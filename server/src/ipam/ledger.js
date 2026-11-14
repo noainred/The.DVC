@@ -5,13 +5,17 @@
 
 import { getIgnoreMatcher, getClassifier, settingsRev } from './settings.js';
 import { getAnnotations, annotationsRev } from './annotations.js';
-import { scanResultList, scanResultListAsync, ipHistoryEntry, scanRev, LOCAL as SCAN_LOCAL } from './scanStore.js';
+import { scanResultList, scanResultListAsync, ipHistoryEntry, scanRev, macIpCount, LOCAL as SCAN_LOCAL } from './scanStore.js';
 import { getOverrides, overridesRev } from './overrides.js';
 import { findPolicy, policiesRev, getPolicies } from './rangePolicies.js';
 import { ipToNum, numToIp, strictIpv4Num, canonIp } from '../util/ipv4.js';
 import { currentScanDatacenters } from './scanDatacenterSource.js'; // v2.638: 스캔 결과의 데이터센터 귀속
 import { datacenterOfVcenter } from '../datacenter/store.js';
 import { createYielder } from '../util/timeSlice.js';
+import { netNameFields } from './hostNames.js'; // v2.991: 호스트명 칸(관리상태 이름 > 역DNS > mDNS > NetBIOS)
+import { netMacFields } from './macVendor.js'; // v2.999: 제조사 · MAC 칸(ARP > NetBIOS)
+import { dnsFwdFields } from './dnsConfirm.js'; // v3.2.0: 역DNS 이름의 정방향 확인(DNS 정합성)
+import { conflictRev, conflictSuspectOf } from './conflictState.js'; // v3.1.0: 충돌 의심(알림 엔진 평가가 판정)
 
 // buildIpamRows 결과 메모이즈 — 같은 스냅샷·스코프·설정/주석/스캔/override/정책 리비전이면 재계산하지 않는다.
 // (API·서브넷대장·xlsx·CSV·syncLedger가 같은 입력으로 여러 번 호출 → 중복 계산 제거)
@@ -45,7 +49,8 @@ export function _ledgerCacheStats() {
 // 캐시 키에 사용자 scope 서명(sc:)을 반드시 포함한다 — 빠지면 무제한 계정의 전체 원장이
 // 범위 제한 계정에 캐시 히트로 새어 나간다(M1 캐시 교차 유출과 동형). allowed=null='all'.
 /** 스냅샷 세대 밖의 변동 축(설정·주석·스캔·override·정책 리비전) — 라우트 memo 키가 같이 써야 주석 저장 직후 TTL 동안 낡은 응답이 나가지 않는다(v2.582 TUNE-1). */
-export function ipamRevKey() { return `s${settingsRev()}|a${annotationsRev()}|n${scanRev()}|o${overridesRev()}|p${policiesRev()}`; }
+// v3.1.0: c = 충돌 의심 목록 리비전(alerts.js 평가가 바꾼다 — 대장 '충돌 의심' 배지)
+export function ipamRevKey() { return `s${settingsRev()}|a${annotationsRev()}|n${scanRev()}|o${overridesRev()}|p${policiesRev()}|c${conflictRev()}`; }
 // v2.638: 스캔 행의 데이터센터 귀속(scanDatacenter.js)도 키에 넣는다 — 스캔 설정의 데이터센터·DataCenter 할당을 바꾸면
 //   다음 스냅샷 세대(30초)를 기다리지 않고 대장이 다시 만들어진다. 범위 계정은 스캔 행을 받지 않으므로 넣지 않는다.
 //   vCenter 를 고른 조회(vcenterId)는 그 vCenter 의 DataCenter 할당도 넣는다(그 할당이 어떤 스캔 행이 보이는지를 정한다).
@@ -112,6 +117,14 @@ function* stableSortGen(arr, cmp) {
 }
 
 /** Build IP rows + summary from a snapshot, optionally scoped to one vCenter. */
+/**
+ * v3.8.1: 캐시에 있는 원장만 돌려준다(없으면 null — **만들지 않는다**). 알림 평가처럼 동기로 도는 주기 경로가 새 스냅샷 직후(원장 동기화가 아직
+ *   끝나지 않은 때) 원장을 그 자리에서 동기로 다시 만들어 이벤트 루프를 막지 않게 한다(v2.740 F-06 — VM 4만 대 실측 260~400ms).
+ */
+export function peekIpamRows(snap, vcenterId, allowed = null) {
+  return _ipamCache.get(_ipamKey(snap, vcenterId || '', allowed)) || null;
+}
+
 export function buildIpamRows(snap, vcenterId, allowed = null) {
   vcenterId = vcenterId || ''; // undefined/null → '' 정규화(스코프·정책 매칭·캐시키 일관)
   const _ck = _ipamKey(snap, vcenterId, allowed);
@@ -261,8 +274,9 @@ function* ipamRowsGen(snap, vcenterId, allowed, scanList) {
   const parseOsMemo = (g) => { const k = String(g || ''); let v = osMemo.get(k); if (!v) { v = parseOs(k); osMemo.set(k, v); } return v; };
   // 확인 출처(discovery): 'vcenter'(vCenter 인식) · 'scan'(Ping/TCP 스캔) · 'both'(둘 다).
   // vCenter가 아는 IP가 스캔에도 잡히면 'both'로 표시. (스캔 결과는 1회만 조회해 재사용 — 호출부가 넘긴다)
-  const scanIpSet = new Set();
-  for (const s of scanList) { scanIpSet.add(s.ip); if ((++tick & YIELD_MASK) === 0) yield; }
+  // v2.991: IP → 스캔 결과(Set 이 아니라 Map — 호스트명 칸을 VM·호스트 행에도 붙인다. discovery 판정은 예전처럼 .has).
+  const scanByIp = new Map();
+  for (const s of scanList) { scanByIp.set(s.ip, s); if ((++tick & YIELD_MASK) === 0) yield; }
   const rows = [];
   const count = new Map();
   for (const vm of vms) {
@@ -277,7 +291,7 @@ function* ipamRowsGen(snap, vcenterId, allowed, scanList) {
         ownerType: 'vm', serverType: 'VM', ownerName: vm.name, powerState: vm.powerState, guestOS: vm.guestOS,
         ...parseOsMemo(vm.guestOS),
         hostName: vm.host || '', cluster: vm.cluster || '', multiHomed: ips.length > 1, scope: scopeAt(ip, n), owner: vm,
-        discovery: scanIpSet.has(ip) ? 'both' : 'vcenter',
+        discovery: scanByIp.has(ip) ? 'both' : 'vcenter',
       });
     }
   }
@@ -294,7 +308,7 @@ function* ipamRowsGen(snap, vcenterId, allowed, scanList) {
       ownerType: 'host', serverType: 'BareMetal', ownerName: h.name, powerState: h.powerState, guestOS: `ESXi ${h.version || ''}`.trim(),
       osName: 'ESXi', osVersion: h.version || '',
       hostName: h.name, cluster: h.cluster || '', multiHomed: false, scope: scopeAt(ip, n), owner: h,
-      discovery: scanIpSet.has(ip) ? 'both' : 'vcenter',
+      discovery: scanByIp.has(ip) ? 'both' : 'vcenter',
     });
   }
   // 능동 스캔으로 발견된 IP(물리/기타 서버 등) 병합 — vCenter가 모르는 IP만 추가.
@@ -330,11 +344,15 @@ function* ipamRowsGen(snap, vcenterId, allowed, scanList) {
       const hist = ipHistoryEntry(sc.ip);
       const released = hist?.status === 'down';
       count.set(sc.ip, (count.get(sc.ip) || 0) + 1);
+      // v2.993(설계 bm-folders §13 ③): 이름 = 역방향 DNS(hostname) → 없으면 정방향 DNS 로 찾은 물리서버 이름(fwdName). 어떻게 찾았는지(nameVia)를 함께 —
+      //   둘이 다르면 역방향 이름을 쓰고 'differ' + fwdName 으로 둘 다 보인다(하나로 정하지 않는다).
+      const nm = scanNameOf(sc);
       rows.push({
         ip: sc.ip, ipNum: n, vcenterId: '', vcenterName: '(네트워크 스캔)',
-        ownerType: 'scanned', serverType: 'Scanned', ownerName: sc.hostname || sc.ip,
+        ownerType: 'scanned', serverType: 'Scanned', ownerName: nm.name || sc.ip,
         powerState: released ? 'POWERED_OFF' : 'POWERED_ON', guestOS: '', osName: '', osVersion: '',
-        hostName: sc.hostname || '', cluster: '', multiHomed: false, scope: scopeAt(sc.ip, n),
+        // 역방향만으로 찾은 이름(예전부터의 기본)에는 칸을 더하지 않는다 — 원장 행 · ipam.db 를 정방향 이름이 없을 때 예전과 같게(PERF2611-01)
+        hostName: nm.name, ...(nm.via && nm.via !== 'ptr' ? { nameVia: nm.via } : {}), ...(nm.via === 'differ' ? { fwdName: nm.fwd } : {}), cluster: '', multiHomed: false, scope: scopeAt(sc.ip, n),
         openPorts: sc.openPorts || [], services: sc.services || [], lastSeen: sc.lastSeen || null,
         firstSeen: hist?.firstSeen || null, usageStatus: hist?.status || null, released,
         source: 'scan', discovery: 'scan', owner: null,
@@ -402,6 +420,8 @@ function* ipamRowsGen(snap, vcenterId, allowed, scanList) {
       r.label = (ov?.label) || (erp?.label) || '';
       r.deviceType = (ov?.deviceType) || (erp?.deviceType) || '';
       r.note = (ov?.note) || (erp?.note) || '';
+      // v3.5.0(재설계 묶음 나): IP 용도 · 요청자 · 할당자 — IP 단위 관리상태에만 있다(대역 정책은 이 칸을 갖지 않는다).
+      r.ipPurpose = ov?.purpose || ''; r.requester = ov?.requester || ''; r.assigner = ov?.assigner || '';
       r.managed = true;
       r.appliedBy = ov ? 'override' : 'range-policy';
       if (erp) { r.rangePolicyId = erp.id; r.rangePolicySpec = erp.spec; }
@@ -421,6 +441,18 @@ function* ipamRowsGen(snap, vcenterId, allowed, scanList) {
       r.appliedBy = 'auto';
     }
     if (!r.displayName) r.displayName = r.hostName || r.ownerName || r.ip;
+    // v2.991: 호스트명 칸 — 관리상태의 호스트명(override) > 스캔이 찾은 이름(역DNS > mDNS > NetBIOS). 범위 계정에는 스캔이 찾은 이름을
+    //   붙이지 않는다(스캔 결과는 vCenter 귀속이 없다 — 스캔 행을 주지 않는 것과 같은 판정). ipam.db 열(record.js)은 바꾸지 않는다.
+    Object.assign(r, netNameFields(allowed ? null : (scanByIp.get(r.ip) || null), ov || null));
+    // v2.999: 제조사 · MAC 칸 — 스캔이 본 값(VM · 호스트 행에도). 범위 계정에는 싣지 않는다(호스트명과 같은 판정). ipam.db 열은 그대로.
+    if (!allowed) {
+      Object.assign(r, netMacFields(scanByIp.get(r.ip) || null, macIpCount, ipHistoryEntry(r.ip)));
+      // v3.2.0: DNS 정합성 — 스캔이 역DNS 이름을 정방향으로 다시 물은 결과(VM · 호스트 행에도 — 역방향 레코드가 낡았으면 그 행의 일이다)
+      Object.assign(r, dnsFwdFields(scanByIp.get(r.ip) || null));
+      // v3.1.0: 충돌 의심 — 그 VM 행에만(스캔 행은 vCenter 가 모르는 IP 라 대조할 NIC 이 없다)
+      const cs = r.ownerType === 'vm' ? conflictSuspectOf(r.ip) : null;
+      if (cs) r.macConflict = { mac: cs.mac, ...(cs.vendor ? { vendor: cs.vendor } : {}), seen: cs.seen, ...(cs.otherVm ? { otherVm: cs.otherVm.name || cs.otherVm.id } : {}) };
+    }
     const vcs = vcByIp.get(r.ip);
     if (vcs && vcs.size > 1) { r.reconcile = 'conflict'; r.conflictVcenters = [...vcs]; }
     else r.reconcile = reconcileOf(r.discovery);
@@ -605,9 +637,11 @@ function* subnetSheetsGen(snap, { vcenterId, onlyBase, allowed = null, ledger = 
       const ip = `${base}.${i}`;
       const recs = byIp.get(ip) || [];
       let status = 'empty', purpose = '', hostname = '', notes = '', power = '', scope = '', serverType = '', os = '';
+      let ipPurpose = '', requester = '', assigner = ''; // v3.5.0: 사람이 넣은 용도 · 요청자 · 할당자(purpose 는 예전 그대로 자동 값)
       let firstSeen = null, lastSeen = null, usageStatus = null;
       let mgmtStatus = '', appliedBy = '', rangePolicySpec = ''; // 관리상태/방식/적용정책
       let owner = null, ownerType = '', vcenterId = '', discovery = ''; // 상세/원격접속/확인출처
+      let nameVia = '', fwdName = ''; // v2.993: 스캔 이름 찾은 방법(ptr · fwd · both · differ) · 다를 때 정방향 이름
       if (i === 0) { status = 'network'; purpose = 'Network ID'; }
       else if (recs.length) {
         used++;
@@ -623,6 +657,7 @@ function* subnetSheetsGen(snap, { vcenterId, onlyBase, allowed = null, ledger = 
           : r.serverType === 'Scanned' ? 'scanned'
             : (recs.length > 1 ? 'duplicate' : (r.multiHomed ? 'multihomed' : 'used'));
         hostname = [...new Set(recs.map((x) => x.ownerName))].join(' / ');
+        { const sr = recs.find((x) => x.nameVia); if (sr) { nameVia = sr.nameVia; fwdName = sr.fwdName || ''; } }   // v2.993: 스캔 행 이름을 찾은 방법
         serverType = r.serverType === 'BareMetal' ? '베어메탈' : (r.serverType === 'Scanned' ? '스캔' : 'VM');
         os = r.serverType === 'Scanned' ? (r.services || []).join(', ') : [r.osName, r.osVersion].filter(Boolean).join(' ');
         purpose = r.serverType === 'Scanned'
@@ -633,6 +668,7 @@ function* subnetSheetsGen(snap, { vcenterId, onlyBase, allowed = null, ledger = 
         power = r.powerState === 'POWERED_ON' ? 'On' : (r.powerState ? 'Off' : '');
         scope = r.scope === 'public' ? '공인' : '사설';
         mgmtStatus = r.mgmtStatus || ''; appliedBy = r.appliedBy || ''; rangePolicySpec = r.rangePolicySpec || '';
+        ipPurpose = r.ipPurpose || ''; requester = r.requester || ''; assigner = r.assigner || '';
       } else if (i >= 1 && i <= 254 && cellPolicies.length) {
         // 빈(미사용) 셀이라도 정책이 덮으면 커버리지를 표시(행은 생성하지 않고 셀 메타만).
         const ipn = b0 + i;
@@ -641,7 +677,7 @@ function* subnetSheetsGen(snap, { vcenterId, onlyBase, allowed = null, ledger = 
       }
       const annRaw = annotations[ip];
       const ann = annRaw && (!annVisible || annVisible(ip)) ? annRaw : null;
-      sheetRows.push({ ip, last: i, purpose, hostname, serverType, os, notes, power, status, scope, firstSeen, lastSeen, usageStatus, discovery, mgmtStatus, appliedBy, rangePolicySpec, owner, ownerType, vcenterId, memo: ann?.memo || '', tags: ann?.tags || [] });
+      sheetRows.push({ ip, last: i, purpose, ipPurpose, requester, assigner, hostname, ...(nameVia ? { nameVia } : {}), ...(fwdName ? { fwdName } : {}), serverType, os, notes, power, status, scope, firstSeen, lastSeen, usageStatus, discovery, mgmtStatus, appliedBy, rangePolicySpec, owner, ownerType, vcenterId, memo: ann?.memo || '', tags: ann?.tags || [] });
     }
     sheets.push({
       subnet: `${base}.0/24`, base, used, rows: sheetRows,
@@ -670,7 +706,7 @@ const _subnetMemo = new Map(); // key -> { at, list }
 const subnetBaseNum = (b) => { const p = b.split('.').map(Number); return ((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8); };
 
 /** 원장 행 → [{subnet, base, used}] — 시트 조립 없이(순수). 결과는 buildSubnetSheets 의 같은 세 값과 같다. */
-export function subnetsFromRows(rows) {
+export function subnetsFromRows(rows, vcenterId = '') {
   const byBase = new Map(); // base -> Set(끝 조각 — '1'..'255' 중 실제로 있는 것)
   for (const r of rows || []) {
     if (r.ipNum == null) continue;
@@ -683,7 +719,25 @@ export function subnetsFromRows(rows) {
     if (r.ip.startsWith(`${base}.`) && LAST_OCTETS.has(last)) set.add(last);
   }
   return [...byBase.keys()].sort((a, b) => subnetBaseNum(a) - subnetBaseNum(b))
-    .map((base) => ({ subnet: `${base}.0/24`, base, used: byBase.get(base).size }));
+    .map((base) => ({ subnet: `${base}.0/24`, base, used: byBase.get(base).size, ...policyCellCounts(base, byBase.get(base), vcenterId) }));
+}
+
+/**
+ * v3.5.0(재설계 묶음 나 — 현황의 사용률에 예약 · DHCP 포함): 대장에 없는 호스트 주소(.1~.254) 가운데 대역 정책이 예약 · 폐기예정(rsv) ·
+ * DHCP(dhcp)로 잡은 수. 판정은 시트와 같은 findPolicy(좁은 대역 우선 · 그 vCenter 귀속 정책) 하나다. 대장에 있는 주소(used)는 세지 않는다 —
+ * used + rsv + dhcp ≤ 254 가 늘 성립한다. 숨김(ignored) 정책은 어느 쪽에도 넣지 않는다.
+ */
+export function policyCellCounts(base, usedLast, vcenterId = '') {
+  const b0 = subnetBaseNum(base);
+  let rsv = 0; let dhcp = 0;
+  for (let i = 1; i <= 254; i += 1) {
+    if (usedLast?.has(String(i))) continue;
+    const p = findPolicy(b0 + i, vcenterId || '');
+    if (!p) continue;
+    if (p.status === 'dhcp') dhcp += 1;
+    else if (p.status === 'reserved' || p.status === 'deprecated') rsv += 1;
+  }
+  return { rsv, dhcp };
 }
 
 /**
@@ -699,7 +753,7 @@ export function listSubnets(snap, vcenterId, allowed = null, opts = {}) {
   const ck = `${head}|${vcenterId}|sc${allowed ? [...allowed].sort().join(',') : 'all'}|${ipamRevKey()}${_dcKey(snap, vcenterId, allowed)}`;
   const hit = _subnetMemo.get(ck);
   if (hit && now - hit.at < SUBNET_MEMO_MAX_AGE_MS && now >= hit.at) return hit.list.map((s) => ({ ...s }));
-  const list = subnetsFromRows(buildIpamRows(snap, vcenterId, allowed).rows);
+  const list = subnetsFromRows(buildIpamRows(snap, vcenterId, allowed).rows, vcenterId);
   putGenerationCache(_subnetMemo, ck, { at: now, list });
   return list.map((s) => ({ ...s }));
 }
@@ -739,3 +793,18 @@ export function ipVcenterOwners(snap) {
   for (const h of snap.hosts || []) { const hip = hostLedgerIp(h); if (!hip) continue; if (!m.has(hip.ip)) m.set(hip.ip, new Set()); if (h.vcenterId) m.get(hip.ip).add(h.vcenterId); }
   return m;
 }
+
+/**
+ * v2.993(설계 bm-folders §13 ③): 스캔 행 이름과 찾은 방법(순수). via — 'ptr'(스캔이 찾은 이름 — v2.991 부터 역DNS · mDNS · NetBIOS 중 표시 이름) ·
+ *   'fwd'(정방향 DNS — 물리서버 이름으로 물어 이 IP) · 'both'(둘이 같은 이름 — 짧은 이름 · 대소문자 무시) · 'differ'(둘이 다름 — 이름은 스캔 이름, fwd 는 따로) · ''(이름 없음).
+ */
+export function scanNameOf(sc) {
+  const p = typeof sc?.hostname === 'string' ? sc.hostname : '';
+  const f = typeof sc?.fwdName === 'string' ? sc.fwdName : '';
+  const sh = (v) => v.toLowerCase().replace(/\.$/, '').split('.')[0];
+  if (p && f) return sh(p) === sh(f) ? { name: p, via: 'both' } : { name: p, via: 'differ', fwd: f };
+  if (p) return { name: p, via: 'ptr' };
+  if (f) return { name: f, via: 'fwd' };
+  return { name: '', via: '' };
+}
+

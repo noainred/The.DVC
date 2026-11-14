@@ -38,9 +38,14 @@ import { loadBmUsageSettings } from '../../bmusage/settings.js';
 import { latestUsage } from '../../bmusage/db.js';
 import { vmRefOf, vmTagsOf, tagsPartialOf } from '../../tags/analyze.js';
 import { buildInventory, hostKeyOf } from '../../servicemap/build.js';
+import { bmFolderMatches } from '../../servicemap/resolve.js';
 import { CORP_OPS, FLEET_OPS } from '../../servicemap/ops.js';
-import { getMap, getPins, peekMap, peekPins, storeRev, storeLoadError, mutateMap, mutatePins, flushStore, resetCorrupt, LIMITS } from '../../servicemap/store.js';
+import { getMap, getPins, peekMap, peekPins, storeRev, storeLoadError, mutateMap, mutatePins, flushStore, resetCorrupt, LIMITS, cleanFolderPath } from '../../servicemap/store.js';
 import { mergeLatestRows, rowsByAgentKeyOf, makeCapOf, clampEdgeTs } from './corpUsage.js';
+// v2.987 물리서버 폴더 규칙 — 배치 판정은 물리서버 폴더의 것 하나를 부른다(도메인 모듈 — routes 를 import 하지 않는다)
+import { peekMain as bmfPeekMain, peekAssign as bmfPeekAssign, storeRev as bmfStoreRev, storeLoadError as bmfStoreError } from '../../bmfolders/store.js';
+import { placeMember as bmfPlaceMember, sortRules as bmfSortRules, aliasGuardOf as bmfAliasGuardOf } from '../../bmfolders/build.js';
+import { lowSameLen, TAG_MASK_MIN } from '../../util/ruleName.js';
 
 const toolsPerm = requirePerm('tools');
 const csvPerm = requirePerm('data.csv');
@@ -67,6 +72,17 @@ export function bmKeyOf(b) {
  * **낮은 등급 키를 별칭으로** 싣는다. 판정은 별칭 고정을 그 구성원의 고정으로 쓰고(resolveMember), 유령으로 보지 않는다(buildQueues live).
  * 별칭 고정은 다음 고정 쓰기 때 새 키로 옮기거나 검토 탭 '새 키로 옮기기'(`pins.rekey`)로 옮긴다 — 읽기 경로에서는 쓰지 않는다.
  */
+/**
+ * v2.996(묶음 D — 엣지 포탈 화면): 엣지가 올린 베어메탈의 **엣지 쪽 키** — 엣지는 자기 함대 행으로 bmKeyOf 를 부른다(태그 → st: · 없으면 그 엣지 fleetId 의 fl:).
+ *   중앙 serverId 는 `edge:<agent>:<fleetId>`(central/fleet.js) — 태그가 없으면 그 꼬리가 엣지 fleetId 다. 엣지 출처가 아니거나 모르면 ''.
+ */
+export function edgeKeyOfRow(b) {
+  if (t(b?.source) !== 'edge') return '';
+  if (lc(b?.serviceTag)) return bmKeyOf({ serviceTag: b.serviceTag }).key;
+  const sid = t(b?.serverId); const pre = `edge:${t(b?.remoteAgent)}:`;
+  if (!t(b?.remoteAgent) || !sid.startsWith(pre) || sid.length === pre.length) return '';
+  return bmKeyOf({ fleetId: sid.slice(pre.length) }).key;
+}
 export function vmAliasKeys(vm, keyKind) { return keyKind === 'instanceUuid' && t(vm?.id) ? [`vm:${t(vm.id)}`] : []; }
 export function bmAliasKeys(b, keyKind) {
   if (keyKind !== 'serviceTag') return [];
@@ -77,6 +93,52 @@ export function bmAliasKeys(b, keyKind) {
   const sid = t(b?.untaggedServerId) || t(b?.serverId);
   const f = !b?.untaggedServerId && sid.startsWith('host:') ? lc(b?.name) : lc(sid);
   return f ? [`fl:${crypto.createHash('sha1').update(f).digest('hex').slice(0, 16)}`] : [];
+}
+/**
+ * v2.989(③-나 — 설계 §6 '수집 서버(pull) 경로 키 대조' 의 결과): 함대 서버 목록(universe)은 iDRAC 등록부 서버를 전력이 없어도 넣지만
+ * 수집 서버 서버는 **전력 항목으로만** 넣는다 — pull 이 전력 값 없는 서버를 전력 항목에서 빼고(collector/puller.js) 실패가 길면 항목이 오래돼 빠진다(2시간).
+ * 그래서 수집 서버가 지금도 보고하는(인벤토리에 있는) 서버의 고정 · 물리서버 폴더 등록이 '없어짐 — 정리 대상' 이 됐다(엣지 push 경로는 그렇지 않다).
+ * 이 함수는 그 키(st:<태그> · 태그 없을 때의 fl: — 함대 fleetId `remote:<수집기>:<서버>` 와 같은 해시)를 돌려준다. 순수.
+ *   · 시한: 그 수집 서버가 **마지막으로 성공한 지** holdMs(기본 UNREADABLE_HOLD_MS 24시간) 안일 때만(상태 `at` — 실패 기록은 직전 성공 시각을 그대로 둔다)
+ *   · 꺼진 · 지워진 수집 서버는 빼고(그쪽은 fleetKeySources 가 '못 읽음' 으로 이미 전부 보류한다) · **지금 ESXi 호스트인 서버(태그 · 이름)는 뺀다**
+ *     (4차 반증 2 — '함대가 아직 안다' 로 보류하면 가상화 호스트가 된 서버의 고정을 영원히 붙잡았다)
+ */
+export function collectorHeldKeys({ remoteServers = [], statusOf = () => null, collectors = [], hosts = [], now = Date.now(), holdMs = 86_400_000,
+  powerEntries = [], powerFreshMs = 2 * 3_600_000, fleetTags = {} } = {}) {
+  const out = new Set();
+  const enabled = new Set((collectors || []).filter((c) => c && t(c.id) && c.enabled !== false).map((c) => t(c.id)));
+  // ESXi 호스트 대조는 이름 전부(짧은 이름 포함 — 함대가 원격 서버를 호스트 이름으로도 ESXi 에 맞춘다, 반증 3a B2). 넓게 빼면 예전처럼 '없어짐' 이 될 뿐이다(안전한 쪽).
+  const short = (x) => { const d = x.indexOf('.'); return d > 0 ? x.slice(0, d) : x; };
+  const hostTags = new Set(); const hostNames = new Set();
+  for (const h of hosts || []) { if (t(h?.serviceTag)) hostTags.add(lc(h.serviceTag)); const n = lc(h?.name); if (n) { hostNames.add(n); hostNames.add(short(n)); } }
+  // 신선한 전력 항목이 있는 서버는 함대 목록에 들어간다 — 그런데도 빠졌다면 다른 이유(분류 예외 등)이므로 보류하지 않는다(반증 3a B1)
+  const fresh = new Set();
+  for (const r of powerEntries || []) {
+    if (!r || !Number.isFinite(Number(r.watts)) || r.watts == null) continue;
+    const ts = numOrNull(r.ts); if (ts == null || now - ts > powerFreshMs) continue;
+    if (r.serverId != null && t(r.serverId)) fresh.add(`${t(r.collectorId)}\u0000${lc(r.serverId)}`);
+    if (t(r.host)) fresh.add(`${t(r.collectorId)}\u0000h:${lc(r.host)}`);
+  }
+  const fl = (s) => `fl:${crypto.createHash('sha1').update(s).digest('hex').slice(0, 16)}`;
+  for (const s of remoteServers || []) {
+    const cid = t(s?.collectorId);
+    if (!cid || !enabled.has(cid)) continue;
+    const at = numOrNull(statusOf(cid)?.at);
+    if (at == null || now - at > holdMs) continue;
+    const tag = lc(s.serviceTag || s.inv?.system?.serviceTag);
+    const sid = lc(s.id);
+    const names = [s.name, s.host, s.hostName, ...(Array.isArray(s.hostNames) ? s.hostNames.slice(0, 8) : [])].map(lc).filter(Boolean);
+    if ((tag && hostTags.has(tag)) || names.some((n) => hostNames.has(n) || hostNames.has(short(n)))) continue;   // 지금 ESXi 호스트(4차 반증 2)
+    if ((sid && fresh.has(`${cid}\u0000${sid}`)) || names.some((n) => fresh.has(`${cid}\u0000h:${n}`))) continue;
+    // 사람이 분류에서 뺀(exclude) · 가상화로 정한 서버는 보류 대상이 아니다(반증 3b 2 — 분류 키는 함대와 같은 태그 → serverId 순)
+    const ft = (tag && fleetTags?.[tag]) || fleetTags?.[lc(`remote:${cid}:${s.id}`)] || '';
+    if (ft === 'exclude' || ft === 'virtualization') continue;
+    if (tag) out.add(`st:${tag}`);
+    if (sid) out.add(fl(lc(`remote:${cid}:${s.id}`)));
+    // 구버전 엣지(전력 항목에 serverId 없음)의 함대 id 는 remote:<수집기>:<호스트> — 그 키도(반증 3a B 의 빈틈)
+    for (const h of [s.host, s.hostName].map(lc).filter(Boolean)) out.add(fl(`remote:${lc(cid)}:${h}`));
+  }
+  return out;
 }
 /** Bareos 원장 → VM 백업 칸(순수). undefined = Bareos 미사용 · null = 원장 못 읽음 · 'ok' 24h 내 성공 · 'fail' 실패/지연 · 'none' 잡 없음. */
 export function backupOf(view, now) {
@@ -163,6 +225,27 @@ async function gather(snap, tagCategory) {
   return p;
 }
 
+/**
+ * v2.984 물리서버 폴더(`routes/api/bmFolders.js`)가 같은 입력(함대 분류 · 법인 귀속 · 사용률 · 부품 장애)을 **같은 단일 비행으로** 쓴다 —
+ * 베어메탈 목록 판정을 두 벌 만들지 않는다(판정 코어는 하나). 태그 카테고리는 서비스 인벤토리 설정 그대로(같은 키 = 같은 수집 공유).
+ */
+export function sharedGather(snap) {
+  let cat = '';
+  try { cat = peekMap()?.settings?.tagCategory || ''; } catch { cat = ''; }
+  return gather(snap, cat);
+}
+/** 입력 세대(입력 다시 읽기 · 스캔 라벨 변경 때 오른다) — 물리서버 폴더 응답 캐시 열쇠에 넣는다. */
+export const sharedInputRev = () => _inputRev;
+/** 입력 다시 읽기(물리서버 폴더 화면) — 서비스 인벤토리와 **같은 상한 하나**(포탈 전체 FRESH_MIN_MS 에 한 번)를 쓴다. 함수 선언은 아래(호이스팅). */
+export const sharedFresh = (now = Date.now()) => forceFresh(now);
+/** 관리 주소에서 스킴 · 경로를 뗀 호스트(‘https://10.0.0.5:443/x’ → ‘10.0.0.5:443’). 정규식 없이. */
+function hostOnly(v) {
+  let s = typeof v === 'string' ? v.trim().slice(0, 300) : '';
+  const i = s.indexOf('://'); if (i >= 0) s = s.slice(i + 3);
+  const j = s.indexOf('/'); if (j >= 0) s = s.slice(0, j);
+  return s;
+}
+
 const _gatherStats = { runs: 0, inFlight: 0, maxInFlight: 0 };
 /** 시험용 — 입력 수집이 몇 번 돌았고 동시에 몇 벌까지 겹쳤는가(2차 반증 4 회귀). */
 export function _gatherStatsForTest() { return { ..._gatherStats }; }
@@ -174,12 +257,12 @@ async function gatherNowInner(snap, tagCategory) {
   const sourceErrors = [];
   const now = Date.now();
   const [{ getFleetInventory, fleetKeySources }, { loadRegistry }, { getInventory }, { allRemoteServers }, edgeUsage, { attributeBareMetalFromSnap },
-    { unreadVcenterReasons }, { getEdgeFleetServers }, { listScanRanges }, pf, bareosReg, { bareosVmView }, { datacenterOfVcenter }] = await Promise.all([
+    { unreadVcenterReasons }, { getEdgeFleetServers, UNREADABLE_HOLD_MS }, { listScanRanges }, pf, bareosReg, { bareosVmView }, { datacenterOfVcenter }, { getCollectorStatus, remotePowerEntries, REMOTE_FRESH_MS }, { loadCollectors }, { loadFleetTags }] = await Promise.all([
     import('../../insights/fleetInventory.js'), import('../../idrac/registry.js'), import('../../idrac/invCache.js'),
     import('../../collector/remoteInventory.js'), import('../../central/bmUsageEdgePull.js'), import('../../idrac/corpAttribution.js'),
     import('../../metrics/unreadVcenters.js'), import('../../central/fleet.js'), import('../../idrac/scanRanges.js'),
     Promise.all([import('../../partfault/db.js'), import('../../partfault/settings.js')]), import('../../bareos/registry.js'), import('../../bareos/vmView.js'),
-    import('../../datacenter/store.js'),
+    import('../../datacenter/store.js'), import('../../collector/state.js'), import('../../collector/registry.js'), import('../../insights/fleetTags.js'),
   ]);
   const bareosSet = await import('../../bareos/settings.js');
   const vcenters = snap?.vcenters || [];
@@ -321,9 +404,15 @@ async function gatherNowInner(snap, tagCategory) {
     try { const inv = b.source === 'edge' ? null : getInventory(sid); const ps = lc(inv?.powerState); powered = ps === 'on' ? true : ps === 'off' ? false : null; } catch { powered = null; }
     members.push({
       key, keyKind, aliasKeys: bmAliasKeys(b, keyKind), kind: 'bm', corp: vc, name: t(b.name), nameIsAddr: isAddr(t(b.name)), serviceTag: t(b.serviceTag), source: t(b.source), remoteAgent: t(b.remoteAgent),
+      ...(t(b.source) === 'edge' ? { edgeKey: edgeKeyOfRow(b) } : {}),   // v2.996(묶음 D): 엣지 쪽 키 — 물리서버 폴더 엣지 묶음만 쓴다(서비스 인벤토리 응답 memberRow 에는 싣지 않는다)
       scan, ...(scanWhy ? { scanWhy } : {}), ...(corpWhy ? { corpWhy } : {}), powered, cores: x?.cores ?? null, memGB: x?.memGB ?? null,
-      usage: x ? { state: x.state, cpuPct: x.cpuPct, memPct: x.memPct, src: x.src } : { state: 'unread' },
+      usage: x ? { state: x.state, cpuPct: x.cpuPct, memPct: x.memPct, src: x.src, ...(x.srcBy ? { srcBy: x.srcBy } : {}), ...(x.at ? { at: x.at } : {}) } : { state: 'unread' },
       faults: faultsOf(b.serviceTag, sid), corpRule: b.vcSource === 'corp-rule',
+      // v2.984 물리서버 폴더(bmfolders)가 함께 쓰는 입력 — 서비스 인벤토리 응답에는 싣지 않는다(memberRow 가 고른다)
+      model: t(b.model), watts: numOrNull(b.watts), collectorId: t(b.collectorId),
+      // v2.987 물리서버 폴더: 사용률 이력 키(bm-usage 적재 키 — idOf) · 관리 주소(등록부 iDRAC 주소 — 관리자 판본만 싣는다)
+      usageKey: id.key, mgmtHost: b.source === 'idrac' ? hostOnly(regById.get(sid)?.host) : '',
+      serverId: sid,   // v3.3.0 물리서버 폴더 하드웨어(iDRAC) 요약 — 인벤토리 찾기 열쇠(로컬 등록부 id · remote:<수집 서버>:<id> · edge:<엣지>:<fleetId>). 응답에 싣지 않는다
     });
   }
   // ── 파생 호스트(구성원이 아니다): 가상화 호스트의 사용률·장애 ──
@@ -331,7 +420,7 @@ async function gatherNowInner(snap, tagCategory) {
   for (const h of fleet.virtualizationHosts || []) {
     const vc = t(h.vcenterId); if (!vc) continue;
     const x = judged.get(`${vc}|virt|${lc(h.name)}`) || null;
-    hostByKey.set(hostKeyOf(vc, h.name), { name: t(h.name), corp: vc, serviceTag: t(h.serviceTag), usage: x ? { state: x.state, cpuPct: x.cpuPct, memPct: x.memPct } : null, faults: faultsOf(h.serviceTag), connectionState: t(h.connectionState) });
+    hostByKey.set(hostKeyOf(vc, h.name), { name: t(h.name), corp: vc, serviceTag: t(h.serviceTag), usage: x ? { state: x.state, cpuPct: x.cpuPct, memPct: x.memPct, src: x.src, ...(x.srcBy ? { srcBy: x.srcBy } : {}), ...(x.at ? { at: x.at } : {}), ...(x.vcUnread ? { vcUnread: true } : {}) } : null, faults: faultsOf(h.serviceTag), connectionState: t(h.connectionState), model: t(h.model), watts: numOrNull(h.watts) });
   }
   let bmBlocked = false; let bmBlockedSources = [];
   try {
@@ -339,6 +428,13 @@ async function gatherNowInner(snap, tagCategory) {
     bmBlockedSources = (fk.unreadable || []).filter((u) => u.source !== 'vcenter').slice(0, 20).map((u) => ({ source: t(u.source), reason: t(u.reason).slice(0, 200) }));
     bmBlocked = bmBlockedSources.length > 0;
   } catch (e) { bmBlocked = true; bmBlockedSources = [{ source: 'fleet-keys', reason: `베어메탈 출처 목록을 만들지 못했습니다(${String(e?.message || e).slice(0, 120)})` }]; }
+  // v2.989(③-나): 수집 서버(pull)가 지금 보고하는데 분류 목록에서 빠진 베어메탈 키 — 그 키의 고정 · 물리서버 폴더 등록은 '없어짐' 이 아니라 보류.
+  const bmHeldKeys = (() => {
+    try {
+      return collectorHeldKeys({ remoteServers, statusOf: getCollectorStatus, collectors: loadCollectors(), hosts: snap?.hosts, now, holdMs: UNREADABLE_HOLD_MS,
+        powerEntries: remotePowerEntries(), powerFreshMs: REMOTE_FRESH_MS, fleetTags: (() => { try { return loadFleetTags() || {}; } catch { return {}; } })() });
+    } catch (e) { sourceErrors.push(`수집 서버 보류 키: ${String(e?.message || e).slice(0, 160)}`); return new Set(); }
+  })();
   // VM 식별 키(instanceUuid)를 못 읽는 법인 — VM 이 있는데 instanceUuid 가 하나도 없다(REST 폴백 수집 등). 그 법인의 iu: 고정은 유령이 아니라 판정 보류(4차 반증 5).
   const vmTotal = new Map(); const vmUuid = new Map();
   for (const vm of snap?.vms || []) { if (!vm || vm.template) continue; const vc = t(vm.vcenterId); vmTotal.set(vc, (vmTotal.get(vc) || 0) + 1); if (t(vm.instanceUuid)) vmUuid.set(vc, (vmUuid.get(vc) || 0) + 1); }
@@ -348,7 +444,7 @@ async function gatherNowInner(snap, tagCategory) {
   const corpHold = new Map();
   for (const v of vcenters) { const id = t(v?.id); if (!id) continue; if (v.status === 'pending') corpHold.set(id, 'corp-pending'); else if (v.status === 'disabled') corpHold.set(id, 'corp-disabled'); }
   const snapInitial = !snap || snap.initial === true;
-  return { members, hostByKey, unreadCorps, bmBlocked, bmBlockedSources, uuidUnreadCorps, corpHold, snapInitial, corpNames, scanEntries, faultsMeta, backupMeta, bareosCorps, sourceErrors, at: now };
+  return { members, hostByKey, unreadCorps, bmBlocked, bmBlockedSources, bmHeldKeys, uuidUnreadCorps, corpHold, snapInitial, corpNames, scanEntries, faultsMeta, backupMeta, bareosCorps, sourceErrors, at: now };
 }
 
 // ───────── 권한 ─────────
@@ -394,7 +490,41 @@ const fleetAdmin = (user, snap) => {
 // ───────── 응답 조립 ─────────
 // 읽기 경로는 동결 참조(복사 없음 — 5차 검토 R5: 요청마다 고정 5만 건 깊은 복사 114ms). 쓰기는 mutate* 만.
 function loadState() {
-  return { map: peekMap(), pins: peekPins(), rev: storeRev(), err: storeLoadError() };
+  return { map: peekMap(), pins: peekPins(), rev: storeRev(), err: storeLoadError(), bmRev: bmfRevSafe() };
+}
+/** 물리서버 폴더 저장소 세대(v2.987 — 물리서버 폴더 규칙이 그 배치를 읽는다. 판정 memo · 응답 캐시 열쇠에 넣는다). 손상이면 'x'. */
+function bmfRevSafe() { try { return bmfStoreError() ? 'x' : bmfStoreRev(); } catch { return 'x'; } }
+/** 법인 → 물리서버 폴더 경로 목록(명시 폴더 ∪ 배치 경로 · 조상). 저장소를 못 읽으면 빈 Map. */
+function bmFolderPathsOf(members = []) {
+  const out = new Map();
+  try {
+    if (bmfStoreError()) return out;
+    const add = (vc, p) => {
+      if (!vc || !p) return;
+      if (!out.has(vc)) out.set(vc, new Set());
+      const segs = String(p).split('\\');
+      for (let i = 1; i <= segs.length; i += 1) out.get(vc).add(segs.slice(0, i).join('\\'));
+    };
+    for (const [vc, c] of Object.entries(bmfPeekMain().corps || {})) for (const p of c.folders || []) add(vc, p);
+    const placed = bmFolderMapOf(members);
+    if (placed) for (const m of members) if (m?.kind === 'bm' && m.corp) add(m.corp, placed.get(m.key));
+  } catch { return new Map(); }
+  return new Map([...out].map(([vc, set]) => [vc, [...set].sort((a, b) => a.localeCompare(b, 'ko')).slice(0, 500)]));
+}
+/**
+ * 베어메탈 키 → 물리서버 폴더 경로(미분류 '') — 물리서버 폴더 화면과 **같은 판정**(bmfolders/build.js placeMember)을 부른다(복제 금지).
+ * 물리서버 폴더 저장소를 못 읽으면 null — 물리서버 폴더 규칙을 건너뛴다(모르는 배치로 판정하지 않는다).
+ */
+export function bmFolderMapOf(members = []) {
+  try {
+    if (bmfStoreError()) return null;
+    const main = bmfPeekMain(); const assign = bmfPeekAssign();
+    const sorted = bmfSortRules(main.rules || []); const auto = main.settings?.autoRules === true;
+    const out = new Map();
+    const aliasOk = bmfAliasGuardOf(members);   // 별칭 가드도 물리서버 폴더 화면과 같게(반증 3a A1)
+    for (const m of members) if (m?.kind === 'bm') out.set(m.key, bmfPlaceMember(m, assign, sorted, auto, aliasOk).path || '');
+    return out;
+  } catch { return null; }
 }
 /**
  * 판정·집계 결과 memo(5차 검토 M10/R5 — 실측: 6,500 구성원 buildInventory 중앙값 77ms 를 구성원·큐·후보·CSV 요청마다 되풀이했고,
@@ -413,16 +543,19 @@ async function inventoryFor(req, snap) {
   const allowed = scopedVcenterIds(req.user, snap);
   const admin = isAdminDetailUser(req.user);
   const known = knownCorpsOf(snap);
-  const key = [snap?.generatedAt || 0, st.rev, g.at, _inputRev, known ? [...known].sort().join(',') : '-', allowed ? [...allowed].sort().join(',') : '*', admin ? 'a' : 'u'].join('|');
+  const key = [snap?.generatedAt || 0, st.rev, st.bmRev, g.at, _inputRev, known ? [...known].sort().join(',') : '-', allowed ? [...allowed].sort().join(',') : '*', admin ? 'a' : 'u'].join('|');
   const now = Date.now();
   const hit = _invMemo.get(key);
-  if (hit && now - hit.at < INV_MEMO_MS) { _invStats.hits += 1; return { st, g, inv: hit.inv, allowed, admin }; }
+  if (hit && now - hit.at < INV_MEMO_MS) { _invStats.hits += 1; return { st, g, inv: hit.inv, members: hit.members, allowed, admin }; }
   _invStats.misses += 1;
-  const inv = buildInventory({ members: g.members, map: st.map, pins: st.pins, hostByKey: g.hostByKey, allowed, unreadCorps: g.unreadCorps, bmBlocked: g.bmBlocked, uuidUnreadCorps: g.uuidUnreadCorps, corpHold: g.corpHold, snapInitial: g.snapInitial, corpNames: g.corpNames, scanEntries: g.scanEntries, adminView: admin, knownCorps: known });
+  // v2.990: 목록 · 큐에 싣는 순서 — 가린 판본은 보이는 이름 → 보이는 키(`visibleOrder`), 전체 범위 관리자는 수집 순서 그대로.
+  // 판정(resolved · 집계)은 **수집 순서 그대로** 돌린다(판본마다 판정이 달라지지 않게) — 큐를 채우는 순회만 이 순서를 쓴다(`queueMembers`).
+  const members = visibleOrder(g.members, admin, !!allowed);
+  const inv = buildInventory({ members: g.members, queueMembers: members, map: st.map, pins: st.pins, bmFolderOf: bmFolderMapOf(g.members), hostByKey: g.hostByKey, allowed, unreadCorps: g.unreadCorps, bmBlocked: g.bmBlocked, bmHeldKeys: g.bmHeldKeys, uuidUnreadCorps: g.uuidUnreadCorps, corpHold: g.corpHold, snapInitial: g.snapInitial, corpNames: g.corpNames, scanEntries: g.scanEntries, adminView: admin, knownCorps: known });
   for (const [k, v] of _invMemo) if (now - v.at >= INV_MEMO_MS) _invMemo.delete(k);
   while (_invMemo.size >= INV_MEMO_MAX) _invMemo.delete(_invMemo.keys().next().value);
-  _invMemo.set(key, { at: now, inv });
-  return { st, g, inv, allowed, admin };
+  _invMemo.set(key, { at: now, inv, members });
+  return { st, g, inv, members, allowed, admin };
 }
 
 /**
@@ -491,27 +624,48 @@ export function keyResolverFor(hide, candidates = []) {
     return isBmKey(k) ? '' : k;
   };
 }
-const maskName = (m, admin, hide = false) => {
+export const maskName = (m, admin, hide = false) => {
   if (!admin && m.kind === 'bm' && m.nameIsAddr) return maskedAddressName(m.name);
   // 이름이 곧 서비스태그인 베어메탈(호스트 이름 없이 등록) — 범위 계정 판본에서는 이름도 가린다(R7)
   if (hide && m.kind === 'bm' && m.serviceTag && lc(m.name) === lc(m.serviceTag)) return `서버 ${pubKey(m.key, true).slice(-6)}`;
   // 이름에 태그가 들어 있으면(iDRAC 기본 이름 'idrac-<태그>' 등) 그 부분만 가린다(4차 반증 3). 정규식 없이 선형으로(외부 입력).
-  if (hide && m.kind === 'bm' && t(m.serviceTag).length >= 4) return stripTag(m.name, m.serviceTag);
+  if (hide && m.kind === 'bm' && t(m.serviceTag).length >= TAG_MASK_MIN) return stripTag(m.name, m.serviceTag);
   return m.name;
 };
 
 /** 이름에서 태그(대소문자 무시)를 '•••' 로 바꾼다 — 길이를 먼저 자르고 indexOf 로(외부 입력에 정규식 금지). */
 export function stripTag(name, tag) {
-  const n = String(name ?? '').slice(0, 256); const tg = lc(tag);
+  const n = String(name ?? '').slice(0, 256); const tg = lowSameLen(String(tag ?? '').trim());
   if (!tg) return n;
-  const low = n.toLowerCase(); let out = ''; let i = 0;
+  // 길이가 바뀌는 소문자화('İ' → 'i̇' 2글자)로 색인이 어긋나면 태그 대신 엉뚱한 글자를 가리고 태그가 드러났다(2차 반증 5) — 글자별로 길이를 지킨다
+  const low = lowSameLen(n); let out = ''; let i = 0;
   for (let j = low.indexOf(tg); j >= 0; j = low.indexOf(tg, i)) { out += `${n.slice(i, j)}•••`; i = j + tg.length; }
   return out + n.slice(i);
 }
 
+/**
+ * v2.990(v2.989 반증 B-6) — **가린 판본의 목록 순서는 보이는 이름 → 보이는 키**.
+ * 입력 수집 순서는 함대 정렬(전력 내림차순 → **원문** 이름 — `insights/fleetInventory.js`)이다. 그대로 실으면 이름이 전부 'idrac-•••' 로 보이는 서버들이
+ * 원문 태그 순으로 나와 가린 서비스 태그(범위 계정) · 가린 주소(비관리자)의 상대 순서가 드러났다. 순서는 **그 계정이 응답에서 보는 값만으로** 정한다.
+ *  · 가린 판본 = 범위 계정(`hide`) 또는 비관리자(`!admin`) — 판정은 `isMaskedView` 하나. 전체 범위 관리자 판본(가리는 것이 없다)은 받은 순서 그대로 돌려준다.
+ *  · 자르기(CAP · slice) **앞에** 부른다 — 자른 뒤 정렬하면 '어느 것이 잘렸는가' 로 원문 순서가 남는다.
+ *  · 이름이 같으면 키(토큰) 순 — 토큰은 프로세스 HMAC 이라 원문 순서와 무관하다. 찾기(`bmFolders.js /search` — 반증 6)와 같은 비교 하나를 쓴다.
+ * 원본 배열은 고치지 않는다(입력 수집 결과는 여러 요청이 함께 쓴다).
+ */
+const VISIBLE_COLLATOR = new Intl.Collator('ko');   // localeCompare(…, 'ko') 와 같은 비교 — 요청마다 만들지 않는다(실측: 6,500건 15ms → 5.5ms)
+export const isMaskedView = (admin, hide) => !!hide || !admin;
+export function visibleOrder(list, admin, hide, { nameOf = (x) => maskName(x, admin, hide), keyOf = (x) => pubKey(x.key, hide), always = false } = {}) {
+  if (!always && !isMaskedView(admin, hide)) return list;
+  const deco = list.map((x) => ({ x, n: String(nameOf(x) ?? ''), k: String(keyOf(x) ?? '') }));
+  deco.sort((a, b) => VISIBLE_COLLATOR.compare(a.n, b.n) || (a.k < b.k ? -1 : a.k > b.k ? 1 : 0));
+  return deco.map((d) => d.x);
+}
+/** 이름이 실리지 않는 키 목록(유령 · 정리 미리보기 · 불일치) — 보이는 키 순. */
+export const visibleKeyOrder = (keys, admin, hide, keyOf = (k) => pubKey(k, hide)) => visibleOrder(keys, admin, hide, { nameOf: () => '', keyOf });
+
 function memberRow(m, r, admin, hide = false) {
   return {
-    key: pubKey(m.key, hide), keyKind: m.keyKind, kind: m.kind, corp: m.corp, name: maskName(m, admin, hide), serviceId: r.serviceId, src: r.src, via: r.src === 'folder' || r.src === 'scan' || r.src === 'tag' || r.src === 'rule' ? r.via : '',
+    key: pubKey(m.key, hide), keyKind: m.keyKind, kind: m.kind, corp: m.corp, name: maskName(m, admin, hide), serviceId: r.serviceId, src: r.src, via: r.src === 'folder' || r.src === 'bmfolder' || r.src === 'scan' || r.src === 'tag' || r.src === 'rule' ? r.via : '',
     reason: r.reason || '', drift: !!r.drift, unchecked: !!r.unchecked, pinMismatch: r.pinMismatch ? true : undefined,
     autoServiceId: r.src === 'pin' ? (r.auto?.serviceId || null) : undefined,
     powered: m.powered, cores: m.cores, memGB: m.memGB, storageGB: m.kind === 'vm' ? m.storageGB : undefined,
@@ -520,7 +674,7 @@ function memberRow(m, r, admin, hide = false) {
     serviceTag: m.kind === 'bm' && !hide ? m.serviceTag : undefined, source: m.kind === 'bm' ? m.source : undefined, scanEntry: m.scan ? m.scan.entryId : undefined,
     // 태그 여럿(5차 M5·R14) — 태그로 정해진 구성원만. 값은 소문자 정렬 순 최대 8개 · 둘 이상의 서비스에 걸리면 tagAmbiguous
     tagValues: r.src === 'tag' && r.multi ? r.tagValues : undefined, tagAmbiguous: r.src === 'tag' && r.tagAmbiguous ? true : undefined,
-    ruleOverlap: r.src === 'rule' && r.ruleOverlap ? r.ruleOverlap : undefined,
+    ruleOverlap: (r.src === 'rule' || r.src === 'bmfolder') && r.ruleOverlap ? r.ruleOverlap : undefined,
   };
 }
 
@@ -536,7 +690,7 @@ export function registerSvcInventory(api) {
     }
     const err = storeLoadError();
     if (err) return res.status(503).json({ ok: false, error: 'registryUnreadable', reason: `서비스 인벤토리 저장소를 읽지 못했습니다 — ${err.map || err.pins}. 빈 트리로 시작하지 않습니다(백업 복원 또는 전체 범위 관리자의 초기화).`, corrupt: err, canReset: fleetAdmin(req.user, snap) });
-    const extraKey = `${scopeKey(req.user, snap)}|w${writeKeyOf(req.user, snap)}|${isAdminDetailUser(req.user) ? 'a' : 'u'}|r${storeRev()}|i${_inputRev}`;
+    const extraKey = `${scopeKey(req.user, snap)}|w${writeKeyOf(req.user, snap)}|${isAdminDetailUser(req.user) ? 'a' : 'u'}|r${storeRev()}|b${bmfRevSafe()}|i${_inputRev}`;
     await memoJson(req, res, 'svc-inventory', async (s) => {
       const { st, g, inv, allowed } = await inventoryFor(req, s);
       const q = inv.queues;
@@ -544,14 +698,18 @@ export function registerSvcInventory(api) {
         ok: true, at: g.at, rev: st.rev, scoped: !!allowed,
         settings: { tagCategory: st.map.settings.tagCategory || '' },
         canFleet: fleetAdmin(req.user, s), canWrite: writerOk(req.user),
-        corps: inv.corps.map((c) => ({ ...c, writable: writableOf(req.user, s, c.vcenterId) })),
+        corps: (() => {
+          // v2.987: 법인마다 물리서버 폴더 경로(명시 폴더 ∪ 서버가 놓인 경로 · 조상 포함) — 소속 규칙 탭의 '물리서버 폴더 규칙' 고르기 목록
+          const bmf = bmFolderPathsOf(g.members);
+          return inv.corps.map((c) => ({ ...c, writable: writableOf(req.user, s, c.vcenterId), bmFolders: bmf.get(c.vcenterId) || [] }));
+        })(),
         services: inv.services, noCorp: inv.noCorp,
         global: inv.global,
-        queues: { unassigned: q.unassigned.reduce((a, x) => a + x.n, 0), unassignedGroups: q.unassigned.length, unmapped: q.unmapped.length, drift: q.drift.length, mismatch: new Set(q.mismatch.map((x) => x.key)).size, redundant: q.redundant.length, ghosts: q.ghosts.length, ghostsHeld: q.ghostsHeld.length, orphaned: q.orphaned.length, tagAmbiguous: q.tagAmbiguous.length, ruleOverlap: q.ruleOverlap.length, aliasPins: q.aliasPins.length },
+        queues: { unassigned: q.unassigned.reduce((a, x) => a + x.n, 0), unassignedGroups: q.unassigned.length, unmapped: q.unmapped.length, drift: q.drift.length, mismatch: new Set(q.mismatch.map((x) => x.key)).size, redundant: q.redundant.length, ghosts: q.ghosts.length, ghostsHeld: q.ghostsHeld.length, orphaned: q.orphaned.length, tagAmbiguous: q.tagAmbiguous.length, ruleOverlap: q.ruleOverlap.length, aliasPins: q.aliasPins.length, dangling: q.dangling.length },
         // 법인을 고른 화면의 탭 숫자가 KPI 와 같은 기준이 되도록 법인별로도 센다(전 법인 숫자를 법인 화면에 쓰지 않는다).
         queuesByCorp: (() => {
           const o = {};
-          const bump = (c, k, n = 1) => { const id = c || ''; (o[id] ||= { unassigned: 0, unmapped: 0, drift: 0, ghosts: 0, ghostsHeld: 0, mismatch: 0, redundant: 0, orphaned: 0, tagAmbiguous: 0, ruleOverlap: 0, aliasPins: 0 })[k] += n; };
+          const bump = (c, k, n = 1) => { const id = c || ''; (o[id] ||= { unassigned: 0, unmapped: 0, drift: 0, ghosts: 0, ghostsHeld: 0, mismatch: 0, redundant: 0, orphaned: 0, tagAmbiguous: 0, ruleOverlap: 0, aliasPins: 0, dangling: 0 })[k] += n; };
           for (const x of q.unassigned) bump(x.corp, 'unassigned', x.n);
           for (const x of q.unmapped) bump(x.corp, 'unmapped');
           for (const x of q.drift) bump(x.corp, 'drift');
@@ -563,6 +721,7 @@ export function registerSvcInventory(api) {
           for (const x of q.tagAmbiguous) bump(x.corp, 'tagAmbiguous');
           for (const x of q.ruleOverlap) bump(x.corp, 'ruleOverlap');
           for (const x of q.aliasPins) bump(x.corp, 'aliasPins');
+          for (const x of q.dangling) bump(x.corp, 'dangling');
           for (const x of q.orphaned) bump(x.corp, 'orphaned');
           return o;
         })(),
@@ -576,7 +735,7 @@ export function registerSvcInventory(api) {
     try {
       const snap = store.get();
       if (storeLoadError()) return res.status(503).json({ ok: false, error: 'registryUnreadable' });
-      const { g, inv, allowed, admin, st } = await inventoryFor(req, snap);
+      const { g, inv, members, allowed, admin, st } = await inventoryFor(req, snap);
       const corp = t(req.query.corp); const svc = t(req.query.service); const gid = t(req.query.global); const unassigned = req.query.unassigned === '1';
       // 법인 귀속이 없는 미지정 구성원만(6차 6 — 예전에는 corp='' 가 '조건 없음' 으로 읽혀 전 법인 미지정이 나왔다). 범위 계정에는 싣지 않는다.
       const nocorp = req.query.nocorp === '1';
@@ -594,7 +753,7 @@ export function registerSvcInventory(api) {
         if (unassigned) return !r.serviceId;
         return !!corp;   // 법인만 주면 그 법인 전부 — 아무 조건도 없으면 빈 목록(전 함대를 한 번에 내리지 않는다)
       };
-      const list = g.members.filter(pick);
+      const list = members.filter(pick);   // 가린 판본은 보이는 순서(v2.990) — 자르기(CAP)보다 먼저
       const CAP = 5000;
       const rows = list.slice(0, CAP).map((m) => memberRow(m, inv.resolved.get(m.key), admin, !!allowed));
       // 영향 호스트 — 호스트별 VM 을 한 번만 묶는다(전 법인 보기에서 호스트 수 × 구성원 수로 돌지 않게).
@@ -657,11 +816,15 @@ export function registerSvcInventory(api) {
         // 판정 보류(5차 R10): 언제부터(이 포탈 프로세스가 처음 본 시각 — 재시작하면 다시 센다) · 무엇이 막혔는지. 출처 문구는 관리자 판본만(장비·수집 서버 이름).
         // 유령·보류는 앞 GHOST_SHOW 건만 싣고 전체 개수·법인별 개수를 따로 준다(6차 8 — 실측: 상한 없이 고정 5만 건이면 응답 4.8MB). 정리 버튼은 법인별 개수로 연다.
         ...(() => {
-          const gl = q.ghosts.filter(inCorp); const hl = heldWithSince(q.ghostsHeld, !allowed).filter(inCorp);
+          // 유령 · 보류는 고정 저장 순서(= 누군가 고정을 건 순서 — 관리자가 함대 순서 목록에서 한꺼번에 걸었으면 원문 순서)다 — 가린 판본은 보이는 키 순(v2.990), 자르기보다 먼저
+          const byKeyOrder = (l) => visibleKeyOrder(l, admin, hide, (x) => pubKey(x.key, hide));
+          const gl = byKeyOrder(q.ghosts.filter(inCorp)); const hl = byKeyOrder(heldWithSince(q.ghostsHeld, !allowed).filter(inCorp));
           const byCorp = {}; for (const x of gl) byCorp[x.corp] = (byCorp[x.corp] || 0) + 1;
           return { ghosts: maskKeyOnly(gl.slice(0, GHOST_SHOW)), ghostsN: gl.length, ghostsByCorp: byCorp, ghostsHeld: maskKeyOnly(hl.slice(0, GHOST_SHOW)), ghostsHeldN: hl.length };
         })(),
         orphaned: q.orphaned.filter(inCorp).length, bmBlocked: g.bmBlocked,
+        // 없는 서비스를 가리키는 고정(7차 반증 5) — 판정은 자동으로 돌아가 있다. 행의 '고정 지우기' 로 지운다
+        dangling: mask(q.dangling.filter(inCorp).slice(0, 200)).map((x) => ({ ...x, ...(x.aliasKey ? { aliasKey: pubKey(x.aliasKey, hide) } : {}) })),
         // 문구(장비·수집 서버 이름)는 **전체 범위** 관리자만 — 범위가 지정된 관리자에게 다른 법인 출처 이름을 싣지 않는다(3차 반증 2 · sourceErrors 와 같은 기준)
         bmBlockedSources: g.bmBlocked ? (g.bmBlockedSources || []).map((u) => (admin && !allowed ? u : { source: u.source })) : [],
       });
@@ -674,12 +837,13 @@ export function registerSvcInventory(api) {
       const snap = store.get();
       // 손상 저장소면 빈 트리 기준(전부 '미소속')으로 답하지 않는다(5차 검토 M6 — members·queues 와 같은 규칙).
       if (storeLoadError()) return res.status(503).json({ ok: false, error: 'registryUnreadable', reason: '서비스 인벤토리 저장소를 읽지 못했습니다.' });
-      const { g, inv, allowed, admin } = await inventoryFor(req, snap);
+      const { inv, members, allowed, admin } = await inventoryFor(req, snap);
       const kind = req.query.kind === 'vm' ? 'vm' : 'bm';
       const corp = t(req.query.corp); const qq = lc(req.query.q).slice(0, 64); const onlyUn = req.query.unassignedOnly !== '0';
       const hide = !!allowed;   // R7 — 범위 계정은 서비스태그로 찾지 않는다(찾기가 태그를 맞혀 보는 길이 되지 않게)
       if (corp && allowed && !allowed.has(corp)) return res.status(404).json({ ok: false, reason: '법인(vCenter)을 찾지 못했습니다.' });
-      const list = g.members.filter((m) => m.kind === kind && m.corp && (!allowed || allowed.has(m.corp)) && (!corp || m.corp === corp)
+      // 가린 판본은 보이는 순서(v2.990 — `inventoryFor` 의 members) · 자르기(CAP)보다 먼저
+      const list = members.filter((m) => m.kind === kind && m.corp && (!allowed || allowed.has(m.corp)) && (!corp || m.corp === corp)
         && (!onlyUn || !inv.resolved.get(m.key)?.serviceId)
         && (!qq || lc(maskName(m, admin, hide)).includes(qq) || (!hide && lc(m.serviceTag).includes(qq)) || lc(m.folderPath).includes(qq) || lc(m.ip).includes(qq)));
       const CAP = 2000;
@@ -694,15 +858,15 @@ export function registerSvcInventory(api) {
     if (!lock.ok) return res.status(lock.status).json(lock.body);
     try {
       const snap = store.get();
-      const { g, inv, allowed, admin } = await inventoryFor(req, snap);
+      const { g, inv, members, allowed, admin } = await inventoryFor(req, snap);
       const svcById = new Map(inv.services.map((s) => [s.id, s]));
-      const SRC = { pin: '고정', folder: 'vCenter 폴더 규칙', scan: '스캔 엔트리', tag: '태그', rule: '이름 규칙', none: '미지정' };
+      const SRC = { pin: '고정', folder: 'vCenter 폴더 규칙', bmfolder: '물리서버 폴더 규칙', scan: '스캔 엔트리', tag: '태그', rule: '이름 규칙', none: '미지정' };
       // 5차 M11·R19: 전역 서비스·등급·담당자 · 드리프트 · 키 종류 · 백업은 화면과 같은 말(영문 코드 금지)
       const BACKUP = { ok: '성공', fail: '실패·지연', none: '잡 없음' };
       const KEY_KIND = { instanceUuid: 'instanceUuid', moref: 'moref(임시)', serviceTag: '서비스태그', fleetId: 'fleetId(임시)' };
       const globalById = new Map((inv.global?.globals || []).map((x) => [x.id, x]));
       const lines = [CSV_BOM + csvLine(['법인', '폴더', '서비스', '전역 서비스', '등급', '담당자', '종류', '이름', '키', '키 종류', '소속 근거', '근거 값', '드리프트', '전원', 'CPU%', '메모리%', 'vCPU/코어', '메모리GB', '스토리지GB', '부품 장애', '백업 24h', '호스트', 'IP'])];
-      for (const m of g.members) {
+      for (const m of members) {   // 가린 판본은 보이는 순서(v2.990)
         if (allowed && !allowed.has(m.corp)) continue;
         if (!m.corp && allowed) continue;
         const r = inv.resolved.get(m.key); const s = r.serviceId ? svcById.get(r.serviceId) : null;
@@ -771,7 +935,9 @@ export function registerSvcInventory(api) {
         }
         const r = mutateMap((d) => FLEET_OPS[op](d, b));
         if (!r.ok) return res.status(r.status).json({ ok: false, reason: r.error });
-        audit(b.id || b.name || op, JSON.stringify({ name: b.name, tier: b.tier, owner: b.owner, value: b.value }).slice(0, 400));
+        // 되돌릴 근거를 남긴다(7차 반증 6): 수정은 바꾸기 전 값(before) · 삭제는 지운 이름과 연결이 풀린 법인 서비스 수
+        audit(b.id || b.name || op, JSON.stringify({ name: b.name, tier: b.tier, owner: b.owner, value: b.value,
+          ...(r.result?.before ? { before: r.result.before } : {}), ...(op === 'global.remove' ? { removedName: r.result?.name, unlinked: r.result?.unlinked } : {}) }).slice(0, 600));
         return done(r.result);
       }
 
@@ -781,6 +947,26 @@ export function registerSvcInventory(api) {
       const corp = t(b.corp);
       if (storeLoadError()) return res.status(503).json({ ok: false, error: 'registryUnreadable', reason: '저장소를 읽지 못해 쓰기를 막았습니다.' });
 
+      // v2.987 물리서버 폴더 규칙 미리보기 — 만들기 전에 그 폴더(하위 포함) 베어메탈이 지금 어느 서비스에 있는지 센다(만들면 옮겨 갈 구성원을 사람이 보고 누르게).
+      if (op === 'bmrule.add' && b.dry === true) {
+        // 저장과 같은 정리(cleanFolderPath)를 거친 경로로 센다 — 끝의 '\\' · 공백이 다른 미리보기를 만들지 않게(2차 반증 4)
+        const cp = cleanFolderPath(b.prefix);
+        if (cp.error || !cp.value) return res.status(400).json({ ok: false, reason: cp.error || '물리서버 폴더를 지정하십시오.' });
+        const p = cp.value;
+        const { g, inv } = await inventoryFor(req, snap);
+        const placed = bmFolderMapOf(g.members);
+        if (!placed) return res.status(503).json({ ok: false, error: 'registryUnreadable', reason: '물리서버 폴더 저장소를 읽지 못해 배치를 모릅니다.' });
+        const from = new Map(); let n = 0; let kept = 0;
+        for (const m of g.members) {
+          if (m.kind !== 'bm' || m.corp !== corp || !bmFolderMatches(p, placed.get(m.key))) continue;
+          n += 1; const r = inv.resolved.get(m.key);
+          // 더 긴(같은) 기존 물리서버 폴더 규칙이 잡고 있는 서버는 새 규칙이 와도 그대로다(긴 경로 우선) — 옮겨 갈 대수에 넣지 않는다(2차 반증 4)
+          if (r?.src === 'bmfolder' && String(r.via || '').length >= p.length) { kept += 1; continue; }
+          const k = r?.src === 'pin' ? `pin:${r.serviceId}` : (r?.serviceId || '');
+          from.set(k, (from.get(k) || 0) + 1);
+        }
+        return res.json({ ok: true, result: { prefix: p, members: n, kept, from: [...from].map(([k, c]) => (k.startsWith('pin:') ? { serviceId: k.slice(4), pinned: true, n: c } : { serviceId: k || null, n: c })) } });
+      }
       if (CORP_OPS[op]) {
         const r = mutateMap((d) => CORP_OPS[op](d, { ...b, corp }));
         if (!r.ok) return res.status(r.status).json({ ok: false, reason: r.error });
@@ -790,7 +976,7 @@ export function registerSvcInventory(api) {
           const rp = mutatePins((d) => { for (const [k, p] of Object.entries(d.pins)) if (p.corp === corp && p.serviceId === r.result.removed) { delete d.pins[k]; pinsRemoved += 1; } return { result: {} }; });
           if (!rp.ok) return res.status(rp.status).json({ ok: false, reason: `서비스는 지웠지만 고정 정리에 실패했습니다 — ${rp.error}` });
         }
-        audit(corp, `${op} ${JSON.stringify({ id: b.id, name: b.name, path: b.path, prefix: b.prefix, kind: b.kind, match: b.match, value: b.value, serviceId: b.serviceId, globalId: b.globalId, enabled: b.enabled, moveUp: b.moveUp === true || undefined, keepAlias: Array.isArray(b.keepAlias) ? b.keepAlias.slice(0, 2) : undefined }).slice(0, 600)}${pinsRemoved ? ` · 고정 ${pinsRemoved}건 정리` : ''}`);
+        audit(corp, `${op} ${JSON.stringify({ id: b.id, name: b.name, path: b.path, prefix: b.prefix, kind: b.kind, match: b.match, value: b.value, serviceId: b.serviceId, globalId: b.globalId, enabled: b.enabled, moveUp: b.moveUp === true || undefined, keepAlias: Array.isArray(b.keepAlias) ? b.keepAlias.slice(0, 2) : undefined, from: r.result?.from }).slice(0, 600)}${pinsRemoved ? ` · 고정 ${pinsRemoved}건 정리` : ''}`);
         return done({ ...r.result, ...(pinsRemoved ? { pinsRemoved } : {}) });
       }
 
@@ -810,49 +996,68 @@ export function registerSvcInventory(api) {
         // '고정 유지' 는 지금의 자동 판정을 함께 적는다 — 자동 판정이 다른 서비스로 바뀌면 다시 드리프트로 묻는다(5차 반증 R8).
         // 화면이 본 자동 판정(expectAuto)과 지금 판정이 다르면 그 키는 검토하지 않는다 — 사람이 보지 못한 새 드리프트를 숨기지 않게(5차 1차 반증 3).
         // pins.clear + onlyIfRedundant: 지금도 '고정 = 자동 판정' 인 키만 지운다(반증 8 — 그 사이 바뀐 고정을 지우면 소속이 조용히 바뀐다).
-        const needNow = op === 'pins.review' || (op === 'pins.clear' && b.onlyIfRedundant === true);
-        const autoNow = needNow ? (await inventoryFor(req, snap)).inv.resolved : null;
+        // pins.clear + onlyIfUnused: 지금 판정에 쓰이는 고정이면 지우지 않는다 — 불일치·보류·없는 서비스 행의 '고정 지우기' 가 보낸다(7차 반증 1: 거짓 불일치 행의
+        //   지우기가 다른 구성원이 쓰는 고정을 지웠다. 화면 판정이 틀려도 서버가 마지막에 막는다).
+        const onlyIfUnused = op === 'pins.clear' && b.onlyIfUnused === true;
+        const needNow = op === 'pins.review' || (op === 'pins.clear' && (b.onlyIfRedundant === true || onlyIfUnused));
+        const invNow = needNow ? (await inventoryFor(req, snap)).inv : null;
+        const autoNow = invNow ? invNow.resolved : null;
+        const usedPinKeys = new Set();
+        if (onlyIfUnused) for (const m of g.members) { const rr = autoNow.get(m.key); if (rr?.src === 'pin') usedPinKeys.add(rr.pinKey || m.key); }
         const expectAuto = op === 'pins.review' && b.expectAuto && typeof b.expectAuto === 'object' && !Array.isArray(b.expectAuto)
           ? Object.fromEntries(Object.entries(b.expectAuto).slice(0, LIMITS.pinBatch).map(([k, v]) => [resolveKey(t(k)), v]).filter(([k]) => k)) : null;
-        let changed = 0; let skipped = unresolved; let stale = 0;
+        let changed = 0; let skipped = unresolved; let stale = 0; let aliasRemoved = 0;
         // 키 등급이 오른 구성원은 고정이 낮은 등급 키(별칭)에 있을 수 있다(5차 R15) — 쓰는 김에 새 키로 옮긴다(읽기 경로는 쓰지 않는다).
         const aliasOf = new Map(g.members.filter((m) => m.corp === corp && m.aliasKeys?.length).map((m) => [m.key, m.aliasKeys]));
-        const moveAlias = (d, k) => {
-          if (d.pins[k]) { for (const a of aliasOf.get(k) || []) if (d.pins[a]?.corp === corp) delete d.pins[a]; return; }
+        // 새 키에 고정이 없으면 옛 키 고정을 새 키로 옮긴다(소속 그대로). 새 키에 고정이 있을 때 옛 키 고정을 지우는 범위는 연산이 정한다(7차 반증 3):
+        //   'all' — 고정 지정·지우기(사람이 이 구성원의 소속을 새로 정했다 · 지우기는 옛 키가 되살아나지 않게) · 'dup' — 고정 유지(같은 서비스인 중복만 —
+        //   서비스가 다른 충돌은 '옛 키로 저장된 고정' 카드에서 사람이 고른다). 지운 개수는 결과·감사에 남긴다.
+        const moveAlias = (d, k, mode) => {
           for (const a of aliasOf.get(k) || []) {
-            if (d.pins[a]?.corp !== corp) continue;
-            if (!d.pins[k]) d.pins[k] = { ...d.pins[a] };
-            delete d.pins[a];
+            const pa = d.pins[a]; if (pa?.corp !== corp) continue;
+            if (!d.pins[k]) { d.pins[k] = { ...pa }; delete d.pins[a]; continue; }
+            if (mode === 'all' || pa.serviceId === d.pins[k].serviceId) { delete d.pins[a]; aliasRemoved += 1; }
           }
         };
+        const aliasPinOf = (d, k) => { for (const a of aliasOf.get(k) || []) if (d.pins[a]?.corp === corp) return d.pins[a]; return null; };
         const r = mutatePins((d) => {
+          // 서비스 존재는 쓰는 순간 다시 본다 — 위의 확인과 이 쓰기 사이(입력 수집 await)에 서비스가 지워지면 없는 서비스를 가리키는 고정이 남았다(7차 반증 5)
+          if (op === 'pins.set' && !(peekMap().corps[corp]?.services || []).some((x) => x.id === serviceId)) return { error: '대상 서비스가 그 사이 지워졌습니다 — 새로 고쳐 다시 고르십시오.', status: 409 };
           for (const k of keys) {
             if (op === 'pins.set') {
               // 살아 있는 구성원이고 그 법인 것이어야 한다(법인을 넘는 지정 금지 — 법인 귀속이 없는 서버는 통합 서버 인벤토리에서 먼저 정한다).
               if (corpOfKey.get(k) !== corp) { skipped += 1; continue; }
-              moveAlias(d, k);
+              moveAlias(d, k, 'all');
               d.pins[k] = { serviceId, corp, by: who, at: Date.now(), reviewed: false }; changed += 1;
             } else {
-              moveAlias(d, k);
-              const p = d.pins[k];
-              if (!p || p.corp !== corp) { skipped += 1; continue; }
+              // 고칠지 먼저 정하고(건너뛰는 키는 옛 키도 건드리지 않는다 — 7차 반증 3 둘째 절) 그다음 옮기거나 지운다
+              // onlyIfUnused 는 그 키의 고정만 본다(옛 키로 되짚어 가면 그 구성원이 지금 쓰는 옛 키 고정을 지울 수 있다)
+              const p0 = d.pins[k] || (onlyIfUnused ? null : aliasPinOf(d, k));
+              if (!p0 || p0.corp !== corp) { skipped += 1; continue; }
               const cur = autoNow?.get(k);
               if (op === 'pins.clear') {
                 if (b.onlyIfRedundant === true && !(cur?.src === 'pin' && cur.redundant)) { stale += 1; continue; }
+                if (onlyIfUnused && usedPinKeys.has(k)) { stale += 1; continue; }
+                moveAlias(d, k, 'all');
                 delete d.pins[k]; changed += 1;
               } else {
                 const now = cur?.auto?.serviceId ?? null;
                 if (expectAuto && Object.prototype.hasOwnProperty.call(expectAuto, k) && (expectAuto[k] ?? null) !== now) { stale += 1; continue; }
+                moveAlias(d, k, 'dup');
                 // 항목은 동결된 지금 값이다 — 고치지 않고 새 객체로 바꿔 넣는다(6차 8 — mutatePins 는 바뀐 키만 정리한다)
-                d.pins[k] = { ...p, reviewed: true, reviewedAuto: now }; changed += 1;
+                d.pins[k] = { ...d.pins[k], reviewed: true, reviewedAuto: now }; changed += 1;
               }
             }
           }
-          if (!changed && stale) return { error: op === 'pins.review' ? '자동 판정이 화면과 달라졌습니다 — 새로 고쳐 다시 확인하십시오.' : '지금은 불필요한 고정이 아닙니다(자동 판정이 바뀜) — 새로 고쳐 다시 확인하십시오.', status: 409 };
-          return { result: { changed, skipped, ...(stale ? { stale } : {}) } };
+          if (!changed && stale) {
+            return { error: op === 'pins.review' ? '자동 판정이 화면과 달라졌습니다 — 새로 고쳐 다시 확인하십시오.'
+              : onlyIfUnused ? '지금 판정에 쓰는 고정이라 지우지 않았습니다 — 다른 구성원의 소속입니다(새로 고쳐 다시 확인하십시오).'
+                : '지금은 불필요한 고정이 아닙니다(자동 판정이 바뀜) — 새로 고쳐 다시 확인하십시오.', status: 409 };
+          }
+          return { result: { changed, skipped, ...(stale ? { stale } : {}), ...(aliasRemoved ? { aliasRemoved } : {}) } };
         });
         if (!r.ok) return res.status(r.status).json({ ok: false, reason: r.error });
-        audit(corp, `${op} ${changed}건${serviceId ? ` → ${serviceId}` : ''}${skipped ? ` · 건너뜀 ${skipped}(다른 법인·없는 키)` : ''} · ${keys.slice(0, 20).join(',')}`);
+        audit(corp, `${op} ${changed}건${serviceId ? ` → ${serviceId}` : ''}${skipped ? ` · 건너뜀 ${skipped}(다른 법인·없는 키)` : ''}${stale ? ` · 그대로 둠 ${stale}` : ''}${aliasRemoved ? ` · 옛 키 고정 ${aliasRemoved}건 함께 지움` : ''} · ${keys.slice(0, 20).join(',')}`);
         return done(r.result);
       }
 
@@ -898,7 +1103,8 @@ export function registerSvcInventory(api) {
         const ghostKeys = new Set(inv.queues.ghosts.filter((x) => x.corp === corp).map((x) => x.key));
         const hideKeys = !!scopedVcenterIds(user, snap);   // R7 — 범위 계정에는 토큰으로 보이고 토큰으로 받는다
         // dry 는 앞 GHOST_PRUNE_MAX 건의 키만 준다(6차 8 — 받는 쪽 상한과 같다). 그보다 많으면 total 로 알리고 화면이 '다시 누르면 다음' 을 안내한다.
-        if (b.dry === true) return res.json({ ok: true, result: { keys: [...ghostKeys].slice(0, GHOST_PRUNE_MAX).map((k) => pubKey(k, hideKeys)), total: ghostKeys.size, max: GHOST_PRUNE_MAX, held: inv.queues.ghostsHeld.filter((x) => x.corp === corp).length } });
+        // 가린 판본은 보이는 키 순으로 자른다(v2.990 — 고정 저장 순서를 싣지 않는다)
+        if (b.dry === true) return res.json({ ok: true, result: { keys: visibleKeyOrder([...ghostKeys], isAdminDetailUser(user), hideKeys).slice(0, GHOST_PRUNE_MAX).map((k) => pubKey(k, hideKeys)), total: ghostKeys.size, max: GHOST_PRUNE_MAX, held: inv.queues.ghostsHeld.filter((x) => x.corp === corp).length } });
         const resolveGhost = keyResolverFor(hideKeys, [...ghostKeys]);
         // 화면이 미리 본 **키**와 지금 유령의 교집합만 지운다(5차 R11 · 3차 반증 3 — 개수만 비교하면 확인창에 없던 키가 끼어 지워졌다. insights fleet/prune 과 같은 방식).
         // 옛 화면(키 없이 개수만 · 아무것도 없이)도 받는다: expect 는 정수만, 다르면 409.

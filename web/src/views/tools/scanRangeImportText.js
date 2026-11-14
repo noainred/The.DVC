@@ -245,7 +245,7 @@ function failOf(inc) {
  */
 export function agentReportRows({ agents = [], rows = [], reports = {}, localLast = null, now = Date.now() } = {}) {
   const by = new Map();
-  const get = (name) => { const k = String(name).toLowerCase(); if (!by.has(k)) by.set(k, { name, enabled: true, datacenterName: '', lines: 0, invalid: 0, ips: 0, at: null, scanned: null, alive: null, failAt: null, fail: null, skipAt: null, skipReason: '' }); return by.get(k); };
+  const get = (name) => { const k = String(name).toLowerCase(); if (!by.has(k)) by.set(k, { name, enabled: true, datacenterName: '', lines: 0, invalid: 0, ips: 0, at: null, scanned: null, alive: null, nameStats: null, failAt: null, fail: null, skipAt: null, skipReason: '' }); return by.get(k); };
   for (const a of agents) if (a?.name) get(a.name).enabled = a.enabled !== false;
   for (const r of rows) {
     if (!r?.agent) continue;
@@ -257,6 +257,7 @@ export function agentReportRows({ agents = [], rows = [], reports = {}, localLas
     if (!rep || typeof rep !== 'object') continue;
     const x = get(name);
     x.at = posTs(rep.at); x.scanned = rep.scanned ?? null; x.alive = rep.alive ?? null;
+    x.nameStats = rep.nameStats && typeof rep.nameStats === 'object' ? rep.nameStats : null; // v2.991 호스트명 확인 요약(없으면 이전 버전 엣지)
     const f = failOf(rep.incomplete);
     if (f) { x.fail = f; x.failAt = f.at; }
   }
@@ -273,7 +274,7 @@ export function agentReportRows({ agents = [], rows = [], reports = {}, localLas
       }
     } else if (localLast.skipped) {
       if (x.skipAt == null || t >= x.skipAt) { x.skipAt = t; x.skipReason = String(localLast.skipped).slice(0, 80); }
-    } else if (!x.at || t > x.at) { x.at = t; x.scanned = localLast.scanned ?? null; x.alive = localLast.alive ?? null; }
+    } else if (!x.at || t > x.at) { x.at = t; x.scanned = localLast.scanned ?? null; x.alive = localLast.alive ?? null; x.nameStats = localLast.nameStats && typeof localLast.nameStats === 'object' ? localLast.nameStats : x.nameStats; }
   }
   return [...by.values()].map((x) => ({ ...x, state: reportState({ enabled: x.enabled, at: x.at, ranges: x.lines, failAt: x.failAt, skipAt: x.skipAt }, now) }))
     .sort((a, b) => (a.name === '__local__' ? -1 : b.name === '__local__' ? 1 : String(a.name).localeCompare(String(b.name))));

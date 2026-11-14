@@ -14,7 +14,7 @@ import { clampSetting } from '../util/clampSetting.js';
 import { DEFAULT_PORTS, isIpv4 } from './scan.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { getOverrides } from './overrides.js';
-import { getPolicies, isCoveredByAnyPolicy } from './rangePolicies.js';
+import { getPolicies, isCoveredByAnyPolicy, findPolicy, specToRange } from './rangePolicies.js';
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
 import { ipToNum, canonIp } from '../util/ipv4.js';
 import { numOrNull } from '../util/numOrNull.js';
@@ -22,6 +22,10 @@ import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { agentKeyOf, agentValueOf } from '../util/agentKey.js'; // v2.604 RECENT2604-01
 import { registerStateFile } from '../util/stateFiles.js';
 import { capStr } from '../util/capStr.js'; // v2.733: 엣지가 보낸 미완료 사유를 평탄화해 상주시킨다
+import { NAME_METHODS, NAME_MISS_MAX, displayName, nameMismatch } from './hostNames.js'; // v2.991: 호스트명 확인(방식별 이름 · 표시 순서)
+import { macInfo, entryMac } from './macVendor.js'; // v2.999: MAC → 제조사 · 종류(IP 상세 창) · 표시 MAC(ARP > NetBIOS)
+import { confirmHoursOf, DNS_CONFIRM_HOURS_MIN, DNS_CONFIRM_HOURS_MAX, DNS_FWD_STATES, DNS_OTHER_MAX } from './dnsConfirm.js'; // v3.2.0: DNS 정합성
+import { cleanQuiet } from './scanQuiet.js'; // v3.7.0: 주기 스캔 쉬는 시간
 
 const MAX_MERGE = 20_000; // 한 보고당 병합 상한(악의/오작동 에이전트의 대량 주입 방지)
 // v2.603(감사 CEN2603-02): **전체** 상한. MAX_MERGE 는 한 호출에만 걸려, 배정 범위가 없는 토큰이 보고를 반복하면 results·history 가
@@ -267,6 +271,13 @@ function normalizeCfg(p = {}) {
     concurrency: clamp(p.concurrency, 1, 1024, DEFAULTS.concurrency),
     timeoutMs: clamp(p.timeoutMs, 100, 10_000, DEFAULTS.timeoutMs),
     reverseDns: p.reverseDns !== false,
+    // v2.991: 호스트명 확인 — mDNS(같은 서브넷만) · NetBIOS(UDP 137). **기본 켜짐**(사용자 결정 2026-11-13 '새 방식 기본값 — 켜짐, 에이전트별로 끔').
+    //   대상 장비로 질의를 새로 보내는 동작이라 끈 에이전트는 묻지 않는다(키가 없는 옛 설정 = 켜짐).
+    mdns: p.mdns !== false,
+    netbios: p.netbios !== false,
+    // v3.2.0: 역DNS 이름의 정방향 확인(DNS 정합성) — 기본 켜짐(대상 장비가 아니라 DNS 서버에 묻는다 · 역DNS 를 끄면 묻지 않는다) · 답을 다시 쓰는 기간(시간).
+    dnsConfirm: p.dnsConfirm !== false,
+    dnsConfirmHours: confirmHoursOf(p.dnsConfirmHours),
     // ICMP ping 병행(v2.359) — 포트가 전부 닫힌 서버도 생존 감지. v2.360: 기본 OFF(opt-in).
     // 프로세스/FD 폭주로 포탈이 먹통이 된 장애(v2.359) 이후, 명시적으로 켤 때만 동작하고
     // 켜더라도 ping 전용 동시성 상한(scan.js PING_MAX)으로 소수만 동시에 실행된다.
@@ -274,6 +285,8 @@ function normalizeCfg(p = {}) {
     retentionDays: clamp(p.retentionDays, 0, 3650, DEFAULTS.retentionDays),
     // v2.638: 이 에이전트가 찾은 IP 를 귀속시킬 DataCenter(비우면 자동 — ipam/scanDatacenter.js). 엣지는 이 칸을 쓰지 않는다.
     datacenterId: typeof p.datacenterId === 'string' ? p.datacenterId.trim().slice(0, 64) : '',
+    // v3.7.0(재설계 묶음 라 — 시안 ⑭): 쉬는 시간 — 스캔하는 쪽(엣지 · 이 포탈)이 자기 현지 시각으로 판정한다(ipam/scanQuiet.js). 없으면 [].
+    quiet: cleanQuiet(p.quiet),
   };
 }
 
@@ -358,10 +371,15 @@ export function saveScanSettings(agent, partial = {}) {
   if (partial.concurrency !== undefined) next.concurrency = clampSetting(partial.concurrency, { min: 1, max: 1024, def: cur.concurrency });
   if (partial.timeoutMs !== undefined) next.timeoutMs = clampSetting(partial.timeoutMs, { min: 100, max: 10_000, def: cur.timeoutMs });
   if (partial.reverseDns !== undefined) next.reverseDns = !!partial.reverseDns;
+  if (partial.mdns !== undefined) next.mdns = !!partial.mdns;       // v2.991
+  if (partial.netbios !== undefined) next.netbios = !!partial.netbios; // v2.991
+  if (partial.dnsConfirm !== undefined) next.dnsConfirm = !!partial.dnsConfirm; // v3.2.0
+  if (partial.dnsConfirmHours !== undefined) next.dnsConfirmHours = clampSetting(partial.dnsConfirmHours, { min: DNS_CONFIRM_HOURS_MIN, max: DNS_CONFIRM_HOURS_MAX, def: cur.dnsConfirmHours }); // v3.2.0
   if (partial.ping !== undefined) next.ping = !!partial.ping; // v2.359 — 누락 시 저장이 조용히 무시됨
   if (partial.retentionDays !== undefined) next.retentionDays = clampSetting(partial.retentionDays, { min: 0, max: 3650, def: cur.retentionDays });
   // v2.638: 데이터센터 귀속(빈 값 = 자동). 존재 여부는 라우트가 등록부로 검사한다(여기는 형식만).
   if (partial.datacenterId !== undefined) next.datacenterId = typeof partial.datacenterId === 'string' ? partial.datacenterId.trim().slice(0, 64) : '';
+  if (partial.quiet !== undefined) next.quiet = cleanQuiet(partial.quiet); // v3.7.0 — 형식 오류는 라우트가 먼저 400(parseQuietInput)
   saveAll({ ...all, agents: { ...all.agents, [key]: next } }); // v2.639 I3: 캐시 객체를 제자리에서 고치지 않는다(쓰기 실패 시 메모리≠디스크 방지)
   return next;
 }
@@ -428,10 +446,157 @@ function cleanServices(v) {
 function cleanHostname(v) {
   return typeof v === 'string' ? v.replace(CTRL_RE, '').slice(0, MAX_HOST_LEN) : '';
 }
+/*
+ * v2.991(호스트명 확인): 엣지가 보내는 새 칸도 **아는 키 · 아는 모양만** 받는다(v2.601 규약 — 디스크에서 읽은 옛 파일도 같은 정제).
+ *   names  — { dns?, mdns?, netbios? } 글자만(각각 cleanHostname). 다른 키 · 객체 · 배열은 버린다.
+ *   tried  — 실제로 물어본 방식(아는 값만 · 중복 제거). **없으면 null** = 옛 엣지(방식 정보 없음 — 역DNS 만 하던 판본).
+ *   nbGroup — NetBIOS 작업 그룹(15자) · mac — NetBIOS 가 답한 어댑터 MAC(AA:BB:CC:DD:EE:FF 모양만 · 모두 0 이면 버림).
+ */
+const NB_GROUP_MAX = 15;
+const MAC_RE = /^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$/;
+function cleanNames(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const o = {};
+  for (const k of NAME_METHODS) { const x = cleanHostname(v[k]).trim(); if (x) o[k] = x; }
+  return Object.keys(o).length ? o : null;
+}
+function cleanTried(v) {
+  if (!Array.isArray(v)) return null;
+  const out = [];
+  for (const x of v.slice(0, 8)) if (NAME_METHODS.includes(x) && !out.includes(x)) out.push(x);
+  return NAME_METHODS.filter((k) => out.includes(k));
+}
+function cleanMac(v) {
+  if (typeof v !== 'string' || v.length > 32) return '';
+  const m = v.trim().toUpperCase().replace(/-/g, ':');
+  return MAC_RE.test(m) && m !== '00:00:00:00:00:00' ? m : '';
+}
+function cleanGroup(v) {
+  return typeof v === 'string' ? v.replace(CTRL_RE, '').trim().slice(0, NB_GROUP_MAX) : '';
+}
+/**
+ * v3.2.0: 역DNS 이름의 정방향 확인 결과 { v, at?, addrs? } 정제(순수 — 엣지가 보낸 값). v 는 아는 값만 · at 은 받은 시각(now)으로 자른다
+ *   (엣지 시계가 앞서도 미래 시각을 저장하지 않는다 · 없으면 두지 않는다) · addrs 는 other 에서만(IPv4 정규형 · DNS_OTHER_MAX 개 — 없으면 버린다).
+ */
+export function cleanDnsFwd(v, now = Date.now()) {
+  if (!v || typeof v !== 'object' || Array.isArray(v) || !DNS_FWD_STATES.includes(v.v)) return null;
+  const out = { v: v.v };
+  if (v.v !== 'unknown') { const at = numOrNull(v.at); if (at != null && at > 0) out.at = Math.min(at, now); }
+  if (v.v === 'other') {
+    const a = [];
+    for (const x of Array.isArray(v.addrs) ? v.addrs.slice(0, 16) : []) { const ip = typeof x === 'string' && isIpv4(x) ? canonIp(x) : ''; if (ip && !a.includes(ip)) a.push(ip); if (a.length >= DNS_OTHER_MAX) break; }
+    if (!a.length) return null;
+    out.addrs = a;
+  }
+  return out;
+}
+const dnsFwdSig = (d) => (d ? `${d.v}:${(d.addrs || []).join(',')}` : '');
 /** alive 원소 하나를 아는 필드로 좁힌다(순수). ip 는 호출부가 isIpv4 로 검사한다. v2.639: 바깥 호출부 0건(테스트도 mergeScanResults 로 검사한다) — 내부 함수. */
 function cleanAliveHost(h) {
-  return { ip: h.ip, openPorts: cleanPorts(h.openPorts), services: cleanServices(h.services), hostname: cleanHostname(h.hostname) };
+  const names = cleanNames(h.names);
+  // v2.993(물리서버 §13 ③ 정방향 DNS): fwdName — 물리서버 이름을 DNS 에 물어 이 IP 가 나왔을 때 그 이름(엣지가 올린다 → 같은 정제). 없으면 칸을 두지 않는다.
+  const fwdName = cleanHostname(h.fwdName);
+  // 표시 이름은 방식별 이름에서 다시 고른다(보낸 hostname 과 names 가 어긋나도 한 규칙). 방식별 이름이 없으면 옛 계약의 hostname.
+  const hostname = names ? displayName(names).name : cleanHostname(h.hostname);
+  // v3.2.0: 정방향 확인은 역DNS 이름이 있을 때만 뜻이 있다(그 이름을 물은 결과).
+  const dnsFwd = names?.dns ? cleanDnsFwd(h.dnsFwd) : null;
+  // v2.999: arpMac — 스캐너 이웃 표(ARP)의 MAC(같은 꼴 검사) · arpTried — 표를 읽었고 그 IP 가 같은 서브넷(참일 때만 — 글자 'true' 등은 거짓).
+  //   없으면(옛 엣지 · 다른 서브넷 · 표를 못 읽음) 둘 다 비고, 중앙은 그 보고를 'MAC 을 볼 수 없었다' 로 읽는다(지난 MAC 을 지우지 않는다).
+  return { ip: h.ip, openPorts: cleanPorts(h.openPorts), services: cleanServices(h.services), hostname,
+    names, tried: cleanTried(h.tried), nbGroup: cleanGroup(h.nbGroup), mac: cleanMac(h.mac), ...(fwdName ? { fwdName } : {}),
+    arpMac: cleanMac(h.arpMac), arpTried: h.arpTried === true, ...(dnsFwd ? { dnsFwd } : {}) };
 }
+/** 저장된 ARP MAC { v, at, miss } 정제(없거나 꼴이 틀리면 null). */
+function cleanStoredArp(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const mac = cleanMac(v.v);
+  if (!mac) return null;
+  const miss = numOrNull(v.miss);
+  const n = numOrNull(v.n);   // v3.1.0: 같은 MAC 을 이어 본 완료 스캔 수(충돌 의심 '연속 N회') — 옛 저장본은 1
+  return { v: mac, at: numOrNull(v.at) ?? 0, miss: miss != null && miss > 0 ? Math.min(Math.floor(miss), NAME_MISS_MAX) : 0, n: n != null && n >= 1 ? Math.min(Math.floor(n), ARP_SEEN_MAX) : 1 };
+}
+const ARP_SEEN_MAX = 1000;
+/**
+ * v2.999: 이번 보고(h — cleanAliveHost 결과)로 ARP MAC 을 갱신한다(순수). 이름(mergeNames)과 같은 규칙 —
+ *   표에 있었으면 새 값(miss 0), 표를 읽었고 같은 서브넷인데 없었으면 값은 두고 miss+1(NAME_MISS_MAX 에 지운다 — 표에서 한 번 밀려난 것으로 깜박이지 않게),
+ *   **볼 수 없었으면 그대로 둔다**(옛 엣지 · 다른 서브넷 에이전트 · 표 읽기 실패 — 보지 못한 것을 '없어졌다' 로 세지 않는다. 화면은 확인 시각으로 오래됨을 말한다).
+ * @returns {{ arp: object|null, changed: null|{from:string, to:string} }}
+ */
+export function mergeArp(prevArp, h, ts) {
+  const p = prevArp && typeof prevArp === 'object' && prevArp.v ? prevArp : null;
+  // v3.1.0: n = 같은 MAC 을 이어 본 횟수(다른 MAC 이면 1부터) — 표에 없었던 스캔 · 볼 수 없던 보고는 n 을 바꾸지 않는다.
+  if (h.arpMac) return { arp: { v: h.arpMac, at: ts, miss: 0, n: p && p.v === h.arpMac ? Math.min((p.n || 1) + 1, ARP_SEEN_MAX) : 1 }, changed: p && p.v !== h.arpMac ? { from: p.v, to: h.arpMac } : null };
+  if (h.arpTried) {
+    if (!p) return { arp: null, changed: null };
+    const miss = (p.miss || 0) + 1;
+    return { arp: miss < NAME_MISS_MAX ? { ...p, miss } : null, changed: null };
+  }
+  return { arp: p, changed: null };
+}
+export { entryMac }; // v2.999: 표시 MAC 판정은 macVendor.js 하나
+/** 저장된 방식별 이름 { k: {v, at, miss} } 정제 — 값이 없는 키는 뺀다. */
+function cleanStoredNames(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const o = {};
+  for (const k of NAME_METHODS) {
+    const e = v[k];
+    if (!e || typeof e !== 'object' || Array.isArray(e)) continue;
+    const name = cleanHostname(e.v).trim();
+    if (!name) continue;
+    const miss = numOrNull(e.miss);
+    o[k] = { v: name, at: numOrNull(e.at) ?? 0, miss: miss != null && miss > 0 ? Math.min(Math.floor(miss), NAME_MISS_MAX) : 0 };
+  }
+  return Object.keys(o).length ? o : null;
+}
+/**
+ * 이번 보고(h — cleanAliveHost 결과)로 방식별 이름을 갱신한다(순수). 물어본 방식이 답했으면 새 값(miss 0), 물었는데 답이 없으면
+ *   이름은 두고 miss+1(NAME_MISS_MAX 에 닿으면 지운다), **묻지 않았으면 지운다**(그 방식을 끈 에이전트 — 더는 확인하지 않는 이름을
+ *   지금 이름처럼 두지 않는다. v2.990 까지 역DNS 를 끄면 hostname 이 바로 비던 것과 같은 방향). 옛 엣지(tried 없음)는 역DNS 만 물은 것으로 본다.
+ *   같은 방식이 전과 다른 이름을 답하면 renames 에 싣는다(대소문자만 다르면 이름 변경이 아니다).
+ * @returns {{ names: object|null, renames: Array<{src:string, from:string, to:string}>, nbAnswered: boolean, nbDropped: boolean }}
+ */
+export function mergeNames(prevNames, h, ts) {
+  const tried = h.tried ?? ['dns'];
+  const got = h.names || (h.tried == null && h.hostname ? { dns: h.hostname } : {});
+  const out = {}; const renames = [];
+  let nbDropped = false;
+  for (const k of NAME_METHODS) {
+    const p = prevNames && prevNames[k] ? prevNames[k] : null;
+    const v = got[k] || '';
+    if (tried.includes(k)) {
+      if (v) {
+        out[k] = { v, at: ts, miss: 0 };
+        if (p?.v && p.v.toLowerCase() !== v.toLowerCase()) renames.push({ src: k, from: p.v, to: v });
+      } else if (p) {
+        const miss = (p.miss || 0) + 1;
+        if (miss < NAME_MISS_MAX) out[k] = { ...p, miss };
+        else if (k === 'netbios') nbDropped = true;
+      }
+    } else if (p && k === 'netbios') nbDropped = true;
+  }
+  return { names: Object.keys(out).length ? out : null, renames, nbAnswered: tried.includes('netbios') && !!got.netbios, nbDropped };
+}
+/** 대장 재계산이 필요한 이름 변화의 지문 — 이름 · '지난 스캔 무응답' 여부 · 물어본 방식 · NetBIOS 그룹/MAC. 확인 시각 · miss 횟수(1→2)는 넣지 않는다. */
+function nameSig(e) {
+  if (!e) return '';
+  const n = e.names || {};
+  return `${NAME_METHODS.map((k) => (n[k] ? `${n[k].v}${n[k].miss > 0 ? '~' : ''}` : '')).join('|')}|${(e.tried || ['?']).join(',')}|${e.nbGroup || ''}|${e.mac || ''}`
+    + `|${e.arp?.v || ''}${e.arp?.miss > 0 ? '~' : ''}`   // v2.999: ARP MAC · '지난 스캔 표에 없음' 표지(확인 시각 · miss 1→2 는 넣지 않는다)
+    + `|${dnsFwdSig(e.dnsFwd)}`;   // v3.2.0: 정방향 확인 판정 · 다른 IP(확인 시각은 넣지 않는다 — 기억을 다시 쓴 스캔마다 대장을 다시 만들지 않게)
+  // v3.1.0: 이어 본 횟수(arp.n)는 넣지 않는다 — 대장의 '충돌 의심' 은 conflictState 리비전(ipamRevKey |c)이 따로 무효화한다(스캔마다 재계산하지 않게).
+}
+// v2.999: 표시 MAC → 그 MAC 의 IP 들(IP 상세 창 '같은 MAC 의 다른 IP' — 요청마다 결과 전량을 훑지 않게). 갱신 지점은 _agentCount 와 같다:
+//   로드 정제 · mergeScanResults(항목 교체) · pruneScanResults(삭제). results 를 다른 곳에서 고치면 여기도 함께.
+const _macIps = new Map();
+function indexMac(ip, before, after) {
+  const a = before ? entryMac(before).mac : '';
+  const b = after ? entryMac(after).mac : '';
+  if (a === b) return;
+  if (a) { const set = _macIps.get(a); if (set) { set.delete(ip); if (!set.size) _macIps.delete(a); } }
+  if (b) { let set = _macIps.get(b); if (!set) { set = new Set(); _macIps.set(b, set); } set.add(ip); }
+}
+/** 그 MAC 을 표시 MAC 으로 가진 IP 수(대장 · 상세 — O(1)). */
+export function macIpCount(mac) { const set = mac ? _macIps.get(mac) : null; return set ? set.size : 0; }
 // v2.639(감사 I2): 결과에 나오는 에이전트 이름 → IP 수. 데이터센터 귀속 판정(scanDatacenterSource)이 '결과에 나오는 에이전트
 //   집합' 을 매번 26만 개를 훑어 모으던 것을(실측 약 150ms) 적재·정리 시점에 유지한다. 갱신 지점은 셋뿐이다 — 로드 정제·
 //   mergeScanResults(새 IP·에이전트 교체)·pruneScanResults(삭제). results 를 다른 곳에서 고치면 여기도 함께.
@@ -451,6 +616,22 @@ function bumpAgent(agent, d) {
 // v2.771(점검 R6-F2-3 — 재현): 키는 정규형(canonIp)이다. 예전에는 원문 키라 엣지가 보낸 '010.1.1.5' 가 '10.1.1.5' 와 별도 행이 되어
 //   원장 known(정규형 VM IP)과 맞지 않는 '(네트워크 스캔)' 미등록 장비로 보이고 override(정규 키)도 붙지 않았다. 이미 저장된 비정규 키는
 //   로드에서 정규 키로 합친다(같은 IP 가 둘이면 마지막 확인이 늦은 쪽). 카운터(_agentCount·_maxSeen)는 합친 뒤의 항목으로 센다.
+/**
+ * v2.991: 저장 항목 하나 — 방식별 이름이 있으면 표시 이름(hostname)을 거기서 다시 고른다. 옛 파일(names 없음)의 hostname 은
+ *   역DNS 이름이다(v2.990 까지 스캔은 역DNS 만 했다 — scan.js) — 그대로 dns 이름으로 옮긴다. nbGroup · mac · tried 는 있을 때만 싣는다.
+ */
+function storedEntry(base, names, tried, arp = null) {
+  const nm = names || (base.hostname ? { dns: { v: base.hostname, at: base.lastSeen || 0, miss: 0 } } : null);
+  const e = { ip: base.ip, openPorts: base.openPorts, services: base.services, hostname: nm ? displayName(nm).name : '', lastSeen: base.lastSeen, agent: base.agent };
+  if (nm) e.names = nm;
+  if (tried) e.tried = tried;
+  if (nm?.netbios && base.nbGroup) e.nbGroup = base.nbGroup;
+  if (nm?.netbios && base.mac) e.mac = base.mac;
+  if (base.fwdName) e.fwdName = base.fwdName;   // v2.993: 저장본의 정방향 DNS 이름(cleanAliveHost 가 정제)
+  if (arp) e.arp = arp;                          // v2.999: ARP MAC { v, at, miss }
+  if (base.dnsFwd && nm?.dns) e.dnsFwd = base.dnsFwd;   // v3.2.0: 역DNS 이름의 정방향 확인(cleanDnsFwd 가 정제)
+  return e;
+}
 function cleanStoredResults(raw) {
   const out = {};
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
@@ -458,7 +639,9 @@ function cleanStoredResults(raw) {
     if (!r || typeof r !== 'object' || !isIpv4(k)) continue;
     const ip = canonIp(k);
     if (!ip) continue;
-    const e = { ...cleanAliveHost({ ...r, ip }), lastSeen: numOrNull(r.lastSeen) ?? 0, agent: typeof r.agent === 'string' ? r.agent : LOCAL };
+    const lastSeen = numOrNull(r.lastSeen) ?? 0;
+    const e = storedEntry({ ...cleanAliveHost({ ...r, ip, names: undefined, tried: undefined }), lastSeen, agent: typeof r.agent === 'string' ? r.agent : LOCAL, dnsFwd: cleanDnsFwd(r.dnsFwd) },
+      cleanStoredNames(r.names), cleanTried(r.tried), cleanStoredArp(r.arp));
     const prev = Object.prototype.hasOwnProperty.call(out, ip) ? out[ip] : null;
     if (prev && prev.lastSeen >= e.lastSeen) continue;
     out[ip] = e;
@@ -466,6 +649,7 @@ function cleanStoredResults(raw) {
   for (const e of Object.values(out)) {
     bumpAgent(e.agent, 1);
     noteSeen(e.lastSeen); // v2.733 C6-02
+    indexMac(e.ip, null, e); // v2.999
   }
   return out;
 }
@@ -479,6 +663,49 @@ export function scanRev() { return scanRevN; }
 export function getScanResults() { return results; }
 const cmpScanIp = (a, b) => (a.ip < b.ip ? -1 : 1);
 export function scanResultList() { return Object.values(results).sort(cmpScanIp); }
+/**
+ * v2.991: 한 IP 의 스캔 결과(IP 상세 창 — 방식별 이름 · 확인 시각 · 연속 무응답 · NetBIOS 그룹/MAC · 물어본 방식). 없으면 null.
+ *   자기 속성만 본다. 새 객체를 돌려준다(저장 객체를 응답으로 내보내지 않는다).
+ */
+export function scanDetailOf(ip) {
+  if (typeof ip !== 'string' || !Object.prototype.hasOwnProperty.call(results, ip)) return null;
+  const r = results[ip];
+  if (!r || typeof r !== 'object') return null;
+  const names = {};
+  for (const k of NAME_METHODS) if (r.names?.[k]) names[k] = { ...r.names[k] };
+  // display · alt 는 서버 판정(hostNames.js) 그대로 — 화면이 우선순위 · '이름 다름' 을 다시 판정하지 않게(판정 코어는 하나).
+  return { ip: r.ip, hostname: r.hostname || '', names, display: displayName(names), alt: nameMismatch(names), tried: Array.isArray(r.tried) ? [...r.tried] : null,
+    nbGroup: r.nbGroup || '', mac: r.mac || '', openPorts: [...(r.openPorts || [])], services: [...(r.services || [])], lastSeen: r.lastSeen || null,
+    agent: r.agent || LOCAL, nameMissMax: NAME_MISS_MAX, hw: macDetailOf(r), ...(r.dnsFwd ? { dnsFwd: { ...r.dnsFwd, ...(r.dnsFwd.addrs ? { addrs: [...r.dnsFwd.addrs] } : {}) } } : {}) };
+}
+/**
+ * v2.999: IP 상세 창의 'MAC · 제조사' 묶음. 표시 MAC(ARP > NetBIOS) · 제조사 · 종류 · ARP 확인 시각 · 지난 스캔 표에 없었는가 · NetBIOS MAC(ARP 와 다를 때만 —
+ *   여러 NIC 의 Windows 는 다른 NIC 의 MAC 을 답한다, 보드 ⑥-6) · 같은 MAC 의 다른 IP(상한 SAME_MAC_LIST). MAC 이 없으면 null.
+ *   MAC 이력(이력 항목의 macs)은 /tools/ipam/history 의 history 가 이미 싣는다.
+ */
+const SAME_MAC_LIST = 20;
+function macDetailOf(r) {
+  const em = entryMac(r);
+  // MAC 이력(최근이 먼저) — 지금 MAC 이 지워졌어도(표에 3회 없었음) 이력은 보인다.
+  const h = Object.prototype.hasOwnProperty.call(history, r.ip) ? history[r.ip] : null;
+  const hist = (Array.isArray(h?.macs) ? h.macs : []).filter((x) => x && typeof x.mac === 'string').slice(-MAX_MACS).reverse()
+    .map((x) => { const i = macInfo(x.mac); return { mac: x.mac, first: numOrNull(x.first), last: numOrNull(x.last), vendor: i?.vendor || null, kind: i?.kind || null, ...(i?.platform ? { platform: i.platform } : {}) }; });
+  if (!em.mac) return hist.length ? { mac: '', src: null, history: hist } : null;
+  const info = macInfo(em.mac) || { vendor: null, kind: null };
+  const set = _macIps.get(em.mac);
+  const others = set ? [...set].filter((x) => x !== r.ip) : [];
+  others.sort((a, b) => (ipToNum(a) ?? 0) - (ipToNum(b) ?? 0));
+  const arp = r.arp && r.arp.v ? r.arp : null;
+  return {
+    mac: em.mac, src: em.src, vendor: info.vendor || null, kind: info.kind || null, ...(info.platform ? { platform: info.platform } : {}),
+    arpAt: arp ? (arp.at || null) : null, arpMiss: arp ? (arp.miss || 0) : 0,
+    // 마지막 완료 스캔이 이 MAC 을 다시 보지 못했다(표에 없었음 · 볼 수 없는 에이전트 · 옛 엣지) — 화면이 확인 시각을 함께 보인다.
+    stale: !!arp && ((arp.miss || 0) > 0 || (arp.at || 0) < (r.lastSeen || 0)),
+    nbMac: r.mac && arp && r.mac !== arp.v ? r.mac : '',
+    sameMac: { total: others.length, ips: others.slice(0, SAME_MAC_LIST) },
+    history: hist,
+  };
+}
 /** 스캔 결과 IP 수(세지 않는다 — 적재·정리 때 유지하는 값). v2.731: 원장 동기화가 동기/양보 경로를 고를 때 쓴다. */
 export function scanResultCount() { return _resultCount; }
 /**
@@ -540,6 +767,9 @@ const sameList = (a, b) => { const x = a || [], y = b || []; return x.length ===
  */
 export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL, opts = {}) {
   const seenOnly = opts?.seenOnly === true;
+  // v3.1.0: 스캔이 본 변화(설계 ipam-alerts-mac-dns ① — 변화 기록 · 알림). 부분 결과(시한에 걸린 스캔)는 비교하지 않는다(보드 ③-4).
+  const changes = seenOnly ? null : [];
+  let baseCheck = null;   // 새 IP 의 기준선 판정 — 처음 새 IP 를 볼 때 한 번 만든다(에이전트 대역 컴파일)
   let changed = false;
   let resContent = false; let resWritten = false; // v2.731 A6-01: 결과 파일을 쓸 일이 있는가 · 그것이 내용 변화인가(lastSeen 만이면 긴 디바운스)
   let n = 0; let merged = 0; let capped = 0; const histCappedBefore = _histCapped;
@@ -564,15 +794,48 @@ export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL, opts = {
     }
     // 분산 멀티에이전트: 더 오래된(stale) 보고가 최신 관측을 덮어쓰지 않게 한다.
     if (prev && (prev.lastSeen || 0) > ts) { recordSeen(h, ts, agent); continue; }
+    // v2.991: 방식별 이름 갱신(mergeNames — 답 없음은 miss 로 세고 바로 지우지 않는다) · NetBIOS 그룹/MAC 은 NetBIOS 가 답했을 때만 바꾼다.
+    const mn = mergeNames(prev?.names || null, h, ts);
+    const next = { ip: h.ip, openPorts: h.openPorts, services: h.services, hostname: mn.names ? displayName(mn.names).name : '', lastSeen: ts, agent };
+    if (mn.names) next.names = mn.names;
+    // 옛 엣지(tried 없음)의 보고는 물어본 방식을 '모름' 으로 둔다 — 이전 보고의 tried 를 남기면 IP 상세 창이 묻지 않은 방식을 '응답 없음' 으로 보인다.
+    if (h.tried) next.tried = h.tried;
+    const nbGroup = mn.nbAnswered ? h.nbGroup : (mn.nbDropped ? '' : (prev?.nbGroup || ''));
+    const mac = mn.nbAnswered ? h.mac : (mn.nbDropped ? '' : (prev?.mac || ''));
+    if (nbGroup && next.names?.netbios) next.nbGroup = nbGroup;
+    if (mac && next.names?.netbios) next.mac = mac;
+    if (h.fwdName) next.fwdName = h.fwdName;   // v2.993: 정방향 DNS 이름(이번 보고에 있을 때만 — 묻지 않은 보고는 칸이 빈다)
+    // v3.2.0: 역DNS 이름의 정방향 확인 — 이번 보고에 있을 때만(옛 엣지 · 확인 끔 · 역DNS 이름 없음은 칸이 빈다). 이름이 지난 스캔에서 남은 값(miss)이면 그 결과도 두지 않는다.
+    if (h.dnsFwd && next.names?.dns && !(next.names.dns.miss > 0)) next.dnsFwd = h.dnsFwd;
+    const ma = mergeArp(prev?.arp || null, h, ts);   // v2.999: ARP MAC(볼 수 없었던 보고는 지난 값을 그대로 — mergeArp 머리말)
+    if (ma.arp) next.arp = ma.arp;
     // 실제 내용(포트/서비스/호스트명/에이전트) 변화가 있을 때만 리비전을 올린다(불필요한 대장 재계산 방지).
-    if (!prev || !sameList(prev.openPorts, h.openPorts) || !sameList(prev.services, h.services)
-      || (prev.hostname || '') !== (h.hostname || '') || prev.agent !== agent) { changed = true; resContent = true; }
+    if (!prev || !sameList(prev.openPorts, next.openPorts) || !sameList(prev.services, next.services)
+      || (prev.hostname || '') !== next.hostname || prev.agent !== agent || nameSig(prev) !== nameSig(next) || (prev.fwdName || '') !== (next.fwdName || '')) { changed = true; resContent = true; }
     if (!prev) bumpAgent(agent, 1); else if (prev.agent !== agent) { bumpAgent(prev.agent, -1); bumpAgent(agent, 1); } // v2.639 I2
-    results[h.ip] = { ip: h.ip, openPorts: h.openPorts, services: h.services, hostname: h.hostname || '', lastSeen: ts, agent };
+    indexMac(h.ip, prev, next); // v2.999
+    results[h.ip] = next;
     noteSeen(ts); // v2.733 C6-02
     resWritten = true;
-    recordSeen(h, ts, agent); // IP 사용 이력(온라인 전환) 갱신
+    const hPrev = Object.prototype.hasOwnProperty.call(history, h.ip) ? history[h.ip] : null;
+    const wasUp = hPrev?.status === 'up';   // v3.1.0: 사용 시작(새 IP · 해제 뒤 다시 응답) 판정 — recordSeen 이 바꾸기 전에 본다
+    const flapTo = ma.changed ? macSeenBefore(hPrev, ma.changed.to) : false;   // v3.1.0: 예전에 본 MAC 으로 되돌아감(이중화 의심)
+    recordSeen({ ...h, hostname: next.hostname }, ts, agent); // IP 사용 이력(온라인 전환) 갱신
+    if (mn.renames.length) noteRenames(h.ip, mn.renames, ts, agent);
+    if (h.arpMac) noteMac(h.ip, h.arpMac, ts, agent);   // v2.999: MAC 이력(스캐너 이웃 표에서 본 값만 — NetBIOS 가 말한 MAC 은 넣지 않는다)
+    if (changes) {
+      if (!hPrev) {
+        if (!baseCheck) baseCheck = baselineChecker(agent);
+        if (baseCheck(h.ip)) changes.push({ type: 'new-ip', ip: h.ip, services: h.services.slice(0, 6), ...(next.arp ? { mac: next.arp.v } : {}) });
+      }
+      if (!wasUp) { const st = mgmtStatusOf(h.ip); if (st === 'reserved' || st === 'deprecated') changes.push({ type: 'reserved-up', ip: h.ip, status: st, services: h.services.slice(0, 6) }); }
+      for (const r of mn.renames) changes.push({ type: 'rename', ip: h.ip, src: r.src, from: r.from, to: r.to });
+      if (ma.changed) changes.push({ type: 'mac-change', ip: h.ip, from: ma.changed.from, to: ma.changed.to, ...(flapTo ? { flap: true } : {}) });
+      const dm = dnsMismatchChange(prev, next);   // v3.2.0: DNS 불일치(기록만)
+      if (dm) changes.push({ ip: h.ip, ...dm });
+    }
   }
+  if (changes && changes.length) emitScanChanges({ agent, ts, changes });
   if (histDirty) changed = true; // up/down 전이·신규 이력도 대장(usageStatus/firstSeen)에 영향
   // v2.731 A6-01: 결과가 바뀌지 않은 보고(살아 있는 IP 0개·전부 더 오래된 보고)는 쓰지 않는다. lastSeen 만 바뀌었으면 긴 디바운스.
   if (resWritten) scheduleWrite(RES, !resContent);   // 디바운스 + 비동기 조각 쓰기(위 '디바운스 원자적 쓰기' 머리말)
@@ -583,6 +846,73 @@ export function mergeScanResults(alive, ts = Date.now(), agent = LOCAL, opts = {
   return { merged, capped };
 }
 
+
+// ---- v3.1.0: 스캔이 본 변화(설계 docs/design/ipam-alerts-mac-dns ①) ---------------------------------
+// 보고 하나(mergeScanResults 한 번)마다 { agent, ts, changes:[{type, ip, …}] } 를 구독자에게 준다(ipam/changeNotify.js — 기록 · 알림 묶음).
+//   이 모듈은 알림을 모른다(의존 방향: changeNotify → scanStore). 구독자는 미뤄서 돈다(setImmediate — 병합을 막지 않는다).
+//   종류: new-ip(처음 응답 — 그 대역 줄의 첫 완료 스캔이 끝난 뒤에만 · vCenter 가 아는 IP 인지는 구독자가 스냅샷으로 거른다) ·
+//   reserved-up(관리상태 예약 · 폐기 IP 가 응답 시작) · rename(같은 방식이 다른 이름) · mac-change(같은 IP 의 ARP MAC 이 바뀜 — flap 은 예전 MAC 으로 되돌아감).
+//   기준선(baseline): 그 줄의 완료 스캔이 처음 끝나면 recordAgentReport 가 표시하고 { type:'baseline', spec } 를 낸다.
+const _changeListeners = new Set();
+export function onScanChanges(fn) { if (typeof fn === 'function') _changeListeners.add(fn); return () => _changeListeners.delete(fn); }
+function emitScanChanges(batch) {
+  for (const fn of _changeListeners) setImmediate(() => { try { const r = fn(batch); if (r?.catch) r.catch(() => {}); } catch { /* 구독자 오류는 병합과 무관 */ } });
+}
+/** 그 IP 의 관리상태(IP 지정 > 대역 정책 — 전역 정책만: 스캔 IP 는 vCenter 귀속이 없다). 없으면 ''. */
+function mgmtStatusOf(ip) {
+  const ov = getOverrides();
+  const o = Object.prototype.hasOwnProperty.call(ov, ip) ? ov[ip] : null;
+  if (o && o.status) return o.status;
+  const p = findPolicy(ipToNum(ip), '');
+  return p?.status || '';
+}
+/**
+ * v3.2.0: DNS 불일치 변화(순수) — 같은 역DNS 이름의 정방향 결과가 **알던 판정에서** 다른 IP · 정방향 없음으로 바뀐 경우만(판정 · 다른 IP 목록이 달라짐).
+ *   지난 결과가 없거나(처음 확인 · 옛 엣지 · 확인 끔) 확인 못 함(unknown)이면 변화가 아니다(보지 못한 것은 변화가 아니다) · 이름이 바뀌었으면 rename 이 말한다.
+ *   지금 어긋난 IP 전부는 추천 › DNS 정합성 카드가 보인다(첫 확인에서 쏟아지는 기록을 만들지 않는다).
+ */
+export function dnsMismatchChange(prev, next) {
+  const a = prev?.dnsFwd; const b = next?.dnsFwd;
+  if (!a || !b || a.v === 'unknown' || (b.v !== 'other' && b.v !== 'none')) return null;
+  const pn = prev?.names?.dns?.v; const nn = next?.names?.dns?.v;
+  if (!pn || !nn || String(pn).toLowerCase() !== String(nn).toLowerCase()) return null;
+  if (dnsFwdSig(a) === dnsFwdSig(b)) return null;
+  return { type: 'dns-mismatch', name: nn, status: b.v, from: a.v, ...(b.addrs ? { addrs: [...b.addrs] } : {}) };
+}
+/** MAC 이력에 그 MAC 이 이미 있었는가(마지막 줄 제외 — 지금 MAC 에서 바뀌는 것이므로). */
+function macSeenBefore(h, mac) {
+  const list = Array.isArray(h?.macs) ? h.macs : [];
+  for (let i = 0; i < list.length - 1; i++) if (list[i]?.mac === mac) return true;
+  return false;
+}
+// 기준선 — { 에이전트 키: { 대역 줄: 처음 완료한 시각 } }. 상태 파일(백업의 설정 변경 감시 대상이 아니다).
+const BASE = path.join(config.configDir, 'ipam-change-baseline.json');
+registerStateFile(BASE);
+const baseKey = (a) => String(a || LOCAL).toLowerCase();   // 에이전트 이름은 대소문자 무시(설정 · 보고와 같은 규칙)
+let baseline = (() => { const v = readJson(BASE, {}); return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; })();
+registerStore(BASE, () => baseline);
+/** 그 에이전트의 대역 중 기준선이 잡힌 줄 안의 IP 인가 — 판정 함수를 돌려준다(대역은 한 번만 컴파일). */
+function baselineChecker(agent) {
+  const marks = baseline[baseKey(agent)] || {};
+  const bounds = (loadScanSettings(agent)?.ranges || []).filter((spec) => marks[spec]).map(specToRange).filter(Boolean);
+  if (!bounds.length) return () => false;
+  return (ip) => { const n = ipToNum(ip); return n != null && bounds.some((r) => n >= r.lo && n <= r.hi); };
+}
+/** 완료 스캔 — 아직 기준선이 없는 그 에이전트의 대역 줄을 표시한다(새로 표시한 줄 목록). */
+function markBaseline(agent, ts = Date.now()) {
+  const k = baseKey(agent);
+  let ranges = [];
+  try { ranges = loadScanSettings(agent)?.ranges || []; } catch { return []; }
+  const marks = baseline[k] && typeof baseline[k] === 'object' ? baseline[k] : {};
+  const added = ranges.filter((spec) => typeof spec === 'string' && !marks[spec]);
+  if (!added.length) return added;
+  for (const spec of added) marks[spec] = ts;
+  baseline[k] = marks;
+  scheduleWrite(BASE);
+  return added;
+}
+/** 테스트 · 진단 — 그 에이전트의 기준선 표시(사본). */
+export function changeBaselineOf(agent = LOCAL) { return { ...(baseline[baseKey(agent)] || {}) }; }
 
 // ---- IP 사용 이력 ----------------------------------------------------------
 // 어떤 IP가 "사용 시작(up) → 미사용(down)"으로 바뀌는 전이를 기록해 대장에서 추이를 본다.
@@ -614,6 +944,40 @@ _histCount = Object.keys(history).length;
 let histDirty = false;
 let histPersistDirty = false;
 registerStore(HIST, () => history, true);
+
+/*
+ * v2.991: 같은 방식이 전과 다른 이름을 답했다 — 이력 항목의 `renames`(최근 MAX_RENAMES 건)에 남긴다. up/down 전이 목록(events)에
+ *   섞지 않는다 — events 를 읽는 곳(해제 판정 · 사용 구간 · 네트워크 맵)은 up/down 만 있다고 가정한다. 이력 항목이 없으면(상한) 남기지 않는다.
+ */
+const MAX_RENAMES = 20;
+/*
+ * v2.999: MAC 이력 — 이력 항목의 `macs`(최근 MAX_MACS 개) = [{ mac, first, last, agent }]. 같은 MAC 이 이어지면 마지막 확인만 옮기고(디스크 기록만 —
+ *   대장 재계산 없음), 다른 MAC 이 보이면 새 줄을 붙인다. ARP(스캐너 이웃 표)로 본 값만 넣는다 — 다음 묶음(변화 기록 · 'MAC 변경')의 근거라
+ *   상대가 말한 값(NetBIOS)을 섞지 않는다. 이력 항목이 없으면(상한) 남기지 않는다. 오래된 보고(ts 가 마지막보다 이르면)는 넣지 않는다.
+ */
+export const MAX_MACS = 10;
+function noteMac(ip, mac, ts, agent) {
+  const e = history[ip];
+  if (!e || typeof e !== 'object') return;
+  const list = Array.isArray(e.macs) ? e.macs : [];
+  const last = list[list.length - 1];
+  if (last && last.mac === mac) {
+    if (ts > (last.last || 0)) { last.last = ts; histPersistDirty = true; }
+    return;
+  }
+  if (last && ts < (last.last || 0)) return;
+  list.push({ mac, first: ts, last: ts, agent });
+  e.macs = list.length > MAX_MACS ? list.slice(-MAX_MACS) : list;
+  histPersistDirty = true;
+}
+function noteRenames(ip, renames, ts, agent) {
+  const e = history[ip];
+  if (!e || typeof e !== 'object') return;
+  const list = Array.isArray(e.renames) ? e.renames : [];
+  for (const r of renames) list.push({ ts, src: r.src, from: r.from, to: r.to, agent });
+  e.renames = list.length > MAX_RENAMES ? list.slice(-MAX_RENAMES) : list;
+  histDirty = true;
+}
 
 function pushEvent(entry, ev) {
   entry.events.push(ev);
@@ -828,7 +1192,7 @@ export function pruneScanResults(retentionDays) {
   // 관리(override/대역정책) IP의 스캔 결과는 보존(보존기간 초과여도 운영 가시성 유지).
   let maxLeft = 0; // v2.733 C6-02: 남은 항목의 lastSeen 최댓값(같은 훑기에서)
   for (const [ip, r] of Object.entries(results)) {
-    if ((r.lastSeen || 0) < cut && !isManaged(ip)) { bumpAgent(r.agent, -1); delete results[ip]; _resultCount--; changed = true; }
+    if ((r.lastSeen || 0) < cut && !isManaged(ip)) { bumpAgent(r.agent, -1); indexMac(ip, r, null); delete results[ip]; _resultCount--; changed = true; }
     else if ((r.lastSeen || 0) > maxLeft) maxLeft = r.lastSeen || 0;
   }
   _maxSeen = maxLeft;
@@ -847,13 +1211,50 @@ export function scanInfo() {
 let reports = readJson(REP, {}) || {};
 registerStore(REP, () => reports);
 
-export function recordAgentReport(agent, { scanned = 0, alive = 0, durationMs = null } = {}) {
+/**
+ * v2.991: 스캔 한 번의 호스트명 확인 요약 { tried:{dns,mdns,netbios}, found:{…}, named, alive } — 엣지 본문에서도 오므로 수치만 좁힌다.
+ *   못 읽은 칸은 null(0 이 아니다). 객체가 아니면 null = '방식 보고 없음'(이전 버전 엣지).
+ */
+export function cleanNameStats(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const cnt = (x) => { const n = numOrNull(x); return n != null && n >= 0 ? Math.min(Math.floor(n), 10_000_000) : null; };
+  const pick = (o) => { const r = {}; for (const k of NAME_METHODS) r[k] = cnt(o && typeof o === 'object' ? o[k] : null); return r; };
+  const out = { tried: pick(v.tried), found: pick(v.found), named: cnt(v.named), alive: cnt(v.alive) };
+  const mac = cleanMacStats(v.mac);   // v2.999: 이웃 표(ARP) 요약 — 없으면 칸을 두지 않는다(옛 엣지 = 'MAC 보고 없음')
+  if (mac) out.mac = mac;
+  const df = cleanDnsFwdStats(v.dnsFwd);   // v3.2.0: 역DNS 이름의 정방향 확인 요약 — 없으면 칸을 두지 않는다(옛 엣지 · 확인 끔)
+  if (df) out.dnsFwd = df;
+  return out;
+}
+const DNS_STOPS = ['budget', 'unreachable'];
+/** v3.2.0: { names, reused, asked, match, other, none, unknown, stopped? } — 수는 numOrNull(못 읽음 null) · stopped 는 아는 값만. 객체가 아니면 null. */
+export function cleanDnsFwdStats(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const cnt = (x) => { const n = numOrNull(x); return n != null && n >= 0 ? Math.min(Math.floor(n), 10_000_000) : null; };
+  const out = {};
+  for (const k of ['names', 'reused', 'asked', 'match', 'other', 'none', 'unknown']) out[k] = cnt(v[k]);
+  if (DNS_STOPS.includes(v.stopped)) out.stopped = v.stopped;
+  return out;
+}
+const MAC_REASONS = ['unsupported', 'unreadable', 'off'];
+/** v2.999: { onLink, found, reason } — 수는 numOrNull(못 읽음 null) · reason 은 아는 값만(그 밖은 null). 객체가 아니면 null. */
+export function cleanMacStats(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const cnt = (x) => { const n = numOrNull(x); return n != null && n >= 0 ? Math.min(Math.floor(n), 10_000_000) : null; };
+  return { onLink: cnt(v.onLink), found: cnt(v.found), reason: MAC_REASONS.includes(v.reason) ? v.reason : null };
+}
+
+export function recordAgentReport(agent, { scanned = 0, alive = 0, durationMs = null, nameStats = null } = {}) {
   const name = agent || LOCAL;
   // v2.601 CEN2601-01: 엣지 본문의 수치를 그대로 저장하지 않는다(객체·문자열이 화면·이력으로 새지 않게).
   scanned = numOrNull(scanned); alive = numOrNull(alive); durationMs = numOrNull(durationMs);
-  reports[name] = { at: Date.now(), scanned, alive };
+  const ns = cleanNameStats(nameStats);
+  reports[name] = { at: Date.now(), scanned, alive, ...(ns ? { nameStats: ns } : {}) };
   scheduleWrite(REP); // 디바운스 원자 기록(에이전트 보고 핫패스 비차단)
-  recordRun({ agent: name, scanned, alive, durationMs }); // 완료된 스캔 이력에 추가
+  // v3.1.0: 완료 스캔 — 그 에이전트 대역 줄의 기준선(첫 완료 스캔)을 잡는다. 이번 스캔의 새 IP 는 이미 병합 때 '기준선 전' 으로 판정됐다(알리지 않음).
+  const added = markBaseline(name);
+  if (added.length) emitScanChanges({ agent: name, ts: Date.now(), changes: added.map((spec) => ({ type: 'baseline', spec })) });
+  recordRun({ agent: name, scanned, alive, durationMs, nameStats: ns }); // 완료된 스캔 이력에 추가
 }
 
 /**
@@ -877,7 +1278,8 @@ export function recordAgentIncomplete(agent, { code = 'error', reason = '', dura
     reason: typeof reason === 'string' ? capStr(reason.slice(0, 300).replace(CTRL_RE, ' '), 300) : '', // 평탄화 — 큰 본문을 붙잡지 않게(v2.607 TIM2607-01)
     durationMs: numOrNull(durationMs), partial: numOrNull(partial), done: numOrNull(done), total: numOrNull(total),
   };
-  reports[name] = { at: numOrNull(prev?.at), scanned: numOrNull(prev?.scanned), alive: numOrNull(prev?.alive), incomplete: inc };
+  const prevNs = cleanNameStats(prev?.nameStats); // v2.991: 마지막 완료 스캔의 이름 확인 요약은 남긴다(미완료 스캔은 이름 단계에 닿지 못한다)
+  reports[name] = { at: numOrNull(prev?.at), scanned: numOrNull(prev?.scanned), alive: numOrNull(prev?.alive), ...(prevNs ? { nameStats: prevNs } : {}), incomplete: inc };
   scheduleWrite(REP);
   return inc;
 }
@@ -890,8 +1292,9 @@ const MAX_RUNS = 200;
 let runs = (() => { const r = readJson(RUNLOG, {}); return Array.isArray(r?.runs) ? r.runs : []; })();
 registerStore(RUNLOG, () => ({ runs }));
 
-export function recordRun({ agent = LOCAL, scanned = 0, alive = 0, durationMs = null } = {}) {
-  runs.unshift({ at: Date.now(), agent: String(agent), scanned: numOrNull(scanned), alive: numOrNull(alive), durationMs: numOrNull(durationMs) });
+export function recordRun({ agent = LOCAL, scanned = 0, alive = 0, durationMs = null, nameStats = null } = {}) {
+  const ns = cleanNameStats(nameStats);
+  runs.unshift({ at: Date.now(), agent: String(agent), scanned: numOrNull(scanned), alive: numOrNull(alive), durationMs: numOrNull(durationMs), ...(ns ? { nameStats: ns } : {}) });
   if (runs.length > MAX_RUNS) runs = runs.slice(0, MAX_RUNS);
   scheduleWrite(RUNLOG); // 디바운스 원자 기록
 }

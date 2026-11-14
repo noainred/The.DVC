@@ -42,7 +42,8 @@ const FILE = () => path.join(config.configDir, 'svcmon-batches.json');
 /** 원장 보관 건수 — 초과분은 **먼저 기록된 것부터** 버린다. */
 export const MAX_BATCHES = 50;
 /** 등록 경로 구분. 라우트가 목록을 복사하지 않게 여기서 내보낸다. */
-export const SOURCES = ['import', 'generate', 'template'];
+// v2.915: 'settings' — 설정 연동(svcmon/settingsSync.js)이 포탈 설정 카탈로그에서 만든 배치.
+export const SOURCES = ['import', 'generate', 'template', 'settings'];
 
 // 배치 ID 는 대상의 `batch` 태그와 **글자 단위로 같아야** 롤백이 맞는 범위를 지운다.
 // store.cleanTarget 의 태그는 길이만 제한(40자)하므로 이쪽이 더 좁다 — 라우트 URL

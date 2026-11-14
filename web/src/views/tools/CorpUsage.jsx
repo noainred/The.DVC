@@ -134,7 +134,7 @@ export default function CorpUsage({ scope = '' } = {}) {
       <div className="card" style={{ padding: 0, minWidth: 0 }}>
         {rows.length === 0 ? (
           <div className="muted" style={{ padding: 16, fontSize: 13 }}>
-            {(data.corps || []).length === 0 ? '서버가 있는 법인이 없습니다 — 서버 분석 › 구분이 비어 있거나 첫 수집 중입니다.' : `${GROUP_LABEL[group]} 구분에 해당하는 법인이 없습니다.`}
+            {(data.corps || []).length === 0 ? '서버가 있는 법인이 없습니다 — Physical Server › 구분이 비어 있거나 첫 수집 중입니다.' : `${GROUP_LABEL[group]} 구분에 해당하는 법인이 없습니다.`}
           </div>
         ) : (
           <STable className="table" minWidth={980}>

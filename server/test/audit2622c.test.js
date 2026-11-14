@@ -272,11 +272,41 @@ test('EDGE-03 — bmstor: 만료 종결 잡에 늦게 온 결과는 반영되고
   const old = bj.enqueueBmstorJob('edge-d', [{ id: 'bm-2622d', host: '10.74.0.6' }]);
   bj.takeBmstorJobs('edge-d', now); bj.reapBmstorClaims(now + 20 * 60_000);
   bj.takeBmstorJobs('edge-d', now + 20 * 60_000); bj.reapBmstorClaims(now + 40 * 60_000);
-  await new Promise((r) => setTimeout(r, 2));
   const fresh = bj.enqueueBmstorJob('edge-d', [{ id: 'bm-2622d', host: '10.74.0.6' }]);
   bj.takeBmstorJobs('edge-d');
   assert.ok(bj.ackBmstorJob(fresh));
   assert.deepEqual(bj.lateBmstorResult(old), { superseded: true });
+});
+
+test('EDGE-03 — bmstor: \'더 새 잡\' 은 생성 순번으로 판정한다 — 두 잡의 createdAt 이 같은 ms 여도 superseded(v3.8.1 — PR #735 이식)', async () => {
+  // 2026-10-21 release 워크플로: createdAt(ms) 비교라 두 enqueue 가 같은 ms 에 떨어지면 더 새 잡을 못 찾아 late 로 반영했다.
+  const bj = await import('../src/bmstor/jobs.js');
+  const realNow = Date.now;
+  Date.now = () => T0; // 모든 enqueue · ack 가 같은 ms
+  try {
+    const expire = (agent) => {
+      bj.takeBmstorJobs(agent, T0); bj.reapBmstorClaims(T0 + 20 * 60_000);
+      bj.takeBmstorJobs(agent, T0 + 20 * 60_000); bj.reapBmstorClaims(T0 + 40 * 60_000);
+    };
+    const old = bj.enqueueBmstorJob('edge-e', [{ id: 'bm-2622e', host: '10.74.0.7' }]);
+    expire('edge-e');
+    assert.equal(bj._bmstorJobForTest(old).expired, true);
+    const fresh = bj.enqueueBmstorJob('edge-e', [{ id: 'bm-2622e', host: '10.74.0.7' }]);
+    assert.equal(bj._bmstorJobForTest(fresh).createdAt, bj._bmstorJobForTest(old).createdAt, '전제: 같은 ms');
+    bj.takeBmstorJobs('edge-e', T0);
+    assert.ok(bj.ackBmstorJob(fresh));
+    assert.deepEqual(bj.lateBmstorResult(old), { superseded: true }, '예전: createdAt 이 같아 late 로 옛 값을 덮었다');
+
+    // 반대 방향: 먼저 만들어져 회신된 잡은 뒤에 만료된 잡의 늦은 결과를 막지 않는다.
+    const first = bj.enqueueBmstorJob('edge-f', [{ id: 'bm-2622f', host: '10.74.0.8' }]);
+    bj.takeBmstorJobs('edge-f', T0);
+    assert.ok(bj.ackBmstorJob(first));
+    const later = bj.enqueueBmstorJob('edge-f', [{ id: 'bm-2622f', host: '10.74.0.8' }]);
+    expire('edge-f');
+    assert.deepEqual(bj.lateBmstorResult(later), { agent: 'edge-f', serverIds: ['bm-2622f'], late: true });
+  } finally {
+    Date.now = realNow;
+  }
 });
 
 test('EDGE-03 — bmstorWorker 는 200 stale(미반영)을 실패로 상태·콘솔에 남기고, 재전송 중복은 실패로 보지 않는다', async () => {
@@ -293,6 +323,22 @@ test('EDGE-03 — bmstorWorker 는 200 stale(미반영)을 실패로 상태·콘
     mock.replies['/api/central/bmstor-result'] = [{ ok: true, stale: true, duplicate: true }];
     await captureConsole(() => w.runBmstorWorkerOnce());
     assert.equal(w.bmstorWorkerStatus().ok, true);
+  });
+});
+
+test('v2.971 — bmstorWorker 회신은 gzip(중앙이 풀어 읽는다)이고, 413(구판 중앙의 1MB 한도)이면 디스크별 카운터를 빼고 한 번 더 보낸다', async () => {
+  const w = await import('../src/agent/bmstorWorker.js');
+  await asEdge(async () => {
+    const before = reqsTo('/api/central/bmstor-result').length;
+    mock.replies['/api/central/bmstor-jobs'] = [{ ok: true, jobs: [{ reqId: 'bms_w_2971', servers: [] }] }];
+    mock.statuses['/api/central/bmstor-result'] = [413];
+    mock.replies['/api/central/bmstor-result'] = [{ ok: false, reason: 'too large' }, { ok: true }];
+    const out = await captureConsole(() => w.runBmstorWorkerOnce());
+    const posts = reqsTo('/api/central/bmstor-result').slice(before);
+    assert.equal(posts.length, 2, '413 뒤 한 번 더');
+    assert.equal(posts[0].body?.reqId, 'bms_w_2971', 'gzip 본문(Content-Encoding)을 받는 쪽이 풀어 JSON 으로 읽는다');
+    assert.match(out, /413/);
+    assert.equal(w.bmstorWorkerStatus().ok, true, '재전송이 성공하면 실패로 남기지 않는다');
   });
 });
 

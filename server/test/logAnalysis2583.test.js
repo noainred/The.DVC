@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { centralSource } from './_centralSource.js'; // v2.954: central.js 가 영역별 파일로 나뉘었다(소스 스윕은 합친 소스로)
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'loga-'));
 process.env.CONFIG_DIR = tmp;
@@ -232,7 +233,7 @@ test('⑧ 반복 수신 로그 조절 — 값이 바뀌거나 1시간이 지나�
   assert.equal(log('edge-a', '11/40', 120_000 + 3_600_000), true, '1시간이 지나면 다시 한 번');
   log('edge-b', 'x', 0); log('edge-c', 'x', 0);
   assert.equal(log('edge-a', '11/40', 120_000 + 3_600_001), true, '상한으로 밀려난 키는 새로 찍는다(유계)');
-  const src = fs.readFileSync(new URL('routes/central.js', SRC), 'utf8');
+  const src = centralSource();
   assert.match(src, /if \(gpuRecvLog\(agent, `\$\{hosts\.length\}\/\$\{vms\.length\}`\)\) console\.log\(`\[central\] gpu-guest-data 수신: agent=\$\{agent\} hosts=\$\{hosts\.length\} vms=\$\{vms\.length\}`\)/, '문구 형식은 그대로(규칙이 읽는다)');
 });
 

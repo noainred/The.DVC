@@ -57,17 +57,20 @@ test('⚠ latestUsage 는 GROUP BY 풀스캔이 아니라 usage_latest 를 읽�
 
 // ── P3 + B5 ───────────────────────────────────────────────────────────────────
 test('일 롤업은 ON CONFLICT DO UPDATE 로 누적한다 (행당 2쿼리 14.5ms → 7.4ms)', () => {
-  const s = bare('bmusage/db.js');
+  // v2.922: 원시·롤업 적재는 시간 단위 파일 모듈(monthStore.js)로 옮겼다 — 두 파일을 함께 본다.
+  const s = bare('bmusage/db.js') + bare('bmusage/monthStore.js');
   assert.match(s, /ON CONFLICT\(agent,key,day\) DO UPDATE SET/);
   assert.ok(!/SELECT \* FROM usage_daily WHERE agent=\? AND key=\? AND day=\?/.test(s), '행당 SELECT 를 되살리지 말 것');
   // ⚠ MAX() 는 인자 하나가 NULL 이면 NULL 이라 하한으로 감싸고 되돌려야 한다.
-  assert.match(s, /NULLIF\(MAX\(IFNULL\(cpu_max,-1e308\)/);
+  // v2.922: 열 이름은 상수 표에서 조립한다(maxSql) — 템플릿 모양으로 본다. 실제 산수는 bmPerf2921 의 롤업 수치 테스트가 고정한다.
+  assert.match(s, /NULLIF\(MAX\(IFNULL\(\$\{c\},-1e308\),IFNULL\(\$\{src\}\.\$\{c\},-1e308\)\),-1e308\)/);
 });
 test('같은 ts 재삽입은 INSERT OR IGNORE + changes 검사로 이중 계수를 막는다', () => {
-  const s = bare('bmusage/db.js');
+  // v2.922: 적재는 monthStore.js — 새로 들어간 행(changes 1)만 롤업 목록(insertedRows)에 넣는다.
+  const s = bare('bmusage/db.js') + bare('bmusage/monthStore.js');
   assert.match(s, /INSERT OR IGNORE INTO usage_history/);
   assert.ok(!/INSERT OR REPLACE INTO usage_history/.test(s), 'REPLACE 면 롤업이 두 번 누적된다');
-  assert.match(s, /if \(!Number\(res\?\.changes\)\)/, 'changes 0 이면 롤업을 건드리지 않는다');
+  assert.match(s, /const isNew = !!Number\(out\?\.changes\);\s*if \(isNew\) \{ res\.inserted \+= 1; res\.insertedRows\.push\(r\); \} else res\.duplicates \+= 1;/, 'changes 0 이면 롤업을 건드리지 않는다(v2.922: 보정 대기도 새 행만 — pend inserted)');
 });
 test('최신값은 ts 가 더 클 때만 갱신한다 — 엣지 push 는 순서대로 오지 않는다', () => {
   assert.match(bare('bmusage/db.js'), /WHERE excluded\.ts > usage_latest\.ts/);
@@ -115,23 +118,32 @@ test('대상에서 사라진 서버의 인메모리 항목을 버린다 (누수 
 });
 
 // ── B6 ───────────────────────────────────────────────────────────────────────
-test('키 충돌을 감지해 개수·목록으로 밝힌다 (대상에서 빼지는 않는다)', async () => {
-  const { resolveTargets } = await import('../src/bmusage/targets.js');
+test('키 충돌을 감지해 개수·목록으로 밝히고 — 다음 점검 ①: 같은 키의 모든 대상을 수집에서 뺀다(key-conflict · 섞인 값을 만들지 않는다)', async () => {
+  const { resolveTargets, NO_PATH_REASON } = await import('../src/bmusage/targets.js');
   const bm = [
     { serverId: 's1', fleetId: 'DUP1', name: 'bm-a', serviceTag: '', vcenterId: 'vc1' },
     { serverId: 's2', fleetId: 'x2', name: 'bm-b', serviceTag: 'DUP1', vcenterId: 'vc1' },
+    { serverId: 's3', fleetId: 'x3', name: 'bm-c', serviceTag: 'UNIQ3', vcenterId: 'vc1' },
   ];
   const reg = [
     { id: 's1', host: 'https://10.0.0.1', username: 'u', password: 'p' },
     { id: 's2', host: 'https://10.0.0.2', username: 'u', password: 'p', serviceTag: 'DUP1' },
+    { id: 's3', host: 'https://10.0.0.3', username: 'u', password: 'p', serviceTag: 'UNIQ3' },
   ];
   const r = resolveTargets({ bareMetal: bm, registry: reg, bmServers: [],
     settings: { corps: { vc1: true }, osSsh: true, idracTelemetry: true }, isEdge: false, agentName: 'C' });
-  assert.equal(r.targets.length, 2, '충돌해도 대상에서 빼지 않는다(어느 쪽을 버릴지 알 수 없다)');
-  assert.equal(r.counts.keyConflicts, 1);
-  assert.equal(r.keyConflicts[0].key, 'DUP1');
-  assert.deepEqual(r.keyConflicts[0].names.sort(), ['bm-a', 'bm-b']);
-  assert.equal(r.keyConflicts[0].vcenterId, 'vc1', 'scope 로 거를 수 있어야 한다(없으면 범위 계정에 전부 숨는다)');
+  assert.deepEqual(r.targets.map((x) => x.key), ['UNIQ3'], '같은 키 두 대는 둘 다 수집하지 않는다(어느 하나를 고르지 않는다) — 겹치지 않는 서버는 그대로');
+  assert.equal(r.counts.targets, 1);
+  assert.equal(r.counts.keyConflicts, 1, '겹친 키 수');
+  assert.equal(r.keyConflicts.length, 2, '서버마다 한 줄');
+  assert.deepEqual(r.keyConflicts.map((x) => x.key), ['DUP1', 'DUP1']);
+  assert.deepEqual(r.keyConflicts.map((x) => x.names[0]).sort(), ['bm-a', 'bm-b']);
+  assert.ok(r.keyConflicts.every((x) => x.names.length === 1 && x.vcenterId === 'vc1' && x.peers === 2), '한 줄 = 그 서버의 이름 · 법인만(범위로 거를 때 다른 법인 서버 이름이 따라오지 않게)');
+  const sk = r.skipped.filter((x) => x.reason === 'key-conflict');
+  assert.deepEqual(sk.map((x) => x.name).sort(), ['bm-a', 'bm-b'], '제외 목록에 사유와 함께 남는다(조용히 사라지지 않는다)');
+  assert.equal(r.counts.byReason['key-conflict'], 2);
+  assert.ok(sk.every((x) => !('idrac' in x) && !('password' in x)), '제외 행에 자격증명이 없다');
+  assert.ok(NO_PATH_REASON['key-conflict'].includes('서비스태그'), '조치를 말한다');
 });
 
 // ── B7 ───────────────────────────────────────────────────────────────────────

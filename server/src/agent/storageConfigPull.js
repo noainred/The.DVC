@@ -163,11 +163,18 @@ async function _pullStorageConfigNow() {
     // 무관하게 **매 pull 마다** 처리해야 한다(구성은 안 바뀌어도 재수집 요청은 흔함) — 그래서
     // 조기 return 이던 unchanged 분기를 없앴다.
     // v2.741(LEFT-02): pull 이 수집을 기다리지 않는다 — 단일비행 작업(runCollectJob)이 한 대씩 수집하고 끝나면 바로 push 한다.
+    // v2.965: PowerScale 점검 요청(inspectNow) — 수집과 따로, 기다리지 않는다(점검 실행기가 재진입 가드 · 대기열을 가진다). 결과는 다음 storage push 의 inspectRuns.
+    //   아는 장비(이 엣지 몫 아이실론)만 — 실행기가 inspectTargets 로 다시 거른다. id 는 글자 · 수만(상한 10).
+    const inspectWants = Array.isArray(body?.inspectNow) ? body.inspectNow.slice(0, 10).filter((x) => typeof x === 'string' || typeof x === 'number').map((x) => String(x).slice(0, 128)) : [];
+    if (inspectWants.length) {
+      console.log(`[storage-config] 중앙 점검 요청 ${inspectWants.length}건 수신 — 점검 실행기에 넣습니다`);
+      import('../storage/inspect/runner.js').then((m) => m.runInspectOnce({ ids: inspectWants, reason: 'central-request' })).catch((e) => console.warn(`[storage-config] 점검 요청 처리 실패: ${String(e?.message || e).slice(0, 160)}`));
+    }
     const wants = Array.isArray(body?.collectNow) ? body.collectNow.slice(0, 20) : [];
     if (wants.length) console.log(`[storage-config] 중앙 재수집 요청 ${wants.length}건 수신 — 수집 작업에 넣습니다`);
     const enq = wants.length ? enqueueCollect(wants) : null;
     const collectQueued = enq ? enq.queued : 0;
-    _last = { at: Date.now(), applied, count: devices.length, collectRequested: wants.length, collectQueued,
+    _last = { at: Date.now(), applied, count: devices.length, collectRequested: wants.length, collectQueued, ...(inspectWants.length ? { inspectRequested: inspectWants.length } : {}),
       ...(enq?.already ? { collectAlready: enq.already } : {}), ...(enq?.dropped ? { collectDropped: enq.dropped } : {}),
       intervals: runtimeIntervals(), intervalsApplied: !!intervalsApplied.applied, ...(intervalsUnreadable ? { intervalsUnreadable } : {}) };
     return { ok: true, applied, unchanged: !applied, count: devices.length, collectRequested: wants.length, collectQueued,

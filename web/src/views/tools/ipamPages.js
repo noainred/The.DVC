@@ -16,19 +16,39 @@
  *   않는다 — 호출부가 `{ csvOk: canCsv() }` 를 넘긴다(생략하면 예전처럼 보인다 — 서버가 집행한다).
  */
 export const IPAM_PAGES = Object.freeze([
-  { k: 'list', label: '대장 목록', icon: '📋', group: 'ledger', needsLedger: true, title: 'vCenter·스캔·수동 등록 IP 전체 목록' },
-  { k: 'sheet', label: '서브넷 대장', icon: '📊', group: 'ledger', title: '/24 서브넷 단위 엑셀형 대장' },
-  { k: 'insights', label: '추천 기능 30선', icon: '🧠', group: 'ledger', title: '유명 IPAM 솔루션 대표 기능 30선을 수집 데이터로 계산' },
-  { k: 'netmap', label: '네트워크 맵', icon: '🗺️', group: 'ledger', title: '대역 선택 → OS별·시간대별 사용/미사용 네트워크 맵' },
-  { k: 'policies', label: '대역 정책', icon: '🧩', group: 'range', needsLedger: true, title: '대역 단위 관리상태(예약·DHCP풀·폐기 등) 기본값' },
+  // v3.4.0(재설계 묶음 가 · 설계 docs/design/ipam-redesign): 맨 앞 '현황' — 탭 5개(IPAM_TABS)의 첫 화면. tab = 그 페이지가 속한 위 탭.
+  { k: 'home', label: '현황', icon: '', group: 'ledger', tab: 'home', title: '사용률 · 지금 확인할 것 · 사용률 높은 대역 · IP 변화 · vCenter별' },
+  { k: 'list', label: '대장 목록', icon: '📋', group: 'ledger', needsLedger: true, title: 'vCenter·스캔·수동 등록 IP 전체 목록' , tab: 'addr' },
+  // v3.6.0(재설계 묶음 다 — 시안 ⑮): 장비마다 iDRAC · vCenter · OS · DNS 이름 대조. 대장 데이터 없이 그린다(서버 GET /tools/ipam/hostnames).
+  { k: 'names', label: '호스트명 대조', icon: '', group: 'ledger', title: 'iDRAC · vCenter · OS · DNS 에 설정된 호스트명이 같은지 장비별로', tab: 'addr' },
+  { k: 'sheet', label: '서브넷 대장', icon: '📊', group: 'ledger', title: '/24 서브넷 단위 엑셀형 대장' , tab: 'range' },
+  { k: 'insights', label: '추천 기능 30선', icon: '🧠', group: 'ledger', title: '유명 IPAM 솔루션 대표 기능 30선을 수집 데이터로 계산' , tab: 'home' },
+  { k: 'netmap', label: '네트워크 맵', icon: '🗺️', group: 'ledger', title: '대역 선택 → OS별·시간대별 사용/미사용 네트워크 맵' , tab: 'range' },
+  { k: 'policies', label: '대역 정책', icon: '🧩', group: 'range', needsLedger: true, title: '대역 단위 관리상태(예약·DHCP풀·폐기 등) 기본값' , tab: 'range' },
   // v2.691: 예전 '대역·스캔'(vCenter 별 대역)은 이 페이지로 합쳐졌다 — 옛 주소 #/ipam/ranges 는 IPAM_PAGE_ALIASES 가 옮긴다.
-  { k: 'scan', label: '스캔 대역·설정', icon: '🛰️', group: 'scan', admin: true, title: '에이전트별 스캔 대역(iDRAC·VM 대역 가져오기)·포트·주기' },
-  { k: 'status', label: '스캔 상태', icon: '📡', group: 'scan', admin: true, title: '진행 중 스캔 + 완료된 스캔 이력' },
-  { k: 'log', label: '스캔 로그', icon: '🧾', group: 'scan', admin: true, title: '스캔 시작·종료·실패·건너뜀·엣지 보고·설정 변경 기록' },
-  { k: 'ipms', label: 'IPMS 설정', icon: '⚙', group: 'setup', admin: true, title: '무시 대역 · vCenter 스캔 대역 · 공인/사설 분류' },
-  { k: 'csv', label: 'CSV 가져오기·내보내기', icon: '⇅', group: 'setup', csv: true, title: '대장 내보내기 · IP 관리상태·메모 CSV · 스캔 대역 CSV' },
+  { k: 'scan', label: '스캔 대역·설정', icon: '🛰️', group: 'scan', admin: true, title: '에이전트별 스캔 대역(iDRAC·VM 대역 가져오기)·포트·주기' , tab: 'scan' },
+  // v3.7.0(재설계 묶음 라 — 시안 ⑭): 에이전트마다 오늘 시간표 · 다음 예정 · 쉬는 시간 · 늦음.
+  { k: 'schedule', label: '주기 스캔 일정', icon: '', group: 'scan', admin: true, title: '에이전트마다 오늘 스캔 시간표 · 다음 예정 · 쉬는 시간', tab: 'scan' },
+  { k: 'status', label: '스캔 상태', icon: '📡', group: 'scan', admin: true, title: '진행 중 스캔 + 완료된 스캔 이력' , tab: 'scan' },
+  { k: 'log', label: '스캔 로그', icon: '🧾', group: 'scan', admin: true, title: '스캔 시작·종료·실패·건너뜀·엣지 보고·설정 변경 기록' , tab: 'scan' },
+  // v3.1.0(시안 ipam-alerts-mac-dns ②): 스캔이 본 변화 — 새 미등록 IP · MAC 변경 · 충돌 의심 · 호스트명 변경 · 예약 IP 사용 시작
+  { k: 'changes', label: 'IP 변화', icon: '🔔', group: 'scan', admin: true, title: '스캔이 본 변화 — 새 미등록 IP · MAC 변경 · 충돌 의심 · 호스트명 변경' , tab: 'scan' },
+  { k: 'ipms', label: 'IPMS 설정', icon: '⚙', group: 'setup', admin: true, title: '무시 대역 · vCenter 스캔 대역 · 공인/사설 분류' , tab: 'setup' },
+  // v3.7.0(재설계 묶음 라 — 시안 ⑫ ⑬): 정기 보고(IPMS 알람) 설정 · 미리 보기 · 발송 기록.
+  { k: 'report', label: '정기 보고', icon: '', group: 'setup', admin: true, title: '법인별 IP 사용 변화를 정한 요일 · 시각에 메일로(전체 종합 + 법인별)', tab: 'setup' },
+  { k: 'csv', label: 'CSV 가져오기·내보내기', icon: '⇅', group: 'setup', csv: true, title: '대장 내보내기 · IP 관리상태·메모 CSV · 스캔 대역 CSV' , tab: 'setup' },
 ]);
 export const IPAM_GROUPS = Object.freeze([['ledger', 'IP 대장'], ['range', '대역'], ['scan', '스캔'], ['setup', '설정·데이터']]);
+/**
+ * v3.4.0: 위 탭 5개(재설계 — 페이지 11개를 탭 5개로). 페이지 키 · 주소(#/ipam/<키>)는 그대로이고 탭은 묶음일 뿐이다 —
+ * 탭을 누르면 그 탭의 첫 페이지, 탭 안에 페이지가 둘 이상이면 아래 줄에 보기 단추가 나온다.
+ * 순서는 IPAM_PAGES 의 순서를 따른다(탭 안 첫 페이지 = 기본 보기).
+ */
+export const IPAM_TABS = Object.freeze([['home', '현황'], ['range', '대역'], ['addr', 'IP 주소'], ['scan', '스캔'], ['setup', '설정']]);
+/** 주소 없이 열었을 때의 페이지(v3.4.0 — 예전 'list'). */
+export const IPAM_DEFAULT_PAGE = 'home';
+/** 탭 안 보기 순서(IPAM_PAGES 순서와 별개 — 대역 탭은 서브넷 대장이 먼저). */
+const TAB_ORDER = Object.freeze({ home: ['home', 'insights'], range: ['sheet', 'policies', 'netmap'], addr: ['list', 'names'], scan: ['scan', 'schedule', 'status', 'log', 'changes'], setup: ['ipms', 'report', 'csv'] });
 /** v2.691: 없어진 페이지의 옛 주소 → 새 페이지(북마크·공유 링크·다른 화면의 바로가기를 살린다). */
 export const IPAM_PAGE_ALIASES = Object.freeze({ ranges: 'scan' });
 export const IPAM_PAGE_KEYS = Object.freeze(IPAM_PAGES.map((p) => p.k));
@@ -48,6 +68,20 @@ export function pageShown(k, access, { csvOk = true } = {}) {
   if (!p) return false;
   if (p.csv && !csvOk) return false;
   return !p.admin || access !== 'no';
+}
+
+/** 페이지가 속한 탭(모르면 null). */
+export function tabOfPage(k) { return BY_KEY.get(k)?.tab || null; }
+
+/**
+ * 위 탭 줄 — 보일 페이지가 하나라도 있는 탭만, 각 탭의 보기 목록(pages)과 첫 보기(first).
+ * 관리자 탭(스캔 · 설정 일부)은 pageShown 과 같은 판정이다 — 403('no')일 때만 숨기고 모름은 보인다.
+ */
+export function tabGroups(access, opts = {}) {
+  return IPAM_TABS.map(([t, label]) => {
+    const pages = (TAB_ORDER[t] || []).map((k) => BY_KEY.get(k)).filter((p) => p && pageShown(p.k, access, opts));
+    return { t, label, pages, first: pages[0]?.k || null, admin: pages.length > 0 && pages.every((p) => p.admin) };
+  }).filter((x) => x.pages.length);
 }
 
 /** 메뉴에 보일 페이지를 그룹별로. */

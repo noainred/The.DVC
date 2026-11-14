@@ -16,9 +16,10 @@ describe('v2.732 IP관리 공유 DB 카드 — count 가 null 이어도 죽지 �
     expect(dbCountText({ count: 12345, kind: 'sqlite' })).toBe((12345).toLocaleString());
     expect(dbMetaText({ count: 12345, kind: 'sqlite' })).toBe('SQLITE');
   });
-  it('IpamCore 는 count 를 직접 toLocaleString 하지 않는다', () => {
-    const src = fs.readFileSync(new URL('./IpamCore.jsx', import.meta.url), 'utf8');
-    expect(src).not.toMatch(/db\.count\.toLocaleString/);
-    expect(src).toMatch(/dbCountText\(db\)/);
+  it('IpamCore · IpamHome 은 count 를 직접 toLocaleString 하지 않는다(v3.4.0: 공유 DB 수는 현황 탭으로 옮겼다)', () => {
+    const core = fs.readFileSync(new URL('./IpamCore.jsx', import.meta.url), 'utf8');
+    const home = fs.readFileSync(new URL('./IpamHome.jsx', import.meta.url), 'utf8');
+    for (const src of [core, home]) expect(src).not.toMatch(/db\.count\.toLocaleString/);
+    expect(home).toMatch(/dbCountText\(db\)/);
   });
 });

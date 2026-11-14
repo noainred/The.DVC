@@ -143,12 +143,12 @@ export default function RelayCheckTool() {
               <React.Fragment key={r.target.key}>
                 <tr style={{ cursor: r.ok ? 'default' : 'pointer', background: r.ok ? undefined : 'rgba(239,68,68,.08)' }} onClick={() => !r.ok && setOpen(open === r.target.key ? null : r.target.key)}>
                   <td>{r.target.site || <span className="muted">—</span>}</td>
-                  <td><code>{r.target.host}</code></td>
+                  <td style={{ whiteSpace: 'normal', maxWidth: 190, overflowWrap: 'anywhere' }}><code>{r.target.host}</code></td>
                   <td data-sort={r.target.port}>:{r.target.port}</td>
                   <td title={kinds[r.target.kind]?.desc || ''}>{r.target.label}</td>
                   <td className="muted">{r.target.expectAgent || (r.target.kind === 'hq-portal' ? '이 중앙' : '—')}</td>
                   <td data-sort={r.ok ? 1 : 0}><span className={`badge ${r.ok ? 'green' : 'red'}`}>{PHASE[r.phase] || r.phase}</span>{!r.ok && r.failStreak > 1 ? <span className="muted" style={{ fontSize: 10.5, marginLeft: 4 }}>연속 {r.failStreak}</span> : null}{r.alerted ? <span className="badge amber" style={{ marginLeft: 4, fontSize: 10 }}>알림됨</span> : null}</td>
-                  <td style={{ fontSize: 12, maxWidth: 360, whiteSpace: 'normal' }}>{r.ok ? <span className="muted">{r.detail}</span> : <span style={{ color: 'var(--red)' }}>{r.error}</span>}</td>
+                  <td style={{ fontSize: 12, maxWidth: 240, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{r.ok ? <span className="muted">{r.detail}</span> : <span style={{ color: 'var(--red)' }}>{r.error}</span>}</td>
                   <td data-sort={r.ms}>{r.ms ?? '—'}</td>
                   <td>{agoText(r.lastOkAt)}</td>
                   <td>{agoText(r.at)}</td>

@@ -15,6 +15,12 @@ import { TestWizard } from './svcmon/TestWizard.jsx';
 import { blankOr } from './blankOr.js';
 import { edgeCardKind, edgeCardWarn, edgeCardMeta, edgeNoReportTotal } from './svcmon/edgeCardText.js';
 import Select from '../components/Select.jsx';
+import OverviewDash from './svcmon/OverviewDash.jsx';   // v2.915 개요(기술 뷰 — Datadog 대시보드 참고)
+import { isFullScopeAdmin, isFullScopeEditor } from './svcmon/svcmonAccess.js';
+import { periodText } from './svcmon/syncLogic.js';
+import { idsByFolder, folderCheck, toggleIds, selectionInfo } from './svcmon/easyRegister.js';   // v2.960 쉬운 등록 A(선택 모드 · 사용/중지)
+import TrialModal from './svcmon/TrialModal.jsx';
+import './svcmon/techView.css';
 
 /**
  * 성능점검 — Claude Design 핸드오프(design_handoff_perf_check) 기준 구현.
@@ -43,7 +49,21 @@ function dropStyle(dnd, id) {
   return o.zone === 'inside' ? DROP_INSIDE : o.zone === 'before' ? DROP_BEFORE : DROP_AFTER;
 }
 
-function TreeRows({ node, depth, sel, setSel, expanded, toggle, q, onCtx, dnd }) {
+/** v2.960: 대상 표지 — 중지 · 최근 시험 결과(서버 /state 의 trial). */
+function TargetTags({ t }) {
+  const tr = t.trial;
+  return (
+    <>
+      {/* 표지는 하나만(트리 폭 340px 에서 이름이 잘리지 않게 — Chromium 실측: 출처 · 중지 · 시험 실패 셋이면 이름이 'bm-e…' 로 잘렸다). 시험 표지가 중지를 함께 뜻한다. */}
+      {tr?.state === 'wait' ? <span className="tv-trialtag" title={`엣지 첫 보고를 기다리는 중${tr.deadline ? ` · 시한 ${new Date(tr.deadline).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })}` : ''}`}>시험 중</span>
+        : (t.enabled === false && tr?.state === 'fail') ? <span className="tv-trialtag fail" title={`중지 · 시험 실패 — ${tr.reason}`}>시험 실패</span>
+          : (t.enabled === false && tr?.state === 'skip') ? <span className="tv-trialtag skip" title={`중지 · 시험 못 함 — ${tr.reason}`}>시험 못 함</span>
+            : t.enabled === false ? <span className="tv-trialtag skip" title="중지 — 점검하지 않습니다">중지</span> : null}
+    </>
+  );
+}
+
+function TreeRows({ node, depth, sel, setSel, expanded, toggle, q, onCtx, dnd, pick = null }) {
   if (depth > 0 && !matchNode(node, q)) return null;
   const open = q ? true : (expanded[node.id] !== false);   // 검색 중 강제 확장(README)
   const { alarms, worst } = statsOf(node);
@@ -60,22 +80,29 @@ function TreeRows({ node, depth, sel, setSel, expanded, toggle, q, onCtx, dnd })
           onDrop={(e) => dnd.onDrop(e, node.id, true)}
           onClick={() => setSel(node.id)}
           onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setSel(node.id); onCtx({ x: e.clientX, y: e.clientY, node: node.id }); }}>
+          {pick && (() => {
+            const ids = pick.idsMap.get(node.id) || [];
+            const st = folderCheck(ids, pick.picked);
+            return <input type="checkbox" className="tv-pick" aria-label={`${node.name} 폴더 선택`} checked={st === 'all'} disabled={!ids.length}
+              ref={(el) => { if (el) el.indeterminate = st === 'some'; }} onClick={(e) => e.stopPropagation()} onChange={() => pick.onPick(ids)} />;
+          })()}
           <span className="pc-tog" onClick={(e) => { e.stopPropagation(); toggle(node.id); }}>{hasKids ? (open ? '−' : '+') : '·'}</span>
           <span className={`pc-dot ${STATUS[worst]?.cls || 'pc-off'}`} />
           <span className={`pc-tree-label${alarms ? ' alarm' : ''}${sel === node.id ? ' on' : ''}`}>{node.name}</span>
+          {pick && (() => { const n = (pick.idsMap.get(node.id) || []).filter((id) => pick.picked.has(id)).length; return n ? <span className="pc-badge" style={{ background: '#153357', color: '#9fcaff' }}>{`${n} 선택`}</span> : null; })()}
           {alarms > 0 && <span className="pc-badge">{alarms}</span>}
         </div>
       )}
       {open && (
         <>
           {[...node.children.values()].map((c) => (
-            <TreeRows key={c.id} node={c} depth={depth + 1} sel={sel} setSel={setSel} expanded={expanded} toggle={toggle} q={q} onCtx={onCtx} dnd={dnd} />
+            <TreeRows key={c.id} node={c} depth={depth + 1} sel={sel} setSel={setSel} expanded={expanded} toggle={toggle} q={q} onCtx={onCtx} dnd={dnd} pick={pick} />
           ))}
           {node.targets.filter((t) => !q || t.name.toLowerCase().includes(q) || (t.host || '').toLowerCase().includes(q)).map((t) => {
             const st = statsOf({ children: new Map(), targets: [t] });
             const id = `target:${t.id}`;
             return (
-              <div key={t.id} className={`pc-tree-row${sel === id ? ' sel' : ''}`} style={{ paddingLeft: 8 + (depth + 1) * 16, ...(dropStyle(dnd, t.id) || {}) }}
+              <div key={t.id} data-tree-sel={sel === id ? '1' : undefined} className={`pc-tree-row${sel === id ? ' sel' : ''}`} style={{ paddingLeft: 8 + (depth + 1) * 16, ...(dropStyle(dnd, t.id) || {}) }}
                 draggable={dnd.canEdit}
                 onDragStart={(e) => { e.stopPropagation(); dnd.start(e, { type: 'target', id: t.id, path: t.path, name: t.name }); }}
                 onDragEnd={dnd.end}
@@ -84,9 +111,12 @@ function TreeRows({ node, depth, sel, setSel, expanded, toggle, q, onCtx, dnd })
                 onDrop={(e) => dnd.onDrop(e, t.id, false)}
                 onClick={() => setSel(id)}
                 onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setSel(id); onCtx({ x: e.clientX, y: e.clientY, node: t.path, targetId: t.id }); }}>
+                {pick && <input type="checkbox" className="tv-pick" aria-label={`${t.name} 선택`} checked={pick.picked.has(t.id)} onClick={(e) => e.stopPropagation()} onChange={() => pick.onPick([t.id])} />}
                 <span className="pc-tog">·</span>
                 <span className={`pc-dot ${STATUS[st.worst]?.cls || 'pc-off'}`} />
-                <span className={`pc-tree-label leaf${st.alarms ? ' alarm' : ''}${sel === id ? ' on' : ''}`}>{t.name}</span>
+                <span className={`pc-tree-label leaf${st.alarms ? ' alarm' : ''}${sel === id ? ' on' : ''}`} title={`${t.name}${t.host ? ` · ${t.host}` : ''}`}>{t.name}</span>
+                {t.origin && <span className={`tv-origin${t.origin.gone ? ' gone' : ''}`} title={`설정 연동 — ${t.origin.key}`}>{t.origin.gone ? '설정에서 사라짐' : '설정'}</span>}
+                <TargetTags t={t} />
                 {st.alarms > 0 && <span className="pc-badge">{st.alarms}</span>}
               </div>
             );
@@ -117,6 +147,7 @@ export default function SvcMonitor() {
   const [filter, setFilter] = useState('ALL');
   const [sort, setSort] = useState('none');            // none | name | status
   const [detail, setDetail] = useState(null);
+  const [runOnce, setRunOnce] = useState(null);   // v2.988 '지금 한 번 점검' — { key, busy, result, error } · key 가 지금 상세와 같을 때만 보인다(늦게 온 응답은 버린다)
   const [leftW, setLeftW] = useState(() => { try { return Number(localStorage.getItem(LEFT_W_KEY)) || DEFAULT_LEFT_W; } catch { return DEFAULT_LEFT_W; } }); // v2.681(R2C-05)
   const [dragging, setDragging] = useState(false);
   const [modal, setModal] = useState(null);
@@ -157,6 +188,28 @@ export default function SvcMonitor() {
   const [tplApply, setTplApply] = useState(null);
   // 통합 등록 마법사 모달 — 트리 '＋ 등록'/우클릭 '이 폴더에 등록…'. { path } | null
   const [register, setRegister] = useState(null);
+  // v2.915: 화면 — '트리'(등록·편집) | '개요'(기술 뷰 · 읽기). 마지막 선택을 기억한다(실패해도 기본 트리).
+  const [view, setViewState] = useState(() => { try { return localStorage.getItem('perfcheck.view') === 'overview' ? 'overview' : 'tree'; } catch { return 'tree'; } });
+  const setView = (v) => { setViewState(v); try { localStorage.setItem('perfcheck.view', v); } catch { /* noop */ } };
+  const [driftHidden, setDriftHidden] = useState(false);   // '설정이 바뀌었습니다' 배너 — 이 화면을 연 동안만 숨김
+  // v2.960 쉬운 등록 A — 트리 선택 모드(폴더·대상 체크 → 일괄 사용/중지 · 시험 점검) · 시험 결과 창 · 작업 결과 안내.
+  const [pickMode, setPickMode] = useState(false);
+  const [picked, setPicked] = useState(() => new Set());
+  const [trialJob, setTrialJob] = useState(null);
+  const [actMsg, setActMsg] = useState('');
+  // v2.928: 개요 호스트 맵 → 트리 바로가기. 고른 대상을 선택하고 트리에서 그 줄이 보이게 스크롤한다(한 번만).
+  const jumpRef = useRef(false);
+  useEffect(() => {
+    if (!jumpRef.current || view !== 'tree') return;
+    jumpRef.current = false;
+    // 트리 상자 안에서만 스크롤한다 — scrollIntoView 는 창까지 내려 상단(모드·KPI)을 가렸다(Chromium 실측).
+    const el = document.querySelector('[data-tree-sel="1"]');
+    const box = el?.closest('.pc-tree-body');
+    if (el && box) {
+      const r = el.getBoundingClientRect(); const b = box.getBoundingClientRect();
+      box.scrollTop += (r.top - b.top) - (b.height / 2) + (r.height / 2);
+    }
+  });
 
   // 선택 노드나 모드가 바뀌면 표시 개수를 처음으로 되돌린다(이전 폴더에서 늘려 둔 값 승계 금지).
   useEffect(() => { setPageN(TARGET_PAGE); }, [sel, mode]);
@@ -200,6 +253,7 @@ export default function SvcMonitor() {
   const folders = useMemo(() => (data?.folders || []).filter((f) => (f.kind || 'infra') === mode), [data, mode]);
   const sortMode = data?.sort?.[mode] || 'manual';
   const tree = useMemo(() => buildTree(targets, folders, sortMode), [targets, folders, sortMode]);
+  const idsMap = useMemo(() => idsByFolder(targets), [targets]);
 
   if (loading && !data) return <Loading />;
   if (error && !data) return <ErrorBox message={error} />;
@@ -242,7 +296,13 @@ export default function SvcMonitor() {
     const v = groups.flatMap((g) => g.tests.map((x) => x.result?.ms).filter((n) => n != null));
     return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : 0;
   })();
-  const selPath = sel ? `Root\\${sel.replace(/^target:/, '')}` : 'Root';
+  // v2.928: 대상을 고르면 내부 id(g-4c30c45c) 대신 '경로\이름' 을 보인다(예전에는 sel 문자열을 그대로 붙였다).
+  const selPath = (() => {
+    if (!sel) return 'Root';
+    if (!sel.startsWith('target:')) return `Root\\${sel}`;
+    const tg = targets.find((x) => `target:${x.id}` === sel);
+    return tg ? `Root\\${tg.path ? `${tg.path}\\` : ''}${tg.name}` : 'Root';
+  })();
 
 
   /* ── 점검 추가/수정 마법사 (1 카테고리 → 2 유형 → 3 파라미터) ── */
@@ -266,6 +326,40 @@ export default function SvcMonitor() {
   };
   const selTarget = targets.find((t) => `target:${t.id}` === sel) || null;
   const doRefresh = async () => { try { await postJson('/svcmon/refresh', {}); setTimeout(refresh, 1500); } catch (e) { window.alert(e.message); } };
+
+  /* ── v2.960 쉬운 등록 A — 사용/중지 · 시험 점검 후 사용 ── */
+  const byIdT = new Map(targets.map((t) => [t.id, t]));
+  const offOf = (ids) => ids.filter((id) => byIdT.get(id)?.enabled === false);
+  const assignNote = (assign) => {
+    const bad = (assign || []).filter((a) => !a.ok);
+    return bad.length ? ` · 엣지 반영 안 됨: ${bad.map((a) => `${a.agent}(${a.skipped ? '경로 기준 배정 — 엣지 배정 탭에서 다시 배포' : a.reason})`).join(', ')}` : '';
+  };
+  const setEnabledFor = async ({ targets: ids = [], tests = [] }, on, label = '') => {
+    const onN = ids.filter((id) => byIdT.get(id)?.enabled !== false).length;   // 이미 중지된 대상은 세지 않는다(반증 L5)
+    if (!on && onN > 1 && !window.confirm(`사용 중인 대상 ${onN}개를 중지할까요? 중지된 대상은 점검하지 않고 알림도 보내지 않습니다.`)) return false;
+    setBusy(true); setActMsg('');
+    try {
+      const r = requireChanged(await postJson('/svcmon/targets/enabled', { targets: ids, tests, enabled: on }));
+      setActMsg(`${label || (on ? '사용으로 켬' : '중지')} — 바뀜 ${r.changed}${r.unchanged ? ` · 이미 그 상태 ${r.unchanged}` : ''}${assignNote(r.assign)}`);
+      refresh();
+      return true;
+    } catch (e) { window.alert(e.message); return false; } finally { setBusy(false); }
+  };
+  const trialFor = async (ids) => {
+    const off = offOf(ids);
+    if (!off.length) { window.alert('고른 대상이 모두 이미 사용 중입니다 — 시험 점검은 중지된 대상만 합니다.'); return; }
+    setBusy(true); setActMsg('');
+    try { const r = requireChanged(await postJson('/svcmon/trial', { ids: off })); setTrialJob(r.job); }
+    catch (e) { window.alert(e.message); } finally { setBusy(false); }
+  };
+  const onPick = (ids) => setPicked((p) => toggleIds(p, ids));
+  // v2.960(반증 L5): 사용/중지 · 시험은 중앙 노드에서만(엣지 노드의 대상은 중앙 배정 사본 — 서버가 409). 편집 권한과 함께 본다.
+  // v2.988: 서버 게이트가 canEdit + fullScopeOnly — 범위 계정에는 스위치를 열지 않는다(누르면 403 이었다).
+  const canToggle = canEdit && isFullScopeEditor(me) && data?.centralNode !== false;
+  const exitPick = () => { setPickMode(false); setPicked(new Set()); };
+  const pickInfo = selectionInfo(picked, targets);
+  const pickedIds = [...picked].filter((id) => byIdT.has(id));
+  const ctxIds = (c) => (c?.targetId ? [c.targetId] : (idsMap.get(c?.node === 'root' ? '' : c?.node) || []));
 
   /* ── 폴더 / 정렬 / 로그 설정 ── */
   const folderPath = ctx && ctx.node !== 'root' && !ctx.targetId ? ctx.node : '';
@@ -451,12 +545,57 @@ export default function SvcMonitor() {
     } catch { /* 프리필 실패는 무시 — 화면은 열린다 */ }
     window.location.hash = '#/tools/svcmon-config';
   };
-  const doReset = () => { setFilter('ALL'); setTestQ(''); setTreeQ(''); setSort('none'); setDetail(null); };
+  const doReset = () => { setFilter('ALL'); setTestQ(''); setTreeQ(''); setSort('none'); setDetail(null); setPicked(new Set()); };
   const removeSel = async () => {
     if (!selTarget) return;
     if (!window.confirm(`'${selTarget.name}' 대상과 점검 ${selTarget.tests.length}개를 삭제할까요?`)) return;
     try { requireChanged(await delJson(`/svcmon/targets/${selTarget.id}`)); setSel(''); refresh(); } catch (e) { window.alert(e.message); }
   };
+
+  const viewSeg = (
+    <span className="tv-seg" role="group" aria-label="화면">
+      <button type="button" className={view === 'tree' ? 'on' : ''} onClick={() => setView('tree')}>트리</button>
+      <button type="button" className={view === 'overview' ? 'on' : ''} onClick={() => setView('overview')}>개요</button>
+    </span>
+  );
+  // v2.915: 설정 연동 감지 배너 — 수만(서버 /state settingsDrift). 편집 권한이 있을 때만(검토 화면이 canEdit + 전체 범위다).
+  //   '새 항목' 은 미등록 전부가 아니라 기준점(첫 감지 · 마지막 확인) 이후 설정에 생긴 것만(서버 driftSummary 머리말).
+  //   검토 화면이 관리자(전체 범위) 전용이라 그 밖의 계정에는 띄우지 않는다.
+  const drift = data?.settingsDrift;
+  const driftN = drift ? (drift.new || 0) + (drift.changed || 0) + (drift.gone || 0) : 0;
+  const ackDrift = async () => { try { await postJson('/svcmon/settings-sync/ack', {}); setDriftHidden(true); refresh(); } catch (e) { window.alert(e.message); } };
+  const isAdminFull = isFullScopeAdmin(me);   // 검토·확인 라우트가 adminOnly + fullScopeOnly(반증 H1) — v2.932(점검 D1-09): 판정은 svcmonAccess.js 하나
+  const driftEvery = periodText(drift?.intervalMs);   // v2.932(점검 D1-08): 감지 주기는 서버 값(없으면 숫자 없이)
+  const driftBanner = isAdminFull && !driftHidden && driftN > 0 ? (
+    <div className="tv-banner" role="status">
+      <span><b>설정이 바뀌었습니다</b>{` — 새 항목 ${drift.new || 0} · 주소 변경 ${drift.changed || 0} · 설정에서 사라짐 ${drift.gone || 0}`}
+        {drift.at ? ` · 마지막 확인 ${new Date(drift.at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })}(${driftEvery ? `${driftEvery} 주기` : '주기 감지'} · 카탈로그 읽기만)` : ''}</span>
+      <a className="pc-btn accent" style={{ marginLeft: 'auto', textDecoration: 'none' }} href="#/tools/svcmon-config/sync">설정 연동에서 검토</a>
+      {(drift.new || 0) > 0 && <button type="button" className="pc-btn" title="지금까지 생긴 새 항목을 본 것으로 둡니다(미등록은 설정 연동 탭에 그대로 남습니다)" onClick={ackDrift}>새 항목 확인</button>}
+      <button type="button" className="pc-btn" onClick={() => setDriftHidden(true)}>나중에</button>
+    </div>
+  ) : null;
+
+  if (view === 'overview') {
+    return (
+      <div className="pc-root">
+        <div className="pc-modebar">{viewSeg}</div>
+        {driftBanner}
+        <OverviewDash onPickTarget={(h) => {
+          // 중앙 저장소의 대상이면 그 대상을 바로 고른다(구분·검색을 맞춘다). 엣지에만 있는 행이면 이름으로 트리 검색만 채운다.
+          setView('tree'); doReset();
+          // 불러온 대상(상한 안)이면 그 대상을 고르고 조상 폴더를 펼친다 — 접힌 폴더 안이면 줄이 안 보였다(반증 재검토 L6).
+          //   목록 밖(상한 2000 초과)이거나 엣지에만 있는 행이면 이름 검색으로 내려간다.
+          const tg = h?.id ? allTargets.find((x) => x.id === h.id) : null;
+          if (tg) {
+            if (tg.kind === 'infra' || tg.kind === 'service') setMode(tg.kind);
+            setExpanded((e) => { const n = { ...e }; let acc = ''; for (const seg of String(tg.path || '').split('\\').filter(Boolean)) { acc = acc ? `${acc}\\${seg}` : seg; delete n[acc]; } return n; });
+            setSel(`target:${tg.id}`); jumpRef.current = true;
+          } else setTreeQ(h?.name || '');
+        }} />
+      </div>
+    );
+  }
 
   return (
     <div className="pc-root">
@@ -465,7 +604,9 @@ export default function SvcMonitor() {
           {mode === 'infra' && <span className="pc-pulse" />}인프라</button>
         <button className={`pc-mode${mode === 'service' ? ' on' : ''}`} onClick={() => { setMode('service'); setSel(''); doReset(); }}>
           {mode === 'service' && <span className="pc-pulse" />}서비스</button>
+        {viewSeg}
       </div>
+      {driftBanner}
 
       <div className="pc-sectionbar">
         <span className="pc-sectitle">{mode === 'service' ? 'SERVICE HEALTH & SLA TESTS' : 'INFRASTRUCTURE PERFORMANCE TESTS'}</span>
@@ -510,7 +651,15 @@ export default function SvcMonitor() {
         <div className="pc-panel pc-tree">
           <div className="pc-panel-head">
             <span>{mode === 'service' ? 'SERVICE TREE' : 'TEST TREE'}</span>
-            <span>{targets.length} {mode === 'service' ? 'services' : 'hosts'}</span>
+            <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+              {canToggle && (
+                <button type="button" className={`pc-chip${pickMode ? ' on' : ''}`} style={{ padding: '2px 9px', fontSize: 11 }} aria-pressed={pickMode}
+                  title="폴더·대상을 체크해 한 번에 사용/중지하거나 시험 점검합니다" onClick={() => (pickMode ? exitPick() : setPickMode(true))}>
+                  {pickMode ? `선택 모드 · ${pickInfo.targets}` : '선택'}
+                </button>
+              )}
+              <span>{targets.length} {mode === 'service' ? 'services' : 'hosts'}</span>
+            </span>
           </div>
           <div className="pc-tree-search">
             <input className="pc-input" placeholder="대상 검색" value={treeQ} onChange={(e) => setTreeQ(e.target.value)} />
@@ -529,9 +678,9 @@ export default function SvcMonitor() {
             </div>
             <TreeRows node={tree} depth={0} sel={sel} setSel={setSel} expanded={expanded} q={treeQ.trim().toLowerCase()}
               toggle={(id) => setExpanded((e) => ({ ...e, [id]: e[id] === false }))}
-              onCtx={(c) => { setCtx(c); closeSubs(); }} dnd={dnd} />
+              onCtx={(c) => { setCtx(c); closeSubs(); }} dnd={dnd} pick={pickMode ? { idsMap, picked, onPick } : null} />
             {targets.length === 0 && <div className="pc-empty" style={{ padding: 24 }}>
-              등록된 {mode === 'service' ? '서비스' : '대상'}이 없습니다.{canEdit ? ' ＋ Add 로 등록하세요.' : ' 관리자에게 요청하세요.'}</div>}
+              등록된 {mode === 'service' ? '서비스' : '대상'}이 없습니다.{canEdit ? ' ＋ 등록 또는 Monitoring 설정 › 설정 연동으로 등록하세요.' : ' 관리자에게 요청하세요.'}</div>}
           </div>
         </div>
 
@@ -581,7 +730,16 @@ export default function SvcMonitor() {
                   <React.Fragment key={target.id}>
                     <div className="pc-group">
                       <span>🗀 Root\{target.path}\{target.name}\{target.host}</span>
-                      <span className="pc-group-meta">{tests.length} tests{alarms ? ` · ${alarms} alarm` : ''}</span>
+                      <span className="pc-group-meta" style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}>
+                        <span>{tests.length} tests{alarms ? ` · ${alarms} alarm` : ''}{target.origin ? ` · 출처 설정 연동` : ''}{target.agent ? ` · 엣지 ${target.agent}` : ''}</span>
+                        {canToggle && (
+                          <button type="button" className={`tv-sw${target.enabled !== false ? ' on' : ''}`} role="switch" aria-checked={target.enabled !== false} disabled={busy}
+                            aria-label={`${target.name} 감시 ${target.enabled !== false ? '사용' : '중지'}`} title={target.enabled !== false ? '누르면 중지' : '누르면 바로 사용(시험 없이) — 시험 점검은 우클릭 메뉴 · 선택 모드'}
+                            onClick={() => setEnabledFor({ targets: [target.id] }, target.enabled === false, target.enabled === false ? `${target.name} 사용` : `${target.name} 중지`)}>
+                            {target.enabled !== false ? '사용' : '중지'}<i aria-hidden="true" />
+                          </button>
+                        )}
+                      </span>
                     </div>
                     {tests.map((x) => {
                       const st = statusOf(target, x);
@@ -677,10 +835,38 @@ export default function SvcMonitor() {
         </div>
       </div>
 
+      {actMsg && <div className="tv-note" role="status" style={{ padding: '8px 2px 0' }}>{actMsg}</div>}
+      {pickMode && pickInfo.targets > 0 && (
+        <div className="tv-bulkbar" role="region" aria-label="고른 대상 일괄 작업">
+          <b>{`대상 ${pickInfo.targets} · 점검 ${pickInfo.tests} 선택`}</b>
+          <span className="sub">{`지금 중지 ${pickInfo.off} · 사용 중 ${pickInfo.on}${pickInfo.edge ? ` · 엣지 전용 ${pickInfo.edge}` : ''}`}</span>
+          <span className="btns">
+            <button type="button" className="pc-btn primary" disabled={busy || !pickInfo.off} title="중지된 대상만 시험합니다 — 통과하면 사용으로" onClick={() => trialFor(pickedIds)}>{`시험 점검 후 사용 · ${pickInfo.off}`}</button>
+            <button type="button" className="pc-btn" disabled={busy || !pickInfo.off} onClick={() => setEnabledFor({ targets: pickedIds }, true, '바로 사용')}>바로 사용</button>
+            <button type="button" className="pc-btn" disabled={busy || !pickInfo.on} onClick={() => setEnabledFor({ targets: pickedIds }, false, '중지')}>중지</button>
+            <button type="button" className="pc-btn" style={{ borderColor: 'transparent', background: 'transparent' }} onClick={() => setPicked(new Set())}>선택 해제</button>
+          </span>
+        </div>
+      )}
+
       {ctx && ctx.x > 0 && (
         <div className="pc-ctx" style={{ left: Math.min(ctx.x, window.innerWidth - 260), top: Math.min(ctx.y, window.innerHeight - 320) }}
           onClick={(e) => e.stopPropagation()}>
           <div className="pc-ctx-head">{ctx.node === 'root' ? 'Root' : ctx.node}{ctx.targetId ? ' (대상)' : ''}</div>
+          {canToggle && (() => {
+            const ids = ctxIds(ctx);
+            const off = offOf(ids).length;
+            const on = ids.length - off;
+            const close = () => { setCtx(null); closeSubs(); };
+            return (
+              <>
+                <button className={`pc-ctx-item${off ? '' : ' dim'}`} disabled={!off} onClick={() => { close(); trialFor(ids); }}>🧪 시험 점검 후 사용…<span className="pc-ctx-ar">{off ? `대상 ${off}` : '중지된 대상 없음'}</span></button>
+                <button className={`pc-ctx-item${off ? '' : ' dim'}`} disabled={!off} onClick={() => { close(); setEnabledFor({ targets: ids }, true, '바로 사용'); }}>▶ 바로 사용</button>
+                <button className={`pc-ctx-item${on ? '' : ' dim'}`} disabled={!on} onClick={() => { close(); setEnabledFor({ targets: ids }, false, '중지'); }}>⏸ 중지{on ? '' : <span className="pc-ctx-ar">이미 모두 중지</span>}</button>
+                <div className="pc-ctx-sep" />
+              </>
+            );
+          })()}
           {canEdit && <>
             <button className="pc-ctx-item" onClick={() => { setCtx(null); newFolder(); }}>📁 하위 폴더 만들기</button>
             <button className="pc-ctx-item" onClick={() => {
@@ -797,6 +983,63 @@ export default function SvcMonitor() {
               <span>주기</span><span>{detail.test.intervalSec}초</span>
               <span>Path</span><span className="pc-modal-path">Root\{detail.target.path}\{detail.target.name}\{detail.target.host}</span>
             </div>
+            {canToggle && (() => {
+              const tOn = detail.target.enabled !== false; const xOn = detail.test.enabled !== false;
+              const flipTest = async () => { if (await setEnabledFor({ tests: [{ targetId: detail.target.id, testId: detail.test.id }] }, !xOn, `${detail.test.name} ${xOn ? '중지' : '사용'}`)) setDetail((d) => ({ ...d, test: { ...d.test, enabled: !xOn } })); };
+              const flipTarget = async () => { if (await setEnabledFor({ targets: [detail.target.id] }, !tOn, `${detail.target.name} ${tOn ? '중지' : '사용'}`)) setDetail((d) => ({ ...d, target: { ...d.target, enabled: !tOn } })); };
+              return (
+                <div className="tv-swbox">
+                  <div className="ln"><span>이 점검</span><span className="who">{detail.test.name}</span>
+                    <span className="end"><button type="button" className={`tv-sw${xOn ? ' on' : ''}`} role="switch" aria-checked={xOn} aria-label="이 점검 사용" disabled={busy} onClick={flipTest}>{xOn ? '사용' : '중지'}<i aria-hidden="true" /></button></span></div>
+                  <div className="ln"><span>대상 전체</span><span className="who">{`${detail.target.name} · 점검 ${detail.target.tests?.length ?? 0}`}</span>
+                    <span className="end">
+                      {!tOn && <button type="button" className="tv-lnk" disabled={busy} onClick={() => { const id = detail.target.id; setDetail(null); trialFor([id]); }}>시험 점검 후 사용</button>}
+                      <button type="button" className={`tv-sw${tOn ? ' on' : ''}`} role="switch" aria-checked={tOn} aria-label={`대상 ${detail.target.name} 사용`} disabled={busy} onClick={flipTarget}>{tOn ? '사용' : '중지'}<i aria-hidden="true" /></button>
+                    </span></div>
+                  <div className="who" style={{ padding: '0 0 8px', fontFamily: 'inherit' }}>중지된 점검은 실행하지 않고 실패 알림도 보내지 않습니다. 대상이 중지면 그 아래 점검은 모두 쉽니다.
+                    {detail.target.trial?.reason ? ` 최근 시험: ${detail.target.trial.reason}` : ''}</div>
+                </div>
+              );
+            })()}
+            {canToggle && data?.executes !== false && (() => {
+              const key = `${detail.target.id}|${detail.test.id}`;
+              const cur = runOnce?.key === key ? runOnce : null;
+              const go = async () => {
+                setRunOnce({ key, busy: true });
+                try {
+                  const r = await postJson(`/svcmon/targets/${detail.target.id}/tests/${detail.test.id}/run`, {});
+                  if (r?.ok === false) throw new Error(r.error || '점검하지 못했습니다.');   // postJson 은 409 를 던지지 않고 본문을 돌려준다
+                  setRunOnce((p) => (p?.key === key ? { key, result: r.result } : p));
+                } catch (e) { setRunOnce((p) => (p?.key === key ? { key, error: e.message } : p)); }
+              };
+              const res = cur?.result;
+              return (
+                <div className="tv-swbox">
+                  <div className="ln"><span>지금 한 번 점검</span>
+                    <span className="who">{res ? `${STATUS[res.status]?.label || res.status}${res.ms != null ? ` · ${res.ms}ms` : ''}` : cur?.error ? '' : '주기를 기다리지 않고 이 점검만 바로 잽니다'}</span>
+                    <span className="end"><button type="button" className="pc-btn" disabled={!!cur?.busy} onClick={go}>{cur?.busy ? '점검 중…' : res || cur?.error ? '다시 점검' : '지금 점검'}</button></span></div>
+                  {res && <div className={`tv-runres ${STATUS[res.status]?.cls || ''}`}>{res.reply || '—'}</div>}
+                  {cur?.error && <div className="tv-runres pc-bad">{cur.error}</div>}
+                  <div className="who" style={{ padding: '0 0 8px', fontFamily: 'inherit' }}>결과는 이 창에만 보입니다 — 상태 · 연속 횟수 · 알림 · 기록에는 넣지 않습니다(중지된 점검도 잴 수 있습니다).</div>
+                </div>
+              );
+            })()}
+            {detail.target.origin && (
+              <div className="tv-obox">
+                이 대상은 <b>설정 연동</b>으로 만들어졌습니다(출처 <span style={{ fontFamily: 'var(--mono)' }}>{detail.target.origin.key}</span>
+                {detail.target.origin.corp ? ` · 법인 ${detail.target.origin.corp}` : ''}). 주소·이름은 포탈 설정을 따릅니다 — 여기서 호스트를 고치면 다음 감지에서 ‘주소 변경’으로 다시 뜹니다.
+                {detail.target.origin.gone ? ' 이 항목은 설정에서 사라졌습니다.' : ''}
+                <div style={{ marginTop: 6, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <a href="#/tools/svcmon-config/sync">설정 연동에서 보기</a>
+                  {isAdminFull && (
+                    <button type="button" className="pc-btn" onClick={async () => {
+                      if (!window.confirm(`'${detail.target.name}' 의 설정 연동을 해제할까요? 대상·점검은 그대로 남고 수동 대상이 됩니다.`)) return;
+                      try { await postJson(`/svcmon/settings-sync/detach/${detail.target.id}`, {}); setDetail(null); refresh(); } catch (e) { window.alert(e.message); }
+                    }}>연동 해제(수동 대상으로)</button>
+                  )}
+                </div>
+              </div>
+            )}
             {canEdit && (
               <div className="pc-modal-actions">
                 <button className="pc-btn" onClick={() => { const d = detail; setDetail(null); openWizard(d.target.id, d.target.name, d.test); }}>✎ 수정</button>
@@ -816,6 +1059,8 @@ export default function SvcMonitor() {
         <TestWizard targetId={wizFor.targetId} targetName={wizFor.targetName} test={wizFor.test}
           onClose={() => setWizFor(null)} onSaved={() => { setWizFor(null); refresh(); }} />
       )}
+
+      {trialJob && <TrialModal job={trialJob} onClose={() => { setTrialJob(null); refresh(); }} />}
 
       {/* 통합 등록 마법사 — 트리에서 '하나의 등록 화면(BulkTab)'을 모달로 불러 쓴다(설정 탭과 동일 컴포넌트).
           위치 프리필. 소량 직접입력~대량 붙여넣기~파일(CSV/XLSX)~템플릿 적용~엣지 배정을 한 흐름으로.

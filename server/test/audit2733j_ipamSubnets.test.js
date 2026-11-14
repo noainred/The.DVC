@@ -11,6 +11,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
+// v3.5.0(재설계 묶음 나): 대역 목록에 예약 · DHCP 수(rsv · dhcp)와 대역 용도(purpose · desc …)가 **덧붙었다** — 옛 판본과의 동일성은
+//   예전 세 값(subnet · base · used)으로 본다(덧붙은 칸은 test/ipamRedesign350.test.js 가 따로 고정한다).
+const core3 = (l) => (Array.isArray(l) ? l.map((x) => ({ subnet: x.subnet, base: x.base, used: x.used })) : l);
+const same = (a, b) => isDeepStrictEqual(core3(a), core3(b));
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2733j-subnets-'));
 process.env.CONFIG_DIR = tmp;
@@ -103,9 +107,9 @@ test('① 결과 동일성 — 새 listSubnets 는 옛 시트 기반 목록(subn
         const got1 = led.listSubnets(snap, vc, allowed, { inputSig: sig });
         const got2 = led.listSubnets(snap, vc, allowed); // 지문 없이(세대 키) — 같은 결과
         const got3 = led.listSubnets(snap, vc, allowed, { inputSig: sig }); // 기억 적중 — 같은 결과
-        assert.ok(isDeepStrictEqual(got1, want), `seed ${s} vc=${vc} scope=${allowed ? [...allowed] : 'all'}\n새: ${JSON.stringify(got1)}\n옛: ${JSON.stringify(want)}`);
-        assert.ok(isDeepStrictEqual(got2, want), `지문 없이 seed ${s}`);
-        assert.ok(isDeepStrictEqual(got3, want), `기억 적중 seed ${s}`);
+        assert.ok(same(got1, want), `seed ${s} vc=${vc} scope=${allowed ? [...allowed] : 'all'}\n새: ${JSON.stringify(got1)}\n옛: ${JSON.stringify(want)}`);
+        assert.ok(same(got2, want), `지문 없이 seed ${s}`);
+        assert.ok(same(got3, want), `기억 적중 seed ${s}`);
         compared++;
       }
     }
@@ -116,10 +120,10 @@ test('① 결과 동일성 — 새 listSubnets 는 옛 시트 기반 목록(subn
   assert.equal(compared, 30 * 9);
   assert.ok(nonCanonUsed >= 20, `비정규 끝 조각 IP 가 든 표본이 너무 적다(${nonCanonUsed}/30) — 대조가 그 경우를 보지 못한다`);
   // 순수 계산부 — 비정규 끝 조각은 세지 않고 .0 도 세지 않으며 .255 는 센다, 서브넷은 남는다(used 0)
-  assert.deepEqual(led.subnetsFromRows([
+  assert.deepEqual(core3(led.subnetsFromRows([
     { ip: '10.5.5.05', ipNum: 1 }, { ip: '10.5.5.0', ipNum: 1 }, { ip: '10.5.5.255', ipNum: 1 }, { ip: '10.5.5.255', ipNum: 1 },
     { ip: '10.4.4.0', ipNum: 1 }, { ip: 'x', ipNum: null }, { ip: '10.5.5.7 ', ipNum: 1 },
-  ]), [{ subnet: '10.4.4.0/24', base: '10.4.4', used: 0 }, { subnet: '10.5.5.0/24', base: '10.5.5', used: 1 }]);
+  ])), [{ subnet: '10.4.4.0/24', base: '10.4.4', used: 0 }, { subnet: '10.5.5.0/24', base: '10.5.5', used: 1 }]);
   rp.deletePolicy(pol.policy.id);
   ov.clearOverride('10.20.0.5'); ov.clearOverride('10.20.1.7'); ov.clearOverride('10.0.0.1');
 });
@@ -161,7 +165,7 @@ test('② live 재현 — 입력이 그대로인 새 세대의 폴링은 원장�
       assert.equal(typeof builds, 'number', '원장 재구성 횟수를 읽지 못했다');
       const r = await getJson('/tools/ipam/subnets');
       assert.equal(r.status, 200);
-      assert.ok(isDeepStrictEqual(r.body.subnets, first.body.subnets), '같은 입력인데 결과가 다르다');
+      assert.ok(same(r.body.subnets, first.body.subnets), '같은 입력인데 결과가 다르다');
       assert.equal(led._ledgerCacheStats().builds, builds, '입력이 그대로인 폴링이 원장을 다시 만들었다');
       ms.push(r.ms);
     }
@@ -174,10 +178,10 @@ test('② live 재현 — 입력이 그대로인 새 세대의 폴링은 원장�
     assert.ok(tPoll < tRebuild / 4, `폴링 ${tPoll.toFixed(1)}ms 가 원장 재구성 ${tRebuild.toFixed(1)}ms 의 1/4 이상이다 — 폴링마다 다시 만든다`);
 
     // 결과는 옛 구현과 같다(마지막 세대 기준)
-    assert.ok(isDeepStrictEqual(first.body.subnets, oldList(S.snapshot, '', null)), '옛 시트 기반 목록과 다르다');
+    assert.ok(same(first.body.subnets, oldList(S.snapshot, '', null)), '옛 시트 기반 목록과 다르다');
     // 범위(vCenter) 질의도 같은 기억 규칙 — vc2 만
     const vc2 = await getJson('/tools/ipam/subnets?vcenterId=vc2');
-    assert.ok(isDeepStrictEqual(vc2.body.subnets, oldList(S.snapshot, 'vc2', null)), 'vCenter 를 고른 결과가 옛 구현과 다르다');
+    assert.ok(same(vc2.body.subnets, oldList(S.snapshot, 'vc2', null)), 'vCenter 를 고른 결과가 옛 구현과 다르다');
   } finally {
     st._setLedgerAsyncMinForTest(NaN);
   }
@@ -187,7 +191,7 @@ test('③ 기억은 입력이 바뀌면 버려진다 — 관리 입력(override�
   const S = st.store;
   const snap = bigSnap();
   S.snapshot = snap;
-  const has = (list, subnet) => list.find((x) => x.subnet === subnet);
+  const has = (list, subnet) => core3(list).find((x) => x.subnet === subnet);
   let r = await getJson('/tools/ipam/subnets');
   assert.equal(has(r.body.subnets, '10.250.0.0/24'), undefined);
   // 수동 예약 IP(새 /24) — overridesRev 가 오른다
@@ -209,7 +213,7 @@ test('③ 기억은 입력이 바뀌면 버려진다 — 관리 입력(override�
   S.snapshot = next;
   r = await getJson('/tools/ipam/subnets');
   assert.deepEqual(has(r.body.subnets, '10.252.3.0/24'), { subnet: '10.252.3.0/24', base: '10.252.3', used: 1 });
-  assert.ok(isDeepStrictEqual(r.body.subnets, oldList(next, '', null)), '바뀐 입력에서 옛 구현과 다르다');
+  assert.ok(same(r.body.subnets, oldList(next, '', null)), '바뀐 입력에서 옛 구현과 다르다');
 
   // 넘긴 지문이 관리 리비전을 모르더라도(호출부가 옛 리비전으로 계산했더라도) 기억 키의 리비전이 결과를 바꾼다
   const fixedSig = 'fixed-sig-2733j';
@@ -259,6 +263,6 @@ test('⑤ 기억 키에는 데이터센터 귀속이 들어간다 — vCenter �
   assert.equal(dcs.setVcenterDatacenter('vc1', 'dc-a').ok, true);
   const after = led.listSubnets(snap, 'vc1', null, { inputSig: sig });
   assert.equal(has(after), false, 'vc1 이 dc-a 가 됐는데 dc-b 에이전트의 스캔 행을 기억에서 줬다');
-  assert.ok(isDeepStrictEqual(after, oldList(snap, 'vc1', null)), '옛 구현과 다르다');
+  assert.ok(same(after, oldList(snap, 'vc1', null)), '옛 구현과 다르다');
   dcs.setVcenterDatacenter('vc1', '');
 });

@@ -6,6 +6,7 @@
 
 import { Client as SSHClient } from 'ssh2';
 import crypto from 'node:crypto';
+import { StringDecoder } from 'node:string_decoder';
 import { createRequire } from 'node:module';
 import { reqTimeoutMs } from '../agent/envTimeout.js';
 import { withDeadline, deadlineMs } from '../util/deadline.js';
@@ -223,7 +224,7 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
 // 대신 인라인 타이머로 stream 을 닫고 reject 해, 매달린 채널도 정리한다.
 // 출력 누적 상한(v2.417) — 고장 장비가 타임아웃까지 출력을 흘리면 메모리가 무한히 자란다.
 // 넘치면 채널을 닫고 reject(정직: 절단본을 성공으로 넘기지 않는다). execCapture 는 자체 2MB 캡.
-const EXEC_MAX_OUTPUT = Math.max(64 * 1024, Number(process.env.SSH_EXEC_MAX_OUTPUT) || 4 * 1024 * 1024);
+export const EXEC_MAX_OUTPUT = Math.max(64 * 1024, Number(process.env.SSH_EXEC_MAX_OUTPUT) || 4 * 1024 * 1024);
 function exec(conn, command, rawTimeoutMs = SSH_EXEC_TIMEOUT_MS, opts = {}) {
   const timeoutMs = execTimeoutMs(rawTimeoutMs, opts);
   return new Promise((resolve, reject) => {
@@ -247,6 +248,42 @@ function exec(conn, command, rawTimeoutMs = SSH_EXEC_TIMEOUT_MS, opts = {}) {
       stream.on('error', (e) => finish(reject, e));          // 채널/연결 오류로도 반드시 결말 짓는다
       stream.stderr.on('error', () => { /* stderr 스트림 오류는 비치명 — 무시 */ });
       stream.on('close', (code) => finish(resolve, { command, code, stdout, stderr }));
+    });
+  });
+}
+
+/**
+ * v2.976 집중 모니터링 — **스스로 끝나지 않는 명령의 줄을 그때그때 넘긴다**(execCapture 는 정해진 시간을 모은 뒤 한 번에 돌려준다).
+ * 대상 서버에서 2초마다 /proc 을 찍는 반복문이 몇 시간 돈다 — 출력을 쌓아 두면 메모리가 계속 자라므로 **줄 단위로 넘기고 버린다**.
+ *  · 줄이 `maxLine`(기본 16KB)보다 길면 그 세션을 끊는다(정상 /proc 줄은 수백 바이트 — 끝없는 한 줄은 이상 출력이다).
+ *  · stderr 는 앞 4KB 만 남긴다(진단용). 채널이 닫히면 `{code, stderr, lines}` 로 끝난다.
+ *  · `signal` 이 오면 채널을 닫는다(세션은 withSsh 가 같은 signal 로 끊는다).
+ *  · UTF-8 이 청크 경계에서 잘려도 깨지지 않게 StringDecoder 로 잇는다.
+ */
+const STREAM_STDERR_MAX = 4096;
+function execStream(conn, command, { onLine, maxLine = 16 * 1024, signal } = {}) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new Error('SSH 스트림 취소'));
+    conn.exec(command, { pty: false }, (err, stream) => {
+      if (err) return reject(err);
+      const dec = new StringDecoder('utf8');
+      let buf = ''; let stderr = ''; let lines = 0; let done = false;
+      const kill = () => { try { stream.close?.(); } catch { /* */ } try { stream.destroy?.(); } catch { /* */ } };
+      const onAbort = () => { kill(); finish(resolve, { command, code: null, aborted: true, stderr, lines }); };
+      const finish = (fn, arg) => { if (done) return; done = true; signal?.removeEventListener('abort', onAbort); fn(arg); };
+      signal?.addEventListener('abort', onAbort, { once: true });
+      const emit = (line) => { lines += 1; try { onLine?.(line); } catch { /* 소비자 오류가 스트림을 끊지 않게 */ } };
+      stream.on('data', (d) => {
+        if (done) return;
+        buf += dec.write(d);
+        let i;
+        while ((i = buf.indexOf('\n')) >= 0) { emit(buf.slice(0, i).replace(/\r$/, '')); buf = buf.slice(i + 1); }
+        if (buf.length > maxLine) { kill(); finish(reject, new Error(`SSH 스트림 한 줄이 상한(${Math.round(maxLine / 1024)}KB)을 넘었습니다`)); }
+      });
+      stream.stderr.on('data', (d) => { if (stderr.length < STREAM_STDERR_MAX) stderr += d.toString().slice(0, STREAM_STDERR_MAX - stderr.length); });
+      stream.on('error', (e) => finish(reject, e));
+      stream.stderr.on('error', () => { /* 비치명 */ });
+      stream.on('close', (code) => { if (buf) emit(buf); buf = ''; finish(resolve, { command, code, stderr, lines }); });
     });
   });
 }
@@ -717,6 +754,8 @@ export async function withSsh(creds, fn, { signal = creds?.signal } = {}) {
     // pcap/트래픽 캡처가 최대 120초를 허용하면서 전송 계층은 60초에 끊어 항상 실패했다).
     exec: async (cmd, timeoutMs, opts) => { const r = await (trace ? traced('exec', cmd, () => exec(conn, cmd, timeoutMs, opts)) : exec(conn, cmd, timeoutMs, opts)); log.push(r); return r; },
     // 스스로 끝나지 않는 갱신형 명령(portperfshow 등) 전용 — captureMs 만큼 모으고 채널을 닫는다.
+    // v2.976 집중 모니터링 — 끝나지 않는 명령의 줄을 그때그때 넘긴다(쌓지 않는다). 세션 시한은 호출자의 signal 이 정한다.
+    execStream: (cmd, opts) => execStream(conn, cmd, opts),
     execCapture: async (cmd, captureMs) => { const r = await (trace ? traced('capture', cmd, () => execCapture(conn, cmd, captureMs)) : execCapture(conn, cmd, captureMs)); log.push(r); return r; },
     // 페이저로 멈추는 명령(errshow 등) — 프롬프트에 자동 응답해 끝까지 받는다(상한·시한 있음).
     execPaged: async (cmd, opts) => { const r = await (trace ? traced('paged', cmd, () => execPaged(conn, cmd, opts)) : execPaged(conn, cmd, opts)); log.push(r); return r; },

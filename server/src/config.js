@@ -140,6 +140,13 @@ export const config = {
   contentionRefreshMs: clampIntervalMs(numEnv(process.env.CONTENTION_REFRESH_MS, 900_000), 900_000, 300_000),
   contentionPerCycle: Math.max(1, Math.min(5_000, Math.trunc(numEnv(process.env.CONTENTION_PER_CYCLE, 400)) || 400)),
   contentionSamples: Math.max(3, Math.min(180, Math.trunc(numEnv(process.env.CONTENTION_SAMPLES, 15)) || 15)),
+  // v2.935(C-①): ESXi 경로별 스토리지 카운터(storagePath 읽기·쓰기·지연) — FC HBA 가 있는 연결 호스트의 실시간 최근 창을 매시 한 번(storpath/collect.js).
+  //   SAN 스위치 포트 합계를 스토리지별로 나누는 **실측 비율**의 근거다(라이선스 불필요). 경로 계열이 많아 표본은 기본 15(5분) · 묶음 4대 ·
+  //   주기당 200대. 부담이 걱정되면 STORPATH_SCAN=false 로 끈다(귀속은 IPF · 타깃 포트 비율로 간다).
+  storPathScan: process.env.STORPATH_SCAN !== 'false',
+  storPathRefreshMs: clampIntervalMs(numEnv(process.env.STORPATH_REFRESH_MS, 3_600_000), 3_600_000, 900_000),
+  storPathPerCycle: Math.max(1, Math.min(2_000, Math.trunc(numEnv(process.env.STORPATH_PER_CYCLE, 200)) || 200)),
+  storPathSamples: Math.max(3, Math.min(180, Math.trunc(numEnv(process.env.STORPATH_SAMPLES, 15)) || 15)),
   // v2.705(B1): 인벤토리 속성을 WaitForUpdatesEx 로 '바뀐 것만' 받는다 — 기본 꺼짐. 켜면 vCenter 마다 오래 사는 세션이 하나 더 열린다.
   vcWaitUpdates: process.env.VC_WAIT_UPDATES === 'true',
   vcWaitUpdatesFullMs: clampIntervalMs(numEnv(process.env.VC_WAIT_UPDATES_FULL_MS, 21_600_000), 21_600_000, 600_000),
@@ -217,10 +224,16 @@ export const config = {
     // CONFIG_DIR에 두어 업그레이드에도 이력이 보존된다. 대상 정의는 CONFIG_DIR/ping-targets.json.
     enabled: process.env.PING_MON_ENABLED !== 'false',
     dbPath: process.env.PING_DB_PATH || dbFile('ping-monitor.db'),
+    // v2.964: 저장(요약) 주기의 기본값 — 화면 '측정 설정' 에서 저장한 값이 있으면 그것이 이긴다(ping/settings.js).
     pollIntervalMs: clampIntervalMs(numEnv(process.env.PING_MON_INTERVAL_MS, 60_000), 60_000, 5_000), // 기본 1분
+    intervalFromEnv: numEnv(process.env.PING_MON_INTERVAL_MS, null) != null,
+    // v2.964(사용자 요청 "ping 은 중단없이 계속 ping"): 대상마다 쉬지 않고 재는 간격의 기본값(1초) — 화면 값이 이긴다.
+    probeIntervalMs: clampIntervalMs(numEnv(process.env.PING_MON_PROBE_MS, 1_000), 1_000, 1_000),
+    probeFromEnv: numEnv(process.env.PING_MON_PROBE_MS, null) != null,
     // v2.605(감사 TIM2605-04): numEnv 는 음수·2^31 초과를 그대로 넘겨 프로브 타이머가 1ms 가 됐다 — [100ms, 60초].
     timeoutMs: reqTimeoutMs(process.env.PING_MON_TIMEOUT_MS, 2_500, { min: 100, max: 60_000 }),
-    // 동시에 프로브할 대상 수 상한(고RTT·다수 대상에서 이벤트 루프/소켓 폭주 방지).
+    timeoutFromEnv: numEnv(process.env.PING_MON_TIMEOUT_MS, null) != null,
+    // 동시에 띄우는 ICMP(ping 프로세스) 수 상한 — 연속 측정에서도 프로세스 폭주를 막는다(TCP 연결 측정은 대상마다 1개라 상한 밖).
     concurrency: Math.max(1, numEnv(process.env.PING_MON_CONCURRENCY, 8)),
     retentionDays: retentionEnv(process.env.PING_MON_RETENTION_DAYS, 365), // ~1년
   },
@@ -236,6 +249,8 @@ export const config = {
   veeamSnap: { dbPath: dbFile('veeam-snap.db') },
   // v2.788 Veeam 일 단위 이력 — 라이선스 사용·만료(B&R) · 저장소 용량(EM) 400일(veeam/historyDb.js · 추이·v2.789 소진 예측).
   veeamHistory: { dbPath: dbFile('veeam-history.db') },
+  // v2.939 GPU 할당율 일 단위 이력 — 법인별 하루 한 점(용량 · 할당) 800일(gpu/allocHistory.js · 추이 · 소진 예상).
+  gpuAllocHistory: { dbPath: process.env.GPU_ALLOC_DB_PATH || dbFile('gpu-alloc.db') },
   capacity: {
     // 리소스 적정성 진단(Capacity Advisor) — 포탈 서버 '호스트 자신'의 CPU/메모리/네트워크/
     // 디스크/이벤트루프를 상시 in-process 로 실측해 시계열(capacity.db)에 적재하고, 1일/1주/1달

@@ -210,9 +210,13 @@ test('④-b insecure(env=false) 는 그 수집기에만 예외다 — 다른 수
   const dev = await fakeDevice('self-b');
   try {
     const insecure = T.deviceTlsConnect({ subsystem: 'rvi-exc', envKey: 'RVI_EXC_TLS', envRaw: 'false', tls: {} });
+    // 전후 비교(2026-11-13 전량 verify 1회 실패 — 1 !== 0): _resetPeerTrustForTest 는 메모리만 비워 앞 시험이 디스크에 남긴 지문을 다시 읽는다.
+    //   앞 시험 가짜 장비의 포트를 OS 가 이 장비에 다시 주면 그 기록이 '이 포트' 로 보였다(재사용 + 디스크 재로드 — 혼자 12회 동시 실행으로는 재현 안 됨, 재로드는 스크립트로 확인).
+    const peersHere = () => PT.listPeers({ kind: 'tls' }).filter((x) => x.port === dev.port).length;
+    const before = peersHere();
     const r1 = await post(insecure, dev.port);
     assert.equal(r1.ok, true, '명시적 예외는 예전처럼 통과해야 한다');
-    assert.equal(PT.listPeers({ kind: 'tls' }).filter((x) => x.port === dev.port).length, 0, '예외 경로가 지문 저장소를 건드렸다');
+    assert.equal(peersHere(), before, '예외 경로가 지문 저장소를 건드렸다');
     const r2 = await post(mk('rvi-other', undefined), dev.port);
     assert.equal(r2.ok, false, '다른 수집기까지 예외가 번졌다');
     const st = T.tlsTrustStatus();

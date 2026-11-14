@@ -14,19 +14,28 @@
  *    (순수 모듈 — 웹 테스트는 node 환경이다).
  */
 
-/** 물리 서버 = 서버 분석 › 구분 Baremetal(미가상화 물리) · 전체 법인. 주소의 셋째 조각이 이 값이면 그 모드다. */
+/** 물리 서버(v2.994 메뉴 이름 'Physical Server · Baremetal') = 서버 분석(Physical Server) › 구분 Baremetal(미가상화 물리) · 전체 법인. 주소의 셋째 조각이 이 값이면 그 모드다. */
 export const BAREMETAL_SEG = 'baremetal';
 
 export const MENU_GROUPS = Object.freeze([
   { id: 'overview', label: 'Overview', tab: 'overview' },
   { id: 'summary', label: 'Summary', tab: 'summary' },
   { id: 'server', label: '서버', children: [
-    // v2.909(가상화 서버 허브 · 시안 docs/design/vm-screen): VM 도구 6개는 이 화면 위 탭이기도 하다 — 그 도구를 열어도 이 메뉴가 켜진다(locate · also).
-    //   도구 키는 그대로(권한 파일의 값). 목록은 views/vms/vmHubText.js HUB_TOOL_KEYS 와 같다(테스트 대조).
-    { id: 'vm', label: '가상화 서버', tab: 'vms', also: ['vmfinder', 'guestos', 'vmtools', 'vm-track', 'curuser', 'real-os'] },
-    { id: 'esxi', label: 'ESXi 호스트', tab: 'hosts' },
-    { id: 'vc', label: 'vCenter', tab: 'vcenters' },
-    { id: 'bm', label: '물리 서버', tool: 'serveranalysis', seg: BAREMETAL_SEG },
+    // v2.915(사용자 요청 '세 메뉴를 하나로' · 설계 docs/design/virt-platform-menu 시안 A · 컨펌 2026-11-07 이름 '가상화 플랫폼'):
+    //   가상화 서버(vms) · ESXi 호스트(hosts) · vCenter(vcenters) 세 항목이 **항목 하나**가 됐다. 탭 id · 해시 · 권한 id 는 그대로다 —
+    //   `tab` 이 처음 여는 탭이고 `tabs` 가 같은 항목이 맡는 나머지 탭(locate · visibleMenu · 저장 메뉴 별칭이 읽는다).
+    //   `also` 는 그 탭 줄의 특수 기능 — views/platform/platformText.js(VM 6 · vCenter 6 · 호스트 4). 도구 키는 그대로(권한 파일의 값).
+    // v2.994(사용자 요청 2026-11-13 · 설계 docs/design/server-menu-rename · 컨펌 '추천대로 전부'): 항목을 둘로 나눴다 —
+    //   'Virtual Machine(VM)'(virt · 처음 여는 탭 vms · 같은 항목이 vcenters 도 맡는다 · VM 6 + vCenter 6 도구) 과
+    //   'Hypervisor'(hv · hosts 탭 · 호스트 4 도구). 탭 id · 해시 · 권한 id · 도구 키는 그대로다. 저장 메뉴 별칭은 이제 tab:vcenters → virt 하나이고
+    //   옛 저장 메뉴의 tab:hosts 는 실제 항목 hv 로 풀린다(sidebar/sideMenu.js itemAliases).
+    { id: 'virt', label: 'Virtual Machine(VM)', tab: 'vms', tabs: ['vcenters'], also: [
+      'vmfinder', 'guestos', 'vmtools', 'vm-track', 'curuser', 'real-os',
+      'vcversion', 'solutions', 'licenses', 'license-expiry', 'cert-expiry', 'change-history',
+    ] },
+    { id: 'hv', label: 'Hypervisor', tab: 'hosts', also: ['host-hygiene', 'esxi', 'hba', 'cluster-check'] },
+    // v2.994: 이름 '물리 서버' → 'Physical Server · Baremetal'(자원관리 › Physical Server 의 구분 Baremetal 바로가기 — id · 도구 · 조각은 그대로)
+    { id: 'bm', label: 'Physical Server · Baremetal', tool: 'serveranalysis', seg: BAREMETAL_SEG },
     // v2.787(사용자 요청 + 시안): Veeam 백업 현황 — 메뉴는 하나, 화면 위 Summary | Detail 탭으로 두 도구를 오간다.
     //   also: 이 항목이 함께 맡는 도구(Detail 화면에서도 이 메뉴가 켜진다 — locate). 도구 키는 그대로(권한 파일·북마크).
     { id: 'veeam', label: 'Backup', tool: 'backup-summary', also: ['backup-detail', 'backup-em', 'backup-run', 'bareos-backup', 'bareos-summary', 'bareos-detail'] },   // v2.788 EM 탭도 같은 항목 · v2.813 이름 'Veeam' → 'Backup'(사용자 요청 — id·도구 키는 그대로) · v2.822 Bareos 탭
@@ -34,12 +43,16 @@ export const MENU_GROUPS = Object.freeze([
   ] },
   { id: 'storage', label: '스토리지', children: [
     { id: 'mon', label: '스토리지 현황', tool: 'storage-mon' },
+    { id: 'ps-inspect', label: 'PowerScale 장비 점검', tool: 'ps-inspect' }, // v2.965 법인별 주간 점검 · 보고서 · Top 10 노드 편중
     { id: 'ds', label: '데이터스토어', tab: 'datastores' },
     { id: 'growth', label: '스토리지 증가량 보고서', tool: 'storage-growth' },
     { id: 'usage', label: '스토리지 사용량 보고서', tool: 'storage-usage' },
     { id: 'track', label: '스토리지 사용량 추이', tool: 'storage-track' },
     { id: 'bmstor', label: '베어메탈 스토리지', tool: 'bm-storage' },
-    { id: 'san', label: 'SAN 스토리지 성능 측정', tool: 'san-switch' },
+    // v2.948(사용자 결정 '독립 도구 · 독립 메뉴 · 기존 메뉴도 보존'): 'san' 항목은 id · 도구 키 그대로 두고 **이름만** 'SAN 스위치 모니터링' 으로 —
+    //   새 항목 'SAN 스토리지 성능'(san-storage)이 그 이름을 쓴다. 옛 라벨 'SAN 스토리지 성능 측정' 은 두 항목을 헷갈리게 한다.
+    { id: 'san', label: 'SAN 스위치 모니터링', tool: 'san-switch' },
+    { id: 'san-storage', label: 'SAN 스토리지 성능', tool: 'san-storage' },
   ] },
   { id: 'network', label: '네트워크', children: [
     { id: 'cvp', label: '전체 네트워크 장비', tool: 'cvp' },
@@ -52,7 +65,7 @@ export const MENU_GROUPS = Object.freeze([
   // v2.779 '백업' → v2.785 'Veeam 현황'(Summary · Detail) 대메뉴는 v2.787 에 '서버 › Veeam' 하나로 옮겼다(사용자 요청 — 탭은 화면 위).
   //   예전에 저장한 내 메뉴의 그룹 id 'backup' 은 sideMenu.js LEGACY_GROUP_LABELS 가 이름을 잇는다.
   { id: 'resource', label: '자원관리', children: [
-    { id: 'sa', label: '서버 분석', tool: 'serveranalysis' },
+    { id: 'sa', label: 'Physical Server', tool: 'serveranalysis' },   // v2.994 이름 '서버 분석' → 'Physical Server'(사용자 요청 — id · 도구 키는 그대로)
     { id: 'gpu', label: 'GPU 인벤토리', tool: 'gpu' },
     { id: 'power', label: '전력 분석', tool: 'powermap' },
   ] },
@@ -74,11 +87,27 @@ export const MENU_GROUPS = Object.freeze([
 
 const segsOf = (hash) => String(hash || '').replace(/^#\/?/, '').split('/').filter(Boolean);
 
-/** 하위 메뉴(또는 하위 메뉴 없는 대메뉴)가 여는 주소. */
+/** 항목이 맡는 탭 전부 — 처음 여는 탭 + 같은 항목의 나머지 탭(v2.915 `tabs`). 도구 항목은 빈 배열. */
+export function tabsOf(item) {
+  if (!item || !item.tab) return [];
+  return [item.tab, ...(Array.isArray(item.tabs) ? item.tabs.filter((t) => t && t !== item.tab) : [])];
+}
+
+/** 하위 메뉴(또는 하위 메뉴 없는 대메뉴)가 여는 주소. v2.915: 여러 탭을 맡는 항목은 visibleMenu 가 고른 '처음 허용 탭'(entryTab)으로.
+ *  v2.994: 메뉴 클릭(App goMenu)도 이 진입 탭으로 간다 — '마지막으로 본 탭' 기억은 없앴다(항목마다 자기 탭이 있다). */
 export function hashOf(item) {
   if (!item) return '#/overview';
   if (item.tool) return `#/tools/${item.tool}${item.seg ? `/${item.seg}` : ''}`;
-  return `#/${item.tab}`;
+  return `#/${menuTabOf(item)}`;
+}
+
+/**
+ * v2.994: 탭 항목을 눌렀을 때 열 탭 — visibleMenu 가 고른 처음 허용 탭(entryTab), 없으면 그 항목의 처음 탭. 도구 항목은 null.
+ * 'Virtual Machine(VM)' 은 VM 탭(inv.vms 가 없으면 vCenter 탭) · 'Hypervisor' 는 호스트 탭. 예전(v2.915~v2.993)의 '마지막으로 본 탭' 은 쓰지 않는다.
+ */
+export function menuTabOf(item) {
+  if (!item || item.tool) return null;
+  return item.entryTab || item.tab || null;
 }
 
 /**
@@ -98,11 +127,11 @@ export function locate(tab, hash, groups = MENU_GROUPS) {
   }
   for (const g of groups) {
     if (!g.children) {
-      if (g.tab === tab) return { group: g.id, child: null };
+      if (tabsOf(g).includes(tab)) return { group: g.id, child: null };
       continue;
     }
     for (const c of g.children) {
-      if (c.tab && c.tab === tab) return { group: g.id, child: c.id };
+      if (c.tab && tabsOf(c).includes(tab)) return { group: g.id, child: c.id };   // v2.915: 같은 항목이 맡는 탭(tabs)도 그 항목
     }
   }
   return { group: null, child: null };
@@ -130,11 +159,15 @@ function groupOfTool(k, seg3, groups) {
  * @param {(k:string)=>boolean} toolOk  도구 잠금이 없는가(toolVisibility.lockReasonOf 가 null)
  */
 export function visibleMenu({ tabOk = () => true, toolOk = () => true } = {}, groups = MENU_GROUPS) {
-  const ok = (it) => (it.tool ? toolOk(it.tool) : tabOk(it.tab));
+  // v2.915: 여러 탭을 맡는 항목은 **하나라도 허용이면** 보이고, 처음 여는 탭은 허용된 것 중 첫 번째(entryTab) — inv.vms 가 없는 계정이
+  //   호스트 · vCenter 까지 잃지 않게(권한 판정은 바뀌지 않는다 — 탭은 App 의 isAllowed 가 그대로 집행한다).
+  const entry = (it) => (it.tool ? null : tabsOf(it).find((t) => tabOk(t)) || null);
+  const ok = (it) => (it.tool ? toolOk(it.tool) : entry(it) != null);
+  const withEntry = (it) => { const e = entry(it); return e && e !== it.tab ? { ...it, entryTab: e } : it; };
   const out = [];
   for (const g of groups) {
-    if (!g.children) { if (g.tab === 'tools' || ok(g)) out.push(g); continue; }
-    const children = g.children.filter(ok);
+    if (!g.children) { if (g.tab === 'tools' || ok(g)) out.push(withEntry(g)); continue; }
+    const children = g.children.filter(ok).map(withEntry);
     if (children.length) out.push({ ...g, children });
   }
   return out;

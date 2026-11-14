@@ -37,7 +37,7 @@ import { getEdgeFleetServers, listEdgeFleet, UNREADABLE_HOLD_MS } from '../centr
 // v2.783(점검 Q2 P-B3): 유령 키 판정이 보는 원격 수집(collector pull) 출처 — 인벤토리·전력·수집 서버 등록부·수신 상태.
 import { remotePowerEntries, getCollectorStatus } from '../collector/state.js';
 import { allRemoteServers } from '../collector/remoteInventory.js';
-import { loadCollectors, registryLoadError as collectorsLoadError } from '../collector/registry.js';
+import { loadCollectors, registryLoadError as collectorsLoadError, normalizeCollectorUrl } from '../collector/registry.js';
 import { summarizeRegistryError, REGISTRY_ERROR_LABEL } from '../util/registryCore.js';
 
 const norm = (s) => String(s || '').trim().toLowerCase();
@@ -55,7 +55,7 @@ const isMeasured = (b) => Number.isFinite(b.watts) && b.watts > 0;
  * @param tags      { 소문자 키 -> 'baremetal'|'virtualization'|'exclude' }
  * @param assign    { 소문자 키 -> 소속 법인(vCenter) id } — 수동 귀속
  */
-export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = {}, assign = {} } = {}) {
+export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = {}, assign = {}, universeDupes = [] } = {}) {
   const vcName = new Map(vcenters.map((v) => [v.id, v.name || v.id]));
   const vcRegion = new Map(vcenters.map((v) => [v.id, v.location?.region || v.region || '']));
   const idx = buildHostIndex(hosts);
@@ -121,6 +121,16 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
   // --- 1) 물리 서버 분류 → 베어메탈 추출 ---
   const bareMetal = [];
   const usedBmKeys = new Set();
+  /*
+   * 다음 점검 ①(2차 · 사용자 결정 2026-11-08 "겹치는 노드의 IP · hostname · service tag 등을 수집해서 사용자가 추가할지 여부를 결정"):
+   *   같은 dk(서비스태그 소문자 || serverId)의 둘째 서버는 예전처럼 bareMetal 에 넣지 않되(분류 · 전력 합 · 서버 분석은 그대로) **조용히 버리지 않는다** —
+   *   bareMetalDupes 에 법인 · 이름 · 원문 서비스태그 · serverId · 출처 · 겹친 상대를 싣는다(베어메탈 사용률의 ‘식별 키가 겹치는 서버’ 표 — 사용자가 추가 여부를 정한다).
+   *   공통 태그(‘To Be Filled By O.E.M.’ 같은 화이트박스 기본값) · 숫자만인 태그와 serverId · 대소문자만 다른 태그가 실제로 이렇게 겹친다(반증 F1 재현).
+   *   ⚠ 서버 분석 응답(routes/insights.js /fleet)에는 싣지 않는다 — 내부용(주소 가림 · 범위 거르기를 그 라우트가 하지 않는다).
+   */
+  const bareMetalDupes = [];
+  const bmByDk = new Map();
+  const dupOf = (k) => { const b = bmByDk.get(k); return b ? { serverId: b.serverId, name: b.name, vcenterId: b.vcenterId || '', source: b.source || '', remoteAgent: b.remoteAgent || '' } : null; };
   const claimedHostKeys = new Set(); // 강제 베어메탈 서버가 점유한 호스트 키 → 호스트 루프에서 가상화 제외(중복 방지)
   const orphanVirt = [];             // 'virtualization' 강제했지만 어느 ESXi 호스트에도 무매칭 → 합성 가상화 행
 
@@ -143,7 +153,15 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
       }
     }
     const dk = norm(s.serviceTag) || norm(s.serverId);
-    if (usedBmKeys.has(dk)) continue;
+    if (usedBmKeys.has(dk)) {
+      const vcd = resolveVc(s.serviceTag, s.serverId, s);
+      bareMetalDupes.push({
+        serverId: s.serverId, fleetId: dk, name: s.serverName || s.host || s.serviceTag || s.serverId, model: s.model || '',
+        serviceTag: s.serviceTag || '', source: s.source, host: s.host || '', hostNames: Array.isArray(s.hostNames) ? s.hostNames.slice(0, 8) : [],
+        remoteAgent: s.remoteAgent || '', forced: t === 'baremetal', tag: t || '', stage: 'classify', dupOf: dupOf(dk), ...vcRow(vcd.id, vcd.src),
+      });
+      continue;
+    }
     usedBmKeys.add(dk);
     const vc = resolveVc(s.serviceTag, s.serverId, s);
     bareMetal.push({
@@ -153,7 +171,28 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
       remoteAgent: s.remoteAgent || '', // 엣지 보고 시 출처 DC/에이전트
       // 엣지 보고분만: 태그가 없었을 때의 serverId(서비스 인벤토리 고정 승계 — 6차 2). 그 밖의 행에는 싣지 않는다.
       ...(s.untaggedServerId ? { untaggedServerId: s.untaggedServerId } : {}),
+      // v2.961: 원격 전력(수집 서버 pull) 출처만 — 그 수집 서버 id(베어메탈 사용률이 ‘엣지 수집 — 어느 엣지’ 를 판정한다 · bmusage/targets.js).
+      //   remoteAgent 의 뜻(엣지 fleet 보고)은 바꾸지 않는다(개요 · 전력 귀속 · 유령 키 · 법인 귀속이 그 뜻으로 읽는다). 내부용 — /insights/fleet 응답에서는 뺀다.
+      ...(s.source === 'remote' && s.collectorId != null && String(s.collectorId).trim() ? { collectorId: String(s.collectorId).trim() } : {}),
       ...vcRow(vc.id, vc.src),
+    });
+    bmByDk.set(dk, bareMetal[bareMetal.length - 1]);
+  }
+
+  // 다음 점검 ①(2차): 서버 목록을 만들 때(buildServerUniverse) 다른 서버와 태그 · 호스트명이 겹쳐 빠진 등록부 서버도 같은 목록으로(stage 'universe').
+  //   분류는 바꾸지 않는다(bareMetal · 전력 합 그대로) — ESXi 호스트를 받치는 것으로 보이거나 제외 태그면 올리지 않는다(베어메탈 후보가 아니다).
+  for (const u of Array.isArray(universeDupes) ? universeDupes : []) {
+    if (!u || typeof u !== 'object') continue;
+    const tu = tagOf(u.serviceTag, u.serverId);
+    if (tu === 'exclude' || tu === 'virtualization') continue;
+    if (tu !== 'baremetal' && matchesHost(u)) continue;
+    const dk = norm(u.serviceTag) || norm(u.serverId);
+    const vcd = resolveVc(u.serviceTag, u.serverId, u);
+    const o = u.owner || null;
+    bareMetalDupes.push({
+      serverId: u.serverId, fleetId: dk, name: u.serverName || u.host || u.serviceTag || u.serverId, model: '', serviceTag: u.serviceTag || '', source: u.source || 'idrac',
+      host: u.host || '', hostNames: u.hostNames || [], remoteAgent: '', forced: tu === 'baremetal', tag: tu || '', stage: 'universe', why: u.why || '',
+      dupOf: dupOf(dk) || (o ? { serverId: o.serverId, name: o.name, vcenterId: o.vcenterId, source: o.source, remoteAgent: o.remoteAgent } : null), ...vcRow(vcd.id, vcd.src),
     });
   }
 
@@ -181,6 +220,14 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
           serviceTag: h.serviceTag || '', source: (m && m.source !== 'vcenter') ? m.source : 'vcenter',
           watts: posOrNull(w), forced: true, tag: 'baremetal', tagKey: hk, ...vcRow(vc.id, vc.src),
         });
+        bmByDk.set(hk, bareMetal[bareMetal.length - 1]);
+      } else {
+        // 다음 점검 ①(2차): 강제 베어메탈 호스트도 같은 hk 가 이미 있으면 조용히 버리지 않는다(위 bareMetalDupes 와 같은 꼴).
+        const vcd = resolveVc(h.serviceTag, h.name, { vcenterId: h.vcenterId, source: 'host' });
+        bareMetalDupes.push({
+          serverId: `host:${h.vcenterId}:${h.name}`, fleetId: hk, name: h.name, model: h.model || '', serviceTag: h.serviceTag || '',
+          source: 'vcenter', host: h.name, hostNames: [h.name], remoteAgent: '', forced: true, tag: 'baremetal', stage: 'classify', dupOf: dupOf(hk), ...vcRow(vcd.id, vcd.src),
+        });
       }
       continue;
     }
@@ -204,6 +251,8 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
       // v2.625: 받치는 iDRAC 등록 id — 사용률 수집(bmusage)이 ESXi 호스트의 iDRAC 을 찾는 연결 고리.
       //   받침이 없거나 엣지 보고분(serverByTag 에서 제외)이면 빈 값이고, 그 호스트는 iDRAC 경로가 없다.
       idracServerId: backed ? (m.serverId || '') : '',
+      // 반증 F4(v2.961): 받침이 원격 전력(수집 서버 pull) 항목이면 그 수집 서버 id — 베어메탈 사용률이 이 호스트를 ‘엣지 수집 — 그 엣지’ 로 판정한다(내부용 · /insights/fleet 응답에서 뺀다).
+      ...(backed && m.source === 'remote' && m.collectorId != null && String(m.collectorId).trim() ? { idracCollectorId: String(m.collectorId).trim() } : {}),
       // v2.733(C2-02): vCenter 추정 전력을 지금 값으로 쓰지 않은 사유(getFleetInventory 가 비운 호스트만 — 없으면 싣지 않는다).
       ...(h.powerUnread ? { powerUnread: h.powerUnread } : {}),
     });
@@ -251,12 +300,14 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
     syntheticVirt: virtualizationHosts.filter((h) => h.synthetic).length,
     bareMetal: bareMetal.length,
     bareMetalMeasured: measured.length,
-    bareMetalWatts: round(bareMetalWatts) || 0,
-    bareMetalKw: Math.round(bareMetalWatts / 100) / 10,
+    // v2.977(전체 점검): 측정한 서버가 0대면 합은 '모름'(null) — 0 W 가 아니다. 일부만 측정이면 부분 합이므로 화면이 '측정 n / 전체 m' 을 함께 쓴다.
+    bareMetalWatts: measured.length ? round(bareMetalWatts) : null,
+    bareMetalKw: measured.length ? Math.round(bareMetalWatts / 100) / 10 : null,
     bareMetalAssigned: bareMetal.filter((b) => b.vcenterId).length,
     bareMetalUnassigned: bareMetal.filter((b) => !b.vcenterId).length,
     bareMetalInferred: bareMetal.filter((b) => b.vcSource === 'inferred').length,
     forcedBareMetal: bareMetal.filter((b) => b.forced).length,
+    bareMetalDupes: bareMetalDupes.length,   // 다음 점검 ①(2차): 같은 dk 라 bareMetal 에 넣지 않은 서버 수(목록은 bareMetalDupes — 베어메탈 사용률 표)
     excluded: Object.entries(tags).filter(([k, v]) => v === 'exclude' && liveKeys.has(k)).length, // live 제외만
     ghostKeys,
   };
@@ -266,7 +317,7 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
   for (const b of bareMetal) {
     if (b.vcenterId && !knownVcIds.has(b.vcenterId)) { knownVcIds.add(b.vcenterId); vcList.push({ id: b.vcenterId, name: b.vcenterId, region: '', external: true }); }
   }
-  return { virtualizationHosts, bareMetal, byVcenter, vcenters: vcList, summary, liveKeys: [...liveKeys] };
+  return { virtualizationHosts, bareMetal, bareMetalDupes, byVcenter, vcenters: vcList, summary, liveKeys: [...liveKeys] };
 }
 
 /**
@@ -286,20 +337,39 @@ async function buildServerUniverse(hosts, vcSkip = {}) {
   const omeEntryVc = new Map(registry.filter((s) => s.type === 'ome' && s.vcenterId).map((s) => [s.id, s.vcenterId]));
 
   const extras = [];
+  /*
+   * 다음 점검 ①(2차 · 사용자 결정): 등록부(iDRAC)의 전력 미보고 서버가 이미 잡힌 **다른 서버**와 서비스태그 · 호스트명이 같아 빠지면(공통 태그 ‘To Be Filled By O.E.M.’ 이 대표)
+   *   예전에는 아무 데도 남지 않았다 — universeDupes 로 남겨 classifyFleet 이 bareMetalDupes(stage 'universe')로 올린다. 같은 등록 id 가 이미 있으면(전력 보고분 = 같은 장비) 남기지 않는다.
+   */
+  const universeDupes = [];
+  const seenIds = new Set(measured.map((s) => String(s.serverId ?? '')));
+  const ownerByKey = new Map();
+  for (const m of measured) { for (const k of [norm(m.serviceTag), ...(m.hostNames || []).map(norm)]) if (k && !ownerByKey.has(k)) ownerByKey.set(k, m); }
+  const noteUniverse = (s, why, k, serviceTag = s.serviceTag) => {
+    if (seenIds.has(String(s.id))) return;
+    const o = ownerByKey.get(k) || null;
+    universeDupes.push({ serverId: s.id, serverName: s.name || '', serviceTag: String(serviceTag || '').trim(), host: norm(s.host), hostNames: (s.hostNames || []).map(norm).filter(Boolean).slice(0, 8),
+      vcenterId: s.vcenterId || '', source: 'idrac', why, owner: o ? { serverId: o.serverId, name: o.serverName || o.host || '', vcenterId: o.vcenterId || '', source: o.source || '', remoteAgent: o.remoteAgent || '' } : null });
+  };
   for (const s of registry) {
     if (s.type === 'ome') continue;
     const keys = matchKeys(s);
     const regTag = norm(s.serviceTag);
-    if ((regTag && seenTag.has(regTag)) || keys.some((k) => seenHost.has(k))) continue; // 1차 빠른 skip
+    if ((regTag && seenTag.has(regTag)) || keys.some((k) => seenHost.has(k))) { // 1차 빠른 skip
+      noteUniverse(s, regTag && seenTag.has(regTag) ? 'tag' : 'host', regTag && seenTag.has(regTag) ? regTag : keys.find((k) => seenHost.has(k)));
+      continue;
+    }
     const inv = getInventory(s.id);
     const serviceTag = (inv?.system?.serviceTag || s.serviceTag || '').trim();
     const tag = norm(serviceTag);
-    if (tag && seenTag.has(tag)) continue;
+    if (tag && seenTag.has(tag)) { noteUniverse(s, 'tag', tag, serviceTag); continue; }
     const hostNames = [...new Set([...(s.hostNames || []).map(norm), tag].filter(Boolean))];
     extras.push({
       serverId: s.id, serverName: s.name, serviceTag, model: (inv?.system?.model || '').trim(),
       host: norm(s.host), hostNames, vcenterId: s.vcenterId || '', watts: null, source: 'idrac',
     });
+    seenIds.add(String(s.id));
+    for (const k of [tag, ...keys]) if (k && !ownerByKey.has(k)) ownerByKey.set(k, extras[extras.length - 1]);
     if (tag) seenTag.add(tag);
     keys.forEach((k) => seenHost.add(k));
   }
@@ -318,7 +388,9 @@ async function buildServerUniverse(hosts, vcSkip = {}) {
     if (nameKey) seenHost.add(nameKey);
   }
 
-  return [...measured, ...extras];
+  const out = [...measured, ...extras];
+  out.universeDupes = universeDupes;   // 배열 속성(직렬화되지 않는다 — getFleetInventory 가 classifyFleet 에 넘긴다)
+  return out;
 }
 
 /*
@@ -354,11 +426,56 @@ function hostListUnknownVcenters(snap) {
 const addKey = (set, v) => { const k = norm(v); if (k) set.add(k); };
 
 /**
+ * v2.961: 수집 서버 등록부 한 번 읽기 — { list, error }. 예전 fleetKeySources 와 같은 두 호출(못 읽음 표지 → 목록)이고,
+ *   getFleetInventory 가 이 결과를 유령 키 판정과 원격 출처 이름 색인(remoteCollectorIndex)에 같이 쓴다(읽기 횟수는 예전과 같다).
+ */
+function readCollectorsOnce() {
+  let error = null;
+  try { error = collectorsLoadError() || null; } catch (e) { error = { reason: String(e?.message || e) }; }
+  let list = [];
+  try { list = loadCollectors(); } catch (e) { list = []; error = error || { reason: String(e?.message || e) }; }
+  return { list: Array.isArray(list) ? list : [], error };
+}
+
+/**
+ * v2.961: 원격 수집 서버 id → 등록부 이름(엣지 보관분 표의 agent 와 같은 값) 색인 — 베어메탈 사용률의 ‘엣지 수집 — 어느 엣지’ 판정 입력(bmusage/targets.js remoteCollectorNameOf).
+ *   못 읽었으면 readable:false(이름을 추측하지 않는다). 토큰 · URL 은 싣지 않는다(이름만). 원 id 와 소문자 id 둘 다 넣는다(등록부는 id 대소문자 중복을 합친다).
+ *   반증 F2 · 재확인 R1: 별칭 색인 — fleet 보고 경로의 엣지 이름(인증 agent — 등록 id 가 원칙)을 같은 name 으로 맞춘다(targets.js canonicalAgentRef).
+ *   byId(소문자 id → {id, name}) 를 **전 항목에서 먼저** 보고, 없을 때만 byName(소문자 name → 목록 앞 항목). 예전(항목마다 id → name, 목록 순서)은 앞 항목의 name 이
+ *   뒤 항목의 id(= 그 엣지의 인증 이름)와 같으면 그 엣지 서버를 앞 항목(다른 엣지)으로 묶었다(재현 clashA).
+ *   firstAlias(소문자 별칭 → 그 별칭이 가리키는 첫 항목 id — collector/registry.js findCollectorByName 과 같은 순서: 목록 앞 항목 · 항목마다 id 또는 name) —
+ *   보이는 이름으로 당기기 · 중앙에서 켜기를 하면 어느 수집 서버로 가는지. 위임 행의 이름이 다른 항목으로 가면 그 사실을 행에 싣는다(agentClash).
+ *   name 이 빈 항목은 이름 색인에 넣지 않는다(받은 이름 그대로 둔다 — 지어내지 않는다).
+ *   2차 재확인: urlById(소문자 id → 정규화 URL — collector/registry.js normalizeCollectorUrl 그대로) — 겹친 두 항목이 **같은 엣지(같은 URL)** 를 가리키면 겹침이 아니다
+ *   (같은 엣지의 옛 수동 등록 + 자기등록처럼 같은 name 이 둘이어도 당기기는 같은 엣지로 간다). URL 이 빈 항목은 같은 엣지라고 단정하지 않는다('' 는 비교하지 않는다).
+ */
+export function remoteCollectorIndex(col) {
+  const names = new Map();
+  const byId = new Map();
+  const byName = new Map();
+  const firstAlias = new Map();
+  const urlById = new Map();
+  if (!col || col.error || !Array.isArray(col.list)) return { readable: false, names, byId, byName, firstAlias, urlById };
+  for (const c of col.list) {
+    if (!c || typeof c !== 'object') continue;
+    const id = String(c.id ?? '').trim();
+    if (!id) continue;
+    const name = String(c.name ?? '').trim();
+    names.set(id, name);
+    if (!names.has(id.toLowerCase())) names.set(id.toLowerCase(), name);
+    if (!byId.has(id.toLowerCase())) { byId.set(id.toLowerCase(), { id, name }); urlById.set(id.toLowerCase(), normalizeCollectorUrl(c.url)); }
+    if (name && !byName.has(name.toLowerCase())) byName.set(name.toLowerCase(), { id, name });
+    for (const k of [id.toLowerCase(), name.toLowerCase()]) if (k && !firstAlias.has(k)) firstAlias.set(k, id);
+  }
+  return { readable: true, names, byId, byName, firstAlias, urlById };
+}
+
+/**
  * 유령 키 판정 입력 — { live:Set<소문자 키>, unreadable:[{source, id?, reason, registry?}] }.
  * @param {object} snap  store.get() 스냅샷
  * @param {{now?:number}} [o]
  */
-export function fleetKeySources(snap, { now = Date.now() } = {}) {
+export function fleetKeySources(snap, { now = Date.now(), collectors = null } = {}) {
   const live = new Set();
   const unreadable = [];
   if (!snap || typeof snap !== 'object') unreadable.push({ source: 'snapshot', reason: '인벤토리 스냅샷이 아직 없습니다(기동 직후)' });
@@ -395,8 +512,10 @@ export function fleetKeySources(snap, { now = Date.now() } = {}) {
     addKey(live, s.serviceTag); addKey(live, s.inv?.system?.serviceTag); addKey(live, s.name); addKey(live, s.host); addKey(live, s.hostName);
     for (const n of (Array.isArray(s.hostNames) ? s.hostNames : [])) addKey(live, n);
   }
-  if (collectorsLoadError()) unreadable.push({ source: 'collector-registry', registry: true, reason: '수집 서버 등록부(collectors.json)를 읽지 못했습니다' });
-  for (const c of loadCollectors()) {
+  // v2.961: getFleetInventory 가 이미 읽은 등록부를 넘기면 그것을 쓴다(한 요청에 같은 파일을 다시 읽지 않는다 — readCollectorsOnce).
+  const col = collectors && Array.isArray(collectors.list) ? collectors : readCollectorsOnce();
+  if (col.error) unreadable.push({ source: 'collector-registry', registry: true, reason: '수집 서버 등록부(collectors.json)를 읽지 못했습니다' });
+  for (const c of col.list) {
     if (!c || !c.id || !c.url) continue; // URL 이 없는 항목은 당기지 않는다(받은 적도 없다)
     if (c.enabled === false) {
       unreadable.push({ source: 'collector', id: String(c.id), reason: `수집 서버 '${c.name || c.id}' 이(가) 비활성이라 그 현장 서버 목록을 모릅니다(다시 켜서 한 번 수집되거나, 수집 서버를 삭제하면 정리할 수 있습니다)` });
@@ -453,8 +572,8 @@ export function fleetLiveKeys(snap) {
  * ghostKeys 는 tags ∪ assign 의 **고유 키 수**(화면 숫자와 미리보기 숫자가 같은 단위), tags·assign 은 저장소별 키 목록.
  * @returns {{ ghostKeys:number, keys:string[], tags:string[], assign:string[], unreadable:object[], blocked:boolean }}
  */
-export function fleetGhostReport(snap, { tags = loadFleetTags(), assign = loadFleetAssign(), now = Date.now() } = {}) {
-  const { live, unreadable } = fleetKeySources(snap, { now });
+export function fleetGhostReport(snap, { tags = loadFleetTags(), assign = loadFleetAssign(), now = Date.now(), collectors = null } = {}) {
+  const { live, unreadable } = fleetKeySources(snap, { now, collectors });
   const tagKeys = Object.keys(tags || {}).filter((k) => !live.has(k)).sort();
   const assignKeys = Object.keys(assign || {}).filter((k) => !live.has(k)).sort();
   const keys = [...new Set([...tagKeys, ...assignKeys])].sort();
@@ -500,17 +619,28 @@ export async function getFleetInventory(snap) {
   const result = classifyFleet({
     hosts, vcenters: snap?.vcenters || [], servers,
     tags: loadFleetTags(), assign: loadFleetAssign(),
+    universeDupes: servers.universeDupes || [],   // 다음 점검 ①(2차)
   });
   result.summary.vcPowerSkipped = vcPowerSkippedOf(hostsIn, vcSkip); // v2.733(C2-02)
   // v2.783(점검 Q2 P-B3): 화면의 유령 키 수는 prune 미리보기와 **같은 판정**(fleetGhostReport)이다 — classifyFleet 의 ghostKeys 는
   //   순수 함수 입력(servers)만 보므로 여기서 덮는다. 못 읽은 출처가 있으면 그 종류만 싣는다(이름·사유는 관리자 미리보기에서).
+  // v2.961: 수집 서버 등록부는 여기서 한 번 읽어 유령 키 판정과 원격 출처 이름 색인에 같이 쓴다(예전과 같은 읽기 횟수).
+  let col = null;
+  try { col = readCollectorsOnce(); } catch { col = null; }
   try {
-    const g = fleetGhostReport(snap);
+    const g = fleetGhostReport(snap, { collectors: col });
     result.summary.ghostKeys = g.ghostKeys;
     result.summary.ghostBlocked = [...new Set(g.unreadable.map((u) => u.source))];
   } catch { result.summary.ghostBlocked = ['error']; }
   const edgeAgents = new Set(result.bareMetal.filter((b) => b.remoteAgent).map((b) => b.remoteAgent));
   result.summary.edgeReported = result.bareMetal.filter((b) => b.remoteAgent).length;
   result.summary.edgeAgents = edgeAgents.size;
-  return { ...result, mode: instanceMode() };
+  const out = { ...result, mode: instanceMode() };
+  /*
+   * v2.961: 원격 수집 서버 id → 등록부 이름 색인 — **열거되지 않는 속성**(JSON 응답 · 펼침 복사에 실리지 않는다 — universeDupes 와 같은 내부용).
+   *   bmusage/poller.js currentTargets 가 resolveTargets 에 넘긴다(‘엣지 수집 — 어느 엣지’). 등록부를 못 읽었으면 readable:false.
+   *   세대: 이 객체는 getFleetInventory 를 부를 때마다 새로 만든다(이름이 바뀌면 다음 호출에 반영 · /insights/fleet 의 snapMemo 는 등록부 저장이 fleetRev 를 올려 무효화한다).
+   */
+  Object.defineProperty(out, 'remoteCollectors', { value: remoteCollectorIndex(col), enumerable: false });
+  return out;
 }

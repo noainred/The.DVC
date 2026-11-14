@@ -55,6 +55,9 @@ const PENDING_HOLD_MS = 2 * 3_600_000; // 재개 대기 대상을 틱이 건너�
 
 const _inflight = new Map();   // targetId → { since, trigger, promise }
 const _lastTry = new Map();    // targetId → { ts, ok, durationMs }
+// v2.954(개선 검토 3번): 대상별 마지막 실행 방식 — 분리 실행(nohup)이 실장비에서 동작했는지를 중앙 '법인별 실환경 확인' 이 판정한다(메모리 · 엣지 재시작 뒤엔 다음 조사까지 비어 있다).
+const _lastRun = new Map();    // targetId → { at, mode, attached?, fallback? }
+const LAST_RUN_MAX = 200;
 const _queue = new Map();      // targetId → { since, trigger, central? } — 동시 실행 상한에 걸려 기다리는 '지금 수집'(TIMING-02)
 let _draining = null;          // 진행 중인 대기열 꺼내기(같이 기다린다)
 let _drainAgain = false;
@@ -246,6 +249,10 @@ function runOne(t, trigger, manual, { resumeOf = null } = {}) {
       const saved = await db.insertScan(rec);
       if (!saved.ok) note('error', `${t.label || t.id}: 결과를 저장하지 못했습니다 — ${saved.error}`);
       _lastTry.set(t.id, { ts: rec.ts, ok: rec.ok, durationMs: rec.durationMs ?? null });
+      if (rec.runMode) {
+        if (!_lastRun.has(t.id) && _lastRun.size >= LAST_RUN_MAX) _lastRun.delete(_lastRun.keys().next().value);
+        _lastRun.set(t.id, { at: rec.ts, mode: rec.runMode, ok: rec.ok === true, detach: t.detach !== false, ...(rec.attached ? { attached: true } : {}), ...(rec.detachFallback ? { fallback: String(rec.detachFallback).slice(0, 200) } : {}) });
+      }
       const how = rec.attached ? ' · 재시작 전 장비에서 돌던 du 결과를 이어 받음' : rec.runMode === 'attached-fallback' ? ` · 분리 실행 불가로 직접 실행(${rec.detachFallback || '사유 없음'})` : '';
       if (rec.ok) note('info', `${t.label || t.id}: 폴더 ${rec.count.toLocaleString()}개 조사 (${Math.round(rec.durationMs / 1000)}초)${rec.errLines ? ` · 권한 오류 ${rec.errLines}줄` : ''}${how}${prior ? ' · 자동 재개' : ''}`);
       else note('error', `${t.label || t.id}: ${rec.error}${prior ? ' (자동 재개)' : ''}`);
@@ -420,6 +427,7 @@ export function isiduPollerStatus() {
       resumes: j.recent.map((x) => ({ targetId: x.key, at: x.at, outcome: x.outcome, note: x.note, resumes: x.resumes })),
     }; })(),
     ...(_demoSkipped ? { demoSkipped: _demoSkipped } : {}),
+    lastRuns: [..._lastRun.entries()].slice(-20).map(([targetId, v]) => ({ targetId, ...v })),   // v2.954: 실행 방식(분리 실행 확인)
     recent: _recent.slice(0, 30),
   };
 }
@@ -430,7 +438,7 @@ export function startIsiduPoller() {
 }
 
 export function _resetForTest() {
-  _inflight.clear(); _lastTry.clear(); _queue.clear(); _seeded = false; _recent.length = 0; _lastError = null; _demoSkipped = 0;
+  _inflight.clear(); _lastTry.clear(); _lastRun.clear(); _queue.clear(); _seeded = false; _recent.length = 0; _lastError = null; _demoSkipped = 0;
   _runDrops.length = 0; _runDropsOmitted = 0;
   for (const q of queuedOf(KIND)) scanDequeued(KIND, q.key);
 }

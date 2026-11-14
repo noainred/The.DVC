@@ -19,6 +19,7 @@ const EmptyInvModal = React.lazy(() => import('./collectors/EmptyInvModal.jsx'))
 import TransportPanel from './collectors/TransportPanel.jsx';
 import { transportBadge, formHttpNote, importHttpNote } from './collectors/transportText.js';
 import { upgradeCell, autoPushLine } from './collectorUpgradeText.js'; // v2.775 업그레이드 결과 이유·시각
+import { autoOptionText, matchNote, matchSortText, selectValue, conflictChoices, assignFailText, saveText as dcSaveText } from './collectors/collectorDcText.js'; // v2.972: 수집 서버 ↔ 법인 매칭
 import { edgeSyncLine, syncRunText } from './upgradeEdgeSyncText.js'; // v2.865: 엣지 자동 업그레이드 한 줄 + '구버전 엣지 밀어 넣기'
 
 // S-09: 새 기본값은 https:// — 평문 http:// 는 사유를 적은 예외로만 등록된다.
@@ -45,6 +46,27 @@ export default function Collectors() {
   const [csvModal, setCsvModal] = useState(null); // 'export' | 'import' | null — CSV 일괄 관리(v2.338)
   const csvOk = canCsv(); // v2.643: CSV 가져오기/내보내기는 관리자 이상 + data.csv 권한만
   const [diag, setDiag] = useState(null); // { collector, cards[] } — 경고 배지 상세(v2.437)
+  const [dcBusy, setDcBusy] = useState(() => new Set());  // v2.972: 법인 매칭 저장 중인 수집 서버 id들(그 행만 잠근다 — 두 행을 이어 저장해도 서로 풀지 않게)
+  const [dcsError, setDcsError] = useState(null);           // v2.972: 법인 목록을 못 읽으면 매칭 칸이 왜 잠겼는지 말한다
+  // v2.972: 수집 서버 ↔ 법인(DataCenter) 매칭 저장 — 수동 고정(🔒)을 바꾸지 않는 전용 경로. '' = 해제(이름 맞춤).
+  const saveDc = async (c, dcId) => {
+    setDcBusy((s) => new Set(s).add(c.id)); setBanner(null);
+    try { const text = dcSaveText(await putJson(`/admin/collectors/${encodeURIComponent(c.id)}/datacenter`, { datacenterId: dcId }), c.id, dcs); await load(); setBanner({ ok: true, text }); }
+    catch (e) { setBanner({ ok: false, text: e.message }); }
+    finally { setDcBusy((s) => { const n = new Set(s); n.delete(c.id); return n; }); }
+  };
+  // v2.986: 불일치 해소 — vCenter 의 법인 할당을 이 수집 서버의 법인으로(PUT /admin/datacenters/assign — 기존 경로 · 감사). 그 vCenter 의 모든 서버 법인이 바뀌므로 묻는다.
+  const assignVcToDc = async (c, ch) => {
+    if (!window.confirm(ch.confirm)) return;
+    setDcBusy((s) => new Set(s).add(c.id)); setBanner(null);
+    try {
+      const r = await putJson('/admin/datacenters/assign', { entries: [{ vcenterId: ch.vcenterId, datacenterId: ch.datacenterId }] });
+      const fail = assignFailText(r);   // 반증 D3: ok 여도 바뀐 것이 없으면 성공으로 말하지 않는다
+      if (fail) throw new Error(fail);
+      await load(); setBanner({ ok: true, text: `vCenter ‘${ch.vcenterId}’ 의 법인 할당을 바꿨습니다 — Physical Server · 통합 서버 인벤토리 · 전력 분석이 같은 법인을 봅니다.` });
+    } catch (e) { setBanner({ ok: false, text: e.message }); }
+    finally { setDcBusy((s) => { const n = new Set(s); n.delete(c.id); return n; }); }
+  };
 
   const load = async () => {
     try { setData(await fetchJson('/admin/collectors')); setError(null); }
@@ -87,7 +109,9 @@ export default function Collectors() {
   useEffect(() => {
     load(); loadIngest(); loadAgentTok();
     fetchJson('/health').then((h) => setCentral(h.version)).catch(() => {});
-    fetchJson('/admin/datacenters').then((d) => setDcs(d.datacenters || [])).catch(() => {}); // 데이터센터 콤보박스 옵션
+    // v2.985(P1 Chromium 판독): 법인 목록 조회가 수집 서버 라벨로 법인을 백필한다(routes/admin/collectorsDc.js) — 그 전에 받은 수집 서버 목록의
+    //   매칭(dcMatch)은 다음 15초 주기까지 '맞는 법인 없음' 으로 남았다. 법인 목록을 받은 뒤 한 번 다시 읽는다.
+    fetchJson('/admin/datacenters').then((d) => { setDcs(d.datacenters || []); setDcsError(null); load(); }).catch((e) => setDcsError(e.message || '법인 목록을 읽지 못했습니다.')); // 데이터센터 콤보박스 옵션 · v2.972 법인 매칭
 
     const t = setInterval(() => { load(); loadIngest(); }, 15_000);
     return () => { clearInterval(t); if (reloadTimer.current) clearTimeout(reloadTimer.current); };
@@ -164,7 +188,7 @@ export default function Collectors() {
   const save = async () => {
     setBusy(true); setMsg(null);
     try {
-      const { _origUrl, ...payload } = form; // 화면 전용 필드는 보내지 않는다
+      const { _origUrl, datacenterId: _dcIgnored, ...payload } = form; // 화면 전용 필드는 보내지 않는다 · 법인 매칭(datacenterId)은 전용 경로로만(서버도 이 본문 값을 무시한다 — v2.972 반증 F1)
       const r = editing ? await putJson(`/admin/collectors/${encodeURIComponent(form.id)}`, payload) : await postJson('/admin/collectors', payload);
       const dropNote = r.ok ? droppedSecretNote(r) : ''; // v2.607 WEB2607-03: URL 이 바뀌어 저장 토큰 폐기(서버가 싣는 경우)
       if (r.ok && dropNote) { await load(); setMsg({ ok: false, text: dropNote }); }
@@ -278,6 +302,7 @@ export default function Collectors() {
       case 'version': return s.version || '';
       case 'sync': return s.at || 0;
       case 'enabled': return c.enabled === false ? 0 : 1;
+      case 'dcmatch': return matchSortText((data.dcMatch || {})[c.id], dcs);
       default: return c.id || '';
     }
   };
@@ -459,23 +484,51 @@ export default function Collectors() {
       <div className="table-wrap">
         <STable>
           <thead><tr>
-            {th('id', 'ID')}{th('name', '이름')}{th('datacenter', '데이터센터')}{th('url', 'URL')}{th('state', '상태')}{th('hosts', '호스트')}{th('version', '버전')}{th('sync', '최근 동기화')}{th('enabled', '수집')}<th className="right">작업</th>
+            {/* v2.985(P1): 1440px(설정 메뉴가 열린 표 영역 약 894px)에서 '작업' 열이 스크롤 밖이던 것 — 이름은 ID 아래, 엣지 라벨은 법인 매칭 칸 안,
+                동기화 시각은 버전 아래, 수집 켜짐은 상태 칸, 작업 버튼은 세로로. 정렬 키(id · dcmatch · url · state · hosts · version)는 그대로. */}
+            {th('id', 'ID · 이름')}{th('dcmatch', '법인 매칭', { title: '이 수집 서버(Agent)가 수집한 서버를 어느 법인(DataCenter)으로 볼지 — Physical Server · 통합 서버 인벤토리 · 전력 분석 · IP 관리가 씁니다. 아래 작은 글자는 엣지가 보낸 데이터센터 라벨입니다.' })}{th('url', 'URL')}{th('state', '상태 · 수집')}{th('hosts', '호스트')}{th('version', '버전 · 동기화')}<th className="right">작업</th>
           </tr></thead>
           <tbody>
-            {sortedList.length === 0 && <tr><td colSpan={10} className="center muted" style={{ padding: 28 }}>등록된 수집 서버가 없습니다. “+ 수집 서버 추가”로 등록하세요.</td></tr>}
+            {sortedList.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 28 }}>등록된 수집 서버가 없습니다. “+ 수집 서버 추가”로 등록하세요.</td></tr>}
             {sortedList.map((c) => {
               const s = status[c.id];
               const cards = rowCards(c, s, ident);
               return (
                 <tr key={c.id}>
-                  <td><b>{c.id}</b></td>
-                  <td>{c.name}</td>
-                  <td>{c.datacenter ? <span className="badge blue">{c.datacenter}</span> : <span className="muted">—</span>}</td>
-                  <td className="muted">{c.url}
+                  <td style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: 170 }}><b>{c.id}</b>{c.name && c.name !== c.id && <div className="muted" style={{ fontSize: 11 }}>{c.name}</div>}</td>
+                  <td style={{ minWidth: 150, whiteSpace: 'normal' }}>
+                    {(() => {
+                      const m = (data.dcMatch || {})[c.id] || null;
+                      const note = matchNote(m, dcs);
+                      return (
+                        <>
+                          <Select sort={false} className="select" value={selectValue(m)} disabled={dcBusy.has(c.id) || !dcs.length} onChange={(e) => saveDc(c, e.target.value)} title={!dcs.length ? (dcsError ? `법인 목록을 읽지 못했습니다: ${dcsError}` : '설정 › DataCenter(법인)에 법인이 없습니다') : undefined}
+                            style={{ padding: '3px 6px', fontSize: 12, maxWidth: 180 }} aria-label={`${c.id} 법인 매칭`}>
+                            <option value="">{autoOptionText(m, dcs)}</option>
+                            {m?.stale && m.picked && <option value={m.picked}>{`(지워진 법인) ${m.picked}`}</option>}
+                            {dcs.map((x) => <option key={x.id} value={x.id}>{x.name || x.id}</option>)}
+                          </Select>
+                          {note.text && <div style={{ fontSize: 11, marginTop: 2, maxWidth: 200, color: note.tone === 'warn' ? 'var(--amber)' : note.tone === 'ok' ? 'var(--green)' : 'var(--text-dim)' }}>{note.text}</div>}
+                          {conflictChoices(m, dcs).map((ch) => (
+                            <div key={ch.key} style={{ fontSize: 11, marginTop: 4, maxWidth: 220, color: 'var(--amber)', whiteSpace: 'normal' }}>
+                              ⚠ {ch.text}
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 3 }}>
+                                <button type="button" className="tab" style={{ fontSize: 11, padding: '2px 6px' }} disabled={dcBusy.has(c.id)} onClick={() => saveDc(c, ch.toCollector.datacenterId)}>{ch.toCollector.label}</button>
+                                <button type="button" className="tab" style={{ fontSize: 11, padding: '2px 6px' }} disabled={dcBusy.has(c.id)} onClick={() => assignVcToDc(c, ch.toVcenter)}>{ch.toVcenter.label}</button>
+                              </div>
+                            </div>
+                          ))}
+                          <div className="muted" style={{ fontSize: 11, marginTop: 2 }} title="엣지가 자기등록 때 보낸 데이터센터 라벨(자유 글자)">엣지 라벨 {c.datacenter ? <span className="badge blue" style={{ fontSize: 10 }}>{c.datacenter}</span> : '—'}</div>
+                        </>
+                      );
+                    })()}
+                  </td>
+                  <td className="muted" style={{ whiteSpace: 'normal', maxWidth: 170 }}>
+                    <div title={c.url} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.url}</div>
                     {c.managed && <span className="badge gray" style={{ marginLeft: 6 }} title="관리자가 수동 수정한 항목 — 엣지 자기등록이 URL/토큰을 덮어쓰지 않습니다">🔒 고정</span>}
                     {(() => { const b = transportBadge(c.transport); return b ? <span className={`badge ${b.tone}`} style={{ marginLeft: 6 }} title={b.title}>{b.label}</span> : null; })()}
                   </td>
-                  <td>{!s ? <span className="badge gray">대기</span>
+                  <td style={{ whiteSpace: 'normal', maxWidth: 160 }}>{!s ? <span className="badge gray">대기</span>
                     : (s.ok && s.degraded) ? <span className="badge amber" title={`일시적 연결 오류: ${s.error || ''} — 직전 데이터·온라인 유지 중(연속 실패 ${s.fails || 1}회). 한 번 더 실패하면 '오류'로 내려갑니다.`}>저하</span>
                       : s.ok ? <span className="badge green">정상</span>
                         : <span className="badge red" title={s.error}>오류</span>}
@@ -494,22 +547,24 @@ export default function Collectors() {
                         onClick={() => setDiag({ collector: c, cards })}>
                         {card.badge} ⓘ
                       </button>
-                    ))}</td>
+                    ))}
+                    <div style={{ marginTop: 3 }}>{c.enabled === false ? <span className="badge gray">수집 중지</span> : <span className="badge green" style={{ fontSize: 10 }}>수집 on</span>}</div></td>
                   <td className="tabular">{s?.ok ? (s.hosts ?? 0).toLocaleString() : '—'}</td>
                   <td className="muted">
                     {s?.version ? <>v{s.version}{central && s.version !== central && <span className="badge amber" style={{ marginLeft: 6 }} title={`중앙 v${central}`}>구버전</span>}</> : '—'}
+                    <div className="muted" style={{ fontSize: 11 }} title="최근 동기화">동기화 {s?.at ? new Date(s.at).toLocaleTimeString('ko-KR') : '—'}</div>
                     {/* v2.775: 실패 이유·시각·자동 여부까지(예전에는 '업그레이드 실패' 만) */}
                     {upgradeCell(s?.upgrade) && (() => { const u = upgradeCell(s.upgrade); return (
                       <div style={{ fontSize: 11, color: u.tone === 'ok' ? 'var(--green)' : 'var(--red)', whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: 320 }}>
                         {u.text}{u.reason && <div className="muted" style={{ fontSize: 11 }}>{u.reason}</div>}
                       </div>); })()}
                   </td>
-                  <td className="muted">{s?.at ? new Date(s.at).toLocaleTimeString('ko-KR') : '—'}</td>
-                  <td>{c.enabled === false ? <span className="badge gray">중지</span> : <span className="badge green">on</span>}</td>
-                  <td className="right nowrap">
-                    <button className="tab" disabled={busy} onClick={() => upgrade(c.id)}>업그레이드</button>
-                    <button className="tab" onClick={() => openEdit(c)}>수정</button>
-                    <button className="tab" style={{ color: 'var(--red)' }} onClick={() => remove(c)}>삭제</button>
+                  <td className="right">
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'stretch' }}>
+                      <button className="tab" disabled={busy} onClick={() => upgrade(c.id)}>업그레이드</button>
+                      <button className="tab" onClick={() => openEdit(c)}>수정</button>
+                      <button className="tab" style={{ color: 'var(--red)' }} onClick={() => remove(c)}>삭제</button>
+                    </div>
                   </td>
                 </tr>
               );

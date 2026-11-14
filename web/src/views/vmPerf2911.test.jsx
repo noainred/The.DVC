@@ -15,8 +15,8 @@ describe('① vCenter 트리 VM 클릭 = 드로어(가상화 서버와 같은 Vm
     expect(s).toMatch(/import VmDrawer from '\.\/vms\/VmDrawer\.jsx'/);
     expect(s).toMatch(/treeVmRows\(\{ view, query, matches, cap: SEARCH_CAP, clusters, vmsByHost, folderTree \}\)/);
     expect(s).toMatch(/<VmDrawer vm=\{vmDrawer\} rows=\{treeRows\}/);
-    expect(s).toMatch(/if \(r\.obj\) setVmDrawer\(null\)/);
-    expect(s).toMatch(/setSel\(\{ type: 'host'/);        // 호스트 · 데이터스토어 모달은 그대로(범위 밖)
+    expect(s).toMatch(/if \(r\.obj\) \{ setVmDrawer\(null\);/);   // v2.975: 호스트 드로어도 함께 닫는다
+    expect(s).not.toMatch(/setSel\(\{ type: 'host'/);    // v2.975: 호스트도 드로어(hosts/hostDrawer2975.test.jsx) — 데이터스토어 모달은 그대로
     expect(s).toMatch(/setSel\(\{ type: 'datastore'/);
   });
 });
@@ -34,13 +34,16 @@ describe('② 성능 — 모달 대신 개체 보기 › 모니터 첫 섹션', 
   });
   it('호출처 7곳이 vcenterId 를 넘긴다(드로어 · 옛 모달은 닫기까지) · 모니터 탭은 VmPerfView 를 첫 섹션으로', () => {
     const ed = read('../components/EntityDetail.jsx');
-    expect(ed).toMatch(/<VmMetricButton vmId=\{item\.id\} vmName=\{item\.name\} vcenterId=\{item\.vcenterId\} onBefore=\{onClose\} \/>/);
-    expect(ed).toMatch(/<HostMetricButton hostId=\{item\.id\} hostName=\{item\.name\} vcenterId=\{item\.vcenterId\} onBefore=\{onClose\} \/>/);
+    // v2.926: EntityDetail 의 VM 가지는 드로어로 위임한다(VM 단추는 드로어 안). v2.975: 호스트 가지도 드로어로 — 호스트 단추는 HostDrawer 안.
+    expect(ed).toMatch(/if \(type === 'vm'\) return <Lazy><VmDrawer vm=\{item\} rows=\{\[\]\}/);
+    expect(ed).not.toMatch(/<VmMetricButton/);
+    expect(ed).not.toMatch(/<HostMetricButton/);
+    expect(read('./hosts/HostDrawer.jsx')).toMatch(/<HostMetricButton hostId=\{host\.id\} hostName=\{host\.name\} vcenterId=\{host\.vcenterId\} onBefore=\{onClose\} \/>/);
     expect(read('./vms/VmDrawer.jsx')).toMatch(/<VmMetricButton vmId=\{vm\.id\} vmName=\{vm\.name\} vcenterId=\{vm\.vcenterId\} onBefore=\{onClose\} \/>/);
     expect(read('./HostDetail.jsx')).toMatch(/<HostMetricButton hostId=\{h\.id\} hostName=\{h\.name\} vcenterId=\{h\.vcenterId\} \/>/);
     const vo = read('./vcd/VmObject.jsx');
     expect(vo).toMatch(/<VmMetricButton vmId=\{vm\.id\} vmName=\{vm\.name\} vcenterId=\{vm\.vcenterId\} \/>/);
-    expect(vo).toMatch(/<VmPerfView entityType="vm" id=\{vm\.id\} name=\{vm\.name\} powered=\{powered\} \/>/);
+    expect(vo).toMatch(/<VmPerfView entityType="vm" id=\{vm\.id\} name=\{vm\.name\} vcenterId=\{vm\.vcenterId\} powered=\{powered\} \/>/);   // v2.926 vcenterId(엣지 포탈 링크)
     expect((vo.match(/VmMetricButton vmId=/g) || []).length).toBe(1);   // 모니터 탭의 '성능' 카드(버튼만 있던 것)는 사라졌다
     const ho = read('./vcd/HostObject.jsx');
     expect(ho).toMatch(/<HostMetricButton hostId=\{host\.id\} hostName=\{host\.name\} vcenterId=\{host\.vcenterId\} \/>/);

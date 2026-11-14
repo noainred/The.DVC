@@ -20,7 +20,7 @@ import { ssrfLookup } from '../util/ssrfLookup.js';
 import { deviceTlsConnect, isTlsPeerError, tlsPeerErrorOf } from '../security/tlsTrust.js'; // 2026-10-09 S-02: CA 체인 또는 승인 지문 — 자격증명 전에 판정
 import { parseDigestChallenge, buildDigestHeader } from './digestAuth.js';
 import { pctFromMetric, pickReports, buildIdracUsage } from '../bmusage/parse/idracTelemetry.js'; // v2.613 DEPS2613-02: 같은 모듈을 :1204 에서 동적으로 또 import 하던 것을 이 한 줄로
-import { readTextCapped } from '../util/readCapped.js';
+import { readTextCapped, readJsonCapped } from '../util/readCapped.js';
 import { readBodyPrefix } from '../util/readPrefix.js';
 import { capStr } from '../util/capStr.js'; // v2.607 SEC2607-03
 import { trimTrailingSlashes } from '../util/trimSlashes.js';
@@ -30,6 +30,7 @@ import { dedupNicPorts } from './nicPorts.js'; // v2.728: 같은 물리 포트(N
 import { partHealthRollup } from './invView.js'; // v2.731 A2-02: 하위 시스템 롤업 = 원소 partState(못 읽음을 OK 로, Critical 을 Warning 으로 접지 않는다)
 import { trustedRedirect } from '../util/resilientFetch.js'; // v2.612 SEC2612-03
 import { ssrfBlockReason } from '../util/ssrfBlock.js'; // v2.612 SEC2612-03
+import { BIOS_KEYS } from './biosKeys.js'; // v2.973: 엣지 축약 인벤토리 · 중앙 수신 정제와 같은 목록
 /** 라이선스 항목 문자열 상한(v2.607 SEC2607-03). */
 export const LICENSE_FIELD_MAX = 256;
 
@@ -320,6 +321,32 @@ async function get(base, pathname, username, password, { signal = null } = {}) {
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
 /**
+ * v3.8.0 디스크 배드 섹터 이력(`diskbad/lclog.js`) 전용 — **본문 상한이 있는** Redfish GET.
+ * `get()` 은 `res.json()` 을 상한 없이 읽는다(인벤토리 응답은 작다). Lifecycle 로그 쪽은 한 쪽에 메시지가 수십~수백 건이라
+ * 상한을 둔다(넘으면 던진다 — 호출부가 '읽기 실패' 로 밝힌다). 인증 실패는 `get()` 과 같은 모양(authFailed · status)으로 던진다.
+ * @param {{host:string, username:string, password:string}} entry
+ * @param {string} pathname  `/redfish/v1/...`(쿼리 포함)
+ * @param {{signal?:AbortSignal|null, maxBytes?:number}} [opts]
+ */
+export async function redfishGetCapped(entry, pathname, { signal = null, maxBytes = 8 * 1048576 } = {}) {
+  const base = String(entry?.host || '').replace(/\/+$/, '');
+  const res = await rawGet(base, pathname, entry.username, entry.password, undefined, signal);
+  if (res.status === 401) {
+    try { await res.body?.cancel?.(); } catch { /* */ }
+    const err = new Error('iDRAC 인증 실패(401) — 사용자/비밀번호 확인');
+    err.authFailed = true; err.status = 401;
+    throw err;
+  }
+  if (!res.ok) {
+    try { await res.body?.cancel?.(); } catch { /* */ }
+    const err = new Error(`Redfish ${pathname.split('?')[0]} -> ${res.status} ${res.statusText || ''}`.trim());
+    err.status = res.status;
+    throw err;
+  }
+  return readJsonCapped(res, maxBytes, 'iDRAC 응답');
+}
+
+/**
  * Redfish NIC 포트의 '설치된 카드 속도'(Mbps)를 추출한다. 정격/최고(SupportedLinkCapabilities·
  * MaxSpeedGbps)를 현재 링크속도보다 우선해, 포트가 다운(current=0)이어도 10G/25G 카드를 식별한다.
  * ⚠️ 과거 버그: `num(current) ?? caps` 는 current=0에서 0으로 단락돼 정격 폴백이 무시됐다.
@@ -433,12 +460,7 @@ export async function fetchPower(entry) {
 }
 
 // BIOS/CMOS attributes worth surfacing prominently (others are kept as a count).
-const BIOS_KEYS = [
-  'BootMode', 'SysProfile', 'SystemProfile', 'ProcVirtualization', 'LogicalProc',
-  'ProcCores', 'SriovGlobalEnable', 'MemFrequency', 'MemOpMode', 'NodeInterleave',
-  'IntegratedRaid', 'SecureBoot', 'TpmSecurity', 'ProcTurboMode', 'EmbSata',
-  'InternalUsb', 'PowerManagement', 'SerialComm', 'OsWatchdogTimer',
-];
+// v2.973: 목록(BIOS_KEYS)은 idrac/biosKeys.js 하나 — 엣지 축약 인벤토리 · 중앙 수신 정제가 같은 목록을 쓴다.
 
 const firstMember = (root) => (root?.Members || [])[0]?.['@odata.id'];
 
@@ -593,6 +615,9 @@ export async function fetchInventory(entry) {
         powerState: s.PowerState || '',
         health: s.Status?.Health || '',
         indicatorLED: s.IndicatorLED || '',
+        // v3.3.0(물리서버 폴더 'OS' 칸): HPE iLO 는 System 응답 Oem.Hpe.HostOS 에 OS 이름 · 버전을 싣는다(AMS 가 있을 때). Dell 은 아래 System 속성에서.
+        ...(typeof s.Oem?.Hpe?.HostOS?.OsName === 'string' && s.Oem.Hpe.HostOS.OsName.trim() ? { osName: s.Oem.Hpe.HostOS.OsName.trim().slice(0, 128) } : {}),
+        ...(typeof s.Oem?.Hpe?.HostOS?.OsVersion === 'string' && s.Oem.Hpe.HostOS.OsVersion.trim() ? { osVersion: s.Oem.Hpe.HostOS.OsVersion.trim().slice(0, 64) } : {}),
       };
       inv.cpu = {
         count: s.ProcessorSummary?.Count ?? null,
@@ -634,6 +659,25 @@ export async function fetchInventory(entry) {
       };
     }
   } catch { /* manager optional */ }
+
+  // --- OS 이름(v3.3.0 — 물리서버 폴더 'OS' 칸 · 사용자 결정 'iDRAC 에서 OS 이름도 수집') ---
+  // Dell: iDRAC System 속성 ServerOS.1.OSName · OSVersion — 서버 OS 에 iSM(iDRAC Service Module)이 있어야 채워진다(없으면 빈 값 → 화면 '—').
+  //   $select 로 두 값만 받는다(속성 전체는 수십 KB — 중앙 직접 수집 법인은 WAN 왕복). $select 를 모르는 펌웨어(4xx — 401 · 404 제외 · 501)면 한 번만 전체로.
+  //   404(속성 자원 없음 — iDRAC8 등)는 다시 묻지 않는다. 실패해도 인벤토리는 그대로다(OS 는 선택 항목 — 컬렉션 메타에 넣지 않는다).
+  if (inv.collections.system === 'ok' && !inv.system.osName && !inv.system.hpe && (/dell/i.test(inv.system.manufacturer || '') || entry.vendor === 'dell')) {
+    try {
+      const P = '/redfish/v1/Managers/System.Embedded.1/Attributes';
+      let a = null;
+      try { a = await G(`${P}?$select=Attributes/ServerOS.1.OSName,Attributes/ServerOS.1.OSVersion`); }
+      // 다시 묻는 경우: 4xx(401 · 404 제외) · 501(Redfish 규격 — 지원하지 않는 $ 질의 인자, 반증 F2)
+      catch (e) { if ((e?.status >= 400 && e?.status < 500 && e.status !== 401 && e.status !== 404) || e?.status === 501) a = await G(P); else throw e; }
+      const at = a?.Attributes && typeof a.Attributes === 'object' ? a.Attributes : {};
+      const nm = typeof at['ServerOS.1.OSName'] === 'string' ? at['ServerOS.1.OSName'].trim() : '';
+      const vr = typeof at['ServerOS.1.OSVersion'] === 'string' ? at['ServerOS.1.OSVersion'].trim() : '';
+      if (nm) inv.system.osName = nm.slice(0, 128);
+      if (vr) inv.system.osVersion = vr.slice(0, 64);
+    } catch { /* OS 이름 optional */ }
+  }
 
   // --- iDRAC network identity (hostname/FQDN/MAC/IP) ---
   try {
@@ -732,7 +776,12 @@ export async function fetchInventory(entry) {
         for (const d of (ctrl.Drives || []).slice(0, 32)) {
           try {
             const drive = await G(d['@odata.id']);
+            // v3.8.0: 디스크 배드 섹터 이력이 로그의 위치(Disk N in Backplane M)와 맞추려고 Id 를, '이 방법(Patrol Read)으로 볼 수 있는가'
+            //   를 가르려고 가상 디스크 소속(Links.Volumes)을 싣는다 — 같은 응답에 이미 있다(추가 HTTP 0회). Links 가 없으면 null(모름).
+            const vols = drive.Links && Array.isArray(drive.Links.Volumes) ? drive.Links.Volumes.length : null;
             inv.disks.push({
+              id: String(drive.Id || '').slice(0, 200),
+              inVolume: vols == null ? null : vols > 0,
               name: drive.Name || drive.Id || '',
               model: drive.Model || '',
               serial: drive.SerialNumber || '',

@@ -23,12 +23,13 @@ import { errorBoxInput } from './accessDeniedText.js';
 
 /** VM GPU 배지 — vGPU/패스쓰루/혼합. Vms.jsx 에 있던 것을 공용으로 옮겼다(상세 화면 단일화). */
 const GPU_TYPE = { vgpu: ['vGPU', 'green'], passthrough: ['패스쓰루', 'amber'], mixed: ['혼합', 'purple'] };
-export function GpuBadge({ gpu }) {
+export function GpuBadge({ gpu, compact = false }) {
   if (!gpu) return <span className="muted">—</span>;
   const [label, cls] = GPU_TYPE[gpu.type] || ['GPU', 'gray'];
+  // compact(v2.977): 표 칸이 좁을 때 — 프로필은 마우스를 올리면(title) 보인다(가상머신 목록 1440px 에서 GPU 칸이 163px 를 차지해 오른쪽 열이 숨었다)
   return (
     <span className={`badge ${cls}`} title={gpu.profile || gpu.model || ''}>
-      {label}{gpu.count > 1 ? ` ×${gpu.count}` : ''}{gpu.profile ? ` · ${gpu.profile}` : ''}
+      {label}{gpu.count > 1 ? ` ×${gpu.count}` : ''}{gpu.profile && !compact ? ` · ${gpu.profile}` : ''}
     </span>
   );
 }
@@ -164,7 +165,7 @@ export function DataTable({
   const shown = limit > 0 ? sorted.slice(0, limit) : sorted;
   // 보이는 행을 호출부에 알린다(키 목록이 바뀔 때만 — 매 렌더 호출하면 부모가 무한 갱신된다).
   const shownKey = shown.map((r) => r.key ?? r.id ?? '').join(',');
-  useEffect(() => { if (onVisible) onVisible(shown); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [shownKey]);
+  useEffect(() => { if (onVisible) onVisible(shown); }, [shownKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className={bare ? '' : 'table-wrap'} style={{ overflow: 'auto', maxHeight }}>

@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>IP 관리 — 알림 · 정기 보고 설정</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+*{box-sizing:border-box}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.sm{min-height:28px;padding:0 10px;font-size:11.5px}
+.input{min-height:36px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:13px;padding:0 10px;min-width:0}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.h2{font-size:14px;font-weight:700;margin:0}
+.h3{font-size:12px;font-weight:700;color:#8b9bb4;margin:0}
+.box{padding:18px 20px;display:flex;flex-direction:column;gap:14px}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden}
+.seg button{border:0;background:transparent;color:#8b9bb4;font:inherit;font-size:12.5px;font-weight:600;padding:8px 14px;cursor:pointer}
+.seg button.on{background:#3b82f6;color:#fff}
+.day{all:unset;box-sizing:border-box;cursor:pointer;width:38px;height:36px;border:1px solid #243049;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:600;color:#8b9bb4}
+.day.on{border-color:#3b82f6;background:rgba(59,130,246,.16);color:#e6edf6}
+.ck{display:grid;grid-template-columns:18px minmax(0,1fr);gap:2px 9px;align-items:start;cursor:pointer}
+.ck input{margin:2px 0 0;width:15px;height:15px}
+.ck b{font-size:13px;font-weight:600}
+.ck span{grid-column:2;font-size:11.5px;color:#8b9bb4}
+.fld{display:flex;flex-direction:column;gap:5px;font-size:12px;color:#8b9bb4;min-width:0}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;font-size:11.5px;font-weight:700;color:#8b9bb4;padding:8px 12px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap}
+th.s::after{content:" ↕";font-weight:400}
+td{padding:8px 12px;border-bottom:1px solid #1f2a40;vertical-align:middle}
+</style>
+</helmet>
+<div style="width:1240px;min-height:1240px;padding:24px;display:flex;flex-direction:column;gap:14px">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+    <a href="Settings.dc.html" class="btn sm" style="background:transparent">‹ 설정</a>
+    <h1 style="margin:0;font-size:19px;font-weight:800">알림 · 정기 보고</h1>
+    <span class="muted">법인별 IP 사용 변경 내역을 정한 때에 메일로 보냅니다</span>
+    <label style="margin-left:auto;display:inline-flex;align-items:center;gap:8px;font-weight:600;cursor:pointer"><input type="checkbox" checked style="width:16px;height:16px"> 정기 보고 켜기</label>
+  </div>
+
+  <div class="card" style="padding:12px 18px;display:flex;flex-wrap:wrap;align-items:center;gap:6px 18px" role="status">
+    <span><b>다음 발송</b> <span class="mono">{{d.next}}</span></span>
+    <span class="muted">보고 구간 {{d.span}}</span>
+    <span class="muted">지난 발송 <span class="mono">{{d.last}}</span> <span class="tag ok">보냄</span> 29통</span>
+    <a href="AlertMail.dc.html" class="btn sm" style="margin-left:auto">메일 미리 보기</a>
+    <button type="button" class="btn sm">나에게 시험 발송</button>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:start">
+
+    <section class="card box" aria-label="언제 보낼까요">
+      <h2 class="h2">언제 보낼까요</h2>
+      <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">
+        <div class="fld">주기
+          <span class="seg" role="group" aria-label="주기">
+            <sc-for list="{{cycles}}" as="c" hint-placeholder-count="3"><button type="button" class="{{c.cls}}" onClick="{{c.pick}}">{{c.label}}</button></sc-for>
+          </span>
+        </div>
+        <label class="fld">보내는 시각<input class="input mono" type="text" value="09:00" style="width:110px"></label>
+      </div>
+      <div class="fld">어느 곳의 시각에 맞출까요
+        <span style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">
+          <label class="ck" style="border:1px solid #3b82f6;border-radius:8px;padding:9px 11px;background:rgba(59,130,246,.12)"><input type="radio" name="tz" checked><b>메인 서버의 시각</b><span>모든 법인 메일을 포탈 시각에 한꺼번에</span></label>
+          <label class="ck" style="border:1px solid #243049;border-radius:8px;padding:9px 11px"><input type="radio" name="tz"><b>법인 엣지 서버의 현지 시각</b><span>법인마다 그곳의 그 요일 · 그 시각에 — 전체 종합은 메인 서버 시각</span></label>
+        </span>
+      </div>
+      <sc-if value="{{isWeekly}}" hint-placeholder-val="{{ true }}">
+        <div class="fld">요일
+          <span style="display:flex;gap:6px;flex-wrap:wrap">
+            <button type="button" class="day">월</button><button type="button" class="day">화</button><button type="button" class="day">수</button><button type="button" class="day">목</button><button type="button" class="day">금</button><button type="button" class="day">토</button><button type="button" class="day on">일</button>
+          </span>
+        </div>
+      </sc-if>
+      <sc-if value="{{isMonthly}}" hint-placeholder-val="{{ false }}">
+        <label class="fld">날짜<select class="input" style="width:200px"><option>매월 1일</option><option>매월 마지막 날</option></select></label>
+      </sc-if>
+      <div class="muted" style="font-size:12px">{{d.note}} 포탈이 꺼져 있어 놓친 회차는 몰아서 보내지 않고 ‘놓침’ 으로 남깁니다.</div>
+      <label class="ck"><input type="checkbox" checked><b>바뀐 것이 없으면 보내지 않기</b><span>그 법인에 변경이 하나도 없으면 법인별 메일을 건너뜁니다(전체 종합에는 ‘변경 없음’ 으로 적힙니다)</span></label>
+    </section>
+
+    <section class="card box" aria-label="무엇을 넣을까요">
+      <h2 class="h2">무엇을 넣을까요</h2>
+      <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 18px">
+        <label class="ck"><input type="checkbox" checked><b>새로 쓰기 시작한 주소</b><span>새 미등록 IP 포함 · 자원 · 용도 · 요청자 · 할당자</span></label>
+        <label class="ck"><input type="checkbox" checked><b>해제된 주소</b><span>쓰이다가 응답이 없어진 주소</span></label>
+        <label class="ck"><input type="checkbox" checked><b>대역 사용률 변화</b><span>지난 구간 → 이번 구간, 변화 큰 순</span></label>
+        <label class="ck"><input type="checkbox" checked><b>가득 찬 대역</b><span>사용률이 기준을 넘은 대역</span></label>
+        <label class="ck"><input type="checkbox" checked><b>충돌 · 중복</b><span>새로 생긴 것과 아직 남은 것</span></label>
+        <label class="ck"><input type="checkbox" checked><b>예약 만료 · 임박</b><span>정리할 예약</span></label>
+        <label class="ck"><input type="checkbox" checked><b>DNS 불일치 · 호스트명 변경</b><span>IP 변화 기록에서 — 새로 어긋난 주소 · 바뀐 이름</span></label>
+        <label class="ck"><input type="checkbox" checked><b>충돌 의심 · MAC 변경</b><span>IP 변화 기록에서</span></label>
+        <label class="ck"><input type="checkbox" checked><b>관리 정보 변경</b><span>누가 용도 · 요청자 · 할당자 · 예약을 바꿨는지</span></label>
+        <label class="ck"><input type="checkbox" checked><b>스캔 수집 상태</b><span>보고가 끊긴 구간 — 그동안의 변화는 빠졌을 수 있음을 밝힙니다</span></label>
+        <label class="ck"><input type="checkbox" checked><b>엑셀 첨부</b><span>변경 내역 전체(본문은 상위 몇 건만)</span></label>
+      </div>
+      <label class="fld" style="max-width:220px">본문에 보일 건수(항목마다)<select class="input"><option>상위 10건</option><option>상위 20건</option><option>상위 50건</option></select></label>
+    </section>
+
+    <section class="card" style="overflow:hidden;grid-column:1 / 3" aria-label="누구에게 보낼까요">
+      <div style="padding:16px 20px 12px;display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px">
+        <h2 class="h2">누구에게 보낼까요</h2>
+        <span class="muted" style="font-size:12px">법인 한 곳의 변경 내역은 그 법인 담당자에게만 갑니다</span>
+      </div>
+      <div style="padding:0 20px 16px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 18px">
+        <label class="ck"><input type="checkbox" checked><b>전체 종합 한 통</b><span>전 법인을 한 표로 — 통합 관리자에게</span></label>
+        <label class="ck"><input type="checkbox" checked><b>법인별 한 통씩</b><span>그 법인의 상세 변경 내역 — 아래 표의 받는 사람에게</span></label>
+        <label class="fld" style="grid-column:1 / 3">전체 종합 받는 사람
+          <span style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span class="tag gray">메일 설정의 기본 받는 사람 3명</span><input class="input" type="text" value="net-admin@corp.example, infra-lead@corp.example" style="flex:1 1 320px"></span>
+        </label>
+      </div>
+      <div style="overflow-x:auto">
+      <table style="min-width:820px">
+        <thead><tr><th class="s">법인</th><th class="s">받는 사람</th><th class="s">스캔 에이전트</th><th class="s">지난 발송</th><th style="width:90px"></th></tr></thead>
+        <tbody>
+          <tr><td><b>한국</b> <span class="muted">vCenter 2</span></td><td><input class="input" type="text" aria-label="VC-KR1 받는 사람" value="ops-kr@corp.example, web-team@corp.example" style="width:100%"></td><td class="muted">edge-kr1 외 1</td><td><span class="tag ok">보냄</span> <span class="mono muted">{{d.last}}</span></td><td><a href="AlertMail.dc.html" class="btn sm">미리 보기</a></td></tr>
+          <tr><td><b>미국 동부</b> <span class="muted">vCenter 2</span></td><td><input class="input" type="text" aria-label="VC-US1 받는 사람" value="dc-us@corp.example" style="width:100%"></td><td class="muted">edge-us1 외 1</td><td><span class="tag ok">보냄</span> <span class="mono muted">{{d.last}}</span></td><td><a href="AlertMail.dc.html" class="btn sm">미리 보기</a></td></tr>
+          <tr><td><b>폴란드</b> <span class="muted">vCenter 1</span></td><td><input class="input" type="text" aria-label="VC-PL1 받는 사람" value="it-pl@corp.example" style="width:100%"></td><td class="muted">edge-pl1</td><td><span class="tag ok">보냄</span> <span class="mono muted">{{d.last}}</span></td><td><a href="AlertMail.dc.html" class="btn sm">미리 보기</a></td></tr>
+          <tr><td><b>브라질</b> <span class="muted">vCenter 1</span></td><td><input class="input" type="text" aria-label="VC-BR1 받는 사람" placeholder="받는 사람 없음 — 전체 종합에만 실립니다" style="width:100%"></td><td class="muted">edge-br1</td><td><span class="tag gray">받는 사람 없음</span></td><td><a href="AlertMail.dc.html" class="btn sm">미리 보기</a></td></tr>
+        </tbody>
+      </table>
+      </div>
+      <div style="padding:11px 20px;font-size:12px" class="muted">28곳 중 4곳 · 받는 사람을 비운 법인 6곳 · <a href="#">CSV 로 한 번에 넣기</a></div>
+    </section>
+
+    <section class="card box" aria-label="바로 알림">
+      <div><h2 class="h2">바로 알림</h2><span class="muted" style="font-size:12px">정기 보고를 기다리지 않고 일이 생긴 때 한 통</span></div>
+      <label class="ck"><input type="checkbox" checked><b>충돌 · 중복이 새로 생겼을 때</b><span>그 법인 받는 사람 + 통합 관리자</span></label>
+      <label class="ck"><input type="checkbox" checked><b>대역이 가득 찼을 때</b><span>사용률 기준 <select class="input" style="min-height:26px;font-size:12px;padding:0 6px" aria-label="사용률 기준"><option>90%</option><option>80%</option><option>95%</option></select> 을 처음 넘은 때 한 번, 내려가면 회복 한 번</span></label>
+      <label class="ck"><input type="checkbox" checked><b>스캔 보고가 끊겼을 때</b><span>같은 상태로 다시 보내지 않습니다</span></label>
+      <div class="muted" style="font-size:12px;border-top:1px solid #1f2a40;padding-top:12px">이미 있는 IP 관리 알림 규칙 5가지(충돌 의심 · MAC 변경 · 새 미등록 IP · 예약 IP 응답 · 호스트명 변경)는 설정 › 알림에 그대로 있습니다 · <a href="#">열기</a></div>
+    </section>
+
+    <section class="card" style="overflow:hidden" aria-label="발송 기록">
+      <div style="padding:16px 20px 10px"><h2 class="h2">발송 기록</h2></div>
+      <table>
+        <thead><tr><th class="s">회차</th><th class="s">결과</th><th class="s">통수</th><th>비고</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">11-08 09:00</td><td><span class="tag ok">보냄</span></td><td class="mono">29</td><td class="muted">종합 1 · 법인 22 · 변경 없음 6곳 건너뜀</td></tr>
+          <tr><td class="mono">11-01 09:00</td><td><span class="tag warn">놓침</span></td><td class="mono">0</td><td class="muted">포탈이 꺼져 있었음(업그레이드)</td></tr>
+          <tr><td class="mono">10-25 09:00</td><td><span class="tag ok">보냄</span></td><td class="mono">27</td><td class="muted">종합 1 · 법인 20 · 메일 2통 실패(주소 오류)</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </div>
+
+  <div style="display:flex;justify-content:flex-end;gap:8px">
+    <button type="button" class="btn">되돌리기</button>
+    <button type="button" class="btn primary">저장</button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1240,"height":1240}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const cur = (this.state && this.state.cycle) || 'weekly';
+    const D = {
+      daily: { next: '11-14(토) 09:00', span: '어제 09:00 ~ 오늘 09:00', last: '11-13 09:00', note: '매일 보냅니다.' },
+      weekly: { next: '11-15(일) 09:00', span: '지난 7일(11-08 ~ 11-15)', last: '11-08 09:00', note: '고른 요일마다 지난 7일의 변경을 보냅니다.' },
+      monthly: { next: '12-01(화) 09:00', span: '지난달 1일 ~ 말일', last: '11-01 09:00', note: '한 달에 한 번 지난달의 변경을 보냅니다.' },
+    };
+    const cycles = [['daily', '매일'], ['weekly', '매주'], ['monthly', '매월']].map(([k, label]) => ({ label, cls: k === cur ? 'on' : '', pick: () => this.setState({ cycle: k }) }));
+    return { cycles, d: D[cur], isWeekly: cur === 'weekly', isMonthly: cur === 'monthly' };
+  }
+}
+</script>
+</body>
+</html>

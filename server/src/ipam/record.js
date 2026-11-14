@@ -10,7 +10,9 @@ export const COLUMNS = ['ip', 'ip_num', 'vcenter_id', 'vcenter_name', 'owner_typ
   'power_state', 'guest_os', 'os_name', 'os_version', 'host_name', 'cluster', 'scope', 'multi_homed', 'duplicate', 'updated_at',
   // 출처 대조 + 수동 관리(override) + 대역정책 노출 — 외부 프로그램이 vCenter/스캔/수동/정책을 구분하고 관리상태를 읽을 수 있게.
   'discovery', 'reconcile', 'mgmt_status', 'mgmt_owner', 'label', 'device_type', 'first_seen', 'last_seen', 'usage_status',
-  'applied_by', 'range_policy_spec'];
+  'applied_by', 'range_policy_spec',
+  // v3.5.0(재설계 묶음 나): 사람이 넣은 IP 용도 · 요청자 · 할당자 — 맨 뒤에 덧붙인다(외부 리더의 열 순서를 바꾸지 않게 · db.js MIGRATE_COLUMNS 에도).
+  'purpose', 'requester', 'assigner'];
 
 export function toRecord(r, updatedAt) {
   return [r.ip, r.ipNum ?? null, r.vcenterId, r.vcenterName, r.ownerType, r.serverType || (r.ownerType === 'host' ? 'BareMetal' : 'VM'), r.ownerName,
@@ -18,5 +20,6 @@ export function toRecord(r, updatedAt) {
     r.multiHomed ? 1 : 0, r.duplicate ? 1 : 0, updatedAt,
     r.discovery || '', r.reconcile || '', r.mgmtStatus || '', r.owner_ || '', r.label || '', r.deviceType || '',
     r.firstSeen ? new Date(r.firstSeen).toISOString() : '', r.lastSeen ? new Date(r.lastSeen).toISOString() : '', r.usageStatus || '',
-    r.appliedBy || '', r.rangePolicySpec || ''];
+    r.appliedBy || '', r.rangePolicySpec || '',
+    r.ipPurpose || '', r.requester || '', r.assigner || ''];
 }

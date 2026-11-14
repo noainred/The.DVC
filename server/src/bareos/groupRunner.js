@@ -16,6 +16,7 @@ import { PRUNE_WAIT_MAX_MS } from './groupRetention.js';
 import { decideFire, CATCHUP_MS, slotKey, nextSlot } from './groupSchedule.js';
 import { jobDigests, markPending, patchJob, registryLoadError, inBatch, markCancelReq, applyRunRow, clearPending } from './registry.js';
 import { onDirector, isDemoActive, effectiveSettings } from './service.js';
+import { lateRunJobs } from './lateReplies.js'; // v2.938: 엣지 대행 늦은 회신 반영(제안 6번)
 import { jobDirectorId } from './settings.js';
 import { RUN_JOBS_MAX, MID_COMMAND_CODES } from './ops.js';
 import { PICKUP_MS, RESULT_MS } from './edgeOps.js';
@@ -192,7 +193,7 @@ export async function runGroup(groupId, { trigger = 'manual', by = '', level = n
           const sig = signal || AbortSignal.timeout(RUN_DEADLINE_MS);
           res = await onDirector(dir, 'runJobs', {
             items: chunk.map((s, k) => ({ key: k, job: s.job.bareosJob, level: lvl, ...(g.storage ? { storage: g.storage } : {}), ...(g.pool ? { pool: g.pool } : {}) })),
-          }, { trigger: trigger === 'timer' ? 'timer' : 'manual', signal: sig });
+          }, { trigger: trigger === 'timer' ? 'timer' : 'manual', signal: sig, onLate: lateRunJobs(chunk.map((s) => s.job.id), { level: lvl, by: by || '예약', trigger: trigger === 'timer' ? 'group-schedule' : 'group' }) });   // v2.938 늦은 회신
         } catch (e) {
           // Director 호출이 통째로 실패 — 잡마다 lastError 를 덮지 않는다(잡이 아니라 Director·전달의 문제다 · v2.830 검토 L3)
           const st = chunkErrorState(e);

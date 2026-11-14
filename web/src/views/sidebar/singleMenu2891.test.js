@@ -37,13 +37,22 @@ describe('해석 — 저장된 단독 메뉴(최상위 tool · 그룹 항목 tab
     ] };
     const r = resolveMenu({ mine, catalog: TOOLS });
     const vms = r.groups.find((g) => g.id === 'custom-1');
-    expect([vms.tab, vms.iconOf, vms.label]).toEqual(['vms', 'server', MENU_GROUPS.find((g) => g.id === 'server').children.find((c) => c.tab === 'vms').label]);
+    // v2.915: 단독으로 저장한 옛 '가상화 서버'(tab:vms)는 별칭으로 가상화 플랫폼 항목이 된다
+    // v2.994: tab:vms 는 이제 'Virtual Machine(VM)' 항목의 정체 키(처음 여는 탭 vms · tabs 에 vcenters)
+    const virt = MENU_GROUPS.find((g) => g.id === 'server').children.find((c) => c.id === 'virt');
+    expect([vms.tab, vms.iconOf, vms.label]).toEqual(['vms', 'server', virt.label]);
+    expect(vms.tabs).toEqual(['vcenters']);
     expect(r.groups.find((g) => g.id === 'custom-2').iconOf).toBe('resource');
     expect(r.groups.some((g) => g.id === 'custom-3')).toBe(false);
     expect(r.unknown).toBe(1);
-    // 같은 항목이 단독 · 그룹 둘 다면 앞의 것만
+    // 같은 항목이 단독 · 그룹 둘 다면 앞의 것만 — v2.994: tab:vms 는 Virtual Machine(VM) · tab:hosts 는 Hypervisor(별개 항목)라 서버 그룹에는 hv 만 남는다
     const dup = resolveMenu({ mine: { v: 1, groups: [{ id: 'custom-1', tab: 'vms' }, { id: 'server', children: [{ tab: 'vms' }, { tab: 'hosts' }] }] }, catalog: TOOLS });
-    expect(dup.groups.find((g) => g.id === 'server').children.map((c) => c.tab)).toEqual(['hosts']);
+    expect(dup.groups.map((g) => g.id)).toEqual(['custom-1', 'server']);
+    expect(dup.groups.find((g) => g.id === 'server').children.map((c) => c.id)).toEqual(['hv']);
+    // 단독 tab:vms 와 그룹의 tab:vcenters(별칭)도 같은 항목 — 그룹 쪽은 빠진다
+    const dup2 = resolveMenu({ mine: { v: 1, groups: [{ id: 'custom-1', tab: 'vms' }, { id: 'server', children: [{ tab: 'vcenters' }, { tab: 'alarms' }] }] }, catalog: TOOLS });
+    expect(dup2.groups.find((g) => g.id === 'server').children.map((c) => c.tab)).toEqual(['alarms']);
+    expect(dup2.unknown).toBe(0);
   });
   it('기본 메뉴로 되돌려도 예전과 같다(기본 단독 · 라벨 규칙 그대로)', () => {
     const stored = toStored(base());

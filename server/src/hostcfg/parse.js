@@ -121,14 +121,27 @@ export function parseCertInfo(xml) {
 
 const SHARED_TRANSPORT = /HostFibreChannelTargetTransport|HostInternetScsiTargetTransport|HostFibreChannelOverEthernetTargetTransport/;
 const MP_LUNS_MAX = 4096;
+export const MP_TARGETS_MAX = 128;   // v2.920: 어댑터 × 타깃 WWN 상한(엣지 push·중앙 정제가 같은 값)
+export const MP_RT_MAX = 8;   // v2.935(C-①): 타깃 하나의 런타임 이름(vmhbaN:Cn:Tn) 상한
+const RT_NAME = /(vmhba\d{1,4}):(C\d{1,4}):(T\d{1,5}):L\d{1,6}/i;
+/** vSphere 는 WWN 을 10진 long 으로 준다 → 콜론 16진(소문자). soapClient.parseHbas 와 같은 변환. 숫자가 아니면 null. */
+export function wwnFromDec(dec) {
+  const s = String(dec ?? '').trim();
+  if (!/^\d{1,20}$/.test(s)) return null;
+  try { return BigInt(s).toString(16).padStart(16, '0').replace(/(..)(?=.)/g, '$1:'); } catch { return null; }
+}
 /**
  * 멀티패스 요약 — 경로 블록(<path>)만 훑는다(LU 블록 안에 <lun> 태그가 중첩돼 LU 로 자르면 틀린다).
  * shared = 경로 전송이 FC·iSCSI·FCoE 인 LUN(로컬 디스크·CD-ROM 의 단일 경로는 정상이라 세지 않는다).
- * 반환: { luns, shared, paths, dead, deadLuns:[], singlePath, singleLuns:[], policies:{psp:count} } | null(못 읽음)
+ * 반환: { luns, shared, paths, dead, deadLuns:[], singlePath, singleLuns:[], policies:{psp:count}, targets:[] } | null(못 읽음)
+ * v2.920 targets — 경로별 **FC 타깃 포트 WWN**(transport HostFibreChannelTargetTransport 의 portWorldWideName)을 어댑터(vmhbaN)별로 센다:
+ *   [{ adapter, wwn, live, dead, luns }] (상한 MP_TARGETS_MAX, 어댑터·WWN 순). 같은 SOAP 경로(config.storageDevice.multipathInfo)라 새 vCenter 호출이 없다.
+ *   호스트 귀속 엔진(sanswitch/attribution.js)이 '지금 살아 있는 경로의 타깃' 으로 조닝 후보를 좁힌다 — 없으면 좁히지 않는다(빈 배열 = FC 경로 없음).
  */
 export function parseMultipath(xml) {
   if (typeof xml !== 'string') return null;
   const byLun = new Map();
+  const byTarget = new Map();   // `${adapter}|${wwn}` → { adapter, wwn, live, dead, luns:Set }
   let paths = 0; let dead = 0;
   let i = 0;
   for (;;) {
@@ -144,8 +157,24 @@ export function parseMultipath(xml) {
     const st = (tag(blk, 'pathState') || tag(blk, 'state') || '').toLowerCase();
     let L = byLun.get(lun);
     if (!L) { if (byLun.size >= MP_LUNS_MAX) continue; L = { live: 0, dead: 0, shared: false }; byLun.set(lun, L); }
-    if (st === 'dead') { L.dead += 1; dead += 1; } else if (st === 'active' || st === 'standby') L.live += 1;
+    const isDead = st === 'dead'; const isLive = st === 'active' || st === 'standby';
+    if (isDead) { L.dead += 1; dead += 1; } else if (isLive) L.live += 1;
     if (SHARED_TRANSPORT.test(blk)) L.shared = true;
+    if (/HostFibreChannelTargetTransport/.test(blk)) {
+      const wwn = wwnFromDec(tag(blk, 'portWorldWideName'));
+      const adapter = String(tag(blk, 'adapter') || '').replace(/^key-vim\.host\.[A-Za-z]+-/, '').slice(0, 32);
+      if (wwn && adapter) {
+        const k = `${adapter}|${wwn}`;
+        let T = byTarget.get(k);
+        if (!T && byTarget.size < MP_TARGETS_MAX) { T = { adapter, wwn, live: 0, dead: 0, luns: new Set(), rt: new Set() }; byTarget.set(k, T); }
+        if (T) {
+          if (isDead) T.dead += 1; else if (isLive) T.live += 1; T.luns.add(lun);
+          // v2.935(C-①): 런타임 이름의 타깃 부분('vmhba1:C0:T3') — ESXi 경로 카운터 인스턴스가 런타임 이름이면 이 표로 타깃 WWN 을 찾는다(storpath/parse.js).
+          const rt = RT_NAME.exec(String(tag(blk, 'name') || tag(blk, 'key') || '').slice(0, 200));
+          if (rt && T.rt.size < MP_RT_MAX) T.rt.add(`${rt[1]}:${rt[2]}:${rt[3]}`.toLowerCase());
+        }
+      }
+    }
   }
   const policies = {};
   const re = /<policy>([A-Za-z0-9_.-]{1,64})<\/policy>/g;
@@ -161,7 +190,9 @@ export function parseMultipath(xml) {
       if (L.live < 2) { singlePath += 1; if (singleLuns.length < 10) singleLuns.push(short(k)); }
     }
   }
-  return { luns: byLun.size, shared, paths, dead, deadLuns, singlePath, singleLuns, policies };
+  const targets = [...byTarget.values()].map((t) => ({ adapter: t.adapter, wwn: t.wwn, live: t.live, dead: t.dead, luns: t.luns.size, rt: [...t.rt].sort() }))
+    .sort((a, b) => a.adapter.localeCompare(b.adapter) || a.wwn.localeCompare(b.wwn));
+  return { luns: byLun.size, shared, paths, dead, deadLuns, singlePath, singleLuns, policies, targets };
 }
 
 /** vSAN 런타임 — enabled(bool|null) · diskIssues(개수) · members(클러스터 멤버 수). 응답이 없으면 null(모름). */
@@ -492,8 +523,15 @@ function sanitizeMp(m) {
     for (const [k, n] of Object.entries(m.policies).slice(0, 16)) if (/^[A-Za-z0-9_.-]{1,64}$/.test(k) && Number.isFinite(n)) pol[k] = Math.trunc(n);
   }
   const n = (x) => (Number.isFinite(x) && x >= 0 ? Math.trunc(x) : 0);
+  // v2.920: 경로별 타깃(어댑터 이름·WWN 표준형·수치만 — 아는 필드만, 상한). 배열이 아니면 키를 싣지 않는다(구버전 엣지 = '아직 안 읽음').
+  const WWN_RE = /^[0-9a-f]{2}(:[0-9a-f]{2}){7}$/;
+  const targets = Array.isArray(m.targets) ? m.targets.slice(0, MP_TARGETS_MAX)
+    .filter((t) => t && typeof t === 'object' && !Array.isArray(t) && nicName(t.adapter) && typeof t.wwn === 'string' && WWN_RE.test(t.wwn.toLowerCase()))
+    .map((t) => ({ adapter: t.adapter, wwn: t.wwn.toLowerCase(), live: n(t.live), dead: n(t.dead), luns: n(t.luns),
+      ...(Array.isArray(t.rt) ? { rt: t.rt.filter((r) => typeof r === 'string' && /^vmhba\d{1,4}:c\d{1,4}:t\d{1,5}$/.test(r)).slice(0, MP_RT_MAX) } : {}) })) : null;   // v2.935 rt
   return {
     luns: n(m.luns), shared: n(m.shared), paths: n(m.paths), dead: n(m.dead), singlePath: n(m.singlePath),
     deadLuns: strList(m.deadLuns)?.slice(0, 10) || [], singleLuns: strList(m.singleLuns)?.slice(0, 10) || [], policies: pol,
+    ...(targets ? { targets } : {}),
   };
 }

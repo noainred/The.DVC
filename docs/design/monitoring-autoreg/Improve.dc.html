@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Monitoring 개선안 — KPI 반응형 · 실패 알림 · 문구</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a111c;color:#c8d6e8;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#9fcaff}a:hover{color:#cfe4ff}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.sec{background:#0f1a2b;border:1px solid #1c2c42;border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
+.sec h3{margin:0;padding:11px 14px;font-size:13.5px;color:#e8f1fb;border-bottom:1px solid #1c2c42;display:flex;align-items:center;gap:10px}
+.sec h3 .no{width:22px;height:22px;border-radius:50%;background:#1668d8;color:#fff;font-size:12px;display:inline-grid;place-items:center;font-family:"JetBrains Mono",monospace;flex:none}
+.sec h3 small{font-weight:400;color:#8ea4bd;font-size:11.5px}
+.why{font-size:12px;color:#9fb4cc;padding:10px 14px;border-bottom:1px solid #131f30;line-height:1.55}
+.why b{color:#e8f1fb}
+.cap{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.08em;color:#7b93ae;margin-bottom:6px}
+.phone{width:200px;background:#0a111c;border:1px solid #1e3350;border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px}
+.pc-card{background:#0f1a2b;border:1px solid #1c2c42;border-radius:6px;padding:7px 8px;border-top:2px solid #1e3350;display:flex;flex-direction:column;gap:2px;min-width:0;overflow:hidden}
+.pc-card-label{font-family:"JetBrains Mono",monospace;font-size:8.5px;letter-spacing:.06em;color:#8ea4bd}
+.pc-card-value{font-family:"JetBrains Mono",monospace;font-size:17px;font-weight:600;color:#dbe7f5}
+.pc-card-note{font-size:8.5px;color:#7b93ae}
+.pc-card.b{border-top-color:#4b9bff}.pc-card.g{border-top-color:#3ddc84}.pc-card.g .pc-card-value{color:#3ddc84}.pc-card.a{border-top-color:#f0a92e}.pc-card.a .pc-card-value{color:#f0a92e}.pc-card.r{border-top-color:#ff5c5c}.pc-card.r .pc-card-value{color:#ff5c5c}.pc-card.o{border-top-color:#6b7f99}
+.bad{outline:2px dashed #ff5c5c;outline-offset:2px}
+.tag{display:inline-block;padding:1px 6px;border-radius:5px;font-size:10.5px;font-family:"JetBrains Mono",monospace;border:1px solid #1e3350;color:#8ea4bd;background:#0a141f;margin-right:4px}
+.tag.ok{color:#3ddc84;border-color:#1f5a3a}.tag.bad2{color:#ff5c5c;border-color:#5f1d1d}.tag.warn{color:#f0a92e;border-color:#5a3d07}
+.lbl{font-size:12px;color:#9fb4cc;display:flex;align-items:center;gap:8px}
+.sel{height:30px;padding:0 26px 0 10px;border-radius:6px;border:1px solid #1e3350;background:#0a141f;color:#c8d6e8;font:inherit;font-size:12px;appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,#8ea4bd 50%),linear-gradient(135deg,#8ea4bd 50%,transparent 50%);background-position:calc(100% - 13px) 12px,calc(100% - 8px) 12px;background-size:5px 5px;background-repeat:no-repeat}
+.inp{height:30px;width:64px;padding:0 8px;border-radius:6px;border:1px solid #1e3350;background:#0a141f;color:#c8d6e8;font:inherit;font-size:12px;font-family:"JetBrains Mono",monospace}
+.cb{width:15px;height:15px;border-radius:4px;border:1px solid #3b4a66;background:#0a141f;display:inline-block;position:relative;flex:none}
+.cb.on{background:#1668d8;border-color:#1668d8}
+.cb.on::after{content:"";position:absolute;left:4px;top:1px;width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.alert{border:1px solid #5f1d1d;border-left:3px solid #ff5c5c;background:#1d0a0a;border-radius:8px;padding:9px 12px;font-size:12px;line-height:1.55;color:#ffd1d1}
+.alert b{color:#fff}
+.alert.ok{border-color:#1f5a3a;border-left-color:#3ddc84;background:#07180e;color:#bdf3d4}
+.code{font-family:"JetBrains Mono",monospace;font-size:11.5px;background:#0a141f;border:1px solid #1c2c42;border-radius:6px;padding:8px 10px;color:#cfe0f2;white-space:pre;overflow:auto}
+.empty{padding:22px;text-align:center;color:#5f7fa3;font-size:12.5px;background:#0a141f;border:1px solid #1c2c42;border-radius:6px}
+table{border-collapse:collapse;width:100%;table-layout:fixed}
+th{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.06em;color:#8ea4bd;text-align:left;padding:7px 10px;background:#132132;font-weight:500}
+td{padding:7px 10px;border-bottom:1px solid #131f30;font-size:12px;vertical-align:top;overflow-wrap:anywhere}
+</style>
+</helmet>
+<div style="width:1440px;height:1000px;box-sizing:border-box;padding:18px 24px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:auto auto;gap:14px;background:#0a111c;overflow:hidden;align-content:start">
+
+  <section class="sec" style="grid-column:1 / span 2">
+    <h3><span class="no">1</span>KPI 카드 7장을 폭에 맞춰 배치 <small>지금은 5열 고정(`.pc-cards` repeat(5,1fr)) — 1440 에서 5+2 두 줄, 400 에서 ‘경고’ 카드가 세로로 찌그러짐(Chromium 실측)</small></h3>
+    <div style="display:grid;grid-template-columns:230px 230px minmax(0,1fr);gap:18px;padding:14px">
+      <div><div class="cap">BEFORE · 400px (실측)</div>
+        <div class="phone">
+          <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px">
+            <div class="pc-card b"><span class="pc-card-label">TOTAL</span><span class="pc-card-value">96</span><span class="pc-card-note">32개</span></div>
+            <div class="pc-card g"><span class="pc-card-label">정상</span><span class="pc-card-value">82</span><span class="pc-card-note">Ok</span></div>
+            <div class="pc-card a bad"><span class="pc-card-label">경<br>고</span><span class="pc-card-value">8</span><span class="pc-card-note">임<br>계<br>치</span></div>
+            <div class="pc-card r"><span class="pc-card-label">실패</span><span class="pc-card-value">6</span><span class="pc-card-note">No ans</span></div>
+            <div class="pc-card o"><span class="pc-card-label">중지</span><span class="pc-card-value">0</span><span class="pc-card-note">Disab</span></div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px">
+            <div class="pc-card o"><span class="pc-card-label">갱신</span><span class="pc-card-value">0</span></div>
+            <div class="pc-card o"><span class="pc-card-label">대기</span><span class="pc-card-value">0</span></div>
+          </div>
+        </div>
+      </div>
+      <div><div class="cap">AFTER · 400px (2열)</div>
+        <div class="phone">
+          <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px">
+            <div class="pc-card b"><span class="pc-card-label">TOTAL TESTS</span><span class="pc-card-value">96</span><span class="pc-card-note">32개 대상 그룹</span></div>
+            <div class="pc-card g"><span class="pc-card-label">정상</span><span class="pc-card-value">82</span><span class="pc-card-note">Ok · Host is alive</span></div>
+            <div class="pc-card a"><span class="pc-card-label">경고</span><span class="pc-card-value">8</span><span class="pc-card-note">임계치 근접</span></div>
+            <div class="pc-card r"><span class="pc-card-label">실패</span><span class="pc-card-value">6</span><span class="pc-card-note">No answer · Error</span></div>
+            <div class="pc-card o"><span class="pc-card-label">중지</span><span class="pc-card-value">0</span><span class="pc-card-note">Disabled</span></div>
+            <div class="pc-card o"><span class="pc-card-label">갱신 안 됨</span><span class="pc-card-value">0</span><span class="pc-card-note">주기 초과</span></div>
+            <div class="pc-card o" style="grid-column:1 / span 2"><span class="pc-card-label">점검 대기</span><span class="pc-card-value">0</span><span class="pc-card-note">아직 실행 안 됨</span></div>
+          </div>
+        </div>
+      </div>
+      <div><div class="cap">AFTER · 1440px (7장 한 줄)</div>
+        <div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px">
+          <div class="pc-card b"><span class="pc-card-label">TOTAL TESTS</span><span class="pc-card-value">96</span><span class="pc-card-note">32개 대상 그룹</span></div>
+          <div class="pc-card g"><span class="pc-card-label">정상</span><span class="pc-card-value">82</span><span class="pc-card-note">Ok · Host is alive</span></div>
+          <div class="pc-card a"><span class="pc-card-label">경고</span><span class="pc-card-value">8</span><span class="pc-card-note">임계치 근접</span></div>
+          <div class="pc-card r"><span class="pc-card-label">실패</span><span class="pc-card-value">6</span><span class="pc-card-note">No answer · Error</span></div>
+          <div class="pc-card o"><span class="pc-card-label">중지</span><span class="pc-card-value">0</span><span class="pc-card-note">Disabled</span></div>
+          <div class="pc-card o"><span class="pc-card-label">갱신 안 됨</span><span class="pc-card-value">0</span><span class="pc-card-note">주기 초과</span></div>
+          <div class="pc-card o"><span class="pc-card-label">점검 대기</span><span class="pc-card-value">0</span><span class="pc-card-note">아직 실행 안 됨</span></div>
+        </div>
+        <div class="code" style="margin-top:10px">.pc-cards { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+@media (max-width: 520px) { .pc-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }</div>
+        <div class="why" style="border:0;padding:8px 0 0">CSS 2줄 · 화면 변경이라 Chromium 1440/400 으로 다시 본다. 값·판정은 바뀌지 않는다.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h3><span class="no">2</span>점검 실패 알림 <small>지금은 ‘엣지 무보고/재개’ 알림만 있다(central/svcmonSilence.js) — 점검이 실패로 바뀌어도 알림이 없다(svcmon/ 에 notify 호출 0건)</small></h3>
+    <div class="why">실패는 폴러가 이미 <b>연속 횟수(streak)</b>를 세고 있으므로, 상태 전이(ok→bad · bad→ok)를 보는 작은 훅이면 된다. 알림 채널·음소거는 포탈 공용 <b>alerts.js notify()</b> 와 알람 뮤트를 그대로 쓴다(새 채널을 만들지 않는다).</div>
+    <div style="padding:12px 14px;display:flex;flex-direction:column;gap:10px">
+      <div class="cap">설정 › MONITORING 설정 › 로그 설정 옆 ‘알림’ 섹션 (제안)</div>
+      <label class="lbl"><span class="cb on" role="checkbox" aria-checked="true" aria-label="실패 알림"></span>점검이 <input class="inp" value="3" aria-label="연속 실패 횟수"> 회 연속 실패(bad)하면 알림</label>
+      <label class="lbl"><span class="cb on" role="checkbox" aria-checked="true" aria-label="복구 알림"></span>정상으로 돌아오면 복구 알림</label>
+      <label class="lbl"><span class="cb" role="checkbox" aria-checked="false" aria-label="경고 알림"></span>경고(warn)도 알림 (기본 끔 — 임계치 근접은 잦다)</label>
+      <label class="lbl" for="al-scope">대상 범위 <select id="al-scope" class="sel"><option>전체</option><option>설정 연동 대상만</option><option>폴더 선택…</option></select></label>
+      <label class="lbl" for="al-ch">채널 <select id="al-ch" class="sel"><option>포탈 알림 설정을 따름(메일 · Slack · Teams)</option></select></label>
+      <div class="alert"><b>Monitoring 점검 실패: vc-cn-east › HTTP /sdk/vimServiceVersions.xml</b><br>3회 연속 실패 (ECONNREFUSED · 14:51~14:56) · 점검 위치 mock-Edge-Shanghai · 경로 설정 연동\가상화\CN-SHA · <span class="mono">svcmon.test.bad:t-4c1a9e</span></div>
+      <div class="alert ok"><b>복구: vc-cn-east › HTTP /sdk/vimServiceVersions.xml</b> — 15:02 정상(200 · 92 ms) · 실패 11분</div>
+      <div class="why" style="border:0;padding:0">키는 <span class="mono">svcmon.test.bad:&lt;testId&gt;</span> 하나(대상이 2만 개여도 같은 점검이 반복 알림되지 않게 전이 때만). 엣지 무보고(stale)는 지금 알림이 담당하므로 중복 발송하지 않는다.</div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h3><span class="no">3</span>작은 결함 · 카탈로그 보강 <small>이번 기능이 기대는 공용 카탈로그를 고치면 통신 점검도 같이 좋아진다</small></h3>
+    <div style="padding:12px 14px;display:flex;flex-direction:column;gap:12px">
+      <div>
+        <div class="cap">③-a 빈 상태 문구가 버튼 이름과 다르다 (SvcMonitor.jsx:534)</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="empty">등록된 대상이 없습니다. <span style="color:#ff8b8b">＋ Add</span> 로 등록하세요.</div>
+          <div class="empty" style="color:#9fb4cc">등록된 대상이 없습니다. <b style="color:#dbe7f5">＋ 등록</b> 또는 <b style="color:#dbe7f5">설정 연동</b>으로 등록하세요.</div>
+        </div>
+      </div>
+      <div>
+        <div class="cap">③-b 통신 점검 카탈로그(linkcheck/settingsKinds.js · settingsLinks.js) 보강 — 설정 연동이 그대로 상속</div>
+        <table>
+          <colgroup><col style="width:190px"><col><col style="width:150px"></colgroup>
+          <thead><tr><th>항목</th><th>지금 · 제안</th><th>근거</th></tr></thead>
+          <tbody>
+            <tr><td>빠진 종류 6</td><td>Arista CVP · Veeam B&amp;R(9419) · Veeam EM(9398) · Bareos Director(9101) · Isilon 디렉터리 사용량 직접 호스트(SSH) · LLM(Ollama URL) 을 <span class="mono">SETTING_KINDS</span> 에 추가</td><td class="mono" style="font-size:11px">두 파일에 cvp·veeam·bareos·llm·isidu 0건</td></tr>
+            <tr><td>PDU 프로브 포트</td><td>지금 https 443 · ‘/’ — 등록부는 SSH(<span class="mono">sshPort</span> 기본 22)로 수집. 등록 sshPort 로 SSH 배너 점검을 기본으로(443 웹 UI 는 선택)</td><td class="mono" style="font-size:11px">settingsKinds.js:129 · pdu/registry.js:95</td></tr>
+            <tr><td>vCenter 담당 엣지</td><td><span class="mono">v.remoteAgent</span> 를 읽지만 vCenter 등록부에 그 필드가 없어 항상 빈 값 → 스냅샷이 관측한 push 엣지(<span class="mono">inventory[].agent</span>)로 보완(commmap 과 같은 ‘등록값 → 관측값’ 순서)</td><td class="mono" style="font-size:11px">settingsLinks.js:107 · vcenter/registry.js:98~104</td></tr>
+            <tr><td>알림 웹훅</td><td>URL 자체가 비밀(sealed) — Monitoring 등록 대상에서 제외(호스트만 싣더라도 경로 유추 단서). 통신 점검의 tls 프로브는 그대로</td><td class="mono" style="font-size:11px">secretVault.js:107</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

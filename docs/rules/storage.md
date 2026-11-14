@@ -39,8 +39,35 @@
 - (원래 5142행) v2.635 — 베어메탈 스토리지 디스크 사용량 12시간 이력. 새 수집이 아니라 '최신 결과를 떼어 적재' 한다
 - (v2.749) 게스트 파티션 사용률 경보 — 원천은 게스트 디스크 수집의 part_latest · 경로 모양으로 OS · 정규식 없는 패턴 · 메일은 아이실론 코어
 - (v2.789) 스토리지 사용량 보고서(일간·주간·월간 표 · LUN·파일시스템 · CSV · 법인/종류 비교 · 예약 메일)
+- (v2.915) 베어메탈 ↔ SAN 비교 — 디스크 I/O 표본(diskstats) · I/O 시계열 DB · 법인 축 · 비교/시계열 API · ‘SAN 비교’ 탭
+- (v2.962) 베어메탈 스토리지 ‘비교 세트’ — SAN 어레이 · 베어메탈 서버 · 그룹 · 법인 합계를 섞어 2~4개 · IOPS · 응답 시간 · 어레이 측 FE 표본 · 격자 하한
+- (v2.971) 베어메탈 I/O 구간 평균은 디스크별 카운터로 · 바쁨 평균 = 가장 바쁜 디스크 · 피크 ≥ 구간 평균 · 묶음 피크 부분 합 금지 · 위임 결과 BIG_JSON + gzip
+- v2.926 — 아이실론 노드 부하 시계열(네트워크·디스크·CPU). 규칙은 `storage/nodeLoad.js`(순수), 적재·조회는 `db.js`, 수집 키는 `collectors/isilonNodeLoad.js`
+- (v2.965) PowerScale 장비 점검(독립 도구 ps-inspect) — 주간 20항목 · 사실 저장 · 읽을 때 판정 · 엣지 로컬 실행 · 주간 보고서 · Top 10 노드 편중
 
 ## 본문
+38. **v2.965 — PowerScale 장비 점검(독립 도구 `ps-inspect` · 메뉴 '스토리지 › PowerScale 장비 점검' · 사용자 범위 '1차 + 2차')**(설계 `docs/design/powerscale-inspection/README.md` · 코드 `server/src/storage/inspect/*` · 회귀 `server/test/psInspect2965.test.js` · `web/src/views/tools/psInspect/psInspectText.test.jsx`):
+  · **사실과 판정을 나눈다** — 실행은 장비에서 읽은 값(facts)만 이력에 저장하고(`store.js` 장비당 12회 · 원본 출력은 싣지 않는다), 판정은 조회 때 `judge.js` 하나가 한다(기준을 바꾸면 지난 회차도 새 기준으로 다시 보인다 ·
+    화면 · 보고서 · 메일이 같은 판정). 항목 20개 · 출처 22건은 `catalog.js` 하나 — 웹 낱말(상태 다섯 · 구분 다섯)은 vitest 가 서버와 1:1 로 대조한다.
+  · **못 읽은 값은 확인 불가**(unknown) — 정상으로 세지 않는다(판정 전 `numOrNull`). 장비 항목은 '이 장비를 아직 점검하지 않았다' 도 확인 불가다. REST 로 수집하는 장비는 그룹(쿼럼) · 부트 미러 경로가 없어 확인 불가로 남는다(사유를 싣는다).
+    Dell 문서에 숫자가 없는 기준(노드 편중 1.5배)은 '포탈 기준' 이라고 화면 · 보고서에 적는다. 노드 CPU 는 기준이 없어 판정하지 않고 Top 10 에 값만 싣는다.
+  · **명령은 고정 화이트리스트 · 전부 조회**(`runner.js SSH_CMDS · REST_PATHS`) — 사용자 · 장비 출력 값을 명령에 끼우지 않는다. SSH 는 세션 하나에 차례로(장비 시한 `STORAGE_INSPECT_TIMEOUT_MS` 180초 · 세션 예산 = 시한 − 20초 · 명령 15초),
+    주기 수집과 같은 장비에 겹치지 않게 `runSampleExclusive`. 인증 실패는 `authGuard` 로 그 장비를 멈추고 자동 재시도하지 않는다. `isi_for_array -s 'gmirror status'` 는 문서 인용을 찾지 못해 화면에 '문법 미확인' 을 단다.
+  · **엣지 위임 장비는 엣지가 로컬에서 실행**(1:1:1 · 백업과 같은 원칙) — 중앙은 요청 큐(`requests.js` · TTL 60분 · 받아 간 뒤 15분 + 장비 시한 안에 결과가 없으면 버리고 `drops` 로 밝힌다)에 넣고 storage-config 응답 `inspectNow` 로 보낸다.
+    엣지는 결과를 고리 파일(`storage-inspect-ring.json` · 장비당 2)에 두었다 다음 storage push 의 `inspectRuns` 로 올린다. 중앙 수신(`central/storageInspectEdge.js`)은 장비 목록 · 노드 표본과 **같은 소유권 함수로 먼저** 거른 뒤
+    `sanitizeRun`(아는 필드만 · facts 화이트리스트 · 문자열 상한 · `capStr` 평탄화 · at 은 수신 시각 이하 · 엣지 이름은 인증된 agent) — 새 facts 필드는 `facts.js FACT_KEYS` 에도 넣는다.
+  · **주간 일정은 중앙에서만**(`schedule.js`) — 처음 기동은 지난 회차를 '기준' 으로만 잡고(돌리지 않는다 — 화면의 '마지막 정기 점검' 은 history 의 started 만), 꺼져 있던 회차 · 30분 넘게 늦은 회차는 몰아서 돌리지 않고 missed 로 적는다.
+    live 는 기동 때 점검하지 않는다(업그레이드 직후 전 법인 장비에 명령을 보내지 않게) · mock 은 데모 시드를 기다린 뒤 한 번. 보고서 메일은 회차 + N분(엣지 결과가 올라올 시간) 뒤 `sendPortalMail` · 전체판 + 법인판.
+  · 보고서 = 서버 모델 하나(`report.js`) → 화면(흰 종이 · 브라우저 인쇄로 PDF) · 메일 본문 · **자급형 HTML 첨부** · CSV. 서버 PDF 는 만들지 않는다(PDF 라이브러리 없음 — 설계 시안의 'PDF 첨부' 를 정정). 다운로드 이름은 ASCII + RFC5987 `filename*`(한글을 헤더에 그대로 넣으면 500).
+  · 권한: 조회 = `tools` + 전체 범위 · 지금 점검 · 설정 · 지금 발송 = admin + 전체 조회 · 쓰기 범위 · CSV = `data.csv`. 비관리자 판본은 장비 주소 가림(`maskDeviceAddress` · `scrubHosts`) · 메일 주소 숨김 · 데모 손님은 데모 장비만.
+  · 화면(Chromium 1440 실측): 본문 표(최소 폭 980 ~ 1020)를 옆 칸과 나란히 두면 오른쪽 열(편중 · 점검 · 기준 · 읽는 방법)이 표 안 스크롤로 숨었다 → 본문 `flex-basis 1040px` · 옆 칸은 내려가 격자. 앱 공통 표 규칙의 nowrap 을 긴 글자 칸 · 보고서 종이에서 푼다.
+  · 실장비 미확인: 명령 · REST 경로 · JSON 모양은 Dell 문서 검색 인용 수준으로 맞췄고 실장비 출력으로 확인하지 못했다(원문 전체 열람 0건 · Reddit 미접근). 첫 실점검 결과의 '확인 불가 사유' 가 다음 점검의 첫 후보다.
+  · 반증 1인(회귀 `server/test/psInspectReview2965.test.js`) 반영 — 되돌리지 말 것: ① 엣지 원소 id 는 **저장 키 모양(capTrim)으로 먼저 맞춘 뒤** 소유권을 본다(`normDeviceIds` — 원문으로 보고 저장에서 trim 하면 공유 토큰이
+    ' isi-direct ' 로 중앙 직접 장비 이력을 썼다 · 노드 표본 고리도 같다) ② 등록된 아이실론 id 만 받는다 · push 하나에 장비당 4건(원소 반복 포함) · 중복은 엣지 원본 시각(edgeAt)으로도 ③ 정제는 판정에 쓰는 목록 · 개수가 빠지면
+    사실 전체를 버린다(0 · [] 로 채우면 '정상') ④ 8일 넘은 실행은 확인 불가(값은 참고 · 보고서에 'n일 전 — 판정 안 함') ⑤ 법인판 Top 10 은 그 법인 장비로 다시 줄 세운다(`corpFilterOf`)
+    ⑥ 노드 통계는 질의 사이 `createYielder` · 8일 넘는 창은 일 요약 · 잘리면 확인 불가 ⑦ REST 는 장비 시한이 끊으면 던진다(일부만) ⑧ 이벤트 · SyncIQ 쪽 넘김이 남거나 정책이 있는데 7일 보고서 0건이면 확인 불가 ·
+    HealthCheck 는 체크리스트마다 최근 평가만 ⑨ 회차: 8일 안의 시계 되돌림은 기록 유지 · 재시작이 회차에 걸쳐도 유예(30분) 안이면 돈다 ⑩ 중앙 정리(pruneRuns)는 등록부 전부 기준(이 노드 몫만 넘기면 위임 장비 이력이 지워진다)
+    ⑪ 엣지는 점검 뒤 push 를 당긴다(`setAfterEdgeInspectHook`) ⑫ 비관리자 판본의 사유 · 오류에서 IPv4 를 가린다. 남긴 것(추정 · 미반영): SSH 목록 출력 4MB 초과 시 그 항목 확인 불가 · 점검이 장비를 잡는 동안 수집 폴러가 풀 슬롯을 기다린다.
 
 - **스토리지 폴러 주기는 중앙 배포값**(`storage/intervals.js`, v2.409): 수집/push/설정 pull 주기를
   모듈 로드 시 `const INTERVAL_MS = ...env...` 로 굳히지 말 것 — 그러면 중앙(설정 › 엣지·원격 › 수집 서버(원격) ›
@@ -775,3 +802,95 @@
   - 7일 증가는 `part_series` 의 기준 시각 이하 마지막 점(diff-저장)으로 낸다 — 기준 점이 없으면 null(관측 부족), 변화 기준(기본 1 GB) 미만 변화는 보이지 않는다. 가득 참 예상은 그 속도의 단순 추정.
   · v2.770(점검 R5-E2): 엣지 소비 전력의 부분 합 표지(`partial`·`missing`)도 중앙 정제 화이트리스트에(missing>0 일 때만 partial) — 빠지면 전체 전력이 부분 합을 '측정' 으로 센다.
     장비 출력 파서에 `m` 플래그 + 무제한 부정 클래스 금지(외로운 \r 마다 시작점) · `/^(\d+):\s*(.*)$/` 대신 `uemcliParse.recStart` 를 쓴다(한 벌) · 주기 수집은 `_inFlight` 를 보고 건너뛰며(`inFlightSkipped`), finally 는 자기 항목만 지운다.
+
+- **v2.915 — 베어메탈 ↔ SAN(VMAX · PowerMax) 비교**(사용자 요청 2026-11-09 "베어메탈 스토리지의 실시간 디스크 사용율을 … SAN vmax, pmax 사용율/전송 속도와 숫자로 비교" + "법인별로 볼 수 있는 기능" + "각 장비별로 peak / average 디스크 access 성능을 비교하는 차트 … 실시간/트렌드" · 승인 시안 `docs/design/bm-san-compare` ①~⑥ · 컨펌 '진행해' 기본값 · 릴리스 번호는 main 이 앞서 v2.956.0 — 코드 · 테스트 표지는 v2.915). 화면 `views/tools/BmSanCompare.jsx` + `BmIoChart.jsx` · 문구 `bmSanCompareText.js` · `bmIoChartText.js` · 서버 `bmstor/{diskstats,ioDb,ioSeries,compare,corp}.js` · 회귀 `server/test/bmstorIo2915.test.js` + 웹 두 테스트):
+  - **디스크 I/O 표본은 df 와 같은 SSH 세션의 상수 명령 하나**(`diskstats.ioSampleCommand` — `cat /proc/uptime; cat /proc/diskstats; sleep N; …` · 입력이 끼는 자리 없음 · N = `BMSTOR_IO_SAMPLE_SEC` 기본 2 · 0 = 끔). **통짜 디스크만**(`WHOLE_DISK_RE` — dm · md · 파티션은 같은 I/O 의 중복) · 섹터 512B 고정 · 카운터 역행 장치는 뺀다 · df 가 성공했으면 I/O 실패가 서버를 오류로 만들지 않는다(`io:null` + `ioError`).
+  - **엣지 회신 두 경로(폴링 · PUSH)는 `poller.sanitizeBmResult` 하나**로 정제한다 — v2.914 까지 PUSH 회신은 정제 없이 latest 에 들어갔다(발견 · 정정). 엣지 워커 회신 화이트리스트에 `io · ioError` 를 더했다 — 새 엣지 export 필드 = 중앙 정제 필드(루트 규칙). 구버전 엣지(io 없음)는 `ioError:'edge-legacy'`(화면 문장은 웹).
+  - **I/O 시계열 DB `bmstor-io.db`(`bmstor/ioDb.js`)** — 12시간 용량 이력과 따로(보존 · 정리 주기가 다르다). 원시(서버 × 수집 1회) + `io_last`(차분용 — '키별 최신값' 을 GROUP BY+MAX 로 만들지 않는다) + 15분 · 1시간 집계(적재 때 upsert · 백필 없음). **평균 = 누적 카운터 차분 ÷ 경과**(uptime 차 — 수집 사이 구간 전체의 진짜 평균 · 첫 행 · 재부팅 · 공백 > 주기×2 는 null), **피크 = 2초 표본 최댓값(하한)** — 화면이 둘 다 말한다. ⚠ v2.971 정정: 평균은 **디스크별** 카운터 차분(합계 하나로 빼면 디스크 구성이 바뀐 구간이 튄다) · 피크는 **2초 표본과 구간 평균 중 큰 값**(2초 표본만이면 피크 < 평균이 나온다) — 아래 v2.971 항목. 집계 함수는 **한 문장에 하나**(`ioRank` 는 세 문장). 보존 env 3 · 31 · 730일. 엣지 위임 서버 값도 **중앙이 적재**(엣지에 DB 없음). 상한 산수는 파일 머리말.
+  - **법인 축**(`bmstor/corp.js datacenterOfBmServer`): 서버 폼 ‘법인’(`datacenterId` · CSV 열 `datacenter` — id 또는 이름 · 미등록은 가져오기 오류) → 비우면 **엣지의 법인**(수집 서버 `vcenterId` → `datacenterOfVcenter` · 조회는 `findCollectorByName` 하나 — EDGE2613-08) → `''`(미지정 · 센티널 `__none__`). 수집 서버의 자유 문자열 `datacenter` 로 이름 대조하지 않는다. 그룹 이름을 법인으로 간주하지 않는다.
+  - **API** `GET /tools/bm-storage/compare?hours&types&datacenterId`(어레이 용량 = 최신 스냅샷 중앙 · 엣지 중 늦은 것 · 전송 속도 = `storageSeriesMulti` 를 시리얼로 대조 · 법인 분리 집계에서는 같은 법인 계열만 · 사유는 코드) · `GET /tools/bm-storage/io/series?range&metric&ids&rank=1`(격자 = SAN `rangeOf` 의 bucketMs — 15분 · 1시간 정배수 · 1h 원시 · 24h 15분 · 7d/30d 1시간 · `bm:all` 은 측정 서버 전부에 값이 있는 칸만 합). 둘 다 adminOnly + fullScopeOnly 이고 **응답에 관리 주소를 싣지 않는다**(`stripHost`). 데모는 `demoBmIoSeries`(수식 — 적재 없음)이고 PowerMax · VMAX 데모 시리얼은 SAN 데모 포트 이름과 맞춘다(`sanDemoArraysFor`).
+  - **화면**: 하위 탭 `useHashTab`(`#/tools/bm-storage/compare`) · 법인 · SAN 종류 칩은 공용 `DeviceFacetBar`(이름 키 → id) · 실시간 1시간 재조회는 공용 `usePolling`(WEB2613-09) · 합계 행은 STable 규약대로 **맨 아래 고정**(시안은 맨 위 — 저장소 규약을 따랐다) · 피크는 전송 속도 칸의 둘째 줄(1440 에서 열이 넘쳐 열 하나를 합쳤다) · CSV 는 `canCsv()` 뒤.
+  - ⚠ 테스트가 src 모듈을 **정적 import 하면 CONFIG_DIR env 보다 먼저 config.js 가 평가**되어 개발용 `server/config/` 에 테스트 서버가 쌓인다(이 작업에서 실측 — 12대). 설정을 읽는 경로가 하나라도 끼면 `before()` 에서 동적 import 한다(`bmstorIo2915.test.js` 머리말).
+- **v2.962 — 베어메탈 스토리지 ‘비교 세트’**(사용자 요청 2026-11-10 "SAN A / SAN B · 가 법인의 SAN A / 가 법인의 베어메탈 AA … 다양하게 각각의 스토리지의 성능을 비교" · 컨펌 '바로 구현 · IOPS · 응답 시간까지 · 표준'. 기록 `docs/design/bm-san-compare/README.md` §9 · 회귀 `server/test/bmCompareSet2962.test.js` + 웹 `compareSetText.test.js`):
+  - **대상 id 는 종류:키**(`san:<시리얼>` · `bm:<id>` · `bmg:<그룹>` · `bmc:<법인 id>` — `compareSet.parseSetIds` · 상한 4 · 웹 `normalizeIds` 와 같은 규칙). 주소 `#/tools/bm-storage/set/<ids>` 로 공유 — `useHashTab` 은 둘째 조각(`set`)만 본다.
+  - **IOPS · 응답 시간은 diskstats 열 3 · 7(완료 수) · 6 · 10(소요 ms)** — 넷 중 하나라도 숫자가 아니면 그 장치는 IOPS 를 null(섹터 · busy 는 그대로). 응답 시간은 I/O 가중(Σ소요 ÷ ΣI/O)이고 I/O 0 이면 null(0 ms 가 아니다). 묶음 합도 Σ로 다시 낸다(서버별 평균의 평균 금지).
+  - **DB 열 추가는 `ioDb.ensureColumns`**(PRAGMA table_info → 빠진 열만 ADD COLUMN · NOT NULL 은 DEFAULT 필수) — v2.956 DB 로 기동하는 테스트가 고정. 새 열을 더할 때 `ADD_COLUMNS` 에도.
+  - **SAN IOPS · 응답 시간 · 바쁨 = 어레이 측 5분 FE 표본**(`storage/db.nodeLoadQuery` group 'fe') — 합의 '전부' 는 그 창에 나온 부모 단위(카탈로그 전체가 아니다 — 빠진 디렉터 하나로 전부 null 이 되지 않게) · 하나라도 빠진 시각은 null · 응답 시간은 최대 · 바쁨은 FA busy 또는 노드/SP CPU 최대. 자격 판정은 기존 `feEligibility`(SSH 는 `fe-ssh`). 실장비 미확인.
+  - **격자는 표본 간격보다 잘게 만들지 않는다**(`compareSet.gridMs` — v2.956 `/io/series` 1시간이 1분 격자였다) · 재격자는 평균/최대(합 금지).
+  - ⚠ `ioSeries.summarize` 의 avgTotal 은 **정수 반올림**(B/s · IOPS 용) — ms · % 지표에 그대로 쓰면 평균이 피크보다 커 보인다(화면 확인에서 발견). `compareSet.finishMetric` 이 반올림 없이 다시 낸다.
+  - 화면: 차트 세로축 선형/로그(로그는 0 이하 점을 빈칸으로 — 0 으로 그리지 않는다) · IOPS 축 눈금은 짧게(`axisIops`) · 같은 사유 문장은 한 열에서 바로 위와 같으면 생략.
+- **v2.971 — 베어메탈 디스크 I/O 의 평균 · 피크 · 바쁨 정의를 바로잡았다**(사용자 질문 2026-11-11 "여기서 수집되는 전송속도 피크/평균이 그룹에 속한 모든 서버의 IO 를 합친거야?" — 화면에서 피크 633 KB/s < 평균 1.18 GB/s · IOPS 72 < 3,510 · 응답 시간 0.00 < 0.20 ms. 코드에서 찾은 결함 넷 · 컨펌 '전부 고치기'. 회귀 `server/test/bmIoPerDisk2971.test.js`(변이 20/20) · `audit2622c.test.js`(413 재전송 · gzip) · 기록 `docs/design/bm-san-compare/README.md` §10):
+  - **구간 평균은 디스크별 누적 카운터로**(`counters.disks` — 이름 → [rd_sectors, wr_sectors, io_ms, rd_ios, wr_ios, rw_ticks] · `diskstats.intervalAvg`). 두 수집 **모두에 있는** 디스크만 · 카운터가 준 디스크(교체)는 그 구간에서 뺀다.
+    v2.970 까지는 합계 하나만 기억해 한 번 빠졌다 돌아온 디스크의 평생 누적이 그 구간에 몰렸다(재현: 2초 표본 128 KB/s · 구간 평균 667 GB/s). 2초 표본에서 뺀 디스크도 맵에는 'after' 누적으로 싣는다.
+    한쪽만 맵이 있으면(업그레이드 직후 첫 구간) **null** · 둘 다 없으면(구버전 엣지) 합계로 빼되 바쁨 평균은 null(basis 'total' — 튀는 위험은 엣지를 올리면 사라진다).
+  - **바쁨 평균 = 가장 바쁜 디스크**(2초 표본 busyPct 와 같은 뜻). v2.970 까지는 모든 디스크 io_ms 합 ÷ 경과(디스크 20개 × 3% → 60%) — 그 값이 든 옛 열(`avg_busy` · `n_abusy` · `sum_abusy`)은 **읽지 않는다**(새 열 `avg_busy_disk` · `n_dbusy` · `sum_dbusy` — 옛 기록의 바쁨 평균은 '—').
+  - **피크 = max(2초 표본, 구간 평균)** — 구간의 실제 최고치는 그 구간 평균보다 작을 수 없다. 적재 때 집계 max_* 를 올리고, 읽을 때(원시 행마다 · 칸 평균 · `ioRank`) 옛 행도 올린다. 비교 세트 · SAN 비교 탭 둘 다.
+  - **묶음 피크는 구성원 전부로**(`ioSeries.sumSeries` — 피크가 빈 구성원은 그 칸 평균). v2.970 까지는 피크 있는 구성원만 더한 부분 합이었다. ‘동시 피크의 상한’ 은 **틀린 설명**이었다(2초 표본은 서버마다 다른 시각의 하한 — 합은 상한도 하한도 아니다) — 화면 문구도 고쳤다.
+  - **엣지 새 export 필드**(`counters.disks`) = 중앙 화이트리스트 `bmstor/diskMap.js sanitizeDiskMap`(엣지 회신 · `io_last.disks_json` 되살리기가 같은 함수 — 이름 32자 이하 · `WHOLE_DISK_RE` · 값 6개 · 0 이상 · 상한 `DISK_MAP_MAX` 1024 넘으면 맵째 버림).
+    위임 결과(`/api/central/bmstor-result`)는 잡 하나에 그 엣지 서버 **전부**가 실린다 — `archScan.BIG_JSON_SMALL` 의 '서버 1대 단위' 는 틀린 기록이라 지우고 **BIG_JSON 등록** · 엣지는 gzip. 현황 응답(`agg.aggregate`)에는 counters 를 싣지 않는다.
+  - **반증 1인 지적 반영(확정 8건)**: ① 합계 기준(구버전 엣지)은 **디스크 수(`io_last.n_disks`)가 바뀐 구간을 모름**(튄 평균이 피크로 30일 남던 것) ② **낡은 디스크 맵** — 구판으로 내렸다 올리면 구판이 ts · 합계만 바꾼다 → 맵을 쓴 수집 `disks_ts` 가 `ts` 와 같을 때만
+    ③ 구버전 엣지 서버의 바쁨은 사유 `busy-avg-unknown`(‘표본 없음’ 이 아니다) · 묶음 바쁨 피크는 평균 없는 구성원의 2초 표본도(최댓값이라 일부여도 하한) ④ **시간 열(rd/wr/io_ticks)은 커널이 unsigned int 로 찍어 2^32 ms 에서 돈다** —
+    섹터가 늘었는데 ticks 만 줄면 넘침으로 보정(`diskstats.tickDelta` · rw_ticks 는 두 열 합이라 두 번까지) · 보정 값이 경과보다 크면 그 디스크는 바쁨에서만 뺀다(2초 표본도 같은 규칙 · 바쁨을 잰 디스크가 없으면 null)
+    ⑤ **연속 재부팅** — uptime 차가 수집 시각 차보다 max(120초, 25%) 넘게 작으면 모름 ⑥ 합이 모두 0 이면 피크도 0(`p || null` 금지) ⑦ 원시 순위 피크도 행마다 max(2초 표본, 구간 평균)
+    ⑧ `san:all` 피크 합은 평균 합 아래로 내려가지 않게. 그 밖: 구판 중앙(1MB 한도)이 413 이면 엣지가 **디스크별 맵만 빼고 한 번 더** 보낸다(`bmstorWorker.dropDiskMaps`) · 디스크 맵 값은 안전 정수 이하만.
+    테스트 가 객체 리터럴 `__proto__:` 로 정제를 검사하던 것은 **공허한 검사**였다(자기 키가 아니라 프로토타입) — JSON.parse 입력으로 바꿨다. 변이 20/20.
+- ⚠⚠ **v2.926(릴리스 2.931.0) — 아이실론 노드 부하 시계열(네트워크 In/Out · 디스크 쓰기/읽기 · CPU). 규칙은 `storage/nodeLoad.js`(순수), 적재·조회는 `db.js`(`saveNodeLoadPoint`·`nodeLoadQuery`), 수집 키는 `collectors/isilonNodeLoad.js`, 화면은 `views/tools/storageNodeLoad/`**
+  (사용자 요청 "노드별 io network 부하를 저장하고 차트로" · "기간별 시간별로 이전 기록" · "Disk io 추가" · 성능 추천 ①CPU ④잡 엔진 ⑤지난주 비교 — Claude Design 시안 v2 컨펌,
+  `docs/design/isilon-node-load/`. 회귀 `server/test/storageNodeLoad2926.test.js` + 웹 `storageNodeLoad/nodeLoadText.test.js`(서버 묶음·기간·조립을 같은 소스로 대조)):
+  · **장비 왕복을 늘리지 않는다** — REST 는 이미 부르는 `statistics/current?devid=all` 에 키 3개(`node.disk.bytes.{in,out}.rate.sum` · `node.cpu.idle.avg`)를 더하고(테스트가 statistics 호출 수 3 을 고정),
+    SSH 는 세션 안에 `isi statistics system --nodes all --format json` 1개(soft · 20초 · 정확 용량 다음 · 전원보다 앞). 표본 = 수집 주기마다 1회 순간값(주기 사이는 모른다 — 화면이 말한다).
+  · ⚠ 정직 기록: 키 이름 · `node.cpu.idle.avg` 의 1/10 % 단위 · 디스크 In = 쓰기 / Out = 읽기 · CLI JSON 모양은 **실장비 미확인**. CPU 단위를 값마다 추측하지 않는다(0~1000 밖은 null —
+    값마다 추측하면 모든 노드가 바쁠 때 해석이 뒤집힌다). 값이 없으면 필드를 만들지 않고(`nodeLoadProbe` 가 읽은 수·사유), 화면은 그 묶음 버튼·표 열을 그리지 않는다.
+  · 디스크는 **B/s 그대로**(네트워크처럼 ×8 하지 않는다 — v2.599 단위 사고) · 필드 이름에 단위(`diskInBytesPs`). 새 노드 필드 3개는 `edgeRecord.NODE_NUM_KEYS` 에도(엣지 정제).
+  · 표 3개(`storage-history.db`): `node_load_sample`(장비 × 시각 PK — 재전송 중복 판정 · 노드 수 · 잡 JSON) · `node_load_history`(노드 원시 — 보존 `nodeLoadRawKeepDays` 기본 30일,
+    설정은 스토리지 증가량 › ⚙ 저장 기간 · env `STORAGE_NODELOAD_KEEP_DAYS`) · `node_load_daily`(노드 × 일 — 지표마다 sum·n·max, 보존은 일 롤업 5년). 스냅샷 1개 = 트랜잭션 1개.
+    ⚠ 일 롤업 max 는 스칼라 `max()` 금지(`max(a, NULL)` = NULL — 못 읽은 표본 하나가 그 날 최대를 지운다) — CASE 로 쓴다.
+  · ⚠⚠ **목록의 노드는 값이 모두 비어도 행을 남긴다** — 그래야 그 주기의 클러스터 합계가 부분 합인지 안다(칸의 노드를 전부 읽었을 때만 합계, 아니면 null · 버킷·일 칸은 노드마다 읽은 표본이 있을 때만).
+    노드 값이 하나도 없는 스냅샷(Unity·PowerStore 처럼 노드 처리량을 재지 않는 타입)은 적재하지 않는다(`no-load`).
+  · API `GET /tools/storage/devices/:id/node-load?range=24h|7d|30d|90d&group=net|disk|cpu[&end=ms]` — toolsPerm + fullScopeOnly · 데모 계정은 데모 장비만(404).
+    24h 원시(수집 주기 15분 미만이면 15분 버킷) · 7d 4시간 버킷(평균 + 최대) · 30d/90d 일 롤업(원시 폴백 없음). 묶음은 `Object.hasOwn` 으로만 받는다(열 이름을 만드는 키).
+    비교 구간(`BASELINE` — 24h 는 지난주 같은 요일)은 같은 조립 규칙으로 읽어 창 위치로 옮긴다. 응답의 `oldest`·`retention`·`rawMaxDays` 로 화면이 이전 구간 범위를 계산한다.
+  · 화면: 창 이동은 전송 속도의 순수 함수(`xferSpeedText` maxBackOf·windowEndOf·windowLabel·windowRangeText)를 **그대로** 쓴다(세 번째 사용처 — 사본 금지). 최신 창만 새 수집(collectedAt)에 다시 부르고 폴링하지 않는다.
+    단위가 다른 묶음은 한 차트에 겹치지 않는다(이중 축 금지). 비교 '대비 %' 는 두 구간 모두 합계를 낸 칸이 절반 이상일 때만. 잡 엔진은 SSH 장비만(REST 는 '모름' — '잡 없음' 이 아니다).
+  · 장비를 지워도 노드 부하 이력은 지우지 않는다(용량 이력과 같다 — 보존 기간으로 정리된다).
+
+36. **v2.937(2차) — 아이실론 노드 2차: 디스크 busy·IOPS(②) · 클라이언트·프로토콜(③) · 표본 주기 분리(⑨) · 노드 드로어 · 재배치 보드**(설계 `docs/design/isilon-node-clients/README.md` · 회귀 `storageNodeClients2936`):
+  · **표본 폴러는 수집 주기와 따로 돈다**(`storage/nodeLoadPoller.js` — 주기 `intervals.nodeLoadMs` 기본 5분·하한 1분·**상한 60분**(항목별 `max`) · 아이실론만 · 장비 토글 `nodeLoadEnabled`
+    기본 켬(`registry.normalizeDevice` — 다른 타입은 필드를 만들지 않는다) · 동시 3 · 장비당 시한 60초(`reqTimeoutMs` 관문) · 인증 정지는 수집 주기와 같은 레코드).
+    장비 점유는 `poller.runSampleExclusive` 로 나눈다 — **표본은 수집 중이면 건너뛰고(IN_FLIGHT_BUSY), 수집 주기는 표본이 끝날 때까지 기다린다**(표본 때문에 1시간 수집이 빠지는 쪽이 더 나쁘다).
+    호출은 4개뿐(REST `statistics/current?devid=all` + `summary/{client,protocol,drive}` · SSH `isi statistics {system,client,protocol,drive} --format json`). ⚠ 실장비 미확인 — 요약 경로·필드·행의 node(lnn 가정) · REST devid→lnn 은 6시간마다 `/cluster/nodes` 로 대응(`probe.idMap`).
+  · **엣지 → 중앙은 기존 storage push 본문의 `nodeLoadSamples`**(장비당 미전송 고리 `RING_MAX`=3 · 200 이면 지움 · 더 쌓이면 가장 오래된 것을 버리고 `ring.dropped` 로 센다). 중앙 `/storage-data` 는 장비 목록과
+    **같은 소유권 필터**(중앙 직접 장비 거절 · 개별 토큰은 위임분만)를 지난 뒤 `storageEdge.saveEdgeNodeLoadSamples`(sanitizeNodeLoadSample — ts 는 수신 시각 이하 · 장비 500 × 표본 6 상한)로 적재하고 응답 `nodeLoadSamples` 로 확인한다.
+    push 는 그 확인을 `util/centralReply.dropSummaryOf` 로 읽는다(ack 가 없으면 중앙 v2.934 이하 — 표본은 버려진다고 콘솔·상태에 남긴다). 새 노드 필드(`busyPct`·`iops`·`opsPs`·`latencyMs`)는 `NODE_NUM_KEYS` 에도.
+  · 표(`storage-history.db`): `node_load_history`·`node_load_daily` 에 지표 4열(ops·lat·busy·iops) 추가 · **`node_load_hourly`(노드 × 시간 — 보존 `nodeLoadHourlyKeepDays` 기본 90일)** ·
+    `node_client_sample`(원시 `nodeClientRawKeepDays` 기본 **2일** — 가장 많이 쌓인다) · `node_client_hourly`(30일) · `node_client_daily`(1년) · `node_proto_hourly/daily`. 표본 1개 = 트랜잭션 1개 · 같은 (장비, ts) 는 PK 가 거른다.
+    **노드 원시 기본 30일 → 7일**(5분 표본이면 12배 — 저장값이 있으면 그대로 · 테스트 2926 ④ 갱신). 원시 보존 밖의 '원시' 창(24시간 · 지난주 비교 구간)은 **시간 요약 1시간 칸**으로 내려간다(원시 폴백이 아니라 요약 — `nodeLoadQuery` source:'hourly').
+  · API: `node-load` 에 묶음 `disk`(din·dout·**busy·iops**)·`proto`(ops·lat — `protoTable` 노드 × 프로토콜 동봉) · 응답 `sample:{pollMs,nodeLoadMs,sampleEnabled,sampleMs}`(표본 켜진 장비는 24시간 창이 15분 칸) ·
+    `GET …/node-clients?node=&range=24h|7d[&end]`(지금 = 창 안 마지막 표본 · 창 평균 · **노드 비중·고정은 전 노드 행렬로**(이 노드만 보면 판정 불가) · 다른 노드 · 이름) ·
+    `GET …/client-dist?range=24h|7d|30d&proto=&fixed=0.5~1&skew=1.1~5`(행렬 상위 50 · 쏠림 노드 집합은 `nodeLoadNodeIds` — ops 0 노드도 분모 · 후보는 `rebalanceCandidates` 탐욕 — **계산일 뿐, 포탈은 바꾸지 않는다**(응답 note)).
+    셋 다 toolsPerm + fullScopeOnly · 데모 404 · 장비 호출 0 · 폴링 없음.
+  · 이름 붙이기는 `storage/clientNames.js` 하나 — 장비 보고 이름(remote_name) > VM IP > 호스트 이름/관리 IP(`hostLedgerIp` 와 같은 판정) · 같은 IP 둘은 `ambiguous` · 비정규 IPv4 표기는 같은 IP 가 아니다 · **역방향 DNS 는 하지 않는다**(SSRF·지연).
+  · 화면: '클라이언트 없음' 은 '연결 없음' 이 아니다(쉬는 마운트는 통계에 없다 — 문장으로) · 마지막 표본이 주기 ×3 을 넘으면 노란 머리(`lateMs` 는 응답 값) · 드로어는 모달 위 모달이 아니라 구역 안 펼침 ·
+    표본 꺼진 장비는 묶음 버튼이 1시간 값으로 그려지고 드로어·분포가 그 사실을 말한다 · 묶음 순서·첫 선택은 `GROUP_ORDER`·`GROUP_FIRST`(서버 묶음과 vitest 대조). 데모는 노드 2 쏠림 · 노드 3 클라이언트 0 을 합성한다(`demoNodeLoadSample` · 48시간 5분 + 5일 1시간 백필 — 클라이언트 기록이 없을 때만).
+  · v2.950(남긴 것 정리 — 코드 주석 표지는 v2.938): CSV·자유텍스트에 `nodeLoad` 칸(`exportedNodeLoad` — 아이실론만 · 빈 칸은 `undefined` 로 **유지** · 가져오기는 키를 만들지 않는다 · 위치형 `TEXT_FIELDS` 는 **맨 끝**에 — 가운데 끼우면 옛 11열 파일의 note·password 가 밀린다) ·
+    노드 표 ID 열 → `NodeLoadPanel openNode` prop 으로 드로어(구역 scrollIntoView) · 엣지 미전송 고리 파일 보존(`storage-nodeload-ring.json` — `registerStateFile` · 2초 디바운스 + exitFlush · 되살릴 때 `sanitizeNodeLoadSample`·장비당 RING_MAX·7일 · 손상은 `preserveCorrupt`).
+  · 남긴 것(정직): 장비 CSV 가져오기/내보내기·일괄 변경에는 `nodeLoadEnabled` 칸이 없다(장비 편집 폼만) · 노드 표(ID 열)에서 드로어를 열지 않는다(노드 부하 구역의 히트맵 이름·순위·분포 막대에서만) · 엣지 미전송 고리는 재시작하면 비워진다(로컬 DB 에는 남는다).
+- **v2.952 — 어레이 프런트엔드 5분 표본(PowerMax FE 디렉터 · PowerStore 노드/포트 · Unity SP/포트 — `storage/collectors/arrayPerf.js` · 폴러 `nodeLoadPoller.js`)**
+  · 대상은 REST 로 수집하는 어레이(`collectMethod 'api'`)만 — SSH 변형(uemcli · pstcli)은 성능 경로가 없어 토글 자체가 없다(`registry.normalizeDevice sampleCapable`). 토글 `nodeLoadEnabled` 는 아이실론과 같은 키 · 기본 켬.
+  · 노드 부하 표에 지표 `hbps`(B/s) · `queue`(%) 가 늘었다(아이실론은 null — 0 이 아니다) · 묶음 `fe` · `CLUSTER_AGG` hbps sum · queue avg · 단위 카탈로그 `node_unit`(`saveNodeUnits · nodeUnitsOf`) —
+    엣지 push 표본 안 `units` 를 중앙이 `sanitizeNodeUnits` 로 정제해 저장(모르는 종류 '' · 이름 없는 것 버림 · 64).
+  · Unity FC 바이트 · IOPS 는 **누적 카운터** — metricValue 최신 두 항목의 델타 ÷ 시각 차(하나면 null · 줄면 리셋 null). PowerStore 지연은 µs → ms(가정 · probe.latUnit). PowerMax HostMBs × 1e6.
+  · 데모: 어레이 데모 장비의 시리얼은 같은 법인 SAN 데모 어레이 시리얼(`mock/demo/sanswitch.js sanDemoArraySerial`) · FE 표본 30일 백필(`backfillNodeLoad feDevices`) · `demoArrayPerfSample` 은 수집기와 같은 `buildFeSample`.
+  · 화면 · 점검은 `docs/rules/sanswitch.md` v2.952.
+
+37. **v2.957 — 아이실론 노드 ↔ 클라이언트 ‘연결 그래프’ 보기(① 현 그래프 · ③ 노드 카드 — 사용자 선택)**(설계 `docs/design/isilon-node-clients-viz/README.md` · 회귀 `web/src/views/tools/storageNodeLoad/nodeLoadViz.test.js` · `nodeGraphView.test.jsx`):
+  · 데이터는 **`/client-dist` 응답 그대로**(새 서버 경로 없음 · 장비 호출 0 · 폴링 없음) — 클라이언트 × 노드 ops 는 서버 행렬 `clients[].nodes`(창 평균 ops/s) · 없으면 `share × total`.
+    쏠림 · 고정 · 노드 집합(ops 0 노드 포함)은 서버 값만 쓴다 — 웹이 다시 판정하지 않는다(`vizDataOf`).
+  · 좌표 · 순서 · 글자는 `nodeLoadViz.js`(순수) 하나 — 노드 호 110°~250°(id 순 · 길이 = 합 · 바닥값 2.5° 라 ops 0 노드도 보인다) · 클라이언트 호 70°~−70°(**주 노드 순 묶음** — 리본이 엇갈리지 않게 · 묶음 안 ops 내림차순) ·
+    리본 = 쌍(ops > 0) · 굵기 2~22px(가장 큰 쌍 대비) · **라벨은 ops 상위 24개만**(바닥 호 ≈ 13px — 전부 적으면 겹친다 · 나머지는 툴팁 · 드로어 — 숨긴 수를 범례가 말한다) · 압축(폭 560 미만)은 클라이언트 글자 없이.
+  · 색은 겹쳐 보기 4색 그대로(nfs 파랑 · smb 주황 · http 초록 · 쏠림 호박) · 배정 없는 프로토콜은 회색 ‘기타’(색을 지어내지 않는다) · 빈 노드는 ‘최근 작업 없음’(‘연결 없음’ 이 아님 — 카드 문장도 같다).
+  · 노드 카드: 부하 높은 순 · 빈 노드 맨 뒤 · 칩 크기 3단계는 **가장 큰 클라이언트 대비**(절대값 기준은 장비마다 규모가 달라 쓰지 않는다) · 칩 상한 12 + ‘외 n’(조용한 상한 금지) · 두 노드를 쓰는 클라이언트는 두 카드 + ‘2노드+’ ·
+    노드가 `CARDS_AUTO_NODES`(12) 를 넘으면 카드로 시작하고 그 사실을 문장으로.
+  · 드로어 연계: `NodeLoadPanel openFromGraph` → `NodeClientsDrawer focus={client, range, at}` — 그래프 창(24h → 24h · 7d/30d → 7d)에 맞추고 응답 뒤 `tr[data-client]` 로 스크롤 · `nl-rowhit` 강조 · 그 창에 없으면 문장(30일 창에서만 보인 클라이언트).
+    보기 ‘연결 그래프’ 는 분포 보기처럼 창 이동 줄 · 타일 · 추이를 쓰지 않는다(`distLike`).
+  · Chromium 1440/400(목 서버 데모 — 노드 6 · 클라이언트 22): 오류 0 · 가로 넘침 0 · 호 → 드로어 · 칩 → 줄 강조 확인. ② 생키 · ④ 매트릭스 · ⑤ 3D 는 시안만(미구현). 실장비 표본 모양은 여전히 미확인(v2.937 과 같다).

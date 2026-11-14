@@ -6,6 +6,8 @@
 //   ③ 1단 줄은 줄바꿈(가로 스크롤 아님).
 //   ④ 화면·서버 문구에 옛 묶음 이름의 메뉴 경로('설정 › 수집 서버 › …' · '설정 › Security › …' 등)가 남지 않는다(주석 제외 — 버전 이력은 그대로 둔다).
 //   ⑤ '설정 › <묶음> › <항목>' 문구는 그 항목이 실제로 그 묶음 안에 있다.
+// v2.916(사용자 요청 '설정 메뉴를 클로드 디자인으로 개편 — 효율적이고 직관적으로' · 시안 A안 + 상태 요약): 1단 탭 줄 → 설정 안의 왼쪽 목록.
+//   묶음 9 → 10('수집' → '수집 주기·임계' + '게스트·GPU', '알림·연동' → '알림·메일', 특수 기능 카테고리 → 시스템). ③ · ④ 를 그에 맞게 바꿨다.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -41,8 +43,8 @@ test('① 하위 키 48개는 그대로다(삭제 · 이름 변경 없음) — �
   assert.equal(new Set(ITEMS.map((i) => i.k)).size, ITEMS.length, '중복 키');
 });
 
-test('② 모든 항목이 묶음 하나에 속하고, 1단은 GROUP_ORDER 9개 · 같은 묶음은 붙어 있다', () => {
-  assert.equal(GROUP_ORDER.length, 9, `1단 묶음이 ${GROUP_ORDER.length}개 — 늘리면 1,440px 에서 다시 넘칠 수 있다(Chromium 으로 확인할 것)`);
+test('② 모든 항목이 묶음 하나에 속하고, 묶음은 GROUP_ORDER 10개 · 같은 묶음은 붙어 있다', () => {
+  assert.equal(GROUP_ORDER.length, 10, `묶음이 ${GROUP_ORDER.length}개 — v2.916 은 10개(왼쪽 목록). 바꾸면 docs/SETTINGS.md 절 순서와 시안 문서도 함께`);
   assert.deepEqual(Object.keys(GROUP_LABEL).sort(), [...GROUP_ORDER].sort(), 'GROUPS 와 GROUP_ORDER 가 어긋난다');
   const loose = ITEMS.filter((i) => !i.group || !GROUP_ORDER.includes(i.group));
   assert.deepEqual(loose.map((i) => i.k), [], '묶음 없는(또는 모르는 묶음) 항목 — 1단에 보이지 않아 메뉴로 들어갈 수 없다');
@@ -52,10 +54,19 @@ test('② 모든 항목이 묶음 하나에 속하고, 1단은 GROUP_ORDER 9개 
   assert.ok(ITEMS.some((i) => i.k === 'vcenter-admin' && i.group === GROUP_ORDER[0]), '기본 화면(vcenter-admin)은 첫 묶음에 있어야 첫 진입 강조가 맞다');
 });
 
-test('③ 1단 줄은 GROUP_ORDER 로 그리고 줄바꿈한다(가로 스크롤 금지)', () => {
+test('③ 메뉴는 왼쪽 목록(GROUP_ORDER 순)이고 가로 탭 줄이 없다 · 모든 항목에 설명 한 줄 · 좁은 화면은 컨테이너 쿼리로 접는다', () => {
   const body = stripComments(SRC);
-  assert.match(body, /GROUP_ORDER\.filter\(\(g\) => groupChildren\(g\)\.length > 0\)/);
-  assert.match(body, /className="vcd-views" style=\{\{[^}]*flexWrap: 'wrap', overflowX: 'visible'/);
+  assert.match(body, /GROUP_ORDER\.map\(\(g\) =>/, '묶음은 GROUP_ORDER 순서로 그린다(첫 등장 순서가 아니라)');
+  assert.match(body, /className="stg-list"/);
+  assert.doesNotMatch(body, /className="vcd-views"/, 'v2.905 의 1단 가로 탭 줄이 남아 있다 — v2.916 은 왼쪽 목록');
+  const descs = [...SRC.matchAll(/^ {2}\{ k: '([a-z0-9-]+)', label: '[^']+', C: \w+, group: '[a-z-]+', desc: '([^']{10,})'/gm)].map((m) => m[1]);
+  assert.deepEqual(ITEMS.map((i) => i.k).filter((k) => !descs.includes(k)), [], '설명(desc) 없는 항목 — 본문 머리의 한 줄 설명 · 검색이 쓴다');
+  const css = fs.readFileSync(path.join(ROOT, 'web/src/styles.css'), 'utf8');
+  assert.match(css, /\.stg-cq \{ container: stg \/ inline-size;/, '목록 접힘은 화면 폭이 아니라 설정 영역 폭으로(사이드바 펼침/접힘에 따라 본문 폭이 다르다)');
+  // 컨테이너 쿼리는 컨테이너 자신에게 걸리지 않는다 — 접히는 .stg 는 컨테이너(.stg-cq)의 자손이어야 한다(v2.916 Chromium 400px 실측 결함).
+  assert.doesNotMatch(css, /\.stg \{[^}]*container:/);
+  assert.match(body, /<div className="stg-cq"><div className=\{`stg\$\{navOpen/);
+  assert.match(css, /@container stg \(max-width: 760px\)/);
 });
 
 // ④ · ⑤ 문구 스윕 — 화면(web/src)과 서버 응답 · 메일(server/src). 테스트 · 주석 · 릴리스 노트(과거 기록)는 보지 않는다.
@@ -68,7 +79,8 @@ function* files(dir) {
   }
 }
 const lineOf = (s, idx) => s.slice(0, idx).split('\n').length;
-const OLD_PATH = /설정\s*[›>]\s*(?:🖥️ |🖥 |🗄️ |🗄 |🎮 |🔌 |👤 |🛡️ |🛡 |📋 )?(vCenter 관리|수집 서버|GPU 사용량 수집|원격 접속 서버|User Control|Security|Log)(?!\(원격\)|[A-Za-z])/g;
+// v2.916: '설정 › 수집 › …'(→ 수집 주기·임계 / 게스트·GPU) · '설정 › 알림·연동 › …'(→ 알림·메일 / 시스템) 도 옛 경로다.
+const OLD_PATH = /설정\s*[›>]\s*(?:🖥️ |🖥 |🗄️ |🗄 |🎮 |🔌 |👤 |🛡️ |🛡 |📋 )?(vCenter 관리|수집 서버|GPU 사용량 수집|원격 접속 서버|User Control|Security|Log|수집(?= › )|알림·연동)(?!\(원격\)|[A-Za-z])/g;
 
 test('④ 옛 묶음 이름의 메뉴 경로가 화면 · 서버 문구에 남지 않는다', () => {
   const hits = [];

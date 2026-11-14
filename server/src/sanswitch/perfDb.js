@@ -25,6 +25,8 @@ import { loadPerfSettings } from './perfSettings.js';
 import { isMockMode } from '../mock/demo/flags.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { isDemoPerfQuery, demoStorageMultiAsync, demoStorageOne, demoPortSeries } from './demoPerfSynth.js';   // v2.715 목업: 수식으로 만든다
+import { storageKey, arraySerialOf, endpointKind } from './endpointKey.js';   // v2.920: 순수 판정은 endpointKey.js 로(귀속 엔진과 공유)
+export { storageKey, arraySerialOf, endpointKind };
 import { createYielder } from '../util/timeSlice.js';   // v2.621(감사 DATA-03): 이월 한계 = 수집 주기 × 2
 import { G15, G1H, alignDown, alignUp, snapBucketMs, rollupGranularity, planSegments, rollupChunkBuckets } from './perfRollup.js';   // v2.728 SAN 2차
 const lockRetry = createLockRetry();
@@ -770,13 +772,6 @@ async function storageSeriesInner(deviceId, { hours = 24, points = 120, from = n
  * 제품군+어레이 시리얼이라 그것이 곧 장비 식별자다(뒤는 디렉터 포트·펌웨어라 장비가 같아도 다르다).
  * `::` 가 없으면(HBA 등) 이름 앞부분을 그대로 쓴다.
  */
-export function storageKey(name) {
-  const s = String(name || '').trim();
-  if (!s) return '(미확인)';
-  if (s.includes('::')) return s.split('::').slice(0, 2).join('::');
-  return s.slice(0, 40);
-}
-
 /**
  * 여러 스위치를 가로질러 **연결 스토리지별로 합산**한 시계열(v2.412, 사용자 요구
  * '법인을 선택하면 그 법인의 모든 스토리지 사용량을 분석').
@@ -789,8 +784,9 @@ export function storageKey(name) {
  * @returns { buckets, bucketMs, series:[{ key, ports:[{deviceId,port}], deviceIds[], sum[], avgTotal, maxTotal }] }
  */
 export async function storageSeriesMulti(deviceIds = [], opt = {}) {
-  const { hours = 24, points = 120, groupOf = null, from = null, to = null, carryMs = null, signal = null } = opt;
-  const keyOpts = { ids: deviceIds.map(String), hours, points, from, to, carryMs, groupOf: groupOf ? [...groupOf.entries()] : null };
+  // v2.948(SAN 스토리지 성능): withPorts 면 시리즈마다 포트별 시계열(portsDetail)을 함께 — 디렉터 · 팹 · 회선 용량을 화면이 묶는다(조회는 한 번).
+  const { hours = 24, points = 120, groupOf = null, from = null, to = null, carryMs = null, signal = null, withPorts = false } = opt;
+  const keyOpts = { ids: deviceIds.map(String), hours, points, from, to, carryMs, groupOf: groupOf ? [...groupOf.entries()] : null, withPorts: !!withPorts };
   if (isDemoPerfQuery(isMockMode(), deviceIds)) {
     // v2.732(감사 B6-07): 데모 수식은 기억·합류 없이 60초 폴링마다 다시 계산했다(데모 260대 1회 약 430ms — 결과는 같은 조건이면 같다).
     //   live 와 같은 heavyQuery(기억 TTL = 수집 주기·같은 줄·감시)를 타고, 계산은 시간 기준으로 양보하며 취소 확인을 한다.
@@ -798,14 +794,14 @@ export async function storageSeriesMulti(deviceIds = [], opt = {}) {
     return heavyQuery(qkey('demo-multi', keyOpts), async (ctx) => {
       const { since, until, bucketMs } = rangeOf({ hours, from, to, points });
       const yielder = createYielder(15);
-      return demoStorageMultiAsync(await demoMeta(deviceIds), { since, until, bucketMs, groupOf, storageKey, carryMs: carryMs ?? defaultCarryMs() },
+      return demoStorageMultiAsync(await demoMeta(deviceIds), { since, until, bucketMs, groupOf, storageKey, carryMs: carryMs ?? defaultCarryMs(), withPorts: !!withPorts },
         async () => { checkCancel(ctx); await yielder(); });
     }, { lane: 'multi', signal });
   }
   const key = qkey('multi', keyOpts);
-  return heavyQuery(key, (ctx) => storageSeriesMultiInner(deviceIds, { hours, points, groupOf, from, to, carryMs, ctx }), { lane: 'multi', signal });
+  return heavyQuery(key, (ctx) => storageSeriesMultiInner(deviceIds, { hours, points, groupOf, from, to, carryMs, ctx, withPorts: !!withPorts }), { lane: 'multi', signal });
 }
-async function storageSeriesMultiInner(deviceIds = [], { hours = 24, points = 120, groupOf = null, from = null, to = null, carryMs = null, ctx = null } = {}) {
+async function storageSeriesMultiInner(deviceIds = [], { hours = 24, points = 120, groupOf = null, from = null, to = null, carryMs = null, ctx = null, withPorts = false } = {}) {
   const db = await open();
   if (!db || !deviceIds.length) return { buckets: [], series: [], bucketMs: 0, unavailable: !db };
   const { since, until, bucketMs } = rangeOf({ hours, from, to, points });
@@ -816,9 +812,10 @@ async function storageSeriesMultiInner(deviceIds = [], { hours = 24, points = 12
   const yielder = createYielder(15);
   const agg = await aggPorts(db, deviceIds.map(String), since, until, bucketMs, { yielder, ctx });
   const { qb0, nb } = agg;
-  const metaRows = db.conn.prepare(`SELECT device_id, port, attached_name FROM port_meta WHERE device_id IN (${ph})`)
+  const metaRows = db.conn.prepare(`SELECT device_id, port, attached_name, attached_wwn, speed, port_type FROM port_meta WHERE device_id IN (${ph})`)   // v2.955 attached_wwn — portsDetail.wwn
     .all(...deviceIds.map(String));
   const storageOf = new Map(metaRows.map((m) => [`${m.device_id}|${m.port}`, storageKey(m.attached_name)]));
+  const metaOf = withPorts ? new Map(metaRows.map((m) => [`${m.device_id}|${m.port}`, m])) : null;   // v2.948 포트별 출력용(이름 · 속도 · 종류)
   /*
    * v2.621(감사 DATA-03 — 재현: 1h 조회 22버킷 전부 절반 값·avgTotal 125MB/s, 정답 250): 팹 A/B 스위치의 캡처 시각은 수십 초
    *   어긋난다. 버킷(1h 60초·6h 180초)이 수집 주기(기본 5분)보다 짧으면 한 버킷에 한 스위치 표본만 들어가 **그 버킷의 합이
@@ -892,8 +889,21 @@ async function storageSeriesMultiInner(deviceIds = [], { hours = 24, points = 12
     const vals = sum.filter((v) => v != null);
     const pv = peak.filter((v) => v != null);
     const ports = s.ports.map((p) => ({ deviceId: p.x.deviceId, port: p.x.port }));
+    // v2.948: 포트별 시계열(요청했을 때만) — 자기 표본이 있는 칸만 값, 나머지는 null(이월하지 않는다 — 합산 쪽 규칙과 다르다: 포트 하나의 값은 '모른다' 가 맞다).
+    let portsDetail = null;
+    if (withPorts) {
+      portsDetail = s.ports.map((p) => {
+        const m = metaOf?.get(p.pk) || {};
+        const avg = new Array(n).fill(null); const pk = new Array(n).fill(null);
+        for (let j = 0; j < n; j++) {
+          const i = pos[j]; const cnt = p.x.a[i];
+          if (cnt > 0) { avg[j] = Math.round(p.x.a[nb + i] / cnt); pk[j] = Math.round(p.x.a[2 * nb + i]); }
+        }
+        return { deviceId: p.x.deviceId, port: p.x.port, name: m.attached_name || '', wwn: m.attached_wwn || '', speed: m.speed || '', portType: m.port_type || '', avg, peak: pk };   // v2.955 wwn — Flow Vision 타깃 필터 링크
+      });
+    }
     series.push({
-      key: s.key, group: s.group, ports, deviceIds: [...new Set(ports.map((p) => p.deviceId))], sum, peak,
+      key: s.key, group: s.group, ports, deviceIds: [...new Set(ports.map((p) => p.deviceId))], sum, peak, ...(portsDetail ? { portsDetail } : {}),
       // v2.720(감사 B1-05): 모든 버킷이 부분 합으로 비워졌으면(vals 0개) 0 이 아니라 null(측정 없음) — 0 은 '트래픽 없음' 이라는 거짓이다.
       avgTotal: vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null,   // 버킷 평균 합의 평균
       maxTotal: vals.length ? Math.max(...vals) : null,                                 // 버킷 평균 합의 최댓값
@@ -907,6 +917,65 @@ async function storageSeriesMultiInner(deviceIds = [], { hours = 24, points = 12
   return { buckets, bucketMs, since, until, series, carryMs: lim, computedAt: Date.now(), source: sourceOf(agg.plan) };
 }
 
+/**
+ * v2.920(호스트 귀속): 포트별 **기간 전송 바이트 합**. aggPorts 의 버킷 평균(bytes/sec) × 버킷 폭을 **표본이 있는 버킷만** 더한다 —
+ *   portperfshow 합산값이라 방향이 없고, '버킷 평균 × 폭' 은 어림값(≈)이다(가장자리 버킷은 조회 구간 안쪽 폭만 센다). 표본이 하나도 없는
+ *   포트는 Map 에 없다(0 이 아니다 — '측정 없음'). series=true 면 버킷별 평균(없는 버킷 null)도 준다(호스트 상세 24h 추이).
+ *   live 와 데모 모두 heavyQuery(기억·합류·감시 — storageSeriesMulti 와 같은 줄)를 탄다. 데모는 demoPortSeries 수식.
+ * @returns {Promise<{since:number, until:number, bucketMs:number, buckets:number[], ports:Map<string,{deviceId:string,port:number,bytes:number,measuredBuckets:number,totalBuckets:number,avg?:(number|null)[]}>, unavailable?:boolean, computedAt?:number, source?:object}>}
+ */
+export async function portBytesMulti(deviceIds = [], { hours = 24, from = null, to = null, points = 120, ports = null, series = false, signal = null } = {}) {
+  const ids = (Array.isArray(deviceIds) ? deviceIds : []).map(String);
+  const keyOpts = { ids, hours, from, to, points, ports: ports?.length ? ports.map(Number) : null, series: !!series };
+  const demo = isDemoPerfQuery(isMockMode(), ids);
+  return heavyQuery(qkey(demo ? 'demo-bytes' : 'bytes', keyOpts), (ctx) => portBytesMultiInner(ids, { ...keyOpts, ctx, demo }), { lane: 'multi', signal });
+}
+async function portBytesMultiInner(ids, { hours, from, to, points, ports, series, ctx, demo }) {
+  const empty = (unavailable) => ({ since: 0, until: 0, bucketMs: 0, buckets: [], ports: new Map(), unavailable, computedAt: Date.now(), source: null });
+  const db = await open();
+  if (!db || !ids.length) return empty(!db);
+  const { since, until, bucketMs } = rangeOf({ hours, from, to, points });
+  const yielder = createYielder(15);
+  const out = new Map();
+  // 버킷 폭 — 조회 구간 밖으로 나간 가장자리는 세지 않는다(버킷 평균이 그 버킷 전체를 대표한다고 보는 어림이므로 구간 안쪽만).
+  const widthSec = (b) => Math.max(0, Math.min(until, b + bucketMs) - Math.max(since, b)) / 1000;
+  if (demo) {
+    const metaRows = await demoMeta(ids);
+    const byDev = new Map();
+    for (const m of metaRows) { if (!byDev.has(m.device_id)) byDev.set(m.device_id, []); byDev.get(m.device_id).push(m); }
+    let buckets = [];
+    for (const id of ids) {
+      const r = demoPortSeries(id, byDev.get(id) || [], { since, until, bucketMs, ports });
+      buckets = r.buckets;
+      for (const s of r.series) {
+        let bytes = 0; let measured = 0; const avg = series ? new Array(r.buckets.length).fill(null) : null;
+        s.avg.forEach((v, i) => { if (v == null) return; bytes += v * widthSec(r.buckets[i]); measured += 1; if (avg) avg[i] = Math.round(v); });
+        if (!measured) continue;
+        out.set(`${id}|${s.port}`, { deviceId: id, port: s.port, bytes: Math.round(bytes), measuredBuckets: measured, totalBuckets: r.buckets.length, ...(avg ? { avg } : {}) });
+      }
+      await yielder(); checkCancel(ctx);
+    }
+    return { since, until, bucketMs, buckets, ports: out, computedAt: Date.now(), source: { kind: 'demo' } };
+  }
+  const agg = await aggPorts(db, ids, since, until, bucketMs, { ports, yielder, ctx });
+  const { qb0, nb } = agg;
+  const buckets = Array.from({ length: nb }, (_, i) => (qb0 + i) * bucketMs);
+  let seen = 0;
+  for (const x of agg.ports.values()) {
+    if ((++seen & 255) === 0) { await yielder(); checkCancel(ctx); }
+    let bytes = 0; let measured = 0; const avg = series ? new Array(nb).fill(null) : null;
+    for (let i = 0; i < nb; i++) {
+      const n = x.a[i]; if (!(n > 0)) continue;
+      const v = x.a[nb + i] / n;
+      bytes += v * widthSec(buckets[i]); measured += 1;
+      if (avg) avg[i] = Math.round(v);
+    }
+    if (!measured) continue;
+    out.set(`${x.deviceId}|${x.port}`, { deviceId: x.deviceId, port: x.port, bytes: Math.round(bytes), measuredBuckets: measured, totalBuckets: nb, ...(avg ? { avg } : {}) });
+  }
+  return { since, until, bucketMs, buckets, ports: out, computedAt: Date.now(), source: sourceOf(agg.plan) };
+}
+
 /** v2.728: 이 조회가 어디서 읽었는지 — 화면 각주용('원본' / '집계 표 + 원본 자투리'). */
 function sourceOf(plan) {
   if (!plan?.rollup) return { kind: 'raw' };
@@ -917,43 +986,6 @@ function sourceOf(plan) {
 function defaultCarryMs() {
   try { const iv = Number(loadPerfSettings()?.intervalMs); if (Number.isFinite(iv) && iv > 0) return iv * 2; } catch { /* 설정 못 읽음 — 기본값 */ }
   return 2 * 5 * 60_000;
-}
-
-/**
- * 스토리지 식별 키에서 **어레이 시리얼로 보이는 조각**을 뽑는다(순수).
- * 'SYMMETRIX::000497700230' → '000497700230'. 이 값으로 등록된 스토리지 장비의 시리얼과
- * 대조해 용량 사용률을 함께 보여줄 수 있다.
- * ⚠ 확신할 수 없으면 빈 문자열을 돌려준다 — 억지로 맞춘 매칭은 엉뚱한 어레이의 용량을
- *   붙여 보여주게 되고, 그건 없느니만 못하다.
- */
-export function arraySerialOf(key) {
-  const seg = String(key || '').split('::');
-  if (seg.length < 2) return '';
-  const s = seg[1].trim();
-  // 시리얼처럼 보이는 것만(영숫자 6자 이상, 공백 없음). 'SAF-1d 4' 같은 포트 표기는 배제.
-  return /^[A-Za-z0-9-]{6,}$/.test(s) ? s : '';
-}
-
-/**
- * 연결 대상이 **스토리지 어레이인지 호스트(HBA)인지** 판정(순수, v2.412).
- *
- * 왜 필요한가: 법인 단위로 합산하면 서버 HBA 가 각각 하나의 '연결 대상'으로 잡혀 표를
- * 뒤덮는다(실측: 어레이 2개에 HBA 64개). 사용자가 보려는 것은 **스토리지**이므로 기본은
- * 어레이만 보여주고, 호스트는 따로 골라 볼 수 있게 한다.
- *
- * 판정 순서
- *  1. 등록된 스토리지 장비의 시리얼과 일치 → **확실한 어레이**(matched)
- *  2. 이름이 `::` 로 나뉜 벤더 심볼릭 이름(SYMMETRIX::…, PowerStore::…) → 어레이(추정)
- *  3. 그 외(Emulex PPN-…, QLE2692 FW:… 같은 HBA 표기) → 호스트
- *
- * ⚠ 2번은 **추정**이다. 어레이가 평평한 이름으로 보고하면 호스트로 분류된다 — 그래서 화면에
- *   '호스트' 필터를 남겨 두고, 어디에 속했는지 확인할 수 있게 한다(숨기지 않는다).
- */
-export function endpointKind(key, { matched = false } = {}) {
-  if (matched) return 'array';
-  const s = String(key || '');
-  if (s === '(미확인)') return 'unknown';
-  return s.includes('::') ? 'array' : 'host';
 }
 
 /**

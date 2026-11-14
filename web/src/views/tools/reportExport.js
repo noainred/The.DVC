@@ -71,8 +71,13 @@ function backgroundOf(el) {
 
 const MARK = 'data-export-root';
 
-/** 공통 캡처 — 스크롤로 잘린 부분까지 요소의 자연 크기 전체를 담는다. */
-async function capture(el, { scale = 2 } = {}) {
+/**
+ * 공통 캡처 — 스크롤로 잘린 부분까지 요소의 자연 크기 전체를 담는다.
+ * 6단계(베어메탈 성능 캡처 PNG)도 이 함수 하나를 쓴다(캡처 코어 두 벌 금지 — html2canvas 는 이미 있는 의존성 · 동적 import).
+ *   onclone — 복제 문서를 더 고칠 호출부 훅(예: SVG 의 var(--…) 색을 계산값으로 — bmCapture.inlineSvgPaint).
+ */
+export async function captureElementCanvas(el, opts = {}) { return capture(el, opts); }
+async function capture(el, { scale = 2, onclone: extraClone = null } = {}) {
   const { default: html2canvas } = await import('html2canvas');
   el.setAttribute(MARK, '1');
   try {
@@ -92,6 +97,7 @@ async function capture(el, { scale = 2 } = {}) {
       onclone: (doc) => {
         const t = doc.querySelector(`[${MARK}]`);
         if (t) { t.style.maxHeight = 'none'; t.style.height = 'auto'; t.style.overflow = 'visible'; }
+        if (t && typeof extraClone === 'function') extraClone(doc, t);
       },
     });
   } finally {

@@ -43,15 +43,15 @@ export const CATS = Object.freeze([
   // v2.763(V2-3): Veeam 백업 상태는 인벤토리 칸에서 뺐다 — 공유 토큰 엣지의 veeam 403 이 'vCenter 인벤토리' 를 빨갛게 칠했다(인벤토리는 정상).
   { id: 'backup', label: 'Veeam 백업', test: /^central:\/veeam-(data|config)$/ },
   // v2.824: Bareos 법인 Director 대행 — 배정 pull 은 백업 칸 옆이 아니라 운영 작업 칸(작업·회신과 함께 본다)
-  { id: 'idrac', label: 'iDRAC·서버', test: /^central:\/(idrac-scan-(jobs|progress|result)|assignment|ip-scan-(assignment|result)|bmusage-config)$|^collector:\/(idrac-scan|bm-usage)$/ },
+  { id: 'idrac', label: 'iDRAC·서버', test: /^central:\/(idrac-scan-(jobs|progress|result)|assignment|ip-scan-(assignment|result)|bmusage-config|bm-onboard|bm-maint|bm-folders|focus-mon\/sync)$|^collector:\/(idrac-scan|focus-mon\/wake|bm-usage|bm-usage\/(trend|devices|nics|snapshot|snapshots|focus|focus\/stop|changes|baseline|compare|compare-series|logs|capacity|top|top\/band))$/ },
   { id: 'gpu', label: 'GPU', test: /^central:\/gpu-guest-(data|config)$/ },
   { id: 'power', label: '전력·PDU', test: /^central:\/pdu-(data|config)$/ },
   // v2.736: 아이실론 디렉터리 사용량(엣지가 그 법인 아이실론에 SSH 로 du — 대상 pull · 결과 push)도 스토리지 칸이다.
   { id: 'storage', label: '스토리지', test: /^central:\/(storage-(data|config)|bmstor-(jobs|result)|isidu-(data|config))$|^collector:\/(bmstor-collect|isidu-(run|test))$/ },
   // v2.608: Arista CloudVision(CVP) 도 같은 '스위치' 칸에 둔다(웹 CAT_COLOR 에 새 칸을 만들지 않으려고 — 라벨이 그 사실을 말한다).
-  { id: 'san', label: 'SAN·네트워크 스위치', test: /^central:\/(sanswitch-(data|config|perf|test-result)|cvp-(data|config))$/ },
+  { id: 'san', label: 'SAN·네트워크 스위치', test: /^central:\/(sanswitch-(data|config|perf|test-result|flow-result)|cvp-(data|config))$/ },
   // v2.735: 법인 간 전송 속도 측정(중앙이 엣지와 10MB 를 주고받는다)도 회선 감시라 이 칸이다.
-  { id: 'watch', label: '장애·감시', test: /^central:\/(part-faults|partfault-config|svcmon-(config|config-ack|report)|link-check(-config)?|ping-(jobs|result))$|^collector:\/(ping|xfer-test)$/ },
+  { id: 'watch', label: '장애·감시', test: /^central:\/(part-faults|partfault-config|disk-bad|disk-bad-job|svcmon-(config|config-ack|report)|link-check(-config)?|ping-(jobs|result))$|^collector:\/(ping|xfer-test)$/ },
   { id: 'users', label: '사용자·세션', test: /^central:\/(curuser(-config)?|users-config)$/ },
   // v2.793: VM 백업 법인 위임(엣지가 담당 vCenter 의 잡 정의·작업을 당기고 상태를 올린다)도 운영 작업 칸이다.
   { id: 'ops', label: '운영 작업', test: /^central:\/(capture-(jobs|result)|rma-(poll|result|credential)|log-quer(ies|y-result)|edge-log-(jobs|result)|result|vm-clone-(sync|report)|veeam-run-(ops|result)|bareos-(config|ops|op-result))$|^collector:\/edge-log$/ },

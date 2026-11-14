@@ -7,14 +7,17 @@
  * 조회는 마운트 1회 + '새로 고침'(무거운 집계는 15초 폴링 금지 — 스냅샷만 읽지만 GPU VM 전부를 행으로 만든다). 늦게 온 이전 응답은 버린다(useLatest).
  * 내려받기는 data.csv 권한(canCsv)일 때만 보이고, 실패는 파일로 저장하지 않고 화면에 말한다(downloadFailText).
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLatest } from '../../hooks/useLatest.js';
 import { fetchJson, downloadFile, canCsv } from '../../api.js';
 import { downloadFailText } from '../downloadFailText.js';
 import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
 import { vcQuickDot } from '../vcCardText.js';
 import { STable } from '../../components/STable.jsx';
-import { ALLOC_LEVELS, DEFAULT_LEVEL, KIND_TEXT, flattenAlloc, openForLevel, numText, pctText, sumTotals, corpChips, corpChipText, allocExportQuery } from './gpuAllocText.js';
+import { ALLOC_LEVELS, DEFAULT_LEVEL, KIND_TEXT, flattenAlloc, openForLevel, openAfterRefresh, numText, pctText, sumTotals, corpChips, corpChipText, allocExportQuery } from './gpuAllocText.js';
+import { GpuAllocPlace } from './GpuAllocPlace.jsx';       // v2.939 개선 4 — 배치 추천
+import { GpuAllocHistory } from './GpuAllocHistory.jsx';   // v2.939 개선 7 — 추이 · 소진 예상
+import { GpuAllocDiag } from './GpuAllocDiag.jsx';         // v2.939 개선 2 — 수집 점검
 import { GpuAllocExportModal } from './GpuAllocExportModal.jsx';   // v2.855 내보내기 창(시안)
 
 const KIND_BADGE = { vc: 'blue', dc: 'gray', cl: 'gray', host: 'blue', gpu: 'teal', pt: 'amber', vsga: 'gray', unplaced: 'gray', off: 'gray', vm: 'gray' };
@@ -51,6 +54,10 @@ export function GpuAllocTree({ scope }) {
   const [dlMsg, setDlMsg] = useState('');
   const [dlBusy, setDlBusy] = useState('');
   const [exportOpen, setExportOpen] = useState(false);   // v2.855: 엑셀은 창에서 단계·시트를 고른 뒤 받는다
+  const [tab, setTab] = useState('tree');   // v2.939: 계층 표 · 배치 추천 · 추이 · 수집 점검
+  // v2.939 개선 10: 새로 고침 뒤 새로 생긴 노드를 지금 단계대로 펼치려고 직전 계층 · 단계를 기억한다(openAfterRefresh).
+  const dataRef = useRef(null);
+  const levelRef = useRef(DEFAULT_LEVEL);
   // v2.853: 법인 칩(바로가기 모양 — 사용자 요청). 빈 Set = 전체. 여러 개 고를 수 있다.
   // v2.856(버그 수정 — v2.853 보고의 '한계'): 상태 점(/vcenters)을 마운트에 한 번만 읽어 '⟳ 새로 고침' 을 눌러도 점이 그대로였다.
   //   이제 load() 가 계층과 함께 다시 읽는다. 다시 읽기가 실패하면 직전 점을 지우지 않는다(처음 실패만 빈 목록 — 점이 흐려진다).
@@ -63,28 +70,34 @@ export function GpuAllocTree({ scope }) {
     setLoading(true); setErr(null);
     loadVcs();
     const q = scope ? `?vcenterId=${encodeURIComponent(scope)}` : '';
-    run(fetchJson(`/tools/gpu-alloc${q}`), (d) => { setData(d); setLoading(false); }, (e) => { setErr(e); setLoading(false); });
+    run(fetchJson(`/tools/gpu-alloc${q}`), (d) => {
+      const prev = dataRef.current; dataRef.current = d;
+      setData(d); setLoading(false);
+      if (prev) setOpen((o) => openAfterRefresh(o, prev, d, levelRef.current));
+    }, (e) => { setErr(e); setLoading(false); });
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { setData(null); setOpen(null); setVcSel(new Set()); load(); }, [scope]);
+  useEffect(() => { dataRef.current = null; setData(null); setOpen(null); setVcSel(new Set()); load(); }, [scope]);
   useEffect(() => { if (data && open == null) setOpen(openForLevel(data, level)); }, [data, open, level]);
 
   const rows = useMemo(() => (data ? flattenAlloc(data, { open: open || new Set(), sort, query, vcSel }) : []), [data, open, sort, query, vcSel]);
   const chips = useMemo(() => (data ? corpChips(data, (vcs || []).filter((v) => !scope || String(v.id) === scope)) : []), [data, vcs, scope]);
   const toggleVc = (id) => setVcSel((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
-  const pickLevel = (lv) => { setLevel(lv); setOpen(openForLevel(data, lv)); };
+  const pickLevel = (lv) => { setLevel(lv); levelRef.current = lv; setOpen(openForLevel(data, lv)); };
   const toggle = (id) => setOpen((prev) => { const n = new Set(prev || []); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const clickSort = (key) => setSort((s) => (!s || s.key !== key ? { key, dir: key === 'name' ? 'asc' : 'desc' } : s.dir === (key === 'name' ? 'asc' : 'desc') ? { key, dir: key === 'name' ? 'desc' : 'asc' } : null));
   const download = async (fmt) => {
     setDlMsg(''); setDlBusy(fmt);
-    // v2.853: 고른 법인만 내려받는다(화면과 같은 범위). 서버가 조회 범위와 교집합을 먼저 낸다. v2.855: 쿼리는 allocExportQuery 하나.
-    const q = allocExportQuery({ scope, vcSel });
+    // v2.939 개선 9(사용자 결정 'CSV 도 모든 법인'): 엑셀 창(v2.869 — 모든 법인으로 시작)과 같은 규칙 — 화면 칩 선택과 무관하게 범위 안 법인 전부.
+    //   화면이 법인 하나(scope)로 열려 있으면 그 법인이다. 서버가 조회 범위와 교집합을 먼저 낸다. 쿼리는 allocExportQuery 하나.
+    const q = allocExportQuery({ scope });
     try { await downloadFile(`/tools/gpu-alloc.${fmt}${q}`); } catch (e) { setDlMsg(downloadFailText(e)); } finally { setDlBusy(''); }
   };
 
   if (err && !data) return <ErrorBox error={err} />;
   if (!data) return <Loading />;
+  const TABS = [['tree', '계층 표'], ['place', '배치 추천'], ['history', '추이'], ['diag', '수집 점검']];
   const T = sumTotals(data, vcSel) || {};
   const kpis = [
     { label: '전체 용량', value: numText(T.capGB), unit: T.capGB != null ? 'GB' : '', sub: `GPU ${T.gpus}장 · 호스트 ${T.hosts}대${T.vsga ? ` · vSGA ${T.vsga}장 제외` : ''}${T.capUnknown ? ` · 모름 ${T.capUnknown}장` : ''}` },
@@ -131,20 +144,28 @@ export function GpuAllocTree({ scope }) {
           </div>
         ))}
       </div>
+      <div className="flex gap wrap gpu-alloc-tabs" role="tablist" aria-label="GPU 할당율 보기">
+        {TABS.map(([k, label]) => (
+          <button key={k} type="button" role="tab" aria-selected={tab === k} className={`qn-btn${tab === k ? ' on' : ''}`} onClick={() => setTab(k)}>{label}</button>
+        ))}
+      </div>
       <div className="flex gap wrap gpu-alloc-ctl">
-        <span className="muted" style={{ fontSize: 12 }}>펼침 단계</span>
-        {ALLOC_LEVELS.map((l) => (
+        {tab === 'tree' && <span className="muted" style={{ fontSize: 12 }}>펼침 단계</span>}
+        {tab === 'tree' && ALLOC_LEVELS.map((l) => (
           <button key={l.depth} type="button" className={level === l.depth && !query ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '6px 11px' }} onClick={() => pickLevel(l.depth)}>{l.label}</button>
         ))}
         <span style={{ marginLeft: 'auto' }} />
         <button type="button" className="logout-btn" style={{ flex: 'none', padding: '6px 11px' }} disabled={loading} onClick={load}>{loading ? '불러오는 중…' : '⟳ 새로 고침'}</button>
-        {canCsv() && <button type="button" className="logout-btn" style={{ flex: 'none', padding: '6px 11px' }} disabled={!!dlBusy} onClick={() => download('csv')} title="GPU·VM 한 줄씩(계층 열을 모두 채운 평면 표) — UTF-8(BOM)">{dlBusy === 'csv' ? '내려받는 중…' : '⬇ CSV'}</button>}
+        {canCsv() && <button type="button" className="logout-btn" style={{ flex: 'none', padding: '6px 11px' }} disabled={!!dlBusy} onClick={() => download('csv')} title="모든 법인(화면 칩 선택과 무관 — 엑셀과 같은 규칙) · GPU·VM 한 줄씩(계층 열을 모두 채운 평면 표) — UTF-8(BOM)">{dlBusy === 'csv' ? '내려받는 중…' : '⬇ CSV'}</button>}
         {canCsv() && <button type="button" className="login-btn" style={{ flex: 'none', padding: '6px 13px' }} disabled={!!dlBusy} onClick={() => setExportOpen(true)} title="법인(기본 모두) · 넣을 단계(호스트 · GPU · VM) · 시트(계층 표 · 평면 표 · 안내 · 법인별 시트)를 고른 뒤 내려받습니다">⬇ 엑셀(.xlsx)…</button>}
       </div>
       {dlMsg && <div className="error-box" style={{ marginBottom: 8 }}>{dlMsg}</div>}
       {canCsv() && exportOpen && <GpuAllocExportModal scope={scope} vcSel={vcSel} chips={chips} onClose={() => setExportOpen(false)} />}
       {err && <ErrorBox error={err} />}
-      {(data.vcenters || []).length === 0 ? (
+      {tab === 'place' && <GpuAllocPlace tree={data} vcSel={vcSel} />}
+      {tab === 'history' && <GpuAllocHistory vcSel={vcSel} scope={scope} />}
+      {tab === 'diag' && <GpuAllocDiag />}
+      {tab !== 'tree' ? null : (data.vcenters || []).length === 0 ? (
         <div className="card" style={{ padding: 16 }}><span className="muted">GPU 가 설치된 호스트가 없습니다.</span></div>
       ) : rows.length === 0 ? (
         <div className="card" style={{ padding: 16 }}><span className="muted">{query ? `‘${query}’ 에 맞는 법인·호스트·VM 이 없습니다` : '고른 법인에 GPU 가 설치된 호스트가 없습니다'}{vcSel.size ? ` (법인 ${[...vcSel].join(', ')} 선택 중)` : ''}.</span></div>
@@ -189,7 +210,7 @@ export function GpuAllocTree({ scope }) {
           </tbody>
         </STable>
       )}
-      {data.truncated > 0 && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>GPU 호스트가 많아 {data.truncated}대는 넣지 않았습니다.</div>}
+      {tab === 'tree' && data.truncated > 0 && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>GPU 호스트가 많아 {data.truncated}대는 넣지 않았습니다.</div>}
     </div>
   );
 }

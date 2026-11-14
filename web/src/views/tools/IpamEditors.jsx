@@ -54,6 +54,10 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved, tzOffsetM
   const [status, setStatus] = useState(row.mgmtStatus || '');
   const [owner, setOwner] = useState(row.owner_ || '');
   const [label, setLabel] = useState(row.label || '');
+  // v3.5.0(재설계 묶음 나): 용도 · 요청자 · 할당자 — 대장 행은 ipPurpose · requester · assigner 로 싣는다(purpose 는 시트의 자동 값).
+  const [purpose, setPurpose] = useState(row.ipPurpose || '');
+  const [requester, setRequester] = useState(row.requester || '');
+  const [assigner, setAssigner] = useState(row.assigner || '');
   const [deviceType, setDeviceType] = useState(row.deviceType || '');
   const [hostnameOverride, setHostnameOverride] = useState((row.managed && row.hostName) || '');
   const [claimedVcenterId, setClaimedVcenterId] = useState(row.vcenterId || '');
@@ -62,6 +66,9 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved, tzOffsetM
   const [reservedUntil, setReservedUntil] = useState(rowDay);
   const [loadedDay, setLoadedDay] = useState(rowDay);   // 폼을 연 시점의 저장값 — 바뀌지 않았으면 저장 본문에서 뺀다
   const [note, setNote] = useState(row.note || '');
+  // v3.1.0: 'MAC 변경 알림 제외' — 목록 행에는 값이 없다. 저장값을 읽은 뒤에만 알고(macLoaded), 바꿨을 때만 보낸다(못 읽었을 때 참을 거짓으로 덮지 않게).
+  const [macAlertOff, setMacAlertOff] = useState(false);
+  const [macLoaded, setMacLoaded] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const [loadWarn, setLoadWarn] = useState(null);
@@ -71,15 +78,17 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved, tzOffsetM
     if (isNew || !row.ip) return;
     // v2.620(WEB2620-10): 응답이 늦게 오면(고RTT) 사용자가 이미 고친 칸을 서버 값으로 되돌렸다 — 목록값 그대로인 칸만 채운다.
     //   재조회 실패는 무음이었다(목록의 근사값으로 저장될 수 있다) — 사유를 적는다.
-    const init = { status: row.mgmtStatus || '', owner: row.owner_ || '', label: row.label || '', deviceType: row.deviceType || '',
+    const init = { status: row.mgmtStatus || '', owner: row.owner_ || '', label: row.label || '', purpose: row.ipPurpose || '', requester: row.requester || '', assigner: row.assigner || '', deviceType: row.deviceType || '',
       hostnameOverride: (row.managed && row.hostName) || '', claimedVcenterId: row.vcenterId || '', note: row.note || '',
       reservedUntil: rowDay };
     const keep = (k, v) => (cur) => (cur === init[k] ? v : cur);
     let alive = true;
     fetchJson(`/tools/ipam/ip/${encodeURIComponent(row.ip)}`).then((r) => {
       if (!alive) return;
-      const o = r.override; if (!o) return;
+      const o = r.override; if (!o) { setMacLoaded(false); return; }
+      setMacLoaded(o.macAlertOff === true); setMacAlertOff((cur) => (cur === false ? o.macAlertOff === true : cur));
       setStatus(keep('status', o.status || '')); setOwner(keep('owner', o.owner || '')); setLabel(keep('label', o.label || ''));
+      setPurpose(keep('purpose', o.purpose || '')); setRequester(keep('requester', o.requester || '')); setAssigner(keep('assigner', o.assigner || ''));
       setDeviceType(keep('deviceType', o.deviceType || '')); setHostnameOverride(keep('hostnameOverride', o.hostnameOverride || ''));
       setClaimedVcenterId(keep('claimedVcenterId', o.claimedVcenterId || '')); setNote(keep('note', o.note || ''));
       const srvDay = r.reservedUntilDay != null ? String(r.reservedUntilDay) : reservedDayOf(o.reservedUntil, r.tzOffsetMin ?? tzOffsetMin);
@@ -94,8 +103,9 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved, tzOffsetM
   const ipList = split.tokens;
   const bulk = ipList.length > 1;
   const invalidNote = isNew ? bulkInvalidText(split.invalid) : null;
-  const fields = { status, owner, label, deviceType, hostnameOverride, claimedVcenterId, note,
-    ...reservedFieldForSave(reservedUntil, loadedDay, { always: isNew || bulk }) };
+  const fields = { status, owner, label, purpose, requester, assigner, deviceType, hostnameOverride, claimedVcenterId, note,
+    ...reservedFieldForSave(reservedUntil, loadedDay, { always: isNew || bulk }),
+    ...(macAlertOff !== (macLoaded ?? false) ? { macAlertOff } : {}) };
   const save = async () => {
     if (!ipList.length) { setErr('IP를 입력하세요.'); return; }
     if (invalidNote) { setErr(invalidNote); return; }
@@ -132,7 +142,8 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved, tzOffsetM
       </div>
       {err && <div className="login-error" style={{ marginBottom: 8, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{err}</div>}
       {loadWarn && <div className="muted" style={{ marginBottom: 8, fontSize: 12, color: 'var(--amber)' }}>{loadWarn}</div>}
-      <div style={{ display: 'grid', gridTemplateColumns: 'max-content minmax(0, 1fr)', columnGap: 16, rowGap: 14, alignItems: 'start' }}>
+      {/* v3.1.0: 400px 에서 전역 .input 최소 폭(220px)이 오른쪽 칸을 넘쳐 입력칸이 창 밖으로 잘렸다(Chromium 판독 — 기존 결함) — .ipam-page 와 같이 이 폼에서 푼다 */}
+      <div className="ipam-ov-form" style={{ display: 'grid', gridTemplateColumns: 'max-content minmax(0, 1fr)', columnGap: 16, rowGap: 14, alignItems: 'start' }}>
         <label style={L}>IP{isNew && <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}> (여러 개 가능)</span>}</label>
         {isNew
           ? (
@@ -161,6 +172,15 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved, tzOffsetM
         <label style={L}>라벨(표시명)</label>
         <input className="input" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="자동 호스트명 대신 표시할 이름" style={{ width: '100%', boxSizing: 'border-box' }} />
 
+        <label style={L}>용도</label>
+        <input className="input" value={purpose} maxLength={200} onChange={(e) => setPurpose(e.target.value)} placeholder="예: 웹 프런트 · DB · 백업망" style={{ width: '100%', boxSizing: 'border-box' }} />
+
+        <label style={L}>요청자</label>
+        <input className="input" value={requester} maxLength={200} onChange={(e) => setRequester(e.target.value)} placeholder="이 주소를 요청한 사람 · 팀" style={{ width: '100%', boxSizing: 'border-box' }} />
+
+        <label style={L}>할당자</label>
+        <input className="input" value={assigner} maxLength={200} onChange={(e) => setAssigner(e.target.value)} placeholder="이 주소를 내준 사람 · 팀" style={{ width: '100%', boxSizing: 'border-box' }} />
+
         <label style={L}>호스트명 override</label>
         <input className="input" value={hostnameOverride} onChange={(e) => setHostnameOverride(e.target.value)} placeholder="자동 수집 호스트명을 덮어쓸 이름(선택)" style={{ width: '100%', boxSizing: 'border-box' }} />
 
@@ -172,6 +192,12 @@ export function OverrideEditor({ row, vcenters = [], onClose, onSaved, tzOffsetM
 
         <label style={L}>예약 만료일</label>
         <input className="input" type="date" value={reservedUntil} onChange={(e) => setReservedUntil(e.target.value)} style={{ width: 200, boxSizing: 'border-box' }} />
+
+        <label style={L}>MAC 변경 알림</label>
+        <label className="flex" style={{ alignItems: 'flex-start', gap: 8, fontSize: 13, minWidth: 0 }}>
+          <input type="checkbox" checked={macAlertOff} onChange={(e) => setMacAlertOff(e.target.checked)} style={{ marginTop: 3, flex: 'none' }} />
+          <span style={{ minWidth: 0 }}>이 IP 는 알리지 않음 <span className="muted" style={{ fontSize: 12 }}>(이중화 장비처럼 MAC 이 정상적으로 바뀌는 IP — IP 변화 기록은 계속합니다)</span></span>
+        </label>
 
         <label style={L}>비고</label>
         <textarea className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="상태 관련 한 줄 메모(상세 메모/태그는 목록의 '메모·태그' 사용)" style={{ resize: 'vertical', minHeight: 56, width: '100%', boxSizing: 'border-box' }} />

@@ -124,6 +124,7 @@ describe('WEB2613-09 폴링은 usePolling — RemoteCommand·PduTool 의 수제 
     ['views/tools/IpamNet.jsx', '3초 스캔 상태(statusDenied 로 403 정지 있음)'], ['views/tools/CapacityTools.jsx', '내보내기 경과초 표시(네트워크 아님)'],
     ['views/tools/SanSwitchTool.jsx', 'G1 담당 파일 — 후속'], ['views/tools/ShutdownTool.jsx', '후속'], ['views/tools/StorageMonTool.jsx', '후속'],
     ['views/tools/DirUsageReport.jsx', '후속'], ['views/tools/RelayCheckTool.jsx', '후속'],
+    ['views/tools/FocusMonTool.jsx', '1초 시계(잠깐 보기 남은 시간 표시 — 네트워크 아님). 조회는 세대 번호 · 403/404 정지 · 이전 응답 유지가 필요해 setTimeout 자가 예약(usePoll)'],
   ]);
   it('views/tools/** 의 setInterval( 은 후속 목록 안에만 있다', () => {
     const bad = hitsOf(/\bsetInterval\(/).filter((h) => h.file.startsWith('views/tools/') && !FOLLOW_UP.has(h.file)).map((h) => `${h.file}:${h.line}`);

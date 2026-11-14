@@ -40,6 +40,22 @@ function readFile() {
   catch (e) { preserveCorrupt(FILE, e.message); return {}; } // v2.296 게스트 OS 계정 복호(메모리 평문)
 }
 
+/**
+ * v2.916 설정 메뉴 상태 배지용 — '켜짐' 하나만 읽는다(게스트 비밀번호를 복호하지 않는다 · 파일 크기/mtime 이 같으면 다시 읽지 않는다).
+ * loadGpuGuestSettings 는 VM 별 계정 재정의 전부를 복호해 배지 계산이 재정의 수에 비례해 느려졌다(반증 D6 — 3,000개 추정 41ms).
+ * 파일이 없으면 기본값. 파싱 실패는 **던진다**(→ 배지 '?') — 손상 보존은 주 로더(readFile)가 한다.
+ */
+let _enabledMemo = null;
+export function gpuGuestEnabledLight() {
+  let st;
+  try { st = fs.statSync(FILE); } catch (e) { if (e?.code === 'ENOENT') return DEFAULTS.enabled === true; throw e; }
+  if (_enabledMemo && _enabledMemo.mtimeMs === st.mtimeMs && _enabledMemo.size === st.size) return _enabledMemo.v;
+  const p = JSON.parse(fs.readFileSync(FILE, 'utf8')) || {};
+  const v = (p.enabled ?? DEFAULTS.enabled) === true;
+  _enabledMemo = { mtimeMs: st.mtimeMs, size: st.size, v };
+  return v;
+}
+
 export function loadGpuGuestSettings() {
   const p = readFile();
   return {

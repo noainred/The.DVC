@@ -214,6 +214,7 @@ export class UpgradeManager {
     if (!this.#lastResult && prev.lastResult) this.#lastResult = prev.lastResult;
     if (!this.lastTick && prev.lastTick) this.lastTick = prev.lastTick;
     if (prev.lastEdgeSync) this.edgeSync.restore(prev.lastEdgeSync); // v2.865 A
+    if (prev.edgeSyncState) this.edgeSync.restoreState(prev.edgeSyncState); // v2.938: 연속 실패·알린 사실
     this.persist = { enabled: true, file, error: r.error || null, corruptKept: r.corruptKept || null, restored: !!(prev.lastCheck || prev.lastResult || prev.lastTick) };
     if (r.error) console.warn(`[upgrade] ${r.error}${r.corruptKept ? ` — 원본은 ${r.corruptKept}` : ''}`);
     return this.persist;
@@ -221,7 +222,7 @@ export class UpgradeManager {
 
   #save() {
     if (!this.persist?.enabled || !this.persist.file) return;
-    const err = writeUpgradeStatus(this.persist.file, { lastCheck: this.lastCheck, lastResult: this.#lastResult, lastTick: this.lastTick, lastEdgeSync: this.edgeSync?.lastRun || null }); // v2.865 A
+    const err = writeUpgradeStatus(this.persist.file, { lastCheck: this.lastCheck, lastResult: this.#lastResult, lastTick: this.lastTick, lastEdgeSync: this.edgeSync?.lastRun || null, edgeSyncState: this.edgeSync?.persistState?.() || null }); // v2.938: 연속 실패·알린 사실도 // v2.865 A
     if (err && err !== this.persist.error) console.warn(`[upgrade] ${err}`);
     this.persist.error = err;
   }
