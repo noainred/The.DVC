@@ -104,6 +104,10 @@ export async function buildView({ now = Date.now() } = {}) {
   const keyById = new Map(keysRaw.map((k) => [k.id, k]));
   const accById = new Map(accRaw.map((a) => [a.id, a]));
   const servers = regErr ? [] : listBmServersRaw();
+  // vCenter 목록에 없는 법인도 화면에 둔다 — 서버 · 공통 계정 · 키 폴더 · 사용 중지가 그 법인을 가리키면(3회차 E3-2 — vCenter 를 지운 법인의 서버 · 중지가 화면에서 사라져 재개도 못 했다).
+  { const have = new Set(corps.map((c) => c.id));
+    const extra = [...servers.map((x) => t(x.vcenterId)), ...accRaw.map((a) => t(a.corp)), ...keysRaw.map((k) => t(k.folderCorp)), ...ST.listStops().map((x) => t(x.corp))].filter((id) => id && !have.has(id));
+    for (const id of [...new Set(extra)].slice(0, 200)) { have.add(id); corps.push({ id, name: `${id} (vCenter 목록에 없음)`, dc: '', missing: true }); } }
   const usage = REFS.refUsage();
   const lastUse = lastUseByFingerprint();
   let edgeRows = [];
@@ -127,6 +131,7 @@ export async function buildView({ now = Date.now() } = {}) {
     isEdge: !!config.agent?.centralUrl,
     policyMode,
     scanEveryMinutes: Math.round(SCAN_EVERY_MS / 60_000), rsaMinBits: RSA_MIN_BITS,
+    limits: { keyLoginServers: KL.MAX_JOB_SERVERS, revokeServers: KL.MAX_REVOKE_SERVERS },   // 화면이 숫자를 박지 않게(3회차 E3-7)
     storeUnreadable: !!storeErr, registryUnreadable: !!regErr, stateUnreadable: !!ST.stateLoadError(),
     usageLoadFailed: keyUsageLoadFailed(), installedLoadFailed: INS.installedLoadFailed(),
     corps: corps.map((c) => ({ ...c, inboxPath: INB.inboxPathOf(c.id), stop: ST.stopFor(c.id) })),
@@ -282,7 +287,7 @@ export async function readInstalledKeys({ serverId, oncePassword = '', by = '' }
   } catch (e) {
     const msg = String(e?.message || e);
     const kind = e?.code === 'SSH_NO_PASSWORD_METHOD' ? 'no-password-method' : isPeerRejectText(msg) ? 'hostkey' : isAuthFailureText(msg) ? 'auth-rejected' : 'connect';
-    const reason = kind === 'no-password-method' ? '서버가 비밀번호 로그인을 받지 않아(키만 받음) 비밀번호를 보내지 않았습니다.'
+    const reason = kind === 'no-password-method' ? `${msg.replace(/^SSH_NO_PASSWORD_METHOD:\s*/, '').replace(/\s+/g, ' ').slice(0, 160)}.`   // 서버가 준 상세(키만 받음 · OTP 만 물음 — 3회차 E3-6)
       : kind === 'hostkey' ? '호스트키를 신뢰하지 않아 끊었습니다 — 설정 › 보안 › 장비 신뢰에서 지문을 확인 · 승인하세요.'
       : kind === 'auth-rejected' ? '인증이 거부됐습니다(다시 시도하지 않습니다 — 계정 잠금 방지).' : `접속하지 못했습니다(${msg.replace(/\s+/g, ' ').slice(0, 100)})`;
     if (auth.keyFingerprint) noteKeyUse({ fingerprint: auth.keyFingerprint, keyName: auth.keyName, server: s.name || s.host, corp: s.vcenterId, feature: 'conn-test', ok: false, code: kind, trigger: 'manual', by });
@@ -648,6 +653,8 @@ export async function keyJobPrecheck(kind, keyId = '', body = {}) {
     if (rid && rid === k) return { ok: false, code: 'same-key', status: 400, reason: '넣을 키와 지울 키가 같습니다.' };
     const { ok: list, skipped } = pickServers(Array.isArray(b.servers) ? b.servers.slice(0, 1000).map((x) => ({ id: t(x?.id, 64), addr: typeof x?.addr === 'string' ? x.addr.slice(0, 400) : '' })) : []);
     if (!list.length) return { ok: false, code: 'empty', status: 400, reason: skipped[0]?.reason || '대상 서버가 없습니다.', skipped };
+    // 상한도 OTP 앞(3회차 E3-7 — 101대 이상은 OTP 를 쓴 뒤 startJob 이 too-many 로 거절했다).
+    if (list.length > KL.MAX_JOB_SERVERS) return { ok: false, code: 'too-many', status: 400, reason: `키 로그인 설정은 한 번에 ${KL.MAX_JOB_SERVERS}대까지입니다 — 나눠서 하세요.` };
   }
   if (kind === 'key-revoke' && !Array.isArray(b.servers) && !t(b.corp, 128)) return { ok: false, code: 'bad-corp', status: 400, reason: '법인을 고르세요.' };
   return null;

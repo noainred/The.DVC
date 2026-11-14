@@ -340,7 +340,10 @@ describe('SSH 공용 접속 2단계 — 보호 장치 · 사건 문구', () => {
     expect(serverSrc('approval/store.js')).toMatch(/code: 'interrupted'/);
     // 이미 중지 — 기록을 다시 쓰지 않았다
     expect(stopDoneText({ ok: true, already: true }, 'KR')).toBe('KR — 이미 키 사용이 중지돼 있습니다(기록을 다시 쓰지 않았습니다).');
-    expect(svc).toMatch(/return \{ ok: true, already: true, stop: cur,/);
+    expect(svc).toMatch(/return \{ ok: true, already: true, stop: ST\.stopFor\(c\) \|\| cur, added,/);
+    // 그 뒤 등록된 서버를 더했으면 그 수 · 더하지 못했으면 서버 사유(3회차 E3-3)
+    expect(stopDoneText({ ok: true, already: true, added: 2 }, 'KR')).toBe('KR — 이미 키 사용이 중지돼 있습니다. 그 뒤 등록된 서버 2대를 중지 기록에 더했습니다(사건은 다시 쓰지 않았습니다).');
+    expect(stopDoneText({ ok: true, already: true, added: 0, reason: '이미 사용 중지 상태입니다 — 사건을 다시 쓰지 않았습니다(그 뒤 등록된 서버를 기록에 더하지 못했습니다 — 상태 파일).' }, 'KR')).toContain('더하지 못했습니다');
   });
   it('두 사람 승인 대상 목록 — 보호 장치 설명 · 끄기 안내가 같은 글자 하나 · 서버 SSH_KINDS 의 종류가 모두 들어 있다', () => {
     expect(GUARD_TEXT.twoPerson.note.startsWith(TWO_PERSON_TARGETS)).toBe(true);

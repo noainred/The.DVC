@@ -481,7 +481,13 @@ export function recordFailedText(r) {
 /** 법인 키 사용 중지 결과(점검 E-8) — 등록부를 못 읽었으면 법인으로만 걸렸다는 것을 밝힌다. */
 export function stopDoneText(r, corpLabel = '') {
   // 이미 중지 상태 — 서버는 기록을 다시 쓰지 않는다(사건을 쌓지 않는다 · 2회차)
-  if (r?.already === true) return `${corpLabel} — 이미 키 사용이 중지돼 있습니다(기록을 다시 쓰지 않았습니다).`;
+  // 그 뒤 등록된 서버를 기록에 더했으면 그 수를, 더하지 못했으면 서버 사유를 그대로(3회차 E3-3 — added 를 버렸다).
+  if (r?.already === true) {
+    const added = finiteNum(r?.added);
+    if (added > 0) return `${corpLabel} — 이미 키 사용이 중지돼 있습니다. 그 뒤 등록된 서버 ${added}대를 중지 기록에 더했습니다(사건은 다시 쓰지 않았습니다).`;
+    if (r?.reason && /더하지 못했습니다/.test(String(r.reason))) return `${corpLabel} — ${String(r.reason)}`;
+    return `${corpLabel} — 이미 키 사용이 중지돼 있습니다(기록을 다시 쓰지 않았습니다).`;
+  }
   const head = `${corpLabel} — 키 사용을 중지했습니다`;
   if (r?.registryUnreadable === true) {
     return `${head}(법인으로만). OS 계정 등록부를 읽지 못해 그 법인 서버 목록을 함께 적지 못했습니다 — 서버의 법인 칸을 바꾸면 이 중지에서 빠질 수 있습니다. 등록부를 고친 뒤 서버 목록을 확인하세요.`;

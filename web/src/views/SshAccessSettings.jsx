@@ -329,6 +329,9 @@ function ServersTab({ v, corpName, reload, say, jobsUi }) {
   const pickable = servers.filter(keyLoginSelectable);
   const chosen = pickable.filter((s) => sel.has(s.id));
   const allOn = pickable.length > 0 && chosen.length === pickable.length;
+  // 한 번에 설정하는 서버 수 상한(API 값 — 서버가 OTP 앞에서도 거절한다 · 3회차 E3-7)
+  const klMax = Number.isFinite(Number(v.limits?.keyLoginServers)) && Number(v.limits?.keyLoginServers) > 0 ? Number(v.limits.keyLoginServers) : null;
+  const overKl = klMax != null && chosen.length > klMax;
   const toggle = (id) => setSel((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const accounts = (v.accounts || []).filter((a) => (a.corp || '') === corp || !a.corp);
   const edges = (v.edgeRows || []).filter((r) => (r.corp || '') === corp);
@@ -380,7 +383,8 @@ function ServersTab({ v, corpName, reload, say, jobsUi }) {
       <section className="ssa-sec">
         <h4>{corpName(corp)} — 서버 {unitText(regBad ? null : servers.length, '대')}</h4>
         <div className="ssa-acts">
-          <button className="btn btn-sm" type="button" disabled={!chosen.length} onClick={() => setKl({ servers: chosen })}>선택한 서버 키 로그인 설정{chosen.length ? ` (${chosen.length}대)` : ''}</button>
+          <button className="btn btn-sm" type="button" disabled={!chosen.length || overKl} onClick={() => setKl({ servers: chosen })}>선택한 서버 키 로그인 설정{chosen.length ? ` (${chosen.length}대)` : ''}</button>
+          {overKl && <Chip tone="warn">한 번에 {klMax}대까지 — 나눠서 고르세요</Chip>}
           <span className="ssa-sub">서버에 공개키 한 줄을 넣어 비밀번호 없이 접속하게 합니다 — 엣지가 수집하는 서버는 그 엣지 포탈에서 합니다.</span>
         </div>
         <STable minWidth={820} className="ssa-t ssa-srvt">
@@ -1130,7 +1134,7 @@ function SecurityTab({ v, corpName, reload, say, me = '', jobsUi }) {
       // 중지는 엣지 서버 수 · 등록부를 못 읽어 법인으로만 걸렸는지를 그대로 알린다(stopDoneText — 점검 E-8).
       if (r?.pending) say(pendingText(r, { what: `${corpName(stopF.corp)} 키 사용 재개`, then: '재개됩니다' }), pendingTone(r));
       else if (resume) say(`${corpName(stopF.corp)} — 키 사용을 재개했습니다.`, 'ok');
-      else say(stopDoneText(r, corpName(stopF.corp)), r?.registryUnreadable ? 'bad' : r?.already ? 'muted' : 'warn');
+      else say(stopDoneText(r, corpName(stopF.corp)), r?.registryUnreadable ? 'bad' : r?.already ? (r?.added > 0 ? 'warn' : /더하지 못했습니다/.test(String(r?.reason || '')) ? 'bad' : 'muted') : 'warn');
       setStopF({ corp: '', reason: '', otp: '' }); reload(); loadChg();
     } catch (e) { say(errText(e), 'bad'); setStopF((x) => ({ ...x, otp: '' })); } finally { setBusy(false); }
   };
@@ -1278,7 +1282,7 @@ function SecurityTab({ v, corpName, reload, say, me = '', jobsUi }) {
       )}
       <section className="ssa-sec ssa-danger">
         <h4>긴급 조치 — 법인 키 사용 중지</h4>
-        <p className="ssa-note">키가 샜다고 의심되면 그 법인의 키 접속을 바로 멈춥니다. 서버는 바꾸지 않습니다(이 노드가 그 법인 키로 접속하지 않을 뿐). 중지할 때 그 법인 서버 목록을 함께 적어 두므로 서버의 법인을 바꿔도 풀리지 않습니다. 비밀번호로 접속하는 서버는 멈추지 않고, 엣지가 수집하는 서버는 그 엣지의 키를 쓰므로 그 엣지 포탈에서 따로 중지합니다.</p>
+        <p className="ssa-note">키가 샜다고 의심되면 그 법인의 키 접속을 바로 멈춥니다. 서버는 바꾸지 않습니다(이 노드가 그 법인 키로 접속하지 않을 뿐). 중지할 때 그 법인 서버 목록을 함께 적어 두므로 서버의 법인을 바꿔도 풀리지 않습니다(중지 뒤에 등록한 서버는 ‘중지 기록 갱신’ 으로 더합니다). 비밀번호로 접속하는 서버는 멈추지 않고, 엣지가 수집하는 서버는 그 엣지의 키를 쓰므로 그 엣지 포탈에서 따로 중지합니다.</p>
         <div className="ssa-form ssa-inline">
           <label>법인 <Select sort={false} className="select select-sm" value={stopF.corp} onChange={(e) => setStopF({ ...stopF, corp: e.target.value })}>
             <option value="">선택</option>{(v.corps || []).map((c) => <option key={c.id} value={c.id}>{c.name}{c.stop?.unreadable ? ' — 상태 모름' : c.stop ? ' — 중지 중' : ''}</option>)}
@@ -1287,7 +1291,11 @@ function SecurityTab({ v, corpName, reload, say, me = '', jobsUi }) {
           <Otp value={stopF.otp} onChange={(x) => setStopF({ ...stopF, otp: x })} />
           <div className="ssa-acts">
             {stopUnknown ? <span className="ssa-sub">상태 파일을 읽지 못해 중지 · 재개를 할 수 없습니다(먼저 위에서 상태 파일을 다시 읽으세요).</span>
-              : stopped ? <button className="btn" type="button" disabled={busy || !stopF.corp} onClick={() => doStop(true)}>사용 재개</button>
+              : stopped ? <>
+                <button className="btn" type="button" disabled={busy || !stopF.corp} onClick={() => doStop(true)}>사용 재개</button>
+                {/* 중지 뒤에 등록한 서버를 기록에 더한다(3회차 E3-3 — 서버는 받는데 화면에 길이 없었다). 사건은 다시 쓰지 않는다. */}
+                <button className="btn" type="button" disabled={busy || !stopF.corp} onClick={() => doStop(false)}>중지 기록 갱신(그 뒤 등록된 서버 더하기)</button>
+              </>
               : <button className="btn danger" type="button" disabled={busy || !stopF.corp} onClick={() => doStop(false)}>이 법인 키 사용 중지</button>}
           </div>
         </div>

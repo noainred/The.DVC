@@ -226,7 +226,8 @@ export async function installOne(server, key, o = {}) {
   };
   if (!step2.ok) {
     const rb = await rollbackChange();
-    return fail('key-login-failed', `키 접속 확인 실패 — ${step2.reason}${rb.tail}${o.restrict && fromIp && (added || replaced) ? restrictText(fromIp) : ''}`, { line: m.kind, rolledBack: rb.rolledBack, rollbackUnknown: rb.rollbackUnknown, fromIp, notes });
+    // 출발지 제한 안내는 그 키가 **거부됐을 때만**(3회차 E3-5 — 로그인은 됐지만 강제 명령으로 명령이 돌지 않은 key-login-unusable 에도 ‘제한을 끄라’ 고 했다).
+    return fail('key-login-failed', `키 접속 확인 실패 — ${step2.reason}${rb.tail}${o.restrict && fromIp && (added || replaced) && step2.code === 'auth-rejected' ? restrictText(fromIp) : ''}`, { line: m.kind, rolledBack: rb.rolledBack, rollbackUnknown: rb.rollbackUnknown, fromIp, notes });
   }
 
   // ④ 확인됨 — 서버를 그 키에 묶고(등록부), 고른 뒷일을 한다.

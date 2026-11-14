@@ -137,6 +137,8 @@ const STRIP = '{ s = $0; sub(/\\r$/, "", s); t = s; sub(/^[ \\t]+/, "", t) }';
 /** 파일 · 폴더 꼴 검사(심볼릭 링크 · 일반 파일 아님 · 못 읽음은 실패). needDir 면 ~/.ssh 가 없을 때 만든다. */
 const CHECKS = (needDir) => [
   'if [ -L "$d" ]; then echo "##KL fail symlink"; exit 3; fi',
+  // 홈 · ~/.ssh 를 이 계정으로 따라갈 수 없으면 파일이 있는지 모른다 — ‘없음’ 이 아니라 실패(3회차 E3-4 — root 소유 0700 ~/.ssh 에서 거두기가 ‘파일 없음’ 으로 끝나고 키 줄이 남았다).
+  'if [ ! -x "$HOME" ] || { [ -d "$d" ] && [ ! -x "$d" ]; }; then echo "##KL fail noaccess"; exit 3; fi',
   ...(needDir ? [
     'mkd=""',
     // 처음 넣기 둘이 겹치면 진 쪽의 mkdir 이 실패한다 — 그 사이 생긴 진짜 폴더면 실패가 아니다(2회차 B4). 남이 만든 폴더면 mkd 를 세우지 않는다.
@@ -319,7 +321,7 @@ export function removeScript({ publicKey, keyId } = {}) {
 export const WHOAMI_SCRIPT = 'echo "##KL ip ${SSH_CONNECTION%% *}"';
 
 /** 표지 줄 읽기(마지막 `##KL …` 한 줄 — 로그인 배너가 앞에 섞여도). 모르는 사유 글자는 'unknown'. */
-const FAIL_WHY = new Set(['nohome', 'symlink', 'notdir', 'mkdir', 'notfile', 'unreadable', 'notwritable', 'read', 'write', 'verify', 'rename', 'nobase64', 'toolong', 'locked', 'raced', 'locklost', 'changed', 'slow']);
+const FAIL_WHY = new Set(['nohome', 'symlink', 'notdir', 'mkdir', 'notfile', 'unreadable', 'notwritable', 'read', 'write', 'verify', 'rename', 'nobase64', 'toolong', 'locked', 'raced', 'locklost', 'changed', 'slow', 'noaccess']);
 const num = (v) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Math.floor(Number(v)) : 0);
 export function parseMarker(stdout) {
   const lines = String(stdout || '').slice(-200_000).split('\n').map((x) => x.trim()).filter((x) => x.startsWith('##KL '));
@@ -340,7 +342,7 @@ export function parseMarker(stdout) {
 export const FAIL_TEXT = Object.freeze({
   nohome: '서버 계정의 HOME 을 알 수 없습니다.', symlink: '~/.ssh 또는 authorized_keys 가 심볼릭 링크라 건드리지 않았습니다 — 서버에서 직접 확인하세요.',
   notdir: '~/.ssh 가 폴더가 아니라 건드리지 않았습니다.', mkdir: '~/.ssh 폴더를 만들지 못했습니다.', notfile: 'authorized_keys 가 일반 파일이 아니라 건드리지 않았습니다.',
-  unreadable: 'authorized_keys 를 읽을 수 없어(권한) 건드리지 않았습니다.', notwritable: 'authorized_keys(또는 ~/.ssh)에 이 계정이 쓸 수 없어(관리자가 잠가 둠) 건드리지 않았습니다.', read: 'authorized_keys 를 읽지 못했습니다.',
+  unreadable: 'authorized_keys 를 읽을 수 없어(권한) 건드리지 않았습니다.', noaccess: '홈 또는 ~/.ssh 폴더를 이 계정으로 열 수 없어(권한) authorized_keys 가 있는지 알 수 없습니다 — 건드리지 않았습니다(‘줄 없음’ 이 아닙니다).', notwritable: 'authorized_keys(또는 ~/.ssh)에 이 계정이 쓸 수 없어(관리자가 잠가 둠) 건드리지 않았습니다.', read: 'authorized_keys 를 읽지 못했습니다.',
   write: '임시 파일을 쓰지 못했습니다(권한 · 디스크) — 원래 파일은 그대로입니다.', verify: '새로 쓴 내용이 예상과 달라(디스크 가득 등) 바꾸지 않았습니다 — 원래 파일은 그대로입니다.',
   rename: '새 파일로 바꾸지 못했습니다 — 원래 파일은 그대로입니다.',
   locked: '다른 작업이 이 서버의 authorized_keys 를 바꾸는 중이라 기다리다 그만뒀습니다 — 원래 파일은 그대로입니다. 잠시 뒤 다시 하세요(남은 자물쇠 ~/.ssh/.authorized_keys.portal.lock 는 주인이 없으면 다음 작업이 치웁니다).',
