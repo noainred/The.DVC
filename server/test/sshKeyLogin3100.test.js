@@ -4475,3 +4475,88 @@ test('㉕-d 그 밖(3회차 D · 공통) — 복원으로 id 가 바뀐 대기 �
   await waitJob(rv.jobId);
   assert.equal(KL.revokingIssue(Kr.id), null, '끝나면 풀린다');
 });
+
+/* ── 3회차 반증(58d48908) 회귀 ─────────────────────────────────────────── */
+test('㉖ 3회차 반증 — 목록 밖 법인은 받는 곳 폴더가 없다(inboxPath · 훑기는 vCenter 법인만 — 그 폴더의 키가 ‘ready’ 로 나오지 않음) · 교체 승인 사전 검사가 거두는 새 키에 409 revoking(요청 그대로) · 화면 authEnabled · 홈이 없는 계정은 없음(none · missing · 넣기는 mkdir 실패 — noaccess 아님) · OTP 말의 강약(계정 · 호스트 이름의 duo · second · 인증 은 비밀번호 칸을 막지 않음) · 도중 중지 문장은 한 번', async () => {
+  const INB = await import('../src/sshaccess/inbox.js');
+  // ① 목록 밖 법인
+  const sMiss = mkServer('bm-miss-26', null, { host: '10.9.26.1', password: 'x', vcenterId: 'vcMiss26' });
+  const kdir = path.join(INB.inboxDir(), 'vcMiss26', 'common'); fs.mkdirSync(kdir, { recursive: true });
+  const kf = path.join(kdir, 'miss26.key'); fs.writeFileSync(kf, F.ed25519Key().pem, { mode: 0o600 });
+  try {
+    INB._resetInboxScanForTest();
+    const v = await SVC.buildView();
+    const c = v.corps.find((x) => x.id === 'vcMiss26');
+    assert.deepEqual([c?.missing, c?.inboxPath], [true, ''], JSON.stringify(c));
+    assert.ok(v.corps.find((x) => x.id === 'vcA').inboxPath, '목록 안 법인은 폴더가 있다');
+    assert.equal(v.inbox.items.some((i) => i.corp === 'vcMiss26' || i.relPath.startsWith('vcMiss26/')), false, `목록 밖 법인 폴더의 키는 항목(ready)이 아니다 ${JSON.stringify(v.inbox.items.filter((i) => i.relPath.includes('Miss')))}`);
+    assert.ok(v.inbox.unknownFolders.some((x) => x.includes('vcMiss26')), JSON.stringify(v.inbox.unknownFolders));
+    assert.equal(v.authEnabled, true, '화면 authEnabled = config.auth.enabled');
+  } finally { fs.rmSync(path.join(INB.inboxDir(), 'vcMiss26'), { recursive: true, force: true }); INB._resetInboxScanForTest(); assert.ok(BM.removeBmServer(sMiss.id).ok); }
+  const off = subRun({ owners: 'own', users: [{ username: 'own', role: 'admin', totpEnabled: true, totpSecret: generateSecret() }], env: { AUTH_ENABLED: 'false' }, code: `
+    const SVC = await imp('sshaccess/service.js'); console.log(JSON.stringify({ a: (await SVC.buildView()).authEnabled }));` });
+  assert.equal(off.a, false);
+  // ② 교체 요청 뒤 새 키를 거두는 중 → 승인 사전 검사 409 revoking · 요청은 대기
+  const kFrom = mkKey('rv-from-26'); const kTo = mkKey('rv-to-26');
+  const rq = await SVC.rotateKeyReq({ from: kFrom.id, to: kTo.id, by: 'own' });
+  assert.equal(rq.pending, true, JSON.stringify(rq));
+  const S = await fakeSshd(); const pw = secret('Pw-Rv-26'); S.st.password = pw; S.writeAk(`${kTo.pub} portal-ssh:${kTo.id}\n`);
+  const sv = mkServer('bm-rv-26', S, { password: pw });
+  const h = holdRevoke(S, kTo);
+  const rvj = await SVC.startKeyRevoke({ keyId: kTo.id, servers: [sv], by: 'own' });
+  await h.reached;
+  try {
+    const p = SVC.approvalPrecheck(rq.request.id, { approve: true, by: 'own2', digest: rq.request.digest });
+    assert.deepEqual([p?.code, p?.status, AP.getRequest(rq.request.id).status], ['revoking', 409, 'pending'], JSON.stringify(p));
+    assert.match(p.reason, /요청은 그대로 둡니다/);
+  } finally { h.release(); }
+  await waitJob(rvj.jobId);
+  assert.equal((await SVC.decideApproval(rq.request.id, { approve: false, by: 'own' })).request.status, 'cancelled');
+  // ③ 홈이 없는 계정(useradd -M) — 권한 문제가 아니라 ‘없음’
+  const line = KL.buildKeyLine({ publicKey: BPUB, keyId: BID });
+  const noHome = path.join(mkHome(), 'no', 'such-home');
+  for (const shell of SHELLS) {
+    assert.deepEqual([sh(AKS.removeScript({ publicKey: BPUB, keyId: BID }), noHome, shell).m, sh(AKS.rollbackScript({ line }), noHome, shell).m, sh(AKS.installScript({ publicKey: BPUB, keyId: BID, line }), noHome, shell).m],
+      [{ kind: 'none' }, { kind: 'none' }, { kind: 'fail', why: 'mkdir' }], `${shell} — noaccess 가 아니다`);
+    assert.equal(spawnSync(shell, ['-c', AK.READ_COMMAND], { env: { HOME: noHome, PATH: process.env.PATH }, encoding: 'utf8' }).stdout, '##AK missing\n', shell);
+  }
+  // ④ OTP 말의 강약(가짜 sshd 대화형 · 가리는 칸 하나)
+  const SX = await import('../src/proxy/sshExec.js');
+  const PW = secret('Kbd-Weak-Pw-26');
+  const trial = async (prompt) => {
+    const seen = [];
+    const srv = new ssh2.Server({ hostKeys: [HOSTKEY] }, (client) => {
+      client.on('authentication', (ctx) => {
+        if (ctx.method !== 'keyboard-interactive') return ctx.reject(['keyboard-interactive']);
+        return ctx.prompt([{ prompt, echo: false }], (a) => { seen.push(a?.[0] === PW ? 'PW' : JSON.stringify(a?.[0])); ctx.reject(['keyboard-interactive']); });
+      });
+      client.on('error', () => {});
+    });
+    await new Promise((r) => { srv.listen(0, '127.0.0.1', r); });
+    let code = '';
+    try { await SX.withSsh({ host: '127.0.0.1', port: srv.address().port, username: 'mon', password: PW, readyTimeout: 6000, passwordOnly: true }, async () => ({})); } catch (e) { code = e?.code || ''; }
+    srv.close();
+    return [seen[0], code];
+  };
+  for (const p of ['Password for duo-svc@h: ', '(root@secondary-db) Password: ', '인증 암호: ']) assert.deepEqual(await trial(p), ['PW', ''], `${p} — 약한 말이 섞인 비밀번호 칸`);
+  for (const p of ['One-time password: ', 'Token password: ', 'Duo passcode: ']) assert.deepEqual(await trial(p), ['""', 'SSH_NO_PASSWORD_METHOD'], `${p} — OTP 칸`);
+  // ⑤ 처음 키로 접속한 서버에 다른 키를 넣는 도중 법인 중지 — 중지 문장은 한 번(되돌림 꼬리는 짧게)
+  const S5 = await fakeSshd(); S5.st.password = pw;
+  const K0 = mkKey('first-leg-26'); const K5 = mkKey('new-key-26');
+  S5.writeAk(`${OTHER}\n${K0.pub} portal-ssh:${K0.id}\n`);
+  const sv5 = mkServer('bm-first-key-26', S5, { keyRef: K0.id, bindApproved: true });
+  const h5 = holdInstall(S5, K5);
+  const st5 = await SVC.startKeyLogin({ servers: [sv5], keyId: K5.id, by: 'own' });
+  assert.equal(st5.ok, true, JSON.stringify(st5));
+  await h5.reached;
+  assert.ok((await SVC.stopCorp('vcA', { by: 'own', reason: '도중 중지 26' })).ok);
+  try {
+    h5.release();
+    const r5 = (await waitJob(st5.jobId)).results[0];
+    assert.equal(r5.code, 'corp-stopped', JSON.stringify(r5));
+    const stopSentence = String(REFS.AUTH_ERROR['corp-stopped'] || '').split(' — ')[0];
+    assert.ok(stopSentence.length > 5, stopSentence);
+    assert.equal(r5.reason.split(stopSentence).length - 1, 1, `중지 문장은 한 번 ${r5.reason}`);
+    assert.match(r5.reason, /법인 키 사용 중지 중 — 되돌리려고 접속하지 않았습니다/);
+  } finally { assert.ok(ST.clearCorpStop('vcA', { by: 'fixture' }).ok); }
+});
