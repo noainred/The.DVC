@@ -42,7 +42,7 @@ function migrate(db) {
       first_ok_at INTEGER, last_scan_at INTEGER, last_ok_at INTEGER, last_status TEXT, last_reason TEXT,
       log_order TEXT, log_total INTEGER, log_oldest INTEGER, covered_from INTEGER, continuous_since INTEGER,
       complete INTEGER, read_last INTEGER, synthesized INTEGER, inv_at INTEGER, drives_json TEXT, updated_at INTEGER,
-      newest_created INTEGER, read_stop TEXT,
+      newest_created INTEGER, read_stop TEXT, read_diag TEXT, probe_json TEXT, probe_at INTEGER,
       PRIMARY KEY(agent, server_id));
     CREATE TABLE IF NOT EXISTS dbr_record(
       agent TEXT NOT NULL, server_id TEXT NOT NULL, entry_key TEXT NOT NULL,
@@ -59,6 +59,10 @@ function migrate(db) {
   const cols = new Set(db.prepare('PRAGMA table_info(dbr_server)').all().map((c) => c.name));
   if (!cols.has('newest_created')) db.exec('ALTER TABLE dbr_server ADD COLUMN newest_created INTEGER');
   if (!cols.has('read_stop')) db.exec('ALTER TABLE dbr_server ADD COLUMN read_stop TEXT');
+  // v3.8.2: 읽기 진단(무엇을 읽었는가) · 장비 진단(그 장비가 무엇을 주는가). 3.8.0 · 3.8.1 이 만든 DB 에 열만 더한다.
+  if (!cols.has('read_diag')) db.exec('ALTER TABLE dbr_server ADD COLUMN read_diag TEXT');
+  if (!cols.has('probe_json')) db.exec('ALTER TABLE dbr_server ADD COLUMN probe_json TEXT');
+  if (!cols.has('probe_at')) db.exec('ALTER TABLE dbr_server ADD COLUMN probe_at INTEGER');
   const v = db.prepare("SELECT v FROM meta WHERE k='schema'").get()?.v;
   if (v != null && Number(v) > SCHEMA_VERSION) throw new Error(`disk-bad.db 의 판(${v})이 이 포탈(${SCHEMA_VERSION})보다 새것입니다 — 포탈을 올리세요.`);
   db.prepare("INSERT OR REPLACE INTO meta(k, v) VALUES('schema', ?)").run(String(SCHEMA_VERSION));
@@ -68,15 +72,16 @@ function prepare(db) {
   return {
     serverGet: db.prepare('SELECT * FROM dbr_server WHERE agent=? AND server_id=?'),
     serverUpsert: db.prepare(`INSERT INTO dbr_server(agent, server_id, name, host, service_tag, first_ok_at, last_scan_at, last_ok_at, last_status, last_reason,
-        log_order, log_total, log_oldest, covered_from, continuous_since, complete, read_last, synthesized, inv_at, drives_json, updated_at, newest_created, read_stop)
+        log_order, log_total, log_oldest, covered_from, continuous_since, complete, read_last, synthesized, inv_at, drives_json, updated_at, newest_created, read_stop, read_diag, probe_json, probe_at)
       VALUES(@agent, @server_id, @name, @host, @service_tag, @first_ok_at, @last_scan_at, @last_ok_at, @last_status, @last_reason,
-        @log_order, @log_total, @log_oldest, @covered_from, @continuous_since, @complete, @read_last, @synthesized, @inv_at, @drives_json, @updated_at, @newest_created, @read_stop)
+        @log_order, @log_total, @log_oldest, @covered_from, @continuous_since, @complete, @read_last, @synthesized, @inv_at, @drives_json, @updated_at, @newest_created, @read_stop, @read_diag, @probe_json, @probe_at)
       ON CONFLICT(agent, server_id) DO UPDATE SET name=excluded.name, host=excluded.host, service_tag=excluded.service_tag,
         first_ok_at=excluded.first_ok_at, last_scan_at=excluded.last_scan_at, last_ok_at=excluded.last_ok_at, last_status=excluded.last_status,
         last_reason=excluded.last_reason, log_order=excluded.log_order, log_total=excluded.log_total, log_oldest=excluded.log_oldest,
         covered_from=excluded.covered_from, continuous_since=excluded.continuous_since, complete=excluded.complete, read_last=excluded.read_last,
         synthesized=excluded.synthesized, inv_at=excluded.inv_at, drives_json=excluded.drives_json, updated_at=excluded.updated_at,
-        newest_created=excluded.newest_created, read_stop=excluded.read_stop`),
+        newest_created=excluded.newest_created, read_stop=excluded.read_stop, read_diag=excluded.read_diag,
+        probe_json=excluded.probe_json, probe_at=excluded.probe_at`),
     recInsert: db.prepare(`INSERT OR IGNORE INTO dbr_record(agent, server_id, entry_key, created, code, message_id, severity, message, slot_key, received_at, baseline)
       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
     serialUpsert: db.prepare(`INSERT INTO dbr_serial(agent, server_id, slot_key, serial, model, first_seen, last_seen) VALUES(?, ?, ?, ?, ?, ?, ?)
@@ -177,7 +182,11 @@ export async function ingestServers(agent, servers, { now = Date.now(), yielder 
         read_last: prev?.read_last ?? null, synthesized: s.synthesized ? 1 : (prev?.synthesized ?? 0),
         inv_at: Number.isFinite(s.invAt) ? s.invAt : (prev?.inv_at ?? null), drives_json: drivesJson, updated_at: now,
         newest_created: prev?.newest_created ?? null, read_stop: prev?.read_stop ?? null,
+        read_diag: prev?.read_diag ?? null, probe_json: prev?.probe_json ?? null, probe_at: prev?.probe_at ?? null,
       };
+      // 장비 진단은 온 것만 바꾼다(서버 한 대를 직접 점검했을 때만 온다). 로그 읽기가 실패한 점검에도 실릴 수 있다.
+      //   답한 단계가 하나도 없는 진단(전부 실패 · 시한)은 지난 정상 진단을 덮지 않는다 — 지난 것이 없을 때만 남긴다(실패했다는 사실을 보이게).
+      if (s.probe && (probeAnswered(s.probe) || !prev?.probe_json)) { row.probe_json = JSON.stringify(s.probe).slice(0, 20_000); row.probe_at = now; }
       if (s.ok && s.log) {
         // 반증 #8: 기록 상한으로 잘렸으면 그 아래 구간은 이번에 '본' 것이 아니다 — 남긴 가장 오래된 기록부터만 본 것으로 적고 complete 를 내린다.
         let capFloor = null;
@@ -198,6 +207,13 @@ export async function ingestServers(agent, servers, { now = Date.now(), yielder 
         row.read_last = finite(L.read);
         // 왜 끝까지 못 읽었나(budget · max · skip — 장비가 쪽 넘김을 지원하지 않음 · capped — 기록 상한). 화면이 '일부만 읽음' 의 이유로 밝힌다.
         row.read_stop = s.recordsCapped ? 'capped' : (s.log.stopped || null);
+        // 읽기 진단은 **로그 전체를 읽은 점검**의 것만 남긴다 — 지난 자리를 찾아 멈춘 이어 읽기는 새 항목 몇 건의 구성이라 활성 로그 전체를 말하지 않는다.
+        //   지난 자리를 못 찾고 끝까지 읽은 점검(활성 로그가 점검 간격보다 짧은 서버는 매번 이 경우다)은 전체 읽기다(반증 3.8.2 #2).
+        if (!s.log.foundCursor && Array.isArray(s.log.top)) {
+          row.read_diag = JSON.stringify({ at: now, read: finite(s.log.read), total: finite(s.log.total), pages: finite(s.log.pages), ms: finite(s.log.ms),
+            distinct: finite(s.log.distinct), firstLen: finite(s.log.firstLen), hasNext: s.log.hasNext ?? null, path: s.log.path || '', top: s.log.top,
+            oldest: finite(s.log.oldestRead), newest: finite(s.log.newestCreated), reachedEnd: s.log.reachedEnd === true }).slice(0, 4_000);
+        }
         const nc = finite(L.newestCreated);
         row.newest_created = nc != null && (prevNewest == null || nc > prevNewest) ? nc : prevNewest;
         for (const r of s.records || []) {
@@ -235,11 +251,19 @@ export async function ingestServers(agent, servers, { now = Date.now(), yielder 
   return { ok: true, servers: storedIds.length, storedIds, newRecords, baselineServers };
 }
 
+/** 장비 진단에 답한 단계가 하나라도 있는가(`{error}` · `{skipped}` 가 아닌 객체). */
+export function probeAnswered(p) {
+  if (!p || typeof p !== 'object') return false;
+  return Object.entries(p).some(([k, v]) => !['v', 'at', 'ms', 'error', 'authDenied', 'synthesized', 'filterVerdict'].includes(k)
+    && v && typeof v === 'object' && !('error' in v) && !('skipped' in v));
+}
+const parseObj = (v) => { try { const j = JSON.parse(v || 'null'); return j && typeof j === 'object' && !Array.isArray(j) ? j : null; } catch { return null; } };
 const rowServer = (r) => ({
   agent: r.agent, serverId: r.server_id, name: r.name || '', host: r.host || '', serviceTag: r.service_tag || '',
   firstOkAt: r.first_ok_at, lastScanAt: r.last_scan_at, lastOkAt: r.last_ok_at, lastStatus: r.last_status || '', lastReason: r.last_reason || '',
   logOrder: r.log_order, logTotal: r.log_total, logOldest: r.log_oldest, coveredFrom: r.covered_from, continuousSince: r.continuous_since,
   complete: r.complete == null ? null : r.complete === 1, readLast: r.read_last, synthesized: r.synthesized === 1, invAt: r.inv_at, newestCreated: r.newest_created ?? null, readStop: r.read_stop || '',
+  readDiag: parseObj(r.read_diag), probe: parseObj(r.probe_json), probeAt: r.probe_at ?? null,
   drives: (() => { try { const j = JSON.parse(r.drives_json || 'null'); return Array.isArray(j) ? j : null; } catch { return null; } })(),
 });
 const rowRecord = (r) => ({

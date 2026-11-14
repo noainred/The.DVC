@@ -13,6 +13,25 @@
  *   교체는 시리얼이 바뀐 것을 본 때만 확정한다. 빠짐(PDR5)만 있으면 '판단 불가'(다시 꽂았는지 바꿨는지 모른다).
  */
 import { COUNTED, CLS, labelOfKey, matchDrive, driveSlotOf, slotKeyOf } from './classify.js';
+import { redfishPartState } from '../partfault/classify.js';
+import { PART_STATE, PART_STATE_LABEL } from '../partfault/types.js';
+
+/**
+ * iDRAC 가 **지금** 그 디스크에 대해 알리는 상태(v3.8.2 — 사용자 'iDRAC 정보만 가지고 판단하는 로직에 집중').
+ * Lifecycle 로그의 과거 기록과는 별개의 근거다 — 활성 로그가 며칠치뿐이어도 iDRAC 가 지금 경고하는 디스크는 여기서 보인다.
+ * 판정은 파트 장애 기능의 코어 하나(`partfault/classify.js redfishPartState` — Health OK/Warning/Critical · 고장 예측은 ok → 주의만 ·
+ * 못 읽은 값은 '확인 불가' 이지 정상도 경고도 아니다)를 그대로 쓴다. 경고 · 위험이 아니면 null.
+ * ⚠ 이것은 '배드 섹터가 났다' 는 뜻이 아니다 — 화면이 '배드 섹터 기록과 별개' 라고 밝힌다(고장 예측을 배드 섹터 수에 넣지 않는 사용자 결정과 같은 선).
+ * @returns {{level:'warn'|'fault', raw:string, predictive:boolean}|null}
+ */
+export function driveAlert(d) {
+  if (!d || typeof d !== 'object') return null;
+  const st = redfishPartState({ health: d.health, state: d.state, predictiveFailure: d.predictive === true ? true : (d.predictive === false ? false : null) });
+  if (st.state !== PART_STATE.warn && st.state !== PART_STATE.fault) return null;
+  return { level: st.state === PART_STATE.fault ? 'fault' : 'warn', raw: String(st.raw || '').slice(0, 60), predictive: d.predictive === true };
+}
+// 낱말은 파트 장애 화면과 같게(같은 상태를 화면마다 다르게 부르지 않는다).
+export const ALERT_LABEL = Object.freeze({ warn: PART_STATE_LABEL[PART_STATE.warn], fault: PART_STATE_LABEL[PART_STATE.fault] });
 
 export const VERDICT = Object.freeze({ inUse: 'inUse', replaced: 'replaced', unknown: 'unknown' });
 export const VERDICT_LABEL = Object.freeze({ inUse: '아직 사용 중', replaced: '교체됨', unknown: '판단 불가' });
@@ -154,13 +173,27 @@ export function judgeServer({ records = [], drives = null, serialRows = [], cove
     predictive: slots.reduce((a, s) => a + s.predictive, 0),
   };
   const unwatched = driveKnown ? drives.filter((d) => d && d.inVolume === false).length : 0;
+  // iDRAC 가 지금 알리는 디스크(배드 섹터 기록과 별개). 디스크 목록을 못 읽었으면 '없음' 이 아니라 모름(null).
+  let alerting = null;
+  if (driveKnown) {
+    alerting = [];
+    const recSlots = new Set(badSlots.map((s) => s.slotKey));
+    for (const d of drives) {
+      const a = driveAlert(d);
+      if (!a) continue;
+      const p = pickDrive(d);
+      alerting.push({ slotKey: p.slotKey, label: p.slotKey ? labelOfKey(p.slotKey) : (p.name || ''), model: p.model, serial: p.serial, media: p.media,
+        level: a.level, levelLabel: ALERT_LABEL[a.level], raw: a.raw, predictive: a.predictive, hasRecords: !!p.slotKey && recSlots.has(p.slotKey) });
+    }
+    counts.alerting = alerting.length;
+  } else counts.alerting = null;
   let status = 'unread';
   if (coverage && coverage.lastOkAt) {
     if (counts.records > 0 || unplaced.some((r) => COUNTED.has(r.cls))) status = 'records';
     else if (driveKnown && drives.length && unwatched === drives.length) status = 'unwatched';
     else status = coverage.complete === false ? 'partial' : 'clean';
   }
-  return { status, slots, unplaced: unplaced.map((r) => ({ created: r.created, code: r.code, cls: r.cls })), drives: driveKnown ? drives.map(pickDrive) : null, counts, unwatched };
+  return { status, slots, unplaced: unplaced.map((r) => ({ created: r.created, code: r.code, cls: r.cls })), drives: driveKnown ? drives.map(pickDrive) : null, counts, unwatched, alerting };
 }
 
 function pickDrive(d) {

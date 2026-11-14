@@ -49,15 +49,40 @@ export function mockEntries(id, now) {
   return { entries: out, oldest, total: 400 + (h % 12_000) };
 }
 
-export function mockScanServer({ drives, invAt, mode, cursor, now, ...base }) {
-  const { entries, oldest, total } = mockEntries(base.id, now);
-  const fresh = cursor ? entries.filter((e) => e.created >= cursor.created) : entries;
+/** 지어낸 읽기 진단 — 서버 몇 대는 로그인 기록이 활성 로그를 채운 꼴(하루 ~ 며칠치)로 만든다(화면 검증용). */
+function mockDiag(id, total, entries) {
+  const h = hash(`diag|${id}`);
+  const flooded = h % 5 === 0;
+  const disk = entries.length;
+  const login = flooded ? Math.floor(total * 0.48) : Math.floor(total * 0.06);
+  const top = [{ code: 'USR0030', n: login }, { code: 'USR0032', n: login }, { code: 'LOG007', n: Math.floor(total * 0.01) }, { code: 'SYS1003', n: Math.floor(total * 0.004) }];
+  if (disk) top.push({ code: entries[0].code, n: disk });
+  return { flooded, diag: { pages: Math.ceil(total / 50), ms: 400 * Math.ceil(total / 50), distinct: 14 + (h % 20), top: top.filter((x) => x.n > 0).sort((a, b) => b.n - a.n), firstLen: 50, hasNext: total > 50, path: 'std' } };
+}
+
+function mockProbe(now) {
+  return { v: 1, at: now, synthesized: true, manager: { firmware: '7.00.00.00', model: '14G Monolithic' },
+    lclog: { path: '/redfish/v1/Managers/iDRAC.Embedded.1/LogServices/Lclog/Entries', pageLen: 50, count: 3853, nextLink: true, order: 'desc', sampleMessageId: 'IDRAC.2.9.USR0030', codes: { USR0030: 24, USR0032: 24, LOG007: 2 } },
+    filterExact: { n: 50, count: 1912, nextLink: true, allMatch: true }, filterPrefixEq: { n: 0, count: 0, nextLink: false, allMatch: false },
+    lcService: { exports: ['ExportLCLog', 'ExportCompleteLCLog', 'ExportTechSupportReport'], ExportLCLog: { shareTypes: ['Local', 'NFS', 'CIFS'] }, ExportCompleteLCLog: { shareTypes: ['NFS', 'CIFS'] } },
+    logAttributes: { total: 812, matched: { 'Logging.1.LCLogAggregation': 'Disabled' } },
+    drive: { id: 'Disk.Bay.0:Enclosure.Internal.0-1:RAID.Integrated.1-1', mediaType: 'SSD', values: { FailurePredicted: false, PredictedMediaLifeLeftPercent: 97 }, links: [] }, ms: 2100 };
+}
+
+export function mockScanServer({ drives, invAt, mode, manual = false, cursor, now, ...base }) {
+  const { entries, oldest: oldestFull, total } = mockEntries(base.id, now);
+  const { flooded, diag } = mockDiag(base.id, total, entries);
+  // 로그인 기록으로 찬 서버는 활성 로그가 며칠치뿐이고 그 안의 기록만 보인다(실장비에서 본 꼴 — v3.8.2).
+  const oldest = flooded ? now - (1 + (hash(`span|${base.id}`) % 6)) * DAY : oldestFull;
+  const visible = flooded ? entries.filter((e) => e.created >= oldest) : entries;
+  const fresh = cursor ? visible.filter((e) => e.created >= cursor.created) : visible;
   const newest = { entryId: `n${Math.floor(now / 3_600_000)}`, created: now - 600_000 };
   return {
     ...base, ok: true, reason: '', synthesized: true, drives, invAt,
     log: { order: 'desc', total, read: cursor ? 3 : total, undated: 0, newestId: newest.entryId, newestCreated: newest.created,
-      oldestRead: cursor ? cursor.created : oldest, reachedEnd: !cursor, foundCursor: !!cursor, cursorUsed: !!cursor, stopped: '', cursorCreated: cursor?.created ?? null },
-    records: fresh, recordsCapped: false,
+      oldestRead: cursor ? cursor.created : oldest, reachedEnd: !cursor, foundCursor: !!cursor, cursorUsed: !!cursor, stopped: '', cursorCreated: cursor?.created ?? null,
+      ...diag },
+    records: fresh, recordsCapped: false, ...(manual ? { probe: mockProbe(now) } : {}),
     _cursor: { entryId: newest.entryId, created: newest.created, complete: true },
     mode,
   };

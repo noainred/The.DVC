@@ -11,7 +11,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, usePolling } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
-import { fmtDate, fmtDateTime, serverBand, clsTone, verdictTone, confidenceTone, noteOf, clsOfCode } from './diskBadText.js';
+import { fmtDate, fmtDateTime, serverBand, clsTone, verdictTone, confidenceTone, noteOf, clsOfCode, diagInfo } from './diskBadText.js';
 
 const BAND = {
   bad: { border: '1px solid rgba(239,68,68,.45)', background: 'rgba(239,68,68,.10)' },
@@ -31,6 +31,7 @@ export function DiskBadServerPanel({ serverId, agent = null }) {
   const [msg, setMsg] = useState('');
   const [open, setOpen] = useState(null);
   const [showAll, setShowAll] = useState(false);
+  const [showProbe, setShowProbe] = useState(true);
   const reqSeq = useRef(0);
   const url = `/tools/disk-bad/server/${encodeURIComponent(serverId)}${agent != null ? `?agent=${encodeURIComponent(agent)}` : ''}`;
   const load = () => {
@@ -48,7 +49,7 @@ export function DiskBadServerPanel({ serverId, agent = null }) {
   const scan = (mode) => {
     setBusy(true); setMsg('');
     postJson('/tools/disk-bad/scan', { scope: 'server', serverId, ...(agent != null ? { agent } : {}), mode })
-      .then(() => { setMsg('점검을 보냈습니다 — 이 서버를 맡은 노드가 읽고 나면 아래가 바뀝니다.'); return load(); })
+      .then(() => { setMsg('점검을 보냈습니다 — 이 서버를 맡은 노드가 읽고 나면 아래가 바뀝니다. 서버 한 대를 직접 점검하면 장비 진단(이 iDRAC 가 무엇을 주는지)도 함께 받아 옵니다 — 장비 진단은 관리자 화면에만 보입니다.'); return load(); })
       .catch((e) => setMsg(e?.message || String(e)))
       .finally(() => setBusy(false));
   };
@@ -62,6 +63,7 @@ export function DiskBadServerPanel({ serverId, agent = null }) {
   const band = serverBand(v);
   const refs = data.labels?.refs || [];
   const cov = v?.coverage || null;
+  const diag = diagInfo(cov?.diag);
   const recs = (v?.records || []).filter((r) => showAll || r.cls !== 'other').sort((a, b) => b.created - a.created);
   const LIMIT = 200;
 
@@ -86,6 +88,34 @@ export function DiskBadServerPanel({ serverId, agent = null }) {
         <div style={{ fontWeight: 800, fontSize: 14 }}>{band.title}</div>
         {band.lines.map((l, i) => <div key={i} style={{ fontSize: 12.5, lineHeight: 1.6 }}>{l}</div>)}
       </div>
+
+      {v && Array.isArray(v.alerting) && v.alerting.length > 0 && (
+        <div style={{ border: '1px solid rgba(245,158,11,.55)', background: 'rgba(245,158,11,.07)', borderRadius: 10, padding: '8px 12px', fontSize: 12.5, lineHeight: 1.65, minWidth: 0 }}>
+          <b>iDRAC 가 지금 이상을 알리는 디스크 {v.alerting.length}개</b> <span className="muted" style={{ fontSize: 12 }}>현재 상태와 고장 예측 — 배드 섹터 기록과는 별개의 근거입니다</span>
+          {v.alerting.map((a, i) => (
+            <div key={a.slotKey || a.serial || i} style={{ overflowWrap: 'anywhere' }}>
+              <span className={`badge ${a.level === 'fault' ? 'red' : 'amber'}`}>{a.levelLabel}</span>{a.predictive && <span className="badge blue" style={{ marginLeft: 4 }}>고장 예측</span>}
+              {' '}<b>{a.label || '위치 모름'}</b> · {a.model || '모델 모름'} · S/N {a.serial || '—'}{a.raw ? ` · iDRAC 값 ${a.raw}` : ''}{a.hasRecords ? ' · 이 자리에 배드 섹터 기록도 있습니다' : ''}
+            </div>
+          ))}
+        </div>
+      )}
+      {diag && (
+        <div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '8px 12px', fontSize: 12, lineHeight: 1.65, minWidth: 0 }}>
+          <b>읽기 진단</b> <span className="muted">이 서버의 로그를 무엇을 얼마나 읽었는지 — 판정이 아니라 읽은 사실입니다</span>
+          {diag.lines.map((l, i) => <div key={i} style={{ overflowWrap: 'anywhere' }}>{l}</div>)}
+          {diag.warn && <div style={{ marginTop: 4, color: 'var(--amber, #f59e0b)', fontWeight: 600 }}>{diag.warn}</div>}
+        </div>
+      )}
+      {data.probe && (
+        <div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '8px 12px', fontSize: 12, lineHeight: 1.6, minWidth: 0 }}>
+          <div className="flex between" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div style={{ minWidth: 0 }}><b>장비 진단</b> <span className="muted">이 iDRAC 가 실제로 무엇을 주는지(읽기 전용 조회 · {fmtDateTime(data.probeAt)}) — 관리자에게만 보입니다</span></div>
+            <button className="tab" style={{ flex: 'none', padding: '3px 10px' }} onClick={() => setShowProbe((x) => !x)}>{showProbe ? '접기' : '펼치기'}</button>
+          </div>
+          {showProbe && <pre style={{ margin: '6px 0 0', padding: 8, borderRadius: 8, background: 'var(--bg-soft)', fontFamily: 'var(--mono)', fontSize: 11.5, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 420, overflow: 'auto' }}>{JSON.stringify(data.probe, null, 2)}</pre>}
+        </div>
+      )}
 
       {v && v.slots.length > 0 && (
         <div style={{ minWidth: 0 }}>
@@ -138,7 +168,7 @@ export function DiskBadServerPanel({ serverId, agent = null }) {
       )}
 
       <div style={{ border: '1px solid var(--border)', borderRadius: 10, background: 'rgba(59,130,246,.08)', padding: '8px 12px', fontSize: 12, lineHeight: 1.65 }}>
-        <b>읽는 법</b> — iDRAC Lifecycle 로그에 남아 있는 구간만 봅니다. 기록 ID 는 Dell 이 붙인 메시지 번호이고, 뜻은 Dell 문서를 검색 요약으로 확인한 것입니다(원문 · 실장비 대조 전).
+        <b>읽는 법</b> — iDRAC 가 지금 보여 주는 Lifecycle 로그(활성분으로 보입니다 — Dell 안내서 요약 기준)에 남아 있는 구간만 봅니다. 로그가 차서 보관으로 넘어간 과거 기록은 아직 읽지 않습니다. 기록 ID 는 Dell 이 붙인 메시지 번호이고, 뜻은 Dell 문서를 검색 요약으로 확인한 것입니다(원문 · 실장비 대조 전).
         ‘아직 사용 중’ 은 포탈이 적어 둔 시리얼이 같으면 확정, 로그에 디스크 빠짐 기록이 없으면 추정입니다. 찾은 기록은 포탈에 보관해, iDRAC 로그가 덮어써져도 남습니다.
         {cov?.continuousSince ? ` 끊김 없이 읽은 구간: ${fmtDate(cov.continuousSince)} 이후.` : ''}
       </div>

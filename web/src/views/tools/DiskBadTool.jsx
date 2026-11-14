@@ -18,7 +18,7 @@ import { Loading, ErrorBox, Kpi, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import { DiskBadServerPanel } from './DiskBadServerPanel.jsx';
-import { fmtDate, fmtDateTime, rateText, pctText, num, clsTone, verdictTone, confidenceTone, noteOf, clsOfCode, JOB_STATE_LABEL, jobStateTone, unitProgress, scopeLabel } from './diskBadText.js';
+import { fmtDate, fmtDateTime, rateText, pctText, num, clsTone, verdictTone, confidenceTone, noteOf, clsOfCode, JOB_STATE_LABEL, jobStateTone, unitProgress, scopeLabel, shortLogNote, spanText } from './diskBadText.js';
 
 const TABS = [
   { k: 'summary', label: '요약' }, { k: 'disks', label: '디스크 목록' }, { k: 'corps', label: '국가 · 법인' },
@@ -66,6 +66,7 @@ export function DiskBadTool() {
   if (!data) return <Loading label="디스크 배드 섹터 분석" />;
   if (!fleet) return <ErrorBox message={`디스크 배드 섹터 DB 를 열지 못했습니다 — ${data.db?.error || '포탈 로그를 확인하세요'}`} />;
   const T = fleet.totals;
+  const shortNote = shortLogNote(T);
   const refs = labels.refs;
   const openServer = (r) => setDetail({ id: r.serverId, name: r.serverName, agent: r.agent ?? '' });
 
@@ -98,6 +99,13 @@ export function DiskBadTool() {
         </div>
         {canScan && <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} onClick={() => setTab('scan')}>{running ? '점검 진행 보기' : '지금 점검'}</button>}
       </div>
+
+      {shortNote && (
+        <div style={{ border: '1px solid rgba(245,158,11,.55)', background: 'rgba(245,158,11,.09)', borderRadius: 10, padding: '8px 12px', fontSize: 12.5, lineHeight: 1.6, minWidth: 0 }}>
+          <b>{shortNote.title}</b>
+          <div>{shortNote.body}</div>
+        </div>
+      )}
 
       <div className="kpis">
         <Kpi label="기록이 있는 디스크 자리" value={num(T.recordSlots)} meta={`서버 ${num(T.serversWithRecords)}대 · 기록 ${num(T.records)}건`} />
@@ -145,6 +153,39 @@ function InUseTable({ list, refs, openServer, limit = 0 }) {
   );
 }
 
+/**
+ * iDRAC 가 **지금** 알리는 디스크 상태(v3.8.2) — Lifecycle 로그의 과거 기록과 별개의 근거다. 활성 로그가 며칠치뿐이어도 여기는 보인다.
+ * 판정 · 낱말은 서버가 준다(파트 장애 기능과 같은 코어 — 주의 · 이상). '배드 섹터가 났다' 는 뜻이 아니라고 밝힌다.
+ */
+function AlertingCard({ fleet, openServer }) {
+  const T = fleet.totals;
+  const list = fleet.alerting || [];
+  if (!Number.isFinite(T.alertingDisks)) return null;   // 3.8.2 이전 중앙 응답 — 표시하지 않는다(0 이라고 하지 않는다)
+  const unknown = Number.isFinite(T.drivesUnknownServers) && T.drivesUnknownServers > 0 ? ` · 디스크 목록을 읽지 못한 서버 ${num(T.drivesUnknownServers)}대는 빠져 있습니다` : '';
+  return (
+    <div className="card" style={{ padding: 12, minWidth: 0 }}>
+      <b style={{ fontSize: 13.5 }}>iDRAC 가 지금 이상을 알리는 디스크 <span className="muted" style={{ fontWeight: 400 }}>{num(T.alertingDisks)}개 · 서버 {num(T.alertingServers)}대</span></b>
+      <div className="muted" style={{ fontSize: 12, margin: '2px 0 6px' }}>
+        iDRAC 가 보고하는 현재 디스크 상태(주의 · 이상)와 고장 예측입니다 — 배드 섹터 기록과는 별개의 근거이고, 이것만으로 ‘배드 섹터가 났다’ 고 하지 않습니다{unknown}.
+      </div>
+      {list.length === 0 ? <div className="muted" style={{ fontSize: 12.5 }}>지금 iDRAC 가 주의 · 이상으로 알리는 디스크는 없습니다(디스크 목록을 읽은 서버 기준).</div> : (
+        <STable className="data-table" minWidth={860} limit={10} style={{ width: '100%', fontSize: 12.5 }}>
+          <thead><tr><th>국가 · 법인</th><th>서버 · 위치</th><th>모델 · 시리얼</th><th>iDRAC 상태</th><th>배드 섹터 기록</th></tr></thead>
+          <tbody>{list.map((a, i) => (
+            <tr key={`${a.agent}|${a.serverId}|${a.slotKey || a.serial || i}`}>
+              <td style={{ whiteSpace: 'normal', minWidth: 140 }}>{a.country ? `${a.country} · ` : ''}{a.corpName}</td>
+              <td data-sort={a.serverName}><button className="tab" style={{ flex: 'none', padding: '2px 8px', fontSize: 12 }} onClick={() => openServer(a)}>{a.serverName}</button><div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>{a.label || '위치 모름'}</div></td>
+              <td>{a.model || '—'}<div className="muted" style={{ fontSize: 11.5, fontFamily: 'var(--mono)' }}>S/N {a.serial || '—'}</div></td>
+              <td data-sort={a.level === 'fault' ? 2 : 1}><span className={`badge ${a.level === 'fault' ? 'red' : 'amber'}`}>{a.levelLabel}</span>{a.predictive && <span className="badge blue" style={{ marginLeft: 4 }}>고장 예측</span>}{a.raw && <div className="muted" style={{ fontSize: 11.5 }}>iDRAC 값 {a.raw}</div>}</td>
+              <td data-sort={a.hasRecords ? 1 : 0}>{a.hasRecords ? <span className="badge red">기록 있음</span> : <span className="muted">읽은 로그에 없음</span>}</td>
+            </tr>
+          ))}</tbody>
+        </STable>
+      )}
+    </div>
+  );
+}
+
 function Summary({ fleet, refs, openServer, setTab, setCorp }) {
   return (
     <>
@@ -156,6 +197,7 @@ function Summary({ fleet, refs, openServer, setTab, setCorp }) {
         <InUseTable list={fleet.inUse.slice(0, 10)} refs={refs} openServer={openServer} />
         <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>빨강(복구 불가) = PDR46 · PDR47 · PDR63 · PDR64 / 주황 = PDR54(미디어 오류를 고쳐 씀) · PDR59(불량 블록을 옮김) · PDR57(불량 블록 표가 차 감) / 파랑 = PDR16(고장 예측 — 배드 섹터 수에 넣지 않음). 근거 칸은 판단 근거의 마지막 줄입니다 — 서버를 누르면 전부 봅니다.</div>
       </div>
+      <AlertingCard fleet={fleet} openServer={openServer} />
       {/* 법인 표(최소 640px)가 1440px 화면의 반쪽 카드에서 잘리지 않게 — 두 카드가 나란히 서려면 칸마다 700px 이상(넓은 화면만). */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 700px), 1fr))', gap: 12 }}>
         <div className="card" style={{ padding: 12, minWidth: 0 }}>
@@ -299,8 +341,8 @@ function Servers({ fleet, labels, openServer }) {
     <div className="card" style={{ padding: 12, minWidth: 0 }}>
       <b style={{ fontSize: 13.5 }}>서버별 <span className="muted" style={{ fontWeight: 400 }}>{fleet.servers.length}대</span></b>
       {reasons.length > 0 && <div className="muted" style={{ fontSize: 12, margin: '4px 0' }}>못 읽은 이유: {reasons.map(([k, n]) => `${k === 'never' ? '아직 점검하지 않음' : (labels.reason[k] || k)} ${n}대`).join(' · ')}</div>}
-      <STable className="data-table" minWidth={900} limit={300} style={{ width: '100%', fontSize: 12.5, marginTop: 6 }}>
-        <thead><tr><th>국가 · 법인</th><th>서버</th><th>판정</th><th>기록 디스크</th><th>사용 중</th><th>복구 불가</th><th>마지막 점검</th></tr></thead>
+      <STable className="data-table" minWidth={1020} limit={300} style={{ width: '100%', fontSize: 12.5, marginTop: 6 }}>
+        <thead><tr><th>국가 · 법인</th><th>서버</th><th>판정</th><th>기록 디스크</th><th>사용 중</th><th>복구 불가</th><th title="iDRAC 가 보여 주는 로그가 담고 있던 기간 — 로그 전체를 읽은 마지막 점검 기준(시간이 지나도 늘지 않습니다)">iDRAC 로그 길이</th><th>마지막 점검</th></tr></thead>
         <tbody>{fleet.servers.map((s) => (
           <tr key={`${s.agent}|${s.serverId}`}>
             <td>{s.country ? `${s.country} · ` : ''}{s.corpName}</td>
@@ -309,6 +351,9 @@ function Servers({ fleet, labels, openServer }) {
             <td data-sort={s.counts.slots} style={{ fontFamily: 'var(--mono)' }}>{num(s.counts.slots)}</td>
             <td data-sort={s.counts.inUse} style={{ fontFamily: 'var(--mono)' }}><b>{num(s.counts.inUse)}</b></td>
             <td data-sort={s.counts.unrecoverable} style={{ fontFamily: 'var(--mono)' }}>{num(s.counts.unrecoverable)}</td>
+            <td data-sort={Number.isFinite(s.logSpanMs) ? s.logSpanMs : undefined} style={{ whiteSpace: 'nowrap' }}>
+              {Number.isFinite(s.logSpanMs) ? <>{spanText(0, s.logSpanMs)}<div className="muted" style={{ fontSize: 11 }}>{Number.isFinite(s.continuousSince) ? `${fmtDate(s.continuousSince)} 부터 끊김 없이 봄` : '끊김 없이 본 구간 모름'}{Number.isFinite(s.loginShare) && s.loginShare >= 0.5 ? ` · 로그인 계열 ${Math.floor(s.loginShare * 100)}%+` : ''}</div></> : <span className="muted">—</span>}
+            </td>
             <td data-sort={s.lastScanAt ?? undefined} style={{ whiteSpace: 'nowrap', fontFamily: 'var(--mono)' }}>{fmtDateTime(s.lastScanAt)}</td>
           </tr>
         ))}</tbody>
