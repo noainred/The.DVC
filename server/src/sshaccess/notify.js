@@ -18,7 +18,7 @@ export const MAIL_EVENTS = Object.freeze({
   'key-changed-outside': '키가 포탈 밖에서 바뀜', 'key-added-outside': '키가 포탈 밖에서 들어옴', 'account-changed-outside': '공통 계정이 포탈 밖에서 바뀜',
   'state-reloaded': '상태 파일 다시 읽음', 'keystore-reloaded': '키 저장소 다시 읽음(포탈 밖 변경 받아들임)',
   // 서버마다의 ‘키 거둠’ 은 메일로 보내지 않는다 — 작업 끝 요약 한 통(점검 C-4 — 고지연 법인 100대 거두기가 메일 100통으로 포탈 전체 시간당 한도를 다 썼다).
-  'key-revoke-done': '서버에서 키 거두기 끝남', 'inbox-new': '받는 곳에 새 키 파일',
+  'key-revoke-done': '서버에서 키 거두기 끝남', 'key-job-interrupted': '키 작업이 서버를 바꾸던 중에 중단됨', 'inbox-new': '받는 곳에 새 키 파일',
 });
 
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -30,13 +30,16 @@ let _send = null;   // 테스트 주입
 
 /** 사건 → 메일 한 통(순수 — 테스트 고정). 보낼 것이 없으면 null. */
 export function buildMail(events) {
-  const rows = (Array.isArray(events) ? events : []).filter((e) => e && MAIL_EVENTS[e.kind]).slice(0, MAX_LINES);
+  const all = (Array.isArray(events) ? events : []).filter((e) => e && MAIL_EVENTS[e.kind]);
+  const rows = all.slice(0, MAX_LINES);
   if (!rows.length) return null;
+  const more = all.length - rows.length;   // 넘친 사건은 말없이 버리지 않고 수를 밝힌다(1회차 C1-5)
   const line = (e) => `${MAIL_EVENTS[e.kind]}${e.corp ? ` · ${one(e.corp, 60)}` : ''}${e.target ? ` · ${one(e.target, 120)}` : ''}${e.by ? ` · ${one(e.by, 40)}` : ''}${e.detail && e.kind !== 'inbox-new' ? ` — ${one(e.detail, 160)}` : ''}`;
-  const subject = rows.length === 1 ? `[SSH 키 보안] ${line(rows[0]).slice(0, 120)}` : `[SSH 키 보안] 사건 ${rows.length}건 — ${MAIL_EVENTS[rows[0].kind]} 외`;
-  const text = `${rows.map(line).join('\n')}\n\n자세한 내용: 설정 › 보안 › SSH 공용 접속 › 키 보안`;
-  const html = `<ul>${rows.map((e) => `<li>${esc(line(e))}</li>`).join('')}</ul><p>자세한 내용: 설정 › 보안 › SSH 공용 접속 › 키 보안</p>`;
-  return { subject, text, html, count: rows.length };
+  const subject = all.length === 1 ? `[SSH 키 보안] ${line(rows[0]).slice(0, 120)}` : `[SSH 키 보안] 사건 ${all.length}건 — ${MAIL_EVENTS[rows[0].kind]} 외`;
+  const moreText = more > 0 ? `\n… 외 ${more}건은 이 메일에 싣지 않았습니다 — 화면의 키 보안 사건 기록을 보세요.` : '';
+  const text = `${rows.map(line).join('\n')}${moreText}\n\n자세한 내용: 설정 › 보안 › SSH 공용 접속 › 키 보안`;
+  const html = `<ul>${rows.map((e) => `<li>${esc(line(e))}</li>`).join('')}</ul>${more > 0 ? `<p>… 외 ${more}건은 이 메일에 싣지 않았습니다 — 화면의 키 보안 사건 기록을 보세요.</p>` : ''}<p>자세한 내용: 설정 › 보안 › SSH 공용 접속 › 키 보안</p>`;
+  return { subject, text, html, count: all.length };
 }
 
 async function flush() {

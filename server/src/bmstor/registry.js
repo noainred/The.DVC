@@ -60,6 +60,8 @@ const redact = ({ password, ...rest }) => ({ ...rest, hasPassword: Boolean(passw
 export function listBmServers() { return load().servers.map(redact); }
 /** 폴러 전용 원본(비밀 포함, 클론) — API 응답에 절대 그대로 내보내지 말 것. */
 export function listBmServersRaw() { return structuredClone(load().servers); }
+/** 항목 하나만(원본 사본) — 작업이 서버마다 등록부 전체를 복제하지 않게(1회차 C1-1). 없으면 null. */
+export function bmServerRawById(id) { const s = load().servers.find((x) => x.id === String(id || '')); return s ? structuredClone(s) : null; }
 
 export function getBmSettings() {
   const s = load().settings || {};
@@ -282,11 +284,13 @@ export function setBmServerKeyRef(id, keyRef, { expectAddr = null } = {}) {
  * 되돌리기 — setBmServerKeyRef 가 돌려준 previous 그대로(키 · 비밀번호 고정 · 주소만 표지).
  * ⚠ 그 사이 접속처가 바뀌었으면(다른 관리자가 주소를 고침 — 등록부가 참조를 이미 버렸다) **되돌리지 않는다** — 옛 키를 새 주소에 다시 묶는 길이 된다(점검 A-1 · C-4).
  */
-export function restoreBmServerKeyRef(id, previous = {}) {
+export function restoreBmServerKeyRef(id, previous = {}, { expectKeyRef } = {}) {
   const data = load();
   if (loadErr.get()) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'OS 계정 등록부를 읽지 못해 되돌리지 못했습니다.' };
   const s = data.servers.find((x) => x.id === String(id || ''));
   if (!s) return { ok: false, code: 'not-found', status: 404, reason: '서버가 그 사이 지워졌습니다.' };
+  // 되돌리는 쪽이 넣은 값이 아직 그대로일 때만(1회차 C1-2 — 그 사이 다른 쓰기(키 로그인 설정 · 다른 사람의 키 고르기 · 회전)가 바꾼 값을 옛 값으로 덮어 인증 수단을 잃었다).
+  if (expectKeyRef !== undefined && String(s.keyRef || '') !== String(expectKeyRef || '')) return { ok: false, code: 'changed', status: 409, reason: '그 사이 다른 쪽이 이 서버의 키 설정을 바꿔 되돌리지 않았습니다 — 서버 설정을 확인하세요.' };
   if (addrKey(s.host, s.port, s.username) !== String(previous.addr || '')) return { ok: false, code: 'moved', status: 409, reason: '그 사이 서버 주소 · 포트 · 계정이 바뀌어 되돌리지 않았습니다(옛 키를 새 주소에 묶지 않음) — 서버 설정을 확인하세요.' };
   const had = { keyRef: s.keyRef, osAuth: s.osAuth, addrOnly: s.addrOnly };
   if (previous.keyRef) s.keyRef = previous.keyRef; else delete s.keyRef;

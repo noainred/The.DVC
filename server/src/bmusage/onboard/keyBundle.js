@@ -42,6 +42,7 @@ export function mergeRedactedKeyStore(bundleText, currentText) {
   const curAccs = cur.accounts.filter((a) => a && typeof a === 'object');
   const curKeyByFp = new Map(curKeys.map((k) => [String(k.fingerprint || ''), k]));
   const curAccById = new Map(curAccs.map((a) => [String(a.id || ''), a]));
+  const curById = new Map(curKeys.map((k) => [String(k.id || ''), k]));
   let restored = 0; const dropped = []; const kept = [];
   const keys = [];
   for (const k of (Array.isArray(b?.keys) ? b.keys : [])) {
@@ -57,8 +58,11 @@ export function mergeRedactedKeyStore(bundleText, currentText) {
     if (!cur0 || typeof cur0.privateKey !== 'string' || !cur0.privateKey) { dropped.push(`key:${String(o.name || o.id || '').slice(0, 64)}`); continue; }
     o.privateKey = cur0.privateKey; o.passphrase = typeof cur0.passphrase === 'string' ? cur0.passphrase : '';
     // v3.10.0(점검 A3): 공개키 · 알고리즘 칸도 지금 파일의 것 — 같은 지문에 남의 공개키를 실은 번들이 ‘공개키 복사’ · authorized_keys 줄에 남의 키를 싣지 못하게.
-    // 반증 R7: **키 id 도** 지금 것 — 번들에서 두 키의 id 를 맞바꾸면 keyRef 로 묶인 서버가 다른 키를 쓰게 됐다(복원은 OTP 를 묻지 않는다).
-    for (const f of ['id', 'publicKey', 'algo', 'sshType', 'bits']) { if (cur0[f] === undefined) delete o[f]; else o[f] = cur0[f]; }
+    // 공개키 · 알고리즘 · 이름은 지금 것(점검 A3 · 1회차 A6 — 이름은 CSV os_key 가 고르는 열쇠라 복원(OTP 없음)이 그 뜻을 바꿨다).
+    for (const f of ['publicKey', 'algo', 'sshType', 'bits', 'name']) { if (cur0[f] === undefined) delete o[f]; else o[f] = cur0[f]; }
+    // 키 id: 번들의 id 가 **지금 다른 지문의 키** 것이면 지금 이 지문의 id 를 쓴다(반증 R7 — 두 키의 id 를 맞바꾸면 keyRef 로 묶인 서버가 다른 키를 썼다).
+    //   그 밖에는 번들 id 그대로 — 같은 키를 새 id 로 다시 등록한 설치에 옛 백업을 복원해도 번들 안의 참조(공통 계정 · 서버)가 이어진다(1회차 D2 — 항상 지금 id 로 바꾸자 참조가 조용히 끊겼다).
+    { const owner = curById.get(String(o.id || '')); if (owner && String(owner.fingerprint || '') !== String(o.fingerprint || '')) o.id = cur0.id; }
     restored += 1;
     keys.push(o);
   }
@@ -78,14 +82,13 @@ export function mergeRedactedKeyStore(bundleText, currentText) {
     const o = { ...a };
     // v3.10.0(점검 A4): 비밀번호는 가렸든(정상 번들) 아니든(손으로 만든 번들) **번들에서 받지 않는다** — 같은 계정(종류 · 법인 · 계정명)의 지금 값만 쓴다.
     //   복원 라우트는 OTP 를 묻지 않으므로 번들의 평문 비밀번호로 공통 계정의 비밀을 바꿀 수 있었다.
-    // 반증 R7: 지금 있는 공통 계정(같은 id)은 **묶음 칸**(종류 · 법인 · 계정명 · 기본 키)을 지금 값으로 — 복원(OTP 없음)이 키 묶음을 바꾸지 못하게.
-    { const c0 = curAccById.get(String(o.id || '')); if (c0) for (const f of ['kind', 'corp', 'username', 'keyRef']) { if (c0[f] === undefined) delete o[f]; else o[f] = c0[f]; } }
     if ((typeof o.password === 'string' && o.password) || o.password === REDACTED_SECRET) {
       const c = curAccById.get(String(o.id || ''));
       const same = c && String(c.kind || '') === String(o.kind || '') && lc(c.corp) === lc(o.corp) && lc(c.username) === lc(o.username);
       if (same && typeof c.password === 'string' && c.password) { o.password = c.password; restored += 1; } else { o.password = ''; dropped.push(`account:${String(o.name || o.id || '').slice(0, 64)}`); }
     }
-    if (o.keyRef && !keys.some((k) => k.id === o.keyRef)) o.keyRef = '';
+    // 번들의 기본 키가 합친 키에 없으면 떼고 그 사실을 밝힌다(1회차 D2 — 조용히 비웠다).
+    if (o.keyRef && !keys.some((k) => k.id === o.keyRef)) { dropped.push(`account-key:${String(o.name || o.id || '').slice(0, 64)}`); o.keyRef = ''; }
     accounts.push(o);
   }
   const accIds = new Set(accounts.map((a) => String(a.id || '')));

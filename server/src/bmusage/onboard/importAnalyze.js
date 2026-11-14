@@ -345,7 +345,9 @@ export function analyzeOnboardRows(rows = [], ctx = {}) {
     // 반증 F3: keepCred 는 os_cred 와 os_key 가 **둘 다** 비었을 때만 — os_key 만 바꾼 행은 키 · 인증 방식을 실제로 바꾸고 공통 계정만 잇는다.
     // v3.10.0(점검 D-3): ‘개별:계정’ 행은 계정 이름만 정한다 — 그 서버가 **같은 계정으로 이미 키를 쓰고 있으면**(엣지에서 키 로그인 설정 · 키 고르기) 키를 떼지 않는다.
     //   예전에는 중앙이 같은 행의 메모 · 마운트만 고쳐 다시 배포해도 키가 비었다 — 키 로그인 설정이 저장 비밀번호를 지운 서버는 인증 수단 없이 남았다.
-    const keepKey = !osKey && !!osUser && !!exOs && lc(exOs.username) === lc(osUser) && !!t(exOs.keyRef) && exOs.osAuth !== 'password';
+    // 같은 접속처(주소 · 포트 · 계정)일 때만 — 주소를 옮긴 행에 키를 이어 붙이면 ‘주소 이동 + 키’ 묶음이 됐다(1회차 D1 · server/CLAUDE.md ‘주소가 바뀌면 keyRef 승계 없음’).
+    const sameAddr = !!exOs && addrKey(exOs.host, exOs.port, exOs.username) === addrKey(osHost, osPort, osUser);   // 등록부 · 묶음 판정과 같은 접속처 글자(bindRule.addrKey)
+    const keepKey = !osKey && !!osUser && sameAddr && !!t(exOs.keyRef) && exOs.osAuth !== 'password';
     const osPlan = osHost ? { id: exOs ? exOs.id : '', host: osHost, port: osPort, username: osBody.username, credRef: osAcc ? osAcc.id : (osCred ? '' : (exOs?.credRef || '')),
       keyRef: osKey ? keyRef : keepKey ? t(exOs.keyRef) : (osCred ? '' : (exOs?.keyRef || '')), osAuth: osKey ? osAuth : keepKey ? (exOs.osAuth || '') : (osCred ? '' : (exOs?.osAuth || '')),
       keepCred: !osCred && !osKey && !!exOs, mounts: osBody.mounts, existing: !!exOs } : null;

@@ -11,6 +11,8 @@
  */
 import { requireRole } from '../../auth/auth.js';
 import { requireSettingsOwner } from '../admin/shared.js';
+import { isFullReadWriteScope } from '../../auth/scope.js';
+import { store } from '../../store.js';
 import { reauth } from './reauth.js';
 import { logAudit, listAuditByActionPrefix } from '../../audit.js';
 import * as SVC from '../../sshaccess/service.js';
@@ -19,11 +21,22 @@ import * as ST from '../../sshaccess/state.js';   // 사건 목록 조회만(쓰
 const adminOnly = requireRole('admin');
 /** 조회 게이트 — 관리자 → 설정 소유자 등급. */
 const ownerRead = [adminOnly, requireSettingsOwner];
-/** 쓰기 게이트 — 순서가 뜻이다(관리자 → 소유자 등급 → OTP 마지막). */
-const ownerWrite = [adminOnly, requireSettingsOwner, reauth];
+/**
+ * 쓰기는 조회 · 쓰기 범위가 **모두** 무제한인 계정만(1회차 A3 — 소유자 등급은 조회 범위만 봐서 writeVcenters 로 좁힌 소유자가 전 법인 서버의 키를 넣고 거두었다).
+ * server/CLAUDE.md v2.904: ‘전체 범위’ 판정은 isFullReadWriteScope 하나.
+ */
+const fullRW = (req, res, next) => (isFullReadWriteScope(req.user, store.get()) ? next()
+  : send(res, { ok: false, code: 'write-scope', status: 403, reason: 'SSH 공용 접속을 바꾸려면 조회 · 쓰기 범위가 모두 무제한인 설정 소유자여야 합니다.' }));
+/** 쓰기 게이트 — 순서가 뜻이다(관리자 → 소유자 등급 → 쓰기 범위 → OTP 마지막). */
+const ownerWrite = [adminOnly, requireSettingsOwner, fullRW, reauth];
 /** 키를 새로 받는 쓰기 — 저장 방식 검사 → OTP. */
 const vaultFirst = (_req, res, next) => { const v = SVC.keyVaultIssue(); if (v) return send(res, v); return next(); };
-const keyAddWrite = [adminOnly, requireSettingsOwner, vaultFirst, reauth];
+/**
+ * OTP 앞 사전 검사(1회차 A5 — 승인할 사람 없음 · 같은 요청 대기 · 기록 손상 · 중지 아님 · 키 상태 · 데모를 OTP 를 쓴 뒤에 거절해 1회용 코드를 버렸다).
+ * fn(req) 이 거절 객체를 주면 그것을 보내고, null 이면 다음으로. 판정은 본 함수가 다시 한다.
+ */
+const pre = (fn) => (req, res, next) => { Promise.resolve().then(() => fn(req)).then((p) => (p ? send(res, p) : next()), next); };
+const write = (fn) => [adminOnly, requireSettingsOwner, fullRW, pre(fn), reauth];
 
 const t = (v, max = 256) => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max).trim();
 const bodyOf = (req) => (req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {});
@@ -56,14 +69,14 @@ export function registerSshAccess(api) {
     audit(req, 'ssh-access.state.reload', 'ssh-access-state.json', { ok: !!r.ok, code: r.code });
     send(res, r);
   });
-  api.post('/settings/ssh-access/reload-keystore', ...ownerWrite, async (req, res) => {
+  api.post('/settings/ssh-access/reload-keystore', ...write((req) => SVC.prechecks.reloadKeyStore({ by: who(req) })), async (req, res) => {
     const r = await SVC.reloadKeyStore({ by: who(req) });
     audit(req, 'ssh-access.keystore.reload', 'ssh-keys.json', { ok: !!r.ok, code: r.code, keys: r.keys, pending: r.pending ? r.request.id : undefined });
     send(res, r, r.pending ? 202 : 200);
   });
 
   /* ── 키 ─────────────────────────────────────────────────────────── */
-  api.post('/settings/ssh-access/keys', ...keyAddWrite, async (req, res) => {
+  api.post('/settings/ssh-access/keys', adminOnly, requireSettingsOwner, fullRW, vaultFirst, pre((req) => SVC.prechecks.addKey({ by: who(req) })), reauth, async (req, res) => {
     const b = bodyOf(req);
     const r = await SVC.addKeyInFolder({ name: b.name, privateKey: typeof b.privateKey === 'string' ? b.privateKey : '', passphrase: typeof b.passphrase === 'string' ? b.passphrase : '',
       rotateAt: b.rotateAt, folderCorp: b.folderCorp, folderServer: b.folderServer, features: featuresOf(b.features) }, { by: who(req) });
@@ -80,13 +93,13 @@ export function registerSshAccess(api) {
   });
 
   // 교체(회전) · 삭제 — 두 사람 승인이 켜져 있으면 요청만 만든다(202 · 다른 설정 소유자가 승인하면 실행).
-  api.post('/settings/ssh-access/keys/rotate', ...ownerWrite, async (req, res) => {
+  api.post('/settings/ssh-access/keys/rotate', ...write((req) => SVC.prechecks.rotate({ from: bodyOf(req).from, to: bodyOf(req).to, by: who(req) })), async (req, res) => {
     const b = bodyOf(req);
     const r = await SVC.rotateKeyReq({ from: t(b.from, 32), to: t(b.to, 32), by: who(req) });
     audit(req, 'ssh-access.key.rotate', `${t(b.from, 32)}>${t(b.to, 32)}`, { ok: !!r.ok, code: r.code, pending: r.pending ? r.request.id : undefined, servers: r.servers?.length, accounts: r.accounts });
     send(res, r, r.pending ? 202 : 200);
   });
-  api.delete('/settings/ssh-access/keys/:id', ...ownerWrite, async (req, res) => {
+  api.delete('/settings/ssh-access/keys/:id', ...write((req) => SVC.prechecks.deleteKey({ keyId: req.params.id, by: who(req) })), async (req, res) => {
     const r = await SVC.deleteKeyReq({ keyId: t(req.params.id, 32), by: who(req) });
     audit(req, 'ssh-access.key.delete', req.params.id, { ok: !!r.ok, code: r.code, pending: r.pending ? r.request.id : undefined });
     send(res, r, r.pending ? 202 : 200);
@@ -95,19 +108,20 @@ export function registerSshAccess(api) {
   /* ── 두 사람 승인 · 보호 장치(v3.10.0) ─────────────────────────────── */
   // 사전 검사는 OTP 앞(자기 승인 · 지문 불일치 · 처리됨 · 기록 손상이 1회 비밀번호를 쓰지 않게 — 점검 A10).
   const approvePre = (approve) => (req, res, next) => { const b = bodyOf(req); const p = SVC.approvalPrecheck(t(req.params.id, 20), { approve, by: who(req), digest: t(b.digest, 64) }); return p ? send(res, p) : next(); };
-  api.post('/settings/ssh-access/approvals/:id/approve', adminOnly, requireSettingsOwner, approvePre(true), reauth, async (req, res) => {
+  api.post('/settings/ssh-access/approvals/:id/approve', adminOnly, requireSettingsOwner, fullRW, approvePre(true), reauth, async (req, res) => {
     const b = bodyOf(req);
     const r = await SVC.decideApproval(t(req.params.id, 20), { approve: true, by: who(req), digest: t(b.digest, 64), note: t(b.note, 300) });
     audit(req, 'ssh-access.approval.approve', req.params.id, { ok: !!r.ok, code: r.code, kind: r.request?.kind, target: t(r.request?.title, 120), requestedBy: r.request?.requestedBy });
     send(res, r);
   });
-  api.post('/settings/ssh-access/approvals/:id/reject', adminOnly, requireSettingsOwner, approvePre(false), reauth, async (req, res) => {
+  api.post('/settings/ssh-access/approvals/:id/reject', adminOnly, requireSettingsOwner, fullRW, approvePre(false), reauth, async (req, res) => {
     const b = bodyOf(req);
     const r = await SVC.decideApproval(t(req.params.id, 20), { approve: false, by: who(req), note: t(b.note, 300) });
     audit(req, 'ssh-access.approval.reject', req.params.id, { ok: !!r.ok, code: r.code, kind: r.request?.kind, target: t(r.request?.title, 120), status: r.request?.status });
     send(res, r);
   });
-  api.put('/settings/ssh-access/guards', ...ownerWrite, async (req, res) => {
+  const guardPatch = (req) => { const b = bodyOf(req); const patch = {}; for (const k of ['twoPerson', 'serverRestrict']) if (typeof b[k] === 'boolean') patch[k] = b[k]; return patch; };
+  api.put('/settings/ssh-access/guards', ...write((req) => SVC.prechecks.guards({ patch: guardPatch(req), by: who(req) })), async (req, res) => {
     const b = bodyOf(req);
     const patch = {};
     for (const k of ['twoPerson', 'serverRestrict']) if (typeof b[k] === 'boolean') patch[k] = b[k];
@@ -118,15 +132,15 @@ export function registerSshAccess(api) {
 
   /* ── 키 로그인 설정 · 키 거두기(v3.10.0 — 서버의 authorized_keys 를 바꾸는 동작) ──── */
   const serverList = (v) => (Array.isArray(v) ? v.slice(0, 1000).map((x) => ({ id: t(x?.id, 64), addr: typeof x?.addr === 'string' ? x.addr.slice(0, 400) : '' })) : null);
-  const jobPre = (kind) => (req, res, next) => { const p = SVC.keyJobPrecheck(kind, t(bodyOf(req).keyId, 32)); return p ? send(res, p) : next(); };
-  api.post('/settings/ssh-access/key-login', adminOnly, requireSettingsOwner, jobPre('key-login'), reauth, async (req, res) => {
+  const jobPre = (kind) => pre((req) => SVC.keyJobPrecheck(kind, t(bodyOf(req).keyId, 32)));
+  api.post('/settings/ssh-access/key-login', adminOnly, requireSettingsOwner, fullRW, jobPre('key-login'), reauth, async (req, res) => {
     const b = bodyOf(req);
     const once = typeof b.oncePassword === 'string' ? b.oncePassword : '';
     const r = await SVC.startKeyLogin({ servers: serverList(b.servers) || [], keyId: t(b.keyId, 32), oncePassword: once, removePassword: b.removePassword === true, replaceKeyId: t(b.replaceKeyId, 32), by: who(req) });
     audit(req, 'ssh-access.key-login.start', t(b.keyId, 32), { ok: !!r.ok, code: r.code, jobId: r.jobId, servers: r.total, oncePassword: !!once, removePassword: b.removePassword === true, replace: t(b.replaceKeyId, 32) || undefined });
     send(res, r, 202);
   });
-  api.post('/settings/ssh-access/key-revoke', adminOnly, requireSettingsOwner, jobPre('key-revoke'), reauth, async (req, res) => {
+  api.post('/settings/ssh-access/key-revoke', adminOnly, requireSettingsOwner, fullRW, jobPre('key-revoke'), reauth, async (req, res) => {
     const b = bodyOf(req);
     const once = typeof b.oncePassword === 'string' ? b.oncePassword : '';
     const r = await SVC.startKeyRevoke({ keyId: t(b.keyId, 32), corp: t(b.corp, 128), servers: serverList(b.servers), oncePassword: once, by: who(req) });
@@ -139,8 +153,9 @@ export function registerSshAccess(api) {
   });
   // 멈추기 — 키 로그인 설정을 멈추는 것은 줄이는 방향(남은 서버에 키를 넣지 않는다)이라 OTP 없이 소유자 등급만.
   //   **키 거두기를 멈추는 것은 OTP**(유출 키가 남은 서버에 그대로 남는다 — 줄이는 방향이 아니다 · 반증 D1). 지금 서버는 끝까지(되돌림을 끊지 않는다).
-  const cancelGate = (req, res, next) => (SVC.keyJobKind(t(req.params.id, 20)) === 'key-revoke' ? reauth(req, res, next) : next());
-  api.post('/settings/ssh-access/jobs/:id/cancel', ...ownerRead, cancelGate, (req, res) => {
+  //   옛 키 교체가 붙은 넣기 작업도 OTP(남은 서버에 옛 키가 남는다 — 1회차 A4).
+  const cancelGate = (req, res, next) => (SVC.keyJobCancelNeedsOtp(t(req.params.id, 20)) ? reauth(req, res, next) : next());
+  api.post('/settings/ssh-access/jobs/:id/cancel', ...ownerRead, fullRW, cancelGate, (req, res) => {
     const r = SVC.cancelKeyJob(t(req.params.id, 20), { by: who(req) });
     audit(req, 'ssh-access.key-job.cancel', req.params.id, { ok: !!r.ok, code: r.code });
     send(res, r);
@@ -179,14 +194,14 @@ export function registerSshAccess(api) {
     audit(req, 'ssh-access.corp.stop', req.params.corp, { ok: !!r.ok, code: r.code, reason: t(b.reason, 120), servers: r.servers });
     send(res, r);
   });
-  api.delete('/settings/ssh-access/corps/:corp/stop', ...ownerWrite, async (req, res) => {
+  api.delete('/settings/ssh-access/corps/:corp/stop', ...write((req) => SVC.prechecks.resume({ corp: req.params.corp, by: who(req) })), async (req, res) => {
     const r = await SVC.resumeCorp(t(req.params.corp, 128), { by: who(req) });
     audit(req, 'ssh-access.corp.resume', req.params.corp, { ok: !!r.ok, code: r.code, pending: r.pending ? r.request.id : undefined });
     send(res, r, r.pending ? 202 : 200);
   });
 
   /* ── 받는 곳(폴더에 직접 넣은 키) ───────────────────────────────── */
-  api.post('/settings/ssh-access/inbox/approve', ...keyAddWrite, async (req, res) => {
+  api.post('/settings/ssh-access/inbox/approve', adminOnly, requireSettingsOwner, fullRW, vaultFirst, pre((req) => SVC.prechecks.addKey({ by: who(req) })), reauth, async (req, res) => {
     const b = bodyOf(req);
     const r = await SVC.approveInbox({ relPath: typeof b.relPath === 'string' ? b.relPath.slice(0, 400) : '', fingerprint: t(b.fingerprint, 80), sha: t(b.sha, 80), name: t(b.name, 80), passphrase: typeof b.passphrase === 'string' ? b.passphrase : '',
       features: featuresOf(b.features), by: who(req) });

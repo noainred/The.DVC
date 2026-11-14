@@ -57,23 +57,46 @@ export function wrapSh(script) {
 const HEAD = [
   'LC_ALL=C; export LC_ALL',
   'umask 077',
+  // 시작 표지(1회차 B5): 바꾸는 스크립트가 **돌기 시작했다**는 것. 끝 표지 없이 이것만 오면(안쪽 셸만 신호로 죽음 · 표지 잘림) ‘결과 모름’ 이다 — ‘바꾼 것 없음’ 이 아니다.
+  'echo "##KL begin"',
   '[ -n "$HOME" ] || { echo "##KL fail nohome"; exit 3; }',
   'd="$HOME/.ssh"; f="$d/authorized_keys"; tmp="$d/.authorized_keys.portal.$$"; lk="$d/.authorized_keys.portal.lock"; held=""',
-  // 끝날 때(신호로 끊겨도) 임시 파일 · 자물쇠를 치운다(반증 R11 — 0 만 걸면 신호에 남았다).
-  'cleanup() { rm -f "$tmp"; if [ -n "$held" ]; then rmdir "$lk" 2>/dev/null; fi; }',
+  // 자물쇠 주인 표(1회차 B1): 호스트:pid:시각. 끝 정리 · mv 직전에 **아직 내 자물쇠인지** 본다(남은 자물쇠로 잘못 치워진 뒤 깨어난 쪽이 덮어쓰지 않게).
+  'me=$(uname -n 2>/dev/null); tok="$me:$$:$(date +%s 2>/dev/null)"',
+  'owns() { [ "$(cat "$lk/owner" 2>/dev/null)" = "$tok" ]; }',
+  'cleanup() { rm -f "$tmp"; if [ -n "$held" ] && owns; then rm -f "$lk/owner"; rmdir "$lk" 2>/dev/null; fi; }',
   'trap cleanup 0; trap \'exit 3\' HUP INT TERM PIPE',
 ];
 /**
- * 서버 쪽 자물쇠(반증 R1 — 넣기 · 거두기가 동시에 같은 파일을 바꾸면 한쪽 갱신이 사라졌다): mkdir 은 원자적이다. 15초 기다려도 못 잡으면 실패,
- * 2분 넘은 자물쇠는 남은 것으로 보고 치운다(포탈이 끊긴 경우). 읽기(분류)부터 mv 까지 잡는다. 사람 · 다른 도구는 이 자물쇠를 모른다 — 그래서 mv 뒤에 다시 본다(post).
+ * 서버 쪽 자물쇠(반증 R1 — 넣기 · 거두기가 동시에 같은 파일을 바꾸면 한쪽 갱신이 사라졌다): mkdir 은 원자적이다. 15초 기다려도 못 잡으면 `locked`.
+ * 남은 자물쇠 치우기(1회차 B1 · B4 — 예전에는 `find -mmin +2` 하나로 주인 확인 없이 치웠다):
+ *   · 주인 표의 호스트가 이 서버이고 그 pid 가 없으면 바로 · 주인 표의 시각이 10분 넘게 지났으면(다른 호스트 — NFS 홈) · 주인 표가 5초 넘게 없으면(만들다 죽음).
+ *   · 치울 때는 옆 이름으로 옮긴 뒤 표가 판단한 그것인지 다시 보고, 아니면 되돌린다. 진짜 안전장치는 mv 직전의 `owns`(아니면 `locklost` — 바꾸지 않는다).
+ * mkdir 이 실패했는데 자물쇠 폴더가 없으면 경합이 아니다(쓸 수 없는 ~/.ssh · 읽기 전용) — 기다리지 않고 `notwritable`(1회차 B3).
+ * 읽기(분류)부터 mv 까지 잡는다. 사람 · 다른 도구는 이 자물쇠를 모른다 — 그래서 mv 직전에 원본을 다시 대조하고 mv 뒤에 다시 본다(post).
  */
 const LOCK = [
   'i=0',
-  'until mkdir "$lk" 2>/dev/null; do',
+  'while :; do',
+  '  if mkdir "$lk" 2>/dev/null; then',
+  '    printf \'%s\\n\' "$tok" > "$lk/owner" || { rmdir "$lk" 2>/dev/null; echo "##KL fail notwritable"; exit 3; }',
+  '    held=1; break',
+  '  fi',
+  '  [ -d "$lk" ] || { echo "##KL fail notwritable"; exit 3; }',
   '  i=$((i + 1)); [ "$i" -ge 15 ] && { echo "##KL fail locked"; exit 3; }',
-  '  if command -v find >/dev/null 2>&1 && [ -n "$(find "$lk" -prune -mmin +2 2>/dev/null)" ]; then rmdir "$lk" 2>/dev/null; else sleep 1; fi',
+  '  o=$(cat "$lk/owner" 2>/dev/null); stale=""',
+  '  if [ -n "$o" ]; then',
+  '    oh=${o%%:*}; r=${o#*:}; op=${r%%:*}; ot=${r#*:}; now=$(date +%s 2>/dev/null || echo 0)',
+  '    if [ -n "$me" ] && [ "$oh" = "$me" ] && ! kill -0 "$op" 2>/dev/null; then stale=1; fi',
+  '    case "$ot" in ""|*[!0-9]*) ;; *) if [ "$now" -gt $((ot + 600)) ]; then stale=1; fi ;; esac',
+  '  elif [ "$i" -ge 5 ]; then stale=1',
+  '  fi',
+  '  if [ -n "$stale" ] && mv "$lk" "$lk.stale.$$" 2>/dev/null; then',
+  '    if [ "$(cat "$lk.stale.$$/owner" 2>/dev/null)" = "$o" ]; then rm -rf "$lk.stale.$$"; else mv "$lk.stale.$$" "$lk" 2>/dev/null || rm -rf "$lk.stale.$$"; fi',
+  '    continue',
+  '  fi',
+  '  sleep 1',
   'done',
-  'held=1',
 ];
 /** 줄 다듬기(앞 공백 · 끝 CR) — awk 안에서 같은 식을 쓴다. 이 글은 셸의 작은따옴표 안에만 들어간다(작은따옴표가 없다). */
 const STRIP = '{ s = $0; sub(/\\r$/, "", s); t = s; sub(/^[ \\t]+/, "", t) }';
@@ -98,7 +121,10 @@ const CHECKS = (needDir) => [
 const COMMIT = [
   'if [ -e "$f" ]; then',
   '  [ -w "$f" ] || { echo "##KL fail notwritable"; exit 3; }',
-  '  if command -v find >/dev/null 2>&1 && [ -z "$(find "$f" -prune -perm -0200 2>/dev/null)" ]; then echo "##KL fail notwritable"; exit 3; fi',
+  // 소유자 쓰기 비트는 ls 로 본다(1회차 B4 — find 가 없는 서버에서 root 의 444 보호가 조용히 빠졌다). `-r--…` 의 셋째 글자가 '-' 면 잠긴 파일.
+  '  case "$(ls -ld -- "$f" 2>/dev/null)" in ??-*) echo "##KL fail notwritable"; exit 3 ;; esac',
+  '  c0=$(cksum < "$f") || { echo "##KL fail read"; exit 3; }',
+  'else c0=""',
   'fi',
   '[ -w "$d" ] || { echo "##KL fail notwritable"; exit 3; }',
   'rm -f "$tmp"',
@@ -110,6 +136,9 @@ const COMMIT = [
   '[ "$c1" = "$c2" ] || { echo "##KL fail verify"; exit 3; }',
   'if [ "$tailn" -gt 0 ]; then c3=$(extra | cksum); c4=$(tail -n "$tailn" "$tmp" | cksum); [ "$c3" = "$c4" ] || { echo "##KL fail verify"; exit 3; }; fi',
   'chmod 600 "$tmp" || { echo "##KL fail write"; exit 3; }',
+  // mv 직전: 아직 내 자물쇠인가(B1) · 그 사이 원본이 바뀌지 않았나(B10 — 자물쇠를 모르는 쪽의 쓰기. 남는 틈은 이 줄과 mv 사이뿐).
+  'owns || { echo "##KL fail locklost"; exit 3; }',
+  'if [ -e "$f" ]; then [ "$(cksum < "$f")" = "$c0" ] || { echo "##KL fail changed"; exit 3; }; else [ -z "$c0" ] || { echo "##KL fail changed"; exit 3; }; fi',
   'mv -f "$tmp" "$f" || { echo "##KL fail rename"; exit 3; }',
   'if command -v restorecon >/dev/null 2>&1; then if [ -n "${mkd:-}" ]; then restorecon -F "$d" >/dev/null 2>&1; fi; restorecon -F "$f" >/dev/null 2>&1; fi',
   'post || { echo "##KL fail raced"; exit 3; }',
@@ -131,15 +160,20 @@ export function installScript({ publicKey, keyId, line, replace = false } = {}) 
     ...HEAD,
     `B='${pk.blob}'; M='${mark}'; L='${line}'; TY='${pk.type}'; RP='${replace ? 1 : 0}'`,
     ...CHECKS(true),
+    'cls() {',
+    '  st="0 0 0 0 0 0"',
+    `  if [ -e "$f" ]; then st=$(awk -v b="$B" -v m="$M" -v L="$L" -v ty="$TY" '${CLS}' "$f") || { echo "##KL fail read"; exit 3; }; fi`,
+    '  set -- $st; nr=$1; ex=$2; un=$3; sd=$4; cu=$5; um=$6',
+    '  act=add',
+    '  if [ $((ex + un + sd + cu)) -gt 0 ]; then',
+    '    if [ "$cu" -eq 0 ] && [ "$RP" = 1 ] && [ $((un + sd)) -gt 0 ]; then act=replace; else echo "##KL present-marked $um $cu $ex $((un + sd))"; exit 0; fi',
+    '  elif [ "$um" -gt 0 ]; then echo "##KL present-unmarked $um 0"; exit 0',
+    '  fi',
+    '}',
+    // 바꿀 것이 없으면(이미 있음) 자물쇠 없이 끝난다 — 쓸 수 없는 ~/.ssh(root 소유)에서도 ‘있음’ 으로 답한다(1회차 축 B 재확인). 바꿀 것이 있으면 자물쇠 안에서 다시 판정한다.
+    'cls',
     ...LOCK,
-    'st="0 0 0 0 0 0"',
-    `if [ -e "$f" ]; then st=$(awk -v b="$B" -v m="$M" -v L="$L" -v ty="$TY" '${CLS}' "$f") || { echo "##KL fail read"; exit 3; }; fi`,
-    'set -- $st; nr=$1; ex=$2; un=$3; sd=$4; cu=$5; um=$6',
-    'act=add',
-    'if [ $((ex + un + sd + cu)) -gt 0 ]; then',
-    '  if [ "$cu" -eq 0 ] && [ "$RP" = 1 ] && [ $((un + sd)) -gt 0 ]; then act=replace; else echo "##KL present-marked $um $cu $ex $((un + sd))"; exit 0; fi',
-    'elif [ "$um" -gt 0 ]; then echo "##KL present-unmarked $um 0"; exit 0',
-    'fi',
+    'cls',
     'old=""',
     'if [ "$act" = replace ]; then',
     '  command -v base64 >/dev/null 2>&1 || { echo "##KL fail nobase64"; exit 3; }',
@@ -175,8 +209,9 @@ export function rollbackScript({ line, oldB64 = '' } = {}) {
     ...HEAD,
     `L='${line}'; OLD='${oldB64}'`,
     ...CHECKS(false),
-    'if [ ! -e "$f" ]; then echo "##KL none"; exit 0; fi',
+    'if [ ! -d "$d" ]; then echo "##KL none"; exit 0; fi',
     ...LOCK,
+    'if [ ! -e "$f" ]; then echo "##KL none"; exit 0; fi',   // 파일 유무도 자물쇠 안에서(1회차 B2)
     `st=$(awk -v L="$L" '${CNT}' "$f") || { echo "##KL fail read"; exit 3; }`,
     'set -- $st; nr=$1; n=$2',
     'if [ "$n" -eq 0 ]; then echo "##KL restored 0"; exit 0; fi',
@@ -184,7 +219,9 @@ export function rollbackScript({ line, oldB64 = '' } = {}) {
     'if [ -n "$OLD" ]; then command -v base64 >/dev/null 2>&1 || { echo "##KL fail nobase64"; exit 3; }; on=$(printf \'%s\' "$OLD" | base64 -d | awk \'END { print NR }\') || { echo "##KL fail read"; exit 3; }; fi',
     `keep() { awk -v L="$L" '${DROPL}' "$f"; }`,
     'if [ "$on" -gt 0 ]; then extra() { printf \'%s\' "$OLD" | base64 -d; }; else extra() { :; }; fi',
-    `post() { n2=$(awk -v L="$L" '${STRIP} t == L { c++ } END { print c + 0 }' "$f") && [ "$n2" -eq 0 ]; }`,
+    // 되살린 옛 줄 안에 원하는 줄과 같은 줄이 있을 수 있다 — 기대값은 ‘옛 줄 안의 L 수’(1회차 B8 — 0 을 기대해 제대로 되돌리고도 raced 라고 했다).
+    `ol=0; if [ "$on" -gt 0 ]; then ol=$(printf '%s' "$OLD" | base64 -d | awk -v L="$L" '${STRIP} t == L { c++ } END { print c + 0 }'); fi`,
+    `post() { n2=$(awk -v L="$L" '${STRIP} t == L { c++ } END { print c + 0 }' "$f") && [ "$n2" -eq "$ol" ]; }`,
     'exp=$((nr - n + on)); tailn=$on',
     ...COMMIT,
     'echo "##KL restored $n"',
@@ -206,8 +243,9 @@ export function removeScript({ publicKey, keyId } = {}) {
     ...HEAD,
     `B='${pk.blob}'; M='${anyMark}'`,
     ...CHECKS(false),
-    'if [ ! -e "$f" ]; then echo "##KL none"; exit 0; fi',
+    'if [ ! -d "$d" ]; then echo "##KL none"; exit 0; fi',
     ...LOCK,
+    'if [ ! -e "$f" ]; then echo "##KL none"; exit 0; fi',   // 파일 유무도 자물쇠 안에서(1회차 B2 — 처음 넣기와 겹친 거두기가 ‘없음’ 으로 끝나고 키가 들어갔다)
     `st=$(awk -v b="$B" -v m="$M" '${CNT}' "$f") || { echo "##KL fail read"; exit 3; }`,
     'set -- $st; nr=$1; n=$2; u=$3',
     'if [ "$n" -eq 0 ]; then echo "##KL removed 0 unmarked $u"; exit 0; fi',
@@ -224,12 +262,13 @@ export function removeScript({ publicKey, keyId } = {}) {
 export const WHOAMI_SCRIPT = 'echo "##KL ip ${SSH_CONNECTION%% *}"';
 
 /** 표지 줄 읽기(마지막 `##KL …` 한 줄 — 로그인 배너가 앞에 섞여도). 모르는 사유 글자는 'unknown'. */
-const FAIL_WHY = new Set(['nohome', 'symlink', 'notdir', 'mkdir', 'notfile', 'unreadable', 'notwritable', 'read', 'write', 'verify', 'rename', 'nobase64', 'toolong', 'locked', 'raced']);
+const FAIL_WHY = new Set(['nohome', 'symlink', 'notdir', 'mkdir', 'notfile', 'unreadable', 'notwritable', 'read', 'write', 'verify', 'rename', 'nobase64', 'toolong', 'locked', 'raced', 'locklost', 'changed']);
 const num = (v) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Math.floor(Number(v)) : 0);
 export function parseMarker(stdout) {
-  const lines = String(stdout || '').slice(0, 200_000).split('\n').map((x) => x.trim()).filter((x) => x.startsWith('##KL '));
+  const lines = String(stdout || '').slice(-200_000).split('\n').map((x) => x.trim()).filter((x) => x.startsWith('##KL '));
   const last = lines[lines.length - 1] || '';
   const w = last.split(' ');
+  if (w[1] === 'begin') return { kind: 'begun' };   // 시작했는데 끝 표지가 없다 — 결과 모름(B5)
   if (w[1] === 'ip') return { kind: 'ip', ip: IP_RE.test(w[2] || '') ? w[2] : '' };
   if (w[1] === 'added' || w[1] === 'present-marked' || w[1] === 'present-unmarked') return { kind: w[1], unmarked: num(w[2]), custom: num(w[3]), exact: num(w[4]), loose: num(w[5]) };
   if (w[1] === 'replaced') return { kind: 'replaced', unmarked: num(w[2]), custom: num(w[3]), old: w[4] && B64_RE.test(w[4]) && w[4].length <= MAX_OLD_B64 ? w[4] : null };
@@ -247,7 +286,9 @@ export const FAIL_TEXT = Object.freeze({
   unreadable: 'authorized_keys 를 읽을 수 없어(권한) 건드리지 않았습니다.', notwritable: 'authorized_keys(또는 ~/.ssh)에 이 계정이 쓸 수 없어(관리자가 잠가 둠) 건드리지 않았습니다.', read: 'authorized_keys 를 읽지 못했습니다.',
   write: '임시 파일을 쓰지 못했습니다(권한 · 디스크) — 원래 파일은 그대로입니다.', verify: '새로 쓴 내용이 예상과 달라(디스크 가득 등) 바꾸지 않았습니다 — 원래 파일은 그대로입니다.',
   rename: '새 파일로 바꾸지 못했습니다 — 원래 파일은 그대로입니다.',
-  locked: '다른 작업이 이 서버의 authorized_keys 를 바꾸는 중이라 기다리다 그만뒀습니다(또는 남은 자물쇠 ~/.ssh/.authorized_keys.portal.lock — 2분 지나면 치웁니다) — 잠시 뒤 다시 하세요.',
+  locked: '다른 작업이 이 서버의 authorized_keys 를 바꾸는 중이라 15초 기다리다 그만뒀습니다 — 원래 파일은 그대로입니다. 잠시 뒤 다시 하세요(남은 자물쇠 ~/.ssh/.authorized_keys.portal.lock 는 주인이 없으면 다음 작업이 치웁니다).',
+  locklost: '작업 중에 자물쇠를 다른 쪽이 가져가 바꾸지 않았습니다 — 원래 파일은 그대로입니다. 잠시 뒤 다시 하세요.',
+  changed: '그 사이 다른 쪽(사람 · 구성 관리 도구)이 authorized_keys 를 바꿔 바꾸지 않았습니다 — 원래 파일은 그대로입니다. 다시 하세요.',
   raced: '바꾼 직후 다시 읽어 보니 다른 쪽(사람 · 구성 관리 도구)이 그 사이 파일을 바꿔 원하는 상태가 아닙니다 — 서버에 들어 있는 키를 다시 읽어 확인하세요.', nobase64: '서버에 base64 명령이 없어 처리하지 않았습니다.', toolong: '바꿀 포탈 줄이 너무 많아 처리하지 않았습니다.',
   unknown: '서버가 예상한 답을 주지 않았습니다.',
 });

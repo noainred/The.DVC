@@ -25,6 +25,7 @@ import { makeLoadError } from '../util/registryCore.js';
 export const STATE_FILE_NAME = 'ssh-access-state.json';
 const FILE = () => path.join(config.configDir, 'ssh-access-state.json');   // = STATE_FILE_NAME(문서 생성기가 글자 그대로 찾는다)
 export const MAX_EVENTS = 300;
+export const MAX_INBOX_SEEN = 2000;
 const MAX_STOPS = 500;
 const MAX_STOP_SERVERS = 2000;
 const READ_RETRY_MS = 30_000;
@@ -32,7 +33,7 @@ const READ_RETRY_MS = 30_000;
 export const GUARD_KEYS = Object.freeze(['twoPerson', 'serverRestrict']);
 // 서버마다 생기는 사건(key-login-set · key-lines-removed)은 넣지 않는다 — 100대 작업 몇 번이 사용 중지 · 바꿔치기 사건을 밀어냈다(점검 C-3 · D-5).
 //   작업 하나에 한 번 남는 요약(key-job-done · key-revoke-done)을 넣는다.
-export const CRITICAL_EVENTS = Object.freeze(['guard-changed', 'approval-requested', 'approval-decided', 'key-job-done', 'key-revoke-done', 'corp-stop', 'corp-resume', 'key-tampered', 'key-changed-outside', 'key-added-outside', 'state-reloaded', 'keystore-reloaded', 'account-changed-outside']);
+export const CRITICAL_EVENTS = Object.freeze(['guard-changed', 'approval-requested', 'approval-decided', 'key-job-done', 'key-revoke-done', 'key-job-interrupted', 'corp-stop', 'corp-resume', 'key-tampered', 'key-changed-outside', 'key-added-outside', 'state-reloaded', 'keystore-reloaded', 'account-changed-outside']);
 
 const t = (v, max = 256) => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max).trim();
 const num = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.round(Number(v)) : 0);
@@ -67,7 +68,10 @@ function norm(j) {
   const events = (j.events || []).filter(isObj).slice(-MAX_EVENTS).map((e) => ({
     at: num(e.at), kind: t(e.kind, 40), corp: t(e.corp, 128), target: t(e.target, 128), by: t(e.by, 64), detail: t(e.detail, 300),
   }));
-  return { stops, events, guards };
+  // 받는 곳 ‘본 표지’(12자 해시) — 사건 기록과 따로 둔다(1회차 C1-4 · D5 — 사건 300개에서 밀려나면 재시작 뒤 같은 파일을 다시 알렸다).
+  if (j.inboxSeen !== undefined && !Array.isArray(j.inboxSeen)) throw new ShapeError('inboxSeen 이 배열이 아닙니다');
+  const inboxSeen = [...new Set((j.inboxSeen || []).filter((x) => typeof x === 'string' && /^[0-9a-f]{12}$/.test(x)))].slice(-MAX_INBOX_SEEN);
+  return { stops, events, guards, inboxSeen };
 }
 
 function load() {
@@ -110,7 +114,7 @@ function unreadable() {
   return e ? { ok: false, code: 'state-unreadable', status: 503, reason: `SSH 공용 접속 상태 파일(${STATE_FILE_NAME})을 읽지 못해 바꾸지 않았습니다 — 손상 보존본(${STATE_FILE_NAME}.corrupt.*)을 확인해 고친 뒤 ‘상태 파일 다시 읽기’ 를 누르세요.` } : null;
 }
 // 프로토타입 없는 객체로 — 'toString' 같은 이름을 중지 기록으로 읽지 않게(반증 D7).
-function draft() { const d = load(); return { stops: Object.assign(Object.create(null), d.stops), events: d.events.slice(), guards: { ...d.guards } }; }
+function draft() { const d = load(); return { stops: Object.assign(Object.create(null), d.stops), events: d.events.slice(), guards: { ...d.guards }, inboxSeen: (d.inboxSeen || []).slice() }; }
 function commit(next) {
   // 이번 쓰기에 실린 사건만 알린다 — 쓰기에 실패하면 버린다(쓰이지 않은 사건을 다음 쓰기 때 알리지 않게).
   const sent = pendingNotify; pendingNotify = [];
@@ -232,12 +236,16 @@ export function setGuards(patch = {}, { by = '', now = Date.now() } = {}) {
 }
 
 /** 키 보안 사건 — 여러 개를 한 번에 쓴다(사건마다 파일 전체를 다시 쓰지 않게). 쓰기 실패는 호출부를 막지 않는다(감사 로그가 원본이다). */
-export function addEvents(list = [], { now = Date.now() } = {}) {
+export function addEvents(list = [], { now = Date.now(), inboxSeen = null } = {}) {
   const items = (Array.isArray(list) ? list : []).filter(isObj);
-  if (!items.length || unreadable()) return { ok: false };
+  const seen = Array.isArray(inboxSeen) ? inboxSeen : [];
+  if ((!items.length && !seen.length) || unreadable()) return { ok: false };
   const d = draft();
-  pushEvents(d, items, now);
+  if (items.length) pushEvents(d, items, now);
+  if (seen.length) d.inboxSeen = [...d.inboxSeen, ...seen];   // 사건과 같은 쓰기에(알림을 보냈는데 표지를 못 남기는 일이 없게)
   return commit(d);
 }
+/** 받는 곳 ‘본 표지’ 목록. 상태 파일을 못 읽으면 null(빈 목록이 아니다 — 호출부는 그 회차에 알리지 않는다). */
+export function inboxSeenList() { const d = load(); return d && !loadErr.get() ? (d.inboxSeen || []).slice() : null; }
 export function addEvent(ev = {}, opts = {}) { return addEvents([ev], opts); }
 export function listEvents({ limit = 100 } = {}) { const d = load(); return d ? d.events.slice(-Math.max(1, Math.min(MAX_EVENTS, limit))).reverse() : []; }

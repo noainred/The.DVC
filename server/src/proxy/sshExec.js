@@ -209,9 +209,22 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
       if (r.ok && r.reason !== 'approved') say(`SSH 호스트키 ${r.algo} ${r.fp} — ${r.reason === 'observed-new' ? '처음 관찰(미승인 · 관찰 모드)' : '관찰 키(미승인 · 관찰 모드)'}`, 'warn');
     });
     if (privateKey) { auth.privateKey = privateKey; if (passphrase) auth.passphrase = passphrase; }
-    // passwordOnly(v3.10.0 — SSH 키 로그인 설정): password 방식만 — 거부되면 같은 비밀번호를 keyboard-interactive 로 한 번 더 보내지 않는다(실패 기록 2회 · 계정 잠금 위험).
-    //   기본값은 그대로(keyboard-interactive 만 받는 서버를 지원 — 기존 기능의 동작을 바꾸지 않는다).
-    else { auth.password = password; if (!passwordOnly) auth.tryKeyboard = true; }
+    // passwordOnly(v3.10.0 — SSH 키 로그인 설정 · 서버의 키 읽기): 비밀번호는 **한 번만** 보낸다 — 서버가 내놓은 방식 가운데 password 가 있으면 그것,
+    //   없고 keyboard-interactive 만 있으면 그것 하나로(1회차 D3 — password 만 쓰자 대화형만 받는 서버에서 읽기가 실패했다). 거부되면 다른 방식으로 다시 보내지 않는다
+    //   (실패 기록 2회 · 계정 잠금 위험). 기본값(passwordOnly 아님)은 그대로 — password 뒤 keyboard-interactive.
+    else if (passwordOnly) {
+      let sent = false;
+      auth.authHandler = (methodsLeft, _partial, cb) => {
+        if (methodsLeft == null) return cb({ type: 'none', username });
+        if (sent) return cb(false);
+        sent = true;
+        if (methodsLeft.includes('password')) return cb({ type: 'password', username, password: password || '' });
+        if (methodsLeft.includes('keyboard-interactive')) {
+          return cb({ type: 'keyboard-interactive', username, prompt: (_n, _i, _l, prompts, finish) => finish(prompts.map(() => password || '')) });
+        }
+        return cb(false);
+      };
+    } else { auth.password = password; auth.tryKeyboard = true; }
     if (_legacy) auth.algorithms = LEGACY_ALGOS;
     // '자세히'(ssh -vvv 상당): ssh2 의 debug 콜백은 소켓 연결·ident 교환·KEXINIT·인증 방식 시도·채널 열기까지
     // 프로토콜 단계마다 한 줄씩 남긴다. 비밀번호는 찍히지 않는다(ssh2 가 로그에 넣지 않음).

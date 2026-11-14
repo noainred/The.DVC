@@ -58,7 +58,7 @@ async function sshRun(server, auth, fn, { execs = 1 } = {}) {
   const { isAuthFailureText, isPeerRejectText } = await import('../util/authGuard.js');
   const st = { sent: false };
   try {
-    // passwordOnly: 비밀번호는 password 방식으로 **한 번만** 보낸다(keyboard-interactive 로 다시 보내지 않는다 — 실패 기록 2회 · 계정 잠금 · 테스트 ⑪-b · 구형 알고리즘 재시도 포함).
+    // passwordOnly: 비밀번호는 **한 번만** 보낸다(서버가 받는 방식 하나 — password 우선, 없으면 대화형 · 실패 기록 2회 · 계정 잠금 · 테스트 ⑪-b · 구형 알고리즘 재시도 포함).
     const v = await withDeadline(legDeadlineMs(execs), (signal) => withSsh({ host: String(server.host), port: Number(server.port) || 22, username: auth.username, password: auth.password || '',
       privateKey: auth.privateKey, passphrase: auth.passphrase, readyTimeout: READY_TIMEOUT_MS, passwordOnly: true, signal },
     async ({ exec }) => fn(async (cmd, mutating = false) => { if (mutating) st.sent = true; return exec(cmd, STEP_TIMEOUT_MS); })), 'SSH 시한 초과');
@@ -67,7 +67,7 @@ async function sshRun(server, auth, fn, { execs = 1 } = {}) {
     const msg = String(e?.message || e);
     const code = isPeerRejectText(msg) ? 'hostkey' : isAuthFailureText(msg) ? 'auth-rejected' : TIMEOUT_RE.test(msg) ? 'timeout' : 'connect';
     const reason = code === 'hostkey' ? '호스트키를 신뢰하지 않아 끊었습니다 — 설정 › 보안 › 장비 신뢰에서 지문을 확인 · 승인하세요.'
-      : code === 'auth-rejected' ? `인증이 거부됐습니다 — 다시 시도하지 않았습니다(계정 잠금 방지).${auth.privateKey ? '' : ' 비밀번호는 password 방식으로 한 번만 보냈습니다 — 서버가 대화형(keyboard-interactive) 로그인만 받으면 이 경로로는 넣을 수 없으니 공개키를 직접 넣으세요(키 폴더의 공개키 복사).'}`
+      : code === 'auth-rejected' ? `인증이 거부됐습니다 — 다시 시도하지 않았습니다(계정 잠금 방지).${auth.privateKey ? '' : ' 비밀번호는 서버가 받는 방식 하나(password 또는 대화형)로 한 번만 보냈습니다.'}`
         : code === 'timeout' ? `서버가 시한 안에 답하지 않았습니다(${msg.replace(/\s+/g, ' ').slice(0, 80)})`
           : `접속하지 못했습니다(${msg.replace(/\s+/g, ' ').slice(0, 100)})`;
     return { ok: false, code, reason, sent: st.sent };
@@ -80,8 +80,14 @@ async function sshRun(server, auth, fn, { execs = 1 } = {}) {
 async function mutRun(run, cmd) {
   const r = await run(cmd, true);
   const m = AK.parseMarker(r?.stdout);
+  // 시작 표지만 있고 끝 표지가 없다(안쪽 셸만 신호로 죽음 · 표지 잘림 — 1회차 B5) → 결과 모름.
+  if (m.kind === 'begun') return { kind: 'nocode' };
   return m.kind === 'unknown' && (r?.code === undefined || r?.code === null) ? { kind: 'nocode' } : m;
 }
+/** 결과를 모르는(바꿨을 수 있는) 실패 사유 — mv 뒤의 확인 실패. ‘바꾼 것 없음’ 꼬리를 붙이지 않는다(1회차 B9 · E1-3). */
+const AFTER_MV = new Set(['raced']);
+/** 되돌림 · 지우기 결과가 ‘결과 모름’ 인가(1회차 B11 — 모르는데 ‘지우지 못했다’ 고 단정하지 않는다). */
+const unknownOutcome = (r) => (!r.ok && r.sent) || (r.ok && (r.value.kind === 'nocode' || (r.value.kind === 'fail' && AFTER_MV.has(r.value.why))));
 /** 바꾸는 명령을 보낸 뒤 답을 못 받았을 때 — ‘바꾼 것 없음’ 이라고 하지 않는다. */
 const UNCERTAIN_TAIL = ' 바꾸는 명령은 서버에 보냈지만 결과를 받지 못했습니다 — 서버의 authorized_keys 가 바뀌었을 수 있습니다. ‘서버에 들어 있는 키 다시 읽기’ 로 확인하세요(포탈의 서버 설정은 바꾸지 않았습니다).';
 
@@ -158,6 +164,7 @@ export async function installOne(server, key, o = {}) {
   if (!step1.ok) return fail(step1.sent ? 'uncertain' : step1.code, `${step1.reason}${step1.sent ? UNCERTAIN_TAIL : ' 서버에서 바꾼 것은 없습니다.'}`, { via: first.authKind });
   const m = step1.value;
   if (m.kind === 'nocode') return fail('uncertain', `서버가 결과 없이 연결을 닫았습니다.${UNCERTAIN_TAIL}`, { via: first.authKind });
+  if (m.kind === 'fail' && AFTER_MV.has(m.why)) return fail('uncertain', `${AK.failText(m.why)}${UNCERTAIN_TAIL}`, { via: first.authKind });
   if (m.kind === 'fail' || m.kind === 'unknown') {
     const why = m.why === 'noip' ? '서버가 본 접속 주소를 읽지 못해 출발지 제한을 붙일 수 없습니다 — 제한 없이 넣으려면 ‘서버 쪽 제한’ 을 끄고 다시 하세요.'
       : m.why === 'badkey' ? '공개키 꼴이 올바르지 않아 넣지 않았습니다.'
@@ -180,21 +187,28 @@ export async function installOne(server, key, o = {}) {
     return { uname: t(u?.stdout, 40), read };
   }, { execs: 2 });
   noteKeyUse({ fingerprint: key.fingerprint, keyName: key.name, server: base.name, corp: base.corp, feature: 'conn-test', ok: step2.ok, code: step2.ok ? 'ok' : step2.code, trigger: 'manual', by: o.by });
-  if (!step2.ok) {
-    // ③ 안 되면 우리가 바꾼 것만 되돌린다(더한 그 줄을 지우고, 바꿨으면 바꾸기 전 포탈 줄을 다시 넣는다). 이미 있던 줄은 손대지 않는다.
-    let rolledBack = null; let rollbackReason = '';
+  /** 우리가 바꾼 것만 되돌린다(더한 그 줄을 지우고, 바꿨으면 바꾸기 전 포탈 줄을 다시 넣는다). 이미 있던 줄은 손대지 않는다. → { rolledBack, tail } */
+  const rollbackChange = async () => {
+    let rolledBack = null; let rollbackReason = ''; let unknown = false;
     if (added || replaced) {
       const cmd = replaced && m.old == null ? null : rollbackCommand({ line, oldB64: replaced ? m.old : '' });
       const rb = cmd ? await sshRun(server, first, async (run) => mutRun(run, cmd)) : { ok: false, reason: '바꾸기 전 줄을 받지 못했습니다' };
       rolledBack = rb.ok && rb.value.kind === 'restored' && rb.value.removed > 0;
+      unknown = !rolledBack && unknownOutcome(rb);
       if (!rolledBack) rollbackReason = !rb.ok ? `${rb.reason}${rb.sent ? ' — 되돌림 명령의 결과를 받지 못했습니다' : ''}`
         : rb.value.kind === 'restored' ? '그 사이 줄이 이미 바뀌어 있어 손대지 않았습니다' : rb.value.kind === 'fail' ? AK.failText(rb.value.why)
           : rb.value.kind === 'nocode' ? '되돌림 명령의 결과를 받지 못했습니다(연결 끊김)' : '서버가 예상한 답을 주지 않았습니다';
     }
-    const tail = replaced
-      ? (rolledBack ? ' 바꾼 줄을 원래대로 되돌렸습니다.' : ` 바꾼 줄을 되돌리지 못했습니다(${rollbackReason}) — 서버의 authorized_keys 에서 표식 ‘${AK.markOf(key.id)}’ 줄을 확인하세요.`)
-      : !added ? ' 줄은 이미 있던 것이라 지우지 않았습니다.' : rolledBack ? ' 더한 줄을 지웠습니다.' : ` 더한 줄을 지우지 못했습니다(${rollbackReason}) — 서버의 authorized_keys 에서 표식 ‘${AK.markOf(key.id)}’ 줄을 직접 지우세요.`;
-    return fail('key-login-failed', `키 접속 확인 실패 — ${step2.reason}${tail}${o.restrict && fromIp && (added || replaced) ? restrictText(fromIp) : ''}`, { line: m.kind, rolledBack, fromIp, notes });
+    const what = replaced ? '바꾼 줄을 원래대로 되돌렸' : '더한 줄을 지웠';
+    const tail = !added && !replaced ? ' 줄은 이미 있던 것이라 지우지 않았습니다.'
+      : rolledBack ? ` ${what}습니다.`
+        : unknown ? ` ${replaced ? '바꾼 줄을 되돌렸는지' : '더한 줄이 지워졌는지'} 모릅니다(${rollbackReason}) — 서버의 authorized_keys 에서 표식 ‘${AK.markOf(key.id)}’ 줄을 확인하세요.`
+          : ` ${replaced ? '바꾼 줄을 되돌리지' : '더한 줄을 지우지'} 못했습니다(${rollbackReason}) — 서버의 authorized_keys 에서 표식 ‘${AK.markOf(key.id)}’ 줄을 ${replaced ? '확인하세요' : '직접 지우세요'}.`;
+    return { rolledBack, rollbackUnknown: unknown || undefined, tail };
+  };
+  if (!step2.ok) {
+    const rb = await rollbackChange();
+    return fail('key-login-failed', `키 접속 확인 실패 — ${step2.reason}${rb.tail}${o.restrict && fromIp && (added || replaced) ? restrictText(fromIp) : ''}`, { line: m.kind, rolledBack: rb.rolledBack, rollbackUnknown: rb.rollbackUnknown, fromIp, notes });
   }
 
   // ④ 확인됨 — 서버를 그 키에 묶고(등록부), 고른 뒷일을 한다.
@@ -206,7 +220,14 @@ export async function installOne(server, key, o = {}) {
   if (step2.value?.read?.ok) INS.noteInstalled(server.id, { host: server.host, port: Number(server.port) || 22, username: kAuth.username, file: '~/.ssh/authorized_keys', keys: step2.value.read.keys, truncated: step2.value.read.truncated, by: t(o.by, 64) });
   // 이미 그 키를 쓰는 서버는 다시 묶지 않는다 — 특히 ‘법인 기본 키를 따름’ 인 서버를 이름 고정으로 바꾸지 않는다(법인 기본 키를 바꾸면 따라가야 한다).
   const b = serverUsesKey(server, key.id) ? { ok: true, already: true } : o.bind(server, key.id);
-  if (!b.ok) return { ...out, ok: false, code: 'bind-failed', reason: `키 접속은 확인됐지만 서버 설정에 적지 못했습니다(${t(b.reason, 120)}) — 서버의 키 줄은 남아 있습니다. ‘키 고르기’ 로 이 키를 고르세요.` };
+  if (!b.ok) {
+    // 키가 그 사이 퇴역 · 삭제됐으면(묶을 수 없다) 우리가 넣은 줄도 되돌린다 — 지운 키의 줄이 서버에 남아 거둘 수도 없게 되던 것(1회차 C1-3).
+    if (b.code === 'key-gone') {
+      const rb = await rollbackChange();
+      return { ...out, ok: false, code: 'bind-failed', rolledBack: rb.rolledBack, rollbackUnknown: rb.rollbackUnknown, reason: `키 접속은 확인됐지만 그 사이 키가 퇴역 · 삭제돼 서버 설정에 적지 않았습니다.${rb.tail}` };
+    }
+    return { ...out, ok: false, code: 'bind-failed', reason: `키 접속은 확인됐지만 서버 설정에 적지 못했습니다(${t(b.reason, 120)}) — 서버의 키 줄은 남아 있습니다. ‘키 고르기’ 로 이 키를 고르세요.` };
+  }
   out.bound = true;
   // 저장 비밀번호 지우기 — 서버 항목에 저장된 비밀번호가 있을 때만(공통 계정의 비밀번호는 다른 서버도 쓰므로 여기서 지우지 않는다).
   if (o.removePassword) {
@@ -218,7 +239,7 @@ export async function installOne(server, key, o = {}) {
     const rm = cmd ? await sshRun(server, kAuth, async (run) => mutRun(run, cmd)) : { ok: false, reason: '옛 키의 공개키 꼴이 올바르지 않습니다' };
     out.oldRemoved = rm.ok && rm.value.kind === 'removed' ? rm.value.removed : rm.ok && rm.value.kind === 'none' ? 0 : null;
     out.oldUnmarked = rm.ok && rm.value.kind === 'removed' ? rm.value.unmarked : null;
-    if (out.oldRemoved == null) notes.push(`옛 키 줄을 지우지 못했습니다(${!rm.ok ? `${rm.reason}${rm.sent ? ' — 결과를 받지 못했습니다' : ''}` : rm.value.kind === 'fail' ? AK.failText(rm.value.why) : '서버가 예상한 답을 주지 않았습니다'}).`);
+    if (out.oldRemoved == null) notes.push(`옛 키 줄을 ${unknownOutcome(rm) ? '지웠는지 모릅니다' : '지우지 못했습니다'}(${!rm.ok ? `${rm.reason}${rm.sent ? ' — 결과를 받지 못했습니다' : ''}` : rm.value.kind === 'fail' ? AK.failText(rm.value.why) : rm.value.kind === 'nocode' ? '결과를 받지 못했습니다(연결 끊김)' : '서버가 예상한 답을 주지 않았습니다'}) — 서버의 authorized_keys 에서 확인하세요.`);
   }
   if (notes.length) out.note = notes.join(' ');
   return out;
@@ -246,6 +267,7 @@ export async function revokeOne(server, key, o = {}) {
   const m = r.value;
   if (m.kind === 'none') return { ...base, ok: true, code: 'none', removed: 0, unmarked: 0, pinned };
   if (m.kind === 'nocode') return { ...base, ok: false, code: 'uncertain', reason: '서버가 결과 없이 연결을 닫았습니다 — 지우는 명령은 보냈으니 지워졌는지 서버에서 확인하세요.', pinned, via: auth.authKind };
+  if (m.kind === 'fail' && AFTER_MV.has(m.why)) return { ...base, ok: false, code: 'uncertain', why: m.why, reason: `${AK.failText(m.why)} 지워졌는지 서버에서 확인하세요.`, pinned, via: auth.authKind };
   if (m.kind !== 'removed') return { ...base, ok: false, code: 'revoke-failed', why: m.kind === 'fail' ? m.why : 'unknown', reason: m.kind === 'fail' ? AK.failText(m.why) : '서버가 예상한 답을 주지 않았습니다.', pinned };
   return { ...base, ok: true, code: m.removed > 0 ? 'removed' : 'not-present', removed: m.removed, unmarked: m.unmarked, pinned };
 }
@@ -273,7 +295,8 @@ const runningRevokes = () => [...slots.keys()].filter((k) => k.startsWith('revok
  * 서버 쪽에도 자물쇠가 있다(akScript LOCK — 다른 포탈 · 다른 노드).
  */
 export const serverLockKey = (s) => `${String(s?.host || '').trim().toLowerCase()}:${Number(s?.port) || 22}`;
-async function withServerLock(key, fn) {
+/** 서버 자물쇠(같은 접속처를 바꾸는 다른 동작 — 키 고르기 — 도 함께 잡는다 · 1회차 C1-2). */
+export async function withServerLock(key, fn) {
   const prev = serverLocks.get(key) || Promise.resolve();
   let release; const mine = new Promise((r) => { release = r; });
   const tail = prev.then(() => mine);
@@ -308,6 +331,10 @@ export function jobStartIssue(kind, keyId = '') {
 export function busyJob(kind, keyId = '') { const p = jobStartIssue(kind, keyId); return p && p.jobId ? p.jobId : ''; }
 /** 작업 종류(라우트가 멈추기 게이트를 고른다 — 거두기를 멈추는 것은 OTP · 반증 D1). 없으면 ''. */
 export function jobKind(id) { return jobs.get(t(id, 20))?.kind || ''; }
+/** 진행 중인 넣기 작업의 키 id(없으면 '') — 그 키를 지우거나 회전으로 퇴역시키지 못하게(1회차 C1-3). */
+export function installingKeyId() { const j = runningIn('install'); return j ? t(j.meta?.keyId, 32) : ''; }
+/** 멈추기에 OTP 가 필요한 작업인가 — 거두기, 또는 옛 키 교체가 붙은 넣기(남은 서버에 옛 키 — 유출 키일 수 있다 — 가 남는다 · 1회차 A4). */
+export function cancelNeedsOtp(id) { const j = jobs.get(t(id, 20)); return !!j && (j.kind === 'key-revoke' || !!j.meta?.replaceKeyId); }
 /** 작업을 멈춘다(지금 서버는 끝까지 — 되돌림을 끊지 않는다 · 남은 서버는 ‘멈춤’ 으로 적는다). */
 export function cancelJob(id, { by = '', why = '' } = {}) {
   const j = jobs.get(t(id, 20));
@@ -352,6 +379,8 @@ export function startJob({ kind, servers, run, by = '', meta = {}, onDone = null
       let r;
       try { r = await withServerLock(serverLockKey(s), () => run(s, handle)); } catch (e) { r = { id: s.id, name: s.name || s.host, corp: t(s.vcenterId), ok: false, code: 'error', reason: `처리 중 오류(${String(e?.message || e).replace(/\s+/g, ' ').slice(0, 100)})` }; }
       job.results.push(r);
+      // 서버마다 이벤트 루프에 차례를 넘긴다(1회차 C1-1 — SSH 전에 바로 실패하는 서버 500대가 한 턴에 돌아 포탈이 수 초 멈췄다).
+      await new Promise((res) => { setImmediate(res); });
     }
     job.current = ''; job.doneAt = Date.now();
     if (slots.get(slot) === id) slots.delete(slot);
@@ -361,6 +390,7 @@ export function startJob({ kind, servers, run, by = '', meta = {}, onDone = null
 }
 /** 진행 · 결과(비밀 없음). 없으면 null. */
 export function jobView(id) {
+  sweep(Date.now());   // 끝난 지 1시간 지난 작업은 보기에서도 정리한다(1회차 E1-7 — 시작할 때만 정리해 칸이 무기한 남았다)
   const j = jobs.get(t(id, 20));
   if (!j) return null;
   return { id: j.id, kind: j.kind, by: j.by, meta: j.meta, startedAt: j.startedAt, doneAt: j.doneAt || null, running: !j.doneAt, total: j.total, done: j.results.length, current: j.current,
