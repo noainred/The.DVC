@@ -13,7 +13,7 @@ import { listBmServersRaw, registryLoadError, bmServerRefCounts, replaceBmServer
 import { loadRegistry as loadIdracRegistry, registryLoadError as idracLoadError } from '../../idrac/registry.js';
 import * as KS from './keyStore.js';
 import { stopMatch } from '../../sshaccess/state.js';   // v3.9.0: 긴급 조치 ‘이 법인 키 사용 중지’(상태 파일 — 못 읽으면 키 접속을 멈춘다)
-import { addrKey } from './bindRule.js';
+import { addrKey, effectiveKeyRefOf } from './bindRule.js';
 import { parsePrivateKey } from './keyParse.js';
 import { sshHostKeyFingerprint } from '../../proxy/sshExec.js';
 
@@ -63,12 +63,9 @@ export function listAccountsView({ visible = null, scoped = false } = {}) {
 
 /** 키 삭제 — 쓰는 서버 · 계정이 0 일 때만. 사용처를 모르면 거절. */
 export function deleteKeyIfUnused(id) {
-  const k = KS.keyById(id);
-  if (!k) return { ok: false, code: 'not-found', status: 404, reason: '키를 찾을 수 없습니다.' };
-  const u = refUsage().key(k.id);
-  if (u.servers == null) return { ok: false, code: 'usage-unknown', status: 503, reason: 'OS 계정 등록부를 읽지 못해 이 키를 쓰는 서버 수를 모릅니다 — 삭제하지 않았습니다.' };
-  if (u.servers > 0 || u.accounts > 0) return { ok: false, code: 'in-use', status: 409, reason: `이 키를 쓰는 서버 ${u.servers}대 · 공통 계정 ${u.accounts}개가 있어 지울 수 없습니다 — 회전으로 참조를 옮긴 뒤 지우세요.` };
-  return KS._removeKey(k.id);
+  // 앞 조건은 deleteIssue 하나(라우트 사전 검사 · SSH 공용 접속 사전 검사 · 본체가 같은 함수 — 5회차 반증 R5R-4).
+  const issue = deleteIssue(id); if (issue) return issue;
+  return KS._removeKey(KS.keyById(id).id);
 }
 
 export function deleteAccountIfUnused(id) {
@@ -212,6 +209,9 @@ function integrityOk(m, parsed) {
  * @returns {{ok:true, username:string, password:string, privateKey?:string, passphrase?:string, authKind:'key'|'password'|'none', keyFingerprint?:string, keyName?:string}
  *          | {ok:false, code:string, error:string}}
  */
+/** 실제로 쓰일 키 id(저장소의 공통 계정으로 푼다) — bindRule.effectiveKeyRefOf 의 저장소판. */
+export function effectiveKeyRef(server = {}) { return effectiveKeyRefOf(server, (id) => KS.accountById(id)); }
+
 export function resolveOsAuth(server = {}, { feature = '' } = {}) {
   const keyRef = t(server.keyRef);
   const credRef = t(server.credRef);
@@ -227,7 +227,7 @@ export function resolveOsAuth(server = {}, { feature = '' } = {}) {
   // 7b 반증 F19: 공통 계정을 쓰면 접속 계정명도 **공통 계정 쪽**(서버 칸은 '개별' 일 때만) — 서버 칸 기본값 root 로 공통 비밀번호를 보내지 않게.
   const username = (acc ? acc.username : '') || t(server.username) || 'root';
   // osAuth 'password' = 비밀번호 고정(공통 계정에 기본 키가 있어도 — CSV os_key ‘password’).
-  const useKey = server.osAuth === 'password' ? '' : (keyRef || (acc && acc.keyRef) || '');
+  const useKey = effectiveKeyRefOf(server, () => acc);   // 판정 하나(5회차 반증 R5R-5 — 쓰기 경로의 ‘거두는 키’ 검사도 이 함수)
   if (useKey) {
     const m = KS.keyMaterial(useKey);
     if (!m.ok) return { ok: false, code: m.code, error: AUTH_ERROR[m.code] || AUTH_ERROR['key-missing'] };

@@ -29,7 +29,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
-import { KEY_FILE_NAME, mergeRedactedKeyStore } from '../bmusage/onboard/keyBundle.js';   // v3.9.0 반증 D5: 적용 시점 다시 합치기
+import { KEY_FILE_NAME, mergeRedactedKeyStore, keyStoreDropNotes } from '../bmusage/onboard/keyBundle.js';   // v3.9.0 반증 D5: 적용 시점 다시 합치기
 
 const SERVER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 /** config.js 의 configDir 과 같은 식(테스트가 대조한다) — config.js 를 import 하지 않으려고 따로 둔다. */
@@ -178,7 +178,9 @@ export function reconcileForApply(name, content, configDir) {
     let cur = '';
     try { cur = fs.readFileSync(path.join(configDir, name), 'utf8'); } catch { cur = ''; }
     const m = mergeRedactedKeyStore(String(content), cur);
-    return { content: m.text, info: { sshKeysKept: (m.kept || []).length, sshKeysDropped: (m.dropped || []).length } };
+    // 빠진 항목(승인 대기 키 id 지킴 · 되살리지 못한 키 · 계정 비밀)은 경고로 — 적용 결과 · 콘솔 · 백업 화면에 보인다(5회차 반증 R5R-6 — 수만 세고 쓰는 곳이 없었다).
+    const notes = keyStoreDropNotes(m.dropped);
+    return { content: m.text, info: { sshKeysKept: (m.kept || []).length, sshKeysDropped: (m.dropped || []).length }, ...(notes.length ? { warning: { file: name, reason: notes.join(' ') } } : {}) };
   }
   if (name !== 'users.json' && name !== 'central-agent-tokens.json') return { content };
   let currentText = null;

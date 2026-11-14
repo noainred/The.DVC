@@ -267,11 +267,13 @@ export function noEndDot(text, max = 300) {
  */
 export function installedReadText(r) {
   if (r && (r.readFailed === true || (typeof r.error === 'string' && r.error && r.missing !== true))) return { text: `서버에 들어 있는 키를 읽지 못했습니다 — ${noEndDot(r.error) || '사유를 받지 못함'}.`, tone: 'warn' };
+  // 읽기는 됐는데 기록 파일에 적지 못함(saved:false) — ‘읽었습니다’(초록)만 말하면 다음 화면의 ‘모름’ 과 어긋난다(5회차 반증 R5R-3).
+  const unsaved = r?.saved === false ? ' — 다만 읽은 키 기록 파일에 적지 못했습니다(파일 · 폴더 권한 확인). 아래 목록은 이번에 읽은 내용이고, 서버 표 · 다음 창에는 남지 않습니다' : '';
   // 파일 없음 — 읽기 실패가 아니다(키 0개 · 2회차 E2-3). 중립으로.
-  if (r && r.missing === true) return { text: '서버 계정에 authorized_keys 파일이 없습니다(키 0개).', tone: 'muted' };
+  if (r && r.missing === true) return { text: `서버 계정에 authorized_keys 파일이 없습니다(키 0개)${unsaved}.`, tone: unsaved ? 'warn' : 'muted' };
   const n = Array.isArray(r?.keys) ? r.keys.length : null;
   const cut = finiteNum(r?.truncated);
-  return { text: `서버에 들어 있는 키 ${unitText(n, '줄')}을 읽었습니다${cut > 0 ? ` · ${cut}줄은 상한을 넘어 읽지 않음` : ''}.`, tone: 'ok' };
+  return { text: `서버에 들어 있는 키 ${unitText(n, '줄')}을 읽었습니다${cut > 0 ? ` · ${cut}줄은 상한을 넘어 읽지 않음` : ''}${unsaved}.`, tone: unsaved ? 'warn' : 'ok' };
 }
 
 /** 받는 곳 승인 때 기본 이름(파일 이름 → 키 이름 규칙에 맞는 글자). 서버 NAME_RE 와 같은 글자만 남긴다(서버가 다시 판정한다). */

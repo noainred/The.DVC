@@ -164,6 +164,12 @@ export default function BmStorageTool() {
   return (
     <div className="bm2">
       {subTabs}
+      {data.registryUnreadable && (
+        <div className="banner bad" role="alert" style={{ marginBottom: 12 }}>
+          서버 목록 파일(bm-storage.json)을 지금 읽지 못합니다 — 아래의 빈 목록 · 주기는 실제 값이 아닙니다(원본은 그대로입니다).
+          파일 · 폴더 권한을 확인하세요. 그동안 저장 · 삭제 · CSV 가져오기 · 내보내기는 받지 않습니다.
+        </div>
+      )}
       <div className="flex between wrap" style={{ alignItems: 'flex-start', gap: 12, marginBottom: 14 }}>
         <div style={{ minWidth: 0, flex: '1 1 420px' }}>
           <div className="muted" style={{ fontSize: 13.5, lineHeight: 1.6 }}>

@@ -63,7 +63,17 @@ const installingFirst = (req, res, next) => {
   if (req.method === 'DELETE' && target && KS.keyById(target)?.status === 'pending') return res.status(409).json({ ok: false, code: 'key-pending', reason: '승인 대기 키입니다 — 설정 › 보안 › SSH 공용 접속의 승인 대기에서 돌려보내면 지워집니다.' });
   return next();
 };
-const keyChangeGate = [adminOnly, toolsPerm, requireSettingsOwner, fullRW, twoPersonFirst, installingFirst, revokingFirst, reauth];
+/**
+ * 교체 · 삭제 본체와 **같은 앞 조건**(REFS.rotateIssue · deleteIssue — 저장소 쓰기 · 폴더 충돌 · 쓰는 곳)을 OTP 앞에서 본다
+ * (5회차 반증 R5R-4 — SSH 공용 접속 경로만 고쳐 7b 는 OTP 를 쓴 뒤 409 였다). 본체가 다시 본다. 없는 키는 본체의 404 로 둔다.
+ */
+const refsFirst = (req, res, next) => {
+  if (req.method === 'DELETE') { const id = t(req.params?.id || '', 32); const i = id && KS.keyById(id) ? REFS.deleteIssue(id) : null; return i ? send(res, i) : next(); }
+  const b = bodyOf(req); const from = t(b.from, 32); const to = t(b.to, 32);
+  const i = from && to && KS.keyById(from) && KS.keyById(to) ? REFS.rotateIssue(from, to) : null;
+  return i ? send(res, i) : next();
+};
+const keyChangeGate = [adminOnly, toolsPerm, requireSettingsOwner, fullRW, twoPersonFirst, installingFirst, revokingFirst, refsFirst, reauth];
 
 const t = (v, max = 256) => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max).trim();
 const bodyOf = (req) => (req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {});

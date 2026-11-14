@@ -632,9 +632,12 @@ function KeyPicker({ server, catalog, onClose, say }) {
   const [once, setOnce] = useState('');
   const [busy, setBusy] = useState('');
   const [note, setNote] = useState({ text: '', tone: 'muted' });
+  // 읽기는 됐는데 기록 파일에 적지 못했을 때(saved:false) 이번에 읽은 목록 — 다시 읽은 창은 기록을 못 읽어 ‘모름’ 만 보였다(5회차 반증 R5R-3).
+  const [fresh, setFresh] = useState(null);
   const readDone = useRef(false);
   const firstRef = useRef(null);
   const c = st.resp;
+  const inst = fresh || c?.installed || null;
   useEffect(() => {
     if (!c || choice !== null) return;
     const cur = (c.keys || []).find((k) => k.current);
@@ -658,6 +661,7 @@ function KeyPicker({ server, catalog, onClose, say }) {
       const r = must(await postJson(`/settings/ssh-access/servers/${encodeURIComponent(server.id)}/installed-keys`, once ? { oncePassword: once } : {}));
       readDone.current = true;
       setNote(installedReadText(r));
+      setFresh(r.saved === false ? { at: Date.now(), keys: Array.isArray(r.keys) ? r.keys : [], error: r.error || '', unsaved: true } : null);
       load();
     } catch (e) { setNote({ text: errText(e), tone: 'bad' }); } finally { setOnce(''); setBusy(''); }
   };
@@ -726,14 +730,14 @@ function KeyPicker({ server, catalog, onClose, say }) {
             <div className="ssa-installed">
               <div className="ssa-acts">
                 <b>이 서버에 들어 있는 키</b>
-                <span className="ssa-sub">{c.installed ? `${dateTime(c.installed.at)} 읽음${c.installed.stale ? ' · 주소가 바뀜' : ''}` : c.installedReadFailed ? '읽은 기록 파일을 지금 읽지 못함(모름)' : '아직 읽지 않음'}</span>
+                <span className="ssa-sub">{inst ? `${dateTime(inst.at)} 읽음${inst.unsaved ? ' · 기록 파일에 적지 못함(이 창을 닫으면 다시 모름)' : ''}${inst.stale ? ' · 주소가 바뀜' : ''}` : c.installedReadFailed ? '읽은 기록 파일을 지금 읽지 못함(모름)' : '아직 읽지 않음'}</span>
               </div>
-              {c.installed && !c.installed.error && (
-                <ul className="ssa-list">{c.installed.keys.map((k, i) => (
+              {inst && !inst.error && (
+                <ul className="ssa-list">{(inst.keys || []).map((k, i) => (
                   <li key={`${k.fingerprint}-${i}`}><code>{shortFp(k.fingerprint)}</code> <span className="ssa-sub">{k.comment || '설명 없음'}</span> {k.keyName ? <Chip tone="ok">폴더에 있음 — {k.keyName}</Chip> : <Chip>개인키가 폴더에 없음</Chip>}</li>
                 ))}</ul>
               )}
-              {c.installed?.error && <p className="ssa-note">{c.installed.error}</p>}
+              {inst?.error && <p className="ssa-note">{inst.error}</p>}
               <div className="ssa-acts">
                 <label className="ssa-otp">이번 한 번만 쓸 비밀번호(선택) <input className="input" type="password" value={once} onChange={(e) => setOnce(e.target.value)} autoComplete="new-password" /></label>
                 <button className="btn btn-sm" type="button" disabled={busy === 'read'} onClick={read}>{busy === 'read' ? '읽는 중…' : '다시 읽기'}</button>

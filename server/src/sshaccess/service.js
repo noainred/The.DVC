@@ -176,7 +176,7 @@ export async function chooseServerKey({ serverId, keyId, expectAddr = null, by =
   // 화면이 본 접속처를 반드시 돌려받는다(빼고 부르면 확인을 건너뛰던 구멍 — 반증 D11).
   if (typeof expectAddr !== 'string' || !expectAddr) return { ok: false, code: 'need-addr', status: 400, reason: '화면에서 본 서버 접속처가 없습니다 — 화면을 다시 읽은 뒤 고르세요.' };
   const kid = t(keyId, 32);
-  { const eff = kid || (t(s.credRef) ? t(KS.accountById(t(s.credRef))?.keyRef, 32) : ''); const rv = eff ? KL.revokingIssue(eff) : null; if (rv) return rv; }   // 법인 기본 키를 따를 때도(5회차 A5-4)
+  { const eff = REFS.effectiveKeyRef({ keyRef: kid, credRef: s.credRef }); const rv = eff ? KL.revokingIssue(eff) : null; if (rv) return rv; }   // 법인 기본 키를 따를 때도(5회차 A5-4 · 판정 하나 R5R-5)
   if (kid) {
     const k = KS.keyById(kid);
     if (!k) return { ok: false, code: 'key-missing', status: 404, reason: '키를 찾을 수 없습니다.' };
@@ -638,7 +638,8 @@ export function approvalPrecheck(id, { approve, by = '', digest = '' } = {}) {
   if (cur.status !== 'pending') return { ok: false, code: 'not-pending', status: 409, reason: '이미 처리된 요청입니다.' };
   if (cur.expiresAt <= Date.now()) return { ok: false, code: 'expired', status: 409, reason: '요청의 시한(24시간)이 지났습니다 — 다시 요청하세요.' };
   // 키 등록 요청을 돌려보내면 승인 대기 키를 지운다 — 저장소를 못 읽는 동안에는 지울 수 없어 고아 키가 남는다(5회차 E5-6). 고친 뒤 돌려보내게 한다.
-  if (!approve && cur.kind === 'ssh-key-activate' && KS.keyStoreLoadError()) return { ...STORE_UNREADABLE, reason: 'SSH 키 저장소를 읽지 못해 지금 돌려보내면 승인 대기 키를 지울 수 없습니다 — 저장소를 고친 뒤 돌려보내세요(요청은 그대로 둡니다).' };
+  //   못 읽음뿐 아니라 쓰기 거절(포탈 밖 변경 · 봉인 못 풂)도 같다 — 지우기가 거절돼 200 ok 뒤에 고아 키가 남았다(5회차 반증 R5R-1).
+  if (!approve && cur.kind === 'ssh-key-activate') { const wi = KS.keyStoreWriteIssue(); if (wi) return { ...wi, reason: `${wi.reason} 지금 돌려보내면 승인 대기 키를 지울 수 없습니다 — 저장소를 고친 뒤 돌려보내세요(요청은 그대로 둡니다).` }; }
   if (approve) {
     if (AP.identityKey(by) === AP.identityKey(cur.requestedBy)) return { ok: false, code: 'self-approve', status: 403, reason: '요청한 사람은 승인할 수 없습니다 — 다른 설정 소유자가 승인해야 합니다.' };
     if (t(digest, 64) !== cur.digest) return { ok: false, code: 'digest-mismatch', status: 409, reason: '화면에서 본 요청 내용과 다릅니다 — 다시 읽은 뒤 승인하세요.' };
@@ -746,7 +747,8 @@ export const prechecks = Object.freeze({
     const k = KS.keyById(t(keyId, 32));
     if (!k) return { ok: false, code: 'not-found', status: 404, reason: '키를 찾을 수 없습니다.' };
     const ii = installingIssue(k.id); if (ii) return ii;
-    if (k.status === 'pending') return AP.approvalsLoadError() ? { ok: false, code: 'approvals-unreadable', status: 503, reason: '승인 기록 파일을 읽지 못해 승인 대기 키를 지우지 않았습니다.' } : null;
+    // 승인 대기 키 지우기도 저장소 쓰기다 — 쓸 수 없으면 OTP 앞에서(5회차 반증 R5R-1).
+    if (k.status === 'pending') return AP.approvalsLoadError() ? { ok: false, code: 'approvals-unreadable', status: 503, reason: '승인 기록 파일을 읽지 못해 승인 대기 키를 지우지 않았습니다.' } : KS.keyStoreWriteIssue();
     return REFS.deleteIssue(k.id) || requestPrecheck({ kind: 'ssh-key-delete', target: k.id, by });   // 쓰는 곳 · 저장소 쓰기(5회차 A5-1)
   },
   resume: async ({ corp, by }) => {
@@ -767,7 +769,8 @@ export const prechecks = Object.freeze({
     if (KS.keyStoreLoadError()) return STORE_UNREADABLE;
     const s = bmServerRawById(t(serverId, 64));
     // 실제로 쓰일 키로 본다 — ‘법인 기본 키를 따름’(빈 값)이면 공통 계정의 기본 키(5회차 A5-4).
-    { const eff = t(keyId, 32) || (s && t(s.credRef) ? t(KS.accountById(t(s.credRef))?.keyRef, 32) : ''); const rv = eff ? KL.revokingIssue(eff) : null; if (rv) return rv; }
+    //   키를 고르면(빈 값 포함) 비밀번호 고정 표지는 지워진다(setBmServerKeyRef) — 그래서 osAuth 는 넣지 않는다.
+    { const eff = REFS.effectiveKeyRef({ keyRef: t(keyId, 32), credRef: s?.credRef }); const rv = eff ? KL.revokingIssue(eff) : null; if (rv) return rv; }
     return s && KL.serverLockBusy(KL.serverLockKey(s)) ? { ok: false, code: 'server-busy', status: 409, reason: '이 서버에 다른 키 작업이 진행 중입니다 — 끝난 뒤 다시 고르세요.' } : null;
   },
   guards: ({ patch, by }) => {

@@ -2,7 +2,7 @@
 // 서버/그룹/전체 합산(총·사용·가용)을 보여준다. 전부 adminOnly(SSH 자격증명·호스트 구성).
 import { requireRole } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
-import { listBmServers, listBmServersRaw, saveBmServer, removeBmServer, getBmSettings, saveBmSettings, bmServerInputIssue } from '../../bmstor/registry.js';
+import { listBmServers, listBmServersRaw, saveBmServer, removeBmServer, getBmSettings, saveBmSettings, bmServerInputIssue, registryReadFailed } from '../../bmstor/registry.js';
 import { getBmLatest, bmCollectNow, bmPollerStatus } from '../../bmstor/poller.js';
 import { isDemoGuest } from '../../auth/demoGuest.js'; // v2.720(감사 R1-03)
 import { aggregate } from '../../bmstor/agg.js';
@@ -74,6 +74,8 @@ const fullScopeOnly = fullScopeOnlyWith('베어메탈 스토리지는 vCenter �
  * 7b: 요청이 키 · 공통 계정 참조를 **새로 묶는지**(새 항목 · 주소 변경 · 다른 참조) 판정하고 참조를 확인한다(존재 · 퇴역 · 종류).
  * @returns {Promise<{binds:boolean}|{error:string, code:string, status?:number}>}
  */
+const REGISTRY_UNREAD = Object.freeze({ ok: false, code: 'registry-unreadable', registryUnreadable: true, reason: 'OS 계정 등록부(bm-storage.json)를 지금 읽지 못합니다 — 파일 · 폴더 권한을 확인한 뒤 다시 하세요(원본은 그대로입니다).' });
+
 export async function bmBindCheck(body = {}) {
   const KS = await import('../../bmusage/onboard/keyStore.js');
   const { bindOfWrite } = await import('../../bmusage/onboard/bindRule.js');
@@ -106,6 +108,8 @@ export function registerBmStorage(api) {
       settings: getBmSettings(), status: bmPollerStatus(),
       agents: listCollectors().map((c) => c.id), // 위임 가능한 엣지(수집 서버) 이름 목록
       datacenters: (() => { try { return listDatacenters().map((d) => ({ id: d.id, name: d.name || d.id })); } catch { return []; } })(),   // v2.915: 폼 '법인' 선택
+      // 등록부를 지금 읽지 못하면 빈 목록 · 기본 주기는 ‘모름’ 이다(원본은 그대로 — 5회차 반증 R5R-2). 화면이 띠로 말한다.
+      ...(registryReadFailed() ? { registryUnreadable: true } : {}),
     });
   });
 
@@ -523,9 +527,12 @@ export function registerBmStorage(api) {
         if (!isFullReadWriteScope(req.user, store.get())) return res.status(403).json({ ok: false, code: 'write-scope', reason: 'SSH 키 · 공통 계정을 서버에 묶으려면 조회 · 쓰기 범위가 모두 무제한인 설정 소유자여야 합니다.' }); }
       // 거두는 중인 키로 묶지 않는다(4회차 A4-2).
       // 실제로 쓰일 키 — keyRef, 없으면 공통 계정(credRef)의 기본 키(5회차 A5-4 — 공통 계정으로 묶으면 거두는 키를 비켜 갔다).
-      { const KL = await import('../../sshaccess/keyLogin.js'); const KS2 = await import('../../bmusage/onboard/keyStore.js');
+      //   판정은 하나(refs.effectiveKeyRef — 5회차 반증 R5R-5): 비밀번호 고정(osAuth 'password')이면 키를 쓰지 않으므로 거두기와 무관하다.
+      //   osAuth 를 보내지 않으면 등록부가 기존 값을 둔다(registry.applyServerInput) — 그 값으로 본다.
+      { const KL = await import('../../sshaccess/keyLogin.js'); const REFS = await import('../../bmusage/onboard/refs.js');
         const s32 = (v) => (typeof v === 'string' ? v.slice(0, 32).trim() : '');
-        const kr = s32(body.keyRef) || (s32(body.credRef) ? s32(KS2.accountById(s32(body.credRef))?.keyRef) : '');
+        const ex = body.id ? listBmServersRaw().find((x) => x.id === body.id) || null : null;
+        const kr = REFS.effectiveKeyRef({ keyRef: s32(body.keyRef), credRef: s32(body.credRef), osAuth: body.osAuth !== undefined ? body.osAuth : ex?.osAuth });
         const v = kr ? KL.revokingIssue(kr) : null; if (v) return res.status(v.status || 409).json({ ok: false, code: v.code, reason: v.reason }); }
       const g2 = await runGate(reauth, req);
       if (!g2.ok) return res.status(g2.status).json(g2.body);
@@ -555,6 +562,7 @@ export function registerBmStorage(api) {
    * 기본 export 는 비밀번호 제외(?secrets=1 은 설정 소유자 + 감사로그), 가져오기는 드라이런 →
    * 덮어쓰기(overwrite=true 명시) 2단계. agent 는 등록된 수집 서버(원격) 이름만 허용. ── */
   api.get('/tools/bm-storage/export.csv', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
+    if (registryReadFailed()) return res.status(503).json(REGISTRY_UNREAD);   // 빈 CSV 를 ‘0대’ 로 내려보내지 않는다(5회차 반증 R5R-2)
     const withPw = String(req.query.secrets || '') === '1';
     const send = () => {
       const list = withPw ? listBmServersRaw() : listBmServers();
@@ -578,6 +586,8 @@ export function registerBmStorage(api) {
     const { rows, error } = parseBmServersCsv(String(req.body?.csv || ''));
     if (error) return res.status(400).json({ ok: false, reason: error });
     if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });
+    // 등록부를 못 읽는 동안에는 드라이런도 받지 않는다 — 원본에 있는 서버를 ‘추가’ 로 보였다(5회차 반증 R5R-2). 저장도 등록부가 거절한다.
+    if (registryReadFailed()) return res.status(503).json(REGISTRY_UNREAD);
 
     const all = listBmServers();
     const existingId = (host, port, user) => all.find((s) =>

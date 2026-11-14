@@ -53,3 +53,16 @@ export function writeTokens(body = {}) {
 
 /** 등록부 쓰기 한 건의 묶음 판정(choke point · bm-storage 라우트 · 온보딩 분석 사후 점검이 같은 입력으로 부른다). */
 export function bindOfWrite(existing, body = {}) { return bindDecision(entryTokens(existing), writeTokens(body)); }
+
+/**
+ * 실제로 쓰일 키 id — **판정 하나**(5회차 반증 R5R-5 — 네 곳에 복제돼 bm-storage 라우트만 ‘비밀번호 고정’ 을 보지 않았다).
+ * osAuth 'password' = 키 없음(공통 계정에 기본 키가 있어도) · keyRef · 없으면 공통 계정(credRef)의 기본 키. 접속(refs.resolveOsAuth)과 같은 규칙.
+ * accountById 는 부르는 쪽이 준다(이 파일은 순수 — 저장소를 읽지 않는다).
+ */
+export function effectiveKeyRefOf({ keyRef, credRef, osAuth } = {}, accountById = () => null) {
+  if (osAuth === 'password') return '';
+  const kr = String(keyRef ?? '').trim(); if (kr) return kr;
+  const cr = String(credRef ?? '').trim(); if (!cr) return '';
+  let acc = null; try { acc = accountById(cr); } catch { acc = null; }
+  return String(acc?.keyRef ?? '').trim();
+}

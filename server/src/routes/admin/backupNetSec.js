@@ -6,6 +6,7 @@ import { getAllGpuGuestDiag } from '../../central/gpuGuestDiag.js';
 import { listInventory } from '../../central/inventory.js';
 import { listAgentConfigs } from '../../central/agentConfig.js';
 import { createBackup, listBackups, backupPath, deleteBackup, readBackupDetailed, readBackupFailure, restoreCentral } from '../../backup/service.js';
+import { keyStoreDropNotes } from '../../bmusage/onboard/keyBundle.js';   // v3.10.0: SSH 키 저장소 복원 문구(예약 적용과 같은 함수)
 import { stagedRestoreStatus, cancelStagedRestore } from '../../backup/stagedRestore.js'; // v2.768(점검 R3-C5-02): 복원 예약 상태·취소
 import { restartProcess } from '../../upgrade/upgrade.js'; // v2.768: 복원 후 바로 재시작(선택 — upgrade/apply 의 restart 와 같은 종료 경로)
 import { loadBackupSettings, saveBackupSettings, backupStatus } from '../../backup/settings.js';
@@ -228,11 +229,8 @@ adminRouter.post('/backup/restore/:name', adminOnly, requireSettingsOwner, async
     //   예전 join 은 '주의: [object Object]' 를 냈다. 백업 생성(service.js createBackup)은 문자열 경고라 두 모양을 모두 받는다.
     // v3.10.0(5회차 D5-1): SSH 키 저장소 합치기 결과를 문구에도 — 승인 대기 키의 id 를 지금 값으로 지킨 키(key-id:)는 그 키를 쓰던 서버가 옛 id 를 가리키므로
     //   승인 뒤 ‘키 고르기’ 로 다시 묶어야 한다 · 되살리지 못한 키 · 계정 비밀은 수만(응답 envKeysDropped 에 이름).
-    { const sshDrop = (Array.isArray(r.envKeysDropped) ? r.envKeysDropped : []).filter((d) => String(d).startsWith('ssh-keys.json:'));
-      const ids = sshDrop.filter((d) => String(d).includes(':key-id:')).length;
-      const other = sshDrop.length - ids;
-      if (ids) parts.push(`SSH 키 ${ids}개는 지금 승인 대기 중이라 지금 id 를 지켰습니다 — 백업에서 그 키를 쓰던 서버는 승인 뒤 설정 › 보안 › SSH 공용 접속의 ‘키 고르기’ 로 다시 묶으세요.`);
-      if (other) parts.push(`SSH 키 저장소에서 되살리지 못한 항목 ${other}개(개인키 · 비밀은 번들에 없음 — 응답의 envKeysDropped 에 이름).`); }
+    //   문구는 keyStoreDropNotes 하나(예약 적용 경로와 같은 문구 — 5회차 반증 R5R-6).
+    parts.push(...keyStoreDropNotes((Array.isArray(r.envKeysDropped) ? r.envKeysDropped : []).filter((d) => String(d).startsWith('ssh-keys.json:'))));
     const warnTexts = Array.isArray(r.warnings) ? r.warnings.map(backupWarnText).filter(Boolean) : [];
     if (warnTexts.length) parts.push(`주의: ${warnTexts.join(' · ')}`);
     parts.push('복원 전 현재 설정은 자동 백업(pre-restore)됨.');

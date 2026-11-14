@@ -17,7 +17,7 @@
 import crypto from 'node:crypto';
 import { cellLooksSecret } from './keyParse.js';
 import { NAME_RE } from './keyStore.js';
-import { addrKey, bindDecision, bindOfWrite } from './bindRule.js';
+import { addrKey, bindDecision, bindOfWrite, effectiveKeyRefOf } from './bindRule.js';
 
 const t = (v) => String(v ?? '').trim();
 const lc = (v) => t(v).toLowerCase();
@@ -326,7 +326,7 @@ export function analyzeOnboardRows(rows = [], ctx = {}) {
       } else if (!osAcc && !osCredName && !(exOs && !osCred)) warn('os-no-auth');
       else if (!osCred && exOs) warn('os-cred-kept');
       // 거두는 중인 키로 묶지 않는다 — 고른 키, 없으면 공통 계정의 기본 키(5회차 A5-4 — CSV 가져오기도 같은 판정).
-      { const eff = keyRef || (osAuth !== 'password' && osAcc?.keyRef ? osAcc.keyRef : '');
+      { const eff = effectiveKeyRefOf({ keyRef, credRef: osAcc ? (osAcc.id || '-') : '', osAuth }, () => osAcc);   // 판정 하나(5회차 반증 R5R-5)
         if (eff && typeof ctx.keyRevoking === 'function' && ctx.keyRevoking(eff)) { reject('key-revoking'); done(); continue; } }
     }
     if (remote) warn('edge-names');

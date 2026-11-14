@@ -3500,7 +3500,7 @@ test('⑲ 소스 스윕 — 등록부 쓰기(키 묶기 · 되돌리기 · 저�
   // 7b 화면 — 키 등록 · 교체 · 삭제 게이트에 두 사람 승인 검사가 OTP 앞에 있다
   const ob = stripComments(fs.readFileSync(path.join(SRC, 'routes/api/bmOnboard.js'), 'utf8'));
   assert.match(ob, /const keyAddGate = \[adminOnly, toolsPerm, requireSettingsOwner, fullRW, twoPersonFirst, keyVaultFirst, reauth\];/);
-  assert.match(ob, /const keyChangeGate = \[adminOnly, toolsPerm, requireSettingsOwner, fullRW, twoPersonFirst, installingFirst, revokingFirst, reauth\];/);
+  assert.match(ob, /const keyChangeGate = \[adminOnly, toolsPerm, requireSettingsOwner, fullRW, twoPersonFirst, installingFirst, revokingFirst, refsFirst, reauth\];/);
   assert.match(ob, /api\.post\('\/tools\/bm-usage\/ssh-keys\/rotate', \.\.\.keyChangeGate/);
   assert.match(ob, /api\.delete\('\/tools\/bm-usage\/ssh-keys\/:id', \.\.\.keyChangeGate/);
   // 알림 메일 — 본문이 사건에서 읽는 칸은 종류 · 법인 · 대상 · 누가 · 설명뿐이다(다른 칸을 본문에 싣는 코드가 생기면 여기서 걸린다)
@@ -5043,7 +5043,7 @@ test('㉙-c 5회차 B — 주석(#) 처리한 같은 키 줄은 키 줄이 아�
 
 test('㉙-d 5회차 D · E — 복원 문구에 승인 대기 키 id 를 지켰다는 요약(소스) · 읽은 키 기록을 못 읽으면 후보 응답 · 화면 · 키 점검이 그 사실을 말한다 · 키 저장소 손상 중 키 등록 요청 돌려보내기는 503(요청 유지)', async () => {
   const bn = (await import('./_stripComments.js')).stripComments(fs.readFileSync(path.join(SRC, 'routes/admin/backupNetSec.js'), 'utf8'));
-  assert.match(bn, /filter\(\(d\) => String\(d\)\.includes\(':key-id:'\)\)\.length[^]*?if \(ids\) parts\.push\(`SSH 키 \$\{ids\}개는 지금 승인 대기 중이라 지금 id 를 지켰습니다/, '복원 응답 문구(5회차 D5-1)');
+  assert.match(bn, /parts\.push\(\.\.\.keyStoreDropNotes\(/, '복원 응답 문구(5회차 D5-1 — 문구는 keyBundle.keyStoreDropNotes 하나 · 5회차 반증 R5R-6)');
   const sv = mkServer('bm-e52', null, { host: '10.9.55.1', password: 'x' });
   const f = path.join(DIR, INS.INSTALLED_FILE_NAME); const aside = `${f}.aside-29d`;
   if (fs.existsSync(f)) fs.renameSync(f, aside);

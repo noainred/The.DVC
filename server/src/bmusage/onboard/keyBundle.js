@@ -29,6 +29,28 @@ export function redactKeyStoreText(text) {
 }
 
 /**
+ * 합치기에서 빠진 항목(mergeRedactedKeyStore 의 dropped) → 사람이 읽을 문구. **복원 즉시 · 예약 적용 두 경로가 같은 함수**(5회차 반증 R5R-6 —
+ * 예약 적용은 수만 세고 어디에도 보이지 않았다 · 괄호 사유가 account-key 항목과 맞지 않았다). 앞에 'ssh-keys.json:' 이 붙어 있어도 된다.
+ * 이름은 키 · 공통 계정 이름뿐(비밀 없음 — 백업 화면은 설정 소유자 등급).
+ */
+export function keyStoreDropNotes(dropped = []) {
+  const list = (Array.isArray(dropped) ? dropped : []).map((d) => String(d).replace(/^ssh-keys\.json:/, ''));
+  const by = (p) => list.filter((d) => d.startsWith(p));
+  const ids = by('key-id:'); const keys = by('key:'); const accs = by('account:'); const accKeys = by('account-key:');
+  const notes = list.filter((d) => d.startsWith('('));
+  const other = list.length - ids.length - keys.length - accs.length - accKeys.length - notes.length;
+  const names = (arr) => `${arr.slice(0, 5).map((d) => d.slice(d.indexOf(':') + 1) || '이름 없음').join(', ')}${arr.length > 5 ? ` 외 ${arr.length - 5}개` : ''}`;
+  const out = [];
+  if (ids.length) out.push(`SSH 키 ${ids.length}개(${names(ids)})는 지금 승인 대기 중이라 지금 id 를 지켰습니다 — 백업에서 그 키를 쓰던 서버는 승인 뒤 설정 › 보안 › SSH 공용 접속의 ‘키 고르기’ 로 다시 묶으세요.`);
+  if (keys.length) out.push(`개인키가 번들에 없어 되살리지 못한 SSH 키 ${keys.length}개(${names(keys)}).`);
+  if (accs.length) out.push(`비밀번호를 되살리지 못한 공통 계정 ${accs.length}개(${names(accs)}) — 비밀번호는 번들에 없어 비운 채로 두었습니다.`);
+  if (accKeys.length) out.push(`가리키던 기본 키가 없어 기본 키를 뗀 공통 계정 ${accKeys.length}개(${names(accKeys)}).`);
+  for (const n of notes.slice(0, 3)) out.push(`SSH 키 저장소: ${n.replace(/^\(|\)$/g, '')}.`);
+  if (other > 0) out.push(`SSH 키 저장소의 다른 항목 ${other}개를 되살리지 못했습니다.`);
+  return out;
+}
+
+/**
  * 복원 병합 — 번들의 가린 칸은 **지금 파일의 같은 키(지문) · 같은 계정(id)** 값으로 되살린다. 되살릴 수 없는 키는 빼고, 비밀번호를 되살릴 수 없는 계정은 비밀번호 없이 남긴다.
  * 7b 반증 F13(결정): 번들에는 개인키가 없으므로 복원이 키를 **다시 만들 수 없다** → 지금 파일에만 있는 키 · 계정(백업 뒤 등록분)은 **지우지 않고 그대로 둔다**(합집합).
  *   지우면 '복원 전' 자동 백업으로 되돌려도 개인키가 없어 영구 손실이다. 남긴 것은 kept 로 밝힌다(복원 결과 sshKeysKept).

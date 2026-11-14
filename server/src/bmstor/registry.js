@@ -34,6 +34,8 @@ let readFailed = false;   // 지금 파일을 읽지 못함(손상 아님 — 5�
 //   아래 groups 변형이 던져 **파일 전체를 손상으로 보존하고 목록을 비웠다**(정상 서버까지 소실 — 스크래치 CONFIG_DIR 재현).
 const loadErr = makeLoadError();
 export function registryLoadError() { load(); return loadErr.get(); }
+/** 지금 파일을 읽지 못하는가(권한 · 폴더 · NFS — 손상 보존과 다르다: 원본이 그대로 있어 빈 목록은 ‘모름’ 이다 · 5회차 반증 R5R-2). */
+export function registryReadFailed() { load(); return readFailed === true; }
 
 // ‘없음’ 은 ENOENT 일 때만(4회차 C4-2 · C4-3 — 폴더 검색 권한 · NFS 오류에도 existsSync 가 거짓이라 빈 값으로 캐시하고 다음 쓰기가 원본을 덮었다).
 const isMissing = (f) => { try { fs.statSync(f); return false; } catch (e) { return e?.code === 'ENOENT'; } };
