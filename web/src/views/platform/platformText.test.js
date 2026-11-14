@@ -270,5 +270,12 @@ describe('KPI 카드 → 도구 리전 인계(v3.10.15)', () => {
     }
     const srv = fs.readFileSync(new URL('../../../../server/src/routes/api/vmtrack.js', import.meta.url), 'utf8');
     expect(srv).toMatch(/region: String\(vc\.location\?\.region \|\| ''\)/);
+    // 하위 구획(DS 목록 · 상위 · 변경 이력 · 피벗)과 상세 모달도 리전을 싣는다 — 제목이 '리전 X 합계' 인데 본문이 전 법인이면 안 된다
+    const st = fs.readFileSync(new URL('../tools/StorageTrackTool.jsx', import.meta.url), 'utf8');
+    expect((st.match(/\.\.\.\(region && !vcenterId \? \{ region \} : \{\}\)/g) || []).length).toBeGreaterThanOrEqual(5);
+    expect(st).toMatch(/<DsDetail \{\.\.\.detail\} region=\{vcenterId \? '' : region\}/);
+    const vt = fs.readFileSync(new URL('../tools/VmTrackTool.jsx', import.meta.url), 'utf8');
+    expect((vt.match(/region=\{vcenterId \? '' : region\}/g) || []).length).toBe(2);
+    expect((vt.match(/\.\.\.\(region \? \{ region \} : \{\}\)/g) || []).length).toBe(2);
   });
 });

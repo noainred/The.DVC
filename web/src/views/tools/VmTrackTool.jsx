@@ -471,8 +471,8 @@ export default function VmTrackTool() {
         </>
       )}
 
-      {detail && <ChangeDetail {...detail} onClose={() => setDetail(null)} />}
-      {dsDetail && <DsChangeDetail {...dsDetail} onClose={() => setDsDetail(null)} />}
+      {detail && <ChangeDetail region={vcenterId ? '' : region} {...detail} onClose={() => setDetail(null)} />}
+      {dsDetail && <DsChangeDetail region={vcenterId ? '' : region} {...dsDetail} onClose={() => setDsDetail(null)} />}
     </div>
   );
 }
@@ -487,15 +487,15 @@ const DS_KIND_META = {
  * 데이터스토어 사용량 변화 상세(v2.348) — 어떤 DS 가 얼마나 늘거나 줄었는지 + 연결/해제.
  * 사용량 변화는 임계(기본 1GB) 이상만 기록되므로, 미세 변동은 목록에 나오지 않는다(화면에 명시).
  */
-function DsChangeDetail({ title, snapId = null, slot = null, onClose }) {
+function DsChangeDetail({ title, snapId = null, slot = null, region = '', onClose }) {   // v3.10.15: region
   const [items, setItems] = useState(null);
   const [err, setErr] = useState(null);
   const [kind, setKind] = useState('all');
   useEffect(() => {
-    fetchJson('/tools/vm-track/ds-changes', { ...(snapId != null ? { snapId } : {}), ...(slot ? { slot } : {}) })
+    fetchJson('/tools/vm-track/ds-changes', { ...(snapId != null ? { snapId } : {}), ...(slot ? { slot } : {}), ...(region ? { region } : {}) })
       .then((d) => setItems(d.items || []))
       .catch((e) => setErr(e.message));
-  }, [snapId, slot]);
+  }, [snapId, slot, region]);
 
   const shown = useMemo(() => (items || []).filter((r) => kind === 'all' || r.kind === kind), [items, kind]);
   const countOf = (k) => (items || []).filter((r) => r.kind === k).length;
@@ -579,15 +579,15 @@ const KIND_META = {
 };
 
 /** 변경 상세 — 생성/삭제/전원 전환 VM + 클러스터·호스트·데이터스토어(사용자 요구). */
-function ChangeDetail({ title, snapId = null, slot = null, focus = 'all', onClose }) {
+function ChangeDetail({ title, snapId = null, slot = null, focus = 'all', region = '', onClose }) {   // v3.10.15: region
   const [items, setItems] = useState(null);
   const [err, setErr] = useState(null);
   const [kind, setKind] = useState(focus || 'all');
   useEffect(() => {
-    fetchJson('/tools/vm-track/changes', { ...(snapId != null ? { snapId } : {}), ...(slot ? { slot } : {}) })
+    fetchJson('/tools/vm-track/changes', { ...(snapId != null ? { snapId } : {}), ...(slot ? { slot } : {}), ...(region ? { region } : {}) })
       .then((d) => setItems(d.items || []))
       .catch((e) => setErr(e.message));
-  }, [snapId, slot]);
+  }, [snapId, slot, region]);
 
   const shown = useMemo(() => (items || []).filter((r) => kind === 'all' || r.kind === kind), [items, kind]);
   const countOf = (k) => (items || []).filter((r) => r.kind === k).length;

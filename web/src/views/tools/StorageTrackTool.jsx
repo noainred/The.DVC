@@ -273,13 +273,13 @@ export default function StorageTrackTool() {
           )}
 
           {/* 데이터스토어별 증감 추이(v2.353, 사용자 요구) */}
-          <DsPerStore days={days} vcenterId={vcenterId} />
+          <DsPerStore days={days} vcenterId={vcenterId} region={region} />
 
           {/* 선택 vCenter 의 전체 DS 각각의 추이 차트(v2.354, 사용자 요구) */}
           <DsAllGrid days={days} vcenterId={vcenterId} />
 
           {/* 스토리지 변경 이력(v2.355, 목업 확정 C) — A 시각별 / B DS별 전환 */}
-          <DsChangeHistory days={days} vcenterId={vcenterId} onPick={(it) => setDsTrend(it)} onSlot={(g) => setDetail({
+          <DsChangeHistory days={days} vcenterId={vcenterId} region={region} scopeText={scopeText} onPick={(it) => setDsTrend(it)} onSlot={(g) => setDetail({
             title: `${slotLabel(g.slot)} 데이터스토어 사용량 변화${` — ${scopeText}`}`,
             slot: g.slot, snapId: null,
           })} />
@@ -328,7 +328,7 @@ export default function StorageTrackTool() {
         </>
       )}
 
-      {detail && <DsDetail {...detail} onClose={() => setDetail(null)} />}
+      {detail && <DsDetail {...detail} region={vcenterId ? '' : region} onClose={() => setDetail(null)} />}
       {dsTrend && <DsTrendModal dsId={dsTrend.dsId} name={dsTrend.name} vcenterId={dsTrend.vcenterId}
         type={dsTrend.type} onClose={() => setDsTrend(null)} />}
     </div>
@@ -345,7 +345,7 @@ const deltaColor = (gb) => (gb > 0 ? 'var(--amber)' : gb < 0 ? 'var(--green)' : 
  *  · DS별(B): 행 = 데이터스토어, 열 = 최근 6개 슬롯의 증감 + 기간 누적(피벗).
  * 데이터는 diff-압축 저장(ds_changes/ds_series) — 무변화 DS 는 행이 없어 전체 vCenter 도 가볍다.
  */
-function DsChangeHistory({ days, vcenterId, onPick, onSlot }) {
+function DsChangeHistory({ days, vcenterId, region = '', scopeText = '', onPick, onSlot }) {   // v3.10.15: region(리전 합계) · scopeText(제목)
   const run = useLatest();   // v2.447: 늦게 온 이전 스코프 응답이 최신 화면을 덮지 않게(감사 B16)
   // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
   const [view, setView] = useHashTab({ base: ['tools', 'storage-track'], valid: ['slots', 'ds'], fallback: 'slots' });
@@ -361,17 +361,17 @@ function DsChangeHistory({ days, vcenterId, onPick, onSlot }) {
   const [err, setErr] = useState(null);
   const LIMIT = 20;
 
-  useEffect(() => { setPage(0); }, [vcenterId, days, qApplied, changedOnly, view]);
+  useEffect(() => { setPage(0); }, [vcenterId, region, days, qApplied, changedOnly, view]);
   useEffect(() => {
     if (view !== 'slots') return;
-    run(fetchJson('/tools/vm-track/ds-change-log', { days, vcenterId }),
+    run(fetchJson('/tools/vm-track/ds-change-log', { days, vcenterId, ...(region && !vcenterId ? { region } : {}) }),
       (d) => { setLog(d); setErr(null); }, (e) => setErr(e.message));
-  }, [view, days, vcenterId, run]);
+  }, [view, days, vcenterId, region, run]);
   useEffect(() => {
     if (view !== 'ds') return;
-    run(fetchJson('/tools/vm-track/ds-pivot', { days, vcenterId, q: qApplied, changedOnly: changedOnly ? 1 : 0, offset: page * LIMIT, limit: LIMIT }),
+    run(fetchJson('/tools/vm-track/ds-pivot', { days, vcenterId, ...(region && !vcenterId ? { region } : {}), q: qApplied, changedOnly: changedOnly ? 1 : 0, offset: page * LIMIT, limit: LIMIT }),
       (d) => { setPivot(d); setErr(null); }, (e) => setErr(e.message));
-  }, [view, days, vcenterId, qApplied, changedOnly, page, run]);
+  }, [view, days, vcenterId, region, qApplied, changedOnly, page, run]);
 
   const chip = (it) => (
     <button key={`${it.dsId}`} className="tab" onClick={() => onPick(it)}
@@ -619,7 +619,7 @@ function DsMiniChart({ item, days }) {
  * 서버가 diff-압축 시계열(ds_series)을 슬롯 축 위에 step 으로 펼쳐 주므로(첫 관측 전 null)
  * 화면은 받은 points 를 그대로 그린다.
  */
-function DsPerStore({ days, vcenterId }) {
+function DsPerStore({ days, vcenterId, region = '' }) {   // v3.10.15: region(리전 안 DS 목록 · 상위)
   const runList = useLatest(); const runTop = useLatest(); const runSeries = useLatest();  // v2.447: 세대 가드(감사 B16)
   const [list, setList] = useState(null);   // 선택 목록(로스터)
   const [top, setTop] = useState(null);     // 기간 증감 상위
@@ -628,15 +628,15 @@ function DsPerStore({ days, vcenterId }) {
   const [series, setSeries] = useState(null);
   const [err, setErr] = useState(null);
 
-  useEffect(() => { setSel(''); }, [vcenterId]); // 범위가 바뀌면 선택 해제(다른 vCenter 의 DS 잔류 방지)
+  useEffect(() => { setSel(''); }, [vcenterId, region]); // 범위가 바뀌면 선택 해제(다른 vCenter 의 DS 잔류 방지)
   useEffect(() => {
-    runList(fetchJson('/tools/vm-track/ds-list', { vcenterId }),
+    runList(fetchJson('/tools/vm-track/ds-list', { vcenterId, ...(region && !vcenterId ? { region } : {}) }),
       (d) => { setList(d.items || []); setErr(null); }, (e) => setErr(e.message));
-  }, [vcenterId, runList]);
+  }, [vcenterId, region, runList]);
   useEffect(() => {
-    runTop(fetchJson('/tools/vm-track/ds-top', { days, vcenterId, limit: 15 }),
+    runTop(fetchJson('/tools/vm-track/ds-top', { days, vcenterId, ...(region && !vcenterId ? { region } : {}), limit: 15 }),
       (d) => { setTop(d); setErr(null); }, (e) => setErr(e.message));
-  }, [days, vcenterId, runTop]);
+  }, [days, vcenterId, region, runTop]);
   useEffect(() => {
     if (!sel) { setSeries(null); return; }
     runSeries(fetchJson('/tools/vm-track/ds-series', { dsId: sel, days }),
@@ -770,15 +770,15 @@ const DS_KIND = {
 };
 
 /** 사용량 변화 데이터스토어 상세 — VM 추이 화면과 같은 엔드포인트를 쓴다(단일 진실). */
-function DsDetail({ title, snapId = null, slot = null, onClose }) {
+function DsDetail({ title, snapId = null, slot = null, region = '', onClose }) {   // v3.10.15: region(리전 합계일 때 그 리전 법인만)
   const run = useLatest();   // v2.447: 세대 가드(감사 B16)
   const [items, setItems] = useState(null);
   const [err, setErr] = useState(null);
   const [kind, setKind] = useState('all');
   useEffect(() => {
-    run(fetchJson('/tools/vm-track/ds-changes', { ...(snapId != null ? { snapId } : {}), ...(slot ? { slot } : {}) }),
+    run(fetchJson('/tools/vm-track/ds-changes', { ...(snapId != null ? { snapId } : {}), ...(slot ? { slot } : {}), ...(region ? { region } : {}) }),
       (d) => setItems(d.items || []), (e) => setErr(e.message));
-  }, [snapId, slot, run]);
+  }, [snapId, slot, region, run]);
 
   const shown = useMemo(() => (items || []).filter((r) => kind === 'all' || r.kind === kind), [items, kind]);
   const countOf = (k) => (items || []).filter((r) => r.kind === k).length;
