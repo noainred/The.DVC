@@ -28,12 +28,12 @@ export function serialOnboard(fn) {
 
 /** 기본 의존(실제 모듈). 테스트는 일부를 바꿔 끼운다. */
 export async function defaultOnboardDeps() {
-  const [BM, IDR, KS, MNT, PROF, CAT, FT, ED, VAULT] = await Promise.all([
+  const [BM, IDR, KS, MNT, PROF, CAT, FT, ED, VAULT, KL] = await Promise.all([
     import('../../bmstor/registry.js'), import('../../idrac/registry.js'), import('./keyStore.js'), import('../../bmstor/collect.js'),
     import('../profiles/index.js'), import('../tuning/catalog.js'), import('../../insights/fleetTags.js'), import('./edgeDeploy.js'),
-    import('../../security/secretVault.js'),
+    import('../../security/secretVault.js'), import('../../sshaccess/keyLogin.js'),   // 거두는 중인 키(5회차 A5-4)
   ]);
-  return { BM, IDR, KS, MNT, PROF, CAT, FT, ED, VAULT };
+  return { BM, IDR, KS, MNT, PROF, CAT, FT, ED, VAULT, KL };
 }
 
 /**
@@ -68,6 +68,7 @@ export function buildOnboardCtx({ D, corps = [], canView, canWrite, fullScope = 
     edgeRows: isEdge ? [] : D.ED.allEdgeRows(),
     accountByName: (kind, name) => pubAcc(D.KS.accountByName(kind, name)),
     keyByName: (name) => { const k = D.KS.keyByName(name); return k ? { id: k.id, name: k.name, status: k.status } : null; },
+    keyRevoking: (id) => { try { return !!D.KL?.revokingIssue?.(id); } catch { return false; } },   // 5회차 A5-4
     osIssue: D.BM.bmServerInputIssue,
     idracIssue: D.IDR.idracInputIssue,
     sanitizeMounts: D.MNT.sanitizeMounts,

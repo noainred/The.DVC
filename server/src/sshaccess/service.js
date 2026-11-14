@@ -176,7 +176,7 @@ export async function chooseServerKey({ serverId, keyId, expectAddr = null, by =
   // 화면이 본 접속처를 반드시 돌려받는다(빼고 부르면 확인을 건너뛰던 구멍 — 반증 D11).
   if (typeof expectAddr !== 'string' || !expectAddr) return { ok: false, code: 'need-addr', status: 400, reason: '화면에서 본 서버 접속처가 없습니다 — 화면을 다시 읽은 뒤 고르세요.' };
   const kid = t(keyId, 32);
-  { const rv = kid ? KL.revokingIssue(kid) : null; if (rv) return rv; }
+  { const eff = kid || (t(s.credRef) ? t(KS.accountById(t(s.credRef))?.keyRef, 32) : ''); const rv = eff ? KL.revokingIssue(eff) : null; if (rv) return rv; }   // 법인 기본 키를 따를 때도(5회차 A5-4)
   if (kid) {
     const k = KS.keyById(kid);
     if (!k) return { ok: false, code: 'key-missing', status: 404, reason: '키를 찾을 수 없습니다.' };
@@ -431,7 +431,8 @@ export function discardInbox({ relPath, sha = '', by = '' } = {}) {
  */
 async function unknownCorpIssue(c, { strict = false } = {}) {
   const known = new Set(); let allRead = true;
-  try { for (const x of (await corpList()) || []) known.add(String(x.id)); } catch { allRead = false; }
+  // vCenter 목록이 비면 ‘못 읽음’ 과 가를 수 없다(설정 파일 손상이면 빈 목록 — 5회차 A5-5) — strict 에서는 다 읽은 것으로 보지 않는다.
+  try { const vcs = (await corpList()) || []; if (!vcs.length) allRead = false; for (const x of vcs) known.add(String(x.id)); } catch { allRead = false; }
   try { if (bmRegistryLoadError()) allRead = false; else for (const s of listBmServersRaw()) if (t(s.vcenterId)) known.add(t(s.vcenterId)); } catch { allRead = false; }
   try { if (KS.keyStoreLoadError()) allRead = false; else { for (const a of KS.listAccountsRaw()) if (t(a.corp)) known.add(t(a.corp)); for (const k of KS.listKeysRaw()) if (t(k.folderCorp)) known.add(t(k.folderCorp)); } } catch { allRead = false; }
   if (strict && !allRead) return null;
@@ -562,7 +563,7 @@ export async function rotateKeyReq({ from, to, by = '' } = {}) {
   const a = KS.keyById(t(from, 32)); const b = KS.keyById(t(to, 32));
   if (!a || !b) return { ok: false, code: 'not-found', status: 404, reason: '옛 키 또는 새 키를 찾을 수 없습니다.' };
   if (b.status !== 'active') return { ok: false, code: b.status === 'pending' ? 'key-pending' : 'key-retired', status: 409, reason: b.status === 'pending' ? REFS.AUTH_ERROR['key-pending'] : '새 키가 퇴역 상태입니다.' };
-  { const ii = installingIssue(a.id) || KL.revokingIssue(b.id); if (ii) return ii; }
+  { const ii = installingIssue(a.id) || KL.revokingIssue(b.id) || REFS.rotateIssue(a.id, b.id); if (ii) return ii; }   // 실행하면 반드시 실패할 요청을 만들지 않는다(5회차 A5-3)
   // 새 키에 수집 기능(bm-usage · bm-storage)이 없으면 옛 키를 쓰던 서버의 주기 수집이 멈춘다 — 승인자가 보도록 본문에 싣고 응답에 경고를 단다(2회차 E2-1).
   const toFeatures = Array.isArray(b.features) ? b.features.slice() : null;
   const noCollect = Array.isArray(toFeatures) && !toFeatures.some((f) => f === 'bm-usage' || f === 'bm-storage');
@@ -655,6 +656,9 @@ export function approvalPrecheck(id, { approve, by = '', digest = '' } = {}) {
       if (nb.status !== 'active') return { ok: false, code: nb.status === 'pending' ? 'key-pending' : 'key-retired', status: 409, reason: nb.status === 'pending' ? REFS.AUTH_ERROR['key-pending'] : '새 키가 그 사이 퇴역했습니다 — 이 요청은 돌려보내세요.' };
     }
     if (cur.kind === 'ssh-key-delete') { const ii = installingIssue(cur.payload?.keyId); if (ii) return { ...ii, reason: `${ii.reason} 요청은 그대로 둡니다 — 작업이 끝난 뒤 승인하세요.` }; }
+    // 실행 함수와 같은 앞 조건 — 옛 키 없음 · 폴더 충돌 · 쓰는 곳 생김(5회차 A5-1 · A5-3). 요청은 그대로 둔다(돌려보낼지는 사람이 정한다).
+    if (cur.kind === 'ssh-key-rotate') { const ri = REFS.rotateIssue(t(cur.payload?.from, 32), t(cur.payload?.to, 32)); if (ri) return { ...ri, status: ri.status || 409, reason: `${ri.reason} 요청은 그대로 둡니다 — 고칠 수 없으면 돌려보내세요.` }; }
+    if (cur.kind === 'ssh-key-delete') { const di = REFS.deleteIssue(t(cur.payload?.keyId, 32)); if (di) return { ...di, reason: `${di.reason} 요청은 그대로 둡니다 — 고칠 수 없으면 돌려보내세요.` }; }
     if (cur.kind === 'ssh-keystore-reload' && typeof cur.payload?.sha === 'string') {
       const sha = KS.diskFileSha();
       if (sha === null) return { ok: false, code: 'read-failed', status: 503, reason: '키 저장소 파일을 지금 읽지 못했습니다 — 파일을 확인한 뒤 다시 승인하세요(요청은 그대로 둡니다).' };   // 2회차 반증 — ‘또 바뀌었습니다’ 라고 했다
@@ -716,9 +720,10 @@ export function requestPrecheck({ kind, target = '', by = '' } = {}) {
 const STORE_UNREADABLE = Object.freeze({ ok: false, code: 'registry-unreadable', status: 503, reason: 'SSH 키 저장소를 읽지 못했습니다 — 바꾸지 않았습니다.' });
 export const prechecks = Object.freeze({
   // 폴더 대상도 OTP 앞(4회차 E4-2 — vCenter 목록 밖 법인 폴더에 등록하면 OTP 를 쓴 뒤 400 이었다). 받는 곳 승인은 폴더를 넘기지 않는다.
-  addKey: ({ by, folderCorp, folderServer }) => { if (KS.keyStoreLoadError()) return STORE_UNREADABLE; const fi = folderTargetIssue(folderCorp, folderServer); return fi ? { ok: false, code: 'bad-folder', status: 400, reason: fi } : requestPrecheck({ kind: 'ssh-key-activate', by }); },
+  // 키 저장소에 지금 쓸 수 있는가 — 못 읽음 · 봉인 못 풂 · 포탈 밖 변경(5회차 A5-2)
+  addKey: ({ by, folderCorp, folderServer }) => { { const wi = KS.keyStoreWriteIssue(); if (wi) return wi; } const fi = folderTargetIssue(folderCorp, folderServer); return fi ? { ok: false, code: 'bad-folder', status: 400, reason: fi } : requestPrecheck({ kind: 'ssh-key-activate', by }); },
   placement: ({ keyId, folderCorp, folderServer }) => {
-    if (KS.keyStoreLoadError()) return STORE_UNREADABLE;
+    { const wi = KS.keyStoreWriteIssue(); if (wi) return wi; }
     const k = KS.keyById(t(keyId, 32)); if (!k) return { ok: false, code: 'not-found', status: 404, reason: '키를 찾을 수 없습니다.' };
     if (folderCorp === undefined && folderServer === undefined) return null;
     const nc = folderCorp !== undefined ? t(folderCorp, 128) : k.folderCorp; const ns = folderServer !== undefined ? t(folderServer, 128) : (folderCorp !== undefined ? '' : k.folderServer);
@@ -730,7 +735,8 @@ export const prechecks = Object.freeze({
     const a = KS.keyById(t(from, 32)); const b = KS.keyById(t(to, 32));
     if (!a || !b) return { ok: false, code: 'not-found', status: 404, reason: '옛 키 또는 새 키를 찾을 수 없습니다.' };
     if (b.status !== 'active') return { ok: false, code: b.status === 'pending' ? 'key-pending' : 'key-retired', status: 409, reason: b.status === 'pending' ? REFS.AUTH_ERROR['key-pending'] : '새 키가 퇴역 상태입니다.' };
-    return installingIssue(a.id) || KL.revokingIssue(b.id) || requestPrecheck({ kind: 'ssh-key-rotate', target: `${a.id}>${b.id}`, by });
+    // 회전 본체와 같은 앞 조건(저장소 쓰기 · 폴더 충돌 — 5회차 A5-2 · A5-3)
+    return installingIssue(a.id) || KL.revokingIssue(b.id) || REFS.rotateIssue(a.id, b.id) || requestPrecheck({ kind: 'ssh-key-rotate', target: `${a.id}>${b.id}`, by });
   },
   deleteKey: ({ keyId, by }) => {
     if (KS.keyStoreLoadError()) return STORE_UNREADABLE;
@@ -738,7 +744,7 @@ export const prechecks = Object.freeze({
     if (!k) return { ok: false, code: 'not-found', status: 404, reason: '키를 찾을 수 없습니다.' };
     const ii = installingIssue(k.id); if (ii) return ii;
     if (k.status === 'pending') return AP.approvalsLoadError() ? { ok: false, code: 'approvals-unreadable', status: 503, reason: '승인 기록 파일을 읽지 못해 승인 대기 키를 지우지 않았습니다.' } : null;
-    return requestPrecheck({ kind: 'ssh-key-delete', target: k.id, by });
+    return REFS.deleteIssue(k.id) || requestPrecheck({ kind: 'ssh-key-delete', target: k.id, by });   // 쓰는 곳 · 저장소 쓰기(5회차 A5-1)
   },
   resume: async ({ corp, by }) => {
     const c = t(corp, 128); const st = ST.stopFor(c);
@@ -756,8 +762,9 @@ export const prechecks = Object.freeze({
   // 서버 키 고르기 — 그 서버에 키 작업이 돌고 있으면 OTP 앞에서 409(본 함수가 다시 본다).
   chooseKey: ({ serverId, keyId }) => {
     if (KS.keyStoreLoadError()) return STORE_UNREADABLE;
-    const rv = t(keyId, 32) ? KL.revokingIssue(t(keyId, 32)) : null; if (rv) return rv;
     const s = bmServerRawById(t(serverId, 64));
+    // 실제로 쓰일 키로 본다 — ‘법인 기본 키를 따름’(빈 값)이면 공통 계정의 기본 키(5회차 A5-4).
+    { const eff = t(keyId, 32) || (s && t(s.credRef) ? t(KS.accountById(t(s.credRef))?.keyRef, 32) : ''); const rv = eff ? KL.revokingIssue(eff) : null; if (rv) return rv; }
     return s && KL.serverLockBusy(KL.serverLockKey(s)) ? { ok: false, code: 'server-busy', status: 409, reason: '이 서버에 다른 키 작업이 진행 중입니다 — 끝난 뒤 다시 고르세요.' } : null;
   },
   guards: ({ patch, by }) => {

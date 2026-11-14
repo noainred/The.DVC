@@ -85,17 +85,36 @@ export function deleteAccountIfUnused(id) {
  * (중간에 멈춰도 가리키는 키는 늘 존재한다 — 옛 키는 마지막에야 퇴역).
  * @returns {{ok:true, servers:string[], accounts:number} | {ok:false, ...}}
  */
-export function rotateKey(fromId, toId, { now = Date.now() } = {}) {
+/**
+ * 회전의 앞 조건(쓰지 않고 본다) — 회전 본체 · 요청 · 승인 사전 검사가 같은 판정을 쓴다(5회차 A5-1 · A5-2 · A5-3 — 사전 검사가 일부만 봐 OTP 를 쓴 뒤
+ *   folder-conflict · 저장소 쓰기 거절로 끝났고, 저장소 쓰기 거절은 등록부만 옮긴 채 멈췄다). → 거절 객체 또는 null.
+ */
+export function rotateIssue(fromId, toId) {
   const from = KS.keyById(fromId); const to = KS.keyById(toId);
   if (!from || !to) return { ok: false, code: 'not-found', status: 404, reason: '옛 키 또는 새 키를 찾을 수 없습니다.' };
   if (from.id === to.id) return { ok: false, code: 'same-key', reason: '같은 키로는 회전할 수 없습니다.' };
   if (to.status !== 'active') return { ok: false, code: to.status === 'pending' ? 'key-pending' : 'retired', reason: to.status === 'pending' ? '새 키가 두 사람 승인을 기다리는 중입니다 — 승인된 뒤 교체하세요.' : '새 키가 퇴역 상태입니다.' };
-  const unread = KS.keyStoreLoadError();
-  if (unread) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'SSH 키 저장소를 읽지 못해 회전하지 않았습니다.' };
+  // 키 저장소에 지금 쓸 수 있는가(못 읽음 · 봉인 못 풂 · 포탈 밖 변경) — 등록부를 먼저 옮긴 뒤 저장소 쓰기가 거절되면 반쯤 바뀐다.
+  const wi = KS.keyStoreWriteIssue(); if (wi) return wi;
   // v3.9.0(점검 B-4): 새 키의 폴더가 옛 키를 쓰는 서버 · 공통 계정을 덮는지 — 아니면 회전 뒤 수집이 key-folder 로 끊긴다. 쓰기 전에 거절한다.
   const conflicts = placementConflicts(to, { serversUsing: (s) => t(s.keyRef) === from.id, accountsUsing: (a) => a.keyRef === from.id });
   if (conflicts === null) return { ok: false, code: 'usage-unknown', status: 503, reason: 'OS 계정 등록부를 읽지 못해 회전하지 않았습니다.' };
   if (conflicts.length) return { ok: false, code: 'folder-conflict', status: 409, reason: `새 키의 폴더 밖인 곳 ${conflicts.length}개가 옛 키를 씁니다 — 새 키의 폴더를 맞춘 뒤 회전하세요.`, conflicts: conflicts.slice(0, 50) };
+  return null;
+}
+/** 삭제의 앞 조건(쓰지 않고 본다 — 5회차 A5-1). */
+export function deleteIssue(id) {
+  const k = KS.keyById(id);
+  if (!k) return { ok: false, code: 'not-found', status: 404, reason: '키를 찾을 수 없습니다.' };
+  const wi = KS.keyStoreWriteIssue(); if (wi) return wi;
+  const u = refUsage().key(k.id);
+  if (u.servers == null) return { ok: false, code: 'usage-unknown', status: 503, reason: 'OS 계정 등록부를 읽지 못해 이 키를 쓰는 서버 수를 모릅니다 — 삭제하지 않았습니다.' };
+  if (u.servers > 0 || u.accounts > 0) return { ok: false, code: 'in-use', status: 409, reason: `이 키를 쓰는 서버 ${u.servers}대 · 공통 계정 ${u.accounts}개가 있어 지울 수 없습니다 — 회전으로 참조를 옮긴 뒤 지우세요.` };
+  return null;
+}
+export function rotateKey(fromId, toId, { now = Date.now() } = {}) {
+  const issue = rotateIssue(fromId, toId); if (issue) return issue;
+  const from = KS.keyById(fromId); const to = KS.keyById(toId);
   const r1 = replaceBmServerKeyRefs(from.id, to.id);
   if (!r1.ok) return { ...r1, status: 503 };
   const r2 = KS.replaceAccountKeyRefs(from.id, to.id, { now });

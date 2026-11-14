@@ -522,7 +522,11 @@ export function registerBmStorage(api) {
       { const { isFullReadWriteScope } = await import('../../auth/scope.js'); const { store } = await import('../../store.js');
         if (!isFullReadWriteScope(req.user, store.get())) return res.status(403).json({ ok: false, code: 'write-scope', reason: 'SSH 키 · 공통 계정을 서버에 묶으려면 조회 · 쓰기 범위가 모두 무제한인 설정 소유자여야 합니다.' }); }
       // 거두는 중인 키로 묶지 않는다(4회차 A4-2).
-      { const KL = await import('../../sshaccess/keyLogin.js'); const kr = typeof body.keyRef === 'string' ? body.keyRef.slice(0, 32).trim() : ''; const v = kr ? KL.revokingIssue(kr) : null; if (v) return res.status(v.status || 409).json({ ok: false, code: v.code, reason: v.reason }); }
+      // 실제로 쓰일 키 — keyRef, 없으면 공통 계정(credRef)의 기본 키(5회차 A5-4 — 공통 계정으로 묶으면 거두는 키를 비켜 갔다).
+      { const KL = await import('../../sshaccess/keyLogin.js'); const KS2 = await import('../../bmusage/onboard/keyStore.js');
+        const s32 = (v) => (typeof v === 'string' ? v.slice(0, 32).trim() : '');
+        const kr = s32(body.keyRef) || (s32(body.credRef) ? s32(KS2.accountById(s32(body.credRef))?.keyRef) : '');
+        const v = kr ? KL.revokingIssue(kr) : null; if (v) return res.status(v.status || 409).json({ ok: false, code: v.code, reason: v.reason }); }
       const g2 = await runGate(reauth, req);
       if (!g2.ok) return res.status(g2.status).json(g2.body);
     }

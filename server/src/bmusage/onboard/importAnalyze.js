@@ -60,6 +60,7 @@ export const ROW_CODE = Object.freeze({
   'key-missing': 'SSH 키 이름이 키 저장소에 없습니다(값은 표시하지 않습니다).',
   'key-retired': '회전으로 퇴역한 SSH 키입니다 — 새 키 이름을 적으세요.',
   'key-pending': '두 사람 승인을 기다리는 SSH 키입니다 — 승인된 뒤에 고를 수 있습니다(v3.10.0).',
+  'key-revoking': '서버에서 거두는 중인 SSH 키입니다 — 거두기가 끝난 뒤 다른 키를 고르세요(v3.10.0).',
   'password-no-secret': 'os_key 가 password 인데 공통 계정에 비밀번호가 없습니다.',
   'dup-name': '같은 name 이 파일 안에 이미 있습니다.',
   'dup-tag': '같은 service_tag 가 파일 안에 이미 있습니다.',
@@ -324,6 +325,9 @@ export function analyzeOnboardRows(rows = [], ctx = {}) {
         }
       } else if (!osAcc && !osCredName && !(exOs && !osCred)) warn('os-no-auth');
       else if (!osCred && exOs) warn('os-cred-kept');
+      // 거두는 중인 키로 묶지 않는다 — 고른 키, 없으면 공통 계정의 기본 키(5회차 A5-4 — CSV 가져오기도 같은 판정).
+      { const eff = keyRef || (osAuth !== 'password' && osAcc?.keyRef ? osAcc.keyRef : '');
+        if (eff && typeof ctx.keyRevoking === 'function' && ctx.keyRevoking(eff)) { reject('key-revoking'); done(); continue; } }
     }
     if (remote) warn('edge-names');
     // ⑦ 저장 규칙 검증(복제하지 않는다 — 등록부 함수)
