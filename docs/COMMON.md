@@ -1,11 +1,11 @@
 # 공통 기능 목록 (자동 생성)
 
-솔루션 전체가 함께 쓰는 공용 모듈 **155개**를 코드에서 뽑은 목록이다. 새 헬퍼·컴포넌트를 만들기 전에 여기서 먼저 찾는다
+솔루션 전체가 함께 쓰는 공용 모듈 **154개**를 코드에서 뽑은 목록이다. 새 헬퍼·컴포넌트를 만들기 전에 여기서 먼저 찾는다
 (같은 판정을 복제하지 말 것 — 루트 `CLAUDE.md` '판정 코어는 하나').
 
 - 생성: `node scripts/common-doc.mjs` · 최신 여부: `node scripts/common-doc.mjs --check`
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다. 설명을 고치려면 그 모듈의 **머리 주석 첫 단락**을 고친다.
-- 훑은 소스 4104개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
+- 훑은 소스 4102개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
 
 ## 읽는 법 · 한계
 
@@ -20,11 +20,11 @@
 | 구분 | 위치 | 모듈 | 사용처 0 | 테스트 0 |
 |---|---|---|---|---|
 | 서버 공용 유틸 | `server/src/util/` | 88 | 0 | 10 |
-| 웹 공용 컴포넌트 | `web/src/components/` | 45 | 1 | 12 |
+| 웹 공용 컴포넌트 | `web/src/components/` | 44 | 0 | 12 |
 | 웹 공용 훅 | `web/src/hooks/` | 7 | 0 | 2 |
 | 웹 공용 유틸 | `web/src/util/` | 3 | 0 | 0 |
 | 웹 최상위 공용 모듈 | `web/src/` | 12 | 0 | 1 |
-| **합계** | | **155** | **1** | **25** |
+| **합계** | | **154** | **0** | **25** |
 
 ## 서버 공용 유틸 — `server/src/util/` (88)
 
@@ -121,7 +121,7 @@
 | `staticGzip.js` | 빌드 자산(해시 이름·불변)의 gzip 전송(v2.596, 감사 PERFWEB-02 — 실측). | `acceptsGzip` `createStaticGzip` `STATIC_GZIP_MAX_BYTES` | 1 | 1 | 3 |
 | `xlsxChart.js` | exceljs 가 만든 .xlsx 에 **꺾은선 차트**를 넣는다(v2.661 — iDRAC 통합 추이 엑셀 내보내기). | `colLetter` `chartXml` `addLineCharts` `sheetRef` `PRST_DASH` | 1 | 1 | 1 |
 
-## 웹 공용 컴포넌트 — `web/src/components/` (45)
+## 웹 공용 컴포넌트 — `web/src/components/` (44)
 
 사용처가 많은 순.
 
@@ -171,7 +171,6 @@
 | `sortableText.js` | 표 자동 정렬의 순수 로직(v2.422, 사용자 요구 '모든 표에 제목 클릭 정렬'). DOM 없이 React 엘리먼트 트리만 다루므로 node 환경 테스트로 고정한다. STable.jsx 가 이 함수들로 헤더 클릭 → tbody 행 재정렬을 수행한다. | `textOf` `sortKeyOf` `compareKeys` `cellText` `sortChildren` `nextSortState` 외 2 | 1 | 1 | 7 |
 | `vmMetricsText.js` | 성능 모달의 조회 실패 판정(순수 — vitest 고정, v2.591 감사 F6). | `metricErrorState` `metricSkipText` `metricAuthStopText` `edgePortalHref` `stopsAutoRefresh` | 1 | 1 | 3 |
 | `vmRemoteProbeText.js` | VM 원격 접속 버튼의 사전 도달성 점검 문구(순수 — 판정과 문구를 한 곳에 둔다). | `probeFailState` `probeRow` `probeTip` `probeColor` `probeFooter` | 1 | 1 | 2 |
-| `vmMetricStats.js` | VM·호스트 성능 차트 요약 수치(v2.598 VC2598-02). 서버는 vCenter 결측(-1)을 null 로 준다 — 예전 화면은 `a + p.v` 로 null 을 0 으로 더하고 분모는 전 점이라 평균이 **과소**했고, 최대·마지막도 결측에 끌렸다. 값이 있… | `metricStats` | 0 | 0 | 1 |
 
 ## 웹 공용 훅 — `web/src/hooks/` (7)
 
@@ -204,7 +203,7 @@
 | 모듈 | 하는 일 | 내보내는 이름 | 사용처 | 영역 | 테스트 |
 |---|---|---|---|---|---|
 | `api.js` | v2.498: 진행 중 요청 레지스트리 + 장기 로딩(hang) 보고. perfClient 는 api.js 를 import 하지 않으므로 순환이 없다(설정 조회는 fetchJson 을 인자로 받는다). | `noteHttpError` `permissionInfoFor` `httpInfoFor` `fetchJson` `postJson` `sendJson` 외 34 | 396 | 19 | 42 |
-| `numOrNull.js` | `numOrNull`(웹) — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정. | `numOrNull` `default` | 132 | 11 | 2 |
+| `numOrNull.js` | `numOrNull`(웹) — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정. | `numOrNull` `default` | 134 | 11 | 2 |
 | `dayStamp.js` | 브라우저 쪽 날짜 표기(v2.582 BUG-3) — 내려받기 파일명·만료일은 **사용자의 로컬 날짜**다. `new Date().toISOString().slice(0, 10)` 은 UTC 날짜라 한국 시각 00:00~09:00 에는 **어제**가 된다 (보고서 파일명… | `dayStamp` | 24 | 5 | 1 |
 | `regions.js` | 지역(region) 목록 — 웹 단일 소스(v2.575 IMP-10). ⚠ 값은 서버 `server/src/util/regions.js` 와 **글자 그대로 같아야 한다**(웹은 서버 소스를 import 할 수 없어 복사가 불가피하다). `web/src/regions.`… | `REGIONS` `default` | 5 | 2 | 1 |
 | `perfClientLogic.js` | 브라우저 성능 보고의 **순수 로직**(v2.498): 경로 정규화·장기 로딩 문구· 쿨다운/상한 판정. 웹 테스트는 node 환경(DOM 없음)이라 판정·문구는 여기서 회귀로 고정한다. | `normPath` `loadingText` `allowReport` `stallPayload` `statusPollTargets` `requesterText` 외 3 | 4 | 2 | 3 |
@@ -315,11 +314,11 @@
 
 판정이 아니라 **사실 목록**이다 — 지우거나 옮기기 전에 그 파일을 열어 확인한다.
 
-### import 사용처가 없는 공용 모듈 (1)
+### import 사용처가 없는 공용 모듈 (0)
 
 죽은 코드라는 뜻이 아니다 — 경로를 조합하는 동적 import · 워커 진입점 · 테스트 전용일 수 있다.
 
-- `web/src/components/vmMetricStats.js`(테스트 1)
+없음.
 
 ### 서버와 웹에 같은 이름으로 두 벌 있는 모듈 (4)
 

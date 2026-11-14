@@ -28,4 +28,15 @@ describe('boldParts', () => {
     expect(parts.some((p) => p.b)).toBe(true);
     expect(parts.map((p) => p.t).join('')).not.toContain('**');
   });
+  // v3.10.9(공통 기능 점검 7회차): '****'(빈 강조) 앞의 글자가 사라졌다('ab****cd' → '**cd').
+  it('빈 강조(****)는 글자로 남고 앞뒤 글자를 잃지 않는다', () => {
+    const join = (x) => boldParts(x).map((p) => p.t).join('');
+    // 불변식: 강조 표시를 되붙이면 원문 그대로다(글자를 하나도 잃지 않는다).
+    const back = (x) => boldParts(x).map((p) => (p.b ? `**${p.t}**` : p.t)).join('');
+    expect(join('ab****cd')).toBe('ab****cd');
+    expect(boldParts('ab****cd').some((p) => p.b)).toBe(false);
+    for (const x of ['ab****cd', 'x****', '****', '앞 **** 뒤 **굵게** 끝', '**a******b**', 'a **b** ****']) expect(back(x)).toBe(x);
+    expect(join('x****')).toBe('x****');
+  });
 });
+
