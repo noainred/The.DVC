@@ -4351,6 +4351,14 @@ test('㉕-b 원격 스크립트 · 칸 고르기 · 옛 id 포탈 줄(3회차 B)
   const r = (await runLogin({ servers: [sv], keyId: K.id, by: 'own' })).job.results[0];
   assert.deepEqual([r.line, r.unmarked, r.otherId, r.restricted], ['present-unmarked', 0, 1, false], JSON.stringify(r));
   assert.match(r.note, /같은 공개키를 다른 키 id 로 포탈이 넣은 줄 1개가 서버에 있습니다/);
+  //   원하는 줄(제한 붙음)이 이미 있어도 다른 id 포탈 줄(제한 없음)이 함께 있으면 ‘제한됨’ 이라 하지 않는다(그 줄로도 들어올 수 있다 — restricted 의 !m.otherId)
+  const S2 = await fakeSshd(); S2.st.password = pw;
+  const Lx = KL.buildKeyLine({ publicKey: K.pub, keyId: K.id, restrict: true, fromIp: '127.0.0.1' });
+  S2.writeAk(`${OTHER}\n${Lx}\n${K.pub} portal-ssh:k_00000000old3\n`);
+  const sv2 = mkServer('bm-otherid-exact', S2, { password: pw });
+  const r2 = (await runLogin({ servers: [sv2], keyId: K.id, by: 'own' })).job.results[0];
+  assert.deepEqual([r2.ok, r2.line, r2.otherId, r2.restricted], [true, 'present-marked', 1, false], JSON.stringify(r2));
+  assert.equal(S2.readAk(), `${OTHER}\n${Lx}\n${K.pub} portal-ssh:k_00000000old3\n`, '줄은 바꾸지 않았다');
 });
 
 test('㉕-c 자격 다시 풀기 · 사건 · 기록(3회차 C) — 키 확인 직전에 자격을 다시 풀어 그 사이 건 법인 중지면 그 키로 접속하지 않고 더한 줄을 되돌린다 · 듣는 쪽이 붙기 전에 쓴 사건도 메일로 · 버린 사건 수(reportLostEvents)도 메일 수에 · 진행 기록을 못 읽으면 작업마다 경고 한 번 · 점검 항목 inflight-unreadable · 읽은 키 · 사용 기록은 읽기 오류면 원본을 덮지 않는다 · 승인 기록은 읽기 오류 뒤 파일이 없으면 다시 쓴다', async () => {
