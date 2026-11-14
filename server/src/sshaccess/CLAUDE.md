@@ -47,3 +47,6 @@
 - **1회차 요약**(상세 `docs/rules/ssh-access.md`): 승인자는 글자 그대로 · 쓰기 범위도 무제한 · pairSeen 은 로컬 승인자 둘이나 실제 승인으로만 · 쓰기 라우트 `fullRW` · OTP 앞 사전 검사(`SVC.prechecks`) ·
   원격 자물쇠 주인 표 + mv 직전 `owns` · 원본 재대조 · 시작 표지(`begun` = 결과 모름) · 진행 기록(`inflight.js` → 기동 때 `key-job-interrupted`) · 작업은 서버마다 양보 · 키 고르기도 서버 자물쇠 ·
   넣는 중인 키 삭제/회전 409 · 본 표지는 상태 파일 `inboxSeen` · 비밀번호 한 번 = 서버가 받는 방식 하나(authHandler).
+- **2회차 요약**(상세 `docs/rules/ssh-access.md`): AD 소유자 신원 기록(`seenAd` — 응답에 싣지 않음) · 실패한 승인도 쌍 증거 · 모르는 법인 중지 404 · 7b 키 쓰기도 `fullRW` · 받는 곳 훑기 한 번에 하나 ·
+  키 고르기 바쁘면 409 · 원격 빠른 답은 **자물쇠 폴더가 없을 때만** · 스크립트 자기 시한 `SCRIPT_DEADLINE_S` < 포탈 exec 시한(`slow`) · 주인 표 호스트 = 이름/부팅 id/pid 이름공간 ·
+  대화형 비밀번호는 가리는 칸(echo=false)에만 · 키 확인은 nonce 를 되돌려 받아야(강제 명령 줄 → `key-login-unusable`).
