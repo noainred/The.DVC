@@ -16,7 +16,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { stripComments } from './_stripComments.js';
 import {
-  SCOPES, SHARED_MIN_AREAS, areaOf, buildCatalog, esc, headSummary, isTestFile, renderMd,
+  SCOPES, SHARED_MIN_AREAS, TEST_FILES_MAX, areaOf, buildCatalog, buildJson, esc, headSummary, isTestFile, renderJson, renderMd,
   scanExports, scanImports, scanPathLiterals,
 } from '../../scripts/common-doc.mjs';
 
@@ -105,12 +105,30 @@ test('scanPathLiterals — 테스트가 가리키는 모듈 경로(조합 경로
 });
 
 test('headSummary — import 뒤 머리 주석 · 장식 줄 · 자기 파일 이름 접두 · 길이 상한', () => {
-  assert.equal(headSummary("import fs from 'node:fs';\nimport path from 'node:path';\n\n/**\n * 원자적 파일 쓰기.\n *\n * 둘째 단락.\n */\nexport const a = 1;"), '원자적 파일 쓰기.');
+  // util/atomicWrite.js 모양 — import 뒤 JSDoc 다음에 또 JSDoc(그 다음이 선언).
+  assert.equal(headSummary("import fs from 'node:fs';\nimport path from 'node:path';\n\n/**\n * 원자적 파일 쓰기.\n *\n * 둘째 단락.\n */\n/** 함수 설명 */\nexport const a = 1;"), '원자적 파일 쓰기.');
   assert.equal(headSummary('// ────────────\n// 권한 프레임워크\n// ────────────\nexport const a = 1;'), '권한 프레임워크');
   assert.equal(headSummary('/**\n * util/chunkedPrune.js — 청크 삭제 (v2.453).\n */', 'server/src/util/chunkedPrune.js'), '청크 삭제 (v2.453).');
   assert.equal(headSummary('#!/usr/bin/env node\n/** 한 줄 요약 */\n'), '한 줄 요약');
   assert.equal(headSummary('export const a = 1;\n/** 코드 뒤 주석은 모듈 설명이 아니다 */'), '');
   assert.equal(headSummary('/**\n * 설명.\n * @param {number} a\n */'), '설명.');
+  // import 줄 끝의 주석 · 다음 import 를 설명하는 주석은 모듈 설명이 아니다(v3.10 판독 — store.js 가 ‘v2.617’ 로 실렸다).
+  assert.equal(headSummary("import a from 'a';\nimport { b } from './b.js'; // v2.617\nimport c from './c.js'; // v2.498: 메모\nexport const x = 1;"), '');
+  assert.equal(headSummary("import a from 'a';\n// v2.605: 다음 import 의 메모\nimport b from './b.js';\n/** 진짜 설명. */\n\nexport const x = 1;"), '진짜 설명.');
+  assert.equal(headSummary("import a from 'a';\n/* 블록 메모 */\nimport b from './b.js';\n\n// 줄 주석 설명\n\nconst y = 2;"), '줄 주석 설명');
+  // import 뒤 주석이 빈 줄 없이 선언에 붙어 있으면 그 선언의 설명이다(store.js SITE_STALE_MS · auth.js demoGuestOf).
+  assert.equal(headSummary("import a from 'a';\n\n/**\n * 낡음 기준 시간.\n */\nexport const STALE = 1;"), '');
+  assert.equal(headSummary("import a from 'a';\n// 이 함수의 메모\nfunction f() {}"), '');
+  // 내보내는 함수 · 클래스 · 기본 내보내기 · 파일과 같은 이름의 선언에 붙은 주석은 모듈 설명이다(Select.jsx · EscClose.jsx · secureCompare.js).
+  assert.equal(headSummary("import a from 'a';\n/** 상수시간 비교. */\nexport function eq() {}"), '상수시간 비교.');
+  assert.equal(headSummary("import a from 'a';\n/** 모달 스택. */\nexport default function EscClose() {}"), '모달 스택.');
+  assert.equal(headSummary("import a from 'a';\n/** 공용 드롭다운. */\nconst Select = forwardRef(f);", 'web/src/components/Select.jsx'), '공용 드롭다운.');
+  assert.equal(headSummary("import a from 'a';\n/** 다른 이름. */\nconst Other = 1;", 'web/src/components/Select.jsx'), '');
+  // 파일 맨 앞 머리 주석 뒤에 import 가 와도 머리 주석이다(import 를 지나기 전의 주석은 건너뛰지 않는다).
+  assert.equal(headSummary("/**\n * 맨 앞 설명.\n */\nimport a from 'a';\nexport const x = 1;"), '맨 앞 설명.');
+  assert.equal(headSummary("// 맨 앞 줄 주석\nimport a from 'a';"), '맨 앞 줄 주석');
+  // import 사이의 여러 줄 블록 주석은 머리 주석이다(TaskWho.jsx). 한 줄 메모는 아니다.
+  assert.equal(headSummary("import a from 'a';\n// 한 줄 메모\nimport b from 'b';\n/**\n * 사이의 머리 주석.\n */\nimport c from 'c';\nconst x = 1;"), '사이의 머리 주석.');
   const long = headSummary(`/** ${'가'.repeat(400)} */`);
   assert.equal([...long].length, 151, '150자 + 말줄임');
   assert.ok(long.endsWith('…'));
@@ -119,6 +137,17 @@ test('headSummary — import 뒤 머리 주석 · 장식 줄 · 자기 파일 �
   assert.equal((cut.split('`').length - 1) % 2, 0, cut);
   // 실제 파일: 사용처가 가장 많은 모듈이 '설명 없음' 으로 실리면 안 된다.
   assert.ok(byFile.get('server/src/util/atomicWrite.js').summary.startsWith('원자적 파일 쓰기'));
+  for (const m of CAT.shared) assert.equal(/^v\d+\.\d+$/.test(m.summary), false, `${m.file}: 요약이 버전 문자열뿐이다`);
+  // 맨 앞 머리 주석을 가진 대표 모듈이 '설명 없음' 으로 떨어지지 않는다(v3.10 1차 수정이 실제로 그렇게 깨졌다 — 23개).
+  for (const f of ['server/src/util/stateFiles.js', 'server/src/util/sqliteOpen.js', 'server/src/util/adaptiveTimer.js', 'server/src/util/clampSetting.js',
+    'server/src/util/bulkImport.js', 'server/src/util/registryCore.js', 'server/src/util/ssrfLookup.js', 'server/src/util/secureCompare.js',
+    'web/src/components/Select.jsx', 'web/src/components/DataList.jsx', 'web/src/components/VmReconfig.jsx']) {
+    assert.ok(byFile.get(f).summary, `${f}: 머리 주석이 있는데 요약이 비었다`);
+  }
+  // ⚠ 알려진 한계(보수적인 쪽을 골랐다): import 뒤 머리 주석이 모듈 상수에 바로 붙어 있으면(`TaskWho.jsx` TONE_COLOR · `EscClose.jsx` stack)
+  //   '설명 없음' 이 된다. 반대로 받으면 `store.js` 처럼 상수 하나의 설명이 모듈 설명으로 실린다 — 틀린 설명이 빈 설명보다 나쁘다.
+  const store = CAT.shared.find((m) => m.file === 'server/src/store.js');
+  assert.equal(store?.summary ?? '', '', 'store.js 는 머리 주석이 없다(import 뒤 주석은 SITE_STALE_MS 의 설명)');
 });
 
 test('esc — 칸 구분자는 어디서든, 꺾쇠는 코드 표기 밖에서만 바꾼다', () => {
@@ -173,6 +202,33 @@ test('renderMd — 모든 공용 모듈이 한 줄씩 실리고, 두 번 만들�
   // 생성 시각을 실으면 매 실행이 diff 를 만든다(머리 주석에서 온 날짜는 내용이라 괜찮다).
   assert.equal(/마지막 갱신|생성 시각|generatedAt/.test(md), false);
   assert.equal(md, renderMd(buildCatalog()), '두 번 만들어도 같다');
+});
+
+test('화면용 JSON — 문서와 같은 모듈 · 영역별 개수의 합 = 사용처 · 두 벌은 서로를 가리킨다 · 생성 시각 · 버전을 싣지 않는다', () => {
+  const j = buildJson(CAT);
+  const common = j.modules.filter((m) => m.scope !== 'outside');
+  assert.equal(common.length, byFile.size, '공용 위치의 모듈 수가 문서와 같다');
+  assert.equal(j.modules.length - common.length, CAT.shared.length);
+  assert.deepEqual(j.scopes.map((s) => s.count), [...CAT.scopes.map((s) => s.modules.length), CAT.shared.length]);
+  const byKey = new Map(j.modules.map((m) => [m.file, m]));
+  for (const m of j.modules) {
+    assert.equal(m.areaCounts.reduce((n, [, c]) => n + c, 0), m.users, `${m.file}: 영역별 개수의 합`);
+    assert.equal(m.areaCounts.length, m.areas, `${m.file}: 영역 수`);
+    assert.ok(m.testFiles.length <= TEST_FILES_MAX && m.testFiles.length <= m.tests, `${m.file}: 테스트 파일 상한`);
+    if (m.twin) assert.equal(byKey.get(m.twin)?.twin, m.file, `${m.file}: 두 벌은 서로를 가리킨다`);
+    // 사용처 **파일 목록**은 싣지 않는다(한 모듈이 수백 개 — 설계 §4.2).
+    assert.equal('importers' in m || 'users_files' in m, false);
+  }
+  assert.equal(byKey.get('server/src/util/numOrNull.js').twin, 'web/src/numOrNull.js');
+  // 영역은 많은 순.
+  const dl = byKey.get('server/src/util/deadline.js');
+  assert.deepEqual(dl.areaCounts.map(([, c]) => c), [...dl.areaCounts.map(([, c]) => c)].sort((a, b) => b - a));
+  const text = renderJson(j);
+  assert.deepEqual(JSON.parse(text), j, '글자로 낸 것을 다시 읽으면 같은 객체다');
+  assert.equal(text.split('\n').filter((l) => l.startsWith('    {')).length, j.modules.length, '모듈 하나가 한 줄');
+  // 버전 · 시각을 실으면 릴리스의 버전업마다 다시 만들어야 한다.
+  assert.equal(/"(?:version|generatedAt|at)"\s*:/.test(text), false);
+  assert.equal(text, renderJson(buildJson(buildCatalog())), '두 번 만들어도 같다');
 });
 
 test('못 읽으면 실패한다 — 풀리지 않는 import · 빈 공용 위치 · 구조 분해 export', () => {

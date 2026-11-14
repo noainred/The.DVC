@@ -1,5 +1,5 @@
 /**
- * v3.9.1 디스크 배드 섹터 — 과거 기록 읽기 1단계(README §22): 디스크 값(텔레메트리 · DriveMetrics) · 시스템 이벤트 로그(SEL).
+ * v3.10.1 디스크 배드 섹터 — 과거 기록 읽기 1단계(README §22): 디스크 값(텔레메트리 · DriveMetrics) · 시스템 이벤트 로그(SEL).
  * 고정하는 것: 정해 둔 이름만 읽음 · 못 읽은 값은 0 이 아님 · 장비가 알려 준 링크만 따라감 · 401 은 멈춤 · 엣지 정제 · 저장 병합 ·
  * 판정(흔적 있음 · 날짜 모름 / SEL 빠짐은 교체 판정의 근거로만) · 집계 · 데모 경로 끝까지.
  */
@@ -11,7 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'diskbadpast391-'));
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'diskbadpast3101-'));
 process.env.CONFIG_DIR = TMP;
 process.env.DISKBAD_DB_PATH = path.join(TMP, 'disk-bad.db');
 process.env.AUTH_ENABLED = 'false';
