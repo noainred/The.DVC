@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>디스크 오류 이력 점검 — 판정 · 실패 사유 · 권한 · 메뉴</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.muted{color:#8b9bb4}
+.sm{font-size:11.5px;color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+h2{margin:0;font-size:14px;font-weight:800}
+.hd{padding:12px 14px;border-bottom:1px solid #1f2a40;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;box-sizing:border-box}
+.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}
+.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.tag.unk{background:rgba(139,155,180,.14);color:#aebbd0}
+.tag.run{background:rgba(59,130,246,.18);color:#93c5fd}
+.tag.sure{background:rgba(59,130,246,.18);color:#93c5fd}
+.tag.fail{border:1px dashed #f87171;color:#fca5a5}
+.tag.none{border:1px solid #33415c;color:#8b9bb4}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:8px 12px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+td{padding:8px 12px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size:12.5px}
+tr:last-child td{border-bottom:0}
+</style>
+</helmet>
+<div style="width:1240px;height:1240px;box-sizing:border-box;padding:24px;display:flex;flex-direction:column;gap:16px;background:#0a0e17">
+
+<section class="card">
+<div class="hd"><h2>서버 판정 — 가장 무거운 것 하나</h2><span class="sm">판정은 점검 스크립트가 낸 결과를 그대로 옮깁니다. 포탈이 다시 판정하지 않습니다.</span></div>
+<table>
+<thead><tr><th style="width:150px">배지</th><th style="width:330px">조건(스크립트 결과)</th><th>화면이 말하는 것</th></tr></thead>
+<tbody>
+<tr><td><span class="tag bad">매체 오류</span></td><td>‘매체 오류 기록’ 1줄 이상 — 로그 · SMART 197/198 · NVMe 매체 오류 · RAID 매체 오류 카운터</td><td>배드 섹터 흔적이 있습니다. 어느 디스크인지는 ‘오류가 기록된 디스크’ 가 말합니다.</td></tr>
+<tr><td><span class="tag warn">재할당</span></td><td>매체 오류 없음 · ‘재할당 기록’ 1줄 이상(SMART 5 · 196 이 0 이 아님)</td><td>섹터를 예비 영역으로 옮긴 적이 있습니다.</td></tr>
+<tr><td><span class="tag warn">I/O·경로</span></td><td>위 둘 없음 · ‘I/O·경로 오류 기록’ 1줄 이상</td><td>디스크가 아니라 케이블 · 경로 · 컨트롤러 · 가상 디스크 원인일 수 있습니다.</td></tr>
+<tr><td><span class="tag unk">미검출</span></td><td>오류 패턴 0줄 — 스크립트 원문 ‘[불명] 가용 자료에서 대상 오류 패턴 미검출’</td><td>남아 있는 자료에서 못 찾았습니다. ‘정상’ 이라고 쓰지 않고 초록색도 쓰지 않습니다.</td></tr>
+<tr><td><span class="tag run">점검 중</span> <span class="tag run">대기</span></td><td>작업이 돌고 있거나 차례를 기다림</td><td>끝날 때까지 숫자 칸은 ‘—’. 이전 결과는 ‘마지막 점검’ 칸에만 남깁니다.</td></tr>
+<tr><td><span class="tag fail">점검 실패</span></td><td>접속 · 권한 · 시한 등으로 결과를 못 받음</td><td>사유 한 줄(아래 표). 오류 0 으로 세지 않습니다.</td></tr>
+<tr><td><span class="tag none">점검 안 함</span></td><td>기록 없음</td><td>—</td></tr>
+</tbody>
+</table>
+</section>
+
+<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">
+
+<section class="card" style="flex:1 1 560px">
+<div class="hd"><h2>디스크에 붙는 표시</h2><span class="sm">확정 · 추정 · 불명은 스크립트의 꼬리표 그대로</span></div>
+<table>
+<thead><tr><th style="width:170px">표시</th><th>뜻</th></tr></thead>
+<tbody>
+<tr><td><span class="tag bad">장착 중</span></td><td><span class="tag sure">확정</span> 오류 줄의 시리얼 · WWN 이 현재 인벤토리와 일치</td></tr>
+<tr><td><span class="tag warn">포맷 후 재사용 추정</span></td><td><span class="tag warn">추정</span> 매체 오류 → 같은 ID 의 파일시스템 생성 성공 → 지금 마운트 · 스왑</td></tr>
+<tr><td><span class="tag unk">인벤토리에 없음</span></td><td><span class="tag sure">확정</span> 지금 수집한 인벤토리에 그 식별자가 없음(교체됐다는 뜻은 아님)</td></tr>
+<tr><td><span class="tag unk">슬롯 교체 추정</span></td><td><span class="tag warn">추정</span> 같은 RAID 슬롯에 다른 식별자 — 슬롯 번호가 유지됐다는 전제</td></tr>
+<tr><td><span class="tag unk">판정 보류</span></td><td><span class="tag unk">불명</span> 식별자 충돌 · 중복</td></tr>
+<tr><td><span class="muted">디스크 특정 불가 · n줄</span></td><td><span class="tag unk">불명</span> 오류 줄에 시리얼 · WWN 이 없음</td></tr>
+</tbody>
+</table>
+</section>
+
+<section class="card" style="flex:1 1 560px">
+<div class="hd"><h2>점검 실패 사유</h2><span class="sm">사유마다 조치가 달라 한 문구로 덮지 않습니다</span></div>
+<table>
+<thead><tr><th style="width:190px">사유</th><th>조치 문구</th></tr></thead>
+<tbody>
+<tr><td>SSH 접속 실패</td><td>주소 · 포트 · 방화벽을 확인하세요. 엣지 법인은 엣지에서 닿는지 봅니다.</td></tr>
+<tr><td>SSH 인증 실패</td><td>설정 › SSH 공용 접속에서 계정을 확인하세요. 계정 잠금을 막으려고 다시 시도하지 않습니다.</td></tr>
+<tr><td>호스트 키가 바뀜</td><td>서버가 재설치됐는지 확인한 뒤 SSH 공용 접속에서 새 지문을 승인하세요.</td></tr>
+<tr><td>root 권한이 아님</td><td>계정을 root 로 하거나 비밀번호 없는 sudo 를 허용해야 합니다.</td></tr>
+<tr><td>python3 없음</td><td>python3 3.6 이상이 필요합니다. 포탈이 설치하지 않습니다.</td></tr>
+<tr><td>Linux 가 아님</td><td>이 점검은 RHEL 계열 Linux 만 지원합니다.</td></tr>
+<tr><td>시한 초과(15분)</td><td>로그가 매우 큰 서버입니다. 서버 쪽 실행도 함께 멈췄습니다.</td></tr>
+<tr><td>엣지 응답 없음</td><td>엣지가 작업을 가져가지 않았습니다 — 통신 점검에서 그 엣지를 확인하세요.</td></tr>
+</tbody>
+</table>
+</section>
+
+</div>
+
+<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">
+
+<section class="card" style="flex:1 1 560px">
+<div class="hd"><h2>누가 무엇을 할 수 있나</h2></div>
+<table>
+<thead><tr><th style="width:190px">동작</th><th>권한</th></tr></thead>
+<tbody>
+<tr><td>보기(법인 요약 · 서버 목록 · 상세)</td><td>관리자. 법인 범위 계정은 자기 법인만 보이고, 법인 요약의 ‘전 법인’ 줄은 자기 범위의 합입니다.</td></tr>
+<tr><td>서버 · 법인 하나 점검</td><td>그 법인을 맡은(쓰기 범위) 관리자.</td></tr>
+<tr><td>전 법인 점검</td><td>전 법인 범위 관리자만. 범위 계정에게는 단추가 보이지 않습니다.</td></tr>
+<tr><td>보고서 원문 내려받기</td><td>보기와 같음. 원문에는 호스트 이름 · 시리얼이 들어 있습니다.</td></tr>
+</tbody>
+</table>
+</section>
+
+<section class="card" style="flex:1 1 560px">
+<div class="hd"><h2>특수기능 목록 항목</h2><span class="sm">카테고리 ‘서버’ · 관리자 전용 · 주소 #/tools/disk-audit</span></div>
+<div style="padding:14px;display:flex;gap:12px;align-items:flex-start">
+<div aria-hidden="true" style="flex:0 0 40px;height:40px;border-radius:10px;background:#1a2236;border:1px solid #243049;display:flex;align-items:center;justify-content:center">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#93c5fd" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="2.2"></circle><path d="M12 3v3.5"></path><path d="m17.5 17.5-2.2-2.2"></path></svg>
+</div>
+<div style="min-width:0;display:flex;flex-direction:column;gap:5px">
+<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span style="font-weight:800;font-size:14px">디스크 오류 이력 점검</span><span class="tag none">관리자</span></div>
+<span class="muted">RHEL 서버의 로그 · SMART · RAID 컨트롤러 기록에서 매체 오류(배드 섹터) 흔적을 찾는다 — 오류가 기록된 디스크가 지금도 장착돼 있는지 · 포맷 후 다시 쓰이는지를 확정 · 추정 · 불명으로 구분 · 전 법인 · 법인별 · 서버별 실행 · 서버에서는 읽기만 · 엣지 법인은 엣지가 현지에서 실행</span>
+<span class="sm">찾는 말: 배드섹터 · bad sector · 매체 오류 · SMART · 재할당 · PERC · storcli · 디스크 점검</span>
+</div>
+</div>
+</section>
+
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1240,"height":1240}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>
