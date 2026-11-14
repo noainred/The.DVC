@@ -230,7 +230,8 @@ adminRouter.post('/backup/restore/:name', adminOnly, requireSettingsOwner, async
     // v3.10.0(5회차 D5-1): SSH 키 저장소 합치기 결과를 문구에도 — 승인 대기 키의 id 를 지금 값으로 지킨 키(key-id:)는 그 키를 쓰던 서버가 옛 id 를 가리키므로
     //   승인 뒤 ‘키 고르기’ 로 다시 묶어야 한다 · 되살리지 못한 키 · 계정 비밀은 수만(응답 envKeysDropped 에 이름).
     //   문구는 keyStoreDropNotes 하나(예약 적용 경로와 같은 문구 — 5회차 반증 R5R-6).
-    parts.push(...keyStoreDropNotes((Array.isArray(r.envKeysDropped) ? r.envKeysDropped : []).filter((d) => String(d).startsWith('ssh-keys.json:'))));
+    //   복원 함수가 자르지 않은 목록으로 만든 문구(sshKeyDropNotes — 6회차 D6-4)를 쓰고, 없으면(예전 모양) 응답 목록으로 만든다.
+    parts.push(...(Array.isArray(r.sshKeyDropNotes) ? r.sshKeyDropNotes : keyStoreDropNotes((Array.isArray(r.envKeysDropped) ? r.envKeysDropped : []).filter((d) => String(d).startsWith('ssh-keys.json:')))));
     const warnTexts = Array.isArray(r.warnings) ? r.warnings.map(backupWarnText).filter(Boolean) : [];
     if (warnTexts.length) parts.push(`주의: ${warnTexts.join(' · ')}`);
     parts.push('복원 전 현재 설정은 자동 백업(pre-restore)됨.');

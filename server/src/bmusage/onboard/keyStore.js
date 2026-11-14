@@ -514,7 +514,7 @@ export function _removeKey(id) {
  *  · 비밀번호 빈 값 · '********' 는 기존 유지(편집 UX — secretCarry 규약과 같은 신호). 접속처가 없는 계정이라 '주소 이동' 은 없다 —
  *    대신 **법인 · 종류 · 계정명**이 바뀌면 저장 비밀 · 기본 키 참조를 승계하지 않는다(다른 법인 · 다른 계정으로 같은 비밀이 가지 않게).
  */
-export function saveAccount(body = {}, { by = '', now = Date.now() } = {}) {
+export function saveAccount(body = {}, { by = '', now = Date.now(), dryRun = false } = {}) {
   const u = unreadable(); if (u) return u;
   const d = draft();
   const id = t(body.id, 32);
@@ -548,6 +548,8 @@ export function saveAccount(body = {}, { by = '', now = Date.now() } = {}) {
   if (body.clearPassword === true) password = '';
   if (kind === 'idrac' && !password) return { ok: false, code: 'need-password', reason: 'iDRAC 공통 계정에는 비밀번호가 필요합니다(읽기 전용 역할 계정 권장).' };
   if (kind === 'os' && !keyRef && !password) return { ok: false, code: 'need-secret', reason: 'OS 공통 계정에는 기본 키 또는 비밀번호가 필요합니다(키 인증 권장).' };
+  // 미리 보기 — 라우트가 OTP 를 쓰기 전에 같은 판정으로 거절하게(6회차 A6-2 — key-folder 400 이 OTP 를 쓴 뒤였다). 쓰기 가능 여부(commit 의 판정)도.
+  if (dryRun) return keyStoreWriteIssue() || { ok: true, dryRun: true };
   const acc = existing || { id: `a_${crypto.randomBytes(6).toString('hex')}`, createdBy: t(by, 64), createdAt: now, copies: [] };
   const copiesStale = existing && kind === 'idrac' && (password !== existing.password || lc(username) !== lc(existing.username)) ? (existing.copies || []).length : 0;
   Object.assign(acc, { name, kind, corp, username, keyRef, password, updatedAt: now });
@@ -556,6 +558,9 @@ export function saveAccount(body = {}, { by = '', now = Date.now() } = {}) {
   const c = commit(d); if (!c.ok) return c;
   return { ok: true, account: publicAccountView(acc), ...(dropped.length ? { droppedSecrets: dropped } : {}), ...(copiesStale ? { copiesStale } : {}) };
 }
+
+/** 공통 계정 저장의 앞 조건(쓰지 않고 본다) — null = 저장할 수 있음. */
+export function saveAccountIssue(body = {}) { const r = saveAccount(body, { dryRun: true }); return r && r.ok === false ? r : null; }
 
 /** 계정 삭제 — 호출부가 사용처 0 을 확인한 뒤(refs.deleteAccountIfUnused). */
 export function _removeAccount(id) {

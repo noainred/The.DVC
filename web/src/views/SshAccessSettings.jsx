@@ -287,6 +287,11 @@ export default function SshAccessSettings() {
       {v.policyMode && v.policyMode !== 'encrypted' && v.policyMode !== 'unavailable' && (
         <p className="ssa-banner" style={{ color: toneVar('bad') }}><BoldText text={'자격증명 저장 방식이 **평문**입니다 — 새 로그인 키를 받지 않습니다. 설정 › 보안 › 자격증명 저장 방식에서 암호화로 바꾸면 저장된 키도 함께 암호화됩니다.'} /></p>
       )}
+      {!v.storeUnreadable && v.storeUndecryptable > 0 && (
+        <p className="ssa-banner" style={{ color: toneVar('bad') }}>
+          SSH 키 저장소에 봉인을 풀지 못한 비밀이 {v.storeUndecryptable}개 있습니다(자격증명 비밀키 불일치 의심) — 그 비밀로는 접속하지 못하고, 봉인본을 지우지 않으려고 키 등록 · 교체 · 삭제 · 폴더 바꾸기를 받지 않습니다. 원래 비밀키로 되돌린 뒤 포탈을 다시 시작하세요.
+        </p>
+      )}
       {(v.storeUnreadable || v.registryUnreadable || v.stateUnreadable) && (
         <p className="ssa-banner" style={{ color: toneVar('bad') }}>
           {v.storeUnreadable ? 'SSH 키 저장소(ssh-keys.json)를 읽지 못했습니다. ' : ''}{v.registryUnreadable ? 'OS 계정 등록부(bm-storage.json)를 읽지 못했습니다. ' : ''}
@@ -638,6 +643,9 @@ function KeyPicker({ server, catalog, onClose, say }) {
   const firstRef = useRef(null);
   const c = st.resp;
   const inst = fresh || c?.installed || null;
+  // 이번에 읽은 목록을 보일 때는 키 칩(‘이 서버에 들어 있음/없음’)도 그 목록으로 — 서버가 이전 기록으로 계산한 값과 섞이지 않게(6회차 E6-2).
+  const freshFps = fresh && !fresh.error ? new Set((fresh.keys || []).map((x) => x.fingerprint)) : null;
+  const installedOf = (k) => (freshFps ? freshFps.has(k.fingerprint) : k.installed);
   useEffect(() => {
     if (!c || choice !== null) return;
     const cur = (c.keys || []).find((k) => k.current);
@@ -713,8 +721,8 @@ function KeyPicker({ server, catalog, onClose, say }) {
                         <span>
                           <b><code>{k.name}</code></b>
                           {k.current && <Chip tone="ok">지금 쓰는 키</Chip>}
-                          {k.installed === true && <Chip tone="ok">이 서버에 들어 있음</Chip>}
-                          {k.installed === false && <Chip tone="warn">이 서버에 없음</Chip>}
+                          {installedOf(k) === true && <Chip tone="ok">이 서버에 들어 있음</Chip>}
+                          {installedOf(k) === false && <Chip tone="warn">이 서버에 없음</Chip>}
                           {!k.selectable && <Chip tone="bad">{ISSUE_TEXT[k.issue] || k.issue}</Chip>}
                           {k.selectable && keyNoCollect(k.features) && <Chip tone="warn" title={NO_COLLECT_WARN}>수집 미허용</Chip>}
                           <span className="ssa-sub"> {k.algo}{k.bits ? ` ${k.bits}` : ''} · {shortFp(k.fingerprint)} · 기능 {featuresText(k.features, catalog)}</span>
@@ -730,7 +738,7 @@ function KeyPicker({ server, catalog, onClose, say }) {
             <div className="ssa-installed">
               <div className="ssa-acts">
                 <b>이 서버에 들어 있는 키</b>
-                <span className="ssa-sub">{inst ? `${dateTime(inst.at)} 읽음${inst.unsaved ? ' · 기록 파일에 적지 못함(이 창을 닫으면 다시 모름)' : ''}${inst.stale ? ' · 주소가 바뀜' : ''}` : c.installedReadFailed ? '읽은 기록 파일을 지금 읽지 못함(모름)' : '아직 읽지 않음'}</span>
+                <span className="ssa-sub">{inst ? `${dateTime(inst.at)} 읽음${inst.unsaved ? ` · 기록 파일에 적지 못함(${c.installedReadFailed ? '이 창을 닫으면 다시 모름' : c.installed ? '다시 열면 이전 기록이 보입니다' : '다시 열면 읽지 않음으로 보입니다'})` : ''}${inst.stale ? ' · 주소가 바뀜' : ''}` : c.installedReadFailed ? '읽은 기록 파일을 지금 읽지 못함(모름)' : '아직 읽지 않음'}</span>
               </div>
               {inst && !inst.error && (
                 <ul className="ssa-list">{(inst.keys || []).map((k, i) => (

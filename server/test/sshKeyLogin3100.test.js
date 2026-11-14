@@ -3483,7 +3483,7 @@ test('⑲ 소스 스윕 — 등록부 쓰기(키 묶기 · 되돌리기 · 저�
   assert.match(rt, /const cancelGate = \(req, res, next\) => \(SVC\.keyJobCancelNeedsOtp\(t\(req\.params\.id, 20\)\) \? reauth\(req, res, next\) : next\(\)\);/);
   assert.match(rt, /const ownerWrite = \[adminOnly, requireSettingsOwner, fullRW, reauth\];/);
   assert.match(rt, /'\/settings\/ssh-access\/corps\/:corp\/stop', \.\.\.write\(\(req\) => SVC\.prechecks\.stop\(\{ corp: req\.params\.corp \}\)\)/);
-  assert.match(rt, /'\/settings\/ssh-access\/servers\/:id\/key', \.\.\.write\(\(req\) => SVC\.prechecks\.chooseKey\(\{ serverId: req\.params\.id, keyId: bodyOf\(req\)\.keyId \}\)\)/);
+  assert.match(rt, /'\/settings\/ssh-access\/servers\/:id\/key', \.\.\.write\(\(req\) => SVC\.prechecks\.chooseKey\(\{ serverId: req\.params\.id, keyId: bodyOf\(req\)\.keyId, expectAddr: bodyOf\(req\)\.expectAddr \}\)\)/);   // 6회차 A6-2 — 사전 검사도 본체와 같은 앞 조건(접속처 포함)
   assert.match(rt, /'\/settings\/ssh-access\/inbox\/discard', \.\.\.write\(\(req\) => SVC\.prechecks\.inboxPath\(\{ relPath: bodyOf\(req\)\.relPath \}\)\)/);
   assert.match(rt, /const approvePre = \(approve\) => \(req, res, next\) => \{ const b = bodyOf\(req\); const p = SVC\.approvalPrecheck\(/, '사전 검사는 service 의 판정 하나');
   assert.match(rt, /const jobPre = \(kind\) => pre\(\(req\) => SVC\.keyJobPrecheck\(kind, t\(bodyOf\(req\)\.keyId, 32\), bodyOf\(req\)\)\);/, '작업 사전 검사는 요청의 키로(같은 키 거두기 중 넣기 409 revoking — 반증 R2) · async 라 pre 로 감싼다');
@@ -4123,7 +4123,8 @@ test('㉓-c 법인 사용 중지 · 사전 검사(2회차 반증 R2R-5 · R2R-6)
     const res = [];
     for (const [m, p, body, want] of [
       ['POST', '/settings/ssh-access/corps/vcNOPE23/stop', { reason: 'x', otp: code }, [404, 'unknown-corp']],
-      ['POST', `/settings/ssh-access/servers/${sv.id}/key`, { keyId: '', otp: code }, [409, 'server-busy']],
+      // 6회차 A6-2: 사전 검사가 본체와 같은 앞 조건 함수(chooseKeyIssue) — 공통 계정 없는 서버의 ‘법인 기본 키를 따름’ 은 자물쇠보다 먼저 409 no-account(OTP 앞). server-busy 는 ⑰-h 가 본다.
+      ['POST', `/settings/ssh-access/servers/${sv.id}/key`, { keyId: '', expectAddr: sv.addr, otp: code }, [409, 'no-account']],
       ['POST', '/settings/ssh-access/inbox/discard', { relPath: '../etc/passwd', sha: 'x', otp: code }, [400, 'bad-path']],
       ['PUT', '/settings/ssh-access/guards', { twoPerson: false, otp: code }, [409, 'too-many']]]) {
       const r = await call('own6', m, p, body); res.push([r.s, r.j.code]);
@@ -4134,7 +4135,8 @@ test('㉓-c 법인 사용 중지 · 사전 검사(2회차 반증 R2R-5 · R2R-6)
     rel(); await held;
     for (const q of mine) AP.decide(q.id, { by: 'own6', approve: false });
   }
-  assert.equal(SVC.prechecks.chooseKey({ serverId: sv.id }), null, '자물쇠가 풀리면 통과');
+  // 6회차 A6-2: 사전 검사가 본체와 같은 앞 조건 — 자물쇠가 풀려도 공통 계정 없는 서버의 ‘법인 기본 키를 따름’ 은 no-account(OTP 앞) · 접속처를 빼면 need-addr
+  assert.deepEqual([SVC.prechecks.chooseKey({ serverId: sv.id, expectAddr: sv.addr })?.code, SVC.prechecks.chooseKey({ serverId: sv.id })?.code], ['no-account', 'need-addr'], '자물쇠가 풀린 뒤에는 결정적 앞 조건만');
   // 받는 곳 경로 사전 검사는 글자 꼴만 본다(파일 시스템을 만지지 않는다 — 받는 곳이 멈추면 동기 lstat 이 이벤트 루프를 멈췄다) — 없는 폴더의 꼴 맞는 경로도 통과(판정은 본 함수)
   assert.equal(SVC.prechecks.inboxPath({ relPath: 'no-such-corp-23c/common/x.pub' }), null);
 });
@@ -4477,7 +4479,7 @@ test('㉕-d 그 밖(3회차 D · 공통) — 복원으로 id 가 바뀐 대기 �
   try {
     const code = (r) => (r ? [r.code, r.status] : null);
     assert.deepEqual(code(KL.revokingIssue(Kr.id)), ['revoking', 409]);
-    assert.deepEqual([code(SVC.prechecks.chooseKey({ serverId: sv2.id, keyId: Kr.id })), code(await SVC.chooseServerKey({ serverId: sv2.id, keyId: Kr.id, expectAddr: sv2.addr, by: 'own' })),
+    assert.deepEqual([code(SVC.prechecks.chooseKey({ serverId: sv2.id, keyId: Kr.id, expectAddr: sv2.addr })), code(await SVC.chooseServerKey({ serverId: sv2.id, keyId: Kr.id, expectAddr: sv2.addr, by: 'own' })),
       code(SVC.prechecks.rotate({ from: kx.id, to: Kr.id, by: 'own' })), code(await SVC.rotateKeyReq({ from: kx.id, to: Kr.id, by: 'own' }))], Array(4).fill(['revoking', 409]));
     assert.equal(rawOf(sv2.id).keyRef, undefined, '묶지 않았다');
     assert.equal(KL.revokingIssue(kx.id), null, '다른 키는 상관없다');
@@ -4970,7 +4972,7 @@ test('㉙-b 5회차 A — 교체 · 삭제 앞 조건 한 곳(refs.rotateIssue �
   const rv = await SVC.startKeyRevoke({ keyId: Kr.id, servers: [svR], by: 'own' });
   await h.reached;
   try {
-    assert.deepEqual([code(SVC.prechecks.chooseKey({ serverId: svC.id, keyId: '' })), code(await SVC.chooseServerKey({ serverId: svC.id, keyId: '', expectAddr: svC.addr, by: 'own' }))], [['revoking', 409], ['revoking', 409]], '법인 기본 키를 따름(빈 값) — 공통 계정의 기본 키가 거두는 중');
+    assert.deepEqual([code(SVC.prechecks.chooseKey({ serverId: svC.id, keyId: '', expectAddr: svC.addr })), code(await SVC.chooseServerKey({ serverId: svC.id, keyId: '', expectAddr: svC.addr, by: 'own' }))], [['revoking', 409], ['revoking', 409]], '법인 기본 키를 따름(빈 값) — 공통 계정의 기본 키가 거두는 중');
     const bs = await call('own8', 'POST', '/tools/bm-storage/servers', { name: 'bm-a54-new', host: '10.9.54.9', port: 22, username: 'mon', mounts: ['/'], vcenterId: 'vcA', credRef: acc.account.id, otp: otpCode });
     assert.deepEqual([bs.s, bs.j.code], [409, 'revoking'], bs.txt);
     assert.equal(AUTH.verifyUserOtp('own8', otpCode).ok, true);
@@ -5043,7 +5045,7 @@ test('㉙-c 5회차 B — 주석(#) 처리한 같은 키 줄은 키 줄이 아�
 
 test('㉙-d 5회차 D · E — 복원 문구에 승인 대기 키 id 를 지켰다는 요약(소스) · 읽은 키 기록을 못 읽으면 후보 응답 · 화면 · 키 점검이 그 사실을 말한다 · 키 저장소 손상 중 키 등록 요청 돌려보내기는 503(요청 유지)', async () => {
   const bn = (await import('./_stripComments.js')).stripComments(fs.readFileSync(path.join(SRC, 'routes/admin/backupNetSec.js'), 'utf8'));
-  assert.match(bn, /parts\.push\(\.\.\.keyStoreDropNotes\(/, '복원 응답 문구(5회차 D5-1 — 문구는 keyBundle.keyStoreDropNotes 하나 · 5회차 반증 R5R-6)');
+  assert.match(bn, /parts\.push\(\.\.\.\(Array\.isArray\(r\.sshKeyDropNotes\) \? r\.sshKeyDropNotes : keyStoreDropNotes\(/, '복원 응답 문구(5회차 D5-1 — 문구는 keyBundle.keyStoreDropNotes 하나 · 5회차 반증 R5R-6 · 6회차 D6-4 자르지 않은 목록)');
   const sv = mkServer('bm-e52', null, { host: '10.9.55.1', password: 'x' });
   const f = path.join(DIR, INS.INSTALLED_FILE_NAME); const aside = `${f}.aside-29d`;
   if (fs.existsSync(f)) fs.renameSync(f, aside);
@@ -5244,9 +5246,11 @@ test('㉚-c 5회차 반증 R5R-5 — ‘실제로 쓰일 키’ 판정 하나(bi
   const bms = stripComments(fs.readFileSync(path.join(SRC, 'routes/api/bmstor.js'), 'utf8'));
   const ia = stripComments(fs.readFileSync(path.join(SRC, 'bmusage/onboard/importAnalyze.js'), 'utf8'));
   const rf = stripComments(fs.readFileSync(path.join(SRC, 'bmusage/onboard/refs.js'), 'utf8'));
-  assert.equal((svc.match(/REFS\.effectiveKeyRef\(\{ keyRef: /g) || []).length, 2, 'service — 키 고르기 본체 · 사전 검사');
+  assert.equal((svc.match(/REFS\.effectiveKeyRef\(\{ keyRef: /g) || []).length, 1, 'service — 키 고르기 앞 조건 함수 하나(chooseKeyIssue — 6회차 A6-2: 본체 · 사전 검사가 같이 부른다)');
+  assert.match(svc, /chooseKey: \(\{ serverId, keyId, expectAddr \}\) => chooseKeyIssue\(\{ serverId, keyId, expectAddr \}\)/);
+  assert.match(svc, /export async function chooseServerKey\([^)]*\) \{\n  \{ const iss = chooseKeyIssue\(\{ serverId, keyId, expectAddr \}\); if \(iss\) return iss; \}/);
   assert.doesNotMatch(svc, /accountById\([^\n]*\)\?\.keyRef/, 'service — 공통 계정 기본 키를 손으로 풀지 않는다');
-  assert.match(bms, /REFS\.effectiveKeyRef\(\{ keyRef: s32\(body\.keyRef\), credRef: s32\(body\.credRef\), osAuth: body\.osAuth !== undefined \? body\.osAuth : ex\?\.osAuth \}\)/);
+  assert.match(bms, /const after = REFS\.effectiveKeyRef\(postWriteAuthOf\(ex, body\)\); const before = ex \? REFS\.effectiveKeyRef\(ex\) : '';/);
   assert.doesNotMatch(bms, /accountById\([^\n]*\)\?\.keyRef/);
   assert.match(ia, /effectiveKeyRefOf\(\{ keyRef, credRef: [^\n]*osAuth \}/); assert.doesNotMatch(ia, /osAcc\??\.keyRef/);
   assert.match(rf, /const useKey = effectiveKeyRefOf\(server, \(\) => acc\);/); assert.doesNotMatch(rf, /acc && acc\.keyRef/);
@@ -5285,6 +5289,6 @@ test('㉚-d 5회차 반증 R5R-6 — 키 저장소 합치기에서 빠진 항목
   assert.ok(w && /지금 id 를 지켰습니다/.test(w.reason), `적용 기록 warnings ${JSON.stringify(ap.warnings)}`);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(cdir, 'ssh-keys.json'), 'utf8')).keys.map((k) => k.id), ['k_curpending01'], '대기 키의 지금 id 를 지켰다');
   const bn = (await import('./_stripComments.js')).stripComments(fs.readFileSync(path.join(SRC, 'routes/admin/backupNetSec.js'), 'utf8'));
-  assert.match(bn, /parts\.push\(\.\.\.keyStoreDropNotes\(\(Array\.isArray\(r\.envKeysDropped\) \? r\.envKeysDropped : \[\]\)\.filter\(\(d\) => String\(d\)\.startsWith\('ssh-keys\.json:'\)\)\)\);/, '복원 즉시 문구도 같은 함수');
+  assert.match(bn, /parts\.push\(\.\.\.\(Array\.isArray\(r\.sshKeyDropNotes\) \? r\.sshKeyDropNotes : keyStoreDropNotes\(\(Array\.isArray\(r\.envKeysDropped\) \? r\.envKeysDropped : \[\]\)\.filter\(\(d\) => String\(d\)\.startsWith\('ssh-keys\.json:'\)\)\)\)\);/, '복원 즉시 문구도 같은 함수(6회차 D6-4 — 복원 함수가 자르지 않은 목록으로 만든 sshKeyDropNotes 우선)');
   assert.doesNotMatch(bn, /SSH 키 \$\{ids\}개는/, '복원 라우트에 문구를 따로 두지 않는다');
 });

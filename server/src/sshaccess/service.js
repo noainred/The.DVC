@@ -134,6 +134,8 @@ export async function buildView({ now = Date.now() } = {}) {
     limits: { keyLoginServers: KL.MAX_JOB_SERVERS, revokeServers: KL.MAX_REVOKE_SERVERS },
     authEnabled: !!config.auth?.enabled,   // 화면이 인증 꺼짐을 짐작하지 않게(3회차 반증 R3R-4)   // 화면이 숫자를 박지 않게(3회차 E3-7)
     storeUnreadable: !!storeErr, registryUnreadable: !!regErr, stateUnreadable: !!ST.stateLoadError(),
+    // 봉인을 풀지 못한 비밀 수 — 그동안 키 저장소 쓰기는 모두 503(keyStoreWriteIssue)인데 화면 · 점검이 말하지 않았다(6회차 A6-3).
+    storeUndecryptable: storeErr ? 0 : KS.keyStoreUndecryptable(),
     usageLoadFailed: keyUsageLoadFailed(), installedLoadFailed: INS.installedLoadFailed(),
     usageReadFailed: keyUsageReadFailed(), installedReadFailed: INS.installedReadFailed(),   // 못 읽음 ≠ 손상(4회차 D4-3)
     corps: corps.map((c) => ({ ...c, inboxPath: c.missing ? '' : INB.inboxPathOf(c.id), stop: ST.stopFor(c.id) })),
@@ -165,7 +167,12 @@ export async function buildView({ now = Date.now() } = {}) {
  * @param {{serverId:string, keyId:string, expectAddr?:string, by:string}} o  keyId 빈 값 = 법인 기본 키(공통 계정)를 따름 · expectAddr = 화면이 본 접속처(publicServer.addr)
  * @returns {Promise<object>} { ok, test, previous? } — 실패면 code · reason · status · reverted · revertError
  */
-export async function chooseServerKey({ serverId, keyId, expectAddr = null, by = '' } = {}) {
+/**
+ * 서버 키 고르기의 앞 조건 — **본체와 사전 검사(OTP 앞)가 같은 함수**(6회차 A6-2 — key-pending · key-folder · edge-delegated · no-account · not-found ·
+ * 등록부 503 이 OTP 를 쓴 뒤였다). 서버 자물쇠가 잡혀 있으면 기다리지 않고 409(2회차 C2-7).
+ * @returns {null | {ok:false, code, status?, reason}}
+ */
+function chooseKeyIssue({ serverId, keyId, expectAddr = null } = {}) {
   if (KS.keyStoreLoadError()) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'SSH 키 저장소를 읽지 못해 바꾸지 않았습니다.' };
   if (bmRegistryLoadError()) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'OS 계정 등록부를 읽지 못해 바꾸지 않았습니다.' };
   const s = listBmServersRaw().find((x) => x.id === t(serverId, 64));
@@ -174,12 +181,13 @@ export async function chooseServerKey({ serverId, keyId, expectAddr = null, by =
   // 화면이 본 접속처를 반드시 돌려받는다(빼고 부르면 확인을 건너뛰던 구멍 — 반증 D11).
   if (typeof expectAddr !== 'string' || !expectAddr) return { ok: false, code: 'need-addr', status: 400, reason: '화면에서 본 서버 접속처가 없습니다 — 화면을 다시 읽은 뒤 고르세요.' };
   const kid = t(keyId, 32);
-  { const eff = REFS.effectiveKeyRef({ keyRef: kid, credRef: s.credRef }); const rv = eff ? KL.revokingIssue(eff) : null; if (rv) return rv; }   // 법인 기본 키를 따를 때도(5회차 A5-4 · 판정 하나 R5R-5)
+  //   키를 고르면(빈 값 포함) 비밀번호 고정 표지는 지워진다(setBmServerKeyRef) — 그래서 osAuth 는 넣지 않는다. 법인 기본 키를 따를 때도(5회차 A5-4 · 판정 하나 R5R-5).
+  { const eff = REFS.effectiveKeyRef({ keyRef: kid, credRef: s.credRef }); const rv = eff ? KL.revokingIssue(eff) : null; if (rv) return rv; }
   if (kid) {
     const k = KS.keyById(kid);
     if (!k) return { ok: false, code: 'key-missing', status: 404, reason: '키를 찾을 수 없습니다.' };
     if (k.status === 'pending') return { ok: false, code: 'key-pending', status: 409, reason: REFS.AUTH_ERROR['key-pending'] };
-    if (k.status !== 'active') return { ok: false, code: 'key-retired', reason: '퇴역한 키는 고를 수 없습니다.' };
+    if (k.status !== 'active') return { ok: false, code: 'key-retired', status: 409, reason: '퇴역한 키는 고를 수 없습니다.' };
     if (KS.tamperedKeyIds().includes(k.id)) return { ok: false, code: 'key-tampered', status: 409, reason: REFS.AUTH_ERROR['key-tampered'] };
     const pi = REFS.keyPlacementIssue(k, s, 'conn-test');
     if (pi) return { ok: false, code: pi, status: 409, reason: REFS.AUTH_ERROR[pi] };
@@ -189,6 +197,13 @@ export async function chooseServerKey({ serverId, keyId, expectAddr = null, by =
   // 키 작업(넣기 · 거두기)과 같은 서버 자물쇠를 잡는다 — 겹치면 되돌리기가 그 사이 쓰기를 덮었다(1회차 C1-2).
   //   이미 누가 쥐고 있으면 기다리지 않는다(2회차 C2-7 — 응답이 작업 한 대 분량(최대 수 분)을 기다렸다).
   if (KL.serverLockBusy(KL.serverLockKey(s))) return { ok: false, code: 'server-busy', status: 409, reason: '이 서버에 다른 키 작업이 진행 중입니다 — 끝난 뒤 다시 고르세요.' };
+  return null;
+}
+
+export async function chooseServerKey({ serverId, keyId, expectAddr = null, by = '' } = {}) {
+  { const iss = chooseKeyIssue({ serverId, keyId, expectAddr }); if (iss) return iss; }
+  const s = listBmServersRaw().find((x) => x.id === t(serverId, 64));
+  const kid = t(keyId, 32);
   return KL.withServerLock(KL.serverLockKey(s), async () => {
   const w = setBmServerKeyRef(s.id, kid, { expectAddr });
   if (!w.ok) return w;
@@ -637,10 +652,10 @@ async function changeGuardsRaw(patch = {}, { by = '' } = {}) {
  * 승인 대기 키를 지금 지울 수 있는가 — 뒷정리(discard → refs.deleteKeyIfUnused → deleteIssue)와 같은 판정(6회차 C6-1 — 저장소 쓰기만 보면
  * 등록부를 못 읽는 동안 OTP · 200 ok 뒤에 대기 키가 고아로 남았다). in-use 는 대기 키에 생기지 않지만 생기면 지우지 않는 것이 맞으므로 통과.
  */
-function pendingKeyDropIssue(keyId) {
+function pendingKeyDropIssue(keyId, { allowInUse = true } = {}) {
   const wi = KS.keyStoreWriteIssue(); if (wi) return wi;
   const k = KS.keyById(t(keyId, 32)); if (!k || k.status !== 'pending') return null;
-  const di = REFS.deleteIssue(k.id); return di && di.code !== 'in-use' ? di : null;
+  const di = REFS.deleteIssue(k.id); return di && !(allowInUse && di.code === 'in-use') ? di : null;
 }
 
 /**
@@ -747,6 +762,8 @@ export const prechecks = Object.freeze({
   placement: ({ keyId, folderCorp, folderServer }) => {
     { const wi = KS.keyStoreWriteIssue(); if (wi) return wi; }
     const k = KS.keyById(t(keyId, 32)); if (!k) return { ok: false, code: 'not-found', status: 404, reason: '키를 찾을 수 없습니다.' };
+    // 승인 대기 키는 폴더 · 기능을 바꿀 수 없다(KS.updateKeyPlacement 와 같은 판정 — OTP 앞 · 6회차 A6-2).
+    if (k.status === 'pending') return { ok: false, code: 'key-pending', status: 409, reason: '승인을 기다리는 키는 바꿀 수 없습니다 — 승인된 뒤에 바꾸거나, 요청을 돌려보내고 다시 등록하세요.' };
     if (folderCorp === undefined && folderServer === undefined) return null;
     const nc = folderCorp !== undefined ? t(folderCorp, 128) : k.folderCorp; const ns = folderServer !== undefined ? t(folderServer, 128) : (folderCorp !== undefined ? '' : k.folderServer);
     if (nc === k.folderCorp && ns === k.folderServer) return null;
@@ -766,7 +783,7 @@ export const prechecks = Object.freeze({
     if (!k) return { ok: false, code: 'not-found', status: 404, reason: '키를 찾을 수 없습니다.' };
     const ii = installingIssue(k.id); if (ii) return ii;
     // 승인 대기 키 지우기도 저장소 쓰기다 — 쓸 수 없으면 OTP 앞에서(5회차 반증 R5R-1).
-    if (k.status === 'pending') return AP.approvalsLoadError() ? { ok: false, code: 'approvals-unreadable', status: 503, reason: '승인 기록 파일을 읽지 못해 승인 대기 키를 지우지 않았습니다.' } : pendingKeyDropIssue(k.id);
+    if (k.status === 'pending') return AP.approvalsLoadError() ? { ok: false, code: 'approvals-unreadable', status: 503, reason: '승인 기록 파일을 읽지 못해 승인 대기 키를 지우지 않았습니다.' } : pendingKeyDropIssue(k.id, { allowInUse: false });   // 직접 지우기는 쓰는 곳이 있으면 본체가 409 — OTP 앞에서(6회차 A6-2)
     return REFS.deleteIssue(k.id) || requestPrecheck({ kind: 'ssh-key-delete', target: k.id, by });   // 쓰는 곳 · 저장소 쓰기(5회차 A5-1)
   },
   resume: async ({ corp, by }) => {
@@ -783,14 +800,8 @@ export const prechecks = Object.freeze({
   // 법인 사용 중지 — 모르는 법인은 OTP 앞에서(2회차 반증 R2R-5).
   stop: async ({ corp }) => (ST.stateLoadError() ? { ok: false, code: 'state-unreadable', status: 503, reason: '상태 파일을 읽지 못해 사용 중지를 적을 수 없습니다 — 먼저 상태 파일을 다시 읽으세요.' } : unknownCorpIssue(t(corp, 128))),   // OTP 앞(4회차 A4-4)
   // 서버 키 고르기 — 그 서버에 키 작업이 돌고 있으면 OTP 앞에서 409(본 함수가 다시 본다).
-  chooseKey: ({ serverId, keyId }) => {
-    if (KS.keyStoreLoadError()) return STORE_UNREADABLE;
-    const s = bmServerRawById(t(serverId, 64));
-    // 실제로 쓰일 키로 본다 — ‘법인 기본 키를 따름’(빈 값)이면 공통 계정의 기본 키(5회차 A5-4).
-    //   키를 고르면(빈 값 포함) 비밀번호 고정 표지는 지워진다(setBmServerKeyRef) — 그래서 osAuth 는 넣지 않는다.
-    { const eff = REFS.effectiveKeyRef({ keyRef: t(keyId, 32), credRef: s?.credRef }); const rv = eff ? KL.revokingIssue(eff) : null; if (rv) return rv; }
-    return s && KL.serverLockBusy(KL.serverLockKey(s)) ? { ok: false, code: 'server-busy', status: 409, reason: '이 서버에 다른 키 작업이 진행 중입니다 — 끝난 뒤 다시 고르세요.' } : null;
-  },
+  // 본체와 같은 앞 조건 함수(6회차 A6-2 — 실제 쓰일 키의 거두기 · 키 상태 · 폴더 · 엣지 위임 · 공통 계정 없음 · 등록부 못 읽음 · 서버 자물쇠).
+  chooseKey: ({ serverId, keyId, expectAddr }) => chooseKeyIssue({ serverId, keyId, expectAddr }),
   guards: ({ patch, by }) => {
     const cur = ST.getGuards();
     if (cur.unreadable) return { ok: false, code: 'state-unreadable', status: 503, reason: '상태 파일을 읽지 못해 보호 장치를 바꾸지 않았습니다.' };

@@ -843,7 +843,9 @@ describe('5회차 반증 R5R-2 · R5R-3 — 읽기는 됐는데 기록에 적지
     expect(jsx).toMatch(/const inst = fresh \|\| c\?\.installed \|\| null;/);
     expect(jsx).toMatch(/setFresh\(r\.saved === false \? \{ at: Date\.now\(\), keys: Array\.isArray\(r\.keys\) \? r\.keys : \[\], error: r\.error \|\| '', unsaved: true \} : null\);/);
     expect(jsx).toMatch(/\{inst && !inst\.error && \(\s*<ul className="ssa-list">\{\(inst\.keys \|\| \[\]\)\.map\(/);
-    expect(jsx).toMatch(/inst\.unsaved \? ' · 기록 파일에 적지 못함/);
+    expect(jsx).toMatch(/inst\.unsaved \? ` · 기록 파일에 적지 못함\(\$\{c\.installedReadFailed \? '이 창을 닫으면 다시 모름' : c\.installed \? '다시 열면 이전 기록이 보입니다'/);   // 6회차 E6-2(b) — 이전 기록이 있으면 ‘다시 모름’ 이 아니다
+    expect(jsx).toMatch(/const installedOf = \(k\) => \(freshFps \? freshFps\.has\(k\.fingerprint\) : k\.installed\);/);   // 6회차 E6-2(a) — 칩도 이번 목록으로
+    expect(jsx).not.toMatch(/\{k\.installed === (true|false) && <Chip/);
     expect(jsx).not.toMatch(/c\.installed\.keys\.map\(/);
   });
   it('bm-storage 화면 — 응답의 registryUnreadable 이면 빈 목록 · 주기가 실제 값이 아니라는 띠(소스)', () => {

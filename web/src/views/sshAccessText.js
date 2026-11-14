@@ -268,7 +268,8 @@ export function noEndDot(text, max = 300) {
 export function installedReadText(r) {
   if (r && (r.readFailed === true || (typeof r.error === 'string' && r.error && r.missing !== true))) return { text: `서버에 들어 있는 키를 읽지 못했습니다 — ${noEndDot(r.error) || '사유를 받지 못함'}.`, tone: 'warn' };
   // 읽기는 됐는데 기록 파일에 적지 못함(saved:false) — ‘읽었습니다’(초록)만 말하면 다음 화면의 ‘모름’ 과 어긋난다(5회차 반증 R5R-3).
-  const unsaved = r?.saved === false ? ' — 다만 읽은 키 기록 파일에 적지 못했습니다(파일 · 폴더 권한 확인). 아래 목록은 이번에 읽은 내용이고, 서버 표 · 다음 창에는 남지 않습니다' : '';
+  //   이 문구는 목록 아래 상태 줄에 나온다 — ‘위 목록’(6회차 E6-2 — ‘아래’ 라고 했다). 다음 창에는 이번 결과가 아니라 이전 기록(있으면) · ‘모름’ 이 보인다.
+  const unsaved = r?.saved === false ? ' — 다만 읽은 키 기록 파일에 적지 못했습니다(파일 · 폴더 권한 확인). 위 목록은 이번에 읽은 내용이고, 서버 표 · 다음에 여는 창에는 이번 결과가 남지 않습니다' : '';
   // 파일 없음 — 읽기 실패가 아니다(키 0개 · 2회차 E2-3). 중립으로.
   if (r && r.missing === true) return { text: `서버 계정에 authorized_keys 파일이 없습니다(키 0개)${unsaved}.`, tone: unsaved ? 'warn' : 'muted' };
   const n = Array.isArray(r?.keys) ? r.keys.length : null;

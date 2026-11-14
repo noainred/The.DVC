@@ -519,6 +519,13 @@ export function registerBmStorage(api) {
     const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
     const bind = await bmBindCheck(body);
     if (bind.error) return res.status(bind.status || 400).json({ ok: false, code: bind.code, reason: bind.error });
+    // 거두는 중인 키로 묶지 않는다(4회차 A4-2 · 5회차 A5-4) — **쓰기 뒤 실제로 쓰일 키**로, 묶음이든 아니든 그 키가 바뀌면 본다(6회차 A6-1 —
+    //   본문 칸으로 계산해 비밀번호 고정을 함께 보내면 비켜 갔고, 이어서 osAuth 만 뒤집는 쓰기(묶음 아님)는 검사가 없었다 · 키를 두고 공통 계정만 바꾸면 헛거절).
+    //   판정: bindRule.postWriteAuthOf(등록부와 같은 규칙) → refs.effectiveKeyRef(접속과 같은 판정 하나). OTP 앞.
+    { const KL = await import('../../sshaccess/keyLogin.js'); const REFS = await import('../../bmusage/onboard/refs.js'); const { postWriteAuthOf } = await import('../../bmusage/onboard/bindRule.js');
+      const ex = body.id ? listBmServersRaw().find((x) => x.id === body.id) || null : null;
+      const after = REFS.effectiveKeyRef(postWriteAuthOf(ex, body)); const before = ex ? REFS.effectiveKeyRef(ex) : '';
+      const v = after && after !== before ? KL.revokingIssue(after) : null; if (v) return res.status(v.status || 409).json({ ok: false, code: v.code, reason: v.reason }); }
     if (bind.binds) {
       const { runGate } = await import('./bmOnboard.js');
       const { reauth } = await import('./reauth.js');
@@ -527,15 +534,6 @@ export function registerBmStorage(api) {
       // 쓰기 범위도 무제한이어야 한다(4회차 A4-3 — SSH 공용 접속 · 7b 키 쓰기와 같은 판정 · 쓰기 범위를 좁힌 소유자가 이 경로로 다른 법인 서버에 키를 묶었다).
       { const { isFullReadWriteScope } = await import('../../auth/scope.js'); const { store } = await import('../../store.js');
         if (!isFullReadWriteScope(req.user, store.get())) return res.status(403).json({ ok: false, code: 'write-scope', reason: 'SSH 키 · 공통 계정을 서버에 묶으려면 조회 · 쓰기 범위가 모두 무제한인 설정 소유자여야 합니다.' }); }
-      // 거두는 중인 키로 묶지 않는다(4회차 A4-2).
-      // 실제로 쓰일 키 — keyRef, 없으면 공통 계정(credRef)의 기본 키(5회차 A5-4 — 공통 계정으로 묶으면 거두는 키를 비켜 갔다).
-      //   판정은 하나(refs.effectiveKeyRef — 5회차 반증 R5R-5): 비밀번호 고정(osAuth 'password')이면 키를 쓰지 않으므로 거두기와 무관하다.
-      //   osAuth 를 보내지 않으면 등록부가 기존 값을 둔다(registry.applyServerInput) — 그 값으로 본다.
-      { const KL = await import('../../sshaccess/keyLogin.js'); const REFS = await import('../../bmusage/onboard/refs.js');
-        const s32 = (v) => (typeof v === 'string' ? v.slice(0, 32).trim() : '');
-        const ex = body.id ? listBmServersRaw().find((x) => x.id === body.id) || null : null;
-        const kr = REFS.effectiveKeyRef({ keyRef: s32(body.keyRef), credRef: s32(body.credRef), osAuth: body.osAuth !== undefined ? body.osAuth : ex?.osAuth });
-        const v = kr ? KL.revokingIssue(kr) : null; if (v) return res.status(v.status || 409).json({ ok: false, code: v.code, reason: v.reason }); }
       const g2 = await runGate(reauth, req);
       if (!g2.ok) return res.status(g2.status).json(g2.body);
     }

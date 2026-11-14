@@ -162,13 +162,16 @@ export function registerBmOnboard(api, deps = {}) {
     res.json({ ok: true, ...v });
   });
 
-  api.post('/tools/bm-usage/accounts', ...keyAdmin, (req, res) => {
+  // 저장 본체와 같은 입력 · 같은 판정으로 OTP 앞에서 거절한다(6회차 A6-2 — 기본 키 폴더(key-folder) · 이름 · 저장소 쓰기 거절이 OTP 를 쓴 뒤였다).
+  const accountInput = (input) => ({
+    id: input.id, name: input.name, kind: input.kind, corp: input.corp, username: input.username,
+    keyRef: input.keyRef, password: typeof input.password === 'string' ? input.password : undefined, clearPassword: input.clearPassword === true,
+  });
+  const accountFirst = (req, res, next) => { const i = KS.saveAccountIssue(accountInput(bodyOf(req))); return i ? send(res, i) : next(); };
+  api.post('/tools/bm-usage/accounts', ...keyAdmin.slice(0, -1), accountFirst, reauth, (req, res) => {
     const b = bodyOf(req);
     const { otp, ...input } = b; void otp;
-    const r = KS.saveAccount({
-      id: input.id, name: input.name, kind: input.kind, corp: input.corp, username: input.username,
-      keyRef: input.keyRef, password: typeof input.password === 'string' ? input.password : undefined, clearPassword: input.clearPassword === true,
-    }, { by: who(req) });
+    const r = KS.saveAccount(accountInput(input), { by: who(req) });
     logAudit({ user: who(req), action: input.id ? 'bm-usage.account.update' : 'bm-usage.account.add', target: t(input.name, 64), ip: req.ip || '',
       detail: JSON.stringify(r.ok ? { kind: r.account.kind, corp: r.account.corp, keyRef: r.account.keyRef, secretChanged: typeof input.password === 'string' && input.password !== '' && input.password !== '********', dropped: r.droppedSecrets || [] } : { ok: false, code: r.code }).slice(0, 300) });
     send(res, r);

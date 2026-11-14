@@ -55,6 +55,16 @@ export function writeTokens(body = {}) {
 export function bindOfWrite(existing, body = {}) { return bindDecision(entryTokens(existing), writeTokens(body)); }
 
 /**
+ * 쓰기 뒤 항목의 인증 칸(게이트를 통과한 쓰기 — bindApproved — 기준). registry.applyServerInput 과 같은 규칙:
+ * 키 · 공통 계정은 bindDecision 의 효력 참조, osAuth 는 요청이 주면 그 값 · 안 주면 기존 값(6회차 A6-1 — 라우트가 본문 칸으로 계산해 어긋났다).
+ */
+export function postWriteAuthOf(existing, body = {}) {
+  const b = bindOfWrite(existing, body);
+  const osAuth = body.osAuth !== undefined ? (body.osAuth === 'password' ? 'password' : '') : (existing?.osAuth === 'password' ? 'password' : '');
+  return { keyRef: b.key, credRef: b.cred, osAuth };
+}
+
+/**
  * 실제로 쓰일 키 id — **판정 하나**(5회차 반증 R5R-5 — 네 곳에 복제돼 bm-storage 라우트만 ‘비밀번호 고정’ 을 보지 않았다).
  * osAuth 'password' = 키 없음(공통 계정에 기본 키가 있어도) · keyRef · 없으면 공통 계정(credRef)의 기본 키. 접속(refs.resolveOsAuth)과 같은 규칙.
  * accountById 는 부르는 쪽이 준다(이 파일은 순수 — 저장소를 읽지 않는다).

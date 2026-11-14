@@ -15,7 +15,7 @@ import { config, currentVersion } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { createYielder } from '../util/timeSlice.js';
 import { redactEnvSecrets, mergeRedactedEnv, pinHostSecurityEnv } from '../util/envRedact.js';
-import { KEY_FILE_NAME, redactKeyStoreText, mergeRedactedKeyStore } from '../bmusage/onboard/keyBundle.js'; // 7b: 번들의 SSH 키 저장소 가림 · 복원 병합 // v2.538: 번들의 .env 에서 키·토큰 제거
+import { KEY_FILE_NAME, redactKeyStoreText, mergeRedactedKeyStore, keyStoreDropNotes } from '../bmusage/onboard/keyBundle.js'; // 7b: 번들의 SSH 키 저장소 가림 · 복원 병합 // v2.538: 번들의 .env 에서 키·토큰 제거
 import { getAllAgentConfigs } from '../central/agentConfig.js';
 import { isRegisteredStateFile } from '../util/stateFiles.js'; // v2.613 PERSIST2613-01·08: 헬퍼가 만든 상태 파일은 스스로 등록한다
 import { DATA_FILE_NAMES, RESTORE_EXCLUDE, stageRestore, stagedNameIssue, reconcileAgentTokensText } from './stagedRestore.js'; // v2.768(점검 R3-C5-02): 복원은 예약 → 기동 시 적용
@@ -483,7 +483,7 @@ export async function restoreCentral(archive, { retention = 30, source = null } 
   const excluded = []; // [{file, reason}] — 복원하지 않는 파일(v2.768)
   const toStage = {};
   const envWrites = [];
-  let envRestored = 0; const envDropped = []; const envPinned = []; const keysKept = [];
+  let envRestored = 0; const envDropped = []; const envPinned = []; const keysKept = []; const sshDropNotes = [];
   let dirIssue = null;
   try { fs.accessSync(CONFIG_DIR, fs.constants.W_OK); } catch (e) { dirIssue = String(e?.code || e?.message || e).slice(0, 200); }
   for (const [name, content0] of Object.entries(archive.central.files)) {
@@ -506,10 +506,15 @@ export async function restoreCentral(archive, { retention = 30, source = null } 
     }
     // 7b: 번들의 SSH 키 저장소는 개인키 · 비밀번호가 가려져 있다 — 지금 파일의 같은 키(지문) · 같은 계정(id)으로 되살리고, 못 살리는 키는 뺀다.
     if (base === KEY_FILE_NAME) {
-      let cur = ''; try { cur = fs.readFileSync(path.join(CONFIG_DIR, base), 'utf8'); } catch { /* 없음 */ }
+      // 지금 파일을 읽고 해석할 수 있을 때만(예약 적용과 같은 규칙 — 6회차 D6-1). 못 읽으면 이 파일은 복원하지 않고 failed 에 사유를 싣는다.
+      let cur = ''; let curIssue = '';
+      try { cur = fs.readFileSync(path.join(CONFIG_DIR, base), 'utf8'); } catch (e) { if (e?.code !== 'ENOENT') curIssue = `지금 SSH 키 저장소를 읽지 못해(${String(e?.code || '오류').slice(0, 40)}) 합칠 수 없습니다 — 이 파일은 복원하지 않았습니다(지금 파일 그대로)`; }
+      if (!curIssue && cur) { try { const j = JSON.parse(cur); if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('shape'); } catch { curIssue = '지금 SSH 키 저장소가 손상돼 합칠 수 없습니다 — 이 파일은 복원하지 않았습니다(지금 파일 그대로 — 키 보안에서 확인하세요)'; } }
+      if (curIssue) { failed.push({ file: base, reason: curIssue }); continue; }
       const m = mergeRedactedKeyStore(String(content0), cur);   // 저장된 값(봉인 그대로)을 옮겨 붙인다 — 복호 · 재봉인 없음
       content = m.text;
-      envDropped.push(...m.dropped.slice(0, 64).map((d) => `${base}:${d}`));   // 되살리지 못한 키 · 계정 비밀(.env 키를 못 살렸을 때와 같은 칸)
+      envDropped.push(...m.dropped.slice(0, 64).map((d) => `${base}:${d}`));   // 되살리지 못한 키 · 계정 비밀(.env 키를 못 살렸을 때와 같은 칸 — 이름은 64개까지)
+      sshDropNotes.push(...keyStoreDropNotes(m.dropped));   // 문구는 자르지 않은 목록으로(6회차 D6-4 — 64개에서 잘라 수가 틀렸고 계정 줄이 빠졌다)
       keysKept.push(...(m.kept || []).slice(0, 64));   // 7b 반증 F13: 백업 뒤 등록한 키 · 계정은 지우지 않고 남겼다(번들에 개인키가 없어 되살릴 수 없으므로)
     }
     // v2.769(점검 R4-D1-3): 예약 복원이 받지 않는 이름(공백·'+'·'@'·선행 '.' 등 — 백업 수집은 확장자만 본다)은 예약에서 조용히 빠졌다.
@@ -552,7 +557,7 @@ export async function restoreCentral(archive, { retention = 30, source = null } 
     restored, failed, excluded, warnings,
     staged: stage ? stage.files : [], stagedReplaced: !!stage?.replaced, pendingRestart: !!stage,
     envWritten: envWrites.length,
-    edges: Object.keys(archive.edges || {}).length, envKeysRestored: envRestored, envKeysDropped: envDropped, envKeysPinned: envPinned, sshKeysKept: keysKept,
+    edges: Object.keys(archive.edges || {}).length, envKeysRestored: envRestored, envKeysDropped: envDropped, envKeysPinned: envPinned, sshKeysKept: keysKept, sshKeyDropNotes: sshDropNotes,
   };
 }
 

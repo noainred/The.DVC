@@ -41,9 +41,12 @@ export function buildKeyCheck({ now = Date.now(), policyMode = '', inbox = null,
   // ① 암호화 저장
   const plainIds = KS.plainStoredKeyIds();
   if (policyMode !== 'encrypted') add('bad', 'policy-plain', '자격증명 저장 방식이 평문', '새 로그인 키를 받지 않습니다. 설정 › 보안 › 자격증명 저장 방식에서 암호화로 바꾸면 저장된 키도 함께 암호화됩니다.');
+  // 봉인을 풀지 못한 비밀(자격증명 비밀키 불일치 의심) — ‘모두 암호화돼 있습니다’ 만 말하면 그동안의 503 과 어긋난다(6회차 A6-3).
+  const undec = KS.keyStoreUndecryptable();
+  if (undec > 0) add('bad', 'store-undecryptable', `봉인을 풀지 못한 비밀 ${undec}개`, '자격증명 비밀키가 맞지 않는 것으로 보입니다 — 그 비밀로는 접속하지 못하고, 봉인본을 지우지 않으려고 키 저장소를 바꾸지 않습니다(키 등록 · 교체 · 삭제 · 폴더 바꾸기 거절). 원래 비밀키로 되돌린 뒤 포탈을 다시 시작하세요.');
   if (plainIds == null) add('unknown', 'plain-unknown', '개인키 저장 형식을 확인하지 못함', '저장소 파일을 읽지 못했습니다.');
   else if (plainIds.length) add('bad', 'plain-stored', `평문으로 저장된 키 ${plainIds.length}개`, '디스크에 개인키가 그대로 있습니다 — 저장 방식을 암호화로 바꾸세요.', { keys: plainIds.slice(0, 50) });
-  else if (keys.length) add('ok', 'encrypted', '개인키 암호화 저장', `키 ${keys.length}개 모두 암호화돼 있습니다.`);
+  else if (keys.length && !(undec > 0)) add('ok', 'encrypted', '개인키 암호화 저장', `키 ${keys.length}개 모두 암호화돼 있습니다.`);
   // ② 파일 권한
   const loose = KS.keyStoreLoosePerm();
   if (loose == null) add('unknown', 'perm-unknown', '저장소 파일 권한을 확인하지 못함', '');
