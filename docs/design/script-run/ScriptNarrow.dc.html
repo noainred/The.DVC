@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>서버 스크립트 실행 — 400px</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.sm{font-size:11.5px;color:#8b9bb4}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none;box-sizing:border-box}
+.btn.pri{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.btn[disabled]{opacity:.45;cursor:default}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;box-sizing:border-box}
+.tag.ok{background:rgba(34,197,94,.16);color:#86efac}
+.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}
+.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.tag.unk{background:rgba(139,155,180,.14);color:#aebbd0}
+.tag.run{background:rgba(59,130,246,.18);color:#93c5fd}
+.tag.lock{border:1px solid #33415c;color:#aebbd0}
+h2{margin:0;font-size:14px;font-weight:800}
+.kpi{padding:10px 12px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.kpi .lbl{font-size:11.5px;color:#8b9bb4}
+.kpi .big{font-size:20px;font-weight:800;line-height:1.2}
+.sc{display:flex;flex-direction:column;gap:8px;padding:12px}
+.tags{display:flex;gap:6px;flex-wrap:wrap}
+.acts{display:flex;gap:8px;flex-wrap:wrap}
+.acts .btn{flex:1 1 120px}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:8px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+td{padding:9px 10px;border-bottom:1px solid #1f2a40;font-size:12.5px;white-space:nowrap}
+tr:last-child td{border-bottom:0}
+</style>
+</helmet>
+<div style="width:400px;height:1560px;box-sizing:border-box;padding:14px 16px 24px;display:flex;flex-direction:column;gap:12px;background:#0a0e17">
+
+<nav aria-label="위치" class="sm" style="display:flex;gap:6px;flex-wrap:wrap">
+<span>특수기능</span><span>›</span><span>운영 작업</span><span>›</span><span style="color:#e6edf6">서버 스크립트 실행</span>
+</nav>
+
+<h1 style="margin:0;font-size:19px;font-weight:800">서버 스크립트 실행</h1>
+<p class="muted" style="margin:0">승인된 Python 스크립트를 Linux 서버에서 실행합니다. 키의 ‘쓸 수 있는 기능’ 에 든 서버에서만 실행됩니다.</p>
+
+<div class="acts">
+<button class="btn" type="button">실행 기록 내려받기</button>
+<a class="btn" href="ScriptReg.dc.html">등록 · 승인(설정)</a>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">
+<div class="card kpi"><span class="lbl">쓸 수 있는 스크립트</span><span class="big">3개</span></div>
+<div class="card kpi"><span class="lbl">승인 대기</span><span class="big" style="color:#fcd34d">1개</span></div>
+<div class="card kpi"><span class="lbl">최근 7일 실행</span><span class="big">6회</span></div>
+<div class="card kpi"><span class="lbl">실패한 서버</span><span class="big" style="color:#fca5a5">2대</span></div>
+</div>
+
+<h2>스크립트</h2>
+
+<div class="card sc">
+<div><b>디스크 오류 이력 점검</b><div class="sm mono">rhel-disk-audit · v1</div></div>
+<div class="tags"><span class="tag lock">포탈 묶음</span><span class="tag ok">서명 확인</span><span class="tag unk">읽기 전용</span></div>
+<span class="sm">root(sudo 가능) · 시한 15분 · 실행 가능 12대 / 14대 · 마지막 11-13 09:20</span>
+<div class="acts"><a class="btn pri" href="ScriptRun.dc.html">실행</a><a class="btn" href="ScriptDisk.dc.html">결과 화면</a></div>
+</div>
+
+<div class="card sc">
+<div><b>커널 · 패키지 판 조사</b><div class="sm mono">os-inventory · v2</div></div>
+<div class="tags"><span class="tag unk">등록</span><span class="tag ok">승인됨</span><span class="tag unk">읽기 전용</span><span class="tag run">실행 중</span></div>
+<span class="sm">일반 계정 · 시한 2분 · 실행 가능 9대 / 14대 · 마지막 11-14 10:02</span>
+<div class="acts"><a class="btn pri" href="ScriptRun.dc.html">실행</a><a class="btn" href="ScriptJob.dc.html">최근 결과</a></div>
+</div>
+
+<div class="card sc">
+<div><b>시간 동기 설정 맞추기</b><div class="sm mono">chrony-align · v1</div></div>
+<div class="tags"><span class="tag unk">등록</span><span class="tag ok">승인됨</span><span class="tag warn">서버를 바꿈</span></div>
+<span class="sm">root(sudo 가능) · 시한 3분 · 실행 가능 4대 / 14대 · 실행할 때 본인 OTP</span>
+<div class="acts"><a class="btn pri" href="ScriptRun.dc.html">실행</a><a class="btn" href="ScriptJob.dc.html">최근 결과</a></div>
+</div>
+
+<div class="card sc">
+<div><b>진단 로그 묶음 수집</b><div class="sm mono">diag-bundle · v3(대기) · 쓰이는 판 v2</div></div>
+<div class="tags"><span class="tag unk">등록</span><span class="tag warn">새 판 승인 대기</span></div>
+<span class="sm">root(sudo 가능) · 시한 10분 · 실행 가능 6대 / 14대</span>
+<div class="acts"><a class="btn pri" href="ScriptRun.dc.html">v2 실행</a><a class="btn" href="ScriptReg.dc.html">승인 화면</a></div>
+</div>
+
+<div class="card sc">
+<div><b style="color:#8b9bb4">임시 파일 정리</b><div class="sm mono">tmp-clean · v4</div></div>
+<div class="tags"><span class="tag unk">등록</span><span class="tag bad">사용 중지</span></div>
+<div class="acts"><button class="btn" type="button" disabled>실행</button></div>
+</div>
+
+<h2>최근 실행</h2>
+<div class="card" style="overflow-x:auto">
+<table style="min-width:560px">
+<thead><tr><th>시작</th><th>스크립트</th><th>성공</th><th>실패</th><th>안 함</th><th>상태</th></tr></thead>
+<tbody>
+<tr><td>11-14 10:02</td><td>커널 · 패키지 판 조사</td><td>6</td><td style="color:#fca5a5;font-weight:700">2</td><td>3</td><td><span class="tag run">실행 중</span></td></tr>
+<tr><td>11-13 09:20</td><td>디스크 오류 이력 점검</td><td>11</td><td style="color:#fca5a5;font-weight:700">1</td><td>0</td><td><span class="tag unk">끝남</span></td></tr>
+<tr><td>11-08 14:40</td><td>시간 동기 설정 맞추기</td><td>4</td><td>0</td><td>0</td><td><span class="tag unk">끝남</span></td></tr>
+</tbody>
+</table>
+</div>
+<span class="sm">좁은 화면에서는 스크립트가 카드로, 실행 기록 표는 상자 안에서 옆으로 밀어 봅니다.</span>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1560}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

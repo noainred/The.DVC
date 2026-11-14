@@ -56,19 +56,19 @@ export function registerSshAccess(api) {
     audit(req, 'ssh-access.state.reload', 'ssh-access-state.json', { ok: !!r.ok, code: r.code });
     send(res, r);
   });
-  api.post('/settings/ssh-access/reload-keystore', ...ownerWrite, (req, res) => {
-    const r = SVC.reloadKeyStore({ by: who(req) });
-    audit(req, 'ssh-access.keystore.reload', 'ssh-keys.json', { ok: !!r.ok, code: r.code, keys: r.keys });
-    send(res, r);
+  api.post('/settings/ssh-access/reload-keystore', ...ownerWrite, async (req, res) => {
+    const r = await SVC.reloadKeyStore({ by: who(req) });
+    audit(req, 'ssh-access.keystore.reload', 'ssh-keys.json', { ok: !!r.ok, code: r.code, keys: r.keys, pending: r.pending ? r.request.id : undefined });
+    send(res, r, r.pending ? 202 : 200);
   });
 
   /* ── 키 ─────────────────────────────────────────────────────────── */
-  api.post('/settings/ssh-access/keys', ...keyAddWrite, (req, res) => {
+  api.post('/settings/ssh-access/keys', ...keyAddWrite, async (req, res) => {
     const b = bodyOf(req);
-    const r = SVC.addKeyInFolder({ name: b.name, privateKey: typeof b.privateKey === 'string' ? b.privateKey : '', passphrase: typeof b.passphrase === 'string' ? b.passphrase : '',
+    const r = await SVC.addKeyInFolder({ name: b.name, privateKey: typeof b.privateKey === 'string' ? b.privateKey : '', passphrase: typeof b.passphrase === 'string' ? b.passphrase : '',
       rotateAt: b.rotateAt, folderCorp: b.folderCorp, folderServer: b.folderServer, features: featuresOf(b.features) }, { by: who(req) });
-    audit(req, 'ssh-access.key.add', b.name, r.ok ? { fingerprint: r.key.fingerprint, folderCorp: r.key.folderCorp, folderServer: r.key.folderServer, features: r.key.features, ok: true } : { ok: false, code: r.code });
-    send(res, r);
+    audit(req, 'ssh-access.key.add', b.name, r.ok ? { fingerprint: r.key.fingerprint, folderCorp: r.key.folderCorp, folderServer: r.key.folderServer, features: r.key.features, ok: true, pending: r.pending ? r.request.id : undefined } : { ok: false, code: r.code });
+    send(res, r, r.pending ? 202 : 200);
   });
 
   api.put('/settings/ssh-access/keys/:id/placement', ...ownerWrite, (req, res) => {
@@ -77,6 +77,62 @@ export function registerSshAccess(api) {
       ...(b.folderServer !== undefined ? { folderServer: t(b.folderServer, 128) } : {}), ...(b.features !== undefined ? { features: featuresOf(b.features) } : {}) });
     audit(req, 'ssh-access.key.placement', req.params.id, r.ok ? { folderCorp: r.key.folderCorp, folderServer: r.key.folderServer, features: r.key.features, ok: true } : { ok: false, code: r.code, conflicts: r.conflicts?.length || 0 });
     send(res, r);
+  });
+
+  // 교체(회전) · 삭제 — 두 사람 승인이 켜져 있으면 요청만 만든다(202 · 다른 설정 소유자가 승인하면 실행).
+  api.post('/settings/ssh-access/keys/rotate', ...ownerWrite, async (req, res) => {
+    const b = bodyOf(req);
+    const r = await SVC.rotateKeyReq({ from: t(b.from, 32), to: t(b.to, 32), by: who(req) });
+    audit(req, 'ssh-access.key.rotate', `${t(b.from, 32)}>${t(b.to, 32)}`, { ok: !!r.ok, code: r.code, pending: r.pending ? r.request.id : undefined, servers: r.servers?.length, accounts: r.accounts });
+    send(res, r, r.pending ? 202 : 200);
+  });
+  api.delete('/settings/ssh-access/keys/:id', ...ownerWrite, async (req, res) => {
+    const r = await SVC.deleteKeyReq({ keyId: t(req.params.id, 32), by: who(req) });
+    audit(req, 'ssh-access.key.delete', req.params.id, { ok: !!r.ok, code: r.code, pending: r.pending ? r.request.id : undefined });
+    send(res, r, r.pending ? 202 : 200);
+  });
+
+  /* ── 두 사람 승인 · 보호 장치(v3.10.0) ─────────────────────────────── */
+  api.post('/settings/ssh-access/approvals/:id/approve', ...ownerWrite, async (req, res) => {
+    const b = bodyOf(req);
+    const r = await SVC.decideApproval(t(req.params.id, 20), { approve: true, by: who(req), digest: t(b.digest, 64), note: t(b.note, 300) });
+    audit(req, 'ssh-access.approval.approve', req.params.id, { ok: !!r.ok, code: r.code, kind: r.request?.kind, target: t(r.request?.title, 120), requestedBy: r.request?.requestedBy });
+    send(res, r);
+  });
+  api.post('/settings/ssh-access/approvals/:id/reject', ...ownerWrite, async (req, res) => {
+    const b = bodyOf(req);
+    const r = await SVC.decideApproval(t(req.params.id, 20), { approve: false, by: who(req), note: t(b.note, 300) });
+    audit(req, 'ssh-access.approval.reject', req.params.id, { ok: !!r.ok, code: r.code, kind: r.request?.kind, target: t(r.request?.title, 120), status: r.request?.status });
+    send(res, r);
+  });
+  api.put('/settings/ssh-access/guards', ...ownerWrite, async (req, res) => {
+    const b = bodyOf(req);
+    const patch = {};
+    for (const k of ['twoPerson', 'serverRestrict']) if (typeof b[k] === 'boolean') patch[k] = b[k];
+    const r = await SVC.changeGuards(patch, { by: who(req) });
+    audit(req, 'ssh-access.guards', Object.keys(patch).join(','), { ok: !!r.ok, code: r.code, patch, pending: r.pending ? r.request.id : undefined });
+    send(res, r, r.pending ? 202 : 200);
+  });
+
+  /* ── 키 로그인 설정 · 키 거두기(v3.10.0 — 서버의 authorized_keys 를 바꾸는 동작) ──── */
+  const serverList = (v) => (Array.isArray(v) ? v.slice(0, 200).map((x) => ({ id: t(x?.id, 64), addr: typeof x?.addr === 'string' ? x.addr.slice(0, 400) : '' })) : null);
+  api.post('/settings/ssh-access/key-login', ...ownerWrite, (req, res) => {
+    const b = bodyOf(req);
+    const once = typeof b.oncePassword === 'string' ? b.oncePassword : '';
+    const r = SVC.startKeyLogin({ servers: serverList(b.servers) || [], keyId: t(b.keyId, 32), oncePassword: once, removePassword: b.removePassword === true, replaceKeyId: t(b.replaceKeyId, 32), by: who(req) });
+    audit(req, 'ssh-access.key-login.start', t(b.keyId, 32), { ok: !!r.ok, code: r.code, jobId: r.jobId, servers: r.total, oncePassword: !!once, removePassword: b.removePassword === true, replace: t(b.replaceKeyId, 32) || undefined });
+    send(res, r, 202);
+  });
+  api.post('/settings/ssh-access/key-revoke', ...ownerWrite, (req, res) => {
+    const b = bodyOf(req);
+    const once = typeof b.oncePassword === 'string' ? b.oncePassword : '';
+    const r = SVC.startKeyRevoke({ keyId: t(b.keyId, 32), corp: t(b.corp, 128), servers: serverList(b.servers), oncePassword: once, by: who(req) });
+    audit(req, 'ssh-access.key-revoke.start', t(b.keyId, 32), { ok: !!r.ok, code: r.code, jobId: r.jobId, servers: r.total, corp: t(b.corp, 128) || undefined, oncePassword: !!once });
+    send(res, r, 202);
+  });
+  api.get('/settings/ssh-access/jobs/:id', ...ownerRead, (req, res) => {
+    const j = SVC.keyJob(t(req.params.id, 20));
+    send(res, j ? { ok: true, job: j } : { ok: false, status: 404, code: 'not-found', reason: '작업을 찾을 수 없습니다(끝난 지 오래됐거나 포탈이 다시 시작했습니다).' });
   });
 
   /* ── 서버 ───────────────────────────────────────────────────────── */
@@ -112,10 +168,10 @@ export function registerSshAccess(api) {
     audit(req, 'ssh-access.corp.stop', req.params.corp, { ok: !!r.ok, code: r.code, reason: t(b.reason, 120), servers: r.servers });
     send(res, r);
   });
-  api.delete('/settings/ssh-access/corps/:corp/stop', ...ownerWrite, (req, res) => {
-    const r = SVC.resumeCorp(t(req.params.corp, 128), { by: who(req) });
-    audit(req, 'ssh-access.corp.resume', req.params.corp, { ok: !!r.ok, code: r.code });
-    send(res, r);
+  api.delete('/settings/ssh-access/corps/:corp/stop', ...ownerWrite, async (req, res) => {
+    const r = await SVC.resumeCorp(t(req.params.corp, 128), { by: who(req) });
+    audit(req, 'ssh-access.corp.resume', req.params.corp, { ok: !!r.ok, code: r.code, pending: r.pending ? r.request.id : undefined });
+    send(res, r, r.pending ? 202 : 200);
   });
 
   /* ── 받는 곳(폴더에 직접 넣은 키) ───────────────────────────────── */
@@ -123,8 +179,8 @@ export function registerSshAccess(api) {
     const b = bodyOf(req);
     const r = await SVC.approveInbox({ relPath: typeof b.relPath === 'string' ? b.relPath.slice(0, 400) : '', fingerprint: t(b.fingerprint, 80), sha: t(b.sha, 80), name: t(b.name, 80), passphrase: typeof b.passphrase === 'string' ? b.passphrase : '',
       features: featuresOf(b.features), by: who(req) });
-    audit(req, 'ssh-access.inbox.approve', t(b.relPath, 128), r.ok ? { fingerprint: r.key.fingerprint, name: r.key.name, plaintextRemoved: r.plaintextRemoved, ok: true } : { ok: false, code: r.code });
-    send(res, r);
+    audit(req, 'ssh-access.inbox.approve', t(b.relPath, 128), r.ok ? { fingerprint: r.key.fingerprint, name: r.key.name, plaintextRemoved: r.plaintextRemoved, ok: true, pending: r.pending ? r.request.id : undefined } : { ok: false, code: r.code });
+    send(res, r, r.pending ? 202 : 200);
   });
   api.post('/settings/ssh-access/inbox/discard', ...ownerWrite, (req, res) => {
     const b = bodyOf(req);

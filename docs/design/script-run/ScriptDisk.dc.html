@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>디스크 점검과 잇기 — 배드 섹터 화면에서 스크립트 실행</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.sm{font-size:11.5px;color:#8b9bb4}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.pri{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.btn.s{min-height:28px;padding:0 10px;font-size:12px}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;box-sizing:border-box}
+.tag.ok{background:rgba(34,197,94,.16);color:#86efac}
+.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}
+.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.tag.unk{background:rgba(139,155,180,.14);color:#aebbd0}
+.tag.lock{border:1px solid #33415c;color:#aebbd0}
+.tag.new{background:rgba(59,130,246,.18);color:#93c5fd}
+h2{margin:0;font-size:14px;font-weight:800}
+.hd{display:flex;gap:10px;align-items:baseline;justify-content:space-between;flex-wrap:wrap;padding:12px 14px;border-bottom:1px solid #1f2a40}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:8px 12px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size:12.5px}
+tr:last-child td{border-bottom:0}
+.row{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;padding:8px 14px;border-bottom:1px solid #1f2a40}
+.row:last-child{border-bottom:0}
+.k{flex:0 0 130px;color:#8b9bb4;font-size:12px}
+.v{flex:1 1 280px;min-width:0}
+.hop{flex:1 1 170px;min-width:0;padding:10px 12px;border:1px solid #243049;border-radius:10px;background:#0f1626;display:flex;flex-direction:column;gap:3px}
+.hop.me{border-color:#3b82f6;background:rgba(59,130,246,.10)}
+.newbox{border:1px dashed #3b82f6;border-radius:10px;background:rgba(59,130,246,.06)}
+</style>
+</helmet>
+<div style="width:1240px;height:1560px;box-sizing:border-box;padding:24px 28px;display:flex;flex-direction:column;gap:16px;background:#0a0e17">
+
+<header style="display:flex;flex-direction:column;gap:6px">
+<h1 style="margin:0;font-size:20px;font-weight:800">디스크 점검은 이 모듈의 첫 스크립트 — 배드 섹터 화면에서 바로 실행</h1>
+<p class="muted" style="margin:0;max-width:980px">붙여 주신 점검 스크립트는 ‘포탈 묶음’ 스크립트 <span class="mono" style="font-size:12px">rhel-disk-audit</span> 로 들어갑니다. 실행 · 접속 · 엣지 대행 · 결과 저장은 공용 모듈이 하고, 디스크 화면은 그 결과를 디스크 말로 풀어 보여 주기만 합니다. <span class="tag new">새로 붙는 것</span> 은 파란 점선으로 표시했습니다.</p>
+</header>
+
+<section aria-label="구조" style="display:flex;gap:8px;align-items:stretch;flex-wrap:wrap">
+<div class="hop"><b>디스크 배드 섹터 분석</b><span class="sm">지금 포탈에 있는 화면(v3.8) · iDRAC 로그</span></div>
+<span class="muted" aria-hidden="true" style="align-self:center">→</span>
+<div class="hop me"><b>서버 스크립트 실행(공용 모듈)</b><span class="sm">승인 · 키 허용 · 실행 · 결과 보관</span></div>
+<span class="muted" aria-hidden="true" style="align-self:center">→</span>
+<div class="hop"><b>디스크 오류 이력 점검</b><span class="sm">스크립트 결과 전용 화면(앞 시안 ①~⑥)</span></div>
+</section>
+
+<section class="card" aria-labelledby="t-a">
+<div class="hd"><h2 id="t-a">① 디스크 배드 섹터 분석 › 서버 한 대 — 지금 화면에 붙는 칸</h2><span class="sm">가상 예 · 서버 kr-ora-db01</span></div>
+<div class="row"><span class="k">iDRAC 기록(지금 있음)</span><span class="v">복구 불가 매체 오류 2건 · Disk 3 in Backplane 1 · 마지막 2026-09-28 <span class="tag bad" style="margin-left:6px">기록 있음</span></span><a class="btn s" href="#lc">기록 보기</a></div>
+<div class="newbox" style="margin:12px 14px;display:flex;flex-direction:column">
+<div class="row"><span class="k"><span class="tag new">새로 붙는 것</span></span><span class="v"><b>서버 안쪽 근거(OS · SMART · RAID 도구)</b> — 스크립트 ‘디스크 오류 이력 점검’ 으로 읽습니다</span></div>
+<div class="row"><span class="k">마지막 점검</span><span class="v">2026-11-13 09:20 · kim.sj · 3분 12초 — 매체 오류 줄 14 · 재할당 줄 2 · 그 디스크는 <b>포맷 후 다시 쓰는 것으로 추정</b></span><a class="btn s" href="Detail.dc.html">결과 보기</a></div>
+<div class="row"><span class="k">지금 실행</span><span class="v sm">이 서버 한 대 · 읽기만 · 시한 15분 · 사유를 적고 실행합니다</span><a class="btn s pri" href="ScriptRun.dc.html">서버에서 점검 실행</a></div>
+</div>
+<div class="row"><span class="k">실행할 수 없을 때</span><span class="v sm">단추 대신 이유를 적습니다 — ‘이 서버는 OS 계정이 등록돼 있지 않음’ · ‘키가 이 스크립트를 허용하지 않음’ · ‘RHEL 이 아님’ · ‘엣지가 수집하는 서버 — 엣지에 실행을 맡깁니다(가능)’</span></div>
+</section>
+
+<section class="card" aria-labelledby="t-b">
+<div class="hd"><h2 id="t-b">② 두 화면이 보는 것은 다릅니다 — 하나로 합치지 않는 까닭</h2></div>
+<table>
+<thead><tr><th style="width:150px"></th><th>디스크 배드 섹터 분석(지금 있음)</th><th>디스크 오류 이력 점검(스크립트)</th></tr></thead>
+<tbody>
+<tr><td class="muted">어디서 읽나</td><td>iDRAC Lifecycle 로그 — 서버 밖(관리 보드)</td><td>서버 안 — 커널 로그 · journal · SMART · perccli/storcli</td></tr>
+<tr><td class="muted">필요한 것</td><td>iDRAC 계정 · 서버가 꺼져 있어도 됨</td><td>SSH 키 · root(sudo) · python3 · RHEL</td></tr>
+<tr><td class="muted">알 수 있는 것</td><td>컨트롤러가 알린 매체 오류 · 슬롯 · 시각</td><td>줄 단위 근거 · 재할당 수 · 포맷 뒤 다시 쓰는지 · 지금 꽂힌 디스크의 시리얼</td></tr>
+<tr><td class="muted">모르는 것</td><td>OS 가 그 디스크를 어떻게 쓰는지</td><td>로그가 지워진 기간 · RAID 뒤에 가려진 디스크(도구가 없을 때)</td></tr>
+<tr><td class="muted">돌리는 때</td><td>6시간마다 자동 + 수동</td><td>수동만(1차)</td></tr>
+</tbody>
+</table>
+<div style="padding:10px 14px;border-top:1px solid #1f2a40"><span class="sm">두 결과가 다르면 다르다고 그대로 보입니다(예: iDRAC 기록 있음 · 서버 안 미검출). 한쪽이 ‘없음’ 이라고 다른 쪽을 지우지 않습니다.</span></div>
+</section>
+
+<section class="card" aria-labelledby="t-c">
+<div class="hd"><h2 id="t-c">③ 들어가는 길 세 곳 — 같은 실행 확인 창</h2></div>
+<div class="row"><span class="k">배드 섹터 화면</span><span class="v">서버 행 · 서버 상세의 ‘서버에서 점검 실행’(위 ①) — 그 서버 한 대가 골라진 채로 열립니다</span></div>
+<div class="row"><span class="k">디스크 오류 이력 점검</span><span class="v">법인 요약의 ‘전 법인 점검’ · ‘이 법인 점검’, 서버 목록의 ‘선택한 서버 점검’(앞 시안 ①② — 그대로)</span></div>
+<div class="row"><span class="k">서버 스크립트 실행</span><span class="v">스크립트 목록의 ‘디스크 오류 이력 점검’ 행 › 실행 · 결과 화면</span></div>
+</section>
+
+<section class="card" aria-labelledby="t-d" style="border-color:#5b4a1e">
+<div class="hd"><h2 id="t-d">④ 확인이 필요한 것 — 정직하게</h2></div>
+<div class="row"><span class="k">같은 서버 찾기</span><span class="v">iDRAC 쪽 서버와 OS 등록 항목을 잇는 키는 구현 때 코드로 확인합니다. 지금은 <b>추정</b>입니다 — 베어메탈 사용률이 서비스 태그 · 이름으로 두 경로를 한 서버로 묶고 있어 같은 방법을 쓸 수 있을 것으로 봅니다. 못 이은 서버는 ①의 칸에 ‘OS 계정 미등록’ 으로 나옵니다.</span></div>
+<div class="row"><span class="k">실서버 미검증</span><span class="v">이 스크립트를 실제 RHEL 서버에서 돌려 본 적이 없습니다. 소요 시간 · 부하 · 출력 크기(가상 예의 ‘3분 12초’ 포함)는 실측값이 아닙니다.</span></div>
+<div class="row"><span class="k">화면 숫자</span><span class="v">매체 오류 줄 수 같은 숫자는 스크립트가 끝에 내는 기계 판독 요약에서 옵니다(앞 시안 결정 D1). 요약이 없으면 숫자 칸은 ‘—’ 이고 보고서 원문만 보입니다.</span></div>
+</section>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1240,"height":1560}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

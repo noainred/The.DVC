@@ -29,7 +29,8 @@ const MAX_STOPS = 500;
 const MAX_STOP_SERVERS = 2000;
 const READ_RETRY_MS = 30_000;
 /** 밀려나지 않게 지키는 사건 — 사용 중지 · 재개 · 바꿔치기(감사 로그에 없는 것도 있다). */
-export const CRITICAL_EVENTS = Object.freeze(['corp-stop', 'corp-resume', 'key-tampered', 'key-changed-outside', 'key-added-outside', 'state-reloaded', 'keystore-reloaded', 'account-changed-outside']);
+export const GUARD_KEYS = Object.freeze(['twoPerson', 'serverRestrict']);
+export const CRITICAL_EVENTS = Object.freeze(['guard-changed', 'approval-requested', 'approval-decided', 'key-login-set', 'key-lines-removed', 'corp-stop', 'corp-resume', 'key-tampered', 'key-changed-outside', 'key-added-outside', 'state-reloaded', 'keystore-reloaded', 'account-changed-outside']);
 
 const t = (v, max = 256) => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max).trim();
 const num = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.round(Number(v)) : 0);
@@ -46,6 +47,9 @@ function norm(j) {
   if (!isObj(j)) throw new ShapeError('상태 파일이 객체가 아닙니다');
   if (j.stops !== undefined && !isObj(j.stops)) throw new ShapeError('stops 가 객체가 아닙니다');
   if (j.events !== undefined && !Array.isArray(j.events)) throw new ShapeError('events 가 배열이 아닙니다');
+  if (j.guards !== undefined && !isObj(j.guards)) throw new ShapeError('guards 가 객체가 아닙니다');
+  // v3.10.0 보호 장치 — 없으면 켬(엄한 쪽이 기본). 글자 그대로 false 일 때만 끔.
+  const guards = { twoPerson: j.guards?.twoPerson !== false, serverRestrict: j.guards?.serverRestrict !== false };
   const stops = Object.create(null);
   const ents = Object.entries(j.stops || {});
   // 넘치는 중지 기록을 조용히 자르면 잘린 법인의 중지가 풀린다(반증 D6) — 손상으로 본다.
@@ -60,7 +64,7 @@ function norm(j) {
   const events = (j.events || []).filter(isObj).slice(-MAX_EVENTS).map((e) => ({
     at: num(e.at), kind: t(e.kind, 40), corp: t(e.corp, 128), target: t(e.target, 128), by: t(e.by, 64), detail: t(e.detail, 300),
   }));
-  return { stops, events };
+  return { stops, events, guards };
 }
 
 function load() {
@@ -103,8 +107,10 @@ function unreadable() {
   return e ? { ok: false, code: 'state-unreadable', status: 503, reason: `SSH 공용 접속 상태 파일(${STATE_FILE_NAME})을 읽지 못해 바꾸지 않았습니다 — 손상 보존본(${STATE_FILE_NAME}.corrupt.*)을 확인해 고친 뒤 ‘상태 파일 다시 읽기’ 를 누르세요.` } : null;
 }
 // 프로토타입 없는 객체로 — 'toString' 같은 이름을 중지 기록으로 읽지 않게(반증 D7).
-function draft() { const d = load(); return { stops: Object.assign(Object.create(null), d.stops), events: d.events.slice() }; }
+function draft() { const d = load(); return { stops: Object.assign(Object.create(null), d.stops), events: d.events.slice(), guards: { ...d.guards } }; }
 function commit(next) {
+  // 이번 쓰기에 실린 사건만 알린다 — 쓰기에 실패하면 버린다(쓰이지 않은 사건을 다음 쓰기 때 알리지 않게).
+  const sent = pendingNotify; pendingNotify = [];
   let normed;
   try { normed = norm(next); } catch (e) { return { ok: false, code: 'bad-state', status: 500, reason: String(e?.message || e).slice(0, 120) }; }
   try {
@@ -115,6 +121,7 @@ function commit(next) {
   }
   cache = normed;
   loadErr.clear();
+  if (sent.length) for (const fn of listeners) { try { fn(sent); } catch { /* 알림 실패는 쓰기 결과를 바꾸지 않는다 */ } }
   return { ok: true };
 }
 
@@ -143,8 +150,15 @@ export function stopFor(corp) {
 }
 export function listStops() { const d = load(); return d ? Object.entries(d.stops).map(([corp, v]) => ({ corp, ...v })) : []; }
 
+/** 사건이 **파일에 쓰인 뒤** 불리는 알림(메일 등 — sshaccess/notify.js). 듣는 쪽 오류는 삼킨다(사건 기록을 막지 않는다). */
+const listeners = new Set();
+export function onEvents(fn) { if (typeof fn === 'function') listeners.add(fn); return () => listeners.delete(fn); }
+let pendingNotify = [];
 function pushEvents(d, list, now) {
-  for (const ev of list) d.events.push({ at: now, kind: t(ev.kind, 40), corp: t(ev.corp, 128), target: t(ev.target, 128), by: t(ev.by, 64), detail: t(ev.detail, 300) });
+  for (const ev of list) {
+    const e = { at: now, kind: t(ev.kind, 40), corp: t(ev.corp, 128), target: t(ev.target, 128), by: t(ev.by, 64), detail: t(ev.detail, 300) };
+    d.events.push(e); pendingNotify.push(e);
+  }
   // 넘치면 덜 중요한 오래된 사건부터 버린다(받는 곳 새 파일이 몰려도 사용 중지 · 바꿔치기 사건이 밀려나지 않게 — 점검 C-7).
   while (d.events.length > MAX_EVENTS) {
     const i = d.events.findIndex((e) => !CRITICAL_EVENTS.includes(e.kind));
@@ -173,6 +187,27 @@ export function clearCorpStop(corp, { by = '', now = Date.now() } = {}) {
   delete d.stops[c];
   pushEvents(d, [{ kind: 'corp-resume', corp: c, by }], now);
   return commit(d);
+}
+
+/**
+ * 보호 장치(v3.10.0 — 두 사람 승인 · 서버 쪽 제한). 상태 파일을 못 읽으면 **켠 것으로** 본다(엄한 쪽 — 손상으로 보호가 꺼지지 않게).
+ * @returns {{twoPerson:boolean, serverRestrict:boolean, unreadable?:true}}
+ */
+export function getGuards() {
+  const d = load();
+  if (!d || loadErr.get()) return { twoPerson: true, serverRestrict: true, unreadable: true };
+  return { ...d.guards };
+}
+/** 보호 장치 바꾸기(호출부가 권한 · OTP · 두 사람 승인을 거친 뒤). 아는 키 · 참/거짓만. */
+export function setGuards(patch = {}, { by = '', now = Date.now() } = {}) {
+  const u = unreadable(); if (u) return u;
+  const d = draft();
+  const changed = [];
+  for (const k of GUARD_KEYS) if (typeof patch[k] === 'boolean' && patch[k] !== d.guards[k]) { d.guards[k] = patch[k]; changed.push(`${k}=${patch[k] ? '켬' : '끔'}`); }
+  if (!changed.length) return { ok: true, guards: { ...d.guards }, changed: 0 };
+  pushEvents(d, [{ kind: 'guard-changed', by, detail: changed.join(' · ') }], now);
+  const c = commit(d);
+  return c.ok ? { ok: true, guards: { ...d.guards }, changed: changed.length } : c;
 }
 
 /** 키 보안 사건 — 여러 개를 한 번에 쓴다(사건마다 파일 전체를 다시 쓰지 않게). 쓰기 실패는 호출부를 막지 않는다(감사 로그가 원본이다). */
