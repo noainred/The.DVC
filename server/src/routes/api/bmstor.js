@@ -512,6 +512,8 @@ export function registerBmStorage(api) {
 
   // 서버 추가/수정 — body { id?, name, host, port, username, password?, agent, groups(최대 3개), mounts, enabled }
   api.post('/tools/bm-storage/servers', adminOnly, fullScopeOnly, async (req, res) => {
+    // 등록부를 못 읽는 동안에는 OTP 를 받기 전에 거절한다(6회차 C6-3 — 키 묶기 저장이 OTP 를 쓴 뒤 503 이었다). 저장 자체도 등록부가 거절한다.
+    if (registryReadFailed()) return res.status(503).json(REGISTRY_UNREAD);
     // 7b 메인 결정(감사 H-1 · 반증 F1 · Q4): SSH 키 · 공통 계정을 이 주소에 **묶는(바꾸는)** 저장은 그 비밀을 관리하는 등급과 같다 —
     //   설정 소유자 등급 + 본인 OTP(마지막). 존재 · 퇴역 · 종류도 여기서 본다(형식만 보던 것). 참조를 떼는 것(빈 값)은 묶음이 아니다.
     const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};

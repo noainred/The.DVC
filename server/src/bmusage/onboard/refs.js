@@ -65,7 +65,7 @@ export function listAccountsView({ visible = null, scoped = false } = {}) {
 export function deleteKeyIfUnused(id) {
   // 앞 조건은 deleteIssue 하나(라우트 사전 검사 · SSH 공용 접속 사전 검사 · 본체가 같은 함수 — 5회차 반증 R5R-4).
   const issue = deleteIssue(id); if (issue) return issue;
-  return KS._removeKey(KS.keyById(id).id);
+  return KS._removeKey(KS.keyById(id).id);   // deleteIssue 가 null 이면 키가 있다
 }
 
 export function deleteAccountIfUnused(id) {
@@ -87,12 +87,13 @@ export function deleteAccountIfUnused(id) {
  *   folder-conflict · 저장소 쓰기 거절로 끝났고, 저장소 쓰기 거절은 등록부만 옮긴 채 멈췄다). → 거절 객체 또는 null.
  */
 export function rotateIssue(fromId, toId) {
+  // 저장소 상태를 키 찾기보다 먼저 — 잠긴 저장소에서 ‘키를 찾을 수 없음’ 404 로 말하지 않는다(6회차 C6-4 · 4회차 반증 R4R-3 규칙).
+  { const wi = KS.keyStoreWriteIssue(); if (wi) return wi; }
   const from = KS.keyById(fromId); const to = KS.keyById(toId);
   if (!from || !to) return { ok: false, code: 'not-found', status: 404, reason: '옛 키 또는 새 키를 찾을 수 없습니다.' };
   if (from.id === to.id) return { ok: false, code: 'same-key', reason: '같은 키로는 회전할 수 없습니다.' };
   if (to.status !== 'active') return { ok: false, code: to.status === 'pending' ? 'key-pending' : 'retired', reason: to.status === 'pending' ? '새 키가 두 사람 승인을 기다리는 중입니다 — 승인된 뒤 교체하세요.' : '새 키가 퇴역 상태입니다.' };
-  // 키 저장소에 지금 쓸 수 있는가(못 읽음 · 봉인 못 풂 · 포탈 밖 변경) — 등록부를 먼저 옮긴 뒤 저장소 쓰기가 거절되면 반쯤 바뀐다.
-  const wi = KS.keyStoreWriteIssue(); if (wi) return wi;
+  // 키 저장소에 지금 쓸 수 있는가(못 읽음 · 봉인 못 풂 · 포탈 밖 변경)는 맨 앞에서 봤다 — 등록부를 먼저 옮긴 뒤 저장소 쓰기가 거절되면 반쯤 바뀐다.
   // v3.9.0(점검 B-4): 새 키의 폴더가 옛 키를 쓰는 서버 · 공통 계정을 덮는지 — 아니면 회전 뒤 수집이 key-folder 로 끊긴다. 쓰기 전에 거절한다.
   const conflicts = placementConflicts(to, { serversUsing: (s) => t(s.keyRef) === from.id, accountsUsing: (a) => a.keyRef === from.id });
   if (conflicts === null) return { ok: false, code: 'usage-unknown', status: 503, reason: 'OS 계정 등록부를 읽지 못해 회전하지 않았습니다.' };
@@ -101,9 +102,9 @@ export function rotateIssue(fromId, toId) {
 }
 /** 삭제의 앞 조건(쓰지 않고 본다 — 5회차 A5-1). */
 export function deleteIssue(id) {
+  const wi = KS.keyStoreWriteIssue(); if (wi) return wi;   // 키 찾기보다 먼저(6회차 C6-4)
   const k = KS.keyById(id);
   if (!k) return { ok: false, code: 'not-found', status: 404, reason: '키를 찾을 수 없습니다.' };
-  const wi = KS.keyStoreWriteIssue(); if (wi) return wi;
   const u = refUsage().key(k.id);
   if (u.servers == null) return { ok: false, code: 'usage-unknown', status: 503, reason: 'OS 계정 등록부를 읽지 못해 이 키를 쓰는 서버 수를 모릅니다 — 삭제하지 않았습니다.' };
   if (u.servers > 0 || u.accounts > 0) return { ok: false, code: 'in-use', status: 409, reason: `이 키를 쓰는 서버 ${u.servers}대 · 공통 계정 ${u.accounts}개가 있어 지울 수 없습니다 — 회전으로 참조를 옮긴 뒤 지우세요.` };

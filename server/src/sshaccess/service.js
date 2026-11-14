@@ -17,7 +17,7 @@ import { store } from '../store.js';
 import { config } from '../config.js';
 import * as KS from '../bmusage/onboard/keyStore.js';
 import * as REFS from '../bmusage/onboard/refs.js';
-import { addrKey } from '../bmusage/onboard/bindRule.js';
+import { addrKey, effectiveKeyRefOf } from '../bmusage/onboard/bindRule.js';
 import { RSA_MIN_BITS } from '../bmusage/onboard/keyParse.js';
 import { listBmServersRaw, bmServerRawById, registryLoadError as bmRegistryLoadError, setBmServerKeyRef, restoreBmServerKeyRef, clearBmServerPassword } from '../bmstor/registry.js';
 import * as INF from './inflight.js';
@@ -61,10 +61,8 @@ export async function corpList() {
 
 /** 서버의 효력 키 id(서버 keyRef → 공통 계정 기본 키, 비밀번호 고정이면 없음). */
 function effectiveKeyId(s, accById) {
-  if (s.osAuth === 'password') return '';
-  if (t(s.keyRef)) return t(s.keyRef);
-  const a = t(s.credRef) ? accById.get(t(s.credRef)) : null;
-  return a && a.kind === 'os' ? t(a.keyRef) : '';
+  // 판정은 bindRule.effectiveKeyRefOf 하나(5회차 반증 R5R-5 — 여기 다섯째 사본이 남아 있었다). OS 공통 계정만(resolveOsAuth 는 다른 종류를 account-kind 로 멈춘다).
+  return effectiveKeyRefOf(s, (id) => { const a = accById.get(id); return a && a.kind === 'os' ? a : null; });
 }
 /** 접속 계정 — resolveOsAuth 와 같은 규칙(공통 계정이 있으면 그 계정, 없으면 서버 칸 · root). */
 const usernameOf = (s, acc) => (acc ? acc.username : (t(s.username) || 'root'));
@@ -343,6 +341,19 @@ export async function testSavedServer({ serverId, by = '' } = {}) {
  * 폴더를 바꾸기 전에 지금 쓰는 곳이 새 폴더 밖이 되지 않는지 본다(밖이 되면 409 + 목록 — 수집이 조용히 끊기지 않게).
  * @param {{keyId:string, folderCorp?:string, folderServer?:string, features?:string[]|null}} o
  */
+/**
+ * 폴더를 바꿀 때의 앞 조건 — 대상 · 등록부 못 읽음 · 충돌. **본체와 사전 검사(OTP 앞)가 같은 함수**(6회차 C6-5 — 충돌 409 · 503 이 OTP 를 쓴 뒤였다).
+ * 충돌 판정은 refs.placementConflicts 하나(키 회전과 같은 함수 — 판정을 두 벌 두지 않는다).
+ */
+function placementChangeIssue(k, nextCorp, nextServer) {
+  const fi = folderTargetIssue(nextCorp, nextServer); if (fi) return { ok: false, code: 'bad-folder', status: 400, reason: fi };
+  const accById = new Map(KS.listAccountsRaw().map((a) => [a.id, a]));
+  const conflicts = REFS.placementConflicts({ folderCorp: nextCorp, folderServer: nextServer }, { serversUsing: (s) => effectiveKeyId(s, accById) === k.id, accountsUsing: (a) => a.keyRef === k.id });
+  if (conflicts === null) return { ok: false, code: 'usage-unknown', status: 503, reason: 'OS 계정 등록부를 읽지 못해 이 키를 쓰는 서버를 모릅니다 — 폴더를 바꾸지 않았습니다.' };
+  if (conflicts.length) return { ok: false, code: 'folder-conflict', status: 409, reason: `이 키를 쓰는 곳 ${conflicts.length}개가 새 폴더 밖이 됩니다 — 그 서버 · 공통 계정의 키를 먼저 바꾸세요(서버별 폴더 키는 공통 계정의 기본 키가 될 수 없습니다).`, conflicts: conflicts.slice(0, 50) };
+  return null;
+}
+
 export function setKeyPlacement({ keyId, folderCorp, folderServer, features } = {}) {
   if (KS.keyStoreLoadError()) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'SSH 키 저장소를 읽지 못했습니다.' };
   const k = KS.keyById(t(keyId, 32));
@@ -352,11 +363,7 @@ export function setKeyPlacement({ keyId, folderCorp, folderServer, features } = 
   const accById = new Map(KS.listAccountsRaw().map((a) => [a.id, a]));
   if ((folderCorp !== undefined || folderServer !== undefined) && (nextCorp !== k.folderCorp || nextServer !== k.folderServer)) {
     // 폴더가 실제로 바뀔 때만 대상을 본다 — 지금 폴더가 vCenter 목록 밖 법인이어도 기능만 바꾸는 저장은 된다(4회차 E4-3).
-    const fi = folderTargetIssue(nextCorp, nextServer); if (fi) return { ok: false, code: 'bad-folder', reason: fi };
-    // 충돌 판정은 refs.placementConflicts 하나(키 회전과 같은 함수 — 판정을 두 벌 두지 않는다).
-    const conflicts = REFS.placementConflicts({ folderCorp: nextCorp, folderServer: nextServer }, { serversUsing: (s) => effectiveKeyId(s, accById) === k.id, accountsUsing: (a) => a.keyRef === k.id });
-    if (conflicts === null) return { ok: false, code: 'usage-unknown', status: 503, reason: 'OS 계정 등록부를 읽지 못해 이 키를 쓰는 서버를 모릅니다 — 폴더를 바꾸지 않았습니다.' };
-    if (conflicts.length) return { ok: false, code: 'folder-conflict', status: 409, reason: `이 키를 쓰는 곳 ${conflicts.length}개가 새 폴더 밖이 됩니다 — 그 서버 · 공통 계정의 키를 먼저 바꾸세요(서버별 폴더 키는 공통 계정의 기본 키가 될 수 없습니다).`, conflicts: conflicts.slice(0, 50) };
+    const pi = placementChangeIssue(k, nextCorp, nextServer); if (pi) return pi;
   }
   // 기능을 바꾸면 그 키를 쓰는 서버 수를 함께 돌려준다(화면이 ‘그 서버들의 그 기능 수집이 멈춘다’ 고 말한다 — 점검 E-M2).
   const affectedServers = features !== undefined && !bmRegistryLoadError() ? listBmServersRaw().filter((s) => effectiveKeyId(s, accById) === k.id).length : null;
@@ -627,6 +634,16 @@ async function changeGuardsRaw(patch = {}, { by = '' } = {}) {
 }
 
 /**
+ * 승인 대기 키를 지금 지울 수 있는가 — 뒷정리(discard → refs.deleteKeyIfUnused → deleteIssue)와 같은 판정(6회차 C6-1 — 저장소 쓰기만 보면
+ * 등록부를 못 읽는 동안 OTP · 200 ok 뒤에 대기 키가 고아로 남았다). in-use 는 대기 키에 생기지 않지만 생기면 지우지 않는 것이 맞으므로 통과.
+ */
+function pendingKeyDropIssue(keyId) {
+  const wi = KS.keyStoreWriteIssue(); if (wi) return wi;
+  const k = KS.keyById(t(keyId, 32)); if (!k || k.status !== 'pending') return null;
+  const di = REFS.deleteIssue(k.id); return di && di.code !== 'in-use' ? di : null;
+}
+
+/**
  * 승인 · 돌려보내기 사전 검사 — **OTP 를 쓰기 전에**(라우트가 reauth 앞에 둔다 · 점검 A10). 판정은 store 가 다시 한다(여기는 빨리 거절만).
  * @returns {null | {ok:false, code, status, reason}}
  */
@@ -639,7 +656,8 @@ export function approvalPrecheck(id, { approve, by = '', digest = '' } = {}) {
   if (cur.expiresAt <= Date.now()) return { ok: false, code: 'expired', status: 409, reason: '요청의 시한(24시간)이 지났습니다 — 다시 요청하세요.' };
   // 키 등록 요청을 돌려보내면 승인 대기 키를 지운다 — 저장소를 못 읽는 동안에는 지울 수 없어 고아 키가 남는다(5회차 E5-6). 고친 뒤 돌려보내게 한다.
   //   못 읽음뿐 아니라 쓰기 거절(포탈 밖 변경 · 봉인 못 풂)도 같다 — 지우기가 거절돼 200 ok 뒤에 고아 키가 남았다(5회차 반증 R5R-1).
-  if (!approve && cur.kind === 'ssh-key-activate') { const wi = KS.keyStoreWriteIssue(); if (wi) return { ...wi, reason: `${wi.reason} 지금 돌려보내면 승인 대기 키를 지울 수 없습니다 — 저장소를 고친 뒤 돌려보내세요(요청은 그대로 둡니다).` }; }
+  //   판정은 뒷정리(discard → deleteKeyIfUnused)와 같은 pendingKeyDropIssue — 등록부를 못 읽어도 지우기가 거절된다(6회차 C6-1).
+  if (!approve && cur.kind === 'ssh-key-activate') { const pi = pendingKeyDropIssue(cur.payload?.keyId); if (pi) return { ...pi, reason: `${pi.reason} 지금 돌려보내면 승인 대기 키를 지울 수 없습니다 — 고친 뒤 돌려보내세요(요청은 그대로 둡니다).` }; }
   if (approve) {
     if (AP.identityKey(by) === AP.identityKey(cur.requestedBy)) return { ok: false, code: 'self-approve', status: 403, reason: '요청한 사람은 승인할 수 없습니다 — 다른 설정 소유자가 승인해야 합니다.' };
     if (t(digest, 64) !== cur.digest) return { ok: false, code: 'digest-mismatch', status: 409, reason: '화면에서 본 요청 내용과 다릅니다 — 다시 읽은 뒤 승인하세요.' };
@@ -732,7 +750,7 @@ export const prechecks = Object.freeze({
     if (folderCorp === undefined && folderServer === undefined) return null;
     const nc = folderCorp !== undefined ? t(folderCorp, 128) : k.folderCorp; const ns = folderServer !== undefined ? t(folderServer, 128) : (folderCorp !== undefined ? '' : k.folderServer);
     if (nc === k.folderCorp && ns === k.folderServer) return null;
-    const fi = folderTargetIssue(nc, ns); return fi ? { ok: false, code: 'bad-folder', status: 400, reason: fi } : null;
+    return placementChangeIssue(k, nc, ns);   // 본체와 같은 함수(6회차 C6-5)
   },
   rotate: ({ from, to, by }) => {
     if (KS.keyStoreLoadError()) return STORE_UNREADABLE;
@@ -748,7 +766,7 @@ export const prechecks = Object.freeze({
     if (!k) return { ok: false, code: 'not-found', status: 404, reason: '키를 찾을 수 없습니다.' };
     const ii = installingIssue(k.id); if (ii) return ii;
     // 승인 대기 키 지우기도 저장소 쓰기다 — 쓸 수 없으면 OTP 앞에서(5회차 반증 R5R-1).
-    if (k.status === 'pending') return AP.approvalsLoadError() ? { ok: false, code: 'approvals-unreadable', status: 503, reason: '승인 기록 파일을 읽지 못해 승인 대기 키를 지우지 않았습니다.' } : KS.keyStoreWriteIssue();
+    if (k.status === 'pending') return AP.approvalsLoadError() ? { ok: false, code: 'approvals-unreadable', status: 503, reason: '승인 기록 파일을 읽지 못해 승인 대기 키를 지우지 않았습니다.' } : pendingKeyDropIssue(k.id);
     return REFS.deleteIssue(k.id) || requestPrecheck({ kind: 'ssh-key-delete', target: k.id, by });   // 쓰는 곳 · 저장소 쓰기(5회차 A5-1)
   },
   resume: async ({ corp, by }) => {

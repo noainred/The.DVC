@@ -41,6 +41,7 @@ export function registryReadFailed() { load(); return readFailed === true; }
 const isMissing = (f) => { try { fs.statSync(f); return false; } catch (e) { return e?.code === 'ENOENT'; } };
 function load() {
   if (cache) return cache;
+  let corruptNow = false;
   try {
     if (!isMissing(FILE)) {
       const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));
@@ -53,9 +54,11 @@ function load() {
     // 읽기 오류(권한 · 폴더 검색 · EMFILE · NFS — 손상 아님): 원본을 옮기지 않고 **캐시하지 않는다**(다음 호출이 다시 읽는다) · 그동안 쓰기는 거절한다
     //   (5회차 C5-1 — 4회차 반증 R4R-1 의 보존본은 폴더 단위 오류에서는 만들 수 없어 사람 저장이 원본을 덮었다). 내용 손상(파싱)은 예전대로 보존본.
     if (e?.code && !(e instanceof SyntaxError)) { readFailed = true; loadErr.set(`읽기 실패(${String(e.code).slice(0, 40)})`); return { servers: [], settings: {} }; }
-    preserveCorrupt(FILE, e?.message); loadErr.set(e); cache = null;
+    preserveCorrupt(FILE, e?.message); loadErr.set(e); cache = null; corruptNow = true;
   }
-  if (readFailed) { readFailed = false; if (cache) loadErr.clear(); }
+  // 읽기 오류에서 회복 — 파일이 없는 설치(cache null)도 표지를 지운다(6회차 C6-2 — 첫 읽기 오류 뒤 권한이 돌아와도 ‘읽기 실패’ 가 재시작까지 남았다).
+  //   이번 읽기가 손상이면 그 표지는 둔다 · 보존본만 남은 경우는 아래 checkCorruptOnly 가 다시 세운다.
+  if (readFailed) { readFailed = false; if (!corruptNow) loadErr.clear(); }
   if (!cache) { loadErr.checkCorruptOnly(FILE); cache = { servers: [], settings: {} }; }
   return cache;
 }

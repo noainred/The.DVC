@@ -65,12 +65,13 @@ const installingFirst = (req, res, next) => {
 };
 /**
  * 교체 · 삭제 본체와 **같은 앞 조건**(REFS.rotateIssue · deleteIssue — 저장소 쓰기 · 폴더 충돌 · 쓰는 곳)을 OTP 앞에서 본다
- * (5회차 반증 R5R-4 — SSH 공용 접속 경로만 고쳐 7b 는 OTP 를 쓴 뒤 409 였다). 본체가 다시 본다. 없는 키는 본체의 404 로 둔다.
+ * (5회차 반증 R5R-4 — SSH 공용 접속 경로만 고쳐 7b 는 OTP 를 쓴 뒤 409 였다). 본체가 다시 본다.
+ * 없는 키도 여기서 404(OTP 를 쓰지 않는다) · 잠긴 저장소는 키 찾기보다 먼저 503(6회차 C6-4 — 키가 없다고 건너뛰어 OTP 뒤 404 였다).
  */
 const refsFirst = (req, res, next) => {
-  if (req.method === 'DELETE') { const id = t(req.params?.id || '', 32); const i = id && KS.keyById(id) ? REFS.deleteIssue(id) : null; return i ? send(res, i) : next(); }
+  if (req.method === 'DELETE') { const id = t(req.params?.id || '', 32); const i = id ? REFS.deleteIssue(id) : null; return i ? send(res, i) : next(); }
   const b = bodyOf(req); const from = t(b.from, 32); const to = t(b.to, 32);
-  const i = from && to && KS.keyById(from) && KS.keyById(to) ? REFS.rotateIssue(from, to) : null;
+  const i = from && to ? REFS.rotateIssue(from, to) : null;
   return i ? send(res, i) : next();
 };
 const keyChangeGate = [adminOnly, toolsPerm, requireSettingsOwner, fullRW, twoPersonFirst, installingFirst, revokingFirst, refsFirst, reauth];
