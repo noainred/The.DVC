@@ -327,6 +327,12 @@
     파일과 같은 이름의 선언일 때만 모듈 설명으로 쓴다. 모듈 상수 위에 둔 머리 주석(`TaskWho.jsx` · `EscClose.jsx`)은 ‘설명 없음’ 이 된다.
   - 내보내는 이름은 정규식으로 읽되 테스트가 서버 유틸 전수를 **실제 모듈 네임스페이스**(`Object.keys(await import())`)와 대조한다.
     이름을 못 뽑는 형태(`export const { a } = x`)·풀리지 않는 상대 import·빈 공용 위치는 **종료코드 1 이고 파일을 쓰지 않는다**.
+  - **공용 모듈 점검 10회(v3.10.3 ~ v3.10.12, 2026-11-15)** — 회차별 회귀는 `server/test/commonRound{1,2,3,4,5,9}_31xx.test.js` 와 웹 테스트(6 · 7 · 8 · 10회차)에 있다.
+    되풀이된 결함: 결측을 `Number()`·`|| 0` 으로 0 으로 읽음(cmpVersion 빈 세그먼트 · fmt · vmMetricsText) · 보류 · 잠금에 시한 없음(exportBusy · 활동 신호) ·
+    공용 헬퍼를 두고 직접 부름(클립보드 26줄 → `util/copyText.js` 만 — 웹 소스 스윕이 막는다) · 머리말이 코드와 다름(relTime · selectSort).
+    **남긴 것(다음 점검의 첫 후보)**: ① `JSON.parse(fs.readFileSync(F)) || {}` 형태가 도메인 저장소 32곳에 남아 객체가 아닌 JSON(`5`·`[]`)을 그대로 쓴다
+    (runtime-settings 는 v3.10.11 에 고쳤다 — 공용 '객체 JSON 읽기' 헬퍼로 옮길 후보, 비밀을 담는 저장소가 섞여 있어 한꺼번에 바꾸지 않았다)
+    ② `bmFoldersText.ageText` · `hostSanText` 의 자체 상대시각(문턱이 다른 의도된 사본 — relTime 으로 합칠지는 화면 계약 확인 뒤).
 - **테스트가 띄운 프로세스를 PID 로 정리할 때는 소유를 확인하고 죽인다**(2026-10-26 PR #779 → v3.8.1 이식): `npm test` 는 파일을 병렬로 돌리므로, 로그에 남긴 PID 의
   프로세스가 이미 끝났다면 그 번호가 다른 테스트 파일의 자식에 재사용됐을 수 있다(이 컨테이너 `pid_max` 32768). 로그된 PID 를 무조건
   `process.kill` 하지 말 것 — 가짜 `ping` 은 `test/_fakePing.js`(`installFakePing(dir)` → `killOwned()`: exec 된 sleep 환경의

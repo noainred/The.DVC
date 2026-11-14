@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "3.10.12",
+      "date": "2026-11-15",
+      "title": "공용 기능 점검 10회차(마지막): CPU 모델명 정규식 길이 상한 · 지운 셸 선택자 · selectSort 문구",
+      "notes": [
+        "CPU 모델명 표시(cpuModelText · cpuModelCell): 앵커 없는 공백 정규식이 긴 원문에 O(n²) 이었다(공백 4만 자 1,490ms · 10만 자 약 7초 실측) — 정규식 전에 200자로 자른다.",
+        "화면 안 sticky 바 높이 측정(useStickyOffset): v2.747 에 지운 V3·V5·V6 셸의 머리 선택자를 지웠다('.topbar' 하나).",
+        "selectSort 머리말: optgroup 은 낱 선택지 뒤에 온다(코드 그대로 — 문구가 '자리를 지킨다' 로 달랐다).",
+        "회귀 cpuModelText.test.js(긴 원문 — 수정 전 7.2초로 실패 확인) · bulkSticky2810.test.js(셸 선택자)."
+      ]
+    },
+    {
       "version": "3.10.11",
       "date": "2026-11-15",
       "title": "공용 기능 점검 9회차: 데이터 소스 설정 파일 모양 검사",
