@@ -102,3 +102,14 @@ label.ssa-stack { font-size: 12px; color: var(--text-dim); }
 .ssa-sw:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
 /* 키 작업 머리말 + ‘멈추기’ 단추 한 줄 — 좁으면 단추가 아래로(글은 줄바꿈 · 가로 넘침 없음) */
 .ssa-job > .ssa-acts > p { flex: 1 1 320px; min-width: 0; }
+/* 1440 에서 동작 열 · 끝 열이 가로 스크롤 뒤로 숨지 않게(docs/rules/web.md v2.780 · 점검 E1-2) — 칸 여백을 줄이고, 글이 긴 칸은 줄바꿈 · 동작 단추는 칸 안에서 줄을 나눈다 */
+.ssa-t thead th, .ssa-t tbody td { padding-left: 10px; padding-right: 10px; }
+.ssa-srvt td:nth-child(2), .ssa-srvt td:nth-child(3), .ssa-srvt td:nth-child(6) { white-space: normal; overflow-wrap: anywhere; min-width: 96px; }
+.ssa-srvt td:last-child .ssa-acts, .ssa-keys td:last-child .ssa-acts, .ssa-appr td:last-child .ssa-acts { min-width: 0; }
+.ssa-keys td:nth-child(4) { white-space: normal; overflow-wrap: anywhere; min-width: 110px; }
+/* 지문 칸은 두 줄로 나눠도 된다(줄인 지문 — 전체는 title) · 이름 칸 최소 폭을 줄여 동작 열이 1440 에서 보이게 */
+.ssa-keys td:nth-child(2) { white-space: normal; overflow-wrap: anywhere; min-width: 96px; }
+.ssa .ssa-keys td:first-child { min-width: 140px; }
+.ssa-appr td:nth-child(3) { white-space: normal; overflow-wrap: anywhere; }
+/* 끝난 요청의 요청 · 처리 칸(이름 + 시각) — 시각은 띄어쓰기에서만 나눈다(날짜 중간에서 끊기지 않게) */
+.ssa-apprd td:nth-child(3), .ssa-apprd td:nth-child(4) { white-space: normal; overflow-wrap: break-word; }

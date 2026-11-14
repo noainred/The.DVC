@@ -68,6 +68,8 @@ export const EVENT_TEXT = Object.freeze({
   'key-lines-removed': '서버에서 키 줄 삭제',
   'key-job-done': '키 로그인 설정 작업 끝남',
   'key-revoke-done': '키 거두기 작업 끝남',
+  // 포탈이 서버를 바꾸던 도중 다시 시작함 — 그 서버의 authorized_keys 를 확인할 것(서버가 기동 때 남김 · 1회차 B7)
+  'key-job-interrupted': '키 작업이 서버를 바꾸던 중에 중단됨',
   'key-job-cancel': '키 작업 멈추기',
   'inbox-seen': '받는 곳 새 파일(내부 표지)',
 });
@@ -161,12 +163,38 @@ export function sortedCheck(items) {
 
 /** 주기 수집 기능 — 서버 표가 ‘이 키는 수집에 허용되지 않음’ 을 가를 때 본다(서버 FEATURE_CATALOG 의 수집 기능 id). */
 export const COLLECT_FEATURES = Object.freeze(['bm-usage', 'bm-storage']);
+/**
+ * 이 키(허용 기능 목록)로는 주기 수집이 접속하지 않는가 — 목록이 있고 수집 기능이 하나도 없을 때만 참(null = 예전 키 · 모든 기능 → 거짓).
+ * 키 고르기 창 · 키 로그인 설정 창 · 넣을 키 목록 · 서버 표가 이 함수 하나로 가른다(판정 복제 금지). 최종 판정은 서버(refs.keyPlacementIssue · feature).
+ */
+export function keyNoCollect(features) {
+  return Array.isArray(features) && !COLLECT_FEATURES.some((f) => features.includes(f));
+}
+/** 수집 미허용 키를 서버에 묶을 때의 경고(키 고르기 · 키 로그인 설정 창 공용 문구). */
+export const NO_COLLECT_WARN = '이 키는 베어메탈 사용률 · 스토리지 수집에 허용되지 않았습니다 — 서버가 이 키를 쓰도록 적히면(연결 시험 · 키 접속 확인은 통과해도) 주기 수집은 이 키로 접속하지 않고 비밀번호로 넘어가지도 않아 그 서버의 수집이 멈춥니다. 키 폴더 탭에서 기능을 더하거나 다른 키를 고르세요.';
+/**
+ * 서버에 저장된 접속 수단이 있는가 — 키로 접속하도록 설정됨(키가 수단) · 비밀번호(서버 항목 또는 공통 계정에 저장됨) · 없음.
+ * 서버가 hasSecret 를 주면 그것, 아니면 서버 응답의 keyMode · hasPassword · 공통 계정 hasPassword 로 가른다. 모르면 null(셈에 넣지 않는다).
+ * ‘비밀번호 고정이면서 비밀번호가 없는 서버’ 는 keyMode 가 ‘password’ 여도 수단이 없다(점검 E1-10).
+ */
+export function hasStoredSecret(s, accounts = []) {
+  if (!s || typeof s !== 'object') return null;
+  if (typeof s.hasSecret === 'boolean') return s.hasSecret;
+  if (s.keyMode === 'pinned' || s.keyMode === 'corp-default') return true;
+  if (s.keyMode === 'none') return false;
+  if (s.keyMode !== 'password') return null;
+  if (s.hasPassword === true) return true;
+  const acc = s.accountName ? (Array.isArray(accounts) ? accounts : []).find((a) => a && a.name === s.accountName) : null;
+  if (acc && acc.hasPassword === true) return true;
+  if (s.hasPassword === false && (!s.accountName || (acc && acc.hasPassword === false))) return false;
+  return null;
+}
 
 /**
  * 서버 표 ‘상태’ 칸 — 실제로 접속을 막는 사유를 먼저(서버가 준 값 그대로 · 화면이 폴더 · 기능을 새로 판정하지 않는다).
  * @returns {{label:string, tone:'ok'|'warn'|'bad'|'muted', title?:string}}
  */
-export function serverStatus(s, { tampered = [], stop = false } = {}) {
+export function serverStatus(s, { tampered = [], stop = false, accounts = null } = {}) {
   if (s.accountMissing) return { label: '공통 계정 없음', tone: 'bad' };
   if (s.keyMissing) return { label: '키 없음(삭제됨)', tone: 'bad' };
   if (stop && (s.keyMode === 'pinned' || s.keyMode === 'corp-default')) return { label: '키 사용 중지', tone: 'bad', title: '법인 키 사용 중지 — 이 노드는 이 서버에 키로 접속하지 않습니다.' };
@@ -175,8 +203,10 @@ export function serverStatus(s, { tampered = [], stop = false } = {}) {
   if (s.keyStatus === 'retired') return { label: '퇴역 키', tone: 'bad' };
   if (s.keyStatus === 'pending') return { label: '키 승인 대기', tone: 'bad', title: '이 키는 다른 설정 소유자의 승인을 기다립니다 — 승인되기 전에는 이 키로 접속하지 않습니다.' };
   if (s.keyMode === 'none') return { label: '인증 수단 없음', tone: 'bad' };
+  // 비밀번호 고정인데 저장된 비밀번호가 없음(서버 · 공통 계정 둘 다) — 접속 수단이 없다(점검 E1-10). 공통 계정 목록을 받지 못했으면 가르지 않는다.
+  if (s.keyMode === 'password' && accounts && hasStoredSecret(s, accounts) === false) return { label: '인증 수단 없음', tone: 'bad', title: '비밀번호로 접속하도록 고정돼 있지만 서버 항목 · 공통 계정 어디에도 저장된 비밀번호가 없습니다.' };
   if (s.keyMode === 'password') return { label: '비밀번호', tone: 'warn' };
-  if (Array.isArray(s.keyFeatures) && !COLLECT_FEATURES.some((f) => s.keyFeatures.includes(f))) return { label: '수집 기능 미허용', tone: 'warn', title: '이 키의 ‘쓸 수 있는 기능’ 에 베어메탈 사용률 · 스토리지가 없습니다 — 주기 수집이 이 키로 접속하지 않습니다.' };
+  if (keyNoCollect(s.keyFeatures)) return { label: '수집 기능 미허용', tone: 'warn', title: '이 키의 ‘쓸 수 있는 기능’ 에 베어메탈 사용률 · 스토리지가 없습니다 — 주기 수집이 이 키로 접속하지 않습니다.' };
   return { label: '키', tone: 'ok' };
 }
 
@@ -184,6 +214,39 @@ export function serverStatus(s, { tampered = [], stop = false } = {}) {
 export function auditTime(at) {
   const n = Date.parse(String(at || ''));
   return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * 감사 줄 detail(라우트가 JSON 으로 적은 400자 이내 글자)의 결과 — 실패 · 거절은 실패로, 승인 대기는 대기로 그린다(점검 E1-5 — 예전에는 detail 을 버려 성공처럼 읽혔다).
+ * 잘려서 읽을 수 없거나 ok 칸이 없으면 null(지어내지 않는다).
+ * @returns {null | {label:string, tone:'bad'|'warn'}}
+ */
+export function auditOutcome(detail) {
+  const raw = typeof detail === 'string' ? detail : '';
+  if (!raw || raw.length > 2000 || raw[0] !== '{') return null;
+  let d = null;
+  try { d = JSON.parse(raw); } catch { return null; }
+  if (!d || typeof d !== 'object' || Array.isArray(d)) return null;
+  if (d.ok === false) return { label: `실패${typeof d.code === 'string' && d.code ? `(${d.code.slice(0, 40)})` : ''}`, tone: 'bad' };
+  if (d.ok === true && d.pending) return { label: '승인 대기', tone: 'warn' };
+  return null;
+}
+/** 문장 끝 마침표를 뗀다(서버 사유를 이어 붙일 때 ‘..’ 이 되지 않게 — 정규식 없이 · 길이 먼저 자름). */
+export function noEndDot(text, max = 300) {
+  let t = String(text ?? '').slice(0, max).trimEnd();
+  while (t.endsWith('.')) t = t.slice(0, -1).trimEnd();
+  return t;
+}
+/**
+ * 키 고르기 창 ‘서버에 들어 있는 키 다시 읽기’ 결과 문구(점검 E1-6). 서버는 출력을 못 읽어도 ok:true + error 를 준다(readInstalledKeys) —
+ * 그때는 ‘0줄을 읽었습니다’ 라고 하지 않고 확인 톤으로 사유를 보인다.
+ * @returns {{text:string, tone:'ok'|'warn'}}
+ */
+export function installedReadText(r) {
+  if (r && typeof r.error === 'string' && r.error) return { text: `서버에 들어 있는 키를 읽지 못했습니다 — ${noEndDot(r.error)}.`, tone: 'warn' };
+  const n = Array.isArray(r?.keys) ? r.keys.length : null;
+  const cut = finiteNum(r?.truncated);
+  return { text: `서버에 들어 있는 키 ${unitText(n, '줄')}을 읽었습니다${cut > 0 ? ` · ${cut}줄은 상한을 넘어 읽지 않음` : ''}.`, tone: 'ok' };
 }
 
 /** 받는 곳 승인 때 기본 이름(파일 이름 → 키 이름 규칙에 맞는 글자). 서버 NAME_RE 와 같은 글자만 남긴다(서버가 다시 판정한다). */
@@ -265,10 +328,12 @@ export function keyOptionLabel(k, corpName = (x) => x) {
   return `${k?.name || '—'}${k?.status === 'retired' ? ' (퇴역)' : ''} — ${folderText(k, corpName)}`;
 }
 
+/** 두 사람 승인을 거치는 쓰기(서버 SSH_KINDS 와 같은 목록 — 보호 장치 설명 · 끄기 안내가 이 글자 하나를 쓴다). */
+export const TWO_PERSON_TARGETS = '키 등록 · 받은 키 승인 · 교체 · 삭제 · 법인 키 사용 재개 · 키 저장소 다시 읽기 · 보호 장치 끄기';
 /** 보호 장치(스위치 둘) — 이름 · 설명. 설명에 시한 숫자를 박지 않는다(남은 시간은 요청마다 서버 값으로 보인다). */
 export const GUARD_KEYS = Object.freeze(['twoPerson', 'serverRestrict']);
 export const GUARD_TEXT = Object.freeze({
-  twoPerson: Object.freeze({ label: '두 사람 승인', note: '키 등록 · 받은 키 승인 · 교체 · 삭제 · 법인 키 사용 재개 · 키 저장소 다시 읽기 · 보호 장치 끄기는 다른 설정 소유자 1명이 승인해야 실행됩니다. 요청은 시한이 지나면 사라집니다. 승인할 수 있는 다른 설정 소유자가 없으면 요청을 만들지 않고 사유를 보입니다.' }),
+  twoPerson: Object.freeze({ label: '두 사람 승인', note: `${TWO_PERSON_TARGETS}는 다른 설정 소유자 1명이 승인해야 실행됩니다. 요청은 시한이 지나면 사라집니다. 승인할 수 있는 다른 설정 소유자가 없으면 요청을 만들지 않고 사유를 보입니다.` }),
   serverRestrict: Object.freeze({ label: '서버 쪽 제한', note: '포탈이 서버에 넣는 키 줄에 ‘이 포탈 주소에서 올 때만’ · ‘포워딩 금지’ 를 붙입니다 — 키가 새도 서버가 본 주소가 이 포탈이 아닌 접속은 그 줄로 받지 않습니다. 주소는 서버가 본 것이라 같은 NAT 뒤의 다른 장비는 가르지 못하고, 사람이 넣은 줄 · 관리자가 옵션을 바꾼 줄에는 붙지 않습니다.' }),
 });
 /** 보호 장치 편집값 ↔ 지금 값 — 켜는 것 · 끄는 것(끄는 것은 다른 설정 소유자의 승인을 거칠 수 있다). 참/거짓이 아닌 값은 바꾸지 않는 것으로 본다. */
@@ -384,7 +449,7 @@ export function stopDoneText(r, corpLabel = '') {
 }
 
 /** 키 보안 사건의 부가 설명 — 사람이 읽을 것만(받는 곳 새 파일의 detail 은 내부 표지라 싣지 않는다). 보호 장치 키 이름은 화면 이름으로. */
-const EVENT_DETAIL_KINDS = new Set(['guard-changed', 'approval-requested', 'approval-decided', 'key-login-set', 'key-lines-removed', 'corp-stop', 'inbox-approved', 'keystore-reloaded', 'key-job-done', 'key-revoke-done']);
+const EVENT_DETAIL_KINDS = new Set(['guard-changed', 'approval-requested', 'approval-decided', 'key-login-set', 'key-lines-removed', 'corp-stop', 'inbox-approved', 'keystore-reloaded', 'key-job-done', 'key-revoke-done', 'key-job-interrupted']);
 export function eventDetail(e) {
   if (!e || !EVENT_DETAIL_KINDS.has(e.kind)) return '';
   const d = String(e.detail || '').slice(0, 300);
@@ -500,8 +565,12 @@ export function keyRevokeRow(r) {
  * @param {object|null} job  마지막으로 받은 서버 job
  * @param {{stopped?:boolean}} o  stopped = 진행을 더 묻지 않게 됨(404 · 연속 실패)
  */
-export function jobHeadText(job, { stopped = false } = {}) {
-  if (!job || typeof job !== 'object') return stopped ? '작업을 시작했지만 진행을 받지 못했습니다.' : '작업을 시작했습니다 — 진행을 묻는 중…';
+export function jobHeadText(job, { stopped = false, own = true } = {}) {
+  // own = 이 화면이 방금 시작한 작업 · false = 이미 있던 작업에 다시 붙음(‘시작했습니다’ 라고 하지 않는다 — 점검 E1-9)
+  if (!job || typeof job !== 'object') {
+    if (stopped) return own ? '작업을 시작했지만 진행을 받지 못했습니다.' : '이 작업의 진행을 받지 못했습니다.';
+    return own ? '작업을 시작했습니다 — 진행을 묻는 중…' : '작업의 진행을 묻는 중…';
+  }
   const done = Array.isArray(job.results) ? job.results.length : 0;
   const prog = `${done} / ${unitText(finiteNum(job.total), '대')}`;
   if (job.running === true) {
@@ -513,13 +582,19 @@ export function jobHeadText(job, { stopped = false } = {}) {
 /**
  * 진행을 더 묻지 못했을 때의 안내(점검 E-6). 404 = 서버가 작업 기록을 모른다(끝난 지 오래됐거나 포탈 재시작 — 서버 사유를 그대로 싣는다).
  * 재시작이면 그때 처리 중이던 서버는 줄을 바꾼 뒤 확인 · 되돌리기 전에 끊겼을 수 있다 — 마지막으로 본 서버 이름을 밝히고 확인할 곳을 가리킨다.
+ * 종류별로 가른다(점검 E1-9): 넣기 = 줄을 바꾼 뒤 확인 · 되돌리기 전에 끊겼을 수 있음 · 거두기 = 확인 · 되돌리기 단계가 없다 — 지우는 명령을 보냈는지 모른다.
  */
-export function jobLostText(status, reason, job) {
+export function jobLostText(status, reason, job, kind = '') {
   const why = String(reason || '').trim();
   const cur = job && job.running === true && job.current ? String(job.current) : '';
+  const k = job?.kind === 'key-revoke' || job?.kind === 'key-login' ? job.kind : kind;
   if (status === 404) {
     const head = why ? (/[.)]$/.test(why) ? why : `${why}.`) : '작업 기록을 찾지 못했습니다.';
-    return `${head} ${cur ? `마지막으로 본 처리 중 서버는 ${cur} 입니다 — ` : ''}처리 중이던 서버가 있었다면 줄을 바꾼 뒤 확인 · 되돌리기 전에 끊겼을 수 있으니, 법인 · 서버 탭 › 키 고르기 › ‘서버에 들어 있는 키 다시 읽기’ 로 확인하세요.`;
+    const where = '법인 · 서버 탭 › 키 고르기 › ‘서버에 들어 있는 키 다시 읽기’ 로 확인하세요.';
+    const tail = k === 'key-revoke'
+      ? `처리 중이던 서버가 있었다면 지우는 명령을 보냈는지 모릅니다 — 그 키 줄이 남았는지 ${where}`
+      : `처리 중이던 서버가 있었다면 줄을 바꾼 뒤 확인 · 되돌리기 전에 끊겼을 수 있으니, ${where}`;
+    return `${head} ${cur ? `마지막으로 본 처리 중 서버는 ${cur} 입니다 — ` : ''}${tail}`;
   }
   return `진행을 더 묻지 못했습니다${why ? `(${why})` : ''} — 작업은 서버에서 계속되고 있을 수 있습니다.`;
 }
@@ -580,7 +655,8 @@ export function savedAuthHints(targets, { keyId = '', accounts = [] } = {}) {
   const storedPw = (s) => s.hasPassword === true || (!!s.accountName && accPw.get(s.accountName) === true);
   const byKey = list.filter((s) => (s.keyMode === 'pinned' || s.keyMode === 'corp-default') && s.installed?.hasKey !== true
     && !(keyId && s.keyId === keyId && storedPw(s))).length;
-  const none = list.filter((s) => s.keyMode === 'none').length;
+  // 저장된 수단이 없는 서버 — keyMode ‘none’ 만이 아니다: 비밀번호로 고정됐는데 서버 · 공통 계정 어디에도 비밀번호가 없는 서버도(점검 E1-10 · hasStoredSecret)
+  const none = list.filter((s) => hasStoredSecret(s, accounts) === false).length;
   const out = [];
   if (byKey) out.push(`서버 ${byKey}대는 지금 키로 접속하도록 설정돼 있는데, 그 키가 서버에 들어 있는지 확인된 적이 없습니다 — 들어 있지 않으면 저장된 인증으로는 접속이 거부됩니다(다시 시도하지 않습니다). 그런 서버는 ‘지금 입력’ 으로 비밀번호를 넣으세요.`);
   if (none) out.push(`서버 ${none}대는 저장된 인증 수단이 없습니다 — ‘지금 입력’ 으로 비밀번호를 넣어야 합니다.`);

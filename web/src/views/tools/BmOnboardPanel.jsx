@@ -12,6 +12,7 @@ import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
+import { rotatePartialText } from '../sshAccessText.js';   // 회전 중간 실패(partial)의 이미 옮긴 곳 — SSH 공용 접속 화면과 같은 문구(점검 E1-11)
 import { downloadBlob } from './bmCapture.js';
 import { missingView, facetOptions, clampPageSize, readPageSize, writePageSize, nodeOf, corpOf, PAGE_SIZE_MIN, PAGE_SIZE_MAX } from './bmMissingView.js';
 import {
@@ -60,14 +61,17 @@ function KeysSection({ manage, onChanged }) {
   const canChange = manage && twoPerson !== true;
   const keys = st.resp?.keys || [];
   const add = async () => {
+    const body = { name: f.name, privateKey: f.privateKey, passphrase: f.passphrase, rotateAt: f.rotateAt || undefined, otp: f.otp };
+    // 개인키 · passphrase · OTP 는 보낸 뒤 성공 · 실패와 무관하게 비운다(입력 칸 위생 — 실패하면 다시 붙여 넣는다 · 점검 E1-12 · SSH 공용 접속 화면과 같은 규칙)
+    setF((x) => ({ ...x, privateKey: '', passphrase: '', otp: '' }));
     setBusy(true); setMsg({ text: '', tone: 'muted' });
     try {
-      const r = await postJson('/tools/bm-usage/ssh-keys', { name: f.name, privateKey: f.privateKey, passphrase: f.passphrase, rotateAt: f.rotateAt || undefined, otp: f.otp });
-      if (r?.ok === false) { refused(r); setMsg({ text: `등록하지 못했습니다 — ${r.reason || r.code}`, tone: 'bad' }); return; }
+      const r = await postJson('/tools/bm-usage/ssh-keys', body);
+      if (r?.ok === false) { refused(r); setMsg({ text: `등록하지 못했습니다 — ${r.reason || r.code} (개인키 · passphrase 는 화면에서 비웠습니다 — 다시 붙여 넣으세요)`, tone: 'bad' }); return; }
       setMsg({ text: `등록했습니다 — ${r.key.algo} ${r.key.bits ?? ''} · ${r.key.fingerprint}`, tone: 'ok' });
       setF({ name: '', privateKey: '', passphrase: '', rotateAt: '', otp: '' });
       load(); onChanged?.();
-    } catch (e) { setMsg({ text: `등록하지 못했습니다 — ${errText(e)}`, tone: 'bad' }); setF((x) => ({ ...x, otp: '' })); }
+    } catch (e) { setMsg({ text: `등록하지 못했습니다 — ${errText(e)} (개인키 · passphrase 는 화면에서 비웠습니다 — 다시 붙여 넣으세요)`, tone: 'bad' }); }
     finally { setBusy(false); }
   };
   const del = async (k) => {
@@ -84,10 +88,22 @@ function KeysSection({ manage, onChanged }) {
     setBusy(true); setMsg({ text: '', tone: 'muted' });
     try {
       const r = await postJson('/tools/bm-usage/ssh-keys/rotate', rot);
-      if (r?.ok === false) { refused(r); setMsg({ text: `회전하지 못했습니다 — ${r.reason || r.code}`, tone: 'bad' }); return; }
+      if (r?.ok === false) {
+        refused(r);
+        // 중간에 실패하면 이미 옮긴 서버 · 공통 계정이 있다(partial — 점검 E1-11). 실패로만 말하지 않고 그 사실을 붙이고 목록을 다시 읽는다.
+        const part = rotatePartialText(r.partial);
+        setMsg({ text: `회전하지 못했습니다 — ${r.reason || r.code}${part ? ` ${part}` : ''}`, tone: 'bad' });
+        setRot((x) => ({ ...x, otp: '' }));
+        if (part) { load(); onChanged?.(); }
+        return;
+      }
       setMsg({ text: `회전했습니다 — 서버 ${r.servers.length}대 · 공통 계정 ${r.accounts}개가 새 키를 씁니다.${r.retestAdvised ? ' 서버마다 ‘연결 시험’ 을 다시 하세요(자동 재시험 없음).' : ''}`, tone: 'ok' });
       setRot({ from: '', to: '', otp: '' }); load(); onChanged?.();
-    } catch (e) { setMsg({ text: `회전하지 못했습니다 — ${errText(e)}`, tone: 'bad' }); setRot((x) => ({ ...x, otp: '' })); }
+    } catch (e) {
+      const part = rotatePartialText(e?.body?.partial);   // 503 등은 던져진다 — 본문의 partial 도 같은 문구로
+      setMsg({ text: `회전하지 못했습니다 — ${errText(e)}${part ? ` ${part}` : ''}`, tone: 'bad' }); setRot((x) => ({ ...x, otp: '' }));
+      if (part) { load(); onChanged?.(); }
+    }
     finally { setBusy(false); }
   };
   if (st.err) return <section className="bmob-sec"><h4>SSH 키 저장소</h4><ErrorBox error={st.err} /></section>;
@@ -119,7 +135,7 @@ function KeysSection({ manage, onChanged }) {
       {st.resp?.hidden === 'scoped' && <p className="bmo-note">범위가 지정된 계정에는 키 목록(이름 · 사용처)을 보이지 않습니다 — 키 · 공통 계정을 서버에 묶는 것은 설정 소유자만 합니다.</p>}
       {st.resp?.undecryptable > 0 && <p className="bmo-note" style={{ color: toneVar('bad') }}>봉인을 풀지 못한 비밀 {st.resp.undecryptable}개 — 자격증명 비밀키가 바뀐 것으로 보입니다. 봉인본을 지우지 않도록 키 저장소 변경을 막았습니다(원래 비밀키로 되돌리세요).</p>}
       {manage && twoPerson === true ? (
-        <p className="bmo-note" style={{ color: toneVar('warn') }}>두 사람 승인이 켜져 있어 이 화면에서는 키를 등록 · 교체(회전) · 삭제하지 않습니다 — <a href="#/settings/ssh-access">설정 › 보안 › SSH 공용 접속</a>의 키 폴더에서 요청하면 다른 설정 소유자가 승인한 뒤 실행됩니다(승인 대기 키는 그 전에는 쓰이지 않습니다).</p>
+        <p className="bmo-note" style={{ color: toneVar('warn') }}>두 사람 승인이 켜져 있어 이 화면에서는 키를 등록 · 교체(회전) · 삭제하지 않습니다 — <a href="#/settings/ssh-access">설정 › 보안 › SSH 공용 접속</a>의 키 폴더에서 요청하면 다른 설정 소유자가 승인한 뒤 실행됩니다(승인 대기 키는 그 전에는 쓰이지 않습니다). 승인할 다른 설정 소유자가 없으면 설정 소유자를 추가하거나, SSH 공용 접속 › 키 보안 › 보호 장치에서 두 사람 승인을 끄세요(승인할 수 있는 소유자 둘을 확인한 적이 없는 포탈만 혼자 끌 수 있습니다).</p>
       ) : manage ? (
         <div className="bmob-forms">
           <fieldset className="bmob-form">
@@ -161,14 +177,16 @@ function AccountsSection({ manage, vcenters, keysRev }) {
   const keyName = (id) => (!id ? '—' : kst.resp?.hidden === 'scoped' ? '(설정됨)' : ((kst.resp?.keys || []).find((k) => k.id === id)?.name || '(없는 키)'));
   const vcName = (id) => (id ? (vcenters.find((v) => v.id === id)?.name || id) : '전 법인 공용');
   const save = async () => {
+    const body = { ...f, ...(f.id ? {} : { id: undefined }), password: f.password || undefined };
+    // 비밀번호 · OTP 는 보낸 뒤 성공 · 실패와 무관하게 비운다(점검 E1-12)
+    setF((x) => ({ ...x, password: '', otp: '' }));
     setBusy(true); setMsg({ text: '', tone: 'muted' });
     try {
-      const body = { ...f, ...(f.id ? {} : { id: undefined }), password: f.password || undefined };
       const r = await postJson('/tools/bm-usage/accounts', body);
-      if (r?.ok === false) { setMsg({ text: `저장하지 못했습니다 — ${r.reason || r.code}`, tone: 'bad' }); return; }
+      if (r?.ok === false) { setMsg({ text: `저장하지 못했습니다 — ${r.reason || r.code}${body.password ? ' (비밀번호는 화면에서 비웠습니다 — 다시 넣으세요)' : ''}`, tone: 'bad' }); return; }
       setMsg({ text: `저장했습니다 — ${r.account.name}${r.droppedSecrets?.length ? ` (법인 · 계정명이 바뀌어 ${r.droppedSecrets.join(' · ')} 를 잇지 않았습니다 — 다시 입력하세요)` : ''}${r.copiesStale ? ` · iDRAC ${r.copiesStale}대에 옛 비밀번호 사본이 있습니다 — 같은 CSV 를 다시 적용해야 새 비밀번호가 들어갑니다` : ''}`, tone: r.droppedSecrets?.length || r.copiesStale ? 'warn' : 'ok' });
       setF(blank); load();
-    } catch (e) { setMsg({ text: `저장하지 못했습니다 — ${errText(e)}`, tone: 'bad' }); setF((x) => ({ ...x, otp: '' })); }
+    } catch (e) { setMsg({ text: `저장하지 못했습니다 — ${errText(e)}${body.password ? ' (비밀번호는 화면에서 비웠습니다 — 다시 넣으세요)' : ''}`, tone: 'bad' }); }
     finally { setBusy(false); }
   };
   const del = async (a) => {
@@ -456,7 +474,7 @@ export default function BmOnboardPanel({ vcenters = [] }) {
   return (
     <div className="bmob" style={{ marginTop: 14 }}>
       <h4 style={{ margin: 0 }}>서버 등록 · 온보딩</h4>
-      <p className="bmo-note"><BoldText text={'수집 경로는 서버마다 하나 — **edge**(법인 엣지가 읽음) · **central**(중앙이 직접) · **auto**(그 법인 엣지가 지금 접속 중이면 edge, 엣지가 없으면 central — 엣지가 있는데 접속을 모르면 판정하지 않습니다). 포탈은 서버에 계정 · 키를 만들지 않습니다.'} /></p>
+      <p className="bmo-note"><BoldText text={'수집 경로는 서버마다 하나 — **edge**(법인 엣지가 읽음) · **central**(중앙이 직접) · **auto**(그 법인 엣지가 지금 접속 중이면 edge, 엣지가 없으면 central — 엣지가 있는데 접속을 모르면 판정하지 않습니다). **이 화면**은 서버에 계정을 만들거나 키를 넣지 않습니다 — 서버의 authorized_keys 에 공개키를 넣는 것(키 로그인 설정)은 설정 › 보안 › SSH 공용 접속에서 합니다.'} /></p>
       <KeysSection manage={manage} onChanged={() => setKeysRev((x) => x + 1)} />
       <AccountsSection manage={manage} vcenters={vcenters} keysRev={keysRev} />
       <ImportSection onApplied={() => setRev((x) => x + 1)} />
