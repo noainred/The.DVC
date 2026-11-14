@@ -28,7 +28,8 @@ export const MISS_REASON_TEXT = Object.freeze({
   'edge-name-clash': '엣지 이름이 다른 수집 서버의 id · 이름과 겹쳐 그 엣지 보관분을 이름으로 가릴 수 없음 — 모름(수집 서버 이름을 서로 다르게 바꾸면 풀립니다)',   // 재확인 R1
   'remote-collector-unknown': '원격 수집 서버(엣지)가 맡은 서버인데 그 수집 서버의 이름을 등록부에서 확인하지 못함(등록부 못 읽음 · 등록부에 없음 · 이름이 빈 등록) — 어느 엣지인지 몰라 모름으로 둡니다',   // v2.961 · 반증 의심 2
 });
-export const KEY_STATUS_TEXT = Object.freeze({ active: '사용', retired: '퇴역(회전됨)' });
+/** 키 상태 — pending 은 SSH 공용 접속 2단계(v3.10.0) 두 사람 승인의 ‘승인 대기’(승인 전에는 접속에 쓰지 않고 고를 수도 없다). */
+export const KEY_STATUS_TEXT = Object.freeze({ active: '사용', retired: '퇴역(회전됨)', pending: '승인 대기' });
 export const ACCOUNT_KIND_TEXT = Object.freeze({ os: 'OS(SSH)', idrac: 'iDRAC' });
 
 /** 모르는 수(null)는 '—'(0 으로 보이지 않는다). */
