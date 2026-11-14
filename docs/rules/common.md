@@ -309,6 +309,16 @@
     (테스트는 '실재 모듈을 가리키는 경로 문자열' 로 센다 — 24개) ③ 머리 주석이 import 뒤에 오는 `util/atomicWrite.js`(사용처 1위)가 '설명 없음' 이 됐다.
   - 한계(문서 머리말에도 있다): 경로를 런타임에 조합하는 소스의 동적 import 는 사용처로 세지 못한다(그 파일을 문서에 밝힌다) · 경로를 조각으로
     조합하는 테스트(`path.join(SRC, 'util', 'x.js')`)는 세지 못한다 — **'테스트 0'·'사용처 0' 은 판정이 아니라 살펴볼 후보**다. `pyportal/` 은 대상이 아니다.
+  - **생성물은 둘이다**(v3.10 — 포탈 점검 › 공통 기능 화면 · 설계 `docs/design/common-catalog`): 같은 명령이 `docs/COMMON.md` 와
+    `server/src/portalcheck/commonCatalog.json`(화면이 읽는 것)을 함께 만들고 `--check` 가 둘 다 본다. JSON 을 `server/src` 에 두는 이유 —
+    배포본에는 `web/src`·`server/test`·`scripts/` 가 없어 포탈이 다시 만들 수 없고(`build-package.sh` 는 server/src · web/dist 만 담는다),
+    `web/public` 에 두면 로그인 없이 받을 수 있다(`web/dist` 는 인증 없이 서빙 — 목록에 서버 내부 모듈의 설명이 있다). **`web/public` 으로 옮기지 말 것.**
+    JSON 에 버전 · 생성 시각을 싣지 않는다(릴리스의 버전업마다 다시 만들게 된다). 라우트 `GET /api/tools/portal-check/common` 은
+    `adminOnly, fullScopeOnly` + 관리자 판본만(`isAdminDetailUser` — 데모 계정 403) · 파일이 없으면 `missing`, 못 읽으면 `unreadable`(빈 목록으로 만들지 않는다).
+    회귀 `server/test/commonCatalog3100.test.js`(실제 라우트 호출) · `web/src/views/tools/commonCatalogText.test.js`.
+  - **머리 주석은 파일 맨 앞에 둔다** — 생성기는 import 뒤의 주석을 보수적으로 읽는다(v3.10 Chromium 판독에서 `store.js` 가 ‘v2.617’ 로 실렸다):
+    import 줄 끝 주석 · import 사이 한 줄 메모는 버리고, import 뒤 주석이 선언에 바로 붙어 있으면 내보내는 함수 · 클래스 · 기본 내보내기 ·
+    파일과 같은 이름의 선언일 때만 모듈 설명으로 쓴다. 모듈 상수 위에 둔 머리 주석(`TaskWho.jsx` · `EscClose.jsx`)은 ‘설명 없음’ 이 된다.
   - 내보내는 이름은 정규식으로 읽되 테스트가 서버 유틸 전수를 **실제 모듈 네임스페이스**(`Object.keys(await import())`)와 대조한다.
     이름을 못 뽑는 형태(`export const { a } = x`)·풀리지 않는 상대 import·빈 공용 위치는 **종료코드 1 이고 파일을 쓰지 않는다**.
 - **테스트가 띄운 프로세스를 PID 로 정리할 때는 소유를 확인하고 죽인다**(2026-10-26 PR #779 → v3.8.1 이식): `npm test` 는 파일을 병렬로 돌리므로, 로그에 남긴 PID 의

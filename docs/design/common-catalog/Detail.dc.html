@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>공통 기능 — 검색과 모듈 상세</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#60a5fa}a:hover{color:#93c5fd}
+</style>
+</helmet>
+<div style="position: relative; box-sizing: border-box; min-height: 1200px; padding: 24px 28px 40px; background: #0a0e17; color: #e6edf6; font-family: 'Inter', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; gap: 14px">
+
+  <div style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px 20px">
+    <div style="min-width: 0">
+      <div style="font-size: 12px; color: #8b9bb4">특수 기능 › 포탈 점검</div>
+      <h1 style="margin: 2px 0 0; font-size: 20px; font-weight: 700">포탈 점검</h1>
+    </div>
+  </div>
+
+  <div style="background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0">
+    <div style="display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center">
+      <label style="display: flex; align-items: center; gap: 8px; flex: 0 1 420px; min-width: 0">
+        <span style="font-size: 12px; color: #8b9bb4; white-space: nowrap">찾기</span>
+        <input type="search" value="시한" style="flex: 1; min-width: 0; font: inherit; font-size: 13px; padding: 7px 10px; border-radius: 8px; border: 1px solid #3b82f6; background: #0f1626; color: #e6edf6">
+      </label>
+      <span style="font-size: 12px; color: #8b9bb4">231개 중 3개 — 모듈 이름 · 내보내는 이름 · 설명에서 찾았습니다</span>
+    </div>
+
+    <div style="overflow-x: auto; min-width: 0">
+      <div role="table" aria-label="검색 결과" style="min-width: 1100px; font-size: 12.5px">
+        <div role="row" style="display: grid; grid-template-columns: 220px 112px minmax(0, 1.7fr) minmax(0, 1fr) 72px 56px 64px; column-gap: 16px; padding: 8px 10px; background: #0f1626; color: #8b9bb4; font-weight: 600; border-bottom: 1px solid #243049">
+          <span role="columnheader">모듈</span>
+          <span role="columnheader">구분</span>
+          <span role="columnheader">하는 일</span>
+          <span role="columnheader">내보내는 이름</span>
+          <span role="columnheader" aria-sort="descending" style="text-align: right; color: #e6edf6">사용처 ▼</span>
+          <span role="columnheader" style="text-align: right">영역</span>
+          <span role="columnheader" style="text-align: right">테스트</span>
+        </div>
+        <div role="row" style="display: grid; grid-template-columns: 220px 112px minmax(0, 1.7fr) minmax(0, 1fr) 72px 56px 64px; column-gap: 16px; padding: 9px 10px; border-bottom: 1px solid #1f2a40; align-items: start">
+          <div role="cell" style="min-width: 0"><a href="Detail.dc.html" style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-weight: 500; text-decoration: none">config.js</a><div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #8b9bb4">server/src/</div></div>
+          <div role="cell"><span style="padding: 2px 9px; border-radius: 20px; font-size: 11px; font-weight: 600; background: rgba(139,155,180,.15); color: #c3cee0; white-space: nowrap">공용 위치 밖</span></div>
+          <div role="cell" style="min-width: 0; color: #d5deec">v2.605 TIM2605-04: 요청 시한 env 정규화(무의존 leaf 모듈 — v2.613 DEPS2613-01 에 util/ 로 이동)</div>
+          <div role="cell" style="min-width: 0; color: #8b9bb4">—</div>
+          <div role="cell" style="text-align: right; font-variant-numeric: tabular-nums; font-weight: 600">507</div>
+          <div role="cell" style="text-align: right; font-variant-numeric: tabular-nums">87</div>
+          <div role="cell" style="text-align: right; font-variant-numeric: tabular-nums">173</div>
+        </div>
+        <div role="row" aria-selected="true" style="display: grid; grid-template-columns: 220px 112px minmax(0, 1.7fr) minmax(0, 1fr) 72px 56px 64px; column-gap: 16px; padding: 9px 10px; border-bottom: 1px solid #1f2a40; align-items: start; background: rgba(59,130,246,.10); box-shadow: 3px 0 0 #3b82f6 inset">
+          <div role="cell" style="min-width: 0"><a href="Detail.dc.html" style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-weight: 500; text-decoration: none">deadline.js</a><div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #8b9bb4">server/src/util/</div></div>
+          <div role="cell"><span style="padding: 2px 9px; border-radius: 20px; font-size: 11px; font-weight: 600; background: rgba(139,155,180,.15); color: #c3cee0; white-space: nowrap">서버 유틸</span></div>
+          <div role="cell" style="min-width: 0; color: #d5deec">작업 시한 — 단일 관문(v2.607 감사 TIM2607-02 · LEFT2607-08).</div>
+          <div role="cell" style="min-width: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #c3cee0; overflow-wrap: anywhere">deadlineMs · withDeadline · DEADLINE_MIN_MS · DEADLINE_MAX_MS <span style="font-family: 'Inter', sans-serif; color: #8b9bb4">외 2</span></div>
+          <div role="cell" style="text-align: right; font-variant-numeric: tabular-nums; font-weight: 600">20</div>
+          <div role="cell" style="text-align: right; font-variant-numeric: tabular-nums">12</div>
+          <div role="cell" style="text-align: right; font-variant-numeric: tabular-nums">1</div>
+        </div>
+        <div role="row" style="display: grid; grid-template-columns: 220px 112px minmax(0, 1.7fr) minmax(0, 1fr) 72px 56px 64px; column-gap: 16px; padding: 9px 10px; border-bottom: 1px solid #1f2a40; align-items: start">
+          <div role="cell" style="min-width: 0"><a href="Detail.dc.html" style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-weight: 500; text-decoration: none">envTimeout.js</a><div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; color: #8b9bb4">server/src/util/</div></div>
+          <div role="cell"><span style="padding: 2px 9px; border-radius: 20px; font-size: 11px; font-weight: 600; background: rgba(139,155,180,.15); color: #c3cee0; white-space: nowrap">서버 유틸</span></div>
+          <div role="cell" style="min-width: 0; color: #d5deec">엣지 워커의 요청 시한 env 정규화(v2.600 감사 추가 배정 · v2.613 DEPS2613-01 에 agent/ → util/ 로 이동).</div>
+          <div role="cell" style="min-width: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #c3cee0">reqTimeoutMs</div>
+          <div role="cell" style="text-align: right; font-variant-numeric: tabular-nums; font-weight: 600">9</div>
+          <div role="cell" style="text-align: right; font-variant-numeric: tabular-nums">7</div>
+          <div role="cell" style="text-align: right; font-variant-numeric: tabular-nums">1</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <aside aria-label="모듈 상세" style="position: absolute; top: 0; right: 0; bottom: 0; width: 480px; max-width: 100%; box-sizing: border-box; background: #141b2d; border-left: 1px solid #243049; box-shadow: -16px 0 40px rgba(0,0,0,.5); padding: 20px 22px 28px; display: flex; flex-direction: column; gap: 18px; overflow-y: auto">
+    <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 12px">
+      <div style="min-width: 0">
+        <h2 style="margin: 0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 17px; font-weight: 500">deadline.js</h2>
+        <div style="margin-top: 4px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #8b9bb4; overflow-wrap: anywhere">server/src/util/deadline.js</div>
+      </div>
+      <button type="button" aria-label="상세 닫기" style="flex: none; width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; border: 1px solid #243049; background: #1a2236; color: #e6edf6; cursor: pointer">
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 3l10 10M13 3L3 13"></path></svg>
+      </button>
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 8px">
+      <span style="padding: 2px 9px; border-radius: 20px; font-size: 11px; font-weight: 600; background: rgba(139,155,180,.15); color: #c3cee0">서버 유틸</span>
+      <span style="font-size: 12px; color: #8b9bb4">사용처 20 · 영역 12 · 테스트 1</span>
+    </div>
+
+    <section style="display: flex; flex-direction: column; gap: 6px">
+      <h3 style="margin: 0; font-size: 12px; font-weight: 600; color: #8b9bb4">하는 일</h3>
+      <p style="margin: 0; font-size: 13.5px; line-height: 1.65">작업 시한 — 단일 관문(v2.607 감사 TIM2607-02 · LEFT2607-08).</p>
+      <p style="margin: 0; font-size: 12px; color: #8b9bb4">그 파일 맨 앞 주석의 첫 단락입니다. 자세한 규칙은 소스의 머리 주석에 있습니다.</p>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 8px">
+      <h3 style="margin: 0; font-size: 12px; font-weight: 600; color: #8b9bb4">내보내는 이름 6</h3>
+      <div style="display: flex; flex-wrap: wrap; gap: 6px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px">
+        <span style="padding: 3px 8px; border-radius: 6px; border: 1px solid #243049; background: #0f1626">deadlineMs</span>
+        <span style="padding: 3px 8px; border-radius: 6px; border: 1px solid #243049; background: #0f1626">withDeadline</span>
+        <span style="padding: 3px 8px; border-radius: 6px; border: 1px solid #243049; background: #0f1626">DEADLINE_MIN_MS</span>
+        <span style="padding: 3px 8px; border-radius: 6px; border: 1px solid #243049; background: #0f1626">DEADLINE_MAX_MS</span>
+        <span style="padding: 3px 8px; border-radius: 6px; border: 1px solid #243049; background: #0f1626">DEADLINE_LONG_MAX_MS</span>
+        <span style="padding: 3px 8px; border-radius: 6px; border: 1px solid #243049; background: #0f1626">DEADLINE_DEFAULT_MS</span>
+      </div>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 8px">
+      <h3 style="margin: 0; font-size: 12px; font-weight: 600; color: #8b9bb4">경로</h3>
+      <div style="display: flex; gap: 8px; align-items: center">
+        <code style="flex: 1; min-width: 0; padding: 8px 10px; border-radius: 8px; border: 1px solid #243049; background: #0f1626; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; overflow-wrap: anywhere">server/src/util/deadline.js</code>
+        <button type="button" style="flex: none; min-height: 44px; font: inherit; font-size: 12.5px; padding: 5px 14px; border-radius: 8px; border: 1px solid #243049; background: #1a2236; color: #e6edf6; cursor: pointer">복사</button>
+      </div>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 8px">
+      <h3 style="margin: 0; font-size: 12px; font-weight: 600; color: #8b9bb4">사용처 20개 파일 · 영역 12</h3>
+      <div style="display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px">
+        <span style="padding: 3px 9px; border-radius: 6px; background: #1a2236">routes <b style="font-variant-numeric: tabular-nums">3</b></span>
+        <span style="padding: 3px 9px; border-radius: 6px; background: #1a2236">veeam <b style="font-variant-numeric: tabular-nums">3</b></span>
+        <span style="padding: 3px 9px; border-radius: 6px; background: #1a2236">cvp <b style="font-variant-numeric: tabular-nums">2</b></span>
+        <span style="padding: 3px 9px; border-radius: 6px; background: #1a2236">ipam <b style="font-variant-numeric: tabular-nums">2</b></span>
+        <span style="padding: 3px 9px; border-radius: 6px; background: #1a2236">storage <b style="font-variant-numeric: tabular-nums">2</b></span>
+        <span style="padding: 3px 9px; border-radius: 6px; background: #1a2236">util <b style="font-variant-numeric: tabular-nums">2</b></span>
+        <span style="padding: 3px 9px; border-radius: 6px; background: #1a2236">bareos <b style="font-variant-numeric: tabular-nums">1</b></span>
+        <span style="padding: 3px 9px; border-radius: 6px; background: #1a2236">diskbad <b style="font-variant-numeric: tabular-nums">1</b></span>
+        <span style="padding: 3px 9px; border-radius: 6px; background: #1a2236">isidu <b style="font-variant-numeric: tabular-nums">1</b></span>
+        <span style="padding: 3px 9px; border-radius: 6px; background: #1a2236">partfault <b style="font-variant-numeric: tabular-nums">1</b></span>
+        <span style="padding: 3px 9px; border-radius: 6px; background: #1a2236">proxy <b style="font-variant-numeric: tabular-nums">1</b></span>
+        <span style="padding: 3px 9px; border-radius: 6px; background: #1a2236">sanswitch <b style="font-variant-numeric: tabular-nums">1</b></span>
+      </div>
+      <p style="margin: 0; font-size: 12px; color: #8b9bb4">영역 = server/src 아래 폴더. 파일 목록은 싣지 않고 영역별 개수만 보여 줍니다.</p>
+    </section>
+
+    <section style="display: flex; flex-direction: column; gap: 8px">
+      <h3 style="margin: 0; font-size: 12px; font-weight: 600; color: #8b9bb4">이 모듈을 가리키는 테스트 1</h3>
+      <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; overflow-wrap: anywhere">server/test/isiduOverview2739.test.js</div>
+    </section>
+
+    <p style="margin: 0; padding-top: 14px; border-top: 1px solid #1f2a40; font-size: 12px; line-height: 1.65; color: #8b9bb4">경로를 런타임에 조합하는 동적 import 와 경로를 조각으로 조합하는 테스트는 세지 못합니다. 숫자는 v3.9.0 빌드 시점의 값입니다.</p>
+  </aside>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1200}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>
