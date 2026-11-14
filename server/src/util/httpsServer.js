@@ -80,6 +80,20 @@ export function tlsListenConfig(env = process.env, { port } = {}) {
   };
 }
 
+/**
+ * 인증서 만료 경고(순수) — **지금 시각 기준**. v3.10.4: 예전에는 인증서를 읽을 때 한 번만 계산해 굳혔다. 재로드는 파일이 바뀔 때만 일어나므로
+ * 포탈을 오래 켜 두면 화면의 '만료 N일 남음' 이 줄지 않았고, 재시작 없이 만료되면 '만료됐습니다' 경고가 끝내 뜨지 않았다.
+ */
+export function expiryWarning(notAfter, validTo = '', now = Date.now()) {
+  const t = numOrNull(notAfter);
+  if (t == null) return null;
+  const days = Math.floor((t - now) / 86400000);
+  const when = validTo ? `(${validTo})` : '';
+  if (t <= now) return `TLS 인증서가 만료됐습니다${when} — 엣지·브라우저가 연결을 거부합니다.`;
+  if (days < EXPIRY_WARN_DAYS) return `TLS 인증서 만료 ${days}일 남음${when}.`;
+  return null;
+}
+
 function readOne(label, file) {
   try { return fs.readFileSync(file); } catch (e) {
     const why = e?.code === 'ENOENT' ? '파일이 없습니다'
@@ -112,10 +126,10 @@ export function loadTlsMaterial(cfg) {
     const t = Date.parse(x.validTo);
     info.notAfter = Number.isFinite(t) ? t : null;
     info.daysLeft = Number.isFinite(t) ? Math.floor((t - Date.now()) / 86400000) : null;
+    info.validTo = String(x.validTo || '').slice(0, 64);
     info.selfSigned = x.subject === x.issuer;
     info.fingerprint256 = String(x.fingerprint256 || '');
-    if (info.daysLeft != null && info.daysLeft < 0) warnings.push(`TLS 인증서가 만료됐습니다(${x.validTo}) — 엣지·브라우저가 연결을 거부합니다.`);
-    else if (info.daysLeft != null && info.daysLeft < EXPIRY_WARN_DAYS) warnings.push(`TLS 인증서 만료 ${info.daysLeft}일 남음(${x.validTo}).`);
+    // v3.10.4(공용 유틸 점검 2회차): 만료 경고는 여기서 굳히지 않는다 — 읽을 때마다 `expiryWarning` 으로 계산한다(tlsListenerStatus).
     if (!info.san) warnings.push('TLS 인증서에 SAN(subjectAltName)이 없습니다 — Node·최신 브라우저는 CN 만으로 호스트를 확인하지 않아 거부합니다.');
   } catch { warnings.push('TLS 인증서 내용을 해석하지 못했습니다(만료일·SAN 미확인).'); }
   try {
@@ -136,8 +150,15 @@ let _state = { configured: false, tls: false, tlsPort: null, httpPort: null, htt
   cert: null, warnings: [], reload: { checkMs: 0, lastAt: null, lastOk: null, lastError: null, count: 0 } };
 
 /** 리스너 상태(진단·자체점검·광고 URL 판단용). 파일 경로·지문은 관리 화면 전용 정보다. */
-export function tlsListenerStatus() {
-  return JSON.parse(JSON.stringify(_state));
+export function tlsListenerStatus(now = Date.now()) {
+  const out = JSON.parse(JSON.stringify(_state));
+  // 남은 날 · 만료 경고는 읽을 때 계산한다(expiryWarning 머리말).
+  if (out.cert && numOrNull(out.cert.notAfter) != null) {
+    out.cert.daysLeft = Math.floor((out.cert.notAfter - now) / 86400000);
+    const w = expiryWarning(out.cert.notAfter, out.cert.validTo, now);
+    if (w) out.warnings = [w, ...(Array.isArray(out.warnings) ? out.warnings : [])];
+  }
+  return out;
 }
 
 /**
@@ -219,7 +240,7 @@ export function createPortalServers(app, { port, env = process.env, log = consol
     warnings: material ? material.warnings.slice() : [],
     reload: { checkMs: cfg.enabled ? cfg.reloadMs : 0, lastAt: null, lastOk: null, lastError: null, count: 0 },
   };
-  for (const w of _state.warnings) log.warn?.(`[tls] ⚠ ${w}`);
+  for (const w of tlsListenerStatus().warnings) log.warn?.(`[tls] ⚠ ${w}`);
 
   let stamp = material ? material.stamp : '';
   const httpsEntry = servers.find((x) => x.scheme === 'https');
@@ -236,7 +257,7 @@ export function createPortalServers(app, { port, env = process.env, log = consol
       _state.cert = m.info; _state.warnings = m.warnings.slice();
       _state.reload.lastOk = true; _state.reload.lastError = null; _state.reload.count += 1;
       log.log?.(`[tls] 인증서를 다시 읽었습니다(${m.info.subject || '주체 미상'}, 만료 ${m.info.daysLeft ?? '?'}일 남음).`);
-      for (const w of m.warnings) log.warn?.(`[tls] ⚠ ${w}`);
+      for (const w of tlsListenerStatus().warnings) log.warn?.(`[tls] ⚠ ${w}`);
       return { ok: true, changed: true };
     } catch (e) {
       _state.reload.lastOk = false; _state.reload.lastError = String(e?.message || e).slice(0, 300);

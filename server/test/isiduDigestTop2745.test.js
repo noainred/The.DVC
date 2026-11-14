@@ -12,6 +12,7 @@
  * 픽스처 이름은 합성이다(공개 저장소 — v2.513).
  */
 import { test, after } from 'node:test';
+import { decodeSubject } from './_mailDecode.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -39,8 +40,7 @@ const T0 = Math.floor(Date.now() / HOUR) * HOUR - 30 * 60_000;
 
 /* ── 가짜 SMTP(받은 원문 → 받는 사람·제목·본문) ───────────────────────── */
 function decodeMail(raw) {
-  const m = /^Subject: (.*)$/mi.exec(raw);
-  const subject = m ? m[1].replace(/=\?UTF-8\?B\?([^?]*)\?=/gi, (_x, b) => Buffer.from(b, 'base64').toString('utf8')) : '';
+  const subject = decodeSubject(raw);   // v3.10.4: 접힌 긴 제목까지(test/_mailDecode.js)
   const out = []; let mode = 'hdr'; let buf = '';
   for (const line of raw.split('\n')) {
     if (/^Content-Transfer-Encoding:\s*base64/i.test(line)) { mode = 'wait'; continue; }
