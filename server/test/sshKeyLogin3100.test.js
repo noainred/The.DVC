@@ -4571,3 +4571,210 @@ test('㉖ 3회차 반증 — 목록 밖 법인은 받는 곳 폴더가 없다(in
     assert.match(r5.reason, /법인 키 사용 중지 중 — 되돌리려고 접속하지 않았습니다/);
   } finally { assert.ok(ST.clearCorpStop('vcA', { by: 'fixture' }).ok); }
 });
+
+/* ── 4회차(9e2fde6a · 6c91f4fc · 27cbbe61 · 57317864) 회귀 ─────────────────── */
+/** CONFIG_DIR 을 검색 권한 없는 폴더로 두고 자식 node 로 모듈을 읽는다(root 면 uid 65534 — root 에게는 권한 검사가 없다). */
+function runUnsearchableCfg(prep, code) {
+  const base = fs.mkdtempSync(path.join(TMP, 'sshkl-c43-')); TMP_DIRS.push(base); fs.chmodSync(base, 0o755);
+  const cfg = path.join(base, 'cfg'); fs.mkdirSync(cfg);
+  for (const [n, body] of Object.entries(prep)) fs.writeFileSync(path.join(cfg, n), body);
+  const script = path.join(base, 'probe.mjs');
+  fs.writeFileSync(script, `const imp = (p) => import(${JSON.stringify(`${SRC}/`)} + p);\n${code}`); fs.chmodSync(script, 0o644);
+  if (RUN_AS_ROOT) { for (const n of ['', ...Object.keys(prep)]) fs.chownSync(path.join(cfg, n), 65534, 65534); }
+  fs.chmodSync(cfg, 0o600);
+  const env = { CONFIG_DIR: cfg, AUTH_ENABLED: 'true', DATA_SOURCE: 'live', HOME: base, PATH: process.env.PATH, SETTINGS_OWNERS: 'own' };
+  const r = RUN_AS_ROOT
+    ? spawnSync('setpriv', ['--reuid=65534', '--regid=65534', '--clear-groups', process.execPath, script], { env, encoding: 'utf8' })
+    : spawnSync(process.execPath, [script], { env, encoding: 'utf8' });
+  fs.chmodSync(cfg, 0o700);
+  const after = Object.fromEntries(Object.keys(prep).map((n) => [n, fs.readFileSync(path.join(cfg, n), 'utf8')]));
+  const out = String(r.stdout || '').trim().split('\n').pop();
+  try { return { ...JSON.parse(out), after, files: fs.readdirSync(cfg).sort() }; } catch { assert.fail(`자식 출력이 JSON 이 아니다: ${out} ${r.stderr}`); }
+}
+/** 홈의 조부모 폴더를 막는다 — root 면 그 폴더 root 소유 0700 + uid 65534 로 돌리고, 비 root 면 0600. */
+function blockedAncestorHome() {
+  const base = fs.mkdtempSync(path.join(TMP, 'sshkl-anc-')); TMP_DIRS.push(base); fs.chmodSync(base, 0o755);
+  const a = path.join(base, 'a'); const h = path.join(a, 'b', 'home'); fs.mkdirSync(path.join(h, '.ssh'), { recursive: true });
+  fs.writeFileSync(path.join(h, '.ssh', 'authorized_keys'), `${OTHER}\n`);
+  if (RUN_AS_ROOT) { fs.chmodSync(a, 0o700); fs.chmodSync(path.join(a, 'b'), 0o755); return { h, how: 'root → 조부모 0700 + uid 65534' }; }
+  fs.chmodSync(a, 0o600); CLOSERS.push(() => fs.chmodSync(a, 0o700));
+  return { h, how: '비 root · 조부모 0600' };
+}
+
+test('㉗-a 4회차 E — vCenter 밖 법인의 서버 · 키에는 받는 곳 경로가 없다 · 그 법인 폴더로 키 등록은 OTP 앞 400 bad-folder(실제 라우트) · 폴더가 같으면 기능만 바꾸는 저장 · 사전 검사는 통과 · 홈의 상위 폴더가 막히면 noaccess · unreachable · 다시 중지는 감사 stop-refresh', async () => {
+  const sOut = mkServer('bm-out-27', null, { host: '10.9.27.1', password: 'x', vcenterId: 'vcOut27' });
+  const kOut = mkKey('key-out-27', { folderCorp: 'vcOut27' });
+  try {
+    const v = await SVC.buildView();
+    assert.deepEqual([v.servers.find((x) => x.id === sOut.id)?.inboxPath, v.keys.find((x) => x.id === kOut.id)?.inboxPath], ['', ''], '목록 밖 법인 서버 · 키에는 받는 곳 경로가 없다');
+    const code = await otp('own8');
+    const add = await call('own8', 'POST', '/settings/ssh-access/keys', { name: 'x27', privateKey: F.ed25519Key().pem, folderCorp: 'vcOut27', features: ['bm-usage'], otp: code });
+    assert.deepEqual([add.s, add.j.code], [400, 'bad-folder'], add.txt);
+    assert.equal(AUTH.verifyUserOtp('own8', code).ok, true, '폴더 거절이 OTP 를 쓰지 않았다');
+    // 폴더가 같으면 — 기능만 바꾸는 저장은 되고 사전 검사도 통과 · 다른 목록 밖 폴더로 옮기면 bad-folder
+    assert.equal(SVC.prechecks.placement({ keyId: kOut.id, folderCorp: 'vcOut27' }), null);
+    const sp = SVC.setKeyPlacement({ keyId: kOut.id, folderCorp: 'vcOut27', features: ['bm-usage'] });
+    assert.deepEqual([sp.ok, KS.keyById(kOut.id).features], [true, ['bm-usage']], JSON.stringify(sp));
+    assert.deepEqual((({ code: c, status }) => [c, status])(SVC.prechecks.placement({ keyId: kOut.id, folderCorp: 'vcOut27b' }) || {}), ['bad-folder', 400]);
+  } finally { assert.ok(BM.removeBmServer(sOut.id).ok); }
+  // 홈의 조부모가 막힘 — ‘없음’ 이 아니라 따라갈 수 없음
+  const line = KL.buildKeyLine({ publicKey: BPUB, keyId: BID });
+  for (const shell of SHELLS) {
+    const { h, how } = blockedAncestorHome();
+    const ro = { h };
+    const got = [shRo(AKS.removeScript({ publicKey: BPUB, keyId: BID }), ro, shell).m, shRo(AKS.rollbackScript({ line }), ro, shell).m, shRo(AKS.installScript({ publicKey: BPUB, keyId: BID, line }), ro, shell).m];
+    assert.deepEqual(got, Array(3).fill({ kind: 'fail', why: 'noaccess' }), `${shell} (${how})`);
+    assert.equal(shRo(AK.READ_COMMAND, ro, shell).out, '##AK unreachable\n', `${shell} (${how})`);
+  }
+  // 다시 중지 감사 — 실제 라우트
+  assert.ok((await SVC.stopCorp('vcB', { by: 'own', reason: '첫 중지 27' })).ok);
+  try {
+    const r = await call('own9', 'POST', '/settings/ssh-access/corps/vcB/stop', { reason: '다시', otp: await otp('own9') });
+    assert.deepEqual([r.s, r.j.already], [200, true], r.txt);
+    const chg = await call('own', 'GET', '/settings/ssh-access/changes');
+    assert.ok(chg.j.items.some((e) => e.action === 'ssh-access.corp.stop-refresh' && e.target === 'vcB'), JSON.stringify(chg.j.items.slice(0, 3)));
+  } finally { assert.ok(ST.clearCorpStop('vcB', { by: 'fixture' }).ok); }
+});
+
+test('㉗-b 4회차 C · D — 복원 합치기는 대기 키의 지금 id 를 지킨다 · activateKey 는 지문으로 대신 찾지 않는다 · 7b 는 대기 키를 지우지 않는다(409 key-pending · 실제 라우트) · 사용 · 읽은 키 기록 읽기 오류는 readFailed(손상 loadFailed 아님 · 화면 칸) · 검색 권한 없는 CONFIG_DIR 은 ‘없음’ 이 아니라 읽기 오류(쓰기 거절 · 원본 그대로) · 점검 도중 다시 읽기면 그 회차의 ‘밖에서 바뀜’ 을 쓰지 않고 던지지 않는다', async () => {
+  const BUN = await import('../src/bmusage/onboard/keyBundle.js');
+  const cur = { keys: [{ id: 'k_curpending01', name: 'p', fingerprint: 'SHA256:FPP', publicKey: 'ssh-ed25519 AAP', privateKey: 'PKP', status: 'pending' }], accounts: [] };
+  const bun = { keys: [{ id: 'k_bunpending01', name: 'p', fingerprint: 'SHA256:FPP', publicKey: 'ssh-ed25519 AAP', privateKey: '', status: 'pending' }], accounts: [] };
+  assert.deepEqual(JSON.parse(BUN.mergeRedactedKeyStore(JSON.stringify(bun), JSON.stringify(cur)).text).keys.map((k) => k.id), ['k_curpending01'], '열린 등록 요청이 가리키는 지금 id 를 지킨다');
+  const kp = mkKey('pending-27b', { pending: true });
+  assert.equal(KS.activateKey('k_0000000027bb', { fingerprint: kp.fingerprint }).ok, false, '지문으로 대신 찾지 않는다(다른 범위로 다시 등록한 대기 키를 집었다)');
+  assert.equal(KS.keyById(kp.id).status, 'pending');
+  assert.ok(ST.setGuards({ twoPerson: false }, { by: 'fixture' }).ok);
+  try {
+    const code = await otp('own8');
+    const del = await call('own8', 'DELETE', `/tools/bm-usage/ssh-keys/${kp.id}?otp=${code}`);
+    assert.deepEqual([del.s, del.j.code, !!KS.keyById(kp.id)], [409, 'key-pending', true], del.txt);
+    assert.equal(AUTH.verifyUserOtp('own8', code).ok, true);
+  } finally { assert.ok(ST.setGuards({ twoPerson: true }, { by: 'fixture' }).ok); }
+  // 사용 · 읽은 키 기록 — 읽기 오류(자리에 폴더)
+  for (const [name, reset] of [[US.USAGE_FILE_NAME, () => US._resetKeyUsageForTest()], [INS.INSTALLED_FILE_NAME, () => INS._resetInstalledForTest()]]) {
+    const f = path.join(DIR, name); const aside = `${f}.aside-27b`;
+    if (fs.existsSync(f)) fs.renameSync(f, aside);
+    fs.mkdirSync(f); reset();
+    try {
+      const v = await SVC.buildView();
+      if (name === US.USAGE_FILE_NAME) {
+        const uv = US.keyUsageView();
+        assert.deepEqual([uv.readFailed, uv.loadFailed, US.keyUsageLoadFailed(), v.usageReadFailed], [true, false, false, true], name);
+      } else assert.deepEqual([v.installedReadFailed, INS.installedReadFailed()], [true, true], name);
+    } finally { fs.rmdirSync(f); if (fs.existsSync(aside)) fs.renameSync(aside, f); reset(); }
+  }
+  const v2 = await SVC.buildView();
+  assert.deepEqual([v2.usageReadFailed, v2.installedReadFailed], [false, false]);
+  // 검색 권한 없는 CONFIG_DIR — 상태 · 승인 · 키 저장소 · 등록부 · 기록 모두 읽기 오류 · 쓰기 거절 · 원본 그대로 · 보존본(.corrupt) 없음
+  const state0 = JSON.stringify({ stops: {}, events: [{ at: 1, kind: 'corp-stop', corp: 'keep' }], guards: {} });
+  const ap0 = JSON.stringify({ requests: [] });
+  const c = runUnsearchableCfg({ 'ssh-access-state.json': state0, 'approvals.json': ap0 }, `
+    const ST = await imp('sshaccess/state.js'); const AP = await imp('approval/store.js'); const KS = await imp('bmusage/onboard/keyStore.js'); const BM = await imp('bmstor/registry.js');
+    const INS = await imp('sshaccess/installed.js'); const US = await imp('sshaccess/usage.js'); const INF = await imp('sshaccess/inflight.js');
+    const w = ST.addEvent({ kind: 'corp-stop', corp: 'new' }); const cr = AP.createRequest({ kind: 'ssh-key-delete', title: 't', target: 'k', payload: {}, by: 'own' });
+    console.log(JSON.stringify({ st: !!ST.stateLoadError(), ap: !!AP.approvalsLoadError(), ks: !!KS.keyStoreLoadError(), bm: !!BM.registryLoadError(), ins: INS.installedReadFailed(), us: US.keyUsageReadFailed(), inf: !!INF.inflightReadIssue(), w: w.ok, cr: cr.status }));`);
+  assert.deepEqual([c.st, c.ap, c.ks, c.bm, c.ins, c.us, c.inf, c.w, c.cr], [true, true, true, true, true, true, true, false, 503], JSON.stringify(c));
+  assert.deepEqual([c.after['ssh-access-state.json'], c.after['approvals.json'], c.files], [state0, ap0, ['approvals.json', 'ssh-access-state.json']], '원본을 덮지도 옮기지도 않았다');
+  // 점검 도중 키 저장소 다시 읽기(4회차 C4-4) — 자식 프로세스 · 소유자 하나 · 두 사람 승인 끔(다시 읽기가 바로 실행)
+  const drift = (withReload) => subRun({ owners: 'solo', users: [{ username: 'solo', role: 'admin', totpEnabled: true, totpSecret: generateSecret() }], env: { T_RELOAD: withReload ? '1' : '' }, code: `
+    const VAULT = await imp('security/secretVault.js'); VAULT.saveSecretsPolicy({ mode: 'encrypted', level: 1 });
+    const KS = await imp('bmusage/onboard/keyStore.js'); const ST = await imp('sshaccess/state.js'); const SVC = await imp('sshaccess/service.js');
+    ST.setGuards({ twoPerson: false }, { by: 'x' });
+    const k = KS.addKey({ name: 'drift-a', privateKey: F.ed25519Key().pem, folderCorp: 'vcA', features: ['bm-usage'] }, { by: 'x' });
+    const f = path.join(process.env.CONFIG_DIR, 'ssh-keys.json'); const d = JSON.parse(fs.readFileSync(f, 'utf8')); for (const x of d.keys) if (x.id === k.key.id) x.name = 'drift-renamed'; fs.writeFileSync(f, JSON.stringify(d));
+    let err = '';
+    const p = SVC.runSshAccessScan().catch((e) => { err = String(e?.message || e); return { ok: false }; });
+    const rl = process.env.T_RELOAD ? SVC.reloadKeyStore({ by: 'solo' }) : Promise.resolve(null);
+    const [sc, r] = await Promise.all([p, rl]);
+    console.log(JSON.stringify({ sc: sc.ok, err, rl: r && r.ok, ev: ST.listEvents({ limit: 50 }).filter((e) => e.kind === 'key-changed-outside').length }));` });
+  const d0 = drift(false); const d1 = drift(true);
+  assert.deepEqual([d0.sc, d0.ev], [true, 1], `대조 — 다시 읽기가 없으면 밖에서 바뀐 것을 사건으로 ${JSON.stringify(d0)}`);
+  assert.deepEqual([d1.sc, d1.err, d1.rl, d1.ev], [true, '', true, 0], `다시 읽기로 새 기준을 받아들였으니 그 회차의 사건은 쓰지 않고 · 던지지 않는다 ${JSON.stringify(d1)}`);
+});
+
+test('㉗-c 4회차 A — 등록부를 못 읽으면 빈 중지라도 재개는 승인을 요구(사전 검사 · 본 함수 strict) · 거두는 중인 키로 묶지 않는다(7b 교체 새 키 · 공통 계정 keyRef · bm-storage keyRef — OTP 앞 409) · bm-storage 묶기도 쓰기 범위 무제한(403 write-scope) · 상태 · 키 저장소 손상 중 사전 검사는 503 · 교체 승인의 새 키가 지워졌으면 409 key-missing', async () => {
+  // ① 등록부 못 읽음 — 모르는 법인의 빈 중지라도 ‘모름’ 으로 보지 않는다(그 법인을 등록부로만 알았을 수 있다)
+  const j = subRun({ owners: 'own,own2', users: [{ username: 'own', role: 'admin', totpEnabled: true, totpSecret: generateSecret() }, { username: 'own2', role: 'admin', totpEnabled: true, totpSecret: generateSecret() }], code: `
+    const { store } = await imp('store.js'); store.snapshot = { ...store.get(), vcenters: [{ id: 'vcA', name: 'A' }] };
+    fs.writeFileSync(path.join(process.env.CONFIG_DIR, 'bm-storage.json'), '{ broken');
+    const SVC = await imp('sshaccess/service.js'); const ST = await imp('sshaccess/state.js'); const AP = await imp('approval/store.js');
+    ST.setCorpStop('ghost27', { by: 'x', reason: 'x' });
+    const dup = AP.createRequest({ kind: 'ssh-corp-resume', title: 't', target: 'ghost27', corp: 'ghost27', payload: { corp: 'ghost27', stopAt: ST.stopFor('ghost27').at }, by: 'own' });
+    const pre = await SVC.prechecks.resume({ corp: 'ghost27', by: 'own' }); const r = await SVC.resumeCorp('ghost27', { by: 'own' });
+    console.log(JSON.stringify({ dup: dup.ok, pre: pre && pre.code, r: [r.ok, r.code || '', r.pending === true], still: !!ST.stopFor('ghost27') }));` });
+  assert.deepEqual([j.dup, j.pre, j.r, j.still], [true, 'dup-request', [false, 'dup-request', false], true], `예전: 승인 없이 풀렸다 ${JSON.stringify(j)}`);
+  // ② 거두는 중인 키로 묶지 않는다(OTP 앞) · ③ bm-storage 묶기 쓰기 범위
+  const S = await fakeSshd(); const pw = secret('Pw-Revoking-27c'); S.st.password = pw;
+  const Kr = mkKey('kl-revoking-27c'); const kx = mkKey('kl-from-27c');
+  S.writeAk(`${Kr.pub} portal-ssh:${Kr.id}\n`);
+  const sv = mkServer('bm-revoking-27c', S, { password: pw });
+  const code = await otp('own8'); const lc = await otp('lim');
+  const h = holdRevoke(S, Kr);
+  const rv = await SVC.startKeyRevoke({ keyId: Kr.id, servers: [sv], by: 'own' });
+  await h.reached;
+  assert.ok(ST.setGuards({ twoPerson: false }, { by: 'fixture' }).ok);
+  try {
+    for (const [m, p, body] of [['POST', '/tools/bm-usage/ssh-keys/rotate', { from: kx.id, to: Kr.id, otp: code }],
+      ['POST', '/tools/bm-usage/accounts', { name: 'acc-27c', kind: 'os', corp: 'vcA', username: 'svc', keyRef: Kr.id, otp: code }],
+      ['POST', '/tools/bm-storage/servers', { name: 'bm-27c-new', host: '10.9.27.9', port: 22, username: 'mon', mounts: ['/'], vcenterId: 'vcA', keyRef: Kr.id, otp: code }]]) {
+      const r = await call('own8', m, p, body);
+      assert.deepEqual([r.s, r.j.code], [409, 'revoking'], `${m} ${p} ${r.txt}`);
+    }
+    assert.equal(AUTH.verifyUserOtp('own8', code).ok, true, '세 거절 모두 OTP 를 쓰지 않았다');
+    const ls = await call('lim', 'POST', '/tools/bm-storage/servers', { name: 'bm-27c-lim', host: '10.9.27.10', port: 22, username: 'mon', mounts: ['/'], vcenterId: 'vcA', keyRef: kx.id, otp: lc });
+    assert.deepEqual([ls.s, ls.j.code], [403, 'write-scope'], ls.txt);
+    assert.equal(AUTH.verifyUserOtp('lim', lc).ok, true);
+  } finally { assert.ok(ST.setGuards({ twoPerson: true }, { by: 'fixture' }).ok); h.release(); }
+  await waitJob(rv.jobId);
+  // ④ 손상 중 사전 검사 503(자식 프로세스) · 교체 승인의 새 키가 지워짐 409 key-missing
+  const st = subRun({ owners: 'own', users: [{ username: 'own', role: 'admin', totpEnabled: true, totpSecret: generateSecret() }], code: `
+    const { store } = await imp('store.js'); store.snapshot = { ...store.get(), vcenters: [{ id: 'vcA', name: 'A' }] };
+    fs.writeFileSync(path.join(process.env.CONFIG_DIR, 'ssh-access-state.json'), '{ broken');
+    const SVC = await imp('sshaccess/service.js'); const r = await SVC.prechecks.stop({ corp: 'vcA' });
+    console.log(JSON.stringify({ r: r && [r.code, r.status] }));` });
+  assert.deepEqual(st.r, ['state-unreadable', 503], JSON.stringify(st));
+  const ks = subRun({ owners: 'own', users: [{ username: 'own', role: 'admin', totpEnabled: true, totpSecret: generateSecret() }], code: `
+    fs.writeFileSync(path.join(process.env.CONFIG_DIR, 'ssh-keys.json'), '{ broken');
+    const SVC = await imp('sshaccess/service.js'); const P = SVC.prechecks;
+    const pick = (r) => (r ? [r.code, r.status] : null);
+    console.log(JSON.stringify({ add: pick(P.addKey({ by: 'own', folderCorp: 'vcA' })), choose: pick(P.chooseKey({ serverId: 'bm_x', keyId: 'k_000000000000' })), rotate: pick(P.rotate({ from: 'k_000000000001', to: 'k_000000000002', by: 'own' })), del: pick(P.deleteKey({ keyId: 'k_000000000001', by: 'own' })), place: pick(P.placement({ keyId: 'k_000000000001', folderCorp: 'vcA' })) }));` });
+  for (const n of ['add', 'choose', 'rotate', 'del', 'place']) assert.deepEqual(ks[n], ['registry-unreadable', 503], `${n} ${JSON.stringify(ks)}`);
+  const kFrom = mkKey('km-from-27c'); const kTo = mkKey('km-to-27c');
+  const rq = await SVC.rotateKeyReq({ from: kFrom.id, to: kTo.id, by: 'own' });
+  assert.equal(rq.pending, true, JSON.stringify(rq));
+  assert.ok(REFS.deleteKeyIfUnused(kTo.id).ok);
+  const pk = SVC.approvalPrecheck(rq.request.id, { approve: true, by: 'own2', digest: rq.request.digest });
+  assert.deepEqual([pk?.code, pk?.status, AP.getRequest(rq.request.id).status], ['key-missing', 409, 'pending'], JSON.stringify(pk));
+  assert.equal((await SVC.decideApproval(rq.request.id, { approve: false, by: 'own' })).request.status, 'cancelled');
+});
+
+test('㉗-d 4회차 B — 홈이 파일(/dev/null)이면 없음(거두기 none · 읽기 missing) · 가리는 ‘YubiKey for …’ · ‘Response:’ 칸에는 보내지 않고 글 없는 칸에는 보낸다 · ‘Password for tokenadm@CORP:’ 에는 보낸다 · 탭 뒤 표식 줄도 포탈 줄(거두기 removed 1)', async () => {
+  for (const shell of SHELLS) {
+    assert.deepEqual(sh(AKS.removeScript({ publicKey: BPUB, keyId: BID }), '/dev/null', shell).m, { kind: 'none' }, shell);
+    assert.equal(spawnSync(shell, ['-c', AK.READ_COMMAND], { env: { HOME: '/dev/null', PATH: process.env.PATH }, encoding: 'utf8' }).stdout, '##AK missing\n', shell);
+    const h = mkHome(); fs.mkdirSync(path.join(h, '.ssh'), { mode: 0o700 }); const f = path.join(h, '.ssh', 'authorized_keys');
+    fs.writeFileSync(f, `${OTHER}\n${BPUB}\t${BMARK}\n`, { mode: 0o600 });
+    assert.deepEqual(sh(AKS.removeScript({ publicKey: BPUB, keyId: BID }), h, shell).m, { kind: 'removed', removed: 1, unmarked: 0 }, shell);
+    assert.equal(fs.readFileSync(f, 'utf8'), `${OTHER}\n`, `${shell} — 탭 뒤 표식 줄을 지웠다(예전: 사람 줄로 보고 남겼다)`);
+  }
+  const SX = await import('../src/proxy/sshExec.js');
+  const PW = secret('Kbd-B4-Pw-27d');
+  const trial = async (prompt) => {
+    const seen = [];
+    const srv = new ssh2.Server({ hostKeys: [HOSTKEY] }, (client) => {
+      client.on('authentication', (ctx) => {
+        if (ctx.method !== 'keyboard-interactive') return ctx.reject(['keyboard-interactive']);
+        return ctx.prompt([{ prompt, echo: false }], (a) => { seen.push(a?.[0] === PW ? 'PW' : JSON.stringify(a?.[0])); ctx.reject(['keyboard-interactive']); });
+      });
+      client.on('error', () => {});
+    });
+    await new Promise((r) => { srv.listen(0, '127.0.0.1', r); });
+    let code = '';
+    try { await SX.withSsh({ host: '127.0.0.1', port: srv.address().port, username: 'mon', password: PW, readyTimeout: 6000, passwordOnly: true }, async () => ({})); } catch (e) { code = e?.code || ''; }
+    srv.close();
+    return [seen[0], code];
+  };
+  for (const p of ['YubiKey for user: ', 'Response: ']) assert.deepEqual(await trial(p), ['""', 'SSH_NO_PASSWORD_METHOD'], `${p} — 비밀번호 말 없는 가리는 칸`);
+  for (const p of ['', 'Password for tokenadm@CORP: ']) assert.deepEqual(await trial(p), ['PW', ''], `‘${p}’ — 글 없는 칸 · 계정 이름의 token 은 강한 OTP 말이 아니다(단어 경계)`);
+});
