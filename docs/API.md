@@ -910,31 +910,31 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/release-notes/since` | — | [server/src/routes/api/searchNotes.js:39](../server/src/routes/api/searchNotes.js#L39) |
 | GET | `/search/inventory` | — | [server/src/routes/api/invSearch.js:53](../server/src/routes/api/invSearch.js#L53) |
 | POST | `/search/nl` | — | [server/src/routes/api/searchNotes.js:15](../server/src/routes/api/searchNotes.js#L15) |
-| GET | `/settings/ssh-access` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:44](../server/src/routes/api/sshAccess.js#L44) |
-| POST | `/settings/ssh-access/approvals/:id/approve` | 역할 `admin` · `requireSettingsOwner` · `approvePre` · `reauth` | [server/src/routes/api/sshAccess.js:98](../server/src/routes/api/sshAccess.js#L98) |
-| POST | `/settings/ssh-access/approvals/:id/reject` | 역할 `admin` · `requireSettingsOwner` · `approvePre` · `reauth` | [server/src/routes/api/sshAccess.js:104](../server/src/routes/api/sshAccess.js#L104) |
-| GET | `/settings/ssh-access/changes` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:207](../server/src/routes/api/sshAccess.js#L207) |
-| DELETE | `/settings/ssh-access/corps/:corp/stop` | 역할 `admin` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/sshAccess.js:182](../server/src/routes/api/sshAccess.js#L182) |
-| POST | `/settings/ssh-access/corps/:corp/stop` | 역할 `admin` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/sshAccess.js:176](../server/src/routes/api/sshAccess.js#L176) |
-| PUT | `/settings/ssh-access/guards` | 역할 `admin` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/sshAccess.js:110](../server/src/routes/api/sshAccess.js#L110) |
-| POST | `/settings/ssh-access/inbox/approve` | 역할 `admin` · `requireSettingsOwner` · `vaultFirst` · `reauth` | [server/src/routes/api/sshAccess.js:189](../server/src/routes/api/sshAccess.js#L189) |
-| POST | `/settings/ssh-access/inbox/discard` | 역할 `admin` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/sshAccess.js:196](../server/src/routes/api/sshAccess.js#L196) |
-| GET | `/settings/ssh-access/jobs/:id` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:136](../server/src/routes/api/sshAccess.js#L136) |
-| POST | `/settings/ssh-access/jobs/:id/cancel` | 역할 `admin` · `requireSettingsOwner` · `cancelGate` | [server/src/routes/api/sshAccess.js:143](../server/src/routes/api/sshAccess.js#L143) |
-| POST | `/settings/ssh-access/key-login` | 역할 `admin` · `requireSettingsOwner` · `jobPre` · `reauth` | [server/src/routes/api/sshAccess.js:122](../server/src/routes/api/sshAccess.js#L122) |
-| POST | `/settings/ssh-access/key-revoke` | 역할 `admin` · `requireSettingsOwner` · `jobPre` · `reauth` | [server/src/routes/api/sshAccess.js:129](../server/src/routes/api/sshAccess.js#L129) |
-| POST | `/settings/ssh-access/keys` | 역할 `admin` · `requireSettingsOwner` · `vaultFirst` · `reauth` | [server/src/routes/api/sshAccess.js:66](../server/src/routes/api/sshAccess.js#L66) |
-| DELETE | `/settings/ssh-access/keys/:id` | 역할 `admin` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/sshAccess.js:89](../server/src/routes/api/sshAccess.js#L89) |
-| PUT | `/settings/ssh-access/keys/:id/placement` | 역할 `admin` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/sshAccess.js:74](../server/src/routes/api/sshAccess.js#L74) |
-| POST | `/settings/ssh-access/keys/rotate` | 역할 `admin` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/sshAccess.js:83](../server/src/routes/api/sshAccess.js#L83) |
-| POST | `/settings/ssh-access/reload-keystore` | 역할 `admin` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/sshAccess.js:59](../server/src/routes/api/sshAccess.js#L59) |
-| POST | `/settings/ssh-access/reload-state` | 역할 `admin` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/sshAccess.js:54](../server/src/routes/api/sshAccess.js#L54) |
-| POST | `/settings/ssh-access/scan` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:49](../server/src/routes/api/sshAccess.js#L49) |
-| GET | `/settings/ssh-access/servers/:id/candidates` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:157](../server/src/routes/api/sshAccess.js#L157) |
-| POST | `/settings/ssh-access/servers/:id/installed-keys` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:161](../server/src/routes/api/sshAccess.js#L161) |
-| POST | `/settings/ssh-access/servers/:id/key` | 역할 `admin` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/sshAccess.js:150](../server/src/routes/api/sshAccess.js#L150) |
-| POST | `/settings/ssh-access/servers/:id/test` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:169](../server/src/routes/api/sshAccess.js#L169) |
-| GET | `/settings/ssh-access/usage` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:204](../server/src/routes/api/sshAccess.js#L204) |
+| GET | `/settings/ssh-access` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:57](../server/src/routes/api/sshAccess.js#L57) |
+| POST | `/settings/ssh-access/approvals/:id/approve` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `approvePre` · `reauth` | [server/src/routes/api/sshAccess.js:111](../server/src/routes/api/sshAccess.js#L111) |
+| POST | `/settings/ssh-access/approvals/:id/reject` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `approvePre` · `reauth` | [server/src/routes/api/sshAccess.js:117](../server/src/routes/api/sshAccess.js#L117) |
+| GET | `/settings/ssh-access/changes` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:222](../server/src/routes/api/sshAccess.js#L222) |
+| DELETE | `/settings/ssh-access/corps/:corp/stop` | `write` | [server/src/routes/api/sshAccess.js:197](../server/src/routes/api/sshAccess.js#L197) |
+| POST | `/settings/ssh-access/corps/:corp/stop` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `reauth` | [server/src/routes/api/sshAccess.js:191](../server/src/routes/api/sshAccess.js#L191) |
+| PUT | `/settings/ssh-access/guards` | `write` | [server/src/routes/api/sshAccess.js:124](../server/src/routes/api/sshAccess.js#L124) |
+| POST | `/settings/ssh-access/inbox/approve` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `vaultFirst` · `pre` · `reauth` | [server/src/routes/api/sshAccess.js:204](../server/src/routes/api/sshAccess.js#L204) |
+| POST | `/settings/ssh-access/inbox/discard` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `reauth` | [server/src/routes/api/sshAccess.js:211](../server/src/routes/api/sshAccess.js#L211) |
+| GET | `/settings/ssh-access/jobs/:id` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:150](../server/src/routes/api/sshAccess.js#L150) |
+| POST | `/settings/ssh-access/jobs/:id/cancel` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `cancelGate` | [server/src/routes/api/sshAccess.js:158](../server/src/routes/api/sshAccess.js#L158) |
+| POST | `/settings/ssh-access/key-login` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `jobPre` · `reauth` | [server/src/routes/api/sshAccess.js:136](../server/src/routes/api/sshAccess.js#L136) |
+| POST | `/settings/ssh-access/key-revoke` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `jobPre` · `reauth` | [server/src/routes/api/sshAccess.js:143](../server/src/routes/api/sshAccess.js#L143) |
+| POST | `/settings/ssh-access/keys` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `vaultFirst` · `pre` · `reauth` | [server/src/routes/api/sshAccess.js:79](../server/src/routes/api/sshAccess.js#L79) |
+| DELETE | `/settings/ssh-access/keys/:id` | `write` | [server/src/routes/api/sshAccess.js:102](../server/src/routes/api/sshAccess.js#L102) |
+| PUT | `/settings/ssh-access/keys/:id/placement` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `reauth` | [server/src/routes/api/sshAccess.js:87](../server/src/routes/api/sshAccess.js#L87) |
+| POST | `/settings/ssh-access/keys/rotate` | `write` | [server/src/routes/api/sshAccess.js:96](../server/src/routes/api/sshAccess.js#L96) |
+| POST | `/settings/ssh-access/reload-keystore` | `write` | [server/src/routes/api/sshAccess.js:72](../server/src/routes/api/sshAccess.js#L72) |
+| POST | `/settings/ssh-access/reload-state` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `reauth` | [server/src/routes/api/sshAccess.js:67](../server/src/routes/api/sshAccess.js#L67) |
+| POST | `/settings/ssh-access/scan` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:62](../server/src/routes/api/sshAccess.js#L62) |
+| GET | `/settings/ssh-access/servers/:id/candidates` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:172](../server/src/routes/api/sshAccess.js#L172) |
+| POST | `/settings/ssh-access/servers/:id/installed-keys` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:176](../server/src/routes/api/sshAccess.js#L176) |
+| POST | `/settings/ssh-access/servers/:id/key` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `reauth` | [server/src/routes/api/sshAccess.js:165](../server/src/routes/api/sshAccess.js#L165) |
+| POST | `/settings/ssh-access/servers/:id/test` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:184](../server/src/routes/api/sshAccess.js#L184) |
+| GET | `/settings/ssh-access/usage` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:219](../server/src/routes/api/sshAccess.js#L219) |
 | GET | `/summary` | — | [server/src/routes/api/inventory.js:164](../server/src/routes/api/inventory.js#L164) |
 | POST | `/tool-usage` | — | [server/src/routes/api/inventory.js:675](../server/src/routes/api/inventory.js#L675) |
 | GET | `/tool-usage/top` | — | [server/src/routes/api/inventory.js:671](../server/src/routes/api/inventory.js#L671) |
@@ -1730,17 +1730,18 @@ Prometheus/OTel 익스포터(선택 토큰).
 |---|---:|---|
 | `fullScopeOnly` | 324 | **전체 범위 계정만**. vCenter 범위를 지정한 계정은 403 — 그 자원에 법인 축이 없어 교집합할 수 없기 때문이다(빈 목록을 주면 '장비 0대' 라는 거짓이 된다). |
 | `fleetOnly` | 212 | **전체 범위 계정만**(v2.607 AUTHZ2607-04·07 — 중앙 IPAM 스캔·중앙 인벤토리·감사 로그처럼 전 법인에 걸친 데이터·동작). 범위 제한 계정은 403. |
-| `requireSettingsOwner` | 83 | **설정 소유 계정**(`settings-owners.txt`·`SETTINGS_OWNERS`·중앙 배포 admin). admin 이라도 소유자가 아니면 403. 그리고 **소유자이면서 전체 범위(vCenter 제한 없음) 계정만** 통과한다 — 범위가 지정된 소유자는 403(v2.744 AUTHZ-02). 백업 아카이브·중앙 토큰 배달 등 **비밀을 다루는 경로**에 붙는다. |
+| `requireSettingsOwner` | 78 | **설정 소유 계정**(`settings-owners.txt`·`SETTINGS_OWNERS`·중앙 배포 admin). admin 이라도 소유자가 아니면 403. 그리고 **소유자이면서 전체 범위(vCenter 제한 없음) 계정만** 통과한다 — 범위가 지정된 소유자는 403(v2.744 AUTHZ-02). 백업 아카이브·중앙 토큰 배달 등 **비밀을 다루는 경로**에 붙는다. |
 | `requireCentral` | 70 | **central 게이트**(v2.613 DEPS2613-09) — 공유 `CENTRAL_TOKEN`·엣지별 개별 토큰이 하나도 설정돼 있지 않으면 404, 토큰이 맞지 않으면 403. 51개 `/api/central/*` 라우트가 같은 미들웨어를 쓴다(예전의 인라인 2줄 게이트 쌍을 하나로). |
 | `fullRwOnly` | 43 | **조회 · 쓰기 모두 전체 범위인 계정만**(v2.935 — `fullReadWriteScopeOnlyWith` 의 산물 · SAN 스위치 등록 · 수집 · 설정 변경 라우트). 쓰기 범위만 줄인 관리자도 403. |
-| `reauth` | 38 | 통합 계정 관리의 재인증 — 로컬 OTP 계정은 OTP, OTP 없는 계정은 설정 소유자만. |
 | `csvPerm` | 37 | **CSV 가져오기/내보내기 권한**(`requirePerm('data.csv')` — v2.643). 관리자 이상만(super_admin 항상, admin 은 권한 설정에서 super_admin 이 끌 수 있다). operator·viewer 는 403. |
+| `reauth` | 33 | 통합 계정 관리의 재인증 — 로컬 OTP 계정은 OTP, OTP 없는 계정은 설정 소유자만. |
 | `fullWriteOnly` | 24 | **쓰기 범위도 무제한인 계정만**(v2.823 Bareos 설정 쓰기). 조회는 무제한이어도 수정 가능 vCenter(writeVcenters)가 지정된 계정은 403 — 전 법인 공용 쓰기라 쓰기 범위와 교집합할 수 없다. |
 | `fleetWideOnly` | 23 | **전체 범위 계정만**(v2.607 AUTHZ2607-03 — vCenter 등록·데이터 소스 전환·표시 순서). 범위 제한 계정은 403. |
 | `demoBlockWrite` | 21 | **데모(손님) 계정 403**(v2.976 집중 모니터링 쓰기 — `isDemoGuest`). `noDemo` 와 같은 뜻 — 관리자 게이트 뒤에 붙는 쓰기 거절이고 권한을 넓히지 않는다. |
 | `tokenFirst` | 21 | **수집 토큰 확인을 본문 해석보다 먼저** 한다(v2.741 — 토큰 없는 요청이 본문 파서·큰 본문 한도에 닿지 않게). 토큰이 없거나 틀리면 403, 수집 토큰 미설정이면 404. |
 | `fullReadWriteScopeOnlyWith` | 14 | **조회 · 쓰기 모두 전체 범위인 계정만**(v2.935 — `routes/admin/shared.js` · `auth/scope.js isFullReadWriteScope`). 조회 범위 또는 쓰기 범위(writeVcenters)를 지정한 계정은 403 — 스위치 설정을 바꾸는 라우트(SAN 플로우 모니터)가 쓴다. |
 | `requireSuperAdmin` | 13 | **super_admin 전용**(v2.726 좌측 메뉴 배포·철회 · v2.740 아이실론 디렉터리 사용량 수집 대상 설정 — 조회·저장·일괄 변경·연결 시험·메일·SSH 키). 저장 역할이 super_admin 인 계정만(`req.user.superAdmin`). 역할 admin 은 403 `super-admin-only`(`requiredRole: ['super_admin']`). |
+| `fullRW` | 12 | **조회 · 쓰기 범위 모두 무제한인 계정만**(v3.10.0 SSH 공용 접속 쓰기 — `isFullReadWriteScope`). writeVcenters 로 쓰기를 좁힌 설정 소유자도 403 `write-scope` — 이 화면의 쓰기는 전 법인 서버의 authorized_keys · 승인 · 사용 중지를 바꾼다. |
 | `fleetReadOnly` | 10 | **전체 범위 계정만**(v2.621 SEC-03 — 폴더 사용량 조회. 응답이 RMA 엣지 IP·호스트명·마운트 경로를 싣는다 · v2.622 SEC-03 — GPU 게스트 엣지 배포 설정·엣지 배포 사용자·수집 진단 조회). 범위 제한 계정은 403. |
 | `issueSettingsFleetOnly` | 10 | **전체 범위 계정만**(v2.871 — 이슈 설정: 자동 할당 규칙 · 알림 · 사람별 메일 주소. 전 법인 공용 설정이다). 범위 제한 계정은 403 · 핸들러가 관리자 판본(데모 제외)을 한 번 더 본다. |
 | `express.json` | 10 | 본문 파서(대용량 JSON 한도). ⚠ 게이트가 아니다 — 이 자리에 있는 이유는 **인증보다 먼저 파싱하지 않기 위해** 라우트 단위로 붙였기 때문이다(`util/bigJsonGate.js` 규약). |
@@ -1748,6 +1749,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | `fullScopeOnlyWith` | 10 | **전체 범위 계정만**(사유 문구를 받는 `fullScopeOnly` — v2.628 SEC2628-01 업그레이드 제어·SEC2628-05 리소스 적정성 진단 등). 범위 제한 계정은 403. |
 | `commenters` | 8 | **admin·operator 또는 권한 키 `issues.request`**(v2.881 위키 — 댓글 · 지켜보기. 데모 계정 제외 · 문서의 스페이스가 쓰기 범위 안이어야 한다 — 저장소 `addComment`). |
 | `authMiddleware` | 8 | 세션 토큰 검증(`resolveTokenUser`). 대부분의 `/api/*` 는 마운트에서 이미 걸리고, 여기 보이는 것은 **라우터가 따로 건** 경우다(`/api/auth` 안의 admin 라우트 등). |
+| `write` | 5 | **SSH 공용 접속 쓰기 묶음**(v3.10.0) = 관리자 → 설정 소유자 등급 → `fullRW` → `pre(사전 검사)` → `reauth`(OTP 마지막). 사전 검사가 거절하면 OTP 를 쓰지 않는다. |
 | `noDemo` | 4 | **데모(손님) 계정 403**(7b 서버 등록 — `isDemoGuest`). 관리자 게이트 뒤에 붙는 쓰기 거절이고 권한을 넓히지 않는다. |
 | `prefsWrite` | 4 | VM 목록 내보내기 내 저장값 쓰기(v2.798) — **데모 손님 403** · 저장 키는 인증된 계정 이름(본문 값 무시) · 손상 파일이면 503 · 감사 로그. |
 | `templateFleetOnly` | 4 | **전체 범위 계정만**(v2.889 — 위키 관리자 템플릿: 모든 스페이스의 새 문서 화면에 보이는 전 법인 공용 설정). 범위 제한 계정은 403 · 핸들러가 관리자 판본(데모 제외)을 한 번 더 본다. |
@@ -1767,6 +1769,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | `requireOwnOtp` | 2 | **본인 OTP 재인증**(1회용·실패 잠금). 호스트 접근 제어 적용·확정처럼 되돌리기 어려운 동작에 붙는다. |
 | `togglePrecheck` | 2 | SAN 플로우 비활성화 · 다시 켜기의 **사전 확인**(v2.940 반증 L-4) — 스위치 · dvc_ 이름 · 포탈 기록 · 지금 상태 · 엣지 버전을 OTP 재인증 **전에** 본다(거부할 요청이 OTP 를 써 버리지 않게). 404 · 400 · 409. |
 | `vaultFirst` | 2 | **새 로그인 키 저장 방식 검사**(v3.9.0 SSH 공용 접속 — 키 등록 · 받는 곳 승인). 자격증명 저장 방식이 암호화가 아니면 409 `keys-need-encryption`, 정책을 못 읽으면 503 `SECRETS_POLICY_UNAVAILABLE` — **OTP(`reauth`) 앞에** 두어 거절될 요청이 1회 비밀번호를 쓰지 않게 한다. 판정은 `keyStore.keyVaultIssue` 하나(저장 함수도 다시 본다). |
+| `pre` | 2 | **OTP 앞 사전 검사**(v3.10.0 SSH 공용 접속 — 승인할 사람 없음 · 같은 요청 대기 · 승인 기록 손상 · 중지 아님 · 키 상태 · 넣는 중인 키 · 데모). 1회용 OTP 를 쓰기 전에 값싸게 거른다. 판정은 본 함수가 다시 한다. |
 | `approvePre` | 2 | **승인 · 돌려보내기 사전 검사**(v3.10.0 SSH 공용 접속 — OTP 앞). 승인 기록 손상 503 · 요청 없음 404 · 처리됨 · 시한 지남 409 · 요청자 본인 승인 403 · 화면에서 본 지문과 다르면 409 — 이 거절들이 1회 비밀번호를 쓰지 않게 한다. 판정은 승인 저장소가 다시 한다. |
 | `jobPre` | 2 | **키 작업 시작 사전 검사**(v3.10.0 키 로그인 설정 · 키 거두기 — OTP 앞). 넣기 칸이 차 있거나 같은 키를 거두는 중이면 409(`busy` · `revoking`), 같은 키 거두기 진행 중 · 동시 거두기 상한이면 409 — OTP 를 쓰지 않는다. |
 | `alertFullScope` | 2 | **전체 범위 계정만**(v2.838 Backup › Summary 백업 안 된 VM 일일 메일 저장 · 지금 보내기 — `fullScopeOnlyWith` 의 산물 · 전 법인 자료를 메일로 보낸다). 범위 제한 계정은 403 · 핸들러가 관리자 판본(데모 제외)을 한 번 더 본다. |

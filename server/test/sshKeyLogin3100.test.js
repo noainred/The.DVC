@@ -681,6 +681,43 @@ test('③-c 승인 대기 키는 고를 수도 없다 — CSV 온보딩(importAn
   assert.ok(KS._removeKey(pk.id).ok);
 });
 
+test('③-d 쓰기 라우트의 결정적 거절은 OTP 앞(1회차 A5) — 같은 요청 대기 · 중지 아님 · 키 없음 · 승인 대기 키 넣기 · 보호 장치 끄기 중복은 1회 비밀번호를 쓰지 않는다 · 쓰기 범위(writeVcenters)가 좁은 소유자는 조회만 되고 쓰기 · 승인은 403 write-scope(1회차 A3) · 7b 화면 안내 문구', async () => {
+  const unused = (u, code, what) => assert.equal(AUTH.verifyUserOtp(u, code).ok, true, `${what} — ${u} 의 코드가 쓰이지 않았다`);
+  const kFrom = mkKey('pre-from'); const kTo = mkKey('pre-to'); const kPend = mkKey('pre-pend', { pending: true });
+  const rq = await SVC.rotateKeyReq({ from: kFrom.id, to: kTo.id, by: 'own' });   // 같은 대상의 요청이 이미 대기
+  assert.equal(rq.pending, true, JSON.stringify(rq));
+  const gq = await SVC.changeGuards({ serverRestrict: false }, { by: 'own' });     // 보호 장치 끄기 요청 대기
+  assert.equal(gq.pending, true, JSON.stringify(gq));
+  const cases = [
+    ['own8', 'POST', '/settings/ssh-access/keys/rotate', { from: kFrom.id, to: kTo.id }, 409, 'dup-request'],
+    ['own8', 'DELETE', '/settings/ssh-access/corps/vcZ/stop', null, 409, 'not-stopped'],
+    ['own8', 'DELETE', '/settings/ssh-access/keys/k_000000000000', null, 404, 'not-found'],
+    ['own9', 'POST', '/settings/ssh-access/key-login', { keyId: kPend.id, servers: [{ id: 'x', addr: 'x' }] }, 409, 'key-pending'],
+    ['own9', 'PUT', '/settings/ssh-access/guards', { serverRestrict: false }, 409, 'dup-request'],
+  ];
+  for (const [u, method, url, body, s0, code0] of cases) {
+    const code = await otp(u);
+    const r = method === 'DELETE' ? await call(u, method, `${url}?otp=${code}`) : await call(u, method, url, { ...body, otp: code });
+    assert.deepEqual([r.s, r.j.code, r.j.needOtp], [s0, code0, undefined], `${method} ${url}: ${r.txt}`);
+    unused(u, code, `${method} ${url}`);
+  }
+  // 쓰기 범위가 좁은 소유자(lim) — 화면은 보지만 바꾸지 못한다. OTP 를 묻기 전에 403(그 코드는 쓰이지 않는다)
+  assert.equal((await call('lim', 'GET', '/settings/ssh-access')).s, 200, '조회는 소유자 등급(조회 범위 무제한)');
+  const lc = await otp('lim');
+  for (const [method, url, body] of [['POST', '/settings/ssh-access/key-login', { keyId: kFrom.id, servers: [] }], ['POST', `/settings/ssh-access/approvals/${rq.request.id}/approve`, { digest: rq.request.digest }],
+    ['POST', '/settings/ssh-access/corps/vcZ/stop', { reason: 'x' }], ['POST', '/settings/ssh-access/jobs/kj_000000000000/cancel', {}]]) {
+    const r = await call('lim', method, url, { ...body, otp: lc });
+    assert.deepEqual([r.s, r.j.code], [403, 'write-scope'], `${url}: ${r.txt}`);
+  }
+  unused('lim', lc, '쓰기 범위 거절');
+  assert.equal(G.otherOwners('own').includes('lim'), false, '승인자로도 세지 않는다(1회차 A3)');
+  assert.equal(ST.stopFor('vcZ'), null);
+  // 7b 화면 안내 — 승인할 다른 소유자가 없을 때의 길까지 말한다
+  assert.match(G.twoPersonRedirect().reason, /승인할 다른 소유자가 없으면 그 화면의 보호 장치에서 두 사람 승인을 끄거나\(소유자가 한 명뿐인 설치\) 승인할 소유자를 세우세요/);
+  for (const r of [rq, gq]) assert.equal((await SVC.decideApproval(r.request.id, { approve: false, by: 'own' })).request.status, 'cancelled');
+  assert.ok(KS._removeKey(kPend.id).ok);
+});
+
 test('④ 돌려보냄 · 취소 · 시한 만료 · 실행 실패 — 승인 대기 키는 저장소에서 지워진다 · 승인 기록을 못 읽으면 대기 키를 남기지 않고 등록을 거절한다', async () => {
   const add = async (name) => {
     const K = F.ed25519Key(); ALL_PEMS.push(K.pem);
@@ -985,7 +1022,7 @@ test('⑥-e AD 별칭은 같은 사람 — 승인자 셈(otherOwners · approver
   }
 });
 
-test('⑥-f 복원 합치기는 공개키 · 알고리즘 칸과 공통 계정 비밀번호를 번들에서 받지 않는다(점검 A3 · A4) · 저장된 공개키가 지문과 맞지 않는 키는 서버에 넣지도 거두지도 않는다(key-tampered — 점검 A3)', async () => {
+test('⑥-f 복원 합치기는 공개키 · 알고리즘 · 이름 칸과 공통 계정 비밀번호를 번들에서 받지 않는다 · 키 id 는 다른 키와 겹칠 때만 지금 것 · 공통 계정 묶음 칸은 번들 값(끊긴 기본 키는 dropped)(점검 A3 · A4 · 반증 R7 · 1회차 A6 · D2) · 저장된 공개키가 지문과 맞지 않는 키는 서버에 넣지도 거두지도 않는다(key-tampered — 점검 A3)', async () => {
   const BUN = await import('../src/bmusage/onboard/keyBundle.js');
   const file = path.join(DIR, 'ssh-keys.json');
   const k = mkKey('a3-key');
@@ -1108,6 +1145,40 @@ test('⑥-h 보호 장치 — 한 요청에 켜기와 끄기가 섞였는데 끄
   assert.equal((await SVC.decideApproval(off.request.id, { approve: false, by: 'own' })).request.status, 'cancelled');
   assert.deepEqual(ST.getGuards(), { twoPerson: true, serverRestrict: true, pairSeen: true });
 });
+
+test('⑥-i 승인자 셈(1회차 A1 · A2 · A3) — AD 를 켠 설치에서 로그인할 수 없는 소유자 이름은 ‘쌍’ 을 세우지 않는다(로컬 계정만 증거 · 실제 승인이 증거) · 계정은 글자 그대로 찾는다(대소문자만 다른 로컬 계정이 있으면 AD 이름으로도 세지 않음) · 쓰기 범위가 좁은 소유자는 승인자가 아니다 · 다른 두 사람을 신원(jkim@a · jkim@b)으로 접지 않는다',
+  {}, () => {
+    const AD = { AD_ENABLED: 'true', AD_URL: 'ldap://ad.example.invalid' };
+    const tot = () => ({ totpEnabled: true, totpSecret: generateSecret() });
+    // ① AD 켬 · 소유자 목록에 로컬 계정이 아닌 이름(퇴사자 · 오타 · 아직 없는 AD 계정) 하나 — 승인자로는 세지만(AD 일 수 있다) ‘쌍’ 은 세우지 않는다
+    const a = subRun({ owners: 'admin,kim.left', users: [{ username: 'admin', role: 'admin', ...tot() }], env: AD, code: `
+      const G = await imp('sshaccess/guards.js'); const ST = await imp('sshaccess/state.js'); const SVC = await imp('sshaccess/service.js');
+      const approvers = G.approverNames(); const other = G.otherOwners('admin');
+      G.notePair({ by: '' }); await SVC.buildView();
+      const seen0 = ST.getGuards().pairSeen;
+      const g = await SVC.changeGuards({ twoPerson: false }, { by: 'admin' });
+      const d = await SVC.decideApproval(g.request.id, { approve: true, by: 'kim.left', digest: g.request.digest });
+      console.log(JSON.stringify({ approvers, other, seen0, gPending: g.pending === true, dOk: d.ok, seen1: ST.getGuards().pairSeen,
+        ev: ST.listEvents({ limit: 20 }).filter((e) => e.kind === 'guard-changed').map((e) => e.detail) }));` });
+    assert.deepEqual([a.approvers, a.other, a.seen0], [['admin'], ['kim.left'], false], `로그인할 수 없을지 모르는 AD 이름 하나로 영영 잠기지 않는다(예전에는 pairSeen 이 섰다) ${JSON.stringify(a)}`);
+    // AD 이름이 실제로 승인했다 = 승인할 수 있는 소유자가 둘이라는 증거 → 그때 쌍을 세운다
+    assert.deepEqual([a.gPending, a.dOk, a.seen1], [true, true, true], JSON.stringify(a));
+    assert.ok(a.ev.some((x) => /둘을 확인/.test(x)), JSON.stringify(a.ev));
+    // ② AD 켬 · 정확 일치 · 쓰기 범위 — Bob(로컬은 bob) 는 세지 않고, writeVcenters 소유자(lim)도 세지 않고, 앞에 viewer ‘Kim’ 이 있어도 진짜 ‘kim’ 을 센다
+    const b = subRun({ owners: 'own,Bob,lim,kim', env: AD, users: [{ username: 'own', role: 'admin', ...tot() }, { username: 'bob', role: 'admin', ...tot() },
+      { username: 'lim', role: 'admin', ...tot(), scope: { writeVcenters: ['vcA'] } }, { username: 'Kim', role: 'viewer', ...tot() }, { username: 'kim', role: 'admin', ...tot() }], code: `
+      const G = await imp('sshaccess/guards.js'); const ST = await imp('sshaccess/state.js');
+      const other = G.otherOwners('own'); const approvers = G.approverNames(); G.notePair({ by: '' });
+      console.log(JSON.stringify({ other, approvers, seen: ST.getGuards().pairSeen }));` });
+    assert.deepEqual([b.other, b.approvers.sort(), b.seen], [['kim'], ['kim', 'own'], true], JSON.stringify(b));
+    // ③ 다른 두 로컬 계정 jkim@corp · jkim@subsidiary — 한 명으로 접지 않는다(쌍이 선다 → 한 사람이 혼자 끄지 못한다). 서로의 요청은 승인하지 못한다(자기 승인 판정과 같은 신원 — 막히는 쪽)
+    const c = subRun({ owners: 'jkim@corp.example,jkim@subsidiary.example', users: [{ username: 'jkim@corp.example', role: 'admin', ...tot() }, { username: 'jkim@subsidiary.example', role: 'admin', ...tot() }], code: `
+      const G = await imp('sshaccess/guards.js'); const ST = await imp('sshaccess/state.js'); const SVC = await imp('sshaccess/service.js');
+      const approvers = G.approverNames(); G.notePair({ by: '' });
+      const g = await SVC.changeGuards({ twoPerson: false }, { by: 'jkim@corp.example' });
+      console.log(JSON.stringify({ approvers, seen: ST.getGuards().pairSeen, other: G.otherOwners('jkim@corp.example'), g: { ok: g.ok, code: g.code || '' }, twoPerson: ST.getGuards().twoPerson }));` });
+    assert.deepEqual([c.approvers.length, c.seen, c.other, c.g, c.twoPerson], [2, true, [], { ok: false, code: 'no-approver' }, true], `예전에는 한 명으로 세어 혼자 껐다 ${JSON.stringify(c)}`);
+  });
 
 /* ── 3. 줄 · 원격 스크립트(순수 akScript) — 실제 bash · dash ───────────────── */
 const BK = F.ed25519Key();           // 빌더 시험용 키(저장소에 넣지 않는다)
@@ -2637,10 +2708,10 @@ test('⑰-g 그 키를 넣는 작업이 도는 동안에는 그 키를 지우거
   const ap = await SVC.decideApproval(dq.request.id, { approve: true, by: 'own2', digest: dq.request.digest });
   assert.deepEqual([ap.ok, ap.code, ap.request?.status], [false, 'key-installing', 'failed'], JSON.stringify(ap));
   // 라우트 — OTP 앞에서 409(코드가 쓰이지 않는다)
-  const code = await otp('own8');
-  const rr = await call('own8', 'DELETE', `/settings/ssh-access/keys/${K.id}?otp=${code}`);
+  const code = await otp('own7');
+  const rr = await call('own7', 'DELETE', `/settings/ssh-access/keys/${K.id}?otp=${code}`);
   assert.deepEqual([rr.s, rr.j.code], [409, 'key-installing'], rr.txt);
-  assert.equal(AUTH.verifyUserOtp('own8', code).ok, true, '사전 검사 거절이 OTP 를 소모하지 않았다');
+  assert.equal(AUTH.verifyUserOtp('own7', code).ok, true, '사전 검사 거절이 OTP 를 소모하지 않았다');
   h.release();
   const j = await waitJob(st.jobId);
   assert.deepEqual([j.results[0].ok, KS.keyById(K.id)?.status, KL.installingKeyId()], [true, 'active', ''], '작업이 끝나면 칸이 빈다 · 키는 그대로');
@@ -2947,8 +3018,7 @@ async function inboxSigCase(INB, idir) {
   assert.equal(count('inbox-new'), 0, '고친 뒤에도 다시 알리지 않았다');
 }
 
-test('⑱-d 옛 판(사건 detail 의 ‘경로|sha’)으로만 알린 받는 곳 파일 — 그 사건이 기록에서 밀려난 뒤 재시작해도 다시 알리지 않는다(업그레이드 날 · 그 뒤)',
-  { todo: '1회차 갱신 중 확인한 남은 틈(낮음 · 업그레이드 경로) — service.js runSshAccessScan 은 옛 사건의 표지를 읽어 그 회차에는 알리지 않지만 inboxSeen 칸으로 옮기지 않는다. 그 사건이 300개 기록에서 밀려난 뒤 재시작하면 같은 파일을 한 번 다시 ‘새 파일’ 로 알린다(메일 포함). 처음 읽을 때 inboxSeen 으로 옮기면 닫힌다.' },
+test('⑱-d 옛 판(사건 detail 의 ‘경로|sha’)으로만 알린 받는 곳 파일 — 처음 표지를 만들 때 옛 표지를 상태 파일 칸(inboxSeen)으로 옮겨, 그 사건이 기록에서 밀려난 뒤 재시작해도 다시 알리지 않는다(1회차 갱신 중 확인 → 0992a0f1)',
   async () => {
     const INB = await import('../src/sshaccess/inbox.js');
     const idir = INB.inboxPathOf('vcB');
