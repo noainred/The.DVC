@@ -37,12 +37,13 @@ import {
 } from './isiduText.js';
 // v2.745 보내는 때(정한 요일·시각) — 요일 칩·시각 선택지는 종합 메일 설정 화면과 같은 것을 쓴다(모양·선택지를 두 벌 두지 않게).
 import { DAY_LABELS, DAY_ORDER, DAY_PRESETS, HOURS, minuteChoices, toggleDay, presetActive } from './isiduDigestText.js';
+import { copyText as copyToClipboard } from '../../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 
 function KeyBox({ k, agent, reportedAt, onCreate, creating }) {
   const ks = agent && !k ? { text: reportedAt ? '키 정보 없음' : '엣지 보고 없음', tone: 'muted' } : keyStatus(k);
   const [copied, setCopied] = useState(false);
   const copy = async () => {
-    try { await navigator.clipboard.writeText(k.publicKey); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { setCopied(false); }
+    if (await copyToClipboard(k.publicKey)) { setCopied(true); setTimeout(() => setCopied(false), 1500); } else setCopied(false);
   };
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 12, borderRadius: 10, background: 'var(--panel-deep)' }}>

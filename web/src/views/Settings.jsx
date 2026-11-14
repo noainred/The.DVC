@@ -51,6 +51,7 @@ const Upgrade = lazy(() => import('./Upgrade.jsx'));
 const PeerTrustSettings = lazy(() => import('./PeerTrustSettings.jsx')); // 장비 신뢰(SSH 호스트키·TLS 인증서 승인) — 2026-10-09 검토 S-01·S-02
 const SshAccessSettings = lazy(() => import('./SshAccessSettings.jsx')); // v3.9.0 SSH 공용 접속(7b 키 저장소 위 — 법인 공통 · 서버별 키 · 키 폴더 · 키 보안)
 import About from './About.jsx';
+import { copyText as copyToClipboard } from '../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 import HorizonAdmin from './HorizonAdmin.jsx'; // v2.685
 const IsiduSettingsPage = lazy(() => import('./tools/IsiduSettingsPage.jsx')); // v2.740 아이실론 수집 대상 설정(슈퍼 관리자 전용)
 const GuestPartSettings = lazy(() => import('./tools/GuestPartSettings.jsx')); // v2.749 게스트 파티션 사용률 — 조회 주기·임계·무시 규칙·메일
@@ -249,8 +250,7 @@ export default function Settings({ initialSub }) {
   const flipFav = () => setFav((prev) => { const next = toggleFav(prev, cur.k); lsWrite(LS_FAV, next); return next; });
   const pick = (k) => { setSub(k); setQuery(''); setGradeFilter(null); };
   const copyLink = async () => {
-    try { await navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}#/settings/${cur.k}`); setCopied(true); }
-    catch { setCopied(false); }
+    setCopied(await copyToClipboard(`${window.location.origin}${window.location.pathname}#/settings/${cur.k}`));
   };
   const byKey = (k) => visible.find((s) => s.k === k);
 

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { fetchJson, can } from '../api.js';
 import EscClose from './EscClose.jsx';
+import { copyText as copyToClipboard } from '../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 
 /**
  * VM remote-console launcher (원격 콘솔), mirroring the vSphere Client:
@@ -21,6 +22,7 @@ export function VmConsoleButton({ vmId, vmName }) {
 
 function VmConsoleModal({ vmId, vmName, onClose }) {
   const [state, setState] = useState({ loading: true });
+  const [urlCopied, setUrlCopied] = useState('');   // '' | 'ok' | 'fail'
 
   React.useEffect(() => {
     let active = true;
@@ -77,7 +79,7 @@ function VmConsoleModal({ vmId, vmName, onClose }) {
         </div>
 
         {data?.webConsoleUrl && (
-          <button className="tab" style={{ marginTop: 10 }} onClick={() => navigator.clipboard?.writeText(data.webConsoleUrl)}>웹 콘솔 URL 복사</button>
+          <button className="tab" style={{ marginTop: 10 }} onClick={async () => setUrlCopied((await copyToClipboard(data.webConsoleUrl)) ? 'ok' : 'fail')}>{urlCopied === 'ok' ? '웹 콘솔 URL 복사됨' : urlCopied === 'fail' ? '복사하지 못했습니다 — URL 을 직접 복사하세요' : '웹 콘솔 URL 복사'}</button>
         )}
 
         <div className="muted" style={{ fontSize: 11, marginTop: 12, lineHeight: 1.7 }}>

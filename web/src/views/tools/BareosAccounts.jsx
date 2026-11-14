@@ -9,6 +9,7 @@ import { call, filesText } from './BareosCorp.jsx';
 import {
   matrixCell, matrixTotals, mergeBulkRows, sameBulkJob, BULK_LABEL, bulkEligible, RESULT_TEXT, RESULT_CLS, bulkCounts, bulkSummaryText, passwordCsv, maskPw, pwPairIssue, nameIssue, profileOptions, DEFAULT_PROFILE, sshSourceText, noSshNeeded,
 } from './bareosCorpText.js';
+import { copyText as copyToClipboard } from '../../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 
 /**
  * 중앙 계정 통합(v2.845 · 설정 탭 — 전 법인 범위 관리자만). 사용자 요청: '중앙에서 bareos 백업 계정 통합관리'.
@@ -229,7 +230,7 @@ function BulkResult({ r, say, onClose, onRetry }) {
                 <div style={ROW}>
                   <code>{shown[x.directorId] ? x.generatedPassword : maskPw(x.generatedPassword)}</code>
                   <button type="button" className="logout-btn" style={BTN} onClick={() => setShown((s) => ({ ...s, [x.directorId]: !s[x.directorId] }))}>{shown[x.directorId] ? '가리기' : '보기'}</button>
-                  <button type="button" className="logout-btn" style={BTN} onClick={() => { try { navigator.clipboard.writeText(x.generatedPassword).then(() => say({ ok: true, text: `${x.name} 비밀번호를 복사했습니다.` })); } catch { say({ ok: false, text: '복사하지 못했습니다.' }); } }}>복사</button>
+                  <button type="button" className="logout-btn" style={BTN} onClick={async () => { say((await copyToClipboard(x.generatedPassword)) ? { ok: true, text: `${x.name} 비밀번호를 복사했습니다.` } : { ok: false, text: '복사하지 못했습니다.' }); }}>복사</button>
                 </div></>
               ) : '—'}</td>}
             </tr>

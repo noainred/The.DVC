@@ -7,6 +7,7 @@ import { getCurrentUser } from '../../api.js';
 import { toneVar } from './toneVar.js';
 import { shareUrlOf, SHARE_HONEST, captureFooter } from './bmShare.js';
 import { captureNodePng, downloadBlob, captureName } from './bmCapture.js';
+import { copyText as copyToClipboard } from '../../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 
 /**
  * @param {{state:()=>object, node:()=>HTMLElement|null, context:()=>object, kind:string}} p
@@ -17,8 +18,8 @@ export default function BmShareButtons({ state, node, context, kind = 'view' }) 
   const [busy, setBusy] = useState(false);
   async function copy() {
     const url = shareUrlOf(state());
-    try { await navigator.clipboard.writeText(url); setMsg({ tone: 'ok', text: '링크를 복사했습니다 — 여는 사람의 권한으로 보입니다.', url }); }
-    catch { setMsg({ tone: 'warn', text: '클립보드에 쓰지 못했습니다 — 아래 링크를 직접 복사하세요.', url }); }
+    if (await copyToClipboard(url)) setMsg({ tone: 'ok', text: '링크를 복사했습니다 — 여는 사람의 권한으로 보입니다.', url });
+    else setMsg({ tone: 'warn', text: '클립보드에 쓰지 못했습니다 — 아래 링크를 직접 복사하세요.', url });
   }
   async function capture() {
     setBusy(true); setMsg(null);

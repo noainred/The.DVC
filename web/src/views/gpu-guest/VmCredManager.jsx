@@ -12,6 +12,7 @@ import { changeFailText } from '../changeResult.js'; // v2.733(C5-01): putJson �
 import { scopeSaveSuffix } from '../scopeSaveText.js'; // v2.733(C5-01): 범위 계정이 보낸 전역 값(collectMethod) 미적용 안내
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
+import { copyText as copyToClipboard } from '../../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 
 /** 클릭하면 정렬되는 테이블 헤더(오름/내림 토글 + 방향 화살표). */
 function SortTh({ k, sort, onSort, children }) {
@@ -411,7 +412,7 @@ export function VmCredManager({ vcs, vcenters, collectMethod, onSavedShared, dep
                 <b style={{ fontSize: 13 }}>🖥 실행 로그 <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>({logLines.length}줄 · 게스트 작업 명령/단계)</span></b>
                 <div className="flex gap" style={{ alignItems: 'center' }}>
                   <button className="tab" style={{ padding: '4px 10px', fontSize: 12 }}
-                    onClick={() => navigator.clipboard?.writeText(logLines.map((l) => l.line).join('\n')).catch(() => {})}>복사</button>
+                    onClick={() => { copyToClipboard(logLines.map((l) => l.line).join('\n')); }}>복사</button>
                   <button className="tab" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => setLogLines([])}>지우기</button>
                   <button className="tab" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => setShowLog((v) => !v)}>{showLog ? '접기' : '펼치기'}</button>
                 </div>
