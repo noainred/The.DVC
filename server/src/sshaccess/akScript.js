@@ -91,7 +91,7 @@ const HEAD = [
  * 읽기(분류)부터 mv 까지 잡는다. 사람 · 다른 도구는 이 자물쇠를 모른다 — 그래서 mv 직전에 원본을 다시 대조하고 mv 뒤에 다시 본다(post).
  */
 const LOCK = [
-  'i=0; nf=0; nos=""; nob=""',
+  'i=0; nf=0; nm=0; nos=""; nob=""',
   'while :; do',
   '  if mkdir "$lk" 2>/dev/null; then',
   // 주인 표를 못 쓰면(디스크 가득 등) 자물쇠를 남기지 않고 사유를 가른다(1회차 반증 6 — 빈 표가 든 자물쇠가 남고 ‘관리자가 잠가 둠’ 이라고 했다).
@@ -127,12 +127,19 @@ const LOCK = [
   '  fi',
   // 옮기기 직전에 표를 다시 읽어 판단한 그 자물쇠일 때만 옮긴다(2회차 B3 — 그 사이 생긴 남의 새 자물쇠를 옮겼다). 남는 틈은 옮긴 뒤 다시 보고 되돌린다 —
   // 되돌릴 자리에 이미 새 자물쇠가 있으면 되돌리지 않는다(mv 가 그 안으로 들어간다). 그 주인은 mv 직전 `owns` 에서 locklost 로 멈춘다(바꾸지 않음).
-  '  if [ -n "$stale" ] && [ "$(cat "$lk/owner" 2>/dev/null)" = "$o" ] && mv "$lk" "$lk.stale.$$" 2>/dev/null; then',
-  '    if [ "$(cat "$lk.stale.$$/owner" 2>/dev/null)" = "$o" ]; then rm -rf "$lk.stale.$$"; elif [ ! -e "$lk" ]; then mv "$lk.stale.$$" "$lk" 2>/dev/null || rm -rf "$lk.stale.$$"; else rm -rf "$lk.stale.$$"; fi',
-  '    continue',
+  '  if [ -n "$stale" ] && [ "$(cat "$lk/owner" 2>/dev/null)" = "$o" ]; then',
+  '    if mv "$lk" "$lk.stale.$$" 2>/dev/null; then',
+  '      if [ "$(cat "$lk.stale.$$/owner" 2>/dev/null)" = "$o" ]; then rm -rf "$lk.stale.$$"; elif [ ! -e "$lk" ]; then mv "$lk.stale.$$" "$lk" 2>/dev/null || rm -rf "$lk.stale.$$"; else rm -rf "$lk.stale.$$"; fi',
+  '      continue',
+  '    fi',
+  // 주인 없는 자물쇠인데 옮길 수 없다(폴더 append-only · 속성 — 6회차 B6-2: 13초 기다린 뒤 ‘다른 작업 중 · 다음 작업이 치운다’ 고 했지만 아무도 치울 수 없었다) — 따로 말한다.
+  '    nm=$((nm + 1)); [ "$nm" -ge 2 ] && { echo "##KL fail lockstuck"; exit 3; }',
   '  fi',
   '  sleep 1',
   'done',
+  // 자물쇠를 잡은 뒤: 죽은 작업이 남긴 임시 사본(authorized_keys 전체 · 0600)을 치운다 — 임시 파일은 자물쇠 안에서만 만들므로 지금 남은 것은 주인이 없다.
+  //   pid 가 살아 있으면(다른 호스트의 같은 번호일 수 있다) 두고, 링크 · 일반 파일 아님은 건드리지 않는다(6회차 B6-2 — 지울 수 없던 동안의 사본이 영영 남았다).
+  'for x in "$d"/.authorized_keys.portal.[0-9]*; do [ -f "$x" ] && [ ! -L "$x" ] || continue; xp=${x##*.}; case "$xp" in ""|*[!0-9]*) continue ;; esac; [ "$xp" = "$$" ] && continue; kill -0 "$xp" 2>/dev/null || rm -f "$x" 2>/dev/null; done',
 ];
 /** 자물쇠를 잡은 **직후**(분류 전) 원본의 cksum — mv 직전에 다시 대조한다(1회차 반증 8 — 분류 뒤에 재서 그 사이 바뀐 것을 놓쳤다). */
 const C0 = ['if [ -e "$f" ]; then c0=$(cksum < "$f") || { echo "##KL fail read"; exit 3; }; else c0=""; fi'];
@@ -335,7 +342,7 @@ export function removeScript({ publicKey, keyId } = {}) {
 export const WHOAMI_SCRIPT = 'echo "##KL ip ${SSH_CONNECTION%% *}"';
 
 /** 표지 줄 읽기(마지막 `##KL …` 한 줄 — 로그인 배너가 앞에 섞여도). 모르는 사유 글자는 'unknown'. */
-const FAIL_WHY = new Set(['nohome', 'symlink', 'notdir', 'mkdir', 'notfile', 'unreadable', 'notwritable', 'read', 'write', 'verify', 'rename', 'nobase64', 'toolong', 'locked', 'raced', 'locklost', 'changed', 'slow', 'noaccess']);
+const FAIL_WHY = new Set(['nohome', 'symlink', 'notdir', 'mkdir', 'notfile', 'unreadable', 'notwritable', 'read', 'write', 'verify', 'rename', 'nobase64', 'toolong', 'locked', 'lockstuck', 'raced', 'locklost', 'changed', 'slow', 'noaccess']);
 const num = (v) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Math.floor(Number(v)) : 0);
 export function parseMarker(stdout) {
   const lines = String(stdout || '').slice(-200_000).split('\n').map((x) => x.trim()).filter((x) => x.startsWith('##KL '));
@@ -360,6 +367,7 @@ export const FAIL_TEXT = Object.freeze({
   write: '임시 파일을 쓰지 못했습니다(권한 · 디스크) — 원래 파일은 그대로입니다.', verify: '새로 쓴 내용이 예상과 달라(디스크 가득 등) 바꾸지 않았습니다 — 원래 파일은 그대로입니다.',
   rename: '새 파일로 바꾸지 못했습니다 — 원래 파일은 그대로입니다.',
   locked: '다른 작업이 이 서버의 authorized_keys 를 바꾸는 중이라 기다리다 그만뒀습니다 — 원래 파일은 그대로입니다. 잠시 뒤 다시 하세요(남은 자물쇠 ~/.ssh/.authorized_keys.portal.lock 는 주인이 없으면 다음 작업이 치웁니다).',
+  lockstuck: '주인이 없는 자물쇠(~/.ssh/.authorized_keys.portal.lock)가 남아 있는데 치울 수 없습니다(~/.ssh 폴더 속성 — append-only 등) — 원래 파일은 그대로입니다. 서버에서 그 폴더 속성을 확인하고 자물쇠 폴더를 지운 뒤 다시 하세요.',
   locklost: '작업 중에 자물쇠를 다른 쪽이 가져가 바꾸지 않았습니다 — 원래 파일은 그대로입니다. 잠시 뒤 다시 하세요.',
   changed: '그 사이 다른 쪽(사람 · 구성 관리 도구)이 authorized_keys 를 바꿔 바꾸지 않았습니다 — 원래 파일은 그대로입니다. 다시 하세요.',
   slow: `서버에서 스크립트가 시작한 지 ${SCRIPT_DEADLINE_S}초 안에 바꾸기까지 가지 못해 멈췄습니다(서버가 느림 · 자물쇠를 오래 기다림) — 원래 파일은 그대로입니다. 잠시 뒤 다시 하세요.`,

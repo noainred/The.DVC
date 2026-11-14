@@ -76,8 +76,12 @@ async function sshRun(server, auth, fn, { execs = 1 } = {}) {
   } catch (e) {
     const msg = String(e?.message || e);
     if (e?.code === 'key-login-unusable') return { ok: false, code: 'key-login-unusable', reason: KEY_UNUSABLE_TEXT, sent: st.sent };
-    const code = e?.code === 'SSH_NO_PASSWORD_METHOD' ? 'no-password-method' : isPeerRejectText(msg) ? 'hostkey' : isAuthFailureText(msg) ? 'auth-rejected' : TIMEOUT_RE.test(msg) ? 'timeout' : 'connect';
-    const reason = code === 'no-password-method' ? `${msg.replace(/^SSH_NO_PASSWORD_METHOD:\s*/, '').replace(/\s+/g, ' ').slice(0, 160)} — 이미 되는 키로 접속하게 서버 설정을 고르거나 공개키를 서버에 직접 넣으세요.`
+    // 부분 성공(비밀번호는 받아들여짐) · 비밀번호 뒤 추가 칸(맞았는지 모름)은 거부와 따로(6회차 B6-1). 추가 칸은 계정 잠금을 막으려고 거부와 같이 센다(service note).
+    const code = e?.code === 'SSH_NO_PASSWORD_METHOD' ? 'no-password-method' : e?.code === 'SSH_PARTIAL_AUTH' ? 'partial-auth' : e?.code === 'SSH_MORE_AUTH' ? 'more-auth' : isPeerRejectText(msg) ? 'hostkey' : isAuthFailureText(msg) ? 'auth-rejected' : TIMEOUT_RE.test(msg) ? 'timeout' : 'connect';
+    const detail = msg.replace(/^SSH_(NO_PASSWORD_METHOD|PARTIAL_AUTH|MORE_AUTH):\s*/, '').replace(/\s+/g, ' ').slice(0, 200);
+    const reason = code === 'no-password-method' ? `${detail.slice(0, 160)} — 이미 되는 키로 접속하게 서버 설정을 고르거나 공개키를 서버에 직접 넣으세요.`
+      : code === 'partial-auth' ? `${detail} — 이 서버는 비밀번호 하나로는 로그인할 수 없어 키를 넣지 못했습니다. 공개키를 서버에 직접 넣거나 서버의 인증 설정(AuthenticationMethods)을 확인하세요.`
+      : code === 'more-auth' ? `${detail} — 다시 시도하지 않았습니다(계정 잠금 방지 · 이 작업에서는 비밀번호 거부와 같이 셉니다). 비밀번호 하나로 로그인할 수 없는 서버라면 공개키를 직접 넣으세요.`
       : code === 'hostkey' ? '호스트키를 신뢰하지 않아 끊었습니다 — 설정 › 보안 › 장비 신뢰에서 지문을 확인 · 승인하세요.'
       : code === 'auth-rejected' ? `인증이 거부됐습니다 — 다시 시도하지 않았습니다(계정 잠금 방지).${auth.privateKey ? '' : ' 비밀번호는 서버가 받는 방식 하나(password 또는 대화형)로 한 번만 보냈습니다.'}`
         : code === 'timeout' ? `서버가 시한 안에 답하지 않았습니다(${msg.replace(/\s+/g, ' ').slice(0, 80)})`

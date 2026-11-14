@@ -2098,7 +2098,8 @@ test('⑪-f passwordOnly 대화형은 처음 나온 가리는 칸(echo=false) �
     if (ctx.method === 'keyboard-interactive') return ctx.prompt([{ prompt: 'Password: ', echo: false }], (x) => { seen.push({ m: 'kbd', secret: x?.[0] }); ctx.reject(['keyboard-interactive']); });
     seen.push({ m: ctx.method }); return ctx.reject(['password', 'keyboard-interactive']);
   });
-  assert.deepEqual([f.ok, f.sent, f.code, g.ok, g.sent, g.code], [false, 1, '', false, 1, ''], JSON.stringify([f, g]));
+  // 6회차 B6-1: f 는 비밀번호가 받아들여진 부분 성공 — 거부가 아니라 SSH_PARTIAL_AUTH(거부 셈에 들지 않는다). g 는 거부(코드 없음 → auth-rejected).
+  assert.deepEqual([f.ok, f.sent, f.code, g.ok, g.sent, g.code], [false, 1, 'SSH_PARTIAL_AUTH', false, 1, ''], JSON.stringify([f, g]));
   // 키 작업 · 읽기 — 비밀번호를 받지 않는 서버 셋(1회 비밀번호). 인증 거부가 아니라 no-password-method · 거부 셈에 들지 않아 작업이 멈추지 않는다(예전: 거부 둘 → 셋째 cancelled)
   const SS = []; for (let i = 0; i < 3; i += 1) { const S = await fakeSshd(); S.st.password = 'Right-Unused-11f'; S.st.noPassword = true; SS.push(S); }
   const K = mkKey('kl-nopw');
@@ -3495,7 +3496,7 @@ test('⑲ 소스 스윕 — 등록부 쓰기(키 묶기 · 되돌리기 · 저�
   assert.match(svcSrc, /readyTimeout: 15_000,\s*passwordOnly: true \},\s*async \(\{ exec \}\) => exec\(READ_COMMAND, 15_000\)\)/, 'readInstalledKeys 도 passwordOnly(⑪-d 가 동작으로도 본다)');
   const sx = stripComments(fs.readFileSync(path.join(SRC, 'proxy/sshExec.js'), 'utf8'));
   assert.match(sx, /connect\(\{[^)]*_legacy: true, passwordOnly \}\)/, '구형 알고리즘 재시도에도 passwordOnly');
-  assert.match(sx, /else if \(passwordOnly\) \{[^]*?auth\.authHandler = [^]*?if \(sent\) return cb\(false\);/, 'passwordOnly 는 authHandler 로 한 번만(1회차 D3 — ⑪-b · ⑪-e 가 동작으로 본다)');
+  assert.match(sx, /else if \(passwordOnly\) \{[^]*?auth\.authHandler = [^]*?if \(sent\) \{[^]*?return cb\(false\);\n        \}\n        sent = true;/, 'passwordOnly 는 authHandler 로 한 번만(1회차 D3 — ⑪-b · ⑪-e 가 동작으로 본다 · 6회차 B6-1 사유 가르기 뒤에도 다시 보내지 않는다)');
   for (const line of rt.split('\n').filter((l) => /audit\(/.test(l))) assert.doesNotMatch(line, /oncePassword: (?!!!once\b)|: once\b|privateKey|passphrase/, line.trim().slice(0, 80));
   // 7b 화면 — 키 등록 · 교체 · 삭제 게이트에 두 사람 승인 검사가 OTP 앞에 있다
   const ob = stripComments(fs.readFileSync(path.join(SRC, 'routes/api/bmOnboard.js'), 'utf8'));

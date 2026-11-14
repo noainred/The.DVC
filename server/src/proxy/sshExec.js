@@ -55,6 +55,10 @@ export function execTimeoutMs(v, { long = false } = {}) {
 export const SSH_HOSTKEY_ERROR_CODE = 'SSH_HOSTKEY_UNTRUSTED';
 /** passwordOnly 인데 서버가 비밀번호를 받는 방식(password · keyboard-interactive)을 내놓지 않았다 — 비밀번호를 보내지 않았다(인증 거부가 아니다). */
 export const SSH_NO_PASSWORD_METHOD = 'SSH_NO_PASSWORD_METHOD';
+/** passwordOnly: 비밀번호는 받아들여졌지만(부분 성공) 서버가 다른 인증을 더 요구했다 — 거부가 아니다(6회차 B6-1). */
+export const SSH_PARTIAL_AUTH = 'SSH_PARTIAL_AUTH';
+/** passwordOnly: 비밀번호 칸 뒤에 대화형 로그인이 다른 칸(인증 코드 등)을 더 물었다 — 비밀번호가 맞았는지 모른다(6회차 B6-1). */
+export const SSH_MORE_AUTH = 'SSH_MORE_AUTH';
 /** passwordOnly 대화형: 비밀번호를 묻는 칸의 글(여러 말) · OTP/코드 칸의 글. 'Passcode' 는 비밀번호가 아니다(OTP 쪽 — pass 만으로 고르지 않는다). */
 export const PW_PROMPT_RE = /password|passwort|passord|wachtwoord|mot de passe|contrase(?:n|ñ)a|senha|parola|has[lł]o|пароль|암호|비밀번호|パスワード|密码|密碼/i;
 // OTP 말은 강한 말(그 자체로 OTP 칸)과 약한 말(계정 · 호스트 이름에도 흔함 — duo-svc · secondary-db · ‘인증 암호’)로 가른다(3회차 반증 R3R-6 — 약한 말이 섞인 비밀번호 칸에 보내지 않았다).
@@ -172,6 +176,7 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
     signal?.addEventListener('abort', onAbort, { once: true });
     conn.on('ready', () => { signal?.removeEventListener('abort', onAbort); say(`SSH 세션 준비 완료(인증 성공) +${Date.now() - t0}ms`); resolve(conn); });
     let noPwMethod = '';   // passwordOnly 인데 비밀번호를 받는 방식이 없었다(아래 authHandler 가 채운다)
+    let partialAuth = ''; let moreAuth = '';   // passwordOnly: 부분 성공 · 비밀번호 뒤 추가 칸(6회차 B6-1 — 둘 다 ‘인증 거부’ 로 세었다)
     conn.on('error', (e) => {
       signal?.removeEventListener('abort', onAbort);
       // S-01: 호스트키 거부는 ssh2 가 'Host denied (verification failed)' 로만 말한다 — 원인(승인 대기·변경·거부)과
@@ -183,6 +188,8 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
         return reject(he);
       }
       say(`SSH 오류: ${e.message}${e.level ? ` (level=${e.level})` : ''}${e.code ? ` code=${e.code}` : ''} +${Date.now() - t0}ms`, 'error');
+      if (partialAuth) { try { conn.end(); } catch { /* */ } const ne = new Error(`${SSH_PARTIAL_AUTH}: ${partialAuth}`); ne.code = SSH_PARTIAL_AUTH; return reject(ne); }
+      if (moreAuth) { try { conn.end(); } catch { /* */ } const ne = new Error(`${SSH_MORE_AUTH}: ${moreAuth}`); ne.code = SSH_MORE_AUTH; return reject(ne); }
       if (noPwMethod) { try { conn.end(); } catch { /* */ } const ne = new Error(`${SSH_NO_PASSWORD_METHOD}: ${noPwMethod}`); ne.code = SSH_NO_PASSWORD_METHOD; return reject(ne); }
       // 구형 알고리즘 폴백 — 협상 실패에만, 1회만.
       if (LEGACY_FALLBACK && LEGACY_ALGOS && !_legacy && NO_MATCH.test(e.message || '')) {
@@ -224,13 +231,21 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
     //   없고 keyboard-interactive 만 있으면 그것 하나로(1회차 D3 — password 만 쓰자 대화형만 받는 서버에서 읽기가 실패했다). 거부되면 다른 방식으로 다시 보내지 않는다
     //   (실패 기록 2회 · 계정 잠금 위험). 기본값(passwordOnly 아님)은 그대로 — password 뒤 keyboard-interactive.
     else if (passwordOnly) {
-      let sent = false; let answered = false;
-      auth.authHandler = (methodsLeft, _partial, cb) => {
+      let sent = false; let answered = false; let viaKi = false;
+      auth.authHandler = (methodsLeft, partial, cb) => {
         if (methodsLeft == null) return cb({ type: 'none', username });
-        if (sent) return cb(false);
+        if (sent) {
+          // 보낸 방식 뒤 다시 불렸다 — 끝낸다. 사유를 가른다(6회차 B6-1 — 모두 ‘인증 거부 · 한 번 보냈음’ 으로 세었다):
+          //   ① 부분 성공(partial) = 보낸 비밀번호는 받아들여졌고 서버가 다른 인증을 더 요구한다(AuthenticationMethods) — 거부가 아니다.
+          //   ② 대화형인데 칸을 하나도 묻지 않고 끝났다(ssh2 가 빈 질의에 스스로 답한다) — 비밀번호를 보내지 않았다.
+          if (partial === true && (answered || !viaKi)) partialAuth = `비밀번호는 받아들여졌지만 서버가 다른 인증(${(Array.isArray(methodsLeft) ? methodsLeft : []).slice(0, 6).join(', ') || '모름'})도 요구합니다 — 포탈은 비밀번호만 보내고 더 보내지 않았습니다`;
+          else if (viaKi && !answered && !noPwMethod) noPwMethod = '서버의 대화형 로그인이 입력 칸을 묻지 않고 끝났습니다 — 비밀번호를 보내지 않았습니다';
+          return cb(false);
+        }
         sent = true;
         if (methodsLeft.includes('password')) return cb({ type: 'password', username, password: password || '' });
         if (methodsLeft.includes('keyboard-interactive')) {
+          viaKi = true;
           // 비밀번호는 **처음 나온 가리는 칸(echo=false) 하나**에만(1회차 반증 9 — 질의마다 · 프롬프트마다 보내 ‘한 번’ 이 아니었다 ·
           //   2회차 B5 — 첫 칸이 보이는 칸(OTP · Duo passcode — echo=true)이어도 거기에 넣어 비밀번호가 평문 칸으로 갔고 맞는 비밀번호가 거부로 세어졌다). 그 밖은 빈 답.
           //   가리는 칸이 끝내 없으면(OTP 만 묻는 서버) 비밀번호를 보내지 않은 것이므로 ‘비밀번호 방식 없음’ 으로 따로 말한다(거부로 세지 않음).
@@ -243,6 +258,8 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
             //   비밀번호 글이 없는 가리는 칸에는 보내지 않는다(4회차 B4-2 — ‘YubiKey for …’ · ‘Response:’ 같은 칸에 넣어 맞는 비밀번호가 거부로 세어졌다).
             //   글이 아예 없는 가리는 칸(옛 sshd · PAM)은 비밀번호 칸으로 본다 — 글이 있는데 비밀번호 말이 없으면 보내지 않는다.
             const pick = hidden.find((x) => PW_PROMPT_RE.test(x.text) && !OTP_STRONG_RE.test(x.text)) || hidden.find((x) => !x.text.trim());
+            // 비밀번호를 보낸 뒤 또 칸을 묻는다(‘Verification code:’ 등) — 빈 답을 보내고, 비밀번호가 맞았는지 모른다고 따로 말한다(6회차 B6-1).
+            if (answered && list.length > 0 && !moreAuth) moreAuth = '서버가 비밀번호 칸 뒤에 다른 칸(인증 코드 등)을 더 물었습니다 — 포탈은 빈 답을 보냈고, 비밀번호가 맞았는지는 알 수 없습니다';
             const at = answered || !pick ? -1 : pick.i;
             if (at >= 0) { answered = true; noPwMethod = ''; }   // 앞 질의가 OTP 만 물었어도 이번에 비밀번호를 보냈다 — 거부면 거부다
             else if (!answered && list.length > 0) {

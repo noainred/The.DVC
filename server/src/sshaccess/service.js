@@ -306,8 +306,10 @@ export async function readInstalledKeys({ serverId, oncePassword = '', by = '' }
     else rec = { host: s.host, port: Number(s.port) || 22, username: auth.username, file: '~/.ssh/authorized_keys', keys: p.keys, truncated: p.truncated, error: '', missing: !p.present, bad: p.bad };
   } catch (e) {
     const msg = String(e?.message || e);
-    const kind = e?.code === 'SSH_NO_PASSWORD_METHOD' ? 'no-password-method' : isPeerRejectText(msg) ? 'hostkey' : isAuthFailureText(msg) ? 'auth-rejected' : 'connect';
-    const reason = kind === 'no-password-method' ? `${msg.replace(/^SSH_NO_PASSWORD_METHOD:\s*/, '').replace(/\s+/g, ' ').slice(0, 160)}.`   // 서버가 준 상세(키만 받음 · OTP 만 물음 — 3회차 E3-6)
+    // 부분 성공 · 비밀번호 뒤 추가 칸은 거부와 따로(6회차 B6-1 — 키 로그인 설정과 같은 분류).
+    const kind = e?.code === 'SSH_NO_PASSWORD_METHOD' ? 'no-password-method' : e?.code === 'SSH_PARTIAL_AUTH' ? 'partial-auth' : e?.code === 'SSH_MORE_AUTH' ? 'more-auth'
+      : isPeerRejectText(msg) ? 'hostkey' : isAuthFailureText(msg) ? 'auth-rejected' : 'connect';
+    const reason = (kind === 'no-password-method' || kind === 'partial-auth' || kind === 'more-auth') ? `${msg.replace(/^SSH_(NO_PASSWORD_METHOD|PARTIAL_AUTH|MORE_AUTH):\s*/, '').replace(/\s+/g, ' ').slice(0, 200)}.`   // 서버가 준 상세(키만 받음 · OTP 만 물음 — 3회차 E3-6)
       : kind === 'hostkey' ? '호스트키를 신뢰하지 않아 끊었습니다 — 설정 › 보안 › 장비 신뢰에서 지문을 확인 · 승인하세요.'
       : kind === 'auth-rejected' ? '인증이 거부됐습니다(다시 시도하지 않습니다 — 계정 잠금 방지).' : `접속하지 못했습니다(${msg.replace(/\s+/g, ' ').slice(0, 100)})`;
     if (auth.keyFingerprint) noteKeyUse({ fingerprint: auth.keyFingerprint, keyName: auth.keyName, server: s.name || s.host, corp: s.vcenterId, feature: 'conn-test', ok: false, code: kind, trigger: 'manual', by });
@@ -897,7 +899,8 @@ function authRejectTracker() {
       return null;
     },
     note(s, pw, res, job) {
-      if (!res || res.code !== 'auth-rejected' || !(res.via === 'password' || res.via === 'password-once')) return;
+      // 비밀번호 뒤 추가 칸(more-auth — 비밀번호가 맞았는지 모름)도 거부와 같이 센다(계정 잠금 방지 · 6회차 B6-1). 부분 성공(partial-auth — 받아들여짐)은 세지 않는다.
+      if (!res || !(res.code === 'auth-rejected' || res.code === 'more-auth') || !(res.via === 'password' || res.via === 'password-once')) return;
       if (pw) { onceRejects += 1; if (onceRejects >= 2) job?.stop('한 번만 쓰는 비밀번호가 두 번 거부됨 — 계정 잠금 방지'); return; }
       const a = accOf(s, pw); if (a) accRejected.add(a);
     },
