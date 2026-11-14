@@ -24,6 +24,7 @@
  * ⚠ 수집 주기·동시성·데드라인 같은 **숫자를 문구에 박지 않는다**(CLAUDE.md). `/health` 가 주는
  *   값만 쓰고, 서버가 주지 않는 것은 '몇 분' 처럼 범위로만 말한다.
  */
+import { numOrNull } from '../numOrNull.js';
 
 /**
  * ⚠ v2.575 BUG-17 — `Number('') === 0`·`Number([]) === 0` 이라 예전 형태는 **빈 값을 0 으로**
@@ -31,13 +32,8 @@
  *   ('기다리면 채워진다' 대신 '등록하세요' 가 뜬다 — 조치가 정반대다).
  *   서버의 `util/numOrNull.js` 와 같은 규칙이다(웹은 별도 파일이라 여기서 좁힌다).
  */
-const num = (v) => {
-  if (v == null || v === '') return null;
-  if (typeof v !== 'number' && typeof v !== 'string') return null;   // [] · {} · true 차단
-  if (typeof v === 'string' && v.trim() === '') return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-};
+// v3.10.9(공통 기능 점검 7회차): 같은 판정의 지역 사본이었다 — 공용 numOrNull 하나로(코어는 하나).
+const num = numOrNull;
 
 /**
  * 타임아웃/중단 계열 오류인가 — 브라우저·폴리필이 문구를 제각각 쓰므로 넓게 본다.

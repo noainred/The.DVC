@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "3.10.9",
+      "date": "2026-11-15",
+      "title": "공용 기능 점검 7회차: 강조 문구 글자 유실 · numOrNull 사본 정리 · 쓰지 않는 모듈 삭제",
+      "notes": [
+        "BoldText(서버 안내 문구의 **강조** 렌더, 116곳이 쓴다): 빈 강조 '****' 앞 글자를 넣지 않고 건너뛰어 'ab****cd' 가 '**cd' 로 그려졌다 — 이제 강조 표시를 되붙이면 원문 그대로(글자를 잃지 않는다).",
+        "loadState: 지역 numOrNull 사본을 공용 numOrNull 로 · vmMetricsText: 손 판정이 공백 문자열 · 배열을 0 으로 통과시키던 것을 numOrNull 로.",
+        "components/vmMetricStats.js: 쓰는 곳이 없어 지웠다(판정은 vmPerfText 하나).",
+        "회귀 boldText.test.js(글자 보존 불변식 — 수정 전 실패 확인) · vmMetricsText.test.js."
+      ]
+    },
+    {
       "version": "3.10.8",
       "date": "2026-11-15",
       "title": "공용 기능 점검 6회차: 활동 신호 '전송 중' 시한 · 자동 새로고침 미래 기록",
