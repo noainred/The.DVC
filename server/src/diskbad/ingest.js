@@ -13,7 +13,7 @@ export const RECORDS_MAX = 5_000;
 export const DRIVES_MAX = 64;
 const REASONS = new Set(Object.values(REASON).filter(Boolean));
 const ORDERS = new Set(['desc', 'asc', 'unknown']);
-const STOPS = new Set(['', 'budget', 'max']);
+const STOPS = new Set(['', 'budget', 'max', 'skip']);
 
 const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
 const s = (v, n) => (typeof v === 'string' || typeof v === 'number' ? String(v).slice(0, n) : '');
@@ -46,7 +46,10 @@ function cleanRecord(r, now) {
   if (!isObj(r)) return null;
   const created = clampTime(r.created, now);
   if (created == null) return null;
-  return { entryId: s(r.entryId, 64), created, messageId: s(r.messageId, 64), severity: s(r.severity, 16), message: s(r.message, 300), code: s(r.code, 12) };
+  // 반증 #10: 자른 시각은 표시 · 판정용이다. 중복 거르기 키에는 **장비가 준 원래 시각**(정수)을 쓴다 — 자른 값을 키에 넣으면
+  //   시계가 빠른 iDRAC 의 같은 항목이 읽을 때마다 다른 키(수신 시각 + 5분)가 되어 새 행 · '새 기록' 메일이 된다(원본은 따로).
+  const raw = Math.floor(numOrNull(r.created));
+  return { entryId: s(r.entryId, 64), created, createdRaw: raw, clockAhead: raw > created, messageId: s(r.messageId, 64), severity: s(r.severity, 16), message: s(r.message, 300), code: s(r.code, 12) };
 }
 
 function cleanDrive(d) {

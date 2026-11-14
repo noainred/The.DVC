@@ -67,7 +67,7 @@ export function DiskBadTool() {
   if (!fleet) return <ErrorBox message={`디스크 배드 섹터 DB 를 열지 못했습니다 — ${data.db?.error || '포탈 로그를 확인하세요'}`} />;
   const T = fleet.totals;
   const refs = labels.refs;
-  const openServer = (r) => setDetail({ id: r.serverId, name: r.serverName });
+  const openServer = (r) => setDetail({ id: r.serverId, name: r.serverName, agent: r.agent ?? '' });
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
@@ -76,7 +76,7 @@ export function DiskBadTool() {
           <div className="muted" style={{ fontSize: 12.5 }}>서버 iDRAC Lifecycle 로그에서 찾은 배드 섹터 기록 — 아직 쓰고 있는 디스크, 국가 · 법인별, 모델별, 월별 추이.</div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 6 }}>
             <label className="muted" htmlFor="dbad-corp" style={{ fontSize: 12 }}>범위</label>
-            <Select id="dbad-corp" value={corp} onChange={(e) => setCorp(e.target.value)} sort={false} style={{ minWidth: 220 }}>
+            <Select id="dbad-corp" className="select" value={corp} onChange={(e) => setCorp(e.target.value)} sort={false} style={{ minWidth: 220 }}>
               <option value="">{data.scoped ? '내 법인 전체' : '전체 법인'}</option>
               {data.corps.map((c) => <option key={c.id} value={c.id}>{c.country ? `${c.country} · ` : ''}{c.name} ({c.servers}대)</option>)}
             </Select>
@@ -100,7 +100,7 @@ export function DiskBadTool() {
       </div>
 
       <div className="kpis">
-        <Kpi label="배드 섹터 기록이 있는 디스크 자리" value={num(T.recordSlots)} meta={`서버 ${num(T.serversWithRecords)}대 · 기록 ${num(T.records)}건`} />
+        <Kpi label="기록이 있는 디스크 자리" value={num(T.recordSlots)} meta={`서버 ${num(T.serversWithRecords)}대 · 기록 ${num(T.records)}건`} />
         <Kpi label="그 디스크를 아직 사용 중" value={num(T.inUse)} accent={T.inUse > 0 ? 'var(--red)' : undefined} meta="확정 + 추정" />
         <Kpi label="이미 교체됨" value={num(T.replaced)} />
         <Kpi label="판단 불가" value={num(T.unknown)} meta="근거가 모자라 말하지 않음" />
@@ -118,7 +118,7 @@ export function DiskBadTool() {
 
       {detail && (
         <Modal title={`${detail.name} — 디스크 이력`} onClose={() => setDetail(null)} width={980}>
-          <DiskBadServerPanel serverId={detail.id} />
+          <DiskBadServerPanel serverId={detail.id} agent={detail.agent} />
         </Modal>
       )}
     </div>
@@ -128,8 +128,8 @@ export function DiskBadTool() {
 function InUseTable({ list, refs, openServer, limit = 0 }) {
   if (!list.length) return <div className="muted" style={{ fontSize: 12.5 }}>해당하는 디스크가 없습니다.</div>;
   return (
-    <STable className="data-table" minWidth={1100} limit={limit} style={{ width: '100%', fontSize: 12.5 }}>
-      <thead><tr><th>국가 · 법인</th><th>서버</th><th>위치</th><th>모델 · 시리얼</th><th>기록</th><th>최근 기록</th><th>판정</th><th data-nosort>근거</th></tr></thead>
+    <STable className="data-table" minWidth={1320} limit={limit} style={{ width: '100%', fontSize: 12.5 }}>
+      <thead><tr><th>국가 · 법인</th><th>서버</th><th>위치</th><th>모델 · 시리얼</th><th>기록</th><th>최근 기록</th><th>판정</th><th data-nosort style={{ minWidth: 260 }}>근거</th></tr></thead>
       <tbody>{list.map((s) => (
         <tr key={`${s.agent}|${s.serverId}|${s.slotKey}`}>
           <td>{s.country ? `${s.country} · ` : ''}{s.corpName}</td>
@@ -139,7 +139,7 @@ function InUseTable({ list, refs, openServer, limit = 0 }) {
           <td data-sort={s.unrecoverable * 1000 + s.total}>{Object.entries(s.byCode).map(([c, n]) => <span key={c} className={`badge ${clsTone(clsOfCode(c, refs))}`} style={{ marginRight: 4 }} title={noteOf(c, refs)}>{c} {n}</span>)}</td>
           <td data-sort={s.last} style={{ whiteSpace: 'nowrap', fontFamily: 'var(--mono)' }}>{fmtDate(s.last)}</td>
           <td data-sort={s.verdict}><span className={`badge ${verdictTone(s.verdict)}`}>{s.verdictLabel}</span> <span className={`badge ${confidenceTone(s.confidence)}`}>{s.confidenceLabel}</span></td>
-          <td style={{ fontSize: 11.5, maxWidth: 320, whiteSpace: 'normal' }} className="muted">{s.evidence[s.evidence.length - 1]?.text || '—'}</td>
+          <td style={{ fontSize: 11.5, minWidth: 260, maxWidth: 360, whiteSpace: 'normal' }} className="muted">{s.evidence[s.evidence.length - 1]?.text || '—'}</td>
         </tr>
       ))}</tbody>
     </STable>
@@ -155,9 +155,10 @@ function Summary({ fleet, refs, openServer, setTab, setCorp }) {
           {fleet.inUse.length > 10 && <button className="tab" style={{ flex: 'none' }} onClick={() => setTab('disks')}>전부 보기</button>}
         </div>
         <InUseTable list={fleet.inUse.slice(0, 10)} refs={refs} openServer={openServer} />
-        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>복구 불가 = PDR46 · PDR47 · PDR63 · PDR64 · PDR54 = 미디어 오류를 고쳐 씀 · PDR59 = 불량 블록을 옮김 · PDR57 = 불량 블록 표가 차 감. 근거 칸은 판단 근거의 마지막 줄입니다 — 서버를 누르면 전부 봅니다.</div>
+        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>빨강(복구 불가) = PDR46 · PDR47 · PDR63 · PDR64 / 주황 = PDR54(미디어 오류를 고쳐 씀) · PDR59(불량 블록을 옮김) · PDR57(불량 블록 표가 차 감) / 파랑 = PDR16(고장 예측 — 배드 섹터 수에 넣지 않음). 근거 칸은 판단 근거의 마지막 줄입니다 — 서버를 누르면 전부 봅니다.</div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 520px), 1fr))', gap: 12 }}>
+      {/* 법인 표(최소 640px)가 1440px 화면의 반쪽 카드에서 잘리지 않게 — 두 카드가 나란히 서려면 칸마다 700px 이상(넓은 화면만). */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 700px), 1fr))', gap: 12 }}>
         <div className="card" style={{ padding: 12, minWidth: 0 }}>
           <b style={{ fontSize: 13.5 }}>국가 · 법인별 <span className="muted" style={{ fontWeight: 400 }}>1,000개당 많은 순</span></b>
           <CorpTable rows={fleet.byCorp.slice(0, 8)} setCorp={setCorp} />
@@ -330,7 +331,7 @@ function Basis({ refs, labels }) {
               <td>{r.clsLabel}{r.counted ? '' : <div className="muted" style={{ fontSize: 11 }}>배드 섹터 수에 안 셈</div>}</td>
               <td style={{ whiteSpace: 'normal' }}>{r.note}</td>
               <td style={{ whiteSpace: 'normal' }} className={r.action ? '' : 'muted'}>{r.action || '—'}</td>
-              <td style={{ whiteSpace: 'normal' }}>{r.sources.map((s, i) => <div key={i}><a href={s.url} target="_blank" rel="noreferrer">{s.title}</a></div>)}</td>
+              <td style={{ whiteSpace: 'normal' }}>{r.sources.map((s, i) => <div key={i}><a href={s.url} target="_blank" rel="noreferrer" style={{ color: 'var(--accent-2)' }}>{s.title}</a></div>)}</td>
               <td><span className={`badge ${r.level === 'dell' ? 'green' : 'amber'}`}>{r.level === 'dell' ? 'Dell 문서' : '커뮤니티'}</span></td>
             </tr>
           ))}</tbody>
@@ -381,7 +382,7 @@ function ScanPanel({ data, jobs, corp, canScan, reload, setJobs }) {
           {data.canScanAll && <label style={{ display: 'flex', gap: 8, fontSize: 12.5 }}><input type="radio" name="dbad-scope" checked={scope === 'all'} onChange={() => setScope('all')} /><span><b>전체 — 모든 법인의 서버</b><div className="muted" style={{ fontSize: 12 }}>법인마다 따로 돌고, 도는 중에도 법인별로 다시 점검 · 중단할 수 있습니다</div></span></label>}
           <label style={{ display: 'flex', gap: 8, fontSize: 12.5 }}><input type="radio" name="dbad-scope" checked={scope === 'corp'} onChange={() => setScope('corp')} /><span><b>법인을 골라서</b></span></label>
           {scope === 'corp' && (
-            <Select value={corpId} onChange={(e) => setCorpId(e.target.value)} sort={false}>
+            <Select className="select" value={corpId} onChange={(e) => setCorpId(e.target.value)} sort={false}>
               <option value="">법인 선택</option>
               {data.corps.map((c) => <option key={c.id} value={c.id}>{c.country ? `${c.country} · ` : ''}{c.name} ({c.servers}대)</option>)}
             </Select>
@@ -433,7 +434,7 @@ function ScanPanel({ data, jobs, corp, canScan, reload, setJobs }) {
           <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}><input type="checkbox" checked={st.autoEnabled} onChange={(e) => saveSettings({ autoEnabled: e.target.checked })} /> {st.intervalHours}시간마다 자동 점검(새 로그만) — 기본 꺼짐. 켜면 전 법인 iDRAC 에 Lifecycle 로그 읽기가 나갑니다(서버마다 첫 회는 전량).</label>
           <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}><input type="checkbox" checked={st.mailEnabled} onChange={(e) => saveSettings({ mailEnabled: e.target.checked })} /> 새 기록이 나오면 법인별 한 통 메일(받는 사람: 설정 › 메일 발송의 ‘디스크 배드 섹터 새 기록’ 수신자 + 아래 법인 담당자)</label>
           <label htmlFor="dbad-corpto" className="muted">법인 담당자 — 한 줄에 ‘vCenter id=메일,메일’</label>
-          <textarea id="dbad-corpto" rows={4} value={corpToText} onChange={(e) => setCorpToText(e.target.value)} style={{ fontFamily: 'var(--mono)', fontSize: 12, width: '100%', boxSizing: 'border-box' }} placeholder={data.corps.slice(0, 2).map((c) => `${c.id}=it-admin@example.com`).join('\n')} />
+          <textarea id="dbad-corpto" className="input" rows={4} value={corpToText} onChange={(e) => setCorpToText(e.target.value)} style={{ fontFamily: 'var(--mono)', fontSize: 12, width: '100%', boxSizing: 'border-box' }} placeholder={data.corps.slice(0, 2).map((c) => `${c.id}=it-admin@example.com`).join('\n')} />
           <div><button className="tab" style={{ flex: 'none' }} onClick={() => saveSettings({})}>담당자 저장</button></div>
           {data.settingsLoadError && <div style={{ color: 'var(--red)' }}>설정 파일을 읽지 못해 기본값으로 시작했습니다 — {data.settingsLoadError.reason}</div>}
         </div>

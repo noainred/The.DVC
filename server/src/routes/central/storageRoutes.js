@@ -148,8 +148,9 @@ export function registerStorageRoutes(centralRouter, deps) {
     if (req.centralAuth?.mode !== 'agent' && !edgeNameKnown(agent) && !edgeNameRegistered(agent)) {
       return res.status(403).json({ ok: false, reason: `중앙이 모르는 엣지 이름(${agent}) — 공유 토큰은 등록된 엣지 이름만 작업을 가져갑니다.`, unverifiedAgent: true });
     }
-    const { claimForAgent } = await import('../../diskbad/jobs.js');
-    res.json({ ok: true, agent, job: claimForAgent(agent) });
+    // 인증 이름 → 수집 서버 등록부 id(조각 · 화면이 쓰는 키). 다르면 그 엣지가 영영 '시작 못 함' 이 된다(diskbad/agentKey.js · 반증 #3).
+    const [{ claimForAgent }, { agentKeyOf }] = await Promise.all([import('../../diskbad/jobs.js'), import('../../diskbad/agentKey.js')]);
+    res.json({ ok: true, agent, job: claimForAgent(agentKeyOf(agent)) });
   });
 
   // 디스크 배드 섹터 이력 결과(v3.8.0) — 25대 묶음. 저장 키는 **인증된 agent** 이고, 그 엣지가 가져간(claim) 작업의 보고만 받는다
@@ -162,10 +163,10 @@ export function registerStorageRoutes(centralRouter, deps) {
       return res.status(403).json({ ok: false, reason: `중앙이 모르는 엣지 이름(${agent}).`, unverifiedAgent: true });
     }
     try {
-      const [{ cleanPush }, { acceptPush }] = await Promise.all([import('../../diskbad/ingest.js'), import('../../diskbad/jobs.js')]);
+      const [{ cleanPush }, { acceptPush }, { agentKeyOf }] = await Promise.all([import('../../diskbad/ingest.js'), import('../../diskbad/jobs.js'), import('../../diskbad/agentKey.js')]);
       const p = cleanPush(req.body);
       if (!p.ok) return res.status(400).json(p);
-      const r = await acceptPush(agent, p);
+      const r = await acceptPush(agentKeyOf(agent), p);
       if (!r.ok) return res.status(503).json(r);
       return res.json({ ...r, agent, omitted: p.omitted });
     } catch (e) {

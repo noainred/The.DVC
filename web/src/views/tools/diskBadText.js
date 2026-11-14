@@ -77,11 +77,22 @@ export function serverBand(view, now = Date.now()) {
       `아직 사용 중 ${c.inUse} · 교체됨 ${c.replaced} · 판단 불가 ${c.unknown}`, `로그가 남아 있는 구간 ${span}`] };
   }
   if (view.status === 'unwatched') return { tone: 'warn', title: '이 방법으로는 볼 수 없는 서버입니다', lines: ['디스크가 RAID 로 묶여 있지 않아(HBA · 패스스루) Patrol Read 가 돌지 않습니다 — ‘기록 없음’ 이 아닙니다.'] };
-  if (view.status === 'partial') return { tone: 'warn', title: '일부만 읽었습니다 — 읽은 구간에는 기록이 없습니다', lines: [`읽은 구간 ${span}. 다음 점검에서 처음부터 다시 읽습니다.`] };
+  if (view.status === 'partial') {
+    const why = READ_STOP_LABEL[cov.readStop] || '';
+    return { tone: 'warn', title: '일부만 읽었습니다 — 읽은 구간에는 기록이 없습니다', lines: [`읽은 구간 ${span}. 다음 점검에서 처음부터 다시 읽습니다.`, ...(why ? [why] : [])] };
+  }
   const short = Number.isFinite(from) && now - from < 120 * 86_400_000;
   return { tone: short ? 'warn' : 'neutral', title: short ? `기록은 없지만, 로그가 ${spanText(from, now)}치뿐입니다` : '남아 있는 로그에는 배드 섹터 기록이 없습니다',
     lines: [`${span} · 그 이전은 로그가 없어 확인할 수 없습니다. ‘발생한 적 없음’ 이 아니라 ‘이 구간에 기록 없음’ 입니다.`] };
 }
+
+/** 끝까지 못 읽은 이유(서버 db.js read_stop). 모르는 값은 말하지 않는다. */
+export const READ_STOP_LABEL = Object.freeze({
+  budget: '서버 한 대에 쓰는 시간이 다 차서 멈췄습니다.',
+  max: '한 번에 읽는 항목 수 상한에 닿아 멈췄습니다.',
+  skip: '이 iDRAC 가 쪽 넘김($skip)을 받지 않아 첫 쪽만 읽었습니다 — 펌웨어를 확인하세요. 이 서버는 이 방법으로 끝까지 읽을 수 없습니다.',
+  capped: '배드 섹터 계열 기록이 한 번에 5,000건을 넘어 가장 새 것만 남겼습니다 — 그보다 오래된 구간은 본 것으로 치지 않습니다.',
+});
 
 export const JOB_STATE_LABEL = Object.freeze({
   queued: '엣지 대기', running: '읽는 중', done: '끝남', failed: '실패', 'not-started': '시작 못 함', 'no-response': '응답 없음', stopped: '중단됨', busy: '다른 점검 진행 중',

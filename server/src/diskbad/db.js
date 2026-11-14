@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { openSqlite, withOpenCleanup, createLockRetry } from '../util/sqliteOpen.js';
+import { createYielder } from '../util/timeSlice.js';
 import { slotOf, slotKeyOf, codeOf, driveSlotOf } from './classify.js';
 
 export const DB_FILE = 'disk-bad.db';
@@ -28,6 +29,8 @@ let ready = null;
 let initError = null;
 const lockRetry = createLockRetry();
 let _gen = 0;
+let _cache = null;        // loadAll 결과(세대가 바뀌면 버린다)
+let _countCache = null;   // 상태 표의 건수(세대가 바뀌면 다시 센다)
 
 function migrate(db) {
   db.exec(`
@@ -38,6 +41,7 @@ function migrate(db) {
       first_ok_at INTEGER, last_scan_at INTEGER, last_ok_at INTEGER, last_status TEXT, last_reason TEXT,
       log_order TEXT, log_total INTEGER, log_oldest INTEGER, covered_from INTEGER, continuous_since INTEGER,
       complete INTEGER, read_last INTEGER, synthesized INTEGER, inv_at INTEGER, drives_json TEXT, updated_at INTEGER,
+      newest_created INTEGER, read_stop TEXT,
       PRIMARY KEY(agent, server_id));
     CREATE TABLE IF NOT EXISTS dbr_record(
       agent TEXT NOT NULL, server_id TEXT NOT NULL, entry_key TEXT NOT NULL,
@@ -50,6 +54,10 @@ function migrate(db) {
       model TEXT, first_seen INTEGER, last_seen INTEGER,
       PRIMARY KEY(agent, server_id, slot_key, serial));
   `);
+  // 개발 중 만든 DB(열이 없던 판)도 연다 — 열만 더한다.
+  const cols = new Set(db.prepare('PRAGMA table_info(dbr_server)').all().map((c) => c.name));
+  if (!cols.has('newest_created')) db.exec('ALTER TABLE dbr_server ADD COLUMN newest_created INTEGER');
+  if (!cols.has('read_stop')) db.exec('ALTER TABLE dbr_server ADD COLUMN read_stop TEXT');
   const v = db.prepare("SELECT v FROM meta WHERE k='schema'").get()?.v;
   if (v != null && Number(v) > SCHEMA_VERSION) throw new Error(`disk-bad.db 의 판(${v})이 이 포탈(${SCHEMA_VERSION})보다 새것입니다 — 포탈을 올리세요.`);
   db.prepare("INSERT OR REPLACE INTO meta(k, v) VALUES('schema', ?)").run(String(SCHEMA_VERSION));
@@ -59,14 +67,15 @@ function prepare(db) {
   return {
     serverGet: db.prepare('SELECT * FROM dbr_server WHERE agent=? AND server_id=?'),
     serverUpsert: db.prepare(`INSERT INTO dbr_server(agent, server_id, name, host, service_tag, first_ok_at, last_scan_at, last_ok_at, last_status, last_reason,
-        log_order, log_total, log_oldest, covered_from, continuous_since, complete, read_last, synthesized, inv_at, drives_json, updated_at)
+        log_order, log_total, log_oldest, covered_from, continuous_since, complete, read_last, synthesized, inv_at, drives_json, updated_at, newest_created, read_stop)
       VALUES(@agent, @server_id, @name, @host, @service_tag, @first_ok_at, @last_scan_at, @last_ok_at, @last_status, @last_reason,
-        @log_order, @log_total, @log_oldest, @covered_from, @continuous_since, @complete, @read_last, @synthesized, @inv_at, @drives_json, @updated_at)
+        @log_order, @log_total, @log_oldest, @covered_from, @continuous_since, @complete, @read_last, @synthesized, @inv_at, @drives_json, @updated_at, @newest_created, @read_stop)
       ON CONFLICT(agent, server_id) DO UPDATE SET name=excluded.name, host=excluded.host, service_tag=excluded.service_tag,
         first_ok_at=excluded.first_ok_at, last_scan_at=excluded.last_scan_at, last_ok_at=excluded.last_ok_at, last_status=excluded.last_status,
         last_reason=excluded.last_reason, log_order=excluded.log_order, log_total=excluded.log_total, log_oldest=excluded.log_oldest,
         covered_from=excluded.covered_from, continuous_since=excluded.continuous_since, complete=excluded.complete, read_last=excluded.read_last,
-        synthesized=excluded.synthesized, inv_at=excluded.inv_at, drives_json=excluded.drives_json, updated_at=excluded.updated_at`),
+        synthesized=excluded.synthesized, inv_at=excluded.inv_at, drives_json=excluded.drives_json, updated_at=excluded.updated_at,
+        newest_created=excluded.newest_created, read_stop=excluded.read_stop`),
     recInsert: db.prepare(`INSERT OR IGNORE INTO dbr_record(agent, server_id, entry_key, created, code, message_id, severity, message, slot_key, received_at, baseline)
       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
     serialUpsert: db.prepare(`INSERT INTO dbr_serial(agent, server_id, slot_key, serial, model, first_seen, last_seen) VALUES(?, ?, ?, ?, ?, ?, ?)
@@ -79,6 +88,10 @@ function prepare(db) {
     serialsOf: db.prepare('SELECT * FROM dbr_serial WHERE agent=? AND server_id=?'),
     count: db.prepare('SELECT COUNT(*) AS n FROM dbr_record'),
     countServers: db.prepare('SELECT COUNT(*) AS n FROM dbr_server'),
+    countOf: db.prepare('SELECT COUNT(*) AS n FROM dbr_record WHERE agent=? AND server_id=?'),
+    pruneOf: db.prepare(`DELETE FROM dbr_record WHERE rowid IN (SELECT rowid FROM dbr_record WHERE agent=? AND server_id=? ORDER BY created DESC LIMIT -1 OFFSET ?)`),
+    metaGet: db.prepare('SELECT v FROM meta WHERE k=?'),
+    metaSet: db.prepare('INSERT OR REPLACE INTO meta(k, v) VALUES(?, ?)'),
   };
 }
 
@@ -121,19 +134,36 @@ export function nextContinuousSince(prev, log) {
   return oldest;
 }
 
+/** 서버 한 대가 DB 에 들고 있는 기록 상한 — 넘으면 오래된 것부터 지운다(보관 정리 · 반증 #11). 배드 섹터 계열만 쌓이므로 정상 장비는 닿지 않는다. */
+export const RECORDS_PER_SERVER_MAX = 20_000;
+
 /**
  * 엣지 · 중앙 직결 점검 결과를 적재한다(정제된 서버 결과 배열 — ingest.js 가 정제한다).
- * @returns {{servers:number, newRecords:Array<{agent:string, serverId:string, created:number, code:string, message:string, slotKey:string}>, baselineServers:number}}
+ *
+ * 반증 #11: 서버 **한 대씩** 트랜잭션으로 쓰고 사이에서 양보한다(25대 × 5,000건을 한 동기 구간으로 쓰면 1초 가까이 막는다).
+ * 서버 단위로는 원자적이다 — 도중에 실패하면 그 서버는 되돌리고, 앞 서버들은 남는다(`storedIds`). 호출자는 실패한 묶음의
+ * 커서를 앞으로 보내지 않으므로(반증 #1) 남은 서버도 다음 점검에서 다시 읽는다(키로 중복을 거른다).
+ *
+ * 새 기록(메일 대상)은 **그 서버의 첫 정상 점검이 아니고**(기준선), **지난 점검에서 본 가장 새 항목보다 새 것**만이다(반증 #15 —
+ * 일부만 읽은 뒤 더 깊이 읽어 과거 항목을 채워 넣는 것은 새 기록이 아니다).
+ * @returns {Promise<{ok:boolean, reason?:string, servers:number, storedIds:string[], newRecords:Array, baselineServers:number}>}
  */
-export async function ingestServers(agent, servers, { now = Date.now() } = {}) {
+export async function ingestServers(agent, servers, { now = Date.now(), yielder = createYielder(15) } = {}) {
+  // 진행 보고(서버 0대)는 DB 를 건드리지 않는다 — 세대를 올리면 화면 캐시만 버려진다.
+  if (!Array.isArray(servers) || !servers.length) return { ok: true, servers: 0, storedIds: [], newRecords: [], baselineServers: 0 };
   const h = await open();
-  if (!h) return { ok: false, reason: dbUnavailableReason(), servers: 0, newRecords: [], baselineServers: 0 };
+  if (!h) return { ok: false, reason: dbUnavailableReason(), servers: 0, storedIds: [], newRecords: [], baselineServers: 0 };
   const a = String(agent || '').trim().toLowerCase();
   const newRecords = [];
+  const storedIds = [];
   let baselineServers = 0;
-  h.db.exec('BEGIN');
-  try {
-    for (const s of servers || []) {
+  for (const s of servers || []) {
+    // eslint-disable-next-line no-await-in-loop
+    await yielder();
+    const fresh = [];
+    let isBaseline = false;
+    h.db.exec('BEGIN');
+    try {
       const prev = h.st.serverGet.get(a, s.id) || null;
       const baseline = !(prev && Number.isFinite(prev.first_ok_at));
       const drivesJson = Array.isArray(s.drives) ? JSON.stringify(s.drives) : (prev?.drives_json ?? null);
@@ -145,10 +175,17 @@ export async function ingestServers(agent, servers, { now = Date.now() } = {}) {
         covered_from: prev?.covered_from ?? null, continuous_since: prev?.continuous_since ?? null, complete: prev?.complete ?? null,
         read_last: prev?.read_last ?? null, synthesized: s.synthesized ? 1 : (prev?.synthesized ?? 0),
         inv_at: Number.isFinite(s.invAt) ? s.invAt : (prev?.inv_at ?? null), drives_json: drivesJson, updated_at: now,
+        newest_created: prev?.newest_created ?? null, read_stop: prev?.read_stop ?? null,
       };
       if (s.ok && s.log) {
-        const L = s.log;
-        if (baseline) baselineServers += 1;
+        // 반증 #8: 기록 상한으로 잘렸으면 그 아래 구간은 이번에 '본' 것이 아니다 — 남긴 가장 오래된 기록부터만 본 것으로 적고 complete 를 내린다.
+        let capFloor = null;
+        if (s.recordsCapped) for (const r of s.records || []) if (Number.isFinite(r.created) && (capFloor == null || r.created < capFloor)) capFloor = r.created;
+        const L = s.recordsCapped
+          ? { ...s.log, oldestRead: Number.isFinite(capFloor) ? Math.max(capFloor, finite(s.log.oldestRead) ?? capFloor) : finite(s.log.oldestRead), reachedEnd: false, foundCursor: false, cursorUsed: false }
+          : s.log;
+        if (baseline) { baselineServers += 1; isBaseline = true; }
+        const prevNewest = finite(prev?.newest_created);
         row.first_ok_at = prev?.first_ok_at ?? now;
         row.last_ok_at = now;
         row.log_order = L.order || null;
@@ -158,14 +195,20 @@ export async function ingestServers(agent, servers, { now = Date.now() } = {}) {
         row.continuous_since = nextContinuousSince(prev?.continuous_since, L);
         row.complete = (L.reachedEnd || L.foundCursor) ? 1 : 0;
         row.read_last = finite(L.read);
+        // 왜 끝까지 못 읽었나(budget · max · skip — 장비가 쪽 넘김을 지원하지 않음 · capped — 기록 상한). 화면이 '일부만 읽음' 의 이유로 밝힌다.
+        row.read_stop = s.recordsCapped ? 'capped' : (s.log.stopped || null);
+        const nc = finite(L.newestCreated);
+        row.newest_created = nc != null && (prevNewest == null || nc > prevNewest) ? nc : prevNewest;
         for (const r of s.records || []) {
           if (!Number.isFinite(r.created)) continue;
           const code = codeOf(r.messageId) || String(r.code || '').toUpperCase().slice(0, 12);
-          const key = `${r.entryId}|${r.created}`.slice(0, 96);
+          const key = `${r.entryId}|${Number.isFinite(r.createdRaw) ? r.createdRaw : r.created}`.slice(0, 96);
           const slotKey = slotKeyOf(slotOf(r.message));
           const ch = h.st.recInsert.run(a, s.id, key, r.created, code, r.messageId, r.severity, r.message, slotKey, now, baseline ? 1 : 0);
-          if (ch.changes > 0 && !baseline) newRecords.push({ agent: a, serverId: s.id, serverName: row.name, created: r.created, code, message: r.message, slotKey });
+          const isNew = !baseline && (prevNewest == null || r.created > prevNewest);
+          if (ch.changes > 0 && isNew) fresh.push({ agent: a, serverId: s.id, serverName: row.name, created: r.created, code, message: r.message, slotKey });
         }
+        if ((s.records || []).length && (h.st.countOf.get(a, s.id)?.n ?? 0) > RECORDS_PER_SERVER_MAX) h.st.pruneOf.run(a, s.id, RECORDS_PER_SERVER_MAX);
       }
       if (Array.isArray(s.drives)) {
         const seen = Number.isFinite(s.invAt) ? s.invAt : now;
@@ -177,21 +220,25 @@ export async function ingestServers(agent, servers, { now = Date.now() } = {}) {
         }
       }
       h.st.serverUpsert.run(row);
+      h.db.exec('COMMIT');
+    } catch (e) {
+      try { h.db.exec('ROLLBACK'); } catch { /* */ }
+      if (isBaseline) baselineServers -= 1;
+      _gen += 1; _cache = null;
+      return { ok: false, reason: `DB 저장 실패: ${String(e?.message || e).slice(0, 160)}`, servers: storedIds.length, storedIds, newRecords, baselineServers };
     }
-    h.db.exec('COMMIT');
-  } catch (e) {
-    try { h.db.exec('ROLLBACK'); } catch { /* */ }
-    throw e;
+    storedIds.push(s.id);
+    for (const f of fresh) newRecords.push(f);
   }
-  _gen += 1;
-  return { ok: true, servers: (servers || []).length, newRecords, baselineServers };
+  _gen += 1; _cache = null;
+  return { ok: true, servers: storedIds.length, storedIds, newRecords, baselineServers };
 }
 
 const rowServer = (r) => ({
   agent: r.agent, serverId: r.server_id, name: r.name || '', host: r.host || '', serviceTag: r.service_tag || '',
   firstOkAt: r.first_ok_at, lastScanAt: r.last_scan_at, lastOkAt: r.last_ok_at, lastStatus: r.last_status || '', lastReason: r.last_reason || '',
   logOrder: r.log_order, logTotal: r.log_total, logOldest: r.log_oldest, coveredFrom: r.covered_from, continuousSince: r.continuous_since,
-  complete: r.complete == null ? null : r.complete === 1, readLast: r.read_last, synthesized: r.synthesized === 1, invAt: r.inv_at,
+  complete: r.complete == null ? null : r.complete === 1, readLast: r.read_last, synthesized: r.synthesized === 1, invAt: r.inv_at, newestCreated: r.newest_created ?? null, readStop: r.read_stop || '',
   drives: (() => { try { const j = JSON.parse(r.drives_json || 'null'); return Array.isArray(j) ? j : null; } catch { return null; } })(),
 });
 const rowRecord = (r) => ({
@@ -200,15 +247,44 @@ const rowRecord = (r) => ({
 });
 const rowSerial = (r) => ({ agent: r.agent, serverId: r.server_id, slotKey: r.slot_key, serial: r.serial, model: r.model || '', firstSeen: r.first_seen, lastSeen: r.last_seen });
 
-/** 화면 집계의 입력 전량(배드 섹터 계열만 쌓이므로 작다 — 그래도 상한을 둔다). */
+/**
+ * 화면 집계의 입력 전량. 반증 #11: 세대(적재)가 같으면 다시 읽지 않는다 — 화면을 몇 번 열어도 DB 는 적재 뒤 한 번만 읽는다.
+ * 읽을 때는 행을 하나씩 넘기며 **시간 기준으로 양보**한다(기록이 많을 때 한 동기 구간으로 막지 않게). 서버당 기록 상한은 ingest 가 지킨다.
+ */
+async function readAllRows(stmt, map, yielder) {
+  const out = [];
+  for (const r of stmt.iterate()) {
+    out.push(map(r));
+    // eslint-disable-next-line no-await-in-loop
+    if ((out.length & 1023) === 0) await yielder();
+  }
+  return out;
+}
 export async function loadAll() {
   const h = await open();
   if (!h) return null;
-  return {
-    servers: h.st.serversAll.all().map(rowServer),
-    records: h.st.recordsAll.all().map(rowRecord),
-    serials: h.st.serialsAll.all().map(rowSerial),
+  if (_cache && _cache.gen === _gen) return _cache.v;
+  const gen = _gen;
+  const y = createYielder(15);
+  const v = {
+    servers: await readAllRows(h.st.serversAll, rowServer, y),
+    records: await readAllRows(h.st.recordsAll, rowRecord, y),
+    serials: await readAllRows(h.st.serialsAll, rowSerial, y),
   };
+  if (gen === _gen) _cache = { gen, v };
+  return v;
+}
+
+/** 작은 값 보관(자동 점검의 마지막 실행 시각 — 재시작해도 6시간 주기를 지킨다 · 반증 #13). 못 읽으면 null. */
+export async function getDiskBadMeta(k) {
+  const h = await open();
+  if (!h) return null;
+  try { return h.st.metaGet.get(String(k))?.v ?? null; } catch { return null; }
+}
+export async function setDiskBadMeta(k, v) {
+  const h = await open();
+  if (!h) return false;
+  try { h.st.metaSet.run(String(k), String(v)); return true; } catch { return false; }
 }
 
 export async function loadServer(agent, serverId) {
@@ -229,13 +305,16 @@ function dbUnavailableReason() {
 
 export async function diskBadDbStatus() {
   const h = await open();
+  if (h && !(_countCache && _countCache.gen === _gen)) {
+    _countCache = { gen: _gen, records: h.st.count.get()?.n ?? null, servers: h.st.countServers.get()?.n ?? null };
+  }
   return {
     available: !!h, path: h ? h.path : DB_PATH(), error: h ? '' : dbUnavailableReason(),
-    records: h ? (h.st.count.get()?.n ?? null) : null, servers: h ? (h.st.countServers.get()?.n ?? null) : null,
+    records: h ? _countCache.records : null, servers: h ? _countCache.servers : null,
   };
 }
 
 export function _resetDiskBadDbForTest() {
   try { x?.db?.close(); } catch { /* */ }
-  x = null; ready = null; initError = null; _gen = 0;
+  x = null; ready = null; initError = null; _gen = 0; _cache = null; _countCache = null;
 }

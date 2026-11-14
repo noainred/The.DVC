@@ -140,12 +140,12 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/bareos-config` | `requireCentral` | [server/src/routes/central/opsRoutes.js:175](../server/src/routes/central/opsRoutes.js#L175) |
 | POST | `/bareos-op-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:197](../server/src/routes/central/opsRoutes.js#L197) |
 | GET | `/bareos-ops` | `requireCentral` | [server/src/routes/central/opsRoutes.js:187](../server/src/routes/central/opsRoutes.js#L187) |
-| GET | `/bm-folders` | `requireCentral` | [server/src/routes/central/storageRoutes.js:289](../server/src/routes/central/storageRoutes.js#L289) |
-| GET | `/bm-maint` | `requireCentral` | [server/src/routes/central/storageRoutes.js:272](../server/src/routes/central/storageRoutes.js#L272) |
-| GET | `/bm-onboard` | `requireCentral` | [server/src/routes/central/storageRoutes.js:253](../server/src/routes/central/storageRoutes.js#L253) |
+| GET | `/bm-folders` | `requireCentral` | [server/src/routes/central/storageRoutes.js:290](../server/src/routes/central/storageRoutes.js#L290) |
+| GET | `/bm-maint` | `requireCentral` | [server/src/routes/central/storageRoutes.js:273](../server/src/routes/central/storageRoutes.js#L273) |
+| GET | `/bm-onboard` | `requireCentral` | [server/src/routes/central/storageRoutes.js:254](../server/src/routes/central/storageRoutes.js#L254) |
 | GET | `/bmstor-jobs` | `requireCentral` | [server/src/routes/central/opsRoutes.js:345](../server/src/routes/central/opsRoutes.js#L345) |
 | POST | `/bmstor-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:350](../server/src/routes/central/opsRoutes.js#L350) |
-| GET | `/bmusage-config` | `requireCentral` | [server/src/routes/central/storageRoutes.js:230](../server/src/routes/central/storageRoutes.js#L230) |
+| GET | `/bmusage-config` | `requireCentral` | [server/src/routes/central/storageRoutes.js:231](../server/src/routes/central/storageRoutes.js#L231) |
 | POST | `/capacity-report` | `requireCentral` | [server/src/routes/central.js:634](../server/src/routes/central.js#L634) |
 | GET | `/capture-jobs` | `requireCentral` | [server/src/routes/central/opsRoutes.js:296](../server/src/routes/central/opsRoutes.js#L296) |
 | POST | `/capture-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:301](../server/src/routes/central/opsRoutes.js#L301) |
@@ -153,10 +153,10 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/curuser-config` | `requireCentral` | [server/src/routes/central.js:1355](../server/src/routes/central.js#L1355) |
 | GET | `/cvp-config` | `requireCentral` | [server/src/routes/central/cvpIsiduRoutes.js:22](../server/src/routes/central/cvpIsiduRoutes.js#L22) |
 | POST | `/cvp-data` | `requireCentral` | [server/src/routes/central/cvpIsiduRoutes.js:51](../server/src/routes/central/cvpIsiduRoutes.js#L51) |
-| POST | `/disk-bad` | `requireCentral` | [server/src/routes/central/storageRoutes.js:158](../server/src/routes/central/storageRoutes.js#L158) |
+| POST | `/disk-bad` | `requireCentral` | [server/src/routes/central/storageRoutes.js:159](../server/src/routes/central/storageRoutes.js#L159) |
 | GET | `/disk-bad-job` | `requireCentral` | [server/src/routes/central/storageRoutes.js:145](../server/src/routes/central/storageRoutes.js#L145) |
-| GET | `/edge-log-jobs` | `requireCentral` | [server/src/routes/central/storageRoutes.js:182](../server/src/routes/central/storageRoutes.js#L182) |
-| POST | `/edge-log-result` | `requireCentral` | [server/src/routes/central/storageRoutes.js:189](../server/src/routes/central/storageRoutes.js#L189) |
+| GET | `/edge-log-jobs` | `requireCentral` | [server/src/routes/central/storageRoutes.js:183](../server/src/routes/central/storageRoutes.js#L183) |
+| POST | `/edge-log-result` | `requireCentral` | [server/src/routes/central/storageRoutes.js:190](../server/src/routes/central/storageRoutes.js#L190) |
 | POST | `/fleet` | `requireCentral` | [server/src/routes/central.js:1394](../server/src/routes/central.js#L1394) |
 | POST | `/focus-mon/sync` | `requireCentral` | [server/src/routes/central.js:620](../server/src/routes/central.js#L620) |
 | GET | `/gpu-guest-config` | `requireCentral` | [server/src/routes/central.js:1625](../server/src/routes/central.js#L1625) |
@@ -176,7 +176,7 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/log-queries` | `requireCentral` | [server/src/routes/central/opsRoutes.js:269](../server/src/routes/central/opsRoutes.js#L269) |
 | POST | `/log-query-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:277](../server/src/routes/central/opsRoutes.js#L277) |
 | POST | `/part-faults` | `requireCentral` | [server/src/routes/central/storageRoutes.js:116](../server/src/routes/central/storageRoutes.js#L116) |
-| GET | `/partfault-config` | `requireCentral` | [server/src/routes/central/storageRoutes.js:219](../server/src/routes/central/storageRoutes.js#L219) |
+| GET | `/partfault-config` | `requireCentral` | [server/src/routes/central/storageRoutes.js:220](../server/src/routes/central/storageRoutes.js#L220) |
 | GET | `/pdu-config` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:35](../server/src/routes/central/pduSanRoutes.js#L35) |
 | POST | `/pdu-data` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:66](../server/src/routes/central/pduSanRoutes.js#L66) |
 | GET | `/ping-jobs` | `requireCentral` | [server/src/routes/central/opsRoutes.js:207](../server/src/routes/central/opsRoutes.js#L207) |
@@ -192,7 +192,7 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | POST | `/sanswitch-perf` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:137](../server/src/routes/central/pduSanRoutes.js#L137) |
 | POST | `/sanswitch-test-result` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:196](../server/src/routes/central/pduSanRoutes.js#L196) |
 | GET | `/storage-config` | `requireCentral` | [server/src/routes/central/storageRoutes.js:86](../server/src/routes/central/storageRoutes.js#L86) |
-| POST | `/storage-data` | `requireCentral` | [server/src/routes/central/storageRoutes.js:305](../server/src/routes/central/storageRoutes.js#L305) |
+| POST | `/storage-data` | `requireCentral` | [server/src/routes/central/storageRoutes.js:306](../server/src/routes/central/storageRoutes.js#L306) |
 | GET | `/svcmon-config` | `requireCentral` | [server/src/routes/central.js:676](../server/src/routes/central.js#L676) |
 | POST | `/svcmon-config-ack` | `requireCentral` | [server/src/routes/central.js:693](../server/src/routes/central.js#L693) |
 | POST | `/svcmon-report` | `requireCentral` | [server/src/routes/central.js:592](../server/src/routes/central.js#L592) |
@@ -1170,13 +1170,13 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/data-flow` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/dataFlow.js:64](../server/src/routes/api/dataFlow.js#L64) |
 | POST | `/tools/deep-search` | 권한 `tools` | [server/src/routes/api/checksLogs.js:190](../server/src/routes/api/checksLogs.js#L190) |
 | GET | `/tools/device-flow` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/deviceFlow.js:30](../server/src/routes/api/deviceFlow.js#L30) |
-| GET | `/tools/disk-bad` | 권한 `tools` | [server/src/routes/api/diskBad.js:111](../server/src/routes/api/diskBad.js#L111) |
-| GET | `/tools/disk-bad/jobs` | 권한 `tools` | [server/src/routes/api/diskBad.js:133](../server/src/routes/api/diskBad.js#L133) |
-| POST | `/tools/disk-bad/jobs/:id/retry` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/diskBad.js:208](../server/src/routes/api/diskBad.js#L208) |
-| POST | `/tools/disk-bad/jobs/:id/stop` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/diskBad.js:197](../server/src/routes/api/diskBad.js#L197) |
-| POST | `/tools/disk-bad/scan` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/diskBad.js:149](../server/src/routes/api/diskBad.js#L149) |
-| GET | `/tools/disk-bad/server/:id` | 권한 `tools` | [server/src/routes/api/diskBad.js:138](../server/src/routes/api/diskBad.js#L138) |
-| PUT | `/tools/disk-bad/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/diskBad.js:218](../server/src/routes/api/diskBad.js#L218) |
+| GET | `/tools/disk-bad` | 권한 `tools` | [server/src/routes/api/diskBad.js:171](../server/src/routes/api/diskBad.js#L171) |
+| GET | `/tools/disk-bad/jobs` | 권한 `tools` | [server/src/routes/api/diskBad.js:198](../server/src/routes/api/diskBad.js#L198) |
+| POST | `/tools/disk-bad/jobs/:id/retry` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/diskBad.js:279](../server/src/routes/api/diskBad.js#L279) |
+| POST | `/tools/disk-bad/jobs/:id/stop` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/diskBad.js:267](../server/src/routes/api/diskBad.js#L267) |
+| POST | `/tools/disk-bad/scan` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/diskBad.js:214](../server/src/routes/api/diskBad.js#L214) |
+| GET | `/tools/disk-bad/server/:id` | 권한 `tools` | [server/src/routes/api/diskBad.js:202](../server/src/routes/api/diskBad.js#L202) |
+| PUT | `/tools/disk-bad/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/diskBad.js:290](../server/src/routes/api/diskBad.js#L290) |
 | GET | `/tools/duplicate-ips` | 권한 `tools` | [server/src/routes/api/vcTools.js:25](../server/src/routes/api/vcTools.js#L25) |
 | GET | `/tools/edge-log` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/edgeLog.js:110](../server/src/routes/api/edgeLog.js#L110) |
 | GET | `/tools/edge-log-local` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/edgeLog.js:122](../server/src/routes/api/edgeLog.js#L122) |

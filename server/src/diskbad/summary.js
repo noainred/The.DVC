@@ -29,7 +29,7 @@ export function serverView(row, records, serials) {
     lastScanAt: row.lastScanAt, lastOkAt: row.lastOkAt, firstOkAt: row.firstOkAt, lastStatus: row.lastStatus, lastReason: row.lastReason,
     lastStatusLabel: row.lastStatus && row.lastStatus !== 'ok' ? (REASON_LABEL[row.lastStatus] || '읽기 실패') : '',
     logOldest: row.logOldest, coveredFrom: row.coveredFrom, continuousSince: row.continuousSince, complete: row.complete, logTotal: row.logTotal,
-    logOrder: row.logOrder, readLast: row.readLast, invAt: row.invAt, synthesized: row.synthesized,
+    logOrder: row.logOrder, readLast: row.readLast, readStop: row.readStop || '', invAt: row.invAt, synthesized: row.synthesized,
   } : null };
 }
 

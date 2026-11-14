@@ -54,22 +54,44 @@ export function judgeSlot({ slotKey, records = [], drive = null, serials = [], c
   const serial = String(drive.serial || '').trim();
   const hist = (serials || []).filter((h) => h && h.serial && Number.isFinite(h.firstSeen)).sort((a, b) => a.firstSeen - b.firstSeen);
   const cur = serial ? hist.find((h) => h.serial === serial) : null;
+  const seenTo = (h) => (Number.isFinite(h.lastSeen) ? h.lastSeen : h.firstSeen);
+  const removals = recs.filter((r) => r.cls === CLS.removed && r.created > last.created);
 
-  // ① 시리얼로 확정 — 기록 시각에 이미 지금 시리얼을 봤다.
+  // ① 시리얼로 확정 — 기록 시각에 이미 지금 시리얼을 봤다. 확정은 **마지막으로 본 때까지**다(반증 #17):
+  //    그 뒤에 이 자리의 빠짐 기록이 있으면 그 사이에 바꿨을 수 있다 — 판단 불가.
   if (cur && cur.firstSeen <= last.created) {
-    evidence.push({ text: `이 자리의 시리얼은 ${fmtTime(cur.firstSeen)} 부터 지금까지 ${serial} 로 같습니다`, src: '포탈이 점검 때마다 적어 둔 시리얼 이력' });
+    const pulled = removals.filter((r) => r.created > seenTo(cur));
+    if (pulled.length) {
+      evidence.push({ text: `이 자리의 시리얼은 ${fmtTime(cur.firstSeen)} ~ ${fmtTime(seenTo(cur))} 에 ${serial} 였습니다`, src: '포탈이 점검 때마다 적어 둔 시리얼 이력' });
+      evidence.push({ text: `그 뒤 ${fmtTime(pulled[0].created)} 에 이 자리의 디스크 빠짐 기록(${pulled[0].code})이 있습니다`, src: 'iDRAC Lifecycle 로그' });
+      return out(VERDICT.unknown, CONFIDENCE.none, '마지막으로 시리얼을 본 뒤에 디스크가 빠졌습니다. 다음 점검의 디스크 목록으로 가립니다.');
+    }
+    evidence.push({ text: `이 자리의 시리얼은 ${fmtTime(cur.firstSeen)} 부터 ${fmtTime(seenTo(cur))}(마지막 점검)까지 ${serial} 로 같습니다`, src: '포탈이 점검 때마다 적어 둔 시리얼 이력' });
     const before = counted.filter((r) => r.created < cur.firstSeen).length;
     return out(VERDICT.inUse, CONFIDENCE.confirmed,
       before ? `${fmtTime(cur.firstSeen)} 이전 기록 ${before}건은 시리얼 이력이 없던 때라 이 디스크의 것인지 확정하지 못합니다.` : '');
   }
-  // ② 시리얼로 확정 — 기록 당시 다른 시리얼이었고 지금은 바뀌었다.
-  const prev = hist.find((h) => h.serial !== serial && h.firstSeen <= last.created);
+  // ② 시리얼로 확정 — 기록 시각에 **다른 시리얼을 실제로 보고 있었고**(처음 ~ 마지막 관찰 사이) 지금은 바뀌었다.
+  //    반증 #6: 처음 본 때만 보면, 이전 디스크의 마지막 관찰과 새 디스크의 첫 관찰 사이에 난 기록(새 디스크가 리빌드 중 낸 오류)을
+  //    이전 디스크의 것으로 잘못 확정한다. 지금 시리얼을 못 읽으면 '바뀌었다' 고 말할 수 없다.
+  const others = serial ? hist.filter((h) => h.serial !== serial) : [];
+  const prev = others.find((h) => h.firstSeen <= last.created && seenTo(h) >= last.created);
   if (prev) {
-    evidence.push({ text: `기록 당시 이 자리의 시리얼은 ${prev.serial}, 지금은 ${serial || '(시리얼 없음)'} 입니다`, src: '포탈이 적어 둔 시리얼 이력' });
+    evidence.push({ text: `기록 당시(${fmtTime(last.created)}) 이 자리의 시리얼은 ${prev.serial}(${fmtTime(prev.firstSeen)} ~ ${fmtTime(seenTo(prev))} 에 봄), 지금은 ${serial} 입니다`, src: '포탈이 적어 둔 시리얼 이력' });
     return out(VERDICT.replaced, CONFIDENCE.confirmed, '');
   }
+  const gapPrev = others.filter((h) => seenTo(h) < last.created).sort((a, b) => seenTo(b) - seenTo(a))[0] || null;
+  if (gapPrev && cur && cur.firstSeen > last.created) {
+    evidence.push({ text: `마지막 기록(${fmtTime(last.created)})은 이전 디스크 ${gapPrev.serial} 를 마지막으로 본 ${fmtTime(seenTo(gapPrev))} 와 지금 디스크 ${serial} 를 처음 본 ${fmtTime(cur.firstSeen)} 사이에 났습니다`, src: '포탈이 적어 둔 시리얼 이력' });
+    return out(VERDICT.unknown, CONFIDENCE.none, '그 사이에 디스크를 바꿨다면 새 디스크(리빌드 중)의 기록일 수도 있습니다. 어느 디스크의 기록인지 정하지 않습니다.');
+  }
+  // ②-b 기록 **뒤에** 이 자리에서 지금과 다른 시리얼을 봤다(반증 #7) — 기록 뒤 디스크가 적어도 한 번 바뀌었다.
+  const after = others.filter((h) => seenTo(h) > last.created).sort((a, b) => seenTo(b) - seenTo(a))[0] || null;
+  if (after) {
+    evidence.push({ text: `마지막 기록 뒤 ${fmtTime(seenTo(after))} 에 이 자리에서 시리얼 ${after.serial} 를 봤고, 지금은 ${serial} 입니다`, src: '포탈이 적어 둔 시리얼 이력' });
+    return out(VERDICT.replaced, CONFIDENCE.estimated, '같은 디스크를 뺐다가 나중에 다시 꽂은 경우가 아니라면 맞습니다. 기록 당시의 시리얼은 모릅니다.');
+  }
   // ③ 로그로 추정 — 기록 뒤로 이 자리에 디스크 빠짐 기록이 없고, 그 구간을 끊김 없이 봤다.
-  const removals = recs.filter((r) => r.cls === CLS.removed && r.created > last.created);
   const continuous = Number.isFinite(continuousSince) && continuousSince <= last.created;
   if (removals.length) {
     evidence.push({ text: `마지막 기록 뒤 ${fmtTime(removals[0].created)} 에 이 자리의 디스크 빠짐 기록(${removals[0].code})이 있습니다`, src: 'iDRAC Lifecycle 로그' });

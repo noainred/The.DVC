@@ -20,6 +20,8 @@ import { PUSH_PROTOCOL } from './ingest.js';
 
 const gzipAsync = promisify(zlib.gzip);
 const POLL_MS = 60_000;
+/** 진행 보고 간격 — 서버 한 대가 오래 걸려도(첫 전량 읽기) 중앙이 '응답 없음'(jobs.js STALL_TIMEOUT_MS)으로 닫지 않게(반증 #2). 테스트가 산수를 고정한다. */
+export const HEARTBEAT_MS = 2 * 60_000;
 let _timer = null;
 let _busy = false;
 let _last = null;
@@ -63,21 +65,39 @@ export async function runDiskBadEdgeOnce() {
     if (!job || !job.id) { _last = { ...(_last || {}), at: Date.now(), ok: true, idle: true }; return null; }
     console.log(`[diskbad-edge] 작업 ${job.id.slice(0, 8)} 시작 — ${job.mode === 'full' ? '처음부터' : '새 로그만'}${Array.isArray(job.serverIds) ? ` · 서버 ${job.serverIds.length}대 지정` : ''}`);
     let seq = 0; let stop = false; let sent = 0; let newRecords = 0; const failures = [];
-    const stat = await scanServers(await localServers(), {
-      mode: job.mode, manual: job.manual === true, serverIds: job.serverIds || null,
-      shouldStop: () => stop,
-      onChunk: async (batch, st) => {
-        try {
-          const ack = await postChunk(job, batch, st, seq++);
-          sent += batch.length; newRecords += Number(ack.newRecords) || 0;
-          if (ack.stop) stop = true;
-          if (ack.stored === false && ack.reason) failures.push(ack.reason);
-        } catch (e) { failures.push(String(e?.message || e).slice(0, 200)); }
-      },
-    });
+    let progress = { total: Array.isArray(job.serverIds) ? job.serverIds.length : null, done: 0, failed: 0, excluded: 0 };
+    // 진행 보고(서버 0대) — 묶음이 25대마다라 첫 보고가 늦을 수 있다. 실패는 다음 간격에 다시 보낸다(기록만).
+    const hb = setInterval(() => {
+      postChunk(job, [], { ...progress, final: false }, seq++).then((ack) => { if (ack.stop || ack.stored === false) stop = true; }).catch(() => {});
+    }, HEARTBEAT_MS);
+    hb.unref?.();
+    let stat;
+    try {
+      stat = await scanServers(await localServers(), {
+        mode: job.mode, manual: job.manual === true, serverIds: job.serverIds || null,
+        shouldStop: () => stop,
+        onProgress: (p) => { progress = p; },
+        // 저장됐다는 답(stored !== false)을 받은 묶음만 true — scan.js 가 그 서버의 커서만 앞으로 보낸다(반증 #1).
+        onChunk: async (batch, st) => {
+          try {
+            const ack = await postChunk(job, batch, st, seq++);
+            newRecords += Number(ack.newRecords) || 0;
+            if (ack.stop) stop = true;
+            if (ack.stored === false) {
+              // 중앙이 이 작업을 더 받지 않는다(재시작 · 닫힌 작업 · 다른 엣지 몫) — 더 읽어도 버려지므로 멈춘다.
+              stop = true;
+              failures.push(ack.reason || '중앙이 보고를 보관하지 않았습니다.');
+              return false;
+            }
+            sent += batch.length;
+            return true;
+          } catch (e) { failures.push(String(e?.message || e).slice(0, 200)); return false; }
+        },
+      });
+    } finally { clearInterval(hb); }
     _last = { at: Date.now(), ms: Date.now() - t0, ok: failures.length === 0, jobId: job.id, mode: job.mode, total: stat.total, done: stat.done, failed: stat.failed, excluded: stat.excluded,
-      sent, newRecords, stopped: stop, ...(failures.length ? { failures: failures.slice(0, 5) } : {}) };
-    console.log(`[diskbad-edge] 작업 ${job.id.slice(0, 8)} ${stop ? '중단됨' : '끝'} — 서버 ${stat.done}/${stat.total} · 실패 ${stat.failed} · 제외 ${stat.excluded} · 보낸 ${sent}대${failures.length ? ` · 보고 실패 ${failures.length}건: ${failures[0]}` : ''}`);
+      sent, unsaved: stat.unsaved || 0, newRecords, stopped: stop, ...(failures.length ? { failures: failures.slice(0, 5) } : {}) };
+    console.log(`[diskbad-edge] 작업 ${job.id.slice(0, 8)} ${stop ? '중단됨' : '끝'} — 서버 ${stat.done}/${stat.total} · 실패 ${stat.failed} · 제외 ${stat.excluded} · 보낸 ${sent}대${failures.length ? ` · 보고 실패 ${failures.length}건(그 서버들은 다음 점검에서 다시 읽음): ${failures[0]}` : ''}`);
     return _last;
   } catch (e) {
     _last = { at: Date.now(), ms: Date.now() - t0, ok: false, phase: 'run', error: String(e?.message || e).slice(0, 300) };

@@ -95,8 +95,12 @@ export async function scanOne(s, { mode = 'incremental', manual = false, invOf =
       oldestRead: r.oldestRead, reachedEnd: r.reachedEnd, foundCursor: r.foundCursor, cursorUsed: r.cursorUsed, stopped: r.stopped,
       cursorCreated: cursor?.created ?? null,
     };
-    return { ...base, ok: true, reason: REASON.ok, log, records: r.entries.slice(0, RECORDS_MAX), recordsCapped: r.entries.length > RECORDS_MAX, drives, invAt,
-      _cursor: r.newest ? { entryId: r.newest.entryId, created: r.newest.created, complete: r.reachedEnd || r.foundCursor } : (cursor || null) };
+    // 상한을 넘으면 **가장 새 것** 을 남긴다(반증 #8 — 장비가 준 순서와 무관하게). 잘렸으면 이어 읽기 커서도 '끝까지 봄' 이 아니다
+    //   — 다음 점검이 처음부터 다시 읽고, 중앙은 잘린 아래 구간을 '본 구간' 에서 뺀다(db.js).
+    const capped = r.entries.length > RECORDS_MAX;
+    const records = capped ? [...r.entries].sort((a, b) => (b.created ?? -Infinity) - (a.created ?? -Infinity)).slice(0, RECORDS_MAX) : r.entries;
+    return { ...base, ok: true, reason: REASON.ok, log, records, recordsCapped: capped, drives, invAt,
+      _cursor: r.newest ? { entryId: r.newest.entryId, created: r.newest.created, complete: !capped && (r.reachedEnd || r.foundCursor) } : (cursor || null) };
   } catch (e) {
     const reason = failReason(e);
     if (reason === REASON.authFailed) authGuard.markAuthStopped(s.id, s, t(e?.message, 200));
@@ -106,9 +110,14 @@ export async function scanOne(s, { mode = 'incremental', manual = false, invOf =
 
 /**
  * 여러 대. 끝난 서버부터 `onChunk` 로 묶어 넘긴다(엣지는 그 묶음을 바로 중앙에 올린다 — 진행률 · 본문 크기).
+ *
+ * ⚠ 반증 #1(높음): 이어 읽기 커서는 **그 묶음이 저장됐다는 답을 받은 서버만** 앞으로 보낸다. `onChunk` 가 false 를 돌려주거나
+ *   던지면 그 묶음 서버들의 커서는 그대로다(다음 점검이 같은 구간을 다시 읽고, 중앙이 키로 중복을 거른다). 보고가 버려졌는데
+ *   커서만 앞으로 가면 그 구간의 기록은 영영 읽히지 않고, 중앙은 그 구간을 '끊김 없이 봄' 으로 남긴다(거짓 '기록 없음').
+ *   한 묶음이 실패해도 다음 묶음은 계속 보낸다.
  * @param {Array} servers 등록부 항목
- * @param {{mode?:string, manual?:boolean, serverIds?:string[]|null, onChunk?:Function, onProgress?:Function}} o
- * @returns {Promise<{total:number, done:number, failed:number, excluded:number}>}
+ * @param {{mode?:string, manual?:boolean, serverIds?:string[]|null, onChunk?:(batch:Array, stat:object)=>Promise<boolean|void>, onProgress?:Function}} o
+ * @returns {Promise<{total:number, done:number, failed:number, excluded:number, unsaved:number}>}  unsaved = 저장 답을 못 받은 서버 수
  */
 export async function scanServers(servers, { mode = 'incremental', manual = false, serverIds = null, onChunk = async () => {}, onProgress = () => {}, shouldStop = () => false, deps = {} } = {}) {
   const want = Array.isArray(serverIds) && serverIds.length ? new Set(serverIds.map(String)) : null;
@@ -120,27 +129,32 @@ export async function scanServers(servers, { mode = 'incremental', manual = fals
   }
   let mock = deps.mock;
   if (mock == null) { try { mock = (await import('../mock/demo/flags.js')).isMockMode(); } catch { mock = false; } }
-  const stat = { total: list.length, done: 0, failed: 0, excluded: 0 };
+  const stat = { total: list.length, done: 0, failed: 0, excluded: 0, unsaved: 0 };
   let buf = [];
-  const cursors = {};
+  const pending = new Map();      // 결과 객체 → 그 서버의 새 커서(저장 답을 받으면 적는다)
   let flushing = Promise.resolve();
   const flush = (final) => {
     const batch = buf; buf = [];
     if (!batch.length && !final) return flushing;
-    flushing = flushing.then(() => onChunk(batch, { ...stat, final }));
+    flushing = flushing.then(async () => {
+      let stored = false;
+      try { stored = (await onChunk(batch, { ...stat, final })) !== false; } catch { stored = false; }
+      const m = {};
+      for (const r of batch) { if (pending.has(r)) { if (stored) m[r.id] = pending.get(r); pending.delete(r); } }
+      if (stored) { if (Object.keys(m).length) saveCursors(m); } else stat.unsaved += batch.length;
+    });
     return flushing;
   };
   await poolSettled(list, CONCURRENCY(), async (s) => {
     if (shouldStop()) return;   // 중단 — 진행 중인 서버는 끝내고 다음 서버부터 멈춘다
     const r = await scanOne(s, { mode, manual, invOf, authStoppedByPoller, mock });
-    if (r._cursor !== undefined) { cursors[s.id] = r._cursor; delete r._cursor; }
+    if (r._cursor !== undefined) { if (r._cursor) pending.set(r, r._cursor); delete r._cursor; }
     stat.done += 1;
     if (!r.ok) { if (r.reason === REASON.excluded) stat.excluded += 1; else stat.failed += 1; }
     buf.push(r);
     onProgress({ ...stat });
     if (buf.length >= CHUNK_SERVERS) await flush(false);
   });
-  saveCursors(cursors);
   await flush(true);
   return stat;
 }

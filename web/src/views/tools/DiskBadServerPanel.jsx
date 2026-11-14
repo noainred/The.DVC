@@ -20,7 +20,11 @@ const BAND = {
   neutral: { border: '1px solid var(--border)', background: 'var(--bg-soft)' },
 };
 
-export function DiskBadServerPanel({ serverId }) {
+/**
+ * @param {{serverId:string, agent?:string|null}} p  agent = 그 서버를 맡은 엣지(수집 서버 id · 중앙 직결은 '').
+ *   다른 엣지에 같은 사설 IP id 가 있을 수 있어 (엣지, id)로 찾는다. 모르면 null(서버가 id 하나뿐일 때만 찾는다).
+ */
+export function DiskBadServerPanel({ serverId, agent = null }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -28,21 +32,22 @@ export function DiskBadServerPanel({ serverId }) {
   const [open, setOpen] = useState(null);
   const [showAll, setShowAll] = useState(false);
   const reqSeq = useRef(0);
+  const url = `/tools/disk-bad/server/${encodeURIComponent(serverId)}${agent != null ? `?agent=${encodeURIComponent(agent)}` : ''}`;
   const load = () => {
     const seq = ++reqSeq.current;
-    return fetchJson(`/tools/disk-bad/server/${encodeURIComponent(serverId)}`)
+    return fetchJson(url)
       .then((d) => { if (seq === reqSeq.current) { setData(d); setErr(null); } })
       .catch((e) => { if (seq === reqSeq.current) setErr(e); });
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { setData(null); load(); }, [serverId]);
+  useEffect(() => { setData(null); load(); }, [url]);
   // 점검 중이면 10초마다 이 서버만 다시 읽는다(무거운 집계가 아니다 — 공용 usePolling, 끝나면 멈춘다).
-  const poll = usePolling(data?.running ? `/tools/disk-bad/server/${encodeURIComponent(serverId)}` : null, {}, 10_000);
+  const poll = usePolling(data?.running ? url : null, {}, 10_000);
   useEffect(() => { if (poll.data) setData(poll.data); }, [poll.data]);
 
   const scan = (mode) => {
     setBusy(true); setMsg('');
-    postJson('/tools/disk-bad/scan', { scope: 'server', serverId, mode })
+    postJson('/tools/disk-bad/scan', { scope: 'server', serverId, ...(agent != null ? { agent } : {}), mode })
       .then(() => { setMsg('점검을 보냈습니다 — 이 서버를 맡은 노드가 읽고 나면 아래가 바뀝니다.'); return load(); })
       .catch((e) => setMsg(e?.message || String(e)))
       .finally(() => setBusy(false));

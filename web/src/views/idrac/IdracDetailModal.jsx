@@ -558,7 +558,7 @@ export function IdracDetailModal({ server, onClose }) {
           )
         )}
 
-        {tab === 'disk' && <DiskBadServerPanel serverId={server.id} />}
+        {tab === 'disk' && <DiskBadServerPanel serverId={server.id} agent={server.remote ? String(server.collectorId || '') : ''} />}
         {tab === 'gpu' && (
           <div>
             <div className="flex gap" style={{ alignItems: 'center', marginBottom: 12 }}>

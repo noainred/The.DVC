@@ -8,11 +8,14 @@
  *    귀속 없는 서버는 범위 계정에 보이지 않는다. 서버 단건 조회는 범위 밖이면 404(존재 은닉).
  *  · 점검(장비에 로그인하는 동작)은 admin · operator + 쓰기 범위: '전체' 는 전체 범위(조회 ∧ 쓰기 무제한) 계정만,
  *    법인은 그 vCenter 가 쓰기 범위 안일 때만(조회 밖 404 → 쓰기 밖 403), 서버 1대는 그 서버의 법인이 쓰기 범위 안일 때만.
- *  · 설정(자동 점검 · 메일 · 법인 담당자)은 admin + 전체 범위.
- *  · 작업 목록은 범위 계정에 자기 엣지 조각만 싣는다.
+ *  · 설정(자동 점검 · 메일 · 법인 담당자)은 admin + **조회 · 쓰기 모두** 전체 범위(반증 #5 — 쓰기만 줄인 admin 이 전 법인 자동 점검을 켜지 못하게).
+ *  · 작업 조각의 권한은 **조각이 맡은 서버 집합**으로 판정한다(반증 #4 — 엣지 이름으로 보면 중앙 직결 조각 '' 을 모든 법인이 함께 쓴다):
+ *    보기는 그 서버가 전부 조회 범위 안일 때만, 멈추기 · 다시 보내기는 조회 밖 404 → 쓰기 밖 403(`unitAccess` 하나).
+ *  · 서버는 (엣지, id)로 찾는다(반증 #16 — 다른 엣지에 같은 사설 IP id 가 있다).
+ *  · 엣지 포탈에서는 점검 · 작업 조작 · 설정을 하지 않는다(409) — 커서 파일을 중앙 작업과 함께 쓰므로 엣지 단독 점검이 중앙의 구간을 건너뛰게 한다(반증 #1).
  */
 import { requireRole, requirePerm } from '../../auth/auth.js';
-import { fullScopeOnlyWith } from '../admin/shared.js';
+import { fullReadWriteScopeOnlyWith } from '../admin/shared.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { scopedVcenterIds, inUserWriteScope, isFullReadWriteScope } from '../../auth/scope.js';
@@ -32,7 +35,9 @@ import { isAdminDetailUser } from '../../auth/demoGuest.js';
 const toolsPerm = requirePerm('tools');
 const writeRole = requireRole('admin', 'operator');
 const adminOnly = requireRole('admin');
-const fullScopeOnly = fullScopeOnlyWith('디스크 배드 섹터 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.');
+const fullScopeOnly = fullReadWriteScopeOnlyWith('디스크 배드 섹터 설정은 전 법인 공용이라 조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.');
+const EDGE_NODE = { ok: false, reason: '엣지 포탈에서는 점검하지 않습니다 — 중앙 포탈의 디스크 배드 섹터 분석에서 점검합니다(이 법인 서버는 중앙이 낸 작업으로 이 엣지가 읽습니다).' };
+const isEdge = () => !!config.agent.centralUrl;
 const NOT_FOUND = { ok: false, reason: '서버를 찾을 수 없습니다.' };
 const t = (v) => String(v ?? '').trim();
 const isHpe = (s) => { const v = t(s?.vendor).toLowerCase(); return v === 'hpe' || v === 'hp' || v.includes('hewlett'); };
@@ -67,27 +72,37 @@ export function physicalServersFor(req, { snap = store.get() } = {}) {
   return { servers: out, scoped: !!sc, sc };
 }
 
-// 메일 · 작업 진행이 법인을 찾을 때 쓰는 판정 — 범위 없는 판정(시스템 동작)이다.
-setCorpResolver((agent, serverId) => {
+// 메일이 법인을 찾을 때 쓰는 판정 — 범위 없는 판정(시스템 동작)이다. 메일 한 번에 표를 한 번 만든다(반증 #12).
+setCorpResolver(() => {
+  const m = new Map();
   try {
-    const { servers } = physicalServersFor({ user: null });
-    const s = servers.find((x) => x.agent === String(agent || '').toLowerCase() && x.id === String(serverId));
-    return s?.corp ? { id: s.corp.id, name: s.corp.name } : null;
-  } catch { return null; }
+    for (const s of physicalServersFor({ user: null }).servers) if (s.corp) m.set(`${s.agent}|${s.id}`, { id: s.corp.id, name: s.corp.name });
+  } catch { /* 법인을 못 찾으면 '법인 귀속 없음' */ }
+  return (agent, serverId) => m.get(`${String(agent || '').toLowerCase()}|${serverId}`) || null;
 });
 
 // 응답 캐시 — DB 세대 · 범위 · 법인 필터가 같고 20초 안이면 다시 계산하지 않는다(서버 1,100대 판정).
 // 세대가 바뀌면(적재) 지운다 — '무엇이 지워지는가' 의 답은 '그 세대의 집계 전부'.
+// 반증 #11: 캐시를 **DB 를 읽기 전에** 본다 — 맞으면 DB 도 집계도 건너뛴다(db.js loadAll 도 세대 단위로 캐시한다).
 const _memo = new Map();
 const MEMO_MS = 20_000;
-function memoFleet(key, gen, fn) {
+function memoGet(key, gen) {
   const hit = _memo.get(key);
-  if (hit && hit.gen === gen && Date.now() - hit.at < MEMO_MS) return hit.v;
-  const v = fn();
+  return hit && hit.gen === gen && Date.now() - hit.at < MEMO_MS ? hit.v : undefined;
+}
+function memoSet(key, gen, v) {
   if (_memo.size > 200) _memo.clear();
   _memo.set(key, { gen, at: Date.now(), v });
-  return v;
 }
+
+/** (엣지, id)로 서버 찾기. agent 를 안 주면 id 가 하나뿐일 때만 — 둘 이상이면 'ambiguous'(지어내지 않는다). */
+function findServer(servers, id, agent) {
+  const hits = servers.filter((x) => x.id === String(id ?? ''));
+  if (agent != null) return hits.find((x) => x.agent === String(agent).trim().toLowerCase()) || null;
+  if (hits.length > 1) return 'ambiguous';
+  return hits[0] || null;
+}
+const AMBIGUOUS = { ok: false, reason: '같은 id 의 서버가 여러 엣지에 있습니다 — agent 를 함께 보내세요.' };
 
 function corpOptions(servers) {
   const m = new Map();
@@ -99,12 +114,57 @@ function corpOptions(servers) {
   return [...m.values()].sort((a, b) => String(a.country || '').localeCompare(String(b.country || '')) || String(a.name).localeCompare(String(b.name)));
 }
 
-/** 범위 계정에 보일 작업 — 자기 엣지 조각만. */
-function jobsFor(req, servers, scoped) {
+/** 조각이 맡은 서버 키(serverIds 가 없으면 그 엣지 · 중앙 직결의 서버 전부 — 범위 없는 목록에서). */
+function unitKeys(u, allServers) {
+  const a = String(u.agent || '').toLowerCase();
+  if (Array.isArray(u.serverIds)) return u.serverIds.map((id) => `${a}|${id}`);
+  return allServers.filter((s) => s.agent === a).map((s) => `${a}|${s.id}`);
+}
+
+/** 권한 판단 재료(요청마다 한 번). */
+function unitCtx(req) {
+  const mine = physicalServersFor(req);
+  let all = mine.servers;
+  if (mine.scoped) { try { all = physicalServersFor({ user: null }).servers; } catch { all = []; } }
+  return { scoped: mine.scoped, visible: new Map(mine.servers.map((s) => [`${s.agent}|${s.id}`, s])), all, snap: store.get() };
+}
+
+/**
+ * 조각 하나를 이 계정이 보거나 조작할 수 있는가(반증 #4 — 판정 하나). 조회 밖 404 → 쓰기 밖 403.
+ * @returns {200|403|404}
+ */
+export function unitAccess(req, u, ctx, { write = false } = {}) {
+  if (isFullReadWriteScope(req.user, ctx.snap)) return 200;
+  const keys = unitKeys(u, ctx.all);
+  if (!keys.length) return ctx.scoped ? 404 : 403;
+  if (ctx.scoped && keys.some((k) => !ctx.visible.has(k))) return 404;
+  if (!write) return 200;
+  for (const k of keys) {
+    const s = ctx.visible.get(k);
+    if (!s || !s.vc || !inUserWriteScope(req.user, ctx.snap, s.vc)) return 403;
+  }
+  return 200;
+}
+
+const sumUnits = (units, k) => units.reduce((acc, u) => acc + (Number(u[k]) || 0), 0);
+
+/** 이 계정에 보일 작업 — 조각을 서버 집합으로 거르고, 합계 · 실행자는 보이는 조각 기준으로 다시 싣는다. */
+function jobsFor(req, ctx = unitCtx(req)) {
   const all = listJobs();
-  if (!scoped) return all;
-  const agents = new Set(servers.map((s) => s.agent));
-  return all.map((j) => ({ ...j, units: j.units.filter((u) => agents.has(u.agent)) })).filter((j) => j.units.length);
+  if (!ctx.scoped) return all;
+  const me = req.user?.username || '';
+  const out = [];
+  for (const j of all) {
+    const units = j.units.filter((u) => unitAccess(req, u, ctx) === 200);
+    if (!units.length) continue;
+    out.push({
+      ...j, units, by: ['auto', 'demo', me].includes(j.by) ? j.by : '',
+      total: units.every((u) => u.total != null) ? sumUnits(units, 'total') : null,
+      done: sumUnits(units, 'done'), failed: sumUnits(units, 'failed'), excluded: sumUnits(units, 'excluded'), newRecords: sumUnits(units, 'newRecords'),
+      running: units.some((u) => u.state === 'queued' || u.state === 'running'),
+    });
+  }
+  return out;
 }
 
 export function registerDiskBad(api) {
@@ -112,17 +172,22 @@ export function registerDiskBad(api) {
     const { servers, scoped } = physicalServersFor(req);
     const corpId = t(req.query.corp);
     if (corpId && !servers.some((s) => s.corp?.id === corpId)) return res.status(404).json({ ok: false, reason: '법인을 찾을 수 없습니다.' });
-    const db = await loadAll();
     const status = await diskBadDbStatus();
     const picked = corpId ? servers.filter((s) => s.corp?.id === corpId) : servers;
     const allowed = scopedVcenterIds(req.user, store.get());
     const key = `${allowed ? [...allowed].sort().join(',') : '*'}|${corpId}`;
-    const fleet = db ? memoFleet(key, diskBadGeneration(), () => buildFleet({ servers: picked, db })) : null;
+    const gen = diskBadGeneration();
+    let fleet = memoGet(key, gen);
+    if (fleet === undefined) {
+      const db = await loadAll();
+      fleet = db ? buildFleet({ servers: picked, db }) : null;
+      if (db) memoSet(key, gen, fleet);
+    }
     const isAdmin = isAdminDetailUser(req.user) && !scoped;
     res.json({
       ok: true, scoped, corp: corpId || null, corps: corpOptions(servers), fleet, labels: labelsPayload(),
       db: { available: status.available, error: status.available ? '' : status.error, records: status.records },
-      jobs: jobsFor(req, servers, scoped).slice(0, 10), auto: autoInfo(),
+      jobs: jobsFor(req).slice(0, 10), auto: autoInfo(),
       canScanAll: isFullReadWriteScope(req.user, store.get()) && ['admin', 'operator'].includes(req.user?.role),
       ...(isAdmin ? { settings: loadDiskBadSettings(), settingsLoadError: diskBadSettingsLoadError(), mail: diskBadMailInfo() } : {}),
       node: config.agent.centralUrl ? { role: 'edge', edge: diskBadEdgeStatus() } : { role: 'central' },
@@ -131,13 +196,13 @@ export function registerDiskBad(api) {
 
   // 진행 표시용 가벼운 조회 — 집계를 다시 하지 않는다(화면이 점검 중일 때만 10초마다 부른다).
   api.get('/tools/disk-bad/jobs', toolsPerm, (req, res) => {
-    const { servers, scoped } = physicalServersFor(req);
-    res.json({ ok: true, jobs: jobsFor(req, servers, scoped).slice(0, 10), auto: autoInfo(), generation: diskBadGeneration() });
+    res.json({ ok: true, jobs: jobsFor(req).slice(0, 10), auto: autoInfo(), generation: diskBadGeneration() });
   });
 
   api.get('/tools/disk-bad/server/:id', toolsPerm, async (req, res) => {
     const { servers } = physicalServersFor(req);
-    const s = servers.find((x) => x.id === String(req.params.id));
+    const s = findServer(servers, req.params.id, typeof req.query.agent === 'string' ? req.query.agent : null);
+    if (s === 'ambiguous') return res.status(409).json(AMBIGUOUS);
     if (!s) return res.status(404).json(NOT_FOUND);
     const d = await loadServer(s.agent, s.id);
     if (!d) return res.json({ ok: true, server: s, dbUnavailable: true, labels: labelsPayload() });
@@ -152,11 +217,12 @@ export function registerDiskBad(api) {
     const mode = body.mode === 'full' ? 'full' : 'incremental';
     const snap = store.get();
     if (!scope) return res.status(400).json({ ok: false, reason: '범위(scope)는 all · corp · server 중 하나입니다.' });
+    if (isEdge()) return res.status(409).json(EDGE_NODE);
     const by = req.user?.username || '';
     if (scope === 'all') {
       if (!isFullReadWriteScope(req.user, snap)) return res.status(403).json({ ok: false, error: 'forbidden', reason: '전체 점검은 전체 범위(조회 · 쓰기 제한 없는) 계정만 실행할 수 있습니다.' });
       const job = createJob({ scope: 'all', targetLabel: '전체', mode, by, units: await unitsForAll() });
-      logAudit(req, 'diskbad.scan', { scope, mode, job: job.id });
+      logAudit({ user: by, action: '디스크 배드 섹터 점검 시작', target: '전체', detail: `${mode === 'full' ? '처음부터' : '새 로그만'} · 작업 ${job.id}`, ip: req.ip });
       return res.json({ ok: true, job });
     }
     const { servers } = physicalServersFor(req);
@@ -171,7 +237,8 @@ export function registerDiskBad(api) {
       label = picked[0]?.corp?.name || target;
     } else {
       target = t(body.serverId);
-      const s = servers.find((x) => x.id === target);
+      const s = findServer(servers, target, typeof body.agent === 'string' ? body.agent : null);
+      if (s === 'ambiguous') return res.status(409).json(AMBIGUOUS);
       if (!s) return res.status(404).json(NOT_FOUND);
       if (s.excluded) return res.status(400).json({ ok: false, reason: 'HPE iLO 서버는 점검 대상이 아닙니다.' });
       if (!s.vc ? !isFullReadWriteScope(req.user, snap) : !inUserWriteScope(req.user, snap, s.vc)) return res.status(403).json({ ok: false, error: 'forbidden', reason: '이 서버의 법인은 쓰기 범위 밖입니다.' });
@@ -182,46 +249,52 @@ export function registerDiskBad(api) {
     for (const s of picked) { if (!byAgent.has(s.agent)) byAgent.set(s.agent, []); byAgent.get(s.agent).push(s.id); }
     const units = [...byAgent.entries()].map(([agent, ids]) => ({ agent, kind: agent ? 'edge' : 'local', serverIds: ids, label: agent || '중앙 직결' }));
     const job = createJob({ scope, target, targetLabel: label, mode, by, manual: scope === 'server', units });
-    logAudit(req, 'diskbad.scan', { scope, target, mode, job: job.id, units: units.length });
+    logAudit({ user: by, action: '디스크 배드 섹터 점검 시작', target: label || target, detail: `${scope === 'corp' ? '법인' : '서버'} · ${mode === 'full' ? '처음부터' : '새 로그만'} · 조각 ${units.length}개 · 작업 ${job.id}`, ip: req.ip });
     res.json({ ok: true, job });
   });
 
-  /** 범위 계정이 손댈 수 있는 조각인가 — 자기 엣지(서버가 범위 안)만. */
-  const unitAllowed = (req, agent) => {
-    const { servers, scoped } = physicalServersFor(req);
-    if (!scoped) return true;
-    const snap = store.get();
-    return servers.some((s) => s.agent === String(agent ?? '').toLowerCase() && s.vc && inUserWriteScope(req.user, snap, s.vc));
+  /** 조각 하나를 찾고 권한을 본다 — 작업이 없거나 조회 범위 밖이면 404, 쓰기 범위 밖이면 403. */
+  const unitFor = (req, res, agent) => {
+    const j = getJob(req.params.id);
+    if (!j) { res.status(404).json({ ok: false, reason: '작업을 찾을 수 없습니다.' }); return null; }
+    const u = j.units.find((x) => x.agent === String(agent ?? '').trim().toLowerCase());
+    const code = u ? unitAccess(req, u, unitCtx(req), { write: true }) : 404;
+    if (code === 404) { res.status(404).json({ ok: false, reason: '작업 조각을 찾을 수 없습니다.' }); return null; }
+    if (code === 403) { res.status(403).json({ ok: false, error: 'forbidden', reason: '이 조각이 맡은 서버 가운데 쓰기 범위 밖이 있습니다.' }); return null; }
+    return { j, u };
   };
 
   api.post('/tools/disk-bad/jobs/:id/stop', writeRole, toolsPerm, (req, res) => {
+    if (isEdge()) return res.status(409).json(EDGE_NODE);
     const agent = req.body?.agent;
-    const j = getJob(req.params.id);
-    if (!j) return res.status(404).json({ ok: false, reason: '작업을 찾을 수 없습니다.' });
-    if (agent == null && !isFullReadWriteScope(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', reason: '작업 전체 중단은 전체 범위 계정만 — 법인 조각을 골라 멈추세요.' });
-    if (agent != null && !unitAllowed(req, agent)) return res.status(403).json({ ok: false, error: 'forbidden', reason: '이 법인은 쓰기 범위 밖입니다.' });
+    if (agent == null) {
+      if (!getJob(req.params.id)) return res.status(404).json({ ok: false, reason: '작업을 찾을 수 없습니다.' });
+      if (!isFullReadWriteScope(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', reason: '작업 전체 중단은 전체 범위 계정만 — 법인 조각을 골라 멈추세요.' });
+    } else if (!unitFor(req, res, agent)) return undefined;
     const r = stopJob(req.params.id, agent == null ? null : String(agent));
-    logAudit(req, 'diskbad.stop', { job: req.params.id, agent: agent ?? '*' });
+    logAudit({ user: req.user?.username || '', action: '디스크 배드 섹터 점검 중단', target: req.params.id, detail: `조각 ${agent == null ? '전부' : (String(agent) || '중앙 직결')}`, ip: req.ip });
     res.json({ ok: true, job: r });
   });
 
   api.post('/tools/disk-bad/jobs/:id/retry', writeRole, toolsPerm, (req, res) => {
+    if (isEdge()) return res.status(409).json(EDGE_NODE);
     const agent = String(req.body?.agent ?? '');
-    if (!unitAllowed(req, agent)) return res.status(403).json({ ok: false, error: 'forbidden', reason: '이 법인은 쓰기 범위 밖입니다.' });
+    if (!unitFor(req, res, agent)) return undefined;
     const r = retryUnit(req.params.id, agent);
     if (!r) return res.status(404).json({ ok: false, reason: '다시 보낼 조각이 없습니다(진행 중이거나 작업이 없습니다).' });
     if (r.busy) return res.status(409).json({ ok: false, reason: '이 법인에 진행 중인 다른 점검이 있습니다.' });
-    logAudit(req, 'diskbad.retry', { job: req.params.id, agent });
+    logAudit({ user: req.user?.username || '', action: '디스크 배드 섹터 점검 다시 보내기', target: req.params.id, detail: `조각 ${agent || '중앙 직결'}`, ip: req.ip });
     res.json({ ok: true, job: r });
   });
 
   api.put('/tools/disk-bad/settings', adminOnly, fullScopeOnly, (req, res) => {
+    if (isEdge()) return res.status(409).json(EDGE_NODE);
     const b = req.body && typeof req.body === 'object' ? req.body : {};
     const patch = {};
     for (const k of ['autoEnabled', 'intervalHours', 'mailEnabled', 'corpTo']) if (k in b) patch[k] = b[k];
     let next;
     try { next = saveDiskBadSettings(patch); } catch (e) { return res.status(500).json({ ok: false, reason: `저장 실패: ${String(e?.message || e).slice(0, 200)}` }); }
-    logAudit(req, 'diskbad.settings', { autoEnabled: next.autoEnabled, intervalHours: next.intervalHours, mailEnabled: next.mailEnabled, corps: Object.keys(next.corpTo).length });
+    logAudit({ user: req.user?.username || '', action: '디스크 배드 섹터 설정 저장', target: 'disk-bad-settings', detail: `자동 ${next.autoEnabled ? `켜짐(${next.intervalHours}시간)` : '꺼짐'} · 메일 ${next.mailEnabled ? '켜짐' : '꺼짐'} · 법인 담당자 ${Object.keys(next.corpTo).length}곳`, ip: req.ip });
     res.json({ ok: true, settings: next, auto: autoInfo() });
   });
 }

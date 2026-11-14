@@ -49,7 +49,7 @@ export function orderOf(rows) {
  * @param {Function} [o.getJson]  테스트 주입
  * @returns {Promise<{mgrPath:string, order:string, total:number|null, read:number, undated:number,
  *   newest:{entryId:string, created:number}|null, oldestRead:number|null, reachedEnd:boolean, foundCursor:boolean,
- *   stopped:''|'budget'|'max', entries:Array}>}
+ *   stopped:''|'budget'|'max'|'skip', entries:Array}>}
  */
 export async function readLclog(entry, { cursor = null, signal = null, budgetMs = 8 * 60_000, maxEntries = 50_000, getJson = redfishGetCapped, now = Date.now } = {}) {
   const t0 = now();
@@ -63,6 +63,11 @@ export async function readLclog(entry, { cursor = null, signal = null, budgetMs 
     const count = Number(j?.['Members@odata.count']);
     return { rows: members.map(entryRow).filter(Boolean), total: Number.isFinite(count) && count >= 0 ? count : null };
   };
+  // 반증 #9: `$skip` 을 무시하는 장비는 어느 쪽을 달라 해도 첫 쪽을 준다 — 그대로 믿으면 같은 50건을 끝까지 돌고 '끝까지 읽음' 이라 거짓말한다.
+  //   다른 쪽을 달라 했는데 첫 행이 첫 쪽의 첫 행과 같으면 지원하지 않는 것으로 보고 멈춘다(일부만 읽음 — complete:false).
+  const rowKey = (r) => (r ? `${r.entryId}|${r.created}` : '');
+  let firstKey = '';
+  const skipIgnored = (rows) => rows.length > 0 && firstKey !== '' && rowKey(rows[0]) === firstKey;
 
   const out = { mgrPath, order: 'unknown', total: null, read: 0, undated: 0, newest: null, oldestRead: null, reachedEnd: false, foundCursor: false, cursorUsed: false, stopped: '', entries: [] };
   let cur = cursor && Number.isFinite(cursor.created) ? cursor : null;
@@ -71,7 +76,9 @@ export async function readLclog(entry, { cursor = null, signal = null, budgetMs 
     out.read += 1;
     if (!Number.isFinite(r.created)) { out.undated += 1; return true; }
     if (!out.newest) out.newest = { entryId: r.entryId, created: r.created };
-    if (cur && (r.created < cur.created || (r.entryId === cur.entryId && r.created === cur.created))) { out.foundCursor = true; return false; }
+    // 반증 #14: 지난번 자리는 **같은 항목(Id · 시각)** 을 만났을 때만 찾은 것이다. 시각이 더 오래된 항목을 먼저 만나도 멈추지 않는다 —
+    //   iDRAC 시계가 거꾸로 갔거나(RTC · 공장 초기화) 같은 주소에 다른 서버가 오면 '더 오래된 시각' 의 새 항목이 있다. 못 찾으면 끝까지 읽는다(gap).
+    if (cur && r.created === cur.created && (!cur.entryId || r.entryId === cur.entryId)) { out.foundCursor = true; return false; }
     out.oldestRead = out.oldestRead == null ? r.created : Math.min(out.oldestRead, r.created);
     const code = codeOf(r.messageId);
     if (code && isStorageCode(code)) out.entries.push({ ...r, code });
@@ -84,6 +91,7 @@ export async function readLclog(entry, { cursor = null, signal = null, budgetMs 
   };
 
   const first = await page(0);
+  firstKey = rowKey(first.rows[0]);
   out.total = first.total;
   out.order = orderOf(first.rows);
   // cursor 로 멈추는 것은 '최신부터 읽고 있다' 가 확실할 때만 — 방향을 모르거나(unknown) 오래된 것 먼저인데 전체 건수를 모르면
@@ -101,6 +109,7 @@ export async function readLclog(entry, { cursor = null, signal = null, budgetMs 
       if (!firstPage && overBudget()) return out;
       const start = Math.max(0, end - size);
       const rows = start === 0 ? first.rows.slice(0, end) : (await page(start)).rows;
+      if (start > 0 && skipIgnored(rows)) { out.stopped = 'skip'; return out; }
       firstPage = false;
       for (let i = rows.length - 1; i >= 0; i -= 1) if (!take(rows[i])) return out;
       if (!rows.length) break;
@@ -118,6 +127,7 @@ export async function readLclog(entry, { cursor = null, signal = null, budgetMs 
     if (out.total != null && skip >= out.total) break;
     if (overBudget()) return out;
     rows = (await page(skip)).rows;
+    if (skipIgnored(rows)) { out.stopped = 'skip'; return out; }
     if (!rows.length) break;
   }
   out.reachedEnd = true;
