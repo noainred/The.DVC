@@ -29,6 +29,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { KEY_FILE_NAME, mergeRedactedKeyStore } from '../bmusage/onboard/keyBundle.js';   // v3.9.0 반증 D5: 적용 시점 다시 합치기
 
 const SERVER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 /** config.js 의 configDir 과 같은 식(테스트가 대조한다) — config.js 를 import 하지 않으려고 따로 둔다. */
@@ -50,6 +51,8 @@ export const RESTORE_EXCLUDE = new Map([
   ['upgrade-signature-override.json', '업그레이드 서명 확인 끄기 — 되돌리면 다시 켠 서명 확인이 OTP 재인증 없이 꺼진다'],
   // Bareos 재해 복구 2차: 복구 순서 실행 상태 — 진행 중에 만든 백업을 되살리면 멈췄거나 끝난 회차가 '진행 중' 으로 돌아와 OTP 없이 남은 VM 을 다시 보낸다
   ['bareos-dr-runs.json', 'Bareos 재해 복구 실행 상태 — 되돌리면 멈췄거나 끝난 회차가 되살아나 OTP 없이 복원을 다시 보낸다'],
+  // v3.9.0 SSH 공용 접속: 법인 키 사용 중지(긴급 조치) — 백업 시점 판본으로 되돌리면 그 뒤에 건 사용 중지가 OTP 없이 풀린다
+  ['ssh-access-state.json', 'SSH 키 사용 중지(긴급 조치) 기록 — 되돌리면 백업 이후에 건 사용 중지가 풀린다'],
 ]);
 /** 예약 파일 읽기 상한 — 번들 해제 상한(64MB)의 JSON 이스케이프 팽창까지 감안한 여유. 넘으면 적용하지 않는다. */
 export const STAGED_MAX_BYTES = 512 * 1024 * 1024;
@@ -164,6 +167,14 @@ export function reconcileForApply(name, content, configDir) {
     try { cur = fs.readFileSync(path.join(configDir, name), 'utf8'); } catch { cur = null; }
     const r = reconcileBareosGroupsText(content, cur);
     return { content: r.text, info: { bareosGroupSlotsKept: r.kept } };
+  }
+  // v3.9.0(반증 D5): SSH 키 저장소는 **적용 시점의 지금 파일**과 다시 합친다 — 예약 때 합친 값으로 쓰면 예약 뒤 본인 OTP 로 좁힌 폴더 · 기능 · 퇴역이
+  //   되돌아가고, 예약 뒤 등록한 키(번들에 없음)는 개인키째 사라졌다. 합치는 규칙은 mergeRedactedKeyStore 하나(지금 키의 폴더 · 기능 · 상태 유지 · 번들에 없는 지금 키 남김).
+  if (name === KEY_FILE_NAME) {
+    let cur = '';
+    try { cur = fs.readFileSync(path.join(configDir, name), 'utf8'); } catch { cur = ''; }
+    const m = mergeRedactedKeyStore(String(content), cur);
+    return { content: m.text, info: { sshKeysKept: (m.kept || []).length, sshKeysDropped: (m.dropped || []).length } };
   }
   if (name !== 'users.json' && name !== 'central-agent-tokens.json') return { content };
   let currentText = null;

@@ -12,6 +12,10 @@ import ssh2 from 'ssh2';
 import { listBmServersRaw, registryLoadError, bmServerRefCounts, replaceBmServerKeyRefs } from '../../bmstor/registry.js';
 import { loadRegistry as loadIdracRegistry, registryLoadError as idracLoadError } from '../../idrac/registry.js';
 import * as KS from './keyStore.js';
+import { stopMatch } from '../../sshaccess/state.js';   // v3.9.0: 긴급 조치 ‘이 법인 키 사용 중지’(상태 파일 — 못 읽으면 키 접속을 멈춘다)
+import { addrKey } from './bindRule.js';
+import { parsePrivateKey } from './keyParse.js';
+import { sshHostKeyFingerprint } from '../../proxy/sshExec.js';
 
 const t = (v) => String(v ?? '').trim();
 
@@ -88,6 +92,10 @@ export function rotateKey(fromId, toId, { now = Date.now() } = {}) {
   if (to.status !== 'active') return { ok: false, code: 'retired', reason: '새 키가 퇴역 상태입니다.' };
   const unread = KS.keyStoreLoadError();
   if (unread) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'SSH 키 저장소를 읽지 못해 회전하지 않았습니다.' };
+  // v3.9.0(점검 B-4): 새 키의 폴더가 옛 키를 쓰는 서버 · 공통 계정을 덮는지 — 아니면 회전 뒤 수집이 key-folder 로 끊긴다. 쓰기 전에 거절한다.
+  const conflicts = placementConflicts(to, { serversUsing: (s) => t(s.keyRef) === from.id, accountsUsing: (a) => a.keyRef === from.id });
+  if (conflicts === null) return { ok: false, code: 'usage-unknown', status: 503, reason: 'OS 계정 등록부를 읽지 못해 회전하지 않았습니다.' };
+  if (conflicts.length) return { ok: false, code: 'folder-conflict', status: 409, reason: `새 키의 폴더 밖인 곳 ${conflicts.length}개가 옛 키를 씁니다 — 새 키의 폴더를 맞춘 뒤 회전하세요.`, conflicts: conflicts.slice(0, 50) };
   const r1 = replaceBmServerKeyRefs(from.id, to.id);
   if (!r1.ok) return { ...r1, status: 503 };
   const r2 = KS.replaceAccountKeyRefs(from.id, to.id, { now });
@@ -95,6 +103,24 @@ export function rotateKey(fromId, toId, { now = Date.now() } = {}) {
   const r3 = KS.markKeyRetired(from.id, { now });
   if (!r3.ok) return { ...r3, partial: { servers: r1.ids, accounts: r2.changed } };
   return { ok: true, servers: r1.ids, accounts: r2.changed || 0 };
+}
+
+/**
+ * 키 `key`(폴더)가 지금 쓰는 곳을 덮는가 — 덮지 못하는 서버 · 공통 계정 목록. 등록부를 못 읽으면 null(모름).
+ * 판정은 keyPlacementIssue 하나(기능은 보지 않는다 — 폴더만). 서버별 폴더 키는 공통 계정의 기본 키가 될 수 없다.
+ */
+export function placementConflicts(key, { serversUsing = () => false, accountsUsing = () => false } = {}) {
+  let servers;
+  try { if (registryLoadError()) return null; servers = listBmServersRaw(); } catch { return null; }
+  const probe = { folderCorp: key.folderCorp || '', folderServer: key.folderServer || '', features: null };
+  const out = [];
+  for (const s of servers) if (serversUsing(s) && keyPlacementIssue(probe, s, 'conn-test')) out.push({ kind: 'server', name: s.name || s.host, corp: t(s.vcenterId) });
+  for (const a of KS.listAccountsRaw()) {
+    if (a.kind !== 'os' || !accountsUsing(a)) continue;
+    if (probe.folderServer) out.push({ kind: 'account', name: a.name, corp: a.corp, why: 'server-folder' });
+    else if (probe.folderCorp && a.corp !== probe.folderCorp) out.push({ kind: 'account', name: a.name, corp: a.corp, why: 'other-corp' });
+  }
+  return out;
 }
 
 /** 접속 자격 해석 오류 문구(화면 · 수집 오류 · 연결 시험 공용). */
@@ -106,14 +132,67 @@ export const AUTH_ERROR = Object.freeze({
   'account-missing': '공통 계정 참조가 가리키는 계정이 없습니다(삭제됨) — 서버 설정에서 계정을 다시 고르세요.',
   'account-kind': '공통 계정 참조가 OS 계정이 아닙니다.',
   'store-unreadable': 'SSH 키 저장소(ssh-keys.json)를 읽지 못해 키로 접속하지 않았습니다.',
+  // v3.9.0 SSH 공용 접속(설계 docs/design/ssh-access §8 · §9)
+  'account-tampered': '공통 계정(계정명 · 법인 · 기본 키 · 비밀번호)이 포탈 밖에서 바뀌었습니다 — 이 계정으로는 접속하지 않습니다. 설정 › 보안 › SSH 공용 접속 › 키 보안을 확인하세요.',
+  'key-tampered': 'SSH 키 원문의 지문이 등록 때와 다릅니다(바꿔치기 의심) — 이 키로는 접속하지 않습니다. 설정 › 보안 › SSH 공용 접속 › 키 보안을 확인하고 키를 새로 등록하세요.',
+  'key-folder': 'SSH 키가 다른 법인 · 다른 서버의 폴더에 있어 이 서버에는 쓰지 않습니다 — 설정 › 보안 › SSH 공용 접속에서 이 서버의 폴더에 있는 키를 고르세요.',
+  'key-feature': '이 SSH 키는 이 기능에 허용되지 않았습니다 — 설정 › 보안 › SSH 공용 접속 › 키 폴더에서 키의 ‘쓸 수 있는 기능’ 을 확인하세요.',
+  'corp-stopped': '이 법인의 SSH 키 사용이 중지됐습니다(긴급 조치) — 설정 › 보안 › SSH 공용 접속에서 재개하기 전에는 키로 접속하지 않습니다.',
+  'state-unreadable': 'SSH 공용 접속 상태 파일(ssh-access-state.json)을 읽지 못해 키로 접속하지 않았습니다 — 사용 중지 기록을 모르는 채 키를 쓰지 않습니다.',
 });
+/** 허용 기능 목록과 무관하게 언제나 되는 쓰임 — 사람이 누르는 연결 시험(uname 한 줄). 그 밖의 호출은 기능 id 를 밝혀야 한다(빈 값 = 모르는 기능 — 목록이 있는 키는 거절). */
+export const ALWAYS_ALLOWED_FEATURES = Object.freeze(['conn-test']);
+/**
+ * 키를 이 서버 · 이 기능에 써도 되는가(판정 하나 — 폴러 · 연결 시험 · SSH 공용 접속 화면의 키 고르기가 같은 함수).
+ * @param {{folderCorp?:string, folderServer?:string, features?:string[]|null}} key
+ * @param {{vcenterId?:string, name?:string}} server
+ * @returns {null | 'key-folder' | 'key-feature'}
+ */
+export function keyPlacementIssue(key = {}, server = {}, feature = '') {
+  const kc = t(key.folderCorp); const ks = t(key.folderServer);
+  if (kc) {
+    if (t(server.vcenterId) !== kc) return 'key-folder';
+    if (ks && ks.toLowerCase() !== t(server.name).toLowerCase()) return 'key-folder';
+  }
+  if (Array.isArray(key.features) && !ALWAYS_ALLOWED_FEATURES.includes(feature) && !key.features.includes(feature)) return 'key-feature';
+  return null;
+}
+/**
+ * 법인 사용 중지 판정 — 서버 법인 · 공통 계정 법인 · 키 폴더 법인 중 하나라도 멈췄거나, 중지할 때 적어 둔 서버(id · 접속처)이면.
+ * 법인 칸만 보면 OTP 없이 칸을 비워 빠져나갈 수 있었다(점검 A-4). 상태 파일을 못 읽으면 멈춘 것으로 본다.
+ */
+function stopIssue(corps, server, username) {
+  const s = stopMatch({ corps: corps.map((x) => t(x)).filter(Boolean), serverId: t(server.id), addr: t(server.host) ? addrKey(server.host, server.port, username) : '', serverCorp: t(server.vcenterId) });
+  if (s?.unreadable) return 'state-unreadable';
+  return s ? 'corp-stopped' : null;
+}
+
+/*
+ * v3.9.0(점검 A-7 · C-8 · D-1): **첫 사용 때 키 원문과 지문을 대조**한다 — 저장소의 지문 칸과 원문이 다르면(누군가 원문만 바꿈) 그 키로 접속하지 않는다.
+ * 프로세스마다 원문 해시 하나에 한 번(passphrase 키는 접속용으로 이미 푼 객체를 쓴다 — bcrypt 를 두 번 돌리지 않는다).
+ * 주기 점검(sshaccess/check.js)은 따로 ‘디스크 파일이 포탈이 마지막으로 쓴 내용과 다른가’ 를 본다.
+ */
+const _verified = new Set();
+export function _resetVerifiedForTest() { _verified.clear(); }
+function contentKey(m) { return crypto.createHash('sha256').update(m.privateKey).update('\0').update(m.passphrase || '').digest('hex'); }
+function integrityOk(m, parsed) {
+  const ck = contentKey(m);
+  if (_verified.has(ck)) return true;
+  let fp = '';
+  if (parsed && typeof parsed === 'object' && typeof parsed.getPublicSSH === 'function') { try { fp = sshHostKeyFingerprint(parsed.getPublicSSH()) || ''; } catch { fp = ''; } }
+  else { const p = parsePrivateKey(m.privateKey, m.passphrase || ''); fp = p.ok ? p.fingerprint : ''; }
+  if (!fp || fp !== m.fingerprint) { KS.markKeyIntegrity(m.id, false); return false; }
+  if (_verified.size > 1000) _verified.clear();
+  _verified.add(ck);
+  return true;
+}
 
 /**
  * OS 등록 항목 → 접속 자격(폴러 · 연결 시험 공용). 원본(비밀 포함)을 받아 원본을 돌려준다 — **응답에 싣지 말 것**.
  * @returns {{ok:true, username:string, password:string, privateKey?:string, passphrase?:string, authKind:'key'|'password'|'none', keyFingerprint?:string, keyName?:string}
  *          | {ok:false, code:string, error:string}}
  */
-export function resolveOsAuth(server = {}) {
+export function resolveOsAuth(server = {}, { feature = '' } = {}) {
   const keyRef = t(server.keyRef);
   const credRef = t(server.credRef);
   const needStore = !!(keyRef || credRef);
@@ -123,6 +202,7 @@ export function resolveOsAuth(server = {}) {
     acc = KS.accountById(credRef);
     if (!acc) return { ok: false, code: 'account-missing', error: AUTH_ERROR['account-missing'] };
     if (acc.kind !== 'os') return { ok: false, code: 'account-kind', error: AUTH_ERROR['account-kind'] };
+    if (KS.isAccountTampered(acc.id)) return { ok: false, code: 'account-tampered', error: AUTH_ERROR['account-tampered'] };
   }
   // 7b 반증 F19: 공통 계정을 쓰면 접속 계정명도 **공통 계정 쪽**(서버 칸은 '개별' 일 때만) — 서버 칸 기본값 root 로 공통 비밀번호를 보내지 않게.
   const username = (acc ? acc.username : '') || t(server.username) || 'root';
@@ -131,12 +211,19 @@ export function resolveOsAuth(server = {}) {
   if (useKey) {
     const m = KS.keyMaterial(useKey);
     if (!m.ok) return { ok: false, code: m.code, error: AUTH_ERROR[m.code] || AUTH_ERROR['key-missing'] };
+    // v3.9.0: 사용 중지 → 폴더 → 허용 기능 순(사용 중지가 가장 강하다 — 다른 사유보다 먼저 말한다).
+    //   실패에도 키 지문을 싣는다 — 폴러의 인증 정지 기록(authCredOf)이 같은 자격으로 남아, 재개 뒤 이미 거부된 키로 다시 로그인하지 않게(점검 B-6).
+    const si = stopIssue([server.vcenterId, acc?.corp, m.folderCorp], server, username);
+    if (si) return { ok: false, code: si, error: AUTH_ERROR[si], keyFingerprint: m.fingerprint };
+    const pi = keyPlacementIssue(m, server, t(feature));
+    if (pi) return { ok: false, code: pi, error: AUTH_ERROR[pi], keyFingerprint: m.fingerprint };
     // 감사 M-5: passphrase 가 있는 키(OpenSSH bcrypt — 실측 16라운드 약 175ms · 동기)는 접속마다 풀면 1,000대 주기에 이벤트 루프가 수 분 막힌다
     //   → 한 번 푼 ssh2 키 객체를 메모리에 둔다(지문 + 원문 해시 열쇠 — 키를 바꾸면 열쇠가 바뀐다). 디스크의 봉인 원문은 그대로다.
     const pk = m.passphrase ? parsedKeyFor(m) : m.privateKey;
     if (!pk) return { ok: false, code: 'key-parse', error: AUTH_ERROR['key-parse'] };
+    if (!integrityOk(m, m.passphrase ? pk : null)) return { ok: false, code: 'key-tampered', error: AUTH_ERROR['key-tampered'], keyFingerprint: m.fingerprint };
     // 키 인증일 때 비밀번호는 보내지 않는다(인증 방식을 하나로 — 키가 거부되면 비밀번호로 몰래 넘어가지 않는다).
-    return { ok: true, username, password: '', privateKey: pk, passphrase: m.passphrase && typeof pk === 'string' ? m.passphrase : '', authKind: 'key', keyFingerprint: m.fingerprint, keyName: m.name };
+    return { ok: true, username, password: '', privateKey: pk, passphrase: m.passphrase && typeof pk === 'string' ? m.passphrase : '', authKind: 'key', keyFingerprint: m.fingerprint, keyName: m.name, keyId: m.id };
   }
   if (acc && acc.password) return { ok: true, username, password: acc.password, authKind: 'password' };
   const pw = typeof server.password === 'string' ? server.password : '';
@@ -174,13 +261,13 @@ export function authCredOf(s = {}) {
  * 폴러용 — OS 등록부 원본에 해석한 자격을 덧씌운다(원본 객체는 바꾸지 않는다). 해석 실패 항목은 authError 를 달아
  * 수집이 접속하지 않고 그 사유로 실패하게 한다(빈 비밀번호로 시도해 인증 실패 · 계정 잠금을 부르지 않게).
  */
-export function withResolvedAuth(list = []) {
+export function withResolvedAuth(list = [], { feature = '' } = {}) {
   return (Array.isArray(list) ? list : []).map((s) => {
     if (!s || typeof s !== 'object') return s;
     if (!t(s.keyRef) && !t(s.credRef)) return s;   // 예전 항목(비밀번호) — 그대로
-    const a = resolveOsAuth(s);
-    if (!a.ok) return { ...s, password: '', authError: a.error, authErrorCode: a.code };
-    return { ...s, username: a.username, password: a.password, ...(a.privateKey ? { privateKey: a.privateKey, passphrase: a.passphrase, keyFingerprint: a.keyFingerprint } : {}) };
+    const a = resolveOsAuth(s, { feature });
+    if (!a.ok) return { ...s, password: '', authError: a.error, authErrorCode: a.code, ...(a.keyFingerprint ? { keyFingerprint: a.keyFingerprint } : {}) };
+    return { ...s, username: a.username, password: a.password, ...(a.privateKey ? { privateKey: a.privateKey, passphrase: a.passphrase, keyFingerprint: a.keyFingerprint, keyName: a.keyName } : {}) };
   });
 }
 

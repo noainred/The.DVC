@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>설정 — SSH 공용 접속 · 키 폴더</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.sm{font-size:11.5px;color:#8b9bb4}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn.pri{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.btn.sm{min-height:28px;padding:0 10px;font-size:12px;color:#e6edf6}
+.btn[disabled]{opacity:.45;cursor:default}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;box-sizing:border-box}
+.tag.ok{background:rgba(34,197,94,.16);color:#86efac}
+.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.tag.unk{background:rgba(139,155,180,.14);color:#aebbd0}
+.tag.none{border:1px solid #33415c;color:#8b9bb4}
+h2{margin:0;font-size:14px;font-weight:800}
+.hd{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:12px 14px;border-bottom:1px solid #1f2a40}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:9px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-space:nowrap;font-size:12.5px}
+.tree{display:flex;flex-direction:column;padding:8px 0}
+.tree a{display:flex;gap:8px;align-items:center;min-height:32px;padding:0 14px;text-decoration:none;color:#cfd9e8;white-space:nowrap}
+.tree a:hover{color:#e6edf6;background:rgba(59,130,246,.06)}
+.tree a.on{background:rgba(59,130,246,.12);color:#ffffff;font-weight:700}
+.tree .n{margin-left:auto;font-size:11px;color:#8b9bb4}
+.tree svg{flex:0 0 15px}
+.l1{padding-left:14px}.l2{padding-left:34px}.l3{padding-left:54px}.l4{padding-left:74px}
+</style>
+</helmet>
+<div style="width:1240px;height:1100px;box-sizing:border-box;padding:24px;display:flex;flex-direction:column;gap:16px;background:#0a0e17">
+
+<header style="display:flex;gap:12px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap">
+<div style="display:flex;flex-direction:column;gap:5px;min-width:0;flex:1 1 520px">
+<h1 style="margin:0;font-size:19px;font-weight:800">SSH 공용 접속 · 키 폴더</h1>
+<p class="muted" style="margin:0">인증키를 <b style="color:#e6edf6">법인 폴더</b> 아래 ‘공통’ 과 ‘서버별’ 로 나눠 둡니다. 화면에서 만들거나 올릴 수 있고, 서버에서 폴더에 직접 넣은 파일도 여기 나타납니다.</p>
+</div>
+<div style="display:flex;gap:8px;flex-wrap:wrap">
+<button class="btn" type="button">키 가져오기</button>
+<button class="btn pri" type="button">키 만들기</button>
+</div>
+</header>
+
+<div style="display:flex;gap:16px;align-items:flex-start;flex:1 1 auto;min-height:0">
+
+<section class="card" aria-label="폴더" style="flex:0 0 330px;overflow:hidden">
+<div class="hd"><h2>폴더</h2><span class="sm mono">ssh-keys/</span></div>
+<nav class="tree" aria-label="키 폴더">
+<a class="l1" href="#us"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 6.5h6l2 2.5h10v9.5H3z"></path></svg>미국 동부<span class="n">1</span></a>
+<a class="l2" href="#us-c"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 6.5h6l2 2.5h10v9.5H3z"></path></svg>공통<span class="n">1</span></a>
+<a class="l2" href="#us-s"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 6.5h6l2 2.5h10v9.5H3z"></path></svg>서버별<span class="n">0</span></a>
+<a class="l1" href="#vn"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 6.5h6l2 2.5h10v9.5H3z"></path></svg>베트남<span class="n">0</span></a>
+<a class="l1" href="#in"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 6.5h6l2 2.5h10v9.5H3z"></path></svg>인도<span class="n">0</span></a>
+<a class="l1 on" href="#pl" aria-current="true"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 6.5h6l2 2.5h10v9.5H3z"></path></svg>폴란드<span class="n" style="color:#dbe6f5">4</span></a>
+<a class="l2" href="#pl-c"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 6.5h6l2 2.5h10v9.5H3z"></path></svg>공통<span class="n">2</span></a>
+<a class="l2" href="#pl-s"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 6.5h6l2 2.5h10v9.5H3z"></path></svg>서버별<span class="n">2</span></a>
+<a class="l3" href="#pl-s-gpu"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 6.5h6l2 2.5h10v9.5H3z"></path></svg>pl-gpu-01<span class="n">1</span></a>
+<a class="l3" href="#pl-s-db"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 6.5h6l2 2.5h10v9.5H3z"></path></svg>pl-db-03<span class="n">1</span></a>
+<a class="l1" href="#kr"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 6.5h6l2 2.5h10v9.5H3z"></path></svg>한국 본사<span class="n">1</span></a>
+<a class="l2" href="#kr-c"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 6.5h6l2 2.5h10v9.5H3z"></path></svg>공통<span class="n">1</span></a>
+<a class="l2" href="#kr-s"><svg aria-hidden="true" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 6.5h6l2 2.5h10v9.5H3z"></path></svg>서버별<span class="n">0</span></a>
+</nav>
+<div class="sm" style="padding:10px 14px;border-top:1px solid #1f2a40">숫자는 키 개수입니다. 키가 없는 법인은 비밀번호로 접속하거나 아직 설정하지 않은 곳입니다.</div>
+</section>
+
+<div style="flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:16px">
+
+<section class="card" aria-label="폴더 정보">
+<div class="hd">
+<h2>폴란드</h2>
+<div style="display:flex;gap:8px;flex-wrap:wrap">
+<button class="btn sm" type="button">폴더 경로 복사</button>
+<button class="btn sm" type="button">폴더 다시 읽기</button>
+</div>
+</div>
+<div style="padding:12px 14px;display:flex;flex-direction:column;gap:6px">
+<div style="display:flex;gap:10px;flex-wrap:wrap"><span class="sm" style="flex:0 0 88px">있는 곳</span><span>엣지 pl-edge — 이 법인의 키는 그 법인 안에만 둡니다. 중앙은 목록과 지문만 받아 보여 줍니다.</span></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap"><span class="sm" style="flex:0 0 88px">경로</span><span class="mono" style="overflow-wrap:anywhere;min-width:0">&lt;포탈 설정 폴더&gt;/ssh-keys/pl/</span></div>
+<div style="display:flex;gap:10px;flex-wrap:wrap"><span class="sm" style="flex:0 0 88px">권한</span><span>폴더 0700 · 파일 0600 · 포탈 실행 계정 소유. 다르면 그 키를 쓰지 않고 이유를 적습니다.</span></div>
+</div>
+</section>
+
+<section class="card" aria-label="공통 키">
+<div class="hd"><h2>공통 <span class="muted" style="font-weight:600">2개</span></h2><span class="sm mono">ssh-keys/pl/common/</span></div>
+<div style="overflow-x:auto">
+<table style="min-width:800px">
+<thead><tr><th>이름 ▴</th><th>종류</th><th>지문</th><th>상태</th><th>쓰는 서버</th><th>만든 날</th><th style="text-align:right"><span class="sm">동작</span></th></tr></thead>
+<tbody>
+<tr>
+<td class="mono"><b>id_ed25519</b></td><td>ed25519</td><td class="mono sm">SHA256:9fQ2mV…kT8w</td>
+<td><span class="tag ok">사용 중</span> <span class="tag unk">법인 기본</span></td><td>4대 <span class="sm">법인 공통 계정 root</span></td><td>11-10 <span class="sm">화면에서 만듦</span></td>
+<td style="text-align:right"><button class="btn sm" type="button">공개키 복사</button> <button class="btn sm" type="button">교체</button></td>
+</tr>
+<tr>
+<td class="mono"><b>legacy_rsa</b></td><td>rsa 4096</td><td class="mono sm">SHA256:Lx0aQe…2pNs</td>
+<td><span class="tag warn">새로 발견 — 승인 필요</span></td><td class="muted">—</td><td>11-14 <span class="sm">폴더에 직접 넣음</span></td>
+<td style="text-align:right"><button class="btn sm" type="button">승인</button> <button class="btn sm" type="button">지우기</button></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<section class="card" aria-label="서버별 키">
+<div class="hd"><h2>서버별 <span class="muted" style="font-weight:600">2개</span></h2><span class="sm mono">ssh-keys/pl/servers/&lt;서버&gt;/</span></div>
+<div style="overflow-x:auto">
+<table style="min-width:800px">
+<thead><tr><th>서버 폴더 ▴</th><th>이름</th><th>종류</th><th>지문</th><th>상태</th><th>계정</th><th style="text-align:right"><span class="sm">동작</span></th></tr></thead>
+<tbody>
+<tr>
+<td class="mono"><b>pl-db-03/</b></td><td class="mono">id_ed25519</td><td>ed25519</td><td class="mono sm">SHA256:c7Rt1b…Xq9d</td>
+<td><span class="tag unk">쓰지 않음</span><div class="sm" style="margin-top:3px">이 서버는 법인 공통으로 접속</div></td><td class="mono">root</td>
+<td style="text-align:right"><button class="btn sm" type="button">이 서버에 쓰기</button> <button class="btn sm" type="button">지우기</button></td>
+</tr>
+<tr>
+<td class="mono"><b>pl-gpu-01/</b></td><td class="mono">id_ed25519</td><td>ed25519</td><td class="mono sm">SHA256:Ae41Zp…m0Vk</td>
+<td><span class="tag ok">사용 중</span></td><td class="mono">svc-mon</td>
+<td style="text-align:right"><button class="btn sm" type="button">공개키 복사</button> <button class="btn sm" type="button">교체</button></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="sm" style="padding:12px 14px;display:flex;flex-direction:column;gap:4px">
+<span>어느 키로 접속하나: <b style="color:#aebbd0">서버에 이름으로 고정한 키 → 법인 기본 키</b>. 서버가 쓸 키는 서버 표에서 이름으로 고릅니다. 서버 폴더 이름은 SSH 공용 접속에 등록한 서버 이름과 같아야 합니다.</span>
+<span>공통 폴더에 키가 여러 개면 하나를 ‘법인 기본’ 으로 정합니다. 서버별 폴더에 키를 넣어 두기만 해서는 쓰이지 않습니다 — 그 서버에서 골라야 합니다.</span>
+<span>폴더에 직접 넣은 키는 관리자가 ‘승인’ 하기 전에는 쓰지 않습니다 — 누가 넣었는지 포탈이 알 수 없기 때문입니다.</span>
+<span>개인키는 화면에 보이지 않고 내려받을 수 없습니다(지문 · 공개키만). 쓰고 있는 키는 지울 수 없습니다 — 먼저 교체합니다.</span>
+<span>암호(passphrase)가 걸린 키는 가져올 때 한 번 묻고, 풀어서 포탈의 암호화 보관 방식으로 다시 저장합니다.</span>
+</div>
+</section>
+
+</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1240,"height":1100}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

@@ -228,6 +228,30 @@ export function listAudit({ limit = 100, offset = 0, user = '', q = '' } = {}) {
 }
 
 /**
+ * v3.9.0(SSH 공용 접속 › 키 보안 ‘키 변경 기록’): `action` 이 주어진 접두 중 하나로 시작하는 줄(최신 먼저 · 읽기 소독 후 · 상한 limit).
+ * 비동기 읽기 — 요청 경로에서 큰 감사 파일을 동기로 읽어 이벤트 루프를 막지 않는다.
+ */
+export async function listAuditByActionPrefix(prefixes = [], { limit = 200 } = {}) {
+  const pre = (Array.isArray(prefixes) ? prefixes : []).map((x) => String(x || '')).filter(Boolean);
+  if (!pre.length) return [];
+  let text = '';
+  try { text = await fs.promises.readFile(FILE, 'utf8'); } catch { return []; }
+  const lines = text.split('\n');
+  const lim = Math.max(1, Math.min(1000, Number(limit) || 200));
+  const out = [];
+  for (let i = lines.length - 1; i >= 0 && out.length < lim; i -= 1) {
+    const l = lines[i];
+    if (!l || !pre.some((p) => l.includes(`"${p}`))) continue;   // 싼 거르기 — 정확한 판정은 아래
+    let e = null;
+    try { e = JSON.parse(l); } catch { continue; }
+    const action = e && typeof e === 'object' ? auditStr(e.action) : '';
+    if (!pre.some((p) => action.startsWith(p))) continue;
+    out.push({ at: auditStr(e.at), user: auditStr(e.user) || 'unknown', action, target: auditStr(e.target), detail: auditStr(e.detail), ip: auditStr(e.ip) });
+  }
+  return out;
+}
+
+/**
  * 감사 로그에 남아 있는 줄 중 `action` 이 **정확히** 같은 것(오래된 것이 앞, 읽기 소독 후). v2.912: 로그인 기록
  * (`security/loginHistory.js`)이 처음 만들어질 때 한 번 옮겨 오는 데 쓴다 — 접두 매칭이 아니다('로그인 실패' 는 들어오지 않는다).
  */

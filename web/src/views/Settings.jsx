@@ -49,6 +49,7 @@ const ApiKeys = lazy(() => import('./ApiKeys.jsx'));                 // 외부 �
 import SecuritySelfCheck from './SecuritySelfCheck.jsx'; // 보안 자가진단(지금 이 서버의 실측 상태, v2.500)
 const Upgrade = lazy(() => import('./Upgrade.jsx'));
 const PeerTrustSettings = lazy(() => import('./PeerTrustSettings.jsx')); // 장비 신뢰(SSH 호스트키·TLS 인증서 승인) — 2026-10-09 검토 S-01·S-02
+const SshAccessSettings = lazy(() => import('./SshAccessSettings.jsx')); // v3.9.0 SSH 공용 접속(7b 키 저장소 위 — 법인 공통 · 서버별 키 · 키 폴더 · 키 보안)
 import About from './About.jsx';
 import HorizonAdmin from './HorizonAdmin.jsx'; // v2.685
 const IsiduSettingsPage = lazy(() => import('./tools/IsiduSettingsPage.jsx')); // v2.740 아이실론 수집 대상 설정(슈퍼 관리자 전용)
@@ -117,6 +118,7 @@ const SUB = [
   { k: 'anomaly', label: '이상동작 탐지', C: AnomalyDetection, group: 'security', desc: '사용량 · 이벤트의 이상 패턴을 찾을 임계와 대상 vCenter 를 정합니다.' },
   { k: 'host-access', label: '호스트 접근 제어', C: HostAccessSettings, group: 'security', desc: '포탈 서버에 누가 들어올 수 있는지 — SSH 허용 목록 · 웹 포트 · OS 방화벽을 포탈에서 통제합니다.' },
   { k: 'peer-trust', label: '장비 신뢰(SSH 호스트키·TLS 인증서)', C: PeerTrustSettings, group: 'security', desc: '장비에 접속할 때 받은 SSH 호스트키 · TLS 인증서 지문을 승인 · 거부합니다.' },
+  { k: 'ssh-access', label: 'SSH 공용 접속', C: SshAccessSettings, group: 'security', desc: '법인 공통 계정 · 서버별 SSH 키 · 키 폴더(법인 › 공통/서버별) · 키 보안(점검 · 사용 중지 · 기록) — 여러 기능이 함께 쓰는 Linux 서버 접속을 한 곳에서 정합니다.' },
   { k: 'security-self-check', label: '보안 자가진단', C: SecuritySelfCheck, group: 'security', desc: '지금 이 서버의 보안 상태를 다시 읽어 항목별로 보여 줍니다 — 로그인 정책 · OTP 등록 · 비밀 저장 등.' },
   // --- 알림·메일 ---
   { k: 'alerts', label: '알림', C: Alerts2, group: 'notify', desc: '임계 규칙과 알림 채널(Slack · Teams · 메일 · 웹훅)을 정하고 테스트 발송합니다. 일일 리포트 시각도 여기서.' },
@@ -149,7 +151,7 @@ const GROUPS = {
   guestgpu: { label: '게스트·GPU', desc: '게스트 OS 안을 보는 수집 — 파티션 · 계정 · GPU.' },
   edge: { label: '엣지·원격', desc: '원격 수집 서버(엣지) · Edge 노드 설치 · 브라우저 SSH/RDP 중계.' },
   usercontrol: { label: '사용자', desc: '계정 · 역할 · 2FA · AD 연동 · 엣지 사용자 배포 · 기능 사용 현황.' },
-  security: { label: '보안', desc: '세션 · 자격증명 · 연동 키 · 이상동작 · 호스트 접근 · 장비 신뢰 · 자가진단.' },
+  security: { label: '보안', desc: '세션 · 자격증명 · 연동 키 · 이상동작 · 호스트 접근 · 장비 신뢰 · SSH 공용 접속 · 자가진단.' },
   notify: { label: '알림·메일', desc: '알림 규칙 · 공용 메일(SMTP) · AI 검색 연동.' },
   log: { label: '로그', desc: '보관 · 진단 · 성능 · 로그 분석 · 감사 · 로그인 기록.' },
   system: { label: '시스템', desc: '특수 기능 카테고리 · 업그레이드 · 버전 정보.' },

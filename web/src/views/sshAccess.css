@@ -1,0 +1,67 @@
+/* 설정 › 보안 › SSH 공용 접속(v3.9.0) — 그리드 · 플렉스 자식 min-width:0 · 버튼 여러 개 행은 flex-wrap · 400px 은 표 안 스크롤 · 글자 대문자 변환 금지 */
+.ssa { display: grid; gap: 12px; min-width: 0; }
+.ssa h3 { margin: 0; }
+.ssa h4 { margin: 0; font-size: 13.5px; }
+.ssa code { font-size: 11.5px; }
+.ssa-head { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: flex-start; min-width: 0; }
+.ssa-title { display: grid; gap: 4px; flex: 1 1 520px; min-width: 0; }
+.ssa-note { margin: 0; font-size: 12px; color: var(--text-dim); line-height: 1.5; overflow-wrap: anywhere; }
+.ssa-sub { font-size: 11.5px; color: var(--text-dim); }
+.ssa-banner { margin: 0; padding: 8px 12px; border: 1px solid currentColor; border-radius: 8px; font-size: 12.5px; overflow-wrap: anywhere; }
+.ssa-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 8px; min-width: 0; }
+.ssa-kpi { display: grid; gap: 2px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); min-width: 0; }
+.ssa-kpi b { font-size: 18px; font-variant-numeric: tabular-nums; }
+.ssa-tabs { display: flex; flex-wrap: wrap; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-deep, var(--bg-soft)); width: fit-content; max-width: 100%; }
+.ssa-tab { min-height: 32px; padding: 0 14px; border: 0; border-radius: 7px; background: transparent; color: var(--text-dim); font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+.ssa-tab:hover { color: var(--text); }
+.ssa-tab.on { background: var(--accent); color: #fff; }
+.ssa-acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
+.ssa-chip { display: inline-flex; align-items: center; gap: 4px; margin-right: 4px; padding: 1px 8px; border: 1px solid; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.ssa-split { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; min-width: 0; }
+.ssa-main { flex: 999 1 560px; display: grid; gap: 12px; min-width: 0; }
+.ssa-corp-pick { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; color: var(--text-dim); min-width: 0; flex-wrap: wrap; }
+.ssa-corp-pick select { max-width: min(520px, 100%); }
+.ssa-corps, .ssa-tree { flex: 1 1 200px; max-width: 240px; display: grid; gap: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; min-width: 0; }
+@media (max-width: 720px) { .ssa-corps, .ssa-tree { max-width: none; } }
+.ssa-corp { display: grid; gap: 2px; padding: 9px 12px; border: 0; border-bottom: 1px solid var(--border-soft, var(--border)); border-left: 3px solid transparent; background: transparent; color: var(--text); text-align: left; font: inherit; cursor: pointer; min-width: 0; }
+.ssa-corp:hover { background: var(--hover); }
+.ssa-corp.on { background: var(--hover); border-left-color: var(--accent); }
+.ssa-corp b { font-size: 12.5px; overflow-wrap: anywhere; }
+.ssa-node { display: flex; gap: 6px; align-items: center; min-height: 30px; padding: 0 10px; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; min-width: 0; }
+.ssa-node:hover { background: var(--hover); }
+.ssa-node.on { background: var(--hover); font-weight: 700; box-shadow: inset 3px 0 0 var(--accent); }
+.ssa-node.d1 { padding-left: 26px; }
+.ssa-node.d2 { padding-left: 44px; }
+.ssa-node svg { flex: 0 0 14px; }
+.ssa-node-l { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ssa-sec { display: grid; gap: 8px; min-width: 0; padding: 10px 0 4px; border-top: 1px solid var(--border); }
+.ssa-sec-wrap { display: grid; gap: 12px; min-width: 0; }
+.ssa-danger { border-top-color: rgba(239, 68, 68, .45); }
+.ssa-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 8px; align-items: end; min-width: 0; margin: 0; padding: 10px; border: 1px solid var(--border); border-radius: 8px; }
+.ssa-form.ssa-inline { border: 0; padding: 0; }
+.ssa-form > legend { font-size: 12.5px; font-weight: 600; padding: 0 4px; }
+.ssa-form > label, .ssa-otp { display: grid; gap: 3px; font-size: 12px; color: var(--text-dim); min-width: 0; }
+.ssa-form .input, .ssa-form textarea, .ssa-otp .input { width: 100%; min-width: 0; box-sizing: border-box; }
+.ssa-form textarea { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; resize: vertical; }
+.ssa-form > .ssa-wide { grid-column: 1 / -1; display: grid; gap: 4px; min-width: 0; }
+.ssa-form > p { grid-column: 1 / -1; }
+.ssa-feats { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; min-width: 0; }
+.ssa-feats label { display: inline-flex; gap: 6px; align-items: center; }
+.ssa-check, .ssa-list { margin: 0; padding: 0 0 0 4px; list-style: none; display: grid; gap: 6px; min-width: 0; }
+.ssa-list { padding-left: 18px; list-style: disc; font-size: 12px; color: var(--text-dim); }
+.ssa-check li { overflow-wrap: anywhere; font-size: 12.5px; }
+.ssa-modal-back { position: fixed; inset: 0; z-index: 900; background: rgba(0, 0, 0, .55); display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow-y: auto; }
+.ssa-modal { width: min(760px, 100%); display: grid; gap: 10px; padding: 16px 18px; border: 1px solid var(--border); border-radius: 14px; background: var(--panel); box-shadow: var(--shadow); min-width: 0; }
+.ssa-modal-h { display: grid; gap: 2px; }
+.ssa-modal-b { display: grid; gap: 12px; min-width: 0; }
+.ssa-modal-f { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; justify-content: space-between; border-top: 1px solid var(--border); padding-top: 10px; }
+.ssa-grp { margin-top: 6px; padding: 6px 10px; font-size: 11.5px; color: var(--text-dim); background: var(--panel-deep, var(--bg-soft)); border-radius: 6px; }
+.ssa-opt { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border-radius: 8px; cursor: pointer; min-width: 0; overflow-wrap: anywhere; }
+.ssa-opt.on { background: var(--hover); box-shadow: inset 3px 0 0 var(--accent); }
+.ssa-opt.off { opacity: .6; cursor: default; }
+.ssa-opt input { margin-top: 3px; }
+.ssa-installed { display: grid; gap: 6px; padding-top: 8px; border-top: 1px solid var(--border); min-width: 0; }
+.ssa-installed .ssa-otp { flex: 1 1 220px; }
+/* 키 표 — 기능 칸은 줄바꿈 허용(1440 에서 동작 열이 보이게) */
+.ssa-keys td:nth-child(3) { white-space: normal; min-width: 120px; }
+.ssa-keys td:first-child { white-space: normal; min-width: 170px; }
