@@ -1,0 +1,3 @@
+#!/bin/bash
+. "${0%/*}/_common"
+case " $* " in *" -d "*) emit lsblk-disk.out ;; *) emit lsblk-tree.out ;; esac

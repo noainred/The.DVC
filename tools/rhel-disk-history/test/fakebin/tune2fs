@@ -1,0 +1,3 @@
+#!/bin/bash
+. "${0%/*}/_common"
+emit "tune2fs_${2##*/}.out"

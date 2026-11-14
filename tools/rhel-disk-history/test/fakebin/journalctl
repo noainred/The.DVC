@@ -1,0 +1,6 @@
+#!/bin/bash
+. "${0%/*}/_common"
+case " $* " in
+  *" _TRANSPORT=kernel "*) emit journal.out ;;
+  *) if [ -f "$RDH_FIX/journal-all.out" ]; then emit journal-all.out; else emit journal.out; fi ;;
+esac

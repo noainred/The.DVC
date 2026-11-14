@@ -1,0 +1,11 @@
+#!/bin/bash
+. "${0%/*}/_common"
+case " $* " in *" --scan "*) emit smartctl-scan.out ;; esac
+type=""; dev=""
+while [ $# -gt 0 ]; do
+  case "$1" in -d) type="$2"; shift 2 ;; -x|-a) shift ;; /dev/*) dev="$1"; shift ;; *) shift ;; esac
+done
+key="smartctl_$(printf '%s' "$dev${type:+_$type}" | tr -c 'A-Za-z0-9' '_').out"
+if [ -f "$RDH_FIX/$key" ]; then emit "$key"; fi
+echo "Smartctl open device: $dev failed: No such device"
+exit 2

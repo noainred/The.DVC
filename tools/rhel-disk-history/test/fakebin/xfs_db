@@ -1,0 +1,8 @@
+#!/bin/bash
+. "${0%/*}/_common"
+for a in "$@"; do dev="$a"; done
+case "$*" in
+  *"print rootino"*) [ -f "$RDH_FIX/xfsdb_${dev##*/}.out" ] || exit 1; echo "rootino = 128"; exit 0 ;;
+  *"crtime"*) emit "xfsdb_${dev##*/}.out" ;;
+esac
+exit 1
