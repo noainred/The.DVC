@@ -545,7 +545,7 @@ test('⑪ 복원 제외 · 소스 스윕 — 상태 파일은 복원하지 않�
   assert.doesNotMatch(rt, /ST\.(setCorpStop|clearCorpStop|addEvent|reload)/, '상태 쓰기는 service 를 거친다(사용 중지는 서버 목록과 함께)');
   const ob = stripComments(fs.readFileSync(path.join(SRC, 'routes/api/bmOnboard.js'), 'utf8'));
   assert.match(ob, /const keyAddGate = \[adminOnly, toolsPerm, requireSettingsOwner, twoPersonFirst, keyVaultFirst, reauth\];/);
-  assert.match(ob, /const keyChangeGate = \[adminOnly, toolsPerm, requireSettingsOwner, twoPersonFirst, reauth\];/, 'v3.10.0: 두 사람 승인이 켜져 있으면 7b 화면의 키 교체 · 삭제도 OTP 전에 거절');
+  assert.match(ob, /const keyChangeGate = \[adminOnly, toolsPerm, requireSettingsOwner, twoPersonFirst, installingFirst, reauth\];/, 'v3.10.0: 두 사람 승인이 켜져 있으면 7b 화면의 키 교체 · 삭제도 OTP 전에 거절 · 넣는 중인 키의 회전 · 삭제도 OTP 전에 409(1회차 반증)');
   assert.match(ob, /api\.post\('\/tools\/bm-usage\/ssh-keys', \.\.\.keyAddGate/);
   // 폴러 두 곳이 기능 id 를 밝힌다(빈 기능 id = 목록이 있는 키 거절)
   assert.match(fs.readFileSync(path.join(SRC, 'bmstor/poller.js'), 'utf8'), /\)\), \{ feature: 'bm-storage' \}\);/);

@@ -3087,7 +3087,7 @@ test('⑲ 소스 스윕 — 등록부 쓰기(키 묶기 · 되돌리기 · 저�
   // 7b 화면 — 키 등록 · 교체 · 삭제 게이트에 두 사람 승인 검사가 OTP 앞에 있다
   const ob = stripComments(fs.readFileSync(path.join(SRC, 'routes/api/bmOnboard.js'), 'utf8'));
   assert.match(ob, /const keyAddGate = \[adminOnly, toolsPerm, requireSettingsOwner, twoPersonFirst, keyVaultFirst, reauth\];/);
-  assert.match(ob, /const keyChangeGate = \[adminOnly, toolsPerm, requireSettingsOwner, twoPersonFirst, reauth\];/);
+  assert.match(ob, /const keyChangeGate = \[adminOnly, toolsPerm, requireSettingsOwner, twoPersonFirst, installingFirst, reauth\];/);
   assert.match(ob, /api\.post\('\/tools\/bm-usage\/ssh-keys\/rotate', \.\.\.keyChangeGate/);
   assert.match(ob, /api\.delete\('\/tools\/bm-usage\/ssh-keys\/:id', \.\.\.keyChangeGate/);
   // 알림 메일 — 본문이 사건에서 읽는 칸은 종류 · 법인 · 대상 · 누가 · 설명뿐이다(다른 칸을 본문에 싣는 코드가 생기면 여기서 걸린다)
