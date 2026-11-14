@@ -38,7 +38,9 @@ const EDGE_ONLINE_MS = 15 * 60_000;   // 엣지 접속 판정 — 설정 인출(
  */
 const fullRW = (req, res, next) => (isFullReadWriteScope(req.user, store.get()) ? next()
   : res.status(403).json({ ok: false, code: 'write-scope', reason: 'SSH 키 · 공통 계정을 바꾸려면 조회 · 쓰기 범위가 모두 무제한인 설정 소유자여야 합니다.' }));
-const keyAdmin = [adminOnly, toolsPerm, requireSettingsOwner, fullRW, reauth];
+/** 거두는 중인 키로 묶지 않는다 — 교체의 새 키(to) · 공통 계정의 기본 키(keyRef). 판정은 KL.revokingIssue 하나(4회차 A4-2 — SSH 공용 접속 쪽만 막았다). OTP 앞. */
+const revokingFirst = (req, res, next) => { const b = bodyOf(req); const v = KL.revokingIssue(t(b.to || b.keyRef || '', 32)); if (v) return send(res, v); return next(); };
+const keyAdmin = [adminOnly, toolsPerm, requireSettingsOwner, fullRW, revokingFirst, reauth];
 /**
  * 키 등록 전용 — 저장 방식이 키를 받을 수 없으면 **OTP 를 쓰기 전에** 거절한다(점검 B-5: 평문 정책 409 가 1회 비밀번호를 먼저 소모했다).
  * keyStore.addKey 도 같은 검사를 다시 한다(이 앞단은 OTP 를 아끼려는 것 — 판정은 keyVaultIssue 하나).
@@ -61,7 +63,7 @@ const installingFirst = (req, res, next) => {
   if (req.method === 'DELETE' && target && KS.keyById(target)?.status === 'pending') return res.status(409).json({ ok: false, code: 'key-pending', reason: '승인 대기 키입니다 — 설정 › 보안 › SSH 공용 접속의 승인 대기에서 돌려보내면 지워집니다.' });
   return next();
 };
-const keyChangeGate = [adminOnly, toolsPerm, requireSettingsOwner, fullRW, twoPersonFirst, installingFirst, reauth];
+const keyChangeGate = [adminOnly, toolsPerm, requireSettingsOwner, fullRW, twoPersonFirst, installingFirst, revokingFirst, reauth];
 
 const t = (v, max = 256) => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max).trim();
 const bodyOf = (req) => (req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {});

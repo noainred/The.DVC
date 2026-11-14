@@ -425,11 +425,16 @@ export function discardInbox({ relPath, sha = '', by = '' } = {}) {
  * 이 포탈이 아는 법인인가 — vCenter 목록 ∪ 등록부 서버의 법인 ∪ 공통 계정 · 키 폴더의 법인(2회차 반증 R2R-5 — vCenter 목록만 봐서, vCenter 를 지웠지만 서버 · 키가 남은 법인의 긴급 중지가 404 였다).
  * 아무것도 읽지 못하면(전부 비거나 오류) 막지 않는다(멈추는 쪽). → 거절 객체 또는 null.
  */
-async function unknownCorpIssue(c) {
-  const known = new Set();
-  try { for (const x of (await corpList()) || []) known.add(String(x.id)); } catch { /* */ }
-  try { if (!bmRegistryLoadError()) for (const s of listBmServersRaw()) if (t(s.vcenterId)) known.add(t(s.vcenterId)); } catch { /* */ }
-  try { if (!KS.keyStoreLoadError()) { for (const a of KS.listAccountsRaw()) if (t(a.corp)) known.add(t(a.corp)); for (const k of KS.listKeysRaw()) if (t(k.folderCorp)) known.add(t(k.folderCorp)); } } catch { /* */ }
+/**
+ * @param {{strict?:boolean}} [o]  strict — 출처 하나라도 못 읽으면 ‘모름’ 으로 보지 않는다(재개의 승인 생략 판정 — 4회차 A4-1: 등록부를 못 읽는 동안
+ *   등록부로만 알던 법인이 ‘모르는 법인’ 이 되어 중지가 승인 없이 풀렸다). 중지(멈추는 쪽)는 못 읽어도 막지 않는다(strict 아님).
+ */
+async function unknownCorpIssue(c, { strict = false } = {}) {
+  const known = new Set(); let allRead = true;
+  try { for (const x of (await corpList()) || []) known.add(String(x.id)); } catch { allRead = false; }
+  try { if (bmRegistryLoadError()) allRead = false; else for (const s of listBmServersRaw()) if (t(s.vcenterId)) known.add(t(s.vcenterId)); } catch { allRead = false; }
+  try { if (KS.keyStoreLoadError()) allRead = false; else { for (const a of KS.listAccountsRaw()) if (t(a.corp)) known.add(t(a.corp)); for (const k of KS.listKeysRaw()) if (t(k.folderCorp)) known.add(t(k.folderCorp)); } } catch { allRead = false; }
+  if (strict && !allRead) return null;
   return known.size && !known.has(c) ? { ok: false, code: 'unknown-corp', status: 404, reason: '이 포탈이 모르는 법인입니다(vCenter · 서버 · 공통 계정 · 키 폴더 어디에도 없음).' } : null;
 }
 /** 지금 그 법인 서버의 id · 접속처(중지 기록에 함께 적는다). */
@@ -466,7 +471,7 @@ export async function resumeCorp(corp, { by = '' } = {}) {
   if (!ST.stopFor(c) || ST.stopFor(c).unreadable) return ST.clearCorpStop(c, { by });   // 중지 상태가 아니거나 상태 모름 — 저장소가 사유를 말한다
   // 이 포탈이 모르는 법인 · 적힌 서버도 없는 중지는 막는 것이 없다 — 승인 없이 푼다(2회차 A2 — 가짜 중지를 푸는 데 승인이 수백 번 필요했다).
   { const st = ST.stopFor(c);
-    if (await unknownCorpIssue(c) && !(st.serverIds || []).length && !(st.addrs || []).length) return ST.clearCorpStop(c, { by }); }
+    if (await unknownCorpIssue(c, { strict: true }) && !(st.serverIds || []).length && !(st.addrs || []).length) return ST.clearCorpStop(c, { by }); }
   // 요청을 **그때의 중지**(걸린 시각)에 묶는다 — 그 뒤 새 사건으로 다시 건 중지를 옛 재개 요청이 풀지 못하게(점검 A6 · C-6).
   return submitSsh({ kind: 'ssh-corp-resume', title: `법인 키 사용 재개 — ${c}`, target: c, corp: c, payload: { corp: c, stopAt: Number(ST.stopFor(c).at) || 0 }, by }, () => ST.clearCorpStop(c, { by }));
 }
@@ -640,7 +645,8 @@ export function approvalPrecheck(id, { approve, by = '', digest = '' } = {}) {
       // 새 키를 거두는 중이면 교체할 수 없다 — 거두기가 끝나도 그 키 줄은 서버에 없다(4회차 E4-5 — ‘끝난 뒤 승인하세요’ 라고 해 따르면 접속이 끊겼다). 돌려보내라고 말한다.
       const rv = KL.revokingIssue(cur.payload?.to); if (rv) return { ...rv, reason: '새 키를 서버에서 거두는 중입니다 — 거둔 키로 교체하면 그 서버들의 키 접속이 끊깁니다. 이 요청은 돌려보내세요.' };
       const nb = KS.keyById(t(cur.payload?.to, 32));
-      if (nb && nb.status !== 'active') return { ok: false, code: nb.status === 'pending' ? 'key-pending' : 'key-retired', status: 409, reason: nb.status === 'pending' ? REFS.AUTH_ERROR['key-pending'] : '새 키가 그 사이 퇴역했습니다 — 이 요청은 돌려보내세요.' };
+      if (!nb) return { ok: false, code: 'key-missing', status: 409, reason: '새 키가 그 사이 지워졌습니다 — 이 요청은 돌려보내세요.' };   // OTP 앞(4회차 A4-4 c)
+      if (nb.status !== 'active') return { ok: false, code: nb.status === 'pending' ? 'key-pending' : 'key-retired', status: 409, reason: nb.status === 'pending' ? REFS.AUTH_ERROR['key-pending'] : '새 키가 그 사이 퇴역했습니다 — 이 요청은 돌려보내세요.' };
     }
     if (cur.kind === 'ssh-key-delete') { const ii = installingIssue(cur.payload?.keyId); if (ii) return { ...ii, reason: `${ii.reason} 요청은 그대로 둡니다 — 작업이 끝난 뒤 승인하세요.` }; }
     if (cur.kind === 'ssh-keystore-reload' && typeof cur.payload?.sha === 'string') {
@@ -700,10 +706,13 @@ export function requestPrecheck({ kind, target = '', by = '' } = {}) {
   return null;
 }
 /** 라우트별 사전 검사 묶음(OTP 앞). */
+/** 키 저장소를 못 읽음 — 사전 검사는 404(없음)가 아니라 503(4회차 A4-4 · 참고). */
+const STORE_UNREADABLE = Object.freeze({ ok: false, code: 'registry-unreadable', status: 503, reason: 'SSH 키 저장소를 읽지 못했습니다 — 바꾸지 않았습니다.' });
 export const prechecks = Object.freeze({
   // 폴더 대상도 OTP 앞(4회차 E4-2 — vCenter 목록 밖 법인 폴더에 등록하면 OTP 를 쓴 뒤 400 이었다). 받는 곳 승인은 폴더를 넘기지 않는다.
-  addKey: ({ by, folderCorp, folderServer }) => { const fi = folderTargetIssue(folderCorp, folderServer); return fi ? { ok: false, code: 'bad-folder', status: 400, reason: fi } : requestPrecheck({ kind: 'ssh-key-activate', by }); },
+  addKey: ({ by, folderCorp, folderServer }) => { if (KS.keyStoreLoadError()) return STORE_UNREADABLE; const fi = folderTargetIssue(folderCorp, folderServer); return fi ? { ok: false, code: 'bad-folder', status: 400, reason: fi } : requestPrecheck({ kind: 'ssh-key-activate', by }); },
   placement: ({ keyId, folderCorp, folderServer }) => {
+    if (KS.keyStoreLoadError()) return STORE_UNREADABLE;
     const k = KS.keyById(t(keyId, 32)); if (!k) return { ok: false, code: 'not-found', status: 404, reason: '키를 찾을 수 없습니다.' };
     if (folderCorp === undefined && folderServer === undefined) return null;
     const nc = folderCorp !== undefined ? t(folderCorp, 128) : k.folderCorp; const ns = folderServer !== undefined ? t(folderServer, 128) : (folderCorp !== undefined ? '' : k.folderServer);
@@ -711,12 +720,14 @@ export const prechecks = Object.freeze({
     const fi = folderTargetIssue(nc, ns); return fi ? { ok: false, code: 'bad-folder', status: 400, reason: fi } : null;
   },
   rotate: ({ from, to, by }) => {
+    if (KS.keyStoreLoadError()) return STORE_UNREADABLE;
     const a = KS.keyById(t(from, 32)); const b = KS.keyById(t(to, 32));
     if (!a || !b) return { ok: false, code: 'not-found', status: 404, reason: '옛 키 또는 새 키를 찾을 수 없습니다.' };
     if (b.status !== 'active') return { ok: false, code: b.status === 'pending' ? 'key-pending' : 'key-retired', status: 409, reason: b.status === 'pending' ? REFS.AUTH_ERROR['key-pending'] : '새 키가 퇴역 상태입니다.' };
     return installingIssue(a.id) || KL.revokingIssue(b.id) || requestPrecheck({ kind: 'ssh-key-rotate', target: `${a.id}>${b.id}`, by });
   },
   deleteKey: ({ keyId, by }) => {
+    if (KS.keyStoreLoadError()) return STORE_UNREADABLE;
     const k = KS.keyById(t(keyId, 32));
     if (!k) return { ok: false, code: 'not-found', status: 404, reason: '키를 찾을 수 없습니다.' };
     const ii = installingIssue(k.id); if (ii) return ii;
@@ -728,16 +739,17 @@ export const prechecks = Object.freeze({
     if (!st) return { ok: false, code: 'not-stopped', status: 409, reason: '그 법인은 사용 중지 상태가 아닙니다.' };
     if (st.unreadable) return { ok: false, code: 'state-unreadable', status: 503, reason: '상태 파일을 읽지 못해 사용 재개를 받지 않습니다.' };
     // 본 함수가 승인 없이 푸는 경우(모르는 법인 · 적힌 서버 없음)는 승인 요청 기준으로 거르지 않는다(3회차 A3-3 — 사전 검사가 no-approver 로 막아 풀 길이 없었다).
-    if (!(st.serverIds || []).length && !(st.addrs || []).length && await unknownCorpIssue(c)) return null;
+    if (!(st.serverIds || []).length && !(st.addrs || []).length && await unknownCorpIssue(c, { strict: true })) return null;
     return requestPrecheck({ kind: 'ssh-corp-resume', target: c, by });
   },
   reloadKeyStore: ({ by }) => (KS.diskFileSha() === null ? { ok: false, code: 'read-failed', status: 503, reason: '키 저장소 파일을 읽지 못했습니다.' }
     : requestPrecheck({ kind: 'ssh-keystore-reload', target: 'ssh-keys.json', by })),
   inboxPath: ({ relPath }) => (INB.relPathShapeOk(relPath) ? null : { ok: false, code: 'bad-path', status: 400, reason: '받는 곳 안의 파일 경로가 아닙니다.' }),
   // 법인 사용 중지 — 모르는 법인은 OTP 앞에서(2회차 반증 R2R-5).
-  stop: async ({ corp }) => unknownCorpIssue(t(corp, 128)),
+  stop: async ({ corp }) => (ST.stateLoadError() ? { ok: false, code: 'state-unreadable', status: 503, reason: '상태 파일을 읽지 못해 사용 중지를 적을 수 없습니다 — 먼저 상태 파일을 다시 읽으세요.' } : unknownCorpIssue(t(corp, 128))),   // OTP 앞(4회차 A4-4)
   // 서버 키 고르기 — 그 서버에 키 작업이 돌고 있으면 OTP 앞에서 409(본 함수가 다시 본다).
   chooseKey: ({ serverId, keyId }) => {
+    if (KS.keyStoreLoadError()) return STORE_UNREADABLE;
     const rv = t(keyId, 32) ? KL.revokingIssue(t(keyId, 32)) : null; if (rv) return rv;
     const s = bmServerRawById(t(serverId, 64));
     return s && KL.serverLockBusy(KL.serverLockKey(s)) ? { ok: false, code: 'server-busy', status: 409, reason: '이 서버에 다른 키 작업이 진행 중입니다 — 끝난 뒤 다시 고르세요.' } : null;

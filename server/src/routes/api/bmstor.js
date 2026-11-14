@@ -518,6 +518,11 @@ export function registerBmStorage(api) {
       const { reauth } = await import('./reauth.js');
       const g1 = await runGate(requireSettingsOwner, req);
       if (!g1.ok) return res.status(g1.status).json({ ...g1.body, reason: '공통 계정 · SSH 키를 서버 주소에 묶는 저장은 설정 소유자(전체 범위)만 할 수 있습니다 — 개별 비밀번호로 등록하거나 소유자에게 맡기세요.' });
+      // 쓰기 범위도 무제한이어야 한다(4회차 A4-3 — SSH 공용 접속 · 7b 키 쓰기와 같은 판정 · 쓰기 범위를 좁힌 소유자가 이 경로로 다른 법인 서버에 키를 묶었다).
+      { const { isFullReadWriteScope } = await import('../../auth/scope.js'); const { store } = await import('../../store.js');
+        if (!isFullReadWriteScope(req.user, store.get())) return res.status(403).json({ ok: false, code: 'write-scope', reason: 'SSH 키 · 공통 계정을 서버에 묶으려면 조회 · 쓰기 범위가 모두 무제한인 설정 소유자여야 합니다.' }); }
+      // 거두는 중인 키로 묶지 않는다(4회차 A4-2).
+      { const KL = await import('../../sshaccess/keyLogin.js'); const kr = typeof body.keyRef === 'string' ? body.keyRef.slice(0, 32).trim() : ''; const v = kr ? KL.revokingIssue(kr) : null; if (v) return res.status(v.status || 409).json({ ok: false, code: v.code, reason: v.reason }); }
       const g2 = await runGate(reauth, req);
       if (!g2.ok) return res.status(g2.status).json(g2.body);
     }
