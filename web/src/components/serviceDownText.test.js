@@ -64,6 +64,18 @@ describe('serviceDownKind — 절대 잡으면 안 되는 것', () => {
   it('4xx 상태코드가 있으면 메시지에 network 문구가 있어도 null(상태코드 우선)', () => {
     expect(serviceDownKind('Failed to fetch', { status: 404 })).toBeNull();
   });
+  it('★ 서버가 상태 사유 code 를 준 503(등록부 · 상태 · 승인 기록 못 읽음 등)은 서버가 살아 있다 — null(사유 문구를 그대로 보인다)', () => {
+    for (const code of ['registry-unreadable', 'state-unreadable', 'approvals-unreadable', 'read-failed', 'secrets-undecryptable', 'SECRETS_POLICY_UNAVAILABLE', 'usage-unknown', 'auth-disabled']) {
+      expect(serviceDownKind('/api/tools/ssh-access -> 503', { status: 503, body: { ok: false, code, error: '설정 파일을 읽지 못했습니다' } })).toBeNull();
+    }
+  });
+  it('code 가 없거나 모르는 code 인 503 은 여전히 gateway(프록시 · 게이트웨이 미가용)', () => {
+    expect(serviceDownKind('/api/tools/ssh-access -> 503', { status: 503 })).toBe('gateway');
+    expect(serviceDownKind('/api/tools/ssh-access -> 503', { status: 503, body: { ok: false } })).toBe('gateway');
+    expect(serviceDownKind('/api/tools/ssh-access -> 503', { status: 503, body: { code: '' } })).toBe('gateway');
+    expect(serviceDownKind('/api/tools/ssh-access -> 503', { status: 503, body: { code: 'some-other-code' } })).toBe('gateway');
+    expect(serviceDownKind('/api/tools/ssh-access -> 503', { status: 503, body: '<html>Service Unavailable</html>' })).toBe('gateway');
+  });
 });
 
 describe('문구·진단 항목', () => {
