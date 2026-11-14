@@ -26,7 +26,7 @@ const DAY_OPTS = [7, 30, 90, 365];
 const SEARCH_DEBOUNCE_MS = 300;
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
-import { KPI_HANDOFF, takeKpiVcenter } from '../platform/platformText.js'; // v2.959: 가상화 플랫폼 KPI 카드가 넘긴 법인
+import { KPI_HANDOFF, takeKpiVcenter, regionsOf, vcInRegion } from '../platform/platformText.js'; // v2.959: 가상화 플랫폼 KPI 카드가 넘긴 법인 · v3.10.15: 리전
 const slotLabel = (slot) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(00|12)$/.exec(String(slot || ''));
   return m ? `${Number(m[2])}/${Number(m[3])} ${m[4]}시` : String(slot || '');
@@ -37,6 +37,8 @@ export default function StorageTrackTool() {
   const [days, setDays] = useState(30);
   // v2.959: 가상화 플랫폼 KPI 카드에서 왔으면 고른 법인(vCenter)을 초기 선택으로(메모리 인계 · 마운트 때 1회 · 없으면 전체).
   const [vcenterId, setVcenterId] = useState(() => takeKpiVcenter(KPI_HANDOFF.storageTrack));
+  // v3.10.15(점검 3회차): 리전 선택(VmTrackTool 과 같은 규칙) — vcenterId 가 있으면 region 은 보내지 않는다.
+  const [region, setRegion] = useState(() => takeKpiVcenter(KPI_HANDOFF.storageTrackRegion));
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -48,11 +50,16 @@ export default function StorageTrackTool() {
   // v2.622(감사 WEB-05): 기간·vCenter 를 바꿀 때 늦게 온 이전 범위 응답이 새 선택을 덮지 않게 세대 가드(형제
   // VmTrackTool 과 같은 useLatest). 범위가 바뀌면 이전 범위 데이터를 비운다(다음 응답까지 옛 차트를 보이지 않게).
   const runLatest = useLatest();
-  const refresh = () => runLatest(fetchJson('/tools/vm-track', { days, vcenterId }),
+  const refresh = () => runLatest(fetchJson('/tools/vm-track', { days, vcenterId, ...(region && !vcenterId ? { region } : {}) }),
     (d) => { setData(d); setError(null); },
     (e) => setError(e.message));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { setData(null); setError(null); refresh(); const t = setInterval(refresh, 30_000); return () => clearInterval(t); }, [days, vcenterId]);
+  useEffect(() => { setData(null); setError(null); refresh(); const t = setInterval(refresh, 30_000); return () => clearInterval(t); }, [days, vcenterId, region]);
+  const vcListS = Array.isArray(data?.vcenterList) ? data.vcenterList : [];
+  const regions = regionsOf(vcListS);
+  const vcOptions = vcInRegion(vcListS, region);
+  const pickRegion = (r) => { setRegion(r); if (vcenterId && !vcInRegion(vcListS, r).some((v) => v.id === vcenterId)) setVcenterId(''); };
+  const scopeText = vcenterId ? (vcListS.find((v) => v.id === vcenterId)?.name || vcenterId) : (region ? `리전 ${region} 합계` : '전체 vCenter 합계');
 
   // points 를 밖에서 만들면 매 렌더 새 배열이라 useMemo 가 무의미해진다 — 콜백 안에서 언팩한다.
   // v2.348 이전 버전에서 만들어진 스냅샷 행은 ds 열이 0 — 0 으로 그리면 라인이 바닥으로 꺼지고
@@ -110,7 +117,7 @@ export default function StorageTrackTool() {
     } catch (e) { setMsg(e.message); } finally { setBusy(false); }
   };
   const openDetail = (row, vc) => setDetail({
-    title: `${slotLabel(row.slot)} 데이터스토어 사용량 변화${vc ? ` — ${vc}` : (vcenterId ? ` — ${vcenterId}` : ' — 전체 vCenter')}`,
+    title: `${slotLabel(row.slot)} 데이터스토어 사용량 변화${vc ? ` — ${vc}` : ` — ${scopeText}`}`,
     slot: (vc || vcenterId) ? null : row.slot,
     snapId: vc ? row.snapId : (vcenterId ? row.snapId : null),
   });
@@ -131,9 +138,15 @@ export default function StorageTrackTool() {
           </div>
         </div>
         <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
-          <Select className="input" value={vcenterId} onChange={(e) => setVcenterId(e.target.value)} style={{ padding: '6px 10px', fontSize: 12.5 }}>
-            <option value="">전체 vCenter(합계)</option>
-            {(data.vcenterList || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+          {(regions.length > 1 || region) && (
+            <Select className="input" value={region} onChange={(e) => pickRegion(e.target.value)} style={{ padding: '6px 10px', fontSize: 12.5 }} aria-label="리전" title="리전을 고르면 그 리전 법인들의 합계 · vCenter 를 고르면 그 vCenter 만">
+              <option value="">전체 리전</option>
+              {regions.map((r) => <option key={r} value={r}>{r}</option>)}
+            </Select>
+          )}
+          <Select className="input" value={vcenterId} onChange={(e) => setVcenterId(e.target.value)} style={{ padding: '6px 10px', fontSize: 12.5 }} aria-label="vCenter">
+            <option value="">{region ? `리전 ${region} 전체(합계)` : '전체 vCenter(합계)'}</option>
+            {vcOptions.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
           </Select>
           <span className="flex gap">
             {DAY_OPTS.map((d) => (
@@ -175,7 +188,7 @@ export default function StorageTrackTool() {
       ) : (
         <>
           <div className="card" style={{ padding: 12, marginBottom: 12 }}>
-            <b style={{ fontSize: 13 }}>용량 / 사용량 / 사용률 {vcenterId ? `— ${vcenterId}` : '— 전체 vCenter 합계'}</b>
+            <b style={{ fontSize: 13 }}>용량 / 사용량 / 사용률 {`— ${scopeText}`}</b>
             {/* 사용자 요구 형태(v2.352): 총 용량은 상단 한도선(라인), 슬롯별 사용량은 바닥에서
                 올라오는 막대 — 사용량이 용량선에 다가가는 정도가 한눈에 보인다. 막대라 축은 0부터. */}
             <div style={{ width: '100%', height: 270, marginTop: 8 }}>
@@ -267,7 +280,7 @@ export default function StorageTrackTool() {
 
           {/* 스토리지 변경 이력(v2.355, 목업 확정 C) — A 시각별 / B DS별 전환 */}
           <DsChangeHistory days={days} vcenterId={vcenterId} onPick={(it) => setDsTrend(it)} onSlot={(g) => setDetail({
-            title: `${slotLabel(g.slot)} 데이터스토어 사용량 변화${vcenterId ? ` — ${vcenterId}` : ' — 전체 vCenter'}`,
+            title: `${slotLabel(g.slot)} 데이터스토어 사용량 변화${` — ${scopeText}`}`,
             slot: g.slot, snapId: null,
           })} />
 
@@ -375,7 +388,7 @@ function DsChangeHistory({ days, vcenterId, onPick, onSlot }) {
     <div className="card" style={{ padding: 12, marginBottom: 12 }}>
       <div className="flex between wrap" style={{ alignItems: 'center' }}>
         <div>
-          <b style={{ fontSize: 13 }}>스토리지 변경 이력 {vcenterId ? `— ${vcenterId}` : '— 전체 vCenter'}</b>
+          <b style={{ fontSize: 13 }}>스토리지 변경 이력 {`— ${scopeText}`}</b>
           <span className="muted" style={{ fontSize: 11.5, marginLeft: 8 }}>
             {view === 'slots' ? '시각별 — 그 슬롯에 변화한 데이터스토어(칩 클릭 → 추이 차트)' : 'DS별 — 최근 슬롯 증감 피벗(행 클릭 → 추이 차트)'}
           </span>

@@ -33,7 +33,7 @@ export function registerVmTrack(api) {
       // 화면 콤보용 vCenter 목록(스냅샷 기준 — 아직 추적 이력이 없는 vCenter 도 선택 가능).
       const vcenters = (snap.vcenters || [])
         .filter((vc) => !allowed || allowed.has(vc.id))
-        .map((vc) => ({ id: vc.id, name: vc.name || vc.id }))
+        .map((vc) => ({ id: vc.id, name: vc.name || vc.id, region: String(vc.location?.region || '') }))   // v3.10.15: 화면의 리전 선택(?region=)용
         // 콤보 정렬(v2.356, 사용자 요구) — 스냅샷의 등록 순서가 아니라 이름순(숫자 인지).
         .sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true, sensitivity: 'base' }));
       // 폴러 상태의 lastResult 는 전 vCenter 합계(total/added/removed)라 범위 제한 계정에 노출하면
