@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>서버 스크립트 실행 — 실행 확인</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.5}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.sm{font-size:11.5px;color:#8b9bb4}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn.pri{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;box-sizing:border-box}
+.tag.ok{background:rgba(34,197,94,.16);color:#86efac}
+.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.tag.unk{background:rgba(139,155,180,.14);color:#aebbd0}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid #1f2a40}
+.k{flex:0 0 132px;color:#8b9bb4;font-size:12px}
+.v{flex:1 1 300px;min-width:0}
+.line{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap}
+.box{border:1px solid #243049;border-radius:10px;background:#0f1626}
+.opt{display:flex;gap:8px;align-items:center;min-height:36px;padding:0 12px;border:1px solid #243049;border-radius:8px;background:#0f1626;flex:1 1 200px;min-width:0}
+.opt.on{border-color:#3b82f6;background:rgba(59,130,246,.10)}
+input[type=radio]{accent-color:#3b82f6;margin:0}
+.in{box-sizing:border-box;width:100%;min-height:36px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit}
+label.f{display:flex;flex-direction:column;gap:4px;flex:1 1 240px;min-width:0;font-size:12px;color:#8b9bb4}
+h2{margin:0;font-size:14px;font-weight:800}
+</style>
+</helmet>
+<div style="width:760px;height:1400px;box-sizing:border-box;padding:28px;display:flex;flex-direction:column;gap:18px;background:#0a0e17">
+
+<div role="dialog" aria-labelledby="dlg-t" style="background:#141b2d;border:1px solid #243049;border-radius:14px;box-shadow:0 4px 24px rgba(0,0,0,.4);display:flex;flex-direction:column">
+
+<div style="padding:18px 20px 12px;display:flex;flex-direction:column;gap:4px">
+<h1 id="dlg-t" style="margin:0;font-size:17px;font-weight:800">‘커널 · 패키지 판 조사’ 를 실행합니다</h1>
+<span class="muted">전 법인 · 실행할 수 있는 서버 9대. 아래 스크립트 그대로(승인된 판)만 실행됩니다.</span>
+</div>
+
+<div class="box" style="margin:0 20px 12px">
+<div class="row"><span class="k">스크립트</span><span class="v"><b>커널 · 패키지 판 조사</b> <span class="sm mono">os-inventory · v2</span></span></div>
+<div class="row"><span class="k">내용 지문</span><span class="v mono" style="font-size:12px">sha256 9f2c41d7…a41b03e6 <span class="tag ok" style="margin-left:6px">승인 때와 같음</span></span></div>
+<div class="row"><span class="k">등록 · 승인</span><span class="v">등록 kim.sj · 승인 park.dh (2026-11-10) — 두 사람</span></div>
+<div class="row" style="border-bottom:0"><span class="k">성격 · 권한</span><span class="v">읽기 전용(등록자가 적은 선언) · 일반 계정으로 실행 · 서버당 시한 2분</span></div>
+</div>
+
+<div role="radiogroup" aria-label="대상" style="display:flex;gap:8px;flex-wrap:wrap;margin:0 20px 12px">
+<label class="opt on"><input type="radio" name="t" checked><span><b>전 법인</b> — 9대</span></label>
+<label class="opt"><input type="radio" name="t"><span><b>법인 하나</b></span></label>
+<label class="opt"><input type="radio" name="t"><span><b>선택한 서버</b></span></label>
+</div>
+
+<div class="box" style="margin:0 20px">
+<div class="row"><span style="font-weight:700;flex:0 0 96px">미국 동부</span><span class="sm" style="flex:0 0 40px">2대</span><span class="sm" style="flex:1 1 200px">엣지 use-edge 가 현지에서 실행</span></div>
+<div class="row"><span style="font-weight:700;flex:0 0 96px">베트남</span><span class="sm" style="flex:0 0 40px">3대</span><span class="sm" style="flex:1 1 200px">엣지 vn-edge 가 현지에서 실행</span></div>
+<div class="row"><span style="font-weight:700;flex:0 0 96px">인도</span><span class="sm" style="flex:0 0 40px">1대</span><span class="sm" style="flex:1 1 200px">중앙 직접 · 실행 안 함 1대</span></div>
+<div class="row" style="border-bottom:0"><span style="font-weight:700;flex:0 0 96px">한국 본사</span><span class="sm" style="flex:0 0 40px">3대</span><span class="sm" style="flex:1 1 200px">중앙 직접</span></div>
+</div>
+
+<div class="box" style="margin:12px 20px 0;border-color:#5b4a1e;background:rgba(245,158,11,.07);padding:10px 12px;display:flex;flex-direction:column;gap:4px">
+<b style="color:#fcd34d">실행하지 않는 서버 3대</b>
+<span class="sm" style="color:#e6edf6">키의 ‘쓸 수 있는 기능’ 에 이 스크립트가 없음 2대(in-erp-02 · pl-bkp-sd01) · 법인 키 사용 중지 1대(pl-bkp-sd02)</span>
+<span class="sm">접속하지 않고 ‘실행 안 함’ 으로 남깁니다. 허용하려면 <a href="SshKeys.dc.html">설정 › SSH 공용 접속 › 키 폴더</a>에서 그 키의 기능에 이 스크립트를 더합니다(설정 소유자 · 본인 OTP).</span>
+</div>
+
+<div style="padding:16px 20px 4px;display:flex;gap:12px;flex-wrap:wrap">
+<label class="f">조사 범위(스크립트가 정해 둔 선택지)<select class="in"><option>커널 + 패키지 목록</option><option>커널만</option></select></label>
+<label class="f">사유(필수 · 감사 로그에 남습니다)<input class="in" type="text" value="보안 공지 대응 — 커널 판 확인"></label>
+</div>
+
+<div style="padding:12px 20px 16px;display:flex;flex-direction:column;gap:11px">
+<div class="line"><span class="k">서버에서 하는 일</span><span class="v">uname · rpm -qa 를 읽어 커널 판과 패키지 목록을 냅니다(등록자가 적은 설명 — 포탈이 내용을 분석해 확인한 것이 아닙니다).</span></div>
+<div class="line"><span class="k">서버에 남기는 것</span><span class="v">없음 — 스크립트는 SSH 표준 입력으로 흘려 보내고 파일로 두지 않습니다. 임시 폴더는 끝나면 지웁니다.</span></div>
+<div class="line"><span class="k">인자</span><span class="v">위 선택지 값만 넘깁니다. 자유롭게 적는 인자는 없습니다(명령 끼워 넣기 방지).</span></div>
+<div class="line"><span class="k">시한 · 출력</span><span class="v">서버당 2분, 넘으면 서버 쪽에서 멈춥니다. 출력은 2MB 까지 저장하고 넘으면 잘린 줄 수를 적습니다.</span></div>
+<div class="line"><span class="k">동시 실행</span><span class="v">법인 안에서는 1대씩 차례로, 법인끼리는 동시에.</span></div>
+</div>
+
+<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;padding:14px 20px;border-top:1px solid #1f2a40">
+<button class="btn" type="button">취소</button>
+<button class="btn pri" type="button">9대에서 실행</button>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:8px">
+<h2>‘서버를 바꿈’ 으로 선언된 스크립트는 한 단계 더</h2>
+<div class="box" style="padding:12px 14px;display:flex;flex-direction:column;gap:10px">
+<span><span class="tag warn">서버를 바꿈</span> <b style="margin-left:4px">시간 동기 설정 맞추기</b> <span class="sm mono">chrony-align · v1</span></span>
+<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+<label class="f" style="flex:0 1 220px">본인 OTP(실행할 때마다)<input class="in mono" type="text" inputmode="numeric" value="" placeholder="6자리"></label>
+<span class="sm" style="flex:1 1 300px;min-width:0">설정 소유자 등급만 실행할 수 있고, 전 법인 한 번에는 실행할 수 없습니다(법인 하나 또는 선택한 서버). 읽기 전용 스크립트는 그 법인을 맡은 관리자가 사유만 적고 실행합니다.</span>
+</div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:8px">
+<h2>실행 직전에 포탈이 다시 확인하는 것</h2>
+<div class="box">
+<div class="row"><span class="k">내용 지문</span><span class="v">저장된 스크립트의 sha256 을 다시 계산해 승인 기록과 비교 — 다르면 실행하지 않고 보안 사건으로 남깁니다.</span></div>
+<div class="row"><span class="k">키의 허용</span><span class="v">서버마다 그 서버의 키가 이 스크립트를 허용하는지 — 아니면 그 서버만 ‘실행 안 함’.</span></div>
+<div class="row" style="border-bottom:0"><span class="k">엣지 법인</span><span class="v">엣지가 받은 본문의 지문을 스스로 다시 계산해 맞을 때만 실행합니다. 포탈 묶음 스크립트는 엣지가 자기 판의 사본을 씁니다.</span></div>
+</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":760,"height":1400}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

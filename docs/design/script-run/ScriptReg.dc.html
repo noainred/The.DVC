@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>설정 — 서버 스크립트 등록과 두 사람 승인</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.sm{font-size:11.5px;color:#8b9bb4}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn.pri{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.btn.danger{border-color:#7f2d36;background:rgba(239,68,68,.12);color:#fecaca}
+.btn[disabled]{opacity:.45;cursor:default}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;box-sizing:border-box}
+.tag.ok{background:rgba(34,197,94,.16);color:#86efac}
+.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}
+.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.tag.unk{background:rgba(139,155,180,.14);color:#aebbd0}
+.tag.lock{border:1px solid #33415c;color:#aebbd0}
+h2{margin:0;font-size:14px;font-weight:800}
+.hd{display:flex;gap:10px;align-items:baseline;justify-content:space-between;flex-wrap:wrap;padding:12px 14px;border-bottom:1px solid #1f2a40}
+.it{display:flex;flex-direction:column;gap:3px;padding:10px 14px;border-bottom:1px solid #1f2a40}
+.it:last-child{border-bottom:0}
+.it.on{background:rgba(59,130,246,.10);box-shadow:inset 3px 0 0 #3b82f6}
+.row{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;padding:8px 14px;border-bottom:1px solid #1f2a40}
+.row:last-child{border-bottom:0}
+.k{flex:0 0 120px;color:#8b9bb4;font-size:12px}
+.v{flex:1 1 280px;min-width:0}
+.step{flex:1 1 180px;min-width:0;padding:10px 12px;border:1px solid #243049;border-radius:10px;background:#0f1626;display:flex;flex-direction:column;gap:3px}
+.step.done{border-color:#1f5a3a}
+.step.now{border-color:#3b82f6;background:rgba(59,130,246,.10)}
+pre{margin:0;padding:10px 14px;background:#0b111e;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;line-height:1.6;color:#cdd7e6;overflow-x:auto;white-space:pre}
+.add{color:#86efac}.del{color:#fca5a5}
+.in{box-sizing:border-box;width:100%;min-height:36px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit}
+label.f{display:flex;flex-direction:column;gap:4px;min-width:0;font-size:12px;color:#8b9bb4}
+</style>
+</helmet>
+<div style="width:1240px;height:1640px;box-sizing:border-box;padding:24px 28px;display:flex;flex-direction:column;gap:16px;background:#0a0e17">
+
+<nav aria-label="위치" class="sm" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+<span>설정</span><span>›</span><span>보안</span><span>›</span><span style="color:#e6edf6">서버 스크립트</span>
+</nav>
+
+<header style="display:flex;gap:16px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap">
+<div style="display:flex;flex-direction:column;gap:6px;min-width:0;flex:1 1 560px">
+<h1 style="margin:0;font-size:20px;font-weight:800">서버 스크립트 — 등록 · 승인</h1>
+<p class="muted" style="margin:0;max-width:820px">서버에서 실행할 Python 스크립트를 올리고 승인합니다. <b style="color:#e6edf6">올린 사람과 다른 설정 소유자가 내용을 보고 승인해야</b> 쓸 수 있고, 승인은 그 내용의 지문(sha256)에 묶입니다 — 한 글자라도 바뀌면 다시 승인받아야 합니다.</p>
+</div>
+<button class="btn pri" type="button">새 스크립트 올리기</button>
+</header>
+
+<div style="display:flex;gap:16px;align-items:flex-start">
+
+<section class="card" aria-labelledby="t-list" style="flex:0 0 330px">
+<div class="hd"><h2 id="t-list">스크립트 5개</h2></div>
+<div class="it"><b>디스크 오류 이력 점검</b><span class="sm mono">rhel-disk-audit · v1</span><span><span class="tag lock">포탈 묶음</span> <span class="tag ok">서명 확인</span></span></div>
+<div class="it"><b>커널 · 패키지 판 조사</b><span class="sm mono">os-inventory · v2</span><span><span class="tag ok">승인됨</span></span></div>
+<div class="it"><b>시간 동기 설정 맞추기</b><span class="sm mono">chrony-align · v1</span><span><span class="tag ok">승인됨</span> <span class="tag warn">서버를 바꿈</span></span></div>
+<div class="it on"><b>진단 로그 묶음 수집</b><span class="sm mono">diag-bundle · v3(대기) · 쓰이는 판 v2</span><span><span class="tag warn">새 판 승인 대기</span></span></div>
+<div class="it"><b style="color:#8b9bb4">임시 파일 정리</b><span class="sm mono">tmp-clean · v4</span><span><span class="tag bad">사용 중지</span></span></div>
+</section>
+
+<div style="flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:16px">
+
+<section class="card" aria-labelledby="t-sel">
+<div class="hd"><h2 id="t-sel">진단 로그 묶음 수집 — 새 판 v3 승인 대기</h2><span class="sm">승인될 때까지는 승인된 v2 가 그대로 실행됩니다</span></div>
+<div style="display:flex;gap:8px;flex-wrap:wrap;padding:12px 14px;border-bottom:1px solid #1f2a40">
+<div class="step done"><b>① 올림</b><span class="sm">kim.sj · 2026-11-14 09:12 · 본인 OTP</span></div>
+<div class="step now"><b>② 다른 소유자의 승인</b><span class="sm">내용 · 바뀐 곳 · 선언을 보고 본인 OTP 로 승인</span></div>
+<div class="step"><b>③ 사용</b><span class="sm">키의 ‘쓸 수 있는 기능’ 에 든 서버에서만</span></div>
+</div>
+<div class="row"><span class="k">내용 지문</span><span class="v mono" style="font-size:12px">v3 sha256 51e07ab2…c9d4f118 <span class="muted">(쓰이는 v2 는 a37f10c4…0be2d6a1)</span></span></div>
+<div class="row"><span class="k">하는 일(등록자 설명)</span><span class="v">/var/log 의 최근 로그와 dmesg 를 묶어 표준 출력으로 냅니다. v3 은 journal 최근 2시간을 더합니다.</span></div>
+<div class="row"><span class="k">성격(선언)</span><span class="v">읽기 전용 — 서버의 파일 · 설정을 바꾸지 않는다고 등록자가 선언</span></div>
+<div class="row"><span class="k">권한 · 시한</span><span class="v">root(비밀번호 없는 sudo 가능) · 서버당 10분 · 출력 상한 2MB</span></div>
+<div class="row"><span class="k">인자</span><span class="v">선택지 1개 — 기간: 2시간 · 24시간(자유 입력 없음)</span></div>
+<div class="row"><span class="k">기능 이름</span><span class="v">SSH 공용 접속 › 키 폴더의 ‘쓸 수 있는 기능’ 에 <b>스크립트: 진단 로그 묶음 수집</b> 으로 나옵니다. 판이 바뀌어도 키 쪽 허용은 그대로입니다.</span></div>
+</section>
+
+<section class="card" aria-labelledby="t-diff">
+<div class="hd"><h2 id="t-diff">v2 에서 바뀐 곳</h2><span class="sm">더한 줄 12 · 뺀 줄 3 · 전체 148줄</span></div>
+<pre><span class="muted"> 61  def collect(hours):</span>
+<span class="del">-62      out = run(["dmesg", "--ctime"])</span>
+<span class="add">+62      out = run(["dmesg", "--ctime"], limit=4000)</span>
+<span class="add">+63      out += run(["journalctl", "--since", "-%dh" % hours, "--no-pager"], limit=20000)</span>
+<span class="muted"> 64      return out</span>
+<span class="muted">…(바뀐 곳 3군데 중 1군데 — 전체 보기에서 나머지를 봅니다)</span></pre>
+<div style="display:flex;gap:8px;flex-wrap:wrap;padding:10px 14px;border-top:1px solid #1f2a40"><button class="btn" type="button">v3 전체 보기(148줄)</button><button class="btn" type="button">v3 내려받기</button></div>
+</section>
+
+<section class="card" aria-labelledby="t-appr" style="border-color:#2b4a86">
+<div class="hd"><h2 id="t-appr">승인</h2><span class="sm">지금 로그인: park.dh(설정 소유자) — 올린 사람(kim.sj)과 다른 계정이라 승인할 수 있습니다</span></div>
+<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;padding:12px 14px">
+<label class="f" style="flex:0 1 200px">본인 OTP<input class="in mono" type="text" inputmode="numeric" placeholder="6자리"></label>
+<label class="f" style="flex:1 1 280px">승인 의견(선택)<input class="in" type="text" placeholder="예: journal 범위 확인함"></label>
+<button class="btn pri" type="button">v3 승인</button>
+<button class="btn" type="button">돌려보내기</button>
+</div>
+<div style="padding:0 14px 12px"><span class="sm">올린 사람 자신은 승인 단추가 잠깁니다. 설정 소유자가 한 명뿐인 포탈에서는 등록한 스크립트를 쓸 수 없습니다(포탈 묶음 스크립트만 실행).</span></div>
+</section>
+
+</div>
+</div>
+
+<section class="card" aria-labelledby="t-new">
+<div class="hd"><h2 id="t-new">새 스크립트 올리기 — 적는 것</h2><span class="sm">설정 소유자 · 본인 OTP</span></div>
+<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;padding:12px 14px">
+<label class="f">파일(.py · 256KB 까지)<input class="in" type="text" value="os_inventory.py" readonly></label>
+<label class="f">이름<input class="in" type="text" value="커널 · 패키지 판 조사"></label>
+<label class="f">성격<select class="in"><option>읽기 전용</option><option>서버를 바꿈</option></select></label>
+<label class="f">권한<select class="in"><option>일반 계정</option><option>root(sudo 가능)</option></select></label>
+<label class="f" style="grid-column:span 2">서버에서 하는 일(실행 확인 창에 그대로 보입니다)<input class="in" type="text" value="uname · rpm -qa 를 읽어 커널 판과 패키지 목록을 냅니다"></label>
+<label class="f">서버당 시한(최대 30분)<input class="in" type="text" value="2분"></label>
+<label class="f">인자 선택지(없으면 비움)<input class="in" type="text" value="범위: 커널+패키지 | 커널만"></label>
+</div>
+</section>
+
+<section class="card" aria-labelledby="t-stop">
+<div class="hd"><h2 id="t-stop">바로 멈추기 · 지우기</h2></div>
+<div class="row"><span class="k">사용 중지</span><span class="v">설정 소유자 한 명이 본인 OTP 로 즉시. 진행 중인 실행은 그 서버까지만 하고 멈춥니다. 다시 쓰려면 두 사람 승인을 다시 받습니다.</span><button class="btn danger" type="button">이 스크립트 사용 중지</button></div>
+<div class="row"><span class="k">포탈 묶음</span><span class="v">포탈 릴리스에 들어 있는 스크립트는 여기서 고칠 수 없습니다. 릴리스 서명으로 확인하고, 파일이 서명과 다르면 실행하지 않습니다. 사용 중지는 할 수 있습니다.</span></div>
+<div class="row"><span class="k">백업 복원</span><span class="v">복원으로는 승인을 되살리지 않습니다 — 복원한 스크립트는 ‘승인 대기’ 로 돌아옵니다.</span></div>
+</section>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1240,"height":1640}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>
