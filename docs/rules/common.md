@@ -316,6 +316,9 @@
     JSON 에 버전 · 생성 시각을 싣지 않는다(릴리스의 버전업마다 다시 만들게 된다). 라우트 `GET /api/tools/portal-check/common` 은
     `adminOnly, fullScopeOnly` + 관리자 판본만(`isAdminDetailUser` — 데모 계정 403) · 파일이 없으면 `missing`, 못 읽으면 `unreadable`(빈 목록으로 만들지 않는다).
     회귀 `server/test/commonCatalog3100.test.js`(실제 라우트 호출) · `web/src/views/tools/commonCatalogText.test.js`.
+  - **머리 주석은 파일 맨 앞에 둔다** — 생성기는 import 뒤의 주석을 보수적으로 읽는다(v3.10 Chromium 판독에서 `store.js` 가 ‘v2.617’ 로 실렸다):
+    import 줄 끝 주석 · import 사이 한 줄 메모는 버리고, import 뒤 주석이 선언에 바로 붙어 있으면 내보내는 함수 · 클래스 · 기본 내보내기 ·
+    파일과 같은 이름의 선언일 때만 모듈 설명으로 쓴다. 모듈 상수 위에 둔 머리 주석(`TaskWho.jsx` · `EscClose.jsx`)은 ‘설명 없음’ 이 된다.
   - 내보내는 이름은 정규식으로 읽되 테스트가 서버 유틸 전수를 **실제 모듈 네임스페이스**(`Object.keys(await import())`)와 대조한다.
     이름을 못 뽑는 형태(`export const { a } = x`)·풀리지 않는 상대 import·빈 공용 위치는 **종료코드 1 이고 파일을 쓰지 않는다**.
 - **테스트가 띄운 프로세스를 PID 로 정리할 때는 소유를 확인하고 죽인다**(2026-10-26 PR #779 → v3.8.1 이식): `npm test` 는 파일을 병렬로 돌리므로, 로그에 남긴 PID 의

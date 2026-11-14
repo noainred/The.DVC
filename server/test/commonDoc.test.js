@@ -105,12 +105,30 @@ test('scanPathLiterals — 테스트가 가리키는 모듈 경로(조합 경로
 });
 
 test('headSummary — import 뒤 머리 주석 · 장식 줄 · 자기 파일 이름 접두 · 길이 상한', () => {
-  assert.equal(headSummary("import fs from 'node:fs';\nimport path from 'node:path';\n\n/**\n * 원자적 파일 쓰기.\n *\n * 둘째 단락.\n */\nexport const a = 1;"), '원자적 파일 쓰기.');
+  // util/atomicWrite.js 모양 — import 뒤 JSDoc 다음에 또 JSDoc(그 다음이 선언).
+  assert.equal(headSummary("import fs from 'node:fs';\nimport path from 'node:path';\n\n/**\n * 원자적 파일 쓰기.\n *\n * 둘째 단락.\n */\n/** 함수 설명 */\nexport const a = 1;"), '원자적 파일 쓰기.');
   assert.equal(headSummary('// ────────────\n// 권한 프레임워크\n// ────────────\nexport const a = 1;'), '권한 프레임워크');
   assert.equal(headSummary('/**\n * util/chunkedPrune.js — 청크 삭제 (v2.453).\n */', 'server/src/util/chunkedPrune.js'), '청크 삭제 (v2.453).');
   assert.equal(headSummary('#!/usr/bin/env node\n/** 한 줄 요약 */\n'), '한 줄 요약');
   assert.equal(headSummary('export const a = 1;\n/** 코드 뒤 주석은 모듈 설명이 아니다 */'), '');
   assert.equal(headSummary('/**\n * 설명.\n * @param {number} a\n */'), '설명.');
+  // import 줄 끝의 주석 · 다음 import 를 설명하는 주석은 모듈 설명이 아니다(v3.10 판독 — store.js 가 ‘v2.617’ 로 실렸다).
+  assert.equal(headSummary("import a from 'a';\nimport { b } from './b.js'; // v2.617\nimport c from './c.js'; // v2.498: 메모\nexport const x = 1;"), '');
+  assert.equal(headSummary("import a from 'a';\n// v2.605: 다음 import 의 메모\nimport b from './b.js';\n/** 진짜 설명. */\n\nexport const x = 1;"), '진짜 설명.');
+  assert.equal(headSummary("import a from 'a';\n/* 블록 메모 */\nimport b from './b.js';\n\n// 줄 주석 설명\n\nconst y = 2;"), '줄 주석 설명');
+  // import 뒤 주석이 빈 줄 없이 선언에 붙어 있으면 그 선언의 설명이다(store.js SITE_STALE_MS · auth.js demoGuestOf).
+  assert.equal(headSummary("import a from 'a';\n\n/**\n * 낡음 기준 시간.\n */\nexport const STALE = 1;"), '');
+  assert.equal(headSummary("import a from 'a';\n// 이 함수의 메모\nfunction f() {}"), '');
+  // 내보내는 함수 · 클래스 · 기본 내보내기 · 파일과 같은 이름의 선언에 붙은 주석은 모듈 설명이다(Select.jsx · EscClose.jsx · secureCompare.js).
+  assert.equal(headSummary("import a from 'a';\n/** 상수시간 비교. */\nexport function eq() {}"), '상수시간 비교.');
+  assert.equal(headSummary("import a from 'a';\n/** 모달 스택. */\nexport default function EscClose() {}"), '모달 스택.');
+  assert.equal(headSummary("import a from 'a';\n/** 공용 드롭다운. */\nconst Select = forwardRef(f);", 'web/src/components/Select.jsx'), '공용 드롭다운.');
+  assert.equal(headSummary("import a from 'a';\n/** 다른 이름. */\nconst Other = 1;", 'web/src/components/Select.jsx'), '');
+  // 파일 맨 앞 머리 주석 뒤에 import 가 와도 머리 주석이다(import 를 지나기 전의 주석은 건너뛰지 않는다).
+  assert.equal(headSummary("/**\n * 맨 앞 설명.\n */\nimport a from 'a';\nexport const x = 1;"), '맨 앞 설명.');
+  assert.equal(headSummary("// 맨 앞 줄 주석\nimport a from 'a';"), '맨 앞 줄 주석');
+  // import 사이의 여러 줄 블록 주석은 머리 주석이다(TaskWho.jsx). 한 줄 메모는 아니다.
+  assert.equal(headSummary("import a from 'a';\n// 한 줄 메모\nimport b from 'b';\n/**\n * 사이의 머리 주석.\n */\nimport c from 'c';\nconst x = 1;"), '사이의 머리 주석.');
   const long = headSummary(`/** ${'가'.repeat(400)} */`);
   assert.equal([...long].length, 151, '150자 + 말줄임');
   assert.ok(long.endsWith('…'));
@@ -119,6 +137,17 @@ test('headSummary — import 뒤 머리 주석 · 장식 줄 · 자기 파일 �
   assert.equal((cut.split('`').length - 1) % 2, 0, cut);
   // 실제 파일: 사용처가 가장 많은 모듈이 '설명 없음' 으로 실리면 안 된다.
   assert.ok(byFile.get('server/src/util/atomicWrite.js').summary.startsWith('원자적 파일 쓰기'));
+  for (const m of CAT.shared) assert.equal(/^v\d+\.\d+$/.test(m.summary), false, `${m.file}: 요약이 버전 문자열뿐이다`);
+  // 맨 앞 머리 주석을 가진 대표 모듈이 '설명 없음' 으로 떨어지지 않는다(v3.10 1차 수정이 실제로 그렇게 깨졌다 — 23개).
+  for (const f of ['server/src/util/stateFiles.js', 'server/src/util/sqliteOpen.js', 'server/src/util/adaptiveTimer.js', 'server/src/util/clampSetting.js',
+    'server/src/util/bulkImport.js', 'server/src/util/registryCore.js', 'server/src/util/ssrfLookup.js', 'server/src/util/secureCompare.js',
+    'web/src/components/Select.jsx', 'web/src/components/DataList.jsx', 'web/src/components/VmReconfig.jsx']) {
+    assert.ok(byFile.get(f).summary, `${f}: 머리 주석이 있는데 요약이 비었다`);
+  }
+  // ⚠ 알려진 한계(보수적인 쪽을 골랐다): import 뒤 머리 주석이 모듈 상수에 바로 붙어 있으면(`TaskWho.jsx` TONE_COLOR · `EscClose.jsx` stack)
+  //   '설명 없음' 이 된다. 반대로 받으면 `store.js` 처럼 상수 하나의 설명이 모듈 설명으로 실린다 — 틀린 설명이 빈 설명보다 나쁘다.
+  const store = CAT.shared.find((m) => m.file === 'server/src/store.js');
+  assert.equal(store?.summary ?? '', '', 'store.js 는 머리 주석이 없다(import 뒤 주석은 SITE_STALE_MS 의 설명)');
 });
 
 test('esc — 칸 구분자는 어디서든, 꺾쇠는 코드 표기 밖에서만 바꾼다', () => {

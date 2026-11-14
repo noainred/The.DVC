@@ -15,7 +15,7 @@ import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import EscClose from '../../components/EscClose.jsx';
 import {
-  SCOPE_IDS, scopeLabel, baseName, dirName, countText, kpiOf, chipCounts, applyFilter, exportsView,
+  SCOPE_IDS, scopeLabel, summaryText, baseName, dirName, countText, kpiOf, chipCounts, applyFilter, exportsView,
   areaLabel, areaNote, builtText, footnoteText, statusView, emptyView, filterLabel, shownText,
 } from './commonCatalogText.js';
 import '../vms/vmHub.css';       // 오른쪽 서랍(.vmh-drawer …)을 그대로 쓴다 — 서랍 스타일을 한 벌 더 만들지 않는다
@@ -63,7 +63,7 @@ function ModuleDrawer({ m, onClose }) {
         </div>
         <div className="vmh-db">
           <Section title="하는 일">
-            <div style={{ fontSize: 13.5, lineHeight: 1.65, overflowWrap: 'anywhere' }}>{m.summary || '머리 주석이 없습니다.'}</div>
+            <div style={{ fontSize: 13.5, lineHeight: 1.65, overflowWrap: 'anywhere' }}>{summaryText(m.summary) || '머리 주석이 없습니다.'}</div>
             <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>그 파일 맨 앞 주석의 첫 단락입니다. 자세한 규칙은 소스의 머리 주석에 있습니다.</div>
           </Section>
 
@@ -227,7 +227,7 @@ export function CommonCatalogView() {
             <button type="button" className="btn" onClick={() => { setQ(''); setFilter('all'); setLimit(PAGE); }}>검색어 · 조건 지우기</button>
           </div>
         ) : (
-          <STable className="v3-table" minWidth={980} limit={limit}>
+          <STable className="v3-table cc-table" minWidth={980} limit={limit}>
             <thead>
               <tr>
                 <th>모듈</th><th className="cc-wide">구분</th><th>하는 일</th><th className="cc-wide">내보내는 이름</th>
@@ -246,8 +246,8 @@ export function CommonCatalogView() {
                       <div style={{ ...MONO, fontSize: 11, color: 'var(--text-dim)' }}>{dirName(m.file)}</div>
                     </td>
                     <td className="cc-wide" data-sort={scopeLabel(m.scope)} style={{ whiteSpace: 'nowrap' }}><span className="badge gray">{scopeLabel(m.scope)}</span></td>
-                    <td style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', minWidth: 240 }}>{m.summary || <span style={{ color: 'var(--text-dim)' }}>머리 주석 없음</span>}</td>
-                    <td className="cc-wide" data-sort={ex.total} style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', ...MONO, fontSize: 11.5 }}>
+                    <td style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', minWidth: 200 }}>{summaryText(m.summary) || <span style={{ color: 'var(--text-dim)' }}>머리 주석 없음</span>}</td>
+                    <td className="cc-wide" data-sort={ex.total} style={{ whiteSpace: 'normal', overflowWrap: 'break-word', ...MONO, fontSize: 11.5 }}>
                       {ex.total === 0 ? <span style={{ color: 'var(--text-dim)' }}>—</span> : ex.shown.join(' · ')}
                       {ex.more > 0 && <span style={{ fontFamily: 'inherit', color: 'var(--text-dim)' }}> 외 {ex.more}</span>}
                     </td>
@@ -261,6 +261,7 @@ export function CommonCatalogView() {
           </STable>
         )}
 
+        {!empty && <div className="cc-narrow-hint" style={{ fontSize: 12, color: 'var(--text-dim)' }}>표는 상자 안에서 옆으로 밀어 봅니다 · 구분 · 내보내는 이름은 모듈을 눌러 상세에서 봅니다</div>}
         {!empty && (
           <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-dim)' }}>
             <span>{shownText({ total: kpi.total, matched: rows.length, shown })}</span>

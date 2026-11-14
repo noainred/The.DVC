@@ -28,6 +28,18 @@ export const scopeLabel = (id) => SCOPE_LABEL[id] || '구분 모름';
 const isCommon = (m) => m?.scope !== 'outside';
 const cnt = (v) => { const n = numOrNull(v); return n !== null && n >= 0 ? n : null; };
 
+/**
+ * 머리 주석 요약 → 화면 글자(순수). 요약은 소스 주석의 Markdown 그대로라 `**강조**` 와 백틱 코드 표기가 들어 있다 —
+ * v3.10 Chromium 판독에서 표와 서랍에 별표 · 백틱이 그대로 보였다. 별표는 떼고, 백틱 짝은 ‘ ’ 로 바꾸고, 짝 없는 백틱은 뗀다.
+ * (문서 docs/COMMON.md 는 Markdown 으로 렌더되므로 원문을 그대로 둔다 — 화면에서만 바꾼다.)
+ */
+export function summaryText(s) {
+  return String(s ?? '')
+    .replace(/\*\*/g, '')
+    .replace(/`([^`\n]+)`/g, '‘$1’')
+    .replace(/`/g, '');
+}
+
 /** 경로 → 파일 이름 · 폴더(끝에 ‘/’). */
 export function baseName(file) { return String(file ?? '').split('/').pop() || ''; }
 export function dirName(file) {

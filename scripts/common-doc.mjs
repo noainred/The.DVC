@@ -119,7 +119,43 @@ export function headSummary(src, fileName = '') {
   s = s.trimStart();
   // 머리 주석이 import 문 **뒤에** 오는 파일이 있다(`util/atomicWrite.js` — 사용처가 가장 많은 모듈이 '설명 없음' 이 됐다).
   // 맨 앞의 정적 import 문만 건너뛴다. 다른 코드가 나오면 멈춘다 — 그 뒤 주석은 모듈 설명이 아니라 그 코드의 설명이다.
-  for (let m; (m = /^import\b[^;]{0,2000};/.exec(s));) s = s.slice(m[0].length).trimStart();
+  // ⚠ v3.10 Chromium 판독에서 찾은 오독(테스트가 고정):
+  //   · import 줄 **끝의 주석**(`import … from './x.js'; // v2.617`)을 모듈 설명으로 읽었다(`store.js` 의 요약이 ‘v2.617’) — 줄 끝 주석은 버린다.
+  //   · import **사이의** 주석은 다음 import 의 메모다 — 건너뛴다(import 를 하나라도 지난 뒤에만. 파일 맨 앞 머리 주석은 그대로 머리 주석이다).
+  //   · import 뒤의 주석이 **바로 선언에 붙어 있으면**(빈 줄 없이) 대개 그 선언의 설명이다(`store.js` 의 SITE_STALE_MS 상수 ·
+  //     `auth.js` 의 내부 함수 demoGuestOf). 다만 **내보내는 함수 · 클래스 · 기본 내보내기 · 파일과 같은 이름의 선언**에 붙은 주석은
+  //     그 모듈의 설명이다(`Select.jsx` · `EscClose.jsx` · `secureCompare.js` — 처음 고칠 때 이것까지 버려 23개가 '설명 없음' 이 됐다).
+  const COMMENT = /^(?:\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n[ \t]*\/\/[^\n]*)*)/;
+  //   · 단, import 사이의 **여러 줄 블록 주석**은 머리 주석이다(`TaskWho.jsx` — import 몇 줄 뒤에 JSDoc, 그 뒤에 또 import).
+  let afterImport = false;
+  let between = null; // import 사이에서 처음 만난 여러 줄 블록 주석
+  for (;;) {
+    const m = /^import\b[^;]{0,2000};[ \t]*(?:\/\/[^\n]*)?/.exec(s);
+    if (m) { s = s.slice(m[0].length).trimStart(); afterImport = true; continue; }
+    const c = afterImport ? COMMENT.exec(s) : null;
+    if (c && /^\s*import\b/.test(s.slice(c[0].length))) {
+      if (!between && c[0].startsWith('/*') && c[0].includes('\n')) between = c[0];
+      s = s.slice(c[0].length).trimStart();
+      continue;
+    }
+    break;
+  }
+  if (between) s = between;
+  else if (afterImport) {
+    const c = COMMENT.exec(s);
+    if (!c) return '';
+    const rest = s.slice(c[0].length);
+    // 빈 줄(또는 파일 끝)이 뒤따르거나 다음이 또 주석이면 모듈 설명, 아니면 바로 아래 선언의 설명.
+    if (!(/^[ \t]*(?:\n[ \t]*\n|$)/.test(rest) || /^\s*(?:\/\*|\/\/)/.test(rest))) {
+      const decl = rest.trimStart();
+      const base = String(fileName).split('/').pop().replace(/\.\w+$/, '').toLowerCase();
+      const named = /^(?:export\s+)?(?:const|let|var|(?:async\s+)?function\*?|class)\s+([A-Za-z_$][\w$]*)/.exec(decl);
+      const moduleLevel = /^export\s+default\b/.test(decl)
+        || /^export\s+(?:async\s+)?(?:function\*?|class)\s/.test(decl)
+        || (!!base && !!named && named[1].toLowerCase() === base);
+      if (!moduleLevel) return '';
+    }
+  }
   let lines = [];
   if (s.startsWith('/*')) {
     const end = s.indexOf('*/');

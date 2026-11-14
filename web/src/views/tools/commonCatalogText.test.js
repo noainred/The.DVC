@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  SCOPE_IDS, SCOPE_LABEL, scopeLabel, baseName, dirName, countText, kpiOf, chipCounts, matchesQuery, matchesFilter,
+  SCOPE_IDS, SCOPE_LABEL, scopeLabel, summaryText, baseName, dirName, countText, kpiOf, chipCounts, matchesQuery, matchesFilter,
   applyFilter, exportsView, areaLabel, areaNote, builtText, footnoteText, statusView, emptyView, filterLabel, shownText,
 } from './commonCatalogText.js';
 
@@ -79,6 +79,18 @@ describe('공통 기능 화면 문구', () => {
     expect(chipCounts(LIST)).toEqual({ all: 8, 'server-util': 3, 'web-components': 1, 'web-hooks': 1, 'web-util': 0, 'web-top': 1, outside: 2 });
     // 원본 배열을 바꾸지 않는다(화면이 같은 배열을 여러 번 거른다).
     expect(LIST[0].file).toBe('server/src/util/deadline.js');
+  });
+
+  it('요약의 별표 · 백틱을 화면 글자로(v3.10 판독 — 표와 서랍에 그대로 보였다)', () => {
+    expect(summaryText('작업 시한 — **단일 관문**(v2.607).')).toBe('작업 시한 — 단일 관문(v2.607).');
+    expect(summaryText('STable — `<table>` 대체 · `numOrNull` 하나')).toBe('STable — ‘<table>’ 대체 · ‘numOrNull’ 하나');
+    // 150자 요약이 코드 표기 가운데서 잘려 짝 없는 백틱 · 별표가 남아도 글자로 새지 않는다.
+    expect(summaryText('앞 **강조 `잘린…')).toBe('앞 강조 잘린…');
+    expect(summaryText(null)).toBe('');
+    for (const s of ['**a**', '`b`', 'x ** y', '``']) {
+      expect(summaryText(s).includes('**'), s).toBe(false);
+      expect(summaryText(s).includes('`'), s).toBe(false);
+    }
   });
 
   it('경로 · 내보내는 이름 · 영역', () => {
