@@ -105,6 +105,11 @@ jobs:
       - name: 문서 최신 여부 — docs/API.md
         continue-on-error: true
         run: node scripts/api-doc.mjs --check
+      # 공통 기능 목록(공용 모듈의 내보내는 이름·사용처·테스트 수)도 생성물이다 — 공용 모듈을 새로 쓰는 파일이 생기면
+      # 사용처 수가 바뀐다. 서버 단위테스트(commonDoc)는 같은 대조를 **실패**로 고정한다.
+      - name: 문서 최신 여부 — docs/COMMON.md
+        continue-on-error: true
+        run: node scripts/common-doc.mjs --check
       # v2.613(TESTDOC2613-11): ARCHITECTURE.md 의 모듈 지도 절과 INDEX.md 의 전체 문서 목록 절도 생성물이다 —
       # 새 디렉터리·새 문서가 생기면 갱신해야 한다(손 목록은 v2.583 이후 디렉터리 42개를 놓쳤다).
       - name: 문서 최신 여부 — docs/ARCHITECTURE.md·INDEX.md(생성 절)
