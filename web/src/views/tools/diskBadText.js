@@ -70,18 +70,27 @@ export function serverBand(view, now = Date.now()) {
   // 구간은 **끊김 없이 본 구간**(continuousSince)으로 말한다 — '지금까지 본 가장 오래된 시각'(coveredFrom)은 사이에 못 본 틈이 있어도 내려간다(반증 3.8.2 #1).
   const from = cov.continuousSince;
   const span = Number.isFinite(from) ? `${fmtDate(from)} ~ ${fmtDate(now)} (${spanText(from, now)})` : '구간 모름';
+  // 과거 기록 읽기 1단계: 로그 기록이 없는 디스크의 누적 값에 흔적이 있으면 띠가 말한다(날짜는 모른다 — 서버 verdict.js traceOf).
+  const traces = Number.isFinite(view.counts?.traces) ? view.counts.traces : 0;
+  const traceLine = traces > 0 ? [`로그 기록이 없는 디스크 ${traces}개의 누적 값에 흔적(재할당 · 보류 · 복구 불가)이 있습니다 — 값은 누적이라 언제 생겼는지 모릅니다. 아래 ‘디스크 값’ 표를 보세요.`] : [];
+  const unrecTrace = Array.isArray(view.diskVals) && view.diskVals.some((d) => d && d.trace === 'unrecoverable');
   if (view.status === 'unread') {
-    return { tone: 'err', title: cov.lastStatusLabel ? `읽지 못했습니다 — ${cov.lastStatusLabel}` : '아직 읽지 못했습니다', lines: ['배드 섹터 유무는 판정하지 않았습니다.', ...(cov.lastReason ? [cov.lastReason] : [])] };
+    // 로그를 못 읽은 서버(예: 403)도 디스크 값은 읽었을 수 있다 — 흔적이 있으면 말한다(반증 F4). 배드 섹터 기록 유무는 판정하지 않는다.
+    return { tone: 'err', title: cov.lastStatusLabel ? `읽지 못했습니다 — ${cov.lastStatusLabel}` : '아직 읽지 못했습니다', lines: ['Lifecycle 로그의 배드 섹터 기록 유무는 판정하지 않았습니다.', ...(cov.lastReason ? [cov.lastReason] : []), ...traceLine] };
   }
   if (view.status === 'records') {
     const c = view.counts || {};
     return { tone: 'bad', title: `배드 섹터 기록이 있습니다 — ${c.records}건 · 디스크 자리 ${c.slots}곳`, lines: [
-      `아직 사용 중 ${c.inUse} · 교체됨 ${c.replaced} · 판단 불가 ${c.unknown}`, `끊김 없이 본 구간 ${span}`] };
+      `아직 사용 중 ${c.inUse} · 교체됨 ${c.replaced} · 판단 불가 ${c.unknown}`, `끊김 없이 본 구간 ${span}`, ...traceLine] };
   }
-  if (view.status === 'unwatched') return { tone: 'warn', title: '이 방법으로는 볼 수 없는 서버입니다', lines: ['디스크가 RAID 로 묶여 있지 않아(HBA · 패스스루) Patrol Read 가 돌지 않습니다 — ‘기록 없음’ 이 아닙니다.'] };
+  if (view.status === 'unwatched') return { tone: unrecTrace ? 'bad' : 'warn', title: '이 방법으로는 볼 수 없는 서버입니다', lines: ['디스크가 RAID 로 묶여 있지 않아(HBA · 패스스루) Patrol Read 가 돌지 않습니다 — ‘기록 없음’ 이 아닙니다.', ...traceLine] };
   if (view.status === 'partial') {
     const why = READ_STOP_LABEL[cov.readStop] || '';
-    return { tone: 'warn', title: '일부만 읽었습니다 — 읽은 구간에는 기록이 없습니다', lines: [`읽은 구간 ${span}. 다음 점검에서 처음부터 다시 읽습니다.`, ...(why ? [why] : [])] };
+    return { tone: unrecTrace ? 'bad' : 'warn', title: '일부만 읽었습니다 — 읽은 구간에는 기록이 없습니다', lines: [`읽은 구간 ${span}. 다음 점검에서 처음부터 다시 읽습니다.`, ...(why ? [why] : []), ...traceLine] };
+  }
+  if (traces > 0) {
+    return { tone: unrecTrace ? 'bad' : 'warn', title: `남은 로그에는 기록이 없지만, 디스크 값에 흔적이 있는 디스크가 ${traces}개 있습니다`, lines: [...traceLine,
+      `끊김 없이 본 구간 ${span} — 로그의 ‘기록 없음’ 은 이 구간에서만의 말입니다.`] };
   }
   // v3.8.2: iDRAC 가 이 경로로 주는 것은 활성 로그로 보인다(Dell 안내서 검색 요약 + 실제 서버 1대) — 그 이전 기록이 '없다' 가 아니라 '여기서는 안 보인다' 이다.
   //   '며칠치뿐' 은 **활성 로그가 담은 기간**(서버 summary.logSpanOf — 시간이 지나도 늘지 않는다)으로 말하고, 기준 일수는 서버가 준 값을 쓴다(전 법인 경고와 같은 값).
@@ -146,6 +155,78 @@ export function shortLogNote(T) {
     body: `iDRAC 가 이 경로로 보여 주는 것은 활성 로그로 보입니다(Dell 안내서 요약 기준 — 실제 서버에서 확인 중). 그 이전에 난 배드 섹터 기록은 이 결과에 없습니다 — 아래 수치의 ‘0’ 은 ‘과거에 없었다’ 가 아닙니다.${med}${login} 서버 탭에서 서버별 로그 길이를 봅니다.`,
   };
 }
+
+/** 디스크 값 판정(서버 verdict.js TRACE) → 배지 색. */
+export function traceTone(t) {
+  if (t === 'records' || t === 'unrecoverable') return 'red';
+  if (t === 'trace') return 'amber';
+  if (t === 'none') return 'green';
+  return 'gray';
+}
+/** 출처 상태(서버 summary.js SOURCE_STATUS_LABEL) → 배지 색. 못 읽음 · 장비에 없음은 '정상' 색이 아니다. */
+export function sourceTone(s) {
+  if (s === 'ok') return 'green';
+  if (s === 'forbidden' || s === 'error' || s === 'timeout' || s === 'auth') return 'red';
+  if (s === 'absent') return 'amber';
+  return 'gray';
+}
+/** 건수 칸 — 못 읽은 값은 '—'(0 이 아니다). */
+export const valCell = (v) => (Number.isFinite(v) ? v.toLocaleString('ko-KR') : '—');
+
+/**
+ * 출처 표(과거 기록 읽기 1단계 — 어디까지 봤나). 서버가 준 값만 쓴다 — 기간을 모르면 '—'.
+ * @returns {Array<{key:string, name:string, what:string, range:string, rangeSort:number|null, count:string, status:string, statusLabel:string, at:number|null, note:string}>}
+ */
+export function sourceRows(cov) {
+  if (!cov) return [];
+  const d = cov.diag || null;
+  const lcFrom = Number.isFinite(d?.oldest) ? d.oldest : cov.continuousSince;
+  const lcTo = Number.isFinite(d?.newest) ? d.newest : cov.lastOkAt;
+  const rangeOf = (a, b) => (Number.isFinite(a) && Number.isFinite(b) ? `${fmtDate(a)} ~ ${fmtDate(b)} (${spanText(a, b)})` : '—');
+  const s = cov.sel || {};
+  const v = cov.vals || {};
+  const selKept = Number.isFinite(s.keptFrom) && (!s.range || !Number.isFinite(s.range.oldest) || s.keptFrom < s.range.oldest)
+    ? `포탈이 보관한 디스크 항목은 ${fmtDate(s.keptFrom)} 부터입니다(그 뒤 SEL 이 지워졌거나 넘어갔습니다).` : '';
+  // '지난 값' 인지는 서버가 정한다(summary.js valsView · selView stale — 반증 F12: 정상으로 읽은 0건을 '못 읽음' 으로 말했다).
+  const stale = (x) => (x.stale === true ? `이번 점검(${fmtDateTime(x.tryAt)})에는 못 읽어 ${fmtDateTime(x.at)} 에 읽은 것을 보입니다.` : '');
+  return [
+    { key: 'lclog', name: '활성 Lifecycle 로그', what: '배드 섹터 계열 기록', range: rangeOf(lcFrom, lcTo), rangeSort: Number.isFinite(lcFrom) ? lcFrom : null,
+      count: Number.isFinite(cov.logTotal) ? `${num(cov.logTotal)}건` : '—', status: cov.lastOkAt ? 'ok' : 'error', statusLabel: cov.lastOkAt ? '읽음' : (cov.lastStatusLabel || '읽기 실패'),
+      at: cov.lastOkAt ?? null, note: '' },
+    { key: 'sel', name: '시스템 이벤트 로그(SEL)', what: '디스크 탈거 · 장착 · 고장 시각', range: rangeOf(s.range?.oldest, s.range?.newest), rangeSort: Number.isFinite(s.range?.oldest) ? s.range.oldest : null,
+      count: Number.isFinite(s.read) ? `${num(s.read)}건 · 디스크 항목 ${num(s.events)}건` : '—', status: s.status || 'never', statusLabel: s.label || '아직 읽지 않음', at: s.at ?? null,
+      note: [selKept, stale(s)].filter(Boolean).join(' ') },
+    { key: 'vals', name: '디스크 값', what: '재할당 · 보류 · 복구 불가(누적)', range: '날짜 없음 — 디스크가 만들어진 뒤의 누적', rangeSort: null,
+      count: Number.isFinite(v.drives) && v.drives > 0 ? `디스크 ${num(v.drives)}개` : '—', status: v.status || 'never', statusLabel: v.label || '아직 읽지 않음', at: v.at ?? null,
+      // 장비가 준 값 이름(메트릭 id) — 이름이 정해 둔 것과 달라 못 읽은 장비를 사용자가 직접 본다('항목 없음' 일 때 특히).
+      note: [v.note || '', stale(v), Array.isArray(v.seen) && v.seen.length ? `장비가 준 값 이름: ${v.seen.slice(0, 12).join(' · ')}${v.seen.length > 12 ? ` 외 ${v.seen.length - 12}개` : ''}` : ''].filter(Boolean).join(' ') },
+  ];
+}
+
+/**
+ * 전 법인 — 출처별 서버 수(과거 기록 읽기 1단계). 서버가 상태별로 센 값(T.valsBy · T.selBy)을 그대로 말한다. 옛 중앙 응답이면 null.
+ * @returns {{vals:string, sel:string}|null}
+ */
+export function pastCoverageText(T) {
+  if (!T || !T.valsBy || !T.selBy) return null;
+  const n = (o, k) => (Number.isFinite(o[k]) ? o[k] : 0);
+  const other = (o) => ['forbidden', 'error', 'timeout', 'auth'].reduce((a, k) => a + n(o, k), 0);
+  const parts = (o, okWord) => [
+    `${okWord} ${num(n(o, 'ok'))}대`,
+    n(o, 'absent') ? `장비에 없음 ${num(n(o, 'absent'))}대` : '',
+    n(o, 'empty') ? `항목 없음 ${num(n(o, 'empty'))}대` : '',
+    other(o) ? `못 읽음 ${num(other(o))}대` : '',
+    n(o, 'never') ? `아직 읽지 않음 ${num(n(o, 'never'))}대` : '',
+  ].filter(Boolean).join(' · ');
+  return {
+    vals: `디스크 값 — ${parts(T.valsBy, '읽음')}${Number.isFinite(T.valsDisks) ? ` (값을 읽은 디스크 ${num(T.valsDisks)}개 · 값 모름 ${num(T.valsUnknownDisks)}개)` : ''}`,
+    sel: `시스템 이벤트 로그 — ${parts(T.selBy, '읽음')}${Number.isFinite(T.selDriveEvents) ? ` (디스크 항목 ${num(T.selDriveEvents)}건)` : ''}`,
+  };
+}
+
+/** 시스템 이벤트 로그 항목 종류(서버 sel.js SEL_KINDS). */
+export const SEL_KIND_LABEL = Object.freeze({ removed: '빠짐', installed: '장착', fault: '고장', predictive: '고장 예측', other: '그 밖' });
+export function selKindTone(k) { return k === 'fault' ? 'red' : k === 'predictive' ? 'blue' : k === 'removed' ? 'amber' : 'gray'; }
 
 export const JOB_STATE_LABEL = Object.freeze({
   queued: '엣지 대기', running: '읽는 중', done: '끝남', failed: '실패', 'not-started': '시작 못 함', 'no-response': '응답 없음', stopped: '중단됨', busy: '다른 점검 진행 중',

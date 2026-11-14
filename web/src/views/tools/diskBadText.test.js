@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fmtDate, spanText, rateText, pctText, clsTone, verdictTone, serverBand, unitProgress, scopeLabel, noteOf, clsOfCode, num, diagInfo, shortLogNote, READ_STOP_LABEL, scanSent } from './diskBadText.js';
+import { fmtDate, spanText, rateText, pctText, clsTone, verdictTone, serverBand, unitProgress, scopeLabel, noteOf, clsOfCode, num, diagInfo, shortLogNote, READ_STOP_LABEL, scanSent, sourceRows, sourceTone, traceTone, valCell, pastCoverageText } from './diskBadText.js';
 
 const HOUR = 3_600_000; const DAY = 24 * HOUR;
 const NOW = Math.floor(Date.now() / HOUR) * HOUR;
@@ -85,5 +85,47 @@ describe('diskBadText', () => {
     expect(d.lines[1]).toContain('가장 오래된 항목 LOG203');
     expect(d.warn).toContain('93%'); expect(d.warn).toContain('반복 표시(LOG007)');
     expect(diagInfo({ at: NOW, read: 10, pages: 1, ms: 100, oldest: NOW - DAY, newest: NOW }).lines[1]).not.toContain('가장 오래된 항목');
+  });
+
+  it('과거 기록 읽기 1단계 — 디스크 값 흔적은 띠가 말하고(날짜 모름) 못 읽은 값은 — 이다', () => {
+    const base = { status: 'clean', coverage: { continuousSince: NOW - 30 * DAY, lastOkAt: NOW, logSpan: { ms: 40 * DAY }, shortLogDays: 30 }, counts: { traces: 2 },
+      diskVals: [{ trace: 'trace' }, { trace: 'trace' }] };
+    const b = serverBand(base, NOW);
+    expect(b.tone).toBe('warn');
+    expect(b.title).toContain('디스크 값에 흔적이 있는 디스크가 2개');
+    expect(b.lines.join(' ')).toContain('언제 생겼는지 모릅니다');
+    expect(serverBand({ ...base, diskVals: [{ trace: 'unrecoverable' }] }, NOW).tone).toBe('bad');
+    expect(serverBand({ ...base, counts: { traces: null } }, NOW).title).not.toContain('흔적');
+    const unread = serverBand({ ...base, status: 'unread', coverage: { lastStatusLabel: '로그 읽기 권한 없음(403)' } }, NOW);
+    expect(unread.tone).toBe('err');
+    expect(unread.lines.join(' ')).toContain('로그 기록이 없는 디스크 2개');
+    expect(serverBand({ ...base, status: 'records', counts: { records: 1, slots: 1, inUse: 1, replaced: 0, unknown: 0, traces: 2 } }, NOW).lines.join(' ')).toContain('로그 기록이 없는 디스크 2개');
+    expect(valCell(null)).toBe('—'); expect(valCell(0)).toBe('0'); expect(valCell(1234)).toBe('1,234');
+    expect(traceTone('unknown')).toBe('gray'); expect(traceTone('none')).toBe('green'); expect(traceTone('unrecoverable')).toBe('red');
+    expect(sourceTone('absent')).toBe('amber'); expect(sourceTone('never')).toBe('gray'); expect(sourceTone('auth')).toBe('red');
+  });
+
+  it('출처 표 — 서버가 준 기간 · 상태 그대로, 못 읽은 이번 점검은 지난 값의 시각을 밝힌다', () => {
+    const rows = sourceRows({ lastOkAt: NOW, logTotal: 1894, diag: { oldest: NOW - 37 * DAY, newest: NOW },
+      sel: { status: 'ok', label: '읽음', at: NOW, read: 412, events: 3, range: { oldest: NOW - 400 * DAY, newest: NOW }, keptFrom: NOW - 500 * DAY },
+      vals: { status: 'absent', label: '장비에 없음', at: NOW - DAY, tryAt: NOW, drives: 7, note: '보고서 없음', stale: true } });
+    expect(rows.map((r) => r.key)).toEqual(['lclog', 'sel', 'vals']);
+    expect(rows[0].range).toContain('37일'); expect(rows[0].count).toBe('1,894건');
+    expect(rows[1].count).toContain('디스크 항목 3건'); expect(rows[1].note).toContain('포탈이 보관한 디스크 항목은');
+    expect(rows[2].range).toContain('날짜 없음'); expect(rows[2].note).toContain('보고서 없음'); expect(rows[2].note).toContain('이번 점검');
+    const emptySel = sourceRows({ lastOkAt: NOW, sel: { status: 'empty', label: '항목 없음', at: NOW, tryAt: NOW, stale: false } });
+    expect(emptySel[1].note).toBe('');
+        const seen = sourceRows({ lastOkAt: NOW, vals: { status: 'empty', label: '항목 없음', drives: 0, seen: ['DiskHealthStatus', 'MediaErrors'] } });
+    expect(seen[2].note).toBe('장비가 준 값 이름: DiskHealthStatus · MediaErrors');
+    const never = sourceRows({ lastOkAt: NOW, sel: { status: 'never', label: '아직 읽지 않음' }, vals: { status: 'never', label: '아직 읽지 않음', drives: 0 } });
+    expect(never[1].range).toBe('—'); expect(never[2].count).toBe('—'); expect(never[2].note).toBe('');
+    expect(sourceRows(null)).toEqual([]);
+  });
+
+  it('전 법인 출처 문구 — 상태별 서버 수 그대로 · 옛 응답이면 null', () => {
+    expect(pastCoverageText({})).toBe(null);
+    const c = pastCoverageText({ valsBy: { ok: 3, absent: 5, error: 1, never: 2 }, selBy: { ok: 10, never: 1 }, valsDisks: 24, valsUnknownDisks: 40, selDriveEvents: 4 });
+    expect(c.vals).toBe('디스크 값 — 읽음 3대 · 장비에 없음 5대 · 못 읽음 1대 · 아직 읽지 않음 2대 (값을 읽은 디스크 24개 · 값 모름 40개)');
+    expect(c.sel).toBe('시스템 이벤트 로그 — 읽음 10대 · 아직 읽지 않음 1대 (디스크 항목 4건)');
   });
 });
