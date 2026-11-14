@@ -1,6 +1,6 @@
 # 설계: 서버 스크립트 실행(공용 모듈) — 특수기능 `script-run` + 설정 › 보안 ‘서버 스크립트’
 
-작성 2026-11-14 (v3.9.0 기준) · 상태 **시안 — 컨펌 대기**(구현 전) · 시안 캔버스: https://claude.ai/artifact/VC37SJcBGAYj7Zhjg8ZaHK (쪽 ‘서버 스크립트 실행(공용 모듈)’)
+작성 2026-11-14 (v3.9.0 기준) · 상태 **컨펌됨 — 구현 전**(2026-11-14 “권고대로 컨펌, 구현 진행해줘, 모두 만들어줘” — R1~R14 전부 권고대로) · 시안 캔버스: https://claude.ai/artifact/VC37SJcBGAYj7Zhjg8ZaHK (쪽 ‘서버 스크립트 실행(공용 모듈)’)
 (아트보드 7장 — 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스. 법인명 · 서버명 · 계정 · 지문 · 수치 · 스크립트 이름은 **전부 가상**이고 색 · 글자는 `web/src/styles.css` `:root` 토큰 그대로.
 아트보드를 브라우저로 렌더해 확인하지는 않았다 — 태그 닫힘 · 금지 문자(백틱 · `text-transform` · 이모지)만 스크립트로 검사.)
 
@@ -22,8 +22,11 @@
 | 엣지 작업 큐의 본보기(claim → ack) | `server/src/bmstor/jobs.js` |
 | 릴리스 번들은 Ed25519 서명 manifest 로 확인한다 | `server/src/upgrade/signature.js` · `release-signing-keys.json` |
 
-**확인하지 못한 것(구현 때 먼저 볼 것)**: ① 릴리스 서명 manifest 가 번들 안 파일별 지문을 담는지 — 담지 않으면 묶음 스크립트의 지문을 소스 상수로 굳혀 ‘서명된 코드가 지문을 말한다’ 로 간다.
-② iDRAC 쪽 서버와 OS 등록 항목을 잇는 키(시안 ⑥ ④) — 베어메탈 사용률의 대상 해석(`bmusage/targets.js`)이 두 경로를 한 서버로 묶는 것은 봤지만 `diskbad` 가 쓰는 서버 키와 같은지는 대조하지 않았다.
+**컨펌 뒤 확인한 것(2026-11-14 — 코드 읽기)**:
+① 릴리스 서명 manifest 는 **산출물(번들 파일) 단위**다 — `manifest.files` 항목은 번들의 이름 · 종류 · sha256 이고 번들 안 파일별 지문은 없다(`server/src/upgrade/signatureCore.js matchArtifact`).
+   → 묶음 스크립트는 **지문을 소스 상수로 굳힌다**(그 소스가 서명된 번들 안에 있다). 실행 직전 디스크의 스크립트 파일 지문을 상수와 대조하고 다르면 ‘서명과 다름’ 으로 실행하지 않는다. 시안 문구 ‘서명 확인’ 의 실제 뜻은 이것이다.
+② iDRAC 쪽 서버 ↔ OS 등록 항목: `diskbad` 는 iDRAC 등록 항목 id + 서비스 태그로 서버를 잡고(`server/src/diskbad/scan.js:79`), 베어메탈 사용률은 iDRAC 등록 항목(id · 서비스 태그)에서 OS 등록 항목을 `pickOsEntry(os, { regHost, name, vc })` 로 고른다(`server/src/bmusage/targets.js:160 · 200 · 253`).
+   → 시안 ⑥ 의 칸은 **같은 `pickOsEntry`** 로 OS 항목을 찾는다(판정을 두 벌 두지 않는다). `diskbad` 행에 그 함수가 필요로 하는 이름 · 법인이 다 실려 있는지는 구현 때 대조한다(없으면 ‘OS 계정 미등록’ 으로 보인다).
 
 ## 3. 화면(시안)
 
