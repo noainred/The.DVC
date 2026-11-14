@@ -16,6 +16,8 @@ import { fmtDate, fmtDateTime, serverBand, clsTone, verdictTone, confidenceTone,
 /** 디스크 값 표의 기본 순서 — 로그 기록 · 복구 불가 흔적 · 흔적 · 흔적 없음 · 값 모름. */
 const TRACE_ORDER = { records: 0, unrecoverable: 1, trace: 2, none: 3, unknown: 4 };
 const hours = (h) => (Number.isFinite(h) ? `${(h / 8766).toFixed(1)}년` : '—');
+/** 디스크 값 출처 짧은 이름(긴 이름은 마우스를 올리면 — 서버 VALS_SRC_LABEL). */
+const SRC_SHORT = { telemetry: '텔레메트리', metrics: 'DriveMetrics' };
 
 const BAND = {
   bad: { border: '1px solid rgba(239,68,68,.45)', background: 'rgba(239,68,68,.10)' },
@@ -117,16 +119,17 @@ export function DiskBadServerPanel({ serverId, agent = null }) {
       {v && sources.length > 0 && (
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 700, margin: '4px 0 6px' }}>어디까지 봤나 <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>출처마다 본 기간 — ‘기록 없음’ 은 이 기간 안에서만의 말입니다</span></div>
-          <STable className="data-table" minWidth={900} style={{ width: '100%', fontSize: 12.5 }}>
+          {/* 980px 창(본문 약 940px) 안에 다 들어오게 — 글이 긴 칸은 줄을 바꾼다(표 칸 기본값이 nowrap 이다 · 화면 확인에서 비고 칸이 잘렸다). */}
+          <STable className="data-table" minWidth={760} style={{ width: '100%', fontSize: 12.5 }}>
             <thead><tr><th>출처</th><th>말해 주는 것</th><th>본 기간</th><th>읽은 것</th><th>상태</th><th data-nosort>비고</th></tr></thead>
             <tbody>{sources.map((r) => (
               <tr key={r.key}>
-                <td style={{ whiteSpace: 'nowrap' }}><b>{r.name}</b></td>
-                <td>{r.what}</td>
-                <td data-sort={r.rangeSort ?? ''} style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{r.range}</td>
-                <td style={{ whiteSpace: 'nowrap' }}>{r.count}</td>
+                <td style={{ whiteSpace: 'normal', minWidth: 110 }}><b>{r.name}</b></td>
+                <td style={{ whiteSpace: 'normal', minWidth: 110, maxWidth: 170 }}>{r.what}</td>
+                <td data-sort={r.rangeSort ?? ''} style={{ whiteSpace: 'normal', minWidth: 120, maxWidth: 170, fontFamily: 'var(--mono)', fontSize: 12 }}>{r.range}</td>
+                <td style={{ whiteSpace: 'normal', minWidth: 90, maxWidth: 150 }}>{r.count}</td>
                 <td data-sort={r.status} style={{ whiteSpace: 'nowrap' }}><span className={`badge ${sourceTone(r.status)}`}>{r.statusLabel}</span>{Number.isFinite(r.at) ? <div className="muted" style={{ fontSize: 11 }}>{fmtDateTime(r.at)}</div> : null}</td>
-                <td style={{ fontSize: 12, minWidth: 200 }}>{r.note || <span className="muted">—</span>}</td>
+                <td style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', fontSize: 12, minWidth: 180 }}>{r.note || <span className="muted">—</span>}</td>
               </tr>
             ))}</tbody>
           </STable>
@@ -158,22 +161,20 @@ export function DiskBadServerPanel({ serverId, agent = null }) {
       {v && v.slots.length > 0 && (
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 700, margin: '4px 0 6px' }}>기록이 있는 디스크 자리 {v.slots.length}곳</div>
-          <STable className="data-table" minWidth={980} style={{ width: '100%', fontSize: 12.5 }}>
-            <thead><tr><th>위치</th><th>기록</th><th>지금 디스크</th><th style={{ textAlign: 'right' }}>재할당</th><th style={{ textAlign: 'right' }}>보류</th><th style={{ textAlign: 'right' }}>복구 불가</th><th>판정</th><th data-nosort>근거</th></tr></thead>
+          <STable className="data-table" minWidth={820} style={{ width: '100%', fontSize: 12.5 }}>
+            <thead><tr><th>위치</th><th>기록</th><th>지금 디스크</th><th>디스크 값</th><th>판정</th><th data-nosort>근거</th></tr></thead>
             <tbody>{v.slots.map((s) => (
               <React.Fragment key={s.slotKey}>
                 <tr>
                   <td data-sort={s.slotKey}><b>{s.label}</b></td>
                   <td data-sort={s.total}>{Object.entries(s.byCode).map(([c, n]) => <span key={c} className={`badge ${clsTone(clsOfCode(c, refs))}`} style={{ marginRight: 4 }} title={noteOf(c, refs)}>{c} {n}</span>)}<div className="muted" style={{ fontSize: 11.5 }}>{fmtDate(s.first)} ~ {fmtDate(s.last)}</div></td>
                   <td>{s.drive ? <>{s.drive.model || '—'}<div className="muted" style={{ fontSize: 11.5, fontFamily: 'var(--mono)' }}>S/N {s.drive.serial || '—'}{s.drive.health ? ` · ${s.drive.health}` : ''}</div></> : <span className="muted">찾지 못함</span>}</td>
-                  <td data-sort={s.vals?.realloc ?? ''} style={{ textAlign: 'right', fontFamily: 'var(--mono)' }}>{valCell(s.vals?.realloc)}</td>
-                  <td data-sort={s.vals?.pending ?? ''} style={{ textAlign: 'right', fontFamily: 'var(--mono)' }}>{valCell(s.vals?.pending)}</td>
-                  <td data-sort={s.vals?.uncorrectable ?? ''} style={{ textAlign: 'right', fontFamily: 'var(--mono)' }}>{valCell(s.vals?.uncorrectable)}</td>
+                  <td data-sort={s.vals?.uncorrectable ?? ''} style={{ fontSize: 12, lineHeight: 1.5 }}>{s.vals ? <>재할당 {valCell(s.vals.realloc)}<br />보류 {valCell(s.vals.pending)}<br />복구 불가 {s.vals.uncorrectable > 0 ? <b>{valCell(s.vals.uncorrectable)}</b> : valCell(s.vals.uncorrectable)}</> : <span className="muted">값 모름</span>}</td>
                   <td data-sort={s.verdict}><span className={`badge ${verdictTone(s.verdict)}`}>{data.labels.verdict[s.verdict]}</span> <span className={`badge ${confidenceTone(s.confidence)}`}>{data.labels.confidence[s.confidence]}</span></td>
                   <td><button className="tab" style={{ flex: 'none', padding: '3px 9px', fontSize: 12 }} onClick={() => setOpen(open === s.slotKey ? null : s.slotKey)}>{open === s.slotKey ? '닫기' : '판단 근거'}</button></td>
                 </tr>
                 {open === s.slotKey && (
-                  <tr><td colSpan={8} style={{ background: 'var(--bg-soft)' }}>
+                  <tr><td colSpan={6} style={{ background: 'var(--bg-soft)', whiteSpace: 'normal' }}>
                     <ol style={{ margin: '4px 0 6px 18px', padding: 0, fontSize: 12.5, lineHeight: 1.6 }}>
                       {s.evidence.map((e, i) => <li key={i}>{e.text} <span className="muted" style={{ fontSize: 11.5 }}>— {e.src}</span></li>)}
                     </ol>
@@ -189,18 +190,17 @@ export function DiskBadServerPanel({ serverId, agent = null }) {
       {v && diskVals && diskVals.length > 0 && (
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 700, margin: '4px 0 6px' }}>디스크 값 {diskVals.length}개 <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}>디스크가 스스로 적어 둔 누적 값 — 로그가 넘어가도 남지만, 언제 생겼는지는 말해 주지 않습니다</span></div>
-          <STable className="data-table" minWidth={1040} style={{ width: '100%', fontSize: 12.5 }}>
-            <thead><tr><th>위치</th><th>디스크</th><th style={{ textAlign: 'right' }}>재할당</th><th style={{ textAlign: 'right' }}>보류</th><th style={{ textAlign: 'right' }}>복구 불가</th><th style={{ textAlign: 'right' }}>가동 시간</th><th>판정</th><th>포탈이 본 변화</th></tr></thead>
+          <STable className="data-table" minWidth={820} style={{ width: '100%', fontSize: 12.5 }}>
+            <thead><tr><th>위치</th><th>디스크</th><th style={{ textAlign: 'right' }}>재할당</th><th style={{ textAlign: 'right' }}>보류</th><th style={{ textAlign: 'right' }}>복구 불가</th><th>판정</th><th>포탈이 본 변화</th></tr></thead>
             <tbody>{diskVals.map((d) => (
               <tr key={d.id || d.slotKey}>
                 <td data-sort={d.slotKey || d.label}><b>{d.label}</b>{d.inVolume === false ? <div className="muted" style={{ fontSize: 11 }}>RAID 밖 — 로그로 볼 수 없음</div> : null}</td>
-                <td>{d.model || '—'}<div className="muted" style={{ fontSize: 11.5, fontFamily: 'var(--mono)' }}>S/N {d.serial || '—'}{d.media ? ` · ${d.media}` : ''}</div></td>
+                <td>{d.model || '—'}<div className="muted" style={{ fontSize: 11.5, fontFamily: 'var(--mono)' }}>S/N {d.serial || '—'}{d.media ? ` · ${d.media}` : ''}{Number.isFinite(d.vals?.powerOnHours) ? ` · 가동 ${hours(d.vals.powerOnHours)}` : ''}</div></td>
                 <td data-sort={d.vals?.realloc ?? ''} style={{ textAlign: 'right', fontFamily: 'var(--mono)' }}>{valCell(d.vals?.realloc)}</td>
                 <td data-sort={d.vals?.pending ?? ''} style={{ textAlign: 'right', fontFamily: 'var(--mono)' }}>{valCell(d.vals?.pending)}</td>
                 <td data-sort={d.vals?.uncorrectable ?? ''} style={{ textAlign: 'right', fontFamily: 'var(--mono)' }}>{d.vals?.uncorrectable > 0 ? <b>{valCell(d.vals.uncorrectable)}</b> : valCell(d.vals?.uncorrectable)}</td>
-                <td data-sort={d.vals?.powerOnHours ?? ''} style={{ textAlign: 'right', fontFamily: 'var(--mono)' }}>{hours(d.vals?.powerOnHours)}</td>
-                <td data-sort={TRACE_ORDER[d.trace] ?? 9}><span className={`badge ${traceTone(d.trace)}`}>{d.traceLabel}</span>{d.vals?.src ? <div className="muted" style={{ fontSize: 11 }}>{srcLabel[d.vals.src] || d.vals.src}</div> : null}</td>
-                <td data-sort={d.vals?.changedAt ?? ''} style={{ fontSize: 12 }}>{d.vals?.changedAt ? <>늘어남 {fmtDateTime(d.vals.changedAt)}{d.vals.before ? <div className="muted" style={{ fontSize: 11 }}>전: 재할당 {valCell(d.vals.before.realloc)} · 보류 {valCell(d.vals.before.pending)} · 복구 불가 {valCell(d.vals.before.uncorrectable)}</div> : null}</> : (d.vals?.firstAt ? <span className="muted">처음 읽음 {fmtDate(d.vals.firstAt)} · 변화 없음</span> : <span className="muted">—</span>)}</td>
+                <td data-sort={TRACE_ORDER[d.trace] ?? 9}><span className={`badge ${traceTone(d.trace)}`}>{d.traceLabel}</span>{d.vals?.src ? <div className="muted" style={{ fontSize: 11 }} title={srcLabel[d.vals.src] || d.vals.src}>{SRC_SHORT[d.vals.src] || d.vals.src}</div> : null}</td>
+                <td data-sort={d.vals?.changedAt ?? ''} style={{ fontSize: 12, whiteSpace: 'normal', minWidth: 140, maxWidth: 220 }}>{d.vals?.changedAt ? <>늘어남 {fmtDateTime(d.vals.changedAt)}{d.vals.before ? <div className="muted" style={{ fontSize: 11 }}>전: 재할당 {valCell(d.vals.before.realloc)} · 보류 {valCell(d.vals.before.pending)} · 복구 불가 {valCell(d.vals.before.uncorrectable)}</div> : null}</> : (d.vals?.firstAt ? <span className="muted">처음 읽음 {fmtDate(d.vals.firstAt)} · 변화 없음</span> : <span className="muted">—</span>)}</td>
               </tr>
             ))}</tbody>
           </STable>
@@ -218,7 +218,7 @@ export function DiskBadServerPanel({ serverId, agent = null }) {
                 <td data-sort={e.created ?? ''} style={{ whiteSpace: 'nowrap', fontFamily: 'var(--mono)' }}>{fmtDateTime(e.created)}</td>
                 <td style={{ whiteSpace: 'nowrap' }}>{e.slotKey ? e.slotKey.replace(/^bp(\d+):d(\d+)$/, (_, b, dd) => `Disk ${dd} · BP ${b}`) : <span className="muted">위치 모름</span>}</td>
                 <td data-sort={e.kind}><span className={`badge ${selKindTone(e.kind)}`}>{SEL_KIND_LABEL[e.kind] || e.kind}</span>{e.messageId ? <div className="muted" style={{ fontSize: 11 }}>{e.messageId}</div> : null}</td>
-                <td style={{ fontSize: 12, wordBreak: 'break-word' }}>{e.message || '—'}</td>
+                <td style={{ fontSize: 12, whiteSpace: 'normal', overflowWrap: 'anywhere', minWidth: 240 }}>{e.message || '—'}</td>
               </tr>
             ))}</tbody>
           </STable>
@@ -240,7 +240,7 @@ export function DiskBadServerPanel({ serverId, agent = null }) {
                 <td data-sort={r.created} style={{ whiteSpace: 'nowrap', fontFamily: 'var(--mono)' }}>{fmtDateTime(r.created)}{r.baseline ? <div className="muted" style={{ fontSize: 11 }}>첫 점검에서 찾음</div> : null}</td>
                 <td style={{ whiteSpace: 'nowrap' }}>{r.slotKey ? r.slotKey.replace(/^bp(\d+|\?):d(\d+)$/, (_, b, d) => (b === '?' ? `Disk ${d}` : `Disk ${d} · BP ${b}`)) : <span className="muted">위치 모름</span>}</td>
                 <td><span className={`badge ${clsTone(r.cls)}`}>{r.code || '—'}</span><div className="muted" style={{ fontSize: 11.5 }}>{noteOf(r.code, refs) || (r.cls === 'other' ? '분류에 없는 기록 — 원문만 보관' : '')}</div></td>
-                <td style={{ fontSize: 12, wordBreak: 'break-word' }}>{r.message || '—'}</td>
+                <td style={{ fontSize: 12, whiteSpace: 'normal', overflowWrap: 'anywhere', minWidth: 240 }}>{r.message || '—'}</td>
               </tr>
             ))}</tbody>
           </STable>

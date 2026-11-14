@@ -223,6 +223,8 @@ export function demoInventory(server, p, now = Date.now(), { watts = null } = {}
     const boss = i < 2;
     const pf = plan.disk && i === diskN - 1;
     return {
+      // Dell 이 Drive 자원에 붙이는 Id(FQDD) 꼴 — 디스크 배드 섹터 이력이 디스크 값 · 로그 위치를 이 Id 로 맞춘다(v3.9.1 데모).
+      id: boss ? `Disk.Direct.${i}-${i}:AHCI.SL.2-1` : `Disk.Bay.${i}:Enclosure.Internal.0-1:RAID.Integrated.1-1`,
       name: boss ? `SSD ${i} (BOSS)` : `Solid State Disk 0:1:${i}`,
       model: boss ? 'MTFDDAV480TDS' : 'KPM6XRUG3T84', serial: `S${String(demoHash(`d${i}|${id}`)).slice(0, 9)}`,
       capacityGB: boss ? 480 : 3840, media: 'SSD', protocol: boss ? 'SATA' : 'SAS',
