@@ -4,7 +4,7 @@
 //   탭 id · 해시는 그대로(#/vcenters · #/hosts · #/vms) — 탭을 누르면 App 의 setTab, 칩을 누르면 허브 범위(위 필터 바의 vCenter)가 그 법인으로 바뀐다.
 import React, { useState } from 'react';
 import { vcQuickDot } from '../vcCardText.js';
-import { entityTabs, chipCount, chipLegend, loadChipsCollapsed, saveChipsCollapsed, platformMenuLabel } from './platformText.js';
+import { entityTabs, chipCount, chipLegend, loadChipsCollapsed, saveChipsCollapsed, platformMenuLabel, chipSites, chipRegionNote } from './platformText.js';
 import './platform.css';
 
 const lsSafe = () => { try { return typeof window !== 'undefined' ? window.localStorage : null; } catch { return null; } };
@@ -25,14 +25,16 @@ const ICON = {
  * @param {string} p.vcenterId              고른 법인(없으면 '')
  * @param {(id:string)=>void} p.onPickVcenter  칩 클릭 — 같은 칩을 다시 누르면 전체
  */
-export default function PlatformHub({ tab, tabs, onTab, summary = null, vcenters, vcenterId, onPickVcenter }) {
+export default function PlatformHub({ tab, tabs, onTab, summary = null, vcenters, vcenterId, region = '', onPickVcenter }) {
   // v2.954(점검 E-2): 요약은 App 이 범위(리전 · vCenter)를 실어 부른 summary prop 하나를 쓴다. 예전에는 여기서 scope 없이(App 이 넘기지 않음) 다시 폴링해
   //   엔티티 탭 · 칩이 범위를 따르지 않고(전 법인 수) 같은 요약을 30초마다 두 번 불렀다. 범위 밖 법인의 칩은 숫자 없이 점만 남는다(요약에 그 법인 줄이 없다).
   const [folded, setFolded] = useState(() => loadChipsCollapsed(lsSafe()));
   const toggleFold = () => { const n = !folded; setFolded(n); saveChipsCollapsed(lsSafe(), n); };
   const items = entityTabs(summary).filter((t) => tabs.includes(t.k));
   const byVc = new Map((summary?.byVc || []).map((r) => [r.id, r]));
-  const sites = Array.isArray(vcenters) ? vcenters : [];
+  // v3.10.14(점검 2회차): 칩은 고른 리전 안의 법인만 — 칩을 눌러도 리전은 남는다(App 의 onPickVcenter 가 region 을 지우지 않는다).
+  const sites = chipSites(vcenters, region);
+  const regionNote = chipRegionNote(region, sites.length);
   const snap = summary?.generatedAt ? new Date(summary.generatedAt).toLocaleTimeString('ko-KR') : '';
   const cur = items.find((t) => t.k === tab) || null;
   // v2.994(사용자 요청 2026-11-13 · 설계 docs/design/server-menu-rename): 제목 = 이 탭에서 사이드바에 켜지는 항목 이름(호스트 탭 'Hypervisor' · vCenter · VM 탭 'Virtual Machine(VM)').
@@ -61,16 +63,17 @@ export default function PlatformHub({ tab, tabs, onTab, summary = null, vcenters
       {/* 400px: 열린 탭의 분해를 탭 아래 한 줄로(탭 3장은 수 + 이름 + 배지만 — platform.css) */}
       {cur && cur.parts.length > 0 && <div className="ph-parts-narrow">{cur.parts.map((p) => <span key={p.text}><b className={p.tone || ''}>{p.text}</b>{p.note ? <small> {p.note}</small> : null}</span>)}</div>}
 
-      {sites.length > 0 && (
+      {(sites.length > 0 || regionNote) && (
         <div className={`vc-quicknav ph-chips${folded ? ' folded' : ''}`} aria-label="바로가기">
           <span className="qn-label">⚡ 바로가기</span>
+          {regionNote && <span className="ph-legend" style={{ marginLeft: 0 }} title="범위 바의 리전 — 이 리전의 법인만 보입니다 · 칩을 눌러도 리전은 남습니다">{regionNote}{sites.length === 0 ? ' · 이 리전에 법인이 없습니다' : ''}</span>}
           {sites.map((s) => {
             const { dot, down } = vcQuickDot(s);
             const c = chipCount(byVc.get(s.id), tab);
             const on = vcenterId === s.id;
             return (
               <button key={s.id} type="button" className={`qn-btn${down ? ' down' : ''}${on ? ' on' : ''}`} aria-pressed={on}
-                title={`${s.name} — 허브 범위를 이 법인으로${c.title ? ` · ${c.title}` : ''}${on ? ' (다시 누르면 전체)' : ''}`}
+                title={`${s.name} — 허브 범위를 이 법인으로${c.title ? ` · ${c.title}` : ''}${on ? (region ? ' (다시 누르면 리전 전체)' : ' (다시 누르면 전체)') : ''}`}
                 onClick={() => onPickVcenter(on ? '' : s.id)}>
                 <span className="qn-dot" style={{ background: dot }} />{s.id}
                 {c.n != null && c.n > 0 && <b className={`qn-n ${c.tone}`}>{c.n.toLocaleString('en-US')}</b>}
