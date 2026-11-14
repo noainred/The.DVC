@@ -544,8 +544,8 @@ test('⑪ 복원 제외 · 소스 스윕 — 상태 파일은 복원하지 않�
   assert.match(rt, /api\.post\('\/settings\/ssh-access\/reload-state', \.\.\.ownerWrite/);
   assert.doesNotMatch(rt, /ST\.(setCorpStop|clearCorpStop|addEvent|reload)/, '상태 쓰기는 service 를 거친다(사용 중지는 서버 목록과 함께)');
   const ob = stripComments(fs.readFileSync(path.join(SRC, 'routes/api/bmOnboard.js'), 'utf8'));
-  assert.match(ob, /const keyAddGate = \[adminOnly, toolsPerm, requireSettingsOwner, twoPersonFirst, keyVaultFirst, reauth\];/);
-  assert.match(ob, /const keyChangeGate = \[adminOnly, toolsPerm, requireSettingsOwner, twoPersonFirst, installingFirst, reauth\];/, 'v3.10.0: 두 사람 승인이 켜져 있으면 7b 화면의 키 교체 · 삭제도 OTP 전에 거절 · 넣는 중인 키의 회전 · 삭제도 OTP 전에 409(1회차 반증)');
+  assert.match(ob, /const keyAddGate = \[adminOnly, toolsPerm, requireSettingsOwner, fullRW, twoPersonFirst, keyVaultFirst, reauth\];/);
+  assert.match(ob, /const keyChangeGate = \[adminOnly, toolsPerm, requireSettingsOwner, fullRW, twoPersonFirst, installingFirst, reauth\];/, 'v3.10.0: 두 사람 승인이 켜져 있으면 7b 화면의 키 교체 · 삭제도 OTP 전에 거절 · 넣는 중인 키의 회전 · 삭제도 OTP 전에 409(1회차 반증)');
   assert.match(ob, /api\.post\('\/tools\/bm-usage\/ssh-keys', \.\.\.keyAddGate/);
   // 폴러 두 곳이 기능 id 를 밝힌다(빈 기능 id = 목록이 있는 키 거절)
   assert.match(fs.readFileSync(path.join(SRC, 'bmstor/poller.js'), 'utf8'), /\)\), \{ feature: 'bm-storage' \}\);/);
@@ -558,7 +558,7 @@ test('⑪ 복원 제외 · 소스 스윕 — 상태 파일은 복원하지 않�
 test('⑫ 법인 사용 중지 — 중지할 때 그 법인 서버(id · 접속처)를 함께 적는다: 서버의 법인 칸을 비우거나 바꿔도 · 같은 접속처를 새 항목으로 다시 만들어도 풀리지 않는다(점검 A-4 · B-1)', async () => {
   const kX = KS.keyByName('no-feat');   // 폴더 없는 키 — 사용 중지가 키 폴더가 아니라 서버 쪽 기록으로 걸리는지 본다
   const s = BM.listBmServersRaw().find((x) => x.name === 'bm-a1');
-  const r = SVC.stopCorp('vcA', { by: 'own', reason: '유출 의심' });
+  const r = await SVC.stopCorp('vcA', { by: 'own', reason: '유출 의심' });
   assert.equal(r.ok, true, JSON.stringify(r)); assert.ok(r.servers >= 1);
   const asIs = { ...s, keyRef: kX.id };
   assert.equal(REFS.resolveOsAuth(asIs, { feature: 'conn-test' }).code, 'corp-stopped');
@@ -597,7 +597,7 @@ test('⑭ 집중 모니터링은 분마다 자격을 다시 해석한다 — 세
   const start = REFS.withResolvedAuth([s], { feature: 'bm-usage' })[0];
   assert.ok(start.privateKey, '세션 시작 때는 키가 풀렸다');
   assert.ok((await FR.refreshFocusOsHost(start)).privateKey, '바뀐 것이 없으면 그대로');
-  assert.ok(SVC.stopCorp('vcA', { by: 'own', reason: 't' }).ok);
+  assert.ok((await SVC.stopCorp('vcA', { by: 'own', reason: 't' })).ok);
   const r1 = await FR.refreshFocusOsHost(start);
   assert.deepEqual([r1.authErrorCode, r1.privateKey, r1.password], ['corp-stopped', undefined, '']);
   assert.ok((await SVC.resumeCorp('vcA', { by: 'own' })).ok);
