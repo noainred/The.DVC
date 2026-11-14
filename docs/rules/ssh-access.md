@@ -196,3 +196,16 @@
 - **7b 교체 · 삭제도 본체와 같은 앞 조건을 OTP 앞에서**(R5R-4): `keyChangeGate` 의 `refsFirst`(REFS.rotateIssue · deleteIssue) · `deleteKeyIfUnused` 는 `deleteIssue` 를 쓴다(앞 조건 한 함수).
 - **실제로 쓰일 키 = `bindRule.effectiveKeyRefOf` 하나**(R5R-5): 접속(resolveOsAuth) · 키 고르기 사전 검사 · 본체 · bm-storage 묶기 · CSV 가 같은 함수 — 비밀번호 고정(osAuth 'password')은 키 없음. 손으로 다시 계산하지 말 것.
 - **SSH 키 저장소 복원 문구 = `keyBundle.keyStoreDropNotes` 하나**(R5R-6): 즉시 복원 응답 문구와 예약 적용 경고(stagedRestore warning — 적용 기록 · 콘솔 · 백업 화면)가 같은 문구. 괄호 사유는 항목 종류별(키 · 계정 비밀번호 · 계정 기본 키 · 대기 키 id 지킴).
+
+## 반복 6회차(5축 점검 · 927e190d · 731d4b1e · 0dfed839) 반영 — 되돌리지 말 것
+
+- **앞 조건은 본체와 사전 검사가 같은 함수**(OTP 를 쓴 뒤의 결정적 거절 금지): 서버 키 고르기 `chooseKeyIssue`(라우트가 `expectAddr` 도 넘긴다) · 폴더 바꾸기 `placementChangeIssue` · 대기 키 지우기 `pendingKeyDropIssue`(뒷정리 discard 와 같은 deleteIssue — 돌려보내기는 in-use 통과, 직접 삭제는 거절) · 7b 공통 계정 `KS.saveAccountIssue`(saveAccount dryRun) · 7b 교체 · 삭제 `refsFirst`(없는 키도 OTP 앞). (A6-2 · C6-1 · C6-5)
+- **잠긴 저장소를 ‘키 없음’ 으로 말하지 않는다**: `rotateIssue` · `deleteIssue` 는 저장소 쓰기 판정을 키 찾기보다 먼저(C6-4 — R4R-3 규칙).
+- **거두는 키 검사는 쓰기 뒤 실제로 쓰일 키로**(A6-1 — 87958dde 가 들인 약화): bm-storage 저장은 `bindRule.postWriteAuthOf`(등록부 applyServerInput 과 같은 규칙) → `refs.effectiveKeyRef`, 묶음이 아닌 쓰기(osAuth 만 뒤집기 · keyRef 떼기)도 그 키가 바뀌면 본다. `service.effectiveKeyId` 도 `effectiveKeyRefOf` 위(OS 계정만).
+- **등록부**: 파일이 없는 설치의 첫 읽기 오류도 회복하면 표지를 지운다(C6-2) · 읽기 오류 중 bm-storage 저장은 첫 줄에서 503(C6-3).
+- **봉인을 못 푼 비밀은 화면 · 키 점검이 말한다**(A6-3): `storeUndecryptable` 띠 · `store-undecryptable`(bad) — 그동안 ‘모두 암호화’ ok 를 내지 않는다.
+- **복원은 지금 ssh-keys.json 을 읽고 해석할 수 있을 때만 합친다**(D6-1 · 보통 — 번들에는 개인키가 없어 지금 파일이 유일한 원본): 읽기 오류 · 손상이면 그 파일은 적용하지 않고 failed(예약 적용 · 즉시 복원 둘 다) · 없음(ENOENT)은 합친다. 문구는 자르지 않은 목록으로(`sshKeyDropNotes` — D6-4).
+- **키 고르기 창**(E6-2): 이번에 읽은 목록을 보일 때는 키 칩도 그 목록의 지문으로 · 머리글은 이전 기록 여부로 갈라 말한다.
+- **passwordOnly 결과 가르기**(B6-1): 부분 성공 `SSH_PARTIAL_AUTH`(partial-auth — 받아들여짐 · 거부로 세지 않음) · 비밀번호 뒤 추가 칸 `SSH_MORE_AUTH`(more-auth — 맞았는지 모름 · 계정 잠금 방지로 거부와 같이 셈) · 대화형이 칸 없이 끝남 → no-password-method(보내지 않음). 어느 경우든 다시 보내지 않는다.
+- **원격 자물쇠**(B6-2): 주인 없는 자물쇠를 두 번 옮기지 못하면 `lockstuck`(append-only 폴더 등 — ‘다음 작업이 치운다’ 고 하지 않는다) · 자물쇠를 잡은 뒤 pid 가 없는 `.authorized_keys.portal.<pid>` 사본을 치운다(임시 파일은 자물쇠 안에서만 만든다).
+- 생성 문서(API · ARCH)는 라우트 · 모듈을 바꾼 커밋에서 함께 재생성(D6-5 — CI `--check` 가 막는다).
