@@ -46,6 +46,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 - **'못 읽은 값' 은 0 이 아니다**: 판정은 `util/numOrNull.js`(웹 `web/src/numOrNull.js`). `Number('')===0`·`Number(null)===0` 함정이 열 번 넘게 재발했다.
   못 읽음·오래됨·부분 합은 정상에도 장애에도 넣지 않고 **따로 센다**. 부분 합은 추이에 적재하지 않는다. 값이 없으면 단위를 붙이지 않는다('—').
 - **판정 코어는 하나**: 같은 판정을 복제하지 말 것(웹·서버 두 벌이면 테스트가 같은 입력으로 대조). 결측을 null 로 바꿨으면 **소비처를 전수로** 따라간다.
+  새 헬퍼·공용 컴포넌트를 만들기 전에 **`docs/COMMON.md`(공통 기능 목록 — 생성물)** 에서 먼저 찾는다. 공용 모듈의 import 가 늘면 `node scripts/common-doc.mjs`.
 - **가림·범위는 그 값이 실리는 응답 경로 전부에**: 관리자 판본 판정은 `auth/demoGuest.js isAdminDetailUser` 하나(`role === 'admin'` 직접 비교 금지 — 소스 스윕).
   범위 계정 쓰기 판정은 '조회 밖 404 → 쓰기 밖 403' · 전 법인 설정·동작은 `fullScopeOnly`/`fleetOnly`. 새 라우터 파일은 '범위 참조 0건' 인지 먼저 본다.
 - **엣지가 보낸 것은 정제한다**: 아는 필드만·객체만·상한·문자열 수치는 수로 · 이름은 인증된 agent · 엣지 시각은 수신 시각으로 자르고 원본은 따로.
@@ -68,7 +69,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 | 파일 | 다루는 것 · 언제 읽나 |
 |---|---|
 | `docs/rules/perf-db.md` (24항목) | 성능·DB·폴러 규약 — 폴러·DB 모듈·캐시·대량 쓰기·응답 캐시를 새로 만들거나 고칠 때 |
-| `docs/rules/common.md` (12항목) | 공통 코드·테스트·문서 규약(numOrNull·주석 제거·TDZ·생성기·의존 방향·릴리스 워크플로) — 테스트·스윕·문서 생성기·릴리스 워크플로를 만질 때 |
+| `docs/rules/common.md` (13항목) | 공통 코드·테스트·문서 규약(numOrNull·주석 제거·TDZ·생성기·의존 방향·릴리스 워크플로) — 테스트·스윕·문서 생성기·릴리스 워크플로를 만질 때 |
 | `docs/rules/security-api.md` (19항목) | 보안·라우트·외부 API·감사 로그·라이선스 — server/src/routes/ · publicapi · auth · 압축 해제 · CSP |
 | `docs/rules/web.md` (47항목) | 웹 화면·메뉴·표·문구 규약 — web/src/ 전반(메뉴·사이드바·표·문구·드롭다운·게시판) |
 | `docs/rules/edge.md` (18항목) | 중앙↔엣지 통신·엣지 로그·통신 점검·토큰 점검·지도·전송 속도·스캔 재개·VM 백업 법인 위임 — server/src/{agent,central,collector,linkcheck,edgelog,portalcheck,commmap,dataflow,devflow,xferspeed,vmclone}/ |
