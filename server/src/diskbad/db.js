@@ -43,6 +43,7 @@ function migrate(db) {
       log_order TEXT, log_total INTEGER, log_oldest INTEGER, covered_from INTEGER, continuous_since INTEGER,
       complete INTEGER, read_last INTEGER, synthesized INTEGER, inv_at INTEGER, drives_json TEXT, updated_at INTEGER,
       newest_created INTEGER, read_stop TEXT, read_diag TEXT, probe_json TEXT, probe_at INTEGER,
+      vals_json TEXT, sel_json TEXT,
       PRIMARY KEY(agent, server_id));
     CREATE TABLE IF NOT EXISTS dbr_record(
       agent TEXT NOT NULL, server_id TEXT NOT NULL, entry_key TEXT NOT NULL,
@@ -63,6 +64,9 @@ function migrate(db) {
   if (!cols.has('read_diag')) db.exec('ALTER TABLE dbr_server ADD COLUMN read_diag TEXT');
   if (!cols.has('probe_json')) db.exec('ALTER TABLE dbr_server ADD COLUMN probe_json TEXT');
   if (!cols.has('probe_at')) db.exec('ALTER TABLE dbr_server ADD COLUMN probe_at INTEGER');
+  // 과거 기록 읽기 1단계(README §22): 디스크 값 · SEL. 앞 판이 만든 DB 에 열만 더한다.
+  if (!cols.has('vals_json')) db.exec('ALTER TABLE dbr_server ADD COLUMN vals_json TEXT');
+  if (!cols.has('sel_json')) db.exec('ALTER TABLE dbr_server ADD COLUMN sel_json TEXT');
   const v = db.prepare("SELECT v FROM meta WHERE k='schema'").get()?.v;
   if (v != null && Number(v) > SCHEMA_VERSION) throw new Error(`disk-bad.db 의 판(${v})이 이 포탈(${SCHEMA_VERSION})보다 새것입니다 — 포탈을 올리세요.`);
   db.prepare("INSERT OR REPLACE INTO meta(k, v) VALUES('schema', ?)").run(String(SCHEMA_VERSION));
@@ -72,16 +76,18 @@ function prepare(db) {
   return {
     serverGet: db.prepare('SELECT * FROM dbr_server WHERE agent=? AND server_id=?'),
     serverUpsert: db.prepare(`INSERT INTO dbr_server(agent, server_id, name, host, service_tag, first_ok_at, last_scan_at, last_ok_at, last_status, last_reason,
-        log_order, log_total, log_oldest, covered_from, continuous_since, complete, read_last, synthesized, inv_at, drives_json, updated_at, newest_created, read_stop, read_diag, probe_json, probe_at)
+        log_order, log_total, log_oldest, covered_from, continuous_since, complete, read_last, synthesized, inv_at, drives_json, updated_at, newest_created, read_stop, read_diag, probe_json, probe_at,
+        vals_json, sel_json)
       VALUES(@agent, @server_id, @name, @host, @service_tag, @first_ok_at, @last_scan_at, @last_ok_at, @last_status, @last_reason,
-        @log_order, @log_total, @log_oldest, @covered_from, @continuous_since, @complete, @read_last, @synthesized, @inv_at, @drives_json, @updated_at, @newest_created, @read_stop, @read_diag, @probe_json, @probe_at)
+        @log_order, @log_total, @log_oldest, @covered_from, @continuous_since, @complete, @read_last, @synthesized, @inv_at, @drives_json, @updated_at, @newest_created, @read_stop, @read_diag, @probe_json, @probe_at,
+        @vals_json, @sel_json)
       ON CONFLICT(agent, server_id) DO UPDATE SET name=excluded.name, host=excluded.host, service_tag=excluded.service_tag,
         first_ok_at=excluded.first_ok_at, last_scan_at=excluded.last_scan_at, last_ok_at=excluded.last_ok_at, last_status=excluded.last_status,
         last_reason=excluded.last_reason, log_order=excluded.log_order, log_total=excluded.log_total, log_oldest=excluded.log_oldest,
         covered_from=excluded.covered_from, continuous_since=excluded.continuous_since, complete=excluded.complete, read_last=excluded.read_last,
         synthesized=excluded.synthesized, inv_at=excluded.inv_at, drives_json=excluded.drives_json, updated_at=excluded.updated_at,
         newest_created=excluded.newest_created, read_stop=excluded.read_stop, read_diag=excluded.read_diag,
-        probe_json=excluded.probe_json, probe_at=excluded.probe_at`),
+        probe_json=excluded.probe_json, probe_at=excluded.probe_at, vals_json=excluded.vals_json, sel_json=excluded.sel_json`),
     recInsert: db.prepare(`INSERT OR IGNORE INTO dbr_record(agent, server_id, entry_key, created, code, message_id, severity, message, slot_key, received_at, baseline)
       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
     serialUpsert: db.prepare(`INSERT INTO dbr_serial(agent, server_id, slot_key, serial, model, first_seen, last_seen) VALUES(?, ?, ?, ?, ?, ?, ?)
@@ -183,7 +189,11 @@ export async function ingestServers(agent, servers, { now = Date.now(), yielder 
         inv_at: Number.isFinite(s.invAt) ? s.invAt : (prev?.inv_at ?? null), drives_json: drivesJson, updated_at: now,
         newest_created: prev?.newest_created ?? null, read_stop: prev?.read_stop ?? null,
         read_diag: prev?.read_diag ?? null, probe_json: prev?.probe_json ?? null, probe_at: prev?.probe_at ?? null,
+        vals_json: prev?.vals_json ?? null, sel_json: prev?.sel_json ?? null,
       };
+      // 과거 기록 읽기 1단계 — 온 것만 바꾼다(옛 판 엣지 · 데모 결과에는 없다 — 지난 값을 그대로 둔다).
+      if (s.vals) row.vals_json = JSON.stringify(mergeVals(parseObj(prev?.vals_json), s.vals, now)).slice(0, 60_000);
+      if (s.sel) row.sel_json = JSON.stringify(mergeSel(parseObj(prev?.sel_json), s.sel, now)).slice(0, 120_000);
       // 장비 진단은 온 것만 바꾼다(서버 한 대를 직접 점검했을 때만 온다). 로그 읽기가 실패한 점검에도 실릴 수 있다.
       //   답한 단계가 하나도 없는 진단(전부 실패 · 시한)은 지난 정상 진단을 덮지 않는다 — 지난 것이 없을 때만 남긴다(실패했다는 사실을 보이게).
       if (s.probe && (probeAnswered(s.probe) || !prev?.probe_json)) { row.probe_json = JSON.stringify(s.probe).slice(0, 20_000); row.probe_at = now; }
@@ -251,6 +261,60 @@ export async function ingestServers(agent, servers, { now = Date.now(), yielder 
   return { ok: true, servers: storedIds.length, storedIds, newRecords, baselineServers };
 }
 
+const VAL_KEYS = ['realloc', 'pending', 'uncorrectable'];
+/**
+ * 디스크 값 저장 모양(순수 — 테스트가 고정). 누적 값이라 **마지막으로 읽은 값**을 남기고, 포탈이 본 변화만 날짜를 단다:
+ *  · firstAt   이 디스크(Id)의 값을 처음 읽은 때 · changedAt  재할당 · 보류 · 복구 불가 가운데 하나가 늘어난 것을 본 때(못 봤으면 null).
+ *  · 이번에 못 읽었으면(ok 가 아님) 지난 값을 버리지 않고 남긴다 — `at` 은 마지막으로 읽은 때로 두고 `status` · `tryAt` 만 바꾼다
+ *    (화면이 '언제 읽은 값 · 이번에는 못 읽음' 을 같이 말한다). 지난 값이 없으면 그대로 '못 읽음' 이다.
+ *  · 디스크 Id 가 바뀌면(교체 · 자리 이동) 그 Id 의 이력은 새로 시작한다 — 다른 디스크의 값과 잇지 않는다.
+ */
+export function mergeVals(prev, cur, now) {
+  const base = { status: cur.status, tryAt: now, telemetry: cur.telemetry || '', metrics: cur.metrics || '' };
+  if (cur.status !== 'ok') {
+    if (prev && Array.isArray(prev.drives) && prev.drives.length) return { ...prev, ...base };
+    return { ...base, at: null, reportAt: null, seen: cur.seen || [], drives: [] };
+  }
+  const old = new Map((prev && Array.isArray(prev.drives) ? prev.drives : []).map((d) => [d.id, d]));
+  const drives = (cur.drives || []).map((d) => {
+    const p = old.get(d.id);
+    const grew = p && VAL_KEYS.some((k) => Number.isFinite(d[k]) && Number.isFinite(p[k]) && d[k] > p[k]);
+    return { ...d, firstAt: Number.isFinite(p?.firstAt) ? p.firstAt : now, changedAt: grew ? now : (Number.isFinite(p?.changedAt) ? p.changedAt : null),
+      ...(grew ? { before: Object.fromEntries(VAL_KEYS.map((k) => [k, Number.isFinite(p[k]) ? p[k] : null])) } : (p?.before ? { before: p.before } : {})) };
+  });
+  return { ...base, at: now, reportAt: cur.reportAt ?? null, seen: cur.seen || [], drives };
+}
+
+export const SEL_KEEP_MAX = 200;
+/**
+ * SEL 디스크 항목 저장 모양(순수). iDRAC 가 SEL 을 지우거나 덮어써도 포탈이 본 항목은 남긴다(합집합 · 가장 새 것 200건).
+ * `range` 는 이번에 읽은 SEL 이 담은 기간, `keptFrom` 은 포탈이 보관한 가장 오래된 항목 — 화면이 둘을 섞지 않는다.
+ */
+export function mergeSel(prev, cur, now) {
+  const base = { status: cur.status, tryAt: now };
+  const prevEvents = prev && Array.isArray(prev.events) ? prev.events : [];
+  if (cur.status !== 'ok' && cur.status !== 'empty') {
+    if (prev) return { ...prev, ...base };
+    return { ...base, at: null, read: null, total: null, stopped: '', range: null, kinds: {}, events: [], keptFrom: null };
+  }
+  const key = (e) => `${e.created}|${e.kind}|${e.slotKey}|${String(e.message || '').slice(0, 80)}`;
+  const seen = new Set();
+  const events = [];
+  for (const e of [...(cur.events || []), ...prevEvents]) {
+    const k = key(e);
+    if (seen.has(k)) continue;
+    seen.add(k); events.push(e);
+  }
+  events.sort((a, b) => (b.created ?? -Infinity) - (a.created ?? -Infinity));
+  const kept = events.slice(0, SEL_KEEP_MAX);
+  const dated = kept.map((e) => e.created).filter(Number.isFinite);
+  return {
+    ...base, at: now, read: cur.read ?? null, total: cur.total ?? null, stopped: cur.stopped || '', kinds: cur.kinds || {},
+    range: Number.isFinite(cur.oldest) || Number.isFinite(cur.newest) ? { oldest: cur.oldest ?? null, newest: cur.newest ?? null } : null,
+    events: kept, keptFrom: dated.length ? Math.min(...dated) : null,
+  };
+}
+
 /** 장비 진단에 답한 단계가 하나라도 있는가(`{error}` · `{skipped}` 가 아닌 객체). */
 export function probeAnswered(p) {
   if (!p || typeof p !== 'object') return false;
@@ -264,6 +328,7 @@ const rowServer = (r) => ({
   logOrder: r.log_order, logTotal: r.log_total, logOldest: r.log_oldest, coveredFrom: r.covered_from, continuousSince: r.continuous_since,
   complete: r.complete == null ? null : r.complete === 1, readLast: r.read_last, synthesized: r.synthesized === 1, invAt: r.inv_at, newestCreated: r.newest_created ?? null, readStop: r.read_stop || '',
   readDiag: parseObj(r.read_diag), probe: parseObj(r.probe_json), probeAt: r.probe_at ?? null,
+  vals: parseObj(r.vals_json), sel: parseObj(r.sel_json),
   drives: (() => { try { const j = JSON.parse(r.drives_json || 'null'); return Array.isArray(j) ? j : null; } catch { return null; } })(),
 });
 const rowRecord = (r) => ({

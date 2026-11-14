@@ -1625,5 +1625,16 @@
     ③ 읽기 진단에 **가장 오래된 항목의 기록 ID**(`oldestCode`)를 싣는다 — 활성 로그의 맨 끝이 LOG203 한 건이었다(로그를 보관으로 넘긴 표시로 **보인다** — 문서 대조 전. 장비 진단이 그 문장을 받아 온다).
     ④ 장비 진단: 로그인이 온 경로(`loginVia` — 문장 끝의 낱말만 · 계정 · 주소 없음) · 가장 오래된 항목 한 건(`lclogOldest` — 건수를 믿을 수 있을 때 요청 1번 · 문장은 LOG 계열일 때만).
     회귀 `server/test/diskBadField383.test.js` · 웹 `diskBadText.test.js`. 이 서버의 활성 로그는 37일치였다(다른 서버는 하루치) — 서버마다 다르다.
-  - 남은 것(설계 §16 · §18 범위 B · C): 지금 쓰이는 곳(OS · vCenter) · 교체 우선순위 · 조치 추적 · 디스크 SMART 값 · vSAN 상태 · 설정 점검. 실장비 대조는 3.8.2 의 장비 진단으로 받는다(§14.1 명령 대신) — 그 답으로 분류표 · 읽는 방법을 고친다.
-  - 회귀 `server/test/diskBad380.test.js` · `server/test/diskBadReview380.test.js` · `server/test/diskBadField382.test.js` · `server/test/diskBadField383.test.js` · 웹 `diskBadText.test.js`.
+  - **v3.9.1 — 과거 기록 읽기 1단계**(2026-11-14 사용자 '시안 보여줘' → '구현해' · '모두 권고 값으로 진행' — 범위 1단계 · 장비에 요청형 동작 없음 · 세션 재사용은 따로 · 표준 + 반증 1회. 설계 README §22):
+    ① **디스크 값**(`diskbad/diskvals.js`) — 재할당 · 보류 · 복구 불가 누적 값. 텔레메트리 보고서 `StorageDiskSMARTData` GET 한 번(Datacenter 라이선스 · 보고서 켜짐 — Dell 백서 요약 기준)과,
+    인벤토리가 **같은 응답에서 받아 둔** DriveMetrics 링크(`idrac/redfish.js` 디스크의 `metricsPath` — 추가 HTTP 0회)가 있는 디스크만. 메트릭 이름은 **정해 둔 것만**(`METRIC_FIELD` — 비슷한 이름을 넓게 잡지 않는다)
+    이고 장비가 준 이름은 `seen` 으로 싣는다. 링크는 꼴 검사(`metricsPathOf` — `/redfish/v1/…/Metrics` · 그 디스크 Id 포함 · `..` · `//` 없음)를 통과해야 묻는다.
+    ② **SEL**(`diskbad/sel.js`) — 디스크 항목만(센서 종류 Drive/Disk 또는 drive/disk + bay/backplane/slot 문장). 위치는 'Drive N … bay B' 를 읽고 **같은 자리라는 것은 추정**이라 근거 문장에 밝힌다.
+    판정에는 **빠짐(removed)만** PDR5 와 같은 교체 판정 근거로 넣는다(장착 항목이 전원을 켤 때마다 쌓이는지 확인하지 못했다 — 넣으면 판정을 흔든다). 세지 않는다.
+    ③ 판정(`verdict.js buildDiskVals · traceOf`): 로그 기록 있음 · 복구 불가 흔적 · **흔적 있음 · 날짜 모름** · 흔적 없음(읽은 값이 모두 0) · **값 모름**(0 이 아니다). 서버 상태(status)는 바꾸지 않고
+    화면 띠가 흔적을 말한다(`diskBadText.js serverBand`). 저장(`db.js mergeVals · mergeSel`): 이번에 못 읽으면 **지난 값을 지우지 않고** 상태 · 시도 시각만 바꾼다 · 값이 늘어난 것을 본 때(`changedAt`)만 날짜가 있다 ·
+    SEL 디스크 항목은 합집합(가장 새 200건) — iDRAC 가 SEL 을 지워도 남는다. 옛 판 엣지(필드 없음)는 '아직 읽지 않음'(never)으로 따로 센다.
+    ④ 점검(`scan.js readPast`): 로그 읽기와 **따로** 시한(90초 + 90초 — 합이 서버 시한보다 짧다 · 테스트 고정) · 실패를 격리 · 401 은 인증 정지(다시 로그인하지 않는다) · 로그 읽기가 403 · 오류여도 읽는다(시한 · 연결 실패면 묻지 않는다).
+    엣지 정제(`ingest.js cleanVals · cleanSel`) — 아는 필드 · 상태 화이트리스트 · 위치 키는 번호와 맞을 때만 · 디스크 64 · 항목 100 상한. 회귀 `server/test/diskBadPast391.test.js` · 웹 `diskBadText.test.js`.
+  - 남은 것(설계 §16 · §18 범위 B · C · §22): 보관 로그 내보내기(§22 2단계 — 장비에 보내는 요청형 동작) · 세션 재사용(3단계) · 지금 쓰이는 곳(OS · vCenter) · 교체 우선순위 · 조치 추적 · vSAN 상태 · 설정 점검. 디스크 값은 v3.9.1 에 텔레메트리 · DriveMetrics 로 읽는다(실장비 대조 전). 실장비 대조는 3.8.2 의 장비 진단으로 받는다(§14.1 명령 대신) — 그 답으로 분류표 · 읽는 방법을 고친다.
+  - 회귀 `server/test/diskBad380.test.js` · `server/test/diskBadReview380.test.js` · `server/test/diskBadField382.test.js` · `server/test/diskBadField383.test.js` · `server/test/diskBadPast391.test.js` · 웹 `diskBadText.test.js`.

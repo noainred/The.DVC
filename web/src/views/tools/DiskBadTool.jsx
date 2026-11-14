@@ -18,7 +18,7 @@ import { Loading, ErrorBox, Kpi, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import { DiskBadServerPanel } from './DiskBadServerPanel.jsx';
-import { fmtDate, fmtDateTime, rateText, pctText, num, clsTone, verdictTone, confidenceTone, noteOf, clsOfCode, JOB_STATE_LABEL, jobStateTone, unitProgress, scopeLabel, shortLogNote, spanText, scanSent } from './diskBadText.js';
+import { fmtDate, fmtDateTime, rateText, pctText, num, clsTone, verdictTone, confidenceTone, noteOf, clsOfCode, JOB_STATE_LABEL, jobStateTone, unitProgress, scopeLabel, shortLogNote, spanText, scanSent, pastCoverageText, traceTone, valCell } from './diskBadText.js';
 
 const TABS = [
   { k: 'summary', label: '요약' }, { k: 'disks', label: '디스크 목록' }, { k: 'corps', label: '국가 · 법인' },
@@ -186,6 +186,43 @@ function AlertingCard({ fleet, openServer }) {
   );
 }
 
+/**
+ * 과거 기록 읽기 1단계(README §22) — 로그 기록은 없는데 디스크가 적어 둔 누적 값에 흔적이 있는 디스크. 판정 · 낱말은 서버(verdict.js)가 준다.
+ * 값은 누적이라 날짜가 없다 — '흔적 있음 · 날짜 모름'. 출처별로 몇 대를 읽었는지(못 읽은 서버는 0 이 아니라 모름)를 같이 말한다.
+ */
+function TraceCard({ fleet, openServer }) {
+  const T = fleet.totals;
+  const cov = pastCoverageText(T);
+  if (!cov) return null;   // 옛 중앙 응답 — 표시하지 않는다(0 이라고 하지 않는다)
+  const list = fleet.traces || [];
+  return (
+    <div className="card" style={{ padding: 12, minWidth: 0 }}>
+      <b style={{ fontSize: 13.5 }}>로그 기록은 없는데 디스크 값에 흔적이 있는 디스크 <span className="muted" style={{ fontWeight: 400 }}>{num(T.traceDisks)}개 · 서버 {num(T.traceServers)}대 · 복구 불가 흔적 {num(T.traceUnrecoverable)}개</span></b>
+      <div className="muted" style={{ fontSize: 12, margin: '2px 0 6px', lineHeight: 1.6 }}>
+        디스크가 스스로 적어 둔 누적 값(재할당 · 보류 · 복구 불가)입니다 — 로그가 넘어가도 남지만 언제 생겼는지는 모릅니다. 값을 읽은 디스크만 셉니다.
+        <div>{cov.vals}</div>
+        <div>{cov.sel}</div>
+      </div>
+      {list.length === 0 ? <div className="muted" style={{ fontSize: 12.5 }}>값을 읽은 디스크 가운데 로그 기록 없이 흔적만 있는 디스크는 없습니다.</div> : (
+        <STable className="data-table" minWidth={900} limit={10} style={{ width: '100%', fontSize: 12.5 }}>
+          <thead><tr><th>국가 · 법인</th><th>서버 · 위치</th><th>모델 · 시리얼</th><th style={{ textAlign: 'right' }}>재할당</th><th style={{ textAlign: 'right' }}>보류</th><th style={{ textAlign: 'right' }}>복구 불가</th><th>판정</th></tr></thead>
+          <tbody>{list.map((d, i) => (
+            <tr key={`${d.agent}|${d.serverId}|${d.id || i}`}>
+              <td style={{ whiteSpace: 'normal', minWidth: 140 }}>{d.country ? `${d.country} · ` : ''}{d.corpName}</td>
+              <td data-sort={d.serverName}><button className="tab" style={{ flex: 'none', padding: '2px 8px', fontSize: 12 }} onClick={() => openServer(d)}>{d.serverName}</button><div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>{d.label}</div></td>
+              <td>{d.model || '—'}<div className="muted" style={{ fontSize: 11.5, fontFamily: 'var(--mono)' }}>S/N {d.serial || '—'}</div></td>
+              <td data-sort={d.vals?.realloc ?? ''} style={{ textAlign: 'right', fontFamily: 'var(--mono)' }}>{valCell(d.vals?.realloc)}</td>
+              <td data-sort={d.vals?.pending ?? ''} style={{ textAlign: 'right', fontFamily: 'var(--mono)' }}>{valCell(d.vals?.pending)}</td>
+              <td data-sort={d.vals?.uncorrectable ?? ''} style={{ textAlign: 'right', fontFamily: 'var(--mono)' }}>{valCell(d.vals?.uncorrectable)}</td>
+              <td data-sort={d.trace}><span className={`badge ${traceTone(d.trace)}`}>{d.traceLabel}</span></td>
+            </tr>
+          ))}</tbody>
+        </STable>
+      )}
+    </div>
+  );
+}
+
 function Summary({ fleet, refs, openServer, setTab, setCorp }) {
   return (
     <>
@@ -198,6 +235,7 @@ function Summary({ fleet, refs, openServer, setTab, setCorp }) {
         <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>빨강(복구 불가) = PDR46 · PDR47 · PDR63 · PDR64 / 주황 = PDR54(미디어 오류를 고쳐 씀) · PDR59(불량 블록을 옮김) · PDR57(불량 블록 표가 차 감) / 파랑 = PDR16(고장 예측 — 배드 섹터 수에 넣지 않음). 근거 칸은 판단 근거의 마지막 줄입니다 — 서버를 누르면 전부 봅니다.</div>
       </div>
       <AlertingCard fleet={fleet} openServer={openServer} />
+      <TraceCard fleet={fleet} openServer={openServer} />
       {/* 법인 표(최소 640px)가 1440px 화면의 반쪽 카드에서 잘리지 않게 — 두 카드가 나란히 서려면 칸마다 700px 이상(넓은 화면만). */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 700px), 1fr))', gap: 12 }}>
         <div className="card" style={{ padding: 12, minWidth: 0 }}>

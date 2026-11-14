@@ -70,6 +70,36 @@ function mockProbe(now) {
     drive: { id: 'Disk.Bay.0:Enclosure.Internal.0-1:RAID.Integrated.1-1', mediaType: 'SSD', values: { FailurePredicted: false, PredictedMediaLifeLeftPercent: 97 }, links: [] }, ms: 2100 };
 }
 
+/**
+ * 지어낸 디스크 값 · SEL(과거 기록 읽기 1단계 — 화면 검증용). 서버 몇 대는 보고서가 없는 꼴(absent),
+ * 몇 대는 로그 기록이 없는 디스크에 흔적이 있는 꼴로 만든다. 디스크 목록이 없으면 값도 없다(모름).
+ */
+function mockPast(id, drives, now) {
+  const h = hash(`past|${id}`);
+  const list = Array.isArray(drives) ? drives : [];
+  const vals = h % 4 === 0
+    ? { at: now, status: 'absent', telemetry: 'absent', metrics: '', reportAt: null, seen: [], drives: [] }
+    : { at: now, status: list.length ? 'ok' : 'empty', telemetry: list.length ? 'ok' : 'empty', metrics: '', reportAt: now - 300_000,
+      seen: ['ReallocatedBlockCount', 'CurrentPendingSectorCount', 'UncorrectableLBACount', 'PowerOnHours'],
+      drives: list.map((d, i) => {
+        const k = hash(`vals|${id}|${i}`);
+        const traced = k % 9 === 0;
+        return { id: d.id, realloc: traced ? 4 + (k % 120) : 0, pending: traced && k % 2 ? 1 + (k % 9) : 0, uncorrectable: traced && k % 3 === 0 ? 1 + (k % 3) : 0,
+          powerOnHours: 8_000 + (k % 40_000), src: 'telemetry' };
+      }) };
+  const events = [];
+  if (h % 3 === 0 && list.length) {
+    const disk = 2 + (h % 4);
+    const created = now - (20 + (h % 300)) * DAY;
+    events.push({ created, kind: 'removed', disk, bp: 1, slotKey: `bp1:d${disk}`, messageId: 'PDR1016', message: `Drive ${disk} is removed from disk drive bay 1.`, severity: 'Critical', sensor: 'Drive Slot / Bay' });
+    events.push({ created: created + 600_000, kind: 'installed', disk, bp: 1, slotKey: `bp1:d${disk}`, messageId: '', message: `Drive ${disk} is installed in disk drive bay 1.`, severity: 'OK', sensor: 'Drive Slot / Bay' });
+  }
+  const oldest = now - (200 + (h % 900)) * DAY;
+  const sel = { at: now, status: 'ok', read: 40 + (h % 400), total: 40 + (h % 400), pages: 1 + (h % 8), stopped: '', oldest, newest: now - 3_600_000,
+    kinds: events.length ? { removed: 1, installed: 1 } : {}, events };
+  return { vals, sel };
+}
+
 export function mockScanServer({ drives, invAt, mode, manual = false, cursor, now, ...base }) {
   const { entries, oldest: oldestFull, total } = mockEntries(base.id, now);
   const { flooded, diag } = mockDiag(base.id, total, entries);
@@ -83,7 +113,7 @@ export function mockScanServer({ drives, invAt, mode, manual = false, cursor, no
     log: { order: 'desc', total, read: cursor ? 3 : total, undated: 0, newestId: newest.entryId, newestCreated: newest.created,
       oldestRead: cursor ? cursor.created : oldest, reachedEnd: !cursor, foundCursor: !!cursor, cursorUsed: !!cursor, stopped: '', cursorCreated: cursor?.created ?? null,
       ...diag },
-    records: fresh, recordsCapped: false, ...(manual ? { probe: mockProbe(now) } : {}),
+    records: fresh, recordsCapped: false, ...mockPast(base.id, drives, now), ...(manual ? { probe: mockProbe(now) } : {}),
     _cursor: { entryId: newest.entryId, created: newest.created, complete: true },
     mode,
   };

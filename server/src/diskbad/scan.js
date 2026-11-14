@@ -16,8 +16,10 @@ import { config } from '../config.js';
 import { poolSettled } from '../util/pool.js';
 import { withDeadline, deadlineMs } from '../util/deadline.js';
 import { createAuthGuard } from '../util/authGuard.js';
-import { readLclog } from './lclog.js';
+import { readLclog, DEFAULT_MGR } from './lclog.js';
 import { probeIdrac } from './probe.js';
+import { readDiskVals } from './diskvals.js';
+import { readSel } from './sel.js';
 import { cursorOf, saveCursors } from './cursors.js';
 import { mockScanServer } from './mock.js';
 
@@ -30,6 +32,10 @@ export const DRIVES_MAX = 64;
 export const RECORDS_MAX = 5_000;
 /** 장비 진단(probe.js)의 시한 — 서버 한 대를 직접 점검할 때만 돈다(GET 십여 번). */
 export const PROBE_TIMEOUT_MS = 120_000;
+/** 과거 기록 읽기 1단계(README §22) — 디스크 값(GET 1 + 링크를 준 디스크 수) · SEL(쪽 수 상한 40)의 시한. 로그 읽기와 따로 끊는다. */
+export const VALS_TIMEOUT_MS = 90_000;
+export const SEL_TIMEOUT_MS = 90_000;
+const SEL_BUDGET_MS = 60_000;
 
 /** 결과 사유 코드 — 중앙이 화이트리스트로 받는다(ingest.js). */
 export const REASON = Object.freeze({
@@ -59,6 +65,30 @@ export function drivesOf(inv) {
     predictive: d?.predictiveFailure === true ? true : (d?.predictiveFailure === false ? false : null),
     inVolume: d?.inVolume === true ? true : (d?.inVolume === false ? false : null),
   }));
+}
+
+/** 인벤토리 디스크의 DriveMetrics 링크(장비가 알려 준 것만 — 꼴 검사는 diskvals.js metricsPathOf). */
+function metricLinksOf(inv) {
+  return Array.isArray(inv?.disks) ? inv.disks.slice(0, DRIVES_MAX).map((d) => ({ id: t(d?.id, 200), metricsPath: typeof d?.metricsPath === 'string' ? d.metricsPath : '' })) : null;
+}
+
+/**
+ * 디스크 값 · SEL(과거 기록 읽기 1단계). 로그 읽기와 **따로** 시한을 걸고 실패를 격리한다 — 둘 중 하나가 실패해도 로그 결과는 그대로다.
+ * 401 이면 인증 정지로 적고 나머지를 묻지 않는다(다시 로그인하지 않는다 — authGuard 규칙).
+ * @returns {Promise<{vals:object, sel:object}>}
+ */
+async function readPast(s, { inv, mgr, now }) {
+  const at = now();
+  const fail = (e) => ({ at, status: /시한/.test(String(e?.message || '')) ? 'timeout' : (e?.status === 403 ? 'forbidden' : (e?.status === 404 ? 'absent' : 'error')) });
+  const authStop = (e) => { authGuard.markAuthStopped(s.id, s, t(e?.message, 200)); return { vals: { at, status: 'auth' }, sel: { at, status: 'auth' } }; };
+  const isAuth = (e) => e?.status === 401 || e?.authFailed === true;
+  let vals;
+  try { vals = await withDeadline(VALS_TIMEOUT_MS, (signal) => readDiskVals(s, { signal, drives: metricLinksOf(inv), now }), '디스크 값 읽기 시한 초과'); }
+  catch (e) { if (isAuth(e)) return authStop(e); vals = fail(e); }
+  let sel;
+  try { sel = await withDeadline(SEL_TIMEOUT_MS, (signal) => readSel(s, { mgr, signal, now, budgetMs: SEL_BUDGET_MS }), 'SEL 읽기 시한 초과'); }
+  catch (e) { if (isAuth(e)) return { ...authStop(e), vals }; sel = fail(e); }
+  return { vals, sel };
 }
 
 function failReason(e) {
@@ -110,15 +140,18 @@ export async function scanOne(s, { mode = 'incremental', manual = false, invOf =
     //   — 다음 점검이 처음부터 다시 읽고, 중앙은 잘린 아래 구간을 '본 구간' 에서 뺀다(db.js).
     const capped = r.entries.length > RECORDS_MAX;
     const records = capped ? [...r.entries].sort((a, b) => (b.created ?? -Infinity) - (a.created ?? -Infinity)).slice(0, RECORDS_MAX) : r.entries;
+    const past = await readPast(s, { inv, mgr: r.mgrPath, now });
     const pr = await probe();
-    return { ...base, ok: true, reason: REASON.ok, log, records, recordsCapped: capped, drives, invAt, ...(pr ? { probe: pr } : {}),
+    return { ...base, ok: true, reason: REASON.ok, log, records, recordsCapped: capped, drives, invAt, ...past, ...(pr ? { probe: pr } : {}),
       _cursor: r.newest ? { entryId: r.newest.entryId, created: r.newest.created, complete: !capped && (r.reachedEnd || r.foundCursor) } : (cursor || null) };
   } catch (e) {
     const reason = failReason(e);
     if (reason === REASON.authFailed) authGuard.markAuthStopped(s.id, s, t(e?.message, 200));
     // 로그 읽기가 실패해도(경로 없음 · 권한) 장비 진단은 답할 수 있다 — 인증 실패 · 연결 실패면 묻지 않는다(다시 로그인하지 않는다).
     const pr = (reason === REASON.authFailed || reason === REASON.unreachable) ? undefined : await probe();
-    return { ...base, ok: false, reason, reasonText: t(e?.message, 200), drives, invAt, ...(pr ? { probe: pr } : {}) };
+    // 디스크 값 · SEL 은 로그 권한이 없거나(403) 로그 경로가 달라도(오류) 읽힐 수 있다. 시한 · 인증 · 연결 실패면 묻지 않는다(장비가 느리거나 막혔다).
+    const past = (reason === REASON.forbidden || reason === REASON.error) ? await readPast(s, { inv, mgr: DEFAULT_MGR, now }) : {};
+    return { ...base, ok: false, reason, reasonText: t(e?.message, 200), drives, invAt, ...past, ...(pr ? { probe: pr } : {}) };
   }
 }
 
