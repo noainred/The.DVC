@@ -34,7 +34,7 @@ export function quietLabel(q) {
 /** 시간표 줄 상태 → 글자 · 색. */
 export const SCHED_STATE = Object.freeze({
   ok: { label: '정상', tone: 'green' },
-  late: { label: '늦음', tone: 'amber', title: '마지막 완료가 주기의 2배보다 오래됐습니다 — 놓친 회차는 몰아서 다시 돌지 않습니다' },
+  late: { label: '늦음', tone: 'amber', title: '마지막 완료가 주기의 2배 + 가장 긴 쉬는 시간보다 오래됐습니다 — 놓친 회차는 몰아서 다시 돌지 않습니다' },
   none: { label: '기록 없음', tone: 'gray', title: '완료한 스캔 기록이 없습니다(0회라는 뜻이 아닙니다)' },
   off: { label: '꺼짐', tone: 'gray' },
 });

@@ -127,12 +127,18 @@ export function sendReport({ slot, target = 'overall', manual = false, by = 'sys
       else out.push(await send('overall', renderOverallMail(model, { sections: r.sections, offsetMin: DAY_OFFSET_MIN, freqLabel, corps: real }), to));
     }
     const corpTargets = target === 'corps' || target === 'all' ? real.filter((c) => (r.corps[c.id]?.to || []).length) : target !== 'overall' ? real.filter((c) => c.id === target) : [];
+    const delivered = [];
     for (const c of corpTargets) {
       const to = r.corps[c.id]?.to || [];
       if (!to.length) { out.push(record({ slot, kind, target: c.id, state: 'skipped', code: 'no-recipients', reason: `${c.name} 받는 사람이 없어 전체 종합에만 실었습니다.` })); continue; }
-      out.push(await send(c.id, renderCorpMail(c, { model, sections: r.sections, offsetMin: corpOffsetMin(r, c.id, now), freqLabel }), to));
+      const rec = await send(c.id, renderCorpMail(c, { model, sections: r.sections, offsetMin: corpOffsetMin(r, c.id, now), freqLabel }), to);
+      out.push(rec);
+      if (rec.state === 'sent') delivered.push(c);
     }
-    if (!manual) { const st = state(); for (const c of real) st.prevOcc[c.id] = c.occMap; save(); }   // 다음 보고의 '지난 보고 대비'
+    // 다음 보고의 '지난 보고 대비' — **이번에 그 법인 메일이 실제로 나간 법인만** 갱신한다(v3.8.1). 예전에는 예약 발송 한 번마다 모든 법인을 갱신해,
+    //   법인 현지 시각 모드에서 메인 시각의 전체 종합이 나가면 몇 시간 뒤 법인 메일의 기준이 그 시각으로 당겨졌다(지난 보고 대비가 아니게 됐다).
+    //   전체 종합은 '지난 보고 대비' 를 싣지 않으므로 기준을 바꾸지 않는다. 지금 보내기 · 미리 보기도 바꾸지 않는다.
+    if (!manual && delivered.length) { const st = state(); for (const c of delivered) st.prevOcc[c.id] = c.occMap; save(); }
     return out;
   });
 }
@@ -159,7 +165,13 @@ export async function reportTick(now = Date.now()) {
     };
     st.overall = st.overall || {};
     await handle(plan.overall, st.overall, r.clock === 'corp' ? 'overall' : 'all');
-    for (const [id, p] of Object.entries(plan.corps)) { st.corps[id] = st.corps[id] || {}; if ((r.corps[id]?.to || []).length) await handle(p, st.corps[id], id); else if (p.action === 'send' || p.action === 'missed') st.corps[id].lastSlot = p.slot; }
+    let moved = false;
+    for (const [id, p] of Object.entries(plan.corps)) {
+      st.corps[id] = st.corps[id] || {};
+      if ((r.corps[id]?.to || []).length) await handle(p, st.corps[id], id);
+      else if (p.action === 'send' || p.action === 'missed') { st.corps[id].lastSlot = p.slot; moved = true; }   // 받는 사람이 없는 법인 — 회차만 넘긴다
+    }
+    if (moved) save();   // v3.8.1: 받는 사람 없는 법인의 회차 기록도 저장한다(재시작하면 같은 회차를 다시 판정하지 않게)
     return { ...plan, results };
   } catch (e) {
     _lastError = { at: Date.now(), message: String(e?.message || e).slice(0, 300) };

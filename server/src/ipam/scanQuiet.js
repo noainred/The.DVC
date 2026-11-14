@@ -83,3 +83,24 @@ export function quietSpansOfDay(quiet, at = Date.now()) {
   }
   return out;
 }
+
+/**
+ * v3.8.1: 쉬는 시간의 가장 긴 연속 길이(ms) — 요일과 상관없이 매일로 보고(넉넉한 쪽) 이틀 치 분 단위로 이어 붙여 잰다(22:00~02:00 + 02:00~06:00 = 8시간).
+ * 중앙은 엣지의 시계를 모르므로 '지금 쉬는 중인가' 대신 이 길이만큼 '끊김 · 늦음' 판정을 늦춘다(쉬는 시간마다 거짓 경보가 울리지 않게). 없으면 0 · 최대 24시간.
+ */
+export function quietLongestMs(quiet) {
+  const rows = cleanQuiet(quiet);
+  if (!rows.length) return 0;
+  const on = new Uint8Array(2880);
+  for (const q of rows) {
+    const a = minOf(q.from); const b = minOf(q.to);
+    for (const day of [0, 1440]) {
+      const end = a < b ? b : b + 1440;
+      for (let m = a; m < end; m += 1) on[(day + m) % 2880] = 1;
+    }
+  }
+  let best = 0; let run = 0;
+  for (let i = 0; i < 2880 * 2; i += 1) { if (on[i % 2880]) { run += 1; if (run > best) best = run; } else run = 0; }
+  return Math.min(best, 1440) * 60_000;
+}
+

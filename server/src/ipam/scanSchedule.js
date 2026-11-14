@@ -9,7 +9,7 @@
  */
 import { DAY_OFFSET_MIN, DAY_MS, dayIndex, dayStartMs } from '../util/dayKey.js';
 import { numOrNull } from '../util/numOrNull.js';
-import { quietText, cleanQuiet } from './scanQuiet.js';
+import { quietText, cleanQuiet, quietLongestMs } from './scanQuiet.js';
 
 export const RUNS_PER_AGENT_MAX = 200;
 const RUN_EVENTS = new Set(['start', 'finish', 'fail', 'skip', 'busy', 'report', 'reject', 'interrupted', 'resume']);
@@ -65,7 +65,9 @@ export function buildScanSchedule({ agents = [], log = [], reports = {}, now = D
     const lastDoneAt = numOrNull(rep?.at);
     const lastDone = [...runs].reverse().find((r) => r.kind === 'done');
     const lastDur = lastDone?.durationMs ?? null;
-    const state = !a.enabled ? 'off' : lastDoneAt == null ? 'none' : iv && now - lastDoneAt > 2 * iv ? 'late' : 'ok';
+    // v3.8.1: '늦음' = 주기의 2배 + 가장 긴 쉬는 시간(쉬는 동안은 주기 회차를 건너뛴다 — 밤마다 '늦음' 이 뜨지 않게). 알림(instantAlerts)과 같은 여유.
+    const quietMs = quietLongestMs(a.quiet);
+    const state = !a.enabled ? 'off' : lastDoneAt == null ? 'none' : iv && now - lastDoneAt > 2 * iv + quietMs ? 'late' : 'ok';
     rows.push({
       agent: a.name, enabled: !!a.enabled, intervalMs: iv, ranges: Array.isArray(a.ranges) ? a.ranges.length : null,
       quiet: cleanQuiet(a.quiet).map(quietText),

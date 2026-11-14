@@ -9,6 +9,7 @@
  * 지금 값을 못 읽은 vCenter 의 IP(대장이 낡았다)는 판정을 보류한다(held — 해소로 기록하지 않는다).
  */
 import { numOrNull } from '../util/numOrNull.js';
+import { quietLongestMs } from './scanQuiet.js'; // v3.8.1 쉬는 시간만큼 끊김 판정을 늦춘다
 
 export const SUBNET_HOSTS = 254;
 export const SUBNET_FULL_DEFAULT = 90;
@@ -67,10 +68,12 @@ export function scanStaleAlerts(agents, reports, { threshold = SCAN_STALE_DEFAUL
     const at = numOrNull(rep.get(String(a.name).toLowerCase())?.at);
     if (!iv || at == null) { held.push(key); continue; }   // 기록이 없다 — 끊김인지 모른다
     const age = now - at;
-    if (age <= iv * k) continue;
+    // v3.8.1: 쉬는 시간에는 주기 회차를 건너뛴다(그 동안 완료 기록이 늘지 않는다) — 가장 긴 쉬는 시간만큼 기준을 늘린다(쉬는 시간마다 거짓 경보 방지).
+    const quietMs = quietLongestMs(a.quiet);
+    if (age <= iv * k + quietMs) continue;
     const h = Math.round(age / 360_000) / 10;
     out.push({ key, scanAgent: a.name, severity: 'warning', title: `스캔 보고 끊김: ${label(a.name)}`,
-      detail: `마지막 완료 ${h}시간 전 — 주기 ${Math.round(iv / 60000)}분의 ${k}배를 넘었습니다(엣지 정지 · 통신 · 배정 문제일 수 있습니다). IP 관리 › 스캔 › 주기 스캔 일정에서 확인하세요.` });
+      detail: `마지막 완료 ${h}시간 전 — 주기 ${Math.round(iv / 60000)}분의 ${k}배${quietMs ? ` + 쉬는 시간 ${Math.round(quietMs / 360_000) / 10}시간` : ''}을 넘었습니다(엣지 정지 · 통신 · 배정 문제일 수 있습니다). IP 관리 › 스캔 › 주기 스캔 일정에서 확인하세요.` });
   }
   return { alerts: out, held };
 }

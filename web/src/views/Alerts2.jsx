@@ -33,7 +33,7 @@ export const IPAM_RULES = Object.freeze([
   { k: 'ipamSubnetFull', label: '대역 가득 참', sev: '경고', tone: 'amber', th: '점유율(%)', state: true,
     desc: '/24 대역의 점유(대장 주소 + 예약 + DHCP — 현황의 사용률과 같은 값)가 기준 이상입니다. 98% 이상은 위험 등급입니다.' },
   { k: 'ipamScanStale', label: '스캔 보고 끊김', sev: '경고', tone: 'amber', th: '주기의 몇 배', state: true,
-    desc: '주기 스캔을 켠 에이전트의 마지막 완료가 주기 × 기준보다 오래됐습니다(엣지 정지 · 통신 · 배정 문제). 완료 기록이 한 번도 없으면 끊김인지 알 수 없어 알리지 않습니다.' },
+    desc: '주기 스캔을 켠 에이전트의 마지막 완료가 주기 × 기준 + 그 에이전트의 가장 긴 쉬는 시간보다 오래됐습니다(엣지 정지 · 통신 · 배정 문제). 쉬는 시간에는 주기 회차를 건너뛰므로 그만큼 늦춰 판정합니다. 완료 기록이 한 번도 없으면 끊김인지 알 수 없어 알리지 않습니다.' },
 ]);
 /** 쉼표 · 줄바꿈으로 나눈 에이전트 이름(빈 칸 · 중복 제거 — 서버 cleanQuietAgents 가 다시 정제한다). */
 export function parseQuietAgents(text) {
