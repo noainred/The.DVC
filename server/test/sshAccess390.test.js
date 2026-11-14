@@ -290,6 +290,12 @@ test('⑦ 받는 곳 — 폴더 이름(slug) · 찾은 파일은 내용 없이(�
   assert.equal((await SVC.approveInbox({ relPath: it.relPath, fingerprint: ED_A.fingerprint, name: 'n1', by: 'own' })).code, 'fingerprint-changed');
   assert.equal((await SVC.approveInbox({ relPath: '../users.json', fingerprint: NEW.fingerprint, name: 'n1', by: 'own' })).code, 'bad-path');
   assert.equal((await SVC.approveInbox({ relPath: 'vcA/servers/bm-a1/../../../users.json', fingerprint: NEW.fingerprint, name: 'n1', by: 'own' })).code, 'bad-path');
+  // 모양(법인/servers/서버/파일)은 맞지만 '..' 조각 — 받는 곳 안의 엉뚱한 자리(법인 폴더 바로 아래)를 지우지 않는다(변이 M8)
+  const stray = path.join(INB.inboxDir(), 'vcA', 'stray-key');
+  fs.writeFileSync(stray, 'x');
+  assert.equal(SVC.discardInbox({ relPath: 'vcA/servers/../stray-key', by: 'own' }).code, 'bad-path');
+  assert.equal(fs.existsSync(stray), true, '지우지 않았다');
+  fs.rmSync(stray);
   const ok = await SVC.approveInbox({ relPath: it.relPath, fingerprint: NEW.fingerprint, name: 'bm-a1-new', features: ['bm-usage'], by: 'own' });
   assert.equal(ok.ok, true, JSON.stringify(ok));
   assert.deepEqual([ok.key.folderCorp, ok.key.folderServer, ok.key.features, ok.plaintextRemoved], ['vcA', 'bm-a1', ['bm-usage'], true]);
