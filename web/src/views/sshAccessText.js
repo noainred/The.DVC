@@ -22,6 +22,7 @@ export const ISSUE_TEXT = Object.freeze({
   'key-feature': '이 기능에 허용되지 않음',
   'key-retired': '퇴역한 키',
   'key-tampered': '키가 포탈 밖에서 바뀜(바꿔치기 의심)',
+  'account-tampered': '공통 계정이 포탈 밖에서 바뀜',
   'corp-stopped': '법인 키 사용 중지 중',
   'state-unreadable': '상태 파일을 읽지 못함',
 });
@@ -53,6 +54,7 @@ export const EVENT_TEXT = Object.freeze({
   'key-tampered': '키 바꿔치기 의심',
   'key-changed-outside': '키가 포탈 밖에서 바뀜',
   'key-added-outside': '키가 포탈 밖에서 들어옴',
+  'account-changed-outside': '공통 계정이 포탈 밖에서 바뀜',
   'state-reloaded': '상태 파일 다시 읽음',
   'keystore-reloaded': '키 저장소 다시 읽음(포탈 밖 변경 받아들임)',
 });

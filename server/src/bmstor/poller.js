@@ -291,7 +291,8 @@ export async function bmCollectNow(trigger = 'manual', { demoOnly = false } = {}
       const row = noteAuth(srv ? authCredOf(srv) : srv, { ...r, at, agent: srv?.agent || '' });
       latest.set(r.id, row);
       // v3.9.0: 중앙이 키로 접속한 결과만 적는다(엣지 PUSH 결과는 엣지 키 — 엣지가 자기 기록에 적는다).
-      if (srv?.keyFingerprint && !String(srv.agent || '').trim()) {
+      // 자격 해석이 막아 접속하지 않은 키는 적지 않는다(반증 D3 — 접속 0회를 ‘실패한 사용’ 으로 쌓지 않게).
+      if (srv?.keyFingerprint && !srv.authErrorCode && !String(srv.agent || '').trim()) {
         noteKeyUse({ fingerprint: srv.keyFingerprint, keyName: srv.keyName, server: srv.name || srv.host, corp: srv.vcenterId, feature: 'bm-storage',
           ok: !!r.ok, code: r.ok ? 'ok' : (isAuthFailureText(r.error || '') ? 'auth-rejected' : 'fail'), trigger });
       }

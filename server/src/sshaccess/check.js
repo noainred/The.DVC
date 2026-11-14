@@ -52,8 +52,10 @@ export function buildKeyCheck({ now = Date.now(), policyMode = '', inbox = null,
   const tampered = KS.tamperedKeyIds();
   if (drift && !drift.ok) add('unknown', 'drift-unknown', '키 저장소 파일 대조', `디스크 파일을 읽지 못해 대조하지 못했습니다(${String(drift.reason || '').slice(0, 60)}).`);
   if (drift?.changed?.length || tampered.length) add('bad', 'tampered', `포탈 밖에서 바뀐 키 ${new Set([...(drift?.changed || []), ...tampered]).size}개`, '그 키로는 접속하지 않습니다 — 누가 바꿨는지 확인한 뒤 키를 새로 등록하거나, 바뀐 내용이 맞으면 ‘키 저장소 다시 읽기’ 로 받아들이세요.', { keys: [...new Set([...(drift?.changed || []), ...tampered])].slice(0, 50) });
+  if (drift?.removed?.length) add('bad', 'removed-outside', `포탈 밖에서 파일에서 빠진 키 ${drift.removed.length}개`, '포탈은 아직 메모리의 키를 쓰지만 재시작하면 사라집니다 — 누가 지웠는지 확인하세요(맞으면 ‘키 저장소 다시 읽기’).', { keys: drift.removed.slice(0, 50) });
+  if (drift?.accountsChanged?.length) add('bad', 'account-changed-outside', `포탈 밖에서 바뀐 공통 계정 ${drift.accountsChanged.length}개`, '그 계정으로는 접속하지 않습니다 — 누가 바꿨는지 확인한 뒤 ‘키 저장소 다시 읽기’ 로 받아들이거나 파일을 되돌리세요.', { keys: drift.accountsChanged.slice(0, 50) });
   if (drift?.added?.length) add('bad', 'added-outside', `포탈 밖에서 들어온 키 ${drift.added.length}개`, '키 저장소 파일에 포탈이 넣지 않은 키가 있습니다 — 재시작하면 쓰이게 됩니다. 모르는 키면 파일에서 지우고, 맞는 키면 ‘키 저장소 다시 읽기’ 로 받아들이세요.', { keys: drift.added.map((k) => k.name).slice(0, 50) });
-  if (drift?.ok && !drift.changed.length && !drift.added.length && !tampered.length) add('ok', 'integrity', '키 저장소 파일 대조', '디스크 파일이 포탈이 마지막으로 쓴 내용과 같습니다.');
+  if (drift?.ok && !drift.changed.length && !drift.added.length && !drift.removed.length && !(drift.accountsChanged || []).length && !tampered.length) add('ok', 'integrity', '키 저장소 파일 대조', '디스크 파일이 포탈이 마지막으로 쓴 내용과 같습니다.');
   else if (!drift) add('unknown', 'integrity-pending', '키 저장소 파일 대조', '아직 대조하지 않았습니다.');
   // ④ 폴더 · 허용 기능
   const noFolder = keys.filter((k) => !k.folderCorp);
@@ -63,7 +65,10 @@ export function buildKeyCheck({ now = Date.now(), policyMode = '', inbox = null,
   // ⑤ 나이
   const old = keys.filter((k) => (k.rotateAt && k.rotateAt <= now) || (!k.rotateAt && k.createdAt && now - k.createdAt >= ROTATE_DAYS * DAY));
   if (old.length) add('warn', 'rotate-due', `교체할 때가 된 키 ${old.length}개`, `회전 예정일이 지났거나 만든 지 ${ROTATE_DAYS}일이 넘었습니다.`, { keys: old.map((k) => k.id).slice(0, 50) });
-  else if (keys.length) add('ok', 'age', '키 나이', `교체 기준(${ROTATE_DAYS}일 · 회전 예정일) 안입니다.`);
+  // 만든 시각 · 회전 예정일이 둘 다 없는 키는 나이를 모른다 — ‘기준 안’ 으로 세지 않는다(반증 지적).
+  const ageUnknown = keys.filter((k) => !k.rotateAt && !k.createdAt);
+  if (ageUnknown.length) add('unknown', 'age-unknown', `나이를 모르는 키 ${ageUnknown.length}개`, '만든 시각 · 회전 예정일이 기록돼 있지 않습니다 — 회전 예정일을 정하세요.', { keys: ageUnknown.map((k) => k.id).slice(0, 50) });
+  if (!old.length && keys.length > ageUnknown.length) add('ok', 'age', '키 나이', `교체 기준(${ROTATE_DAYS}일 · 회전 예정일) 안입니다${ageUnknown.length ? '(나이를 모르는 키 제외)' : ''}.`);
   // ⑤-2 서버 쪽(점검 B-1 · B-4) — 폴더 · 기능 때문에 접속하지 못하는 서버 · 법인 칸이 없어 사용 중지가 닿지 않는 서버(service 가 계산해 넘긴다)
   if (servers) {
     if (servers.blocked?.length) add('warn', 'placement-blocked', `키 폴더 · 기능 때문에 키로 접속하지 못하는 서버 ${servers.blocked.length}대`, '서버의 키를 이 서버 폴더 · 법인 공통 폴더의 키로 고르거나 키의 기능을 더하세요(수집이 이 사유로 실패합니다).', { files: servers.blocked.slice(0, 50) });

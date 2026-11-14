@@ -29,6 +29,8 @@ export const MAX_FILES = 300;
 export const MAX_UNKNOWN = 100;
 const SAFE = /[^A-Za-z0-9._-]/g;
 const O_NOFOLLOW = fs.constants.O_NOFOLLOW || 0;
+// FIFO · 장치 파일을 막힘 없이 연다(O_NONBLOCK 없이 FIFO 를 열면 쓰는 쪽이 생길 때까지 이벤트 루프가 멈춘다 — 반증 D1). 일반 파일 읽기에는 영향 없음.
+const O_NONBLOCK = fs.constants.O_NONBLOCK || 0;
 
 const t = (v, max = 256) => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max).trim();
 
@@ -109,10 +111,12 @@ export async function scanInbox({ corps = [], servers = [] } = {}) {
   return out;
 }
 
-/** O_NOFOLLOW 로 열어 일반 파일 · 크기를 확인하고 읽는다. */
+/** 일반 파일인지 먼저 보고(lstat) O_NOFOLLOW | O_NONBLOCK 으로 열어 다시 확인(fstat)한 뒤 읽는다. */
 function readNoFollow(abs) {
+  try { const st0 = fs.lstatSync(abs); if (st0.isSymbolicLink()) return { ok: false, code: 'symlink' }; if (!st0.isFile()) return { ok: false, code: 'not-file' }; }
+  catch (e) { return { ok: false, code: e?.code === 'ENOENT' ? 'not-found' : 'unreadable' }; }
   let fd;
-  try { fd = fs.openSync(abs, fs.constants.O_RDONLY | O_NOFOLLOW); } catch (e) { return { ok: false, code: e?.code === 'ELOOP' ? 'symlink' : e?.code === 'ENOENT' ? 'not-found' : 'unreadable' }; }
+  try { fd = fs.openSync(abs, fs.constants.O_RDONLY | O_NOFOLLOW | O_NONBLOCK); } catch (e) { return { ok: false, code: e?.code === 'ELOOP' ? 'symlink' : e?.code === 'ENOENT' ? 'not-found' : 'unreadable' }; }
   try {
     const st = fs.fstatSync(fd);
     if (!st.isFile()) return { ok: false, code: 'not-file' };
@@ -130,6 +134,7 @@ async function inspectFile(abs, rel, corp, server) {
   let st;
   try { st = await fs.promises.lstat(abs); } catch { return { ...base, code: 'unreadable', reason: READ_REASON.unreadable }; }
   if (st.isSymbolicLink()) return { ...base, code: 'symlink', reason: READ_REASON.symlink };
+  if (!st.isFile()) return { ...base, code: 'not-file', reason: READ_REASON['not-file'] };   // FIFO · 소켓 · 장치는 열지 않는다(반증 D1)
   const r = readNoFollow(abs);
   if (!r.ok) return { ...base, code: r.code, reason: READ_REASON[r.code] || READ_REASON.unreadable, ...(r.st ? { size: r.st.size } : {}) };
   const meta = { ...base, size: r.st.size, mtime: Math.round(r.st.mtimeMs), loosePerm: (r.st.mode & 0o077) !== 0, sha: shaOf(r.buf) };

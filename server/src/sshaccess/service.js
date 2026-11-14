@@ -144,17 +144,20 @@ export async function chooseServerKey({ serverId, keyId, expectAddr = null, by =
   const s = listBmServersRaw().find((x) => x.id === t(serverId, 64));
   if (!s) return { ok: false, code: 'not-found', status: 404, reason: '서버를 찾을 수 없습니다.' };
   if (t(s.agent)) return { ok: false, code: 'edge-delegated', status: 409, reason: '엣지가 수집하는 서버입니다 — 키는 그 엣지 포탈의 SSH 공용 접속에서 고릅니다(키는 법인 밖으로 나가지 않습니다).' };
+  // 화면이 본 접속처를 반드시 돌려받는다(빼고 부르면 확인을 건너뛰던 구멍 — 반증 D11).
+  if (typeof expectAddr !== 'string' || !expectAddr) return { ok: false, code: 'need-addr', status: 400, reason: '화면에서 본 서버 접속처가 없습니다 — 화면을 다시 읽은 뒤 고르세요.' };
   const kid = t(keyId, 32);
   if (kid) {
     const k = KS.keyById(kid);
     if (!k) return { ok: false, code: 'key-missing', status: 404, reason: '키를 찾을 수 없습니다.' };
     if (k.status !== 'active') return { ok: false, code: 'key-retired', reason: '퇴역한 키는 고를 수 없습니다.' };
+    if (KS.tamperedKeyIds().includes(k.id)) return { ok: false, code: 'key-tampered', status: 409, reason: REFS.AUTH_ERROR['key-tampered'] };
     const pi = REFS.keyPlacementIssue(k, s, 'conn-test');
     if (pi) return { ok: false, code: pi, status: 409, reason: REFS.AUTH_ERROR[pi] };
   } else if (!t(s.credRef)) {
     return { ok: false, code: 'no-account', status: 409, reason: '이 서버는 법인 공통 계정을 쓰지 않아 ‘법인 기본 키를 따름’ 을 고를 수 없습니다 — 키를 이름으로 고르세요.' };
   }
-  const w = setBmServerKeyRef(s.id, kid, { expectAddr: typeof expectAddr === 'string' && expectAddr ? expectAddr : null });
+  const w = setBmServerKeyRef(s.id, kid, { expectAddr });
   if (!w.ok) return w;
   const after = listBmServersRaw().find((x) => x.id === s.id);
   const test = after ? await testServer(after, { by }) : { ok: false, kind: 'gone', reason: '서버가 그 사이 지워졌습니다.' };
@@ -375,10 +378,12 @@ export function stopCorp(corp, { by = '', reason = '' } = {}) {
   const c = t(corp, 128);
   const accById = new Map(KS.keyStoreLoadError() ? [] : KS.listAccountsRaw().map((a) => [a.id, a]));
   const regErr = bmRegistryLoadError();
-  const servers = regErr ? [] : listBmServersRaw().filter((s) => t(s.vcenterId) === c)
-    .map((s) => ({ id: s.id, addr: addrKey(s.host, s.port, usernameOf(s, t(s.credRef) ? accById.get(t(s.credRef)) : null)) }));
+  const corpServers = regErr ? [] : listBmServersRaw().filter((s) => t(s.vcenterId) === c);
+  const servers = corpServers.map((s) => ({ id: s.id, addr: addrKey(s.host, s.port, usernameOf(s, t(s.credRef) ? accById.get(t(s.credRef)) : null)) }));
   const r = ST.setCorpStop(c, { by, reason, servers });
-  return r.ok ? { ...r, servers: servers.length, ...(regErr ? { registryUnreadable: true } : {}) } : r;
+  // 엣지가 수집하는 서버는 그 엣지의 키로 접속한다 — 이 노드의 중지는 거기에 닿지 않는다(사실대로 따로 센다).
+  const edgeServers = corpServers.filter((s) => t(s.agent)).length;
+  return r.ok ? { ...r, servers: servers.length - edgeServers, edgeServers, ...(regErr ? { registryUnreadable: true } : {}) } : r;
 }
 export function resumeCorp(corp, { by = '' } = {}) { return ST.clearCorpStop(t(corp, 128), { by }); }
 
@@ -410,16 +415,24 @@ export async function runSshAccessScan({ now = Date.now() } = {}) {
     const events = [];
     const drift = checkKeyDrift({ now });
     if (!_seenDrift) _seenDrift = new Set();
+    // ‘본 표지’ 는 사건을 실제로 쓴 뒤에만 세운다(쓰기에 실패하면 다음 점검에서 다시 낸다 — 반증 D10).
+    const seenDrift = []; const seenInbox = [];
     for (const id of drift.changed || []) {
       if (_seenDrift.has(`c:${id}`)) continue;
-      _seenDrift.add(`c:${id}`);
+      seenDrift.push(`c:${id}`);
       const k = KS.keyById(id);
       events.push({ kind: 'key-changed-outside', corp: k?.folderCorp || '', target: k?.name || id, detail: k?.fingerprint || '' });
     }
     for (const a of drift.added || []) {
       if (_seenDrift.has(`a:${a.id}`)) continue;
-      _seenDrift.add(`a:${a.id}`);
+      seenDrift.push(`a:${a.id}`);
       events.push({ kind: 'key-added-outside', target: a.name || a.id, detail: a.fingerprint || '' });
+    }
+    for (const id of drift.accountsChanged || []) {
+      if (_seenDrift.has(`u:${id}`)) continue;
+      seenDrift.push(`u:${id}`);
+      const a = KS.accountById(id);
+      events.push({ kind: 'account-changed-outside', corp: a?.corp || '', target: a?.name || id });
     }
     const corps = await corpList();
     const regErr = bmRegistryLoadError();
@@ -431,13 +444,14 @@ export async function runSshAccessScan({ now = Date.now() } = {}) {
       if (it.code !== 'ready' && !it.needPassphrase) continue;
       const sig = `${it.relPath}|${it.sha || it.size}`;
       if (_seenInbox.has(sig)) continue;
-      _seenInbox.add(sig);
+      seenInbox.push(sig);
       fresh.push({ it, sig });
     }
     // 새 파일은 사건 하나로(파일마다 상태 파일을 다시 쓰지 않는다 — 점검 D-2). detail = 본 표지(재시작 뒤 다시 세지 않게).
     if (fresh.length) events.push({ kind: 'inbox-new', corp: fresh.length === 1 ? fresh[0].it.corp : '',
       target: `${fresh.length}개 — ${fresh.slice(0, 3).map((x) => x.it.relPath).join(' · ')}`, detail: fresh.map((x) => x.sig).join('\n') });
-    if (events.length) ST.addEvents(events, { now });
+    const wrote = events.length ? ST.addEvents(events, { now }).ok : true;
+    if (wrote) { for (const x of seenDrift) _seenDrift.add(x); for (const x of seenInbox) _seenInbox.add(x); }
     if (!regErr) INS.pruneInstalled(new Set(servers.map((s) => s.id)));
     flushKeyUsage({ now });
     return { ok: true, drift, inbox: ib.items.length, events: events.length };

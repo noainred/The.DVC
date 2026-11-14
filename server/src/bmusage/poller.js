@@ -672,7 +672,8 @@ async function collectOne(target, { trigger = 'auto', intervalMs = null, prevRun
       .then((r) => { osMs = Date.now() - osT0; return r; })
     : Promise.resolve(stopped ? { ok: false, error: `인증 실패로 주기 수집이 정지됐습니다(${stopped.attempts}회 시도). 비밀번호를 고치면 자동 재개합니다.`, authStopped: stopped } : null));
   const [idrac, os] = await Promise.all(jobs);
-  if (os && target.osHost?.keyFingerprint) {
+  // 자격 해석이 막아 접속하지 않은 키(사용 중지 · 폴더 · 기능 · 바꿔치기)는 ‘사용’ 이 아니다 — 주기마다 실패로 쌓지 않는다(반증 D3).
+  if (os && target.osHost?.keyFingerprint && !target.osHost.authErrorCode && !os.authErrorCode) {
     const oh = target.osHost;
     noteKeyUse({ fingerprint: oh.keyFingerprint, keyName: oh.keyName, server: oh.name || target.name || oh.host, corp: oh.vcenterId || target.vcenterId, feature: 'bm-usage',
       ok: !!os.ok, code: os.ok ? 'ok' : (os.authStopped ? 'auth-stopped' : (/auth|인증|permission denied/i.test(String(os.error || '')) ? 'auth-rejected' : 'fail')), trigger });

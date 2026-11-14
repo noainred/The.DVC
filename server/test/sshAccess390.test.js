@@ -203,6 +203,8 @@ test('③ 키 바꿔치기 감시 — 디스크 파일이 포탈이 쓴 내용�
   const cand = SVC.serverKeyCandidates(tmp.id).keys.find((k) => k.id === victim.id);
   assert.ok(!cand || (cand.selectable === false && cand.issue === 'key-tampered'), '후보에서 빠지거나 고를 수 없음으로');
   BM.removeBmServer(tmp.id);
+  // 포탈 밖 변경이 남아 있는 동안 포탈은 저장소를 쓰지 않는다(흔적을 정상 쓰기가 지우지 않게 — 반증 D8)
+  assert.equal(KS.addKey({ name: 'during-tamper', privateKey: F.ed25519Key().pem }, { by: 'own' }).code, 'store-changed-outside');
   const chk = CHK.buildKeyCheck({ policyMode: 'encrypted', drift });
   assert.ok(chk.items.some((i) => i.code === 'tampered' && i.level === 'bad'));
   assert.ok(chk.items.some((i) => i.code === 'added-outside' && i.level === 'bad'));
@@ -219,6 +221,19 @@ test('③ 키 바꿔치기 감시 — 디스크 파일이 포탈이 쓴 내용�
   assert.equal(REFS.resolveOsAuth(srv, { feature: 'bm-usage' }).ok, true, '원래대로 되돌리면 풀린다');
   assert.deepEqual(CHK.checkKeyDrift().changed, []);
   assert.ok(ST.listEvents({ limit: 300 }).some((e) => e.kind === 'keystore-reloaded' && e.by === 'own'));
+  // 공개키 칸만 바꿔도 잡는다(‘공개키 복사’ 가 남의 키를 내주지 않게 — 반증 D4) · 재시작(메모리 비움) 뒤에도 공개키 ↔ 지문 대조로 잡는다
+  const j2 = JSON.parse(orig);
+  const v2 = j2.keys.find((k) => k.name === 'legacy');
+  const other = (() => { const k = ssh2.utils.parseKey(F.ed25519Key().pem); const p = Array.isArray(k) ? k[0] : k; return `${p.type} ${p.getPublicSSH().toString('base64')}`; })();
+  v2.publicKey = other;
+  fs.writeFileSync(file, JSON.stringify(j2));
+  assert.deepEqual(CHK.checkKeyDrift().changed, [v2.id]);
+  KS._resetKeyStoreForTest();
+  assert.deepEqual(CHK.checkKeyDrift().changed, [v2.id], '재시작 뒤에도');
+  assert.equal(REFS.resolveOsAuth(srv, { feature: 'bm-usage' }).code, 'key-tampered');
+  fs.writeFileSync(file, orig);
+  assert.equal(SVC.reloadKeyStore({ by: 'own' }).ok, true);
+  assert.equal(REFS.resolveOsAuth(srv, { feature: 'bm-usage' }).ok, true);
 });
 
 test('④ authorized_keys 해석 — 옵션(따옴표 안 공백) · 설명 · 주석 · 잘못된 줄 · 포탈 표지 · 표지 줄 판정 · 긴 줄 선형(ReDoS 비율)', () => {
@@ -247,13 +262,15 @@ test('④ authorized_keys 해석 — 옵션(따옴표 안 공백) · 설명 · �
 test('⑤ 서버의 키 고르기 — 폴더 밖 키 409 · 고른 키로 접속되면 유지 · 안 되면 이전 설정으로 되돌림 · 들어 있는 키 읽기(지문 대조 · 1회 비밀번호 미저장) · 사용 기록', async () => {
   const kA = KS.keyByName('kr-common'); const kS = KS.keyByName('bm-a1-only'); const kB = KS.keyByName('pl-common');
   const s = BM.saveBmServer({ name: 'bm-a1', host: '127.0.0.1', port: SSHD.port, username: 'mon', mounts: ['/'], vcenterId: 'vcA', password: 'Pw-Old-1' }).server;
-  assert.equal((await SVC.chooseServerKey({ serverId: s.id, keyId: kB.id, by: 'own' })).code, 'key-folder');
+  const addr = (await SVC.buildView()).servers.find((x) => x.id === s.id).addr;
+  assert.equal((await SVC.chooseServerKey({ serverId: s.id, keyId: kB.id, by: 'own' })).code, 'need-addr', '화면이 본 접속처 없이는 고르지 않는다(반증 D11)');
+  assert.equal((await SVC.chooseServerKey({ serverId: s.id, keyId: kB.id, expectAddr: addr, by: 'own' })).code, 'key-folder');
   // 낡은 화면(다른 접속처를 본 화면)에서 고른 키는 묶지 않는다(점검 A-8)
   assert.equal((await SVC.chooseServerKey({ serverId: s.id, keyId: kA.id, expectAddr: '127.0.0.1:1|mon', by: 'own' })).code, 'moved');
   assert.equal(BM.listBmServersRaw().find((x) => x.id === s.id).keyRef, undefined);
   // 가짜 sshd 가 kS 만 받는다 → kA 고르기는 접속 실패 → 되돌림(비밀번호 그대로)
   SSHD.allowKey(ED_S.pem);
-  const bad = await SVC.chooseServerKey({ serverId: s.id, keyId: kA.id, by: 'own' });
+  const bad = await SVC.chooseServerKey({ serverId: s.id, keyId: kA.id, expectAddr: addr, by: 'own' });
   assert.equal(bad.code, 'test-failed'); assert.equal(bad.reverted, true);
   const raw1 = BM.listBmServersRaw().find((x) => x.id === s.id);
   assert.equal(raw1.keyRef, undefined, '되돌렸다'); assert.equal(raw1.password, 'Pw-Old-1', '비밀번호는 그대로');
@@ -346,6 +363,17 @@ test('⑦ 받는 곳 — 폴더 이름(slug) · 찾은 파일은 내용 없이(�
   assert.equal(SVC.discardInbox({ relPath: it2.relPath, by: 'own' }).code, 'need-expect');
   const it3 = (await INB.scanInbox({ corps, servers })).items.find((x) => x.file === 'id_d');
   assert.equal(SVC.discardInbox({ relPath: it3.relPath, sha: it3.sha, by: 'own' }).ok, true);
+  // FIFO 하나가 이벤트 루프를 멈추지 않는다(반증 D1 — O_NONBLOCK 없이 열면 쓰는 쪽이 생길 때까지 멈췄다). 멈추면 시한으로 끊기게 자식 프로세스에서 잰다.
+  execFileSync('mkfifo', [path.join(dir, 'fifo')]);
+  const fifoOut = execFileSync(process.execPath, ['--input-type=module', '-e', `
+    const INB = await import(${JSON.stringify(path.join(HERE, '../src/sshaccess/inbox.js'))});
+    const sc = await INB.scanInbox({ corps: [{ id: 'vcA' }], servers: [{ id: 'x', name: 'bm-a1', vcenterId: 'vcA' }] });
+    const rd = INB.readForApproval('vcA/servers/bm-a1/fifo', { expectSha: 'a'.repeat(32) });
+    const rm = INB.removeInboxFile('vcA/servers/bm-a1/fifo', { expectSha: 'a'.repeat(32) });
+    console.log(JSON.stringify([sc.items.find((x) => x.file === 'fifo')?.code, rd.code, rm.code]));
+  `], { env: { ...process.env, CONFIG_DIR: DIR }, encoding: 'utf8', timeout: 8000 }).trim().split('\n').pop();
+  assert.deepEqual(JSON.parse(fifoOut), ['not-file', 'not-file', 'not-file']);
+  fs.rmSync(path.join(dir, 'fifo'));
   // 디렉터리 심링크 — 서버 폴더가 받는 곳 밖을 가리키면 읽지도 · 승인하지도 · 지우지도 않는다(점검 A-2 · C-2)
   const outside = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'sshacc-out-'));
   const OUT = F.ed25519Key();
@@ -501,17 +529,21 @@ test('⑫ 법인 사용 중지 — 중지할 때 그 법인 서버(id · 접속�
   const asIs = { ...s, keyRef: kX.id };
   assert.equal(REFS.resolveOsAuth(asIs, { feature: 'conn-test' }).code, 'corp-stopped');
   assert.equal(REFS.resolveOsAuth({ ...asIs, vcenterId: '' }, { feature: 'conn-test' }).code, 'corp-stopped', '법인 칸을 비워도(서버 id)');
-  assert.equal(REFS.resolveOsAuth({ ...asIs, id: 'bm_new', vcenterId: 'vcB' }, { feature: 'conn-test' }).code, 'corp-stopped', '다른 항목 · 다른 법인이어도 같은 접속처');
+  assert.equal(REFS.resolveOsAuth({ ...asIs, id: 'bm_new', vcenterId: '' }, { feature: 'conn-test' }).code, 'corp-stopped', '법인 없는 새 항목 · 같은 접속처');
+  assert.equal(REFS.resolveOsAuth({ ...asIs, id: 'bm_vcb', vcenterId: 'vcB' }, { feature: 'conn-test' }).ok, true, '다른 법인의 같은 사설 주소 서버는 막지 않는다(반증 D2 — 법인끼리 IP 가 겹친다)');
   assert.equal(REFS.resolveOsAuth({ ...asIs, id: 'bm_other', host: '10.99.0.1', vcenterId: '' }, { feature: 'conn-test' }).ok, true, '다른 서버는 그대로');
   assert.equal(SVC.resumeCorp('vcA', { by: 'own' }).ok, true);
   assert.equal(REFS.resolveOsAuth({ ...asIs, vcenterId: '' }, { feature: 'conn-test' }).ok, true);
+  assert.equal(ST.clearCorpStop('toString', { by: 'own' }).code, 'not-stopped', '프로토타입 이름을 중지 기록으로 읽지 않는다(반증 D7)');
+  assert.equal(ST.stopFor('constructor'), null);
 });
 
 test('⑬ 상태 파일 모양이 틀리면(JSON 은 맞아도) 손상으로 보고 키 접속을 멈춘다 · 사람이 고친 뒤 다시 읽기로 푼다(점검 A-6 · C-11 · C-3)', () => {
   const sf = path.join(DIR, ST.STATE_FILE_NAME);
   const before = fs.readFileSync(sf, 'utf8');
   const srv = { id: 'z1', name: 'z', host: '10.0.0.77', keyRef: KS.keyByName('no-feat').id };
-  for (const bad of ['{"stops":[]}', '[]', '{"stops":{"vcA":"yes"}}', '{"events":{}}']) {
+  const many = JSON.stringify({ stops: Object.fromEntries(Array.from({ length: 501 }, (_, i) => [`c${i}`, {}])) });
+  for (const bad of ['{"stops":[]}', '[]', '{"stops":{"vcA":"yes"}}', '{"events":{}}', '{"stops":{"vcA":{"serverIds":"bm_1"}}}', many]) {
     fs.writeFileSync(sf, bad);
     ST._resetSshAccessStateForTest();
     assert.equal(REFS.resolveOsAuth(srv, { feature: 'conn-test' }).code, 'state-unreadable', bad);
@@ -582,4 +614,42 @@ test('⑯ 키 사용 기록 — 마지막 사용은 전체 묶음에서(최근 �
   assert.equal(US.lastUseByFingerprint().get(fpA)?.lastAt, now - 5000, '오래전 한 번 쓴 키도 마지막 사용이 보인다');
   assert.equal(US.noteKeyUse({ fingerprint: fpA, server: 'web1', corp: 'vcB', feature: 'bm-usage', ok: true }, { now }).unusual, 'new-server', '다른 법인의 같은 이름 서버');
   assert.equal(US.keyUsageView({ fingerprint: fpA }).rows.length, 2);
+});
+
+test('⑰ 반증 2차 — 예약 복원은 적용 시점 파일과 다시 합친다(반증 D5) · 공통 계정이 포탈 밖에서 바뀌면 그 계정으로 접속하지 않는다(반증 D4) · 막힌 키는 사용 기록에 쌓지 않는다(반증 D3 소스) · 바꿔치기 표지 키는 고르지 않는다(반증 D11)', async () => {
+  const SR = await import('../src/backup/stagedRestore.js');
+  const file = path.join(DIR, 'ssh-keys.json');
+  const cur = fs.readFileSync(file, 'utf8');
+  const kA = KS.keyByName('kr-common');
+  // 예약 때의 사본(넓은 기능) → 그 뒤 새 키 등록 → 적용 시점 합치기: 지금 값 유지 · 새 키 남김
+  const staged = JSON.parse(cur);
+  for (const k of staged.keys) if (k.id === kA.id) k.features = null;
+  const NEWK = KS.addKey({ name: 'after-schedule', privateKey: F.ed25519Key().pem, folderCorp: 'vcA', features: ['bm-usage'] }, { by: 'own' });
+  assert.ok(NEWK.ok, JSON.stringify(NEWK));
+  const rc = SR.reconcileForApply('ssh-keys.json', JSON.stringify(staged), DIR);
+  const out = JSON.parse(rc.content);
+  assert.deepEqual(out.keys.find((k) => k.id === kA.id).features, ['bm-usage', 'bm-storage'], '예약 뒤 좁힌 값이 되돌아가지 않는다');
+  assert.ok(out.keys.some((k) => k.name === 'after-schedule' && typeof k.privateKey === 'string' && k.privateKey), '예약 뒤 등록한 키가 개인키째 남는다');
+  // 공통 계정을 파일에서 바꾸면(계정명) — 대조가 잡고 그 계정으로 접속하지 않는다 · 저장소 쓰기도 막힌다
+  const acc = KS.listAccountsRaw().find((a) => a.name === 'kr-acc');
+  const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+  for (const a of j.accounts) if (a.id === acc.id) a.username = 'attacker';
+  const orig = fs.readFileSync(file, 'utf8');
+  fs.writeFileSync(file, JSON.stringify(j));
+  assert.deepEqual(CHK.checkKeyDrift().accountsChanged, [acc.id]);
+  assert.equal(REFS.resolveOsAuth({ id: 'q1', name: 'q', host: '10.0.0.66', vcenterId: 'vcA', credRef: acc.id }, { feature: 'conn-test' }).code, 'account-tampered');
+  assert.ok(CHK.buildKeyCheck({ policyMode: 'encrypted', drift: CHK.checkKeyDrift() }).items.some((i) => i.code === 'account-changed-outside' && i.level === 'bad'));
+  fs.writeFileSync(file, orig);
+  assert.equal(SVC.reloadKeyStore({ by: 'own' }).ok, true);
+  assert.equal(REFS.resolveOsAuth({ id: 'q1', name: 'q', host: '10.0.0.66', vcenterId: 'vcA', credRef: acc.id }, { feature: 'conn-test' }).ok, true);
+  // 폴러 두 곳 — 자격 해석이 막은 결과는 사용 기록에 적지 않는다
+  const src = (f) => fs.readFileSync(path.join(HERE, '../src', f), 'utf8');
+  assert.match(src('bmusage/poller.js'), /target\.osHost\?\.keyFingerprint && !target\.osHost\.authErrorCode && !os\.authErrorCode/);
+  assert.match(src('bmstor/poller.js'), /srv\?\.keyFingerprint && !srv\.authErrorCode && /);
+  // 키 고르기 — 바꿔치기 표지가 있는 키는 접속 시험 전에 거절
+  const s = BM.listBmServersRaw().find((x) => x.name === 'bm-a1');
+  const addr = (await SVC.buildView()).servers.find((x) => x.id === s.id).addr;
+  KS.markKeyIntegrity(kA.id, false);
+  assert.equal((await SVC.chooseServerKey({ serverId: s.id, keyId: kA.id, expectAddr: addr, by: 'own' })).code, 'key-tampered');
+  KS.markKeyIntegrity(kA.id, true);
 });

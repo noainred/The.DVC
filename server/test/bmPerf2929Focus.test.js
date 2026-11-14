@@ -437,6 +437,8 @@ test('v3.9.0 SSH 공용 접속(점검 B-2) — 집중 모니터링은 분마다 
   const seen = []; let n = 0;
   h.deps.refreshOsHost = async (o) => { n += 1; return n === 2 ? { ...o, password: '', authError: '법인 키 사용 중지', authErrorCode: 'corp-stopped' } : { ...o, tick: n }; };
   h.deps.collectOs = async (o) => { seen.push(o); if (o.authError) return { ok: false, error: o.authError, authErrorCode: o.authErrorCode }; return { ok: true }; };
+  const rec = [];
+  h.deps.recordOsAuth = async (tg, o) => { rec.push([tg.osHost?.tick, o.ok]); };
   F._setFocusDepsForTest(h.deps);
   const r = await F.startFocusLocal({ target: tgt('R1', 'vcR'), reason: '재해석 확인', by: 'op' });
   assert.equal(r.code, 'ok', JSON.stringify(r));
@@ -445,4 +447,5 @@ test('v3.9.0 SSH 공용 접속(점검 B-2) — 집중 모니터링은 분마다 
   assert.deepEqual(seen.map((o) => o.tick ?? o.authErrorCode), [1, 'corp-stopped', 3], '수집기는 다시 해석한 대상을 받는다');
   const g = await F.getFocusLocal({ key: 'R1', id: r.id });
   assert.equal(g.samples[1].missOs, 'cred-config', '자격 해석이 막은 분은 SSH 오류가 아니라 cred-config');
+  assert.deepEqual(rec, [[1, true], [3, true]], '인증 결과는 그 분에 쓴 자격으로 · 해석이 막아 로그인하지 않은 분은 적지 않는다(반증 D9)');
 });

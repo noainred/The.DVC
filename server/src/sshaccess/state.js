@@ -29,7 +29,7 @@ const MAX_STOPS = 500;
 const MAX_STOP_SERVERS = 2000;
 const READ_RETRY_MS = 30_000;
 /** 밀려나지 않게 지키는 사건 — 사용 중지 · 재개 · 바꿔치기(감사 로그에 없는 것도 있다). */
-export const CRITICAL_EVENTS = Object.freeze(['corp-stop', 'corp-resume', 'key-tampered', 'key-changed-outside', 'key-added-outside', 'state-reloaded', 'keystore-reloaded']);
+export const CRITICAL_EVENTS = Object.freeze(['corp-stop', 'corp-resume', 'key-tampered', 'key-changed-outside', 'key-added-outside', 'state-reloaded', 'keystore-reloaded', 'account-changed-outside']);
 
 const t = (v, max = 256) => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max).trim();
 const num = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.round(Number(v)) : 0);
@@ -47,10 +47,14 @@ function norm(j) {
   if (j.stops !== undefined && !isObj(j.stops)) throw new ShapeError('stops 가 객체가 아닙니다');
   if (j.events !== undefined && !Array.isArray(j.events)) throw new ShapeError('events 가 배열이 아닙니다');
   const stops = Object.create(null);
-  for (const [corp, v] of Object.entries(j.stops || {}).slice(0, MAX_STOPS)) {
+  const ents = Object.entries(j.stops || {});
+  // 넘치는 중지 기록을 조용히 자르면 잘린 법인의 중지가 풀린다(반증 D6) — 손상으로 본다.
+  if (ents.length > MAX_STOPS) throw new ShapeError(`stops 가 ${MAX_STOPS}개를 넘습니다`);
+  for (const [corp, v] of ents) {
     const c = t(corp, 128);
     if (!c) continue;
     if (!isObj(v)) throw new ShapeError(`stops.${c.slice(0, 40)} 가 객체가 아닙니다`);
+    for (const f of ['serverIds', 'addrs']) if (v[f] !== undefined && !Array.isArray(v[f])) throw new ShapeError(`stops.${c.slice(0, 40)}.${f} 가 배열이 아닙니다`);
     stops[c] = { at: num(v.at), by: t(v.by, 64), reason: t(v.reason, 300), serverIds: strList(v.serverIds, MAX_STOP_SERVERS), addrs: strList(v.addrs, MAX_STOP_SERVERS) };
   }
   const events = (j.events || []).filter(isObj).slice(-MAX_EVENTS).map((e) => ({
@@ -98,7 +102,8 @@ function unreadable() {
   const e = loadErr.get();
   return e ? { ok: false, code: 'state-unreadable', status: 503, reason: `SSH 공용 접속 상태 파일(${STATE_FILE_NAME})을 읽지 못해 바꾸지 않았습니다 — 손상 보존본(${STATE_FILE_NAME}.corrupt.*)을 확인해 고친 뒤 ‘상태 파일 다시 읽기’ 를 누르세요.` } : null;
 }
-function draft() { const d = load(); return { stops: { ...d.stops }, events: d.events.slice() }; }
+// 프로토타입 없는 객체로 — 'toString' 같은 이름을 중지 기록으로 읽지 않게(반증 D7).
+function draft() { const d = load(); return { stops: Object.assign(Object.create(null), d.stops), events: d.events.slice() }; }
 function commit(next) {
   let normed;
   try { normed = norm(next); } catch (e) { return { ok: false, code: 'bad-state', status: 500, reason: String(e?.message || e).slice(0, 120) }; }
@@ -118,11 +123,14 @@ function commit(next) {
  * @param {{corps?:string[], serverId?:string, addr?:string}} q
  * @returns {null | {unreadable:true} | {corp:string, at:number, by:string, reason:string}}
  */
-export function stopMatch({ corps = [], serverId = '', addr = '' } = {}) {
+export function stopMatch({ corps = [], serverId = '', addr = '', serverCorp = '' } = {}) {
   const d = load();
   if (!d || loadErr.get()) return { unreadable: true };
-  for (const c of corps) { const k = t(c, 128); if (k && d.stops[k]) return { corp: k, ...d.stops[k] }; }
-  const sid = t(serverId, 64); const ad = t(addr, 300);
+  for (const c of corps) { const k = t(c, 128); if (k && Object.hasOwn(d.stops, k)) return { corp: k, ...d.stops[k] }; }
+  const sid = t(serverId, 64);
+  // 접속처 대조는 **법인이 없는 서버만**(반증 D2) — 법인끼리 사설 IP 가 겹치므로 다른 법인의 같은 주소 서버를 막으면 안 된다.
+  //   법인 칸을 비워 빠져나가는 길(같은 항목)은 서버 id 가, 새 항목으로 다시 만드는 길은 법인이 없을 때 접속처가 잡는다.
+  const ad = t(serverCorp, 128) ? '' : t(addr, 300);
   if (sid || ad) for (const [corp, s] of Object.entries(d.stops)) if ((sid && s.serverIds.includes(sid)) || (ad && s.addrs.includes(ad))) return { corp, ...s };
   return null;
 }
@@ -131,7 +139,7 @@ export function stopFor(corp) {
   const d = load();
   if (!d || loadErr.get()) return { unreadable: true };
   const c = t(corp, 128);
-  return c && d.stops[c] ? { ...d.stops[c] } : null;
+  return c && Object.hasOwn(d.stops, c) ? { ...d.stops[c] } : null;
 }
 export function listStops() { const d = load(); return d ? Object.entries(d.stops).map(([corp, v]) => ({ corp, ...v })) : []; }
 
@@ -152,7 +160,7 @@ export function setCorpStop(corp, { by = '', reason = '', servers = [], now = Da
   const c = t(corp, 128);
   if (!c) return { ok: false, code: 'bad-corp', reason: '법인을 고르세요.' };
   const d = draft();
-  if (!d.stops[c] && Object.keys(d.stops).length >= MAX_STOPS) return { ok: false, code: 'too-many', reason: '사용 중지 기록이 너무 많습니다.' };
+  if (!Object.hasOwn(d.stops, c) && Object.keys(d.stops).length >= MAX_STOPS) return { ok: false, code: 'too-many', reason: '사용 중지 기록이 너무 많습니다.' };
   d.stops[c] = { at: now, by: t(by, 64), reason: t(reason, 300), serverIds: strList(servers.map((s) => s?.id), MAX_STOP_SERVERS), addrs: strList(servers.map((s) => s?.addr), MAX_STOP_SERVERS) };
   pushEvents(d, [{ kind: 'corp-stop', corp: c, by, detail: `${t(reason, 240)}${servers.length ? ` · 서버 ${servers.length}대` : ''}` }], now);
   return commit(d);
@@ -161,7 +169,7 @@ export function clearCorpStop(corp, { by = '', now = Date.now() } = {}) {
   const u = unreadable(); if (u) return u;
   const c = t(corp, 128);
   const d = draft();
-  if (!d.stops[c]) return { ok: false, code: 'not-stopped', status: 404, reason: '이 법인은 사용 중지 상태가 아닙니다.' };
+  if (!c || !Object.hasOwn(d.stops, c)) return { ok: false, code: 'not-stopped', status: 404, reason: '이 법인은 사용 중지 상태가 아닙니다.' };
   delete d.stops[c];
   pushEvents(d, [{ kind: 'corp-resume', corp: c, by }], now);
   return commit(d);

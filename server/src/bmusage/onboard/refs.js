@@ -133,6 +133,7 @@ export const AUTH_ERROR = Object.freeze({
   'account-kind': '공통 계정 참조가 OS 계정이 아닙니다.',
   'store-unreadable': 'SSH 키 저장소(ssh-keys.json)를 읽지 못해 키로 접속하지 않았습니다.',
   // v3.9.0 SSH 공용 접속(설계 docs/design/ssh-access §8 · §9)
+  'account-tampered': '공통 계정(계정명 · 법인 · 기본 키 · 비밀번호)이 포탈 밖에서 바뀌었습니다 — 이 계정으로는 접속하지 않습니다. 설정 › 보안 › SSH 공용 접속 › 키 보안을 확인하세요.',
   'key-tampered': 'SSH 키 원문의 지문이 등록 때와 다릅니다(바꿔치기 의심) — 이 키로는 접속하지 않습니다. 설정 › 보안 › SSH 공용 접속 › 키 보안을 확인하고 키를 새로 등록하세요.',
   'key-folder': 'SSH 키가 다른 법인 · 다른 서버의 폴더에 있어 이 서버에는 쓰지 않습니다 — 설정 › 보안 › SSH 공용 접속에서 이 서버의 폴더에 있는 키를 고르세요.',
   'key-feature': '이 SSH 키는 이 기능에 허용되지 않았습니다 — 설정 › 보안 › SSH 공용 접속 › 키 폴더에서 키의 ‘쓸 수 있는 기능’ 을 확인하세요.',
@@ -161,7 +162,7 @@ export function keyPlacementIssue(key = {}, server = {}, feature = '') {
  * 법인 칸만 보면 OTP 없이 칸을 비워 빠져나갈 수 있었다(점검 A-4). 상태 파일을 못 읽으면 멈춘 것으로 본다.
  */
 function stopIssue(corps, server, username) {
-  const s = stopMatch({ corps: corps.map((x) => t(x)).filter(Boolean), serverId: t(server.id), addr: t(server.host) ? addrKey(server.host, server.port, username) : '' });
+  const s = stopMatch({ corps: corps.map((x) => t(x)).filter(Boolean), serverId: t(server.id), addr: t(server.host) ? addrKey(server.host, server.port, username) : '', serverCorp: t(server.vcenterId) });
   if (s?.unreadable) return 'state-unreadable';
   return s ? 'corp-stopped' : null;
 }
@@ -201,6 +202,7 @@ export function resolveOsAuth(server = {}, { feature = '' } = {}) {
     acc = KS.accountById(credRef);
     if (!acc) return { ok: false, code: 'account-missing', error: AUTH_ERROR['account-missing'] };
     if (acc.kind !== 'os') return { ok: false, code: 'account-kind', error: AUTH_ERROR['account-kind'] };
+    if (KS.isAccountTampered(acc.id)) return { ok: false, code: 'account-tampered', error: AUTH_ERROR['account-tampered'] };
   }
   // 7b 반증 F19: 공통 계정을 쓰면 접속 계정명도 **공통 계정 쪽**(서버 칸은 '개별' 일 때만) — 서버 칸 기본값 root 로 공통 비밀번호를 보내지 않게.
   const username = (acc ? acc.username : '') || t(server.username) || 'root';

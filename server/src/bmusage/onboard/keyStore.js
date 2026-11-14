@@ -22,6 +22,7 @@ import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js'
 import { makeLoadError, filterObjectElements } from '../../util/registryCore.js';
 import { openSecretsDeep, sealSecretsDeep, decryptFailureCount, loadSecretsPolicy } from '../../security/secretVault.js';
 import { parsePrivateKey, PASSPHRASE_MAX } from './keyParse.js';
+import { sshHostKeyFingerprint } from '../../proxy/sshExec.js';
 
 import { KEY_FILE_NAME } from './keyBundle.js';
 export { KEY_FILE_NAME };
@@ -120,7 +121,7 @@ function load() {
 }
 
 /** 테스트 전용 — 메모리 캐시를 비워 다음 호출이 파일을 다시 읽게 한다. */
-export function _resetKeyStoreForTest() { cache = null; loadErr.clear(); undecryptable = 0; _tampered.clear(); }
+export function _resetKeyStoreForTest() { cache = null; loadErr.clear(); undecryptable = 0; _tampered.clear(); _tamperedAcc.clear(); }
 /** 봉인을 못 푼 값 수(0 이면 정상) — 화면 · 라우트가 '쓰기 거절' 사유를 말한다. */
 export function keyStoreUndecryptable() { load(); return undecryptable; }
 
@@ -132,8 +133,20 @@ const unreadable = () => {
   return null;
 };
 
-/** 사본을 바꿔 봉인 · 원자적으로 쓴 뒤에만 캐시를 바꾼다. 봉인 실패(정책 잠금)는 code 그대로. */
+/**
+ * 사본을 바꿔 봉인 · 원자적으로 쓴 뒤에만 캐시를 바꾼다. 봉인 실패(정책 잠금)는 code 그대로.
+ * v3.9.0(반증 D8): 쓰기 전에 디스크가 포탈이 마지막으로 쓴 내용과 같은지 본다 — 다르면 쓰지 않는다(포탈 밖 변경의 흔적을 정상 쓰기가 사건 없이 지우지 않게).
+ *   사람이 확인한 뒤 ‘키 저장소 다시 읽기’(설정 소유자 + OTP)로 디스크를 새 기준으로 삼으면 다시 쓸 수 있다.
+ */
 function commit(next) {
+  const dd = diskDrift();
+  const outside = !dd.ok ? -1 : dd.changed.length + dd.added.length + dd.removed.length + dd.accountsChanged.length;
+  if (outside) {
+    return { ok: false, code: 'store-changed-outside', status: 409,
+      reason: outside < 0
+        ? `SSH 키 저장소 파일을 다시 읽지 못해(${String(dd.reason || '').slice(0, 60)}) 포탈 밖 변경 여부를 모릅니다 — 바꾸지 않았습니다.`
+        : `SSH 키 저장소 파일이 포탈 밖에서 바뀌어(${outside}곳) 바꾸지 않았습니다 — 설정 › 보안 › SSH 공용 접속 › 키 보안에서 확인한 뒤 ‘키 저장소 다시 읽기’ 를 누르세요.` };
+  }
   try {
     fs.mkdirSync(path.dirname(FILE), { recursive: true });
     atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ keys: next.keys, accounts: next.accounts }), null, 2), { mode: 0o600 });
@@ -225,6 +238,16 @@ export function keyStoreLoosePerm() {
 const _tampered = new Set();
 export function markKeyIntegrity(id, ok) { if (ok) _tampered.delete(t(id, 32)); else _tampered.add(t(id, 32)); }
 export function tamperedKeyIds() { return [..._tampered]; }
+/** 포탈 밖에서 바뀐 공통 계정(계정명 · 법인 · 기본 키 · 비밀번호) — 그 계정으로는 접속하지 않는다(반증 D4). */
+const _tamperedAcc = new Set();
+export function tamperedAccountIds() { return [..._tamperedAcc]; }
+export function isAccountTampered(id) { return _tamperedAcc.has(t(id, 32)); }
+/** 공개키 칸이 지문과 맞는가(화면 ‘공개키 복사’ 가 authorized_keys 배포에 쓰인다 — 공개키만 바꾸면 남의 키를 배포하게 된다 · 반증 D4). */
+function publicKeyMatches(k) {
+  const b64 = String(k.publicKey || '').trim().split(/\s+/)[1] || '';
+  if (!b64) return false;
+  try { return sshHostKeyFingerprint(Buffer.from(b64, 'base64')) === k.fingerprint; } catch { return false; }
+}
 
 /**
  * 디스크 파일 ↔ 메모리 대조(주기 점검 · 화면) — 포탈이 마지막으로 쓴(또는 읽은) 내용과 디스크가 다른 키.
@@ -234,29 +257,41 @@ export function tamperedKeyIds() { return [..._tampered]; }
  * @returns {{ok:boolean, changed:string[], added:{id:string,name:string,fingerprint:string}[], removed:string[], reason?:string}}
  */
 export function diskDrift() {
-  const out = { ok: true, changed: [], added: [], removed: [] };
+  const out = { ok: true, changed: [], added: [], removed: [], accountsChanged: [] };
   if (keyStoreLoadError()) return { ...out, ok: false, reason: 'store-unreadable' };
   let disk;
   try {
-    if (!fs.existsSync(FILE)) disk = { keys: [] };
-    else { const j = JSON.parse(fs.readFileSync(FILE, 'utf8')); disk = openSecretsDeep({ keys: Array.isArray(j?.keys) ? j.keys : [] }); }
+    if (!fs.existsSync(FILE)) disk = { keys: [], accounts: [] };
+    else { const j = JSON.parse(fs.readFileSync(FILE, 'utf8')); disk = openSecretsDeep({ keys: Array.isArray(j?.keys) ? j.keys : [], accounts: Array.isArray(j?.accounts) ? j.accounts : [] }); }
   } catch (e) { return { ...out, ok: false, reason: `read-failed:${String(e?.code || e?.message || e).slice(0, 40)}` }; }
-  const mem = load().keys;
+  const d = load();
+  const mem = d.keys;
   const diskKeys = filterObjectElements(disk.keys).list.map(normKey).filter(Boolean);
   const byId = new Map(diskKeys.map((k) => [k.id, k]));
-  const sig = (k) => JSON.stringify([k.privateKey, k.passphrase, k.fingerprint, k.status, k.folderCorp, k.folderServer, k.features]);
+  // 공개키 · 이름도 본다(반증 D4 — 공개키만 바꾸면 ‘공개키 복사’ 가 남의 키를 내줬다).
+  const sig = (k) => JSON.stringify([k.privateKey, k.passphrase, k.fingerprint, k.publicKey, k.name, k.status, k.folderCorp, k.folderServer, k.features]);
   for (const k of mem) {
     const dk = byId.get(k.id);
     if (!dk) { out.removed.push(k.id); continue; }
-    if (sig(dk) !== sig(k)) { out.changed.push(k.id); _tampered.add(k.id); }
+    if (sig(dk) !== sig(k) || !publicKeyMatches(k)) { out.changed.push(k.id); _tampered.add(k.id); }
   }
   const memIds = new Set(mem.map((k) => k.id));
   for (const dk of diskKeys) if (!memIds.has(dk.id)) out.added.push({ id: dk.id, name: dk.name, fingerprint: dk.fingerprint });
+  // 공통 계정 — 계정명 · 법인 · 기본 키 · 비밀번호가 포탈이 쓴 것과 다르면 그 계정으로 접속하지 않는다.
+  const diskAccs = filterObjectElements(disk.accounts).list.map(normAccount).filter(Boolean);
+  const accById = new Map(diskAccs.map((a) => [a.id, a]));
+  const asig = (a) => JSON.stringify([a.name, a.kind, a.corp, a.username, a.keyRef, a.password]);
+  for (const a of d.accounts) {
+    const da = accById.get(a.id);
+    if (!da || asig(da) !== asig(a)) { out.accountsChanged.push(a.id); _tamperedAcc.add(a.id); }
+  }
+  const memAcc = new Set(d.accounts.map((a) => a.id));
+  for (const da of diskAccs) if (!memAcc.has(da.id)) out.accountsChanged.push(da.id);
   return out;
 }
 /** 설정 소유자 + OTP — 디스크 파일을 새 기준으로 다시 읽는다(포탈 밖에서 바뀐 것을 사람이 확인한 뒤). 바꿔치기 표지도 푼다. */
 export function reloadKeyStoreFromDisk() {
-  cache = null; loadErr.clear(); undecryptable = 0; _tampered.clear();
+  cache = null; loadErr.clear(); undecryptable = 0; _tampered.clear(); _tamperedAcc.clear();
   load();
   const e = loadErr.get();
   return e ? { ok: false, code: 'registry-unreadable', status: 503, reason: `SSH 키 저장소를 읽지 못했습니다 — ${String(e.reason || '').slice(0, 120)}` } : { ok: true, keys: load().keys.length };

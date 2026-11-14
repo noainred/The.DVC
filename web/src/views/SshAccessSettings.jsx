@@ -15,6 +15,7 @@ import { STable } from '../components/STable.jsx';
 import Select from '../components/Select.jsx';
 import BoldText from '../components/boldText.jsx';
 import { toneVar } from './tools/toneVar.js';
+import { unitText } from './unitText.js';
 import {
   LEVEL_TEXT, LEVEL_TONE, KEY_MODE_TEXT, ISSUE_TEXT, INBOX_CODE_TEXT, EVENT_TEXT, USE_CODE_TEXT, UNUSUAL_TEXT,
   shortFp, dateTime, ageDays, featuresText, folderTree, keysInFolder, inboxInFolder, sortedCheck, suggestKeyName, serverStatus, auditTime, COLLECT_FEATURES,
@@ -132,7 +133,10 @@ function ServersTab({ v, corpName, reload, say }) {
   const servers = (v.servers || []).filter((s) => (s.vcenterId || '') === corp);
   const accounts = (v.accounts || []).filter((a) => (a.corp || '') === corp || !a.corp);
   const edges = (v.edgeRows || []).filter((r) => (r.corp || '') === corp);
-  const stop = (v.corps || []).find((c) => c.id === corp)?.stop;
+  const stop0 = (v.corps || []).find((c) => c.id === corp)?.stop;
+  // 상태 파일을 못 읽으면 stop = { unreadable } — ‘중지 중’ 이 아니라 ‘모름’(그동안 모든 키 접속이 멈춰 있다 · 반증 지적).
+  const stateUnknown = !!stop0?.unreadable;
+  const stop = stateUnknown ? null : stop0;
   const keyName = (id) => (v.keys || []).find((k) => k.id === id)?.name || '';
   const setB = (id, on) => setBusy((p) => { const n = new Set(p); if (on) n.add(id); else n.delete(id); return n; });
   const test = async (s) => {
@@ -149,11 +153,12 @@ function ServersTab({ v, corpName, reload, say }) {
           {corpIds.map((id) => {
             const c = (v.corps || []).find((x) => x.id === id);
             const n = (v.servers || []).filter((s) => (s.vcenterId || '') === id).length;
-            return <option key={id || '_none'} value={id}>{corpName(id)}{c?.dc ? ` (${c.dc})` : ''} — 서버 {n}대{c?.stop ? ' · 키 사용 중지' : ''}</option>;
+            return <option key={id || '_none'} value={id}>{corpName(id)}{c?.dc ? ` (${c.dc})` : ''} — 서버 {n}대{c?.stop?.unreadable ? ' · 상태 모름' : c?.stop ? ' · 키 사용 중지' : ''}</option>;
           })}
         </Select></label>
         <span className="ssa-sub">OS 등록 서버가 있는 법인 {corpIds.filter((id) => (v.servers || []).some((s) => (s.vcenterId || '') === id)).length}곳</span>
       </div>
+      {stateUnknown && <p className="ssa-banner" style={{ color: toneVar('bad') }}>상태 파일을 읽지 못해 이 노드의 모든 키 접속을 멈췄습니다(사용 중지 기록을 모름) — 키 보안 탭에서 파일을 확인한 뒤 다시 읽으세요.</p>}
       {stop && <p className="ssa-banner" style={{ color: toneVar('bad') }}>이 법인은 키 사용이 중지돼 있습니다 — {stop.by || '—'} · {dateTime(stop.at)}{stop.reason ? ` · ${stop.reason}` : ''}. 키 보안 탭에서 재개합니다.</p>}
       <section className="ssa-sec">
         <h4>{corpName(corp)} — 법인 공통 계정</h4>
@@ -175,7 +180,7 @@ function ServersTab({ v, corpName, reload, say }) {
           <thead><tr><th>서버</th><th>계정</th><th>쓰는 키</th><th>상태</th><th>서버에 들어 있는 키</th><th data-nosort>동작</th></tr></thead>
           <tbody>
             {servers.map((s) => {
-              const stt = serverStatus(s, { tampered: v.tampered, stop: !!stop, rsaMinBits: v.rsaMinBits });
+              const stt = serverStatus(s, { tampered: v.tampered, stop: !!stop || stateUnknown, rsaMinBits: v.rsaMinBits });
               return (
                 <tr key={s.id}>
                   <td data-sort={s.name}><b>{s.name}</b><div className="ssa-sub"><code>{s.host}{s.port !== 22 ? `:${s.port}` : ''}</code>{s.agent ? ` · 엣지 ${s.agent}` : ''}</div></td>
@@ -423,7 +428,7 @@ function FoldersTab({ v, corpName, reload, say }) {
               <option value="">공통</option>{(v.servers || []).filter((s) => s.vcenterId === edit.folderCorp).map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
             </Select></label>
             <div className="ssa-wide"><span className="ssa-sub">쓸 수 있는 기능</span><FeaturePicker catalog={v.features} value={edit.features} onChange={(f) => setEdit({ ...edit, features: f })} allowAll={edit.key.features == null} /></div>
-            {!featuresChosen(edit.features) && <p className="ssa-note" style={{ color: toneVar('warn') }}>기능을 하나 이상 고르세요 — 없으면 이 키로 어느 기능도 접속하지 않습니다(쓰는 서버 {edit.key.servers ?? '—'}대의 수집이 멈춥니다).</p>}
+            {!featuresChosen(edit.features) && <p className="ssa-note" style={{ color: toneVar('warn') }}>기능을 하나 이상 고르세요 — 없으면 이 키로 어느 기능도 접속하지 않습니다(쓰는 서버 {unitText(edit.key.servers, '대')}의 수집이 멈춥니다).</p>}
             <Otp value={edit.otp} onChange={(x) => setEdit({ ...edit, otp: x })} />
             <div className="ssa-acts">
               <button className="btn primary" type="button" disabled={busy || !featuresChosen(edit.features)} onClick={async () => {
@@ -534,9 +539,12 @@ function SecurityTab({ v, corpName, reload, say }) {
   const doStop = async (resume) => {
     setBusy(true);
     try {
-      if (resume) must(await delJson(`/settings/ssh-access/corps/${encodeURIComponent(stopF.corp)}/stop?otp=${encodeURIComponent(stopF.otp)}`));
-      else must(await postJson(`/settings/ssh-access/corps/${encodeURIComponent(stopF.corp)}/stop`, { reason: stopF.reason, otp: stopF.otp }));
-      say(`${corpName(stopF.corp)} — 키 사용을 ${resume ? '재개' : '중지'}했습니다.`, resume ? 'ok' : 'warn');
+      let r;
+      if (resume) r = must(await delJson(`/settings/ssh-access/corps/${encodeURIComponent(stopF.corp)}/stop?otp=${encodeURIComponent(stopF.otp)}`));
+      else r = must(await postJson(`/settings/ssh-access/corps/${encodeURIComponent(stopF.corp)}/stop`, { reason: stopF.reason, otp: stopF.otp }));
+      // 엣지가 수집하는 서버는 그 엣지의 키로 접속한다 — 여기서 건 중지가 닿지 않는다는 것을 그대로 알린다.
+      const edgeNote = !resume && r?.edgeServers ? ` 엣지가 수집하는 서버 ${r.edgeServers}대는 그 엣지 포탈에서 따로 중지해야 합니다.` : '';
+      say(`${corpName(stopF.corp)} — 키 사용을 ${resume ? '재개' : '중지'}했습니다.${edgeNote}`, resume ? 'ok' : 'warn');
       setStopF({ corp: '', reason: '', otp: '' }); reload(); loadChg();
     } catch (e) { say(errText(e), 'bad'); setStopF((x) => ({ ...x, otp: '' })); } finally { setBusy(false); }
   };
@@ -547,11 +555,13 @@ function SecurityTab({ v, corpName, reload, say }) {
     setBusy(true);
     try {
       const r = must(await postJson(`/settings/ssh-access/reload-${which}`, { otp: relOtp }));
-      say(which === 'state' ? '상태 파일을 다시 읽었습니다.' : `키 저장소를 다시 읽었습니다(키 ${r.keys ?? '—'}개) — 디스크 내용이 새 기준입니다.`, 'ok');
+      say(which === 'state' ? '상태 파일을 다시 읽었습니다.' : `키 저장소를 다시 읽었습니다(키 ${unitText(r.keys, '개')}) — 디스크 내용이 새 기준입니다.`, 'ok');
       setRelOtp(''); reload(); loadChg();
     } catch (e) { say(errText(e), 'bad'); setRelOtp(''); } finally { setBusy(false); }
   };
-  const stopped = (v.corps || []).find((c) => c.id === stopF.corp)?.stop;
+  const stopSel = (v.corps || []).find((c) => c.id === stopF.corp)?.stop;
+  const stopUnknown = !!stopSel?.unreadable;
+  const stopped = stopUnknown ? null : stopSel;
   const changeRows = [
     ...(chg.resp?.events || []).map((e) => ({ at: Number(e.at) || 0, what: EVENT_TEXT[e.kind] || e.kind, code: false, target: `${e.corp ? `${corpName(e.corp)} · ` : ''}${e.target || '—'}`, who: e.by || '포탈' })),
     ...(chg.resp?.items || []).map((e) => ({ at: auditTime(e.at), what: e.action, code: true, target: e.target || '—', who: e.user })),
@@ -582,15 +592,16 @@ function SecurityTab({ v, corpName, reload, say }) {
       )}
       <section className="ssa-sec ssa-danger">
         <h4>긴급 조치 — 법인 키 사용 중지</h4>
-        <p className="ssa-note">키가 샜다고 의심되면 그 법인의 키 접속을 바로 멈춥니다. 서버는 바꾸지 않습니다(이 노드가 그 법인 키로 접속하지 않을 뿐). 중지할 때 그 법인 서버 목록을 함께 적어 두므로 서버의 법인을 바꿔도 풀리지 않습니다. 비밀번호로 접속하는 서버는 멈추지 않습니다.</p>
+        <p className="ssa-note">키가 샜다고 의심되면 그 법인의 키 접속을 바로 멈춥니다. 서버는 바꾸지 않습니다(이 노드가 그 법인 키로 접속하지 않을 뿐). 중지할 때 그 법인 서버 목록을 함께 적어 두므로 서버의 법인을 바꿔도 풀리지 않습니다. 비밀번호로 접속하는 서버는 멈추지 않고, 엣지가 수집하는 서버는 그 엣지의 키를 쓰므로 그 엣지 포탈에서 따로 중지합니다.</p>
         <div className="ssa-form ssa-inline">
           <label>법인 <Select sort={false} className="select select-sm" value={stopF.corp} onChange={(e) => setStopF({ ...stopF, corp: e.target.value })}>
-            <option value="">선택</option>{(v.corps || []).map((c) => <option key={c.id} value={c.id}>{c.name}{c.stop ? ' — 중지 중' : ''}</option>)}
+            <option value="">선택</option>{(v.corps || []).map((c) => <option key={c.id} value={c.id}>{c.name}{c.stop?.unreadable ? ' — 상태 모름' : c.stop ? ' — 중지 중' : ''}</option>)}
           </Select></label>
           {!stopped && <label>사유 <input className="input" value={stopF.reason} onChange={(e) => setStopF({ ...stopF, reason: e.target.value })} maxLength={200} /></label>}
           <Otp value={stopF.otp} onChange={(x) => setStopF({ ...stopF, otp: x })} />
           <div className="ssa-acts">
-            {stopped ? <button className="btn" type="button" disabled={busy || !stopF.corp} onClick={() => doStop(true)}>사용 재개</button>
+            {stopUnknown ? <span className="ssa-sub">상태 파일을 읽지 못해 중지 · 재개를 할 수 없습니다(먼저 위에서 상태 파일을 다시 읽으세요).</span>
+              : stopped ? <button className="btn" type="button" disabled={busy || !stopF.corp} onClick={() => doStop(true)}>사용 재개</button>
               : <button className="btn danger" type="button" disabled={busy || !stopF.corp} onClick={() => doStop(false)}>이 법인 키 사용 중지</button>}
           </div>
         </div>

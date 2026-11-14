@@ -379,7 +379,8 @@ async function tick(sess, idx) {
   const missOs = sess.hasOs ? osMissOf(os) : 'no-path';
   const missIdrac = sess.hasIdrac ? idracMissOf(idrac) : 'no-path';
   // 인증 결과를 주기 수집과 같은 가드에 — 실패는 정지 · 성공은 해제.
-  if (sess.hasOs && os) await _D.recordOsAuth(tg, { ok: !!os.ok, errorText: missOs === 'auth' ? os.error : '' }).catch(() => {});
+  // 인증 결과는 이번 분에 실제로 쓴 자격 기준(세션 시작 때의 옛 자격이 아니라 — 반증 D9). 해석이 막은 분은 로그인하지 않았으므로 적지 않는다.
+  if (sess.hasOs && os && !osHostNow?.authError) await _D.recordOsAuth({ ...tg, osHost: osHostNow }, { ok: !!os.ok, errorText: missOs === 'auth' ? os.error : '' }).catch(() => {});
   if (sess.hasIdrac && idrac && idrac.kind !== 'auth-stopped' && !idrac.busy) await _D.recordIdracAuth(tg, { ok: !!idrac.ok, kind: idrac.kind || '', errorText: idrac.error || '' }).catch(() => {});
 
   // 값 — 주기 수집과 같은 계산(buildUsage · buildPerfEntry). 누적 카운터 이전 표본은 이 세션 것(첫 분은 주기 수집의 마지막 표본 사본 — 주기 수집 상태는 건드리지 않는다).
