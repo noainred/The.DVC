@@ -1673,7 +1673,7 @@ test('⑪ 비밀번호가 틀리면 — auth-rejected · authorized_keys 는 그
   assert.equal(S.readAk(), before);
 });
 
-test('⑪-b keyboard-interactive 도 받는 sshd(PAM 을 켠 서버) — 틀린 비밀번호는 서버에 한 번만 간다(한 번의 동작 = 인증 실패 한 번)',
+test('⑪-b keyboard-interactive 도 받는 sshd(PAM 을 켠 서버) — 틀린 비밀번호는 서버에 한 번만 간다(한 번의 동작 = 인증 실패 한 번 · 서버가 둘 다 내놓으면 password 하나 — 1회차 D3)',
   {}, async () => {
     const S = await fakeSshd();
     S.st.password = 'Right-Pw-Never-Sent';
@@ -1685,6 +1685,7 @@ test('⑪-b keyboard-interactive 도 받는 sshd(PAM 을 켠 서버) — 틀린 
     assert.equal(S.st.conns, 1);
     assert.match(r.reason, /다시 시도하지 않았습니다\(계정 잠금 방지\)/, '결과 문구는 다시 시도하지 않았다고 말한다');
     assert.equal(S.passwordTries().length, 1, `서버가 받은 비밀번호 인증 시도(= 서버의 실패 횟수) — ${S.passwordTries().map((x) => x.method).join(' → ')}`);
+    assert.equal(S.passwordTries()[0].method, 'password', '둘 다 내놓으면 password 우선');
   });
 
 test('⑪-c 구형 알고리즘(diffie-hellman-group1-sha1)만 받는 서버 — 협상 실패 뒤 다시 붙을 때도 비밀번호는 password 방식 한 번(keyboard-interactive 로 다시 보내지 않는다 — 점검 B-F7 · D-4)', async () => {
@@ -1730,6 +1731,32 @@ test('⑪-d 서버에 들어 있는 키 읽기도 비밀번호는 password 방�
   S.clear(); S.writeAk(`${OTHER}\n`);
   const ok = await SVC.readInstalledKeys({ serverId: sv.id, oncePassword: S.st.password, by: 'own' });
   assert.deepEqual([ok.ok, ok.keys.length, ok.via], [true, 1, 'password-once'], JSON.stringify(ok));
+});
+
+test('⑪-e 대화형(keyboard-interactive)만 받는 서버 — 비밀번호는 서버가 내놓은 방식 하나로 한 번만: 맞으면 키 읽기 · 키 로그인 설정이 되고, 틀리면 대화형 한 번뿐(1회차 D3 — password 만 보내자 이런 서버에서 읽기가 늘 실패했다)', async () => {
+  const S = await fakeSshd();
+  const right = secret('Right-Kbd-Pw-11e');
+  S.st.password = right; S.st.offerKbd = true; S.st.noPassword = true;
+  const K = mkKey('kl-kbd-only');
+  const sv = mkServer('bm-kbd-only', S);   // 저장된 비밀번호 없음 — 1회 비밀번호로
+  S.writeAk(`${OTHER}\n`);
+  // 서버에 들어 있는 키 읽기
+  const rd = await SVC.readInstalledKeys({ serverId: sv.id, oncePassword: right, by: 'own' });
+  assert.deepEqual([rd.ok, rd.keys?.length, rd.via], [true, 1, 'password-once'], JSON.stringify(rd));
+  assert.deepEqual(S.passwordTries().map((x) => [x.method, x.password]), [['keyboard-interactive', right]], 'password 방식은 시도하지 않았다(서버가 내놓지 않음) · 대화형 한 번');
+  // 틀린 비밀번호 — 대화형 한 번뿐
+  S.clear();
+  const wrong = secret('Wrong-Kbd-Pw-11e');
+  const rd2 = await SVC.readInstalledKeys({ serverId: sv.id, oncePassword: wrong, by: 'own' });
+  assert.deepEqual([rd2.ok, rd2.code], [false, 'auth-rejected'], JSON.stringify(rd2));
+  assert.deepEqual(S.passwordTries().map((x) => [x.method, x.password]), [['keyboard-interactive', wrong]]);
+  // 키 로그인 설정 — 대화형으로 붙어 줄을 넣고, 키로 다시 붙어 확인
+  S.clear();
+  const r = (await runLogin({ servers: [sv], keyId: K.id, oncePassword: right, by: 'own' })).job.results[0];
+  assert.deepEqual([r.ok, r.line, r.restricted, r.bound], [true, 'added', true, true], JSON.stringify(r));
+  assert.deepEqual(S.passwordTries().map((x) => [x.conn, x.method]), [[1, 'keyboard-interactive']]);
+  assert.match(S.readAk(), new RegExp(`portal-ssh:${K.id}`));
+  // 대조 — password 를 내놓는 서버에서는 password 하나(⑪-b · ⑪-c 가 대화형도 받는 서버에서 같은 것을 본다)
 });
 
 test('⑫ 키 접속 확인이 실패하면(출발지 제한 불일치) — key-login-failed · 더한 줄을 지운다(rolledBack) · 남의 줄은 그대로 · 출발지 제한 안내 · 제한을 빼고 다시 넣지 않는다 · 이미 있던 줄은 지우지 않는다', async () => {
@@ -2124,6 +2151,9 @@ test('⑭-b 엣지 재배포가 키를 떼지 않는다 — 엣지에서 키 로
     out.redeployApplied = (await apply([row('v2')], 'sig-2')).applied;
     const ra = REFS.resolveOsAuth(cur(), { feature: 'bm-usage' });
     out.after = { key: cur().keyRef === K.id, hasPw: !!cur().password, auth: ra.ok, authKind: ra.authKind || '', note: cur().note || '' };
+    // 같은 계정이지만 주소를 옮긴 행 — 키를 새 주소로 잇지 않는다(1회차 D1 — 같은 접속처일 때만 유지 · 주소가 바뀌면 keyRef 승계 없음)
+    out.movedApplied = (await apply([{ ...row('v2b'), osHost: '10.30.0.6' }], 'sig-2b')).applied;
+    out.moved = { host: cur().host, key: !!cur().keyRef };
     // 계정이 바뀐 행 — 키를 잇지 않는다(접속처가 바뀌면 승계 없음)
     out.otherApplied = (await apply([row('v3', 'root')], 'sig-3')).applied;
     out.other = { key: !!cur().keyRef, username: cur().username };
@@ -2131,6 +2161,7 @@ test('⑭-b 엣지 재배포가 키를 떼지 않는다 — 엣지에서 키 로
   ` });
   assert.deepEqual([j.first, j.bind, j.clear, j.before], [1, true, true, { key: true, hasPw: false }], JSON.stringify(j));
   assert.deepEqual([j.redeployApplied, j.after.key, j.after.auth, j.after.authKind], [1, true, true, 'key'], `재배포 뒤에도 키로 접속한다(예전 판은 키를 떼 인증 수단 없이 남았다) ${JSON.stringify(j.after)}`);
+  assert.deepEqual([j.movedApplied, j.moved], [1, { host: '10.30.0.6', key: false }], '주소를 옮긴 행은 키를 새 주소에 잇지 않는다(1회차 D1)');
   assert.deepEqual([j.otherApplied, j.other], [1, { key: false, username: 'root' }]);
 });
 
@@ -2662,7 +2693,7 @@ test('⑰-i 서버를 바꾸는 동안은 진행 기록(ssh-key-jobs-inflight.js
   assert.equal(st.ok, true, JSON.stringify(st));
   await h.reached;
   const raw = fs.readFileSync(file, 'utf8');
-  assert.deepEqual(JSON.parse(raw).items.map((x) => [x.kind, x.server, x.keyName, x.corp, x.by]), [['key-login', 'bm-inflight', 'inflight-key', 'vcA', 'own']]);   // 작업 id 는 ⑰-i2(todo)
+  assert.deepEqual(JSON.parse(raw).items.map((x) => [x.jobId, x.sid, x.kind, x.server, x.keyName, x.corp, x.by]), [[st.jobId, sv.id, 'key-login', 'bm-inflight', 'inflight-key', 'vcA', 'own']]);
   assert.equal(modeOf(file), 0o600);
   assert.equal(raw.includes(pw), false, '비밀번호가 없다');
   h.release();
@@ -2672,7 +2703,7 @@ test('⑰-i 서버를 바꾸는 동안은 진행 기록(ssh-key-jobs-inflight.js
   const solo = { username: 'solo', role: 'admin', totpEnabled: true, totpSecret: generateSecret() };
   const a = subRun({ owners: 'solo', users: [solo], code: `
     const INF = await imp('sshaccess/inflight.js');
-    INF.markStart({ jobId: 'kj_aaaaaaaaaaaa', kind: 'key-revoke', keyName: 'leaked-key', server: 'bm-x1', corp: 'vcA', by: 'solo' });
+    INF.markStart({ jobId: 'kj_aaaaaaaaaaaa', kind: 'key-revoke', keyName: 'leaked-key', sid: 'bm_x1', server: 'bm-x1', corp: 'vcA', by: 'solo' });
     console.log(JSON.stringify({ left: fs.existsSync(path.join(process.env.CONFIG_DIR, 'ssh-key-jobs-inflight.json')) }));` });
   assert.equal(a.left, true);
   const b = subRun({ dir: a.dir, owners: 'solo', users: [solo], code: `
@@ -2689,23 +2720,30 @@ test('⑰-i 서버를 바꾸는 동안은 진행 기록(ssh-key-jobs-inflight.js
   assert.match(b.mail, /키 작업이 서버를 바꾸던 중에 중단됨 · vcA · bm-x1 · leaked-key/, '메일로도 알린다');
 });
 
-test('⑰-i2 진행 기록에 작업 id 가 적힌다(재시작 뒤 ‘중단’ 사건이 어느 작업인지 밝힌다 · 같은 이름 서버를 바꾸는 두 작업의 기록이 서로 지우지 않는다)',
-  { todo: '소스 결함(1회차 갱신 중 발견) — service.js:727 inflight() 가 job?.id 를 읽는데, keyLogin.js:370 startJob 이 run 에 넘기는 것은 { stop } 뿐인 handle 이라 jobId 가 늘 빈 글자다. 그래서 key-job-interrupted 사건이 ‘(작업 )’ 이 되고, markStart · markEnd 가 (jobId, 서버 이름)으로 찾으므로 이름이 같은 다른 서버를 바꾸는 두 작업(넣기 · 거두기 — 칸이 달라 동시에 돈다)은 서로의 기록을 지울 수 있다(추정 — 재현은 jobId 빈 글자까지).' },
-  async () => {
-    const S = await fakeSshd();
-    const pw = secret('Pw-Inflight-Stored-17i2');
-    S.st.password = pw;
-    const K = mkKey('inflight-key2');
-    const sv = mkServer('bm-inflight2', S, { password: pw });
-    const h = holdInstall(S, K);
-    const st = await SVC.startKeyLogin({ servers: [sv], keyId: K.id, by: 'own' });
-    assert.equal(st.ok, true, JSON.stringify(st));
-    await h.reached;
-    const items = JSON.parse(fs.readFileSync(path.join(DIR, 'ssh-key-jobs-inflight.json'), 'utf8')).items;
-    h.release();
-    await waitJob(st.jobId);
-    assert.deepEqual(items.map((x) => x.jobId), [st.jobId]);
-  });
+test('⑰-i2 진행 기록에 작업 id · 서버 id 가 적힌다 — 재시작 뒤 ‘중단’ 사건이 어느 작업인지 밝히고, 이름이 같은 두 서버(법인끼리 겹친다)를 바꾸는 두 작업(넣기 · 거두기 — 칸이 달라 동시에 돈다)의 기록이 서로 지우지 않는다(1회차 갱신 중 발견 → 640e5e62)', async () => {
+  const file = path.join(DIR, 'ssh-key-jobs-inflight.json');
+  const pw = secret('Pw-Inflight-Stored-17i2');
+  const SA = await fakeSshd(); const SB = await fakeSshd();
+  for (const S of [SA, SB]) S.st.password = pw;
+  const K = mkKey('inflight-key2'); const K2 = mkKey('inflight-key3', { folderCorp: 'vcB' });
+  const svA = mkServer('bm-samename', SA, { password: pw });
+  const svB = mkServer('bm-samename', SB, { password: pw, vcenterId: 'vcB' });
+  assert.notEqual(svA.id, svB.id);
+  SB.writeAk(`${K2.pub} portal-ssh:${K2.id}\n`);
+  const hA = holdInstall(SA, K); const hB = holdRevoke(SB, K2);
+  const st = await SVC.startKeyLogin({ servers: [svA], keyId: K.id, by: 'own' });
+  const rv = await SVC.startKeyRevoke({ keyId: K2.id, servers: [svB], by: 'own2' });
+  assert.deepEqual([st.ok, rv.ok], [true, true], JSON.stringify([st, rv]));
+  await hA.reached; await hB.reached;
+  const items = () => (fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')).items : []).map((x) => [x.jobId, x.sid, x.kind, x.server, x.corp]).sort();
+  assert.deepEqual(items(), [[st.jobId, svA.id, 'key-login', 'bm-samename', 'vcA'], [rv.jobId, svB.id, 'key-revoke', 'bm-samename', 'vcB']].sort(), '두 기록이 함께 있다(예전에는 작업 id 가 비어 이름만으로 겹쳤다)');
+  hB.release();
+  await waitJob(rv.jobId);
+  assert.deepEqual(items(), [[st.jobId, svA.id, 'key-login', 'bm-samename', 'vcA']], '거두기가 끝나며 지운 것은 제 기록뿐 — 넣기 기록은 남는다');
+  hA.release();
+  await waitJob(st.jobId);
+  assert.deepEqual(items(), []);
+});
 
 test('⑰-j 넣기 작업 도중 서버 쪽 제한을 켜면 남은 서버부터 제한 줄로 넣는다 · 도중에 꺼도 시작 때 켜져 있었으면 끝까지 제한(엄한 쪽으로만 — 1회차 C1-7)', async () => {
   const pw = secret('Pw-RestrictMid-Stored-17j');
@@ -2838,7 +2876,7 @@ test('⑱-b 사건이 넘쳐도 중요 사건은 남는다 — 서버마다의 k
   assert.ok(j.critMails >= 1, '전제 — 알림 경로는 살아 있다');
 });
 
-test('⑱-c 받는 곳 ‘본 표지’ 는 12자 해시 — 새 파일 25개 = inbox-new 한 건(표지 20개 · 메일 한 줄) + inbox-seen(나머지 · 메일 없음) · 재시작 뒤 다시 알리지 않는다 · 예전 꼴(경로|sha) 표지도 같은 파일로 알아본다(점검 D S-2)', async () => {
+test('⑱-c 받는 곳 ‘본 표지’ 는 12자 해시 — 새 파일 25개 = inbox-new 한 건(표지 20개 · 메일 한 줄) + inbox-seen(나머지 · 메일 없음) · 재시작 뒤 다시 알리지 않는다 · 예전 꼴(경로|sha) 표지도 같은 파일로 알아본다 · 표지는 상태 파일 별도 칸(사건이 밀려나도 · 첫 점검 때 못 읽어도 다시 알리지 않음)(점검 D S-2 · 1회차 C1-4)', async () => {
   const INB = await import('../src/sshaccess/inbox.js');
   const idir = INB.inboxPathOf('vcB');
   fs.mkdirSync(idir, { recursive: true });
@@ -2877,11 +2915,58 @@ async function inboxSigCase(INB, idir) {
   assert.equal(inboxLines.length, 1, `메일은 한 줄(본 표지 사건은 보내지 않는다) ${JSON.stringify(inboxLines)}`);
   assert.match(inboxLines[0], /^받는 곳에 새 키 파일 · 25개 — /);
   assert.equal(lines.some((l) => /[0-9a-f]{12}/.test(l)), false, '표지는 메일에 싣지 않는다');
-  // 재시작 뒤 다시 점검 — 다시 알리지 않는다(25개 모두 사건에서 표지를 읽었다)
+  // 재시작 뒤 다시 점검 — 다시 알리지 않는다(25개 모두 표지가 있다)
   SVC._resetSshAccessServiceForTest();
   await SVC.runSshAccessScan();
   assert.deepEqual([count('inbox-new'), count('inbox-seen')], [n0 + 1, s0 + 1]);
+  // 1회차 C1-4 — 본 표지는 상태 파일의 별도 칸(inboxSeen · 최대 MAX_INBOX_SEEN)에 같은 쓰기로 남는다: 사건 300개가 밀려나도 · 첫 점검 때 상태 파일을 못 읽어도 다시 알리지 않는다
+  const seenList = ST.inboxSeenList();
+  assert.ok([...sigs, ...seen].every((x) => seenList.includes(x)), '25개 표지가 별도 칸에 있다');
+  assert.equal(ST.MAX_INBOX_SEEN, 2000);
+  // ① 중요 사건 300개로 받는 곳 사건을 밀어낸 뒤 재시작(옛 꼴 표지로만 알던 id_old 는 뺀다 — 그 경우는 ⑱-d)
+  fs.rmSync(path.join(idir, 'id_old'));
+  for (let i = 0; i < 3; i += 1) ST.addEvents(Array.from({ length: 100 }, (_, n) => ({ kind: 'approval-decided', target: `c14-${i}-${n}` })));
+  assert.equal(count('inbox-new'), 0, '전제 — 받는 곳 사건은 밀려났다');
+  SVC._resetSshAccessServiceForTest();
+  const m1 = MAILS.length;
+  await SVC.runSshAccessScan();
+  await N._flushKeyNotifyForTest();
+  assert.equal(count('inbox-new'), 0, '다시 알리지 않았다(예전에는 사건에서만 표지를 읽어 25개를 다시 알렸다)');
+  assert.equal(MAILS.slice(m1).some((m) => m.text.includes('받는 곳에 새 키 파일')), false);
+  // ② 재시작 직후 첫 점검 때 상태 파일을 못 읽음 → 그 회차는 알리지 않고 빈 표지로 굳히지도 않는다 → 고친 뒤 점검도 다시 알리지 않는다
+  const sf = path.join(DIR, ST.STATE_FILE_NAME);
+  const good = fs.readFileSync(sf, 'utf8');
+  fs.writeFileSync(sf, '{ broken'); ST._resetSshAccessStateForTest();
+  SVC._resetSshAccessServiceForTest();
+  assert.equal(ST.inboxSeenList(), null, '못 읽으면 null(빈 목록이 아니다)');
+  await SVC.runSshAccessScan();
+  fs.writeFileSync(sf, good);
+  for (const f of fs.readdirSync(DIR)) if (f.startsWith(`${ST.STATE_FILE_NAME}.corrupt.`)) fs.rmSync(path.join(DIR, f));
+  assert.equal(SVC.reloadState({ by: 'own' }).ok, true);
+  await SVC.runSshAccessScan();   // 같은 실행(재시작 없음) — 앞 회차가 빈 표지를 굳혔다면 여기서 다시 알렸다
+  assert.equal(count('inbox-new'), 0, '고친 뒤에도 다시 알리지 않았다');
 }
+
+test('⑱-d 옛 판(사건 detail 의 ‘경로|sha’)으로만 알린 받는 곳 파일 — 그 사건이 기록에서 밀려난 뒤 재시작해도 다시 알리지 않는다(업그레이드 날 · 그 뒤)',
+  { todo: '1회차 갱신 중 확인한 남은 틈(낮음 · 업그레이드 경로) — service.js runSshAccessScan 은 옛 사건의 표지를 읽어 그 회차에는 알리지 않지만 inboxSeen 칸으로 옮기지 않는다. 그 사건이 300개 기록에서 밀려난 뒤 재시작하면 같은 파일을 한 번 다시 ‘새 파일’ 로 알린다(메일 포함). 처음 읽을 때 inboxSeen 으로 옮기면 닫힌다.' },
+  async () => {
+    const INB = await import('../src/sshaccess/inbox.js');
+    const idir = INB.inboxPathOf('vcB');
+    fs.mkdirSync(idir, { recursive: true });
+    const k = F.ed25519Key(); ALL_PEMS.push(k.pem);
+    fs.writeFileSync(path.join(idir, 'id_legacy'), k.pem, { mode: 0o600 });
+    try {
+      const it = (await INB.scanInbox({ corps: [{ id: 'vcB' }], servers: [] })).items.find((x) => x.file === 'id_legacy');
+      assert.ok(ST.addEvent({ kind: 'inbox-new', corp: 'vcB', target: '1개 — 예전 판', detail: `${it.relPath}|${it.sha}` }).ok);
+      SVC._resetSshAccessServiceForTest();
+      await SVC.runSshAccessScan();   // 업그레이드 뒤 첫 점검 — 옛 표지로 알아본다(다시 알리지 않음)
+      for (let i = 0; i < 3; i += 1) ST.addEvents(Array.from({ length: 100 }, (_, n) => ({ kind: 'approval-decided', target: `c14d-${i}-${n}` })));
+      SVC._resetSshAccessServiceForTest();
+      const before = eventsOf('inbox-new').length;
+      await SVC.runSshAccessScan();
+      assert.equal(eventsOf('inbox-new').length, before, '옛 표지 사건이 밀려난 뒤에도 다시 알리지 않는다');
+    } finally { for (const f of fs.readdirSync(idir)) fs.rmSync(path.join(idir, f)); }
+  });
 
 /* ── 7. 소스 스윕 ─────────────────────────────────────────────────────── */
 test('⑲ 소스 스윕 — 등록부 쓰기(키 묶기 · 되돌리기 · 저장 비밀번호 삭제)는 service.js 만 부른다(keyLogin.js 는 넘겨받은 함수만) · 새 쓰기 라우트는 ownerWrite · 감사에 1회 비밀번호를 싣지 않는다', async () => {
