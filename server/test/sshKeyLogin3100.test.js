@@ -304,17 +304,18 @@ function sh(cmd, home, shell = 'bash', { PATH = process.env.PATH } = {}) {
 const RUN_AS_ROOT = typeof process.getuid === 'function' && process.getuid() === 0;
 /** 원격 스크립트의 자물쇠 주인 표 호스트 칸과 같은 식(uname -n / boot_id / pid 이름공간 — 2회차 B2). 이름만 쓰면 스크립트는 ‘다른 호스트’ 로 본다. */
 const HOSTID = (() => { let boot = ''; let ns = ''; try { boot = fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim(); } catch { /* */ } try { ns = fs.readlinkSync('/proc/self/ns/pid'); } catch { /* */ } return `${os.hostname()}/${boot}/${ns}`; })();
-function roHome(content) {
+function roHome(content, { lockTok = '', sshMode = null } = {}) {
   const h = fs.mkdtempSync(path.join(TMP, 'sshkl-ro-')); TMP_DIRS.push(h);
   const d = path.join(h, '.ssh'); fs.mkdirSync(d);
   if (content != null) { fs.writeFileSync(path.join(d, 'authorized_keys'), content); fs.chmodSync(path.join(d, 'authorized_keys'), 0o644); }
-  if (RUN_AS_ROOT) { fs.chmodSync(h, 0o755); fs.chownSync(h, 65534, 65534); fs.chmodSync(d, 0o755); return { h, how: 'root → setpriv uid 65534' }; }
-  fs.chmodSync(d, 0o555); CLOSERS.push(() => fs.chmodSync(d, 0o700));
+  if (lockTok) { fs.mkdirSync(path.join(d, '.authorized_keys.portal.lock')); fs.writeFileSync(path.join(d, '.authorized_keys.portal.lock', 'owner'), `${lockTok}\n`); }   // 옛 자물쇠가 남은 읽기 전용 ~/.ssh(2회차 반증 R2R-4)
+  if (RUN_AS_ROOT) { fs.chmodSync(h, 0o755); fs.chownSync(h, 65534, 65534); fs.chmodSync(d, sshMode ?? 0o755); return { h, how: 'root → setpriv uid 65534' }; }
+  fs.chmodSync(d, sshMode ?? 0o555); CLOSERS.push(() => fs.chmodSync(d, 0o700));
   return { h, how: '비 root · ~/.ssh 0555' };
 }
-function shRo(cmd, ro, shell) {
-  if (!RUN_AS_ROOT) return sh(cmd, ro.h, shell);
-  const r = spawnSync('setpriv', ['--reuid=65534', '--regid=65534', '--clear-groups', shell, '-c', cmd], { env: { HOME: ro.h, PATH: process.env.PATH, SSH_CONNECTION: '127.0.0.1 50000 127.0.0.1 22' }, encoding: 'utf8' });
+function shRo(cmd, ro, shell, { PATH = process.env.PATH } = {}) {
+  if (!RUN_AS_ROOT) return sh(cmd, ro.h, shell, { PATH });
+  const r = spawnSync('setpriv', ['--reuid=65534', '--regid=65534', '--clear-groups', shell, '-c', cmd], { env: { HOME: ro.h, PATH, SSH_CONNECTION: '127.0.0.1 50000 127.0.0.1 22' }, encoding: 'utf8' });
   assert.equal(r.error, undefined, `setpriv 를 돌리지 못했다: ${r.error}`);
   return { out: r.stdout, err: r.stderr, code: r.status, m: KL.parseMarker(r.stdout) };
 }
@@ -3448,8 +3449,9 @@ test('⑲ 소스 스윕 — 등록부 쓰기(키 묶기 · 되돌리기 · 저�
   assert.equal([...rt.matchAll(/api\.(get|post|put|delete)\(/g)].length, chains.size, '미들웨어 줄을 읽지 못한 라우트가 없다');
   const OWNER_READ = ['adminOnly', 'requireSettingsOwner'];
   const W = [...OWNER_READ, 'fullRW'];
-  for (const r of ['post /settings/ssh-access/keys/rotate', 'delete /settings/ssh-access/keys/:id', 'put /settings/ssh-access/guards', 'delete /settings/ssh-access/corps/:corp/stop', 'post /settings/ssh-access/reload-keystore']) {
-    assert.deepEqual(chains.get(r), [...W, 'pre', 'reauth'], `${r} — 결정적 거절은 OTP 앞(1회차 A5)`);
+  for (const r of ['post /settings/ssh-access/keys/rotate', 'delete /settings/ssh-access/keys/:id', 'put /settings/ssh-access/guards', 'delete /settings/ssh-access/corps/:corp/stop', 'post /settings/ssh-access/reload-keystore',
+    'post /settings/ssh-access/corps/:corp/stop', 'post /settings/ssh-access/servers/:id/key', 'post /settings/ssh-access/inbox/discard']) {
+    assert.deepEqual(chains.get(r), [...W, 'pre', 'reauth'], `${r} — 결정적 거절은 OTP 앞(1회차 A5 · 2회차 반증 R2R-5 — 중지 · 서버 키 고르기 · 받는 곳 버리기)`);
   }
   assert.deepEqual(chains.get('post /settings/ssh-access/approvals/:id/approve'), [...W, 'approvePre(true)', 'reauth'], '자기 승인 · 지문 · 처리됨 · 기록 손상은 OTP 앞(점검 A10)');
   assert.deepEqual(chains.get('post /settings/ssh-access/approvals/:id/reject'), [...W, 'approvePre(false)', 'reauth']);
@@ -3463,6 +3465,9 @@ test('⑲ 소스 스윕 — 등록부 쓰기(키 묶기 · 되돌리기 · 저�
   assert.deepEqual(chains.get('post /settings/ssh-access/jobs/:id/cancel'), [...W, 'cancelGate']);
   assert.match(rt, /const cancelGate = \(req, res, next\) => \(SVC\.keyJobCancelNeedsOtp\(t\(req\.params\.id, 20\)\) \? reauth\(req, res, next\) : next\(\)\);/);
   assert.match(rt, /const ownerWrite = \[adminOnly, requireSettingsOwner, fullRW, reauth\];/);
+  assert.match(rt, /'\/settings\/ssh-access\/corps\/:corp\/stop', \.\.\.write\(\(req\) => SVC\.prechecks\.stop\(\{ corp: req\.params\.corp \}\)\)/);
+  assert.match(rt, /'\/settings\/ssh-access\/servers\/:id\/key', \.\.\.write\(\(req\) => SVC\.prechecks\.chooseKey\(\{ serverId: req\.params\.id \}\)\)/);
+  assert.match(rt, /'\/settings\/ssh-access\/inbox\/discard', \.\.\.write\(\(req\) => SVC\.prechecks\.inboxPath\(\{ relPath: bodyOf\(req\)\.relPath \}\)\)/);
   assert.match(rt, /const approvePre = \(approve\) => \(req, res, next\) => \{ const b = bodyOf\(req\); const p = SVC\.approvalPrecheck\(/, '사전 검사는 service 의 판정 하나');
   assert.match(rt, /const jobPre = \(kind\) => pre\(\(req\) => SVC\.keyJobPrecheck\(kind, t\(bodyOf\(req\)\.keyId, 32\), bodyOf\(req\)\)\);/, '작업 사전 검사는 요청의 키로(같은 키 거두기 중 넣기 409 revoking — 반증 R2) · async 라 pre 로 감싼다');
   assert.doesNotMatch(rt, /resolveOsAuth|keyMaterial|listKeysRaw|listBmServersRaw|KS\.|keyStore|approval\/store|approval\/twoPerson|keyLogin/, '라우트는 저장소 · 승인 저장소 · 키 로그인 본체를 직접 만지지 않는다(service 를 거친다)');
@@ -3862,6 +3867,7 @@ test('㉑-j 점검 회차가 하는 뒷일(2회차 C2-3 · C2-4 · C2-5 · C2-8)
   // ③ 소스 — 버려진 회차(15분 상한을 넘겨 다음 회차가 돌았다)는 뒷일 · 쓰기 · 지우기 전에 돌아간다 · 지울 때는 지금 서버 목록
   const svc = (await import('./_stripComments.js')).stripComments(fs.readFileSync(path.join(SRC, 'sshaccess/service.js'), 'utf8'));
   assert.match(svc, /if \(_runningSince !== myRun\) return \{ ok: false, abandoned: true \};\s*retryJobEvents\(\);\s*processLeftovers\(\);\s*const wrote = /);
+  assert.match(svc, /const exp = TP\.expireSweep\(\{ now \}\)[^]*?if \(exp\.length\) writeJobEvents\(exp\);[^]*?if \(_runningSince !== myRun\) return/, '만료 사건은 점검 맨 앞에서 바로 쓴다(버려진 회차여도 남는다 — 2회차 반증)');
   assert.match(svc, /if \(!regErr && !bmRegistryLoadError\(\)\) INS\.pruneInstalled\(new Set\(listBmServersRaw\(\)\.map\(\(s\) => s\.id\)\)\);/);
   assert.match(svc, /startKeyNotify\(\);[^]*?processLeftovers\(\);[^]*?const run = \(\) =>/, '기동 때도');
 });
@@ -3976,6 +3982,7 @@ test('㉒-b 키 접속 확인은 이번 접속의 nonce 를 되돌려 받아야 
   const r = (await runLogin({ servers: [sv], keyId: K.id, removePassword: true, by: 'own' })).job.results[0];
   assert.deepEqual([r.ok, r.code, !!r.bound, !!r.passwordRemoved], [false, 'key-login-failed', false, false], JSON.stringify(r));
   assert.match(r.reason, /포탈이 보낸 명령이 돌지 않았습니다\(그 키 줄에 강제 명령\(command=\)이 있는 등\)/);
+  assert.match(r.reason, /이 키로는 수집할 수 없어 묶지 않았습니다\. /, '문장이 끝난 뒤 덧붙는다(마침표 — 2회차 반증 문구)');
   assert.deepEqual([rawOf(sv.id).keyRef, rawOf(sv.id).password], [undefined, pw], '묶지 않았다 · 저장 비밀번호를 지우지 않았다(예전: uname 이 성공으로 끝나 묶고 지웠다)');
   assert.ok(S.st.execs.some((x) => x.forced === '/bin/echo hi'), '전제 — 강제 명령이 돌았다');
   assert.equal(S.readAk(), `${OTHER}\ncommand="/bin/echo hi",no-pty ${K.pub} portal-ssh:${K.id}\n`, '관리자 줄 그대로');
@@ -3991,4 +3998,189 @@ test('㉒-b 키 접속 확인은 이번 접속의 nonce 를 되돌려 받아야 
   assert.deepEqual([r2.ok, r2.bound], [true, true], JSON.stringify(r2));
   const verify = S2.st.execs.find((x) => x.conn === 2);
   assert.match(scriptOf(verify.command), /^echo "##KLV [0-9a-f]{12} \$\(uname -s 2>\/dev\/null\)"$/m, '확인 명령은 nonce 를 되돌려 받는 꼴(셸과 무관하게 /bin/sh 로 싼다)');
+});
+
+/* ── 2회차 반증 반영(973b7224) 회귀 ─────────────────────────────────────── */
+test('㉓-a 진행 기록을 못 읽어도(파일 자리에 폴더 — EISDIR) 키 작업은 끝까지 돈다 — 기록만 못 함(markStart · markEnd · clearLeftovers 가 false · 원본을 덮지 않음 — 2회차 반증 R2R-1: 모든 키 작업이 오류로 끝났다) · 이 프로세스가 시작한 작업의 남은 줄(지우기 실패)은 ‘재시작으로 중단’ 이 아니다(끝났으면 조용히 지움)', async () => {
+  const INF = await import('../src/sshaccess/inflight.js');
+  const file = path.join(DIR, INF.INFLIGHT_FILE_NAME);
+  const S = await fakeSshd(); const pw = secret('Pw-Inflight-Eisdir-23a'); S.st.password = pw;
+  const K = mkKey('eisdir-key');
+  const sv = mkServer('bm-eisdir', S, { password: pw });
+  S.writeAk(`${OTHER}\n${K.pub} portal-ssh:${K.id}\n`);
+  fs.rmSync(file, { force: true }); fs.mkdirSync(file); INF._resetInflightForTest();
+  try {
+    const rec = { jobId: 'kj_eeeeeeeeeeee', kind: 'key-revoke', keyName: 'k', sid: 'bm_e', server: 'e', corp: 'vcA', by: 'own' };
+    assert.deepEqual([INF.markStart(rec), INF.markEnd(rec), INF.clearLeftovers([rec]), INF.peekLeftovers()], [false, false, false, []]);
+    const rv = (await runRevoke({ keyId: K.id, servers: [sv], by: 'own' })).job.results[0];
+    assert.deepEqual([rv.ok, rv.code, rv.removed], [true, 'removed', 1], `거두기는 기록 없이도 끝난다(예전: 작업 오류) ${JSON.stringify(rv)}`);
+    assert.equal(S.readAk(), `${OTHER}\n`);
+    assert.equal(fs.statSync(file).isDirectory(), true, '원본(폴더)을 덮지 않았다');
+  } finally { fs.rmSync(file, { recursive: true, force: true }); INF._resetInflightForTest(); }
+  // 이 프로세스가 시작해 끝난 작업의 줄이 남았다(지우기 실패 흉내) → 점검이 ‘중단’ 사건으로 적지 않고 조용히 지운다
+  const S2 = await fakeSshd(); S2.st.password = pw;
+  const sv2 = mkServer('bm-mine-done', S2, { password: pw });
+  const j = await runLogin({ servers: [sv2], keyId: K.id, by: 'own' });
+  INF.markStart({ jobId: j.start.jobId, kind: 'key-login', keyName: K.name, sid: sv2.id, server: 'bm-mine-done', corp: 'vcA', by: 'own' });
+  const before = eventsOf('key-job-interrupted').length;
+  assert.equal((await SVC.runSshAccessScan()).ok, true);
+  assert.deepEqual([eventsOf('key-job-interrupted').length, INF.peekLeftovers()], [before, []], '내 작업의 남은 줄은 중단이 아니다 · 끝났으니 지웠다');
+});
+
+test('㉓-b 원격 스크립트(실제 bash · dash · 2회차 반증 R2R-3 · R2R-4) — mv 직전 ‘##KL commit’ 을 내고 그 쓰기가 실패하면(포탈이 끊음) 바꾸지 않고 종료 3 · 마지막 표지가 commit 이면 결과 모름(begun) · 쓸 수 없는 ~/.ssh 는 옛 자물쇠가 남아 있어도 빠른 답(줄 없음 removed 0 · 바꿀 것이 있으면 바로 notwritable) · locked 문구에 숫자 없음', () => {
+  assert.deepEqual([KL.parseMarker('##KL begin\n##KL commit\n'), KL.parseMarker('##KL begin\n##KL commit\n##KL added 0 0\n').kind], [{ kind: 'begun' }, 'added']);
+  assert.doesNotMatch(KL.failText('locked'), /\d+초/, '기다리는 시간은 자기 시한에 따라 다르다 — 숫자를 박지 않는다');
+  const line = KL.buildKeyLine({ publicKey: BPUB, keyId: BID });
+  const scripts = { 넣기: [AKS.installScript({ publicKey: BPUB, keyId: BID, line }), `${OTHER}\n`], 거두기: [AKS.removeScript({ publicKey: BPUB, keyId: BID }), `${OTHER}\n${line}\n`], 되돌림: [AKS.rollbackScript({ line }), `${OTHER}\n${line}\n`] };
+  const binNoSleep = fakeBin('nosleep');
+  for (const shell of SHELLS) {
+    for (const [name, [sc, body]] of Object.entries(scripts)) {
+      assert.ok(sc.includes("'echo \"##KL commit\" || exit 3'") || sc.includes('echo "##KL commit" || exit 3'), name);
+      // 출력이 써지지 않는다(/dev/full — 포탈이 끊어 출력 관이 닫힌 것과 같다: 쓰기 실패) → commit 표지 쓰기에서 멈춘다
+      const h = mkHome(); fs.mkdirSync(path.join(h, '.ssh'), { mode: 0o700 }); const f = path.join(h, '.ssh', 'authorized_keys'); fs.writeFileSync(f, body, { mode: 0o600 });
+      const r = spawnSync(shell, ['-c', `exec >/dev/full; ${sc}`], { env: { HOME: h, PATH: process.env.PATH, SSH_CONNECTION: '127.0.0.1 50000 127.0.0.1 22' }, encoding: 'utf8' });
+      assert.deepEqual([r.status, fs.readFileSync(f, 'utf8'), fs.readdirSync(path.join(h, '.ssh'))], [3, body, ['authorized_keys']], `${shell} ${name}: 바꾸지 않았다 · 자물쇠 · 임시 파일 없음(${r.stderr.slice(0, 200)})`);
+    }
+    // 쓸 수 없는 ~/.ssh + 옛 자물쇠(주인 살아 있음) — 기다리지 않는다(예전: 바꿀 것이 없어도 · 있어도 15번 기다려 locked)
+    const live = `${HOSTID}:${process.pid}:${Math.floor(Date.now() / 1000)}`;
+    const roNo = roHome(`${OTHER}\n`, { lockTok: live }); const roYes = roHome(`${OTHER}\n${line}\n`, { lockTok: live }); const roHas = roHome(`${OTHER}\n${line}\n`, { lockTok: live });
+    const t0 = Date.now();
+    const got = [shRo(scripts.거두기[0], roNo, shell).m, shRo(scripts.되돌림[0], roNo, shell).m, shRo(scripts.거두기[0], roYes, shell).m, shRo(scripts.넣기[0], roHas, shell).m];
+    assert.deepEqual(got, [{ kind: 'removed', removed: 0, unmarked: 0 }, { kind: 'restored', removed: 0 }, { kind: 'fail', why: 'notwritable' }, M('present-marked', 0, 0, 1, 0)], `${shell} (${roNo.how})`);
+    assert.ok(Date.now() - t0 < 5_000, `기다리지 않았다(${Date.now() - t0}ms — 진짜 sleep)`);
+    void binNoSleep;
+  }
+});
+
+test('㉓-c 법인 사용 중지 · 사전 검사(2회차 반증 R2R-5 · R2R-6) — 아는 법인 = vCenter ∪ 등록부 서버의 법인 ∪ 공통 계정 · 키 폴더의 법인(vCenter 를 지웠어도 서버가 남은 법인은 중지된다) · 중지 · 서버 키 고르기 · 받는 곳 버리기 · 승인 요청의 결정적 거절은 OTP 앞 · 이미 중지된 법인을 다시 중지하면 그 뒤 등록된 서버를 기록에 더한다(사건 없음 · added)', async () => {
+  // ① vCenter 목록에 없지만 등록부 서버가 남은 법인 — 중지된다(예전: 404 unknown-corp)
+  const sGone = mkServer('bm-vc-gone', null, { host: '10.9.23.1', password: 'x', vcenterId: 'vcGone' });
+  const st1 = await SVC.stopCorp('vcGone', { by: 'own', reason: 'vCenter 는 지웠다' });
+  assert.deepEqual([st1.ok, ST.stopFor('vcGone')?.serverIds], [true, [sGone.id]], JSON.stringify(st1));
+  // ② 다시 중지 — 그 뒤 등록한 서버를 기록에 더한다(사건 없음)
+  const evN = eventsOf('corp-stop').length;
+  const sNew = mkServer('bm-vc-gone-new', null, { host: '10.9.23.2', password: 'x', vcenterId: 'vcGone' });
+  const st2 = await SVC.stopCorp('vcGone', { by: 'own', reason: '다시' });
+  assert.deepEqual([st2.ok, st2.already, st2.added, ST.stopFor('vcGone').serverIds.sort(), eventsOf('corp-stop').length], [true, true, 1, [sGone.id, sNew.id].sort(), evN], JSON.stringify(st2));
+  assert.match(st2.reason, /그 뒤 등록된 서버 1대를 중지 기록에 더함/);
+  const st3 = await SVC.stopCorp('vcGone', { by: 'own', reason: '또' });
+  assert.deepEqual([st3.added, ST.stopFor('vcGone').serverIds.length], [0, 2], '더할 것이 없으면 0');
+  assert.ok(ST.clearCorpStop('vcGone', { by: 'fixture' }).ok);
+  for (const x of [sGone, sNew]) assert.ok(BM.removeBmServer(x.id).ok);
+  // ③ 키 폴더 · 공통 계정의 법인도 아는 법인(자식 프로세스 — vCenter 목록은 vcA 하나)
+  const j = subRun({ owners: 'own', users: [{ username: 'own', role: 'admin', totpEnabled: true, totpSecret: generateSecret() }], code: `
+    const VAULT = await imp('security/secretVault.js'); VAULT.saveSecretsPolicy({ mode: 'encrypted', level: 1 });
+    const { store } = await imp('store.js'); store.snapshot = { ...store.get(), vcenters: [{ id: 'vcA', name: 'A' }] };
+    const KS = await imp('bmusage/onboard/keyStore.js'); const SVC = await imp('sshaccess/service.js');
+    KS.addKey({ name: 'kf', privateKey: F.ed25519Key().pem, folderCorp: 'vcKey', features: ['bm-usage'] }, { by: 'x' });
+    KS.saveAccount({ name: 'acc', kind: 'os', corp: 'vcAcc', username: 'svc', password: 'x' }, { by: 'x' });
+    const pick = (r) => (r ? [r.ok, r.code || ''] : null);
+    console.log(JSON.stringify({ key: pick(await SVC.stopCorp('vcKey', { by: 'own' })), acc: pick(await SVC.stopCorp('vcAcc', { by: 'own' })), nope: pick(await SVC.stopCorp('vcNope', { by: 'own' })), pre: pick(await SVC.prechecks.stop({ corp: 'vcNope' })), preOk: await SVC.prechecks.stop({ corp: 'vcKey' }) }));` });
+  assert.deepEqual([j.key, j.acc, j.nope, j.pre, j.preOk], [[true, ''], [true, ''], [false, 'unknown-corp'], [false, 'unknown-corp'], null], JSON.stringify(j));
+  // ④ 라우트 — OTP 를 쓰기 전에 거절(같은 코드로 네 번 · 끝에 그 코드가 아직 쓰이지 않았는지 본다)
+  const code = await otp('own6');
+  const S = await fakeSshd(); const sv = mkServer('bm-23c-busy', S, { password: 'x' });
+  let rel; let entered; const inLock = new Promise((r) => { entered = r; });
+  const held = KL.withServerLock(KL.serverLockKey(rawOf(sv.id)), () => new Promise((r) => { entered(); rel = r; }));
+  await inLock;
+  const mine = [];
+  try {
+    for (let i = 0; i < AP.MAX_PENDING_PER_USER; i += 1) { const q = AP.createRequest({ kind: 'ssh-key-delete', title: 't', target: `k_23c_${i}`, payload: { keyId: `k_23c_${i}` }, by: 'own6' }); assert.ok(q.ok, JSON.stringify(q)); mine.push(q.request); }
+    const res = [];
+    for (const [m, p, body, want] of [
+      ['POST', '/settings/ssh-access/corps/vcNOPE23/stop', { reason: 'x', otp: code }, [404, 'unknown-corp']],
+      ['POST', `/settings/ssh-access/servers/${sv.id}/key`, { keyId: '', otp: code }, [409, 'server-busy']],
+      ['POST', '/settings/ssh-access/inbox/discard', { relPath: '../etc/passwd', sha: 'x', otp: code }, [400, 'bad-path']],
+      ['PUT', '/settings/ssh-access/guards', { twoPerson: false, otp: code }, [409, 'too-many']]]) {
+      const r = await call('own6', m, p, body); res.push([r.s, r.j.code]);
+      assert.deepEqual([r.s, r.j.code], want, `${m} ${p} ${r.txt}`);
+    }
+    assert.equal(AUTH.verifyUserOtp('own6', code).ok, true, '네 거절 모두 OTP 를 쓰지 않았다');
+  } finally {
+    rel(); await held;
+    for (const q of mine) AP.decide(q.id, { by: 'own6', approve: false });
+  }
+  assert.equal(SVC.prechecks.chooseKey({ serverId: sv.id }), null, '자물쇠가 풀리면 통과');
+  // 받는 곳 경로 사전 검사는 글자 꼴만 본다(파일 시스템을 만지지 않는다 — 받는 곳이 멈추면 동기 lstat 이 이벤트 루프를 멈췄다) — 없는 폴더의 꼴 맞는 경로도 통과(판정은 본 함수)
+  assert.equal(SVC.prechecks.inboxPath({ relPath: 'no-such-corp-23c/common/x.pub' }), null);
+});
+
+test('㉓-d 응답 · 기록(2회차 반증 R2R-8 · R2R-10 · 그 밖) — setGuards · 승인 실행 결과에 seenAd 없음 · 기록 상한에 밀린 새 사건은 메일의 ‘외 N건’ · 제목 건수에 센다 · 다시 쓰는 사건은 처음 시각(미래 시각은 받지 않음) · 다시 읽기 승인 사전 검사는 파일을 못 읽으면 503 read-failed(‘또 바뀜’ 이 아님)', async () => {
+  // seenAd — 상태에는 있고 응답에는 없다
+  assert.ok(ST.noteSeenAd('ad.someone').ok);
+  const sg = ST.setGuards({ serverRestrict: true }, { by: 'fixture' });
+  assert.deepEqual([sg.ok, 'seenAd' in sg.guards, ST.getGuards().seenAd.includes('ad.someone')], [true, false, true], JSON.stringify(sg));
+  const rq = await SVC.changeGuards({ serverRestrict: false }, { by: 'own' });
+  assert.equal(rq.pending, true, JSON.stringify(rq));
+  const ap = await SVC.decideApproval(rq.request.id, { approve: true, by: 'own2', digest: rq.request.digest });
+  assert.equal(ap.ok, true, JSON.stringify(ap));
+  assert.doesNotMatch(JSON.stringify(ap), /seenAd|ad\.someone/, '승인 실행 결과(요청 기록의 result 포함)에도 싣지 않는다');
+  assert.ok(ST.setGuards({ serverRestrict: true }, { by: 'fixture' }).ok);
+  // 사건 시각 — 지난 시각은 그대로 · 미래는 지금
+  const past = Date.now() - 600_000;
+  assert.ok(ST.addEvents([{ kind: 'key-job-done', target: 'at-past-23d', at: past }, { kind: 'key-job-done', target: 'at-future-23d', at: Date.now() + 3_600_000 }]).ok);
+  const ev = Object.fromEntries(eventsOf('key-job-done').filter((e) => e.target.startsWith('at-')).map((e) => [e.target, e.at]));
+  assert.ok(ev['at-past-23d'] === past && ev['at-future-23d'] <= Date.now(), JSON.stringify(ev));
+  // 다시 읽기 요청 뒤 파일을 못 읽는다(자리에 폴더) → 503 read-failed · 요청은 대기 그대로
+  const rl = await SVC.reloadKeyStore({ by: 'own' });
+  assert.equal(rl.pending, true, JSON.stringify(rl));
+  const file = path.join(DIR, 'ssh-keys.json'); const aside = `${file}.aside-23d`;
+  fs.renameSync(file, aside); fs.mkdirSync(file);
+  try {
+    assert.deepEqual((({ code, status }) => [code, status])(SVC.approvalPrecheck(rl.request.id, { approve: true, by: 'own2', digest: rl.request.digest }) || {}), ['read-failed', 503]);
+    assert.equal(AP.getRequest(rl.request.id).status, 'pending');
+  } finally { fs.rmdirSync(file); fs.renameSync(aside, file); }
+  assert.equal((await SVC.decideApproval(rl.request.id, { approve: false, by: 'own' })).request.status, 'cancelled');
+  // 기록 상한에 밀린 사건 수(자식 프로세스) — 한 번에 400건 → 기록 300 · 밀린 100 + 대기열 상한(240)에서 버린 60 = 메일 ‘사건 400건 · 외 340건’
+  const q = subRun({ owners: 'solo', users: [{ username: 'solo', role: 'admin', totpEnabled: true, totpSecret: generateSecret() }], code: `
+    const ST = await imp('sshaccess/state.js'); const N = await imp('sshaccess/notify.js');
+    const mails = []; N._setKeyNotifySendForTest(async (m) => { mails.push(m); return { ok: true }; }); N.startKeyNotify();
+    const warns = []; const ow = console.warn; console.warn = (...a) => warns.push(a.join(' '));
+    ST.addEvents(Array.from({ length: 400 }, (_, n) => ({ kind: 'corp-stop', corp: 'L' + n })));
+    console.warn = ow;
+    await N._flushKeyNotifyForTest();
+    console.log(JSON.stringify({ n: ST.listEvents({ limit: 300 }).length, mails: mails.map((m) => ({ subject: m.subject, more: (/외 (\\d+)건/.exec(m.text) || [])[1] || '' })), warns }));` });
+  assert.deepEqual([q.n, q.mails.map((m) => [(/사건 (\d+)건/.exec(m.subject) || [])[1], m.more])], [300, [['400', '340']]], JSON.stringify(q));
+  assert.ok(q.warns.some((w) => /사건 100건이 기록 상한\(300\)에 밀려 남지 않았습니다/.test(w)), JSON.stringify(q.warns));
+});
+
+test('㉓-e 서버에서 키 읽기 · 대화형 칸 고르기(2회차 반증 R2R-9 · R2R-11) — 홈 · ~/.ssh 를 따라갈 수 없으면 ‘##AK unreachable’ → unreadable(‘파일 없음’ 이 아니다) · 가리는 칸 가운데 비밀번호 글 칸을 먼저(가리는 OTP 칸에는 넣지 않는다) · 없으면 OTP 류가 아닌 가리는 칸 · 그것도 없으면 no-password-method', async () => {
+  const roX = roHome(null, { sshMode: RUN_AS_ROOT ? 0o700 : 0o600 });
+  const out = shRo(AK.READ_COMMAND, roX, 'bash').out;
+  assert.match(out, /^##AK unreachable\n?$/, `${roX.how}: ${out}`);
+  const p = AK.parseReadOutput(out);
+  assert.deepEqual([p.ok, p.code], [false, 'unreadable']);
+  assert.match(p.reason, /홈 또는 ~\/\.ssh 폴더를 이 계정으로 열 수 없습니다\(권한\) — authorized_keys 가 있는지 알 수 없습니다/);
+  const h0 = mkHome(); fs.mkdirSync(path.join(h0, '.ssh'));
+  assert.equal(spawnSync('bash', ['-c', AK.READ_COMMAND], { env: { HOME: h0, PATH: process.env.PATH }, encoding: 'utf8' }).stdout, '##AK missing\n', '따라갈 수 있고 파일이 없으면 missing(대조)');
+  // 칸 고르기 — 글 판정(정규식 export)
+  const SX = await import('../src/proxy/sshExec.js');
+  assert.ok(['Password: ', 'Passwort:', 'mot de passe :', '비밀번호:', 'パスワード:'].every((x) => SX.PW_PROMPT_RE.test(x)));
+  assert.ok(['Verification code: ', 'Duo passcode: ', 'Enter PIN:', 'One-time password token:', '인증 코드:'].every((x) => SX.OTP_PROMPT_RE.test(x)));
+  assert.equal(SX.PW_PROMPT_RE.test('Duo passcode:'), false, "'passcode' 는 비밀번호 글이 아니다");
+  const { withSsh } = SX;
+  const PW = secret('Kbd-Pick-Pw-23e');
+  const trial = async (prompts2) => {
+    const seen = [];
+    const srv = new ssh2.Server({ hostKeys: [HOSTKEY] }, (client) => {
+      client.on('authentication', (ctx) => {
+        if (ctx.method !== 'keyboard-interactive') return ctx.reject(['keyboard-interactive']);
+        const ask = (i) => ctx.prompt(prompts2[i], (a) => { (a || []).forEach((v, k) => seen.push(`${i}.${k}:${v === PW ? 'PW' : JSON.stringify(v)}`)); if (i + 1 < prompts2.length) ask(i + 1); else ctx.reject(['keyboard-interactive']); });
+        return ask(0);
+      });
+      client.on('error', () => {});
+    });
+    await new Promise((r) => { srv.listen(0, '127.0.0.1', r); });
+    let code = '';
+    try { await withSsh({ host: '127.0.0.1', port: srv.address().port, username: 'mon', password: PW, readyTimeout: 6000, passwordOnly: true }, async () => ({})); } catch (e) { code = e?.code || ''; }
+    srv.close();
+    return { seen, code };
+  };
+  // n) 한 질의 [가리는 Verification, 가리는 Password] → Password 칸에만(예전: 처음 가리는 칸 = OTP 칸)
+  assert.deepEqual(await trial([[{ prompt: 'Verification code: ', echo: false }, { prompt: 'Password: ', echo: false }]]), { seen: ['0.0:""', '0.1:PW'], code: '' });
+  // o) 첫 질의 가리는 Verification(빈 답) → 둘째 질의 Password → 거기에(보냈으니 거부는 거부)
+  assert.deepEqual(await trial([[{ prompt: 'Verification code: ', echo: false }], [{ prompt: 'Password: ', echo: false }]]), { seen: ['0.0:""', '1.0:PW'], code: '' });
+  //    글이 없는 가리는 칸 하나(옛 sshd) → 거기에 · 가리는 OTP 칸만 → 보내지 않음(no-password-method)
+  assert.deepEqual(await trial([[{ prompt: '', echo: false }]]), { seen: ['0.0:PW'], code: '' });
+  assert.deepEqual(await trial([[{ prompt: 'Duo passcode: ', echo: false }]]), { seen: ['0.0:""'], code: 'SSH_NO_PASSWORD_METHOD' });
 });
