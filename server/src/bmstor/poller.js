@@ -14,6 +14,8 @@
 
 import { listBmServersRaw, getBmSettings } from './registry.js';
 import { withResolvedAuth, authCredOf } from '../bmusage/onboard/refs.js'; // 7b: 키 · 공통 계정 참조 해석 · 인증 정지 자격 지문(판정 하나)
+import { noteKeyUse } from '../sshaccess/usage.js';   // v3.9.0: 키 사용 기록(화면용 — 판정에 쓰지 않는다)
+import { isAuthFailureText } from '../util/authGuard.js';
 import { collectMany } from './collect.js';
 import { enqueueBmstorJob, setBmstorExpireHandler } from './jobs.js';
 import { findCollectorForAgent } from '../central/idracScanPush.js';
@@ -232,7 +234,7 @@ export async function bmCollectNow(trigger = 'manual', { demoOnly = false } = {}
   try {
     const demo = isMockMode();
     // 7b 반증 F2: 인증 정지 판정 · 기록은 **해석 뒤 자격**(키 지문 · 공통 계정 비밀번호)으로 — 원본으로 보면 키 회전 · 계정 비밀번호 변경 뒤에도 풀리지 않는다.
-    const enabled = withResolvedAuth(listBmServersRaw().filter((s) => s.enabled !== false && (demo || !isDemoId(s.id))));
+    const enabled = withResolvedAuth(listBmServersRaw().filter((s) => s.enabled !== false && (demo || !isDemoId(s.id))), { feature: 'bm-storage' });
     // v2.590: **주기 수집만** 인증 실패 정지 서버를 뺀다(수동 '지금 수집' 은 막지 않는다). 빠진 서버는 결과에
     // 정지 사실을 남긴다 — 조용히 빼면 화면이 마지막 값을 지금 값처럼 보여준다.
     let authStopped = 0;
@@ -288,6 +290,11 @@ export async function bmCollectNow(trigger = 'manual', { demoOnly = false } = {}
       const srv = srvById.get(r.id);
       const row = noteAuth(srv ? authCredOf(srv) : srv, { ...r, at, agent: srv?.agent || '' });
       latest.set(r.id, row);
+      // v3.9.0: 중앙이 키로 접속한 결과만 적는다(엣지 PUSH 결과는 엣지 키 — 엣지가 자기 기록에 적는다).
+      if (srv?.keyFingerprint && !String(srv.agent || '').trim()) {
+        noteKeyUse({ fingerprint: srv.keyFingerprint, keyName: srv.keyName, server: srv.name || srv.host, corp: srv.vcenterId, feature: 'bm-storage',
+          ok: !!r.ok, code: r.ok ? 'ok' : (isAuthFailureText(r.error || '') ? 'auth-rejected' : 'fail'), trigger });
+      }
       ioEntries.push({ id: r.id, result: row, name: srv?.name || srv?.host || '' });
       if (r.ok) ok++; else errors++;
     }

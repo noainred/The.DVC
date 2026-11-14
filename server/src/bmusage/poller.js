@@ -28,6 +28,7 @@ import { withDeadline } from '../proxy/sshExec.js';
 import { createAuthGuard, isAuthFailureText } from '../util/authGuard.js';
 import { loadBmUsageSettings, bmUsageEnabled, enterpriseActive, onBmUsageSettingsChange, STORE_DEFAULTS, effectiveRawDays, SNAPSHOT_KEEP_DAYS } from './settings.js';
 import { withResolvedAuth, authCredOf } from './onboard/refs.js'; // 7b: OS 등록 항목의 키 · 공통 계정 참조 → 접속 자격
+import { noteKeyUse } from '../sshaccess/usage.js';   // v3.9.0: 키 사용 기록(화면용 — 판정에 쓰지 않는다)
 import { resolveTargets } from './targets.js';
 import { enterpriseEligible } from './license.js';
 import { collectEnterpriseUsage, SESSION_BUDGET_MS as ENT_BUDGET_MS } from './collectors/idracEnterprise.js';
@@ -378,7 +379,7 @@ export async function currentTargets() {
   const bmServers = (() => {
     try {
       // 7b: 키 · 공통 계정 참조를 접속 자격으로 해석한다(refs.resolveOsAuth 하나 — 연결 시험과 같은 판정). 해석 실패는 authError 로 남아 접속하지 않는다.
-      const list = withResolvedAuth(listBmServersRaw());
+      const list = withResolvedAuth(listBmServersRaw(), { feature: 'bm-usage' });   // v3.9.0: 키의 허용 기능 · 폴더 · 법인 사용 중지 판정
       const le = typeof bmRegistryLoadError === 'function' ? bmRegistryLoadError() : null;
       // v2.744(최종 검토 FB — RD-R1·RG2744-03): 원문(le.reason — JSON.parse 메시지의 파일 조각)이 아니라 요약(registrySourceError).
       if (le) sourceErrors.push(registrySourceError('os-registry', (why) => `OS 계정 등록부를 읽지 못했습니다 — 대상 서버가 no-os-cred 로 보일 수 있습니다(${why})${remoteHeldNote('os')}`, le));
@@ -671,6 +672,11 @@ async function collectOne(target, { trigger = 'auto', intervalMs = null, prevRun
       .then((r) => { osMs = Date.now() - osT0; return r; })
     : Promise.resolve(stopped ? { ok: false, error: `인증 실패로 주기 수집이 정지됐습니다(${stopped.attempts}회 시도). 비밀번호를 고치면 자동 재개합니다.`, authStopped: stopped } : null));
   const [idrac, os] = await Promise.all(jobs);
+  if (os && target.osHost?.keyFingerprint) {
+    const oh = target.osHost;
+    noteKeyUse({ fingerprint: oh.keyFingerprint, keyName: oh.keyName, server: oh.name || target.name || oh.host, corp: oh.vcenterId || target.vcenterId, feature: 'bm-usage',
+      ok: !!os.ok, code: os.ok ? 'ok' : (os.authStopped ? 'auth-stopped' : (/auth|인증|permission denied/i.test(String(os.error || '')) ? 'auth-rejected' : 'fail')), trigger });
+  }
   /*
    * 이 서버의 표본 시각. Linux 는 명령 1회 왕복이라 '출력을 받은 시각' 과 여기의 차이는 수십 ms 이고
    * (주기 300초 대비 무시 가능), 예전 방식의 오차는 **수 분**이었다. `prev.at` 과 `row.ts` 가 같은

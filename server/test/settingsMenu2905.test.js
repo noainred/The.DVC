@@ -35,7 +35,7 @@ const KEYS_V2901 = [
 ];
 
 // v2.912 에 더한 키(설정 › 로그 › 최근 로그인 · 로그인 횟수). 옛 48개는 하나도 빠지거나 이름이 바뀌지 않는다.
-const KEYS_ADDED = ['recent-logins', 'login-counts', 'feature-usage']; // v2.913 설정 › 사용자 › 기능 사용 현황
+const KEYS_ADDED = ['recent-logins', 'login-counts', 'feature-usage', 'ssh-access']; // v2.913 설정 › 사용자 › 기능 사용 현황 · v3.9.0 설정 › 보안 › SSH 공용 접속
 
 test('① 하위 키 48개는 그대로다(삭제 · 이름 변경 없음) — 더한 키는 KEYS_ADDED 에만', () => {
   assert.equal(ITEMS.length, 48 + KEYS_ADDED.length, `항목을 ${ITEMS.length}개 읽었다 — SUB 줄 모양('  { k: …, label: …, C: …')이 바뀌었는지 확인`);

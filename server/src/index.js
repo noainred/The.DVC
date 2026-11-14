@@ -195,6 +195,7 @@ import './central/focusMonEdge.js'; // 〃 엣지 깨우기 구현 등록(servic
 import { startLinkCheckWorker } from './agent/linkCheckWorker.js'; // 엣지가 재는 링크(엣지→중앙·엣지↔엣지)
 import { startPowerOffPoller } from './tools/powerOffPoller.js';     // 전원 꺼짐 점검(v2.484)
 import { resumeHostAccessPending } from './hostaccess/service.js';  // 호스트 접근 제어 확정 대기 복구(v2.485)
+import { startSshAccessScheduler } from './sshaccess/service.js';  // v3.9.0 SSH 공용 접속 — 키 바꿔치기 감시 · 받는 곳 새 파일 · 사용 기록 쓰기(10분)
 import { resumeInstallJobs, reserveInstallResumeLocks } from './bareos/install/job.js';  // v2.844 Bareos 완전 설치 — 진행 중이던 작업 이어 읽기(러너는 엣지 노드 안에서 계속 돈다)
 import { startStoragePush } from './storage/push.js';            // 엣지→중앙 스냅샷 push(v2.302)
 import { startStorageConfigPull } from './agent/storageConfigPull.js'; // 중앙→엣지 장비 배포 pull(v2.302)
@@ -659,6 +660,7 @@ const stagger = [
   startDirUsageScheduler, // 폴더 사용량 Top-N 리포트(v2.454) — 60초 틱 + 재진입 가드, 설정 꺼짐이면 결과 수거만
   startGuestDiskPoller, // 게스트 디스크 회수 리포트(v2.459) — 60초 틱, opt-in(기본 꺼짐)·주기 경과 시에만 수집 + 재진입 가드
   resumeInstallJobs, // v2.844 Bareos 완전 설치 — 러너 상태 이어 읽기(업로드·중앙 단계 중이던 것은 '끊김' 실패로 — 다시 시도 가능)
+  startSshAccessScheduler, // v3.9.0 SSH 공용 접속 주기 점검(첫 실행 90초 뒤 · 10분마다) — 키 원문 지문 대조 · 받는 곳 · 사용 기록 쓰기
   resumeHostAccessPending, // 호스트 접근 제어(v2.485) — 확정 대기(commit-confirm)가 남아 있으면 기한을 이어받아 자동 되돌림 타이머 재무장
   startPowerOffPoller,  // 전원 꺼짐 점검(v2.484) — 60초 틱, 설정 주기(기본 6h) 경과 시 스냅샷의 꺼진 VM 관측 적재 + 재진입 가드, vCenter 왕복 없음
   startGuestDiskPush,   // 〃 엣지→중앙 push(v2.466) — site 모드 vCenter 의 guest.disk 를 엣지가 수집해 중앙에 올림. CENTRAL_URL·pushGuestDisk 미충족이면 자기기동 안 함

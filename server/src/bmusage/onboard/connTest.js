@@ -6,7 +6,7 @@
 /** 저장 항목 연결 시험(한 번 · 짧은 시한). 결과에 비밀 · 출력 원문을 싣지 않는다(종류 · 짧은 문구만). */
 export async function testSavedOs(s0) {
   const { resolveOsAuth } = await import('./refs.js');
-  const a = resolveOsAuth(s0);
+  const a = resolveOsAuth(s0, { feature: 'conn-test' });   // v3.9.0: 사람이 누르는 연결 시험 — 허용 기능과 무관(폴더 · 사용 중지는 본다)
   if (!a.ok) return { ok: false, kind: 'auth-unresolved', reason: a.error };
   if (a.authKind === 'none') return { ok: false, kind: 'no-secret', reason: '인증 수단이 없습니다 — 키를 고르거나 비밀번호를 입력하세요.' };
   const { withSsh } = await import('../../proxy/sshExec.js');

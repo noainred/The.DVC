@@ -20,7 +20,7 @@ import crypto from 'node:crypto';
 import { config } from '../../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js';
 import { makeLoadError, filterObjectElements } from '../../util/registryCore.js';
-import { openSecretsDeep, sealSecretsDeep, decryptFailureCount } from '../../security/secretVault.js';
+import { openSecretsDeep, sealSecretsDeep, decryptFailureCount, loadSecretsPolicy } from '../../security/secretVault.js';
 import { parsePrivateKey, PASSPHRASE_MAX } from './keyParse.js';
 
 import { KEY_FILE_NAME } from './keyBundle.js';
@@ -33,6 +33,31 @@ export const NAME_RE = /^[A-Za-z0-9가-힣][A-Za-z0-9가-힣._-]{0,63}$/;
 /** CSV 에서 다른 뜻으로 쓰는 낱말 — 키 · 계정 이름으로 쓰지 않는다. */
 export const RESERVED_NAMES = Object.freeze(['password', 'none', 'individual', '개별', '비밀번호', 'auto']);
 const USERNAME_BAD = /[\s'"`;|&<>$\\]/;
+/**
+ * v3.9.0(SSH 공용 접속 — 설계 docs/design/ssh-access §9): 키 **폴더**(법인 › 공통 / 서버별 › 서버)와 **허용 기능**.
+ *  · `folderCorp`(vCenter id — 법인) · `folderServer`(OS 등록부 서버 이름) — 빈 값 = 미분류(예전 키 — 어느 서버든 쓸 수 있다, 키 점검이 경고).
+ *    폴더가 있는 키는 그 법인 서버에만(서버별이면 그 서버에만) 쓰인다 — 판정은 `refs.resolveOsAuth` 하나.
+ *  · `features` — 이 키로 접속해도 되는 기능 id 목록. `null` = 모든 기능(예전 키 — 키 점검이 경고). 빈 배열 = 어느 기능도 못 쓴다.
+ */
+export const KEY_FEATURES = Object.freeze(['bm-usage', 'bm-storage', 'disk-audit']);
+const FOLDER_RE = /^[^\u0000-\u001f\u007f/\\]{1,128}$/;   // 경로 조각이 아니다(id · 이름 — 슬래시 · 제어문자만 막는다)
+export function normFeatures(v) {
+  if (v === null || v === undefined) return null;
+  if (!Array.isArray(v)) return null;
+  return [...new Set(v.map((x) => t(x, 32)).filter((x) => KEY_FEATURES.includes(x)))];
+}
+/** 새 로그인 키는 암호화 정책에서만 받는다(키 보안 — 평문 정책이면 디스크에 개인키 평문이 남는다). 정책을 못 읽으면 받지 않는다. */
+export function keyVaultIssue() {
+  let pol = null;
+  try { pol = loadSecretsPolicy(); } catch { pol = null; }
+  const mode = pol?.mode || '';
+  if (mode === 'encrypted') return null;
+  // S-07 정책 잠금(못 읽음)은 7b 와 같은 code 로 — ‘평문이라 거절’ 과 ‘정책을 몰라 거절’ 은 조치가 다르다.
+  if (!pol || pol.locked || mode === 'unavailable') return { ok: false, code: 'SECRETS_POLICY_UNAVAILABLE', status: 503,
+    reason: '자격증명 저장 방식(secrets-policy.json)을 읽지 못해 새 키를 저장하지 않았습니다 — 설정 › 보안 › 자격증명 저장 방식을 확인하세요.' };
+  return { ok: false, code: 'keys-need-encryption', status: 409,
+    reason: '로그인 키는 자격증명 저장 방식이 ‘암호화’ 일 때만 받습니다 — 설정 › 보안 › 자격증명 저장 방식에서 암호화로 바꾼 뒤 다시 등록하세요(평문 방식에서는 개인키가 디스크에 그대로 남습니다).' };
+}
 
 const t = (v, max = 256) => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max).trim();
 const lc = (v) => t(v).toLowerCase();
@@ -57,6 +82,9 @@ function normKey(k) {
     rotateAt: Number(k.rotateAt) > 0 ? Number(k.rotateAt) : null,
     status: k.status === 'retired' ? 'retired' : 'active',
     retiredAt: Number(k.retiredAt) > 0 ? Number(k.retiredAt) : null,
+    folderCorp: FOLDER_RE.test(t(k.folderCorp, 128)) ? t(k.folderCorp, 128) : '',
+    folderServer: FOLDER_RE.test(t(k.folderCorp, 128)) && FOLDER_RE.test(t(k.folderServer, 128)) ? t(k.folderServer, 128) : '',
+    features: normFeatures(k.features),
   };
 }
 function normAccount(a) {
@@ -92,7 +120,7 @@ function load() {
 }
 
 /** 테스트 전용 — 메모리 캐시를 비워 다음 호출이 파일을 다시 읽게 한다. */
-export function _resetKeyStoreForTest() { cache = null; loadErr.clear(); undecryptable = 0; }
+export function _resetKeyStoreForTest() { cache = null; loadErr.clear(); undecryptable = 0; _tampered.clear(); }
 /** 봉인을 못 푼 값 수(0 이면 정상) — 화면 · 라우트가 '쓰기 거절' 사유를 말한다. */
 export function keyStoreUndecryptable() { load(); return undecryptable; }
 
@@ -130,6 +158,7 @@ export function publicKeyView(k, { usage = null, now = Date.now() } = {}) {
     createdBy: k.createdBy, createdAt: k.createdAt || null, rotateAt: k.rotateAt, status: k.status, retiredAt: k.retiredAt,
     rotateDue: !!(k.rotateAt && k.rotateAt <= now && k.status === 'active'),
     recommended: k.algo === 'ed25519',
+    folderCorp: k.folderCorp || '', folderServer: k.folderServer || '', features: Array.isArray(k.features) ? [...k.features] : null,
     // 사용처 수 — 모르면 null('—'). 0 으로 지어내지 않는다(등록부를 못 읽었으면 삭제도 막힌다).
     servers: u ? u.servers : null, accountsUsing: u ? u.accounts : null,
   };
@@ -172,6 +201,30 @@ export function accountByName(kind, name) {
   return a ? { ...a } : null;
 }
 
+/* ── 키 점검용(v3.9.0 — sshaccess/check.js) ─────────────────────────────── */
+
+/** 파일에 **평문으로** 남아 있는 개인키 · passphrase 의 키 id(봉인 표지가 없는 값). 파일을 못 읽으면 null(모름). 원문은 돌려주지 않는다. */
+export function plainStoredKeyIds() {
+  try {
+    if (!fs.existsSync(FILE)) return [];
+    const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    return (Array.isArray(j?.keys) ? j.keys : []).filter((k) => k && typeof k === 'object'
+      && ((typeof k.privateKey === 'string' && k.privateKey !== '' && !k.privateKey.startsWith('enc$1$'))
+        || (typeof k.passphrase === 'string' && k.passphrase !== '' && !k.passphrase.startsWith('enc$1$')))).map((k) => t(k.id, 32));
+  } catch { return null; }
+}
+/** 저장소 파일 권한(그룹 · 남이 읽을 수 있으면 true). 파일이 없으면 false, 못 보면 null. */
+export function keyStoreLoosePerm() {
+  try { if (!fs.existsSync(FILE)) return false; return (fs.statSync(FILE).mode & 0o077) !== 0; } catch { return null; }
+}
+/**
+ * 무결성 표지 — 키 점검이 저장된 원문을 다시 풀어 **등록 때 지문과 다르면** 그 키를 접속에 쓰지 않는다(바꿔치기 감시).
+ * 메모리 표지다(재시작하면 다음 점검이 다시 본다 — 점검은 기동 직후 · 주기마다 돈다).
+ */
+const _tampered = new Set();
+export function markKeyIntegrity(id, ok) { if (ok) _tampered.delete(t(id, 32)); else _tampered.add(t(id, 32)); }
+export function tamperedKeyIds() { return [..._tampered]; }
+
 /**
  * 접속 직전에만 쓰는 키 원문. 없거나 못 열었으면(봉인 해제 실패 = '') error code.
  * @returns {{ok:true, privateKey:string, passphrase:string, fingerprint:string, name:string} | {ok:false, code:'key-missing'|'key-unreadable'}}
@@ -180,8 +233,10 @@ export function keyMaterial(id) {
   const k = load().keys.find((x) => x.id === t(id, 32));
   if (!k) return { ok: false, code: 'key-missing' };
   if (k.status === 'retired') return { ok: false, code: 'key-retired' };   // 감사 L-11: 퇴역 키로는 접속하지 않는다
+  if (_tampered.has(k.id)) return { ok: false, code: 'key-tampered' };      // v3.9.0: 저장된 원문의 지문이 등록 때와 다르다(바꿔치기 의심)
   if (!k.privateKey) return { ok: false, code: 'key-unreadable' };
-  return { ok: true, privateKey: k.privateKey, passphrase: k.passphrase || '', fingerprint: k.fingerprint, name: k.name };
+  return { ok: true, privateKey: k.privateKey, passphrase: k.passphrase || '', fingerprint: k.fingerprint, name: k.name, id: k.id,
+    folderCorp: k.folderCorp || '', folderServer: k.folderServer || '', features: Array.isArray(k.features) ? [...k.features] : null };
 }
 
 /* ── 이름 판정(키 · 계정 공용) ─────────────────────────────────────────── */
@@ -207,6 +262,7 @@ const dateMs = (v) => {
  */
 export function addKey(body = {}, { by = '', now = Date.now() } = {}) {
   const u = unreadable(); if (u) return u;
+  const vi = keyVaultIssue(); if (vi) return vi;
   const name = t(body.name, 80);
   const ni = nameIssue(name); if (ni) return { ok: false, code: 'bad-name', reason: ni };
   const pass = typeof body.passphrase === 'string' ? body.passphrase : '';
@@ -220,14 +276,44 @@ export function addKey(body = {}, { by = '', now = Date.now() } = {}) {
   if (d.keys.some((k) => lc(k.name) === name.toLowerCase())) return { ok: false, code: 'dup-name', reason: `같은 이름의 키가 있습니다(‘${name}’).` };
   const same = d.keys.find((k) => k.fingerprint === p.fingerprint);
   if (same) return { ok: false, code: 'dup-key', reason: `같은 키가 이미 ‘${same.name}’ 으로 등록돼 있습니다(지문 ${p.fingerprint}).` };
+  const fo = folderOf(body); if (!fo.ok) return fo;
   const key = {
     id: `k_${crypto.randomBytes(6).toString('hex')}`, name, algo: p.algo, sshType: p.sshType, bits: p.bits,
     fingerprint: p.fingerprint, publicKey: p.publicKey, privateKey: body.privateKey, passphrase: pass,
     createdBy: t(by, 64), createdAt: now, rotateAt, status: 'active', retiredAt: null,
+    folderCorp: fo.corp, folderServer: fo.server, features: body.features === undefined ? null : normFeatures(body.features),
   };
   d.keys.push(key);
   const c = commit(d); if (!c.ok) return c;
   return { ok: true, key: publicKeyView(key, { now }) };
+}
+
+/** 폴더 입력 판정 — { folderCorp, folderServer }. 서버별 폴더는 법인이 있어야 한다. */
+function folderOf(body = {}) {
+  const corp = t(body.folderCorp, 128); const server = t(body.folderServer, 128);
+  if (corp && !FOLDER_RE.test(corp)) return { ok: false, code: 'bad-folder', reason: '폴더(법인)가 올바르지 않습니다.' };
+  if (server && !corp) return { ok: false, code: 'bad-folder', reason: '서버별 폴더는 법인을 먼저 골라야 합니다.' };
+  if (server && !FOLDER_RE.test(server)) return { ok: false, code: 'bad-folder', reason: '폴더(서버)가 올바르지 않습니다.' };
+  return { ok: true, corp, server };
+}
+
+/**
+ * 키의 폴더 · 허용 기능 변경(v3.9.0). 원문은 바꾸지 않는다. 쓰는 서버가 새 폴더 밖이 되는지는 호출부(sshaccess)가 등록부와 함께 본다.
+ * @param {{folderCorp?:string, folderServer?:string, features?:string[]|null}} body  undefined = 그대로
+ */
+export function updateKeyPlacement(id, body = {}, { now = Date.now() } = {}) {
+  const u = unreadable(); if (u) return u;
+  const d = draft();
+  const k = d.keys.find((x) => x.id === t(id, 32));
+  if (!k) return { ok: false, code: 'not-found', status: 404, reason: '키를 찾을 수 없습니다.' };
+  if (body.folderCorp !== undefined || body.folderServer !== undefined) {
+    const fo = folderOf({ folderCorp: body.folderCorp ?? k.folderCorp, folderServer: body.folderServer ?? (body.folderCorp !== undefined ? '' : k.folderServer) });
+    if (!fo.ok) return fo;
+    k.folderCorp = fo.corp; k.folderServer = fo.server;
+  }
+  if (body.features !== undefined) k.features = body.features === null ? null : normFeatures(body.features);
+  const c = commit(d); if (!c.ok) return c;
+  return { ok: true, key: publicKeyView(k, { now }) };
 }
 
 /** 이름 · 회전 예정일 수정(원문은 바꾸지 않는다 — 다른 키는 새로 등록 후 회전). */

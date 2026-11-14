@@ -50,6 +50,8 @@ export const RESTORE_EXCLUDE = new Map([
   ['upgrade-signature-override.json', '업그레이드 서명 확인 끄기 — 되돌리면 다시 켠 서명 확인이 OTP 재인증 없이 꺼진다'],
   // Bareos 재해 복구 2차: 복구 순서 실행 상태 — 진행 중에 만든 백업을 되살리면 멈췄거나 끝난 회차가 '진행 중' 으로 돌아와 OTP 없이 남은 VM 을 다시 보낸다
   ['bareos-dr-runs.json', 'Bareos 재해 복구 실행 상태 — 되돌리면 멈췄거나 끝난 회차가 되살아나 OTP 없이 복원을 다시 보낸다'],
+  // v3.9.0 SSH 공용 접속: 법인 키 사용 중지(긴급 조치) — 백업 시점 판본으로 되돌리면 그 뒤에 건 사용 중지가 OTP 없이 풀린다
+  ['ssh-access-state.json', 'SSH 키 사용 중지(긴급 조치) 기록 — 되돌리면 백업 이후에 건 사용 중지가 풀린다'],
 ]);
 /** 예약 파일 읽기 상한 — 번들 해제 상한(64MB)의 JSON 이스케이프 팽창까지 감안한 여유. 넘으면 적용하지 않는다. */
 export const STAGED_MAX_BYTES = 512 * 1024 * 1024;

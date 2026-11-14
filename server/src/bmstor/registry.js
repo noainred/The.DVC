@@ -250,6 +250,41 @@ export function replaceBmServerKeyRefs(fromId, toId) {
   return { ok: true, ids };
 }
 
+/**
+ * v3.9.0 SSH 공용 접속 — **같은 주소**에서 이 서버가 쓸 키만 바꾼다(키 회전 `replaceBmServerKeyRefs` 와 같은 꼴 — 접속처 불변이라 choke point 를 지나지 않는다).
+ *  · keyRef 빈 값 = 서버 키를 떼고 공통 계정의 기본 키(또는 비밀번호)를 따른다. 키를 고르면 '비밀번호 고정'(osAuth) 표지를 지운다(고른 키가 쓰이게).
+ *  · ⚠ 비밀을 주소에 묶는 쓰기다 — 부르는 곳은 `sshaccess/service.js` 하나(설정 소유자 등급 + 본인 OTP 라우트 뒤 · 소스 스윕 테스트가 고정).
+ *  · 등록부를 못 읽었으면 쓰지 않는다. 쓰기에 실패하면 메모리도 되돌린다.
+ * @returns {{ok:true, previous:{keyRef:string, osAuth:string}} | {ok:false, code:string, status?:number, reason:string}}
+ */
+export function setBmServerKeyRef(id, keyRef, { expectHost = null } = {}) {
+  const data = load();
+  if (loadErr.get()) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'OS 계정 등록부를 읽지 못해 키를 바꾸지 않았습니다.' };
+  const s = data.servers.find((x) => x.id === String(id || ''));
+  if (!s) return { ok: false, code: 'not-found', status: 404, reason: '서버를 찾을 수 없습니다.' };
+  if (expectHost != null && String(s.host) !== String(expectHost)) return { ok: false, code: 'moved', status: 409, reason: '서버 주소가 바뀌었습니다 — 화면을 다시 읽으세요.' };
+  const k = String(keyRef || '').trim();
+  if (k && !REF_RE.key.test(k)) return { ok: false, code: 'bad-ref', reason: 'SSH 키 참조가 올바르지 않습니다.' };
+  const previous = { keyRef: String(s.keyRef || ''), osAuth: s.osAuth === 'password' ? 'password' : '' };
+  const had = { keyRef: s.keyRef, osAuth: s.osAuth, addrOnly: s.addrOnly };
+  if (k) s.keyRef = k; else delete s.keyRef;
+  delete s.osAuth;
+  if (s.addrOnly && (s.password || s.keyRef || s.credRef)) delete s.addrOnly;
+  try { persist(); } catch (e) {
+    for (const f of ['keyRef', 'osAuth', 'addrOnly']) { if (had[f] === undefined) delete s[f]; else s[f] = had[f]; }
+    return { ok: false, code: e?.code === 'SECRETS_POLICY_UNAVAILABLE' ? 'SECRETS_POLICY_UNAVAILABLE' : 'write-failed', status: 503, reason: `OS 계정 등록부를 쓰지 못했습니다(${String(e?.code || e?.message || e).slice(0, 60)}).` };
+  }
+  return { ok: true, previous };
+}
+/** 되돌리기 — setBmServerKeyRef 가 돌려준 previous 그대로(키 · 비밀번호 고정 표지). */
+export function restoreBmServerKeyRef(id, previous = {}) {
+  const r = setBmServerKeyRef(id, previous.keyRef || '');
+  if (!r.ok || previous.osAuth !== 'password') return r;
+  const s = load().servers.find((x) => x.id === String(id || ''));
+  if (s) { s.osAuth = 'password'; try { persist(); } catch { delete s.osAuth; return { ok: false, code: 'write-failed', status: 503, reason: '비밀번호 고정 표지를 되돌리지 못했습니다.' }; } }
+  return r;
+}
+
 export function removeBmServer(id) {
   const data = load();
   const next = data.servers.filter((s) => s.id !== id);
