@@ -5,7 +5,7 @@
 
 - 생성: `node scripts/common-doc.mjs` · 최신 여부: `node scripts/common-doc.mjs --check`
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다. 설명을 고치려면 그 모듈의 **머리 주석 첫 단락**을 고친다.
-- 훑은 소스 4103개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
+- 훑은 소스 4104개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
 
 ## 읽는 법 · 한계
 
@@ -59,7 +59,7 @@
 | `deadline.js` | 작업 시한 — **단일 관문**(v2.607 감사 TIM2607-02 · LEFT2607-08). | `deadlineMs` `withDeadline` `DEADLINE_MIN_MS` `DEADLINE_MAX_MS` `DEADLINE_LONG_MAX_MS` `DEADLINE_DEFAULT_MS` | 20 | 12 | 2 |
 | `outboundStats.js` | 이 노드가 **다른 포탈로 나가는** 호출의 기록(v2.587, 데이터 흐름 지도). | `isTrackedPath` `withOutboundTag` `recordOutbound` `outboundStats` `resetOutboundStats` | 16 | 11 | 7 |
 | `ssrfBlock.js` | SSRF 차단 판정 — IP 리터럴·URL·DNS 해석 결과의 차단 대역 검사(v2.579 에 `collector/registry.js` 에서 분리). | `ipBlockReason` `ssrfBlockReason` `ssrfBlockReasonResolved` | 16 | 10 | 2 |
-| `cmpVersion.js` | semver 형태 버전 비교 — **단일 소스**(v2.575 IMP-04). | `cmpVersion` `default` | 15 | 7 | 2 |
+| `cmpVersion.js` | semver 형태 버전 비교 — **단일 소스**(v2.575 IMP-04). | `cmpVersion` `default` | 15 | 7 | 3 |
 | `exportBusy.js` | 무거운 내보내기의 **동시 실행 1건 가드** — 단일 소스(v2.575). | `exportLockMaxMs` `acquireExport` `_resetExportBusy` `exportBusyOf` | 15 | 1 | 13 |
 | `asyncRoute.js` | `asyncRoute` / `wrapAsyncRouter` — express 4 에서 **async 핸들러의 throw 를 전역 에러 핸들러로 보낸다**. (v2.574, 2026-09-21 감사 BUG-01·BUG-02·BUG-03) | `asyncRoute` `wrapAsyncRouter` | 14 | 1 | 5 |
 | `errors.js` | Turn a thrown error (often a generic "fetch failed") into a human-readable reason plus a Korean hint about the likely cause, for vCenter connection di… | `describeError` | 14 | 9 | 4 |
@@ -211,8 +211,8 @@
 | `perfClient.js` | 진행 중 요청 레지스트리 + 장기 로딩 보고(v2.498). | `startReq` `ridOf` `endReq` `inflightSnapshot` `oldestInflightMs` `subscribeInflight` 외 7 | 3 | 2 | 2 |
 | `upgradeNotice.js` | 업그레이드 뒤 '새로고침 하세요' 안내의 판정 코어(v2.999 · 사용자 요청 2026-11-13 · 설계 docs/design/upgrade-reload · 컨펌 '추천대로 전부 진행'). | `normVersion` `cmpVersion` `isStale` `markNoticeShown` `noteServerVersion` `subscribeUpgrade` 외 15 | 3 | 2 | 2 |
 | `chunkReload.js` | 업그레이드 뒤 옛 화면 조각(청크) 404 에서 빠져나오기(v2.977 전체 점검 · 화면 축 1번 — 재현). | `isChunkLoadError` `claimAutoReload` `reloadOnChunkError` `installChunkReload` `RELOAD_KEY` `RELOAD_GAP_MS` | 2 | 2 | 1 |
+| `cmpVersion.js` | semver 형태 버전 비교. 서버 `server/src/util/cmpVersion.js` 와 **같은 규칙**(v2.826 — 웹에도 하나만 둔다): - 선행 `v`/공백을 벗긴다 · 세그먼트가 전부 숫자가 아니면 null(모르는 것 — **낮은 버전으로 보지 않는… | `cmpVersion` `default` | 2 | 2 | 3 |
 | `pwa.js` | PWA 부트스트랩 — 서비스워커 등록(설치 가능) + 위험 인시던트 브라우저 알림(폴링). 브라우저 푸시(VAPID) 없이도 세션이 떠 있는 동안 새 위험 경보를 데스크톱/모바일 알림으로 띄운다. 알림 권한은 사용자 제스처(인사이트 › 인시던트의 "알림 켜기")로 요청… | `registerPwa` `enableNotifications` `startAlertNotifications` | 2 | 2 | 0 |
-| `cmpVersion.js` | semver 형태 버전 비교. 서버 `server/src/util/cmpVersion.js` 와 **같은 규칙**(v2.826 — 웹에도 하나만 둔다): - 선행 `v`/공백을 벗긴다 · 세그먼트가 전부 숫자가 아니면 null(모르는 것 — **낮은 버전으로 보지 않는… | `cmpVersion` `default` | 1 | 1 | 2 |
 | `sessionActivity.js` | 서버측 세션 정리(2026-10-09 검토 S-05) — 로그아웃을 서버에 알리고, 서버측 유휴 만료의 기준인 '사용자 활동' 을 보낸다. | `createActivityPinger` `sendActivity` `serverLogout` `ACTIVITY_MIN_INTERVAL_MS` `ACTIVITY_EVENTS` | 1 | 1 | 1 |
 | `usageTracker.js` | 기능 사용 추적(화면 쪽, v2.913 · 설계 docs/design/feature-usage §4.2·§4.6). | `usageKeyFromHash` `createUsageTracker` `sendUsage` `POLL_MS` `STABLE_MS` `BEAT_MS` 외 2 | 1 | 1 | 3 |
 
