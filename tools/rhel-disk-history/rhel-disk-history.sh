@@ -1255,7 +1255,7 @@ function find_id(b, t1, t2,   i, bt, before, after, alt) {
 }
 function smart_fault(h,   r) {     # 현재 디스크의 누적 오류값: 1=미디어 계열 있음 0=읽었고 없음 ""=못 읽음
   if (smv[h, "status"] != "ok") return ""
-  if (pos(smv[h, "realloc"]) || pos(smv[h, "pending"]) || pos(smv[h, "offunc"]) || pos(smv[h, "repunc"]) || pos(smv[h, "grown"]) || pos(smv[h, "uncr"]) || pos(smv[h, "uncw"]) || pos(smv[h, "uncv"]) || pos(smv[h, "nvmemedia"]) || pos(smv[h, "unclog"]) || pos(smv[h, "stfail"])) return 1
+  if (pos(smv[h, "realloc"]) || pos(smv[h, "reallocev"]) || pos(smv[h, "pending"]) || pos(smv[h, "offunc"]) || pos(smv[h, "repunc"]) || pos(smv[h, "grown"]) || pos(smv[h, "uncr"]) || pos(smv[h, "uncw"]) || pos(smv[h, "uncv"]) || pos(smv[h, "nvmemedia"]) || pos(smv[h, "unclog"]) || pos(smv[h, "stfail"])) return 1
   if (smv[h, "kind"] == "ata" && isnum(smv[h, "realloc"]) && (isnum(smv[h, "pending"]) || isnum(smv[h, "offunc"]))) return 0
   if (smv[h, "kind"] == "scsi" && (isnum(smv[h, "grown"]) || isnum(smv[h, "uncr"]))) return 0
   if (smv[h, "kind"] == "nvme" && isnum(smv[h, "nvmemedia"])) return 0
@@ -1903,7 +1903,9 @@ smart_one() { # smart_one 장치 종류 [probe]  — probe=1 이면 열지 못�
   fi
   if [ "$probe" = 1 ] && { [ $((rc & 2)) = 2 ] || [ "$rc" -ge 124 ]; }; then return 1; fi
   osdev=""
-  case "$type" in megaraid,*|cciss,*|areca,*|3ware,*|aacraid,*) ;; *) osdev="${dev#/dev/}" ;; esac
+  # 컨트롤러 경유 종류는 접두가 붙어 올 수 있다(실서버 smartctl --scan 실측: '-d sat+megaraid,3' — SATA 디스크가 PERC 뒤에 있을 때).
+  # 이때 장치 경로(/dev/bus/0)는 접근용 노드일 뿐 OS 디스크 이름이 아니다.
+  case "$type" in *megaraid,*|*cciss,*|*areca,*|*3ware,*|*aacraid,*) ;; *) osdev="${dev#/dev/}" ;; esac
   handle="$dev${type:+ -d $type}"
   "$AWK" -v handle="$handle" -v osdev="$osdev" -v rc="$rc" -f "$WORK/smart.awk" "$RAW/$name.out" >> "$FACTS"
   return 0

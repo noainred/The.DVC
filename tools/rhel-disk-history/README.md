@@ -169,11 +169,11 @@ mkfs 는 로그를 남기지 않습니다. 그래서 '오류 시각' 과 '지금
 | 항목 | 상태 |
 |---|---|
 | `bash -n` · shellcheck(warning 이상 0건) | 확인 |
-| 가짜 환경 시나리오 11개(아래) | 통과 |
+| 가짜 환경 시나리오 11개(아래 · 176개 검사) | 통과 |
 | 100만 줄(118MB) messages 처리 | 약 3초(개발 컨테이너 기준) |
 | 실제 RHEL 7/8/9 서버 | **미검증** |
 | 실제 PERC + storcli/perccli 출력 형식 | **미검증**(문서 예시를 기억해 작성) |
-| 실제 smartctl 출력(SATA · SAS · NVMe · megaraid 경유) | **미검증** |
+| 실제 smartctl 출력(SATA · SAS · NVMe · megaraid 경유) | **미검증** — 단 실서버 1대에서 `--scan` 의 종류 표기가 `-d sat+megaraid,N`(PERC 뒤 SATA)임을 화면으로 확인해 반영(2026-11-14) |
 | bash 4.2 · gawk 4.0 실물 | **미검증**(bash 5.2 · gawk 5.2 에서만 실행. 4.3+ 문법 · gawk 4.2+ 기능은 쓰지 않도록 작성하고 금지 문법을 검색했습니다) |
 | XFS 생성 시각(`xfs_db` 의 `v3.crtime.sec`) | **미검증**(필드 이름 기억 기반) |
 

@@ -409,7 +409,14 @@ EOF
 }
 sas_out smartctl__dev_bus_0_megaraid_0.out S0M0AAAA 5000c5007f8a0b20 0 0
 sas_out smartctl__dev_bus_0_megaraid_3.out S0M0CCCC 5000c5007f8a0c30 14 3
-run_case
+# 실서버 실측 형식: PERC 뒤 SATA 디스크는 --scan 이 '-d sat+megaraid,N' 으로 알려 준다
+echo "/dev/bus/0 -d sat+megaraid,5 # /dev/bus/0 [megaraid_disk_05] [SAT], ATA device" >> "$FIX/smartctl-scan.out"
+smart_ata smartctl__dev_bus_0_sat_megaraid_5.out 22TESTSATA05 "5 000039 b78d00005" 1 0 0 12000
+run_case --save-raw
+RAWF=$(ls "$OUT"/*_raw/facts.tsv 2>/dev/null | head -n 1)
+expect "$(printf 'sat+megaraid,5\tosdev=\tkind=ata')" "$RAWF"      # 접근 노드(bus/0)를 OS 디스크 이름으로 오인하지 않는다
+expect '\[확정\] /dev/bus/0 -d sat+megaraid,5 · '
+expect 'smartctl -x -d sat+megaraid,5 /dev/bus/0' "$FIX/calls.log"
 expect_rc 20
 expect 'sda .*RAID 가상 디스크'
 expect '\[확정\] 슬롯 0:32:3 .*Media Error Count 12'
