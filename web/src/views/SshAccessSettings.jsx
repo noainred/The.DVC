@@ -852,7 +852,7 @@ function FoldersTab({ v, corpName, reload, say }) {
           <fieldset className="ssa-form">
             <legend>{edit.key.name} — 폴더 · 쓸 수 있는 기능</legend>
             <label>법인 <Select sort={false} className="select select-sm" value={edit.folderCorp} onChange={(e) => setEdit({ ...edit, folderCorp: e.target.value, folderServer: '' })}>
-              <option value="">미분류(폴더 없음)</option>{(v.corps || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              <option value="">미분류(폴더 없음)</option>{(v.corps || []).filter((c) => !c.missing).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </Select></label>
             <label>서버(비우면 공통) <Select sort={false} className="select select-sm" value={edit.folderServer} disabled={!edit.folderCorp} onChange={(e) => setEdit({ ...edit, folderServer: e.target.value })}>
               <option value="">공통</option>{(v.servers || []).filter((s) => s.vcenterId === edit.folderCorp).map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
@@ -1032,8 +1032,8 @@ function SecurityTab({ v, corpName, reload, say, me = '', jobsUi }) {
   const g = v.guards || {};
   const guardsKnown = typeof g.twoPerson === 'boolean' && typeof g.serverRestrict === 'boolean' && !g.unreadable;
   // 인증을 끈 설치 — 서버가 두 사람 승인을 켜 둔 채 적용하지 않는다(twoPerson=true · twoPersonActive=false). OTP 도 묻지 않는다(reauth — 점검 E1-4).
-  // 두 사람 승인이 꺼져 있으면 이 표지로는 인증 꺼짐을 가를 수 없다(그때는 말하지 않는다).
-  const authOff = !g.unreadable && g.twoPerson === true && g.twoPersonActive === false;
+  // 서버가 authEnabled 를 주면 그것으로(3회차 반증 R3R-4 — 두 사람 승인이 꺼진 설치에서 인증 꺼짐을 몰라 ‘OTP 로 바로 꺼집니다’ 라고 했다). 옛 서버면 위 표지로 짐작한다.
+  const authOff = typeof v.authEnabled === 'boolean' ? !v.authEnabled : (!g.unreadable && g.twoPerson === true && g.twoPersonActive === false);
   const [gd, setGd] = useState({ twoPerson: g.twoPerson === true, serverRestrict: g.serverRestrict === true });
   const [gOtp, setGOtp] = useState('');
   // 다시 읽어 서버 값이 바뀌면 편집값을 그 값으로 맞춘다(저장 전 편집을 낡은 값 위에 두지 않는다).

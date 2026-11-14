@@ -690,7 +690,9 @@ describe('SSH 공용 접속 화면 — 규약', () => {
     expect(css).toMatch(/\.ssa-t thead th, \.ssa-t tbody td \{ padding-left: 10px; padding-right: 10px; \}/);
     expect(css).toMatch(/\.ssa-keys td:nth-child\(2\) \{ white-space: normal;/);
     // E1-4 — 인증을 끈 설치: 켬(적용 안 됨) · ‘본인 OTP 만으로’ 라고 하지 않는다
-    expect(src).toMatch(/const authOff = !g\.unreadable && g\.twoPerson === true && g\.twoPersonActive === false;/);
+    // 서버의 authEnabled 를 먼저 쓴다(3회차 반증 R3R-4) — 옛 서버면 표지로 짐작
+    expect(src).toMatch(/const authOff = typeof v\.authEnabled === 'boolean' \? !v\.authEnabled : \(!g\.unreadable && g\.twoPerson === true && g\.twoPersonActive === false\);/);
+    expect(serverSrc('sshaccess/service.js')).toMatch(/authEnabled: !!config\.auth\?\.enabled,/);
     expect(src).toContain('켬(적용 안 됨)');
     expect(src).not.toContain('두 사람 승인이 적용되지 않고 본인 OTP 만으로 실행됩니다');
     // 인증 꺼짐은 끄기 자체를 받지 않는다(3회차 A3-1) — 끄기 결과 문장은 인증이 켜진 설치에서만

@@ -211,7 +211,7 @@ export async function installOne(server, key, o = {}) {
       const cmd = replaced && m.old == null ? null : rollbackCommand({ line, oldB64: replaced ? m.old : '' });
       // 되돌림도 그 차례에 자격을 다시 푼다 — 그 사이 법인 사용 중지가 걸렸으면 키로 접속하지 않는다(3회차 C3-1).
       const fa = first.authKind === 'key' ? firstLegAuth(server, o.oncePassword, key.id) : first;
-      const rb = !fa.ok ? { ok: false, reason: `${fa.reason || fa.error || '접속 자격을 풀지 못함'} — 되돌리려고 접속하지 않았습니다` }
+      const rb = !fa.ok ? { ok: false, reason: `${fa.code === 'corp-stopped' ? '법인 키 사용 중지 중' : (fa.reason || fa.error || '접속 자격을 풀지 못함')} — 되돌리려고 접속하지 않았습니다` }   // 중지 문장을 두 번 싣지 않는다(3회차 반증 문구)
         : cmd ? await sshRun(server, fa, async (run) => mutRun(run, cmd)) : { ok: false, reason: '바꾸기 전 줄을 받지 못했습니다' };
       rolledBack = rb.ok && rb.value.kind === 'restored' && rb.value.removed > 0;
       unknown = !rolledBack && unknownOutcome(rb);

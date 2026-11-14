@@ -57,7 +57,10 @@ export const SSH_HOSTKEY_ERROR_CODE = 'SSH_HOSTKEY_UNTRUSTED';
 export const SSH_NO_PASSWORD_METHOD = 'SSH_NO_PASSWORD_METHOD';
 /** passwordOnly 대화형: 비밀번호를 묻는 칸의 글(여러 말) · OTP/코드 칸의 글. 'Passcode' 는 비밀번호가 아니다(OTP 쪽 — pass 만으로 고르지 않는다). */
 export const PW_PROMPT_RE = /password|passwort|passord|wachtwoord|mot de passe|contrase(?:n|ñ)a|senha|parola|has[lł]o|пароль|암호|비밀번호|パスワード|密码|密碼/i;
-export const OTP_PROMPT_RE = /passcode|one[- ]?time|\botp\b|token|verification|verify|\bcode\b|\bpin\b|duo|factor|second|인증|코드|확인 번호|認証|验证码|驗證碼/i;
+// OTP 말은 강한 말(그 자체로 OTP 칸)과 약한 말(계정 · 호스트 이름에도 흔함 — duo-svc · secondary-db · ‘인증 암호’)로 가른다(3회차 반증 R3R-6 — 약한 말이 섞인 비밀번호 칸에 보내지 않았다).
+export const OTP_STRONG_RE = /passcode|one[- ]?time|\botp\b|token|verification|verify|\bcode\b|\bpin\b|factor|코드|확인 번호|認証|验证码|驗證碼/i;
+export const OTP_WEAK_RE = /duo|second|인증/i;
+export const OTP_PROMPT_RE = new RegExp(`${OTP_STRONG_RE.source}|${OTP_WEAK_RE.source}`, 'i');
 
 /** ssh2 hostVerifier 가 주는 키(Buffer — SSH wire 형식 공개키) → 'SHA256:<base64>'(OpenSSH 표기). */
 export function sshHostKeyFingerprint(key) {
@@ -235,7 +238,8 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
             // 가리는 칸 가운데 비밀번호를 묻는 글이 있는 칸을 먼저, 없으면 OTP · 코드 류가 아닌 가리는 칸(2회차 반증 R2R-11 — 가리는 OTP 칸에 비밀번호가 갔다).
             const hidden = list.map((p, i) => ({ i, text: String(p?.prompt ?? '').slice(0, 300), hid: !!p && p.echo === false })).filter((x) => x.hid);
             // 1순위는 ‘비밀번호 글이 있고 OTP 글이 없는’ 칸(3회차 B3-3 — ‘One-time password’ · ‘Token password’ 같은 OTP 칸에 넣었다).
-            const pick = hidden.find((x) => PW_PROMPT_RE.test(x.text) && !OTP_PROMPT_RE.test(x.text)) || hidden.find((x) => !OTP_PROMPT_RE.test(x.text) && !PW_PROMPT_RE.test(x.text));
+            //   비밀번호 글 칸은 강한 OTP 말이 없으면 고른다(약한 말 — duo · second · 인증 — 은 계정 · 호스트 이름일 수 있다). 글이 없는 칸은 OTP 말이 하나도 없을 때만.
+            const pick = hidden.find((x) => PW_PROMPT_RE.test(x.text) && !OTP_STRONG_RE.test(x.text)) || hidden.find((x) => !OTP_PROMPT_RE.test(x.text) && !PW_PROMPT_RE.test(x.text));
             const at = answered || !pick ? -1 : pick.i;
             if (at >= 0) { answered = true; noPwMethod = ''; }   // 앞 질의가 OTP 만 물었어도 이번에 비밀번호를 보냈다 — 거부면 거부다
             else if (!answered && list.length > 0) noPwMethod = '서버의 대화형 로그인이 비밀번호 칸(입력을 가리는 칸)을 묻지 않았습니다(OTP 등만 물음) — 비밀번호를 보내지 않았습니다';

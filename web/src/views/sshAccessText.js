@@ -486,7 +486,7 @@ export function stopDoneText(r, corpLabel = '') {
   if (r?.already === true) {
     const added = finiteNum(r?.added);
     if (added > 0) return `${corpLabel} — 이미 키 사용이 중지돼 있습니다. 그 뒤 등록된 서버 ${added}대를 중지 기록에 더했습니다(사건은 다시 쓰지 않았습니다).`;
-    if (r?.addFailed === true) return `${corpLabel} — 이미 키 사용이 중지돼 있지만, 그 뒤 등록된 서버를 중지 기록에 더하지 못했습니다(상태 파일 쓰기 실패 — ${String(r?.reason || '사유를 받지 못함')}).`;
+    if (r?.addFailed === true) return `${corpLabel} — 이미 키 사용이 중지돼 있지만, 그 뒤 등록된 서버를 중지 기록에 더하지 못했습니다(상태 파일 쓰기 실패 — 상태 파일을 확인한 뒤 다시 하세요).`;
     return `${corpLabel} — 이미 키 사용이 중지돼 있습니다(기록을 다시 쓰지 않았습니다).`;
   }
   const head = `${corpLabel} — 키 사용을 중지했습니다`;
@@ -559,15 +559,16 @@ export function keyLoginRow(r, meta = {}) {
     return { label: row.code === 'uncertain' ? UNCERTAIN_LABEL : '실패', tone: 'bad', parts: [failText(row), ...notesOf(row)],
       rollback: row.rolledBack === true ? 'done' : row.rollbackUnknown === true ? 'unknown' : row.rolledBack === false ? 'failed' : '' };   // 모르면 ‘못함’ 이라고 하지 않는다(1회차 반증 11)
   }
-  const parts = [LINE_TEXT[row.line] || '키 접속 확인'];
   const unmarked = finiteNum(row.unmarked) || 0;
   const custom = finiteNum(row.custom) || 0;
-  let warn = unmarked > 0 || custom > 0;
+  const otherId = finiteNum(row.otherId) || 0;   // 같은 공개키를 다른 키 id 로 포탈이 넣은 줄(3회차 B3-4 — 사람 줄이 아니다)
+  const parts = [row.line === 'present-unmarked' && unmarked === 0 && otherId > 0 ? '같은 키 줄이 이미 있어(다른 키 id 로 포탈이 넣은 줄) 그대로 두고 키 접속 확인' : (LINE_TEXT[row.line] || '키 접속 확인')];
+  let warn = unmarked > 0 || custom > 0 || otherId > 0;
   if (row.restricted === true) parts.push(`출발지 제한 적용${row.fromIp ? `(${row.fromIp})` : ''} · 포워딩 금지`);
   else if (meta?.restrict === true) {
     // 제한을 켰는데 붙지 않았다 — 사람이 넣은 줄 · 바꾸지 못한 제한 없는 포탈 줄 · 관리자가 바꾼 줄(서버 메모가 자세한 사유를 준다)
     warn = true;
-    parts.push(row.line === 'present-unmarked' || unmarked > 0 || row.replaceSkipped === true
+    parts.push(unmarked > 0 || row.replaceSkipped === true || (row.line === 'present-unmarked' && otherId === 0)
       ? '서버 쪽 제한이 켜져 있지만 제한 없는 같은 키 줄이 서버에 남아 있습니다 — 그 줄로도 접속됩니다'
       : '서버 쪽 제한이 켜져 있지만 이 서버의 키 줄에 제한이 붙었는지 확인되지 않았습니다');
   } else if (row.line === 'added') parts.push(meta?.restrict === false ? '서버 쪽 제한 없이 넣음(보호 장치 꺼짐)' : '서버 쪽 제한 없이 넣음');

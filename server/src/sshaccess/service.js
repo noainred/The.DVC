@@ -105,6 +105,7 @@ export async function buildView({ now = Date.now() } = {}) {
   const accById = new Map(accRaw.map((a) => [a.id, a]));
   const servers = regErr ? [] : listBmServersRaw();
   // vCenter 목록에 없는 법인도 화면에 둔다 — 서버 · 공통 계정 · 키 폴더 · 사용 중지가 그 법인을 가리키면(3회차 E3-2 — vCenter 를 지운 법인의 서버 · 중지가 화면에서 사라져 재개도 못 했다).
+  const vcCorps = corps.slice();   // 받는 곳 · 폴더 판정은 vCenter 목록만(승인 · 주기 점검과 같게 — 3회차 반증 R3R-1)
   { const have = new Set(corps.map((c) => c.id));
     const extra = [...servers.map((x) => t(x.vcenterId)), ...accRaw.map((a) => t(a.corp)), ...keysRaw.map((k) => t(k.folderCorp)), ...ST.listStops().map((x) => t(x.corp))].filter((id) => id && !have.has(id));
     for (const id of [...new Set(extra)].slice(0, 200)) { have.add(id); corps.push({ id, name: `${id} (vCenter 목록에 없음)`, dc: '', missing: true }); } }
@@ -114,7 +115,7 @@ export async function buildView({ now = Date.now() } = {}) {
   try { edgeRows = (await import('../bmusage/onboard/edgeDeploy.js')).allEdgeRows().map((r) => ({ agent: r.agent, name: t(r.name, 128), corp: t(r.corp, 128), osHost: t(r.osHost, 256), osCred: t(r.osCred, 64), osKey: t(r.osKey, 64), osUser: t(r.osUser, 128) })); } catch { edgeRows = []; }
   let policyMode = '';
   try { policyMode = loadSecretsPolicy()?.mode || ''; } catch { policyMode = ''; }
-  const inbox = await INB.scanInbox({ corps, servers: servers.map((s) => ({ id: s.id, name: s.name || s.host, vcenterId: t(s.vcenterId) })) });
+  const inbox = await INB.scanInbox({ corps: vcCorps, servers: servers.map((s) => ({ id: s.id, name: s.name || s.host, vcenterId: t(s.vcenterId) })) });
   const corpName = (id) => corps.find((c) => c.id === id)?.name || id || '전 법인';
   const pubServers = servers.filter((s) => !s.addrOnly).map((s) => ({ ...publicServer(s, { accById, keyById }), inboxPath: t(s.vcenterId) ? INB.inboxPathOf(s.vcenterId, s.name || s.host) : '' }));
   // 키 점검 ‘서버’ 칸 — 키를 쓰는데 폴더 · 기능 규칙 때문에 주기 수집이 막힌 서버, 법인이 없어 폴더 키를 못 쓰는 서버(엣지 위임 서버는 그 엣지가 본다).
@@ -131,10 +132,11 @@ export async function buildView({ now = Date.now() } = {}) {
     isEdge: !!config.agent?.centralUrl,
     policyMode,
     scanEveryMinutes: Math.round(SCAN_EVERY_MS / 60_000), rsaMinBits: RSA_MIN_BITS,
-    limits: { keyLoginServers: KL.MAX_JOB_SERVERS, revokeServers: KL.MAX_REVOKE_SERVERS },   // 화면이 숫자를 박지 않게(3회차 E3-7)
+    limits: { keyLoginServers: KL.MAX_JOB_SERVERS, revokeServers: KL.MAX_REVOKE_SERVERS },
+    authEnabled: !!config.auth?.enabled,   // 화면이 인증 꺼짐을 짐작하지 않게(3회차 반증 R3R-4)   // 화면이 숫자를 박지 않게(3회차 E3-7)
     storeUnreadable: !!storeErr, registryUnreadable: !!regErr, stateUnreadable: !!ST.stateLoadError(),
     usageLoadFailed: keyUsageLoadFailed(), installedLoadFailed: INS.installedLoadFailed(),
-    corps: corps.map((c) => ({ ...c, inboxPath: INB.inboxPathOf(c.id), stop: ST.stopFor(c.id) })),
+    corps: corps.map((c) => ({ ...c, inboxPath: c.missing ? '' : INB.inboxPathOf(c.id), stop: ST.stopFor(c.id) })),
     accounts: accRaw.filter((a) => a.kind === 'os').map((a) => KS.publicAccountView(a, { usage: usage.account(a.id) })),
     keys: keysRaw.map((k) => ({ ...KS.publicKeyView(k, { usage: usage.key(k.id), now }), lastUse: lastUse.get(k.fingerprint) || null,
       inboxPath: k.folderCorp ? INB.inboxPathOf(k.folderCorp, k.folderServer) : '' })),
@@ -636,7 +638,7 @@ export function approvalPrecheck(id, { approve, by = '', digest = '' } = {}) {
     // 넣는 중인 키(교체의 옛 키 · 삭제할 키)와 새 키 상태도 OTP 앞에서(3회차 A3-2 — 실행 단계에서 409 key-installing 으로 끝나 승인자의 OTP 와 요청이 버려졌다).
     //   넣기 작업은 끝나면 풀리므로 요청은 그대로 두고 나중에 다시 승인하게 한다.
     if (cur.kind === 'ssh-key-rotate') {
-      const ii = installingIssue(cur.payload?.from); if (ii) return { ...ii, reason: `${ii.reason} 요청은 그대로 둡니다 — 작업이 끝난 뒤 승인하세요.` };
+      const ii = installingIssue(cur.payload?.from) || KL.revokingIssue(cur.payload?.to); if (ii) return { ...ii, reason: `${ii.reason} 요청은 그대로 둡니다 — 작업이 끝난 뒤 승인하세요.` };   // 새 키 거두는 중도(3회차 반증 R3R-2)
       const nb = KS.keyById(t(cur.payload?.to, 32));
       if (nb && nb.status !== 'active') return { ok: false, code: nb.status === 'pending' ? 'key-pending' : 'key-retired', status: 409, reason: nb.status === 'pending' ? REFS.AUTH_ERROR['key-pending'] : '새 키가 그 사이 퇴역했습니다 — 이 요청은 돌려보내세요.' };
     }

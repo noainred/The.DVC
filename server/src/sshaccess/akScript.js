@@ -142,7 +142,8 @@ const STRIP = '{ s = $0; sub(/\\r$/, "", s); t = s; sub(/^[ \\t]+/, "", t) }';
 const CHECKS = (needDir) => [
   'if [ -L "$d" ]; then echo "##KL fail symlink"; exit 3; fi',
   // 홈 · ~/.ssh 를 이 계정으로 따라갈 수 없으면 파일이 있는지 모른다 — ‘없음’ 이 아니라 실패(3회차 E3-4 — root 소유 0700 ~/.ssh 에서 거두기가 ‘파일 없음’ 으로 끝나고 키 줄이 남았다).
-  'if [ ! -x "$HOME" ] || { [ -d "$d" ] && [ ! -x "$d" ]; }; then echo "##KL fail noaccess"; exit 3; fi',
+  // 홈이 아예 없는 계정(useradd -M)은 권한 문제가 아니다 — 아래 꼴 검사가 ‘없음’ 으로 답한다(3회차 반증 R3R-5).
+  'if { [ -e "$HOME" ] && [ ! -x "$HOME" ]; } || { [ -d "$d" ] && [ ! -x "$d" ]; }; then echo "##KL fail noaccess"; exit 3; fi',
   ...(needDir ? [
     'mkd=""',
     // 처음 넣기 둘이 겹치면 진 쪽의 mkdir 이 실패한다 — 그 사이 생긴 진짜 폴더면 실패가 아니다(2회차 B4). 남이 만든 폴더면 mkd 를 세우지 않는다.
