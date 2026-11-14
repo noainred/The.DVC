@@ -192,6 +192,8 @@ const PURPOSES = {
   'active-sessions.json': "'단일 세션 강제(ID 공유 금지)' 용 계정별 마지막 로그인 세션 ID(손상이면 재로그인)",
   'sanswitch-perf-push.json': '엣지 SAN 포트 사용량 push 커서(마지막으로 보낸 rowid)',
   'cvp-push.json': '엣지 CVP 포트 사용량 push 커서(마지막으로 보낸 rowid, v2.608)',
+  'ssh-access-installed.json': 'SSH 공용 접속 — 서버에서 읽은 authorized_keys 공개키 지문(상태 — 서버마다 마지막 읽기 · 비밀 없음, v3.9.0)',
+  'ssh-key-jobs-inflight.json': 'SSH 키 작업(키 로그인 설정 · 거두기)이 지금 바꾸는 서버 기록(상태 — 재시작하면 중단 사건으로 남긴다 · 복원 제외, v3.10.0)',
 };
 /** v2.613 PERSIST2613-02: 카탈로그 대조 테스트용 — MIGRATABLE·RUNTIME_STATE_NAMES 가 전부 설명을 갖는지 본다. */
 export { PURPOSES };

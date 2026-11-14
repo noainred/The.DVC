@@ -2773,12 +2773,12 @@ test('⑰-c 멈추기 라우트는 OTP 없이 소유자 등급만(줄이는 방�
   for (const S of [S1, S2, S3]) S.st.password = pw;
   const K = mkKey('job-cancel');
   const [s1, s2, s3] = [S1, S2, S3].map((S, i) => mkServer(`bm-jc${i + 1}`, S, { password: pw }));
+  const code = await otp('own4'); const c7 = await otp('own7');   // OTP 코드는 붙잡기 전에 받는다 — otp() 가 창(30초)을 기다리면 붙잡힌 접속이 exec 시한(20초)을 넘겨 작업이 끝난다(검증 중 실측 — ㉑-c 7b 삭제가 200 으로 지나갔다)
   const h = holdInstall(S1, K);
   const st = await SVC.startKeyLogin({ servers: [s1, s2, s3], keyId: K.id, by: 'own' });
   assert.equal(st.ok, true, JSON.stringify(st));
   await h.reached;
   // 같은 칸 작업이 도는 중 — 시작 라우트는 OTP 앞에서 409(그 코드는 쓰이지 않는다)
-  const code = await otp('own4');
   const busy = await call('own4', 'POST', '/settings/ssh-access/key-login', { servers: [s2], keyId: K.id, otp: code });
   assert.deepEqual([busy.s, busy.j.code, busy.j.jobId, busy.j.needOtp], [409, 'busy', st.jobId, undefined], busy.txt);
   assert.equal(AUTH.verifyUserOtp('own4', code).ok, true, 'busy 거절이 OTP 를 소모하지 않았다');
@@ -2818,7 +2818,7 @@ test('⑰-c 멈추기 라우트는 OTP 없이 소유자 등급만(줄이는 방�
   const noOtp = await call('own3', 'POST', rcurl, {});
   assert.deepEqual([noOtp.s, noOtp.j.needOtp], [403, true], noOtp.txt);
   assert.equal(SVC.keyJob(rv.jobId).cancelled, false);
-  const rc = await call('own7', 'POST', rcurl, { otp: await otp('own7') });
+  const rc = await call('own7', 'POST', rcurl, { otp: c7 });
   assert.deepEqual([rc.s, rc.j.ok], [200, true], rc.txt);
   hr.release();
   const rj = await waitJob(rv.jobId);
@@ -2908,6 +2908,7 @@ test('⑰-e 거두기 칸은 키마다 — 다른 키의 거두기는 동시에 
   for (const S of Ss) S.st.password = pw;
   const svs = Ss.map((S, i) => mkServer(`bm-rvs${i}`, S, { password: pw }));
   Ss.forEach((S, i) => S.writeAk(`${keys[i].pub} portal-ssh:${keys[i].id}\n`));
+  const code = await otp('own7');   // OTP 코드는 붙잡기 전에 받는다 — otp() 가 창(30초)을 기다리면 붙잡힌 접속이 exec 시한(20초)을 넘겨 작업이 끝난다(검증 중 실측 — ㉑-c 7b 삭제가 200 으로 지나갔다)
   const holds = [0, 1, 2].map((i) => holdRevoke(Ss[i], keys[i]));
   const starts = [];
   for (let i = 0; i < 3; i += 1) { const r = await SVC.startKeyRevoke({ keyId: keys[i].id, servers: [svs[i]], by: 'own' }); assert.equal(r.ok, true, JSON.stringify(r)); starts.push(r); }
@@ -2924,7 +2925,6 @@ test('⑰-e 거두기 칸은 키마다 — 다른 키의 거두기는 동시에 
   assert.deepEqual([ins.ok, ins.code, ins.status, ins.jobId], [false, 'revoking', 409, starts[0].jobId], JSON.stringify(ins));
   assert.deepEqual([KL.busyJob('key-revoke', keys[1].id), KL.busyJob('key-login', keys[0].id), KL.busyJob('key-login', keys[3].id)], [starts[1].jobId, starts[0].jobId, '']);
   // 라우트 사전 검사 — body.keyId 로 보고 OTP 앞에서 409(코드가 쓰이지 않는다)
-  const code = await otp('own7');
   const r1 = await call('own7', 'POST', '/settings/ssh-access/key-login', { servers: [svs[3]], keyId: keys[0].id, otp: code });
   assert.deepEqual([r1.s, r1.j.code], [409, 'revoking'], r1.txt);
   const r2 = await call('own7', 'POST', '/settings/ssh-access/key-revoke', { servers: [svs[3]], keyId: keys[1].id, otp: code });
@@ -2986,6 +2986,7 @@ test('⑰-g 그 키를 넣는 작업이 도는 동안에는 그 키를 지우거
   const sv = mkServer('bm-inst-busy', S, { password: pw });
   const dq = await SVC.deleteKeyReq({ keyId: K.id, by: 'own' });   // 작업 전에 만든 삭제 요청(승인 대기)
   assert.deepEqual([dq.ok, dq.pending], [true, true], JSON.stringify(dq));
+  const code = await otp('own7');   // OTP 코드는 붙잡기 전에 받는다 — otp() 가 창(30초)을 기다리면 붙잡힌 접속이 exec 시한(20초)을 넘겨 작업이 끝난다(검증 중 실측 — ㉑-c 7b 삭제가 200 으로 지나갔다)
   const h = holdInstall(S, K);
   const st = await SVC.startKeyLogin({ servers: [sv], keyId: K.id, by: 'own' });
   assert.equal(st.ok, true, JSON.stringify(st));
@@ -2998,7 +2999,6 @@ test('⑰-g 그 키를 넣는 작업이 도는 동안에는 그 키를 지우거
   const ap = await SVC.decideApproval(dq.request.id, { approve: true, by: 'own2', digest: dq.request.digest });
   assert.deepEqual([ap.ok, ap.code, ap.request?.status], [false, 'key-installing', 'failed'], JSON.stringify(ap));
   // 라우트 — OTP 앞에서 409(코드가 쓰이지 않는다)
-  const code = await otp('own7');
   const rr = await call('own7', 'DELETE', `/settings/ssh-access/keys/${K.id}?otp=${code}`);
   assert.deepEqual([rr.s, rr.j.code], [409, 'key-installing'], rr.txt);
   // 7b 화면(서버 사용률 › SSH 키)의 회전(from) · 삭제(:id)도 — 두 사람 승인이 꺼져 있어 그 화면이 받는 설치에서 OTP 앞 409(1회차 반증 참고 — 7b 경로는 넣는 중인 키를 보지 않았다)
@@ -3199,6 +3199,7 @@ test('⑰-k 옛 키 교체가 붙은 넣기 작업을 멈추는 것은 OTP(남�
   for (const S of [S1, S2]) S.st.password = pw;
   const kOld = mkKey('rc-old'); const kNew = mkKey('rc-new');
   const [s1, s2] = [S1, S2].map((S, i) => mkServer(`bm-rc${i}`, S, { password: pw }));
+  const yesCode = await otp('own9');   // OTP 코드는 붙잡기 전에 받는다 — otp() 가 창(30초)을 기다리면 붙잡힌 접속이 exec 시한(20초)을 넘겨 작업이 끝난다(검증 중 실측 — ㉑-c 7b 삭제가 200 으로 지나갔다)
   const h = holdInstall(S1, kNew);
   const st = await SVC.startKeyLogin({ servers: [s1, s2], keyId: kNew.id, replaceKeyId: kOld.id, by: 'own' });
   assert.equal(st.ok, true, JSON.stringify(st));
@@ -3207,7 +3208,7 @@ test('⑰-k 옛 키 교체가 붙은 넣기 작업을 멈추는 것은 OTP(남�
   const url = `/settings/ssh-access/jobs/${st.jobId}/cancel`;
   const no = await call('own3', 'POST', url, {});
   assert.deepEqual([no.s, no.j.needOtp], [403, true], no.txt);
-  const yes = await call('own9', 'POST', url, { otp: await otp('own9') });
+  const yes = await call('own9', 'POST', url, { otp: yesCode });
   assert.deepEqual([yes.s, yes.j.ok], [200, true], yes.txt);
   h.release();
   assert.deepEqual((await waitJob(st.jobId)).results.map((r) => r.code), ['ok', 'cancelled']);
@@ -3640,6 +3641,7 @@ test('㉑-c 7b 화면(2회차 A3 · A4 · D2-2) — 키 관리 · 등록 · 교�
   const S = await fakeSshd(); const pw = secret('Pw-7b-Busy-21c'); S.st.password = pw;
   const K = mkKey('7b-new'); const kOld = mkKey('7b-old');
   const sv = mkServer('bm-7b-busy', S, { password: pw });
+  const c2 = await otp('own7');   // OTP 코드는 붙잡기 전에 받는다 — otp() 가 창(30초)을 기다리면 붙잡힌 접속이 exec 시한(20초)을 넘겨 작업이 끝난다(검증 중 실측 — ㉑-c 7b 삭제가 200 으로 지나갔다)
   const h = holdInstall(S, K);
   const st = await SVC.startKeyLogin({ servers: [sv], keyId: K.id, replaceKeyId: kOld.id, by: 'own' });
   assert.equal(st.ok, true, JSON.stringify(st));
@@ -3647,7 +3649,6 @@ test('㉑-c 7b 화면(2회차 A3 · A4 · D2-2) — 키 관리 · 등록 · 교�
   assert.deepEqual(KL.installingKeyIds().sort(), [K.id, kOld.id].sort());
   assert.ok(ST.setGuards({ twoPerson: false }, { by: 'fixture' }).ok);
   try {
-    const c2 = await otp('own7');
     // 처리 함수는 t(v, 32)(자른 뒤 공백 제거)로 id 를 읽는다 — 예전 검사는 공백 제거 뒤 잘라, ‘id + 공백 18 + 아무 글자’ 가 검사를 비켜 가고 처리 함수에서는 그 id 가 됐다(2회차 A4)
     const pad = (id) => `${id}${' '.repeat(18)}zz`;
     for (const [m, p, body] of [['DELETE', `/tools/bm-usage/ssh-keys/${kOld.id}?otp=${c2}`, null], ['DELETE', `/tools/bm-usage/ssh-keys/${encodeURIComponent(pad(K.id))}?otp=${c2}`, null],
