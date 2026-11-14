@@ -73,24 +73,35 @@ export function approverNames() {
   if (!users) return [];
   return ownersBut('').filter((x) => canApprove(x, users, adOn, { localOnly: true }));
 }
-/** 서로 **다른 신원**의 승인자 수 — 신원이 같은 두 계정(서로 승인할 수 없다)은 쌍이 아니다(1회차 반증 3 — 쌍으로 세어 영구히 잠겼다). */
-const distinctIdentities = (names) => new Set(names.map((x) => identityKey(x))).size;
+/**
+ * 승인자 쌍의 증거가 되는 신원들 = 로컬 승인자(서로 다른 신원) ∪ 이 화면에 들어온 적이 있는 AD 소유자(지금도 목록에 있고 승인할 수 있는 이름).
+ * 신원이 같은 두 계정은 하나로 센다(서로 승인할 수 없다 — 1회차 반증 3).
+ */
+function pairIdentities() {
+  const ids = new Set(approverNames().map((x) => identityKey(x)));
+  const { users, adOn } = ctx();
+  if (users && adOn) {
+    const seen = new Set(ST.getGuards().seenAd || []);
+    for (const x of ownersBut('')) if (seen.has(identityKey(x)) && canApprove(x, users, adOn)) ids.add(identityKey(x));
+  }
+  return ids;
+}
 /**
  * 승인할 수 있는 소유자가 둘(다른 신원) 이상이면 상태 파일에 ‘쌍을 봤다’(pairSeen)를 세운다 — 기동 때 · 화면 · 요청 · 주기 점검에서 부른다.
  * ‘승인자 0명이면 본인 OTP 로 끄기’ 지름길은 **pairSeen 이 아닐 때만** 연다(반증 R3 · R4 — 목록 기준은 버렸다). 소유자가 실제로 한 명인 설치는 계속 혼자 끌 수 있다.
- * 쌍의 증거: 로컬 승인자 둘 · 다른 사람의 실제 승인(service.decideApproval) · AD 소유자가 이 화면에 들어온 세션(noteOwnerSession — 1회차 반증 1).
+ * 쌍의 증거: 로컬 승인자 둘 · 다른 사람의 승인(service.decideApproval — 실행 결과와 무관) · AD 소유자가 이 화면에 들어온 세션(noteOwnerSession — 신원을 상태 파일에 적는다).
  * 한계: 증거가 생기기 전에 다른 소유자를 승인 불가로 만든 경우는 막지 못한다(기동 때 바로 본다 — 로컬 계정).
  */
 export function notePair({ by = '' } = {}) {
   try {
     const g = ST.getGuards();
     if (g.unreadable || g.pairSeen) return;
-    if (distinctIdentities(approverNames()) >= 2) ST.markPairSeen({ by });
+    if (pairIdentities().size >= 2) ST.markPairSeen({ by });
   } catch { /* 관측 실패는 판정을 바꾸지 않는다(pairSeen 은 엄한 쪽으로만 움직인다) */ }
 }
 /**
- * 소유자 등급을 통과한 세션이 이 화면에 들어왔다(라우트가 부른다). 그 사람이 로컬 계정이 아니고(AD) 다른 신원의 승인자가 있으면 쌍이다 —
- * AD 공동 소유자를 목록에서 빼고 혼자 끄던 길(1회차 반증 1 — pairSeen 을 로컬 계정으로만 세웠다)을 막는다.
+ * 소유자 등급을 통과한 세션이 이 화면에 들어왔다(라우트가 부른다). 그 사람이 로컬 계정이 아니면(AD) 신원을 상태 파일에 적고 쌍을 다시 본다 —
+ * AD 공동 소유자를 목록에서 빼거나(1회차 반증 1) 대소문자만 다른 로컬 계정으로 가려(2회차 A1) 혼자 끄던 길을, 둘 다 한 번이라도 들어왔으면 막는다.
  */
 export function noteOwnerSession(username) {
   try {
@@ -99,13 +110,12 @@ export function noteOwnerSession(username) {
     const g = ST.getGuards();
     if (g.unreadable || g.pairSeen) return;
     const { users, adOn } = ctx();
-    if (!users || !adOn || users.some((x) => String(x.username || '') === u)) { notePair({ by: u }); return; }
-    const me = identityKey(u);
-    if (approverNames().some((x) => identityKey(x) !== me)) ST.markPairSeen({ by: u });
+    if (users && adOn && !users.some((x) => String(x.username || '') === u)) ST.noteSeenAd(identityKey(u));
+    notePair({ by: u });
   } catch { /* */ }
 }
 /** 7b 등 다른 화면의 키 변경 라우트가 쓰는 거절 — 두 사람 승인이 켜져 있으면 승인 절차가 있는 화면으로 보낸다(우회 금지). */
 export function twoPersonRedirect() {
   return twoPersonOn() ? { ok: false, code: 'two-person-required', status: 409,
-    reason: '두 사람 승인이 켜져 있어 여기서는 키를 등록 · 교체 · 삭제할 수 없습니다 — 설정 › 보안 › SSH 공용 접속에서 요청하면 다른 설정 소유자의 승인 뒤 실행됩니다. 승인할 다른 소유자가 없으면 그 화면의 보호 장치에서 두 사람 승인을 끄거나(소유자가 한 명뿐인 설치) 승인할 소유자를 세우세요.' } : null;
+    reason: '두 사람 승인이 켜져 있어 여기서는 키를 등록 · 교체 · 삭제할 수 없습니다 — 설정 › 보안 › SSH 공용 접속에서 요청하면 다른 설정 소유자의 승인 뒤 실행됩니다. 승인할 다른 소유자가 없으면, 승인할 수 있는 소유자가 둘이었던 적이 없는 포탈은 그 화면의 보호 장치에서 두 사람 승인을 끌 수 있고, 그 밖에는 승인할 소유자를 다시 세워야 합니다.' } : null;
 }

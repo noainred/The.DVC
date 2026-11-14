@@ -37,6 +37,15 @@ export const STEP_TIMEOUT_MS = 20_000;
 export const READY_TIMEOUT_MS = 15_000;
 /** 접속 한 번(세션)의 시한 — 준비 + exec 수 × exec 시한 + 여유 5초. 넘기면 세션을 끊는다(테스트가 산수를 고정). */
 export const legDeadlineMs = (execs) => READY_TIMEOUT_MS + Math.max(1, execs) * STEP_TIMEOUT_MS + 5_000;
+/**
+ * 시한 경주 — fn 이 시한 안에 끝나지 않으면 던진다(fn 이 signal 을 받지 않는 호출부용 · 2회차 C2-2 키 고르기의 연결 시험).
+ * 밑의 접속은 그 호출부의 자체 시한으로 끝난다 — 여기는 서버 자물쇠를 무한정 쥐지 않게 하는 것.
+ */
+export async function withLegDeadline(execs, fn) {
+  let tm;
+  const timeout = new Promise((_r, rej) => { tm = setTimeout(() => rej(new Error(`시한 초과(${Math.round(legDeadlineMs(execs) / 1000)}초)`)), legDeadlineMs(execs)); });
+  try { return await Promise.race([fn(), timeout]); } finally { clearTimeout(tm); }
+}
 const JOB_KEEP_MS = 3600_000;
 
 /* ── 원격 명령(akScript 의 스크립트를 /bin/sh 한 줄로 싼 것 — 테스트가 실제 셸로 돌린다) ── */
@@ -297,6 +306,8 @@ const runningRevokes = () => [...slots.keys()].filter((k) => k.startsWith('revok
  * 서버 쪽에도 자물쇠가 있다(akScript LOCK — 다른 포탈 · 다른 노드).
  */
 export const serverLockKey = (s) => `${String(s?.host || '').trim().toLowerCase()}:${Number(s?.port) || 22}`;
+/** 그 접속처를 지금 누가 만지고 있나(키 고르기가 기다리지 않고 409 로 돌려주게 — 2회차 C2-7). */
+export function serverLockBusy(key) { return serverLocks.has(key); }
 /** 서버 자물쇠(같은 접속처를 바꾸는 다른 동작 — 키 고르기 — 도 함께 잡는다 · 1회차 C1-2). */
 export async function withServerLock(key, fn) {
   const prev = serverLocks.get(key) || Promise.resolve();
@@ -335,6 +346,8 @@ export function busyJob(kind, keyId = '') { const p = jobStartIssue(kind, keyId)
 export function jobKind(id) { return jobs.get(t(id, 20))?.kind || ''; }
 /** 진행 중인 넣기 작업의 키 id(없으면 '') — 그 키를 지우거나 회전으로 퇴역시키지 못하게(1회차 C1-3). */
 export function installingKeyId() { const j = runningIn('install'); return j ? t(j.meta?.keyId, 32) : ''; }
+/** 진행 중인 넣기 작업이 쓰는 키 id 들 — 넣는 키와 지울 옛 키(교체). 옛 키를 그 사이 지우면 남은 서버의 옛 키 줄을 거둘 수 없게 된다(2회차 D2-2). */
+export function installingKeyIds() { const j = runningIn('install'); return j ? [t(j.meta?.keyId, 32), t(j.meta?.replaceKeyId, 32)].filter(Boolean) : []; }
 /** 멈추기에 OTP 가 필요한 작업인가 — 거두기, 또는 옛 키 교체가 붙은 넣기(남은 서버에 옛 키 — 유출 키일 수 있다 — 가 남는다 · 1회차 A4). */
 export function cancelNeedsOtp(id) { const j = jobs.get(t(id, 20)); return !!j && (j.kind === 'key-revoke' || !!j.meta?.replaceKeyId); }
 /** 작업을 멈춘다(지금 서버는 끝까지 — 되돌림을 끊지 않는다 · 남은 서버는 ‘멈춤’ 으로 적는다). */
@@ -379,7 +392,8 @@ export function startJob({ kind, servers, run, by = '', meta = {}, onDone = null
       }
       job.current = s.name || s.host;
       let r;
-      try { r = await withServerLock(serverLockKey(s), () => run(s, handle)); } catch (e) { r = { id: s.id, name: s.name || s.host, corp: t(s.vcenterId), ok: false, code: 'error', reason: `처리 중 오류(${String(e?.message || e).replace(/\s+/g, ' ').slice(0, 100)})` }; }
+      // 자물쇠를 기다리는 사이 멈췄으면 그 서버는 하지 않는다(2회차 C2-2 — 앞 동작이 오래 쥐고 있으면 멈추기가 듣지 않았다).
+      try { r = await withServerLock(serverLockKey(s), () => (job.cancelled ? { id: s.id, name: s.name || s.host, corp: t(s.vcenterId), ok: false, code: 'cancelled', reason: `작업을 멈춰 이 서버는 하지 않았습니다${job.cancelWhy ? `(${job.cancelWhy})` : ''}.` } : run(s, handle))); } catch (e) { r = { id: s.id, name: s.name || s.host, corp: t(s.vcenterId), ok: false, code: 'error', reason: `처리 중 오류(${String(e?.message || e).replace(/\s+/g, ' ').slice(0, 100)})` }; }
       job.results.push(r);
       // 서버마다 이벤트 루프에 차례를 넘긴다(1회차 C1-1 — SSH 전에 바로 실패하는 서버 500대가 한 턴에 돌아 포탈이 수 초 멈췄다).
       await new Promise((res) => { setImmediate(res); });

@@ -1692,9 +1692,10 @@ test('⑨-f 서버 쪽 자물쇠 · 바꾼 뒤 확인 · 읽기 전용 · 신호
       assert.deepEqual(fs.readdirSync(path.join(a.h, '.ssh')), ['authorized_keys'], `${shell} ${why} — 남은 자물쇠 · 임시 파일을 치웠다`);
     }
     // ③-b 주인 표 없음 5초는 **그 자물쇠를 처음 본 때부터**(1회차 반증 7 ② — 대기자 자신의 대기 횟수로 재서, 오래 기다린 대기자가 막 만들어져 아직 표가 없는 남의 자물쇠를 치웠다).
-    //      살아 있는 주인의 자물쇠를 6번 기다린 뒤 보유자가 놓고 다른 쪽이 막 잡아 표를 쓰기 전(2초) → 다시 표가 생긴다 → 끝까지 기다려 locked · 남의 자물쇠 그대로
+    //      살아 있는 주인의 자물쇠를 6번 기다린 뒤 보유자가 놓고 다른 쪽이 막 잡아 표를 쓰기 전(2초) → 다시 표가 생긴다 → 또 한 번 놓고 잡는 사이 3초 표 없음 → 다시 표.
+    //      표 없는 틈마다 처음 본 때부터 잰다(앞 틈의 시각을 이어 쓰면 둘째 틈에서 치운다) → 끝까지 기다려 locked · 남의 자물쇠 그대로
     const a3 = mk(`${OTHER}\n`); owner(a3.lk, liveTok); fs.writeFileSync(path.join(a3.h, 'clock'), '1000');
-    fs.writeFileSync(path.join(a3.h, 'sleep-hook.sh'), `lk="$HOME/.ssh/.authorized_keys.portal.lock"\n[ "$c" = 6 ] && rm -f "$lk/owner"\n[ "$c" = 8 ] && printf '%s\\n' '${liveTok}' > "$lk/owner"\n`);
+    fs.writeFileSync(path.join(a3.h, 'sleep-hook.sh'), `lk="$HOME/.ssh/.authorized_keys.portal.lock"\ncase "$c" in 6|10) rm -f "$lk/owner" ;; 8|13) printf '%s\\n' '${liveTok}' > "$lk/owner" ;; esac\n`);
     const r3 = sh(add, a3.h, shell, { PATH: binLock });
     assert.deepEqual([r3.m, fs.readFileSync(a3.f, 'utf8'), fs.readFileSync(path.join(a3.lk, 'owner'), 'utf8')], [{ kind: 'fail', why: 'locked' }, `${OTHER}\n`, `${liveTok}\n`], `${shell}: ${r3.out}${r3.err}`);
     // ④ 경합이 아닌 mkdir 실패 — 15초 기다리지 않는다(1회차 B3). 자물쇠 자리에 일반 파일(폴더는 쓸 수 있음) → 몇 번 다시 해 본 뒤 fail write(1회차 반증 7 ① — 예전 notwritable ‘관리자가 잠가 둠’ 은 틀린 사유)

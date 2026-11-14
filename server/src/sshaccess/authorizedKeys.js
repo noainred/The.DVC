@@ -19,7 +19,8 @@ export { PORTAL_MARK };   // 표식 글자는 한 곳(akScript — 순수)에서
  * 읽기 명령 — 홈의 기본 경로만(AuthorizedKeysFile 이 다른 서버는 화면이 ‘읽은 파일’ 경로를 밝히고, 최종 판정은 실제 접속으로 한다).
  * 첫 줄에 파일 상태(없음 · 읽음)를 표지로 낸다 — 파일이 없는 것과 비어 있는 것을 가른다. 출력은 head -c 로 자른다.
  */
-export const READ_COMMAND = "f=\"$HOME/.ssh/authorized_keys\"; if [ -f \"$f\" ]; then echo '##AK present'; head -c 262144 \"$f\"; else echo '##AK missing'; fi";
+// 2회차 E2-3: 없음 · 못 읽음 · 일반 파일 아님을 가른다(예전에는 모르는 것을 ‘없음’ 으로, 못 읽는 파일을 ‘0줄’ 로 말했다). 앞 표지 한 줄 뒤에 내용.
+export const READ_COMMAND = "f=\"$HOME/.ssh/authorized_keys\"; if [ -f \"$f\" ]; then if [ -r \"$f\" ]; then echo '##AK present'; head -c 262144 \"$f\"; else echo '##AK unreadable'; fi; elif [ -e \"$f\" ] || [ -L \"$f\" ]; then echo '##AK notfile'; else echo '##AK missing'; fi";
 
 const KEY_TYPE_RE = /^(ssh-ed25519|ssh-rsa|ssh-dss|ecdsa-sha2-nistp(?:256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com)$/;
 const B64_RE = /^[A-Za-z0-9+/]+={0,3}$/;
@@ -79,6 +80,8 @@ export function parseReadOutput(stdout) {
   const nl = s.indexOf('\n');
   const head = (nl >= 0 ? s.slice(0, nl) : s).trim();
   if (head === '##AK missing') return { ok: true, present: false, keys: [], bad: 0, truncated: 0 };
+  if (head === '##AK unreadable') return { ok: false, code: 'unreadable', reason: 'authorized_keys 가 있지만 이 계정으로 읽을 수 없습니다(권한).' };
+  if (head === '##AK notfile') return { ok: false, code: 'notfile', reason: 'authorized_keys 가 일반 파일이 아니거나 따라갈 수 없는 링크입니다.' };
   if (head !== '##AK present') return { ok: false, reason: '읽기 명령의 출력이 예상과 다릅니다(셸이 다르거나 로그인 메시지가 섞임).' };
   return { ok: true, present: true, ...parseAuthorizedKeys(nl >= 0 ? s.slice(nl + 1) : '') };
 }

@@ -69,7 +69,19 @@ function slugMap(entries) {
  * 받는 곳을 읽는다(비동기 · 파일 내용은 돌려주지 않는다).
  * @param {{corps:{id:string}[], servers:{id:string,name:string,vcenterId?:string}[]}} known  지금 있는 법인 · OS 등록 서버(폴더 이름 → id)
  */
-export async function scanInbox({ corps = [], servers = [] } = {}) {
+/**
+ * 받는 곳 훑기는 **한 번에 하나**(2회차 C2-1 — 응답 없는 공유에서 lstat 이 멈추면 점검 회차 · 화면 GET 마다 libuv 스레드를 하나씩 더 붙잡아,
+ * 4개가 다 차면 포탈 전체의 파일 읽기 · DNS 조회가 멈췄다). 앞 훑기가 아직 끝나지 않았으면 기다리지 않고 지난 결과(없으면 빈 결과)에 busy 를 붙여 돌려준다.
+ */
+let _scanInFlight = null;
+let _lastScan = null;
+export async function scanInbox(opts = {}) {
+  if (_scanInFlight) return { ...(_lastScan || { exists: false, dir: inboxDir(), items: [], truncated: 0, unknownFolders: [], unknownTotal: 0, rootIsLink: false }), busy: true };
+  _scanInFlight = scanInboxOnce(opts);
+  try { const r = await _scanInFlight; _lastScan = r; return r; } finally { _scanInFlight = null; }
+}
+export function _resetInboxScanForTest() { _scanInFlight = null; _lastScan = null; }
+async function scanInboxOnce({ corps = [], servers = [] } = {}) {
   const base = inboxDir();
   const out = { exists: false, dir: base, items: [], truncated: 0, unknownFolders: [], unknownTotal: 0, rootIsLink: false };
   try { const st = await fs.promises.lstat(base); if (st.isSymbolicLink()) { out.rootIsLink = true; return out; } if (!st.isDirectory()) return out; } catch { return out; }

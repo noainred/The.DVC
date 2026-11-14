@@ -89,7 +89,7 @@ export function rotateKey(fromId, toId, { now = Date.now() } = {}) {
   const from = KS.keyById(fromId); const to = KS.keyById(toId);
   if (!from || !to) return { ok: false, code: 'not-found', status: 404, reason: '옛 키 또는 새 키를 찾을 수 없습니다.' };
   if (from.id === to.id) return { ok: false, code: 'same-key', reason: '같은 키로는 회전할 수 없습니다.' };
-  if (to.status !== 'active') return { ok: false, code: 'retired', reason: '새 키가 퇴역 상태입니다.' };
+  if (to.status !== 'active') return { ok: false, code: to.status === 'pending' ? 'key-pending' : 'retired', reason: to.status === 'pending' ? '새 키가 두 사람 승인을 기다리는 중입니다 — 승인된 뒤 교체하세요.' : '새 키가 퇴역 상태입니다.' };
   const unread = KS.keyStoreLoadError();
   if (unread) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'SSH 키 저장소를 읽지 못해 회전하지 않았습니다.' };
   // v3.9.0(점검 B-4): 새 키의 폴더가 옛 키를 쓰는 서버 · 공통 계정을 덮는지 — 아니면 회전 뒤 수집이 key-folder 로 끊긴다. 쓰기 전에 거절한다.

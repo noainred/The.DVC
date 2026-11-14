@@ -12,17 +12,25 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { registerStateFile } from '../util/stateFiles.js';
 
-const FILE = () => path.join(config.configDir, 'ssh-key-jobs-inflight.json');
+export const INFLIGHT_FILE_NAME = 'ssh-key-jobs-inflight.json';
+const FILE = () => path.join(config.configDir, 'ssh-key-jobs-inflight.json');   // = INFLIGHT_FILE_NAME
+// 상태 파일 — 설정 변경 자동 백업 · 지문에 넣지 않고, 복원에서도 뺀다(되돌리면 끝난 작업이 ‘중단’ 사건이 된다 · 2회차 D2-1).
+registerStateFile(INFLIGHT_FILE_NAME);
 const MAX = 50;
 const t = (v, max = 128) => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max);
 let cache = null;
 
 function load() {
   if (cache) return cache;
+  let text;
   try {
     if (!fs.existsSync(FILE())) { cache = []; return cache; }
-    const j = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    text = fs.readFileSync(FILE(), 'utf8');
+  } catch { return []; }   // 읽기 오류(권한 등)는 손상이 아니다 — 원본을 두고 다음에 다시 읽는다(2회차 C2-8)
+  try {
+    const j = JSON.parse(text);
     cache = Array.isArray(j?.items) ? j.items.filter((x) => x && typeof x === 'object').slice(-MAX) : [];
   } catch {
     try { preserveCorrupt(FILE()); } catch { /* */ }

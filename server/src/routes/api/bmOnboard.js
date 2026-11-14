@@ -33,7 +33,12 @@ const csvPerm = requirePerm('data.csv');   // v2.643: CSV · 텍스트 가져오
 const noDemo = (req, res, next) => (isDemoGuest(req.user) ? res.status(403).json({ ok: false, error: 'forbidden', reason: '데모 계정은 서버를 등록할 수 없습니다.' }) : next());
 const EDGE_ONLINE_MS = 15 * 60_000;   // 엣지 접속 판정 — 설정 인출(기본 몇 분)의 여러 배. 이보다 오래면 '끊김', 기록이 없으면 '모름'
 /** 키 관리 게이트 묶음 — 순서가 뜻이다(관리자 → tools → 소유자 등급 → OTP). */
-const keyAdmin = [adminOnly, toolsPerm, requireSettingsOwner, reauth];
+/**
+ * 쓰기는 조회 · 쓰기 범위가 모두 무제한인 계정만(2회차 A3 — SSH 공용 접속 쓰기와 같은 판정 · 쓰기 범위를 좁힌 소유자가 이 화면으로 전 법인 키 · 공통 계정을 바꿨다).
+ */
+const fullRW = (req, res, next) => (isFullReadWriteScope(req.user, store.get()) ? next()
+  : res.status(403).json({ ok: false, code: 'write-scope', reason: 'SSH 키 · 공통 계정을 바꾸려면 조회 · 쓰기 범위가 모두 무제한인 설정 소유자여야 합니다.' }));
+const keyAdmin = [adminOnly, toolsPerm, requireSettingsOwner, fullRW, reauth];
 /**
  * 키 등록 전용 — 저장 방식이 키를 받을 수 없으면 **OTP 를 쓰기 전에** 거절한다(점검 B-5: 평문 정책 409 가 1회 비밀번호를 먼저 소모했다).
  * keyStore.addKey 도 같은 검사를 다시 한다(이 앞단은 OTP 를 아끼려는 것 — 판정은 keyVaultIssue 하나).
@@ -41,18 +46,19 @@ const keyAdmin = [adminOnly, toolsPerm, requireSettingsOwner, reauth];
 const keyVaultFirst = (_req, res, next) => { const v = KS.keyVaultIssue(); if (v) return send(res, v); return next(); };
 /** 두 사람 승인이 켜져 있으면 이 화면의 키 등록 · 교체 · 삭제를 받지 않는다 — OTP 를 쓰기 전에 거절한다. */
 const twoPersonFirst = (_req, res, next) => { const v = twoPersonRedirect(); if (v) return send(res, v); return next(); };
-const keyAddGate = [adminOnly, toolsPerm, requireSettingsOwner, twoPersonFirst, keyVaultFirst, reauth];
+const keyAddGate = [adminOnly, toolsPerm, requireSettingsOwner, fullRW, twoPersonFirst, keyVaultFirst, reauth];
 /**
  * 그 키를 서버에 넣는 작업(SSH 공용 접속 키 로그인 설정)이 도는 동안에는 지우거나 회전으로 퇴역시키지 않는다(1회차 반증 참고 · C1-3 과 같은 규칙 — 7b 경로도).
  * 회전은 옛 키(from), 삭제는 그 키(:id). OTP 를 쓰기 전에 409.
  */
 const installingFirst = (req, res, next) => {
-  const k = KL.installingKeyId();
-  const target = String(req.params?.id || req.body?.from || '').trim().slice(0, 32);
-  if (k && target && k === target) return res.status(409).json({ ok: false, code: 'key-installing', reason: '그 키를 서버에 넣는 작업이 진행 중입니다 — 작업이 끝나거나 멈춘 뒤 다시 하세요.' });
+  const busy = KL.installingKeyIds();
+  // 처리 함수와 **같은 다듬기**(t(v, 32) — 자른 뒤 공백 제거)로 본다(2회차 A4 — 공백을 붙인 id 로 비켜 갔다). 넣는 키 · 교체로 지울 옛 키 둘 다(D2-2).
+  const target = t(req.params?.id || bodyOf(req).from || '', 32);
+  if (target && busy.includes(target)) return res.status(409).json({ ok: false, code: 'key-installing', reason: '그 키를 서버에 넣거나 교체하는 작업이 진행 중입니다 — 작업이 끝나거나 멈춘 뒤 다시 하세요.' });
   return next();
 };
-const keyChangeGate = [adminOnly, toolsPerm, requireSettingsOwner, twoPersonFirst, installingFirst, reauth];
+const keyChangeGate = [adminOnly, toolsPerm, requireSettingsOwner, fullRW, twoPersonFirst, installingFirst, reauth];
 
 const t = (v, max = 256) => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max).trim();
 const bodyOf = (req) => (req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {});

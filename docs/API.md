@@ -1053,9 +1053,9 @@ Prometheus/OTel 익스포터(선택 토큰).
 | DELETE | `/tools/bm-storage/servers/:id` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bmstor.js:532](../server/src/routes/api/bmstor.js#L532) |
 | PUT | `/tools/bm-storage/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bmstor.js:539](../server/src/routes/api/bmstor.js#L539) |
 | GET | `/tools/bm-usage` | 권한 `tools` | [server/src/routes/api/bmUsage.js:968](../server/src/routes/api/bmUsage.js#L968) |
-| GET | `/tools/bm-usage/accounts` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmOnboard.js:135](../server/src/routes/api/bmOnboard.js#L135) |
-| POST | `/tools/bm-usage/accounts` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/bmOnboard.js:143](../server/src/routes/api/bmOnboard.js#L143) |
-| DELETE | `/tools/bm-usage/accounts/:id` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/bmOnboard.js:155](../server/src/routes/api/bmOnboard.js#L155) |
+| GET | `/tools/bm-usage/accounts` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmOnboard.js:141](../server/src/routes/api/bmOnboard.js#L141) |
+| POST | `/tools/bm-usage/accounts` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `fullRW` · `reauth` | [server/src/routes/api/bmOnboard.js:149](../server/src/routes/api/bmOnboard.js#L149) |
+| DELETE | `/tools/bm-usage/accounts/:id` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `fullRW` · `reauth` | [server/src/routes/api/bmOnboard.js:161](../server/src/routes/api/bmOnboard.js#L161) |
 | GET | `/tools/bm-usage/activity` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1230](../server/src/routes/api/bmUsage.js#L1230) |
 | GET | `/tools/bm-usage/annotations` | 권한 `tools` | [server/src/routes/api/bmAnnotations.js:184](../server/src/routes/api/bmAnnotations.js#L184) |
 | POST | `/tools/bm-usage/annotations` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmAnnotations.js:188](../server/src/routes/api/bmAnnotations.js#L188) |
@@ -1093,14 +1093,14 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/tools/bm-usage/maintenance/:id/end` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmMaint.js:316](../server/src/routes/api/bmMaint.js#L316) |
 | GET | `/tools/bm-usage/maintenance/occurrences` | 권한 `tools` | [server/src/routes/api/bmMaint.js:307](../server/src/routes/api/bmMaint.js#L307) |
 | POST | `/tools/bm-usage/maintenance/preview` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmMaint.js:311](../server/src/routes/api/bmMaint.js#L311) |
-| POST | `/tools/bm-usage/onboard/analyze` | 역할 `admin` · 권한 `tools`, `data.csv` · `noDemo` | [server/src/routes/api/bmOnboard.js:222](../server/src/routes/api/bmOnboard.js#L222) |
-| POST | `/tools/bm-usage/onboard/apply` | 역할 `admin` · 권한 `tools`, `data.csv` · `noDemo` | [server/src/routes/api/bmOnboard.js:238](../server/src/routes/api/bmOnboard.js#L238) |
-| GET | `/tools/bm-usage/onboard/codes` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmOnboard.js:357](../server/src/routes/api/bmOnboard.js#L357) |
-| DELETE | `/tools/bm-usage/onboard/edge-rows` | 역할 `admin` · 권한 `tools` · `noDemo` | [server/src/routes/api/bmOnboard.js:287](../server/src/routes/api/bmOnboard.js#L287) |
-| GET | `/tools/bm-usage/onboard/edge-rows` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmOnboard.js:267](../server/src/routes/api/bmOnboard.js#L267) |
-| GET | `/tools/bm-usage/onboard/missing` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmOnboard.js:301](../server/src/routes/api/bmOnboard.js#L301) |
-| GET | `/tools/bm-usage/onboard/template.csv` | 역할 `admin` · 권한 `tools`, `data.csv` | [server/src/routes/api/bmOnboard.js:210](../server/src/routes/api/bmOnboard.js#L210) |
-| POST | `/tools/bm-usage/onboard/test` | 역할 `admin` · 권한 `tools` · `noDemo` | [server/src/routes/api/bmOnboard.js:342](../server/src/routes/api/bmOnboard.js#L342) |
+| POST | `/tools/bm-usage/onboard/analyze` | 역할 `admin` · 권한 `tools`, `data.csv` · `noDemo` | [server/src/routes/api/bmOnboard.js:228](../server/src/routes/api/bmOnboard.js#L228) |
+| POST | `/tools/bm-usage/onboard/apply` | 역할 `admin` · 권한 `tools`, `data.csv` · `noDemo` | [server/src/routes/api/bmOnboard.js:244](../server/src/routes/api/bmOnboard.js#L244) |
+| GET | `/tools/bm-usage/onboard/codes` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmOnboard.js:363](../server/src/routes/api/bmOnboard.js#L363) |
+| DELETE | `/tools/bm-usage/onboard/edge-rows` | 역할 `admin` · 권한 `tools` · `noDemo` | [server/src/routes/api/bmOnboard.js:293](../server/src/routes/api/bmOnboard.js#L293) |
+| GET | `/tools/bm-usage/onboard/edge-rows` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmOnboard.js:273](../server/src/routes/api/bmOnboard.js#L273) |
+| GET | `/tools/bm-usage/onboard/missing` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmOnboard.js:307](../server/src/routes/api/bmOnboard.js#L307) |
+| GET | `/tools/bm-usage/onboard/template.csv` | 역할 `admin` · 권한 `tools`, `data.csv` | [server/src/routes/api/bmOnboard.js:216](../server/src/routes/api/bmOnboard.js#L216) |
+| POST | `/tools/bm-usage/onboard/test` | 역할 `admin` · 권한 `tools` · `noDemo` | [server/src/routes/api/bmOnboard.js:348](../server/src/routes/api/bmOnboard.js#L348) |
 | GET | `/tools/bm-usage/perf-rules` | 권한 `tools` | [server/src/routes/api/bmPerfOps.js:295](../server/src/routes/api/bmPerfOps.js#L295) |
 | PUT | `/tools/bm-usage/perf-rules` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` | [server/src/routes/api/bmPerfOps.js:296](../server/src/routes/api/bmPerfOps.js#L296) |
 | POST | `/tools/bm-usage/perf-rules/dry-run` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/bmPerfOps.js:297](../server/src/routes/api/bmPerfOps.js#L297) |
@@ -1132,12 +1132,12 @@ Prometheus/OTel 익스포터(선택 토큰).
 | PUT | `/tools/bm-usage/settings` | 역할 `admin` | [server/src/routes/api/bmUsage.js:1494](../server/src/routes/api/bmUsage.js#L1494) |
 | GET | `/tools/bm-usage/slo` | 권한 `tools` | [server/src/routes/api/bmPlaybookSlo.js:198](../server/src/routes/api/bmPlaybookSlo.js#L198) |
 | PUT | `/tools/bm-usage/slo` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` | [server/src/routes/api/bmPlaybookSlo.js:199](../server/src/routes/api/bmPlaybookSlo.js#L199) |
-| GET | `/tools/bm-usage/ssh-keys` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmOnboard.js:88](../server/src/routes/api/bmOnboard.js#L88) |
-| POST | `/tools/bm-usage/ssh-keys` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `twoPersonFirst` · `keyVaultFirst` · `reauth` | [server/src/routes/api/bmOnboard.js:96](../server/src/routes/api/bmOnboard.js#L96) |
-| DELETE | `/tools/bm-usage/ssh-keys/:id` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `twoPersonFirst` · `installingFirst` · `reauth` | [server/src/routes/api/bmOnboard.js:128](../server/src/routes/api/bmOnboard.js#L128) |
-| PUT | `/tools/bm-usage/ssh-keys/:id` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/bmOnboard.js:104](../server/src/routes/api/bmOnboard.js#L104) |
-| POST | `/tools/bm-usage/ssh-keys/:id/passphrase` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/bmOnboard.js:111](../server/src/routes/api/bmOnboard.js#L111) |
-| POST | `/tools/bm-usage/ssh-keys/rotate` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `twoPersonFirst` · `installingFirst` · `reauth` | [server/src/routes/api/bmOnboard.js:118](../server/src/routes/api/bmOnboard.js#L118) |
+| GET | `/tools/bm-usage/ssh-keys` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmOnboard.js:94](../server/src/routes/api/bmOnboard.js#L94) |
+| POST | `/tools/bm-usage/ssh-keys` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `fullRW` · `twoPersonFirst` · `keyVaultFirst` · `reauth` | [server/src/routes/api/bmOnboard.js:102](../server/src/routes/api/bmOnboard.js#L102) |
+| DELETE | `/tools/bm-usage/ssh-keys/:id` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `fullRW` · `twoPersonFirst` · `installingFirst` · `reauth` | [server/src/routes/api/bmOnboard.js:134](../server/src/routes/api/bmOnboard.js#L134) |
+| PUT | `/tools/bm-usage/ssh-keys/:id` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `fullRW` · `reauth` | [server/src/routes/api/bmOnboard.js:110](../server/src/routes/api/bmOnboard.js#L110) |
+| POST | `/tools/bm-usage/ssh-keys/:id/passphrase` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `fullRW` · `reauth` | [server/src/routes/api/bmOnboard.js:117](../server/src/routes/api/bmOnboard.js#L117) |
+| POST | `/tools/bm-usage/ssh-keys/rotate` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `fullRW` · `twoPersonFirst` · `installingFirst` · `reauth` | [server/src/routes/api/bmOnboard.js:124](../server/src/routes/api/bmOnboard.js#L124) |
 | PUT | `/tools/bm-usage/tuning/overrides` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` | [server/src/routes/api/bmUsage.js:1096](../server/src/routes/api/bmUsage.js#L1096) |
 | GET | `/tools/capacity` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:72](../server/src/routes/api/toolsCapacity.js#L72) |
 | GET | `/tools/capacity-forecast` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1787](../server/src/routes/api/toolsCapacity.js#L1787) |
@@ -1739,9 +1739,9 @@ Prometheus/OTel 익스포터(선택 토큰).
 | `fleetWideOnly` | 23 | **전체 범위 계정만**(v2.607 AUTHZ2607-03 — vCenter 등록·데이터 소스 전환·표시 순서). 범위 제한 계정은 403. |
 | `demoBlockWrite` | 21 | **데모(손님) 계정 403**(v2.976 집중 모니터링 쓰기 — `isDemoGuest`). `noDemo` 와 같은 뜻 — 관리자 게이트 뒤에 붙는 쓰기 거절이고 권한을 넓히지 않는다. |
 | `tokenFirst` | 21 | **수집 토큰 확인을 본문 해석보다 먼저** 한다(v2.741 — 토큰 없는 요청이 본문 파서·큰 본문 한도에 닿지 않게). 토큰이 없거나 틀리면 403, 수집 토큰 미설정이면 404. |
+| `fullRW` | 19 | **조회 · 쓰기 범위 모두 무제한인 계정만**(v3.10.0 SSH 공용 접속 쓰기 — `isFullReadWriteScope`). writeVcenters 로 쓰기를 좁힌 설정 소유자도 403 `write-scope` — 이 화면의 쓰기는 전 법인 서버의 authorized_keys · 승인 · 사용 중지를 바꾼다. |
 | `fullReadWriteScopeOnlyWith` | 14 | **조회 · 쓰기 모두 전체 범위인 계정만**(v2.935 — `routes/admin/shared.js` · `auth/scope.js isFullReadWriteScope`). 조회 범위 또는 쓰기 범위(writeVcenters)를 지정한 계정은 403 — 스위치 설정을 바꾸는 라우트(SAN 플로우 모니터)가 쓴다. |
 | `requireSuperAdmin` | 13 | **super_admin 전용**(v2.726 좌측 메뉴 배포·철회 · v2.740 아이실론 디렉터리 사용량 수집 대상 설정 — 조회·저장·일괄 변경·연결 시험·메일·SSH 키). 저장 역할이 super_admin 인 계정만(`req.user.superAdmin`). 역할 admin 은 403 `super-admin-only`(`requiredRole: ['super_admin']`). |
-| `fullRW` | 12 | **조회 · 쓰기 범위 모두 무제한인 계정만**(v3.10.0 SSH 공용 접속 쓰기 — `isFullReadWriteScope`). writeVcenters 로 쓰기를 좁힌 설정 소유자도 403 `write-scope` — 이 화면의 쓰기는 전 법인 서버의 authorized_keys · 승인 · 사용 중지를 바꾼다. |
 | `fleetReadOnly` | 10 | **전체 범위 계정만**(v2.621 SEC-03 — 폴더 사용량 조회. 응답이 RMA 엣지 IP·호스트명·마운트 경로를 싣는다 · v2.622 SEC-03 — GPU 게스트 엣지 배포 설정·엣지 배포 사용자·수집 진단 조회). 범위 제한 계정은 403. |
 | `issueSettingsFleetOnly` | 10 | **전체 범위 계정만**(v2.871 — 이슈 설정: 자동 할당 규칙 · 알림 · 사람별 메일 주소. 전 법인 공용 설정이다). 범위 제한 계정은 403 · 핸들러가 관리자 판본(데모 제외)을 한 번 더 본다. |
 | `express.json` | 10 | 본문 파서(대용량 JSON 한도). ⚠ 게이트가 아니다 — 이 자리에 있는 이유는 **인증보다 먼저 파싱하지 않기 위해** 라우트 단위로 붙였기 때문이다(`util/bigJsonGate.js` 규약). |

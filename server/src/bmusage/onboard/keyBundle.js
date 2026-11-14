@@ -97,7 +97,14 @@ export function mergeRedactedKeyStore(bundleText, currentText) {
     if (accIds.has(String(c.id || ''))) continue;
     const o = { ...c };
     if (accNames.has(`${o.kind}|${lc(o.name)}`)) o.name = `${String(o.name).slice(0, 55)}-restored`;
-    if (o.keyRef && !keys.some((k) => k.id === o.keyRef)) o.keyRef = '';
+    // 지금 파일에만 있는 계정의 기본 키: 합친 키에 같은 id 가 없으면 **같은 지문의 키**(번들 id 로 되살아난 같은 키)로 옮기고,
+    //   그것도 없을 때만 떼고 밝힌다(2회차 D2-4 — 조용히 비웠다).
+    if (o.keyRef && !keys.some((k) => k.id === o.keyRef)) {
+      const fp = String(curById.get(String(o.keyRef))?.fingerprint || '');
+      const same = fp ? keys.find((k) => String(k.fingerprint || '') === fp) : null;
+      if (same) o.keyRef = same.id;
+      else { dropped.push(`account-key:${String(o.name || o.id || '').slice(0, 64)}`); o.keyRef = ''; }
+    }
     accounts.push(o); kept.push(`account:${String(c.name || c.id || '').slice(0, 64)}`);
   }
   return { text: JSON.stringify({ keys, accounts }, null, 2), restored, dropped, kept };

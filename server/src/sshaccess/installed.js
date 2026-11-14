@@ -11,8 +11,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { registerStateFile } from '../util/stateFiles.js';
 
 export const INSTALLED_FILE_NAME = 'ssh-access-installed.json';
+// 상태 파일(화면용 기록) — v3.10.0 부터 키 작업이 서버마다 쓴다. 설정 변경 자동 백업 · 지문에 넣지 않는다(2회차 D2-1 — 작업 잡음이 자동 보관 슬롯을 밀어냈다).
+registerStateFile(INSTALLED_FILE_NAME);
 const FILE = () => path.join(config.configDir, 'ssh-access-installed.json');   // = INSTALLED_FILE_NAME
 export const MAX_INSTALLED_KEYS = 200;
 const MAX_SERVERS = 5000;

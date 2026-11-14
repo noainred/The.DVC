@@ -53,7 +53,9 @@ function norm(j) {
   if (j.guards !== undefined && !isObj(j.guards)) throw new ShapeError('guards 가 객체가 아닙니다');
   // v3.10.0 보호 장치 — 없으면 켬(엄한 쪽이 기본). 글자 그대로 false 일 때만 끔.
   // pairSeen: 승인할 수 있는 설정 소유자가 둘 이상인 것을 한 번이라도 본 설치(guards.notePair) — 그 뒤로는 두 사람 승인을 혼자 끄지 못한다(반증 R3).
-  const guards = { twoPerson: j.guards?.twoPerson !== false, serverRestrict: j.guards?.serverRestrict !== false, pairSeen: j.guards?.pairSeen === true };
+  // seenAd: 이 화면에 들어온 AD 소유자의 신원(identityKey) — 승인자 쌍의 증거(2회차 A1 — 소유자가 모두 AD 인 설치는 로컬 승인자가 없어 쌍이 서지 않았다). 최대 20.
+  const seenAd = (Array.isArray(j.guards?.seenAd) ? j.guards.seenAd : []).filter((x) => typeof x === 'string' && x && x.length <= 128).slice(-20);
+  const guards = { twoPerson: j.guards?.twoPerson !== false, serverRestrict: j.guards?.serverRestrict !== false, pairSeen: j.guards?.pairSeen === true, seenAd };
   const stops = Object.create(null);
   const ents = Object.entries(j.stops || {});
   // 넘치는 중지 기록을 조용히 자르면 잘린 법인의 중지가 풀린다(반증 D6) — 손상으로 본다.
@@ -213,10 +215,20 @@ export function clearCorpStop(corp, { by = '', now = Date.now() } = {}) {
  */
 export function getGuards() {
   const d = load();
-  if (!d || loadErr.get()) return { twoPerson: true, serverRestrict: true, pairSeen: true, unreadable: true };
-  return { ...d.guards };
+  if (!d || loadErr.get()) return { twoPerson: true, serverRestrict: true, pairSeen: true, seenAd: [], unreadable: true };
+  return { ...d.guards, seenAd: (d.guards.seenAd || []).slice() };
 }
 /** ‘승인할 수 있는 소유자 둘’ 을 본 표지를 세운다(한 번 세우면 내리지 않는다 — 화면 · API 로 내릴 길이 없다). */
+/** AD 소유자 세션의 신원을 적는다(처음 볼 때만 쓴다 — 화면을 열 때마다 쓰지 않는다). */
+export function noteSeenAd(idKey) {
+  const u = unreadable(); if (u) return u;
+  const k = t(idKey, 128); if (!k) return { ok: false };
+  const d = draft();
+  const cur = d.guards.seenAd || [];
+  if (cur.includes(k)) return { ok: true, changed: 0 };
+  d.guards.seenAd = [...cur, k].slice(-20);
+  return commit(d);
+}
 export function markPairSeen({ by = '', now = Date.now() } = {}) {
   const u = unreadable(); if (u) return u;
   const d = draft();

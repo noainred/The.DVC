@@ -30,6 +30,7 @@ const FILE = () => path.join(config.configDir, 'approvals.json');   // = APPROVA
 export const REQUEST_TTL_MS = 24 * 3600_000;
 export const MAX_PENDING = 200;
 export const MAX_HISTORY = 300;
+export const MAX_PENDING_PER_USER = 30;
 const MAX_PAYLOAD_BYTES = 4096;
 const OPEN = 'pending';
 const STATUSES = ['pending', 'approved', 'rejected', 'cancelled', 'expired', 'executed', 'failed'];
@@ -132,6 +133,8 @@ export function createRequest({ kind, title, target, corp = '', payload = {}, by
   const d = draft();
   const open = d.requests.filter((r) => r.status === OPEN && r.expiresAt > now);
   if (open.length >= MAX_PENDING) return { ok: false, code: 'too-many', status: 409, reason: '승인 대기 요청이 너무 많습니다 — 먼저 처리하세요.' };
+  // 요청자마다 상한(2회차 A2 — 한 사람이 대기 상한을 다 채워 다른 사람의 승인 요청을 막았다).
+  if (open.filter((r) => identityKey(r.requestedBy) === identityKey(who)).length >= MAX_PENDING_PER_USER) return { ok: false, code: 'too-many', status: 409, reason: `내가 만든 승인 대기 요청이 ${MAX_PENDING_PER_USER}건입니다 — 먼저 처리하거나 취소하세요.` };
   const dup = open.find((r) => r.kind === k && r.target === tg);
   if (dup) return { ok: false, code: 'dup-request', status: 409, reason: `같은 요청이 이미 승인을 기다리고 있습니다(${dup.requestedBy} · ${new Date(dup.requestedAt).toISOString().slice(0, 16).replace('T', ' ')} UTC).`, request: view(dup) };
   const req = normReq({

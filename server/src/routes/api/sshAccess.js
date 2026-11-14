@@ -133,7 +133,7 @@ export function registerSshAccess(api) {
 
   /* ── 키 로그인 설정 · 키 거두기(v3.10.0 — 서버의 authorized_keys 를 바꾸는 동작) ──── */
   const serverList = (v) => (Array.isArray(v) ? v.slice(0, 1000).map((x) => ({ id: t(x?.id, 64), addr: typeof x?.addr === 'string' ? x.addr.slice(0, 400) : '' })) : null);
-  const jobPre = (kind) => pre((req) => SVC.keyJobPrecheck(kind, t(bodyOf(req).keyId, 32)));
+  const jobPre = (kind) => pre((req) => SVC.keyJobPrecheck(kind, t(bodyOf(req).keyId, 32), bodyOf(req)));
   api.post('/settings/ssh-access/key-login', adminOnly, requireSettingsOwner, fullRW, jobPre('key-login'), reauth, async (req, res) => {
     const b = bodyOf(req);
     const once = typeof b.oncePassword === 'string' ? b.oncePassword : '';
@@ -189,9 +189,9 @@ export function registerSshAccess(api) {
   });
 
   /* ── 법인 사용 중지(긴급 조치) ───────────────────────────────────── */
-  api.post('/settings/ssh-access/corps/:corp/stop', ...ownerWrite, (req, res) => {
+  api.post('/settings/ssh-access/corps/:corp/stop', ...ownerWrite, async (req, res) => {
     const b = bodyOf(req);
-    const r = SVC.stopCorp(t(req.params.corp, 128), { by: who(req), reason: t(b.reason, 300) });
+    const r = await SVC.stopCorp(t(req.params.corp, 128), { by: who(req), reason: t(b.reason, 300) });
     audit(req, 'ssh-access.corp.stop', req.params.corp, { ok: !!r.ok, code: r.code, reason: t(b.reason, 120), servers: r.servers });
     send(res, r);
   });
@@ -202,7 +202,7 @@ export function registerSshAccess(api) {
   });
 
   /* ── 받는 곳(폴더에 직접 넣은 키) ───────────────────────────────── */
-  api.post('/settings/ssh-access/inbox/approve', adminOnly, requireSettingsOwner, fullRW, vaultFirst, pre((req) => SVC.prechecks.addKey({ by: who(req) })), reauth, async (req, res) => {
+  api.post('/settings/ssh-access/inbox/approve', adminOnly, requireSettingsOwner, fullRW, vaultFirst, pre((req) => SVC.prechecks.inboxPath({ relPath: bodyOf(req).relPath }) || SVC.prechecks.addKey({ by: who(req) })), reauth, async (req, res) => {
     const b = bodyOf(req);
     const r = await SVC.approveInbox({ relPath: typeof b.relPath === 'string' ? b.relPath.slice(0, 400) : '', fingerprint: t(b.fingerprint, 80), sha: t(b.sha, 80), name: t(b.name, 80), passphrase: typeof b.passphrase === 'string' ? b.passphrase : '',
       features: featuresOf(b.features), by: who(req) });
