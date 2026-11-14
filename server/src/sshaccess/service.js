@@ -9,28 +9,34 @@
  *  · 라우트(`routes/api/sshAccess.js`)는 이 모듈만 부른다 — 접속 자격 원본(`resolveOsAuth` · `keyMaterial` · `listKeysRaw`)을 라우트가 만지지 않는다(7b 소스 스윕 ⑩ 과 같은 규칙).
  *  · 응답에는 지문 · 공개키 · 이름 · 사용처만. 개인키 · passphrase · 비밀번호 · 1회 비밀번호는 응답 · 감사 · 상태 파일 어디에도 싣지 않는다.
  *  · 접속 주소는 **저장값**(요청 host 를 받지 않는다 — v2.480). 한 번 · 짧은 시한 · 자동 재시도 없음(계정 잠금).
- *  · 서버 키 고르기 = 폴더 규칙(`refs.keyPlacementIssue`) → 등록부 `setBmServerKeyRef`(같은 주소 · 키만) → 연결 확인 → 실패면 **이전 설정으로 되돌린다**.
+ *  · 서버 키 고르기 = 폴더 규칙(`refs.keyPlacementIssue`) → 등록부 `setBmServerKeyRef`(같은 접속처 · 키만) → 연결 확인 → 실패면 **이전 설정으로 되돌린다**
+ *    (그 사이 접속처가 바뀌었으면 되돌리지 않는다 — 옛 키를 새 주소에 묶지 않게).
  */
 import { store } from '../store.js';
 import { config } from '../config.js';
 import * as KS from '../bmusage/onboard/keyStore.js';
 import * as REFS from '../bmusage/onboard/refs.js';
+import { addrKey } from '../bmusage/onboard/bindRule.js';
+import { RSA_MIN_BITS } from '../bmusage/onboard/keyParse.js';
 import { listBmServersRaw, registryLoadError as bmRegistryLoadError, setBmServerKeyRef, restoreBmServerKeyRef } from '../bmstor/registry.js';
 import { loadSecretsPolicy } from '../security/secretVault.js';
 import * as ST from './state.js';
+import * as INS from './installed.js';
 import * as INB from './inbox.js';
-import { noteKeyUse, keyUsageView, flushKeyUsage } from './usage.js';
-import { buildKeyCheck, verifyKeyIntegrity } from './check.js';
+import { noteKeyUse, keyUsageView, flushKeyUsage, lastUseByFingerprint, keyUsageLoadFailed } from './usage.js';
+import { buildKeyCheck, checkKeyDrift } from './check.js';
 import { READ_COMMAND, parseReadOutput } from './authorizedKeys.js';
 
 const t = (v, max = 256) => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max).trim();
 const lc = (v) => t(v).toLowerCase();
+export const SCAN_EVERY_MS = 10 * 60_000;
+const COLLECT = ['bm-usage', 'bm-storage'];
 
-/** 기능 목록(화면 · 키의 ‘쓸 수 있는 기능’). id 는 keyStore.KEY_FEATURES 와 같다(테스트가 대조). */
+/** 기능 목록(화면 · 키의 ‘쓸 수 있는 기능’). id 는 keyStore.KEY_FEATURES 와 같다(테스트가 대조). ready:false = 아직 이 접속으로 붙는 곳이 없다(화면이 그렇게 말한다). */
 export const FEATURE_CATALOG = Object.freeze([
-  Object.freeze({ id: 'bm-usage', label: '베어메탈 사용률', tool: 'bm-usage', note: 'CPU · 메모리 · 디스크 · 네트워크 · HBA 수집(집중 모니터링 · 저활용 포함)' }),
-  Object.freeze({ id: 'bm-storage', label: '베어메탈 스토리지', tool: 'bm-storage', note: '마운트 용량(df) 수집' }),
-  Object.freeze({ id: 'disk-audit', label: '디스크 오류 이력 점검', tool: 'disk-audit', note: '로그 · SMART · RAID 기록에서 매체 오류 흔적 찾기(읽기 전용)' }),
+  Object.freeze({ id: 'bm-usage', label: '베어메탈 사용률', tool: 'bm-usage', ready: true, note: 'CPU · 메모리 · 디스크 · 네트워크 · HBA 수집(집중 모니터링 · 저활용 포함)' }),
+  Object.freeze({ id: 'bm-storage', label: '베어메탈 스토리지', tool: 'bm-storage', ready: true, note: '마운트 용량(df) 수집' }),
+  Object.freeze({ id: 'disk-audit', label: '디스크 오류 이력 점검', tool: 'disk-audit', ready: false, note: '로그 · SMART · RAID 기록에서 매체 오류 흔적 찾기(읽기 전용) — 다음 단계에서 붙습니다' }),
 ]);
 
 /** 이 노드가 아는 법인(vCenter) — id · 이름 · DataCenter 이름. */
@@ -52,20 +58,26 @@ function effectiveKeyId(s, accById) {
   const a = t(s.credRef) ? accById.get(t(s.credRef)) : null;
   return a && a.kind === 'os' ? t(a.keyRef) : '';
 }
+/** 접속 계정 — resolveOsAuth 와 같은 규칙(공통 계정이 있으면 그 계정, 없으면 서버 칸 · root). */
+const usernameOf = (s, acc) => (acc ? acc.username : (t(s.username) || 'root'));
+/** 등록부 setBmServerKeyRef 의 expectAddr 와 같은 글자(서버 칸 username 기준 — 등록부가 그렇게 비교한다). */
+const regAddrOf = (s) => addrKey(s.host, s.port, s.username);
 
-function publicServer(s, { accById, keyById, now }) {
+function publicServer(s, { accById, keyById }) {
   const effKey = effectiveKeyId(s, accById);
   const key = effKey ? keyById.get(effKey) : null;
   const acc = t(s.credRef) ? accById.get(t(s.credRef)) : null;
-  const inst = ST.installedOf(s.id);
+  const inst = INS.installedOf(s.id);
   const placement = key ? REFS.keyPlacementIssue(key, s, 'conn-test') : null;
   return {
     id: s.id, name: s.name || s.host, host: s.host, port: Number(s.port) || 22, vcenterId: t(s.vcenterId), agent: t(s.agent), enabled: s.enabled !== false,
-    username: acc ? acc.username : (t(s.username) || 'root'), accountName: acc ? acc.name : '', accountMissing: !!t(s.credRef) && !acc,
+    username: usernameOf(s, acc), accountName: acc ? acc.name : '', accountMissing: !!t(s.credRef) && !acc,
     keyMode: t(s.keyRef) ? 'pinned' : (effKey ? 'corp-default' : (s.osAuth === 'password' || s.password || (acc && acc.password) ? 'password' : 'none')),
     keyId: effKey || '', keyName: key ? key.name : '', keyFingerprint: key ? key.fingerprint : '', keyMissing: !!effKey && !key,
-    keyStatus: key ? key.status : '', placementIssue: placement || '',
+    keyStatus: key ? key.status : '', keyFeatures: key ? (Array.isArray(key.features) ? [...key.features] : null) : null, placementIssue: placement || '',
     hasPassword: !!s.password, passwordPinned: s.osAuth === 'password',
+    // 화면이 키 고르기 때 그대로 돌려보낸다(낡은 화면에서 고른 키를 바뀐 접속처에 묶지 않게 — 점검 A-8).
+    addr: regAddrOf(s),
     installed: inst ? { at: inst.at, by: inst.by, present: !inst.error, error: inst.error || '', count: inst.keys.length,
       hasKey: !!(key && inst.keys.some((k) => k.fingerprint === key.fingerprint)), stale: inst.host !== s.host || inst.port !== (Number(s.port) || 22) } : null,
   };
@@ -82,45 +94,51 @@ export async function buildView({ now = Date.now() } = {}) {
   const accById = new Map(accRaw.map((a) => [a.id, a]));
   const servers = regErr ? [] : listBmServersRaw();
   const usage = REFS.refUsage();
-  const kuse = keyUsageView({ limit: 1 });
-  const lastUseByFp = new Map();
-  for (const r of kuse.rows) { const p = lastUseByFp.get(r.fingerprint); if (!p || r.lastAt > p.lastAt) lastUseByFp.set(r.fingerprint, { lastAt: r.lastAt, server: r.server, feature: r.feature, ok: r.lastOk }); }
+  const lastUse = lastUseByFingerprint();
   let edgeRows = [];
   try { edgeRows = (await import('../bmusage/onboard/edgeDeploy.js')).allEdgeRows().map((r) => ({ agent: r.agent, name: t(r.name, 128), corp: t(r.corp, 128), osHost: t(r.osHost, 256), osCred: t(r.osCred, 64), osKey: t(r.osKey, 64), osUser: t(r.osUser, 128) })); } catch { edgeRows = []; }
   let policyMode = '';
   try { policyMode = loadSecretsPolicy()?.mode || ''; } catch { policyMode = ''; }
   const inbox = await INB.scanInbox({ corps, servers: servers.map((s) => ({ id: s.id, name: s.name || s.host, vcenterId: t(s.vcenterId) })) });
   const corpName = (id) => corps.find((c) => c.id === id)?.name || id || '전 법인';
+  const pubServers = servers.filter((s) => !s.addrOnly).map((s) => ({ ...publicServer(s, { accById, keyById }), inboxPath: t(s.vcenterId) ? INB.inboxPathOf(s.vcenterId, s.name || s.host) : '' }));
+  // 키 점검 ‘서버’ 칸 — 키를 쓰는데 폴더 · 기능 규칙 때문에 주기 수집이 막힌 서버, 법인이 없어 폴더 키를 못 쓰는 서버(엣지 위임 서버는 그 엣지가 본다).
+  const keyed = pubServers.filter((s) => s.keyId && !s.agent);
+  const serverSummary = regErr ? null : {
+    blocked: keyed.filter((s) => s.placementIssue || (Array.isArray(s.keyFeatures) && !COLLECT.some((f) => s.keyFeatures.includes(f)))).map((s) => s.name),
+    noCorp: keyed.filter((s) => !s.vcenterId).map((s) => s.name),
+  };
+  const drift = storeErr ? null : checkKeyDrift({ now });
   return {
     at: now,
     isEdge: !!config.agent?.centralUrl,
     policyMode,
+    scanEveryMinutes: Math.round(SCAN_EVERY_MS / 60_000), rsaMinBits: RSA_MIN_BITS,
     storeUnreadable: !!storeErr, registryUnreadable: !!regErr, stateUnreadable: !!ST.stateLoadError(),
+    usageLoadFailed: keyUsageLoadFailed(), installedLoadFailed: INS.installedLoadFailed(),
     corps: corps.map((c) => ({ ...c, inboxPath: INB.inboxPathOf(c.id), stop: ST.stopFor(c.id) })),
     accounts: accRaw.filter((a) => a.kind === 'os').map((a) => KS.publicAccountView(a, { usage: usage.account(a.id) })),
-    keys: keysRaw.map((k) => ({ ...KS.publicKeyView(k, { usage: usage.key(k.id), now }), lastUse: lastUseByFp.get(k.fingerprint) || null,
+    keys: keysRaw.map((k) => ({ ...KS.publicKeyView(k, { usage: usage.key(k.id), now }), lastUse: lastUse.get(k.fingerprint) || null,
       inboxPath: k.folderCorp ? INB.inboxPathOf(k.folderCorp, k.folderServer) : '' })),
     usageKnown: usage.known,
-    servers: servers.filter((s) => !s.addrOnly).map((s) => ({ ...publicServer(s, { accById, keyById, now }), inboxPath: t(s.vcenterId) ? INB.inboxPathOf(s.vcenterId, s.name || s.host) : '' })),
+    servers: pubServers,
     edgeRows,
     features: FEATURE_CATALOG,
-    inbox: { dir: inbox.dir, exists: inbox.exists, items: inbox.items, unknownFolders: inbox.unknownFolders, truncated: inbox.truncated },
-    check: buildKeyCheck({ now, policyMode, inbox, integrity: _lastIntegrity, corpName }),
+    inbox: { dir: inbox.dir, exists: inbox.exists, items: inbox.items, unknownFolders: inbox.unknownFolders, unknownTotal: inbox.unknownTotal, truncated: inbox.truncated, rootIsLink: inbox.rootIsLink },
+    check: buildKeyCheck({ now, policyMode, inbox, drift, servers: serverSummary, corpName }),
     stops: ST.listStops(),
     events: ST.listEvents({ limit: 50 }),
     tampered: KS.tamperedKeyIds(),
   };
 }
 
-let _lastIntegrity = null;
-
 /* ── 서버의 키 고르기(시안 ⑥ SshPick) ─────────────────────────────────── */
 
 /**
- * @param {{serverId:string, keyId:string, expectHost?:string, by:string}} o  keyId 빈 값 = 법인 기본 키(공통 계정)를 따름
- * @returns {Promise<object>} { ok, test, reverted?, previous? } — 실패면 code · reason · status
+ * @param {{serverId:string, keyId:string, expectAddr?:string, by:string}} o  keyId 빈 값 = 법인 기본 키(공통 계정)를 따름 · expectAddr = 화면이 본 접속처(publicServer.addr)
+ * @returns {Promise<object>} { ok, test, previous? } — 실패면 code · reason · status · reverted · revertError
  */
-export async function chooseServerKey({ serverId, keyId, expectHost = null, by = '' } = {}) {
+export async function chooseServerKey({ serverId, keyId, expectAddr = null, by = '' } = {}) {
   if (KS.keyStoreLoadError()) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'SSH 키 저장소를 읽지 못해 바꾸지 않았습니다.' };
   if (bmRegistryLoadError()) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'OS 계정 등록부를 읽지 못해 바꾸지 않았습니다.' };
   const s = listBmServersRaw().find((x) => x.id === t(serverId, 64));
@@ -136,14 +154,16 @@ export async function chooseServerKey({ serverId, keyId, expectHost = null, by =
   } else if (!t(s.credRef)) {
     return { ok: false, code: 'no-account', status: 409, reason: '이 서버는 법인 공통 계정을 쓰지 않아 ‘법인 기본 키를 따름’ 을 고를 수 없습니다 — 키를 이름으로 고르세요.' };
   }
-  const w = setBmServerKeyRef(s.id, kid, { expectHost });
+  const w = setBmServerKeyRef(s.id, kid, { expectAddr: typeof expectAddr === 'string' && expectAddr ? expectAddr : null });
   if (!w.ok) return w;
   const after = listBmServersRaw().find((x) => x.id === s.id);
-  const test = await testServer(after, { by });
+  const test = after ? await testServer(after, { by }) : { ok: false, kind: 'gone', reason: '서버가 그 사이 지워졌습니다.' };
   if (test.ok) return { ok: true, test, previous: w.previous };
   const back = restoreBmServerKeyRef(s.id, w.previous);
-  return { ok: false, code: 'test-failed', status: 409, reason: `고른 키로 접속하지 못해 이전 설정으로 되돌렸습니다 — ${test.reason || test.kind}`, test, reverted: !!back.ok,
-    ...(back.ok ? {} : { revertError: back.reason }) };
+  // 되돌렸다고 말하지 않는다 — 못 되돌렸으면 그대로 밝힌다(점검 E-M5).
+  return back.ok
+    ? { ok: false, code: 'test-failed', status: 409, reason: `고른 키로 접속하지 못해 이전 설정으로 되돌렸습니다 — ${test.reason || test.kind}`, test, reverted: true }
+    : { ok: false, code: 'test-failed', status: 409, reason: `고른 키로 접속하지 못했고 이전 설정으로 되돌리지도 못했습니다 — ${test.reason || test.kind}`, test, reverted: false, revertError: back.reason };
 }
 
 /** 저장된 항목으로 한 번 연결 시험(7b connTest 와 같은 본체) + 키 사용 기록. */
@@ -166,11 +186,14 @@ export function serverKeyCandidates(serverId) {
   if (!s) return { ok: false, code: 'not-found', status: 404, reason: '서버를 찾을 수 없습니다.' };
   const accById = new Map(KS.listAccountsRaw().map((a) => [a.id, a]));
   const acc = t(s.credRef) ? accById.get(t(s.credRef)) : null;
-  const inst = ST.installedOf(s.id);
+  const inst = INS.installedOf(s.id);
   const instFps = inst && !inst.error && inst.host === s.host ? new Set(inst.keys.map((k) => k.fingerprint)) : null;
   const effKey = effectiveKeyId(s, accById);
-  const keys = KS.listKeysRaw().map((k) => {
-    const issue = k.status !== 'active' ? 'key-retired' : (REFS.keyPlacementIssue(k, s, 'conn-test') || '');
+  const keysRaw = KS.listKeysRaw();
+  const byFp = new Map(keysRaw.map((k) => [k.fingerprint, k]));
+  const tampered = new Set(KS.tamperedKeyIds());
+  const keys = keysRaw.map((k) => {
+    const issue = k.status !== 'active' ? 'key-retired' : (tampered.has(k.id) ? 'key-tampered' : (REFS.keyPlacementIssue(k, s, 'conn-test') || ''));
     return { id: k.id, name: k.name, algo: k.algo, bits: k.bits, fingerprint: k.fingerprint, status: k.status,
       folder: !k.folderCorp ? 'none' : (k.folderServer ? 'server' : 'common'), folderCorp: k.folderCorp, folderServer: k.folderServer,
       features: Array.isArray(k.features) ? [...k.features] : null, selectable: !issue, issue, current: k.id === effKey,
@@ -180,11 +203,11 @@ export function serverKeyCandidates(serverId) {
   keys.sort((a, b) => (order[a.folder] - order[b.folder]) || a.name.localeCompare(b.name));
   return {
     ok: true,
-    server: { id: s.id, name: s.name || s.host, host: s.host, port: Number(s.port) || 22, vcenterId: t(s.vcenterId), keyMode: t(s.keyRef) ? 'pinned' : (effKey ? 'corp-default' : 'other') },
+    server: { id: s.id, name: s.name || s.host, host: s.host, port: Number(s.port) || 22, vcenterId: t(s.vcenterId), addr: regAddrOf(s), keyMode: t(s.keyRef) ? 'pinned' : (effKey ? 'corp-default' : 'other') },
     corpDefault: acc && acc.kind === 'os' ? { accountName: acc.name, username: acc.username, keyId: acc.keyRef || '', keyName: acc.keyRef ? (KS.keyById(acc.keyRef)?.name || '') : '' } : null,
     keys,
     installed: inst ? { at: inst.at, by: inst.by, file: inst.file, error: inst.error || '', stale: inst.host !== s.host,
-      keys: inst.keys.map((k) => { const m = KS.listKeysRaw().find((x) => x.fingerprint === k.fingerprint); return { ...k, keyId: m ? m.id : '', keyName: m ? m.name : '' }; }) } : null,
+      keys: inst.keys.map((k) => { const m = byFp.get(k.fingerprint); return { ...k, keyId: m ? m.id : '', keyName: m ? m.name : '' }; }) } : null,
   };
 }
 
@@ -229,7 +252,7 @@ export async function readInstalledKeys({ serverId, oncePassword = '', by = '' }
     return { ok: false, code: kind, status: 502, reason };
   }
   if (auth.keyFingerprint) noteKeyUse({ fingerprint: auth.keyFingerprint, keyName: auth.keyName, server: s.name || s.host, corp: s.vcenterId, feature: 'conn-test', ok: true, code: 'ok', trigger: 'manual', by });
-  const saved = ST.noteInstalled(s.id, { ...rec, by: t(by, 64) });
+  const saved = INS.noteInstalled(s.id, { ...rec, by: t(by, 64) });
   const byFp = new Map(KS.listKeysRaw().map((k) => [k.fingerprint, k]));
   return {
     ok: true, saved: !!saved.ok, file: rec.file, username: rec.username, error: rec.error || '', truncated: rec.truncated || 0, bad: rec.bad || 0, via: auth.authKind,
@@ -277,58 +300,96 @@ export function setKeyPlacement({ keyId, folderCorp, folderServer, features } = 
   if (!k) return { ok: false, code: 'not-found', status: 404, reason: '키를 찾을 수 없습니다.' };
   const nextCorp = folderCorp !== undefined ? t(folderCorp, 128) : k.folderCorp;
   const nextServer = folderServer !== undefined ? t(folderServer, 128) : (folderCorp !== undefined ? '' : k.folderServer);
-  if (folderCorp !== undefined || folderServer !== undefined) { const fi = folderTargetIssue(nextCorp, nextServer); if (fi) return { ok: false, code: 'bad-folder', reason: fi }; }
-  const probe = { folderCorp: nextCorp, folderServer: nextServer, features: null };
-  const conflicts = [];
+  const accById = new Map(KS.listAccountsRaw().map((a) => [a.id, a]));
   if (folderCorp !== undefined || folderServer !== undefined) {
-    if (bmRegistryLoadError()) return { ok: false, code: 'usage-unknown', status: 503, reason: 'OS 계정 등록부를 읽지 못해 이 키를 쓰는 서버를 모릅니다 — 폴더를 바꾸지 않았습니다.' };
-    const accById = new Map(KS.listAccountsRaw().map((a) => [a.id, a]));
-    for (const s of listBmServersRaw()) {
-      if (effectiveKeyId(s, accById) !== k.id) continue;
-      if (REFS.keyPlacementIssue(probe, s, 'conn-test')) conflicts.push({ kind: 'server', name: s.name || s.host, corp: t(s.vcenterId) });
-    }
-    for (const a of accById.values()) {
-      if (a.kind !== 'os' || a.keyRef !== k.id) continue;
-      if (nextServer) conflicts.push({ kind: 'account', name: a.name, corp: a.corp, why: 'server-folder' });
-      else if (nextCorp && a.corp !== nextCorp) conflicts.push({ kind: 'account', name: a.name, corp: a.corp, why: 'other-corp' });
-    }
+    const fi = folderTargetIssue(nextCorp, nextServer); if (fi) return { ok: false, code: 'bad-folder', reason: fi };
+    // 충돌 판정은 refs.placementConflicts 하나(키 회전과 같은 함수 — 판정을 두 벌 두지 않는다).
+    const conflicts = REFS.placementConflicts({ folderCorp: nextCorp, folderServer: nextServer }, { serversUsing: (s) => effectiveKeyId(s, accById) === k.id, accountsUsing: (a) => a.keyRef === k.id });
+    if (conflicts === null) return { ok: false, code: 'usage-unknown', status: 503, reason: 'OS 계정 등록부를 읽지 못해 이 키를 쓰는 서버를 모릅니다 — 폴더를 바꾸지 않았습니다.' };
+    if (conflicts.length) return { ok: false, code: 'folder-conflict', status: 409, reason: `이 키를 쓰는 곳 ${conflicts.length}개가 새 폴더 밖이 됩니다 — 그 서버 · 공통 계정의 키를 먼저 바꾸세요(서버별 폴더 키는 공통 계정의 기본 키가 될 수 없습니다).`, conflicts: conflicts.slice(0, 50) };
   }
-  if (conflicts.length) return { ok: false, code: 'folder-conflict', status: 409, reason: `이 키를 쓰는 곳 ${conflicts.length}개가 새 폴더 밖이 됩니다 — 그 서버 · 공통 계정의 키를 먼저 바꾸세요(서버별 폴더 키는 공통 계정의 기본 키가 될 수 없습니다).`, conflicts: conflicts.slice(0, 50) };
-  return KS.updateKeyPlacement(k.id, {
+  // 기능을 바꾸면 그 키를 쓰는 서버 수를 함께 돌려준다(화면이 ‘그 서버들의 그 기능 수집이 멈춘다’ 고 말한다 — 점검 E-M2).
+  const affectedServers = features !== undefined && !bmRegistryLoadError() ? listBmServersRaw().filter((s) => effectiveKeyId(s, accById) === k.id).length : null;
+  const r = KS.updateKeyPlacement(k.id, {
     ...(folderCorp !== undefined ? { folderCorp: nextCorp } : {}), ...(folderServer !== undefined || folderCorp !== undefined ? { folderServer: nextServer } : {}),
     ...(features !== undefined ? { features } : {}),
   });
+  return r.ok && affectedServers != null ? { ...r, affectedServers } : r;
 }
+
+/** 키를 새로 받을 수 있는가(저장 방식) — 라우트가 OTP 를 쓰기 전에 본다(점검 B-5). null = 받을 수 있음. */
+export function keyVaultIssue() { return KS.keyVaultIssue(); }
 
 /* ── 받는 곳(inbox) ───────────────────────────────────────────────────── */
 
-export async function approveInbox({ relPath, fingerprint, name, passphrase = '', features, by = '' } = {}) {
+/**
+ * 폴더 이름 → 법인 · 서버. **정확히 하나**일 때만(두 법인 · 두 서버가 같은 폴더 이름이면 모호로 거절 — 점검 C-13 · A-5).
+ * 폴더는 파일이 놓인 자리에서 정한다(요청 본문이 아니다).
+ */
+async function folderOwner(slugs) {
+  const corps = (await corpList()).filter((c) => INB.folderSlug(c.id) === slugs.corpSlug);
+  if (corps.length !== 1) return corps.length
+    ? { ok: false, code: 'ambiguous-folder', status: 409, reason: '두 법인이 같은 폴더 이름을 씁니다 — 승인하지 않았습니다.' }
+    : { ok: false, code: 'unknown-folder', status: 409, reason: '폴더 이름이 지금 있는 법인과 맞지 않습니다.' };
+  const corp = corps[0];
+  if (!slugs.serverSlug) return { ok: true, corp, server: '' };
+  if (bmRegistryLoadError()) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'OS 계정 등록부를 읽지 못했습니다.' };
+  const srv = listBmServersRaw().filter((x) => t(x.vcenterId) === corp.id && INB.serverSlug(x.name || x.host) === slugs.serverSlug);
+  if (srv.length !== 1) return srv.length
+    ? { ok: false, code: 'ambiguous-folder', status: 409, reason: '그 법인의 두 서버가 같은 폴더 이름을 씁니다 — 승인하지 않았습니다.' }
+    : { ok: false, code: 'unknown-folder', status: 409, reason: '폴더 이름이 그 법인의 서버와 맞지 않습니다.' };
+  return { ok: true, corp, server: srv[0].name || srv[0].host };
+}
+
+/** 승인 — 다시 읽어 **사람이 본 파일(sha) · 지문과 같을 때만** 저장소에 넣고 평문 파일을 지운다(지울 때도 같은 파일인지 다시 본다). */
+export async function approveInbox({ relPath, fingerprint = '', sha = '', name, passphrase = '', features, by = '' } = {}) {
   const slugs = INB.slugsOf(relPath);
   if (!slugs) return { ok: false, code: 'bad-path', status: 400, reason: '받는 곳 안의 파일 경로가 아닙니다.' };
-  const corps = await corpList();
-  const corp = corps.find((c) => INB.folderSlug(c.id) === slugs.corpSlug);
-  if (!corp) return { ok: false, code: 'unknown-folder', status: 409, reason: '폴더 이름이 지금 있는 법인과 맞지 않습니다.' };
-  let server = '';
-  if (slugs.serverSlug) {
-    if (bmRegistryLoadError()) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'OS 계정 등록부를 읽지 못했습니다.' };
-    const s = listBmServersRaw().find((x) => t(x.vcenterId) === corp.id && INB.folderSlug(x.name || x.host) === slugs.serverSlug);
-    if (!s) return { ok: false, code: 'unknown-folder', status: 409, reason: '폴더 이름이 그 법인의 서버와 맞지 않습니다.' };
-    server = s.name || s.host;
-  }
-  const rd = INB.readForApproval(relPath, fingerprint, passphrase);
+  const owner = await folderOwner(slugs);
+  if (!owner.ok) return owner;
+  const rd = INB.readForApproval(relPath, { expectSha: t(sha, 80), expectFingerprint: t(fingerprint, 80), passphrase });
   if (!rd.ok) return rd;
-  const r = KS.addKey({ name, privateKey: rd.pem, passphrase, folderCorp: corp.id, folderServer: server, features: features === undefined ? [] : features }, { by });
+  const r = KS.addKey({ name, privateKey: rd.pem, passphrase, folderCorp: owner.corp.id, folderServer: owner.server, features: features === undefined ? [] : features }, { by });
   if (!r.ok) return r;
-  const rm = INB.removeInboxFile(relPath);
-  ST.addEvent({ kind: 'inbox-approved', corp: corp.id, target: r.key.name, by, detail: `${r.key.fingerprint}${rm.ok ? '' : ' · 평문 파일 삭제 실패'}` });
+  const rm = INB.removeInboxFile(relPath, { expectSha: rd.sha });
+  ST.addEvent({ kind: 'inbox-approved', corp: owner.corp.id, target: r.key.name, by, detail: `${r.key.fingerprint}${rm.ok ? '' : ' · 평문 파일 삭제 실패'}` });
   return { ok: true, key: r.key, plaintextRemoved: !!rm.ok, ...(rm.ok ? {} : { plaintextLeft: true, removeError: rm.reason }) };
 }
 
-export function discardInbox({ relPath, by = '' } = {}) {
+/** 지우기 — 사람이 본 파일(sha)과 같을 때만(그 사이 바뀐 파일을 보지 않고 지우지 않게 — 점검 C-6). */
+export function discardInbox({ relPath, sha = '', by = '' } = {}) {
   const slugs = INB.slugsOf(relPath);
   if (!slugs) return { ok: false, code: 'bad-path', status: 400, reason: '받는 곳 안의 파일 경로가 아닙니다.' };
-  const r = INB.removeInboxFile(relPath);
+  const r = INB.removeInboxFile(relPath, { expectSha: t(sha, 80) });
   if (r.ok) ST.addEvent({ kind: 'inbox-discarded', target: t(relPath, 120), by });
+  return r;
+}
+
+/* ── 법인 사용 중지 ───────────────────────────────────────────────────── */
+
+/**
+ * 사용 중지 — 지금 그 법인 서버의 id · 접속처를 함께 적는다(서버의 법인 칸을 비워 빠져나가지 못하게 — 점검 A-4 · B-1).
+ * 등록부를 못 읽으면 법인만으로 건다(멈추는 쪽은 막지 않는다 — 응답이 그 사실을 밝힌다).
+ */
+export function stopCorp(corp, { by = '', reason = '' } = {}) {
+  const c = t(corp, 128);
+  const accById = new Map(KS.keyStoreLoadError() ? [] : KS.listAccountsRaw().map((a) => [a.id, a]));
+  const regErr = bmRegistryLoadError();
+  const servers = regErr ? [] : listBmServersRaw().filter((s) => t(s.vcenterId) === c)
+    .map((s) => ({ id: s.id, addr: addrKey(s.host, s.port, usernameOf(s, t(s.credRef) ? accById.get(t(s.credRef)) : null)) }));
+  const r = ST.setCorpStop(c, { by, reason, servers });
+  return r.ok ? { ...r, servers: servers.length, ...(regErr ? { registryUnreadable: true } : {}) } : r;
+}
+export function resumeCorp(corp, { by = '' } = {}) { return ST.clearCorpStop(t(corp, 128), { by }); }
+
+/* ── 손상 · 포탈 밖 변경 뒤 다시 읽기(설정 소유자 + OTP) ───────────────── */
+export function reloadState({ by = '' } = {}) { return ST.reloadSshAccessState({ by }); }
+/** 키 저장소 파일을 새 기준으로 — 바꿔치기 표지를 풀고 첫 사용 대조를 다시 하게 한다. */
+export function reloadKeyStore({ by = '' } = {}) {
+  const r = KS.reloadKeyStoreFromDisk();
+  REFS._resetVerifiedForTest();
+  _seenDrift = null;
+  if (r.ok) ST.addEvent({ kind: 'keystore-reloaded', by, detail: `키 ${r.keys}개` });
   return r;
 }
 
@@ -338,35 +399,58 @@ export function usageView({ fingerprint = '', limit = 200 } = {}) { return keyUs
 /* ── 주기 점검(기동 뒤 · 10분마다) ────────────────────────────────────── */
 let _timer = null;
 let _seenInbox = null;
+let _seenDrift = null;
 let _running = false;
-export const SCAN_EVERY_MS = 10 * 60_000;
 
-/** 한 번 — 무결성 확인 · 받는 곳의 새 파일 · 지워진 서버의 읽은 결과 정리 · 사용 기록 쓰기. 사건만 남긴다(알림 메일은 2단계). */
+/** 한 번 — 키 저장소 파일 대조 · 받는 곳의 새 파일 · 지워진 서버의 읽은 결과 정리 · 사용 기록 쓰기. 사건은 모아 한 번만 쓴다(점검 D-2 · C-7). */
 export async function runSshAccessScan({ now = Date.now() } = {}) {
   if (_running) return { skipped: true };
   _running = true;
   try {
-    const before = new Set(KS.tamperedKeyIds());
-    _lastIntegrity = { ...(await verifyKeyIntegrity()), at: now };
-    for (const id of _lastIntegrity.mismatch) if (!before.has(id)) { const k = KS.keyById(id); ST.addEvent({ kind: 'key-tampered', corp: k?.folderCorp || '', target: k?.name || id, detail: k?.fingerprint || '' }); }
+    const events = [];
+    const drift = checkKeyDrift({ now });
+    if (!_seenDrift) _seenDrift = new Set();
+    for (const id of drift.changed || []) {
+      if (_seenDrift.has(`c:${id}`)) continue;
+      _seenDrift.add(`c:${id}`);
+      const k = KS.keyById(id);
+      events.push({ kind: 'key-changed-outside', corp: k?.folderCorp || '', target: k?.name || id, detail: k?.fingerprint || '' });
+    }
+    for (const a of drift.added || []) {
+      if (_seenDrift.has(`a:${a.id}`)) continue;
+      _seenDrift.add(`a:${a.id}`);
+      events.push({ kind: 'key-added-outside', target: a.name || a.id, detail: a.fingerprint || '' });
+    }
     const corps = await corpList();
-    const servers = bmRegistryLoadError() ? [] : listBmServersRaw();
+    const regErr = bmRegistryLoadError();
+    const servers = regErr ? [] : listBmServersRaw();
     const ib = await INB.scanInbox({ corps, servers: servers.map((s) => ({ id: s.id, name: s.name || s.host, vcenterId: t(s.vcenterId) })) });
-    if (!_seenInbox) _seenInbox = new Set(ST.listEvents({ limit: 300 }).filter((e) => e.kind === 'inbox-new').map((e) => e.detail));
+    if (!_seenInbox) _seenInbox = new Set(ST.listEvents({ limit: 300 }).filter((e) => e.kind === 'inbox-new').flatMap((e) => String(e.detail || '').split('\n')));
+    const fresh = [];
     for (const it of ib.items) {
       if (it.code !== 'ready' && !it.needPassphrase) continue;
-      const sig = `${it.relPath}|${it.fingerprint || it.size}`;
+      const sig = `${it.relPath}|${it.sha || it.size}`;
       if (_seenInbox.has(sig)) continue;
       _seenInbox.add(sig);
-      ST.addEvent({ kind: 'inbox-new', corp: it.corp, target: it.relPath, detail: sig });
+      fresh.push({ it, sig });
     }
-    if (!bmRegistryLoadError()) ST.pruneInstalled(new Set(servers.map((s) => s.id)));
+    // 새 파일은 사건 하나로(파일마다 상태 파일을 다시 쓰지 않는다 — 점검 D-2). detail = 본 표지(재시작 뒤 다시 세지 않게).
+    if (fresh.length) events.push({ kind: 'inbox-new', corp: fresh.length === 1 ? fresh[0].it.corp : '',
+      target: `${fresh.length}개 — ${fresh.slice(0, 3).map((x) => x.it.relPath).join(' · ')}`, detail: fresh.map((x) => x.sig).join('\n') });
+    if (events.length) ST.addEvents(events, { now });
+    if (!regErr) INS.pruneInstalled(new Set(servers.map((s) => s.id)));
     flushKeyUsage({ now });
-    return { ok: true, integrity: _lastIntegrity, inbox: ib.items.length };
+    return { ok: true, drift, inbox: ib.items.length, events: events.length };
   } finally { _running = false; }
 }
+/** 라우트용 — 점검을 시작만 하고 기다리지 않는다(요청을 오래 붙잡지 않게 — 점검 D-1). */
+export function startSshAccessScanNow() {
+  if (_running) return { ok: false, code: 'busy', status: 409, reason: '점검이 이미 진행 중입니다.' };
+  runSshAccessScan().catch((e) => console.warn(`[ssh-access] 점검 실패: ${String(e?.message || e).slice(0, 160)}`));
+  return { ok: true, started: true };
+}
 
-/** 기동 시 한 번 등록(index.js). 첫 실행은 FIRST_DELAY 뒤(기동 직후 부하를 피한다). */
+/** 기동 시 한 번 등록(index.js). 첫 실행은 firstDelayMs 뒤(기동 직후 부하를 피한다 — 키 원문 대조는 첫 사용 때 refs 가 따로 한다). */
 export function startSshAccessScheduler({ firstDelayMs = 90_000 } = {}) {
   if (_timer) return;
   const run = () => { runSshAccessScan().catch((e) => console.warn(`[ssh-access] 주기 점검 실패: ${String(e?.message || e).slice(0, 160)}`)); };
@@ -374,4 +458,4 @@ export function startSshAccessScheduler({ firstDelayMs = 90_000 } = {}) {
   first.unref?.();
   _timer = first;
 }
-export function _resetSshAccessServiceForTest() { if (_timer) { clearTimeout(_timer); clearInterval(_timer); } _timer = null; _seenInbox = null; _lastIntegrity = null; _running = false; }
+export function _resetSshAccessServiceForTest() { if (_timer) { clearTimeout(_timer); clearInterval(_timer); } _timer = null; _seenInbox = null; _seenDrift = null; _running = false; }

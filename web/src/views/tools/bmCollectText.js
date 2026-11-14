@@ -48,6 +48,7 @@ export const REASON_TEXT = Object.freeze({
   unreachable: { label: 'iDRAC 미도달', action: 'iDRAC 네트워크 · 서비스 상태를 확인하세요.' },
   'pool-busy': { label: '동시성 대기 초과', action: '동시성 설정 · 진행 중인 집중 모니터링 수를 보세요.' },
   'no-telemetry': { label: '리포트 없음', action: 'Datacenter 라이선스가 없는 iDRAC — 센서 · 전력만 읽습니다(정상).' },
+  'cred-config': { label: '키 · 계정 설정으로 시도 안 함', action: '설정 › 보안 › SSH 공용 접속에서 이 서버의 키(법인 사용 중지 · 폴더 · 쓸 수 있는 기능 · 퇴역 · 바꿔치기)를 확인하세요.' },
   error: { label: '수집 오류', action: '작업 로그(실패 행)의 오류 문구를 보세요.' },
 });
 export const INFO_TEXT = Object.freeze({ 'no-telemetry': '리포트 없음(라이선스 — 정상)', first: '첫 주기(다음 주기부터 값 — 정상)', 'psi-absent': 'PSI 없음(커널 — 정상)' });

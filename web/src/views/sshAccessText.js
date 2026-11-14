@@ -21,7 +21,7 @@ export const ISSUE_TEXT = Object.freeze({
   'key-folder': '다른 법인 · 다른 서버의 폴더',
   'key-feature': '이 기능에 허용되지 않음',
   'key-retired': '퇴역한 키',
-  'key-tampered': '지문이 등록 때와 다름(바꿔치기 의심)',
+  'key-tampered': '키가 포탈 밖에서 바뀜(바꿔치기 의심)',
   'corp-stopped': '법인 키 사용 중지 중',
   'state-unreadable': '상태 파일을 읽지 못함',
 });
@@ -51,12 +51,16 @@ export const EVENT_TEXT = Object.freeze({
   'inbox-approved': '받은 키 승인',
   'inbox-discarded': '받은 키 파일 삭제',
   'key-tampered': '키 바꿔치기 의심',
+  'key-changed-outside': '키가 포탈 밖에서 바뀜',
+  'key-added-outside': '키가 포탈 밖에서 들어옴',
+  'state-reloaded': '상태 파일 다시 읽음',
+  'keystore-reloaded': '키 저장소 다시 읽음(포탈 밖 변경 받아들임)',
 });
 
 /** 사용 기록 결과 code → 글자. */
 export const USE_CODE_TEXT = Object.freeze({
   ok: '성공', 'auth-rejected': '로그인 실패', 'auth-stopped': '인증 정지 중', fail: '실패', hostkey: '호스트키 미신뢰', connect: '접속 실패',
-  'auth-unresolved': '자격 해석 실패', 'no-secret': '인증 수단 없음',
+  'auth-unresolved': '자격 해석 실패', 'no-secret': '인증 수단 없음', gone: '서버 지워짐',
 });
 export const UNUSUAL_TEXT = Object.freeze({ 'new-server': '처음 쓰인 서버', 'new-feature': '처음 쓰인 기능' });
 
@@ -136,6 +140,32 @@ export function inboxInFolder(view, node) {
 /** 키 점검 항목을 등급 순으로. */
 export function sortedCheck(items) {
   return [...(Array.isArray(items) ? items : [])].sort((a, b) => LEVEL_ORDER.indexOf(a.level) - LEVEL_ORDER.indexOf(b.level));
+}
+
+/** 주기 수집 기능 — 서버 표가 ‘이 키는 수집에 허용되지 않음’ 을 가를 때 본다(서버 FEATURE_CATALOG 의 수집 기능 id). */
+export const COLLECT_FEATURES = Object.freeze(['bm-usage', 'bm-storage']);
+
+/**
+ * 서버 표 ‘상태’ 칸 — 실제로 접속을 막는 사유를 먼저(서버가 준 값 그대로 · 화면이 폴더 · 기능을 새로 판정하지 않는다).
+ * @returns {{label:string, tone:'ok'|'warn'|'bad'|'muted', title?:string}}
+ */
+export function serverStatus(s, { tampered = [], stop = false } = {}) {
+  if (s.accountMissing) return { label: '공통 계정 없음', tone: 'bad' };
+  if (s.keyMissing) return { label: '키 없음(삭제됨)', tone: 'bad' };
+  if (stop && (s.keyMode === 'pinned' || s.keyMode === 'corp-default')) return { label: '키 사용 중지', tone: 'bad', title: '법인 키 사용 중지 — 이 노드는 이 서버에 키로 접속하지 않습니다.' };
+  if (s.keyId && (tampered || []).includes(s.keyId)) return { label: '키가 포탈 밖에서 바뀜', tone: 'bad' };
+  if (s.placementIssue) return { label: ISSUE_TEXT[s.placementIssue] || s.placementIssue, tone: 'bad' };
+  if (s.keyStatus === 'retired') return { label: '퇴역 키', tone: 'bad' };
+  if (s.keyMode === 'none') return { label: '인증 수단 없음', tone: 'bad' };
+  if (s.keyMode === 'password') return { label: '비밀번호', tone: 'warn' };
+  if (Array.isArray(s.keyFeatures) && !COLLECT_FEATURES.some((f) => s.keyFeatures.includes(f))) return { label: '수집 기능 미허용', tone: 'warn', title: '이 키의 ‘쓸 수 있는 기능’ 에 베어메탈 사용률 · 스토리지가 없습니다 — 주기 수집이 이 키로 접속하지 않습니다.' };
+  return { label: '키', tone: 'ok' };
+}
+
+/** 감사 로그 시각(ISO 문자열 — UTC) → ms. 못 읽으면 0. 화면은 dateTime 으로 이 브라우저 시각에 맞춘다(사건 행과 같은 시간대). */
+export function auditTime(at) {
+  const n = Date.parse(String(at || ''));
+  return Number.isFinite(n) ? n : 0;
 }
 
 /** 받는 곳 승인 때 기본 이름(파일 이름 → 키 이름 규칙에 맞는 글자). 서버 NAME_RE 와 같은 글자만 남긴다(서버가 다시 판정한다). */

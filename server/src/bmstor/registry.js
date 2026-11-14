@@ -23,7 +23,7 @@ import { sanitizeMounts } from './collect.js';
 import { accessMoved } from '../util/secretCarry.js'; // v2.607 LEFT2607-06
 import { normalizeBmGroups, groupsOf } from './agg.js';
 import { datacenterInputIssue } from './corp.js'; // v2.915: 법인(선택) — 설계 bm-san-compare §4.4
-import { bindOfWrite } from '../bmusage/onboard/bindRule.js'; // 7b r3(R-N1): 비밀을 주소에 묶는 판정 하나(choke point)
+import { bindOfWrite, addrKey } from '../bmusage/onboard/bindRule.js'; // 7b r3(R-N1): 비밀을 주소에 묶는 판정 하나(choke point)
 
 const FILE = path.join(config.configDir, 'bm-storage.json');
 const DEFAULT_INTERVAL_MIN = 10;
@@ -253,19 +253,21 @@ export function replaceBmServerKeyRefs(fromId, toId) {
 /**
  * v3.9.0 SSH 공용 접속 — **같은 주소**에서 이 서버가 쓸 키만 바꾼다(키 회전 `replaceBmServerKeyRefs` 와 같은 꼴 — 접속처 불변이라 choke point 를 지나지 않는다).
  *  · keyRef 빈 값 = 서버 키를 떼고 공통 계정의 기본 키(또는 비밀번호)를 따른다. 키를 고르면 '비밀번호 고정'(osAuth) 표지를 지운다(고른 키가 쓰이게).
+ *  · `expectAddr` = 화면이 본 접속처(host · port · 계정 — bindRule.addrKey). 다르면 409 — 낡은 화면에서 고른 키를 바뀐 주소에 묶지 않는다(점검 A-8).
  *  · ⚠ 비밀을 주소에 묶는 쓰기다 — 부르는 곳은 `sshaccess/service.js` 하나(설정 소유자 등급 + 본인 OTP 라우트 뒤 · 소스 스윕 테스트가 고정).
  *  · 등록부를 못 읽었으면 쓰지 않는다. 쓰기에 실패하면 메모리도 되돌린다.
- * @returns {{ok:true, previous:{keyRef:string, osAuth:string}} | {ok:false, code:string, status?:number, reason:string}}
+ * @returns {{ok:true, previous:{keyRef:string, osAuth:string, addrOnly:boolean, addr:string}} | {ok:false, code:string, status?:number, reason:string}}
  */
-export function setBmServerKeyRef(id, keyRef, { expectHost = null } = {}) {
+export function setBmServerKeyRef(id, keyRef, { expectAddr = null } = {}) {
   const data = load();
   if (loadErr.get()) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'OS 계정 등록부를 읽지 못해 키를 바꾸지 않았습니다.' };
   const s = data.servers.find((x) => x.id === String(id || ''));
   if (!s) return { ok: false, code: 'not-found', status: 404, reason: '서버를 찾을 수 없습니다.' };
-  if (expectHost != null && String(s.host) !== String(expectHost)) return { ok: false, code: 'moved', status: 409, reason: '서버 주소가 바뀌었습니다 — 화면을 다시 읽으세요.' };
+  const addr = addrKey(s.host, s.port, s.username);
+  if (expectAddr != null && addr !== String(expectAddr)) return { ok: false, code: 'moved', status: 409, reason: '서버 주소 · 포트 · 계정이 바뀌었습니다 — 화면을 다시 읽으세요.' };
   const k = String(keyRef || '').trim();
   if (k && !REF_RE.key.test(k)) return { ok: false, code: 'bad-ref', reason: 'SSH 키 참조가 올바르지 않습니다.' };
-  const previous = { keyRef: String(s.keyRef || ''), osAuth: s.osAuth === 'password' ? 'password' : '' };
+  const previous = { keyRef: String(s.keyRef || ''), osAuth: s.osAuth === 'password' ? 'password' : '', addrOnly: s.addrOnly === true, addr };
   const had = { keyRef: s.keyRef, osAuth: s.osAuth, addrOnly: s.addrOnly };
   if (k) s.keyRef = k; else delete s.keyRef;
   delete s.osAuth;
@@ -276,13 +278,25 @@ export function setBmServerKeyRef(id, keyRef, { expectHost = null } = {}) {
   }
   return { ok: true, previous };
 }
-/** 되돌리기 — setBmServerKeyRef 가 돌려준 previous 그대로(키 · 비밀번호 고정 표지). */
+/**
+ * 되돌리기 — setBmServerKeyRef 가 돌려준 previous 그대로(키 · 비밀번호 고정 · 주소만 표지).
+ * ⚠ 그 사이 접속처가 바뀌었으면(다른 관리자가 주소를 고침 — 등록부가 참조를 이미 버렸다) **되돌리지 않는다** — 옛 키를 새 주소에 다시 묶는 길이 된다(점검 A-1 · C-4).
+ */
 export function restoreBmServerKeyRef(id, previous = {}) {
-  const r = setBmServerKeyRef(id, previous.keyRef || '');
-  if (!r.ok || previous.osAuth !== 'password') return r;
-  const s = load().servers.find((x) => x.id === String(id || ''));
-  if (s) { s.osAuth = 'password'; try { persist(); } catch { delete s.osAuth; return { ok: false, code: 'write-failed', status: 503, reason: '비밀번호 고정 표지를 되돌리지 못했습니다.' }; } }
-  return r;
+  const data = load();
+  if (loadErr.get()) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'OS 계정 등록부를 읽지 못해 되돌리지 못했습니다.' };
+  const s = data.servers.find((x) => x.id === String(id || ''));
+  if (!s) return { ok: false, code: 'not-found', status: 404, reason: '서버가 그 사이 지워졌습니다.' };
+  if (addrKey(s.host, s.port, s.username) !== String(previous.addr || '')) return { ok: false, code: 'moved', status: 409, reason: '그 사이 서버 주소 · 포트 · 계정이 바뀌어 되돌리지 않았습니다(옛 키를 새 주소에 묶지 않음) — 서버 설정을 확인하세요.' };
+  const had = { keyRef: s.keyRef, osAuth: s.osAuth, addrOnly: s.addrOnly };
+  if (previous.keyRef) s.keyRef = previous.keyRef; else delete s.keyRef;
+  if (previous.osAuth === 'password') s.osAuth = 'password'; else delete s.osAuth;
+  if (previous.addrOnly) s.addrOnly = true; else delete s.addrOnly;
+  try { persist(); } catch (e) {
+    for (const f of ['keyRef', 'osAuth', 'addrOnly']) { if (had[f] === undefined) delete s[f]; else s[f] = had[f]; }
+    return { ok: false, code: 'write-failed', status: 503, reason: `되돌리지 못했습니다(${String(e?.code || e?.message || e).slice(0, 60)}).` };
+  }
+  return { ok: true };
 }
 
 export function removeBmServer(id) {

@@ -195,7 +195,8 @@ import './central/focusMonEdge.js'; // 〃 엣지 깨우기 구현 등록(servic
 import { startLinkCheckWorker } from './agent/linkCheckWorker.js'; // 엣지가 재는 링크(엣지→중앙·엣지↔엣지)
 import { startPowerOffPoller } from './tools/powerOffPoller.js';     // 전원 꺼짐 점검(v2.484)
 import { resumeHostAccessPending } from './hostaccess/service.js';  // 호스트 접근 제어 확정 대기 복구(v2.485)
-import { startSshAccessScheduler } from './sshaccess/service.js';  // v3.9.0 SSH 공용 접속 — 키 바꿔치기 감시 · 받는 곳 새 파일 · 사용 기록 쓰기(10분)
+import { startSshAccessScheduler } from './sshaccess/service.js';
+import { flushKeyUsage } from './sshaccess/usage.js';  // 종료 직전 키 사용 기록 쓰기(30초 묶음이 남긴 것 — 점검 D-5)  // v3.9.0 SSH 공용 접속 — 키 바꿔치기 감시 · 받는 곳 새 파일 · 사용 기록 쓰기(10분)
 import { resumeInstallJobs, reserveInstallResumeLocks } from './bareos/install/job.js';  // v2.844 Bareos 완전 설치 — 진행 중이던 작업 이어 읽기(러너는 엣지 노드 안에서 계속 돈다)
 import { startStoragePush } from './storage/push.js';            // 엣지→중앙 스냅샷 push(v2.302)
 import { startStorageConfigPull } from './agent/storageConfigPull.js'; // 중앙→엣지 장비 배포 pull(v2.302)
@@ -823,6 +824,8 @@ const gracefulExit = (signal, { beforeExit } = {}) => {
       try { stopPingMonitor(); } catch (e) { console.warn(`[shutdown] Ping 모니터 정지 실패: ${e?.message || e}`); }
       // v2.976: 집중 모니터링 — 열린 분을 닫아 DB 에 쓴다(이미 열린 DB 일 때만 · 동기). 엣지 워커는 수집기를 닫는다.
       try { stopFocusMonWorker(); stopFocusMon(); } catch (e) { console.warn(`[shutdown] 집중 모니터링 정지 실패: ${e?.message || e}`); }
+      // v3.9.0: SSH 키 사용 기록 — 메모리에 모아 30초 뒤 쓰므로 종료 직전 남은 것을 쓴다(동기 · 작다).
+      try { flushKeyUsage(); } catch (e) { console.warn(`[shutdown] 키 사용 기록 쓰기 실패: ${e?.message || e}`); }
       for (const h of exitHooks) { try { h(); } catch (e) { console.warn(`[shutdown] 종료 훅 실패: ${e?.message || e}`); } }
       process.exit(code);
     });

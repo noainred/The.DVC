@@ -5,37 +5,23 @@
  *   폴더 미지정 · 허용 기능 미지정 · 키 나이(회전 예정일 · 만든 지 ROTATE_DAYS 일) · 승인 안 된 키 파일 · 받는 곳 파일 권한 · 법인 사용 중지.
  * 판정 등급: 'bad'(지금 위험 — 바꿔치기 · 평문 저장) · 'warn'(손볼 것) · 'ok'. 못 읽은 항목은 'unknown'(0 으로 세지 않는다).
  *
- * 성능: 무결성 확인은 키를 하나씩 다시 풀어야 한다(passphrase 키는 OpenSSH bcrypt — 키당 ~175ms 동기). 키 사이마다 setImmediate 로 이벤트 루프에
- *   양보한다(키 하나의 풀기 자체는 나눌 수 없다 — 키 200개 상한). 주기 점검(10분)에서만 돌고 화면 조회는 마지막 결과를 쓴다.
- *   결과(바꿔치기 표지)는 `keyStore.markKeyIntegrity` 로 접속 판정에 반영된다.
+ * 바꿔치기: 디스크 ↔ 메모리 대조(checkKeyDrift — 키를 풀지 않는다) + 첫 사용 때 원문 ↔ 지문 대조(refs). 결과는 `keyStore` 의 표지로 접속 판정에 반영된다.
  */
-import { parsePrivateKey } from '../bmusage/onboard/keyParse.js';
 import * as KS from '../bmusage/onboard/keyStore.js';
 import { listStops, stateLoadError } from './state.js';
 
 export const ROTATE_DAYS = 180;
 const DAY = 86_400_000;
 const t = (v, max = 128) => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max).trim();
-const tick = () => new Promise((r) => setImmediate(r));
 
 /**
- * 저장된 키 원문을 다시 풀어 지문을 대조한다(비동기 — 키 사이 양보). 바뀐 키는 접속에 쓰지 않게 표지한다.
- * @returns {Promise<{checked:number, mismatch:string[], unreadable:string[]}>}
+ * 키 저장소 파일이 포탈 밖에서 바뀌었는가(디스크 ↔ 메모리 — keyStore.diskDrift). 키를 다시 풀지 않는다(빠르다 — 점검 D-1:
+ * 예전에는 키마다 원문을 다시 풀어 passphrase 키 200개면 47초가 걸렸고, 메모리끼리 대조해 실행 중 디스크 변경을 보지도 못했다).
+ * 원문 ↔ 지문 대조는 첫 사용 때 refs.integrityOk 가 한다.
+ * @returns {{at:number, ok:boolean, changed:string[], added:object[], removed:string[], reason?:string}}
  */
-export async function verifyKeyIntegrity() {
-  const out = { checked: 0, mismatch: [], unreadable: [] };
-  if (KS.keyStoreLoadError()) return out;
-  for (const k of KS.listKeysRaw()) {
-    if (k.status !== 'active') continue;
-    await tick();
-    if (!k.privateKey) { out.unreadable.push(k.id); continue; }   // 봉인을 못 풀었다 — 접속 판정이 이미 key-unreadable 로 막는다
-    const p = parsePrivateKey(k.privateKey, k.passphrase || '');
-    out.checked += 1;
-    const ok = p.ok && p.fingerprint === k.fingerprint;
-    KS.markKeyIntegrity(k.id, ok);
-    if (!ok) out.mismatch.push(k.id);
-  }
-  return out;
+export function checkKeyDrift({ now = Date.now() } = {}) {
+  return { at: now, ...KS.diskDrift() };
 }
 
 /**
@@ -43,7 +29,7 @@ export async function verifyKeyIntegrity() {
  * @param {{now?:number, policyMode?:string, inbox?:{items:object[], exists:boolean, unknownFolders:string[]}|null, integrity?:object|null,
  *          corpName?:(id:string)=>string}} o
  */
-export function buildKeyCheck({ now = Date.now(), policyMode = '', inbox = null, integrity = null, corpName = (x) => x } = {}) {
+export function buildKeyCheck({ now = Date.now(), policyMode = '', inbox = null, drift = null, servers = null, corpName = (x) => x } = {}) {
   const items = [];
   const add = (level, code, title, detail, extra = {}) => items.push({ level, code, title, detail, ...extra });
   const storeErr = KS.keyStoreLoadError();
@@ -62,11 +48,13 @@ export function buildKeyCheck({ now = Date.now(), policyMode = '', inbox = null,
   const loose = KS.keyStoreLoosePerm();
   if (loose == null) add('unknown', 'perm-unknown', '저장소 파일 권한을 확인하지 못함', '');
   else if (loose) add('bad', 'perm-loose', '저장소 파일을 다른 계정이 읽을 수 있음', 'ssh-keys.json 권한을 0600 으로 바꾸세요(포탈은 0600 으로 씁니다 — 누군가 바꿨습니다).');
-  // ③ 바꿔치기
-  if (integrity) {
-    if (integrity.mismatch?.length) add('bad', 'tampered', `지문이 등록 때와 다른 키 ${integrity.mismatch.length}개`, '바꿔치기 의심 — 그 키로는 접속하지 않습니다. 키를 지우고 새로 등록하세요.', { keys: integrity.mismatch.slice(0, 50) });
-    else if (integrity.checked) add('ok', 'integrity', '키 바꿔치기 감시', `키 ${integrity.checked}개의 지문이 등록 때와 같습니다.`);
-  } else add('unknown', 'integrity-pending', '키 바꿔치기 감시', '아직 확인하지 않았습니다(기동 직후 · 주기마다 확인합니다).');
+  // ③ 바꿔치기 — 디스크 ↔ 메모리(drift) + 첫 사용 대조 표지(tampered)
+  const tampered = KS.tamperedKeyIds();
+  if (drift && !drift.ok) add('unknown', 'drift-unknown', '키 저장소 파일 대조', `디스크 파일을 읽지 못해 대조하지 못했습니다(${String(drift.reason || '').slice(0, 60)}).`);
+  if (drift?.changed?.length || tampered.length) add('bad', 'tampered', `포탈 밖에서 바뀐 키 ${new Set([...(drift?.changed || []), ...tampered]).size}개`, '그 키로는 접속하지 않습니다 — 누가 바꿨는지 확인한 뒤 키를 새로 등록하거나, 바뀐 내용이 맞으면 ‘키 저장소 다시 읽기’ 로 받아들이세요.', { keys: [...new Set([...(drift?.changed || []), ...tampered])].slice(0, 50) });
+  if (drift?.added?.length) add('bad', 'added-outside', `포탈 밖에서 들어온 키 ${drift.added.length}개`, '키 저장소 파일에 포탈이 넣지 않은 키가 있습니다 — 재시작하면 쓰이게 됩니다. 모르는 키면 파일에서 지우고, 맞는 키면 ‘키 저장소 다시 읽기’ 로 받아들이세요.', { keys: drift.added.map((k) => k.name).slice(0, 50) });
+  if (drift?.ok && !drift.changed.length && !drift.added.length && !tampered.length) add('ok', 'integrity', '키 저장소 파일 대조', '디스크 파일이 포탈이 마지막으로 쓴 내용과 같습니다.');
+  else if (!drift) add('unknown', 'integrity-pending', '키 저장소 파일 대조', '아직 대조하지 않았습니다.');
   // ④ 폴더 · 허용 기능
   const noFolder = keys.filter((k) => !k.folderCorp);
   if (noFolder.length) add('warn', 'no-folder', `폴더가 없는 키 ${noFolder.length}개`, '어느 법인 서버에든 쓰일 수 있습니다 — 키 폴더에서 법인(공통/서버별)을 정하세요.', { keys: noFolder.map((k) => k.id).slice(0, 50) });
@@ -76,6 +64,11 @@ export function buildKeyCheck({ now = Date.now(), policyMode = '', inbox = null,
   const old = keys.filter((k) => (k.rotateAt && k.rotateAt <= now) || (!k.rotateAt && k.createdAt && now - k.createdAt >= ROTATE_DAYS * DAY));
   if (old.length) add('warn', 'rotate-due', `교체할 때가 된 키 ${old.length}개`, `회전 예정일이 지났거나 만든 지 ${ROTATE_DAYS}일이 넘었습니다.`, { keys: old.map((k) => k.id).slice(0, 50) });
   else if (keys.length) add('ok', 'age', '키 나이', `교체 기준(${ROTATE_DAYS}일 · 회전 예정일) 안입니다.`);
+  // ⑤-2 서버 쪽(점검 B-1 · B-4) — 폴더 · 기능 때문에 접속하지 못하는 서버 · 법인 칸이 없어 사용 중지가 닿지 않는 서버(service 가 계산해 넘긴다)
+  if (servers) {
+    if (servers.blocked?.length) add('warn', 'placement-blocked', `키 폴더 · 기능 때문에 키로 접속하지 못하는 서버 ${servers.blocked.length}대`, '서버의 키를 이 서버 폴더 · 법인 공통 폴더의 키로 고르거나 키의 기능을 더하세요(수집이 이 사유로 실패합니다).', { files: servers.blocked.slice(0, 50) });
+    if (servers.noCorp?.length) add('warn', 'no-corp-key', `법인이 지정되지 않았는데 키로 접속하는 서버 ${servers.noCorp.length}대`, '법인 키 사용 중지가 이 서버에는 닿지 않습니다(법인을 모른다) — 서버 등록에서 법인(vCenter)을 지정하세요.', { files: servers.noCorp.slice(0, 50) });
+  }
   // ⑥ 받는 곳
   if (inbox) {
     const pend = (inbox.items || []).filter((x) => x.code === 'ready' || x.needPassphrase);

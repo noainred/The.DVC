@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **329개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **330개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-14)
@@ -269,7 +269,8 @@
 | `session-state.json` | 설정 | 세션 폐기·유휴 상태(로그아웃·폐기 기록, 검토 S-05·S-06) | ✅ | ✅ | ✅ | auth/sessionState.js |
 | `settings-owners.txt` | 텍스트 | 설정 소유자 목록(백업·비밀 CSV 등 최상위 권한) | ✅ | ✅ | ✅ | security/securitySettings.js |
 | `ssh` | 디렉터리 | 아이실론 디렉터리 사용량 SSH 키 디렉터리(ssh/isidu_key — 0700/0600, v2.736) |  |  | ✅ | util/sshKeyStore.js |
-| `ssh-access-state.json` | 설정 | SSH 공용 접속의 **상태 파일**(v3.9.0 · 설계 docs/design/ssh-access §8 · §9). | ✅ | ✅ | ✅ | sshaccess/state.js |
+| `ssh-access-installed.json` | 설정 | 서버에서 읽은 `~/.ssh/authorized_keys` 의 **공개키 지문**(v3.9.0 · 설계 docs/design/ssh-access §9). | ✅ | ✅ | ✅ | sshaccess/installed.js |
+| `ssh-access-state.json` | 설정 | SSH 공용 접속의 **상태 파일**(v3.9.0 · 설계 docs/design/ssh-access §8 · §9) — 접속 판정에 쓰는 것만 둔다. | ✅ | ✅ | ✅ | sshaccess/state.js |
 | `ssh-key-usage.json` | 설정 | **키 사용 기록**(v3.9.0 · 설계 docs/design/ssh-access §8 ‘사용 기록’). | ✅ | ✅ | ✅ | sshaccess/usage.js |
 | `ssh-keys-inbox` | 디렉터리 | **키 폴더(받는 곳)**: 사람이 서버에서 직접 넣은 개인키 파일을 찾아 ‘승인 대기’ 로 보여 주고, 승인하면 봉인 저장소로 옮긴다 |  |  |  | sshaccess/inbox.js |
 | `ssh-keys.json` | 설정 | SSH 키 저장소 + 법인 공통 계정(7b단계 · 설계 PROFILES §18 'SSH 키 저장소' · §19 자격증명). | ✅ | ✅ | ✅ | bmusage/onboard/keyStore.js |

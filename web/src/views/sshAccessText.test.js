@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   shortFp, dateTime, ageDays, featuresText, folderTree, keysInFolder, inboxInFolder, sortedCheck, suggestKeyName,
-  LEVEL_TEXT, LEVEL_TONE, KEY_MODE_TEXT, ISSUE_TEXT,
+  LEVEL_TEXT, LEVEL_TONE, KEY_MODE_TEXT, ISSUE_TEXT, serverStatus, auditTime,
 } from './sshAccessText.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -58,6 +58,27 @@ describe('SSH 공용 접속 — 표시 도우미', () => {
   });
 });
 
+describe('SSH 공용 접속 — 서버 상태 칸(접속을 막는 사유 먼저)', () => {
+  const base = { keyMode: 'pinned', keyId: 'k1', keyFeatures: ['bm-usage'] };
+  it('계정 없음 · 키 없음 · 사용 중지 · 바꿔치기 · 폴더 · 퇴역 · 비밀번호 · 수집 기능 미허용 · 정상', () => {
+    expect(serverStatus({ ...base, accountMissing: true }).label).toBe('공통 계정 없음');
+    expect(serverStatus({ ...base, keyMissing: true }).tone).toBe('bad');
+    expect(serverStatus(base, { stop: true }).label).toBe('키 사용 중지');
+    expect(serverStatus({ keyMode: 'password' }, { stop: true }).label).toBe('비밀번호');
+    expect(serverStatus(base, { tampered: ['k1'] }).tone).toBe('bad');
+    expect(serverStatus({ ...base, placementIssue: 'key-folder' }).tone).toBe('bad');
+    expect(serverStatus({ ...base, keyStatus: 'retired' }).label).toBe('퇴역 키');
+    expect(serverStatus({ ...base, keyFeatures: ['disk-audit'] }).label).toBe('수집 기능 미허용');
+    expect(serverStatus({ ...base, keyFeatures: [] }).tone).toBe('warn');
+    expect(serverStatus({ ...base, keyFeatures: null })).toEqual({ label: '키', tone: 'ok' });
+    expect(serverStatus(base)).toEqual({ label: '키', tone: 'ok' });
+  });
+  it('감사 시각 — ISO(UTC) 를 ms 로 · 못 읽으면 0', () => {
+    expect(auditTime('2026-11-14T08:27:00.000Z')).toBe(Date.UTC(2026, 10, 14, 8, 27));
+    expect(auditTime('')).toBe(0);
+  });
+});
+
 describe('SSH 공용 접속 화면 — 규약', () => {
   const src = fs.readFileSync(path.join(HERE, 'SshAccessSettings.jsx'), 'utf8');
   it('표는 STable · 원시 table 없음 · 백틱 강조 · 대문자 변환 없음', () => {
@@ -67,6 +88,19 @@ describe('SSH 공용 접속 화면 — 규약', () => {
     const css = fs.readFileSync(path.join(HERE, 'sshAccess.css'), 'utf8');
     expect(css).not.toMatch(/text-transform\s*:\s*uppercase/);
     for (const m of src.matchAll(/BoldText text=\{'([^']*)'\}/g)) expect(m[1]).not.toMatch(/`/);
+  });
+  it('쓰기 응답은 전부 must() — postJson 409 · putJson/delJson 400 · 409 를 성공으로 그리지 않는다', () => {
+    const calls = [...src.matchAll(/await (postJson|putJson|delJson)\(/g)].length;
+    const wrapped = [...src.matchAll(/must\(await (postJson|putJson|delJson)\(/g)].length;
+    expect(calls).toBe(wrapped);
+    expect([...src.matchAll(/run\(\(\) => (postJson|putJson|delJson)\(/g)].length).toBeGreaterThan(0);
+    expect(src).toMatch(/const r = must\(await fn\(\)\)/);
+  });
+  it('기능 고르기는 렌더 밖 컴포넌트 · 예전 키는 ‘제한 없음’ 을 보존 · 0개는 저장 단추를 막는다', () => {
+    expect(src).toMatch(/^function FeaturePicker\(/m);
+    expect(src).toMatch(/features: k\.features == null \? null : \[\.\.\.k\.features\]/);
+    expect(src).toMatch(/allowAll=\{edit\.key\.features == null\}/);
+    expect((src.match(/!featuresChosen\(/g) || []).length).toBeGreaterThanOrEqual(6);
   });
   it('비밀은 보내기만 — 응답에서 개인키 · passphrase 를 그리지 않는다 · 1회 비밀번호는 보낸 뒤 비운다', () => {
     expect(src).not.toMatch(/resp\.privateKey|k\.privateKey|it\.privateKey|c\.privateKey/);

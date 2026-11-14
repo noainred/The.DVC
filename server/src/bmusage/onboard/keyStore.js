@@ -218,12 +218,49 @@ export function keyStoreLoosePerm() {
   try { if (!fs.existsSync(FILE)) return false; return (fs.statSync(FILE).mode & 0o077) !== 0; } catch { return null; }
 }
 /**
- * 무결성 표지 — 키 점검이 저장된 원문을 다시 풀어 **등록 때 지문과 다르면** 그 키를 접속에 쓰지 않는다(바꿔치기 감시).
- * 메모리 표지다(재시작하면 다음 점검이 다시 본다 — 점검은 기동 직후 · 주기마다 돈다).
+ * 무결성 표지 — 그 키를 접속에 쓰지 않는다(`key-tampered`). 세우는 곳: ① 첫 사용 때 원문 지문 ≠ 저장 지문(refs.integrityOk)
+ * ② 주기 점검이 디스크 파일과 메모리를 대조해 포탈 밖에서 바뀐 키(`diskDrift`). 메모리 표지다 — 재시작하면 ① 이 첫 사용 전에 다시 본다.
+ * 푸는 곳: 설정 소유자 + OTP 의 ‘키 저장소 다시 읽기’(`reloadKeyStoreFromDisk` — 디스크 내용을 새 기준으로 받아들인다).
  */
 const _tampered = new Set();
 export function markKeyIntegrity(id, ok) { if (ok) _tampered.delete(t(id, 32)); else _tampered.add(t(id, 32)); }
 export function tamperedKeyIds() { return [..._tampered]; }
+
+/**
+ * 디스크 파일 ↔ 메모리 대조(주기 점검 · 화면) — 포탈이 마지막으로 쓴(또는 읽은) 내용과 디스크가 다른 키.
+ * 봉인 문자열이 아니라 **푼 값**으로 비교한다(정책 전환으로 다시 봉인돼도 바뀐 것이 아니다). 바뀐 키는 접속에 쓰지 않게 표지한다.
+ * ⚠ 원문과 지문을 함께 바꾸면 첫 사용 대조(refs)는 통과하지만 여기서 ‘바뀜’ 으로 잡힌다(포탈이 쓴 내용과 다르다). 다만 재시작 뒤에는
+ *   그 디스크 내용이 새 기준이 된다(메모리가 비어 있다) — 화면 · 문서가 이 한계를 밝힌다.
+ * @returns {{ok:boolean, changed:string[], added:{id:string,name:string,fingerprint:string}[], removed:string[], reason?:string}}
+ */
+export function diskDrift() {
+  const out = { ok: true, changed: [], added: [], removed: [] };
+  if (keyStoreLoadError()) return { ...out, ok: false, reason: 'store-unreadable' };
+  let disk;
+  try {
+    if (!fs.existsSync(FILE)) disk = { keys: [] };
+    else { const j = JSON.parse(fs.readFileSync(FILE, 'utf8')); disk = openSecretsDeep({ keys: Array.isArray(j?.keys) ? j.keys : [] }); }
+  } catch (e) { return { ...out, ok: false, reason: `read-failed:${String(e?.code || e?.message || e).slice(0, 40)}` }; }
+  const mem = load().keys;
+  const diskKeys = filterObjectElements(disk.keys).list.map(normKey).filter(Boolean);
+  const byId = new Map(diskKeys.map((k) => [k.id, k]));
+  const sig = (k) => JSON.stringify([k.privateKey, k.passphrase, k.fingerprint, k.status, k.folderCorp, k.folderServer, k.features]);
+  for (const k of mem) {
+    const dk = byId.get(k.id);
+    if (!dk) { out.removed.push(k.id); continue; }
+    if (sig(dk) !== sig(k)) { out.changed.push(k.id); _tampered.add(k.id); }
+  }
+  const memIds = new Set(mem.map((k) => k.id));
+  for (const dk of diskKeys) if (!memIds.has(dk.id)) out.added.push({ id: dk.id, name: dk.name, fingerprint: dk.fingerprint });
+  return out;
+}
+/** 설정 소유자 + OTP — 디스크 파일을 새 기준으로 다시 읽는다(포탈 밖에서 바뀐 것을 사람이 확인한 뒤). 바꿔치기 표지도 푼다. */
+export function reloadKeyStoreFromDisk() {
+  cache = null; loadErr.clear(); undecryptable = 0; _tampered.clear();
+  load();
+  const e = loadErr.get();
+  return e ? { ok: false, code: 'registry-unreadable', status: 503, reason: `SSH 키 저장소를 읽지 못했습니다 — ${String(e.reason || '').slice(0, 120)}` } : { ok: true, keys: load().keys.length };
+}
 
 /**
  * 접속 직전에만 쓰는 키 원문. 없거나 못 열었으면(봉인 해제 실패 = '') error code.
@@ -414,6 +451,12 @@ export function saveAccount(body = {}, { by = '', now = Date.now() } = {}) {
   let keyRef = kind === 'os' ? t(body.keyRef !== undefined ? body.keyRef : (moved ? '' : existing?.keyRef), 32) : '';
   if (moved && body.keyRef === undefined && existing?.keyRef) dropped.push('keyRef');
   if (keyRef && !d.keys.some((k) => k.id === keyRef && k.status === 'active')) return { ok: false, code: 'key-missing', reason: '기본 키가 키 저장소에 없거나 회전으로 퇴역했습니다.' };
+  // v3.9.0(점검 B-4): 기본 키의 폴더 — 서버별 폴더 키는 공통 계정의 기본 키가 될 수 없고, 폴더 법인이 계정 법인과 달라도 안 된다(쓰면 수집이 key-folder 로 끊긴다).
+  if (keyRef) {
+    const kk = d.keys.find((k) => k.id === keyRef);
+    if (kk.folderServer) return { ok: false, code: 'key-folder', reason: '서버별 폴더의 키는 법인 공통 계정의 기본 키가 될 수 없습니다 — 공통 폴더의 키를 고르세요.' };
+    if (kk.folderCorp && kk.folderCorp !== corp) return { ok: false, code: 'key-folder', reason: '다른 법인 폴더의 키입니다 — 이 계정의 법인 공통 폴더에 있는 키를 고르세요.' };
+  }
   if (!existing && d.accounts.length >= MAX_ACCOUNTS) return { ok: false, code: 'too-many', reason: `공통 계정은 ${MAX_ACCOUNTS}개까지입니다.` };
   const provided = body.password !== undefined && body.password !== null && body.password !== '' && body.password !== '********';
   if (provided && String(body.password).length > 1024) return { ok: false, code: 'bad-password', reason: '비밀번호가 너무 깁니다.' };
