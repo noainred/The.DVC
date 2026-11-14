@@ -6,7 +6,7 @@
  *  · 무거운 API 는 폴링하지 않는다(마운트 1회 + 버튼). 늦게 온 이전 응답은 버린다(gen).
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson, postJson, delJson, hasRole, getCurrentUser, downloadFile, canCsv } from '../../api.js';
+import { fetchJson, postJson, delJson, sendJson, hasRole, getCurrentUser, downloadFile, canCsv } from '../../api.js';
 import { ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
@@ -43,12 +43,27 @@ function KeysSection({ manage, onChanged }) {
   const [rot, setRot] = useState({ from: '', to: '', otp: '' });
   const [msg, setMsg] = useState({ text: '', tone: 'muted' });
   const [busy, setBusy] = useState(false);
+  /**
+   * 두 사람 승인(SSH 공용 접속 2단계 v3.10.0) — 켜져 있으면 서버가 이 화면의 키 등록 · 교체 · 삭제를 409(two-person-required)로 돌려보낸다(승인 절차가 있는 화면으로).
+   * 개인키를 붙여 넣은 뒤에야 거절되지 않게 폼을 미리 숨긴다(검토 D-6). 값은 이 화면이 이미 읽는 키 목록 응답의 twoPerson(무거운 SSH 공용 접속 화면 자료를 따로 읽지 않는다).
+   * true = 켬 · false = 끔 · null = 모름(옛 서버 · 못 읽음 — 폼은 그대로 두고 서버의 409 를 받으면 그때 숨긴다). 판정은 서버가 다시 한다.
+   */
+  const [refusedTwoPerson, setRefusedTwoPerson] = useState(false);
+  const twoPerson = refusedTwoPerson ? true : typeof st.resp?.twoPerson === 'boolean' ? st.resp.twoPerson : null;
+  const setTwoPerson = (v) => setRefusedTwoPerson(v === true);
+  // 409 two-person-required — 폼을 숨기고, 붙여 넣은 개인키 · passphrase · OTP 는 화면 상태에서 비운다(숨긴 폼에 비밀을 들고 있지 않게).
+  const refused = (r) => {
+    if (r?.code !== 'two-person-required') return;
+    setTwoPerson(true);
+    setF((x) => ({ ...x, privateKey: '', passphrase: '', otp: '' })); setRot((x) => ({ ...x, otp: '' }));
+  };
+  const canChange = manage && twoPerson !== true;
   const keys = st.resp?.keys || [];
   const add = async () => {
     setBusy(true); setMsg({ text: '', tone: 'muted' });
     try {
       const r = await postJson('/tools/bm-usage/ssh-keys', { name: f.name, privateKey: f.privateKey, passphrase: f.passphrase, rotateAt: f.rotateAt || undefined, otp: f.otp });
-      if (r?.ok === false) { setMsg({ text: `등록하지 못했습니다 — ${r.reason || r.code}`, tone: 'bad' }); return; }
+      if (r?.ok === false) { refused(r); setMsg({ text: `등록하지 못했습니다 — ${r.reason || r.code}`, tone: 'bad' }); return; }
       setMsg({ text: `등록했습니다 — ${r.key.algo} ${r.key.bits ?? ''} · ${r.key.fingerprint}`, tone: 'ok' });
       setF({ name: '', privateKey: '', passphrase: '', rotateAt: '', otp: '' });
       load(); onChanged?.();
@@ -59,8 +74,9 @@ function KeysSection({ manage, onChanged }) {
     const otp = window.prompt(`키 ‘${k.name}’ 를 지웁니다 — 본인 OTP(없으면 비워 두세요)`, '');
     if (otp === null) return;
     try {
-      const r = await delJson(`/tools/bm-usage/ssh-keys/${encodeURIComponent(k.id)}?otp=${encodeURIComponent(otp)}`);
-      if (r?.ok === false) { setMsg({ text: `지우지 못했습니다 — ${r.reason || r.code}`, tone: 'bad' }); return; }
+      // OTP 는 본문으로(주소 쿼리는 앞단 프록시 · 브라우저 기록에 남는다 — reauth 는 본문을 먼저 본다)
+      const r = await sendJson(`/tools/bm-usage/ssh-keys/${encodeURIComponent(k.id)}`, 'DELETE', { otp });
+      if (r?.ok === false) { refused(r); setMsg({ text: `지우지 못했습니다 — ${r.reason || r.code}`, tone: 'bad' }); return; }
       setMsg({ text: `지웠습니다 — ${k.name}`, tone: 'ok' }); load(); onChanged?.();
     } catch (e) { setMsg({ text: `지우지 못했습니다 — ${errText(e)}`, tone: 'bad' }); }
   };
@@ -68,7 +84,7 @@ function KeysSection({ manage, onChanged }) {
     setBusy(true); setMsg({ text: '', tone: 'muted' });
     try {
       const r = await postJson('/tools/bm-usage/ssh-keys/rotate', rot);
-      if (r?.ok === false) { setMsg({ text: `회전하지 못했습니다 — ${r.reason || r.code}`, tone: 'bad' }); return; }
+      if (r?.ok === false) { refused(r); setMsg({ text: `회전하지 못했습니다 — ${r.reason || r.code}`, tone: 'bad' }); return; }
       setMsg({ text: `회전했습니다 — 서버 ${r.servers.length}대 · 공통 계정 ${r.accounts}개가 새 키를 씁니다.${r.retestAdvised ? ' 서버마다 ‘연결 시험’ 을 다시 하세요(자동 재시험 없음).' : ''}`, tone: 'ok' });
       setRot({ from: '', to: '', otp: '' }); load(); onChanged?.();
     } catch (e) { setMsg({ text: `회전하지 못했습니다 — ${errText(e)}`, tone: 'bad' }); setRot((x) => ({ ...x, otp: '' })); }
@@ -78,10 +94,10 @@ function KeysSection({ manage, onChanged }) {
   return (
     <section className="bmob-sec">
       <h4>SSH 키 저장소</h4>
-      <p className="bmo-note"><BoldText text={'키는 **봉인 저장**하고 화면 · API · 내보내기 · 백업에는 **지문 · 공개키만** 나갑니다. ed25519 권장 · RSA 2048 비트 미만 · DSA 는 받지 않습니다. 포탈은 서버의 authorized_keys 를 건드리지 않습니다 — 공개키 배포는 현장에서 합니다.'} /></p>
+      <p className="bmo-note"><BoldText text={'키는 **봉인 저장**하고 화면 · API · 내보내기 · 백업에는 **지문 · 공개키만** 나갑니다. ed25519 권장 · RSA 2048 비트 미만 · DSA 는 받지 않습니다. **이 화면**은 서버의 authorized_keys 를 바꾸지 않습니다 — 서버에 공개키를 넣거나(키 로그인 설정) 포탈이 넣은 줄을 거두는 것은 설정 › 보안 › SSH 공용 접속에서 하고(본인 OTP), 그 밖에는 현장에서 넣습니다.'} /></p>
       {st.loading && !st.resp ? <p className="bmo-note">읽는 중…</p> : (
         <STable minWidth={980} className="bmo-t" style={{ fontSize: 12 }}>
-          <thead><tr><th>이름</th><th>종류</th><th>지문(SHA256)</th><th>등록</th><th>회전 예정</th><th className="right">쓰는 서버</th><th>상태</th>{manage && <th data-nosort>동작</th>}</tr></thead>
+          <thead><tr><th>이름</th><th>종류</th><th>지문(SHA256)</th><th>등록</th><th>회전 예정</th><th className="right">쓰는 서버</th><th>상태</th>{canChange && <th data-nosort>동작</th>}</tr></thead>
           <tbody>
             {keys.map((k) => (
               <tr key={k.id}>
@@ -91,18 +107,20 @@ function KeysSection({ manage, onChanged }) {
                 <td data-sort={k.createdAt || 0}>{ymd(k.createdAt)}<div className="bmo-sub">{k.createdBy || '—'}</div></td>
                 <td data-sort={k.rotateAt || 0}>{ymd(k.rotateAt)}{k.rotateDue && <div><Chip tone="warn">예정일 지남</Chip></div>}</td>
                 <td className="right" data-sort={k.servers ?? ''}>{numOr(k.servers)}{k.accountsUsing ? <div className="bmo-sub">계정 {k.accountsUsing}</div> : null}</td>
-                <td data-sort={k.status}>{KEY_STATUS_TEXT[k.status] || k.status}</td>
-                {manage && <td data-nosort><button className="btn btn-sm" type="button" onClick={() => del(k)} disabled={busy}>삭제</button></td>}
+                <td data-sort={k.status}>{k.status === 'pending' ? <Chip tone="warn" title="다른 설정 소유자의 승인을 기다리는 키입니다 — 승인되기 전에는 접속에 쓰지 않고, 서버 · 공통 계정에서 고를 수도 없습니다(설정 › 보안 › SSH 공용 접속 › 키 보안 › 승인 대기).">{KEY_STATUS_TEXT.pending}</Chip> : (KEY_STATUS_TEXT[k.status] || k.status)}</td>
+                {canChange && <td data-nosort><button className="btn btn-sm" type="button" onClick={() => del(k)} disabled={busy}>삭제</button></td>}
               </tr>
             ))}
-            {!keys.length && <tr><td colSpan={manage ? 8 : 7} className="bmo-sub">{st.resp?.hidden === 'scoped' ? '범위 계정에는 키 목록을 보이지 않습니다(키가 없다는 뜻이 아닙니다).' : '등록한 키가 없습니다.'}</td></tr>}
+            {!keys.length && <tr><td colSpan={canChange ? 8 : 7} className="bmo-sub">{st.resp?.hidden === 'scoped' ? '범위 계정에는 키 목록을 보이지 않습니다(키가 없다는 뜻이 아닙니다).' : '등록한 키가 없습니다.'}</td></tr>}
           </tbody>
         </STable>
       )}
       {st.resp && st.resp.usageKnown === false && <p className="bmo-note" style={{ color: toneVar('warn') }}>OS 계정 등록부를 읽지 못해 ‘쓰는 서버’ 를 모릅니다(—) — 이 동안 삭제는 막힙니다.</p>}
       {st.resp?.hidden === 'scoped' && <p className="bmo-note">범위가 지정된 계정에는 키 목록(이름 · 사용처)을 보이지 않습니다 — 키 · 공통 계정을 서버에 묶는 것은 설정 소유자만 합니다.</p>}
       {st.resp?.undecryptable > 0 && <p className="bmo-note" style={{ color: toneVar('bad') }}>봉인을 풀지 못한 비밀 {st.resp.undecryptable}개 — 자격증명 비밀키가 바뀐 것으로 보입니다. 봉인본을 지우지 않도록 키 저장소 변경을 막았습니다(원래 비밀키로 되돌리세요).</p>}
-      {manage ? (
+      {manage && twoPerson === true ? (
+        <p className="bmo-note" style={{ color: toneVar('warn') }}>두 사람 승인이 켜져 있어 이 화면에서는 키를 등록 · 교체(회전) · 삭제하지 않습니다 — <a href="#/settings/ssh-access">설정 › 보안 › SSH 공용 접속</a>의 키 폴더에서 요청하면 다른 설정 소유자가 승인한 뒤 실행됩니다(승인 대기 키는 그 전에는 쓰이지 않습니다).</p>
+      ) : manage ? (
         <div className="bmob-forms">
           <fieldset className="bmob-form">
             <legend>키 등록</legend>
@@ -115,7 +133,7 @@ function KeysSection({ manage, onChanged }) {
           </fieldset>
           <fieldset className="bmob-form">
             <legend>회전(참조 교체)</legend>
-            <p className="bmo-sub">순서: 새 키 등록 → 서버 authorized_keys 배포(현장) → 여기서 교체 → 전 서버 연결 시험 → 옛 키 사용 0 이면 삭제.</p>
+            <p className="bmo-sub">순서: 새 키 등록 → 서버 authorized_keys 에 새 공개키 넣기(SSH 공용 접속의 키 로그인 설정 또는 현장) → 여기서 교체 → 전 서버 연결 시험 → 옛 키 사용 0 이면 삭제.</p>
             <label>옛 키 <Select sort={false} className="select select-sm" value={rot.from} onChange={(e) => setRot({ ...rot, from: e.target.value })}><option value="">선택</option>{keys.filter((k) => k.status === 'active').map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}</Select></label>
             <label>새 키 <Select sort={false} className="select select-sm" value={rot.to} onChange={(e) => setRot({ ...rot, to: e.target.value })}><option value="">선택</option>{keys.filter((k) => k.status === 'active' && k.id !== rot.from).map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}</Select></label>
             <label>본인 OTP <input className="input" inputMode="numeric" value={rot.otp} onChange={(e) => setRot({ ...rot, otp: e.target.value })} maxLength={8} autoComplete="one-time-code" /></label>

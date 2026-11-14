@@ -24,7 +24,7 @@ import { ROW_CODE, WARN } from '../../bmusage/onboard/importAnalyze.js';
 import { TEMPLATE_COLUMNS, MAX_UPLOAD_BYTES, MAX_ROWS, parseOnboardFile } from '../../bmusage/onboard/importParse.js';
 import * as KS from '../../bmusage/onboard/keyStore.js';
 import * as REFS from '../../bmusage/onboard/refs.js';
-import { twoPersonRedirect } from '../../sshaccess/guards.js';   // v3.10.0: 두 사람 승인이 켜져 있으면 키 등록 · 교체 · 삭제는 승인 절차가 있는 화면으로(우회 금지)
+import { twoPersonRedirect, twoPersonOn } from '../../sshaccess/guards.js';   // v3.10.0: 두 사람 승인이 켜져 있으면 키 등록 · 교체 · 삭제는 승인 절차가 있는 화면으로(우회 금지)
 
 const adminOnly = requireRole('admin');
 const toolsPerm = requirePerm('tools');
@@ -78,7 +78,8 @@ export function registerBmOnboard(api, deps = {}) {
     if (unreadable503(res)) return;
     const v = REFS.listKeysView({ scoped: !!scopedVcenterIds(req.user, store.get()) });   // 감사 L-7: 범위 계정에는 목록을 주지 않는다
     res.set('Cache-Control', 'no-store');
-    res.json({ ok: true, ...v, undecryptable: KS.keyStoreUndecryptable() || 0 });
+    // twoPerson: 화면이 키 등록 · 교체 · 삭제 폼을 미리 숨기게(SSH 공용 접속 화면 자료를 통째로 읽지 않게 — 웹 점검 D-6). 판정은 쓰기 라우트가 다시 한다.
+    res.json({ ok: true, ...v, undecryptable: KS.keyStoreUndecryptable() || 0, twoPerson: twoPersonOn() });
   });
 
   api.post('/tools/bm-usage/ssh-keys', ...keyAddGate, (req, res) => {

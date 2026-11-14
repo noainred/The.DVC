@@ -14,7 +14,7 @@
  *    - 1회 비밀번호 · OTP 는 보낸 뒤 성공 · 실패와 무관하게 비운다. 서버 쪽 제한은 보호 장치 설정이다(요청마다 고르지 않는다 — 창은 읽기 전용으로 보인다).
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { fetchJson, postJson, putJson, delJson, getCurrentUser } from '../api.js';
+import { fetchJson, postJson, putJson, sendJson, getCurrentUser } from '../api.js';
 import { ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import Select from '../components/Select.jsx';
@@ -26,11 +26,19 @@ import {
   shortFp, dateTime, ageDays, featuresText, folderTree, keysInFolder, inboxInFolder, sortedCheck, suggestKeyName, serverStatus, auditTime, COLLECT_FEATURES,
   APPROVAL_STATUS_TEXT, APPROVAL_STATUS_TONE, GUARD_KEYS, GUARD_TEXT, splitApprovals, approvalRemaining, isOwnRequest, pendingText, pendingTone,
   folderText, keyOptionLabel, guardDiff, guardSaveText, approvalDetail, approvalOutcome, rotateDoneText, eventDetail, restrictLineText,
-  keyLoginRow, keyRevokeRow, jobSummary, tallyText, keyLoginSelectable, keyLoginKeyOptions, corpKeyOptions, rotateTargetOptions, defaultKeyChoice, savedAuthHints, pendingKeyRequest,
+  keyLoginRow, keyRevokeRow, tallyText, keyLoginSelectable, keyLoginKeyOptions, corpKeyOptions, rotateTargetOptions, defaultKeyChoice, savedAuthHints, pendingKeyRequest,
+  HIDDEN_EVENT_KINDS, guardFailText, rotatePartialText, recordFailedText, stopDoneText, jobHeadText, jobLostText, revokeStartText, revokeOnceWarn,
 } from './sshAccessText.js';
 import './sshAccess.css';
 
-const errText = (e) => e?.body?.reason || e?.message || String(e);
+/**
+ * 오류 글자 — 서버 reason 그대로. 두 사람 승인이 켜져 있는데 승인할 사람이 없어 요청을 만들지 않은 경우(409 no-approver)는
+ * 서버 사유가 ‘보호 장치’ 를 가리키므로 그 스위치가 어디 있는지만 덧붙인다.
+ */
+const errText = (e) => {
+  const base = e?.body?.reason || e?.message || String(e);
+  return e?.body?.code === 'no-approver' ? `${base} (보호 장치는 키 보안 탭에 있습니다.)` : base;
+};
 /** 쓰기 응답 — ok:false(400 · 409 를 던지지 않는 api.js 경로)를 오류로 바꾼다. */
 function must(r) {
   if (r && r.ok === false) { const e = new Error(r.reason || r.code || '실패했습니다'); e.body = r; throw e; }
@@ -79,13 +87,15 @@ const JOB_POLL_MAX_FAILS = 5;
 /**
  * 키 작업(키 로그인 설정 · 키 거두기) 진행 — **작업이 도는 동안에만** 2초마다 묻는다. 끝나면 멈추고, 화면을 떠나면 멈추고, 늦게 온 이전 응답은 버린다(gen).
  * 작업을 못 찾거나(404 — 끝난 지 오래 · 포탈 재시작) 연달아 못 물으면 멈추고 그 사실을 보인다(끝나지 않는 폴링 금지 — 작업 자체는 서버에서 계속된다).
- * onDone 은 작업이 끝난 것을 처음 본 때 한 번 부른다(ref — 부모가 다시 그려져도 폴링을 다시 시작하지 않는다).
+ * onDone(job, { wasRunning }) 은 작업이 끝난 것을 처음 본 때 한 번 부른다(ref — 부모가 다시 그려져도 폴링을 다시 시작하지 않는다).
+ * wasRunning = 이 화면이 그 작업이 도는 것을 봤거나 직접 시작했다 — 이미 끝난 작업에 다시 붙은 것(탭을 다시 엶 · v.jobs)이면 false(화면을 또 다시 읽지 않게).
  */
 function useKeyJob(onDone) {
   const [st, setSt] = useState({ id: '', job: null, skipped: [], err: null, stopped: false });
   const gen = useRef(0);
   const timer = useRef(null);
   const fails = useRef(0);
+  const sawRunning = useRef(false);
   const doneRef = useRef(onDone);
   doneRef.current = onDone;
   useEffect(() => () => { gen.current += 1; clearTimeout(timer.current); }, []);
@@ -95,8 +105,8 @@ function useKeyJob(onDone) {
       if (g !== gen.current) return;
       fails.current = 0;
       setSt((p) => ({ ...p, job: r.job || null, err: null }));
-      if (r.job?.running) timer.current = setTimeout(() => ask(id, g), JOB_POLL_MS);
-      else doneRef.current?.(r.job || null);
+      if (r.job?.running) { sawRunning.current = true; timer.current = setTimeout(() => ask(id, g), JOB_POLL_MS); }
+      else doneRef.current?.(r.job || null, { wasRunning: sawRunning.current });
     } catch (e) {
       if (g !== gen.current) return;
       fails.current += 1;
@@ -105,8 +115,9 @@ function useKeyJob(onDone) {
       if (!stop) timer.current = setTimeout(() => ask(id, g), JOB_POLL_MS);
     }
   }, []);
-  const start = useCallback((id, skipped = []) => {
-    const g = ++gen.current; clearTimeout(timer.current); fails.current = 0;
+  /** own = 이 화면이 방금 시작한 작업(끝난 것을 처음 봐도 wasRunning) · false = 이미 있는 작업에 다시 붙음. */
+  const start = useCallback((id, skipped = [], { own = true } = {}) => {
+    const g = ++gen.current; clearTimeout(timer.current); fails.current = 0; sawRunning.current = !!own;
     setSt({ id, job: null, skipped: Array.isArray(skipped) ? skipped : [], err: null, stopped: false });
     ask(id, g);
   }, [ask]);
@@ -123,28 +134,44 @@ function useKeyJob(onDone) {
   return { ...st, running, start, resume, clear };
 }
 
-/** 키 작업 결과 — 서버마다 한 줄(키 로그인 설정 · 키 거두기 공용). 글자 · 톤은 sshAccessText(서버 ok · code 그대로 — 화면이 성공을 다시 판정하지 않는다). */
+/**
+ * 키 작업 결과 — 서버마다 한 줄(키 로그인 설정 · 키 거두기 공용). 글자 · 톤은 sshAccessText(서버 ok · code 그대로 — 화면이 성공을 다시 판정하지 않는다).
+ * 도는 동안 ‘멈추기’(OTP 없음 — 줄이는 방향) — 지금 처리 중인 서버는 끝까지 하고(줄 넣기 · 확인 · 되돌리기를 끊지 않는다) 남은 서버는 하지 않는다.
+ * 호출부는 key={kj.id} 로 그린다(작업이 바뀌면 멈추기 문구가 남지 않게).
+ */
 function KeyJobResult({ kj, kind }) {
+  const [cx, setCx] = useState({ busy: false, text: '', tone: 'muted' });
   if (!kj.id) return null;
   const job = kj.job;
   const meta = job?.meta || {};
-  const sum = jobSummary(job);
   const toRow = kind === 'key-revoke' ? keyRevokeRow : (r) => keyLoginRow(r, meta);
   const skipped = (kj.skipped.length ? kj.skipped : meta.skipped) || [];
   const rows = [...(job?.results || []), ...skipped].map((r) => ({ r, x: toRow(r) }));
   const unreached = kind === 'key-revoke' && rows.some(({ x }) => x.tone === 'bad');
+  const canCancel = !!job && job.running === true && !job.cancelled && !kj.stopped;
+  const cancel = async () => {
+    setCx({ busy: true, text: '', tone: 'muted' });
+    try {
+      must(await postJson(`/settings/ssh-access/jobs/${encodeURIComponent(kj.id)}/cancel`, {}));
+      setCx({ busy: false, text: '멈추기를 요청했습니다 — 지금 처리 중인 서버는 끝까지 하고(줄 넣기 · 확인 · 되돌리기를 끊지 않습니다), 남은 서버는 하지 않고 ‘멈춤’ 으로 적습니다.', tone: 'warn' });
+    } catch (e) { setCx({ busy: false, text: `멈추지 못했습니다 — ${errText(e)}`, tone: 'bad' }); }
+  };
+  const tally = !job || job.running ? '' : (tallyText(rows.map(({ x }) => x.label)) || '결과 없음');
   return (
     <div className="ssa-job">
-      <p className="ssa-note" role="status">
-        {!job ? '작업을 시작했습니다 — 진행을 묻는 중…'
-          : sum.running ? `진행 ${sum.done} / ${unitText(sum.total, '대')}${sum.current ? ` — 지금 ${sum.current}` : ''} · 1대씩 차례로 합니다`
-          : `끝났습니다(${dateTime(job.doneAt)}) — ${tallyText(rows.map(({ x }) => x.label)) || '결과 없음'}`}
-        {meta.keyName ? ` · 키 ${meta.keyName}` : ''}{meta.replaceKeyName ? ` · 옛 키 ${meta.replaceKeyName} 줄 삭제` : ''}
-      </p>
+      <div className="ssa-acts">
+        <p className="ssa-note" role="status">
+          {jobHeadText(job, { stopped: kj.stopped })}{tally ? ` — ${tally}` : ''}
+          {meta.keyName ? ` · 키 ${meta.keyName}` : ''}{meta.replaceKeyName ? ` · 교체 — 확인되면 옛 키 ${meta.replaceKeyName} 줄도 지우기(지운 결과는 서버마다)` : ''}
+          {job?.by ? ` · 시작 ${job.by}` : ''}
+        </p>
+        {canCancel && <button className="btn btn-sm danger" type="button" disabled={cx.busy} onClick={cancel} title="지금 처리 중인 서버는 끝까지 하고 남은 서버는 하지 않습니다(본인 OTP 없이 — 줄이는 방향).">{cx.busy ? '멈추는 중…' : '멈추기'}</button>}
+      </div>
+      {cx.text && <p className="ssa-note" role="status" style={{ color: toneVar(cx.tone) }}>{cx.text}</p>}
       {kj.err && (
         <p className="ssa-note" style={{ color: toneVar('bad') }}>
-          {kj.stopped ? `진행을 더 묻지 못했습니다(${errText(kj.err)}) — 작업은 서버에서 계속됐을 수 있습니다. 결과는 키 보안 › 키 변경 기록에도 남습니다. ` : `진행을 묻지 못했습니다 — 다시 묻는 중(${errText(kj.err)}).`}
-          {kj.stopped && <button className="btn btn-sm" type="button" onClick={kj.resume}>진행 다시 묻기</button>}
+          {kj.stopped ? `${jobLostText(kj.err?.status, kj.err?.body?.reason || kj.err?.message, job)} ` : `진행을 묻지 못했습니다 — 다시 묻는 중(${errText(kj.err)}).`}
+          {kj.stopped && kj.err?.status !== 404 && <button className="btn btn-sm" type="button" onClick={kj.resume}>진행 다시 묻기</button>}
         </p>
       )}
       <STable minWidth={560} className="ssa-t ssa-jobt">
@@ -157,11 +184,29 @@ function KeyJobResult({ kj, kind }) {
               <td>{x.parts.join(' · ') || '—'}</td>
             </tr>
           ))}
-          {!rows.length && <tr><td colSpan={3} className="ssa-sub">{job ? '아직 끝난 서버가 없습니다.' : '진행을 묻는 중입니다.'}</td></tr>}
+          {!rows.length && <tr><td colSpan={3} className="ssa-sub">{kj.stopped ? '결과를 받지 못했습니다.' : job ? '아직 끝난 서버가 없습니다.' : '진행을 묻는 중입니다.'}</td></tr>}
         </tbody>
       </STable>
-      {unreached && meta.keyId && <p className="ssa-note">못 닿은 서버는 서버에서 직접 지워야 합니다 — 그 계정의 ~/.ssh/authorized_keys 에서 표식 ‘portal-ssh:{meta.keyId}’ 가 붙은 줄입니다.</p>}
+      {unreached && meta.keyId && <p className="ssa-note">못 닿았거나 · 결과를 모르거나 · 멈춤 · 상한으로 빠진 서버는 그 키 줄이 남아 있을 수 있습니다 — 서버에서 직접 확인해 지우세요(그 계정의 ~/.ssh/authorized_keys 에서 표식 ‘portal-ssh:{meta.keyId}’ 가 붙은 줄).</p>}
+      {job && !job.running && <p className="ssa-note">작업이 끝나면 키 보안 › 키 변경 기록에 요약(대수 · 실패한 서버 일부)이 남습니다 — 포탈이 도중에 다시 시작하면 남지 않습니다.</p>}
     </div>
+  );
+}
+
+/**
+ * 키 로그인 설정 작업 — 창을 닫거나 화면을 다시 열어도 진행 · 결과를 이어 본다(점검 E-2 — 서버 v.jobs.install: 진행 중이거나 끝난 지 1시간 안 · 포탈 재시작 전까지).
+ * 이미 끝난 작업에 다시 붙으면 한 번만 묻는다. 도는 것을 보다가 끝나면 서버 표를 다시 읽는다.
+ */
+function InstallJobPanel({ jobRef, reload }) {
+  const kj = useKeyJob((_job, { wasRunning }) => { if (wasRunning) reload(); });
+  const jobId = jobRef?.id || '';
+  useEffect(() => { if (jobId && jobId !== kj.id && !kj.running) kj.start(jobId, [], { own: false }); }, [jobId]);   // eslint-disable-line react-hooks/exhaustive-deps -- 서버가 알려 준 작업 id 가 바뀔 때만 다시 붙는다
+  if (!kj.id) return null;
+  return (
+    <section className="ssa-sec">
+      <h4>키 로그인 설정 작업 — {kj.running ? '진행 중' : '최근 결과'}</h4>
+      <KeyJobResult key={kj.id} kj={kj} kind="key-login" />
+    </section>
   );
 }
 
@@ -250,6 +295,9 @@ function ServersTab({ v, corpName, reload, say }) {
   const stop = stateUnknown ? null : stop0;
   const keyName = (id) => (v.keys || []).find((k) => k.id === id)?.name || '';
   const setB = (id, on) => setBusy((p) => { const n = new Set(p); if (on) n.add(id); else n.delete(id); return n; });
+  // 등록부 · 키 저장소를 못 읽었으면 수는 ‘—’, 빈 목록은 ‘못 읽음’ 으로(0 · ‘없습니다’ 로 지어내지 않는다 — 점검 E-11).
+  const regBad = !!v.registryUnreadable;
+  const storeBad = !!v.storeUnreadable;
   const test = async (s) => {
     setB(s.id, true);
     try {
@@ -263,14 +311,15 @@ function ServersTab({ v, corpName, reload, say }) {
         <label className="ssa-corp-pick">법인 <Select sort={false} className="select select-sm" value={corp} onChange={(e) => { setCorp(e.target.value); setSel(new Set()); }}>
           {corpIds.map((id) => {
             const c = (v.corps || []).find((x) => x.id === id);
-            const n = (v.servers || []).filter((s) => (s.vcenterId || '') === id).length;
-            return <option key={id || '_none'} value={id}>{corpName(id)}{c?.dc ? ` (${c.dc})` : ''} — 서버 {n}대{c?.stop?.unreadable ? ' · 상태 모름' : c?.stop ? ' · 키 사용 중지' : ''}</option>;
+            const n = regBad ? null : (v.servers || []).filter((s) => (s.vcenterId || '') === id).length;
+            return <option key={id || '_none'} value={id}>{corpName(id)}{c?.dc ? ` (${c.dc})` : ''} — 서버 {unitText(n, '대')}{c?.stop?.unreadable ? ' · 상태 모름' : c?.stop ? ' · 키 사용 중지' : ''}</option>;
           })}
         </Select></label>
-        <span className="ssa-sub">OS 등록 서버가 있는 법인 {corpIds.filter((id) => (v.servers || []).some((s) => (s.vcenterId || '') === id)).length}곳</span>
+        <span className="ssa-sub">{regBad ? 'OS 계정 등록부를 읽지 못해 법인별 서버 수를 모릅니다' : `OS 등록 서버가 있는 법인 ${corpIds.filter((id) => (v.servers || []).some((s) => (s.vcenterId || '') === id)).length}곳`}</span>
       </div>
       {stateUnknown && <p className="ssa-banner" style={{ color: toneVar('bad') }}>상태 파일을 읽지 못해 이 노드의 모든 키 접속을 멈췄습니다(사용 중지 기록을 모름) — 키 보안 탭에서 파일을 확인한 뒤 다시 읽으세요.</p>}
       {stop && <p className="ssa-banner" style={{ color: toneVar('bad') }}>이 법인은 키 사용이 중지돼 있습니다 — {stop.by || '—'} · {dateTime(stop.at)}{stop.reason ? ` · ${stop.reason}` : ''}. 키 보안 탭에서 재개합니다.</p>}
+      {!kl && v.jobs?.install?.id && <InstallJobPanel jobRef={v.jobs.install} reload={reload} />}
       <section className="ssa-sec">
         <h4>{corpName(corp)} — 법인 공통 계정</h4>
         {accounts.length ? (
@@ -282,11 +331,11 @@ function ServersTab({ v, corpName, reload, say }) {
                 <td>{a.hasPassword ? '저장됨' : '—'}</td><td className="right" data-sort={a.servers ?? ''}>{a.servers ?? '—'}</td></tr>
             ))}</tbody>
           </STable>
-        ) : <p className="ssa-note">{corp ? '이 법인의 공통 계정이 없습니다.' : '미귀속 서버에는 법인 공통 계정이 없습니다.'}</p>}
+        ) : <p className="ssa-note">{storeBad ? 'SSH 키 저장소를 읽지 못해 공통 계정을 보일 수 없습니다(없는 것이 아닙니다).' : corp ? '이 법인의 공통 계정이 없습니다.' : '미귀속 서버에는 법인 공통 계정이 없습니다.'}</p>}
         <p className="ssa-note">공통 계정 추가 · 수정은 지금처럼 베어메탈 사용률 › 서버 등록 › 법인 공통 계정에서 합니다(같은 저장소).</p>
       </section>
       <section className="ssa-sec">
-        <h4>{corpName(corp)} — 서버 {servers.length}대</h4>
+        <h4>{corpName(corp)} — 서버 {unitText(regBad ? null : servers.length, '대')}</h4>
         <div className="ssa-acts">
           <button className="btn btn-sm" type="button" disabled={!chosen.length} onClick={() => setKl({ servers: chosen })}>선택한 서버 키 로그인 설정{chosen.length ? ` (${chosen.length}대)` : ''}</button>
           <span className="ssa-sub">서버에 공개키 한 줄을 넣어 비밀번호 없이 접속하게 합니다 — 엣지가 수집하는 서버는 그 엣지 포탈에서 합니다.</span>
@@ -314,7 +363,7 @@ function ServersTab({ v, corpName, reload, say }) {
                       : <span>{s.installed.count}줄{s.keyName ? (s.installed.hasKey ? ' · 쓰는 키 있음' : ' · 쓰는 키 없음') : ''}</span>) : <span className="ssa-sub">읽지 않음</span>}
                     {s.installed && <div className="ssa-sub">{dateTime(s.installed.at)}{s.installed.stale ? ' · 주소가 바뀜(다시 읽기)' : ''}</div>}
                     {/* 쓰는 키 줄의 서버 쪽 제한(from= · 포워딩 금지) — 읽은 적이 있고 그 줄이 있을 때만 말한다(null = 모름) */}
-                    {s.installed?.hasKey && s.installed.keyHasOptions === false && <div><Chip tone="warn" title="마지막으로 읽은 authorized_keys 기준 — 이 키 줄에 출발지 제한 · 포워딩 금지가 없습니다. ‘키 로그인 설정’ 으로 다시 넣으면 제한이 붙습니다(서버 쪽 제한이 켜져 있을 때).">서버 쪽 제한 없음</Chip></div>}
+                    {s.installed?.hasKey && s.installed.keyHasOptions === false && <div><Chip tone="warn" title="마지막으로 읽은 authorized_keys 기준 — 이 키 줄에 출발지 제한 · 포워딩 금지가 없습니다. 포탈이 넣은 줄(표식)이면 서버 쪽 제한이 켜진 상태에서 ‘키 로그인 설정’ 을 다시 하면(그 키가 아닌 접속 — 저장 비밀번호 · 이번 한 번 비밀번호로) 제한 줄로 바꿉니다. 사람이 넣은 줄(표식 없음) · 관리자가 옵션을 바꾼 줄은 포탈이 바꾸지 않습니다 — 서버에서 직접 고치세요.">서버 쪽 제한 없음</Chip></div>}
                     {s.installed?.hasKey && s.installed.keyHasOptions === true && <div className="ssa-sub">서버 쪽 제한 있음</div>}
                   </td>
                   <td data-nosort>
@@ -327,7 +376,7 @@ function ServersTab({ v, corpName, reload, say }) {
                 </tr>
               );
             })}
-            {!servers.length && <tr><td colSpan={7} className="ssa-sub">이 법인으로 등록된 OS 서버가 없습니다(베어메탈 스토리지 · 서버 등록에서 법인을 지정한 서버만 여기 보입니다).</td></tr>}
+            {!servers.length && <tr><td colSpan={7} className="ssa-sub">{regBad ? 'OS 계정 등록부를 읽지 못해 서버 목록을 보일 수 없습니다(없는 것이 아닙니다).' : '이 법인으로 등록된 OS 서버가 없습니다(베어메탈 스토리지 · 서버 등록에서 법인을 지정한 서버만 여기 보입니다).'}</td></tr>}
           </tbody>
         </STable>
         <p className="ssa-note">계정을 정하는 순서: 서버에 이름으로 고정한 키 → 법인 공통 계정의 기본 키 → 비밀번호. 고정한 키가 사라지거나 다른 폴더로 가면 다른 키로 넘어가지 않고 멈춥니다.</p>
@@ -405,7 +454,10 @@ function KeyLoginDialog({ servers, corp, v, corpName, onClose }) {
       kj.start(r.jobId, r.skipped);
     } catch (e) {
       const sk = e?.body?.skipped;
-      setNote({ text: `${errText(e)}${Array.isArray(sk) && sk.length ? ` — ${sk.slice(0, 8).map((x) => x.name).join(' · ')}${sk.length > 8 ? ` 외 ${sk.length - 8}` : ''}` : ''}`, tone: 'bad' });
+      // 409 busy(다른 키 로그인 설정 작업이 도는 중 — OTP 를 쓰기 전에 거절) — 그 작업은 창을 닫으면 법인 · 서버 탭에 보인다(닫을 때 화면을 다시 읽게 한다).
+      const busyJob = e?.body?.code === 'busy' && e?.body?.jobId;
+      if (busyJob) started.current = true;
+      setNote({ text: `${errText(e)}${busyJob ? ' 진행 중인 작업은 이 창을 닫으면 법인 · 서버 탭에 보입니다(멈추기도 거기서).' : ''}${Array.isArray(sk) && sk.length ? ` — ${sk.slice(0, 8).map((x) => x.name).join(' · ')}${sk.length > 8 ? ` 외 ${sk.length - 8}` : ''}` : ''}`, tone: 'bad' });
     } finally { setBusy(false); }
   };
   // 끝난 뒤 실패한 서버만 다시(사람이 고른 재시도 — 포탈이 스스로 다시 시도하지는 않는다). 접속처가 바뀌어 건너뛴 서버는 화면을 다시 읽어야 한다.
@@ -439,9 +491,10 @@ function KeyLoginDialog({ servers, corp, v, corpName, onClose }) {
                         <option value="">선택</option>
                         {options.map((k) => <option key={k.id} value={k.id}>{keyOptionLabel(k, corpName)}</option>)}
                       </Select>
-                      {key && <span className="ssa-sub">{key.algo}{key.bits ? ` ${key.bits}` : ''} · <code>{shortFp(key.fingerprint)}</code> · 키 폴더 ‘{folderText(key, corpName)}’{key.installed === true ? ' · 이 서버에 이미 들어 있음(마지막으로 읽은 내용 기준 — 줄이 있으면 더하지 않고 접속만 확인합니다)' : ''}</span>}
+                      {key && <span className="ssa-sub">{key.algo}{key.bits ? ` ${key.bits}` : ''} · <code>{shortFp(key.fingerprint)}</code> · 키 폴더 ‘{folderText(key, corpName)}’{key.installed === true ? ' · 이 서버에 이미 들어 있음(마지막으로 읽은 내용 기준 — 줄이 있으면 더하지 않고 접속만 확인합니다. 서버 쪽 제한이 켜져 있고 그 줄이 제한 없는 포탈 줄이면 제한 줄로 바꿀 수 있습니다)' : ''}</span>}
                     </>
-                  ) : <span className="ssa-note" style={{ color: toneVar('warn') }}>{single ? '이 서버에 넣을 수 있는 키가 없습니다 — 키 폴더 탭에서 이 법인(공통) 또는 이 서버 폴더에 키를 등록하세요(승인 대기 · 퇴역 키는 넣지 않습니다).' : '이 법인 공통 폴더에 넣을 수 있는 키가 없습니다 — 키 폴더 탭에서 공통 폴더에 키를 등록하세요(승인 대기 · 퇴역 키는 넣지 않습니다).'}</span>}
+                  ) : v.storeUnreadable ? <span className="ssa-note" style={{ color: toneVar('bad') }}>SSH 키 저장소를 읽지 못해 넣을 키를 고를 수 없습니다(키가 없는 것이 아닙니다).</span>
+                  : <span className="ssa-note" style={{ color: toneVar('warn') }}>{single ? '이 서버에 넣을 수 있는 키가 없습니다 — 키 폴더 탭에서 이 법인(공통) 또는 이 서버 폴더에 키를 등록하세요(승인 대기 · 퇴역 키는 넣지 않습니다).' : '이 법인 공통 폴더에 넣을 수 있는 키가 없습니다 — 키 폴더 탭에서 공통 폴더에 키를 등록하세요(승인 대기 · 퇴역 키는 넣지 않습니다).'}</span>}
                 {!single && <span className="ssa-sub">여러 대에는 이 법인 공통 폴더의 키만 넣습니다 — 서버별 폴더의 키는 그 서버 한 대씩 설정합니다.</span>}
               </div>
             </div>
@@ -457,12 +510,12 @@ function KeyLoginDialog({ servers, corp, v, corpName, onClose }) {
             <div className="ssa-line"><span className="ssa-k">하는 일</span>
               <div className="ssa-v"><ol className="ssa-steps">
                 <li>{pwMode === 'once' ? '넣은 비밀번호로' : '저장된 인증으로'} 한 번 접속합니다.</li>
-                <li><code>~/.ssh/authorized_keys</code> 끝에 공개키 한 줄을 더합니다 — 포탈이 넣은 줄임을 알 수 있게 표식을 붙입니다. 같은 키 줄이 이미 있으면 더하지 않습니다.</li>
+                <li><code>~/.ssh/authorized_keys</code> 끝에 공개키 한 줄을 더합니다 — 포탈이 넣은 줄임을 알 수 있게 표식을 붙입니다. 같은 키 줄이 이미 있으면 더하지 않습니다. 단, 서버 쪽 제한이 켜져 있고 포탈이 넣은 그 키 줄이 제한 없이(또는 다른 주소로) 있으면 그 줄을 제한 줄로 바꿉니다 — 이번 접속이 바로 그 키일 때는 되돌릴 길이 없어 바꾸지 않습니다. 사람이 넣은 줄 · 관리자가 옵션을 바꾼 줄은 손대지 않습니다.</li>
                 <li>접속을 끊고 키로 다시 접속해 확인합니다.</li>
                 <li>확인되면 이 서버가 그 키를 쓰도록 적습니다. 이미 그 키를 쓰는 서버(법인 기본 키를 따르는 서버 포함)는 설정을 그대로 둡니다.</li>
               </ol></div>
             </div>
-            <div className="ssa-line"><span className="ssa-k">잘 안 되면</span><div className="ssa-v">키 접속이 확인되지 않으면 더한 줄을 지우고 원래대로 둡니다. 비밀번호가 틀리면 다시 시도하지 않습니다(계정 잠금 방지). 서버 쪽 제한 때문에 키 접속이 안 될 때도 제한을 자동으로 빼지 않고 사유를 적습니다.</div></div>
+            <div className="ssa-line"><span className="ssa-k">잘 안 되면</span><div className="ssa-v">키 접속이 확인되지 않으면 우리가 바꾼 것만 되돌립니다(더한 줄은 지우고, 바꾼 줄은 바꾸기 전 줄로). 비밀번호가 틀리면 다시 시도하지 않습니다(password 방식으로 한 번 — 계정 잠금 방지). 서버 쪽 제한 때문에 키 접속이 안 될 때도 제한을 자동으로 빼지 않고 사유를 적습니다. 바꾸는 명령을 보냈는데 답을 받지 못하면 ‘결과 모름’ 으로 적습니다 — 서버가 바뀌었을 수 있으니 확인하세요.</div></div>
             <div className="ssa-line"><span className="ssa-k">선택</span>
               <div className="ssa-v ssa-stack">
                 <label className="ssa-radio"><input type="checkbox" checked={removePw} onChange={(e) => setRemovePw(e.target.checked)} /><span>키 로그인이 확인되면 저장된 비밀번호를 지웁니다</span></label>
@@ -484,8 +537,8 @@ function KeyLoginDialog({ servers, corp, v, corpName, onClose }) {
           </div>
         ) : (
           <div className="ssa-modal-b">
-            <b>끝난 뒤 — 서버마다 한 줄</b>
-            <KeyJobResult kj={kj} kind="key-login" />
+            <b>서버마다 한 줄</b>
+            <KeyJobResult key={kj.id} kj={kj} kind="key-login" />
           </div>
         )}
         {note.text && <p className="ssa-note" role="status" style={{ color: toneVar(note.tone) }}>{note.text}</p>}
@@ -499,7 +552,7 @@ function KeyLoginDialog({ servers, corp, v, corpName, onClose }) {
           </div>
         ) : (
           <div className="ssa-modal-f">
-            <span className="ssa-sub">{kj.running ? '창을 닫아도 작업은 서버에서 계속됩니다 — 결과는 키 보안 › 키 변경 기록에 서버마다 남습니다.' : '닫으면 서버 표를 다시 읽습니다.'}</span>
+            <span className="ssa-sub">{kj.running ? '창을 닫아도 작업은 서버에서 계속됩니다 — 진행 · 결과는 법인 · 서버 탭에서 이어 볼 수 있습니다(끝난 뒤 한동안 · 포탈이 다시 시작하기 전까지).' : '닫으면 서버 표를 다시 읽습니다.'}</span>
             <div className="ssa-acts">
               {!kj.running && retryTargets.length > 0 && <button className="btn" type="button" onClick={retry}>실패한 서버 {retryTargets.length}대만 다시 설정</button>}
               <button className="btn" type="button" onClick={close}>{kj.running ? '창 닫기(작업은 계속됩니다)' : '닫기'}</button>
@@ -528,12 +581,17 @@ function KeyPicker({ server, catalog, onClose, say }) {
     // 지금 설정 그대로를 미리 고른다 — 이름 고정이면 그 키, 법인 기본 키를 따르면 '', 그 밖(비밀번호 고정 등)은 고르지 않음(E-L11).
     setChoice(c.server.keyMode === 'pinned' && cur ? cur.id : (c.server.keyMode === 'corp-default' ? '' : null));
   }, [c, choice]);
+  // 저장 · 읽기 중에는 Esc · 바깥 · 닫기로 닫지 않는다(점검 E-12 — 저장이 실패해 ‘되돌리기도 실패’ 경고가 나와야 할 때 창이 이미 닫혀 그 경고가 사라졌다).
+  // 닫는 함수는 ref 로 — 부모가 인라인 함수를 넘겨 다시 그려질 때마다 효과가 다시 돌아 초점을 옮기지 않게(A-2). 닫으면 창을 연 단추로 초점을 돌려준다(A-1).
+  const lockedRef = useRef(false); lockedRef.current = !!busy;
+  const closeRef = useRef(null); closeRef.current = () => { if (!lockedRef.current) onClose(readDone.current); };
   useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') onClose(readDone.current); };
+    const prev = document.activeElement;
+    const onKey = (e) => { if (e.key === 'Escape') closeRef.current(); };
     window.addEventListener('keydown', onKey);
     firstRef.current?.focus();
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+    return () => { window.removeEventListener('keydown', onKey); if (prev && typeof prev.focus === 'function' && document.contains(prev)) prev.focus(); };
+  }, []);
   const read = async () => {
     setBusy('read');
     try {
@@ -560,7 +618,7 @@ function KeyPicker({ server, catalog, onClose, say }) {
   const chosenKey = (c?.keys || []).find((k) => k.id === choice);
   const noCollect = chosenKey && Array.isArray(chosenKey.features) && !COLLECT_FEATURES.some((f) => chosenKey.features.includes(f));
   return (
-    <div className="ssa-modal-back" role="presentation" onClick={(e) => { if (e.target === e.currentTarget) onClose(readDone.current); }}>
+    <div className="ssa-modal-back" role="presentation" onClick={(e) => { if (e.target === e.currentTarget) closeRef.current(); }}>
       <div className="ssa-modal" role="dialog" aria-modal="true" aria-labelledby="ssa-pick-t">
         <div className="ssa-modal-h">
           <h4 id="ssa-pick-t">{server.name} — 쓸 키 고르기</h4>
@@ -616,7 +674,7 @@ function KeyPicker({ server, catalog, onClose, say }) {
                 <label className="ssa-otp">이번 한 번만 쓸 비밀번호(선택) <input className="input" type="password" value={once} onChange={(e) => setOnce(e.target.value)} autoComplete="new-password" /></label>
                 <button className="btn btn-sm" type="button" disabled={busy === 'read'} onClick={read}>{busy === 'read' ? '읽는 중…' : '다시 읽기'}</button>
               </div>
-              <p className="ssa-note">서버 계정의 ~/.ssh/authorized_keys 에서 공개키 줄만 읽어 지문으로 맞춥니다. 비밀번호를 넣으면 이번 읽기에만 쓰고 저장하지 않습니다. 폴더의 키를 차례로 대 보지는 않습니다(계정 잠금 방지).</p>
+              <p className="ssa-note">서버 계정의 ~/.ssh/authorized_keys 에서 공개키 줄만 읽어 지문으로 맞춥니다. 비밀번호를 넣으면 이번 읽기에만 쓰고 저장하지 않습니다(password 방식으로 한 번만 보냅니다). 폴더의 키를 차례로 대 보지는 않습니다(계정 잠금 방지).</p>
             </div>
           </div>
         )}
@@ -624,7 +682,7 @@ function KeyPicker({ server, catalog, onClose, say }) {
         <div className="ssa-modal-f">
           <Otp value={otp} onChange={setOtp} />
           <div className="ssa-acts">
-            <button className="btn" type="button" onClick={() => onClose(readDone.current)} ref={c?.corpDefault ? undefined : firstRef}>닫기</button>
+            <button className="btn" type="button" disabled={!!busy} onClick={() => closeRef.current()} ref={c?.corpDefault ? undefined : firstRef}>닫기</button>
             <button className="btn primary" type="button" disabled={busy === 'save' || choice === null || !c} onClick={save}>{busy === 'save' ? '확인 중…' : '이 키 사용'}</button>
           </div>
         </div>
@@ -652,7 +710,9 @@ function FoldersTab({ v, corpName, reload, say }) {
   const [add, setAdd] = useState(blankAdd);
   const [appr, setAppr] = useState(null);   // { item, name, passphrase, features, otp }
   const [kact, setKact] = useState(null);   // 키 교체 · 삭제 — { kind: 'rotate' | 'delete', key, to, otp }
+  const [disc, setDisc] = useState(null);   // 받은 키 파일 지우기 — { item, otp }(OTP 는 보통 입력 칸으로 — window.prompt 는 글자가 그대로 보였다 · 점검 E-16)
   const [busy, setBusy] = useState(false);
+  const storeBad = !!v.storeUnreadable;   // 키 저장소를 못 읽으면 수는 ‘—’ · 빈 폴더는 ‘못 읽음’(점검 E-11)
   const canAdd = node && (node.kind === 'common' || node.kind === 'server');
   /**
    * 쓰기 하나 — 실패는 서버 사유 그대로(충돌 목록 포함). 성공 문구는 결과로 만든다.
@@ -663,7 +723,10 @@ function FoldersTab({ v, corpName, reload, say }) {
     try { const r = must(await fn()); say(typeof okText === 'function' ? okText(r) : okText, r.plaintextLeft ? 'bad' : r.pending ? pendingTone(r) : 'ok'); reload(); return true; }
     catch (e) {
       const cf = e?.body?.conflicts;
-      say(cf?.length ? `${errText(e)} — ${cf.slice(0, 8).map((x) => `${x.kind === 'account' ? '공통 계정' : '서버'} ${x.name}`).join(' · ')}${cf.length > 8 ? ` 외 ${cf.length - 8}` : ''}` : errText(e), 'bad');
+      // 키 교체가 중간에 실패하면 이미 옮긴 곳이 있다(partial — 점검 E-9). 실패로만 말하지 않고 그 사실을 붙이고, 표를 다시 읽는다.
+      const part = rotatePartialText(e?.body?.partial);
+      say(`${cf?.length ? `${errText(e)} — ${cf.slice(0, 8).map((x) => `${x.kind === 'account' ? '공통 계정' : '서버'} ${x.name}`).join(' · ')}${cf.length > 8 ? ` 외 ${cf.length - 8}` : ''}` : errText(e)}${part ? ` ${part}` : ''}`, 'bad');
+      if (part) reload();
       return false;
     } finally { setBusy(false); }
   };
@@ -675,13 +738,13 @@ function FoldersTab({ v, corpName, reload, say }) {
         {shown.map((n) => (
           <button key={n.id} type="button" className={`ssa-node d${n.depth}${node?.id === n.id ? ' on' : ''}`} onClick={() => setSel(n)} aria-current={node?.id === n.id ? 'true' : undefined}>
             <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round"><path d="M3 6.5h6l2 2.5h10v9.5H3z" /></svg>
-            <span className="ssa-node-l">{n.label}</span><span className="ssa-sub">{n.count}</span>
+            <span className="ssa-node-l">{n.label}</span><span className="ssa-sub">{storeBad ? '—' : n.count}</span>
           </button>
         ))}
       </nav>
       <div className="ssa-main">
         <section className="ssa-sec">
-          <h4>{node?.kind === 'none' ? '미분류' : `${corpName(node?.corp)} › ${node?.kind === 'server' ? `서버별 › ${node.server}` : node?.kind === 'servers' ? '서버별(전부)' : node?.kind === 'corp' ? '전부' : '공통'}`} — 키 {keys.length}개</h4>
+          <h4>{node?.kind === 'none' ? '미분류' : `${corpName(node?.corp)} › ${node?.kind === 'server' ? `서버별 › ${node.server}` : node?.kind === 'servers' ? '서버별(전부)' : node?.kind === 'corp' ? '전부' : '공통'}`} — 키 {unitText(storeBad ? null : keys.length, '개')}</h4>
           {node?.kind === 'none' && <p className="ssa-note">폴더가 없는 키는 어느 법인 서버에든 쓰일 수 있습니다 — 법인(공통 · 서버별)을 정하세요.</p>}
           {path && <p className="ssa-note">서버에서 키 파일을 직접 넣는 곳: <code>{path}</code> — 넣은 파일은 아래 ‘받은 키’ 에 나타나고, 승인하기 전에는 쓰지 않습니다.</p>}
           <STable minWidth={620} className="ssa-t ssa-keys">
@@ -711,7 +774,7 @@ function FoldersTab({ v, corpName, reload, say }) {
                   </td>
                 </tr>
               ))}
-              {!keys.length && <tr><td colSpan={5} className="ssa-sub">이 폴더에 키가 없습니다.</td></tr>}
+              {!keys.length && <tr><td colSpan={5} className="ssa-sub">{storeBad ? 'SSH 키 저장소를 읽지 못해 키를 보일 수 없습니다(없는 것이 아닙니다).' : '이 폴더에 키가 없습니다.'}</td></tr>}
             </tbody>
           </STable>
         </section>
@@ -766,7 +829,8 @@ function FoldersTab({ v, corpName, reload, say }) {
             <Otp value={kact.otp} onChange={(x) => setKact({ ...kact, otp: x })} />
             <div className="ssa-acts">
               <button className="btn danger" type="button" disabled={busy} onClick={async () => {
-                const ok = await run(() => delJson(`/settings/ssh-access/keys/${encodeURIComponent(kact.key.id)}?otp=${encodeURIComponent(kact.otp)}`),
+                // OTP 는 본문으로(주소 쿼리는 앞단 프록시 · 브라우저 기록에 남는다 — 서버 reauth 는 본문을 먼저 본다 · 점검 E-15)
+                const ok = await run(() => sendJson(`/settings/ssh-access/keys/${encodeURIComponent(kact.key.id)}`, 'DELETE', { otp: kact.otp }),
                   (r) => (r.pending ? pendingText(r, { what: `${kact.key.name} 삭제`, then: '지워집니다' }) : `${kact.key.name} 을 지웠습니다.`));
                 if (ok) setKact(null); else setKact((x) => (x ? { ...x, otp: '' } : x));
               }}>삭제</button>
@@ -787,12 +851,28 @@ function FoldersTab({ v, corpName, reload, say }) {
                   <td data-sort={it.fingerprint || ''}>{it.algo ? `${it.algo}${it.bits ? ` ${it.bits}` : ''} · ` : ''}{it.fingerprint ? <code>{shortFp(it.fingerprint)}</code> : <span className="ssa-sub">{it.reason || '—'}</span>}</td>
                   <td data-nosort><div className="ssa-acts">
                     <button className="btn btn-sm" type="button" disabled={busy || !(it.code === 'ready' || it.needPassphrase)} onClick={() => setAppr({ item: it, name: suggestKeyName(it), passphrase: '', features: [], otp: '' })}>승인</button>
-                    <button className="btn btn-sm" type="button" disabled={busy || !it.sha} title={it.sha ? undefined : '내용을 읽지 못한 파일(너무 큼 · 링크 등)은 서버에서 직접 지우세요.'} onClick={async () => { const otp = window.prompt(`${it.file} 파일을 지웁니다 — 본인 OTP(없으면 비워 두세요)`, ''); if (otp === null) return; await run(() => postJson('/settings/ssh-access/inbox/discard', { relPath: it.relPath, sha: it.sha || '', otp }), `${it.file} 를 지웠습니다.`); }}>지우기</button>
+                    <button className="btn btn-sm" type="button" disabled={busy || !it.sha} title={it.sha ? undefined : '내용을 읽지 못한 파일(너무 큼 · 링크 등)은 서버에서 직접 지우세요.'} onClick={() => setDisc({ item: it, otp: '' })}>지우기</button>
                   </div></td>
                 </tr>
               ))}</tbody>
             </STable>
           </section>
+        )}
+        {disc && (
+          <fieldset className="ssa-form">
+            <legend>{disc.item.file} — 받은 키 파일 지우기</legend>
+            <p className="ssa-note"><code>{disc.item.relPath}</code> · {disc.item.server ? `서버별 › ${disc.item.server}` : '공통'} · {dateTime(disc.item.mtime)}. 승인하지 않고 받는 곳에서 파일을 지웁니다 — 화면에서 본 뒤 파일 내용이 바뀌었으면 지우지 않습니다.</p>
+            <Otp value={disc.otp} onChange={(x) => setDisc({ ...disc, otp: x })} />
+            <div className="ssa-acts">
+              <button className="btn danger" type="button" disabled={busy} onClick={async () => {
+                const { item, otp } = disc;
+                setDisc((x) => (x ? { ...x, otp: '' } : x));   // OTP 는 보낸 뒤 성공 · 실패와 무관하게 비운다
+                const ok = await run(() => postJson('/settings/ssh-access/inbox/discard', { relPath: item.relPath, sha: item.sha || '', otp }), `${item.file} 를 지웠습니다.`);
+                if (ok) setDisc(null);
+              }}>지우기</button>
+              <button className="btn" type="button" onClick={() => setDisc(null)}>닫기</button>
+            </div>
+          </fieldset>
         )}
         {appr && (
           <fieldset className="ssa-form">
@@ -832,7 +912,7 @@ function FoldersTab({ v, corpName, reload, say }) {
               if (ok) setAdd(blankAdd);
             }}>등록</button></div>
             {v.guards?.twoPersonActive === true && <p className="ssa-note">두 사람 승인이 켜져 있습니다 — 등록하면 ‘승인 대기’ 로 들어가고, 다른 설정 소유자가 승인한 뒤에야 쓰입니다(그 전에는 서버에서 고를 수도 없습니다).</p>}
-            <p className="ssa-note">ed25519 권장 · RSA {v.rsaMinBits || '—'} 비트 미만 · DSA 는 받지 않습니다. 개인키는 암호화해 저장하고 화면 · API · 백업에는 지문 · 공개키만 나갑니다.</p>
+            <p className="ssa-note">ed25519 권장 · RSA {unitText(v.rsaMinBits || null, ' 비트')} 미만 · DSA 는 받지 않습니다. 개인키는 암호화해 저장하고 화면 · API · 백업에는 지문 · 공개키만 나갑니다.</p>
           </fieldset>
         )}
       </div>
@@ -843,6 +923,8 @@ function FoldersTab({ v, corpName, reload, say }) {
 /* ── 쓰는 기능(시안 ④) ─────────────────────────────────────────────── */
 function FeaturesTab({ v }) {
   const keys = (v.keys || []).filter((k) => k.status === 'active');
+  // 키 저장소를 못 읽었으면 허용한 키 수는 모른다(0 이 아니다 — 점검 E-11)
+  const cnt = (n) => (v.storeUnreadable ? '—' : n);
   return (
     <section className="ssa-sec">
       <h4>SSH 공용 접속을 쓰는 기능</h4>
@@ -850,8 +932,8 @@ function FeaturesTab({ v }) {
         <thead><tr><th>기능</th><th>무엇을 하나</th><th className="right">허용한 키</th><th className="right">예전 방식 키(모든 기능)</th></tr></thead>
         <tbody>{(v.features || []).map((f) => (
           <tr key={f.id}><td data-sort={f.label}><b>{f.label}</b>{f.ready === false && <div><Chip tone="muted">다음 단계 — 아직 접속하지 않음</Chip></div>}</td><td className="ssa-sub">{f.note}</td>
-            <td className="right" data-sort={keys.filter((k) => (k.features || []).includes(f.id)).length}>{keys.filter((k) => (k.features || []).includes(f.id)).length}</td>
-            <td className="right" data-sort={keys.filter((k) => k.features == null).length}>{keys.filter((k) => k.features == null).length}</td></tr>
+            <td className="right" data-sort={v.storeUnreadable ? '' : keys.filter((k) => (k.features || []).includes(f.id)).length}>{cnt(keys.filter((k) => (k.features || []).includes(f.id)).length)}</td>
+            <td className="right" data-sort={v.storeUnreadable ? '' : keys.filter((k) => k.features == null).length}>{cnt(keys.filter((k) => k.features == null).length)}</td></tr>
         ))}</tbody>
       </STable>
       <p className="ssa-note">모든 기능이 같은 한 곳(서버 고정 키 → 법인 기본 키 → 비밀번호)에서 계정을 받습니다. 키마다 ‘쓸 수 있는 기능’ 에 없는 기능은 그 키로 접속하지 않습니다. 로그인이 거부되면 그 기능이 그 서버의 주기 접속을 멈춥니다(기능마다 따로 — 계정 잠금 방지).</p>
@@ -875,7 +957,11 @@ function SecurityTab({ v, corpName, reload, say, me = '' }) {
   // 다시 읽어 서버 값이 바뀌면 편집값을 그 값으로 맞춘다(저장 전 편집을 낡은 값 위에 두지 않는다).
   useEffect(() => { setGd({ twoPerson: g.twoPerson === true, serverRestrict: g.serverRestrict === true }); }, [g.twoPerson, g.serverRestrict]);
   const [rv, setRv] = useState({ corp: '', keyId: '', once: '', otp: '' });
-  const kj = useKeyJob(() => { loadChg(); loadUse(); });
+  // 거두기 작업 — 도는 것을 보다가 끝나면 기록을 다시 읽는다(이미 끝난 작업에 다시 붙은 것이면 다시 읽지 않는다).
+  const kj = useKeyJob((_job, { wasRunning }) => { if (wasRunning) { loadChg(); loadUse(); } });
+  // 탭을 떠났다 오거나 화면을 다시 열어도 마지막 거두기 작업(진행 중 · 끝난 지 얼마 안 된 것)의 진행 · 결과를 이어 본다(점검 E-2 — 서버 v.jobs.revoke).
+  const lastRevoke = v.jobs?.revoke?.id || '';
+  useEffect(() => { if (lastRevoke && lastRevoke !== kj.id && !kj.running) kj.start(lastRevoke, [], { own: false }); }, [lastRevoke]);   // eslint-disable-line react-hooks/exhaustive-deps -- 서버가 알려 준 작업 id 가 바뀔 때만 다시 붙는다
   const { pending: apprPending, done: apprDone } = splitApprovals(v.approvals);
   const actReq = act ? apprPending.find((r) => r.id === act.id) || null : null;
   const actOwn = isOwnRequest(actReq, me);
@@ -887,13 +973,17 @@ function SecurityTab({ v, corpName, reload, say, me = '' }) {
       // 승인은 화면에서 본 요청 지문(digest)을 돌려보낸다 — 그 사이 요청이 달라졌으면 서버가 거절한다.
       const r = must(await postJson(`/settings/ssh-access/approvals/${encodeURIComponent(actReq.id)}/${approve ? 'approve' : 'reject'}`,
         approve ? { digest: actReq.digest, note: act.note, otp: act.otp } : { note: act.note, otp: act.otp }));
-      say(approve ? `${actReq.title || actReq.label || actReq.kind} — 승인했고 실행됐습니다.${actReq.kind === 'ssh-key-rotate' ? ` ${rotateDoneText(r.result)}.` : ''}`
-        : `${actReq.title || actReq.label || actReq.kind} — ${r.request?.status === 'cancelled' ? '요청을 취소했습니다.' : '돌려보냈습니다.'}`, 'ok');
+      // 실행은 됐는데 결과를 승인 기록에 적지 못했으면(recordFailed — 점검 C-8) 그 사실을 밝힌다(확인 톤).
+      say(approve ? `${actReq.title || actReq.label || actReq.kind} — 승인했고 실행됐습니다.${actReq.kind === 'ssh-key-rotate' ? ` ${rotateDoneText(r.result)}.` : ''}${recordFailedText(r)}`
+        : `${actReq.title || actReq.label || actReq.kind} — ${r.request?.status === 'cancelled' ? '요청을 취소했습니다.' : '돌려보냈습니다.'}`, approve && r.recordFailed ? 'warn' : 'ok');
       setAct(null);
     } catch (e) {
-      // 승인은 기록됐는데 실행이 실패한 경우(요청은 ‘실행 실패’ 로 끝난다) — 승인 실패와 다르게 말한다.
-      const ran = e?.body?.request?.status === 'failed';
-      say(ran ? `승인은 됐지만 실행하지 못했습니다 — ${errText(e)} 다시 하려면 새로 요청해야 합니다.` : errText(e), 'bad');
+      // 승인은 기록됐는데 실행이 실패한 경우(요청은 ‘실행 실패’ 로 끝난다 — 서버가 실행 결과 result 를 함께 준다) — 승인 실패와 다르게 말한다.
+      // 사전 검사 거절(자기 승인 403 · 지문 불일치 · 처리됨 409 · 승인 기록 못 읽음 503)은 실행 전이라 서버 사유만 보인다.
+      const b = e?.body || {};
+      const ran = b.request?.status === 'failed' || (!!b.result && typeof b.result === 'object');
+      const part = rotatePartialText(b.result?.partial);
+      say(ran ? `승인은 됐지만 실행하지 못했습니다 — ${errText(e)}${part ? ` ${part}` : ''}${b.recordFailed ? ' 실행 실패를 승인 기록에도 적지 못했습니다.' : ''} 다시 하려면 새로 요청해야 합니다.` : errText(e), 'bad');
       if (ran) setAct(null); else setAct((x) => (x ? { ...x, otp: '' } : x));
     } finally { setBusy(false); reload(); loadChg(); }
   };
@@ -911,7 +1001,12 @@ function SecurityTab({ v, corpName, reload, say, me = '' }) {
       // 끄는 변경이 승인 대기로 갔으면 스위치는 지금 값(켬)으로 돌려 둔다 — 꺼진 것처럼 보이지 않게.
       if (r.pending) setGd((d) => ({ ...d, ...Object.fromEntries(diff.off.map((k) => [k, true])) }));
       reload(); loadChg();
-    } catch (e) { say(errText(e), 'bad'); } finally { setGOtp(''); setBusy(false); }
+    } catch (e) {
+      // 켜는 것은 먼저 적용되고 끄는 쪽이 실패할 수 있다(partial.applied — 점검 E-7) — 켠 것은 켰다고 말하고 화면을 다시 읽는다.
+      const applied = Array.isArray(e?.body?.partial?.applied) && e.body.partial.applied.length > 0;
+      say(guardFailText(e?.body, errText(e)), applied ? 'warn' : 'bad');
+      if (applied) { reload(); loadChg(); }
+    } finally { setGOtp(''); setBusy(false); }
   };
   const doRevoke = async () => {
     const body = { keyId: rv.keyId, corp: rv.corp, otp: rv.otp };
@@ -922,10 +1017,13 @@ function SecurityTab({ v, corpName, reload, say, me = '' }) {
     try {
       const r = must(await postJson('/settings/ssh-access/key-revoke', body));
       kj.start(r.jobId, r.skipped);
-      say(`키 거두기를 시작했습니다 — 서버 ${unitText(r.total, '대')}에 1대씩 차례로 접속합니다. 아래에 서버마다 결과가 나옵니다.`, 'warn');
+      say(revokeStartText(r), 'warn');
     } catch (e) {
       const sk = e?.body?.skipped;
-      say(`${errText(e)}${Array.isArray(sk) && sk.length ? ` — ${sk.slice(0, 8).map((x) => x.name).join(' · ')}${sk.length > 8 ? ` 외 ${sk.length - 8}` : ''}` : ''}`, 'bad');
+      // 409 busy(다른 거두기 작업이 도는 중 — OTP 를 쓰기 전에 거절) — 그 작업의 진행을 아래에 붙여 보인다.
+      const busyJob = e?.body?.code === 'busy' && e?.body?.jobId;
+      if (busyJob) kj.start(e.body.jobId, [], { own: false });
+      say(`${errText(e)}${busyJob ? ' 진행 중인 작업을 아래에 보입니다.' : ''}${Array.isArray(sk) && sk.length ? ` — ${sk.slice(0, 8).map((x) => x.name).join(' · ')}${sk.length > 8 ? ` 외 ${sk.length - 8}` : ''}` : ''}`, 'bad');
     } finally { setBusy(false); }
   };
   const items = sortedCheck(v.check?.items);
@@ -938,13 +1036,14 @@ function SecurityTab({ v, corpName, reload, say, me = '' }) {
     setBusy(true);
     try {
       let r;
-      if (resume) r = must(await delJson(`/settings/ssh-access/corps/${encodeURIComponent(stopF.corp)}/stop?otp=${encodeURIComponent(stopF.otp)}`));
+      // 재개 OTP 는 본문으로(주소 쿼리는 앞단 프록시 · 브라우저 기록에 남는다 — 점검 E-15)
+      if (resume) r = must(await sendJson(`/settings/ssh-access/corps/${encodeURIComponent(stopF.corp)}/stop`, 'DELETE', { otp: stopF.otp }));
       else r = must(await postJson(`/settings/ssh-access/corps/${encodeURIComponent(stopF.corp)}/stop`, { reason: stopF.reason, otp: stopF.otp }));
-      // 엣지가 수집하는 서버는 그 엣지의 키로 접속한다 — 여기서 건 중지가 닿지 않는다는 것을 그대로 알린다.
-      const edgeNote = !resume && r?.edgeServers ? ` 엣지가 수집하는 서버 ${r.edgeServers}대는 그 엣지 포탈에서 따로 중지해야 합니다.` : '';
       // 재개는 ‘다시 여는’ 방향 — 두 사람 승인이 켜져 있으면 202(승인 대기)로 온다. 그때는 재개했다고 말하지 않는다.
+      // 중지는 엣지 서버 수 · 등록부를 못 읽어 법인으로만 걸렸는지를 그대로 알린다(stopDoneText — 점검 E-8).
       if (r?.pending) say(pendingText(r, { what: `${corpName(stopF.corp)} 키 사용 재개`, then: '재개됩니다' }), pendingTone(r));
-      else say(`${corpName(stopF.corp)} — 키 사용을 ${resume ? '재개' : '중지'}했습니다.${edgeNote}`, resume ? 'ok' : 'warn');
+      else if (resume) say(`${corpName(stopF.corp)} — 키 사용을 재개했습니다.`, 'ok');
+      else say(stopDoneText(r, corpName(stopF.corp)), r?.registryUnreadable ? 'bad' : 'warn');
       setStopF({ corp: '', reason: '', otp: '' }); reload(); loadChg();
     } catch (e) { say(errText(e), 'bad'); setStopF((x) => ({ ...x, otp: '' })); } finally { setBusy(false); }
   };
@@ -965,7 +1064,7 @@ function SecurityTab({ v, corpName, reload, say, me = '' }) {
   const stopUnknown = !!stopSel?.unreadable;
   const stopped = stopUnknown ? null : stopSel;
   const changeRows = [
-    ...(chg.resp?.events || []).map((e) => ({ at: Number(e.at) || 0, what: EVENT_TEXT[e.kind] || e.kind, code: false, target: `${e.corp ? `${corpName(e.corp)} · ` : ''}${e.target || '—'}`, detail: eventDetail(e), who: e.by || '포탈' })),
+    ...(chg.resp?.events || []).filter((e) => !HIDDEN_EVENT_KINDS.includes(e.kind)).map((e) => ({ at: Number(e.at) || 0, what: EVENT_TEXT[e.kind] || e.kind, code: false, target: `${e.corp ? `${corpName(e.corp)} · ` : ''}${e.target || '—'}`, detail: eventDetail(e), who: e.by || '포탈' })),
     ...(chg.resp?.items || []).map((e) => ({ at: auditTime(e.at), what: e.action, code: true, target: e.target || '—', detail: '', who: e.user })),
   ].sort((a, b) => b.at - a.at);
   return (
@@ -1046,7 +1145,7 @@ function SecurityTab({ v, corpName, reload, say, me = '' }) {
         {!g.unreadable && !guardsKnown && <p className="ssa-banner" style={{ color: toneVar('bad') }}>보호 장치 설정을 받지 못했습니다 — 켬 · 끔을 모릅니다(다시 읽기를 누르세요).</p>}
         <ul className="ssa-guards">
           <li><span className="ssa-gs"><span className="ssa-lock">항상 켬</span></span><span className="ssa-gb"><b>개인키는 암호화 저장에서만 받음 · 내보내지 않음</b><span className="ssa-sub">자격증명 저장 방식이 암호화일 때만 새 로그인 키를 받습니다. 개인키는 화면 · 응답 · 로그 · 내려받기로 내보내지 않습니다(지문 · 공개키만).</span></span></li>
-          <li><span className="ssa-gs"><span className="ssa-lock">항상 켬</span></span><span className="ssa-gb"><b>키 작업은 본인 OTP</b><span className="ssa-sub">등록 · 받은 키 승인 · 교체 · 삭제 · 서버에 넣기 · 거두기 · 요청 승인 · 이 화면의 설정 변경.</span></span></li>
+          <li><span className="ssa-gs"><span className="ssa-lock">항상 켬</span></span><span className="ssa-gb"><b>키 작업은 본인 OTP</b><span className="ssa-sub">등록 · 받은 키 승인 · 교체 · 삭제 · 서버에 넣기 · 거두기 · 요청 승인 · 이 화면의 설정 변경(진행 중인 키 작업 멈추기는 줄이는 방향이라 OTP 없이). 로그인(인증)을 끈 설치는 OTP 를 묻지 않고, OTP 를 쓰지 않는 계정(AD 등)은 설정 소유자이면 OTP 없이 통과합니다.</span></span></li>
           {GUARD_KEYS.map((k) => (
             <li key={k}>
               <span className="ssa-gs"><button type="button" role="switch" aria-checked={gd[k]} aria-label={GUARD_TEXT[k].label} className={`ssa-sw${gd[k] ? ' on' : ''}`} disabled={busy || !guardsKnown} onClick={() => setGd({ ...gd, [k]: !gd[k] })}><i /></button></span>
@@ -1058,7 +1157,7 @@ function SecurityTab({ v, corpName, reload, say, me = '' }) {
             </li>
           ))}
         </ul>
-        {gdiff.off.length > 0 && <p className="ssa-note" style={{ color: toneVar('warn') }}>끄는 변경은 다른 설정 소유자가 있으면 그 승인을 거쳐 꺼집니다(켜는 변경은 바로 적용됩니다).{gdiff.off.includes('twoPerson') ? ' 두 사람 승인을 끄면 키 등록 · 교체 · 삭제 · 사용 재개가 본인 OTP 만으로 실행됩니다.' : ''}{gdiff.off.includes('serverRestrict') ? ' 서버 쪽 제한을 끄면 앞으로 넣는 키 줄에 출발지 제한 · 포워딩 금지가 붙지 않습니다(이미 넣은 줄은 그대로).' : ''}</p>}
+        {gdiff.off.length > 0 && <p className="ssa-note" style={{ color: toneVar('warn') }}>두 사람 승인이 켜져 있으면 끄는 변경은 승인할 수 있는 다른 설정 소유자의 승인을 거쳐 꺼집니다(켜는 변경은 바로 적용됩니다). 설정 소유자 목록에 다른 계정이 있는데 지금 승인할 수 없는 상태(관리자 역할 · 전체 범위 · 로그인 수단이 필요)면 끄지 않고 사유를 보입니다 — 그 계정을 고치거나 목록에서 뺀 뒤 하세요. 다른 소유자가 아무도 없을 때만 본인 OTP 로 바로 꺼집니다.{gdiff.off.includes('twoPerson') ? ' 두 사람 승인을 끄면 키 등록 · 교체 · 삭제 · 사용 재개가 본인 OTP 만으로 실행됩니다.' : ''}{gdiff.off.includes('serverRestrict') ? ' 서버 쪽 제한을 끄면 앞으로 넣는 키 줄에 출발지 제한 · 포워딩 금지가 붙지 않습니다(이미 넣은 줄은 그대로).' : ''}</p>}
         {guardReq && <p className="ssa-note" style={{ color: toneVar('warn') }}>보호 장치 끄기 요청이 승인을 기다리고 있습니다 — {guardReq.title || '보호 장치 끄기'} · 요청 {guardReq.requestedBy || '—'}. 위 ‘승인 대기’ 에서 처리합니다.</p>}
         <div className="ssa-form ssa-inline">
           <Otp value={gOtp} onChange={setGOtp} />
@@ -1103,7 +1202,7 @@ function SecurityTab({ v, corpName, reload, say, me = '' }) {
       </section>
       <section className="ssa-sec ssa-danger">
         <h4>긴급 조치 — 서버에서 키 거두기</h4>
-        <p className="ssa-note">그 법인 서버마다 포탈이 넣은 그 키의 줄(표식이 붙은 줄)을 authorized_keys 에서 지웁니다. 멈추는 방향이라 두 사람 승인 없이 본인 OTP 만으로 바로 실행합니다. 닿지 못한 서버는 사유와 함께 결과에 남깁니다 — 사람이 직접 지웁니다. 사람이 직접 넣은 같은 키 줄(표식 없음)은 지우지 않고 수만 알려 줍니다. 엣지가 수집하는 서버는 그 엣지 포탈에서 거둡니다.</p>
+        <p className="ssa-note">그 법인 서버마다 포탈이 넣은 그 키의 줄(표식이 붙은 줄)을 authorized_keys 에서 지웁니다. 멈추는 방향이라 두 사람 승인 없이 본인 OTP 만으로 바로 실행합니다. 같은 키를 넣는 키 로그인 설정 작업이 돌고 있으면 그 작업을 멈춥니다. 닿지 못한 서버 · 결과를 모르는 서버 · 한 번에 거두는 상한을 넘어 빠진 서버는 사유와 함께 결과에 남깁니다 — 사람이 직접 지웁니다. authorized_keys 가 심볼릭 링크이거나 읽기 · 쓰기가 막혀 있으면 건드리지 않고 실패로 적습니다. 사람이 직접 넣은 같은 키 줄(표식 없음)은 지우지 않고 수만 알려 줍니다. 엣지가 수집하는 서버는 그 엣지 포탈에서 거둡니다.</p>
         <div className="ssa-form ssa-inline">
           <label>법인 <Select sort={false} className="select select-sm" value={rv.corp} onChange={(e) => setRv({ ...rv, corp: e.target.value, keyId: '' })}>
             <option value="">선택</option>{(v.corps || []).map((c) => <option key={c.id} value={c.id}>{c.name}{c.stop?.unreadable ? ' — 상태 모름' : c.stop ? ' — 중지 중' : ''}</option>)}
@@ -1116,12 +1215,13 @@ function SecurityTab({ v, corpName, reload, say, me = '' }) {
           <div className="ssa-acts">
             <button className="btn danger" type="button" disabled={busy || kj.running || !rv.corp || !rv.keyId} onClick={doRevoke}>{kj.running ? '거두는 중…' : '서버에서 키 거두기'}</button>
           </div>
+          {rv.once && <p className="ssa-note" style={{ color: toneVar('warn') }}>{revokeOnceWarn(v.registryUnreadable || !rv.corp ? null : (v.servers || []).filter((s) => (s.vcenterId || '') === rv.corp && !s.agent).length)}</p>}
         </div>
         <p className="ssa-note">키는 그 법인 폴더 · 미분류 키만 보입니다(퇴역 키 포함). 비밀번호를 비우면 저장된 인증으로 접속합니다 — 법인 키 사용 중지 중에는 키로 접속하지 않으므로, 키로만 접속하던 서버는 이번 한 번만 쓸 비밀번호를 넣어야 닿습니다(저장하지 않습니다). 새 키로 바꾸려면 키 폴더 탭의 ‘교체…’ 를 씁니다.</p>
-        <KeyJobResult kj={kj} kind="key-revoke" />
+        <KeyJobResult key={kj.id} kj={kj} kind="key-revoke" />
       </section>
       <section className="ssa-sec">
-        <div className="ssa-acts"><h4>키 사용 기록</h4><span className="ssa-sub">접속 결과 · {use.resp?.retainDays ?? '—'}일 보관 · 주기 성공은 묶음 횟수로만</span><button className="btn btn-sm" type="button" onClick={loadUse}>다시 읽기</button></div>
+        <div className="ssa-acts"><h4>키 사용 기록</h4><span className="ssa-sub">접속 결과 · {unitText(use.resp?.retainDays, '일')} 보관 · 주기 성공은 묶음 횟수로만</span><button className="btn btn-sm" type="button" onClick={loadUse}>다시 읽기</button></div>
         {use.err && <ErrorBox error={use.err} />}
         {use.resp?.loadFailed && <p className="ssa-note" style={{ color: toneVar('warn') }}>사용 기록 파일이 손상돼 보존본을 남기고 새로 시작했습니다 — 그 이전 기록은 이 화면에 없습니다.</p>}
         {use.resp && (
@@ -1137,7 +1237,7 @@ function SecurityTab({ v, corpName, reload, say, me = '' }) {
         <p className="ssa-note">‘처음 쓰인 서버 · 기능’ 은 표시만 합니다(막지 않습니다). 이 기록은 이 노드가 키로 접속한 것만입니다 — 엣지가 수집하는 서버는 그 엣지 포탈에 있습니다.</p>
       </section>
       <section className="ssa-sec">
-        <div className="ssa-acts"><h4>키 변경 기록</h4><span className="ssa-sub">감사 로그(지울 수 없음) · 키 보안 사건 · 이 브라우저 시각</span><button className="btn btn-sm" type="button" onClick={loadChg}>다시 읽기</button></div>
+        <div className="ssa-acts"><h4>키 변경 기록</h4><span className="ssa-sub">감사 로그(화면에서 지울 수 없음 — 보관 상한을 넘으면 오래된 줄부터 정리됩니다) · 키 보안 사건(개수 상한 — 덜 중요한 것부터 밀려납니다) · 이 브라우저 시각</span><button className="btn btn-sm" type="button" onClick={loadChg}>다시 읽기</button></div>
         {chg.err && <ErrorBox error={chg.err} />}
         {chg.resp && (
           <STable minWidth={860} className="ssa-t ssa-chg" limit={300}>
@@ -1157,7 +1257,8 @@ function SecurityTab({ v, corpName, reload, say, me = '' }) {
           <li>키 파일이 포탈 밖에서 바뀌었는지는 {v.scanEveryMinutes ? `${v.scanEveryMinutes}분` : '주기'}마다 확인합니다 — 그 사이의 변경은 다음 점검에서 잡힙니다. 키 원문과 지문을 함께 바꾼 경우는 ‘포탈이 마지막으로 쓴 내용과 다름’ 으로만 압니다 — 포탈이 그 사이 재시작하면 디스크 내용이 새 기준이 되어 잡히지 않습니다.</li>
           <li>두 사람 승인은 설정 소유자 계정이 둘 이상일 때만 뜻이 있습니다. 한 사람이 계정 둘을 가지면 우회됩니다 — 계정 관리의 문제로 남습니다.</li>
           <li>서버 쪽 제한은 서버의 SSH 가 그 표기를 지키는 한에서만 유효합니다. 서버 관리자가 키 줄에서 제한을 빼도 포탈은 서버를 주기적으로 읽지 않습니다 — 그 서버의 ‘서버에 들어 있는 키’ 를 다시 읽은 뒤에야 키 점검이 알립니다.</li>
-          <li>이 포탈이 서버에 닿는 주소가 접속마다 다르면(NAT 등) 출발지 제한 때문에 키 접속이 막힐 수 있습니다. 그때는 넣은 줄을 지우고 사유를 적으며, 제한을 자동으로 빼지 않습니다.</li>
+          <li>이 포탈이 서버에 닿는 주소가 접속마다 다르면(NAT 등) 출발지 제한 때문에 키 접속이 막힐 수 있습니다. 키 로그인 설정의 확인 단계에서 막히면 넣은 줄을 지우고 사유를 적습니다(제한을 자동으로 빼지 않습니다). 설정한 뒤에 주소가 바뀌면 줄은 서버에 그대로 남고, 그 서버의 주기 수집이 인증 거부로 멈춥니다(계정 잠금 방지 — 자동 재시도 없음).</li>
+          <li>출발지 제한은 서버가 본 주소 기준입니다 — 같은 NAT 뒤의 다른 장비에서 오는 접속은 가르지 못합니다.</li>
         </ul>
       </section>
     </div>

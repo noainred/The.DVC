@@ -268,7 +268,7 @@ export function keyOptionLabel(k, corpName = (x) => x) {
 /** 보호 장치(스위치 둘) — 이름 · 설명. 설명에 시한 숫자를 박지 않는다(남은 시간은 요청마다 서버 값으로 보인다). */
 export const GUARD_KEYS = Object.freeze(['twoPerson', 'serverRestrict']);
 export const GUARD_TEXT = Object.freeze({
-  twoPerson: Object.freeze({ label: '두 사람 승인', note: '키 등록 · 받은 키 승인 · 교체 · 삭제 · 법인 키 사용 재개 · 키 저장소 다시 읽기 · 보호 장치 끄기는 다른 설정 소유자 1명이 승인해야 실행됩니다. 요청은 시한이 지나면 사라집니다.' }),
+  twoPerson: Object.freeze({ label: '두 사람 승인', note: '키 등록 · 받은 키 승인 · 교체 · 삭제 · 법인 키 사용 재개 · 키 저장소 다시 읽기 · 보호 장치 끄기는 다른 설정 소유자 1명이 승인해야 실행됩니다. 요청은 시한이 지나면 사라집니다. 승인할 수 있는 다른 설정 소유자가 없으면 요청을 만들지 않고 사유를 보입니다.' }),
   serverRestrict: Object.freeze({ label: '서버 쪽 제한', note: '포탈이 서버에 넣는 키 줄에 ‘이 포탈 주소에서 올 때만’ · ‘포워딩 금지’ 를 붙입니다 — 키가 새도 서버가 본 주소가 이 포탈이 아닌 접속은 그 줄로 받지 않습니다. 주소는 서버가 본 것이라 같은 NAT 뒤의 다른 장비는 가르지 못하고, 사람이 넣은 줄 · 관리자가 옵션을 바꾼 줄에는 붙지 않습니다.' }),
 });
 /** 보호 장치 편집값 ↔ 지금 값 — 켜는 것 · 끄는 것(끄는 것은 다른 설정 소유자의 승인을 거칠 수 있다). 참/거짓이 아닌 값은 바꾸지 않는 것으로 본다. */
@@ -501,7 +501,8 @@ export function jobLostText(status, reason, job) {
   const why = String(reason || '').trim();
   const cur = job && job.running === true && job.current ? String(job.current) : '';
   if (status === 404) {
-    return `작업 기록을 찾지 못했습니다${why ? `(${why})` : ''}. ${cur ? `마지막으로 본 처리 중 서버는 ${cur} 입니다 — ` : ''}처리 중이던 서버가 있었다면 줄을 바꾼 뒤 확인 · 되돌리기 전에 끊겼을 수 있으니, 법인 · 서버 탭 › 키 고르기 › ‘서버에 들어 있는 키 다시 읽기’ 로 확인하세요.`;
+    const head = why ? (/[.)]$/.test(why) ? why : `${why}.`) : '작업 기록을 찾지 못했습니다.';
+    return `${head} ${cur ? `마지막으로 본 처리 중 서버는 ${cur} 입니다 — ` : ''}처리 중이던 서버가 있었다면 줄을 바꾼 뒤 확인 · 되돌리기 전에 끊겼을 수 있으니, 법인 · 서버 탭 › 키 고르기 › ‘서버에 들어 있는 키 다시 읽기’ 로 확인하세요.`;
   }
   return `진행을 더 묻지 못했습니다${why ? `(${why})` : ''} — 작업은 서버에서 계속되고 있을 수 있습니다.`;
 }

@@ -9,6 +9,7 @@ import {
   splitApprovals, approvalRemaining, isOwnRequest, pendingText, pendingTone, folderText, keyOptionLabel, guardDiff, guardSaveText,
   approvalDetail, approvalOutcome, rotateDoneText, eventDetail, keyLoginRow, keyRevokeRow, jobSummary, tallyText, restrictLineText,
   keyLoginSelectable, keyLoginKeyOptions, corpKeyOptions, rotateTargetOptions, defaultKeyChoice, savedAuthHints, pendingKeyRequest,
+  identityKey, HIDDEN_EVENT_KINDS, guardFailText, rotatePartialText, recordFailedText, stopDoneText, jobHeadText, jobLostText, revokeStartText, revokeOnceWarn,
 } from './sshAccessText.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -115,15 +116,22 @@ describe('SSH 공용 접속 2단계(v3.10.0) — 두 사람 승인 문구', () =
     for (const bad of [null, undefined, '', '0', 0, NaN, [], {}]) expect(approvalRemaining(bad, now)).toBe('—');
     expect(approvalRemaining(now + H, null)).toBe('—');
   });
-  it('내 요청 판정 — 소문자 비교(서버와 같은 규칙) · 내 이름을 모르면 잠그지 않는다(false)', () => {
+  it('내 요청 판정 — 신원 비교(소문자 · AD 도메인 접두 · 접미 — 서버와 같은 규칙) · 내 이름을 모르면 잠그지 않는다(false)', () => {
     expect(isOwnRequest({ requestedBy: 'Kim.Admin' }, 'kim.admin ')).toBe(true);
     expect(isOwnRequest({ requestedBy: 'kim.admin' }, 'KIM.Admin')).toBe(true);   // 내 이름 쪽 대소문자도 접는다(변이 M1 이 살아남던 자리)
     expect(isOwnRequest({ requestedBy: 'kim.admin' }, 'park.sec')).toBe(false);
     expect(isOwnRequest({ requestedBy: 'kim.admin' }, '')).toBe(false);
     expect(isOwnRequest({ requestedBy: '' }, '')).toBe(false);
     expect(isOwnRequest(null, 'kim.admin')).toBe(false);
-    // 서버 store 가 실제로 소문자로 비교한다(화면 잠금과 서버 403 이 같은 사람을 가리킨다)
-    expect(serverSrc('approval/store.js')).toMatch(/lc\(who\) === lc\(r\.requestedBy\)\) return \{ ok: false, code: 'self-approve'/);
+    // AD 별칭 — 같은 사람이 ‘CORP\\kim’ 으로 요청하고 ‘kim@corp.local’ 로 보면 내 요청이다(서버 점검 A2 와 같은 판정)
+    expect(isOwnRequest({ requestedBy: 'CORP\\Kim.Admin' }, 'kim.admin@corp.local')).toBe(true);
+    expect(identityKey('CORP\\Alice')).toBe('alice'); expect(identityKey('alice@corp.local')).toBe('alice'); expect(identityKey('@x')).toBe('@x');
+    expect(identityKey(null)).toBe('');
+    // 서버 store 가 실제로 같은 신원 비교를 쓴다(화면 잠금과 서버 403 이 같은 사람을 가리킨다) — 규칙 글자도 대조
+    const store = serverSrc('approval/store.js');
+    expect(store).toMatch(/identityKey\(who\) === identityKey\(r\.requestedBy\)\) return \{ ok: false, code: 'self-approve'/);
+    expect(store).toMatch(/const bs = s\.lastIndexOf\('\\\\'\); if \(bs >= 0\) s = s\.slice\(bs \+ 1\);/);
+    expect(store).toMatch(/const at = s\.indexOf\('@'\); if \(at > 0\) s = s\.slice\(0, at\);/);
   });
   it('202 승인 대기 문구 — 소유자 수를 알면 적고 · 모르면 적지 않고 · 0명이면 승인할 사람이 없다고 말하며 보호 장치를 가리킨다', () => {
     const two = pendingText({ pending: true, approvers: 2 }, { what: 'kr-ops 등록', then: '쓰입니다' });
@@ -191,6 +199,20 @@ describe('SSH 공용 접속 2단계(v3.10.0) — 두 사람 승인 문구', () =
     expect(rotateDoneText({ servers: [], accounts: 0 })).toContain('서버 0대 · 공통 계정 0개');
     expect(rotateDoneText(undefined)).toBe('서버 — · 공통 계정 —를 새 키로 옮기고 옛 키를 퇴역시켰습니다');
   });
+  it('교체 중간 실패(partial) · 실행 결과 기록 실패(recordFailed) — 실패로만 말하지 않고 이미 된 것을 밝힌다(점검 E-9 · C-8)', () => {
+    const p1 = rotatePartialText({ servers: ['s1', 's2'] });   // 공통 계정 단계 전에 멈춤
+    expect(p1).toContain('서버 2대(공통 계정은 옮기기 전에 멈춤)가 새 키를 가리킵니다'); expect(p1).toContain('옛 키는 퇴역시키지 못했습니다');
+    expect(rotatePartialText({ servers: ['s1'], accounts: 2 })).toContain('서버 1대 · 공통 계정 2개가 새 키를');
+    expect(rotatePartialText({ servers: 'x', accounts: '3' })).toContain('서버 —(공통 계정은');   // 글자 수는 수로 읽지 않는다
+    expect(rotatePartialText(undefined)).toBe(''); expect(rotatePartialText(null)).toBe('');
+    // 서버가 그 모양으로 준다
+    expect(serverSrc('bmusage/onboard/refs.js')).toMatch(/partial: \{ servers: r1\.ids \}/);
+    expect(serverSrc('bmusage/onboard/refs.js')).toMatch(/partial: \{ servers: r1\.ids, accounts: r2\.changed \}/);
+    expect(recordFailedText({ ok: true, recordFailed: true, recordReason: '디스크 가득' })).toContain('승인 기록에 적지 못했습니다(디스크 가득)');
+    expect(recordFailedText({ ok: true, recordFailed: true })).toContain('이번 실행 자체는 됐습니다');
+    expect(recordFailedText({ ok: true })).toBe(''); expect(recordFailedText({ recordFailed: 'true' })).toBe('');
+    expect(serverSrc('approval/twoPerson.js')).toMatch(/recordFailed: true, recordReason:/);
+  });
   it('폴더 글자 · 드롭다운 한 줄', () => {
     const cn = (id) => ({ vcA: 'KR-SEL' }[id] || id);
     expect(folderText({ folderCorp: 'vcA', folderServer: '' }, cn)).toBe('KR-SEL › 공통');
@@ -220,6 +242,14 @@ describe('SSH 공용 접속 2단계 — 보호 장치 · 사건 문구', () => {
     expect(guardSaveText({ ok: true, guards: {}, changed: 1 }, { on: [], off: ['serverRestrict'], changed: 1 })).toBe('보호 장치를 저장했습니다 — 서버 쪽 제한 끔.');
     expect(guardSaveText({ ok: true, changed: 0 }, { on: [], off: [], changed: 0 })).toBe('바뀐 것이 없습니다.');
   });
+  it('보호 장치 저장 실패 — 켠 것이 이미 적용됐으면(partial.applied) 그 사실을 먼저 말한다(점검 E-7)', () => {
+    const t = guardFailText({ ok: false, code: 'no-approver', partial: { applied: ['serverRestrict'] } }, '승인할 수 있는 다른 설정 소유자가 없습니다');
+    expect(t).toBe('서버 쪽 제한 — 켰습니다(적용됨). 끄는 변경은 하지 못했습니다: 승인할 수 있는 다른 설정 소유자가 없습니다');
+    expect(guardFailText({ ok: false, reason: 'r' })).toBe('r');
+    expect(guardFailText({ partial: { applied: [] } }, 'x')).toBe('x');
+    expect(guardFailText(undefined, '')).toBe('실패했습니다');
+    expect(serverSrc('sshaccess/service.js')).toMatch(/partial: \{ applied: Object\.keys\(on\) \}/);
+  });
   it('사건 글자 — 서버가 남기는 종류(CRITICAL_EVENTS)는 전부 이름이 있다 · 새 파일의 내부 표지는 싣지 않는다 · 보호 장치 키는 화면 이름으로', () => {
     const m = /export const CRITICAL_EVENTS = Object\.freeze\(\[([^\]]+)\]\)/.exec(serverSrc('sshaccess/state.js'));
     for (const kind of m[1].split(',').map((x) => x.trim().replace(/'/g, '')).filter(Boolean)) expect(EVENT_TEXT[kind], kind).toBeTruthy();
@@ -227,6 +257,13 @@ describe('SSH 공용 접속 2단계 — 보호 장치 · 사건 문구', () => {
     expect(eventDetail({ kind: 'approval-decided', detail: '승인 · 실행됨(요청 kim.admin)' })).toBe('승인 · 실행됨(요청 kim.admin)');
     expect(eventDetail({ kind: 'inbox-new', detail: 'vcA/common/x|abc\nvcA/common/y|def' })).toBe('');
     expect(eventDetail({ kind: 'key-login-set' })).toBe('');
+    expect(eventDetail({ kind: 'key-revoke-done', detail: '3대 — 지움 2 · 줄 없음 0 · 실패 1 — bm-a1(connect)' })).toContain('실패 1');
+    expect(eventDetail({ kind: 'inbox-seen', detail: 'abc123def456' })).toBe('');
+    expect(HIDDEN_EVENT_KINDS).toContain('inbox-seen');
+    // 서버가 남기는 사건 종류(service.js · state.js)는 전부 이름이 있다
+    for (const src of [serverSrc('sshaccess/service.js'), serverSrc('sshaccess/state.js')]) {
+      for (const m of src.matchAll(/(?:addEvents?\(|events\.push\(|pushEvents\(d, \[)\{ kind: '([a-z][a-z-]*)'/g)) expect(EVENT_TEXT[m[1]], m[1]).toBeTruthy();
+    }
     expect(eventDetail(null)).toBe('');
     expect(ISSUE_TEXT['key-pending']).toBeTruthy();
   });
@@ -242,19 +279,21 @@ describe('SSH 공용 접속 2단계 — 보호 장치 · 사건 문구', () => {
 describe('SSH 공용 접속 2단계 — 키 로그인 설정 · 키 거두기 결과 줄', () => {
   it('결과 code 글자 — 서버 keyLogin.js 가 내는 code 는 전부 글자가 있다', () => {
     const src = serverSrc('sshaccess/keyLogin.js');
-    // code 가 적히는 네 꼴 — fail('x' · code: 'x' · code(: | =) 조건 ? 'a' : (조건 ? 'b' :) 'c' · fail(조건 ? 'a' : 'b'
+    // code 가 적히는 꼴 — ‘code: …’ · ‘code = …’ · ‘fail(…,’ 의 값 자리에서 글자 그대로('x') 또는 삼항의 결과(? 'x' · : 'x') — 삼항이 몇 겹이든 모두
+    const lits = (expr) => [...expr.matchAll(/(?:^|\? |: )'([a-z][a-z-]*)'/g)].map((m) => m[1]);
     const codes = new Set();
-    for (const re of [/fail\('([a-z][a-z-]*)'/g, /\bcode: '([a-z][a-z-]*)'/g,
-      /\bcode(?: =|:) [^;,\n']*\? '([a-z][a-z-]*)' : (?:[^;,\n']*\? '([a-z][a-z-]*)' : )?'([a-z][a-z-]*)'/g, /fail\([^,\n]*\? '([a-z][a-z-]*)' : '([a-z][a-z-]*)'/g]) {
-      for (const m of src.matchAll(re)) for (const c of m.slice(1)) if (c) codes.add(c);
-    }
-    // 작업을 시작하지 못한 요청 오류(행 결과가 아니다 — 서버 reason 을 그대로 보인다)
-    for (const skip of ['busy', 'empty', 'too-many']) codes.delete(skip);
-    for (const must of ['ok', 'edge-delegated', 'install-failed', 'key-login-failed', 'bind-failed', 'revoke-failed', 'bad-key', 'removed', 'not-present', 'none', 'hostkey', 'auth-rejected', 'connect', 'no-secret', 'error', 'key-pending', 'key-retired']) {
+    for (const m of src.matchAll(/\bcode(?: =|:) ([^;,\n]*)/g)) for (const c of lits(m[1])) codes.add(c);
+    for (const m of src.matchAll(/\bfail\(([^,\n]*),/g)) for (const c of lits(m[1])) codes.add(c);
+    // 작업을 시작 · 멈추지 못한 요청 오류(행 결과가 아니다 — 서버 reason 을 그대로 보인다)
+    for (const skip of ['busy', 'empty', 'too-many', 'bad-kind', 'done']) codes.delete(skip);
+    for (const must of ['ok', 'edge-delegated', 'install-failed', 'key-login-failed', 'bind-failed', 'revoke-failed', 'bad-key', 'removed', 'not-present', 'none', 'hostkey', 'auth-rejected', 'connect', 'timeout', 'uncertain', 'cancelled', 'error', 'key-pending', 'key-retired']) {
       expect(codes.has(must), `keyLogin.js 에서 ${must} 를 찾지 못함(추출 규칙 확인)`).toBe(true);
     }
     for (const c of codes) expect(JOB_CODE_TEXT[c], c).toBeTruthy();
     for (const c of ['moved', 'not-found', 'corp-stopped', 'key-folder', 'key-feature', 'key-tampered', 'state-unreadable']) expect(JOB_CODE_TEXT[c], c).toBeTruthy();
+    // service.js 가 작업 행으로 내는 code(서버 · 키를 그 차례에 다시 읽음 · 상한) — 글자가 있다
+    const svc = serverSrc('sshaccess/service.js');
+    for (const c of ['moved', 'key-changed', 'over-limit']) { expect(svc).toContain(`code: '${c}'`); expect(JOB_CODE_TEXT[c], c).toBeTruthy(); }
   });
   it('키 로그인 — 완료: 줄 추가 · 출발지 제한 · 비밀번호 삭제 · 옛 키 줄 수 · 메모가 있으면 확인 톤', () => {
     const ok = keyLoginRow({ ok: true, code: 'ok', line: 'added', restricted: true, fromIp: '192.0.2.5', bound: true, passwordRemoved: true, oldRemoved: 1, oldUnmarked: 0 }, { restrict: true });
@@ -269,11 +308,26 @@ describe('SSH 공용 접속 2단계 — 키 로그인 설정 · 키 거두기 �
     const pwFail = keyLoginRow({ ok: true, line: 'added', restricted: true, bound: true, passwordRemoved: false, note: '저장 비밀번호를 지우지 못했습니다(쓰기 실패).' }, { removePassword: true });
     expect(pwFail.tone).toBe('warn'); expect(pwFail.parts.join(' ')).not.toContain('저장 비밀번호 삭제'); expect(pwFail.parts.at(-1)).toContain('지우지 못했습니다');
     expect(serverSrc('sshaccess/keyLogin.js')).toMatch(/if \(!server\.password\) out\.passwordRemoved = null;/);
-    // 줄이 이미 있었으면 제한을 새로 붙이지 않는다 — ‘적용’ 이라고 말하지 않는다
-    const present = keyLoginRow({ ok: true, code: 'ok', line: 'present-marked', restricted: false, bound: true, passwordRemoved: false }, { restrict: true });
-    expect(present.parts.join(' ')).toContain('있던 줄이라 서버 쪽 제한을 새로 붙이지 않음');
+    // 제한을 켰는데 제한 없는 포탈 줄을 바꾸지 못했으면(지금 그 키로만 접속돼 — replaceSkipped) ‘적용’ 이라고 말하지 않고 확인 톤(점검 E-5)
+    const present = keyLoginRow({ ok: true, code: 'ok', line: 'present-marked', restricted: false, replaceSkipped: true, bound: true, passwordRemoved: false, note: '제한 없는 포탈 줄이 있지만 …' }, { restrict: true });
+    expect(present.parts.join(' ')).toContain('제한 없는 같은 키 줄이 서버에 남아 있습니다');
     expect(present.parts.join(' ')).not.toContain('출발지 제한 적용');
     expect(present.parts.join(' ')).not.toContain('저장 비밀번호 삭제');
+    expect(present.tone).toBe('warn');
+    // 제한이 다 붙은 기존 포탈 줄 — 서버는 restricted:true 로 준다(keyLogin exactOnly)
+    expect(keyLoginRow({ ok: true, line: 'present-marked', restricted: true, bound: true }, { restrict: true })).toMatchObject({ tone: 'ok' });
+    expect(serverSrc('sshaccess/keyLogin.js')).toMatch(/const restricted = !!o\.restrict && \(added \|\| replaced \|\| exactOnly\) && !m\.unmarked && !m\.custom;/);
+    // 사람이 넣은 줄만 있음(present-unmarked) · 표식 없는 줄 · 관리자가 바꾼 줄 + 제한 켬 — 메모가 없어도 초록으로 끝내지 않는다
+    const human = keyLoginRow({ ok: true, line: 'present-unmarked', restricted: false, unmarked: 1, bound: true }, { restrict: true });
+    expect(human.tone).toBe('warn'); expect(human.parts[0]).toContain('사람이 넣은 줄'); expect(human.parts.join(' ')).toContain('제한 없는 같은 키 줄');
+    expect(keyLoginRow({ ok: true, line: 'added', restricted: false, unmarked: 0, custom: 1, bound: true }, { restrict: true }).tone).toBe('warn');
+    expect(keyLoginRow({ ok: true, line: 'added', restricted: true, unmarked: 2, bound: true }, { restrict: true }).tone).toBe('warn');
+    // 제한 없는(다른 주소의) 포탈 줄을 제한 줄로 바꿈(replaced) — 서버의 기존 줄을 바꿨다는 사실을 글자로(점검 E-4)
+    const rep = keyLoginRow({ ok: true, line: 'replaced', restricted: true, fromIp: '192.0.2.9', bound: true }, { restrict: true });
+    expect(rep).toMatchObject({ label: '완료', tone: 'ok' });
+    expect(rep.parts[0]).toBe('제한 없는(또는 다른 주소의) 포탈 줄을 제한 줄로 바꾸고 키 접속 확인');
+    expect(rep.parts[1]).toBe('출발지 제한 적용(192.0.2.9) · 포워딩 금지');
+    expect(serverSrc('sshaccess/keyLogin.js')).toMatch(/const replaced = m\.kind === 'replaced';/);
     // 보호 장치가 꺼져 있으면 제한 없이 넣었다고 말한다
     expect(keyLoginRow({ ok: true, line: 'added', restricted: false, bound: true }, { restrict: false }).parts.join(' ')).toContain('서버 쪽 제한 없이 넣음');
     // 옛 키 줄을 못 지웠으면(null) 수를 지어내지 않고 서버 메모를 보인다 · 톤은 확인
@@ -297,6 +351,16 @@ describe('SSH 공용 접속 2단계 — 키 로그인 설정 · 키 거두기 �
     expect(keyLoginRow(undefined)).toMatchObject({ label: '실패', tone: 'bad', parts: ['사유를 받지 못했습니다'] });
     // ok 가 참이 아닌 값(문자열 등)은 완료로 그리지 않는다
     expect(keyLoginRow({ ok: 'true', code: 'ok' }).label).toBe('실패');
+    // 명령을 보냈는데 답이 없음 — ‘결과 모름’(실패도 성공도 아니다) · ‘바꾼 것 없음’ 이라고 하지 않는다
+    const unc = keyLoginRow({ ok: false, code: 'uncertain', reason: '서버가 시한 안에 답하지 않았습니다 바꾸는 명령은 서버에 보냈지만 결과를 받지 못했습니다' });
+    expect(unc).toMatchObject({ label: '결과 모름', tone: 'bad' });
+    expect(JOB_CODE_TEXT.uncertain).toContain('바뀌었을 수 있음'); expect(JOB_CODE_TEXT.uncertain).not.toContain('바꾼 것 없음');
+    expect(keyLoginRow({ ok: false, code: 'uncertain' }).parts[0]).toBe(JOB_CODE_TEXT.uncertain);
+    // 멈춤 · 작업 도중 키가 바뀜 — 시도하지 않음(실패와 따로)
+    expect(keyLoginRow({ ok: false, code: 'cancelled', reason: '작업을 멈춰 이 서버는 하지 않았습니다.' })).toMatchObject({ label: '멈춤', tone: 'warn' });
+    expect(keyLoginRow({ ok: false, code: 'key-changed', reason: 'x' })).toMatchObject({ label: '하지 않음', tone: 'warn' });
+    // 실패 행의 서버 메모(notes 배열)도 보인다
+    expect(keyLoginRow({ ok: false, code: 'key-login-failed', reason: 'r', notes: ['표식 없는 같은 키 줄 1개가 서버에 있습니다', 3] }).parts).toEqual(['r', '표식 없는 같은 키 줄 1개가 서버에 있습니다']);
   });
   it('키 거두기 — 지움 / 포탈 줄 없음 / 파일 없음 / 못 닿음 · 표식 없는 줄 · 아직 그 키로 고정된 서버는 확인 톤', () => {
     expect(keyRevokeRow({ ok: true, code: 'removed', removed: 2, unmarked: 0, pinned: false })).toEqual({ label: '지움', tone: 'ok', parts: ['포탈이 넣은 줄 2개 삭제'], rollback: '' });
@@ -304,12 +368,23 @@ describe('SSH 공용 접속 2단계 — 키 로그인 설정 · 키 거두기 �
     expect(keyRevokeRow({ ok: true, code: 'none', removed: 0, unmarked: 0 })).toMatchObject({ label: '파일 없음', tone: 'muted' });
     const left = keyRevokeRow({ ok: true, code: 'not-present', removed: 0, unmarked: 1 });
     expect(left.tone).toBe('warn'); expect(left.parts.join(' ')).toContain('표식 없는 같은 키 줄 1개 남음');
+    // 아직 그 키를 쓰는 서버 — 이름 고정이든 공통 계정의 기본 키를 따르든(서버 serverUsesKey) 같은 문구
     const pinned = keyRevokeRow({ ok: true, code: 'removed', removed: 1, unmarked: 0, pinned: true });
-    expect(pinned.tone).toBe('warn'); expect(pinned.parts.join(' ')).toContain('아직 이 키로 고정');
+    expect(pinned.tone).toBe('warn'); expect(pinned.parts.join(' ')).toContain('아직 이 키로 접속하도록 설정돼'); expect(pinned.parts.join(' ')).toContain('공통 계정의 기본 키');
+    expect(serverSrc('sshaccess/keyLogin.js')).toMatch(/const pinned = serverUsesKey\(server, key\.id\);/);
     expect(keyRevokeRow({ ok: false, code: 'connect', reason: '접속하지 못했습니다(timeout)' })).toEqual({ label: '못 닿음', tone: 'bad', parts: ['접속하지 못했습니다(timeout)'], rollback: '' });
     expect(keyRevokeRow({ ok: false, code: 'corp-stopped', reason: 'r' }).label).toBe('못 닿음');
     expect(keyRevokeRow({ ok: false, code: 'revoke-failed', reason: 'r' }).label).toBe('실패');
     expect(keyRevokeRow({ ok: false, code: 'edge-delegated', reason: 'r' })).toMatchObject({ label: '하지 않음', tone: 'warn' });
+    // 심볼릭 링크 · 못 읽음 · 못 씀 — ‘파일 없음’(회색)이 아니라 실패(점검 B-F2b) · 서버 사유 그대로
+    const link = keyRevokeRow({ ok: false, code: 'revoke-failed', why: 'symlink', reason: '~/.ssh 또는 authorized_keys 가 심볼릭 링크라 건드리지 않았습니다 — 서버에서 직접 확인하세요.', pinned: true });
+    expect(link).toMatchObject({ label: '실패', tone: 'bad' }); expect(link.parts[0]).toContain('심볼릭 링크'); expect(link.parts.join(' ')).toContain('아직 이 키로 접속하도록');
+    expect(keyRevokeRow({ ok: false, code: 'revoke-failed', why: 'symlink' }).parts).toEqual([JOB_CODE_TEXT['revoke-failed']]);
+    // 결과 모름 · 멈춤 · 상한으로 빠짐 — 키 줄이 남았을 수 있다(위험 톤)
+    expect(keyRevokeRow({ ok: false, code: 'uncertain', reason: 'r' })).toMatchObject({ label: '결과 모름', tone: 'bad' });
+    expect(keyRevokeRow({ ok: false, code: 'cancelled', reason: 'r' })).toMatchObject({ label: '멈춤', tone: 'bad' });
+    expect(keyRevokeRow({ ok: false, code: 'over-limit', reason: 'r' })).toMatchObject({ label: '빠짐(상한)', tone: 'bad' });
+    expect(keyRevokeRow({ ok: false, code: 'timeout', reason: 'r' })).toMatchObject({ label: '못 닿음', tone: 'bad' });
     // 지운 수를 못 받았으면 단위 없이 ‘—’
     expect(keyRevokeRow({ ok: true, code: 'removed' }).parts).toEqual(['포탈이 넣은 줄 — 삭제']);
   });
@@ -320,6 +395,42 @@ describe('SSH 공용 접속 2단계 — 키 로그인 설정 · 키 거두기 �
     expect(jobSummary({ total: '5', results: [] }).total).toBe(null);
     expect(tallyText(['완료', '실패', '완료', '하지 않음'])).toBe('완료 2 · 실패 1 · 하지 않음 1');
     expect(tallyText([])).toBe('');
+  });
+  it('작업 머리말 · 진행을 잃었을 때 — 더 묻지 못하게 된 뒤에는 ‘도는 중’ 처럼 말하지 않는다(점검 E-6)', () => {
+    const run = { running: true, total: 10, current: 'bm-a3', results: [{}, {}, {}] };
+    expect(jobHeadText(run)).toBe('진행 3 / 10대 — 지금 bm-a3 · 1대씩 차례로 합니다');
+    expect(jobHeadText(run, { stopped: true })).toBe('마지막으로 받은 진행 3 / 10대 — 그때 처리 중 bm-a3 · 그 뒤는 모릅니다');
+    expect(jobHeadText({ ...run, cancelled: true })).toContain('멈추는 중');
+    expect(jobHeadText(null)).toContain('진행을 묻는 중');
+    expect(jobHeadText(null, { stopped: true })).toBe('작업을 시작했지만 진행을 받지 못했습니다.');
+    expect(jobHeadText({ running: false, doneAt: 0, cancelled: true, cancelledBy: 'kim', results: [] })).toBe('끝났습니다(—) — 도중에 멈춤(kim)');
+    expect(jobHeadText({ running: true, total: null, results: [] })).toContain('0 / —');
+    const lost = jobLostText(404, '작업을 찾을 수 없습니다(… 포탈이 다시 시작했습니다 …)', run);
+    expect(lost).toContain('작업을 찾을 수 없습니다'); expect(lost).toContain('마지막으로 본 처리 중 서버는 bm-a3');
+    expect(lost).toContain('서버에 들어 있는 키 다시 읽기'); expect(lost).not.toContain('계속됐을 수 있습니다');
+    expect(jobLostText(404, '', null)).not.toContain('마지막으로 본');
+    expect(jobLostText(0, 'Failed to fetch', run)).toContain('작업은 서버에서 계속되고 있을 수 있습니다');
+    // 숫자 상한(1시간)을 화면에 박지 않는다 — 서버 사유에 있다
+    expect(jobLostText(404, '', run)).not.toMatch(/\d+\s*시간/);
+  });
+  it('키 거두기 시작 · 1회 비밀번호 주의 — 멈춘 넣기 작업 · 상한으로 빠진 서버 · 법인 전 서버에 같은 비밀번호(점검 E-10 · E-13)', () => {
+    const t = revokeStartText({ ok: true, total: 500, stopped: 'kj_x', skipped: [{ code: 'over-limit' }, { code: 'over-limit' }, { code: 'edge-delegated' }] });
+    expect(t).toContain('서버 500대에 1대씩'); expect(t).toContain('키 로그인 설정 작업을 멈췄습니다'); expect(t).toContain('상한을 넘은 서버 2대'); expect(t).toContain('엣지가 수집하는 서버 1대');
+    expect(revokeStartText({ ok: true, total: 3, skipped: [] })).not.toContain('멈췄습니다');
+    expect(revokeStartText({})).toContain('서버 —에');
+    expect(serverSrc('sshaccess/service.js')).toMatch(/code: 'over-limit'/);
+    expect(serverSrc('sshaccess/keyLogin.js')).toMatch(/return \{ ok: true, jobId: id, \.\.\.\(stopped \? \{ stopped \} : \{\}\) \};/);
+    expect(revokeOnceWarn(12)).toContain('이 법인 서버 12대 전부에'); expect(revokeOnceWarn(12)).toContain('저장된 인증으로 되던 서버도');
+    expect(revokeOnceWarn(null)).toContain('이 법인 서버 전부에');
+    // 서버 — 1회 비밀번호가 있으면 저장 인증 대신 그것으로 붙는다(firstLegAuth(server, o.oncePassword))
+    expect(serverSrc('sshaccess/keyLogin.js')).toMatch(/const auth = firstLegAuth\(server, o\.oncePassword\);/);
+  });
+  it('법인 사용 중지 결과 — 등록부를 못 읽어 법인으로만 걸렸으면 그렇게 말한다(점검 E-8)', () => {
+    expect(stopDoneText({ ok: true, servers: 5, edgeServers: 2 }, 'KR-SEL')).toBe('KR-SEL — 키 사용을 중지했습니다(이 노드가 접속하는 서버 5대를 함께 적음). 엣지가 수집하는 서버 2대는 그 엣지 포탈에서 따로 중지해야 합니다.');
+    const u = stopDoneText({ ok: true, servers: 0, edgeServers: 0, registryUnreadable: true }, 'KR-SEL');
+    expect(u).toContain('(법인으로만)'); expect(u).toContain('빠질 수 있습니다'); expect(u).not.toContain('0대');
+    expect(stopDoneText({ ok: true }, 'X')).toBe('X — 키 사용을 중지했습니다.');
+    expect(serverSrc('sshaccess/service.js')).toMatch(/\.\.\.\(regErr \? \{ registryUnreadable: true \} : \{\}\)/);
   });
   it('키 선택지 — 여러 대 = 그 법인 공통 폴더의 활성 키만(승인 대기 · 퇴역 · 바꿔치기 · 서버별 · 다른 법인 제외)', () => {
     const v2 = { tampered: ['kT'], keys: [
@@ -376,12 +487,35 @@ describe('SSH 공용 접속 화면 — 규약', () => {
   it('2단계(v3.10.0) — 작업 진행은 도는 동안에만 묻고 · 떠나면 멈추고 · 늦은 응답은 버린다(주기 폴링 없음)', () => {
     expect(src).not.toMatch(/setInterval\(/);
     expect(src).not.toMatch(/usePolling/);
-    expect(src).toMatch(/if \(r\.job\?\.running\) timer\.current = setTimeout\(\(\) => ask\(id, g\), JOB_POLL_MS\)/);
+    expect(src).toMatch(/if \(r\.job\?\.running\) \{ sawRunning\.current = true; timer\.current = setTimeout\(\(\) => ask\(id, g\), JOB_POLL_MS\); \}/);
     expect(src).toMatch(/const JOB_POLL_MS = 2000;/);
     expect(src).toMatch(/useEffect\(\(\) => \(\) => \{ gen\.current \+= 1; clearTimeout\(timer\.current\); \}, \[\]\)/);
     expect((src.match(/if \(g !== gen\.current\) return;/g) || []).length).toBeGreaterThanOrEqual(2);
     // 못 물으면 끝없이 묻지 않는다(상한 · 404 는 바로 멈춤)
     expect(src).toMatch(/e\?\.status === 404 \|\| e\?\.status === 403 \|\| fails\.current >= JOB_POLL_MAX_FAILS/);
+  });
+  it('2단계 점검 E-2 · E-6 — 작업은 화면을 다시 열어도 이어 보고(v.jobs) · 이미 끝난 작업에 다시 붙으면 다시 읽지 않고 · 도는 동안 멈추기(OTP 없음)', () => {
+    expect(src).toMatch(/const lastRevoke = v\.jobs\?\.revoke\?\.id \|\| '';/);
+    expect(src).toMatch(/if \(lastRevoke && lastRevoke !== kj\.id && !kj\.running\) kj\.start\(lastRevoke, \[\], \{ own: false \}\);/);
+    expect(src).toMatch(/\{!kl && v\.jobs\?\.install\?\.id && <InstallJobPanel jobRef=\{v\.jobs\.install\} reload=\{reload\} \/>\}/);
+    expect(src).toMatch(/useKeyJob\(\(_job, \{ wasRunning \}\) => \{ if \(wasRunning\)/);
+    expect(src).toMatch(/must\(await postJson\(`\/settings\/ssh-access\/jobs\/\$\{encodeURIComponent\(kj\.id\)\}\/cancel`, \{\}\)\)/);
+    // 서버 — 화면 자료에 칸마다 마지막 작업 · 멈추기 라우트는 OTP 없이 소유자 등급만
+    expect(serverSrc('sshaccess/service.js')).toMatch(/jobs: KL\.lastJobs\(\),/);
+    expect(serverSrc('routes/api/sshAccess.js')).toMatch(/api\.post\('\/settings\/ssh-access\/jobs\/:id\/cancel', \.\.\.ownerRead,/);
+    // 결과 표는 작업마다 새로(멈추기 문구가 다른 작업에 남지 않게)
+    expect((src.match(/<KeyJobResult key=\{kj\.id\} kj=\{kj\}/g) || []).length).toBe(3);
+    // 진행을 잃은 뒤에는 ‘계속됐을 수 있습니다 · 기록에도 남습니다’ 로 단정하지 않는다
+    expect(src).not.toContain('결과는 키 보안 › 키 변경 기록에도 남습니다');
+  });
+  it('2단계 점검 E-12 · E-15 · E-16 — 키 고르기 창은 저장 중 닫히지 않고 · OTP 는 주소 쿼리 · window.prompt 로 받지 않는다', () => {
+    expect(src).toMatch(/closeRef\.current = \(\) => \{ if \(!lockedRef\.current\) onClose\(readDone\.current\); \};/);
+    expect(src).toMatch(/disabled=\{!!busy\} onClick=\{\(\) => closeRef\.current\(\)\}/);
+    expect(src).not.toMatch(/\?otp=/);
+    expect(src).not.toMatch(/window\.prompt\([^)]*OTP/);
+    expect((src.match(/sendJson\(`[^`]*`, 'DELETE', \{ otp: /g) || []).length).toBe(2);   // 키 삭제 · 법인 재개
+    // 서버 reauth 는 본문을 먼저 본다(DELETE 본문으로 보낸 OTP 가 읽힌다)
+    expect(serverSrc('routes/api/reauth.js')).toMatch(/req\.body\?\.otp \?\? req\.query\?\.otp/);
   });
   it('2단계 — 202 승인 대기를 성공으로 그리지 않는다 · 승인은 본 지문을 보낸다 · 본인 요청은 승인 단추가 잠긴다', () => {
     expect((src.match(/r\.pending \? pendingText\(/g) || []).length).toBeGreaterThanOrEqual(4);   // 키 등록 · 받은 키 승인 · 교체 · 삭제
@@ -423,10 +557,10 @@ describe('SSH 공용 접속 화면 — 규약', () => {
     for (const m of src.matchAll(/BoldText text=\{'([^']*)'\}/g)) expect(m[1]).not.toMatch(/`/);
   });
   it('쓰기 응답은 전부 must() — postJson 409 · putJson/delJson 400 · 409 를 성공으로 그리지 않는다', () => {
-    const calls = [...src.matchAll(/await (postJson|putJson|delJson)\(/g)].length;
-    const wrapped = [...src.matchAll(/must\(await (postJson|putJson|delJson)\(/g)].length;
+    const calls = [...src.matchAll(/await (postJson|putJson|delJson|sendJson)\(/g)].length;
+    const wrapped = [...src.matchAll(/must\(await (postJson|putJson|delJson|sendJson)\(/g)].length;
     expect(calls).toBe(wrapped);
-    expect([...src.matchAll(/run\(\(\) => (postJson|putJson|delJson)\(/g)].length).toBeGreaterThan(0);
+    expect([...src.matchAll(/run\(\(\) => (postJson|putJson|delJson|sendJson)\(/g)].length).toBeGreaterThan(0);
     expect(src).toMatch(/const r = must\(await fn\(\)\)/);
   });
   it('기능 고르기는 렌더 밖 컴포넌트 · 예전 키는 ‘제한 없음’ 을 보존 · 0개는 저장 단추를 막는다', () => {

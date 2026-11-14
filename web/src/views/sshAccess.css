@@ -100,3 +100,5 @@ label.ssa-stack { font-size: 12px; color: var(--text-dim); }
 .ssa-sw.on i { left: 19px; }
 .ssa-sw:disabled { opacity: .5; cursor: not-allowed; }
 .ssa-sw:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+/* 키 작업 머리말 + ‘멈추기’ 단추 한 줄 — 좁으면 단추가 아래로(글은 줄바꿈 · 가로 넘침 없음) */
+.ssa-job > .ssa-acts > p { flex: 1 1 320px; min-width: 0; }

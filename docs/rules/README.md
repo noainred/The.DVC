@@ -23,6 +23,7 @@
 | [demo.md](demo.md) | 6 | 데모(mock) 모드·데모 계정 | server/src/mock/ · auth/demoGuest.js |
 | [audits.md](audits.md) | 82 | 회차별 점검(감사) 기록 v2.583~v2.785 | 같은 영역을 다시 점검할 때 — 확정분·남긴 것·작업 방식 교훈 |
 | [focusmon.md](focusmon.md) | 7 | 서버 집중 모니터링 — v2.976 반증 · v2.978 CSV 대량 등록 · 일괄 시험 · 다시 연결 · v2.979 구간 평균 · v2.981 프로세스 세부 · v2.982 서버 그룹 · v2.983 수집 부하 · v2.992 카드 아래 줄 원문 | server/src/focusmon/ · central/focusMonEdge.js · agent/focusMonWorker.js · web/src/views/tools/FocusMon* |
+| [ssh-access.md](ssh-access.md) | 9 | SSH 공용 접속 2단계(v3.10.0) — 두 사람 승인 · authorized_keys 원격 스크립트 · 키 로그인 · 거두기 · 보호 장치 · 사건/알림 | server/src/{sshaccess,approval}/ · routes/api/sshAccess.js · web/src/views/SshAccessSettings.jsx |
 | [server-security-history.md](server-security-history.md) | 20절 | 서버 보안 감사 조치 기록 | 서버 인증·권한·SSRF·비밀·엣지 수신 코드를 고칠 때 |
 
 ## 남기는 방법

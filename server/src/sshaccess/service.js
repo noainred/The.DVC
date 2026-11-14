@@ -682,7 +682,7 @@ export async function startKeyRevoke({ keyId, corp = '', servers = null, oncePas
     list = central.slice(0, KL.MAX_REVOKE_SERVERS);
     skipped = inCorp.filter((s) => t(s.agent)).map((s) => ({ id: s.id, name: s.name || s.host, corp: c, ok: false, code: 'edge-delegated', reason: '엣지가 수집하는 서버 — 그 엣지 포탈에서 거둡니다.' }));
     // 상한을 넘는 서버는 잘린 사실을 밝힌다(점검 C-1 · E-10 — 예전에는 조용히 100대에서 잘랐다).
-    for (const s of central.slice(KL.MAX_REVOKE_SERVERS)) skipped.push({ id: s.id, name: s.name || s.host, corp: c, ok: false, code: 'over-limit', reason: `한 번에 ${KL.MAX_REVOKE_SERVERS}대까지라 이번 작업에서 빠졌습니다 — 서버를 골라 따로 거두세요.` });
+    for (const s of central.slice(KL.MAX_REVOKE_SERVERS)) skipped.push({ id: s.id, name: s.name || s.host, corp: c, ok: false, code: 'over-limit', reason: `법인 단위 거두기는 한 번에 ${KL.MAX_REVOKE_SERVERS}대까지라 이번 작업에서 빠졌습니다 — 이 서버는 서버에서 직접 그 키의 포탈 줄을 지우세요.` });
   }
   if (!list.length) return { ok: false, code: 'empty', status: 400, reason: skipped[0]?.reason || '대상 서버가 없습니다.', skipped };
   const pw = oncePw(oncePassword);
