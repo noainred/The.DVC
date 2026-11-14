@@ -36,10 +36,19 @@ body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR
 .k b{font-size:24px;line-height:1.2}
 .g2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(560px,100%),1fr));gap:14px;align-items:start}
 .tw{overflow-x:auto}
-.sg{display:grid;grid-template-columns:26px 150px 80px minmax(210px,1.3fr) 170px 64px 64px 64px 76px 110px;column-gap:12px;align-items:center;padding:0 16px;min-width:1180px;box-sizing:border-box}
-.ig{display:grid;grid-template-columns:150px minmax(150px,1fr) minmax(170px,1.2fr) 130px;column-gap:12px;align-items:center;padding:0 16px;min-width:640px;box-sizing:border-box}
+.sg{display:grid;grid-template-columns:26px 170px 104px minmax(210px,1.2fr) 150px 64px 64px 64px 76px 100px;column-gap:12px;align-items:center;padding:0 16px;min-width:1180px;box-sizing:border-box}
+.ig{display:grid;grid-template-columns:104px 124px minmax(170px,1.2fr) minmax(150px,1fr);column-gap:12px;align-items:center;padding:0 16px;min-width:640px;box-sizing:border-box}
 .cg{display:grid;grid-template-columns:minmax(200px,1.3fr) 84px 56px minmax(150px,1fr) 84px;column-gap:12px;align-items:center;padding:0 16px;min-width:640px;box-sizing:border-box}
 .eg{display:grid;grid-template-columns:34px 128px minmax(190px,1fr) 150px minmax(150px,.9fr) 96px minmax(260px,1.6fr);column-gap:12px;align-items:start;padding:8px 16px;min-width:1240px;box-sizing:border-box}
+.seg{display:inline-flex;flex-wrap:wrap;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{height:30px;padding:0 12px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap}
+.seg button:first-child{border-left:0}
+.seg button.on{background:#1e3a8a;color:#fff}
+.ag{display:grid;grid-template-columns:minmax(180px,1.2fr) 56px 60px 78px 92px 70px 70px 60px 110px 184px 104px;column-gap:12px;align-items:center;padding:0 16px;min-width:1180px;box-sizing:border-box}
+.dg{display:grid;grid-template-columns:minmax(200px,1.3fr) 92px 70px 64px minmax(120px,1fr) 104px 104px 150px minmax(170px,1.1fr);column-gap:12px;align-items:center;padding:0 16px;min-width:1180px;box-sizing:border-box}
+.rate{display:flex;align-items:center;gap:8px}
+.rate i{display:block;height:8px;border-radius:4px;background:#1b2a48;flex:1;min-width:40px;overflow:hidden}
+.rate i u{display:block;height:8px;border-radius:4px;background:#ef4444}
 .th{height:34px;font-size:12px;color:#8b9bb4;background:#0f1626;border-top:1px solid #1f2a40;border-bottom:1px solid #1f2a40}
 .eg.th{padding-top:0;padding-bottom:0;align-items:center}
 .tr{min-height:42px;border-bottom:1px solid #1a2236;font-size:12.5px}
@@ -63,7 +72,7 @@ body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR
 <div style="max-width:1440px;margin:0 auto;box-sizing:border-box;padding:24px 32px 32px;display:flex;flex-direction:column;gap:14px">
   <div style="display:flex;flex-direction:column;gap:2px">
     <div class="dim" style="font-size:12px">특수 기능 › 서버 집중 모니터링 › 디스크 점검 — 등록한 서버에서 배드 섹터 점검 프로그램(RHEL 디스크 오류 이력 점검)을 돌리고 결과를 모아 봅니다</div>
-    <div class="dim" style="font-size:12px">가상의 서버 · 값입니다. 표의 줄을 누르면 아래 결과가 바뀝니다(kr-db-01 · kr-db-02 · us-db-01 을 자세히 그렸습니다). ‘점검’ 단추와 체크도 눌러 보세요.</div>
+    <div class="dim" style="font-size:12px">가상의 서버 · 값입니다. 표의 줄을 누르면 아래 결과가 바뀝니다(kr-db-01 · kr-db-02 · us-db-01 을 자세히 그렸습니다). ‘묶어 보기’ 단추(법인별 · 디스크 모델별 · 서버 모델별 · 그룹별)를 눌러 보고, 묶음 줄을 누르면 그 묶음의 서버만 보입니다.</div>
   </div>
 
   <div class="kp">
@@ -76,13 +85,21 @@ body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR
         <sc-for list="{{ chips }}" as="c" hint-placeholder-count="4"><button type="button" class="{{ c.cls }}" onClick="{{ c.pick }}">{{ c.label }}</button></sc-for></div>
       <div class="row"><span style="font-weight:600">{{ pickedText }}</span><button type="button" class="btn">준비 상태 다시 확인</button><button type="button" class="btn pri" onClick="{{ runPicked }}">고른 서버 점검</button></div>
     </div>
+    <div class="row" style="padding:0 16px">
+      <span class="dim" style="font-size:12.5px">묶어 보기</span>
+      <div class="seg"><sc-for list="{{ byBtns }}" as="b" hint-placeholder-count="5"><button type="button" class="{{ b.cls }}" onClick="{{ b.pick }}">{{ b.label }}</button></sc-for></div>
+      <span class="badge new">새 · 2차 요청</span>
+      <sc-if value="{{ hasScope }}" hint-placeholder-val="{{ false }}"><button type="button" class="chip on" onClick="{{ clearScope }}">{{ scopeText }}</button></sc-if>
+      <span class="cap">{{ byNote }}</span>
+    </div>
+    <sc-if value="{{ isServer }}" hint-placeholder-val="{{ true }}">
     <div class="tw">
-      <div class="sg th"><span></span><span>서버</span><span>담당 노드</span><span>준비 · 상태</span><span>마지막 점검</span><span style="text-align:right">매체 오류</span><span style="text-align:right">I/O · 경로</span><span style="text-align:right">재할당</span><span style="text-align:right">못 읽은 것</span><span></span></div>
+      <div class="sg th"><span></span><span>서버</span><span>법인 · 담당 노드</span><span>준비 · 상태</span><span>마지막 점검</span><span style="text-align:right">매체 오류</span><span style="text-align:right">I/O · 경로</span><span style="text-align:right">재할당</span><span style="text-align:right">못 읽은 것</span><span></span></div>
       <sc-for list="{{ rows }}" as="r" hint-placeholder-count="8">
         <div class="{{ r.cls }}" onClick="{{ r.open }}">
           <span><button type="button" class="{{ r.chk }}" onClick="{{ r.pick }}" aria-label="고르기">{{ r.mark }}</button></span>
-          <span style="display:flex;flex-direction:column"><span class="mono" style="font-weight:600">{{ r.name }}</span><small class="mono dim">{{ r.addr }}</small></span>
-          <span class="dim">{{ r.node }}</span>
+          <span style="display:flex;flex-direction:column"><span class="mono" style="font-weight:600">{{ r.name }}</span><small class="dim">{{ r.addr }}</small></span>
+          <span style="display:flex;flex-direction:column"><span>{{ r.corp }}</span><small class="dim">{{ r.node }}</small></span>
           <span style="display:flex;flex-direction:column;gap:2px"><span><span class="{{ r.stCls }}">{{ r.st }}</span></span><small class="dim">{{ r.stSub }}</small></span>
           <span style="display:flex;flex-direction:column"><span class="num">{{ r.last }}</span><small class="dim">{{ r.dur }}</small></span>
           <span class="num" style="{{ r.mediaStyle }}">{{ r.media }}</span>
@@ -93,6 +110,39 @@ body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR
         </div>
       </sc-for>
     </div>
+    </sc-if>
+
+    <sc-if value="{{ isAgg }}" hint-placeholder-val="{{ false }}">
+    <div class="tw">
+      <div class="ag th"><span>{{ aggHead }}</span><span style="text-align:right">서버</span><span style="text-align:right">점검함</span><span style="text-align:right">준비 안 됨</span><span style="text-align:right">기록 있는 서버</span><span style="text-align:right">매체 오류</span><span style="text-align:right">I/O · 경로</span><span style="text-align:right">재할당</span><span style="text-align:right">물리 디스크(본 것)</span><span>가장 오래된 점검</span><span></span></div>
+      <sc-for list="{{ aggRows }}" as="g" hint-placeholder-count="4">
+        <div class="ag tr clk" onClick="{{ g.open }}">
+          <span style="display:flex;flex-direction:column"><span style="font-weight:600">{{ g.name }}</span><small class="dim">{{ g.sub }}</small></span>
+          <span class="num" style="text-align:right">{{ g.n }}</span><span class="num" style="text-align:right">{{ g.done }}</span><span class="num" style="{{ g.nrStyle }}">{{ g.notReady }}</span>
+          <span class="num" style="{{ g.hitStyle }}">{{ g.hit }}</span><span class="num" style="text-align:right">{{ g.media }}</span><span class="num" style="text-align:right">{{ g.io }}</span><span class="num" style="text-align:right">{{ g.re }}</span>
+          <span class="num" style="text-align:right">{{ g.disks }}</span><span class="num dim">{{ g.oldest }}</span>
+          <span style="text-align:right"><button type="button" class="{{ g.btnCls }}" onClick="{{ g.run }}">{{ g.btn }}</button></span>
+        </div>
+      </sc-for>
+    </div>
+    </sc-if>
+
+    <sc-if value="{{ isDisk }}" hint-placeholder-val="{{ false }}">
+    <div class="tw">
+      <div class="dg th"><span>디스크 모델</span><span>종류 · 크기</span><span style="text-align:right">디스크</span><span style="text-align:right">서버</span><span>법인</span><span style="text-align:right">매체 오류 기록</span><span style="text-align:right">재할당 기록</span><span>기록 있는 디스크 비율</span><span>어디서 봤나</span></div>
+      <sc-for list="{{ diskRows }}" as="d" hint-placeholder-count="4">
+        <div class="dg tr clk" onClick="{{ d.open }}">
+          <span class="mono" style="font-weight:600;overflow-wrap:anywhere">{{ d.model }}</span><span class="dim">{{ d.kind }}</span>
+          <span class="num" style="text-align:right">{{ d.n }}</span><span class="num" style="text-align:right">{{ d.srv }}</span><span class="dim">{{ d.corps }}</span>
+          <span class="num" style="{{ d.mStyle }}">{{ d.media }}</span><span class="num" style="text-align:right">{{ d.re }}</span>
+          <span class="rate"><i><u style="{{ d.fill }}"></u></i><span class="num" style="min-width:76px">{{ d.rate }}</span></span>
+          <span class="dim" style="overflow-wrap:anywhere">{{ d.where }}</span>
+        </div>
+      </sc-for>
+    </div>
+    <div class="cap" style="padding:0 16px">디스크는 <b>시리얼 · WWN 으로 하나씩</b> 셉니다(같은 디스크가 여러 근거에 나와도 1개). 로그 줄에 식별자가 없어 디스크에 붙이지 못한 기록은 여기에 넣지 않습니다 — 지금 {{ orphanText }}. 비율의 분모는 ‘점검한 서버에서 프로그램이 본 물리 디스크’ 이고 전체 보유 수량이 아닙니다. 디스크 10개 미만은 ‘표본 적음’ 으로 표시합니다.</div>
+    </sc-if>
+
     <div class="cap" style="padding:0 16px">숫자는 프로그램이 찾은 <b>기록 줄 수</b>이지 장애 횟수가 아닙니다(같은 일이 여러 로그에 겹쳐 남습니다). ‘—’ 는 점검하지 않았거나 읽지 못한 것이고 0 과 다릅니다. 0 도 ‘과거에 문제가 없었다’ 는 뜻이 아니라 ‘남아 있는 자료에서 찾지 못했다’ 입니다. 점검은 단추를 누를 때만 돌고 주기 실행은 없습니다.</div>
   </div>
 
@@ -112,8 +162,8 @@ body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR
         <div class="card" style="background:#0f1626;padding:10px 0 6px;display:flex;flex-direction:column;gap:8px">
           <b style="padding:0 16px;font-size:13px">지금 있는 디스크 — 프로그램이 본 것 12개 중 4개</b>
           <div class="tw">
-            <div class="ig th"><span>장치 · 슬롯</span><span>종류</span><span>식별자</span><span>쓰는 중</span></div>
-            <sc-for list="{{ disks }}" as="d" hint-placeholder-count="4"><div class="ig tr"><span class="mono" style="font-weight:600">{{ d.label }}</span><span class="dim">{{ d.scope }}</span><span class="mono" style="font-size:11.5px;overflow-wrap:anywhere">{{ d.ids }}</span><span class="dim">{{ d.use }}</span></div></sc-for>
+            <div class="ig th"><span>장치 · 슬롯</span><span>모델</span><span>식별자</span><span>종류 · 쓰는 중</span></div>
+            <sc-for list="{{ disks }}" as="d" hint-placeholder-count="4"><div class="ig tr"><span class="mono" style="font-weight:600">{{ d.label }}</span><span class="mono" style="font-size:11.5px;overflow-wrap:anywhere">{{ d.model }}</span><span class="mono" style="font-size:11.5px;overflow-wrap:anywhere">{{ d.ids }}</span><span class="dim" style="display:flex;flex-direction:column"><span>{{ d.scope }}</span><small>{{ d.use }}</small></span></div></sc-for>
           </div>
         </div>
         <div class="card" style="background:#0f1626;padding:10px 0 6px;display:flex;flex-direction:column;gap:8px">
@@ -204,7 +254,7 @@ body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR
 </x-dc>
 <script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2300}}'>
 class Component extends DCLogic {
-  constructor(p) { super(p); this.state = { sel: 'kr-db-01', filter: 'all', picked: ['pl-db-02', 'kr-db-02'], started: {}, showScope: false }; }
+  constructor(p) { super(p); this.state = { sel: 'kr-db-01', filter: 'all', picked: ['pl-db-02', 'kr-db-02'], started: {}, showScope: false, by: 'server', scope: null }; }
   renderVals() {
     const S = this.state;
     const LIM = { node: 1, min: 20, gap: 10, keep: 10, days: 90 };
@@ -223,6 +273,25 @@ class Component extends DCLogic {
       ['us-db-02', '10.60.30.12', '엣지 NJ', 'nopy', '—', '', null, null, null, null],
       ['us-web-01', '10.60.10.21', '엣지 NJ', 'ver', '10-30 14:20', '1분 12초', 0, 0, 0, 1],
     ];
+    // 묶어 보기에 쓰는 값 — [법인(''=미지정), 서버 모델(null=모름), 그룹, 본 물리 디스크 [[모델, 종류 · 크기, 수, 기록 있는 디스크, 매체, 재할당, 어디서]] | null=본 적 없음]
+    const META = {
+      'kr-db-01': ['한국', 'PowerEdge R740xd', 'DB', [['ST4000NM0035', 'HDD · 4 TB', 8, 1, 1, 1, 'kr-db-01 /c0/e32/s5 — PERC 카운터 · SMART']]],
+      'kr-db-02': ['한국', 'PowerEdge R740xd', 'DB', [['ST4000NM0035', 'HDD · 4 TB', 8, 0, 0, 0, '']]],
+      'kr-bak-01': ['', 'PowerEdge R640', '백업', null],
+      'pl-db-01': ['폴란드', 'PowerEdge R740xd', 'DB', [['MG04ACA400N', 'HDD · 4 TB', 12, 0, 0, 0, '']]],
+      'pl-db-02': ['폴란드', 'PowerEdge R740xd', 'DB', null],
+      'pl-was-01': ['폴란드', 'VMware Virtual Platform', 'WAS', []],
+      'pl-was-03': ['폴란드', null, 'WAS', null],
+      'us-nfs-01': ['미국', 'VMware Virtual Platform', '백업', null],
+      'us-db-01': ['미국', 'PowerEdge R640', 'DB', null],
+      'us-db-02': ['미국', 'PowerEdge R640', 'DB', null],
+      'us-web-01': ['미국', 'PowerEdge R640', '웹', [['SSDSC2KB480G8', 'SSD · 480 GB', 2, 0, 0, 0, '']]],
+    };
+    const corpOf = (s) => META[s[0]][0] || '법인 미지정';
+    const modelOf = (s) => META[s[0]][1] || '모델 모름';
+    const shortModel = (m) => m.replace('PowerEdge ', '').replace('VMware Virtual Platform', 'VMware 가상 머신');
+    const KEYOF = { corp: corpOf, smodel: modelOf, group: (s) => META[s[0]][2], disk: (s) => (META[s[0]][3] || []).map((d) => d[0]) };
+    const inScope = (s) => { if (!S.scope) return true; const v = KEYOF[S.scope.k](s); return Array.isArray(v) ? v.includes(S.scope.v) : v === S.scope.v; };
     const ST = {
       done: ['badge ok', '점검함', '준비됨 · 판본 같음'], never: ['badge', '점검한 적 없음', '준비됨 · 판본 같음'], run: ['badge live', '실행 중', '지금 단계: 로그 수집 범위(journal)'],
       timeout: ['badge warn', '시한 초과 — 일부만', 'journal 을 읽다 끊김 · 결과 없음'], nosudo: ['badge warn', '준비 안 됨 — sudo 규칙 없음', 'python3 있음 · 파일 판본 같음'],
@@ -236,14 +305,14 @@ class Component extends DCLogic {
     const chips = [['all', '전체 ' + SV.length], ['hit', '기록 있음 ' + SV.filter(FIL.hit).length], ['notready', '준비 안 됨 ' + SV.filter(FIL.notready).length]]
       .map(([k, l]) => ({ label: l, cls: 'chip' + (S.filter === k ? ' on' : ''), pick: () => this.setState({ filter: k }) }));
     const pickedSet = new Set(S.picked);
-    const rows = SV.filter(FIL[S.filter]).map((s) => {
+    const rows = SV.filter(FIL[S.filter]).filter(inScope).map((s) => {
       const st = stOf(s); const ready = READY[st];
       const started = !!S.started[s[0]];
       return {
         cls: 'sg tr clk' + (S.sel === s[0] ? ' sel' : ''), open: () => this.setState({ sel: s[0] }),
         chk: 'chk' + (pickedSet.has(s[0]) ? ' on' : ''), mark: pickedSet.has(s[0]) ? '✓' : '',
         pick: (e) => { if (e && e.stopPropagation) e.stopPropagation(); this.setState({ picked: pickedSet.has(s[0]) ? S.picked.filter((x) => x !== s[0]) : S.picked.concat([s[0]]) }); },
-        name: s[0], addr: s[1], node: s[2], stCls: ST[st][0], st: ST[st][1], stSub: started ? '방금 시작 · 차례를 기다리는 중(노드당 ' + LIM.node + '대)' : ST[st][2],
+        name: s[0], addr: s[1] + ' · ' + shortModel(modelOf(s)), corp: corpOf(s), node: s[2] === '중앙' ? '중앙 직접' : s[2], stCls: ST[st][0], st: ST[st][1], stSub: started ? '방금 시작 · 차례를 기다리는 중(노드당 ' + LIM.node + '대)' : ST[st][2],
         last: started ? '지금' : s[4], dur: started ? '0초째' : s[5],
         media: n(started ? null : s[6]), mediaStyle: 'text-align:right;' + (s[6] > 0 && !started ? 'color:#fca5a5;font-weight:700' : ''), io: n(started ? null : s[7]), re: n(started ? null : s[8]), gaps: n(started ? null : s[9]),
         btn: st === 'run' ? '실행 중' : ready ? '점검' : '점검 불가', btnCls: 'btn sm' + (ready ? ' pri' : ' off'),
@@ -251,7 +320,51 @@ class Component extends DCLogic {
       };
     });
     const runPicked = () => { const m = Object.assign({}, S.started); S.picked.forEach((x) => { const s = SV.find((y) => y[0] === x); if (s && READY[stOf(s)]) m[x] = true; }); this.setState({ started: m, picked: [] }); };
-    const done = SV.filter((s) => s[3] === 'done').length;
+    // 묶음 표 — 법인 · 서버 모델 · 그룹은 같은 모양
+    const sumOf = (list, i) => { const v = list.map((s) => s[i]).filter((x) => x != null); return v.length ? String(v.reduce((a, b) => a + b, 0)) : '—'; };
+    const aggBy = (keyFn, order) => {
+      const m = new Map();
+      SV.forEach((s) => { const k = keyFn(s); if (!m.has(k)) m.set(k, []); m.get(k).push(s); });
+      const keys = Array.from(m.keys()).sort((a, b) => (order.indexOf(a) + 99) % 99 - (order.indexOf(b) + 99) % 99);
+      return keys.map((k) => {
+        const list = m.get(k);
+        const hit = list.filter(FIL.hit).length; const nr = list.filter(FIL.notready).length;
+        const dn = list.filter((s) => s[6] != null); // 결과가 있는 서버(판본이 달라 지금은 못 돌려도 지난 결과는 센다)
+        const seen = list.map((s) => META[s[0]][3]).filter((d) => d != null);
+        const disks = seen.length ? String(seen.reduce((a, d) => a + d.reduce((x, y) => x + y[2], 0), 0)) : '—';
+        const nodes = Array.from(new Set(list.map((s) => (s[2] === '중앙' ? '중앙 직접' : s[2])))).join(' · ');
+        const never = list.filter((s) => s[3] === 'never').length;
+        const ready = list.some((s) => READY[stOf(s)]);
+        return {
+          name: k, sub: nodes + (k === '법인 미지정' ? ' — 대상 · 키 탭에서 법인을 정해 주세요' : ''), n: String(list.length), done: String(dn.length),
+          notReady: String(nr), nrStyle: 'text-align:right;' + (nr ? 'color:#fcd34d' : ''), hit: String(hit), hitStyle: 'text-align:right;' + (hit ? 'color:#fca5a5;font-weight:700' : ''),
+          media: sumOf(dn, 6), io: sumOf(dn, 7), re: sumOf(dn, 8), disks,
+          oldest: dn.length ? dn.map((s) => s[4]).sort()[0] + (never ? ' · 안 한 서버 ' + never : '') : '점검한 적 없음',
+          btn: '묶음 점검', btnCls: 'btn sm' + (ready ? ' pri' : ' off'),
+          run: (e) => { if (e && e.stopPropagation) e.stopPropagation(); const st = Object.assign({}, S.started); list.forEach((s) => { if (READY[stOf(s)]) st[s[0]] = true; }); this.setState({ started: st }); },
+          open: () => this.setState({ by: 'server', scope: { k: S.by, v: k } }),
+        };
+      });
+    };
+    const BY = {
+      server: ['서버', '', ''], corp: ['법인별', '법인', '법인은 서버 등록의 ‘법인’ 칸입니다. 비워 두면 담당 엣지의 법인을 따르고, 중앙이 직접 맡았거나 엣지가 여러 법인을 맡으면 ‘법인 미지정’ 입니다.'],
+      disk: ['디스크 모델별', '', '모델은 감싸는 실행 파일이 보고서 끝에 덧붙이는 ‘디스크 목록’ 구획에서 읽습니다(주신 프로그램의 보고서에는 모델이 없습니다).'],
+      smodel: ['서버 모델별', '서버 모델', '서버 모델은 준비 상태를 확인할 때 일반 계정으로 읽습니다(/sys/class/dmi/id — root 불필요).'], group: ['그룹별', '그룹', '대상 · 키 탭의 서버 그룹입니다.'],
+    };
+    const byBtns = Object.keys(BY).map((k) => ({ label: BY[k][0], cls: S.by === k ? 'on' : '', pick: () => this.setState({ by: k }) }));
+    const ORDER = { corp: ['한국', '폴란드', '미국', '법인 미지정'], smodel: ['PowerEdge R740xd', 'PowerEdge R640', 'VMware Virtual Platform', '모델 모름'], group: ['DB', 'WAS', '백업', '웹'] };
+    const isAgg = S.by === 'corp' || S.by === 'smodel' || S.by === 'group';
+    const aggRows = isAgg ? aggBy(KEYOF[S.by], ORDER[S.by]) : [];
+    const dm = new Map();
+    SV.forEach((s) => (META[s[0]][3] || []).forEach((d) => { if (!dm.has(d[0])) dm.set(d[0], { kind: d[1], n: 0, bad: 0, media: 0, re: 0, srv: new Set(), corps: new Set(), where: [] }); const o = dm.get(d[0]); o.n += d[2]; o.bad += d[3]; o.media += d[4]; o.re += d[5]; o.srv.add(s[0]); o.corps.add(corpOf(s)); if (d[6]) o.where.push(d[6]); }));
+    const diskRows = Array.from(dm.entries()).map(([model, o]) => ({
+      model, kind: o.kind, n: String(o.n), srv: String(o.srv.size), corps: Array.from(o.corps).join(' · '),
+      media: String(o.media), mStyle: 'text-align:right;' + (o.media ? 'color:#fca5a5;font-weight:700' : ''), re: String(o.re),
+      rate: o.n < 10 ? '표본 적음(' + o.bad + '/' + o.n + ')' : (o.bad / o.n * 100).toFixed(1) + '% (' + o.bad + '/' + o.n + ')', fill: 'width:' + (o.n < 10 ? 0 : Math.max(o.bad ? 3 : 0, o.bad / o.n * 100)) + '%',
+      where: o.where.join(' · ') || '기록 없음', open: () => this.setState({ by: 'server', scope: { k: 'disk', v: model } }),
+    }));
+    const SCOPE_NAME = { corp: '법인', smodel: '서버 모델', group: '그룹', disk: '디스크 모델' };
+    const done = SV.filter((s) => s[6] != null).length;
     const kpis = [
       { label: '점검한 서버', v: done + ' / ' + SV.length, sub: '등록한 서버 가운데', color: '' },
       { label: '매체 오류 기록이 있는 서버', v: String(SV.filter((s) => s[6] > 0).length), sub: 'kr-db-01 — 3줄', color: 'color:#fca5a5' },
@@ -271,11 +384,11 @@ class Component extends DCLogic {
       ['u', '매체 오류 이후 포맷 및 현재 재사용을 함께 입증할 근거 부족.', 'in'],
     ].map((v) => ({ cls: T[v[0]][0], tag: T[v[0]][1], text: v[1], txtCls: v[2] }));
     const disks = [
-      ['/c0/e32/s5', 'RAID 물리 디스크', 'SN=ZC1A2B3C WWN=5000c500a1b2c3d4', '물리 디스크에서 판단 불가'],
-      ['/c0/e32/s4', 'RAID 물리 디스크', 'SN=ZC1A2B39 WWN=5000c500a1b2c3a0', '물리 디스크에서 판단 불가'],
-      ['/dev/sda', '가상/논리 또는 RAID 경유 OS 장치', 'WWN=6d0946607a1b2c00271f3e5a0c9d4411', '있음'],
-      ['/dev/sdb', '가상/논리 또는 RAID 경유 OS 장치', 'WWN=6d0946607a1b2c00271f3e5b11aa0e02', '있음'],
-    ].map((d) => ({ label: d[0], scope: d[1], ids: d[2], use: d[3] }));
+      ['/c0/e32/s5', 'ST4000NM0035', 'RAID 물리 디스크', 'SN=ZC1A2B3C WWN=5000c500a1b2c3d4', '쓰는 중: 물리 디스크에서 판단 불가'],
+      ['/c0/e32/s4', 'ST4000NM0035', 'RAID 물리 디스크', 'SN=ZC1A2B39 WWN=5000c500a1b2c3a0', '쓰는 중: 물리 디스크에서 판단 불가'],
+      ['/dev/sda', 'PERC H740P Mini', '가상/논리 또는 RAID 경유 OS 장치', 'WWN=6d0946607a1b2c00271f3e5a0c9d4411', '쓰는 중: 있음'],
+      ['/dev/sdb', 'PERC H740P Mini', '가상/논리 또는 RAID 경유 OS 장치', 'WWN=6d0946607a1b2c00271f3e5b11aa0e02', '쓰는 중: 있음'],
+    ].map((d) => ({ label: d[0], model: d[1], scope: d[2], ids: d[3], use: d[4] }));
     const sources = [
       ['journalctl 전체 보존 부트', '2,481,204', '2', '08-19 ~ 11-15', 'ok', '읽음'],
       ['/var/log/messages 외 회전 파일 4개', '311,870', '1', '시간 비교 불가', 'ok', '읽음'],
@@ -334,6 +447,9 @@ class Component extends DCLogic {
     };
     const isOther = !isFull && !isClean && !isPrep;
     return {
+      byBtns, byNote: BY[S.by][2], isServer: S.by === 'server', isAgg, isDisk: S.by === 'disk', aggHead: BY[S.by][1], aggRows, diskRows,
+      hasScope: !!S.scope && S.by === 'server', scopeText: S.scope ? SCOPE_NAME[S.scope.k] + ' = ' + S.scope.v + ' ✕' : '', clearScope: () => this.setState({ scope: null }),
+      orphanText: 'kr-db-01 4줄 · pl-db-01 41줄(서버 2대)',
       kpis, chips, rows, runPicked, pickedText: '고른 서버 ' + S.picked.length + '대', verdicts, disks, sources, events, scopeLines, install,
       isFull, isClean, isPrep, isOther, otherTitle: sel[0], otherCls: ST[selSt][0], otherSt: ST[selSt][1], otherNote: NOTE[selSt] || '',
       showScope: S.showScope, scopeLabel: S.showScope ? '해석 범위 접기' : '해석 범위 펼치기', toggleScope: () => this.setState({ showScope: !S.showScope }),
