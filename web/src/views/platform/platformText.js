@@ -102,6 +102,29 @@ export function handoffKpiVcenter(target, vcenterId) {
 }
 export function takeKpiVcenter(target) { return takeSearch(target) || ''; }
 
+/**
+ * v3.10.13(점검 1회차): vCenter 목록의 검색어 규칙 한 벌(공백 구분 다중 키워드 AND — 이름 · id · 도시 · 국가 · 리전 · 버전)과,
+ * 상세의 ‹ 이전 · 다음 › 이 도는 **이웃 목록 = 허브에서 보던 범위(리전 · 검색어) 안의 vCenter**. 고른 법인 하나(vcenterId)는 범위로 치지 않는다(그러면 이웃이 없다).
+ * 전에는 범위를 리전으로 좁혀도 상세의 이전 · 다음이 전 법인을 돌았다(세 탭이 같은 범위를 쓴다는 v2.915 규약과 어긋남).
+ */
+export const keywordsOf = (q) => String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
+export function vcMatches(s, keywords) {
+  if (!s || typeof s !== 'object') return false;
+  if (!Array.isArray(keywords) || keywords.length === 0) return true;
+  const hay = [s.name, s.id, s.location?.city, s.location?.country, s.location?.region, s.version].filter(Boolean).join(' ').toLowerCase();
+  return keywords.every((kw) => hay.includes(kw));
+}
+export function siblingSites(sites, scope) {
+  const region = String(scope?.region || '');
+  const kws = keywordsOf(scope?.q);
+  return (Array.isArray(sites) ? sites : []).filter((s) => s && typeof s === 'object' && (!region || s.location?.region === region) && vcMatches(s, kws));
+}
+/** 이전 · 다음 옆에 붙는 범위 글자 — 리전 · 검색어가 있을 때만('리전 유럽 · ‘kr1’'), 없으면 ''. */
+export function siblingScopeText(scope) {
+  const region = String(scope?.region || '').trim(); const q = String(scope?.q || '').trim();
+  return [region ? `리전 ${region}` : '', q ? `‘${q}’` : ''].filter(Boolean).join(' · ');
+}
+
 export const VC_VIEWS = Object.freeze([['cards', '카드'], ['table', '표']]);
 export function loadVcView(storage) {
   try { const v = storage?.getItem?.(LS_VC_VIEW); return VC_VIEWS.some(([k]) => k === v) ? v : 'cards'; } catch { return 'cards'; }

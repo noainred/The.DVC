@@ -942,3 +942,5 @@
   `platformText.KPI_HANDOFF`(`vm-track:vcenter` · `storage-track:vcenter`) 로 `hooks/searchHandoff` 메모리 인계(URL 에 싣지 않는다 · 30초 · 꺼내면 지운다) · 받는 도구는 `useState(() => takeKpiVcenter(…))` 로 마운트 때 1회.
   ‘VM 백업’ 카드는 법인을 골랐으면 Backup 현황 · Detail(`backupViewText.openBackupDetail` — 서머리의 openDetail 과 같은 키 `backup-detail-vc`), 아니면 Summary. 도구 권한이 없으면 누를 수 없다(커서 · 제목 없음). 리전만 골랐으면 전체로 연다(도구에 리전 선택이 없다).
   새 인계 target 을 ⌘K 의 `invSearchQuery SCREEN` 표에 넣지 않는다(검색 인계가 아니다) — `useSearchHandoff` 훅 대신 `takeSearch` 를 직접 쓴 이유.
+- **v3.10.13 — 가상화 플랫폼 점검 1회차: vCenter 상세의 ‹ 이전 · 다음 › 은 허브 범위 안에서**(자율 개선 루프 2026-11-15): 전에는 리전 · 검색어로 범위를 좁혀도 상세의 이전 · 다음이 전 법인을 돌았다(세 탭이 같은 범위를 쓴다는 v2.915 규약과 어긋남).
+  이웃 목록은 `platformText.siblingSites(sites, scope)`(리전 · 검색어만 — 고른 법인 하나 `vcenterId` 는 범위로 치지 않는다: 그러면 이웃이 없다) · 카운터 옆에 `siblingScopeText`(‘리전 유럽 · ‘kr1’’) · 검색 규칙은 `keywordsOf · vcMatches` 한 벌(카드 목록 `shown` 과 같은 함수).
