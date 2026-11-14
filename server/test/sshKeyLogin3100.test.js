@@ -2102,7 +2102,8 @@ test('⑪-f passwordOnly 대화형은 처음 나온 가리는 칸(echo=false) �
   const once = secret('Once-NoPw-11f');
   const j = (await runLogin({ servers: svs, keyId: K.id, oncePassword: once, by: 'own' })).job;
   assert.deepEqual([j.results.map((r) => r.code), j.cancelled], [['no-password-method', 'no-password-method', 'no-password-method'], false], JSON.stringify(j.results));
-  assert.match(j.results[0].reason, /비밀번호 로그인을 받지 않아\(키만 받음\) 비밀번호를 보내지 않았습니다/);
+  // 사유는 서버가 준 상세(허용 방식) + 안내(2회차 반증 — 고정 문구가 OTP 만 묻는 서버에도 ‘키만 받음’ 이라 했다)
+  assert.match(j.results[0].reason, /^서버가 비밀번호 로그인을 받지 않습니다\(허용 방식: publickey\) — 비밀번호를 보내지 않았습니다 — 이미 되는 키로 접속하게 서버 설정을 고르거나 공개키를 서버에 직접 넣으세요/);
   assert.doesNotMatch(j.results[0].reason, /인증이 거부/);
   assert.deepEqual(SS.map((S) => S.passwordTries().length), [0, 0, 0], '비밀번호를 한 번도 보내지 않았다');
   const rd = await SVC.readInstalledKeys({ serverId: svs[0].id, oncePassword: once, by: 'own' });
@@ -2353,7 +2354,8 @@ test('⑫-h 바꾸는 명령이 서버에서 끝까지 돈 뒤 종료 코드 · 
   assert.doesNotMatch(r.reason, /서버에서 바꾼 것은 없습니다/);
   assert.deepEqual([S.keyTries().length, rawOf(sv.id).keyRef, rawOf(sv.id).password], [0, undefined, S.st.password], '확인 · 묶기로 넘어가지 않았다');
   // 작업 요약 — 결과 모름은 ‘실패’ 가 아니다(2회차 E2-8 — 실패로 세고 실패 이름에 넣었다)
-  assert.equal(eventsOf('key-job-done').find((e) => e.target.includes('kl-drop'))?.detail, '1대 — 확인 0 · 실패 0 · 결과 모름 1', JSON.stringify(eventsOf('key-job-done').slice(0, 2)));
+  //   결과 모름 서버는 이름을 먼저 싣는다(서버에서 직접 확인해야 한다 — 2회차 반증: 수만 있었다)
+  assert.equal(eventsOf('key-job-done').find((e) => e.target.includes('kl-drop'))?.detail, '1대 — 확인 0 · 실패 0 · 결과 모름 1 — bm-kl-drop(결과 모름)', JSON.stringify(eventsOf('key-job-done').slice(0, 2)));
   // ② 확인 실패 뒤 되돌림 명령의 답이 끊겼다 → ‘지웠다’ 고도 ‘지우지 못했다’ 고도 하지 않고 **모른다** 고 말한다(rollbackUnknown — 1회차 B11)
   S.writeAk(`${OTHER}\n`); S.clear();
   S.st.ipQueue.push('127.0.0.1', '10.77.0.9');
@@ -3063,7 +3065,10 @@ test('⑰-h 서버의 키 고르기는 키 작업과 같은 서버 자물쇠를 
   } finally { t.mock.timers.reset(); }
   const svcSrc = (await import('./_stripComments.js')).stripComments(fs.readFileSync(path.join(SRC, 'sshaccess/service.js'), 'utf8'));
   assert.match(svcSrc, /if \(KL\.serverLockBusy\(KL\.serverLockKey\(s\)\)\) return \{ ok: false, code: 'server-busy', status: 409/);
-  assert.match(svcSrc, /await KL\.withLegDeadline\(2, \(\) => testServer\(after, \{ by \}\)\)/, '키 고르기의 연결 시험은 시한 안에서(서버 자물쇠를 무한정 쥐지 않게)');
+  assert.match(svcSrc, /await KL\.withLegDeadline\(2, \(\) => withDeadline\(KL\.legDeadlineMs\(2\) - 2_000, \(signal\) => testServer\(after, \{ by, signal \}\), '[^']+'\)\)/, '키 고르기의 연결 시험은 시한 안에서 · 시한이 지나면 세션도 끊는다(signal — 2회차 반증 R2R-7)');
+  assert.match(svcSrc, /async function testServer\(s, \{ by = '', signal \} = \{\}\) \{[^]*?testSavedOs\(s, \{ signal \}\)/);
+  const ctSrc = (await import('./_stripComments.js')).stripComments(fs.readFileSync(path.join(SRC, 'bmusage/onboard/connTest.js'), 'utf8'));
+  assert.match(ctSrc, /export async function testSavedOs\(s0, \{ signal \} = \{\}\)[^]*?withSsh\(\{[^}]*\.\.\.\(signal \? \{ signal \} : \{\}\) \}/, '연결 시험이 signal 을 withSsh 에 넘긴다');
 });
 
 test('⑰-i 서버를 바꾸는 동안은 진행 기록(ssh-key-jobs-inflight.json — 비밀 없음)이 있고 끝나면 지운다 · 도중에 포탈이 재시작하면 기동 때 key-job-interrupted 사건(중요 · 메일)으로 남긴다(1회차 B7 — 작업이 메모리에만 있어 기록이 통째로 사라졌다)', async () => {
