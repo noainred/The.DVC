@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "3.10.7",
+      "date": "2026-11-15",
+      "title": "공용 기능 점검 5회차: 버전 비교 빈 세그먼트 · 웹 포맷터 빈 값 0 둔갑 · 버전 비교 사본",
+      "notes": [
+        "cmpVersion(서버 · 웹 두 벌): 세그먼트는 숫자 글자만 — 빈 세그먼트(3..10 · 3.10.)를 0 으로, 0x10 · 1e3 을 숫자로 읽던 것을 '모름(null)' 으로. 업그레이드 · 엣지 버전 게이트가 쓰는 판정.",
+        "웹 util/fmt: num · dec1 · fmtW · fmtWh · fmtKg 가 빈 문자열을 '0'·'0 W'·'0 kWh'·'0 kg' 으로 보였다 → '—'(numOrNull) · fmtDate · fmtTime 은 못 읽는 시각에 'Invalid Date' 대신 '—'.",
+        "linkCheckText: 옛 규칙(3세그먼트 강제 · 빈 세그먼트 0)의 cmpVersion 사본을 지우고 공용 것을 다시 내보낸다.",
+        "회귀 server/test/commonRound5_3107.test.js(웹 · 서버 같은 입력 대조) · web/src/util/fmt.test.js."
+      ]
+    },
+    {
       "version": "3.10.6",
       "date": "2026-11-15",
       "title": "공용 기능 점검 4회차: 클립보드 복사를 공용 헬퍼 하나로 — HTTP 포탈의 거짓 '복사했습니다' 제거",

@@ -11,6 +11,7 @@
  */
 
 import { agoText as _ago, elapsedText as _elapsed } from './relTime.js';
+import { cmpVersion } from '../../cmpVersion.js';   // v3.10.7: 공용 버전 비교(사본 제거)
 const t = (v) => String(v ?? '').trim();
 
 export const STATE_LABEL = Object.freeze({
@@ -152,14 +153,12 @@ function latestNotCurrent(row, L, { enabled, intervalMs, now }) {
   return null;
 }
 
-/** semver 비교(`partFaults`·`edgeLogText` 와 같은 규칙 — 형식이 아니면 null). */
-export function cmpVersion(a, b) {
-  const pa = t(a).replace(/^v/, '').split('.').map(Number);
-  const pb = t(b).replace(/^v/, '').split('.').map(Number);
-  if (pa.length < 3 || pb.length < 3 || pa.some(Number.isNaN) || pb.some(Number.isNaN)) return null;
-  for (let i = 0; i < 3; i += 1) if (pa[i] !== pb[i]) return pa[i] - pb[i];
-  return 0;
-}
+/**
+ * semver 비교 — v3.10.7: 공용 `web/src/cmpVersion.js` 를 그대로 다시 내보낸다(코어는 하나).
+ * 예전 이 파일의 사본은 주석이 '`partFaults`·`edgeLogText` 와 같은 규칙' 이라 했지만 그 둘은 v2.575 에 이미 공용 규칙으로 옮겨 갔고,
+ * 사본만 3세그먼트 강제 · 빈 세그먼트를 0 으로 읽는(`2..1` 을 2.0.1 로) 옛 규칙에 남아 있었다. 호출부(엣지 최소 버전 판정)는 부호만 본다.
+ */
+export { cmpVersion };
 
 /**
  * ms → 사람이 읽는 값.

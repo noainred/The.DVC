@@ -21,14 +21,19 @@ import { agoText } from '../views/tools/relTime.js';
  */
 export const fmtAgo = (ts, opt) => agoText(ts, Date.now(), opt);
 
-export const num = (n) => (n == null ? '—' : Number(n).toLocaleString());
-export const fmtDate = (ts) => (ts ? new Date(ts).toLocaleDateString('ko-KR') : '—');
-export const fmtTime = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR') : '—');
-export const dec1 = (n) => Number(n).toLocaleString(undefined, { maximumFractionDigits: 1 });
+// v3.10.7(공통 기능 점검 5회차): 아래 포맷터는 `Number.isFinite(Number(v))` 로 결측을 걸렀는데 `Number('') === 0` 이라
+//   빈 문자열이 '0 W'·'0 kWh'·'0 kg'·'0' 으로 둔갑했다(v2.561 규약 위반 — 못 읽은 값은 0 이 아니다). 판정은 numOrNull 하나로.
+//   날짜도 못 읽는 값('abc'·NaN)이면 'Invalid Date' 를 그대로 그렸다 → '—'.
+export const num = (n) => { const v = numOrNull(n); return v == null ? '—' : v.toLocaleString(); };
+const validDate = (ts) => { if (!ts) return null; const d = ts instanceof Date ? ts : new Date(ts); return Number.isFinite(d.getTime()) ? d : null; };
+export const fmtDate = (ts) => { const d = validDate(ts); return d ? d.toLocaleDateString('ko-KR') : '—'; };
+export const fmtTime = (ts) => { const d = validDate(ts); return d ? d.toLocaleString('ko-KR') : '—'; };
+export const dec1 = (n) => { const v = numOrNull(n); return v == null ? '—' : v.toLocaleString(undefined, { maximumFractionDigits: 1 }); };
 
 /** 전력(W): 1,000 넘으면 상위 단위(kW→MW→GW). 예: 131,133 W → 131.1 kW. */
-export const fmtW = (w) => {
-  if (w == null || !Number.isFinite(Number(w))) return '—';
+export const fmtW = (w0) => {
+  const w = numOrNull(w0);
+  if (w == null) return '—';
   const a = Math.abs(w);
   if (a >= 1e9) return `${dec1(w / 1e9)} GW`;
   if (a >= 1e6) return `${dec1(w / 1e6)} MW`;
@@ -37,8 +42,9 @@ export const fmtW = (w) => {
 };
 
 /** 에너지(입력 kWh): 1,000 넘으면 MWh→GWh. 예: 141,623.6 kWh → 141.6 MWh. */
-export const fmtWh = (kwh) => {
-  if (kwh == null || !Number.isFinite(Number(kwh))) return '—';
+export const fmtWh = (kwh0) => {
+  const kwh = numOrNull(kwh0);
+  if (kwh == null) return '—';
   const a = Math.abs(kwh);
   if (a >= 1e6) return `${dec1(kwh / 1e6)} GWh`;
   if (a >= 1e3) return `${dec1(kwh / 1e3)} MWh`;
@@ -46,8 +52,9 @@ export const fmtWh = (kwh) => {
 };
 
 /** CO2(입력 kg): 1,000 넘으면 t(톤). */
-export const fmtKg = (kg) => {
-  if (kg == null || !Number.isFinite(Number(kg))) return '—';
+export const fmtKg = (kg0) => {
+  const kg = numOrNull(kg0);
+  if (kg == null) return '—';
   return Math.abs(kg) >= 1e3 ? `${dec1(kg / 1e3)} t` : `${Math.round(kg).toLocaleString()} kg`;
 };
 
