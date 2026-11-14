@@ -58,7 +58,8 @@ test('v3.7.0 주기 스캔 일정 — 오늘 조각(이 포탈 start/finish · �
   assert.deepEqual(by.__local__.runs.map((x) => x.kind), ['done', 'skip']);
   assert.equal(by.__local__.runs[0].fromMin, 720); assert.equal(by.__local__.runs[0].toMin, 730);
   assert.equal(by.__local__.counts.skip, 2); assert.deepEqual(by.__local__.quiet, ['01:00~05:00']);
-  assert.equal(by.__local__.state, 'late', '마지막 완료 2시간 50분 전 > 주기 2배');
+  // v3.7.1: '늦음' = 주기 × 2 + 가장 긴 쉬는 시간 — 쉬는 시간 4시간이 있는 이 포탈은 2시간 50분 전 완료가 아직 늦음이 아니다(늦음 판정은 stabilize371 ①).
+  assert.equal(by.__local__.state, 'ok', '마지막 완료 2시간 50분 전 < 주기 2배 + 쉬는 시간 4시간');
   assert.equal(by['edge-pl'].runs[0].fromMin, 720, '엣지 report — 끝난 시각 - 걸린 시간'); assert.equal(by['edge-pl'].overrun, true);
   assert.equal(by['edge-us'].state, 'none', '완료 기록 없음 — 0회가 아니라 모름'); assert.equal(by['edge-off'].state, 'off');
   assert.equal(by['edge-pl'].nextAt, now, '다음 예정 어림 — 이미 지났으면 지금');
