@@ -36,6 +36,7 @@ export async function withDeadline(ms, fn, label = '타임아웃', { long = fals
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(), eff); // unref 하지 않는다 — 대기 중인 수집을 반드시 끊어야 한다
   try { return await fn(ac.signal); }
-  catch (e) { if (ac.signal.aborted) throw new Error(`${label}(${Math.round(eff / 1000)}초)`); throw e; }
+  // v3.10.3: 시한 오류에 원래 오류를 cause 로 남긴다(무엇이 끊겼는지 — 로그에서 원인을 잃지 않게). 메시지는 그대로다.
+  catch (e) { if (ac.signal.aborted) throw new Error(`${label}(${Math.round(eff / 1000)}초)`, { cause: e }); throw e; }
   finally { clearTimeout(t); }
 }

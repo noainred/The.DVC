@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **750개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **751개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-13)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-14)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -12,7 +12,7 @@
 > (`docs/rules/storage.md` '스토리지 폴러 주기는 중앙 배포값' 참조).
 
 
-## 공용 유틸 (37)
+## 공용 유틸 (38)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -28,6 +28,7 @@
 | `BMUSAGE_TZ_OFFSET_MIN` |  |  | util/dayKey.js |
 | `EDGE_EXPORT_MAX_BYTES` | `64` |  | util/readCapped.js |
 | `EDGE_RESPONSE_MAX_BYTES` | `16` |  | util/readCapped.js |
+| `EXPORT_LOCK_MAX_MS` | `1800000(30분 — 1분~6시간)` |  | util/exportBusy.js |
 | `GZIP_MIN_BYTES` | `1024` |  | util/compress.js |
 | `LINKCHECK_TZ_OFFSET_MIN` |  |  | util/dayKey.js |
 | `LOOP_LAG_INTERVAL_MS` | `30000` |  | util/loopLag.js |
@@ -939,4 +940,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 750
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 751

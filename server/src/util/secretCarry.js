@@ -26,6 +26,7 @@ const norm = (v) => String(v ?? '').trim().toLowerCase();
  */
 export function accessMoved(prev = {}, body = {}, keys = ['host']) {
   if (!prev) return false;                       // 신규 항목은 '이동'이 아니다
+  body = body && typeof body === 'object' ? body : {};   // v3.10.3: 본문이 null 이면 TypeError 대신 '바뀌지 않음'
   for (const k of keys) {
     const after = body[k] !== undefined ? body[k] : prev[k];
     if (norm(prev[k]) !== norm(after)) return true;
@@ -45,6 +46,8 @@ export const secretProvided = (v) => v !== undefined && v !== null && v !== '' &
  */
 export function dropCarriedSecrets(target, body = {}, secretKeys = []) {
   const dropped = [];
+  if (!target || typeof target !== 'object') return dropped;
+  body = body && typeof body === 'object' ? body : {};   // v3.10.3: 본문이 null 이면 '비밀을 주지 않았다' 로 — 승계하던 비밀은 버린다
   for (const k of secretKeys) {
     if (secretProvided(body[k])) continue;
     if (target[k] === undefined) continue;
