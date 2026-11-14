@@ -20,7 +20,7 @@ import { ssrfLookup } from '../util/ssrfLookup.js';
 import { deviceTlsConnect, isTlsPeerError, tlsPeerErrorOf } from '../security/tlsTrust.js'; // 2026-10-09 S-02: CA 체인 또는 승인 지문 — 자격증명 전에 판정
 import { parseDigestChallenge, buildDigestHeader } from './digestAuth.js';
 import { pctFromMetric, pickReports, buildIdracUsage } from '../bmusage/parse/idracTelemetry.js'; // v2.613 DEPS2613-02: 같은 모듈을 :1204 에서 동적으로 또 import 하던 것을 이 한 줄로
-import { readTextCapped } from '../util/readCapped.js';
+import { readTextCapped, readJsonCapped } from '../util/readCapped.js';
 import { readBodyPrefix } from '../util/readPrefix.js';
 import { capStr } from '../util/capStr.js'; // v2.607 SEC2607-03
 import { trimTrailingSlashes } from '../util/trimSlashes.js';
@@ -319,6 +319,32 @@ async function get(base, pathname, username, password, { signal = null } = {}) {
 }
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+/**
+ * v3.8.0 디스크 배드 섹터 이력(`diskbad/lclog.js`) 전용 — **본문 상한이 있는** Redfish GET.
+ * `get()` 은 `res.json()` 을 상한 없이 읽는다(인벤토리 응답은 작다). Lifecycle 로그 쪽은 한 쪽에 메시지가 수십~수백 건이라
+ * 상한을 둔다(넘으면 던진다 — 호출부가 '읽기 실패' 로 밝힌다). 인증 실패는 `get()` 과 같은 모양(authFailed · status)으로 던진다.
+ * @param {{host:string, username:string, password:string}} entry
+ * @param {string} pathname  `/redfish/v1/...`(쿼리 포함)
+ * @param {{signal?:AbortSignal|null, maxBytes?:number}} [opts]
+ */
+export async function redfishGetCapped(entry, pathname, { signal = null, maxBytes = 8 * 1048576 } = {}) {
+  const base = String(entry?.host || '').replace(/\/+$/, '');
+  const res = await rawGet(base, pathname, entry.username, entry.password, undefined, signal);
+  if (res.status === 401) {
+    try { await res.body?.cancel?.(); } catch { /* */ }
+    const err = new Error('iDRAC 인증 실패(401) — 사용자/비밀번호 확인');
+    err.authFailed = true; err.status = 401;
+    throw err;
+  }
+  if (!res.ok) {
+    try { await res.body?.cancel?.(); } catch { /* */ }
+    const err = new Error(`Redfish ${pathname.split('?')[0]} -> ${res.status} ${res.statusText || ''}`.trim());
+    err.status = res.status;
+    throw err;
+  }
+  return readJsonCapped(res, maxBytes, 'iDRAC 응답');
+}
 
 /**
  * Redfish NIC 포트의 '설치된 카드 속도'(Mbps)를 추출한다. 정격/최고(SupportedLinkCapabilities·
@@ -750,7 +776,12 @@ export async function fetchInventory(entry) {
         for (const d of (ctrl.Drives || []).slice(0, 32)) {
           try {
             const drive = await G(d['@odata.id']);
+            // v3.8.0: 디스크 배드 섹터 이력이 로그의 위치(Disk N in Backplane M)와 맞추려고 Id 를, '이 방법(Patrol Read)으로 볼 수 있는가'
+            //   를 가르려고 가상 디스크 소속(Links.Volumes)을 싣는다 — 같은 응답에 이미 있다(추가 HTTP 0회). Links 가 없으면 null(모름).
+            const vols = drive.Links && Array.isArray(drive.Links.Volumes) ? drive.Links.Volumes.length : null;
             inv.disks.push({
+              id: String(drive.Id || '').slice(0, 200),
+              inVolume: vols == null ? null : vols > 0,
               name: drive.Name || drive.Id || '',
               model: drive.Model || '',
               serial: drive.SerialNumber || '',

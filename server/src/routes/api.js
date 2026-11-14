@@ -46,6 +46,7 @@ import { registerSanFlow } from './api/sanFlow.js';       // v2.935(C-②) Broca
 import { registerCvp } from './api/cvp.js';               // Arista CloudVision(CVP) 네트워크 스위치(v2.608)
 import { registerCvpBulk } from './api/cvpBulk.js';       // CVP 서버 CSV·자유텍스트 대량 등록(v2.641)
 import { registerPartFaults } from './api/partFaults.js'; // 파트 장애(물리 부품 장애 기록·알림, v2.547)
+import { registerDiskBad } from './api/diskBad.js'; // 디스크 배드 섹터 분석(v3.8.0)
 import { registerEdgeLog } from './api/edgeLog.js'; // 엣지 로그·진행상태(중앙이 당긴다 + 폴백, v2.549)
 import { registerBmUsage } from './api/bmUsage.js'; // 베어메탈 사용률(CPU·MEM·디스크·NET·HBA, v2.550)
 import { registerBmPerfOps } from './api/bmPerfOps.js'; // v2.929 리눅스 성능 5단계(집중 모니터링 · 변경 이벤트 · 베이스라인 · 구간 비교 · 알림 규칙)
@@ -181,6 +182,7 @@ registerSanFlow(api);   // v2.935 — /tools/san-flow*(전체 범위 관리자 �
 registerCvp(api);
 registerCvpBulk(api);
 registerPartFaults(api);
+registerDiskBad(api);
 registerEdgeLog(api);
 registerBmUsage(api);
 registerBmPerfOps(api);

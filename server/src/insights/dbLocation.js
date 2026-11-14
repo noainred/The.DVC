@@ -57,13 +57,14 @@ export const MIGRATABLE = [
   { file: 'bm-usage.db', label: '베어메탈 사용률(CPU·메모리·디스크·네트워크·HBA, v2.550)' },
   { file: 'link-check.db', label: '통신 점검 이력(중앙↔엣지·vCenter 링크, v2.552)' },
   { file: 'bmstor-history.db', label: '베어메탈 스토리지 디스크 사용량 12시간 이력(서버·그룹·합계, v2.635)' },
-  { file: 'bmstor-io.db', label: '베어메탈 스토리지 디스크 I/O 시계열(원시·15분·1시간 집계, v2.915)' },
+  { file: 'bmstor-io.db', label: '베어메탈 스토리지 디스크 I/O 시계열(원시·15분·1시간 집계, v3.8.0)' },
   { file: 'cvp.db', label: 'Arista CloudVision(CVP) 네트워크 스위치 — 장비·포트 최신값·포트 사용량 이력(v2.608)' },
   { file: 'vm-dns.db', label: 'VM DNS 서버 설정 변경 이력(바뀐 것만 — v2.696)' },
   { file: 'xfer-speed.db', label: '법인 간 전송 속도 측정 이력(중앙↔엣지 10MB 왕복 — 원시 + 일 요약, v2.735)' },
   { file: 'usage.db', label: '기능 사용 현황 — 사용자 × 화면 × 날 열람 수 · 머문 시간 일 집계(v2.913)' },
   { file: 'focusmon.db', label: '서버 집중 모니터링 기록(서버별 1분 묶음 · 프로세스 상위 30 — 30일, v2.976)' },
   { file: 'isidu.db', label: '아이실론 디렉터리 사용량 이력(사용자 폴더 크기 — 조사마다 전체, v2.736)' },
+  { file: 'disk-bad.db', label: '디스크 배드 섹터 이력(iDRAC Lifecycle 로그 · 시리얼 이력, v3.8.0)' },
   // vcenter-logs.db 는 **이미 자체 경로 설정**(설정 › 로그 수집의 storagePath)이 있어 제외한다 —
   // 두 곳에서 경로를 제어하면 어느 쪽이 이겼는지 알 수 없다(그 화면에서 옮기세요).
   // ipam.db 는 **외부 프로그램이 경로를 고정해 읽는 공유 파일**이라 기본 대상에서 제외한다

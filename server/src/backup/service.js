@@ -63,6 +63,7 @@ export function fileCapFor(name) {
  * 백업 **내용**은 바꾸지 않는다(복원 의미 유지) — 트리거와 중복 판정에서만 뺀다.
  */
 export const RUNTIME_STATE_NAMES = new Set([
+  'diskbad-cursors.json', 'diskbad-auth-stops.json', // v3.8.0 디스크 배드 섹터 — 서버별 마지막 읽은 로그 항목 · 인증 실패 정지(registerStateFile 과 이중 안전망)
   'focusmon-sessions.json', 'focusmon-keys.json', 'focusmon-auth-stops.json', // v2.976 집중 모니터링 계속 수집 정의 · 엣지 공개키 기록 · 인증 정지(registerStateFile 과 이중 안전망)
   'storage-inspect-runs.json', 'storage-inspect-ring.json', 'storage-inspect-state.json', // v2.965 PowerScale 점검 이력 · 엣지 미전송 고리 · 회차 기록(registerStateFile 과 이중 안전망)
   'issue-notify-state.json', // v2.871 이슈 기한 알림 기록(issues/notify.js — registerStateFile 과 이중 안전망)
