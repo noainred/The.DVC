@@ -184,3 +184,24 @@ export function refsTable() {
     id, cls: v.cls, clsLabel: CLS_LABEL[v.cls], counted: COUNTED.has(v.cls), note: v.note, action: v.action, level: v.level, sources: v.sources,
   }));
 }
+
+/**
+ * 로그인 · 로그아웃 계열 기록 ID(v3.8.2 — 읽기 진단용. 판정에 쓰지 않는다).
+ * USR0030 은 Dell 커뮤니티 글 제목('USR0030 Successfully logged in using … and REDFISH')으로, USR0036(묶인 로그인 기록)은
+ * iDRAC9 사용자 안내서 검색 요약으로 확인했다. USR0031 · USR0032(로그인 실패 · 로그아웃)는 기억 기준이고 문서 대조 전이다 —
+ * 그래서 화면은 비율과 함께 **상위 기록 ID 를 그대로** 보여 준다(이 목록이 틀려도 사용자가 구성을 직접 본다).
+ */
+export const LOGIN_CODES = Object.freeze(['USR0030', 'USR0031', 'USR0032', 'USR0036']);
+
+/**
+ * 읽은 항목 가운데 로그인 계열의 비율(0~1). 상위 목록에 든 것만 세므로 **하한**이다. 읽은 건수를 모르면 null.
+ * @param {{read?:number|null, top?:Array<{code:string,n:number}>}|null} diag
+ */
+export function loginShareOf(diag) {
+  const read = Number(diag?.read);
+  if (!diag || !Number.isFinite(read) || read <= 0 || !Array.isArray(diag.top)) return null;
+  let n = 0;
+  for (const x of diag.top) if (x && LOGIN_CODES.includes(String(x.code)) && Number.isFinite(x.n)) n += x.n;
+  return Math.min(1, n / read);
+}
+

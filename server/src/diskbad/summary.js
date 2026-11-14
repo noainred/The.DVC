@@ -8,10 +8,21 @@
  *  · 모델별 비율은 **지금 꽂힌 디스크**만 센다 — 교체된 디스크의 모델은 로그에 없다(README §8.2). 그 수를 '모델을 알 수 없음' 으로 따로 싣는다.
  *  · 월별 추이에는 그 달의 로그가 남아 있는 서버 비율을 같이 싣는다(과거로 갈수록 적게 잡힌다 — 화면이 밝힌다).
  *  · 데모(합성) 결과가 섞이면 `synthesized` 로 밝힌다.
+ *  · v3.8.2(실장비에서 드러난 것): iDRAC 가 주는 것은 활성 로그뿐이고 로그인 기록이 그것을 채우면 하루치만 남는다. '기록 0' 이
+ *    '과거에 없었다' 로 읽히지 않게, **로그가 30일 미만만 남은 서버 수**(`shortLog`) · 남은 기간의 가운데값 · 로그인 기록이 절반을 넘는
+ *    서버 수(`loginHeavy`)를 합계에 싣는다. 화면이 KPI 위에 경고로 보인다.
  */
-import { classOf, COUNTED, CLS, labelOfKey, refsTable, ID_TABLE, CLS_LABEL } from './classify.js';
+import { classOf, COUNTED, CLS, labelOfKey, refsTable, ID_TABLE, CLS_LABEL, loginShareOf, LOGIN_CODES } from './classify.js';
 import { judgeServer, VERDICT, VERDICT_LABEL, CONFIDENCE_LABEL, SERVER_STATUS_LABEL } from './verdict.js';
 import { REASON_LABEL } from './scan.js';
+
+export const SHORT_LOG_DAYS = 30;
+const DAY_MS = 86_400_000;
+/** 서버 한 대의 읽기 진단(화면용) — 로그인 계열 비율을 붙인다. */
+export function diagView(readDiag) {
+  if (!readDiag || typeof readDiag !== 'object') return null;
+  return { ...readDiag, loginShare: loginShareOf(readDiag), loginCodes: LOGIN_CODES };
+}
 
 const keyOf = (agent, id) => `${String(agent || '').toLowerCase()}|${id}`;
 const monthKey = (ms) => { const d = new Date(ms); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`; };
@@ -30,6 +41,7 @@ export function serverView(row, records, serials) {
     lastStatusLabel: row.lastStatus && row.lastStatus !== 'ok' ? (REASON_LABEL[row.lastStatus] || '읽기 실패') : '',
     logOldest: row.logOldest, coveredFrom: row.coveredFrom, continuousSince: row.continuousSince, complete: row.complete, logTotal: row.logTotal,
     logOrder: row.logOrder, readLast: row.readLast, readStop: row.readStop || '', invAt: row.invAt, synthesized: row.synthesized,
+    diag: diagView(row.readDiag),
   } : null };
 }
 
@@ -59,7 +71,9 @@ export function buildFleet({ servers = [], db = { servers: [], records: [], seri
   const monthly = new Map();
   let synthesized = false;
   const readServers = [];
-  const tot = { servers: 0, read: 0, unread: 0, excluded: 0, disks: 0, recordSlots: 0, inUse: 0, replaced: 0, unknown: 0, records: 0, unrecoverable: 0, unwatched: 0, serversWithRecords: 0 };
+  const tot = { servers: 0, read: 0, unread: 0, excluded: 0, disks: 0, recordSlots: 0, inUse: 0, replaced: 0, unknown: 0, records: 0, unrecoverable: 0, unwatched: 0, serversWithRecords: 0,
+    spanKnown: 0, shortLog: 0, loginHeavy: 0, diagKnown: 0 };
+  const spans = [];
 
   for (const s of servers) {
     const c = corpOf(s.corp);
@@ -76,6 +90,14 @@ export function buildFleet({ servers = [], db = { servers: [], records: [], seri
       reasons[rk] = (reasons[rk] || 0) + 1;
     } else {
       c.read += 1; tot.read += 1; readServers.push(row);
+      // 로그가 남은 기간 — 못 읽은 값은 세지 않는다(spanKnown 이 분모).
+      if (Number.isFinite(row?.coveredFrom)) {
+        const days = Math.max(0, (now - row.coveredFrom) / DAY_MS);
+        tot.spanKnown += 1; spans.push(days);
+        if (days < SHORT_LOG_DAYS) tot.shortLog += 1;
+      }
+      const share = loginShareOf(row?.readDiag);
+      if (share != null) { tot.diagKnown += 1; if (share >= 0.5) tot.loginHeavy += 1; }
       const watched = (v.drives || []).filter((d) => d.inVolume !== false);
       c.disks += watched.length; tot.disks += watched.length;
       tot.unwatched += v.unwatched || 0;
@@ -98,7 +120,8 @@ export function buildFleet({ servers = [], db = { servers: [], records: [], seri
     }
     const base = { agent: s.agent, serverId: s.id, serverName: s.name || row?.name || s.id, corpId: c.id, corpName: c.name, country: c.country };
     serverRows.push({ ...base, status: v.status, statusLabel: SERVER_STATUS_LABEL[v.status], counts: v.counts, lastScanAt: row?.lastScanAt ?? null,
-      lastStatusLabel: v.coverage?.lastStatusLabel || '', coveredFrom: row?.coveredFrom ?? null, complete: row?.complete ?? null, disks: (v.drives || []).length || null });
+      lastStatusLabel: v.coverage?.lastStatusLabel || '', coveredFrom: row?.coveredFrom ?? null, complete: row?.complete ?? null, disks: (v.drives || []).length || null,
+      logTotal: row?.logTotal ?? null, loginShare: loginShareOf(row?.readDiag) });
     for (const sl of v.slots) {
       if (sl.total <= 0) continue;
       const item = { ...base, slotKey: sl.slotKey, label: sl.label, verdict: sl.verdict, verdictLabel: VERDICT_LABEL[sl.verdict], confidence: sl.confidence,
@@ -133,8 +156,11 @@ export function buildFleet({ servers = [], db = { servers: [], records: [], seri
   slotList.sort((a, b) => b.last - a.last);
   serverRows.sort((a, b) => b.counts.inUse - a.counts.inUse || b.counts.slots - a.counts.slots || String(a.serverName).localeCompare(String(b.serverName)));
 
+  spans.sort((a, b) => a - b);
+  const median = spans.length ? (spans.length % 2 ? spans[(spans.length - 1) / 2] : (spans[spans.length / 2 - 1] + spans[spans.length / 2]) / 2) : null;
   return {
-    totals: { ...tot, ratePer1000: tot.disks > 0 ? Math.round((tot.recordSlots / tot.disks) * 10_000) / 10 : null },
+    totals: { ...tot, ratePer1000: tot.disks > 0 ? Math.round((tot.recordSlots / tot.disks) * 10_000) / 10 : null,
+      shortLogDays: SHORT_LOG_DAYS, medianLogDays: median == null ? null : Math.round(median * 10) / 10 },
     byCorp, byModel, unknownModel, months: months_, inUse: inUseList, slots: slotList, servers: serverRows, unreadReasons: reasons,
     synthesized,
   };

@@ -13,7 +13,10 @@ export const RECORDS_MAX = 5_000;
 export const DRIVES_MAX = 64;
 const REASONS = new Set(Object.values(REASON).filter(Boolean));
 const ORDERS = new Set(['desc', 'asc', 'unknown']);
-const STOPS = new Set(['', 'budget', 'max', 'skip']);
+const STOPS = new Set(['', 'budget', 'max', 'skip', 'short', 'empty']);
+const PATHS = new Set(['std', 'legacy']);
+export const TOP_MAX = 8;
+export const PROBE_MAX_BYTES = 16_000;
 
 const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
 const s = (v, n) => (typeof v === 'string' || typeof v === 'number' ? String(v).slice(0, n) : '');
@@ -39,7 +42,37 @@ function cleanLog(L, now) {
     oldestRead: clampTime(L.oldestRead, now), cursorCreated: clampTime(L.cursorCreated, now),
     reachedEnd: L.reachedEnd === true, foundCursor: L.foundCursor === true, cursorUsed: L.cursorUsed === true,
     stopped: STOPS.has(L.stopped) ? L.stopped : '',
+    // v3.8.2 읽기 진단(판정에 쓰지 않는다 — 화면이 '무엇을 읽었는지' 를 밝힌다). 모르는 판의 엣지는 보내지 않는다(null).
+    pages: cnt(L.pages), ms: cnt(L.ms), distinct: cnt(L.distinct), firstLen: cnt(L.firstLen),
+    hasNext: b(L.hasNext), path: PATHS.has(L.path) ? L.path : '',
+    top: Array.isArray(L.top) ? L.top.slice(0, TOP_MAX).map((x) => (isObj(x) ? { code: s(x.code, 16), n: cnt(x.n) ?? 0 } : null)).filter((x) => x && x.code) : null,
   };
+}
+
+/** 0 이상의 정수(못 읽으면 null — 0 이 아니다). */
+function cnt(v) { const n = numOrNull(v); return n != null && n >= 0 ? Math.floor(n) : null; }
+
+/** 장비 진단(probe.js)을 다시 자른다 — 글자 · 수 · 불리언만, 깊이 4 · 객체 60키 · 배열 60개 · 글자 200자. */
+function san(v, depth) {
+  if (v === null || typeof v === 'boolean') return v;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v === 'string') return v.slice(0, 200);
+  if (depth >= 4 || typeof v !== 'object') return null;
+  if (Array.isArray(v)) return v.slice(0, 60).map((x) => san(x, depth + 1));
+  const o = {};
+  let n = 0;
+  for (const [k, x] of Object.entries(v)) {
+    if (n >= 60) break;
+    if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+    o[String(k).slice(0, 64)] = san(x, depth + 1);
+    n += 1;
+  }
+  return o;
+}
+export function cleanProbe(p) {
+  if (!isObj(p)) return null;
+  const o = san(p, 0);
+  return JSON.stringify(o).length > PROBE_MAX_BYTES ? { v: typeof o.v === 'number' ? o.v : 0, error: '진단 결과가 상한보다 커서 버렸습니다.' } : o;
 }
 
 function cleanRecord(r, now) {
@@ -77,6 +110,7 @@ export function cleanServer(x, now) {
     log: ok ? cleanLog(x.log, now) : null,
     records, recordsCapped: x.recordsCapped === true || (Array.isArray(x.records) && x.records.length > RECORDS_MAX),
     drives, invAt: clampTime(x.invAt, now), synthesized: x.synthesized === true,
+    probe: cleanProbe(x.probe),
   };
 }
 

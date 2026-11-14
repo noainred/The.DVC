@@ -17,6 +17,7 @@ import { poolSettled } from '../util/pool.js';
 import { withDeadline, deadlineMs } from '../util/deadline.js';
 import { createAuthGuard } from '../util/authGuard.js';
 import { readLclog } from './lclog.js';
+import { probeIdrac } from './probe.js';
 import { cursorOf, saveCursors } from './cursors.js';
 import { mockScanServer } from './mock.js';
 
@@ -27,6 +28,8 @@ const MAX_ENTRIES = () => Math.min(200_000, Math.max(1_000, Number(process.env.D
 export const CHUNK_SERVERS = 25;
 export const DRIVES_MAX = 64;
 export const RECORDS_MAX = 5_000;
+/** 장비 진단(probe.js)의 시한 — 서버 한 대를 직접 점검할 때만 돈다(GET 십여 번). */
+export const PROBE_TIMEOUT_MS = 120_000;
 
 /** 결과 사유 코드 — 중앙이 화이트리스트로 받는다(ingest.js). */
 export const REASON = Object.freeze({
@@ -78,7 +81,7 @@ export async function scanOne(s, { mode = 'incremental', manual = false, invOf =
   const inv = invOf(s.id);
   const drives = drivesOf(inv);
   const invAt = Number.isFinite(inv?.collectedAt) ? inv.collectedAt : null;
-  if (mock) return { ...mockScanServer({ ...base, drives, invAt, mode, cursor: mode === 'full' ? null : cursorOf(s.id), now: now() }) };
+  if (mock) return { ...mockScanServer({ ...base, drives, invAt, mode, manual, cursor: mode === 'full' ? null : cursorOf(s.id), now: now() }) };
   if (!manual) {
     if (authStoppedByPoller(s)) return { ...base, ok: false, reason: REASON.authStopped, drives, invAt };
     if (authGuard.authStopFor(s)) return { ...base, ok: false, reason: REASON.authStopped, drives, invAt };
@@ -87,6 +90,12 @@ export async function scanOne(s, { mode = 'incremental', manual = false, invOf =
   const prevCursor = mode === 'full' ? null : cursorOf(s.id);
   const cursor = prevCursor && prevCursor.complete ? prevCursor : null;
   const timeout = SERVER_TIMEOUT_MS();
+  // 서버 한 대를 화면에서 직접 점검할 때만 — 그 장비가 실제로 무엇을 주는지 읽기 전용으로 묻는다(probe.js). 실패해도 점검 결과는 그대로다.
+  const probe = async () => {
+    if (!manual) return undefined;
+    try { return await withDeadline(PROBE_TIMEOUT_MS, (signal) => probeIdrac(s, { signal, now }), '장비 진단 시한 초과'); }
+    catch (e) { return { v: 0, at: now(), error: t(e?.status ? `HTTP ${e.status}` : e?.message, 80) }; }
+  };
   try {
     const r = await withDeadline(timeout, (signal) => readLclog(s, { cursor, signal, budgetMs: Math.max(30_000, timeout - 60_000), maxEntries: MAX_ENTRIES(), now }), 'Lifecycle 로그 읽기 시한 초과');
     authGuard.clearAuthStop(s.id);
@@ -94,17 +103,22 @@ export async function scanOne(s, { mode = 'incremental', manual = false, invOf =
       order: r.order, total: r.total, read: r.read, undated: r.undated, newestId: r.newest?.entryId || '', newestCreated: r.newest?.created ?? null,
       oldestRead: r.oldestRead, reachedEnd: r.reachedEnd, foundCursor: r.foundCursor, cursorUsed: r.cursorUsed, stopped: r.stopped,
       cursorCreated: cursor?.created ?? null,
+      // 무엇을 읽었는가(진단 — 판정에 쓰지 않는다): 쪽 수 · 걸린 시간 · 기록 ID 구성 · 첫 쪽 크기 · 다음 쪽 링크 · 경로.
+      pages: r.pages, ms: r.ms, distinct: r.distinct, top: r.top, firstLen: r.firstLen, hasNext: r.hasNext, path: r.path,
     };
     // 상한을 넘으면 **가장 새 것** 을 남긴다(반증 #8 — 장비가 준 순서와 무관하게). 잘렸으면 이어 읽기 커서도 '끝까지 봄' 이 아니다
     //   — 다음 점검이 처음부터 다시 읽고, 중앙은 잘린 아래 구간을 '본 구간' 에서 뺀다(db.js).
     const capped = r.entries.length > RECORDS_MAX;
     const records = capped ? [...r.entries].sort((a, b) => (b.created ?? -Infinity) - (a.created ?? -Infinity)).slice(0, RECORDS_MAX) : r.entries;
-    return { ...base, ok: true, reason: REASON.ok, log, records, recordsCapped: capped, drives, invAt,
+    const pr = await probe();
+    return { ...base, ok: true, reason: REASON.ok, log, records, recordsCapped: capped, drives, invAt, ...(pr ? { probe: pr } : {}),
       _cursor: r.newest ? { entryId: r.newest.entryId, created: r.newest.created, complete: !capped && (r.reachedEnd || r.foundCursor) } : (cursor || null) };
   } catch (e) {
     const reason = failReason(e);
     if (reason === REASON.authFailed) authGuard.markAuthStopped(s.id, s, t(e?.message, 200));
-    return { ...base, ok: false, reason, reasonText: t(e?.message, 200), drives, invAt };
+    // 로그 읽기가 실패해도(경로 없음 · 권한) 장비 진단은 답할 수 있다 — 인증 실패 · 연결 실패면 묻지 않는다(다시 로그인하지 않는다).
+    const pr = (reason === REASON.authFailed || reason === REASON.unreachable) ? undefined : await probe();
+    return { ...base, ok: false, reason, reasonText: t(e?.message, 200), drives, invAt, ...(pr ? { probe: pr } : {}) };
   }
 }
 

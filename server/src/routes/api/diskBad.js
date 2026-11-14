@@ -208,7 +208,9 @@ export function registerDiskBad(api) {
     if (!d) return res.json({ ok: true, server: s, dbUnavailable: true, labels: labelsPayload() });
     const v = serverView(d.server, d.records, d.serials);
     const running = listJobs().some((j) => j.units.some((u) => (u.agent === s.agent) && (u.state === 'queued' || u.state === 'running')));
-    res.json({ ok: true, server: s, view: v, scanned: !!d.server, running, labels: labelsPayload(), excluded: s.excluded });
+    // 장비 진단(그 장비가 무엇을 주는가 — 펌웨어 판 · 속성 이름 등)은 관리자 판본에만 싣는다.
+    const probe = isAdminDetailUser(req.user) && d.server?.probe ? { probe: d.server.probe, probeAt: d.server.probeAt } : {};
+    res.json({ ok: true, server: s, view: v, scanned: !!d.server, running, labels: labelsPayload(), excluded: s.excluded, ...probe });
   });
 
   api.post('/tools/disk-bad/scan', writeRole, toolsPerm, async (req, res) => {

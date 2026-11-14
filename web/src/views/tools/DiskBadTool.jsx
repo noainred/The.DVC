@@ -18,7 +18,7 @@ import { Loading, ErrorBox, Kpi, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import { DiskBadServerPanel } from './DiskBadServerPanel.jsx';
-import { fmtDate, fmtDateTime, rateText, pctText, num, clsTone, verdictTone, confidenceTone, noteOf, clsOfCode, JOB_STATE_LABEL, jobStateTone, unitProgress, scopeLabel } from './diskBadText.js';
+import { fmtDate, fmtDateTime, rateText, pctText, num, clsTone, verdictTone, confidenceTone, noteOf, clsOfCode, JOB_STATE_LABEL, jobStateTone, unitProgress, scopeLabel, shortLogNote, spanText } from './diskBadText.js';
 
 const TABS = [
   { k: 'summary', label: '요약' }, { k: 'disks', label: '디스크 목록' }, { k: 'corps', label: '국가 · 법인' },
@@ -66,6 +66,7 @@ export function DiskBadTool() {
   if (!data) return <Loading label="디스크 배드 섹터 분석" />;
   if (!fleet) return <ErrorBox message={`디스크 배드 섹터 DB 를 열지 못했습니다 — ${data.db?.error || '포탈 로그를 확인하세요'}`} />;
   const T = fleet.totals;
+  const shortNote = shortLogNote(T);
   const refs = labels.refs;
   const openServer = (r) => setDetail({ id: r.serverId, name: r.serverName, agent: r.agent ?? '' });
 
@@ -98,6 +99,13 @@ export function DiskBadTool() {
         </div>
         {canScan && <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} onClick={() => setTab('scan')}>{running ? '점검 진행 보기' : '지금 점검'}</button>}
       </div>
+
+      {shortNote && (
+        <div style={{ border: '1px solid rgba(245,158,11,.55)', background: 'rgba(245,158,11,.09)', borderRadius: 10, padding: '8px 12px', fontSize: 12.5, lineHeight: 1.6, minWidth: 0 }}>
+          <b>{shortNote.title}</b>
+          <div>{shortNote.body}</div>
+        </div>
+      )}
 
       <div className="kpis">
         <Kpi label="기록이 있는 디스크 자리" value={num(T.recordSlots)} meta={`서버 ${num(T.serversWithRecords)}대 · 기록 ${num(T.records)}건`} />
@@ -295,12 +303,13 @@ function Trend({ fleet, compact = false }) {
 
 function Servers({ fleet, labels, openServer }) {
   const reasons = Object.entries(fleet.unreadReasons || {});
+  const nowMs = Date.now();
   return (
     <div className="card" style={{ padding: 12, minWidth: 0 }}>
       <b style={{ fontSize: 13.5 }}>서버별 <span className="muted" style={{ fontWeight: 400 }}>{fleet.servers.length}대</span></b>
       {reasons.length > 0 && <div className="muted" style={{ fontSize: 12, margin: '4px 0' }}>못 읽은 이유: {reasons.map(([k, n]) => `${k === 'never' ? '아직 점검하지 않음' : (labels.reason[k] || k)} ${n}대`).join(' · ')}</div>}
-      <STable className="data-table" minWidth={900} limit={300} style={{ width: '100%', fontSize: 12.5, marginTop: 6 }}>
-        <thead><tr><th>국가 · 법인</th><th>서버</th><th>판정</th><th>기록 디스크</th><th>사용 중</th><th>복구 불가</th><th>마지막 점검</th></tr></thead>
+      <STable className="data-table" minWidth={1020} limit={300} style={{ width: '100%', fontSize: 12.5, marginTop: 6 }}>
+        <thead><tr><th>국가 · 법인</th><th>서버</th><th>판정</th><th>기록 디스크</th><th>사용 중</th><th>복구 불가</th><th title="iDRAC 가 보여 주는(활성) 로그가 언제부터 남아 있는가">로그 남은 기간</th><th>마지막 점검</th></tr></thead>
         <tbody>{fleet.servers.map((s) => (
           <tr key={`${s.agent}|${s.serverId}`}>
             <td>{s.country ? `${s.country} · ` : ''}{s.corpName}</td>
@@ -309,6 +318,9 @@ function Servers({ fleet, labels, openServer }) {
             <td data-sort={s.counts.slots} style={{ fontFamily: 'var(--mono)' }}>{num(s.counts.slots)}</td>
             <td data-sort={s.counts.inUse} style={{ fontFamily: 'var(--mono)' }}><b>{num(s.counts.inUse)}</b></td>
             <td data-sort={s.counts.unrecoverable} style={{ fontFamily: 'var(--mono)' }}>{num(s.counts.unrecoverable)}</td>
+            <td data-sort={Number.isFinite(s.coveredFrom) ? nowMs - s.coveredFrom : undefined} style={{ whiteSpace: 'nowrap' }}>
+              {Number.isFinite(s.coveredFrom) ? <>{spanText(s.coveredFrom, nowMs)}<div className="muted" style={{ fontSize: 11 }}>{fmtDate(s.coveredFrom)} 부터{Number.isFinite(s.loginShare) && s.loginShare >= 0.5 ? ` · 로그인 기록 ${Math.floor(s.loginShare * 100)}%+` : ''}</div></> : <span className="muted">—</span>}
+            </td>
             <td data-sort={s.lastScanAt ?? undefined} style={{ whiteSpace: 'nowrap', fontFamily: 'var(--mono)' }}>{fmtDateTime(s.lastScanAt)}</td>
           </tr>
         ))}</tbody>
