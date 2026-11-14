@@ -100,6 +100,9 @@ const leaksKey = (text, pems) => pems.some((p) => pemLines(p).some((l) => String
 const ALL_PEMS = [];     // 이 파일이 저장소에 넣은 개인키 전부
 const SECRET_WORDS = []; // 1회 비밀번호 · 저장 비밀번호(평문으로 어디에도 남으면 안 된다)
 const secret = (s) => { SECRET_WORDS.push(s); return s; };
+/** 가짜 sshd 에서 붙잡아 둔 명령(holdExec) — 테스트가 중간에 실패해도 놓는다(붙잡힌 접속이 작업 · 파일 전체를 멈추지 않게). */
+const HELD = [];
+test.afterEach(() => { for (const r of HELD.splice(0)) r(); });
 
 /** 사용자마다 지금 쓸 수 있는 OTP 코드 하나(1회용 — 카운터는 늘어나야 한다). 한 창에 세 개(앞 · 지금 · 뒤 칸)까지, 넘으면 다음 창을 기다린다. */
 const _lastCtr = {};
@@ -887,7 +890,9 @@ test('⑥-b 승인할 사람이 없는 설치 — 키 등록 · 받는 곳 승�
       const su = AUTH.getUser('noainred');
       const before = G.twoPersonOn();
       const pick = (r) => ({ ok: r.ok, code: r.code, status: r.status, reason: r.reason, pending: r.pending === true });
+      const sha0 = KS.diskFileSha();
       const add = pick(await SVC.addKeyInFolder({ name: 'solo-k', privateKey: F.ed25519Key().pem, folderCorp: 'vcA', features: ['bm-usage'] }, { by: 'solo' }));
+      const shaAfterAdd = KS.diskFileSha();
       const IK = F.ed25519Key();
       const idir = INB.inboxPathOf('vcA'); fs.mkdirSync(idir, { recursive: true }); fs.writeFileSync(path.join(idir, 'id_solo'), IK.pem, { mode: 0o600 });
       const it = (await INB.scanInbox({ corps: [{ id: 'vcA' }], servers: [] })).items.find((x) => x.file === 'id_solo');
@@ -896,14 +901,14 @@ test('⑥-b 승인할 사람이 없는 설치 — 키 등록 · 받는 곳 승�
       const rs = pick(await SVC.resumeCorp('vcA', { by: 'solo' }));
       const g = pick(await SVC.changeGuards({ twoPerson: false }, { by: 'solo' }));
       console.log(JSON.stringify({ before, owners: SEC.loadSessionSecurity().settingsOwners.filter((x) => x !== 'solo').sort(), superCanLogin: !!(su && (su.passwordHash || su.totpEnabled)),
-        approvers: G.approverNames(), other: G.otherOwners('solo'), add, keyStored: !!KS.keyByName('solo-k'),
+        approvers: G.approverNames(), other: G.otherOwners('solo'), add, keyStored: !!KS.keyByName('solo-k'), storeUntouched: sha0 === shaAfterAdd,
         ib, inboxKept: fs.existsSync(path.join(idir, 'id_solo')), inboxKeyStored: !!KS.keyByName('solo-inbox'), stopOk: stop.ok, rs, stillStopped: !!ST.stopFor('vcA'),
         requests: AP.listRequests({}).length, g, guards: ST.getGuards(), ev: ST.listEvents({ limit: 50 }).filter((e) => e.kind === 'guard-changed').map((e) => e.detail) }));
     ` });
     // 전제 — 요청자 말고 유효 소유자 목록에 있는 이름은 로그인 수단이 없는 자동 포함 계정과 범위 소유자뿐이다(둘 다 승인 라우트를 통과하지 못한다)
     assert.deepEqual([j.before, j.owners, j.superCanLogin, j.approvers, j.other], [true, ['noainred', 'scoped'], false, ['solo'], []], JSON.stringify(j));
     // 점검 C-7 — 승인할 사람이 없으면 요청을 만들지 않는다: 대기 키를 저장하지 않고 받는 곳의 평문 파일도 지우지 않는다(끄는 길을 안내한다)
-    assert.deepEqual([j.add.code, j.add.status, j.keyStored], ['no-approver', 409, false], JSON.stringify(j.add));
+    assert.deepEqual([j.add.code, j.add.status, j.keyStored, j.storeUntouched], ['no-approver', 409, false, true], `대기 키를 저장했다 지우지도 않는다(키 저장소 파일을 쓰지 않음) ${JSON.stringify(j.add)}`);
     assert.match(j.add.reason, /두 사람 승인을 끄면 본인 OTP 만으로/);
     assert.deepEqual([j.ib.code, j.ib.status, j.inboxKept, j.inboxKeyStored], ['no-approver', 409, true, false], JSON.stringify(j.ib));
     assert.deepEqual([j.stopOk, j.rs.code, j.rs.status, j.stillStopped, j.requests], [true, 'no-approver', 409, true, 0], '멈추기는 바로 · 재개(다시 여는 쪽)는 요청을 만들지 않는다');
@@ -1760,6 +1765,12 @@ test('⑫-d 관리자가 옵션을 바꾼 포탈 줄이 있으면 — 키 로그
   assert.match(r2.note, /표식 없는 같은 키 줄 1개가 서버에 있습니다/);
   assert.match(r2.note, /출발지 제한이 없으니 서버에서 직접 정리하세요/);
   assert.equal(S.readAk(), before2);
+  // 관리자 줄 + 제한 없는 우리 꼴 줄이 함께 있으면 — 바꾸기 대상(loose)이 있어도 아무 줄도 바꾸지 않는다(바꾸면 관리자 줄까지 지운다)
+  const before3 = `${before}${K.pub} portal-ssh:${K.id}\n`;
+  S.writeAk(before3); S.clear();
+  const r3 = (await runLogin({ servers: [sv], keyId: K.id, by: 'own' })).job.results[0];
+  assert.deepEqual([r3.ok, r3.line, r3.custom, r3.restricted], [true, 'present-marked', 1, false], JSON.stringify(r3));
+  assert.equal(S.readAk(), before3, '관리자 줄이 그대로 남았다');
 });
 
 test('⑫-e 첫 접속이 바로 그 키(저장 비밀번호 없음)면 — 제한 없는 포탈 줄을 제한 줄로 바꾸지 않는다(확인이 실패하면 되돌릴 접속이 없다 — 점검 B-F5) · replaceSkipped + 안내 · 1회 비밀번호를 주면 바꾼다', async () => {
@@ -2149,11 +2160,15 @@ test('⑰ 키 거두기(법인 단위) — 중앙이 수집하는 서버만 돈�
   assert.ok(ST.clearCorpStop('vcR', { by: 'fixture' }).ok);
 });
 
-/** S 에서 pred 에 맞는 명령을 붙잡아 둔다(느린 서버) — reached = 붙잡힌 때 · release() = 놓기. */
+/** S 에서 pred 에 맞는 명령을 붙잡아 둔다(느린 서버) — reached = 붙잡힌 때 · release() = 놓기. 테스트가 중간에 실패해도 놓는다(afterEach — 붙잡힌 접속이 파일 전체를 멈추지 않게). */
 function holdExec(S, pred) {
   let release; const held = new Promise((r) => { release = r; });
-  let entered; const reached = new Promise((r) => { entered = r; });
+  HELD.push(() => release());
+  let entered; const hit = new Promise((r) => { entered = r; });
   S.st.gate = async (cmd) => { if (pred(cmd)) { entered(); await held; } };
+  // 붙잡을 명령이 오지 않으면(작업이 시작되지 않음 등) 영원히 기다리지 않고 실패한다
+  let timer;
+  const reached = Promise.race([hit, new Promise((_r, rej) => { timer = setTimeout(() => rej(new Error('붙잡을 명령이 15초 안에 오지 않았다')), 15_000); timer.unref?.(); })]).finally(() => clearTimeout(timer));
   return { reached, release };
 }
 /** 그 키 넣기 명령(넣을 줄 L 이 든 스크립트)을 붙잡는다. */
@@ -2197,6 +2212,7 @@ test('⑰-b 작업 칸은 넣기 · 거두기 따로 — 넣기 작업이 도는
   S1.st.gate = null; S1.writeAk(`${K2.pub} portal-ssh:${K2.id}\n`);
   const h2 = holdInstall(S1, K);
   const st2 = await SVC.startKeyLogin({ servers: [s1], keyId: K.id, by: 'own' });
+  assert.equal(st2.ok, true, JSON.stringify(st2));
   await h2.reached;
   const rv3 = await SVC.startKeyRevoke({ keyId: K2.id, servers: [s1b], by: 'own2' });
   await sleep(150);
@@ -2215,6 +2231,7 @@ test('⑰-c 멈추기 라우트는 OTP 없이 소유자 등급만(줄이는 방�
   const [s1, s2, s3] = [S1, S2, S3].map((S, i) => mkServer(`bm-jc${i + 1}`, S, { password: pw }));
   const h = holdInstall(S1, K);
   const st = await SVC.startKeyLogin({ servers: [s1, s2, s3], keyId: K.id, by: 'own' });
+  assert.equal(st.ok, true, JSON.stringify(st));
   await h.reached;
   // 같은 칸 작업이 도는 중 — 시작 라우트는 OTP 앞에서 409(그 코드는 쓰이지 않는다)
   const code = await otp('own4');
@@ -2223,7 +2240,8 @@ test('⑰-c 멈추기 라우트는 OTP 없이 소유자 등급만(줄이는 방�
   assert.equal(AUTH.verifyUserOtp('own4', code).ok, true, 'busy 거절이 OTP 를 소모하지 않았다');
   // 화면 — 칸마다 마지막 작업(진행 중)
   const v = await call('own', 'GET', '/settings/ssh-access');
-  assert.deepEqual([v.j.jobs.install?.id, v.j.jobs.install?.running, v.j.jobs.install?.total, v.j.jobs.install?.by], [st.jobId, true, 3, 'own'], v.txt.slice(0, 300));
+  assert.deepEqual([v.j.jobs.install?.id, v.j.jobs.install?.running, v.j.jobs.install?.total, v.j.jobs.install?.by, v.j.jobs.install?.keyName], [st.jobId, true, 3, 'own', 'job-cancel'], v.txt.slice(0, 300));
+  assert.ok(Array.isArray(v.j.jobs.revokes), '거두기 작업 목록 칸은 늘 있다');
   // 멈추기 — 권한 없는 계정 403 · 범위 소유자 403 · 소유자 등급은 OTP 없이
   const curl = `/settings/ssh-access/jobs/${st.jobId}/cancel`;
   assert.equal((await call('adm', 'POST', curl, {})).s, 403);
@@ -2249,6 +2267,7 @@ test('⑰-c 멈추기 라우트는 OTP 없이 소유자 등급만(줄이는 방�
   for (const S of [S2, S3]) { S.clear(); S.writeAk(`${K.pub} portal-ssh:${K.id}\n`); }
   const hr = holdRevoke(S2, K);
   const rv = await SVC.startKeyRevoke({ keyId: K.id, servers: [s2, s3], by: 'own' });
+  assert.equal(rv.ok, true, JSON.stringify(rv));
   await hr.reached;
   assert.equal(SVC.keyJobKind(rv.jobId), 'key-revoke');
   const rcurl = `/settings/ssh-access/jobs/${rv.jobId}/cancel`;
@@ -2267,6 +2286,7 @@ test('⑰-c 멈추기 라우트는 OTP 없이 소유자 등급만(줄이는 방�
   for (const S of [S2, S3]) S.clear();
   const h2 = holdInstall(S4, K);
   const st2 = await SVC.startKeyLogin({ servers: [s4, s2, s3], keyId: K.id, by: 'own' });
+  assert.equal(st2.ok, true, JSON.stringify(st2));
   await h2.reached;
   assert.ok(BM.saveBmServer({ ...rawOf(s2.id), username: 'mon-moved' }).ok);
   assert.ok(KS.markKeyRetired(K.id).ok);
@@ -2355,9 +2375,14 @@ test('⑰-e 거두기 칸은 키마다 — 다른 키의 거두기는 동시에 
   const okIns = await SVC.startKeyLogin({ servers: [svs[3]], keyId: keys[3].id, by: 'own' });
   assert.equal(okIns.ok, true, JSON.stringify(okIns));
   await waitJob(okIns.jobId);
-  // 화면 칸 — install · revoke(가장 최근 거두기)
+  // 화면 칸 — install · revoke(가장 최근 거두기) · revokes(1시간 안의 거두기 작업 — 최근 것부터 최대 5개 · 키 이름과 함께: 키마다 동시에 돌므로 하나만 보여 주면 나머지를 놓친다)
   const lj = KL.lastJobs();
-  assert.deepEqual([lj.revoke?.id, lj.install?.id], [starts[2].jobId, okIns.jobId]);
+  assert.deepEqual([lj.revoke?.id, lj.revoke?.keyName, lj.install?.id, lj.install?.keyName], [starts[2].jobId, 'rv-slot-2', okIns.jobId, 'rv-slot-3']);
+  assert.ok(Array.isArray(lj.revokes) && lj.revokes.length <= 5, JSON.stringify(lj.revokes));
+  const top3 = lj.revokes.slice(0, 3);
+  assert.deepEqual(top3.map((x) => x.id).sort(), starts.map((r) => r.jobId).sort(), '진행 중인 거두기 셋이 맨 앞');
+  assert.deepEqual(top3.map((x) => [x.kind, x.running, x.keyName]).sort(), [0, 1, 2].map((i) => ['key-revoke', true, `rv-slot-${i}`]));
+  assert.deepEqual((await SVC.buildView()).jobs.revokes.slice(0, 3).map((x) => x.id).sort(), starts.map((r) => r.jobId).sort(), '화면(view.jobs.revokes)도 같은 목록');
   for (const h of holds) h.release();
   const done = await Promise.all(starts.map((r) => waitJob(r.jobId)));
   assert.deepEqual(done.map((j) => j.results[0].code), ['removed', 'removed', 'removed']);

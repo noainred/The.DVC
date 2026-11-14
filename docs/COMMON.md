@@ -5,7 +5,7 @@
 
 - 생성: `node scripts/common-doc.mjs` · 최신 여부: `node scripts/common-doc.mjs --check`
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다. 설명을 고치려면 그 모듈의 **머리 주석 첫 단락**을 고친다.
-- 훑은 소스 4094개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
+- 훑은 소스 4095개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
 
 ## 읽는 법 · 한계
 
@@ -215,11 +215,11 @@
 | `sessionActivity.js` | 서버측 세션 정리(2026-10-09 검토 S-05) — 로그아웃을 서버에 알리고, 서버측 유휴 만료의 기준인 '사용자 활동' 을 보낸다. | `createActivityPinger` `sendActivity` `serverLogout` `ACTIVITY_MIN_INTERVAL_MS` `ACTIVITY_EVENTS` | 1 | 1 | 1 |
 | `usageTracker.js` | 기능 사용 추적(화면 쪽, v2.913 · 설계 docs/design/feature-usage §4.2·§4.6). | `usageKeyFromHash` `createUsageTracker` `sendUsage` `POLL_MS` `STABLE_MS` `BEAT_MS` 외 2 | 1 | 1 | 3 |
 
-## 공용 위치 밖에서 널리 쓰이는 모듈 (77)
+## 공용 위치 밖에서 널리 쓰이는 모듈 (78)
 
 공용 위치(위 5곳) 밖에 있지만 사실상 공통 기능인 모듈이다. 새로 만들기 전에 함께 본다.
 
-### 서버 (69)
+### 서버 (70)
 
 **자기 영역 말고 5개 이상 영역**이 import 하는 모듈. 다른 영역 수가 많은 순.
 
@@ -229,9 +229,9 @@
 | `server/src/store.js` | v2.617 | 205 | 43 | 297 |
 | `server/src/collector/registry.js` | Collector registry — the list of remote collector agents (one per datacenter) the central portal pulls power from. Stored in CONFIG_DIR/collectors.jso… | 82 | 31 | 48 |
 | `server/src/security/secretVault.js` | 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). | 40 | 28 | 22 |
-| `server/src/mock/demo/flags.js` | 데모(DATA_SOURCE=mock) 모드 공용 판정(v2.708). | 86 | 27 | 3 |
+| `server/src/mock/demo/flags.js` | 데모(DATA_SOURCE=mock) 모드 공용 판정(v2.708). | 87 | 27 | 3 |
 | `server/src/alerts.js` | Alerting — evaluates threshold/condition rules against the current snapshot on an interval and pushes notifications to Slack(incoming webhook) and/or… | 30 | 23 | 28 |
-| `server/src/proxy/sshExec.js` | Small SSH helper built on ssh2: connect, run commands, and upload files via SFTP. Shared by the proxy auto-deploy and the agent auto-deploy features.… | 47 | 17 | 28 |
+| `server/src/proxy/sshExec.js` | Small SSH helper built on ssh2: connect, run commands, and upload files via SFTP. Shared by the proxy auto-deploy and the agent auto-deploy features.… | 47 | 17 | 29 |
 | `server/src/datacenter/store.js` | DataCenter(법인) 레지스트리 — vCenter의 '상위 개념'. | 44 | 15 | 11 |
 | `server/src/vcenter/registry.js` | vCenter registry — read/write the managed list of vCenters in config/vcenters.json (the same file the live collector polls), with validation, password… | 31 | 15 | 6 |
 | `server/src/vcenter/soapParse.js` | 순수(사이드이펙트 없음) SOAP 응답 파서 — worker_threads 워커에서도 재사용하기 위해 soapClient.js에서 분리했다. 여기에는 config/DB/네트워크 등 부수효과 있는 import를 절대 추가하지 말 것(워커가 로드할 때 부수효과가 워커 스레… | 25 | 15 | 16 |
@@ -241,8 +241,8 @@
 | `server/src/idrac/registry.js` | iDRAC registry — the managed list of Dell servers whose power draw we collect over Redfish. Stored in CONFIG_DIR/idrac.json (gitignored, 0600, holds c… | 34 | 12 | 52 |
 | `server/src/mock/demo/edge.js` | 데모(DATA_SOURCE=mock) 엣지(수집 서버) 그룹(v2.708). | 23 | 12 | 2 |
 | `server/src/mail/settings.js` | 포탈 공용 메일(SMTP) 설정 (`mail.json`, v2.454). | 21 | 12 | 21 |
+| `server/src/auth/auth.js` | v2.716: 내장 데모 계정이 mock 모드에서 쓰일 때 — 요청 문맥은 admin + demoGuest(auth/demoGuest.js 가 요청을 먼저 거른다). | 144 | 11 | 55 |
 | `server/src/audit.js` | Audit log — records security/operational actions (who did what, when) so the portal's write operations (VM 생성, 원격접속, 설정 변경 등)이 추적된다. Appended to CONFI… | 132 | 11 | 40 |
-| `server/src/auth/auth.js` | v2.716: 내장 데모 계정이 mock 모드에서 쓰일 때 — 요청 문맥은 admin + demoGuest(auth/demoGuest.js 가 요청을 먼저 거른다). | 143 | 10 | 55 |
 | `server/src/runtime-settings.js` | Runtime-adjustable settings that can be changed from the portal UI (and persisted), overriding the env defaults. Currently: the data source (mock \| li… | 19 | 10 | 22 |
 | `server/src/security/tlsTrust.js` | 장비 TLS 상대 인증(2026-10-09 검토 S-02) — 자격증명을 보내는 HTTPS 연결이 **정말 그 장비인지** 확인한다. | 14 | 10 | 4 |
 | `server/src/storage/registry.js` | 스토리지 장비 등록부(v2.302). | 28 | 9 | 39 |
@@ -291,6 +291,7 @@
 | `server/src/upgrade/manager.js` | Orchestrates the auto-upgrade feature for the running portal: tracks the last check, runs the optional background watcher (local folder + remote sourc… | 8 | 5 | 16 |
 | `server/src/edgelog/spec.js` | 엣지 포탈의 **진행상태**를 어디서 읽는지 적은 표(순수 데이터, v2.549). | 7 | 5 | 18 |
 | `server/src/nsx/registry.js` | NSX Manager registry — read/write the managed list in CONFIG_DIR/nsx.json, with validation, password redaction, and a connectivity test. Edited throug… | 7 | 5 | 8 |
+| `server/src/auth/ad.js` | Active Directory (LDAP) authentication — UPN simple bind + group→role mapping. | 6 | 5 | 6 |
 | `server/src/pdu/poller.js` | PDU 주기 수집. | 6 | 5 | 11 |
 | `server/src/security/peerTrust.js` | 장비 상대 신뢰 저장소(2026-10-09 검토 S-01 SSH 호스트키 · S-02 TLS 인증서) — '이 주소의 장비가 정말 그 장비인가'. | 6 | 5 | 11 |
 | `server/src/focusmon/service.js` | 이 노드의 집중 모니터링을 묶는다(v2.976): 키 · 중앙 직접 수집기 · 1초/10초 틱 · 수집 시작/끝 · 엣지 깨우기. | 5 | 5 | 8 |
