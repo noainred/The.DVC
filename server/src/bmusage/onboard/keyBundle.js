@@ -47,6 +47,10 @@ export function mergeRedactedKeyStore(bundleText, currentText) {
   for (const k of (Array.isArray(b?.keys) ? b.keys : [])) {
     if (!k || typeof k !== 'object') continue;
     const o = { ...k };
+    // v3.9.0(점검 A-3 · C-1): 지금 파일에 같은 키(지문)가 있으면 **폴더 · 허용 기능 · 상태(퇴역)** 는 지금 값을 쓴다 — 이 셋은 설정 소유자 + OTP 로만
+    //   좁히는 값인데 복원 라우트는 OTP 를 묻지 않는다(server/CLAUDE.md v2.842 — OTP 로만 끄는 보안 설정을 복원이 되살리지 않는다).
+    const cur0 = curKeyByFp.get(String(o.fingerprint || ''));
+    if (cur0) for (const f of ['folderCorp', 'folderServer', 'features', 'status', 'retiredAt']) { if (cur0[f] === undefined) delete o[f]; else o[f] = cur0[f]; }
     if (o.privateKey === REDACTED_SECRET) {
       const c = curKeyByFp.get(String(o.fingerprint || ''));
       if (!c || typeof c.privateKey !== 'string' || !c.privateKey) { dropped.push(`key:${String(o.name || o.id || '').slice(0, 64)}`); continue; }

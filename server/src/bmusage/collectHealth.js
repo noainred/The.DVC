@@ -18,7 +18,7 @@ import { parseFileName, FAMILIES } from './monthStore.js';
 const n = numOrNull;
 const r1 = (v) => (v == null ? null : Math.round(v * 10) / 10);
 /** 실패 사유 code(경로별) — FOCUS_MISS 와 같은 열거에서 no-path 를 뺀 것. 웹 문구 표와 1:1. */
-export const HEALTH_REASON_CODES = Object.freeze(['auth', 'auth-stopped', 'timeout', 'ssh-error', 'host-key', 'not-linux', 'unreachable', 'pool-busy', 'no-telemetry', 'error']);
+export const HEALTH_REASON_CODES = Object.freeze(['auth', 'auth-stopped', 'timeout', 'ssh-error', 'host-key', 'not-linux', 'unreachable', 'pool-busy', 'no-telemetry', 'error', 'cred-config']);
 /** 정상인 빈 칸(실패가 아님) — 리포트 없음(텔레메트리 라이선스) · 첫 주기 · PSI 없음. */
 export const HEALTH_INFO_CODES = Object.freeze(['no-telemetry', 'first', 'psi-absent']);
 /** 사유 → 상태 9종(웹 STATE_TEXT 의 id) — 화면이 ‘기존 상태와 같은 분류’ 로 말한다. */

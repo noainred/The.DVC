@@ -8,6 +8,7 @@
  *   ⑥ 엣지는 보내지 않는다 · 중앙 수신(/api/central/isidu-data)이 적재한 결과도 보낸다
  */
 import { test, after } from 'node:test';
+import { decodeSubject } from './_mailDecode.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -28,8 +29,7 @@ const listen = (srv) => new Promise((r) => srv.listen(0, '127.0.0.1', () => r(sr
 
 /** 받은 원문 → 제목(RFC 2047 해석)·본문(base64 구획 해석 — util/smtp.js 는 본문을 늘 base64 로 보낸다). */
 function decodeMail(raw) {
-  const m = /^Subject: (.*)$/mi.exec(raw);
-  const subject = m ? m[1].replace(/=\?UTF-8\?B\?([^?]*)\?=/gi, (_x, b) => Buffer.from(b, 'base64').toString('utf8')) : '';
+  const subject = decodeSubject(raw);   // v3.10.4: 접힌 긴 제목까지(test/_mailDecode.js)
   const out = []; let mode = 'hdr'; let buf = '';
   for (const line of raw.split('\n')) {
     if (/^Content-Transfer-Encoding:\s*base64/i.test(line)) { mode = 'wait'; continue; }

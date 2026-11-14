@@ -18,6 +18,7 @@ const EmptyInvModal = React.lazy(() => import('./collectors/EmptyInvModal.jsx'))
 // 2026-10-09 검토 S-09(그룹 J): 중앙↔엣지 전송 보호 — 평문 HTTP 는 승인된 예외만(판정은 서버, 문장은 transportText).
 import TransportPanel from './collectors/TransportPanel.jsx';
 import { transportBadge, formHttpNote, importHttpNote } from './collectors/transportText.js';
+import { copyText as copyToClipboard } from '../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 import { upgradeCell, autoPushLine } from './collectorUpgradeText.js'; // v2.775 업그레이드 결과 이유·시각
 import { autoOptionText, matchNote, matchSortText, selectValue, conflictChoices, assignFailText, saveText as dcSaveText } from './collectors/collectorDcText.js'; // v2.972: 수집 서버 ↔ 법인 매칭
 import { edgeSyncLine, syncRunText } from './upgradeEdgeSyncText.js'; // v2.865: 엣지 자동 업그레이드 한 줄 + '구버전 엣지 밀어 넣기'
@@ -179,10 +180,7 @@ export default function Collectors() {
     setForm((f) => ({ ...f, token: tok }));
     setShowToken(true);
     const done = (copied) => setMsg({ ok: true, text: `토큰을 생성했습니다${copied ? ' · 클립보드에 복사됨' : ''}. 에이전트를 COLLECTOR_TOKEN=${tok} 로 실행하세요(값은 위 칸에서 확인).` });
-    try {
-      if (navigator.clipboard?.writeText) navigator.clipboard.writeText(tok).then(() => done(true)).catch(() => done(false));
-      else done(false);
-    } catch { done(false); }
+    copyToClipboard(tok).then(done, () => done(false));
   };
 
   const save = async () => {
@@ -429,7 +427,7 @@ export default function Collectors() {
             <div style={{ display: 'flex', gap: 8, marginTop: 6, alignItems: 'center' }}>
               <input className="input" readOnly value={newTok.token} style={{ flex: 1, fontFamily: 'ui-monospace, monospace', fontSize: 12 }} onFocus={(e) => e.target.select()} />
               <button className="logout-btn" style={{ padding: '6px 12px', whiteSpace: 'nowrap' }}
-                onClick={() => { try { navigator.clipboard?.writeText(newTok.token); } catch { /* */ } }}>복사</button>
+                onClick={() => { copyToClipboard(newTok.token); }}>복사</button>
               <button className="logout-btn" style={{ padding: '6px 12px' }} onClick={() => setNewTok(null)}>닫기</button>
             </div>
             <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>

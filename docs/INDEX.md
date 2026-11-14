@@ -216,6 +216,7 @@
 | [AUDIT-2026-10-19.md](AUDIT-2026-10-19.md) | v2.744 점검 — 10축 발견 · 발견마다 2인 반증 · 10그룹 수정 · 후속 3그룹 · 회귀 검토 (2026-10-19) |
 | [BAREOS-VMWARE-ROCKY9-INSTALL.md](BAREOS-VMWARE-ROCKY9-INSTALL.md) | Bareos 설치 가이드 — Rocky Linux 9 · VMware vSphere 8/9 게스트 VM 백업 (저장 경로 `/mnt/bareos`) |
 | [CAPACITY-ADVISOR.md](CAPACITY-ADVISOR.md) | 리소스 적정성 진단 (Capacity Advisor) |
+| [COMMON.md](COMMON.md) | 공통 기능 목록 (자동 생성) |
 | [CONFIG-FILES.md](CONFIG-FILES.md) | 설정·데이터 파일 레퍼런스 (자동 생성) |
 | [CVP.md](CVP.md) | Arista CloudVision(CVP) 네트워크 스위치 수집 (v2.608) |
 | [DEV-METHOD.md](DEV-METHOD.md) | 개발 방법론 — The.DVC 포탈을 Claude Code 로 개발하는 방식(v2.677 기준) |
@@ -246,5 +247,5 @@
 | [WORKLOG-2026-07-31.md](WORKLOG-2026-07-31.md) | 작업 기록 — VMware Global Monitoring Portal (The.DVC) |
 | [WORKLOG-2026-08-01.md](WORKLOG-2026-08-01.md) | 작업 기록 — 권한 세분화 · 로그인 테마 · 계정 정책 · 보안 감사 (2026-08-01) |
 
-`docs/*.md` 104개(이름순). 위 분류 절에 없는 문서도 여기에는 반드시 있다 — 분류 절은 손으로 쓰고 이 절은 생성한다.
+`docs/*.md` 105개(이름순). 위 분류 절에 없는 문서도 여기에는 반드시 있다 — 분류 절은 손으로 쓰고 이 절은 생성한다.
 <!-- arch-doc:docs:end -->

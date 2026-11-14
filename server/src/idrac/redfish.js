@@ -795,6 +795,9 @@ export async function fetchInventory(entry) {
               //   그 둘 중 **위험한 쪽(조용히 정상)** 으로 떨어졌다(v2.525 `Number(null)===0` 계열).
               predictiveFailure: drive.FailurePredicted == null ? null : !!drive.FailurePredicted,
               rpm: num(drive.RotationSpeedRPM),
+              // 디스크 배드 섹터 이력(과거 기록 읽기 1단계): 장비가 이 디스크의 누적 오류 값(DriveMetrics) 링크를 알려 주면 받아 둔다 —
+              //   같은 응답에 이미 있다(추가 HTTP 0회). 없으면 ''(그 장비에는 묻지 않는다). 쓰는 쪽이 꼴을 다시 검사한다(diskbad/diskvals.js metricsPathOf).
+              metricsPath: typeof drive.Metrics?.['@odata.id'] === 'string' ? drive.Metrics['@odata.id'].slice(0, 300) : '',
             });
           } catch { /* skip drive */ }
         }

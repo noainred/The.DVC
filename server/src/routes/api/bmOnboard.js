@@ -32,6 +32,12 @@ const noDemo = (req, res, next) => (isDemoGuest(req.user) ? res.status(403).json
 const EDGE_ONLINE_MS = 15 * 60_000;   // 엣지 접속 판정 — 설정 인출(기본 몇 분)의 여러 배. 이보다 오래면 '끊김', 기록이 없으면 '모름'
 /** 키 관리 게이트 묶음 — 순서가 뜻이다(관리자 → tools → 소유자 등급 → OTP). */
 const keyAdmin = [adminOnly, toolsPerm, requireSettingsOwner, reauth];
+/**
+ * 키 등록 전용 — 저장 방식이 키를 받을 수 없으면 **OTP 를 쓰기 전에** 거절한다(점검 B-5: 평문 정책 409 가 1회 비밀번호를 먼저 소모했다).
+ * keyStore.addKey 도 같은 검사를 다시 한다(이 앞단은 OTP 를 아끼려는 것 — 판정은 keyVaultIssue 하나).
+ */
+const keyVaultFirst = (_req, res, next) => { const v = KS.keyVaultIssue(); if (v) return send(res, v); return next(); };
+const keyAddGate = [adminOnly, toolsPerm, requireSettingsOwner, keyVaultFirst, reauth];
 
 const t = (v, max = 256) => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max).trim();
 const bodyOf = (req) => (req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {});
@@ -71,7 +77,7 @@ export function registerBmOnboard(api, deps = {}) {
     res.json({ ok: true, ...v, undecryptable: KS.keyStoreUndecryptable() || 0 });
   });
 
-  api.post('/tools/bm-usage/ssh-keys', ...keyAdmin, (req, res) => {
+  api.post('/tools/bm-usage/ssh-keys', ...keyAddGate, (req, res) => {
     const b = bodyOf(req);
     const r = KS.addKey({ name: b.name, privateKey: typeof b.privateKey === 'string' ? b.privateKey : '', passphrase: typeof b.passphrase === 'string' ? b.passphrase : '', rotateAt: b.rotateAt }, { by: who(req) });
     logAudit({ user: who(req), action: 'bm-usage.ssh-key.add', target: t(b.name, 64), ip: req.ip || '',

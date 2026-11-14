@@ -11,6 +11,7 @@ import {
   bundleFromText, importDirStateText, bundleWhereText, bundleStateView, bundleSourceHelp,
   canLink, linkChoices, linkDoneText, isSshAuthFail,
 } from './bareosInstallText.js';
+import { copyText as copyToClipboard } from '../../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 
 /**
  * Bareos 완전 설치(v2.844 · 설정 탭 — 전 법인 범위 관리자만 보인다).
@@ -36,7 +37,7 @@ function Msg({ m }) {
   if (!m) return null;
   return <div className={`banner ${m.ok === false ? 'bad' : m.ok === 'warn' ? 'warn' : 'ok'}`} role={m.ok === false ? 'alert' : 'status'} style={{ marginTop: 10, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}><BoldText text={m.text} /></div>;
 }
-const copyText = (t, say) => { try { navigator.clipboard.writeText(t).then(() => say({ ok: true, text: '복사했습니다.' }), () => say({ ok: false, text: '복사하지 못했습니다 — 직접 선택해 복사하세요.' })); } catch { say({ ok: false, text: '복사하지 못했습니다.' }); } };
+const copyText = (t, say) => { copyToClipboard(t).then((ok) => say(ok ? { ok: true, text: '복사했습니다.' } : { ok: false, text: '복사하지 못했습니다 — 직접 선택해 복사하세요.' }), () => say({ ok: false, text: '복사하지 못했습니다 — 직접 선택해 복사하세요.' })); };
 
 function Stepper({ step, reinstall }) {
   const steps = [['targets', '대상 고르기'], ...(reinstall ? [['reset', '초기화 확인']] : []), ['precheck', '사전 점검'], ['plan', '설치 계획'], ['run', '실행'], ['finish', '마무리']];

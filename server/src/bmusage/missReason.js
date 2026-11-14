@@ -10,6 +10,8 @@ export function osMissOf(os) {
   if (!os) return 'no-path';
   if (os.ok) return '';
   if (os.authStopped) return 'auth-stopped';
+  // v3.9.0(점검 B-8): 접속 전에 자격 해석이 막았다(키 사용 중지 · 폴더 · 허용 기능 · 퇴역 · 바꿔치기 · 저장소 못 읽음) — 접속 오류(ssh-error)가 아니라 ‘설정 때문에 시도 안 함’.
+  if (os.authErrorCode) return 'cred-config';
   const e = String(os.error || '');
   if (os.busy) return 'pool-busy';
   if (isPeerRejectText(e)) return 'host-key';

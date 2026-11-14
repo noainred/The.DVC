@@ -58,7 +58,8 @@ import {
   scanInventory, findingsOf as invFindingsOf, groupFindings as invGroupFindings,
   findingCounts as invFindingCounts, INV_STATE, INV_FINDING, INV_GRADE, maskInventoryForDemoGuest,
 } from '../../portalcheck/invScan.js';
-import { isDemoGuest } from '../../auth/demoGuest.js';
+import { isDemoGuest, isAdminDetailUser } from '../../auth/demoGuest.js';
+import { getCommonCatalog, COMMON_STATUS } from '../../portalcheck/commonCatalog.js';   // v3.10 — 공통 기능(다섯째 서브메뉴)
 // v2.614 — 아키텍처 점검(세 번째 서브메뉴): 라우터 스택·게이트 태그·카탈로그·엣지 로그 표·BIG_JSON·DB·설정 파일·import 그래프.
 //   판정 코어(`portalcheck/archScan.js`)는 routes/ 를 import 하지 않으므로(arch2579 규칙 ①) 라우터는 **여기서** 넘긴다.
 import { adminRouter } from '../admin.js';
@@ -370,6 +371,25 @@ api.post('/tools/portal-check/arch/run', adminOnly, fullScopeOnly, async (req, r
   } catch (err) {
     res.status(500).json({ ok: false, reason: String(err?.message || err).slice(0, 300) });
   }
+});
+
+/**
+ * 다섯째 서브메뉴 — 공통 기능(v3.10 · 설계 docs/design/common-catalog).
+ *
+ * 빌드 때 `scripts/common-doc.mjs` 가 소스에서 만든 공통 기능 목록(`portalcheck/commonCatalog.json`)을 **읽어 주기만** 한다 —
+ * 배포본에는 소스가 없어 여기서 다시 만들 수 없다. 왕복 0 · 폴링 없음(화면은 마운트 1회).
+ *  · 문지기는 형제 보기와 같다(`adminOnly, fullScopeOnly`) + **관리자 판본만**(`isAdminDetailUser`) — 목록에는 서버 내부 모듈의
+ *    설명(SSRF 판정 · 비밀 승계 · 인증 정지 규칙)과 소스 경로가 들어 있다. 데모 계정(admin 문맥)은 403 이다.
+ *  · 파일이 없거나 못 읽으면 **200 + status** 로 말한다(`missing`·`unreadable`) — 빈 목록(모듈 0개)으로 만들지 않고,
+ *    읽기 오류의 원문(파일 조각 · 절대 경로)도 싣지 않는다.
+ */
+const COMMON_DENY_REASON = '공통 기능 목록은 관리자 계정만 조회할 수 있습니다 — 서버 내부 모듈의 설명과 소스 경로가 들어갑니다.';
+api.get('/tools/portal-check/common', adminOnly, fullScopeOnly, (req, res) => {
+  if (!isAdminDetailUser(req.user)) return res.status(403).json({ ok: false, error: 'forbidden', reason: COMMON_DENY_REASON });
+  const out = getCommonCatalog();
+  const version = safe(() => currentVersion(), '');
+  if (out.status !== COMMON_STATUS.OK) return res.json({ ok: true, status: out.status, version });
+  res.json({ ok: true, status: COMMON_STATUS.OK, version, ...out.catalog });
 });
 
 /**

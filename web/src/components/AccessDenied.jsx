@@ -13,6 +13,7 @@
 import { useState } from 'react';
 import { getCurrentUser } from '../api.js';
 import { describePermission, buildRequestText, deniedRoleLabel, deniedSubText } from './accessDeniedText.js';
+import { copyText as copyToClipboard } from '../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 
 export default function AccessDenied({ info = null, message = '', compact = false }) {
   const [copied, setCopied] = useState(false);
@@ -23,14 +24,8 @@ export default function AccessDenied({ info = null, message = '', compact = fals
   const text = buildRequestText({ user, info, reason });
 
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // 클립보드 차단 환경(비 HTTPS·권한 거부) — 아래 본문을 직접 선택해 복사하면 된다.
-      setCopied(false);
-    }
+    // 비 HTTPS 에서도 폴백으로 복사한다. 그래도 안 되면(권한 거부) 아래 본문을 직접 선택해 복사하면 된다.
+    if (await copyToClipboard(text)) { setCopied(true); setTimeout(() => setCopied(false), 2000); } else setCopied(false);
   };
 
   return (

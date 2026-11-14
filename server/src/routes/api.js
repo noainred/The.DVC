@@ -54,6 +54,7 @@ import { registerBmCompare } from './api/bmCompare.js'; // 6단계 리눅스 성
 import { registerBmCollectHealth } from './api/bmCollectHealth.js'; // 6단계 — 수집 건강 보드(메타 모니터링)
 import { registerBmAnnotations } from './api/bmAnnotations.js'; // 6단계 — 운영 주석(중앙 저장)
 import { registerBmOnboard } from './api/bmOnboard.js'; // 7b단계 — SSH 키 저장소 · 공통 계정 · 서버 등록(온보딩) · 누락 점검
+import { registerSshAccess } from './api/sshAccess.js'; // v3.9.0 설정 › 보안 › SSH 공용 접속(7b 키 저장소 위 — 폴더 · 서버별 키 · 키 보안)
 import { registerBmMaint } from './api/bmMaint.js'; // 8a단계 — 정비 창 · 알림 억제
 import { registerBmCapacity } from './api/bmCapacity.js'; // 8a단계 — 용량 소진 예측
 import { registerBmTop } from './api/bmTop.js'; // 8b단계 — 프로세스 Top-N
@@ -190,6 +191,7 @@ registerBmCompare(api);
 registerBmCollectHealth(api);
 registerBmAnnotations(api);
 registerBmOnboard(api);
+registerSshAccess(api);
 registerBmMaint(api);
 registerBmCapacity(api);
 registerBmTop(api);

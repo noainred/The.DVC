@@ -30,9 +30,17 @@ const encoder = new TextEncoder();
 let pool = null; // { workers:[{w, busy}], queue:[], pending:Map, seq } | null(비활성/실패)
 let poolBroken = false; // 초기화가 한 번 실패하면 이후 계속 인라인(재시도 폭주 방지)
 
+const RESPAWN_WINDOW_MS = 60_000;
+export const RESPAWN_MAX = 5;
+let _respawns = [];
+let _respawnWarned = false;
+
+let _workerUrlOverride = null;
 function workerUrl() {
-  return new URL('./parseWorker.js', import.meta.url);
+  return _workerUrlOverride || new URL('./parseWorker.js', import.meta.url);
 }
+/** 테스트 전용 — 워커 진입점을 바꾼다(뜨자마자 죽는 워커로 재생성 한도를 확인한다). */
+export function _setWorkerUrlForTest(u) { _workerUrlOverride = u || null; }
 
 function spawnWorker() {
   const w = new Worker(workerUrl());
@@ -68,7 +76,25 @@ function spawnWorker() {
     }
     if (pool) {
       pool.workers = pool.workers.filter((s) => s !== slot);
-      try { pool.workers.push(spawnWorker()); } catch { /* 재생성 실패 시 남은 워커로 지속 */ }
+      // v3.10.5(공용 유틸 점검 3회차): 재생성에 한도를 둔다 — 워커가 뜨자마자 죽으면(설치본에 parseWorker.js 가 없거나 깨짐) 'error' →
+      //   재생성 → 'error' 가 쉬지 않고 이어져 스레드를 끝없이 만들고 버렸다. 1분에 RESPAWN_MAX 번을 넘으면 더 만들지 않고,
+      //   남은 워커가 없으면 풀을 접고 메인 스레드에서 파싱한다(수집은 멈추지 않는다 — 큐의 작업도 그 자리에서 처리).
+      const now = Date.now();
+      _respawns = _respawns.filter((t) => now - t < RESPAWN_WINDOW_MS);
+      if (_respawns.length < RESPAWN_MAX) {
+        _respawns.push(now);
+        try { pool.workers.push(spawnWorker()); } catch { /* 재생성 실패 시 남은 워커로 지속 */ }
+      } else if (!_respawnWarned) {
+        _respawnWarned = true;
+        try { console.warn(`[soap-parse] 파싱 워커가 1분에 ${RESPAWN_MAX}번 넘게 죽어 더 띄우지 않습니다 — 남은 워커${pool.workers.length ? ` ${pool.workers.length}개` : '가 없어 메인 스레드'}로 파싱합니다.`); } catch { /* */ }
+      }
+      if (!pool.workers.length) {
+        const p = pool;
+        pool = null;
+        poolBroken = true;
+        for (const t of p.queue.splice(0)) { try { t.resolve(parseObjectContent(t.xml)); } catch (e) { t.reject(e); } }
+        return;
+      }
       // ⚠ 회귀 방지(v2.287, 확정 버그 #8): 죽은 워커가 물고 있던 1건만 재처리하고 drain 을
       // 부르지 않으면, 큐에 대기 중이던 나머지 파싱 작업의 Promise 가 영원히 pending 으로 남는다
       // (drain 은 push·다른 워커 message 에서만 돌고, parseObjectContentAsync 엔 타임아웃이 없다).
@@ -144,5 +170,5 @@ export async function shutdownParsePool() {
 
 /** 테스트용 내부 상태 확인. */
 export function _poolInfo() {
-  return { workerCount: WORKER_COUNT, minOffloadChars: MIN_OFFLOAD_CHARS, active: !!pool, broken: poolBroken };
+  return { workerCount: WORKER_COUNT, minOffloadChars: MIN_OFFLOAD_CHARS, active: !!pool, broken: poolBroken, respawnsInWindow: _respawns.length };
 }

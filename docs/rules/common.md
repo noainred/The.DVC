@@ -18,6 +18,7 @@
 - (원래 3180행) v2.577 에 훑었고 결함 0건으로 확인한 축
 - (원래 3227행) 의존 방향은 한쪽이다 — routes/ 는 index.js 만 import 하고, util/ 은 도메인을 모른다
 - 시간 비율(ReDoS · 선형 시간) 테스트는 크기 차이를 크게(8배) 두고 작은 쪽 · 큰 쪽을 번갈아 잰다
+- 공용 모듈은 `docs/COMMON.md`(생성물)에서 먼저 찾는다 — 새 헬퍼를 만들기 전에
 
 ## 본문
 
@@ -293,6 +294,45 @@
   **기준 24배** · 작은 쪽과 큰 쪽을 **번갈아 5회** 재 각각 최솟값(같은 시점의 부하를 함께 받게). 전체 웹 테스트 안에서 잰 비율 8.15~9.25(기준 24) ·
   제곱 변이(짝 찾기 무제한)는 약 65배(73→4,770ms)로 실패한다(예전 판은 같은 변이를 약 4배 · 기준 3.2배로 겨우 잡았다). 비율 판정은 그대로다(절대 시간 기준으로 바꾸지 말 것).
   ⚠ 정직 기록: 단일 파일 실행 + CPU 부하(4코어 바쁜 루프)로는 예전 판의 실패를 재현하지 못했다(12/12 통과) — 원인은 CI 병렬 실행 중 흔들림으로 **추정**한다.
+- **공용 모듈은 `docs/COMMON.md`(생성물)에서 먼저 찾는다 — 새 헬퍼·컴포넌트를 만들기 전에**(2026-11-14 사용자 요청 '전체 솔루션에서
+  사용하는 공통 기능' — `scripts/common-doc.mjs` + `server/test/commonDoc.test.js`):
+  - 왜: 공용 모듈 목록이 없어 같은 헬퍼를 다시 적었다 — `numOrNull` 13벌(v2.561) · 동시성 풀 23벌(v2.575) · `withDeadline` 2벌(v2.607).
+    목록은 공용 위치 5곳(`server/src/util` · `web/src/{components,hooks,util}` · `web/src` 최상위)의 모듈마다 머리 주석 첫 단락 ·
+    내보내는 이름 · 사용처(import 하는 파일 수) · 영역 수 · 테스트 수를 싣고, 공용 위치 밖인데 널리 쓰이는 모듈(서버 = 다른 영역 5개 이상 ·
+    웹 = 사용처 20개 파일 이상도)과 서버·웹 두 벌 모듈을 따로 적는다.
+  - **설명을 고치려면 그 모듈의 머리 주석 첫 단락을 고친다**(문서를 직접 고치지 않는다). 새 공용 모듈은 파일 맨 앞(import 문 앞이나 바로 뒤)에
+    한 단락으로 '무엇을 하는가' 를 적는다 — 없으면 '(머리 주석 없음)' 으로 실린다.
+  - **목록이 조금 낡아도 PR 은 깨지지 않는다**(v3.10.1 — 사용자 선택 '릴리스 때 재생성'): 소스 파일 하나만 늘어도 파일 수 · 사용처 수가 바뀌므로
+    v3.10.0 처럼 테스트가 `--check` 를 실패로 고정하면 병렬 세션의 PR 이 줄줄이 깨지고 `COMMON.md` · JSON 에서 서로 충돌한다(최근 3일 main:
+    커밋 244 · 새 소스 파일 220). 그래서 낡음은 CI **경고**(`ci.yml` continue-on-error)이고, 배포본은 **`release.yml` 이 패키징 직전에 다시 만든다**
+    (러너 작업본만 — 커밋하지 않는다 · 생성기가 실패하면 저장소의 목록을 그대로 싣고 릴리스는 계속). 테스트(`commonDoc`)는 그 두 단계의 존재 · 순서를
+    고정하고, 생성기 규칙(못 읽은 것 0 · 내보내는 이름 대조 · JSON 불변식)은 그대로 실패로 본다. 로컬에서 최신으로 보고 싶으면 `node scripts/common-doc.mjs`.
+  - **이 생성기 · 화면 자신의 테스트는 테스트 수에 넣지 않는다**(`CATALOG_SELF_TESTS` — v3.10.0 에 검사 데이터로 적은 모듈 경로가 ‘그 모듈을 가리키는 테스트’ 로
+    세어져 20개 모듈이 부풀고 5개가 0 → 1 이 됐다). 새 자기 테스트 파일을 만들면 그 목록에 넣는다(없는 파일을 적으면 테스트가 실패한다).
+  - 워커 진입점(`new Worker(new URL('./x.js', import.meta.url))`)도 사용처로 센다(v3.10.1 — `util/parseWorker.js` 가 ‘사용처 0’ 이었다).
+  - ⚠ 초판이 실제로 틀렸던 것 셋(테스트가 각각 고정): ① `export const SEL = '.a, .b'` 의 문자열을 import 대상으로 읽었다(`from` 을 거친 것만 읽는다)
+    ② 테스트의 조합 경로 동적 import(`import(pathToFileURL(path.join(SRC, 'util/x.js')))`) 600여 건을 못 세어 '테스트 0' 이 35개로 부풀었다
+    (테스트는 '실재 모듈을 가리키는 경로 문자열' 로 센다 — 24개) ③ 머리 주석이 import 뒤에 오는 `util/atomicWrite.js`(사용처 1위)가 '설명 없음' 이 됐다.
+  - 한계(문서 머리말에도 있다): 경로를 런타임에 조합하는 소스의 동적 import 는 사용처로 세지 못한다(그 파일을 문서에 밝힌다) · 경로를 조각으로
+    조합하는 테스트(`path.join(SRC, 'util', 'x.js')`)는 세지 못한다 — **'테스트 0'·'사용처 0' 은 판정이 아니라 살펴볼 후보**다. `pyportal/` 은 대상이 아니다.
+  - **생성물은 둘이다**(v3.10 — 포탈 점검 › 공통 기능 화면 · 설계 `docs/design/common-catalog`): 같은 명령이 `docs/COMMON.md` 와
+    `server/src/portalcheck/commonCatalog.json`(화면이 읽는 것)을 함께 만들고 `--check` 가 둘 다 본다. JSON 을 `server/src` 에 두는 이유 —
+    배포본에는 `web/src`·`server/test`·`scripts/` 가 없어 포탈이 다시 만들 수 없고(`build-package.sh` 는 server/src · web/dist 만 담는다),
+    `web/public` 에 두면 로그인 없이 받을 수 있다(`web/dist` 는 인증 없이 서빙 — 목록에 서버 내부 모듈의 설명이 있다). **`web/public` 으로 옮기지 말 것.**
+    JSON 에 버전 · 생성 시각을 싣지 않는다(릴리스의 버전업마다 다시 만들게 된다). 라우트 `GET /api/tools/portal-check/common` 은
+    `adminOnly, fullScopeOnly` + 관리자 판본만(`isAdminDetailUser` — 데모 계정 403) · 파일이 없으면 `missing`, 못 읽으면 `unreadable`(빈 목록으로 만들지 않는다).
+    회귀 `server/test/commonCatalog3100.test.js`(실제 라우트 호출) · `web/src/views/tools/commonCatalogText.test.js`.
+  - **머리 주석은 파일 맨 앞에 둔다** — 생성기는 import 뒤의 주석을 보수적으로 읽는다(v3.10 Chromium 판독에서 `store.js` 가 ‘v2.617’ 로 실렸다):
+    import 줄 끝 주석 · import 사이 한 줄 메모는 버리고, import 뒤 주석이 선언에 바로 붙어 있으면 내보내는 함수 · 클래스 · 기본 내보내기 ·
+    파일과 같은 이름의 선언일 때만 모듈 설명으로 쓴다. 모듈 상수 위에 둔 머리 주석(`TaskWho.jsx` · `EscClose.jsx`)은 ‘설명 없음’ 이 된다.
+  - 내보내는 이름은 정규식으로 읽되 테스트가 서버 유틸 전수를 **실제 모듈 네임스페이스**(`Object.keys(await import())`)와 대조한다.
+    이름을 못 뽑는 형태(`export const { a } = x`)·풀리지 않는 상대 import·빈 공용 위치는 **종료코드 1 이고 파일을 쓰지 않는다**.
+  - **공용 모듈 점검 10회(v3.10.3 ~ v3.10.12, 2026-11-15)** — 회차별 회귀는 `server/test/commonRound{1,2,3,4,5,9}_31xx.test.js` 와 웹 테스트(6 · 7 · 8 · 10회차)에 있다.
+    되풀이된 결함: 결측을 `Number()`·`|| 0` 으로 0 으로 읽음(cmpVersion 빈 세그먼트 · fmt · vmMetricsText) · 보류 · 잠금에 시한 없음(exportBusy · 활동 신호) ·
+    공용 헬퍼를 두고 직접 부름(클립보드 26줄 → `util/copyText.js` 만 — 웹 소스 스윕이 막는다) · 머리말이 코드와 다름(relTime · selectSort).
+    **남긴 것(다음 점검의 첫 후보)**: ① `JSON.parse(fs.readFileSync(F)) || {}` 형태가 도메인 저장소 32곳에 남아 객체가 아닌 JSON(`5`·`[]`)을 그대로 쓴다
+    (runtime-settings 는 v3.10.11 에 고쳤다 — 공용 '객체 JSON 읽기' 헬퍼로 옮길 후보, 비밀을 담는 저장소가 섞여 있어 한꺼번에 바꾸지 않았다)
+    ② `bmFoldersText.ageText` · `hostSanText` 의 자체 상대시각(문턱이 다른 의도된 사본 — relTime 으로 합칠지는 화면 계약 확인 뒤).
 - **테스트가 띄운 프로세스를 PID 로 정리할 때는 소유를 확인하고 죽인다**(2026-10-26 PR #779 → v3.8.1 이식): `npm test` 는 파일을 병렬로 돌리므로, 로그에 남긴 PID 의
   프로세스가 이미 끝났다면 그 번호가 다른 테스트 파일의 자식에 재사용됐을 수 있다(이 컨테이너 `pid_max` 32768). 로그된 PID 를 무조건
   `process.kill` 하지 말 것 — 가짜 `ping` 은 `test/_fakePing.js`(`installFakePing(dir)` → `killOwned()`: exec 된 sleep 환경의

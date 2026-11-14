@@ -26,10 +26,46 @@ describe('createActivityPinger', () => {
     const p = createActivityPinger({ send: () => { calls++; return new Promise((_, rej) => { release = rej; }); }, now: () => t });
     p.ping(true);
     await tick();
-    t += 120_000; expect(p.ping()).toBe(false);
+    // v3.10.8: 전송 중 보류는 한 간격(60초) 안에서만 — 예전 판본은 120초 뒤에도 false 였다(아래 '끝나지 않는 전송' 결함).
+    t += 30_000; expect(p.ping(true)).toBe(false);
     release(new Error('net'));
     await tick(); await tick();
-    expect(p.ping()).toBe(true);
+    expect(p.ping(true)).toBe(true);
+    await tick();
+    expect(calls).toBe(2);
+  });
+
+  // v3.10.8(공통 기능 점검 6회차): fetch 는 기본 시한이 없다 — 끊긴 연결에서 전송이 끝나지 않으면 예전엔 그 뒤 활동 신호가
+  //   영원히 나가지 않아, 사용자가 일하는 중에 서버 유휴 만료(120초 여유)로 로그아웃됐다.
+  it('끝나지 않는 전송이 활동 신호를 영원히 막지 않는다 — 한 간격 뒤 다시 보낸다', async () => {
+    let t = 1_000_000; let calls = 0;
+    const p = createActivityPinger({ send: () => { calls++; return new Promise(() => {}); }, now: () => t });
+    expect(p.ping(true)).toBe(true);
+    await tick();
+    t += ACTIVITY_MIN_INTERVAL_MS - 1; expect(p.ping()).toBe(false);
+    t += 1; expect(p.ping()).toBe(true);
+    await tick();
+    expect(calls).toBe(2);
+    t += ACTIVITY_MIN_INTERVAL_MS; expect(p.ping()).toBe(true);
+    expect(ACTIVITY_MIN_INTERVAL_MS).toBeLessThan(120_000);
+  });
+
+  it('늦게 끝난 옛 전송이 새 전송의 보류 표시를 지우지 않는다', async () => {
+    let t = 0; const rel = [];
+    const p = createActivityPinger({ send: () => new Promise((r) => { rel.push(r); }), now: () => t });
+    p.ping(true); await tick();
+    t += ACTIVITY_MIN_INTERVAL_MS; expect(p.ping()).toBe(true);   // 옛 전송은 아직 — 시한이 지나 새로 보냄
+    await tick();
+    expect(rel.length).toBe(2);
+    rel[0](); await tick(); await tick();                         // 옛 전송이 이제 끝남
+    t += 1_000; expect(p.ping(true)).toBe(false);                  // 새 전송은 아직 진행 중 — 겹쳐 보내지 않는다
+  });
+
+  it('시계를 되돌려도 막히지 않는다(남긴 시각이 미래)', async () => {
+    let t = 10_000_000; let calls = 0;
+    const p = createActivityPinger({ send: () => { calls++; }, now: () => t });
+    p.ping(true); await tick();
+    t -= 3_600_000; expect(p.ping()).toBe(true);
     await tick();
     expect(calls).toBe(2);
   });

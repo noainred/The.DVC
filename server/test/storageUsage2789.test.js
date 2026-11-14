@@ -13,6 +13,7 @@
  *  ⑥ 메일 — 형식 오류 400(field) · since · 가짜 SMTP 로 지금 보내기 · 예약 회차 한 번만 · 상태에 주소 없음 · 본문 이스케이프
  */
 import { test, after } from 'node:test';
+import { decodeSubject } from './_mailDecode.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -194,8 +195,7 @@ test('⑤ 라우터 — 일간 보고표 · 하위 항목 · 비관리자 주소
 
 /* ── ⑥ 메일 ─────────────────────────────────────────────────────────── */
 function decodeMail(raw) {
-  const m = /^Subject: (.*)$/mi.exec(raw);
-  const subject = m ? m[1].replace(/=\?UTF-8\?B\?([^?]*)\?=/gi, (_x, x) => Buffer.from(x, 'base64').toString('utf8')) : '';
+  const subject = decodeSubject(raw);   // v3.10.4: 접힌 긴 제목까지(test/_mailDecode.js)
   const out = []; let mode = 'hdr'; let buf = '';
   for (const line of raw.split('\n')) {
     if (/^Content-Transfer-Encoding:\s*base64/i.test(line)) { mode = 'wait'; continue; }

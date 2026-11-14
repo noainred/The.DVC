@@ -19,6 +19,7 @@ import {
   fillResultText, directorPlanFiles, directorConflicts, freeConsoleName, consoleTaken, conflictText, ownFromPaths, catalogErrorText,
   directorAgentAdvice, directorAgentAdviceText, defaultsPatch, mergeDefaultsOnReload,
 } from './bareosText.js';
+import { copyText as copyToClipboard } from '../../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 
 /**
  * Bareos VM 백업 › 설정(v2.823 법인별 Director — 전체 범위 관리자).
@@ -50,7 +51,7 @@ const hostOf = (v) => String(v?.host || '').replace(/^https?:\/\//, '').replace(
 /** 클립보드 복사 + 결과 안내(W13 — 실패를 삼키지 않는다). */
 const copyWith = (say) => (text) => {
   const fail = () => say({ ok: false, text: '복사하지 못했습니다 — 글을 직접 선택해 복사하세요.' });
-  try { navigator.clipboard.writeText(text).then(() => say({ ok: true, text: '복사했습니다.' }), fail); } catch { fail(); }
+  copyToClipboard(text).then((ok) => (ok ? say({ ok: true, text: '복사했습니다.' }) : fail()), fail);
 };
 
 function Msg({ m }) {

@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>SSH 공용 접속 — 키 로그인 설정</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.5}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.sm{font-size:11.5px;color:#8b9bb4}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn.pri{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;box-sizing:border-box}
+.tag.ok{background:rgba(34,197,94,.16);color:#86efac}
+.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}
+.k{flex:0 0 132px;color:#8b9bb4;font-size:12px;padding-top:1px}
+.v{flex:1 1 300px;min-width:0}
+.line{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap}
+.box{border:1px solid #243049;border-radius:10px;background:#0f1626}
+.opt{display:flex;gap:8px;align-items:center;min-height:36px}
+input[type=radio],input[type=checkbox]{accent-color:#3b82f6;margin:0;width:15px;height:15px}
+input[type=password],input[type=text]{height:36px;box-sizing:border-box;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:13px;padding:0 10px}
+ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px}
+h2{margin:0;font-size:14px;font-weight:800}
+.res{display:flex;gap:8px 12px;align-items:baseline;flex-wrap:wrap;padding:9px 12px;border-bottom:1px solid #1f2a40}
+</style>
+</helmet>
+<div style="width:760px;height:1200px;box-sizing:border-box;padding:28px;display:flex;flex-direction:column;gap:18px;background:#0a0e17">
+
+<div role="dialog" aria-labelledby="k-t" style="background:#141b2d;border:1px solid #243049;border-radius:14px;box-shadow:0 4px 24px rgba(0,0,0,.4);display:flex;flex-direction:column">
+
+<div style="padding:18px 20px 12px;display:flex;flex-direction:column;gap:4px">
+<h1 id="k-t" style="margin:0;font-size:17px;font-weight:800">키 로그인 설정 — 폴란드 · 서버 1대</h1>
+<span class="muted">서버에 공개키 한 줄을 넣어, 다음부터 비밀번호 없이 접속하게 합니다.</span>
+</div>
+
+<div style="padding:4px 20px 16px;display:flex;flex-direction:column;gap:13px">
+<div class="line"><span class="k">대상</span><span class="v"><b>pl-bareos-01</b> <span class="sm mono">192.0.2.70 · root</span></span></div>
+<div class="line"><span class="k">넣을 키</span><span class="v">폴란드 공통 키 <span class="mono sm">ed25519 · SHA256:9fQ2mV…kT8w</span><br><span class="sm">키 폴더 ‘폴란드 › 공통’ · 엣지 pl-edge 보관</span></span></div>
+<div class="line"><span class="k">등록에 쓸 비밀번호</span>
+<span class="v" style="display:flex;flex-direction:column;gap:2px">
+<label class="opt"><input type="radio" name="pw" checked><span>이 서버에 저장된 비밀번호 사용</span></label>
+<label class="opt"><input type="radio" name="pw"><span>지금 입력 — 이번 한 번만 쓰고 저장하지 않습니다</span></label>
+<input type="password" aria-label="등록에 쓸 비밀번호" placeholder="비밀번호" disabled style="max-width:280px;opacity:.5">
+</span>
+</div>
+<div class="line"><span class="k">하는 일</span>
+<span class="v"><ol>
+<li>비밀번호로 한 번 접속합니다.</li>
+<li><span class="mono">~/.ssh/authorized_keys</span> 끝에 공개키 한 줄을 더합니다 — 포탈이 넣은 줄임을 알 수 있게 표식을 붙입니다.</li>
+<li>접속을 끊고 키로 다시 접속해 확인합니다.</li>
+<li>확인되면 ‘키 로그인 됨’ 으로 기록합니다.</li>
+</ol></span>
+</div>
+<div class="line"><span class="k">잘 안 되면</span><span class="v">키 접속이 확인되지 않으면 더한 줄을 지우고 원래대로 둡니다. 비밀번호가 틀리면 다시 시도하지 않습니다(계정 잠금 방지).</span></div>
+<div class="line"><span class="k">선택</span>
+<span class="v" style="display:flex;flex-direction:column;gap:2px">
+<label class="opt"><input type="checkbox" checked><span>키 로그인이 확인되면 저장된 비밀번호를 지웁니다</span></label>
+<label class="opt"><input type="checkbox"><span>이 키는 엣지 주소(192.0.2.5)에서 올 때만 받게 합니다</span></label>
+</span>
+</div>
+<div class="line"><span class="k">바꾸지 않는 것</span><span class="v">sshd 설정(비밀번호 로그인 허용 여부 등) · sudoers · 다른 사람이 넣은 키 줄.</span></div>
+<div class="line"><span class="k">본인 확인</span><span class="v"><input type="text" inputmode="numeric" aria-label="OTP 6자리" placeholder="OTP 6자리" style="width:140px"> <span class="sm">서버의 접속 경로를 바꾸는 작업이라 OTP 를 등록한 관리자만 할 수 있습니다</span></span></div>
+</div>
+
+<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;padding:14px 20px;border-top:1px solid #1f2a40">
+<button class="btn" type="button">취소</button>
+<button class="btn pri" type="button">키 로그인 설정</button>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:8px">
+<h2>끝난 뒤 — 서버마다 한 줄</h2>
+<div class="box">
+<div class="res"><span class="tag ok">완료</span><b>pl-bareos-01</b><span class="muted" style="flex:1 1 300px;min-width:0">키 접속 확인 · 저장된 비밀번호 삭제</span></div>
+<div class="res"><span class="tag bad">실패</span><b>pl-new-04</b><span class="muted" style="flex:1 1 300px;min-width:0">비밀번호 인증 거부 — 서버에서 바꾼 것 없음. 다시 시도하지 않았습니다.</span></div>
+<div class="res" style="border-bottom:0"><span class="tag bad">실패</span><b>pl-old-02</b><span class="muted" style="flex:1 1 300px;min-width:0">키 접속 확인 실패(서버가 키 로그인을 받지 않음) — 더한 줄을 지웠습니다.</span></div>
+</div>
+<span class="sm">여러 대를 고르면 같은 창에서 한 번에 하고, 법인 안에서는 1대씩 차례로 합니다. 키를 ‘교체’ 할 때도 같은 순서입니다 — 새 키 접속을 확인한 뒤에만 옛 키 줄을 지웁니다.</span>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":760,"height":1200}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

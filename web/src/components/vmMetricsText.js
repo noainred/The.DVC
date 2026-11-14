@@ -13,6 +13,7 @@
  *   20초마다 같은 409 를 다시 받았다. 이제 `skip` 으로 따로 돌려주고 자동 갱신을 멈춘다(문구는 vcAuthStopText 한 벌).
  */
 import { skipSingleText } from '../views/vcAuthStopText.js';
+import { numOrNull } from '../numOrNull.js';
 
 /**
  * @param {unknown} err fetchJson 이 던진 오류(HttpError 면 `status`·`body` 가 있다)
@@ -23,8 +24,9 @@ export function metricErrorState(err) {
   if (body && typeof body === 'object' && body.authStopped === true) {
     // ⚠ `Number(null) === 0` — 모르면 횟수를 말하지 않는다(v2.525 규약).
     const a = body.attempts;
-    const attempts = a == null || a === '' || !Number.isFinite(Number(a)) ? null : Number(a);
-    const since = body.since == null || body.since === '' || !Number.isFinite(Number(body.since)) ? null : Number(body.since);
+    // v3.10.9(공통 기능 점검 7회차): 손으로 쓴 판정은 공백 문자열('  ')·배열([])을 0 으로 통과시켰다 — 공용 numOrNull 로.
+    const attempts = numOrNull(a);
+    const since = numOrNull(body.since);
     return { authStopped: { attempts, since, reason: String(body.reason || '') }, skip: null, message: String(body.reason || err.message || '') };
   }
   if (body && typeof body === 'object' && typeof body.skipReason === 'string' && body.skipReason) {

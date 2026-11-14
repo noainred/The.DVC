@@ -11,16 +11,12 @@ import { createPortal } from 'react-dom';
 import { can } from '../../../api.js';
 import { VmRemoteButton } from '../../../components/VmRemote.jsx';
 import { idracLinks, SSH_USER_KEY } from './hwText.js';
+import { copyText as copyToClipboard } from '../../../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 
 const readUser = () => { try { return localStorage.getItem(SSH_USER_KEY) || 'root'; } catch { return 'root'; } };
 const saveUser = (v) => { try { localStorage.setItem(SSH_USER_KEY, v); } catch { /* 저장 못 해도 이번 화면에서는 쓴다 */ } };
-async function copyText(text) {
-  try { if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true; } } catch { /* 아래 대체 */ }
-  try {
-    const ta = document.createElement('textarea'); ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
-    document.body.appendChild(ta); ta.select(); const ok = document.execCommand('copy'); document.body.removeChild(ta); return ok;
-  } catch { return false; }
-}
+// v3.10.6: 손으로 적은 폴백 대신 공용 util/copyText.js 하나를 쓴다(같은 판정이 25곳에 흩어져 있었다).
+const copyText = (text) => copyToClipboard(text);
 
 export function IdracConnect({ addr, name, corp, small = false }) {
   const [pos, setPos] = useState(null);

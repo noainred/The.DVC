@@ -70,7 +70,18 @@ export function encodeHeaderWord(s) {
   if (!v) return '';
   // eslint-disable-next-line no-control-regex
   if (/^[\x20-\x7e]*$/.test(v)) return v;             // 순수 ASCII 는 그대로
-  return `=?UTF-8?B?${Buffer.from(v, 'utf8').toString('base64')}?=`;
+  // v3.10.4(공용 유틸 점검 2회차): encoded-word 하나는 75자를 넘으면 안 되고(RFC 2047 §2) 헤더 한 줄은 998자 상한이다(RFC 5322 §2.1.1).
+  //   예전에는 제목 전체를 한 덩어리로 인코딩해 한글 25자쯤부터 75자를 넘었고, 긴 경보 제목은 998자까지 넘길 수 있었다.
+  //   UTF-8 39바이트(= base64 52자 + 12자 틀 = 64자) 단위로 글자 경계에서 나눠 접는다(CRLF + 공백 — 디코더는 단어 사이 공백을 지운다).
+  //   'Subject: ' 를 붙여도 첫 줄이 78자 권고 안에 든다.
+  const words = [];
+  let cur = '';
+  for (const ch of v) {
+    if (cur && Buffer.byteLength(cur + ch, 'utf8') > 39) { words.push(cur); cur = ''; }
+    cur += ch;
+  }
+  if (cur) words.push(cur);
+  return words.map((w) => `=?UTF-8?B?${Buffer.from(w, 'utf8').toString('base64')}?=`).join('\r\n ');
 }
 
 /**
@@ -93,7 +104,8 @@ export function formatDisplayName(n) {
     cur += ch;
   }
   if (cur) words.push(cur);
-  return words.map((w) => (/^[\x20-\x7e]*$/.test(w) ? `=?UTF-8?B?${Buffer.from(w, 'utf8').toString('base64')}?=` : encodeHeaderWord(w))).join(' ');
+  // v3.10.4: 단어마다 직접 인코딩한다 — encodeHeaderWord 는 39바이트에서 접으므로(제목용) 45바이트 표시 이름 단어 안에 CRLF 가 끼었다.
+  return words.map((w) => `=?UTF-8?B?${Buffer.from(w, 'utf8').toString('base64')}?=`).join(' ');
 }
 
 /** base64 본문을 76자로 접는다(RFC 2045 권장 줄 길이). */

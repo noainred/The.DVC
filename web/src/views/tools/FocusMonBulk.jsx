@@ -14,6 +14,7 @@ import {
   DASH, CSV_ACTION_TEXT, csvChangeText, csvGroupNote, groupLabel, decodeCsvBytes, WAKE_TEXT, wakeFallbackText, upgradeText, diagItems, installGroups, installCommand, INSTALL_NOTE,
   nodeText, agoShort, KEY_FILE_NOTE, csvHeaderNotes,
 } from './focusMonText.js';
+import { copyText as copyToClipboard } from '../../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 
 export function Seg({ value, options, onChange, label }) {
   return (
@@ -23,7 +24,9 @@ export function Seg({ value, options, onChange, label }) {
   );
 }
 export function Badge({ b }) { return b ? <span className={`fm-badge ${b.tone || 'off'}`}>{b.label}</span> : null; }
-export function copyText(t) { try { navigator.clipboard?.writeText(t); return true; } catch { return false; } }
+// v3.10.6: 예전에는 동기로 true 를 돌려줬다 — HTTP 포탈에서는 navigator.clipboard 가 없어 아무것도 복사하지 않고도 '복사했습니다' 가 떴다.
+//   이제 실제 결과(Promise<boolean>)를 돌려준다.
+export function copyText(t) { return copyToClipboard(t); }
 
 /* ── CSV 대량 등록 ─────────────────────────────────────────────────────────── */
 export function CsvPanel({ main, busy, run, onClose }) {
@@ -146,7 +149,7 @@ export function NodeCard({ x, main, busy, run, setMsg, count, onInstall, install
       <div className="fm-row fm-between">
         <span><b>{nodeText(x.agent)}</b> <span className="fm-dim">· 서버 {count}대{edge ? ` · ${x.online ? '연결됨' : x.at ? `마지막 동기화 ${agoShort(x.at, now)}` : '동기화 기록 없음'}${x.version ? ` · v${x.version}` : ''}` : ''}</span></span>
         <span className="fm-row">
-          {x.key?.publicKey ? <button type="button" className="fm-btn sm" onClick={() => setMsg(copyText(x.key.publicKey) ? { tone: 'ok', text: '공개키를 복사했습니다.' } : { tone: 'bad', text: '복사하지 못했습니다 — 글을 직접 선택해 복사하세요.' })}>공개키 복사</button> : null}
+          {x.key?.publicKey ? <button type="button" className="fm-btn sm" onClick={async () => setMsg((await copyText(x.key.publicKey)) ? { tone: 'ok', text: '공개키를 복사했습니다.' } : { tone: 'bad', text: '복사하지 못했습니다 — 글을 직접 선택해 복사하세요.' })}>공개키 복사</button> : null}
           {x.key?.publicKey ? <button type="button" className={`fm-btn sm ${installOn ? 'pri' : ''}`} onClick={onInstall}>설치 명령</button> : null}
           {!x.key?.publicKey && x.kind === 'central' ? <button type="button" className="fm-btn sm" disabled={!!busy} onClick={() => run('key', () => postJson('/tools/focus-mon/key', {}).then((r) => ({ ok: r?.ok !== false, reason: r?.created ? '중앙 키를 만들었습니다.' : r?.reason || '이미 키가 있습니다.' })))}>키 만들기</button> : null}
           {!x.key?.publicKey && edge ? <span className="fm-badge off">키 없음</span> : null}
@@ -186,7 +189,7 @@ export function InstallCard({ node, main, setMsg, defaultUser }) {
   if (!node?.key?.publicKey) return null;
   const groups = installGroups(main.targets, node.agent);
   const list = groups.length ? groups : [{ user: defaultUser || 'dvcmon', hosts: [] }];
-  const copy = (t, what) => setMsg(copyText(t) ? { tone: 'ok', text: `${what}을(를) 복사했습니다.` } : { tone: 'bad', text: '복사하지 못했습니다 — 글을 직접 선택해 복사하세요.' });
+  const copy = async (t, what) => setMsg((await copyText(t)) ? { tone: 'ok', text: `${what}을(를) 복사했습니다.` } : { tone: 'bad', text: '복사하지 못했습니다 — 글을 직접 선택해 복사하세요.' });
   return (
     <div className="fm-card">
       <h3 className="fm-h3">대상 서버에 넣는 방법 — {nodeText(node.agent)} 키</h3>

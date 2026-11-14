@@ -98,8 +98,10 @@ test('C5-02 — index.js: logbuffer 다음 두 번째 import 가 예약 적용 �
   assert.match(lines[1], /^import '\.\/backup\/stagedRestoreBoot\.js';/);
   const importsOf = (rel) => [...fs.readFileSync(path.join(SRC, rel), 'utf8').matchAll(/^import\s[^;]*?from\s+'([^']+)'|^import\s+'([^']+)'/gm)].map((x) => x[1] || x[2]);
   assert.deepEqual(importsOf('backup/stagedRestoreBoot.js'), ['./stagedRestore.js']);
-  assert.deepEqual(importsOf('backup/stagedRestore.js').filter((s) => !s.startsWith('node:')), ['../util/atomicWrite.js']);
+  // v3.9.0(SSH 공용 접속 반증 D5): 적용 시점 SSH 키 저장소 다시 합치기 — keyBundle.js 도 무의존 leaf 여야 한다(아래에서 고정).
+  assert.deepEqual(importsOf('backup/stagedRestore.js').filter((s) => !s.startsWith('node:')), ['../util/atomicWrite.js', '../bmusage/onboard/keyBundle.js']);
   assert.deepEqual(importsOf('util/atomicWrite.js').filter((s) => !s.startsWith('node:')), []);
+  assert.deepEqual(importsOf('bmusage/onboard/keyBundle.js').filter((s) => !s.startsWith('node:')), []);
   assert.deepEqual(importsOf('logbuffer.js'), ['./util/capStr.js']);
   assert.deepEqual(importsOf('util/capStr.js').filter((s) => !s.startsWith('node:')), []);
   // CONFIG_DIR 판정은 config.js 와 같다

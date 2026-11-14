@@ -90,6 +90,66 @@ function cleanRecord(r, now) {
   return { entryId: s(r.entryId, 64), created, createdRaw: raw, clockAhead: raw > created, messageId: s(r.messageId, 64), severity: s(r.severity, 16), message: s(r.message, 300), code: s(r.code, 12) };
 }
 
+// 과거 기록 읽기 1단계(README §22) — 디스크 값 · SEL. 모르는 판의 엣지는 보내지 않는다(null — 중앙은 지난 값을 그대로 둔다).
+export const VALS_STATUS = Object.freeze(['ok', 'empty', 'absent', 'forbidden', 'error', 'timeout', 'auth']);
+export const SEL_STATUS = VALS_STATUS;
+const VALS_SET = new Set(VALS_STATUS);
+const SRC_SET = new Set(['telemetry', 'metrics', '']);
+const PART_SET = new Set(['ok', 'empty', 'absent', 'forbidden', 'error', '']);
+const SEL_STOPS = new Set(['', 'budget', 'max', 'skip', 'short', 'error', 'timeout']);
+/** 제어 문자는 빈칸으로(반증 F2 — JSON 으로 저장하면 한 글자가 6글자(\\uXXXX)로 불어 저장 크기가 예측을 넘었다). 길이는 먼저 자른다. */
+const plain = (v, n) => s(v, n).replace(/[\u0000-\u001f\u007f]/g, ' ');
+const KIND_SET = new Set(['removed', 'installed', 'fault', 'predictive', 'other']);
+export const VALS_DRIVES_MAX = 64;
+export const SEL_EVENTS_MAX = 100;
+/** 0 이상의 수(소수 허용 — 가동 시간). 못 읽으면 null. */
+const nn = (v) => { const n = numOrNull(v); return n != null && n >= 0 ? n : null; };
+
+export function cleanVals(v, now) {
+  if (!isObj(v)) return null;
+  const status = VALS_SET.has(v.status) ? v.status : 'error';
+  const drives = Array.isArray(v.drives) ? v.drives.slice(0, VALS_DRIVES_MAX).map((d) => {
+    if (!isObj(d)) return null;
+    const id = plain(d.id, 200).trim();
+    if (!id) return null;
+    const o = { id, realloc: cnt(d.realloc), pending: cnt(d.pending), uncorrectable: cnt(d.uncorrectable), powerOnHours: nn(d.powerOnHours), src: SRC_SET.has(d.src) ? d.src : '' };
+    return [o.realloc, o.pending, o.uncorrectable, o.powerOnHours].some((x) => x != null) ? o : null;
+  }).filter(Boolean) : [];
+  return {
+    at: clampTime(v.at, now) ?? now, status: status === 'ok' && !drives.length ? 'empty' : status,
+    telemetry: PART_SET.has(v.telemetry) ? v.telemetry : '', metrics: PART_SET.has(v.metrics) ? v.metrics : '',
+    reportAt: clampTime(v.reportAt, now), seen: Array.isArray(v.seen) ? v.seen.slice(0, 40).map((x) => plain(x, 64)).filter(Boolean) : [],
+    drives,
+  };
+}
+
+export function cleanSel(v, now) {
+  if (!isObj(v)) return null;
+  const events = Array.isArray(v.events) ? v.events.slice(0, SEL_EVENTS_MAX).map((e) => {
+    if (!isObj(e)) return null;
+    const disk = cnt(e.disk); const bp = cnt(e.bp);
+    const slotKey = s(e.slotKey, 24);
+    const created = clampTime(e.created, now);
+    // 반증 F3: 자른 시각(수신 + 5분)은 표시용이다. 중복 거르기 키에는 **장비가 준 원래 시각**을 쓰고(db.js mergeSel), 시계가 빠른 장비의
+    //   항목은 판정에 쓰지 않는다(verdict.js — 날짜를 믿을 수 없으면 '기록 뒤 빠짐' 을 말할 수 없다). LC 기록의 반증 #10 과 같은 선.
+    const raw = numOrNull(e.created);
+    return {
+      created, createdRaw: created != null && raw != null ? Math.floor(raw) : null, clockAhead: created != null && raw != null && raw > created,
+      kind: KIND_SET.has(e.kind) ? e.kind : 'other', disk, bp,
+      // 위치 키는 이 꼴만(엣지가 만든 글자를 그대로 믿지 않는다 — 위치 번호와도 맞아야 한다).
+      slotKey: disk != null && bp != null && slotKey === `bp${bp}:d${disk}` ? slotKey : '',
+      messageId: plain(e.messageId, 64), message: plain(e.message, 300), severity: plain(e.severity, 16), sensor: plain(e.sensor, 40),
+    };
+  }).filter(Boolean) : [];
+  const kinds = {};
+  if (isObj(v.kinds)) for (const k of KIND_SET) { const n = cnt(v.kinds[k]); if (n != null) kinds[k] = n; }
+  return {
+    at: clampTime(v.at, now) ?? now, status: VALS_SET.has(v.status) ? v.status : 'error',
+    read: cnt(v.read), total: cnt(v.total), pages: cnt(v.pages), stopped: SEL_STOPS.has(v.stopped) ? v.stopped : '',
+    oldest: clampTime(v.oldest, now), newest: clampTime(v.newest, now), kinds, events,
+  };
+}
+
 function cleanDrive(d) {
   if (!isObj(d)) return null;
   const cap = numOrNull(d.capacityGB);
@@ -116,6 +176,7 @@ export function cleanServer(x, now) {
     records, recordsCapped: x.recordsCapped === true || (Array.isArray(x.records) && x.records.length > RECORDS_MAX),
     drives, invAt: clampTime(x.invAt, now), synthesized: x.synthesized === true,
     probe: cleanProbe(x.probe),
+    vals: cleanVals(x.vals, now), sel: cleanSel(x.sel, now),
   };
 }
 

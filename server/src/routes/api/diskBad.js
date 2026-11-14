@@ -211,6 +211,8 @@ export function registerDiskBad(api) {
     const running = listJobs().some((j) => j.units.some((u) => (u.agent === s.agent) && (u.state === 'queued' || u.state === 'running')));
     // 장비 진단(그 장비가 무엇을 주는가 — 펌웨어 판 · 속성 이름 등)은 관리자 판본에만 싣는다.
     const probe = isAdminDetailUser(req.user) && d.server?.probe ? { probe: d.server.probe, probeAt: d.server.probeAt } : {};
+    // 장비가 준 디스크 값 이름(메트릭 id)도 장비 진단과 같은 성격(속성 이름)이라 관리자 판본에만(반증 F15 — 같은 종류를 다르게 가리지 않는다).
+    if (!isAdminDetailUser(req.user) && v.coverage?.vals) v.coverage.vals = { ...v.coverage.vals, seen: [] };
     // canProbe: 이 계정이 장비 진단을 볼 수 있는가 — 화면이 '아직 없다 · 받는 방법' 을 관리자에게만 안내한다.
     res.json({ ok: true, server: s, view: v, scanned: !!d.server, running, labels: labelsPayload(), excluded: s.excluded, canProbe: isAdminDetailUser(req.user), ...probe });
   });
