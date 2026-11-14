@@ -59,6 +59,7 @@ export const ROW_CODE = Object.freeze({
   'os-cred-empty': 'os_cred 가 비어 있습니다(공통 계정 이름 또는 ‘개별:계정명’).',
   'key-missing': 'SSH 키 이름이 키 저장소에 없습니다(값은 표시하지 않습니다).',
   'key-retired': '회전으로 퇴역한 SSH 키입니다 — 새 키 이름을 적으세요.',
+  'key-pending': '두 사람 승인을 기다리는 SSH 키입니다 — 승인된 뒤에 고를 수 있습니다(v3.10.0).',
   'password-no-secret': 'os_key 가 password 인데 공통 계정에 비밀번호가 없습니다.',
   'dup-name': '같은 name 이 파일 안에 이미 있습니다.',
   'dup-tag': '같은 service_tag 가 파일 안에 이미 있습니다.',
@@ -318,7 +319,7 @@ export function analyzeOnboardRows(rows = [], ctx = {}) {
         else {
           const k = typeof ctx.keyByName === 'function' ? ctx.keyByName(osKey) : null;
           if (!k) { reject('key-missing'); done(); continue; }
-          if (k.status === 'retired') { reject('key-retired'); done(); continue; }
+          if (k.status !== 'active') { reject(k.status === 'pending' ? 'key-pending' : 'key-retired'); done(); continue; }   // 승인 대기 키도 거절(점검 A7 · D-2 — 활성만)
           keyRef = k.id; res.key = k.name; osKeyName = k.name;
         }
       } else if (!osAcc && !osCredName && !(exOs && !osCred)) warn('os-no-auth');
@@ -342,8 +343,12 @@ export function analyzeOnboardRows(rows = [], ctx = {}) {
       if (issue) { res.action = 'reject'; res.code = 'os-invalid'; res.reason = `os_host: ${issue}`; done(); continue; }
     }
     // 반증 F3: keepCred 는 os_cred 와 os_key 가 **둘 다** 비었을 때만 — os_key 만 바꾼 행은 키 · 인증 방식을 실제로 바꾸고 공통 계정만 잇는다.
+    // v3.10.0(점검 D-3): ‘개별:계정’ 행은 계정 이름만 정한다 — 그 서버가 **같은 계정으로 이미 키를 쓰고 있으면**(엣지에서 키 로그인 설정 · 키 고르기) 키를 떼지 않는다.
+    //   예전에는 중앙이 같은 행의 메모 · 마운트만 고쳐 다시 배포해도 키가 비었다 — 키 로그인 설정이 저장 비밀번호를 지운 서버는 인증 수단 없이 남았다.
+    const keepKey = !osKey && !!osUser && !!exOs && lc(exOs.username) === lc(osUser) && !!t(exOs.keyRef) && exOs.osAuth !== 'password';
     const osPlan = osHost ? { id: exOs ? exOs.id : '', host: osHost, port: osPort, username: osBody.username, credRef: osAcc ? osAcc.id : (osCred ? '' : (exOs?.credRef || '')),
-      keyRef: osKey ? keyRef : (osCred ? '' : (exOs?.keyRef || '')), osAuth: osKey ? osAuth : (osCred ? '' : (exOs?.osAuth || '')), keepCred: !osCred && !osKey && !!exOs, mounts: osBody.mounts, existing: !!exOs } : null;
+      keyRef: osKey ? keyRef : keepKey ? t(exOs.keyRef) : (osCred ? '' : (exOs?.keyRef || '')), osAuth: osKey ? osAuth : keepKey ? (exOs.osAuth || '') : (osCred ? '' : (exOs?.osAuth || '')),
+      keepCred: !osCred && !osKey && !!exOs, mounts: osBody.mounts, existing: !!exOs } : null;
     // r3(R-N1): 찾은 뒤 — 적용이 등록부에 보낼 본문 그대로 choke point 와 같은 함수로 본다(이름 판정이 놓친 묶음이 있으면 여기서 잡는다).
     if (osPlan && !remote && !binds && bindOfWrite(exOs, osWriteOf(osPlan, exOs)).binds) {
       if (!ownerOk) { reject('bind-owner-only'); done(); continue; }

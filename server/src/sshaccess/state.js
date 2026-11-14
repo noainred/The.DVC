@@ -30,7 +30,9 @@ const MAX_STOP_SERVERS = 2000;
 const READ_RETRY_MS = 30_000;
 /** 밀려나지 않게 지키는 사건 — 사용 중지 · 재개 · 바꿔치기(감사 로그에 없는 것도 있다). */
 export const GUARD_KEYS = Object.freeze(['twoPerson', 'serverRestrict']);
-export const CRITICAL_EVENTS = Object.freeze(['guard-changed', 'approval-requested', 'approval-decided', 'key-login-set', 'key-lines-removed', 'corp-stop', 'corp-resume', 'key-tampered', 'key-changed-outside', 'key-added-outside', 'state-reloaded', 'keystore-reloaded', 'account-changed-outside']);
+// 서버마다 생기는 사건(key-login-set · key-lines-removed)은 넣지 않는다 — 100대 작업 몇 번이 사용 중지 · 바꿔치기 사건을 밀어냈다(점검 C-3 · D-5).
+//   작업 하나에 한 번 남는 요약(key-job-done · key-revoke-done)을 넣는다.
+export const CRITICAL_EVENTS = Object.freeze(['guard-changed', 'approval-requested', 'approval-decided', 'key-job-done', 'key-revoke-done', 'corp-stop', 'corp-resume', 'key-tampered', 'key-changed-outside', 'key-added-outside', 'state-reloaded', 'keystore-reloaded', 'account-changed-outside']);
 
 const t = (v, max = 256) => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max).trim();
 const num = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.round(Number(v)) : 0);
@@ -155,15 +157,19 @@ const listeners = new Set();
 export function onEvents(fn) { if (typeof fn === 'function') listeners.add(fn); return () => listeners.delete(fn); }
 let pendingNotify = [];
 function pushEvents(d, list, now) {
+  const fresh = [];
   for (const ev of list) {
     const e = { at: now, kind: t(ev.kind, 40), corp: t(ev.corp, 128), target: t(ev.target, 128), by: t(ev.by, 64), detail: t(ev.detail, 300) };
-    d.events.push(e); pendingNotify.push(e);
+    d.events.push(e); fresh.push(e);
   }
   // 넘치면 덜 중요한 오래된 사건부터 버린다(받는 곳 새 파일이 몰려도 사용 중지 · 바꿔치기 사건이 밀려나지 않게 — 점검 C-7).
   while (d.events.length > MAX_EVENTS) {
     const i = d.events.findIndex((e) => !CRITICAL_EVENTS.includes(e.kind));
     d.events.splice(i >= 0 ? i : 0, 1);
   }
+  // 알림은 **기록에 남은** 사건만(점검 C-3 부수 — 방금 넣은 사건이 자르기로 지워졌는데 알림만 나가던 것).
+  const kept = new Set(d.events);
+  for (const e of fresh) if (kept.has(e)) pendingNotify.push(e);
 }
 
 /**

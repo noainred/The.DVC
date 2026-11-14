@@ -93,13 +93,15 @@ export function registerSshAccess(api) {
   });
 
   /* ── 두 사람 승인 · 보호 장치(v3.10.0) ─────────────────────────────── */
-  api.post('/settings/ssh-access/approvals/:id/approve', ...ownerWrite, async (req, res) => {
+  // 사전 검사는 OTP 앞(자기 승인 · 지문 불일치 · 처리됨 · 기록 손상이 1회 비밀번호를 쓰지 않게 — 점검 A10).
+  const approvePre = (approve) => (req, res, next) => { const b = bodyOf(req); const p = SVC.approvalPrecheck(t(req.params.id, 20), { approve, by: who(req), digest: t(b.digest, 64) }); return p ? send(res, p) : next(); };
+  api.post('/settings/ssh-access/approvals/:id/approve', adminOnly, requireSettingsOwner, approvePre(true), reauth, async (req, res) => {
     const b = bodyOf(req);
     const r = await SVC.decideApproval(t(req.params.id, 20), { approve: true, by: who(req), digest: t(b.digest, 64), note: t(b.note, 300) });
     audit(req, 'ssh-access.approval.approve', req.params.id, { ok: !!r.ok, code: r.code, kind: r.request?.kind, target: t(r.request?.title, 120), requestedBy: r.request?.requestedBy });
     send(res, r);
   });
-  api.post('/settings/ssh-access/approvals/:id/reject', ...ownerWrite, async (req, res) => {
+  api.post('/settings/ssh-access/approvals/:id/reject', adminOnly, requireSettingsOwner, approvePre(false), reauth, async (req, res) => {
     const b = bodyOf(req);
     const r = await SVC.decideApproval(t(req.params.id, 20), { approve: false, by: who(req), note: t(b.note, 300) });
     audit(req, 'ssh-access.approval.reject', req.params.id, { ok: !!r.ok, code: r.code, kind: r.request?.kind, target: t(r.request?.title, 120), status: r.request?.status });
@@ -116,23 +118,30 @@ export function registerSshAccess(api) {
 
   /* ── 키 로그인 설정 · 키 거두기(v3.10.0 — 서버의 authorized_keys 를 바꾸는 동작) ──── */
   const serverList = (v) => (Array.isArray(v) ? v.slice(0, 200).map((x) => ({ id: t(x?.id, 64), addr: typeof x?.addr === 'string' ? x.addr.slice(0, 400) : '' })) : null);
-  api.post('/settings/ssh-access/key-login', ...ownerWrite, (req, res) => {
+  const jobPre = (kind) => (_req, res, next) => { const p = SVC.keyJobPrecheck(kind); return p ? send(res, p) : next(); };
+  api.post('/settings/ssh-access/key-login', adminOnly, requireSettingsOwner, jobPre('key-login'), reauth, async (req, res) => {
     const b = bodyOf(req);
     const once = typeof b.oncePassword === 'string' ? b.oncePassword : '';
-    const r = SVC.startKeyLogin({ servers: serverList(b.servers) || [], keyId: t(b.keyId, 32), oncePassword: once, removePassword: b.removePassword === true, replaceKeyId: t(b.replaceKeyId, 32), by: who(req) });
+    const r = await SVC.startKeyLogin({ servers: serverList(b.servers) || [], keyId: t(b.keyId, 32), oncePassword: once, removePassword: b.removePassword === true, replaceKeyId: t(b.replaceKeyId, 32), by: who(req) });
     audit(req, 'ssh-access.key-login.start', t(b.keyId, 32), { ok: !!r.ok, code: r.code, jobId: r.jobId, servers: r.total, oncePassword: !!once, removePassword: b.removePassword === true, replace: t(b.replaceKeyId, 32) || undefined });
     send(res, r, 202);
   });
-  api.post('/settings/ssh-access/key-revoke', ...ownerWrite, (req, res) => {
+  api.post('/settings/ssh-access/key-revoke', adminOnly, requireSettingsOwner, jobPre('key-revoke'), reauth, async (req, res) => {
     const b = bodyOf(req);
     const once = typeof b.oncePassword === 'string' ? b.oncePassword : '';
-    const r = SVC.startKeyRevoke({ keyId: t(b.keyId, 32), corp: t(b.corp, 128), servers: serverList(b.servers), oncePassword: once, by: who(req) });
-    audit(req, 'ssh-access.key-revoke.start', t(b.keyId, 32), { ok: !!r.ok, code: r.code, jobId: r.jobId, servers: r.total, corp: t(b.corp, 128) || undefined, oncePassword: !!once });
+    const r = await SVC.startKeyRevoke({ keyId: t(b.keyId, 32), corp: t(b.corp, 128), servers: serverList(b.servers), oncePassword: once, by: who(req) });
+    audit(req, 'ssh-access.key-revoke.start', t(b.keyId, 32), { ok: !!r.ok, code: r.code, jobId: r.jobId, servers: r.total, corp: t(b.corp, 128) || undefined, oncePassword: !!once, stopped: r.stopped || undefined, skipped: r.skipped?.length || undefined });
     send(res, r, 202);
   });
   api.get('/settings/ssh-access/jobs/:id', ...ownerRead, (req, res) => {
     const j = SVC.keyJob(t(req.params.id, 20));
-    send(res, j ? { ok: true, job: j } : { ok: false, status: 404, code: 'not-found', reason: '작업을 찾을 수 없습니다(끝난 지 오래됐거나 포탈이 다시 시작했습니다).' });
+    send(res, j ? { ok: true, job: j } : { ok: false, status: 404, code: 'not-found', reason: '작업을 찾을 수 없습니다(끝난 지 1시간이 지났거나 포탈이 다시 시작했습니다 — 다시 시작했으면 그때 처리 중이던 서버는 끝나지 않았을 수 있습니다).' });
+  });
+  // 멈추기 — 줄이는 방향(남은 서버를 하지 않는다)이라 OTP 없이 소유자 등급만. 지금 서버는 끝까지(되돌림을 끊지 않는다).
+  api.post('/settings/ssh-access/jobs/:id/cancel', ...ownerRead, (req, res) => {
+    const r = SVC.cancelKeyJob(t(req.params.id, 20), { by: who(req) });
+    audit(req, 'ssh-access.key-job.cancel', req.params.id, { ok: !!r.ok, code: r.code });
+    send(res, r);
   });
 
   /* ── 서버 ───────────────────────────────────────────────────────── */

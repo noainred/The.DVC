@@ -9,11 +9,12 @@
  */
 import ssh2 from 'ssh2';
 import { sshHostKeyFingerprint } from '../proxy/sshExec.js';
+import { PORTAL_MARK } from './akScript.js';
 
 export const MAX_BYTES = 256 * 1024;
 export const MAX_LINE = 16 * 1024;
 export const MAX_LINES = 400;
-export const PORTAL_MARK = 'portal-ssh:';
+export { PORTAL_MARK };   // 표식 글자는 한 곳(akScript — 순수)에서만 정한다
 /**
  * 읽기 명령 — 홈의 기본 경로만(AuthorizedKeysFile 이 다른 서버는 화면이 ‘읽은 파일’ 경로를 밝히고, 최종 판정은 실제 접속으로 한다).
  * 첫 줄에 파일 상태(없음 · 읽음)를 표지로 낸다 — 파일이 없는 것과 비어 있는 것을 가른다. 출력은 head -c 로 자른다.

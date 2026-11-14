@@ -37,10 +37,13 @@ export async function approve(id, { by = '', digest = '', note = '' } = {}) {
   try { res = await kinds.get(d.request.kind).run(d.request.payload, { by, request: d.request }); }
   catch (e) { res = { ok: false, code: 'error', reason: `실행 중 오류(${String(e?.message || e).replace(/\s+/g, ' ').slice(0, 120)})` }; }
   const ok = !!(res && res.ok);
-  AP.markExecuted(id, { ok, code: ok ? 'ok' : res?.code, reason: ok ? '' : res?.reason });
+  // 결과 기록에 실패하면 응답에 밝힌다(점검 C-8 — 실행은 됐는데 기록이 ‘승인됨’ 에 멈추면 10분 뒤 ‘중단’ 으로 확정된다).
+  const mk = AP.markExecuted(id, { ok, code: ok ? 'ok' : res?.code, reason: ok ? '' : res?.reason });
+  const recordFailed = !(mk && mk.ok);
   // 승인은 됐지만 실행이 실패하면 요청은 ‘failed’ 로 끝난다(다시 하려면 새 요청) — 뒷정리도 한다.
   if (!ok) { try { kinds.get(d.request.kind).discard?.(d.request.payload, 'failed'); } catch { /* 뒷정리 실패는 결과를 바꾸지 않는다 */ } }
-  return { ok, request: AP.getRequest(id), result: res, ...(ok ? {} : { code: res?.code || 'failed', status: res?.status || 409, reason: res?.reason || '실행하지 못했습니다.' }) };
+  return { ok, request: AP.getRequest(id), result: res, ...(recordFailed ? { recordFailed: true, recordReason: String(mk?.reason || '').slice(0, 200) } : {}),
+    ...(ok ? {} : { code: res?.code || 'failed', status: res?.status || 409, reason: res?.reason || '실행하지 못했습니다.' }) };
 }
 
 export function reject(id, { by = '', note = '' } = {}) {
@@ -53,6 +56,6 @@ export function reject(id, { by = '', note = '' } = {}) {
 /** 시한이 지난 요청을 확정하고 뒷정리한다(주기 점검이 부른다). 확정한 요청 목록. */
 export function expireSweep({ now = Date.now() } = {}) {
   const due = AP.expireDue({ now });
-  for (const r of due) { try { kinds.get(r.kind)?.discard?.(r.payload, 'expired'); } catch { /* */ } }
+  for (const r of due) { try { kinds.get(r.kind)?.discard?.(r.payload, r.interrupted ? 'interrupted' : 'expired'); } catch { /* */ } }
   return due;
 }

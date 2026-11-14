@@ -13,6 +13,7 @@ import { loadSessionSecurity } from '../security/securitySettings.js';
 import { loadUsers, normalizedScope } from '../auth/auth.js';
 import { loadAdConfig } from '../auth/ad.js';
 import * as ST from './state.js';
+import { identityKey } from '../approval/store.js';
 
 const ADMIN_ROLES = new Set(['admin', 'super_admin']);
 export function twoPersonOn() { return !!config.auth?.enabled && ST.getGuards().twoPerson === true; }
@@ -27,15 +28,39 @@ function canApprove(name, users, adOn) {
   if (sc.vcenters.length || sc.regions.length) return false;
   return !!(u.passwordHash || u.totpEnabled);
 }
+/** 유효 소유자 목록에서 요청자(같은 신원 — AD 별칭 포함)를 뺀 이름들. 같은 신원의 다른 꼴은 하나로 센다(점검 A2). */
+function ownersBut(by) {
+  let owners = [];
+  try { owners = loadSessionSecurity().settingsOwners || []; } catch { owners = []; }
+  const me = identityKey(by);
+  const seen = new Set(); const out = [];
+  for (const raw of owners) {
+    const x = String(raw || '').trim(); const id = identityKey(x);
+    if (!x || !id || id === me || seen.has(id)) continue;
+    seen.add(id); out.push(x);
+  }
+  return out;
+}
 /** 요청자 말고 승인할 수 있는 설정 소유자 이름들(못 읽으면 빈 목록 — 승인자가 없다고 본다). */
 export function otherOwners(by) {
-  let owners = []; let users = []; let adOn = false;
-  try { owners = loadSessionSecurity().settingsOwners || []; } catch { owners = []; }
+  let users = []; let adOn = false;
   try { users = loadUsers() || []; } catch { return []; }
   try { const ad = loadAdConfig(); adOn = !!(ad && ad.enabled && ad.url); } catch { adOn = false; }
-  const me = String(by || '').trim().toLowerCase();
-  return [...new Set(owners.map((x) => String(x || '').trim()).filter(Boolean))]
-    .filter((x) => x.toLowerCase() !== me && canApprove(x, users, adOn));
+  return ownersBut(by).filter((x) => canApprove(x, users, adOn));
+}
+/**
+ * 목록에 이름이 있는 다른 소유자(지금 승인할 수 있든 없든) — 시드 계정(noainred)이 로그인 수단이 없으면 뺀다.
+ * ‘승인자 0명이면 본인 OTP 로 끄기’ 지름길은 **이 수도 0** 일 때만 연다(점검 A1): 다른 소유자를 강등 · 범위 지정 · 차단 · 삭제해 ‘승인 불가’ 로 만든 뒤
+ * 바로 끄는 길을 막는다 — 그 계정을 소유자 목록에서 빼는 것(소유자 + OTP · 감사 · 별도 기록)이 먼저여야 한다. 못 읽으면 ‘있다’ 고 본다(엄한 쪽).
+ */
+export function listedOtherOwners(by) {
+  let users = [];
+  try { users = loadUsers() || []; } catch { return ['(계정 파일을 읽지 못함)']; }
+  return ownersBut(by).filter((x) => {
+    if (identityKey(x) !== 'noainred') return true;
+    const u = users.find((v) => identityKey(v.username) === 'noainred');
+    return !!(u && (u.passwordHash || u.totpEnabled));
+  });
 }
 /** 7b 등 다른 화면의 키 변경 라우트가 쓰는 거절 — 두 사람 승인이 켜져 있으면 승인 절차가 있는 화면으로 보낸다(우회 금지). */
 export function twoPersonRedirect() {

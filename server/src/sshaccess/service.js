@@ -12,6 +12,7 @@
  *  · 서버 키 고르기 = 폴더 규칙(`refs.keyPlacementIssue`) → 등록부 `setBmServerKeyRef`(같은 접속처 · 키만) → 연결 확인 → 실패면 **이전 설정으로 되돌린다**
  *    (그 사이 접속처가 바뀌었으면 되돌리지 않는다 — 옛 키를 새 주소에 묶지 않게).
  */
+import crypto from 'node:crypto';
 import { store } from '../store.js';
 import { config } from '../config.js';
 import * as KS from '../bmusage/onboard/keyStore.js';
@@ -29,7 +30,7 @@ import { READ_COMMAND, parseReadOutput } from './authorizedKeys.js';
 import * as AP from '../approval/store.js';
 import * as TP from '../approval/twoPerson.js';
 import * as KL from './keyLogin.js';
-import { twoPersonOn, serverRestrictOn, otherOwners } from './guards.js';
+import { twoPersonOn, serverRestrictOn, otherOwners, listedOtherOwners } from './guards.js';
 import { startKeyNotify } from './notify.js';
 
 const t = (v, max = 256) => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max).trim();
@@ -142,7 +143,9 @@ export async function buildView({ now = Date.now() } = {}) {
     // v3.10.0 — 보호 장치 · 두 사람 승인
     guards: { ...ST.getGuards(), twoPersonActive: twoPersonOn() },
     approvalsUnreadable: !!AP.approvalsLoadError(),
-    approvals: AP.listRequests({ kinds: SSH_KINDS, limit: 60 }, { now }).map((r) => ({ ...r, label: TP.kindLabel(r.kind) })),
+    approvals: AP.listForView({ kinds: SSH_KINDS, doneLimit: 60 }, { now }).map((r) => ({ ...r, label: TP.kindLabel(r.kind) })),
+    // 칸마다 마지막 키 작업(1시간 안) — 화면을 다시 열어도 진행 · 결과를 이어 본다(점검 E-2).
+    jobs: KL.lastJobs(),
   };
 }
 
@@ -256,7 +259,8 @@ export async function readInstalledKeys({ serverId, oncePassword = '', by = '' }
   const { isAuthFailureText, isPeerRejectText } = await import('../util/authGuard.js');
   let rec;
   try {
-    const out = await withSsh({ host: String(s.host), port: Number(s.port) || 22, username: auth.username, password: auth.password || '', privateKey: auth.privateKey, passphrase: auth.passphrase, readyTimeout: 15_000 },
+    const out = await withSsh({ host: String(s.host), port: Number(s.port) || 22, username: auth.username, password: auth.password || '', privateKey: auth.privateKey, passphrase: auth.passphrase, readyTimeout: 15_000,
+      passwordOnly: true },   // 비밀번호는 password 방식으로 한 번만(점검 E-3 — 문구 ‘다시 시도하지 않습니다’ 와 맞춘다)
       async ({ exec }) => exec(READ_COMMAND, 15_000));
     const p = parseReadOutput(out?.stdout || '');
     if (!p.ok) rec = { host: s.host, port: Number(s.port) || 22, username: auth.username, file: '~/.ssh/authorized_keys', keys: [], error: p.reason };
@@ -405,17 +409,21 @@ export function stopCorp(corp, { by = '', reason = '' } = {}) {
 export async function resumeCorp(corp, { by = '' } = {}) {
   const c = t(corp, 128);
   if (!ST.stopFor(c) || ST.stopFor(c).unreadable) return ST.clearCorpStop(c, { by });   // 중지 상태가 아니거나 상태 모름 — 저장소가 사유를 말한다
-  return submitSsh({ kind: 'ssh-corp-resume', title: `법인 키 사용 재개 — ${c}`, target: c, corp: c, payload: { corp: c }, by }, () => ST.clearCorpStop(c, { by }));
+  // 요청을 **그때의 중지**(걸린 시각)에 묶는다 — 그 뒤 새 사건으로 다시 건 중지를 옛 재개 요청이 풀지 못하게(점검 A6 · C-6).
+  return submitSsh({ kind: 'ssh-corp-resume', title: `법인 키 사용 재개 — ${c}`, target: c, corp: c, payload: { corp: c, stopAt: Number(ST.stopFor(c).at) || 0 }, by }, () => ST.clearCorpStop(c, { by }));
 }
 
 /* ── 손상 · 포탈 밖 변경 뒤 다시 읽기(설정 소유자 + OTP) ───────────────── */
 export function reloadState({ by = '' } = {}) { return ST.reloadSshAccessState({ by }); }
 /** 키 저장소 파일을 새 기준으로 — 바꿔치기 표지를 풀고 첫 사용 대조를 다시 하게 한다. */
 export async function reloadKeyStore({ by = '' } = {}) {
-  return submitSsh({ kind: 'ssh-keystore-reload', title: '키 저장소 다시 읽기 — 포탈 밖 변경 받아들이기', target: 'ssh-keys.json', payload: {}, by }, () => reloadKeyStoreNow({ by }));
+  // 요청을 **그때의 디스크 내용**(sha256)에 묶는다 — 승인 직전에 파일을 또 바꿔 넣지 못하게(점검 A5).
+  const sha = KS.diskFileSha();
+  if (sha === null) return { ok: false, code: 'read-failed', status: 503, reason: '키 저장소 파일을 읽지 못했습니다.' };
+  return submitSsh({ kind: 'ssh-keystore-reload', title: '키 저장소 다시 읽기 — 포탈 밖 변경 받아들이기', target: 'ssh-keys.json', payload: { sha }, by }, () => reloadKeyStoreNow({ by }));
 }
-function reloadKeyStoreNow({ by = '' } = {}) {
-  const r = KS.reloadKeyStoreFromDisk();
+function reloadKeyStoreNow({ by = '', expectSha } = {}) {
+  const r = KS.reloadKeyStoreFromDisk({ expectSha });
   REFS._resetVerifiedForTest();
   _seenDrift = null;
   if (r.ok) ST.addEvent({ kind: 'keystore-reloaded', by, detail: `키 ${r.keys}개` });
@@ -429,15 +437,34 @@ export const SSH_KINDS = Object.freeze(['ssh-key-activate', 'ssh-key-rotate', 's
 TP.registerKind('ssh-key-activate', { label: '키 등록',
   run: (p) => KS.activateKey(p.keyId, { fingerprint: p.fingerprint }),
   // 돌려보냄 · 취소 · 시한 만료 · 실행 실패 — 승인 대기 키를 지운다(쓰이지 않은 키가 저장소에 남지 않게).
-  discard: (p) => { const k = KS.keyById(p.keyId); if (k && k.status === 'pending') KS._removeKey(p.keyId); } });
+  // 사용처가 있으면 지우지 않는다(점검 C-5 — 예전에는 대기 키를 묶은 서버가 key-missing 으로 남았다. 지금은 묶기 자체를 막지만 그 전 자료가 있을 수 있다).
+  discard: (p) => { const k = KS.keyById(p.keyId); if (k && k.status === 'pending') REFS.deleteKeyIfUnused(p.keyId); } });
 TP.registerKind('ssh-key-rotate', { label: '키 교체(회전)', run: (p) => REFS.rotateKey(p.from, p.to) });
 TP.registerKind('ssh-key-delete', { label: '키 삭제', run: (p) => REFS.deleteKeyIfUnused(p.keyId) });
-TP.registerKind('ssh-corp-resume', { label: '법인 키 사용 재개', run: (p, { by }) => ST.clearCorpStop(p.corp, { by }) });
-TP.registerKind('ssh-keystore-reload', { label: '키 저장소 다시 읽기(포탈 밖 변경 받아들이기)', run: (_p, { by }) => reloadKeyStoreNow({ by }) });
+TP.registerKind('ssh-corp-resume', { label: '법인 키 사용 재개',
+  run: (p, { by }) => {
+    const cur = ST.stopFor(p.corp);
+    if (cur && !cur.unreadable && Number(cur.at) !== Number(p.stopAt)) return { ok: false, code: 'stop-changed', status: 409, reason: '요청 뒤 그 법인에 사용 중지가 다시 걸렸습니다 — 새 중지를 확인하고 새로 요청하세요(옛 요청으로 풀지 않습니다).' };
+    return ST.clearCorpStop(p.corp, { by });
+  } });
+TP.registerKind('ssh-keystore-reload', { label: '키 저장소 다시 읽기(포탈 밖 변경 받아들이기)', run: (p, { by }) => reloadKeyStoreNow({ by, expectSha: typeof p.sha === 'string' ? p.sha : '' }) });
 TP.registerKind('ssh-guard-change', { label: '보호 장치 끄기', run: (p, { by }) => ST.setGuards(p.patch, { by }) });
+
+/**
+ * 두 사람 승인이 켜져 있는데 승인할 사람이 없으면 요청을 만들지 않는다(점검 C-7 — 아무도 승인하지 못하는 요청이 24시간 남고,
+ * 받는 곳 승인은 평문 파일까지 지워 키 원문을 잃었다). 부작용(대기 키 저장 · 평문 삭제) **전에** 부른다.
+ */
+function noApproverIssue(by) {
+  if (!twoPersonOn() || otherOwners(by).length) return null;
+  const listed = listedOtherOwners(by);
+  const who = listed.length ? `(목록의 ${listed.slice(0, 3).join(' · ')}${listed.length > 3 ? ` 외 ${listed.length - 3}` : ''} — 지금 승인할 수 없는 계정입니다: 관리자 역할 · 전체 범위 · 로그인 수단이 필요)` : '';
+  return { ok: false, code: 'no-approver', status: 409,
+    reason: `두 사람 승인이 켜져 있지만 승인할 수 있는 다른 설정 소유자가 없습니다${who} — 요청을 만들지 않았습니다. ${listed.length ? '그 계정을 고치거나 설정 소유자 목록에서 뺀 뒤 ' : ''}보호 장치에서 두 사람 승인을 끄면 본인 OTP 만으로 할 수 있습니다.` };
+}
 
 /** 요청을 만들거나(두 사람 승인 켬) 바로 실행한다(끔). 요청이 만들어지면 사건을 남긴다. */
 async function submitSsh(req, runNow) {
+  const na = noApproverIssue(req.by); if (na) return na;
   const r = await TP.submit({ ...req, required: twoPersonOn() }, runNow);
   if (r && r.ok && r.pending) {
     ST.addEvent({ kind: 'approval-requested', corp: req.corp || '', target: req.title, by: req.by });
@@ -448,6 +475,7 @@ async function submitSsh(req, runNow) {
 
 /** 키를 저장소에 넣는다 — 두 사람 승인이 켜져 있으면 ‘승인 대기’ 로 넣고 요청을 만든다(승인 전에는 접속에 쓰이지 않는다 — keyMaterial 이 거절). */
 async function addKeyWithApproval(input, { by = '', how = '등록' } = {}) {
+  const na = noApproverIssue(by); if (na) return na;   // 대기 키를 저장하기 전에(받는 곳이면 평문 파일을 지우기 전에)
   const need = twoPersonOn();
   const r = KS.addKey(input, { by, pending: need });
   if (!r.ok || !need) return r;
@@ -477,7 +505,7 @@ export async function deleteKeyReq({ keyId, by = '' } = {}) {
     if (AP.approvalsLoadError()) return { ok: false, code: 'approvals-unreadable', status: 503, reason: '승인 기록 파일을 읽지 못해 승인 대기 키를 지우지 않았습니다.' };
     const open = AP.listRequests({ kinds: ['ssh-key-activate'], includeDone: false }).some((r) => r.target === k.id);
     if (open) return { ok: false, code: 'key-pending', status: 409, reason: '승인 대기 중인 키입니다 — 키 보안 › 승인 대기에서 돌려보내면 지워집니다.' };
-    return KS._removeKey(k.id);
+    return REFS.deleteKeyIfUnused(k.id);   // 사용처가 있으면 지우지 않는다(점검 C-5)
   }
   return submitSsh({ kind: 'ssh-key-delete', title: `키 삭제 — ${k.name}`, target: k.id, corp: k.folderCorp || '', payload: { keyId: k.id, name: k.name, fingerprint: k.fingerprint }, by },
     () => REFS.deleteKeyIfUnused(k.id));
@@ -495,24 +523,51 @@ export async function changeGuards(patch = {}, { by = '' } = {}) {
   let out = { ok: true, guards: cur, changed: 0 };
   if (Object.keys(on).length) { out = ST.setGuards(on, { by }); if (!out.ok) return out; }
   if (!Object.keys(off).length) return out;
+  // 켜는 것은 이미 적용됐다 — 끄는 쪽이 실패해도 응답이 그 사실을 밝힌다(점검 E-7 — 실패로만 말하면 화면이 켠 것까지 안 된 줄 안다).
+  const partial = (r) => (r && !r.ok && Object.keys(on).length ? { ...r, partial: { applied: Object.keys(on) }, guards: ST.getGuards() } : r);
   const tpOn = twoPersonOn();
   if (tpOn && otherOwners(by).length > 0) {
     const names = Object.keys(off).map((k) => (k === 'twoPerson' ? '두 사람 승인' : '서버 쪽 제한')).join(' · ');
-    return submitSsh({ kind: 'ssh-guard-change', title: `보호 장치 끄기 — ${names}`, target: Object.keys(off).sort().join(','), payload: { patch: off }, by }, () => ST.setGuards(off, { by }));
+    return partial(await submitSsh({ kind: 'ssh-guard-change', title: `보호 장치 끄기 — ${names}`, target: Object.keys(off).sort().join(','), payload: { patch: off }, by }, () => ST.setGuards(off, { by })));
   }
+  // 승인자 0명 지름길은 **목록에도 다른 소유자가 없을 때만**(점검 A1 — 다른 소유자를 강등 · 범위 지정해 ‘승인 불가’ 로 만든 뒤 바로 끄는 길을 막는다).
+  if (tpOn && listedOtherOwners(by).length > 0) return partial(noApproverIssue(by));
   const r = ST.setGuards(off, { by });
   if (r.ok && tpOn) ST.addEvent({ kind: 'guard-changed', by, detail: '승인할 다른 설정 소유자가 없어 본인 OTP 만으로 껐습니다' });
-  return r;
+  return partial(r);
+}
+
+/**
+ * 승인 · 돌려보내기 사전 검사 — **OTP 를 쓰기 전에**(라우트가 reauth 앞에 둔다 · 점검 A10). 판정은 store 가 다시 한다(여기는 빨리 거절만).
+ * @returns {null | {ok:false, code, status, reason}}
+ */
+export function approvalPrecheck(id, { approve, by = '', digest = '' } = {}) {
+  if (AP.approvalsLoadError()) return { ok: false, code: 'approvals-unreadable', status: 503, reason: '승인 기록 파일을 읽지 못해 승인 · 돌려보내기를 받지 않습니다.' };
+  const cur = AP.getRequest(t(id, 20));
+  if (!cur || !SSH_KINDS.includes(cur.kind)) return { ok: false, code: 'not-found', status: 404, reason: '요청을 찾을 수 없습니다.' };
+  if (cur.status !== 'pending') return { ok: false, code: 'not-pending', status: 409, reason: '이미 처리된 요청입니다.' };
+  if (cur.expiresAt <= Date.now()) return { ok: false, code: 'expired', status: 409, reason: '요청의 시한(24시간)이 지났습니다 — 다시 요청하세요.' };
+  if (approve) {
+    if (AP.identityKey(by) === AP.identityKey(cur.requestedBy)) return { ok: false, code: 'self-approve', status: 403, reason: '요청한 사람은 승인할 수 없습니다 — 다른 설정 소유자가 승인해야 합니다.' };
+    if (t(digest, 64) !== cur.digest) return { ok: false, code: 'digest-mismatch', status: 409, reason: '화면에서 본 요청 내용과 다릅니다 — 다시 읽은 뒤 승인하세요.' };
+  }
+  return null;
+}
+/** 키 작업 시작 사전 검사 — 같은 칸 작업이 진행 중이면 OTP 를 쓰기 전에 409. */
+export function keyJobPrecheck(kind) {
+  const busy = KL.busyJob(kind);
+  return busy ? { ok: false, code: 'busy', status: 409, jobId: busy, reason: kind === 'key-revoke' ? '다른 키 거두기 작업이 진행 중입니다 — 끝난 뒤 다시 하세요.' : '다른 키 로그인 설정 작업이 진행 중입니다 — 끝나거나 멈춘 뒤 다시 하세요.' } : null;
 }
 
 /** 승인 · 돌려보내기(요청한 사람은 승인할 수 없다 — store 가 강제). */
 export async function decideApproval(id, { approve, by = '', digest = '', note = '' } = {}) {
+  if (AP.approvalsLoadError()) return { ok: false, code: 'approvals-unreadable', status: 503, reason: '승인 기록 파일을 읽지 못해 승인 · 돌려보내기를 받지 않습니다.' };   // 점검 C-11 — 404 가 아니다
   const cur = AP.getRequest(t(id, 20));
   if (!cur || !SSH_KINDS.includes(cur.kind)) return { ok: false, code: 'not-found', status: 404, reason: '요청을 찾을 수 없습니다.' };
   const r = approve ? await TP.approve(cur.id, { by, digest, note }) : TP.reject(cur.id, { by, note });
   if (r.request && (r.ok || r.request.status !== 'pending')) {
     ST.addEvent({ kind: 'approval-decided', corp: cur.corp, target: cur.title, by,
-      detail: approve ? (r.ok ? `승인 · 실행됨(요청 ${cur.requestedBy})` : `승인했지만 실행 실패 — ${t(r.reason, 160)}`) : (r.request.status === 'cancelled' ? '요청자가 취소' : `돌려보냄(요청 ${cur.requestedBy})`) });
+      detail: approve ? (r.ok ? `승인 · 실행됨(요청 ${cur.requestedBy})${r.recordFailed ? ' · 결과 기록 실패' : ''}` : `승인했지만 실행 실패 — ${t(r.reason, 160)}`) : (r.request.status === 'cancelled' ? '요청자가 취소' : `돌려보냄(요청 ${cur.requestedBy})`) });
   }
   return r;
 }
@@ -520,7 +575,12 @@ export async function decideApproval(id, { approve, by = '', digest = '', note =
 /* ── 키 로그인 설정 · 키 거두기(v3.10.0 — keyLogin.js) ──────────────────────── */
 
 /** 등록부 쓰기 두 가지는 이 파일에서만 부른다(소스 스윕 — keyLogin.js 는 넘겨받은 함수만 쓴다). */
-const bindKey = (server, keyId) => setBmServerKeyRef(server.id, keyId, { expectAddr: regAddrOf(server) });
+// 묶기 직전에 키가 아직 활성인지 다시 본다 — 작업 도중 회전 · 삭제로 퇴역한 키에 서버를 묶지 않게(점검 C 의심 S-1).
+const bindKey = (server, keyId) => {
+  const k = KS.keyById(keyId);
+  if (!k || k.status !== 'active') return { ok: false, reason: '그 사이 키가 퇴역 · 삭제됐습니다' };
+  return setBmServerKeyRef(server.id, keyId, { expectAddr: regAddrOf(server) });
+};
 // 키 접속이 확인된 뒤에만 불린다(keyLogin.installOne) — 공통 계정의 기본 키를 따르는 서버면 viaAccountKey(등록부는 계정 키를 모른다).
 const clearPassword = (server) => clearBmServerPassword(server.id, { expectAddr: regAddrOf(server), viaAccountKey: !t(server.keyRef) && !!t(server.credRef) });
 
@@ -541,66 +601,114 @@ function pickServers(list) {
   return { ok, skipped };
 }
 const oncePw = (v) => (typeof v === 'string' && v.length <= 1024 ? v : '');
+/** 작업이 그 서버에 닿은 때의 등록부 원본 — 시작 뒤 지워졌거나 접속처가 바뀌었으면 null(한 시간 전 자격으로 붙지 않게 — 점검 C 의심 S-1). */
+function freshServer(s0) {
+  if (bmRegistryLoadError()) return null;
+  const s = listBmServersRaw().find((x) => x.id === s0.id);
+  return s && regAddrOf(s) === regAddrOf(s0) ? s : null;
+}
+const movedResult = (s0) => ({ id: s0.id, name: s0.name || s0.host, corp: t(s0.vcenterId), ok: false, code: 'moved', reason: '작업이 시작된 뒤 서버가 지워졌거나 주소 · 포트 · 계정이 바뀌어 하지 않았습니다.' });
+/** 키 원본을 다시 읽는다(작업 도중 퇴역 · 삭제 · 바꿔치기 — 그 뒤 서버에는 하지 않는다). */
+function freshKey(id) { const k = KS.listKeysRaw().find((x) => x.id === id); return k || null; }
+async function mockRefusal() {
+  try { const { isMockMode } = await import('../mock/demo/flags.js'); if (isMockMode()) return { ok: false, code: 'demo', status: 409, reason: '데모(mock) 모드에서는 서버에 접속하지 않습니다.' }; } catch { /* 판정 모듈이 없으면 실제 모드 */ }
+  return null;
+}
+const countBy = (results, pick) => { const m = {}; for (const r of results) { const k = pick(r); m[k] = (m[k] || 0) + 1; } return m; };
+const failNames = (results) => results.filter((r) => !r.ok && r.code !== 'cancelled').slice(0, 5).map((r) => `${t(r.name, 40)}(${t(r.code, 24)})`).join(', ');
 
 /**
  * 키 로그인 설정을 시작한다(작업 — 1대씩 차례로). 서버 쪽 제한은 보호 장치 설정을 따른다(요청이 고르지 않는다).
  * @param {{servers:{id:string,addr:string}[], keyId:string, oncePassword?:string, removePassword?:boolean, replaceKeyId?:string, by?:string}} o
  */
-export function startKeyLogin({ servers, keyId, oncePassword = '', removePassword = false, replaceKeyId = '', by = '' } = {}) {
+export async function startKeyLogin({ servers, keyId, oncePassword = '', removePassword = false, replaceKeyId = '', by = '' } = {}) {
+  const demo = await mockRefusal(); if (demo) return demo;
   if (KS.keyStoreLoadError()) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'SSH 키 저장소를 읽지 못했습니다.' };
   if (bmRegistryLoadError()) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'OS 계정 등록부를 읽지 못했습니다.' };
-  const key = KS.listKeysRaw().find((k) => k.id === t(keyId, 32));
+  const key = freshKey(t(keyId, 32));
   if (!key) return { ok: false, code: 'key-missing', status: 404, reason: '키를 찾을 수 없습니다.' };
   if (key.status !== 'active') return { ok: false, code: key.status === 'pending' ? 'key-pending' : 'key-retired', status: 409, reason: key.status === 'pending' ? REFS.AUTH_ERROR['key-pending'] : '퇴역한 키는 넣지 않습니다.' };
-  if (KS.tamperedKeyIds().includes(key.id)) return { ok: false, code: 'key-tampered', status: 409, reason: REFS.AUTH_ERROR['key-tampered'] };
+  // 공개키 칸이 지문과 맞을 때만 — 복원 · 손으로 고친 파일로 남의 공개키가 들어가 있으면 그 줄을 서버에 넣게 된다(점검 A3).
+  if (KS.tamperedKeyIds().includes(key.id) || !KS.publicKeyMatches(key)) return { ok: false, code: 'key-tampered', status: 409, reason: REFS.AUTH_ERROR['key-tampered'] };
   let replaceKey = null;
   if (t(replaceKeyId, 32)) {
-    replaceKey = KS.listKeysRaw().find((k) => k.id === t(replaceKeyId, 32)) || null;
+    replaceKey = freshKey(t(replaceKeyId, 32));
     if (!replaceKey) return { ok: false, code: 'key-missing', status: 404, reason: '지울 옛 키를 찾을 수 없습니다.' };
     if (replaceKey.id === key.id) return { ok: false, code: 'same-key', reason: '넣을 키와 지울 키가 같습니다.' };
+    if (!KS.publicKeyMatches(replaceKey)) return { ok: false, code: 'key-tampered', status: 409, reason: '지울 옛 키의 저장된 공개키가 지문과 맞지 않습니다 — 서버에서 지문으로 직접 찾아 지우세요.' };
   }
   const { ok: list, skipped } = pickServers(servers);
   if (!list.length) return { ok: false, code: 'empty', status: 400, reason: skipped[0]?.reason || '대상 서버가 없습니다.', skipped };
   const restrict = serverRestrictOn();
   const pw = oncePw(oncePassword);
   const r = KL.startJob({ kind: 'key-login', servers: list, by, meta: { keyId: key.id, keyName: key.name, restrict, removePassword: !!removePassword, replaceKeyName: replaceKey?.name || '', skipped },
-    run: async (s) => {
-      const res = await KL.installOne(s, key, { oncePassword: pw, restrict, removePassword: !!removePassword, replaceKey, by, bind: bindKey, clearPassword });
+    run: async (s0) => {
+      const s = freshServer(s0);
+      if (!s) return movedResult(s0);
+      const k = freshKey(key.id);
+      if (!k || k.status !== 'active' || !KS.publicKeyMatches(k)) return { id: s.id, name: s.name || s.host, corp: t(s.vcenterId), ok: false, code: 'key-changed', reason: '작업 도중 키가 퇴역 · 삭제됐거나 저장된 내용이 바뀌어 이 서버에는 하지 않았습니다.' };
+      const rk = replaceKey ? freshKey(replaceKey.id) : null;
+      const res = await KL.installOne(s, k, { oncePassword: pw, restrict, removePassword: !!removePassword, replaceKey: rk && KS.publicKeyMatches(rk) ? rk : null, by, bind: bindKey, clearPassword });
       ST.addEvent({ kind: 'key-login-set', corp: t(s.vcenterId), target: `${s.name || s.host} · ${key.name}`, by, detail: res.ok ? `키 접속 확인${res.restricted ? ' · 출발지 제한' : ''}${res.passwordRemoved ? ' · 저장 비밀번호 삭제' : ''}` : `실패(${res.code})` });
       return res;
+    },
+    onDone: (v) => {
+      const c = countBy(v.results, (x) => (x.ok ? 'ok' : x.code === 'cancelled' ? 'cancelled' : 'fail'));
+      ST.addEvent({ kind: 'key-job-done', target: `키 로그인 설정 · ${key.name}`, by,
+        detail: `${v.total}대 — 확인 ${c.ok || 0} · 실패 ${c.fail || 0}${c.cancelled ? ` · 멈춤 ${c.cancelled}` : ''}${c.fail ? ` — ${failNames(v.results)}` : ''}${v.cancelledBy ? ` · 멈춘 사람 ${v.cancelledBy}` : ''}` });
     } });
   return r.ok ? { ...r, total: list.length, skipped } : r;
 }
 
 /**
  * 서버에서 키 거두기 — 그 키의 포탈 줄을 지운다(긴급 조치 — 멈추는 방향이라 본인 OTP 만).
- * 대상: `servers`({id, addr} 목록) 또는 `corp`(그 법인의 중앙 수집 서버 전부). 닿지 못한 서버는 결과에 사유와 함께 남는다.
+ * 대상: `servers`({id, addr} 목록) 또는 `corp`(그 법인의 중앙 수집 서버 전부 — 상한 KL.MAX_REVOKE_SERVERS, 넘는 서버는 ‘over-limit’ 으로 밝힌다).
+ * 같은 키를 넣는 작업이 돌고 있으면 그 작업을 멈춘다(keyLogin.startJob). 닿지 못한 서버는 결과에 사유와 함께 남는다.
  */
-export function startKeyRevoke({ keyId, corp = '', servers = null, oncePassword = '', by = '' } = {}) {
+export async function startKeyRevoke({ keyId, corp = '', servers = null, oncePassword = '', by = '' } = {}) {
+  const demo = await mockRefusal(); if (demo) return demo;
   if (KS.keyStoreLoadError()) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'SSH 키 저장소를 읽지 못했습니다.' };
   if (bmRegistryLoadError()) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'OS 계정 등록부를 읽지 못했습니다.' };
-  const key = KS.listKeysRaw().find((k) => k.id === t(keyId, 32));
+  const key = freshKey(t(keyId, 32));
   if (!key) return { ok: false, code: 'key-missing', status: 404, reason: '키를 찾을 수 없습니다.' };
+  if (!KS.publicKeyMatches(key)) return { ok: false, code: 'key-tampered', status: 409, reason: '저장된 공개키가 지문과 맞지 않아 거두지 않았습니다(남의 줄을 지울 수 있다) — 서버에서 지문으로 직접 찾아 지우세요.' };
   let list; let skipped = [];
   if (Array.isArray(servers)) ({ ok: list, skipped } = pickServers(servers));
   else {
     const c = t(corp, 128);
     if (!c) return { ok: false, code: 'bad-corp', reason: '법인을 고르세요.' };
     const inCorp = listBmServersRaw().filter((s) => t(s.vcenterId) === c && !s.addrOnly);
-    list = inCorp.filter((s) => !t(s.agent)).slice(0, KL.MAX_JOB_SERVERS);
+    const central = inCorp.filter((s) => !t(s.agent));
+    list = central.slice(0, KL.MAX_REVOKE_SERVERS);
     skipped = inCorp.filter((s) => t(s.agent)).map((s) => ({ id: s.id, name: s.name || s.host, corp: c, ok: false, code: 'edge-delegated', reason: '엣지가 수집하는 서버 — 그 엣지 포탈에서 거둡니다.' }));
+    // 상한을 넘는 서버는 잘린 사실을 밝힌다(점검 C-1 · E-10 — 예전에는 조용히 100대에서 잘랐다).
+    for (const s of central.slice(KL.MAX_REVOKE_SERVERS)) skipped.push({ id: s.id, name: s.name || s.host, corp: c, ok: false, code: 'over-limit', reason: `한 번에 ${KL.MAX_REVOKE_SERVERS}대까지라 이번 작업에서 빠졌습니다 — 서버를 골라 따로 거두세요.` });
   }
   if (!list.length) return { ok: false, code: 'empty', status: 400, reason: skipped[0]?.reason || '대상 서버가 없습니다.', skipped };
   const pw = oncePw(oncePassword);
   const r = KL.startJob({ kind: 'key-revoke', servers: list, by, meta: { keyId: key.id, keyName: key.name, corp: t(corp, 128), skipped },
-    run: async (s) => {
+    run: async (s0) => {
+      const s = freshServer(s0);
+      if (!s) return movedResult(s0);
       const res = await KL.revokeOne(s, key, { oncePassword: pw, by });
       if (res.ok && res.removed > 0) ST.addEvent({ kind: 'key-lines-removed', corp: t(s.vcenterId), target: `${s.name || s.host} · ${key.name}`, by, detail: `${res.removed}줄` });
       return res;
+    },
+    // 작업 끝에 요약 사건 하나(중요 사건 · 메일 한 통) — 실패한 서버 이름을 함께(점검 E-2 · C-4).
+    onDone: (v) => {
+      const c = countBy(v.results, (x) => (x.ok ? (x.removed > 0 ? 'removed' : 'none') : x.code === 'cancelled' ? 'cancelled' : 'fail'));
+      ST.addEvent({ kind: 'key-revoke-done', corp: t(corp, 128), target: `${key.name}`, by,
+        detail: `${v.total}대 — 지움 ${c.removed || 0} · 줄 없음 ${c.none || 0} · 실패 ${c.fail || 0}${c.cancelled ? ` · 멈춤 ${c.cancelled}` : ''}${skipped.length ? ` · 빠짐 ${skipped.length}` : ''}${c.fail ? ` — ${failNames(v.results)}` : ''}` });
     } });
   return r.ok ? { ...r, total: list.length, skipped } : r;
 }
 export function keyJob(id) { return KL.jobView(id); }
+/** 키 작업 멈추기(지금 서버는 끝까지 — 되돌림을 끊지 않는다). 줄이는 방향이라 소유자 등급만(OTP 없음). */
+export function cancelKeyJob(id, { by = '' } = {}) {
+  const r = KL.cancelJob(id, { by, why: `${t(by, 40)} 이(가) 멈춤` });
+  if (r.ok) ST.addEvent({ kind: 'key-job-cancel', target: t(id, 20), by });
+  return r;
+}
 
 /* ── 사용 기록 ────────────────────────────────────────────────────────── */
 export function usageView({ fingerprint = '', limit = 200 } = {}) { return keyUsageView({ fingerprint, limit }); }
@@ -608,6 +716,12 @@ export function usageView({ fingerprint = '', limit = 200 } = {}) { return keyUs
 /* ── 주기 점검(기동 뒤 · 10분마다) ────────────────────────────────────── */
 let _timer = null;
 let _seenInbox = null;
+/**
+ * 받는 곳 파일의 ‘본 표지’ — 12자 해시(사건 detail 300자 안에 20개가 들어간다). 예전 판은 경로|sha 원문을 줄로 붙여 300자에서 잘렸고,
+ * 한 번에 5개쯤 넘게 들어오면 재시작 뒤 나머지를 다시 알렸다(점검 D 의심 S-2). 옛 사건의 원문 표지도 같은 해시로 읽는다(업그레이드 날 다시 알리지 않게).
+ */
+const inboxSigKey = (sig) => crypto.createHash('sha256').update(String(sig)).digest('hex').slice(0, 12);
+const INBOX_SIGS_PER_EVENT = 20;
 let _seenDrift = null;
 let _running = false;
 
@@ -617,10 +731,14 @@ export async function runSshAccessScan({ now = Date.now() } = {}) {
   _running = true;
   try {
     const events = [];
-    const drift = checkKeyDrift({ now });
+    // 승인 요청 만료 확정은 **맨 먼저** — 뒤 단계(대조 · 받는 곳)가 던져도 이 회차가 만료를 확정하고 대기 키를 정리한다(점검 C 의심 S-3).
+    for (const r of TP.expireSweep({ now })) events.push({ kind: 'approval-decided', corp: r.corp, target: r.title, detail: r.interrupted ? '승인 뒤 실행 결과가 적히지 않음 — 실행됐는지 확인 필요' : '시한(24시간)이 지나 사라짐' });
+    let drift = { changed: [], added: [], accountsChanged: [] }; let ib = { items: [] }; let regErr = null; let servers = [];
+    const seenDrift = []; const seenInbox = [];
+    try {
+    drift = checkKeyDrift({ now });
     if (!_seenDrift) _seenDrift = new Set();
     // ‘본 표지’ 는 사건을 실제로 쓴 뒤에만 세운다(쓰기에 실패하면 다음 점검에서 다시 낸다 — 반증 D10).
-    const seenDrift = []; const seenInbox = [];
     for (const id of drift.changed || []) {
       if (_seenDrift.has(`c:${id}`)) continue;
       seenDrift.push(`c:${id}`);
@@ -639,22 +757,24 @@ export async function runSshAccessScan({ now = Date.now() } = {}) {
       events.push({ kind: 'account-changed-outside', corp: a?.corp || '', target: a?.name || id });
     }
     const corps = await corpList();
-    const regErr = bmRegistryLoadError();
-    const servers = regErr ? [] : listBmServersRaw();
-    const ib = await INB.scanInbox({ corps, servers: servers.map((s) => ({ id: s.id, name: s.name || s.host, vcenterId: t(s.vcenterId) })) });
-    if (!_seenInbox) _seenInbox = new Set(ST.listEvents({ limit: 300 }).filter((e) => e.kind === 'inbox-new').flatMap((e) => String(e.detail || '').split('\n')));
+    regErr = bmRegistryLoadError();
+    servers = regErr ? [] : listBmServersRaw();
+    ib = await INB.scanInbox({ corps, servers: servers.map((s) => ({ id: s.id, name: s.name || s.host, vcenterId: t(s.vcenterId) })) });
+    if (!_seenInbox) _seenInbox = new Set(ST.listEvents({ limit: 300 }).filter((e) => e.kind === 'inbox-new' || e.kind === 'inbox-seen').flatMap((e) => String(e.detail || '').split(/\s+/)).filter(Boolean).map((x) => (x.includes('|') ? inboxSigKey(x) : x)));
     const fresh = [];
     for (const it of ib.items) {
       if (it.code !== 'ready' && !it.needPassphrase) continue;
-      const sig = `${it.relPath}|${it.sha || it.size}`;
+      const sig = inboxSigKey(`${it.relPath}|${it.sha || it.size}`);
       if (_seenInbox.has(sig)) continue;
       seenInbox.push(sig);
       fresh.push({ it, sig });
     }
     // 새 파일은 사건 하나로(파일마다 상태 파일을 다시 쓰지 않는다 — 점검 D-2). detail = 본 표지(재시작 뒤 다시 세지 않게).
     if (fresh.length) events.push({ kind: 'inbox-new', corp: fresh.length === 1 ? fresh[0].it.corp : '',
-      target: `${fresh.length}개 — ${fresh.slice(0, 3).map((x) => x.it.relPath).join(' · ')}`, detail: fresh.map((x) => x.sig).join('\n') });
-    for (const r of TP.expireSweep({ now })) events.push({ kind: 'approval-decided', corp: r.corp, target: r.title, detail: '시한(24시간)이 지나 사라짐' });
+      target: `${fresh.length}개 — ${fresh.slice(0, 3).map((x) => x.it.relPath).join(' · ')}`, detail: fresh.slice(0, INBOX_SIGS_PER_EVENT).map((x) => x.sig).join(' ') });
+    // 20개가 넘으면 나머지 표지는 알림 없는 사건(inbox-seen)에 싣는다 — 메일은 위 한 줄(몇 개인지)로 충분하다.
+    for (let i = INBOX_SIGS_PER_EVENT; i < fresh.length; i += INBOX_SIGS_PER_EVENT) events.push({ kind: 'inbox-seen', detail: fresh.slice(i, i + INBOX_SIGS_PER_EVENT).map((x) => x.sig).join(' ') });
+    } catch (e) { console.warn(`[ssh-access] 점검 일부 실패(만료 확정은 했습니다): ${String(e?.message || e).slice(0, 160)}`); regErr = regErr || 'scan-failed'; }
     const wrote = events.length ? ST.addEvents(events, { now }).ok : true;
     if (wrote) { for (const x of seenDrift) _seenDrift.add(x); for (const x of seenInbox) _seenInbox.add(x); }
     if (!regErr) INS.pruneInstalled(new Set(servers.map((s) => s.id)));

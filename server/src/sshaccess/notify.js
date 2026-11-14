@@ -17,7 +17,8 @@ export const MAIL_EVENTS = Object.freeze({
   'corp-stop': '법인 키 사용 중지', 'corp-resume': '법인 키 사용 재개',
   'key-changed-outside': '키가 포탈 밖에서 바뀜', 'key-added-outside': '키가 포탈 밖에서 들어옴', 'account-changed-outside': '공통 계정이 포탈 밖에서 바뀜',
   'state-reloaded': '상태 파일 다시 읽음', 'keystore-reloaded': '키 저장소 다시 읽음(포탈 밖 변경 받아들임)',
-  'key-lines-removed': '서버에서 키 거둠', 'inbox-new': '받는 곳에 새 키 파일',
+  // 서버마다의 ‘키 거둠’ 은 메일로 보내지 않는다 — 작업 끝 요약 한 통(점검 C-4 — 고지연 법인 100대 거두기가 메일 100통으로 포탈 전체 시간당 한도를 다 썼다).
+  'key-revoke-done': '서버에서 키 거두기 끝남', 'inbox-new': '받는 곳에 새 키 파일',
 });
 
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -62,7 +63,7 @@ export function startKeyNotify() {
   onEvents((events) => {
     const pick = events.filter((e) => MAIL_EVENTS[e.kind]);
     if (!pick.length) return;
-    queue.push(...pick);
+    queue = queue.concat(pick);   // 전개 push 를 쓰지 않는다(audit2603a 스윕)
     if (queue.length > MAX_LINES * 4) queue = queue.slice(-MAX_LINES * 4);
     if (!timer) { timer = setTimeout(() => { flush().catch(() => {}); }, FLUSH_MS); timer.unref?.(); }
   });

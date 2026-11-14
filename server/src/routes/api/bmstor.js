@@ -82,7 +82,7 @@ export async function bmBindCheck(body = {}) {
     if (body[f] === undefined) continue;
     const v = String(body[f] || '').trim();
     if (!v) continue;   // 떼기 — 확인할 참조가 없다
-    if (kind === 'key') { const k = KS.keyById(v); if (!k) return { error: 'SSH 키가 키 저장소에 없습니다.', code: 'key-missing' }; if (k.status === 'retired') return { error: '회전으로 퇴역한 키는 고를 수 없습니다.', code: 'key-retired' }; }
+    if (kind === 'key') { const k = KS.keyById(v); if (!k) return { error: 'SSH 키가 키 저장소에 없습니다.', code: 'key-missing' }; if (k.status === 'retired') return { error: '회전으로 퇴역한 키는 고를 수 없습니다.', code: 'key-retired' }; if (k.status !== 'active') return { error: '두 사람 승인을 기다리는 키는 승인된 뒤에 고를 수 있습니다.', code: 'key-pending' }; }
     else { const a = KS.accountById(v); if (!a) return { error: '공통 계정이 없습니다.', code: 'account-missing' }; if (a.kind !== 'os') return { error: 'OS 공통 계정만 고를 수 있습니다.', code: 'account-kind' }; }
   }
   // 7b r3(R-N1): 묶음 판정은 등록부 choke point 와 **같은 함수 · 같은 입력**(bindRule.bindOfWrite) — 두 벌을 두지 않는다.

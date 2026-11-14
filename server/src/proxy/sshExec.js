@@ -177,7 +177,7 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
       if (LEGACY_FALLBACK && LEGACY_ALGOS && !_legacy && NO_MATCH.test(e.message || '')) {
         say('알고리즘 협상 실패 → 구형 알고리즘(diffie-hellman-group1-sha1/ssh-dss/aes-cbc 등)까지 열어 1회 재시도합니다.', 'warn');
         try { conn.end(); } catch { /* */ }
-        connect({ host, port, username, password, privateKey, passphrase, readyTimeout, signal, trace, verbose, _legacy: true }).then(resolve, reject);
+        connect({ host, port, username, password, privateKey, passphrase, readyTimeout, signal, trace, verbose, _legacy: true, passwordOnly }).then(resolve, reject);   // passwordOnly 도 넘긴다(v3.10.0 점검 B-F7 · D-4 — 빠지면 재시도에서 비밀번호가 keyboard-interactive 로 한 번 더 간다)
         return;
       }
       reject(e);

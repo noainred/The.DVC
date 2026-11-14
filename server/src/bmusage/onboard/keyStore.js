@@ -244,7 +244,7 @@ const _tamperedAcc = new Set();
 export function tamperedAccountIds() { return [..._tamperedAcc]; }
 export function isAccountTampered(id) { return _tamperedAcc.has(t(id, 32)); }
 /** 공개키 칸이 지문과 맞는가(화면 ‘공개키 복사’ 가 authorized_keys 배포에 쓰인다 — 공개키만 바꾸면 남의 키를 배포하게 된다 · 반증 D4). */
-function publicKeyMatches(k) {
+export function publicKeyMatches(k) {
   const b64 = String(k.publicKey || '').trim().split(/\s+/)[1] || '';
   if (!b64) return false;
   try { return sshHostKeyFingerprint(Buffer.from(b64, 'base64')) === k.fingerprint; } catch { return false; }
@@ -290,8 +290,16 @@ export function diskDrift() {
   for (const da of diskAccs) if (!memAcc.has(da.id)) out.accountsChanged.push(da.id);
   return out;
 }
-/** 설정 소유자 + OTP — 디스크 파일을 새 기준으로 다시 읽는다(포탈 밖에서 바뀐 것을 사람이 확인한 뒤). 바꿔치기 표지도 푼다. */
-export function reloadKeyStoreFromDisk() {
+/** 디스크 파일의 sha256(없으면 '', 못 읽으면 null) — ‘다시 읽기’ 승인을 요청 때 본 디스크 내용에 묶는다(점검 A5). */
+export function diskFileSha() {
+  try { return fs.existsSync(FILE) ? crypto.createHash('sha256').update(fs.readFileSync(FILE)).digest('hex') : ''; } catch { return null; }
+}
+/**
+ * 설정 소유자 + OTP — 디스크 파일을 새 기준으로 다시 읽는다(포탈 밖에서 바뀐 것을 사람이 확인한 뒤). 바꿔치기 표지도 푼다.
+ * expectSha 를 주면 지금 디스크가 그 내용일 때만(승인 요청 뒤 파일이 또 바뀌었으면 거절 — 승인한 사람이 본 것만 받아들인다).
+ */
+export function reloadKeyStoreFromDisk({ expectSha } = {}) {
+  if (typeof expectSha === 'string' && diskFileSha() !== expectSha) return { ok: false, code: 'disk-changed', status: 409, reason: '승인 요청 뒤 키 저장소 파일이 또 바뀌었습니다 — 바뀐 내용을 다시 확인하고 새로 요청하세요.' };
   cache = null; loadErr.clear(); undecryptable = 0; _tampered.clear(); _tamperedAcc.clear();
   load();
   const e = loadErr.get();

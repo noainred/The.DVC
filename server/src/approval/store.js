@@ -38,6 +38,16 @@ const KIND_RE = /^[a-z][a-z0-9-]{1,39}$/;
 
 const t = (v, max = 256) => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max).trim();
 const lc = (v) => t(v, 128).toLowerCase();
+/**
+ * 신원 비교용 글자 — 소문자 · AD 도메인 접두(`CORP\\alice`) · 접미(`alice@corp.local`)를 뗀다(점검 A2).
+ * AD 로그인은 세 꼴을 모두 받고 입력한 글자를 그대로 username 으로 쓴다 — 글자만 비교하면 같은 사람이 별칭으로 자기 요청을 승인할 수 있었다.
+ */
+export function identityKey(name) {
+  let s = lc(name);
+  const bs = s.lastIndexOf('\\'); if (bs >= 0) s = s.slice(bs + 1);
+  const at = s.indexOf('@'); if (at > 0) s = s.slice(0, at);
+  return s;
+}
 const num = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.round(Number(v)) : 0);
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 
@@ -95,7 +105,8 @@ const unreadable = () => {
 function commit(next) {
   // 끝난 요청은 최근 MAX_HISTORY 개만(대기 중인 것은 버리지 않는다).
   const open = next.requests.filter((r) => r.status === OPEN);
-  const done = next.requests.filter((r) => r.status !== OPEN).slice(-MAX_HISTORY);
+  // 자르는 순서는 **끝난 시각**(decidedAt) — 오래 기다린 요청을 지금 결정하면 그 기록이 바로 잘리던 것(점검 C-9 — 요청 시각 순이었다).
+  const done = next.requests.filter((r) => r.status !== OPEN).sort((a, b) => (a.decidedAt || a.requestedAt) - (b.decidedAt || b.requestedAt)).slice(-MAX_HISTORY);
   const out = { requests: [...done, ...open].sort((a, b) => a.requestedAt - b.requestedAt) };
   try {
     fs.mkdirSync(path.dirname(FILE()), { recursive: true });
@@ -142,6 +153,13 @@ export function listRequests({ kinds = null, includeDone = true, limit = 200 } =
     .filter((r) => includeDone || r.status === OPEN)
     .sort((a, b) => b.requestedAt - a.requestedAt).slice(0, Math.max(1, Math.min(500, limit)));
 }
+/** 화면용 — 대기 중인 요청은 **전부**(상한 MAX_PENDING), 끝난 요청은 최근 doneLimit 개(점검 E-1 — 합쳐서 자르면 대기 요청이 끝난 요청에 밀려 보이지 않았다). */
+export function listForView({ kinds = null, doneLimit = 60 } = {}, { now = Date.now() } = {}) {
+  const all = listRequests({ kinds, includeDone: true, limit: 500 }, { now });
+  const open = all.filter((r) => r.status === OPEN);
+  const done = all.filter((r) => r.status !== OPEN).slice(0, Math.max(0, doneLimit));
+  return [...open, ...done];
+}
 export function getRequest(id) { const r = load()?.requests.find((x) => x.id === t(id, 20)); return r ? view(r) : null; }
 
 /**
@@ -158,10 +176,10 @@ export function decide(id, { by, approve, digest = '', note = '' } = {}, { now =
   if (r.status !== OPEN) return { ok: false, code: 'not-pending', status: 409, reason: '이미 처리된 요청입니다.' };
   if (r.expiresAt <= now) return { ok: false, code: 'expired', status: 409, reason: '요청의 시한(24시간)이 지났습니다 — 다시 요청하세요.' };
   if (approve) {
-    if (lc(who) === lc(r.requestedBy)) return { ok: false, code: 'self-approve', status: 403, reason: '요청한 사람은 승인할 수 없습니다 — 다른 설정 소유자가 승인해야 합니다.' };
+    if (identityKey(who) === identityKey(r.requestedBy)) return { ok: false, code: 'self-approve', status: 403, reason: '요청한 사람은 승인할 수 없습니다 — 다른 설정 소유자가 승인해야 합니다.' };
     if (t(digest, 64) !== r.digest) return { ok: false, code: 'digest-mismatch', status: 409, reason: '화면에서 본 요청 내용과 다릅니다 — 다시 읽은 뒤 승인하세요.' };
   }
-  r.status = approve ? 'approved' : (lc(who) === lc(r.requestedBy) ? 'cancelled' : 'rejected');
+  r.status = approve ? 'approved' : (identityKey(who) === identityKey(r.requestedBy) ? 'cancelled' : 'rejected');
   r.decidedBy = who; r.decidedAt = now; r.note = t(note, 300);
   const c = commit(d); if (!c.ok) return c;
   return { ok: true, request: view(r) };
@@ -189,6 +207,7 @@ export function expireDue({ now = Date.now() } = {}) {
   const stuck = d.requests.filter((r) => r.status === 'approved' && r.decidedAt && r.decidedAt + INTERRUPTED_MS <= now);
   if (!due.length && !stuck.length) return [];
   for (const r of due) { r.status = 'expired'; r.decidedAt = now; }
-  for (const r of stuck) { r.status = 'failed'; r.result = { ok: false, code: 'interrupted', reason: '승인 뒤 실행 결과가 적히지 않았습니다(포탈이 실행 중 멈춤) — 다시 요청하세요.' }; }
-  return commit(d).ok ? [...due, ...stuck].map(view) : [];
+  // 실행이 됐는지 모른다(실행 뒤 기록 쓰기만 실패했을 수도 있다 — 점검 C-8) — ‘실행 여부 모름’ 으로 적고, 호출부는 이것을 만료와 다르게 다룬다(interrupted 표지).
+  for (const r of stuck) { r.status = 'failed'; r.result = { ok: false, code: 'interrupted', reason: '승인 뒤 실행 결과가 적히지 않았습니다(실행 중 포탈이 멈췄거나 결과 기록을 쓰지 못함) — 실행됐는지 확인한 뒤 필요하면 다시 요청하세요.' }; }
+  return commit(d).ok ? [...due.map(view), ...stuck.map((r) => ({ ...view(r), interrupted: true }))] : [];
 }
