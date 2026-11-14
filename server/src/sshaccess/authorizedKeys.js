@@ -21,7 +21,7 @@ export { PORTAL_MARK };   // 표식 글자는 한 곳(akScript — 순수)에서
  */
 // 2회차 E2-3: 없음 · 못 읽음 · 일반 파일 아님을 가른다(예전에는 모르는 것을 ‘없음’ 으로, 못 읽는 파일을 ‘0줄’ 로 말했다). 앞 표지 한 줄 뒤에 내용.
 // 홈 판정은 바꾸는 스크립트(akScript noacc)와 같다 — 있는 가장 가까운 조상 폴더를 따라갈 수 없으면 못 읽음, 조상이 폴더가 아니면 없음(4회차 B4-1).
-export const READ_COMMAND = "f=\"$HOME/.ssh/authorized_keys\"; p=\"$HOME\"; while [ -n \"$p\" ] && [ ! -e \"$p\" ]; do q=\"${p%/*}\"; [ \"$q\" = \"$p\" ] && break; p=\"$q\"; done; [ -n \"$p\" ] || p=/; if [ -f \"$f\" ]; then if [ -r \"$f\" ]; then echo '##AK present'; head -c 262144 \"$f\"; else echo '##AK unreadable'; fi; elif [ -e \"$f\" ] || [ -L \"$f\" ]; then echo '##AK notfile'; elif { [ -d \"$p\" ] && [ ! -x \"$p\" ]; } || { [ -d \"$HOME/.ssh\" ] && [ ! -x \"$HOME/.ssh\" ]; }; then echo '##AK unreachable'; else echo '##AK missing'; fi";
+export const READ_COMMAND = "f=\"$HOME/.ssh/authorized_keys\"; p=\"$HOME\"; while [ -n \"$p\" ] && [ ! -e \"$p\" ] && [ ! -L \"$p\" ]; do q=\"${p%/*}\"; [ \"$q\" = \"$p\" ] && break; p=\"$q\"; done; [ -n \"$p\" ] || p=/; if [ -f \"$f\" ]; then if [ -r \"$f\" ]; then echo '##AK present'; head -c 262144 \"$f\"; else echo '##AK unreadable'; fi; elif [ -e \"$f\" ] || [ -L \"$f\" ]; then echo '##AK notfile'; elif { [ -L \"$p\" ] && [ ! -e \"$p\" ]; } || { [ -d \"$p\" ] && [ ! -x \"$p\" ]; } || { [ -d \"$HOME/.ssh\" ] && [ ! -x \"$HOME/.ssh\" ]; }; then echo '##AK unreachable'; else echo '##AK missing'; fi";
 
 const KEY_TYPE_RE = /^(ssh-ed25519|ssh-rsa|ssh-dss|ecdsa-sha2-nistp(?:256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com)$/;
 const B64_RE = /^[A-Za-z0-9+/]+={0,3}$/;

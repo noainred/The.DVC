@@ -145,7 +145,8 @@ const CHECKS = (needDir) => [
   // 홈이 아예 없는 계정(useradd -M)은 권한 문제가 아니다 — 아래 꼴 검사가 ‘없음’ 으로 답한다(3회차 반증 R3R-5).
   // 홈이 ‘없음’ 인지 ‘따라갈 수 없음’ 인지는 있는 가장 가까운 조상 폴더로 가른다(4회차 E4-4 — 홈의 상위 폴더가 막히면 [ -e ] 도 거짓이라 ‘없음’ 으로 답했다).
   // 그 조상이 폴더가 아니면(홈이 /dev/null · 일반 파일) 권한 문제가 아니다 — ~/.ssh 가 있을 수 없으니 ‘없음’(4회차 B4-1 ②).
-  'noacc() { p="$HOME"; while [ -n "$p" ] && [ ! -e "$p" ]; do q="${p%/*}"; [ "$q" = "$p" ] && break; p="$q"; done; [ -n "$p" ] || p=/; [ -d "$p" ] && [ ! -x "$p" ]; }',
+  // 따라갈 수 없는 곳을 가리키는 심볼릭 링크(홈 · 경로 중간)는 거기서 멈추고 ‘알 수 없음’ 으로 본다(4회차 반증 R4R-5 — 링크를 지나 위로 올라가 ‘없음’ 이라고 했다).
+  'noacc() { p="$HOME"; while [ -n "$p" ] && [ ! -e "$p" ] && [ ! -L "$p" ]; do q="${p%/*}"; [ "$q" = "$p" ] && break; p="$q"; done; [ -n "$p" ] || p=/; if [ -L "$p" ] && [ ! -e "$p" ]; then return 0; fi; [ -d "$p" ] && [ ! -x "$p" ]; }',
   'if noacc || { [ -d "$d" ] && [ ! -x "$d" ]; }; then echo "##KL fail noaccess"; exit 3; fi',
   ...(needDir ? [
     'mkd=""',
@@ -202,9 +203,10 @@ const COMMIT = [
 export function installScript({ publicKey, keyId, line, replace = false } = {}) {
   const pk = splitPublicKey(publicKey); const mark = markOf(keyId);
   if (!pk || !mark || !safeQ(line) || !line.includes(` ${pk.blob} `) || !line.endsWith(` ${mark}`)) return null;
-  const CLS = `${STRIP} index(t, b) == 0 { next } index(t, m) > 0 { if (t == L) ex++; else if (index(t, ty " ") == 1) un++; else if (t ~ /^from="[0-9A-Fa-f.:]+",no-agent-forwarding,no-port-forwarding,no-X11-forwarding /) sd++; else cu++; next } (index(t, " " pm) > 0 || index(t, "\t" pm) > 0) { oi++; next } { um++ } END { printf "%d %d %d %d %d %d %d", NR, ex + 0, un + 0, sd + 0, cu + 0, um + 0, oi + 0 }`;
-  const OLD = `${STRIP} index(t, b) > 0 && index(t, m) > 0 { print $0 }`;
-  const DROPM = `${STRIP} index(t, b) > 0 && index(t, m) > 0 { next } { print }`;
+  // 자기 표식도 앞이 공백 · 탭일 때만(4회차 반증 R4R-7 — ‘xportal-ssh:k_<id>’ 처럼 붙은 사람 줄을 포탈 줄로 봤다).
+  const CLS = `${STRIP} index(t, b) == 0 { next } (index(t, " " m) > 0 || index(t, "\t" m) > 0) { if (t == L) ex++; else if (index(t, ty " ") == 1) un++; else if (t ~ /^from="[0-9A-Fa-f.:]+",no-agent-forwarding,no-port-forwarding,no-X11-forwarding /) sd++; else cu++; next } (index(t, " " pm) > 0 || index(t, "\t" pm) > 0) { oi++; next } { um++ } END { printf "%d %d %d %d %d %d %d", NR, ex + 0, un + 0, sd + 0, cu + 0, um + 0, oi + 0 }`;
+  const OLD = `${STRIP} index(t, b) > 0 && (index(t, " " m) > 0 || index(t, "\t" m) > 0) { print $0 }`;
+  const DROPM = `${STRIP} index(t, b) > 0 && (index(t, " " m) > 0 || index(t, "\t" m) > 0) { next } { print }`;
   return [
     ...HEAD,
     `B='${pk.blob}'; M='${mark}'; L='${line}'; TY='${pk.type}'; RP='${replace ? 1 : 0}'`,

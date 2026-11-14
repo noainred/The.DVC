@@ -34,7 +34,7 @@ export function buildKeyCheck({ now = Date.now(), policyMode = '', inbox = null,
   const add = (level, code, title, detail, extra = {}) => items.push({ level, code, title, detail, ...extra });
   const storeErr = KS.keyStoreLoadError();
   if (storeErr) {
-    add('unknown', 'store-unreadable', 'SSH 키 저장소를 읽지 못함', '손상 보존본을 확인하세요 — 그동안 키로 접속하지 않습니다.');
+    add('unknown', 'store-unreadable', 'SSH 키 저장소를 읽지 못함', '파일 권한(읽기 오류) 또는 손상 보존본을 확인하세요 — 그동안 키로 접속하지 않습니다.');
     return { at: now, items, summary: summarize(items) };
   }
   const keys = KS.listKeysRaw().filter((k) => k.status === 'active');

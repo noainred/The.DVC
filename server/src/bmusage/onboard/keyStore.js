@@ -136,7 +136,7 @@ export function keyStoreUndecryptable() { load(); return undecryptable; }
 const unreadable = () => {
   load();   // ⚠ 로드를 먼저 — 첫 호출이 쓰기면 오류 상태가 아직 없다(손상 파일을 빈 저장소로 덮어쓰던 결함 · ⑦ 이 잡았다)
   const e = loadErr.get();
-  if (e) return { ok: false, code: 'registry-unreadable', status: 503, reason: `SSH 키 저장소(${KEY_FILE_NAME})를 읽지 못해 바꾸지 않았습니다 — 손상 보존본(${KEY_FILE_NAME}.corrupt.*)을 확인해 되돌린 뒤 다시 시도하세요.` };
+  if (e) return { ok: false, code: 'registry-unreadable', status: 503, reason: `SSH 키 저장소(${KEY_FILE_NAME})를 읽지 못해 바꾸지 않았습니다 — 파일 권한(읽기 오류) 또는 손상 보존본(${KEY_FILE_NAME}.corrupt.*)을 확인한 뒤 다시 시도하세요.` };
   if (undecryptable) return { ok: false, code: 'secrets-undecryptable', status: 503, reason: `봉인을 풀지 못한 비밀 ${undecryptable}개가 있어(자격증명 비밀키 불일치 의심) 키 저장소를 바꾸지 않았습니다 — 봉인본을 지우지 않기 위해서입니다(이 파일은 백업에 개인키가 없습니다). 원래 비밀키로 되돌린 뒤 다시 시도하세요.` };
   return null;
 };

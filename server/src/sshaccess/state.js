@@ -232,9 +232,11 @@ export function addStopServers(corp, servers = []) {
   const c = t(corp, 128);
   const d = draft();
   if (!c || !Object.hasOwn(d.stops, c)) return { ok: false, code: 'not-stopped', status: 404, reason: '이 법인은 사용 중지 상태가 아닙니다.' };
-  const cur = d.stops[c];
+  // 사본을 바꾼다 — 캐시의 중지 객체를 제자리에서 바꾸면 쓰기가 실패해도 메모리에는 더해진 채 남았다(4회차 반증 R4R-2).
+  const cur = { ...d.stops[c] };
   cur.serverIds = strList([...(cur.serverIds || []), ...servers.map((s) => s?.id)], MAX_STOP_SERVERS);
   cur.addrs = strList([...(cur.addrs || []), ...servers.map((s) => s?.addr)], MAX_STOP_SERVERS);
+  d.stops[c] = cur;
   return commit(d);
 }
 export function clearCorpStop(corp, { by = '', now = Date.now() } = {}) {

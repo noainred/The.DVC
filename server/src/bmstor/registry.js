@@ -47,10 +47,9 @@ function load() {
       cache = { servers, settings: j?.settings || {} };
     }
   } catch (e) {
-    // 읽기 오류(권한 · EMFILE 등)는 손상이 아니다 — 원본을 옮기지 않고 잠근다(4회차 C4-3).
-    if (e?.code && !(e instanceof SyntaxError)) loadErr.set(`읽기 실패(${String(e.code).slice(0, 40)})`);
-    else { preserveCorrupt(FILE, e?.message); loadErr.set(e); }
-    cache = null;
+    // 읽기 오류도 보존본을 남긴다 — 이 등록부는 사람 쓰기 경로(서버 저장 · 삭제 · 주기 · CSV)가 오류를 보지 않아, 원본을 그대로 두면 다음 저장이 덮었다
+    //   (4회차 반증 R4R-1 — 4회차 C4-3 에서 보존본을 빼 원본이 사라졌다). ‘없음’ 판정은 ENOENT 만(isMissing — C4-3)은 그대로다.
+    preserveCorrupt(FILE, e?.message); loadErr.set(e); cache = null;
   }
   if (!cache) { loadErr.checkCorruptOnly(FILE); cache = { servers: [], settings: {} }; }
   return cache;

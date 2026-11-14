@@ -452,7 +452,9 @@ export async function stopCorp(corp, { by = '', reason = '' } = {}) {
   const cur = ST.stopFor(c);
   if (cur && !cur.unreadable) {
     // 다시 걸어 사건을 쌓지 않는다 — 다만 중지 뒤에 등록한 서버는 기록에 더한다(2회차 반증 R2R-6 — 그 서버는 법인 칸을 비우면 중지에서 빠졌다).
-    const { servers } = corpServerList(c);
+    const { servers, regErr: rErr } = corpServerList(c);
+    // 등록부를 못 읽으면 새 서버가 있는지 모른다 — ‘없어서 바꾸지 않았다’ 고 말하지 않는다(4회차 반증 R4R-2).
+    if (rErr) return { ok: true, already: true, stop: cur, added: 0, registryUnreadable: true, reason: '이미 사용 중지 상태입니다 — OS 계정 등록부를 읽지 못해 그 뒤 등록된 서버를 확인하지 못했습니다.' };
     const ids = new Set(cur.serverIds || []); const addrs = new Set(cur.addrs || []);
     const extra = servers.filter((x) => !ids.has(x.id) || (x.addr && !addrs.has(x.addr)));
     const w = extra.length ? ST.addStopServers(c, extra) : { ok: true };
@@ -640,6 +642,7 @@ export function approvalPrecheck(id, { approve, by = '', digest = '' } = {}) {
     if (cur.kind === 'ssh-corp-resume') { const st = ST.stopFor(cur.payload?.corp); if (st && !st.unreadable && Number(st.at) !== Number(cur.payload?.stopAt)) return { ok: false, code: 'stop-changed', status: 409, reason: '요청 뒤 그 법인에 사용 중지가 다시 걸렸습니다 — 이 요청은 돌려보내고 새 중지를 확인한 뒤 새로 요청하세요.' }; }
     // 넣는 중인 키(교체의 옛 키 · 삭제할 키)와 새 키 상태도 OTP 앞에서(3회차 A3-2 — 실행 단계에서 409 key-installing 으로 끝나 승인자의 OTP 와 요청이 버려졌다).
     //   넣기 작업은 끝나면 풀리므로 요청은 그대로 두고 나중에 다시 승인하게 한다.
+    if ((cur.kind === 'ssh-key-rotate' || cur.kind === 'ssh-key-delete') && KS.keyStoreLoadError()) return STORE_UNREADABLE;   // 못 읽음을 ‘지워짐’ 으로 말하지 않는다(4회차 반증 R4R-3)
     if (cur.kind === 'ssh-key-rotate') {
       const ii = installingIssue(cur.payload?.from); if (ii) return { ...ii, reason: `${ii.reason} 요청은 그대로 둡니다 — 작업이 끝난 뒤 승인하세요.` };
       // 새 키를 거두는 중이면 교체할 수 없다 — 거두기가 끝나도 그 키 줄은 서버에 없다(4회차 E4-5 — ‘끝난 뒤 승인하세요’ 라고 해 따르면 접속이 끊겼다). 돌려보내라고 말한다.

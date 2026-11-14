@@ -44,7 +44,7 @@ export function mergeRedactedKeyStore(bundleText, currentText) {
   const curAccById = new Map(curAccs.map((a) => [String(a.id || ''), a]));
   const curById = new Map(curKeys.map((k) => [String(k.id || ''), k]));
   let restored = 0; const dropped = []; const kept = [];
-  const keys = [];
+  const keys = []; const idRemap = new Map();
   for (const k of (Array.isArray(b?.keys) ? b.keys : [])) {
     if (!k || typeof k !== 'object') continue;
     const o = { ...k };
@@ -64,7 +64,11 @@ export function mergeRedactedKeyStore(bundleText, currentText) {
     //   그 밖에는 번들 id 그대로 — 같은 키를 새 id 로 다시 등록한 설치에 옛 백업을 복원해도 번들 안의 참조(공통 계정 · 서버)가 이어진다(1회차 D2 — 항상 지금 id 로 바꾸자 참조가 조용히 끊겼다).
     { const owner = curById.get(String(o.id || '')); if (owner && String(owner.fingerprint || '') !== String(o.fingerprint || '')) o.id = cur0.id; }
     // 승인 대기 키는 지금 id 를 지킨다 — 열린 등록 요청이 그 id 를 가리킨다(4회차 D4-1 — 번들 id 로 바꾸자 요청이 키를 잃었고, 지문으로 대신 찾는 길이 다른 범위의 대기 키를 집었다).
-    if (cur0 && cur0.status === 'pending' && cur0.id) o.id = cur0.id;
+    if (cur0 && cur0.status === 'pending' && cur0.id) {
+      // 번들 안의 옛 id 참조(공통 계정 기본 키)는 지금 id 로 옮기고, 바뀐 사실을 결과에 밝힌다(4회차 반증 R4R-4 — 서버의 키 참조는 bm-storage 복원본에 옛 id 로 남는다: 승인 뒤 키 고르기로 다시 묶는다).
+      if (String(o.id || '') && String(o.id) !== String(cur0.id)) { idRemap.set(String(o.id), String(cur0.id)); dropped.push(`key-id:${String(cur0.name || cur0.id).slice(0, 64)}`); }
+      o.id = cur0.id;
+    }
     restored += 1;
     keys.push(o);
   }
@@ -89,6 +93,7 @@ export function mergeRedactedKeyStore(bundleText, currentText) {
       const same = c && String(c.kind || '') === String(o.kind || '') && lc(c.corp) === lc(o.corp) && lc(c.username) === lc(o.username);
       if (same && typeof c.password === 'string' && c.password) { o.password = c.password; restored += 1; } else { o.password = ''; dropped.push(`account:${String(o.name || o.id || '').slice(0, 64)}`); }
     }
+    if (o.keyRef && idRemap.has(String(o.keyRef))) o.keyRef = idRemap.get(String(o.keyRef));   // 승인 대기 키의 지금 id 로(R4R-4)
     // 번들의 기본 키가 합친 키에 없으면 떼고 그 사실을 밝힌다(1회차 D2 — 조용히 비웠다).
     if (o.keyRef && !keys.some((k) => k.id === o.keyRef)) { dropped.push(`account-key:${String(o.name || o.id || '').slice(0, 64)}`); o.keyRef = ''; }
     accounts.push(o);

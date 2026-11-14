@@ -346,6 +346,7 @@ describe('SSH 공용 접속 2단계 — 보호 장치 · 사건 문구', () => {
     expect(stopDoneText({ ok: true, already: true, added: 0, addFailed: true, reason: 'x' }, 'KR')).toContain('더하지 못했습니다');
     expect(stopDoneText({ ok: true, already: true, added: 0, reason: '…더하지 못했습니다…' }, 'KR')).toBe('KR — 이미 키 사용이 중지돼 있습니다 — 그 뒤 등록된 서버가 없어 기록을 바꾸지 않았습니다.');   // 판정은 사유 글자가 아니라 addFailed 칸(3회차 D3-2)
     expect(svc).toMatch(/addFailed: extra\.length > 0 && !w\.ok/);
+    expect(stopDoneText({ ok: true, already: true, added: 0, registryUnreadable: true }, 'KR')).toContain('확인하지 못했습니다');   // 4회차 반증 R4R-2
   });
   it('두 사람 승인 대상 목록 — 보호 장치 설명 · 끄기 안내가 같은 글자 하나 · 서버 SSH_KINDS 의 종류가 모두 들어 있다', () => {
     expect(GUARD_TEXT.twoPerson.note.startsWith(TWO_PERSON_TARGETS)).toBe(true);

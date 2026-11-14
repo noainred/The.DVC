@@ -858,7 +858,9 @@ function FoldersTab({ v, corpName, reload, say }) {
               <option value="">미분류(폴더 없음)</option>{(v.corps || []).filter((c) => !c.missing || c.id === edit.key.folderCorp).map((c) => <option key={c.id} value={c.id} disabled={c.missing && c.id !== edit.folderCorp}>{c.name}</option>)}
             </Select></label>
             <label>서버(비우면 공통) <Select sort={false} className="select select-sm" value={edit.folderServer} disabled={!edit.folderCorp} onChange={(e) => setEdit({ ...edit, folderServer: e.target.value })}>
+              {/* 지금 서버 폴더 이름이 서버 목록에 없으면 그 값도 보인다(4회차 반증 R4R-6 — ‘공통’ 으로 보였는데 옛 이름이 저장됐다). 새로 고를 수는 없다. */}
               <option value="">공통</option>{(v.servers || []).filter((s) => s.vcenterId === edit.folderCorp).map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
+              {edit.folderServer && !(v.servers || []).some((s) => s.vcenterId === edit.folderCorp && s.name === edit.folderServer) && <option value={edit.folderServer} disabled={edit.folderServer !== edit.key.folderServer}>{edit.folderServer} (서버 목록에 없음)</option>}
             </Select></label>
             <div className="ssa-wide"><span className="ssa-sub">쓸 수 있는 기능</span><FeaturePicker catalog={v.features} value={edit.features} onChange={(f) => setEdit({ ...edit, features: f })} allowAll={edit.key.features == null} /></div>
             {!featuresChosen(edit.features) && <p className="ssa-note" style={{ color: toneVar('warn') }}>기능을 하나 이상 고르세요 — 없으면 이 키로 어느 기능도 접속하지 않습니다(쓰는 서버 {unitText(edit.key.servers, '대')}의 수집이 멈춥니다).</p>}

@@ -486,6 +486,7 @@ export function stopDoneText(r, corpLabel = '') {
   if (r?.already === true) {
     const added = finiteNum(r?.added);
     if (added > 0) return `${corpLabel} — 이미 키 사용이 중지돼 있습니다. 그 뒤 등록된 서버 ${added}대를 중지 기록에 더했습니다(사건은 다시 쓰지 않았습니다).`;
+    if (r?.registryUnreadable === true) return `${corpLabel} — 이미 키 사용이 중지돼 있지만, OS 계정 등록부를 읽지 못해 그 뒤 등록된 서버를 확인하지 못했습니다(기록을 바꾸지 않았습니다).`;   // 4회차 반증 R4R-2
     if (r?.addFailed === true) return `${corpLabel} — 이미 키 사용이 중지돼 있지만, 그 뒤 등록된 서버를 중지 기록에 더하지 못했습니다(상태 파일 쓰기 실패 — 상태 파일을 확인한 뒤 다시 하세요).`;
     // 더할 서버가 없었다는 것도 말한다(4회차 E4-6).
     return `${corpLabel} — 이미 키 사용이 중지돼 있습니다 — 그 뒤 등록된 서버가 없어 기록을 바꾸지 않았습니다.`;
