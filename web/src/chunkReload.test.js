@@ -21,4 +21,12 @@ describe('v2.977 업그레이드 뒤 화면 조각 404', () => {
     expect(claimAutoReload(null, 1)).toBe(false);
     expect(claimAutoReload({ getItem: () => { throw new Error('denied'); }, setItem: () => {} }, 1)).toBe(false);
   });
+  // v3.10.8(공통 기능 점검 6회차): 남긴 시각이 미래면(시계를 되돌림) 예전엔 그 시각까지 자동 새로고침이 막혔다.
+  it('미래 기록은 믿지 않는다 — 지금 시각으로 다시 적고 한 번 새로 읽는다', () => {
+    const s = mem();
+    s.setItem(RELOAD_KEY, String(10_000_000));
+    expect(claimAutoReload(s, 10_000_000 - 3_600_000)).toBe(true);
+    expect(s.getItem(RELOAD_KEY)).toBe(String(10_000_000 - 3_600_000));
+    expect(claimAutoReload(s, 10_000_000 - 3_600_000 + 1)).toBe(false); // 그 뒤로는 다시 60초 간격
+  });
 });
