@@ -58,6 +58,7 @@ export const rollbackCommand = (o) => wrapOrNull(AK.rollbackScript(o));
 /* ── 접속(한 번 · 재시도 없음 · 시한) ─────────────────────────────────────── */
 
 const TIMEOUT_RE = /타임아웃|시한 초과|취소|timed? ?out/i;
+const KEY_UNUSABLE_TEXT = '그 키로 접속은 되지만 포탈이 보낸 명령이 돌지 않았습니다(그 키 줄에 강제 명령(command=)이 있는 등) — 이 키로는 수집할 수 없어 묶지 않았습니다';
 /**
  * @param {Function} fn  (run) => 결과. run(cmd, mutating) — mutating 이면 ‘바꾸는 명령을 보냈다’ 표시를 세운다(답을 못 받았을 때 문구가 갈린다).
  * @returns {Promise<{ok:true, value:object} | {ok:false, code:string, reason:string, sent:boolean}>}
@@ -74,6 +75,7 @@ async function sshRun(server, auth, fn, { execs = 1 } = {}) {
     return { ok: true, value: v };
   } catch (e) {
     const msg = String(e?.message || e);
+    if (e?.code === 'key-login-unusable') return { ok: false, code: 'key-login-unusable', reason: KEY_UNUSABLE_TEXT, sent: st.sent };
     const code = e?.code === 'SSH_NO_PASSWORD_METHOD' ? 'no-password-method' : isPeerRejectText(msg) ? 'hostkey' : isAuthFailureText(msg) ? 'auth-rejected' : TIMEOUT_RE.test(msg) ? 'timeout' : 'connect';
     const reason = code === 'no-password-method' ? '서버가 비밀번호 로그인을 받지 않아(키만 받음) 비밀번호를 보내지 않았습니다 — 이미 되는 키로 접속하게 서버 설정을 고르거나 공개키를 서버에 직접 넣으세요.'
       : code === 'hostkey' ? '호스트키를 신뢰하지 않아 끊었습니다 — 설정 › 보안 › 장비 신뢰에서 지문을 확인 · 승인하세요.'
@@ -191,11 +193,16 @@ export async function installOne(server, key, o = {}) {
   if (replaceSkipped) notes.push('제한 없는 포탈 줄이 있지만 지금 그 키로만 접속돼 제한 줄로 바꾸지 않았습니다(확인이 실패하면 되돌릴 길이 없습니다) — 이번 한 번만 쓸 비밀번호를 넣고 다시 하면 바꿉니다.');
 
   // ② 끊고 그 키로 다시 접속해 확인한다.
+  // 출력도 본다(2회차 B6 — 강제 명령(command=) 줄이면 exec 는 성공하지만 우리 명령은 돌지 않는다: 그런 키에 서버를 묶고 저장 비밀번호까지 지웠다).
+  //   이번 접속에만 쓰는 글자(nonce)를 되돌려 받아야 ‘명령을 돌릴 수 있는 키’ 다 — 로그인 메시지가 섞여도 그 줄을 찾는다(셸과 무관하게 /bin/sh 로 싼다).
+  const nonce = crypto.randomBytes(6).toString('hex');
   const step2 = await sshRun(server, kAuth, async (run) => {
-    const u = await run('uname -s');
+    const u = await run(AK.wrapSh(`echo "##KLV ${nonce} $(uname -s 2>/dev/null)"`));
+    const hit = String(u?.stdout ?? '').slice(-200_000).split('\n').map((x) => x.trim()).find((x) => x.startsWith(`##KLV ${nonce}`));
+    if (!hit) { const e = new Error(KEY_UNUSABLE_TEXT); e.code = 'key-login-unusable'; throw e; }
     let read = null;
     try { read = parseReadOutput((await run(READ_COMMAND))?.stdout || ''); } catch { read = null; }
-    return { uname: t(u?.stdout, 40), read };
+    return { uname: t(hit.slice(`##KLV ${nonce}`.length).trim(), 40), read };
   }, { execs: 2 });
   noteKeyUse({ fingerprint: key.fingerprint, keyName: key.name, server: base.name, corp: base.corp, feature: 'conn-test', ok: step2.ok, code: step2.ok ? 'ok' : step2.code, trigger: 'manual', by: o.by });
   /** 우리가 바꾼 것만 되돌린다(더한 그 줄을 지우고, 바꿨으면 바꾸기 전 포탈 줄을 다시 넣는다). 이미 있던 줄은 손대지 않는다. → { rolledBack, tail } */

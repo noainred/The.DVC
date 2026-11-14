@@ -224,10 +224,15 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
         sent = true;
         if (methodsLeft.includes('password')) return cb({ type: 'password', username, password: password || '' });
         if (methodsLeft.includes('keyboard-interactive')) {
-          // 비밀번호는 **첫 질의의 첫 프롬프트**에만(1회차 반증 9 — 질의마다 · 프롬프트마다 보내 ‘한 번’ 이 아니었다). 그 밖은 빈 답.
+          // 비밀번호는 **처음 나온 가리는 칸(echo=false) 하나**에만(1회차 반증 9 — 질의마다 · 프롬프트마다 보내 ‘한 번’ 이 아니었다 ·
+          //   2회차 B5 — 첫 칸이 보이는 칸(OTP · Duo passcode — echo=true)이어도 거기에 넣어 비밀번호가 평문 칸으로 갔고 맞는 비밀번호가 거부로 세어졌다). 그 밖은 빈 답.
+          //   가리는 칸이 끝내 없으면(OTP 만 묻는 서버) 비밀번호를 보내지 않은 것이므로 ‘비밀번호 방식 없음’ 으로 따로 말한다(거부로 세지 않음).
           return cb({ type: 'keyboard-interactive', username, prompt: (_n, _i, _l, prompts, finish) => {
-            const first = !answered && prompts.length > 0; if (first) answered = true;
-            finish(prompts.map((_p, i) => (first && i === 0 ? password || '' : '')));
+            const list = Array.isArray(prompts) ? prompts : [];
+            const at = answered ? -1 : list.findIndex((p) => p && p.echo === false);
+            if (at >= 0) { answered = true; noPwMethod = ''; }   // 앞 질의가 OTP 만 물었어도 이번에 비밀번호를 보냈다 — 거부면 거부다
+            else if (!answered && list.length > 0) noPwMethod = '서버의 대화형 로그인이 비밀번호 칸(입력을 가리는 칸)을 묻지 않았습니다(OTP 등만 물음) — 비밀번호를 보내지 않았습니다';
+            finish(list.map((_p, i) => (i === at ? password || '' : '')));
           } });
         }
         // 비밀번호를 받는 방식이 없다(publickey 만 등) — 아무것도 보내지 않았다. 인증 거부로 세지 않게 따로 말한다(1회차 반증 9).

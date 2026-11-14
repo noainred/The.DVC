@@ -144,7 +144,7 @@ export async function buildView({ now = Date.now() } = {}) {
     events: ST.listEvents({ limit: 50 }),
     tampered: KS.tamperedKeyIds(),
     // v3.10.0 — 보호 장치 · 두 사람 승인
-    guards: { ...ST.getGuards(), twoPersonActive: twoPersonOn() },   // pairSeen = 혼자 끌 수 없음(화면 안내)
+    guards: { ...pubGuards(ST.getGuards()), twoPersonActive: twoPersonOn() },   // pairSeen = 혼자 끌 수 없음(화면 안내)
     approvalsUnreadable: !!AP.approvalsLoadError(),
     approvals: AP.listForView({ kinds: SSH_KINDS, doneLimit: 60 }, { now }).map((r) => ({ ...r, label: TP.kindLabel(r.kind) })),
     // 칸마다 마지막 키 작업(1시간 안) — 화면을 다시 열어도 진행 · 결과를 이어 본다(점검 E-2).
@@ -545,7 +545,13 @@ export async function deleteKeyReq({ keyId, by = '' } = {}) {
 /**
  * 보호 장치 바꾸기. **켜는 것**은 바로(본인 OTP). **끄는 것**은 두 사람 승인 — 단, 승인해 줄 다른 설정 소유자가 한 명도 없으면 바로(잠김 방지 · 사건에 적는다).
  */
-export async function changeGuards(patch = {}, { by = '' } = {}) {
+/** 응답에 싣는 보호 장치 — 화면에 들어온 AD 소유자 신원 목록(seenAd)은 판정용이라 싣지 않는다(2회차 웹 관찰). */
+const pubGuards = (g) => { if (!g || typeof g !== 'object') return g; const { seenAd: _seen, ...rest } = g; return rest; };
+export async function changeGuards(patch = {}, o = {}) {
+  const r = await changeGuardsRaw(patch, o);
+  return r && r.guards ? { ...r, guards: pubGuards(r.guards) } : r;
+}
+async function changeGuardsRaw(patch = {}, { by = '' } = {}) {
   notePair({ by });
   const cur = ST.getGuards();
   if (cur.unreadable) return { ok: false, code: 'state-unreadable', status: 503, reason: '상태 파일을 읽지 못해 보호 장치를 바꾸지 않았습니다.' };

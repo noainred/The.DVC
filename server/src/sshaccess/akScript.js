@@ -25,6 +25,12 @@ export const IP_RE = /^(?:(?:\d{1,3}\.){3}\d{1,3}|[0-9A-Fa-f:]{2,45})$/;
 const B64_RE = /^[A-Za-z0-9+/=]*$/;
 export const RESTRICT_OPTIONS = Object.freeze(['no-agent-forwarding', 'no-port-forwarding', 'no-X11-forwarding']);
 export const MAX_OLD_B64 = 60_000;
+/**
+ * 바꾸는 스크립트의 자기 시한(초 · 2회차 B1). 포탈은 exec 마다 시한(keyLogin STEP_TIMEOUT_MS)을 두고 넘기면 채널을 닫지만, 서버의 스크립트는 계속 돈다 —
+ * 포탈이 ‘결과 모름’ 으로 넘어간 뒤 그 스크립트가 늦게 mv 하면, 그 사이 끝난 거두기 · 다시 넣기의 결과가 틀린다. 그래서 스크립트가 시작한 지 이만큼 지났으면 바꾸기 직전에 멈춘다(`slow` — 바꾼 것 없음).
+ * 포탈 시한보다 넉넉히 짧아야 한다(채널 열기 · 명령 전달 왕복 — 800ms+ RTT). 산수는 테스트가 고정한다.
+ */
+export const SCRIPT_DEADLINE_S = 12;
 
 /** 공개키 글 → { type, blob }. 꼴이 아니면 null. */
 export function splitPublicKey(publicKey) {
@@ -62,7 +68,13 @@ const HEAD = [
   '[ -n "$HOME" ] || { echo "##KL fail nohome"; exit 3; }',
   'd="$HOME/.ssh"; f="$d/authorized_keys"; tmp="$d/.authorized_keys.portal.$$"; lk="$d/.authorized_keys.portal.lock"; held=""',
   // 자물쇠 주인 표(1회차 B1): 호스트:pid:시각. 끝 정리 · mv 직전에 **아직 내 자물쇠인지** 본다(남은 자물쇠로 잘못 치워진 뒤 깨어난 쪽이 덮어쓰지 않게).
-  'me=$(uname -n 2>/dev/null); tok="$me:$$:$(date +%s 2>/dev/null)"',
+  // 호스트 = 이름 + 부팅 id + pid 이름공간(2회차 B2 — 이름만 보면 이름이 같은 다른 서버 · 컨테이너가 NFS 홈을 나눠 쓸 때 살아 있는 주인을 ‘pid 없음’ 으로 치웠다).
+  // 셋이 다 같을 때만 pid 로 판정한다. 이름공간 글자에 ':' 가 있어 표는 오른쪽부터 가른다.
+  'me=$(uname -n 2>/dev/null); [ -z "$me" ] || me="$me/$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)/$(readlink /proc/self/ns/pid 2>/dev/null)"',
+  'tok="$me:$$:$(date +%s 2>/dev/null)"',
+  // 자기 시한(2회차 B1 — SCRIPT_DEADLINE_S): date 를 못 쓰는 서버(시각이 숫자가 아님)는 시한 없이 돈다.
+  't0=$(date +%s 2>/dev/null); case "$t0" in ""|*[!0-9]*) t0=0 ;; esac',
+  `late() { [ "$t0" -gt 0 ] || return 1; tn=$(date +%s 2>/dev/null); case "$tn" in ""|*[!0-9]*) return 1 ;; esac; [ "$tn" -gt $((t0 + ${SCRIPT_DEADLINE_S})) ]; }`,
   'owns() { [ "$(cat "$lk/owner" 2>/dev/null)" = "$tok" ]; }',
   'cleanup() { rm -f "$tmp"; if [ -n "$held" ] && owns; then rm -f "$lk/owner"; rmdir "$lk" 2>/dev/null; fi; }',
   'trap cleanup 0; trap \'exit 3\' HUP INT TERM PIPE',
@@ -72,6 +84,8 @@ const HEAD = [
  * 남은 자물쇠 치우기(1회차 B1 · B4 — 예전에는 `find -mmin +2` 하나로 주인 확인 없이 치웠다):
  *   · 주인 표의 호스트가 이 서버이고 그 pid 가 없으면 바로 · 주인 표의 시각이 10분 넘게 지났으면(다른 호스트 — NFS 홈) · 주인 표가 5초 넘게 없으면(만들다 죽음).
  *   · 치울 때는 옆 이름으로 옮긴 뒤 표가 판단한 그것인지 다시 보고, 아니면 되돌린다. 진짜 안전장치는 mv 직전의 `owns`(아니면 `locklost` — 바꾸지 않는다).
+ *   · 한계: NFS 홈을 나눠 쓰는 서버끼리 시계가 10분 넘게 어긋나면 살아 있는 주인의 자물쇠를 치울 수 있다(시각 규칙) — 그때도 mv 직전 `owns` · 원본 재대조가 막는다(틈은 ms). NFS 홈이면 시계 동기가 전제다.
+ *   · 15번(또는 자기 시한 SCRIPT_DEADLINE_S)을 넘기면 `locked`.
  * mkdir 이 실패했는데 자물쇠 폴더가 없으면 경합이 아니다(쓸 수 없는 ~/.ssh · 읽기 전용) — 기다리지 않고 `notwritable`(1회차 B3).
  * 읽기(분류)부터 mv 까지 잡는다. 사람 · 다른 도구는 이 자물쇠를 모른다 — 그래서 mv 직전에 원본을 다시 대조하고 mv 뒤에 다시 본다(post).
  */
@@ -80,7 +94,11 @@ const LOCK = [
   'while :; do',
   '  if mkdir "$lk" 2>/dev/null; then',
   // 주인 표를 못 쓰면(디스크 가득 등) 자물쇠를 남기지 않고 사유를 가른다(1회차 반증 6 — 빈 표가 든 자물쇠가 남고 ‘관리자가 잠가 둠’ 이라고 했다).
-  '    if ! printf \'%s\\n\' "$tok" > "$lk/owner"; then rm -f "$lk/owner"; rmdir "$lk" 2>/dev/null; if [ -w "$d" ]; then echo "##KL fail write"; else echo "##KL fail notwritable"; fi; exit 3; fi',
+  // 주인 표를 쓰는 사이 자물쇠 폴더가 사라졌으면(남은 자물쇠를 치우던 쪽이 막 만든 내 자물쇠를 옮김 — 2회차 B3) 실패가 아니라 경합이다: 다시 잡는다.
+  '    if ! printf \'%s\\n\' "$tok" 2>/dev/null > "$lk/owner"; then',
+  '      if [ ! -d "$lk" ]; then nf=$((nf + 1)); [ "$nf" -ge 5 ] && { echo "##KL fail write"; exit 3; }; continue; fi',
+  '      rm -f "$lk/owner"; rmdir "$lk" 2>/dev/null; if [ -w "$d" ]; then echo "##KL fail write"; else echo "##KL fail notwritable"; fi; exit 3',
+  '    fi',
   '    held=1; break',
   '  fi',
   // mkdir 이 실패했는데 자물쇠 폴더가 없다: 쓸 수 없는 폴더면 바로 notwritable, 아니면 그 사이 보유자가 놓은 것일 수 있어 다시 해 본다(1회차 반증 7 ① — 헛 notwritable).
@@ -89,20 +107,23 @@ const LOCK = [
   '    nf=$((nf + 1)); [ "$nf" -ge 5 ] && { echo "##KL fail write"; exit 3; }',
   '    continue',
   '  fi',
-  '  i=$((i + 1)); [ "$i" -ge 15 ] && { echo "##KL fail locked"; exit 3; }',
-  '  o=$(cat "$lk/owner" 2>/dev/null); stale=""; now=$(date +%s 2>/dev/null || echo 0)',
+  '  i=$((i + 1)); if [ "$i" -ge 15 ] || late; then echo "##KL fail locked"; exit 3; fi',
+  '  o=$(cat "$lk/owner" 2>/dev/null); stale=""; now=$(date +%s 2>/dev/null); case "$now" in ""|*[!0-9]*) now=0 ;; esac',
   '  if [ -n "$o" ]; then',
   '    nos=""',
-  '    oh=${o%%:*}; r=${o#*:}; op=${r%%:*}; ot=${r#*:}',
-  '    if [ -n "$me" ] && [ "$oh" = "$me" ] && ! kill -0 "$op" 2>/dev/null; then stale=1; fi',
+  '    ot=${o##*:}; r=${o%:*}; op=${r##*:}; oh=${r%:*}',
+  '    case "$op" in ""|*[!0-9]*) op="" ;; esac',
+  '    if [ -n "$me" ] && [ -n "$op" ] && [ "$oh" = "$me" ] && ! kill -0 "$op" 2>/dev/null; then stale=1; fi',
   '    case "$ot" in ""|*[!0-9]*) ;; *) if [ "$now" -gt $((ot + 600)) ]; then stale=1; fi ;; esac',
   // 주인 표가 없는 자물쇠: **처음 본 때부터** 5초(1회차 반증 7 ② — 대기자 자신의 대기 횟수로 재서, 막 만든 자물쇠를 치웠다).
   '  else',
   '    [ -n "$nos" ] || nos=$now',
   '    if [ "$now" -ge $((nos + 5)) ]; then stale=1; fi',
   '  fi',
-  '  if [ -n "$stale" ] && mv "$lk" "$lk.stale.$$" 2>/dev/null; then',
-  '    if [ "$(cat "$lk.stale.$$/owner" 2>/dev/null)" = "$o" ]; then rm -rf "$lk.stale.$$"; else mv "$lk.stale.$$" "$lk" 2>/dev/null || rm -rf "$lk.stale.$$"; fi',
+  // 옮기기 직전에 표를 다시 읽어 판단한 그 자물쇠일 때만 옮긴다(2회차 B3 — 그 사이 생긴 남의 새 자물쇠를 옮겼다). 남는 틈은 옮긴 뒤 다시 보고 되돌린다 —
+  // 되돌릴 자리에 이미 새 자물쇠가 있으면 되돌리지 않는다(mv 가 그 안으로 들어간다). 그 주인은 mv 직전 `owns` 에서 locklost 로 멈춘다(바꾸지 않음).
+  '  if [ -n "$stale" ] && [ "$(cat "$lk/owner" 2>/dev/null)" = "$o" ] && mv "$lk" "$lk.stale.$$" 2>/dev/null; then',
+  '    if [ "$(cat "$lk.stale.$$/owner" 2>/dev/null)" = "$o" ]; then rm -rf "$lk.stale.$$"; elif [ ! -e "$lk" ]; then mv "$lk.stale.$$" "$lk" 2>/dev/null || rm -rf "$lk.stale.$$"; else rm -rf "$lk.stale.$$"; fi',
   '    continue',
   '  fi',
   '  sleep 1',
@@ -117,7 +138,8 @@ const CHECKS = (needDir) => [
   'if [ -L "$d" ]; then echo "##KL fail symlink"; exit 3; fi',
   ...(needDir ? [
     'mkd=""',
-    'if [ ! -d "$d" ]; then if [ -e "$d" ]; then echo "##KL fail notdir"; exit 3; fi; mkdir "$d" || { echo "##KL fail mkdir"; exit 3; }; mkd=1; fi',
+    // 처음 넣기 둘이 겹치면 진 쪽의 mkdir 이 실패한다 — 그 사이 생긴 진짜 폴더면 실패가 아니다(2회차 B4). 남이 만든 폴더면 mkd 를 세우지 않는다.
+    'if [ ! -d "$d" ]; then if [ -e "$d" ]; then echo "##KL fail notdir"; exit 3; fi; if mkdir "$d" 2>/dev/null; then mkd=1; elif [ -d "$d" ] && [ ! -L "$d" ]; then :; else echo "##KL fail mkdir"; exit 3; fi; fi',
   ] : []),
   'if [ -L "$f" ]; then echo "##KL fail symlink"; exit 3; fi',
   'if [ -e "$f" ] && [ ! -f "$f" ]; then echo "##KL fail notfile"; exit 3; fi',
@@ -148,6 +170,8 @@ const COMMIT = [
   'chmod 600 "$tmp" || { echo "##KL fail write"; exit 3; }',
   // mv 직전: 아직 내 자물쇠인가(B1) · 그 사이 원본이 바뀌지 않았나(B10 — 자물쇠를 모르는 쪽의 쓰기. 남는 틈은 이 줄과 mv 사이뿐).
   'owns || { echo "##KL fail locklost"; exit 3; }',
+  // 자기 시한(2회차 B1): 포탈이 이미 ‘결과 모름’ 으로 넘어갔을 수 있다 — 늦게 바꾸지 않는다.
+  'if late; then echo "##KL fail slow"; exit 3; fi',
   'if [ -e "$f" ]; then [ "$(cksum < "$f")" = "$c0" ] || { echo "##KL fail changed"; exit 3; }; else [ -z "$c0" ] || { echo "##KL fail changed"; exit 3; }; fi',
   'mv -f "$tmp" "$f" || { echo "##KL fail rename"; exit 3; }',
   'if command -v restorecon >/dev/null 2>&1; then if [ -n "${mkd:-}" ]; then restorecon -F "$d" >/dev/null 2>&1; fi; restorecon -F "$f" >/dev/null 2>&1; fi',
@@ -181,7 +205,8 @@ export function installScript({ publicKey, keyId, line, replace = false } = {}) 
     '  fi',
     '}',
     // 바꿀 것이 없으면(이미 있음) 자물쇠 없이 끝난다 — 쓸 수 없는 ~/.ssh(root 소유)에서도 ‘있음’ 으로 답한다(1회차 축 B 재확인). 바꿀 것이 있으면 자물쇠 안에서 다시 판정한다.
-    'cls',
+    // 단 **자물쇠 폴더가 없을 때만**(2회차 B1 — 누가 바꾸는 중인데 그 앞의 파일을 보고 답했다). 쓸 수 없는 ~/.ssh 에는 자물쇠가 생길 수 없으니 그 경우는 그대로 빠르다.
+    'if [ ! -d "$lk" ]; then cls; fi',
     ...LOCK,
     ...C0,
     'cls',
@@ -222,9 +247,12 @@ export function rollbackScript({ line, oldB64 = '' } = {}) {
     ...CHECKS(false),
     'if [ ! -d "$d" ]; then echo "##KL none"; exit 0; fi',
     // 바꿀 것이 없으면(파일 없음 · 그 줄 없음) 자물쇠 없이 답한다 — 쓸 수 없는 ~/.ssh 에서도(1회차 반증 5). 있으면 자물쇠 안에서 다시 본다(B2).
-    'if [ ! -e "$f" ]; then echo "##KL none"; exit 0; fi',
-    `st=$(awk -v L="$L" '${CNT}' "$f") || { echo "##KL fail read"; exit 3; }`,
-    'set -- $st; if [ "$2" -eq 0 ]; then echo "##KL restored 0"; exit 0; fi',
+    // 빠른 답은 자물쇠 폴더가 없을 때만(2회차 B1 — 다른 쪽이 바꾸는 중이면 기다렸다 다시 본다).
+    'if [ ! -d "$lk" ]; then',
+    '  if [ ! -e "$f" ]; then echo "##KL none"; exit 0; fi',
+    `  st=$(awk -v L="$L" '${CNT}' "$f") || { echo "##KL fail read"; exit 3; }`,
+    '  set -- $st; if [ "$2" -eq 0 ]; then echo "##KL restored 0"; exit 0; fi',
+    'fi',
     ...LOCK,
     ...C0,
     'if [ ! -e "$f" ]; then echo "##KL none"; exit 0; fi',
@@ -261,12 +289,15 @@ export function removeScript({ publicKey, keyId } = {}) {
     ...CHECKS(false),
     'if [ ! -d "$d" ]; then echo "##KL none"; exit 0; fi',
     // 지울 것이 없으면 자물쇠 없이 답한다(1회차 반증 5 — root 소유 ~/.ssh 의 비 root 계정에서 ‘실패’ 로 답했다). 있으면 자물쇠 안에서 다시 본다(B2).
-    'if [ ! -e "$f" ]; then echo "##KL none"; exit 0; fi',
-    `st=$(awk -v b="$B" -v m="$M" '${CNT}' "$f") || { echo "##KL fail read"; exit 3; }`,
-    'set -- $st; if [ "$2" -eq 0 ]; then echo "##KL removed 0 unmarked $3"; exit 0; fi',
+    // 빠른 답은 **자물쇠 폴더가 없을 때만**(2회차 B1 — 시한을 넘긴 넣기가 서버에서 아직 자물쇠를 쥐고 있는데 긴급 거두기가 ‘줄 없음’ 으로 끝나고, 그 뒤 키가 들어갔다).
+    'if [ ! -d "$lk" ]; then',
+    '  if [ ! -e "$f" ]; then echo "##KL none"; exit 0; fi',
+    `  st=$(awk -v b="$B" -v m="$M" '${CNT}' "$f") || { echo "##KL fail read"; exit 3; }`,
+    '  set -- $st; if [ "$2" -eq 0 ]; then echo "##KL removed 0 unmarked $3"; exit 0; fi',
+    'fi',
     ...LOCK,
     ...C0,
-    'if [ ! -e "$f" ]; then echo "##KL none"; exit 0; fi',   // 파일 유무도 자물쇠 안에서(1회차 B2 — 처음 넣기와 겹친 거두기가 ‘없음’ 으로 끝나고 키가 들어갔다)
+    'if [ ! -e "$f" ]; then echo "##KL none"; exit 0; fi',   // 자물쇠를 잡은 뒤 다시 본다(1회차 B2 — 처음 넣기와 겹친 거두기가 ‘없음’ 으로 끝나고 키가 들어갔다)
     `st=$(awk -v b="$B" -v m="$M" '${CNT}' "$f") || { echo "##KL fail read"; exit 3; }`,
     'set -- $st; nr=$1; n=$2; u=$3',
     'if [ "$n" -eq 0 ]; then echo "##KL removed 0 unmarked $u"; exit 0; fi',
@@ -283,7 +314,7 @@ export function removeScript({ publicKey, keyId } = {}) {
 export const WHOAMI_SCRIPT = 'echo "##KL ip ${SSH_CONNECTION%% *}"';
 
 /** 표지 줄 읽기(마지막 `##KL …` 한 줄 — 로그인 배너가 앞에 섞여도). 모르는 사유 글자는 'unknown'. */
-const FAIL_WHY = new Set(['nohome', 'symlink', 'notdir', 'mkdir', 'notfile', 'unreadable', 'notwritable', 'read', 'write', 'verify', 'rename', 'nobase64', 'toolong', 'locked', 'raced', 'locklost', 'changed']);
+const FAIL_WHY = new Set(['nohome', 'symlink', 'notdir', 'mkdir', 'notfile', 'unreadable', 'notwritable', 'read', 'write', 'verify', 'rename', 'nobase64', 'toolong', 'locked', 'raced', 'locklost', 'changed', 'slow']);
 const num = (v) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Math.floor(Number(v)) : 0);
 export function parseMarker(stdout) {
   const lines = String(stdout || '').slice(-200_000).split('\n').map((x) => x.trim()).filter((x) => x.startsWith('##KL '));
@@ -310,6 +341,7 @@ export const FAIL_TEXT = Object.freeze({
   locked: '다른 작업이 이 서버의 authorized_keys 를 바꾸는 중이라 15초 기다리다 그만뒀습니다 — 원래 파일은 그대로입니다. 잠시 뒤 다시 하세요(남은 자물쇠 ~/.ssh/.authorized_keys.portal.lock 는 주인이 없으면 다음 작업이 치웁니다).',
   locklost: '작업 중에 자물쇠를 다른 쪽이 가져가 바꾸지 않았습니다 — 원래 파일은 그대로입니다. 잠시 뒤 다시 하세요.',
   changed: '그 사이 다른 쪽(사람 · 구성 관리 도구)이 authorized_keys 를 바꿔 바꾸지 않았습니다 — 원래 파일은 그대로입니다. 다시 하세요.',
+  slow: `서버에서 스크립트가 시작한 지 ${SCRIPT_DEADLINE_S}초 안에 바꾸기까지 가지 못해 멈췄습니다(서버가 느림 · 자물쇠를 오래 기다림) — 원래 파일은 그대로입니다. 잠시 뒤 다시 하세요.`,
   raced: '바꾼 직후 다시 읽어 보니 다른 쪽(사람 · 구성 관리 도구)이 그 사이 파일을 바꿔 원하는 상태가 아닙니다 — 서버에 들어 있는 키를 다시 읽어 확인하세요.', nobase64: '서버에 base64 명령이 없어 처리하지 않았습니다.', toolong: '바꿀 포탈 줄이 너무 많아 처리하지 않았습니다.',
   unknown: '서버가 예상한 답을 주지 않았습니다.',
 });
