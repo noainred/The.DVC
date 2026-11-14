@@ -894,7 +894,14 @@ export async function runSshAccessScan({ now = Date.now() } = {}) {
     // 본 표지는 상태 파일의 별도 칸(inboxSeen) + 옛 판의 사건 detail. 상태 파일을 못 읽으면 표지를 만들지 않는다 — 빈 표지로 굳어 고친 뒤 다시 알리던 것(1회차 C1-4).
     if (!_seenInbox) {
       const kept = ST.inboxSeenList();
-      if (kept) _seenInbox = new Set([...kept, ...ST.listEvents({ limit: 300 }).filter((e) => e.kind === 'inbox-new' || e.kind === 'inbox-seen').flatMap((e) => String(e.detail || '').split(/\s+/)).filter(Boolean).map((x) => (x.includes('|') ? inboxSigKey(x) : x))]);
+      if (kept) {
+        const legacy = ST.listEvents({ limit: 300 }).filter((e) => e.kind === 'inbox-new' || e.kind === 'inbox-seen').flatMap((e) => String(e.detail || '').split(/\s+/)).filter(Boolean).map((x) => (x.includes('|') ? inboxSigKey(x) : x)).filter((x) => /^[0-9a-f]{12}$/.test(x));
+        const keptSet = new Set(kept);
+        const move = [...new Set(legacy.filter((x) => !keptSet.has(x)))];
+        // 사건 기록에만 있던 표지(옛 판 · 이 칸 이전)를 칸으로 옮긴다 — 그 사건이 나중에 밀려나도 재시작 뒤 다시 알리지 않게(테스트 ⑱-d).
+        if (move.length) ST.addEvents([], { inboxSeen: move });
+        _seenInbox = new Set([...kept, ...move]);
+      }
     }
     const fresh = [];
     for (const it of ib.items) {
