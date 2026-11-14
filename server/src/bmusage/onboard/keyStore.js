@@ -380,6 +380,8 @@ export function updateKeyPlacement(id, body = {}, { now = Date.now() } = {}) {
   const d = draft();
   const k = d.keys.find((x) => x.id === t(id, 32));
   if (!k) return { ok: false, code: 'not-found', status: 404, reason: '키를 찾을 수 없습니다.' };
+  // v3.10.0: 승인 대기 키는 바꿀 수 없다 — 승인하는 사람이 본 내용(이름 · 폴더 · 기능 · 원문)과 승인 뒤 쓰이는 내용이 같아야 한다.
+  if (k.status === 'pending') return { ok: false, code: 'key-pending', status: 409, reason: '승인을 기다리는 키는 바꿀 수 없습니다 — 승인된 뒤에 바꾸거나, 요청을 돌려보내고 다시 등록하세요.' };
   if (body.folderCorp !== undefined || body.folderServer !== undefined) {
     const fo = folderOf({ folderCorp: body.folderCorp ?? k.folderCorp, folderServer: body.folderServer ?? (body.folderCorp !== undefined ? '' : k.folderServer) });
     if (!fo.ok) return fo;
@@ -396,6 +398,8 @@ export function updateKeyMeta(id, body = {}, { now = Date.now() } = {}) {
   const d = draft();
   const k = d.keys.find((x) => x.id === t(id, 32));
   if (!k) return { ok: false, code: 'not-found', status: 404, reason: '키를 찾을 수 없습니다.' };
+  // v3.10.0: 승인 대기 키는 바꿀 수 없다 — 승인하는 사람이 본 내용(이름 · 폴더 · 기능 · 원문)과 승인 뒤 쓰이는 내용이 같아야 한다.
+  if (k.status === 'pending') return { ok: false, code: 'key-pending', status: 409, reason: '승인을 기다리는 키는 바꿀 수 없습니다 — 승인된 뒤에 바꾸거나, 요청을 돌려보내고 다시 등록하세요.' };
   if (body.name !== undefined) {
     const name = t(body.name, 80);
     const ni = nameIssue(name); if (ni) return { ok: false, code: 'bad-name', reason: ni };
@@ -417,6 +421,8 @@ export function setKeyPassphrase(id, passphrase, { now = Date.now() } = {}) {
   const d = draft();
   const k = d.keys.find((x) => x.id === t(id, 32));
   if (!k) return { ok: false, code: 'not-found', status: 404, reason: '키를 찾을 수 없습니다.' };
+  // v3.10.0: 승인 대기 키는 바꿀 수 없다 — 승인하는 사람이 본 내용(이름 · 폴더 · 기능 · 원문)과 승인 뒤 쓰이는 내용이 같아야 한다.
+  if (k.status === 'pending') return { ok: false, code: 'key-pending', status: 409, reason: '승인을 기다리는 키는 바꿀 수 없습니다 — 승인된 뒤에 바꾸거나, 요청을 돌려보내고 다시 등록하세요.' };
   if (!k.privateKey) return { ok: false, code: 'key-unreadable', reason: '저장된 개인키를 열지 못했습니다(봉인 해제 실패) — 키를 새로 등록하세요.' };
   const pass = typeof passphrase === 'string' ? passphrase : '';
   const p = parsePrivateKey(k.privateKey, pass);

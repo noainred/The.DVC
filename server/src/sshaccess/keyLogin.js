@@ -278,7 +278,8 @@ export function _resetKeyLoginJobsForTest() { jobs.clear(); running = null; }
  */
 export function startJob({ kind, servers, run, by = '', meta = {} } = {}, { now = Date.now() } = {}) {
   sweep(now);
-  if (running && !jobs.get(running)?.doneAt) return { ok: false, code: 'busy', status: 409, reason: '다른 키 작업이 진행 중입니다 — 끝난 뒤 다시 하세요.' };
+  const cur = running ? jobs.get(running) : null;   // 기록이 이미 정리된 작업은 끝난 것이다(없는 작업 때문에 ‘진행 중’ 으로 잠기지 않게)
+  if (cur && !cur.doneAt) return { ok: false, code: 'busy', status: 409, reason: '다른 키 작업이 진행 중입니다 — 끝난 뒤 다시 하세요.' };
   if (!Array.isArray(servers) || !servers.length) return { ok: false, code: 'empty', status: 400, reason: '대상 서버가 없습니다.' };
   if (servers.length > MAX_JOB_SERVERS) return { ok: false, code: 'too-many', status: 400, reason: `한 번에 ${MAX_JOB_SERVERS}대까지입니다 — 나눠서 하세요.` };
   const id = `kj_${crypto.randomBytes(6).toString('hex')}`;

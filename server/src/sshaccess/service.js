@@ -452,7 +452,9 @@ async function addKeyWithApproval(input, { by = '', how = '등록' } = {}) {
   const r = KS.addKey(input, { by, pending: need });
   if (!r.ok || !need) return r;
   const q = await submitSsh({ kind: 'ssh-key-activate', title: `키 ${how} — ${r.key.name}`, target: r.key.id, corp: r.key.folderCorp || '',
-    payload: { keyId: r.key.id, fingerprint: r.key.fingerprint, name: r.key.name, folderCorp: r.key.folderCorp || '', folderServer: r.key.folderServer || '' }, by }, () => ({ ok: true }));
+    // 승인하는 사람이 보는 것 = 요청 지문에 묶이는 것: 이름 · 폴더 · 허용 기능 · 지문(승인 대기 키는 그 뒤로 바꿀 수 없다 — keyStore).
+    payload: { keyId: r.key.id, fingerprint: r.key.fingerprint, name: r.key.name, algo: r.key.algo || '', folderCorp: r.key.folderCorp || '', folderServer: r.key.folderServer || '',
+      features: Array.isArray(r.key.features) ? r.key.features : null }, by }, () => ({ ok: true }));
   if (!q.ok) { KS._removeKey(r.key.id); return q; }   // 요청을 못 만들었으면 승인 대기 키를 남기지 않는다
   return { ok: true, key: r.key, pending: true, request: q.request, approvers: q.approvers };
 }
@@ -469,7 +471,12 @@ export async function rotateKeyReq({ from, to, by = '' } = {}) {
 export async function deleteKeyReq({ keyId, by = '' } = {}) {
   const k = KS.keyById(t(keyId, 32));
   if (!k) return { ok: false, code: 'not-found', status: 404, reason: '키를 찾을 수 없습니다.' };
-  if (k.status === 'pending') return { ok: false, code: 'key-pending', status: 409, reason: '승인 대기 중인 키입니다 — 키 보안 › 승인 대기에서 돌려보내면 지워집니다.' };
+  if (k.status === 'pending') {
+    // 요청이 살아 있으면 그 요청을 돌려보내 지운다. 요청이 없는 승인 대기 키(요청 뒷정리가 실패해 남은 것)는 한 번도 쓰인 적이 없으므로 바로 지운다.
+    const open = AP.listRequests({ kinds: ['ssh-key-activate'], includeDone: false }).some((r) => r.target === k.id);
+    if (open) return { ok: false, code: 'key-pending', status: 409, reason: '승인 대기 중인 키입니다 — 키 보안 › 승인 대기에서 돌려보내면 지워집니다.' };
+    return KS._removeKey(k.id);
+  }
   return submitSsh({ kind: 'ssh-key-delete', title: `키 삭제 — ${k.name}`, target: k.id, corp: k.folderCorp || '', payload: { keyId: k.id, name: k.name, fingerprint: k.fingerprint }, by },
     () => REFS.deleteKeyIfUnused(k.id));
 }
