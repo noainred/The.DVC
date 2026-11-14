@@ -4808,11 +4808,12 @@ test('㉘ 4회차 반증 — 등록부를 못 읽는 동안 서버를 저장하�
     const BM = await imp('bmstor/registry.js');
     const err = !!BM.registryLoadError();
     const w = BM.saveBmServer({ name: 'r4r-new', host: '10.9.40.9', port: 22, username: 'mon', mounts: ['/'], vcenterId: 'vcA', password: 'x' });
-    console.log(JSON.stringify({ err, w: w.ok }));`);
-  const kept = fs.readdirSync(r1.cfg).filter((n) => n.startsWith('bm-storage.json.corrupt.'));
-  assert.ok(r1.err && kept.length >= 1, `보존본이 남는다 ${JSON.stringify([r1, fs.readdirSync(r1.cfg)])}`);
-  const saved = kept.map((n) => fs.readFileSync(path.join(r1.cfg, n), 'utf8')).join('\n');
-  for (const n of ['r4r-a', 'r4r-b', 'r4r-c']) assert.ok(saved.includes(n), `${n} 이(가) 보존본에 있다`);
+    console.log(JSON.stringify({ err, w: w.ok, code: w.code }));`);
+  // 5회차 C5-1: 읽기 오류는 캐시하지 않고 사람 쓰기를 503 으로 거절한다 — 원본은 옮기지도 덮지도 않는다(폴더 단위 오류에서는 보존본을 만들 수 없었다)
+  assert.deepEqual([r1.err, r1.w, r1.code], [true, false, 'registry-unreadable'], JSON.stringify(r1));
+  const orig = fs.readFileSync(path.join(r1.cfg, 'bm-storage.json'), 'utf8');
+  for (const n of ['r4r-a', 'r4r-b', 'r4r-c']) assert.ok(orig.includes(n), `${n} 이(가) 원본에 그대로 있다`);
+  assert.ok(!orig.includes('r4r-new'), '읽지 못한 원본을 덮지 않았다');
   // ② 중지 기록 더하기 — 상태 쓰기 실패(파일 자리에 폴더)면 메모리의 중지 객체도 그대로 · 등록부를 못 읽으면 다시 중지는 registryUnreadable
   const s2 = subRun({ owners: 'own', users: [{ username: 'own', role: 'admin', totpEnabled: true, totpSecret: generateSecret() }], code: `
     const ST = await imp('sshaccess/state.js'); const f = path.join(process.env.CONFIG_DIR, ST.STATE_FILE_NAME);

@@ -531,20 +531,20 @@ export function registerBmStorage(api) {
     const r = saveBmServer(bind.binds ? { ...rest, bindApproved: true } : rest);
     if (r.ok && bind.binds) logAudit({ user: req.user?.username, action: '베어메탈 서버 인증 참조 묶음', target: r.server?.host || '', detail: JSON.stringify({ keyRef: rest.keyRef || '', credRef: rest.credRef || '', osAuth: rest.osAuth || '' }).slice(0, 200), ip: req.ip || '' });
     if (r.ok) logAudit({ user: req.user?.username, action: '베어메탈 스토리지 서버 저장', target: r.server?.host || '', detail: `mounts ${(r.server?.mounts || []).length}개${r.server?.agent ? ` · 엣지 ${r.server.agent}` : ''}`, ip: req.ip || '' });
-    res.status(r.ok ? 200 : 400).json(r);
+    res.status(r.ok ? 200 : (r.status || 400)).json(r);
   });
 
   api.delete('/tools/bm-storage/servers/:id', adminOnly, fullScopeOnly, (req, res) => {
     const r = removeBmServer(req.params.id);
     if (r.ok) logAudit({ user: req.user?.username, action: '베어메탈 스토리지 서버 삭제', target: req.params.id, ip: req.ip || '' });
-    res.status(r.ok ? 200 : 404).json(r);
+    res.status(r.ok ? 200 : (r.status || 404)).json(r);
   });
 
   // 수집 주기 저장(분) — 폴러가 30초 틱마다 설정을 다시 읽으므로 재기동 없이 반영된다.
   api.put('/tools/bm-storage/settings', adminOnly, fullScopeOnly, (req, res) => {
     const r = saveBmSettings(req.body || {});
     if (r.ok) logAudit({ user: req.user?.username, action: '베어메탈 스토리지 주기 변경', target: `${r.settings.intervalMinutes}분`, ip: req.ip || '' });
-    res.status(r.ok ? 200 : 400).json(r);
+    res.status(r.ok ? 200 : (r.status || 400)).json(r);
   });
 
   /* ── 서버 CSV 일괄 관리(v2.341, 사용자 요구 — 다수 서버 등록). 수집 서버 CSV(v2.338)와 동일 골격:

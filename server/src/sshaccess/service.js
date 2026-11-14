@@ -643,6 +643,9 @@ export function approvalPrecheck(id, { approve, by = '', digest = '' } = {}) {
     // 넣는 중인 키(교체의 옛 키 · 삭제할 키)와 새 키 상태도 OTP 앞에서(3회차 A3-2 — 실행 단계에서 409 key-installing 으로 끝나 승인자의 OTP 와 요청이 버려졌다).
     //   넣기 작업은 끝나면 풀리므로 요청은 그대로 두고 나중에 다시 승인하게 한다.
     if ((cur.kind === 'ssh-key-rotate' || cur.kind === 'ssh-key-delete') && KS.keyStoreLoadError()) return STORE_UNREADABLE;   // 못 읽음을 ‘지워짐’ 으로 말하지 않는다(4회차 반증 R4R-3)
+    // 키 저장소에 쓰는 승인은 지금 쓸 수 있는지 미리 본다 · 상태 파일에 쓰는 승인은 상태 파일을 본다 — 걸리면 요청은 그대로 둔다(5회차 C5-2 — OTP 를 쓴 뒤 503/409 로 요청이 버려졌고 키 등록은 되돌릴 수 없었다).
+    if (['ssh-key-activate', 'ssh-key-rotate', 'ssh-key-delete'].includes(cur.kind)) { const wi = KS.keyStoreWriteIssue(); if (wi) return { ...wi, reason: `${wi.reason} 요청은 그대로 둡니다 — 고친 뒤 승인하세요.` }; }
+    if (['ssh-corp-resume', 'ssh-guard-change'].includes(cur.kind) && ST.stateLoadError()) return { ok: false, code: 'state-unreadable', status: 503, reason: '상태 파일을 읽지 못해 지금은 실행할 수 없습니다 — 요청은 그대로 둡니다. 상태 파일을 고친 뒤 승인하세요.' };
     if (cur.kind === 'ssh-key-rotate') {
       const ii = installingIssue(cur.payload?.from); if (ii) return { ...ii, reason: `${ii.reason} 요청은 그대로 둡니다 — 작업이 끝난 뒤 승인하세요.` };
       // 새 키를 거두는 중이면 교체할 수 없다 — 거두기가 끝나도 그 키 줄은 서버에 없다(4회차 E4-5 — ‘끝난 뒤 승인하세요’ 라고 해 따르면 접속이 끊겼다). 돌려보내라고 말한다.

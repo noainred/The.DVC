@@ -142,6 +142,17 @@ const unreadable = () => {
 };
 
 /**
+ * 지금 쓰면 거절될 사유(못 읽음 · 봉인 못 풂 · 포탈 밖 변경) — 쓰지 않고 미리 본다(승인 사전 검사 — 5회차 C5-2: 승인 OTP 를 쓴 뒤 503/409 로 요청이 버려졌다).
+ * 판정은 unreadable · commit 과 같은 식이다.
+ */
+export function keyStoreWriteIssue() {
+  const u = unreadable(); if (u) return u;
+  const dd = diskDrift();
+  const outside = !dd.ok ? -1 : dd.changed.length + dd.added.length + dd.removed.length + dd.accountsChanged.length;
+  if (outside) return { ok: false, code: 'store-changed-outside', status: 409, reason: outside < 0 ? 'SSH 키 저장소 파일을 다시 읽지 못해 포탈 밖 변경 여부를 모릅니다.' : `SSH 키 저장소 파일이 포탈 밖에서 바뀌었습니다(${outside}곳) — 키 보안에서 확인한 뒤 ‘키 저장소 다시 읽기’ 를 하세요.` };
+  return null;
+}
+/**
  * 사본을 바꿔 봉인 · 원자적으로 쓴 뒤에만 캐시를 바꾼다. 봉인 실패(정책 잠금)는 code 그대로.
  * v3.9.0(반증 D8): 쓰기 전에 디스크가 포탈이 마지막으로 쓴 내용과 같은지 본다 — 다르면 쓰지 않는다(포탈 밖 변경의 흔적을 정상 쓰기가 사건 없이 지우지 않게).
  *   사람이 확인한 뒤 ‘키 저장소 다시 읽기’(설정 소유자 + OTP)로 디스크를 새 기준으로 삼으면 다시 쓸 수 있다.

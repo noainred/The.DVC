@@ -115,7 +115,7 @@ export function reloadSshAccessState({ by = '' } = {}) {
 function unreadable() {
   load();
   const e = loadErr.get();
-  return e ? { ok: false, code: 'state-unreadable', status: 503, reason: `SSH 공용 접속 상태 파일(${STATE_FILE_NAME})을 읽지 못해 바꾸지 않았습니다 — 손상 보존본(${STATE_FILE_NAME}.corrupt.*)을 확인해 고친 뒤 ‘상태 파일 다시 읽기’ 를 누르세요.` } : null;
+  return e ? { ok: false, code: 'state-unreadable', status: 503, reason: `SSH 공용 접속 상태 파일(${STATE_FILE_NAME})을 읽지 못해 바꾸지 않았습니다 — 파일 권한(읽기 오류) 또는 손상 보존본(${STATE_FILE_NAME}.corrupt.*)을 확인해 고친 뒤 ‘상태 파일 다시 읽기’ 를 누르세요.` } : null;
 }
 // 프로토타입 없는 객체로 — 'toString' 같은 이름을 중지 기록으로 읽지 않게(반증 D7).
 function draft() { const d = load(); return { stops: Object.assign(Object.create(null), d.stops), events: d.events.slice(), guards: { ...d.guards }, inboxSeen: (d.inboxSeen || []).slice() }; }

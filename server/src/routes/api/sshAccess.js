@@ -194,8 +194,8 @@ export function registerSshAccess(api) {
     const r = await SVC.stopCorp(t(req.params.corp, 128), { by: who(req), reason: t(b.reason, 300) });
     // 다시 중지(중지 기록 갱신)는 새 중지와 가른다 · 더하지 못했으면 실패로 적는다(4회차 E4-6).
     audit(req, r.already ? 'ssh-access.corp.stop-refresh' : 'ssh-access.corp.stop', req.params.corp, r.already
-      ? { ok: !!r.ok && !r.addFailed, added: r.added || 0, addFailed: r.addFailed || undefined }
-      : { ok: !!r.ok, code: r.code, reason: t(b.reason, 120), servers: r.servers });
+      ? { ok: !!r.ok && !r.addFailed && !r.registryUnreadable, added: r.added || 0, addFailed: r.addFailed || undefined, registryUnreadable: r.registryUnreadable || undefined }   // 확인 못 함도 가른다(5회차 C5-3)
+      : { ok: !!r.ok, code: r.code, reason: t(b.reason, 120), servers: r.servers, registryUnreadable: r.registryUnreadable || undefined });
     send(res, r);
   });
   api.delete('/settings/ssh-access/corps/:corp/stop', ...write((req) => SVC.prechecks.resume({ corp: req.params.corp, by: who(req) })), async (req, res) => {

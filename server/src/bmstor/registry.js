@@ -29,6 +29,7 @@ const FILE = path.join(config.configDir, 'bm-storage.json');
 const DEFAULT_INTERVAL_MIN = 10;
 
 let cache = null;
+let readFailed = false;   // 지금 파일을 읽지 못함(손상 아님 — 5회차 C5-1)
 // v2.613 PERSIST2613-04: 로드 오류 상태·원소 필터는 util/registryCore.js 하나(다른 등록부 4벌과 같은 판정). 예전에는 원소 null 하나에
 //   아래 groups 변형이 던져 **파일 전체를 손상으로 보존하고 목록을 비웠다**(정상 서버까지 소실 — 스크래치 CONFIG_DIR 재현).
 const loadErr = makeLoadError();
@@ -47,15 +48,20 @@ function load() {
       cache = { servers, settings: j?.settings || {} };
     }
   } catch (e) {
-    // 읽기 오류도 보존본을 남긴다 — 이 등록부는 사람 쓰기 경로(서버 저장 · 삭제 · 주기 · CSV)가 오류를 보지 않아, 원본을 그대로 두면 다음 저장이 덮었다
-    //   (4회차 반증 R4R-1 — 4회차 C4-3 에서 보존본을 빼 원본이 사라졌다). ‘없음’ 판정은 ENOENT 만(isMissing — C4-3)은 그대로다.
+    // 읽기 오류(권한 · 폴더 검색 · EMFILE · NFS — 손상 아님): 원본을 옮기지 않고 **캐시하지 않는다**(다음 호출이 다시 읽는다) · 그동안 쓰기는 거절한다
+    //   (5회차 C5-1 — 4회차 반증 R4R-1 의 보존본은 폴더 단위 오류에서는 만들 수 없어 사람 저장이 원본을 덮었다). 내용 손상(파싱)은 예전대로 보존본.
+    if (e?.code && !(e instanceof SyntaxError)) { readFailed = true; loadErr.set(`읽기 실패(${String(e.code).slice(0, 40)})`); return { servers: [], settings: {} }; }
     preserveCorrupt(FILE, e?.message); loadErr.set(e); cache = null;
   }
+  if (readFailed) { readFailed = false; if (cache) loadErr.clear(); }
   if (!cache) { loadErr.checkCorruptOnly(FILE); cache = { servers: [], settings: {} }; }
   return cache;
 }
+/** 사람 쓰기 거절 — 지금 파일을 읽지 못하는 동안(원본을 덮지 않게 · 5회차 C5-1). */
+function readRefusal() { load(); return readFailed ? { ok: false, code: 'registry-unreadable', status: 503, reason: 'OS 계정 등록부(bm-storage.json)를 지금 읽지 못해 저장하지 않았습니다 — 파일 · 폴더 권한을 확인한 뒤 다시 하세요(원본은 그대로입니다).' } : null; }
 
 function persist() {
+  if (readFailed) return;   // 읽지 못한 원본을 빈 값으로 덮지 않는다(5회차 C5-1)
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ servers: cache.servers, settings: cache.settings }), null, 2), { mode: 0o600 });
   loadErr.clear(); // v2.612 LEFT2612-01 과 같은 규칙
@@ -76,6 +82,7 @@ export function getBmSettings() {
 }
 
 export function saveBmSettings(body = {}) {
+  { const rr = readRefusal(); if (rr) return rr; }
   const iv = Number(body.intervalMinutes);
   if (!Number.isFinite(iv) || iv < 1 || iv > 1440) return { ok: false, reason: '수집 주기는 1~1440분 사이여야 합니다.' };
   const data = load();
@@ -121,6 +128,7 @@ export const COLLECT_VIA = Object.freeze(['edge', 'central', 'auto']);
 
 /** 추가/수정 — id 있으면 수정(빈 비밀번호는 기존 유지), 없으면 신규. 검증은 저장과 단일 소스. */
 export function saveBmServer(body = {}) {
+  { const rr = readRefusal(); if (rr) return rr; }
   const data = load();
   const r = applyServerInput(data, body, { now: Date.now() });
   if (!r.ok) return r;
@@ -331,6 +339,7 @@ export function clearBmServerPassword(id, { expectAddr = null, viaAccountKey = f
 }
 
 export function removeBmServer(id) {
+  { const rr = readRefusal(); if (rr) return rr; }
   const data = load();
   const next = data.servers.filter((s) => s.id !== id);
   if (next.length === data.servers.length) return { ok: false, reason: '서버를 찾을 수 없습니다.' };

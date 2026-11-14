@@ -46,7 +46,7 @@ function load() {
 }
 function save() {
   try {
-    if (!cache.length) { if (fs.existsSync(FILE())) fs.rmSync(FILE(), { force: true }); return true; }
+    if (!cache.length) { fs.rmSync(FILE(), { force: true }); return true; }   // existsSync 없이 — 폴더 검색 권한이 없을 때 ‘지웠다’ 고 하지 않게(5회차 C5-1b · 실패는 아래 catch)
     fs.mkdirSync(path.dirname(FILE()), { recursive: true });
     atomicWriteFileSync(FILE(), JSON.stringify({ items: cache }), { mode: 0o600 });
     return true;

@@ -107,7 +107,7 @@ export function _resetApprovalsForTest() { cache = null; loadErr.clear(); lastRe
 export function approvalsLoadError() { load(); return loadErr.get(); }
 const unreadable = () => {
   load();
-  return loadErr.get() ? { ok: false, code: 'approvals-unreadable', status: 503, reason: `승인 기록 파일(${APPROVALS_FILE_NAME})을 읽지 못해 요청 · 승인을 받지 않습니다 — 손상 보존본(${APPROVALS_FILE_NAME}.corrupt.*)을 확인하세요.` } : null;
+  return loadErr.get() ? { ok: false, code: 'approvals-unreadable', status: 503, reason: `승인 기록 파일(${APPROVALS_FILE_NAME})을 읽지 못해 요청 · 승인을 받지 않습니다 — 파일 권한(읽기 오류) 또는 손상 보존본(${APPROVALS_FILE_NAME}.corrupt.*)을 확인하세요.` } : null;
 };
 function commit(next) {
   // 끝난 요청은 최근 MAX_HISTORY 개만(대기 중인 것은 버리지 않는다).
