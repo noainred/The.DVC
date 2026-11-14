@@ -278,7 +278,7 @@ test('EDGE-03 — bmstor: 만료 종결 잡에 늦게 온 결과는 반영되고
   assert.deepEqual(bj.lateBmstorResult(old), { superseded: true });
 });
 
-test('EDGE-03 — bmstor: \'더 새 잡\' 은 생성 순번으로 판정한다 — 두 잡의 createdAt 이 같은 ms 여도 superseded(v3.7.1 — PR #735 이식)', async () => {
+test('EDGE-03 — bmstor: \'더 새 잡\' 은 생성 순번으로 판정한다 — 두 잡의 createdAt 이 같은 ms 여도 superseded(v3.8.1 — PR #735 이식)', async () => {
   // 2026-10-21 release 워크플로: createdAt(ms) 비교라 두 enqueue 가 같은 ms 에 떨어지면 더 새 잡을 못 찾아 late 로 반영했다.
   const bj = await import('../src/bmstor/jobs.js');
   const realNow = Date.now;

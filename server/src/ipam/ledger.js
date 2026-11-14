@@ -118,7 +118,7 @@ function* stableSortGen(arr, cmp) {
 
 /** Build IP rows + summary from a snapshot, optionally scoped to one vCenter. */
 /**
- * v3.7.1: 캐시에 있는 원장만 돌려준다(없으면 null — **만들지 않는다**). 알림 평가처럼 동기로 도는 주기 경로가 새 스냅샷 직후(원장 동기화가 아직
+ * v3.8.1: 캐시에 있는 원장만 돌려준다(없으면 null — **만들지 않는다**). 알림 평가처럼 동기로 도는 주기 경로가 새 스냅샷 직후(원장 동기화가 아직
  *   끝나지 않은 때) 원장을 그 자리에서 동기로 다시 만들어 이벤트 루프를 막지 않게 한다(v2.740 F-06 — VM 4만 대 실측 260~400ms).
  */
 export function peekIpamRows(snap, vcenterId, allowed = null) {

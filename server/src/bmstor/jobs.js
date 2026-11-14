@@ -69,7 +69,7 @@ export function enqueueBmstorJob(agent, servers) {
     for (const rid of set) { const at = jobs.get(rid)?.createdAt ?? 0; if (at < oldestAt) { oldestAt = at; oldestId = rid; } }
     if (oldestId) { jobs.delete(oldestId); set.delete(oldestId); }
   }
-  const order = seq; // v3.7.1: newReqId 가 seq 를 올리기 전 값 — 잡 생성 순번(단조 증가 · '더 새 잡' 판정 전용)
+  const order = seq; // v3.8.1: newReqId 가 seq 를 올리기 전 값 — 잡 생성 순번(단조 증가 · '더 새 잡' 판정 전용)
   const reqId = newReqId();
   jobs.set(reqId, { reqId, agent: String(agent || ''), servers, state: 'pending', order, createdAt: Date.now(), takenAt: null, claims: 0, claimDeadline: null, doneAt: null });
   set.add(reqId); pendingByAgent.set(key, set);
@@ -111,7 +111,7 @@ export function ackBmstorJob(reqId) {
  *   돌려 라우트가 200 {stale:true} 로 버렸고, 중앙 화면은 수집이 끝났는데도 '회신하지 않았다' 로 남았다(엣지는 성공으로 기록).
  *   · 같은 잡의 늦은 결과는 한 번만 반영한다(재전송 중복 방지).
  *   · 그 뒤 **같은 에이전트의 더 새 잡**이 이미 정상 회신됐으면 반영하지 않는다(새 값을 옛 값으로 되돌리지 않게) — `superseded`.
- *     v3.7.1(PR #735 이식): '더 새' 는 생성 순번(order)으로 판정한다 — createdAt(ms 벽시계)은 두 잡이 같은 ms 에 만들어지거나 시계가 조정되면
+ *     v3.8.1(PR #735 이식): '더 새' 는 생성 순번(order)으로 판정한다 — createdAt(ms 벽시계)은 두 잡이 같은 ms 에 만들어지거나 시계가 조정되면
  *     순서를 잃어 옛 늦은 결과가 새 값을 덮었다(2026-10-21 release 워크플로 1회 실패). createdAt 은 TTL · prune 용으로만 쓴다.
  * @returns {null|{agent:string, serverIds:string[], late:true}|{superseded:true}|{duplicate:true}}  null = 모르는 잡·만료가 아닌 종결
  */

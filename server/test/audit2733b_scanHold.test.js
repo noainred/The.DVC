@@ -18,7 +18,7 @@ import { installFakePing } from './_fakePing.js';
 const TOKEN = 'tok-2733b-shared';
 const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-2733b-'));
 const BIN = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-2733b-bin-'));
-// 가짜 ping: 자기 PID 를 남기고 sleep 으로 바뀐다 — 2단계(ping)에서 스캔을 시한까지 묶는다(1단계 TCP 생존은 이미 찾은 뒤). test/_fakePing.js(v3.7.1)
+// 가짜 ping: 자기 PID 를 남기고 sleep 으로 바뀐다 — 2단계(ping)에서 스캔을 시한까지 묶는다(1단계 TCP 생존은 이미 찾은 뒤). test/_fakePing.js(v3.8.1)
 const { killOwned } = installFakePing(BIN);
 process.env.PATH = `${BIN}:${process.env.PATH}`;
 process.env.CONFIG_DIR = CFG;
@@ -45,7 +45,7 @@ before(async () => { target = await listen(); tport = target.address().port; });
 after(() => {
   runner._setScanDeadlineOverrideForTest?.(null);
   target?.close();
-  killOwned(); // 이 파일이 띄운 sleep 만 — 로그의 PID 가 다른 프로세스에 재사용됐을 수 있다(test/_fakePing.js · v3.7.1)
+  killOwned(); // 이 파일이 띄운 sleep 만 — 로그의 PID 가 다른 프로세스에 재사용됐을 수 있다(test/_fakePing.js · v3.8.1)
   fs.rmSync(BIN, { recursive: true, force: true });
 });
 

@@ -158,6 +158,8 @@ import { startCurUserConfigPull } from './agent/curUserConfigPull.js'; // 〃 �
 import { startPartFaultPoller } from './partfault/poller.js';       // 파트 장애(v2.547) — 중앙: 스캔→전이→DB→알림
 import { startPartFaultPush } from './partfault/push.js';           // 〃 엣지: 로컬 판정 후 '장애 + 전체 요약' 을 중앙 push(v2.548 프로토콜 2)
 import { startPartFaultConfigPull } from './agent/partFaultConfigPull.js'; // 〃 중앙→엣지 스위치 배포(v2.548)
+import { startDiskBadJobs } from './diskbad/jobs.js';             // 디스크 배드 섹터 이력(v3.8.0) — 중앙: 작업 · 6시간 자동 점검(기본 꺼짐)
+import { startDiskBadEdge } from './diskbad/edge.js';             // 〃 엣지: 중앙 작업을 가져가 그 법인 iDRAC 로그를 읽고 결과 push
 import { startBmUsageConfigPull } from './agent/bmUsageConfigPull.js'; // v2.627 베어메탈 사용률 설정 중앙→엣지 배포
 import { startBmOnboardPull } from './agent/bmOnboardPull.js'; // 7b단계 서버 등록 배포(중앙 → 엣지 — 수집 경로 edge)
 import { startBmMaintPull } from './agent/bmMaintPull.js'; // 8a단계 정비 창 배포(중앙 → 엣지 — 그 법인 창)
@@ -394,6 +396,7 @@ app.use('/api/central/agent-config', BIG_JSON); // 엣지 설정 통합 push(다
 // 엣지 쪽은 gzip 을 붙였지만 express.json 의 limit 은 **해제 후 길이**라 한도도 함께 올려야 한다.
 app.use('/api/central/storage-data', BIG_JSON);
 app.use('/api/central/part-faults', BIG_JSON);  // 파트 장애 push(v2.547) — 열린 장애가 많은 법인이 1mb 기본을 넘으면 413 = 조용한 소실
+app.use('/api/central/disk-bad', BIG_JSON);     // 디스크 배드 섹터 이력 push(v3.8.0) — 25대 묶음이라도 첫 점검(전량)은 서버당 기록 수천 건이 될 수 있다(413 = 조용한 소실)
 app.use('/api/central/edge-log-result', BIG_JSON);  // 엣지 로그 폴백 회신(v2.549) — 로그 400줄 × 줄당 최대 2,000자면 1mb 기본을 넘고, 413 은 재시도 대상이 아니라 조용한 소실이 된다
 // 엣지 로그 **연합 조회** 결과(v2.561) — v2.549 가 형제 경로만 등록해 이쪽이 빠져 있었다.
 // 실측: 500행(`checksLogs.js` 의 limit 상한) × vCenter 이벤트 message 1,900자 = 981KB 로 기본 1mb 에 닿고
@@ -622,7 +625,7 @@ const stagger = [
   // 둘 다 재진입 가드가 있고, 조건(CENTRAL_URL·토큰) 미충족이면 스스로 기동하지 않는다.
   startSvcmonPush, startSvcmonConfigPull, startSvcmonSilenceWatch,
   startSvcmonTrials, // v2.960 시험 점검 엣지 대기 이어 받기(파일에 남은 것만 · 시한이 지났으면 되돌린다) — 없으면 아무것도 하지 않는다
-  startSettingsSyncDetector, // v2.915 Monitoring 설정 연동 — 5분마다 설정 카탈로그를 **읽기만** 해 새 항목·주소 변경·사라짐을 센다(네트워크 왕복 0) · 엣지는 기동하지 않는다
+  startSettingsSyncDetector, // v3.8.0 Monitoring 설정 연동 — 5분마다 설정 카탈로그를 **읽기만** 해 새 항목·주소 변경·사라짐을 센다(네트워크 왕복 0) · 엣지는 기동하지 않는다
   startVmCloneScheduler, // VM 복제(백업식) — 60초 틱, 재진입 가드 + 전역 직렬 실행 큐(runner)
   startVmBackupMail,     // 〃 실패 메일(v2.794) — 1분 틱, 엣지는 기동하지 않는다
   startVmCloneWorker,    // 〃 법인 위임(v2.793) — 엣지가 담당 vCenter 의 잡 정의·작업을 당기고 상태를 올린다. 재진입 가드, CENTRAL_URL 미설정이면 자기기동 안 함
@@ -671,6 +674,7 @@ const stagger = [
   startBmOnboardPull, // 7b 서버 등록 배포(중앙 → 엣지) — CENTRAL_URL 미설정이면 자기기동 안 함
   startBmMaintPull, // 8a 정비 창 배포(중앙 → 엣지) — CENTRAL_URL 미설정이면 자기기동 안 함
   startBmFoldersPull, // v2.996 물리서버 폴더 사본(중앙 → 엣지) — CENTRAL_URL 미설정이면 자기기동 안 함
+  startDiskBadJobs, startDiskBadEdge, // 디스크 배드 섹터 이력(v3.8.0) — 자동 점검은 설정에서 켤 때만 · 엣지 워커는 CENTRAL_URL 미설정이면 자기기동 안 함
   startEdgeLogWorker,
   startBmUsagePoller,
   startLinkCheckPoller,

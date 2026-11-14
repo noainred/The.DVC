@@ -1,4 +1,4 @@
-// 가짜 `ping`(PATH 앞에 두는 sleep) 공용 헬퍼 — audit2732d·audit2733b 가 같이 쓴다(v3.7.1 — PR #779 이식).
+// 가짜 `ping`(PATH 앞에 두는 sleep) 공용 헬퍼 — audit2732d·audit2733b 가 같이 쓴다(v3.8.1 — PR #779 이식).
 // 스크립트는 자기 PID 를 남기고 sleep 으로 바뀐다(exec — execFile 시한이 sleep 자체를 죽인다).
 // 정리(killOwned)는 그 PID 가 **아직 이 헬퍼가 띄운 sleep 일 때만** 죽인다: 로그에 남은 PID 의 sleep 이 이미 끝났다면
 // 커널이 그 번호를 다른 프로세스(병렬로 도는 다른 테스트 파일의 자식 등)에 다시 줬을 수 있다. 소유 표지는 exec 된 sleep 의

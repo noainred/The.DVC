@@ -1,4 +1,4 @@
-// v3.7.1 안정화 — ① 쉬는 시간 × 끊김/늦음 거짓 경보 ② 엣지 쉬는 시간이 실패 기록을 덮음 ③ 정기 보고 '지난 보고 대비' 기준
+// v3.8.1 안정화 — ① 쉬는 시간 × 끊김/늦음 거짓 경보 ② 엣지 쉬는 시간이 실패 기록을 덮음 ③ 정기 보고 '지난 보고 대비' 기준
 // ④ 알림 평가의 동기 원장 재구성 · ⑤ bmstor 순번(audit2622c) · ⑥ 가짜 ping 정리(_fakePing.js — audit2732d · audit2733b).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

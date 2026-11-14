@@ -65,7 +65,7 @@ export function buildScanSchedule({ agents = [], log = [], reports = {}, now = D
     const lastDoneAt = numOrNull(rep?.at);
     const lastDone = [...runs].reverse().find((r) => r.kind === 'done');
     const lastDur = lastDone?.durationMs ?? null;
-    // v3.7.1: '늦음' = 주기의 2배 + 가장 긴 쉬는 시간(쉬는 동안은 주기 회차를 건너뛴다 — 밤마다 '늦음' 이 뜨지 않게). 알림(instantAlerts)과 같은 여유.
+    // v3.8.1: '늦음' = 주기의 2배 + 가장 긴 쉬는 시간(쉬는 동안은 주기 회차를 건너뛴다 — 밤마다 '늦음' 이 뜨지 않게). 알림(instantAlerts)과 같은 여유.
     const quietMs = quietLongestMs(a.quiet);
     const state = !a.enabled ? 'off' : lastDoneAt == null ? 'none' : iv && now - lastDoneAt > 2 * iv + quietMs ? 'late' : 'ok';
     rows.push({
