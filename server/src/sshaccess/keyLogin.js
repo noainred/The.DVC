@@ -58,7 +58,7 @@ export const rollbackCommand = (o) => wrapOrNull(AK.rollbackScript(o));
 /* ── 접속(한 번 · 재시도 없음 · 시한) ─────────────────────────────────────── */
 
 const TIMEOUT_RE = /타임아웃|시한 초과|취소|timed? ?out/i;
-const KEY_UNUSABLE_TEXT = '그 키로 접속은 되지만 포탈이 보낸 명령이 돌지 않았습니다(그 키 줄에 강제 명령(command=)이 있는 등) — 이 키로는 수집할 수 없어 묶지 않았습니다';
+const KEY_UNUSABLE_TEXT = '그 키로 접속은 되지만 포탈이 보낸 명령이 돌지 않았습니다(그 키 줄에 강제 명령(command=)이 있는 등) — 이 키로는 수집할 수 없어 묶지 않았습니다.';
 /**
  * @param {Function} fn  (run) => 결과. run(cmd, mutating) — mutating 이면 ‘바꾸는 명령을 보냈다’ 표시를 세운다(답을 못 받았을 때 문구가 갈린다).
  * @returns {Promise<{ok:true, value:object} | {ok:false, code:string, reason:string, sent:boolean}>}
@@ -77,7 +77,7 @@ async function sshRun(server, auth, fn, { execs = 1 } = {}) {
     const msg = String(e?.message || e);
     if (e?.code === 'key-login-unusable') return { ok: false, code: 'key-login-unusable', reason: KEY_UNUSABLE_TEXT, sent: st.sent };
     const code = e?.code === 'SSH_NO_PASSWORD_METHOD' ? 'no-password-method' : isPeerRejectText(msg) ? 'hostkey' : isAuthFailureText(msg) ? 'auth-rejected' : TIMEOUT_RE.test(msg) ? 'timeout' : 'connect';
-    const reason = code === 'no-password-method' ? '서버가 비밀번호 로그인을 받지 않아(키만 받음) 비밀번호를 보내지 않았습니다 — 이미 되는 키로 접속하게 서버 설정을 고르거나 공개키를 서버에 직접 넣으세요.'
+    const reason = code === 'no-password-method' ? `${msg.replace(/^SSH_NO_PASSWORD_METHOD:\s*/, '').replace(/\s+/g, ' ').slice(0, 160)} — 이미 되는 키로 접속하게 서버 설정을 고르거나 공개키를 서버에 직접 넣으세요.`
       : code === 'hostkey' ? '호스트키를 신뢰하지 않아 끊었습니다 — 설정 › 보안 › 장비 신뢰에서 지문을 확인 · 승인하세요.'
       : code === 'auth-rejected' ? `인증이 거부됐습니다 — 다시 시도하지 않았습니다(계정 잠금 방지).${auth.privateKey ? '' : ' 비밀번호는 서버가 받는 방식 하나(password 또는 대화형)로 한 번만 보냈습니다.'}`
         : code === 'timeout' ? `서버가 시한 안에 답하지 않았습니다(${msg.replace(/\s+/g, ' ').slice(0, 80)})`

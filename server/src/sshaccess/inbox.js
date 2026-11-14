@@ -159,7 +159,8 @@ async function inspectFile(abs, rel, corp, server) {
  * 받는 곳 안의 상대 경로 → 절대 경로 + 그 자리의 법인 · 서버 폴더 이름. 밖이거나 모양이 다르거나 **어느 조각이든 심링크**면 null.
  * 경로 글자는 다듬지 않는다(앞뒤 공백이 있으면 거부 — 점검 C-6: 다듬으면 ‘key ’ 를 지우라는 요청이 ‘key’ 를 지웠다).
  */
-function resolveRel(relPath) {
+/** 경로 글자 꼴만(파일 시스템을 만지지 않는다 — OTP 앞 사전 검사용 · 2회차 반증: 받는 곳 파일 시스템이 멈추면 동기 lstat 이 이벤트 루프를 멈춘다). */
+function relShape(relPath) {
   if (typeof relPath !== 'string' || !relPath || relPath.length > 400 || relPath !== relPath.trim() || relPath.includes('\0') || path.isAbsolute(relPath)) return null;
   const parts = relPath.split('/');
   if (parts.some((x) => !x || x === '.' || x === '..')) return null;
@@ -168,6 +169,12 @@ function resolveRel(relPath) {
   const root = path.resolve(inboxDir());
   const abs = path.resolve(root, ...parts);
   if (!abs.startsWith(root + path.sep)) return null;
+  return { root, abs, parts };
+}
+export function relPathShapeOk(relPath) { return !!relShape(relPath); }
+function resolveRel(relPath) {
+  const sh = relShape(relPath); if (!sh) return null;
+  const { root, abs, parts } = sh;
   // 디렉터리 조각(받는 곳 · 법인 · common/servers · 서버)이 진짜 디렉터리인지 — 링크면 거부.
   let cur = root;
   for (const seg of [null, ...parts.slice(0, -1)]) {

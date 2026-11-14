@@ -80,6 +80,7 @@ export const HIDDEN_EVENT_KINDS = Object.freeze(['inbox-seen']);
 export const USE_CODE_TEXT = Object.freeze({
   ok: '성공', 'auth-rejected': '로그인 실패', 'auth-stopped': '인증 정지 중', fail: '실패', hostkey: '호스트키 미신뢰', connect: '접속 실패',
   'auth-unresolved': '자격 해석 실패', 'no-secret': '인증 수단 없음', gone: '서버 지워짐',
+  timeout: '시한 초과', 'no-password-method': '비밀번호 방식 없음(보내지 않음)', 'key-login-unusable': '명령이 돌지 않는 키(강제 명령 등)',
 });
 export const UNUSUAL_TEXT = Object.freeze({ 'new-server': '처음 쓰인 서버', 'new-feature': '처음 쓰인 기능' });
 
@@ -510,7 +511,7 @@ export const JOB_CODE_TEXT = Object.freeze({
   'key-changed': '작업 도중 키가 퇴역 · 삭제 · 변경돼 하지 않음',
   'account-missing': '공통 계정이 없음', 'account-kind': '공통 계정이 OS 계정이 아님', 'account-tampered': '공통 계정이 포탈 밖에서 바뀜', 'store-unreadable': '키 저장소를 읽지 못함',
   'corp-stopped': '법인 키 사용 중지 중', 'state-unreadable': '상태 파일을 읽지 못함', 'no-secret': '저장된 인증 수단 없음',
-  'auth-rejected': '인증 거부(다시 시도하지 않음)', 'no-password-method': '서버가 비밀번호 로그인을 받지 않음(보내지 않음)', hostkey: '호스트키 미신뢰', connect: '접속 실패', timeout: '서버가 시한 안에 답하지 않음',
+  'auth-rejected': '인증 거부(다시 시도하지 않음)', 'no-password-method': '서버가 비밀번호 로그인을 받지 않음(보내지 않음)', 'key-login-unusable': '키로 접속은 되지만 명령이 돌지 않음(강제 명령 등)', hostkey: '호스트키 미신뢰', connect: '접속 실패', timeout: '서버가 시한 안에 답하지 않음',
   // 바꾸는 명령을 보낸 뒤 답을 못 받음 — ‘바꾼 것 없음’ 이 아니다(서버의 명령은 끊겨도 끝까지 돌 수 있다)
   uncertain: '명령은 보냈지만 답을 받지 못함 — 서버의 authorized_keys 가 바뀌었을 수 있음',
   'install-failed': '줄을 넣지 못함', 'key-login-failed': '키 접속 확인 실패', 'bind-failed': '서버 설정에 적지 못함', 'revoke-failed': '줄을 지우지 못함', 'bad-key': '공개키 꼴이 올바르지 않음',

@@ -187,7 +187,9 @@ export async function chooseServerKey({ serverId, keyId, expectAddr = null, by =
   const after = bmServerRawById(s.id);
   // 연결 시험에 시한(2회차 C2-2 — 서버 자물쇠를 쥔 채 시한 없이 기다려 같은 서버를 지나는 긴급 거두기가 멈췄다).
   let test;
-  try { test = after ? await KL.withLegDeadline(2, () => testServer(after, { by })) : { ok: false, kind: 'gone', reason: '서버가 그 사이 지워졌습니다.' }; }
+  // 시한이 지나면 세션도 끊는다(withDeadline → signal · 2회차 반증 R2R-7). 바깥 경주는 signal 을 받지 않는 경로의 뒷받침.
+  const { withDeadline } = await import('../util/deadline.js');
+  try { test = after ? await KL.withLegDeadline(2, () => withDeadline(KL.legDeadlineMs(2) - 2_000, (signal) => testServer(after, { by, signal }), '연결 시험 시한 초과')) : { ok: false, kind: 'gone', reason: '서버가 그 사이 지워졌습니다.' }; }
   catch (e) { test = { ok: false, kind: 'timeout', reason: `연결 시험이 시한 안에 끝나지 않았습니다(${String(e?.message || e).slice(0, 80)})` }; }
   if (test.ok) return { ok: true, test, previous: w.previous };
   const back = restoreBmServerKeyRef(s.id, w.previous, { expectKeyRef: kid });
@@ -199,9 +201,9 @@ export async function chooseServerKey({ serverId, keyId, expectAddr = null, by =
 }
 
 /** 저장된 항목으로 한 번 연결 시험(7b connTest 와 같은 본체) + 키 사용 기록. */
-async function testServer(s, { by = '' } = {}) {
+async function testServer(s, { by = '', signal } = {}) {
   const { testSavedOs } = await import('../bmusage/onboard/connTest.js');
-  const r = await testSavedOs(s);
+  const r = await testSavedOs(s, { signal });
   const a = REFS.resolveOsAuth(s, { feature: 'conn-test' });
   if (a.ok && a.keyFingerprint) noteKeyUse({ fingerprint: a.keyFingerprint, keyName: a.keyName, server: s.name || s.host, corp: s.vcenterId, feature: 'conn-test', ok: !!r.ok, code: r.ok ? 'ok' : r.kind, trigger: 'manual', by });
   return r;
@@ -407,16 +409,40 @@ export function discardInbox({ relPath, sha = '', by = '' } = {}) {
  * 사용 중지 — 지금 그 법인 서버의 id · 접속처를 함께 적는다(서버의 법인 칸을 비워 빠져나가지 못하게 — 점검 A-4 · B-1).
  * 등록부를 못 읽으면 법인만으로 건다(멈추는 쪽은 막지 않는다 — 응답이 그 사실을 밝힌다).
  */
-export async function stopCorp(corp, { by = '', reason = '' } = {}) {
-  const c = t(corp, 128);
-  // 이 포탈이 아는 법인만(2회차 A2 — 없는 법인 이름 500개로 중지 기록 상한을 채워 진짜 법인의 긴급 중지가 막혔다). 법인 목록을 못 읽으면 막지 않는다(멈추는 쪽).
-  try { const known = await corpList(); if (Array.isArray(known) && known.length && !known.some((x) => x.id === c)) return { ok: false, code: 'unknown-corp', status: 404, reason: '이 포탈이 모르는 법인입니다.' }; } catch { /* */ }
-  const cur = ST.stopFor(c);
-  if (cur && !cur.unreadable) return { ok: true, already: true, stop: cur, reason: '이미 사용 중지 상태입니다 — 기록을 다시 쓰지 않았습니다.' };   // 다시 걸어 사건을 쌓지 않는다
+/**
+ * 이 포탈이 아는 법인인가 — vCenter 목록 ∪ 등록부 서버의 법인 ∪ 공통 계정 · 키 폴더의 법인(2회차 반증 R2R-5 — vCenter 목록만 봐서, vCenter 를 지웠지만 서버 · 키가 남은 법인의 긴급 중지가 404 였다).
+ * 아무것도 읽지 못하면(전부 비거나 오류) 막지 않는다(멈추는 쪽). → 거절 객체 또는 null.
+ */
+async function unknownCorpIssue(c) {
+  const known = new Set();
+  try { for (const x of (await corpList()) || []) known.add(String(x.id)); } catch { /* */ }
+  try { if (!bmRegistryLoadError()) for (const s of listBmServersRaw()) if (t(s.vcenterId)) known.add(t(s.vcenterId)); } catch { /* */ }
+  try { if (!KS.keyStoreLoadError()) { for (const a of KS.listAccountsRaw()) if (t(a.corp)) known.add(t(a.corp)); for (const k of KS.listKeysRaw()) if (t(k.folderCorp)) known.add(t(k.folderCorp)); } } catch { /* */ }
+  return known.size && !known.has(c) ? { ok: false, code: 'unknown-corp', status: 404, reason: '이 포탈이 모르는 법인입니다(vCenter · 서버 · 공통 계정 · 키 폴더 어디에도 없음).' } : null;
+}
+/** 지금 그 법인 서버의 id · 접속처(중지 기록에 함께 적는다). */
+function corpServerList(c) {
   const accById = new Map(KS.keyStoreLoadError() ? [] : KS.listAccountsRaw().map((a) => [a.id, a]));
   const regErr = bmRegistryLoadError();
   const corpServers = regErr ? [] : listBmServersRaw().filter((s) => t(s.vcenterId) === c);
   const servers = corpServers.map((s) => ({ id: s.id, addr: addrKey(s.host, s.port, usernameOf(s, t(s.credRef) ? accById.get(t(s.credRef)) : null)) }));
+  return { regErr, corpServers, servers };
+}
+export async function stopCorp(corp, { by = '', reason = '' } = {}) {
+  const c = t(corp, 128);
+  // 이 포탈이 아는 법인만(2회차 A2 — 없는 법인 이름 500개로 중지 기록 상한을 채워 진짜 법인의 긴급 중지가 막혔다).
+  const uk = await unknownCorpIssue(c); if (uk) return uk;
+  const cur = ST.stopFor(c);
+  if (cur && !cur.unreadable) {
+    // 다시 걸어 사건을 쌓지 않는다 — 다만 중지 뒤에 등록한 서버는 기록에 더한다(2회차 반증 R2R-6 — 그 서버는 법인 칸을 비우면 중지에서 빠졌다).
+    const { servers } = corpServerList(c);
+    const ids = new Set(cur.serverIds || []); const addrs = new Set(cur.addrs || []);
+    const extra = servers.filter((x) => !ids.has(x.id) || (x.addr && !addrs.has(x.addr)));
+    const w = extra.length ? ST.addStopServers(c, extra) : { ok: true };
+    const added = w.ok ? extra.length : 0;
+    return { ok: true, already: true, stop: ST.stopFor(c) || cur, added, reason: `이미 사용 중지 상태입니다 — 사건을 다시 쓰지 않았습니다${added ? `(그 뒤 등록된 서버 ${added}대를 중지 기록에 더함)` : extra.length ? '(그 뒤 등록된 서버를 기록에 더하지 못했습니다 — 상태 파일)' : ''}.` };
+  }
+  const { regErr, corpServers, servers } = corpServerList(c);
   const r = ST.setCorpStop(c, { by, reason, servers });
   // 엣지가 수집하는 서버는 그 엣지의 키로 접속한다 — 이 노드의 중지는 거기에 닿지 않는다(사실대로 따로 센다).
   const edgeServers = corpServers.filter((s) => t(s.agent)).length;
@@ -427,8 +453,8 @@ export async function resumeCorp(corp, { by = '' } = {}) {
   const c = t(corp, 128);
   if (!ST.stopFor(c) || ST.stopFor(c).unreadable) return ST.clearCorpStop(c, { by });   // 중지 상태가 아니거나 상태 모름 — 저장소가 사유를 말한다
   // 이 포탈이 모르는 법인 · 적힌 서버도 없는 중지는 막는 것이 없다 — 승인 없이 푼다(2회차 A2 — 가짜 중지를 푸는 데 승인이 수백 번 필요했다).
-  { const st = ST.stopFor(c); let known = null; try { known = await corpList(); } catch { known = null; }
-    if (Array.isArray(known) && known.length && !known.some((x) => x.id === c) && !(st.serverIds || []).length && !(st.addrs || []).length) return ST.clearCorpStop(c, { by }); }
+  { const st = ST.stopFor(c);
+    if (await unknownCorpIssue(c) && !(st.serverIds || []).length && !(st.addrs || []).length) return ST.clearCorpStop(c, { by }); }
   // 요청을 **그때의 중지**(걸린 시각)에 묶는다 — 그 뒤 새 사건으로 다시 건 중지를 옛 재개 요청이 풀지 못하게(점검 A6 · C-6).
   return submitSsh({ kind: 'ssh-corp-resume', title: `법인 키 사용 재개 — ${c}`, target: c, corp: c, payload: { corp: c, stopAt: Number(ST.stopFor(c).at) || 0 }, by }, () => ST.clearCorpStop(c, { by }));
 }
@@ -590,7 +616,11 @@ export function approvalPrecheck(id, { approve, by = '', digest = '' } = {}) {
     if (t(digest, 64) !== cur.digest) return { ok: false, code: 'digest-mismatch', status: 409, reason: '화면에서 본 요청 내용과 다릅니다 — 다시 읽은 뒤 승인하세요.' };
     // 실행할 상태가 요청 때와 달라졌으면(OTP 를 쓴 뒤 실행 단계에서 실패해 요청까지 버리던 것 — 2회차 A5) 미리 거절한다. 실행 함수가 다시 본다.
     if (cur.kind === 'ssh-corp-resume') { const st = ST.stopFor(cur.payload?.corp); if (st && !st.unreadable && Number(st.at) !== Number(cur.payload?.stopAt)) return { ok: false, code: 'stop-changed', status: 409, reason: '요청 뒤 그 법인에 사용 중지가 다시 걸렸습니다 — 이 요청은 돌려보내고 새 중지를 확인한 뒤 새로 요청하세요.' }; }
-    if (cur.kind === 'ssh-keystore-reload' && typeof cur.payload?.sha === 'string' && KS.diskFileSha() !== cur.payload.sha) return { ok: false, code: 'disk-changed', status: 409, reason: '요청 뒤 키 저장소 파일이 또 바뀌었습니다 — 이 요청은 돌려보내고 바뀐 내용을 확인한 뒤 새로 요청하세요.' };
+    if (cur.kind === 'ssh-keystore-reload' && typeof cur.payload?.sha === 'string') {
+      const sha = KS.diskFileSha();
+      if (sha === null) return { ok: false, code: 'read-failed', status: 503, reason: '키 저장소 파일을 지금 읽지 못했습니다 — 파일을 확인한 뒤 다시 승인하세요(요청은 그대로 둡니다).' };   // 2회차 반증 — ‘또 바뀌었습니다’ 라고 했다
+      if (sha !== cur.payload.sha) return { ok: false, code: 'disk-changed', status: 409, reason: '요청 뒤 키 저장소 파일이 또 바뀌었습니다 — 이 요청은 돌려보내고 바뀐 내용을 확인한 뒤 새로 요청하세요.' };
+    }
   }
   return null;
 }
@@ -630,6 +660,10 @@ export function requestPrecheck({ kind, target = '', by = '' } = {}) {
   if (!twoPersonOn()) return null;
   if (AP.approvalsLoadError()) return { ok: false, code: 'approvals-unreadable', status: 503, reason: '승인 기록 파일을 읽지 못해 요청을 받지 않습니다.' };
   const na = noApproverIssue(by); if (na) return na;
+  // 요청자마다 대기 상한 — 저장소가 다시 본다(2회차 반증 R2R-5 — OTP 를 쓴 뒤에 거절했다).
+  if (AP.listRequests({ includeDone: false, limit: 500 }).filter((r) => AP.identityKey(r.requestedBy) === AP.identityKey(by)).length >= AP.MAX_PENDING_PER_USER) {
+    return { ok: false, code: 'too-many', status: 409, reason: `내가 만든 승인 대기 요청이 ${AP.MAX_PENDING_PER_USER}건입니다 — 먼저 처리하거나 취소하세요.` };
+  }
   if (target) {
     const dup = AP.listRequests({ kinds: [kind], includeDone: false }).find((r) => r.target === t(target, 200));
     if (dup) return { ok: false, code: 'dup-request', status: 409, reason: `같은 요청이 이미 승인을 기다리고 있습니다(${dup.requestedBy}).`, request: dup };
@@ -660,7 +694,14 @@ export const prechecks = Object.freeze({
   },
   reloadKeyStore: ({ by }) => (KS.diskFileSha() === null ? { ok: false, code: 'read-failed', status: 503, reason: '키 저장소 파일을 읽지 못했습니다.' }
     : requestPrecheck({ kind: 'ssh-keystore-reload', target: 'ssh-keys.json', by })),
-  inboxPath: ({ relPath }) => (INB.slugsOf(relPath) ? null : { ok: false, code: 'bad-path', status: 400, reason: '받는 곳 안의 파일 경로가 아닙니다.' }),
+  inboxPath: ({ relPath }) => (INB.relPathShapeOk(relPath) ? null : { ok: false, code: 'bad-path', status: 400, reason: '받는 곳 안의 파일 경로가 아닙니다.' }),
+  // 법인 사용 중지 — 모르는 법인은 OTP 앞에서(2회차 반증 R2R-5).
+  stop: async ({ corp }) => unknownCorpIssue(t(corp, 128)),
+  // 서버 키 고르기 — 그 서버에 키 작업이 돌고 있으면 OTP 앞에서 409(본 함수가 다시 본다).
+  chooseKey: ({ serverId }) => {
+    const s = bmServerRawById(t(serverId, 64));
+    return s && KL.serverLockBusy(KL.serverLockKey(s)) ? { ok: false, code: 'server-busy', status: 409, reason: '이 서버에 다른 키 작업이 진행 중입니다 — 끝난 뒤 다시 고르세요.' } : null;
+  },
   guards: ({ patch, by }) => {
     const cur = ST.getGuards();
     if (cur.unreadable) return { ok: false, code: 'state-unreadable', status: 503, reason: '상태 파일을 읽지 못해 보호 장치를 바꾸지 않았습니다.' };
@@ -767,17 +808,23 @@ function jobServerEvents(list) {
   return list.slice().sort((a, b) => pri(a) - pri(b)).slice(0, PER_JOB_EVENTS).map(({ fail: _f, ...e }) => e);
 }
 /** 바꾸기 전에 ‘지금 이 서버를 바꾸는 중’ 을 적고 끝나면 지운다 — 도중에 포탈이 재시작하면 기동 때 ‘중단’ 사건이 된다(1회차 B7). */
+// 이 프로세스가 시작한 작업 id — 진행 기록의 지우기(markEnd)가 실패해 남은 줄을 나중 점검이 ‘포탈이 다시 시작됨’ 으로 적지 않게(2회차 반증 — 작업 기록은 1시간 뒤 사라진다).
+const _myJobIds = new Set();
 async function inflight(job, kind, keyName, s, by, fn) {
   const rec = { jobId: job?.id || '', kind, keyName, sid: s.id, server: s.name || s.host, corp: t(s.vcenterId), by };   // job = startJob 의 handle({ id, stop })
-  INF.markStart(rec);
-  try { return await fn(); } finally { INF.markEnd(rec); }
+  if (rec.jobId) { _myJobIds.add(rec.jobId); if (_myJobIds.size > 500) _myJobIds.delete(_myJobIds.values().next().value); }
+  // 기록은 기록일 뿐 — 못 적어도 작업은 계속 돈다(2회차 반증 R2R-1).
+  try { INF.markStart(rec); } catch (e) { console.warn(`[ssh-access] 진행 기록을 적지 못했습니다: ${String(e?.message || e).slice(0, 120)}`); }
+  try { return await fn(); } finally { try { INF.markEnd(rec); } catch { /* 기록만 못 지움 — 다음 점검이 이 프로세스의 작업으로 알아본다 */ } }
 }
 /** 작업 결과 한 줄의 갈래 — 성공 · 결과 모름 · 하지 않음 · 실패(2회차 E2-8 — 결과 모름 · 하지 않음까지 ‘실패’ 로 셌다). */
 const NOT_DONE_CODES = new Set(['cancelled', 'moved', 'auth-skipped', 'key-changed', 'edge-delegated', 'over-limit', 'demo']);
 const outcomeOf = (x) => (x.ok ? 'ok' : x.code === 'uncertain' ? 'uncertain' : NOT_DONE_CODES.has(x.code) ? 'notdone' : 'fail');
 const outcomeText = (c) => `${c.uncertain ? ` · 결과 모름 ${c.uncertain}` : ''}${c.notdone ? ` · 하지 않음 ${c.notdone}` : ''}`;
 const countBy = (results, pick) => { const m = {}; for (const r of results) { const k = pick(r); m[k] = (m[k] || 0) + 1; } return m; };
-const failNames = (results) => results.filter((r) => !r.ok && outcomeOf(r) === 'fail').slice(0, 5).map((r) => `${t(r.name, 40)}(${t(r.code, 24)})`).join(', ');
+// 확인이 필요한 서버 이름 — 결과 모름을 먼저(서버에서 직접 확인해야 한다 · 2회차 반증: 요약에 수만 있었다), 그다음 실패. 최대 5대.
+const failNames = (results) => [...results.filter((r) => outcomeOf(r) === 'uncertain'), ...results.filter((r) => outcomeOf(r) === 'fail')].slice(0, 5)
+  .map((r) => `${t(r.name, 40)}(${outcomeOf(r) === 'uncertain' ? '결과 모름' : t(r.code, 24)})`).join(', ');
 
 /**
  * 키 로그인 설정을 시작한다(작업 — 1대씩 차례로). 서버 쪽 제한은 보호 장치 설정을 따른다(요청이 고르지 않는다).
@@ -828,7 +875,7 @@ export async function startKeyLogin({ servers, keyId, oncePassword = '', removeP
     onDone: (v) => {
       const c = countBy(v.results, outcomeOf);
       writeJobEvents([...jobServerEvents(evs), { kind: 'key-job-done', target: `키 로그인 설정 · ${key.name}`, by,
-        detail: `${v.total}대 — 확인 ${c.ok || 0} · 실패 ${c.fail || 0}${outcomeText(c)}${skipped.length ? ` · 시작 때 빠짐 ${skipped.length}` : ''}${c.fail ? ` — ${failNames(v.results)}` : ''}${v.cancelledBy ? ` · 멈춘 사람 ${v.cancelledBy}` : ''}` }]);
+        detail: `${v.total}대 — 확인 ${c.ok || 0} · 실패 ${c.fail || 0}${outcomeText(c)}${skipped.length ? ` · 시작 때 빠짐 ${skipped.length}` : ''}${c.fail || c.uncertain ? ` — ${failNames(v.results)}` : ''}${v.cancelledBy ? ` · 멈춘 사람 ${v.cancelledBy}` : ''}` }]);
     } });
   return r.ok ? { ...r, total: list.length, skipped } : r;
 }
@@ -876,7 +923,7 @@ export async function startKeyRevoke({ keyId, corp = '', servers = null, oncePas
     onDone: (v) => {
       const c = countBy(v.results, (x) => (x.ok ? (x.removed > 0 ? 'removed' : 'none') : outcomeOf(x)));
       writeJobEvents([...jobServerEvents(evs), { kind: 'key-revoke-done', corp: t(corp, 128), target: `${key.name}`, by,
-        detail: `${v.total}대 — 지움 ${c.removed || 0} · 줄 없음 ${c.none || 0} · 실패 ${c.fail || 0}${outcomeText(c)}${skipped.length ? ` · 빠짐 ${skipped.length}` : ''}${c.fail ? ` — ${failNames(v.results)}` : ''}` }]);
+        detail: `${v.total}대 — 지움 ${c.removed || 0} · 줄 없음 ${c.none || 0} · 실패 ${c.fail || 0}${outcomeText(c)}${skipped.length ? ` · 빠짐 ${skipped.length}` : ''}${c.fail || c.uncertain ? ` — ${failNames(v.results)}` : ''}` }]);
     } });
   return r.ok ? { ...r, total: list.length, skipped } : r;
 }
@@ -894,7 +941,11 @@ export function cancelKeyJob(id, { by = '' } = {}) {
  */
 function processLeftovers() {
   try {
-    const left = INF.peekLeftovers().filter((x) => !KL.jobView(String(x.jobId || '')));
+    const all = INF.peekLeftovers();
+    // 이 프로세스가 시작한 작업의 남은 줄(지우기 실패)은 중단이 아니다 — 끝난 것만 조용히 지운다(도는 중이면 둔다).
+    const mine = all.filter((x) => _myJobIds.has(String(x.jobId || '')) && !KL.jobView(String(x.jobId || ''))?.running);
+    if (mine.length) INF.clearLeftovers(mine);
+    const left = all.filter((x) => !_myJobIds.has(String(x.jobId || '')) && !KL.jobView(String(x.jobId || '')));
     if (!left.length) return;
     const w = ST.addEvents(left.slice(0, 50).map((x) => ({ kind: 'key-job-interrupted', corp: x.corp, target: `${x.server} · ${x.keyName}`, by: x.by,
       detail: `${x.kind === 'key-revoke' ? '키 거두기' : '키 로그인 설정'} 도중 포탈이 다시 시작됨 — 그 서버의 authorized_keys 를 확인하세요(작업 ${x.jobId})` })));
@@ -906,7 +957,8 @@ function processLeftovers() {
  * 작업 끝 사건 쓰기가 실패하면(디스크 가득 등) 버리지 않고 다음 점검 때 다시 쓴다 · 콘솔에 남긴다(2회차 C2-4 — 그 작업의 사건이 조용히 모두 사라졌다).
  */
 let _pendingJobEvents = [];
-function writeJobEvents(list) {
+function writeJobEvents(list0) {
+  const at = Date.now(); const list = list0.map((e) => (Number.isFinite(e?.at) ? e : { ...e, at }));   // 다시 쓸 때 처음 시각을 지킨다
   const w = ST.addEvents(list);
   if (w.ok) return;
   _pendingJobEvents = _pendingJobEvents.concat(list).slice(-200);
@@ -946,7 +998,9 @@ export async function runSshAccessScan({ now = Date.now() } = {}) {
     const events = [];
     notePair({ by: '' });
     // 승인 요청 만료 확정은 **맨 먼저** — 뒤 단계(대조 · 받는 곳)가 던져도 이 회차가 만료를 확정하고 대기 키를 정리한다(점검 C 의심 S-3).
-    for (const r of TP.expireSweep({ now })) events.push({ kind: 'approval-decided', corp: r.corp, target: r.title, detail: r.interrupted ? '승인 뒤 실행 결과가 적히지 않음 — 실행됐는지 확인 필요' : '시한(24시간)이 지나 사라짐' });
+    // 만료 사건은 바로 쓴다 — 이 회차가 15분을 넘겨 버려지면 아래 몰아 쓰기가 일어나지 않아, 만료 확정은 됐는데 사건이 사라졌다(2회차 반증). 실패하면 다음 점검이 다시 쓴다.
+    { const exp = TP.expireSweep({ now }).map((r) => ({ kind: 'approval-decided', corp: r.corp, target: r.title, detail: r.interrupted ? '승인 뒤 실행 결과가 적히지 않음 — 실행됐는지 확인 필요' : '시한(24시간)이 지나 사라짐' }));
+      if (exp.length) writeJobEvents(exp); }
     let drift = { changed: [], added: [], accountsChanged: [] }; let ib = { items: [] }; let regErr = null; let servers = [];
     const seenDrift = []; const seenInbox = [];
     try {

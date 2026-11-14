@@ -4,7 +4,8 @@
  *  · 결과에 비밀 · 출력 원문을 싣지 않는다(종류 · 짧은 문구 · OS 이름 꼴만).
  */
 /** 저장 항목 연결 시험(한 번 · 짧은 시한). 결과에 비밀 · 출력 원문을 싣지 않는다(종류 · 짧은 문구만). */
-export async function testSavedOs(s0) {
+/** @param {{signal?:AbortSignal}} [o]  signal — 부르는 쪽의 시한이 지나면 세션을 실제로 끊는다(2회차 반증 R2R-7 — 키 고르기 시한이 지나도 접속이 남았다). */
+export async function testSavedOs(s0, { signal } = {}) {
   const { resolveOsAuth } = await import('./refs.js');
   const a = resolveOsAuth(s0, { feature: 'conn-test' });   // v3.9.0: 사람이 누르는 연결 시험 — 허용 기능과 무관(폴더 · 사용 중지는 본다)
   if (!a.ok) return { ok: false, kind: 'auth-unresolved', reason: a.error };
@@ -13,7 +14,7 @@ export async function testSavedOs(s0) {
   const { isAuthFailureText, isPeerRejectText } = await import('../../util/authGuard.js');
   const t0 = Date.now();
   try {
-    const out = await withSsh({ host: String(s0.host), port: Number(s0.port) || 22, username: a.username, password: a.password || '', privateKey: a.privateKey, passphrase: a.passphrase, readyTimeout: 15_000 },
+    const out = await withSsh({ host: String(s0.host), port: Number(s0.port) || 22, username: a.username, password: a.password || '', privateKey: a.privateKey, passphrase: a.passphrase, readyTimeout: 15_000, ...(signal ? { signal } : {}) },
       async ({ exec }) => exec('uname -s', 10_000));
     const os = String(out?.stdout || '').trim().slice(0, 32);
     return { ok: true, kind: 'ok', authKind: a.authKind, os: /^[A-Za-z0-9_.-]{1,32}$/.test(os) ? os : '', ms: Date.now() - t0 };

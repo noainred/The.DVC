@@ -101,9 +101,10 @@ const LOCK = [
   '    fi',
   '    held=1; break',
   '  fi',
-  // mkdir 이 실패했는데 자물쇠 폴더가 없다: 쓸 수 없는 폴더면 바로 notwritable, 아니면 그 사이 보유자가 놓은 것일 수 있어 다시 해 본다(1회차 반증 7 ① — 헛 notwritable).
+  // 쓸 수 없는 폴더면 남은 자물쇠가 있어도 기다리지 않는다(2회차 반증 R2R-4 — 옛 자물쇠가 남은 읽기 전용 ~/.ssh 에서 늘 locked).
+  '  [ -w "$d" ] || { echo "##KL fail notwritable"; exit 3; }',
+  // mkdir 이 실패했는데 자물쇠 폴더가 없다: 그 사이 보유자가 놓은 것일 수 있어 다시 해 본다(1회차 반증 7 ① — 헛 notwritable).
   '  if [ ! -d "$lk" ]; then',
-  '    [ -w "$d" ] || { echo "##KL fail notwritable"; exit 3; }',
   '    nf=$((nf + 1)); [ "$nf" -ge 5 ] && { echo "##KL fail write"; exit 3; }',
   '    continue',
   '  fi',
@@ -172,6 +173,10 @@ const COMMIT = [
   'owns || { echo "##KL fail locklost"; exit 3; }',
   // 자기 시한(2회차 B1): 포탈이 이미 ‘결과 모름’ 으로 넘어갔을 수 있다 — 늦게 바꾸지 않는다.
   'if late; then echo "##KL fail slow"; exit 3; fi',
+  // 아직 포탈이 듣고 있는가(2회차 반증 R2R-3 — 자기 시한은 스크립트 시작부터만 잰다: 셸 기동 · 홈 자동 마운트로 늦게 시작하면 포탈이 포기한 뒤 바꿀 수 있었다).
+  //   포탈이 접속을 끊었으면 이 쓰기가 SIGPIPE/EPIPE 로 실패해 바꾸지 않고 끝난다(sshd 가 세션의 출력 관을 닫는다 — 실제 sshd 에서는 확인하지 못함 · 추정).
+  //   이 표지 뒤로 끝 표지가 없으면 ‘결과 모름’ 이다(begun 과 같음).
+  'echo "##KL commit" || exit 3',
   'if [ -e "$f" ]; then [ "$(cksum < "$f")" = "$c0" ] || { echo "##KL fail changed"; exit 3; }; else [ -z "$c0" ] || { echo "##KL fail changed"; exit 3; }; fi',
   'mv -f "$tmp" "$f" || { echo "##KL fail rename"; exit 3; }',
   'if command -v restorecon >/dev/null 2>&1; then if [ -n "${mkd:-}" ]; then restorecon -F "$d" >/dev/null 2>&1; fi; restorecon -F "$f" >/dev/null 2>&1; fi',
@@ -206,7 +211,7 @@ export function installScript({ publicKey, keyId, line, replace = false } = {}) 
     '}',
     // 바꿀 것이 없으면(이미 있음) 자물쇠 없이 끝난다 — 쓸 수 없는 ~/.ssh(root 소유)에서도 ‘있음’ 으로 답한다(1회차 축 B 재확인). 바꿀 것이 있으면 자물쇠 안에서 다시 판정한다.
     // 단 **자물쇠 폴더가 없을 때만**(2회차 B1 — 누가 바꾸는 중인데 그 앞의 파일을 보고 답했다). 쓸 수 없는 ~/.ssh 에는 자물쇠가 생길 수 없으니 그 경우는 그대로 빠르다.
-    'if [ ! -d "$lk" ]; then cls; fi',
+    'if [ ! -d "$lk" ] || [ ! -w "$d" ]; then cls; fi',
     ...LOCK,
     ...C0,
     'cls',
@@ -248,7 +253,7 @@ export function rollbackScript({ line, oldB64 = '' } = {}) {
     'if [ ! -d "$d" ]; then echo "##KL none"; exit 0; fi',
     // 바꿀 것이 없으면(파일 없음 · 그 줄 없음) 자물쇠 없이 답한다 — 쓸 수 없는 ~/.ssh 에서도(1회차 반증 5). 있으면 자물쇠 안에서 다시 본다(B2).
     // 빠른 답은 자물쇠 폴더가 없을 때만(2회차 B1 — 다른 쪽이 바꾸는 중이면 기다렸다 다시 본다).
-    'if [ ! -d "$lk" ]; then',
+    'if [ ! -d "$lk" ] || [ ! -w "$d" ]; then',
     '  if [ ! -e "$f" ]; then echo "##KL none"; exit 0; fi',
     `  st=$(awk -v L="$L" '${CNT}' "$f") || { echo "##KL fail read"; exit 3; }`,
     '  set -- $st; if [ "$2" -eq 0 ]; then echo "##KL restored 0"; exit 0; fi',
@@ -290,7 +295,7 @@ export function removeScript({ publicKey, keyId } = {}) {
     'if [ ! -d "$d" ]; then echo "##KL none"; exit 0; fi',
     // 지울 것이 없으면 자물쇠 없이 답한다(1회차 반증 5 — root 소유 ~/.ssh 의 비 root 계정에서 ‘실패’ 로 답했다). 있으면 자물쇠 안에서 다시 본다(B2).
     // 빠른 답은 **자물쇠 폴더가 없을 때만**(2회차 B1 — 시한을 넘긴 넣기가 서버에서 아직 자물쇠를 쥐고 있는데 긴급 거두기가 ‘줄 없음’ 으로 끝나고, 그 뒤 키가 들어갔다).
-    'if [ ! -d "$lk" ]; then',
+    'if [ ! -d "$lk" ] || [ ! -w "$d" ]; then',
     '  if [ ! -e "$f" ]; then echo "##KL none"; exit 0; fi',
     `  st=$(awk -v b="$B" -v m="$M" '${CNT}' "$f") || { echo "##KL fail read"; exit 3; }`,
     '  set -- $st; if [ "$2" -eq 0 ]; then echo "##KL removed 0 unmarked $3"; exit 0; fi',
@@ -320,7 +325,7 @@ export function parseMarker(stdout) {
   const lines = String(stdout || '').slice(-200_000).split('\n').map((x) => x.trim()).filter((x) => x.startsWith('##KL '));
   const last = lines[lines.length - 1] || '';
   const w = last.split(' ');
-  if (w[1] === 'begin') return { kind: 'begun' };   // 시작했는데 끝 표지가 없다 — 결과 모름(B5)
+  if (w[1] === 'begin' || w[1] === 'commit') return { kind: 'begun' };   // 시작했는데(또는 바꾸기 직전인데) 끝 표지가 없다 — 결과 모름(B5 · 2회차 반증 R2R-3)
   if (w[1] === 'ip') return { kind: 'ip', ip: IP_RE.test(w[2] || '') ? w[2] : '' };
   if (w[1] === 'added' || w[1] === 'present-marked' || w[1] === 'present-unmarked') return { kind: w[1], unmarked: num(w[2]), custom: num(w[3]), exact: num(w[4]), loose: num(w[5]) };
   if (w[1] === 'replaced') return { kind: 'replaced', unmarked: num(w[2]), custom: num(w[3]), old: w[4] && B64_RE.test(w[4]) && w[4].length <= MAX_OLD_B64 ? w[4] : null };
@@ -338,7 +343,7 @@ export const FAIL_TEXT = Object.freeze({
   unreadable: 'authorized_keys 를 읽을 수 없어(권한) 건드리지 않았습니다.', notwritable: 'authorized_keys(또는 ~/.ssh)에 이 계정이 쓸 수 없어(관리자가 잠가 둠) 건드리지 않았습니다.', read: 'authorized_keys 를 읽지 못했습니다.',
   write: '임시 파일을 쓰지 못했습니다(권한 · 디스크) — 원래 파일은 그대로입니다.', verify: '새로 쓴 내용이 예상과 달라(디스크 가득 등) 바꾸지 않았습니다 — 원래 파일은 그대로입니다.',
   rename: '새 파일로 바꾸지 못했습니다 — 원래 파일은 그대로입니다.',
-  locked: '다른 작업이 이 서버의 authorized_keys 를 바꾸는 중이라 15초 기다리다 그만뒀습니다 — 원래 파일은 그대로입니다. 잠시 뒤 다시 하세요(남은 자물쇠 ~/.ssh/.authorized_keys.portal.lock 는 주인이 없으면 다음 작업이 치웁니다).',
+  locked: '다른 작업이 이 서버의 authorized_keys 를 바꾸는 중이라 기다리다 그만뒀습니다 — 원래 파일은 그대로입니다. 잠시 뒤 다시 하세요(남은 자물쇠 ~/.ssh/.authorized_keys.portal.lock 는 주인이 없으면 다음 작업이 치웁니다).',
   locklost: '작업 중에 자물쇠를 다른 쪽이 가져가 바꾸지 않았습니다 — 원래 파일은 그대로입니다. 잠시 뒤 다시 하세요.',
   changed: '그 사이 다른 쪽(사람 · 구성 관리 도구)이 authorized_keys 를 바꿔 바꾸지 않았습니다 — 원래 파일은 그대로입니다. 다시 하세요.',
   slow: `서버에서 스크립트가 시작한 지 ${SCRIPT_DEADLINE_S}초 안에 바꾸기까지 가지 못해 멈췄습니다(서버가 느림 · 자물쇠를 오래 기다림) — 원래 파일은 그대로입니다. 잠시 뒤 다시 하세요.`,

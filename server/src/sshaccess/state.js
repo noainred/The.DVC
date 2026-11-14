@@ -120,6 +120,7 @@ function draft() { const d = load(); return { stops: Object.assign(Object.create
 function commit(next) {
   // 이번 쓰기에 실린 사건만 알린다 — 쓰기에 실패하면 버린다(쓰이지 않은 사건을 다음 쓰기 때 알리지 않게).
   const sent = pendingNotify; pendingNotify = [];
+  const lost = pendingLost; pendingLost = [];
   let normed;
   try { normed = norm(next); } catch (e) { return { ok: false, code: 'bad-state', status: 500, reason: String(e?.message || e).slice(0, 120) }; }
   try {
@@ -130,7 +131,8 @@ function commit(next) {
   }
   cache = normed;
   loadErr.clear();
-  if (sent.length) for (const fn of listeners) { try { fn(sent); } catch { /* 알림 실패는 쓰기 결과를 바꾸지 않는다 */ } }
+  if (lost.length) console.warn(`[ssh-access] 사건 ${lost.length}건이 기록 상한(${MAX_EVENTS})에 밀려 남지 않았습니다 — 메일에는 수로 밝힙니다.`);
+  if (sent.length || lost.length) for (const fn of listeners) { try { fn(sent, { lost }); } catch { /* 알림 실패는 쓰기 결과를 바꾸지 않는다 */ } }
   return { ok: true };
 }
 
@@ -163,10 +165,13 @@ export function listStops() { const d = load(); return d ? Object.entries(d.stop
 const listeners = new Set();
 export function onEvents(fn) { if (typeof fn === 'function') listeners.add(fn); return () => listeners.delete(fn); }
 let pendingNotify = [];
+let pendingLost = [];   // 이번 쓰기에서 기록 상한에 밀려 남지 못한 새 사건(2회차 반증 R2R-10 — 기록 · 메일 수에서 말없이 빠졌다)
 function pushEvents(d, list, now) {
   const fresh = [];
   for (const ev of list) {
-    const e = { at: now, kind: t(ev.kind, 40), corp: t(ev.corp, 128), target: t(ev.target, 128), by: t(ev.by, 64), detail: t(ev.detail, 300) };
+    // 다시 쓰는 작업 끝 사건은 처음 시각을 지킨다(2회차 반증 — 다음 점검 때 다시 쓰면 최대 10분 늦게 찍혔다). 미래 시각은 받지 않는다.
+    const at = Number.isFinite(ev.at) && ev.at > 0 && ev.at <= now ? ev.at : now;
+    const e = { at, kind: t(ev.kind, 40), corp: t(ev.corp, 128), target: t(ev.target, 128), by: t(ev.by, 64), detail: t(ev.detail, 300) };
     d.events.push(e); fresh.push(e);
   }
   // 넘치면 **이번에 넣지 않은** 사건 가운데 덜 중요한 오래된 것부터 버린다(받는 곳 새 파일이 몰려도 사용 중지 · 바꿔치기 사건이 밀려나지 않게 — 점검 C-7).
@@ -183,7 +188,7 @@ function pushEvents(d, list, now) {
   if (d.events.length > MAX_EVENTS) d.events.splice(0, d.events.length - MAX_EVENTS);   // 한 번에 상한보다 많이 넣은 경우만
   // 알림은 **기록에 남은** 사건만(점검 C-3 부수).
   const kept = new Set(d.events);
-  for (const e of fresh) if (kept.has(e)) pendingNotify.push(e);
+  for (const e of fresh) { if (kept.has(e)) pendingNotify.push(e); else pendingLost.push(e); }
 }
 
 /**
@@ -197,6 +202,17 @@ export function setCorpStop(corp, { by = '', reason = '', servers = [], now = Da
   if (!Object.hasOwn(d.stops, c) && Object.keys(d.stops).length >= MAX_STOPS) return { ok: false, code: 'too-many', reason: '사용 중지 기록이 너무 많습니다.' };
   d.stops[c] = { at: now, by: t(by, 64), reason: t(reason, 300), serverIds: strList(servers.map((s) => s?.id), MAX_STOP_SERVERS), addrs: strList(servers.map((s) => s?.addr), MAX_STOP_SERVERS) };
   pushEvents(d, [{ kind: 'corp-stop', corp: c, by, detail: `${t(reason, 240)}${servers.length ? ` · 서버 ${servers.length}대` : ''}` }], now);
+  return commit(d);
+}
+/** 이미 걸린 중지 기록에 그 뒤 등록된 서버를 더한다(사건은 쌓지 않는다 — 2회차 반증 R2R-6). 늘리기만(엄한 쪽). */
+export function addStopServers(corp, servers = []) {
+  const u = unreadable(); if (u) return u;
+  const c = t(corp, 128);
+  const d = draft();
+  if (!c || !Object.hasOwn(d.stops, c)) return { ok: false, code: 'not-stopped', status: 404, reason: '이 법인은 사용 중지 상태가 아닙니다.' };
+  const cur = d.stops[c];
+  cur.serverIds = strList([...(cur.serverIds || []), ...servers.map((s) => s?.id)], MAX_STOP_SERVERS);
+  cur.addrs = strList([...(cur.addrs || []), ...servers.map((s) => s?.addr)], MAX_STOP_SERVERS);
   return commit(d);
 }
 export function clearCorpStop(corp, { by = '', now = Date.now() } = {}) {
@@ -237,16 +253,18 @@ export function markPairSeen({ by = '', now = Date.now() } = {}) {
   pushEvents(d, [{ kind: 'guard-changed', by, detail: '승인할 수 있는 설정 소유자 둘을 확인 — 이제 두 사람 승인은 혼자 끌 수 없습니다' }], now);
   return commit(d);
 }
+/** 바꾸기 결과에 싣는 보호 장치 — 판정용 seenAd(AD 소유자 신원 목록)는 응답 · 승인 결과에 싣지 않는다(2회차 반증 R2R-8). */
+const pubGuards = (g) => { const { seenAd: _seen, ...rest } = g || {}; return rest; };
 /** 보호 장치 바꾸기(호출부가 권한 · OTP · 두 사람 승인을 거친 뒤). 아는 키 · 참/거짓만. */
 export function setGuards(patch = {}, { by = '', now = Date.now() } = {}) {
   const u = unreadable(); if (u) return u;
   const d = draft();
   const changed = [];
   for (const k of GUARD_KEYS) if (typeof patch[k] === 'boolean' && patch[k] !== d.guards[k]) { d.guards[k] = patch[k]; changed.push(`${k}=${patch[k] ? '켬' : '끔'}`); }
-  if (!changed.length) return { ok: true, guards: { ...d.guards }, changed: 0 };
+  if (!changed.length) return { ok: true, guards: pubGuards(d.guards), changed: 0 };
   pushEvents(d, [{ kind: 'guard-changed', by, detail: changed.join(' · ') }], now);
   const c = commit(d);
-  return c.ok ? { ok: true, guards: { ...d.guards }, changed: changed.length } : c;
+  return c.ok ? { ok: true, guards: pubGuards(d.guards), changed: changed.length } : c;
 }
 
 /** 키 보안 사건 — 여러 개를 한 번에 쓴다(사건마다 파일 전체를 다시 쓰지 않게). 쓰기 실패는 호출부를 막지 않는다(감사 로그가 원본이다). */

@@ -163,7 +163,7 @@ export function registerSshAccess(api) {
   });
 
   /* ── 서버 ───────────────────────────────────────────────────────── */
-  api.post('/settings/ssh-access/servers/:id/key', ...ownerWrite, async (req, res) => {
+  api.post('/settings/ssh-access/servers/:id/key', ...write((req) => SVC.prechecks.chooseKey({ serverId: req.params.id })), async (req, res) => {
     const b = bodyOf(req);
     const r = await SVC.chooseServerKey({ serverId: t(req.params.id, 64), keyId: t(b.keyId, 32), expectAddr: typeof b.expectAddr === 'string' ? t(b.expectAddr, 400) : null, by: who(req) });
     audit(req, 'ssh-access.server.key', req.params.id, { keyId: t(b.keyId, 32) || 'corp-default', ok: !!r.ok, code: r.code, test: r.test?.kind, reverted: r.reverted, revertFailed: r.revertError ? true : undefined });
@@ -189,7 +189,7 @@ export function registerSshAccess(api) {
   });
 
   /* ── 법인 사용 중지(긴급 조치) ───────────────────────────────────── */
-  api.post('/settings/ssh-access/corps/:corp/stop', ...ownerWrite, async (req, res) => {
+  api.post('/settings/ssh-access/corps/:corp/stop', ...write((req) => SVC.prechecks.stop({ corp: req.params.corp })), async (req, res) => {
     const b = bodyOf(req);
     const r = await SVC.stopCorp(t(req.params.corp, 128), { by: who(req), reason: t(b.reason, 300) });
     audit(req, 'ssh-access.corp.stop', req.params.corp, { ok: !!r.ok, code: r.code, reason: t(b.reason, 120), servers: r.servers });
@@ -209,7 +209,7 @@ export function registerSshAccess(api) {
     audit(req, 'ssh-access.inbox.approve', t(b.relPath, 128), r.ok ? { fingerprint: r.key.fingerprint, name: r.key.name, plaintextRemoved: r.plaintextRemoved, ok: true, pending: r.pending ? r.request.id : undefined } : { ok: false, code: r.code });
     send(res, r, r.pending ? 202 : 200);
   });
-  api.post('/settings/ssh-access/inbox/discard', ...ownerWrite, (req, res) => {
+  api.post('/settings/ssh-access/inbox/discard', ...write((req) => SVC.prechecks.inboxPath({ relPath: bodyOf(req).relPath })), (req, res) => {
     const b = bodyOf(req);
     const r = SVC.discardInbox({ relPath: typeof b.relPath === 'string' ? b.relPath.slice(0, 400) : '', sha: t(b.sha, 80), by: who(req) });
     audit(req, 'ssh-access.inbox.discard', t(b.relPath, 128), { ok: !!r.ok, code: r.code });

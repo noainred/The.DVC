@@ -66,7 +66,9 @@ let hooked = false;
 export function startKeyNotify() {
   if (hooked) return;
   hooked = true;
-  onEvents((events) => {
+  onEvents((events, { lost = [] } = {}) => {
+    // 기록 상한에 밀려 남지 못한 사건도 ‘외 N건’ 에 센다(2회차 반증 R2R-10).
+    dropped += (Array.isArray(lost) ? lost : []).filter((e) => MAIL_EVENTS[e?.kind]).length;
     const pick = events.filter((e) => MAIL_EVENTS[e.kind]);
     if (!pick.length) return;
     queue = queue.concat(pick);   // 전개 push 를 쓰지 않는다(audit2603a 스윕)

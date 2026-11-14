@@ -55,6 +55,9 @@ export function execTimeoutMs(v, { long = false } = {}) {
 export const SSH_HOSTKEY_ERROR_CODE = 'SSH_HOSTKEY_UNTRUSTED';
 /** passwordOnly 인데 서버가 비밀번호를 받는 방식(password · keyboard-interactive)을 내놓지 않았다 — 비밀번호를 보내지 않았다(인증 거부가 아니다). */
 export const SSH_NO_PASSWORD_METHOD = 'SSH_NO_PASSWORD_METHOD';
+/** passwordOnly 대화형: 비밀번호를 묻는 칸의 글(여러 말) · OTP/코드 칸의 글. 'Passcode' 는 비밀번호가 아니다(OTP 쪽 — pass 만으로 고르지 않는다). */
+export const PW_PROMPT_RE = /password|passwort|passord|wachtwoord|mot de passe|contrase(?:n|ñ)a|senha|parola|has[lł]o|пароль|암호|비밀번호|パスワード|密码|密碼/i;
+export const OTP_PROMPT_RE = /passcode|one[- ]?time|\botp\b|token|verification|verify|\bcode\b|\bpin\b|duo|factor|second|인증|코드|확인 번호|認証|验证码|驗證碼/i;
 
 /** ssh2 hostVerifier 가 주는 키(Buffer — SSH wire 형식 공개키) → 'SHA256:<base64>'(OpenSSH 표기). */
 export function sshHostKeyFingerprint(key) {
@@ -229,7 +232,10 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
           //   가리는 칸이 끝내 없으면(OTP 만 묻는 서버) 비밀번호를 보내지 않은 것이므로 ‘비밀번호 방식 없음’ 으로 따로 말한다(거부로 세지 않음).
           return cb({ type: 'keyboard-interactive', username, prompt: (_n, _i, _l, prompts, finish) => {
             const list = Array.isArray(prompts) ? prompts : [];
-            const at = answered ? -1 : list.findIndex((p) => p && p.echo === false);
+            // 가리는 칸 가운데 비밀번호를 묻는 글이 있는 칸을 먼저, 없으면 OTP · 코드 류가 아닌 가리는 칸(2회차 반증 R2R-11 — 가리는 OTP 칸에 비밀번호가 갔다).
+            const hidden = list.map((p, i) => ({ i, text: String(p?.prompt ?? '').slice(0, 300), hid: !!p && p.echo === false })).filter((x) => x.hid);
+            const pick = hidden.find((x) => PW_PROMPT_RE.test(x.text)) || hidden.find((x) => !OTP_PROMPT_RE.test(x.text));
+            const at = answered || !pick ? -1 : pick.i;
             if (at >= 0) { answered = true; noPwMethod = ''; }   // 앞 질의가 OTP 만 물었어도 이번에 비밀번호를 보냈다 — 거부면 거부다
             else if (!answered && list.length > 0) noPwMethod = '서버의 대화형 로그인이 비밀번호 칸(입력을 가리는 칸)을 묻지 않았습니다(OTP 등만 물음) — 비밀번호를 보내지 않았습니다';
             finish(list.map((_p, i) => (i === at ? password || '' : '')));

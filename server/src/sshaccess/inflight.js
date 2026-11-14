@@ -22,13 +22,14 @@ const MAX = 50;
 const t = (v, max = 128) => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max);
 let cache = null;
 
+/** → 기록 배열, 또는 읽기 오류면 null(그때는 기록하지 않는다 — 작업은 계속 돈다 · 원본을 덮지 않는다). */
 function load() {
   if (cache) return cache;
   let text;
   try {
     if (!fs.existsSync(FILE())) { cache = []; return cache; }
     text = fs.readFileSync(FILE(), 'utf8');
-  } catch { return []; }   // 읽기 오류(권한 등)는 손상이 아니다 — 원본을 두고 다음에 다시 읽는다(2회차 C2-8)
+  } catch { return null; }   // 읽기 오류(권한 · EISDIR 등)는 손상이 아니다 — 원본을 두고 다음에 다시 읽는다(2회차 C2-8)
   try {
     const j = JSON.parse(text);
     cache = Array.isArray(j?.items) ? j.items.filter((x) => x && typeof x === 'object').slice(-MAX) : [];
@@ -49,7 +50,8 @@ function save() {
 
 /** 그 서버를 바꾸기 시작함(같은 작업 · 같은 서버는 하나). */
 export function markStart({ jobId, kind, keyName, sid, server, corp, by }, { now = Date.now() } = {}) {
-  load();
+  // 못 읽으면 기록만 못 한다(2회차 반증 R2R-1 — cache 가 null 인 채 filter 를 불러 **모든 키 작업이 오류**로 끝났다. 긴급 거두기 포함).
+  if (!load()) return false;
   // 같은 작업 · 같은 서버(등록부 id — 이름은 법인끼리 겹칠 수 있다)는 하나.
   cache = cache.filter((x) => !(x.jobId === t(jobId, 24) && x.sid === t(sid, 64)));
   cache.push({ jobId: t(jobId, 24), kind: t(kind, 16), keyName: t(keyName, 64), sid: t(sid, 64), server: t(server), corp: t(corp), by: t(by, 64), at: now });
@@ -58,16 +60,16 @@ export function markStart({ jobId, kind, keyName, sid, server, corp, by }, { now
 }
 /** 그 서버가 끝남(성공 · 실패 무관 — 결과는 작업 기록에 있다). */
 export function markEnd({ jobId, sid }) {
-  load();
+  if (!load()) return false;
   const before = cache.length;
   cache = cache.filter((x) => !(x.jobId === t(jobId, 24) && x.sid === t(sid, 64)));
   return before === cache.length ? true : save();
 }
 /** 기동 때 — 남은 기록(지난 실행이 바꾸던 중에 멈춘 서버)을 돌려준다. 비우지 않는다 — 사건을 쓴 뒤에 clearLeftovers(1회차 반증 10 — 먼저 비워 사건 쓰기가 실패하면 기록이 사라졌다). */
-export function peekLeftovers() { cache = null; return load().slice(); }
+export function peekLeftovers() { cache = null; return (load() || []).slice(); }
 /** 사건으로 옮긴 뒤 그 항목들만 지운다(그 사이 새로 생긴 기록은 남긴다). */
 export function clearLeftovers(items) {
-  load();
+  if (!load()) return false;
   const gone = new Set((Array.isArray(items) ? items : []).map((x) => `${x.jobId}|${x.sid}`));
   cache = cache.filter((x) => !gone.has(`${x.jobId}|${x.sid}`));
   return save();
