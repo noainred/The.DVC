@@ -226,6 +226,13 @@ adminRouter.post('/backup/restore/:name', adminOnly, requireSettingsOwner, async
     // v2.769(점검 R4-D1-2): 적용 때 되살아날 엣지 토큰·전원 재로그인 같은 경고를 문구에도 싣는다(응답 JSON 에만 두면 화면이 말하지 않는다).
     // v2.770(점검 R5-E1-2): 복원 경고는 `{file, reason}` 객체다(service.js restoreCentral·stagedRestore — audit2769b 가 모양을 고정) —
     //   예전 join 은 '주의: [object Object]' 를 냈다. 백업 생성(service.js createBackup)은 문자열 경고라 두 모양을 모두 받는다.
+    // v3.10.0(5회차 D5-1): SSH 키 저장소 합치기 결과를 문구에도 — 승인 대기 키의 id 를 지금 값으로 지킨 키(key-id:)는 그 키를 쓰던 서버가 옛 id 를 가리키므로
+    //   승인 뒤 ‘키 고르기’ 로 다시 묶어야 한다 · 되살리지 못한 키 · 계정 비밀은 수만(응답 envKeysDropped 에 이름).
+    { const sshDrop = (Array.isArray(r.envKeysDropped) ? r.envKeysDropped : []).filter((d) => String(d).startsWith('ssh-keys.json:'));
+      const ids = sshDrop.filter((d) => String(d).includes(':key-id:')).length;
+      const other = sshDrop.length - ids;
+      if (ids) parts.push(`SSH 키 ${ids}개는 지금 승인 대기 중이라 지금 id 를 지켰습니다 — 백업에서 그 키를 쓰던 서버는 승인 뒤 설정 › 보안 › SSH 공용 접속의 ‘키 고르기’ 로 다시 묶으세요.`);
+      if (other) parts.push(`SSH 키 저장소에서 되살리지 못한 항목 ${other}개(개인키 · 비밀은 번들에 없음 — 응답의 envKeysDropped 에 이름).`); }
     const warnTexts = Array.isArray(r.warnings) ? r.warnings.map(backupWarnText).filter(Boolean) : [];
     if (warnTexts.length) parts.push(`주의: ${warnTexts.join(' · ')}`);
     parts.push('복원 전 현재 설정은 자동 백업(pre-restore)됨.');

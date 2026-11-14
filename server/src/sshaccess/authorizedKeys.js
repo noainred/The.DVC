@@ -83,7 +83,7 @@ export function parseReadOutput(stdout) {
   if (head === '##AK missing') return { ok: true, present: false, keys: [], bad: 0, truncated: 0 };
   if (head === '##AK unreadable') return { ok: false, code: 'unreadable', reason: 'authorized_keys 가 있지만 이 계정으로 읽을 수 없습니다(권한).' };
   // 홈 · ~/.ssh 를 이 계정으로 따라갈 수 없다 — 파일이 있는지 모른다(2회차 반증 R2R-9 — ‘파일 없음(키 0개)’ 으로 말했다).
-  if (head === '##AK unreachable') return { ok: false, code: 'unreadable', reason: '홈 또는 ~/.ssh 폴더를 이 계정으로 열 수 없습니다(권한) — authorized_keys 가 있는지 알 수 없습니다.' };
+  if (head === '##AK unreachable') return { ok: false, code: 'unreadable', reason: '홈 또는 ~/.ssh 폴더를 이 계정으로 열 수 없습니다(권한 · 또는 따라갈 수 없는 심볼릭 링크) — authorized_keys 가 있는지 알 수 없습니다.' };
   if (head === '##AK notfile') return { ok: false, code: 'notfile', reason: 'authorized_keys 가 일반 파일이 아니거나 따라갈 수 없는 링크입니다.' };
   if (head !== '##AK present') return { ok: false, reason: '읽기 명령의 출력이 예상과 다릅니다(셸이 다르거나 로그인 메시지가 섞임).' };
   return { ok: true, present: true, ...parseAuthorizedKeys(nl >= 0 ? s.slice(nl + 1) : '') };

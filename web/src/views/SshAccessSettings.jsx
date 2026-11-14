@@ -290,7 +290,7 @@ export default function SshAccessSettings() {
       {(v.storeUnreadable || v.registryUnreadable || v.stateUnreadable) && (
         <p className="ssa-banner" style={{ color: toneVar('bad') }}>
           {v.storeUnreadable ? 'SSH 키 저장소(ssh-keys.json)를 읽지 못했습니다. ' : ''}{v.registryUnreadable ? 'OS 계정 등록부(bm-storage.json)를 읽지 못했습니다. ' : ''}
-          {v.stateUnreadable ? '상태 파일(ssh-access-state.json)을 읽지 못해 모든 키 접속을 멈췄습니다. ' : ''}손상 보존본(*.corrupt.*)을 확인하세요.
+          {v.stateUnreadable ? '상태 파일(ssh-access-state.json)을 읽지 못해 모든 키 접속을 멈췄습니다. ' : ''}파일 권한(읽기 오류) 또는 손상 보존본(*.corrupt.*)을 확인하세요.
         </p>
       )}
       <div className="ssa-kpis">
@@ -1174,7 +1174,7 @@ function SecurityTab({ v, corpName, reload, say, me = '', jobsUi }) {
       </section>
       <section className="ssa-sec">
         <div className="ssa-acts"><h4>승인 대기 — {v.approvalsUnreadable ? '읽지 못함' : `${apprPending.length}건`}</h4><span className="ssa-sub">{authOff ? '이 설치는 인증이 꺼져 있어 승인 · 돌려보내기를 받지 않습니다(남은 요청은 시한이 지나면 사라집니다)' : '두 사람 승인 — 요청한 사람이 아닌 설정 소유자가 본인 OTP 로 승인해야 실행됩니다'} · 남은 시간은 화면을 읽은 시각({dateTime(v.at)}) 기준</span></div>
-        {v.approvalsUnreadable && <p className="ssa-banner" style={{ color: toneVar('bad') }}>승인 기록 파일(approvals.json)을 읽지 못해 요청 · 승인을 받지 않습니다 — 손상 보존본(approvals.json.corrupt.*)을 확인하세요. 아래 목록은 비어 있는 것이 아니라 읽지 못한 것입니다.</p>}
+        {v.approvalsUnreadable && <p className="ssa-banner" style={{ color: toneVar('bad') }}>승인 기록 파일(approvals.json)을 읽지 못해 요청 · 승인을 받지 않습니다 — 파일 권한(읽기 오류) 또는 손상 보존본(approvals.json.corrupt.*)을 확인하세요. 아래 목록은 비어 있는 것이 아니라 읽지 못한 것입니다.</p>}
         {!v.approvalsUnreadable && (
           <STable minWidth={820} className="ssa-t ssa-appr">
             <thead><tr><th>종류</th><th>대상</th><th>요청한 사람</th><th>요청 시각</th><th>남은 시간</th><th>상태</th><th data-nosort>동작</th></tr></thead>
@@ -1273,7 +1273,7 @@ function SecurityTab({ v, corpName, reload, say, me = '', jobsUi }) {
         <section className="ssa-sec">
           <h4>파일을 확인한 뒤 다시 읽기</h4>
           <p className="ssa-note">
-            {v.stateUnreadable ? '상태 파일을 읽지 못해 모든 키 접속을 멈췄습니다. 손상 보존본(ssh-access-state.json.corrupt.*)을 보고 파일을 고친 뒤 다시 읽으세요. ' : ''}
+            {v.stateUnreadable ? '상태 파일을 읽지 못해 모든 키 접속을 멈췄습니다. 파일 권한(읽기 오류) 또는 손상 보존본(ssh-access-state.json.corrupt.*)을 보고 고친 뒤 다시 읽으세요. ' : ''}
             {outside ? '키 저장소 파일이 포탈 밖에서 바뀌었습니다. 누가 왜 바꿨는지 확인한 뒤에만 받아들이세요 — 받아들이면 디스크 내용이 새 기준이 되고, 바뀐 키도 다시 쓰입니다.' : ''}
           </p>
           <div className="ssa-form ssa-inline">

@@ -4184,7 +4184,7 @@ test('㉓-e 서버에서 키 읽기 · 대화형 칸 고르기(2회차 반증 R2
   assert.match(out, /^##AK unreachable\n?$/, `${roX.how}: ${out}`);
   const p = AK.parseReadOutput(out);
   assert.deepEqual([p.ok, p.code], [false, 'unreadable']);
-  assert.match(p.reason, /홈 또는 ~\/\.ssh 폴더를 이 계정으로 열 수 없습니다\(권한\) — authorized_keys 가 있는지 알 수 없습니다/);
+  assert.match(p.reason, /홈 또는 ~\/\.ssh 폴더를 이 계정으로 열 수 없습니다\(권한 · 또는 따라갈 수 없는 심볼릭 링크\) — authorized_keys 가 있는지 알 수 없습니다/);   // 5회차 D5-5
   const h0 = mkHome(); fs.mkdirSync(path.join(h0, '.ssh'));
   assert.equal(spawnSync('bash', ['-c', AK.READ_COMMAND], { env: { HOME: h0, PATH: process.env.PATH }, encoding: 'utf8' }).stdout, '##AK missing\n', '따라갈 수 있고 파일이 없으면 missing(대조)');
   // 칸 고르기 — 글 판정(정규식 export)
@@ -4226,7 +4226,7 @@ test('㉔ 3회차 축 E — 홈 · ~/.ssh 를 따라갈 수 없으면 바꾸는 
   // ① noaccess(실제 bash · dash) — root 면 setpriv uid 65534 + root 소유 0700 ~/.ssh, 비 root 면 ~/.ssh 0600(x 없음)
   const line = KL.buildKeyLine({ publicKey: BPUB, keyId: BID });
   const body = `${OTHER}\n${line}\n`;
-  assert.match(KL.failText('noaccess'), /홈 또는 ~\/\.ssh 폴더를 이 계정으로 열 수 없어\(권한\) authorized_keys 가 있는지 알 수 없습니다/);
+  assert.match(KL.failText('noaccess'), /홈 또는 ~\/\.ssh 폴더를 이 계정으로 열 수 없어\(권한 · 또는 따라갈 수 없는 심볼릭 링크\) authorized_keys 가 있는지 알 수 없습니다/);   // 5회차 D5-5
   for (const shell of SHELLS) {
     for (const [name, sc] of [['거두기', AKS.removeScript({ publicKey: BPUB, keyId: BID })], ['되돌림', AKS.rollbackScript({ line })], ['넣기', AKS.installScript({ publicKey: BPUB, keyId: BID, line })]]) {
       const ro = roHome(body, { sshMode: RUN_AS_ROOT ? 0o700 : 0o600 });

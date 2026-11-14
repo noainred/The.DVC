@@ -355,7 +355,7 @@ export function parseMarker(stdout) {
 export const FAIL_TEXT = Object.freeze({
   nohome: '서버 계정의 HOME 을 알 수 없습니다.', symlink: '~/.ssh 또는 authorized_keys 가 심볼릭 링크라 건드리지 않았습니다 — 서버에서 직접 확인하세요.',
   notdir: '~/.ssh 가 폴더가 아니라 건드리지 않았습니다.', mkdir: '~/.ssh 폴더를 만들지 못했습니다.', notfile: 'authorized_keys 가 일반 파일이 아니라 건드리지 않았습니다.',
-  unreadable: 'authorized_keys 를 읽을 수 없어(권한) 건드리지 않았습니다.', noaccess: '홈 또는 ~/.ssh 폴더를 이 계정으로 열 수 없어(권한) authorized_keys 가 있는지 알 수 없습니다 — 건드리지 않았습니다(‘줄 없음’ 이 아닙니다).', notwritable: 'authorized_keys(또는 ~/.ssh)에 이 계정이 쓸 수 없어(관리자가 잠가 둠) 건드리지 않았습니다.', read: 'authorized_keys 를 읽지 못했습니다.',
+  unreadable: 'authorized_keys 를 읽을 수 없어(권한) 건드리지 않았습니다.', noaccess: '홈 또는 ~/.ssh 폴더를 이 계정으로 열 수 없어(권한 · 또는 따라갈 수 없는 심볼릭 링크) authorized_keys 가 있는지 알 수 없습니다 — 건드리지 않았습니다(‘줄 없음’ 이 아닙니다).', notwritable: 'authorized_keys(또는 ~/.ssh)에 이 계정이 쓸 수 없어(관리자가 잠가 둠) 건드리지 않았습니다.', read: 'authorized_keys 를 읽지 못했습니다.',
   write: '임시 파일을 쓰지 못했습니다(권한 · 디스크) — 원래 파일은 그대로입니다.', verify: '새로 쓴 내용이 예상과 달라(디스크 가득 등) 바꾸지 않았습니다 — 원래 파일은 그대로입니다.',
   rename: '새 파일로 바꾸지 못했습니다 — 원래 파일은 그대로입니다.',
   locked: '다른 작업이 이 서버의 authorized_keys 를 바꾸는 중이라 기다리다 그만뒀습니다 — 원래 파일은 그대로입니다. 잠시 뒤 다시 하세요(남은 자물쇠 ~/.ssh/.authorized_keys.portal.lock 는 주인이 없으면 다음 작업이 치웁니다).',
