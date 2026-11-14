@@ -16,7 +16,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { stripComments } from './_stripComments.js';
 import {
-  SCOPES, SHARED_MIN_AREAS, TEST_FILES_MAX, areaOf, buildCatalog, buildJson, esc, headSummary, isTestFile, renderJson, renderMd,
+  CATALOG_SELF_TESTS, SCOPES, SHARED_MIN_AREAS, TEST_FILES_MAX, areaOf, buildCatalog, buildJson, esc, headSummary, isTestFile, renderJson, renderMd,
   scanExports, scanImports, scanPathLiterals,
 } from '../../scripts/common-doc.mjs';
 
@@ -25,9 +25,33 @@ const UTIL = path.join(ROOT, 'server/src/util');
 const CAT = buildCatalog();
 const byFile = new Map(CAT.scopes.flatMap((s) => s.modules).map((m) => [m.file, m]));
 
-test('docs/COMMON.md 가 최신이다 — 생성기 --check 통과', () => {
+// v3.10.1(사용자 선택 '릴리스 때 재생성'): 예전에는 여기서 `--check` 로 **최신 여부를 실패로** 고정했다 — 다른 PR 이 소스 파일을 하나만
+// 추가해도 파일 수 · 사용처 수가 바뀌어 이 테스트가 깨지고, 병렬 PR 끼리 COMMON.md · JSON 에서 충돌했다(최근 3일 main: 커밋 244 · 새 소스 파일 220).
+// 이제 낡음은 CI 경고(ci.yml)이고, 배포본은 release.yml 이 패키징 직전에 다시 만든다. 그 두 단계가 빠지지 않게 고정한다.
+test('낡은 목록이 배포되지 않는다 — release.yml 이 패키징 직전에 다시 만들고 ci.yml 은 경고한다', () => {
+  const rel = fs.readFileSync(path.join(ROOT, '.github/workflows/release.yml'), 'utf8');
+  const regen = rel.indexOf('run: node scripts/common-doc.mjs\n');
+  const pkg = rel.indexOf('packaging/offline/build-package.sh');
+  assert.ok(regen > 0, 'release.yml 에 목록 재생성 단계가 없다');
+  assert.ok(pkg > regen, '재생성은 첫 패키징보다 앞이어야 한다');
+  assert.equal(rel.includes('scripts/common-doc.mjs --check'), false, '릴리스에서 --check 로 막으면 낡은 목록 때문에 업그레이드가 멈춘다');
+  const ci = fs.readFileSync(path.join(ROOT, '.github/workflows/ci.yml'), 'utf8');
+  const step = ci.slice(ci.indexOf('docs/COMMON.md'), ci.indexOf('scripts/common-doc.mjs --check') + 40);
+  assert.match(step, /continue-on-error: true/, 'ci.yml 의 최신 검사는 경고(continue-on-error)여야 한다');
+});
+
+test('--check 는 낡음을 종료코드 1 로 알린다(CI 경고 단계가 기대는 동작)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'common-check-'));
+  try {
+    // 생성물 경로를 바꿀 수 없으므로 '지금 소스로 만든 글자' 와 비교하는 순수 함수만 본다.
+    const md = renderMd(buildCatalog());
+    fs.writeFileSync(path.join(tmp, 'a.md'), md);
+    assert.equal(fs.readFileSync(path.join(tmp, 'a.md'), 'utf8') === md, true);
+    assert.equal(`${md}x` === md, false);
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
   const r = spawnSync(process.execPath, ['scripts/common-doc.mjs', '--check'], { cwd: ROOT, encoding: 'utf8' });
-  assert.equal(r.status, 0, `${r.stdout}${r.stderr}\n→ node scripts/common-doc.mjs 로 갱신할 것`);
+  assert.ok(r.status === 0 || r.status === 1, `--check 종료코드 ${r.status}: ${r.stderr}`);
+  if (r.status === 1) assert.match(r.stderr, /node scripts\/common-doc\.mjs/, '낡았으면 다시 만드는 명령을 알려 준다');
 });
 
 test('읽지 못한 것이 없다 — problems 0 · 공용 위치마다 모듈이 있다', () => {
@@ -92,6 +116,9 @@ test('scanImports — from 을 거친 것만 import 로 읽는다(문자열 상�
   `));
   assert.deepEqual([...r.specs].sort(), ['../b.js', './a.js', './d.js', './e.js', './lazy.js', './side.css']);
   assert.equal(r.dynamicUnknown, 1, '경로를 조합하는 동적 import 는 건수로 센다');
+  // 워커 진입점 · 같은 폴더 모듈을 가리키는 new URL(…, import.meta.url) 도 사용처다(v3.10.1 — parseWorker.js ‘사용처 0’ 오탐). 데이터 파일은 아니다.
+  const w = scanImports(stripComments("const u = new URL('./parseWorker.js', import.meta.url);\nconst d = new URL('./commonCatalog.json', import.meta.url);\nconst e = new URL ( \"../central.js\" , import.meta.url );"));
+  assert.deepEqual(w.specs, ['./parseWorker.js', '../central.js']);
 });
 
 test('scanPathLiterals — 테스트가 가리키는 모듈 경로(조합 경로·캐시 무효화 접미·템플릿)', () => {
@@ -177,6 +204,15 @@ test('카탈로그 기준점 — 널리 쓰이는 코어가 사용처·테스트
   const stable = byFile.get('web/src/components/STable.jsx');
   assert.ok(stable.users >= 100, `STable 사용처 ${stable.users}`);
   assert.ok(stable.tests >= 1, 'STable 을 가리키는 테스트');
+  // 워커 진입점은 사용처가 있다(soapParsePool.js 의 new URL) — v3.10.1 전에는 ‘사용처 0’ 이었다.
+  const pw = byFile.get('server/src/util/parseWorker.js');
+  assert.ok(pw.users >= 1, `parseWorker.js 사용처 ${pw.users}`);
+  // 이 생성기 · 화면 자신의 테스트는 테스트 수에 들어가지 않는다(검사 데이터로 경로를 적을 뿐 — v3.10.0 에 20개 모듈이 부풀었다).
+  for (const f of CATALOG_SELF_TESTS) assert.ok(fs.existsSync(path.join(ROOT, f)), `${f} 가 없다 — CATALOG_SELF_TESTS 를 고칠 것`);
+  const json = buildJson(CAT);
+  for (const m of json.modules) {
+    for (const t of m.testFiles) assert.equal(CATALOG_SELF_TESTS.includes(t), false, `${m.file}: 자기 테스트 ${t} 가 세어졌다`);
+  }
   // 테스트 파일·진입점은 공용 모듈로 실리지 않는다.
   for (const f of byFile.keys()) assert.equal(isTestFile(f), false, f);
   assert.equal(byFile.has('web/src/App.jsx'), false);

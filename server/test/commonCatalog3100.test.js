@@ -113,18 +113,20 @@ test('③ GET /api/tools/portal-check/common — 전체 범위 admin 200 · 범�
   assert.match((await call('demo')).j.reason, /관리자 계정만/);
 });
 
-test('④ 실린 생성물이 그대로 읽히고 지금 소스와 모듈 수가 같다', async () => {
+// v3.10.1: 저장소의 생성물은 조금 낡아 있을 수 있다(릴리스가 패키징 직전에 다시 만든다 — commonDoc 테스트가 그 단계를 고정한다).
+//   그래서 '지금 소스와 같다' 가 아니라 '실린 것이 온전히 읽히고, 다듬기가 생성기의 값을 바꾸지 않는다' 를 본다.
+test('④ 실린 생성물이 그대로 읽힌다 — 다듬기가 생성기의 값을 바꾸지 않는다', async () => {
   const shipped = C.readCommonCatalog();
   assert.equal(shipped.status, 'ok');
+  assert.ok(shipped.catalog.modules.length > 100, `모듈 ${shipped.catalog.modules.length}개`);
+  const raw = JSON.parse(fs.readFileSync(C.COMMON_CATALOG_FILE, 'utf8'));
+  assert.equal(shipped.catalog.modules.length, raw.modules.length, '다듬기가 모듈을 버렸다(구분 목록 · 필수 필드가 생성기와 어긋남)');
+  raw.modules.forEach((m, i) => assert.deepEqual(shipped.catalog.modules[i], m, `${m.file}: 다듬은 값이 생성물과 다르다`));
+  assert.deepEqual(shipped.catalog.scopes.map((s) => s.id), [...C.COMMON_SCOPES]);
+  // 생성기가 지금 내는 모양도 같은 다듬기를 그대로 통과한다(생성기 필드가 늘거나 바뀌면 여기서 드러난다).
   const { buildCatalog, buildJson } = await import('../../scripts/common-doc.mjs');
   const fresh = buildJson(buildCatalog());
-  assert.equal(shipped.catalog.modules.length, fresh.modules.length, 'node scripts/common-doc.mjs 로 다시 만들 것');
-  // 다듬기가 생성물의 값을 바꾸지 않는다(상한 · 구분 목록이 생성기와 어긋나면 여기서 드러난다).
-  const byFile = new Map(fresh.modules.map((m) => [`${m.scope}|${m.file}`, m]));
-  for (const m of shipped.catalog.modules) {
-    const f = byFile.get(`${m.scope}|${m.file}`);
-    assert.ok(f, `${m.file} 가 생성기 결과에 없다`);
-    assert.deepEqual(m, f, `${m.file}: 다듬은 값이 생성물과 다르다`);
-  }
-  assert.deepEqual(shipped.catalog.scopes.map((s) => s.id), [...C.COMMON_SCOPES]);
+  const again = C.normalizeCatalog(fresh);
+  assert.equal(again.modules.length, fresh.modules.length);
+  fresh.modules.forEach((m, i) => assert.deepEqual(again.modules[i], m, `${m.file}: 지금 생성기 출력을 다듬기가 바꾼다`));
 });
