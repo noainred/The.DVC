@@ -198,6 +198,11 @@ test('③ 키 바꿔치기 감시 — 디스크 파일이 포탈이 쓴 내용�
   const drift = CHK.checkKeyDrift();
   assert.deepEqual([drift.ok, drift.changed, drift.added.map((a) => a.id)], [true, [victim.id], ['k_intruder01']]);
   assert.equal(REFS.resolveOsAuth(srv, { feature: 'bm-usage' }).code, 'key-tampered', '바뀐 키는 메모리 원문이 멀쩡해도 접속에 쓰지 않는다');
+  // 키 고르기 후보에서도 고를 수 없다(점검 · 변이 M41)
+  const tmp = BM.saveBmServer({ name: 'bm-t3', host: '10.0.0.93', mounts: ['/'], vcenterId: 'vcA', password: 'x' }).server;
+  const cand = SVC.serverKeyCandidates(tmp.id).keys.find((k) => k.id === victim.id);
+  assert.ok(!cand || (cand.selectable === false && cand.issue === 'key-tampered'), '후보에서 빠지거나 고를 수 없음으로');
+  BM.removeBmServer(tmp.id);
   const chk = CHK.buildKeyCheck({ policyMode: 'encrypted', drift });
   assert.ok(chk.items.some((i) => i.code === 'tampered' && i.level === 'bad'));
   assert.ok(chk.items.some((i) => i.code === 'added-outside' && i.level === 'bad'));
