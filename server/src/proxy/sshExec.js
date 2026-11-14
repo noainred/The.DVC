@@ -53,6 +53,8 @@ export function execTimeoutMs(v, { long = false } = {}) {
  *   문구에 장비 호스트명도 넣지 않는다(이름에 '…-403' 이 있으면 문구 판정 \b403\b 에 걸린다 — 호출자 화면이 장비를 이미 안다).
  */
 export const SSH_HOSTKEY_ERROR_CODE = 'SSH_HOSTKEY_UNTRUSTED';
+/** passwordOnly 인데 서버가 비밀번호를 받는 방식(password · keyboard-interactive)을 내놓지 않았다 — 비밀번호를 보내지 않았다(인증 거부가 아니다). */
+export const SSH_NO_PASSWORD_METHOD = 'SSH_NO_PASSWORD_METHOD';
 
 /** ssh2 hostVerifier 가 주는 키(Buffer — SSH wire 형식 공개키) → 'SHA256:<base64>'(OpenSSH 표기). */
 export function sshHostKeyFingerprint(key) {
@@ -162,6 +164,7 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
     const onAbort = () => { try { conn.end(); } catch { /* */ } say('SSH 접속 취소(호출자 타임아웃)', 'error'); reject(new Error('SSH 접속 취소(타임아웃)')); };
     signal?.addEventListener('abort', onAbort, { once: true });
     conn.on('ready', () => { signal?.removeEventListener('abort', onAbort); say(`SSH 세션 준비 완료(인증 성공) +${Date.now() - t0}ms`); resolve(conn); });
+    let noPwMethod = '';   // passwordOnly 인데 비밀번호를 받는 방식이 없었다(아래 authHandler 가 채운다)
     conn.on('error', (e) => {
       signal?.removeEventListener('abort', onAbort);
       // S-01: 호스트키 거부는 ssh2 가 'Host denied (verification failed)' 로만 말한다 — 원인(승인 대기·변경·거부)과
@@ -173,6 +176,7 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
         return reject(he);
       }
       say(`SSH 오류: ${e.message}${e.level ? ` (level=${e.level})` : ''}${e.code ? ` code=${e.code}` : ''} +${Date.now() - t0}ms`, 'error');
+      if (noPwMethod) { try { conn.end(); } catch { /* */ } const ne = new Error(`${SSH_NO_PASSWORD_METHOD}: ${noPwMethod}`); ne.code = SSH_NO_PASSWORD_METHOD; return reject(ne); }
       // 구형 알고리즘 폴백 — 협상 실패에만, 1회만.
       if (LEGACY_FALLBACK && LEGACY_ALGOS && !_legacy && NO_MATCH.test(e.message || '')) {
         say('알고리즘 협상 실패 → 구형 알고리즘(diffie-hellman-group1-sha1/ssh-dss/aes-cbc 등)까지 열어 1회 재시도합니다.', 'warn');
@@ -213,15 +217,21 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
     //   없고 keyboard-interactive 만 있으면 그것 하나로(1회차 D3 — password 만 쓰자 대화형만 받는 서버에서 읽기가 실패했다). 거부되면 다른 방식으로 다시 보내지 않는다
     //   (실패 기록 2회 · 계정 잠금 위험). 기본값(passwordOnly 아님)은 그대로 — password 뒤 keyboard-interactive.
     else if (passwordOnly) {
-      let sent = false;
+      let sent = false; let answered = false;
       auth.authHandler = (methodsLeft, _partial, cb) => {
         if (methodsLeft == null) return cb({ type: 'none', username });
         if (sent) return cb(false);
         sent = true;
         if (methodsLeft.includes('password')) return cb({ type: 'password', username, password: password || '' });
         if (methodsLeft.includes('keyboard-interactive')) {
-          return cb({ type: 'keyboard-interactive', username, prompt: (_n, _i, _l, prompts, finish) => finish(prompts.map(() => password || '')) });
+          // 비밀번호는 **첫 질의의 첫 프롬프트**에만(1회차 반증 9 — 질의마다 · 프롬프트마다 보내 ‘한 번’ 이 아니었다). 그 밖은 빈 답.
+          return cb({ type: 'keyboard-interactive', username, prompt: (_n, _i, _l, prompts, finish) => {
+            const first = !answered && prompts.length > 0; if (first) answered = true;
+            finish(prompts.map((_p, i) => (first && i === 0 ? password || '' : '')));
+          } });
         }
+        // 비밀번호를 받는 방식이 없다(publickey 만 등) — 아무것도 보내지 않았다. 인증 거부로 세지 않게 따로 말한다(1회차 반증 9).
+        noPwMethod = `서버가 비밀번호 로그인을 받지 않습니다(허용 방식: ${methodsLeft.slice(0, 6).join(', ') || '없음'}) — 비밀번호를 보내지 않았습니다`;
         return cb(false);
       };
     } else { auth.password = password; auth.tryKeyboard = true; }

@@ -24,7 +24,8 @@ import { ROW_CODE, WARN } from '../../bmusage/onboard/importAnalyze.js';
 import { TEMPLATE_COLUMNS, MAX_UPLOAD_BYTES, MAX_ROWS, parseOnboardFile } from '../../bmusage/onboard/importParse.js';
 import * as KS from '../../bmusage/onboard/keyStore.js';
 import * as REFS from '../../bmusage/onboard/refs.js';
-import { twoPersonRedirect, twoPersonOn } from '../../sshaccess/guards.js';   // v3.10.0: 두 사람 승인이 켜져 있으면 키 등록 · 교체 · 삭제는 승인 절차가 있는 화면으로(우회 금지)
+import { twoPersonRedirect, twoPersonOn } from '../../sshaccess/guards.js';
+import * as KL from '../../sshaccess/keyLogin.js';   // 넣는 중인 키(installingKeyId)만 본다   // v3.10.0: 두 사람 승인이 켜져 있으면 키 등록 · 교체 · 삭제는 승인 절차가 있는 화면으로(우회 금지)
 
 const adminOnly = requireRole('admin');
 const toolsPerm = requirePerm('tools');
@@ -41,7 +42,17 @@ const keyVaultFirst = (_req, res, next) => { const v = KS.keyVaultIssue(); if (v
 /** 두 사람 승인이 켜져 있으면 이 화면의 키 등록 · 교체 · 삭제를 받지 않는다 — OTP 를 쓰기 전에 거절한다. */
 const twoPersonFirst = (_req, res, next) => { const v = twoPersonRedirect(); if (v) return send(res, v); return next(); };
 const keyAddGate = [adminOnly, toolsPerm, requireSettingsOwner, twoPersonFirst, keyVaultFirst, reauth];
-const keyChangeGate = [adminOnly, toolsPerm, requireSettingsOwner, twoPersonFirst, reauth];
+/**
+ * 그 키를 서버에 넣는 작업(SSH 공용 접속 키 로그인 설정)이 도는 동안에는 지우거나 회전으로 퇴역시키지 않는다(1회차 반증 참고 · C1-3 과 같은 규칙 — 7b 경로도).
+ * 회전은 옛 키(from), 삭제는 그 키(:id). OTP 를 쓰기 전에 409.
+ */
+const installingFirst = (req, res, next) => {
+  const k = KL.installingKeyId();
+  const target = String(req.params?.id || req.body?.from || '').trim().slice(0, 32);
+  if (k && target && k === target) return res.status(409).json({ ok: false, code: 'key-installing', reason: '그 키를 서버에 넣는 작업이 진행 중입니다 — 작업이 끝나거나 멈춘 뒤 다시 하세요.' });
+  return next();
+};
+const keyChangeGate = [adminOnly, toolsPerm, requireSettingsOwner, twoPersonFirst, installingFirst, reauth];
 
 const t = (v, max = 256) => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max).trim();
 const bodyOf = (req) => (req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {});

@@ -54,7 +54,8 @@ function send(res, r, okStatus = 200) {
 const audit = (req, action, target, detail) => logAudit({ user: who(req), action, target: t(target, 128), ip: req.ip || '', detail: JSON.stringify(detail).slice(0, 400) });
 
 export function registerSshAccess(api) {
-  api.get('/settings/ssh-access', ...ownerRead, async (_req, res) => {
+  api.get('/settings/ssh-access', ...ownerRead, async (req, res) => {
+    SVC.noteOwnerSession(who(req));   // AD 공동 소유자가 들어온 것 = 승인자 쌍의 증거(guards.noteOwnerSession)
     try { send(res, { ok: true, ...(await SVC.buildView()) }); } catch (e) { send(res, { ok: false, status: 500, reason: `화면 자료를 만들지 못했습니다(${String(e?.message || e).slice(0, 120)})` }); }
   });
 

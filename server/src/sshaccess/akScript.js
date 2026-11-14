@@ -76,20 +76,30 @@ const HEAD = [
  * 읽기(분류)부터 mv 까지 잡는다. 사람 · 다른 도구는 이 자물쇠를 모른다 — 그래서 mv 직전에 원본을 다시 대조하고 mv 뒤에 다시 본다(post).
  */
 const LOCK = [
-  'i=0',
+  'i=0; nf=0; nos=""',
   'while :; do',
   '  if mkdir "$lk" 2>/dev/null; then',
-  '    printf \'%s\\n\' "$tok" > "$lk/owner" || { rmdir "$lk" 2>/dev/null; echo "##KL fail notwritable"; exit 3; }',
+  // 주인 표를 못 쓰면(디스크 가득 등) 자물쇠를 남기지 않고 사유를 가른다(1회차 반증 6 — 빈 표가 든 자물쇠가 남고 ‘관리자가 잠가 둠’ 이라고 했다).
+  '    if ! printf \'%s\\n\' "$tok" > "$lk/owner"; then rm -f "$lk/owner"; rmdir "$lk" 2>/dev/null; if [ -w "$d" ]; then echo "##KL fail write"; else echo "##KL fail notwritable"; fi; exit 3; fi',
   '    held=1; break',
   '  fi',
-  '  [ -d "$lk" ] || { echo "##KL fail notwritable"; exit 3; }',
+  // mkdir 이 실패했는데 자물쇠 폴더가 없다: 쓸 수 없는 폴더면 바로 notwritable, 아니면 그 사이 보유자가 놓은 것일 수 있어 다시 해 본다(1회차 반증 7 ① — 헛 notwritable).
+  '  if [ ! -d "$lk" ]; then',
+  '    [ -w "$d" ] || { echo "##KL fail notwritable"; exit 3; }',
+  '    nf=$((nf + 1)); [ "$nf" -ge 5 ] && { echo "##KL fail write"; exit 3; }',
+  '    continue',
+  '  fi',
   '  i=$((i + 1)); [ "$i" -ge 15 ] && { echo "##KL fail locked"; exit 3; }',
-  '  o=$(cat "$lk/owner" 2>/dev/null); stale=""',
+  '  o=$(cat "$lk/owner" 2>/dev/null); stale=""; now=$(date +%s 2>/dev/null || echo 0)',
   '  if [ -n "$o" ]; then',
-  '    oh=${o%%:*}; r=${o#*:}; op=${r%%:*}; ot=${r#*:}; now=$(date +%s 2>/dev/null || echo 0)',
+  '    nos=""',
+  '    oh=${o%%:*}; r=${o#*:}; op=${r%%:*}; ot=${r#*:}',
   '    if [ -n "$me" ] && [ "$oh" = "$me" ] && ! kill -0 "$op" 2>/dev/null; then stale=1; fi',
   '    case "$ot" in ""|*[!0-9]*) ;; *) if [ "$now" -gt $((ot + 600)) ]; then stale=1; fi ;; esac',
-  '  elif [ "$i" -ge 5 ]; then stale=1',
+  // 주인 표가 없는 자물쇠: **처음 본 때부터** 5초(1회차 반증 7 ② — 대기자 자신의 대기 횟수로 재서, 막 만든 자물쇠를 치웠다).
+  '  else',
+  '    [ -n "$nos" ] || nos=$now',
+  '    if [ "$now" -ge $((nos + 5)) ]; then stale=1; fi',
   '  fi',
   '  if [ -n "$stale" ] && mv "$lk" "$lk.stale.$$" 2>/dev/null; then',
   '    if [ "$(cat "$lk.stale.$$/owner" 2>/dev/null)" = "$o" ]; then rm -rf "$lk.stale.$$"; else mv "$lk.stale.$$" "$lk" 2>/dev/null || rm -rf "$lk.stale.$$"; fi',
@@ -98,6 +108,8 @@ const LOCK = [
   '  sleep 1',
   'done',
 ];
+/** 자물쇠를 잡은 **직후**(분류 전) 원본의 cksum — mv 직전에 다시 대조한다(1회차 반증 8 — 분류 뒤에 재서 그 사이 바뀐 것을 놓쳤다). */
+const C0 = ['if [ -e "$f" ]; then c0=$(cksum < "$f") || { echo "##KL fail read"; exit 3; }; else c0=""; fi'];
 /** 줄 다듬기(앞 공백 · 끝 CR) — awk 안에서 같은 식을 쓴다. 이 글은 셸의 작은따옴표 안에만 들어간다(작은따옴표가 없다). */
 const STRIP = '{ s = $0; sub(/\\r$/, "", s); t = s; sub(/^[ \\t]+/, "", t) }';
 /** 파일 · 폴더 꼴 검사(심볼릭 링크 · 일반 파일 아님 · 못 읽음은 실패). needDir 면 ~/.ssh 가 없을 때 만든다. */
@@ -123,8 +135,6 @@ const COMMIT = [
   '  [ -w "$f" ] || { echo "##KL fail notwritable"; exit 3; }',
   // 소유자 쓰기 비트는 ls 로 본다(1회차 B4 — find 가 없는 서버에서 root 의 444 보호가 조용히 빠졌다). `-r--…` 의 셋째 글자가 '-' 면 잠긴 파일.
   '  case "$(ls -ld -- "$f" 2>/dev/null)" in ??-*) echo "##KL fail notwritable"; exit 3 ;; esac',
-  '  c0=$(cksum < "$f") || { echo "##KL fail read"; exit 3; }',
-  'else c0=""',
   'fi',
   '[ -w "$d" ] || { echo "##KL fail notwritable"; exit 3; }',
   'rm -f "$tmp"',
@@ -173,6 +183,7 @@ export function installScript({ publicKey, keyId, line, replace = false } = {}) 
     // 바꿀 것이 없으면(이미 있음) 자물쇠 없이 끝난다 — 쓸 수 없는 ~/.ssh(root 소유)에서도 ‘있음’ 으로 답한다(1회차 축 B 재확인). 바꿀 것이 있으면 자물쇠 안에서 다시 판정한다.
     'cls',
     ...LOCK,
+    ...C0,
     'cls',
     'old=""',
     'if [ "$act" = replace ]; then',
@@ -210,8 +221,13 @@ export function rollbackScript({ line, oldB64 = '' } = {}) {
     `L='${line}'; OLD='${oldB64}'`,
     ...CHECKS(false),
     'if [ ! -d "$d" ]; then echo "##KL none"; exit 0; fi',
+    // 바꿀 것이 없으면(파일 없음 · 그 줄 없음) 자물쇠 없이 답한다 — 쓸 수 없는 ~/.ssh 에서도(1회차 반증 5). 있으면 자물쇠 안에서 다시 본다(B2).
+    'if [ ! -e "$f" ]; then echo "##KL none"; exit 0; fi',
+    `st=$(awk -v L="$L" '${CNT}' "$f") || { echo "##KL fail read"; exit 3; }`,
+    'set -- $st; if [ "$2" -eq 0 ]; then echo "##KL restored 0"; exit 0; fi',
     ...LOCK,
-    'if [ ! -e "$f" ]; then echo "##KL none"; exit 0; fi',   // 파일 유무도 자물쇠 안에서(1회차 B2)
+    ...C0,
+    'if [ ! -e "$f" ]; then echo "##KL none"; exit 0; fi',
     `st=$(awk -v L="$L" '${CNT}' "$f") || { echo "##KL fail read"; exit 3; }`,
     'set -- $st; nr=$1; n=$2',
     'if [ "$n" -eq 0 ]; then echo "##KL restored 0"; exit 0; fi',
@@ -244,7 +260,12 @@ export function removeScript({ publicKey, keyId } = {}) {
     `B='${pk.blob}'; M='${anyMark}'`,
     ...CHECKS(false),
     'if [ ! -d "$d" ]; then echo "##KL none"; exit 0; fi',
+    // 지울 것이 없으면 자물쇠 없이 답한다(1회차 반증 5 — root 소유 ~/.ssh 의 비 root 계정에서 ‘실패’ 로 답했다). 있으면 자물쇠 안에서 다시 본다(B2).
+    'if [ ! -e "$f" ]; then echo "##KL none"; exit 0; fi',
+    `st=$(awk -v b="$B" -v m="$M" '${CNT}' "$f") || { echo "##KL fail read"; exit 3; }`,
+    'set -- $st; if [ "$2" -eq 0 ]; then echo "##KL removed 0 unmarked $3"; exit 0; fi',
     ...LOCK,
+    ...C0,
     'if [ ! -e "$f" ]; then echo "##KL none"; exit 0; fi',   // 파일 유무도 자물쇠 안에서(1회차 B2 — 처음 넣기와 겹친 거두기가 ‘없음’ 으로 끝나고 키가 들어갔다)
     `st=$(awk -v b="$B" -v m="$M" '${CNT}' "$f") || { echo "##KL fail read"; exit 3; }`,
     'set -- $st; nr=$1; n=$2; u=$3',

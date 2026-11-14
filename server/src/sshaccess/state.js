@@ -69,8 +69,8 @@ function norm(j) {
     at: num(e.at), kind: t(e.kind, 40), corp: t(e.corp, 128), target: t(e.target, 128), by: t(e.by, 64), detail: t(e.detail, 300),
   }));
   // 받는 곳 ‘본 표지’(12자 해시) — 사건 기록과 따로 둔다(1회차 C1-4 · D5 — 사건 300개에서 밀려나면 재시작 뒤 같은 파일을 다시 알렸다).
-  if (j.inboxSeen !== undefined && !Array.isArray(j.inboxSeen)) throw new ShapeError('inboxSeen 이 배열이 아닙니다');
-  const inboxSeen = [...new Set((j.inboxSeen || []).filter((x) => typeof x === 'string' && /^[0-9a-f]{12}$/.test(x)))].slice(-MAX_INBOX_SEEN);
+  //   이 칸은 알림 중복을 막는 기록일 뿐이라 모양이 틀려도 손상으로 보지 않는다(1회차 반증 참고 — 손상으로 보면 모든 키 접속이 멈췄다).
+  const inboxSeen = [...new Set((Array.isArray(j.inboxSeen) ? j.inboxSeen : []).filter((x) => typeof x === 'string' && /^[0-9a-f]{12}$/.test(x)))].slice(-MAX_INBOX_SEEN);
   return { stops, events, guards, inboxSeen };
 }
 
@@ -169,10 +169,12 @@ function pushEvents(d, list, now) {
   }
   // 넘치면 **이번에 넣지 않은** 사건 가운데 덜 중요한 오래된 것부터 버린다(받는 곳 새 파일이 몰려도 사용 중지 · 바꿔치기 사건이 밀려나지 않게 — 점검 C-7).
   //   이번에 넣은 사건은 자르지 않는다 — 오래 운영해 기록이 중요 사건으로 차면 새 덜 중요한 사건(inbox-new)이 넣자마자 잘려 알림도 영영 나가지 않았다(반증 R5).
-  const freshSet = new Set(fresh);
+  //   지키는 것은 이번 사건 가운데 **중요 사건과 앞의 덜 중요한 사건 5개**까지 — 작업 끝 몰아 쓰기(서버마다 50개)가 그만큼 오래된 중요 사건을 밀어냈다(1회차 반증 4).
+  const keep = new Set(); let nc = 0;
+  for (const e of fresh) { if (CRITICAL_EVENTS.includes(e.kind)) keep.add(e); else if (nc < 5) { keep.add(e); nc += 1; } }
   while (d.events.length > MAX_EVENTS) {
-    let i = d.events.findIndex((e) => !freshSet.has(e) && !CRITICAL_EVENTS.includes(e.kind));
-    if (i < 0) i = d.events.findIndex((e) => !freshSet.has(e));
+    let i = d.events.findIndex((e) => !keep.has(e) && !CRITICAL_EVENTS.includes(e.kind));
+    if (i < 0) i = d.events.findIndex((e) => !keep.has(e));
     if (i < 0) break;
     d.events.splice(i, 1);
   }

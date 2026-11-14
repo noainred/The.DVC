@@ -3,7 +3,7 @@
  *
  * 작업은 메모리에만 있어, 바꾸는 도중 포탈이 재시작(자동 업그레이드 포함)하면 사건 · 작업 기록이 모두 사라지고
  * 그 서버의 줄은 확인도 되돌림도 없이 남았다. 그래서 바꾸는 명령을 보내기 전에 여기 적고, 그 서버가 끝나면 지운다.
- * 기동 때 남은 것이 있으면 `takeLeftovers()` 가 돌려주고 파일을 비운다 — service 가 ‘중단’ 사건으로 남긴다.
+ * 기동 때 남은 것이 있으면 `peekLeftovers()` 가 돌려주고, service 가 ‘중단’ 사건으로 남긴 뒤 `clearLeftovers()` 로 그 항목만 지운다.
  *
  * 파일 `CONFIG_DIR/ssh-key-jobs-inflight.json`(0600 · 원자적 쓰기 · 비밀 없음 — 작업 id · 종류 · 키 이름 · 서버 이름 · 법인 · 시각만).
  * 못 읽으면(손상) 옆으로 치우고 빈 것으로 본다(이 파일은 기록용이다 — 판정에 쓰지 않는다).
@@ -55,12 +55,13 @@ export function markEnd({ jobId, sid }) {
   cache = cache.filter((x) => !(x.jobId === t(jobId, 24) && x.sid === t(sid, 64)));
   return before === cache.length ? true : save();
 }
-/** 기동 때 한 번 — 남은 기록(지난 실행이 바꾸던 중에 멈춘 서버)을 돌려주고 비운다. */
-export function takeLeftovers() {
-  cache = null;
-  const items = load().slice();
-  cache = [];
-  save();
-  return items;
+/** 기동 때 — 남은 기록(지난 실행이 바꾸던 중에 멈춘 서버)을 돌려준다. 비우지 않는다 — 사건을 쓴 뒤에 clearLeftovers(1회차 반증 10 — 먼저 비워 사건 쓰기가 실패하면 기록이 사라졌다). */
+export function peekLeftovers() { cache = null; return load().slice(); }
+/** 사건으로 옮긴 뒤 그 항목들만 지운다(그 사이 새로 생긴 기록은 남긴다). */
+export function clearLeftovers(items) {
+  load();
+  const gone = new Set((Array.isArray(items) ? items : []).map((x) => `${x.jobId}|${x.sid}`));
+  cache = cache.filter((x) => !gone.has(`${x.jobId}|${x.sid}`));
+  return save();
 }
 export function _resetInflightForTest() { cache = null; }

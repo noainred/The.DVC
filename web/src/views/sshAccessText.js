@@ -468,7 +468,7 @@ export const JOB_CODE_TEXT = Object.freeze({
   'key-changed': '작업 도중 키가 퇴역 · 삭제 · 변경돼 하지 않음',
   'account-missing': '공통 계정이 없음', 'account-kind': '공통 계정이 OS 계정이 아님', 'account-tampered': '공통 계정이 포탈 밖에서 바뀜', 'store-unreadable': '키 저장소를 읽지 못함',
   'corp-stopped': '법인 키 사용 중지 중', 'state-unreadable': '상태 파일을 읽지 못함', 'no-secret': '저장된 인증 수단 없음',
-  'auth-rejected': '인증 거부(다시 시도하지 않음)', hostkey: '호스트키 미신뢰', connect: '접속 실패', timeout: '서버가 시한 안에 답하지 않음',
+  'auth-rejected': '인증 거부(다시 시도하지 않음)', 'no-password-method': '서버가 비밀번호 로그인을 받지 않음(보내지 않음)', hostkey: '호스트키 미신뢰', connect: '접속 실패', timeout: '서버가 시한 안에 답하지 않음',
   // 바꾸는 명령을 보낸 뒤 답을 못 받음 — ‘바꾼 것 없음’ 이 아니다(서버의 명령은 끊겨도 끝까지 돌 수 있다)
   uncertain: '명령은 보냈지만 답을 받지 못함 — 서버의 authorized_keys 가 바뀌었을 수 있음',
   'install-failed': '줄을 넣지 못함', 'key-login-failed': '키 접속 확인 실패', 'bind-failed': '서버 설정에 적지 못함', 'revoke-failed': '줄을 지우지 못함', 'bad-key': '공개키 꼴이 올바르지 않음',
@@ -499,15 +499,15 @@ const PINNED_TEXT = '이 서버는 아직 이 키로 접속하도록 설정돼 �
 /**
  * 키 로그인 설정 결과 한 줄. meta = 작업의 설정(restrict · removePassword — 서버 job.meta).
  * 서버 쪽 제한이 켜져 있는데 이 서버에 제한 없는(또는 확인 못 한) 같은 키 줄이 남으면 ‘확인’ 톤이다 — 초록으로 끝내지 않는다(점검 E-5).
- * @returns {{label:string, tone:'ok'|'warn'|'bad'|'muted', parts:string[], rollback:''|'done'|'failed'}}
- *   rollback: 더한 줄을 되돌렸는가('done') · 되돌리지 못했는가('failed') · 해당 없음('')
+ * @returns {{label:string, tone:'ok'|'warn'|'bad'|'muted', parts:string[], rollback:''|'done'|'failed'|'unknown'}}
+ *   rollback: 더한 줄을 되돌렸는가('done') · 되돌리지 못했는가('failed') · 되돌렸는지 모르는가('unknown' — 서버 rollbackUnknown) · 해당 없음('')
  */
 export function keyLoginRow(r, meta = {}) {
   const row = rowOf(r);
   if (row.ok !== true) {
     if (SKIP_CODES.has(row.code)) return { label: SKIP_LABEL[row.code] || '하지 않음', tone: 'warn', parts: [failText(row)], rollback: '' };
     return { label: row.code === 'uncertain' ? UNCERTAIN_LABEL : '실패', tone: 'bad', parts: [failText(row), ...notesOf(row)],
-      rollback: row.rolledBack === true ? 'done' : row.rolledBack === false ? 'failed' : '' };
+      rollback: row.rolledBack === true ? 'done' : row.rollbackUnknown === true ? 'unknown' : row.rolledBack === false ? 'failed' : '' };   // 모르면 ‘못함’ 이라고 하지 않는다(1회차 반증 11)
   }
   const parts = [LINE_TEXT[row.line] || '키 접속 확인'];
   const unmarked = finiteNum(row.unmarked) || 0;

@@ -65,8 +65,9 @@ async function sshRun(server, auth, fn, { execs = 1 } = {}) {
     return { ok: true, value: v };
   } catch (e) {
     const msg = String(e?.message || e);
-    const code = isPeerRejectText(msg) ? 'hostkey' : isAuthFailureText(msg) ? 'auth-rejected' : TIMEOUT_RE.test(msg) ? 'timeout' : 'connect';
-    const reason = code === 'hostkey' ? '호스트키를 신뢰하지 않아 끊었습니다 — 설정 › 보안 › 장비 신뢰에서 지문을 확인 · 승인하세요.'
+    const code = e?.code === 'SSH_NO_PASSWORD_METHOD' ? 'no-password-method' : isPeerRejectText(msg) ? 'hostkey' : isAuthFailureText(msg) ? 'auth-rejected' : TIMEOUT_RE.test(msg) ? 'timeout' : 'connect';
+    const reason = code === 'no-password-method' ? '서버가 비밀번호 로그인을 받지 않아(키만 받음) 비밀번호를 보내지 않았습니다 — 이미 되는 키로 접속하게 서버 설정을 고르거나 공개키를 서버에 직접 넣으세요.'
+      : code === 'hostkey' ? '호스트키를 신뢰하지 않아 끊었습니다 — 설정 › 보안 › 장비 신뢰에서 지문을 확인 · 승인하세요.'
       : code === 'auth-rejected' ? `인증이 거부됐습니다 — 다시 시도하지 않았습니다(계정 잠금 방지).${auth.privateKey ? '' : ' 비밀번호는 서버가 받는 방식 하나(password 또는 대화형)로 한 번만 보냈습니다.'}`
         : code === 'timeout' ? `서버가 시한 안에 답하지 않았습니다(${msg.replace(/\s+/g, ' ').slice(0, 80)})`
           : `접속하지 못했습니다(${msg.replace(/\s+/g, ' ').slice(0, 100)})`;
@@ -164,7 +165,8 @@ export async function installOne(server, key, o = {}) {
   if (!step1.ok) return fail(step1.sent ? 'uncertain' : step1.code, `${step1.reason}${step1.sent ? UNCERTAIN_TAIL : ' 서버에서 바꾼 것은 없습니다.'}`, { via: first.authKind });
   const m = step1.value;
   if (m.kind === 'nocode') return fail('uncertain', `서버가 결과 없이 연결을 닫았습니다.${UNCERTAIN_TAIL}`, { via: first.authKind });
-  if (m.kind === 'fail' && AFTER_MV.has(m.why)) return fail('uncertain', `${AK.failText(m.why)}${UNCERTAIN_TAIL}`, { via: first.authKind });
+  // raced: 결과는 받았다 — mv 뒤 확인에서 원하는 상태가 아니었다(1회차 반증 12 — ‘결과를 받지 못했습니다’ 꼬리를 붙였다).
+  if (m.kind === 'fail' && AFTER_MV.has(m.why)) return fail('uncertain', `${AK.failText(m.why)} 포탈의 서버 설정은 바꾸지 않았습니다.`, { via: first.authKind });
   if (m.kind === 'fail' || m.kind === 'unknown') {
     const why = m.why === 'noip' ? '서버가 본 접속 주소를 읽지 못해 출발지 제한을 붙일 수 없습니다 — 제한 없이 넣으려면 ‘서버 쪽 제한’ 을 끄고 다시 하세요.'
       : m.why === 'badkey' ? '공개키 꼴이 올바르지 않아 넣지 않았습니다.'

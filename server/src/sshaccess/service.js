@@ -31,7 +31,8 @@ import { READ_COMMAND, parseReadOutput } from './authorizedKeys.js';
 import * as AP from '../approval/store.js';
 import * as TP from '../approval/twoPerson.js';
 import * as KL from './keyLogin.js';
-import { twoPersonOn, serverRestrictOn, otherOwners, notePair } from './guards.js';
+import { twoPersonOn, serverRestrictOn, otherOwners, notePair, noteOwnerSession } from './guards.js';
+export { noteOwnerSession };
 import { startKeyNotify } from './notify.js';
 
 const t = (v, max = 256) => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max).trim();
@@ -272,8 +273,9 @@ export async function readInstalledKeys({ serverId, oncePassword = '', by = '' }
     else rec = { host: s.host, port: Number(s.port) || 22, username: auth.username, file: '~/.ssh/authorized_keys', keys: p.keys, truncated: p.truncated, error: p.present ? '' : '파일이 없습니다(키가 하나도 없음).', bad: p.bad };
   } catch (e) {
     const msg = String(e?.message || e);
-    const kind = isPeerRejectText(msg) ? 'hostkey' : isAuthFailureText(msg) ? 'auth-rejected' : 'connect';
-    const reason = kind === 'hostkey' ? '호스트키를 신뢰하지 않아 끊었습니다 — 설정 › 보안 › 장비 신뢰에서 지문을 확인 · 승인하세요.'
+    const kind = e?.code === 'SSH_NO_PASSWORD_METHOD' ? 'no-password-method' : isPeerRejectText(msg) ? 'hostkey' : isAuthFailureText(msg) ? 'auth-rejected' : 'connect';
+    const reason = kind === 'no-password-method' ? '서버가 비밀번호 로그인을 받지 않아(키만 받음) 비밀번호를 보내지 않았습니다.'
+      : kind === 'hostkey' ? '호스트키를 신뢰하지 않아 끊었습니다 — 설정 › 보안 › 장비 신뢰에서 지문을 확인 · 승인하세요.'
       : kind === 'auth-rejected' ? '인증이 거부됐습니다(다시 시도하지 않습니다 — 계정 잠금 방지).' : `접속하지 못했습니다(${msg.replace(/\s+/g, ' ').slice(0, 100)})`;
     if (auth.keyFingerprint) noteKeyUse({ fingerprint: auth.keyFingerprint, keyName: auth.keyName, server: s.name || s.host, corp: s.vcenterId, feature: 'conn-test', ok: false, code: kind, trigger: 'manual', by });
     return { ok: false, code: kind, status: 502, reason };
@@ -572,6 +574,8 @@ export function approvalPrecheck(id, { approve, by = '', digest = '' } = {}) {
  */
 export async function keyJobPrecheck(kind, keyId = '') {
   const demo = await mockRefusal(); if (demo) return demo;
+  if (KS.keyStoreLoadError()) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'SSH 키 저장소를 읽지 못했습니다.' };
+  if (bmRegistryLoadError()) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'OS 계정 등록부를 읽지 못했습니다.' };
   const k = t(keyId, 32);
   if (k && !KS.keyStoreLoadError()) {
     const key = freshKey(k);
@@ -614,7 +618,7 @@ export const prechecks = Object.freeze({
   resume: ({ corp, by }) => {
     const c = t(corp, 128); const st = ST.stopFor(c);
     if (!st) return { ok: false, code: 'not-stopped', status: 409, reason: '그 법인은 사용 중지 상태가 아닙니다.' };
-    if (st.unreadable) return null;   // 상태 모름 — 본 함수가 사유를 말한다
+    if (st.unreadable) return { ok: false, code: 'state-unreadable', status: 503, reason: '상태 파일을 읽지 못해 사용 재개를 받지 않습니다.' };
     return requestPrecheck({ kind: 'ssh-corp-resume', target: c, by });
   },
   reloadKeyStore: ({ by }) => requestPrecheck({ kind: 'ssh-keystore-reload', target: 'ssh-keys.json', by }),
@@ -938,9 +942,13 @@ export function startSshAccessScheduler({ firstDelayMs = 90_000 } = {}) {
   notePair({ by: '' });   // 기동 때 바로 ‘승인할 수 있는 소유자 둘’ 을 본다(첫 관측 전 강등 창을 줄인다 — guards.notePair)
   // 지난 실행이 서버를 바꾸던 도중에 멈췄으면 그 서버를 ‘중단’ 사건으로 남긴다(1회차 B7 — 작업은 메모리에만 있어 기록이 통째로 사라졌다).
   try {
-    const left = INF.takeLeftovers();
-    if (left.length) ST.addEvents(left.slice(0, 50).map((x) => ({ kind: 'key-job-interrupted', corp: x.corp, target: `${x.server} · ${x.keyName}`, by: x.by,
-      detail: `${x.kind === 'key-revoke' ? '키 거두기' : '키 로그인 설정'} 도중 포탈이 다시 시작됨 — 그 서버의 authorized_keys 를 확인하세요(작업 ${x.jobId})` })));
+    const left = INF.peekLeftovers();
+    if (left.length) {
+      const w = ST.addEvents(left.slice(0, 50).map((x) => ({ kind: 'key-job-interrupted', corp: x.corp, target: `${x.server} · ${x.keyName}`, by: x.by,
+        detail: `${x.kind === 'key-revoke' ? '키 거두기' : '키 로그인 설정'} 도중 포탈이 다시 시작됨 — 그 서버의 authorized_keys 를 확인하세요(작업 ${x.jobId})` })));
+      if (w.ok) INF.clearLeftovers(left);   // 사건을 쓴 뒤에만 지운다(못 쓰면 다음 기동 때 다시 — 1회차 반증 10)
+      else console.warn('[ssh-access] 중단된 키 작업 기록을 사건으로 옮기지 못했습니다(상태 파일) — 다음 기동 때 다시 합니다.');
+    }
   } catch (e) { console.warn(`[ssh-access] 중단된 키 작업 기록을 읽지 못했습니다: ${String(e?.message || e).slice(0, 120)}`); }
   const run = () => { runSshAccessScan().catch((e) => console.warn(`[ssh-access] 주기 점검 실패: ${String(e?.message || e).slice(0, 160)}`)); };
   const first = setTimeout(() => { run(); _timer = setInterval(run, SCAN_EVERY_MS); _timer.unref?.(); }, firstDelayMs);

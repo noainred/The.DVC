@@ -206,7 +206,7 @@ function KeyJobResult({ kj, kind }) {
         <tbody>
           {rows.map(({ r, x }, i) => (
             <tr key={`${r?.id || 'row'}-${i}`}>
-              <td data-sort={x.label}><Chip tone={x.tone}>{x.label}</Chip>{x.rollback === 'done' && <Chip>되돌림</Chip>}{x.rollback === 'failed' && <Chip tone="bad">되돌리지 못함</Chip>}</td>
+              <td data-sort={x.label}><Chip tone={x.tone}>{x.label}</Chip>{x.rollback === 'done' && <Chip>되돌림</Chip>}{x.rollback === 'failed' && <Chip tone="bad">되돌리지 못함</Chip>}{x.rollback === 'unknown' && <Chip tone="warn">되돌렸는지 모름</Chip>}</td>
               <td data-sort={r?.name || ''}><b>{r?.name || r?.id || '—'}</b></td>
               <td>{x.parts.join(' · ') || '—'}</td>
             </tr>

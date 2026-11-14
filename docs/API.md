@@ -911,30 +911,30 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/search/inventory` | — | [server/src/routes/api/invSearch.js:53](../server/src/routes/api/invSearch.js#L53) |
 | POST | `/search/nl` | — | [server/src/routes/api/searchNotes.js:15](../server/src/routes/api/searchNotes.js#L15) |
 | GET | `/settings/ssh-access` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:57](../server/src/routes/api/sshAccess.js#L57) |
-| POST | `/settings/ssh-access/approvals/:id/approve` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `approvePre` · `reauth` | [server/src/routes/api/sshAccess.js:111](../server/src/routes/api/sshAccess.js#L111) |
-| POST | `/settings/ssh-access/approvals/:id/reject` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `approvePre` · `reauth` | [server/src/routes/api/sshAccess.js:117](../server/src/routes/api/sshAccess.js#L117) |
-| GET | `/settings/ssh-access/changes` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:222](../server/src/routes/api/sshAccess.js#L222) |
-| DELETE | `/settings/ssh-access/corps/:corp/stop` | `write` | [server/src/routes/api/sshAccess.js:197](../server/src/routes/api/sshAccess.js#L197) |
-| POST | `/settings/ssh-access/corps/:corp/stop` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `reauth` | [server/src/routes/api/sshAccess.js:191](../server/src/routes/api/sshAccess.js#L191) |
-| PUT | `/settings/ssh-access/guards` | `write` | [server/src/routes/api/sshAccess.js:124](../server/src/routes/api/sshAccess.js#L124) |
-| POST | `/settings/ssh-access/inbox/approve` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `vaultFirst` · `pre` · `reauth` | [server/src/routes/api/sshAccess.js:204](../server/src/routes/api/sshAccess.js#L204) |
-| POST | `/settings/ssh-access/inbox/discard` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `reauth` | [server/src/routes/api/sshAccess.js:211](../server/src/routes/api/sshAccess.js#L211) |
-| GET | `/settings/ssh-access/jobs/:id` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:150](../server/src/routes/api/sshAccess.js#L150) |
-| POST | `/settings/ssh-access/jobs/:id/cancel` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `cancelGate` | [server/src/routes/api/sshAccess.js:158](../server/src/routes/api/sshAccess.js#L158) |
-| POST | `/settings/ssh-access/key-login` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `jobPre` · `reauth` | [server/src/routes/api/sshAccess.js:136](../server/src/routes/api/sshAccess.js#L136) |
-| POST | `/settings/ssh-access/key-revoke` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `jobPre` · `reauth` | [server/src/routes/api/sshAccess.js:143](../server/src/routes/api/sshAccess.js#L143) |
-| POST | `/settings/ssh-access/keys` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `vaultFirst` · `pre` · `reauth` | [server/src/routes/api/sshAccess.js:79](../server/src/routes/api/sshAccess.js#L79) |
-| DELETE | `/settings/ssh-access/keys/:id` | `write` | [server/src/routes/api/sshAccess.js:102](../server/src/routes/api/sshAccess.js#L102) |
-| PUT | `/settings/ssh-access/keys/:id/placement` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `reauth` | [server/src/routes/api/sshAccess.js:87](../server/src/routes/api/sshAccess.js#L87) |
-| POST | `/settings/ssh-access/keys/rotate` | `write` | [server/src/routes/api/sshAccess.js:96](../server/src/routes/api/sshAccess.js#L96) |
-| POST | `/settings/ssh-access/reload-keystore` | `write` | [server/src/routes/api/sshAccess.js:72](../server/src/routes/api/sshAccess.js#L72) |
-| POST | `/settings/ssh-access/reload-state` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `reauth` | [server/src/routes/api/sshAccess.js:67](../server/src/routes/api/sshAccess.js#L67) |
-| POST | `/settings/ssh-access/scan` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:62](../server/src/routes/api/sshAccess.js#L62) |
-| GET | `/settings/ssh-access/servers/:id/candidates` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:172](../server/src/routes/api/sshAccess.js#L172) |
-| POST | `/settings/ssh-access/servers/:id/installed-keys` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:176](../server/src/routes/api/sshAccess.js#L176) |
-| POST | `/settings/ssh-access/servers/:id/key` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `reauth` | [server/src/routes/api/sshAccess.js:165](../server/src/routes/api/sshAccess.js#L165) |
-| POST | `/settings/ssh-access/servers/:id/test` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:184](../server/src/routes/api/sshAccess.js#L184) |
-| GET | `/settings/ssh-access/usage` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:219](../server/src/routes/api/sshAccess.js#L219) |
+| POST | `/settings/ssh-access/approvals/:id/approve` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `approvePre` · `reauth` | [server/src/routes/api/sshAccess.js:112](../server/src/routes/api/sshAccess.js#L112) |
+| POST | `/settings/ssh-access/approvals/:id/reject` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `approvePre` · `reauth` | [server/src/routes/api/sshAccess.js:118](../server/src/routes/api/sshAccess.js#L118) |
+| GET | `/settings/ssh-access/changes` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:223](../server/src/routes/api/sshAccess.js#L223) |
+| DELETE | `/settings/ssh-access/corps/:corp/stop` | `write` | [server/src/routes/api/sshAccess.js:198](../server/src/routes/api/sshAccess.js#L198) |
+| POST | `/settings/ssh-access/corps/:corp/stop` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `reauth` | [server/src/routes/api/sshAccess.js:192](../server/src/routes/api/sshAccess.js#L192) |
+| PUT | `/settings/ssh-access/guards` | `write` | [server/src/routes/api/sshAccess.js:125](../server/src/routes/api/sshAccess.js#L125) |
+| POST | `/settings/ssh-access/inbox/approve` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `vaultFirst` · `pre` · `reauth` | [server/src/routes/api/sshAccess.js:205](../server/src/routes/api/sshAccess.js#L205) |
+| POST | `/settings/ssh-access/inbox/discard` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `reauth` | [server/src/routes/api/sshAccess.js:212](../server/src/routes/api/sshAccess.js#L212) |
+| GET | `/settings/ssh-access/jobs/:id` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:151](../server/src/routes/api/sshAccess.js#L151) |
+| POST | `/settings/ssh-access/jobs/:id/cancel` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `cancelGate` | [server/src/routes/api/sshAccess.js:159](../server/src/routes/api/sshAccess.js#L159) |
+| POST | `/settings/ssh-access/key-login` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `jobPre` · `reauth` | [server/src/routes/api/sshAccess.js:137](../server/src/routes/api/sshAccess.js#L137) |
+| POST | `/settings/ssh-access/key-revoke` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `jobPre` · `reauth` | [server/src/routes/api/sshAccess.js:144](../server/src/routes/api/sshAccess.js#L144) |
+| POST | `/settings/ssh-access/keys` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `vaultFirst` · `pre` · `reauth` | [server/src/routes/api/sshAccess.js:80](../server/src/routes/api/sshAccess.js#L80) |
+| DELETE | `/settings/ssh-access/keys/:id` | `write` | [server/src/routes/api/sshAccess.js:103](../server/src/routes/api/sshAccess.js#L103) |
+| PUT | `/settings/ssh-access/keys/:id/placement` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `reauth` | [server/src/routes/api/sshAccess.js:88](../server/src/routes/api/sshAccess.js#L88) |
+| POST | `/settings/ssh-access/keys/rotate` | `write` | [server/src/routes/api/sshAccess.js:97](../server/src/routes/api/sshAccess.js#L97) |
+| POST | `/settings/ssh-access/reload-keystore` | `write` | [server/src/routes/api/sshAccess.js:73](../server/src/routes/api/sshAccess.js#L73) |
+| POST | `/settings/ssh-access/reload-state` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `reauth` | [server/src/routes/api/sshAccess.js:68](../server/src/routes/api/sshAccess.js#L68) |
+| POST | `/settings/ssh-access/scan` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:63](../server/src/routes/api/sshAccess.js#L63) |
+| GET | `/settings/ssh-access/servers/:id/candidates` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:173](../server/src/routes/api/sshAccess.js#L173) |
+| POST | `/settings/ssh-access/servers/:id/installed-keys` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:177](../server/src/routes/api/sshAccess.js#L177) |
+| POST | `/settings/ssh-access/servers/:id/key` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `reauth` | [server/src/routes/api/sshAccess.js:166](../server/src/routes/api/sshAccess.js#L166) |
+| POST | `/settings/ssh-access/servers/:id/test` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:185](../server/src/routes/api/sshAccess.js#L185) |
+| GET | `/settings/ssh-access/usage` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:220](../server/src/routes/api/sshAccess.js#L220) |
 | GET | `/summary` | — | [server/src/routes/api/inventory.js:164](../server/src/routes/api/inventory.js#L164) |
 | POST | `/tool-usage` | — | [server/src/routes/api/inventory.js:675](../server/src/routes/api/inventory.js#L675) |
 | GET | `/tool-usage/top` | — | [server/src/routes/api/inventory.js:671](../server/src/routes/api/inventory.js#L671) |
@@ -1053,9 +1053,9 @@ Prometheus/OTel 익스포터(선택 토큰).
 | DELETE | `/tools/bm-storage/servers/:id` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bmstor.js:532](../server/src/routes/api/bmstor.js#L532) |
 | PUT | `/tools/bm-storage/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bmstor.js:539](../server/src/routes/api/bmstor.js#L539) |
 | GET | `/tools/bm-usage` | 권한 `tools` | [server/src/routes/api/bmUsage.js:968](../server/src/routes/api/bmUsage.js#L968) |
-| GET | `/tools/bm-usage/accounts` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmOnboard.js:124](../server/src/routes/api/bmOnboard.js#L124) |
-| POST | `/tools/bm-usage/accounts` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/bmOnboard.js:132](../server/src/routes/api/bmOnboard.js#L132) |
-| DELETE | `/tools/bm-usage/accounts/:id` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/bmOnboard.js:144](../server/src/routes/api/bmOnboard.js#L144) |
+| GET | `/tools/bm-usage/accounts` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmOnboard.js:135](../server/src/routes/api/bmOnboard.js#L135) |
+| POST | `/tools/bm-usage/accounts` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/bmOnboard.js:143](../server/src/routes/api/bmOnboard.js#L143) |
+| DELETE | `/tools/bm-usage/accounts/:id` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/bmOnboard.js:155](../server/src/routes/api/bmOnboard.js#L155) |
 | GET | `/tools/bm-usage/activity` | 권한 `tools` | [server/src/routes/api/bmUsage.js:1230](../server/src/routes/api/bmUsage.js#L1230) |
 | GET | `/tools/bm-usage/annotations` | 권한 `tools` | [server/src/routes/api/bmAnnotations.js:184](../server/src/routes/api/bmAnnotations.js#L184) |
 | POST | `/tools/bm-usage/annotations` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmAnnotations.js:188](../server/src/routes/api/bmAnnotations.js#L188) |
@@ -1093,14 +1093,14 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/tools/bm-usage/maintenance/:id/end` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmMaint.js:316](../server/src/routes/api/bmMaint.js#L316) |
 | GET | `/tools/bm-usage/maintenance/occurrences` | 권한 `tools` | [server/src/routes/api/bmMaint.js:307](../server/src/routes/api/bmMaint.js#L307) |
 | POST | `/tools/bm-usage/maintenance/preview` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/bmMaint.js:311](../server/src/routes/api/bmMaint.js#L311) |
-| POST | `/tools/bm-usage/onboard/analyze` | 역할 `admin` · 권한 `tools`, `data.csv` · `noDemo` | [server/src/routes/api/bmOnboard.js:211](../server/src/routes/api/bmOnboard.js#L211) |
-| POST | `/tools/bm-usage/onboard/apply` | 역할 `admin` · 권한 `tools`, `data.csv` · `noDemo` | [server/src/routes/api/bmOnboard.js:227](../server/src/routes/api/bmOnboard.js#L227) |
-| GET | `/tools/bm-usage/onboard/codes` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmOnboard.js:346](../server/src/routes/api/bmOnboard.js#L346) |
-| DELETE | `/tools/bm-usage/onboard/edge-rows` | 역할 `admin` · 권한 `tools` · `noDemo` | [server/src/routes/api/bmOnboard.js:276](../server/src/routes/api/bmOnboard.js#L276) |
-| GET | `/tools/bm-usage/onboard/edge-rows` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmOnboard.js:256](../server/src/routes/api/bmOnboard.js#L256) |
-| GET | `/tools/bm-usage/onboard/missing` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmOnboard.js:290](../server/src/routes/api/bmOnboard.js#L290) |
-| GET | `/tools/bm-usage/onboard/template.csv` | 역할 `admin` · 권한 `tools`, `data.csv` | [server/src/routes/api/bmOnboard.js:199](../server/src/routes/api/bmOnboard.js#L199) |
-| POST | `/tools/bm-usage/onboard/test` | 역할 `admin` · 권한 `tools` · `noDemo` | [server/src/routes/api/bmOnboard.js:331](../server/src/routes/api/bmOnboard.js#L331) |
+| POST | `/tools/bm-usage/onboard/analyze` | 역할 `admin` · 권한 `tools`, `data.csv` · `noDemo` | [server/src/routes/api/bmOnboard.js:222](../server/src/routes/api/bmOnboard.js#L222) |
+| POST | `/tools/bm-usage/onboard/apply` | 역할 `admin` · 권한 `tools`, `data.csv` · `noDemo` | [server/src/routes/api/bmOnboard.js:238](../server/src/routes/api/bmOnboard.js#L238) |
+| GET | `/tools/bm-usage/onboard/codes` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmOnboard.js:357](../server/src/routes/api/bmOnboard.js#L357) |
+| DELETE | `/tools/bm-usage/onboard/edge-rows` | 역할 `admin` · 권한 `tools` · `noDemo` | [server/src/routes/api/bmOnboard.js:287](../server/src/routes/api/bmOnboard.js#L287) |
+| GET | `/tools/bm-usage/onboard/edge-rows` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmOnboard.js:267](../server/src/routes/api/bmOnboard.js#L267) |
+| GET | `/tools/bm-usage/onboard/missing` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmOnboard.js:301](../server/src/routes/api/bmOnboard.js#L301) |
+| GET | `/tools/bm-usage/onboard/template.csv` | 역할 `admin` · 권한 `tools`, `data.csv` | [server/src/routes/api/bmOnboard.js:210](../server/src/routes/api/bmOnboard.js#L210) |
+| POST | `/tools/bm-usage/onboard/test` | 역할 `admin` · 권한 `tools` · `noDemo` | [server/src/routes/api/bmOnboard.js:342](../server/src/routes/api/bmOnboard.js#L342) |
 | GET | `/tools/bm-usage/perf-rules` | 권한 `tools` | [server/src/routes/api/bmPerfOps.js:295](../server/src/routes/api/bmPerfOps.js#L295) |
 | PUT | `/tools/bm-usage/perf-rules` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` | [server/src/routes/api/bmPerfOps.js:296](../server/src/routes/api/bmPerfOps.js#L296) |
 | POST | `/tools/bm-usage/perf-rules/dry-run` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/bmPerfOps.js:297](../server/src/routes/api/bmPerfOps.js#L297) |
@@ -1132,12 +1132,12 @@ Prometheus/OTel 익스포터(선택 토큰).
 | PUT | `/tools/bm-usage/settings` | 역할 `admin` | [server/src/routes/api/bmUsage.js:1494](../server/src/routes/api/bmUsage.js#L1494) |
 | GET | `/tools/bm-usage/slo` | 권한 `tools` | [server/src/routes/api/bmPlaybookSlo.js:198](../server/src/routes/api/bmPlaybookSlo.js#L198) |
 | PUT | `/tools/bm-usage/slo` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` | [server/src/routes/api/bmPlaybookSlo.js:199](../server/src/routes/api/bmPlaybookSlo.js#L199) |
-| GET | `/tools/bm-usage/ssh-keys` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmOnboard.js:77](../server/src/routes/api/bmOnboard.js#L77) |
-| POST | `/tools/bm-usage/ssh-keys` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `twoPersonFirst` · `keyVaultFirst` · `reauth` | [server/src/routes/api/bmOnboard.js:85](../server/src/routes/api/bmOnboard.js#L85) |
-| DELETE | `/tools/bm-usage/ssh-keys/:id` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `twoPersonFirst` · `reauth` | [server/src/routes/api/bmOnboard.js:117](../server/src/routes/api/bmOnboard.js#L117) |
-| PUT | `/tools/bm-usage/ssh-keys/:id` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/bmOnboard.js:93](../server/src/routes/api/bmOnboard.js#L93) |
-| POST | `/tools/bm-usage/ssh-keys/:id/passphrase` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/bmOnboard.js:100](../server/src/routes/api/bmOnboard.js#L100) |
-| POST | `/tools/bm-usage/ssh-keys/rotate` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `twoPersonFirst` · `reauth` | [server/src/routes/api/bmOnboard.js:107](../server/src/routes/api/bmOnboard.js#L107) |
+| GET | `/tools/bm-usage/ssh-keys` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bmOnboard.js:88](../server/src/routes/api/bmOnboard.js#L88) |
+| POST | `/tools/bm-usage/ssh-keys` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `twoPersonFirst` · `keyVaultFirst` · `reauth` | [server/src/routes/api/bmOnboard.js:96](../server/src/routes/api/bmOnboard.js#L96) |
+| DELETE | `/tools/bm-usage/ssh-keys/:id` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `twoPersonFirst` · `installingFirst` · `reauth` | [server/src/routes/api/bmOnboard.js:128](../server/src/routes/api/bmOnboard.js#L128) |
+| PUT | `/tools/bm-usage/ssh-keys/:id` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/bmOnboard.js:104](../server/src/routes/api/bmOnboard.js#L104) |
+| POST | `/tools/bm-usage/ssh-keys/:id/passphrase` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/bmOnboard.js:111](../server/src/routes/api/bmOnboard.js#L111) |
+| POST | `/tools/bm-usage/ssh-keys/rotate` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` · `twoPersonFirst` · `installingFirst` · `reauth` | [server/src/routes/api/bmOnboard.js:118](../server/src/routes/api/bmOnboard.js#L118) |
 | PUT | `/tools/bm-usage/tuning/overrides` | 역할 `admin` · 권한 `tools` · `requireSettingsOwner` | [server/src/routes/api/bmUsage.js:1096](../server/src/routes/api/bmUsage.js#L1096) |
 | GET | `/tools/capacity` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:72](../server/src/routes/api/toolsCapacity.js#L72) |
 | GET | `/tools/capacity-forecast` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1787](../server/src/routes/api/toolsCapacity.js#L1787) |
@@ -1767,6 +1767,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | `hwFullScopeOnly` | 3 | **전체 범위 계정만**(서버 하드웨어 정보 내보내기 — v2.967). GET /insights/fleet 과 같은 근거: 미귀속 베어메탈 하드웨어가 들어가 범위로 나눌 수 없다. |
 | `ownerIfAutoCentralToken` | 2 | 요청이 `autoCentralToken` 옵션을 쓸 때만 **설정 소유자**를 요구한다(평문 CENTRAL_TOKEN 을 원격 호스트에 기록하는 경로라 백업과 같은 등급). |
 | `requireOwnOtp` | 2 | **본인 OTP 재인증**(1회용·실패 잠금). 호스트 접근 제어 적용·확정처럼 되돌리기 어려운 동작에 붙는다. |
+| `installingFirst` | 2 | **넣는 중인 키 보호**(v3.10.0 — 7b 키 회전 · 삭제). 그 키를 서버에 넣는 SSH 공용 접속 작업이 진행 중이면 OTP 를 쓰기 전에 409 `key-installing`. |
 | `togglePrecheck` | 2 | SAN 플로우 비활성화 · 다시 켜기의 **사전 확인**(v2.940 반증 L-4) — 스위치 · dvc_ 이름 · 포탈 기록 · 지금 상태 · 엣지 버전을 OTP 재인증 **전에** 본다(거부할 요청이 OTP 를 써 버리지 않게). 404 · 400 · 409. |
 | `vaultFirst` | 2 | **새 로그인 키 저장 방식 검사**(v3.9.0 SSH 공용 접속 — 키 등록 · 받는 곳 승인). 자격증명 저장 방식이 암호화가 아니면 409 `keys-need-encryption`, 정책을 못 읽으면 503 `SECRETS_POLICY_UNAVAILABLE` — **OTP(`reauth`) 앞에** 두어 거절될 요청이 1회 비밀번호를 쓰지 않게 한다. 판정은 `keyStore.keyVaultIssue` 하나(저장 함수도 다시 본다). |
 | `pre` | 2 | **OTP 앞 사전 검사**(v3.10.0 SSH 공용 접속 — 승인할 사람 없음 · 같은 요청 대기 · 승인 기록 손상 · 중지 아님 · 키 상태 · 넣는 중인 키 · 데모). 1회용 OTP 를 쓰기 전에 값싸게 거른다. 판정은 본 함수가 다시 한다. |

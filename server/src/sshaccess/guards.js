@@ -38,9 +38,10 @@ function canApprove(name, users, adOn, { localOnly = false } = {}) {
   return !!(u.passwordHash || u.totpEnabled);
 }
 /**
- * 유효 소유자 목록에서 요청자(같은 신원 — AD 별칭 포함 · 점검 A2)를 뺀 이름들. 같은 글자(대소문자 무시)는 하나로 센다.
- * 신원(identityKey)으로 접지 않는다 — `jkim@corp` 와 `jkim@subsidiary` 처럼 다른 두 사람을 한 명으로 세어 혼자 끄던 것(1회차 A2).
- * (요청자와 같은 신원 글자인 다른 사람은 승인자에서 빠진다 — 자기 승인 판정과 같은 규칙. 막히는 쪽이라 안전하다.)
+ * 유효 소유자 목록에서 요청자(같은 신원 — AD 별칭 포함 · 점검 A2)를 뺀 이름들. **같은 글자만** 하나로 센다(대소문자도 가른다 —
+ * 먼저 소문자로 접으면 viewer `kim` 이 관리자 `Kim` 을 가려 진짜 승인자를 세지 않았다 · 1회차 반증 2). 판정(canApprove)은 정확 일치로 한다.
+ * 신원(identityKey)으로 접지 않는다 — `jkim@corp` · `jkim@subsidiary` 는 다른 두 사람이다(1회차 A2). 다만 요청자와 같은 신원 글자인 사람은 승인자에서 빠진다
+ * (자기 승인 판정과 같은 규칙 — 막히는 쪽).
  */
 function ownersBut(by) {
   let owners = [];
@@ -48,38 +49,60 @@ function ownersBut(by) {
   const me = by ? identityKey(by) : '';
   const seen = new Set(); const out = [];
   for (const raw of owners) {
-    const x = String(raw || '').trim(); const lcx = x.toLowerCase();
-    if (!x || (me && identityKey(x) === me) || seen.has(lcx)) continue;
-    seen.add(lcx); out.push(x);
+    const x = String(raw || '').trim();
+    if (!x || (me && identityKey(x) === me) || seen.has(x)) continue;
+    seen.add(x); out.push(x);
   }
   return out;
 }
+function ctx() {
+  let users = null; let adOn = false;
+  try { users = loadUsers() || []; } catch { users = null; }
+  try { const ad = loadAdConfig(); adOn = !!(ad && ad.enabled && ad.url); } catch { adOn = false; }
+  return { users, adOn };
+}
 /** 요청자 말고 승인할 수 있는 설정 소유자 이름들(못 읽으면 빈 목록 — 승인자가 없다고 본다). */
 export function otherOwners(by) {
-  let users = []; let adOn = false;
-  try { users = loadUsers() || []; } catch { return []; }
-  try { const ad = loadAdConfig(); adOn = !!(ad && ad.enabled && ad.url); } catch { adOn = false; }
+  const { users, adOn } = ctx();
+  if (!users) return [];
   return ownersBut(by).filter((x) => canApprove(x, users, adOn));
 }
-/** 승인할 수 있는 설정 소유자 전부(요청자 구분 없이 · 같은 신원은 하나로). 못 읽으면 빈 목록. */
+/** 승인할 수 있는 **로컬** 설정 소유자 이름들(‘승인자 쌍’ 증거용 — AD 이름은 로그인 세션을 본 뒤에만: noteOwnerSession). */
 export function approverNames() {
-  let users = []; let adOn = false;
-  try { users = loadUsers() || []; } catch { return []; }
-  try { const ad = loadAdConfig(); adOn = !!(ad && ad.enabled && ad.url); } catch { adOn = false; }
+  const { users, adOn } = ctx();
+  if (!users) return [];
   return ownersBut('').filter((x) => canApprove(x, users, adOn, { localOnly: true }));
 }
+/** 서로 **다른 신원**의 승인자 수 — 신원이 같은 두 계정(서로 승인할 수 없다)은 쌍이 아니다(1회차 반증 3 — 쌍으로 세어 영구히 잠겼다). */
+const distinctIdentities = (names) => new Set(names.map((x) => identityKey(x))).size;
 /**
- * 승인할 수 있는 소유자가 둘 이상이면 상태 파일에 ‘쌍을 봤다’(pairSeen)를 세운다 — 기동 때 · 화면 · 요청 · 주기 점검에서 부른다.
- * ‘승인자 0명이면 본인 OTP 로 끄기’ 지름길은 **pairSeen 이 아닐 때만** 연다(반증 R3 — 목록 기준(listed)이었던 첫 수정은 다른 소유자를 목록에서 빼면
- * 혼자 끌 수 있었고(R3), 거꾸로 화면에서 뺄 수 없는 파일 · 중앙 배포 소유자가 있으면 영영 잠겼다(R4)). 소유자가 실제로 한 명인 설치는 계속 혼자 끌 수 있다.
- * 한계: 기동 전 · 첫 관측 전에 다른 소유자를 승인 불가로 만든 경우는 막지 못한다(기동 때 바로 본다).
+ * 승인할 수 있는 소유자가 둘(다른 신원) 이상이면 상태 파일에 ‘쌍을 봤다’(pairSeen)를 세운다 — 기동 때 · 화면 · 요청 · 주기 점검에서 부른다.
+ * ‘승인자 0명이면 본인 OTP 로 끄기’ 지름길은 **pairSeen 이 아닐 때만** 연다(반증 R3 · R4 — 목록 기준은 버렸다). 소유자가 실제로 한 명인 설치는 계속 혼자 끌 수 있다.
+ * 쌍의 증거: 로컬 승인자 둘 · 다른 사람의 실제 승인(service.decideApproval) · AD 소유자가 이 화면에 들어온 세션(noteOwnerSession — 1회차 반증 1).
+ * 한계: 증거가 생기기 전에 다른 소유자를 승인 불가로 만든 경우는 막지 못한다(기동 때 바로 본다 — 로컬 계정).
  */
 export function notePair({ by = '' } = {}) {
   try {
     const g = ST.getGuards();
     if (g.unreadable || g.pairSeen) return;
-    if (approverNames().length >= 2) ST.markPairSeen({ by });
+    if (distinctIdentities(approverNames()) >= 2) ST.markPairSeen({ by });
   } catch { /* 관측 실패는 판정을 바꾸지 않는다(pairSeen 은 엄한 쪽으로만 움직인다) */ }
+}
+/**
+ * 소유자 등급을 통과한 세션이 이 화면에 들어왔다(라우트가 부른다). 그 사람이 로컬 계정이 아니고(AD) 다른 신원의 승인자가 있으면 쌍이다 —
+ * AD 공동 소유자를 목록에서 빼고 혼자 끄던 길(1회차 반증 1 — pairSeen 을 로컬 계정으로만 세웠다)을 막는다.
+ */
+export function noteOwnerSession(username) {
+  try {
+    const u = String(username || '').trim();
+    if (!u) return;
+    const g = ST.getGuards();
+    if (g.unreadable || g.pairSeen) return;
+    const { users, adOn } = ctx();
+    if (!users || !adOn || users.some((x) => String(x.username || '') === u)) { notePair({ by: u }); return; }
+    const me = identityKey(u);
+    if (approverNames().some((x) => identityKey(x) !== me)) ST.markPairSeen({ by: u });
+  } catch { /* */ }
 }
 /** 7b 등 다른 화면의 키 변경 라우트가 쓰는 거절 — 두 사람 승인이 켜져 있으면 승인 절차가 있는 화면으로 보낸다(우회 금지). */
 export function twoPersonRedirect() {
