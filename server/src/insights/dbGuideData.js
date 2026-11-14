@@ -5557,6 +5557,7 @@ export const DB_GUIDE_DATA = {
       "서버 표(‘dbr_server’): 서버마다 마지막 점검 결과·실패 이유, 로그 정렬 방향과 건수, 로그가 남아 있는 구간, 끊김 없이 읽은 구간의 시작(‘continuous_since’), 지난 점검에서 본 가장 새 항목의 시각, 끝까지 못 읽은 이유, 지금 디스크 목록",
       "기록 표(‘dbr_record’): 물리·가상 디스크 범주(PDR·VDR) 로그 원문 한 줄씩. 엣지 이름·서버·항목 Id 와 장비가 준 원래 시각으로 중복을 거릅니다. 첫 점검에서 찾은 과거 기록은 표시해 둡니다(메일 대상 아님).",
       "시리얼 표(‘dbr_serial’): 디스크 자리마다 본 시리얼과 처음·마지막으로 본 시각 — '아직 사용 중 / 교체됨' 을 확정하는 근거",
+      "서버 표의 과거 기록 읽기 열(v3.10.1): 디스크가 적어 둔 누적 값(재할당·보류·복구 불가 — ‘vals_json’, 처음 읽은 때와 늘어난 것을 본 때)과 시스템 이벤트 로그의 디스크 항목(탈거·장착·고장 — ‘sel_json’, 가장 새 200건)",
       "메타 표(‘meta’): 스키마 버전과 6시간 자동 점검의 마지막 실행 시각"
     ],
     "writer": "중앙의 디스크 배드 섹터 작업 관리(‘diskbad/jobs.js’)가 씁니다. 법인 서버는 그 법인 엣지가 작업을 가져가 로그를 읽고 25대씩 올린 결과를, 중앙 직결 서버는 중앙이 직접 읽은 결과를 서버 한 대씩 트랜잭션으로 적재합니다. 점검은 화면에서 누르거나(전체·법인·서버 1대) 자동 점검을 켰을 때 6시간마다 돕니다.",
@@ -5585,6 +5586,8 @@ export const DB_GUIDE_DATA = {
       "server/src/diskbad/jobs.js",
       "server/src/diskbad/summary.js",
       "server/src/diskbad/verdict.js",
+      "server/src/diskbad/diskvals.js",
+      "server/src/diskbad/sel.js",
       "server/src/routes/api/diskBad.js",
       "server/src/insights/dbLocation.js"
     ]
