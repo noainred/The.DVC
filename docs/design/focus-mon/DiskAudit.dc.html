@@ -46,6 +46,8 @@ body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR
 .seg button.on{background:#1e3a8a;color:#fff}
 .ag{display:grid;grid-template-columns:minmax(180px,1.2fr) 56px 60px 78px 92px 70px 70px 60px 110px 184px 104px;column-gap:12px;align-items:center;padding:0 16px;min-width:1180px;box-sizing:border-box}
 .dg{display:grid;grid-template-columns:minmax(200px,1.3fr) 92px 70px 64px minmax(120px,1fr) 104px 104px 150px minmax(170px,1.1fr);column-gap:12px;align-items:center;padding:0 16px;min-width:1180px;box-sizing:border-box}
+.xg{display:grid;grid-template-columns:minmax(220px,1.3fr) 120px 64px 56px 110px 96px 176px minmax(180px,1.2fr);column-gap:12px;align-items:center;padding:0 16px;min-width:1140px;box-sizing:border-box}
+.gh{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:8px 16px;background:#111a2c;border-bottom:1px solid #1f2a40;min-width:1140px;box-sizing:border-box}
 .rate{display:flex;align-items:center;gap:8px}
 .rate i{display:block;height:8px;border-radius:4px;background:#1b2a48;flex:1;min-width:40px;overflow:hidden}
 .rate i u{display:block;height:8px;border-radius:4px;background:#ef4444}
@@ -72,7 +74,7 @@ body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR
 <div style="max-width:1440px;margin:0 auto;box-sizing:border-box;padding:24px 32px 32px;display:flex;flex-direction:column;gap:14px">
   <div style="display:flex;flex-direction:column;gap:2px">
     <div class="dim" style="font-size:12px">특수 기능 › 서버 집중 모니터링 › 디스크 점검 — 등록한 서버에서 배드 섹터 점검 프로그램(RHEL 디스크 오류 이력 점검)을 돌리고 결과를 모아 봅니다</div>
-    <div class="dim" style="font-size:12px">가상의 서버 · 값입니다. 표의 줄을 누르면 아래 결과가 바뀝니다(kr-db-01 · kr-db-02 · us-db-01 을 자세히 그렸습니다). ‘묶어 보기’ 단추(법인별 · 디스크 모델별 · 서버 모델별 · 그룹별)를 눌러 보고, 묶음 줄을 누르면 그 묶음의 서버만 보입니다.</div>
+    <div class="dim" style="font-size:12px">가상의 서버 · 값입니다. 표의 줄을 누르면 아래 결과가 바뀝니다(kr-db-01 · kr-db-02 · us-db-01 을 자세히 그렸습니다). ‘묶어 보기’ 단추(법인별 · 디스크 모델별 · 법인 × 디스크 모델 · 서버 모델별 · 그룹별)를 눌러 보고, 묶음 줄을 누르면 그 묶음의 서버만 보입니다.</div>
   </div>
 
   <div class="kp">
@@ -141,6 +143,27 @@ body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR
       </sc-for>
     </div>
     <div class="cap" style="padding:0 16px">디스크는 <b>시리얼 · WWN 으로 하나씩</b> 셉니다(같은 디스크가 여러 근거에 나와도 1개). 로그 줄에 식별자가 없어 디스크에 붙이지 못한 기록은 여기에 넣지 않습니다 — 지금 {{ orphanText }}. 비율의 분모는 ‘점검한 서버에서 프로그램이 본 물리 디스크’ 이고 전체 보유 수량이 아닙니다. 디스크 10개 미만은 ‘표본 적음’ 으로 표시합니다.</div>
+    </sc-if>
+
+    <sc-if value="{{ isCross }}" hint-placeholder-val="{{ false }}">
+    <div class="row" style="padding:0 16px"><span class="dim" style="font-size:12.5px">먼저 묶기</span><div class="seg"><sc-for list="{{ outerBtns }}" as="b" hint-placeholder-count="2"><button type="button" class="{{ b.cls }}" onClick="{{ b.pick }}">{{ b.label }}</button></sc-for></div><span class="badge new">새 · 3차 요청</span><span class="cap">{{ crossNote }}</span></div>
+    <div class="tw">
+      <div class="xg th"><span>{{ crossHead }}</span><span>{{ crossHead2 }}</span><span style="text-align:right">디스크</span><span style="text-align:right">서버</span><span style="text-align:right">매체 오류 기록</span><span style="text-align:right">재할당 기록</span><span>기록 있는 디스크</span><span>어디서 봤나</span></div>
+      <sc-for list="{{ crossGroups }}" as="g" hint-placeholder-count="3">
+        <div class="gh"><b style="font-size:13.5px">{{ g.name }}</b><span class="badge">{{ g.sum }}</span><sc-if value="{{ g.hasBad }}" hint-placeholder-val="{{ false }}"><span class="badge bad">{{ g.badText }}</span></sc-if><span class="dim" style="font-size:12px">{{ g.cover }}</span></div>
+        <sc-for list="{{ g.rows }}" as="d" hint-placeholder-count="2">
+          <div class="xg tr clk" onClick="{{ d.open }}">
+            <span class="{{ d.nameCls }}" style="padding-left:18px;overflow-wrap:anywhere">{{ d.name }}</span><span class="dim">{{ d.kind }}</span>
+            <span class="num" style="text-align:right">{{ d.n }}</span><span class="num" style="text-align:right">{{ d.srv }}</span>
+            <span class="num" style="{{ d.mStyle }}">{{ d.media }}</span><span class="num" style="text-align:right">{{ d.re }}</span>
+            <span class="rate"><i><u style="{{ d.fill }}"></u></i><span class="num" style="min-width:96px">{{ d.rate }}</span></span>
+            <span class="dim" style="overflow-wrap:anywhere">{{ d.where }}</span>
+          </div>
+        </sc-for>
+        <sc-if value="{{ g.empty }}" hint-placeholder-val="{{ false }}"><div class="xg tr"><span class="dim" style="grid-column:1 / -1;padding-left:18px">{{ g.emptyText }}</span></div></sc-if>
+      </sc-for>
+    </div>
+    <div class="cap" style="padding:0 16px">줄을 누르면 그 법인에서 그 모델을 가진 서버만 보입니다. 디스크는 시리얼 · WWN 으로 하나씩 셉니다. 한 법인 안의 모델은 디스크 수가 적어 비율 대신 ‘기록 있는 수 / 본 수’ 로 적고, 10개 이상일 때만 비율을 함께 적습니다. 식별자가 없어 디스크에 붙이지 못한 기록({{ orphanText }})은 여기에 넣지 않습니다.</div>
     </sc-if>
 
     <div class="cap" style="padding:0 16px">숫자는 프로그램이 찾은 <b>기록 줄 수</b>이지 장애 횟수가 아닙니다(같은 일이 여러 로그에 겹쳐 남습니다). ‘—’ 는 점검하지 않았거나 읽지 못한 것이고 0 과 다릅니다. 0 도 ‘과거에 문제가 없었다’ 는 뜻이 아니라 ‘남아 있는 자료에서 찾지 못했다’ 입니다. 점검은 단추를 누를 때만 돌고 주기 실행은 없습니다.</div>
@@ -248,13 +271,18 @@ body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR
       <b>⑥</b><span>지난 점검과 견주어 ‘새 근거’ 표시 — (넣는다 · 같은 줄(종류 · 출처 · 식별자 · 기록)이 지난 회차에 없으면 ‘새’)</span>
       <b>⑦</b><span>iDRAC ‘디스크 배드 섹터’ 도구와 — (이번에는 서로 링크만. 판정을 합치지 않는다 — 저쪽은 iDRAC 기록, 이쪽은 OS 기록이라 근거가 다르다)</span>
       <b>⑧</b><span>새 기록 알림(메일) — (넣지 않는다 · 사람이 누를 때만 도는 점검이라)</span>
+      <b>⑨</b><span>법인 — (서버 등록에 ‘법인’ 칸을 더한다 · 비우면 담당 엣지의 법인이 하나일 때만 자동 · 그 밖은 ‘법인 미지정’)</span>
+      <b>⑩</b><span>디스크 모델을 얻는 방법 — (감싸는 실행 파일이 보고서 끝에 ‘디스크 목록’ 을 덧붙인다 · 프로그램은 그대로. 대안: 프로그램에 모델 출력을 더함 / iDRAC 재고와 시리얼로 맞춤)</span>
+      <b>⑪</b><span>‘모델별’ 의 뜻 — (디스크 모델 · 서버 모델 둘 다)</span>
+      <b>⑫</b><span>‘묶음 점검’ 단추 — (넣는다 · 노드당 동시 1대 한도는 그대로)</span>
+      <b>⑬</b><span>‘법인 × 디스크 모델’ 의 모양 — (묶음 목록: 법인 아래에 모델 줄 · ‘디스크 모델 먼저’ 로 뒤집기. 대안: 법인을 열로 놓는 격자 — 법인 28곳이면 가로로 길어집니다)</span>
     </div>
   </div>
 </div>
 </x-dc>
 <script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2300}}'>
 class Component extends DCLogic {
-  constructor(p) { super(p); this.state = { sel: 'kr-db-01', filter: 'all', picked: ['pl-db-02', 'kr-db-02'], started: {}, showScope: false, by: 'server', scope: null }; }
+  constructor(p) { super(p); this.state = { sel: 'kr-db-01', filter: 'all', picked: ['pl-db-02', 'kr-db-02'], started: {}, showScope: false, by: 'server', scope: null, outer: 'corp' }; }
   renderVals() {
     const S = this.state;
     const LIM = { node: 1, min: 20, gap: 10, keep: 10, days: 90 };
@@ -276,9 +304,9 @@ class Component extends DCLogic {
     // 묶어 보기에 쓰는 값 — [법인(''=미지정), 서버 모델(null=모름), 그룹, 본 물리 디스크 [[모델, 종류 · 크기, 수, 기록 있는 디스크, 매체, 재할당, 어디서]] | null=본 적 없음]
     const META = {
       'kr-db-01': ['한국', 'PowerEdge R740xd', 'DB', [['ST4000NM0035', 'HDD · 4 TB', 8, 1, 1, 1, 'kr-db-01 /c0/e32/s5 — PERC 카운터 · SMART']]],
-      'kr-db-02': ['한국', 'PowerEdge R740xd', 'DB', [['ST4000NM0035', 'HDD · 4 TB', 8, 0, 0, 0, '']]],
+      'kr-db-02': ['한국', 'PowerEdge R740xd', 'DB', [['ST4000NM0035', 'HDD · 4 TB', 6, 0, 0, 0, ''], ['SSDSC2KB480G8', 'SSD · 480 GB', 2, 0, 0, 0, '']]],
       'kr-bak-01': ['', 'PowerEdge R640', '백업', null],
-      'pl-db-01': ['폴란드', 'PowerEdge R740xd', 'DB', [['MG04ACA400N', 'HDD · 4 TB', 12, 0, 0, 0, '']]],
+      'pl-db-01': ['폴란드', 'PowerEdge R740xd', 'DB', [['MG04ACA400N', 'HDD · 4 TB', 8, 0, 0, 0, ''], ['ST4000NM0035', 'HDD · 4 TB', 4, 0, 0, 0, '']]],
       'pl-db-02': ['폴란드', 'PowerEdge R740xd', 'DB', null],
       'pl-was-01': ['폴란드', 'VMware Virtual Platform', 'WAS', []],
       'pl-was-03': ['폴란드', null, 'WAS', null],
@@ -291,7 +319,7 @@ class Component extends DCLogic {
     const modelOf = (s) => META[s[0]][1] || '모델 모름';
     const shortModel = (m) => m.replace('PowerEdge ', '').replace('VMware Virtual Platform', 'VMware 가상 머신');
     const KEYOF = { corp: corpOf, smodel: modelOf, group: (s) => META[s[0]][2], disk: (s) => (META[s[0]][3] || []).map((d) => d[0]) };
-    const inScope = (s) => { if (!S.scope) return true; const v = KEYOF[S.scope.k](s); return Array.isArray(v) ? v.includes(S.scope.v) : v === S.scope.v; };
+    const inScope = (s) => { if (!S.scope) return true; if (S.scope.k === 'cross') return corpOf(s) === S.scope.corp && KEYOF.disk(s).includes(S.scope.disk); const v = KEYOF[S.scope.k](s); return Array.isArray(v) ? v.includes(S.scope.v) : v === S.scope.v; };
     const ST = {
       done: ['badge ok', '점검함', '준비됨 · 판본 같음'], never: ['badge', '점검한 적 없음', '준비됨 · 판본 같음'], run: ['badge live', '실행 중', '지금 단계: 로그 수집 범위(journal)'],
       timeout: ['badge warn', '시한 초과 — 일부만', 'journal 을 읽다 끊김 · 결과 없음'], nosudo: ['badge warn', '준비 안 됨 — sudo 규칙 없음', 'python3 있음 · 파일 판본 같음'],
@@ -349,6 +377,7 @@ class Component extends DCLogic {
     const BY = {
       server: ['서버', '', ''], corp: ['법인별', '법인', '법인은 서버 등록의 ‘법인’ 칸입니다. 비워 두면 담당 엣지의 법인을 따르고, 중앙이 직접 맡았거나 엣지가 여러 법인을 맡으면 ‘법인 미지정’ 입니다.'],
       disk: ['디스크 모델별', '', '모델은 감싸는 실행 파일이 보고서 끝에 덧붙이는 ‘디스크 목록’ 구획에서 읽습니다(주신 프로그램의 보고서에는 모델이 없습니다).'],
+      cross: ['법인 × 디스크 모델', '', ''],
       smodel: ['서버 모델별', '서버 모델', '서버 모델은 준비 상태를 확인할 때 일반 계정으로 읽습니다(/sys/class/dmi/id — root 불필요).'], group: ['그룹별', '그룹', '대상 · 키 탭의 서버 그룹입니다.'],
     };
     const byBtns = Object.keys(BY).map((k) => ({ label: BY[k][0], cls: S.by === k ? 'on' : '', pick: () => this.setState({ by: k }) }));
@@ -364,6 +393,37 @@ class Component extends DCLogic {
       where: o.where.join(' · ') || '기록 없음', open: () => this.setState({ by: 'server', scope: { k: 'disk', v: model } }),
     }));
     const SCOPE_NAME = { corp: '법인', smodel: '서버 모델', group: '그룹', disk: '디스크 모델' };
+    // 법인 × 디스크 모델 — 디스크 한 묶음 = (서버, 모델)
+    const cells = [];
+    SV.forEach((s) => (META[s[0]][3] || []).forEach((d) => cells.push({ srv: s[0], corp: corpOf(s), model: d[0], kind: d[1], n: d[2], bad: d[3], media: d[4], re: d[5], where: d[6] })));
+    const rateText = (bad, n) => (n >= 10 ? (bad / n * 100).toFixed(1) + '% (' + bad + '/' + n + ')' : bad + ' / ' + n + ' · 표본 적음');
+    const fold = (list) => ({ n: list.reduce((a, c) => a + c.n, 0), bad: list.reduce((a, c) => a + c.bad, 0), media: list.reduce((a, c) => a + c.media, 0), re: list.reduce((a, c) => a + c.re, 0), srv: new Set(list.map((c) => c.srv)).size, where: list.map((c) => c.where).filter(Boolean).join(' · ') });
+    const byCorp = S.outer === 'corp';
+    const outerKeys = byCorp ? ORDER.corp : Array.from(new Set(cells.map((c) => c.model)));
+    const crossGroups = outerKeys.map((ok) => {
+      const mine = cells.filter((c) => (byCorp ? c.corp : c.model) === ok);
+      const innerKeys = Array.from(new Set(mine.map((c) => (byCorp ? c.model : c.corp))));
+      const t = fold(mine);
+      const svs = SV.filter((s) => corpOf(s) === ok);
+      const noRes = svs.filter((s) => s[6] == null).map((s) => s[0]);
+      return {
+        name: ok, sum: byCorp ? '서버 ' + svs.length + '대 중 결과 ' + (svs.length - noRes.length) + '대 · 물리 디스크 ' + t.n + '개' : mine[0].kind + ' · 디스크 ' + t.n + '개 · 법인 ' + innerKeys.length + '곳',
+        hasBad: t.bad > 0, badText: '기록 있는 디스크 ' + t.bad + '개',
+        cover: byCorp ? (noRes.length ? '결과 없는 서버: ' + noRes.slice(0, 3).join(' · ') + (noRes.length > 3 ? ' 외 ' + (noRes.length - 3) : '') : '전 서버 결과 있음') : (t.n >= 10 ? '전체 ' + rateText(t.bad, t.n) : '전체 ' + t.bad + ' / ' + t.n + ' · 표본 적음'),
+        empty: mine.length === 0, emptyText: '프로그램이 본 물리 디스크가 없습니다 — 점검 결과가 없거나 가상 머신뿐입니다.',
+        rows: innerKeys.map((ik) => {
+          const part = mine.filter((c) => (byCorp ? c.model : c.corp) === ik); const f = fold(part);
+          const corp = byCorp ? ok : ik; const model = byCorp ? ik : ok;
+          return {
+            name: ik, nameCls: byCorp ? 'mono' : '', kind: byCorp ? part[0].kind : Array.from(new Set(part.map((c) => c.srv))).join(' · '), n: String(f.n), srv: String(f.srv),
+            media: String(f.media), mStyle: 'text-align:right;' + (f.media ? 'color:#fca5a5;font-weight:700' : ''), re: String(f.re),
+            rate: rateText(f.bad, f.n), fill: 'width:' + (f.n ? Math.max(f.bad ? 4 : 0, f.bad / f.n * 100) : 0) + '%', where: f.where || '기록 없음',
+            open: () => this.setState({ by: 'server', scope: { k: 'cross', corp, disk: model } }),
+          };
+        }),
+      };
+    });
+    const outerBtns = [['corp', '법인 먼저'], ['model', '디스크 모델 먼저']].map(([k, l]) => ({ label: l, cls: S.outer === k ? 'on' : '', pick: () => this.setState({ outer: k }) }));
     const done = SV.filter((s) => s[6] != null).length;
     const kpis = [
       { label: '점검한 서버', v: done + ' / ' + SV.length, sub: '등록한 서버 가운데', color: '' },
@@ -448,7 +508,9 @@ class Component extends DCLogic {
     const isOther = !isFull && !isClean && !isPrep;
     return {
       byBtns, byNote: BY[S.by][2], isServer: S.by === 'server', isAgg, isDisk: S.by === 'disk', aggHead: BY[S.by][1], aggRows, diskRows,
-      hasScope: !!S.scope && S.by === 'server', scopeText: S.scope ? SCOPE_NAME[S.scope.k] + ' = ' + S.scope.v + ' ✕' : '', clearScope: () => this.setState({ scope: null }),
+      hasScope: !!S.scope && S.by === 'server', scopeText: !S.scope ? '' : S.scope.k === 'cross' ? '법인 = ' + S.scope.corp + ' · 디스크 모델 = ' + S.scope.disk + ' ✕' : SCOPE_NAME[S.scope.k] + ' = ' + S.scope.v + ' ✕',
+      isCross: S.by === 'cross', crossGroups, outerBtns, crossHead: byCorp ? '법인 › 디스크 모델' : '디스크 모델 › 법인', crossHead2: byCorp ? '종류 · 크기' : '서버',
+      crossNote: byCorp ? '법인마다 어떤 디스크 모델을 쓰고, 그중 어느 모델에 기록이 있는지 봅니다.' : '모델마다 어느 법인에 있고, 어느 법인에서 기록이 나왔는지 봅니다.', clearScope: () => this.setState({ scope: null }),
       orphanText: 'kr-db-01 4줄 · pl-db-01 41줄(서버 2대)',
       kpis, chips, rows, runPicked, pickedText: '고른 서버 ' + S.picked.length + '대', verdicts, disks, sources, events, scopeLines, install,
       isFull, isClean, isPrep, isOther, otherTitle: sel[0], otherCls: ST[selSt][0], otherSt: ST[selSt][1], otherNote: NOTE[selSt] || '',
