@@ -4778,3 +4778,97 @@ test('㉗-d 4회차 B — 홈이 파일(/dev/null)이면 없음(거두기 none �
   for (const p of ['YubiKey for user: ', 'Response: ', 'Enter secret phrase: ']) assert.deepEqual(await trial(p), ['""', 'SSH_NO_PASSWORD_METHOD'], `${p} — 비밀번호 말 없는 가리는 칸(OTP 말도 없는 글이어도 — 글이 있으면 비밀번호 말이 있어야 보낸다)`);
   for (const p of ['', 'Password for tokenadm@CORP: ']) assert.deepEqual(await trial(p), ['PW', ''], `‘${p}’ — 글 없는 칸 · 계정 이름의 token 은 강한 OTP 말이 아니다(단어 경계)`);
 });
+
+/* ── 4회차 반증(83fe809a) 회귀 ──────────────────────────────────────────── */
+/** 설정 폴더는 쓸 수 있고 지정한 파일만 못 읽게 한 채 자식 node 를 돌린다(root 면 폴더는 uid 65534 소유 · 파일은 root 0600 + setpriv 65534 · 비 root 면 파일 000). */
+function runWithUnreadableFiles(prep, unreadable, code) {
+  const base = fs.mkdtempSync(path.join(TMP, 'sshkl-r4r-')); TMP_DIRS.push(base); fs.chmodSync(base, 0o755);
+  const cfg = path.join(base, 'cfg'); fs.mkdirSync(cfg);
+  for (const [n, body] of Object.entries(prep)) fs.writeFileSync(path.join(cfg, n), body);
+  const script = path.join(base, 'probe.mjs');
+  fs.writeFileSync(script, `const imp = (p) => import(${JSON.stringify(`${SRC}/`)} + p);\nconst fs = await import('node:fs'); const path = await import('node:path');\n${code}`); fs.chmodSync(script, 0o644);
+  if (RUN_AS_ROOT) { fs.chownSync(cfg, 65534, 65534); for (const n of Object.keys(prep)) if (!unreadable.includes(n)) fs.chownSync(path.join(cfg, n), 65534, 65534); }
+  for (const n of unreadable) fs.chmodSync(path.join(cfg, n), RUN_AS_ROOT ? 0o600 : 0o000);
+  const env = { CONFIG_DIR: cfg, AUTH_ENABLED: 'true', DATA_SOURCE: 'live', HOME: base, PATH: process.env.PATH, SETTINGS_OWNERS: 'own', SSRF_ALLOW_LOOPBACK: 'true' };
+  const r = RUN_AS_ROOT
+    ? spawnSync('setpriv', ['--reuid=65534', '--regid=65534', '--clear-groups', process.execPath, script], { env, encoding: 'utf8' })
+    : spawnSync(process.execPath, [script], { env, encoding: 'utf8' });
+  for (const n of fs.readdirSync(cfg)) { try { fs.chmodSync(path.join(cfg, n), 0o600); } catch { /* */ } }
+  const out = String(r.stdout || '').trim().split('\n').pop();
+  try { return { ...JSON.parse(out), cfg }; } catch { assert.fail(`자식 출력이 JSON 이 아니다: ${out} ${r.stderr}`); }
+}
+
+test('㉘ 4회차 반증 — 등록부를 못 읽는 동안 서버를 저장하면 원본이 보존본으로 남는다 · 중지 기록 더하기가 쓰기에 실패하면 메모리도 그대로 · 등록부를 못 읽으면 다시 중지는 registryUnreadable · 키 저장소 손상 중 교체 · 삭제 승인 사전 검사는 503 · 복원은 대기 키의 옛 id 참조를 지금 id 로 옮기고 밝힌다 · 따라갈 수 없는 곳을 가리키는 링크 홈은 noaccess · 붙은 ‘xportal-ssh:’ 는 포탈 표식이 아니다', async () => {
+  // ① 등록부 읽기 오류 중 저장 — 원본(서버 3대)은 .corrupt.* 보존본으로(예전 4회차: 보존하지 않아 다음 저장이 원본을 덮었다)
+  const seed = subRun({ owners: 'own', users: [{ username: 'own', role: 'admin', totpEnabled: true, totpSecret: generateSecret() }], code: `
+    const BM = await imp('bmstor/registry.js');
+    for (const n of ['r4r-a', 'r4r-b', 'r4r-c']) BM.saveBmServer({ name: n, host: '10.9.40.' + (n.charCodeAt(4) - 96), port: 22, username: 'mon', mounts: ['/'], vcenterId: 'vcA', password: 'x' });
+    console.log(JSON.stringify({ text: fs.readFileSync(path.join(process.env.CONFIG_DIR, 'bm-storage.json'), 'utf8') }));` });
+  const r1 = runWithUnreadableFiles({ 'bm-storage.json': seed.text }, ['bm-storage.json'], `
+    const BM = await imp('bmstor/registry.js');
+    const err = !!BM.registryLoadError();
+    const w = BM.saveBmServer({ name: 'r4r-new', host: '10.9.40.9', port: 22, username: 'mon', mounts: ['/'], vcenterId: 'vcA', password: 'x' });
+    console.log(JSON.stringify({ err, w: w.ok }));`);
+  const kept = fs.readdirSync(r1.cfg).filter((n) => n.startsWith('bm-storage.json.corrupt.'));
+  assert.ok(r1.err && kept.length >= 1, `보존본이 남는다 ${JSON.stringify([r1, fs.readdirSync(r1.cfg)])}`);
+  const saved = kept.map((n) => fs.readFileSync(path.join(r1.cfg, n), 'utf8')).join('\n');
+  for (const n of ['r4r-a', 'r4r-b', 'r4r-c']) assert.ok(saved.includes(n), `${n} 이(가) 보존본에 있다`);
+  // ② 중지 기록 더하기 — 상태 쓰기 실패(파일 자리에 폴더)면 메모리의 중지 객체도 그대로 · 등록부를 못 읽으면 다시 중지는 registryUnreadable
+  const s2 = subRun({ owners: 'own', users: [{ username: 'own', role: 'admin', totpEnabled: true, totpSecret: generateSecret() }], code: `
+    const ST = await imp('sshaccess/state.js'); const f = path.join(process.env.CONFIG_DIR, ST.STATE_FILE_NAME);
+    ST.setCorpStop('vcA', { by: 'x', reason: 'x', servers: [{ id: 'bm_s1', addr: '10.0.0.1:22' }] });
+    fs.rmSync(f); fs.mkdirSync(f);
+    const w = ST.addStopServers('vcA', [{ id: 'bm_s2', addr: '10.0.0.2:22' }]);
+    console.log(JSON.stringify({ w: w.ok, ids: ST.stopFor('vcA').serverIds, addrs: ST.stopFor('vcA').addrs }));` });
+  assert.deepEqual([s2.w, s2.ids, s2.addrs], [false, ['bm_s1'], ['10.0.0.1:22']], `쓰기에 실패하면 메모리에도 더하지 않는다 ${JSON.stringify(s2)}`);
+  const s3 = subRun({ owners: 'own', users: [{ username: 'own', role: 'admin', totpEnabled: true, totpSecret: generateSecret() }], code: `
+    const { store } = await imp('store.js'); store.snapshot = { ...store.get(), vcenters: [{ id: 'vcA', name: 'A' }] };
+    const ST = await imp('sshaccess/state.js'); ST.setCorpStop('vcA', { by: 'x', reason: 'x' });
+    fs.writeFileSync(path.join(process.env.CONFIG_DIR, 'bm-storage.json'), '{ broken');
+    const SVC = await imp('sshaccess/service.js'); const r = await SVC.stopCorp('vcA', { by: 'own' });
+    console.log(JSON.stringify({ r: [r.ok, r.already, r.added, r.registryUnreadable === true], reason: r.reason }));` });
+  assert.deepEqual(s3.r, [true, true, 0, true], JSON.stringify(s3));
+  assert.match(s3.reason, /OS 계정 등록부를 읽지 못해 그 뒤 등록된 서버를 확인하지 못했습니다/);
+  // ③ 키 저장소 손상 중 교체 · 삭제 승인 사전 검사 — ‘지워짐(key-missing)’ 이 아니라 503
+  const s4 = subRun({ owners: 'own,own2', users: [{ username: 'own', role: 'admin', totpEnabled: true, totpSecret: generateSecret() }, { username: 'own2', role: 'admin', totpEnabled: true, totpSecret: generateSecret() }], code: `
+    const AP = await imp('approval/store.js');
+    const rq = AP.createRequest({ kind: 'ssh-key-rotate', title: 't', target: 'k_000000000001>k_000000000002', payload: { from: 'k_000000000001', to: 'k_000000000002' }, by: 'own' });
+    const dq = AP.createRequest({ kind: 'ssh-key-delete', title: 't', target: 'k_000000000001', payload: { keyId: 'k_000000000001' }, by: 'own' });
+    fs.writeFileSync(path.join(process.env.CONFIG_DIR, 'ssh-keys.json'), '{ broken');
+    const SVC = await imp('sshaccess/service.js');
+    const pick = (q) => { const r = SVC.approvalPrecheck(q.request.id, { approve: true, by: 'own2', digest: q.request.digest }); return r && [r.code, r.status]; };
+    console.log(JSON.stringify({ rot: pick(rq), del: pick(dq) }));` });
+  assert.deepEqual([s4.rot, s4.del], [['registry-unreadable', 503], ['registry-unreadable', 503]], JSON.stringify(s4));
+  // ④ 복원 — 대기 키의 옛 id(번들)를 가리키는 공통 계정 기본 키는 지금 id 로 · 바뀐 사실(key-id:)
+  const BUN = await import('../src/bmusage/onboard/keyBundle.js');
+  const cur = { keys: [{ id: 'k_curpend00r4', name: 'pend-r4', fingerprint: 'SHA256:FPR4', publicKey: 'ssh-ed25519 AAR4', privateKey: 'PKR4', status: 'pending' }], accounts: [] };
+  const bun = { keys: [{ id: 'k_oldpend00r4', name: 'pend-r4', fingerprint: 'SHA256:FPR4', publicKey: 'ssh-ed25519 AAR4', privateKey: '', status: 'pending' }],
+    accounts: [{ id: 'a_r4acc000001', name: 'acc-r4', kind: 'os', corp: 'vcA', username: 'svc', keyRef: 'k_oldpend00r4', password: '' }] };
+  const m = BUN.mergeRedactedKeyStore(JSON.stringify(bun), JSON.stringify(cur));
+  const mj = JSON.parse(m.text);
+  assert.deepEqual([mj.keys.map((k) => k.id), mj.accounts.find((a) => a.id === 'a_r4acc000001')?.keyRef], [['k_curpend00r4'], 'k_curpend00r4'], JSON.stringify(mj));
+  assert.ok(m.dropped.some((x) => x.startsWith('key-id:')), JSON.stringify(m.dropped));
+  // ⑤ 링크 홈 — 따라갈 수 없는 곳을 가리키면 noaccess · unreachable(예전: 링크를 지나 위로 올라가 ‘없음’) · 정상 링크는 정상
+  for (const shell of SHELLS) {
+    const base = fs.mkdtempSync(path.join(TMP, 'sshkl-lnk-')); TMP_DIRS.push(base); fs.chmodSync(base, 0o755);
+    const t = path.join(base, 't'); fs.mkdirSync(path.join(t, 'home', '.ssh'), { recursive: true }); fs.writeFileSync(path.join(t, 'home', '.ssh', 'authorized_keys'), `${OTHER}\n`);
+    const ok = path.join(base, 'ok'); fs.mkdirSync(path.join(ok, '.ssh'), { recursive: true }); fs.writeFileSync(path.join(ok, '.ssh', 'authorized_keys'), `${OTHER}\n`);
+    if (RUN_AS_ROOT) { fs.chmodSync(t, 0o700); fs.chmodSync(ok, 0o755); fs.chmodSync(path.join(ok, '.ssh'), 0o755); fs.chmodSync(path.join(ok, '.ssh', 'authorized_keys'), 0o644); }
+    else { fs.chmodSync(t, 0o600); CLOSERS.push(() => fs.chmodSync(t, 0o700)); }
+    fs.symlinkSync(path.join(t, 'home'), path.join(base, 'lnk-bad')); fs.symlinkSync(ok, path.join(base, 'lnk-ok'));
+    const bad = { h: path.join(base, 'lnk-bad') }; const good = { h: path.join(base, 'lnk-ok') };
+    const rm = AKS.removeScript({ publicKey: BPUB, keyId: BID });
+    assert.deepEqual([shRo(rm, bad, shell).m, shRo(AK.READ_COMMAND, bad, shell).out], [{ kind: 'fail', why: 'noaccess' }, '##AK unreachable\n'], shell);
+    assert.deepEqual([shRo(rm, good, shell).m, shRo(AK.READ_COMMAND, good, shell).out.split('\n')[0]], [{ kind: 'removed', removed: 0, unmarked: 0 }, '##AK present'], `${shell} — 정상 링크`);
+  }
+  // ⑦ 붙은 ‘xportal-ssh:k_…’ 는 포탈 표식이 아니다 — 같은 공개키의 사람 줄(unmarked 1)로 센다(예전: 포탈 줄 loose 로 세어 ‘바꾸기’ 대상이었다).
+  //    같은 키의 사람 줄이 있으면 넣기는 줄을 더하지 않는다(present-unmarked — 기존 규칙)
+  const line = KL.buildKeyLine({ publicKey: BPUB, keyId: BID });
+  for (const shell of SHELLS) {
+    const h = mkHome(); fs.mkdirSync(path.join(h, '.ssh'), { mode: 0o700 }); const f = path.join(h, '.ssh', 'authorized_keys');
+    fs.writeFileSync(f, `${BPUB} x${BMARK}\n`, { mode: 0o600 });
+    assert.deepEqual(sh(AKS.installScript({ publicKey: BPUB, keyId: BID, line }), h, shell).m, M('present-unmarked', 1), shell);
+    assert.deepEqual(sh(AKS.installScript({ publicKey: BPUB, keyId: BID, line, replace: true }), h, shell).m, M('present-unmarked', 1), `${shell} — 바꾸기를 켜도 그 줄을 포탈 줄로 바꾸지 않는다`);
+    assert.equal(fs.readFileSync(f, 'utf8'), `${BPUB} x${BMARK}\n`, `${shell} — 사람 줄 그대로`);
+  }
+});
