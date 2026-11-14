@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>공통 기능 — 상태 6종</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#60a5fa}a:hover{color:#93c5fd}
+</style>
+</helmet>
+<div style="box-sizing: border-box; min-height: 760px; padding: 24px 28px 36px; background: #0a0e17; color: #e6edf6; font-family: 'Inter', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; font-size: 13px; line-height: 1.55; display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px; align-content: start">
+
+  <section style="min-width: 0; display: flex; flex-direction: column; gap: 8px">
+    <h2 style="margin: 0; font-size: 12px; font-weight: 600; color: #8b9bb4">1 · 불러오는 중</h2>
+    <div style="min-height: 190px; box-sizing: border-box; background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 16px 18px; display: flex; align-items: center; justify-content: center; color: #8b9bb4">불러오는 중…</div>
+    <p style="margin: 0; font-size: 12px; color: #8b9bb4">화면을 열 때 한 번만 받습니다. 주기 폴링은 하지 않습니다(빌드 시점의 고정 값).</p>
+  </section>
+
+  <section style="min-width: 0; display: flex; flex-direction: column; gap: 8px">
+    <h2 style="margin: 0; font-size: 12px; font-weight: 600; color: #8b9bb4">2 · 목록이 실리지 않은 설치본</h2>
+    <div style="min-height: 190px; box-sizing: border-box; background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px">
+      <div style="font-weight: 600">이 설치본에는 공통 기능 목록이 실려 있지 않습니다</div>
+      <div style="color: #d5deec">목록은 빌드할 때 소스에서 만들어 설치본에 함께 싣습니다. 이 버전보다 뒤에 추가된 기능이라 파일이 없습니다 — 버전을 올리면 보입니다.</div>
+      <div style="display: flex; gap: 14px; font-size: 12px; color: #8b9bb4"><span>공용 모듈 —</span><span>공용 위치 밖 —</span></div>
+    </div>
+    <p style="margin: 0; font-size: 12px; color: #8b9bb4">숫자 자리는 0 이 아니라 ‘—’ 입니다.</p>
+  </section>
+
+  <section style="min-width: 0; display: flex; flex-direction: column; gap: 8px">
+    <h2 style="margin: 0; font-size: 12px; font-weight: 600; color: #8b9bb4">3 · 목록 파일을 읽지 못함</h2>
+    <div style="min-height: 190px; box-sizing: border-box; background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px">
+      <div style="padding: 8px 12px; border-radius: 8px; border: 1px solid #243049; border-left: 4px solid #ef4444; background: #111726; font-size: 12.5px">공통 기능 목록 파일을 읽지 못했습니다(형식이 맞지 않음). 모듈이 0개라는 뜻이 아닙니다.</div>
+      <div style="color: #d5deec">설치본 파일이 손상됐을 수 있습니다. 같은 버전을 다시 설치하면 파일이 새로 놓입니다.</div>
+    </div>
+    <p style="margin: 0; font-size: 12px; color: #8b9bb4">파일 조각 · 경로 원문은 응답과 화면에 싣지 않습니다.</p>
+  </section>
+
+  <section style="min-width: 0; display: flex; flex-direction: column; gap: 8px">
+    <h2 style="margin: 0; font-size: 12px; font-weight: 600; color: #8b9bb4">4 · 목록의 버전이 지금 포탈과 다름</h2>
+    <div style="min-height: 190px; box-sizing: border-box; background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px">
+      <div style="padding: 8px 12px; border-radius: 8px; border: 1px solid #243049; border-left: 4px solid #f59e0b; background: #111726; font-size: 12.5px">이 목록은 v3.8.3 빌드 때 만든 것입니다 · 지금 포탈은 v3.9.0 — 숫자와 모듈이 지금 소스와 다를 수 있습니다.</div>
+      <div style="color: #8b9bb4">목록과 표는 그대로 보여 줍니다(가리지 않습니다).</div>
+    </div>
+    <p style="margin: 0; font-size: 12px; color: #8b9bb4">릴리스 절차에서 목록을 다시 만들지 않았을 때만 생깁니다 — 테스트가 막는 경우입니다.</p>
+  </section>
+
+  <section style="min-width: 0; display: flex; flex-direction: column; gap: 8px">
+    <h2 style="margin: 0; font-size: 12px; font-weight: 600; color: #8b9bb4">5 · 찾는 것이 없음</h2>
+    <div style="min-height: 190px; box-sizing: border-box; background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start">
+      <div style="font-weight: 600">‘retryBackoff’ 와 맞는 공용 모듈이 없습니다</div>
+      <div style="color: #d5deec">모듈 이름 · 내보내는 이름 · 설명에서 찾았고, 공용 위치 밖 77개도 함께 찾았습니다. 도메인 폴더 안의 모듈은 이 목록에 없을 수 있습니다.</div>
+      <button type="button" style="font: inherit; font-size: 12.5px; min-height: 44px; padding: 5px 14px; border-radius: 8px; border: 1px solid #243049; background: #1a2236; color: #e6edf6; cursor: pointer">검색어 지우기</button>
+    </div>
+    <p style="margin: 0; font-size: 12px; color: #8b9bb4">‘없다’ 고 단정하지 않고 찾은 범위를 밝힙니다.</p>
+  </section>
+
+  <section style="min-width: 0; display: flex; flex-direction: column; gap: 8px">
+    <h2 style="margin: 0; font-size: 12px; font-weight: 600; color: #8b9bb4">6 · 권한 없음</h2>
+    <div style="min-height: 190px; box-sizing: border-box; background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px">
+      <div style="font-weight: 600">이 화면을 볼 권한이 없습니다</div>
+      <div style="color: #d5deec">공통 기능 목록은 관리자이면서 전체 범위인 계정만 볼 수 있습니다. 포탈 점검의 다른 보기와 같은 규칙입니다.</div>
+    </div>
+    <p style="margin: 0; font-size: 12px; color: #8b9bb4">기존 권한 안내 상자(ErrorBox)가 그대로 처리합니다 — 새 문구를 만들지 않습니다.</p>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":760}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>
