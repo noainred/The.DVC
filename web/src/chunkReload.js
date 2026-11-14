@@ -22,7 +22,9 @@ export function claimAutoReload(storage, now = Date.now()) {
   try {
     if (!storage) return false;
     const last = Number(storage.getItem(RELOAD_KEY)) || 0;
-    if (now - last < RELOAD_GAP_MS) return false;
+    // v3.10.8(공통 기능 점검 6회차): 남긴 시각이 지금보다 뒤면(시계를 되돌림 · 손댄 값) 예전엔 `now - last` 가 음수라
+    //   그 시각이 올 때까지 — 몇 시간이든 — 자동 새로고침이 막혔다. 미래 기록은 믿지 않고 지금 시각으로 다시 적는다.
+    if (now >= last && now - last < RELOAD_GAP_MS) return false;
     storage.setItem(RELOAD_KEY, String(now));
     return true;
   } catch { return false; }
