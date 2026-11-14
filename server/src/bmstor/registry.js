@@ -299,6 +299,25 @@ export function restoreBmServerKeyRef(id, previous = {}) {
   return { ok: true };
 }
 
+/**
+ * v3.10.0 키 로그인 설정 — 키 접속이 확인된 뒤 **저장 비밀번호를 지운다**(사람이 고른 선택).
+ *  · 서버에 키가 고정돼 있을 때만(지우고 나서 인증 수단이 하나도 남지 않게 하지 않는다) · 접속처가 화면이 본 것과 같을 때만.
+ *  · 비밀을 줄이는 쓰기다(묶지 않는다) — 부르는 곳은 `sshaccess/service.js` 하나(소스 스윕).
+ */
+export function clearBmServerPassword(id, { expectAddr = null } = {}) {
+  const data = load();
+  if (loadErr.get()) return { ok: false, code: 'registry-unreadable', status: 503, reason: 'OS 계정 등록부를 읽지 못해 바꾸지 않았습니다.' };
+  const s = data.servers.find((x) => x.id === String(id || ''));
+  if (!s) return { ok: false, code: 'not-found', status: 404, reason: '서버를 찾을 수 없습니다.' };
+  if (expectAddr != null && addrKey(s.host, s.port, s.username) !== String(expectAddr)) return { ok: false, code: 'moved', status: 409, reason: '서버 주소 · 포트 · 계정이 바뀌었습니다 — 비밀번호를 지우지 않았습니다.' };
+  if (!String(s.keyRef || '').trim() || s.osAuth === 'password') return { ok: false, code: 'no-key', status: 409, reason: '이 서버에 고정된 키가 없어 비밀번호를 지우지 않았습니다.' };
+  if (!s.password) return { ok: true, already: true };
+  const had = s.password;
+  s.password = '';
+  try { persist(); } catch (e) { s.password = had; return { ok: false, code: 'write-failed', status: 503, reason: `OS 계정 등록부를 쓰지 못했습니다(${String(e?.code || e?.message || e).slice(0, 60)}).` }; }
+  return { ok: true };
+}
+
 export function removeBmServer(id) {
   const data = load();
   const next = data.servers.filter((s) => s.id !== id);

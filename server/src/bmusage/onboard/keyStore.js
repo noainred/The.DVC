@@ -81,7 +81,8 @@ function normKey(k) {
     passphrase: typeof k.passphrase === 'string' ? k.passphrase : '',
     createdBy: t(k.createdBy, 64), createdAt: Number(k.createdAt) > 0 ? Number(k.createdAt) : 0,
     rotateAt: Number(k.rotateAt) > 0 ? Number(k.rotateAt) : null,
-    status: k.status === 'retired' ? 'retired' : 'active',
+    // v3.10.0: 'pending' = 두 사람 승인을 기다리는 키 — 저장은 됐지만 접속에 쓰지 않는다(keyMaterial 이 거절 · 승인 = activateKey).
+    status: k.status === 'retired' ? 'retired' : k.status === 'pending' ? 'pending' : 'active',
     retiredAt: Number(k.retiredAt) > 0 ? Number(k.retiredAt) : null,
     folderCorp: FOLDER_RE.test(t(k.folderCorp, 128)) ? t(k.folderCorp, 128) : '',
     folderServer: FOLDER_RE.test(t(k.folderCorp, 128)) && FOLDER_RE.test(t(k.folderServer, 128)) ? t(k.folderServer, 128) : '',
@@ -305,6 +306,7 @@ export function keyMaterial(id) {
   const k = load().keys.find((x) => x.id === t(id, 32));
   if (!k) return { ok: false, code: 'key-missing' };
   if (k.status === 'retired') return { ok: false, code: 'key-retired' };   // 감사 L-11: 퇴역 키로는 접속하지 않는다
+  if (k.status !== 'active') return { ok: false, code: 'key-pending' };    // v3.10.0: 승인 대기 키(활성만 쓴다 — 모르는 상태도 거절)
   if (_tampered.has(k.id)) return { ok: false, code: 'key-tampered' };      // v3.9.0: 저장된 원문의 지문이 등록 때와 다르다(바꿔치기 의심)
   if (!k.privateKey) return { ok: false, code: 'key-unreadable' };
   return { ok: true, privateKey: k.privateKey, passphrase: k.passphrase || '', fingerprint: k.fingerprint, name: k.name, id: k.id,
@@ -332,7 +334,7 @@ const dateMs = (v) => {
  * 키 등록. 원문을 직접 판정해 종류 · 비트 · 지문 · 공개키를 만든다.
  * @returns {{ok:true, key:object} | {ok:false, code:string, reason:string, status?:number}}
  */
-export function addKey(body = {}, { by = '', now = Date.now() } = {}) {
+export function addKey(body = {}, { by = '', now = Date.now(), pending = false } = {}) {
   const u = unreadable(); if (u) return u;
   const vi = keyVaultIssue(); if (vi) return vi;
   const name = t(body.name, 80);
@@ -352,7 +354,7 @@ export function addKey(body = {}, { by = '', now = Date.now() } = {}) {
   const key = {
     id: `k_${crypto.randomBytes(6).toString('hex')}`, name, algo: p.algo, sshType: p.sshType, bits: p.bits,
     fingerprint: p.fingerprint, publicKey: p.publicKey, privateKey: body.privateKey, passphrase: pass,
-    createdBy: t(by, 64), createdAt: now, rotateAt, status: 'active', retiredAt: null,
+    createdBy: t(by, 64), createdAt: now, rotateAt, status: pending ? 'pending' : 'active', retiredAt: null,
     folderCorp: fo.corp, folderServer: fo.server, features: body.features === undefined ? null : normFeatures(body.features),
   };
   d.keys.push(key);
@@ -426,6 +428,19 @@ export function setKeyPassphrase(id, passphrase, { now = Date.now() } = {}) {
 }
 
 /** 회전 표지만(참조 교체는 refs.js 가 등록부와 함께) — 옛 키를 retired 로. */
+/** 승인 대기 키를 쓸 수 있게 한다(두 사람 승인 뒤 — sshaccess/twoPerson.js). 지문이 요청 때와 같을 때만. */
+export function activateKey(id, { fingerprint = '' } = {}) {
+  const u = unreadable(); if (u) return u;
+  const d = draft();
+  const k = d.keys.find((x) => x.id === t(id, 32));
+  if (!k) return { ok: false, code: 'not-found', status: 404, reason: '키를 찾을 수 없습니다(요청 뒤 지워졌습니다).' };
+  if (k.status !== 'pending') return { ok: false, code: 'not-pending', status: 409, reason: '승인 대기 상태의 키가 아닙니다.' };
+  if (t(fingerprint, 80) !== k.fingerprint) return { ok: false, code: 'fingerprint-changed', status: 409, reason: '요청 때의 키와 지문이 다릅니다 — 승인하지 않았습니다.' };
+  k.status = 'active';
+  const c = commit(d); if (!c.ok) return c;
+  return { ok: true, key: publicKeyView(k) };
+}
+
 export function markKeyRetired(id, { now = Date.now() } = {}) {
   const u = unreadable(); if (u) return u;
   const d = draft();

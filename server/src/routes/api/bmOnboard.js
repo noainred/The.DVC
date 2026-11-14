@@ -24,6 +24,7 @@ import { ROW_CODE, WARN } from '../../bmusage/onboard/importAnalyze.js';
 import { TEMPLATE_COLUMNS, MAX_UPLOAD_BYTES, MAX_ROWS, parseOnboardFile } from '../../bmusage/onboard/importParse.js';
 import * as KS from '../../bmusage/onboard/keyStore.js';
 import * as REFS from '../../bmusage/onboard/refs.js';
+import { twoPersonRedirect } from '../../sshaccess/guards.js';   // v3.10.0: 두 사람 승인이 켜져 있으면 키 등록 · 교체 · 삭제는 승인 절차가 있는 화면으로(우회 금지)
 
 const adminOnly = requireRole('admin');
 const toolsPerm = requirePerm('tools');
@@ -37,7 +38,10 @@ const keyAdmin = [adminOnly, toolsPerm, requireSettingsOwner, reauth];
  * keyStore.addKey 도 같은 검사를 다시 한다(이 앞단은 OTP 를 아끼려는 것 — 판정은 keyVaultIssue 하나).
  */
 const keyVaultFirst = (_req, res, next) => { const v = KS.keyVaultIssue(); if (v) return send(res, v); return next(); };
-const keyAddGate = [adminOnly, toolsPerm, requireSettingsOwner, keyVaultFirst, reauth];
+/** 두 사람 승인이 켜져 있으면 이 화면의 키 등록 · 교체 · 삭제를 받지 않는다 — OTP 를 쓰기 전에 거절한다. */
+const twoPersonFirst = (_req, res, next) => { const v = twoPersonRedirect(); if (v) return send(res, v); return next(); };
+const keyAddGate = [adminOnly, toolsPerm, requireSettingsOwner, twoPersonFirst, keyVaultFirst, reauth];
+const keyChangeGate = [adminOnly, toolsPerm, requireSettingsOwner, twoPersonFirst, reauth];
 
 const t = (v, max = 256) => (typeof v === 'string' ? v : v == null ? '' : String(v)).slice(0, max).trim();
 const bodyOf = (req) => (req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {});
@@ -99,7 +103,7 @@ export function registerBmOnboard(api, deps = {}) {
     send(res, r);
   });
 
-  api.post('/tools/bm-usage/ssh-keys/rotate', ...keyAdmin, (req, res) => {
+  api.post('/tools/bm-usage/ssh-keys/rotate', ...keyChangeGate, (req, res) => {
     const b = bodyOf(req);
     const r = REFS.rotateKey(t(b.from, 32), t(b.to, 32));
     logAudit({ user: who(req), action: 'bm-usage.ssh-key.rotate', target: `${t(b.from, 32)}→${t(b.to, 32)}`, ip: req.ip || '',
@@ -109,7 +113,7 @@ export function registerBmOnboard(api, deps = {}) {
     res.json({ ok: true, servers: r.servers, accounts: r.accounts, retestAdvised: r.servers.length > 0 });
   });
 
-  api.delete('/tools/bm-usage/ssh-keys/:id', ...keyAdmin, (req, res) => {
+  api.delete('/tools/bm-usage/ssh-keys/:id', ...keyChangeGate, (req, res) => {
     const r = REFS.deleteKeyIfUnused(t(req.params.id, 32));
     logAudit({ user: who(req), action: 'bm-usage.ssh-key.delete', target: t(req.params.id, 32), ip: req.ip || '', detail: JSON.stringify({ ok: !!r.ok, code: r.code }).slice(0, 200) });
     send(res, r);

@@ -33,6 +33,8 @@ const VAULT = await import('../src/security/secretVault.js');
 VAULT.saveSecretsPolicy({ mode: 'encrypted', level: 1 });
 const P = await import('../src/bmusage/onboard/keyParse.js');
 const KS = await import('../src/bmusage/onboard/keyStore.js');
+// v3.10.0: 두 사람 승인(기본 켬)이면 이 화면의 키 등록 · 교체 · 삭제는 409 로 SSH 공용 접속 화면에 보낸다 — 이 파일은 7b 본래 동작을 본다(끄고 시작 · 켠 동작은 sshKeyLogin3100).
+(await import('../src/sshaccess/state.js')).setGuards({ twoPerson: false }, { by: 'test' });
 const REFS = await import('../src/bmusage/onboard/refs.js');
 const BM = await import('../src/bmstor/registry.js');
 

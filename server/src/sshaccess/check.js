@@ -29,7 +29,7 @@ export function checkKeyDrift({ now = Date.now() } = {}) {
  * @param {{now?:number, policyMode?:string, inbox?:{items:object[], exists:boolean, unknownFolders:string[]}|null, integrity?:object|null,
  *          corpName?:(id:string)=>string}} o
  */
-export function buildKeyCheck({ now = Date.now(), policyMode = '', inbox = null, drift = null, servers = null, corpName = (x) => x } = {}) {
+export function buildKeyCheck({ now = Date.now(), policyMode = '', inbox = null, drift = null, servers = null, corpName = (x) => x, guards = null, pendingApprovals = null } = {}) {
   const items = [];
   const add = (level, code, title, detail, extra = {}) => items.push({ level, code, title, detail, ...extra });
   const storeErr = KS.keyStoreLoadError();
@@ -72,6 +72,7 @@ export function buildKeyCheck({ now = Date.now(), policyMode = '', inbox = null,
   // ⑤-2 서버 쪽(점검 B-1 · B-4) — 폴더 · 기능 때문에 접속하지 못하는 서버 · 법인 칸이 없어 사용 중지가 닿지 않는 서버(service 가 계산해 넘긴다)
   if (servers) {
     if (servers.blocked?.length) add('warn', 'placement-blocked', `키 폴더 · 기능 때문에 키로 접속하지 못하는 서버 ${servers.blocked.length}대`, '서버의 키를 이 서버 폴더 · 법인 공통 폴더의 키로 고르거나 키의 기능을 더하세요(수집이 이 사유로 실패합니다).', { files: servers.blocked.slice(0, 50) });
+    if (servers.unrestricted?.length) add('warn', 'restrict-missing', `키 줄에 서버 쪽 제한이 없는 서버 ${servers.unrestricted.length}대`, '서버의 authorized_keys 에서 읽은 그 키 줄에 출발지 제한 · 포워딩 금지가 없습니다 — ‘키 로그인 설정’ 으로 다시 넣으면 제한이 붙습니다(마지막으로 읽은 내용 기준).', { files: servers.unrestricted.slice(0, 50) });
     if (servers.noCorp?.length) add('warn', 'no-corp-key', `법인이 지정되지 않았는데 키로 접속하는 서버 ${servers.noCorp.length}대`, '법인 키 사용 중지가 이 서버에는 닿지 않습니다(법인을 모른다) — 서버 등록에서 법인(vCenter)을 지정하세요.', { files: servers.noCorp.slice(0, 50) });
   }
   // ⑥ 받는 곳
@@ -82,6 +83,12 @@ export function buildKeyCheck({ now = Date.now(), policyMode = '', inbox = null,
     if (looseFiles.length) add('warn', 'inbox-perm', `다른 계정이 읽을 수 있는 키 파일 ${looseFiles.length}개`, '받는 곳의 파일은 0600 이어야 합니다.', { files: looseFiles.map((x) => x.relPath).slice(0, 50) });
     if (inbox.unknownFolders?.length) add('warn', 'inbox-unknown', `법인 · 서버를 모르는 폴더 ${inbox.unknownFolders.length}개`, '폴더 이름이 지금 있는 법인 · 서버와 맞지 않아 읽지 않았습니다.', { files: inbox.unknownFolders.slice(0, 50) });
   }
+  // ⑥-2 보호 장치 · 승인 대기(v3.10.0)
+  if (guards && !guards.unreadable) {
+    if (!guards.twoPerson) add('warn', 'two-person-off', '두 사람 승인이 꺼져 있음', '키 등록 · 교체 · 삭제 · 사용 재개가 본인 OTP 만으로 실행됩니다 — 설정 소유자가 둘 이상이면 켜 두세요.');
+    if (!guards.serverRestrict) add('warn', 'restrict-off', '서버 쪽 제한이 꺼져 있음', '서버에 넣는 키 줄에 출발지 제한 · 포워딩 금지를 붙이지 않습니다 — 키가 새면 다른 곳에서도 쓸 수 있습니다.');
+  }
+  if (pendingApprovals) add('warn', 'approvals-pending', `승인을 기다리는 요청 ${pendingApprovals}건`, '다른 설정 소유자가 승인해야 실행됩니다 — 24시간이 지나면 사라집니다.');
   // ⑦ 사용 중지
   if (stateLoadError()) add('bad', 'state-unreadable', 'SSH 공용 접속 상태 파일을 읽지 못함', '사용 중지 기록을 모르므로 모든 키 접속을 멈췄습니다.');
   else for (const s of listStops()) add('bad', 'corp-stopped', `${corpName(s.corp)} — 키 사용 중지 중`, `${t(s.by, 64) || '—'} · ${new Date(s.at || now).toISOString().slice(0, 16).replace('T', ' ')} UTC${s.reason ? ` · ${t(s.reason, 200)}` : ''}`, { corp: s.corp });

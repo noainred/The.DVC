@@ -45,6 +45,8 @@ const INB = await import('../src/sshaccess/inbox.js');
 const AK = await import('../src/sshaccess/authorizedKeys.js');
 const SVC = await import('../src/sshaccess/service.js');
 const CHK = await import('../src/sshaccess/check.js');
+// 이 파일은 1단계 동작(본인 OTP 만으로 실행)을 본다 — 두 사람 승인(v3.10.0 · 기본 켬)은 sshKeyLogin3100.test.js 가 따로 본다.
+assert.ok(ST.setGuards({ twoPerson: false }, { by: 'test' }).ok);
 const { store } = await import('../src/store.js');
 store.snapshot = { ...store.get(), vcenters: [{ id: 'vcA', name: 'KR-SEL' }, { id: 'vcB', name: 'PL-WAW' }] };
 
@@ -213,11 +215,11 @@ test('③ 키 바꿔치기 감시 — 디스크 파일이 포탈이 쓴 내용�
   await SVC.runSshAccessScan();
   assert.equal(ST.listEvents({ limit: 300 }).filter((e) => e.kind === 'key-changed-outside' && e.detail === victim.fingerprint).length, 1);
   // 사람이 ‘받아들이기’ — 디스크가 새 기준. 그래도 원문 ↔ 지문이 다른 키는 첫 사용 대조가 막는다(두 번째 겹)
-  assert.equal(SVC.reloadKeyStore({ by: 'own' }).ok, true);
+  assert.equal((await SVC.reloadKeyStore({ by: 'own' })).ok, true);
   assert.equal(KS.tamperedKeyIds().length, 0, '표지를 풀었다');
   assert.equal(REFS.resolveOsAuth(srv, { feature: 'bm-usage' }).code, 'key-tampered', '원문이 지문과 다르다');
   fs.writeFileSync(file, orig);
-  assert.equal(SVC.reloadKeyStore({ by: 'own' }).ok, true);
+  assert.equal((await SVC.reloadKeyStore({ by: 'own' })).ok, true);
   assert.equal(REFS.resolveOsAuth(srv, { feature: 'bm-usage' }).ok, true, '원래대로 되돌리면 풀린다');
   assert.deepEqual(CHK.checkKeyDrift().changed, []);
   assert.ok(ST.listEvents({ limit: 300 }).some((e) => e.kind === 'keystore-reloaded' && e.by === 'own'));
@@ -232,7 +234,7 @@ test('③ 키 바꿔치기 감시 — 디스크 파일이 포탈이 쓴 내용�
   assert.deepEqual(CHK.checkKeyDrift().changed, [v2.id], '재시작 뒤에도');
   assert.equal(REFS.resolveOsAuth(srv, { feature: 'bm-usage' }).code, 'key-tampered');
   fs.writeFileSync(file, orig);
-  assert.equal(SVC.reloadKeyStore({ by: 'own' }).ok, true);
+  assert.equal((await SVC.reloadKeyStore({ by: 'own' })).ok, true);
   assert.equal(REFS.resolveOsAuth(srv, { feature: 'bm-usage' }).ok, true);
 });
 
@@ -511,7 +513,8 @@ test('⑪ 복원 제외 · 소스 스윕 — 상태 파일은 복원하지 않�
   assert.match(rt, /api\.post\('\/settings\/ssh-access\/reload-keystore', \.\.\.ownerWrite/);
   assert.doesNotMatch(rt, /ST\.(setCorpStop|clearCorpStop|addEvent|reload)/, '상태 쓰기는 service 를 거친다(사용 중지는 서버 목록과 함께)');
   const ob = stripComments(fs.readFileSync(path.join(SRC, 'routes/api/bmOnboard.js'), 'utf8'));
-  assert.match(ob, /const keyAddGate = \[adminOnly, toolsPerm, requireSettingsOwner, keyVaultFirst, reauth\];/);
+  assert.match(ob, /const keyAddGate = \[adminOnly, toolsPerm, requireSettingsOwner, twoPersonFirst, keyVaultFirst, reauth\];/);
+  assert.match(ob, /const keyChangeGate = \[adminOnly, toolsPerm, requireSettingsOwner, twoPersonFirst, reauth\];/, 'v3.10.0: 두 사람 승인이 켜져 있으면 7b 화면의 키 교체 · 삭제도 OTP 전에 거절');
   assert.match(ob, /api\.post\('\/tools\/bm-usage\/ssh-keys', \.\.\.keyAddGate/);
   // 폴러 두 곳이 기능 id 를 밝힌다(빈 기능 id = 목록이 있는 키 거절)
   assert.match(fs.readFileSync(path.join(SRC, 'bmstor/poller.js'), 'utf8'), /\)\), \{ feature: 'bm-storage' \}\);/);
@@ -532,7 +535,7 @@ test('⑫ 법인 사용 중지 — 중지할 때 그 법인 서버(id · 접속�
   assert.equal(REFS.resolveOsAuth({ ...asIs, id: 'bm_new', vcenterId: '' }, { feature: 'conn-test' }).code, 'corp-stopped', '법인 없는 새 항목 · 같은 접속처');
   assert.equal(REFS.resolveOsAuth({ ...asIs, id: 'bm_vcb', vcenterId: 'vcB' }, { feature: 'conn-test' }).ok, true, '다른 법인의 같은 사설 주소 서버는 막지 않는다(반증 D2 — 법인끼리 IP 가 겹친다)');
   assert.equal(REFS.resolveOsAuth({ ...asIs, id: 'bm_other', host: '10.99.0.1', vcenterId: '' }, { feature: 'conn-test' }).ok, true, '다른 서버는 그대로');
-  assert.equal(SVC.resumeCorp('vcA', { by: 'own' }).ok, true);
+  assert.equal((await SVC.resumeCorp('vcA', { by: 'own' })).ok, true);
   assert.equal(REFS.resolveOsAuth({ ...asIs, vcenterId: '' }, { feature: 'conn-test' }).ok, true);
   assert.equal(ST.clearCorpStop('toString', { by: 'own' }).code, 'not-stopped', '프로토타입 이름을 중지 기록으로 읽지 않는다(반증 D7)');
   assert.equal(ST.stopFor('constructor'), null);
@@ -566,7 +569,7 @@ test('⑭ 집중 모니터링은 분마다 자격을 다시 해석한다 — 세
   assert.ok(SVC.stopCorp('vcA', { by: 'own', reason: 't' }).ok);
   const r1 = await FR.refreshFocusOsHost(start);
   assert.deepEqual([r1.authErrorCode, r1.privateKey, r1.password], ['corp-stopped', undefined, '']);
-  assert.ok(SVC.resumeCorp('vcA', { by: 'own' }).ok);
+  assert.ok((await SVC.resumeCorp('vcA', { by: 'own' })).ok);
   assert.equal((await FR.refreshFocusOsHost({ ...start, host: '10.1.1.1' })).authErrorCode, 'moved');
   assert.equal((await FR.refreshFocusOsHost({ ...start, id: 'bm_gone' })).authErrorCode, 'gone');
   const legacy = { host: '10.0.0.1', password: 'pw' };
@@ -640,7 +643,7 @@ test('⑰ 반증 2차 — 예약 복원은 적용 시점 파일과 다시 합친
   assert.equal(REFS.resolveOsAuth({ id: 'q1', name: 'q', host: '10.0.0.66', vcenterId: 'vcA', credRef: acc.id }, { feature: 'conn-test' }).code, 'account-tampered');
   assert.ok(CHK.buildKeyCheck({ policyMode: 'encrypted', drift: CHK.checkKeyDrift() }).items.some((i) => i.code === 'account-changed-outside' && i.level === 'bad'));
   fs.writeFileSync(file, orig);
-  assert.equal(SVC.reloadKeyStore({ by: 'own' }).ok, true);
+  assert.equal((await SVC.reloadKeyStore({ by: 'own' })).ok, true);
   assert.equal(REFS.resolveOsAuth({ id: 'q1', name: 'q', host: '10.0.0.66', vcenterId: 'vcA', credRef: acc.id }, { feature: 'conn-test' }).ok, true);
   // 폴러 두 곳 — 자격 해석이 막은 결과는 사용 기록에 적지 않는다
   const src = (f) => fs.readFileSync(path.join(HERE, '../src', f), 'utf8');
