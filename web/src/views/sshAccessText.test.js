@@ -814,3 +814,42 @@ describe('SSH 공용 접속 화면 — 규약', () => {
     expect(st).toMatch(/\{ k: 'ssh-access', label: 'SSH 공용 접속', C: SshAccessSettings, group: 'security'/);
   });
 });
+
+describe('5회차 반증 R5R-2 · R5R-3 — 읽기는 됐는데 기록에 적지 못함 · 등록부 못 읽음 띠', () => {
+  it('saved:false 는 따로 말한다(warn · ‘기록 파일에 적지 못했습니다’) — 파일 없음과 겹쳐도 · 그 밖의 꼴은 그대로', () => {
+    const a = installedReadText({ ok: true, keys: [{}, {}], saved: false });
+    expect(a.tone).toBe('warn');
+    expect(a.text).toContain('서버에 들어 있는 키 2줄을 읽었습니다');
+    expect(a.text).toContain('읽은 키 기록 파일에 적지 못했습니다');
+    expect(a.text.endsWith('.')).toBe(true); expect(a.text).not.toContain('..');
+    const m = installedReadText({ ok: true, keys: [], error: '', missing: true, saved: false });
+    expect(m.tone).toBe('warn');
+    expect(m.text).toContain('서버 계정에 authorized_keys 파일이 없습니다(키 0개)');
+    expect(m.text).toContain('기록 파일에 적지 못했습니다');
+    const c = installedReadText({ ok: true, keys: [{}], truncated: 2, saved: false });
+    expect(c.text).toContain('2줄은 상한을 넘어 읽지 않음'); expect(c.text).toContain('적지 못했습니다');
+    // saved:true · 없음은 예전 그대로(초록 · 중립)
+    expect(installedReadText({ ok: true, keys: [{}], saved: true })).toEqual({ text: '서버에 들어 있는 키 1줄을 읽었습니다.', tone: 'ok' });
+    expect(installedReadText({ ok: true, keys: [], missing: true, saved: true })).toEqual({ text: '서버 계정에 authorized_keys 파일이 없습니다(키 0개).', tone: 'muted' });
+    // 읽기 실패가 먼저다(기록 여부와 무관)
+    const rf = installedReadText({ ok: true, keys: [], readFailed: true, error: '권한', saved: false });
+    expect(rf.text).toBe('서버에 들어 있는 키를 읽지 못했습니다 — 권한.'); expect(rf.tone).toBe('warn');
+    // 서버가 saved 를 싣는다
+    expect(serverSrc('sshaccess/service.js')).toMatch(/saved: !!saved\.ok/);
+  });
+  it('키 고르기 창은 saved:false 응답의 keys 를 그 창에 보인다(fresh) — 다시 읽은 목록 대신 ‘모름’ 만 보이지 않게(소스)', () => {
+    const jsx = fs.readFileSync(path.join(HERE, 'SshAccessSettings.jsx'), 'utf8');
+    expect(jsx).toMatch(/const \[fresh, setFresh\] = useState\(null\);/);
+    expect(jsx).toMatch(/const inst = fresh \|\| c\?\.installed \|\| null;/);
+    expect(jsx).toMatch(/setFresh\(r\.saved === false \? \{ at: Date\.now\(\), keys: Array\.isArray\(r\.keys\) \? r\.keys : \[\], error: r\.error \|\| '', unsaved: true \} : null\);/);
+    expect(jsx).toMatch(/\{inst && !inst\.error && \(\s*<ul className="ssa-list">\{\(inst\.keys \|\| \[\]\)\.map\(/);
+    expect(jsx).toMatch(/inst\.unsaved \? ' · 기록 파일에 적지 못함/);
+    expect(jsx).not.toMatch(/c\.installed\.keys\.map\(/);
+  });
+  it('bm-storage 화면 — 응답의 registryUnreadable 이면 빈 목록 · 주기가 실제 값이 아니라는 띠(소스)', () => {
+    const jsx = fs.readFileSync(path.join(HERE, 'tools/BmStorageTool.jsx'), 'utf8');
+    expect(jsx).toMatch(/\{data\.registryUnreadable && \(\s*<div className="banner bad" role="alert"/);
+    expect(jsx).toMatch(/아래의 빈 목록 · 주기는 실제 값이 아닙니다/);
+    expect(serverSrc('routes/api/bmstor.js')).toMatch(/\.\.\.\(registryReadFailed\(\) \? \{ registryUnreadable: true \} : \{\}\)/);
+  });
+});
