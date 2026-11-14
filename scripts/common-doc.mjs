@@ -12,6 +12,7 @@
  *    사용 영역 수 · 그 모듈을 가리키는 테스트 파일 수.
  *  · **공용 위치 밖인데 널리 쓰이는 모듈** — 사실상 공통 기능인데 도메인 폴더에 있는 것(서버는 영역 수, 웹은 사용처 수로도).
  *  · **살펴볼 것** — import 사용처가 없는 공용 모듈 · 서버와 웹에 같은 이름으로 두 벌 있는 모듈.
+ *  · 같은 내용을 화면(포탈 점검 › 공통 기능)이 읽는 JSON 으로도 낸다(`OUT_JSON` — v3.10 · 설계 docs/design/common-catalog).
  *
  * 규약:
  *  · **'못 읽은 것' 을 조용히 넘기지 않는다**(v2.563 `docsGen2452` 사고): 공용 위치가 비었거나, 내보내기를
@@ -22,7 +23,7 @@
  *  · 사용처는 **정적 import · 재수출 · 문자열 리터럴 동적 import** 만 센다. 경로를 런타임에 조합하는
  *    동적 import 는 세지 못한다 — 그 파일 목록을 문서 머리말에 밝힌다. 테스트는 '실재 모듈을 가리키는 경로 문자열' 로 센다.
  *
- * 사용: node scripts/common-doc.mjs          (docs/COMMON.md 갱신)
+ * 사용: node scripts/common-doc.mjs          (docs/COMMON.md · server/src/portalcheck/commonCatalog.json 갱신)
  *       node scripts/common-doc.mjs --check  (갱신이 필요하면 1 로 종료 — CI 에서 씀)
  */
 import fs from 'node:fs';
@@ -32,6 +33,15 @@ import { stripComments } from '../server/test/_stripComments.js';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const OUT = path.join(ROOT, 'docs', 'COMMON.md');
+/**
+ * 화면(포탈 점검 › 공통 기능)이 읽는 JSON. **`server/src` 안에 둔다** — 배포본에는 `web/src`·`server/test`·`scripts/` 가 없어 포탈이
+ * 실행 중에 목록을 다시 만들 수 없고(`packaging/offline/build-package.sh` 는 server/src · web/dist 만 담는다), `web/public` 에 두면
+ * 로그인 없이 받을 수 있다(`web/dist` 는 인증 없이 정적 서빙 — 목록에는 서버 내부 모듈의 설명이 들어 있다).
+ * 설계: docs/design/common-catalog/README.md §4.2.
+ */
+export const OUT_JSON = path.join(ROOT, 'server', 'src', 'portalcheck', 'commonCatalog.json');
+/** 모듈 하나에 싣는 테스트 파일 이름 상한(화면 상세용 — 개수는 `tests` 가 따로 말한다). */
+export const TEST_FILES_MAX = 30;
 
 /**
  * 공용 위치. `deep` 이면 하위 폴더까지, `only` 는 그 폴더 바로 아래 파일만.
@@ -300,10 +310,14 @@ export function buildCatalog(root = ROOT) {
 
   const row = (r) => {
     const i = info.get(r) || { importers: new Set(), testImporters: new Set() };
-    const areas = new Set([...i.importers].map(areaOf));
+    const counts = new Map();
+    for (const f of i.importers) { const a = areaOf(f); counts.set(a, (counts.get(a) || 0) + 1); }
     return {
       file: r, summary: i.summary || '', exports: i.exports || [],
-      users: i.importers.size, areas: areas.size, areaList: [...areas].sort(), tests: i.testImporters.size,
+      users: i.importers.size, areas: counts.size, areaList: [...counts.keys()].sort(), tests: i.testImporters.size,
+      // 화면 상세용 — 영역별 사용처 개수(많은 순 · 같으면 이름순)와 가리키는 테스트 파일. 사용처 **파일 목록**은 싣지 않는다(한 모듈이 수백 개).
+      areaCounts: [...counts].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)),
+      testFiles: [...i.testImporters].sort(),
     };
   };
   const byUse = (a, b) => b.users - a.users || (a.file < b.file ? -1 : 1);
@@ -340,6 +354,44 @@ export function buildCatalog(root = ROOT) {
   twins.sort((a, b) => (a.name < b.name ? -1 : 1));
 
   return { scopes, shared, twins, dynamicUnknown, fileCount: allFiles.length, problems };
+}
+
+/**
+ * 카탈로그 → 화면용 JSON 객체(순수). 공용 위치의 모듈과 공용 위치 밖 모듈을 **한 배열**에 싣는다(`scope` 로 가른다 — 설계 §6 ③).
+ * 생성 시각 · 버전을 싣지 않는다 — 버전을 실으면 릴리스의 버전업마다 다시 만들어야 하고, 이 파일은 코드와 같은 패키지에 실려
+ * 버전이 어긋날 수 없다(어긋나는 경우는 '다시 만들지 않았다' 뿐이고 그것은 테스트의 `--check` 가 막는다).
+ */
+export function buildJson(cat) {
+  const twinOf = new Map();
+  for (const t of cat.twins) { twinOf.set(t.server, t.web); twinOf.set(t.web, t.server); }
+  const mod = (m, scope) => ({
+    file: m.file, scope, summary: m.summary || '', exports: m.exports || [],
+    users: m.users, areas: m.areas, areaCounts: m.areaCounts || [],
+    tests: m.tests, testFiles: (m.testFiles || []).slice(0, TEST_FILES_MAX),
+    twin: twinOf.get(m.file) || null,
+  });
+  const modules = [
+    ...cat.scopes.flatMap((sc) => sc.modules.map((m) => mod(m, sc.id))),
+    ...cat.shared.map((m) => mod(m, 'outside')),
+  ];
+  return {
+    v: 1,
+    fileCount: cat.fileCount,
+    dynamicUnknown: { count: cat.dynamicUnknown.reduce((n, d) => n + d.count, 0), files: cat.dynamicUnknown.map((d) => d.file) },
+    limits: { sharedMinAreas: SHARED_MIN_AREAS, sharedMinWebUsers: SHARED_MIN_WEB_USERS, testFilesMax: TEST_FILES_MAX },
+    scopes: [
+      ...cat.scopes.map((sc) => ({ id: sc.id, title: sc.title, dir: sc.dir, count: sc.modules.length })),
+      { id: 'outside', title: '공용 위치 밖', dir: '', count: cat.shared.length },
+    ],
+    modules,
+  };
+}
+
+/** JSON 객체 → 파일 글자(순수). 모듈 하나를 한 줄에 — 사용처 수 하나가 바뀌면 diff 도 한 줄이다. */
+export function renderJson(obj) {
+  const { modules, ...head } = obj;
+  const headLines = Object.entries(head).map(([k, v]) => `  ${JSON.stringify(k)}: ${JSON.stringify(v)},`);
+  return `{\n${headLines.join('\n')}\n  "modules": [\n${modules.map((m) => `    ${JSON.stringify(m)}`).join(',\n')}\n  ]\n}\n`;
 }
 
 /**
@@ -424,19 +476,24 @@ function main() {
     process.exit(1);
   }
   const md = renderMd(cat);
+  const json = renderJson(buildJson(cat));
   const total = cat.scopes.reduce((n, s) => n + s.modules.length, 0);
+  const outs = [[OUT, md, 'docs/COMMON.md'], [OUT_JSON, json, 'server/src/portalcheck/commonCatalog.json']];
   if (process.argv.includes('--check')) {
-    const cur = fs.existsSync(OUT) ? fs.readFileSync(OUT, 'utf8') : '';
-    if (cur !== md) {
-      console.error('docs/COMMON.md 가 코드와 다릅니다 — `node scripts/common-doc.mjs` 로 갱신하세요.');
+    // 두 생성물을 **둘 다** 본다 — 하나가 낡았다고 일찍 끝내면 다른 하나의 낡음이 가려진다(ci.yml v2.574 IMP-01 과 같은 이유).
+    const stale = outs.filter(([file, text]) => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '') !== text).map(([, , label]) => label);
+    if (stale.length) {
+      console.error(`${stale.join(' · ')} 가 코드와 다릅니다 — \`node scripts/common-doc.mjs\` 로 갱신하세요.`);
       process.exit(1);
     }
-    console.log(`docs/COMMON.md 최신 (공용 모듈 ${total}개)`);
+    console.log(`docs/COMMON.md · commonCatalog.json 최신 (공용 모듈 ${total}개)`);
     return;
   }
-  fs.mkdirSync(path.dirname(OUT), { recursive: true });
-  fs.writeFileSync(OUT, md);
-  console.log(`docs/COMMON.md 생성 — 공용 모듈 ${total}개 · 공용 위치 밖 공유 ${cat.shared.length}개 · 소스 ${cat.fileCount}개 파일`);
+  for (const [file, text] of outs) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, text);
+  }
+  console.log(`docs/COMMON.md · commonCatalog.json 생성 — 공용 모듈 ${total}개 · 공용 위치 밖 공유 ${cat.shared.length}개 · 소스 ${cat.fileCount}개 파일`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) main();

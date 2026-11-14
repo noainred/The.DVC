@@ -1,0 +1,19 @@
+/* 포탈 점검 › 공통 기능(v3.10 · 시안 docs/design/common-catalog). 서랍은 vms/vmHub.css 의 .vmh-drawer 를 그대로 쓴다. */
+
+/* 표의 모듈 이름 — 단추지만 링크처럼 보인다(누르면 상세 서랍). */
+.cc-link { font: inherit; font-family: var(--mono); font-size: 12.5px; font-weight: 500; color: var(--accent-2); background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+.cc-link:hover { text-decoration: underline; }
+.cc-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+/* 상세 서랍의 이름 · 경로 · 영역 조각. */
+.cc-token { padding: 3px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel-deep); overflow-wrap: anywhere; }
+.cc-area { padding: 3px 9px; border-radius: 6px; background: var(--panel-2); }
+.cc-path { flex: 1 1 220px; min-width: 0; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-deep); font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+
+/* 구분 — 넓은 화면은 칩, 좁은 화면은 드롭다운(시안 ③). 좁은 화면의 표는 구분 · 내보내는 이름 열을 접고 상세에서 본다. */
+.cc-select { display: none; }
+@media (max-width: 720px) {
+  .cc-chips { display: none !important; }
+  .cc-select { display: block; }
+  .cc-wide { display: none; }
+}

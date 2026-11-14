@@ -5,13 +5,13 @@
 
 - 생성: `node scripts/common-doc.mjs` · 최신 여부: `node scripts/common-doc.mjs --check`
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다. 설명을 고치려면 그 모듈의 **머리 주석 첫 단락**을 고친다.
-- 훑은 소스 4088개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
+- 훑은 소스 4093개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
 
 ## 읽는 법 · 한계
 
 - **하는 일**: 그 파일 맨 앞 주석의 첫 단락(150자에서 자름). 머리 주석이 없는 모듈은 1개다.
 - **사용처**: 그 모듈을 import 하는 파일 수(테스트 제외). **영역**: 사용처가 속한 폴더 수(서버 `server/src/<영역>` · 웹 `web/src/<영역>`, `views/tools` 는 따로).
-- **테스트**: 그 모듈의 경로를 **import 하거나 문자열로 가리키는**(소스 스윕) 테스트 파일 수. 경로를 조각으로 조합하면(`path.join(SRC, 'util', 'x.js')`) 세지 못하므로 0 이 '검증 없음' 을 뜻하지는 않는다(0 인 모듈 25개).
+- **테스트**: 그 모듈의 경로를 **import 하거나 문자열로 가리키는**(소스 스윕) 테스트 파일 수. 경로를 조각으로 조합하면(`path.join(SRC, 'util', 'x.js')`) 세지 못하므로 0 이 '검증 없음' 을 뜻하지는 않는다(0 인 모듈 23개).
 - 사용처로 세는 것은 정적 import · 재수출 · 문자열 리터럴 동적 import 다. 경로를 런타임에 조합하는 동적 import 는 세지 못했다 — 8건 · 파일 8개(`server/src/edgelog/collect.js` · `server/src/linkcheck/settingsLinks.js` · `server/src/portalcheck/archScan.js` · `server/src/routes/api/bmFolders.js` · `server/src/routes/api/partFaults.js` · `server/src/routes/central/storageRoutes.js` · `server/src/routes/central.js` · `scripts/tools-catalog.mjs`).
 - 사용처 수는 '얼마나 널리 쓰이는가' 이지 품질 지표가 아니다.
 
@@ -19,12 +19,12 @@
 
 | 구분 | 위치 | 모듈 | 사용처 0 | 테스트 0 |
 |---|---|---|---|---|
-| 서버 공용 유틸 | `server/src/util/` | 88 | 1 | 10 |
-| 웹 공용 컴포넌트 | `web/src/components/` | 45 | 1 | 12 |
+| 서버 공용 유틸 | `server/src/util/` | 88 | 1 | 9 |
+| 웹 공용 컴포넌트 | `web/src/components/` | 45 | 1 | 11 |
 | 웹 공용 훅 | `web/src/hooks/` | 7 | 0 | 2 |
 | 웹 공용 유틸 | `web/src/util/` | 2 | 0 | 0 |
 | 웹 최상위 공용 모듈 | `web/src/` | 12 | 0 | 1 |
-| **합계** | | **154** | **2** | **25** |
+| **합계** | | **154** | **2** | **23** |
 
 ## 서버 공용 유틸 — `server/src/util/` (88)
 
@@ -32,7 +32,7 @@
 
 | 모듈 | 하는 일 | 내보내는 이름 | 사용처 | 영역 | 테스트 |
 |---|---|---|---|---|---|
-| `numOrNull.js` | `numOrNull` — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정 (v2.561). | `numOrNull` `default` | 283 | 59 | 5 |
+| `numOrNull.js` | `numOrNull` — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정 (v2.561). | `numOrNull` `default` | 284 | 60 | 7 |
 | `atomicWrite.js` | 원자적 파일 쓰기 — 임시파일에 기록 후 rename으로 교체한다. writeFileSync는 기록 도중 크래시/정전 시 파일을 truncate/부분기록 상태로 남겨, 다음 로드에서 JSON 파싱 실패 → 빈 값 반환 → 다음 저장이 손상본을 덮어쓰며 데이터가 영구 유… | `atomicWriteFileSync` `classifyLoadReason` `loadReasonWhere` `summarizeLoadReason` `safeLoadText` `preserveCorrupt` 외 1 | 249 | 72 | 8 |
 | `dayKey.js` | 날짜 경계 코어 — 하나다(v2.582 ARCH-2). | `resolveDayOffsetMin` `toMs` `dayKey` `todayStamp` `dayIndex` `dayStartMs` 외 9 | 134 | 34 | 32 |
 | `capStr.js` | 외부 문자열을 **상주 구조**(Map 키·보관 레코드)에 넣을 때의 길이 상한(v2.606 감사 TIM2606-02). | `flatStr` `capStr` `capTrim` | 103 | 23 | 2 |
@@ -56,7 +56,7 @@
 | `secretCarry.js` | "접속 대상이 바뀌면 저장 비밀을 승계하지 않는다" — 공용 판정(v2.500). | `accessMoved` `dropCarriedSecrets` `secretProvided` | 24 | 19 | 2 |
 | `ssrfLookup.js` | **DNS 리바인딩(TOCTOU) 차단용 공용 lookup 훅**(v2.506). | `filterAddresses` `addressBlockReason` `ssrfLookupError` `makeSsrfLookup` `pinnedLookup` `ssrfLookup` 외 1 | 24 | 17 | 1 |
 | `agentNameHeader.js` | 엣지 → 중앙 push 에 `X-Agent-Name` 헤더를 싣는다(v2.620 RECENT2620-02). | `agentNameHeader` | 20 | 9 | 1 |
-| `deadline.js` | 작업 시한 — **단일 관문**(v2.607 감사 TIM2607-02 · LEFT2607-08). | `deadlineMs` `withDeadline` `DEADLINE_MIN_MS` `DEADLINE_MAX_MS` `DEADLINE_LONG_MAX_MS` `DEADLINE_DEFAULT_MS` | 20 | 12 | 1 |
+| `deadline.js` | 작업 시한 — **단일 관문**(v2.607 감사 TIM2607-02 · LEFT2607-08). | `deadlineMs` `withDeadline` `DEADLINE_MIN_MS` `DEADLINE_MAX_MS` `DEADLINE_LONG_MAX_MS` `DEADLINE_DEFAULT_MS` | 20 | 12 | 3 |
 | `outboundStats.js` | 이 노드가 **다른 포탈로 나가는** 호출의 기록(v2.587, 데이터 흐름 지도). | `isTrackedPath` `withOutboundTag` `recordOutbound` `outboundStats` `resetOutboundStats` | 16 | 11 | 7 |
 | `ssrfBlock.js` | SSRF 차단 판정 — IP 리터럴·URL·DNS 해석 결과의 차단 대역 검사(v2.579 에 `collector/registry.js` 에서 분리). | `ipBlockReason` `ssrfBlockReason` `ssrfBlockReasonResolved` | 16 | 10 | 2 |
 | `cmpVersion.js` | semver 형태 버전 비교 — **단일 소스**(v2.575 IMP-04). | `cmpVersion` `default` | 15 | 7 | 2 |
@@ -119,7 +119,7 @@
 | `soapParsePool.js` | SOAP 파싱 워커 풀 — RetrieveProperties 응답의 CPU 바운드 정규식 파싱을 worker_threads로 오프로딩해 메인 이벤트 루프 블로킹을 없앤다(28+ vCenter·고RTT 환경에서 매 주기 파싱이 메인 스레드를 점유하면 HTTP 응답/다른… | `parseObjectContentAsync` `shutdownParsePool` `_poolInfo` | 1 | 1 | 2 |
 | `staticGzip.js` | 빌드 자산(해시 이름·불변)의 gzip 전송(v2.596, 감사 PERFWEB-02 — 실측). | `acceptsGzip` `createStaticGzip` `STATIC_GZIP_MAX_BYTES` | 1 | 1 | 2 |
 | `xlsxChart.js` | exceljs 가 만든 .xlsx 에 **꺾은선 차트**를 넣는다(v2.661 — iDRAC 통합 추이 엑셀 내보내기). | `colLetter` `chartXml` `addLineCharts` `sheetRef` `PRST_DASH` | 1 | 1 | 1 |
-| `parseWorker.js` | worker_threads 워커 — RetrieveProperties 응답 XML의 정규식 파싱(CPU 바운드)을 메인 이벤트 루프 밖에서 수행한다. 28개 vCenter를 매 주기 수집할 때 수 MB XML을 메인 스레드에서 파싱하면 그동안 HTTP 응답/다른 vCe… | (없음) | 0 | 0 | 0 |
+| `parseWorker.js` | worker_threads 워커 — RetrieveProperties 응답 XML의 정규식 파싱(CPU 바운드)을 메인 이벤트 루프 밖에서 수행한다. 28개 vCenter를 매 주기 수집할 때 수 MB XML을 메인 스레드에서 파싱하면 그동안 HTTP 응답/다른 vCe… | (없음) | 0 | 0 | 1 |
 
 ## 웹 공용 컴포넌트 — `web/src/components/` (45)
 
@@ -127,11 +127,11 @@
 
 | 모듈 | 하는 일 | 내보내는 이름 | 사용처 | 영역 | 테스트 |
 |---|---|---|---|---|---|
-| `STable.jsx` | STable — `<table>` 대체 컴포넌트(v2.422, 사용자 요구 '데이터 조회 화면의 모든 표는 제목 클릭 정렬, 기억해줘'). | `STable` `default` | 300 | 15 | 5 |
-| `ui.jsx` | 공용 UI 재수출 셸(v2.295 대형 파일 분할 · 모듈화 감사 2차 확정 #2·#7). 구 633줄 구현은 3개 파일로 이동했고 이 파일은 **순수 재수출만** 한다 — views/ 의 86개 소비자 import 경로가 바뀌지 않도록(SpecialTools v2.2… | `GpuBadge` `usageColor` `Kpi` `UsageCell` `StateBadge` `SeverityBadge` 외 10 | 285 | 11 | 5 |
-| `Select.jsx` | 공용 드롭다운(v2.708) — 날 `<select>` 대신 이것을 쓴다(테스트가 날 select 를 금지한다). 기본으로 선택지를 보이는 글자 순으로 정렬하고 '전체·선택…' 같은 고정 선택지는 맨 위에 둔다(selectSort.js). 기간·심각도·권장 먼저처럼 *… | `default` | 193 | 11 | 0 |
+| `STable.jsx` | STable — `<table>` 대체 컴포넌트(v2.422, 사용자 요구 '데이터 조회 화면의 모든 표는 제목 클릭 정렬, 기억해줘'). | `STable` `default` | 301 | 15 | 5 |
+| `ui.jsx` | 공용 UI 재수출 셸(v2.295 대형 파일 분할 · 모듈화 감사 2차 확정 #2·#7). 구 633줄 구현은 3개 파일로 이동했고 이 파일은 **순수 재수출만** 한다 — views/ 의 86개 소비자 import 경로가 바뀌지 않도록(SpecialTools v2.2… | `GpuBadge` `usageColor` `Kpi` `UsageCell` `StateBadge` `SeverityBadge` 외 10 | 286 | 11 | 5 |
+| `Select.jsx` | 공용 드롭다운(v2.708) — 날 `<select>` 대신 이것을 쓴다(테스트가 날 select 를 금지한다). 기본으로 선택지를 보이는 글자 순으로 정렬하고 '전체·선택…' 같은 고정 선택지는 맨 위에 둔다(selectSort.js). 기간·심각도·권장 먼저처럼 *… | `default` | 194 | 11 | 1 |
 | `boldText.jsx` | 서버가 만든 안내 문구의 `**강조**` 를 안전하게 굵게 렌더한다(v2.440). | `boldParts` `default` | 116 | 5 | 5 |
-| `EscClose.jsx` | 열려 있는 모달 스택. ESC는 '가장 위(마지막에 열린)' 모달 하나만 닫는다 — 중첩 모달(예: 호스트 상세 → 호스트 VM 목록)에서 ESC 한 번에 둘 다 닫히던 버그 방지. | `default` | 29 | 9 | 0 |
+| `EscClose.jsx` | 열려 있는 모달 스택. ESC는 '가장 위(마지막에 열린)' 모달 하나만 닫는다 — 중첩 모달(예: 호스트 상세 → 호스트 VM 목록)에서 ESC 한 번에 둘 다 닫히던 버그 방지. | `default` | 30 | 9 | 0 |
 | `primitives.jsx` | ui.jsx(구 633줄)에서 분리(v2.295 모듈화 감사 2차 확정 #2·#7). 본문은 원본 10~162·608~633행 그대로 이동(기능 변화 없음). | `GpuBadge` `usageColor` `Kpi` `UsageCell` `StateBadge` `SeverityBadge` 외 5 | 21 | 8 | 5 |
 | `Modal.jsx` | ui.jsx(구 633줄)에서 분리(v2.295). 본문은 원본 164~190행 그대로. 단독 분리 이유: VmRemote/VmReconfig(EntityDetail 이 import)가 Modal 하나 때문에 ui.jsx 를 역참조하는 순환이 있었다(함수 선언 호이스팅… | `Modal` | 19 | 3 | 0 |
 | `EntityDetail.jsx` | ui.jsx(구 633줄)에서 분리(v2.295). 본문은 원본 192~606행 그대로 이동. | `DRow` `VmIpPing` `HostVmsModal` `VmPartitionsSection` `VmCfgSection` `PerfcSection` 외 10 | 16 | 6 | 8 |
@@ -202,8 +202,8 @@
 
 | 모듈 | 하는 일 | 내보내는 이름 | 사용처 | 영역 | 테스트 |
 |---|---|---|---|---|---|
-| `api.js` | v2.498: 진행 중 요청 레지스트리 + 장기 로딩(hang) 보고. perfClient 는 api.js 를 import 하지 않으므로 순환이 없다(설정 조회는 fetchJson 을 인자로 받는다). | `noteHttpError` `permissionInfoFor` `httpInfoFor` `fetchJson` `postJson` `sendJson` 외 34 | 395 | 19 | 42 |
-| `numOrNull.js` | `numOrNull`(웹) — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정. | `numOrNull` `default` | 131 | 11 | 2 |
+| `api.js` | v2.498: 진행 중 요청 레지스트리 + 장기 로딩(hang) 보고. perfClient 는 api.js 를 import 하지 않으므로 순환이 없다(설정 조회는 fetchJson 을 인자로 받는다). | `noteHttpError` `permissionInfoFor` `httpInfoFor` `fetchJson` `postJson` `sendJson` 외 34 | 396 | 19 | 43 |
+| `numOrNull.js` | `numOrNull`(웹) — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정. | `numOrNull` `default` | 132 | 11 | 5 |
 | `dayStamp.js` | 브라우저 쪽 날짜 표기(v2.582 BUG-3) — 내려받기 파일명·만료일은 **사용자의 로컬 날짜**다. `new Date().toISOString().slice(0, 10)` 은 UTC 날짜라 한국 시각 00:00~09:00 에는 **어제**가 된다 (보고서 파일명… | `dayStamp` | 24 | 5 | 1 |
 | `regions.js` | 지역(region) 목록 — 웹 단일 소스(v2.575 IMP-10). ⚠ 값은 서버 `server/src/util/regions.js` 와 **글자 그대로 같아야 한다**(웹은 서버 소스를 import 할 수 없어 복사가 불가피하다). `web/src/regions.`… | `REGIONS` `default` | 5 | 2 | 1 |
 | `perfClientLogic.js` | 브라우저 성능 보고의 **순수 로직**(v2.498): 경로 정규화·장기 로딩 문구· 쿨다운/상한 판정. 웹 테스트는 node 환경(DOM 없음)이라 판정·문구는 여기서 회귀로 고정한다. | `normPath` `loadingText` `allowReport` `stallPayload` `statusPollTargets` `requesterText` 외 3 | 4 | 2 | 3 |
@@ -225,7 +225,7 @@
 
 | 모듈 | 하는 일 | 사용처 | 다른 영역 | 테스트 |
 |---|---|---|---|---|
-| `server/src/config.js` | v2.605 TIM2605-04: 요청 시한 env 정규화(무의존 leaf 모듈 — v2.613 DEPS2613-01 에 util/ 로 이동) | 507 | 86 | 173 |
+| `server/src/config.js` | v2.605 TIM2605-04: 요청 시한 env 정규화(무의존 leaf 모듈 — v2.613 DEPS2613-01 에 util/ 로 이동) | 507 | 86 | 174 |
 | `server/src/store.js` | v2.617 | 205 | 43 | 296 |
 | `server/src/collector/registry.js` | Collector registry — the list of remote collector agents (one per datacenter) the central portal pulls power from. Stored in CONFIG_DIR/collectors.jso… | 82 | 31 | 48 |
 | `server/src/security/secretVault.js` | 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). | 40 | 28 | 21 |
@@ -301,7 +301,7 @@
 
 | 모듈 | 하는 일 | 사용처 | 다른 영역 | 테스트 |
 |---|---|---|---|---|
-| `web/src/views/unitText.js` | 값 + 단위 표기 — **값이 없으면 단위를 붙이지 않는다**(v2.575 BUG-20). | 53 | 7 | 3 |
+| `web/src/views/unitText.js` | 값 + 단위 표기 — **값이 없으면 단위를 붙이지 않는다**(v2.575 BUG-20). | 53 | 7 | 4 |
 | `web/src/views/tools/relTime.js` | 상대시각 문구 — **공용 코어** (v2.574 IMP-03). | 49 | 4 | 1 |
 | `web/src/views/changeResult.js` | v2.731(점검 1회차 A5-01): 변경 요청 응답 판정 — 순수 모듈(화면·테스트가 같이 쓴다). | 40 | 4 | 4 |
 | `web/src/views/tools/toneVar.js` | toneVar — 판정 톤(`ok`/`warn`/`bad`, 또는 진단 어휘 `green`/`amber`/`red`) → CSS 색 변수. **공용 코어** (v2.613 DEPS2613-11). 예전에는 `bmUsageText`·`edgeLogText`·`partFa`… | 29 | 1 | 1 |
@@ -318,7 +318,7 @@
 
 죽은 코드라는 뜻이 아니다 — 경로를 조합하는 동적 import · 워커 진입점 · 테스트 전용일 수 있다.
 
-- `server/src/util/parseWorker.js`(테스트 0)
+- `server/src/util/parseWorker.js`(테스트 1)
 - `web/src/components/vmMetricStats.js`(테스트 1)
 
 ### 서버와 웹에 같은 이름으로 두 벌 있는 모듈 (4)

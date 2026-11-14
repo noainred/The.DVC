@@ -16,7 +16,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { stripComments } from './_stripComments.js';
 import {
-  SCOPES, SHARED_MIN_AREAS, areaOf, buildCatalog, esc, headSummary, isTestFile, renderMd,
+  SCOPES, SHARED_MIN_AREAS, TEST_FILES_MAX, areaOf, buildCatalog, buildJson, esc, headSummary, isTestFile, renderJson, renderMd,
   scanExports, scanImports, scanPathLiterals,
 } from '../../scripts/common-doc.mjs';
 
@@ -173,6 +173,33 @@ test('renderMd — 모든 공용 모듈이 한 줄씩 실리고, 두 번 만들�
   // 생성 시각을 실으면 매 실행이 diff 를 만든다(머리 주석에서 온 날짜는 내용이라 괜찮다).
   assert.equal(/마지막 갱신|생성 시각|generatedAt/.test(md), false);
   assert.equal(md, renderMd(buildCatalog()), '두 번 만들어도 같다');
+});
+
+test('화면용 JSON — 문서와 같은 모듈 · 영역별 개수의 합 = 사용처 · 두 벌은 서로를 가리킨다 · 생성 시각 · 버전을 싣지 않는다', () => {
+  const j = buildJson(CAT);
+  const common = j.modules.filter((m) => m.scope !== 'outside');
+  assert.equal(common.length, byFile.size, '공용 위치의 모듈 수가 문서와 같다');
+  assert.equal(j.modules.length - common.length, CAT.shared.length);
+  assert.deepEqual(j.scopes.map((s) => s.count), [...CAT.scopes.map((s) => s.modules.length), CAT.shared.length]);
+  const byKey = new Map(j.modules.map((m) => [m.file, m]));
+  for (const m of j.modules) {
+    assert.equal(m.areaCounts.reduce((n, [, c]) => n + c, 0), m.users, `${m.file}: 영역별 개수의 합`);
+    assert.equal(m.areaCounts.length, m.areas, `${m.file}: 영역 수`);
+    assert.ok(m.testFiles.length <= TEST_FILES_MAX && m.testFiles.length <= m.tests, `${m.file}: 테스트 파일 상한`);
+    if (m.twin) assert.equal(byKey.get(m.twin)?.twin, m.file, `${m.file}: 두 벌은 서로를 가리킨다`);
+    // 사용처 **파일 목록**은 싣지 않는다(한 모듈이 수백 개 — 설계 §4.2).
+    assert.equal('importers' in m || 'users_files' in m, false);
+  }
+  assert.equal(byKey.get('server/src/util/numOrNull.js').twin, 'web/src/numOrNull.js');
+  // 영역은 많은 순.
+  const dl = byKey.get('server/src/util/deadline.js');
+  assert.deepEqual(dl.areaCounts.map(([, c]) => c), [...dl.areaCounts.map(([, c]) => c)].sort((a, b) => b - a));
+  const text = renderJson(j);
+  assert.deepEqual(JSON.parse(text), j, '글자로 낸 것을 다시 읽으면 같은 객체다');
+  assert.equal(text.split('\n').filter((l) => l.startsWith('    {')).length, j.modules.length, '모듈 하나가 한 줄');
+  // 버전 · 시각을 실으면 릴리스의 버전업마다 다시 만들어야 한다.
+  assert.equal(/"(?:version|generatedAt|at)"\s*:/.test(text), false);
+  assert.equal(text, renderJson(buildJson(buildCatalog())), '두 번 만들어도 같다');
 });
 
 test('못 읽으면 실패한다 — 풀리지 않는 import · 빈 공용 위치 · 구조 분해 export', () => {

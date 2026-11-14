@@ -1,6 +1,6 @@
 # 설계: 포탈 점검 › 공통 기능(`#/tools/portal-check/common`) — 공통 기능 목록 화면
 
-작성 2026-11-14 (v3.9.0 · main be4f7f8d 기준) · 상태 **시안 — 컨펌 대기**(구현 전) · 시안 캔버스: https://claude.ai/artifact/GpVXkVRqBa1UqSUzjmTb4H
+작성 2026-11-14 (v3.9.0 · main be4f7f8d 기준) · 상태 **구현됨 v3.10.0**(컨펌 2026-11-14 ‘기본값대로’ — §6 기본값 7개 그대로 · 검증 표준 · §7 구현 기록) · 시안 캔버스: https://claude.ai/artifact/GpVXkVRqBa1UqSUzjmTb4H
 (아트보드 4장 — 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스. **수치 · 모듈 이름 · 설명은 2026-11-14 main 에서 생성기가 실제로 센 값**이다 —
 공용 모듈 154 · 공용 위치 밖 77(서버 69 · 웹 8) · 사용처 0 2 · 테스트 0 25 · 서버·웹 두 벌 4 · 훑은 소스 4,088개 파일. ② 의 `deadline.js` 영역별 개수도 실측.
 색 · 글자는 `web/src/styles.css` `:root` 토큰 그대로. 계정의 ‘Design System’ 아티팩트는 앞 시안들과 같이 내용이 비어 있어 쓰지 않았다.)
@@ -85,8 +85,24 @@
 | ⑥ | 내보내기 | 없음 | CSV 내보내기 |
 | ⑦ | 검증 수준 | 표준(관련 테스트 + Chromium 1440/400 1회 + CI) | 전체 검증 / 빠르게 |
 
-## 7. 구현 메모(컨펌 뒤)
+## 7. 구현 기록(v3.10.0) — 시안과 다른 점
 
-- 예상(추정): 생성기 JSON 출력 + 테스트 · 서버 로더 + 라우트 + 테스트 · 웹 보기 + 서랍 + 문구 모듈 + 테스트 · Chromium · 릴리스까지 **60~90분**(CI · 릴리스 대기 포함).
-- 화면이 생기므로 **기능 릴리스(버전업)** 대상이다.
-- 순서: ① 생성기에 `--json` 산출과 `--check` 대조 추가 ② `portalcheck/commonCatalog.js`(읽기 · 모양 검증 · 못 읽음 구분) ③ 라우트 ④ `CommonCatalogView.jsx` + `commonCatalogText.js` ⑤ `PortalCheck.jsx VIEWS` 에 `['common', '공통 기능']`.
+| 파일 | 하는 일 |
+|---|---|
+| `scripts/common-doc.mjs` | `buildJson` · `renderJson` — `docs/COMMON.md` 와 함께 `server/src/portalcheck/commonCatalog.json` 을 만들고 `--check` 가 둘 다 본다 |
+| `server/src/portalcheck/commonCatalog.js` | 읽기 · 모양 검증(`missing` · `unreadable` 을 가른다 · 숫자는 `numOrNull` · 문자열 · 배열 상한) · 크기 · 수정 시각 캐시 |
+| `server/src/routes/api/portalCheck.js` | `GET /tools/portal-check/common` — `adminOnly, fullScopeOnly` + `isAdminDetailUser` |
+| `web/src/views/tools/CommonCatalogView.jsx` · `commonCatalogText.js` · `commonCatalog.css` | 화면 · 순수 판정/문구 · 좁은 화면 규칙 |
+| `web/src/views/tools/PortalCheck.jsx` | `VIEWS` 에 `['common', '공통 기능']` |
+
+시안과 다른 점(구현하면서 정한 것):
+
+1. **④-4 ‘목록 버전 ≠ 포탈 버전’ 상태를 만들지 않았다.** JSON 에 버전을 실으면 릴리스의 버전업(`release.sh`)마다 목록을 다시 만들어야 하고,
+   목록은 코드와 같은 패키지에 실려 어긋날 수 없다(어긋나는 경우는 ‘다시 만들지 않았다’ 뿐이고 테스트의 `--check` 가 막는다). 안내 줄의 버전은 실행 중인 포탈의 버전이다.
+2. **데모 계정(admin 문맥)은 403** — 시안에 없던 것. 목록에 서버 내부 모듈의 설명과 소스 경로가 있어 관리자 판본(`isAdminDetailUser`)만 받는다.
+3. 처음 열면 ‘전체’ 칩만 눌린 상태다(시안 ① 은 ‘공용 모듈’ 카드도 눌린 것처럼 그렸다). 숫자 카드는 누르면 그 조건으로 거르고, 다시 누르면 푼다.
+4. 표는 처음 50행 + ‘더 보기’ 50행씩(`STable limit` — 정렬 뒤에 자른다). 시안의 12행은 그림용이었다.
+5. 서랍은 기존 VM 상세 서랍(`vms/vmHub.css .vmh-drawer` — 640px · 720 미만 전체 화면)을 그대로 쓴다. 시안은 480px 로 그렸다.
+6. JSON 크기는 **실측 약 176KB**(시안의 150KB 는 추정이었다) — 응답 한 번, 화면을 열 때만.
+7. 공용 위치 밖 모듈은 내보내는 이름을 싣지 않는다(생성기가 공용 위치의 모듈만 읽는다) — 상세에 그렇게 적는다.
+8. `server/src` 에 JSON 생성물을 두는 것이 기존 소스 스윕과 부딪히는지(§5 의 ‘확인하지 않았다’)는 전량 테스트로 확인했다 — 결과는 PR 본문.
