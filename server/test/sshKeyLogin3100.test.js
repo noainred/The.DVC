@@ -4775,6 +4775,6 @@ test('㉗-d 4회차 B — 홈이 파일(/dev/null)이면 없음(거두기 none �
     srv.close();
     return [seen[0], code];
   };
-  for (const p of ['YubiKey for user: ', 'Response: ']) assert.deepEqual(await trial(p), ['""', 'SSH_NO_PASSWORD_METHOD'], `${p} — 비밀번호 말 없는 가리는 칸`);
+  for (const p of ['YubiKey for user: ', 'Response: ', 'Enter secret phrase: ']) assert.deepEqual(await trial(p), ['""', 'SSH_NO_PASSWORD_METHOD'], `${p} — 비밀번호 말 없는 가리는 칸(OTP 말도 없는 글이어도 — 글이 있으면 비밀번호 말이 있어야 보낸다)`);
   for (const p of ['', 'Password for tokenadm@CORP: ']) assert.deepEqual(await trial(p), ['PW', ''], `‘${p}’ — 글 없는 칸 · 계정 이름의 token 은 강한 OTP 말이 아니다(단어 경계)`);
 });
