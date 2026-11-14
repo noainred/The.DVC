@@ -73,6 +73,15 @@ async function sshRun(server, auth, fn, { execs = 1 } = {}) {
     return { ok: false, code, reason, sent: st.sent };
   }
 }
+/**
+ * 바꾸는 명령을 보내고 표지를 읽는다. 표지가 없고 **종료 코드도 없으면**(연결이 끊겨 채널만 닫힘 — exec 는 그래도 resolve 한다) 'nocode' —
+ * 명령이 돌았을 수 있다(테스트 ⑫-h). 종료 코드가 있는데 표지가 없으면 셸이 스크립트를 받지 않은 것이다('unknown' — 바뀐 것 없음).
+ */
+async function mutRun(run, cmd) {
+  const r = await run(cmd, true);
+  const m = AK.parseMarker(r?.stdout);
+  return m.kind === 'unknown' && (r?.code === undefined || r?.code === null) ? { kind: 'nocode' } : m;
+}
 /** 바꾸는 명령을 보낸 뒤 답을 못 받았을 때 — ‘바꾼 것 없음’ 이라고 하지 않는다. */
 const UNCERTAIN_TAIL = ' 바꾸는 명령은 서버에 보냈지만 결과를 받지 못했습니다 — 서버의 authorized_keys 가 바뀌었을 수 있습니다. ‘서버에 들어 있는 키 다시 읽기’ 로 확인하세요(포탈의 서버 설정은 바꾸지 않았습니다).';
 
@@ -143,11 +152,12 @@ export async function installOne(server, key, o = {}) {
     line = AK.buildKeyLine({ publicKey: key.publicKey, keyId: key.id, restrict: !!o.restrict, fromIp }) || '';
     const cmd = line ? installCommand({ publicKey: key.publicKey, keyId: key.id, line, replace: allowReplace }) : null;
     if (!cmd) return { kind: 'fail', why: 'badkey' };
-    return AK.parseMarker((await run(cmd, true))?.stdout);
+    return mutRun(run, cmd);
   }, { execs: o.restrict ? 2 : 1 });
   // via = 첫 접속에 쓴 인증 방식(작업이 같은 비밀번호의 거부를 세어 멈춘다 — 계정 잠금 · 반증 D3).
   if (!step1.ok) return fail(step1.sent ? 'uncertain' : step1.code, `${step1.reason}${step1.sent ? UNCERTAIN_TAIL : ' 서버에서 바꾼 것은 없습니다.'}`, { via: first.authKind });
   const m = step1.value;
+  if (m.kind === 'nocode') return fail('uncertain', `서버가 결과 없이 연결을 닫았습니다.${UNCERTAIN_TAIL}`, { via: first.authKind });
   if (m.kind === 'fail' || m.kind === 'unknown') {
     const why = m.why === 'noip' ? '서버가 본 접속 주소를 읽지 못해 출발지 제한을 붙일 수 없습니다 — 제한 없이 넣으려면 ‘서버 쪽 제한’ 을 끄고 다시 하세요.'
       : m.why === 'badkey' ? '공개키 꼴이 올바르지 않아 넣지 않았습니다.'
@@ -175,10 +185,11 @@ export async function installOne(server, key, o = {}) {
     let rolledBack = null; let rollbackReason = '';
     if (added || replaced) {
       const cmd = replaced && m.old == null ? null : rollbackCommand({ line, oldB64: replaced ? m.old : '' });
-      const rb = cmd ? await sshRun(server, first, async (run) => AK.parseMarker((await run(cmd, true))?.stdout)) : { ok: false, reason: '바꾸기 전 줄을 받지 못했습니다' };
+      const rb = cmd ? await sshRun(server, first, async (run) => mutRun(run, cmd)) : { ok: false, reason: '바꾸기 전 줄을 받지 못했습니다' };
       rolledBack = rb.ok && rb.value.kind === 'restored' && rb.value.removed > 0;
       if (!rolledBack) rollbackReason = !rb.ok ? `${rb.reason}${rb.sent ? ' — 되돌림 명령의 결과를 받지 못했습니다' : ''}`
-        : rb.value.kind === 'restored' ? '그 사이 줄이 이미 바뀌어 있어 손대지 않았습니다' : rb.value.kind === 'fail' ? AK.failText(rb.value.why) : '서버가 예상한 답을 주지 않았습니다';
+        : rb.value.kind === 'restored' ? '그 사이 줄이 이미 바뀌어 있어 손대지 않았습니다' : rb.value.kind === 'fail' ? AK.failText(rb.value.why)
+          : rb.value.kind === 'nocode' ? '되돌림 명령의 결과를 받지 못했습니다(연결 끊김)' : '서버가 예상한 답을 주지 않았습니다';
     }
     const tail = replaced
       ? (rolledBack ? ' 바꾼 줄을 원래대로 되돌렸습니다.' : ` 바꾼 줄을 되돌리지 못했습니다(${rollbackReason}) — 서버의 authorized_keys 에서 표식 ‘${AK.markOf(key.id)}’ 줄을 확인하세요.`)
@@ -204,7 +215,7 @@ export async function installOne(server, key, o = {}) {
   }
   if (o.replaceKey && o.replaceKey.id !== key.id) {
     const cmd = removeCommand({ publicKey: o.replaceKey.publicKey, keyId: o.replaceKey.id });
-    const rm = cmd ? await sshRun(server, kAuth, async (run) => AK.parseMarker((await run(cmd, true))?.stdout)) : { ok: false, reason: '옛 키의 공개키 꼴이 올바르지 않습니다' };
+    const rm = cmd ? await sshRun(server, kAuth, async (run) => mutRun(run, cmd)) : { ok: false, reason: '옛 키의 공개키 꼴이 올바르지 않습니다' };
     out.oldRemoved = rm.ok && rm.value.kind === 'removed' ? rm.value.removed : rm.ok && rm.value.kind === 'none' ? 0 : null;
     out.oldUnmarked = rm.ok && rm.value.kind === 'removed' ? rm.value.unmarked : null;
     if (out.oldRemoved == null) notes.push(`옛 키 줄을 지우지 못했습니다(${!rm.ok ? `${rm.reason}${rm.sent ? ' — 결과를 받지 못했습니다' : ''}` : rm.value.kind === 'fail' ? AK.failText(rm.value.why) : '서버가 예상한 답을 주지 않았습니다'}).`);
@@ -228,12 +239,13 @@ export async function revokeOne(server, key, o = {}) {
     const more = auth.code === 'corp-stopped' ? ' 법인 키 사용 중지 중에는 키로 접속하지 않습니다 — 이번 한 번만 쓸 비밀번호를 넣거나 서버에서 직접 지우세요.' : '';
     return { ...base, ok: false, code: auth.code, reason: `${auth.reason}${more}` };
   }
-  const r = await sshRun(server, auth, async (run) => AK.parseMarker((await run(cmd, true))?.stdout));
+  const r = await sshRun(server, auth, async (run) => mutRun(run, cmd));
   if (auth.keyFingerprint) noteKeyUse({ fingerprint: auth.keyFingerprint, keyName: auth.keyName, server: base.name, corp: base.corp, feature: 'conn-test', ok: r.ok, code: r.ok ? 'ok' : r.code, trigger: 'manual', by: o.by });
   const pinned = serverUsesKey(server, key.id);
   if (!r.ok) return { ...base, ok: false, code: r.sent ? 'uncertain' : r.code, reason: `${r.reason}${r.sent ? ' 지우는 명령은 보냈지만 결과를 받지 못했습니다 — 지워졌는지 서버에서 확인하세요.' : ''}`, pinned, via: auth.authKind };
   const m = r.value;
   if (m.kind === 'none') return { ...base, ok: true, code: 'none', removed: 0, unmarked: 0, pinned };
+  if (m.kind === 'nocode') return { ...base, ok: false, code: 'uncertain', reason: '서버가 결과 없이 연결을 닫았습니다 — 지우는 명령은 보냈으니 지워졌는지 서버에서 확인하세요.', pinned, via: auth.authKind };
   if (m.kind !== 'removed') return { ...base, ok: false, code: 'revoke-failed', why: m.kind === 'fail' ? m.why : 'unknown', reason: m.kind === 'fail' ? AK.failText(m.why) : '서버가 예상한 답을 주지 않았습니다.', pinned };
   return { ...base, ok: true, code: m.removed > 0 ? 'removed' : 'not-present', removed: m.removed, unmarked: m.unmarked, pinned };
 }

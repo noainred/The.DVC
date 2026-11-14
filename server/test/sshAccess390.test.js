@@ -501,12 +501,36 @@ test('⑪ 복원 제외 · 소스 스윕 — 상태 파일은 복원하지 않�
   assert.doesNotMatch(rt, /resolveOsAuth|keyMaterial|listKeysRaw|listAccountsRaw|listBmServersRaw|KS\.|keyStore/, '라우트는 자격 원본 · 키 저장소를 만지지 않는다');
   assert.equal(rt.split('\n').filter((l) => l.includes('privateKey')).length, 1, '개인키는 키 등록 본문을 서비스로 넘기는 한 줄뿐(응답 · 감사에 싣지 않는다)');
   assert.doesNotMatch(rt, /bindApproved/);
-  // 쓰기 라우트는 전부 소유자 → OTP 마지막. 키를 새로 받는 쓰기는 저장 방식 검사를 OTP 앞에(점검 B-5)
+  // 쓰기 라우트는 전부 소유자 → OTP 마지막. 키를 새로 받는 쓰기는 저장 방식 검사를 OTP 앞에(점검 B-5).
+  //   v3.10.0: 승인 · 키 작업 라우트는 OTP 를 쓰지 않는 사전 검사를 OTP 앞에 끼우려고 묶음(...ownerWrite)을 펼쳐 적는다(점검 A10) — 그래서 묶음 이름이 아니라
+  //   **펼친 미들웨어 줄**로 본다(예전 스윕은 `...묶음` 꼴만 읽어 펼친 라우트를 조용히 건너뛰었다). 모든 POST · PUT · DELETE 를 빠짐없이 읽는다.
+  const defs = new Map([...rt.matchAll(/const (\w+) = \[([^\]]*)\];/g)].map((m) => [m[1], m[2].split(',').map((x) => x.trim()).filter(Boolean)]));
+  const chains = new Map([...rt.matchAll(/api\.(get|post|put|delete)\('([^']+)',\s*([^\n]*?),\s*(?:async\s*)?\(_?req, res\) =>/g)]
+    .map((m) => [`${m[1]} ${m[2]}`, m[3].split(/,\s*/).flatMap((x) => (x.startsWith('...') ? (defs.get(x.slice(3)) || [`?${x}`]) : [x]))]));
+  assert.equal([...rt.matchAll(/api\.(get|post|put|delete)\(/g)].length, chains.size, '미들웨어 줄을 읽지 못한 라우트가 없다');
+  const OWNER = ['adminOnly', 'requireSettingsOwner'];
   const readOnly = ['/settings/ssh-access/scan', '/settings/ssh-access/servers/:id/installed-keys', '/settings/ssh-access/servers/:id/test'];
+  // 멈추기는 줄이는 방향(남은 서버를 하지 않는다) — OTP 없이 소유자 등급만. 쓰기 라우트 가운데 명시적 예외는 이것 하나다.
+  const reduceOnly = ['/settings/ssh-access/jobs/:id/cancel'];
   const keyAdd = ['/settings/ssh-access/keys', '/settings/ssh-access/inbox/approve'];
-  for (const m of rt.matchAll(/api\.(post|put|delete)\('([^']+)', \.\.\.(\w+)/g)) {
-    assert.equal(m[3], readOnly.includes(m[2]) ? 'ownerRead' : keyAdd.includes(m[2]) ? 'keyAddWrite' : 'ownerWrite', m[2]);
+  const PRE = new Set(['approvePre(true)', 'approvePre(false)', "jobPre('key-login')", "jobPre('key-revoke')"]);
+  let writes = 0;
+  for (const [k, c] of chains) {
+    const [method, p] = k.split(' ');
+    if (method === 'get') continue;
+    writes += 1;
+    if (readOnly.includes(p) || reduceOnly.includes(p)) { assert.deepEqual(c, OWNER, `${k} — 소유자 등급만`); continue; }
+    if (keyAdd.includes(p)) { assert.deepEqual(c, [...OWNER, 'vaultFirst', 'reauth'], k); continue; }
+    assert.deepEqual(c.slice(0, 2), OWNER, k);
+    assert.deepEqual([c.at(-1), c.filter((x) => x === 'reauth').length], ['reauth', 1], `${k} — OTP 는 한 번 · 마지막(${c.join(', ')})`);
+    assert.ok(c.slice(2, -1).every((x) => PRE.has(x)), `${k} — 소유자 등급과 OTP 사이에는 OTP 를 쓰지 않는 사전 검사만(${c.join(', ')})`);
   }
+  assert.ok(writes >= 20, `쓰기 라우트를 실제로 훑었다(${writes})`);
+  assert.deepEqual(chains.get('post /settings/ssh-access/approvals/:id/approve'), [...OWNER, 'approvePre(true)', 'reauth'], '승인 사전 검사는 OTP 앞(점검 A10)');
+  assert.deepEqual(chains.get('post /settings/ssh-access/approvals/:id/reject'), [...OWNER, 'approvePre(false)', 'reauth']);
+  assert.deepEqual(chains.get('post /settings/ssh-access/key-login'), [...OWNER, "jobPre('key-login')", 'reauth']);
+  assert.deepEqual(chains.get('post /settings/ssh-access/key-revoke'), [...OWNER, "jobPre('key-revoke')", 'reauth']);
+  assert.deepEqual(chains.get('post /settings/ssh-access/jobs/:id/cancel'), OWNER);
   assert.match(rt, /const ownerWrite = \[adminOnly, requireSettingsOwner, reauth\];/);
   assert.match(rt, /const keyAddWrite = \[adminOnly, requireSettingsOwner, vaultFirst, reauth\];/);
   assert.match(rt, /api\.post\('\/settings\/ssh-access\/reload-state', \.\.\.ownerWrite/);
