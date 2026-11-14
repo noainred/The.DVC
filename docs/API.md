@@ -915,10 +915,10 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/settings/ssh-access/approvals/:id/reject` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `approvePre` · `reauth` | [server/src/routes/api/sshAccess.js:118](../server/src/routes/api/sshAccess.js#L118) |
 | GET | `/settings/ssh-access/changes` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:223](../server/src/routes/api/sshAccess.js#L223) |
 | DELETE | `/settings/ssh-access/corps/:corp/stop` | `write` | [server/src/routes/api/sshAccess.js:198](../server/src/routes/api/sshAccess.js#L198) |
-| POST | `/settings/ssh-access/corps/:corp/stop` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `reauth` | [server/src/routes/api/sshAccess.js:192](../server/src/routes/api/sshAccess.js#L192) |
+| POST | `/settings/ssh-access/corps/:corp/stop` | `write` | [server/src/routes/api/sshAccess.js:192](../server/src/routes/api/sshAccess.js#L192) |
 | PUT | `/settings/ssh-access/guards` | `write` | [server/src/routes/api/sshAccess.js:125](../server/src/routes/api/sshAccess.js#L125) |
 | POST | `/settings/ssh-access/inbox/approve` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `vaultFirst` · `pre` · `reauth` | [server/src/routes/api/sshAccess.js:205](../server/src/routes/api/sshAccess.js#L205) |
-| POST | `/settings/ssh-access/inbox/discard` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `reauth` | [server/src/routes/api/sshAccess.js:212](../server/src/routes/api/sshAccess.js#L212) |
+| POST | `/settings/ssh-access/inbox/discard` | `write` | [server/src/routes/api/sshAccess.js:212](../server/src/routes/api/sshAccess.js#L212) |
 | GET | `/settings/ssh-access/jobs/:id` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:151](../server/src/routes/api/sshAccess.js#L151) |
 | POST | `/settings/ssh-access/jobs/:id/cancel` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `cancelGate` | [server/src/routes/api/sshAccess.js:159](../server/src/routes/api/sshAccess.js#L159) |
 | POST | `/settings/ssh-access/key-login` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `jobPre` · `reauth` | [server/src/routes/api/sshAccess.js:137](../server/src/routes/api/sshAccess.js#L137) |
@@ -932,7 +932,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/settings/ssh-access/scan` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:63](../server/src/routes/api/sshAccess.js#L63) |
 | GET | `/settings/ssh-access/servers/:id/candidates` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:173](../server/src/routes/api/sshAccess.js#L173) |
 | POST | `/settings/ssh-access/servers/:id/installed-keys` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:177](../server/src/routes/api/sshAccess.js#L177) |
-| POST | `/settings/ssh-access/servers/:id/key` | 역할 `admin` · `requireSettingsOwner` · `fullRW` · `reauth` | [server/src/routes/api/sshAccess.js:166](../server/src/routes/api/sshAccess.js#L166) |
+| POST | `/settings/ssh-access/servers/:id/key` | `write` | [server/src/routes/api/sshAccess.js:166](../server/src/routes/api/sshAccess.js#L166) |
 | POST | `/settings/ssh-access/servers/:id/test` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:185](../server/src/routes/api/sshAccess.js#L185) |
 | GET | `/settings/ssh-access/usage` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:220](../server/src/routes/api/sshAccess.js#L220) |
 | GET | `/summary` | — | [server/src/routes/api/inventory.js:164](../server/src/routes/api/inventory.js#L164) |
@@ -1730,16 +1730,16 @@ Prometheus/OTel 익스포터(선택 토큰).
 |---|---:|---|
 | `fullScopeOnly` | 324 | **전체 범위 계정만**. vCenter 범위를 지정한 계정은 403 — 그 자원에 법인 축이 없어 교집합할 수 없기 때문이다(빈 목록을 주면 '장비 0대' 라는 거짓이 된다). |
 | `fleetOnly` | 212 | **전체 범위 계정만**(v2.607 AUTHZ2607-04·07 — 중앙 IPAM 스캔·중앙 인벤토리·감사 로그처럼 전 법인에 걸친 데이터·동작). 범위 제한 계정은 403. |
-| `requireSettingsOwner` | 78 | **설정 소유 계정**(`settings-owners.txt`·`SETTINGS_OWNERS`·중앙 배포 admin). admin 이라도 소유자가 아니면 403. 그리고 **소유자이면서 전체 범위(vCenter 제한 없음) 계정만** 통과한다 — 범위가 지정된 소유자는 403(v2.744 AUTHZ-02). 백업 아카이브·중앙 토큰 배달 등 **비밀을 다루는 경로**에 붙는다. |
+| `requireSettingsOwner` | 75 | **설정 소유 계정**(`settings-owners.txt`·`SETTINGS_OWNERS`·중앙 배포 admin). admin 이라도 소유자가 아니면 403. 그리고 **소유자이면서 전체 범위(vCenter 제한 없음) 계정만** 통과한다 — 범위가 지정된 소유자는 403(v2.744 AUTHZ-02). 백업 아카이브·중앙 토큰 배달 등 **비밀을 다루는 경로**에 붙는다. |
 | `requireCentral` | 70 | **central 게이트**(v2.613 DEPS2613-09) — 공유 `CENTRAL_TOKEN`·엣지별 개별 토큰이 하나도 설정돼 있지 않으면 404, 토큰이 맞지 않으면 403. 51개 `/api/central/*` 라우트가 같은 미들웨어를 쓴다(예전의 인라인 2줄 게이트 쌍을 하나로). |
 | `fullRwOnly` | 43 | **조회 · 쓰기 모두 전체 범위인 계정만**(v2.935 — `fullReadWriteScopeOnlyWith` 의 산물 · SAN 스위치 등록 · 수집 · 설정 변경 라우트). 쓰기 범위만 줄인 관리자도 403. |
 | `csvPerm` | 37 | **CSV 가져오기/내보내기 권한**(`requirePerm('data.csv')` — v2.643). 관리자 이상만(super_admin 항상, admin 은 권한 설정에서 super_admin 이 끌 수 있다). operator·viewer 는 403. |
-| `reauth` | 33 | 통합 계정 관리의 재인증 — 로컬 OTP 계정은 OTP, OTP 없는 계정은 설정 소유자만. |
+| `reauth` | 30 | 통합 계정 관리의 재인증 — 로컬 OTP 계정은 OTP, OTP 없는 계정은 설정 소유자만. |
 | `fullWriteOnly` | 24 | **쓰기 범위도 무제한인 계정만**(v2.823 Bareos 설정 쓰기). 조회는 무제한이어도 수정 가능 vCenter(writeVcenters)가 지정된 계정은 403 — 전 법인 공용 쓰기라 쓰기 범위와 교집합할 수 없다. |
 | `fleetWideOnly` | 23 | **전체 범위 계정만**(v2.607 AUTHZ2607-03 — vCenter 등록·데이터 소스 전환·표시 순서). 범위 제한 계정은 403. |
 | `demoBlockWrite` | 21 | **데모(손님) 계정 403**(v2.976 집중 모니터링 쓰기 — `isDemoGuest`). `noDemo` 와 같은 뜻 — 관리자 게이트 뒤에 붙는 쓰기 거절이고 권한을 넓히지 않는다. |
 | `tokenFirst` | 21 | **수집 토큰 확인을 본문 해석보다 먼저** 한다(v2.741 — 토큰 없는 요청이 본문 파서·큰 본문 한도에 닿지 않게). 토큰이 없거나 틀리면 403, 수집 토큰 미설정이면 404. |
-| `fullRW` | 19 | **조회 · 쓰기 범위 모두 무제한인 계정만**(v3.10.0 SSH 공용 접속 쓰기 — `isFullReadWriteScope`). writeVcenters 로 쓰기를 좁힌 설정 소유자도 403 `write-scope` — 이 화면의 쓰기는 전 법인 서버의 authorized_keys · 승인 · 사용 중지를 바꾼다. |
+| `fullRW` | 16 | **조회 · 쓰기 범위 모두 무제한인 계정만**(v3.10.0 SSH 공용 접속 쓰기 — `isFullReadWriteScope`). writeVcenters 로 쓰기를 좁힌 설정 소유자도 403 `write-scope` — 이 화면의 쓰기는 전 법인 서버의 authorized_keys · 승인 · 사용 중지를 바꾼다. |
 | `fullReadWriteScopeOnlyWith` | 14 | **조회 · 쓰기 모두 전체 범위인 계정만**(v2.935 — `routes/admin/shared.js` · `auth/scope.js isFullReadWriteScope`). 조회 범위 또는 쓰기 범위(writeVcenters)를 지정한 계정은 403 — 스위치 설정을 바꾸는 라우트(SAN 플로우 모니터)가 쓴다. |
 | `requireSuperAdmin` | 13 | **super_admin 전용**(v2.726 좌측 메뉴 배포·철회 · v2.740 아이실론 디렉터리 사용량 수집 대상 설정 — 조회·저장·일괄 변경·연결 시험·메일·SSH 키). 저장 역할이 super_admin 인 계정만(`req.user.superAdmin`). 역할 admin 은 403 `super-admin-only`(`requiredRole: ['super_admin']`). |
 | `fleetReadOnly` | 10 | **전체 범위 계정만**(v2.621 SEC-03 — 폴더 사용량 조회. 응답이 RMA 엣지 IP·호스트명·마운트 경로를 싣는다 · v2.622 SEC-03 — GPU 게스트 엣지 배포 설정·엣지 배포 사용자·수집 진단 조회). 범위 제한 계정은 403. |
@@ -1747,9 +1747,9 @@ Prometheus/OTel 익스포터(선택 토큰).
 | `express.json` | 10 | 본문 파서(대용량 JSON 한도). ⚠ 게이트가 아니다 — 이 자리에 있는 이유는 **인증보다 먼저 파싱하지 않기 위해** 라우트 단위로 붙였기 때문이다(`util/bigJsonGate.js` 규약). |
 | `guarded` | 10 | 공개 API 전용 래퍼 — 허용 목록 검사 + 스냅샷 준비 + async throw 안전 처리. 미들웨어가 아니라 핸들러를 감싼 것이다. |
 | `fullScopeOnlyWith` | 10 | **전체 범위 계정만**(사유 문구를 받는 `fullScopeOnly` — v2.628 SEC2628-01 업그레이드 제어·SEC2628-05 리소스 적정성 진단 등). 범위 제한 계정은 403. |
+| `write` | 8 | **SSH 공용 접속 쓰기 묶음**(v3.10.0) = 관리자 → 설정 소유자 등급 → `fullRW` → `pre(사전 검사)` → `reauth`(OTP 마지막). 사전 검사가 거절하면 OTP 를 쓰지 않는다. |
 | `commenters` | 8 | **admin·operator 또는 권한 키 `issues.request`**(v2.881 위키 — 댓글 · 지켜보기. 데모 계정 제외 · 문서의 스페이스가 쓰기 범위 안이어야 한다 — 저장소 `addComment`). |
 | `authMiddleware` | 8 | 세션 토큰 검증(`resolveTokenUser`). 대부분의 `/api/*` 는 마운트에서 이미 걸리고, 여기 보이는 것은 **라우터가 따로 건** 경우다(`/api/auth` 안의 admin 라우트 등). |
-| `write` | 5 | **SSH 공용 접속 쓰기 묶음**(v3.10.0) = 관리자 → 설정 소유자 등급 → `fullRW` → `pre(사전 검사)` → `reauth`(OTP 마지막). 사전 검사가 거절하면 OTP 를 쓰지 않는다. |
 | `noDemo` | 4 | **데모(손님) 계정 403**(7b 서버 등록 — `isDemoGuest`). 관리자 게이트 뒤에 붙는 쓰기 거절이고 권한을 넓히지 않는다. |
 | `prefsWrite` | 4 | VM 목록 내보내기 내 저장값 쓰기(v2.798) — **데모 손님 403** · 저장 키는 인증된 계정 이름(본문 값 무시) · 손상 파일이면 503 · 감사 로그. |
 | `templateFleetOnly` | 4 | **전체 범위 계정만**(v2.889 — 위키 관리자 템플릿: 모든 스페이스의 새 문서 화면에 보이는 전 법인 공용 설정). 범위 제한 계정은 403 · 핸들러가 관리자 판본(데모 제외)을 한 번 더 본다. |
