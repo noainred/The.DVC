@@ -724,7 +724,7 @@ function jobServerEvents(list) {
 }
 /** 바꾸기 전에 ‘지금 이 서버를 바꾸는 중’ 을 적고 끝나면 지운다 — 도중에 포탈이 재시작하면 기동 때 ‘중단’ 사건이 된다(1회차 B7). */
 async function inflight(job, kind, keyName, s, by, fn) {
-  const rec = { jobId: job?.id || '', kind, keyName, server: s.name || s.host, corp: t(s.vcenterId), by };
+  const rec = { jobId: job?.id || '', kind, keyName, sid: s.id, server: s.name || s.host, corp: t(s.vcenterId), by };   // job = startJob 의 handle({ id, stop })
   INF.markStart(rec);
   try { return await fn(); } finally { INF.markEnd(rec); }
 }

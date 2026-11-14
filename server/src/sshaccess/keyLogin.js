@@ -367,7 +367,7 @@ export function startJob({ kind, servers, run, by = '', meta = {}, onDone = null
   }
   const id = `kj_${crypto.randomBytes(6).toString('hex')}`;
   const job = { id, kind, slot, by: t(by, 64), meta, startedAt: now, doneAt: 0, total: servers.length, results: [], current: '', cancelled: false, cancelledBy: '', cancelWhy: '' };
-  const handle = { stop: (why) => { if (!job.cancelled) { job.cancelled = true; job.cancelledBy = ''; job.cancelWhy = t(why, 120); } } };
+  const handle = { id, stop: (why) => { if (!job.cancelled) { job.cancelled = true; job.cancelledBy = ''; job.cancelWhy = t(why, 120); } } };
   jobs.set(id, job); slots.set(slot, id); lastBySlot.set(viewKey(slot), id);
   (async () => {
     for (const s of servers) {

@@ -40,18 +40,19 @@ function save() {
 }
 
 /** 그 서버를 바꾸기 시작함(같은 작업 · 같은 서버는 하나). */
-export function markStart({ jobId, kind, keyName, server, corp, by }, { now = Date.now() } = {}) {
+export function markStart({ jobId, kind, keyName, sid, server, corp, by }, { now = Date.now() } = {}) {
   load();
-  cache = cache.filter((x) => !(x.jobId === jobId && x.server === t(server)));
-  cache.push({ jobId: t(jobId, 24), kind: t(kind, 16), keyName: t(keyName, 64), server: t(server), corp: t(corp), by: t(by, 64), at: now });
+  // 같은 작업 · 같은 서버(등록부 id — 이름은 법인끼리 겹칠 수 있다)는 하나.
+  cache = cache.filter((x) => !(x.jobId === t(jobId, 24) && x.sid === t(sid, 64)));
+  cache.push({ jobId: t(jobId, 24), kind: t(kind, 16), keyName: t(keyName, 64), sid: t(sid, 64), server: t(server), corp: t(corp), by: t(by, 64), at: now });
   if (cache.length > MAX) cache = cache.slice(-MAX);
   return save();
 }
 /** 그 서버가 끝남(성공 · 실패 무관 — 결과는 작업 기록에 있다). */
-export function markEnd({ jobId, server }) {
+export function markEnd({ jobId, sid }) {
   load();
   const before = cache.length;
-  cache = cache.filter((x) => !(x.jobId === jobId && x.server === t(server)));
+  cache = cache.filter((x) => !(x.jobId === t(jobId, 24) && x.sid === t(sid, 64)));
   return before === cache.length ? true : save();
 }
 /** 기동 때 한 번 — 남은 기록(지난 실행이 바꾸던 중에 멈춘 서버)을 돌려주고 비운다. */
