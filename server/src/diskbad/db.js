@@ -191,9 +191,18 @@ export async function ingestServers(agent, servers, { now = Date.now(), yielder 
         read_diag: prev?.read_diag ?? null, probe_json: prev?.probe_json ?? null, probe_at: prev?.probe_at ?? null,
         vals_json: prev?.vals_json ?? null, sel_json: prev?.sel_json ?? null,
       };
-      // 과거 기록 읽기 1단계 — 온 것만 바꾼다(옛 판 엣지 · 데모 결과에는 없다 — 지난 값을 그대로 둔다).
-      if (s.vals) row.vals_json = JSON.stringify(mergeVals(parseObj(prev?.vals_json), s.vals, now)).slice(0, 60_000);
-      if (s.sel) row.sel_json = JSON.stringify(mergeSel(parseObj(prev?.sel_json), s.sel, now)).slice(0, 120_000);
+      // 과거 기록 읽기 1단계 — 온 것만 바꾼다(옛 판 엣지에는 없다 — 지난 값을 그대로 둔다).
+      //   반증 F1: 디스크 값은 **그 점검의 디스크 목록에서 Id 별 시리얼**을 함께 적는다(Dell Drive Id 는 자리 이름이다 — 시리얼이 바뀌면 이력을 잇지 않는다).
+      //   반증 F2: 글자 수로 자르지 않는다(잘린 JSON 은 못 읽어 보관분이 통째로 사라졌다) — 오래된 항목부터 빼고, 그래도 넘으면 지난 값을 둔다.
+      if (s.vals) {
+        const serialOf = serialMapOf(Array.isArray(s.drives) ? s.drives : parseArr(prev?.drives_json));
+        const j = fitJson(mergeVals(parseObj(prev?.vals_json), s.vals, now, serialOf), VALS_JSON_MAX, (o) => (o.seen?.length ? (o.seen = [], true) : false));
+        if (j) row.vals_json = j;
+      }
+      if (s.sel) {
+        const j = fitJson(mergeSel(parseObj(prev?.sel_json), s.sel, now), SEL_JSON_MAX, (o) => (o.events?.length > 1 ? (o.events = o.events.slice(0, Math.floor(o.events.length / 2)), true) : false));
+        if (j) row.sel_json = j;
+      }
       // 장비 진단은 온 것만 바꾼다(서버 한 대를 직접 점검했을 때만 온다). 로그 읽기가 실패한 점검에도 실릴 수 있다.
       //   답한 단계가 하나도 없는 진단(전부 실패 · 시한)은 지난 정상 진단을 덮지 않는다 — 지난 것이 없을 때만 남긴다(실패했다는 사실을 보이게).
       if (s.probe && (probeAnswered(s.probe) || !prev?.probe_json)) { row.probe_json = JSON.stringify(s.probe).slice(0, 20_000); row.probe_at = now; }
@@ -262,27 +271,65 @@ export async function ingestServers(agent, servers, { now = Date.now(), yielder 
 }
 
 const VAL_KEYS = ['realloc', 'pending', 'uncorrectable'];
+const hasCounter = (d) => !!d && VAL_KEYS.some((k) => Number.isFinite(d[k]));
+export const VALS_KEEP_MAX = 64;
+export const VALS_JSON_MAX = 100_000;
+export const SEL_JSON_MAX = 150_000;
+const parseArr = (v) => { try { const j = JSON.parse(v || 'null'); return Array.isArray(j) ? j : null; } catch { return null; } };
+/** 디스크 목록 → (Id → 시리얼). 못 읽은 목록이면 빈 맵(시리얼 모름). */
+function serialMapOf(drives) {
+  const m = new Map();
+  for (const d of Array.isArray(drives) ? drives : []) { const sn = String(d?.serial || '').trim(); if (d?.id && sn) m.set(String(d.id), sn.slice(0, 64)); }
+  return (id) => m.get(String(id)) || '';
+}
+/** 직렬화가 상한을 넘으면 `shrink` 로 줄여 다시 — 끝내 넘으면 null(호출자는 지난 값을 둔다). 글자 수로 자르지 않는다(반증 F2). */
+function fitJson(obj, max, shrink) {
+  let j = JSON.stringify(obj);
+  for (let i = 0; j.length > max && i < 16 && shrink(obj); i += 1) j = JSON.stringify(obj);
+  return j.length > max ? null : j;
+}
+
 /**
  * 디스크 값 저장 모양(순수 — 테스트가 고정). 누적 값이라 **마지막으로 읽은 값**을 남기고, 포탈이 본 변화만 날짜를 단다:
- *  · firstAt   이 디스크(Id)의 값을 처음 읽은 때 · changedAt  재할당 · 보류 · 복구 불가 가운데 하나가 늘어난 것을 본 때(못 봤으면 null).
- *  · 이번에 못 읽었으면(ok 가 아님) 지난 값을 버리지 않고 남긴다 — `at` 은 마지막으로 읽은 때로 두고 `status` · `tryAt` 만 바꾼다
- *    (화면이 '언제 읽은 값 · 이번에는 못 읽음' 을 같이 말한다). 지난 값이 없으면 그대로 '못 읽음' 이다.
- *  · 디스크 Id 가 바뀌면(교체 · 자리 이동) 그 Id 의 이력은 새로 시작한다 — 다른 디스크의 값과 잇지 않는다.
+ *  · 디스크마다 `serial`(그 점검의 디스크 목록에서) · `readAt`(재할당 · 보류 · 복구 불가를 마지막으로 읽은 때) · `firstAt`(처음 읽은 때) ·
+ *    `changedAt`(그 가운데 하나가 늘어난 것을 본 때 — 못 봤으면 null) · `before`(늘기 전 값).
+ *  · 반증 F1: Dell Drive Id 는 **자리 이름**이다 — 같은 Id 라도 시리얼이 다르면 다른 디스크다. 이력을 잇지 않고, 그 자리의 지난 값도 남기지 않는다.
+ *  · 이번에 못 읽은 디스크(못 읽은 점검 · 보고서에 빠진 디스크 — 반증 F9)는 지난 값을 지우지 않는다. `readAt` 이 그대로라 화면 · 판정이 '지난 값' 으로 다룬다.
+ *  · 가동 시간만 온 디스크는 지난 재할당 · 보류 · 복구 불가를 덮지 않는다(가동 시간만 고친다).
+ * @param {(id:string)=>string} [serialOf]  그 점검의 Id → 시리얼(모르면 '')
  */
-export function mergeVals(prev, cur, now) {
+export function mergeVals(prev, cur, now, serialOf = () => '') {
   const base = { status: cur.status, tryAt: now, telemetry: cur.telemetry || '', metrics: cur.metrics || '' };
-  if (cur.status !== 'ok') {
-    if (prev && Array.isArray(prev.drives) && prev.drives.length) return { ...prev, ...base };
-    return { ...base, at: null, reportAt: null, seen: cur.seen || [], drives: [] };
-  }
-  const old = new Map((prev && Array.isArray(prev.drives) ? prev.drives : []).map((d) => [d.id, d]));
-  const drives = (cur.drives || []).map((d) => {
-    const p = old.get(d.id);
+  const prevDrives = prev && Array.isArray(prev.drives) ? prev.drives : [];
+  const old = new Map(prevDrives.map((d) => [d.id, d]));
+  const sameDisk = (p, sn) => !(p && p.serial && sn && p.serial !== sn);
+  const out = [];
+  const done = new Set();
+  for (const d of Array.isArray(cur.drives) ? cur.drives : []) {
+    if (!d || !d.id || done.has(d.id)) continue;
+    done.add(d.id);
+    const sn = String(serialOf(d.id) || '').trim().slice(0, 64);
+    const p0 = old.get(d.id) || null;
+    const p = sameDisk(p0, sn) ? p0 : null;
+    if (!hasCounter(d)) {
+      // 가동 시간만 — 지난 값이 있으면 가동 시간만 고치고, 없으면 값 없는 줄로 둔다(흔적 판정은 '값 모름').
+      if (p) out.push({ ...p, powerOnHours: Number.isFinite(d.powerOnHours) ? d.powerOnHours : p.powerOnHours ?? null, serial: p.serial || sn });
+      else out.push({ id: d.id, serial: sn, realloc: null, pending: null, uncorrectable: null, powerOnHours: d.powerOnHours ?? null, src: d.src || '', readAt: null, firstAt: null, changedAt: null });
+      continue;
+    }
     const grew = p && VAL_KEYS.some((k) => Number.isFinite(d[k]) && Number.isFinite(p[k]) && d[k] > p[k]);
-    return { ...d, firstAt: Number.isFinite(p?.firstAt) ? p.firstAt : now, changedAt: grew ? now : (Number.isFinite(p?.changedAt) ? p.changedAt : null),
-      ...(grew ? { before: Object.fromEntries(VAL_KEYS.map((k) => [k, Number.isFinite(p[k]) ? p[k] : null])) } : (p?.before ? { before: p.before } : {})) };
-  });
-  return { ...base, at: now, reportAt: cur.reportAt ?? null, seen: cur.seen || [], drives };
+    out.push({ ...d, serial: sn || p?.serial || '', readAt: now, firstAt: Number.isFinite(p?.firstAt) ? p.firstAt : now,
+      changedAt: grew ? now : (Number.isFinite(p?.changedAt) ? p.changedAt : null),
+      ...(grew ? { before: Object.fromEntries(VAL_KEYS.map((k) => [k, Number.isFinite(p[k]) ? p[k] : null])) } : (p?.before ? { before: p.before } : {})) });
+  }
+  for (const p of prevDrives) {
+    if (!p || done.has(p.id)) continue;
+    if (!sameDisk(p, String(serialOf(p.id) || '').trim())) continue;   // 그 자리에 다른 디스크가 들어왔다 — 지난 값을 남기지 않는다
+    out.push(p);
+  }
+  const ok = cur.status === 'ok';
+  return { ...base, at: ok ? now : (prev?.at ?? null), reportAt: ok ? (cur.reportAt ?? null) : (prev?.reportAt ?? null),
+    seen: Array.isArray(cur.seen) && cur.seen.length ? cur.seen : (prev?.seen || []), drives: out.slice(0, VALS_KEEP_MAX) };
 }
 
 export const SEL_KEEP_MAX = 200;
@@ -297,7 +344,8 @@ export function mergeSel(prev, cur, now) {
     if (prev) return { ...prev, ...base };
     return { ...base, at: null, read: null, total: null, stopped: '', range: null, kinds: {}, events: [], keptFrom: null };
   }
-  const key = (e) => `${e.created}|${e.kind}|${e.slotKey}|${String(e.message || '').slice(0, 80)}`;
+  // 키에는 장비가 준 원래 시각(createdRaw — 반증 F3: 자른 시각은 점검마다 달라져 같은 항목이 쌓였다).
+  const key = (e) => `${Number.isFinite(e.createdRaw) ? e.createdRaw : e.created}|${e.kind}|${e.slotKey}|${String(e.message || '').slice(0, 80)}`;
   const seen = new Set();
   const events = [];
   for (const e of [...(cur.events || []), ...prevEvents]) {

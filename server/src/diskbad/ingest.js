@@ -96,7 +96,9 @@ export const SEL_STATUS = VALS_STATUS;
 const VALS_SET = new Set(VALS_STATUS);
 const SRC_SET = new Set(['telemetry', 'metrics', '']);
 const PART_SET = new Set(['ok', 'empty', 'absent', 'forbidden', 'error', '']);
-const SEL_STOPS = new Set(['', 'budget', 'max', 'skip', 'short', 'error']);
+const SEL_STOPS = new Set(['', 'budget', 'max', 'skip', 'short', 'error', 'timeout']);
+/** 제어 문자는 빈칸으로(반증 F2 — JSON 으로 저장하면 한 글자가 6글자(\\uXXXX)로 불어 저장 크기가 예측을 넘었다). 길이는 먼저 자른다. */
+const plain = (v, n) => s(v, n).replace(/[\u0000-\u001f\u007f]/g, ' ');
 const KIND_SET = new Set(['removed', 'installed', 'fault', 'predictive', 'other']);
 export const VALS_DRIVES_MAX = 64;
 export const SEL_EVENTS_MAX = 100;
@@ -108,7 +110,7 @@ export function cleanVals(v, now) {
   const status = VALS_SET.has(v.status) ? v.status : 'error';
   const drives = Array.isArray(v.drives) ? v.drives.slice(0, VALS_DRIVES_MAX).map((d) => {
     if (!isObj(d)) return null;
-    const id = s(d.id, 200).trim();
+    const id = plain(d.id, 200).trim();
     if (!id) return null;
     const o = { id, realloc: cnt(d.realloc), pending: cnt(d.pending), uncorrectable: cnt(d.uncorrectable), powerOnHours: nn(d.powerOnHours), src: SRC_SET.has(d.src) ? d.src : '' };
     return [o.realloc, o.pending, o.uncorrectable, o.powerOnHours].some((x) => x != null) ? o : null;
@@ -116,7 +118,7 @@ export function cleanVals(v, now) {
   return {
     at: clampTime(v.at, now) ?? now, status: status === 'ok' && !drives.length ? 'empty' : status,
     telemetry: PART_SET.has(v.telemetry) ? v.telemetry : '', metrics: PART_SET.has(v.metrics) ? v.metrics : '',
-    reportAt: clampTime(v.reportAt, now), seen: Array.isArray(v.seen) ? v.seen.slice(0, 40).map((x) => s(x, 64)).filter(Boolean) : [],
+    reportAt: clampTime(v.reportAt, now), seen: Array.isArray(v.seen) ? v.seen.slice(0, 40).map((x) => plain(x, 64)).filter(Boolean) : [],
     drives,
   };
 }
@@ -127,11 +129,16 @@ export function cleanSel(v, now) {
     if (!isObj(e)) return null;
     const disk = cnt(e.disk); const bp = cnt(e.bp);
     const slotKey = s(e.slotKey, 24);
+    const created = clampTime(e.created, now);
+    // 반증 F3: 자른 시각(수신 + 5분)은 표시용이다. 중복 거르기 키에는 **장비가 준 원래 시각**을 쓰고(db.js mergeSel), 시계가 빠른 장비의
+    //   항목은 판정에 쓰지 않는다(verdict.js — 날짜를 믿을 수 없으면 '기록 뒤 빠짐' 을 말할 수 없다). LC 기록의 반증 #10 과 같은 선.
+    const raw = numOrNull(e.created);
     return {
-      created: clampTime(e.created, now), kind: KIND_SET.has(e.kind) ? e.kind : 'other', disk, bp,
+      created, createdRaw: created != null && raw != null ? Math.floor(raw) : null, clockAhead: created != null && raw != null && raw > created,
+      kind: KIND_SET.has(e.kind) ? e.kind : 'other', disk, bp,
       // 위치 키는 이 꼴만(엣지가 만든 글자를 그대로 믿지 않는다 — 위치 번호와도 맞아야 한다).
       slotKey: disk != null && bp != null && slotKey === `bp${bp}:d${disk}` ? slotKey : '',
-      messageId: s(e.messageId, 64), message: s(e.message, 300), severity: s(e.severity, 16), sensor: s(e.sensor, 40),
+      messageId: plain(e.messageId, 64), message: plain(e.message, 300), severity: plain(e.severity, 16), sensor: plain(e.sensor, 40),
     };
   }).filter(Boolean) : [];
   const kinds = {};

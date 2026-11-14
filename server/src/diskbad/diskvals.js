@@ -43,9 +43,14 @@ function count(v) {
   return n != null && n >= 0 ? n : null;
 }
 
-/** 값이 하나라도 있는가. */
+/** 값이 하나라도 있는가(가동 시간 포함 — 표시용). */
 export function hasAnyVal(v) {
   return !!v && VAL_FIELDS.some((f) => Number.isFinite(v[f]));
+}
+/** 흔적을 말할 수 있는 값(재할당 · 보류 · 복구 불가)이 하나라도 있는가. 가동 시간만 읽힌 디스크는 '값을 읽음' 이 아니다(반증 F10). */
+export const COUNTER_FIELDS = Object.freeze(['realloc', 'pending', 'uncorrectable']);
+export function hasCounter(v) {
+  return !!v && COUNTER_FIELDS.some((f) => Number.isFinite(v[f]));
 }
 
 /**
@@ -90,26 +95,31 @@ export function parseDriveMetrics(j) {
   if (!j || typeof j !== 'object') return null;
   const ur = count(j.UncorrectableIOReadErrorCount);
   const uw = count(j.UncorrectableIOWriteErrorCount);
-  return {
-    realloc: count(j.BadBlockCount), pending: null,
-    uncorrectable: ur == null && uw == null ? null : (ur || 0) + (uw || 0),
-    powerOnHours: count(j.PowerOnHours),
-  };
+  // 부분 합 금지(반증 F11 · 루트 CLAUDE.md): 둘 다 읽었을 때만 합한다. 하나만 읽혔으면 그 값이 0 보다 클 때만 쓴다
+  //   (복구 불가가 있다는 사실은 하한으로도 참이다) — 0 이면 '없음' 이라고 말할 수 없으니 모름(null).
+  let unc = null;
+  if (ur != null && uw != null) unc = ur + uw;
+  else if ((ur ?? 0) > 0 || (uw ?? 0) > 0) unc = (ur ?? 0) + (uw ?? 0);
+  return { realloc: count(j.BadBlockCount), pending: null, uncorrectable: unc, powerOnHours: count(j.PowerOnHours) };
 }
 
-const SAFE_PATH_RE = /^\/redfish\/v1\/[A-Za-z0-9._:\/%-]{1,280}\/Metrics$/;
+// '…/Systems|Chassis/<id>/(Storage/<id>/)Drives/<디스크 Id>/Metrics' 꼴만. '%' 는 받지 않는다(반증 F8 — '%2e%2e' 가 정규화 뒤 다른 자원을 가리켰다).
+const METRICS_PATH_RE = /^\/redfish\/v1\/(?:Systems|Chassis)\/[A-Za-z0-9._-]{1,64}\/(?:Storage\/[A-Za-z0-9._:-]{1,120}\/)?Drives\/([A-Za-z0-9._:-]{1,200})\/Metrics$/;
 /**
- * 인벤토리가 받아 둔 DriveMetrics 링크 — 이 꼴이고 그 디스크 Id 를 담을 때만 쓴다(장비가 준 경로를 그대로 붙이지 않는다 — probe.js safePath 와 같은 선).
+ * 인벤토리가 받아 둔 DriveMetrics 링크 — 위 꼴이고 경로의 디스크 Id 가 **그 디스크 Id 와 같을 때만** 쓴다(장비가 준 경로를 그대로 붙이지 않는다).
  */
 export function metricsPathOf(d) {
   const p = typeof d?.metricsPath === 'string' ? d.metricsPath : '';
   const id = String(d?.id || '');
-  if (!p || !id || p.length > 300 || p.includes('..') || p.includes('//') || !SAFE_PATH_RE.test(p)) return '';
-  return p.includes(id) || p.includes(encodeURIComponent(id)) ? p : '';
+  if (!p || !id || p.length > 300) return '';
+  const m = METRICS_PATH_RE.exec(p);
+  return m && m[1] === id ? p : '';
 }
 
 const errKind = (e) => (e?.status === 404 ? 'absent' : (e?.status === 403 ? 'forbidden' : 'error'));
 const isAuth = (e) => e?.status === 401 || e?.authFailed === true;
+/** 장비가 막혔거나 바쁘다(429 · 5xx) · 시한으로 끊겼다 — 더 묻지 않는다(반증 F5). */
+const isBusy = (e, signal) => !!signal?.aborted || e?.status === 429 || (Number.isInteger(e?.status) && e.status >= 500);
 
 /**
  * 서버 한 대의 디스크 값. 401 은 던진다(호출자가 인증 정지로 — 다시 로그인하지 않는다).
@@ -134,7 +144,7 @@ export async function readDiskVals(entry, { signal = null, drives = null, getJso
   // ② 텔레메트리에서 못 읽은 디스크 가운데 장비가 링크를 알려 준 것만.
   const links = (Array.isArray(drives) ? drives : []).map((d) => ({ id: String(d?.id || '').slice(0, 200), path: metricsPathOf(d) }))
     .filter((d) => d.id && d.path && !by.has(d.id)).slice(0, DRIVES_MAX);
-  if (links.length) {
+  if (links.length && !signal?.aborted) {
     let ok = 0; let fail = '';
     for (const d of links) {
       try {
@@ -144,14 +154,17 @@ export async function readDiskVals(entry, { signal = null, drives = null, getJso
       } catch (e) {
         if (isAuth(e)) throw e;
         fail = fail || errKind(e);
+        if (isBusy(e, signal)) break;
       }
     }
     out.metrics = ok ? 'ok' : (fail || 'empty');
   }
   out.drives = [...by.values()].filter(hasAnyVal).slice(0, DRIVES_MAX);
-  if (out.drives.length) out.status = 'ok';
+  // '읽음' 은 흔적을 말할 수 있는 값(재할당 · 보류 · 복구 불가)을 하나라도 읽었을 때만(반증 F10). 가동 시간만이면 '항목 없음'.
+  if (out.drives.some(hasCounter)) out.status = 'ok';
+  else if (signal?.aborted) out.status = 'timeout';     // 시한으로 끊긴 것은 '읽기 실패' 와 따로 밝힌다(반증 F7)
   else if (out.telemetry === 'forbidden' || out.metrics === 'forbidden') out.status = 'forbidden';
   else if (out.telemetry === 'error' || out.metrics === 'error') out.status = 'error';
-  else if (out.telemetry === 'empty' || out.metrics === 'empty') out.status = 'empty';
+  else if (out.drives.length || out.telemetry === 'empty' || out.metrics === 'empty') out.status = 'empty';
   return out;
 }

@@ -141,7 +141,8 @@ export async function scanOne(s, { mode = 'incremental', manual = false, invOf =
     const capped = r.entries.length > RECORDS_MAX;
     const records = capped ? [...r.entries].sort((a, b) => (b.created ?? -Infinity) - (a.created ?? -Infinity)).slice(0, RECORDS_MAX) : r.entries;
     const past = await readPast(s, { inv, mgr: r.mgrPath, now });
-    const pr = await probe();
+    // 디스크 값 · SEL 에서 인증이 거부됐으면 장비 진단으로 다시 로그인하지 않는다(반증 F6).
+    const pr = past.vals?.status === 'auth' || past.sel?.status === 'auth' ? undefined : await probe();
     return { ...base, ok: true, reason: REASON.ok, log, records, recordsCapped: capped, drives, invAt, ...past, ...(pr ? { probe: pr } : {}),
       _cursor: r.newest ? { entryId: r.newest.entryId, created: r.newest.created, complete: !capped && (r.reachedEnd || r.foundCursor) } : (cursor || null) };
   } catch (e) {
@@ -149,8 +150,10 @@ export async function scanOne(s, { mode = 'incremental', manual = false, invOf =
     if (reason === REASON.authFailed) authGuard.markAuthStopped(s.id, s, t(e?.message, 200));
     // 로그 읽기가 실패해도(경로 없음 · 권한) 장비 진단은 답할 수 있다 — 인증 실패 · 연결 실패면 묻지 않는다(다시 로그인하지 않는다).
     const pr = (reason === REASON.authFailed || reason === REASON.unreachable) ? undefined : await probe();
-    // 디스크 값 · SEL 은 로그 권한이 없거나(403) 로그 경로가 달라도(오류) 읽힐 수 있다. 시한 · 인증 · 연결 실패면 묻지 않는다(장비가 느리거나 막혔다).
-    const past = (reason === REASON.forbidden || reason === REASON.error) ? await readPast(s, { inv, mgr: DEFAULT_MGR, now }) : {};
+    // 디스크 값 · SEL 은 로그 권한이 없거나(403) 로그 경로가 없어도(404) 읽힐 수 있다. 그 밖(시한 · 인증 · 연결 실패 · 429 · 5xx — 장비가 느리거나
+    //   막혔거나 바쁘다)이면 더 묻지 않는다(반증 F5). 장비 진단이 인증 거부를 받았으면 다시 로그인하지 않는다(반증 F6).
+    const lcMissing = reason === REASON.error && e?.status === 404;
+    const past = (reason === REASON.forbidden || lcMissing) && !pr?.authDenied ? await readPast(s, { inv, mgr: DEFAULT_MGR, now }) : {};
     return { ...base, ok: false, reason, reasonText: t(e?.message, 200), drives, invAt, ...past, ...(pr ? { probe: pr } : {}) };
   }
 }

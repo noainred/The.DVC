@@ -102,11 +102,12 @@ export async function readSel(entry, { mgr, signal = null, getJson = redfishGetC
     }
   } catch (e) {
     if (e?.status === 401 || e?.authFailed === true) throw e;
+    const timedOut = !!signal?.aborted;    // 시한으로 끊긴 것은 '읽기 실패' 와 따로(반증 F7)
     if (out.pages <= 1 && !out.read) {
-      out.status = e?.status === 404 ? 'absent' : (e?.status === 403 ? 'forbidden' : 'error');
+      out.status = timedOut ? 'timeout' : (e?.status === 404 ? 'absent' : (e?.status === 403 ? 'forbidden' : 'error'));
       return out;
     }
-    out.stopped = out.stopped || 'error';   // 읽은 데까지는 남긴다
+    out.stopped = out.stopped || (timedOut ? 'timeout' : 'error');   // 읽은 데까지는 남긴다
   }
   if (out.status === 'ok' && !out.read) out.status = 'empty';
   out.events = events.sort((a, b) => (b.created ?? -Infinity) - (a.created ?? -Infinity)).slice(0, SEL_EVENTS_MAX);

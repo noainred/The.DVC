@@ -70,13 +70,14 @@ export function serverBand(view, now = Date.now()) {
   // 구간은 **끊김 없이 본 구간**(continuousSince)으로 말한다 — '지금까지 본 가장 오래된 시각'(coveredFrom)은 사이에 못 본 틈이 있어도 내려간다(반증 3.8.2 #1).
   const from = cov.continuousSince;
   const span = Number.isFinite(from) ? `${fmtDate(from)} ~ ${fmtDate(now)} (${spanText(from, now)})` : '구간 모름';
-  if (view.status === 'unread') {
-    return { tone: 'err', title: cov.lastStatusLabel ? `읽지 못했습니다 — ${cov.lastStatusLabel}` : '아직 읽지 못했습니다', lines: ['배드 섹터 유무는 판정하지 않았습니다.', ...(cov.lastReason ? [cov.lastReason] : [])] };
-  }
   // 과거 기록 읽기 1단계: 로그 기록이 없는 디스크의 누적 값에 흔적이 있으면 띠가 말한다(날짜는 모른다 — 서버 verdict.js traceOf).
   const traces = Number.isFinite(view.counts?.traces) ? view.counts.traces : 0;
   const traceLine = traces > 0 ? [`로그 기록이 없는 디스크 ${traces}개의 누적 값에 흔적(재할당 · 보류 · 복구 불가)이 있습니다 — 값은 누적이라 언제 생겼는지 모릅니다. 아래 ‘디스크 값’ 표를 보세요.`] : [];
   const unrecTrace = Array.isArray(view.diskVals) && view.diskVals.some((d) => d && d.trace === 'unrecoverable');
+  if (view.status === 'unread') {
+    // 로그를 못 읽은 서버(예: 403)도 디스크 값은 읽었을 수 있다 — 흔적이 있으면 말한다(반증 F4). 배드 섹터 기록 유무는 판정하지 않는다.
+    return { tone: 'err', title: cov.lastStatusLabel ? `읽지 못했습니다 — ${cov.lastStatusLabel}` : '아직 읽지 못했습니다', lines: ['Lifecycle 로그의 배드 섹터 기록 유무는 판정하지 않았습니다.', ...(cov.lastReason ? [cov.lastReason] : []), ...traceLine] };
+  }
   if (view.status === 'records') {
     const c = view.counts || {};
     return { tone: 'bad', title: `배드 섹터 기록이 있습니다 — ${c.records}건 · 디스크 자리 ${c.slots}곳`, lines: [
@@ -186,7 +187,8 @@ export function sourceRows(cov) {
   const v = cov.vals || {};
   const selKept = Number.isFinite(s.keptFrom) && (!s.range || !Number.isFinite(s.range.oldest) || s.keptFrom < s.range.oldest)
     ? `포탈이 보관한 디스크 항목은 ${fmtDate(s.keptFrom)} 부터입니다(그 뒤 SEL 이 지워졌거나 넘어갔습니다).` : '';
-  const stale = (x) => (x.stale || (x.status !== 'ok' && x.status !== 'never' && Number.isFinite(x.at)) ? `이번 점검(${fmtDateTime(x.tryAt)})에는 못 읽어 ${fmtDateTime(x.at)} 에 읽은 것을 보입니다.` : '');
+  // '지난 값' 인지는 서버가 정한다(summary.js valsView · selView stale — 반증 F12: 정상으로 읽은 0건을 '못 읽음' 으로 말했다).
+  const stale = (x) => (x.stale === true ? `이번 점검(${fmtDateTime(x.tryAt)})에는 못 읽어 ${fmtDateTime(x.at)} 에 읽은 것을 보입니다.` : '');
   return [
     { key: 'lclog', name: '활성 Lifecycle 로그', what: '배드 섹터 계열 기록', range: rangeOf(lcFrom, lcTo), rangeSort: Number.isFinite(lcFrom) ? lcFrom : null,
       count: Number.isFinite(cov.logTotal) ? `${num(cov.logTotal)}건` : '—', status: cov.lastOkAt ? 'ok' : 'error', statusLabel: cov.lastOkAt ? '읽음' : (cov.lastStatusLabel || '읽기 실패'),

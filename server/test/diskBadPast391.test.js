@@ -280,8 +280,116 @@ test('⑨ 소스 계약 — 인벤토리가 같은 응답에서 링크를 받음
   const sc = code('diskbad/scan.js');
   assert.equal((sc.match(/await readPast\(s, \{/g) || []).length, 2, '로그를 읽은 점검 · 권한 없음/오류 점검 둘 다');
   assert.match(sc, /authGuard\.markAuthStopped\(s\.id, s/);
-  assert.match(sc, /reason === REASON\.forbidden \|\| reason === REASON\.error/);
+  // 로그를 못 읽은 점검에서 디스크 값 · SEL 을 읽는 조건은 아래 F5 테스트가 고정한다(403 · 404 만).
   assert.ok(SC.VALS_TIMEOUT_MS + SC.SEL_TIMEOUT_MS < SC.SERVER_TIMEOUT_MS(), '덧붙인 두 시한의 합은 로그 읽기 시한보다 짧다');
   // 장비 설정을 바꾸는 요청을 보내지 않는다(GET 만).
   for (const f of ['diskbad/diskvals.js', 'diskbad/sel.js']) assert.doesNotMatch(code(f), /method:\s*['"](POST|PATCH|PUT|DELETE)/i, f);
+});
+
+// ── 반증 1회(F1 ~ F16) 회귀 ───────────────────────────────────────────────────────────────────────
+
+test('F1 · F9 — Drive Id 는 자리 이름: 시리얼이 바뀌면 이력을 잇지 않고 지난 값을 남기지 않음 · 보고서에 빠진 디스크는 지난 값으로 남음', () => {
+  const sOld = (id) => (id === ID0 ? 'OLD' : 'S2');
+  const a = D.mergeVals(null, { status: 'ok', drives: [{ id: ID0, realloc: 5, pending: 0, uncorrectable: 1 }, { id: ID2, realloc: 1, pending: 0, uncorrectable: 0 }] }, NOW - DAY, sOld);
+  assert.equal(a.drives[0].serial, 'OLD');
+  // 같은 자리에 새 디스크(NEW) — 값 0 을 정상으로 읽음: 옛 이력(firstAt · changedAt · before)을 잇지 않는다.
+  const sNew = (id) => (id === ID0 ? 'NEW' : 'S2');
+  const b = D.mergeVals(a, { status: 'ok', drives: [{ id: ID0, realloc: 0, pending: 0, uncorrectable: 0 }] }, NOW, sNew);
+  const b0 = b.drives.find((d) => d.id === ID0);
+  assert.equal(b0.serial, 'NEW'); assert.equal(b0.firstAt, NOW); assert.equal(b0.changedAt, null); assert.equal(b0.before, undefined);
+  const b2 = b.drives.find((d) => d.id === ID2);
+  assert.equal(b2.readAt, NOW - DAY, 'F9: 보고서에 빠진 디스크는 지우지 않고 지난 값(읽은 때 그대로)');
+  // 새 디스크로 바뀐 뒤 못 읽은 점검 — 옛 디스크의 값을 남기지 않는다.
+  const c = D.mergeVals(a, { status: 'absent', drives: [] }, NOW, sNew);
+  assert.equal(c.drives.find((d) => d.id === ID0), undefined);
+  // 판정: 값의 시리얼이 지금 디스크와 다르면 쓰지 않는다(새 디스크가 옛 디스크의 '복구 불가 흔적' 을 받지 않는다).
+  const drives = [{ id: ID0, name: 'Physical Disk 0:1:0', serial: 'NEW', inVolume: true }];
+  const j = VD.judgeServer({ records: [], drives, serialRows: [], coverage: { lastOkAt: NOW }, vals: { ...a, tryAt: NOW } });
+  assert.equal(j.diskVals[0].trace, VD.TRACE.unknown);
+  assert.equal(j.counts.traces, null, 'F14: 값을 하나도 못 쓰면 흔적 수는 0 이 아니라 모름');
+  // 같은 디스크(OLD)의 지난 값은 '지난 값' 으로 쓴다 — 누적 값의 흔적은 그대로 참.
+  const k = VD.judgeServer({ records: [], drives: [{ ...drives[0], serial: 'OLD' }], serialRows: [], coverage: { lastOkAt: NOW }, vals: { ...a, tryAt: NOW } });
+  assert.equal(k.diskVals[0].trace, VD.TRACE.unrecoverable);
+  assert.equal(k.diskVals[0].vals.stale, true);
+  // 시리얼을 모르는 지난 값은 쓰지 않는다(어느 디스크 것인지 대조할 수 없다).
+  const noSn = { ...a, tryAt: NOW, drives: a.drives.map((d) => ({ ...d, serial: '' })) };
+  assert.equal(VD.judgeServer({ records: [], drives: [{ ...drives[0], serial: 'OLD' }], serialRows: [], coverage: { lastOkAt: NOW }, vals: noSn }).diskVals[0].trace, VD.TRACE.unknown);
+});
+
+test('F2 · F3 — 큰 SEL 도 읽을 수 있는 JSON 으로 저장 · 제어 문자는 빈칸 · 시계가 빠른 장비의 같은 항목은 한 번 · 판정에 쓰지 않음', async () => {
+  const ctl = '\u0001'.repeat(300);
+  const ev = (i) => ({ created: NOW - i * HOUR, kind: 'removed', disk: 2, bp: 1, slotKey: 'bp1:d2', message: ctl, messageId: ctl, severity: ctl, sensor: ctl });
+  const clean = I.cleanServer({ id: 'big', ok: true, log: { order: 'desc' }, records: [], sel: { status: 'ok', read: 100, events: Array.from({ length: 100 }, (_, i) => ev(i)) } }, NOW);
+  assert.ok(!/[\u0000-\u001f]/.test(clean.sel.events[0].message));
+  await D.ingestServers('f2', [clean], { now: NOW });
+  const one = await D.loadServer('f2', 'big');
+  assert.ok(one.server.sel && one.server.sel.events.length > 0, '저장된 SEL 을 다시 읽을 수 있다(잘린 JSON 이 아니다)');
+  // 시계가 3일 빠른 장비: 같은 항목이 점검마다 다른 시각으로 잘려도 원래 시각 키로 한 번.
+  const ahead = (now) => I.cleanSel({ status: 'ok', events: [{ created: NOW + 3 * DAY, kind: 'removed', disk: 0, bp: 1, slotKey: 'bp1:d0', message: 'Drive 0 is removed from disk drive bay 1.' }] }, now);
+  const e1 = ahead(NOW);
+  assert.equal(e1.events[0].clockAhead, true);
+  assert.equal(e1.events[0].createdRaw, NOW + 3 * DAY);
+  let m = null;
+  for (let i = 0; i < 5; i += 1) m = D.mergeSel(m, ahead(NOW + i * 6 * HOUR), NOW + i * 6 * HOUR);
+  assert.equal(m.events.length, 1);
+  // 판정: 시계가 빠른 장비의 빠짐은 쓰지 않는다 — 시리얼로 확정된 자리가 흔들리지 않는다.
+  const drives = [{ id: ID0, name: 'Physical Disk 0:1:0', serial: 'S0', inVolume: true }];
+  const serialRows = [{ slotKey: 'bp1:d0', serial: 'S0', firstSeen: NOW - 90 * DAY, lastSeen: NOW }];
+  const j = VD.judgeServer({ records: [{ created: NOW - 30 * DAY, code: 'PDR46', cls: 'unrecoverable', slotKey: 'bp1:d0' }], drives, serialRows, coverage: { lastOkAt: NOW }, sel: m });
+  assert.equal(j.slots[0].verdict, VD.VERDICT.inUse);
+  assert.equal(j.slots[0].confidence, VD.CONFIDENCE.confirmed);
+});
+
+test('F4 · F13 — 로그를 못 읽은 서버(403)의 디스크 값도 전 법인 집계에 · 흔적 표는 전부 정렬한 뒤 상한', () => {
+  const drives = [{ id: ID0, name: 'Physical Disk 0:1:0', serial: 'S0', inVolume: true }];
+  const row = (id, unc) => ({ agent: '', serverId: id, name: id, lastStatus: 'forbidden', lastOkAt: null, drives,
+    vals: { status: 'ok', at: NOW, tryAt: NOW, drives: [{ id: ID0, serial: 'S0', realloc: 1, pending: 0, uncorrectable: unc, readAt: NOW }] }, sel: { status: 'ok', at: NOW, tryAt: NOW, events: [] } });
+  const rows = Array.from({ length: 320 }, (_, i) => row(`u${i}`, i === 319 ? 9 : 0));
+  const f = S.buildFleet({ servers: rows.map((r) => ({ agent: '', id: r.serverId, name: r.name, corp: null })), db: { servers: rows, records: [], serials: [] }, now: NOW });
+  assert.equal(f.totals.read, 0);
+  assert.equal(f.totals.valsBy.ok, 320);
+  assert.equal(f.totals.traceDisks, 320);
+  assert.equal(f.tracesTotal, 320);
+  assert.equal(f.traces.length, 300);
+  assert.equal(f.traces[0].serverId, 'u319', '복구 불가 많은 것이 상한에 잘리지 않는다');
+  assert.equal(f.traces[0].logRead, false);
+});
+
+test('F7 · F8 · F10 · F11 · F12 — 시한 · 링크 꼴 · 가동 시간만 · 부분 합 · 정상 0건', async () => {
+  const ac = new AbortController(); ac.abort();
+  const t = await V.readDiskVals({}, { signal: ac.signal, getJson: async () => { throw Object.assign(new Error('aborted'), { name: 'AbortError' }); }, now: () => NOW });
+  assert.equal(t.status, 'timeout');
+  const sel = await SEL.readSel({}, { mgr: '/redfish/v1/Managers/iDRAC.Embedded.1', signal: ac.signal, getJson: async () => { throw new Error('aborted'); }, now: () => NOW });
+  assert.equal(sel.status, 'timeout');
+  const ok = `/redfish/v1/Systems/System.Embedded.1/Storage/RAID.Integrated.1-1/Drives/${ID0}/Metrics`;
+  assert.equal(V.metricsPathOf({ id: ID0, metricsPath: ok }), ok);
+  assert.equal(V.metricsPathOf({ id: 'Disk.Bay.0', metricsPath: '/redfish/v1/%2e%2e/%2e%2e/AccountService/Accounts/Disk.Bay.0/Metrics' }), '');
+  assert.equal(V.metricsPathOf({ id: ID0, metricsPath: `/redfish/v1/AccountService/Accounts/${ID0}/Metrics` }), '');
+  assert.equal(V.metricsPathOf({ id: ID0, metricsPath: ok.replace(ID0, ID2) }), '');
+  const hoursOnly = await V.readDiskVals({}, { getJson: async () => ({ MetricValues: [mv(ID0, 'PowerOnHours', 1000)] }), now: () => NOW });
+  assert.equal(hoursOnly.status, 'empty', '가동 시간만이면 값을 읽은 것이 아니다');
+  const j = VD.judgeServer({ records: [], drives: [{ id: ID0, serial: 'S0', inVolume: true }], serialRows: [], coverage: { lastOkAt: NOW }, vals: { status: 'empty', tryAt: NOW, drives: [{ id: ID0, serial: 'S0', powerOnHours: 1000, readAt: null }] } });
+  assert.equal(j.counts.valsDisks, 0);
+  assert.equal(j.counts.traces, null);
+  assert.equal(V.parseDriveMetrics({ UncorrectableIOReadErrorCount: 0 }).uncorrectable, null, '하나만 읽힌 0 은 없음이라고 말할 수 없다');
+  assert.equal(V.parseDriveMetrics({ UncorrectableIOReadErrorCount: 2 }).uncorrectable, 2, '하나만 읽혀도 0 보다 크면 흔적은 참');
+  assert.equal(V.parseDriveMetrics({ UncorrectableIOReadErrorCount: 2, UncorrectableIOWriteErrorCount: 1 }).uncorrectable, 3);
+  assert.equal(S.selView({ status: 'empty', at: NOW, tryAt: NOW }).stale, false, '정상으로 읽은 0건은 못 읽음이 아니다');
+  assert.equal(S.selView({ status: 'error', at: NOW - DAY, tryAt: NOW }).stale, true);
+  assert.equal(S.valsView({ status: 'absent', at: NOW - DAY, tryAt: NOW, drives: [{ id: ID0, readAt: NOW - DAY, realloc: 1 }] }).stale, true);
+  assert.equal(S.valsView({ status: 'absent', at: null, tryAt: NOW, drives: [] }).stale, false);
+});
+
+test('F5 · F6 · F15 · F16 — 바쁜 장비에 더 묻지 않음 · 인증 거부 뒤 다시 로그인하지 않음 · 값 이름은 관리자 판본 · 서버 한 대 최악 시간', () => {
+  const sc = code('diskbad/scan.js');
+  assert.match(sc, /const lcMissing = reason === REASON\.error && e\?\.status === 404;/);
+  assert.match(sc, /\(reason === REASON\.forbidden \|\| lcMissing\) && !pr\?\.authDenied/);
+  assert.match(sc, /past\.vals\?\.status === 'auth' \|\| past\.sel\?\.status === 'auth' \? undefined : await probe\(\)/);
+  const dv = code('diskbad/diskvals.js');
+  assert.match(dv, /if \(isBusy\(e, signal\)\) break;/);
+  const rt = code('routes/api/diskBad.js');
+  assert.match(rt, /if \(!isAdminDetailUser\(req\.user\) && v\.coverage\?\.vals\) v\.coverage\.vals = \{ \.\.\.v\.coverage\.vals, seen: \[\] \};/);
+  // 덧붙인 읽기는 로그 읽기 시한 **밖**이다 — 서버 한 대 최악 = 로그 + 디스크 값 + SEL (+ 수동이면 장비 진단). 진행 보고(2분)가 따로 있어 무응답 판정과는 무관하다.
+  const worst = SC.SERVER_TIMEOUT_MS() + SC.VALS_TIMEOUT_MS + SC.SEL_TIMEOUT_MS + SC.PROBE_TIMEOUT_MS;
+  assert.ok(worst <= 15 * 60_000, `서버 한 대 최악 ${worst / 60_000}분`);
 });

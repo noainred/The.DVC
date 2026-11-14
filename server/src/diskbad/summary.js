@@ -36,16 +36,20 @@ export function valsView(v) {
   if (!v || typeof v !== 'object') return { status: 'never', label: SOURCE_STATUS_LABEL.never, at: null, tryAt: null, drives: 0, seen: [], note: '' };
   const status = SOURCE_STATUS_LABEL[v.status] ? v.status : 'error';
   const drives = Array.isArray(v.drives) ? v.drives.length : 0;
+  // stale: 이번 시도에는 못 읽었는데 지난 값을 들고 있다(화면이 '언제 읽은 값' 을 밝힌다 — 반증 F12: 화면이 상태로 짐작하지 않게 서버가 정한다).
+  const stale = status !== 'ok' && Number.isFinite(v.at) && Array.isArray(v.drives) && v.drives.some((d) => Number.isFinite(d?.readAt));
   return { status, label: SOURCE_STATUS_LABEL[status], at: v.at ?? null, tryAt: v.tryAt ?? null, drives, telemetry: v.telemetry || '', metrics: v.metrics || '',
-    reportAt: v.reportAt ?? null, seen: Array.isArray(v.seen) ? v.seen : [], stale: status !== 'ok' && drives > 0,
+    reportAt: v.reportAt ?? null, seen: Array.isArray(v.seen) ? v.seen : [], stale,
     note: status === 'absent' ? VALS_ABSENT_NOTE : '', srcLabels: VALS_SRC_LABEL };
 }
 /** 저장된 SEL → 화면(상태 · 이번에 읽은 SEL 의 기간 · 포탈이 보관한 디스크 항목). */
 export function selView(v) {
   if (!v || typeof v !== 'object') return { status: 'never', label: SOURCE_STATUS_LABEL.never, at: null, tryAt: null, read: null, range: null, events: 0, keptFrom: null, kinds: {} };
   const status = SOURCE_STATUS_LABEL[v.status] ? v.status : 'error';
+  // 정상으로 읽었는데 0건(empty)은 '못 읽음' 이 아니다(반증 F12).
+  const stale = status !== 'ok' && status !== 'empty' && Number.isFinite(v.at);
   return { status, label: SOURCE_STATUS_LABEL[status], at: v.at ?? null, tryAt: v.tryAt ?? null, read: v.read ?? null, total: v.total ?? null, stopped: v.stopped || '',
-    range: v.range || null, events: Array.isArray(v.events) ? v.events.length : 0, keptFrom: v.keptFrom ?? null, kinds: v.kinds || {} };
+    range: v.range || null, events: Array.isArray(v.events) ? v.events.length : 0, keptFrom: v.keptFrom ?? null, kinds: v.kinds || {}, stale };
 }
 const DAY_MS = 86_400_000;
 
@@ -173,7 +177,8 @@ export function buildFleet({ servers = [], db = { servers: [], records: [], seri
     }
     const base = { agent: s.agent, serverId: s.id, serverName: s.name || row?.name || s.id, corpId: c.id, corpName: c.name, country: c.country };
     // iDRAC 가 지금 알리는 디스크 — 디스크 목록을 읽은 서버만 센다(못 읽은 서버는 따로 센다 — 0 이 아니다).
-    if (read) {
+    // 출처 · 디스크 값은 **로그를 못 읽은 서버도** 센다(반증 F4 — 로그 권한이 없는 서버(403)도 디스크 값 · SEL 은 읽는다). 점검한 적 없는 서버는 never.
+    {
       const vs = v.coverage?.vals?.status || 'never';
       const ss = v.coverage?.sel?.status || 'never';
       tot.valsBy[vs] = (tot.valsBy[vs] || 0) + 1;
@@ -182,16 +187,18 @@ export function buildFleet({ servers = [], db = { servers: [], records: [], seri
       if (Array.isArray(v.diskVals)) {
         let traced = 0;
         for (const d of v.diskVals) {
-          if (d.inVolume === false && !d.vals) continue;    // 볼 수 없는 디스크의 '값 모름' 은 위 unwatched 로 따로 센다
-          if (d.vals) tot.valsDisks += 1; else tot.valsUnknownDisks += 1;
+          if (d.inVolume === false && !d.valsRead) continue;    // 볼 수 없는 디스크의 '값 모름' 은 unwatched 로 따로 센다
+          if (d.valsRead) tot.valsDisks += 1; else tot.valsUnknownDisks += 1;
           if (d.trace === TRACE.trace || d.trace === TRACE.unrecoverable) {
             traced += 1; tot.traceDisks += 1;
             if (d.trace === TRACE.unrecoverable) tot.traceUnrecoverable += 1;
-            if (traceList.length < TRACES_MAX) traceList.push({ agent: s.agent, serverId: s.id, serverName: s.name || row?.name || s.id, corpId: c.id, corpName: c.name, country: c.country, ...d });
+            traceList.push({ agent: s.agent, serverId: s.id, serverName: s.name || row?.name || s.id, corpId: c.id, corpName: c.name, country: c.country, logRead: read, ...d });
           }
         }
         if (traced) tot.traceServers += 1;
       }
+    }
+    if (read) {
       if (Array.isArray(v.alerting)) {
         if (v.alerting.length) tot.alertingServers += 1;
         tot.alertingDisks += v.alerting.length;
@@ -245,8 +252,9 @@ export function buildFleet({ servers = [], db = { servers: [], records: [], seri
       shortLogDays: SHORT_LOG_DAYS, medianLogDays: median == null ? null : Math.round(median * 10) / 10 },
     byCorp, byModel, unknownModel, months: months_, inUse: inUseList, slots: slotList, servers: serverRows, unreadReasons: reasons,
     alerting: alertingList.sort((a, b) => (a.level === b.level ? 0 : (a.level === 'fault' ? -1 : 1)) || Number(b.hasRecords) - Number(a.hasRecords)),
-    // 로그 기록은 없고 디스크 값에 흔적이 있는 디스크 — 복구 불가 먼저, 그다음 재할당 많은 순.
-    traces: traceList.sort((a, b) => (b.vals?.uncorrectable ?? -1) - (a.vals?.uncorrectable ?? -1) || (b.vals?.realloc ?? -1) - (a.vals?.realloc ?? -1)),
+    // 로그 기록은 없고 디스크 값에 흔적이 있는 디스크 — 복구 불가 먼저, 그다음 재할당 많은 순. **전부 정렬한 뒤** 상한(반증 F13).
+    traces: traceList.sort((a, b) => (b.vals?.uncorrectable ?? -1) - (a.vals?.uncorrectable ?? -1) || (b.vals?.realloc ?? -1) - (a.vals?.realloc ?? -1)).slice(0, TRACES_MAX),
+    tracesTotal: traceList.length,
     synthesized,
   };
 }

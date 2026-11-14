@@ -197,7 +197,7 @@ function TraceCard({ fleet, openServer }) {
   const list = fleet.traces || [];
   return (
     <div className="card" style={{ padding: 12, minWidth: 0 }}>
-      <b style={{ fontSize: 13.5 }}>로그 기록은 없는데 디스크 값에 흔적이 있는 디스크 <span className="muted" style={{ fontWeight: 400 }}>{num(T.traceDisks)}개 · 서버 {num(T.traceServers)}대 · 복구 불가 흔적 {num(T.traceUnrecoverable)}개</span></b>
+      <b style={{ fontSize: 13.5 }}>로그 기록은 없는데 디스크 값에 흔적이 있는 디스크 <span className="muted" style={{ fontWeight: 400 }}>{num(T.traceDisks)}개 · 서버 {num(T.traceServers)}대 · 복구 불가 흔적 {num(T.traceUnrecoverable)}개{Number.isFinite(fleet.tracesTotal) && fleet.tracesTotal > list.length ? ` · 복구 불가 · 재할당 많은 순 ${num(list.length)}개만 싣습니다` : ''}</span></b>
       <div className="muted" style={{ fontSize: 12, margin: '2px 0 6px', lineHeight: 1.6 }}>
         디스크가 스스로 적어 둔 누적 값(재할당 · 보류 · 복구 불가)입니다 — 로그가 넘어가도 남지만 언제 생겼는지는 모릅니다. 값을 읽은 디스크만 셉니다.
         <div>{cov.vals}</div>
@@ -209,8 +209,8 @@ function TraceCard({ fleet, openServer }) {
           <tbody>{list.map((d, i) => (
             <tr key={`${d.agent}|${d.serverId}|${d.id || i}`}>
               <td style={{ whiteSpace: 'normal', minWidth: 140 }}>{d.country ? `${d.country} · ` : ''}{d.corpName}</td>
-              <td data-sort={d.serverName}><button className="tab" style={{ flex: 'none', padding: '2px 8px', fontSize: 12 }} onClick={() => openServer(d)}>{d.serverName}</button><div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>{d.label}</div></td>
-              <td>{d.model || '—'}<div className="muted" style={{ fontSize: 11.5, fontFamily: 'var(--mono)' }}>S/N {d.serial || '—'}</div></td>
+              <td data-sort={d.serverName}><button className="tab" style={{ flex: 'none', padding: '2px 8px', fontSize: 12 }} onClick={() => openServer(d)}>{d.serverName}</button><div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>{d.label}{d.logRead === false ? ' · 로그는 못 읽음' : ''}</div></td>
+              <td>{d.model || '—'}<div className="muted" style={{ fontSize: 11.5, fontFamily: 'var(--mono)' }}>S/N {d.serial || '—'}{d.vals?.stale ? ` · 지난 값(${fmtDate(d.vals.readAt)})` : ''}</div></td>
               <td data-sort={d.vals?.realloc ?? ''} style={{ textAlign: 'right', fontFamily: 'var(--mono)' }}>{valCell(d.vals?.realloc)}</td>
               <td data-sort={d.vals?.pending ?? ''} style={{ textAlign: 'right', fontFamily: 'var(--mono)' }}>{valCell(d.vals?.pending)}</td>
               <td data-sort={d.vals?.uncorrectable ?? ''} style={{ textAlign: 'right', fontFamily: 'var(--mono)' }}>{valCell(d.vals?.uncorrectable)}</td>

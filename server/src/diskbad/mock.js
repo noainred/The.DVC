@@ -84,7 +84,8 @@ function mockPast(id, drives, now) {
       drives: list.map((d, i) => {
         const k = hash(`vals|${id}|${i}`);
         const traced = k % 9 === 0;
-        return { id: d.id, realloc: traced ? 4 + (k % 120) : 0, pending: traced && k % 2 ? 1 + (k % 9) : 0, uncorrectable: traced && k % 3 === 0 ? 1 + (k % 3) : 0,
+        const k2 = hash(`unc|${id}|${i}`);   // 흔적 디스크 가운데 일부만 복구 불가(같은 해시를 쓰면 흔적이 늘 복구 불가가 됐다 — 화면 확인)
+        return { id: d.id, realloc: traced ? 4 + (k % 120) : 0, pending: traced && k2 % 2 ? 1 + (k2 % 9) : 0, uncorrectable: traced && k2 % 3 === 0 ? 1 + (k2 % 3) : 0,
           powerOnHours: 8_000 + (k % 40_000), src: 'telemetry' };
       }) };
   const events = [];

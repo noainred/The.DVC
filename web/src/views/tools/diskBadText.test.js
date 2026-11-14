@@ -96,6 +96,9 @@ describe('diskBadText', () => {
     expect(b.lines.join(' ')).toContain('언제 생겼는지 모릅니다');
     expect(serverBand({ ...base, diskVals: [{ trace: 'unrecoverable' }] }, NOW).tone).toBe('bad');
     expect(serverBand({ ...base, counts: { traces: null } }, NOW).title).not.toContain('흔적');
+    const unread = serverBand({ ...base, status: 'unread', coverage: { lastStatusLabel: '로그 읽기 권한 없음(403)' } }, NOW);
+    expect(unread.tone).toBe('err');
+    expect(unread.lines.join(' ')).toContain('로그 기록이 없는 디스크 2개');
     expect(serverBand({ ...base, status: 'records', counts: { records: 1, slots: 1, inUse: 1, replaced: 0, unknown: 0, traces: 2 } }, NOW).lines.join(' ')).toContain('로그 기록이 없는 디스크 2개');
     expect(valCell(null)).toBe('—'); expect(valCell(0)).toBe('0'); expect(valCell(1234)).toBe('1,234');
     expect(traceTone('unknown')).toBe('gray'); expect(traceTone('none')).toBe('green'); expect(traceTone('unrecoverable')).toBe('red');
@@ -110,7 +113,9 @@ describe('diskBadText', () => {
     expect(rows[0].range).toContain('37일'); expect(rows[0].count).toBe('1,894건');
     expect(rows[1].count).toContain('디스크 항목 3건'); expect(rows[1].note).toContain('포탈이 보관한 디스크 항목은');
     expect(rows[2].range).toContain('날짜 없음'); expect(rows[2].note).toContain('보고서 없음'); expect(rows[2].note).toContain('이번 점검');
-    const seen = sourceRows({ lastOkAt: NOW, vals: { status: 'empty', label: '항목 없음', drives: 0, seen: ['DiskHealthStatus', 'MediaErrors'] } });
+    const emptySel = sourceRows({ lastOkAt: NOW, sel: { status: 'empty', label: '항목 없음', at: NOW, tryAt: NOW, stale: false } });
+    expect(emptySel[1].note).toBe('');
+        const seen = sourceRows({ lastOkAt: NOW, vals: { status: 'empty', label: '항목 없음', drives: 0, seen: ['DiskHealthStatus', 'MediaErrors'] } });
     expect(seen[2].note).toBe('장비가 준 값 이름: DiskHealthStatus · MediaErrors');
     const never = sourceRows({ lastOkAt: NOW, sel: { status: 'never', label: '아직 읽지 않음' }, vals: { status: 'never', label: '아직 읽지 않음', drives: 0 } });
     expect(never[1].range).toBe('—'); expect(never[2].count).toBe('—'); expect(never[2].note).toBe('');

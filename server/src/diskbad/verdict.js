@@ -136,7 +136,8 @@ export function judgeServer({ records = [], drives = null, serialRows = [], cove
   const unplaced = [];
   // SEL 의 디스크 빠짐(과거 기록 읽기 1단계)은 Lifecycle 로그의 빠짐(PDR5)과 같은 자리에서 **교체 판정의 근거**로만 쓴다 — 세지 않는다.
   //   장착 · 고장 항목은 판정에 넣지 않는다(전원을 켤 때 장착 항목이 쌓이는지 확인하지 못했다 — 넣으면 기록 뒤 '빠짐' 처럼 판정을 흔든다).
-  const selRemovals = (Array.isArray(sel?.events) ? sel.events : []).filter((e) => e && e.kind === 'removed' && e.slotKey && Number.isFinite(e.created))
+  //   시계가 빠른 장비의 항목(clockAhead — 날짜를 수신 시각으로 잘랐다)은 쓰지 않는다(반증 F3 — 잘린 날짜가 늘 '기록 뒤' 가 되어 확정 판정을 흔들었다).
+  const selRemovals = (Array.isArray(sel?.events) ? sel.events : []).filter((e) => e && e.kind === 'removed' && e.slotKey && Number.isFinite(e.created) && e.clockAhead !== true)
     .map((e) => ({ created: e.created, code: 'SEL', cls: CLS.removed, slotKey: e.slotKey, src: 'iDRAC 시스템 이벤트 로그(SEL)', posNote: ' — SEL 문장의 위치 번호를 같은 자리로 본 것입니다(추정)' }));
   for (const r of [...records, ...selRemovals]) {
     if (!r.slotKey) { if (COUNTED.has(r.cls) || r.cls === CLS.predictive) unplaced.push(r); continue; }
@@ -150,14 +151,15 @@ export function judgeServer({ records = [], drives = null, serialRows = [], cove
   }
   const driveKnown = Array.isArray(drives);
   const valsBy = valsMap(vals);
+  const valsTry = Number.isFinite(vals?.tryAt) ? vals.tryAt : null;
   const slots = [];
   for (const [slotKey, recs] of bySlot) {
     const counted = recs.filter((r) => COUNTED.has(r.cls) || r.cls === CLS.predictive);
     if (!counted.length) continue;
     const drive = driveKnown ? matchDrive(slotKey, drives) : null;
     const v = judgeSlot({ slotKey, records: recs, drive, serials: serialsBySlot.get(slotKey) || [], continuousSince: coverage?.continuousSince ?? null, driveKnown });
-    const dv = drive ? valsBy.get(String(drive.id || '')) || null : null;
-    if (dv) v.evidence.push({ text: `지금 디스크가 적어 둔 누적 값 — ${valsText(dv)}(언제 생겼는지는 말해 주지 않습니다)`, src: VALS_SRC_LABEL[dv.src] || '디스크 값' });
+    const dv = drive ? valsFor(drive, valsBy, valsTry) : null;
+    if (dv && hasCounterVal(dv)) v.evidence.push({ text: `지금 디스크가 적어 둔 누적 값 — ${valsText(dv)}(언제 생겼는지는 말해 주지 않습니다${dv.stale ? ` · ${fmt(dv.readAt)} 에 읽은 지난 값` : ''})`, src: VALS_SRC_LABEL[dv.src] || '디스크 값' });
     const byCode = {};
     for (const r of counted) byCode[r.code] = (byCode[r.code] || 0) + 1;
     const unrecoverable = counted.filter((r) => r.cls === CLS.unrecoverable).length;
@@ -196,11 +198,13 @@ export function judgeServer({ records = [], drives = null, serialRows = [], cove
     counts.alerting = alerting.length;
   } else counts.alerting = null;
   // 디스크 값(과거 기록 읽기 1단계) — 지금 꽂힌 디스크마다 값과 '흔적' 판정. 로그 기록이 있는 자리는 그 판정을 그대로 두고 값만 붙인다.
-  const diskVals = buildDiskVals({ drives: driveKnown ? drives : null, valsBy, recSlots: new Set(badSlots.map((s) => s.slotKey)) });
+  const diskVals = buildDiskVals({ drives: driveKnown ? drives : null, valsBy, valsTry, recSlots: new Set(badSlots.map((s) => s.slotKey)) });
   if (diskVals) {
-    counts.traces = diskVals.filter((d) => d.trace === TRACE.trace || d.trace === TRACE.unrecoverable).length;
-    counts.valsDisks = diskVals.filter((d) => d.vals).length;
-    counts.valsUnknown = diskVals.filter((d) => !d.vals).length;
+    // '값을 읽음' 은 재할당 · 보류 · 복구 불가 가운데 하나라도 읽은 디스크(반증 F10 — 가동 시간만은 아니다).
+    counts.valsDisks = diskVals.filter((d) => d.valsRead).length;
+    counts.valsUnknown = diskVals.length - counts.valsDisks;
+    // 하나도 못 읽었으면 흔적 수는 0 이 아니라 모름(반증 F14).
+    counts.traces = counts.valsDisks ? diskVals.filter((d) => d.trace === TRACE.trace || d.trace === TRACE.unrecoverable).length : null;
   }
   let status = 'unread';
   if (coverage && coverage.lastOkAt) {
@@ -241,7 +245,24 @@ export function valsText(v) {
 
 function pickVals(v) {
   return { realloc: v.realloc ?? null, pending: v.pending ?? null, uncorrectable: v.uncorrectable ?? null, powerOnHours: v.powerOnHours ?? null,
-    src: v.src || '', firstAt: v.firstAt ?? null, changedAt: v.changedAt ?? null, before: v.before || null };
+    src: v.src || '', firstAt: v.firstAt ?? null, changedAt: v.changedAt ?? null, before: v.before || null, readAt: v.readAt ?? null, stale: v.stale === true };
+}
+const hasCounterVal = (v) => !!v && VAL_KEYS.some((k) => Number.isFinite(v[k]));
+
+/**
+ * 지금 디스크에 쓸 값(반증 F1). Dell Drive Id 는 **자리 이름**이라 값의 시리얼이 지금 디스크의 시리얼과 다르면 다른 디스크의 값이다 — 쓰지 않는다.
+ * 시리얼을 한쪽이라도 모르면 **이번 점검에 읽은 값**(같은 점검의 디스크 목록)만 쓴다. 지난 값(readAt < 마지막 시도)에는 stale 을 단다 —
+ * 누적 값이라 흔적(0 보다 큼)은 그대로 참이지만 '흔적 없음' 은 그 뒤에 바뀌었을 수 있다(화면이 날짜와 함께 밝힌다).
+ */
+function valsFor(drive, valsBy, valsTry) {
+  const v = valsBy.get(String(drive?.id || '')) || null;
+  if (!v) return null;
+  const sn = String(drive?.serial || '').trim();
+  const vs = String(v.serial || '').trim();
+  if (sn && vs && sn !== vs) return null;
+  const stale = Number.isFinite(valsTry) && (!Number.isFinite(v.readAt) || v.readAt < valsTry);
+  if ((!sn || !vs) && stale) return null;
+  return { ...v, stale };
 }
 
 /** 값 Id → 값. 저장된 디스크 값(db.js mergeVals 모양)을 받는다. */
@@ -255,23 +276,25 @@ function valsMap(vals) {
  * 디스크마다 한 줄. 디스크 목록을 읽었으면 그 목록 기준(값이 없는 디스크는 '값 모름'), 못 읽었으면 값이 온 디스크만.
  * 둘 다 없으면 null(모름).
  */
-function buildDiskVals({ drives, valsBy, recSlots }) {
+function buildDiskVals({ drives, valsBy, valsTry, recSlots }) {
   if (Array.isArray(drives)) {
     return drives.map((d) => {
       const p = pickDrive(d);
-      const v = valsBy.get(String(d.id || '')) || null;
+      const v = valsFor(d, valsBy, valsTry);
       const trace = p.slotKey && recSlots.has(p.slotKey) ? TRACE.records : traceOf(v);
       return { id: String(d.id || ''), slotKey: p.slotKey, label: p.slotKey ? labelOfKey(p.slotKey) : (p.name || '위치 모름'), model: p.model, serial: p.serial, media: p.media,
-        health: p.health, inVolume: p.inVolume, vals: v ? pickVals(v) : null, trace, traceLabel: TRACE_LABEL[trace] };
+        health: p.health, inVolume: p.inVolume, vals: v ? pickVals(v) : null, valsRead: hasCounterVal(v), trace, traceLabel: TRACE_LABEL[trace] };
     });
   }
-  if (!valsBy.size) return null;
-  return [...valsBy.values()].map((v) => {
+  // 디스크 목록을 못 읽었으면 **이번 점검에 읽은 값만**(어느 디스크 것인지 시리얼로 대조할 수 없다 — 지난 값은 그 사이에 바뀐 디스크의 것일 수 있다).
+  const fresh = [...valsBy.values()].map((v) => valsFor({ id: v.id }, valsBy, valsTry)).filter(Boolean);
+  if (!fresh.length) return null;
+  return fresh.map((v) => {
     const sl = driveSlotOf({ id: v.id });
     const slotKey = sl ? slotKeyOf(sl) : '';
     const trace = slotKey && recSlots.has(slotKey) ? TRACE.records : traceOf(v);
     return { id: String(v.id), slotKey, label: slotKey ? labelOfKey(slotKey) : String(v.id).slice(0, 60), model: '', serial: '', media: '', health: '', inVolume: null,
-      vals: pickVals(v), trace, traceLabel: TRACE_LABEL[trace] };
+      vals: pickVals(v), valsRead: hasCounterVal(v), trace, traceLabel: TRACE_LABEL[trace] };
   });
 }
 
