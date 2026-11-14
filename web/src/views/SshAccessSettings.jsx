@@ -561,7 +561,7 @@ function KeyLoginDialog({ servers, corp, v, corpName, onClose }) {
                 <li>확인되면 이 서버가 그 키를 쓰도록 적습니다. 이미 그 키를 쓰는 서버(법인 기본 키를 따르는 서버 포함)는 설정을 그대로 둡니다.</li>
               </ol></div>
             </div>
-            <div className="ssa-line"><span className="ssa-k">잘 안 되면</span><div className="ssa-v">키 접속이 확인되지 않으면 우리가 바꾼 것만 되돌립니다(더한 줄은 지우고, 바꾼 줄은 바꾸기 전 줄로). 비밀번호가 틀리면 다시 시도하지 않습니다(password 방식으로 한 번 — 계정 잠금 방지). 같은 공통 계정 비밀번호가 한 서버에서 거부되면 그 계정을 쓰는 나머지 서버는 건너뜁니다. 서버 쪽 제한 때문에 키 접속이 안 될 때도 제한을 자동으로 빼지 않고 사유를 적습니다. 바꾸는 명령을 보냈는데 답을 받지 못하면 ‘결과 모름’ 으로 적습니다 — 서버가 바뀌었을 수 있으니 확인하세요.</div></div>
+            <div className="ssa-line"><span className="ssa-k">잘 안 되면</span><div className="ssa-v">키 접속이 확인되지 않으면 우리가 바꾼 것만 되돌립니다(더한 줄은 지우고, 바꾼 줄은 바꾸기 전 줄로). 비밀번호가 틀리면 다시 시도하지 않습니다(서버가 받는 방식 하나로 한 번만 — 계정 잠금 방지). 같은 공통 계정 비밀번호가 한 서버에서 거부되면 그 계정을 쓰는 나머지 서버는 건너뜁니다. 서버 쪽 제한 때문에 키 접속이 안 될 때도 제한을 자동으로 빼지 않고 사유를 적습니다. 바꾸는 명령을 보냈는데 답을 받지 못하면 ‘결과 모름’ 으로 적습니다 — 서버가 바뀌었을 수 있으니 확인하세요.</div></div>
             <div className="ssa-line"><span className="ssa-k">선택</span>
               <div className="ssa-v ssa-stack">
                 <label className="ssa-radio"><input type="checkbox" checked={removePw} onChange={(e) => setRemovePwSet(e.target.checked)} /><span>키 로그인이 확인되면 저장된 비밀번호를 지웁니다</span></label>
@@ -722,7 +722,7 @@ function KeyPicker({ server, catalog, onClose, say }) {
                 <label className="ssa-otp">이번 한 번만 쓸 비밀번호(선택) <input className="input" type="password" value={once} onChange={(e) => setOnce(e.target.value)} autoComplete="new-password" /></label>
                 <button className="btn btn-sm" type="button" disabled={busy === 'read'} onClick={read}>{busy === 'read' ? '읽는 중…' : '다시 읽기'}</button>
               </div>
-              <p className="ssa-note">서버 계정의 ~/.ssh/authorized_keys 에서 공개키 줄만 읽어 지문으로 맞춥니다. 비밀번호를 넣으면 이번 읽기에만 쓰고 저장하지 않습니다(password 방식으로 한 번만 보냅니다). 폴더의 키를 차례로 대 보지는 않습니다(계정 잠금 방지).</p>
+              <p className="ssa-note">서버 계정의 ~/.ssh/authorized_keys 에서 공개키 줄만 읽어 지문으로 맞춥니다. 비밀번호를 넣으면 이번 읽기에만 쓰고 저장하지 않습니다(서버가 받는 방식 하나(password 또는 대화형)로 한 번만 보냅니다). 폴더의 키를 차례로 대 보지는 않습니다(계정 잠금 방지).</p>
             </div>
           </div>
         )}
