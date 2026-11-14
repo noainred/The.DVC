@@ -501,42 +501,47 @@ test('⑪ 복원 제외 · 소스 스윕 — 상태 파일은 복원하지 않�
   assert.doesNotMatch(rt, /resolveOsAuth|keyMaterial|listKeysRaw|listAccountsRaw|listBmServersRaw|KS\.|keyStore/, '라우트는 자격 원본 · 키 저장소를 만지지 않는다');
   assert.equal(rt.split('\n').filter((l) => l.includes('privateKey')).length, 1, '개인키는 키 등록 본문을 서비스로 넘기는 한 줄뿐(응답 · 감사에 싣지 않는다)');
   assert.doesNotMatch(rt, /bindApproved/);
-  // 쓰기 라우트는 전부 소유자 → OTP 마지막. 키를 새로 받는 쓰기는 저장 방식 검사를 OTP 앞에(점검 B-5).
-  //   v3.10.0: 승인 · 키 작업 라우트는 OTP 를 쓰지 않는 사전 검사를 OTP 앞에 끼우려고 묶음(...ownerWrite)을 펼쳐 적는다(점검 A10) — 그래서 묶음 이름이 아니라
-  //   **펼친 미들웨어 줄**로 본다(예전 스윕은 `...묶음` 꼴만 읽어 펼친 라우트를 조용히 건너뛰었다). 모든 POST · PUT · DELETE 를 빠짐없이 읽는다.
-  const defs = new Map([...rt.matchAll(/const (\w+) = \[([^\]]*)\];/g)].map((m) => [m[1], m[2].split(',').map((x) => x.trim()).filter(Boolean)]));
-  const chains = new Map([...rt.matchAll(/api\.(get|post|put|delete)\('([^']+)',\s*([^\n]*?),\s*(?:async\s*)?\(_?req, res\) =>/g)]
-    .map((m) => [`${m[1]} ${m[2]}`, m[3].split(/,\s*/).flatMap((x) => (x.startsWith('...') ? (defs.get(x.slice(3)) || [`?${x}`]) : [x]))]));
+  // 쓰기 라우트는 전부 관리자 → 소유자 등급 → **쓰기 범위 무제한(fullRW — 1회차 A3)** → OTP 를 쓰지 않는 사전 검사 → OTP 마지막.
+  //   키를 새로 받는 쓰기는 저장 방식 검사(vaultFirst)도 OTP 앞(점검 B-5). 승인 · 키 작업 · 요청을 만드는 쓰기는 사전 검사(approvePre · jobPre · pre)를
+  //   OTP 앞에 끼우려고 묶음을 펼치거나 묶음 함수(write(fn))로 적는다 — 그래서 묶음 이름이 아니라 **펼친 미들웨어 줄**로 본다(점검 A10 · 1회차 A5).
+  //   모든 POST · PUT · DELETE 를 빠짐없이 읽는다(펼침 도우미 test/_routeChains.js — sshKeyLogin3100 ⑲ 와 같은 것).
+  const { routeChains } = await import('./_routeChains.js');
+  const chains = routeChains(rt);
   assert.equal([...rt.matchAll(/api\.(get|post|put|delete)\(/g)].length, chains.size, '미들웨어 줄을 읽지 못한 라우트가 없다');
+  assert.equal([...chains.values()].some((c) => c.some((x) => x.startsWith('?'))), false, '펼치지 못한 묶음이 없다');
   const OWNER = ['adminOnly', 'requireSettingsOwner'];
+  const W = [...OWNER, 'fullRW'];
   const readOnly = ['/settings/ssh-access/scan', '/settings/ssh-access/servers/:id/installed-keys', '/settings/ssh-access/servers/:id/test'];
-  // 멈추기 — 넣기 작업을 멈추는 것은 줄이는 방향(남은 서버에 키를 넣지 않는다)이라 OTP 없이 소유자 등급만, 거두기 작업을 멈추는 것은 OTP(반증 D1 — cancelGate 가 작업 종류로 고른다).
-  //   쓰기 라우트 가운데 명시적 예외는 이것 하나다(동작은 sshKeyLogin3100 ⑰-c).
+  // 멈추기 — 넣기 작업을 멈추는 것은 줄이는 방향이라 OTP 없이, 거두기 · 옛 키 교체가 붙은 넣기를 멈추는 것은 OTP(반증 D1 · 1회차 A4 — cancelGate 가 작업으로 고른다).
+  //   쓰기 라우트 가운데 명시적 예외는 이것 하나다(동작은 sshKeyLogin3100 ⑰-c · ㉒).
   const reduceOnly = ['/settings/ssh-access/jobs/:id/cancel'];
-  const keyAdd = ['/settings/ssh-access/keys', '/settings/ssh-access/inbox/approve'];
-  const PRE = new Set(['approvePre(true)', 'approvePre(false)', "jobPre('key-login')", "jobPre('key-revoke')"]);
+  const PRE = new Set(['pre', 'vaultFirst', 'approvePre(true)', 'approvePre(false)', "jobPre('key-login')", "jobPre('key-revoke')"]);
   let writes = 0;
   for (const [k, c] of chains) {
     const [method, p] = k.split(' ');
     if (method === 'get') continue;
     writes += 1;
     if (readOnly.includes(p)) { assert.deepEqual(c, OWNER, `${k} — 소유자 등급만`); continue; }
-    if (reduceOnly.includes(p)) { assert.deepEqual(c, [...OWNER, 'cancelGate'], `${k} — 소유자 등급 + 작업 종류별 OTP`); continue; }
-    if (keyAdd.includes(p)) { assert.deepEqual(c, [...OWNER, 'vaultFirst', 'reauth'], k); continue; }
-    assert.deepEqual(c.slice(0, 2), OWNER, k);
+    if (reduceOnly.includes(p)) { assert.deepEqual(c, [...W, 'cancelGate'], `${k} — 소유자 등급 + 쓰기 범위 + 작업별 OTP`); continue; }
+    assert.deepEqual(c.slice(0, 3), W, `${k} — 쓰기 범위 무제한(1회차 A3)`);
     assert.deepEqual([c.at(-1), c.filter((x) => x === 'reauth').length], ['reauth', 1], `${k} — OTP 는 한 번 · 마지막(${c.join(', ')})`);
-    assert.ok(c.slice(2, -1).every((x) => PRE.has(x)), `${k} — 소유자 등급과 OTP 사이에는 OTP 를 쓰지 않는 사전 검사만(${c.join(', ')})`);
+    assert.ok(c.slice(3, -1).every((x) => PRE.has(x)), `${k} — 쓰기 범위와 OTP 사이에는 OTP 를 쓰지 않는 사전 검사만(${c.join(', ')})`);
   }
   assert.ok(writes >= 20, `쓰기 라우트를 실제로 훑었다(${writes})`);
-  assert.deepEqual(chains.get('post /settings/ssh-access/approvals/:id/approve'), [...OWNER, 'approvePre(true)', 'reauth'], '승인 사전 검사는 OTP 앞(점검 A10)');
-  assert.deepEqual(chains.get('post /settings/ssh-access/approvals/:id/reject'), [...OWNER, 'approvePre(false)', 'reauth']);
-  assert.deepEqual(chains.get('post /settings/ssh-access/key-login'), [...OWNER, "jobPre('key-login')", 'reauth']);
-  assert.deepEqual(chains.get('post /settings/ssh-access/key-revoke'), [...OWNER, "jobPre('key-revoke')", 'reauth']);
-  assert.match(rt, /const cancelGate = \(req, res, next\) => \(SVC\.keyJobKind\(t\(req\.params\.id, 20\)\) === 'key-revoke' \? reauth\(req, res, next\) : next\(\)\);/, '거두기 멈추기만 OTP');
-  assert.match(rt, /const ownerWrite = \[adminOnly, requireSettingsOwner, reauth\];/);
-  assert.match(rt, /const keyAddWrite = \[adminOnly, requireSettingsOwner, vaultFirst, reauth\];/);
+  assert.deepEqual(chains.get('post /settings/ssh-access/approvals/:id/approve'), [...W, 'approvePre(true)', 'reauth'], '승인 사전 검사는 OTP 앞(점검 A10)');
+  assert.deepEqual(chains.get('post /settings/ssh-access/approvals/:id/reject'), [...W, 'approvePre(false)', 'reauth']);
+  assert.deepEqual(chains.get('post /settings/ssh-access/key-login'), [...W, "jobPre('key-login')", 'reauth']);
+  assert.deepEqual(chains.get('post /settings/ssh-access/key-revoke'), [...W, "jobPre('key-revoke')", 'reauth']);
+  for (const k of ['post /settings/ssh-access/keys', 'post /settings/ssh-access/inbox/approve']) assert.deepEqual(chains.get(k), [...W, 'vaultFirst', 'pre', 'reauth'], `${k} — 저장 방식 · 승인할 사람 검사가 OTP 앞`);
+  for (const k of ['post /settings/ssh-access/keys/rotate', 'delete /settings/ssh-access/keys/:id', 'put /settings/ssh-access/guards', 'delete /settings/ssh-access/corps/:corp/stop', 'post /settings/ssh-access/reload-keystore']) {
+    assert.deepEqual(chains.get(k), [...W, 'pre', 'reauth'], `${k} — 요청을 만드는 쓰기의 결정적 거절(승인할 사람 없음 · 같은 요청 대기 · 기록 손상 · 중지 아님 · 키 상태)은 OTP 앞(1회차 A5)`);
+  }
+  assert.match(rt, /const cancelGate = \(req, res, next\) => \(SVC\.keyJobCancelNeedsOtp\(t\(req\.params\.id, 20\)\) \? reauth\(req, res, next\) : next\(\)\);/, '거두기 · 교체 넣기 멈추기만 OTP');
+  assert.match(rt, /const fullRW = \(req, res, next\) => \(isFullReadWriteScope\(req\.user, store\.get\(\)\) \? next\(\)/, '쓰기 범위 판정은 isFullReadWriteScope 하나(server/CLAUDE.md v2.904)');
+  assert.match(rt, /const ownerWrite = \[adminOnly, requireSettingsOwner, fullRW, reauth\];/);
+  assert.match(rt, /const write = \(fn\) => \[adminOnly, requireSettingsOwner, fullRW, pre\(fn\), reauth\];/);
+  assert.match(rt, /const pre = \(fn\) => \(req, res, next\) => \{ Promise\.resolve\(\)\.then\(\(\) => fn\(req\)\)\.then\(\(p\) => \(p \? send\(res, p\) : next\(\)\), next\); \};/, '사전 검사가 던지면 next(err) — 통과시키지 않는다');
   assert.match(rt, /api\.post\('\/settings\/ssh-access\/reload-state', \.\.\.ownerWrite/);
-  assert.match(rt, /api\.post\('\/settings\/ssh-access\/reload-keystore', \.\.\.ownerWrite/);
   assert.doesNotMatch(rt, /ST\.(setCorpStop|clearCorpStop|addEvent|reload)/, '상태 쓰기는 service 를 거친다(사용 중지는 서버 목록과 함께)');
   const ob = stripComments(fs.readFileSync(path.join(SRC, 'routes/api/bmOnboard.js'), 'utf8'));
   assert.match(ob, /const keyAddGate = \[adminOnly, toolsPerm, requireSettingsOwner, twoPersonFirst, keyVaultFirst, reauth\];/);

@@ -31,7 +31,7 @@ const DIR = fs.mkdtempSync(path.join(TMP, 'sshkl3100-'));
 process.env.CONFIG_DIR = DIR;
 process.env.AUTH_ENABLED = 'true';
 process.env.DATA_SOURCE = 'live';
-process.env.SETTINGS_OWNERS = 'own,own2,own3,own4,own5,own6,own7,sown';
+process.env.SETTINGS_OWNERS = 'own,own2,own3,own4,own5,own6,own7,sown,lim';
 process.env.SSRF_ALLOW_LOOPBACK = 'true';
 process.env.SSH_HOSTKEY_POLICY = 'observe';
 delete process.env.CENTRAL_URL;
@@ -49,7 +49,8 @@ const { generateSecret, generateToken } = await import('../src/auth/totp.js');
 // OTP 는 계정마다 한 창(30초)에 세 번까지다 — 쓰기 라우트를 여럿 지나야 해서 OTP 소유자를 넷 둔다(own · own2 가 요청자/승인자, own3 · own4 는 여분).
 // adm2 = OTP 는 있지만 설정 소유자가 아닌 관리자(‘권한 없는 요청이 OTP 를 소모하지 않는다’ 를 보려는 계정).
 // own5 · own6 · own7 = 점검 A10(사전 검사가 OTP 를 쓰지 않는다) · 작업 칸 사전 검사 · 거두기 멈추기 OTP 를 볼 때 쓰는 여분(OTP 를 쓰지 않았음을 그 코드로 다시 확인하므로 코드가 든다).
-const SECRETS = { own: generateSecret(), own2: generateSecret(), own3: generateSecret(), own4: generateSecret(), own5: generateSecret(), own6: generateSecret(), own7: generateSecret(), adm2: generateSecret() };
+// lim = 설정 소유자이고 조회 범위는 무제한이지만 쓰기 범위(writeVcenters)가 좁은 관리자(1회차 A3 — SSH 공용 접속 쓰기 · 승인을 못 한다).
+const SECRETS = { own: generateSecret(), own2: generateSecret(), own3: generateSecret(), own4: generateSecret(), own5: generateSecret(), own6: generateSecret(), own7: generateSecret(), adm2: generateSecret(), lim: generateSecret() };
 fs.writeFileSync(path.join(DIR, 'users.json'), JSON.stringify({ users: [
   { username: 'own', role: 'admin', totpEnabled: true, totpSecret: SECRETS.own },
   { username: 'own2', role: 'admin', totpEnabled: true, totpSecret: SECRETS.own2 },
@@ -58,6 +59,7 @@ fs.writeFileSync(path.join(DIR, 'users.json'), JSON.stringify({ users: [
   { username: 'own5', role: 'admin', totpEnabled: true, totpSecret: SECRETS.own5 },
   { username: 'own6', role: 'admin', totpEnabled: true, totpSecret: SECRETS.own6 },
   { username: 'own7', role: 'admin', totpEnabled: true, totpSecret: SECRETS.own7 },
+  { username: 'lim', role: 'admin', totpEnabled: true, totpSecret: SECRETS.lim, scope: { writeVcenters: ['vcA'] } },
   { username: 'sown', role: 'admin', scope: { vcenters: ['vcA'] } },
   { username: 'adm', role: 'admin' },
   { username: 'adm2', role: 'admin', totpEnabled: true, totpSecret: SECRETS.adm2 },
@@ -102,7 +104,17 @@ const SECRET_WORDS = []; // 1회 비밀번호 · 저장 비밀번호(평문으�
 const secret = (s) => { SECRET_WORDS.push(s); return s; };
 /** 가짜 sshd 에서 붙잡아 둔 명령(holdExec) — 테스트가 중간에 실패해도 놓는다(붙잡힌 접속이 작업 · 파일 전체를 멈추지 않게). */
 const HELD = [];
-test.afterEach(() => { for (const r of HELD.splice(0)) r(); });
+/**
+ * 테스트마다 끝에 — 붙잡은 명령을 놓고, 아직 도는 키 작업이 있으면 멈추고 끝나기를 기다린다(한 테스트가 중간에 실패해도 다음 테스트가 ‘busy’ 로 줄줄이 실패하지 않게).
+ * 정상 테스트는 작업을 끝까지 기다리므로 여기서 멈출 것이 없다.
+ */
+test.afterEach(async () => {
+  for (const r of HELD.splice(0)) r();
+  const lj = KL.lastJobs();
+  const ids = [lj.install, ...(lj.revokes || [])].filter((j) => j && j.running).map((j) => j.id);
+  for (const id of ids) KL.cancelJob(id, { by: 'test-cleanup', why: '앞 테스트 정리' });
+  for (const id of ids) for (let i = 0; i < 1500 && SVC.keyJob(id)?.running; i += 1) await sleep(20);
+});
 
 /** 사용자마다 지금 쓸 수 있는 OTP 코드 하나(1회용 — 카운터는 늘어나야 한다). 한 창에 세 개(앞 · 지금 · 뒤 칸)까지, 넘으면 다음 창을 기다린다. */
 const _lastCtr = {};
@@ -124,6 +136,7 @@ const express = (await import('express')).default;
 const { api: router } = await import('../src/routes/api.js');
 const USERS = Object.fromEntries(['own', 'own2', 'own3', 'own4', 'own5', 'own6', 'own7', 'adm', 'adm2'].map((u) => [u, { username: u, role: 'admin', scope: null }]));
 USERS.sown = { username: 'sown', role: 'admin', scope: { vcenters: ['vcA'] } };
+USERS.lim = { username: 'lim', role: 'admin', scope: { writeVcenters: ['vcA'] } };
 const app = express(); app.use(express.json({ limit: '4mb' }));
 app.use((req, _r, next) => { req.user = USERS[req.headers['x-u']] || null; next(); });
 app.use('/api', router);
@@ -146,6 +159,8 @@ async function call(u, method, p, body) {
  *  · st.gate(명령) — 있으면 명령을 돌리기 전에 그 Promise 를 기다린다(느린 서버 — 작업이 도는 동안 다른 일을 시험한다).
  *  · st.rejectExec(명령, 연결 번호) — 참이면 그 exec 요청을 거절한다(바꾸는 명령을 보낸 뒤 답을 받지 못한 접속 — 점검 B-F3).
  *  · st.dropExec(명령, 연결 번호) — 참이면 명령을 끝까지 돌린 뒤 **종료 코드 · 출력 없이** 연결을 끊는다(서버는 바꿨는데 답이 끊긴 경우).
+ *  · st.fakeOut 은 함수여도 된다(명령, 연결 번호 → 글 또는 null) · st.banner(명령) — 명령 출력 앞에 붙일 글(로그인 셸 · .bashrc 가 찍는 잡음 흉내).
+ *  · st.noPassword — password 방식을 내놓지 않는다(대화형 keyboard-interactive 만 받는 서버 — offerKbd 와 함께).
  *  · 인증 시도(연결 번호 · 방식 · 계정 · 보낸 비밀번호)를 전부 적는다 — ‘다시 시도하지 않았다’ 를 테스트가 센다.
  */
 const HOSTKEY = crypto.generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs1', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } }).privateKey;
@@ -154,7 +169,7 @@ async function fakeSshd() {
   const home = fs.mkdtempSync(path.join(TMP, 'sshkl-home-'));
   TMP_DIRS.push(home);
   const akFile = path.join(home, '.ssh', 'authorized_keys');
-  const st = { password: null, clientIp: '127.0.0.1', ipQueue: [], offerKbd: false, noSshConnection: false, fakeOut: null, onConn: null, gate: null, rejectExec: null, dropExec: null, path: null, seen: [], execs: [], conns: 0 };
+  const st = { password: null, clientIp: '127.0.0.1', ipQueue: [], offerKbd: false, noSshConnection: false, fakeOut: null, onConn: null, gate: null, rejectExec: null, dropExec: null, path: null, banner: null, noPassword: false, seen: [], execs: [], conns: 0 };
   const keyAllowed = (data, ip) => {
     let text = '';
     try { text = fs.readFileSync(akFile, 'utf8'); } catch { return null; }
@@ -175,7 +190,7 @@ async function fakeSshd() {
     const conn = st.conns;
     const ip = st.ipQueue.length ? st.ipQueue.shift() : st.clientIp;
     try { st.onConn?.(conn); } catch { /* */ }
-    const left = () => ['publickey', 'password', ...(st.offerKbd ? ['keyboard-interactive'] : [])];
+    const left = () => ['publickey', ...(st.noPassword ? [] : ['password']), ...(st.offerKbd ? ['keyboard-interactive'] : [])];
     client.on('authentication', (ctx) => {
       const rec = { conn, ip, method: ctx.method, username: ctx.username };
       st.seen.push(rec);
@@ -188,6 +203,7 @@ async function fakeSshd() {
       }
       if (ctx.method === 'password') {
         rec.password = ctx.password;
+        if (st.noPassword) return ctx.reject(left());
         return st.password && ctx.password === st.password ? ctx.accept() : ctx.reject(left());
       }
       if (ctx.method === 'keyboard-interactive' && st.offerKbd) {
@@ -204,7 +220,10 @@ async function fakeSshd() {
         st.execs.push({ conn, command: info.command });
         if (st.rejectExec?.(info.command, conn)) { rej(); return; }
         const stream = acc();
-        if (typeof st.fakeOut === 'string') { stream.write(st.fakeOut); stream.exit(1); stream.end(); return; }
+        const fo = typeof st.fakeOut === 'function' ? st.fakeOut(info.command, conn) : st.fakeOut;
+        if (typeof fo === 'string') { stream.write(fo); stream.exit(1); stream.end(); return; }
+        const bn = typeof st.banner === 'function' ? st.banner(info.command, conn) : null;
+        if (typeof bn === 'string') stream.write(bn);
         if (st.gate) await st.gate(info.command, conn);
         const env = { HOME: home, PATH: st.path || process.env.PATH, ...(st.noSshConnection ? {} : { SSH_CONNECTION: `${ip} 50000 127.0.0.1 22` }) };
         const drop = !!st.dropExec?.(info.command, conn);
@@ -225,7 +244,7 @@ async function fakeSshd() {
     writeAk(text) { fs.mkdirSync(path.dirname(akFile), { recursive: true, mode: 0o700 }); fs.writeFileSync(akFile, text, { mode: 0o600 }); },
     readAk() { return fs.existsSync(akFile) ? fs.readFileSync(akFile, 'utf8') : null; },
     /** 인증 시도 · 명령 기록을 비우고 연결 번호를 처음부터 다시 센다. */
-    clear() { st.seen.length = 0; st.execs.length = 0; st.conns = 0; st.ipQueue.length = 0; st.onConn = null; st.gate = null; st.rejectExec = null; st.dropExec = null; st.path = null; },
+    clear() { st.seen.length = 0; st.execs.length = 0; st.conns = 0; st.ipQueue.length = 0; st.onConn = null; st.gate = null; st.rejectExec = null; st.dropExec = null; st.path = null; st.banner = null; },
     /** 비밀번호가 **실제로 서버에 간** 시도(password 방식 · 프롬프트에 답한 keyboard-interactive). 프롬프트 없이 거절된 방식 문의는 비밀번호를 싣지 않는다. */
     passwordTries() { return st.seen.filter((x) => x.password !== undefined); },
     keyTries() { return st.seen.filter((x) => x.method === 'publickey'); },
@@ -277,23 +296,12 @@ const WRAP_RE = /^echo '([A-Za-z0-9+/=]+)' \| base64 -d \| \/bin\/sh$/;
 const scriptOf = (command) => { const m = WRAP_RE.exec(String(command)); return m ? Buffer.from(m[1], 'base64').toString('utf8') : String(command); };
 /** 스크립트에 끼운 넣을 줄(L='…') — 없으면 ''. */
 const lineInScript = (script) => (/^B='[^']*'; M='[^']*'; L='([^']*)'/m.exec(script) || /^L='([^']*)'/m.exec(script) || [])[1] || '';
-/**
- * 라우트 파일(주석 뗀 글) → `메서드 경로` → 펼친 미들웨어 이름 줄. `...ownerWrite` 같은 묶음은 그 파일의 `const 이름 = [ … ];` 로 펼친다.
- * 승인 · 키 작업 라우트는 사전 검사를 OTP 앞에 끼우려고 묶음을 펼쳐 적으므로 묶음 이름만 보는 스윕은 그것들을 놓친다(점검 A10).
- */
-function routeChains(src) {
-  const defs = new Map([...src.matchAll(/const (\w+) = \[([^\]]*)\];/g)].map((m) => [m[1], m[2].split(',').map((x) => x.trim()).filter(Boolean)]));
-  const out = new Map();
-  for (const m of src.matchAll(/api\.(get|post|put|delete)\('([^']+)',\s*([^\n]*?),\s*(?:async\s*)?\(_?req, res\) =>/g)) {
-    out.set(`${m[1]} ${m[2]}`, m[3].split(/,\s*/).flatMap((x) => (x.startsWith('...') ? (defs.get(x.slice(3)) || [`?${x}`]) : [x])));
-  }
-  return out;
-}
 /** 실제 awk 를 감싼 가짜 awk 가 든 bin 폴더(점검 B-F1 — busybox awk 흉내). mode: 'trunc' = 출력이 일반 파일이면 앞 2줄만 쓰고 0 · 'exit2' = 앞 2줄만 쓰고 2. */
-const REAL = Object.fromEntries(['awk', 'mv', 'sleep'].map((c) => [c, execFileSync('sh', ['-c', `command -v ${c}`], { encoding: 'utf8' }).trim()]));
+const REAL = Object.fromEntries(['awk', 'mv', 'sleep', 'chmod'].map((c) => [c, execFileSync('sh', ['-c', `command -v ${c}`], { encoding: 'utf8' }).trim()]));
 /**
  * mode — 'trunc' · 'exit2'(가짜 awk) · 'mvfail'(mv 실패) · 'nosleep'(sleep 이 바로 끝남 — 자물쇠 15초를 기다리지 않게) ·
- * 'race'(mv 한 뒤 다른 쪽이 authorized_keys 를 $HOME/race-content 로 바꾼다 — 자물쇠를 모르는 사람 · 도구) · 'mvhang'(mv 가 멈춘다 — 신호 시험).
+ * 'race'(mv 한 뒤 다른 쪽이 authorized_keys 를 $HOME/race-content 로 바꾼다 — 자물쇠를 모르는 사람 · 도구) · 'mvhang'(mv 가 멈춘다 — 신호 시험) ·
+ * 'chmodhook'(임시 파일 chmod — 검증 뒤 · mv 직전 — 에 $HOME/hook.sh 를 돌린다: 그 틈에 다른 쪽이 파일 · 자물쇠를 건드리는 흉내).
  */
 function fakeBin(mode) {
   const d = fs.mkdtempSync(path.join(TMP, 'sshkl-bin-')); TMP_DIRS.push(d);
@@ -302,6 +310,7 @@ function fakeBin(mode) {
   else if (mode === 'nosleep') put('sleep', 'exit 0');
   else if (mode === 'race') put('mv', `${REAL.mv} "$@" || exit $?\ncat "$HOME/race-content" > "$HOME/.ssh/authorized_keys"`);
   else if (mode === 'mvhang') put('mv', `: > "$HOME/mv-started"\nexec ${REAL.sleep} 30`);
+  else if (mode === 'chmodhook') put('chmod', `${REAL.chmod} "$@" || exit $?\n[ -f "$HOME/hook.sh" ] && . "$HOME/hook.sh"\nexit 0`);
   else put('awk', `if [ -f /proc/self/fd/1 ]; then ${REAL.awk} "$@" | head -n 2; exit ${mode === 'exit2' ? 2 : 0}; fi\nexec ${REAL.awk} "$@"`);
   return `${d}:${process.env.PATH}`;
 }
@@ -999,16 +1008,31 @@ test('⑥-f 복원 합치기는 공개키 · 알고리즘 칸과 공통 계정 �
   assert.equal(ma.password, curA.password, '같은 계정이면 지금 값(봉인본) — 번들의 평문을 받지 않는다');
   assert.equal(merged.accounts.find((a) => a.id === 'a_0000000000a4').password, '', '지금 없는 계정의 비밀번호도 번들에서 받지 않는다');
   assert.equal(JSON.stringify(merged).includes('Bundle-'), false);
-  // 반증 R7 — 번들이 두 키의 id 를 맞바꿔도(지문 · 원문은 그대로) id 는 지금 것 · 같은 id 공통 계정의 묶음 칸(종류 · 법인 · 계정명 · 기본 키)도 지금 값
-  //   (복원은 OTP 를 묻지 않는다 — id 를 맞바꾸면 keyRef 로 묶인 서버가 다른 키를 쓰게 됐다)
+  // 반증 R7 — 번들이 두 키의 id 를 맞바꿔도(지문 · 원문은 그대로) id 는 지금 것(번들 id 가 **지금 다른 지문 키의 id** 일 때만 바꾼다) ·
+  //   1회차 A6 — 이름도 지금 것(이름은 CSV os_key 가 고르는 열쇠다 · 복원은 OTP 를 묻지 않는다)
   const swap = JSON.parse(KS.redactKeyStoreText(cur).text);
   const bk = swap.keys.find((x) => x.id === k.id); const bo = swap.keys.find((x) => x.id === kOld.id);
   [bk.id, bo.id] = [bo.id, bk.id];
-  for (const a of swap.accounts) if (a.id === acc.account.id) Object.assign(a, { kind: 'os', username: 'root', corp: 'vcB', keyRef: kOld.id });
+  bk.name = 'renamed-in-bundle';
   const m2 = JSON.parse(BUN.mergeRedactedKeyStore(JSON.stringify(swap), cur).text);
-  assert.deepEqual([m2.keys.find((x) => x.fingerprint === k.fingerprint)?.id, m2.keys.find((x) => x.fingerprint === kOld.fingerprint)?.id], [k.id, kOld.id], '키 id 는 지금 것');
-  const a2 = m2.accounts.find((a) => a.id === acc.account.id);
-  assert.deepEqual([a2.kind, a2.username, a2.corp, a2.keyRef, a2.password], [curA.kind, curA.username, curA.corp, curA.keyRef, curA.password], '공통 계정 묶음 칸 · 비밀번호는 지금 값');
+  const mk2 = m2.keys.find((x) => x.fingerprint === k.fingerprint);
+  assert.deepEqual([mk2?.id, m2.keys.find((x) => x.fingerprint === kOld.fingerprint)?.id], [k.id, kOld.id], '맞바꾼 id 는 지금 것');
+  assert.equal(mk2.name, k.name, '이름은 지금 것(1회차 A6)');
+  // 1회차 D2 — 번들 id 가 지금 어느 키의 것도 아니면(같은 키를 지웠다 새 id 로 다시 등록한 설치에 옛 백업을 복원) **번들 id 그대로** — 번들 안의 참조(공통 계정 · 서버)가 이어진다
+  //   (항상 지금 id 로 바꾸던 첫 수정은 정상 복원에서 참조를 조용히 끊었다). 공통 계정의 묶음 칸은 번들 값(지금 값으로 덮던 첫 수정을 되돌림 — 복원의 뜻).
+  const oldBackup = JSON.parse(KS.redactKeyStoreText(cur).text);
+  const ob = oldBackup.keys.find((x) => x.id === k.id);
+  ob.id = 'k_0000000000d2';
+  for (const a of oldBackup.accounts) if (a.id === acc.account.id) Object.assign(a, { username: 'root', corp: 'vcB', keyRef: 'k_0000000000d2' });
+  oldBackup.accounts.push({ id: 'a_0000000000d2', name: 'd2-orphan', kind: 'os', corp: 'vcA', username: 'x', keyRef: 'k_ffffffffffff', password: '' });
+  const m3 = BUN.mergeRedactedKeyStore(JSON.stringify(oldBackup), cur);
+  const j3 = JSON.parse(m3.text);
+  assert.equal(j3.keys.find((x) => x.fingerprint === k.fingerprint)?.id, 'k_0000000000d2', '번들 id 가 다른 키와 겹치지 않으면 번들 id 그대로(1회차 D2)');
+  const a3 = j3.accounts.find((a) => a.id === acc.account.id);
+  assert.deepEqual([a3.username, a3.corp, a3.keyRef, a3.password], ['root', 'vcB', 'k_0000000000d2', ''], '공통 계정 묶음 칸은 번들 값 · 계정명이 바뀌었으니 비밀번호는 받지 않는다(A4)');
+  assert.ok(m3.dropped.includes('account:a4-acc'), JSON.stringify(m3.dropped));
+  assert.equal(j3.accounts.find((a) => a.id === 'a_0000000000d2').keyRef, '', '합친 키에 없는 기본 키는 뗀다');
+  assert.ok(m3.dropped.includes('account-key:d2-orphan'), `뗀 사실을 밝힌다(1회차 D2 — 조용히 비웠다) ${JSON.stringify(m3.dropped)}`);
   // 메모리의 키 원본이 공개키 ↔ 지문이 맞지 않으면(복원 · 손으로 고친 파일을 다시 읽은 뒤) 넣기 · 거두기 모두 붙기 전에 거절
   const j = JSON.parse(cur);
   for (const x of j.keys) if (x.id === k.id || x.id === kOld.id) x.publicKey = other;
@@ -1529,7 +1553,7 @@ test('⑩ 키 로그인 설정 — 저장 비밀번호로 붙어 from= + 포워�
   const again = await SVC.startKeyLogin({ servers: [sv], keyId: K.id, by: 'own' });
   assert.equal(again.ok, true, JSON.stringify(again));
   assert.deepEqual((({ code, status, jobId }) => [code, status, jobId])(await SVC.startKeyLogin({ servers: [sv], keyId: K.id, by: 'own' })), ['busy', 409, again.jobId]);
-  assert.deepEqual([KL.busyJob('key-login'), SVC.keyJobPrecheck('key-login')?.code, SVC.keyJobPrecheck('key-revoke')], [again.jobId, 'busy', null], '라우트 사전 검사(OTP 앞)도 같은 판정');
+  assert.deepEqual([KL.busyJob('key-login'), (await SVC.keyJobPrecheck('key-login'))?.code, await SVC.keyJobPrecheck('key-revoke')], [again.jobId, 'busy', null], '라우트 사전 검사(OTP 앞 · async)도 같은 판정');
   const r2 = (await waitJob(again.jobId)).results[0];
   // restricted = 지금 서버에 있는 그 키의 포탈 줄에 제한이 붙어 있는가(이미 제한된 같은 줄이 있으면 참 — 바꾸지 않았어도)
   assert.deepEqual([r2.ok, r2.line, r2.restricted, r2.bound, r2.passwordRemoved, r2.replaceSkipped], [true, 'present-marked', true, true, false, false], JSON.stringify(r2));
@@ -2447,7 +2471,13 @@ test('⑱ 알림 메일 — 알릴 사건(MAIL_EVENTS)만 고른다 · 사건의
   assert.deepEqual(noisy.text.split('\n').slice(0, 3), ['승인 요청 · vcA · 키 등록 — <b>kr</b> & "co" · own', '받는 곳에 새 키 파일 · 2개 — vcA/common/id_a', '서버에서 키 거두기 끝남 · vcA · kr · own2 — 100대 — 지움 98 · 줄 없음 0 · 실패 2']);
   assert.equal(noisy.text.includes('bm-a1 · kr'), false, '서버마다의 거둠 사건은 싣지 않는다(점검 C-4 — 예전 판은 한 줄씩 실었다)');
   assert.ok(noisy.html.includes('&lt;b&gt;kr&lt;/b&gt; &amp; &quot;co&quot;') && !noisy.html.includes('<b>'), 'HTML 본문은 이스케이프');
-  assert.equal(N.buildMail(Array.from({ length: 100 }, (_, i) => ({ kind: 'corp-resume', corp: `c${i}` }))).count, 60, '한 통의 줄 수 상한');
+  // 한 통의 줄 수 상한(60) — 넘친 사건은 말없이 버리지 않고 ‘외 N건’ 을 밝힌다 · count · 제목은 전체 수(1회차 C1-5 — 예전에는 제목도 60건이라 했다)
+  const big = N.buildMail(Array.from({ length: 100 }, (_, i) => ({ kind: 'corp-resume', corp: `c${i}` })));
+  assert.deepEqual([big.count, big.text.split('\n').filter((l) => l.startsWith('법인 키 사용 재개')).length], [100, 60]);
+  assert.match(big.subject, /사건 100건/);
+  assert.match(big.text, /… 외 40건은 이 메일에 싣지 않았습니다/);
+  assert.match(big.html, /외 40건은 이 메일에 싣지 않았습니다/);
+  assert.equal(N.buildMail(Array.from({ length: 60 }, (_, i) => ({ kind: 'corp-resume', corp: `c${i}` }))).text.includes('외 '), false, '넘치지 않으면 덧붙이지 않는다');
   // 몰아서 생긴 사건 → 한 통(가짜 발송은 파일 처음에 붙여 뒀다)
   await N._flushKeyNotifyForTest();
   const n0 = MAILS.length;
@@ -2556,38 +2586,36 @@ test('⑲ 소스 스윕 — 등록부 쓰기(키 묶기 · 되돌리기 · 저�
   assert.doesNotMatch(kl, /setBmServerKeyRef|restoreBmServerKeyRef|clearBmServerPassword|bmstor\/registry|saveBmServer|applyBmServerBatch/, 'keyLogin.js 는 등록부를 직접 쓰지 않는다');
   assert.match(kl, /\bo\.bind\(/); assert.match(kl, /\bo\.clearPassword\(/);
   assert.doesNotMatch(kl, /console\.[a-z]+\([^\n]*(?:assword|privateKey|passphrase)/, '비밀을 콘솔에 찍지 않는다');
-  // 라우트 — 쓰기 라우트는 전부 관리자 → 설정 소유자 등급 → (OTP 를 쓰지 않는 사전 검사) → OTP(마지막). 승인 · 키 작업 라우트는 사전 검사를 OTP 앞에 끼우려고
-  //   묶음(...ownerWrite)을 펼쳐 적는다 — 그래서 묶음 이름이 아니라 **펼친 미들웨어 줄**로 본다(점검 A10).
+  // 라우트 — 쓰기 라우트는 전부 관리자 → 설정 소유자 등급 → 쓰기 범위 무제한(fullRW · 1회차 A3) → (OTP 를 쓰지 않는 사전 검사) → OTP(마지막).
+  //   묶음 · 묶음 함수(write(fn))를 펼친 미들웨어 줄로 본다(test/_routeChains.js — sshAccess390 ⑪ 이 모든 쓰기 라우트를 같은 규칙으로 본다).
   const rt = stripComments(fs.readFileSync(path.join(SRC, 'routes/api/sshAccess.js'), 'utf8'));
+  const { routeChains } = await import('./_routeChains.js');
   const chains = routeChains(rt);
   assert.equal([...rt.matchAll(/api\.(get|post|put|delete)\(/g)].length, chains.size, '미들웨어 줄을 읽지 못한 라우트가 없다');
   const OWNER_READ = ['adminOnly', 'requireSettingsOwner'];
-  const PRE = new Set(['approvePre(true)', 'approvePre(false)', "jobPre('key-login')", "jobPre('key-revoke')", 'vaultFirst']);
-  for (const r of ['post /settings/ssh-access/keys/rotate', 'delete /settings/ssh-access/keys/:id', 'post /settings/ssh-access/approvals/:id/approve', 'post /settings/ssh-access/approvals/:id/reject',
-    'put /settings/ssh-access/guards', 'post /settings/ssh-access/key-login', 'post /settings/ssh-access/key-revoke', 'delete /settings/ssh-access/corps/:corp/stop', 'post /settings/ssh-access/reload-keystore']) {
-    const c = chains.get(r) || [];
-    assert.deepEqual(c.slice(0, 2), OWNER_READ, r);
-    assert.deepEqual([c.at(-1), c.filter((x) => x === 'reauth').length], ['reauth', 1], `${r} — OTP 는 한 번 · 마지막(${c.join(', ')})`);
-    assert.ok(c.slice(2, -1).every((x) => PRE.has(x)), `${r} — 소유자 등급과 OTP 사이에는 OTP 를 쓰지 않는 사전 검사만(${c.join(', ')})`);
+  const W = [...OWNER_READ, 'fullRW'];
+  for (const r of ['post /settings/ssh-access/keys/rotate', 'delete /settings/ssh-access/keys/:id', 'put /settings/ssh-access/guards', 'delete /settings/ssh-access/corps/:corp/stop', 'post /settings/ssh-access/reload-keystore']) {
+    assert.deepEqual(chains.get(r), [...W, 'pre', 'reauth'], `${r} — 결정적 거절은 OTP 앞(1회차 A5)`);
   }
-  assert.deepEqual(chains.get('post /settings/ssh-access/approvals/:id/approve'), [...OWNER_READ, 'approvePre(true)', 'reauth'], '자기 승인 · 지문 · 처리됨 · 기록 손상은 OTP 앞(점검 A10)');
-  assert.deepEqual(chains.get('post /settings/ssh-access/approvals/:id/reject'), [...OWNER_READ, 'approvePre(false)', 'reauth']);
-  assert.deepEqual(chains.get('post /settings/ssh-access/key-login'), [...OWNER_READ, "jobPre('key-login')", 'reauth'], '진행 중 작업(busy)은 OTP 앞');
-  assert.deepEqual(chains.get('post /settings/ssh-access/key-revoke'), [...OWNER_READ, "jobPre('key-revoke')", 'reauth']);
+  assert.deepEqual(chains.get('post /settings/ssh-access/approvals/:id/approve'), [...W, 'approvePre(true)', 'reauth'], '자기 승인 · 지문 · 처리됨 · 기록 손상은 OTP 앞(점검 A10)');
+  assert.deepEqual(chains.get('post /settings/ssh-access/approvals/:id/reject'), [...W, 'approvePre(false)', 'reauth']);
+  assert.deepEqual(chains.get('post /settings/ssh-access/key-login'), [...W, "jobPre('key-login')", 'reauth'], '데모 · 키 상태 · 진행 중 작업은 OTP 앞');
+  assert.deepEqual(chains.get('post /settings/ssh-access/key-revoke'), [...W, "jobPre('key-revoke')", 'reauth']);
   assert.deepEqual(chains.get('get /settings/ssh-access/jobs/:id'), OWNER_READ);
-  // 멈추기 — 넣기 작업을 멈추는 것은 줄이는 방향(남은 서버에 키를 넣지 않는다)이라 OTP 없이 소유자 등급만. 거두기 작업을 멈추는 것은 OTP(유출 키가 남은 서버에 남는다 — 반증 D1).
-  //   쓰기 라우트 가운데 이것 하나만 명시적 예외(cancelGate 가 작업 종류로 reauth 를 고른다 — ⑰-c 가 동작으로 본다).
-  assert.deepEqual(chains.get('post /settings/ssh-access/jobs/:id/cancel'), [...OWNER_READ, 'cancelGate']);
-  assert.match(rt, /const cancelGate = \(req, res, next\) => \(SVC\.keyJobKind\(t\(req\.params\.id, 20\)\) === 'key-revoke' \? reauth\(req, res, next\) : next\(\)\);/);
-  assert.match(rt, /const ownerWrite = \[adminOnly, requireSettingsOwner, reauth\];/);
+  // 멈추기 — 넣기 작업 멈추기는 줄이는 방향이라 OTP 없음. 거두기 · 옛 키 교체가 붙은 넣기 멈추기는 OTP(반증 D1 · 1회차 A4). 쓰기 라우트 가운데 이것 하나만 명시적 예외.
+  assert.deepEqual(chains.get('post /settings/ssh-access/jobs/:id/cancel'), [...W, 'cancelGate']);
+  assert.match(rt, /const cancelGate = \(req, res, next\) => \(SVC\.keyJobCancelNeedsOtp\(t\(req\.params\.id, 20\)\) \? reauth\(req, res, next\) : next\(\)\);/);
+  assert.match(rt, /const ownerWrite = \[adminOnly, requireSettingsOwner, fullRW, reauth\];/);
   assert.match(rt, /const approvePre = \(approve\) => \(req, res, next\) => \{ const b = bodyOf\(req\); const p = SVC\.approvalPrecheck\(/, '사전 검사는 service 의 판정 하나');
-  assert.match(rt, /const jobPre = \(kind\) => \(req, res, next\) => \{ const p = SVC\.keyJobPrecheck\(kind, t\(bodyOf\(req\)\.keyId, 32\)\);/, '작업 사전 검사는 요청의 키로(같은 키 거두기 중 넣기 409 revoking — 반증 R2)');
+  assert.match(rt, /const jobPre = \(kind\) => pre\(\(req\) => SVC\.keyJobPrecheck\(kind, t\(bodyOf\(req\)\.keyId, 32\)\)\);/, '작업 사전 검사는 요청의 키로(같은 키 거두기 중 넣기 409 revoking — 반증 R2) · async 라 pre 로 감싼다');
   assert.doesNotMatch(rt, /resolveOsAuth|keyMaterial|listKeysRaw|listBmServersRaw|KS\.|keyStore|approval\/store|approval\/twoPerson|keyLogin/, '라우트는 저장소 · 승인 저장소 · 키 로그인 본체를 직접 만지지 않는다(service 를 거친다)');
   // 접속 한 번마다 시한(세션을 실제로 끊는다) · 비밀번호는 password 방식 한 번(구형 알고리즘 재시도 · 서버에 들어 있는 키 읽기 포함 — 점검 B-F7 · E-3)
   assert.match(kl, /withDeadline\(legDeadlineMs\(execs\), \(signal\) => withSsh\(\{[^]*?passwordOnly: true, signal \}/);
   const svcSrc = stripComments(fs.readFileSync(path.join(SRC, 'sshaccess/service.js'), 'utf8'));
   assert.match(svcSrc, /readyTimeout: 15_000,\s*passwordOnly: true \},\s*async \(\{ exec \}\) => exec\(READ_COMMAND, 15_000\)\)/, 'readInstalledKeys 도 passwordOnly(⑪-d 가 동작으로도 본다)');
-  assert.match(stripComments(fs.readFileSync(path.join(SRC, 'proxy/sshExec.js'), 'utf8')), /connect\(\{[^)]*_legacy: true, passwordOnly \}\)/, '구형 알고리즘 재시도에도 passwordOnly');
+  const sx = stripComments(fs.readFileSync(path.join(SRC, 'proxy/sshExec.js'), 'utf8'));
+  assert.match(sx, /connect\(\{[^)]*_legacy: true, passwordOnly \}\)/, '구형 알고리즘 재시도에도 passwordOnly');
+  assert.match(sx, /else if \(passwordOnly\) \{[^]*?auth\.authHandler = [^]*?if \(sent\) return cb\(false\);/, 'passwordOnly 는 authHandler 로 한 번만(1회차 D3 — ⑪-b · ⑪-e 가 동작으로 본다)');
   for (const line of rt.split('\n').filter((l) => /audit\(/.test(l))) assert.doesNotMatch(line, /oncePassword: (?!!!once\b)|: once\b|privateKey|passphrase/, line.trim().slice(0, 80));
   // 7b 화면 — 키 등록 · 교체 · 삭제 게이트에 두 사람 승인 검사가 OTP 앞에 있다
   const ob = stripComments(fs.readFileSync(path.join(SRC, 'routes/api/bmOnboard.js'), 'utf8'));
