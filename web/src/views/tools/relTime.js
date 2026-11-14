@@ -13,9 +13,11 @@
  *   그래서 이 모듈은 **두 이름을 나눈다** — `agoText(ts, now)` 는 타임스탬프,
  *   `elapsedText(ms)` 는 경과 시간이다. 이름만 보고 알 수 있어야 한다.
  *
- * 반올림 규칙: **내림**(`Math.floor`)이다. 90초는 `1분 전` 이다 —
- * "1분 30초 지났다" 를 `2분 전` 이라 말하면 **아직 지나지 않은 시간**을 말하는 것이다.
- * (다수였던 7개가 `Math.round` 였지만, 다수결이 아니라 **정직한 쪽**을 고른다.)
+ * 반올림 규칙: **반올림**(`Math.round`)이다 — 아래 `elapsedText` 주석 그대로(9벌 중 7벌의 규칙, 표기 정책은 바꾸지 않았다).
+ * ⚠ v3.10.10(공통 기능 점검 8회차) 정정: 이 머리말은 v2.574 초안의 '내림(Math.floor) — 90초는 1분 전' 을 남기고 있었지만
+ *   코드는 처음부터 `Math.round` 였다(90초 → `2분 전`). 머리말을 코드에 맞췄다.
+ * 경계: 반올림한 값이 다음 단위에 닿으면 다음 단위로 올린다 — 59.6초가 `60초 전`, 59.5분이 `60분 전`, 23.5시간이 `24시간 전` 으로
+ *   나오던 것을(v3.10.10 이전) `1분 전`·`1시간 전`·`1일 전` 으로.
  *
  * 결측 표기는 `—`(다수·기존 화면과 같은 모양)이고, 호출부가 필요하면 `dash` 로 바꾼다.
  */
@@ -49,10 +51,14 @@ export function elapsedText(ms, { dash = '—', subMinute = 'seconds', future } 
   }
   if (v < MIN) {
     const justNowBelow = subMinute === '방금' ? MIN : (typeof subMinute === 'number' && subMinute > 0 ? subMinute : 1000);
-    return v < justNowBelow ? '방금' : `${Math.round(v / 1000)}초 전`;
+    if (v < justNowBelow) return '방금';
+    const s = Math.round(v / 1000);
+    if (s < 60) return `${s}초 전`;
   }
-  if (v < HOUR) return `${Math.round(v / MIN)}분 전`;
-  if (v < DAY) return `${Math.round(v / HOUR)}시간 전`;
+  const m = Math.round(v / MIN);
+  if (m < 60) return `${m}분 전`;
+  const h = Math.round(v / HOUR);
+  if (h < 24) return `${h}시간 전`;
   return `${Math.round(v / DAY)}일 전`;
 }
 
