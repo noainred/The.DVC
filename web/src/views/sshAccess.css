@@ -65,3 +65,38 @@
 /* 키 표 — 기능 칸은 줄바꿈 허용(1440 에서 동작 열이 보이게) */
 .ssa-keys td:nth-child(3) { white-space: normal; min-width: 120px; }
 .ssa-keys td:first-child { white-space: normal; min-width: 170px; }
+/* ── v3.10.0 — 키 로그인 설정 창 · 승인 대기 · 보호 장치 · 키 작업 결과 ───────────────── */
+/* 전역 .btn 에는 danger 변형이 없다(1단계부터 이 화면이 쓰던 클래스 — 규칙이 없어 보통 단추와 같아 보였다). 이 화면 안에서만 붉은 테두리. */
+.ssa .btn.danger { border-color: rgba(239, 68, 68, .55); color: var(--red); }
+.ssa .btn.danger:hover:not(:disabled) { border-color: var(--red); background: rgba(239, 68, 68, .12); }
+/* 창의 ‘이름 : 값’ 줄(시안 SshKey) — 좁으면 값이 이름 아래로 내려간다 */
+.ssa-line { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: flex-start; min-width: 0; font-size: 12.5px; }
+.ssa-k { flex: 0 0 132px; color: var(--text-dim); font-size: 12px; padding-top: 1px; }
+.ssa-v { flex: 1 1 300px; min-width: 0; overflow-wrap: anywhere; }
+.ssa-stack { display: grid; gap: 4px; justify-items: start; min-width: 0; }
+.ssa-stack .select, .ssa-stack .input { max-width: 100%; min-width: 0; }
+label.ssa-stack { font-size: 12px; color: var(--text-dim); }
+.ssa-radio { display: inline-flex; gap: 8px; align-items: flex-start; min-height: 24px; cursor: pointer; min-width: 0; }
+.ssa-radio input { margin-top: 3px; flex: 0 0 auto; }
+.ssa-pw { width: min(280px, 100%); min-width: 0; }
+.ssa-pw:disabled { opacity: .5; }
+.ssa-steps { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+.ssa-targets { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; max-height: 132px; overflow-y: auto; }
+.ssa-modal:focus { outline: none; }
+/* 키 작업 결과 · 승인 · 변경 기록 — 글이 긴 칸만 줄바꿈(전역 td 는 nowrap) */
+.ssa-job { display: grid; gap: 6px; min-width: 0; }
+.ssa-jobt td:nth-child(3) { white-space: normal; min-width: 260px; overflow-wrap: anywhere; }
+.ssa-appr td:nth-child(2), .ssa-apprd td:nth-child(2), .ssa-apprd td:nth-child(6), .ssa-chg td:nth-child(3) { white-space: normal; min-width: 180px; overflow-wrap: anywhere; }
+/* 보호 장치(시안 SshSec) — 왼쪽 칸(스위치 · ‘항상 켬’)의 폭을 고정해 글 시작 위치를 맞춘다 */
+.ssa-guards { margin: 0; padding: 0; list-style: none; display: grid; border: 1px solid var(--border); border-radius: 10px; min-width: 0; }
+.ssa-guards > li { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; border-bottom: 1px solid var(--border-soft, var(--border)); min-width: 0; }
+.ssa-guards > li:last-child { border-bottom: 0; }
+.ssa-gs { flex: 0 0 60px; display: flex; justify-content: center; padding-top: 1px; }
+.ssa-gb { flex: 1 1 0; min-width: 0; display: grid; gap: 3px; font-size: 12.5px; overflow-wrap: anywhere; }
+.ssa-lock { padding: 1px 8px; border: 1px solid var(--border); border-radius: 999px; font-size: 11px; font-weight: 700; color: var(--text-dim); white-space: nowrap; }
+.ssa-sw { flex: 0 0 38px; width: 38px; height: 22px; border-radius: 999px; background: var(--border); position: relative; border: 0; padding: 0; cursor: pointer; }
+.ssa-sw i { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--text); transition: left .12s; }
+.ssa-sw.on { background: var(--accent); }
+.ssa-sw.on i { left: 19px; }
+.ssa-sw:disabled { opacity: .5; cursor: not-allowed; }
+.ssa-sw:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }

@@ -189,9 +189,12 @@ export function suggestKeyName(item) {
 
 /* ── v3.10.0 — 두 사람 승인(요청 → 다른 설정 소유자의 승인 → 실행) ─────────────────── */
 
-/** 승인 요청 상태 → 글자 · 톤. 'approved' 는 승인은 됐는데 실행 결과가 적히지 않은 상태(실행 중 · 그 사이 포탈이 멈춤). */
+/**
+ * 승인 요청 상태 → 글자 · 톤. 'approved' 는 승인은 됐는데 실행 결과가 아직 적히지 않은 상태(실행 중 · 그 사이 포탈이 멈춤) —
+ * 서버가 얼마 뒤 ‘실행 실패(중단)’ 로 확정한다(approval/store expireDue). 그래서 ‘실행됨’ 으로 읽히지 않게 적는다.
+ */
 export const APPROVAL_STATUS_TEXT = Object.freeze({
-  pending: '승인 대기', approved: '승인됨(실행 결과 없음)', rejected: '돌려보냄', cancelled: '요청 취소', expired: '시한 지남', executed: '실행됨', failed: '실행 실패',
+  pending: '승인 대기', approved: '승인됨(실행 결과 아직 없음)', rejected: '돌려보냄', cancelled: '요청 취소', expired: '시한 지남', executed: '실행됨', failed: '실행 실패',
 });
 export const APPROVAL_STATUS_TONE = Object.freeze({ pending: 'warn', approved: 'warn', rejected: 'muted', cancelled: 'muted', expired: 'muted', executed: 'ok', failed: 'bad' });
 
@@ -272,11 +275,17 @@ export function guardSaveText(r, diff) {
   return finiteNum(r?.changed) === 0 ? '바뀐 것이 없습니다.' : `보호 장치를 저장했습니다${done ? ` — ${done}` : ''}.`;
 }
 
-/** 승인 요청이 실행할 내용(요청 본문 — 비밀 없음: 이름 · 지문 · 폴더만). 모르는 종류는 빈 글자. */
-export function approvalDetail(req, corpName = (x) => x) {
+/**
+ * 승인 요청이 실행할 내용(요청 본문 — 비밀 없음: 이름 · 종류 · 지문 · 폴더 · 허용 기능). 모르는 종류는 빈 글자.
+ * 승인하는 사람이 보는 것 = 요청 지문(digest)에 묶인 것이다 — 허용 기능이 본문에 없으면(예전 요청) 지어내지 않고 적지 않는다.
+ */
+export function approvalDetail(req, corpName = (x) => x, catalog = []) {
   const p = req?.payload && typeof req.payload === 'object' ? req.payload : {};
   switch (req?.kind) {
-    case 'ssh-key-activate': return `키 ${p.name || '—'} · 지문 ${shortFp(p.fingerprint)} · 폴더 ${folderText(p, corpName)} — 승인하면 이 키가 접속에 쓰이기 시작합니다`;
+    case 'ssh-key-activate': {
+      const feat = p.features === null || Array.isArray(p.features) ? ` · 쓸 수 있는 기능 ${featuresText(p.features, catalog)}` : '';
+      return `키 ${p.name || '—'}${p.algo ? ` · ${p.algo}` : ''} · 지문 ${shortFp(p.fingerprint)} · 폴더 ${folderText(p, corpName)}${feat} — 승인하면 이 키가 접속에 쓰이기 시작합니다`;
+    }
     case 'ssh-key-rotate': return `옛 키 ${p.fromName || p.from || '—'} → 새 키 ${p.toName || p.to || '—'} — 옛 키를 쓰는 서버 · 공통 계정을 새 키로 옮기고 옛 키를 퇴역시킵니다(서버의 authorized_keys 는 바꾸지 않습니다)`;
     case 'ssh-key-delete': return `키 ${p.name || '—'} · 지문 ${shortFp(p.fingerprint)} — 쓰는 곳이 없을 때만 지워집니다`;
     case 'ssh-corp-resume': return `${corpName(p.corp)} — 이 법인의 키 접속을 다시 엽니다`;
@@ -288,12 +297,21 @@ export function approvalDetail(req, corpName = (x) => x) {
     default: return '';
   }
 }
+/**
+ * 승인 대기 키에 살아 있는 등록 요청 — 있으면 그 요청을 돌려보내야(취소해야) 키가 지워지고, 없으면(요청 뒷정리가 실패해 남은 키) 키 폴더에서 바로 지울 수 있다
+ * (서버 `service.deleteKeyReq` 와 같은 기준 — 최종 판정은 서버). 없으면 null.
+ */
+export function pendingKeyRequest(view, keyId) {
+  if (!keyId) return null;
+  return splitApprovals(view?.approvals).pending.find((r) => r.kind === 'ssh-key-activate' && r.target === keyId) || null;
+}
+
 /** 끝난 요청의 결과 한 줄(실패 사유 · 메모). */
 export function approvalOutcome(r) {
   if (!r) return '';
   if (r.status === 'failed') return r.result?.reason || '실행하지 못했습니다(다시 하려면 새로 요청합니다)';
   if (r.status === 'expired') return '승인되지 않은 채 시한이 지났습니다';
-  if (r.status === 'approved') return '실행 결과가 적히지 않았습니다 — 실제로 바뀌었는지 화면에서 확인하세요';
+  if (r.status === 'approved') return '실행 결과가 아직 적히지 않았습니다(실행 중이거나 그 사이 포탈이 멈춤) — 그대로면 얼마 뒤 실행 실패(중단)로 확정됩니다';
   return r.note || '';
 }
 /** 키 교체(회전) 결과 문구 — 수를 모르면 ‘—’(단위 없이). */
@@ -349,8 +367,11 @@ export function keyLoginRow(r, meta = {}) {
   if (row.restricted === true) parts.push(`출발지 제한 적용${row.fromIp ? `(${row.fromIp})` : ''} · 포워딩 금지`);
   else if (row.line === 'added') parts.push('서버 쪽 제한 없이 넣음(보호 장치 꺼짐)');
   else if (meta?.restrict === true) parts.push('있던 줄이라 서버 쪽 제한을 새로 붙이지 않음');
-  if (row.bound === true) parts.push('이 서버의 쓰는 키로 고정');
+  // bound = 이 서버가 이 키를 쓰게 됐다(이미 쓰던 서버 — 법인 기본 키를 따르는 서버 포함 — 는 그대로 둔다: ‘고정’ 이라고 말하지 않는다).
+  if (row.bound === true) parts.push('이 서버가 이 키를 쓰도록 설정됨');
+  // passwordRemoved: true = 지움 · null = 지울 것이 없었음(서버 항목에 저장된 비밀번호 없음) · false = 지우지 못함(사유는 note)
   if (row.passwordRemoved === true) parts.push('저장 비밀번호 삭제');
+  else if (row.passwordRemoved === null && meta?.removePassword === true) parts.push('지울 저장 비밀번호 없음');
   if (finiteNum(row.oldRemoved) != null) parts.push(`옛 키 줄 ${row.oldRemoved}개 삭제`);
   if (finiteNum(row.oldUnmarked) > 0) parts.push(`표식 없는 옛 키 줄 ${row.oldUnmarked}개는 남김(사람이 넣은 줄 — 직접 지우세요)`);
   if (row.note) parts.push(String(row.note));
@@ -384,6 +405,40 @@ export function jobSummary(job) {
   const ok = results.filter((r) => r && r.ok === true).length;
   const total = finiteNum(job?.total);
   return { ok, fail: results.length - ok, done: results.length, total, left: total == null ? null : Math.max(0, total - results.length), running: job?.running === true, current: String(job?.current || '') };
+}
+
+/** 결과 글자별 개수 한 줄(‘완료 3 · 실패 1’) — 처음 나온 순서대로. 빈 목록은 ''. */
+export function tallyText(labels) {
+  const m = new Map();
+  for (const l of Array.isArray(labels) ? labels : []) { const k = String(l || ''); if (k) m.set(k, (m.get(k) || 0) + 1); }
+  return [...m].map(([k, n]) => `${k} ${n}`).join(' · ');
+}
+
+/** 키 로그인 설정 창의 ‘서버 쪽 제한’ 줄 — 보호 장치 설정을 읽기 전용으로 보인다(요청마다 고르는 값이 아니다). 못 받은 값을 켬 · 끔으로 지어내지 않는다. */
+export function restrictLineText(guards) {
+  const g = guards && typeof guards === 'object' ? guards : null;
+  if (!g || typeof g.serverRestrict !== 'boolean') return '설정을 받지 못했습니다 — 서버가 보호 장치 설정대로 넣습니다(결과 줄에 적용 여부가 나옵니다).';
+  if (g.unreadable) return '상태 파일을 읽지 못해 켠 것으로 봅니다 — 넣는 줄에 출발지 제한 · 포워딩 금지를 붙입니다.';
+  return g.serverRestrict
+    ? '켬 — 넣는 줄에 ‘이 포탈 주소에서 올 때만’ · ‘포워딩 금지’ 를 붙입니다(키 보안 › 보호 장치의 설정 — 여기서 고르지 않습니다).'
+    : '끔 — 제한 없이 넣습니다(키 보안 › 보호 장치에서 켭니다).';
+}
+
+/**
+ * ‘저장된 인증 사용’ 을 골랐을 때의 주의 — 서버는 **지금 설정된 접속 수단**으로 첫 접속을 한다(키로 설정돼 있으면 그 키 — 비밀번호로 넘어가지 않는다).
+ *  · 키로 설정돼 있는데 그 키가 서버에 들어 있다고 확인된 적이 없는 서버 → 저장된 인증으로는 거부될 수 있다(한 번 · 재시도 없음).
+ *  · 저장된 인증 수단이 없는 서버 → 1회 비밀번호가 있어야 한다.
+ * 화면이 접속 가능 여부를 판정하는 것은 아니다(마지막으로 읽은 authorized_keys 기준의 안내 — 실제 결과는 서버가 준다).
+ * @returns {string[]} 안내 문장(없으면 빈 배열)
+ */
+export function savedAuthHints(targets) {
+  const list = Array.isArray(targets) ? targets.filter(Boolean) : [];
+  const byKey = list.filter((s) => (s.keyMode === 'pinned' || s.keyMode === 'corp-default') && s.installed?.hasKey !== true).length;
+  const none = list.filter((s) => s.keyMode === 'none').length;
+  const out = [];
+  if (byKey) out.push(`서버 ${byKey}대는 지금 키로 접속하도록 설정돼 있는데, 그 키가 서버에 들어 있는지 확인된 적이 없습니다 — 들어 있지 않으면 저장된 인증으로는 접속이 거부됩니다(다시 시도하지 않습니다). 그런 서버는 ‘지금 입력’ 으로 비밀번호를 넣으세요.`);
+  if (none) out.push(`서버 ${none}대는 저장된 인증 수단이 없습니다 — ‘지금 입력’ 으로 비밀번호를 넣어야 합니다.`);
+  return out;
 }
 
 /** 키 로그인 설정 대상으로 고를 수 있는 서버인가 — 엣지가 수집하는 서버는 그 엣지 포탈에서 한다(키는 법인 밖으로 나가지 않는다). */

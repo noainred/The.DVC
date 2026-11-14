@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **330개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **331개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-14)
@@ -28,6 +28,7 @@
 | `alerts-state.json` | 설정 | Alerting — evaluates threshold/condition rules against the current snapshot on | ✅ | ✅ | ✅ | alerts.js |
 | `alerts.json` | 설정 | Alerting — evaluates threshold/condition rules against the current snapshot on | ✅ | ✅ | ✅ | alerts.js |
 | `api-keys.json` | 설정 | 외부 연동 API 키 저장소 (v2.562) — 다른 포탈이 이 포탈의 조회 API 를 읽을 수 있게 하는 인증. | ✅ | ✅ | ✅ | publicapi/keys.js |
+| `approvals.json` | 설정 | **두 사람 승인**(요청 → 다른 설정 소유자의 승인 → 실행) 공용 저장소(v3.10.0 · 설계 docs/design/ssh-access §8 S10). | ✅ | ✅ | ✅ | approval/store.js |
 | `attach-settings.json` | 설정 | 첨부 전체 상한(v2.889 — maxTotalMB, 기본 2048 · 1~102400. 비밀 없음) | ✅ | ✅ | ✅ | attach/store.js |
 | `attachments` | 디렉터리 | 위키 문서 · 이슈 첨부 파일(v2.889 · 시안 ⑨⑩ '첨부' · C-4). | ✅ | ✅ | ✅ | attach/store.js |
 | `attachments.json` | 설정 | 위키 문서 · 이슈 첨부 목록(v2.889 — 원래 이름 · 주인(W-번호 · ISS-번호) · 크기 · sha256 · 올린 사람. 비밀 없음) | ✅ | ✅ | ✅ | attach/store.js |
