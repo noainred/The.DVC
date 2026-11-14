@@ -171,7 +171,7 @@ async function fakeSshd() {
   const home = fs.mkdtempSync(path.join(TMP, 'sshkl-home-'));
   TMP_DIRS.push(home);
   const akFile = path.join(home, '.ssh', 'authorized_keys');
-  const st = { password: null, clientIp: '127.0.0.1', ipQueue: [], offerKbd: false, kbdPrompts: null, noSshConnection: false, fakeOut: null, onConn: null, gate: null, rejectExec: null, dropExec: null, path: null, banner: null, noPassword: false, seen: [], execs: [], conns: 0 };
+  const st = { password: null, clientIp: '127.0.0.1', ipQueue: [], offerKbd: false, kbdPrompts: null, forceCmd: null, noSshConnection: false, fakeOut: null, onConn: null, gate: null, rejectExec: null, dropExec: null, path: null, banner: null, noPassword: false, seen: [], execs: [], conns: 0 };
   const keyAllowed = (data, ip) => {
     let text = '';
     try { text = fs.readFileSync(akFile, 'utf8'); } catch { return null; }
@@ -237,7 +237,9 @@ async function fakeSshd() {
         if (st.gate) await st.gate(info.command, conn);
         const env = { HOME: home, PATH: st.path || process.env.PATH, ...(st.noSshConnection ? {} : { SSH_CONNECTION: `${ip} 50000 127.0.0.1 22` }) };
         const drop = !!st.dropExec?.(info.command, conn);
-        const p = spawn('bash', ['-c', forcedCmd || info.command], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+        // st.forceCmd(conn) — 그 연결의 exec 를 강제 명령으로(그 키 줄에 command= 가 붙은 서버 흉내 — 우리가 더한 줄이 아니라 다른 경로로 강제되는 경우 · 3회차 E3-5)
+        const forced2 = typeof st.forceCmd === 'function' ? st.forceCmd(conn) : null;
+        const p = spawn('bash', ['-c', forcedCmd || forced2 || info.command], { env, stdio: ['ignore', 'pipe', 'pipe'] });
         if (!drop) { p.stdout.on('data', (d) => stream.write(d)); p.stderr.on('data', (d) => stream.stderr.write(d)); }
         else { p.stdout.resume(); p.stderr.resume(); }
         p.on('error', () => { stream.exit(127); stream.end(); });
@@ -254,7 +256,7 @@ async function fakeSshd() {
     writeAk(text) { fs.mkdirSync(path.dirname(akFile), { recursive: true, mode: 0o700 }); fs.writeFileSync(akFile, text, { mode: 0o600 }); },
     readAk() { return fs.existsSync(akFile) ? fs.readFileSync(akFile, 'utf8') : null; },
     /** 인증 시도 · 명령 기록을 비우고 연결 번호를 처음부터 다시 센다. */
-    clear() { st.seen.length = 0; st.execs.length = 0; st.conns = 0; st.ipQueue.length = 0; st.onConn = null; st.gate = null; st.rejectExec = null; st.dropExec = null; st.path = null; st.banner = null; },
+    clear() { st.seen.length = 0; st.execs.length = 0; st.conns = 0; st.ipQueue.length = 0; st.onConn = null; st.gate = null; st.forceCmd = null; st.rejectExec = null; st.dropExec = null; st.path = null; st.banner = null; },
     /** 비밀번호가 **실제로 서버에 간** 시도(password 방식 · 프롬프트에 답한 keyboard-interactive). 프롬프트 없이 거절된 방식 문의는 비밀번호를 싣지 않는다. */
     passwordTries() { return st.seen.filter((x) => x.password !== undefined); },
     keyTries() { return st.seen.filter((x) => x.method === 'publickey'); },
@@ -2115,7 +2117,7 @@ test('⑪-f passwordOnly 대화형은 처음 나온 가리는 칸(echo=false) �
   const jo = (await runLogin({ servers: [svo], keyId: K.id, oncePassword: once, by: 'own' })).job;
   assert.deepEqual(jo.results.map((r) => r.code), ['no-password-method'], JSON.stringify(jo.results));
   assert.ok(So.st.seen.every((x) => !(x.answers || []).includes(once)), '비밀번호를 어느 칸에도 보내지 않았다');
-  assert.match(rd.reason, /비밀번호를 보내지 않았습니다/);
+  assert.equal(rd.reason, '서버가 비밀번호 로그인을 받지 않습니다(허용 방식: publickey) — 비밀번호를 보내지 않았습니다.', '키 읽기도 서버가 준 상세(3회차 E3-6 — 고정 문구 ‘키만 받음’)');
 });
 
 test('⑫ 키 접속 확인이 실패하면(출발지 제한 불일치) — key-login-failed · 더한 줄을 지운다(rolledBack) · 남의 줄은 그대로 · 출발지 제한 안내 · 제한을 빼고 다시 넣지 않는다 · 이미 있던 줄은 지우지 않는다', async () => {
@@ -3983,6 +3985,7 @@ test('㉒-b 키 접속 확인은 이번 접속의 nonce 를 되돌려 받아야 
   assert.deepEqual([r.ok, r.code, !!r.bound, !!r.passwordRemoved], [false, 'key-login-failed', false, false], JSON.stringify(r));
   assert.match(r.reason, /포탈이 보낸 명령이 돌지 않았습니다\(그 키 줄에 강제 명령\(command=\)이 있는 등\)/);
   assert.match(r.reason, /이 키로는 수집할 수 없어 묶지 않았습니다\. /, '문장이 끝난 뒤 덧붙는다(마침표 — 2회차 반증 문구)');
+  assert.doesNotMatch(r.reason, /출발지 제한/, '로그인은 됐다(강제 명령) — 출발지 제한 안내는 키가 거부됐을 때만(3회차 E3-5)');
   assert.deepEqual([rawOf(sv.id).keyRef, rawOf(sv.id).password], [undefined, pw], '묶지 않았다 · 저장 비밀번호를 지우지 않았다(예전: uname 이 성공으로 끝나 묶고 지웠다)');
   assert.ok(S.st.execs.some((x) => x.forced === '/bin/echo hi'), '전제 — 강제 명령이 돌았다');
   assert.equal(S.readAk(), `${OTHER}\ncommand="/bin/echo hi",no-pty ${K.pub} portal-ssh:${K.id}\n`, '관리자 줄 그대로');
@@ -3990,6 +3993,14 @@ test('㉒-b 키 접속 확인은 이번 접속의 nonce 를 되돌려 받아야 
   S.writeAk(`${OTHER}\ncommand="echo '##KLV 000000000000 Linux'",no-pty ${K.pub} portal-ssh:${K.id}\n`); S.clear();
   const rf = (await runLogin({ servers: [sv], keyId: K.id, removePassword: true, by: 'own' })).job.results[0];
   assert.deepEqual([rf.ok, rf.code, rawOf(sv.id).keyRef, rawOf(sv.id).password], [false, 'key-login-failed', undefined, pw], JSON.stringify(rf));
+  // 우리가 줄을 더했고(출발지 제한) 키 로그인은 됐지만 명령이 강제됐다 → 더한 줄은 되돌리고 · 출발지 제한 안내는 붙이지 않는다(거부가 아니다 — 3회차 E3-5)
+  const S3 = await fakeSshd(); S3.st.password = pw; S3.writeAk(`${OTHER}\n`);
+  const sv3 = mkServer('bm-kl-forced-added', S3, { password: pw });
+  S3.st.forceCmd = (conn) => (conn === 2 ? 'echo hi' : null);
+  const r3 = (await runLogin({ servers: [sv3], keyId: K.id, removePassword: true, by: 'own' })).job.results[0];
+  assert.deepEqual([r3.ok, r3.code, r3.line, r3.rolledBack, rawOf(sv3.id).password], [false, 'key-login-failed', 'added', true, pw], JSON.stringify(r3));
+  assert.doesNotMatch(r3.reason, /출발지 제한/, JSON.stringify(r3));
+  assert.equal(S3.readAk(), `${OTHER}\n`, '더한 줄을 지웠다');
   // 대조 — 강제 명령이 없는 서버에서는 배너가 섞여도 확인된다(nonce 줄을 찾는다)
   const S2 = await fakeSshd(); S2.st.password = pw;
   const sv2 = mkServer('bm-kl-nonce-banner', S2, { password: pw });
@@ -4187,4 +4198,44 @@ test('㉓-e 서버에서 키 읽기 · 대화형 칸 고르기(2회차 반증 R2
   //    글이 없는 가리는 칸 하나(옛 sshd) → 거기에 · 가리는 OTP 칸만 → 보내지 않음(no-password-method)
   assert.deepEqual(await trial([[{ prompt: '', echo: false }]]), { seen: ['0.0:PW'], code: '' });
   assert.deepEqual(await trial([[{ prompt: 'Duo passcode: ', echo: false }]]), { seen: ['0.0:""'], code: 'SSH_NO_PASSWORD_METHOD' });
+});
+
+/* ── 3회차 축 E(4c5695ac) 회귀 ──────────────────────────────────────────── */
+test('㉔ 3회차 축 E — 홈 · ~/.ssh 를 따라갈 수 없으면 바꾸는 스크립트는 fail noaccess(‘없음’ 이 아니다 · 줄 그대로) · 키 로그인 대상이 상한을 넘으면 OTP 앞 400 too-many · 화면에 상한 값(limits) · vCenter 목록 밖 법인도 화면 법인 목록에(missing)', async () => {
+  // ① noaccess(실제 bash · dash) — root 면 setpriv uid 65534 + root 소유 0700 ~/.ssh, 비 root 면 ~/.ssh 0600(x 없음)
+  const line = KL.buildKeyLine({ publicKey: BPUB, keyId: BID });
+  const body = `${OTHER}\n${line}\n`;
+  assert.match(KL.failText('noaccess'), /홈 또는 ~\/\.ssh 폴더를 이 계정으로 열 수 없어\(권한\) authorized_keys 가 있는지 알 수 없습니다/);
+  for (const shell of SHELLS) {
+    for (const [name, sc] of [['거두기', AKS.removeScript({ publicKey: BPUB, keyId: BID })], ['되돌림', AKS.rollbackScript({ line })], ['넣기', AKS.installScript({ publicKey: BPUB, keyId: BID, line })]]) {
+      const ro = roHome(body, { sshMode: RUN_AS_ROOT ? 0o700 : 0o600 });
+      const r = shRo(sc, ro, shell);
+      assert.deepEqual([r.m, r.code], [{ kind: 'fail', why: 'noaccess' }, 3], `${shell} ${name} (${ro.how}): ${r.out}${r.err}`);
+      if (!RUN_AS_ROOT) fs.chmodSync(path.join(ro.h, '.ssh'), 0o700);
+      assert.equal(fs.readFileSync(path.join(ro.h, '.ssh', 'authorized_keys'), 'utf8'), body, '줄 그대로(예전: 거두기가 ‘파일 없음’ 으로 끝났다)');
+      if (!RUN_AS_ROOT) fs.chmodSync(path.join(ro.h, '.ssh'), 0o600);
+    }
+  }
+  // ② 화면 — 상한 값 · vCenter 목록 밖 법인
+  const sGhost = mkServer('bm-ghost-corp-24', null, { host: '10.9.24.1', password: 'x', vcenterId: 'vcGhost24' });
+  try {
+    const v = await SVC.buildView();
+    assert.deepEqual(v.limits, { keyLoginServers: KL.MAX_JOB_SERVERS, revokeServers: KL.MAX_REVOKE_SERVERS });
+    const g = v.corps.find((c) => c.id === 'vcGhost24');
+    assert.deepEqual(g && { id: g.id, name: g.name, dc: g.dc, missing: g.missing }, { id: 'vcGhost24', name: 'vcGhost24 (vCenter 목록에 없음)', dc: '', missing: true }, JSON.stringify(g));
+    assert.equal(v.corps.find((c) => c.id === 'vcA')?.missing, undefined, 'vCenter 목록의 법인에는 missing 이 없다');
+  } finally { assert.ok(BM.removeBmServer(sGhost.id).ok); }
+  // ③ 키 로그인 대상 상한(자식 프로세스 — 서버 101대) — OTP 앞 사전 검사가 400 too-many(예전: OTP 를 쓴 뒤 시작 함수가 거절)
+  const j = subRun({ owners: 'own', users: [{ username: 'own', role: 'admin', totpEnabled: true, totpSecret: generateSecret() }], code: `
+    const VAULT = await imp('security/secretVault.js'); VAULT.saveSecretsPolicy({ mode: 'encrypted', level: 1 });
+    const { store } = await imp('store.js'); store.snapshot = { ...store.get(), vcenters: [{ id: 'vcA', name: 'A' }] };
+    const KS = await imp('bmusage/onboard/keyStore.js'); const BM = await imp('bmstor/registry.js'); const SVC = await imp('sshaccess/service.js'); const KL = await imp('sshaccess/keyLogin.js');
+    const k = KS.addKey({ name: 'lim-key', privateKey: F.ed25519Key().pem, folderCorp: 'vcA', features: ['bm-usage'] }, { by: 'x' });
+    const list = [];
+    for (let i = 0; i < KL.MAX_JOB_SERVERS + 1; i += 1) { const r = BM.saveBmServer({ name: 'lim' + i, host: '10.77.' + Math.floor(i / 200) + '.' + (i % 200 + 1), port: 22, username: 'mon', mounts: ['/'], vcenterId: 'vcA', password: 'x' }); list.push({ id: r.server.id, addr: SVC.serverKeyCandidates(r.server.id).server.addr }); }
+    const over = await SVC.keyJobPrecheck('key-login', k.key.id, { servers: list });
+    const at = await SVC.keyJobPrecheck('key-login', k.key.id, { servers: list.slice(0, KL.MAX_JOB_SERVERS) });
+    console.log(JSON.stringify({ max: KL.MAX_JOB_SERVERS, over: over && [over.code, over.status, over.reason], at }));` });
+  assert.deepEqual([j.over?.slice(0, 2), j.at], [['too-many', 400], null], JSON.stringify(j));
+  assert.match(j.over[2], new RegExp(`한 번에 ${j.max}대까지입니다`));
 });
