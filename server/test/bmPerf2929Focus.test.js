@@ -429,3 +429,20 @@ test('V12 · V13 비관리자 응답 — 변경 이벤트 · 구간 비교의 �
   assert.equal(h.since.chrony, rcv, '엣지 since(미래)는 수신 시각으로(상세)');
   assert.equal(PS.healthOf({ cells: { chrony: { code: 'warn' } }, since: { chrony: rcv + 30 * 86_400_000 } }, rcv, { full: false }).cells.chrony.since, rcv, '봉투 요약도');
 });
+
+test('v3.9.0 SSH 공용 접속(점검 B-2) — 집중 모니터링은 분마다 자격을 다시 해석하고 그 결과로 접속한다(세션 시작 때 푼 키를 끝까지 쓰지 않는다) · 해석이 막으면 그 분은 cred-config 결측', async (t) => {
+  if (!sqlite) return t.skip('node:sqlite 없음');
+  F._resetFocusForTest();
+  const h = harness();
+  const seen = []; let n = 0;
+  h.deps.refreshOsHost = async (o) => { n += 1; return n === 2 ? { ...o, password: '', authError: '법인 키 사용 중지', authErrorCode: 'corp-stopped' } : { ...o, tick: n }; };
+  h.deps.collectOs = async (o) => { seen.push(o); if (o.authError) return { ok: false, error: o.authError, authErrorCode: o.authErrorCode }; return { ok: true }; };
+  F._setFocusDepsForTest(h.deps);
+  const r = await F.startFocusLocal({ target: tgt('R1', 'vcR'), reason: '재해석 확인', by: 'op' });
+  assert.equal(r.code, 'ok', JSON.stringify(r));
+  await h.fireAll();
+  assert.equal(n, 3, '분마다 한 번');
+  assert.deepEqual(seen.map((o) => o.tick ?? o.authErrorCode), [1, 'corp-stopped', 3], '수집기는 다시 해석한 대상을 받는다');
+  const g = await F.getFocusLocal({ key: 'R1', id: r.id });
+  assert.equal(g.samples[1].missOs, 'cred-config', '자격 해석이 막은 분은 SSH 오류가 아니라 cred-config');
+});

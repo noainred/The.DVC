@@ -231,9 +231,11 @@ test('④ authorized_keys 해석 — 옵션(따옴표 안 공백) · 설명 · �
   assert.deepEqual(r.keys.map((k) => [k.fingerprint, k.comment, k.portal, k.hasOptions]), [[ED_A.fingerprint, 'ops@bastion', false, false], [ED_S.fingerprint, 'portal-ssh:vcA:bm-a1', true, true]]);
   assert.deepEqual(AK.parseReadOutput('##AK missing\n'), { ok: true, present: false, keys: [], bad: 0, truncated: 0 });
   assert.equal(AK.parseReadOutput('Welcome banner\n##AK present\n').ok, false, '표지 줄이 첫 줄이 아니면 읽지 못한 것');
-  const time = (n) => { const s = `from="${'a'.repeat(n)} ssh-ed25519 AAAA`; const t0 = process.hrtime.bigint(); AK.parseAuthorizedKeys(s); return Number(process.hrtime.bigint() - t0); };
-  time(2000); const a = time(4000); const b = time(16000);
-  assert.ok(b < a * 16, `선형(4배 입력 → ${(b / a).toFixed(1)}배)`);
+  // 한 번 잰 값은 마이크로초라 다른 작업과 겹치면 흔들린다 — 크기마다 여러 번 재 가장 작은 값(잡음이 더하기만 한다)으로 비교한다.
+  const time1 = (n) => { const s = `from="${'a'.repeat(n)} ssh-ed25519 AAAA`; const t0 = process.hrtime.bigint(); for (let i = 0; i < 20; i += 1) AK.parseAuthorizedKeys(s); return Number(process.hrtime.bigint() - t0); };
+  const time = (n) => Math.min(...Array.from({ length: 9 }, () => time1(n)));
+  time(2000); const a = time(3000); const b = time(12000);
+  assert.ok(b < a * 10, `선형(4배 입력 → ${(b / a).toFixed(1)}배 — 이차면 16배)`);
 });
 
 /* ── 서버의 키 고르기 · 들어 있는 키 읽기(가짜 sshd) ───────────────────── */
