@@ -525,7 +525,7 @@ describe('SSH 공용 접속 화면 — 규약', () => {
     expect(src).toMatch(/e\?\.status === 404 \|\| e\?\.status === 403 \|\| fails\.current >= JOB_POLL_MAX_FAILS/);
   });
   it('2단계 점검 E-2 · E-6 — 작업은 화면을 다시 열어도 이어 보고(v.jobs) · 이미 끝난 작업에 다시 붙으면 다시 읽지 않고 · 도는 동안 멈추기(OTP 없음)', () => {
-    expect(src).toMatch(/const lastRevoke = v\.jobs\?\.revoke\?\.id \|\| '';/);
+    expect(src).toMatch(/v\.jobs\?\.revokes/);   // 1시간 안의 거두기 작업 목록(키마다) — 다른 사람이 돌린 거두기도 칸으로
     expect(src).toMatch(/useEffect\(\(\) => \{ if \(lastRevoke\) addRevokeJob\(lastRevoke\); \}, \[lastRevoke, addRevokeJob\]\);/);
     expect(src).toMatch(/\{!kl && v\.jobs\?\.install\?\.id && <JobPanel key=\{v\.jobs\.install\.id\} jobId=\{v\.jobs\.install\.id\} kind="key-login"/);
     // 거두기는 키마다 따로 돈다 — 칸을 여럿(작업 id 마다 하나 · key={id})
