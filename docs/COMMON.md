@@ -5,7 +5,7 @@
 
 - 생성: `node scripts/common-doc.mjs` · 최신 여부: `node scripts/common-doc.mjs --check`
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다. 설명을 고치려면 그 모듈의 **머리 주석 첫 단락**을 고친다.
-- 훑은 소스 4099개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
+- 훑은 소스 4101개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
 
 ## 읽는 법 · 한계
 
@@ -77,18 +77,18 @@
 | `postNo503Retry.js` | 엣지가 중앙으로 **큰 본문**을 올릴 때 503 은 호출 안에서 다시 보내지 않는 전송 헬퍼. | `postNo503Retry` `fetchNo503Retry` | 8 | 7 | 3 |
 | `tokenFingerprint.js` | 토큰 '지문'(v2.560, 순수 모듈). | `tokenFingerprint` `tokenFingerprintParts` `sameToken` `tokenGroupKey` | 8 | 6 | 4 |
 | `xlsxWorkerRun.js` | 엑셀 조립·직렬화를 워커 스레드에서 돌리는 실행기(v2.799, 공용). | `runXlsxWorker` `serveXlsxWorker` | 8 | 3 | 0 |
-| `httpsServer.js` | 포탈이 **직접 TLS 로** 받을 수 있게 하는 리스너(2026-10-09 검토 S-09, 그룹 J). | `tlsListenConfig` `loadTlsMaterial` `tlsListenerStatus` `advertisedListen` `listeningPortalPorts` `_resetHttpsServerState` 외 1 | 7 | 5 | 2 |
-| `ping.js` | ICMP ping 유틸 — OS의 ping CLI를 호출해 도달성/RTT를 반환한다(raw 소켓 불필요). Linux/Windows 모두 지원. 모든 실패는 격리되어 { alive:false }로 떨어진다. | `pingProbeMode` `pingProbeStats` `parsePingOutput` `pingOne` `tcpConnect` `tcpProbeMany` 외 1 | 7 | 5 | 2 |
+| `httpsServer.js` | 포탈이 **직접 TLS 로** 받을 수 있게 하는 리스너(2026-10-09 검토 S-09, 그룹 J). | `tlsListenConfig` `expiryWarning` `loadTlsMaterial` `tlsListenerStatus` `advertisedListen` `listeningPortalPorts` 외 2 | 7 | 5 | 3 |
+| `ping.js` | ICMP ping 유틸 — OS의 ping CLI를 호출해 도달성/RTT를 반환한다(raw 소켓 불필요). Linux/Windows 모두 지원. 모든 실패는 격리되어 { alive:false }로 떨어진다. | `pingProbeMode` `pingProbeStats` `parsePingOutput` `pingOne` `tcpConnect` `tcpProbeMany` 외 1 | 7 | 5 | 3 |
 | `readPrefix.js` | 응답 본문을 **앞부분만** 읽는다(v2.603 감사 SEC2603-03). | `readBodyPrefix` | 7 | 7 | 0 |
 | `scanJournal.js` | 실행 중 스캔 기록 + 재시작 뒤 자동 재개(v2.737). | `resumeDelayMs` `scanStarted` `scanProgress` `scanFinished` `scanQueued` `scanQueuedMany` 외 21 | 7 | 7 | 9 |
 | `activityLog.js` | 수집 '작업 로그' 링버퍼 **공용 팩토리**(v2.516). | `createActivityLog` | 6 | 5 | 4 |
 | `bulkText.js` | 대량 등록용 **자유텍스트** 파싱/직렬화(순수, v2.513). | `splitCells` `splitCellsRaw` `splitLine` `parseKeyed` `parseFreeRows` `rowsToFreeText` 외 3 | 6 | 6 | 3 |
 | `central404.js` | 엣지 설정 pull 의 404 판정(v2.600 감사 EDGE2600-06 · v2.613 DEPS2613-01 에 agent/ → util/ 로 이동, 옛 경로는 재수출). | `classifyCentral404` `classifyCentral404Body` | 6 | 2 | 1 |
 | `collectRequestQueue.js` | 엣지 위임 '지금 수집' 요청 큐의 공용 코어(v2.590 P16 · v2.591 재설계). | `createCollectRequestQueue` `SEEN_MAX` | 6 | 5 | 7 |
-| `bulkRun.js` | 대량 가져오기의 **실제 연결 테스트** 실행/진행률 보관(v2.513). | `startBulkTest` `publicRun` `passedLines` `isBusy` `_resetForTest` | 5 | 1 | 5 |
+| `bulkRun.js` | 대량 가져오기의 **실제 연결 테스트** 실행/진행률 보관(v2.513). | `startBulkTest` `publicRun` `passedLines` `isBusy` `_resetForTest` | 5 | 1 | 6 |
 | `hostPort.js` | 등록 주소(`https://host:port/…`)에서 접속용 host·port 를 뽑는 공용 파서(v2.603 LEFT2603-02). | `splitHostPort` `haproxyAddress` | 5 | 4 | 1 |
 | `regions.js` | 지역(region) 목록 — **단일 소스**(v2.575 IMP-10). | `REGIONS` `default` | 5 | 4 | 1 |
-| `smtp.js` | 의존성 없는 최소 SMTP 클라이언트 (v2.454). | `headerSafeText` `normalizeAddresses` `encodeHeaderWord` `formatDisplayName` `buildMime` `dotStuff` 외 8 | 5 | 4 | 6 |
+| `smtp.js` | 의존성 없는 최소 SMTP 클라이언트 (v2.454). | `headerSafeText` `normalizeAddresses` `encodeHeaderWord` `formatDisplayName` `buildMime` `dotStuff` 외 8 | 5 | 4 | 7 |
 | `waitDrain.js` | 쓰기 백프레셔 대기 공용(v2.783 점검 Q5 — O-B4 · 형제 스윕). | `waitDrain` | 5 | 2 | 1 |
 | `credFingerprint.js` | 자격증명 '지문'(v2.528, 순수 모듈). | `credFingerprint` `credFingerprintParts` | 4 | 4 | 1 |
 | `xlsxSheetPrOrder.js` | exceljs 가 쓰는 시트 속성(`<sheetPr>`)의 하위 요소 순서를 OOXML 스키마 순서로 바로잡는다(v2.799.1). | `ensureSheetPrOrder` `sheetPrOrderState` | 4 | 4 | 1 |
