@@ -1750,7 +1750,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | `write` | 9 | **SSH 공용 접속 쓰기 묶음**(v3.10.0) = 관리자 → 설정 소유자 등급 → `fullRW` → `pre(사전 검사)` → `reauth`(OTP 마지막). 사전 검사가 거절하면 OTP 를 쓰지 않는다. |
 | `commenters` | 8 | **admin·operator 또는 권한 키 `issues.request`**(v2.881 위키 — 댓글 · 지켜보기. 데모 계정 제외 · 문서의 스페이스가 쓰기 범위 안이어야 한다 — 저장소 `addComment`). |
 | `authMiddleware` | 8 | 세션 토큰 검증(`resolveTokenUser`). 대부분의 `/api/*` 는 마운트에서 이미 걸리고, 여기 보이는 것은 **라우터가 따로 건** 경우다(`/api/auth` 안의 admin 라우트 등). |
-| `revokingFirst` | 6 | ⚠ **이 생성기가 뜻을 모르는 이름입니다** — 소스를 열어 확인하고 `scripts/api-doc.mjs` 의 `GUARD_NOTE` 에 추가하세요. |
+| `revokingFirst` | 6 | **거두는 중인 키 보호**(v3.10.0 — 7b 키 교체의 새 키 · 공통 계정의 기본 키). 그 키를 서버에서 거두는 SSH 공용 접속 작업이 진행 중이면 OTP 를 쓰기 전에 409 `revoking`. |
 | `noDemo` | 4 | **데모(손님) 계정 403**(7b 서버 등록 — `isDemoGuest`). 관리자 게이트 뒤에 붙는 쓰기 거절이고 권한을 넓히지 않는다. |
 | `prefsWrite` | 4 | VM 목록 내보내기 내 저장값 쓰기(v2.798) — **데모 손님 403** · 저장 키는 인증된 계정 이름(본문 값 무시) · 손상 파일이면 503 · 감사 로그. |
 | `templateFleetOnly` | 4 | **전체 범위 계정만**(v2.889 — 위키 관리자 템플릿: 모든 스페이스의 새 문서 화면에 보이는 전 법인 공용 설정). 범위 제한 계정은 403 · 핸들러가 관리자 판본(데모 제외)을 한 번 더 본다. |
@@ -1785,8 +1785,6 @@ Prometheus/OTel 익스포터(선택 토큰).
 | `csvPermIfDownload` | 1 | `csvPerm` 과 같되 **download=1(파일 내보내기)일 때만** 요구한다 — 화면 조회(JSON)는 통과(v2.741 AUTHZ-02 — VMware 구성 백업). |
 | `cancelGate` | 1 | **키 작업 멈추기 게이트**(v3.10.0). 키 로그인 설정 작업을 멈추는 것은 줄이는 방향이라 OTP 없이 통과, **키 거두기 작업을 멈추는 것은 본인 OTP**(`reauth` — 유출 키가 남은 서버에 그대로 남는다). |
 | `csvPermUnlessJson` | 1 | `csvPerm` 과 같되 **format=json(화면의 표·붙여넣기 등록)은 통과**(v2.643 — 성능점검 대상 등록 마법사). |
-
-> ⚠ 뜻을 모르는 게이트 **1개**: `revokingFirst` — 문서가 이 사실을 숨기지 않습니다.
 
 ---
 

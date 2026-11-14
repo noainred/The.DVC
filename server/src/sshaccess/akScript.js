@@ -77,7 +77,7 @@ const HEAD = [
   't0=$(date +%s 2>/dev/null); case "$t0" in ""|0*|*[!0-9]*|?????????????*) t0=0 ;; esac',
   `late() { [ "$t0" -gt 0 ] || return 1; tn=$(date +%s 2>/dev/null); case "$tn" in ""|0*|*[!0-9]*|?????????????*) return 1 ;; esac; [ "$tn" -gt $((t0 + ${SCRIPT_DEADLINE_S})) ]; }`,
   'owns() { [ "$(cat "$lk/owner" 2>/dev/null)" = "$tok" ]; }',
-  'cleanup() { rm -f "$tmp"; if [ -n "$held" ] && owns; then rm -f "$lk/owner"; rmdir "$lk" 2>/dev/null; fi; }',
+  'cleanup() { rm -f "$tmp" 2>/dev/null; if [ -n "$held" ] && owns; then rm -f "$lk/owner"; rmdir "$lk" 2>/dev/null; fi; }',
   'trap cleanup 0; trap \'exit 3\' HUP INT TERM PIPE',
 ];
 /**
@@ -144,7 +144,8 @@ const CHECKS = (needDir) => [
   // 홈 · ~/.ssh 를 이 계정으로 따라갈 수 없으면 파일이 있는지 모른다 — ‘없음’ 이 아니라 실패(3회차 E3-4 — root 소유 0700 ~/.ssh 에서 거두기가 ‘파일 없음’ 으로 끝나고 키 줄이 남았다).
   // 홈이 아예 없는 계정(useradd -M)은 권한 문제가 아니다 — 아래 꼴 검사가 ‘없음’ 으로 답한다(3회차 반증 R3R-5).
   // 홈이 ‘없음’ 인지 ‘따라갈 수 없음’ 인지는 있는 가장 가까운 조상 폴더로 가른다(4회차 E4-4 — 홈의 상위 폴더가 막히면 [ -e ] 도 거짓이라 ‘없음’ 으로 답했다).
-  'noacc() { p="$HOME"; while [ -n "$p" ] && [ ! -e "$p" ]; do q="${p%/*}"; [ "$q" = "$p" ] && break; p="$q"; done; [ -n "$p" ] || p=/; [ ! -x "$p" ]; }',
+  // 그 조상이 폴더가 아니면(홈이 /dev/null · 일반 파일) 권한 문제가 아니다 — ~/.ssh 가 있을 수 없으니 ‘없음’(4회차 B4-1 ②).
+  'noacc() { p="$HOME"; while [ -n "$p" ] && [ ! -e "$p" ]; do q="${p%/*}"; [ "$q" = "$p" ] && break; p="$q"; done; [ -n "$p" ] || p=/; [ -d "$p" ] && [ ! -x "$p" ]; }',
   'if noacc || { [ -d "$d" ] && [ ! -x "$d" ]; }; then echo "##KL fail noaccess"; exit 3; fi',
   ...(needDir ? [
     'mkd=""',
@@ -201,7 +202,7 @@ const COMMIT = [
 export function installScript({ publicKey, keyId, line, replace = false } = {}) {
   const pk = splitPublicKey(publicKey); const mark = markOf(keyId);
   if (!pk || !mark || !safeQ(line) || !line.includes(` ${pk.blob} `) || !line.endsWith(` ${mark}`)) return null;
-  const CLS = `${STRIP} index(t, b) == 0 { next } index(t, m) > 0 { if (t == L) ex++; else if (index(t, ty " ") == 1) un++; else if (t ~ /^from="[0-9A-Fa-f.:]+",no-agent-forwarding,no-port-forwarding,no-X11-forwarding /) sd++; else cu++; next } index(t, pm) > 0 { oi++; next } { um++ } END { printf "%d %d %d %d %d %d %d", NR, ex + 0, un + 0, sd + 0, cu + 0, um + 0, oi + 0 }`;
+  const CLS = `${STRIP} index(t, b) == 0 { next } index(t, m) > 0 { if (t == L) ex++; else if (index(t, ty " ") == 1) un++; else if (t ~ /^from="[0-9A-Fa-f.:]+",no-agent-forwarding,no-port-forwarding,no-X11-forwarding /) sd++; else cu++; next } (index(t, " " pm) > 0 || index(t, "\t" pm) > 0) { oi++; next } { um++ } END { printf "%d %d %d %d %d %d %d", NR, ex + 0, un + 0, sd + 0, cu + 0, um + 0, oi + 0 }`;
   const OLD = `${STRIP} index(t, b) > 0 && index(t, m) > 0 { print $0 }`;
   const DROPM = `${STRIP} index(t, b) > 0 && index(t, m) > 0 { next } { print }`;
   return [
@@ -210,7 +211,7 @@ export function installScript({ publicKey, keyId, line, replace = false } = {}) 
     ...CHECKS(true),
     'cls() {',
     '  st="0 0 0 0 0 0"',
-    `  if [ -e "$f" ]; then st=$(awk -v b="$B" -v m="$M" -v L="$L" -v ty="$TY" -v pm=" ${PORTAL_MARK}k_" '${CLS}' "$f") || { echo "##KL fail read"; exit 3; }; fi`,
+    `  if [ -e "$f" ]; then st=$(awk -v b="$B" -v m="$M" -v L="$L" -v ty="$TY" -v pm="${PORTAL_MARK}k_" '${CLS}' "$f") || { echo "##KL fail read"; exit 3; }; fi`,
     '  set -- $st; nr=$1; ex=$2; un=$3; sd=$4; cu=$5; um=$6; oi=$7',
     '  act=add',
     '  if [ $((ex + un + sd + cu)) -gt 0 ]; then',
@@ -295,9 +296,11 @@ export function rollbackScript({ line, oldB64 = '' } = {}) {
 export function removeScript({ publicKey, keyId } = {}) {
   const pk = splitPublicKey(publicKey); const mark = markOf(keyId);
   if (!pk || !mark) return null;
-  const anyMark = ` ${PORTAL_MARK}k_`;
-  const CNT = `${STRIP} index(t, b) == 0 { next } index(t, m) > 0 { n++; next } { u++ } END { printf "%d %d %d", NR, n + 0, u + 0 }`;
-  const DROPM = `${STRIP} index(t, b) > 0 && index(t, m) > 0 { next } { print }`;
+  // 표식 앞은 공백 또는 탭(4회차 B4-4 — 탭 뒤 표식을 넣기 · 읽기는 포탈 줄로, 거두기는 사람 줄로 봐 키 줄을 남겼다).
+  const anyMark = `${PORTAL_MARK}k_`;
+  const HASM = '(index(t, " " m) > 0 || index(t, "\\t" m) > 0)';
+  const CNT = `${STRIP} index(t, b) == 0 { next } ${HASM} { n++; next } { u++ } END { printf "%d %d %d", NR, n + 0, u + 0 }`;
+  const DROPM = `${STRIP} index(t, b) > 0 && ${HASM} { next } { print }`;
   return [
     ...HEAD,
     `B='${pk.blob}'; M='${anyMark}'`,
@@ -318,7 +321,7 @@ export function removeScript({ publicKey, keyId } = {}) {
     'if [ "$n" -eq 0 ]; then echo "##KL removed 0 unmarked $u"; exit 0; fi',
     `keep() { awk -v b="$B" -v m="$M" '${DROPM}' "$f"; }`,
     'extra() { :; }',
-    `post() { n2=$(awk -v b="$B" -v m="$M" '${STRIP} index(t, b) > 0 && index(t, m) > 0 { c++ } END { print c + 0 }' "$f") && [ "$n2" -eq 0 ]; }`,
+    `post() { n2=$(awk -v b="$B" -v m="$M" '${STRIP} index(t, b) > 0 && ${HASM} { c++ } END { print c + 0 }' "$f") && [ "$n2" -eq 0 ]; }`,
     'exp=$((nr - n)); tailn=0',
     ...COMMIT,
     'echo "##KL removed $n unmarked $u"',
