@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { threadId } from 'node:worker_threads';
 
 /**
  * 원자적 파일 쓰기 — 임시파일에 기록 후 rename으로 교체한다. writeFileSync는 기록 도중
@@ -12,8 +13,11 @@ import path from 'node:path';
  * 전부 썼다고 보장하지 않으므로 바이너리는 끝까지 이어 쓴다. 문자열 경로는 예전과 같다.
  */
 function writeAll(fd, data) {
-  if (!ArrayBuffer.isView(data)) { fs.writeSync(fd, data); return; }
-  const buf = Buffer.isBuffer(data) ? data : Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+  // v3.10.3: 문자열도 Buffer 로 바꿔 끝까지 쓴다 — `fs.writeSync(fd, string)` 는 쓴 바이트 수를 돌려줄 뿐이라 짧게 쓰인 것을 놓치면
+  //   잘린 파일이 rename 으로 원본을 대신한다(원자적 쓰기의 목적이 무너진다).
+  const buf = typeof data === 'string' ? Buffer.from(data, 'utf8')
+    : !ArrayBuffer.isView(data) ? Buffer.from(String(data ?? ''), 'utf8')
+      : Buffer.isBuffer(data) ? data : Buffer.from(data.buffer, data.byteOffset, data.byteLength);
   let off = 0;
   while (off < buf.length) {
     const n = fs.writeSync(fd, buf, off, buf.length - off);
@@ -22,10 +26,13 @@ function writeAll(fd, data) {
   }
 }
 
+let _tmpSeq = 0;
+
 export function atomicWriteFileSync(file, data, { mode = 0o600 } = {}) {
   const dir = path.dirname(file);
   fs.mkdirSync(dir, { recursive: true });
-  const tmp = path.join(dir, `.${path.basename(file)}.tmp-${process.pid}-${Date.now()}`);
+  // v3.10.3: 순번을 붙인다 — 같은 프로세스의 워커 스레드(같은 pid)가 같은 ms 에 같은 파일을 쓰면 임시 이름이 겹쳐 서로의 내용을 덮었다.
+  const tmp = path.join(dir, `.${path.basename(file)}.tmp-${process.pid}-${Date.now()}-t${threadId}-${++_tmpSeq}`);
   try {
     // 임시파일 데이터를 디스크에 fsync한 뒤 rename — fsync 없이는 rename 메타데이터가 데이터보다
     // 먼저 디스크에 닿아, 정전 시 대상이 0바이트/부분 파일로 남을 수 있다(정전 안전성 확보).

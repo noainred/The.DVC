@@ -58,9 +58,16 @@ export function dayIndex(ts, offsetMin = DAY_OFFSET_MIN) { return Math.floor((Nu
 /** 일 인덱스 → 그 날의 시작 epoch ms(오프셋 적용). */
 export function dayStartMs(day, offsetMin = DAY_OFFSET_MIN) { return Number(day) * DAY_MS - offsetMin * 60_000; }
 /** 일 인덱스 → `YYYY-MM-DD`(그 지역의 날짜). */
-export function dayLabel(day, offsetMin = DAY_OFFSET_MIN) { return new Date(dayStartMs(day, offsetMin) + offsetMin * 60_000).toISOString().slice(0, 10); }
+// v3.10.3: 날짜 번호가 수가 아니면(NaN · 문자열 ISO 를 dayIndex 에 넣은 경우) `toISOString()` 이 RangeError 로 던졌다 — dayKey 처럼 '' 를 돌려준다.
+export function dayLabel(day, offsetMin = DAY_OFFSET_MIN) {
+  const t = dayStartMs(day, offsetMin);
+  if (!inDateRange(t, offsetMin)) return '';
+  return new Date(t + offsetMin * 60_000).toISOString().slice(0, 10);
+}
 /** 그 지역의 벽시계 — 스케줄 판정용(v2.582 BUG-5: 서버 프로세스 TZ 가 아니라 이 오프셋으로 판정한다). */
 export function localClock(ts = Date.now(), offsetMin = DAY_OFFSET_MIN) {
+  // v3.10.3: 수가 아닌 시각에서 던지지 않는다(못 읽은 시각은 0 시 · 1970 년이 아니라 빈 값이다).
+  if (!inDateRange(Number(ts), offsetMin)) return { day: '', hour: null, minute: null, offsetMin };
   const d = new Date(Number(ts) + offsetMin * 60_000);
   return { day: d.toISOString().slice(0, 10), hour: d.getUTCHours(), minute: d.getUTCMinutes(), offsetMin };
 }
