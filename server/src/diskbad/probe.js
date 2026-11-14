@@ -107,6 +107,7 @@ export async function probeIdrac(entry, { signal = null, getJson = redfishGetCap
   let base = `${mgr}/LogServices/Lclog/Entries`;
   let sample = '';
   let lclogCount = null;
+  let lclogPage = 0;
   await step('lclog', async () => {
     const r = await firstOk([base, `${mgr}/Logs/Lclog`]);
     base = r.path;
@@ -120,13 +121,35 @@ export async function probeIdrac(entry, { signal = null, getJson = redfishGetCap
     sample = [...byId.entries()].sort((a, b) => a[1] - b[1])[0]?.[0] || '';
     lclogCount = f.count;
     const e0 = members(r.json)[0] || {};
+    // 로그인 기록이 **어느 경로**로 온 것인가(REDFISH · GUI · SSH …) — 문장 끝의 낱말만 센다. 계정 이름 · 주소는 싣지 않는다.
+    const via = {};
+    for (const x of f.rows) {
+      if (!/USR0030$/i.test(String(x.messageId))) continue;
+      const m = /\band ([A-Za-z][A-Za-z0-9-]{1,15})\.?\s{0,4}$/.exec(String(x.message || '').slice(0, 300));
+      const k = m ? m[1].toUpperCase() : '(모름)';
+      via[k] = (via[k] || 0) + 1;
+    }
+    lclogPage = f.n;
     return {
+      loginVia: Object.fromEntries(Object.entries(via).slice(0, 8)),
       path: base, pageLen: f.n, count: f.count, nextLink: f.next, order: orderOf(f.rows),
       newest: iso(ts.length ? Math.max(...ts) : NaN), oldest: iso(ts.length ? Math.min(...ts) : NaN),
       sampleMessageId: t(sample, 64), codes: Object.fromEntries(Object.entries(byCode).sort((a, b) => b[1] - a[1]).slice(0, 6)),
       entryKeys: Object.keys(e0).slice(0, 30).map((k) => t(k, 40)), oemKeys: Object.keys(e0?.Oem?.Dell || {}).slice(0, 20).map((k) => t(k, 40)),
     };
   });
+
+  // ── 가장 오래된 항목 한 건(건수를 믿을 수 있을 때만 — 요청 1번): 활성 로그가 어디서 시작하는가. 실장비에서 맨 끝이 LOG203 이었다.
+  //    문장은 **LOG 계열일 때만** 싣는다(로그 자체에 대한 기록 — 계정 · 주소가 들어 있지 않다). 그 밖은 기록 ID 와 시각만.
+  if (lclogCount != null && lclogPage > 0 && lclogCount > lclogPage && Number.isSafeInteger(lclogCount) && lclogCount < 5_000_000) {
+    await step('lclogOldest', async () => {
+      const f = pageFacts(await G(`${base}?$skip=${lclogCount - 1}`));
+      const x = f.rows[f.rows.length - 1];
+      if (!x) return { n: 0 };
+      const code = codeOf(x.messageId);
+      return { n: f.n, messageId: t(x.messageId, 64), created: iso(x.created), ...(/^LOG\d{1,6}$/.test(code) ? { message: t(x.message, 160) } : {}) };
+    });
+  }
 
   // ── 걸러 받기($filter): 첫 쪽에서 본 기록 ID 로 물어 **답이 맞는지** 본다(Dell 공식 스크립트가 쓰는 꼴 — MessageId eq '…') ──
   // 식은 **보낼 꼴 그대로** 만든다(공백 · 따옴표를 미리 %XX 로) — fetch 가 나중에 바꾸면 Digest 인증의 uri 와 실제 요청이 어긋나 401 이 된다.

@@ -44,7 +44,7 @@ function cleanLog(L, now) {
     stopped: STOPS.has(L.stopped) ? L.stopped : '',
     // v3.8.2 읽기 진단(판정에 쓰지 않는다 — 화면이 '무엇을 읽었는지' 를 밝힌다). 모르는 판의 엣지는 보내지 않는다(null).
     pages: cnt(L.pages), ms: cnt(L.ms), distinct: cnt(L.distinct), firstLen: cnt(L.firstLen),
-    hasNext: b(L.hasNext), path: PATHS.has(L.path) ? L.path : '',
+    hasNext: b(L.hasNext), path: PATHS.has(L.path) ? L.path : '', oldestCode: s(L.oldestCode, 16),
     // 건수를 못 읽은 항목은 0 으로 두지 않고 버린다.
     top: Array.isArray(L.top) ? L.top.slice(0, TOP_MAX).map((x) => (isObj(x) ? { code: s(x.code, 16), n: cnt(x.n) } : null)).filter((x) => x && x.code && x.n != null) : null,
   };

@@ -127,7 +127,7 @@ export async function readLclog(entry, { cursor = null, signal = null, budgetMs 
   };
 
   const out = { mgrPath, order: 'unknown', total: null, read: 0, undated: 0, newest: null, oldestRead: null, reachedEnd: false, foundCursor: false, cursorUsed: false, stopped: '', entries: [],
-    pages: 0, ms: 0, distinct: 0, top: [], firstLen: 0, hasNext: false, path: 'std' };
+    pages: 0, ms: 0, distinct: 0, top: [], firstLen: 0, hasNext: false, path: 'std', oldestCode: '' };
   // 읽은 항목의 기록 ID 구성(진단 — 판정에 쓰지 않는다). 로그인 기록이 활성 로그를 채웠는지 화면이 보여 준다.
   const codes = new Map();
   const done = () => {
@@ -147,7 +147,8 @@ export async function readLclog(entry, { cursor = null, signal = null, budgetMs 
     // 반증 #14: 지난번 자리는 **같은 항목(Id · 시각)** 을 만났을 때만 찾은 것이다. 시각이 더 오래된 항목을 먼저 만나도 멈추지 않는다 —
     //   iDRAC 시계가 거꾸로 갔거나(RTC · 공장 초기화) 같은 주소에 다른 서버가 오면 '더 오래된 시각' 의 새 항목이 있다. 못 찾으면 끝까지 읽는다(gap).
     if (cur && r.created === cur.created && (!cur.entryId || r.entryId === cur.entryId)) { out.foundCursor = true; return false; }
-    out.oldestRead = out.oldestRead == null ? r.created : Math.min(out.oldestRead, r.created);
+    // 가장 오래된 항목의 기록 ID(진단 — v3.8.3). 실장비에서 활성 로그의 맨 끝이 LOG203 한 건이었다 — 로그가 보관으로 넘어간 표시인지 화면이 그대로 보여 준다.
+    if (out.oldestRead == null || r.created < out.oldestRead) { out.oldestRead = r.created; out.oldestCode = tc; }
     const code = codeOf(r.messageId);
     if (code && isStorageCode(code)) out.entries.push({ ...r, code });
     return true;

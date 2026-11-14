@@ -11,7 +11,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, usePolling } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
-import { fmtDate, fmtDateTime, serverBand, clsTone, verdictTone, confidenceTone, noteOf, clsOfCode, diagInfo } from './diskBadText.js';
+import { fmtDate, fmtDateTime, serverBand, clsTone, verdictTone, confidenceTone, noteOf, clsOfCode, diagInfo, scanSent } from './diskBadText.js';
 
 const BAND = {
   bad: { border: '1px solid rgba(239,68,68,.45)', background: 'rgba(239,68,68,.10)' },
@@ -29,6 +29,7 @@ export function DiskBadServerPanel({ serverId, agent = null }) {
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
+  const [msgBad, setMsgBad] = useState(false);
   const [open, setOpen] = useState(null);
   const [showAll, setShowAll] = useState(false);
   const [showProbe, setShowProbe] = useState(true);
@@ -47,10 +48,15 @@ export function DiskBadServerPanel({ serverId, agent = null }) {
   useEffect(() => { if (poll.data) setData(poll.data); }, [poll.data]);
 
   const scan = (mode) => {
-    setBusy(true); setMsg('');
+    setBusy(true); setMsg(''); setMsgBad(false);
     postJson('/tools/disk-bad/scan', { scope: 'server', serverId, ...(agent != null ? { agent } : {}), mode })
-      .then(() => { setMsg('점검을 보냈습니다 — 이 서버를 맡은 노드가 읽고 나면 아래가 바뀝니다. 서버 한 대를 직접 점검하면 장비 진단(이 iDRAC 가 무엇을 주는지)도 함께 받아 옵니다 — 장비 진단은 관리자 화면에만 보입니다.'); return load(); })
-      .catch((e) => setMsg(e?.message || String(e)))
+      .then((r) => {
+        // 409 는 던지지 않고 본문으로 온다(api.js) — 시작하지 못한 점검(다른 점검 진행 중 · 엣지 포탈 · 같은 id 가 여러 엣지)을 '보냈습니다' 라고 하지 않는다(v3.8.3).
+        const sent = scanSent(r);
+        setMsg(sent.text); setMsgBad(!sent.ok);
+        return load();
+      })
+      .catch((e) => { setMsg(e?.message || String(e)); setMsgBad(true); })
       .finally(() => setBusy(false));
   };
 
@@ -82,7 +88,7 @@ export function DiskBadServerPanel({ serverId, agent = null }) {
           {v && <button className="tab" style={{ flex: 'none', padding: '6px 12px' }} disabled={busy || data.running} onClick={() => scan('full')} title="이 서버의 로그를 처음부터 다시 읽습니다">처음부터 다시 읽기</button>}
         </div>
       </div>
-      {msg && <div className="muted" style={{ fontSize: 12 }}>{msg}</div>}
+      {msg && <div className={msgBad ? undefined : 'muted'} style={{ fontSize: 12, ...(msgBad ? { color: 'var(--red)', fontWeight: 600 } : {}) }}>{msg}</div>}
 
       <div style={{ ...BAND[band.tone], borderRadius: 10, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 4 }}>
         <div style={{ fontWeight: 800, fontSize: 14 }}>{band.title}</div>
@@ -105,6 +111,12 @@ export function DiskBadServerPanel({ serverId, agent = null }) {
           <b>읽기 진단</b> <span className="muted">이 서버의 로그를 무엇을 얼마나 읽었는지 — 판정이 아니라 읽은 사실입니다</span>
           {diag.lines.map((l, i) => <div key={i} style={{ overflowWrap: 'anywhere' }}>{l}</div>)}
           {diag.warn && <div style={{ marginTop: 4, color: 'var(--amber, #f59e0b)', fontWeight: 600 }}>{diag.warn}</div>}
+        </div>
+      )}
+      {data.canProbe && !data.probe && (
+        <div className="muted" style={{ border: '1px dashed var(--border)', borderRadius: 10, padding: '8px 12px', fontSize: 12, lineHeight: 1.6, minWidth: 0 }}>
+          <b>장비 진단이 아직 없습니다</b> — 이 화면에서 ‘다시 점검’ 이나 ‘처음부터 다시 읽기’ 를 눌러 <b>이 서버 한 대만</b> 점검할 때 받아 옵니다(법인 · 전체 점검에서는 받지 않습니다).
+          이 서버를 맡은 노드가 다른 점검을 하는 중이면 시작되지 않으니, 점검 탭에서 진행 중인 작업이 없는지 먼저 확인하세요.
         </div>
       )}
       {data.probe && (

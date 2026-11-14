@@ -192,6 +192,12 @@ export function refsTable() {
  * 그래서 화면은 비율과 함께 **상위 기록 ID 를 그대로** 보여 준다(이 목록이 틀려도 사용자가 구성을 직접 본다).
  */
 export const LOGIN_CODES = Object.freeze(['USR0030', 'USR0031', 'USR0032', 'USR0036']);
+/**
+ * 반복 표시(v3.8.3). iDRAC 는 같은 기록이 이어지면 'LOG007 — 앞 기록이 N번 되풀이됨' 한 줄로 묶는다(Dell 커뮤니티 글 요약으로 확인 — USR0030 뒤에 LOG007 이 붙는다).
+ * 실장비 한 대의 활성 로그가 USR0030 884 · LOG007 883 이었다 — 로그인 기록만 세면 47% 라 '절반 이상' 에 못 미치지만 실제로는 93% 가 로그인과 그 반복 표시다.
+ * 그래서 반복 표시는 **로그인 계열 건수까지만** 로그인 쪽으로 센다(그보다 많은 LOG007 은 다른 기록의 반복일 수 있다 — 지어내지 않는다).
+ */
+export const REPEAT_CODE = 'LOG007';
 
 /**
  * 읽은 항목 가운데 로그인 계열의 비율(0~1). 상위 목록에 든 것만 세므로 **하한**이다. 읽은 건수를 모르면 null.
@@ -200,8 +206,12 @@ export const LOGIN_CODES = Object.freeze(['USR0030', 'USR0031', 'USR0032', 'USR0
 export function loginShareOf(diag) {
   const read = Number(diag?.read);
   if (!diag || !Number.isFinite(read) || read <= 0 || !Array.isArray(diag.top)) return null;
-  let n = 0;
-  for (const x of diag.top) if (x && LOGIN_CODES.includes(String(x.code)) && Number.isFinite(x.n)) n += x.n;
-  return Math.min(1, n / read);
+  let n = 0; let rep = 0;
+  for (const x of diag.top) {
+    if (!x || !Number.isFinite(x.n)) continue;
+    if (LOGIN_CODES.includes(String(x.code))) n += x.n;
+    else if (String(x.code) === REPEAT_CODE) rep += x.n;
+  }
+  return Math.min(1, (n + Math.min(rep, n)) / read);
 }
 

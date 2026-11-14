@@ -12,7 +12,7 @@
  *    '과거에 없었다' 로 읽히지 않게, **로그가 30일 미만만 남은 서버 수**(`shortLog`) · 남은 기간의 가운데값 · 로그인 기록이 절반을 넘는
  *    서버 수(`loginHeavy`)를 합계에 싣는다. 화면이 KPI 위에 경고로 보인다.
  */
-import { classOf, COUNTED, CLS, labelOfKey, refsTable, ID_TABLE, CLS_LABEL, loginShareOf, LOGIN_CODES } from './classify.js';
+import { classOf, COUNTED, CLS, labelOfKey, refsTable, ID_TABLE, CLS_LABEL, loginShareOf, LOGIN_CODES, REPEAT_CODE } from './classify.js';
 import { judgeServer, VERDICT, VERDICT_LABEL, CONFIDENCE_LABEL, SERVER_STATUS_LABEL } from './verdict.js';
 import { REASON_LABEL } from './scan.js';
 
@@ -38,7 +38,7 @@ export function logSpanOf(row) {
 /** 서버 한 대의 읽기 진단(화면용) — 로그인 계열 비율을 붙인다. */
 export function diagView(readDiag) {
   if (!readDiag || typeof readDiag !== 'object') return null;
-  return { ...readDiag, loginShare: loginShareOf(readDiag), loginCodes: LOGIN_CODES };
+  return { ...readDiag, loginShare: loginShareOf(readDiag), loginCodes: LOGIN_CODES, repeatCode: REPEAT_CODE };
 }
 
 const keyOf = (agent, id) => `${String(agent || '').toLowerCase()}|${id}`;

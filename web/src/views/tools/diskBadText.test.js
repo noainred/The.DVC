@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fmtDate, spanText, rateText, pctText, clsTone, verdictTone, serverBand, unitProgress, scopeLabel, noteOf, clsOfCode, num, diagInfo, shortLogNote, READ_STOP_LABEL } from './diskBadText.js';
+import { fmtDate, spanText, rateText, pctText, clsTone, verdictTone, serverBand, unitProgress, scopeLabel, noteOf, clsOfCode, num, diagInfo, shortLogNote, READ_STOP_LABEL, scanSent } from './diskBadText.js';
 
 const HOUR = 3_600_000; const DAY = 24 * HOUR;
 const NOW = Math.floor(Date.now() / HOUR) * HOUR;
@@ -69,5 +69,21 @@ describe('diskBadText', () => {
     const b = serverBand({ status: 'clean', coverage: { coveredFrom: NOW - 35 * DAY, continuousSince: NOW - 20 * HOUR, logSpan: { ms: 20 * HOUR }, shortLogDays: 30 } }, NOW);
     expect(b.tone).toBe('warn'); expect(b.title).toContain('20시간'); expect(b.title).not.toContain('0일');
     expect(b.lines[0]).toContain('보관 로그'); expect(b.lines[0]).toContain('끊김 없이 본 구간');
+  });
+  it('v3.8.3 점검 요청의 답: 시작하지 못한 점검(409 본문 ok:false)을 보냈습니다 라고 하지 않는다', () => {
+    expect(scanSent({ ok: true, job: {} }).ok).toBe(true);
+    expect(scanSent({ ok: true, job: {} }).text).toContain('점검을 보냈습니다');
+    const busy = scanSent({ ok: false, busy: true, reason: '이 서버를 맡은 노드가 다른 점검을 하는 중이라 시작하지 못했습니다' });
+    expect(busy.ok).toBe(false); expect(busy.text).toContain('시작하지 못했습니다'); expect(busy.text).not.toContain('보냈습니다');
+    expect(scanSent({ ok: false }).text).toBe('점검을 시작하지 못했습니다.');
+    expect(scanSent(undefined).ok).toBe(true);
+    expect(scanSent({ ok: true }, '점검을 보냈습니다.').text).toBe('점검을 보냈습니다.');
+  });
+  it('v3.8.3 읽기 진단: 가장 오래된 항목의 기록 ID · 반복 표시(LOG007)를 로그인 쪽으로 센 경고', () => {
+    const d = diagInfo({ at: NOW, read: 1894, pages: 38, ms: 9000, distinct: 4, reachedEnd: true, oldest: NOW - 37 * DAY, newest: NOW - HOUR, oldestCode: 'LOG203',
+      top: [{ code: 'USR0030', n: 884 }, { code: 'LOG007', n: 883 }, { code: 'SWC0403', n: 126 }, { code: 'LOG203', n: 1 }], loginShare: 0.933, loginCodes: ['USR0030'], repeatCode: 'LOG007' });
+    expect(d.lines[1]).toContain('가장 오래된 항목 LOG203');
+    expect(d.warn).toContain('93%'); expect(d.warn).toContain('반복 표시(LOG007)');
+    expect(diagInfo({ at: NOW, read: 10, pages: 1, ms: 100, oldest: NOW - DAY, newest: NOW }).lines[1]).not.toContain('가장 오래된 항목');
   });
 });

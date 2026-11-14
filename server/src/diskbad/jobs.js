@@ -65,6 +65,9 @@ function busyAgents() {
   return out;
 }
 
+/** 그 엣지(중앙 직결은 '')에 대기 · 진행 중인 조각이 있는가 — 라우트가 '건너뛰어질 점검' 을 만들기 전에 묻는다(v3.8.3). */
+export function isAgentBusy(agent) { sweepJobs(); return busyAgents().has(normAgent(agent)); }
+
 /**
  * 작업을 만든다.
  * @param {{scope:'all'|'corp'|'server', target?:string, targetLabel?:string, mode?:'incremental'|'full', by?:string, auto?:boolean, manual?:boolean,
