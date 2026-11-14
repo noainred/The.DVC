@@ -2129,6 +2129,70 @@ test('⑱ 알림 메일 — 알릴 사건(MAIL_EVENTS)만 고른다 · 사건의
   assert.equal(MAILS.length, n0 + 1, '보낼 것이 없으면 보내지 않는다');
 });
 
+test('⑱-b 사건이 넘쳐도 중요 사건은 남는다 — 서버마다의 key-login-set 300건이 법인 사용 중지 · 작업 요약을 밀어내지 않는다(점검 C-3 · D-5) · 알림은 기록에 남은 사건만(자르기로 바로 지워진 사건은 메일로 나가지 않는다)', {}, () => {
+  const j = subRun({ owners: 'solo', users: [{ username: 'solo', role: 'admin', totpEnabled: true, totpSecret: generateSecret() }], code: `
+    const ST = await imp('sshaccess/state.js'); const N = await imp('sshaccess/notify.js');
+    const mails = []; N._setKeyNotifySendForTest(async (m) => { mails.push(m); return { ok: true }; }); N.startKeyNotify();
+    ST.addEvent({ kind: 'corp-stop', corp: 'vcA', by: 'solo', detail: '유출 의심' });
+    ST.addEvent({ kind: 'key-job-done', target: '키 로그인 설정 · k', by: 'solo', detail: '100대' });
+    for (let i = 0; i < 3; i += 1) ST.addEvents(Array.from({ length: 100 }, (_, n) => ({ kind: 'key-login-set', target: 'bm-' + i + '-' + n, by: 'solo', detail: '키 접속 확인' })));
+    const ev1 = ST.listEvents({ limit: 300 });
+    // 중요 사건으로 가득 찬 기록에 비중요 사건(받는 곳 새 파일)을 넣으면 넣자마자 잘린다 — 알림도 나가지 않아야 한다
+    for (let i = 0; i < 3; i += 1) ST.addEvents(Array.from({ length: 100 }, (_, n) => ({ kind: 'approval-decided', target: 'r-' + i + '-' + n, by: 'solo' })));
+    await N._flushKeyNotifyForTest(); const m1 = mails.length;
+    ST.addEvent({ kind: 'inbox-new', target: '1개 — trimmed', detail: 'aaaaaaaaaaaa' });
+    await N._flushKeyNotifyForTest();
+    const ev2 = ST.listEvents({ limit: 300 });
+    console.log(JSON.stringify({ max: ST.MAX_EVENTS, n1: ev1.length, stopKept: ev1.some((e) => e.kind === 'corp-stop'), doneKept: ev1.some((e) => e.kind === 'key-job-done'),
+      loginSet: ev1.filter((e) => e.kind === 'key-login-set').length, n2: ev2.length, inboxKept: ev2.some((e) => e.kind === 'inbox-new'), critMails: m1, mailsAfterTrim: mails.length - m1,
+      last: N.lastKeyNotify()?.count || 0 }));
+  ` });
+  assert.deepEqual([j.max, j.n1, j.stopKept, j.doneKept, j.loginSet], [300, 300, true, true, 298], JSON.stringify(j));
+  assert.deepEqual([j.n2, j.inboxKept, j.mailsAfterTrim], [300, false, 0], '기록에 남지 않은 사건은 알리지 않는다');
+  assert.ok(j.critMails >= 1, '전제 — 알림 경로는 살아 있다');
+});
+
+test('⑱-c 받는 곳 ‘본 표지’ 는 12자 해시 — 새 파일 25개 = inbox-new 한 건(표지 20개 · 메일 한 줄) + inbox-seen(나머지 · 메일 없음) · 재시작 뒤 다시 알리지 않는다 · 예전 꼴(경로|sha) 표지도 같은 파일로 알아본다(점검 D S-2)', async () => {
+  const INB = await import('../src/sshaccess/inbox.js');
+  const idir = INB.inboxPathOf('vcB');
+  fs.mkdirSync(idir, { recursive: true });
+  const count = (k) => eventsOf(k).length;
+  // 예전 판이 이미 알린 파일 하나 — 사건에 원문 표지 ‘경로|sha’ 로 남아 있다
+  const oldK = F.ed25519Key(); ALL_PEMS.push(oldK.pem);
+  fs.writeFileSync(path.join(idir, 'id_old'), oldK.pem, { mode: 0o600 });
+  const itOld = (await INB.scanInbox({ corps: [{ id: 'vcB' }], servers: [] })).items.find((x) => x.file === 'id_old');
+  assert.equal(itOld?.code, 'ready', JSON.stringify(itOld));
+  assert.ok(ST.addEvent({ kind: 'inbox-new', corp: 'vcB', target: '1개 — 예전 판', detail: `${itOld.relPath}|${itOld.sha}` }).ok);
+  SVC._resetSshAccessServiceForTest();   // 재시작 — 본 표지를 사건 기록에서 다시 읽는다
+  const n0 = count('inbox-new'); const s0 = count('inbox-seen');
+  await SVC.runSshAccessScan();
+  assert.equal(count('inbox-new'), n0, '예전 꼴로 알린 파일을 다시 알리지 않는다(업그레이드 날 다시 알리지 않게)');
+  // 새 파일 25개
+  for (let i = 0; i < 25; i += 1) { const k = F.ed25519Key(); ALL_PEMS.push(k.pem); fs.writeFileSync(path.join(idir, `id_n${String(i).padStart(2, '0')}`), k.pem, { mode: 0o600 }); }
+  await N._flushKeyNotifyForTest();
+  const m0 = MAILS.length;
+  await SVC.runSshAccessScan();
+  assert.deepEqual([count('inbox-new'), count('inbox-seen')], [n0 + 1, s0 + 1], '새 파일 25개 = 알림 사건 하나 + 본 표지 사건 하나');
+  const ev = eventsOf('inbox-new')[0];
+  const sigs = ev.detail.split(' ');
+  assert.match(ev.target, /^25개 — /);
+  assert.equal(sigs.length, 20);
+  assert.ok(sigs.every((x) => /^[0-9a-f]{12}$/.test(x)), ev.detail);
+  assert.ok(ev.detail.length <= 300, '사건 detail(300자) 안에 다 들어간다 — 예전 판은 경로|sha 원문이 잘려 재시작 뒤 나머지를 다시 알렸다');
+  const seen = eventsOf('inbox-seen')[0].detail.split(' ');
+  assert.equal(seen.length, 5);
+  assert.equal(new Set([...sigs, ...seen]).size, 25, '표지 25개가 겹치지 않는다');
+  await N._flushKeyNotifyForTest();
+  const lines = MAILS.slice(m0).flatMap((m) => m.text.split('\n'));
+  assert.deepEqual(lines.filter((l) => l.startsWith('받는 곳에 새 키 파일')).map((l) => l.slice(0, 22)), ['받는 곳에 새 키 파일 · 25개 — '], '메일은 한 줄(본 표지 사건은 보내지 않는다)');
+  assert.equal(lines.some((l) => /[0-9a-f]{12}/.test(l)), false, '표지는 메일에 싣지 않는다');
+  // 재시작 뒤 다시 점검 — 다시 알리지 않는다(25개 모두 사건에서 표지를 읽었다)
+  SVC._resetSshAccessServiceForTest();
+  await SVC.runSshAccessScan();
+  assert.deepEqual([count('inbox-new'), count('inbox-seen')], [n0 + 1, s0 + 1]);
+  for (const f of fs.readdirSync(idir)) fs.rmSync(path.join(idir, f));
+});
+
 /* ── 7. 소스 스윕 ─────────────────────────────────────────────────────── */
 test('⑲ 소스 스윕 — 등록부 쓰기(키 묶기 · 되돌리기 · 저장 비밀번호 삭제)는 service.js 만 부른다(keyLogin.js 는 넘겨받은 함수만) · 새 쓰기 라우트는 ownerWrite · 감사에 1회 비밀번호를 싣지 않는다', async () => {
   const { stripComments } = await import('./_stripComments.js');
