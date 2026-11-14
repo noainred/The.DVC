@@ -172,7 +172,10 @@ export async function runIpScanAgentOnce(...args) {
     //   바꾸지 않는다 — 쉬는 시간이 끝난 첫 틱에 한 번 돈다(몰아서 여러 번 돌지 않는다). 옛 중앙(quiet 없음)이면 예전 그대로.
     const qw = dueOnly ? quietWindowAt(cleanQuiet(a.quiet)) : null;
     if (qw) {
-      last = { at: Date.now(), assigned: true, skipped: 'quiet', quiet: quietText(qw) };
+      // v3.7.1: 직전 스캔 · 결과 보고 실패는 쉬는 시간 기록으로 덮지 않는다(무음 실패 금지 — 예전에는 실패가 쉬는 동안 엣지 로그 · 상태에서 사라졌다).
+      //   실패 기록은 그대로 두고 '쉬는 중' 표시만 더한다. 배정 조회 실패는 방금 조회가 성공했으므로 남기지 않는다(위 주기 전 분기와 같은 규칙).
+      const failed = _lastScanRecord?.error ? _lastScanRecord : null;
+      last = failed ? { ...failed, quiet: quietText(qw), quietAt: Date.now() } : { at: Date.now(), assigned: true, skipped: 'quiet', quiet: quietText(qw) };
       return last;
     }
     // 엣지도 스캔을 별도 프로세스에서(v2.363) — 원격지 포탈/에이전트 부하 격리.

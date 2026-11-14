@@ -29,7 +29,7 @@ import { unreadVcenterReasons } from './metrics/unreadVcenters.js';
 import { getScanResults, macIpCount, getAgentReports, listScanAgents, loadScanSettings, LOCAL } from './ipam/scanStore.js';   // v3.1.0: IP 충돌 의심 규칙(스캔이 본 ARP MAC)
 import { findConflicts } from './ipam/conflict.js';
 import { duplicateAlerts, subnetFullAlerts, scanStaleAlerts } from './ipam/instantAlerts.js'; // v3.7.0 바로 알림 3가지
-import { buildIpamRows, listSubnets } from './ipam/ledger.js';
+import { peekIpamRows, listSubnets } from './ipam/ledger.js';
 import { withSubnetNotes } from './ipam/subnetNotes.js';
 import { setConflictSuspects } from './ipam/conflictState.js';
 import { buildGpuAllocTree } from './gpu/allocTree.js';   // v2.939 개선 6: 법인 GPU 할당률 규칙(계층과 같은 합계) // v2.768(점검 R3-C5-03): '지금 값 아님' 판정 한 벌
@@ -226,6 +226,9 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
   // 판정 보류 키(값을 못 읽음) — 발생 중이면 해소하지 않는다. 배열 원소가 아니라 숨은 속성이다(기존 소비처·비교 무변경).
   const held = new Set();
   Object.defineProperty(out, 'held', { value: held, enumerable: false });
+  // v3.7.1: 키 앞부분으로 보류(이번 회차에 그 종류 전체를 판정하지 못했다 — 어떤 키가 발생 중인지 평가 쪽은 모른다).
+  const heldPrefixes = new Set();
+  Object.defineProperty(out, 'heldPrefixes', { value: heldPrefixes, enumerable: false });
   // v2.607 LEFT2607-04: REST 폴백으로 수집된 vCenter 는 경보를 **조회하지 않았다**(restClient.js alarmsUnknown:true —
   //   alarms:[] 는 '경보 0건' 이 아니다). 예전엔 그 vCenter 의 발생 중 위험 알람이 목록에서 빠졌다는 이유로 '해소' 알림이
   //   나갔다. 그 vCenter 의 경보 해소 판정을 보류한다(tick 이 st.alert.vcenterId 로 본다 — 키에는 vCenter 축이 없다).
@@ -321,15 +324,28 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
   }
   // v3.7.0(재설계 묶음 라): IP 관리 바로 알림 — 중복 IP · 대역 가득 참 · 스캔 보고 끊김(판정 ipam/instantAlerts.js). 대장은 store 가 30초마다 만드는
   //   캐시(같은 세대면 그대로)를 읽는다 — 규칙을 켠 경우에만. 실패는 격리한다(다른 규칙 평가를 막지 않는다).
+  // v3.7.1: 원장은 **캐시에 있을 때만** 읽는다(peekIpamRows) — 없으면(새 스냅샷 직후 원장 동기화가 아직 안 끝남) 그 회차는 판정을 보류한다
+  //   (발생 중인 중복 · 가득 참은 해소로 기록하지 않는다 — heldPrefixes). 예전에는 그 자리에서 원장을 동기로 다시 만들어 평가 주기마다 이벤트 루프를 막을 수 있었다.
+  //   캐시가 있으면 listSubnets 도 같은 원장 캐시를 쓴다(대역 목록 기억 — 다시 만들지 않는다).
   if (R.ipamDuplicate?.enabled || R.ipamSubnetFull?.enabled) {
     try {
-      if (R.ipamDuplicate?.enabled) {
-        const d = duplicateAlerts(buildIpamRows(snap, '', null).rows, { unreadVc: new Set([...unreadVc, ...staleVc]) });
-        for (const k of d.held) held.add(k);
-        for (const x of d.alerts.slice(0, 300)) out.push(x);
+      const led = peekIpamRows(snap, '', null);
+      if (!led) {
+        if (R.ipamDuplicate?.enabled) heldPrefixes.add('ipdup:');
+        if (R.ipamSubnetFull?.enabled) heldPrefixes.add('ipfull:');
+      } else {
+        if (R.ipamDuplicate?.enabled) {
+          const d = duplicateAlerts(led.rows, { unreadVc: new Set([...unreadVc, ...staleVc]) });
+          for (const k of d.held) held.add(k);
+          for (const x of d.alerts.slice(0, 300)) out.push(x);
+        }
+        if (R.ipamSubnetFull?.enabled) for (const x of subnetFullAlerts(withSubnetNotes(listSubnets(snap, '', null)), { threshold: R.ipamSubnetFull.threshold }).slice(0, 300)) out.push(x);
       }
-      if (R.ipamSubnetFull?.enabled) for (const x of subnetFullAlerts(withSubnetNotes(listSubnets(snap, '', null)), { threshold: R.ipamSubnetFull.threshold }).slice(0, 300)) out.push(x);
-    } catch (e) { console.warn(`[alerts] IP 관리 바로 알림 평가 실패: ${e?.message || e}`); }
+    } catch (e) {
+      // 평가 실패도 '해소' 가 아니다 — 보류한다.
+      heldPrefixes.add('ipdup:'); heldPrefixes.add('ipfull:');
+      console.warn(`[alerts] IP 관리 바로 알림 평가 실패: ${e?.message || e}`);
+    }
   }
   if (R.ipamScanStale?.enabled) {
     try {
@@ -836,6 +852,7 @@ async function refreshState(cfg, sendEnabled) {
   try { active = evaluate(snap, cfg); } catch { active = []; }
   // 판정 보류 키는 아래 concat(새 배열) 전에 잡아 둔다 — 숨은 속성은 concat 으로 옮겨지지 않는다.
   const held = active.held instanceof Set ? active.held : new Set();
+  const heldPrefixes = active.heldPrefixes instanceof Set ? [...active.heldPrefixes] : [];   // v3.7.1
   const alarmsHeldVc = active.alarmsHeldVcenters instanceof Set ? active.alarmsHeldVcenters : new Set(); // v2.607 LEFT2607-04
   const unreadVc = active.unreadVcenters instanceof Set ? active.unreadVcenters : new Set(); // v2.720(감사 B1-01)
   // 동시 다운 감지: 직전 스냅샷과 비교(전이). 규칙 켜져 있을 때만 알림에 포함하되,
@@ -891,7 +908,7 @@ async function refreshState(cfg, sendEnabled) {
     // 끊는다(복구가 아니라 **모르는 것**이다 — '해소' 알림을 내지 않는다).
     const alarmHeld = key.startsWith('alarm:') && alarmsHeldVc.has(String(st.alert?.vcenterId ?? ''));
     const vcUnread = UNREAD_VC_KEY_RE.test(key) && unreadVc.has(String(st.alert?.vcenterId ?? '')); // v2.720(감사 B1-01)
-    if (held.has(key) || alarmHeld || vcUnread) {
+    if (held.has(key) || heldPrefixes.some((p) => key.startsWith(p)) || alarmHeld || vcUnread) {
       if (!st.heldSince) { st.heldSince = now; changed = true; }
       if (now - st.heldSince < HELD_MAX_MS) continue;
       firing.delete(key); rememberEnded(restored, key, st, now, cooldownMs); changed = true; continue;
