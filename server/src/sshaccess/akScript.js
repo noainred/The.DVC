@@ -204,9 +204,10 @@ export function installScript({ publicKey, keyId, line, replace = false } = {}) 
   const pk = splitPublicKey(publicKey); const mark = markOf(keyId);
   if (!pk || !mark || !safeQ(line) || !line.includes(` ${pk.blob} `) || !line.endsWith(` ${mark}`)) return null;
   // 자기 표식도 앞이 공백 · 탭일 때만(4회차 반증 R4R-7 — ‘xportal-ssh:k_<id>’ 처럼 붙은 사람 줄을 포탈 줄로 봤다).
-  const CLS = `${STRIP} index(t, b) == 0 { next } (index(t, " " m) > 0 || index(t, "\t" m) > 0) { if (t == L) ex++; else if (index(t, ty " ") == 1) un++; else if (t ~ /^from="[0-9A-Fa-f.:]+",no-agent-forwarding,no-port-forwarding,no-X11-forwarding /) sd++; else cu++; next } (index(t, " " pm) > 0 || index(t, "\t" pm) > 0) { oi++; next } { um++ } END { printf "%d %d %d %d %d %d %d", NR, ex + 0, un + 0, sd + 0, cu + 0, um + 0, oi + 0 }`;
-  const OLD = `${STRIP} index(t, b) > 0 && (index(t, " " m) > 0 || index(t, "\t" m) > 0) { print $0 }`;
-  const DROPM = `${STRIP} index(t, b) > 0 && (index(t, " " m) > 0 || index(t, "\t" m) > 0) { next } { print }`;
+  // 주석 줄(#)은 sshd 가 읽지 않는다 — 키 줄로 세지 않고 그대로 둔다(5회차 B5-3 — 주석 처리한 같은 키 줄을 ‘이미 있음’ 으로 보고 넣지 않았다).
+  const CLS = `${STRIP} substr(t, 1, 1) == "#" { next } index(t, b) == 0 { next } (index(t, " " m) > 0 || index(t, "\t" m) > 0) { if (t == L) ex++; else if (index(t, ty " ") == 1) un++; else if (t ~ /^from="[0-9A-Fa-f.:]+",no-agent-forwarding,no-port-forwarding,no-X11-forwarding /) sd++; else cu++; next } (index(t, " " pm) > 0 || index(t, "\t" pm) > 0) { oi++; next } { um++ } END { printf "%d %d %d %d %d %d %d", NR, ex + 0, un + 0, sd + 0, cu + 0, um + 0, oi + 0 }`;
+  const OLD = `${STRIP} substr(t, 1, 1) != "#" && index(t, b) > 0 && (index(t, " " m) > 0 || index(t, "\t" m) > 0) { print $0 }`;
+  const DROPM = `${STRIP} substr(t, 1, 1) != "#" && index(t, b) > 0 && (index(t, " " m) > 0 || index(t, "\t" m) > 0) { next } { print }`;
   return [
     ...HEAD,
     `B='${pk.blob}'; M='${mark}'; L='${line}'; TY='${pk.type}'; RP='${replace ? 1 : 0}'`,
@@ -301,8 +302,8 @@ export function removeScript({ publicKey, keyId } = {}) {
   // 표식 앞은 공백 또는 탭(4회차 B4-4 — 탭 뒤 표식을 넣기 · 읽기는 포탈 줄로, 거두기는 사람 줄로 봐 키 줄을 남겼다).
   const anyMark = `${PORTAL_MARK}k_`;
   const HASM = '(index(t, " " m) > 0 || index(t, "\\t" m) > 0)';
-  const CNT = `${STRIP} index(t, b) == 0 { next } ${HASM} { n++; next } { u++ } END { printf "%d %d %d", NR, n + 0, u + 0 }`;
-  const DROPM = `${STRIP} index(t, b) > 0 && ${HASM} { next } { print }`;
+  const CNT = `${STRIP} substr(t, 1, 1) == "#" { next } index(t, b) == 0 { next } ${HASM} { n++; next } { u++ } END { printf "%d %d %d", NR, n + 0, u + 0 }`;
+  const DROPM = `${STRIP} substr(t, 1, 1) != "#" && index(t, b) > 0 && ${HASM} { next } { print }`;
   return [
     ...HEAD,
     `B='${pk.blob}'; M='${anyMark}'`,
@@ -323,7 +324,7 @@ export function removeScript({ publicKey, keyId } = {}) {
     'if [ "$n" -eq 0 ]; then echo "##KL removed 0 unmarked $u"; exit 0; fi',
     `keep() { awk -v b="$B" -v m="$M" '${DROPM}' "$f"; }`,
     'extra() { :; }',
-    `post() { n2=$(awk -v b="$B" -v m="$M" '${STRIP} index(t, b) > 0 && ${HASM} { c++ } END { print c + 0 }' "$f") && [ "$n2" -eq 0 ]; }`,
+    `post() { n2=$(awk -v b="$B" -v m="$M" '${STRIP} substr(t, 1, 1) != "#" && index(t, b) > 0 && ${HASM} { c++ } END { print c + 0 }' "$f") && [ "$n2" -eq 0 ]; }`,
     'exp=$((nr - n)); tailn=0',
     ...COMMIT,
     'echo "##KL removed $n unmarked $u"',

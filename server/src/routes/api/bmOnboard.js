@@ -80,7 +80,7 @@ function send(res, r, okStatus = 200) {
 function unreadable503(res) {
   const e = KS.keyStoreLoadError();
   if (!e) return false;
-  res.status(503).json({ ok: false, code: 'registry-unreadable', registryUnreadable: true, reason: `SSH 키 저장소(${KS.KEY_FILE_NAME})를 읽지 못했습니다 — 손상 보존본(${KS.KEY_FILE_NAME}.corrupt.*)을 확인하세요.` });
+  res.status(503).json({ ok: false, code: 'registry-unreadable', registryUnreadable: true, reason: `SSH 키 저장소(${KS.KEY_FILE_NAME})를 읽지 못했습니다 — 파일 권한(읽기 오류) 또는 손상 보존본(${KS.KEY_FILE_NAME}.corrupt.*)을 확인하세요.` });
   return true;
 }
 

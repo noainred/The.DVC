@@ -148,7 +148,7 @@ export async function buildView({ now = Date.now() } = {}) {
     features: FEATURE_CATALOG,
     inbox: { dir: inbox.dir, exists: inbox.exists, items: inbox.items, unknownFolders: inbox.unknownFolders, unknownTotal: inbox.unknownTotal, truncated: inbox.truncated, rootIsLink: inbox.rootIsLink, busy: !!inbox.busy },
     check: buildKeyCheck({ now, policyMode, inbox, drift, servers: serverSummary, corpName,
-      guards: ST.getGuards(), pendingApprovals: AP.listRequests({ kinds: SSH_KINDS, includeDone: false }, { now }).length, inflightUnreadable: !!INF.inflightReadIssue() }),
+      guards: ST.getGuards(), pendingApprovals: AP.listRequests({ kinds: SSH_KINDS, includeDone: false }, { now }).length, inflightUnreadable: !!INF.inflightReadIssue(), installedUnreadable: INS.installedReadFailed() }),
     stops: ST.listStops(),
     events: ST.listEvents({ limit: 50 }),
     tampered: KS.tamperedKeyIds(),
@@ -248,6 +248,7 @@ export function serverKeyCandidates(serverId) {
   return {
     ok: true,
     server: { id: s.id, name: s.name || s.host, host: s.host, port: Number(s.port) || 22, vcenterId: t(s.vcenterId), addr: regAddrOf(s), keyMode: t(s.keyRef) ? 'pinned' : (effKey ? 'corp-default' : 'other') },
+    installedReadFailed: INS.installedReadFailed(),   // 읽은 키 기록을 지금 읽지 못함(‘읽지 않음’ 이 아니다 — 5회차 E5-2)
     corpDefault: acc && acc.kind === 'os' ? { accountName: acc.name, username: acc.username, keyId: acc.keyRef || '', keyName: acc.keyRef ? (KS.keyById(acc.keyRef)?.name || '') : '' } : null,
     keys,
     installed: inst ? { at: inst.at, by: inst.by, file: inst.file, error: inst.error || '', stale: inst.host !== s.host,
@@ -636,6 +637,8 @@ export function approvalPrecheck(id, { approve, by = '', digest = '' } = {}) {
   if (!cur || !SSH_KINDS.includes(cur.kind)) return { ok: false, code: 'not-found', status: 404, reason: '요청을 찾을 수 없습니다.' };
   if (cur.status !== 'pending') return { ok: false, code: 'not-pending', status: 409, reason: '이미 처리된 요청입니다.' };
   if (cur.expiresAt <= Date.now()) return { ok: false, code: 'expired', status: 409, reason: '요청의 시한(24시간)이 지났습니다 — 다시 요청하세요.' };
+  // 키 등록 요청을 돌려보내면 승인 대기 키를 지운다 — 저장소를 못 읽는 동안에는 지울 수 없어 고아 키가 남는다(5회차 E5-6). 고친 뒤 돌려보내게 한다.
+  if (!approve && cur.kind === 'ssh-key-activate' && KS.keyStoreLoadError()) return { ...STORE_UNREADABLE, reason: 'SSH 키 저장소를 읽지 못해 지금 돌려보내면 승인 대기 키를 지울 수 없습니다 — 저장소를 고친 뒤 돌려보내세요(요청은 그대로 둡니다).' };
   if (approve) {
     if (AP.identityKey(by) === AP.identityKey(cur.requestedBy)) return { ok: false, code: 'self-approve', status: 403, reason: '요청한 사람은 승인할 수 없습니다 — 다른 설정 소유자가 승인해야 합니다.' };
     if (t(digest, 64) !== cur.digest) return { ok: false, code: 'digest-mismatch', status: 409, reason: '화면에서 본 요청 내용과 다릅니다 — 다시 읽은 뒤 승인하세요.' };

@@ -2079,7 +2079,7 @@ test('⑪-f passwordOnly 대화형은 처음 나온 가리는 칸(echo=false) �
   // j) OTP 칸만 묻고 거부 → 비밀번호를 보내지 않았다 → SSH_NO_PASSWORD_METHOD(거부로 세지 않는다)
   const jj = await trial(kbdOnly((ctx, seen) => ctx.prompt([{ prompt: 'Verification code: ', echo: true }], (x) => { seen.push({ m: 'kbd', secret: x?.[0] }); ctx.reject(['keyboard-interactive']); })));
   assert.deepEqual([jj.ok, jj.sent, jj.code, jj.seen.filter((x) => x.startsWith('kbd'))], [false, 0, 'SSH_NO_PASSWORD_METHOD', ['kbd:""']], JSON.stringify(jj));
-  assert.match(jj.msg, /비밀번호 칸\(입력을 가리는 칸\)을 묻지 않았습니다/);
+  assert.match(jj.msg, /입력을 가리는 칸을 묻지 않았습니다\(OTP 등 보이는 칸만\)/);   // 5회차 B5-4 — 가리는 칸 없음 / 알아보지 못함을 가른다
   // d) publickey 만 → 보내지 않고 SSH_NO_PASSWORD_METHOD(예전에는 ‘인증 거부’ 문구로 끝나 거부로 셌다)
   const d = await trial((ctx, seen) => { seen.push({ m: ctx.method, secret: ctx.password }); ctx.reject(['publickey']); });
   assert.deepEqual([d.ok, d.sent, d.code], [false, 0, 'SSH_NO_PASSWORD_METHOD'], JSON.stringify(d));

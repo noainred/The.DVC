@@ -19,10 +19,13 @@ const DOWN_STATUS = [500, 502, 503, 504];
  * @param {object|null} http      httpInfoFor(message) 로 되찾은 원본 HttpError(있으면 상태코드 우선)
  * @returns {'gateway'|'internal'|'network'|'timeout'|null}
  */
+/** 서버가 살아서 ‘파일을 읽지 못함’ 을 구조화해 답한 503 — 일시적 미가용(업그레이드 중)이 아니다(v3.10.0 — 5회차 E5-5: 키 저장소 503 이 ‘5분 뒤 다시’ 로 보였다). */
+const SERVER_STATE_CODES = new Set(['registry-unreadable', 'state-unreadable', 'approvals-unreadable', 'read-failed', 'secrets-undecryptable', 'SECRETS_POLICY_UNAVAILABLE', 'usage-unknown', 'auth-disabled']);
 export function serviceDownKind(message, http = null) {
   const status = Number(http?.status) || 0;
   // 4xx(권한·잘못된 요청·없음·충돌)는 재시도해도 결과가 같다 — 절대 이 안내로 바꾸지 않는다.
   if (status >= 400 && status < 500) return null;
+  if (status && SERVER_STATE_CODES.has(String(http?.body?.code || ''))) return null;
   if (DOWN_STATUS.includes(status)) return status === 500 ? 'internal' : 'gateway';
   const m = typeof message === 'string' ? message : String(message?.message || '');
   if (!m) return null;

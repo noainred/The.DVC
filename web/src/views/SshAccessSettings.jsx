@@ -407,7 +407,7 @@ function ServersTab({ v, corpName, reload, say, jobsUi }) {
                   <td data-sort={stt.label}><Chip tone={stt.tone} title={stt.title}>{stt.label}</Chip></td>
                   <td data-sort={s.installed?.at || 0}>
                     {s.installed ? (s.installed.error ? <span className="ssa-sub">{s.installed.error}</span>
-                      : <span>{s.installed.count}줄{s.keyName ? (s.installed.hasKey ? ' · 쓰는 키 있음' : ' · 쓰는 키 없음') : ''}</span>) : <span className="ssa-sub">읽지 않음</span>}
+                      : <span>{s.installed.count}줄{s.keyName ? (s.installed.hasKey ? ' · 쓰는 키 있음' : ' · 쓰는 키 없음') : ''}</span>) : <span className="ssa-sub">{v.installedReadFailed ? '기록을 읽지 못함' : '읽지 않음'}</span>}
                     {s.installed && <div className="ssa-sub">{dateTime(s.installed.at)}{s.installed.stale ? ' · 주소가 바뀜(다시 읽기)' : ''}</div>}
                     {/* 쓰는 키 줄의 서버 쪽 제한(from= · 포워딩 금지) — 읽은 적이 있고 그 줄이 있을 때만 말한다(null = 모름) */}
                     {s.installed?.hasKey && s.installed.keyHasOptions === false && <div><Chip tone="warn" title="마지막으로 읽은 authorized_keys 기준 — 이 키 줄에 출발지 제한 · 포워딩 금지가 없습니다. 포탈이 넣은 줄(표식)이면 서버 쪽 제한이 켜진 상태에서 ‘키 로그인 설정’ 을 다시 하면(그 키가 아닌 접속 — 저장 비밀번호 · 이번 한 번 비밀번호로) 제한 줄로 바꿉니다. 사람이 넣은 줄(표식 없음) · 관리자가 옵션을 바꾼 줄은 포탈이 바꾸지 않습니다 — 서버에서 직접 고치세요.">서버 쪽 제한 없음</Chip></div>}
@@ -726,7 +726,7 @@ function KeyPicker({ server, catalog, onClose, say }) {
             <div className="ssa-installed">
               <div className="ssa-acts">
                 <b>이 서버에 들어 있는 키</b>
-                <span className="ssa-sub">{c.installed ? `${dateTime(c.installed.at)} 읽음${c.installed.stale ? ' · 주소가 바뀜' : ''}` : '아직 읽지 않음'}</span>
+                <span className="ssa-sub">{c.installed ? `${dateTime(c.installed.at)} 읽음${c.installed.stale ? ' · 주소가 바뀜' : ''}` : c.installedReadFailed ? '읽은 기록 파일을 지금 읽지 못함(모름)' : '아직 읽지 않음'}</span>
               </div>
               {c.installed && !c.installed.error && (
                 <ul className="ssa-list">{c.installed.keys.map((k, i) => (
@@ -860,7 +860,8 @@ function FoldersTab({ v, corpName, reload, say }) {
             <label>서버(비우면 공통) <Select sort={false} className="select select-sm" value={edit.folderServer} disabled={!edit.folderCorp} onChange={(e) => setEdit({ ...edit, folderServer: e.target.value })}>
               {/* 지금 서버 폴더 이름이 서버 목록에 없으면 그 값도 보인다(4회차 반증 R4R-6 — ‘공통’ 으로 보였는데 옛 이름이 저장됐다). 새로 고를 수는 없다. */}
               <option value="">공통</option>{(v.servers || []).filter((s) => s.vcenterId === edit.folderCorp).map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
-              {edit.folderServer && !(v.servers || []).some((s) => s.vcenterId === edit.folderCorp && s.name === edit.folderServer) && <option value={edit.folderServer} disabled={edit.folderServer !== edit.key.folderServer}>{edit.folderServer} (서버 목록에 없음)</option>}
+              {/* 글자 그대로 같은 서버가 없으면 지금 값을 보인다 — 대소문자만 다르면 그 서버로 쓰인다(서버 판정은 대소문자 무시 · 5회차 E5-3) */}
+              {edit.folderServer && !(v.servers || []).some((s) => s.vcenterId === edit.folderCorp && s.name === edit.folderServer) && <option value={edit.folderServer} disabled={edit.folderServer !== edit.key.folderServer}>{edit.folderServer} {(v.servers || []).some((s) => s.vcenterId === edit.folderCorp && String(s.name || '').toLowerCase() === String(edit.folderServer).toLowerCase()) ? '(서버 이름과 대소문자만 다름 — 그 서버로 쓰입니다)' : '(서버 목록에 없음)'}</option>}
             </Select></label>
             <div className="ssa-wide"><span className="ssa-sub">쓸 수 있는 기능</span><FeaturePicker catalog={v.features} value={edit.features} onChange={(f) => setEdit({ ...edit, features: f })} allowAll={edit.key.features == null} /></div>
             {!featuresChosen(edit.features) && <p className="ssa-note" style={{ color: toneVar('warn') }}>기능을 하나 이상 고르세요 — 없으면 이 키로 어느 기능도 접속하지 않습니다(쓰는 서버 {unitText(edit.key.servers, '대')}의 수집이 멈춥니다).</p>}

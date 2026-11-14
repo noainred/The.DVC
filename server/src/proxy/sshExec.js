@@ -245,7 +245,13 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
             const pick = hidden.find((x) => PW_PROMPT_RE.test(x.text) && !OTP_STRONG_RE.test(x.text)) || hidden.find((x) => !x.text.trim());
             const at = answered || !pick ? -1 : pick.i;
             if (at >= 0) { answered = true; noPwMethod = ''; }   // 앞 질의가 OTP 만 물었어도 이번에 비밀번호를 보냈다 — 거부면 거부다
-            else if (!answered && list.length > 0) noPwMethod = '서버의 대화형 로그인이 비밀번호 칸(입력을 가리는 칸)을 묻지 않았습니다(OTP 등만 물음) — 비밀번호를 보내지 않았습니다';
+            else if (!answered && list.length > 0) {
+              // 가리는 칸이 아예 없음 / 있었지만 비밀번호 칸으로 알아보지 못함을 가른다(5회차 B5-4 — ‘Kennwort:’ 같은 칸에도 ‘OTP 만 물음’ 이라고 했다).
+              const shown = hidden.map((x) => x.text.replace(/[^\p{L}\p{N} .:@_()\-]/gu, '').trim().slice(0, 40)).filter(Boolean).slice(0, 2).join(' · ');
+              noPwMethod = hidden.length
+                ? `서버의 대화형 로그인이 묻는 가리는 칸을 비밀번호 칸으로 알아보지 못했습니다${shown ? `(칸 글: ${shown})` : ''} — 비밀번호를 보내지 않았습니다`
+                : '서버의 대화형 로그인이 입력을 가리는 칸을 묻지 않았습니다(OTP 등 보이는 칸만) — 비밀번호를 보내지 않았습니다';
+            }
             finish(list.map((_p, i) => (i === at ? password || '' : '')));
           } });
         }
