@@ -187,3 +187,12 @@
 - **원격 스크립트**: 주석 줄(`#`)은 키 줄로 세지 않는다(B5-3) · 막힌 곳을 가리키는 ~/.ssh 링크는 읽기도 못 읽음(B5-2) · 끊긴 링크 홈은 ‘알 수 없음’(권한 · 또는 따라갈 수 없는 링크 — B5-1 · D5-5 · E5-4 문구).
 - 비밀번호를 보내지 않은 사유는 ‘가리는 칸 없음’ 과 ‘가리는 칸을 비밀번호 칸으로 알아보지 못함(칸 글)’ 으로 가른다(B5-4).
 - **화면**: 키 저장소 등 서버가 구조화해 답한 503(`registry-unreadable` 등)은 ‘업그레이드 중’ 안내로 바꾸지 않는다(E5-5 — `serviceDownKind`) · 읽은 키 기록 못 읽음은 ‘읽지 않음’ 이 아니라 ‘못 읽음’ + 키 점검 항목(E5-2) · 폴더 서버 이름 대소문자(E5-3) · 키 저장소를 못 읽는 동안 키 등록 요청 돌려보내기는 503(고아 키 방지 — E5-6).
+
+## 반복 5회차 반증 반영(87958dde) — 되돌리지 말 것
+
+- **돌려보내기 · 승인 대기 키 삭제도 저장소 쓰기다**(R5R-1): 키 등록 요청 돌려보내기(`approvalPrecheck` approve:false)와 `prechecks.deleteKey` 의 대기 키 갈래는 `KS.keyStoreWriteIssue()`(못 읽음 · 봉인 못 풂 · 포탈 밖 변경)를 OTP 앞에서 본다 — ‘못 읽음’ 만 보면 200 ok 뒤에 대기 키가 고아로 남았다.
+- **못 읽은 등록부의 빈 목록은 ‘모름’**(R5R-2 — C5-1 수정의 곁가지): `registryReadFailed()`(읽기 오류만 — 손상 보존 뒤 빈 목록은 사실) → bm-storage 조회 `registryUnreadable` + 화면 띠, CSV 가져오기(드라이런 포함) · 내보내기 503.
+- **읽은 키를 기록에 못 적으면 그렇게 말한다**(R5R-3): `installedReadText` 가 `saved:false` 를 warn 으로 · 키 고르기 창은 이번 응답의 keys 를 보인다(다음 창에는 남지 않음을 밝힌다).
+- **7b 교체 · 삭제도 본체와 같은 앞 조건을 OTP 앞에서**(R5R-4): `keyChangeGate` 의 `refsFirst`(REFS.rotateIssue · deleteIssue) · `deleteKeyIfUnused` 는 `deleteIssue` 를 쓴다(앞 조건 한 함수).
+- **실제로 쓰일 키 = `bindRule.effectiveKeyRefOf` 하나**(R5R-5): 접속(resolveOsAuth) · 키 고르기 사전 검사 · 본체 · bm-storage 묶기 · CSV 가 같은 함수 — 비밀번호 고정(osAuth 'password')은 키 없음. 손으로 다시 계산하지 말 것.
+- **SSH 키 저장소 복원 문구 = `keyBundle.keyStoreDropNotes` 하나**(R5R-6): 즉시 복원 응답 문구와 예약 적용 경고(stagedRestore warning — 적용 기록 · 콘솔 · 백업 화면)가 같은 문구. 괄호 사유는 항목 종류별(키 · 계정 비밀번호 · 계정 기본 키 · 대기 키 id 지킴).
