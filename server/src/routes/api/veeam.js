@@ -902,12 +902,12 @@ async function emSummary(now = Date.now()) {
   let d;
   try { d = await emData(false); } catch { return null; }
   const views = Array.isArray(d?.ems) ? d.ems : [];
-  let jobs = null; let cap = 0; let used = 0; let repoN = 0; const over = [];
+  let jobs = null; let cap = 0; let used = 0; let repoN = 0; let repoUnknown = 0; const over = [];
   for (const v of views) {
     const c = v?.data?.jobs?.counts?.all;
     if (Number.isFinite(c)) jobs = (jobs ?? 0) + c;
     for (const r of v?.data?.repositories || []) {
-      if (!Number.isFinite(r.capacity) || r.capacity <= 0 || !Number.isFinite(r.free)) continue;
+      if (!Number.isFinite(r.capacity) || r.capacity <= 0 || !Number.isFinite(r.free)) { repoUnknown++; continue; }   // 전체 점검 9회차(V-23): 모르는 저장소는 따로 센다(부분 합 표시)
       repoN++; cap += r.capacity; used += r.capacity - r.free;
       if (Number.isFinite(r.usedPct) && r.usedPct >= 90) over.push({ name: String(r.name || '').slice(0, 64), pct: r.usedPct, vc: Array.isArray(r.vcNames) ? r.vcNames.slice(0, 3).map((x) => String(x).slice(0, 64)) : null, daysLeft: repoDaysLeft(d?.history?.repo?.[`em:${v.id}#${r.server || ''}|${r.name}`]) });   // v2.838 남은 일수(추정 — 최근 30일 사용 증가 기울기)
     }
@@ -916,8 +916,9 @@ async function emSummary(now = Date.now()) {
   const lt = d?.licenses?.totals || null;
   return {
     ems: views.length, jobs,
-    repo: repoN ? { n: repoN, usedPct: Math.round((used / cap) * 1000) / 10, over: over.slice(0, 5), overN: over.length } : null,
-    lic: lt && Number.isFinite(lt.used) && Number.isFinite(lt.licensed) && lt.licensed > 0 ? { used: lt.used, licensed: lt.licensed, pct: Math.round((lt.used / lt.licensed) * 1000) / 10 } : null,
+    // 전체 점검 9회차(V-23): 일부 저장소 · B&R 만 아는 합은 부분 합이다 — 모르는 수(unknown)를 함께 실어 화면이 '전체' 로 보이지 않게
+    repo: repoN ? { n: repoN, usedPct: Math.round((used / cap) * 1000) / 10, over: over.slice(0, 5), overN: over.length, unknown: repoUnknown } : null,
+    lic: lt && Number.isFinite(lt.used) && Number.isFinite(lt.licensed) && lt.licensed > 0 ? { used: lt.used, licensed: lt.licensed, pct: Math.round((lt.used / lt.licensed) * 1000) / 10, unknown: Number(lt.unknown) || 0, servers: Number(lt.servers) || 0 } : null,
     auth: views.filter((v) => v?.status?.authStop).map((v) => String(v.name || '').slice(0, 64)).slice(0, 5),
     trend30: repoTrend30(d?.history?.repo, now),
     series30: repoSeries30(d?.history?.repo),   // v2.838 '30일 추이' 선 — 저장소 사용 합(EM 이력)
@@ -1252,8 +1253,13 @@ const EM_DETAIL_TTL_MS = 5 * 60_000;
 export function registerBackupStatus(api) {
   const toolsPerm = requirePerm('tools');
   // v2.838 일일 메일 계산기 — 전 법인 · 시스템 계정(화면 찾기와 같은 staleData · 범위 옵션 = 전체 VM · 템플릿·vCLS 제외)
-  setStaleProvider(async (q) => staleData({ user: { username: 'system', role: 'admin' } }, store.get(), { power: 'all', excl: true },
-    staleQueryOf({ ...q, n: String(q.n), excludeNone: q.excludeNone === false ? '0' : '1', onlyOn: q.onlyOn === false ? '0' : '1', includeNever: q.includeNever === false ? '0' : '1' })));
+  setStaleProvider(async (q) => {
+    // 전체 점검 9회차(V-21): 재시작 직후 골격 스냅샷(initial · VM 0대)으로 계산하면 '0대' 가 나온다 — 모름으로 돌려 메일이 그날 차례를 쓰지 않게(엣지 push 의 snapEvents 와 같은 판정)
+    const snap0 = store.get();
+    if (snap0?.initial === true || !(Array.isArray(snap0?.vms) && snap0.vms.length)) return { notReady: true, reason: '인벤토리 첫 수집이 끝나지 않았습니다(재시작 직후) — 다음 틱에 다시 봅니다.' };
+    return staleData({ user: { username: 'system', role: 'admin' } }, snap0, { power: 'all', excl: true },
+    staleQueryOf({ ...q, n: String(q.n), excludeNone: q.excludeNone === false ? '0' : '1', onlyOn: q.onlyOn === false ? '0' : '1', includeNever: q.includeNever === false ? '0' : '1' }));
+  });
   const csvPerm = requirePerm('data.csv');
 
   api.get('/tools/backup-summary', toolsPerm, (req, res) => {

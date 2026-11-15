@@ -158,12 +158,12 @@ export default function BackupSummaryTool() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8 }}>
             <Stat label="보호 VM" value={fmtNum(pa?.act?.v)} />
             <Stat label="7일 성공률" value={pctText(okPct(pa?.v7))} tone="ok" title="최근 7일에 끝난 VM 마지막 결과 중 성공·경고 비율(B&R 결과 기준 — 잡 세션 수가 아니다)" />
-            <Stat label="저장소 사용" value={em?.repo ? `${em.repo.usedPct}%` : '—'} extra={em?.repo?.overN ? `${em.repo.overN}곳 90% 넘음` : ''} title={em ? 'EM 이 읽은 저장소 용량 합' : 'EM 자료는 전체 범위 계정만 봅니다'} />
+            <Stat label="저장소 사용" value={em?.repo ? `${em.repo.usedPct}%` : '—'} extra={[em?.repo?.overN ? `${em.repo.overN}곳 90% 넘음` : '', em?.repo?.unknown ? `용량 모름 ${em.repo.unknown}곳 빼고` : ''].filter(Boolean).join(' · ')} title={em ? 'EM 이 읽은 저장소 용량 합' : 'EM 자료는 전체 범위 계정만 봅니다'} />
             <Stat label="다음 창" value={pa?.vnx ? hhmm(pa.vnx) : '—'} extra={pa?.vnx ? `VM ${fmtNum(pa.vnxN)}` : ''} title="Veeam 잡의 다음 실행 중 가장 이른 시각 · 그 뒤 1시간 안에 도는 VM 수" />
           </div>
           <div className="flex wrap" style={{ gap: 6 }}>
             {(veeamAuth > 0 || em?.auth?.length > 0) && <Chip tone="bad" title="인증 실패로 주기 수집을 멈춘 서버(자동 재시도 없음 — 설정에서 계정을 고치세요)">인증 실패 {fmtNum(veeamAuth + (em?.auth?.length || 0))}{em?.auth?.length ? ` (${em.auth.slice(0, 2).join(' · ')})` : ''}</Chip>}
-            {em?.lic && <Chip tone={em.lic.pct >= 90 ? 'warn' : 'muted'}>라이선스 {em.lic.pct}% 사용</Chip>}
+            {em?.lic && <Chip tone={em.lic.pct >= 90 ? 'warn' : 'muted'}>라이선스 {em.lic.pct}% 사용{em.lic.unknown ? ` (모름 ${em.lic.unknown}대 빼고)` : ''}</Chip>}
             {sum('veeamFailed') > 0 && <Chip tone="bad">읽기 실패 서버 {fmtNum(sum('veeamFailed'))}</Chip>}
             {partial.length > 0 && <Chip tone="warn" title={partial.map((r) => `${r.name}(${veeamStateOf(r.veeamState).text})`).join(' · ')}>일부만 읽은 법인 {partial.length}</Chip>}
           </div>
