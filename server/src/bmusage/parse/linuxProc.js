@@ -336,7 +336,7 @@ export function parseProcStatFull(lines = []) {
       }
       continue;
     }
-    const k = /^(ctxt|intr|procs_running|procs_blocked|processes)\s+(\d+)/.exec(s);
+    const k = /^(ctxt|intr|procs_running|procs_blocked|processes|btime)\s+(\d+)/.exec(s);   // btime — 1회차 점검 D1: 부팅 시각(장비 동일성 · 재부팅 판정)
     if (k) kv[k[1]] = num(k[2]);
   }
   if (!cpu && kv.ctxt == null) return null;
@@ -344,6 +344,7 @@ export function parseProcStatFull(lines = []) {
     cpu, cores, coreCount: coreCount || null, coresTruncated: coreCount > MAX_CORES,
     ctxt: kv.ctxt ?? null, intr: kv.intr ?? null,
     procsRunning: kv.procs_running ?? null, procsBlocked: kv.procs_blocked ?? null,
+    btime: kv.btime ?? null,
   };
 }
 

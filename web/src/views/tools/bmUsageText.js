@@ -97,7 +97,7 @@ export function emptyDiag(d = {}, { now = Date.now() } = {}) {
   if (!(d.targets || []).length) {
     const by = d.skippedCounts || {};
     const parts = [];
-    if (by['edge-delegated']) parts.push(`엣지가 수집하는 서버 **${by['edge-delegated']}대**(그 엣지 화면에서 보입니다)`);
+    if (by['edge-delegated']) parts.push(`엣지가 맡는 서버 **${by['edge-delegated']}대**(그 엣지 화면에서 보입니다 — OS 등록 엣지 지정 서버는 그 엣지에 OS 등록이 있어야 수집)`);   // 재확인 N1: 단정하지 않는다
     if (by['corp-off']) parts.push(`켜지 않은 법인 **${by['corp-off']}대**`);
     if (by.unassigned) parts.push(`법인 귀속이 없는 서버 **${by.unassigned}대**`);
     if (by['no-idrac']) parts.push(`iDRAC 등록이 없는 서버 **${by['no-idrac']}대**`);
@@ -106,6 +106,10 @@ export function emptyDiag(d = {}, { now = Date.now() } = {}) {
     if (by['os-ambiguous']) parts.push(`OS 등록을 하나로 못 정한 서버 **${by['os-ambiguous']}대**`);   // 2차 재확인 G3
     if (by['os-foreign']) parts.push(`OS 등록이 다른 법인 것인 서버 **${by['os-foreign']}대**`);
     if (by['remote-collector-unknown']) parts.push(`원격 수집 서버를 모르는 서버 **${by['remote-collector-unknown']}대**`);   // v2.961
+    // 1회차 점검 D3 · D4: 사람이 끈 등록 · 엣지 지정 OS 등록
+    if (by['idrac-disabled']) parts.push(`iDRAC 등록이 ‘사용 안 함’ 인 서버 **${by['idrac-disabled']}대**`);
+    if (by['os-disabled']) parts.push(`OS 등록이 ‘사용 안 함’ 인 서버 **${by['os-disabled']}대**`);
+    if (by['os-edge']) parts.push(`OS 등록이 엣지 수집으로 지정된 서버 **${by['os-edge']}대**`);
     return {
       kind: 'no-target', waiting: false,
       text: parts.length
@@ -147,6 +151,10 @@ export const MISSING_MARK = Object.freeze({
   'no-idrac-cred': 'iDRAC 계정 없음',
   'os-ambiguous': 'OS 등록 모호',      // 2차 재확인 G3 — 법인으로 하나를 못 정함
   'os-foreign': 'OS 등록 다른 법인',
+  // 1회차 점검 D3 · D4
+  'idrac-disabled': 'iDRAC 등록 꺼짐',
+  'os-disabled': 'OS 등록 꺼짐',
+  'os-edge': 'OS 등록 엣지 지정',
 });
 export function missingMark(list = []) {
   const parts = (list || []).map((k) => MISSING_MARK[k] || k);
@@ -166,6 +174,9 @@ export function missingFootnotes(rows = []) {
   if (kinds.has('no-idrac-cred')) out.push('**iDRAC 계정 없음** — 설정 › iDRAC 등록에서 계정·비밀번호를 채우세요.');
   if (kinds.has('os-ambiguous')) out.push('**OS 등록 모호** — 같은 이름 · 주소의 OS 등록이 여럿(주소가 다름)이거나, ‘수집에 추가’ 한 서버에 법인이 지정되지 않은 등록뿐입니다. 어느 장비인지 몰라 OS 로 접속하지 않습니다 — 설정 › 베어메탈 스토리지에서 그 등록에 법인을 지정하세요.');
   if (kinds.has('os-foreign')) out.push('**OS 등록 다른 법인** — 이름 · 주소가 맞는 OS 등록이 다른 법인으로 지정돼 있어 쓰지 않습니다(다른 법인 서버의 주소 · 계정으로 접속하지 않게).');
+  if (kinds.has('idrac-disabled')) out.push('**iDRAC 등록 꺼짐** — 그 iDRAC 등록이 ‘사용 안 함’ 이라 그 계정으로 로그인하지 않습니다. 설정 › iDRAC 등록에서 켜면 다음 주기부터 읽습니다.');
+  if (kinds.has('os-disabled')) out.push('**OS 등록 꺼짐** — 그 OS 계정 등록이 ‘사용 안 함’ 이라 SSH 하지 않습니다. 설정 › 베어메탈 스토리지에서 켜면 다음 주기부터 디스크·네트워크·HBA 까지 읽습니다.');
+  if (kinds.has('os-edge')) out.push('**OS 등록 엣지 지정** — 그 OS 계정 등록은 엣지 지정이라 이 노드에서는 그 주소 · 계정으로 접속하지 않습니다. 그 엣지 포탈에 이 서버의 OS 등록이 있어야 디스크·네트워크·HBA 를 수집합니다.');
   return out;
 }
 
@@ -174,6 +185,7 @@ export const SKIP_LABEL = Object.freeze({
   'edge-delegated': '엣지 수집', 'corp-off': '법인 미선택', unassigned: '법인 귀속 없음', 'no-idrac': 'iDRAC 등록 없음', 'no-idrac-cred': 'iDRAC 계정 없음',
   'no-os-cred': 'OS 계정 없음', 'both-off': '두 경로 모두 꺼짐', 'key-conflict': '키 충돌', 'os-ambiguous': 'OS 등록 모호', 'os-foreign': 'OS 등록 다른 법인',
   'remote-collector-unknown': '수집 서버 모름',   // v2.961 — 원격 수집 서버가 맡은 서버인데 그 수집 서버를 등록부에서 못 찾음(못 읽음 · 삭제)
+  'idrac-disabled': 'iDRAC 등록 꺼짐', 'os-disabled': 'OS 등록 꺼짐', 'os-edge': 'OS 등록 엣지 지정',   // 1회차 점검 D3 · D4
 });
 /** 대상이 아닌 서버 — 사유마다 조치가 다르므로 **있는 사유만** 한 번씩 적는다. */
 export function skippedNotes(counts = {}, reasons = {}) {
@@ -202,11 +214,15 @@ export function edgeDelegatedByAgent(skipped = [], { stateOf = null } = {}) {
     const a = t(s.agent);
     const k = a.toLowerCase();
     const cur = by.get(k);
-    if (cur) { cur.count += 1; if (s.agentClash) cur.clash = true; } else by.set(k, { agent: a, count: 1, clash: !!s.agentClash });
+    // 재확인 N1: OS 등록 엣지 지정으로 넘긴 서버(delegatedBy 'os-registry')는 따로 센다 — 엣지가 그 계정을 갖지 않을 수 있다(칩 · 안내가 단정하지 않게).
+    const os = s.delegatedBy === 'os-registry' ? 1 : 0;
+    if (cur) { cur.count += 1; cur.osReg += os; if (s.agentClash) cur.clash = true; } else by.set(k, { agent: a, count: 1, osReg: os, clash: !!s.agentClash });
   }
   const out = [...by.values()].map((x) => {
     // 재확인 R1: 서버가 '이 이름은 다른 수집 서버의 id · 이름과 겹친다(agentClash)' 고 하면 엣지 표의 같은 이름 줄이 다른 수집 서버일 수 있다 — 그 줄의 상태를 붙이지 않는다.
     if (x.clash) return { ...x, state: { ...EDGE_NAME_CLASH_STATE } };
+    // 재확인 N1: OS 등록 엣지 지정으로만 넘긴 묶음에는 엣지 표 상태(테두리 색 · 툴팁 포함)를 붙이지 않는다 — ‘정상’ 초록이 ‘그 엣지가 수집 중’ 으로 읽힌다.
+    if (x.osReg && x.osReg >= x.count) return { ...x, state: null };
     let state = null;
     if (x.agent && typeof stateOf === 'function') { try { state = stateOf(x.agent) || null; } catch { state = null; } }
     return { ...x, state };
@@ -235,21 +251,28 @@ export function remoteUnknownNote(skipped = []) {
 /** v2.961 — 엣지별 한 칸의 문구(엣지 이름 · 대수 · 상태). 이름이 비면 '이름 모름'. 상태를 모르면 그 사실을 말한다(지어내지 않는다). */
 export function edgeDelegatedChip(x = {}) {
   const name = t(x.agent) ? `‘${t(x.agent)}’` : '이름 모름';
+  const cnt = Number(x.count) || 0; const os = Number(x.osReg) || 0;
+  // 재확인 N1: OS 등록 엣지 지정으로만 넘긴 묶음에 엣지 표 상태(‘정상’ 등)를 붙이면 그 엣지가 수집 중인 것처럼 읽힌다 — 붙이지 않고 확인할 것을 말한다.
+  if (os && os >= cnt) return `${name} ${cnt}대 · OS 등록 엣지 지정(그 엣지에 OS 등록 확인 필요)`;
   const st = x.state && t(x.state.label) ? t(x.state.label) : (t(x.agent) ? '엣지 보관분 표에 없음' : '');
-  return `${name} ${Number(x.count) || 0}대${st ? ` · ${st}` : ''}`;
+  return `${name} ${cnt}대${st ? ` · ${st}` : ''}${os ? ` · 그중 ${os}대는 OS 등록 엣지 지정(그 엣지에 OS 등록 확인 필요)` : ''}`;
 }
 
 /** v2.961 — 엣지별 묶음 아래 안내 한 줄(조치). 표에 없는 엣지가 있으면 그 이유 후보를 함께 말한다. */
 export function edgeDelegatedGuide(list = []) {
   if (!Array.isArray(list) || !list.length) return '';
   const clash = list.some((x) => x.clash);
-  const missing = list.some((x) => !t(x.agent) || !x.state);
+  const missing = list.some((x) => !t(x.agent) || (!x.state && !((Number(x.osReg) || 0) >= (Number(x.count) || 0))));   // OS 등록 지정만인 묶음은 일부러 상태를 비웠다(표에 없음이 아니다)
   const off = list.some((x) => x.state && x.state.state === 'off-edge');
+  // 재확인 N1: OS 등록 엣지 지정 서버만 있는 묶음이면 ‘그 엣지가 수집합니다’ 를 말하지 않는다(엣지가 그 계정을 갖지 않을 수 있다).
+  const osAny = list.some((x) => (Number(x.osReg) || 0) > 0);
+  const osAll = list.every((x) => (Number(x.osReg) || 0) >= (Number(x.count) || 0));
   return [
-    '이 서버들은 **그 엣지가 수집**합니다(계정이 엣지에만 있어 중앙은 접속하지 않습니다). 아래 ‘엣지 보관분’ 표에서 그 엣지의 상태를 확인하세요 — ',
-    off ? '**엣지에서 꺼짐**' : '‘엣지에서 꺼짐’',
-    ' 이면 그 줄의 ‘중앙에서 켜기’ 로 켭니다(버튼은 전체 범위 관리자에게만 보입니다).',
-    missing ? ' 표에 없는 엣지는 수집 서버 등록부에 그 이름이 없거나(엣지가 보고한 이름), 이 계정에 보이는 대상이 없는 엣지이거나, 엣지 표를 아직 불러오지 못한 경우입니다.' : '',
+    osAll ? '' : '이 서버들은 **그 엣지가 수집**합니다(계정이 엣지에만 있어 중앙은 접속하지 않습니다). 아래 ‘엣지 보관분’ 표에서 그 엣지의 상태를 확인하세요 — ',
+    osAll ? '' : (off ? '**엣지에서 꺼짐**' : '‘엣지에서 꺼짐’'),
+    osAll ? '' : ' 이면 그 줄의 ‘중앙에서 켜기’ 로 켭니다(버튼은 전체 범위 관리자에게만 보입니다).',
+    osAny ? `${osAll ? '' : ' '}**OS 등록 엣지 지정** 서버는 중앙 OS 계정 등록에 엣지가 지정돼 있어 중앙이 접속하지 않을 뿐입니다 — 그 엣지 포탈에 이 서버의 OS 등록이 있어야 수집합니다(엣지 보관분에 그 서버 값이 없으면 아무도 수집하지 않는 것입니다 · 중앙 등록은 디스크 용량 측정 위임용).` : '',
+    !osAll && missing ? ' 표에 없는 엣지는 수집 서버 등록부에 그 이름이 없거나(엣지가 보고한 이름), 이 계정에 보이는 대상이 없는 엣지이거나, 엣지 표를 아직 불러오지 못한 경우입니다.' : '',
     clash ? ' **이름이 겹친 엣지**는 엣지 표의 같은 이름 줄이 다른 수집 서버일 수 있어 상태를 붙이지 않았습니다 — 수집 서버 이름을 서로 다르게 바꾸세요.' : '',
   ].join('');
 }

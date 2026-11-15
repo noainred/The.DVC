@@ -3,6 +3,7 @@
  *   ① 계산(순수): 실패 사유는 missReason 코어 하나(상태 9종 분류) · 리포트 없음 · 첫 주기 · PSI 없음은 실패가 아니다 · 대상 0대면 성공률 null(0% 도 100% 도 아니다) ·
  *      SSH 를 연 서버만 소요를 센다 · ‘며칠째’ 는 이어지는 동안 유지 · 기준 대조는 값 없으면 unread(보류)
  *   ② 실제 폴러 배선: pollBmUsageOnce → 슬롯 최대 사용 · SSH 소요 · 인증 정지 사유 · collect_cycle 기록 · 0대 주기도 기록 · ‘수집 건강’ 알림 규칙(노드 한 칸)
+ *      1회차 점검 D6: 자격 해석이 막아 접속하지 않은 서버(cred-config — 없는 키 참조)도 SSH 소요에 넣지 않는다(예전: 0~1ms 로 들어가 p50 을 끌어내렸다).
  *   ③ 봉투 · 중앙 정제(아는 필드만 · 열거 밖 버림 · 시각 clamp) ④ 실제 라우터: viewer 403 · 범위 계정은 자기 법인 행만 · 다른 법인이 섞인 노드 값은 숨김 · 구버전 엣지 old-version
  * 기준 시각: 정시 −30분(v2.517 규약).
  */
@@ -69,12 +70,15 @@ async function setupPoller() {
   fs.writeFileSync(path.join(DIR, 'bm-storage.json'), JSON.stringify({ servers: [
     { id: 'o-a', name: 'bm-a', host: '127.0.0.1', port: 9, username: 'mon', password: 'pw', mounts: [] },
     { id: 'o-b', name: 'bm-b', host: '127.0.0.1', port: 9, username: 'mon2', password: 'pw2', mounts: [] },
+    // 1회차 점검 D6: 없는 키 참조 — 자격 해석(refs.withResolvedAuth)이 authError 로 막아 접속하지 않는다(cred-config)
+    { id: 'o-k', name: 'bm-k', host: '127.0.0.1', port: 9, username: 'mon3', keyRef: 'k-missing-d6', mounts: [] },
   ] }));
   fs.writeFileSync(path.join(DIR, 'bmusage-settings.json'), JSON.stringify({ enabled: true, corps: { vcA: true, vcB: true }, osSsh: true, idracTelemetry: false }));
   const P = await import('../src/bmusage/poller.js');
   P._setFleetForTest(async () => ({ bareMetal: [
     { serverId: 's-a', name: 'bm-a', serviceTag: 'HTAGA', vcenterId: 'vcA' },
     { serverId: 's-b', name: 'bm-b', serviceTag: 'HTAGB', vcenterId: 'vcA' },
+    { serverId: 's-k', name: 'bm-k', serviceTag: 'HTAGK', vcenterId: 'vcA' },
   ], virtualizationHosts: [] }));
   (await import('../src/bmusage/settings.js'))._resetForTest();
   return P;
@@ -95,10 +99,10 @@ test('② 실제 폴러 — 사유 · 슬롯 최대 · SSH 소요 · 주기 기�
   assert.equal(r1.ok, true, JSON.stringify(r1).slice(0, 300));
   const h = P.collectHealthNow();
   assert.ok(h, '주기 뒤 상태가 있다');
-  assert.equal(h.node.servers, 2); assert.equal(h.node.ok, 0); assert.equal(h.node.successPct, 0);
+  assert.equal(h.node.servers, 3); assert.equal(h.node.ok, 0); assert.equal(h.node.successPct, 0);
   const codes = h.node.reasons.map((x) => `${x.path}:${x.code}`).sort();
-  assert.deepEqual(codes, ['os:auth-stopped', 'os:ssh-error'], JSON.stringify(h.node.reasons));
-  assert.equal(h.node.ssh.n, 1, '정지된 서버는 SSH 를 열지 않는다 — 소요에 넣지 않는다');
+  assert.deepEqual(codes, ['os:auth-stopped', 'os:cred-config', 'os:ssh-error'], JSON.stringify(h.node.reasons));
+  assert.equal(h.node.ssh.n, 1, '정지된 서버 · 자격 해석이 막은 서버(1회차 점검 D6)는 SSH 를 열지 않는다 — 소요에 넣지 않는다');
   assert.ok(h.node.conc.max >= 1 && h.node.conc.max <= h.node.conc.cap, JSON.stringify(h.node.conc));
   assert.equal(h.node.cells.success, 'true'); assert.equal(h.node.cells.auth, 'true');
   assert.ok(h.node.db && h.node.db.mainBytes > 0, '저장 실측(stat)');
@@ -107,7 +111,7 @@ test('② 실제 폴러 — 사유 · 슬롯 최대 · SSH 소요 · 주기 기�
   const O = await import('../src/bmusage/opsDb.js');
   const { config } = await import('../src/config.js');
   const rows = await O.cycleRange({ agent: config.agent?.name || '', from: 0, to: Date.now() + 1000 });
-  assert.equal(rows.length, 1); assert.equal(rows[0].servers, 2); assert.equal(rows[0].ok, 0);
+  assert.equal(rows.length, 1); assert.equal(rows[0].servers, 3); assert.equal(rows[0].ok, 0);
   await A._drainPerfAlertsForTest();
   const sent = A.perfAlertStatus().sent.filter((x) => x.rule === 'collect');
   assert.equal(sent.length, 1, '수집 건강 규칙 — 노드 한 칸'); assert.equal(sent[0].key, '__node__'); assert.match(sent[0].title, /성공률 0%/);
