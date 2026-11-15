@@ -128,4 +128,20 @@ describe('diskBadText', () => {
     expect(c.vals).toBe('디스크 값 — 읽음 3대 · 장비에 없음 5대 · 못 읽음 1대 · 아직 읽지 않음 2대 (값을 읽은 디스크 24개 · 값 모름 40개)');
     expect(c.sel).toBe('시스템 이벤트 로그 — 읽음 10대 · 아직 읽지 않음 1대 (디스크 항목 4건)');
   });
+
+  it('1회차(R1 · R6 · R7) — 띠의 구간 끝은 마지막으로 읽은 때 · 실패한 마지막 점검을 밝힘 · 본 기간은 끊김 없이 본 구간 · 위치 못 읽은 기록은 건수로', () => {
+    const cov = { continuousSince: NOW - 60 * DAY, lastOkAt: NOW - 30 * DAY, lastScanAt: NOW - HOUR, lastStatus: 'timeout', lastStatusLabel: '시한 초과', logSpan: { ms: 90 * DAY }, shortLogDays: 30,
+      diag: { oldest: NOW - 70 * DAY, newest: NOW - 59 * DAY } };
+    const b = serverBand({ status: 'clean', coverage: cov, counts: {} }, NOW);
+    expect(b.lines.join(' ')).toContain('(30일)');
+    expect(b.lines.join(' ')).toContain('에 읽은 결과입니다 — 마지막 점검');
+    expect(b.lines.join(' ')).toContain('시한 초과');
+    const rows = sourceRows(cov);
+    expect(rows[0].range).toContain('(30일)');
+    expect(rows[0].note).toContain('시한 초과');
+    expect(sourceRows({ lastOkAt: NOW, diag: { oldest: NOW - 37 * DAY, newest: NOW } })[0].range).toContain('37일');
+    const r = serverBand({ status: 'records', coverage: { continuousSince: NOW - 10 * DAY, lastOkAt: NOW }, counts: { records: 3, slots: 0, unplaced: 3, inUse: 0, replaced: 0, unknown: 0 } }, NOW);
+    expect(r.title).toContain('위치를 못 읽은 기록 3건 포함');
+  });
 });
+

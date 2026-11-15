@@ -124,7 +124,7 @@ export function buildFleet({ servers = [], db = { servers: [], records: [], seri
   let synthesized = false;
   const readServers = [];
   const tot = { servers: 0, read: 0, unread: 0, excluded: 0, disks: 0, recordSlots: 0, inUse: 0, replaced: 0, unknown: 0, records: 0, unrecoverable: 0, unwatched: 0, serversWithRecords: 0,
-    spanKnown: 0, shortLog: 0, loginHeavy: 0, diagKnown: 0, alertingDisks: 0, alertingServers: 0, drivesUnknownServers: 0,
+    spanKnown: 0, shortLog: 0, loginHeavy: 0, diagKnown: 0, alertingDisks: 0, alertingServers: 0, drivesUnknownServers: 0, unplaced: 0, staleServers: 0,
     // 과거 기록 읽기 1단계 — 출처별 서버 수(읽은 서버만 · 상태별)와 디스크 값.
     valsBy: {}, selBy: {}, valsDisks: 0, valsUnknownDisks: 0, traceDisks: 0, traceUnrecoverable: 0, traceServers: 0, selDriveEvents: 0 };
   const traceList = [];
@@ -168,7 +168,11 @@ export function buildFleet({ servers = [], db = { servers: [], records: [], seri
     c.records += v.counts.records; c.unrecoverable += v.counts.unrecoverable;
     tot.recordSlots += v.counts.slots; tot.inUse += v.counts.inUse; tot.replaced += v.counts.replaced; tot.unknown += v.counts.unknown;
     tot.records += v.counts.records; tot.unrecoverable += v.counts.unrecoverable;
-    if (v.counts.slots > 0) tot.serversWithRecords += 1;
+    // 반증 R1: 위치를 못 읽은 기록만 있는 서버도 '기록이 있는 서버' 다(자리 수로 세면 빠졌다).
+    if (v.status === 'records') tot.serversWithRecords += 1;
+    tot.unplaced += v.counts.unplaced || 0;
+    // 개선 I3: 한 번 읽은 뒤 마지막 점검이 실패한 서버 — 지난 결과로 집계되고 있다(화면이 수를 밝힌다).
+    if (read && row && row.lastStatus && row.lastStatus !== 'ok') tot.staleServers += 1;
     for (const r of v.records) {
       if (!COUNTED.has(r.cls)) continue;
       const mk = monthKey(r.created);
@@ -198,7 +202,8 @@ export function buildFleet({ servers = [], db = { servers: [], records: [], seri
         if (traced) tot.traceServers += 1;
       }
     }
-    if (read) {
+    // iDRAC 가 지금 알리는 디스크 — 로그를 못 읽은 서버(403 등)도 디스크 목록은 있을 수 있다(반증 R10). 점검한 적이 있는 서버만 센다.
+    if (row) {
       if (Array.isArray(v.alerting)) {
         if (v.alerting.length) tot.alertingServers += 1;
         tot.alertingDisks += v.alerting.length;

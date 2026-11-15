@@ -284,7 +284,8 @@ export function registerDiskBad(api) {
     } else if (!unitFor(req, res, agent)) return undefined;
     const r = stopJob(req.params.id, agent == null ? null : String(agent));
     logAudit({ user: req.user?.username || '', action: '디스크 배드 섹터 점검 중단', target: req.params.id, detail: `조각 ${agent == null ? '전부' : (String(agent) || '중앙 직결')}`, ip: req.ip });
-    res.json({ ok: true, job: r });
+    // 응답도 범위를 거친다(반증 R14 — 범위 계정에게 작업 전체(다른 엣지 조각 · 다른 관리자 이름)가 실렸다).
+    res.json({ ok: true, job: r ? (jobsFor(req).find((x) => x.id === r.id) || null) : null });
   });
 
   api.post('/tools/disk-bad/jobs/:id/retry', writeRole, toolsPerm, (req, res) => {
@@ -295,7 +296,7 @@ export function registerDiskBad(api) {
     if (!r) return res.status(404).json({ ok: false, reason: '다시 보낼 조각이 없습니다(진행 중이거나 작업이 없습니다).' });
     if (r.busy) return res.status(409).json({ ok: false, reason: '이 법인에 진행 중인 다른 점검이 있습니다.' });
     logAudit({ user: req.user?.username || '', action: '디스크 배드 섹터 점검 다시 보내기', target: req.params.id, detail: `조각 ${agent || '중앙 직결'}`, ip: req.ip });
-    res.json({ ok: true, job: r });
+    res.json({ ok: true, job: jobsFor(req).find((x) => x.id === r.id) || null });
   });
 
   api.put('/tools/disk-bad/settings', adminOnly, fullScopeOnly, (req, res) => {

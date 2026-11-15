@@ -69,7 +69,12 @@ export function serverBand(view, now = Date.now()) {
   const cov = view.coverage || {};
   // 구간은 **끊김 없이 본 구간**(continuousSince)으로 말한다 — '지금까지 본 가장 오래된 시각'(coveredFrom)은 사이에 못 본 틈이 있어도 내려간다(반증 3.8.2 #1).
   const from = cov.continuousSince;
-  const span = Number.isFinite(from) ? `${fmtDate(from)} ~ ${fmtDate(now)} (${spanText(from, now)})` : '구간 모름';
+  // 끝은 **마지막으로 읽은 때**(반증 R6 — 오늘로 쓰면 한 달 전에 읽은 결과도 '오늘까지 봤다' 가 됐다).
+  const end = Number.isFinite(cov.lastOkAt) ? cov.lastOkAt : now;
+  const span = Number.isFinite(from) ? `${fmtDate(from)} ~ ${fmtDate(end)} (${spanText(from, end)})` : '구간 모름';
+  // 마지막 점검이 실패했으면 아래 판정은 지난번에 읽은 결과다 — 그렇다고 밝힌다.
+  const staleLine = cov.lastStatus && cov.lastStatus !== 'ok' && Number.isFinite(cov.lastOkAt)
+    ? [`아래는 ${fmtDateTime(cov.lastOkAt)} 에 읽은 결과입니다 — 마지막 점검(${fmtDateTime(cov.lastScanAt)})은 ${cov.lastStatusLabel || '읽기 실패'}.`] : [];
   // 과거 기록 읽기 1단계: 로그 기록이 없는 디스크의 누적 값에 흔적이 있으면 띠가 말한다(날짜는 모른다 — 서버 verdict.js traceOf).
   const traces = Number.isFinite(view.counts?.traces) ? view.counts.traces : 0;
   const traceLine = traces > 0 ? [`로그 기록이 없는 디스크 ${traces}개의 누적 값에 흔적(재할당 · 보류 · 복구 불가)이 있습니다 — 값은 누적이라 언제 생겼는지 모릅니다. 아래 ‘디스크 값’ 표를 보세요.`] : [];
@@ -80,17 +85,18 @@ export function serverBand(view, now = Date.now()) {
   }
   if (view.status === 'records') {
     const c = view.counts || {};
-    return { tone: 'bad', title: `배드 섹터 기록이 있습니다 — ${c.records}건 · 디스크 자리 ${c.slots}곳`, lines: [
-      `아직 사용 중 ${c.inUse} · 교체됨 ${c.replaced} · 판단 불가 ${c.unknown}`, `끊김 없이 본 구간 ${span}`, ...traceLine] };
+    // 위치를 못 읽은 기록은 건수로만 밝힌다(반증 R1 — 자리 단위 '판단 불가' 에 섞였다).
+    return { tone: 'bad', title: `배드 섹터 기록이 있습니다 — ${c.records}건 · 디스크 자리 ${c.slots}곳${c.unplaced ? `(위치를 못 읽은 기록 ${c.unplaced}건 포함)` : ''}`, lines: [
+      `아직 사용 중 ${c.inUse} · 교체됨 ${c.replaced} · 판단 불가 ${c.unknown}`, `끊김 없이 본 구간 ${span}`, ...staleLine, ...traceLine] };
   }
-  if (view.status === 'unwatched') return { tone: unrecTrace ? 'bad' : 'warn', title: '이 방법으로는 볼 수 없는 서버입니다', lines: ['디스크가 RAID 로 묶여 있지 않아(HBA · 패스스루) Patrol Read 가 돌지 않습니다 — ‘기록 없음’ 이 아닙니다.', ...traceLine] };
+  if (view.status === 'unwatched') return { tone: unrecTrace ? 'bad' : 'warn', title: '이 방법으로는 볼 수 없는 서버입니다', lines: ['디스크가 RAID 로 묶여 있지 않아(HBA · 패스스루) Patrol Read 가 돌지 않습니다 — ‘기록 없음’ 이 아닙니다.', ...staleLine, ...traceLine] };
   if (view.status === 'partial') {
     const why = READ_STOP_LABEL[cov.readStop] || '';
-    return { tone: unrecTrace ? 'bad' : 'warn', title: '일부만 읽었습니다 — 읽은 구간에는 기록이 없습니다', lines: [`읽은 구간 ${span}. 다음 점검에서 처음부터 다시 읽습니다.`, ...(why ? [why] : []), ...traceLine] };
+    return { tone: unrecTrace ? 'bad' : 'warn', title: '일부만 읽었습니다 — 읽은 구간에는 기록이 없습니다', lines: [`읽은 구간 ${span}. 다음 점검에서 처음부터 다시 읽습니다.`, ...(why ? [why] : []), ...staleLine, ...traceLine] };
   }
   if (traces > 0) {
     return { tone: unrecTrace ? 'bad' : 'warn', title: `남은 로그에는 기록이 없지만, 디스크 값에 흔적이 있는 디스크가 ${traces}개 있습니다`, lines: [...traceLine,
-      `끊김 없이 본 구간 ${span} — 로그의 ‘기록 없음’ 은 이 구간에서만의 말입니다.`] };
+      `끊김 없이 본 구간 ${span} — 로그의 ‘기록 없음’ 은 이 구간에서만의 말입니다.`, ...staleLine] };
   }
   // v3.8.2: iDRAC 가 이 경로로 주는 것은 활성 로그로 보인다(Dell 안내서 검색 요약 + 실제 서버 1대) — 그 이전 기록이 '없다' 가 아니라 '여기서는 안 보인다' 이다.
   //   '며칠치뿐' 은 **활성 로그가 담은 기간**(서버 summary.logSpanOf — 시간이 지나도 늘지 않는다)으로 말하고, 기준 일수는 서버가 준 값을 쓴다(전 법인 경고와 같은 값).
@@ -98,7 +104,7 @@ export function serverBand(view, now = Date.now()) {
   const limitDays = Number.isFinite(cov.shortLogDays) ? cov.shortLogDays : 30;
   const short = Number.isFinite(spanMs) && spanMs < limitDays * 86_400_000;
   return { tone: short ? 'warn' : 'neutral', title: short ? `기록은 없지만, iDRAC 가 보여 주는 로그가 ${spanText(0, spanMs)}치뿐입니다` : '남아 있는 로그에는 배드 섹터 기록이 없습니다',
-    lines: [`끊김 없이 본 구간 ${span} · 그 이전 기록은 iDRAC 가 보여 주는 로그에 없어 확인하지 못했습니다(보관 로그로 넘어갔을 수 있고, 이 기능은 아직 보관 로그를 읽지 않습니다). ‘발생한 적 없음’ 이 아니라 ‘이 구간에 기록 없음’ 입니다.`] };
+    lines: [`끊김 없이 본 구간 ${span} · 그 이전 기록은 iDRAC 가 보여 주는 로그에 없어 확인하지 못했습니다(보관 로그로 넘어갔을 수 있고, 이 기능은 아직 보관 로그를 읽지 않습니다). ‘발생한 적 없음’ 이 아니라 ‘이 구간에 기록 없음’ 입니다.`, ...staleLine] };
 }
 
 /** 끝까지 못 읽은 이유(서버 db.js read_stop). 모르는 값은 말하지 않는다. */
@@ -180,8 +186,10 @@ export const valCell = (v) => (Number.isFinite(v) ? v.toLocaleString('ko-KR') : 
 export function sourceRows(cov) {
   if (!cov) return [];
   const d = cov.diag || null;
-  const lcFrom = Number.isFinite(d?.oldest) ? d.oldest : cov.continuousSince;
-  const lcTo = Number.isFinite(d?.newest) ? d.newest : cov.lastOkAt;
+  // 본 기간 = 끊김 없이 본 구간 ~ 마지막으로 읽은 때(반증 R7 — 읽기 진단의 범위는 '처음부터 읽은 점검' 때 것이라 이어 읽기가 쌓여도 첫 점검 날짜에 멈췄다).
+  //   그 값이 없을 때만 읽기 진단의 범위를 쓴다.
+  const lcFrom = Number.isFinite(cov.continuousSince) ? cov.continuousSince : (Number.isFinite(d?.oldest) ? d.oldest : null);
+  const lcTo = Number.isFinite(cov.continuousSince) && Number.isFinite(cov.lastOkAt) ? cov.lastOkAt : (Number.isFinite(d?.newest) ? d.newest : cov.lastOkAt);
   const rangeOf = (a, b) => (Number.isFinite(a) && Number.isFinite(b) ? `${fmtDate(a)} ~ ${fmtDate(b)} (${spanText(a, b)})` : '—');
   const s = cov.sel || {};
   const v = cov.vals || {};
@@ -192,7 +200,8 @@ export function sourceRows(cov) {
   return [
     { key: 'lclog', name: '활성 Lifecycle 로그', what: '배드 섹터 계열 기록', range: rangeOf(lcFrom, lcTo), rangeSort: Number.isFinite(lcFrom) ? lcFrom : null,
       count: Number.isFinite(cov.logTotal) ? `${num(cov.logTotal)}건` : '—', status: cov.lastOkAt ? 'ok' : 'error', statusLabel: cov.lastOkAt ? '읽음' : (cov.lastStatusLabel || '읽기 실패'),
-      at: cov.lastOkAt ?? null, note: '' },
+      at: cov.lastOkAt ?? null,
+      note: cov.lastStatus && cov.lastStatus !== 'ok' && Number.isFinite(cov.lastOkAt) ? `마지막 점검(${fmtDateTime(cov.lastScanAt)})은 ${cov.lastStatusLabel || '읽기 실패'} — ${fmtDateTime(cov.lastOkAt)} 에 읽은 것을 보입니다.` : '' },
     { key: 'sel', name: '시스템 이벤트 로그(SEL)', what: '디스크 탈거 · 장착 · 고장 시각', range: rangeOf(s.range?.oldest, s.range?.newest), rangeSort: Number.isFinite(s.range?.oldest) ? s.range.oldest : null,
       count: Number.isFinite(s.read) ? `${num(s.read)}건 · 디스크 항목 ${num(s.events)}건` : '—', status: s.status || 'never', statusLabel: s.label || '아직 읽지 않음', at: s.at ?? null,
       note: [selKept, stale(s)].filter(Boolean).join(' ') },
