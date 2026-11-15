@@ -41,6 +41,11 @@ export const PROC_EVERY_CHOICES = Object.freeze([5, 15, 30]);
 export const TOPO_EVERY_S = 30;
 /** 한 번 연 반복문의 수명(초) — 넘으면 스스로 끝나고 수집기가 다시 연다. */
 export const LOOP_LIFE_S = 6 * 3600;
+/** v3.12.0(⑬ 더할 지표 A1): 파일시스템 사용률 · inode 주기(초) · df 시한(초) — 시안 컨펌 기본값(60초 · 3초). */
+export const FS_EVERY_S = 60;
+export const DF_TIMEOUT_S = 3;
+/** df 에서 뺄 종류 — 메모리 · 읽기 전용 이미지 · 컨테이너 겹침(로컬 디스크가 아니다). 네트워크 파일시스템은 -l 이 뺀다(멈춘 NFS 가 반복문을 붙잡지 않게). */
+const DF_SKIP = '-x tmpfs -x devtmpfs -x squashfs -x overlay -x iso9660';
 
 /**
  * 프로세스 줄: `pid ticks threads starttime rssPages comm ppid utime stime nice vsizeBytes majflt blkioTicks state` — comm 은 안전한 글자만(그 밖은 `_` · 비면 `_`).
@@ -80,7 +85,7 @@ function build(I, PE = PROC_EVERY_S) {
   const maxN = Math.max(1, Math.floor(LOOP_LIFE_S / I));
   return [
     'LC_ALL=C; export LC_ALL',
-    `I=${I}; P=${PE}; TE=${topoEvery}; MAXN=${maxN}`,
+    `I=${I}; P=${PE}; TE=${topoEvery}; MAXN=${maxN}; FE=${FS_EVERY_S}`,
     "echo '##HELLO 1'",
     'echo "uname $(uname -srm 2>/dev/null)"',
     'echo "rel $(head -n 1 /etc/redhat-release 2>/dev/null)"',
@@ -98,11 +103,21 @@ function build(I, PE = PROC_EVERY_S) {
     'n=0',
     'while [ $n -lt $MAXN ]; do',
     '  echo "##T $(cut -d" " -f1 /proc/uptime) $(date +%s)"',
-    "  echo '##STAT'; grep -E '^(cpu[0-9]* |procs_running |procs_blocked )' /proc/stat 2>/dev/null | head -n 1101",
+    // v3.12.0(⑬ A3): ctxt · processes(fork 누적) · intr 첫 합계 칸 — intr 줄은 수천 칸이라 awk 가 앞 두 칸만 낸다(줄 상한 안)
+    "  echo '##STAT'; awk '/^(cpu[0-9]* |procs_running |procs_blocked |ctxt |processes )/{print;next} /^intr /{print $1,$2}' /proc/stat 2>/dev/null | head -n 1104",
     "  echo '##LOAD'; cat /proc/loadavg 2>/dev/null",
     "  echo '##MEM'; head -n 129 /proc/meminfo 2>/dev/null",
     "  echo '##NET'; head -n 259 /proc/net/dev 2>/dev/null",
     "  echo '##DISK'; head -n 1025 /proc/diskstats 2>/dev/null",
+    // v3.12.0(⑬ A4 · A2): 메모리 압박(스왑 입출력 · major fault · 페이지 회수 — RHEL 7 에는 PSI 가 없다) · TCP 카운터 · 소켓 수. 모두 일반 계정으로 읽힌다.
+    "  echo '##VM'; grep -E '^(pswpin|pswpout|pgmajfault|pgscan|pgsteal)' /proc/vmstat 2>/dev/null | head -n 64",
+    "  echo '##SNMP'; cat /proc/net/snmp /proc/net/netstat 2>/dev/null | grep -E '^(Tcp|TcpExt):' | head -n 8",
+    "  echo '##SOCK'; head -n 8 /proc/net/sockstat 2>/dev/null",
+    // v3.12.0(⑬ A1): 60초마다 로컬 파일시스템 사용률 · inode — df 는 시한(KILL)으로 감싸고 끝에 종료값 줄(rc 137 = 시한에 걸림 → 화면 '응답 없음')
+    '  if [ $(( (n * I) % FE )) -lt $I ]; then',
+    `    echo '##FS'; ( timeout -s KILL ${DF_TIMEOUT_S} df -P -l -T -k ${DF_SKIP} 2>/dev/null; echo "rc $?" ) | head -n 258`,
+    `    echo '##FSI'; ( timeout -s KILL ${DF_TIMEOUT_S} df -P -l -i ${DF_SKIP} 2>/dev/null; echo "rc $?" ) | head -n 258`,
+    '  fi',
     ckAdd('CB', '  '),
     '  if [ $((n % TE)) -eq 0 ]; then',
     "    echo '##NETTOPO'",

@@ -116,6 +116,16 @@ export async function readMetric(target, fromMinute, toMinute, limit = 2000) {
   return db.prepare('SELECT minute, n, data FROM fm_metric WHERE target = ? AND minute >= ? AND minute <= ? ORDER BY minute LIMIT ?')
     .all(String(target), fromMinute, toMinute, limit);
 }
+/**
+ * v3.12.0(⑬ 가득 찰 때까지) — [from, to] 에서 step 분마다 한 묶음만(하루 144묶음 · (target, minute) 인덱스 범위 뒤 나머지 거르기).
+ * 결과가 크지 않게 줄 수 상한 `limit`.
+ */
+export async function readMetricEvery(target, fromMinute, toMinute, step = 10, limit = 400) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.prepare('SELECT minute, data FROM fm_metric WHERE target = ? AND minute >= ? AND minute <= ? AND minute % ? = 0 ORDER BY minute LIMIT ?')
+    .all(String(target), fromMinute, toMinute, Math.max(1, step | 0), limit);
+}
 export async function readProc(target, fromMinute, toMinute, limit = 120) {
   const db = await getDb();
   if (!db) return null;

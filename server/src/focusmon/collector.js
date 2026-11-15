@@ -19,7 +19,8 @@ import { createAuthGuard } from '../util/authGuard.js';
 import { scriptFor, normInterval, normProcEvery } from './script.js';
 import { loadWindow, nodeCounters } from './load.js';
 import { createFrameParser, frameToRaw, LINE_MAX } from './parse.js';
-import { computeSample, topProcs } from './rates.js';
+import { computeSample, topProcs, procStates } from './rates.js';
+import { FS_EVERY_S } from './script.js';
 
 export const focusAuthGuard = createAuthGuard({ file: 'focusmon-auth-stops.json' });
 export const READY_TIMEOUT_MS = 15_000;
@@ -53,6 +54,8 @@ export function createCollector(target, { interval, procEvery, keys, onSample, o
   let stopped = false; let ctl = null; let timer = null; let fails = 0; let busy = false;
   let status = { state: 'connecting', since: now(), lastSampleAt: null, error: '', hello: null, osVerified: null, interval: iv };
   let sessionSamples = 0;
+  // v3.12.0(⑬): 마지막 프로세스 상태(D · 좀비 — 5초마다) · 마지막 파일시스템(60초마다)을 표본마다 싣는다(age 초 — 엣지 시각을 쓰지 않는다)
+  let lastPst = null; let lastPstAt = 0; let lastFs = null; let lastFsAt = 0; const dSince = new Map();
   let prevRaw = null; let prevAt = 0; let topo = {}; let blk = null; let users = new Map(); let prevProc = null; let prevProcUp = null; let hello = null;
   let units = new Map(); let prevIo = null; let usersUp = null; let unitsUp = null; // v2.981 서비스(30초) · 앞 입출력(프로세스 주기) · 맵을 읽은 uptime(반증 F6)
   // v2.983 수집 부하 — ##SELF 창(보통 30초): 앞 SELF 이후 받은 바이트(묶음별) · 프레임 · 구성 · 프로세스 횟수. 새 세션이면 비운다(셸이 바뀐다).
@@ -86,8 +89,13 @@ export function createCollector(target, { interval, procEvery, keys, onSample, o
     if (raw.ps) { users = raw.ps; usersUp = raw.up; }
     if (raw.unit) { units = raw.unit; unitsUp = raw.up; }
     const ts = now();
+    if (raw.proc) { lastPst = procStates(raw.proc, raw.up, dSince); lastPstAt = ts; }
+    if (raw.fs) { lastFs = raw.fs; lastFsAt = ts; }
+    // 묵은 값은 싣지 않는다 — 프로세스 상태는 프로세스 표본 주기(최대 30초)의 2배, 파일시스템은 주기의 3배(df 가 시한에 걸려도 rc 로 온다 — 줄이 아예 없으면 모름)
+    const pst = lastPst && ts - lastPstAt <= 65_000 ? lastPst : null;
+    const fsNow = lastFs && ts - lastFsAt <= FS_EVERY_S * 3_000 ? { ...lastFs, age: Math.round((ts - lastFsAt) / 1000) } : null;
     if (prevRaw && ts - prevAt < 120_000) {
-      const s = computeSample(prevRaw, raw, { topo, blk });
+      const s = computeSample(prevRaw, raw, { topo, blk, pst, fs: fsNow });
       if (s.dt != null) {
         try { onSample?.(s, { ts, hello }); } catch { /* */ }
         status.lastSampleAt = ts;
@@ -127,6 +135,7 @@ export function createCollector(target, { interval, procEvery, keys, onSample, o
     let idleAbort = false;
     sessionSamples = 0;
     ldPrev = null; ldReset(); // 새 셸 — 앞 창과 잇지 않는다
+    lastPst = null; dSince.clear(); // D 상태가 이어진 시간은 새 셸에서 다시 센다(끊긴 동안을 이어진 것으로 말하지 않는다)
     const startedAt = now();
     const parser = createFrameParser({
       onHello: (h) => {

@@ -106,6 +106,11 @@ export const METRICS = Object.freeze([
   { key: 'mem', label: '메모리', items: [['pct', '사용률'], ['swU', '스왑 사용']], unit: '%' },
   { key: 'net', label: '네트워크', items: [['u', '사용률'], ['rx', '수신'], ['tx', '송신'], ['er', '오류'], ['dr', '드롭']], unit: '' },
   { key: 'disk', label: '디스크', items: [['r', ''], ['w', ''], ['rMB', ''], ['wMB', ''], ['rAwait', ''], ['wAwait', ''], ['await', ''], ['qu', ''], ['rqsz', ''], ['svctm', ''], ['util', ''], ['rrqm', ''], ['wrqm', '']], unit: '' },
+  // v3.12.0(⑬ ⑤ '비교 탭에도') — 서버 query.seriesKeyFor 와 같은 열쇠
+  { key: 'fs', label: '파일시스템', items: [['pct', '사용률'], ['ipct', 'inode']], unit: '%' },
+  { key: 'tcp', label: 'TCP', items: [['rt', '재전송률'], ['lo', '리슨 큐 넘침'], ['es', '연결'], ['tw', 'TIME_WAIT']], unit: '' },
+  { key: 'sched', label: '스케줄링', items: [['cs', '컨텍스트 스위치'], ['in', '인터럽트'], ['fk', 'fork'], ['run', '실행 대기'], ['D', 'D 상태'], ['Z', '좀비']], unit: '' },
+  { key: 'vmp', label: '메모리 압박', items: [['si', '스왑 들어옴'], ['so', '스왑 나감'], ['mf', 'major fault'], ['sc', '페이지 회수']], unit: '' },
 ]);
 
 const fix = (v, d) => Number(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -140,14 +145,20 @@ export function sizeText(v) {
 }
 /** 지표 · 항목 → 값 글자. */
 export function metricValueText(metric, item, v) {
-  if (metric === 'cpu' || (metric === 'mem' && item === 'pct')) return pctText(v, 1);
+  if (metric === 'cpu' || (metric === 'mem' && item === 'pct') || metric === 'fs' || (metric === 'tcp' && item === 'rt')) return pctText(v, metric === 'tcp' ? 2 : 1);
+  if (metric === 'tcp' && item === 'lo') return n(v) == null ? DASH : numText(n(v) * 60, 1); // 회/분
+  if (metric === 'tcp' || (metric === 'sched' && ['run', 'D', 'Z'].includes(item))) return numText(v, 0);
+  if (metric === 'sched' || metric === 'vmp') return numText(v, n(v) != null && n(v) < 10 ? 1 : 0);
   if (metric === 'mem') return bytesText(v);
   if (metric === 'net') return item === 'u' ? pctText(v, 1) : item === 'rx' || item === 'tx' ? bpsText(v) : numText(v, 0);
   if (metric === 'disk') return iostatText(item, v);
   return numText(v);
 }
 export function metricUnitText(metric, item) {
-  if (metric === 'cpu' || (metric === 'mem' && item === 'pct') || (metric === 'net' && item === 'u') || (metric === 'disk' && item === 'util')) return '%';
+  if (metric === 'cpu' || (metric === 'mem' && item === 'pct') || (metric === 'net' && item === 'u') || (metric === 'disk' && item === 'util') || metric === 'fs' || (metric === 'tcp' && item === 'rt')) return '%';
+  if (metric === 'tcp') return item === 'lo' ? '회/분' : '개';
+  if (metric === 'sched') return ({ cs: '회/초', in: '회/초', fk: '개/초', run: '개', D: '개', Z: '개' })[item] ?? '';
+  if (metric === 'vmp') return item === 'mf' ? '회/초' : '페이지/초';
   if (metric === 'net' && (item === 'rx' || item === 'tx')) return 'b/s';
   if (metric === 'disk') return ({ rAwait: 'ms', wAwait: 'ms', await: 'ms', svctm: 'ms', rMB: 'MB/s', wMB: 'MB/s', r: '회/초', w: '회/초', rrqm: '회/초', wrqm: '회/초', qu: '', rqsz: '섹터' })[item] ?? '';
   if (metric === 'mem') return 'B';
@@ -519,6 +530,12 @@ export const CARD_LINE_ITEMS = Object.freeze([
   { key: 'stl', label: 'CPU steal', title: '가상 머신에서 하이퍼바이저가 가져간 시간 비율(steal)', text: (x) => `steal ${pctText(x?.stl, 1)}` },
   { key: 'load', label: '부하 평균(1분)', title: '/proc/loadavg 1분 값 · 코어 수와 비교해 보세요', text: (x) => `부하 ${numText(x?.load1, 2)}${n(x?.cores) ? ` / ${x.cores}코어` : ''}` },
   { key: 'swap', label: '스왑 사용', title: '쓰고 있는 스왑(전체 - 남은 것) — 스왑이 없으면 없음', text: (x) => `스왑 ${swapText(x?.swU, x?.swT)}` },
+  // v3.12.0(⑬ ⑤ '카드 줄에도') — 서버 rates.summaryOf 의 fsMax · tcpRt · procD · rq · swIo(못 읽음 '—')
+  { key: 'fsMax', label: '파일시스템 최대', title: '로컬 파일시스템 중 가장 높은 사용률(60초마다 df)', text: (x) => `FS 최대 ${pctText(x?.fsMax, 0)}` },
+  { key: 'tcpRt', label: 'TCP 재전송률', title: '재전송 세그먼트 ÷ 보낸 세그먼트(표본 사이 차이)', text: (x) => `재전송 ${pctText(x?.tcpRt, 2)}` },
+  { key: 'procD', label: 'D 상태 프로세스', title: '디스크 대기에서 멈춘(D) 프로세스 수 — 이어지면 디스크 · NFS 를 보세요', text: (x) => `D 상태 ${numText(x?.procD, 0)}` },
+  { key: 'rq', label: '실행 대기 / 코어', title: '실행 대기(procs_running) ÷ 코어 수 — 1 을 오래 넘으면 CPU 가 모자랍니다', text: (x) => `실행 대기/코어 ${numText(x?.rq, 2)}` },
+  { key: 'swIo', label: '스왑 입출력', title: '스왑 들어옴 + 나감(페이지/초) — 스왑 사용량보다 실제로 느려지는 원인', text: (x) => `스왑 입출력 ${numText(x?.swIo, 0)}/s` },
 ]);
 const LINE_KEYS = new Set(CARD_LINE_ITEMS.map((x) => x.key));
 /** 저장된 목록 정리 — 아는 열쇠만 · 겹침 없이 · 최대 CARD_LINE_MAX · 비면 기본값(카드 아래 줄이 사라지지 않게). */
@@ -758,4 +775,91 @@ export function installGroups(targets, agent) {
     m.get(t.username).push(t.host);
   }
   return [...m.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0])).map(([user, hosts]) => ({ user, hosts: [...new Set(hosts)] }));
+}
+
+/* ── 더할 지표(v3.12.0 ⑬ — 시안 Metrics · 사용자 '기본값대로 모두 구현해줘') ───────────────────────────── */
+/** 파일시스템 판정 — 설정 문턱(주의 · 위험 — 다른 사용률과 같은 값). 못 읽음은 null. */
+export function fsLevel(pct, settings) {
+  const x = n(pct); if (x == null) return null;
+  const w = n(settings?.warnPct) ?? 80; const c = n(settings?.critPct) ?? 90;
+  return x >= c ? 'crit' : x >= w ? 'warn' : 'ok';
+}
+/** '가득 찰 때까지' 칸 — 서버 query.fillEstimate 의 결과(추정). */
+export function fillText(fill, m) {
+  if (!fill) return { text: DASH, tone: 'off' };
+  if (fill.state === 'not-record') return { text: DASH, tone: 'off', title: '계속 수집 서버만 추정합니다' };
+  if (fill.state === 'short') return { text: DASH, tone: 'off', title: `기록이 ${n(fill.spanH) ?? 0}시간 — 6시간보다 짧아 추정하지 않습니다` };
+  if (fill.state !== 'ok') return { text: DASH, tone: 'off', title: '기록 DB 를 읽지 못했습니다' };
+  const r = fill.rows?.[m];
+  if (!r) return { text: DASH, tone: 'off', title: '이 마운트의 기록이 부족합니다' };
+  if (r.trend !== 'up') return { text: r.trend === 'down' ? '줄고 있음' : '늘지 않음', tone: 'off', title: `하루 ${numText(r.perDay, 2)}%p` };
+  if (r.days == null) return { text: '1년 넘게', tone: 'off', title: `하루 ${numText(r.perDay, 2)}%p 증가` };
+  return { text: `약 ${numText(r.days, r.days < 10 && !Number.isInteger(r.days) ? 1 : 0)}일(추정)`, tone: r.days < 3 ? 'crit' : r.days < 14 ? 'warn' : 'off', title: `지난 ${n(fill.spanH) ?? '?'}시간 추세 — 하루 ${numText(r.perDay, 2)}%p` };
+}
+/** KB → 사람이 읽는 크기(2진 — df 와 같은 1024 단위). */
+export function kbText(kb) { const x = n(kb); return x == null ? DASH : bytesText(x * 1024); }
+/** df 결과 머리 — 응답 없음(시한) · 못 읽음 · 마지막 확인. */
+export function fsHeadText(fs, now = Date.now()) {
+  if (!fs) return '아직 파일시스템을 확인하지 않았습니다(60초마다)';
+  if (fs.rc === 137) return 'df 가 시한(3초) 안에 끝나지 않았습니다 — 응답 없음(멈춘 마운트가 있을 수 있습니다)';
+  const ago = fs.at ? Math.max(0, Math.round((now - fs.at) / 1000)) : null;
+  return `60초마다 · 로컬 파일시스템만${ago != null ? ` · 마지막 확인 ${ago}초 전` : ''}`;
+}
+/** 서버 상세 새 카드의 칸 — [열쇠, 이름, 단위, 글자로 바꾸기, 아래 줄]. 값 · 최고는 응답 charts.ext[열쇠]. */
+const perMin = (v) => (n(v) == null ? null : n(v) * 60);
+export const EXT_CARDS = Object.freeze({
+  tcp: [
+    ['p.rt', '재전송률', '%', (v) => numText(v, 2)],
+    ['p.lo', '리슨 큐 넘침', '회/분', (v) => numText(perMin(v), 1)],
+    ['p.es', '연결(ESTABLISHED)', '', (v) => numText(v, 0)],
+    ['p.tw', 'TIME_WAIT', '', (v) => numText(v, 0)],
+  ],
+  sched: [
+    ['k.cs', '컨텍스트 스위치', '/s', (v) => numText(v, 0)],
+    ['k.in', '인터럽트', '/s', (v) => numText(v, 0)],
+    ['k.fk', '새 프로세스(fork)', '/s', (v) => numText(v, 1)],
+    ['l.run', '실행 대기', '', (v) => numText(v, 0)],
+    ['q.D', 'D 상태', '개', (v) => numText(v, 0)],
+    ['q.Z', '좀비', '개', (v) => numText(v, 0)],
+  ],
+  vmp: [
+    ['v.si', '스왑 들어옴', '페이지/s', (v) => numText(v, 0)],
+    ['v.so', '스왑 나감', '페이지/s', (v) => numText(v, 0)],
+    ['v.mf', 'major fault', '/s', (v) => numText(v, 1)],
+    ['v.sc', '페이지 회수(스캔)', '/s', (v) => numText(v, 0)],
+  ],
+});
+/** 지금(끝 순간 또는 평균) 값 — 표(table)에서. 열쇠 → 값. */
+export function extNow(table, key) {
+  const t = table || {};
+  const [g, k] = key.split('.');
+  if (g === 'p') return t.tcp?.[k] ?? null;
+  if (g === 'k') return t.sched?.[k] ?? null;
+  if (g === 'v') return t.vmp?.[k] ?? null;
+  if (g === 'q') return t.pst?.[k] ?? null;
+  if (key === 'l.run') return t.run ?? null;
+  return null;
+}
+/** 페이지 회수 성공 비율(회수 ÷ 스캔) — 표본 사이 시점 차이로 회수가 스캔보다 크게 잡힐 수 있어 100% 로 자른다 · 스캔이 없으면 —. */
+export function reclaimText(vmp) {
+  const sc = n(vmp?.sc); const sl = n(vmp?.sl);
+  if (sc == null || sl == null || sc <= 0) return DASH;
+  return pctText(Math.min(100, (100 * sl) / sc), 0);
+}
+/** 칸의 경고 색 — 재전송률 0.5% 이상 · 리슨 큐 넘침 · D 상태 · 좀비 · 스왑 입출력이 0 이 아니면 주의(시안 결정 — 판정 문턱이 아니라 눈에 띄게만). */
+export function extTone(key, v) {
+  const x = n(v); if (x == null) return '';
+  if (key === 'p.rt') return x >= 0.5 ? 'warn' : '';
+  if (['p.lo', 'q.D', 'q.Z', 'v.si', 'v.so'].includes(key)) return x > 0 ? 'warn' : '';
+  return '';
+}
+/** 아래 줄 — 최고값과 그 시각(구간 안) · 실행 대기는 코어 수와. */
+export function extSub(key, ext, { cores = null, clock = (t) => String(t) } = {}) {
+  const e = ext?.[key];
+  const mx = n(e?.max);
+  if (key === 'l.run' && n(cores)) return `코어 ${cores}개 · 최고 ${mx == null ? DASH : numText(mx, 0)}${mx != null && e.maxAt ? ` — ${clock(e.maxAt)}` : ''}`;
+  if (mx == null) return '이 구간에 값이 없습니다';
+  if (mx === 0) return '구간 내내 0';
+  const f = EXT_CARDS.tcp.concat(EXT_CARDS.sched, EXT_CARDS.vmp).find((c) => c[0] === key);
+  return `최고 ${f ? f[3](mx) : numText(mx)}${e.maxAt ? ` — ${clock(e.maxAt)}` : ''}`;
 }
