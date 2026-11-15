@@ -206,7 +206,7 @@ test('LEFT2605-01: 중계 점검(주기 폴러)·토큰 점검·연결 테스트
   const big = bigJsonServer(40 * 1048576);
   await new Promise((r) => big.s.listen(0, '127.0.0.1', r));
   try {
-    const r = await runCheck({ host: '127.0.0.1', port: big.s.address().port, kind: 'edge-portal', token: 't' }, { timeoutMs: 20_000 });
+    const r = await runCheck({ host: '127.0.0.1', port: big.s.address().port, kind: 'edge-portal', token: 't', scheme: 'http' }, { timeoutMs: 20_000 });
     assert.equal(r.ok, true, JSON.stringify(r));
     assert.ok(big.written() < 12 * 1048576, `상한에서 멈춰야 한다(서버가 쓴 바이트 ${big.written()} — 수정 전에는 40MB 전량)`);
   } finally { big.s.close(); }

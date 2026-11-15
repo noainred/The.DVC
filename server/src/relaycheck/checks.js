@@ -74,9 +74,12 @@ function sshBanner(host, port, timeoutMs) {
   });
 }
 
-async function portalPing(host, port, { token, expectAgent, otherIds = [], timeoutMs, tag = '' }) {
+async function portalPing(host, port, { token, expectAgent, otherIds = [], timeoutMs, tag = '', scheme = '' }) {
   const t0 = Date.now();
-  const base = `http://${host}:${port}`;
+  // 전체 점검 16회차(T-1): 토큰을 싣는 요청은 등록 URL 의 스킴(https 기본) — 스킴을 모르는데 토큰이 있으면 https(평문으로 비밀을 보내지 않는다)
+  const sch = scheme === 'http' ? 'http' : (scheme === 'https' || token ? 'https' : 'http');
+  const h = String(host).includes(':') && !String(host).startsWith('[') ? `[${host}]` : host;
+  const base = `${sch}://${h}:${port}`;
   // v2.613 EDGE2613-10: 수집 서버 id 를 알면(`collectorId`·`expectAgent`) 나가는 기록에 태그를 붙인다 — 없으면 outboundStats 가
   //   URL 만으로 기록해 같은 origin 의 두 엣지가 `sharedUrl` 로 뭉친다. 태그가 없으면(수집 서버 미등록 호스트) 예전 그대로.
   const tagged = (fn) => (tag ? withOutboundTag(tag, fn) : fn());
@@ -132,5 +135,5 @@ export async function runCheck(target, { timeoutMs = 8_000 } = {}) {
   // edge-portal / irs-portal
   const t = await tcp(host, port, timeoutMs);
   if (!t.ok) return t;
-  return portalPing(host, port, { token: target.token, expectAgent: target.expectAgent, otherIds: target.otherIds || [], timeoutMs, tag: target.collectorId || target.expectAgent || '' });
+  return portalPing(host, port, { token: target.token, expectAgent: target.expectAgent, otherIds: target.otherIds || [], timeoutMs, tag: target.collectorId || target.expectAgent || '', scheme: target.scheme || '' });
 }

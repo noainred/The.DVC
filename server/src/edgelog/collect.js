@@ -81,7 +81,8 @@ export async function collectEdgeLog({ since = 0, level = '', limit = DEFAULT_LO
   const all = Array.isArray(raw.items) ? raw.items : [];
   // 상한을 넘으면 **최신 쪽을 남긴다** — 진행상태를 보려는 것이므로 오래된 줄보다 방금 줄이 중요하다.
   const kept = all.length > cap ? all.slice(-cap) : all;
-  const items = kept.map((e) => ({ id: e.id, time: e.time, level: e.level, msg: redactLogLine(e.msg).slice(0, LINE_MAX) }));
+  // 16회차 T-3: 먼저 자르고 가린다(정규식에 8KB 줄 전체를 넣지 않는다 — 루트 규칙 '길이를 먼저 자르고') · 가림 글자로 늘어난 만큼 다시 자른다
+  const items = kept.map((e) => ({ id: e.id, time: e.time, level: e.level, msg: redactLogLine(String(e.msg ?? '').slice(0, LINE_MAX)).slice(0, LINE_MAX) }));
 
   const status = withStatus ? await collectStatus() : null;
   return {

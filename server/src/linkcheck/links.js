@@ -135,10 +135,15 @@ export function buildLinks({ collectors = [], vcenters = [], pairs = [], setting
   const on = (kind) => settings.kinds?.[kind] !== false;   // 기본 켜짐(명시 false 만 끈다)
 
   const agents = [];
+  // 16회차 T-2: 같은 표시 이름의 수집 서버가 둘 이상이면 링크 id 를 수집 서버 id 로 가른다(표본 · 이벤트가 섞이지 않게) · 그 사실을 problems 로 밝힌다
+  const nameN = new Map();
+  for (const c0 of collectors) { const n0 = t(c0.name) || t(c0.id); if (n0) nameN.set(n0, (nameN.get(n0) || 0) + 1); }
+  const dupSaid = new Set();
   for (const c of collectors) {
     const name = t(c.name) || t(c.id);
     if (!name) continue;
     agents.push(name);
+    if (nameN.get(name) > 1 && !dupSaid.has(name)) { dupSaid.add(name); problems.push({ kind: 'central->edge', from: 'central', to: name, reason: `같은 표시 이름의 수집 서버가 ${nameN.get(name)}개입니다 — 점검은 수집 서버 id 로 가르지만 화면에서 구분하기 어렵습니다(이름을 서로 다르게 하세요).` }); }
     const enabled = c.enabled !== false;
     const tg = parseTarget(c.url);
     if (tg.bad) {
@@ -148,10 +153,10 @@ export function buildLinks({ collectors = [], vcenters = [], pairs = [], setting
     }
     if (on('central->edge')) {
       links.push({
-        id: linkIdOf('central->edge', 'central', name),
+        id: linkIdOf('central->edge', 'central', nameN.get(name) > 1 ? `${name}#${t(c.id)}` : name),
         kind: 'central->edge', by: 'central', from: 'central', to: name,
         host: tg.host, port: tg.port, scheme: tg.scheme, origin: tg.origin,
-        path: '/api/collector/export', auth: 'collector-token',
+        path: '/api/collector/export', auth: 'collector-token', collectorId: t(c.id),   // 16회차 T-2: 토큰은 이 id 의 항목에서(이름 아님)
         enabled, agent: name, note: t(c.note) || '',
       });
     }

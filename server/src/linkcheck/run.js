@@ -38,7 +38,7 @@ export function specFor(link = {}, ctx = {}) {
   }
 
   if (kind === 'central->edge') {
-    const c = ctx.collectors?.get?.(t(link.to)) || null;
+    const c = (t(link.collectorId) ? ctx.collectors?.get?.(t(link.collectorId)) : null) || ctx.collectorsByName?.get?.(t(link.to)) || null;   // 16회차 T-2: id 먼저 · 이름은 유일할 때만
     const token = t(c?.token);
     if (!token) {
       // 토큰이 없으면 엣지가 403 을 준다 — 그것을 '인증 실패' 로 기록하면 원인을 거꾸로 말한다.

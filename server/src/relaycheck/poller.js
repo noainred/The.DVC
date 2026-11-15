@@ -30,7 +30,8 @@ const _state = new Map(); // `${host}:${port}` → { target, ok, phase, error, d
 export function buildTargets(settings, collectors = [], topology = null) {
   const hostOf = (u) => { try { return new URL(u).hostname.replace(/^\[|\]$/g, ''); } catch { return ''; } };
   const portOf = (u) => { try { const x = new URL(u); return Number(x.port) || (x.protocol === 'https:' ? 443 : 80); } catch { return 0; } };
-  const cols = collectors.filter((c) => c.enabled !== false && c.url).map((c) => ({ ...c, _host: hostOf(c.url), _port: portOf(c.url) }));
+  const schemeOf = (u) => { try { return new URL(u).protocol === 'http:' ? 'http' : 'https'; } catch { return 'https'; } };
+  const cols = collectors.filter((c) => c.enabled !== false && c.url).map((c) => ({ ...c, _host: hostOf(c.url), _port: portOf(c.url), _scheme: schemeOf(c.url) }));
   const hosts = new Map();
   if (settings.autoHosts) for (const c of cols) if (c._host) hosts.set(c._host, hosts.get(c._host) || c.datacenter || c.name || '');
   for (const h of settings.hosts || []) hosts.set(h.host, h.label || hosts.get(h.host) || '');
@@ -53,7 +54,9 @@ export function buildTargets(settings, collectors = [], topology = null) {
       const col = cols.find((c) => c._host === host && c._port === p.port);
       const t = { key, host, port: p.port, kind: p.kind, label: p.label || KINDS[p.kind]?.label || p.kind, site: label, collectorId: col?.id || '' };
       if (p.kind === 'edge-portal' || p.kind === 'irs-portal') {
-        if (col) { t.token = col.token; t.expectAgent = col.id; t.otherIds = ids; }
+        // 전체 점검 16회차(T-1 — 재현): 토큰은 **등록 URL 의 스킴**으로만 보낸다 — 예전에는 늘 http 로 접속해 https 로 등록된 엣지의 수집 토큰이
+        //   회선에 평문으로 나갔다(S-09 — 중앙↔엣지는 https 기본 · 평문은 등록부가 허용한 저장 http URL 만). 등록 항목이 없으면 토큰 없이 /api/health.
+        if (col) { t.token = col.token; t.expectAgent = col.id; t.otherIds = ids; t.scheme = col._scheme; }
         t.relayAgent = relay?.id || '';
       }
       out.push(t);
