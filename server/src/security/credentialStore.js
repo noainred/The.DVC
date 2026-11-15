@@ -17,6 +17,7 @@
  *    파일에 남기지 않는다(schedule/outbox 파일에도 없음). 사용마다 감사 + useCount/lastUsed 갱신.
  *  - SSH 키는 저장 시 ssh2 로 파싱 검증(형식·패스프레이즈)하고 공개키 SHA-256 지문만 화면에 보인다.
  */
+import { sshKdfRoundsIssue } from '../util/sshKeyKdf.js';   // 21회차 L-6
 import { strictIpv4Num, cidrMatch } from '../util/ipv4.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -87,14 +88,16 @@ function load() {
   _db = { items: [] };
   return _db;
 }
-function persist() {
-  atomicWriteFileSync(FILE(), JSON.stringify(sealSecretsDeep({ version: 1, items: load().items }), null, 2), { mode: 0o600 });
+function persist(items = load().items) {
+  atomicWriteFileSync(FILE(), JSON.stringify(sealSecretsDeep({ version: 1, items }), null, 2), { mode: 0o600 });
 }
 const newId = () => `cred_${Date.now().toString(36)}_${(seq++).toString(36)}_${crypto.randomBytes(3).toString('hex')}`;
 const lc = (s) => String(s || '').trim().toLowerCase();
 
 /** SSH 개인키 검증 + 공개키 SHA-256 지문(순수). 실패 시 { ok:false, reason }. 비밀은 반환하지 않는다. */
 export function inspectPrivateKey(privateKey, passphrase = '') {
+  const kdfIssue = sshKdfRoundsIssue(privateKey);   // 21회차 L-6: parseKey 전에(동기 bcrypt — rounds 는 키 안의 값)
+  if (kdfIssue) return { ok: false, reason: kdfIssue };
   const parsed = ssh2.utils.parseKey(String(privateKey || ''), passphrase || undefined);
   if (parsed instanceof Error) {
     const msg = /passphrase|decrypt|encrypted/i.test(parsed.message) ? '개인키가 암호화되어 있습니다 — 패스프레이즈를 확인하세요.' : `개인키 형식을 읽을 수 없습니다(${parsed.message.slice(0, 80)})`;
@@ -181,7 +184,9 @@ export function saveCredential(input = {}, { actor = '' } = {}) {
   const issue = credentialInputIssue(input, { existing });
   if (issue) throw new Error(issue);
   const now = Date.now();
-  const rec = existing || { id: newId(), createdAt: now, createdBy: actor, useCount: 0 };
+  // 전체 점검 21회차 L-1(재현): 사본에 고치고 **저장이 성공한 뒤에** 메모리를 바꾼다 — 예전에는 저장이 실패해도(S-07 잠금 · 디스크) 메모리에 들어가
+  //   브로커가 그 비밀을 내줬고, 삭제는 목록에서 사라졌다가 재시작 뒤 되살아났다(peerTrust assertWritable 과 같은 방향).
+  const rec = existing ? structuredClone(existing) : { id: newId(), createdAt: now, createdBy: actor, useCount: 0 };
   rec.name = String(input.name).trim(); rec.kind = input.kind; rec.username = String(input.username).trim();
   rec.hosts = listOf(input.hosts); rec.agents = listOf(input.agents); rec.note = String(input.note || '').slice(0, 300);
   if (input.kind === 'password') {
@@ -200,8 +205,10 @@ export function saveCredential(input = {}, { actor = '' } = {}) {
   rec.updatedAt = now; rec.updatedBy = actor;
   if (actor === 'mock-demo') rec.demo = true;
   else if (existing && isDemoCredential(existing)) rec.demo = false;   // 사람이 고쳐 저장하면 자기 계정이 된다(v2.719 R1-07)
-  if (!existing) { if (db.items.length >= MAX_ITEMS) throw new Error(`계정은 최대 ${MAX_ITEMS}개`); db.items.push(rec); }
-  persist();
+  if (!existing && db.items.length >= MAX_ITEMS) throw new Error(`계정은 최대 ${MAX_ITEMS}개`);
+  const next = existing ? db.items.map((x) => (x === existing ? rec : x)) : [...db.items, rec];
+  persist(next);
+  db.items = next;
   return publicView(rec);
 }
 
@@ -209,8 +216,10 @@ export function deleteCredential(id) {
   const db = load();
   const i = db.items.findIndex((x) => x.id === id);
   if (i < 0) return null;
-  const [gone] = db.items.splice(i, 1);
-  persist();
+  const gone = db.items[i];
+  const next = db.items.filter((_, j) => j !== i);
+  persist(next);   // 21회차 L-1: 저장 성공 뒤에만 메모리에서 뺀다
+  db.items = next;
   return publicView(gone);
 }
 

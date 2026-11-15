@@ -70,7 +70,7 @@ async function scanConfigFiles() {
         // 위치·필드·상태·길이만 — 값 자체는 어떤 상태여도 싣지 않는다.
         if (state !== 'empty' && row.items.length < 200) row.items.push({ path: pathStr, field, state, len: v.length });
       });
-    } catch (e) { row.note = `파싱 실패(${String(e.message).slice(0, 60)})`; }
+    } catch (e) { row.note = `파싱 실패(${safeLoadText(e, 60) || '사유 미상'})`; }   // 21회차 L-5: 원문(파일 조각 — 비밀번호 끝 글자)이 아니라 요약
     // 비밀 필드가 하나도 없는 파일은 목록 소음이라 제외(권한 이상 파일은 유지해 경고).
     if (row.plain || row.sealed || row.empty || row.note || row.wide) out.push(row);
     await yieldLoop();
@@ -104,7 +104,7 @@ const LOG_MAX_HITS_PER_FILE = 20;
 // (패턴, 마스킹할 그룹 idx). 값 그룹은 프리뷰에서 ***로 치환된다.
 const LOG_PATTERNS = [
   { name: 'password=', re: /(password|passwd|pwd)["']?\s*[:=]\s*["']?([^"'\s&,}]{3,})/i, g: 2 },
-  { name: 'url-cred', re: /:\/\/([^/\s:@]+):([^@\s]{3,})@/, g: 2 },
+  { name: 'url-cred', re: /:\/\/([^/\s:@]{1,256}):([^@\s]{3,512})@/, g: 2 },   // 21회차 L-8: 반복 상한(32KB 줄 O(n²))
   { name: 'basic-auth', re: /(authorization\s*[:=]\s*["']?basic\s+)([A-Za-z0-9+/=]{8,})/i, g: 2 },
 ];
 
@@ -113,12 +113,17 @@ const LOG_PATTERNS = [
 // 과거: 탐지 그룹(`[^"'\s&,}]`)이 콤마·& 에서 끊겨 `password=***,w0rd,2026` 처럼 비밀번호
 // 뒷부분이 프리뷰에 원문 노출됐고, 한 줄에 자격증명이 둘이면 두 번째가 안 가려졌다. 과다
 // 마스킹은 안전(부분 노출이 유출) — 점검 도구가 유출 통로가 되지 않게 값을 통째로 가린다.
+// 전체 점검 21회차 L-4(재현): ① 따옴표 값은 **닫는 따옴표까지 통째로**(JSON `"password": "correct horse battery"` 가 첫 단어만 가려지던 것 —
+//   키 뒤 따옴표를 허용) ② 따옴표 없는 값은 **줄 끝까지**(`password=open sesame now` 의 뒷 단어가 남던 것 — 과다 마스킹은 안전)
+//   ③ 그룹이 2개인 패턴의 replace 콜백 넷째 인자는 매치 위치(수)라 그것이 뒤에 붙던 것(`***24`) — 셋째 그룹이 문자열일 때만 뒤에 붙인다.
+//   반복 상한(값 512 · 사용자 256)과 줄 상한(MASK_LINE_MAX)으로 선형(L-8).
 const MASK_PATTERNS = [
-  /((?:password|passwd|pwd)["']?\s*[:=]\s*["']?)([^\s"']{3,})/ig,                       // password=... (공백/따옴표 전까지)
-  /((?:password|passwd|secret|token|api[_-]?key)\s*[:=]\s*['"`])([^'"`]{3,})(['"`])/ig,  // 소스 따옴표 값(SRC_RE 탐지 대응 — secret/token/api_key 포함)
-  /(:\/\/[^/\s:@]+:)([^@\s]{3,})(@)/ig,                                                  // scheme://user:PASS@
-  /((?:authorization\s*[:=]\s*["']?basic\s+))([A-Za-z0-9+/=]{8,})/ig,                    // Authorization: Basic <b64>
+  /((?:password|passwd|pwd|secret|token|api[_-]?key)["']?\s*[:=]\s*['"`])([^'"`]{1,512})(['"`])/ig,   // 따옴표 값(JSON · 소스)
+  /((?:password|passwd|pwd)["']?\s*[:=]\s*)(?!['"`])(\S.{2,})/ig,                                       // 따옴표 없는 값 — 줄 끝까지
+  /(:\/\/[^/\s:@]{1,256}:)([^@\s]{1,512})(@)/ig,                                                        // scheme://user:PASS@
+  /((?:authorization\s*[:=]\s*["']?basic\s+))([A-Za-z0-9+/=]{8,})/ig,                                   // Authorization: Basic <b64>
 ];
+const MASK_LINE_MAX = 4096;
 
 /**
  * 한 줄 전체를 모든 패턴으로 마스킹한 뒤, 첫 마스킹 지점 주변 160자만 프리뷰로 돌려준다.
@@ -126,8 +131,8 @@ const MASK_PATTERNS = [
  * 절대 돌려주지 않고 전체를 숨긴다 — 점검 도구가 유출 통로가 되지 않게(v2.313 감사 반영).
  */
 function maskLine(line) {
-  let masked = String(line);
-  for (const re of MASK_PATTERNS) masked = masked.replace(re, (_full, pre, _val, post = '') => `${pre}${MASK}${post}`);
+  let masked = String(line).slice(0, MASK_LINE_MAX);
+  for (const re of MASK_PATTERNS) masked = masked.replace(re, (_full, pre, _val, p3) => `${pre}${MASK}${typeof p3 === 'string' ? p3 : ''}`);
   if (!masked.includes(MASK)) return `${MASK} (마스킹 패턴 불일치 — 값 전체 숨김)`;
   const at = Math.max(0, masked.indexOf(MASK) - 60);
   return masked.slice(at, at + 160);
@@ -268,4 +273,4 @@ export async function runSecretScan({ fresh = false, sourceDirs } = {}) {
   return _inflight;
 }
 
-export { maskLen }; // 테스트용(마스킹 규약 고정)
+export { maskLen, maskLine }; // 테스트용(마스킹 규약 고정 · 21회차 L-4)

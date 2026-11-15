@@ -1,11 +1,11 @@
 # 공통 기능 목록 (자동 생성)
 
-솔루션 전체가 함께 쓰는 공용 모듈 **157개**를 코드에서 뽑은 목록이다. 새 헬퍼·컴포넌트를 만들기 전에 여기서 먼저 찾는다
+솔루션 전체가 함께 쓰는 공용 모듈 **158개**를 코드에서 뽑은 목록이다. 새 헬퍼·컴포넌트를 만들기 전에 여기서 먼저 찾는다
 (같은 판정을 복제하지 말 것 — 루트 `CLAUDE.md` '판정 코어는 하나').
 
 - 생성: `node scripts/common-doc.mjs` · 최신 여부: `node scripts/common-doc.mjs --check`
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다. 설명을 고치려면 그 모듈의 **머리 주석 첫 단락**을 고친다.
-- 훑은 소스 4187개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
+- 훑은 소스 4189개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
 
 ## 읽는 법 · 한계
 
@@ -19,14 +19,14 @@
 
 | 구분 | 위치 | 모듈 | 사용처 0 | 테스트 0 |
 |---|---|---|---|---|
-| 서버 공용 유틸 | `server/src/util/` | 88 | 0 | 10 |
+| 서버 공용 유틸 | `server/src/util/` | 89 | 0 | 10 |
 | 웹 공용 컴포넌트 | `web/src/components/` | 46 | 0 | 12 |
 | 웹 공용 훅 | `web/src/hooks/` | 8 | 0 | 2 |
 | 웹 공용 유틸 | `web/src/util/` | 3 | 0 | 0 |
 | 웹 최상위 공용 모듈 | `web/src/` | 12 | 0 | 1 |
-| **합계** | | **157** | **0** | **25** |
+| **합계** | | **158** | **0** | **25** |
 
-## 서버 공용 유틸 — `server/src/util/` (88)
+## 서버 공용 유틸 — `server/src/util/` (89)
 
 사용처가 많은 순.
 
@@ -100,6 +100,7 @@
 | `runtimeCheck.js` | Node 런타임 계약과 기동 시 호환성 자가 점검(검토 I-06). | `enginesRange` `parseNodeVersion` `judgeVersion` `selfCheckFetchDispatcher` `overallState` `runtimeStatus` 외 7 | 3 | 3 | 1 |
 | `sameHostName.js` | 두 호스트 이름이 같은 장비를 가리키는가(v2.777 — 사용자 요청 '엣지에서 보고하는 호스트네임을 기록해서 검증'). 대소문자 무시 · 끝 점 무시 · 한쪽만 FQDN 이면 첫 마디(짧은 이름)로 비교한다(os.hostname() 이 배포판마다 짧은 이름·FQDN… | `sameHostName` | 3 | 3 | 1 |
 | `secureCompare.js` | 공유 토큰/시크릿 비교를 상수시간(timing-safe)으로 수행한다. 일반 `===`는 첫 불일치 바이트에서 조기 반환해 응답시간 차이로 토큰을 한 바이트씩 복구당할 수 있다. 길이를 먼저 HMAC으로 정규화해 길이 자체도 누설하지 않는다. | `timingSafeEqualStr` `tokenMatches` | 3 | 1 | 1 |
+| `sshKeyKdf.js` | OpenSSH 새 형식 개인키(openssh-key-v1)의 bcrypt KDF **반복 횟수(rounds)** 를 parseKey 전에 읽는다(순수 · 전체 점검 21회차 L-6). | `opensshKdfRounds` `sshKdfRoundsIssue` `SSH_KDF_ROUNDS_MAX` | 3 | 2 | 1 |
 | `xlsxInternalLink.js` | 같은 파일 안 시트로 가는 링크(`#'시트'!A1`)를 OOXML 규격 모양으로 쓴다(v2.802 — 호스트·클러스터 엑셀). | `ensureInternalLinks` `internalLinkState` `sheetLink` | 3 | 3 | 2 |
 | `zip.js` | 단일 파일 ZIP 생성기 — 의존성 없이(zlib만) 한 파일을 deflate 압축한 .zip 버퍼를 만든다. 대용량 내보내기를 zip으로 압축해 전송할 때 사용(에어갭 Rocky9에서 외부 패키지 불필요). | `zipSingle` `zipMany` `zipManyAsync` `sendMaybeZip` `ZIP_THRESHOLD` | 3 | 2 | 4 |
 | `bigJsonGate.js` | 대용량 JSON 파서를 **인증된 요청에만** 태우는 게이트(v2.538). | `bigJsonStats` `sessionBigBodyAllowed` `bigJsonGate` | 2 | 2 | 8 |
@@ -231,12 +232,12 @@
 | `server/src/config.js` | (머리 주석 없음) | 509 | 86 | 175 |
 | `server/src/store.js` | (머리 주석 없음) | 205 | 43 | 305 |
 | `server/src/collector/registry.js` | Collector registry — the list of remote collector agents (one per datacenter) the central portal pulls power from. Stored in CONFIG_DIR/collectors.jso… | 83 | 32 | 49 |
-| `server/src/security/secretVault.js` | 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). | 40 | 28 | 23 |
+| `server/src/security/secretVault.js` | 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). | 40 | 28 | 24 |
 | `server/src/mock/demo/flags.js` | 데모(DATA_SOURCE=mock) 모드 공용 판정(v2.708). | 85 | 26 | 3 |
 | `server/src/alerts.js` | Alerting — evaluates threshold/condition rules against the current snapshot on an interval and pushes notifications to Slack(incoming webhook) and/or… | 31 | 23 | 28 |
 | `server/src/proxy/sshExec.js` | Small SSH helper built on ssh2: connect, run commands, and upload files via SFTP. Shared by the proxy auto-deploy and the agent auto-deploy features.… | 47 | 17 | 30 |
 | `server/src/datacenter/store.js` | DataCenter(법인) 레지스트리 — vCenter의 '상위 개념'. | 46 | 16 | 12 |
-| `server/src/vcenter/registry.js` | vCenter registry — read/write the managed list of vCenters in config/vcenters.json (the same file the live collector polls), with validation, password… | 31 | 15 | 6 |
+| `server/src/vcenter/registry.js` | vCenter registry — read/write the managed list of vCenters in config/vcenters.json (the same file the live collector polls), with validation, password… | 31 | 15 | 7 |
 | `server/src/vcenter/soapParse.js` | 순수(사이드이펙트 없음) SOAP 응답 파서 — worker_threads 워커에서도 재사용하기 위해 soapClient.js에서 분리했다. 여기에는 config/DB/네트워크 등 부수효과 있는 import를 절대 추가하지 말 것(워커가 로드할 때 부수효과가 워커 스레… | 25 | 15 | 17 |
 | `server/src/mail/service.js` | 포탈 공용 메일 발송 진입점 (v2.454). | 18 | 14 | 17 |
 | `server/src/agent/envTimeout.js` | 호환 재수출(v2.613 DEPS2613-01) — 본체는 `util/envTimeout.js` 로 옮겼다. config.js 가 agent/ 를 import 하는 방향(설정 leaf → 엣지 워커 디렉터리)이 잠재 순환의 씨앗이었고, agent/ 밖 18개 파일이 이… | 33 | 13 | 2 |

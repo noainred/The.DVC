@@ -7,6 +7,7 @@
  *  · 접속 자격 해석 `resolveOsAuth` — 폴러 · 연결 시험이 같은 하나를 쓴다(판정 코어 하나).
  *    순서: 서버 keyRef → 공통 계정(credRef)의 기본 키 → 공통 계정 비밀번호 → 서버 비밀번호. 키 참조가 있는데 키가 없으면 **비밀번호로 몰래 넘어가지 않고** 오류다.
  */
+import { sshKdfRoundsIssue } from '../../util/sshKeyKdf.js';   // 21회차 L-6
 import crypto from 'node:crypto';
 import ssh2 from 'ssh2';
 import { listBmServersRaw, registryLoadError, bmServerRefCounts, replaceBmServerKeyRefs } from '../../bmstor/registry.js';
@@ -273,6 +274,7 @@ function parsedKeyFor(m) {
   const hit = _parsed.get(k);
   if (hit) { _parsed.delete(k); _parsed.set(k, hit); return hit; }
   let p;
+  if (sshKdfRoundsIssue(m.privateKey)) return null;   // 21회차 L-6: KDF 반복 상한
   try { _parseCount += 1; p = ssh2.utils.parseKey(m.privateKey, m.passphrase); } catch { p = null; }
   if (!p || p instanceof Error) return null;
   if (Array.isArray(p)) p = p[0];

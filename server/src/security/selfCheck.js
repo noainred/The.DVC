@@ -147,6 +147,10 @@ export const RELAX_SWITCHES = [
   { env: 'NSX_TLS_REJECT_UNAUTHORIZED', onValue: 'false', title: 'NSX TLS 검증 예외', why: '장비 인증서 검증 예외 — 이 수집기의 자격증명이 상대 확인 없이 전송된다(기본은 CA 체인 또는 승인 지문).' },
   { env: 'STORAGE_TLS_VERIFY', onValue: 'false', title: '스토리지 수집 TLS 검증 예외', why: '장비 인증서 검증 예외 — 이 수집기의 자격증명이 상대 확인 없이 전송된다(기본은 CA 체인 또는 승인 지문).' },
   { env: 'SANSWITCH_TLS_VERIFY', onValue: 'false', title: 'SAN 스위치 TLS 검증 예외', why: '장비 인증서 검증 예외 — 이 수집기의 자격증명이 상대 확인 없이 전송된다(기본은 CA 체인 또는 승인 지문).' },
+  // 전체 점검 21회차 L-7(재현): 아래 셋이 빠져 켜 둔 채로 '14개 스위치 모두 기본값(보호 켜짐)' 이라고 보고했다.
+  { env: 'VEEAM_TLS_VERIFY', onValue: 'false', title: 'Veeam TLS 검증 예외', why: '장비 인증서 검증 예외 — 이 수집기의 자격증명이 상대 확인 없이 전송된다(기본은 CA 체인 또는 승인 지문).' },
+  { env: 'TLS_PEER_POLICY', onValue: 'observe', title: '장비 TLS 지문 관찰 모드(env)', why: '처음 보는 장비 지문을 받아들이고 기록만 한다 — 화면의 정책보다 env 가 이긴다.' },
+  { env: 'SSH_HOSTKEY_POLICY', onValue: 'observe', title: 'SSH 호스트 키 관찰 모드(env)', why: '처음 보는 SSH 서버 키를 받아들이고 기록만 한다 — 그 서버에 비밀번호가 전달될 수 있다.' },
 ];
 
 /**
@@ -279,7 +283,8 @@ export function collectSelfCheck({ users = null, env = process.env, dir = null }
       : pol?.recovered
         ? `정책 파일을 읽지 못해(${pol.problem}) ${pol.recovered === 'last-good' ? '직전 유효 정책' : '신뢰 사본(secrets-policy.trusted.json)'}으로 계속 ${pol.mode === 'encrypted' ? '봉인' : '평문'} 저장 중이다.`
       : (pol?.mode === 'encrypted'
-        ? `봉인 저장(${pol.alg || 'aes-256-gcm'} · 레벨 ${pol.level ?? 2}). 키 파일이 같은 호스트에 있으므로 at-rest 보호이며 호스트 완전 장악은 막지 못한다.`
+        // 21회차 L-7: pol.alg 는 없는 필드였다 — 레벨 1(aes-128-gcm)을 aes-256-gcm 으로 적었다(secretVault LEVELS 와 같은 표)
+        ? `봉인 저장(${pol.algorithm || ({ 1: 'aes-128-gcm', 2: 'aes-256-gcm', 3: 'aes-256-gcm' })[pol.level ?? 2] || 'aes-256-gcm'} · 레벨 ${pol.level ?? 2}). 키 파일이 같은 호스트에 있으므로 at-rest 보호이며 호스트 완전 장악은 막지 못한다.`
         : '평문 저장(기본값). 파일 권한(0600)만이 보호 수단이다.'),
     evidence: 'secrets-policy.json',
     howto: (pol?.locked || pol?.recovered)
