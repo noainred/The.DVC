@@ -8,7 +8,7 @@
  * ⚠ 쓰기(세트 저장 · 동시 집중)는 operator 이상(서버가 다시 검사) · 저장 결과는 r?.ok === false 로 검사(sendJson 은 400 · 409 를 던지지 않는다).
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchJson, postJson, putJson, delJson, hasRole, canCsv } from '../../api.js';
+import { fetchJson, postJson, putJson, delJson, canCsv } from '../../api.js';
 import { ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
@@ -25,6 +25,8 @@ import { useAnnotations } from './BmAnnotations.jsx';
 import { parseRef, refOf, normCompareResp, corpLabel } from './bmPerfUrl.js'; // 다음 점검 ①: 비교 열 = (법인, 키) 쌍
 import BmShareButtons from './BmShareButtons.jsx'; // 6단계 공유 링크 · 캡처
 import './bmStage6.css';
+import { gateOk, gateShown, gateWhy } from './bmWriteText.js'; // 점검 반복 2회차 E2⑥ — 서버 쓰기 표지(동시 집중 · 세트)
+import { focusBlockText } from './bmCompareText.js';
 
 /** 조회기 — 세대로 늦게 온 이전 응답을 버린다(테스트가 가짜 fetcher 로 고정). */
 export function createCompareLoader(fetcher = (q) => fetchJson('/tools/bm-usage/compare', q, undefined, { timeoutMs: 120_000, retries: 0 })) {
@@ -229,14 +231,14 @@ export default function BmCompareView({ keys = [], onKeys, names = {}, onOpen, i
   // keys = ‘법인|키’ 쌍 글자(bmPerfUrl.refOf — 예전 판 목록은 키만 · 법인 모름). 요청은 키 · 법인을 같은 순서 두 목록으로.
   const keysSig = keys.join(',');
   const pairs = keys.map(parseRef);
-  const canWrite = hasRole('admin', 'operator');
+  // 점검 반복 2회차 E2⑥: 쓰기 버튼은 서버 표지로만 — 세트 저장 · 지우기(/compare/sets 응답 actions) · 동시 집중(비교 응답 actions.focus + 열 writable — 하나라도 조회 전용이면 서버가 아무것도 시작하지 않는다).
   useEffect(() => {
     if (!keys.length) { loader.current.cancel(); setSt({ resp: null, err: null, loading: false }); return; }
     const vcs = pairs.map((p) => p.vc);
     loader.current.load({ keys: pairs.map((p) => p.key).join(','), ...(vcs.some(Boolean) ? { vcenterIds: vcs.join(',') } : {}), range, group, value, ...(cross ? { cross: '1' } : {}) }, (p) => setSt((x) => ({ ...x, ...p })));
   }, [keysSig, range, group, value, cross]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { onState?.({ view, group, value, range, cross, metric, keys }); }, [view, group, value, range, cross, metric, keysSig]); // eslint-disable-line react-hooks/exhaustive-deps
-  const loadSets = () => fetchJson('/tools/bm-usage/compare/sets').then((r) => setSets({ list: r.sets || [], err: '', max: r.max })).catch((e) => setSets({ list: null, err: e?.message || String(e) }));
+  const loadSets = () => fetchJson('/tools/bm-usage/compare/sets').then((r) => setSets({ list: r.sets || [], err: '', max: r.max, actions: r.actions || null })).catch((e) => setSets({ list: null, err: e?.message || String(e), actions: null }));
   useEffect(() => { loadSets(); }, []);
   const resp = useMemo(() => normCompareResp(st.resp), [st.resp]);
   const max = resp?.maxServers ?? sets.max ?? 5;
@@ -248,6 +250,11 @@ export default function BmCompareView({ keys = [], onKeys, names = {}, onOpen, i
   const annWin = useMemo(() => (resp?.from != null ? { from: resp.from, to: resp.to } : null), [resp]);
   const ann = useAnnotations(live.map((c) => c.realKey), annWin, 0, live.map((c) => c.vcenterId || ''));
   const crossCorps = new Set(live.map((c) => c.vcenterId)).size > 1;
+  const canSave = gateOk(sets.actions?.compareSetSave);
+  const canDelete = gateOk(sets.actions?.compareSetDelete);
+  const fg = resp?.actions?.focus;
+  const focusBlock = focusBlockText(fg, live, gateWhy(fg));   // '' 이면 시작할 수 있다
+  const canFocus = live.length >= 1 && !focusBlock;
 
   async function saveSet() {
     setMsg(null);
@@ -308,7 +315,7 @@ export default function BmCompareView({ keys = [], onKeys, names = {}, onOpen, i
       <div className="bmcmp-chips">
         {keys.map((k) => {
           const c = cols.find((x) => x.key === k);
-          const sv = c ? columnStateView(c.state, { minEdgeVersion: resp?.minEdgeVersion }) : null;
+          const sv = c ? columnStateView(c.state, { minEdgeVersion: resp?.minEdgeVersion, crossAllowed: resp?.crossAllowed }) : null;
           return (
             <span key={k} className={`bmcmp-chip${c && !['ok', 'stale'].includes(c.state) ? ' bmcmp-off' : ''}`} style={{ borderColor: colors[k]?.stroke }} title={sv?.note || ''}>
               <span role="button" tabIndex={0} className="bmp-link" onClick={() => onOpen?.(k)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.(k); }}>{nameOf(k)}</span>
@@ -321,7 +328,7 @@ export default function BmCompareView({ keys = [], onKeys, names = {}, onOpen, i
       </div>
       {cols.filter((c) => !['ok', 'stale'].includes(c.state)).map((c) => (
         <div key={c.key}>
-          <p className="bmo-note">‘{nameOf(c.key)}’ — {columnStateView(c.state, { minEdgeVersion: resp?.minEdgeVersion }).note}{c.reason ? `(${c.reason})` : ''}</p>
+          <p className="bmo-note">‘{nameOf(c.key)}’ — {columnStateView(c.state, { minEdgeVersion: resp?.minEdgeVersion, crossAllowed: resp?.crossAllowed }).note}{c.reason ? `(${c.reason})` : ''}</p>
           {c.state === 'ambiguous' && Array.isArray(c.candidates) && (
             <div className="bmcmp-btns" role="group" aria-label="법인 고르기">
               {c.candidates.map((x) => <button key={x.vcenterId} type="button" className="btn btn-sm bmp-touch" onClick={() => onKeys?.(keys.map((k) => (k === c.key ? refOf(c.realKey, x.vcenterId) : k)))}>{corpLabel(x)}</button>)}
@@ -338,23 +345,25 @@ export default function BmCompareView({ keys = [], onKeys, names = {}, onOpen, i
           {(sets.list || []).map((s) => (
             <span key={s.id} className="bmcmp-set">
               <button type="button" className="btn btn-sm bmp-touch" onClick={() => { setCross(s.cross === true && !!resp?.crossAllowed); onKeys?.(s.keys.map((k, i) => refOf(k, s.vcenterIds?.[i] || ''))); }}>{s.name}({s.keys.length}대{s.cross ? ' · 법인 간' : ''})</button>
-              {canWrite && <button type="button" className="bmcmp-x" aria-label={`세트 ${s.name} 지우기`} onClick={() => deleteSet(s.id)}>✕</button>}
+              {canDelete && <button type="button" className="bmcmp-x" aria-label={`세트 ${s.name} 지우기`} onClick={() => deleteSet(s.id)}>✕</button>}
             </span>
           ))}
           {sets.list && !sets.list.length && <span className="bmo-note" style={{ margin: 0 }}>없음</span>}
-          {canWrite && keys.length >= 2 && (
+          {canSave && keys.length >= 2 && (
             <span className="bmcmp-save">
               <input className="input" type="text" maxLength={60} placeholder="세트 이름" value={setName} onChange={(e) => setSetName(e.target.value)} aria-label="세트 이름" />
               <button type="button" className="btn btn-sm bmp-touch" disabled={!setName.trim() || !!sets.err} onClick={saveSet}>비교 세트 저장</button>
             </span>
           )}
         </div>
-        {canWrite && live.length >= 1 && (
+        {canFocus && (
           <div className="bmcmp-focus">
             <input className="input bmo-input" type="text" maxLength={300} placeholder="사유(필수 — 감사 기록에 남습니다)" value={reason} onChange={(e) => setReason(e.target.value)} aria-label="동시 집중 사유" />
             <button type="button" className="btn btn-sm bmp-touch" disabled={focusBusy || reason.trim().length < 2} onClick={focusAll}>{focusBusy ? '시작하는 중…' : `${live.length}대 동시 집중 모니터링`}</button>
           </div>
         )}
+        {/* 점검 반복 2회차 E2⑥: 닫았으면 이유 한 줄(역할이 모자란 계정에는 예전처럼 아무것도 그리지 않는다) */}
+        {!canFocus && live.length >= 1 && gateShown(fg) && focusBlock && <p className="bmo-note" style={{ margin: 0 }}>동시 집중 모니터링 — {focusBlock}.</p>}
       </div>
       {msg && <p className="bmo-note" style={{ color: toneVar(msg.tone) }}><BoldText text={msg.text} /></p>}
       {/* 보기 · 지표 · 값 */}

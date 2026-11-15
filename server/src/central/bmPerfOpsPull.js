@@ -206,13 +206,22 @@ export function sanitizeFocusSummary(list, now = Date.now()) {
     verdictFrom: s.verdictFrom == null ? null : enumOr(s.verdictFrom, VERDICTS, 'unknown'), verdictTo: s.verdictTo == null ? null : enumOr(s.verdictTo, VERDICTS, 'unknown'), candidate: s.candidate == null ? null : strOf(s.candidate, 32),
   })).filter((s) => s.id && s.key);
 }
+/**
+ * 모르는 규칙 id(판 차이 — 이 중앙보다 새 엣지의 규칙 · 형식 밖)는 'unknown' 으로 둔다(점검 반복 3회차 I1 — 예전 'use' 로 바꿔 다른 규칙 알림이 ‘USE 판정 변화’ 로 보였고
+ *   이슈 생성 여부도 중앙의 use 규칙 설정으로 판단됐다). 'unknown' 은 이슈를 만들지 않는다 — 이슈 표지가 ‘중앙에서 판단’(pending-central)이면 ‘건너뜀’(skipped)으로 바꾼다.
+ */
+export const UNKNOWN_RULE = 'unknown';
 export function sanitizeAlertSent(list, now = Date.now()) {
   if (!Array.isArray(list)) return null;
-  return list.slice(-200).filter(isObj).map((r) => ({
-    id: strOf(r.id, 16), at: ts(r.at, now), rule: enumOr(r.rule, RULES, 'use'), key: strOf(r.key, 256), name: strOf(r.name, 120), vcenterId: strOf(r.vcenterId, 128), title: strOf(r.title, 200),
-    channels: (Array.isArray(r.channels) ? r.channels : []).slice(0, 4).filter((c) => ['email', 'webhook', 'slack', 'teams'].includes(c)),
-    result: enumOr(r.result, RESULTS, ''), issue: r.issue == null ? null : enumOr(r.issue, ISSUE, 'skipped'), autoFocus: r.autoFocus == null ? null : strOf(r.autoFocus, 40),
-  })).filter((r) => r.id && r.key);
+  return list.slice(-200).filter(isObj).map((r) => {
+    const rule = enumOr(r.rule, RULES, UNKNOWN_RULE);
+    const issue = r.issue == null ? null : enumOr(r.issue, ISSUE, 'skipped');
+    return {
+      id: strOf(r.id, 16), at: ts(r.at, now), rule, key: strOf(r.key, 256), name: strOf(r.name, 120), vcenterId: strOf(r.vcenterId, 128), title: strOf(r.title, 200),
+      channels: (Array.isArray(r.channels) ? r.channels : []).slice(0, 4).filter((c) => ['email', 'webhook', 'slack', 'teams'].includes(c)),
+      result: enumOr(r.result, RESULTS, ''), issue: rule === UNKNOWN_RULE && issue === 'pending-central' ? 'skipped' : issue, autoFocus: r.autoFocus == null ? null : strOf(r.autoFocus, 40),
+    };
+  }).filter((r) => r.id && r.key);
 }
 
 /** 엣지 문자열 → 표시용 이름(URL 제거 · 공백 정리 · 상한 — 길이를 먼저 자르고 선형 치환). */
@@ -262,7 +271,8 @@ export async function centralizeEdgeSent(agent, snap, deps = {}) {
     let vc = null;
     try { vc = await resolve({ agent: ag, scope: 'idrac', deviceKeyKind: tag ? 'serviceTag' : '', deviceKey: tag || strOf(tg.key, 256), claimedVcenterId: strOf(tg.vcenterId, 128) }, ctx); } catch { vc = null; }
     const name = safeEdgeName(tg.name || tg.key, 80) || safeEdgeName(tg.key, 80);
-    const label = BMPERF_RULE_LABEL[r.rule] || '성능 규칙';
+    // 3회차 I1: 모르는 규칙은 ‘알 수 없는 규칙’(다른 규칙 이름으로 보이지 않게 — 판 차이일 수 있다)
+    const label = r.rule === UNKNOWN_RULE || !RULES.has(r.rule) ? '알 수 없는 규칙' : (BMPERF_RULE_LABEL[r.rule] || '성능 규칙');
     list.push({ ...r, key: strOf(tg.key, 256), name, vcenterId: String(vc?.id || ''), title: capStr(`${name} — ${label}(수집 노드 ${ag})`, 200) });
   }
   return { list, dropped };
@@ -282,7 +292,8 @@ export async function ingestEdgeAlertIssues(agent, snap, deps = {}) {
   };
   const { list, dropped } = await centralizeEdgeSent(agent, { ...snap, perfAlertSent: pend }, deps);
   const rules = await D.rules();
-  const fires = list.filter((r) => rules.rules?.[r.rule]?.on && rules.rules[r.rule].issue === true && !(rules.rules[r.rule].corpsOff || []).includes(r.vcenterId))
+  // 3회차 I1: 아는 규칙만(모르는 규칙 · 'unknown' 은 이슈를 만들지 않는다 — 다른 규칙의 이슈 설정으로 판단하지 않게)
+  const fires = list.filter((r) => RULES.has(r.rule) && Object.hasOwn(rules.rules || {}, r.rule) && rules.rules[r.rule]?.on && rules.rules[r.rule].issue === true && !(rules.rules[r.rule].corpsOff || []).includes(r.vcenterId))
     .map((r) => ({ ...r, id: `${capStr(String(agent), 48)}:${r.id}`, agent: capStr(String(agent), 64) }));
   if (!fires.length) return { created: 0, dropped };
   const res = await D.apply(fires, { dailyMax: rules.daily?.issues ?? 20 });

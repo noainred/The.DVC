@@ -10,7 +10,7 @@
 import * as db from './db.js';
 import * as month from './monthStore.js';
 import { normalizeWindow, pickRes, toPoints, gapsOf, baselineOf, capPoints, RES_MS, SERVER_METRICS, DEVICE_METRICS } from './trendWindow.js';
-import { STORE_DEFAULTS, effectiveRawDays } from './settings.js';
+import { STORE_DEFAULTS, effectiveRawDays, peakWindowSOf } from './settings.js';
 import { DAY_OFFSET_MIN } from '../util/dayKey.js';
 
 const dayStart = (day) => Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8, 10))) - DAY_OFFSET_MIN * 60_000;
@@ -80,13 +80,20 @@ export async function trendFor({ agent = '', key, q = {}, settings = {}, now = D
   };
 }
 
-/** 장치 목록 — 종류별 · 처음 본 순서(색 고정용) · 장치 상한 초과 수(최신값). */
-export async function devicesFor({ agent = '', key } = {}) {
+/**
+ * 장치 목록 — 종류별 · 처음 본 순서(색 고정용) · 장치 상한 초과 수(최신값).
+ * 점검 반복 2회차 I2: peakWindowCapS = 이 노드 설정의 피크 창 상한(settings.store.peakWindowS) — 화면이 ‘줄였다’ 를 기본값 10 이 아니라 이 값과 견준다(숫자를 화면에 박지 않는다).
+ *   설정을 주지 않은 호출 · 못 읽은 값은 null(화면은 줄었는지 말하지 않는다).
+ */
+export async function devicesFor({ agent = '', key, settings = null } = {}) {
   const list = await db.deviceList(key, { agent });
   const out = { disk: [], nic: [], mount: [] };
   for (const d of list) if (out[d.kind]) out[d.kind].push({ dev: d.dev, ord: d.ord, color: d.ord - 1, firstTs: d.first_ts, lastTs: d.last_ts, ...(d.info ? { info: d.info } : {}) });
   const latest = (await db.latestUsage()).find((r) => String(r.key) === String(key) && String(r.agent || '') === String(agent)) || null;
-  return { ok: true, key, devices: out, over: latest?.dev_over ?? null, peakSrc: latest?.peak_src ?? null, peakWindowS: latest?.peak_window_s ?? null };
+  const st = settings && typeof settings === 'object' && settings.store && typeof settings.store === 'object' ? settings.store : null;   // 저장 구조 설정(settings.js STORE_DEFAULTS)
+  const cap = st ? peakWindowSOf(st.peakWindowS) : null;   // 재확인 R3: 중앙 정제와 같은 함수(설정 범위의 정수만)
+  return { ok: true, key, devices: out, over: latest?.dev_over ?? null, peakSrc: latest?.peak_src ?? null, peakWindowS: latest?.peak_window_s ?? null,
+    peakWindowCapS: cap };
 }
 
 /**

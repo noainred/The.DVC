@@ -12,7 +12,7 @@ import Select from '../../components/Select.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
 import { shortStamp } from './bmOpsText.js';
-import { RULE_TEXT, CHANNEL_TEXT, RULES_HONEST, sentResultText, issueResultText, autoFocusText, HEALTH_CELL_TEXT, FOCUS_METRIC_TEXT } from './bmPerfOpsText.js';
+import { RULE_TEXT, CHANNEL_TEXT, RULES_HONEST, sentResultText, sentRuleText, UNKNOWN_RULE_HINT, issueResultText, autoFocusText, HEALTH_CELL_TEXT, FOCUS_METRIC_TEXT } from './bmPerfOpsText.js';
 import './bmOps.css';
 import './bmPerfOps.css';
 
@@ -227,7 +227,7 @@ export default function BmPerfRulesPanel({ vcenters = [] }) {
               {resp.sent.map((x) => (
                 <tr key={`${x.agent}|${x.id}`}>
                   <td data-sort={x.at}>{shortStamp(x.at)}</td>
-                  <td data-sort={x.rule}>{RULE_TEXT[x.rule]?.label || x.rule}</td>
+                  <td data-sort={sentRuleText(x.rule)} title={x.rule === 'unknown' ? UNKNOWN_RULE_HINT : undefined}>{sentRuleText(x.rule)}</td>
                   <td data-sort={x.name}>{x.name}{x.via === 'edge' ? <span className="bmo-sub"> · 엣지 {x.agent}</span> : null}</td>
                   <td data-sort={x.vcenterId}>{vcName(x.vcenterId) || '—'}</td>
                   <td data-sort={x.title} className="bmo-wrap">{x.title}</td>

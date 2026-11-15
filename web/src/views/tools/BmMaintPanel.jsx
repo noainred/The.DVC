@@ -6,7 +6,8 @@
  * ⚠ 조회는 펼칠 때 1회 + 저장 · 동작 뒤(폴링 없음) · 늦게 온 이전 응답은 세대로 버린다 · 조회 실패 상태로 저장 버튼을 열지 않는다.
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson, postJson, putJson, delJson, hasRole } from '../../api.js';
+import { fetchJson, postJson, putJson, delJson } from '../../api.js';
+import { gateOk, gateShown, gateWhy } from './bmWriteText.js'; // 점검 반복 2회차 재확인 R4
 import { ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
@@ -16,7 +17,7 @@ import { unitText } from '../unitText.js';
 import { shortStamp } from './bmOpsText.js';
 import {
   SCOPE_ORDER, SCOPE_TEXT, STATUS_TEXT, TARGET_KIND_TEXT, WEEKDAY_OPTIONS, NTH_OPTIONS, TZ_OPTIONS, DEPLOY_STATUS_TEXT,
-  scheduleText, statusLine, targetText, scopesText, countsText, leakText, formToBody, emptyForm, windowToForm, approvalNote, limitsNote, maintHonest, durText,
+  scheduleText, statusLine, targetText, scopesText, countsText, leakText, formToBody, emptyForm, windowToForm, approvalNote, confirmOwnerNote, limitsNote, maintHonest, durText,
 } from './bmMaintText.js';
 import './bmOps.css';
 import './bmPerfOps.css';
@@ -116,7 +117,9 @@ export default function BmMaintPanel({ vcenters = [] }) {
   };
   useEffect(() => { load(); }, []);
   const resp = st.resp;
-  const writer = hasRole('admin', 'operator');
+  // 점검 반복 2회차 재확인 R4: ‘새 창’ 은 서버 표지(actions.create — 데모 · 역할, authMiddleware · 라우트와 같은 판정)로만 — 역할만 보면 데모 계정에 열리고 저장이 403 이었다.
+  const cg = resp?.actions?.create;
+  const writer = gateOk(cg);
   const corpName = (id) => vcenters.find((v) => v.id === id)?.name || id || '—';
   const startNew = () => { setEditId(null); setPreview(null); setMsg(null); setForm(emptyForm({ corp: vcenters[0]?.id || '', tz: resp?.defaultTz || 'Asia/Seoul' })); };
   const startEdit = (w) => { setEditId(w.id); setPreview(null); setMsg(null); setForm({ ...windowToForm(w), rev: w.rev }); };
@@ -155,6 +158,7 @@ export default function BmMaintPanel({ vcenters = [] }) {
         {!!sum.expired && <span className="bmp-chip" style={{ color: toneVar('bad') }}>재확인 만료 {sum.expired}</span>}
         <span className="bmo-note" style={{ color: toneVar(lk.tone) }}>{lk.text}</span>
         {writer && !form && <button type="button" className="btn" onClick={startNew}>새 창</button>}
+        {!writer && gateShown(cg) && gateWhy(cg) && <span className="bmo-sub">새 창 — {gateWhy(cg)}</span>}
         <button type="button" className="btn" onClick={load} disabled={st.loading}>{st.loading ? '읽는 중…' : '다시 읽기'}</button>
       </div>
       {resp.deployed && <p className="bmo-note" style={{ color: toneVar(resp.deployed.stale || resp.deployed.unreadable ? 'warn' : 'idle') }}>
@@ -179,6 +183,7 @@ export default function BmMaintPanel({ vcenters = [] }) {
                   {w.canConfirm && w.schedule?.kind !== 'once' && <button type="button" className="btn btn-sm" onClick={() => act(w, 'confirm')}>재확인</button>}
                   {w.canDelete && <button type="button" className="btn btn-sm" onClick={() => act(w, 'delete')}>지우기</button>}
                 </div>
+                {w.confirmOwner === 'combined' && <div className="bmo-note">{confirmOwnerNote(resp.limits || {})}</div>}
                 {rowMsg?.id === w.id && <div className="bmo-note" style={{ color: toneVar(rowMsg.ok ? 'ok' : 'bad') }}>{rowMsg.text}</div>}
               </td>
             </tr>

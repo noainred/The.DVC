@@ -147,7 +147,7 @@ describe('기준값 · 근거 — 보여 주기만(숫자는 API 값)', () => {
   it('근거 한 줄 — 장치 · 값 · 못 읽은 이유', () => {
     expect(T.basisText({ label: '평균 대기열', value: 9.2, unit: '', code: 'bad', device: 'nvme0n1' })).toBe('nvme0n1 평균 대기열 9.2');
     expect(T.basisText({ label: 'ECC 정정', value: null, code: 'missing' })).toBe('ECC 정정 —(못 읽음)');
-    expect(T.basisText({ label: 'PSI io full', value: null, code: 'none' })).toBe('PSI io full —(그 커널에 없음)');
+    expect(T.basisText({ key: 'psi_io_full10', label: 'PSI io full', value: null, code: 'none' })).toBe('PSI io full —(그 커널에 없음)');   // 2회차 E3: none 이유는 항목(key)별
   });
   it('근거 열은 API perfCols 의 judged:false · 그 자원만 · 못 읽은 값은 ‘—’', () => {
     const cols = [{ col: 'load1', res: 'cpu', use: 'S', judged: false, unit: '', label: 'load 1분' }, { col: 'runq_per_core', res: 'cpu', use: 'S', judged: true, unit: '', label: '런큐' }, { col: 'swap_in_ps', res: 'mem', use: 'S', judged: false, unit: 'pages/s', label: '스왑 인' }];

@@ -1016,7 +1016,7 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
     for (const r of markInMaint(realResults0, maintOf)) MR?.countSuppression('collectFail', r.inMaint.ids);
     const skippedResults = maintSkip.map(({ tg, ms }) => {
       const ids = ms.windows.filter((w) => w.scopes.includes('collect')).map((w) => w.id);
-      MR?.countSuppression('collect', ids); MR?.noteApplied('collect', tg.key, ms.until.collect, ids, Date.now(), { since: MR.sinceOf?.(ms, 'collect') ?? null });
+      MR?.countSuppression('collect', ids); MR?.noteApplied('collect', tg.key, ms.until.collect, ids, Date.now(), { occ: MR.scopeOccOf(ms, 'collect') });
       // 상세는 지난 수집 기록을 지우지 않고 ‘정비 중 — 건너뜀’ 표지만 덧댄다(다음 실제 수집이 표지를 지운다).
       _detail.set(tg.key, { ...(_detail.get(tg.key) || { state: 'none', detail: null }), maintSkip: { ids, until: ms.until.collect, at: Date.now() } });
       return { ok: false, target: tg, maintSkip: { ids, until: ms.until.collect }, ms: 0 };
