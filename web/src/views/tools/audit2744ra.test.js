@@ -45,6 +45,7 @@ describe('GA-R3 VM 수량 추이 — data 가 비어도 선택 도구를 그린�
     expect(code).toMatch(/const retry = \(\) => retryGate\.current\.start\(\(\) => load\(/);
     // vCenter 목록은 마지막 응답의 것을 따로 둔다(data 가 비어도 선택 상자가 빈 목록이 되지 않게).
     expect(code).toMatch(/setVcList\(d\.vcenterList\)/);
-    expect(code).toMatch(/vcList\.map\(/);
+    expect(code).toMatch(/vcOptions\.map\(/);   // v3.10.15: 선택지는 리전 안 vCenter(vcInRegion(vcList, region)) — 목록 자체는 여전히 마지막 응답의 vcList
+    expect(code).toMatch(/vcInRegion\(vcList, region\)/);
   });
 });
