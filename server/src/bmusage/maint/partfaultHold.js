@@ -10,7 +10,7 @@
  *   그 엣지 대상을 **모른다** — 그 장비는 여전히 보류하지 않지만(모르는 장비를 억제하지 않는다) 조용히 빠뜨리지 않고 ‘대상 모름’ 으로 센다
  *   (targetsUnknown: 엣지 · 장비 수 — 그 엣지 법인에 hold 창이 있을 때만 · 법인을 모르면 센다). 폴러가 상태 · 콘솔에 싣는다.
  */
-import { maintJudge, countSuppression, noteApplied, localTargets, sinceOf, auditCycle } from './runtime.js';
+import { maintJudge, countSuppression, noteApplied, localTargets, scopeOccOf, auditCycle } from './runtime.js';
 import { windowStatus } from './judge.js';
 
 const t = (v) => String(v ?? '').trim();
@@ -47,7 +47,7 @@ export function holdSetFor(devices = [], targets = [], judge, now = Date.now(), 
     const s = judge.stateFor(tg, now);
     if (!s?.scopes?.hold) continue;
     hold.add(k);
-    byDevice.set(k, { ids: s.windows.filter((w) => w.scopes.includes('hold')).map((w) => w.id), until: s.until.hold, since: sinceOf(s, 'hold'), key: t(tg.key) });
+    byDevice.set(k, { ids: s.windows.filter((w) => w.scopes.includes('hold')).map((w) => w.id), until: s.until.hold, occ: scopeOccOf(s, 'hold'), key: t(tg.key) });
   }
   return { hold, byDevice, ...(unknown.size ? { targetsUnknown: { agents: [...unknown.keys()].sort().slice(0, 64), devices: [...unknown.values()].reduce((a, b) => a + b, 0) } } : {}) };
 }
@@ -83,7 +83,7 @@ export async function partfaultMaintHold(devices = [], { now = Date.now(), deps 
     const blindAgent = (ag) => { let cs = []; try { cs = corpsOf ? corpsOf(ag) || [] : []; } catch { cs = []; } return !cs.length || cs.some((c) => holdCorps.has(t(c))); };
     const r = holdSetFor(devices, targets, judge, now, { knownAgents: deps.knownAgents !== undefined ? deps.knownAgents : (targets.knownAgents || null), blindAgent });
     for (const [k, v] of r.byDevice) {
-      noteApplied('hold', v.key, v.until, v.ids, now, { since: v.since });
+      noteApplied('hold', v.key, v.until, v.ids, now, { occ: v.occ });   // 창마다 그 창 발생의 시작 · 끝(3회차 D3)
       // 계수는 장비마다 창 한 번(주기마다 세지 않는다 — 화면 ‘전이 보류 n대’).
       const fresh = v.ids.filter((id) => !_counted.has(`${id}|${k}`));
       for (const id of fresh) { _counted.add(`${id}|${k}`); if (_counted.size > 20_000) _counted.clear(); }

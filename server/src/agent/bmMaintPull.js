@@ -7,6 +7,8 @@
  *    지난 배포본은 받은 지 24시간(store.DEPLOY_TTL_MS)까지만 판정에 들어간다(억제 시한 — 중앙이 지운 창이 끊긴 엣지에서 계속 억제하지 않게).
  *  · 받은 창은 `store.saveDeployed` 가 **같은 정규화(normalizeWindow)** 로 다시 자른다(엣지는 중앙 문자열을 그대로 믿지 않는다 · 형식 밖은 버리고 센다).
  *  · 적용한 서명은 **다음 인출의 쿼리**로 중앙에 알린다(숫자 · 서명만). 0건이어도 상태를 남긴다(`_last` · 콘솔 · edgelog/spec.js 등재 — 무음 실패 금지).
+ *  · 점검 반복 3회차 D2: 본문의 `history`(끝남 · 지움 · 만료 창 — 지난 구간 전용)도 같은 저장(saveDeployed)이 같은 정규화 · 상한으로 자른다. 배열이 아니면(구버전 중앙)
+ *    직전 history 를 그대로 둔다 — history 는 억제가 아니라 과거 사실이라 24시간 시한을 걸지 않는다(지금 판정에서는 빠진다).
  */
 import { config, clampIntervalMs, currentVersion } from '../config.js';
 import { classifyCentral404 } from './central404.js';
@@ -57,9 +59,11 @@ export async function pullBmMaintNow({ fetchImpl = resilientFetch, now = Date.no
       if (_logOnce('nodist', last.reason)) console.log(`[bm-maint-pull] 배포 없음(${last.reason || '-'}) — 지난 배포본 유지(24시간 시한)`);
       return last;
     }
-    const r = ST.saveDeployed(body.windows, { sig: body.sig, now: now() });
-    last = { at: now(), ok: true, windows: body.windows.length, kept: r.n, dropped: r.dropped, sig: body.sig };
-    if (r.dropped || _logOnce('ok', `${r.n}`)) console.log(`[bm-maint-pull] 정비 창 ${r.n}개 받음${r.dropped ? ` · 형식 밖 ${r.dropped}개 버림` : ''}`);
+    const r = ST.saveDeployed(body.windows, { sig: body.sig, now: now(), history: Array.isArray(body.history) ? body.history : undefined });
+    last = { at: now(), ok: true, windows: body.windows.length, kept: r.n, dropped: r.dropped, sig: body.sig, history: r.history, ...(r.historyDropped ? { historyDropped: r.historyDropped } : {}) };
+    if (r.dropped || r.historyDropped || _logOnce('ok', `${r.n}|${r.history}`)) {
+      console.log(`[bm-maint-pull] 정비 창 ${r.n}개 받음 · 지난 구간용 ${r.history}개${r.dropped ? ` · 형식 밖 ${r.dropped}개 버림` : ''}${r.historyDropped ? ` · 지난 구간용 ${r.historyDropped}개 버림(형식 밖 · 상한)` : ''}`);
+    }
     return last;
   } catch (e) {
     last = { at: now(), ok: false, error: String(e?.message || e).slice(0, 300) };

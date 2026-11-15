@@ -17,7 +17,7 @@ import { unitText } from '../unitText.js';
 import { shortStamp } from './bmOpsText.js';
 import {
   SCOPE_ORDER, SCOPE_TEXT, STATUS_TEXT, TARGET_KIND_TEXT, WEEKDAY_OPTIONS, NTH_OPTIONS, TZ_OPTIONS, DEPLOY_STATUS_TEXT,
-  scheduleText, statusLine, targetText, scopesText, countsText, leakText, formToBody, emptyForm, windowToForm, approvalNote, limitsNote, maintHonest, durText,
+  scheduleText, statusLine, targetText, scopesText, countsText, leakText, formToBody, emptyForm, windowToForm, approvalNote, confirmOwnerNote, limitsNote, maintHonest, durText,
 } from './bmMaintText.js';
 import './bmOps.css';
 import './bmPerfOps.css';
@@ -183,6 +183,7 @@ export default function BmMaintPanel({ vcenters = [] }) {
                   {w.canConfirm && w.schedule?.kind !== 'once' && <button type="button" className="btn btn-sm" onClick={() => act(w, 'confirm')}>재확인</button>}
                   {w.canDelete && <button type="button" className="btn btn-sm" onClick={() => act(w, 'delete')}>지우기</button>}
                 </div>
+                {w.confirmOwner === 'combined' && <div className="bmo-note">{confirmOwnerNote(resp.limits || {})}</div>}
                 {rowMsg?.id === w.id && <div className="bmo-note" style={{ color: toneVar(rowMsg.ok ? 'ok' : 'bad') }}>{rowMsg.text}</div>}
               </td>
             </tr>
