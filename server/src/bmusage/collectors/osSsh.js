@@ -427,17 +427,21 @@ export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_B
        * 1회차 점검 D5(a): exec 자체가 실패한 시도(시한 · 채널 오류 · 출력 상한)를 삼키지 않는다 — 예전에는 catch(() => null) 이 ‘출력은 왔는데 표지가 없음’ 과
        *   같은 갈래로 보내 사유가 'not-linux'(‘Linux 출력 아님 — OS 종류 · 셸을 확인’)였다(재현: uname 멈춤 30,030ms → not-linux). 첫 exec 오류의 종류를 결과에 남긴다
        *   (execError: 'timeout' | 'channel' | 'output-limit') — missReason.osMissOf 가 문구가 아니라 이 값으로 가른다. 오류 원문(명령 전문이 실린다)은 싣지 않는다.
+       * 재확인 N2: 판정은 **첫 시도의 결과**로 한다 — 첫 시도가 출력은 받았는데 표지가 없었으면(그 형식이 아니라는 증거) 대체 시도가 시한에 걸려도 예전처럼 not-linux 갈래다
+       *   (예전 판: 대체 시도의 시한이 ‘timeout · OS 종류 문제가 아닙니다’ 로 원인을 뒤집었다). 첫 시도 자체가 exec 오류일 때만 execError 를 싣는다.
        */
-      let execErr = '';
+      let first = '';   // '' · 'no-markers' · 'exec:<종류>'
       for (const fn of order) {
         // ⚠ 남은 예산이 없으면 **시작하지 않고 사유를 남긴다**(조용히 생략하지 않는다 — v2.528 규약).
         if (slice() < MIN_SLICE_MS) {
           budgetSkipped = '남은 수집 시간이 부족해 다른 형식(Windows/Linux) 시도는 건너뛰었습니다.';
           break;
         }
-        const got = await fn().catch((e) => { if (!execErr) execErr = execErrorKind(e); return null; });
+        const got = await fn().catch((e) => { if (!first) first = `exec:${execErrorKind(e)}`; return null; });
         if (got) { _osKind.set(hostKey, got.osKind); return got; }
+        if (!first) first = 'no-markers';
       }
+      const execErr = first.startsWith('exec:') ? first.slice(5) : '';
       if (execErr) {
         return {
           ok: false, execError: execErr,

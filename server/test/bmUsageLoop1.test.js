@@ -75,9 +75,11 @@ test('D1 ① 순수 — 접속처 · 재부팅 · 호스트 이름이 바뀌면 
   // 같은 장비 · 같은 부팅 → 값(btime 이 몇 초 흔들려도 같은 부팅)
   const a2 = U.buildUsage({ target: tgt('10.0.0.1'), os: shaped({ ...DEV_A, cpu: 1300, ticks: 34_000, rx: 3e6, tx: 4e6, btime: DEV_A.btime + 2 }), prev: a1.next, now: NOW });
   assert.equal(a2.detail.osDeviceChange, ''); assert.equal(a2.row.disk_busy_pct, 10); assert.ok(a2.row.cpu_pct > 0 && a2.row.net_bps > 0);
-  // 재부팅(같은 주소 · btime 이 허용 폭 넘게 바뀜) · 같은 주소에 다른 장비(호스트 이름) — 둘 다 첫 표본
+  // 부팅 시각 변화(같은 주소 · btime 이 허용 폭 넘게 바뀜 — 재부팅 또는 시계 보정) · 같은 주소에 다른 장비(호스트 이름) — 둘 다 첫 표본
   const rb = U.buildUsage({ target: tgt('10.0.0.1'), os: shaped({ ...DEV_A, cpu: 5000, ticks: 900_000, btime: DEV_A.btime + 86_400 }), prev: a1.next, now: NOW });
-  assert.equal(rb.detail.osDeviceChange, 'reboot'); assert.equal(rb.row.disk_busy_pct, null); assert.match(rb.notes[0], /다시 부팅/);
+  assert.equal(rb.detail.osDeviceChange, 'boot-time'); assert.equal(rb.row.disk_busy_pct, null);
+  assert.match(rb.notes[0], /부팅 시각\(btime\)이 바뀌어\(재부팅 또는 시계 보정\)/, '재확인 N3: 재부팅이라 단정하지 않는다');
+  assert.ok(!rb.notes[0].includes('`'), '문구에 백틱 없음');
   const hn = U.buildUsage({ target: tgt('10.0.0.1'), os: shaped({ ...DEV_A, cpu: 5000, ticks: 900_000, hn: 'other' }), prev: a1.next, now: NOW });
   assert.equal(hn.detail.osDeviceChange, 'hostname'); assert.equal(hn.row.disk_busy_pct, null);
   // 포트만 바뀌어도 다른 접속처
@@ -262,10 +264,19 @@ test('D3 · D4 ④ 실제 등록부 → currentTargets(재현 꼴) · 집중 모
   // 집중 모니터링: 세션 중 등록이 꺼지면 다음 분부터 접속하지 않는다(authErrorCode — missReason cred-config)
   const F = await import('../src/bmusage/focus/run.js');
   const off = await F.refreshFocusOsHost({ id: 'o-1', host: '10.0.1.11', port: 22, username: 'mon', password: 'pw' });
-  assert.equal(off.authErrorCode, 'disabled'); assert.equal(off.password, '');
+  assert.equal(off.authErrorCode, 'os-disabled'); assert.equal(off.password, '');
   const edge = await F.refreshFocusOsHost({ id: 'o-2', host: '10.0.1.12', port: 22, username: 'mon', password: 'pw' });
-  assert.equal(edge.authErrorCode, 'edge-registry');
-  assert.equal(MR.osMissOf({ ok: false, authErrorCode: 'disabled' }), 'cred-config');
+  assert.equal(edge.authErrorCode, 'os-edge');
+  // 재확인 N4: 결측 사유는 그 code 그대로(예전 판: cred-config — ‘키 · 계정 설정’ 이라는 틀린 조치) · 실제 collectOsUsage 가 접속 전에 돌려주는 결과로
+  const OSc = await import('../src/bmusage/collectors/osSsh.js');
+  assert.equal(MR.osMissOf(await OSc.collectOsUsage(off)), 'os-disabled');
+  assert.equal(MR.osMissOf(await OSc.collectOsUsage(edge)), 'os-edge');
+  assert.equal(MR.osMissOf({ ok: false, authErrorCode: 'key-missing' }), 'cred-config', '키 · 계정 해석 막힘은 그대로 cred-config');
+  assert.ok(F.FOCUS_MISS.includes('os-disabled') && F.FOCUS_MISS.includes('os-edge'));
+  // 중앙 집중 인출 정제: 새 code 는 남고, 모르는 code 는 'error'(구버전 중앙이 새 code 를 받는 경우와 같은 갈래 — 깨지지 않는다)
+  const PO = await import('../src/central/bmPerfOpsPull.js');
+  assert.equal(PO.cleanSample({ idx: 1, minuteTs: NOW, missOs: 'os-edge' }, NOW + 1000).missOs, 'os-edge');
+  assert.equal(PO.cleanSample({ idx: 1, minuteTs: NOW, missOs: 'zzz-new' }, NOW + 1000).missOs, 'error');
 });
 
 /* ── D5 ─────────────────────────────────────────────────────────────────── */
@@ -312,6 +323,10 @@ class FakeClient extends EventEmitter {
   exec(cmd, a, b) {
     const cb = typeof a === 'function' ? a : b;
     if (process.env.L1_FAIL_ALL === '1') { setImmediate(() => cb(new Error('(SSH) Channel open failure: open failed'))); return; }
+    if (process.env.L1_NOMARK_MAIN === '1' && cmd.includes("echo '##STAT'")) {   // 재확인 N2: 첫 시도가 출력은 받았는데 표지가 없다(Linux 아님의 증거)
+      const st = new EventEmitter(); st.stderr = new EventEmitter(); st.close = () => {}; st.destroy = () => {}; st.signal = () => {};
+      setImmediate(() => { cb(null, st); setImmediate(() => { st.emit('data', Buffer.from('% Unknown command\\n')); st.emit('close', 0); }); }); return;
+    }
     const ch = spawn('/bin/dash', ['-c', cmd], { env: { ...process.env, PATH: FAKE + ':' + process.env.PATH }, detached: true });
     const st = new EventEmitter(); st.stderr = new EventEmitter();
     ch.stdout.on('data', (d) => st.emit('data', d)); ch.stderr.on('data', (d) => st.stderr.emit('data', d));
@@ -350,6 +365,16 @@ test('D5 ② 실제 collectOsUsage — 주 명령 exec 시한 → timeout(예전
   assert.ok(!/LC_ALL|##STAT/.test(r.error), '명령 전문을 싣지 않는다');
   const c = runChild({ L1_FAKEBIN: bin, L1_FAIL_ALL: '1' });
   assert.equal(c.execError, 'channel'); assert.equal(c.miss, 'ssh-error');
+});
+
+test('D5 ③ 재확인 N2 — 첫 시도가 표지 없는 출력(Linux 아님의 증거)이고 대체 시도(PowerShell)만 시한이면 not-linux 를 유지한다(예전: timeout + ‘OS 종류 문제가 아닙니다’)', { timeout: 120_000 }, async (t) => {
+  if (!fs.existsSync('/bin/dash')) return t.skip('dash 없음');
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'bmloop1-bin2-'));
+  fs.writeFileSync(path.join(bin, 'powershell'), '#!/bin/sh\nexec sleep 100\n', { mode: 0o755 });   // 대체 시도만 멈춘다
+  t.after(() => fs.rmSync(bin, { recursive: true, force: true }));
+  const r = runChild({ L1_FAKEBIN: bin, L1_NOMARK_MAIN: '1', BMUSAGE_CMD_TIMEOUT_MS: '6000' });
+  assert.equal(r.ok, false); assert.equal(r.execError, null, JSON.stringify(r)); assert.equal(r.miss, 'not-linux', `사유(${r.error})`);
+  assert.ok(!/OS 종류 문제가 아닙니다/.test(r.error), '문구가 원인을 뒤집지 않는다');
 });
 
 /* ── 의심 1 · 2 ─────────────────────────────────────────────────────────── */

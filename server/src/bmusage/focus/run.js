@@ -41,7 +41,8 @@ export const FOCUS_METRICS = Object.freeze([
 export const FOCUS_COLS = Object.freeze(FOCUS_METRICS.map((m) => m.col));
 export const FOCUS_STATUS = Object.freeze(['queued', 'running', 'done', 'stopped', 'auth', 'interrupted', 'failed']);
 /** 결측 사유(웹 문구 1:1). */
-export const FOCUS_MISS = Object.freeze(['timeout', 'auth', 'auth-stopped', 'ssh-error', 'host-key', 'not-linux', 'no-path', 'pool-busy', 'unreachable', 'no-telemetry', 'error', 'cred-config', 'forbidden', 'ids-unmatched', 'cert-untrusted']);   // 1회차 점검 D5(b): iDRAC 셋
+// 1회차 점검 D5(b): iDRAC 셋 · 재확인 N4: os-disabled · os-edge(분마다 다시 해석이 막은 등록 — 주기 수집은 그 등록을 대상에서 빼므로 수집 건강 열거에는 없다)
+export const FOCUS_MISS = Object.freeze(['timeout', 'auth', 'auth-stopped', 'ssh-error', 'host-key', 'not-linux', 'no-path', 'pool-busy', 'unreachable', 'no-telemetry', 'error', 'cred-config', 'forbidden', 'ids-unmatched', 'cert-untrusted', 'os-disabled', 'os-edge']);
 /** 결과 code → HTTP(라우트 · 엣지 대행 공용 — 스냅샷과 같은 규약: 업무 결과는 code 로). */
 export const FOCUS_CODE_STATUS = Object.freeze({
   ok: 200, queued: 200, 'bad-reason': 400, 'bad-request': 400, 'not-found': 404, forbidden: 403, 'no-path': 409, busy: 409, 'daily-cap': 429,
@@ -136,8 +137,10 @@ async function refreshOsHost0(osHost) {
   // 1회차 점검 D3 · D4: 그 사이 ‘사용 안 함’ 으로 꺼졌거나 엣지 등록(agent)으로 바뀐 항목으로는 접속하지 않는다(대상 해석과 같은 함수 — targets.js osEntryIssue).
   const { osEntryIssue } = await import('../targets.js');
   const issue = osEntryIssue(raw, { isEdge: !!config.agent?.centralUrl, agentName: config.agent?.name || '' });
-  if (issue === 'os-disabled') return fail('disabled', 'OS 등록 항목이 그 사이 ‘사용 안 함’ 으로 꺼져 접속하지 않았습니다.');
-  if (issue === 'os-edge') return fail('edge-registry', 'OS 등록 항목이 그 사이 엣지 수집으로 지정돼 이 노드에서는 접속하지 않았습니다.');
+  //   재확인 N4: 사유 code 는 대상 해석과 같은 열거(os-disabled · os-edge — missReason.osMissOf 가 그대로 결측 사유로 · FOCUS_MISS). 예전 판은 'disabled' · 'edge-registry' 로
+  //   실려 cred-config(‘키 · 계정 설정’)로 보였다 — 조치가 다르다.
+  if (issue === 'os-disabled') return fail('os-disabled', 'OS 등록 항목이 그 사이 ‘사용 안 함’ 으로 꺼져 접속하지 않았습니다.');
+  if (issue === 'os-edge') return fail('os-edge', 'OS 등록 항목이 그 사이 엣지 지정으로 바뀌어 이 노드에서는 접속하지 않았습니다.');
   const { withResolvedAuth } = await import('../onboard/refs.js');
   return withResolvedAuth([raw], { feature: 'bm-usage' })[0];
 }

@@ -62,12 +62,15 @@ export function osDeviceOf(target, os) {
   const h = String(target?.osHost?.host ?? '').trim().toLowerCase().slice(0, 256);
   return { ep: h ? `${h}:${Number(target?.osHost?.port) || 22}` : '', boot: n(os.counters?.btime), hn: String(os.hostname ?? '').trim().toLowerCase().slice(0, 253) };
 }
-/** 바뀐 까닭 code('' = 같은 장비 · 모름) — 'endpoint'(접속처) · 'reboot'(부팅 시각) · 'hostname'(호스트 이름). */
+/**
+ * 바뀐 까닭 code('' = 같은 장비 · 모름) — 'endpoint'(접속처) · 'boot-time'(부팅 시각 btime) · 'hostname'(호스트 이름).
+ *   재확인 N3: btime 은 재부팅뿐 아니라 시계 ‘단계’ 보정에서도 움직인다(커널이 지금 시각 − 가동 시간으로 낸다 — 일반 지식) — 재부팅이라 단정하지 않는다.
+ */
 export function osDeviceChange(prevDev, cur) {
   if (!prevDev || typeof prevDev !== 'object' || !cur) return '';
   if (prevDev.ep && cur.ep && prevDev.ep !== cur.ep) return 'endpoint';
   const pb = n(prevDev.boot);
-  if (pb != null && cur.boot != null && Math.abs(cur.boot - pb) > BOOT_SKEW_S) return 'reboot';
+  if (pb != null && cur.boot != null && Math.abs(cur.boot - pb) > BOOT_SKEW_S) return 'boot-time';
   if (prevDev.hn && cur.hn && prevDev.hn !== cur.hn) return 'hostname';
   return '';
 }
@@ -83,7 +86,7 @@ export function idracDeviceChanged(prevDev, cur) {
 }
 const OS_CHANGE_NOTE = Object.freeze({
   endpoint: '직전 표본과 OS 접속처(등록 주소 · 포트)가 달라 다른 장비의 누적 카운터와 차분하지 않았습니다 — CPU·디스크·네트워크·HBA 사용률은 다음 주기부터 나옵니다(첫 표본으로 다룹니다).',
-  reboot: '직전 표본 뒤 서버가 다시 부팅돼(부팅 시각이 바뀜) 누적 카운터를 차분하지 않았습니다 — CPU·디스크·네트워크·HBA 사용률은 다음 주기부터 나옵니다.',
+  'boot-time': '직전 표본 뒤 부팅 시각(btime)이 바뀌어(재부팅 또는 시계 보정) 누적 카운터를 차분하지 않았습니다 — CPU·디스크·네트워크·HBA 사용률은 다음 주기부터 나옵니다.',
   hostname: '직전 표본과 서버 호스트 이름이 달라(같은 주소에 다른 장비가 응답했을 수 있습니다) 누적 카운터를 차분하지 않았습니다 — CPU·디스크·네트워크·HBA 사용률은 다음 주기부터 나옵니다.',
 });
 

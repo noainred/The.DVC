@@ -3,7 +3,7 @@
  *   서버 열거와 1:1 은 bmStage6Text(REASON_TEXT ↔ HEALTH_REASON_CODES) · bmPerfOpsText(FOCUS_MISS_TEXT ↔ FOCUS_MISS) · server bmFolders2992(WHY_CODES ↔ whyText)가 고정한다.
  */
 import { describe, it, expect } from 'vitest';
-import { SKIP_LABEL, MISSING_MARK, skippedNotes, missingFootnotes, missingMark } from './bmUsageText.js';
+import { SKIP_LABEL, MISSING_MARK, skippedNotes, missingFootnotes, missingMark, edgeDelegatedByAgent, edgeDelegatedChip, edgeDelegatedGuide } from './bmUsageText.js';
 import { MISS_REASON_TEXT } from './bmOnboardText.js';
 import { WHY_TEXT } from './bmFolders/whyText.js';
 import { REASON_TEXT } from './bmCollectText.js';
@@ -40,5 +40,25 @@ describe('점검 반복 1회차 — 새 사유 문구', () => {
     for (const r of [{}, { agent: 'edge-a' }, { agentUnknown: '__proto__' }, null]) expect(agentNoteOf(r)).toBe('');
     for (const v of [...Object.values(AGENT_UNKNOWN_TEXT), AGENT_UNKNOWN_HINT]) { expect(v.includes('`')).toBe(false); expect(v.length).toBeLessThan(80); }
     expect(AGENT_UNKNOWN_HINT).toMatch(/중앙 직접/);
+  });
+  it('재확인 N1 — OS 등록 엣지 지정 위임은 ‘엣지가 수집’ 을 단정하지 않는다(칩 · 안내 · 사유 · 각주)', () => {
+    const ok = { state: 'ok', label: '정상' };
+    const only = edgeDelegatedByAgent([{ reason: 'edge-delegated', agent: 'edge-pl', delegatedBy: 'os-registry' }], { stateOf: () => ok });
+    expect(only[0].osReg).toBe(1); expect(only[0].state).toBe(null, '엣지 표 상태(‘정상’ 초록 테두리)를 붙이지 않는다');
+    expect(edgeDelegatedGuide([...only, ...edgeDelegatedByAgent([{ reason: 'edge-delegated', agent: 'edge-us' }], { stateOf: () => ok })])).not.toMatch(/표에 없는 엣지는/);
+    expect(edgeDelegatedChip(only[0])).toBe('‘edge-pl’ 1대 · OS 등록 엣지 지정(그 엣지에 OS 등록 확인 필요)');   // 예전: ‘edge-pl’ 1대 · 정상
+    const g = edgeDelegatedGuide(only);
+    expect(g).not.toMatch(/그 엣지가 수집\*\*합니다/); expect(g).toMatch(/그 엣지 포탈에 이 서버의 OS 등록이 있어야 수집합니다/);
+    const mixed = edgeDelegatedByAgent([{ reason: 'edge-delegated', agent: 'edge-pl', delegatedBy: 'os-registry' }, { reason: 'edge-delegated', agent: 'edge-pl', delegatedBy: 'collector' }], { stateOf: () => ok });
+    expect(edgeDelegatedChip(mixed[0])).toBe('‘edge-pl’ 2대 · 정상 · 그중 1대는 OS 등록 엣지 지정(그 엣지에 OS 등록 확인 필요)');
+    expect(edgeDelegatedGuide(mixed)).toMatch(/그 엣지가 수집\*\*합니다[\s\S]*OS 등록 엣지 지정/);
+    expect(edgeDelegatedGuide(edgeDelegatedByAgent([{ reason: 'edge-delegated', agent: 'edge-us' }], { stateOf: () => ok }))).not.toMatch(/OS 등록 엣지 지정/);
+    for (const v of [NO_PATH_REASON['os-edge'], NO_PATH_REASON['edge-delegated'], MISS_REASON_TEXT['os-edge'], ...missingFootnotes([{ missing: ['os-edge'] }]), WHY_TEXT['os-edge'].a, g]) {
+      expect(v).not.toMatch(/엣지가 맡습니다|엣지가 수집하는 서버입니다/); expect(v.includes('`')).toBe(false);
+    }
+    expect(NO_PATH_REASON['os-edge']).toMatch(/그 엣지 포탈에 이 서버의 OS 등록이 있어야/);
+  });
+  it('재확인 N4 — 집중 모니터링 결측 사유 os-disabled · os-edge 문구(키 · 계정 설정이 아니다)', () => {
+    for (const c of ['os-disabled', 'os-edge']) { expect(FOCUS_MISS_TEXT[c], c).toBeTruthy(); expect(FOCUS_MISS_TEXT[c]).not.toMatch(/키 · 계정/); expect(FOCUS_MISS_TEXT[c].includes('`')).toBe(false); }
   });
 });
