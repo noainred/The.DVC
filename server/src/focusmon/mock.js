@@ -8,6 +8,8 @@
  */
 import { IOSTAT_COLS, aggregateIostat, TOP_N } from './rates.js';
 import { loadWindow as _loadWindow } from './load.js';
+import { flattenSample, newBlock, appendToBlock } from './codec.js';
+import { summarizeBlock } from './summary.js';
 
 const frac = (x) => x - Math.floor(x);
 const hash = (a, b) => frac(Math.sin(a * 127.1 + b * 311.7) * 43758.5453);
@@ -163,6 +165,35 @@ export function demoSample(id, ts, interval = 2) {
     net, dsk, dtot, nPhys: phys.length,
     sched, vmp, tcp, pst, fs,
   };
+}
+
+/**
+ * v3.13.0(⑭) 데모의 요약 행(긴 구간) — 칸마다 데모 표본 셋을 요약한다(실제 요약과 같은 모양 · 1분 또는 1시간 칸).
+ * 이틀 전 05:00~08:20(서버 시각)은 '수집하지 않은 시간' 으로 비운다(시안의 빗금 — 0 이 아니다). 날마다 업무 시간에 CPU 가 오른다.
+ */
+export function demoSumRows(id, from, to, stepMs) {
+  if (!BY_ID.has(String(id))) return null;
+  const out = [];
+  const start = Math.floor(from / stepMs) * stepMs;
+  const day = 86_400_000; const now = Date.now();
+  for (let t = start; t <= to && out.length < 2000; t += stepMs) {
+    const age = now - t;
+    const tod = ((t + 9 * 3_600_000) % day + day) % day; // KST 기준 하루 안 시각
+    if (age > day && age < 2 * day + day && tod > 5 * 3_600_000 && tod < 8.33 * 3_600_000 && age > 2 * day - 3_600_000) continue;
+    const b = newBlock(Math.floor(t / 60_000));
+    for (const f of [0.2, 0.5, 0.8]) {
+      const ts = t + f * stepMs;
+      const s = demoSample(id, ts);
+      const work = tod > 9 * 3_600_000 && tod < 18 * 3_600_000 ? 1 : 0.55;
+      if (s.cpu) s.cpu = { ...s.cpu, pct: Math.round(s.cpu.pct * work * 100) / 100, usr: Math.round(s.cpu.usr * work * 100) / 100 };
+      const { row, meta } = flattenSample(s);
+      if (row.has('s.cpu') && s.cpu) row.set('s.cpu', s.cpu.pct);
+      appendToBlock(b, ts, row, meta);
+    }
+    const sm = summarizeBlock(b);
+    if (sm) out.push({ t, span: stepMs, s: sm });
+  }
+  return out;
 }
 
 /** v3.12.0(⑬) 데모의 '가득 찰 때까지' — kr-db-01 은 /var · /oradata 가 차오르는 중(시안과 같은 값) · 나머지는 늘지 않음. */

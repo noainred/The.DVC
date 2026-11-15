@@ -22,6 +22,7 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { registerStateFile } from '../util/stateFiles.js';
 import { flattenSample, newBlock, appendToBlock, encodeBlock, encodeProcBlock } from './codec.js';
 import { normInterval } from './script.js';
+import { summarizeBlock, encodeSum } from './summary.js'; // v3.13.0 ⑭ 1분 요약
 
 export const RECENT_MIN = 31;
 export const GRACE_MS = 15_000;
@@ -64,6 +65,8 @@ function thaw(block) {
 
 function enqueueBlock(id, block, procList) {
   try { writeQ.push({ kind: 'm', target: id, minute: block.minute, n: block.ts.length, data: encodeBlock(block) }); } catch { /* 묶음 하나가 대기열 전체를 깨지 않게 */ }
+  // v3.13.0(⑭ 컨펌 ② '기록할 때 같이 만든다'): 1분 요약 — 늦은 표본으로 다시 쓸 때(flushReopened)도 같은 길이라 요약도 다시 쓴다
+  try { const sm = summarizeBlock(block); if (sm) writeQ.push({ kind: 's1', target: id, minute: block.minute, data: encodeSum(sm) }); } catch { /* 요약 하나가 대기열을 깨지 않게 */ }
   if (procList && procList.length) { try { writeQ.push({ kind: 'p', target: id, minute: block.minute, data: encodeProcBlock(procList) }); } catch { /* */ } }
   if (writeQ.length > 20_000) writeQ.splice(0, writeQ.length - 20_000); // DB 가 오래 막혀도 메모리가 끝없이 자라지 않게(오래된 것부터 버림)
 }
@@ -105,7 +108,24 @@ export function ingestSample(id, ts, sample, hello, now = Date.now()) {
   }
   if (!e.latest || ts >= e.latest.ts) e.latest = { ts, sample };
   e.lastAt = Math.max(e.lastAt, ts);
+  // v3.13.0(⑭ 자동 사건): 가동 시간이 줄면 재부팅(30초 넘게 — 표본 순서가 바뀐 것과 가른다)
+  if (Number.isFinite(sample.up)) {
+    if (Number.isFinite(e.lastUp) && sample.up + 30 < e.lastUp && ts >= (e.lastUpAt || 0)) queueEvent(id, 'reboot', '재부팅 — 가동 시간이 줄었습니다', ts);
+    if (ts >= (e.lastUpAt || 0)) { e.lastUp = sample.up; e.lastUpAt = ts; }
+  }
   return true;
+}
+
+/* ── 사건(v3.13.0 ⑭ 컨펌 ⑥ — 자동 · 직접) ───────────────────────────────── */
+/** 자동 사건 종류 → 판정 글(화면은 같은 열쇠로 색을 고른다). */
+export const EVENT_KINDS = Object.freeze(['reboot', 'auth', 'hostkey', 'start', 'stop', 'user']);
+/** 사건을 기록 대기열에 — 대상마다 한 줄(id 를 같이 쓰면 여러 대상을 한 사건으로 묶는다). 글은 300자. */
+export function queueEvent(target, kind, text, at = Date.now(), { id = null, by = '', scope = 'server' } = {}) {
+  if (!EVENT_KINDS.includes(kind)) return null;
+  const eid = id || `ev-${crypto.randomBytes(6).toString('hex')}`;
+  writeQ.push({ kind: 'e', id: eid, target: String(target), at, ekind: kind, text: String(text).slice(0, 300), by: String(by || '').slice(0, 64), scope });
+  if (writeQ.length > 20_000) writeQ.splice(0, writeQ.length - 20_000);
+  return eid;
 }
 
 export function ingestProcs(id, ts, p) {
@@ -469,7 +489,15 @@ const EDGE = new Map(); // agentLower → { agent, at, version, key, ok, error, 
 const KEYS_FILE = registerStateFile('focusmon-keys.json');
 let keysLoaded = false;
 
-export function setStatus(id, st, now = Date.now()) { ST.set(String(id), { ...st, at: now }); }
+export function setStatus(id, st, now = Date.now()) {
+  // v3.13.0(⑭ 자동 사건): 키 로그인 거부 · 호스트키 승인 필요로 **바뀐 순간**만(같은 상태가 이어지면 다시 적지 않는다)
+  const prev = ST.get(String(id));
+  //   앞 상태를 모르면(기동 직후 · 엣지 첫 동기화) 적지 않는다 — 재시작마다 같은 사건이 되풀이되지 않게
+  if ((st?.state === 'auth' || st?.state === 'hostkey') && prev && prev.state !== st.state) {
+    queueEvent(id, st.state, st.state === 'auth' ? '키 로그인 거부 — 수집을 멈췄습니다' : '호스트키 승인 필요 — 장비 신뢰 확인', now);
+  }
+  ST.set(String(id), { ...st, at: now });
+}
 export function statusOf(id) { return ST.get(String(id)) || null; }
 
 function loadKeys() {

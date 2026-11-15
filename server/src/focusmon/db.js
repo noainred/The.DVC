@@ -55,6 +55,13 @@ async function openDb() {
       CREATE TABLE IF NOT EXISTS fm_audit (id TEXT PRIMARY KEY, target TEXT NOT NULL, at INTEGER NOT NULL, ended INTEGER, node TEXT, by TEXT, outcome TEXT, rc INTEGER, ver TEXT, summary TEXT, ready TEXT, report BLOB);
       CREATE INDEX IF NOT EXISTS idx_fm_audit_target_at ON fm_audit(target, at);
       CREATE INDEX IF NOT EXISTS idx_fm_audit_at ON fm_audit(at);
+      CREATE TABLE IF NOT EXISTS fm_sum1 (target TEXT NOT NULL, minute INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY (target, minute));
+      CREATE INDEX IF NOT EXISTS idx_fm_sum1_minute ON fm_sum1(minute);
+      CREATE TABLE IF NOT EXISTS fm_sum60 (target TEXT NOT NULL, hour INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY (target, hour));
+      CREATE INDEX IF NOT EXISTS idx_fm_sum60_hour ON fm_sum60(hour);
+      CREATE TABLE IF NOT EXISTS fm_event (id TEXT NOT NULL, target TEXT NOT NULL, at INTEGER NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL, by TEXT, scope TEXT, PRIMARY KEY (id, target));
+      CREATE INDEX IF NOT EXISTS idx_fm_event_target_at ON fm_event(target, at);
+      CREATE INDEX IF NOT EXISTS idx_fm_event_at ON fm_event(at);
     `);
     _db = conn; _err = '';
     lockRetry.ok();
@@ -84,23 +91,38 @@ export function dbBytes() {
  * 묶음 적재 — 한 트랜잭션. rows: [{kind:'m'|'p', target, minute, n?, data}]. 같은 (target, minute) 은 덮는다(늦게 온 표본으로 다시 만든 묶음).
  * @returns {Promise<{ok:boolean, written?:number, ms?:number, error?:string}>}
  */
+/**
+ * 기록 대기열 줄 → 표(비동기 · 종료 직전 동기 경로가 같은 분기를 쓴다 — v3.13.0: 따로 두면 새 종류(요약 · 사건)가 종료 때 원본 표에 잘못 들어간다).
+ * 모르는 종류는 쓰지 않는다(예전에는 원본 묶음으로 썼다).
+ */
+function runRows(db, rows) {
+  const m = db.prepare('INSERT OR REPLACE INTO fm_metric (target, minute, n, data) VALUES (?, ?, ?, ?)');
+  const p = db.prepare('INSERT OR REPLACE INTO fm_proc (target, minute, data) VALUES (?, ?, ?)');
+  const ld = db.prepare('INSERT OR REPLACE INTO fm_load (target, minute, data) VALUES (?, ?, ?)');
+  const nd = db.prepare('INSERT OR REPLACE INTO fm_node (node, minute, data) VALUES (?, ?, ?)');
+  // v3.13.0(⑭): 1분 · 1시간 요약 · 사건(자동) — 같은 트랜잭션
+  const s1 = db.prepare('INSERT OR REPLACE INTO fm_sum1 (target, minute, data) VALUES (?, ?, ?)');
+  const s60 = db.prepare('INSERT OR REPLACE INTO fm_sum60 (target, hour, data) VALUES (?, ?, ?)');
+  const ev = db.prepare('INSERT OR REPLACE INTO fm_event (id, target, at, kind, text, by, scope) VALUES (?, ?, ?, ?, ?, ?, ?)');
+  for (const r of rows) {
+    if (r.kind === 'm' || r.kind == null) m.run(String(r.target), r.minute, r.n | 0, r.data);
+    else if (r.kind === 's1') s1.run(String(r.target), r.minute, r.data);
+    else if (r.kind === 's60') s60.run(String(r.target), r.hour, r.data);
+    else if (r.kind === 'e') ev.run(String(r.id), String(r.target), r.at, String(r.ekind), String(r.text).slice(0, 300), String(r.by || '').slice(0, 64), String(r.scope || 'server'));
+    else if (r.kind === 'p') p.run(String(r.target), r.minute, r.data);
+    else if (r.kind === 'l') ld.run(String(r.target), r.minute, String(r.data));
+    else if (r.kind === 'n') nd.run(String(r.target), r.minute, String(r.data));
+  }
+}
+
 export async function writeBlocks(rows = []) {
   const db = await getDb();
   if (!db) return { ok: false, error: _err || lockRetry.note() || 'DB 를 열지 못했습니다' };
   if (!rows.length) return { ok: true, written: 0, ms: 0 };
   const t0 = performance.now();
-  const m = db.prepare('INSERT OR REPLACE INTO fm_metric (target, minute, n, data) VALUES (?, ?, ?, ?)');
-  const p = db.prepare('INSERT OR REPLACE INTO fm_proc (target, minute, data) VALUES (?, ?, ?)');
-  const ld = db.prepare('INSERT OR REPLACE INTO fm_load (target, minute, data) VALUES (?, ?, ?)');
-  const nd = db.prepare('INSERT OR REPLACE INTO fm_node (node, minute, data) VALUES (?, ?, ?)');
   try {
     db.exec('BEGIN');
-    for (const r of rows) {
-      if (r.kind === 'p') p.run(String(r.target), r.minute, r.data);
-      else if (r.kind === 'l') ld.run(String(r.target), r.minute, String(r.data));
-      else if (r.kind === 'n') nd.run(String(r.target), r.minute, String(r.data));
-      else m.run(String(r.target), r.minute, r.n | 0, r.data);
-    }
+    runRows(db, rows);
     db.exec('COMMIT');
   } catch (e) {
     try { db.exec('ROLLBACK'); } catch { /* */ }
@@ -194,7 +216,65 @@ export async function pruneChunk(cutMinute) {
   db.prepare('DELETE FROM fm_run WHERE rowid IN (SELECT rowid FROM fm_run WHERE started < ? LIMIT ?)').run(cutMinute * 60_000, PRUNE_CHUNK);
   n += db.prepare('DELETE FROM fm_load WHERE rowid IN (SELECT rowid FROM fm_load WHERE minute < ? LIMIT ?)').run(cutMinute, PRUNE_CHUNK).changes;
   n += db.prepare('DELETE FROM fm_node WHERE rowid IN (SELECT rowid FROM fm_node WHERE minute < ? LIMIT ?)').run(cutMinute, PRUNE_CHUNK).changes;
+  // v3.13.0(⑭) 요약 · 사건도 같은 보관 기간(컨펌 ② · ⑥ — 30일)
+  n += db.prepare('DELETE FROM fm_sum1 WHERE rowid IN (SELECT rowid FROM fm_sum1 WHERE minute < ? LIMIT ?)').run(cutMinute, PRUNE_CHUNK).changes;
+  n += db.prepare('DELETE FROM fm_sum60 WHERE rowid IN (SELECT rowid FROM fm_sum60 WHERE hour < ? LIMIT ?)').run(Math.floor(cutMinute / 60), PRUNE_CHUNK).changes;
+  n += db.prepare('DELETE FROM fm_event WHERE rowid IN (SELECT rowid FROM fm_event WHERE at < ? LIMIT ?)').run(cutMinute * 60_000, PRUNE_CHUNK).changes;
   return n;
+}
+
+/* ── 요약 · 사건(v3.13.0 ⑭) ─────────────────────────────────────────────── */
+/** 1분 요약 [fromMinute, toMinute] — (target, minute) 기본 키 범위. */
+export async function readSum1(target, fromMinute, toMinute, limit = 2000) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.prepare('SELECT minute, data FROM fm_sum1 WHERE target = ? AND minute >= ? AND minute <= ? ORDER BY minute LIMIT ?').all(String(target), fromMinute, toMinute, limit);
+}
+/** 1시간 요약 [fromHour, toHour]. */
+export async function readSum60(target, fromHour, toHour, limit = 1000) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.prepare('SELECT hour, data FROM fm_sum60 WHERE target = ? AND hour >= ? AND hour <= ? ORDER BY hour LIMIT ?').all(String(target), fromHour, toHour, limit);
+}
+/**
+ * 요약이 아직 없는 원본 분(백필 — 컨펌 ③ '한 번 조각으로 · 쉬어 가며'). afterMinute 다음부터 minute 순으로 limit 줄.
+ * minute 인덱스 범위 + 기본 키 존재 확인(NOT EXISTS) — 끝까지 가면 빈 배열.
+ */
+export async function metricsWithoutSum(afterMinute, beforeMinute, limit = 50) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.prepare('SELECT m.target AS target, m.minute AS minute, m.data AS data FROM fm_metric m WHERE m.minute > ? AND m.minute < ? AND NOT EXISTS (SELECT 1 FROM fm_sum1 s WHERE s.target = m.target AND s.minute = m.minute) ORDER BY m.minute LIMIT ?')
+    .all(afterMinute, beforeMinute, limit);
+}
+/** 1시간 요약이 없는 끝난 시간들 — 1분 요약의 (대상, 시간) 중에서. sinceMinute 이후만(기동 때 한 번 · 하루 남짓). */
+export async function hoursWithoutSum60(sinceMinute, beforeHour, limit = 5000) {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = db.prepare('SELECT target, minute FROM fm_sum1 WHERE minute >= ? AND minute < ? ORDER BY minute LIMIT ?').all(sinceMinute, beforeHour * 60, 200_000);
+  const want = new Map();
+  for (const r of rows) { const k = `${r.target}|${Math.floor(r.minute / 60)}`; if (!want.has(k)) want.set(k, { target: r.target, hour: Math.floor(r.minute / 60) }); }
+  const has = db.prepare('SELECT 1 FROM fm_sum60 WHERE target = ? AND hour = ?');
+  const out = [];
+  for (const x of want.values()) { if (!has.get(x.target, x.hour)) out.push(x); if (out.length >= limit) break; }
+  return out;
+}
+/** 직접 적은 사건 하나(같은 id 의 줄 전부)를 지운다 — 자동 사건은 지우지 않는다(kind 'user' 만). 지운 줄 수. */
+export async function deleteUserEvent(id) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.prepare("DELETE FROM fm_event WHERE id = ? AND kind = 'user'").run(String(id)).changes;
+}
+/** 대상의 사건 [from, to](시각 순 · 상한). */
+export async function readEvents(target, from, to, limit = 200) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.prepare('SELECT id, target, at, kind, text, by, scope FROM fm_event WHERE target = ? AND at >= ? AND at <= ? ORDER BY at LIMIT ?').all(String(target), from, to, limit);
+}
+/** 사건(id 로) — 지우기 전 확인(직접 적은 것인지 · 누가 · 어느 서버들). null = DB 를 못 열었다 · [] = 없다. */
+export async function eventById(id) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.prepare('SELECT id, target, at, kind, text, by, scope FROM fm_event WHERE id = ? LIMIT 250').all(String(id));
 }
 
 /** 용량 상한을 넘었을 때 가장 오래된 분부터 한 조각 지운다(보관 기간 안이라도). 지운 줄 수. */
@@ -267,18 +347,9 @@ export function _resetForTest() { try { _db?.close(); } catch { /* */ } _db = nu
 /** 종료 직전 동기 적재 — 이미 열린 DB 가 있을 때만(새로 열지 않는다). 쓴 줄 수. */
 export function writeBlocksSync(rows = []) {
   if (!_db || !rows.length) return 0;
-  const m = _db.prepare('INSERT OR REPLACE INTO fm_metric (target, minute, n, data) VALUES (?, ?, ?, ?)');
-  const p = _db.prepare('INSERT OR REPLACE INTO fm_proc (target, minute, data) VALUES (?, ?, ?)');
-  const ld = _db.prepare('INSERT OR REPLACE INTO fm_load (target, minute, data) VALUES (?, ?, ?)');
-  const nd = _db.prepare('INSERT OR REPLACE INTO fm_node (node, minute, data) VALUES (?, ?, ?)');
   try {
     _db.exec('BEGIN');
-    for (const r of rows) {
-      if (r.kind === 'p') p.run(String(r.target), r.minute, r.data);
-      else if (r.kind === 'l') ld.run(String(r.target), r.minute, String(r.data));
-      else if (r.kind === 'n') nd.run(String(r.target), r.minute, String(r.data));
-      else m.run(String(r.target), r.minute, r.n | 0, r.data);
-    }
+    runRows(_db, rows);
     _db.exec('COMMIT');
     return rows.length;
   } catch { try { _db.exec('ROLLBACK'); } catch { /* */ } return 0; }

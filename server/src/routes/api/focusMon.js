@@ -31,6 +31,10 @@ import * as registry from '../../focusmon/registry.js';
 import * as store from '../../focusmon/store.js';
 import * as db from '../../focusmon/db.js';
 import * as Q from '../../focusmon/query.js';
+import * as L from '../../focusmon/longq.js'; // v3.13.0 ⑭ 긴 구간(요약 표)
+import { planUserEvent, writeUserEvent, eventsFor, SCOPES as EVENT_SCOPES, TEXT_MAX as EVENT_TEXT_MAX, SCOPE_MAX as EVENT_SCOPE_MAX } from '../../focusmon/events.js';
+import { biggestChanges } from '../../focusmon/changes.js';
+import { backfillState } from '../../focusmon/rollup.js';
 import { focusKeys, allTargets, findTarget, isMockMode, startCollection, stopCollection, addToCollection, removeFromCollection, targetEndpointChanged, localRunner, serviceStatus } from '../../focusmon/service.js';
 import { recorderStatus } from '../../focusmon/recorder.js';
 import { wakeEdge, focusEdgeMinVersion, focusDiagMinVersion } from '../../central/focusMonEdge.js';
@@ -166,7 +170,8 @@ api.get('/tools/focus-mon', adminOnly, fullScopeOnly, async (req, res) => {
   res.json({
     ok: true, now, mock: isMockMode(), admin: isAdminDetailUser(req.user),
     limits: { maxPerSession: store.MAX_PER_SESSION, maxSessions: store.MAX_SESSIONS, maxTotal: store.MAX_TOTAL_TARGETS, maxRecord: store.MAX_RECORD_TARGETS,
-      intervals: INTERVALS, defaultInterval: DEFAULT_INTERVAL, windows: Q.WINDOWS, watchMin: store.WATCH_MIN, watchMaxMin: store.WATCH_MAX_MIN,
+      intervals: INTERVALS, defaultInterval: DEFAULT_INTERVAL, windows: Q.WINDOWS, longWindows: Q.LONG_WINDOWS, watchMin: store.WATCH_MIN, watchMaxMin: store.WATCH_MAX_MIN,
+      eventTextMax: EVENT_TEXT_MAX, eventScopes: EVENT_SCOPES, eventScopeMax: EVENT_SCOPE_MAX,
       viewerTtlMs: store.VIEWER_TTL_MS, idleInterval: store.IDLE_INTERVAL, maxTargets: registry.MAX_TARGETS },
     settings, settingRanges: registry.SETTING_RANGES, edgeMin, diagMin,
     csv: { maxRows: registry.CSV_MAX_ROWS, maxBytes: registry.CSV_MAX_BYTES },
@@ -177,6 +182,7 @@ api.get('/tools/focus-mon', adminOnly, fullScopeOnly, async (req, res) => {
     // v3.11.0 법인 칸(서버 등록 · 수정의 고르기 목록) — 데모 계정에는 실제 법인 목록을 싣지 않는다
     corps: isDemoGuest(req.user) ? [] : corpResolver().list,
     recorder: recorderStatus(), db: { available: dbOk, error: db.dbError() || null, oldestMinute: dbOk ? await db.oldestMinute() : null },
+    history: backfillState(), // v3.13.0 ⑭ — 이미 쌓인 기록의 요약을 만드는 중인가(화면 '요약 만드는 중')
     mem: store.memStats(), local: serviceStatus().running,
   });
 });
@@ -484,25 +490,80 @@ api.delete('/tools/focus-mon/sessions/:id', adminOnly, fullRwOnly, demoBlockWrit
 
 /* ── 조회 ─────────────────────────────────────────────────────────────────── */
 
-/** 화면 데이터. view = overview | compare | server | iostat. 최근 구간이면 ‘보는 화면’ 심박을 남긴다. */
+/**
+ * 화면 데이터. view = overview | compare | server | iostat. 최근 구간이면 ‘보는 화면’ 심박을 남긴다.
+ * v3.13.0(⑭): 개요 · 비교 · 서버 상세는 긴 구간(1시간 ~ 30일 — `Q.LONG_WINDOWS`)도 받는다 — 개요 · 비교는 1시간부터 요약 표, 서버 상세는 6시간부터(1시간은 원본).
+ *   긴 구간의 표는 끝 순간만(구간 평균 없음) · 겹쳐 보기 cmp = 1d | 7d · 서버 상세에는 그 구간의 사건(번호 · 자동 + 직접)을 싣는다. iostat 비교는 원본 구간(30분 이하)만.
+ */
+const CMP_CHOICES = Object.freeze(['1d', '7d']);
 api.get('/tools/focus-mon/data', adminOnly, fullScopeOnly, async (req, res) => {
   const view = String(req.query.view || 'overview');
-  const w = Q.normWindow({ win: req.query.win, end: req.query.end });
+  const w = Q.normWindow({ win: req.query.win, end: req.query.end }, Date.now(), { long: view !== 'iostat' });
   const { ids, missing } = pickIds(req, view === 'server' ? 1 : 40);
   if (!ids.length) return res.status(404).json({ ok: false, code: 'not-found', reason: '볼 대상이 없습니다(없는 대상이거나 고르지 않았습니다).' });
   if (!w.past) store.touchView(ids);
-  const base = { ok: true, view, win: w.win, from: w.from, to: w.to, past: w.past, missing, now: Date.now() };
-  if (view === 'overview') return res.json({ ...base, ...(await Q.overview(ids, w)) });
+  const base = { ok: true, view, win: w.win, from: w.from, to: w.to, past: w.past, missing, now: Date.now(), longWin: w.long };
+  const cmp = CMP_CHOICES.includes(String(req.query.cmp)) ? String(req.query.cmp) : '';
+  if (view === 'overview') return res.json({ ...base, ...(w.long ? await L.longOverview(ids, w) : await Q.overview(ids, w)) });
   if (view === 'compare') {
     const metric = COMPARE_METRICS.includes(String(req.query.metric)) ? String(req.query.metric) : 'cpu';
-    return res.json({ ...base, metric, ...(await Q.compare(ids, w, { metric, item: String(req.query.item || ''), scope: String(req.query.scope || 'all').slice(0, 220) })) });
+    const opt = { metric, item: String(req.query.item || ''), scope: String(req.query.scope || 'all').slice(0, 220) };
+    return res.json({ ...base, metric, ...(w.long ? await L.longCompare(ids, w, opt) : await Q.compare(ids, w, opt)) });
   }
-  if (view === 'server') return res.json({ ...base, ...(await Q.serverDetail(ids[0], w, { at: req.query.at === 'avg' ? 'avg' : 'end', dev: String(req.query.dev || '') })) });
+  if (view === 'server') {
+    const dev = String(req.query.dev || '');
+    const r = w.win > 60 ? await L.longServer(ids[0], w, { dev, cmp }) : await Q.serverDetail(ids[0], w, { at: !w.long && req.query.at === 'avg' ? 'avg' : 'end', dev, cmp });
+    const ev = await eventsFor(ids[0], w.from, w.to);
+    return res.json({ ...base, ...r, cmp: cmp || null, events: ev.events, eventsPartial: ev.partial });
+  }
   if (view === 'iostat') {
     const pins = String(req.query.pins || '').split(',').filter(Boolean).slice(0, 4);
     return res.json({ ...base, ...(await Q.iostatCompare(ids, w, { at: req.query.at === 'avg' ? 'avg' : 'end', scope: req.query.scope === 'all' ? 'all' : 'phys', col: String(req.query.col || 'wAwait'), pins })) });
   }
   return res.status(400).json({ ok: false, code: 'bad-view', reason: '모르는 보기입니다.' });
+});
+
+/**
+ * ‘무엇이 가장 변했나’(v3.13.0 ⑭ — 컨펌 ⑤): 고른 구간 vs 앞 4배 구간 — 서버 × 지표 점수 순 상위. 조회와 같은 문 · 보이는 대상만 · 단추로만 묻는다(화면 폴링 없음).
+ */
+api.get('/tools/focus-mon/changes', adminOnly, fullScopeOnly, async (req, res) => {
+  const w = Q.normWindow({ win: req.query.win, end: req.query.end }, Date.now(), { long: true });
+  const { ids, missing, vis } = pickIds(req, 40);
+  if (!ids.length) return res.status(404).json({ ok: false, code: 'not-found', reason: '볼 대상이 없습니다(없는 대상이거나 고르지 않았습니다).' });
+  const r = await biggestChanges(ids.map((id) => ({ id, name: vis.get(id)?.name || id })), w);
+  res.json({ ok: true, win: w.win, from: w.from, to: w.to, past: w.past, missing, ...r });
+});
+
+/**
+ * 사건 직접 적기(v3.13.0 ⑭ — 컨펌 ⑥ '관리자 · 전체 쓰기 범위 · 30일 · 감사'). 대상 서버 하나 + 범위(이 서버 · 그 그룹 · 그 수집) — 적는 때 서버들로 펴서 같은 id 로.
+ * 수집 시작과 같은 문(관리자 · 조회 · 쓰기 전체 범위 · 데모 차단) · 등록부를 못 읽으면 503 · 보이는 대상만.
+ */
+api.post('/tools/focus-mon/events', adminOnly, fullRwOnly, demoBlockWrite, async (req, res) => {
+  if (registryUnreadable(res)) return;
+  const vis = visibleTargets(req);
+  const target = vis.find((t) => t.id === String(req.body?.target ?? ''));
+  if (!target) return res.status(404).json({ ok: false, code: 'not-found', reason: '없는 대상입니다.' });
+  const plan = planUserEvent({ target, all: vis, scope: String(req.body?.scope ?? 'server'), text: req.body?.text, at: req.body?.at, by: req.user?.username || '' });
+  if (!plan.ok) return res.status(400).json(plan);
+  const w = await writeUserEvent(plan);
+  if (!w?.ok) return res.status(503).json({ ok: false, code: 'db', reason: '사건을 저장하지 못했습니다(기록 DB 를 열지 못했습니다).' });
+  const scopeText = plan.scope === 'group' ? `그룹 ${target.group}` : plan.scope === 'session' ? '그 수집 전체' : '이 서버';
+  logAudit({ user: req.user?.username, action: 'focus-mon.event-add', target: plan.id, detail: `${target.name} · ${scopeText}(${plan.targets.length}대) · ${new Date(plan.at).toISOString()} · ${plan.text.slice(0, 200)}`, ip: req.ip });
+  res.json({ ok: true, id: plan.id, targets: plan.targets.length, at: plan.at });
+});
+
+/** 직접 적은 사건 지우기 — 같은 문 · 직접 적은 것만(자동 사건은 지우지 않는다) · 그 id 의 서버 줄 전부. */
+api.delete('/tools/focus-mon/events/:id', adminOnly, fullRwOnly, demoBlockWrite, async (req, res) => {
+  const id = String(req.params.id || '');
+  if (!/^ev-[0-9a-f]{12}$/.test(id)) return res.status(404).json({ ok: false, code: 'not-found', reason: '없는 사건입니다.' });
+  const rows = await db.eventById(id);
+  if (rows == null) return res.status(503).json({ ok: false, code: 'db', reason: '기록 DB 를 열지 못했습니다.' });
+  const vis = visibleById(req);
+  if (!rows.length || rows.some((r) => r.kind !== 'user') || !rows.some((r) => vis.has(r.target))) return res.status(404).json({ ok: false, code: 'not-found', reason: '없는 사건이거나 직접 적은 사건이 아닙니다.' });
+  const n = await db.deleteUserEvent(id);
+  if (n == null) return res.status(503).json({ ok: false, code: 'db', reason: '기록 DB 를 열지 못했습니다.' });
+  logAudit({ user: req.user?.username, action: 'focus-mon.event-delete', target: id, detail: `${rows.length}대 · 적은 사람 ${rows[0].by || '—'} · ${String(rows[0].text).slice(0, 200)}`, ip: req.ip });
+  res.json({ ok: true, id, removed: n });
 });
 
 /**
@@ -622,12 +683,12 @@ api.get('/tools/focus-mon/coverage', adminOnly, fullScopeOnly, async (req, res) 
   res.json({ ok: true, ...(await Q.coverage(ids, from, to)) });
 });
 
-/** CSV — kind=series(지표 비교 한 줄씩) | iostat(장치 줄 × 13칸). 구간은 화면과 같다(최대 30분). */
+/** CSV — kind=series(지표 비교 한 줄씩) | iostat(장치 줄 × 13칸). 구간은 화면과 같다(지표 비교는 긴 구간도 — 요약 칸 평균 · iostat 은 30분까지). */
 api.get('/tools/focus-mon/export.csv', adminOnly, fullScopeOnly, csvPerm, async (req, res) => {
   const lock = acquireExport('focus-mon', req);
   if (!lock.ok) return res.status(lock.status).json(lock.body);
   try {
-    const w = Q.normWindow({ win: req.query.win, end: req.query.end });
+    const w = Q.normWindow({ win: req.query.win, end: req.query.end }, Date.now(), { long: req.query.kind !== 'iostat' });
     const { ids, vis } = pickIds(req, 40);
     if (!ids.length) return res.status(404).json({ ok: false, code: 'not-found', reason: '볼 대상이 없습니다.' });
     const name = (id) => vis.get(id)?.name || id;
@@ -641,7 +702,8 @@ api.get('/tools/focus-mon/export.csv', adminOnly, fullScopeOnly, csvPerm, async 
       }
     } else {
       const metric = COMPARE_METRICS.includes(String(req.query.metric)) ? String(req.query.metric) : 'cpu';
-      const r = await Q.compare(ids, w, { metric, item: String(req.query.item || ''), scope: String(req.query.scope || 'all').slice(0, 220) });
+      const opt = { metric, item: String(req.query.item || ''), scope: String(req.query.scope || 'all').slice(0, 220) };
+      const r = w.long ? await L.longCompare(ids, w, opt) : await Q.compare(ids, w, opt);
       const step = (w.to - w.from) / r.points;
       lines.push(csvLine(['time', ...r.targets.map((x) => name(x.id))]));
       for (let k = 0; k < r.points; k++) {
