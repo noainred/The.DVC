@@ -148,3 +148,43 @@ export function nextOccurrences(sched, tz, now, n = 5) {
   const horizon = sched?.kind === 'once' ? 400 * DAY : 400 * DAY;
   return occurrencesBetween(sched, tz, now, now + horizon, { max: OCC_MAX }).filter((o) => o.end > now).slice(0, n);
 }
+
+/**
+ * 점검 반복 6회차 Y(A3): [from, to) 안의 **시간대 전환 시각**(UTC ms — 오프셋이 바뀐 첫 분) 목록(순수 · Intl 만 · 오름차순).
+ *   합 규칙(store.js coverSteps)이 매주 창의 기준점을 앞으로 36일만 보던 것을 창 수명(92일) 안의 전환 둘레까지 늘릴 때 쓴다 — 시간대가 다른 창끼리는
+ *   전환 뒤 겹침이 바뀐다(바르샤바 10:00 6h + 서울 23:00 7h: 겨울 12h → 여름 13h).
+ *   계산: UTC 연도마다 하루 걸음으로 오프셋을 보고, 바뀐 날 안에서 분 단위 이분 탐색(연도 · 시간대마다 한 번 — 모듈 메모 · 상한 있음).
+ *   전제: 한 시간대가 하루 안에 두 번 바뀌어 하루 걸음 두 점의 오프셋이 같아지는 일은 없다(IANA 규칙 — 서머타임 · 정책 변경 모두 하루 넘게 떨어져 있다).
+ *   알 수 없는 시간대면 빈 목록(창은 저장 때 validTz 를 거친다 — 여기서 다시 막지 않고 던지지도 않는다).
+ */
+const _tzYears = new Map();
+const TZ_YEARS_MAX = 400;
+function tzTransitionsOfYear(tz, y) {
+  const k = `${tz}|${y}`;
+  let r = _tzYears.get(k);
+  if (r) return r;
+  r = [];
+  try {
+    const a0 = Date.UTC(y, 0, 1); const a1 = Date.UTC(y + 1, 0, 1);
+    let prev = tzOffsetMin(tz, a0);
+    for (let d = a0 + DAY; d <= a1; d += DAY) {
+      const o = tzOffsetMin(tz, d);
+      if (o === prev) continue;
+      let lo = d - DAY; let hi = d;   // offset(lo) = prev · offset(hi) ≠ prev
+      while (hi - lo > MIN) { const mid = lo + Math.floor((hi - lo) / (2 * MIN)) * MIN; if (tzOffsetMin(tz, mid) === prev) lo = mid; else hi = mid; }
+      r.push(hi);
+      prev = o;
+    }
+  } catch { r = []; }
+  if (_tzYears.size >= TZ_YEARS_MAX) _tzYears.clear();
+  _tzYears.set(k, r);
+  return r;
+}
+export function tzTransitions(tz, from, to) {
+  const out = [];
+  if (!(Number.isFinite(from) && Number.isFinite(to) && to > from)) return out;
+  for (let y = new Date(from).getUTCFullYear(); y <= new Date(to).getUTCFullYear(); y += 1) {
+    for (const x of tzTransitionsOfYear(String(tz ?? ''), y)) if (x >= from && x < to) out.push(x);
+  }
+  return out;
+}

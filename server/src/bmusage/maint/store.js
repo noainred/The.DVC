@@ -19,7 +19,7 @@ import crypto from 'node:crypto';
 import { config } from '../../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js';
 import { makeSettingsLoadError } from '../../util/settingsLoadError.js';
-import { SCHED_KINDS, ONCE_MAX_MIN, RECUR_MAX_MIN, parseLocal, parseTime, localToUtc, validTz, DEFAULT_TZ, MIN, DAY } from './schedule.js';
+import { SCHED_KINDS, ONCE_MAX_MIN, RECUR_MAX_MIN, parseLocal, parseTime, localToUtc, validTz, DEFAULT_TZ, MIN, DAY, tzTransitions } from './schedule.js';
 import { SCOPES, TARGET_KINDS, TAG_RE, windowStatus, expiresAt, effectiveOccurrences, matchTarget } from './judge.js';
 
 const FILE = () => path.join(config.configDir, 'maintenance-windows.json');
@@ -73,6 +73,8 @@ export function needsOwnerTier(w) {
  *   ‘12시간 넘게 덮는 억제는 소유자 등급’ 이라는 원래 뜻 — 소유자 창 옆에 운영자가 12시간을 붙여 24시간 상시가 되는 길(G1)을 막는다. approvedBy 는 **기록일 뿐 합 판정에 쓰지 않는다**
  *   (소유자가 운영자 창의 이름만 고쳐 approvedBy 가 붙어도 합에서 빠지지 않는다 — G2). 소유자 자신의 저장은 라우트가 이 검사 없이 허용한다.
  *   기준점: 반복 창은 앞으로 36일(매월은 400일) · 일회 창은 그 발생 — 발생마다 앞뒤 2일 안에서 24시간 창을 본다.
+ *   + **매주 후보 수명(만료 · 400일 중 이른 것) 안의 시간대 전환 둘레**(전환 앞 2일 ~ 뒤 9일의 후보 발생 — 점검 반복 6회차 Y A3: 매주 창끼리의 겹침은 전환과 전환 사이에서만
+ *   7일 주기라 36일 뒤의 전환(바르샤바 3월 · 뉴욕 3월 · 시드니 4월)이 바꾸는 겹침을 보지 못했다. 앞 2일 ~ 뒤 9일 = 섞인 구간 + 새 주기 첫 한 주. dstAnchors — 두 경로가 같은 함수).
  *   24시간 창 시작 후보 = 합친 구간의 시작 · (끝 − 24시간) + **후보 발생마다 (시작 − 24시간 + 1ms) · (끝 − 1ms)**(⚠ 점검 반복 3회차 재확인 R2: 합친 구간이 후보 발생 앞뒤로
  *   하루 넘게 이어지면 구간 끝점에서 시작하는 24시간 창이 후보와 겹치지 않아 하나도 세지 않았다 — 소유자 창으로 상시 덮인 서버에 운영자가 ‘수요일 00:00 12h’ · ‘수요일 12:00 12h’ 를 만들 수 있었다.
  *   덮임은 시작 위치에 대해 조각 선형이라 후보 발생과 겹치는 범위 안 최대는 꺾이는 점 또는 그 범위의 양끝에서 나온다).
@@ -110,8 +112,9 @@ function* coverSteps(cand, all, now, { tagsOf = null, exact = false, memo = null
       const ps = live.filter((w) => matchTarget(w, { key, vcenterId: cand.vcenterId }, { tagsOf }));
       if (!ps.length) continue;
       const group = [cand, ...ps];
-      for (const a of [...anchorsOf(cand), ...ps.filter((w) => w.schedule?.kind !== 'weekly').flatMap(anchorsOf)]) {
-        if (windowOver(a, cand, group, (w, lo, hi) => effectiveOccurrences(w, lo, hi), limit)) return true;
+      const occ = (w, lo, hi) => effectiveOccurrences(w, lo, hi);
+      for (const a of [...anchorsOf(cand), ...dstAnchors(cand, group, now, occ), ...ps.filter((w) => w.schedule?.kind !== 'weekly').flatMap(anchorsOf)]) {
+        if (windowOver(a, cand, group, occ, limit)) return true;
       }
     }
     return false;
@@ -166,7 +169,10 @@ function* coverSteps(cand, all, now, { tagsOf = null, exact = false, memo = null
     const bound = group.reduce((a, w) => { const d = durationMinOf(w.schedule, w.tz); return a + (d == null ? Infinity : (w.schedule?.kind === 'once' ? d : 2 * d)); }, 0);
     if (bound * MIN <= limit) continue;
     candAnchors ||= effectiveOccurrences(cand, now - DAY, now + horizon(cand));
-    for (const a of [...candAnchors, ...ps.filter((w) => w.schedule?.kind !== 'weekly').flatMap(anchorsOf)]) {
+    // A3(6회차 Y): 시간대 전환 둘레의 후보 발생 — 앞의 36일 기준점에 이미 있는 발생(같은 시작)은 다시 세지 않는다(답은 같고 비용만 는다)
+    const have = new Set(candAnchors.map((o) => o.start));
+    const extra = dstAnchors(cand, group, now, occOf).filter((o) => !have.has(o.start) && have.add(o.start));
+    for (const a of [...candAnchors, ...extra, ...ps.filter((w) => w.schedule?.kind !== 'weekly').flatMap(anchorsOf)]) {
       const lo = a.start - 2 * DAY; const hi = a.end + 2 * DAY;
       if (!occOf(cand, lo, hi).length) continue;   // 그 둘레에 후보 발생이 없으면 동료를 세지 않는다(windowOver 와 같은 판단)
       for (const w of ps) if (warm(w, lo, hi)) yield;   // 동료 발생 조각을 새로 셌으면 양보 자리(R1 ④)
@@ -180,6 +186,27 @@ function* coverSteps(cand, all, now, { tagsOf = null, exact = false, memo = null
 const CHUNK_MS = 8 * DAY;
 /** 한 요청 안의 계산 메모(목록 canConfirm — 3회차 재확인 R1). 창 객체가 그 요청 동안 바뀌지 않는다는 전제(목록 한 번 · 같은 now). */
 export function coverMemo(now) { return { now, all: undefined, tagsOf: undefined, members: new Map(), anchors: new WeakMap(), occ: new WeakMap() }; }
+/** 전환 둘레 — 앞 2일 ~ 뒤 9일. 발생 o 의 덮임은 [o.start − 1일 − 12시간, o.end + 1일] 의 발생만 본다(창 24시간 · 동료 길이 ≤ 12시간) — 그래서 전환 T 가 섞이는 발생은
+ *  시작이 (T − 1.5일, T + 1.5일] 이고, 새 주기의 첫 순수 한 주는 시작 [T + 1.5일, T + 8.5일) 이다. 둘을 덮고 여유를 둔다. */
+const DST_BEFORE_MS = 2 * DAY;
+const DST_AFTER_MS = 9 * DAY;
+/**
+ * 점검 반복 6회차 Y(A3): 매주 후보의 **시간대 전환 둘레 기준점**(빠른 길 · 정확 경로 · 메모가 같은 함수 — occOf 만 그 경로의 발생 세기).
+ *   매주 창끼리의 덮임은 동료(매주) 시간대 · 후보 시간대의 오프셋이 그대로인 동안 7일 주기다 — 주기가 바뀌는 곳은 그 시간대들의 전환뿐이다(만료 · 끝내기 · 지움은 덮임을 줄이기만 한다 ·
+ *   매월 · 일회 동료는 자기 발생이 기준점이다). 그래서 후보 수명(만료 · 400일 중 이른 것 — 끝 뒤 2일 안의 전환도: 수명 끝 직전 발생이 전환 뒤 동료와 섞인다) 안의 전환마다
+ *   앞 2일 ~ 뒤 9일의 후보 발생을 기준점에 더하면 수명 전체를 본 것과 같다(시험: 수명 전체 발생을 30분 격자로 다 세는 독립 계산과 무작위 대조 — bmUsageLoop6y).
+ *   매월 · 일회 후보는 이미 발생 전부가 기준점이라 해당 없음. 시간대가 하나뿐이고 전환이 없는 묶음(서울만)은 빈 목록 — 비용 0.
+ */
+function dstAnchors(cand, group, now, occOf) {
+  if (cand.schedule?.kind !== 'weekly') return [];
+  const exp = expiresAt(cand);
+  const end = Math.min(exp ?? Infinity, now + FUTURE_MAX_DAYS * DAY);
+  if (!(end > now)) return [];
+  const tzs = new Set(group.filter((w) => w.schedule?.kind === 'weekly').map((w) => w.tz));
+  const out = [];
+  for (const tz of tzs) for (const T of tzTransitions(tz, now, end + DST_BEFORE_MS)) out.push(...occOf(cand, T - DST_BEFORE_MS, T + DST_AFTER_MS));
+  return out;
+}
 /** 기준점 하나 둘레(앞뒤 2일)에서 후보 발생과 겹치는 24시간 창 중 덮임이 상한을 넘는 것이 있는가(순수 — 빠른 길 · 정확 경로가 같은 함수). */
 function windowOver(a, cand, group, occOf, limit) {
   const lo = a.start - 2 * DAY; const hi = a.end + 2 * DAY;
