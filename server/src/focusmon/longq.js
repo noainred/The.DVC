@@ -62,7 +62,7 @@ export async function sumRowsFor(id, from, to, src, y = createYielder(15)) {
   const have = new Set(rows.map((r) => r.hour));
   for (let h = Math.max(fh, th - PARTIAL_HOURS + 1); h <= th; h++) {
     if (have.has(h)) continue;
-    const mr = await db.readSum1(id, h * 60, h * 60 + 59, 60);
+    const mr = await db.readSum1(id, h * 60, Math.min(h * 60 + 59, Math.floor(to / 60_000)), 60); // 구간 끝 뒤의 분은 넣지 않는다(지난 구간)
     const m = mergeSums((mr || []).map((x) => decodeSum(x.data)).filter((s) => s && s.keys.length));
     if (m) out.push({ t: h * 3_600_000, span: 3_600_000, s: m, partial: true });
     await y();

@@ -455,6 +455,17 @@ test('⑦ F1 · F12 — 1시간 구간은 칸이 요약 간격 이상(번갈아 
   assert.ok(cur, '지금 시간 partial');
   const b = L.sumBuckets(r7, 'c.pct', NOW - 7 * 86_400_000, NOW, 168);
   assert.equal(b.avg[167], 40, '마지막 칸');
+  // 정시 10분 뒤에 끝나는 구간 — 끝나지 않은 시간 칸의 가운데는 덮은 구간(정시 ~ 10분)의 가운데라 남는다(정시 가운데 +30분이면 구간 밖이라 버려졌다 · F12) · 끝 뒤의 분은 넣지 않는다
+  const to = HOUR + 10 * 60_000 + 30_000;
+  const id2 = 'fm-hist-p2'; // 지금 시간에만 기록이 있는 서버(앞 시간 칸이 마지막 칸을 대신 채우지 않게)
+  const r2rows = []; for (let k = 0; k <= 10; k++) r2rows.push(sumRow(id2, MIN(HOUR) + k, { 'c.pct': 40 }));
+  r2rows.push(sumRow(id2, MIN(HOUR) + 20, { 'c.pct': 99 }));
+  assert.ok((await db.writeBlocks(r2rows)).ok);
+  const rp = await L.sumRowsFor(id2, to - 7 * 86_400_000, to, 'h');
+  const curp = rp.find((r) => r.partial && r.t === HOUR);
+  assert.ok(curp && curp.s.t1 <= to, '끝 뒤의 분(20분 · 99)은 넣지 않는다');
+  assert.equal(SUM.sumCol(curp.s, 'c.pct').hi, 40);
+  assert.equal(L.sumBuckets(rp, 'c.pct', to - 7 * 86_400_000, to, 168).avg[167], 40, '정시 10분 뒤 끝 — 마지막 칸이 남는다');
 });
 
 test('⑦ F4 · F5 · F13 — 재시작 뒤 보관 기간 전체에서 1시간 요약 구멍을 찾는다 · 가운데 빠진 시간을 요청 경로에서 메우지 않는다 · 백필은 조각', async () => {
@@ -565,4 +576,31 @@ test('⑦ F8 — 긴 구간 60초 기억에 끝 값을 넣지 않는다(수집 �
   const r2 = await L.longServer(id, w, {}, now + 1000);
   assert.equal(r1.table.cpu.pct, 10); assert.equal(r2.table.cpu.pct, 90, '두 번째(기억 안)도 최신 표본');
   assert.equal(r2.lastAt, now - 1000);
+  // 개요도 같은 규칙(끝 값은 매번)
+  const o1 = await L.longOverview([id], w, now + 1500);
+  store.ingestSample(id, now - 500, { cpu: { pct: 55, usr: 55, sys: 0, iow: 0, stl: 0 } }, null, now - 500);
+  const o2 = await L.longOverview([id], w, now + 2000);
+  assert.equal(o1.targets[0].sum.cpu, 90); assert.equal(o2.targets[0].sum.cpu, 55, '개요 — 기억 안에서도 최신 끝 값');
+});
+
+test('⑦ F2 · F13 — 사건이 200건 넘으면 최근 쪽을 남긴다(DB · 목록) · 백필은 빈 조각(6시간 넘는 공백)을 건너 끝까지 간다', async () => {
+  const id = 'fm-hist-t';
+  const rows = [];
+  for (let k = 0; k < 300; k++) rows.push({ kind: 'e', id: `ev-a${String(k).padStart(11, '0')}`, target: id, at: NOW - 3_600_000 + k * 1000, ekind: 'hostkey', text: 'h', by: '', scope: 'server' });
+  rows.push({ kind: 'e', id: 'ev-ffffffffffff', target: id, at: NOW - 1000, ekind: 'user', text: '최근 메모', by: 'ops', scope: 'server' });
+  assert.ok((await db.writeBlocks(rows)).ok);
+  const db200 = await db.readEvents(id, NOW - 7_200_000, NOW, 200);
+  assert.equal(db200[db200.length - 1].kind, 'user', 'DB 도 최근 쪽 · 시각 순');
+  await db.writeRun({ id: 'fs-hist-old', targets: [id], mode: 'watch', interval: 2, started: NOW - 3_650_000, ended: null, by: 'x' }); // 업그레이드 전 수집(합성) — 목록이 200을 넘는다
+  const r = await EV.eventsFor(id, NOW - 7_200_000, NOW);
+  assert.equal(r.events.length, 200); assert.equal(r.cut, 1, '오래된 1건을 잘랐다');
+  assert.ok(r.events.some((e) => e.user && e.text === '최근 메모'), '최근에 직접 적은 사건이 남는다');
+  // 백필 — 원본에 6시간 넘는 공백이 있어도 끝까지(빈 조각에서 멈추지 않는다)
+  rollup._resetForTest();
+  const g = 'fm-hist-gap';
+  const a0 = MIN(NOW) - 20 * 60; const a1 = MIN(NOW) - 8 * 60;
+  const mk = (m) => ({ kind: 'm', target: g, minute: m, n: 1, data: CODEC.encodeBlock(blockOf(m, [[m * 60_000 + 500, { 'c.pct': 1 }]])) });
+  assert.ok((await db.writeBlocks([mk(a0), mk(a1)])).ok);
+  for (let i = 0; i < 400 && rollup.backfillState().building; i++) await rollup.backfillSlice(NOW, 1000);
+  assert.equal((await db.readSum1(g, a1, a1)).length, 1, '공백 뒤의 분도 요약');
 });
