@@ -957,3 +957,6 @@
   서버 `veeam/summaryRegion.js`(`regionQuery · inRegion · regionsOf`) 하나로 `/tools/backup-summary`(+`.csv`) · `/schedule` · `/errors` · `/stale`(staleQueryOf.region) 이 **사용자 범위 교집합 뒤**에 리전을 거른다 — 응답에 `region · regions`.
   화면: Summary 에 리전 Select(`data-backup-region` — 리전이 2개 이상이거나 골라져 있을 때만 · 모르는 리전은 ‘(법인 없음)’) · 머리 ‘N개 법인 · 리전 X’ · 숫자 줄 · 두 카드 · 트리 · CSV · 찾기 · 일정 · 에러가 같은 `?region=`(‘제목뿐이지 않게’ — v3.10.15 교훈) · 리전을 바꾸면 선택(한 법인 안)을 푼다 · 기억하지 않는다.
   인계: `KPI_HANDOFF.backupSummaryRegion`(메모리 · 30초) — 허브 `backupGo` 는 법인이 있으면 Detail(v2.959), 리전만이면 Summary+리전. 테스트 `platformText.test.js` v3.10.17 · `server/test/backupSummaryRegion31017.test.js`.
+- **v3.10.18 — 가상화 플랫폼 점검 6회차: 허브 부제의 옛 가정 문구 정정**(자율 개선 루프): `PlatformHub` 부제가 ‘법인 = vCenter = Bareos 한 단위’ 라고 말했다 — 2026-11-13 사용자 정정(법인 1 : 서비스 N · 서비스 1 = vCenter 1 + Bareos 1)과 어긋나는 **화면 문구**라 고쳤다
+  (‘서비스 = vCenter 1 + Bareos 1 · 한 법인에 서비스가 여럿일 수 있습니다’). 같은 옛 가정이 남은 다른 문구(`BareosCorp` 라벨 ‘1:1:1’ · `bareosText` 혼합 엣지 안내 · 카드 ‘vCenter · 법인’ 류의 느슨한 ‘법인’)는
+  루트 CLAUDE.md 대로 **정리 범위를 사용자가 정한 뒤**에 손댄다(이 회차는 부제 한 줄만). 테스트 `platformText.test.js` v3.10.18.

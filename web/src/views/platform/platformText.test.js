@@ -306,3 +306,11 @@ describe('v3.10.17 — 점검 5회차: 리전만 고른 채 백업 KPI 카드 �
     expect(fs.readFileSync(new URL('../tools/BackupSummaryStale.jsx', import.meta.url), 'utf8')).toMatch(/scopeSig = `[^`]*scope\?\.region/);
   });
 });
+
+describe('v3.10.18 — 점검 6회차: 허브 부제가 옛 가정(법인 = vCenter = Bareos 1:1:1)을 말하지 않는다', () => {
+  it('2026-11-13 사용자 정정 — 법인 1 : 서비스 N · 서비스 1 = vCenter 1 + Bareos 1(소스 계약)', () => {
+    const s = fs.readFileSync(new URL('./PlatformHub.jsx', import.meta.url), 'utf8');
+    expect(s).not.toMatch(/법인 = vCenter = Bareos/);
+    expect(s).toMatch(/서비스 = vCenter 1 \+ Bareos 1 · 한 법인에 서비스가 여럿일 수 있습니다/);
+  });
+});
