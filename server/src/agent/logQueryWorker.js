@@ -85,7 +85,8 @@ async function runLogQueryWorkerInner() {
           failures.push({ vcenterId: q.vcenterId, httpStatus: 413, bytes: Buffer.byteLength(body),
             error: `중앙이 본문 크기를 거부(413) — ${rows.length}줄 ${(Buffer.byteLength(body) / 1024).toFixed(0)}KB. 조회 줄 수를 줄이거나 중앙에 BIG_JSON 등록이 필요합니다.` });
         } else if (!post.ok) {
-          failures.push({ vcenterId: q.vcenterId, httpStatus: post.status, error: `결과 보고 HTTP ${post.status}` });
+          // 전체 점검 14회차(C-5): 410 = 중앙이 그 조회를 모른다(만료 · 중앙 재시작) — 다시 보내도 같다
+          failures.push({ vcenterId: q.vcenterId, httpStatus: post.status, error: post.status === 410 ? '중앙이 이 조회를 모릅니다(시한이 지났거나 중앙이 재시작) — 결과를 버립니다' : `결과 보고 HTTP ${post.status}` });
         } else { sent += 1; }
       } catch (e) {
         failures.push({ vcenterId: q.vcenterId, httpStatus: null, error: String(e?.message || e).slice(0, 200) });

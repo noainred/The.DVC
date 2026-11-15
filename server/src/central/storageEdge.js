@@ -314,7 +314,7 @@ export async function saveEdgeNodeLoadSamples(agent, list, { now = Date.now() } 
       try { r = await saveNodeLoadSample(id, s); } catch { r = { saved: false, reason: 'db-error' }; }
       if (r?.saved) out.saved += 1;
       else if (r?.duplicate) out.duplicate += 1;
-      else { out.dropped += 1; if (r?.reason === 'db-unavailable') out.dbUnavailable = true; }
+      else { out.dropped += 1; if (r?.reason === 'db-unavailable' || r?.reason === 'db-error') out.dbUnavailable = true; }   // 전체 점검 14회차(C-2): 쓰기 예외도 '적재 못 함' — 엣지가 고리를 지우지 않게
     }
     if (ent.samples.length > NODE_LOAD_SAMPLES_PER_DEVICE) out.dropped += ent.samples.length - NODE_LOAD_SAMPLES_PER_DEVICE;
   }

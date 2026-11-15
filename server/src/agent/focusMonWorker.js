@@ -142,6 +142,16 @@ export function expireAuditResults(now = Date.now()) {
 }
 export function _auditForTest() { return { get results() { return auditResults; }, get dropped() { return auditDropped; }, get skipNext() { return auditSkipNext; }, reset() { auditResults = []; auditDropped = 0; auditSkipNext = false; } }; }
 
+/** buf 에서 sent 에 든 원소(같은 객체)만 뺀다 — 제자리 · O(n). */
+function dropSent(buf, sent) {
+  if (!sent.length || !buf.length) return;
+  const s = new Set(sent);
+  let w = 0;
+  for (let i = 0; i < buf.length; i++) if (!s.has(buf[i])) buf[w++] = buf[i];
+  buf.length = w;
+}
+export const _dropSentForTest = dropSent;
+
 function trim(buf) {
   const cut = Date.now() - BUF_AGE_MS;
   let k = 0; while (k < buf.length && (buf[k].t < cut || buf.length - k > BUF_MAX)) k += 1;
@@ -219,8 +229,9 @@ export async function syncOnce(now = Date.now()) {
       if (_log('sync', `${r.status} ${_last.reason}`)) console.warn(`[focusmon-edge] 중앙 동기화 실패: HTTP ${r.status}${_last.reason ? ` — ${_last.reason}` : ''}`);
       return _last;
     }
-    // 보낸 만큼만 지운다(보내는 동안 새로 쌓인 것은 남긴다)
-    samples.splice(0, sendS.length); procs.splice(0, sendP.length); testResults = testResults.slice(sendT.length);
+    // 보낸 것만 지운다(보내는 동안 새로 쌓인 것은 남긴다). 전체 점검 15회차(A-2): 개수가 아니라 원소로 — 기다리는 동안 trim 이 보낸 앞쪽을 이미 지웠으면
+    //   splice(0, 보낸 개수)가 보내지 않은 새 표본까지 지웠다(고RTT · 버퍼 상한 · 중앙이 끊겼다 돌아온 직후)
+    dropSent(samples, sendS); dropSent(procs, sendP); testResults = testResults.slice(sendT.length);
     sentOk = true;
     validUntil = Date.now() + Math.min(60_000, Math.max(5_000, Number(data.validUntil) - Number(data.now) || 30_000));
     const targets = Array.isArray(data.targets) ? data.targets.slice(0, 200) : [];

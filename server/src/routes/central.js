@@ -1093,7 +1093,10 @@ centralRouter.post('/inventory', requireCentral(), (req, res) => {
   const droppedN = dropped.notObject + dropped.otherVcenter + dropped.badId + (dropped.overCount || 0); // v2.727(D-04): 상한 넘침도 '뺀 것' 이다
   if (droppedN) console.warn(`[central] inventory: agent=${agent} vc=${vcId} 원소 ${droppedN}건 제외(객체 아님 ${dropped.notObject} · 다른 vCenter ${dropped.otherVcenter} · id 형식 ${dropped.badId}${dropped.overCount ? ` · 상한 초과 ${dropped.overCount}` : ''})`);
   if (dropped.vcLicenses || dropped.vcSolutions) console.warn(`[central] inventory: agent=${agent} vc=${vcId} vCenter 라이선스 ${dropped.vcLicenses || 0}건 · 솔루션 ${dropped.vcSolutions || 0}건을 모양이 달라 뺐습니다(배열 아님·객체 아닌 원소·모르는 형식의 필드·상한 초과)`);
-  const saved = setInventory(vcId, slice, agent, b.generatedAt || null) || {};
+  // 전체 점검 14회차(C-3): generatedAt 은 시각 표시로만 쓴다 — 수(ms) 또는 짧은 글자만(객체 · 배열 · 수 MB 글자가 캐시 · 디스크 · 응답으로 가던 것)
+  const genIn = b.generatedAt;
+  const genAt = typeof genIn === 'number' && Number.isFinite(genIn) ? genIn : (typeof genIn === 'string' && genIn.trim() ? genIn.trim().slice(0, 40) : null);
+  const saved = setInventory(vcId, slice, agent, genAt) || {};
   // v2.898(반증 하-5): 사이트 위임으로 등록된 vCenter 만 받는다(등록부에 없는 id 를 바꿔 가며 메모리를 늘리지 못하게) ·
   //   받은 것으로 통째로 바꾼다 — 엣지가 접속처를 바꿔 캐시를 비웠으면 옛 vCenter 의 권한 목록을 중앙이 계속 보이지 않게(없으면 지운다).
   //   v2.901(점검 E3): 키가 없으면(옛 엣지 · 중앙 버전을 확인하지 못한 엣지) 직전 값을 그대로 둔다 — {} 일 때만 지운다.
