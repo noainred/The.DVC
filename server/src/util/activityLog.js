@@ -64,14 +64,14 @@ export function createActivityLog({ fileName, max = 500, numFields = [], writeGa
    *   크래시(강제 종료)에 잃을 수 있는 것은 마지막 간격(기본 1초) 안의 기록뿐이다 — 재생성 가능한 캐시(머리말)라 받아들인다. 원자 쓰기 · 0600 · 상한은 그대로.
    */
   const GAP = Math.max(0, Number(writeGapMs) || 0);
-  let lastWriteAt = 0;  // 마지막 파일 쓰기 시각
+  let lastWriteAt = -Infinity;  // 마지막 파일 쓰기 시각(performance.now — 단조 · 처음은 ‘오래전’ 이라 첫 기록은 곧바로 쓴다)
   let timer = null;     // 뒤 경계 쓰기 예약
   let dirty = false;    // 메모리에만 있고 아직 파일에 없는 기록이 있다
   function writeNow() {
     if (timer) { clearTimeout(timer); timer = null; }
     if (!buf) return;
     dirty = false;
-    lastWriteAt = Date.now();
+    lastWriteAt = performance.now();   // 5회차 재확인 R3: 간격은 단조 시계로 — 벽시계가 뒤로 가면 뒤 경계 타이머가 그 차만큼(예: 1시간) 늦어졌다
     try { atomicWriteFileSync(FILE, JSON.stringify(buf), { mode: 0o600 }); }
     catch { dirty = true; /* 영속 실패는 무시 — 인메모리 로그는 유지(다음 기록·조회에서 재시도) */ }
   }
@@ -108,7 +108,7 @@ export function createActivityLog({ fileName, max = 500, numFields = [], writeGa
     b.push(e);
     if (b.length > MAX) b.splice(0, b.length - MAX);  // 오래된 것부터 폐기(링버퍼)
     dirty = true;
-    const since = Date.now() - lastWriteAt;
+    const since = performance.now() - lastWriteAt;
     if (!timer && since >= GAP) { writeNow(); return e; }   // 앞 경계 — 따로 떨어진 기록은 곧바로(5회차 I1)
     if (!timer) { timer = setTimeout(() => { timer = null; flush(); }, Math.max(0, GAP - since)); timer.unref?.(); }   // 뒤 경계 — 간격 끝에 한 번
     return e;
@@ -122,5 +122,5 @@ export function createActivityLog({ fileName, max = 500, numFields = [], writeGa
   }
 
   // _resetForTest: 대기분을 먼저 쓰고 비운다 — 다음 load() 가 파일에서 다시 읽으므로 대기분을 버리면 사라진다.
-  return { recordActivity, listActivity, flush, _resetForTest: () => { flush(); buf = null; lastWriteAt = 0; }, MAX, FILE };
+  return { recordActivity, listActivity, flush, _resetForTest: () => { flush(); buf = null; lastWriteAt = -Infinity; }, MAX, FILE };
 }

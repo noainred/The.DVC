@@ -31,6 +31,15 @@ const MIN = 60_000; const HOUR = 3_600_000; const DAY = 86_400_000;
 let sqlite = true; try { await import('node:sqlite'); } catch { sqlite = false; }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// 5회차 재확인 R2: 최상위 await(웹훅 listen)를 모든 test() 등록보다 앞에 둔다 — D1 하나만 위에 있을 때 --test-name-pattern 으로 D1 을 거르거나 D1 이 곧바로 끝나면(sqlite 없음 skip) 실행이 끝나지 않았다.
+/** 로컬 웹훅 하나(실제 alerts.json — 모듈이 처음 읽기 전에 쓴다). mode: stall(연결만 받고 답하지 않는다) · fail(500) · ok(200). */
+let hookMode = 'ok'; let hookHits = 0; const held = [];
+const hook = http.createServer((req, res) => { hookHits += 1; req.resume(); req.on('end', () => { if (hookMode === 'stall') { held.push(res); return; } res.statusCode = hookMode === 'fail' ? 500 : 200; res.end('x'); }); });
+await new Promise((r) => hook.listen(0, '127.0.0.1', r));
+hook.unref();   // 5회차 재확인 R2: 남은 핸들이 시험 프로세스를 붙잡지 않게
+fs.writeFileSync(path.join(DIR, 'alerts.json'), JSON.stringify({ channels: { webhook: { enabled: true, url: `http://127.0.0.1:${hook.address().port}/hook` } }, suppressWindowMin: 0 }));
+test.after(() => { for (const r of held) { try { r.socket?.destroy(); } catch { /* */ } } hook.close(); });
+
 test('D1 — 정비 창 배포의 자동 인출도 사람 인출과 같은 상한(500대 엣지 — 예전 400대에서 잘림) · 범위 계정에는 잘린 대수 대신 사실만 · 배포 현황이 잘림을 밝힌다', async (t) => {
   if (!sqlite) return t.skip('node:sqlite 없음');
   const N = 500;
@@ -83,12 +92,6 @@ test('D1 — 정비 창 배포의 자동 인출도 사람 인출과 같은 상�
   assert.equal(view.edges.find((x) => x.agent.toLowerCase() === EDGE).targetsTruncated, 600);
 });
 
-/** 로컬 웹훅 하나(실제 alerts.json — 모듈이 처음 읽기 전에 쓴다). mode: stall(연결만 받고 답하지 않는다) · fail(500) · ok(200). */
-let hookMode = 'ok'; let hookHits = 0; const held = [];
-const hook = http.createServer((req, res) => { hookHits += 1; req.resume(); req.on('end', () => { if (hookMode === 'stall') { held.push(res); return; } res.statusCode = hookMode === 'fail' ? 500 : 200; res.end('x'); }); });
-await new Promise((r) => hook.listen(0, '127.0.0.1', r));
-fs.writeFileSync(path.join(DIR, 'alerts.json'), JSON.stringify({ channels: { webhook: { enabled: true, url: `http://127.0.0.1:${hook.address().port}/hook` } }, suppressWindowMin: 0 }));
-test.after(() => { for (const r of held) { try { r.socket?.destroy(); } catch { /* */ } } hook.close(); });
 const rowsOf = (keys, v = 99) => keys.map((k) => ({ key: k, name: `bm-${k}`, vcenterId: 'vcA', cpu_pct: v }));
 const settingsOf = () => ({ alertEnabled: true, alertPct: 90, alertSustainMin: 0, alertRepeatHours: 6, intervalMs: 300_000, maintJudge: { stateFor: () => null } });
 
@@ -140,6 +143,37 @@ test('D3 — 채널 실패는 ‘발송’ 이 아니다: 실패 수 · 재시�
   assert.equal(N.applyAlertOutcome(state, { id: 'K|cpu_pct', mark: 1000, kind: 'over', outcome: 'skipped', repeatMs }), false);
   assert.equal(N.applyAlertOutcome(state, { id: 'K|cpu_pct', mark: 999, kind: 'over', outcome: 'failed', repeatMs }), false, '그 사이 다시 보낸 상태는 건드리지 않는다');
   assert.equal(N.applyAlertOutcome(state, { id: 'K|cpu_pct', mark: 1000, kind: 'recovered', outcome: 'failed', repeatMs }), false, '해제 실패는 상태가 없어 재시도하지 않는다');
+});
+
+test('R1(5회차 재확인) — 채널이 계속 실패하면 재시도는 두 번에서 멈춘다(재시도 수를 주기마다 들고 간다) · 그 뒤는 재알림 간격대로', async (t) => {
+  const AL = await import('../src/alerts.js');
+  const N = await import('../src/bmusage/notify.js');
+  const AR = await import('../src/bmusage/alertRules.js');
+  N._resetAlertStateForTest();
+  hookMode = 'fail';
+  const realNow = Date.now; let off = 0;
+  Date.now = () => realNow() + off;
+  t.after(() => { Date.now = realNow; hookMode = 'ok'; });
+  const hits0 = hookHits; const tries = [];
+  for (let m = 0; m <= 180; m += 5) {   // 5분 주기 · 3시간(재알림 간격 6시간 안)
+    off = m * MIN;
+    const h = hookHits;
+    await N.runBmUsageAlerts(rowsOf(['R1']), settingsOf());
+    await N._drainBmUsageAlertsForTest();
+    if (hookHits > h) tries.push(m);
+  }
+  assert.equal(tries.length, 1 + AL.RETRY_DELAYS_MS.length, `재현 r5 재확인 R1 — 예전: 10분마다 영원히(180분에 18번) · 시도 ${JSON.stringify(tries)}`);
+  assert.ok(hookHits - hits0 >= tries.length);
+  const st = JSON.parse(fs.readFileSync(path.join(DIR, 'bmusage-alert-state.json'), 'utf8')).metrics['R1|cpu_pct'];
+  assert.equal(st.retries, AL.RETRY_DELAYS_MS.length, '재시도 수가 주기를 넘어 이어진다');
+  // 순수 — stepAlert 가 재시도 수를 들고 간다(초과 지속 · 억제 중 · 경계 떨림) · 받으면(applyAlertOutcome) 지운다
+  const cfg = { pct: 90, sustainMin: 0, repeatHours: 6, intervalMs: 300_000 };
+  const T = 1_000_000_000_000;
+  const a = AR.stepAlert({ since: T - MIN, lastOverAt: T - MIN, overMs: 0, peak: 99, notifiedAt: T - 2 * MIN, retries: 2 }, 99, cfg, T);
+  assert.equal(a.state.retries, 2);
+  const b = AR.stepAlert(a.state, 88, cfg, T + 5 * MIN);   // 히스테리시스(임계 바로 아래 · 해제 문턱 위) — 상태 유지
+  assert.equal(b.state?.retries, 2);
+  assert.equal(AR.stepAlert({ since: T, lastOverAt: T, overMs: 0, peak: 99, notifiedAt: null }, 99, cfg, T + MIN).state.retries, undefined, '재시도가 없으면 필드도 없다');
 });
 
 test('D4 — 대상 전수 정비 창 판정: 같은 시각 · 같은 창의 발생을 한 번만(값 같음 · 비용 비율)', async () => {
@@ -210,5 +244,15 @@ test('I1 — 작업 로그는 간격 묶음 쓰기: 서로 다른 틱의 기록 
     await sleep(ACTIVITY_WRITE_GAP_MS + 200);
     assert.equal(JSON.parse(fs.readFileSync(log.FILE, 'utf8')).at(-1).deviceId, 'tail', '간격 끝에 쓴다(타이머)');
     assert.equal((fs.statSync(log.FILE).mode & 0o777), 0o600);
+    // 5회차 재확인 R3: 간격은 단조 시계 — 벽시계가 1시간 뒤로 가도 뒤 경계는 간격 끝(예전: 1시간 뒤에야 써서 그 사이 강제 종료면 유실)
+    const realNow = Date.now;
+    try {
+      await sleep(ACTIVITY_WRITE_GAP_MS + 50);   // 직전 쓰기에서 간격이 지나게(대기 타이머 없음)
+      log.recordActivity({ deviceId: 'pre', ok: true });   // 앞 경계 — 곧바로 쓴다(타이머 없음 — 뒤 'back' 은 새 타이머가 쓴다)
+      Date.now = () => realNow() - 3_600_000;
+      log.recordActivity({ deviceId: 'back', ok: true });
+      await sleep(ACTIVITY_WRITE_GAP_MS + 300);
+      assert.equal(JSON.parse(fs.readFileSync(log.FILE, 'utf8')).at(-1).deviceId, 'back', '시계가 뒤로 가도 간격 끝에 쓴다');
+    } finally { Date.now = realNow; }
   } finally { fs.renameSync = orig; }
 });
