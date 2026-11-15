@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  PLATFORM_TABS, PLATFORM_TAB_KEYS, isPlatformTab, scopeLabel, bareosSumOf, KPI_HANDOFF, handoffKpiVcenter, takeKpiVcenter, VC_TOOLS, HOST_TOOLS, PLATFORM_TOOL_KEYS, entityTabs, chipCount, chipLegend, signalSegments,
+  PLATFORM_TABS, PLATFORM_TAB_KEYS, isPlatformTab, scopeLabel, bareosSumOf, KPI_HANDOFF, handoffKpiVcenter, takeKpiVcenter, keywordsOf, vcMatches, siblingSites, siblingScopeText, chipSites, chipRegionNote, VC_TOOLS, HOST_TOOLS, PLATFORM_TOOL_KEYS, entityTabs, chipCount, chipLegend, signalSegments,
   VM_ITEM_TOOL_KEYS, HV_ITEM_TOOL_KEYS, platformMenuLabel,
   loadChipsCollapsed, saveChipsCollapsed, loadVcView, saveVcView, SCOPE_SEARCH_PLACEHOLDER, SCOPE_NOTE,
 } from './platformText.js';
@@ -183,5 +183,60 @@ describe('KPI 카드 → 도구 인계(v2.959)', () => {
     }
     const q = fs.readFileSync(new URL('../../components/invSearchQuery.js', import.meta.url), 'utf8');
     expect(q).not.toMatch(/vm-track:vcenter|storage-track:vcenter/);
+  });
+});
+
+// v3.10.13(점검 1회차) — 상세의 ‹ 이전 · 다음 › 이웃 목록 = 허브 범위(리전 · 검색어) 안 · 고른 법인 하나는 범위로 치지 않는다 · 검색 규칙은 카드 목록과 한 벌.
+describe('이웃 목록 · 검색 규칙(v3.10.13)', () => {
+  const sites = [
+    { id: 'vc-a', name: 'VC-KR1', version: '8.0.2', location: { city: 'Seoul', country: 'Korea', region: '아시아' } },
+    { id: 'vc-b', name: 'VC-KR2', version: '7.0.3', location: { city: 'Busan', country: 'Korea', region: '아시아' } },
+    { id: 'vc-c', name: 'VC-DE1', version: '8.0.3', location: { city: 'Frankfurt', country: 'Germany', region: '유럽' } },
+    null, 'x',
+  ];
+  it('keywordsOf · vcMatches — 공백 구분 AND · 이름 id 도시 국가 리전 버전 · 대소문자 무시 · 쓰레기 행 false', () => {
+    expect(keywordsOf('  Kr1  seoul ')).toEqual(['kr1', 'seoul']);
+    expect(vcMatches(sites[0], keywordsOf('kr1 seoul'))).toBe(true);
+    expect(vcMatches(sites[0], keywordsOf('kr1 busan'))).toBe(false);
+    expect(vcMatches(sites[2], keywordsOf('8.0.3'))).toBe(true);
+    expect(vcMatches(sites[1], keywordsOf('유럽'))).toBe(false);
+    expect(vcMatches(sites[1], [])).toBe(true);
+    expect(vcMatches(null, [])).toBe(false);
+  });
+  it('siblingSites — 리전 · 검색어로만 거른다(vcenterId 는 무시) · 범위 없으면 전부', () => {
+    expect(siblingSites(sites, {}).map((s) => s.id)).toEqual(['vc-a', 'vc-b', 'vc-c']);
+    expect(siblingSites(sites, { region: '아시아', vcenterId: 'vc-a' }).map((s) => s.id)).toEqual(['vc-a', 'vc-b']);
+    expect(siblingSites(sites, { q: 'de1' }).map((s) => s.id)).toEqual(['vc-c']);
+    expect(siblingSites(sites, { region: '유럽', q: 'kr' })).toEqual([]);
+    expect(siblingSites(null, { region: '유럽' })).toEqual([]);
+  });
+  it('siblingScopeText — 리전 · 검색어가 있을 때만', () => {
+    expect(siblingScopeText({})).toBe('');
+    expect(siblingScopeText({ vcenterId: 'vc-a' })).toBe('');
+    expect(siblingScopeText({ region: '유럽' })).toBe('리전 유럽');
+    expect(siblingScopeText({ region: '유럽', q: ' kr1 ' })).toBe('리전 유럽 · ‘kr1’');
+  });
+});
+
+// v3.10.14(점검 2회차) — 바로가기 칩은 고른 리전 안의 법인만 · 칩을 눌러도 리전은 남는다(App 소스 계약).
+describe('바로가기 칩 범위(v3.10.14)', () => {
+  const vcs = [{ id: 'a', location: { region: '아시아' } }, { id: 'b', location: { region: '유럽' } }, { id: 'c' }, null];
+  it('chipSites — 리전 없으면 전부(쓰레기 행 제외) · 리전이면 그 리전만 · 맞는 법인이 없으면 빈 목록', () => {
+    expect(chipSites(vcs, '').map((s) => s.id)).toEqual(['a', 'b', 'c']);
+    expect(chipSites(vcs, '유럽').map((s) => s.id)).toEqual(['b']);
+    expect(chipSites(vcs, '중동')).toEqual([]);
+    expect(chipSites(null, '유럽')).toEqual([]);
+  });
+  it('chipRegionNote — 리전이 있을 때만 · 법인 수', () => {
+    expect(chipRegionNote('', 3)).toBe('');
+    expect(chipRegionNote('유럽', 5)).toBe('리전 유럽 · 5법인');
+    expect(chipRegionNote('유럽', NaN)).toBe('리전 유럽 · 0법인');
+  });
+  it('App 은 칩에 region 을 넘기고 칩을 눌러도 region 을 지우지 않는다(소스 계약)', async () => {
+    const fs = await import('node:fs');
+    const app = fs.readFileSync(new URL('../../App.jsx', import.meta.url), 'utf8');
+    expect(app).toMatch(/<PlatformHub[\s\S]*?region=\{region\}[\s\S]*?onPickVcenter=\{\(id\) => patchFilter\(\{ vcenterId: id \}\)\}/);
+    const hub = fs.readFileSync(new URL('./PlatformHub.jsx', import.meta.url), 'utf8');
+    expect(hub).toMatch(/const sites = chipSites\(vcenters, region\)/);
   });
 });
