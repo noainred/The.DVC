@@ -287,8 +287,10 @@ test('④ 자동 사건 — 가동 시간이 30초 넘게 줄면 재부팅 · �
   store.setStatus(id, { state: 'connecting' }, NOW + 50); store.setStatus(id, { state: 'ok' }, NOW + 51); store.setStatus(id, { state: 'connecting' }, NOW + 52); store.setStatus(id, { state: 'auth' }, NOW + 53);
   assert.deepEqual(store.drainWrites(1000).filter((r) => r.kind === 'e').map((e) => e.ekind), ['auth'], '정상을 거쳐 다시 거부되면 새 사건');
   // 접속처가 바뀌면 옛 서버의 가동 시간으로 재부팅을 만들지 않는다(반증 F9)
+  store.ingestSample(id, NOW + 650_000, smp(90_000), null, NOW + 650_000); // 옛 서버는 오래 켜져 있었다
+  store.drainWrites(1000);
   store.forgetTargetState(id);
-  store.ingestSample(id, NOW + 700_000, smp(5), null, NOW + 700_000);
+  store.ingestSample(id, NOW + 700_000, smp(5), null, NOW + 700_000); // 새 접속처의 첫 표본 — 가동 시간이 작아도 재부팅이 아니다
   assert.equal(store.drainWrites(1000).filter((r) => r.kind === 'e').length, 0);
   assert.equal(store.queueEvent(id, 'evil', 'x'), null, '모르는 종류는 받지 않는다');
   // 엣지 표본의 가동 시간도 정제 화이트리스트를 지난다
