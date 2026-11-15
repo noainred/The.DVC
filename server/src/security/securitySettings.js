@@ -200,7 +200,8 @@ export function fileUserLoginPolicies() {
       }
     }
   } catch (e) {
-    // 읽기 실패(권한/IO)는 빈 재정의로 계속(전역 정책만 적용 — fail-closed). 형식 오류와 달리
+    // 읽기 실패(권한/IO)는 빈 재정의로 계속(전역 정책만 적용). ⚠ 19회차 B-2 정정: 'fail-closed' 가 아니다 — 사용자별 재정의가 전역보다 강했으면
+    //   읽기 실패가 그 사용자의 정책을 약하게 만든다(처리 방향은 security-session.json 손상과 함께 사용자 결정 대기). 형식 오류와 달리
     // 완전 무증상이면 운영자가 진단할 단서가 없으므로 같은 1회 경고 경로에 태운다.
     bad.push(`file:읽기 실패(${e?.code || e?.message || 'error'})`);
   }

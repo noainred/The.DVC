@@ -725,17 +725,17 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 
 | 메서드 | 경로 | 게이트(공통 제외) | 소스 |
 |---|---|---|---|
-| POST | `/activity` | — | [server/src/routes/auth.js:308](../server/src/routes/auth.js#L308) |
-| GET | `/ad-config` | 역할 `admin` · `authMiddleware` · `requireEnrolled` · `adFleetOnly` | [server/src/routes/auth.js:363](../server/src/routes/auth.js#L363) |
-| PUT | `/ad-config` | 역할 `admin` · `authMiddleware` · `requireEnrolled` · `adFleetOnly` · `requireSettingsOwner` | [server/src/routes/auth.js:373](../server/src/routes/auth.js#L373) |
-| POST | `/ad-test` | 역할 `admin` · `authMiddleware` · `requireEnrolled` · `adFleetOnly` | [server/src/routes/auth.js:386](../server/src/routes/auth.js#L386) |
-| GET | `/config` | — | [server/src/routes/auth.js:29](../server/src/routes/auth.js#L29) |
-| POST | `/extend` | `authMiddleware` · `requireEnrolled` | [server/src/routes/auth.js:239](../server/src/routes/auth.js#L239) |
-| POST | `/login` | — | [server/src/routes/auth.js:53](../server/src/routes/auth.js#L53) |
-| POST | `/logout` | `authMiddleware` | [server/src/routes/auth.js:290](../server/src/routes/auth.js#L290) |
-| GET | `/me` | `authMiddleware` | [server/src/routes/auth.js:209](../server/src/routes/auth.js#L209) |
-| POST | `/totp/begin` | `authMiddleware` | [server/src/routes/auth.js:332](../server/src/routes/auth.js#L332) |
-| POST | `/totp/confirm` | `authMiddleware` | [server/src/routes/auth.js:342](../server/src/routes/auth.js#L342) |
+| POST | `/activity` | — | [server/src/routes/auth.js:330](../server/src/routes/auth.js#L330) |
+| GET | `/ad-config` | 역할 `admin` · `authMiddleware` · `requireEnrolled` · `adFleetOnly` | [server/src/routes/auth.js:411](../server/src/routes/auth.js#L411) |
+| PUT | `/ad-config` | 역할 `admin` · `authMiddleware` · `requireEnrolled` · `adFleetOnly` · `requireSettingsOwner` | [server/src/routes/auth.js:421](../server/src/routes/auth.js#L421) |
+| POST | `/ad-test` | 역할 `admin` · `authMiddleware` · `requireEnrolled` · `adFleetOnly` | [server/src/routes/auth.js:434](../server/src/routes/auth.js#L434) |
+| GET | `/config` | — | [server/src/routes/auth.js:34](../server/src/routes/auth.js#L34) |
+| POST | `/extend` | `authMiddleware` · `requireEnrolled` | [server/src/routes/auth.js:261](../server/src/routes/auth.js#L261) |
+| POST | `/login` | — | [server/src/routes/auth.js:58](../server/src/routes/auth.js#L58) |
+| POST | `/logout` | `authMiddleware` | [server/src/routes/auth.js:312](../server/src/routes/auth.js#L312) |
+| GET | `/me` | `authMiddleware` | [server/src/routes/auth.js:231](../server/src/routes/auth.js#L231) |
+| POST | `/totp/begin` | `authMiddleware` | [server/src/routes/auth.js:363](../server/src/routes/auth.js#L363) |
+| POST | `/totp/confirm` | `authMiddleware` | [server/src/routes/auth.js:382](../server/src/routes/auth.js#L382) |
 
 ## `/api/ping`
 

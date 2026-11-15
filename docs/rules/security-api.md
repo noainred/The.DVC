@@ -667,3 +667,18 @@
   - 등록부에 비밀 없음(IP · 포트 · 계정 · 담당 노드). 접속은 노드가 만든 키(`util/sshKeyStore.js` — 아이실론 키와 같은 공장)만 · 응답에는 공개키 · 지문만.
   - 인증 거부는 `util/authGuard.js` 로 멈추고 사람이 ‘다시 연결’ 할 때 한 번 시도(60초에 한 번) · 대상 주소는 엄격한 IPv4 + SSRF 정적 가드 · 등록부를 못 읽으면 503.
   - 원격 명령은 미리 만든 상수(주기별) · 프로세스는 comm 만(cmdline · environ 0) · 프로세스 사용자 이름은 `isAdminDetailUser` 만 원문.
+
+- **전체 점검 19회차 — 인증 · 세션 · 로그인**(`test/securityFullAudit19.test.js` · 2026-11-15):
+  - **A-1 진행 중 인증 묶음**(`routes/auth.js`): 잠금은 인증 전 · 실패는 인증 뒤에 세므로 AD bind 를 기다리는 동안 같은 계정 · 출발지 동시 요청이 모두 DC 까지 갔다
+    (재현: 동시 200 → bind 200회). 진행 중 인증 **계정당 1 · 출발지당 8** — 넘치면 429(실패로 세지 않음). 로컬 인증은 동기라 걸리지 않는다.
+  - **A-2 본인 OTP 재등록**: 이미 등록된 계정은 begin 에 `currentCode`(verifyUserOtp — 1회용 · 잠금, 빈 값은 실패로 안 셈) → 10분 안 confirm. 등록 전 세션(처음 등록)은 그대로.
+    폰 분실 복구는 관리자 대리 등록(`/admin/users/:u/totp/*`) · `otp-enroll.sh`. 웹 본인 경로 화면(ForceOtpEnroll)은 처음 등록 전용이라 바뀌지 않는다.
+  - **A-3 권한 파일 fail-closed**(`auth/permissions.js`): 손상 · 읽기 오류 · 재시작 뒤 보존본만 → operator · viewer 대시보드만 · 재정의 없음 · admin 끌 수 있는 키 끔(super_admin 은 늘 허용).
+    서비스 점검 목록 + 권한 화면 저장 또는 '기본값으로 확정' 으로 풀림. **security-session.json 손상(약해짐)은 사용자 결정 대기** — 강한 쪽(otp_only 등)으로 닫으면
+    전원 OTP 강제 등록이 되어 운영 영향이 크다(audits.md 19회차).
+  - **A-4 users.json 읽기 오류 fail-closed**(`auth/auth.js loadUsers`): 원본 유지 · 계정 생성 금지 · `persistUsers` 거절 · 초기 비밀번호 안내 금지 · `usersReadError()`.
+    형태가 다른 파일(users 배열 아님 · 빈 목록)은 시드 전에 보존한다.
+  - **A-5** 로그인 성공은 그 계정의 실패 수만큼만 출발지 카운터에서 뺀다(자기 계정 성공을 끼워 출발지 한도를 비우던 것) · **A-11** RDP 티켓은 발급자만 소비(다른 사람 시도는 티켓을 지우지 않음) ·
+    **A-12** `addressMask` IPv6 리터럴 정규식은 길이(64) 먼저.
+  - **남긴 것(결정 · 설계 필요)**: A-6 AD 세션 sub 정규화(kim · KIM · UPN · DOMAIN\kim 이 다른 세션 — 단일 세션 우회) · A-7 AD URL SSRF(ldap 스킴 · ULA 내부 DC 를 막지 않는 규칙 필요) ·
+    A-8 로그인 성공 상한 · 폐기 기록 상한 넘침 처리 · A-9 소유자 목록의 로컬 계정 없는 이름을 같은 이름 AD 세션이 차지 · A-10 AD 켜짐 시 로컬 이름 응답 시간 차.

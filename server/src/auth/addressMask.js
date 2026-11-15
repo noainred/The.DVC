@@ -166,7 +166,8 @@ export function addressMatcher(hosts = []) {
     if (typeof v !== 'string') return false;
     const s = v.trim();
     if (!s) return false;
-    if (IPV4_ANY.test(s) || IPV6_LIT.test(s)) return true;
+    // 19회차 A-12: IPV6_LIT 은 콜론이 많은 긴 입력에 O(n²) — IPv6 리터럴은 대괄호 포함 50자를 넘지 않으므로 길이를 먼저 본다
+    if (IPV4_ANY.test(s) || (s.length <= 64 && IPV6_LIT.test(s))) return true;
     return set.has(s.toLowerCase());
   };
   fn.addressSet = set;

@@ -110,7 +110,7 @@ function handle(ws, params, user, token = null) {
   // 자격증명은 **1회용 티켓(consumeRdpTicket)에서만** 조회한다(감사 H18·CLAUDE.md 'RDP 자격증명은
   // 티켓으로'). 쿼리스트링 폴백을 제거해 fail-closed — 비번이 URL 로 상위 프록시 로그·브라우저
   // 히스토리에 남는 경로를 봉인한다. 티켓이 없으면 접속을 거부(클라이언트가 티켓 발급을 재시도).
-  const tk = consumeRdpTicket(params.get('ticket'));
+  const tk = consumeRdpTicket(params.get('ticket'), { user: user?.username || '' });   // 19회차 A-11: 발급자만
   // ⚠ WS close 사유는 UTF-8 123바이트 상한 — 예전 한글 문구(약 140바이트)는 ws.close 가 RangeError 를 던져
   //   연결이 닫히지 않은 채 남았다. safeWsClose 가 글자 경계에서 자른다(2026-10-09 S-04 작업 중 확인).
   if (!tk) { safeWsClose(ws, 1011, 'RDP 접속 티켓이 필요합니다(POST /api/remote/rdp-ticket)'); return; }

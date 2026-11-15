@@ -92,9 +92,10 @@ test('AX3-03: RDP 티켓은 필드 길이 상한(거부)과 사용자당 보관 
   const ids = [];
   for (let i = 0; i < t.MAX_TICKETS_PER_OWNER + 5; i++) ids.push(t.issueRdpTicket({ username: 'u', password: String(i) }, { owner: 'op' }));
   const other = t.issueRdpTicket({ username: 'v', password: 'z' }, { owner: 'other' });
-  assert.equal(t.consumeRdpTicket(ids[0]), null, '같은 사용자의 가장 오래된 티켓은 밀려난다');
-  assert.ok(t.consumeRdpTicket(ids[ids.length - 1]), '최신 티켓은 남는다');
-  assert.ok(t.consumeRdpTicket(other), '다른 사용자의 티켓은 밀어내지 않는다');
+  // 전체 점검 19회차 A-11: 소비는 발급자만(user 대조)
+  assert.equal(t.consumeRdpTicket(ids[0], { user: 'op' }), null, '같은 사용자의 가장 오래된 티켓은 밀려난다');
+  assert.ok(t.consumeRdpTicket(ids[ids.length - 1], { user: 'op' }), '최신 티켓은 남는다');
+  assert.ok(t.consumeRdpTicket(other, { user: 'other' }), '다른 사용자의 티켓은 밀어내지 않는다');
 });
 
 test('AX3-04: GPU 시계열 JSON 내보내기는 스트리밍이고 동시 1건 가드(409)를 갖는다', async () => {

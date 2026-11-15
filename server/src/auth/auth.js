@@ -175,18 +175,40 @@ function ensureDemoUser(list) {
   return false;
 }
 
+/*
+ * 전체 점검 19회차 A-4(재현 — EISDIR): **읽기 오류**(EACCES · EISDIR · EIO — root 로 도구를 돌려 users.json 이 root 0600 이 된 경우가 대표)를
+ *   파싱 손상과 같은 catch 로 받아 원본을 .corrupt 로 옮기고 기본 admin · 데모 계정을 새로 만들었다 — 다음 재시작에서 **전 계정이 사라진 채** 열리고
+ *   미인증 /auth/config 가 초기 비밀번호 파일을 안내했다. 이제 읽기 오류는 원본을 그대로 두고 계정을 만들지 않으며 **아무도 로그인하지 못한다**
+ *   (fail-closed — 관리자가 권한을 고치고 재시작하면 그대로 읽는다). 이 상태에서는 사용자 파일을 쓰지 않는다(persistUsers 거절).
+ */
+let _usersReadError = null;
+/** users.json 을 읽지 못해(ENOENT 아닌 읽기 오류) 로그인을 막고 있으면 { at, code }, 아니면 null. */
+export function usersReadError() { return _usersReadError; }
+
 export function loadUsers() {
   if (users) return users;
+  _usersReadError = null;
   const file = path.join(CONFIG_DIR, 'users.json');
   if (fs.existsSync(file)) {
+    let text;
+    try { text = fs.readFileSync(file, 'utf8'); }
+    catch (err) {
+      _usersReadError = { at: Date.now(), code: String(err?.code || 'read-error').slice(0, 32) };
+      console.error(`[auth] users.json 을 읽지 못했습니다(${_usersReadError.code}) — 원본을 그대로 두고 계정을 만들지 않습니다(로그인 불가). 파일 소유자 · 권한(포탈 서비스 계정 · 0600)을 확인하고 포탈을 재시작하세요.`);
+      users = [];
+      return users;
+    }
     try {
-      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const parsed = JSON.parse(text);
       if (Array.isArray(parsed?.users) && parsed.users.length) {
         users = parsed.users;
         const changed = [ensureDemoUser(users), ensureSuperUser(users)].some(Boolean);
         if (changed) { try { persistUsers(); } catch { /* 다음 저장 때 함께 기록 */ } }
         return users;
       }
+      // 19회차 A-4: 형태가 다른 파일(users 가 배열 아님 · 빈 목록 · null)도 시드 전에 보존한다 — 예전에는 보존 없이 시드가 덮었다.
+      preserveCorrupt(file, 'users 가 비었거나 배열이 아닙니다(형식 불일치)');
+      console.error('[auth] Failed to parse users.json: 형식 불일치(users 가 비었거나 배열이 아님) — 원본을 보존하고 기본 계정을 만듭니다');
     } catch (err) {
       // 손상본을 조용히 무시하고 아래에서 기본 admin을 시드하면, 다음 persistUsers가
       // 실사용자 전부를 시드 1건으로 덮어써 계정이 영구 유실된다 → 손상본을 .corrupt로 보존.
@@ -236,6 +258,7 @@ export function reloadUsersFromDisk() {
 
 function persistUsers() {
   const file = path.join(CONFIG_DIR, 'users.json');
+  if (_usersReadError) throw new Error('users.json 을 읽지 못한 상태라 저장하지 않습니다(원본 보호) — 파일 권한을 고치고 재시작하세요.');   // 19회차 A-4
   // 원자적 쓰기 — 자격증명 파일이 부분기록으로 손상돼 전 사용자가 유실되는 사고를 방지.
   try {
     atomicWriteFileSync(file, JSON.stringify({ users: loadUsers() }, null, 2), { mode: 0o600 });
@@ -337,6 +360,7 @@ export function isOtpOnlyUser(username, role) {
 export function setupState() {
   try {
     const list = loadUsers();
+    if (_usersReadError) return { setupPending: false, initialPasswordFile: null };   // 19회차 A-4: 읽기 오류는 초기 구축이 아니다(초기 비밀번호 파일 안내 금지)
     const setupPending = !list.some((u) => isAdminTier(u.role) && u.totpEnabled);
     if (!setupPending) return { setupPending: false, initialPasswordFile: null };
     const file = path.join(CONFIG_DIR, 'initial-admin-password.txt');

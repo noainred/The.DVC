@@ -3124,3 +3124,6 @@ high 0 · 반증 1(A3-01 — 경로 오독, 데모 계정은 READ_DENY 하위라
     같은 결함의 형제(iDRAC 스캔 배정 — B-3) · 무보고 감시 무음 정지(B-4). **남긴 것**: 표시 이름이 겹친 엣지의 edge->central 링크 id 중복(엣지 보고에 가를 근거가 없다) ·
     성능점검 엣지 배정 저장은 화면 경고 뒤 허용(설계).
   - 작업 방식 교훈: 판정을 한 곳에서 바꾸면(링크 id · 자르기 순서) 같은 값을 다시 만드는 다른 소비처를 먼저 찾을 것 — 16회차 수정 셋 중 둘이 반증에서 그 이유로 깨졌다.
+- **보안 · 인증 ①(19회차 · `securityFullAudit19`)**: 인증 · 세션 · 로그인 — 확정 중간 4 · 낮음 5 · 추정 3. 고친 것: A-1 · A-2 · A-3(권한 파일) · A-4 · A-5 · A-11 · A-12 + 문서 정정 3(AUDIT-2026-08-13 'fail-safe' ·
+  securitySettings 'fail-closed' 주석 · server/CLAUDE.md 등록 전 열린 라우트). **남긴 것**: security-session.json 손상 시 약해짐(사용자 결정 — 강하게 닫으면 전원 OTP 강제) ·
+  A-6 · A-7 · A-8 · A-9 · A-10(`docs/rules/security-api.md` '전체 점검 19회차' 남긴 것) · mustChangePassword 미집행(정보).

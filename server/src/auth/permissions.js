@@ -4,6 +4,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { isSuperAdmin } from './roles.js';
 import { isDemoGuest } from './demoGuest.js';
+import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 기능별 권한(Permission) 프레임워크 — "모든 기능에 대해 역할별 권한을 켜고 끈다".
@@ -224,13 +225,39 @@ function defaultMatrix() {
   };
 }
 
+/*
+ * 전체 점검 19회차 A-3(재현): 권한 파일을 못 읽으면(손상 · 읽기 오류 · 재시작 뒤 손상 보존본만 남음) **기본값이 아니라 최소 권한**으로 연다.
+ *   예전에는 기본 매트릭스로 열려 관리자가 좁혀 둔 권한이 넓어졌다(operator 원격 접속 · 도구 · 허용 목록 사용자 · admin CSV 가 false → true).
+ *   최소 권한 = operator · viewer 는 대시보드만, 사용자별 재정의 없음, admin 의 끌 수 있는 키(ADMIN_TOGGLE_KEYS)는 끔(super_admin 은 늘 허용 — 고칠 수 있다).
+ *   서비스 점검 목록에 나오고, 권한 화면 저장(saveMatrix) 또는 '기본값으로 확정'(지금의 최소 권한을 저장)으로 풀린다. 읽기 오류는 원본을 옮기지 않는다.
+ */
+const _loadErr = makeSettingsLoadError(() => matrixFile(), { label: '권한 매트릭스 — 못 읽는 동안 operator · viewer 는 대시보드만(최소 권한)', confirm: () => persistMatrix() });
+/** 권한 파일을 못 읽어 최소 권한으로 동작 중이면 { at, reason }, 아니면 null. */
+export function permissionsLoadError() { loadMatrix(); return _loadErr.get(); }
+function lockedMatrix() {
+  return {
+    operator: ['dashboard'], viewer: ['dashboard'],
+    toolsDenied: { operator: [], viewer: [] },
+    users: {},
+    adminDenied: [...ADMIN_TOGGLE_KEYS],
+  };
+}
+
 /** 편집 가능한 역할→권한 매트릭스 로드(operator/viewer 만). admin 은 항상 전체. */
 export function loadMatrix() {
   if (cached) return cached;
   const file = matrixFile();
   if (fs.existsSync(file)) {
+    let text;
+    try { text = fs.readFileSync(file, 'utf8'); }
+    catch (err) {
+      _loadErr.corrupt(`읽기 오류 ${String(err?.code || '')}`.trim());
+      console.error(`[perm] permissions.json 을 읽지 못했습니다(${String(err?.code || '오류')}) — 원본을 그대로 두고 최소 권한으로 동작합니다. 파일 권한을 확인하고 재시작하세요.`);
+      cached = lockedMatrix();
+      return cached;
+    }
     try {
-      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const parsed = JSON.parse(text);
       const m = parsed && typeof parsed === 'object' ? (parsed.matrix || parsed) : {};
       const td = m.toolsDenied || {};
       // 버전이 없는 파일(= v2.505 이하가 쓴 것)은 1 로 본다 — 위 SCHEMA_VERSION 주석 참조.
@@ -245,20 +272,26 @@ export function loadMatrix() {
         users: sanitizeUsers(m.users),
         adminDenied: sanitizeAdminDenied(m.adminDenied),
       };
+      _loadErr.ok();
       return cached;
     } catch (err) {
       // 손상 파일을 조용히 기본값으로 덮어쓰면 다음 저장이 원본을 잃는다 → .corrupt 로 보존.
+      _loadErr.corrupt(err);
       preserveCorrupt(file, err.message);
-      console.error(`[perm] permissions.json 파싱 실패: ${safeLoadText(err) || '사유 미상'}`);
+      console.error(`[perm] permissions.json 파싱 실패: ${safeLoadText(err) || '사유 미상'} — 최소 권한으로 동작합니다(19회차 A-3)`);
+      cached = lockedMatrix();
+      return cached;
     }
   }
-  cached = defaultMatrix();
+  _loadErr.missing();   // 파일 없음 + 손상 보존본만 → 여전히 못 읽은 것(재시작 뒤에도 최소 권한)
+  cached = _loadErr.get() ? lockedMatrix() : defaultMatrix();
   return cached;
 }
 
 function persistMatrix() {
   // schemaVersion 을 함께 쓴다 — 없으면 다음 키 추가 때 또 '조용한 거부' 가 된다(위 주석).
-  atomicWriteFileSync(matrixFile(), JSON.stringify({ schemaVersion: SCHEMA_VERSION, matrix: cached }, null, 2), { mode: 0o600 });
+  atomicWriteFileSync(matrixFile(), JSON.stringify({ schemaVersion: SCHEMA_VERSION, matrix: cached || loadMatrix() }, null, 2), { mode: 0o600 });
+  _loadErr.ok();   // 19회차 A-3: 관리자 저장(또는 확정)이 최소 권한 상태를 푼다
 }
 
 /** operator/viewer 두 행 + 특수기능 거부목록을 저장(부분 갱신 허용). admin 행은 무시된다. */
