@@ -251,7 +251,7 @@ export function loadMatrix() {
     let text;
     try { text = fs.readFileSync(file, 'utf8'); }
     catch (err) {
-      _loadErr.corrupt(`읽기 오류 ${String(err?.code || '')}`.trim());
+      _loadErr.readError(err);   // 20회차 반증 F4: 옮기지 않았다 · 확정 불가(권한을 고쳐야 한다)
       console.error(`[perm] permissions.json 을 읽지 못했습니다(${String(err?.code || '오류')}) — 원본을 그대로 두고 최소 권한으로 동작합니다. 파일 권한을 확인하고 재시작하세요.`);
       cached = lockedMatrix();
       return cached;
@@ -288,6 +288,23 @@ export function loadMatrix() {
   return cached;
 }
 
+/**
+ * 20회차 반증 F5(재현): 못 읽은 동안의 **부분 저장**(역할 행만 · 사용자 재정의 하나)은 최소 권한 행과 빈 사용자 재정의를 파일에 굳히고 표지를 지웠다 —
+ *   원본의 사용자별 허용 목록 제한이 사라져, 나중에 operator 에 tools 를 되돌리면 그 사용자가 전 도구를 받았다. 읽기 오류면 rename 이 읽지 못한 원본을 대체했다.
+ *   그래서 오류 중에는 쓰지 않는다 — 해제는 보존본 복구 · 서비스 점검 '기본값으로 확정'(지금 최소 권한을 저장) · super_admin 초기화(손상일 때만).
+ * @returns {null | { status:number, body:object }}
+ */
+export function permissionsWriteRefusal({ reset = false } = {}) {
+  loadMatrix();
+  const e = _loadErr.get();
+  if (!e) return null;
+  if (reset && !e.readError) return null;
+  return { status: e.readError ? 503 : 409, body: { ok: false, code: 'permissions-unreadable',
+    reason: e.readError
+      ? '권한 파일을 읽지 못하는 상태(파일 권한 · 소유자)라 저장하지 않았습니다 — 원본을 덮지 않습니다. 파일 권한을 고치고 재시작하세요.'
+      : '권한 파일이 손상돼 최소 권한으로 동작 중이라 부분 저장을 받지 않습니다 — 손상 보존본(.corrupt.*)을 되돌리고 재시작하거나, 서비스 점검에서 기본값으로 확정(지금 최소 권한 저장)하거나, 초기화하세요.' } };
+}
+
 function persistMatrix() {
   // schemaVersion 을 함께 쓴다 — 없으면 다음 키 추가 때 또 '조용한 거부' 가 된다(위 주석).
   atomicWriteFileSync(matrixFile(), JSON.stringify({ schemaVersion: SCHEMA_VERSION, matrix: cached || loadMatrix() }, null, 2), { mode: 0o600 });
@@ -297,6 +314,7 @@ function persistMatrix() {
 /** operator/viewer 두 행 + 특수기능 거부목록을 저장(부분 갱신 허용). admin 행은 무시된다. */
 export function saveMatrix(next = {}) {
   const cur = loadMatrix();
+  const refused = permissionsWriteRefusal(); if (refused) { const er = new Error(refused.body.reason); er.status = refused.status; er.code = refused.body.code; throw er; }   // 20회차 F5(라우트가 먼저 본다 — 방어)
   const td = next.toolsDenied || {};
   cached = {
     operator: next.operator !== undefined ? sanitizeRow(next.operator) : cur.operator,
@@ -317,6 +335,7 @@ export function saveMatrix(next = {}) {
 
 /** 기본값으로 초기화. */
 export function resetMatrix() {
+  const refused = permissionsWriteRefusal({ reset: true }); if (refused) { const er = new Error(refused.body.reason); er.status = refused.status; er.code = refused.body.code; throw er; }
   cached = defaultMatrix();
   persistMatrix();
   return cached;
@@ -388,6 +407,7 @@ export function userToolAllowed(user, key) {
  * @returns {{ok:boolean, reason?:string, entry?:object|null}}
  */
 export function setUserTools(username, { mode = 'off', tools = [], by = '' } = {}) {
+  { const refused = permissionsWriteRefusal(); if (refused) return { ok: false, status: refused.status, code: refused.body.code, reason: refused.body.reason }; }   // 20회차 F5
   const name = String(username || '').trim();
   if (!USERNAME_RE.test(name)) return { ok: false, reason: '사용자명 형식이 올바르지 않습니다.' };
   if (!USER_TOOL_MODES.includes(String(mode))) return { ok: false, reason: `mode 는 ${USER_TOOL_MODES.join('/')} 중 하나여야 합니다.` };

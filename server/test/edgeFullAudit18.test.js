@@ -47,7 +47,7 @@ test('B-2 — 엣지 배포 사용자는 ownerOnly(확정 라우트가 설정 �
   assert.equal(settingsFileOwnerOnly('central-agent-users.json'), true);
   assert.equal(settingsFileOwnerOnly('agent-assignments.json'), false);
   const src = fs.readFileSync(new URL('../src/routes/api/checksLogs.js', import.meta.url), 'utf8');
-  assert.match(src, /if \(settingsFileOwnerOnly\(file\)\) \{ const g = settingsOwnerGradeDenial\(req\); if \(g\) return res\.status\(403\)\.json\(g\); \}\n  const r = confirmSettingsDefault/);
+  assert.match(src, /if \(settingsFileOwnerOnly\(file\)\) \{ const g = settingsOwnerGradeDenial\(req\); if \(g\) return res\.status\(403\)\.json\(g\); \}\n(?:.*\n)?  const r = confirmSettingsDefault/);   // 20회차 F8: super 게이트 줄이 사이에 올 수 있다
 });
 
 test('B-3 — iDRAC 스캔 배정: 못 읽은 동안 추가 · 수정 · 삭제 · 병합 가져오기 거절 · 바꾸기는 허용', async () => {

@@ -559,6 +559,8 @@ function superAdminGuardDenied(u, { nextRole, actor = null, actorUser = null, tr
 }
 
 export function createUser({ username, name, role = 'viewer', password, scope } = {}, { actor = null, actorUser = null, trusted = false } = {}) {
+  loadUsers();
+  if (_usersReadError) return { ok: false, reason: 'users.json 을 읽지 못한 상태라 계정을 만들지 않습니다(원본 보호) — 파일 권한을 고치고 재시작하세요.' };   // 20회차 F9
   username = String(username || '').trim();
   if (!/^[A-Za-z0-9._@-]{2,64}$/.test(username)) return { ok: false, reason: '사용자 ID 형식이 올바르지 않습니다.' };
   if (!VALID_ROLES.includes(role)) return { ok: false, reason: '역할이 올바르지 않습니다.' };
@@ -708,6 +710,8 @@ export function deleteUser(username, { actor = null, actorUser = null, trusted =
  */
 export function applyManagedUsers(managed = []) {
   const list = loadUsers();
+  // 20회차 반증 F9(재현): 읽기 오류 중 중앙 배포 계정을 메모리에 더하면(저장은 거절) 엣지에서 '아무도 로그인 못 함' 이 깨졌다 — 바꾸기 전에 멈춘다.
+  if (_usersReadError) throw new Error('users.json 을 읽지 못한 상태라 중앙 배포 사용자를 적용하지 않습니다(원본 보호) — 파일 권한을 고치고 재시작하세요.');
   const want = new Map((managed || []).filter((u) => u && u.username).map((u) => [String(u.username).trim(), u]));
   const result = { created: 0, updated: 0, removed: 0, skipped: [] };
   for (const [username, m] of want) {
@@ -1106,6 +1110,9 @@ export function _resetAdShadowForTest() { _adShadow.clear(); }
 export function localNameTaken(username) {
   const n = String(username ?? '').trim().toLowerCase();
   if (!n) return false;
+  // 20회차 반증 F3(재현): users.json 을 읽지 못한 동안(19회차 A-4 — 목록이 비어 있다)은 **어떤 이름도 AD 로 받지 않는다** — 그러지 않으면
+  //   로컬 'noainred'(설정 소유자) 와 같은 이름의 AD 계정이 소유자 등급으로 로그인했다(v2.681 방패가 빈 목록에서 사라짐). 발급 · 검사 둘 다 이 함수.
+  if (_usersReadError) return true;
   try { return loadUsers().some((u) => String(u?.username ?? '').toLowerCase() === n); } catch { return false; }
 }
 

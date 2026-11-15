@@ -1,6 +1,7 @@
 // 사용자 관리·권한 매트릭스·비밀번호·TOTP — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
+import { isSelfTarget, requireCurrentOtp, selfRebindVerified, clearSelfRebind } from '../../auth/otpRebind.js';   // 20회차 반증 F1
 import { listUsers, createUser, updateUser, deleteUser, beginTotpEnroll, confirmTotpEnroll, disableTotp, setLocalPassword, clearLoginCredentials, actorIsSuperAdmin } from '../../auth/auth.js';
-import { PERMISSION_CATALOG, ROLES, ADMIN_TOGGLE_KEYS, loadMatrix, saveMatrix, resetMatrix, rolePermissions, USER_TOOL_MODES, setUserTools, userToolOverrides, effectiveToolAccess } from '../../auth/permissions.js';
+import { PERMISSION_CATALOG, ROLES, ADMIN_TOGGLE_KEYS, loadMatrix, saveMatrix, resetMatrix, permissionsWriteRefusal, rolePermissions, USER_TOOL_MODES, setUserTools, userToolOverrides, effectiveToolAccess } from '../../auth/permissions.js';
 // v2.506: 도구 거부목록의 '서버 집행 가능 여부' 를 권한 화면에 함께 내려준다(무음 실패 제거).
 import { enforcedToolKeys, TOOL_ENFORCEMENT_NOTES } from '../../auth/toolAccess.js';
 import { logAudit } from '../../audit.js';
@@ -198,7 +199,7 @@ adminRouter.put('/user-tools/:username', adminOnly, (req, res) => {
       : (r.reason || ''),
     ip: req.ip || '',
   });
-  if (!r.ok) return res.status(400).json(r);
+  if (!r.ok) return res.status(r.status || 400).json(r);
   // v2.741 AUTHZ-01: 성공 응답의 전체 목록도 GET /permissions 와 같은 경계(범위 밖 계정 항목·설정자 미노출).
   const ov = overridesForActor(userToolOverrides(), req.user, store.get());
   res.json({ ok: true, entry: r.entry, effective: eff, users: ov.users, ...(ov.scoped ? { scoped: true, omittedOutOfScope: ov.omitted, byHidden: ov.byHidden } : {}) });
@@ -218,6 +219,7 @@ adminRouter.put('/permissions', adminOnly, (req, res) => {
     }
     adminDenied = next.adminDenied;
   }
+  { const refused = permissionsWriteRefusal(); if (refused) return res.status(refused.status).json(refused.body); }   // 20회차 F5
   const matrix = saveMatrix({ operator: next.operator, viewer: next.viewer, toolsDenied: next.toolsDenied, adminDenied });
   logAudit({ user: req.user?.username, action: '기능 권한 매트릭스 변경', target: 'permissions', detail: `operator=${matrix.operator.length}·viewer=${matrix.viewer.length}·거부(op/vw)=${matrix.toolsDenied.operator.length}/${matrix.toolsDenied.viewer.length}·admin끔=${(matrix.adminDenied || []).join(',') || '없음'}`, ip: req.ip || '' });
   res.json({ ok: true, matrix: { admin: rolePermissions('admin'), ...matrix } });
@@ -228,6 +230,7 @@ adminRouter.post('/permissions/reset', adminOnly, (req, res) => {
   if ((loadMatrix().adminDenied || []).length && !actorIsSuperAdmin(req.user || null)) {
     return res.status(403).json({ ok: false, error: 'forbidden', code: 'super-admin-only', reason: 'super_admin 이 끈 admin 권한(CSV)이 있어 초기화는 super_admin 만 할 수 있습니다.' });
   }
+  { const refused = permissionsWriteRefusal({ reset: true }); if (refused) return res.status(refused.status).json(refused.body); }   // 20회차 F5(손상이면 초기화는 허용 · 읽기 오류는 거절)
   const matrix = resetMatrix();
   logAudit({ user: req.user?.username, action: '기능 권한 매트릭스 초기화', target: 'permissions', ip: req.ip || '' });
   res.json({ ok: true, matrix: { admin: rolePermissions('admin'), ...matrix } });
@@ -238,8 +241,25 @@ adminRouter.post('/permissions/reset', adminOnly, (req, res) => {
 // ⚠ 자격증명 변경 4경로(비번 설정·로그인 차단·OTP 등록·OTP 해제)는 모두 actor 를 넘긴다 —
 // 보호 계정(수퍼관리자·설정소유자)을 다른 admin 이 대리 변경하면 그 계정으로 로그인할 수 있게 되어
 // 계정 탈취가 된다(auth.js credentialGuardDenied). 한 곳만 빠져도 우회가 성립한다.
+/*
+ * 전체 점검 20회차 반증 F1(재현): 아래 자격증명 변경 라우트를 **자기 자신**에게 쓰면 본인 경로(/auth/totp/*)의 '현재 OTP' 요구(19회차 A-2)를
+ *   그대로 비켜 갔다 — 탈취한 admin 세션이 자기 OTP 를 다시 묶거나 해제 · 비밀번호 설정 · 로그인 차단으로 영구 탈취 · 주인 잠금을 했다.
+ *   대상 = 요청자이고 OTP 가 등록된 계정이면 같은 판정(auth/otpRebind.js)으로 현재 코드를 받는다. 다른 사람 대상(폰 분실 대리 등록)은 그대로.
+ */
+function denySelfWithoutOtp(req, res, what) {
+  if (!isSelfTarget(req, req.params.username)) return false;
+  // 10분 안에 현재 코드를 이미 확인했으면 다시 묻지 않는다 — 같은 코드를 다시 보내면 재사용 방지(minCounter)에 걸린다
+  //   (예: OTP 전용 계정 해제 → 서버가 임시 비밀번호를 요구 → 화면이 비밀번호를 받아 다시 보냄).
+  if (selfRebindVerified(req.params.username)) return false;
+  const need = requireCurrentOtp(req.params.username, (req.body || {}).currentCode, what);
+  if (!need) return false;
+  logAudit({ user: req.user?.username, action: `${what} 거부(본인 — 현재 OTP 확인 실패)`, target: req.params.username, ip: req.ip || '' });
+  res.status(need.status).json(need.body);
+  return true;
+}
 adminRouter.post('/users/:username/password', adminOnly, (req, res) => {
   if (denyTargetOutOfScope(req, res)) return;   // v2.607 AUTHZ2607-01
+  if (denySelfWithoutOtp(req, res, '비밀번호 설정')) return;   // 20회차 F1
   const r = setLocalPassword(req.params.username, (req.body || {}).password, { actor: req.user?.username, actorUser: req.user });
   if (r.ok) logAudit({ user: req.user?.username, action: '사용자 비밀번호 설정', target: req.params.username, ip: req.ip || '' });
   else logAudit({ user: req.user?.username, action: '사용자 비밀번호 설정 거부', target: req.params.username, detail: r.reason || '', ip: req.ip || '' });
@@ -248,6 +268,7 @@ adminRouter.post('/users/:username/password', adminOnly, (req, res) => {
 // 로그인 차단(관리자) — 비밀번호/OTP 를 모두 제거해 로그인 불가 상태로 되돌린다(데모 계정 잠금).
 adminRouter.delete('/users/:username/password', adminOnly, (req, res) => {
   if (denyTargetOutOfScope(req, res)) return;   // v2.607 AUTHZ2607-01
+  if (denySelfWithoutOtp(req, res, '로그인 차단')) return;   // 20회차 F1
   const r = clearLoginCredentials(req.params.username, { actor: req.user?.username, actorUser: req.user });
   if (r.ok) logAudit({ user: req.user?.username, action: '사용자 로그인 차단(자격증명 제거)', target: req.params.username, ip: req.ip || '' });
   else logAudit({ user: req.user?.username, action: '사용자 로그인 차단 거부', target: req.params.username, detail: r.reason || '', ip: req.ip || '' });
@@ -261,18 +282,24 @@ adminRouter.delete('/users/:username/password', adminOnly, (req, res) => {
 // (auth.js credentialGuardDenied). 대리 등록은 감사로그에 남긴다 — 강력한 권한 작업이다.
 adminRouter.post('/users/:username/totp/begin', adminOnly, (req, res) => {
   if (denyTargetOutOfScope(req, res)) return;   // v2.607 AUTHZ2607-01
+  if (denySelfWithoutOtp(req, res, 'OTP 재등록')) return;   // 20회차 F1(확인 사실은 10분 기억 — 아래 confirm 이 본다)
   const r = beginTotpEnroll(req.params.username, req.get('host') || '', { actor: req.user?.username, actorUser: req.user });
   if (!r.ok) logAudit({ user: req.user?.username, action: 'OTP 대리 등록 거부', target: req.params.username, detail: r.reason || '', ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
 });
 adminRouter.post('/users/:username/totp/confirm', adminOnly, (req, res) => {
   if (denyTargetOutOfScope(req, res)) return;   // v2.607 AUTHZ2607-01
+  if (isSelfTarget(req, req.params.username) && !selfRebindVerified(req.params.username)) {   // 20회차 F1
+    return res.status(403).json({ ok: false, needCurrentOtp: true, reason: '본인 계정의 OTP 재등록입니다 — 시작할 때 지금 OTP 코드를 확인한 뒤 10분 안에 확정하세요.' });
+  }
   const r = confirmTotpEnroll(req.params.username, (req.body || {}).code, { actor: req.user?.username, actorUser: req.user });
+  if (r.ok && isSelfTarget(req, req.params.username)) clearSelfRebind(req.params.username);
   if (r.ok) logAudit({ user: req.user?.username, action: 'OTP 대리 등록 확정', target: req.params.username, ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
 });
 adminRouter.post('/users/:username/totp/disable', adminOnly, (req, res) => {
   if (denyTargetOutOfScope(req, res)) return;   // v2.607 AUTHZ2607-01
+  if (denySelfWithoutOtp(req, res, 'OTP 해제')) return;   // 20회차 F1
   // ⚠ req.body 를 통째로 넘기면 안 된다 — `force` 는 콘솔 복구 도구 전용 신뢰 플래그인데,
   // 클라이언트가 `{"force":true}` 를 실어 수퍼관리자 OTP 해제 가드를 무력화할 수 있었다
   // (재감사에서 실행 재현: 해제 → 임시 비번 로그인 → 자력 OTP 등록 → 계정 탈취).

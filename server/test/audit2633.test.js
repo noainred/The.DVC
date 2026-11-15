@@ -101,7 +101,13 @@ test('③ 라우트 게이트: operator 403 · 범위 관리자 403 · 파일 �
 test('② 18개 전부 관리자 확정이 성공하고, 오류가 풀리며, 보존본은 남는다 · 두 번째는 409 · 감사 로그', async () => {
   const u = '/tools/service-check/settings-files/confirm';
   for (const f of FILES) {
-    const r = await call(api, FULL, 'POST', u, { file: f });
+    // 전체 점검 20회차 반증 F8: 쓰기 라우트가 super_admin 전용인 설정(아이실론)은 확정도 super_admin — admin 은 403
+    if (f === 'isidu-settings.json') assert.equal((await call(api, FULL, 'POST', u, { file: f })).status, 403, 'isidu 확정은 super_admin');
+    //   쓰기 라우트가 설정 소유자 등급인 설정(베어메탈 SLO · 알림 규칙 · 튜닝)은 확정도 소유자 — admin 은 403
+    const OWNER_ONLY = ['bm-perf-slo.json', 'bm-perf-rules.json', 'bmusage-tuning.json'];
+    if (OWNER_ONLY.includes(f)) assert.equal((await call(api, FULL, 'POST', u, { file: f })).status, 403, `${f} 확정은 설정 소유자`);
+    const who = f === 'isidu-settings.json' ? { ...FULL, superAdmin: true } : OWNER_ONLY.includes(f) ? { ...FULL, username: 'noainred' } : FULL;
+    const r = await call(api, who, 'POST', u, { file: f });
     assert.equal(r.status, 200, `${f}: ${JSON.stringify(r.body)}`);
     assert.equal(r.body.ok, true);
     assert.ok(fs.existsSync(path.join(CFG, f)), `${f}: 기본값 파일이 써지지 않았다`);

@@ -33,7 +33,7 @@ let _cache = null; let _mtime = '';
  * 로드 오류는 공용 코어(util/settingsLoadError.js — v2.631·v2.633)로: 손상이면 보존본으로 옮기고 오류를 세운다 · 파일이 없는데 보존본만 남았으면
  *   (재시작 뒤에도) 여전히 못 읽은 것이다 · 관리자가 저장하거나 서비스 점검에서 ‘기본값으로 확정’ 하면 풀린다. 사유 문구는 원문 조각을 싣지 않는다(safeLoadText).
  */
-const _err = makeSettingsLoadError(FILE, { label: '베어메탈 튜닝 권장값 덮어쓰기', confirm: () => writeFile({ v: 1, all: {}, corps: {}, by: 'confirm-default', at: Date.now() }) });
+const _err = makeSettingsLoadError(FILE, { label: '베어메탈 튜닝 권장값 덮어쓰기', confirm: () => writeFile({ v: 1, all: {}, corps: {}, by: 'confirm-default', at: Date.now() }) , ownerOnly: true });   // 20회차 F8: 쓰기 라우트가 소유자 등급
 const mtimeOf = () => { try { const st = fs.statSync(FILE()); return `${st.mtimeMs}:${st.size}`; } catch { return ''; } };
 export function tuningOverridesLoadError() { load(); return _err.get(); }
 

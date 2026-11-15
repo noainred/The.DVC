@@ -8,7 +8,8 @@ import { config, loadVcenterConfig } from '../../config.js';
 import { scanResultList, getIpHistoryMap } from '../../ipam/scanStore.js';
 import { snapshotFilter, slimVm, filterScanResults } from '../../search/deepSearch.js';
 import { getServiceCheck } from '../../health/services.js';
-import { confirmSettingsDefault, settingsFileOwnerOnly } from '../../util/settingsLoadError.js';
+import { confirmSettingsDefault, settingsFileOwnerOnly, settingsFileSuperOnly } from '../../util/settingsLoadError.js';
+import { isSuperAdmin } from '../../auth/roles.js';
 import { fullScopeOnlyWith, settingsOwnerGradeDenial } from '../admin/shared.js';
 import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { logAudit } from '../../audit.js';
@@ -230,6 +231,7 @@ api.post('/tools/service-check/settings-files/confirm', requireRole('admin'), se
   if (!file) return res.status(400).json({ ok: false, code: 'bad-request', reason: 'file 이 필요합니다' });
   // 18회차 반증 B-2: 쓰기 라우트가 설정 소유자 등급인 파일은 확정도 같은 등급(확정 = 그 쓰기와 같은 결과를 전 엣지에 내린다)
   if (settingsFileOwnerOnly(file)) { const g = settingsOwnerGradeDenial(req); if (g) return res.status(403).json(g); }
+  if (settingsFileSuperOnly(file) && !isSuperAdmin(req.user)) return res.status(403).json({ error: 'forbidden', reason: 'super-admin-only', requiredRole: ['super_admin'] });   // 20회차 반증 F8
   const r = confirmSettingsDefault(file, { by: req.user?.username || '' });
   if (!r.ok) {
     const status = r.code === 'unknown-file' ? 404 : r.code === 'not-in-error' || r.code === 'not-confirmable' || r.code === 'file-present' ? 409 : 500;

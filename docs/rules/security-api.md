@@ -682,3 +682,9 @@
     **A-12** `addressMask` IPv6 리터럴 정규식은 길이(64) 먼저.
   - **남긴 것(결정 · 설계 필요)**: A-6 AD 세션 sub 정규화(kim · KIM · UPN · DOMAIN\kim 이 다른 세션 — 단일 세션 우회) · A-7 AD URL SSRF(ldap 스킴 · ULA 내부 DC 를 막지 않는 규칙 필요) ·
     A-8 로그인 성공 상한 · 폐기 기록 상한 넘침 처리 · A-9 소유자 목록의 로컬 계정 없는 이름을 같은 이름 AD 세션이 차지 · A-10 AD 켜짐 시 로컬 이름 응답 시간 차.
+  - **20회차 반증(`securityFullAudit20`)**: F1 관리자 라우트 자기 대상(`/admin/users/:me/totp/*` · `password` POST/DELETE)도 현재 OTP(10분 안 확인은 재사용 —
+    임시 비밀번호 재시도 때 같은 코드 재사용 방지에 걸리지 않게) · 화면 `UserAdmin.jsx withCurrentOtp` 가 코드를 받아 한 번 다시 보낸다 ·
+    F2 등록 강제가 아닌 미등록 세션의 본인 OTP 등록 거부(대리 등록만) · F3 읽기 오류 중 `localNameTaken` 은 늘 참(AD 금지) · F9 계정 생성 · 중앙 배포 적용 거부 ·
+    F4 `settingsLoadError.readError` — 읽기 오류는 '옮겼습니다' 라 하지 않고 확정 불가 · F5 권한 파일 오류 중 부분 저장(역할 행 · 사용자 재정의) 거절(초기화는 손상일 때만) ·
+    F6 진행 중 묶음 키는 도메인 앞뒤를 뗀 이름 · F7 로그인 429 는 서버 문구(프록시 뒤 TRUST_PROXY 없으면 동시 AD 로그인 8건 상한) ·
+    F8 확정 게이트: 베어메탈 SLO · 알림 규칙 · 튜닝 = 설정 소유자 · 아이실론 설정 = super_admin.

@@ -40,12 +40,13 @@ test('A-1 — AD bind 를 기다리는 동안 같은 계정 동시 로그인은 
 });
 
 test('A-2 — 등록된 계정의 본인 재등록: 현재 코드 없으면 403 · 맞으면 begin → confirm · confirm 만 단독 거부', async () => {
+  // 20회차 F1: 판정은 auth/otpRebind.js 하나(본인 경로 · 관리자 자기 대상 경로가 같이 쓴다)
   const src = fs.readFileSync(path.join(SRC, 'routes/auth.js'), 'utf8');
-  assert.match(src, /if \(otpEnrolled\(req\.user\.username\)\) \{\n    const cur = String\(\(req\.body \|\| \{\}\)\.currentCode \?\? ''\)\.trim\(\);\n    const v = cur \? verifyUserOtp\(req\.user\.username, cur\)/);
-  assert.match(src, /if \(!\(Date\.now\(\) - at < SELF_REBIND_MS\)\) \{/);
-  assert.match(src, /needCurrentOtp: true/);
-  // 등록 전 세션(mustEnrollOtp — 처음 등록)은 코드 없이: otpEnrolled 가 false 면 분기를 건너뛴다
-  assert.match(src, /const otpEnrolled = \(name\) => \{ const u = getUser\(name\); return !!\(u && u\.totpEnabled && u\.totpSecret\); \};/);
+  assert.match(src, /const need = requireCurrentOtp\(req\.user\.username, \(req\.body \|\| \{\}\)\.currentCode, 'OTP 재등록'\);/);
+  assert.match(src, /if \(!selfRebindVerified\(req\.user\.username\)\) \{/);
+  const rb = fs.readFileSync(path.join(SRC, 'auth/otpRebind.js'), 'utf8');
+  assert.match(rb, /const v = cur \? verifyUserOtp\(name, cur\) : \{ ok: false, reason: '현재 코드가 없습니다' \};/);
+  assert.match(rb, /return !!\(u && u\.totpEnabled && u\.totpSecret\);/);
 });
 
 test('A-3 — 권한 파일 손상 · 재시작 뒤 보존본만 · 읽기 오류: 최소 권한(넓어지지 않음) · 저장이 푼다', () => {
@@ -117,9 +118,11 @@ test('A-11 · A-12 — RDP 티켓은 발급자만 · IPv6 정규식은 길이를
   assert.ok(t.consumeRdpTicket(id, { user: 'alice' }), '다른 사람의 시도가 티켓을 지우지 않는다 — 주인은 쓴다');
   const { addressMatcher } = await import('../src/auth/addressMask.js');
   const m = addressMatcher([]);
-  const big = `${':'.repeat(16_000)}x`;
-  const t0 = performance.now(); m(big); const ms = performance.now() - t0;
-  assert.ok(ms < 20, `콜론 16k 입력 ${ms.toFixed(1)}ms(수정 전 약 130ms)`);
+  // ReDoS 회귀는 비율로(루트 규칙) — 같은 길이의 콜론 없는 입력과 견준다(수정 전: 콜론 16k 약 130ms · 기준 1ms 미만)
+  const big = `${':'.repeat(16_000)}x`; const plain = `${'b'.repeat(16_000)}x`;
+  const time = (s) => { const t0 = performance.now(); for (let i = 0; i < 3; i++) m(s); return performance.now() - t0; };
+  time(plain); const base = time(plain); const ms = time(big);
+  assert.ok(ms < Math.max(base * 20, 15), `콜론 16k 입력 ${ms.toFixed(1)}ms · 기준 ${base.toFixed(1)}ms`);
   assert.equal(m('fe80::1'), true); assert.equal(m('[2001:db8::1]'), true);
 });
 

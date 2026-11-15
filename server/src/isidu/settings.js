@@ -106,7 +106,7 @@ export function sessionPlanOf(t) {
   return { cmdMs: Math.min(cmd, session - 15_000), sessionMs: session };
 }
 
-const loadErr = makeSettingsLoadError(FILE, { label: '아이실론 디렉터리 사용량 설정', confirm: () => { saveSettingsRaw(emptyValue()); } });
+const loadErr = makeSettingsLoadError(FILE, { label: '아이실론 디렉터리 사용량 설정', confirm: () => { saveSettingsRaw(emptyValue()); }, superOnly: true });   // 20회차 F8: 쓰기 라우트가 super_admin
 export function isiduSettingsLoadError() { load(); return loadErr.get(); }
 
 let _cache = null; // { mtime, size, value }
