@@ -20,6 +20,7 @@ import { maskBmIdentity } from '../../bmusage/targets.js';
 import { currentTargets } from '../../bmusage/poller.js';
 import { strOf } from '../../util/coercionTrap.js';
 import { bmAddressHosts } from './bmUsage.js';
+import { bmGate } from './bmWriteGate.js'; // 점검 반복 2회차 재확인 R4 — 쓰기 버튼 표지(데모 · 역할)
 
 const toolsPerm = requirePerm('tools');
 const writeRole = requireRole('admin', 'operator');
@@ -69,7 +70,8 @@ export async function bmKeyOverlapsRead(req, snap, deps = {}) {
   const items = list.map((o) => overlapRowView(o, { allowed, isAdmin, match, writable: inUserWriteScope(req.user, snap, o.vcenterId) }));
   // 개수는 보이는 목록에서 센다(범위 계정에 전역 수를 주지 않는다 — 반증 F3).
   const counts = { total: items.length, pending: items.filter((x) => !x.decision).length, added: items.filter((x) => x.decision?.decision === 'add').length, excluded: items.filter((x) => x.decision?.decision === 'exclude').length };
-  return { ok: true, at: Date.now(), items, counts, isEdge: !!tg.isEdge, ...(isAdmin ? {} : { addressHidden: true }) };
+  // 점검 반복 2회차 재확인 R4: 결정 · 되돌리기 표지(데모 · 역할 — 행 writable 은 법인 쓰기 범위) — 데모 계정에 버튼이 열리고 누르면 403 이었다.
+  return { ok: true, at: Date.now(), items, counts, isEdge: !!tg.isEdge, ...(isAdmin ? {} : { addressHidden: true }), actions: { decide: bmGate(req, 'keyDecide', { snap }), clear: bmGate(req, 'keyClear', { snap }) } };
 }
 
 /** 쓰기 게이트 — 조회 밖 404 → 쓰기 밖 403(조건 없이). 지금 겹침 목록에 없으면(겹침이 풀렸다) 결정 기록의 법인으로 본다(되돌리기만). */
