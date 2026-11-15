@@ -69,6 +69,16 @@ export function keyWriteIssue(key, server = {}, before = null) {
   };
 }
 
+/**
+ * 공통 계정을 이 서버(법인)에 써도 되는가(6회차 A2 — 판정 하나). 계정 법인이 비었거나(전 법인 공용) 서버 법인이 비었거나 같으면 된다.
+ *   온보딩 분석의 cred-other-corp(importAnalyze credOk)와 공통 계정 저장의 그 계정을 쓰는 서버 대조(refs.accountUseIssue)가 같은 함수를 쓴다.
+ *   ⚠ 접속 때 판정(resolveOsAuth)에는 넣지 않았다 — 이미 그렇게 쓰는 서버의 수집이 멈춘다(쓰기만 막는다 · docs/rules/idrac-server.md 6회차 X 남은 것).
+ */
+export function accountCorpOk(accountCorp, serverCorp) {
+  const a = t(accountCorp).toLowerCase(); const v = t(serverCorp).toLowerCase();
+  return !a || !v || a === v;
+}
+
 /** 회전 — 옛 키로 되던 수집 기능 중 새 키로는 막히는 것(같은 판정 keyPlacementIssue). */
 export function lostFeatures(fromKey, toKey) {
   return COLLECT_FEATURES.filter((f) => !keyPlacementIssue({ features: fromKey?.features }, {}, f) && keyPlacementIssue({ features: toKey?.features }, {}, f) === 'key-feature');

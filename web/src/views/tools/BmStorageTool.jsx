@@ -4,7 +4,7 @@
 // 수집 주체: 중앙 직접(기본) 또는 글로벌 엣지 위임(중앙→엣지 PUSH — 수집 서버(원격) URL 필요).
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson, canCsv, getCurrentUser } from '../../api.js';
-import { canManageKeys, authChoiceOf, authBodyOf, HOSTKEY_OBSERVE_NOTE } from './bmOnboardText.js'; // 7b: 인증(키 · 공통 계정) 드롭다운 — 설정 소유자 등급만
+import { canManageKeys, authChoiceOf, authBodyOf, HOSTKEY_OBSERVE_NOTE, authChoicesView, authChoicesNote } from './bmOnboardText.js'; // 7b: 인증(키 · 공통 계정) 드롭다운 — 설정 소유자 등급만
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
 import { CsvExportModal, CsvImportModal } from '../../components/CsvBulkModals.jsx'; // CSV 일괄 관리(v2.341)
@@ -49,15 +49,19 @@ export default function BmStorageTool() {
   const [error, setError] = useState(null);
   const [form, setForm] = useState(null); // 서버 추가/수정 폼 | null
   const owner = canManageKeys(getCurrentUser(), true);
-  const [authOpts, setAuthOpts] = useState({ keys: [], accounts: [] });
+  const [authOpts, setAuthOpts] = useState(() => authChoicesView({ ok: true }));
+  // 6회차 B4: 이 서버에 쓸 수 있는 키 · 공통 계정만(서버 판정 — 저장과 같은 함수). 서버별 폴더 키는 이름으로 맞추므로 이름 · 주소가 바뀌면 다시 묻는다(짧게 기다렸다가 ·
+  //   늦게 온 이전 응답은 버린다). 상시 폴링 없음.
+  const authSeq = useRef(0);
+  const authQ = owner && form ? `id=${encodeURIComponent(form.id || '')}&name=${encodeURIComponent(form.name || '')}&host=${encodeURIComponent(form.host || '')}` : '';
   useEffect(() => {
-    if (!owner || !form) return;
-    let alive = true;
-    Promise.all([fetchJson('/tools/bm-usage/ssh-keys').catch(() => null), fetchJson('/tools/bm-usage/accounts').catch(() => null)]).then(([k, a]) => {
-      if (alive) setAuthOpts({ keys: (k?.keys || []).filter((x) => x.status === 'active'), accounts: (a?.accounts || []).filter((x) => x.kind === 'os') });
-    });
-    return () => { alive = false; };
-  }, [owner, !!form]);   // eslint-disable-line react-hooks/exhaustive-deps -- 폼을 열 때 한 번
+    if (!authQ) { setAuthOpts(authChoicesView({ ok: true })); return undefined; }   // 폼을 닫으면 비운다(다음 서버에 앞 서버의 목록이 잠시 보이지 않게)
+    const my = ++authSeq.current;
+    const tm = setTimeout(() => {
+      fetchJson(`/tools/bm-storage/auth-choices?${authQ}`).then((r) => r, () => null).then((r) => { if (my === authSeq.current) setAuthOpts(authChoicesView(r)); });
+    }, 300);
+    return () => clearTimeout(tm);
+  }, [authQ]);
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
   const [ivEdit, setIvEdit] = useState(null); // 주기 편집값(분) | null
@@ -405,9 +409,10 @@ export default function BmStorageTool() {
                 <label>인증(SSH 키 · 공통 계정) <span className="muted" style={{ fontSize: 11 }}>(설정 소유자 — 묶음을 바꾸면 본인 OTP)</span>
                   <Select sort={false} className="input" value={form.auth || ''} onChange={(e) => setForm({ ...form, auth: e.target.value })}>
                     <option value="">개별 비밀번호(위 칸)</option>
-                    {authOpts.keys.map((k) => <option key={k.id} value={`key:${k.id}`}>키 · {k.name} ({k.algo})</option>)}
-                    {authOpts.accounts.map((a) => <option key={a.id} value={`acc:${a.id}`}>공통 계정 · {a.name} ({a.username})</option>)}
+                    {authOpts.keys.map((k) => <option key={k.id} value={`key:${k.id}`}>키 · {k.name} ({k.algo}){k.fit ? '' : ' — 지금 설정(이 서버와 맞지 않음)'}</option>)}
+                    {authOpts.accounts.map((a) => <option key={a.id} value={`acc:${a.id}`}>공통 계정 · {a.name} ({a.username}){a.fit ? '' : ' — 지금 설정(이 서버와 맞지 않음)'}</option>)}
                   </Select>
+                  {authChoicesNote(authOpts) && <span className="muted" style={{ display: 'block', fontSize: 11, marginTop: 4, whiteSpace: 'normal' }}>{authChoicesNote(authOpts)}</span>}
                 </label>
               )}
               {owner && (form.auth || '') !== authChoiceOf(cfgOf(form.id)) && (form.auth || '') && (

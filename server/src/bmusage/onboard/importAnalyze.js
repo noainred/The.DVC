@@ -18,7 +18,7 @@ import crypto from 'node:crypto';
 import { cellLooksSecret } from './keyParse.js';
 import { NAME_RE } from './keyStore.js';
 import { addrKey, bindDecision, bindOfWrite, entryTokens } from './bindRule.js';
-import { keyWriteIssue, featureLabels } from './placement.js';
+import { keyWriteIssue, featureLabels, accountCorpOk } from './placement.js';
 
 const t = (v) => String(v ?? '').trim();
 const lc = (v) => t(v).toLowerCase();
@@ -284,7 +284,7 @@ export function analyzeOnboardRows(rows = [], ctx = {}) {
     const usesIdracAcc = !!idracHost && !!idracCredRaw && !INDIVIDUAL.has(lc(idracCredRaw));
     let binds = bindNameDecision({ remote, agent, exOs, exIdr, exEdge, osHost, osPort, idracHost, osCredRaw, osKeyRaw, idracCredRaw, usesOsAcc, usesKey, usesIdracAcc, nameOfAcc, nameOfKey, idrCopyName });
     if (binds && !ownerOk) { reject('bind-owner-only'); done(); continue; }
-    const credOk = (acc) => !acc.corp || !vc || lc(acc.corp) === lc(vc);
+    const credOk = (acc) => accountCorpOk(acc.corp, vc);   // 6회차 A2: 공통 계정 저장의 서버 대조와 같은 함수(placement.accountCorpOk)
     let idracAcc = null; let idracCredName = '';
     const idracCred = t(c.idrac_cred);
     if (idracHost) {

@@ -144,6 +144,24 @@ export function authChoiceOf(c) {
   if (c.credRef) return `acc:${c.credRef}`;
   return '';
 }
+/**
+ * 6회차 B4 — bm-storage 서버 폼의 인증 드롭다운 목록. 판정은 서버(GET /tools/bm-storage/auth-choices — 저장과 같은 bmPlacementIssue)의 selectable 그대로다.
+ *   고를 수 있는 것과 지금 설정(current — 맞지 않아도 남긴다 · fit:false)만 싣고, 뺀 수와 법인 귀속 없음을 안내에 쓴다. 응답을 못 읽으면 목록을 비우고 error.
+ */
+export function authChoicesView(r) {
+  if (!r || r.ok !== true) return { keys: [], accounts: [], hidden: 0, corpless: false, error: true };
+  const pick = (l) => (Array.isArray(l) ? l : []).filter((x) => x && (x.selectable === true || x.current === true)).map((x) => ({ ...x, fit: x.selectable === true }));
+  const all = [...(Array.isArray(r.keys) ? r.keys : []), ...(Array.isArray(r.accounts) ? r.accounts : [])];
+  return { keys: pick(r.keys), accounts: pick(r.accounts), hidden: all.filter((x) => x && x.selectable !== true && x.current !== true).length, corpless: r.corpless === true, error: false };
+}
+/** 드롭다운 아래 안내 한 줄(빼낸 것이 있을 때 · 못 읽었을 때). 없으면 ''. */
+export function authChoicesNote(v = {}) {
+  if (v.error) return '이 서버에 쓸 수 있는 키 · 공통 계정 목록을 읽지 못했습니다 — 개별 비밀번호만 고를 수 있습니다.';
+  if (!v.hidden) return '';
+  const base = `이 서버에 쓸 수 없는 키 · 공통 계정 ${v.hidden}개는 목록에서 뺐습니다(키 폴더 · 계정 법인이 이 서버와 맞지 않음).`;
+  return v.corpless ? `${base} 이 서버는 법인 귀속이 없어 법인 폴더 키를 쓸 수 없습니다 — 법인 폴더 키는 서버 등록(CSV)에서 법인을 정한 뒤 고르세요.` : base;
+}
+
 /** 인증 선택 → 저장 본문의 참조 칸(바뀌지 않으면 보내지 않는다 — 서버가 '묶음' 으로 보지 않게). */
 export function authBodyOf(choice = '', c = null) {
   const cur = authChoiceOf(c);
