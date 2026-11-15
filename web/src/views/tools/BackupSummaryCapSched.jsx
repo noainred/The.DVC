@@ -80,7 +80,7 @@ function Lane({ items, from, color, full, top }) {
   });
 }
 
-function Schedule({ reloadKey }) {
+function Schedule({ reloadKey, region = '' }) {   // v3.10.17 region: Summary 의 리전
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -90,11 +90,11 @@ function Schedule({ reloadKey }) {
   const load = useCallback(() => {
     const my = ++gen.current;
     setLoading(true); setError(null);
-    fetchJson('/tools/backup-summary/schedule')
+    fetchJson('/tools/backup-summary/schedule', region ? { region } : {})
       .then((r) => { if (my === gen.current) setData(r); })
       .catch((e) => { if (my === gen.current) setError(e); })
       .finally(() => { if (my === gen.current) setLoading(false); });
-  }, []);
+  }, [region]);
   useEffect(() => { load(); return () => { gen.current++; }; }, [load, reloadKey]);
   const from = hourStart(data?.at || Date.now());
   const rows = sortSchedRows(data?.rows);
@@ -162,11 +162,11 @@ function Schedule({ reloadKey }) {
   );
 }
 
-export default function BackupSummaryCapSched({ rows, em, bp = null, reloadKey }) {
+export default function BackupSummaryCapSched({ rows, em, bp = null, reloadKey, region = '' }) {   // v3.10.17 region: Summary 의 리전(일정도 같은 법인만)
   return (
     <div role="group" aria-label="용량과 일정" data-backup-capsched="" style={{ display: 'flex', flexWrap: 'wrap', gap: 12, minWidth: 0 }}>
       <Capacity rows={rows} em={em} bp={bp} />
-      <Schedule reloadKey={reloadKey} />
+      <Schedule reloadKey={reloadKey} region={region} />
     </div>
   );
 }

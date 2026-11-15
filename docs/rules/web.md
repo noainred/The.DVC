@@ -953,3 +953,7 @@
   허브 탭 줄(HubTabs v2.915)과 Backup 현황 머리(VeeamHeader v2.822)에 두 벌 있던 규칙을 `hooks/useActiveTabInView.js`(순수 `keepActiveTabInView` + 훅) 하나로 모으고 vCenter 상세 · VM · 호스트 개체 보기의 `.vcd-views` 도 쓴다 —
   400px 에서 ‹ 이전 · 다음 › 으로 넘어가거나 기억 탭으로 열면 ‘네트워크’ 같은 뒤쪽 탭 · 강조 탭(‘호스트 및 클러스터’ · ‘VM’)이 줄 밖에 숨어 있었다.
   규칙: 넘칠 때만 · `scrollLeft` 만(창 스크롤 금지 — 요소를 창 안으로 끌어오는 DOM 호출은 상단을 가린다) · 8px 여유. 새 탭 줄은 `role="tablist"` + `aria-selected` + 이 훅. 테스트 `hooks/useActiveTabInView.test.js`(소스 계약 네 곳 · 옛 사본 없음).
+- **v3.10.17 — 가상화 플랫폼 점검 5회차: 리전만 고른 채 백업 KPI 카드 → Backup 현황 · Summary 가 그 리전만 센다**(자율 개선 루프): VM · 스토리지 카드는 v3.10.15 에 리전을 넘겼는데 백업 카드만 전체 Summary 로 열렸다.
+  서버 `veeam/summaryRegion.js`(`regionQuery · inRegion · regionsOf`) 하나로 `/tools/backup-summary`(+`.csv`) · `/schedule` · `/errors` · `/stale`(staleQueryOf.region) 이 **사용자 범위 교집합 뒤**에 리전을 거른다 — 응답에 `region · regions`.
+  화면: Summary 에 리전 Select(`data-backup-region` — 리전이 2개 이상이거나 골라져 있을 때만 · 모르는 리전은 ‘(법인 없음)’) · 머리 ‘N개 법인 · 리전 X’ · 숫자 줄 · 두 카드 · 트리 · CSV · 찾기 · 일정 · 에러가 같은 `?region=`(‘제목뿐이지 않게’ — v3.10.15 교훈) · 리전을 바꾸면 선택(한 법인 안)을 푼다 · 기억하지 않는다.
+  인계: `KPI_HANDOFF.backupSummaryRegion`(메모리 · 30초) — 허브 `backupGo` 는 법인이 있으면 Detail(v2.959), 리전만이면 Summary+리전. 테스트 `platformText.test.js` v3.10.17 · `server/test/backupSummaryRegion31017.test.js`.

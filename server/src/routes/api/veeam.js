@@ -39,7 +39,8 @@ import { bareosVmView } from '../../bareos/vmView.js';   // v2.801 VM 전체 정
 import { listGroups as bareosGroups, groupsLoadError as bareosGroupsLoadError, groupsRev as bareosGroupsRev } from '../../bareos/groups.js';   // v2.835 Detail '다음 예정'(Bareos 그룹 예약)
 import { nextSlot as bareosNextSlot } from '../../bareos/groupSchedule.js';
 import { policyFields } from '../../veeam/backupPolicy.js';   // v2.835 백업 정책 · 실제 · 정책≠실제 · 마지막 성공
-import { newSiteAgg, addSiteVm, finishSiteAgg, sumSiteAggs, countVeeamWindow, staleQueryOf, newStaleAcc, addStaleRows, finishStaleRows } from '../../veeam/backupSummaryAgg.js';   // v2.836 Summary 법인 집계 · 전체 법인 찾기
+import { newSiteAgg, addSiteVm, finishSiteAgg, sumSiteAggs, countVeeamWindow, staleQueryOf, newStaleAcc, addStaleRows, finishStaleRows } from '../../veeam/backupSummaryAgg.js';
+import { inRegion, regionsOf, regionQuery } from '../../veeam/summaryRegion.js';   // v3.10.17 Summary 리전 범위(허브 KPI 카드 → ?region=)   // v2.836 Summary 법인 집계 · 전체 법인 찾기
 import { corpView as bareosCorpView } from './bareosLive.js';   // v2.837 Summary '멈춤 의심'(진행 현황과 같은 판정 — 조회를 새로 일으키지 않는다)
 import { effectiveSettings as bareosEffectiveSettings, isDemoActive as bareosIsDemoActive } from '../../bareos/service.js';
 import { directorById as bareosDirectorById, jobDirectorId as bareosJobDirectorId } from '../../bareos/settings.js';
@@ -752,10 +753,11 @@ function scopeOf(req) {
 /** v2.787: 우선순위 VM 목록은 VM 단위 백업 상태 = Detail 도구 데이터 — Detail 이 거부된 계정의 Summary 에는 싣지 않는다(도구별 접근 집행과 같은 판정). */
 const detailToolOk = (req) => !issueFor(toolActorOf(req), 'backup-detail');
 
-async function summaryData(req, snap, scope) {
+async function summaryData(req, snap, scope, region = '') {
   const allowed = scopedVcenterIds(req.user, snap);
   const admin = isAdminDetailUser(req.user);
-  const vcs = (snap?.vcenters || []).filter((v) => !allowed || allowed.has(v.id));
+  const vcsAll = (snap?.vcenters || []).filter((v) => !allowed || allowed.has(v.id));
+  const vcs = inRegion(vcsAll, region);   // v3.10.17 리전은 범위 교집합 뒤에(범위 밖은 리전으로도 안 보인다)
   const vmsBy = new Map();
   for (const vm of snap?.vms || []) { const a = vmsBy.get(vm.vcenterId); if (a) a.push(vm); else vmsBy.set(vm.vcenterId, [vm]); }
   const maybeYield = createYielder(15);
@@ -799,7 +801,7 @@ async function summaryData(req, snap, scope) {
   // v2.839 Bareos 카드 '풀 사용' · '스케줄' · 용량 카드 'Full 풀 가득 참' — 범위 안 Director 의 정책 수집본(없으면 null — '수집 전')
   let bareosPolicy = null;
   try { if (bset) bareosPolicy = bareosPolicySummary(bset, allowed, bareosRegistryLoadError() ? [] : bareosJobDigests(), { now, demo: bareosIsDemoActive() }); } catch { bareosPolicy = null; }
-  return { ok: true, at: Date.now(), scope, rows, totals, bareosGroups: bareosGroupCounts(new Set(vcs.map((v) => v.id)), now), bareosPolicy, directors: bareosDirectorHealth(rows, bset), em, priority: prioOk ? { items: prio, total: prioTotal, truncated: prioTotal > prio.length || undefined } : { withheld: 'detail-tool' }, ...(admin ? { runningJobs: jobs } : {}), registryUnreadable: registryBroken() || undefined,
+  return { ok: true, at: Date.now(), scope, region, regions: regionsOf(vcsAll), rows, totals, bareosGroups: bareosGroupCounts(new Set(vcs.map((v) => v.id)), now), bareosPolicy, directors: bareosDirectorHealth(rows, bset), em, priority: prioOk ? { items: prio, total: prioTotal, truncated: prioTotal > prio.length || undefined } : { withheld: 'detail-tool' }, ...(admin ? { runningJobs: jobs } : {}), registryUnreadable: registryBroken() || undefined,
     marksUnreadable: unreadable || undefined, marksCorruptKept: (!unreadable && marksCorruptKept()) || undefined };
 }
 
@@ -991,9 +993,9 @@ function veeamJobsOf(vcId, req) {
  * v2.838 '백업 스케줄 — 다음 24시간'(시안 ① 용량과 일정) — 법인마다 Veeam 잡 다음 실행 · Bareos 그룹 회차 · 겹침 · 7일 요약.
  *   Veeam 은 다음 1회만 안다(반복 주기 미수집) · Director 스케줄은 2차 · 그룹 파일을 못 읽으면 groupsUnreadable(Bareos 줄 모름).
  */
-async function scheduleData(req, snap, scope) {
+async function scheduleData(req, snap, scope, region = '') {
   const allowed = scopedVcenterIds(req.user, snap);
-  const vcs = (snap?.vcenters || []).filter((v) => !allowed || allowed.has(v.id));
+  const vcs = inRegion((snap?.vcenters || []).filter((v) => !allowed || allowed.has(v.id)), region);   // v3.10.17
   const vmsBy = new Map();
   for (const vm of snap?.vms || []) { const a = vmsBy.get(vm.vcenterId); if (a) a.push(vm); else vmsBy.set(vm.vcenterId, [vm]); }
   const maybeYield = createYielder(15);
@@ -1029,10 +1031,10 @@ async function scheduleData(req, snap, scope) {
  *   오류 원문은 관리자 판본만(가림 규칙 — Veeam 서버 오류는 serverView 가 이미 가린다 · Bareos Director 오류 · EM 오류도 같다).
  *   EM 세션 · EM 수집 상태는 전 법인 자료라 전체 범위 계정만.
  */
-async function errorsData(req, snap, scope, days) {
+async function errorsData(req, snap, scope, days, region = '') {
   const allowed = scopedVcenterIds(req.user, snap);
   const admin = isAdminDetailUser(req.user);
-  const vcs = (snap?.vcenters || []).filter((v) => !allowed || allowed.has(v.id));
+  const vcs = inRegion((snap?.vcenters || []).filter((v) => !allowed || allowed.has(v.id)), region);   // v3.10.17
   const vmsBy = new Map();
   for (const vm of snap?.vms || []) { const a = vmsBy.get(vm.vcenterId); if (a) a.push(vm); else vmsBy.set(vm.vcenterId, [vm]); }
   const maybeYield = createYielder(15);
@@ -1092,7 +1094,7 @@ async function errorsData(req, snap, scope, days) {
  */
 async function staleData(req, snap, scope, o) {
   const allowed = scopedVcenterIds(req.user, snap);
-  const vcs = (snap?.vcenters || []).filter((v) => (!allowed || allowed.has(v.id)) && (!o.vc || v.id === o.vc));   // v2.837 법인 하나(라우트가 범위를 먼저 본다)
+  const vcs = inRegion((snap?.vcenters || []).filter((v) => (!allowed || allowed.has(v.id)) && (!o.vc || v.id === o.vc)), o.region);   // v2.837 법인 하나(라우트가 범위를 먼저 본다) · v3.10.17 리전
   const vmsBy = new Map();
   for (const vm of snap?.vms || []) { const a = vmsBy.get(vm.vcenterId); if (a) a.push(vm); else vmsBy.set(vm.vcenterId, [vm]); }
   const maybeYield = createYielder(15);
@@ -1256,7 +1258,7 @@ export function registerBackupStatus(api) {
     const snap = store.get();
     const admin = isAdminDetailUser(req.user);
     const scope = scopeOf(req);
-    return memoJson(req, res, 'backup-summary', async () => summaryData(req, snap, scope),
+    return memoJson(req, res, 'backup-summary', async () => summaryData(req, snap, scope, regionQuery(req.query)),
       { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|m${marksRev()}|d${detailToolOk(req) ? 1 : 0}|em${emSourcesRev()}|c${jobsRev()}|b${bareosRegistryRev()}|g${bareosGroupsRev()}|w${writeKeyOf(req, snap)}|bp${bareosPolicyRev()}` });   // v2.839 bp = 정책 수집본 리비전   // v2.837 w = 쓰기 가능 법인(rows[].w — 같은 범위라도 operator·viewer·writeVcenters 가 다르다)   // v2.787 Detail 접근(우선순위 VM) · 키에 req.originalUrl(전원·제외)도 든다(shared.js) · v2.784 표시 리비전(저장 즉시 수가 바뀐다) · v2.806 c = 복제 잡 기록 리비전(우선순위 VM 의 Clone 상태)
   });
 
@@ -1286,7 +1288,7 @@ export function registerBackupStatus(api) {
     const snap = store.get();
     const admin = isAdminDetailUser(req.user);
     const scope = scopeOf(req);
-    return memoJson(req, res, 'backup-summary-schedule', async () => scheduleData(req, snap, scope),
+    return memoJson(req, res, 'backup-summary-schedule', async () => scheduleData(req, snap, scope, regionQuery(req.query)),
       { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|em${emSourcesRev()}|g${bareosGroupsRev()}|bp${bareosPolicyRev()}|r${bareosRegistryRev()}` });
   });
   api.get('/tools/backup-summary/errors', toolsPerm, (req, res) => {
@@ -1295,7 +1297,7 @@ export function registerBackupStatus(api) {
     const snap = store.get();
     const admin = isAdminDetailUser(req.user);
     const scope = scopeOf(req);
-    return memoJson(req, res, 'backup-summary-errors', async () => errorsData(req, snap, scope, days),
+    return memoJson(req, res, 'backup-summary-errors', async () => errorsData(req, snap, scope, days, regionQuery(req.query)),
       { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|em${emSourcesRev()}|b${bareosRegistryRev()}|bp${bareosPolicyRev()}` });   // 백업 표시(정책)는 에러 행에 쓰지 않는다 — m 없음 · v2.840 오류 볼륨 = 정책 수집본(bp)
   });
 
@@ -1469,7 +1471,7 @@ export function registerBackupStatus(api) {
     if (!lock.ok) return res.status(lock.status).json(lock.body);
     try {
       const scope = scopeOf(req);
-      const d = await summaryData(req, store.get(), scope);
+      const d = await summaryData(req, store.get(), scope, regionQuery(req.query));
       const lines = [CSV_BOM + csvLine(['vCenter', '범위', 'VM', 'Veeam 백업', '스냅샷 기준', '둘 다', 'Veeam 만', '스냅샷만', '확인 안 됨', '백업 중', '대기',
         '오래된 백업 1일+', '오래된 백업 3일+', '오래된 백업 7일+', '완료 시각 모름', '실패', '경고', '마지막 백업 완료(UTC)', 'Veeam 상태', '스냅샷 잔존', '제외(템플릿·vCLS)', '전원 모름',
         '중요도 상', '중요도 중', '중요도 하', '백업 필요', '백업 필요·미백업'])];

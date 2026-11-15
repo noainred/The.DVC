@@ -23,7 +23,7 @@ const linkBtn = { background: 'none', border: 0, padding: 0, color: '#93c5fd', f
 const CHIP = { padding: '3px 12px', fontSize: 12, fontWeight: 700 };
 const KINDS = [['', '전체', 'all'], ['fail', '실패', 'fail'], ['warn', '경고', 'warn'], ['stuck', '멈춤 의심', 'stuck'], ['volume', '오류 볼륨', 'volume'], ['collect', '수집 오류', 'collect']];   // v2.840 오류 볼륨(정책 수집본)
 
-export default function BackupSummaryErrors({ reloadKey, onOpenDetail }) {
+export default function BackupSummaryErrors({ reloadKey, onOpenDetail, region = '' }) {   // v3.10.17 region: Summary 의 리전(에러 로그도 같은 법인만)
   const [days, setDays] = useState(1);
   const [kind, setKind] = useState('');
   const [src, setSrc] = useState('');
@@ -41,11 +41,11 @@ export default function BackupSummaryErrors({ reloadKey, onOpenDetail }) {
   const load = useCallback(() => {
     const my = ++gen.current;
     setLoading(true); setError(null);
-    fetchJson('/tools/backup-summary/errors', { days: String(days) })
+    fetchJson('/tools/backup-summary/errors', { days: String(days), ...(region ? { region } : {}) })
       .then((r) => { if (my === gen.current) setData(r); })
       .catch((e) => { if (my === gen.current) setError(e); })
       .finally(() => { if (my === gen.current) setLoading(false); });
-  }, [days]);
+  }, [days, region]);
   useEffect(() => { load(); return () => { gen.current++; }; }, [load, reloadKey]);
 
   const c = data?.counts || {};

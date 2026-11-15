@@ -310,7 +310,7 @@ export default function VCenters({ onSelectSite, onGoVms, resetSignal, scope = {
   //   도구 권한이 없으면 누를 수 없다(커서 · 제목 없음). 리전만 골랐으면 Summary(전체)로 — Detail 은 법인 하나만 본다.
   const backupGo = vcSel
     ? (toolAllowed('backup-detail') ? () => openBackupDetail(vcSel) : null)
-    : (toolAllowed('backup-summary') ? () => { window.location.hash = '#/tools/backup-summary'; } : null);
+    : (toolAllowed('backup-summary') ? () => { handoffKpiScope({ region: KPI_HANDOFF.backupSummaryRegion }, { region: regSel }); window.location.hash = '#/tools/backup-summary'; } : null);   // v3.10.17 리전만 골랐으면 Summary 가 그 리전만 센다
   const backupTextOf = (s) => backupVbCell(backupBy?.[s.id], bareosBy.get(s.id) || null, Number.isFinite(s.metrics?.vms) ? s.metrics.vms : null, Date.now(), { refreshError: backupRefreshErr, bareosAllowed: bareosOk });
   // 허브 탭 줄: 카드 | 표 ‖ vCenter 성격의 특수 기능(권한 없는 도구는 숨김 — 도구 키 그대로)
   const vcTools = toolsFor(VC_TOOLS);
@@ -323,7 +323,7 @@ export default function VCenters({ onSelectSite, onGoVms, resetSignal, scope = {
         views={VC_VIEWS.map(([k, label]) => ({ k, label: k === 'table' ? `${label} · 법인별 비교` : label, onClick: () => setVcView(k) }))} />
       <div className="kpis kpis-1row ph-kpis" style={{ margin: '12px 0 18px' }}>
         <div className="card kpi" data-kpi-backup="" onClick={backupGo || undefined} style={backupGo ? { cursor: 'pointer' } : undefined}
-          title={`VM 백업 — veeam/bareos · 범위: ${kpiScope}${backupGo ? `\n클릭 — ${vcSel ? `${kpiScope} 의 Backup 현황 · Detail` : 'Backup 현황 · Summary'}` : ''}\nVeeam: 연동된 Veeam 서버가 백업 대상으로 가진 VM 수(vCenter 카드의 앞 수 합)\nBareos: 각 법인 Bareos 에 잡이 등록된 VM 수(Bareos 백업 현황의 법인 줄 합 — 도구 권한이 있을 때만)\n못 읽은 vCenter 는 0 으로 더하지 않고 따로 셉니다` + (bt?.partial || bareosPartial ? '\n* 일부만 읽은 vCenter 가 있어 실제보다 적을 수 있습니다' : '')}>
+          title={`VM 백업 — veeam/bareos · 범위: ${kpiScope}${backupGo ? `\n클릭 — ${vcSel ? `${kpiScope} 의 Backup 현황 · Detail` : regSel ? `Backup 현황 · Summary(리전 ${regSel})` : 'Backup 현황 · Summary'}` : ''}\nVeeam: 연동된 Veeam 서버가 백업 대상으로 가진 VM 수(vCenter 카드의 앞 수 합)\nBareos: 각 법인 Bareos 에 잡이 등록된 VM 수(Bareos 백업 현황의 법인 줄 합 — 도구 권한이 있을 때만)\n못 읽은 vCenter 는 0 으로 더하지 않고 따로 셉니다` + (bt?.partial || bareosPartial ? '\n* 일부만 읽은 vCenter 가 있어 실제보다 적을 수 있습니다' : '')}>
           <div className="label">VM 백업 (Veeam / Bareos){scoped ? <span className="muted" style={{ fontWeight: 500 }}> · {kpiScope}</span> : null}</div>
           {(() => {
             const t = `${bt ? `${num(bt.veeam)}${bt.partial ? '*' : ''}` : '—'}/${bareosSum == null ? '—' : `${num(bareosSum)}${bareosPartial ? '*' : ''}`}`;
