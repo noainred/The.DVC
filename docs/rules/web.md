@@ -963,7 +963,7 @@
 - **v3.10.19 — 가상화 플랫폼 점검 7회차: 누르는 카드 · 행에 키보드 접근(`components/pressable.js` 한 벌)**(자율 개선 루프): 허브 vCenter 카드 · KPI 카드 3장(VM 백업 · VM 증가 · 스토리지 증가)은
   div onClick 이라 Tab 으로 닿지 않고 Enter · Space 로 열리지 않았다(마우스 전용). `pressable(onClick)` = role="button" · tabIndex 0 · Enter/Space → onClick(+preventDefault) · onClick 없으면 빈 props.
   `primitives.Kpi` 의 같은 인라인 코드도 이 한 벌로. 법인별 비교 표는 행 클릭을 두고 **이름을 `button.cell-link`** 로(호스트 · VM 수 버튼과 같은 꼴 — 키보드로 상세). 포커스 테두리는 `platform.css :focus-visible`.
-  규칙: 새 '누르는 div' 는 onClick 을 직접 달지 말고 `pressable` 로(테스트가 `className="card kpi|vc-card" … onClick=` 을 막는다). 테스트 `components/pressable.test.js`.
+  규칙: 새 '누르는 div' 는 onClick 을 직접 달지 말고 `pressable` 로(테스트가 `className="card kpi|vc-card" … onClick=` 을 막는다). **안쪽 버튼에서 올라온 키는 무시**(`target !== currentTarget` — 반증 재현: ‘호스트 →’ 에서 Enter 가 카드 상세를 열고 버튼 클릭은 막혔다). 테스트 `components/pressable.test.js`.
 - **v3.10.20 — 가상화 플랫폼 점검 8회차: VM 순증감 ≠ 생성 − 삭제이면 ‘미집계 ±N’ 을 숨기지 않는다(`tools/vmTrackText.js` 한 벌)**(자율 개선 루프): 허브 KPI 카드와 VM 수량 추이 도구가
   순증감(마지막 − 처음 total)과 생성 · 삭제 합을 따로 세어 ‘+61 · 생성 +0 · 삭제 −0’ 처럼 모순으로 보였다 — 기준선 슬롯(첫 스냅샷 · DB 재설정 뒤)과 vCenter 를 건너뛴 슬롯은 생성 · 삭제를 세지 않는다(데모 백필도 같다).
   `vmNetSummary(points)` → `{net, added, removed, unaccounted, baselines, skippedSlots}` · `vmNetMetaText` · `vmNetUnaccountedTitle`(이유). 카드 meta ‘생성 +A · 삭제 −R · 미집계 ±U’ · 도구 ‘생성/삭제’ 칸 meta · title.
