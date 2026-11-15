@@ -1596,14 +1596,14 @@ Prometheus/OTel 익스포터(선택 토큰).
 | PUT | `/tools/vm-tags/policy` | 역할 `admin` · `fleetOnly` | [server/src/routes/api/vmTags.js:85](../server/src/routes/api/vmTags.js#L85) |
 | GET | `/tools/vm-track` | 권한 `tools` | [server/src/routes/api/vmtrack.js:20](../server/src/routes/api/vmtrack.js#L20) |
 | GET | `/tools/vm-track/changes` | 권한 `tools` | [server/src/routes/api/vmtrack.js:51](../server/src/routes/api/vmtrack.js#L51) |
-| GET | `/tools/vm-track/ds-change-log` | 권한 `tools` | [server/src/routes/api/vmtrack.js:128](../server/src/routes/api/vmtrack.js#L128) |
-| GET | `/tools/vm-track/ds-changes` | 권한 `tools` | [server/src/routes/api/vmtrack.js:65](../server/src/routes/api/vmtrack.js#L65) |
-| GET | `/tools/vm-track/ds-list` | 권한 `tools` | [server/src/routes/api/vmtrack.js:79](../server/src/routes/api/vmtrack.js#L79) |
-| GET | `/tools/vm-track/ds-pivot` | 권한 `tools` | [server/src/routes/api/vmtrack.js:145](../server/src/routes/api/vmtrack.js#L145) |
-| GET | `/tools/vm-track/ds-series` | 권한 `tools` | [server/src/routes/api/vmtrack.js:91](../server/src/routes/api/vmtrack.js#L91) |
-| GET | `/tools/vm-track/ds-series-all` | 권한 `tools` | [server/src/routes/api/vmtrack.js:106](../server/src/routes/api/vmtrack.js#L106) |
-| GET | `/tools/vm-track/ds-top` | 권한 `tools` | [server/src/routes/api/vmtrack.js:166](../server/src/routes/api/vmtrack.js#L166) |
-| POST | `/tools/vm-track/snapshot` | 역할 `admin` | [server/src/routes/api/vmtrack.js:183](../server/src/routes/api/vmtrack.js#L183) |
+| GET | `/tools/vm-track/ds-change-log` | 권한 `tools` | [server/src/routes/api/vmtrack.js:131](../server/src/routes/api/vmtrack.js#L131) |
+| GET | `/tools/vm-track/ds-changes` | 권한 `tools` | [server/src/routes/api/vmtrack.js:66](../server/src/routes/api/vmtrack.js#L66) |
+| GET | `/tools/vm-track/ds-list` | 권한 `tools` | [server/src/routes/api/vmtrack.js:81](../server/src/routes/api/vmtrack.js#L81) |
+| GET | `/tools/vm-track/ds-pivot` | 권한 `tools` | [server/src/routes/api/vmtrack.js:149](../server/src/routes/api/vmtrack.js#L149) |
+| GET | `/tools/vm-track/ds-series` | 권한 `tools` | [server/src/routes/api/vmtrack.js:94](../server/src/routes/api/vmtrack.js#L94) |
+| GET | `/tools/vm-track/ds-series-all` | 권한 `tools` | [server/src/routes/api/vmtrack.js:109](../server/src/routes/api/vmtrack.js#L109) |
+| GET | `/tools/vm-track/ds-top` | 권한 `tools` | [server/src/routes/api/vmtrack.js:171](../server/src/routes/api/vmtrack.js#L171) |
+| POST | `/tools/vm-track/snapshot` | 역할 `admin` | [server/src/routes/api/vmtrack.js:189](../server/src/routes/api/vmtrack.js#L189) |
 | DELETE | `/tools/vmseries/data` | 역할 `admin` | [server/src/routes/api/vmSeries.js:301](../server/src/routes/api/vmSeries.js#L301) |
 | GET | `/tools/vmseries/local` | 권한 `tools` | [server/src/routes/api/vmSeries.js:265](../server/src/routes/api/vmSeries.js#L265) |
 | POST | `/tools/vmseries/run` | 역할 `admin` | [server/src/routes/api/vmSeries.js:257](../server/src/routes/api/vmSeries.js#L257) |
