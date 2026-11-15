@@ -946,3 +946,6 @@
   이웃 목록은 `platformText.siblingSites(sites, scope)`(리전 · 검색어만 — 고른 법인 하나 `vcenterId` 는 범위로 치지 않는다: 그러면 이웃이 없다) · 카운터 옆에 `siblingScopeText`(‘리전 유럽 · ‘kr1’’) · 검색 규칙은 `keywordsOf · vcMatches` 한 벌(카드 목록 `shown` 과 같은 함수).
 - **v3.10.14 — 가상화 플랫폼 점검 2회차: 바로가기 칩은 고른 리전 안의 법인만 · 칩을 눌러도 리전은 남는다**(자율 개선 루프): 전에는 리전을 골라도 칩이 28곳 전부였고 리전 밖 칩을 누르면 App 이 리전을 지워 범위가 튀었다.
   `platformText.chipSites(vcenters, region)`(리전 안만 · 없으면 빈 목록 + '이 리전에 법인이 없습니다') · `chipRegionNote`(‘리전 유럽 · 5법인’) · App 의 `onPickVcenter` 는 `patchFilter({ vcenterId })` 만(리전 유지 — 고른 칩을 다시 누르면 ‘리전 전체’). VM 탭 ‘법인별’ 행의 onPickVcenter(리전 지움)는 그대로(법인별 표는 전 법인 표).
+- **v3.10.15 — 가상화 플랫폼 점검 3회차: VM 수량 · 스토리지 사용량 추이 도구에 ‘리전’ 선택 · KPI 카드가 리전도 넘긴다**(자율 개선 루프): KPI 줄은 리전 범위를 합했는데(v2.958) 카드를 누르면 도구가 전체로 열렸다(도구에 리전이 없었다).
+  도구: 리전 Select(리전이 2개 이상이거나 골라져 있을 때만) + vCenter Select(리전 안만 · `platformText.regionsOf · vcInRegion`) · 요청은 `vcenterId` 가 없을 때만 `region` · 제목은 `scopeText`(vCenter 이름 / ‘리전 X 합계’ / ‘전체 vCenter 합계’ — 예전엔 id 를 그대로 보였다).
+  인계: `handoffKpiScope(targets, {vcenterId, region})` — vCenter 가 있으면 vCenter 만, 없으면 리전(`KPI_HANDOFF.vmTrackRegion · storageTrackRegion`). 서버 `vcenterList` 항목에 `region`.

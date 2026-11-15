@@ -14,7 +14,7 @@ import { hasDsData, dsUnknownNote } from './storageTrack.js';
 import { unitText } from '../unitText.js';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
-import { KPI_HANDOFF, takeKpiVcenter } from '../platform/platformText.js'; // v2.959: 가상화 플랫폼 KPI 카드가 넘긴 법인
+import { KPI_HANDOFF, takeKpiVcenter, regionsOf, vcInRegion } from '../platform/platformText.js'; // v2.959: 가상화 플랫폼 KPI 카드가 넘긴 법인 · v3.10.15: 리전
 
 const DAY_OPTS = [7, 30, 90, 365];
 // 슬롯 라벨: '8/21 00시' — 하루 2점이라 날짜만으로는 구분이 안 된다.
@@ -82,6 +82,8 @@ export default function VmTrackTool() {
   const [days, setDays] = useState(30);
   // v2.959: 가상화 플랫폼 KPI 카드에서 왔으면 고른 법인(vCenter)을 초기 선택으로(메모리 인계 · 마운트 때 1회 · 없으면 전체).
   const [vcenterId, setVcenterId] = useState(() => takeKpiVcenter(KPI_HANDOFF.vmTrack));
+  // v3.10.15(점검 3회차): 리전 선택 — 서버 ?region= 은 사용자 범위와의 교집합(vcenterId 가 있으면 region 은 보내지 않는다). KPI 카드가 리전만 골랐을 때 인계받는다.
+  const [region, setRegion] = useState(() => takeKpiVcenter(KPI_HANDOFF.vmTrackRegion));
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -102,7 +104,7 @@ export default function VmTrackTool() {
   // onDone(ok) 는 이 요청이 마지막 요청으로 반영됐을 때만 불린다(useLatest — 늦은 응답은 무시).
   const load = (onDone) => {
     const done = typeof onDone === 'function' ? onDone : null;
-    return run(fetchJson('/tools/vm-track', { days, vcenterId }),
+    return run(fetchJson('/tools/vm-track', { days, vcenterId, ...(region && !vcenterId ? { region } : {}) }),
       (d) => { setData(d); setError(null); if (Array.isArray(d?.vcenterList)) setVcList(d.vcenterList); done?.(true); },
       (e) => { setError(e); done?.(false); });   // v2.744: 객체 그대로 — 403 이면 ErrorBox 가 권한 안내로 그린다
   };
@@ -114,7 +116,11 @@ export default function VmTrackTool() {
   //   이전 값 위에 배너가 아니라 오류 화면이 뜬다(다른 범위의 값을 보여 주지 않는다).
   //   조건이 바뀌면 진행 중이던 '다시 조회' 표시·실패 횟수도 내린다(그 시도는 옛 조건의 것이다 — RA-R2).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { retryGate.current.reset(setRetrying); setRetryFails(0); setData(null); setError(null); load(); }, [days, vcenterId]);
+  useEffect(() => { retryGate.current.reset(setRetrying); setRetryFails(0); setData(null); setError(null); load(); }, [days, vcenterId, region]);
+  const regions = regionsOf(vcList);
+  const vcOptions = vcInRegion(vcList, region);
+  const pickRegion = (r) => { setRegion(r); if (vcenterId && !vcInRegion(vcList, r).some((v) => v.id === vcenterId)) setVcenterId(''); };
+  const scopeText = vcenterId ? (vcList.find((v) => v.id === vcenterId)?.name || vcenterId) : (region ? `리전 ${region} 합계` : '전체 vCenter 합계');
 
   const snapshotNow = async () => {
     setBusy(true); setMsg(null);
@@ -142,9 +148,15 @@ export default function VmTrackTool() {
           </div>
         </div>
         <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
-          <Select className="input" value={vcenterId} onChange={(e) => setVcenterId(e.target.value)} style={{ padding: '6px 10px', fontSize: 12.5 }}>
-            <option value="">전체 vCenter(합계)</option>
-            {vcList.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+          {(regions.length > 1 || region) && (
+            <Select className="input" value={region} onChange={(e) => pickRegion(e.target.value)} style={{ padding: '6px 10px', fontSize: 12.5 }} aria-label="리전" title="리전을 고르면 그 리전 법인들의 합계 · vCenter 를 고르면 그 vCenter 만">
+              <option value="">전체 리전</option>
+              {regions.map((r) => <option key={r} value={r}>{r}</option>)}
+            </Select>
+          )}
+          <Select className="input" value={vcenterId} onChange={(e) => setVcenterId(e.target.value)} style={{ padding: '6px 10px', fontSize: 12.5 }} aria-label="vCenter">
+            <option value="">{region ? `리전 ${region} 전체(합계)` : '전체 vCenter(합계)'}</option>
+            {vcOptions.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
           </Select>
           <span className="flex gap">
             {DAY_OPTS.map((d) => (
@@ -241,7 +253,7 @@ export default function VmTrackTool() {
         <>
           {/* 총량 추이 — 전체 또는 선택 vCenter */}
           <div className="card" style={{ padding: 12, marginBottom: 12 }}>
-            <b style={{ fontSize: 13 }}>총 VM 수 추이 {vcenterId ? `— ${vcenterId}` : '— 전체 vCenter 합계'}</b>
+            <b style={{ fontSize: 13 }}>총 VM 수 추이 {`— ${scopeText}`}</b>
             <div style={{ width: '100%', height: 260, marginTop: 8 }}>
               <ResponsiveContainer>
                 <LineChart data={chart} margin={{ top: 6, right: 16, bottom: 4, left: 0 }}>
@@ -300,7 +312,7 @@ export default function VmTrackTool() {
 
           {/* 데이터스토어 용량/사용량 추이(v2.348, 사용자 요구) — vCenter 에 연결된 DS 합계 */}
           <div className="card" style={{ padding: 12, marginBottom: 12 }}>
-            <b style={{ fontSize: 13 }}>데이터스토어 용량/사용량 추이 {vcenterId ? `— ${vcenterId}` : '— 전체 vCenter 합계'}</b>
+            <b style={{ fontSize: 13 }}>데이터스토어 용량/사용량 추이 {`— ${scopeText}`}</b>
             <span className="muted" style={{ fontSize: 11.5, marginLeft: 8 }}>vCenter 에 연결된 데이터스토어 기준(TB) · 오른쪽 축은 사용률(%)</span>
             {/* 사용자 요구 형태(v2.352): 총 용량 = 상단 한도선(라인), 슬롯별 사용량 = 막대(축 0부터). */}
             <div style={{ width: '100%', height: 250, marginTop: 8 }}>
@@ -386,7 +398,7 @@ export default function VmTrackTool() {
                     const off = p.offCount ?? (p.total - p.onCount);
                     // 상세 모달은 같은 슬롯 데이터를 열고 kind 로 초기 필터만 다르게 준다.
                     const open = (focus) => setDetail({
-                      title: `${slotLabel(p.slot)} 변경 내역${vcenterId ? ` — ${vcenterId}` : ' — 전체 vCenter'}`,
+                      title: `${slotLabel(p.slot)} 변경 내역${` — ${scopeText}`}`,
                       slot: vcenterId ? null : p.slot, snapId: vcenterId ? p.snapId : null, focus,
                     });
                     return (
@@ -424,7 +436,7 @@ export default function VmTrackTool() {
                               <button className="tab" style={{ padding: '2px 8px', fontSize: 12, color: d > 0 ? 'var(--amber)' : 'var(--green)' }}
                                 title="사용량이 늘거나 줄어든 데이터스토어 보기"
                                 onClick={() => setDsDetail({
-                                  title: `${slotLabel(p.slot)} 데이터스토어 사용량 변화${vcenterId ? ` — ${vcenterId}` : ' — 전체 vCenter'}`,
+                                  title: `${slotLabel(p.slot)} 데이터스토어 사용량 변화${` — ${scopeText}`}`,
                                   slot: vcenterId ? null : p.slot, snapId: vcenterId ? p.snapId : null,
                                 })}>
                                 {d > 0 ? `+${d.toLocaleString()}` : d.toLocaleString()} GB
@@ -459,8 +471,8 @@ export default function VmTrackTool() {
         </>
       )}
 
-      {detail && <ChangeDetail {...detail} onClose={() => setDetail(null)} />}
-      {dsDetail && <DsChangeDetail {...dsDetail} onClose={() => setDsDetail(null)} />}
+      {detail && <ChangeDetail region={vcenterId ? '' : region} {...detail} onClose={() => setDetail(null)} />}
+      {dsDetail && <DsChangeDetail region={vcenterId ? '' : region} {...dsDetail} onClose={() => setDsDetail(null)} />}
     </div>
   );
 }
@@ -475,15 +487,15 @@ const DS_KIND_META = {
  * 데이터스토어 사용량 변화 상세(v2.348) — 어떤 DS 가 얼마나 늘거나 줄었는지 + 연결/해제.
  * 사용량 변화는 임계(기본 1GB) 이상만 기록되므로, 미세 변동은 목록에 나오지 않는다(화면에 명시).
  */
-function DsChangeDetail({ title, snapId = null, slot = null, onClose }) {
+function DsChangeDetail({ title, snapId = null, slot = null, region = '', onClose }) {   // v3.10.15: region
   const [items, setItems] = useState(null);
   const [err, setErr] = useState(null);
   const [kind, setKind] = useState('all');
   useEffect(() => {
-    fetchJson('/tools/vm-track/ds-changes', { ...(snapId != null ? { snapId } : {}), ...(slot ? { slot } : {}) })
+    fetchJson('/tools/vm-track/ds-changes', { ...(snapId != null ? { snapId } : {}), ...(slot ? { slot } : {}), ...(region ? { region } : {}) })
       .then((d) => setItems(d.items || []))
       .catch((e) => setErr(e.message));
-  }, [snapId, slot]);
+  }, [snapId, slot, region]);
 
   const shown = useMemo(() => (items || []).filter((r) => kind === 'all' || r.kind === kind), [items, kind]);
   const countOf = (k) => (items || []).filter((r) => r.kind === k).length;
@@ -567,15 +579,15 @@ const KIND_META = {
 };
 
 /** 변경 상세 — 생성/삭제/전원 전환 VM + 클러스터·호스트·데이터스토어(사용자 요구). */
-function ChangeDetail({ title, snapId = null, slot = null, focus = 'all', onClose }) {
+function ChangeDetail({ title, snapId = null, slot = null, focus = 'all', region = '', onClose }) {   // v3.10.15: region
   const [items, setItems] = useState(null);
   const [err, setErr] = useState(null);
   const [kind, setKind] = useState(focus || 'all');
   useEffect(() => {
-    fetchJson('/tools/vm-track/changes', { ...(snapId != null ? { snapId } : {}), ...(slot ? { slot } : {}) })
+    fetchJson('/tools/vm-track/changes', { ...(snapId != null ? { snapId } : {}), ...(slot ? { slot } : {}), ...(region ? { region } : {}) })
       .then((d) => setItems(d.items || []))
       .catch((e) => setErr(e.message));
-  }, [snapId, slot]);
+  }, [snapId, slot, region]);
 
   const shown = useMemo(() => (items || []).filter((r) => kind === 'all' || r.kind === kind), [items, kind]);
   const countOf = (k) => (items || []).filter((r) => r.kind === k).length;
