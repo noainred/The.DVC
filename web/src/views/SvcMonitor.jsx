@@ -913,6 +913,8 @@ export default function SvcMonitor() {
         <div className="pc-overlay" onClick={() => setLogCfg(null)}>
           <div className="pc-modal" style={{ width: 'min(600px, 94vw)' }} onClick={(e) => e.stopPropagation()}>
             <div className="pc-modal-head"><b>⚙ 점검 로그 설정 (CSV)</b><button className="pc-x" onClick={() => setLogCfg(null)}>✕</button></div>
+            {/* 전체 점검 30회차 H: 설정 파일을 못 읽는 동안 아래 값은 기본값이고 CSV 기록은 멈춰 있다 — 그 사실을 이 모달에서도 말하고 저장을 잠근다 */}
+            {logCfg.settingsUnreadable ? <div className="svc-warn" style={{ margin: '8px 0' }}>로그 보관 설정 파일을 읽지 못해 지금 CSV 기록이 멈춰 있습니다(점검 · 알림은 계속). 아래 값은 저장된 값이 아니라 기본값입니다 — 설정 › 서비스 점검에서 확정하거나 손상 보존본을 되돌린 뒤 재시작하세요.</div> : null}
             <div className="pc-form">
               <div className="pc-lrow"><span>로그 기록</span>
                 <div className="pc-seg">
@@ -957,7 +959,7 @@ export default function SvcMonitor() {
               </div>
               <div className="pc-modal-actions">
                 <button className="pc-btn" onClick={() => setLogCfg(null)}>닫기</button>
-                <button className="pc-btn accent" disabled={busy} onClick={saveLogSettings}>{busy ? '저장 중…' : '저장'}</button>
+                <button className="pc-btn accent" disabled={busy || !!logCfg.settingsUnreadable} onClick={saveLogSettings}>{busy ? '저장 중…' : '저장'}</button>
               </div>
             </div>
           </div>

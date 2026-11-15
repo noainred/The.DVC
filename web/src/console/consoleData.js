@@ -505,10 +505,12 @@ export function buildDomainTiles({ global: g, alarms, nsx, svcmon, pdu, idracPol
     const s = svcmon?.summary || null;
     const tl = svcmonTile(s, svcmon?.edgeTotals, svcmon?.executes);   // 26회차 F2: 엣지 합계 · 실행 여부까지
     const noPerm = !s && permission.svcmon === false;
-    const extra = [tl.pending ? `미실행 ${fmtInt(tl.pending)}` : '', tl.silentEdges ? `무보고 엣지 ${fmtInt(tl.silentEdges)}` : '', tl.noReportEdges ? `보고 전 엣지 ${fmtInt(tl.noReportEdges)}` : ''].filter(Boolean).join(' · ');
+    // 30회차 J: 기동 유예 중(첫 보고 대기) 엣지는 레벨에 넣지 않되 문구에서는 밝힌다(아무 데도 세지 않으면 사라진다)
+    const awaiting = num(svcmon?.edgeTotals?.awaitingFirstReport) ?? 0;
+    const extra = [tl.pending ? `미실행 ${fmtInt(tl.pending)}` : '', tl.silentEdges ? `무보고 엣지 ${fmtInt(tl.silentEdges)}` : '', tl.noReportEdges ? `보고 전 엣지 ${fmtInt(tl.noReportEdges)}` : '', awaiting ? `첫 보고 대기 ${fmtInt(awaiting)}` : ''].filter(Boolean).join(' · ');
     const meta = s
       ? (tl.total || tl.edges ? `점검 항목 · 실패 ${fmtInt(tl.bad)} · 경고 ${fmtInt(tl.warn)} · 지연 ${fmtInt(tl.stale)}${extra ? ` · ${extra}` : ''}`
-        : svcmon?.executes === false ? '이 포탈은 점검을 직접 실행하지 않습니다 · 엣지 보고 없음' : '등록된 점검 항목 없음')
+        : svcmon?.executes === false ? `이 포탈은 점검을 직접 실행하지 않습니다 · ${awaiting ? `엣지 첫 보고 대기 ${fmtInt(awaiting)}` : '엣지 보고 없음'}` : '등록된 점검 항목 없음')
       : noPerm ? '조회 권한 없음 (서비스 모니터)' : '점검 상태 대기';
     tiles.push({ page: 'alarms', name: '서비스 점검', level: tl.level, value: s ? fmtInt(tl.total) : '—', meta, crit: String(tl.bad), warn: String(tl.warn), info: String(tl.stale) });
   }

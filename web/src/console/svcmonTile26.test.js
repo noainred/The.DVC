@@ -43,3 +43,15 @@ describe('svcmonTile(28회차 N-7 — 기동 유예 중인 엣지는 주의가 �
     expect(svcmonLevel({ total: 4, pending: 4 }, { agents: 0, rows: 0, assignedNoReport: 1, awaitingFirstReport: 2 }, false)).toBe(1);
   });
 });
+
+describe('30회차 J — 첫 보고 대기 엣지는 레벨에 넣지 않되 문구에서 밝힌다', () => {
+  it('정상 보고 2 + 대기 3 → 레벨 0 · 문구에 첫 보고 대기 3', () => {
+    const base = { global: null, alarms: [], nsx: null, pdu: null, idracPoller: null, dsOver: null, storageDevices: null, permission: { svcmon: true } };
+    const tile = buildDomainTiles({ ...base, svcmon: { summary: { total: 0 }, executes: false, edgeTotals: { agents: 2, rows: 10, ok: 10, bad: 0, warn: 0, stale: 0, silent: 0, assignedNoReport: 0, awaitingFirstReport: 3 } } }).find((x) => x.name === '서비스 점검');
+    expect(tile.level).toBe(0);
+    expect(tile.meta).toMatch(/첫 보고 대기 3/);
+    const only = buildDomainTiles({ ...base, svcmon: { summary: { total: 0 }, executes: false, edgeTotals: { agents: 0, rows: 0, awaitingFirstReport: 2 } } }).find((x) => x.name === '서비스 점검');
+    expect(only.level).toBeNull();
+    expect(only.meta).toMatch(/첫 보고 대기 2/);
+  });
+});

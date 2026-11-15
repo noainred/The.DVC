@@ -95,6 +95,12 @@ export function createRunner({ keys, sink, connect } = {}) {
       live.set(id, { col, t, interval: normInterval(d.interval), procEvery: normProcEvery(d.procEvery) });
       col.start();
     }
+    // 30회차 D(재현): 상한으로 막혀 있다가 수집에서 빠진 대상은 'limit' 이 그대로 남아 카드가 '노드 상한' 이었다 — 멈춤으로 알린다
+    //   (상한에서 풀려 시작한 대상은 수집기가 스스로 상태를 알린다).
+    for (const [id, st] of wasLimited) {
+      if (want.has(id)) continue;
+      try { sink?.status?.(id, { state: 'stopped', since: Date.now(), error: '', interval: st.interval }); } catch { /* */ }
+    }
     return { running: live.size, limited: limited.size };
   }
 

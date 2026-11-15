@@ -256,7 +256,8 @@ export function pointsFor(store, rule, id, now) {
     const withAll = rows.some((s) => s.apps.all && typeof s.apps.all === 'object');
     for (const s of rows) {
       // 29회차 F6: 목록이 잘린 표본(allCut)에서 없는 이름은 0(죽음)이 아니라 모름(null — 판정 보류)
-      if (withAll) { if (s.apps.all && typeof s.apps.all === 'object') { const v = Object.hasOwn(s.apps.all, rule.app) ? Number(s.apps.all[rule.app]) : (s.apps.allCut === true ? null : 0); out.push([s.t, Number.isFinite(v) ? v : null]); } continue; }
+      //   30회차 E: 'nonsvc'(.service 가 아닌 단위만 잘림 — .service 는 먼저 실린다)이면 .service 이름의 부재는 0 이다
+      if (withAll) { if (s.apps.all && typeof s.apps.all === 'object') { const cut = s.apps.allCut === true || (s.apps.allCut === 'nonsvc' && !String(rule.app).endsWith('.service')); const v = Object.hasOwn(s.apps.all, rule.app) ? Number(s.apps.all[rule.app]) : (cut ? null : 0); out.push([s.t, Number.isFinite(v) ? v : null]); } continue; }
       if (!Array.isArray(s.apps.sv)) { out.push([s.t, null]); continue; } // 서비스 지도 없음 — 모름
       const a = s.apps.sv.find((x) => x.k === rule.app);
       out.push([s.t, a ? a.n : (s.apps.sv.length < 20 ? 0 : null)]);

@@ -487,13 +487,15 @@ api.post('/tools/focus-mon/sessions/:id/targets', adminOnly, fullRwOnly, demoBlo
 
 /** 수집에서 서버 하나 빼기(서버별 ‘수집 종료’ · v2.979) — 마지막 서버면 그 수집이 끝난다. */
 api.delete('/tools/focus-mon/sessions/:id/targets/:tid', adminOnly, fullRwOnly, demoBlockWrite, (req, res) => {
-  if (registryUnreadable(res)) return;   // 29회차 F7
-  const vis = visibleById(req);
+  // 30회차 B: 수집에서 빼기는 등록부가 아니라 수집 정의(세션 파일)에 기대므로 등록부 손상 중에도 연다(수집 전체 종료와 같게 — 멈추는 쪽 조작).
+  //   보이는 대상 확인은 등록부를 읽을 때만 한다(손상 중에는 그 수집에 든 서버인지를 removeFromCollection 이 본다).
+  const unreadable = !!registry.registryLoadError();
+  const vis = unreadable ? null : visibleById(req);
   const tid = String(req.params.tid);
-  if (!vis.has(tid)) return res.status(404).json({ ok: false, code: 'not-found', reason: '없는 대상입니다.' });
+  if (vis && !vis.has(tid)) return res.status(404).json({ ok: false, code: 'not-found', reason: '없는 대상입니다.' });
   const r = removeFromCollection(req.params.id, tid);
   if (!r.ok) return res.status(r.code === 'not-found' ? 404 : 409).json(r);
-  logAudit({ user: req.user?.username, action: 'focus-mon.remove-target', target: r.session.id, detail: `${vis.get(tid).name}${r.ended ? ' · 마지막 서버라 수집이 끝남' : ''}`, ip: req.ip });
+  logAudit({ user: req.user?.username, action: 'focus-mon.remove-target', target: r.session.id, detail: `${vis?.get(tid)?.name || tid}${r.ended ? ' · 마지막 서버라 수집이 끝남' : ''}${unreadable ? ' · 등록부 손상 중' : ''}`, ip: req.ip });
   res.json(r);
 });
 

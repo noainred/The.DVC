@@ -101,3 +101,12 @@ describe('headlineFor — 연결 끊김은 "업데이트 재시작" + 자동 재
     }
   });
 });
+
+describe('30회차 A — 파일을 못 읽음(…Unreadable) 503 은 일시 미가용 안내로 바꾸지 않는다', () => {
+  it('reason · code 가 …Unreadable 이면 null', () => {
+    expect(serviceDownKind('등록부를 읽지 못했습니다', { status: 503, body: { ok: false, reason: 'registryUnreadable', detail: '등록부를 읽지 못했습니다' } })).toBeNull();
+    expect(serviceDownKind('x', { status: 503, body: { code: 'settingsUnreadable' } })).toBeNull();
+    expect(serviceDownKind('x', { status: 503, body: { reason: 'busy' } })).toBe('gateway');
+    expect(serviceDownKind('x', { status: 503 })).toBe('gateway');
+  });
+});

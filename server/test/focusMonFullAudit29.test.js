@@ -131,9 +131,10 @@ test('F6 — 서비스 목록이 상한에서 잘린 표본(allCut)의 없는 �
     const rule = { id: 'ar-000000000001', metric: 'app', app: 'oracle-db.service', threshold: 1, durMin: 1, op: 'lt' };
     const pts = AL.pointsFor(store, rule, id, now);
     const viaEdge = edge.cleanApps ? edge.cleanApps({ sv: [], cm: [], all: { 'a.service': 1, 'bad name!': 2 } }) : null;
-    console.log(JSON.stringify({ cut: g.allCut === true, vals: pts.map((p) => p[1]), ev: AL.judge(pts, rule, null, now).event, edgeCut: viaEdge ? viaEdge.allCut === true : null }));`);
-  assert.equal(out.cut, true);
-  assert.ok(out.vals.every((v) => v === null), `수정 전: 0,0,…,0 → fire — ${out.vals}`);
+    console.log(JSON.stringify({ cut: g.allCut ?? null, vals: pts.map((p) => p[1]), ev: AL.judge(pts, rule, null, now).event, edgeCut: viaEdge ? viaEdge.allCut === true : null }));`);
+  // 30회차 E: .service 를 먼저 싣는다 — 살아 있는 oracle-db.service 는 목록에 들고(값 1), 잘린 것은 scope 뿐이라 'nonsvc'
+  assert.equal(out.cut, 'nonsvc');
+  assert.ok(out.vals.every((v) => v === 1), `수정 전: 0,0,…,0 → fire(살아 있는 서비스를 죽음으로) — ${out.vals}`);
   assert.notEqual(out.ev, 'fire');
   if (out.edgeCut !== null) assert.equal(out.edgeCut, true, '엣지 수신에서 거른 칸이 있어도 allCut');
 });
@@ -151,7 +152,7 @@ test('F7 — 등록부 손상이면 조회 · 시험 · 수집 시작도 503(메
   for (const b of blocks) {
     const head = b.split('\n')[0];
     if (!/visibleById|visibleTargets|pickIds/.test(b.split(/\n\}\);/)[0])) continue;
-    assert.match(b, /registryUnreadable\(res\)/, head); checked += 1;
+    assert.match(b, /registryUnreadable\(res\)|registry\.registryLoadError\(\)/, head); checked += 1;   // 30회차 B: 수집에서 빼기는 손상 중에도 연다(세션 소속으로 판단)
   }
   assert.ok(checked >= 15, `스윕한 핸들러 ${checked}`);   // 29회차 시점 19개
 });
@@ -163,4 +164,55 @@ test('F8 — 집중 모니터링 화면의 내려받기 실패를 삼키지 않�
   }
   const audit = fs.readFileSync(path.join(WEB, 'views/tools/FocusMonAudit.jsx'), 'utf8');
   assert.match(audit, /\{canCsv\(\) \? <button type="button" className="fm-btn sm" onClick=\{\(\) => downloadFile\(`\/tools\/focus-mon\/audit\/run\//);
+});
+
+/* ── 30회차(28 · 29회차 수정 반증) ── */
+test('30 B · C — 손상 중 서버별 수집 종료는 열려 있고 · 1분 알림 주기는 건너뛴다(발생 중 상태를 지우지 않게)', () => {
+  const out = sub(none, `${ROUTE_HEAD}
+    const { issueAgentToken } = await import(${J('central/agentTokens.js')}); issueAgentToken('edge-x');
+    const ids = [0, 1].map((i) => registry.addTarget({ name: 'b-' + i, host: '10.66.0.' + (i + 1), port: 22, username: 'dvcmon', agent: 'edge-x' }, { agents: ['edge-x'] }).target.id);
+    const s = await call('POST', '/api/tools/focus-mon/sessions', { targets: ids, mode: 'record', interval: 2 });
+    const fs2 = await import('node:fs'); const p = await import('node:path');
+    fs2.writeFileSync(p.join(process.env.CONFIG_DIR, 'focusmon-targets.json'), '{"targets":[{"id": BROKEN');
+    registry._resetForTest();
+    const stop = await call('DELETE', '/api/tools/focus-mon/sessions/' + s.body.session.id + '/targets/' + ids[0]);
+    const tick = await svc.minuteTick(Date.now());
+    done({ start: s.status, stop: stop.status, left: store.sessionOfTarget(ids[1])?.targets?.length ?? null, tick });`, ROUTE_ENV);
+  assert.equal(out.start, 200);
+  assert.equal(out.stop, 200, '수정 전(29회차 판): 503 — 수집 전체 종료는 200 인데 서버별만 막혔다');
+  assert.equal(out.left, 1);
+  assert.deepEqual(out.tick, { skipped: 'registry-unreadable' }, '수정 전: 빈 대상으로 알림 주기를 돌아 발생 중 상태를 지웠다');
+});
+
+test('30 D · E · F — limit 해제는 stopped · .service 를 먼저 실어 필수 앱 죽음은 fire · 비정상 sentAt 은 나이를 믿지 않는다', () => {
+  const out = sub(none, `const { createRunner } = await import(${J('focusmon/runner.js')});
+    const got = []; const runner = createRunner({ keys: null, sink: { sample() {}, procs() {}, load() {}, status: (id, st) => { got.push(id + ':' + st.state); } } });
+    const w = [{ id: 'fm-d0000000', host: '192.0.2.1', port: 22, username: 'x', interval: 2, demo: true }, { id: 'fm-d0000001', host: '192.0.2.2', port: 22, username: 'x', interval: 2, demo: true }];
+    runner.reconcile(w); runner.reconcile([w[0]]); runner.stopAll();
+    const { appGroups } = await import(${J('focusmon/rates.js')}); const AL = await import(${J('focusmon/alerts.js')}); const store = await import(${J('focusmon/store.js')});
+    const cur = []; const units = new Map();
+    for (let i = 0; i < 410; i++) { const pid = 1000 + i; cur.push({ pid, ppid: 1, comm: 'c' + i, thr: 1, rss: 100, start: 10 }); units.set(pid, 'cri-containerd-' + String(i).padStart(12, '0') + '.scope'); }
+    const g = appGroups(cur, [], { tck: 100, dt: 5, units, withAll: true });   // oracle-db.service 는 죽었다(목록에 없음)
+    const id = 'fm-cccccccccc'; const now = Date.now();
+    for (let t = now - 90_000; t <= now; t += 15_000) store.ingestProcs(id, t, { n: cur.length, top: [], apps: g });
+    const rule = { id: 'ar-000000000002', metric: 'app', app: 'oracle-db.service', threshold: 1, durMin: 1, op: 'lt' };
+    const ev = AL.judge(AL.pointsFor(store, rule, id, now), rule, null, now).event;
+    const registry = await import(${J('focusmon/registry.js')}); const edge = await import(${J('central/focusMonEdge.js')});
+    const tid = registry.addTarget({ name: 'f-1', host: '10.9.0.21', port: 22, username: 'u', agent: 'edge-f' }, { agents: ['edge-f'] }).target.id;
+    store.startSession({ targets: [tid], interval: 2, mode: 'watch', by: 't' });
+    edge.handleEdgeSync('edge-f', { sentAt: 0, status: { [tid]: { state: 'ok', lastSampleAt: now - 3_600_000, interval: 2 } } }, now);
+    console.log(JSON.stringify({ got, cut: g.allCut, ev, age: now - store.statusOf(tid).lastSampleAt }));`, { FOCUSMON_MAX_STREAMS: '1' });
+  assert.ok(out.got.includes('fm-d0000001:stopped'), `수정 전: limit 이 남음 — ${out.got}`);
+  assert.equal(out.cut, 'nonsvc', '.service 가 아닌 단위만 잘렸다');
+  assert.equal(out.ev, 'fire', '수정 전(29회차 판): 영원히 hold — 필수 앱이 죽어도 알리지 않았다');
+  assert.equal(out.age, 3_600_000, '수정 전: sentAt 0 이면 1시간 전 상태가 방금(나이 0)');
+});
+
+test('30 A · G — 파일을 못 읽음 503 은 서버 사유로 보인다(웹) · 느린 DNS 는 사유를 말한다(소스)', () => {
+  const api = fs.readFileSync(path.join(WEB, 'api.js'), 'utf8');
+  assert.match(api, /const msg = \(unreadable \? data\.detail : ''\) \|\| data\?\.reason/);
+  const sd = fs.readFileSync(path.join(WEB, 'components/serviceDownText.js'), 'utf8');
+  assert.match(sd, /if \(status === 503 && b && typeof b === 'object' && \[b\.reason, b\.code\]\.some/);
+  const ck = fs.readFileSync(path.join(SRC, 'svcmon/checker.js'), 'utf8');
+  assert.match(ck, /sock\.once\('timeout', \(\) => done\(resolved \? false : \{ why: '이름 해석 시간 초과' \}\)\);/);
 });

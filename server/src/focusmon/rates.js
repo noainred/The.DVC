@@ -375,9 +375,16 @@ export function appGroups(curList, rows, { tck, dt, page = 4096, users, units, i
     all = {};
     let k = 0;
     // 전체 점검 29회차 F6(재현): 상한에서 자를 때 표시가 없어, 잘려 빠진 살아 있는 서비스를 알림이 '0개(죽음)' 로 읽었다 — 잘렸으면 allCut
-    for (const g of acc.sv.values()) { if (g.k === APP_KERNEL || g.k === APP_SESSION || g.k === APP_NOSVC) continue; if (k >= APP_ALL_MAX) { allCut = true; break; } all[g.k] = g.n; k += 1; }
+    // 30회차 E(재현): 컨테이너 scope 가 400개를 넘는 서버는 표본마다 allCut 이라 필수 앱(대개 .service)이 죽어도 영원히 '보류' 였다 —
+    //   **.service 를 먼저** 싣고, 잘린 것이 .service 가 아닌 단위뿐이면 allCut 은 'nonsvc'(알림은 .service 이름의 부재를 0 으로 읽는다).
+    const groups = [...acc.sv.values()].filter((g) => g.k !== APP_KERNEL && g.k !== APP_SESSION && g.k !== APP_NOSVC);
+    const ordered = [...groups.filter((g) => g.k.endsWith('.service')), ...groups.filter((g) => !g.k.endsWith('.service'))];
+    for (const g of ordered) {
+      if (k >= APP_ALL_MAX) { allCut = g.k.endsWith('.service') ? true : (allCut === true ? true : 'nonsvc'); continue; }
+      all[g.k] = g.n; k += 1;
+    }
   }
-  return { sv: haveUnits ? fin(acc.sv) : null, cm: fin(acc.cm), ...(all ? { all, ...(allCut ? { allCut: true } : {}) } : {}) };
+  return { sv: haveUnits ? fin(acc.sv) : null, cm: fin(acc.cm), ...(all ? { all, ...(allCut ? { allCut } : {}) } : {}) };
 }
 
 /** 개요 카드 요약(서버 1대 · 표본 1개) — 화면 · 비교 · 정렬이 같은 값을 쓴다. */

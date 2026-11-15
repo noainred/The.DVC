@@ -11,7 +11,7 @@ import { getDataSource } from '../runtime-settings.js';
 import * as store from './store.js';
 import * as db from './db.js';
 import { createRunner } from './runner.js';
-import { listTargets, getTarget, getSettings } from './registry.js';
+import { listTargets, getTarget, getSettings, registryLoadError } from './registry.js';
 import { createNodeSampler } from './load.js';
 import { DEMO_TARGETS, isDemoTarget } from './mock.js';
 import { recordTick, flushOnExit, recorderStatus } from './recorder.js';
@@ -74,6 +74,9 @@ export function tick1(now = Date.now()) {
  */
 export async function minuteTick(now = Date.now(), { send = null, maintJudge = null } = {}) {
   if (String(process.env.CENTRAL_URL || '').trim()) return { skipped: 'edge' };
+  // 전체 점검 30회차 C(재현): 등록부를 못 읽으면 대상 목록이 비어 알림 주기가 발생 중 상태를 지웠다(해제 알림도 없이 — 복구 뒤 같은 알림이 다시 나감).
+  //   규칙 파일 손상과 같이 이 주기를 건너뛴다(판정 · 조절 모두 — 대상이 없다는 뜻이 아니다).
+  if (registryLoadError()) return { skipped: 'registry-unreadable' };
   const settings = getSettings();
   const recordIds = new Set(store.listSessions(now).filter((x) => x.mode === 'record').flatMap((x) => x.targets));
   const targets = allTargets().filter((t) => recordIds.has(t.id));

@@ -158,7 +158,7 @@
 | `TaskWho.jsx` | '불러오는 중' 의 한 작업 줄 아래에 **누가 지연시키는가** 를 보인다(v2.583) — 사용자 요청: "불러오는 중… 이라는 메시지 나올 때 누가 이 메시지의 지연을 발생시켰는지 ID 도 같이 보여줘." | `default` | 2 | 1 | 0 |
 | `UpgradeNotice.jsx` | '프로그램이 업그레이드되었으니 새로고침 하세요' 상자(v2.999 · 설계 docs/design/upgrade-reload ①③). 오류 경계(ErrorBoundary)가 '이 창의 판 ≠ 서버의 판' 이거나 화면 조각을 못 받은 오류일 때 그린다. ⚠ 주 번들에 둔다… | `useUpgradeVersions` `useSinceNotes` `UpgradeChanges` `RefreshIcon` `default` | 2 | 2 | 2 |
 | `selectSort.js` | 드롭다운(&lt;select>) 선택지 정렬(순수, v2.708 — 사용자 요청 "모든 드롭박스 메뉴를 정렬해서 보이게, 앞으로 만드는 드롭박스도 정렬"). 화면은 `components/Select.jsx` 를 쓰고, 날 `<select>` 는 테스트가 금지한다. | `optionText` `isPinnedOption` `sortSelectChildren` | 2 | 1 | 1 |
-| `serviceDownText.js` | '서비스 일시 미가용' 판정·문구(순수, v2.459). | `serviceDownKind` `headlineFor` `probeOutcome` `reconnectStep` `reconnectStatusText` `diagnosticLines` 외 4 | 2 | 1 | 2 |
+| `serviceDownText.js` | '서비스 일시 미가용' 판정·문구(순수, v2.459). | `serviceDownKind` `headlineFor` `probeOutcome` `reconnectStep` `reconnectStatusText` `diagnosticLines` 외 4 | 2 | 1 | 3 |
 | `useNarrowScreen.js` | 좁은 화면 여부 훅(v2.987 — VmDistPanels.jsx 에서 옮김 · 물리서버 폴더와 함께 쓴다). matchMedia 가 없거나 던지면 넓은 화면으로 본다(SSR · 구형 브라우저). | `useNarrowScreen` | 2 | 2 | 0 |
 | `vmperf/VmPerfView.jsx` | VM · ESXi 호스트 **성능** 화면(v2.911 · 시안 docs/design/vm-perf ②③④ · 사용자 컨펌 '개선' = 기본값). 예전 성능 모달(VmMetrics.jsx MetricModal — 지표 4 + 기간 5 버튼 한 줄 · datetime-l… | `default` | 2 | 1 | 3 |
 | `AccessDenied.jsx` | AccessDenied — 권한 부족(403) 안내 화면. | `default` | 1 | 1 | 2 |
@@ -206,7 +206,7 @@
 
 | 모듈 | 하는 일 | 내보내는 이름 | 사용처 | 영역 | 테스트 |
 |---|---|---|---|---|---|
-| `api.js` | v2.498: 진행 중 요청 레지스트리 + 장기 로딩(hang) 보고. perfClient 는 api.js 를 import 하지 않으므로 순환이 없다(설정 조회는 fetchJson 을 인자로 받는다). | `noteHttpError` `permissionInfoFor` `httpInfoFor` `fetchJson` `postJson` `sendJson` 외 34 | 399 | 19 | 43 |
+| `api.js` | v2.498: 진행 중 요청 레지스트리 + 장기 로딩(hang) 보고. perfClient 는 api.js 를 import 하지 않으므로 순환이 없다(설정 조회는 fetchJson 을 인자로 받는다). | `noteHttpError` `permissionInfoFor` `httpInfoFor` `fetchJson` `postJson` `sendJson` 외 34 | 399 | 19 | 44 |
 | `numOrNull.js` | `numOrNull`(웹) — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정. | `numOrNull` `default` | 138 | 11 | 2 |
 | `dayStamp.js` | 브라우저 쪽 날짜 표기(v2.582 BUG-3) — 내려받기 파일명·만료일은 **사용자의 로컬 날짜**다. `new Date().toISOString().slice(0, 10)` 은 UTC 날짜라 한국 시각 00:00~09:00 에는 **어제**가 된다 (보고서 파일명… | `dayStamp` | 24 | 5 | 1 |
 | `regions.js` | 지역(region) 목록 — 웹 단일 소스(v2.575 IMP-10). ⚠ 값은 서버 `server/src/util/regions.js` 와 **글자 그대로 같아야 한다**(웹은 서버 소스를 import 할 수 없어 복사가 불가피하다). `web/src/regions.`… | `REGIONS` `default` | 5 | 2 | 2 |

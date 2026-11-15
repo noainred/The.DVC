@@ -35,9 +35,11 @@ export const dgramLookupFor = (ms) => (h, o, cb) => (net.isIP(String(h ?? '')) ?
 export const dgramLookup = dgramLookupFor(3000);
 
 /**
- * 28회차 N-5 · N-6 — 점검용 검증 lookup. ① DNS 시한을 **그 점검의 시한**에 맞춘다(공용 ssrfLookup 의 3초는 첫 네임서버가 죽은 환경(glibc 5초)에서
- *   DNS 장애를 '포트 연결 실패' 로 오진했다 — 수정 전에는 시한 없이 기다려 ok 였다) ② 차단 · 걸러냄 경고는 **이름마다 10분에 한 줄**
- *   (듀얼 스택 이름은 점검마다 '[ssrf] … 제외' 한 줄씩 남겼다). 시한별 lookup 을 하나씩 만들어 재사용한다.
+ * 28회차 N-5 · N-6 — 점검용 검증 lookup. ① DNS 시한을 **그 점검의 시한**에 맞춘다(공용 ssrfLookup 의 3초 시한이 3~4초 걸리는 해석을 실패로 만들었다 —
+ *   26회차 전에는 tcp 4초 · cert 6초 시한 안이면 ok 였다) ② 차단 · 걸러냄 경고는 **이 스레드에서** 이름마다 10분에 한 줄
+ *   (듀얼 스택 이름은 점검마다 '[ssrf] … 제외' 한 줄씩 남겼다 — 워커 스레드마다 따로 센다(최대 워커 수만큼)). 시한별 lookup 을 하나씩 만들어 재사용한다.
+ *   ⚠ 30회차 정정: 28회차 커밋 머리말의 'glibc 5초 사례도 고쳤다' · '수정 전에는 시한 없이 기다려 ok 였다' 는 tcp(4초)에서 틀렸다 — 4초를 넘는 해석은 수정 전에도
+ *   소켓 timeout 으로 실패했다. 지금은 그때 '이름 해석 시간 초과' 라고 사유를 말할 뿐이다(tcpPort).
  */
 const _ssrfWarnAt = new Map();
 function ssrfWarnOnce(key, msg) {
@@ -305,8 +307,11 @@ function tcpPort(host, port, timeoutMs) {
   return new Promise((resolve) => {
     const sock = net.connect({ host, port, timeout: timeoutMs, lookup: checkLookup(timeoutMs) });   // 26회차 F10: 실행 시점 해석 검증 · 28회차 N-5 시한
     const done = (v) => { try { sock.destroy(); } catch { /* noop */ } resolve(v); };
+    // 30회차 G(재현): 같은 시한의 소켓 timeout 이 DNS 시한보다 먼저 울려 느린 DNS 가 사유 없는 '포트 연결 실패' 였다 — 이름을 아직 못 풀었으면 그렇게 말한다
+    let resolved = net.isIP(String(host || '')) !== 0;
+    sock.once('lookup', () => { resolved = true; });
     sock.once('connect', () => done(true));   // 바이트를 보내지 않는다(대상 로그 오염 방지)
-    sock.once('timeout', () => done(false));
+    sock.once('timeout', () => done(resolved ? false : { why: '이름 해석 시간 초과' }));
     sock.once('error', (e) => { const why = connFailText(e); done(why ? { why } : false); });
   });
 }
