@@ -5,7 +5,7 @@ import { DataTable, Loading, ErrorBox, UsageCell } from '../../components/ui.jsx
 import { Card, useTool } from './shared.jsx';
 import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
 import { STable } from '../../components/STable.jsx';
-import { licenseScopeNote, licenseDupNote } from './licenseScopeText.js'; // v2.603: 범위 밖 제외 안내
+import { licenseScopeNote, licenseDupNote, corpTag } from './licenseScopeText.js'; // v2.603: 범위 밖 제외 안내 · v3.13.8 corpTag(법인 글자 중복 방지)
 import { HorizonServerManager } from '../HorizonAdmin.jsx'; // v2.685: Horizon 연결 서버 등록(설정 메뉴와 공용)
 import BoldText from '../../components/boldText.jsx';
 import { numOrNull } from '../../numOrNull.js';
@@ -94,8 +94,9 @@ export function Solutions() {
       <div className="grid cols-2">
         {data.items.map((it) => (
           <div className="card" key={it.vcenterId}>
-            <div className="flex between" style={{ marginBottom: 8 }}>
-              <b>{it.name}{it.corp ? <span className="muted" style={{ fontSize: 11, fontWeight: 400 }}> · 법인 {it.corp}</span> : it.region ? <span className="muted" style={{ fontSize: 11, fontWeight: 400 }}> · {it.region}</span> : ''}</b>
+            {/* v3.13.8: 400px 에서 왼쪽(이름 · 법인)이 접히면 오른쪽 'vCenter v…' 와 글자가 붙었다(gap 없음) — gap + flexWrap. 법인 글자는 corpTag(‘법인 ○○ 법인’ 중복 방지). */}
+            <div className="flex between" style={{ marginBottom: 8, gap: '4px 12px', flexWrap: 'wrap' }}>
+              <b style={{ minWidth: 0 }}>{it.name}{it.corp ? <span className="muted" style={{ fontSize: 11, fontWeight: 400 }}> · {corpTag(it.corp)}</span> : it.region ? <span className="muted" style={{ fontSize: 11, fontWeight: 400 }}> · {it.region}</span> : ''}</b>
               <span className="muted" style={{ fontSize: 12 }}>vCenter v{it.version || '—'}{it.build ? ` (b${it.build})` : ''}</span>
             </div>
             {/* ESXi 버전(사이트 내 호스트) — 여러 버전이면 드리프트 */}

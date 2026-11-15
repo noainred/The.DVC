@@ -69,11 +69,16 @@ export function saveChipsCollapsed(storage, collapsed) {
  *  - scopeLabel: KPI 문구의 머리 — 전체 / vCenter 이름 / '리전 X · N법인'.
  *  - bareosSumOf: Bareos 백업 현황 rows[] 중 범위 안 법인의 counts.jobs 합 — 못 읽은 법인(counts 없음)은 0 으로 더하지 않고 unknown 으로 센다 · 하나도 못 읽었으면 jobs null.
  */
+/** v3.13.6: 리전 글자 — 'Unknown'(위치를 비워 등록)은 '리전 미지정', 그 밖은 '리전 X'. 범위 글자 · 칩 안내 · 범위 바가 한 벌로 쓴다. */
+export function regionText(r) {
+  const v = String(r || '').trim();
+  return v === 'Unknown' ? '리전 미지정' : `리전 ${v}`;
+}
 export function scopeLabel(scope, sitesInScope) {
   const vc = String(scope?.vcenterId || ''); const region = String(scope?.region || '');
   const list = Array.isArray(sitesInScope) ? sitesInScope : [];
   if (vc) { const s = list.find((x) => x && x.id === vc); return s ? String(s.name || s.id) : vc; }
-  if (region) return `리전 ${region} · ${list.length}법인`;
+  if (region) return `${regionText(region)} · ${list.length}법인`;
   return '전체';
 }
 export function bareosSumOf(rows, ids) {
@@ -144,7 +149,7 @@ export function siblingSites(sites, scope) {
 /** 이전 · 다음 옆에 붙는 범위 글자 — 리전 · 검색어가 있을 때만('리전 유럽 · ‘kr1’'), 없으면 ''. */
 export function siblingScopeText(scope) {
   const region = String(scope?.region || '').trim(); const q = String(scope?.q || '').trim();
-  return [region ? `리전 ${region}` : '', q ? `‘${q}’` : ''].filter(Boolean).join(' · ');
+  return [region ? regionText(region) : '', q ? `‘${q}’` : ''].filter(Boolean).join(' · ');
 }
 
 export const VC_VIEWS = Object.freeze([['cards', '카드'], ['table', '표']]);
@@ -222,10 +227,45 @@ export function chipSites(vcenters, region) {
   const list = (Array.isArray(vcenters) ? vcenters : []).filter((s) => s && typeof s === 'object');
   return r ? list.filter((s) => String(s.location?.region ?? '') === r) : list;
 }
+/**
+ * v3.13.0(2차 루프 1회차): 공용 범위 바의 vCenter 선택지 — 리전을 골랐으면 **그 리전 vCenter 만**(칩과 같은 판정 chipSites).
+ *   예전에는 리전과 무관하게 전부를 보여 리전 밖 vCenter 를 고를 수 있었고, 그러면 허브 카드(그 vCenter 숫자)와 본문(리전 ∩ vCenter = 0건)이 엇갈렸다.
+ *   지금 고른 vCenter 가 리전 밖이면(다른 경로에서 넘어온 값) 맨 앞에 남기고 outside 로 표시한다 — 선택 상자가 거짓 '전체 vCenter' 를 보이지 않게.
+ * @returns {Array<{id:string, name:string, outside:boolean}>}
+ */
+export function scopeVcOptions(vcenters, region, vcenterId = '') {
+  const list = chipSites(vcenters, region).map((v) => ({ id: String(v.id), name: String(v.name || v.id), outside: false }));
+  const id = String(vcenterId || '');
+  if (id && !list.some((o) => o.id === id)) {
+    const v = (Array.isArray(vcenters) ? vcenters : []).find((x) => x && String(x.id) === id);
+    list.unshift({ id, name: String(v?.name || id), outside: !!String(region || '') });
+  }
+  return list;
+}
+/**
+ * v3.13.6(2차 루프 7회차): 공용 범위 바의 리전 선택지 — 정해진 4리전(regions.js) **더하기 등록 데이터에만 있는 리전**(예: 위치를 비워 등록해 서버가 'Unknown' 으로 둔 vCenter).
+ *   예전에는 정해진 4리전만 보여 그런 vCenter 는 리전으로 거를 수 없었다(도구의 리전 선택 — regionsOf — 은 데이터에서 만들어 보였다). 범위 계정(scope.regions)은 그 리전만.
+ * @returns {Array<{value:string, label:string}>}
+ */
+export function scopeRegionOptions(base, vcenters, allowed = null) {
+  const fixed = (Array.isArray(base) ? base : []).map(String);
+  const extra = [...new Set((Array.isArray(vcenters) ? vcenters : []).map((v) => String(v?.location?.region ?? '').trim()).filter((r) => r && !fixed.includes(r)))]
+    .sort((a, b) => (a === 'Unknown') - (b === 'Unknown') || a.localeCompare(b, 'ko'));   // 'Unknown'(위치 미지정)은 맨 뒤
+  const all = [...fixed, ...extra];
+  const list = Array.isArray(allowed) && allowed.length ? all.filter((r) => allowed.includes(r)) : all;
+  return list.map((r) => ({ value: r, label: r === 'Unknown' ? '리전 미지정(Unknown)' : r }));   // 선택지 글자는 값을 함께 보인다(regionText 와 구분)
+}
+/** vCenter 를 고를 때의 patch — 리전 밖 vCenter 면 리전을 비운다(vCenter 하나가 리전보다 좁다 · 둘이 엇갈리면 화면이 빈다). 목록에 없는 id 는 리전을 그대로 둔다. */
+export function scopeVcPatch(vcenters, region, id) {
+  const v = String(id || ''); const r = String(region || '');
+  if (!v || !r) return { vcenterId: v };
+  const vc = (Array.isArray(vcenters) ? vcenters : []).find((x) => x && String(x.id) === v);
+  return vc && String(vc.location?.region ?? '') !== r ? { vcenterId: v, region: '' } : { vcenterId: v };
+}
 /** 칩 줄 범례 앞에 붙는 리전 안내 — '리전 유럽 · 5법인'(리전이 없으면 ''). */
 export function chipRegionNote(region, n) {
   const r = String(region || '').trim();
-  return r ? `리전 ${r} · ${Number.isFinite(n) ? n : 0}법인` : '';
+  return r ? `${regionText(r)} · ${Number.isFinite(n) ? n : 0}법인` : '';
 }
 
 export function chipLegend(tab) {
