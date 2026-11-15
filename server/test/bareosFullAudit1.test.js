@@ -114,3 +114,19 @@ test('③ B-3 — 라우트 소스: 결과 모름은 표지 · 감사 결과 모
   assert.match(body, /\$\{unknown \? '결과 모름' : '실패'\}/);
   assert.ok(body.indexOf('runUnknownHeld(job)') < body.indexOf("onDirector(jobDir(job), 'runJob'"), '보내기 전에 막는다');
 });
+
+// ── 전체 점검 5회차(R-1) — 결과 모름 막기는 단건 · 그룹 실행이 서로 본다 ──
+test('⑤ R-1 — markRunUnknown(쓰기 한 번) → runUnknownHeld · 그룹 실행이 결과 모름 대상을 보내지 않고 덩어리 결과 모름도 표지를 남긴다', () => {
+  const a = R.addJob({ vcenterId: 'vc-pl', vmId: 'vc-pl:vm-31', vmName: 'web-31', directorId: 'dir_pl', bareosJob: 'pv-pl-vm-31', client: 'pl-fd', storage: 'File', pool: 'Full', dc: 'DC-PL', folder: '/web', createdBy: 't' }).id;
+  const b = R.addJob({ vcenterId: 'vc-pl', vmId: 'vc-pl:vm-32', vmName: 'web-32', directorId: 'dir_pl', bareosJob: 'pv-pl-vm-32', client: 'pl-fd', storage: 'File', pool: 'Full', dc: 'DC-PL', folder: '/web', createdBy: 't' }).id;
+  R.markRunUnknown([a, b], '그룹 ‘g1’ 실행 결과 모름 — timeout');
+  for (const id of [a, b]) { const j = R.getJob(id); assert.equal(j.lastError.unknown, true); assert.equal(R.runUnknownHeld(j), true); }
+  // 늦은 회신 · 새 실행(markPending)은 표지를 지운다
+  R.markPending(a, { jobid: 900, level: 'Full', by: 't' });
+  assert.equal(R.runUnknownHeld(R.getJob(a)), false);
+  const src = fs.readFileSync(path.resolve(path.dirname(new URL(import.meta.url).pathname), '../src/bareos/groupRunner.js'), 'utf8');
+  const iHeld = src.indexOf('if (runUnknownHeld(j)) {'); const iLock = src.indexOf('if (!tryLockJob(j.id)) {');
+  assert.ok(iHeld > 0 && iHeld < iLock, '보낼 대상을 고를 때 본다(잠금 전)');
+  assert.match(src, /if \(st === 'unknown'\) markRunUnknown\(chunk\.map\(\(s\) => s\.job\.id\),/, '덩어리째 결과 모름');
+  assert.match(src, /\} else if \(st === 'unknown'\) \{\n\s*patchJob\(s\.job\.id, \{ lastError: \{[^\n]*unknown: true \} \}\);/, '항목 결과 모름');
+});
