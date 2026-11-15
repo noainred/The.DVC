@@ -175,11 +175,19 @@ export function reconcileForApply(name, content, configDir) {
   // v3.9.0(반증 D5): SSH 키 저장소는 **적용 시점의 지금 파일**과 다시 합친다 — 예약 때 합친 값으로 쓰면 예약 뒤 본인 OTP 로 좁힌 폴더 · 기능 · 퇴역이
   //   되돌아가고, 예약 뒤 등록한 키(번들에 없음)는 개인키째 사라졌다. 합치는 규칙은 mergeRedactedKeyStore 하나(지금 키의 폴더 · 기능 · 상태 유지 · 번들에 없는 지금 키 남김).
   if (name === KEY_FILE_NAME) {
-    // 지금 파일을 읽고 해석할 수 있을 때만 합친다 — 번들에는 개인키가 없어 지금 파일이 유일한 원본이다(6회차 D6-1 — 읽기 오류 · 손상을 ''로 두고 합쳐
-    //   ‘키 0개’ 로 덮었고 손상 원본은 보존본 없이 사라졌다). 못 읽으면 이 파일은 적용하지 않는다(던지면 failed 에 남는다 · 원본 그대로).
-    //   파일이 없으면(ENOENT) 잃을 것이 없으니 합친다(키는 되살릴 수 없고 계정만 비밀번호 없이 남는다 — 경고가 말한다).
+    // 지금 파일을 읽고 해석할 수 있을 때만 합친다(6회차 D6-1 — 읽기 오류 · 손상을 ''로 두고 합쳐 ‘키 0개’ 로 덮었고 손상 원본은 보존본 없이 사라졌다).
+    //   못 읽으면 이 파일은 적용하지 않는다(던지면 failed 에 남는다 · 원본 그대로).
+    //   예약 내용은 **예약 때 그때의 지금 파일과 합친 것**이라 그 파일의 봉인 개인키가 들어 있다(번들 원문에는 없다 — 합치기가 개인키를 지금 파일에서만 받는다).
+    //   그래서 적용 때 지금 파일이 없으면(ENOENT) 예약 내용을 **자기 자신과** 합친다 — 예약 때 들어간 봉인 개인키 · 비밀번호는 남기고, 개인키 없는 키는 예전처럼 뺀다.
+    //   ''와 다시 합치면 그 개인키를 버려 되살릴 길이 없었다(6회차 반증 R6R-2 · v3.9.0 은 살렸다).
     let cur = '';
-    try { cur = fs.readFileSync(path.join(configDir, name), 'utf8'); } catch (e) { if (e?.code !== 'ENOENT') throw new Error(`지금 SSH 키 저장소를 읽지 못해(${String(e?.code || '오류').slice(0, 40)}) 합칠 수 없습니다 — 이 파일은 적용하지 않았습니다(지금 파일 그대로)`); }
+    try { cur = fs.readFileSync(path.join(configDir, name), 'utf8'); } catch (e) {
+      if (e?.code !== 'ENOENT') throw new Error(`지금 SSH 키 저장소를 읽지 못해(${String(e?.code || '오류').slice(0, 40)}) 합칠 수 없습니다 — 이 파일은 적용하지 않았습니다(지금 파일 그대로)`);
+      const sm = mergeRedactedKeyStore(String(content), String(content));
+      const sn = keyStoreDropNotes(sm.dropped);
+      return { content: sm.text, info: { sshKeysKept: (sm.kept || []).length, sshKeysDropped: (sm.dropped || []).length },
+        warning: { file: name, reason: `적용 때 지금 SSH 키 저장소 파일이 없어 예약 때 합친 내용으로 썼습니다 — 예약 뒤 지운 키가 있었다면 다시 지우세요(키 보안에서 확인).${sn.length ? ` ${sn.join(' ')}` : ''}` } };
+    }
     if (cur) { try { const j = JSON.parse(cur); if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('shape'); } catch { throw new Error('지금 SSH 키 저장소가 손상돼 합칠 수 없습니다 — 이 파일은 적용하지 않았습니다(지금 파일 그대로 — 키 보안에서 확인하세요)'); } }
     const m = mergeRedactedKeyStore(String(content), cur);
     // 빠진 항목(승인 대기 키 id 지킴 · 되살리지 못한 키 · 계정 비밀)은 경고로 — 적용 결과 · 콘솔 · 백업 화면에 보인다(5회차 반증 R5R-6 — 수만 세고 쓰는 곳이 없었다).

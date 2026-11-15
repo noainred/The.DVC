@@ -5254,7 +5254,8 @@ test('㉚-c 5회차 반증 R5R-5 — ‘실제로 쓰일 키’ 판정 하나(bi
   assert.match(svc, /chooseKey: \(\{ serverId, keyId, expectAddr \}\) => chooseKeyIssue\(\{ serverId, keyId, expectAddr \}\)/);
   assert.match(svc, /export async function chooseServerKey\([^)]*\) \{\n  \{ const iss = chooseKeyIssue\(\{ serverId, keyId, expectAddr \}\); if \(iss\) return iss; \}/);
   assert.doesNotMatch(svc, /accountById\([^\n]*\)\?\.keyRef/, 'service — 공통 계정 기본 키를 손으로 풀지 않는다');
-  assert.match(bms, /const after = REFS\.effectiveKeyRef\(postWriteAuthOf\(ex, body\)\); const before = ex \? REFS\.effectiveKeyRef\(ex\) : '';/);
+  assert.match(bms, /const pw = postWriteAuthOf\(ex, body\); const after = REFS\.effectiveKeyRef\(pw\); const before = ex \? REFS\.effectiveKeyRef\(ex\) : '';/);
+  assert.match(bms, /after && \(after !== before \|\| pw\.moved\) \? KL\.revokingIssue\(after\) : null/, '6회차 반증 R6R-1 — 새 주소에 같은 키를 다시 묶는 것도 본다');
   assert.doesNotMatch(bms, /accountById\([^\n]*\)\?\.keyRef/);
   assert.match(ia, /effectiveKeyRefOf\(\{ keyRef, credRef: [^\n]*osAuth \}/); assert.doesNotMatch(ia, /osAcc\??\.keyRef/);
   assert.match(rf, /const useKey = effectiveKeyRefOf\(server, \(\) => acc\);/); assert.doesNotMatch(rf, /acc && acc\.keyRef/);
@@ -5349,7 +5350,7 @@ test('㉛-d 6회차 B6-1 — passwordOnly: 부분 성공은 SSH_PARTIAL_AUTH(par
   assert.deepEqual(jp.SS.map((S) => S.passwordTries().length), [1, 1, 1]);
   const jm = await job(more, 'm');
   assert.deepEqual(jm.j.results.map((r) => [r.code, r.via]), [['more-auth', 'password-once'], ['more-auth', 'password-once'], ['cancelled', undefined]], `추가 칸은 거부와 같이 센다 ${JSON.stringify(jm.j.results)}`);
-  assert.match(jm.j.results[2].reason, /한 번만 쓰는 비밀번호가 두 번 거부됨/);
+  assert.match(jm.j.results[2].reason, /한 번만 쓰는 비밀번호로 두 서버에서 로그인하지 못함\(거부 0 · 비밀번호 뒤 추가 칸 2\)/, '6회차 반증 R6R-3 — 추가 칸은 ‘거부됨’ 이라고 하지 않는다');
   assert.match(jm.j.results[0].reason, /비밀번호 하나로 로그인할 수 없는 서버라면 공개키를 직접 넣으세요/);
   assert.deepEqual(jm.SS.map((S) => S.passwordTries().length), [1, 1, 0], '남은 서버에는 보내지 않았다');
   const jz = await job(zero, 'z');
@@ -5422,7 +5423,8 @@ test('㉛-a 6회차 C — 대기 키 지우기 판정은 뒷정리와 하나(등
     const sa = BM.saveBmServer({ name: 'c6-sa', host: '10.9.70.2', port: 22, username: 'mon', mounts: ['/'], vcenterId: 'vcA', keyRef: a.key.id, bindApproved: true });
     const r = SVC.approvalPrecheck(q.id, { approve: false, by: 'own2' }); const d = SVC.prechecks.deleteKey({ keyId: p.key.id, by: 'own' });
     console.log(JSON.stringify({ a: a.key.id, p: p.key.id, q: q.id, sv: sv.server.id, sa: sa.server.id, r: r && [r.code, r.status], d: d && [d.code, d.status] }));` });
-  assert.deepEqual([s1.r, s1.d], [null, ['in-use', 409]], `돌려보내기는 in-use 를 통과 · 직접 삭제는 거절 ${JSON.stringify(s1)}`);
+  // 6회차 반증 R6R-4: 열린 등록 요청이 있는 대기 키의 직접 삭제는 본체처럼 key-pending(돌려보내기로 지운다)이 먼저 — 그것도 OTP 앞.
+  assert.deepEqual([s1.r, s1.d], [null, ['key-pending', 409]], `돌려보내기는 in-use 를 통과 · 직접 삭제는 거절 ${JSON.stringify(s1)}`);
   const probeRegErr = (prep, fin = '') => subRun({ dir: s1.dir, owners: 'own,own2', users: owners2, code: `
     const f = path.join(process.env.CONFIG_DIR, 'bm-storage.json');
     ${prep}
@@ -5437,10 +5439,10 @@ test('㉛-a 6회차 C — 대기 키 지우기 판정은 뒷정리와 하나(등
     console.log(JSON.stringify(out));` });
   const e1 = probeRegErr("fs.renameSync(f, f + '.real'); fs.mkdirSync(f);", "fs.rmdirSync(f); fs.renameSync(f + '.real', f);");
   assert.deepEqual([e1.regErr, e1.readFailed], [true, true], '전제 — 읽기 오류');
-  assert.deepEqual([e1.r, e1.d, e1.pl, e1.ck, e1.st, e1.kp], [['usage-unknown', 503], ['usage-unknown', 503], ['usage-unknown', 503], ['registry-unreadable', 503], 'pending', 'pending'], `등록부 읽기 오류 — OTP 앞 503 · 요청 · 대기 키 그대로 ${JSON.stringify(e1)}`);
+  assert.deepEqual([e1.r, e1.d, e1.pl, e1.ck, e1.st, e1.kp], [['usage-unknown', 503], ['key-pending', 409], ['usage-unknown', 503], ['registry-unreadable', 503], 'pending', 'pending'], `등록부 읽기 오류 — OTP 앞 503 · 요청 · 대기 키 그대로 ${JSON.stringify(e1)}`);
   const e2 = probeRegErr("fs.writeFileSync(f, '{ broken');");
   assert.deepEqual([e2.regErr, e2.readFailed], [true, false], '전제 — 손상(보존본)');
-  assert.deepEqual([e2.r, e2.d, e2.pl, e2.st, e2.kp], [['usage-unknown', 503], ['usage-unknown', 503], ['usage-unknown', 503], 'pending', 'pending'], `등록부 손상 보존 — 같다 ${JSON.stringify(e2)}`);
+  assert.deepEqual([e2.r, e2.d, e2.pl, e2.st, e2.kp], [['usage-unknown', 503], ['key-pending', 409], ['usage-unknown', 503], 'pending', 'pending'], `등록부 손상 보존 — 같다 ${JSON.stringify(e2)}`);
   // C6-2 — 파일이 없는 설치에서 첫 읽기가 읽기 오류였다가 권한이 돌아오면 표지가 저절로 지워진다(손상 · 보존본만 남음이면 표지 유지)
   const rec = (prep) => runUnsearchableCfg(prep, `
     const fs = await import('node:fs'); const BM = await imp('bmstor/registry.js');
@@ -5519,7 +5521,9 @@ test('㉛-b 6회차 A — 거두는 키 검사는 쓰기 뒤 실제로 쓰일 �
     [ex, { ...base, credRef: 'a2' }, { keyRef: 'k1', credRef: 'a2', osAuth: 'password' }],
     [ex, { host: 'h2', port: 22, username: 'mon' }, { keyRef: '', credRef: '', osAuth: 'password' }],
     [ex, { host: ' H1 ', port: '', username: 'MON' }, { keyRef: 'k1', credRef: 'a1', osAuth: 'password' }],
-    [{ ...ex, osAuth: 'other' }, { ...base }, { keyRef: 'k1', credRef: 'a1', osAuth: '' }]]) assert.deepEqual(BR.postWriteAuthOf(e, b), want, JSON.stringify([e, b]));
+    [{ ...ex, osAuth: 'other' }, { ...base }, { keyRef: 'k1', credRef: 'a1', osAuth: '' }]]) assert.deepEqual((({ moved: _m, ...r }) => r)(BR.postWriteAuthOf(e, b)), want, JSON.stringify([e, b]));
+  // 6회차 반증 R6R-1: moved 도 돌려준다(새 항목 · 주소 이동 = true)
+  assert.deepEqual([BR.postWriteAuthOf(null, { host: 'h1', port: 22, username: 'mon' }).moved, BR.postWriteAuthOf(ex, { host: 'h2', port: 22, username: 'mon' }).moved, BR.postWriteAuthOf(ex, { ...base }).moved], [true, true, false]);
   // A6-1 — 거두는 중인 키(bm-storage 서버 저장 · 실제 라우트 · OTP 없이 보내 거두기 검사 뒤 OTP 에서 멈추는지 본다)
   const S = await fakeSshd(); const pw = secret('Pw-A61'); S.st.password = pw;
   const Kr = mkKey('a61-revoking'); S.writeAk(`${Kr.pub} portal-ssh:${Kr.id}\n`);
@@ -5631,8 +5635,12 @@ test('㉛-c 6회차 D6-1 · D6-4 — 지금 ssh-keys.json 을 읽지 못하거�
   assert.ok(ok.ap.applied.includes('ssh-keys.json') && !fe(ok.ap), JSON.stringify(ok.ap));
   assert.deepEqual(JSON.parse(fs.readFileSync(kf(ok.cdir), 'utf8')).keys.map((k) => k.id), ['k_cur00000031'], '지금 키는 남긴다(합집합)');
   const mi = apply(() => {});
-  assert.ok(mi.ap.applied.includes('ssh-keys.json') && !fe(mi.ap), `파일 없음은 예전처럼 합친다 ${JSON.stringify(mi.ap)}`);
-  assert.deepEqual(JSON.parse(fs.readFileSync(kf(mi.cdir), 'utf8')).accounts.map((a) => [a.name, a.password]), [['acc31', '']], '계정은 비밀번호 없이');
+  assert.ok(mi.ap.applied.includes('ssh-keys.json') && !fe(mi.ap), `파일 없음은 적용한다 ${JSON.stringify(mi.ap)}`);
+  // 6회차 반증 R6R-2: 지금 파일이 없으면 예약 내용을 자기 자신과 합친다 — 예약에 든 비밀번호 · 봉인 개인키는 남기고(예약 때 그때의 지금 파일에서 받은 것), 개인키 없는 키는 뺀다 · 경고로 알린다.
+  { const w = JSON.parse(fs.readFileSync(kf(mi.cdir), 'utf8'));
+    // 실제 예약 내용은 예약 때 합친 결과라 개인키 없는 키가 없다 — 이 시험은 번들 원문을 바로 예약해 그런 키가 있고, 자기 자신과 합치면 그대로 남는다(예약 내용 기준).
+    assert.deepEqual([w.accounts.map((a) => [a.name, a.password]), w.keys.map((k) => k.id)], [[['acc31', 'pw']], ['k_bun00000031']], '예약 내용 기준(비밀번호 남음)');
+    assert.ok((mi.ap.warnings || []).some((x) => x.file === 'ssh-keys.json' && /지금 SSH 키 저장소 파일이 없어 예약 때 합친 내용으로 썼습니다/.test(x.reason)), JSON.stringify(mi.ap.warnings)); }
   // EACCES — 설정 폴더는 쓸 수 있고 ssh-keys.json 만 못 읽는 자식(uid 65534)
   const ea = runWithUnreadableFiles({ 'ssh-keys.json': JSON.stringify(cur) }, ['ssh-keys.json'], `
     const SR = await imp('backup/stagedRestore.js');

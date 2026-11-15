@@ -61,7 +61,7 @@ export function bindOfWrite(existing, body = {}) { return bindDecision(entryToke
 export function postWriteAuthOf(existing, body = {}) {
   const b = bindOfWrite(existing, body);
   const osAuth = body.osAuth !== undefined ? (body.osAuth === 'password' ? 'password' : '') : (existing?.osAuth === 'password' ? 'password' : '');
-  return { keyRef: b.key, credRef: b.cred, osAuth };
+  return { keyRef: b.key, credRef: b.cred, osAuth, moved: b.moved };   // moved — 새 주소에 같은 키를 다시 묶는 것도 새 묶음이다(6회차 반증 R6R-1)
 }
 
 /**

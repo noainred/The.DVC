@@ -178,8 +178,10 @@ function chooseKeyIssue({ serverId, keyId, expectAddr = null } = {}) {
   const s = listBmServersRaw().find((x) => x.id === t(serverId, 64));
   if (!s) return { ok: false, code: 'not-found', status: 404, reason: '서버를 찾을 수 없습니다.' };
   if (t(s.agent)) return { ok: false, code: 'edge-delegated', status: 409, reason: '엣지가 수집하는 서버입니다 — 키는 그 엣지 포탈의 SSH 공용 접속에서 고릅니다(키는 법인 밖으로 나가지 않습니다).' };
-  // 화면이 본 접속처를 반드시 돌려받는다(빼고 부르면 확인을 건너뛰던 구멍 — 반증 D11).
-  if (typeof expectAddr !== 'string' || !expectAddr) return { ok: false, code: 'need-addr', status: 400, reason: '화면에서 본 서버 접속처가 없습니다 — 화면을 다시 읽은 뒤 고르세요.' };
+  // 화면이 본 접속처를 반드시 돌려받는다(빼고 부르면 확인을 건너뛰던 구멍 — 반증 D11). 라우트와 같은 다듬기(t(v, 400))로 · 지금 주소와 다르면 OTP 앞 409(6회차 반증 R6R-4 — 본체만 봐 낡은 창이 OTP 를 쓴 뒤 409 moved 였다).
+  const ea = typeof expectAddr === 'string' ? t(expectAddr, 400) : '';
+  if (!ea) return { ok: false, code: 'need-addr', status: 400, reason: '화면에서 본 서버 접속처가 없습니다 — 화면을 다시 읽은 뒤 고르세요.' };
+  if (ea !== regAddrOf(s)) return { ok: false, code: 'moved', status: 409, reason: '서버 주소 · 포트 · 계정이 바뀌었습니다 — 화면을 다시 읽으세요.' };
   const kid = t(keyId, 32);
   //   키를 고르면(빈 값 포함) 비밀번호 고정 표지는 지워진다(setBmServerKeyRef) — 그래서 osAuth 는 넣지 않는다. 법인 기본 키를 따를 때도(5회차 A5-4 · 판정 하나 R5R-5).
   { const eff = REFS.effectiveKeyRef({ keyRef: kid, credRef: s.credRef }); const rv = eff ? KL.revokingIssue(eff) : null; if (rv) return rv; }
@@ -654,9 +656,11 @@ async function changeGuardsRaw(patch = {}, { by = '' } = {}) {
  * 승인 대기 키를 지금 지울 수 있는가 — 뒷정리(discard → refs.deleteKeyIfUnused → deleteIssue)와 같은 판정(6회차 C6-1 — 저장소 쓰기만 보면
  * 등록부를 못 읽는 동안 OTP · 200 ok 뒤에 대기 키가 고아로 남았다). in-use 는 대기 키에 생기지 않지만 생기면 지우지 않는 것이 맞으므로 통과.
  */
-function pendingKeyDropIssue(keyId, { allowInUse = true } = {}) {
+function pendingKeyDropIssue(keyId, { allowInUse = true, direct = false } = {}) {
   const wi = KS.keyStoreWriteIssue(); if (wi) return wi;
   const k = KS.keyById(t(keyId, 32)); if (!k || k.status !== 'pending') return null;
+  // 직접 지우기는 열린 등록 요청이 있으면 본체가 409(돌려보내기로 지운다) — 같은 판정을 OTP 앞에서(6회차 반증 R6R-4).
+  if (direct && AP.listRequests({ kinds: ['ssh-key-activate'], includeDone: false }).some((r) => r.target === k.id)) return { ok: false, code: 'key-pending', status: 409, reason: '승인 대기 중인 키입니다 — 키 보안 › 승인 대기에서 돌려보내면 지워집니다.' };
   const di = REFS.deleteIssue(k.id); return di && !(allowInUse && di.code === 'in-use') ? di : null;
 }
 
@@ -785,7 +789,7 @@ export const prechecks = Object.freeze({
     if (!k) return { ok: false, code: 'not-found', status: 404, reason: '키를 찾을 수 없습니다.' };
     const ii = installingIssue(k.id); if (ii) return ii;
     // 승인 대기 키 지우기도 저장소 쓰기다 — 쓸 수 없으면 OTP 앞에서(5회차 반증 R5R-1).
-    if (k.status === 'pending') return AP.approvalsLoadError() ? { ok: false, code: 'approvals-unreadable', status: 503, reason: '승인 기록 파일을 읽지 못해 승인 대기 키를 지우지 않았습니다.' } : pendingKeyDropIssue(k.id, { allowInUse: false });   // 직접 지우기는 쓰는 곳이 있으면 본체가 409 — OTP 앞에서(6회차 A6-2)
+    if (k.status === 'pending') return AP.approvalsLoadError() ? { ok: false, code: 'approvals-unreadable', status: 503, reason: '승인 기록 파일을 읽지 못해 승인 대기 키를 지우지 않았습니다.' } : pendingKeyDropIssue(k.id, { allowInUse: false, direct: true });   // 직접 지우기는 쓰는 곳이 있으면 본체가 409 — OTP 앞에서(6회차 A6-2)
     return REFS.deleteIssue(k.id) || requestPrecheck({ kind: 'ssh-key-delete', target: k.id, by });   // 쓰는 곳 · 저장소 쓰기(5회차 A5-1)
   },
   resume: async ({ corp, by }) => {
@@ -890,19 +894,26 @@ async function mockRefusal() {
  * 키 인증의 거부는 세지 않는다(서버마다 키가 없을 수 있다 — 잠금과 무관).
  */
 function authRejectTracker() {
-  let onceRejects = 0; const accRejected = new Set();
+  // 사유를 함께 기억한다 — ‘비밀번호 뒤 추가 칸’(more-auth)은 비밀번호가 맞았을 수 있어 ‘거부됨 · 비밀번호를 확인하라’ 고 하지 않는다(6회차 반증 R6R-3).
+  let onceRejects = 0; let onceMore = 0; const accRejected = new Map();
   const accOf = (s, pw) => (!pw && t(s.credRef) && !t(s.keyRef) ? t(s.credRef) : '');
   return {
     skip(s, pw) {
       const a = accOf(s, pw);
-      if (a && accRejected.has(a)) return { id: s.id, name: s.name || s.host, corp: t(s.vcenterId), ok: false, code: 'auth-skipped', reason: '같은 공통 계정의 비밀번호가 이 작업의 다른 서버에서 거부돼 이 서버는 하지 않았습니다(계정 잠금 방지) — 비밀번호를 확인한 뒤 다시 하세요.' };
+      if (a && accRejected.has(a)) return { id: s.id, name: s.name || s.host, corp: t(s.vcenterId), ok: false, code: 'auth-skipped', reason: accRejected.get(a) === 'more-auth'
+        ? '같은 공통 계정으로 이 작업의 다른 서버에 접속할 때 서버가 비밀번호 뒤에 다른 칸(인증 코드 등)을 더 물어 이 서버는 하지 않았습니다(계정 잠금 방지 — 비밀번호가 맞았는지는 모릅니다). 비밀번호 하나로 로그인할 수 없는 서버라면 공개키를 직접 넣으세요.'
+        : '같은 공통 계정의 비밀번호가 이 작업의 다른 서버에서 거부돼 이 서버는 하지 않았습니다(계정 잠금 방지) — 비밀번호를 확인한 뒤 다시 하세요.' };
       return null;
     },
     note(s, pw, res, job) {
       // 비밀번호 뒤 추가 칸(more-auth — 비밀번호가 맞았는지 모름)도 거부와 같이 센다(계정 잠금 방지 · 6회차 B6-1). 부분 성공(partial-auth — 받아들여짐)은 세지 않는다.
       if (!res || !(res.code === 'auth-rejected' || res.code === 'more-auth') || !(res.via === 'password' || res.via === 'password-once')) return;
-      if (pw) { onceRejects += 1; if (onceRejects >= 2) job?.stop('한 번만 쓰는 비밀번호가 두 번 거부됨 — 계정 잠금 방지'); return; }
-      const a = accOf(s, pw); if (a) accRejected.add(a);
+      if (pw) {
+        onceRejects += 1; if (res.code === 'more-auth') onceMore += 1;
+        if (onceRejects >= 2) job?.stop(onceMore ? `한 번만 쓰는 비밀번호로 두 서버에서 로그인하지 못함(거부 ${onceRejects - onceMore} · 비밀번호 뒤 추가 칸 ${onceMore}) — 계정 잠금 방지` : '한 번만 쓰는 비밀번호가 두 번 거부됨 — 계정 잠금 방지');
+        return;
+      }
+      const a = accOf(s, pw); if (a && !accRejected.has(a)) accRejected.set(a, res.code);
     },
   };
 }

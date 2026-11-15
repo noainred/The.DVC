@@ -524,8 +524,9 @@ export function registerBmStorage(api) {
     //   판정: bindRule.postWriteAuthOf(등록부와 같은 규칙) → refs.effectiveKeyRef(접속과 같은 판정 하나). OTP 앞.
     { const KL = await import('../../sshaccess/keyLogin.js'); const REFS = await import('../../bmusage/onboard/refs.js'); const { postWriteAuthOf } = await import('../../bmusage/onboard/bindRule.js');
       const ex = body.id ? listBmServersRaw().find((x) => x.id === body.id) || null : null;
-      const after = REFS.effectiveKeyRef(postWriteAuthOf(ex, body)); const before = ex ? REFS.effectiveKeyRef(ex) : '';
-      const v = after && after !== before ? KL.revokingIssue(after) : null; if (v) return res.status(v.status || 409).json({ ok: false, code: v.code, reason: v.reason }); }
+      const pw = postWriteAuthOf(ex, body); const after = REFS.effectiveKeyRef(pw); const before = ex ? REFS.effectiveKeyRef(ex) : '';
+      //   키가 같아도 주소가 바뀌면(새 주소에 다시 묶음) 본다(6회차 반증 R6R-1 — after !== before 만 봐 거두는 키를 새 주소에 묶었다). 같은 주소에서 이름만 바꾸는 저장은 막지 않는다.
+      const v = after && (after !== before || pw.moved) ? KL.revokingIssue(after) : null; if (v) return res.status(v.status || 409).json({ ok: false, code: v.code, reason: v.reason }); }
     if (bind.binds) {
       const { runGate } = await import('./bmOnboard.js');
       const { reauth } = await import('./reauth.js');
