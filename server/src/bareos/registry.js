@@ -360,12 +360,21 @@ export function applyRunRow(id, row, now = Date.now()) {
   let changed = false;
   // v2.822.3(C2-2 — 재현): 끝난 실행을 따로 남긴다(최근 FINISHED_KEEP 건). 포탈이 시작한 실행이 끝날 때 더 큰 jobid(대기 중인 스케줄 실행)가
   //   이미 lastRun 이면 그 결과가 어디에도 남지 않아 실패 메일에서 빠졌다. 실패 메일(notify)이 이 목록도 본다.
-  if (isFinalStatus(row.status) && !(j.finishedRuns || []).some((x) => x.jobid === rec.jobid)) {
+  const seenFin = isFinalStatus(row.status) ? (Array.isArray(j.finishedRuns) ? j.finishedRuns : []).find((x) => x.jobid === rec.jobid) : null;
+  if (isFinalStatus(row.status) && !seenFin) {
     // v2.858: 바이트 · 시작 시각도 남긴다 — 진행 현황의 '지난 같은 레벨 실행' 기준(실행 중이면 lastRun 이 그 실행이라 끝난 값은 여기에만 있다)
     const { jobid, status, state, level, startedAt, endedAt, bytes, errors } = rec;
     j.finishedRuns = [...(Array.isArray(j.finishedRuns) ? j.finishedRuns : []), { jobid, status, state, level, startedAt, endedAt, bytes, errors, checkedAt: now }]
       .sort((a, b) => a.jobid - b.jobid).slice(-FINISHED_KEEP);
     changed = true;
+  } else if (seenFin) {
+    // 전체 점검 1회차(B-2): 같은 실행을 먼저 덜 자세한 행(대조용 `list jobs days=` — 바이트가 비어 온다)으로 받았으면 뒤에 온 자세한 행(llist)으로
+    //   **빈 칸만** 채운다(아는 값은 바꾸지 않는다 — lastRun 과 같은 규칙). 예전에는 처음 행으로 굳어 다음 실행이 시작되면 '지난 같은 레벨' 기준이 사라졌다.
+    for (const k of ['level', 'startedAt', 'endedAt', 'bytes', 'errors']) {
+      const empty = k === 'level' ? !seenFin[k] : (seenFin[k] === null || seenFin[k] === undefined);
+      const has = k === 'level' ? !!rec[k] : (rec[k] !== null && rec[k] !== undefined);
+      if (empty && has) { seenFin[k] = rec[k]; changed = true; }
+    }
   }
   // 마지막으로 **백업이 만들어진**(T·W) 시각 — 잘린 목록과 무관하게 남긴다(S14 · 더 새 값만)
   if ((row.status === 'T' || row.status === 'W') && Number.isFinite(rec.endedAt) && rec.endedAt > 0 && !(Number.isFinite(j.lastOkAt) && j.lastOkAt >= rec.endedAt)) {
