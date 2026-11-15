@@ -123,7 +123,8 @@ function VmNameSearch({ term, sites, scope = null, scopeText = '전체 vCenter' 
           <tbody>
             {items.map((v) => (
               <tr key={v.id} style={{ cursor: 'pointer' }} title="클릭 — VM 상세" onClick={() => setSel(v)}>
-                <td data-sort={v.name}><button type="button" className="cell-link" onClick={(e) => { e.stopPropagation(); setSel(v); }} title="이 VM 상세">{v.name}</button></td>   {/* v3.12.3 키보드로 상세(행 클릭은 그대로) */}
+                {/* v3.12.3 키보드로 상세(행 클릭은 그대로) — 주석은 td 와 같은 줄에 두지 않는다(tr 안 공백 텍스트 노드 · validateDOMNesting 경고 · v3.12.5) */}
+                <td data-sort={v.name}><button type="button" className="cell-link" onClick={(e) => { e.stopPropagation(); setSel(v); }} title="이 VM 상세">{v.name}</button></td>
                 <td>{vcNameOf(sites, v.vcenterId)}</td>
                 <td className="muted">{v.host || '—'}</td>
                 <td data-sort={v.powerState || ''}>{powerLabel(v.powerState)}</td>
