@@ -19,6 +19,8 @@
  * ⚠ 중앙이 펼쳐 보낸 태그 창(origin 'central')은 **펼친 keys 만**으로 맞춘다(반증 F10 — 엣지 로컬 용도 태그로 넓히면 엣지 판정 ≠ 중앙 판정).
  * ⚠ 지운 창은 **묘비**(deleted.at)다: 지금 판정(maintStateFor)에서는 빠지고, 지난 구간(coverIntervals — ⑤ 분모 제외 · 추이 음영 · 변경 묶음)에는
  *   **지운 시각까지** 남는다(소급 소거 금지 — 그때 정비였던 사실은 지운 뒤에도 그때의 일이다). 묘비는 보관 90일(store.KEEP_ENDED_DAYS)까지.
+ * ⚠ 엣지의 배포 history 창(history: true — 중앙이 끝남 · 지움 · 만료 창을 지난 구간용으로 함께 보낸다: 점검 반복 3회차 D2)도 같은 뜻이다 —
+ *   지금 판정(activeOccurrence)에서 빠지고 지난 구간에만 남는다. 그래서 엣지의 ⑤ 제외 · 음영이 중앙과 같은 과거를 본다.
  * ⚠ 요청 경로 비용(반증 F6): windowStatus 는 다음 · 지난 발생을 **지금에서 바깥으로 조각 탐색**한다(400일 전부를 세지 않는다).
  */
 import { occurrencesBetween, occurrenceAt, maxMinOf, MIN, DAY } from './schedule.js';
@@ -82,9 +84,9 @@ export function effectiveOccurrences(w, from, to, { history = false } = {}) {
   }
   return out;
 }
-/** now 를 덮는 유효 발생(없으면 null). */
+/** now 를 덮는 유효 발생(없으면 null). 배포 history 창(w.history — 중앙의 끝남 · 지움 · 만료 창: 점검 반복 3회차 D2)은 지난 구간 전용이라 지금 판정에 넣지 않는다. */
 export function activeOccurrence(w, now) {
-  if (!w || w.deleted || !w.schedule) return null;
+  if (!w || w.deleted || w.history || !w.schedule) return null;
   const o = occurrenceAt(w.schedule, w.tz, now);
   if (!o) return null;
   return effectiveOccurrences(w, o.start, o.end).find((x) => x.start === o.start && now < x.end) || null;
@@ -108,6 +110,22 @@ export function maintStateFor(windows = [], target = null, now = Date.now(), { t
     for (const s of on) { scopes[s] = true; until[s] = Math.max(until[s] ?? 0, o.end); }
   }
   return { active: hit.length > 0, scopes, until, windows: hit };
+}
+
+/**
+ * 판정 결과(maintStateFor · 랙 groupMaintState)에서 그 범위를 켠 **창마다의 발생**(창 id · 그 발생의 시작 · 끝 — 순수).
+ *   ‘창 끝 뒤 억제’ 점검의 적용 기록(runtime.noteApplied occ)이 쓴다 — 점검 반복 3회차 D3: 한 서버를 덮는 창 둘이 겹치면 시작은 창들의 최소 · 끝은 최대를 섞어
+ *   거짓 over-cap 을 셌다. 창마다 그 창의 시작 · 끝으로 본다(호출처 5곳이 이 함수 하나 — 다시 짜지 않는다).
+ * @returns {Array<{id:string, since:number, until:number}>}
+ */
+export function scopeOccOf(ms, scope) {
+  const out = [];
+  for (const w of ms?.windows || []) {
+    if (!(w?.scopes || []).includes(scope)) continue;
+    const since = Number(w.start); const until = Number(w.end);
+    if (t(w.id) && Number.isFinite(since) && Number.isFinite(until)) out.push({ id: t(w.id), since, until });
+  }
+  return out;
 }
 
 /** [from, to) 안에서 그 범위(scope)를 켠 창이 이 서버를 덮는 구간(합쳐서 · 오름차순 — 순수). ⑤ 제외 · 추이 음영 · 변경 이벤트 묶음이 쓴다. */

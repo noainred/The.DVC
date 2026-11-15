@@ -341,6 +341,10 @@ export const SENT_RESULT_TEXT = Object.freeze({ queued: '보내는 중(대기열
 export const ISSUE_RESULT_TEXT = Object.freeze({ 'pending-central': '중앙에서 판단', 'daily-cap': '하루 상한', created: '만듦', commented: '댓글', dup: '이미 처리', error: '실패', skipped: '안 만듦' });
 export const RULES_HONEST = '판정 · 발송은 그 서버를 수집하는 노드(엣지)가 합니다 — 이 설정은 이 노드 것이고 중앙에서 엣지로 배포하지 않습니다(다음 판). 정비 창(설정 › 정비 창 · 알림 억제)의 ① 알림 억제를 켠 창 안에서는 기록만 하고 보내지 않으며, 창이 끝난 뒤에도 조건이 참이면 그때 한 번 보냅니다(제목 ‘정비 창 안부터 초과’). 백업 창(Bareos · Veeam 스케줄) 억제는 베어메탈 서버의 원천이 없어 동작하지 않습니다. 같은 상태가 이어지면 다시 보내지 않고, 재시작해도 다시 보내지 않습니다(상태 파일). 전력 · 온도 규칙(랙 여유 · 흡기 · 피크 급증 · PowerCap)은 그 서버의 판정 노드(대상과 전력 원천을 함께 가진 노드 — 전력 보기의 ‘알림 판정 없음’ 표시와 같은 기준)만 판정합니다 — 같은 표본은 지속에 한 번만 세고, 미측정 · 대상 목록에 없는 배치 서버가 있는 랙 · 낡은 센서 · 앞 7일 표본이 모자란 서버는 판정하지 않습니다(보류 — 정상으로 세지 않습니다). 보류(못 읽음 · 낡음)가 지속 주기 수보다 길게 이어졌거나 수집이 지속 × 수집 주기보다 오래 멈췄으면(재시작 · 실패) 지속을 처음부터 셉니다 — 주기 자체가 오래 걸리는 것은 끊지 않습니다. 판정 노드가 넘어가면 이 노드의 상태를 비우되(해소 알림 없음) 재발 억제는 그 기간 동안 남깁니다. 랙은 배치 서버 전부가 정비 창 안일 때만 억제하고, 일부만 창 안이면 보내되 본문에 정비 중 서버를 적습니다. 엣지 위임 서버는 그 엣지가 판정합니다.';
 export function sentResultText(r) { return SENT_RESULT_TEXT[r] ?? String(r || '—'); }
+/** 알림 이력의 규칙 칸 — 모르는 규칙은 서버가 'unknown' 으로 둔다(점검 반복 3회차 I1 — 다른 규칙 이름으로 보이지 않게 · 원인을 단정하지 않는다). */
+export const UNKNOWN_RULE_TEXT = '알 수 없는 규칙';
+export const UNKNOWN_RULE_HINT = '이 노드가 모르는 규칙의 발송 기록입니다(엣지와 판이 다를 수 있습니다) — 이 노드는 이 기록으로 이슈를 만들지 않습니다.';
+export function sentRuleText(rule) { return RULE_TEXT[rule]?.label || (rule === 'unknown' ? UNKNOWN_RULE_TEXT : String(rule || '—')); }
 export function issueResultText(r) { return r == null ? '—' : (ISSUE_RESULT_TEXT[r] ?? String(r)); }
 export function autoFocusText(r) {
   if (r == null) return '—';
