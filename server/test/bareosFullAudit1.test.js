@@ -157,3 +157,18 @@ test('⑩ B-22 — runner.sh SELinux 규칙 확인은 첫 칸이 정확히 그 �
   assert.equal(has('/data/bareos = /var/lib/bareos/storage', '/data/bareos'), true);
   assert.equal(has('', '/data/bareos'), false);
 });
+
+// ── 전체 점검 13회차(W-10) — 그룹 파일을 못 읽으면 정책 화면은 '그룹 예약 0 · 수동만' 이 아니라 모름 ──
+test('⑬ W-10 — vmPolicyVerdict: 그룹을 모르면 Director 스케줄에 없는 잡은 unknown · 정책 KPI 의 그룹 수는 null', async () => {
+  const P = await import('../src/bareos/policy.js');
+  const job = { vcenterId: 'vc', vmId: 'vc:vm-1', bareosJob: 'pv-1' };
+  assert.equal(P.vmPolicyVerdict({ job, method: null, group: null, inDirSchedule: false }), 'manual', '그룹을 알면 예전 그대로');
+  assert.equal(P.vmPolicyVerdict({ job, method: null, group: null, inDirSchedule: false, groupsKnown: false }), 'unknown');
+  assert.equal(P.vmPolicyVerdict({ job, method: null, group: null, inDirSchedule: true, groupsKnown: false }), 'policy', 'Director 스케줄에 있으면 정책');
+  const src = fs.readFileSync(path.resolve(path.dirname(new URL(import.meta.url).pathname), '../src/bareos/policy.js'), 'utf8');
+  assert.match(src, /group: groupsKnown \? groupSchedN : null/);
+  assert.match(src, /jobPolicyResolver\(\{ settings, groups: myGroups, db, now, groupsKnown \}\)/);
+  const rt = fs.readFileSync(path.resolve(path.dirname(new URL(import.meta.url).pathname), '../src/routes/api/bareosPolicy.js'), 'utf8');
+  assert.match(rt, /try \{ if \(groupsLoadError\(\)\) groupsKnown = false; else groups = listGroups\(\); \}/);
+  assert.match(rt, /digestsKnown: !regBad, groups, groupsKnown, marks:/);
+});

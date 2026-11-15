@@ -100,7 +100,7 @@ export default function BackupSummaryTool() {
   const linked = rows.filter((r) => r.veeamState !== 'unlinked').length;
   const veeamAuth = sum('veeamAuth');
   const bareosAllUnknown = rows.length > 0 && rows.every((r) => r.bareosUnknown);
-  const bareosHref = (visibleTabs({ admin: hasRole('admin'), bareosOk: toolAllowed('bareos-backup'), bareosViewOk: toolAllowed('bareos-summary') }).find(([k]) => k === 'bareos') || [])[2];
+  const bareosHref = (visibleTabs({ admin: hasRole('admin'), bareosOk: toolAllowed('bareos-backup'), bareosViewOk: toolAllowed('bareos-summary'), bareosDetailOk: toolAllowed('bareos-detail') }).find(([k]) => k === 'bareos') || [])[2];
   const g = data.bareosGroups;
   const bp = data.bareosPolicy || null;   // v2.839 Director 정책 수집본 요약(범위 안 · 없으면 null — 수집 전)
   const bNext = [g?.next, bp?.next].filter((x) => Number.isFinite(x)).reduce((a, b) => (a == null || b < a ? b : a), null);

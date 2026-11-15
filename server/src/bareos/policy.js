@@ -309,11 +309,13 @@ function groupSlots(g, from, to) {
  * @param {{ job?:object|null, method?:string|null, group?:object|null, inDirSchedule?:boolean|null }} x
  *   inDirSchedule: 그 잡이 Director 스케줄(status scheduler 의 jobs)에 있다 true · 없다 false · 수집본이 없어 모름 null
  */
-export function vmPolicyVerdict({ job, method, group, inDirSchedule }) {
+export function vmPolicyVerdict({ job, method, group, inDirSchedule, groupsKnown = true }) {
   if (!job) return method === 'bareos' ? 'unregistered' : null;   // 잡도 없고 Bareos 정책도 아니면 이 표의 대상이 아니다
   if (method && method !== 'bareos') return 'mismatch';
   if (group?.schedule?.enabled === true) return 'policy';
   if (inDirSchedule === true) return 'policy';
+  // 전체 점검 13회차(W-10): 그룹 파일을 못 읽었으면 그룹 예약으로 도는지 모른다 — '수동만' 으로 단정하지 않는다
+  if (groupsKnown === false) return 'unknown';
   if (inDirSchedule === null) return 'unknown';
   return 'manual';
 }
@@ -330,7 +332,7 @@ function findPool(rows, name) {
  * @returns {(j:object, method:string|null) => { dirId, verdict, src, next, dup, jobdefs, fullPool, incPool, pool, poolFrom, retentionSec, keep, group, collected }}
  *   dup = 그룹 예약과 Director 스케줄 둘 다에 든 잡의 Director 스케줄 이름(두 번 돌 수 있다 — 화면 경고) · 아니면 ''
  */
-export function jobPolicyResolver({ settings, groups = [], db = loadPolicy(), now = Date.now() }) {
+export function jobPolicyResolver({ settings, groups = [], db = loadPolicy(), now = Date.now(), groupsKnown = true }) {
   const groupOf = new Map();
   for (const g of groups) for (const id of g.vmIds || []) groupOf.set(`${g.vcenterId}|${id}`, g);
   const inSched = new Map();   // directorId → Map(jobName → scheduleName) | null(수집 전)
@@ -350,7 +352,7 @@ export function jobPolicyResolver({ settings, groups = [], db = loadPolicy(), no
     const d = db.directors[dirId];
     const m = schedOfDir(dirId);
     const inDir = m ? m.has(j.bareosJob) : null;
-    const verdict = vmPolicyVerdict({ job: j, method, group: g, inDirSchedule: inDir });
+    const verdict = vmPolicyVerdict({ job: j, method, group: g, inDirSchedule: inDir, groupsKnown });
     const jd = (val(d, 'jobdefs') || []).find((x) => x.name === settings.defaults?.jobDefs) || null;
     const poolName = g?.pool || j.pool || '';
     const pool = findPool(poolsFor(dirId), poolName);
@@ -378,7 +380,7 @@ export function jobPolicyResolver({ settings, groups = [], db = loadPolicy(), no
  * @param {{ settings, digests, digestsKnown, groups, marks, marksKnown, vmsById:Map, allowed:Set|null, admin:boolean, demo:boolean, now:number, vcName:(id)=>string }} o
  */
 export function policyView(o) {
-  const { settings, digests = [], digestsKnown = true, groups = [], marks = {}, marksKnown = true, vmsById = new Map(), allowed = null, admin = false, demo = false, now = Date.now(), vcName = (x) => x } = o;
+  const { settings, digests = [], digestsKnown = true, groups = [], groupsKnown = true, marks = {}, marksKnown = true, vmsById = new Map(), allowed = null, admin = false, demo = false, now = Date.now(), vcName = (x) => x } = o;
   const db = o.db || loadPolicy();
   const collecting = o.collecting || new Set();
   const scoped = scopedDirectors(settings, allowed);
@@ -483,7 +485,7 @@ export function policyView(o) {
   // ── VM 적용 정책 ──
   const vmRows = []; const counts = { policy: 0, manual: 0, unregistered: 0, mismatch: 0, unknown: 0 };
   if (digestsKnown) {
-    const resolve = jobPolicyResolver({ settings, groups: myGroups, db, now });
+    const resolve = jobPolicyResolver({ settings, groups: myGroups, db, now, groupsKnown });
     const seenVm = new Set();
     const push = (row) => { counts[row.verdict]++; if (vmRows.length < VM_ROWS_MAX) vmRows.push(row); };
     for (const j of mine) {
@@ -516,7 +518,7 @@ export function policyView(o) {
   return {
     ok: true, at: now, directors,
     kpis: {
-      schedules: { director: collected ? schedN : null, group: groupSchedN, unused: collected ? unusedN : null },
+      schedules: { director: collected ? schedN : null, group: groupsKnown ? groupSchedN : null, unused: collected ? unusedN : null },   // 전체 점검 13회차(W-10): 그룹 파일을 못 읽으면 0 이 아니라 모름
       jobdefs: jobdefsN, filesets: filesetsN, ai: jobdefsN === null ? null : aiN,
       pools: poolsN === null ? null : { n: poolsN, vols: volsN, full: fullPools, errorVols, maxPct },
       vm: { total: digestsKnown ? Object.values(counts).reduce((a, b) => a + b, 0) : null, ...counts },
