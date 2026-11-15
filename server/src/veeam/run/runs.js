@@ -233,7 +233,8 @@ export async function trackOnce(now = Date.now()) {
   if (_tracking) return { skipped: true };
   _tracking = true;
   let changed = false;
-  const mine = [];   // 이번 틱이 맡은 서버(끝나면 _trackBusy 에서 뺀다)
+  const mine = [];   // 이번 틱이 맡은 서버
+  const held = new Set();   // 이번 틱이 아직 쥔 서버 id(서버마다 끝나면 뺀다)
   try {
     const active = load().filter((r) => r.status === 'running');
     for (const run of active) {
@@ -249,9 +250,9 @@ export async function trackOnce(now = Date.now()) {
         for (const s of g.sessions) if (!s.finished && s.id) { const a = byServer.get(g.serverId) || []; a.push({ run, g, s }); byServer.set(g.serverId, a); }
       }
     }
-    for (const e of byServer) if (!_trackBusy.has(e[0])) { _trackBusy.add(e[0]); mine.push(e); }
+    for (const e of byServer) if (!_trackBusy.has(e[0])) { _trackBusy.add(e[0]); mine.push(e); held.add(e[0]); }
   } catch (e) {
-    for (const [sid] of mine) _trackBusy.delete(sid);
+    for (const sid of held) _trackBusy.delete(sid);
     _tracking = false;
     if (changed) persist();
     throw e;
@@ -259,7 +260,7 @@ export async function trackOnce(now = Date.now()) {
   _tracking = false;   // 모으기 끝 — 아래 회신 대기 동안 다음 틱이 다른 서버를 읽는다
   try {
     // 서버마다 병렬(동시 4) — 꺼진 엣지 하나의 회신 시한이 다른 서버의 추적을 늦추지 않게(2차 반증 N8 · 다음 틱까지 — V-4).
-    await poolRun(mine, TRACK_CONCURRENCY, async ([serverId, list]) => {
+    async function trackServer(serverId, list) {
       const server = getServerWithSecret(serverId);
       if (!server) {
         for (const { run, s } of list) { s.finished = true; for (const v of run.vms) if (v.sessionId === s.id && !FINAL.has(v.state)) { v.state = 'unknown'; v.detail = 'Veeam 서버 등록이 삭제돼 결과를 읽을 수 없습니다.'; } }
@@ -277,13 +278,16 @@ export async function trackOnce(now = Date.now()) {
         applySession(run, s.id, x);
         changed = true;
       }
-    });
+    }
+    // 2회차 반증 R-4: 서버마다 회신을 받는 즉시 그 서버의 가드를 푼다 — 틱 끝(가장 느린 서버)까지 붙잡으면 같은 틱에 묶인 빠른 서버가 다음 틱들에서 건너뛰어졌다.
+    //   이 틱이 아직 쥔 서버만(held) 푼다 — 먼저 푼 서버를 다음 틱이 다시 쥐었으면 그 가드를 지우지 않는다.
+    await poolRun(mine, TRACK_CONCURRENCY, async ([serverId, list]) => { try { await trackServer(serverId, list); } finally { held.delete(serverId); _trackBusy.delete(serverId); } });
     for (const run of load().filter((r) => r.status === 'running')) {
       for (const g of run.groups) if (g.state === 'running' && g.sessions.every((s) => s.finished || !s.id)) g.state = 'done';
       settle(run);
     }
   } finally {
-    for (const [sid] of mine) _trackBusy.delete(sid);
+    for (const sid of held) _trackBusy.delete(sid);   // 예외 경로 대비(정상 경로는 서버마다 이미 풀었다 — 다음 틱이 다시 쥔 서버는 건드리지 않는다)
     if (changed) persist();
   }
   return { ok: true };

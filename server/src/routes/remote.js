@@ -7,7 +7,7 @@
 import { Router } from 'express';
 import { store } from '../store.js';
 import { requireRole, requirePerm } from '../auth/auth.js';
-import { scopedVcenterIds } from '../auth/scope.js';
+import { scopedVcenterIds, writeScopedVcenterIds } from '../auth/scope.js';
 import { mergeScopedList, denyFleetWrite } from '../auth/scopeMerge.js';   // v2.607 RECENT2607-03 · 전체 점검 2회차 V-1
 import {
   getConfig, getConfigSafe, saveConfig,
@@ -246,14 +246,26 @@ function proxyHiddenFor(allowed, id) {
 }
 const PROXY_NOT_FOUND = '프록시를 찾을 수 없습니다.';
 const SHARED_PROXY_REASON = '이 중계 서버에는 범위 밖 법인의 vCenter 도 배정돼 있어 범위 제한 계정은 주소·포트·자동 구성·이름을 바꾸거나 삭제할 수 없습니다(다른 법인의 접속 경로입니다) — 자기 범위 vCenter 배정만 바꿀 수 있습니다.';
+/** 전체 점검 7회차(2회차 반증 R-3): 중계 서버 쓰기는 쓰기 범위로 판정(조회 범위와의 교집합 — 둘 다 무제한이면 null · 던지면 빈 범위). */
+function proxyWriteScope(req) {
+  try { return writeScopedVcenterIds(req.user, store.get()); } catch { return new Set(); }
+}
+const PROXY_WRITE_DENIED = '조회 전용 범위 — 이 중계 서버에 배정된 vCenter 는 수정 권한이 없습니다.';
+/** 중계 서버 동작(시험 · 상태 확인 · 배포 — 저장 비밀로 접속하거나 설정을 민다) 판정: 조회로 숨겨지면 404, 쓰기 범위의 vCenter 가 하나도 없으면 403, 아니면 0(전체 점검 7회차). */
+function proxyActionDenied(req, id) {
+  if (proxyHiddenFor(scopedVcenterIds(req.user, store.get()), id)) return 404;
+  return proxyHiddenFor(proxyWriteScope(req), id) ? 403 : 0;
+}
+const sendProxyDenied = (res, code, extra = {}) => (code === 404 ? res.status(404).json({ ok: false, reason: PROXY_NOT_FOUND, ...extra }) : res.status(403).json({ ok: false, error: 'forbidden', reason: PROXY_WRITE_DENIED, ...extra }));
 remoteRouter.post('/proxies', adminOnly, (req, res) => {
   const body = { ...(req.body || {}) };
-  const allowed = scopedVcenterIds(req.user, store.get());
+  const read = scopedVcenterIds(req.user, store.get());
+  const allowed = proxyWriteScope(req);   // 전체 점검 7회차: 쓰기 범위(조회만 보면 쓰기를 줄인 관리자가 범위 밖 법인의 중계 서버를 바꾸고 기본 중계 서버를 덮었다)
   let ignoredOutOfScope = 0;
   if (allowed) {
     if (String(body.id || '') === 'default') return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '기본 중계 서버는 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.' });
     const { prev, inScope, outScope } = proxyScopeOf(allowed, body.id);
-    if (prev && !inScope.length && outScope.length) return res.status(404).json({ ok: false, reason: '프록시를 찾을 수 없습니다.' });
+    if (prev && !inScope.length && outScope.length) return proxyHiddenFor(read, body.id) ? res.status(404).json({ ok: false, reason: '프록시를 찾을 수 없습니다.' }) : res.status(403).json({ ok: false, error: 'forbidden', reason: PROXY_WRITE_DENIED });
     if (prev && outScope.length) {
       const changed = sharedProxyChanges(prev, body);
       if (changed.length) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: SHARED_PROXY_REASON, changedFields: changed });
@@ -264,14 +276,14 @@ remoteRouter.post('/proxies', adminOnly, (req, res) => {
     }
   }
   const r = saveProxy(body);
-  if (r.ok && allowed && r.proxy) r.proxy = { ...r.proxy, vcenterIds: (r.proxy.vcenterIds || []).filter((v) => allowed.has(String(v))) };
+  if (r.ok && read && r.proxy) r.proxy = { ...r.proxy, vcenterIds: (r.proxy.vcenterIds || []).filter((v) => read.has(String(v))) };   // 응답 가림은 조회 범위(보이는 것)
   res.status(r.ok ? 200 : 400).json({ ...r, ...(ignoredOutOfScope ? { ignoredOutOfScope } : {}) });
 });
 remoteRouter.delete('/proxies/:id', adminOnly, (req, res) => {
-  const allowed = scopedVcenterIds(req.user, store.get());
+  const allowed = proxyWriteScope(req);   // 전체 점검 7회차: 쓰기 범위 — 조회 밖 404 → 쓰기 밖 403
   if (allowed) {
     const { prev, inScope, outScope } = proxyScopeOf(allowed, req.params.id);
-    if (prev && !inScope.length && outScope.length) return res.status(404).json({ ok: false, reason: '프록시를 찾을 수 없습니다.' });
+    if (prev && !inScope.length && outScope.length) return proxyHiddenFor(scopedVcenterIds(req.user, store.get()), req.params.id) ? res.status(404).json({ ok: false, reason: '프록시를 찾을 수 없습니다.' }) : res.status(403).json({ ok: false, error: 'forbidden', reason: PROXY_WRITE_DENIED });
     if (prev && outScope.length) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: SHARED_PROXY_REASON });
   }
   const r = removeProxy(req.params.id);
@@ -281,7 +293,7 @@ remoteRouter.delete('/proxies/:id', adminOnly, (req, res) => {
 // Health check for one proxy — auto-selects Data Plane API or SSH deploy based
 // on what the proxy has enabled. Returns { ok, ms, reason, method }.
 remoteRouter.post('/proxies/:id/health', adminOnly, async (req, res) => {
-  if (proxyHiddenFor(scopedVcenterIds(req.user, store.get()), req.params.id)) return res.status(404).json({ ok: false, reason: PROXY_NOT_FOUND, method: 'none' }); // v2.621 SEC-01
+  { const d = proxyActionDenied(req, req.params.id); if (d) return sendProxyDenied(res, d, { method: 'none' }); }   // v2.621 SEC-01 · 전체 점검 7회차(쓰기 밖 403)
   const proxy = getProxyById(req.params.id);
   if (!proxy) return res.status(404).json({ ok: false, reason: '프록시를 찾을 수 없습니다.', method: 'none' });
   try {
@@ -305,7 +317,7 @@ remoteRouter.post('/proxies/:id/health', adminOnly, async (req, res) => {
 // url 만 공격자 호스트로 바꾸고 password:'********' 를 보내 저장된 Data Plane 비밀번호를 그 호스트로
 // 평문(Basic) 전송시킬 수 있다. 새 URL 을 시험하려면 비밀번호를 새로 입력해야 한다.
 remoteRouter.post('/test', adminOnly, async (req, res) => {
-  if (proxyHiddenFor(scopedVcenterIds(req.user, store.get()), (req.body || {}).proxyId)) return res.status(404).json({ ok: false, reason: PROXY_NOT_FOUND }); // v2.621 SEC-01
+  { const d = proxyActionDenied(req, (req.body || {}).proxyId); if (d) return sendProxyDenied(res, d); }   // v2.621 SEC-01 · 전체 점검 7회차(쓰기 밖 403)
   const proxy = getProxyById((req.body || {}).proxyId);
   const body = (req.body || {}).dataplane || {};
   const dp = { ...proxy.dataplane, ...body };
@@ -321,7 +333,7 @@ remoteRouter.post('/test', adminOnly, async (req, res) => {
 // ⚠ 보안(H-2): 저장된 비밀번호/개인키를 재사용하면 접속 host/port 도 저장값으로 고정한다 —
 // dep.host 만 바꿔 저장된 root 비밀번호·SSH 개인키를 공격자 sshd 로 보내는 것을 막는다.
 remoteRouter.post('/deploy/test', adminOnly, async (req, res) => {
-  if (proxyHiddenFor(scopedVcenterIds(req.user, store.get()), (req.body || {}).proxyId)) return res.status(404).json({ ok: false, reason: PROXY_NOT_FOUND }); // v2.621 SEC-01
+  { const d = proxyActionDenied(req, (req.body || {}).proxyId); if (d) return sendProxyDenied(res, d); }   // v2.621 SEC-01 · 전체 점검 7회차(쓰기 밖 403)
   const proxy = getProxyById((req.body || {}).proxyId);
   const body = (req.body || {}).deploy || {};
   const dep = { ...proxy.deploy, ...body };
@@ -340,8 +352,9 @@ remoteRouter.post('/deploy', adminOnly, async (req, res) => {
   const onlyId = (req.body || {}).proxyId;
   // v2.621(감사 SEC-01): 범위 admin 은 숨겨진 프록시(범위 밖 vCenter 만 배정)를 순회하지 않는다 — 지정했으면 404(존재 은닉),
   //   전체 배포면 건너뛰고 개수를 밝힌다(POST·DELETE /proxies 가 404 로 숨기는 것과 같은 기준).
-  const allowed = scopedVcenterIds(req.user, store.get());
-  if (onlyId && proxyHiddenFor(allowed, onlyId)) return res.status(404).json({ ok: false, reason: PROXY_NOT_FOUND });
+  // 전체 점검 7회차: 배포는 설정을 미는 동작 — 순회 · 지정 판정은 쓰기 범위(조회로 숨겨진 지정은 404 그대로)
+  const allowed = proxyWriteScope(req);
+  if (onlyId) { const d = proxyActionDenied(req, onlyId); if (d) return sendProxyDenied(res, d); }
   let omittedOutOfScope = 0;
   const results = [];
   for (const proxy of listProxies()) {

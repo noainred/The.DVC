@@ -6,7 +6,7 @@ import { enforcedToolKeys, TOOL_ENFORCEMENT_NOTES } from '../../auth/toolAccess.
 import { logAudit } from '../../audit.js';
 import { adminOnly } from './shared.js';
 import { store } from '../../store.js';
-import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
+import { scopedVcenterIds, writeScopedVcenterIds, isFullReadWriteScope } from '../../auth/scope.js';
 import { denyFleetWrite } from '../../auth/scopeMerge.js';   // 전체 점검 2회차 V-1 — 전 법인 공용 쓰기는 조회 ∧ 쓰기 전체
 
 /*
@@ -28,15 +28,20 @@ function scopeOf(raw) {
   return { vcenters: arrOf(raw.vcenters), regions: arrOf(raw.regions), writeVcenters: arrOf(raw.writeVcenters) };
 }
 function subset(inner, outer) {
-  if (!inner) return false;         // 전체 범위(null)는 어떤 범위의 부분집합도 아니다
-  if (!outer) return true;
+  if (!outer) return true;          // 바깥이 무제한이면 무엇이든 안이다(조회 무제한 · 쓰기 제한 요청자 — 전체 점검 7회차)
+  if (!inner) return false;         // 전체 범위(null)는 제한된 범위의 부분집합이 아니다
   for (const id of inner) if (!outer.has(id)) return false;
   return true;
 }
-/** 대상 scope(원시)가 요청자(req.user) 범위 안인가. 요청자가 전체 범위면 항상 true. */
+/**
+ * 대상 scope(원시)가 요청자(req.user) 범위 안인가. 요청자가 조회 ∧ 쓰기 전체 범위면 항상 true.
+ * 전체 점검 7회차(2회차 반증 R-1 — 재현): 예전 첫 줄은 '조회 범위가 무제한이면 true' 라, writeVcenters 로 쓰기만 줄인 관리자가
+ *   자기 · 남의 scope 를 null(조회 · 쓰기 무제한)로 바꾸거나 전체 범위 관리자를 만들고 그 비밀번호 · OTP 를 대리 설정했다(v2.733 · v2.904 함정과 같은 모양).
+ *   이제 대상의 조회 ⊆ 요청자 조회(무제한이면 통과) · 대상의 쓰기 ⊆ 요청자 쓰기(요청자 쓰기가 제한이면 대상도 그 안이어야 한다).
+ */
 function scopeWithinActor(rawScope, actor, snap) {
+  if (isFullReadWriteScope(actor, snap)) return true;
   const actorRead = scopedVcenterIds(actor, snap);
-  if (!actorRead) return true;
   const sc = scopeOf(rawScope);
   if (!sc) return false;
   const u = { scope: sc };
@@ -49,12 +54,16 @@ function userScopeRaw(username) {
   const u = listUsers().find((x) => x.username === username);
   return u ? u : null;
 }
-/** 범위 계정이 대상 계정을 다룰 수 없으면 응답하고 true(404 — 존재 은닉). */
+/**
+ * 범위 계정이 대상 계정을 다룰 수 없으면 응답하고 true. 조회 범위 계정은 404(목록에 보이지 않는 계정 — 존재 은닉),
+ * 조회 무제한 · 쓰기 제한 계정은 403(목록에 보이는 계정 — 조회 밖 404 → 쓰기 밖 403 규약 · 전체 점검 7회차).
+ */
 function denyTargetOutOfScope(req, res) {
   const snap = store.get();
-  if (!scopedVcenterIds(req.user, snap)) return false;
+  if (isFullReadWriteScope(req.user, snap)) return false;
   const t = userScopeRaw(req.params.username);
   if (t && scopeWithinActor(t.scope, req.user, snap)) return false;
+  if (t && !scopedVcenterIds(req.user, snap)) { res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: SCOPE_DENY_REASON }); return true; }
   res.status(404).json({ ok: false, reason: '사용자를 찾을 수 없습니다.' });
   return true;
 }
@@ -102,7 +111,7 @@ adminRouter.get('/users', adminOnly, (req, res) => {
 // 자격증명 변경과 같은 등급의 보안 작업이므로 감사로그를 남긴다(이전에는 기록이 없었다).
 adminRouter.post('/users', adminOnly, (req, res) => {
   const snap = store.get();
-  if (scopedVcenterIds(req.user, snap) && !scopeWithinActor((req.body || {}).scope, req.user, snap)) {
+  if (!isFullReadWriteScope(req.user, snap) && !scopeWithinActor((req.body || {}).scope, req.user, snap)) {   // 전체 점검 7회차: 쓰기 제한 계정도
     logAudit({ user: req.user?.username, action: '사용자 생성 거부', target: String((req.body || {}).username || ''), detail: '범위 밖 scope', ip: req.ip || '' });
     return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: SCOPE_DENY_REASON });
   }
@@ -113,7 +122,7 @@ adminRouter.post('/users', adminOnly, (req, res) => {
 
 adminRouter.patch('/users/:username', adminOnly, (req, res) => {
   if (denyTargetOutOfScope(req, res)) return;
-  if (scopedVcenterIds(req.user, store.get()) && (req.body || {}).scope !== undefined && !scopeWithinActor((req.body || {}).scope, req.user, store.get())) {
+  if (!isFullReadWriteScope(req.user, store.get()) && (req.body || {}).scope !== undefined && !scopeWithinActor((req.body || {}).scope, req.user, store.get())) {   // 전체 점검 7회차
     logAudit({ user: req.user?.username, action: '사용자 수정 거부', target: req.params.username, detail: '범위 밖 scope', ip: req.ip || '' });
     return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: SCOPE_DENY_REASON });
   }

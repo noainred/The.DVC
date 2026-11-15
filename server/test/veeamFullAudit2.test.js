@@ -221,14 +221,32 @@ test('③ V-3 — 업그레이드 대기: Veeam 관리 작업 · 보내는 중 �
   assert.ok(iReq > 0 && iReq < iSend, '삭제 요청 감사는 보내기 전에');
 });
 
-test('④ V-4 — 세션 추적: 느린 서버를 기다리는 동안 다음 틱이 다른 서버를 읽는다 · 같은 서버는 겹쳐 읽지 않는다', async () => {
-  const src = rd('veeam/run/runs.js');
-  assert.match(src, /const _trackBusy = new Set\(\)/);
-  assert.match(src, /for \(const e of byServer\) if \(!_trackBusy\.has\(e\[0\]\)\) \{ _trackBusy\.add\(e\[0\]\); mine\.push\(e\); \}/);
-  assert.match(src, /_tracking = false;[^\n]*\n\s*try \{\n[^\n]*\n\s*await poolRun\(mine,/, '모으기 뒤 가드를 풀고 회신을 기다린다');
-  assert.match(src, /finally \{\n\s*for \(const \[sid\] of mine\) _trackBusy\.delete\(sid\);/);
+test('④ V-4(+반증 R-4) — 세션 추적: 느린 서버(꺼진 엣지)를 기다리는 동안 다음 틱이 같은 틱에 묶였던 빠른 서버를 다시 읽는다 · 느린 서버는 겹쳐 읽지 않는다', async () => {
+  const REG = await import('../src/veeam/registry.js');
+  const runs = await import('../src/veeam/run/runs.js');
+  const E = await import('../src/veeam/run/edgeOps.js');
+  const { authGuard } = await import('../src/veeam/poller.js');
+  runs._resetForTest(); E._resetForTest();
+  const slow = REG.saveServer({ name: 'SLOW', host: 'vbr-slow.corp.local', username: 'u', password: 'p', agent: 'edge-x', vcenterIds: ['vcA'] });   // 엣지 대행 — 아무도 가져가지 않는다
+  const fast = REG.saveServer({ name: 'FAST', host: 'vbr-fast.corp.local', username: 'u', password: 'p', vcenterIds: ['vcB'] });                   // 중앙 직접 — 인증 정지라 즉시 '보내지 않음'
+  assert.ok(slow.id && fast.id, '등록');
+  authGuard.markAuthStopped(fast.id, REG.getServerWithSecret(fast.id), '시험용 정지');
+  const grp = (srv, sid) => ({ serverId: srv.id, serverName: srv.name, kind: 'quick', state: 'running', sessions: [{ id: sid, objectIds: [sid], finished: false }] });
+  const vm = (srv, sid) => ({ vmId: sid, name: sid, objectId: sid, serverId: srv.id, how: 'quick', state: 'running', sessionId: sid });
+  runs._resetForTest();   // 파일을 다시 읽게(_runs = null)
+  fs.writeFileSync(path.join(DIR, 'veeam-backup-runs.json'), JSON.stringify({ runs: [{ id: 'run-1', at: Date.now(), status: 'running', mode: 'quick', user: 't', vms: [vm(slow, 's-slow'), vm(fast, 's-fast')], groups: [grp(slow, 's-slow'), grp(fast, 's-fast')] }] }));
+  const fastSess = () => runs.getRun('run-1').groups.find((g) => g.serverId === fast.id).sessions[0];
+  const tickA = runs.trackOnce();   // 느린 서버 회신(인출 시한 수 분)을 기다리며 끝나지 않는다 — 기다리지 않는다
+  for (let i = 0; i < 20 && !fastSess().lastErrorAt; i++) await new Promise((r) => setTimeout(r, 5));
+  const first = fastSess().lastErrorAt;
+  assert.ok(first > 0, '빠른 서버는 첫 틱에서 읽었다');
+  await new Promise((r) => setTimeout(r, 5));
+  const tickB = await runs.trackOnce();
+  assert.notEqual(tickB.skipped, true, '전역 가드로 통째로 건너뛰지 않는다');
+  assert.ok(fastSess().lastErrorAt > first, '같은 틱에 묶였던 빠른 서버를 다음 틱이 다시 읽는다(반증 R-4 — 예전 판은 틱 A 가 끝날 때까지 건너뛰었다)');
+  assert.equal(E.pendingView().filter((o) => o.kind === 'sessions').length, 1, '느린 서버는 겹쳐 보내지 않는다(대기 1건)');
+  E._resetForTest(); void tickA;
 });
-
 test('⑤ V-5 — 복원 지점 시각을 모르면 null(0 · 1970 아님)', () => {
   const bm = rd('routes/api/backupManage.js');
   assert.match(bm, /const pointAt0 = numOrNull\(b\.pointAt\);\n\s*const pointAt = pointAt0 !== null && pointAt0 > 946_684_800_000 \? pointAt0 : null;/);

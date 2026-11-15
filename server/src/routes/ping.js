@@ -24,7 +24,7 @@
 
 import express from 'express';
 import { requireRole } from '../auth/auth.js';
-import { scopedVcenterIds } from '../auth/scope.js';
+import { scopedVcenterIds, writeScopedVcenterIds } from '../auth/scope.js';
 import { isAdminDetailUser } from '../auth/demoGuest.js';
 import { store } from '../store.js';
 import { loadVcenterConfig } from '../config.js';
@@ -59,8 +59,10 @@ const rangeMsOf = (q, def = '1d') => RANGES[String(q || def)] || RANGES[def];
 // 전 vCenter 관리 호스트명·IP·응답시간을 열람하던 갭(CLAUDE.md "조회 라우트 scope 는 예외 없이")
 // 을 닫는다. vCenter 타깃 id 는 'vc_<vcenterId>' 이므로 그 접두를 벗겨 허용 집합과 대조한다.
 // manual 타깃(vCenter 귀속 없음)은 그대로 두고(기존 동작), edge 타깃은 별도 라우트(DC 그룹)다.
-function vcScope(req) {
-  const allowed = scopedVcenterIds(req.user, store.get()); // null = 전체 허용
+function vcScope(req, { write = false } = {}) {
+  // 전체 점검 7회차: 쓰기 판정은 쓰기 범위(조회 범위와의 교집합 — 둘 다 무제한이면 null). 던지면 빈 범위(거부).
+  let allowed;
+  try { allowed = write ? writeScopedVcenterIds(req.user, store.get()) : scopedVcenterIds(req.user, store.get()); } catch { allowed = new Set(); } // null = 전체 허용
   const vcIdOf = (id) => (String(id).startsWith('vc_') ? String(id).slice(3) : null);
   // v2.597(감사 AUTHZ-2597-01): 대상 객체에 vcenterId 가 있으면 그것이 귀속이다 — id 접두('vc_')만 보면 vcenterId 만
   //   가진 대상(수동 등록 등)이 범위 밖인데도 이름·관리 IP·RTT 가 보였다.
@@ -123,8 +125,15 @@ pingRouter.get('/series', async (req, res) => {
 //   · 범위 계정은 source 를 manual·vcenter 밖으로 바꾸지 못한다(edge·vcport 는 전 법인 공용 목록이다).
 //   전체 범위 admin 은 예전 그대로(scope.all).
 const LISTED_SOURCES = new Set(['manual', 'vcenter']);
-function scopedWriteDenied(req, { id = null, existing = false } = {}) {
-  const scope = vcScope(req);
+/**
+ * 전체 점검 7회차(2회차 반증 R-3): 조회 밖 → 404 · 조회는 되지만 쓰기 밖 → 403(규약). 예전에는 조회 범위만 봐서 쓰기 범위를 줄인 관리자가
+ *   범위 밖 법인 대상을 등록 · 수정 · 삭제(이력째)했다. 반환: false | 404 | 403.
+ */
+function scopedWriteDenied(req, opts = {}) {
+  if (scopeDeniedBy(vcScope(req), req, opts)) return 404;
+  return scopeDeniedBy(vcScope(req, { write: true }), req, opts) ? 403 : false;
+}
+function scopeDeniedBy(scope, req, { id = null, existing = false } = {}) {
   if (scope.all) return false;
   const body = req.body || {};
   if (existing) {
@@ -145,21 +154,27 @@ function scopedWriteDenied(req, { id = null, existing = false } = {}) {
 const scopeNotFound = (res) => res.status(404).json({ ok: false, reason: '없는 대상' });
 // 범위 계정에는 전 vCenter·전 대상을 건드리는 일괄 작업을 열지 않는다(seed-vcenters·vcport·poll-now).
 function denyScopedBulk(req, res, what) {
-  if (vcScope(req).all) return false;
+  if (vcScope(req, { write: true }).all) return false;   // 전체 점검 7회차: 조회 ∧ 쓰기 전체만
   res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: `${what}은(는) 전 vCenter 대상을 바꿉니다 — 전체 범위(vCenter 제한 없는) 계정만 할 수 있습니다.` });
   return true;
 }
 
 pingRouter.post('/targets', adminOnly, (req, res) => {
-  if (scopedWriteDenied(req)) return res.status(404).json({ ok: false, reason: '범위 밖 vCenter 대상은 등록할 수 없습니다.' });
+  const d = scopedWriteDenied(req);
+  if (d === 403) return res.status(403).json({ ok: false, error: 'forbidden', reason: '조회 전용 범위 — 이 법인 대상은 수정 권한이 없습니다.' });
+  if (d) return res.status(404).json({ ok: false, reason: '범위 밖 vCenter 대상은 등록할 수 없습니다.' });
   const r = addTarget(req.body || {}); res.status(r.ok ? 200 : 400).json(r);
 });
 pingRouter.put('/targets/:id', adminOnly, (req, res) => {
-  if (scopedWriteDenied(req, { id: req.params.id, existing: true })) return scopeNotFound(res);
+  const d = scopedWriteDenied(req, { id: req.params.id, existing: true });
+  if (d === 403) return res.status(403).json({ ok: false, error: 'forbidden', reason: '조회 전용 범위 — 이 법인 대상은 수정 권한이 없습니다.' });
+  if (d) return scopeNotFound(res);
   const r = updateTarget(req.params.id, req.body || {}); res.status(r.ok ? 200 : 400).json(r);
 });
 pingRouter.delete('/targets/:id', adminOnly, async (req, res) => {
-  if (scopedWriteDenied(req, { id: req.params.id, existing: true })) return scopeNotFound(res);
+  const d = scopedWriteDenied(req, { id: req.params.id, existing: true });
+  if (d === 403) return res.status(403).json({ ok: false, error: 'forbidden', reason: '조회 전용 범위 — 이 법인 대상은 수정 권한이 없습니다.' });
+  if (d) return scopeNotFound(res);
   const r = removeTarget(req.params.id);
   // v2.603(감사 DB2603-02 후속): 이력 삭제는 청크로 나눠 **백그라운드**에서 끝까지 돈다(대상 1년치 ≈ 52만 행을 응답 경로에서
   // 기다리지 않는다). 대상은 이미 목록에서 빠졌으므로 화면에 영향이 없고, 실패는 조용히 버리지 않고 콘솔에 남긴다.

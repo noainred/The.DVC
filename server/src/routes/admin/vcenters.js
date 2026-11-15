@@ -17,13 +17,16 @@ import { scopedVcenterIds, writeScopedVcenterIds, isFullReadWriteScope, WRITE_SC
  *   · 새 등록·데이터 소스 전환·표시 순서 저장은 전 법인에 걸친 동작이라 범위 계정 403.
  */
 const fleetWideOnly = fullScopeOnlyWith('vCenter 등록·데이터 소스 전환·표시 순서는 전 법인에 걸친 설정이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.');
-/** 대상 vCenter 가 범위 밖이면 응답하고 true. */
+/**
+ * 대상 vCenter 가 범위 밖이면 응답하고 true — 조회 밖 404 → 쓰기 밖 403.
+ * 전체 점검 7회차(2회차 반증 R-2 — 재현): 예전 `if (!read) return false` 가 쓰기 검사보다 앞이라 조회 무제한 · 쓰기 제한 관리자가
+ *   쓰기 범위 밖 vCenter 등록을 고치고 지웠다(server/CLAUDE.md v2.733 함정). 판정이 던지면 거부.
+ */
 function denyVcOutOfScope(req, res, id) {
   const snap = store.get();
-  const read = scopedVcenterIds(req.user, snap);
-  if (!read) return false;
-  if (!read.has(String(id))) { res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' }); return true; }
-  const write = writeScopedVcenterIds(req.user, snap);
+  let read; let write;
+  try { read = scopedVcenterIds(req.user, snap); write = writeScopedVcenterIds(req.user, snap); } catch { read = new Set(); write = new Set(); }
+  if (read && !read.has(String(id))) { res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' }); return true; }
   if (write && !write.has(String(id))) { res.status(403).json({ ok: false, error: 'forbidden', reason: '조회 전용 범위 — 이 vCenter 는 수정 권한이 없습니다.' }); return true; }
   return false;
 }
@@ -92,7 +95,7 @@ adminRouter.post('/vcenters/test', adminOnly, async (req, res) => {
     const id = String((req.body || {}).id || '');
     const read = scopedVcenterIds(req.user, store.get());
     if (!id) return res.status(403).json(read ? { ok: false, error: 'forbidden', reason: '새 vCenter 연결 테스트는 전체 범위(vCenter 제한 없는) 계정만 할 수 있습니다.' } : { ok: false, error: 'forbidden', reason: WRITE_SCOPE_PARTIAL_REASON, writeScope: 'partial' });
-    if (read && !read.has(id)) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
+    if (denyVcOutOfScope(req, res, id)) return;   // 전체 점검 7회차: 저장 항목 시험(저장 비밀로 접속)도 조회 밖 404 → 쓰기 밖 403
     // v2.630 AUTHZ2630-02: 범위 계정의 테스트는 저장된 접속처(host·port)로만 — body.host 로 바꿔 임의 호스트를 두드리지 못하게.
     return res.json(await testConnection(req.body || {}, { pinSavedHost: true }));
   }
@@ -106,7 +109,9 @@ adminRouter.post('/vcenters/test-all', adminOnly, async (req, res) => {
   const onlyEnabled = String(req.query.only || (req.body || {}).only || '') === 'enabled';
   const withRelay = String(req.query.relay || (req.body || {}).relay || 'true') !== 'false';
   let list = sortByOrder(listRegistry());
-  const allowedAll = scopedVcenterIds(req.user, store.get());
+  // 전체 점검 7회차: 저장 비밀로 접속하는 시험이라 쓰기 범위 안만(writeScopedVcenterIds — 조회 범위와의 교집합 · 둘 다 무제한이면 null). 던지면 빈 목록.
+  let allowedAll;
+  try { allowedAll = writeScopedVcenterIds(req.user, store.get()); } catch { allowedAll = new Set(); }
   const totalRegistered = list.length;
   if (allowedAll) list = list.filter((v) => allowedAll.has(v.id));   // v2.607: 범위 안만
   const omittedOutOfScope = totalRegistered - list.length;

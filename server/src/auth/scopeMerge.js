@@ -1,4 +1,4 @@
-import { scopedVcenterIds, isFullReadWriteScope, WRITE_SCOPE_PARTIAL_REASON } from './scope.js';
+import { scopedVcenterIds, writeScopedVcenterIds, isFullReadWriteScope, WRITE_SCOPE_PARTIAL_REASON } from './scope.js';
 import { store } from '../store.js';
 
 /**
@@ -93,6 +93,15 @@ export function denyFleetWrite(req, res, reason) {
     ? { ok: false, error: 'forbidden', requiredOwner: true, reason }
     : { ok: false, error: 'forbidden', requiredOwner: true, reason: WRITE_SCOPE_PARTIAL_REASON, writeScope: 'partial' });
   return true;
+}
+
+/**
+ * 설정 저장(범위 병합 · 전역 필드 보존)이 쓰는 범위 — **쓰기 범위**(조회와의 교집합 · 둘 다 무제한이면 null · 던지면 빈 집합 = 전부 보존).
+ * 전체 점검 7회차(2회차 반증 R-3): 저장 라우트가 조회 범위(scopedVcenterIds)로 병합해, 조회 무제한 · 쓰기 제한 관리자의 PUT 이 전 법인 키 ·
+ *   전역 필드(보존일 · 주기)를 바꾸고 대상에서 뺀 법인의 DB 파일까지 지웠다. 응답 가림(보이는 것)은 그대로 조회 범위로 한다.
+ */
+export function writeMergeScope(req) {
+  try { return writeScopedVcenterIds(req.user, store.get()); } catch { return new Set(); }
 }
 
 /**

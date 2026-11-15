@@ -1,7 +1,7 @@
 // 용량/낭비/씬/VM파인더/온도/용량예측 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
-import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
+import { scopedVcenterIds, inUserScope, writeScopedVcenterIds } from '../../auth/scope.js';
 import { scopePollerStatus } from '../../auth/scopeStatus.js';
-import { mergeScopedIds, denyScopedRun, keepScopedFields, ignoredGlobalFields } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01: 범위 계정 PUT 은 범위 밖 키를 보존한다 · v2.607 AUTHZ2607-05 전역 필드
+import { mergeScopedIds, denyScopedRun, keepScopedFields, ignoredGlobalFields, writeMergeScope } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01: 범위 계정 PUT 은 범위 밖 키를 보존한다 · v2.607 AUTHZ2607-05 전역 필드
 import { requireRole, requirePerm } from '../../auth/auth.js'; // v2.478(감사 S5): /tools/* 조회도 tools 권한 게이트   // 설정 변경/데이터 삭제는 관리자 전용
 import { logAudit } from '../../audit.js';
 import { acquireExport } from '../../util/exportBusy.js'; // v2.575 — 내보내기 동시 1건 가드(단일 소스)
@@ -669,7 +669,7 @@ api.get('/tools/waste/off-check', requirePerm('tools'), (req, res) => {
 });
 api.put('/tools/waste/off-check/settings', requireRole('admin'), (req, res) => {
   // v2.607 AUTHZ2607-05: 이 설정은 전부 전 법인 공용(사용 여부·주기) — 범위 계정의 값은 적용하지 않고 밝힌다.
-  const allowed = scopedVcenterIds(req.user, store.get());
+  const allowed = writeMergeScope(req);   // 전체 점검 7회차: 쓰기 범위가 제한된 계정도 '범위 계정'
   const kg = keepScopedFields(req.body || {}, loadPowerOffSettings(), allowed, []);
   const next = allowed ? loadPowerOffSettings() : savePowerOffSettings(kg.patch);
   if (!allowed) logAudit({ user: req.user?.username, action: '전원 꺼짐 점검 설정 변경', detail: `enabled=${next.enabled} interval=${next.intervalHours}h`, ip: req.ip || '' });
@@ -991,7 +991,8 @@ api.put('/tools/waste/settings', requireRole('admin'), (req, res) => {
   // v2.605 AUTHZ2605-01: 범위 제한 admin 은 GET 이 걸러 준 목록을 되돌려 보낸다 — 그것을 전체 목록으로
   //   저장하면 다른 법인이 대상에서 빠지고 그 DB 파일까지 지워졌다. 범위 밖 id 는 직전 값을 보존하고,
   //   범위 밖 DB·전체 합계 DB 는 이 계정의 저장으로 지우지 않는다(trackTotal 은 전 법인 계열이라 보존).
-  const allowed = scopedVcenterIds(req.user, snap);
+  const allowed = writeMergeScope(req);   // 전체 점검 7회차: 병합 · 전역 필드 · 지울 DB 는 쓰기 범위(조회만 보면 쓰기를 줄인 관리자가 다른 법인을 대상에서 빼 DB 파일까지 지웠다)
+  const read = scopedVcenterIds(req.user, snap);
   let ignoredOutOfScope = []; let unapplied = null; let unappliedReason = null;
   // v2.607 AUTHZ2607-05: 전역 필드(enabled·retentionDays·trackTotal 등)는 전 법인 공용 — 범위 계정의 값은 버리고 밝힌다
   //   (예전에는 범위 admin 이 보존일을 1일로 내려 전 법인 VM 성능 이력을 prune 시켰다).
@@ -1029,7 +1030,7 @@ api.put('/tools/waste/settings', requireRole('admin'), (req, res) => {
     detail: dropped.length ? `DB 삭제: ${dropped.join(', ')}` : '', ip: req.ip || '',
   });
   // PUT 응답도 GET 과 같은 필터 — 범위 밖 id 를 응답으로 되돌려 주지 않는다.
-  const safeNext = allowed ? { ...next, vcenterIds: (next.vcenterIds || []).filter((id) => allowed.has(id)) } : next;
+  const safeNext = read ? { ...next, vcenterIds: (next.vcenterIds || []).filter((id) => read.has(id)) } : next;   // 응답 가림은 조회 범위
   res.json({ ok: true, settings: safeNext, staleIds: vmperfStaleIds(safeNext.vcenterIds, snap), dropped, ...(ignoredOutOfScope.length ? { ignoredOutOfScope: ignoredOutOfScope.length } : {}), ...(unapplied ? { unapplied, unappliedReason } : {}), ...ignoredGlobalFields(kg.ignoredGlobal) });
 });
 
@@ -1042,9 +1043,11 @@ api.delete('/tools/waste/settings/data', requireRole('admin'), (req, res) => {
   }
   const vcId = String(req.query.vcenterId ?? '');
   // v2.605 AUTHZ2605-01: 범위 제한 admin 은 범위 밖 vCenter·전체 합계(전 법인 계열) DB 를 지울 수 없다.
-  const allowedDel = scopedVcenterIds(req.user, store.get());
+  // 전체 점검 7회차(2회차 반증 R-3): 되돌릴 수 없는 삭제라 쓰기 범위로 판정(조회만 보면 쓰기를 줄인 관리자가 범위 밖 · 전체 합계 DB 를 지웠다) · 던지면 거부
+  let allowedDel;
+  try { allowedDel = writeScopedVcenterIds(req.user, store.get()); } catch { allowedDel = new Set(); }
   if (allowedDel && (vcId === '' || !allowedDel.has(vcId))) {
-    return res.status(403).json({ ok: false, requiredOwner: true, reason: '범위 밖 vCenter 또는 전체 합계 데이터는 전체 범위 계정만 지울 수 있습니다.' });
+    return res.status(403).json({ ok: false, requiredOwner: true, reason: '쓰기 범위 밖 vCenter 또는 전체 합계 데이터는 조회 · 쓰기 전체 범위 계정만 지울 수 있습니다.' });
   }
   const removed = dropVmperfDb(vcId);
   logAudit({ user: req.user?.username, action: 'VM 성능 트래킹 데이터 삭제', target: vcId || '(전체 합계)', detail: `파일 ${removed}개`, ip: req.ip || '' });
