@@ -10,14 +10,15 @@ import { alertQueryOf, alertCondText, sameAlertQuery, alertStatusText } from './
 
 const TONE = { ok: '#86efac', bad: '#fca5a5', warn: '#fcd34d' };
 
-export default function BackupSummaryAlert({ alert, finder, vcName, onChanged }) {
+export default function BackupSummaryAlert({ alert, finder, vcName, onChanged, region = '' }) {
   const s = alert?.settings || null;
   const [time, setTime] = useState(s?.time || '08:30');
   const [enabled, setEnabled] = useState(s?.savedAt ? s.enabled : true);   // 처음 저장이면 켜 둔 채로 시작
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   if (!alert || alert.hidden) return null;
-  const same = s && sameAlertQuery(s.q, finder);
+  // 전체 점검 6회차(W-2): 리전 보기의 찾기 결과는 그 리전만이지만 알림은 리전을 저장하지 않아 전 법인에서 찾는다 — '같음' 으로 보이지 않게
+  const same = s && !region && sameAlertQuery(s.q, finder);
   const finderOk = Number.isInteger(Number(finder?.n)) && Number(finder.n) >= 1 && Number(finder.n) <= 999;
   const save = async () => {
     setBusy(true); setMsg(null);
@@ -47,8 +48,9 @@ export default function BackupSummaryAlert({ alert, finder, vcName, onChanged })
       <div style={{ overflowWrap: 'anywhere' }}>
         <span className="muted">저장된 설정: </span>
         {s ? <><b style={{ color: s.enabled ? TONE.ok : 'var(--text-dim)' }}>{s.enabled ? `켜짐 · 매일 ${s.time}` : '꺼짐'}</b> · {alertCondText(s.q, vcName)}{s.savedBy ? <span className="muted"> · {s.savedBy} 저장</span> : null}</> : '—'}
-        {s && <span style={{ color: same ? TONE.ok : TONE.warn }}> · {same ? '지금 찾기 조건과 같음' : '지금 찾기 조건과 다름'}</span>}
+        {s && <span style={{ color: same ? TONE.ok : TONE.warn }}> · {same ? '지금 찾기 조건과 같음' : region ? '지금 찾기 조건과 다름(리전)' : '지금 찾기 조건과 다름'}</span>}
       </div>
+      {region ? <div style={{ color: TONE.warn, overflowWrap: 'anywhere' }}>리전 {region} 보기 중 — 위 찾기 결과는 이 리전만이지만 알림 메일은 전 법인에서 찾습니다(리전은 알림 조건에 저장하지 않습니다).</div> : null}
       <div className="muted">마지막 발송: {alertStatusText(alert.status)}</div>
       {mail && !mail.enabled && <div style={{ color: TONE.warn }}>메일 발송이 꺼져 있어 보내지 않습니다 — 설정 › 메일 발송에서 켜세요.</div>}
       {mail && mail.enabled && !mail.kindEnabled && <div style={{ color: TONE.warn }}>메일 종류 ‘백업 안 된 VM(매일)’ 이 꺼져 있어 보내지 않습니다 — 설정 › 메일 발송.</div>}

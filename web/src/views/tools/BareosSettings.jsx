@@ -83,6 +83,16 @@ export function DiagStages({ stages }) {
 // v2.878: hashBase — 구획 주소의 앞부분. 기본은 새 자리(전체 설정 › vCenter 관리 › Bareos 백업 서버 = #/settings/bareos/<구획>) ·
 //   설정 화면을 못 여는 관리자는 예전 자리(#/tools/bareos-backup/settings/<구획>)에서 같은 화면을 쓴다(BareosBackupTool).
 export const SETTINGS_HASH_BASE = Object.freeze(['settings', 'bareos']);
+/** 전체 점검 6회차(W-5): Director 자동 설정의 풀 값 — 보낼 값과 미리 보기가 같은 하나 · 범위는 서버 autoSetup.normVmwareExtras 와 같다. */
+export function dirPoolsOf(d) { return { fullDays: Number(d?.fullDays), incrDays: Number(d?.incrDays), maxVolumeGB: Number(d?.maxVolumeGB) }; }
+export function dirPoolsIssue(d) {
+  const p = dirPoolsOf(d);
+  const ok = (x, max) => Number.isInteger(x) && x >= 1 && x <= max;
+  if (!ok(p.fullDays, 3650) || !ok(p.incrDays, 3650)) return '풀 보존 기간(1~3650일)';
+  if (!ok(p.maxVolumeGB, 1024)) return '볼륨 최대 크기(1~1024 GB)';
+  return '';
+}
+
 export default function SettingsTab({ onSaved, writable = true, hashBase = SETTINGS_HASH_BASE }) {
   const [s, setS] = useState(null);
   const [err, setErr] = useState(null);
@@ -710,7 +720,7 @@ function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirec
   const runDirector = async () => {
     setBusy('2');
     const body = { ...sshBody, otp: ssh.otp, directorPort: Number(d.directorPort) || 9101, consoleName: d.consoleName, restoreClient: d.restoreClient, restoreStorage: d.restoreStorage, restorePool: d.restorePool,
-      ...(d.usePools ? { pools: { fullDays: Number(d.fullDays), incrDays: Number(d.incrDays), maxVolumeGB: Number(d.maxVolumeGB) } } : {}),
+      ...(d.usePools ? { pools: dirPoolsOf(d) } : {}),
       ...(d.useSchedule ? { schedule: { fullDay: d.fullDay, time: d.time } } : {}) };
     try {
       const r = await postJson(url('director'), body, withRelayWait({}, dir, s.relayLimits, 'setup.director', { setup: true }));
@@ -778,14 +788,15 @@ function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirec
   // v2.841: 사전 점검(또는 앞선 409)이 알려 준 남의 파일과 2단계가 놓을 파일이 겹치면 OTP 를 쓰기 전에 막는다(서버도 쓰기 전에 다시 막는다)
   const ownKnown = (pf?.confFiles || extraOwn.length) ? [...(pf?.confFiles || []), ...extraOwn] : null;
   const conflicts = directorConflicts(directorPlanFiles({ defaults: s.defaults, consoleName: d.consoleName, pools: d.usePools, schedule: d.useSchedule }), ownKnown) || [];
-  const dReady = sshOk && otpOk && d.restoreClient && d.restoreStorage && d.restorePool && !conflicts.length && !any;
-  const dMissing = missingText([[sshOk, 'SSH 주소·비밀번호'], [d.restoreClient && d.restoreStorage && d.restorePool, '복원 잡 FD·스토리지·풀'], [!conflicts.length, '겹치는 파일 정리(위 안내)'], [otpOk, 'OTP 6자리']]);
+  const poolsBad = d.usePools ? dirPoolsIssue(d) : '';   // 전체 점검 6회차(W-5): 서버(autoSetup.normVmwareExtras)와 같은 범위 — 범위 밖이면 OTP 를 쓰기 전에 잠근다
+  const dReady = sshOk && otpOk && d.restoreClient && d.restoreStorage && d.restorePool && !conflicts.length && !poolsBad && !any;
+  const dMissing = missingText([[!poolsBad, poolsBad], [sshOk, 'SSH 주소·비밀번호'], [d.restoreClient && d.restoreStorage && d.restorePool, '복원 잡 FD·스토리지·풀'], [!conflicts.length, '겹치는 파일 정리(위 안내)'], [otpOk, 'OTP 6자리']]);
   // W3: FD INI 는 저장된 매핑의 vcserver·INI 경로를 쓴다 — 비어 있으면 4단계(채움 → 저장)가 먼저다
   const siteReady = !!(site && site.vcserver && site.configFile);
   const fReady = sshOk && siteReady && f.vcuser && f.vcpass && f.vcthumbprint && otpOk && !unsaved && !any;
   const fMissing = missingText([[site, '저장된 매핑의 vCenter'], [!site || siteReady, '매핑의 vcserver·INI 경로(4단계 채움 → 저장)'], [!unsaved, '매핑 저장(표에 저장하지 않은 변경)'], [sshOk, 'SSH 주소·비밀번호'], [f.vcuser && f.vcpass, 'vCenter 계정·비밀번호'], [f.vcthumbprint, '지문'], [otpOk, 'OTP 6자리']]);
   const prep = directorPrepBlock({ defaults: s.defaults, consoleName: d.consoleName, anyClient: d.restoreClient || 'bareos-fd', anyStorage: d.restoreStorage || 'File', anyPool: d.restorePool || 'Full',
-    pools: d.usePools ? { fullDays: Number(d.fullDays) || 90, incrDays: Number(d.incrDays) || 30, maxVolumeGB: Number(d.maxVolumeGB) || 50 } : null,
+    pools: d.usePools ? dirPoolsOf(d) : null,   // 미리 보기 = 보낼 값(예전에는 빈 칸을 90/30/50 으로 채워 보이고 실제로는 0 을 보내 400)
     schedule: d.useSchedule ? { fullDay: d.fullDay, time: d.time } : null });
 
   return (
