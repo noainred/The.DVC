@@ -1,7 +1,7 @@
 // v3.10.19 — 누르는 카드의 키보드 접근 한 벌(pressable) · 허브 카드 · KPI 카드 · 법인별 비교 표 · primitives Kpi 가 같은 것을 쓴다
 import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
-import { pressable, PRESS_KEYS } from './pressable.js';
+import { pressable, PRESS_KEYS, onPressKey } from './pressable.js';
 
 describe('pressable', () => {
   it('onClick 이 있으면 role · tabIndex · onKeyDown(Enter/Space → onClick + preventDefault) · 다른 키는 무시', () => {
@@ -31,5 +31,26 @@ describe('pressable', () => {
     expect(vt).toMatch(/<button type="button" className="cell-link" style=\{\{ fontWeight: 700 \}\} onClick=\{\(e\) => \{ stop\(e\); onOpen\(s\.id\); \}\}/);
     const css = fs.readFileSync(new URL('../views/platform/platform.css', import.meta.url), 'utf8');
     expect(css).toMatch(/\.card\.kpi\[role="button"\]:focus-visible, \.card\.vc-card\[role="button"\]:focus-visible \{ outline: 2px solid var\(--accent\)/);
+  });
+});
+
+describe('v3.12.3 — 정렬 열 머리 키보드(onPressKey 한 벌 · STable · DataTable)', () => {
+  it('onPressKey — 자기 자신의 Enter/Space 만 · 안쪽에서 올라온 키 · 다른 키는 무시', () => {
+    const fn = vi.fn(); const h = onPressKey(fn); const el = {};
+    const e1 = { key: 'Enter', target: el, currentTarget: el, preventDefault: vi.fn() }; h(e1); expect(fn).toHaveBeenCalledTimes(1); expect(e1.preventDefault).toHaveBeenCalled();
+    h({ key: ' ', target: {}, currentTarget: el, preventDefault: vi.fn() }); expect(fn).toHaveBeenCalledTimes(1);
+    h({ key: 'a', target: el, currentTarget: el, preventDefault: vi.fn() }); expect(fn).toHaveBeenCalledTimes(1);
+  });
+  it('소스 계약 — STable 머리는 tabIndex · onPressKey(역할은 바꾸지 않는다 — role 없음) · DataTable 머리도 · 포커스 CSS', () => {
+    const st = fs.readFileSync(new URL('./STable.jsx', import.meta.url), 'utf8');
+    expect(st).toMatch(/tabIndex: th\.props\.tabIndex \?\? 0,/);
+    expect(st).toMatch(/onPressKey\(\(\) => setSort\(\(c\) => nextSortState\(c, myCol\)\)\)\(e\)/);
+    expect(st).not.toMatch(/role: 'button'/);
+    const pr = fs.readFileSync(new URL('./primitives.jsx', import.meta.url), 'utf8');
+    expect(pr).toMatch(/tabIndex=\{0\} onKeyDown=\{onPressKey\(\(\) => toggle\(c\.key\)\)\}/);
+    const css = fs.readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
+    expect(css).toMatch(/th\[aria-sort\]:focus-visible \{ outline: 2px solid var\(--accent\)/);
+    const vc = fs.readFileSync(new URL('../views/VCenters.jsx', import.meta.url), 'utf8');
+    expect(vc).toMatch(/className="cell-link" onClick=\{\(e\) => \{ e\.stopPropagation\(\); setSel\(v\); \}\}/);
   });
 });

@@ -977,3 +977,6 @@
 - **v3.12.2 — 2차 루프 2회차: vCenter 탭의 ‘VM 이름 검색’ 이 허브 범위(리전 · vCenter)를 따른다**(`vcVmSearchText.vmSearchScopeParams · vmSearchScopeText`): 범위 바 안내는 ‘범위 · 검색은 세 탭에 함께 적용’ 인데 이 조회만 리전을 골라도
   전 vCenter 를 찾고 ‘(전체 vCenter)’ 라고 말했다(재현 — 리전 유럽에서 ‘app’ 결과에 ap-south · br-sao). 요청에 vCenter(있으면) 또는 리전을 싣고, 제목 · 0건 문구에 범위 글자(`scopeLabel` — ‘전체’ 만 ‘전체 vCenter’)를 쓴다 · 범위가 바뀌면 다시 찾는다.
   범위를 고르지 않으면 지금처럼 전체(v2.671 요청 그대로). 테스트 `vcVmSearchText.test.js` v3.12.2.
+- **v3.12.3 — 2차 루프 3회차: 정렬 열 머리(STable · DataTable)를 키보드로 — Tab 으로 닿고 Enter/Space 로 정렬 · 키 처리 코어 `onPressKey` 한 벌**: 표 정렬이 마우스 전용이었다(허브 세 탭 스캔에서 th 가 cursor:pointer 인데 tabindex 없음 — 포탈 전 표 공통).
+  STable 머리에 `tabIndex 0` + `onKeyDown = onPressKey(정렬)` — **role 은 바꾸지 않는다**(columnheader · aria-sort 유지 — `pressable` 의 role=button 을 th 에 쓰면 안 된다). DataTable 머리도 같은 것 + `aria-sort`. 포커스 테두리 `styles.css th[aria-sort]:focus-visible`.
+  title 은 ‘클릭하면 이 열로 정렬합니다(… · 키보드는 Enter · Space)’(기존 문구 포함 — 테스트가 찾는다). vCenter 탭 VM 이름 검색 결과의 이름도 `button.cell-link`(키보드로 상세). 자체 정렬 표(SortTh 컴포넌트 4곳)는 이번 범위 밖. 테스트 `pressable.test.js` v3.12.3 · `STable.test.jsx`.

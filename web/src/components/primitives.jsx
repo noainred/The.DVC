@@ -7,7 +7,7 @@
 // ⚠ components/ 아래 파일은 './ui.jsx'(셸)가 아니라 이 파일/Modal.jsx 를 직접 import 할 것 —
 // 셸 역참조는 순환의 씨앗이다(views/ 는 셸 사용 유지: 86개 소비자 import 무변경).
 import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { pressable } from './pressable.js';
+import { pressable, onPressKey } from './pressable.js';   // v3.12.3 DataTable 정렬 머리 키보드
 // 권한 거부(403) 안내 — AccessDenied 는 api.js 만 참조하므로 이 import 로 순환이 생기지 않는다
 // (api.js 는 컴포넌트를 import 하지 않는다). 위 '순환의 씨앗' 주의사항과 배치되지 않음.
 import { permissionInfoFor, httpInfoFor, reportLoadingStall, ensurePerfClientConfig, pollLoadingServerStatus } from '../api.js';
@@ -171,7 +171,8 @@ export function DataTable({
         <thead>
           <tr>
             {columns.map((c) => (
-              <th key={c.key} onClick={() => toggle(c.key)} style={{ textAlign: c.align || 'left' }}>
+              <th key={c.key} onClick={() => toggle(c.key)} tabIndex={0} onKeyDown={onPressKey(() => toggle(c.key))}
+                aria-sort={sort.key === c.key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'} style={{ textAlign: c.align || 'left' }}>
                 {c.label}{sort.key === c.key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
               </th>
             ))}
