@@ -85,3 +85,10 @@ test('S-6 — 일 요약: 그날 마지막 관측이 못 읽음(null)이면 앞�
   const src = fs.readFileSync(path.join(SRC, 'central/storageEdge.js'), 'utf8');
   assert.match(src, /saveCapacityPoint\(dv\)\.then\(\(r\) => \{ if \(r && r\.saved === false && r\.reason === 'db-unavailable'\) unmark\('db-unavailable'\); \}\)\.catch\(/);
 });
+
+test('24회차(SAN #5 의 형제) — 스토리지 등록부도 쓰기 성공 뒤에만 메모리를 바꾼다', () => {
+  const src = fs.readFileSync(path.join(SRC, 'storage/registry.js'), 'utf8');
+  assert.match(src, /const next = existing \? db\.devices\.map\(\(d\) => \(d === existing \? dev : d\)\) : \[\.\.\.db\.devices, dev\];\n  persist\(next\);\n  db\.devices = next;/);
+  assert.match(src, /const dev = existing \? \{ \.\.\.existing \} :/);
+  assert.match(src, /persist\(all\); db\.devices = all;/);
+});

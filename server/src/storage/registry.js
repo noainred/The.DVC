@@ -60,8 +60,8 @@ function load() {
   return _db;
 }
 
-function persist() {
-  atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ version: 1, devices: load().devices }), null, 2), { mode: 0o600 });
+function persist(devices = load().devices) {
+  atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ version: 1, devices }), null, 2), { mode: 0o600 });
   loadErr.clear(); // v2.612 LEFT2612-01
 }
 
@@ -128,7 +128,8 @@ export function saveDevice(input = {}) {
   const datacenterId = String(input.datacenterId || '').trim();
 
   const existing = input.id ? db.devices.find((d) => d.id === input.id) : null;
-  const dev = existing || { id: `st-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, createdAt: Date.now(), pulled: false };
+  // 24회차(SAN #5 의 형제): 사본에 고치고 쓰기 성공 뒤에만 메모리를 바꾼다(저장 실패에도 폴러 · 엣지 배포가 저장 안 된 값을 쓰던 것)
+  const dev = existing ? { ...existing } : { id: `st-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, createdAt: Date.now(), pulled: false };
   // 전체 점검 23회차 S-2(재현): 중복(host+type) 검사가 신규 등록에만 있어, 기존 장비를 다른 장비와 같은 host 로 고치면 같은 어레이가 두 대가 됐다
   //   (증가량 · 보고표 · 전력 합계 이중 계산 · 세션 둘 · CSV 멱등 키 깨짐). 수정도 **자기 자신을 뺀** 등록부와 견준다 — 메모리를 바꾸기 전에.
   if (existing) {
@@ -166,9 +167,10 @@ export function saveDevice(input = {}) {
     // 장비가 중복 생성된다(storage/duplicate.js 머리말 참조).
     const dup = duplicateIssue(db.devices, { host, type });
     if (dup) { const e = new Error(dup.message); e.conflict = dup.conflict; throw e; }
-    db.devices.push(dev);
   }
-  persist();
+  const next = existing ? db.devices.map((d) => (d === existing ? dev : d)) : [...db.devices, dev];
+  persist(next);
+  db.devices = next;
   const { password: _p, ...safe } = dev;
   return { ...safe, hasPassword: !!dev.password, ...(droppedSecrets.length ? { droppedSecrets } : {}) };
 }
@@ -177,7 +179,8 @@ export function deleteDevice(id) {
   const db = load();
   const i = db.devices.findIndex((d) => d.id === id);
   if (i < 0) return false;
-  db.devices.splice(i, 1); persist();
+  const next = db.devices.filter((_, j) => j !== i);
+  persist(next); db.devices = next;   // 쓰기 성공 뒤에만
   return true;
 }
 
@@ -206,8 +209,8 @@ export function applyPulledDevices(list) {
   const mine = String(config.agent.name || '').toLowerCase();
   const keep = db.devices.filter((d) => String(d.agent || '').toLowerCase() !== mine); // 남의 것/로컬은 보존
   const before = new Set(db.devices.filter((d) => String(d.agent || '').toLowerCase() === mine).map((d) => String(d.id)));
-  db.devices = [...keep, ...(list || []).map((d) => ({ ...d, pulled: true }))];
-  persist();
+  const all = [...keep, ...(list || []).map((d) => ({ ...d, pulled: true }))];
+  persist(all); db.devices = all;   // 쓰기 성공 뒤에만
   // v2.596(감사 EF-3 — 재현): 이 엣지에서 빠진 장비(삭제·다른 엣지로 이동)의 id 를 돌려준다 — 호출부가 로컬 스냅샷을 지워야
   //   다음 push 에 유령 장비로 실리지 않는다(SAN 스위치와 같은 규칙).
   const now = new Set((list || []).map((d) => String(d.id)));
