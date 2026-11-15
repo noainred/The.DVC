@@ -67,7 +67,8 @@ function enqueueBlock(id, block, procList) {
   try { writeQ.push({ kind: 'm', target: id, minute: block.minute, n: block.ts.length, data: encodeBlock(block) }); } catch { /* 묶음 하나가 대기열 전체를 깨지 않게 */ }
   // v3.13.0(⑭ 컨펌 ② '기록할 때 같이 만든다'): 1분 요약 — 늦은 표본으로 다시 쓸 때(flushReopened)도 같은 길이라 요약도 다시 쓴다
   try { const sm = summarizeBlock(block); if (sm) writeQ.push({ kind: 's1', target: id, minute: block.minute, data: encodeSum(sm) }); } catch { /* 요약 하나가 대기열을 깨지 않게 */ }
-  if (procList && procList.length) { try { writeQ.push({ kind: 'p', target: id, minute: block.minute, data: encodeProcBlock(procList) }); } catch { /* */ } }
+  // v3.14.0(⑮ 컨펌 ③ '분마다 상위 20 · 30일'): 앱 묶음은 그 분의 **마지막 표본에만** 남긴다(표본마다 남기면 프로세스 기록이 두 배가 된다 · 메모리의 최근 표본은 그대로)
+  if (procList && procList.length) { try { const last = procList.length - 1; writeQ.push({ kind: 'p', target: id, minute: block.minute, data: encodeProcBlock(procList.map((s, i) => (i === last || !s.apps ? s : { ...s, apps: undefined }))) }); } catch { /* */ } }
   if (writeQ.length > 20_000) writeQ.splice(0, writeQ.length - 20_000); // DB 가 오래 막혀도 메모리가 끝없이 자라지 않게(오래된 것부터 버림)
 }
 
@@ -144,7 +145,7 @@ export function ingestProcs(id, ts, p) {
   const e = entry(id);
   const minute = Math.floor(ts / 60_000);
   const list = e.procs.get(minute) || [];
-  if (list.length < 60) list.push({ t: ts, n: p.n ?? null, top: p.top || [], ...(p.da === true || p.da === false ? { da: p.da } : {}) }); // da: 지연 집계(v2.981 — 디스크 대기를 아는지)
+  if (list.length < 60) list.push({ t: ts, n: p.n ?? null, top: p.top || [], ...(p.da === true || p.da === false ? { da: p.da } : {}), ...(p.apps ? { apps: p.apps } : {}) }); // da: 지연 집계(v2.981 — 디스크 대기를 아는지) · apps: 앱 단위 묶음(v3.14.0 ⑮)
   e.procs.set(minute, list);
   if (!e.latestProcs || ts >= e.latestProcs.ts) e.latestProcs = { ts, ...p };
   return true;

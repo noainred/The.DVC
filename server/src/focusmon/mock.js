@@ -6,7 +6,7 @@
  * 데모 대상 id 는 `fm-d0…` 로 시작한다(등록부의 `fm-<16진>` 과 겹치지 않게 0 다음 글자를 d 로 고정 — 등록부 id 는 무작위 16진이라 우연히 겹칠 수 있어
  * isDemoTarget 은 목록 소속으로 판정한다).
  */
-import { IOSTAT_COLS, aggregateIostat, TOP_N } from './rates.js';
+import { IOSTAT_COLS, aggregateIostat, TOP_N, APP_TOP, appNameOf, appServiceKey } from './rates.js';
 import { loadWindow as _loadWindow } from './load.js';
 import { flattenSample, newBlock, appendToBlock } from './codec.js';
 import { summarizeBlock } from './summary.js';
@@ -253,7 +253,25 @@ export function demoProcs(id, ts) {
   const same = new Map(); for (const r of rows) same.set(r.c, (same.get(r.c) || 0) + 1);
   for (const r of rows) r.ns = same.get(r.c) + (r.c.startsWith('ora_') ? 30 : 0); // 데모: 오라클 백그라운드 프로세스는 상위 밖에도 더 있다
   rows.sort((a, b) => b.cpu - a.cpu || a.pid - b.pid);
-  return { n: 420 + i * 13, top: rows.slice(0, TOP_N), da: true };
+  return { n: 420 + i * 13, top: rows.slice(0, TOP_N), da: true, apps: demoApps(rows, i) };
+}
+
+/** v3.14.0(⑮) 데모 앱 묶음 — 데모 프로세스 40개를 같은 열쇠(rates.appServiceKey · appNameOf)로 묶는다. 오라클 백그라운드 · 커널 스레드는 상위 밖에도 더 있다(프로세스 수만). */
+function demoApps(rows, i) {
+  const acc = { sv: new Map(), cm: new Map() };
+  for (const r of rows) {
+    for (const [mode, k] of [['sv', appServiceKey(r.sv || null, r.pp, r.pid)], ['cm', appNameOf(r.c)]]) {
+      const g = acc[mode].get(k) || { k, n: 0, th: 0, cpu: 0, rss: 0, rb: 0, wb: 0, ion: 0, users: new Set() };
+      g.n += 1; g.th += r.th; g.cpu += r.cpu; g.rss += r.rss; g.users.add(r.u);
+      if (r.rb != null) { g.rb += r.rb; g.wb += r.wb; g.ion += 1; }
+      acc[mode].set(k, g);
+    }
+  }
+  const extra = (k) => (/^ora_|dbora/.test(k) ? 30 : k === '커널 스레드' || /^kworker/.test(k) ? 60 + i : 0);
+  const fin = (m) => [...m.values()].map((g) => { const n = g.n + extra(g.k); const io = g.ion === 0 ? 'none' : g.ion === n ? 'all' : 'part';
+    return { k: g.k, n, th: g.th + extra(g.k), cpu: r2(g.cpu), rss: r2(g.rss), ...(io !== 'none' ? { rb: r2(g.rb), wb: r2(g.wb) } : {}), io, u: [...g.users][0], un: g.users.size }; })
+    .sort((a, b) => b.cpu - a.cpu || b.rss - a.rss).slice(0, APP_TOP);
+  return { sv: fin(acc.sv), cm: fin(acc.cm) };
 }
 
 /**
