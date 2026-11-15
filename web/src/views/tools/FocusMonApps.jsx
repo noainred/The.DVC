@@ -30,7 +30,7 @@ function AppChart({ s, from, to }) {
   return (
     <div className="fm-pad fm-col">
       <div className="fm-row fm-between"><span className="fm-h3 fm-sm">앱별 CPU — 위 {se.keys.length}개 + 나머지(쌓은 영역)</span><span className="fm-dim">코어 1개 = 100% · 색은 묶음 이름을 따릅니다</span></div>
-      <div className="fm-chart-box">
+      <div className="fm-chart-box fm-appchart">
         <svg viewBox="0 0 640 172" role="img" aria-label={`앱별 CPU 쌓은 영역 — ${se.keys.join(', ')} 와 나머지`} className="fm-chart">
           {[0, max / 2, max].map((v) => <g key={v}><line x1={X0} x2={X1} y1={y(v)} y2={y(v)} stroke="var(--fm-grid)" /><text x={X0 - 6} y={y(v) + 4} className="fm-axis" textAnchor="end">{Math.round(v)}</text></g>)}
           {paths.map((d, i) => <path key={i} d={d} fill={i < se.keys.length ? appColor(se.keys[i], se.keys) : APP_REST_COLOR} fillOpacity="0.55" stroke={i < se.keys.length ? appColor(se.keys[i], se.keys) : APP_REST_COLOR} strokeWidth="1" />)}
