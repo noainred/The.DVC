@@ -164,7 +164,7 @@ describe('화면 소스', () => {
     expect(src).toMatch(/<Procs main=\{main\} ids=\{shownIds\}/);
   });
   it('수정 저장은 그룹을 함께 보낸다 · CSV 적용은 그룹 상한 초과면 잠근다', () => {
-    expect(src).toMatch(/agent: f\.agent, group: f\.group \|\| '' \}/);
+    expect(src).toMatch(/agent: f\.agent, group: f\.group \|\| '', /); // v3.11.0 — 뒤에 법인(바뀐 때만)이 붙는다
     expect(bulk).toMatch(/plan\.groupsOver/);
   });
   it('화면 글에 백틱 · 대문자 변환 없음', () => {

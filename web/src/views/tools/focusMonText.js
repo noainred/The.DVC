@@ -88,6 +88,7 @@ export const TABS = Object.freeze([
   { key: 'compare', label: '비교' },
   { key: 'procs', label: '프로세스' },
   { key: 'load', label: '수집 부하' },
+  { key: 'audit', label: '디스크 점검' }, // v3.11.0 배드 섹터 점검 프로그램(시안 ⑰)
   { key: 'targets', label: '대상 · 키' },
 ]);
 
@@ -285,12 +286,12 @@ export function needsRetry(t) {
 /* ── 등록된 서버 수정(v2.980 — 사용자 '등록된 서버 수정하는 기능 추가') ─────────────────────────────
  * 서버 registry.EDIT_FIELDS · targetChanges 와 같은 칸 · 같은 규칙(담당 노드 대소문자 무시) — 서버 테스트가 칸 목록을 대조한다.
  * 판정은 서버가 한다(응답 moved · cleared). 여기는 저장 전 미리보기(저장 단추 · 안내 글)다. */
-export const EDIT_FIELDS = Object.freeze(['name', 'host', 'port', 'username', 'agent', 'group']);
-export const EDIT_FIELD_TEXT = Object.freeze({ name: '이름', host: 'IP', port: '포트', username: '계정', agent: '담당 노드', group: '그룹' });
+export const EDIT_FIELDS = Object.freeze(['name', 'host', 'port', 'username', 'agent', 'group', 'corp']);
+export const EDIT_FIELD_TEXT = Object.freeze({ name: '이름', host: 'IP', port: '포트', username: '계정', agent: '담당 노드', group: '그룹', corp: '법인' });
 const ENDPOINT_FIELDS = new Set(['host', 'port', 'username', 'agent']);
 /** 수정 칸의 처음 값(등록부 값 그대로 — 포트는 글자). */
 export function editFormOf(t) {
-  return { name: t?.name ?? '', host: t?.host ?? '', port: t?.port == null || t?.port === '' ? '22' : String(t.port), username: t?.username ?? '', agent: t?.agent ?? '', group: t?.group ?? '' };
+  return { name: t?.name ?? '', host: t?.host ?? '', port: t?.port == null || t?.port === '' ? '22' : String(t.port), username: t?.username ?? '', agent: t?.agent ?? '', group: t?.group ?? '', corp: t?.corp ?? '' };
 }
 const editKey = (k, v) => {
   const x = String(v ?? '').trim();
@@ -299,13 +300,14 @@ const editKey = (k, v) => {
   return x;
 };
 /** 고친 칸 — { changes:[{k,label,from,to}], endpoint } (endpoint = 주소 · 포트 · 계정 · 담당 노드 중 하나라도 바뀜). */
-export function editChanges(t, form) {
+export function editChanges(t, form, { corpName = (id) => id } = {}) {
   const changes = [];
   for (const k of EDIT_FIELDS) {
     const was = k === 'port' ? (t?.port ?? 22) : t?.[k];
     if (editKey(k, was) === editKey(k, form?.[k])) continue;
     const now = String(form?.[k] ?? '').trim();
-    changes.push({ k, label: EDIT_FIELD_TEXT[k], from: k === 'agent' ? nodeText(was) : k === 'group' ? groupLabel(was) : String(was ?? '') || DASH, to: k === 'agent' ? nodeText(now) : k === 'group' ? groupLabel(now) : now || (k === 'port' ? '22' : DASH) });
+    const corpL = (v) => (v ? corpName(v) || v : '지정 안 함(담당 엣지의 법인)');
+    changes.push({ k, label: EDIT_FIELD_TEXT[k], from: k === 'agent' ? nodeText(was) : k === 'group' ? groupLabel(was) : k === 'corp' ? corpL(was) : String(was ?? '') || DASH, to: k === 'agent' ? nodeText(now) : k === 'group' ? groupLabel(now) : k === 'corp' ? corpL(now) : now || (k === 'port' ? '22' : DASH) });
   }
   return { changes, endpoint: changes.some((c) => ENDPOINT_FIELDS.has(c.k)) };
 }

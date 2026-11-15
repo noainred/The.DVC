@@ -5,6 +5,7 @@
  *  · fm_metric(target, minute, n, data BLOB)  — 서버 1대 · 1분 = 한 줄(codec.js 압축 묶음 · 열 이름표 포함)
  *  · fm_proc(target, minute, data BLOB)       — 그 1분의 프로세스 상위 30 표본들(comm 만 · 사용자 이름 · 인자 0)
  *  · fm_run(id, started, ended, by, mode, interval, targets) — 수집 기록(누가 · 언제 · 어느 서버 · 방식) — ‘기록이 있는 시간’ 띠와 감사용
+ *  · fm_audit(id, target, at, …, summary, report BLOB) — v3.11.0 디스크 점검 실행 한 번 = 한 줄(요약 JSON + 보고서 원문 gzip). 대상마다 최근 10회 · 90일.
  * 규약(docs/rules/perf-db.md):
  *  · open 은 진행 중인 시도를 공유하고(`_opening`) 잠금은 래치하지 않는다(`createLockRetry`) · busy_timeout 먼저 · 파일 0600(`openSqlite`).
  *  · 쓰기는 한 트랜잭션 · 한 번에 최대 수십 줄(recorder.js 가 10초 틱으로 모은다 — 측정 중앙값 0.37ms).
@@ -51,6 +52,9 @@ async function openDb() {
       CREATE INDEX IF NOT EXISTS idx_fm_load_minute ON fm_load(minute);
       CREATE TABLE IF NOT EXISTS fm_node (node TEXT NOT NULL, minute INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (node, minute));
       CREATE INDEX IF NOT EXISTS idx_fm_node_minute ON fm_node(minute);
+      CREATE TABLE IF NOT EXISTS fm_audit (id TEXT PRIMARY KEY, target TEXT NOT NULL, at INTEGER NOT NULL, ended INTEGER, node TEXT, by TEXT, outcome TEXT, rc INTEGER, ver TEXT, summary TEXT, ready TEXT, report BLOB);
+      CREATE INDEX IF NOT EXISTS idx_fm_audit_target_at ON fm_audit(target, at);
+      CREATE INDEX IF NOT EXISTS idx_fm_audit_at ON fm_audit(at);
     `);
     _db = conn; _err = '';
     lockRetry.ok();
@@ -188,6 +192,54 @@ export async function pruneOldestChunk() {
   const m = await oldestMinute();
   if (m == null) return 0;
   return pruneChunk(m + 1);
+}
+
+/* ── 디스크 점검(v3.11.0) ─────────────────────────────────────────────── */
+export const AUDIT_KEEP = 10;
+export const AUDIT_KEEP_DAYS = 90;
+const auditRow = (r) => { if (!r) return null; let summary = null; try { summary = r.summary ? JSON.parse(r.summary) : null; } catch { summary = null; } return { id: r.id, target: r.target, at: r.at, ended: r.ended ?? null, node: r.node || '', by: r.by || '', outcome: r.outcome || '', rc: r.rc ?? null, ver: r.ver || '', summary }; };
+/**
+ * 실행 한 번 적재 + 그 대상의 오래된 회차 정리(최근 AUDIT_KEEP 회 · AUDIT_KEEP_DAYS 일) — 한 트랜잭션.
+ * @returns {Promise<boolean>}
+ */
+export async function writeAudit(a, now = Date.now()) {
+  const db = await getDb();
+  if (!db) return false;
+  try {
+    db.exec('BEGIN');
+    db.prepare('INSERT OR REPLACE INTO fm_audit (id, target, at, ended, node, by, outcome, rc, ver, summary, ready, report) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(String(a.id), String(a.target), a.at, a.ended ?? null, String(a.node || ''), String(a.by || '').slice(0, 64), String(a.outcome || ''), Number.isInteger(a.rc) ? a.rc : null, String(a.ver || '').slice(0, 64),
+        JSON.stringify(a.summary ?? null), JSON.stringify(a.ready ?? []), a.report ?? null);
+    db.prepare('DELETE FROM fm_audit WHERE target = ? AND id NOT IN (SELECT id FROM fm_audit WHERE target = ? ORDER BY at DESC LIMIT ?)').run(String(a.target), String(a.target), AUDIT_KEEP);
+    db.prepare('DELETE FROM fm_audit WHERE rowid IN (SELECT rowid FROM fm_audit WHERE at < ? LIMIT 200)').run(now - AUDIT_KEEP_DAYS * 86_400_000);
+    db.exec('COMMIT');
+    return true;
+  } catch (e) {
+    try { db.exec('ROLLBACK'); } catch { /* */ }
+    console.warn('[focusmon-db] 디스크 점검 결과를 쓰지 못했습니다:', String(e?.message || e).slice(0, 200));
+    return false;
+  }
+}
+/** 한 대상의 회차(최근부터 · 원문 없이). */
+export async function listAudits(target, limit = AUDIT_KEEP) {
+  const db = await getDb();
+  if (!db) return null;
+  return db.prepare('SELECT id, target, at, ended, node, by, outcome, rc, ver, summary FROM fm_audit WHERE target = ? ORDER BY at DESC LIMIT ?').all(String(target), Math.max(1, Math.min(50, limit | 0))).map(auditRow);
+}
+/** 한 대상의 가장 최근 회차(원문 없이) — (target, at) 인덱스 · 대상마다 한 번(GROUP BY + MAX 금지 규약). */
+export async function latestAudit(target) {
+  const db = await getDb();
+  if (!db) return null;
+  return auditRow(db.prepare('SELECT id, target, at, ended, node, by, outcome, rc, ver, summary FROM fm_audit WHERE target = ? ORDER BY at DESC LIMIT 1').get(String(target)));
+}
+/** 회차 하나(원문 포함 — 보고서 보기 · 내려받기). */
+export async function readAudit(id) {
+  const db = await getDb();
+  if (!db) return null;
+  const r = db.prepare('SELECT * FROM fm_audit WHERE id = ?').get(String(id));
+  if (!r) return null;
+  let ready = []; try { ready = JSON.parse(r.ready || '[]'); } catch { ready = []; }
+  return { ...auditRow(r), ready: Array.isArray(ready) ? ready : [], report: r.report ? Buffer.from(r.report) : null };
 }
 
 export function _planForTest(sql) { return _db ? _db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(0, 1).map((r) => r.detail).join(' | ') : ''; }

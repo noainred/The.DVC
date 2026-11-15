@@ -16,6 +16,7 @@ import { createNodeSampler } from './load.js';
 import { DEMO_TARGETS, isDemoTarget } from './mock.js';
 import { recordTick, flushOnExit, recorderStatus } from './recorder.js';
 import { every } from '../util/longTimer.js';
+import { startAuditService } from './audit/service.js'; // v3.11.0 디스크 점검 — 중앙 실행기 키 · 재시작 전 작업 정리
 
 export const focusKeys = createSshKeyStore({
   name: 'focusmon_key', envVar: 'FOCUSMON_SSH_KEY', comment: 'dvc-focusmon', tag: '[focusmon]',
@@ -142,6 +143,7 @@ export function nodeTick(now = Date.now()) {
 
 export function startFocusMon() {
   if (timers.length) return;
+  try { startAuditService({ keys: focusKeys }); } catch (e) { console.warn(`[focusmon] 디스크 점검 시작 실패: ${String(e?.message || e).slice(0, 160)}`); }
   timers = [
     every(() => { try { tick1(); } catch (e) { console.warn(`[focusmon] 틱 실패: ${String(e?.message || e).slice(0, 160)}`); } }, 1_000),
     every(() => { recordTick().catch((e) => console.warn(`[focusmon] 기록 실패: ${String(e?.message || e).slice(0, 160)}`)); }, 10_000),

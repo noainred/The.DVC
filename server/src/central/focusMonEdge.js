@@ -18,6 +18,7 @@ import { listTargets, registryLoadError, getSettings } from '../focusmon/registr
 import { setWakeImpl } from '../focusmon/service.js';
 import { IOSTAT_COLS, TOP_N } from '../focusmon/rates.js';
 import { INTERVALS, PROC_EVERY_CHOICES } from '../focusmon/script.js';
+import { handleEdgeAudit } from '../focusmon/audit/service.js'; // v3.11.0 디스크 점검 — 작업 배달 · 원문 결과 받기(중앙이 다시 해석)
 
 export const VALID_MS = 30_000;
 export const MAX_SAMPLES = 6000;
@@ -251,6 +252,8 @@ export function handleEdgeSync(agent, body, now = Date.now()) {
   if (node && mine.size > 0 && node.sessions > 0) store.setNodeLoad(key, node, now);
   store.noteEdgeSync(agent, { version: typeof b.version === 'string' && /^\d{1,4}\.\d{1,4}\.\d{1,6}$/.test(b.version) ? b.version : '', key: cleanKey(b.key), diag }, now);
 
+  // v3.11.0 디스크 점검 — 그 엣지가 맡은 대상의 작업만 · 결과는 원문으로 받아 중앙이 해석한다(audit/service cleanEdgeResult · analyzeRun)
+  const audit = handleEdgeAudit(key, mine, b.audit, now);
   const desired = store.desiredFor(key, (id) => mine.get(id) || null, now);
   const tests = store.pendingTestsFor(key, now, { busy: diag ? diag.testsBusy : null }).filter((id) => mine.has(id)).map((id) => { const t = mine.get(id); return { id, host: t.host, port: t.port, username: t.username }; });
   return {
@@ -260,6 +263,7 @@ export function handleEdgeSync(agent, body, now = Date.now()) {
     //   예전에는 엣지가 수집 목록에서만 대상을 찾아, 시험만 한 서버의 '다시 연결' 이 아무것도 풀지 못했다(사용자 보고 2026-11-12 — 키를 넣어도 '거부로 멈춤').
     ...(() => { const ids = store.takeEdgeRetries(key, now).filter((id) => mine.has(id)); return { retries: ids, retryTargets: ids.map((id) => { const t = mine.get(id); return { id, host: t.host, port: t.port, username: t.username }; }) }; })(),
     tests,
+    ...(audit.jobs.length || audit.ack.length ? { audit } : {}),
     ensureKey: mine.size > 0,
     // v2.978 시작 지연 줄이기: 맡은 서버가 있는 엣지는 쉬는 동안에도 이 주기로 조회한다(깨우기가 닿지 않는 중계 엣지 — 예전 30초 고정).
     // 맡은 서버가 없으면 싣지 않는다(엣지 기본 30초). 옛 판 엣지는 이 칸을 모르고 30초를 쓴다.

@@ -113,7 +113,7 @@ test('② CSV — 그룹 열이 있으면 바꾸고 · 없으면 그대로 · �
   assert.equal(ap.ok, true);
   assert.deepEqual(registry.listGroups().map((g) => [g.name, g.n]), [['WAS', 1], ['DB', 1]]);
   const ex = registry.exportRows();
-  assert.deepEqual(ex[0], ['이름', 'IP', '포트', '계정', '담당 노드', '그룹']);
+  assert.deepEqual(ex[0], ['이름', 'IP', '포트', '계정', '담당 노드', '그룹', '법인'], 'v3.11.0 법인 열이 끝에 붙었다(없으면 가져오기가 그대로 둔다)');
   assert.ok(ex.some((r) => r[0] === 'new-01' && r[5] === 'DB'));
   assert.ok(ex.some((r) => r[0] === 'new-02' && r[5] === ''));
   assert.equal(registry.csvTemplateRows()[0][5], '그룹');

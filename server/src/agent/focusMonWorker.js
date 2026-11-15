@@ -26,6 +26,7 @@ import { createRunner } from '../focusmon/runner.js';
 import { focusKeys } from '../focusmon/service.js';
 import { EDGE_TEST_CONCURRENCY } from '../focusmon/store.js';
 import { createNodeSampler } from '../focusmon/load.js';
+import { createAuditRunner } from '../focusmon/audit/runner.js';
 const TEST_RESULTS_PER_SYNC = 50; // 중앙이 동기화당 받는 시험 결과 상한(central/focusMonEdge.js arr(b.tests, 50))과 같게 — 넘는 것은 다음 동기화에(반증 3)
 
 const gzipAsync = promisify(zlib.gzip);
@@ -83,6 +84,34 @@ const runner = createRunner({
   },
 });
 
+/*
+ * v3.11.0 디스크 점검 — 중앙이 동기화 응답 audit.jobs 로 준 작업을 이 엣지가 돌린다(노드당 동시 1 · 대기열). 결과는 **원문**(준비 줄 · 실행 줄)으로
+ * 다음 동기화 본문 audit.results 에 싣고, 중앙이 ack 한 것만 지운다(실패하면 다시 보낸다 · 최대 AUDIT_RESULTS_MAX 건 · 오래된 것부터 버리고 센다).
+ * 진행 중 목록은 audit.active(작업 id · 상태 · 단계)로 — 중앙이 같은 작업을 다시 내려보내지 않게.
+ */
+const AUDIT_RESULTS_MAX = 4;
+const AUDIT_BYTES_PER_SYNC = 6 * 1024 * 1024;
+let auditResults = []; let auditDropped = 0;
+const auditRunner = createAuditRunner({
+  keys: focusKeys,
+  onResult: (job, result) => {
+    auditResults.push({ runId: job.runId, result });
+    if (auditResults.length > AUDIT_RESULTS_MAX) { auditDropped += auditResults.length - AUDIT_RESULTS_MAX; auditResults = auditResults.slice(-AUDIT_RESULTS_MAX); }
+    schedule(0);
+  },
+});
+/** 이번 동기화에 실을 결과(바이트 상한 — 큰 보고서 둘을 한 본문에 싣지 않는다 · 하나는 늘 싣는다). */
+export function auditResultsToSend() {
+  const out = []; let bytes = 0;
+  for (const r of auditResults) {
+    const b = (r.result?.outBytes || 0) + 64 * 1024;
+    if (out.length && bytes + b > AUDIT_BYTES_PER_SYNC) break;
+    out.push(r); bytes += b;
+    if (out.length >= 2) break;
+  }
+  return out;
+}
+
 function trim(buf) {
   const cut = Date.now() - BUF_AGE_MS;
   let k = 0; while (k < buf.length && (buf[k].t < cut || buf.length - k > BUF_MAX)) k += 1;
@@ -90,7 +119,7 @@ function trim(buf) {
 }
 
 export function focusMonWorkerStatus() {
-  return { enabled: !!config.agent.centralUrl, running: runner.running().length, buffered: samples.length, dropped, validUntil, idleMs: nextDelayMs({ active: false, idleHintMs }), fails, ...(_last || {}) };
+  return { enabled: !!config.agent.centralUrl, running: runner.running().length, buffered: samples.length, dropped, validUntil, idleMs: nextDelayMs({ active: false, idleHintMs }), fails, audits: auditRunner.size(), auditResults: auditResults.length, auditDropped, ...(_last || {}) };
 }
 
 /** 중앙에 보내는 연결 진단(v2.978) — 비밀 없음(주소 · 토큰 · 키 없음). */
@@ -132,7 +161,9 @@ export async function syncOnce(now = Date.now()) {
   const sendL = loads; loads = {}; let sentOk = false; // v2.983 — 실패하면 finally 에서 되돌린다(그사이 새 창이 왔으면 새 것이 이긴다)
   try {
     const keyView = focusKeys.publicKeyView();
-    const body = JSON.stringify({ v: 1, version: currentVersion(), sentAt: Date.now(), key: keyView, samples: sendS, procs: sendP, status: statuses, tests: sendT, load: sendL, diag: diagBody() });
+    const sendA = auditResultsToSend();
+    const auditBody = auditRunner.size() || sendA.length ? { audit: { active: auditRunner.list().map((j) => ({ runId: j.runId, state: j.state, phase: j.phase || null })), results: sendA } } : {};
+    const body = JSON.stringify({ v: 1, version: currentVersion(), sentAt: Date.now(), key: keyView, samples: sendS, procs: sendP, status: statuses, tests: sendT, load: sendL, diag: diagBody(), ...auditBody });
     let payload = body; let hdrs = { 'Content-Type': 'application/json' };
     try { payload = await gzipAsync(Buffer.from(body)); hdrs = { ...hdrs, 'Content-Encoding': 'gzip' }; } catch { /* 원문 */ }
     txBytes += payload.length;
@@ -179,6 +210,17 @@ export async function syncOnce(now = Date.now()) {
         .catch(() => {})
         .finally(() => { testsInFlight.delete(id); });
     }
+    // v3.11.0 디스크 점검 — 받은 결과는 지우고(ack) 새 작업을 줄에 세운다(같은 작업 · 결과가 아직 남은 작업은 건너뛴다)
+    const au = data.audit && typeof data.audit === 'object' ? data.audit : null;
+    if (au) {
+      const acked = new Set((Array.isArray(au.ack) ? au.ack : []).map(String));
+      if (acked.size) auditResults = auditResults.filter((r) => !acked.has(r.runId));
+      for (const j of Array.isArray(au.jobs) ? au.jobs.slice(0, 20) : []) {
+        if (!j || typeof j.runId !== 'string' || auditRunner.has(j.runId) || auditResults.some((r) => r.runId === j.runId)) continue;
+        auditRunner.submit({ runId: j.runId, mode: j.mode === 'check' ? 'check' : 'run', target: { id: String(j.id), host: String(j.host), port: Number(j.port) || 22, username: String(j.username) },
+          expect: j.expect && typeof j.expect === 'object' ? { program: String(j.expect.program || ''), wrapper: String(j.expect.wrapper || '') } : null });
+      }
+    }
     _last = { at: Date.now(), ok: true, ms: Date.now() - t0, sent: sendS.length, targets: lastTargets, note: lastTargets ? '' : '수집할 대상이 없습니다.' };
     return _last;
   } catch (e) {
@@ -189,7 +231,7 @@ export async function syncOnce(now = Date.now()) {
     if (!sentOk) loads = { ...sendL, ...loads };
     running = false;
     expireIfStale();
-    const active = lastTargets > 0 || wakeAsked;
+    const active = lastTargets > 0 || wakeAsked || auditRunner.size() > 0 || auditResults.length > 0;
     wakeAsked = false;
     schedule(nextDelayMs({ active, idleHintMs }));
   }
@@ -205,5 +247,5 @@ export function stopFocusMonWorker() { clearTimeout(timer); clearInterval(nodeTi
 /** v2.983 시험용 — 수집 부하 창을 넣는다(실수집 없이 동기화 본문을 시험). */
 export function _putLoadForTest(id, l) { loads[id] = l; }
 export function _loadsForTest() { return { ...loads }; }
-export function _resetForTest() { loads = {}; txBytes = 0; nodeLast = null; nodePrevTx = null; testsInFlight.clear(); samples.length = 0; procs.length = 0; testResults = []; statuses = {}; validUntil = 0; unsupportedUntil = 0; lastTargets = 0; _last = null; dropped = 0; running = false; idleHintMs = null; fails = 0; lastRttMs = null; lastError = ''; lastErrorAt = 0; runner.stopAll(); }
+export function _resetForTest() { auditResults = []; auditDropped = 0; loads = {}; txBytes = 0; nodeLast = null; nodePrevTx = null; testsInFlight.clear(); samples.length = 0; procs.length = 0; testResults = []; statuses = {}; validUntil = 0; unsupportedUntil = 0; lastTargets = 0; _last = null; dropped = 0; running = false; idleHintMs = null; fails = 0; lastRttMs = null; lastError = ''; lastErrorAt = 0; runner.stopAll(); }
 export const _runnerForTest = runner;

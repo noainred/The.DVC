@@ -1,0 +1,69 @@
+##DA BEGIN 1
+RHEL 디스크 오류 이력 점검 | vm | 2026-11-15T00:06:07.530988+00:00
+보고서 | /tmp/dvc-disk-audit.JgFWytvY/rhel_disk_audit_20261115_000607_530561.txt
+
+[로그 수집 범위]
+  /usr/bin/journalctl --list-boots --no-pager | 종료값 0 | No journal files were found.
+  journalctl 전체 보존 부트 | 0줄, 후보 0줄, 해석 실패 0줄 | 시간 비교 불가 ~ 시간 비교 불가
+  수집 불가 | /var/log/messages*
+  /usr/bin/dmesg --color=never | 종료값 0
+  dmesg (현재 부트, 상대 시간) | 375줄, 후보 0줄, 해석 실패 0줄 | 시간 비교 불가 ~ 시간 비교 불가
+
+[PERC/StorCLI 조회]
+  수집 불가 | perccli/storcli (RAID 구성이라면 물리 디스크 가시성 제한)
+
+[OS/SMART 조회]
+  /usr/bin/lsblk -J -p -o NAME,KNAME,TYPE,MODEL,SERIAL,WWN,TRAN,FSTYPE,MOUNTPOINT | 종료값 0
+  수집 불가 | smartctl
+    /dev/vda 하위 /dev/vda | FS=- | 사용=/
+    /dev/vdb 하위 /dev/vdb | FS=- | 사용=/opt/rclone
+    /dev/vdc 하위 /dev/vdc | FS=- | 사용=/opt/claude-code
+    /dev/vdd 하위 /dev/vdd | FS=- | 사용=/opt/env-runner
+    /dev/vde 하위 /dev/vde | FS=- | 사용=/mnt/skills/public
+    /dev/vdf 하위 /dev/vdf | FS=- | 사용=/mnt/skills/examples
+
+[RAID 경유 물리 SMART 조회]
+  수집 불가 | smartctl (RAID 경유 조회)
+
+[현재 디스크 인벤토리]
+  /dev/zram0 | OS 노출 장치 (물리 여부는 구성에 따라 다름) | 식별자 없음 | 마운트/스왑 표시 미관측
+  /dev/vda | 가상/논리 또는 RAID 경유 OS 장치 | 식별자 없음 | 마운트/스왑 표시 있음
+  /dev/vdb | 가상/논리 또는 RAID 경유 OS 장치 | 식별자 없음 | 마운트/스왑 표시 있음
+  /dev/vdc | 가상/논리 또는 RAID 경유 OS 장치 | 식별자 없음 | 마운트/스왑 표시 있음
+  /dev/vdd | 가상/논리 또는 RAID 경유 OS 장치 | 식별자 없음 | 마운트/스왑 표시 있음
+  /dev/vde | 가상/논리 또는 RAID 경유 OS 장치 | 식별자 없음 | 마운트/스왑 표시 있음
+  /dev/vdf | 가상/논리 또는 RAID 경유 OS 장치 | 식별자 없음 | 마운트/스왑 표시 있음
+
+[판정]
+  [불명] 가용 자료에서 대상 오류 패턴 미검출. 과거 무장애 여부는 알 수 없음.
+  파일시스템 생성 성공 패턴 0줄, 명령/시도 패턴 0줄
+  [불명] 포맷 후 재사용 및 교체 여부를 연결할 장애 디스크 식별 근거 부족.
+
+[상세 근거]
+
+[해석 범위]
+  확인하지 못했거나 일부만 수집한 소스/항목 4개.
+  삭제·회전·덮어쓰기·휘발성 로그, 오프호스트 로그 및 다른 journal namespace는 범위 밖.
+  파일명/장치명/슬롯/DID 단독으로 과거 물리 디스크와 현재 디스크를 연결하지 않음.
+  동일 기록에 명시된 SN/WWN만 연결. 현재 호스트명과 다른 로그는 ID 대조에서 제외.
+  일반 I/O 오류는 케이블·경로·컨트롤러·가상디스크 등에서도 발생할 수 있음.
+  SMART 카운터와 RAID 카운터는 조회 시점의 값이며 과거 오류 시간·포맷 시점을 제공하지 않음.
+  legacy syslog의 연도/시간대 및 dmesg의 상대 시간은 포맷 순서 판정에 사용하지 않음.
+  재사용은 현재 마운트/스왑 표시와 과거 성공 로그의 조합이며 파티션·FS 계보는 별도 확인 필요.
+  RAID 가상디스크의 OS 오류는 물리 슬롯으로 자동 귀속하지 않음. 숨겨진 디스크/경로는 미관측 가능.
+  SMART ID 5는 재할당 섹터 수, ID 196은 재할당 이벤트 수. 두 값을 합산하지 않음.
+  SMART RAID 인덱스는 물리 슬롯이나 과거 교체 이력으로 사용하지 않음.
+  서로 다른 소스에 복제된 기록은 각각 표시. 건수는 장애 횟수가 아님.
+
+완료 | /tmp/dvc-disk-audit.JgFWytvY/rhel_disk_audit_20261115_000607_530561.txt
+##DA EXIT 0
+##DA DISKS
+NAME="zram0" TYPE="disk" MODEL="" SERIAL="" WWN="" SIZE="0B" ROTA="0" TRAN=""
+NAME="vda" TYPE="disk" MODEL="" SERIAL="" WWN="" SIZE="256G" ROTA="1" TRAN="virtio"
+NAME="vdb" TYPE="disk" MODEL="" SERIAL="" WWN="" SIZE="9.5M" ROTA="1" TRAN="virtio"
+NAME="vdc" TYPE="disk" MODEL="" SERIAL="" WWN="" SIZE="382.3M" ROTA="1" TRAN="virtio"
+NAME="vdd" TYPE="disk" MODEL="" SERIAL="" WWN="" SIZE="49.5M" ROTA="1" TRAN="virtio"
+NAME="vde" TYPE="disk" MODEL="" SERIAL="" WWN="" SIZE="752K" ROTA="1" TRAN="virtio"
+NAME="vdf" TYPE="disk" MODEL="" SERIAL="" WWN="" SIZE="5.8M" ROTA="1" TRAN="virtio"
+##DA RAID
+##DA END
