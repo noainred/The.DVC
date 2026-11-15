@@ -339,8 +339,12 @@ export async function serverDetail(id, w, { at = 'end', dev = '', cmp = '' } = {
   if (shift) {
     const sh = await blocksFor(id, w.from - shift, w.to - shift);
     const sp = positions(sh.blocks, w.from - shift, w.to - shift);
+    // 그때 표본이 더 성길 수 있다(계속 수집은 보는 화면이 없으면 10초) — 그때 표본에 맞는 칸 수로 묶은 뒤 지금 칸 수로 늘인다(반증 F6:
+    //   지금 칸 수에 고정하면 10초 표본이 2초 칸에 하나 걸러 들어가 점선이 그려지지 않았다)
     const n = cpuB.avg.length;
-    overlay = { cmp, cpu: bucketize(sp, 'c.pct', w.from - shift, w.to - shift, n, { fixed: true }).avg, mem: bucketize(sp, 'm.pct', w.from - shift, w.to - shift, n, { fixed: true }).avg };
+    const m = Math.max(1, Math.min(n, pointsFor(sp, w.from - shift, w.to - shift, n)));
+    const stretch = (arr) => (m === n ? arr : Array.from({ length: n }, (_, k) => arr[Math.min(m - 1, Math.floor((k * m) / n))]));
+    overlay = { cmp, cpu: stretch(bucketize(sp, 'c.pct', w.from - shift, w.to - shift, m, { fixed: true }).avg), mem: stretch(bucketize(sp, 'm.pct', w.from - shift, w.to - shift, m, { fixed: true }).avg) };
   }
   return {
     id, n: pos.length, firstAt: pos.length ? pos[0][2] : null, lastAt: lp ? lp[2] : null, coverMs: table?.coverMs ?? null, at, table, summary: summarize(table), charts: { ...charts, ext }, dev: devChart, points: P, sparkPoints: SP, partial, hello: store.helloOf(id),

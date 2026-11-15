@@ -181,7 +181,8 @@ function TimeBar({ tb, now, coverage, oldestMinute, route }) {
   const [drag, setDrag] = useState(null);
   const cov = (coverage?.ranges || []).map(([a, b]) => [a * 60_000, (b + 1) * 60_000]);
   const minDate = oldest ? ymd(oldest) : ymd(now - 30 * 86_400_000);
-  const caption = windowCaption({ past: !latest, from: endNow - W, to: endNow, win: tb.win });
+  // 서버 상세의 1시간은 원본(요약은 6시간부터 — 반증 F14: 캡션이 '1분 요약' 이라고 했다)
+  const caption = windowCaption({ past: !latest, from: endNow - W, to: endNow, win: tb.win, raw: route?.tab === 'server' && tb.win <= 60 });
   // v3.13.0(⑭) 긴 구간 — 24시간부터는 하루 슬라이더가 한두 칸이라 숨긴다(이전 · 다음 · 날짜로 이동은 그대로)
   const slider = tb.win < 1440;
   return (
@@ -460,7 +461,7 @@ function Compare({ main, ids, tb, now, onOpen }) {
           ))}
         </div>
       </div>
-      <ChangesCard ids={ids} tb={tb} tById={tById} onOpen={onOpen} />
+      <ChangesCard ids={ids} tb={tb} tById={tById} onOpen={onOpen} retentionDays={main.settings?.retentionDays} />
     </>
   );
 }
@@ -711,7 +712,7 @@ function ServerDetail({ main, id, tb, now, onBack }) {
                 </tr>
               ))}</tbody>
             </STable>
-            <div className="fm-note fm-pad">사용률 = 수신 · 송신 중 큰 쪽 ÷ 링크 속도. 본딩 속도는 802.3ad · balance 계열은 올라온 구성원 합, active-backup 은 쓰는 구성원 하나입니다. 링크 속도를 못 읽은 인터페이스는 사용률을 ‘—’ 로 두고 수신 · 송신량만 보여 줍니다. ‘{tb.win}분 평균’ 은 시간 띠에서 고른 구간({tb.windows.join(' · ')}분 중 하나)의 시간 평균입니다(표본마다 덮는 시간으로 가중 — 수집 주기가 바뀐 구간도 치우치지 않습니다). 수신 · 송신은 평균, 사용률은 순간마다의 사용률(큰 쪽 ÷ 링크 속도)을 평균한 값이라 평균 수신 · 송신으로 다시 나눈 값과 다를 수 있고, 오류 · 드롭은 그 구간의 합입니다.</div>
+            <div className="fm-note fm-pad">사용률 = 수신 · 송신 중 큰 쪽 ÷ 링크 속도. 본딩 속도는 802.3ad · balance 계열은 올라온 구성원 합, active-backup 은 쓰는 구성원 하나입니다. 링크 속도를 못 읽은 인터페이스는 사용률을 ‘—’ 로 두고 수신 · 송신량만 보여 줍니다. {tb.long ? '긴 구간에는 구간 평균이 없어 표는 구간 끝 순간의 값입니다(요약 표에는 표의 원본이 없습니다). ' : <>‘{tb.win}분 평균’ 은 시간 띠에서 고른 구간({tb.windows.join(' · ')}분 중 하나)의 시간 평균입니다(표본마다 덮는 시간으로 가중 — 수집 주기가 바뀐 구간도 치우치지 않습니다). 수신 · 송신은 평균, 사용률은 순간마다의 사용률(큰 쪽 ÷ 링크 속도)을 평균한 값이라 평균 수신 · 송신으로 다시 나눈 값과 다를 수 있고, 오류 · 드롭은 그 구간의 합입니다.</>}</div>
           </div>
           <div className="fm-card fm-flush">
             <div className="fm-row fm-between fm-pad"><h3 className="fm-h3">디스크 — 물리 {dsks.filter((x) => x.k === 'disk').length}개 · 파티션 {dsks.filter((x) => x.k === 'part').length}개 · LVM 볼륨 {dsks.filter((x) => x.k === 'lvm').length}개 <span className="fm-dim fm-at">· {atText}</span></h3>
@@ -750,7 +751,7 @@ function ServerDetail({ main, id, tb, now, onBack }) {
                     <HoverTip f={hL} vbw={640} plot={devPlot} time={hoverTime(hL, [devC.rAwait, devC.wAwait], d.from, d.to)} rows={[{ key: 'r', label: '읽기 지연', color: RX_COLOR, value: msText(valueAtFrac(devC.rAwait, hL)) }, { key: 'w', label: '쓰기 지연', color: TX_COLOR, value: msText(valueAtFrac(devC.wAwait, hL)) }]} /></div></div>
               </div>
             ) : null}
-            <div className="fm-note fm-pad">열 이름과 계산식은 iostat -x -m 과 같습니다(같은 /proc/diskstats 누적값의 차이). 요약 열은 13개 가운데 8개이고 ‘iostat 전체 열’ 을 누르면 병합 · 요청 크기 · 합친 지연 · 서비스 시간이 나옵니다. ‘전체 디스크’ 는 물리 디스크만 더합니다(파티션 · LVM 은 같은 입출력을 다시 보는 것). ‘{tb.win}분 평균’ 은 시간 띠에서 고른 구간({tb.windows.join(' · ')}분 중 하나)을 다시 계산한 값입니다 — 표본마다 덮는 시간으로 가중해 횟수 · 처리량 · 대기열 · 사용률은 시간 평균, 지연은 요청 수(초당 횟수 × 시간)로 가중합니다(끝난 요청이 없으면 ‘—’).</div>
+            <div className="fm-note fm-pad">열 이름과 계산식은 iostat -x -m 과 같습니다(같은 /proc/diskstats 누적값의 차이). 요약 열은 13개 가운데 8개이고 ‘iostat 전체 열’ 을 누르면 병합 · 요청 크기 · 합친 지연 · 서비스 시간이 나옵니다. ‘전체 디스크’ 는 물리 디스크만 더합니다(파티션 · LVM 은 같은 입출력을 다시 보는 것). {tb.long ? '긴 구간에는 구간 평균이 없어 표는 구간 끝 순간의 값입니다(요약 표에는 표의 원본이 없습니다). ' : <>‘{tb.win}분 평균’ 은 시간 띠에서 고른 구간({tb.windows.join(' · ')}분 중 하나)을 다시 계산한 값입니다 — 표본마다 덮는 시간으로 가중해 횟수 · 처리량 · 대기열 · 사용률은 시간 평균, 지연은 요청 수(초당 횟수 × 시간)로 가중합니다(끝난 요청이 없으면 ‘—’).</>}</div>
           </div>
           <ExtCards d={d} settings={settings} now={now} cores={hello?.ncpu || tab?.cpu?.cores?.length || null} atText={atText} tb={tb} />
           <div className="fm-card fm-flush">

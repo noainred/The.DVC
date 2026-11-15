@@ -262,7 +262,11 @@ test('④ 자동 사건 — 가동 시간이 30초 넘게 줄면 재부팅 · �
   store.ingestSample(id, NOW + 4000, smp(4990), null, NOW + 4000); // 12초 줄었다 — 표본 순서 흔들림 · 재부팅 아님
   store.ingestSample(id, NOW + 6000, smp(40), null, NOW + 6000);
   let ev = store.drainWrites(1000).filter((r) => r.kind === 'e');
-  assert.equal(ev.length, 1); assert.equal(ev[0].ekind, 'reboot'); assert.equal(ev[0].at, NOW + 6000);
+  // 사건 시각 = 켜진 시각(받은 시각 − 가동 시간) — 앞 표본보다 앞으로는 가지 않는다(반증 F9)
+  assert.equal(ev.length, 1); assert.equal(ev[0].ekind, 'reboot'); assert.equal(ev[0].at, NOW + 4000, '켜진 시각(NOW−34초)이 앞 표본보다 앞이라 앞 표본 시각');
+  store.ingestSample(id, NOW + 600_000, smp(100), null, NOW + 600_000); // 쉬던 동안(10분) 재부팅 — 다시 받은 시각이 아니라 켜진 시각
+  ev = store.drainWrites(1000).filter((r) => r.kind === 'e');
+  assert.deepEqual(ev.map((e) => [e.ekind, e.at]), [['reboot', NOW + 500_000]]);
   store.ingestSample(id, NOW + 8000, smp(null), null, NOW + 8000);
   assert.equal(store.drainWrites(1000).filter((r) => r.kind === 'e').length, 0, '가동 시간을 못 읽으면 판정하지 않는다');
   store.setStatus(id, { state: 'auth' }, NOW);
@@ -270,9 +274,17 @@ test('④ 자동 사건 — 가동 시간이 30초 넘게 줄면 재부팅 · �
   store.setStatus(id, { state: 'ok' }, NOW + 1);
   store.setStatus(id, { state: 'hostkey' }, NOW + 2);
   store.setStatus(id, { state: 'hostkey' }, NOW + 3);
-  store.setStatus(id, { state: 'auth' }, NOW + 4);
+  // 반증 F2: 다시 시도할 때마다 'connecting' 을 거쳐 같은 상태로 — 사건이 아니다
+  for (let k = 0; k < 5; k++) { store.setStatus(id, { state: 'connecting' }, NOW + 10 + k * 2); store.setStatus(id, { state: 'hostkey' }, NOW + 11 + k * 2); }
+  store.setStatus(id, { state: 'auth' }, NOW + 40);
   ev = store.drainWrites(1000).filter((r) => r.kind === 'e');
-  assert.deepEqual(ev.map((e) => e.ekind), ['hostkey', 'auth'], '같은 상태가 이어지면 다시 적지 않는다');
+  assert.deepEqual(ev.map((e) => e.ekind), ['hostkey', 'auth'], '같은 상태가 이어지거나 연결 중을 거쳐 돌아와도 다시 적지 않는다');
+  store.setStatus(id, { state: 'connecting' }, NOW + 50); store.setStatus(id, { state: 'ok' }, NOW + 51); store.setStatus(id, { state: 'connecting' }, NOW + 52); store.setStatus(id, { state: 'auth' }, NOW + 53);
+  assert.deepEqual(store.drainWrites(1000).filter((r) => r.kind === 'e').map((e) => e.ekind), ['auth'], '정상을 거쳐 다시 거부되면 새 사건');
+  // 접속처가 바뀌면 옛 서버의 가동 시간으로 재부팅을 만들지 않는다(반증 F9)
+  store.forgetTargetState(id);
+  store.ingestSample(id, NOW + 700_000, smp(5), null, NOW + 700_000);
+  assert.equal(store.drainWrites(1000).filter((r) => r.kind === 'e').length, 0);
   assert.equal(store.queueEvent(id, 'evil', 'x'), null, '모르는 종류는 받지 않는다');
   // 엣지 표본의 가동 시간도 정제 화이트리스트를 지난다
   const c = edge.cleanSample({ up: 123.5, junk: 1 });
@@ -422,4 +434,135 @@ test('⑥ 라우트 — 긴 구간 분기 · iostat 은 원본 · 사건 쓰기 
     if (had) fs.writeFileSync(FILE, had); else fs.rmSync(FILE, { force: true });
     registry._resetForTest();
   } finally { svc.stopFocusMon(); srv.close(); }
+});
+
+/* ── ⑦ 반증 1인 반영(F1 ~ F14) ───────────────────────────────────────────── */
+test('⑦ F1 · F12 — 1시간 구간은 칸이 요약 간격 이상(번갈아 비지 않음) · 끝나지 않은 시간은 덮은 구간의 가운데', async () => {
+  L._resetForTest();
+  const id = 'fm-hist-p';
+  const rows = [];
+  for (let m = MIN(NOW) - 60; m < MIN(NOW); m++) rows.push(sumRow(id, m, { 'c.pct': 40, 's.cpu': 40 }));
+  assert.ok((await db.writeBlocks(rows)).ok);
+  assert.ok(L.LONG_POINTS[60] <= 60 / 1.5, `1시간 칸 수 ${L.LONG_POINTS[60]}`);
+  const w = Q.normWindow({ win: 60 }, NOW, { long: true });
+  const ov = await L.longOverview([id], w, NOW);
+  const cp = await L.longCompare([id], w, { metric: 'cpu', item: 'pct' }, NOW);
+  assert.equal(ov.targets[0].series.cpu.filter((v) => v == null).length, 0, '개요 칸이 비지 않는다');
+  assert.equal(cp.targets[0].avg.filter((v) => v == null).length, 0, '비교 칸이 비지 않는다(선이 이어진다)');
+  // 7일 — 지금 시간(정시 + 30분, 끝나지 않음)의 1분 요약이 마지막 칸에 들어간다(정시 가운데 +30분 = 지금이라 예전에는 버려질 수 있었다)
+  const r7 = await L.sumRowsFor(id, NOW - 7 * 86_400_000, NOW, 'h');
+  const cur = r7.find((r) => r.partial && r.t === HOUR);
+  assert.ok(cur, '지금 시간 partial');
+  const b = L.sumBuckets(r7, 'c.pct', NOW - 7 * 86_400_000, NOW, 168);
+  assert.equal(b.avg[167], 40, '마지막 칸');
+});
+
+test('⑦ F4 · F5 · F13 — 재시작 뒤 보관 기간 전체에서 1시간 요약 구멍을 찾는다 · 가운데 빠진 시간을 요청 경로에서 메우지 않는다 · 백필은 조각', async () => {
+  rollup._resetForTest();
+  const id = 'fm-hist-h';
+  const old = HOUR - 72 * 3_600_000;
+  const rows = []; for (let k = 0; k < 60; k++) rows.push(sumRow(id, MIN(old) + k, { 'c.pct': 77 }));
+  assert.ok((await db.writeBlocks(rows)).ok);
+  // 요청 경로: 1시간 요약이 없는 가운데 시간은 1분 요약으로 메우지 않는다(끝 PARTIAL_HOURS 시간만)
+  const before = await L.sumRowsFor(id, old - 3_600_000, NOW, 'h');
+  assert.equal(before.filter((r) => r.t === old).length, 0, '가운데 구멍은 요청에서 메우지 않는다(백그라운드가 채운다)');
+  // 기동 할 일 찾기 — 48시간보다 오래된 시간도
+  for (let i = 0; i < 50; i++) await rollup.seedDirty(NOW, 1000);
+  await rollup.rollupTick(NOW, 1000, 10_000);
+  assert.equal((await db.readSum60(id, Math.floor(old / 3_600_000), Math.floor(old / 3_600_000))).length, 1, '72시간 전 시간의 1시간 요약');
+  const after = await L.sumRowsFor(id, old - 3_600_000, NOW, 'h');
+  assert.equal(SUM.sumCol(after.find((r) => r.t === old).s, 'c.pct').a, 77);
+  // 백필은 원본의 가장 오래된 분부터 범위를 조각(SCAN_SLICE_MIN 분)으로 묻는다 — 다 만든 뒤 재시작해도 원본 표 전체를 한 번에 훑지 않는다
+  rollup._resetForTest();
+  assert.equal(rollup.backfillState().cursorMinute, null);
+  const oldest = await db.oldestMinute();
+  await rollup.backfillSlice(NOW, 0); // 한 조각만(시간 0 — 첫 조각 뒤 멈춘다)
+  const c1 = rollup.backfillState().cursorMinute;
+  assert.ok(c1 != null && c1 >= oldest - 1 && c1 <= oldest - 1 + rollup.SCAN_SLICE_MIN, `첫 조각 커서 ${c1 - oldest}`);
+});
+
+test('⑦ F6 — 짧은 구간 겹쳐 보기: 그때 표본이 성기면(10초) 그 간격에 맞춰 묶은 뒤 늘인다(선이 이어진다)', async () => {
+  store._resetForTest();
+  const id = 'fm-hist-o';
+  const end = Date.now() - 5_000;
+  for (let t = end - 5 * 60_000 - 86_400_000; t <= end - 86_400_000; t += 10_000) store.ingestSample(id, t, { cpu: { pct: 20, usr: 20, sys: 0, iow: 0, stl: 0 }, mem: { pct: 50 } }, null, t + 100);
+  store.closeAll();
+  assert.ok((await db.writeBlocks(store.drainWrites(5000))).ok);
+  for (let t = end - 5 * 60_000; t <= end; t += 2_000) store.ingestSample(id, t, { cpu: { pct: 30, usr: 30, sys: 0, iow: 0, stl: 0 }, mem: { pct: 60 } }, null, t);
+  const r = await Q.serverDetail(id, Q.normWindow({ win: 5, end }, end + 3_000), { cmp: '1d' });
+  const n = r.overlay.cpu.length;
+  assert.equal(n, r.charts.band.avg.length, '같은 칸 수');
+  const nulls = r.overlay.cpu.filter((v) => v == null).length;
+  assert.ok(nulls <= 2, `어제 선 빈 칸 ${nulls}/${n} — 번갈아 비지 않는다`);
+  assert.ok(r.overlay.cpu.filter((v) => v != null).every((v) => v === 20));
+});
+
+test('⑦ F11 — 수집 시작 · 더함 · 뺌 · 끝은 서버마다 적는다(뺀 서버의 기록이 남고 더한 서버는 더한 시각)', async () => {
+  store._resetForTest();
+  const [a, b, c] = ['fm-hist-sa', 'fm-hist-sb', 'fm-hist-sc'];
+  const t0 = NOW - 600_000;
+  const r = store.startSession({ targets: [a, b], interval: 2, mode: 'watch', by: 'ops' }, t0);
+  assert.ok(r.ok);
+  store.addToSession(r.session.id, [c], t0 + 60_000);
+  store.removeFromSession(r.session.id, b, t0 + 120_000);
+  store.stopSession(r.session.id, 'stopped', t0 + 180_000);
+  assert.ok((await db.writeBlocks(store.drainWrites(1000))).ok);
+  await db.writeRun({ id: r.session.id, started: t0, ended: t0 + 180_000, by: 'ops', mode: 'watch', interval: 2, targets: [a, c] });
+  const kinds = async (id) => (await EV.eventsFor(id, t0 - 1000, NOW)).events.map((e) => [e.kind, e.at - t0]);
+  assert.deepEqual(await kinds(b), [['start', 0], ['stop', 120_000]], '뺀 서버 — 시작 · 뺌이 남는다');
+  assert.deepEqual(await kinds(c), [['start', 60_000], ['stop', 180_000]], '더한 서버 — 더한 시각');
+  assert.deepEqual(await kinds(a), [['start', 0], ['stop', 180_000]], 'fm_run 합성과 겹치지 않는다(같은 수집은 한 번)');
+  assert.equal((await EV.eventsFor(a, t0 - 1000, NOW)).events[0].by, 'ops', '시작에는 시작한 사람');
+});
+
+test('⑦ F3 · F7 · F10 — 데모 계정에 사람 이름 · 직접 적은 글 없음 · 앞 구간이 보관 밖이면 밝힘 · 지우기도 503', async () => {
+  const express = (await import('express')).default;
+  const { api } = await import('../src/routes/api.js');
+  const svc = await import('../src/focusmon/service.js');
+  const users = { admin: { username: 'real-admin', role: 'admin', scope: null }, demo: { username: 'thedvcdemp', role: 'admin', scope: null, demoGuest: true } };
+  const app = express(); app.use(express.json());
+  app.use((req, _res, next) => { req.user = users[req.headers['x-test-user'] || 'admin']; next(); });
+  app.use('/api', api);
+  const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+  const base = `http://127.0.0.1:${srv.address().port}`;
+  const call = async (method, p, { who = 'admin', body } = {}) => { const r = await fetch(base + p, { method, headers: { 'Content-Type': 'application/json', 'x-test-user': who }, body: body ? JSON.stringify(body) : undefined }); return { status: r.status, body: await r.json().catch(() => null) }; };
+  try {
+    const id = mock.DEMO_TARGETS[1].id;
+    const w = await call('POST', '/api/tools/focus-mon/events', { body: { target: id, text: '운영 메모 CHG-1234' } });
+    assert.equal(w.status, 200);
+    assert.ok((await db.writeBlocks([{ kind: 'e', id: 'run:fs-x:s:1', target: id, at: Date.now() - 2000, ekind: 'start', text: '잠깐 보기 시작(2초)', by: 'real-admin', scope: 'session' }])).ok);
+    const a = await call('GET', `/api/tools/focus-mon/data?view=server&win=30&targets=${id}`);
+    assert.ok(a.body.events.some((e) => e.user && e.by === 'real-admin'), '관리자에게는 보인다');
+    const d = await call('GET', `/api/tools/focus-mon/data?view=server&win=30&targets=${id}`, { who: 'demo' });
+    assert.equal(d.status, 200);
+    assert.ok(!d.body.events.some((e) => e.user), '데모 계정에는 직접 적은 사건이 없다');
+    assert.ok(d.body.events.every((e) => e.by === ''), '데모 계정에는 사람 이름이 없다');
+    assert.ok(!JSON.stringify(d.body.events).includes('CHG-1234'));
+    const c30 = await call('GET', `/api/tools/focus-mon/changes?win=43200&targets=${id}`);
+    assert.equal(c30.body.aBeyond, true, '30일 구간의 앞 4배는 보관 기간 밖');
+    const c1 = await call('GET', `/api/tools/focus-mon/changes?win=60&targets=${id}`);
+    assert.equal(c1.body.aBeyond, false);
+    const registry = await import('../src/focusmon/registry.js');
+    const FILE = path.join(DIR, 'focusmon-targets.json');
+    const had = fs.existsSync(FILE) ? fs.readFileSync(FILE) : null;
+    fs.writeFileSync(FILE, '{ broken'); registry._resetForTest();
+    const del = await call('DELETE', `/api/tools/focus-mon/events/${w.body.id}`);
+    assert.equal(del.status, 503); assert.equal(del.body.reason, 'registryUnreadable');
+    for (const f of fs.readdirSync(DIR)) if (f.startsWith('focusmon-targets.json.corrupt')) fs.rmSync(path.join(DIR, f));
+    if (had) fs.writeFileSync(FILE, had); else fs.rmSync(FILE, { force: true });
+    registry._resetForTest();
+  } finally { svc.stopFocusMon(); srv.close(); }
+});
+
+test('⑦ F8 — 긴 구간 60초 기억에 끝 값을 넣지 않는다(수집 중 표가 묵지 않는다)', async () => {
+  L._resetForTest(); store._resetForTest();
+  const id = 'fm-hist-m';
+  const now = Date.now();
+  store.ingestSample(id, now - 4000, { cpu: { pct: 10, usr: 10, sys: 0, iow: 0, stl: 0 } }, null, now - 4000);
+  const w = Q.normWindow({ win: 360 }, now, { long: true });
+  const r1 = await L.longServer(id, w, {}, now);
+  store.ingestSample(id, now - 1000, { cpu: { pct: 90, usr: 90, sys: 0, iow: 0, stl: 0 } }, null, now - 1000);
+  const r2 = await L.longServer(id, w, {}, now + 1000);
+  assert.equal(r1.table.cpu.pct, 10); assert.equal(r2.table.cpu.pct, 90, '두 번째(기억 안)도 최신 표본');
+  assert.equal(r2.lastAt, now - 1000);
 });

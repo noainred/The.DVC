@@ -114,7 +114,7 @@ export function EventsCard({ id, t, d, main, onChanged, setMsg }) {
 }
 
 /** 가장 변했나 — 단추로만 묻는다. */
-export function ChangesCard({ ids, tb, tById, onOpen }) {
+export function ChangesCard({ ids, tb, tById, onOpen, retentionDays }) {
   const [state, setState] = useState({ busy: false, data: null, error: null, key: '' });
   const gen = useRef(0);
   const key = `${ids.join(',')}|${tb.win}|${tb.end ?? ''}`;
@@ -127,17 +127,19 @@ export function ChangesCard({ ids, tb, tById, onOpen }) {
       .catch((e) => { if (my === gen.current) setState({ busy: false, data: null, error: e, key }); });
   };
   const d = state.data;
+  // 앞 구간(4배)이 통째로 보관 기간 밖이면 견줄 수 없다(반증 F7 — 30일 구간은 늘 빈 결과였다)
+  const beyond = retentionDays > 0 && tb.win >= retentionDays * 1440;
   return (
     <div className="fm-card fm-flush">
       <div className="fm-row fm-between fm-pad">
         <div className="fm-col"><h3 className="fm-h3">무엇이 가장 변했나 — 최근 {winText(tb.win)} vs 그 앞 {winText(tb.win * 4)}</h3>
           <span className="fm-dim">서버 × 지표마다 두 구간의 중앙값 비와 분포가 겹치는 정도로 점수를 매깁니다 · 순위는 어디부터 볼지의 안내이고 원인을 단정하지 않습니다</span></div>
-        <button type="button" className="fm-btn pri" disabled={state.busy || !ids.length} onClick={run}>{state.busy ? '계산 중…' : d ? '다시 계산' : '계산'}</button>
+        <button type="button" className="fm-btn pri" disabled={state.busy || !ids.length || beyond} onClick={run}>{state.busy ? '계산 중…' : d ? '다시 계산' : '계산'}</button>
       </div>
       {state.error ? <div className="fm-pad"><ErrorBox error={state.error} /></div> : null}
       {d ? (
         <>
-          <div className="fm-note fm-pad">{changesCaption(d)}{d.partial ? ' · 기록 DB 를 일부 읽지 못했습니다' : ''}{d.skipped ? ` · 칸이 모자라 뺀 서버 × 지표 ${d.skipped}개(앞 구간에 기록이 적음)` : ''}</div>
+          <div className="fm-note fm-pad">{changesCaption(d)}{d.partial ? ' · 기록 DB 를 일부 읽지 못했습니다' : ''}{d.skipped ? ` · 칸이 모자라 뺀 서버 × 지표 ${d.skipped}개(앞 구간에 기록이 적음)` : ''}{d.aBeyond ? ' · 앞 구간이 보관 기간 밖이라 견줄 수 없습니다' : d.aPartly ? ' · 앞 구간의 일부가 보관 기간 밖입니다(남은 기록으로만 견줍니다)' : ''}</div>
           {d.rows.length ? (
             <div className="fm-tblbox">
               <STable className="fm-table" minWidth={760}>
@@ -159,7 +161,8 @@ export function ChangesCard({ ids, tb, tById, onOpen }) {
             </div>
           ) : <div className="fm-note fm-pad">두 구간 사이에 눈에 띄게 바뀐 지표가 없습니다(또는 앞 구간 기록이 모자랍니다).</div>}
         </>
-      ) : !state.busy ? <div className="fm-note fm-pad">‘계산’ 을 누르면 지금 보는 서버 {ids.length}대를 견줍니다.</div> : null}
+      ) : beyond ? <div className="fm-note fm-pad">이 구간의 앞 4배 길이는 보관 기간({retentionDays}일) 밖이라 견줄 수 없습니다 — 더 짧은 구간을 고르세요.</div>
+        : !state.busy ? <div className="fm-note fm-pad">‘계산’ 을 누르면 지금 보는 서버 {ids.length}대를 견줍니다.</div> : null}
     </div>
   );
 }

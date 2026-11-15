@@ -110,13 +110,23 @@ export function ingestSample(id, ts, sample, hello, now = Date.now()) {
   e.lastAt = Math.max(e.lastAt, ts);
   // v3.13.0(⑭ 자동 사건): 가동 시간이 줄면 재부팅(30초 넘게 — 표본 순서가 바뀐 것과 가른다)
   if (Number.isFinite(sample.up)) {
-    if (Number.isFinite(e.lastUp) && sample.up + 30 < e.lastUp && ts >= (e.lastUpAt || 0)) queueEvent(id, 'reboot', '재부팅 — 가동 시간이 줄었습니다', ts);
+    // 사건 시각 = 켜진 시각(지금 − 가동 시간) — 쉬던 동안의 재부팅을 다시 받은 시각에 찍지 않는다(반증 F9) · 앞 표본보다 앞으로는 가지 않는다
+    //   쉬던 동안(2분 넘게 표본이 없었다)은 '그동안 흘렀어야 할 가동 시간' 과도 견준다 — 다시 켜진 뒤 가동 시간이 예전 값보다 커졌어도 재부팅이다(여유 60초)
+    const gap = Number.isFinite(e.lastUpAt) ? (ts - e.lastUpAt) / 1000 : 0;
+    const rebooted = Number.isFinite(e.lastUp) && (sample.up + 30 < e.lastUp || (gap > 120 && sample.up + 60 < e.lastUp + gap));
+    if (rebooted && ts >= (e.lastUpAt || 0)) queueEvent(id, 'reboot', '재부팅 — 가동 시간이 줄었습니다', Math.max(e.lastUpAt || 0, Math.round(ts - sample.up * 1000)));
     if (ts >= (e.lastUpAt || 0)) { e.lastUp = sample.up; e.lastUpAt = ts; }
   }
   return true;
 }
 
 /* ── 사건(v3.13.0 ⑭ 컨펌 ⑥ — 자동 · 직접) ───────────────────────────────── */
+const MODE_NAME = Object.freeze({ watch: '잠깐 보기', record: '계속 수집' });
+/** 수집 시작 · 끝 · 더함 · 뺌 — 서버마다 따로 적는다(반증 F11: fm_run 의 지금 서버 목록으로 만들면 뺀 서버의 시작 · 끝이 사라지고 더한 서버의 시작이 수집 시작 시각에 찍혔다).
+ *  id 는 `run:<수집>:<s|e>:<시각>` — events.eventsFor 가 이 수집의 fm_run 합성을 건너뛴다(업그레이드 전 수집만 합성). */
+function runEvent(s, target, kind, text, now) {
+  queueEvent(target, kind, text, now, { id: `run:${s.id}:${kind === 'start' ? 's' : 'e'}:${now}`, by: kind === 'start' ? s.by : '', scope: 'session' });
+}
 /** 자동 사건 종류 → 판정 글(화면은 같은 열쇠로 색을 고른다). */
 export const EVENT_KINDS = Object.freeze(['reboot', 'auth', 'hostkey', 'start', 'stop', 'user']);
 /** 사건을 기록 대기열에 — 대상마다 한 줄(id 를 같이 쓰면 여러 대상을 한 사건으로 묶는다). 글은 300자. */
@@ -315,6 +325,7 @@ export function startSession({ targets = [], interval, mode = 'watch', by = '' }
   applyMoves(moved, now);
   S.set(s.id, s);
   for (const t of ids) lastView.set(t, now);
+  for (const t of ids) runEvent(s, t, 'start', `${MODE_NAME[mode]} 시작(${s.interval}초)`, now);
   if (mode === 'record' || moved.length) persistSessions();
   return { ok: true, session: { ...s, targets: [...ids] }, skipped, moved };
 }
@@ -336,6 +347,7 @@ export function addToSession(id, targets = [], now = Date.now()) {
   applyMoves(moved, now);
   s.targets = [...s.targets, ...add];
   for (const t of add) lastView.set(t, now);
+  for (const t of add) runEvent(s, t, 'start', `${MODE_NAME[s.mode]}에 더함(${s.interval}초)`, now);
   s.lastViewAt = now;
   if (s.mode === 'record' || moved.length) persistSessions();
   return { ok: true, session: { ...s, targets: [...s.targets] }, added: add, skipped, moved };
@@ -350,6 +362,7 @@ export function removeFromSession(id, targetId, now = Date.now()) {
   if (!s.targets.includes(t)) return { ok: false, code: 'not-in-session', reason: '그 수집에 없는 서버입니다.' };
   if (s.targets.length === 1) { const r = stopSession(s.id, 'removed', now); return { ...r, ended: true }; }
   s.targets = s.targets.filter((x) => x !== t);
+  runEvent(s, t, 'stop', `${MODE_NAME[s.mode]}에서 뺌`, now);
   if (s.mode === 'record') persistSessions();
   return { ok: true, ended: false, session: { ...s, targets: [...s.targets] } };
 }
@@ -373,6 +386,7 @@ export function stopSession(id, why = 'stopped', now = Date.now()) {
   const s = S.get(String(id));
   if (!s) return { ok: false, code: 'not-found', reason: '없는 수집입니다(이미 끝났을 수 있습니다).' };
   S.delete(s.id);
+  for (const t of s.targets) runEvent(s, t, 'stop', `${MODE_NAME[s.mode]} 끝`, now);
   ended.unshift({ ...s, targets: [...s.targets], endedAt: now, why });
   if (ended.length > 20) ended.length = 20;
   if (s.mode === 'record') persistSessions();
@@ -493,10 +507,12 @@ export function setStatus(id, st, now = Date.now()) {
   // v3.13.0(⑭ 자동 사건): 키 로그인 거부 · 호스트키 승인 필요로 **바뀐 순간**만(같은 상태가 이어지면 다시 적지 않는다)
   const prev = ST.get(String(id));
   //   앞 상태를 모르면(기동 직후 · 엣지 첫 동기화) 적지 않는다 — 재시작마다 같은 사건이 되풀이되지 않게
-  if ((st?.state === 'auth' || st?.state === 'hostkey') && prev && prev.state !== st.state) {
+  //   반증 F2: 다시 시도할 때마다 'connecting' 을 거쳐 같은 상태로 돌아온다 — 견주는 것은 'connecting' 을 뺀 **안정 상태**(호스트키 대기 중 60초마다 사건이 쌓였다)
+  const stable = prev ? (prev.state === 'connecting' ? (prev.stable ?? null) : prev.state) : null;
+  if ((st?.state === 'auth' || st?.state === 'hostkey') && stable && stable !== st.state) {
     queueEvent(id, st.state, st.state === 'auth' ? '키 로그인 거부 — 수집을 멈췄습니다' : '호스트키 승인 필요 — 장비 신뢰 확인', now);
   }
-  ST.set(String(id), { ...st, at: now });
+  ST.set(String(id), { ...st, at: now, stable: st?.state === 'connecting' ? stable : (st?.state ?? null) });
 }
 export function statusOf(id) { return ST.get(String(id)) || null; }
 
@@ -590,6 +606,7 @@ export function takeEdgeRetries(agent, now = Date.now()) {
 export function forgetTargetState(id) {
   const k = String(id);
   ST.delete(k); TESTS.delete(k); RETRIES.delete(k);
+  const e = T.get(k); if (e) { e.lastUp = undefined; e.lastUpAt = undefined; } // 반증 F9 — 접속처가 바뀌면 옛 서버의 가동 시간으로 '재부팅' 을 만들지 않게
   LOAD.delete(k); // v2.983 반증 F13 — 예전 주소의 수집 부하 창을 새 주소의 것처럼 보이지 않게
 }
 

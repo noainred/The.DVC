@@ -22,6 +22,16 @@ describe('구간 글자 · 긴 구간 판정', () => {
     expect(c).not.toMatch(/슬라이더/);
     expect(windowCaption({ past: false, from: 0, to: 1, win: 10080 })).toMatch(/1시간 요약/);
     expect(windowCaption({ past: false, from: 0, to: 1, win: 5 })).toMatch(/5분 · 슬라이더/);
+    // 반증 F14: 서버 상세 1시간은 원본 — 캡션이 요약이라고 말하지 않는다
+    expect(windowCaption({ past: false, from: 0, to: 1, win: 60, raw: true })).toMatch(/1시간 · 원본 표본/);
+    expect(windowCaption({ past: false, from: 0, to: 1, win: 60, raw: true })).not.toMatch(/요약/);
+  });
+  it('화면 — 서버 상세 1시간 캡션은 원본 · 가장 변했나는 앞 구간이 보관 기간 밖이면 잠근다 · 긴 구간 표 주석은 평균을 말하지 않는다(반증 F7 · F14)', () => {
+    const tool = read('./FocusMonTool.jsx'); const hist = read('./FocusMonHistory.jsx');
+    expect(tool).toMatch(/raw: route\?\.tab === 'server' && tb\.win <= 60/);
+    expect(hist).toMatch(/const beyond = retentionDays > 0 && tb\.win >= retentionDays \* 1440;/);
+    expect(hist).toMatch(/disabled=\{state\.busy \|\| !ids\.length \|\| beyond\}/);
+    expect((tool.match(/\{tb\.long \? '긴 구간에는 구간 평균이 없어/g) || []).length).toBe(2);
   });
   it('조회 주기 — 과거 0 · 긴 구간 30초(보는 화면 심박 60초보다 짧게) · 그 밖은 기본값', () => {
     expect(pollMsFor(1440, 123, 2000)).toBe(0);

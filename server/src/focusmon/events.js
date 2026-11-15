@@ -1,7 +1,8 @@
 /**
  * focusmon/events.js — 사건 표시(v3.13.0 ⑭ B3 — 시안 History · 컨펌 ⑥ '직접 적는 사건: 관리자 · 전체 쓰기 범위 · 30일 · 감사').
  *
- *  · 자동 사건: 재부팅(가동 시간이 줄어듦) · 키 로그인 거부 · 호스트키 승인 필요(store.queueEvent — 상태가 바뀐 순간만) · 수집 시작 · 끝(fm_run 에서 만든다 — 따로 적지 않는다).
+ *  · 자동 사건: 재부팅(가동 시간이 줄어듦 · 시각은 켜진 시각) · 키 로그인 거부 · 호스트키 승인 필요(store.queueEvent — 'connecting' 을 뺀 안정 상태가 바뀐 순간만) ·
+ *    수집 시작 · 끝 · 더함 · 뺌(store 가 서버마다 적는다 — 업그레이드 전 수집은 fm_run 에서 만든다).
  *    OOM 은 ⑯ 에서 더한다.
  *  · 직접 적는 사건: 이 서버 · 그 서버의 그룹 · 그 서버가 든 수집 전체 — **적는 때 대상들로 펴서** 서버마다 한 줄(같은 id). 대상 상한 `SCOPE_MAX`.
  *    글은 300자 · 제어 글자는 공백 · 앞뒤 공백 정리 · 빈 글 거절 · 시각은 지금 ±30일 안(미래 1시간까지).
@@ -66,13 +67,21 @@ export async function eventsFor(id, from, to) {
   const rows = await db.readEvents(id, from, to, 200);
   const runs = await db.listRuns(from - 31 * 86_400_000, 400);
   const out = [];
-  for (const r of rows || []) out.push({ id: r.id, at: r.at, kind: r.kind, text: r.text, by: r.kind === 'user' ? r.by || '' : '', scope: r.scope || 'server' });
+  const explicit = new Set();
+  for (const r of rows || []) {
+    // 시작 · 더함은 누가 시작했는지를 싣는다 · 그 밖의 자동 사건에는 사람 이름이 없다
+    out.push({ id: r.id, at: r.at, kind: r.kind, text: r.text, by: r.kind === 'user' || r.kind === 'start' ? r.by || '' : '', scope: r.scope || 'server' });
+    const m = /^run:([^:]+):/.exec(r.id); if (m) explicit.add(m[1]);
+  }
+  // 업그레이드 전 수집(서버마다 적은 시작 · 끝이 없는 것)만 fm_run 에서 만든다(반증 F11)
   for (const r of runs || []) {
-    if (!Array.isArray(r.targets) || !r.targets.includes(id)) continue;
+    if (!Array.isArray(r.targets) || !r.targets.includes(id) || explicit.has(r.id)) continue;
     const mode = r.mode === 'record' ? '계속 수집' : '잠깐 보기';
     if (r.started >= from && r.started <= to) out.push({ id: `run-${r.id}-s`, at: r.started, kind: 'start', text: `${mode} 시작(${r.interval}초)`, by: r.by || '', scope: 'session' });
     if (r.ended != null && r.ended >= from && r.ended <= to) out.push({ id: `run-${r.id}-e`, at: r.ended, kind: 'stop', text: `${mode} 끝`, by: '', scope: 'session' });
   }
   out.sort((a, b) => a.at - b.at || a.id.localeCompare(b.id));
-  return { events: out.slice(0, 200).map((e, i) => ({ n: i + 1, ...e, label: EVENT_TEXT[e.kind] || e.kind, user: e.kind === 'user' })), partial: rows == null || runs == null };
+  // 최근 200건(오래된 쪽을 자른다 — 반증 F2) · 번호는 남은 것의 시각 순
+  const kept = out.length > 200 ? out.slice(out.length - 200) : out;
+  return { events: kept.map((e, i) => ({ n: i + 1, ...e, label: EVENT_TEXT[e.kind] || e.kind, user: e.kind === 'user' })), partial: rows == null || runs == null, cut: out.length - kept.length };
 }

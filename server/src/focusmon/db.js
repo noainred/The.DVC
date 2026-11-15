@@ -188,6 +188,14 @@ export async function oldestMinute() {
   return r?.m ?? null;
 }
 
+/** 가장 오래된 1분 요약의 분(1시간 요약 할 일 찾기의 시작점 — 원본보다 요약이 앞설 수 있다). */
+export async function oldestSumMinute() {
+  const db = await getDb();
+  if (!db) return null;
+  const r = db.prepare('SELECT MIN(minute) AS m FROM fm_sum1').get();
+  return r?.m ?? null;
+}
+
 /** 수집 기록. */
 export async function writeRun(run) {
   const db = await getDb();
@@ -237,8 +245,9 @@ export async function readSum60(target, fromHour, toHour, limit = 1000) {
   return db.prepare('SELECT hour, data FROM fm_sum60 WHERE target = ? AND hour >= ? AND hour <= ? ORDER BY hour LIMIT ?').all(String(target), fromHour, toHour, limit);
 }
 /**
- * 요약이 아직 없는 원본 분(백필 — 컨펌 ③ '한 번 조각으로 · 쉬어 가며'). afterMinute 다음부터 minute 순으로 limit 줄.
- * minute 인덱스 범위 + 기본 키 존재 확인(NOT EXISTS) — 끝까지 가면 빈 배열.
+ * 요약이 아직 없는 원본 분(백필 — 컨펌 ③ '한 번 조각으로 · 쉬어 가며'). (afterMinute, beforeMinute) 를 minute 순으로 limit 줄.
+ * minute 인덱스 범위 + 기본 키 존재 확인(NOT EXISTS). 부르는 쪽(rollup.backfillSlice)이 범위를 6시간씩 잘라 부른다 —
+ * 범위를 열어 두면 다 만든 뒤에도 기동마다 원본 표 전체를 한 번에 훑었다(반증 F13 — 30일 × 20대 약 0.7초 추정).
  */
 export async function metricsWithoutSum(afterMinute, beforeMinute, limit = 50) {
   const db = await getDb();
@@ -246,17 +255,15 @@ export async function metricsWithoutSum(afterMinute, beforeMinute, limit = 50) {
   return db.prepare('SELECT m.target AS target, m.minute AS minute, m.data AS data FROM fm_metric m WHERE m.minute > ? AND m.minute < ? AND NOT EXISTS (SELECT 1 FROM fm_sum1 s WHERE s.target = m.target AND s.minute = m.minute) ORDER BY m.minute LIMIT ?')
     .all(afterMinute, beforeMinute, limit);
 }
-/** 1시간 요약이 없는 끝난 시간들 — 1분 요약의 (대상, 시간) 중에서. sinceMinute 이후만(기동 때 한 번 · 하루 남짓). */
-export async function hoursWithoutSum60(sinceMinute, beforeHour, limit = 5000) {
+/**
+ * 1시간 요약이 없는 끝난 시간들 — [fromMinute, toMinute) 의 1분 요약 (대상, 시간) 가운데(조각으로 부른다 — rollup.seedDirty 가 보관 기간을 6시간씩 훑는다 · 반증 F4).
+ * minute 인덱스 범위 + 1시간 요약 기본 키 존재 확인(NOT EXISTS). 정수 나눗셈으로 시간.
+ */
+export async function hoursWithoutSum60(fromMinute, toMinute, limit = 5000) {
   const db = await getDb();
   if (!db) return null;
-  const rows = db.prepare('SELECT target, minute FROM fm_sum1 WHERE minute >= ? AND minute < ? ORDER BY minute LIMIT ?').all(sinceMinute, beforeHour * 60, 200_000);
-  const want = new Map();
-  for (const r of rows) { const k = `${r.target}|${Math.floor(r.minute / 60)}`; if (!want.has(k)) want.set(k, { target: r.target, hour: Math.floor(r.minute / 60) }); }
-  const has = db.prepare('SELECT 1 FROM fm_sum60 WHERE target = ? AND hour = ?');
-  const out = [];
-  for (const x of want.values()) { if (!has.get(x.target, x.hour)) out.push(x); if (out.length >= limit) break; }
-  return out;
+  return db.prepare('SELECT DISTINCT s.target AS target, s.minute / 60 AS hour FROM fm_sum1 s WHERE s.minute >= ? AND s.minute < ? AND NOT EXISTS (SELECT 1 FROM fm_sum60 h WHERE h.target = s.target AND h.hour = s.minute / 60) LIMIT ?')
+    .all(fromMinute, toMinute, limit).map((r) => ({ target: r.target, hour: Number(r.hour) }));
 }
 /** 직접 적은 사건 하나(같은 id 의 줄 전부)를 지운다 — 자동 사건은 지우지 않는다(kind 'user' 만). 지운 줄 수. */
 export async function deleteUserEvent(id) {
@@ -268,7 +275,8 @@ export async function deleteUserEvent(id) {
 export async function readEvents(target, from, to, limit = 200) {
   const db = await getDb();
   if (!db) return null;
-  return db.prepare('SELECT id, target, at, kind, text, by, scope FROM fm_event WHERE target = ? AND at >= ? AND at <= ? ORDER BY at LIMIT ?').all(String(target), from, to, limit);
+  // 최근 쪽을 남긴다(반증 F2 — 오래된 것부터 자르면 자동 사건이 많을 때 최근에 직접 적은 사건이 빠졌다) · 돌려줄 때는 시각 순
+  return db.prepare('SELECT id, target, at, kind, text, by, scope FROM fm_event WHERE target = ? AND at >= ? AND at <= ? ORDER BY at DESC LIMIT ?').all(String(target), from, to, limit).reverse();
 }
 /** 사건(id 로) — 지우기 전 확인(직접 적은 것인지 · 누가 · 어느 서버들). null = DB 를 못 열었다 · [] = 없다. */
 export async function eventById(id) {

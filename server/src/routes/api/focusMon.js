@@ -514,7 +514,9 @@ api.get('/tools/focus-mon/data', adminOnly, fullScopeOnly, async (req, res) => {
     const dev = String(req.query.dev || '');
     const r = w.win > 60 ? await L.longServer(ids[0], w, { dev, cmp }) : await Q.serverDetail(ids[0], w, { at: !w.long && req.query.at === 'avg' ? 'avg' : 'end', dev, cmp });
     const ev = await eventsFor(ids[0], w.from, w.to);
-    return res.json({ ...base, ...r, cmp: cmp || null, events: ev.events, eventsPartial: ev.partial });
+    // 반증 F3: 데모 계정에는 사람 이름 · 직접 적은 글을 싣지 않는다(목 모드에서 관리자가 데모 서버에 적은 운영 메모 · 시작한 계정 — 수집 목록의 demoMask 와 같은 규약)
+    const events = isDemoGuest(req.user) ? ev.events.filter((e) => !e.user).map((e, i) => ({ ...e, n: i + 1, by: '' })) : ev.events;
+    return res.json({ ...base, ...r, cmp: cmp || null, events, eventsPartial: ev.partial, eventsCut: ev.cut || 0 });
   }
   if (view === 'iostat') {
     const pins = String(req.query.pins || '').split(',').filter(Boolean).slice(0, 4);
@@ -531,7 +533,9 @@ api.get('/tools/focus-mon/changes', adminOnly, fullScopeOnly, async (req, res) =
   const { ids, missing, vis } = pickIds(req, 40);
   if (!ids.length) return res.status(404).json({ ok: false, code: 'not-found', reason: '볼 대상이 없습니다(없는 대상이거나 고르지 않았습니다).' });
   const r = await biggestChanges(ids.map((id) => ({ id, name: vis.get(id)?.name || id })), w);
-  res.json({ ok: true, win: w.win, from: w.from, to: w.to, past: w.past, missing, ...r });
+  // 반증 F7: 앞 구간(4배)이 보관 기간 밖이면 견줄 수 없다 — 빈 결과를 '변한 것 없음' 으로 읽지 않게 밝힌다
+  const keepFrom = Date.now() - registry.getSettings().retentionDays * 86_400_000;
+  res.json({ ok: true, win: w.win, from: w.from, to: w.to, past: w.past, missing, ...r, aBeyond: r.a.to <= keepFrom, aPartly: r.a.from < keepFrom && r.a.to > keepFrom });
 });
 
 /**
@@ -554,6 +558,7 @@ api.post('/tools/focus-mon/events', adminOnly, fullRwOnly, demoBlockWrite, async
 
 /** 직접 적은 사건 지우기 — 같은 문 · 직접 적은 것만(자동 사건은 지우지 않는다) · 그 id 의 서버 줄 전부. */
 api.delete('/tools/focus-mon/events/:id', adminOnly, fullRwOnly, demoBlockWrite, async (req, res) => {
+  if (registryUnreadable(res)) return; // 반증 F10 — 적기와 같은 문(등록부를 못 읽으면 '없는 사건' 이라고 말하지 않는다)
   const id = String(req.params.id || '');
   if (!/^ev-[0-9a-f]{12}$/.test(id)) return res.status(404).json({ ok: false, code: 'not-found', reason: '없는 사건입니다.' });
   const rows = await db.eventById(id);

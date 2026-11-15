@@ -94,6 +94,9 @@ export function decodeSum(buf) {
 /** 요약의 열 하나 → {n, a, lo, hi} | null. */
 export function sumCol(s, key) {
   if (!s) return null;
-  const i = s.keys.indexOf(key);
+  // 열 찾기는 요약마다 한 번 만든 색인으로(긴 구간 서버 상세는 행 1,440 × 열 수십 번 찾는다 — indexOf 면 행마다 선형)
+  let ix = s._ix;
+  if (!ix) { ix = new Map(); for (let j = 0; j < s.keys.length; j++) ix.set(s.keys[j], j); Object.defineProperty(s, '_ix', { value: ix, enumerable: false }); }
+  const i = ix.has(key) ? ix.get(key) : -1;
   return i < 0 ? null : { n: s.n[i], a: s.a[i], lo: s.lo[i], hi: s.hi[i] };
 }

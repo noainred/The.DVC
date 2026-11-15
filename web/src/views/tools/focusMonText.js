@@ -242,10 +242,10 @@ export function winText(w) {
 }
 /** 긴 구간(요약 표 — 1시간부터)인가. */
 export const isLongWin = (w) => (n(w) ?? 0) >= 60;
-export function windowCaption({ past, from, to, win }) {
+export function windowCaption({ past, from, to, win, raw = false }) {
   const long = isLongWin(win);
   const span = `${clockText(from, true)} ~ ${long ? clockText(to, true) : clockText(to)}`;
-  const src = !long ? '' : win <= 1440 ? ' · 칸마다 1분 요약(최저 · 평균 · 최고)' : ' · 칸마다 1시간 요약(최저 · 평균 · 최고)';
+  const src = !long ? '' : raw ? ' · 원본 표본' : win <= 1440 ? ' · 칸마다 1분 요약(최저 · 평균 · 최고)' : ' · 칸마다 1시간 요약(최저 · 평균 · 최고)';
   return past
     ? `과거 구간 · ${span} · ${winText(win)}${src} · 이 구간은 갱신하지 않습니다 — 수집과 기록은 계속됩니다`
     : long
