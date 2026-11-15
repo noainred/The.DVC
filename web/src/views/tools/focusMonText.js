@@ -574,7 +574,7 @@ export function loadGroupLabel(g, procEvery, topoSec) {
 export const LOAD_GROUPS = Object.freeze(['base', 'topo', 'proc']);
 /** 묶음마다 무엇이 들었나(줄 아래 패널). */
 export const LOAD_GROUP_WHAT = Object.freeze({
-  base: '/proc/stat · loadavg · meminfo · net/dev · diskstats 와 반복 자체(시각 · sleep)',
+  base: '/proc/stat · loadavg · meminfo · net/dev · diskstats · vmstat · net/snmp · sockstat · 60초마다 df 두 번과 반복 자체(시각 · sleep)',
   topo: '인터페이스 · 본딩 · lsblk · ps(pid → 사용자) · systemd 서비스',
   proc: '모든 프로세스의 /proc/<pid>/stat · 읽을 수 있는 /proc/<pid>/io',
 });

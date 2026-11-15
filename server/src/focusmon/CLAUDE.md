@@ -45,6 +45,12 @@
   엣지 `cleanLoad`/`cleanNodeLoad` 화이트리스트 · **수집기가 있을 때만 노드 표본** · 보는 화면 심박은 잠깐 보기 서버만.
 - **카드 아래 줄 고르기(v2.992 — 사용자 '빨간 부분을 선택해서 볼 수 있게 · Disk write/read · Network in/out · disk wait 등')** — `rates.summaryOf` 에 rMB · wMB · rIo · wIo · qu(물리 디스크 합) ·
   iow · stl · load1 · cores · swU · swT(**이미 저장된 열에서** — 새 열 없음 · 못 읽음 null) · 웹 `CARD_LINE_ITEMS`(최대 4 · 기본 네트워크 + 쓰기 지연 · `fm.ov.line`) · 회귀 `focusMonCard2992` · web `focusMonCard`.
+- **더할 지표(v3.12.0 ⑬ — 시안 Metrics · '기본값대로 모두 구현해줘')** — 원격은 여전히 상수(`/proc/stat` ctxt · processes · intr 첫 칸 · `/proc/vmstat` · `net/snmp`+`netstat` · `sockstat` ·
+  60초마다 `timeout -s KILL 3 df -P -l`(-T -k · -i — 로컬만 · rc 137 = 응답 없음)). 새 구획은 **기본 묶음**(수집 부하 CB 경계가 FSI 뒤 — `focusMonLoad2983` ①) ·
+  파서 `parseVm`(회수 줄은 경로별 합 — `_anon/_file` · `direct_throttle` 제외) · `parseSnmp` · `parseSock` · `parseFs`/`parseFsi`(`okMount` — 마운트는 시리즈 이름) ·
+  계산 `rates.computeSample`(초당 값 · 카운터 감소 null · 보낸 것 0 이면 재전송률 null) · D/좀비 `procStates`(수집기 지도로 이어진 시간) · 파일시스템 · D 는 **수집기가 마지막 값을 표본마다** 싣는다(age) ·
+  열 `k.* v.* p.* q.* f.<마운트>.p|i` · 묶음 메타 fs 는 **합친다**(`codec.mergeMeta` — 마지막 표본에 없을 수 있다) · 엣지 `cleanSample` 화이트리스트 · 가득 찰 때까지 `query.fillEstimate`
+  (계속 수집만 · 24시간 · 10분 묶음 하나씩 · 6시간 미만 short · 10분 캐시 · 추정). 회귀 `focusMonMetrics3120` · web `focusMonMetrics`.
 - **디스크 점검(v3.11.0 — 사용자 '배드섹터 점검 프로그램 추가' + 원문 · '법인별 · 모델별로' · '기본값대로 모두 구현')** — 이 폴더의 **유일한 sudo 예외**(사용자 승인: 고정 설치 + sudoers 한 줄).
   상세 `docs/rules/focusmon.md` · 설계 `docs/design/focus-mon/README.md` §20 · 회귀 `focusMonAudit3110` · web `focusMonAudit`. **되돌리면 안 되는 것**:
   ① 받은 프로그램 `audit/rhel_disk_audit.py` 는 **한 바이트도 고치지 않는다**(sha256 = 판본 · 고치면 전 서버 재설치) — 덧붙일 일은 감싸는 실행 파일 `WRAPPER_TEXT` 에(인자 거절 · 임시 폴더 · 시한 KILL · nice/ionice · 디스크 목록).
