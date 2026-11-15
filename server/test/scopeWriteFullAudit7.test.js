@@ -111,3 +111,25 @@ test('③ 설정 저장 — 쓰기 제한 관리자의 전역 필드 · 범위 �
   const offAdm = await call('adm', 'PUT', '/api/tools/waste/off-check/settings', { enabled: false });
   assert.equal(offAdm.status, 200); assert.equal(offAdm.body.ignoredGlobal, undefined);
 });
+
+test('④ 7회차 반증 R-2~R-5 — Horizon 수집 · 설정 · GPU 게스트 시험 · 대역 메모 · 긴급중단 승인자', async () => {
+  assert.equal((await call('wadm', 'POST', '/api/tools/horizon-sessions/collect', {})).status, 403);
+  const hs = await call('wadm', 'PUT', '/api/tools/horizon-sessions/settings', { enabled: true });
+  assert.equal(hs.status, 403); assert.equal(hs.body.writeScope, 'partial');
+  assert.equal((await call('wadm', 'POST', '/api/admin/gpu-guest/test', { vcenterId: 'vcB', items: [{ vmId: 'vcB:vm-1' }] })).status, 403, '쓰기 범위 밖 게스트 로그인');
+  assert.equal((await call('sadm', 'POST', '/api/admin/gpu-guest/test', { vcenterId: 'vcB', items: [{ vmId: 'vcB:vm-1' }] })).status, 404);
+  assert.equal((await call('wadm', 'PUT', '/api/tools/ipam/subnet-note', { subnet: '10.1.2.0/24', purpose: 'x' })).status, 403, '전 법인 공용 대역 메모');
+  const st = fs.readFileSync(new URL('../src/routes/admin/statusTools.js', import.meta.url), 'utf8');
+  assert.match(st, /if \(!isFullReadWriteScope\(\{ username: u\.username, role: authzRole\(u\.role\), scope: u\.scope \}, store\.get\(\)\)\) return res\.status\(403\)/, '승인자도 조회 ∧ 쓰기 전체');
+});
+
+test('④ 7회차 반증 R-1 — 쓰기 범위 안 vCenter 를 모두 빼는 요청(범위 밖 id 만 남김)은 적용하지 않고 밝힌다', async () => {
+  const { mergeScopedIds } = await import('../src/auth/scopeMerge.js');
+  const r = mergeScopedIds(['vcA', 'vcB', 'vcC'], ['vcB'], new Set(['vcA']), ['vcA', 'vcB', 'vcC']);
+  assert.deepEqual(r.merged, ['vcA', 'vcB', 'vcC'], '빼지 않는다(빈 범위 안 목록 = 그대로)');
+  assert.equal(r.unapplied, 'empty-in-scope'); assert.match(r.unappliedReason, /적용하지 않았습니다/);
+  const r2 = mergeScopedIds(['vcA', 'vcB'], [], new Set(['vcA']), ['vcA', 'vcB']);
+  assert.equal(r2.unapplied, 'empty-in-scope', '빈 목록도 예전처럼');
+  const r3 = mergeScopedIds(['vcA', 'vcB'], ['vcA'], new Set(['vcA']), ['vcA', 'vcB']);
+  assert.equal(r3.unapplied, undefined, '정상 요청은 사유 없음');
+});

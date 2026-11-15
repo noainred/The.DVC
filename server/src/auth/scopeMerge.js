@@ -53,8 +53,10 @@ export function mergeScopedIds(before, body, allowed, allIds) {
   for (const id of inScope) mergedSet.add(id);
   const same = mergedSet.size === prevSet.size && [...mergedSet].every((id) => prevSet.has(id));
   // 적용하지 않은 요청은 사유를 싣는다(v2.606 RECENT2606-04) — 화면이 '저장됐다' 고만 말하지 않게.
-  const emptyNote = req.length === 0 && prevInScope.length > 0
-    ? '범위 안 vCenter 를 모두 빼는 요청은 적용하지 않았습니다 — 빈 목록은 이 계정에서 \'범위 안은 그대로\' 를 뜻합니다.'
+  // 전체 점검 7회차 반증 R-1: 범위 밖 id 만 보낸 경우도 같다(쓰기 범위 병합 — 조회 무제한 · 쓰기 제한 계정의 GET 에는 쓰기 밖 id 가 보인다).
+  //   예전 조건(req.length === 0)이면 쓰기 범위의 마지막 vCenter 를 뺀 요청이 안내 없이 무시됐다.
+  const emptyNote = inScopeReq.length === 0 && prevInScope.length > 0
+    ? '범위 안 vCenter 를 모두 빼는 요청은 적용하지 않았습니다 — 범위 안 목록이 비면 이 계정에서 \'범위 안은 그대로\' 를 뜻합니다.'
     : null;
   if (same) return { merged: prev, ignored, ...(emptyNote && prev.length ? { unapplied: 'empty-in-scope', unappliedReason: emptyNote } : {}) };
   // v2.606 RECENT2606-04: 직전이 '전체 대상([])' 이면 범위 계정은 그것을 **고정 목록으로 바꾸지 않는다**. 펼쳐 저장하면
