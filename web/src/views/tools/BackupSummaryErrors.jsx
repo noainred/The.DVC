@@ -64,7 +64,7 @@ export default function BackupSummaryErrors({ reloadKey, onOpenDetail, region = 
   };
   const goHistory = (r) => { saveRunFocus(r.vc, r.vmId, r.jobid); window.location.hash = '#/tools/bareos-backup/runs'; };
   const toggle = (id) => setOpen((s0) => { const s1 = new Set(s0); if (s1.has(id)) s1.delete(id); else s1.add(id); return s1; });
-  useEffect(() => { setDrawer(null); }, [kind, src, days, view]);
+  useEffect(() => { setDrawer(null); }, [kind, src, days, view, region]);   // 전체 점검 6회차(W-3): 리전을 바꿔도 닫는다(표는 새 리전인데 서랍은 옛 목록을 돌았다)
   const isOpen = (r) => drawer?.kind === 'log' && drawer.list[drawer.index] === r;
   const actions = (r) => {
     const o = errorOpen(r, opt); const h = errorHistory(r, opt);

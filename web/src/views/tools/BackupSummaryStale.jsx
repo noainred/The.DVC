@@ -67,7 +67,15 @@ export default function BackupSummaryStale({ scope, rows, sel, onPick, onOpenDet
   // 처음 펼칠 때 한 번 찾는다(조건은 기억한 값) · 범위 옵션(전원·제외)이 바뀌면 지난 결과는 버린다
   const scopeSig = `${scope?.power || ''}|${scope?.excl === false ? 0 : 1}|${scope?.region || ''}`;   // v3.10.17 리전이 바뀌면 이전 결과를 비운다
   const lastScope = useRef(scopeSig);
-  useEffect(() => { if (lastScope.current !== scopeSig) { lastScope.current = scopeSig; gen.current++; setData(null); setLoading(false); } }, [scopeSig]);
+  const lastRegion = useRef(scope?.region || '');
+  // 전체 점검 6회차(W-1): 리전이 바뀌면 고른 법인도 비운다 — 서버는 법인 ∧ 리전으로 걸러, 새 리전 밖 법인이 남으면 '0대'(초록)를 정상처럼 보였다
+  useEffect(() => {
+    if (lastScope.current === scopeSig) return;
+    const regionMoved = lastRegion.current !== (scope?.region || '');
+    lastScope.current = scopeSig; lastRegion.current = scope?.region || '';
+    gen.current++; setData(null); setLoading(false);
+    if (regionMoved) setO((cur) => (cur.vc ? { ...cur, vc: '' } : cur));
+  }, [scopeSig]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (open && !data && !loading && !error) find(); }, [open, data]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => { gen.current++; }, []);
   useEffect(() => { if (open && !alert) loadAlert(); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -137,7 +145,7 @@ export default function BackupSummaryStale({ scope, rows, sel, onPick, onOpenDet
               {alert && !alert.hidden && <button type="button" className={`tab${alertOpen ? ' active' : ''}`} aria-expanded={alertOpen} onClick={() => setAlertOpen((v) => !v)} title="이 조건으로 하루 한 번 메일을 보냅니다" style={{ padding: '3px 12px', fontSize: 12 }}>이 조건을 알림으로(메일){alert.settings?.enabled ? ' · 켜짐' : ''}</button>}
             </span>
           </div>
-          {alertOpen && alert && <BackupSummaryAlert key={alert.settings?.savedAt ?? 'new'} alert={alert} finder={o} vcName={(id) => (sites.find((r) => r.id === id)?.name || id)} onChanged={loadAlert} />}
+          {alertOpen && alert && <BackupSummaryAlert key={alert.settings?.savedAt ?? 'new'} alert={alert} finder={o} vcName={(id) => (sites.find((r) => r.id === id)?.name || id)} onChanged={loadAlert} region={scope?.region || ''} />}
           {bad && <div className="muted" style={{ padding: '0 14px 10px', fontSize: 12.5 }}>기간을 1~999 로 적으세요.</div>}
           {csvErr && <div style={{ padding: '0 14px 10px', fontSize: 12.5, color: '#fca5a5' }}>CSV 를 받지 못했습니다 — {csvErr?.status === 403 ? 'CSV 권한이 없습니다.' : String(csvErr?.message || csvErr).slice(0, 160)}</div>}
           {data && !fresh && !loading && <div style={{ padding: '0 14px 10px', fontSize: 12.5, color: '#fcd34d' }}>조건이 바뀌었습니다 — 아래 목록은 지난 조건의 결과입니다. 찾기를 누르세요.</div>}

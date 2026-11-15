@@ -6,7 +6,7 @@ import { requirePerm, requireRole } from '../../auth/auth.js';
 // 대체되지 않는다'). viewer 에게 tools 만 줘도 IPAM 예약·상태·정책을 바꾸고 지울 수 있었다 — 2026-06-27 감사가 고쳤다고
 // 기록한 C2 의 회귀다. 테스트(audit2590)가 viewer+tools → 403 을 실제 라우터로 고정한다.
 const canWrite = requireRole('admin', 'operator');
-import { scopedVcenterIds, writeScopedVcenterIds, inUserScope } from '../../auth/scope.js';
+import { scopedVcenterIds, writeScopedVcenterIds, inUserScope, isFullReadWriteScope } from '../../auth/scope.js';
 import { csvCell } from '../../util/csv.js';
 import { store, ledgerInputSignatureOf } from '../../store.js'; // v2.733 C6-01: 서브넷 목록은 원장 입력 지문으로 기억한다
 import { loadVcenterConfig } from '../../config.js';
@@ -174,7 +174,8 @@ api.get('/tools/ipam/subnets', requirePerm('tools'), (req, res) => {
 });
 // v3.5.0(재설계 묶음 나): 대역 용도 · 설명 저장 — 운영자 이상 + 전체 범위(한 /24 를 두 vCenter 가 나눠 쓸 수 있어 범위 계정은 쓰지 못한다).
 api.put('/tools/ipam/subnet-note', canWrite, requirePerm('tools'), (req, res) => {
-  const denied = subnetNoteWriteDenied(scopedVcenterIds(req.user, store.get()));
+  // 전체 점검 7회차 반증 R-4: 전 법인 공용 데이터라 조회 ∧ 쓰기 전체만(쓰기 범위를 줄인 계정이 남의 대역 이름을 바꿨다) — 판정이 던지면 거부
+  const denied = subnetNoteWriteDenied(isFullReadWriteScope(req.user, store.get()) ? null : new Set());
   if (denied) return res.status(403).json({ error: denied });
   const b = req.body || {};
   let r;

@@ -155,12 +155,14 @@ export default function BareosPolicyTab({ bare = false, reloadKey = 0 } = {}) {
             </STable>
           </div>
         ) : <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>범위 안에 Director 가 없습니다 — 설정 › 백업 › Bareos 백업 서버 › Director 와 매핑을 확인하세요.</div>}
+        {data.groupsUnreadable && <div role="alert" style={{ padding: '8px 14px', fontSize: 12, color: TONE.bad, borderTop: '1px solid var(--border-soft)' }}>포탈 백업 그룹 파일을 읽지 못했습니다 — 그룹 예약 수와 그룹으로만 도는 VM 의 정책은 모름으로 둡니다(손상본 bareos-groups.json.corrupt.* 확인).</div>}
         {anyDenied && <div style={{ padding: '8px 14px', fontSize: 12, color: TONE.warn, borderTop: '1px solid var(--border-soft)' }}>‘권한 없음’ — 포탈 콘솔 Profile 의 Command ACL 에 show 가 없습니다. 자동 설정을 다시 돌리거나 Profile 에 show 를 더하면 Run 줄 · JobDefs · FileSet 이 보입니다(나머지 값은 그대로 수집됩니다).</div>}
       </Section>
 
       <div data-policy-kpis="" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(200px, calc(50% - 5px)), 1fr))', gap: 10 }}>
-        <Kpi label="스케줄" value={k.schedules?.director == null ? `— · ${fmtNum(k.schedules?.group)}` : fmtNum((k.schedules.director || 0) + (k.schedules.group || 0))}
-          sub={`Director ${k.schedules?.director == null ? '—(수집 전)' : fmtNum(k.schedules.director)} · 포탈 그룹 예약 ${fmtNum(k.schedules?.group)}${k.schedules?.unused ? ` · 아무 잡도 안 씀 ${fmtNum(k.schedules.unused)}` : ''}`} />
+        {/* 전체 점검 13회차(W-10): 그룹 파일을 못 읽으면 그룹 예약 수는 모름(—) — 합계를 Director 수만으로 만들지 않는다 */}
+        <Kpi label="스케줄" value={k.schedules?.director == null || k.schedules?.group == null ? `${fmtNum(k.schedules?.director)} · ${fmtNum(k.schedules?.group)}` : fmtNum(k.schedules.director + k.schedules.group)}
+          sub={`Director ${k.schedules?.director == null ? '—(수집 전)' : fmtNum(k.schedules.director)} · 포탈 그룹 예약 ${k.schedules?.group == null ? '—(그룹 파일을 읽지 못함)' : fmtNum(k.schedules.group)}${k.schedules?.unused ? ` · 아무 잡도 안 씀 ${fmtNum(k.schedules.unused)}` : ''}`} />
         <Kpi label="JobDefs · FileSet" value={`${k.jobdefs == null ? '—' : fmtNum(k.jobdefs)} · ${k.filesets == null ? '—' : fmtNum(k.filesets)}`}
           sub={k.jobdefs == null ? (anyDenied ? 'show 권한 없음 — 위 안내' : '수집 전') : `Always Incremental 쓰는 JobDefs ${fmtNum(k.ai)}`} />
         <Kpi label="풀 · 볼륨" value={k.pools ? `${fmtNum(k.pools.n)} · ${k.pools.vols == null ? '—' : fmtNum(k.pools.vols)}` : '—'}

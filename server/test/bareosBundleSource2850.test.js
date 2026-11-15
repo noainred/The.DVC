@@ -140,3 +140,35 @@ test('⑥ 라우트 — 저장은 관리자 · 전체 범위 · 쓰기 범위 ·
   assert.match(src, /if \(e\?\.code === 'invalid'\) return res\.status\(400\)/);
   assert.match(src, /bundles: await listAllBundles\(\{ verify: true \}\), fetch: bundleFetchStatus\(\)/, '화면을 열 때(개요) 두 폴더를 검증한다(받아 두면 적용)');
 });
+
+test('전체 점검 11회차(B-30) — 서명 키를 회수하면 이미 검증해 기억한 번들도 다시 판정해 쓰지 않는다', async () => {
+  const s = signed('25.20261115.7');
+  B._setTrustForTest(s.trust);
+  SRC.saveBundleSource({ importDir: s.dir });
+  B._setNowForTest(() => Date.now() + B.SETTLE_MS + 1_000);
+  const ok = await B.pickBundle();
+  assert.equal(ok?.version, s.v, '유효 키로 서명 — 사용 가능');
+  // 같은 키를 회수한 신뢰(호스트 신뢰 파일의 회수와 같은 모양)
+  const doc = { format: 'vmware-portal-release-keys', schema: 1, keys: [...s.trust.byId.values()].map((k) => ({ keyId: k.keyId, publicKey: k.publicKey, addedAt: '2026-11-01', revoked: true, revokedAt: '2026-11-15', revokedReason: 'leak' })) };
+  B._setTrustForTest(mergeTrust([parseKeysDoc(doc, 'test')]));
+  const after = await B.pickBundle();
+  assert.ok(!after || after.version !== s.v, '회수된 키로 서명된 번들은 설치에 쓰지 않는다(예전: 기억한 ok 를 그대로 냈다)');
+  B._setNowForTest(null);
+});
+
+test('전체 점검 11회차(B-31 · B-32 · B-33) — 일일 요약은 진행 · 대기를 센다 · 콘솔 인증 프레임은 선형 · 번들 받기 시한은 실제 값', async () => {
+  const D = await import('../src/bareos/digest.js');
+  const src = (p) => fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '../src', p), 'utf8');
+  assert.match(src('bareos/digest.js'), /else if \(lr\.state !== 'error'\) c\.other \+= 1;/);
+  assert.match(src('bareos/digest.js'), /<th \$\{th\}>진행 · 대기<\/th>/);
+  const html = D.renderDigest({ rows: [{ id: 'd', name: 'KR', known: true, targets: 3, ok: 1, warn: 0, fail: 0, cancel: 0, other: 2, stale: 0, restores: 0, restoreFail: 0, nicFail: 0, verifyOk: 0, verifyFail: 0, verifyPending: 0 }], fails: [],
+    total: { corps: 1, unknown: 0, targets: 3, ok: 1, warn: 0, fail: 0, cancel: 0, other: 2, stale: 0 } }, Date.now());
+  assert.match(html.subject, /진행 · 대기 2/, '제목에 진행 · 대기 수(밤새 멈춘 잡이 사라지지 않게)');
+  const con = src('bareos/console.js');
+  assert.doesNotMatch(con, /replace\(\/\\0\+\$\//, '앵커 끝 무제한 반복 정규식 없음');
+  assert.match(con, /f\.data\.subarray\(0, 4096\)/);
+  const bun = src('bareos/install/bundle.js');
+  assert.match(bun, /\{ timeoutMs: TAR_FETCH_MS, retries: 1 \}/);
+  assert.equal(B.TAR_FETCH_MS, 1_800_000, 'resilientFetch 상한과 같다');
+  assert.match(bun, /e\?\.name === 'TimeoutError'/);
+});

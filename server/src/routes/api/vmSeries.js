@@ -15,8 +15,8 @@
  * (auth/toolAccess.js — Optimization 이 이 리포트의 주인).
  */
 import { demoOn, isMockMode } from '../../mock/demo/flags.js'; // v2.708 데모(mock)는 켜진 것처럼
-import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
-import { mergeScopedMap, filterScopedMap, denyScopedRun, keepScopedFields, ignoredGlobalFields } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01 · v2.606 AUTHZ2606-05 · v2.607 AUTHZ2607-05
+import { scopedVcenterIds, inUserScope, writeScopedVcenterIds } from '../../auth/scope.js';
+import { mergeScopedMap, filterScopedMap, denyScopedRun, keepScopedFields, ignoredGlobalFields, writeMergeScope } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01 · v2.606 AUTHZ2606-05 · v2.607 AUTHZ2607-05
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
@@ -203,7 +203,8 @@ api.put('/tools/vmseries/settings', requireRole('admin'), (req, res) => {
   // v2.605 AUTHZ2605-01: 범위 제한 admin 은 GET 이 거른 targets 를 되돌려 보낸다 — 전체로 저장하면 다른
   //   법인이 수집 범위에서 빠졌다. 범위 밖 targets 는 직전 값을 보존하고, 전 법인에 걸친 scope('all'↔
   //   'selected')는 바꾸지 않으며, 범위 밖 DB 는 dropExcluded 로도 지우지 않는다.
-  const allowed = scopedVcenterIds(req.user, snap);
+  const allowed = writeMergeScope(req);   // 전체 점검 7회차: 병합 · 전역 필드 · 지울 DB 는 쓰기 범위(응답 가림은 조회 범위 — read)
+  const read = scopedVcenterIds(req.user, snap);
   // v2.607 AUTHZ2607-05: 전역 필드(enabled·주기·보존일·임계·scope)는 전 법인 공용 — 범위 계정의 값은 버리고 밝힌다.
   const kg = keepScopedFields(b, before, allowed, ['targets', 'dropExcluded']);
   const patch = kg.patch;
@@ -232,7 +233,7 @@ api.put('/tools/vmseries/settings', requireRole('admin'), (req, res) => {
     detail: `${before.enabled !== next.enabled ? `enabled ${before.enabled}→${next.enabled} · ` : ''}임계 cpu ${next.thresholds.cpuPct}% mem ${next.thresholds.memPct}% ready ${next.thresholds.readyPct}%${dropped.length ? ` · DB 삭제: ${dropped.join(', ')}` : ''}`,
     ip: req.ip || '',
   });
-  const safeNext = allowed ? { ...next, targets: filterScopedMap(next.targets, allowed) } : next;
+  const safeNext = read ? { ...next, targets: filterScopedMap(next.targets, read) } : next;
   res.json({ ok: true, settings: safeNext, ...vmSeriesStaleOf(safeNext.targets, snap), dropped, ...(pruneScheduled ? { pruneScheduled: true } : {}), ...(ignoredOutOfScope.length ? { ignoredOutOfScope: ignoredOutOfScope.length } : {}), ...ignoredGlobalFields(kg.ignoredGlobal) });
 });
 
@@ -303,9 +304,11 @@ api.delete('/tools/vmseries/data', requireRole('admin'), async (req, res) => {
   const vcId = String(req.query.vcenterId);
   // v2.606 AUTHZ2606-04: 형제 DELETE /tools/waste/settings/data(v2.605)와 같은 가드 — 범위 제한 admin 은 범위 밖 vCenter 의
   //   스파이크 DB 를 지울 수 없다(되돌릴 수 없는 삭제).
-  const allowedDel = scopedVcenterIds(req.user, store.get());
-  if (allowedDel && !allowedDel.has(vcId)) {
-    return res.status(403).json({ ok: false, requiredOwner: true, reason: '범위 밖 vCenter 의 데이터는 전체 범위 계정만 지울 수 있습니다.' });
+  // 전체 점검 7회차(2회차 반증 R-3): 되돌릴 수 없는 삭제라 쓰기 범위로 판정(조회만 보면 쓰기를 줄인 관리자가 범위 밖 법인 · 전체 합계 DB 를 지웠다) · 던지면 거부
+  let allowedDel;
+  try { allowedDel = writeScopedVcenterIds(req.user, store.get()); } catch { allowedDel = new Set(); }
+  if (allowedDel && (vcId === '' || !allowedDel.has(vcId))) {
+    return res.status(403).json({ ok: false, requiredOwner: true, reason: '쓰기 범위 밖 vCenter 또는 전체 합계 데이터는 조회 · 쓰기 전체 범위 계정만 지울 수 있습니다.' });
   }
   const stats = await vmSeriesDbStats(vcId);
   const removed = dropVmSeriesDb(vcId);

@@ -9,7 +9,7 @@
  *   pending: { jobid, since, level, by, trigger } | null,   // 포탈이 실행했고 아직 끝나지 않은 백업
  *   cancelReq: { jobid, at, by, via:'single'|'group' } | null,   // v2.867 그 실행에 취소를 보냈다(판정은 cancelState.js — 지금 도는 실행일 때만 유효)
  *   lastRun: { jobid, status, state, level, startedAt, endedAt, bytes, files, errors, checkedAt } | null,
- *   lastError: { at, message } | null,
+ *   lastError: { at, message, unknown? } | null,   // unknown: 단건 · 그룹 실행이 결과 모름(전체 점검 3 · 5회차 — runUnknownHeld 가 잠시 다시 보내기를 막는다)
  *   missingInDirector: boolean,                         // Director `.jobs` 에 없으면 true(누가 conf 를 지웠다)
  *   restores: [ { jobid, fromJobids, mode, target, status, state, startedAt, endedAt, by, at, batchId?, nic?, finish? } ],   // 최근 RESTORES_KEEP 건
  *     v2.861 batchId(묶음 복원) · nic('disconnect'|'keep' — 새 VM 은 끊기가 기본) · finish{ nic:'pending'|'ok'|'failed'|'skipped', detail, at, opId?, tries? }
@@ -329,6 +329,20 @@ export function deleteJob(id, { directorId = '' } = {}) {
   return true;
 }
 
+/** 전체 점검 3회차(B-3): 단건 실행이 '결과 모름' 으로 끝난 뒤 다시 누르기를 막는 시간 — 그 사이 폴러 대조(list jobs days=)가 실제 실행을 원장에 넣으면 먼저 풀린다. */
+export const RUN_UNKNOWN_HOLD_MS = 10 * 60_000;
+/** 결과 모름으로 끝난 직전 실행 요청이 아직 붙잡혀 있는가(그 뒤 시작한 실행이 원장에 보이면 풀린다). */
+export function runUnknownHeld(job, now = Date.now()) {
+  const le = job?.lastError;
+  if (!le?.unknown || !Number.isFinite(le.at) || now - le.at >= RUN_UNKNOWN_HOLD_MS) return false;
+  const st = Number.isFinite(job?.lastRun?.startedAt) ? job.lastRun.startedAt : null;
+  return !(st !== null && st >= le.at - 120_000);   // Director 현지 시각 · 왕복 여유 2분
+}
+/** 여러 대상에 '실행 결과 모름' 표지(쓰기 한 번 — 그룹 덩어리 · 전체 점검 5회차 R-1). 던지지 않는다(원장 쓰기 실패는 콘솔). */
+export function markRunUnknown(ids, message) {
+  try { inBatch(() => { for (const id of ids || []) patchJob(id, { lastError: { at: Date.now(), message: String(message || '').slice(0, 300), unknown: true } }); }); }
+  catch (e) { console.warn(`[bareos] 결과 모름 표지 기록 실패: ${String(e?.message || e).slice(0, 160)}`); }
+}
 /** 실행 시작 기록(포탈이 run 을 보냈다). */
 export function markPending(id, { jobid, level, by, trigger = 'manual', late = false }) {
   // v2.938 반증 B-4: 늦은 회신은 trigger 를 바꾸지 않고 late 표지를 따로 단다(화면 triggerText 가 'group-late' 를 '수동' 으로 읽었다)
@@ -360,12 +374,21 @@ export function applyRunRow(id, row, now = Date.now()) {
   let changed = false;
   // v2.822.3(C2-2 — 재현): 끝난 실행을 따로 남긴다(최근 FINISHED_KEEP 건). 포탈이 시작한 실행이 끝날 때 더 큰 jobid(대기 중인 스케줄 실행)가
   //   이미 lastRun 이면 그 결과가 어디에도 남지 않아 실패 메일에서 빠졌다. 실패 메일(notify)이 이 목록도 본다.
-  if (isFinalStatus(row.status) && !(j.finishedRuns || []).some((x) => x.jobid === rec.jobid)) {
+  const seenFin = isFinalStatus(row.status) ? (Array.isArray(j.finishedRuns) ? j.finishedRuns : []).find((x) => x.jobid === rec.jobid) : null;
+  if (isFinalStatus(row.status) && !seenFin) {
     // v2.858: 바이트 · 시작 시각도 남긴다 — 진행 현황의 '지난 같은 레벨 실행' 기준(실행 중이면 lastRun 이 그 실행이라 끝난 값은 여기에만 있다)
     const { jobid, status, state, level, startedAt, endedAt, bytes, errors } = rec;
     j.finishedRuns = [...(Array.isArray(j.finishedRuns) ? j.finishedRuns : []), { jobid, status, state, level, startedAt, endedAt, bytes, errors, checkedAt: now }]
       .sort((a, b) => a.jobid - b.jobid).slice(-FINISHED_KEEP);
     changed = true;
+  } else if (seenFin) {
+    // 전체 점검 1회차(B-2): 같은 실행을 먼저 덜 자세한 행(대조용 `list jobs days=` — 바이트가 비어 온다)으로 받았으면 뒤에 온 자세한 행(llist)으로
+    //   **빈 칸만** 채운다(아는 값은 바꾸지 않는다 — lastRun 과 같은 규칙). 예전에는 처음 행으로 굳어 다음 실행이 시작되면 '지난 같은 레벨' 기준이 사라졌다.
+    for (const k of ['level', 'startedAt', 'endedAt', 'bytes', 'errors']) {
+      const empty = k === 'level' ? !seenFin[k] : (seenFin[k] === null || seenFin[k] === undefined);
+      const has = k === 'level' ? !!rec[k] : (rec[k] !== null && rec[k] !== undefined);
+      if (empty && has) { seenFin[k] = rec[k]; changed = true; }
+    }
   }
   // 마지막으로 **백업이 만들어진**(T·W) 시각 — 잘린 목록과 무관하게 남긴다(S14 · 더 새 값만)
   if ((row.status === 'T' || row.status === 'W') && Number.isFinite(rec.endedAt) && rec.endedAt > 0 && !(Number.isFinite(j.lastOkAt) && j.lastOkAt >= rec.endedAt)) {

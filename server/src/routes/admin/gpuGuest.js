@@ -20,8 +20,8 @@ import { loadVcenterConfig } from '../../config.js';
 import { expandIpList } from '../../idrac/iprange.js';
 import { listCollectors } from '../../collector/registry.js';
 import { adminOnly, maskPw, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
-import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
-import { mergeScopedMap, filterScopedMap, keepScopedFields, ignoredGlobalFields, denyScopedRun } from '../../auth/scopeMerge.js';
+import { scopedVcenterIds, inUserScope, inUserWriteScope } from '../../auth/scope.js';
+import { mergeScopedMap, filterScopedMap, keepScopedFields, ignoredGlobalFields, denyScopedRun, writeMergeScope } from '../../auth/scopeMerge.js';
 import { poolRun } from '../../util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
 import { strictIpv4Num } from '../../util/ipv4.js';
 import { ipBlockReason } from '../../util/ssrfBlock.js';
@@ -143,10 +143,10 @@ adminRouter.get('/metrics/settings', adminOnly, (req, res) => {
 });
 adminRouter.put('/metrics/settings', adminOnly, (req, res) => {
   // v2.611 AUTHZ2611-02: 샘플러 주기·보존일은 전 법인 공용(vCenter 축 없음) — 범위 계정의 값은 적용하지 않고 밝힌다(v2.607 ignoredGlobal).
-  const allowed = scopedVcenterIds(req.user, store.get());
+  const allowed = writeMergeScope(req);   // 전체 점검 7회차: 쓰기 범위(응답 가림은 조회 범위)
   if (allowed) {
     const { ignoredGlobal } = keepScopedFields(req.body || {}, loadMetricsSettings(), allowed, []);
-    return res.json({ ok: true, settings: loadMetricsSettings(), status: scopeSamplerStatus(metricsSamplerStatus(), allowed), ...ignoredGlobalFields(ignoredGlobal) });
+    return res.json({ ok: true, settings: loadMetricsSettings(), status: scopeSamplerStatus(metricsSamplerStatus(), scopedVcenterIds(req.user, store.get())), ...ignoredGlobalFields(ignoredGlobal) });
   }
   const settings = saveMetricsSettings(req.body || {});
   rescheduleMetricsSampler(); // apply the new interval immediately
@@ -186,7 +186,8 @@ adminRouter.get('/gpu-guest/settings', adminOnly, (req, res) => {
   res.json({ ...scopedGpuGuestView(settings, allowed), status: scopeGpuGuestStatus(gpuGuestStatus(), allowed, settings) });
 });
 adminRouter.put('/gpu-guest/settings', adminOnly, (req, res) => {
-  const allowed = scopedVcenterIds(req.user, store.get());
+  const allowed = writeMergeScope(req);   // 전체 점검 7회차: 병합 · 전역 필드는 쓰기 범위(응답 가림은 조회 범위 — 아래 read)
+  const read = scopedVcenterIds(req.user, store.get());
   const before = loadGpuGuestSettings();
   let body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
   let ignored = []; let ignoredGlobal = [];
@@ -207,7 +208,7 @@ adminRouter.put('/gpu-guest/settings', adminOnly, (req, res) => {
   rescheduleGpuGuestPoller();
   reschedulePhysicalPoller();   // v2.597(LC2597-02): 같은 주기 설정을 쓰는 물리 GPU 폴러도
   res.json({
-    ok: true, ...scopedGpuGuestView(settings, allowed), status: scopeGpuGuestStatus(gpuGuestStatus(), allowed, settings),
+    ok: true, ...scopedGpuGuestView(settings, read), status: scopeGpuGuestStatus(gpuGuestStatus(), read, settings),
     ...(droppedSecrets.length ? { droppedSecrets: [...new Set(droppedSecrets)] } : {}),
     ...(ignored.length ? { ignoredOutOfScope: ignored.length } : {}),
     ...ignoredGlobalFields(ignoredGlobal),
@@ -428,6 +429,8 @@ adminRouter.post('/gpu-guest/test', adminOnly, async (req, res) => {
   if (!vcenterId || !Array.isArray(items) || !items.length) return res.status(400).json({ error: 'vcenterId + items 필요' });
   const snap = store.get();
   if (!inUserScope(req.user, snap, String(vcenterId))) return res.status(404).json({ error: 'vCenter 를 찾을 수 없습니다.' }); // v2.611: 범위 밖 게스트에 로그인하지 않는다
+  // 전체 점검 7회차 반증 R-3: 게스트 로그인은 쓰기 등급(형제 deep-search/probe · 게스트 조사 잡과 같게) — 조회는 되지만 쓰기 밖이면 403
+  if (!inUserWriteScope(req.user, snap, String(vcenterId))) return res.status(403).json({ error: '조회 전용 범위 — 이 vCenter 는 수정 권한이 없습니다.' });
   const vmById = new Map((snap.vms || []).filter((v) => v.vcenterId === vcenterId).map((v) => [v.id, v]));
   // 호스트명 → 다운로드 후보 호스트(vCenter 실제 IP → ESXi IP → ESXi FQDN).
   const dlByHost = new Map();

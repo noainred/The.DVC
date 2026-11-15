@@ -969,3 +969,7 @@
     닿지 않음 · 판 모름은 단정하지 않는다. 판 번호는 `featureMinEdgeVersion`(릴리스 노트 제목 표지)에서 — 상수로 박지 않는다.
     엣지 연결 시험은 엣지 한 곳에 동시 8건(`store.EDGE_TEST_CONCURRENCY`) — 중앙이 같은 본문의 `diag.testsBusy` 만큼 덜 배달하고 워커도 상한에서 멈춘다(옛 판은 진단이 없어 예전처럼 20).
     '다시 연결' 대기열은 `retryTargets`(그 엣지 몫 접속 정보)를 함께 싣는다 — 엣지가 수집 목록 밖 대상(시험만 한 서버)의 인증 정지도 풀 수 있게(v2.978 사용자 보고).
+- **전체 점검 4회차 V-9 — 엣지 시각은 시계 보정이 0 이어도 수신 시각으로 자른다**(`central/veeamEdge.js` poller.at · `veeam/parse.js` authStop.since · 회귀 `veeamFullAudit2` ⑦):
+  보정 창 밖(차이 2분 미만 · 30일 초과)이면 결과 ts 만 미래를 잘랐고 두 값은 미래 시각 그대로 저장돼 진행 상태에 보였다. 새 엣지 시각 칸도 `shift`(보정 + `Math.min(now)`)를 지날 것.
+  **남긴 것(4회차 V-8 — 추정)**: Veeam EM VM 기록(`veeam/em/vmStore.js keyOf`)은 '백업 서버 + VM 이름' 키라 같은 서버의 동명 VM 두 대(moref 다름)의 마지막 작업 · 복원 지점이 한 기록에 섞인다.
+  moref 키로 바꾸면 저장 형식이 바뀌고(옛 이름 키 기록과 겹침) 실제 EM 응답에 moref 가 늘 있는지 실측하지 않아 이번에 고치지 않았다 — 실 EM 응답 확인 뒤 다룰 것.

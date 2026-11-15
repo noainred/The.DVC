@@ -93,6 +93,8 @@
     범위가 지정된 계정(scope.vcenters)은 403(`SETTINGS_OWNER_FULL_SCOPE_REASON`)이다. `/auth/me` 의 **`isSettingsOwner`(설정 메뉴 노출 —
     소유자 목록에 있는가) ≠ `settingsOwnerTier`(소유자 등급 라우트를 실제로 통과하는가)** — 화면이 소유자 등급 버튼을 잠글 때는 뒤의 값을 볼 것.
   - ⚠ **공용 게이트의 쓰기 = 조회 ∧ 쓰기 전체**(6회차 A1 · `writeScopeDenial`): `fullScopeOnlyWith` · `requireSettingsOwner` 는 안전 메서드(GET · HEAD · OPTIONS)만 조회 범위로 보고 그 밖은 `isFullReadWriteScope`(던지면 거부) — 읽기성 POST 예외는 `{ readPost: true }` 로 최소(지금 cvp parse-preview 하나) · 등급 질의(`isOwnerTier`)는 `settingsOwnerGradeDenial`. 상세 `docs/rules/security-api.md`.
+    전체 점검 2회차 V-1: 라우트 안 인라인 검사 · `denyScopedRun` 도 같은 판정 하나 — **`auth/scopeMerge.js denyFleetWrite`**(쓰기 라우트에 `if (scopedVcenterIds(...)) 403` 을 새로 쓰지 말 것 · 회귀 `veeamFullAudit2`).
+    7회차: 쓰기 핸들러가 `scopedVcenterIds` 만 보면 결함이다 — 단건은 조회 밖 404 → 쓰기 밖 403(`writeScopedVcenterIds`), 설정 병합은 `writeMergeScope`, 사용자 관리는 `scopeWithinActor`(대상 조회 · 쓰기 ⊆ 요청자 — 권한 상승 재현 · `scopeWriteFullAudit7`).
   - **백업 라우트도 소유자 경계에 포함**: 백업 아카이브는 `portal.env`(AUTH_SECRET·CENTRAL_TOKEN)·
     `users.json`(TOTP 시크릿)·`vcenters.json` 등 자격증명 사본이라 `/api/admin/backup/*` 전부에
     `requireSettingsOwner`를 건다(v2.210). AUTH_SECRET이 새면 임의 계정 토큰 위조로 OTP 정책·

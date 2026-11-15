@@ -98,7 +98,14 @@ export function mergeEmVms(emId, target, rows, { startedAt = Date.now(), soleSer
   let list = Object.entries(vms).filter(([, r]) => lastEvidence(r) >= cutoff);
   if (list.length > MAX_PER_EM) list = list.sort((a, b) => lastEvidence(b[1]) - lastEvidence(a[1])).slice(0, MAX_PER_EM);
   const kept = Object.fromEntries(list);
-  const since = rows?.complete ? startedAt - OVERLAP_MS : (Number.isFinite(e.since) ? e.since : (Number.isFinite(rows?.since) ? rows.since : null));
+  let since = rows?.complete ? startedAt - OVERLAP_MS : (Number.isFinite(e.since) ? e.since : (Number.isFinite(rows?.since) ? rows.since : null));
+  if (!rows?.complete) {
+    // 전체 점검 12회차(V-30): 상한 · 예산으로 잘렸으면 이번에 실제로 읽은 가장 오래된 시각까지 올린다 — 새것부터 읽으므로 그 앞(빈 구간)은 다음 회차에도 닿지 못한다
+    //   (예전에는 since 를 고정해 창이 날마다 커지고 매 주기 최대치를 읽었다 · 빈 구간은 수집 비고가 밝힌다)
+    if (Number.isFinite(rows?.capFloor) && (since == null || rows.capFloor > since)) since = rows.capFloor;
+    // 오류로만 미완결(예: 그 EM 판이 모르는 질의 유형)이어도 창이 첫 채움보다 커지지 않게
+    if (Number.isFinite(rows?.windowMs) && Number.isFinite(since) && since < startedAt - rows.windowMs) since = startedAt - rows.windowMs;
+  }
   m.set(emId, { target: target || e.target || '', since, at: startedAt, ua: unattributed, vms: kept });
   save();
   _rev++;

@@ -118,7 +118,11 @@ export function canceledText(c, tsText = (x) => String(x)) {
   // '중단 요청' — 멈추는 중에도 다 멈춘 뒤에도 맞는 말(띠 · 카드의 '멈추는 중' 배지와 어긋나지 않게 · Chromium 확인)
   const parts = [`${c.effective === false ? '중단하지 못함' : '중단 요청'} ${tsText(c.at)}${c.by ? ` ${c.by}` : ''}`];
   for (const [k, t] of [['canceled', '취소'], ['finished', '이미 끝남'], ['cleared', '추적만 해제'], ['halted', '시작 전 멈춤'], ['failed', '취소 실패'], ['unknown', '취소 결과 모름'], ['busy', '다른 요청 중']]) if (c[k] > 0) parts.push(`${t} ${c[k]}`);
-  if (c.extra && (c.extra.canceled || c.extra.failed || c.extra.unknown || c.extra.busy)) parts.push(`그 밖 실행 취소 ${c.extra.canceled}`);
+  // 전체 점검 13회차(W-11): 서버 감사 줄(groupRunner.cancelAuditText)과 같은 꼴 — 실패 · 모름 수를 빼면 '취소 0' 만 보여 아직 도는 실행을 알 수 없었다
+  if (c.extra && (c.extra.canceled || c.extra.failed || c.extra.unknown || c.extra.busy)) {
+    const bad = (Number(c.extra.failed) || 0) + (Number(c.extra.unknown) || 0) + (Number(c.extra.busy) || 0);
+    parts.push(`그 밖 실행 취소 ${Number(c.extra.canceled) || 0}${bad ? `(실패·모름 ${bad})` : ''}`);
+  }
   // v2.870 감사 A1-05: 시작 결과를 모르는 실행은 jobid 가 없어 취소를 보내지 못했다 — Director 에서 확인할 수
   if (c.startUnknown > 0) parts.push(`시작 결과 모름 ${c.startUnknown}(취소 못 함 — Director 에서 확인)`);
   if (c.scope === 'all') parts.push('범위 그룹 VM 전부');

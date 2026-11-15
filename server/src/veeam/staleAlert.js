@@ -158,6 +158,8 @@ function giveUpAfter(ms, p) {
 async function computeAndSend(cfg, { by = 'system' } = {}) {
   if (!_provider) return { ok: false, reason: '계산기가 아직 준비되지 않았습니다.' };
   const d = await giveUpAfter(RUN_DEADLINE_MS, _provider(cfg.q));
+  // 전체 점검 9회차(V-21): 계산기가 '아직 모름'(재시작 직후 골격 스냅샷 — VM 0대)이라고 하면 보내지 않는다 — '0대' 메일이 이상 없음처럼 나가고 그날 발송 완료로 기록됐다
+  if (d?.notReady) return { ok: false, notReady: true, reason: String(d.reason || '인벤토리 첫 수집이 끝나지 않았습니다').slice(0, 200) };
   const vcLabel = cfg.q.vc ? (d.rows?.[0]?.vcName || cfg.q.vc) : '';
   const m = renderStaleMail(d, { vcLabel });
   const r = await sendPortalMail({ kind: MAIL_KIND, subject: m.subject, html: m.html, text: m.text, by });
@@ -179,6 +181,7 @@ export async function tick(now = Date.now()) {
     const tries = st.day === day ? (Number(st.tries) || 0) + 1 : 1;
     let r;
     try { r = await computeAndSend(cfg); } catch (e) { r = { ok: false, reason: String(e?.message || e).slice(0, 200) }; }
+    if (r?.notReady) return r;   // 차례를 쓰지 않는다(시도 횟수 · 재시도 간격도 그대로) — 다음 틱에 다시 본다(V-21)
     _state = { day, at: now, ok: r.ok, n: r.n ?? null, total: r.total ?? null, reason: r.reason || '', tries, nextTry: r.ok ? null : now + RETRY_MS };
     saveState();
     return r;

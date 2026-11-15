@@ -21,6 +21,7 @@ import { startRun, listRuns, getRun, serverBusy, claimServer, releaseServer } fr
 import { dispatchOp, authStopOf } from '../../veeam/run/dispatch.js';
 import { listPortalVms, getPortalVm, notePortalVm } from '../../veeam/run/portalVms.js';
 import { NEW_NAME_RE } from '../../veeam/run/manage.js';
+import { numOrNull } from '../../util/numOrNull.js';   // 전체 점검 2회차 V-5
 
 const adminOnly = requireRole('admin');
 const toolsPerm = requirePerm('tools');
@@ -149,7 +150,9 @@ api.post('/tools/backup-run/vm/:vmId/restore', toolsPerm, adminOnly, reauth, (re
   const server = serverOf(ctx, String(b.serverId || ''));
   const issue = busyIssue(server);
   if (issue) return res.status(issue.status).json({ ok: false, reason: issue.error });
-  const pointAt = Number.isFinite(Number(b.pointAt)) ? Number(b.pointAt) : null;
+  // 전체 점검 2회차 V-5: 시각을 모르는 지점(화면 point.at = null)이 Number(null) === 0 으로 1970 이 되던 것 — 못 읽은 값은 null(timeOf 와 같은 하한 2000-01-01)
+  const pointAt0 = numOrNull(b.pointAt);
+  const pointAt = pointAt0 !== null && pointAt0 > 946_684_800_000 ? pointAt0 : null;
   const vmRow = { vmId: ctx.vm.id, name: ctx.vm.name, vcenterId: ctx.vm.vcenterId, objectId: morefOf(ctx.vm), hostName: ctx.hostName, serverId: server.id, serverName: server.name, how: 'restore',
     restore: { restorePointId: pid, newName, dest: ctx.dest, pointAt, jobName: ctx.record?.jobName || ctx.jobName }, ...vmSizeOf(ctx.vm) };
   const run = startRun({ vms: [vmRow], groups: [{ serverId: server.id, serverName: server.name, kind: 'restore', vcenterId: ctx.vm.vcenterId, refs: [vmRow] }] }, { user: req.user?.username || '', mode: 'restore' });
@@ -188,6 +191,9 @@ api.post('/tools/backup-run/vm/:vmId/delete-backup', toolsPerm, adminOnly, reaut
   const token = claimServer(server.id, 'deleteBackup', req.user?.username);   // 반증 F4
   if (!token) return res.status(409).json({ ok: false, reason: `Veeam 서버 '${server.name}' 로 진행 중인 요청이 있습니다 — 끝난 뒤 다시 하세요.` });
   res.locals.perfExpectSlow = true;
+  // 전체 점검 2회차 V-3: 되돌릴 수 없는 요청은 보내기 **전에** 요청 감사를 한 줄 남긴다 — 결과 감사는 회신 뒤(엣지면 최대 수 분)라
+  //   그 사이 재시작(수동 · 장애)이면 요청자 기록이 남지 않았다(업그레이드 자동 적용은 이제 이 작업을 기다린다 — veeam/run/inflight.js).
+  logAudit({ user: req.user?.username, action: 'Veeam 포탈 잡 백업 삭제 요청', target: ctx.vm.name, detail: `잡 '${jobName}' · 서버 ${server.name} · 보내는 중(결과는 다음 줄)`, ip: req.ip });
   let r;
   try { r = await dispatchOp(server, 'deleteBackup', { jobName, vm: { name: ctx.vm.name, hostName: ctx.jobHostName, objectId: ctx.record?.objectId || morefOf(ctx.vm) } }); }
   finally { releaseServer(server.id, token); }

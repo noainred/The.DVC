@@ -6,7 +6,8 @@ import { enforcedToolKeys, TOOL_ENFORCEMENT_NOTES } from '../../auth/toolAccess.
 import { logAudit } from '../../audit.js';
 import { adminOnly } from './shared.js';
 import { store } from '../../store.js';
-import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
+import { scopedVcenterIds, writeScopedVcenterIds, isFullReadWriteScope } from '../../auth/scope.js';
+import { denyFleetWrite } from '../../auth/scopeMerge.js';   // 전체 점검 2회차 V-1 — 전 법인 공용 쓰기는 조회 ∧ 쓰기 전체
 
 /*
  * ⚠⚠ v2.607 AUTHZ2607-01 — 범위(scope) 제한 admin 의 사용자 관리 경계.
@@ -27,15 +28,20 @@ function scopeOf(raw) {
   return { vcenters: arrOf(raw.vcenters), regions: arrOf(raw.regions), writeVcenters: arrOf(raw.writeVcenters) };
 }
 function subset(inner, outer) {
-  if (!inner) return false;         // 전체 범위(null)는 어떤 범위의 부분집합도 아니다
-  if (!outer) return true;
+  if (!outer) return true;          // 바깥이 무제한이면 무엇이든 안이다(조회 무제한 · 쓰기 제한 요청자 — 전체 점검 7회차)
+  if (!inner) return false;         // 전체 범위(null)는 제한된 범위의 부분집합이 아니다
   for (const id of inner) if (!outer.has(id)) return false;
   return true;
 }
-/** 대상 scope(원시)가 요청자(req.user) 범위 안인가. 요청자가 전체 범위면 항상 true. */
+/**
+ * 대상 scope(원시)가 요청자(req.user) 범위 안인가. 요청자가 조회 ∧ 쓰기 전체 범위면 항상 true.
+ * 전체 점검 7회차(2회차 반증 R-1 — 재현): 예전 첫 줄은 '조회 범위가 무제한이면 true' 라, writeVcenters 로 쓰기만 줄인 관리자가
+ *   자기 · 남의 scope 를 null(조회 · 쓰기 무제한)로 바꾸거나 전체 범위 관리자를 만들고 그 비밀번호 · OTP 를 대리 설정했다(v2.733 · v2.904 함정과 같은 모양).
+ *   이제 대상의 조회 ⊆ 요청자 조회(무제한이면 통과) · 대상의 쓰기 ⊆ 요청자 쓰기(요청자 쓰기가 제한이면 대상도 그 안이어야 한다).
+ */
 function scopeWithinActor(rawScope, actor, snap) {
+  if (isFullReadWriteScope(actor, snap)) return true;
   const actorRead = scopedVcenterIds(actor, snap);
-  if (!actorRead) return true;
   const sc = scopeOf(rawScope);
   if (!sc) return false;
   const u = { scope: sc };
@@ -48,12 +54,16 @@ function userScopeRaw(username) {
   const u = listUsers().find((x) => x.username === username);
   return u ? u : null;
 }
-/** 범위 계정이 대상 계정을 다룰 수 없으면 응답하고 true(404 — 존재 은닉). */
+/**
+ * 범위 계정이 대상 계정을 다룰 수 없으면 응답하고 true. 조회 범위 계정은 404(목록에 보이지 않는 계정 — 존재 은닉),
+ * 조회 무제한 · 쓰기 제한 계정은 403(목록에 보이는 계정 — 조회 밖 404 → 쓰기 밖 403 규약 · 전체 점검 7회차).
+ */
 function denyTargetOutOfScope(req, res) {
   const snap = store.get();
-  if (!scopedVcenterIds(req.user, snap)) return false;
+  if (isFullReadWriteScope(req.user, snap)) return false;
   const t = userScopeRaw(req.params.username);
   if (t && scopeWithinActor(t.scope, req.user, snap)) return false;
+  if (t && !scopedVcenterIds(req.user, snap)) { res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: SCOPE_DENY_REASON }); return true; }
   res.status(404).json({ ok: false, reason: '사용자를 찾을 수 없습니다.' });
   return true;
 }
@@ -101,7 +111,7 @@ adminRouter.get('/users', adminOnly, (req, res) => {
 // 자격증명 변경과 같은 등급의 보안 작업이므로 감사로그를 남긴다(이전에는 기록이 없었다).
 adminRouter.post('/users', adminOnly, (req, res) => {
   const snap = store.get();
-  if (scopedVcenterIds(req.user, snap) && !scopeWithinActor((req.body || {}).scope, req.user, snap)) {
+  if (!isFullReadWriteScope(req.user, snap) && !scopeWithinActor((req.body || {}).scope, req.user, snap)) {   // 전체 점검 7회차: 쓰기 제한 계정도
     logAudit({ user: req.user?.username, action: '사용자 생성 거부', target: String((req.body || {}).username || ''), detail: '범위 밖 scope', ip: req.ip || '' });
     return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: SCOPE_DENY_REASON });
   }
@@ -112,7 +122,7 @@ adminRouter.post('/users', adminOnly, (req, res) => {
 
 adminRouter.patch('/users/:username', adminOnly, (req, res) => {
   if (denyTargetOutOfScope(req, res)) return;
-  if (scopedVcenterIds(req.user, store.get()) && (req.body || {}).scope !== undefined && !scopeWithinActor((req.body || {}).scope, req.user, store.get())) {
+  if (!isFullReadWriteScope(req.user, store.get()) && (req.body || {}).scope !== undefined && !scopeWithinActor((req.body || {}).scope, req.user, store.get())) {   // 전체 점검 7회차
     logAudit({ user: req.user?.username, action: '사용자 수정 거부', target: req.params.username, detail: '범위 밖 scope', ip: req.ip || '' });
     return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: SCOPE_DENY_REASON });
   }
@@ -194,7 +204,7 @@ adminRouter.put('/user-tools/:username', adminOnly, (req, res) => {
   res.json({ ok: true, entry: r.entry, effective: eff, users: ov.users, ...(ov.scoped ? { scoped: true, omittedOutOfScope: ov.omitted, byHidden: ov.byHidden } : {}) });
 });
 adminRouter.put('/permissions', adminOnly, (req, res) => {
-  if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '역할별 기능 권한은 전 사용자 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.' }); // v2.607 AUTHZ2607-01
+  if (denyFleetWrite(req, res, '역할별 기능 권한은 전 사용자 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.')) return; // v2.607 AUTHZ2607-01 · 전체 점검 2회차 V-1(조회 ∧ 쓰기 전체)
   const b = req.body || {};
   const next = b.matrix || b; // { operator:[...], viewer:[...], toolsDenied:{...} } 또는 { matrix:{...} }
   // v2.643: admin 행(CSV 등 관리자 전용 키)을 바꾸는 것은 super_admin 만 — admin 이 스스로 권한을 되살리지 못하게.
@@ -213,7 +223,7 @@ adminRouter.put('/permissions', adminOnly, (req, res) => {
   res.json({ ok: true, matrix: { admin: rolePermissions('admin'), ...matrix } });
 });
 adminRouter.post('/permissions/reset', adminOnly, (req, res) => {
-  if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '역할별 기능 권한은 전 사용자 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.' }); // v2.607 AUTHZ2607-01
+  if (denyFleetWrite(req, res, '역할별 기능 권한은 전 사용자 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.')) return; // v2.607 AUTHZ2607-01 · 전체 점검 2회차 V-1(조회 ∧ 쓰기 전체)
   // v2.643: 초기화는 admin 행(adminDenied)도 기본(허용)으로 되돌린다 — admin 이 super_admin 의 결정을 우회하지 못하게.
   if ((loadMatrix().adminDenied || []).length && !actorIsSuperAdmin(req.user || null)) {
     return res.status(403).json({ ok: false, error: 'forbidden', code: 'super-admin-only', reason: 'super_admin 이 끈 admin 권한(CSV)이 있어 초기화는 super_admin 만 할 수 있습니다.' });

@@ -143,14 +143,57 @@ export function reconcileBareosGroupsText(backupText, currentText) {
  *   결과가 끔인 경우는 백업도 끔이고 **지금 파일도 명시적으로 끔**일 때뿐이다(지금 파일이 없거나 못 읽으면 켬 — 재해 복구 새 서버도 켬으로 시작).
  * @returns {{ text: string, forcedOn: boolean }}
  */
+/**
+ * 전체 점검 9회차(V-20 — 재현): 같은 파일의 다른 '소유자 + 본인 OTP' 설정도 복원으로 **약해지지 않게** 맞춘다 — 복원 라우트는 OTP 를 묻지 않는데
+ *   백업 판본을 그대로 쓰면 OTP 로 바꾼 로그인 방식(password_only → otp_only)이 되돌아가고, 지운 설정 소유자가 되살아나고, 켠 단일 세션 · 유휴 로그아웃이 꺼졌다
+ *   (v2.842 F1 과 같은 종류 — server/CLAUDE.md '새 OTP 로 끄는 설정은 RESTORE_EXCLUDE 또는 reconcileForApply').
+ *   ⓐ loginPolicy 는 강도 순(otp_only > 미설정(레거시) > otp_or_password > password_only)으로 더 강한 쪽 ⓑ settingsOwners 는 지금 목록에 있는 계정만
+ *   ⓒ idleLogoutEnabled · singleSession 은 켜기만 ⓓ idleLogoutMin · sessionMaxHours 는 더 짧은 쪽(0 = 무제한이 가장 약하다).
+ *   지금 파일이 없거나 못 읽으면 기본값(엄격)과 견준다 — 재해 복구 새 서버도 약한 값으로 시작하지 않는다(소유자 목록만은 백업 그대로 — 새 서버의 소유자 복구 경로).
+ */
+const POLICY_RANK = Object.freeze({ otp_only: 3, otp_or_password: 1, password_only: 0 });   // 그 밖(null · 모르는 값) = 레거시(2)
+const policyRank = (v) => (Object.hasOwn(POLICY_RANK, v) ? POLICY_RANK[v] : 2);
+const OWNER_RE = /^[A-Za-z0-9._@-]{2,64}$/;
+const ownersOf = (v) => (Array.isArray(v) ? [...new Set(v.map((x) => String(x || '').trim()).filter((x) => OWNER_RE.test(x)))] : []);
+const minutesOf = (v, dflt) => { const n = Number(v); return v !== '' && v !== null && v !== undefined && Number.isFinite(n) && n > 0 ? n : dflt; };
+const maxHoursOf = (v) => { const n = Number(v); return v === '' || v === null || v === undefined || !Number.isFinite(n) || n <= 0 ? Infinity : n; };   // 0 · 없음 = 무제한
 export function reconcileSecuritySessionText(backupText, currentText) {
   let b;
-  try { b = JSON.parse(String(backupText)); } catch { return { text: backupText, forcedOn: false }; }   // 깨진 판본은 로더가 손상 보존 → 기본값(켬)
-  if (!b || typeof b !== 'object' || Array.isArray(b) || b.bareosSetupOtp !== false) return { text: backupText, forcedOn: false };
-  let curOff = false;
-  try { const c = JSON.parse(String(currentText)); curOff = !!c && typeof c === 'object' && c.bareosSetupOtp === false; } catch { curOff = false; }
-  if (curOff) return { text: backupText, forcedOn: false };
-  return { text: JSON.stringify({ ...b, bareosSetupOtp: true }, null, 2), forcedOn: true };
+  try { b = JSON.parse(String(backupText)); } catch { return { text: backupText, forcedOn: false, kept: [] }; }   // 깨진 판본은 로더가 손상 보존 → 기본값(엄격)
+  if (!b || typeof b !== 'object' || Array.isArray(b)) return { text: backupText, forcedOn: false, kept: [] };
+  let c = null;
+  try { c = JSON.parse(String(currentText)); if (!c || typeof c !== 'object' || Array.isArray(c)) c = null; } catch { c = null; }
+  const out = { ...b }; const kept = [];
+  // v2.842: bareosSetupOtp — 끔은 백업도 끔이고 지금 파일도 명시적으로 끔일 때만
+  if (b.bareosSetupOtp === false && !(c && c.bareosSetupOtp === false)) { out.bareosSetupOtp = true; kept.push('bareosSetupOtp'); }
+  const curPolicy = c ? c.loginPolicy : null;
+  if (policyRank(b.loginPolicy) < policyRank(curPolicy)) { out.loginPolicy = Object.hasOwn(POLICY_RANK, curPolicy) ? curPolicy : null; kept.push('loginPolicy'); }
+  if (c && Array.isArray(b.settingsOwners)) {
+    const cur = new Set(ownersOf(c.settingsOwners).length ? ownersOf(c.settingsOwners) : ['noainred']);   // 지금 저장값이 없으면 기본(loadConfiguredSecurity 와 같게)
+    const bo = ownersOf(b.settingsOwners);
+    const inter = bo.filter((x) => cur.has(x));
+    if (inter.length !== bo.length) { out.settingsOwners = inter; kept.push('settingsOwners'); }
+  }
+  const boolOf = (o, k, dflt) => (o && o[k] !== undefined ? !!o[k] : dflt);
+  if (!boolOf(b, 'idleLogoutEnabled', true) && boolOf(c, 'idleLogoutEnabled', true)) { out.idleLogoutEnabled = true; kept.push('idleLogoutEnabled'); }
+  if (!boolOf(b, 'singleSession', false) && boolOf(c, 'singleSession', false)) { out.singleSession = true; kept.push('singleSession'); }
+  const curIdle = minutesOf(c?.idleLogoutMin, 30);
+  if (minutesOf(b.idleLogoutMin, 30) > curIdle) { out.idleLogoutMin = curIdle; kept.push('idleLogoutMin'); }
+  const curMax = maxHoursOf(c?.sessionMaxHours);
+  if (maxHoursOf(b.sessionMaxHours) > curMax) { out.sessionMaxHours = curMax; kept.push('sessionMaxHours'); }
+  return { text: kept.length ? JSON.stringify(out, null, 2) : backupText, forcedOn: kept.includes('bareosSetupOtp'), kept };
+}
+
+/**
+ * 전체 점검 9회차(V-20): 자격증명 저장 방식(secrets-policy.json · 신뢰 사본)도 복원으로 **약해지지 않게** — 지금이 암호화인데 백업이 평문이면 지금 파일 그대로
+ *   (평문 백업을 되돌리면 그 뒤 저장하는 새 비밀이 평문이 됐다 · 바꾸려면 소유자 + 본인 OTP). 지금 파일이 없거나 못 읽으면 백업 그대로(재해 복구 — 정책 로더의 S-07 판정이 맡는다).
+ */
+export function reconcileSecretsPolicyText(backupText, currentText) {
+  let c = null; let b = null;
+  try { c = JSON.parse(String(currentText)); } catch { c = null; }
+  try { b = JSON.parse(String(backupText)); } catch { b = null; }
+  if (c && c.mode === 'encrypted' && !(b && b.mode === 'encrypted')) return { text: String(currentText), keptCurrent: true };
+  return { text: backupText, keptCurrent: false };
 }
 
 export function reconcileForApply(name, content, configDir) {
@@ -158,8 +201,20 @@ export function reconcileForApply(name, content, configDir) {
     let cur = null;
     try { cur = fs.readFileSync(path.join(configDir, name), 'utf8'); } catch { cur = null; }
     const r = reconcileSecuritySessionText(content, cur);
-    return r.forcedOn
-      ? { content: r.text, info: { bareosSetupOtpKeptOn: true }, warning: { file: name, reason: '백업에는 Bareos 자동 설정 본인 OTP 재확인이 꺼져 있었지만 복원으로는 끄지 않습니다(켬으로 적용) — 끄려면 설정 › 보안 › 세션 보안에서 본인 OTP 로 저장하세요.' } }
+    const others = r.kept.filter((k) => k !== 'bareosSetupOtp');
+    if (r.forcedOn && !others.length) return { content: r.text, info: { bareosSetupOtpKeptOn: true }, warning: { file: name, reason: '백업에는 Bareos 자동 설정 본인 OTP 재확인이 꺼져 있었지만 복원으로는 끄지 않습니다(켬으로 적용) — 끄려면 설정 › 보안 › 세션 보안에서 본인 OTP 로 저장하세요.' } }
+    if (r.kept.length) {
+      return { content: r.text, info: { ...(r.forcedOn ? { bareosSetupOtpKeptOn: true } : {}), securityKept: r.kept },
+        warning: { file: name, reason: `백업 판본이 지금보다 약한 보안 설정(${r.kept.join(' · ')})을 담고 있어 그 값은 지금 수준으로 두었습니다 — 복원은 본인 OTP 를 묻지 않으므로 약하게 되돌리지 않습니다(바꾸려면 설정 › 세션 보안에서 소유자 + 본인 OTP).` } };
+    }
+    return { content: r.text };
+  }
+  if (name === 'secrets-policy.json' || name === 'secrets-policy.trusted.json') {
+    let cur = null;
+    try { cur = fs.readFileSync(path.join(configDir, name), 'utf8'); } catch { cur = null; }
+    const r = reconcileSecretsPolicyText(content, cur);
+    return r.keptCurrent
+      ? { content: r.text, info: { secretsPolicyKept: true }, warning: { file: name, reason: '백업은 자격증명 평문 저장이지만 지금은 암호화라 지금 방식을 유지했습니다 — 복원은 본인 OTP 를 묻지 않으므로 약하게 되돌리지 않습니다.' } }
       : { content: r.text };
   }
   if (name === 'bareos-groups.json') {

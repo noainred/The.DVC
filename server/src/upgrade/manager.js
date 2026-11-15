@@ -32,6 +32,7 @@ import { runningBulkDeploys as bulkDeployRuns } from '../agent/bulkDeploy.js';  
 import { runnerStatus as vmcloneRunnerStatus } from '../vmclone/runner.js';  // v2.741(TIMING-01 ③): 실행 중 VM 복제 잡도 기다린다(읽기만)
 import { getJob as vmcloneJob } from '../vmclone/store.js';
 import { runningBareosFinishes } from '../vmclone/execOp.js';   // v2.874(점검 B2-02): Bareos 복원 마무리(NIC 끊기 · 검증 — vCenter 줄)도 기다린다(읽기만)
+import { runningVeeamWork } from '../veeam/run/inflight.js';   // 전체 점검 2회차 V-3: Veeam 관리 작업 · 보내는 중 실행 · 엣지 대행 상태 변경도 기다린다(읽기만)
 import { runningBareosWork } from '../bareos/inflight.js';   // v2.825.1(G15): 엣지 대행 작업·늦은 회신·자동 설정도 기다린다(재시작하면 결과를 잃는다 · 읽기만)
 import { poolSettled } from '../util/pool.js';
 import { numOrNull } from '../util/numOrNull.js';
@@ -83,6 +84,10 @@ function bareosWork() {
   try { b = runningBareosFinishes(); } catch { b = []; }   // v2.874(점검 B2-02): 복원 마무리(NIC 끊기 · 검증 — vCenter 줄)
   return [...a, ...b];
 }
+/** 전체 점검 2회차 V-3: 재시작하면 결과 · 감사를 잃는 Veeam 작업(veeam/run/inflight.js). 상한은 스캔과 같다. */
+function veeamWork() {
+  try { return runningVeeamWork(); } catch { return []; }
+}
 /**
  * v2.742(감사 RECENT-02): 자동 적용이 기다리는 **시작하지 못한 '지금 수집' 대기 요청**(util/scanJournal queuedScans).
  *   기록이 파일에 남은(resumable) 대기 요청은 재시작 뒤 그 기능의 대기열로 돌아오므로 기다리지 않는다(분리 실행 du 와 같은 판단 — TIMING-03).
@@ -92,16 +97,18 @@ function queuedEntries(list) { return (Array.isArray(list) ? list : []).filter((
 const queuedLabel = (x) => `'지금 수집' 대기 ${x.label || x.key || x.kind}`.slice(0, 120);
 
 /** 상한을 넘겨 적용할 때 — 스캔은 자동 재개가 잇고(resumeOutlookText), VM 복제·대량 배포·기록 못 한 대기 요청은 잇지 않는다(조용히 '재개된다' 고 말하지 않는다). */
-const NON_SCAN_KINDS = new Set(['vm-clone', 'bulk-deploy', 'bareos']);
+const NON_SCAN_KINDS = new Set(['vm-clone', 'bulk-deploy', 'bareos', 'veeam']);
 const scansOnly = (list) => (Array.isArray(list) ? list : []).filter((x) => !NON_SCAN_KINDS.has(x.kind) && !x.queued);
 function cloneOutlookText(blocking) {
   const list = Array.isArray(blocking) ? blocking : [];
   const n = list.filter((x) => x.kind === 'vm-clone').length;
   const d = list.filter((x) => x.kind === 'bulk-deploy').length;
   const b = list.filter((x) => x.kind === 'bareos').length;
+  const vm = list.filter((x) => x.kind === 'veeam').length;
   const q = queuedEntries(list).length;
   return joinOutlook(
     b ? `Bareos 작업 ${b}건은 결과를 받지 못합니다 — 백업 대상·Director(자동 설정은 그 서버의 설정 파일)를 확인하세요` : '',
+    vm ? `Veeam 작업 ${vm}건은 결과를 받지 못합니다 — Veeam 콘솔에서 실행 · 삭제 여부를 확인하세요` : '',
     n ? `VM 복제 ${n}개는 중간에 끊깁니다 — 원본 VM 에 임시 스냅샷(portal-clone-*)이 남았는지 VM 복제 화면에서 확인하세요` : '',
     d ? `에이전트 대량 배포 ${d}건은 중간에 끊깁니다 — 설치가 끝나지 않은 노드가 남았는지 배포 화면에서 확인하고 다시 실행하세요` : '',
     q ? `'지금 수집' 대기 요청 ${q}개는 기록을 남기지 못해 재시작 뒤 다시 돌지 않습니다 — 다시 누르세요` : '',
@@ -438,7 +445,7 @@ export class UpgradeManager {
     const queuedKept = queued.filter((x) => x.resumable);
     // v2.741(감사 TIMING-01 ③): 실행 중 VM 복제 잡도 기다린다(재시작이 오면 원본 VM 에 임시 스냅샷이 남는다 — 이어 받는 경로가 없다).
     // v2.742(감사 TIMING-04): 진행 중인 에이전트 대량 배포도 기다린다(재시작이 원격 설치를 중간에 끊는다 — 이어 받는 경로가 없다).
-    const scans = [...all.filter((x) => !x.resumable), ...queued.filter((x) => !x.resumable).map((x) => ({ ...x, label: queuedLabel(x) })), ...runningVmClones(), ...runningBulkDeploys(), ...bareosWork()];
+    const scans = [...all.filter((x) => !x.resumable), ...queued.filter((x) => !x.resumable).map((x) => ({ ...x, label: queuedLabel(x) })), ...runningVmClones(), ...runningBulkDeploys(), ...bareosWork(), ...veeamWork()];
     if (!scans.length || max <= 0) { const forced = false; this.#clearDeferral(); return { wait: false, forced, scans, detached, queuedKept }; }
     if (!this.deferral || this.deferral.latest !== latest) this.deferral = { since: now, until: now + max, latest, scans: [] };
     this.deferral.scans = scans.map((x) => ({ kind: x.kind, label: x.label, since: x.since }));

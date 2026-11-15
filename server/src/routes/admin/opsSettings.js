@@ -16,7 +16,7 @@ import { ssrfBlockReasonResolved } from '../../collector/registry.js';
 import { dailyReportStatus, saveDailyReportSettings, runDailyReportNow } from '../../reports/dailyReport.js';
 import { refreshCerts } from '../../security/certMonitor.js';
 import { adminOnly, requireSettingsOwner, fullScopeOnlyWith, SETTINGS_OWNER_FULL_SCOPE_REASON } from './shared.js';
-import { mergeScopedMap, filterScopedMap, denyScopedRun } from '../../auth/scopeMerge.js'; // v2.606 AUTHZ2606-07
+import { mergeScopedMap, filterScopedMap, denyScopedRun, denyFleetWrite, writeMergeScope } from '../../auth/scopeMerge.js'; // v2.606 AUTHZ2606-07
 import { todayStamp } from "../../util/dayKey.js";
 import { csvLine } from '../../util/csv.js'; // v2.741(WEB-02 후속): CSV 수식 가드 한 벌
 import { requirePerm as requireCsvPerm } from '../../auth/auth.js';
@@ -166,7 +166,7 @@ function scopeAnomaly(st, allowed) {
 }
 adminRouter.get('/anomaly', adminOnly, (req, res) => res.json(scopeAnomaly(getAnomalySettings(), scopedVcenterIds(req.user, store.get()))));
 adminRouter.put('/anomaly', adminOnly, (req, res) => {
-  const allowed = scopedVcenterIds(req.user, store.get());
+  const allowed = writeMergeScope(req);   // 전체 점검 7회차: 병합 · 전역 필드는 쓰기 범위(응답 가림은 조회 범위)
   const body = req.body || {};
   if (!allowed) return res.json({ ok: true, settings: saveAnomalySettings(body) });
   const before = getAnomalySettings();
@@ -176,7 +176,7 @@ adminRouter.put('/anomaly', adminOnly, (req, res) => {
   if (body.threshold !== undefined && body.threshold !== '' && Number(body.threshold) !== before.threshold) ignoredGlobal.push('threshold');
   const settings = saveAnomalySettings({ enabled: before.enabled, threshold: before.threshold, perVcenter: m.merged });
   res.json({
-    ok: true, settings: scopeAnomaly(settings, allowed),
+    ok: true, settings: scopeAnomaly(settings, scopedVcenterIds(req.user, store.get())),
     ...(m.ignored.length ? { ignoredOutOfScope: m.ignored.length } : {}),
     ...(ignoredGlobal.length ? { ignoredGlobal, ignoredReason: '전역 임계·사용 여부는 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다 — 적용하지 않았습니다.' } : {}),
   });
@@ -275,9 +275,7 @@ adminRouter.get('/os-scan', adminOnly, (req, res) => res.json(scopedOsScanStatus
 // v2.606 AUTHZ2606-06: 스캔 설정은 전역이다 — 범위 admin 이 켠 주기 스캔은 전 vCenter 게스트에 로그인한다(v2.599 가 수동
 //   실행에서 막은 것을 설정으로 우회). 범위 계정의 변경은 403(Horizon settings PUT v2.605 와 같은 판단).
 adminRouter.put('/os-scan/settings', adminOnly, (req, res) => {
-  if (scopedVcenterIds(req.user, store.get())) {
-    return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '실제 OS 스캔 설정은 전 법인 공용이고 전 vCenter 게스트에 로그인합니다 — 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.' });
-  }
+  if (denyFleetWrite(req, res, '실제 OS 스캔 설정은 전 법인 공용이고 전 vCenter 게스트에 로그인합니다 — 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.')) return;   // 전체 점검 2회차 V-1(조회 ∧ 쓰기 전체)
   const status = scopedOsScanStatus(req);   // 예전과 같은 순서(저장 전 상태 + 저장 결과) — 전체 범위 admin 응답은 그대로
   res.json({ ok: true, ...status, settings: saveOsScanSettings(req.body || {}) });
 });
@@ -285,10 +283,13 @@ adminRouter.put('/os-scan/settings', adminOnly, (req, res) => {
 //   (미지정이면 전 vCenter 를 돌아 범위 밖 게스트에 로그인한다).
 adminRouter.post('/os-scan/run', adminOnly, async (req, res) => {
   const vcId = String(req.body?.vcenterId || '');
-  const allowed = scopedVcenterIds(req.user, store.get());
+  // 전체 점검 7회차: 게스트에 로그인하는 실행 — 조회 밖 404 → 쓰기 밖 403(전 vCenter 실행은 조회 ∧ 쓰기 전체만)
+  const read = scopedVcenterIds(req.user, store.get());
+  const allowed = writeMergeScope(req);
   if (allowed) {
     if (!vcId) return res.status(400).json({ ok: false, reason: '범위가 제한된 계정은 스캔할 vCenter 를 지정해야 합니다.' });
-    if (!allowed.has(vcId)) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
+    if (read && !read.has(vcId)) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
+    if (!allowed.has(vcId)) return res.status(403).json({ ok: false, error: 'forbidden', reason: '조회 전용 범위 — 이 vCenter 는 실행 권한이 없습니다.' });
   }
   res.json(await runOsScanNow(vcId));
 });
