@@ -450,13 +450,15 @@ export function deleteWindow(id, { by = '', rev = null, now = Date.now() } = {})
 /* ── 엣지 배포본(중앙이 보낸 창 — 엣지에서만 쓴다) ─────────────────────── */
 let _dep = null;   // { m, s, data }
 /**
- * history(지난 구간용 — 점검 반복 3회차 D2) 상한: 개수 · 크기(JSON 글자 수 — 중앙이 보낼 때와 엣지가 받을 때 같은 값). 넘치면 최근 것부터 남기고 센다.
+ * history(지난 구간용 — 점검 반복 3회차 D2) 상한: 개수 · 크기(JSON UTF-8 바이트 — 중앙이 보낼 때와 엣지가 받을 때 같은 값 · historySizeOf). 넘치면 최근 것부터 남기고 센다.
  *   크기 상한은 인출 본문 상한(agent/bmMaintPull BODY_MAX 4MB) 안에서 지금 억제 창(windows)의 자리를 빼앗지 않게 잡았다.
  */
 export const DEPLOY_HISTORY_MAX = 500;
 export const DEPLOY_HISTORY_BYTES_MAX = 1_000_000;
 /** history 를 상한 안으로(순수 — 앞에서부터 남긴다: 호출자가 최근 것부터 줄 세운다). */
-export function capHistory(list = [], { sizeOf = (w) => JSON.stringify(w).length, maxBytes = DEPLOY_HISTORY_BYTES_MAX } = {}) {
+/** 크기 = JSON 의 **UTF-8 바이트**(3회차 재확인 2 — 글자 수로 재면 한글 이름 · 사유가 가득한 history 가 1,000,000자 · 2.7MB 가 되어 인출 본문 상한(바이트)을 먹었다). */
+export const historySizeOf = (x) => Buffer.byteLength(JSON.stringify(x), 'utf8');
+export function capHistory(list = [], { sizeOf = historySizeOf, maxBytes = DEPLOY_HISTORY_BYTES_MAX } = {}) {
   const out = []; let bytes = 0; let dropped = 0;
   for (const w of Array.isArray(list) ? list : []) {
     const n = sizeOf(w);
@@ -472,10 +474,16 @@ const bareWin = (w) => { const o = { ...w }; delete o.origin; delete o.history; 
  * ⚠ 정정(3회차 재확인 R3): 처음 판은 지운 · 끝낸 · 재확인 · 만든 시각만 보아, 오래전에 만들어 어제 저절로 끝난 일회 창(지난 31일 계산에 실제로 걸리는 창)이 먼저 버려졌다.
  *   이제 그 창의 **유효 끝**(일회 = 마지막 발생의 끝 onceEndOf · 반복 = 재확인 만료 시각)과 지운 · 끝낸 시각 중 늦은 것.
  */
+/**
+ * ⚠ 정정(3회차 재확인 2 R3-2): 묘비는 지난 구간에 **지운 시각까지만** 남는다(effectiveOccurrences history) — 열쇠도 min(유효 끝, 지운 시각).
+ *   max 로 두면 시작 전에 지운 일회 창 · 지운 반복 창의 열쇠가 미래(유효 끝 · 만료)가 되어, 한 번도 덮지 않은 묘비가 상한에서 진짜 지난 창을 밀어냈다.
+ */
 export const historyRecency = (w) => {
   if (!w) return 0;
-  const end = w.schedule?.kind === 'once' ? onceEndOf(w.deleted ? { ...w, deleted: undefined } : w) : (expiresAt(w) ?? 0);
-  return Math.max(Number(end) || 0, Number(w.deleted?.at) || 0, Number(w.endedAt) || 0);
+  const end = Number(w.schedule?.kind === 'once' ? onceEndOf(w.deleted ? { ...w, deleted: undefined } : w) : (expiresAt(w) ?? 0)) || 0;
+  const del = w.deleted ? Number(w.deleted.at) : NaN;
+  if (Number.isFinite(del)) return end ? Math.min(end, del) : del;
+  return Math.max(end, Number(w.endedAt) || 0);
 };
 /**
  * 배포본 저장(엣지 인출 워커) — 같은 정규화를 다시 거친다(엣지는 중앙 문자열을 그대로 믿지 않는다). 형식 밖은 버리고 센다.
@@ -511,7 +519,7 @@ export function saveDeployed(list, { sig = '', now = Date.now(), history = undef
       if (!w) { historyDropped += 1; continue; }
       carry(x, w);
       if (liveIds.has(w.id) || !keptPast(w, now)) continue;
-      cand.push({ w, n: JSON.stringify(x).length });
+      cand.push({ w, n: historySizeOf(x) });
     }
     historyDropped += Math.max(0, history.length - DEPLOY_HISTORY_MAX * 2);
     const c = capHistory(cand.sort((a, b) => historyRecency(b.w) - historyRecency(a.w)), { sizeOf: (p) => p.n });

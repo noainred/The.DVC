@@ -278,8 +278,10 @@ test('R3(3회차 재확인) — history 상한을 넘으면 최근에 끝난 창
       vcenterId: 'vcE', tz: 'Asia/Seoul', schedule: { kind: 'once', start: loc(now - 2 * DAY), end: loc(now - 2 * DAY + HOUR) }, scopes: { exclude: true }, rev: 1, by: 'op', at: now - 3 * DAY, approvedBy: '', confirmedAt: now - 3 * DAY });
     const per = ST.DEPLOY_HISTORY_BYTES_MAX / 100;
     const keys = [];
-    while (JSON.stringify(one(0, keys)).length < per - 260) keys.push(`S${String(keys.length).padStart(4, '0')}`);
-    keys.push('P'.repeat(per - JSON.stringify(one(0, keys)).length - 3));   // 서버 키 형식(256자 이하) 안에서 남은 글자를 채운다
+    // 크기는 UTF-8 바이트(historySizeOf — 3회차 재확인 2: 이름의 한글은 글자당 3바이트)
+    while (ST.historySizeOf(one(0, keys)) < per - 200) keys.push(`S${String(keys.length).padStart(4, '0')}`);
+    keys.push('P'.repeat(per - ST.historySizeOf(one(0, keys)) - 3));   // 서버 키 형식(256자 이하) 안에서 남은 바이트를 채운다
+    assert.equal(ST.historySizeOf(one(0, keys)), per, '한 개 정확히 상한/100 바이트');
     const items = Array.from({ length: 101 }, (_, i) => one(i, keys));
     const sent = ST.capHistory(items);
     assert.equal(sent.list.length, 100); assert.equal(sent.dropped, 1);
@@ -291,4 +293,36 @@ test('R3(3회차 재확인) — history 상한을 넘으면 최근에 끝난 창
     config.configDir = keep; ST._resetMaintStoreForTest();
     fs.rmSync(ODIR, { recursive: true, force: true });
   }
+});
+
+test('R3-2 · 크기(3회차 재확인 2) — 묘비의 열쇠는 지운 시각까지(min) · 시작 전에 지운 묘비 500이 어제 끝난 창을 밀어내지 않는다 · 크기는 UTF-8 바이트', async () => {
+  const f = path.join(DIR, 'maintenance-windows.json');
+  const o = JSON.parse(fs.readFileSync(f, 'utf8'));
+  o.items = o.items.filter((w) => !/^mw-(old|yday|tomb)/.test(w.id));
+  const mk = (id, name, startMs, createdMs, extra = {}) => ({ id, name, reason: 'r', target: { kind: 'server', keys: ['E1'] }, vcenterId: 'vcE', tz: 'Asia/Seoul',
+    schedule: { kind: 'once', start: loc(startMs), end: loc(startMs + HOUR) }, scopes: { exclude: true }, by: 'op', at: createdMs, rev: 1, approvedBy: '', confirmedAt: createdMs, edits: [], ...extra });
+  // 85일 전에 만들어 열흘 뒤 시작으로 잡았다가 84일 전에 취소한 일회 창 500(지난 구간 덮임 0) — 예전 열쇠 max(유효 끝 +10일, 지운 시각) = 미래
+  for (let i = 0; i < 500; i += 1) o.items.push(mk(`mw-tomb${String(i).padStart(5, '0')}`, `취소 ${i}`, T0 + 10 * DAY + i * MIN, T0 - 85 * DAY, { deleted: { at: T0 - 84 * DAY, by: 'op' } }));
+  const late = mk('mw-yday00002', '어제 끝남', T0 - DAY, T0 - 85 * DAY);
+  o.items.push(late);
+  fs.writeFileSync(f, JSON.stringify(o));
+  ST._resetMaintStoreForTest();
+  const tomb = o.items.find((w) => w.id === 'mw-tomb00000');
+  assert.equal(ST.historyRecency(tomb), T0 - 84 * DAY, '묘비 열쇠 = 지운 시각(유효 끝이 더 늦어도)');
+  assert.ok(ST.historyRecency(late) > ST.historyRecency(tomb));
+  const body = await DP.deployFor('Edge-A', { verified: true, now: Date.now() });
+  assert.equal(body.history.length, ST.DEPLOY_HISTORY_MAX); assert.ok(body.historyDropped > 0);
+  assert.ok(body.history.some((x) => x.id === late.id), '재현 R3-2 — 예전 열쇠로는 한 번도 덮지 않은 묘비가 먼저 남아 어제 끝난 창이 버려졌다');
+  // 덮은 뒤 지운 창(시작 뒤 지움): 열쇠 = 지운 시각 · 지우지 않은 창은 그대로(유효 끝)
+  const cut = mk('mw-cut', 'c', T0 - 3 * DAY, T0 - 4 * DAY, { deleted: { at: T0 - 3 * DAY + 10 * MIN, by: 'op' } });
+  assert.equal(ST.historyRecency(cut), T0 - 3 * DAY + 10 * MIN);
+  assert.equal(ST.historyRecency(mk('mw-plain', 'p', T0 - 3 * DAY, T0 - 4 * DAY)), T0 - 3 * DAY + HOUR);
+  // 크기 = UTF-8 바이트(한글 3바이트) — 글자 수 상한이면 한글 history 가 인출 본문 상한(바이트)을 2.7배로 먹었다
+  const ko = mk('mw-ko', '가'.repeat(100), T0 - DAY, T0 - 2 * DAY);
+  assert.equal(ST.historySizeOf(ko), Buffer.byteLength(JSON.stringify(ko)));
+  assert.ok(ST.historySizeOf(ko) >= JSON.stringify(ko).length + 200);
+  const big = Array.from({ length: 5 }, (_, i) => ({ ...ko, id: `mw-k${i}`, name: '가'.repeat(120) }));
+  const per = ST.historySizeOf(big[0]);
+  const c = ST.capHistory(big, { maxBytes: per * 3 });
+  assert.equal(c.list.length, 3, '바이트로 잰다');
 });
