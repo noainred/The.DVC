@@ -60,7 +60,7 @@ test('F2 — 서버 상세 실행 표지(데모 · 역할): 스냅샷 실행 · 
     assert.deepEqual(G.bmGate(vw, nm), { ok: false, why: 'role-operator' });
   }
   // GET 응답에 표지가 실린다(스냅샷 · 집중 읽기 — 소스)
-  const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const strip = (await import('./_stripComments.js')).stripComments;   // 주석 제거기는 하나(TESTDOC2613-08)
   const bu = strip(fs.readFileSync(new URL('../src/routes/api/bmUsage.js', import.meta.url), 'utf8'));
   assert.match(bu, /actions:\s*\{\s*run:\s*bmGate\(req,\s*'snapshotRun'/);
   const po = strip(fs.readFileSync(new URL('../src/routes/api/bmPerfOps.js', import.meta.url), 'utf8'));
