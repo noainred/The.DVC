@@ -19,7 +19,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
-import { setKeepDays, RAW_KEEP_DAYS_DEF, DAILY_KEEP_DAYS_DEF, NODE_LOAD_RAW_KEEP_DAYS_DEF, NODE_LOAD_HOURLY_KEEP_DAYS_DEF,
+import { makeSettingsLoadError } from '../util/settingsLoadError.js';   // 23회차 S-3
+import { setKeepDays, setPruneHold, RAW_KEEP_DAYS_DEF, DAILY_KEEP_DAYS_DEF, NODE_LOAD_RAW_KEEP_DAYS_DEF, NODE_LOAD_HOURLY_KEEP_DAYS_DEF,
   NODE_CLIENT_RAW_KEEP_DAYS_DEF, NODE_CLIENT_HOURLY_KEEP_DAYS_DEF, NODE_CLIENT_DAILY_KEEP_DAYS_DEF } from './db.js';
 
 const FILE = () => path.join(config.configDir, 'storage-growth-settings.json');
@@ -96,15 +97,24 @@ export function normalizeGrowthSettings(input = {}) {
 }
 
 let _cache = null;
+/*
+ * 전체 점검 23회차 S-3(재현): 손상 → 기본값 → 다음 정리가 긴 보존 이력을 지웠다. 이제 못 읽은 동안(손상 · 재시작 뒤 보존본만)은
+ *   ① 보존 정리를 보류(db.setPruneHold) ② 저장은 409(부분 저장이 나머지 칸을 기본값으로 굳히지 않게) ③ 서비스 점검 목록에 올라
+ *   '기본값으로 확정'(빈 설정 저장 → 기본값 · 정리 재개) 또는 보존본 복구로만 풀린다.
+ */
+const _loadErr = makeSettingsLoadError(() => FILE(), { label: '스토리지 증가량 보존 기간(못 읽는 동안 이력 정리 보류)', confirm: () => { atomicWriteFileSync(FILE(), '{}', { mode: 0o600 }); _cache = {}; _loadErr.ok(); applyGrowthSettings(); } });
+/** 보존 설정을 못 읽었으면 { at, reason }, 아니면 null. */
+export function growthSettingsLoadError() { loadGrowthSettings(); return _loadErr.get(); }
 
 /** 저장된 설정 + 기본값을 합친 실효값. `source` 로 '어디서 온 값인지' 를 함께 준다. */
 export function loadGrowthSettings() {
   if (!_cache) {
     let saved = {};
-    try { saved = JSON.parse(fs.readFileSync(FILE(), 'utf8')) || {}; }
+    try { saved = JSON.parse(fs.readFileSync(FILE(), 'utf8')) || {}; _loadErr.ok(); }
     catch (e) {
-      // ENOENT 는 '아직 저장한 적 없음' 이라 정상이다. 그 밖(손상)은 원본을 보존하고 기본으로 간다.
-      if (e?.code !== 'ENOENT') { try { preserveCorrupt(FILE()); } catch { /* best effort */ } }
+      // ENOENT 는 '아직 저장한 적 없음' 이라 정상이다(손상 보존본만 남았으면 여전히 못 읽은 것 — missing). 그 밖(손상)은 원본을 보존한다.
+      if (e?.code === 'ENOENT') _loadErr.missing();
+      else { _loadErr.corrupt(e); try { preserveCorrupt(FILE()); } catch { /* best effort */ } }
       saved = {};
     }
     _cache = normalizeGrowthSettings(saved).values;
@@ -131,6 +141,10 @@ export function loadGrowthSettings() {
 
 /** 저장 → 즉시 DB 에 반영. prune 은 여기서 돌리지 않는다(호출부 결정 — 위 머리말 참조). */
 export function saveGrowthSettings(input) {
+  if (growthSettingsLoadError()) {   // 23회차 S-3
+    const e = new Error('저장된 보존 기간 설정 파일을 읽지 못했습니다 — 지금 저장하면 적지 않은 칸이 기본값(더 짧은 보존)으로 굳습니다. 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리고 재시작하세요.');
+    e.code = 'settings-unreadable'; throw e;
+  }
   const { values, issues } = normalizeGrowthSettings(input);
   // v2.733(점검 3회차 C4-04): 캐시·DB 반영은 **디스크 쓰기 성공 뒤에만** — 예전에는 먼저 바꿔, 저장 실패 뒤에도 실패한 값이 출처 'saved' 로
   //   보였다(재시작하면 옛 값). 저장 전에 한 번 읽어 둔다(_cache 가 비어 있으면 다른 저장값을 빠뜨린 채 덮어쓰지 않게).
@@ -145,10 +159,11 @@ export function saveGrowthSettings(input) {
 /** 기동 시·저장 시 DB 모듈에 보존 일수를 주입한다. */
 export function applyGrowthSettings() {
   const v = loadGrowthSettings();
+  setPruneHold(_loadErr.get() ? `보존 기간 설정 파일을 읽지 못함(${_loadErr.get().reason}) — 기본값으로 지우지 않습니다` : null);   // 23회차 S-3
   setKeepDays({ rawKeepDays: v.rawKeepDays, dailyKeepDays: v.dailyKeepDays, nodeLoadRawKeepDays: v.nodeLoadRawKeepDays,
     nodeLoadHourlyKeepDays: v.nodeLoadHourlyKeepDays, nodeClientRawKeepDays: v.nodeClientRawKeepDays,
     nodeClientHourlyKeepDays: v.nodeClientHourlyKeepDays, nodeClientDailyKeepDays: v.nodeClientDailyKeepDays });
   return v;
 }
 
-export function _resetForTest() { _cache = null; }
+export function _resetForTest() { _cache = null; _loadErr.ok(); }

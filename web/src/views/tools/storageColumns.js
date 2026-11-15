@@ -152,8 +152,9 @@ export function cellValue(key, row) {
     case 'hdd': return s?.media?.hdd || null;
     case 'ssd': return s?.media?.ssd || null;
     case 'pools': return s ? (s.pools || []).length : null;
-    case 'nodes': return s ? (s.nodes?.count ?? 0) : null;
-    case 'accounts': return s ? (s.accounts?.length ?? 0) : null;
+    // 전체 점검 23회차 S-5(재현): '미수집'(섹션 skip · 오류)을 0 으로 그렸다(Unity SSH 'SP 0 · 계정 0') — 그 섹션을 읽었을 때(ok)만 개수, 아니면 비움(—).
+    case 'nodes': return s && s.sections?.nodes === 'ok' ? numOrNull(s.nodes?.count) : null;
+    case 'accounts': return s && s.sections?.accounts === 'ok' && Array.isArray(s.accounts) ? s.accounts.length : null;
     case 'arrays': return Array.isArray(ex.arrays) ? ex.arrays.length : null;
     case 'bricks': return num(ex.numBricks);
     case 'clusters': return Array.isArray(ex.clusters) ? ex.clusters.length : null;
