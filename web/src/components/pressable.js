@@ -7,7 +7,7 @@
  */
 export const PRESS_KEYS = Object.freeze(['Enter', ' ']);
 /**
- * v3.12.3: Enter/Space 를 그 요소 자신의 '누름' 으로 바꾸는 onKeyDown 한 벌 — role 을 바꾸면 안 되는 요소(정렬 열 머리 th — columnheader · aria-sort)도 쓴다.
+ * v3.12.4: Enter/Space 를 그 요소 자신의 '누름' 으로 바꾸는 onKeyDown 한 벌 — role 을 바꾸면 안 되는 요소(정렬 열 머리 th — columnheader · aria-sort)도 쓴다.
  * 안쪽 버튼 · 링크에서 올라온 키는 무시한다 — 안 그러면 '호스트 →' 에서 Enter 를 쳤을 때 카드(상세)가 열리고 버튼의 클릭은 preventDefault 로 막혔다(반증 재현 · v3.10.19 보완).
  */
 export function onPressKey(fn) {

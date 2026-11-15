@@ -328,7 +328,7 @@ describe('v3.10.21 — 점검 9회차: Summary 리전 보기에서 나눌 수 �
   });
 });
 
-describe('v3.12.1 — 2차 루프 1회차: 공용 범위 바의 vCenter 선택지는 고른 리전 안만 · 리전 밖 vCenter 를 고르면 리전을 비운다', () => {
+describe('v3.12.2 — 2차 루프 1회차: 공용 범위 바의 vCenter 선택지는 고른 리전 안만 · 리전 밖 vCenter 를 고르면 리전을 비운다', () => {
   const VCS = [{ id: 'a', name: 'A', location: { region: '유럽' } }, { id: 'b', name: 'B', location: { region: '북미' } }, { id: 'c', name: 'C', location: { region: '유럽' } }, { id: 'd', name: 'D' }];
   it('scopeVcOptions — 리전이 없으면 전부 · 있으면 그 리전만 · 지금 고른 리전 밖 vCenter 는 맨 앞에 outside', () => {
     expect(scopeVcOptions(VCS, '').map((o) => o.id)).toEqual(['a', 'b', 'c', 'd']);

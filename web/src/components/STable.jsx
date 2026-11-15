@@ -26,7 +26,7 @@
  */
 import React, { useMemo, useState } from 'react';
 import { headerSortable, sortChildren, nextSortState } from './sortableText.js';
-import { onPressKey } from './pressable.js';   // v3.12.3 정렬 머리 키보드(Enter/Space) — 역할(columnheader)은 그대로
+import { onPressKey } from './pressable.js';   // v3.12.4 정렬 머리 키보드(Enter/Space) — 역할(columnheader)은 그대로
 
 const ARROW = { asc: '▲', desc: '▼' };
 
@@ -90,7 +90,7 @@ export function STable({ sortable = true, limit = 0, minWidth = 0, wrap, childre
     return React.cloneElement(th, {
       key: th.key ?? `h${idx}`,
       onClick: (e) => { th.props.onClick?.(e); setSort((c) => nextSortState(c, myCol)); },
-      // v3.12.3(2차 루프 3회차): 마우스로만 정렬됐다 — Tab 으로 닿고 Enter/Space 로 같은 순서(오름 → 내림 → 해제). 포커스 테두리는 styles.css th[aria-sort]:focus-visible.
+      // v3.12.4(2차 루프 3회차): 마우스로만 정렬됐다 — Tab 으로 닿고 Enter/Space 로 같은 순서(오름 → 내림 → 해제). 포커스 테두리는 styles.css th[aria-sort]:focus-visible.
       tabIndex: th.props.tabIndex ?? 0,
       onKeyDown: (e) => { th.props.onKeyDown?.(e); if (!e.defaultPrevented) onPressKey(() => setSort((c) => nextSortState(c, myCol)))(e); },
       style: { cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', ...(th.props.style || {}) },

@@ -608,7 +608,7 @@ function Portal({ user, onLogout }) {
               {((user.scope?.regions?.length) ? REGIONS.filter((r) => user.scope.regions.includes(r)) : REGIONS)
                 .map((r) => <option key={r} value={r}>{r}</option>)}
             </Select>
-            {/* v3.12.1: 리전을 골랐으면 그 리전 vCenter 만 · 리전 밖 vCenter 를 고르면(다른 경로의 값) 리전을 비운다 — 허브 카드와 본문이 엇갈리지 않게 */}
+            {/* v3.12.2: 리전을 골랐으면 그 리전 vCenter 만 · 리전 밖 vCenter 를 고르면(다른 경로의 값) 리전을 비운다 — 허브 카드와 본문이 엇갈리지 않게 */}
             <Select className="select" value={vcenterId} onChange={(e) => patchFilter(scopeVcPatch(vcenters, region, e.target.value))}>
               <option value="">{region ? `리전 ${region} 전체` : '전체 vCenter'}</option>
               {scopeVcOptions(vcenters, region, vcenterId).map((v) => <option key={v.id} value={v.id}>{v.outside ? `${v.name} (리전 밖)` : v.name}</option>)}

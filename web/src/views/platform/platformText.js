@@ -223,7 +223,7 @@ export function chipSites(vcenters, region) {
   return r ? list.filter((s) => String(s.location?.region ?? '') === r) : list;
 }
 /**
- * v3.12.1(2차 루프 1회차): 공용 범위 바의 vCenter 선택지 — 리전을 골랐으면 **그 리전 vCenter 만**(칩과 같은 판정 chipSites).
+ * v3.12.2(2차 루프 1회차): 공용 범위 바의 vCenter 선택지 — 리전을 골랐으면 **그 리전 vCenter 만**(칩과 같은 판정 chipSites).
  *   예전에는 리전과 무관하게 전부를 보여 리전 밖 vCenter 를 고를 수 있었고, 그러면 허브 카드(그 vCenter 숫자)와 본문(리전 ∩ vCenter = 0건)이 엇갈렸다.
  *   지금 고른 vCenter 가 리전 밖이면(다른 경로에서 넘어온 값) 맨 앞에 남기고 outside 로 표시한다 — 선택 상자가 거짓 '전체 vCenter' 를 보이지 않게.
  * @returns {Array<{id:string, name:string, outside:boolean}>}
