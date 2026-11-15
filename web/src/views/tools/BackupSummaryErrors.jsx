@@ -23,7 +23,7 @@ const linkBtn = { background: 'none', border: 0, padding: 0, color: '#93c5fd', f
 const CHIP = { padding: '3px 12px', fontSize: 12, fontWeight: 700 };
 const KINDS = [['', '전체', 'all'], ['fail', '실패', 'fail'], ['warn', '경고', 'warn'], ['stuck', '멈춤 의심', 'stuck'], ['volume', '오류 볼륨', 'volume'], ['collect', '수집 오류', 'collect']];   // v2.840 오류 볼륨(정책 수집본)
 
-export default function BackupSummaryErrors({ reloadKey, onOpenDetail }) {
+export default function BackupSummaryErrors({ reloadKey, onOpenDetail, region = '' }) {   // v3.10.17 region: Summary 의 리전(에러 로그도 같은 법인만)
   const [days, setDays] = useState(1);
   const [kind, setKind] = useState('');
   const [src, setSrc] = useState('');
@@ -41,11 +41,11 @@ export default function BackupSummaryErrors({ reloadKey, onOpenDetail }) {
   const load = useCallback(() => {
     const my = ++gen.current;
     setLoading(true); setError(null);
-    fetchJson('/tools/backup-summary/errors', { days: String(days) })
+    fetchJson('/tools/backup-summary/errors', { days: String(days), ...(region ? { region } : {}) })
       .then((r) => { if (my === gen.current) setData(r); })
       .catch((e) => { if (my === gen.current) setError(e); })
       .finally(() => { if (my === gen.current) setLoading(false); });
-  }, [days]);
+  }, [days, region]);
   useEffect(() => { load(); return () => { gen.current++; }; }, [load, reloadKey]);
 
   const c = data?.counts || {};
@@ -206,7 +206,7 @@ export default function BackupSummaryErrors({ reloadKey, onOpenDetail }) {
       {data && (
         <div className="muted" style={{ padding: '8px 14px', fontSize: 11.5, borderTop: '1px solid var(--border-soft)', lineHeight: 1.6 }}>
           {data.truncated ? `서버가 새것부터 ${fmtNum(data.rows.length)}건만 보냈습니다(수는 전부 셉니다) · ` : ''}
-          Veeam VM = 그 VM 의 마지막 task 결과만(그 앞 실패는 B&amp;R 결과에 없습니다) · EM 세션 = {data.sources?.em ? 'EM 이 읽은 최근 실패 · 경고 세션(EM 이 최근 7일만 읽습니다)' : '전체 범위 계정만 봅니다'} ·
+          Veeam VM = 그 VM 의 마지막 task 결과만(그 앞 실패는 B&amp;R 결과에 없습니다) · EM 세션 = {data.sources?.em ? 'EM 이 읽은 최근 실패 · 경고 세션(EM 이 최근 7일만 읽습니다)' : data.emSkippedForRegion ? '리전 보기에서는 뺐습니다(EM 은 리전으로 나눌 수 없음 — 전체 리전에서 보입니다)' : '전체 범위 계정만 봅니다'} ·
           Bareos = 포탈 원장의 끝난 실행(잡마다 최근 5건 — 원문은 행의 로그 서랍에서) · 멈춤 의심 = Bareos 진행 현황이 최근 조회된 법인만 ·
           로그 = 그 실행의 작업 로그를 Director 에서 읽어 옆 서랍에(엣지 대행 법인은 엣지가 대신) · 이력 → = 진행 · 이력에서 그 VM · 그 실행을 골라 엽니다 ·
           같은 모양 = Bareos 는 법인 · 결과 · 레벨 · 오류 수가 같고 1시간 안인 실행 수(그 밖은 출처 · 결과 · 잡 · 메시지 앞머리) — 같은 원인인지는 묶어 보기의 묶음 로그가 첫 오류 줄로 대조합니다{data.bareosUnknownSites ? ` · Bareos 원장을 못 읽은 법인 ${fmtNum(data.bareosUnknownSites)}곳은 Bareos 행이 없습니다(모름)` : ''}.

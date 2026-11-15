@@ -36,6 +36,7 @@ import { VeeamTag, VeeamSummaryCard, VeeamSnapSummary, VeeamDetailModal } from '
 import { authStopNote, authStopCell, authStopSingleText, plainText, skipNote, skipCell, skipSingleText } from './vcAuthStopText.js'; // v2.733(C3-01): 인증 정지로 조회하지 않음 · v2.744(감사 후속 FA-②): 직접 수집 대상 아님
 // v2.895(사용자 요청 — vSphere Client 의 vCenter 탭 12개 · 승인 시안 docs/design/vcenter-tabs ①~⑦ · 기본값 1~7): 탭 목록 · 옛 키 호환은 순수 모듈 하나.
 import { VCD_TABS, entryTab, saveTab, normTab, tabClass } from './vcd/vcdTabs.js';
+import useActiveTabInView from '../hooks/useActiveTabInView.js'; // v3.10.16: 탭 줄이 넘치면(400px) 열린 탭이 보이게 줄만 옮긴다
 import SummaryTab from './vcd/SummaryTab.jsx';
 import MonitorTab from './vcd/MonitorTab.jsx';
 import ConfigureTab from './vcd/ConfigureTab.jsx';
@@ -291,6 +292,7 @@ export default function VCenterDetail({ site, onBack, siblings = null, onOpen = 
   // v2.895: 탭 12개 — 처음은 '호스트 및 클러스터'(예전 기본), 그 뒤로는 마지막으로 본 탭(브라우저 기억). 옛 기억값 'trend' 는 모니터 › 성능.
   // v2.958: 허브(법인 카드 · 표)에서 들어오면 initialTab('요약') — entryTab 이 기억값으로도 남긴다. 다른 vCenter 로 바뀌면 key 로 다시 마운트된다.
   const [view, setViewRaw] = useState(() => entryTab(initialTab, lsSafe()));
+  const viewsRef = useRef(null); useActiveTabInView(viewsRef, view);
   const [monSub, setMonSub] = useState('alarms');      // 모니터 하위 칸(문제 및 알람 · 이벤트 · 작업 · 성능)
   const [cfgSub, setCfgSub] = useState('licenses');    // 구성 하위 칸
   const setView = (k, sub) => {
@@ -627,7 +629,7 @@ export default function VCenterDetail({ site, onBack, siblings = null, onOpen = 
       )}
       {!obj && <>
       {/* v2.895: vSphere Client 의 vCenter 탭 12개(순서 그대로 · 이모지 없음). 한 줄 — 넘치면 탭 줄만 가로 스크롤(400px 에서 페이지를 밀지 않는다 — 기본값 4). */}
-      <nav className="vcd-views" role="tablist" aria-label="vCenter 보기">
+      <nav ref={viewsRef} className="vcd-views" role="tablist" aria-label="vCenter 보기">
         {VCD_TABS.map((v) => (
           <button key={v.k} type="button" role="tab" aria-selected={view === v.k} className={tabClass(v.k, view === v.k)} style={{ flex: 'none', padding: '6px 10px', fontSize: 13 }} onClick={() => setView(v.k)}>
             {v.label}

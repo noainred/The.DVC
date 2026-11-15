@@ -29,7 +29,7 @@ describe('E-1 VcTable — 셀 수 없는 vCenter 는 0 이 아니라 —', () =>
     ];
     const html = renderToStaticMarkup(h(VcTable, { sites, byVc: new Map(), backupText: () => null, onOpen() {}, onGoHosts() {}, onGoVms() {}, now: NOW }));
     const rows = html.split('<tr').slice(1);
-    const pl = rows.find((r) => r.includes('<b>PL</b>'));
+    const pl = rows.find((r) => r.includes('>PL</button>'));   // v3.10.19: 이름은 button.cell-link(키보드로 상세)
     expect(pl).toBeTruthy();
     expect(pl).not.toMatch(/>0 →</);          // 호스트 · VM 버튼 '0 →' 없음
     expect(pl).not.toMatch(/>0%</);           // 사용률 0% 없음

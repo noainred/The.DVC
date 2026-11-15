@@ -65,7 +65,7 @@ export default function BackupSummaryStale({ scope, rows, sel, onPick, onOpenDet
     try { await downloadFile(`/tools/backup-summary/stale.csv?${new URLSearchParams(params)}`); } catch (e) { setCsvErr(e); }
   }, [o, scope]);
   // 처음 펼칠 때 한 번 찾는다(조건은 기억한 값) · 범위 옵션(전원·제외)이 바뀌면 지난 결과는 버린다
-  const scopeSig = `${scope?.power || ''}|${scope?.excl === false ? 0 : 1}`;
+  const scopeSig = `${scope?.power || ''}|${scope?.excl === false ? 0 : 1}|${scope?.region || ''}`;   // v3.10.17 리전이 바뀌면 이전 결과를 비운다
   const lastScope = useRef(scopeSig);
   useEffect(() => { if (lastScope.current !== scopeSig) { lastScope.current = scopeSig; gen.current++; setData(null); setLoading(false); } }, [scopeSig]);
   useEffect(() => { if (open && !data && !loading && !error) find(); }, [open, data]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -101,7 +101,7 @@ export default function BackupSummaryStale({ scope, rows, sel, onPick, onOpenDet
             : data ? <span data-stale-summary="">
               <b style={{ color: data.n ? '#fca5a5' : '#86efac' }}>{fmtNum(data.n)}대</b>가 최근 <b>{q?.n}{qUnit}</b> 동안 성공한 백업이 없습니다
               <span className="muted"> — 한 번도 없음 {fmtNum(data.never)} · 마지막 성공이 기준을 넘음 {fmtNum(data.old)} · 실패만 반복 {fmtNum(data.failing)} · 법인 {fmtNum(data.sites)}곳{q?.excludeNone ? ` (백업 안함 정책 ${fmtNum(data.excluded?.none)}대 제외` : ' ('}{q?.onlyOn ? ` · 꺼진 VM ${fmtNum(data.excluded?.off)}대 제외` : ''}{data.unknown ? ` · 결과를 못 읽은 ${fmtNum(data.unknown)}대는 ‘모름’ 으로 따로` : ''})</span>
-            </span> : <span className="muted">펼치면 전 법인에서 찾습니다.</span>}
+            </span> : <span className="muted">{scope?.region ? `펼치면 리전 ${scope.region} 안에서 찾습니다.` : '펼치면 전 법인에서 찾습니다.'}</span>}
       </div>
       {open && (
         <div style={{ borderTop: '1px solid var(--border-soft)' }}>

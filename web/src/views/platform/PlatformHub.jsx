@@ -44,7 +44,7 @@ export default function PlatformHub({ tab, tabs, onTab, summary = null, vcenters
     <section className="ph" aria-label={title}>
       <header className="ph-head">
         <h1>{title}</h1>
-        <span className="ph-sub">법인 = vCenter = Bareos 한 단위 · vCenter 에서 호스트 · VM 으로 내려가고, 숫자를 누르면 그 범위로 탭이 바뀝니다</span>
+        <span className="ph-sub">서비스 = vCenter 1 + Bareos 1 · 한 법인에 서비스가 여럿일 수 있습니다 · vCenter 에서 호스트 · VM 으로 내려가고, 숫자를 누르면 그 범위로 탭이 바뀝니다</span>
         {snap && <span className="ph-snap" title="이 숫자들의 기준(인벤토리 스냅샷 시각)">스냅샷 {snap}</span>}
       </header>
 
