@@ -311,7 +311,61 @@ export function topProcs(prevList, curList, { dt, tck, page, ncpu, up, users, un
     for (const k of NEW_KEYS) if (row[k] == null) delete row[k];
     return row;
   });
-  return { n: curList.length, top: out, da: dacct === true ? true : dacct === false ? false : null };
+  const apps = appGroups(curList, rows, { tck, dt, page: pg, users, units, io, prevIo, usersUp, unitsUp });
+  return { n: curList.length, top: out, da: dacct === true ? true : dacct === false ? false : null, ...(apps ? { apps } : {}) };
+}
+
+/* ── 앱 단위 묶음(v3.14.0 ⑮ — 시안 Apps · 사용자 "기본값대로 모두 구현해줘") ──────────────
+ * 이미 받는 PROC(모든 프로세스) · UNIT(서비스) · PS(계정) · IO 로 묶는다 — 원격 명령 추가 없음.
+ *  · 서비스(sv): `.service` 는 그 이름 · `session-N.scope` 는 '사용자 세션' · 다른 `.scope` 는 그 이름 · 서비스가 없으면 커널 스레드(부모 pid 2 · kthreadd) 또는 '서비스 없음'.
+ *    서비스 지도를 아직 못 받았으면(UNIT 은 30초마다) 서비스 묶음은 null(모름 — 모두 '서비스 없음' 으로 지어내지 않는다).
+ *  · 프로그램 이름(cm): comm 의 숫자 덩어리를 * 로(ora_p001 · ora_p007 → ora_p* — 프로세스 탭 '이름별 묶음' 과 같은 규칙 `appNameOf`).
+ *  · 합: 프로세스 수 · 스레드 · CPU(코어 1개 = 100% · 두 표본에 다 있던 프로세스만) · RSS(MB — 공유 메모리를 여러 번 센다) ·
+ *    디스크 읽기 · 쓰기(MB/s — /proc/<pid>/io 를 읽은 프로세스만 · 다 읽었으면 io 'all' · 일부면 'part' · 못 읽었으면 값 null).
+ *  · 기준마다 CPU 순 상위 `APP_TOP`(20).
+ */
+export const APP_TOP = 20;
+export const APP_KERNEL = '커널 스레드';
+export const APP_SESSION = '사용자 세션';
+export const APP_NOSVC = '서비스 없음';
+export const appNameOf = (c) => String(c || '').replace(/\d+/g, '*').slice(0, 64);
+/** 서비스 기준 열쇠(판정 코어 — query 의 펼침 목록도 이것을 쓴다). unit: 서비스 이름 | null · ppid · pid. */
+export function appServiceKey(unit, ppid, pid) {
+  if (unit) return /^session-[A-Za-z0-9._-]+\.scope$/.test(unit) ? APP_SESSION : unit;
+  if (pid === 2 || ppid === 2) return APP_KERNEL;
+  return APP_NOSVC;
+}
+export function appGroups(curList, rows, { tck, dt, page = 4096, users, units, io, prevIo, usersUp = null, unitsUp = null } = {}) {
+  if (!Array.isArray(curList) || !curList.length || !(tck > 0) || !(dt > 0)) return null;
+  const cpu = new Map(); for (const r of rows || []) cpu.set(r.p.pid, r.cpu);
+  const after = (mapUp, p) => mapUp != null && p.start != null && p.start / tck > mapUp;
+  const haveUnits = units && typeof units.size === 'number' && units.size > 0;
+  const acc = { sv: new Map(), cm: new Map() };
+  for (const p of curList) {
+    const unit = haveUnits && !after(unitsUp, p) ? (units.get(p.pid) || null) : null;
+    const user = after(usersUp, p) ? null : (users?.get?.(p.pid) || null);
+    const i1 = io?.get?.(p.pid); const i0 = prevIo?.get?.(p.pid);
+    const rd = i1 && i0 ? delta(i0.r, i1.r) : null; const wr = i1 && i0 ? delta(i0.w, i1.w) : null;
+    const keys = [['cm', appNameOf(p.comm)]];
+    if (haveUnits) keys.push(['sv', appServiceKey(unit, p.ppid, p.pid)]);
+    for (const [mode, k] of keys) {
+      let g = acc[mode].get(k);
+      if (!g) { g = { k, n: 0, th: 0, cpu: 0, rss: 0, rb: 0, wb: 0, ion: 0, users: new Map() }; acc[mode].set(k, g); }
+      g.n += 1; g.th += p.thr ?? 0; g.cpu += cpu.get(p.pid) ?? 0; g.rss += p.rss ?? 0;
+      if (rd != null && wr != null) { g.rb += rd; g.wb += wr; g.ion += 1; }
+      if (user) g.users.set(user, (g.users.get(user) || 0) + 1);
+    }
+  }
+  const fin = (m) => [...m.values()].sort((a, b) => b.cpu - a.cpu || b.rss - a.rss || a.k.localeCompare(b.k)).slice(0, APP_TOP).map((g) => {
+    const top = [...g.users.entries()].sort((a, b) => b[1] - a[1])[0];
+    const row = { k: g.k, n: g.n, th: g.th, cpu: r1(g.cpu), rss: r1((g.rss * page) / 1048576),
+      rb: g.ion ? r2(g.rb / dt / 1048576) : null, wb: g.ion ? r2(g.wb / dt / 1048576) : null, io: g.ion === 0 ? 'none' : g.ion === g.n ? 'all' : 'part',
+      u: top ? top[0] : null, un: g.users.size };
+    if (row.rb == null) { delete row.rb; delete row.wb; }
+    if (!row.u) delete row.u;
+    return row;
+  });
+  return { sv: haveUnits ? fin(acc.sv) : null, cm: fin(acc.cm) };
 }
 
 /** 개요 카드 요약(서버 1대 · 표본 1개) — 화면 · 비교 · 정렬이 같은 값을 쓴다. */
