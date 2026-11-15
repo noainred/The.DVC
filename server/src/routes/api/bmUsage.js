@@ -26,9 +26,9 @@ import { fullReadWriteScopeOnlyWith, requireSettingsOwner } from '../admin/share
 import { knownAgentNames } from '../../central/knownAgents.js';
 import { unassignedCauses, CAUSE as UNASSIGNED_CAUSE } from '../../bmusage/attribution.js';
 import { TIER_LABEL } from '../../bmusage/license.js';
-import { publicTarget, maskTargetAddress, maskBmIdentity, NO_PATH_REASON } from '../../bmusage/targets.js';
+import { publicTarget, publicSkipped, maskTargetAddress, maskBmIdentity, NO_PATH_REASON } from '../../bmusage/targets.js';
 import { maskActivityEvents, maskPollerStatus, scrubHosts, addressMatcher, isAdminReq, scrubberFor, maskedIdToken, MASK_TOKEN_PREFIX } from '../../auth/addressMask.js';
-import { targetIdOf } from '../../bmusage/maint/judge.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 정비 창 판정과 같은 식별 함수
+import { nodePairIdOf } from '../../bmusage/maint/judge.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 정비 창 판정과 같은 식별 함수(targetIdOf · 귀속 없음은 노드까지 — 4회차 D3 로 하나로)
 import { currentTargets, pollBmUsageOnce, bmUsageStatus, authStopsFor, sourceErrorsView, usageDetailFor } from '../../bmusage/poller.js';
 import { isDemoGuest } from '../../auth/demoGuest.js'; // v2.720(감사 R1-03)
 import { bmGates, writableVc } from './bmWriteGate.js'; // 점검 반복 2회차 E1 · E2 — 쓰기 버튼 표지
@@ -448,7 +448,7 @@ async function resolvePerfTarget(req, D, { allowed, isAdmin, key, vcenterId = ''
     if (unPick != null) return !v && ag === unPick;
     return !vc || v === vc;
   };
-  const pairIdOf = (x, ag) => (t(x?.vcenterId) ? targetIdOf(x) : `|${t(x?.key)}@${ag}`);
+  const pairIdOf = nodePairIdOf;   // 4회차 D3: 로그 공통 원인 후보와 같은 하나(maint/judge.js)
   const byId = new Map();
   const tg = await D.currentTargets();
   const agent = config.agent?.name || '';
@@ -983,7 +983,7 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
     const match = addressMatcher(hosts);
     const targets0 = applyScope(tg.targets.map(publicTarget), allowed);
     const targets = isAdmin ? targets0 : targets0.map((x) => maskTargetAddress(x, hosts, match));
-    const skipped0 = applyScope(tg.skipped, allowed);
+    const skipped0 = applyScope(tg.skipped, allowed).map(publicSkipped);   // 4회차 D2: 누락 점검 전용 칸(osRegId)은 싣지 않는다
     const skipped = isAdmin ? skipped0 : maskBmList(skipped0, match);
     /*
      * ⚠ **사유별 개수도 scope 를 타야 한다**(v2.550 자체 재검토에서 잡은 결함): 예전에는

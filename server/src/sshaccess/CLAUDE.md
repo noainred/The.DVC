@@ -4,7 +4,7 @@
 회귀: `server/test/sshAccess390.test.js`(실제 라우터 · 키 저장소 암호화 · 가짜 sshd — ⑫~⑯ 은 5축 점검 확정 결함) · 웹 `web/src/views/sshAccessText.test.js`.
 
 - **새 저장소가 아니다**: 키 · 법인 공통 계정 = 7b `bmusage/onboard/keyStore.js`(ssh-keys.json), 서버 = `bmstor/registry.js`(bm-storage.json). 이 폴더는 그 위의 폴더 · 고르기 · 점검 · 상태만 둔다.
-  같은 판정을 두 벌 두지 말 것 — 키를 이 서버 · 이 기능에 써도 되는가는 `refs.keyPlacementIssue` 하나, 폴더를 바꾸면 쓰던 곳이 밖이 되는가는 `refs.placementConflicts` 하나(폴더 변경 · 키 회전).
+  같은 판정을 두 벌 두지 말 것 — 키를 이 서버 · 이 기능에 써도 되는가는 `refs.keyPlacementIssue` 하나(정의는 순수 모듈 `bmusage/onboard/placement.js` — refs 가 다시 내보낸다 · 온보딩 분석 · bm-storage 저장 · 회전이 쓰기 때도 같은 함수 — 4회차 D1), 폴더를 바꾸면 쓰던 곳이 밖이 되는가는 `refs.placementConflicts` 하나(폴더 변경 · 키 회전).
 - **접속 자격 해석 순서**(`refs.resolveOsAuth(server, { feature })`): 키 원문 → **법인 사용 중지**(서버 · 공통 계정 · 키 폴더 법인 + 중지 때 적은 서버 id · 접속처) → **폴더** → **허용 기능** → **첫 사용 원문 ↔ 지문 대조**.
   호출부는 기능 id 를 밝힌다(`bm-usage` · `bm-storage` · `disk-audit` — 빈 값은 목록이 있는 키를 못 쓴다). `conn-test` 만 기능과 무관(사용 중지 · 폴더는 넘지 못한다). 폴더 · 기능이 없는 예전 키는 그대로 쓰인다(키 점검이 경고).
   공통 계정의 기본 키는 서버별 폴더 키 · 다른 법인 폴더 키일 수 없다(`keyStore.saveAccount`).

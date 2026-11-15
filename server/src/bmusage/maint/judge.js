@@ -33,6 +33,11 @@ const t = (v) => String(v ?? '').trim();
 /** 대상이 창의 대상인가(순수). tagsOf(target) → ['role:web','app:gpdb', …] — 중앙은 수동 태그로, 엣지는 [](배포본 keys 로 맞춘다). */
 /** 대상 식별(순수) — 서버는 (법인, 키) 쌍. 같은 키 · 다른 법인은 다른 서버다(반증 F1). */
 export const targetIdOf = (x) => `${t(x?.vcenterId)}|${t(x?.key)}`;
+/**
+ * 노드를 가로지르는 목록(이 노드 + 엣지 보관분)의 서버 식별(순수) — 법인이 있으면 (법인, 키) 쌍, 귀속 없음(법인 '')은 **노드까지** 가른다(`|키@노드`).
+ *   상세 · 로그 · 비교의 대상 해석(routes/api/bmUsage.js resolvePerfTarget)과 로그 공통 원인 후보(logs/view.js)가 같은 하나를 쓴다(4회차 점검 D3).
+ */
+export const nodePairIdOf = (x, agent = '') => (t(x?.vcenterId) ? targetIdOf(x) : `|${t(x?.key)}@${t(agent)}`);
 
 export function matchTarget(w, target, { tagsOf = null } = {}) {
   const tg = w?.target;

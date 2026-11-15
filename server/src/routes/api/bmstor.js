@@ -86,7 +86,22 @@ export async function bmBindCheck(body = {}) {
     else { const a = KS.accountById(v); if (!a) return { error: '공통 계정이 없습니다.', code: 'account-missing' }; if (a.kind !== 'os') return { error: 'OS 공통 계정만 고를 수 있습니다.', code: 'account-kind' }; }
   }
   // 7b r3(R-N1): 묶음 판정은 등록부 choke point 와 **같은 함수 · 같은 입력**(bindRule.bindOfWrite) — 두 벌을 두지 않는다.
-  return { binds: bindOfWrite(ex, body).binds };
+  const bind = bindOfWrite(ex, body);
+  /*
+   * 4회차 점검 D1: 저장 뒤 효력 키(bind.key · bind.cred = 등록부가 저장할 참조)가 이 서버의 폴더(법인 · 서버) 밖이면 **쓰기 전에 거절**한다 —
+   *   저장하면 수집이 매 주기 key-folder 로 접속하지 않는다(B-4). 판정은 placement.keyWriteIssue(= keyPlacementIssue · 온보딩 분석 · 회전과 같은 함수).
+   *   법인 · 이름은 등록부 저장 규칙 그대로(applyServerInput: vcenterId 는 주면 그 값 · 안 주면 기존 · name 은 빈 값이면 주소). 키 · 법인 · 이름이 그대로면 판정하지 않는다.
+   *   허용 기능 제한은 여기서 막지 않는다(이 화면은 스토리지 전용 키를 일부러 고를 수 있다 — 수집 건강 · 서버 상세가 key-feature 를 말한다).
+   */
+  const PL = await import('../../bmusage/onboard/placement.js');
+  const { entryTokens } = await import('../../bmusage/onboard/bindRule.js');
+  const look = { keyById: KS.keyById, accountById: KS.accountById };
+  const osAuthAfter = body.osAuth !== undefined ? (body.osAuth === 'password' ? 'password' : '') : (ex?.osAuth === 'password' ? 'password' : '');
+  const after = PL.effectiveKeyOf({ key: bind.key, cred: bind.cred, osAuth: osAuthAfter }, look);
+  const before = ex ? { keyId: PL.effectiveKeyOf(entryTokens(ex), look)?.id || '', vcenterId: ex.vcenterId, name: ex.name } : null;
+  const server = { vcenterId: body.vcenterId !== undefined ? String(body.vcenterId || '').trim().slice(0, 128) : String(ex?.vcenterId || ''), name: String(body.name || '').trim() || String(body.host || '').trim() };
+  if (PL.keyWriteIssue(after, server, before).folder) return { error: 'SSH 키(직접 고른 키 또는 공통 계정의 기본 키)가 다른 법인 · 다른 서버의 폴더에 있어 이 서버에는 쓸 수 없습니다 — 이 서버 법인(또는 이 서버)의 폴더에 있는 키를 고르세요(설정 › 보안 › SSH 공용 접속).', code: 'key-folder', status: 409 };
+  return { binds: bind.binds };
 }
 
 export function registerBmStorage(api) {

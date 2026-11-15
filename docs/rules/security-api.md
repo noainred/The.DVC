@@ -545,6 +545,9 @@
      (중앙 적용이 묶음 행에만 싣고, 묶음 칸 — 주소 · 이름 — 이 그대로인 갱신만 앞 승인을 잇는다). 엣지 쪽 기존 항목을 중앙이 모르므로 '잇는'(os_cred 빈칸 + os_key) 배포 행은
      늘 묶음으로 본다 · 다른 엣지로 옮기는 행은 그 엣지에겐 새 묶음. 회귀 `bmOnboard7bReview` ⑩(h18 — 비소유자 · 범위 관리자 · 가짜 sshd 수신 0) ⑪(h20 — choke point ·
      일괄 · 온보딩 · 엣지) ⑫(스윕) · 변이 R1~R10. 키 회전(`replaceBmServerKeyRefs` — 같은 주소의 키 교체, 소유자 + OTP 라우트)은 choke point 를 지나지 않는다(주소 불변).
+     (베어메탈 사용률 점검 4회차 D1) **키 배치 판정도 쓰기 때 같은 하나**: 키 폴더(법인 · 서버) 밖 키를 서버에 묶는 쓰기는 거부한다 — 온보딩 분석(중앙 · 엣지 적용 공통 — 행 `key-folder`) ·
+     `bmBindCheck`(409 — 소유자 · OTP 게이트 **전**이라 OTP 를 소모하지 않는다) · 회전(B-4 `placementConflicts`). 판정은 `onboard/placement.js keyPlacementIssue`(refs 가 다시 내보낸다 — 접속 때 resolveOsAuth 와 같은 함수) ·
+     효력 키는 적용 본문 그대로의 참조(`bindOfWrite` cred · key → 공통 계정 기본 키 · 비밀번호 고정이면 없음). 허용 기능 제한은 경고만(분석 행 · 회전 결과 — 메인 결정). 거부 문구에 키 폴더 값 · 키 이름을 싣지 않는다.
 
 - ⚠⚠ **리눅스 성능 8a단계 정비 창 · 용량 예측 API — 억제를 늘리는 쓰기는 등급 게이트, 줄이는 쓰기는 쓰기 범위, 판정은 서버 하나**
   (`routes/api/bmMaint.js` · `routes/api/bmCapacity.js` · `routes/central.js GET /bm-maint` · 회귀 `bmMaint8aRoute` · `bmMaint8aEdge` · `bmCapacity8aRoute`):
