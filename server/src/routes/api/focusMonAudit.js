@@ -15,7 +15,7 @@
  */
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
-import { requireRole } from '../../auth/auth.js';
+import { requireRole, requirePerm } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
 import { fullScopeOnlyWith, fullReadWriteScopeOnlyWith } from '../admin/shared.js';
 import { isDemoGuest } from '../../auth/demoGuest.js';
@@ -152,7 +152,7 @@ api.get('/tools/focus-mon/audit/run/:runId', adminOnly, fullScopeOnly, async (re
 });
 
 /** 보고서 원문 내려받기(.txt) — 대상 서버의 실행 출력 그대로(구획 예산으로 줄인 것이면 생략 줄이 들어 있다). */
-api.get('/tools/focus-mon/audit/run/:runId/report.txt', adminOnly, fullScopeOnly, async (req, res) => {
+api.get('/tools/focus-mon/audit/run/:runId/report.txt', adminOnly, fullScopeOnly, requirePerm('data.csv'), async (req, res) => { // 파일 내보내기 — 데이터 내보내기 권한(superAdmin2643 스윕)
   if (registryUnreadable(res)) return;
   const row = await db.readAudit(String(req.params.runId).slice(0, 40));
   const t = row ? visibleTargets(req).find((x) => x.id === row.target) : null;

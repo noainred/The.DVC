@@ -490,7 +490,11 @@ test('⑨ 반증 F1 · F2 · F5 — 출력 보관 상한 · 표지 위조 · 보
   assert.equal(dm[0].n, 0); assert.equal(dm[0].unknown, 2); assert.equal(dm[0].rate, null, '모르는 디스크는 비율 분모에서 빠진다(0% 가 아니다)');
   // F9-c — RAID 줄 해석은 되돌아가기 없이(공백 긴 줄 8,000개)
   const raid = ['Drive /c0/e32/s1 :', ...Array.from({ length: 8000 }, () => `SN = ${' '.repeat(270)}${'Z'.repeat(126)}`)];
-  const t0 = Date.now(); P.parseDisks([], raid); assert.ok(Date.now() - t0 < 150, `${Date.now() - t0}ms(예전 546ms)`);
+  // 비율로(절대 시간 단언 금지 규약 TESTDOC2613-02) — 같은 줄 수 · 길이의 평범한 줄과 견준다(예전 정규식은 546ms 대 수 ms)
+  const plain = ['Drive /c0/e32/s1 :', ...Array.from({ length: 8000 }, () => `SN = ${'Z'.repeat(396)}`)];
+  const tm = (l) => { const a = performance.now(); P.parseDisks([], l); return performance.now() - a; };
+  tm(plain); const tPlain = Math.max(2, tm(plain)); const tBad = tm(raid);
+  assert.ok(tBad / tPlain < 8, `되돌아가기 줄 ${tBad.toFixed(1)}ms · 평범한 줄 ${tPlain.toFixed(1)}ms`);
   // F9-g — 원격 이름을 열쇠로 쓰는 표는 프로토타입 없는 객체
   const pr = P.parseReady(['##DR 1', '##DR file __proto__ x 0:0:644', '##DR end']);
   assert.equal(Object.getPrototypeOf(pr.files), null); assert.equal(({}).sha, undefined, '프로토타입 오염 없음');
