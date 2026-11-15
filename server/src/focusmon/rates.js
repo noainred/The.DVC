@@ -195,13 +195,57 @@ export function computeSample(prev, cur, ctx = {}) {
   const phys = dsk.filter((d) => d.k === 'disk');
   const total = phys.length ? aggregateIostat(phys) : null;
 
+  // v3.12.0(⑬ 더할 지표): 초당 값 = 누적 차이 ÷ dt(카운터가 줄면 — 재부팅 · 넘침 — null) · 지금 값은 그대로 · 못 읽은 칸은 null(0 아님)
+  const ps = (a, b) => { const x = okDt ? delta(a, b) : null; return x == null ? null : r2(x / dt); };
+  const st0 = prev?.stat || {}; const st1 = cur?.stat || {};
+  const sched = st1.ctxt != null || st1.forks != null || st1.intr != null ? { cs: ps(st0.ctxt, st1.ctxt), in: ps(st0.intr, st1.intr), fk: ps(st0.forks, st1.forks) } : null;
+  const v0 = prev?.vm; const v1 = cur?.vm;
+  const vmp = v1 ? { si: ps(v0?.swpin, v1.swpin), so: ps(v0?.swpout, v1.swpout), mf: ps(v0?.majflt, v1.majflt), sc: ps(v0?.scan, v1.scan), sl: ps(v0?.steal, v1.steal) } : null;
+  const n0 = prev?.snmp; const n1 = cur?.snmp; const k1 = cur?.sock;
+  let tcp = null;
+  if (n1 || k1) {
+    const dOut = okDt ? delta(n0?.outSegs, n1?.outSegs) : null; const dRt = okDt ? delta(n0?.retrans, n1?.retrans) : null;
+    // 재전송률 = 구간 안 재전송 ÷ 보낸 세그먼트 — 보낸 것이 없으면 비율이 없다(null)
+    tcp = { rt: dOut != null && dRt != null && dOut > 0 ? r2(Math.min(100, (100 * dRt) / dOut)) : null, lo: ps(n0?.lof, n1?.lof), ld: ps(n0?.ldrop, n1?.ldrop), es: n1?.estab ?? null, tw: k1?.tw ?? null, iu: k1?.inuse ?? null };
+  }
+
   return {
     dt: okDt ? dt : null,
     cpu: cpuAll ? { ...cpuAll, cores } : null,
     load: cur?.load?.load || null, run: cur?.stat?.running ?? null, blk: cur?.stat?.blocked ?? null, thr: cur?.load?.threads ?? null,
     mem, net, dsk, dtot: total, nPhys: phys.length,
+    // v3.12.0: 프로세스 상태(D · 좀비 — 프로세스 구획은 5초마다라 수집기가 마지막 값을 넘긴다) · 파일시스템(60초마다 — 마지막 확인을 넘긴다 · at 이 그 시각)
+    sched, vmp, tcp, ...(ctx.pst ? { pst: ctx.pst } : {}), ...(ctx.fs ? { fs: ctx.fs } : {}),
     ...(cur?.truncated?.length ? { truncated: cur.truncated } : {}),
   };
+}
+
+/** 이어진 D 상태 목록 상한(화면 '지금 D 상태 프로세스'). */
+export const D_LIST_MAX = 8;
+/**
+ * 프로세스 구획 → D(디스크 대기에서 멈춤) · 좀비 수 + 지금 D 인 프로세스(이어진 시간). dSince 는 수집기가 들고 있는 (pid:시작 tick → 처음 본 uptime) 지도 —
+ * 이번에 D 가 아니면 지운다. 상태 칸이 없는 옛 줄(6칸)뿐이면 null(모름 — 0 이 아니다).
+ */
+export function procStates(list, up, dSince) {
+  if (!Array.isArray(list) || !list.some((p) => p.state != null)) return null;
+  let D = 0; let Z = 0; const seen = new Set(); const pd = [];
+  for (const p of list) {
+    if (p.state === 'Z') Z += 1;
+    if (p.state !== 'D') continue;
+    D += 1;
+    const k = `${p.pid}:${p.start}`; seen.add(k);
+    if (!dSince.has(k)) dSince.set(k, up);
+    pd.push({ pid: p.pid, c: p.comm, s: up != null && dSince.get(k) != null ? Math.max(0, Math.round(up - dSince.get(k))) : null });
+  }
+  for (const k of [...dSince.keys()]) if (!seen.has(k)) dSince.delete(k);
+  pd.sort((a, b) => (b.s ?? -1) - (a.s ?? -1));
+  return { D, Z, pd: pd.slice(0, D_LIST_MAX) };
+}
+/** 파일시스템 가장 높은 사용률(%) — 응답 없음이거나 줄이 없으면 null. */
+export function fsMaxOf(fs) {
+  if (!fs || !Array.isArray(fs.rows) || !fs.rows.length) return null;
+  let mx = null; for (const r of fs.rows) if (r.pct != null && (mx == null || r.pct > mx)) mx = r.pct;
+  return mx;
 }
 
 /**
@@ -290,6 +334,10 @@ export function summaryOf(s) {
     iow: s.cpu?.iow ?? null, stl: s.cpu?.stl ?? null,
     load1: Array.isArray(s.load) ? (s.load[0] ?? null) : null, cores: Array.isArray(s.cpu?.cores) && s.cpu.cores.length ? s.cpu.cores.length : null,
     swU: s.mem?.swU ?? null, swT: s.mem?.swT ?? null,
+    // v3.12.0(⑬ ⑤ '비교 · 카드 줄에도'): 파일시스템 최대 % · TCP 재전송 % · D 상태 수 · 실행 대기/코어 · 스왑 입출력(페이지/s 합)
+    fsMax: fsMaxOf(s.fs), tcpRt: s.tcp?.rt ?? null, procD: s.pst?.D ?? null,
+    rq: s.run != null && Array.isArray(s.cpu?.cores) && s.cpu.cores.length ? r2(s.run / s.cpu.cores.length) : null,
+    swIo: s.vmp && s.vmp.si != null && s.vmp.so != null ? r2(s.vmp.si + s.vmp.so) : null,
     stuck: (s.dsk || []).some((d) => d.stuck && d.k === 'disk'),
   };
 }

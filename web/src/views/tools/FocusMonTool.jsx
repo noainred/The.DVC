@@ -23,6 +23,7 @@ import {
   procDescOf, PROC_STATE_TEXT, procKey, procCoverText, procIoNote, procWaitNote, procThreadNote, PROC_NET_NOTE, PROC_ARGS_NOTE, mbsText, mbText,
   GROUP_NONE, groupLabel, groupSections, groupChips, filterByGroup, groupChipOn, groupSummary, groupStartPlan, groupStartText, groupSuggestions, suggestionText,
   CARD_LINE_ITEMS, CARD_LINE_MAX, normCardLine, toggleCardLine, cardLineCells,
+  fsLevel, fillText, kbText, fsHeadText, EXT_CARDS, extNow, extTone, extSub, reclaimText,
 } from './focusMonText.js';
 import { niceMax, yScale, yTicks, linePath, areaPath, stackedAreas, spreadLabels, heatColor, cellShade, seriesMax, indexAtFrac, valueAtFrac, timeAtIndex, xAtIndex, tipRows } from './focusMonChart.js';
 import { Seg, Badge, copyText, CsvPanel, NodeCard, InstallCard } from './FocusMonBulk.jsx';
@@ -326,7 +327,7 @@ function Compare({ main, ids, tb, now, onOpen }) {
   const [hf, setHf] = useState(null);
   const pinTouched = useRef(false);
   const [log, setLog] = useState(false);
-  const scopeParam = metric === 'disk' ? (scope === 'all' ? 'all' : scope === 'mount' ? `mount:${scopeText}` : `dev:${scopeText}`) : metric === 'net' ? (scope === 'if' && scopeText ? `if:${scopeText}` : 'top') : 'all';
+  const scopeParam = metric === 'disk' ? (scope === 'all' ? 'all' : scope === 'mount' ? `mount:${scopeText}` : `dev:${scopeText}`) : metric === 'net' ? (scope === 'if' && scopeText ? `if:${scopeText}` : 'top') : metric === 'fs' ? (scope === 'mount' && scopeText ? `mount:${scopeText}` : 'all') : 'all';
   const params = useMemo(() => ({ view: 'compare', targets: ids.join(','), win: tb.win, end: tb.end ?? '', metric, item: it, scope: scopeParam }), [ids, tb.win, tb.end, metric, it, scopeParam]);
   const q = usePoll('/tools/focus-mon/data', params, tb.end == null ? 2_000 : 0, ids.length > 0);
   const tById = useMemo(() => new Map(main.targets.map((t) => [t.id, t])), [main.targets]);
@@ -364,11 +365,11 @@ function Compare({ main, ids, tb, now, onOpen }) {
             {mdef.items.map(([k, t]) => <button key={k} type="button" className={it === k ? 'on' : ''} onClick={() => { setItem(k); lsSet('fm.cmp.item', k); }}>{itemLabel(k, t)}{metric === 'disk' ? <span className="fm-io">{({ rrqm: 'rrqm/s', wrqm: 'wrqm/s', r: 'r/s', w: 'w/s', rMB: 'rMB/s', wMB: 'wMB/s', rqsz: 'avgrq-sz', qu: 'avgqu-sz', await: 'await', rAwait: 'r_await', wAwait: 'w_await', svctm: 'svctm', util: '%util' })[k]}</span> : null}</button>)}
           </div>
         </div>
-        {metric === 'disk' || metric === 'net' ? (
+        {metric === 'disk' || metric === 'net' || metric === 'fs' ? (
           <div className="fm-row"><span className="fm-lbl">범위</span>
-            <Seg label="범위" value={scope} onChange={setScope} options={metric === 'disk' ? [['all', '전체 디스크'], ['mount', '같은 마운트 지점'], ['dev', '장치 지정']] : [['all', '대표(본딩 · 물리)'], ['if', '인터페이스 지정']]} />
+            <Seg label="범위" value={scope} onChange={setScope} options={metric === 'disk' ? [['all', '전체 디스크'], ['mount', '같은 마운트 지점'], ['dev', '장치 지정']] : metric === 'fs' ? [['all', '가장 높은 마운트'], ['mount', '마운트 지정']] : [['all', '대표(본딩 · 물리)'], ['if', '인터페이스 지정']]} />
             {scope !== 'all' ? <input className="fm-input" value={scopeText} onChange={(e) => setScopeText(e.target.value.slice(0, 200))} placeholder={scope === 'mount' ? '/oradata' : scope === 'dev' ? 'sdb' : 'bond0'} aria-label="범위 값" /> : null}
-            <span className="fm-dim">{metric === 'disk' ? '전체 디스크 = 서버마다 물리 디스크의 요청 수로 가중한 평균(사용률은 최고값)' : '대표 = 본딩(없으면 본딩에 묶이지 않은 물리) 수신 · 송신 합'}</span>
+            <span className="fm-dim">{metric === 'disk' ? '전체 디스크 = 서버마다 물리 디스크의 요청 수로 가중한 평균(사용률은 최고값)' : metric === 'fs' ? '가장 높은 마운트 = 서버마다 로컬 파일시스템 중 가장 높은 사용률(inode 는 마운트를 지정하세요) · 60초마다 확인' : '대표 = 본딩(없으면 본딩에 묶이지 않은 물리) 수신 · 송신 합'}</span>
           </div>
         ) : null}
         <div className="fm-row"><span className="fm-lbl">고정</span>
@@ -713,6 +714,7 @@ function ServerDetail({ main, id, tb, now, onBack }) {
             ) : null}
             <div className="fm-note fm-pad">열 이름과 계산식은 iostat -x -m 과 같습니다(같은 /proc/diskstats 누적값의 차이). 요약 열은 13개 가운데 8개이고 ‘iostat 전체 열’ 을 누르면 병합 · 요청 크기 · 합친 지연 · 서비스 시간이 나옵니다. ‘전체 디스크’ 는 물리 디스크만 더합니다(파티션 · LVM 은 같은 입출력을 다시 보는 것). ‘{tb.win}분 평균’ 은 시간 띠에서 고른 구간({tb.windows.join(' · ')}분 중 하나)을 다시 계산한 값입니다 — 표본마다 덮는 시간으로 가중해 횟수 · 처리량 · 대기열 · 사용률은 시간 평균, 지연은 요청 수(초당 횟수 × 시간)로 가중합니다(끝난 요청이 없으면 ‘—’).</div>
           </div>
+          <ExtCards d={d} settings={settings} now={now} cores={hello?.ncpu || tab?.cpu?.cores?.length || null} atText={atText} tb={tb} />
           <div className="fm-card fm-flush">
             <div className="fm-row fm-between fm-pad"><h3 className="fm-h3">CPU 를 많이 쓰는 프로세스 — 상위 5 <span className="fm-dim fm-at">· {atText}</span></h3><a href={`#/${BASE.join('/')}/procs`}>상위 30개 전부 보기</a></div>
             <div className="fm-tblbox">
@@ -740,6 +742,78 @@ function ServerDetail({ main, id, tb, now, onBack }) {
           </div>
         </>
       )}
+    </>
+  );
+}
+
+/* ── 더할 지표(v3.12.0 ⑬ — 시안 Metrics · 사용자 '기본값대로 모두 구현해줘') ─────────────────────────────── */
+/** 작은 칸 하나 — 이름 · 지금 값 · 추이 · 아래 줄(최고 — 시각). */
+function ExtTile({ k, label, unit, fmt, d, cores, tb }) {
+  const v = extNow(d.table, k);
+  const e = d.charts?.ext?.[k];
+  const tone = extTone(k, v);
+  return (
+    <div className="fm-xk">
+      <span className="l">{label}</span>
+      <span><span className={`v fm-num ${tone ? `fm-t-${tone}` : ''}`}>{fmt(v)}</span>{v != null && unit ? <span className="u">{unit}</span> : null}{k === 'l.run' && cores && v != null ? <span className="u"> / {cores}코어</span> : null}</span>
+      <Spark vals={e?.vals} color={tone === 'warn' ? '#f59e0b' : RX_COLOR} max={niceMax(seriesMax([e?.vals]) ?? 1)} area={false} h={26} hover={{ from: d.from, to: d.to, label, fmt }} />
+      <span className="l">{extSub(k, d.charts?.ext, { cores, clock: (t) => clockText(t) })}</span>
+    </div>
+  );
+}
+function ExtCards({ d, settings, now, cores, atText, tb }) {
+  const fs = d.fs;
+  const rows = (fs?.rows || []).slice().sort((a, b) => (a.m === '/' ? -1 : b.m === '/' ? 1 : a.m.localeCompare(b.m)));
+  const pd = d.table?.pst?.pd || [];
+  const hasExt = !!(d.table?.tcp || d.table?.sched || d.table?.vmp || d.table?.pst);
+  return (
+    <>
+      <div className="fm-card fm-flush">
+        <div className="fm-row fm-between fm-pad"><h3 className="fm-h3">파일시스템 — 사용률 · inode</h3><span className={fs?.rc === 137 ? 'fm-badge crit' : 'fm-dim'}>{fsHeadText(fs, now)}</span></div>
+        {rows.length ? (
+          <STable className="fm-table" minWidth={900}>
+            <thead><tr><th>마운트</th><th>종류</th><th>장치</th><th className="fm-r">크기</th><th>사용률</th><th className="fm-r">inode</th><th>가득 찰 때까지</th></tr></thead>
+            <tbody>{rows.map((r) => {
+              const lv = fsLevel(r.pct, settings); const il = fsLevel(r.ipct, settings); const f = fillText(d.fill, r.m);
+              return (
+                <tr key={r.m}>
+                  <td className="fm-mono" style={{ fontWeight: 600 }}>{r.m}</td>
+                  <td className="fm-dim">{r.t}</td>
+                  <td className="fm-mono fm-dim fm-ell" title={r.d}>{r.d}</td>
+                  <td className="fm-r fm-num" data-sort={r.kb ?? null}>{kbText(r.kb)}</td>
+                  <td data-sort={r.pct ?? null}><span className="fm-meter"><span className="t"><span className={`f ${lv === 'ok' ? '' : lv || ''}`} style={{ width: `${Math.min(100, r.pct ?? 0)}%` }} /></span><span className="fm-num">{pctText(r.pct, 1)}</span></span></td>
+                  <td className={`fm-r fm-num ${il === 'crit' ? 'fm-t-crit' : il === 'warn' ? 'fm-t-warn' : ''}`} data-sort={r.ipct ?? null}>{r.ipct == null ? (r.t === 'xfs' ? `${DASH} (xfs)` : DASH) : pctText(r.ipct, 0)}</td>
+                  <td data-sort={d.fill?.rows?.[r.m]?.days ?? null}><span className={f.tone === 'off' ? 'fm-dim' : `fm-badge ${f.tone}`} title={f.title || undefined}>{f.text}</span></td>
+                </tr>
+              );
+            })}</tbody>
+          </STable>
+        ) : <div className="fm-pad fm-dim">{fs?.rc === 137 ? '시한 안에 df 가 끝나지 않아 이번 확인에는 값이 없습니다.' : '로컬 파일시스템 값을 아직 받지 못했습니다 — 이 서버의 수집이 이 판(3.12.0) 이전이거나 df 를 읽지 못했습니다.'}</div>}
+        <div className="fm-note fm-pad">사용률은 일반 계정 기준 df 값입니다(root 예약분은 ‘쓸 수 있는 양’ 에서 빠집니다). xfs 의 inode 는 필요할 때 늘어나 비율이 큰 뜻이 없어 ‘—’ 로 둡니다. ‘가득 찰 때까지’ 는 계속 수집 서버에서 지난 하루 추세로 낸 추정이고, 기록이 6시간보다 짧으면 ‘—’ 입니다. 판정 문턱은 주의 {settings?.warnPct ?? 80}% · 위험 {settings?.critPct ?? 90}%(설정의 사용률 문턱)입니다. 이 표는 구간 안 마지막 확인 값입니다.</div>
+      </div>
+      {hasExt ? (
+        <div className="fm-three">
+          <div className="fm-card">
+            <div className="fm-row fm-between"><h3 className="fm-h3">TCP · 소켓 <span className="fm-dim fm-at">· {atText}</span></h3></div>
+            <div className="fm-xkp">{EXT_CARDS.tcp.map(([k, l, u, f]) => <ExtTile key={k} k={k} label={l} unit={u} fmt={f} d={d} cores={cores} tb={tb} />)}</div>
+            <span className="fm-note">재전송률 = 재전송 세그먼트 ÷ 보낸 세그먼트(표본 사이 차이). 리슨 큐 넘침은 accept 가 밀려 연결을 버린 횟수입니다 — 0 이 아니면 앱이 연결을 제때 받지 못하고 있다는 뜻입니다. 값은 서버 전체(네트워크 네임스페이스 하나)이며 컨테이너 안 소켓은 보이지 않습니다.</span>
+          </div>
+          <div className="fm-card">
+            <div className="fm-row fm-between"><h3 className="fm-h3">CPU 스케줄링 · 프로세스 상태 <span className="fm-dim fm-at">· {atText}</span></h3></div>
+            <div className="fm-xkp">{EXT_CARDS.sched.map(([k, l, u, f]) => <ExtTile key={k} k={k} label={l} unit={u} fmt={f} d={d} cores={cores} tb={tb} />)}</div>
+            {pd.length ? (
+              <div className="fm-dl"><span className="fm-dim">지금 D 상태(디스크 대기에서 멈춘) 프로세스</span><span className="fm-dim">이어진 시간</span>
+                {pd.map((x) => <React.Fragment key={x.pid}><span className="fm-mono">{x.c} <span className="fm-dim">(pid {x.pid})</span></span><span className="fm-num">{x.s == null ? DASH : `${x.s}초째`}</span></React.Fragment>)}</div>
+            ) : null}
+            <span className="fm-note">좀비 · D 상태는 이미 받는 프로세스 줄에서 셉니다(프로세스 표본 주기마다). 실행 대기가 코어 수를 오래 넘으면 CPU 가 모자란 것이고, D 상태가 이어지면 디스크 · NFS 를 봐야 합니다.</span>
+          </div>
+          <div className="fm-card">
+            <div className="fm-row fm-between"><h3 className="fm-h3">메모리 압박 <span className="fm-dim fm-at">· {atText}</span></h3></div>
+            <div className="fm-xkp">{EXT_CARDS.vmp.map(([k, l, u, f]) => <ExtTile key={k} k={k} label={l} unit={u} fmt={f} d={d} cores={cores} tb={tb} />)}</div>
+            <span className="fm-note">RHEL 7 에는 압박 지표(PSI)가 없어 스왑 입출력 · major fault · 페이지 회수로 대신합니다. 스왑 사용량(지금 있는 값)보다 스왑 입출력이 실제로 느려지는 원인입니다. 페이지 회수 성공 비율 {reclaimText(d.table?.vmp)}.</span>
+          </div>
+        </div>
+      ) : <div className="fm-card fm-dim">TCP · 스케줄링 · 메모리 압박 값이 이 구간에 없습니다 — 이 서버의 수집이 이 판(3.12.0) 이전에 시작됐거나 값을 읽지 못했습니다.</div>}
     </>
   );
 }

@@ -11,12 +11,13 @@
  *  · 정규식은 전부 앵커가 있고 길이가 한정된 꼴이다(외부 입력 — ReDoS 규약).
  */
 
-export const SECTIONS = Object.freeze(['STAT', 'LOAD', 'MEM', 'NET', 'DISK', 'NETTOPO', 'BLK', 'PS', 'UNIT', 'PROC', 'IO', 'SELF']);
+export const SECTIONS = Object.freeze(['STAT', 'LOAD', 'MEM', 'NET', 'DISK', 'VM', 'SNMP', 'SOCK', 'FS', 'FSI', 'NETTOPO', 'BLK', 'PS', 'UNIT', 'PROC', 'IO', 'SELF']);
 /** v2.983 수집 부하 — 구획 → 세 묶음(기본 지표 · 구성 · 프로세스 · 자기 측정). 원격 스크립트의 ck 위치와 같다(테스트가 대조). */
-export const SECTION_GROUP = Object.freeze({ STAT: 'base', LOAD: 'base', MEM: 'base', NET: 'base', DISK: 'base', NETTOPO: 'topo', BLK: 'topo', PS: 'topo', UNIT: 'topo', PROC: 'proc', IO: 'proc', SELF: 'self' });
+// v3.12.0(⑬): VM · SNMP · SOCK · FS · FSI 는 기본 묶음 — 수집 부하 탭이 그 비용을 기본 지표 몫으로 잰다(따로 묶지 않는다)
+export const SECTION_GROUP = Object.freeze({ STAT: 'base', LOAD: 'base', MEM: 'base', NET: 'base', DISK: 'base', VM: 'base', SNMP: 'base', SOCK: 'base', FS: 'base', FSI: 'base', NETTOPO: 'topo', BLK: 'topo', PS: 'topo', UNIT: 'topo', PROC: 'proc', IO: 'proc', SELF: 'self' });
 const ORDER = Object.freeze(Object.fromEntries(SECTIONS.map((s, i) => [s, i])));
 /** 구획별 줄 수 상한(스크립트의 head -n 과 같거나 조금 크다). */
-export const SECTION_MAX_LINES = Object.freeze({ STAT: 1100, LOAD: 4, MEM: 128, NET: 258, DISK: 1024, NETTOPO: 256, BLK: 512, PS: 20000, PROC: 20000, UNIT: 20000, IO: 20000, SELF: 4 });
+export const SECTION_MAX_LINES = Object.freeze({ STAT: 1104, LOAD: 4, MEM: 128, NET: 258, DISK: 1024, VM: 64, SNMP: 8, SOCK: 8, FS: 258, FSI: 258, NETTOPO: 256, BLK: 512, PS: 20000, PROC: 20000, UNIT: 20000, IO: 20000, SELF: 4 });
 export const LINE_MAX = 4096;
 /** 프레임 하나가 붙잡을 수 있는 글자 수 상한(원래 줄 길이로 센다). 정상 프레임은 프로세스 2만 개여도 약 2MB —
  *  줄 수 상한 합(약 4만 3천 줄) × 줄 길이 상한이면 대상 1대가 수백 MB 를 붙잡을 수 있었다(2026-11-11 반증 4번). 넘으면 그 프레임을 버린다. */
@@ -117,13 +118,16 @@ export function parseHello(lines = []) {
   };
 }
 
-/** ##STAT → 전체 · 코어별 jiffies(앞 8칸: user nice system idle iowait irq softirq steal) + 실행 · 대기 프로세스 수. */
+/** ##STAT → 전체 · 코어별 jiffies(앞 8칸: user nice system idle iowait irq softirq steal) + 실행 · 대기 프로세스 수 + (v3.12.0) ctxt · processes · intr 첫 합계(누적 · 없으면 null). */
 export function parseStat(lines = []) {
-  let all = null; const cores = []; let running = null; let blocked = null;
+  let all = null; const cores = []; let running = null; let blocked = null; let ctxt = null; let forks = null; let intr = null;
   for (const l of lines) {
     const f = words(l);
     if (f[0] === 'procs_running') { running = intOrNull(f[1]); continue; }
     if (f[0] === 'procs_blocked') { blocked = intOrNull(f[1]); continue; }
+    if (f[0] === 'ctxt') { ctxt = intOrNull(f[1]); continue; }
+    if (f[0] === 'processes') { forks = intOrNull(f[1]); continue; }
+    if (f[0] === 'intr') { intr = intOrNull(f[1]); continue; }
     const m = /^cpu(\d{0,4})$/.exec(f[0]);
     if (!m) continue;
     const v = f.slice(1, 9).map(intOrNull);
@@ -131,7 +135,94 @@ export function parseStat(lines = []) {
     while (v.length < 8) v.push(0); // 아주 옛 커널은 steal 이 없다 — 칸이 없는 것은 0(카운터가 없다 = 그 시간 0)
     if (m[1] === '') all = v; else { const i = Number(m[1]); if (i < 1024) cores[i] = v; }
   }
-  return { all, cores: cores.filter(Boolean).length ? cores : [], running, blocked };
+  return { all, cores: cores.filter(Boolean).length ? cores : [], running, blocked, ctxt, forks, intr };
+}
+
+/* ── v3.12.0(⑬ 더할 지표 — 시안 Metrics · 사용자 '기본값대로 모두 구현해줘') ─────────────────────────────── */
+/** pgscan · pgsteal 의 합칠 이름 — 회수 경로별(kswapd · direct · khugepaged · proactive · 옛 커널은 _zone 접미). _anon · _file(5.8+ 내역 — 같은 수를 다시 센다) · direct_throttle(횟수)은 뺀다. */
+const RECLAIM_RE = /^(pgscan|pgsteal)_(kswapd|direct|khugepaged|proactive)(_[a-z0-9]{1,16})?$/;
+/** ##VM(/proc/vmstat 일부) → 누적 페이지 수(스왑 들어옴 · 나감 · major fault · 회수 스캔 · 회수 성공). 칸이 없으면 null(0 아님). */
+export function parseVm(lines = []) {
+  const kv = Object.create(null);
+  for (const l of lines) { const f = words(l); if (f.length === 2 && /^[a-z_0-9]{2,40}$/.test(f[0])) { const v = intOrNull(f[1]); if (v != null) kv[f[0]] = v; } }
+  let scan = null; let steal = null;
+  for (const [k, v] of Object.entries(kv)) {
+    const m = RECLAIM_RE.exec(k);
+    if (!m || k === 'pgscan_direct_throttle') continue;
+    if (m[1] === 'pgscan') scan = (scan ?? 0) + v; else steal = (steal ?? 0) + v;
+  }
+  return { swpin: kv.pswpin ?? null, swpout: kv.pswpout ?? null, majflt: kv.pgmajfault ?? null, scan, steal };
+}
+
+/** ##SNMP(/proc/net/snmp · netstat 의 Tcp · TcpExt 머리 · 값 줄 쌍) → 누적(재전송 · 보낸 세그먼트 · 리슨 큐 넘침 · 버림) + 지금 연결 수. */
+export function parseSnmp(lines = []) {
+  const tab = Object.create(null);
+  let head = null;
+  for (const l of lines) {
+    const f = words(l);
+    if (!/^(Tcp|TcpExt):$/.test(f[0] || '')) { head = null; continue; }
+    if (f.slice(1).every((x) => /^[A-Za-z][A-Za-z0-9]{0,40}$/.test(x))) { head = f; continue; }
+    if (head && head[0] === f[0] && head.length === f.length) {
+      for (let i = 1; i < f.length; i++) { const v = /^-?\d{1,20}$/.test(f[i]) ? Number(f[i]) : null; if (v != null && safeKey(head[i])) tab[`${f[0]}${head[i]}`] = v; }
+    }
+    head = null;
+  }
+  const g = (k) => (Object.hasOwn(tab, k) && tab[k] >= 0 ? tab[k] : null);
+  return { retrans: g('Tcp:RetransSegs'), outSegs: g('Tcp:OutSegs'), estab: g('Tcp:CurrEstab'), lof: g('TcpExt:ListenOverflows'), ldrop: g('TcpExt:ListenDrops') };
+}
+
+/** ##SOCK(/proc/net/sockstat) → TCP 소켓 수(지금 값): 쓰는 중 · TIME_WAIT · 고아. */
+export function parseSock(lines = []) {
+  for (const l of lines) {
+    const f = words(l);
+    if (f[0] !== 'TCP:') continue;
+    const kv = Object.create(null);
+    for (let i = 1; i + 1 < f.length; i += 2) if (/^[a-z]{1,12}$/.test(f[i])) kv[f[i]] = intOrNull(f[i + 1]);
+    return { inuse: kv.inuse ?? null, tw: kv.tw ?? null, orphan: kv.orphan ?? null };
+  }
+  return { inuse: null, tw: null, orphan: null };
+}
+
+/** 마운트 경로 — 원격 값이라 글자 · 길이를 제한한다(시리즈 이름 · 메타 열쇠가 된다). 공백 · 제어 글자 · '..' 가 든 경로는 버린다. */
+const MNT_RE = /^\/[A-Za-z0-9._@+:,=-][A-Za-z0-9._@+:,=\/-]{0,126}$|^\/$/;
+export const okMount = (m) => typeof m === 'string' && MNT_RE.test(m) && !m.includes('..') && !m.includes('//') && safeKey(m);
+/** ##FS(df -P -l -T -k + 'rc N') → { rc, rows:[{m 마운트, t 종류, d 장치, kb 크기, used, avail, pct}] } · 사용률 = 사용 ÷ (사용 + 쓸 수 있는 양) — df 와 같은 분모(root 예약분 제외). */
+export function parseFs(lines = []) {
+  let rc = null; const rows = [];
+  for (const l of lines) {
+    const rm = /^rc (\d{1,3})$/.exec(l.trim());
+    if (rm) { rc = Number(rm[1]); continue; }
+    const f = words(l);
+    if (f.length < 7 || f[0] === 'Filesystem') continue;
+    const m = f.slice(6).join(' ');
+    const [kb, used, avail] = [intOrNull(f[2]), intOrNull(f[3]), intOrNull(f[4])];
+    if (!okMount(m) || kb == null || used == null || avail == null || rows.length >= 256 || rows.some((r) => r.m === m)) continue;
+    const t = /^[a-z0-9._-]{1,24}$/.test(f[1]) ? f[1] : '?';
+    const d = /^[A-Za-z0-9._:\/@+=-]{1,128}$/.test(f[0]) ? f[0] : '?';
+    rows.push({ m, t, d, kb, used, avail, pct: used + avail > 0 ? Math.round((1000 * used) / (used + avail)) / 10 : null });
+  }
+  return { rc, rows };
+}
+/** ##FSI(df -P -l -i + 'rc N') → { rc, rows:[{m, ipct}] } — inode 수가 0(동적 · 모름)이면 null. */
+export function parseFsi(lines = []) {
+  let rc = null; const rows = [];
+  for (const l of lines) {
+    const rm = /^rc (\d{1,3})$/.exec(l.trim());
+    if (rm) { rc = Number(rm[1]); continue; }
+    const f = words(l);
+    if (f.length < 6 || f[0] === 'Filesystem') continue;
+    const m = f.slice(5).join(' ');
+    const [tot, iu] = [intOrNull(f[1]), intOrNull(f[2])];
+    if (!okMount(m) || rows.length >= 256 || rows.some((r) => r.m === m)) continue;
+    rows.push({ m, ipct: tot != null && tot > 0 && iu != null ? Math.round((1000 * iu) / tot) / 10 : null });
+  }
+  return { rc, rows };
+}
+/** FS + FSI → [{m, t, d, kb, pct, ipct}] · rc(df 종료값 — 137 = 시한에 걸림). xfs 는 inode 가 필요할 때 늘어 비율에 큰 뜻이 없어 null(시안 결정). */
+export function mergeFs(fs, fsi) {
+  if (!fs) return null;
+  const im = new Map((fsi?.rows || []).map((r) => [r.m, r.ipct]));
+  return { rc: fs.rc, irc: fsi?.rc ?? null, rows: fs.rows.map((r) => ({ m: r.m, t: r.t, d: r.d, kb: r.kb, pct: r.pct, ipct: r.t === 'xfs' ? null : (im.get(r.m) ?? null) })) };
 }
 
 /** ##LOAD → [1, 5, 15] 분 부하 + 실행/전체 스레드. */
@@ -375,6 +466,8 @@ export function frameToRaw(frame) {
     mem: s.MEM ? parseMem(s.MEM) : null,
     net: s.NET ? parseNetDev(s.NET) : null,
     disk: s.DISK ? parseDiskstats(s.DISK) : null,
+    vm: s.VM ? parseVm(s.VM) : null, snmp: s.SNMP ? parseSnmp(s.SNMP) : null, sock: s.SOCK ? parseSock(s.SOCK) : null,
+    fs: s.FS ? mergeFs(parseFs(s.FS), s.FSI ? parseFsi(s.FSI) : null) : null,
     netTopo: s.NETTOPO ? parseNetTopo(s.NETTOPO) : null,
     blk: s.BLK ? parseBlk(s.BLK) : null,
     ps: s.PS ? parsePs(s.PS) : null,

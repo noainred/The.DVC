@@ -159,6 +159,16 @@
 /* 서버 상세 */
 .fm-wrap .fm-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .fm-wrap .fm-two.wide { grid-template-columns: minmax(0, 1fr) 340px; align-items: start; }
+/* v3.12.0 ⑬ 더할 지표 — 카드 셋이 넓으면 한 줄 · 좁으면 쌓인다 · 칸(이름 · 값 · 추이 · 아래 줄) */
+.fm-wrap .fm-three { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); gap: 12px; align-items: start; }
+.fm-wrap .fm-xkp { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: 10px; }
+.fm-wrap .fm-xk { background: var(--panel-2, rgba(255,255,255,.02)); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fm-wrap .fm-xk .l { font-size: 12px; color: var(--text-dim); overflow-wrap: anywhere; }
+.fm-wrap .fm-xk .v { font-size: 20px; font-weight: 700; line-height: 1.2; }
+.fm-wrap .fm-xk .u { font-size: 12px; color: var(--text-dim); font-weight: 500; margin-left: 3px; }
+.fm-wrap .fm-t-warn { color: var(--amber); }
+.fm-wrap .fm-t-crit { color: var(--red); }
+.fm-wrap .fm-dl { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 10px; row-gap: 4px; font-size: 12.5px; }
 .fm-wrap .fm-big { font-size: 28px; font-weight: 600; line-height: 1.15; }
 .fm-wrap .fm-big small { font-size: 14px; color: var(--text-dim); margin-left: 2px; }
 .fm-wrap .fm-rt { text-align: right; line-height: 1.5; }

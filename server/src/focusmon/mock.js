@@ -136,12 +136,43 @@ export function demoSample(id, ts, interval = 2) {
   const phys = dsk.filter((x) => x.k === 'disk');
   const dtot = aggregateIostat(phys);
   const usr = r2(cpu * 0.66); const sys = r2(cpu * 0.2); const iow = r2(Math.min(30, dskU * 0.15)); const stl = 0;
+  // v3.12.0(⑬ 더할 지표 — 시안 Metrics 와 같은 모양): 스케줄링 · 메모리 압박 · TCP · 프로세스 상태 · 파일시스템(60초 갱신 · 데모는 분마다 같은 값)
+  const busy = cpu / 100;
+  const sched = { cs: Math.round(ncores * (1200 + 2600 * busy) * (0.9 + 0.2 * hash(seed + 7, t))), in: Math.round(ncores * (700 + 900 * busy)), fk: r2(0.4 + 4 * busy * hash(seed + 8, t)) };
+  const swapIo = i === 0 && t % 120 > 90; // kr-db-01 은 가끔 스왑 입출력(시안의 주의 상태)
+  const vmp = { si: swapIo ? Math.round(120 + 160 * hash(seed, t)) : 0, so: swapIo ? Math.round(60 + 90 * hash(seed + 1, t)) : 0, mf: r2(2 + 40 * busy * hash(seed + 2, t)), sc: Math.round(memPct > 80 ? 9000 + 9000 * hash(seed + 3, t) : 0), sl: 0 };
+  vmp.sl = Math.round(vmp.sc * (0.6 + 0.2 * hash(seed + 4, t))); // 회수 성공은 스캔보다 적다
+  const rtHigh = i === 0 && t % 90 > 70;
+  const tcp = { rt: r2(rtHigh ? 0.6 + 0.4 * hash(seed + 5, t) : 0.05 + 0.1 * hash(seed + 6, t)), lo: rtHigh ? r2(0.2) : 0, ld: rtHigh ? r2(0.2) : 0, es: Math.round(200 + 1200 * busy), tw: Math.round(600 + 3300 * busy), iu: Math.round(260 + 1300 * busy) };
+  const D = i === 0 ? (t % 40 < 6 ? 2 : 0) : (i === 8 && t % 60 < 8 ? 1 : 0);
+  const pst = { D, Z: i === 13 ? 1 : 0, pd: D ? [{ pid: 1187, c: 'jbd2_dm-3-8', s: t % 40 }, { pid: 25109, c: 'ora_dbw0_ORCL', s: Math.max(0, (t % 40) - 2) }].slice(0, D) : [] };
+  const tm = Math.floor(ts / 60_000);
+  const grow = (base, perDay) => r2(Math.min(99.9, base + perDay * ((tm % 1440) / 1440)));
+  const fsRows = [
+    { m: '/', t: 'xfs', d: '/dev/mapper/rhel-root', kb: 52_403_200, pct: r2(30 + 10 * hash(seed, 1)), ipct: null },
+    { m: '/boot', t: 'xfs', d: '/dev/sda1', kb: 1_038_336, pct: 21.4, ipct: null },
+    { m: '/var', t: 'xfs', d: '/dev/mapper/rhel-var', kb: 104_806_400, pct: i === 0 ? grow(84, 1.6) : r2(40 + 20 * hash(seed, 2)), ipct: null },
+    { m: '/oradata', t: 'ext4', d: '/dev/mapper/oradata-data01', kb: 2_147_483_648, pct: i === 0 ? grow(97, 1.1) : r2(55 + 25 * hash(seed, 3)), ipct: r2(30 + 20 * hash(seed, 4)) },
+    { m: '/oraarch', t: 'ext4', d: '/dev/mapper/oraarch-arch01', kb: 524_288_000, pct: r2(35 + 15 * hash(seed, 5)), ipct: i === 0 ? 93 : r2(10 + 10 * hash(seed, 6)) },
+  ];
+  const fs = i === 8 && tm % 30 < 3 ? { rc: 137, irc: 137, age: Math.floor((ts / 1000) % 60), rows: [] } : { rc: 0, irc: 0, age: Math.floor((ts / 1000) % 60), rows: fsRows };
   return {
     dt: interval, cpu: { pct: r2(cpu), usr, sys, iow, stl, irq: r2(cpu * 0.02), cores },
     load: [r2((cpu / 100) * ncores * 1.1), r2((cpu / 100) * ncores), r2((cpu / 100) * ncores * 0.9)], run: Math.round((cpu / 100) * ncores), blk: Math.round(iow / 5), thr: 1200 + i * 10,
     mem: { pct: r2(memPct), total, used, avail: total - used, bc: total * 0.12, free: Math.max(0, total - used - total * 0.12), swT: 16 * 2 ** 30, swU: 0, dirty: 1.2 * 2 ** 30, slab: 6.4 * 2 ** 30, availSource: 'MemAvailable' },
     net, dsk, dtot, nPhys: phys.length,
+    sched, vmp, tcp, pst, fs,
   };
+}
+
+/** v3.12.0(⑬) 데모의 '가득 찰 때까지' — kr-db-01 은 /var · /oradata 가 차오르는 중(시안과 같은 값) · 나머지는 늘지 않음. */
+export function demoFill(id) {
+  const i = BY_ID.get(String(id));
+  if (i == null) return null;
+  const rows = i === 0
+    ? { '/var': { days: 9, trend: 'up', perDay: 1.6 }, '/oradata': { days: 2.6, trend: 'up', perDay: 1.1 }, '/': { days: null, trend: 'flat', perDay: 0 }, '/boot': { days: null, trend: 'flat', perDay: 0 }, '/oraarch': { days: null, trend: 'flat', perDay: 0.02 } }
+    : Object.fromEntries(['/', '/boot', '/var', '/oradata', '/oraarch'].map((m) => [m, { days: null, trend: 'flat', perDay: 0 }]));
+  return { state: 'ok', spanH: 24, rows };
 }
 
 // [이름, 사용자, CPU 기준, 스레드, 서비스(v2.981 — 데모 세부 정보), 디스크 대기 기준 %]

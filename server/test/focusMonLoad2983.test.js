@@ -87,9 +87,15 @@ test('① 원격 명령 — 12개 상수 · 목록 밖 값은 기본 · ##SELF �
   assert.ok(!/\b(cat|awk|grep|cut|head|sed|ps|date)\b|\$\((?!\()|`/.test(fn), `묶음 tick 은 내장 명령만(명령 치환 · 외부 명령 없음 — 산술 $(( )) 은 내장): ${fn}`);
   assert.match(fn, /<\/proc\/\$\$\/stat/, '자기 stat 만 읽는다');
   assert.equal(lines.filter((l) => /ck; C[BCP]=\$\(\(C[BCP] \+ CK - L\)\); L=\$CK/.test(l)).length, 3, '묶음 셋(기본 · 구성 · 프로세스) 뒤에 한 번씩');
-  // 묶음 위치: 기본은 DISK 바로 뒤 · 구성은 UNIT 바로 뒤 · 프로세스는 IO 바로 뒤(파서 SECTION_GROUP 과 같은 경계)
+  // 묶음 위치: 기본은 기본 구획의 끝(v3.12.0 ⑬ 부터 DISK 뒤 VM · SNMP · SOCK · 60초 FS · FSI 까지 — 그 if 블록을 닫는 fi 바로 뒤) ·
+  //   구성은 UNIT 바로 뒤 · 프로세스는 IO 바로 뒤(파서 SECTION_GROUP 과 같은 경계)
   const at = (re) => lines.findIndex((l) => re.test(l));
-  assert.equal(at(/ck; CB=/), at(/echo '##DISK'/) + 1);
+  assert.equal(at(/ck; CB=/), at(/echo '##FSI'/) + 2);
+  assert.equal(lines[at(/echo '##FSI'/) + 1].trim(), 'fi');
+  for (const sec of ['DISK', 'VM', 'SNMP', 'SOCK', 'FS', 'FSI']) {
+    assert.ok(at(new RegExp(`echo '##${sec}'`)) < at(/ck; CB=/), `${sec} 는 기본 묶음 안`);
+    assert.equal(P.SECTION_GROUP[sec], 'base', `파서도 ${sec} 를 기본 묶음으로`);
+  }
   assert.equal(at(/ck; CC=/), at(/echo '##UNIT'/) + 1);
   assert.equal(at(/ck; CP=/), at(/echo '##IO'/) + 1);
   const selfAt = at(/echo '##SELF'/);

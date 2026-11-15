@@ -46,6 +46,8 @@ import { forgetTarget as auditForgetTarget, forgetReadiness as auditForgetReadin
 
 const adminOnly = requireRole('admin');
 const csvPerm = requirePerm('data.csv');
+/** 비교 지표(v3.12.0 ⑬ — 파일시스템 · TCP · 스케줄링 · 메모리 압박을 더함). 항목 · 범위는 query.seriesKeyFor 가 다시 거른다. */
+const COMPARE_METRICS = Object.freeze(['cpu', 'mem', 'net', 'disk', 'fs', 'tcp', 'sched', 'vmp']);
 const fullScopeOnly = fullScopeOnlyWith('서버 집중 모니터링은 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다 — 전 법인 서버의 주소 · 프로세스가 들어갑니다.');
 const fullRwOnly = fullReadWriteScopeOnlyWith('서버 집중 모니터링의 대상 · 수집 변경은 조회 · 쓰기 모두 전체 범위인 계정만 할 수 있습니다.');
 const EDGE_ONLINE_MS = 60_000;
@@ -492,7 +494,7 @@ api.get('/tools/focus-mon/data', adminOnly, fullScopeOnly, async (req, res) => {
   const base = { ok: true, view, win: w.win, from: w.from, to: w.to, past: w.past, missing, now: Date.now() };
   if (view === 'overview') return res.json({ ...base, ...(await Q.overview(ids, w)) });
   if (view === 'compare') {
-    const metric = ['cpu', 'mem', 'net', 'disk'].includes(String(req.query.metric)) ? String(req.query.metric) : 'cpu';
+    const metric = COMPARE_METRICS.includes(String(req.query.metric)) ? String(req.query.metric) : 'cpu';
     return res.json({ ...base, metric, ...(await Q.compare(ids, w, { metric, item: String(req.query.item || ''), scope: String(req.query.scope || 'all').slice(0, 220) })) });
   }
   if (view === 'server') return res.json({ ...base, ...(await Q.serverDetail(ids[0], w, { at: req.query.at === 'avg' ? 'avg' : 'end', dev: String(req.query.dev || '') })) });
@@ -638,7 +640,7 @@ api.get('/tools/focus-mon/export.csv', adminOnly, fullScopeOnly, csvPerm, async 
         for (const d of row.devices) lines.push(csvLine([name(row.id), d.n, d.dn || '', d.k, d.mp || '', ...d.v.map((v) => (v == null ? '' : v))]));
       }
     } else {
-      const metric = ['cpu', 'mem', 'net', 'disk'].includes(String(req.query.metric)) ? String(req.query.metric) : 'cpu';
+      const metric = COMPARE_METRICS.includes(String(req.query.metric)) ? String(req.query.metric) : 'cpu';
       const r = await Q.compare(ids, w, { metric, item: String(req.query.item || ''), scope: String(req.query.scope || 'all').slice(0, 220) });
       const step = (w.to - w.from) / r.points;
       lines.push(csvLine(['time', ...r.targets.map((x) => name(x.id))]));
