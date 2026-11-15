@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>집중 모니터링 — 긴 구간 · 비교 · 주석</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.num{font-variant-numeric:tabular-nums}
+.dim{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0;box-sizing:border-box}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.btn{height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#141b2d;color:#e6edf6;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap;box-sizing:border-box}
+.btn.sm{height:28px;padding:0 10px;font-size:12px}
+.btn.pri{background:#2563eb;border-color:#2563eb;color:#fff}
+.h3{margin:0;font-size:14.5px;font-weight:600}
+.badge{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:11px;font-size:12px;font-weight:600;white-space:nowrap;background:rgba(139,155,180,.16);color:#c3cede}
+.badge.new{background:rgba(125,211,252,.12);color:#7dd3fc}
+.badge.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.badge.bad{background:rgba(239,68,68,.16);color:#fca5a5}
+.seg{display:inline-flex;flex-wrap:wrap;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{height:30px;padding:0 11px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap}
+.seg button:first-child{border-left:0}
+.seg button.on{background:#1e3a8a;color:#fff}
+.seg .sep{width:6px;background:#243049}
+.pc{padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.cap{font-size:12px;color:#8b9bb4;overflow-wrap:anywhere}
+.lay{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:14px;align-items:start}
+.chart{position:relative;height:250px;margin:6px 0 0 34px}
+.chart svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.yax{position:absolute;left:-34px;top:0;bottom:0;width:28px;display:flex;flex-direction:column;justify-content:space-between;align-items:flex-end;font-size:11px;color:#8b9bb4}
+.xax{position:relative;height:18px;margin-left:34px;font-size:11px;color:#8b9bb4}
+.xax span{position:absolute;transform:translateX(-50%);white-space:nowrap}
+.flag{position:absolute;top:-2px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:0;pointer-events:none}
+.flag i{display:block;width:18px;height:18px;border-radius:9px;font-style:normal;font-size:11px;font-weight:700;line-height:18px;text-align:center;color:#0a0e17}
+.leg{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:#c3cede}
+.leg span{display:inline-flex;align-items:center;gap:6px}
+.sw{display:inline-block;width:18px;height:0;border-top:2px solid #3987e5}
+.sw.band{height:10px;border:0;background:rgba(57,135,229,.25);border-radius:2px}
+.sw.cmp{border-top:2px dashed #a3b1c6}
+.sw.gap{height:10px;border:0;background:repeating-linear-gradient(135deg,#1b2436 0 3px,#0f1626 3px 6px);border-radius:2px}
+.stat{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(140px,100%),1fr));gap:10px}
+.st{background:#0f1626;border:1px solid #1f2a40;border-radius:10px;padding:8px 12px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.st b{font-size:18px}
+.an{display:grid;grid-template-columns:22px 92px minmax(0,1fr);column-gap:8px;align-items:start;padding:7px 0;border-bottom:1px solid #1a2236;font-size:12.5px}
+.an i{display:block;width:18px;height:18px;border-radius:9px;font-style:normal;font-size:11px;font-weight:700;line-height:18px;text-align:center;color:#0a0e17}
+.in{height:30px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px;padding:0 8px;box-sizing:border-box;min-width:0}
+.tw{overflow-x:auto}
+.cg{display:grid;grid-template-columns:36px 120px 150px 110px 110px 130px minmax(120px,1fr);column-gap:12px;align-items:center;padding:0 16px;min-width:900px;box-sizing:border-box}
+.th{height:34px;font-size:12px;color:#8b9bb4;background:#0f1626;border-top:1px solid #1f2a40;border-bottom:1px solid #1f2a40}
+.tr{height:40px;border-bottom:1px solid #1a2236;font-size:12.5px}
+.url{flex:1;min-width:0;font-family:"JetBrains Mono",monospace;font-size:12px;background:#0b111d;border:1px solid #1f2a40;border-radius:8px;padding:7px 10px;overflow-x:auto;white-space:nowrap;color:#c3cede}
+.cf{display:grid;grid-template-columns:28px minmax(0,1fr);column-gap:10px;row-gap:8px;font-size:12.5px}
+.cf b{color:#7dd3fc}
+@media (max-width:1000px){.lay{grid-template-columns:minmax(0,1fr)}}
+</style>
+</helmet>
+<div style="max-width:1440px;margin:0 auto;box-sizing:border-box;padding:24px 32px 32px;display:flex;flex-direction:column;gap:14px">
+  <div style="display:flex;flex-direction:column;gap:2px">
+    <div class="dim" style="font-size:12px">특수 기능 › 서버 집중 모니터링 › 서버 상세 · 비교 — 긴 구간(1시간~30일) · 어제/지난주 겹쳐 보기 · 사건 표시 · ‘무엇이 가장 변했나’ · 링크로 같은 장면 나누기</div>
+    <div class="dim" style="font-size:12px">가상의 서버 · 값입니다. 구간 · 겹쳐 보기 단추를 눌러 보세요. 빗금은 그 시간에 수집하지 않아 값이 없는 곳입니다(0 이 아닙니다).</div>
+  </div>
+
+  <div class="card pc">
+    <div class="row" style="justify-content:space-between">
+      <div class="row"><h3 class="h3">kr-db-01 · CPU 사용률</h3><span class="badge new">새 · B1 B2 B3</span><span class="badge">{{ src }}</span></div>
+      <div class="row">
+        <div class="seg"><sc-for list="{{ rangeBtns }}" as="b" hint-placeholder-count="9"><button type="button" class="{{ b.cls }}" onClick="{{ b.pick }}" title="{{ b.title }}">{{ b.label }}</button></sc-for></div>
+        <span class="dim" style="font-size:12.5px">겹쳐 보기</span>
+        <div class="seg"><sc-for list="{{ cmpBtns }}" as="b" hint-placeholder-count="3"><button type="button" class="{{ b.cls }}" onClick="{{ b.pick }}">{{ b.label }}</button></sc-for></div>
+      </div>
+    </div>
+    <div class="leg">
+      <span><i class="sw"></i>{{ lineName }}</span>
+      <sc-if value="{{ hasBand }}" hint-placeholder-val="{{ true }}"><span><i class="sw band"></i>칸 안의 최저 ~ 최고</span></sc-if>
+      <sc-if value="{{ hasCmp }}" hint-placeholder-val="{{ true }}"><span><i class="sw cmp"></i>{{ cmpName }}</span></sc-if>
+      <span><i class="sw gap"></i>수집하지 않은 시간</span>
+      <span class="dim">번호 = 아래 사건</span>
+    </div>
+    <div class="chart">
+      <div class="yax"><span>100%</span><span>75</span><span>50</span><span>25</span><span>0</span></div>
+      <svg viewBox="0 0 1000 250" preserveAspectRatio="none">
+        <path d="M0 0 H1000 M0 62.5 H1000 M0 125 H1000 M0 187.5 H1000 M0 250 H1000" stroke="#1f2a40" stroke-width="1" vector-effect="non-scaling-stroke"/>
+        <sc-for list="{{ gaps }}" as="g" hint-placeholder-count="2"><rect x="{{ g.x }}" y="0" width="{{ g.w }}" height="250" fill="url(#hatch)"/></sc-for>
+        <defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="3" height="6" fill="#1b2436"/></pattern></defs>
+        <path d="{{ band }}" fill="rgba(57,135,229,.22)" stroke="none"/>
+        <path d="{{ cmp }}" fill="none" stroke="#a3b1c6" stroke-width="1.6" stroke-dasharray="5 4" vector-effect="non-scaling-stroke"/>
+        <path d="{{ line }}" fill="none" stroke="#3987e5" stroke-width="2" vector-effect="non-scaling-stroke"/>
+        <sc-for list="{{ marks }}" as="m" hint-placeholder-count="3"><path d="{{ m.d }}" stroke="{{ m.c }}" stroke-width="1" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/></sc-for>
+      </svg>
+      <sc-for list="{{ marks }}" as="m" hint-placeholder-count="3"><div class="flag" style="{{ m.pos }}"><i style="{{ m.bg }}">{{ m.n }}</i></div></sc-for>
+    </div>
+    <div class="xax"><sc-for list="{{ ticks }}" as="t" hint-placeholder-count="6"><span style="{{ t.pos }}">{{ t.label }}</span></sc-for></div>
+    <div class="stat"><sc-for list="{{ stats }}" as="s" hint-placeholder-count="5"><div class="st"><span class="cap">{{ s.k }}</span><b class="num">{{ s.v }}</b><span class="cap">{{ s.sub }}</span></div></sc-for></div>
+    <span class="cap">{{ srcNote }}</span>
+  </div>
+
+  <div class="lay">
+    <div class="card" style="padding:14px 0 10px;display:flex;flex-direction:column;gap:10px">
+      <div class="row" style="justify-content:space-between;padding:0 16px">
+        <div class="row"><h3 class="h3">무엇이 가장 변했나 — 고른 구간 vs 바로 앞 구간</h3><span class="badge new">새 · B5</span></div>
+        <div class="row"><span class="dim" style="font-size:12.5px">범위</span><div class="seg"><sc-for list="{{ scopeBtns }}" as="b" hint-placeholder-count="2"><button type="button" class="{{ b.cls }}" onClick="{{ b.pick }}">{{ b.label }}</button></sc-for></div></div>
+      </div>
+      <div class="cap" style="padding:0 16px">고른 구간: 11-13 14:00 ~ 14:10(10분) · 앞 구간: 13:20 ~ 14:00(4배 길이). 모든 지표를 같은 방법으로 견주어 차이가 큰 순서로 세웁니다. 값이 없는 칸은 양쪽에서 빼고 남은 칸 수를 밝힙니다.</div>
+      <div class="tw">
+        <div class="cg th"><span>순위</span><span>서버</span><span>지표</span><span style="text-align:right">앞 구간</span><span style="text-align:right">고른 구간</span><span>변화</span><span>쓴 칸(앞 · 고른)</span></div>
+        <sc-for list="{{ changes }}" as="c" hint-placeholder-count="6">
+          <div class="cg tr"><span class="num dim">{{ c.rank }}</span><span class="mono" style="font-weight:600">{{ c.srv }}</span><span>{{ c.metric }}</span><span class="num" style="text-align:right">{{ c.a }}</span><span class="num" style="text-align:right">{{ c.b }}</span><span><span class="{{ c.cls }}">{{ c.d }}</span></span><span class="num dim">{{ c.n }}</span></div>
+        </sc-for>
+      </div>
+      <div class="cap" style="padding:0 16px">기계 학습이 아니라 통계 비교입니다(중앙값의 비 · 분포가 겹치는 정도). 잠깐 보기(15분)처럼 이력이 짧아도 쓸 수 있습니다. 순위는 ‘어디부터 볼지’ 의 안내이고 원인을 단정하지 않습니다.</div>
+    </div>
+
+    <div class="card pc">
+      <div class="row" style="justify-content:space-between"><div class="row"><h3 class="h3">사건</h3><span class="badge new">새 · B3</span></div><span class="cap">이 구간 {{ annCount }}건</span></div>
+      <sc-for list="{{ anns }}" as="a" hint-placeholder-count="5">
+        <div class="an"><i style="{{ a.bg }}">{{ a.n }}</i><span class="num dim">{{ a.at }}</span><span style="display:flex;flex-direction:column"><span>{{ a.text }}</span><small class="dim">{{ a.by }}</small></span></div>
+      </sc-for>
+      <div style="display:flex;flex-direction:column;gap:6px;padding-top:4px">
+        <b style="font-size:12.5px">사건 직접 적기(배포 · 작업)</b>
+        <div class="row" style="gap:6px"><input class="in mono" style="width:150px" value="11-13 13:55" aria-label="시각"><select class="in" aria-label="대상"><option>이 서버</option><option>그룹 DB</option><option>이 수집 전체</option></select></div>
+        <div class="row" style="gap:6px"><input class="in" style="flex:1" placeholder="예: 앱 v3.2 배포 · 인덱스 재구성" aria-label="내용"><button type="button" class="btn sm pri">적기</button></div>
+        <span class="cap">자동 사건은 노드가 이미 아는 일입니다(수집 시작 · 끝 · 재부팅 = uptime 이 줄어듦 · 키 로그인 거부 · 호스트키 바뀜 · OOM). 직접 적은 사건은 누가 적었는지 남고 감사 로그에 들어갑니다.</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card pc">
+    <div class="row" style="justify-content:space-between"><div class="row"><h3 class="h3">이 장면 링크</h3><span class="badge new">새 · B6</span></div></div>
+    <div class="row" style="flex-wrap:nowrap"><div class="url">{{ url }}</div><button type="button" class="btn sm">링크 복사</button></div>
+    <span class="cap">주소에 탭 · 서버 · 구간 · 시점 · 겹쳐 보기를 넣어, 받은 사람이 같은 화면을 엽니다. 주소에는 서버 id 만 넣고 IP · 이름은 넣지 않습니다. 받은 사람도 이 화면 권한(관리자 · 전체 범위)이 있어야 열리고, 없으면 지금처럼 권한 안내가 나옵니다.</span>
+  </div>
+
+  <div class="card pc">
+    <h3 class="h3">컨펌 받을 것(답이 없으면 괄호 값으로 구현)</h3>
+    <div class="cf">
+      <b>①</b><span>긴 구간 단추 — (1시간 · 6시간 · 24시간 · 7일 · 30일을 더함. 1분 ~ 30분 단추와 시간 띠는 그대로)</span>
+      <b>②</b><span>요약 표 — (1분 요약과 1시간 요약을 새로 쓴다: 최저 · 평균 · 최고 · 표본 수. 기록할 때 같이 만들고 · 30일 보관. 원본 2초 표본은 지금처럼 30일)</span>
+      <b>③</b><span>이미 쌓인 기록의 요약 — (한 번 조각으로 나눠 만든다 · 포탈이 바쁘지 않게 쉬어 가며. 만드는 동안 긴 구간은 ‘요약 만드는 중’)</span>
+      <b>④</b><span>겹쳐 보기 — (어제 같은 시각 · 지난주 같은 시각. 그때 수집하지 않은 곳은 비워 둔다)</span>
+      <b>⑤</b><span>‘무엇이 가장 변했나’ 의 비교 방법 — (중앙값의 비 + 분포가 겹치는 정도 · 앞 구간은 4배 길이)</span>
+      <b>⑥</b><span>직접 적는 사건 — (관리자 · 전체 쓰기 범위 · 30일 보관 · 감사)</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1800}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { range: '24h', cmp: 'none', scope: 'all' }; }
+  renderVals() {
+    const S = this.state;
+    // [키, 이름, 칸 수, 칸 길이(분), 자료]
+    const R = {
+      '1m': ['1분', 30, 1 / 30, 'raw'], '5m': ['5분', 75, 4 / 60, 'raw'], '10m': ['10분', 100, 6 / 60, 'raw'], '30m': ['30분', 120, 0.25, 'raw'],
+      '1h': ['1시간', 120, 0.5, 'raw'], '6h': ['6시간', 180, 2, 'm'], '24h': ['24시간', 288, 5, 'm'], '7d': ['7일', 168, 60, 'h'], '30d': ['30일', 180, 240, 'h'],
+    };
+    const [rName, N, step, kind] = R[S.range];
+    const END = 14 * 60 + 10; // 11-13 14:10 (분)
+    const span = N * step; // 분
+    const noise = (i, s) => { const x = Math.sin(i * 12.9898 + s * 78.233) * 43758.5453; return x - Math.floor(x); };
+    const cpuAt = (t) => { // t = 분(11-13 00:00 기준, 음수 = 이전 날)
+      const tod = ((t % 1440) + 1440) % 1440; const day = Math.floor(t / 1440);
+      const work = tod > 540 && tod < 1080 ? 30 : tod > 120 && tod < 210 ? 22 : 6; // 02:00~03:30 백업
+      const spike = day === 0 && tod > 840 && tod < 851 ? 38 : 0; // 오늘 14:00~14:10
+      return Math.min(98, 14 + work + spike + noise(Math.floor(t / Math.max(step, 0.05)), day + 3) * 9);
+    };
+    const collected = (t) => !(t < -6 * 1440 - 600) && !(t > -2 * 1440 + 300 && t < -2 * 1440 + 1100) && !(t > -1440 + 1300 && t < -1440 + 1340);
+    const x = (i) => (i + 0.5) * 1000 / N;
+    const y = (v) => (250 - v / 100 * 250).toFixed(1);
+    const pts = []; for (let i = 0; i < N; i++) { const t = END - span + i * step; pts.push({ t, ok: collected(t) }); }
+    const agg = (t) => { const k = Math.max(1, Math.min(6, Math.round(step / 1))); const v = []; for (let j = 0; j < k; j++) v.push(cpuAt(t + j * step / k)); return { avg: v.reduce((a, b) => a + b, 0) / k, mn: Math.min.apply(null, v) - (kind === 'h' ? 6 : 3), mx: Math.max.apply(null, v) + (kind === 'h' ? 14 : 5) }; };
+    const path = (fn) => { let d = ''; let pen = false; pts.forEach((p, i) => { const v = fn(p); if (v == null) { pen = false; return; } d += (pen ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v) + ' '; pen = true; }); return d.trim() || 'M0 250'; };
+    const line = path((p) => (p.ok ? agg(p.t).avg : null));
+    let band = 'M0 250';
+    if (kind !== 'raw') {
+      const segs = []; let cur = [];
+      pts.forEach((p, i) => { if (p.ok) cur.push(i); else if (cur.length) { segs.push(cur); cur = []; } }); if (cur.length) segs.push(cur);
+      band = segs.map((s) => { const a = agg; const top = s.map((i) => x(i).toFixed(1) + ' ' + y(Math.min(100, a(pts[i].t).mx))); const bot = s.slice().reverse().map((i) => x(i).toFixed(1) + ' ' + y(Math.max(0, a(pts[i].t).mn))); return 'M' + top.join(' L') + ' L' + bot.join(' L') + ' Z'; }).join(' ');
+    }
+    const shift = S.cmp === '1d' ? 1440 : S.cmp === '7d' ? 7 * 1440 : 0;
+    const cmp = shift ? path((p) => (collected(p.t - shift) ? agg(p.t - shift).avg : null)) : 'M0 250';
+    const gaps = []; let g0 = null;
+    pts.forEach((p, i) => { if (!p.ok && g0 == null) g0 = i; if ((p.ok || i === N - 1) && g0 != null) { const e = p.ok ? i : N; gaps.push({ x: (g0 * 1000 / N).toFixed(1), w: ((e - g0) * 1000 / N).toFixed(1) }); g0 = null; } });
+    const two = (n) => String(n).padStart(2, '0');
+    const fmt = (t, withDay) => { const d = 13 + Math.floor(t / 1440); const tod = ((t % 1440) + 1440) % 1440; return (withDay ? '11-' + two(d) + ' ' : '') + two(Math.floor(tod / 60)) + ':' + two(Math.floor(tod % 60)); };
+    const ticks = []; for (let k = 0; k <= 5; k++) { const t = END - span + span * k / 5; ticks.push({ pos: 'left:' + (k * 20) + '%', label: fmt(Math.round(t), span > 1440) }); }
+    const COL = { auto: 'background:#a3b1c6', bad: 'background:#f87171', user: 'background:#7dd3fc', warn: 'background:#fbbf24' };
+    const EV = [
+      [14 * 60 + 1, 'user', '앱 v3.2 배포(직접 적음)', 'ops-kim · 13:58 에 적음'],
+      [14 * 60 + 4, 'bad', 'OOM — java 1개 종료(dmesg)', '자동 · dmesg 읽을 수 있는 서버만'],
+      [9 * 60 + 12, 'auto', '계속 수집 · 2초로 올라감(보는 화면 열림)', '자동'],
+      [-1440 + 1300, 'warn', '재부팅(uptime 이 줄어듦)', '자동 · 11-12 21:40'],
+      [-2 * 1440 + 300, 'auto', '수집 끝(엣지 PL 끊김 13시간)', '자동'],
+      [-6 * 1440 - 600, 'auto', '계속 수집 시작', '자동 · admin'],
+    ].filter((e) => e[0] >= END - span && e[0] <= END).sort((a, b) => a[0] - b[0]);
+    let prevPx = -99; let lane = 0;
+    const marks = EV.map((e, i) => {
+      const px = (e[0] - (END - span)) / span * 1000;
+      lane = px - prevPx < 25 ? lane + 1 : 0; prevPx = px; // 가까운 사건은 번호를 아래로 비켜 놓는다
+      return { n: i + 1, d: 'M' + px.toFixed(1) + ' 0 V250', c: COL[e[1]].slice(11), pos: 'left:' + (px / 10).toFixed(2) + '%;top:' + (lane * 22 - 2) + 'px', bg: COL[e[1]] };
+    });
+    const anns = EV.map((e, i) => ({ n: i + 1, bg: COL[e[1]], at: fmt(e[0], true), text: e[2], by: e[3] }));
+    const vals = pts.filter((p) => p.ok).map((p) => agg(p.t));
+    const avg = vals.length ? vals.reduce((a, b) => a + b.avg, 0) / vals.length : null;
+    const mx = vals.length ? Math.max.apply(null, vals.map((v) => (kind === 'raw' ? v.avg : v.mx))) : null;
+    const cover = Math.round(pts.filter((p) => p.ok).length / N * 100);
+    const cmpVals = shift ? pts.filter((p) => p.ok && collected(p.t - shift)) : [];
+    const cmpAvg = cmpVals.length ? cmpVals.reduce((a, p) => a + agg(p.t - shift).avg, 0) / cmpVals.length : null;
+    const curOnSame = cmpVals.length ? cmpVals.reduce((a, p) => a + agg(p.t).avg, 0) / cmpVals.length : null;
+    const f1 = (v) => (v == null ? '—' : v.toFixed(1) + '%');
+    const stats = [
+      { k: '구간 평균(시간 가중)', v: f1(avg), sub: '수집한 시간만' },
+      { k: kind === 'raw' ? '최고(표본)' : '최고(칸 안 최고값)', v: f1(mx > 100 ? 100 : mx), sub: kind === 'raw' ? '2초 표본' : '요약의 최고값 — 평균선보다 높습니다' },
+      { k: '수집한 시간', v: cover + '%', sub: rName + ' 중' },
+      { k: S.cmp === 'none' ? '겹쳐 보기' : (S.cmp === '1d' ? '어제 같은 시각 평균' : '지난주 같은 시각 평균'), v: S.cmp === 'none' ? '—' : f1(cmpAvg), sub: S.cmp === 'none' ? '위 단추로 고릅니다' : '지금 ' + f1(curOnSame) + ' · 양쪽 다 있는 ' + cmpVals.length + '칸으로' },
+    ];
+    const SRC = { raw: ['원본 2초 표본', '1시간 이하는 원본 표본을 칸으로 묶습니다(지금과 같음).'],
+      m: ['1분 요약', '6시간 · 24시간은 1분 요약(최저 · 평균 · 최고 · 표본 수)을 읽습니다 — 원본을 풀지 않아 빠릅니다. 띠는 칸 안의 최저 ~ 최고라 짧은 튐도 사라지지 않습니다.'],
+      h: ['1시간 요약', '7일 · 30일은 1시간 요약을 읽습니다. 평균만 두면 순간 최고가 사라져, 최저 · 최고 띠를 함께 그립니다. 표본 수로 ‘일부만 수집한 시간’ 을 가려냅니다.'] };
+    const rangeBtns = Object.keys(R).map((k) => ({ label: R[k][0], cls: S.range === k ? 'on' : '', title: SRC[R[k][3]][0], pick: () => this.setState({ range: k }) }));
+    const cmpBtns = [['none', '없음'], ['1d', '어제'], ['7d', '지난주']].map(([k, l]) => ({ label: l, cls: S.cmp === k ? 'on' : '', pick: () => this.setState({ cmp: k }) }));
+    const scopeBtns = [['srv', '이 서버'], ['all', '이 수집 전체 12대']].map(([k, l]) => ({ label: l, cls: S.scope === k ? 'on' : '', pick: () => this.setState({ scope: k }) }));
+    const CH = [
+      ['kr-db-01', 'CPU 사용률', '31%', '71%', '×2.3 오름', 'badge bad', '1,200 · 300'],
+      ['kr-db-01', '스왑 들어옴', '0 페이지/s', '214 페이지/s', '0 → 있음', 'badge bad', '1,200 · 300'],
+      ['pl-db-01', '쓰기 지연(sdb)', '2.1 ms', '18.4 ms', '×8.8 오름', 'badge bad', '1,198 · 300'],
+      ['kr-was-02', 'TCP 재전송', '0.10%', '0.84%', '×8.4 오름', 'badge warn', '1,200 · 296'],
+      ['kr-db-01', 'D 상태 프로세스', '0', '2', '0 → 있음', 'badge warn', '1,200 · 300'],
+      ['us-web-01', '네트워크 받기', '410 Mb/s', '120 Mb/s', '×0.29 내림', 'badge', '1,200 · 300'],
+      ['pl-was-03', '메모리 사용', '—', '—', '값 없음 — 순위에서 뺌', 'dim', '0 · 0'],
+    ].filter((c) => S.scope === 'all' || c[0] === 'kr-db-01');
+    const changes = CH.map((c, i) => ({ rank: c[5] === 'dim' ? '—' : String(i + 1), srv: c[0], metric: c[1], a: c[2], b: c[3], d: c[4], cls: c[5], n: c[6] }));
+    const url = 'https://portal.example/#/tools/focus-mon?tab=server&srv=t_8f3a21&win=' + S.range + '&at=2026-11-13T14:10' + (S.cmp === 'none' ? '' : '&cmp=' + S.cmp);
+    return {
+      src: SRC[kind][0], srcNote: SRC[kind][1], rangeBtns, cmpBtns, scopeBtns, lineName: kind === 'raw' ? 'CPU 사용률' : '칸 평균', hasBand: kind !== 'raw',
+      hasCmp: S.cmp !== 'none', cmpName: S.cmp === '1d' ? '어제 같은 시각' : '지난주 같은 시각', band, cmp, line, gaps, marks, ticks, stats,
+      anns, annCount: anns.length, changes, url,
+    };
+  }
+}
+</script>
+</body>
+</html>

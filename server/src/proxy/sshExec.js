@@ -256,20 +256,21 @@ function exec(conn, command, rawTimeoutMs = SSH_EXEC_TIMEOUT_MS, opts = {}) {
  * v2.976 집중 모니터링 — **스스로 끝나지 않는 명령의 줄을 그때그때 넘긴다**(execCapture 는 정해진 시간을 모은 뒤 한 번에 돌려준다).
  * 대상 서버에서 2초마다 /proc 을 찍는 반복문이 몇 시간 돈다 — 출력을 쌓아 두면 메모리가 계속 자라므로 **줄 단위로 넘기고 버린다**.
  *  · 줄이 `maxLine`(기본 16KB)보다 길면 그 세션을 끊는다(정상 /proc 줄은 수백 바이트 — 끝없는 한 줄은 이상 출력이다).
+ *    `cutLong: true` 면 끊지 않고 앞 `maxLine` 만 한 줄로 넘기고 다음 줄바꿈까지 버린다(v3.11.0 디스크 점검 — 출력에 대상 서버 로그가 들어간다). 자른 줄 수는 `cutLines`.
  *  · stderr 는 앞 4KB 만 남긴다(진단용). 채널이 닫히면 `{code, stderr, lines}` 로 끝난다.
  *  · `signal` 이 오면 채널을 닫는다(세션은 withSsh 가 같은 signal 로 끊는다).
  *  · UTF-8 이 청크 경계에서 잘려도 깨지지 않게 StringDecoder 로 잇는다.
  */
 const STREAM_STDERR_MAX = 4096;
-function execStream(conn, command, { onLine, maxLine = 16 * 1024, signal } = {}) {
+function execStream(conn, command, { onLine, maxLine = 16 * 1024, cutLong = false, signal } = {}) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(new Error('SSH 스트림 취소'));
     conn.exec(command, { pty: false }, (err, stream) => {
       if (err) return reject(err);
       const dec = new StringDecoder('utf8');
-      let buf = ''; let stderr = ''; let lines = 0; let done = false;
+      let buf = ''; let stderr = ''; let lines = 0; let done = false; let skip = false; let cutLines = 0;
       const kill = () => { try { stream.close?.(); } catch { /* */ } try { stream.destroy?.(); } catch { /* */ } };
-      const onAbort = () => { kill(); finish(resolve, { command, code: null, aborted: true, stderr, lines }); };
+      const onAbort = () => { kill(); finish(resolve, { command, code: null, aborted: true, stderr, lines, cutLines }); };
       const finish = (fn, arg) => { if (done) return; done = true; signal?.removeEventListener('abort', onAbort); fn(arg); };
       signal?.addEventListener('abort', onAbort, { once: true });
       const emit = (line) => { lines += 1; try { onLine?.(line); } catch { /* 소비자 오류가 스트림을 끊지 않게 */ } };
@@ -277,13 +278,17 @@ function execStream(conn, command, { onLine, maxLine = 16 * 1024, signal } = {})
         if (done) return;
         buf += dec.write(d);
         let i;
+        if (skip) { i = buf.indexOf('\n'); if (i < 0) { buf = ''; return; } buf = buf.slice(i + 1); skip = false; }
         while ((i = buf.indexOf('\n')) >= 0) { emit(buf.slice(0, i).replace(/\r$/, '')); buf = buf.slice(i + 1); }
-        if (buf.length > maxLine) { kill(); finish(reject, new Error(`SSH 스트림 한 줄이 상한(${Math.round(maxLine / 1024)}KB)을 넘었습니다`)); }
+        if (buf.length > maxLine) {
+          if (cutLong) { emit(buf.slice(0, maxLine)); buf = ''; skip = true; cutLines += 1; return; }
+          kill(); finish(reject, new Error(`SSH 스트림 한 줄이 상한(${Math.round(maxLine / 1024)}KB)을 넘었습니다`));
+        }
       });
       stream.stderr.on('data', (d) => { if (stderr.length < STREAM_STDERR_MAX) stderr += d.toString().slice(0, STREAM_STDERR_MAX - stderr.length); });
       stream.on('error', (e) => finish(reject, e));
       stream.stderr.on('error', () => { /* 비치명 */ });
-      stream.on('close', (code) => { if (buf) emit(buf); buf = ''; finish(resolve, { command, code, stderr, lines }); });
+      stream.on('close', (code) => { if (buf && !skip) emit(buf); buf = ''; finish(resolve, { command, code, stderr, lines, cutLines }); });
     });
   });
 }
@@ -784,3 +789,6 @@ export async function withSsh(creds, fn, { signal = creds?.signal } = {}) {
 export { withDeadline, deadlineMs };
 /** 테스트 전용 — 내보내지 않는 캡처 경로의 상한을 가짜 채널로 확인한다(v2.607 SEC2607-04). */
 export const _sshExecInternals = { execCapture };
+
+/** 시험 전용 — 가짜 연결로 줄 넘기기 · 긴 줄 자르기를 고정한다(test/focusMonAudit3110 ⑪). */
+export { execStream as _execStreamForTest };

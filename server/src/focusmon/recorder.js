@@ -67,6 +67,7 @@ async function housekeep(now) {
   st.pruned += n; st.lastPruneAt = now;
   const bytes = db.dbBytes();
   if (bytes != null && bytes > s.capGb * 2 ** 30) {
+    st.capped += await db.pruneAuditBlobs(now - 86_400_000); // v3.11.0 디스크 점검 원문(오래된 것부터 — 요약은 남긴다)
     for (let k = 0; k < 10; k++) { const d = await db.pruneOldestChunk(); st.capped += d; if (!d) break; await new Promise((r) => setImmediate(r)); }
   }
 }

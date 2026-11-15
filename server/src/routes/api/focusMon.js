@@ -40,15 +40,20 @@ import { judgeLoad, estimateLoad, averageLoads, averageNodes, loadTotals } from 
 import { demoNodeLoad } from '../../focusmon/mock.js';
 import { IOSTAT_COLS, IOSTAT_NAME } from '../../focusmon/rates.js';
 import { focusAuthGuard, authDevOf } from '../../focusmon/collector.js';
+import { registerFocusMonAudit } from './focusMonAudit.js'; // v3.11.0 디스크 점검(배드 섹터 점검 프로그램)
+import { corpResolver } from '../../focusmon/audit/corp.js';
+import { forgetTarget as auditForgetTarget, forgetReadiness as auditForgetReadiness } from '../../focusmon/audit/service.js';
 
 const adminOnly = requireRole('admin');
 const csvPerm = requirePerm('data.csv');
+/** 비교 지표(v3.12.0 ⑬ — 파일시스템 · TCP · 스케줄링 · 메모리 압박을 더함). 항목 · 범위는 query.seriesKeyFor 가 다시 거른다. */
+const COMPARE_METRICS = Object.freeze(['cpu', 'mem', 'net', 'disk', 'fs', 'tcp', 'sched', 'vmp']);
 const fullScopeOnly = fullScopeOnlyWith('서버 집중 모니터링은 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다 — 전 법인 서버의 주소 · 프로세스가 들어갑니다.');
 const fullRwOnly = fullReadWriteScopeOnlyWith('서버 집중 모니터링의 대상 · 수집 변경은 조회 · 쓰기 모두 전체 범위인 계정만 할 수 있습니다.');
 const EDGE_ONLINE_MS = 60_000;
 /** 감사 기록용 바뀐 칸 글(v2.980) — 'IP 10.0.0.1 → 10.0.0.2 · 담당 노드 중앙 → 엣지 NJ'. 값은 입력 검사를 지난 짧은 글자뿐이다(비밀 칸 없음). */
-const CHANGE_LABEL = { name: '이름', host: 'IP', port: '포트', username: '계정', agent: '담당 노드', group: '그룹' };
-const changeVal = (k, v) => (k === 'agent' ? (v ? `엣지 ${v}` : '중앙') : k === 'group' ? (v || '그룹 없음') : v);
+const CHANGE_LABEL = { name: '이름', host: 'IP', port: '포트', username: '계정', agent: '담당 노드', group: '그룹', corp: '법인' };
+const changeVal = (k, v) => (k === 'agent' ? (v ? `엣지 ${v}` : '중앙') : k === 'group' ? (v || '그룹 없음') : k === 'corp' ? (v || '지정 안 함') : v);
 const changesText = (changes = []) => changes.map((c) => `${CHANGE_LABEL[c.k] || c.k} ${changeVal(c.k, c.from)} → ${changeVal(c.k, c.to)}`).join(' · ');
 const verCmp = (a, b) => { const x = String(a).split('.').map(Number); const y = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); return 0; };
 
@@ -169,6 +174,8 @@ api.get('/tools/focus-mon', adminOnly, fullScopeOnly, async (req, res) => {
     iostat: { cols: IOSTAT_COLS, names: IOSTAT_NAME },
     ...demoMask(req, { nodes, targets, sessions: store.listSessions(now), ended: store.endedSessions() }),
     groups: groupsView(req, targets),
+    // v3.11.0 법인 칸(서버 등록 · 수정의 고르기 목록) — 데모 계정에는 실제 법인 목록을 싣지 않는다
+    corps: isDemoGuest(req.user) ? [] : corpResolver().list,
     recorder: recorderStatus(), db: { available: dbOk, error: db.dbError() || null, oldestMinute: dbOk ? await db.oldestMinute() : null },
     mem: store.memStats(), local: serviceStatus().running,
   });
@@ -178,7 +185,7 @@ api.get('/tools/focus-mon', adminOnly, fullScopeOnly, async (req, res) => {
 
 api.post('/tools/focus-mon/targets', adminOnly, fullRwOnly, demoBlockWrite, (req, res) => {
   if (registryUnreadable(res)) return;
-  const r = registry.addTarget(req.body || {}, { agents: knownAgentNames(), by: req.user?.username });
+  const r = registry.addTarget(req.body || {}, { agents: knownAgentNames(), by: req.user?.username, corps: corpResolver().list });
   if (!r.ok) return res.status(r.code === 'registry-unreadable' ? 503 : 400).json(r);
   logAudit({ user: req.user?.username, action: 'focus-mon.target.add', target: r.target.name, detail: `${r.target.host}:${r.target.port} ${r.target.username} @ ${r.target.agent || '중앙'}`, ip: req.ip });
   res.json(r);
@@ -186,12 +193,14 @@ api.post('/tools/focus-mon/targets', adminOnly, fullRwOnly, demoBlockWrite, (req
 
 api.put('/tools/focus-mon/targets/:id', adminOnly, fullRwOnly, demoBlockWrite, (req, res) => {
   if (registryUnreadable(res)) return;
-  const r = registry.updateTarget(req.params.id, req.body || {}, { agents: knownAgentNames() });
+  const cr = corpResolver();
+  const r = registry.updateTarget(req.params.id, req.body || {}, { agents: knownAgentNames(), corps: cr.list });
   if (!r.ok) return res.status(r.code === 'not-found' ? 404 : r.code === 'registry-unreadable' ? 503 : 400).json(r);
   if (!r.changes.length) return res.json({ ...r, cleared: false });
   // v2.980(사용자 '등록된 서버 수정하는 기능 추가'): 접속처가 바뀌면 바로 다시 맞추고 예전 접속처의 상태 · 시험 결과를 지운다.
-  if (r.moved) targetEndpointChanged(r.before, r.target);
-  logAudit({ user: req.user?.username, action: 'focus-mon.target.update', target: r.target.name, detail: `${changesText(r.changes)}${r.moved ? ' (접속처 바뀜)' : ''}`, ip: req.ip });
+  if (r.moved) { targetEndpointChanged(r.before, r.target); auditForgetReadiness(r.target.id); } // v3.11.0 디스크 점검 준비 상태 · 진행 중 작업은 예전 접속처의 것
+  const named = r.changes.map((c) => (c.k === 'corp' ? { ...c, from: c.from ? (cr.name(c.from) || c.from) : '', to: c.to ? (cr.name(c.to) || c.to) : '' } : c));
+  logAudit({ user: req.user?.username, action: 'focus-mon.target.update', target: r.target.name, detail: `${changesText(named)}${r.moved ? ' (접속처 바뀜)' : ''}`, ip: req.ip });
   res.json({ ok: true, target: r.target, moved: r.moved, changes: r.changes, cleared: r.moved });
 });
 
@@ -200,6 +209,7 @@ api.delete('/tools/focus-mon/targets/:id', adminOnly, fullRwOnly, demoBlockWrite
   const t = registry.getTarget(req.params.id);
   const r = registry.removeTarget(req.params.id);
   if (!r.ok) return res.status(r.code === 'not-found' ? 404 : 503).json(r);
+  auditForgetTarget(String(req.params.id)); // v3.11.0 디스크 점검 준비 상태 · 진행 중 작업(결과 기록은 DB 보관 규칙대로)
   logAudit({ user: req.user?.username, action: 'focus-mon.target.remove', target: t?.name || req.params.id, ip: req.ip });
   res.json(r);
 });
@@ -249,7 +259,7 @@ const testGate = new Map(); // targetId → { at, busy }
  */
 api.post('/tools/focus-mon/targets/import/preview', adminOnly, fullRwOnly, csvPerm, demoBlockWrite, (req, res) => {
   if (registryUnreadable(res)) return;
-  const r = registry.planCsv(String(req.body?.text ?? ''), { agents: knownAgentNames() });
+  const r = registry.planCsv(String(req.body?.text ?? ''), { agents: knownAgentNames(), corps: corpResolver().list });
   if (!r.ok) return res.status(400).json(r);
   res.json(r);
 });
@@ -261,8 +271,9 @@ api.post('/tools/focus-mon/targets/import/preview', adminOnly, fullRwOnly, csvPe
 api.post('/tools/focus-mon/targets/import', adminOnly, fullRwOnly, csvPerm, demoBlockWrite, (req, res) => {
   if (registryUnreadable(res)) return;
   const b = req.body || {};
-  const r = registry.applyCsv(String(b.text ?? ''), { agents: knownAgentNames(), by: req.user?.username, mode: b.mode === 'valid' ? 'valid' : 'all', update: b.update === true });
+  const r = registry.applyCsv(String(b.text ?? ''), { agents: knownAgentNames(), by: req.user?.username, mode: b.mode === 'valid' ? 'valid' : 'all', update: b.update === true, corps: corpResolver().list });
   if (!r.ok) return res.status(r.code === 'registry-unreadable' ? 503 : 400).json(r);
+  for (const id of r.moved || []) auditForgetReadiness(id); // v3.11.0 디스크 점검 — 접속처가 바뀐 대상의 작업 · 준비 상태(반증 F7)
   logAudit({ user: req.user?.username, action: 'focus-mon.target.import', target: 'focus-mon', detail: `새로 ${r.added}대 · 갱신 ${r.updated}대 · 그대로 ${r.same}대 · 건너뜀 ${r.skipped}줄${r.moved.length ? ` · 접속처 바뀜 ${r.moved.length}대` : ''}`, ip: req.ip });
   res.json(r);
 });
@@ -276,7 +287,8 @@ api.get('/tools/focus-mon/targets/export.csv', adminOnly, fullScopeOnly, csvPerm
   try {
     const demo = isDemoGuest(req.user);
     const list = template ? [] : allTargets().filter((t) => (demo ? t.demo : !t.demo));
-    const rows = template ? registry.csvTemplateRows() : registry.exportRows(list);
+    const cr = corpResolver();
+    const rows = template ? registry.csvTemplateRows() : registry.exportRows(list, { corpName: (id) => cr.name(id) });
     if (!template) logAudit({ user: req.user?.username, action: 'focus-mon.target.export', target: 'focus-mon', detail: `${list.length}대`, ip: req.ip });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${template ? 'focus-mon-targets-template' : 'focus-mon-targets'}.csv"`);
@@ -317,6 +329,7 @@ api.post('/tools/focus-mon/targets/move', adminOnly, fullRwOnly, demoBlockWrite,
   const agents = knownAgentNames();
   const r = registry.moveTargets({ from: String(b.from ?? ''), to: String(b.to ?? ''), ids: Array.isArray(b.ids) ? b.ids : null }, { agents });
   if (!r.ok) return res.status(r.code === 'registry-unreadable' ? 503 : 400).json(r);
+  for (const id of r.moved || []) auditForgetReadiness(id); // v3.11.0 디스크 점검 — 담당 노드가 바뀐 대상의 작업 · 준비 상태(반증 F7 — 옛 노드로 고정된 작업은 아무에게도 배달되지 않는다)
   if (r.moved.length) {
     logAudit({ user: req.user?.username, action: 'focus-mon.target.move', target: 'focus-mon', detail: `${String(b.from || '') || '중앙'} → ${String(b.to || '') || '중앙'} · ${r.moved.length}대${r.skipped ? ` · 겹쳐 건너뜀 ${r.skipped}대` : ''}`, ip: req.ip });
     if (b.to) wakeEdge(String(b.to)).catch(() => {});
@@ -481,7 +494,7 @@ api.get('/tools/focus-mon/data', adminOnly, fullScopeOnly, async (req, res) => {
   const base = { ok: true, view, win: w.win, from: w.from, to: w.to, past: w.past, missing, now: Date.now() };
   if (view === 'overview') return res.json({ ...base, ...(await Q.overview(ids, w)) });
   if (view === 'compare') {
-    const metric = ['cpu', 'mem', 'net', 'disk'].includes(String(req.query.metric)) ? String(req.query.metric) : 'cpu';
+    const metric = COMPARE_METRICS.includes(String(req.query.metric)) ? String(req.query.metric) : 'cpu';
     return res.json({ ...base, metric, ...(await Q.compare(ids, w, { metric, item: String(req.query.item || ''), scope: String(req.query.scope || 'all').slice(0, 220) })) });
   }
   if (view === 'server') return res.json({ ...base, ...(await Q.serverDetail(ids[0], w, { at: req.query.at === 'avg' ? 'avg' : 'end', dev: String(req.query.dev || '') })) });
@@ -627,7 +640,7 @@ api.get('/tools/focus-mon/export.csv', adminOnly, fullScopeOnly, csvPerm, async 
         for (const d of row.devices) lines.push(csvLine([name(row.id), d.n, d.dn || '', d.k, d.mp || '', ...d.v.map((v) => (v == null ? '' : v))]));
       }
     } else {
-      const metric = ['cpu', 'mem', 'net', 'disk'].includes(String(req.query.metric)) ? String(req.query.metric) : 'cpu';
+      const metric = COMPARE_METRICS.includes(String(req.query.metric)) ? String(req.query.metric) : 'cpu';
       const r = await Q.compare(ids, w, { metric, item: String(req.query.item || ''), scope: String(req.query.scope || 'all').slice(0, 220) });
       const step = (w.to - w.from) / r.points;
       lines.push(csvLine(['time', ...r.targets.map((x) => name(x.id))]));
@@ -642,5 +655,8 @@ api.get('/tools/focus-mon/export.csv', adminOnly, fullScopeOnly, csvPerm, async 
     res.send(CSV_BOM + lines.join('\n') + '\n');
   } finally { lock.release(); }
 });
+
+
+registerFocusMonAudit(api); // v3.11.0 디스크 점검 — 같은 도구 키(focus-mon) · 같은 문
 
 }
