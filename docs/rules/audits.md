@@ -2476,7 +2476,7 @@ server/src/bareos/CLAUDE.md 크기 상한(15,000B)으로 원문 그대로 옮겼
 - **G17 폴러 상태 running = 타이머 유무(확정 — 표시만)**: `running` = 지금 조회 중(`_busy`), 타이머는 `started`.
 - **G18 워커 마지막 실패가 5초 뒤 빈 틱에 덮임(부분)**: `lastError`(10분 보존) 별도 칸 · 인출 응답 형식 오류도 콘솔에(변화 기준 스로틀) · 상태에 사본 수(`copies` — `edgeStoreView`).
 
-**남긴 것**: ① 수동·장애 재시작은 여전히 대행 작업 결과를 잃는다(업그레이드 자동 적용만 기다린다 — 비밀을 디스크에 두지 않는 설계) · Veeam 대행(`veeam/run/edgeOps.js`)·Veeam 워커의 같은 모양은 이번 범위 밖(별건 — 다음 점검 후보)
+**남긴 것**: ① 수동·장애 재시작은 여전히 대행 작업 결과를 잃는다(업그레이드 자동 적용만 기다린다 — 비밀을 디스크에 두지 않는 설계) · Veeam 대행(`veeam/run/edgeOps.js`)·Veeam 워커의 같은 모양은 이번 범위 밖(별건 — 다음 점검 후보) → ✅ **전체 점검 2회차(V-3)에 해결** — `veeam/run/inflight.js runningVeeamWork`(관리 자리 · 보내는 중 실행 · 엣지 대행 상태 변경 · 엣지 워커 실행 중)를 업그레이드 대기에 넣었다(수동 · 장애 재시작은 여전히 잃는다 — 삭제는 보내기 전 요청 감사로 기록만 남는다)
 ② 옛 엣지(v2.824.0)는 업그레이드 전까지 work 먼저 순서로 poll 한다(회신 모양은 같다 — 중앙은 그대로 받는다) ③ `-stops` 파일의 PURPOSES 누락은 광역 기존 패턴(인증 정지 파일 19개 중 Veeam 2개만 등재) — Bareos 2개만 넣었다
 ④ ~~runJob·restore 늦은 회신 미반영~~ → ✅ **v2.938 해결**(`bareos/lateReplies.js` — runJob·runJobs·묶음 restores·단건 restore. 첫 구현은 단건 restore 를 빠뜨렸고 항목마다 원장을 썼다 — 반증 1인이 찾아 같은 판에서 고쳤다: 단건 `lateKey` · `inBatch` · 재설치 뒤 옛 번호 거부 · 리허설 `deleteOnOk` · trigger 보존). **실환경 미확인**: 실제 Bareos·엣지·Windows 스크롤바(헤드리스 Chromium 은 수치로만 확인).
 

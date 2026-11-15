@@ -570,6 +570,11 @@
     새 GET 라우트가 장비에 접속하거나 상태를 바꾸면 안전 메서드 통과에 기대지 말고 `fullReadWriteScopeOnlyWith` 를 직접 건다(Bareos `?refresh=1` 은 콘솔 조회 — 읽기).
   - **결정 대기(사용자)**: `requireSettingsOwner` 의 **GET**(백업 내려받기 · 상태 · 비밀 정책 조회 — 전 법인 공용 비밀이 든 조회)을 쓰기 범위가 지정된 소유자에게 줄지. 이번에는 바꾸지 않았다(바꾸면 그 소유자는 소유자 라우트의 GET 도 잃는다).
   - 바뀌는 흐름(정직 기록): 쓰기 범위가 지정된 관리자 · 소유자는 전 법인 공용 쓰기 · 시험 · 실행 라우트에서 403 을 받는다(버튼은 지금처럼 역할로 열리고, 서버 사유가 화면에 그대로 보인다 — 통합 서버 인벤토리 · bm-storage 주기 저장 확인).
+  - ⚠ **남은 빈칸 — 전체 점검 2회차 V-1(2026-11-15 · 재현)**: 6회차는 공용 **게이트**(팩토리)만 고쳤고, 라우트 안 인라인 검사(`if (scopedVcenterIds(req.user, store.get())) 403`)와
+    실행 헬퍼 `denyScopedRun`(14개 라우트)은 조회 범위만 봤다 — 쓰기 vcA 관리자가 vCenter 로그 보관 설정(저장 경로 · 주기) · 로그인 실패 감시 설정 · 역할 권한 저장/초기화 ·
+    OS 스캔 설정 · 중계 서버 설정을 바꾸고, 전 법인 수동 수집 · 인증서 재확인을 돌리고, vCenter **새 항목** 연결 시험(등록과 같은 전 법인 동작)을 했다.
+    → 판정 하나 `auth/scopeMerge.js denyFleetWrite(req, res, reason)`(조회 ∧ 쓰기 전체 · 던지면 거부 · 쓰기 범위 사유는 `WRITE_SCOPE_PARTIAL_REASON` — 문구는 `auth/scope.js` 하나로 옮겼다) ·
+    `denyScopedRun` 은 그것을 부른다. 회귀 `veeamFullAudit2` ①(라우트 9개 · 소스 스윕). 남은 같은 모양 판독: `routes/` 의 나머지 `scopedVcenterIds(...)` 403 은 전부 GET(조회)이다.
     회귀 `server/test/bmUsageLoop6x.test.js` A1 ①② · 정정 `bareosRestoreBulkRoutes2861` ⑤(사유가 공용 쓰기 범위 사유로 먼저 나온다).
 
 - ⚠⚠ **리눅스 성능 8a단계 정비 창 · 용량 예측 API — 억제를 늘리는 쓰기는 등급 게이트, 줄이는 쓰기는 쓰기 범위, 판정은 서버 하나**
