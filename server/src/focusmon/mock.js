@@ -10,6 +10,7 @@ import { IOSTAT_COLS, aggregateIostat, TOP_N } from './rates.js';
 import { loadWindow as _loadWindow } from './load.js';
 import { flattenSample, newBlock, appendToBlock } from './codec.js';
 import { summarizeBlock } from './summary.js';
+import { dayIndex, dayStartMs } from '../util/dayKey.js';
 
 const frac = (x) => x - Math.floor(x);
 const hash = (a, b) => frac(Math.sin(a * 127.1 + b * 311.7) * 43758.5453);
@@ -171,13 +172,13 @@ export function demoSample(id, ts, interval = 2) {
  * v3.13.0(⑭) 데모의 요약 행(긴 구간) — 실제 요약과 같은 모양(1분 또는 1시간 칸).
  * 칸마다 데모 표본을 만들면 24시간(1,440칸)에 서버 하나 0.5초가 걸려(실측) 개요 20대가 이벤트 루프를 10초 막는다 —
  * 그래서 **끝 시각의 데모 표본 셋으로 본(template)을 한 번 만들고** 칸마다 정해진 물결(사인 · 업무 시간 CPU 오름)로 크기만 바꾼다.
- * 이틀 전 05:00~08:20(KST)은 '수집하지 않은 시간' 으로 비운다(시안의 빗금 — 0 이 아니다).
+ * 이틀 전 05:00~08:20(포탈 기준 시각)은 '수집하지 않은 시간' 으로 비운다(시안의 빗금 — 0 이 아니다).
  */
 const PCT_KEY = /^(s\.|c\.|m\.pct$|f\..*\.p$|f\..*\.i$|n\..*\.u$|d\..*\.util$)/;
 const CPU_KEY = /^(s\.cpu$|c\.(pct|usr|sys)$|l\.(1|5|15|run)$|k\.cs$)/;
 export function demoSumRows(id, from, to, stepMs) {
   if (!BY_ID.has(String(id))) return null;
-  const day = 86_400_000; const KST = 9 * 3_600_000; const now = Date.now();
+  const H = 3_600_000; const now = Date.now(); // 날짜 · 시각은 포탈 기준 날짜(util/dayKey — KST 상수를 박지 않는다 · C-03)
   const tb = newBlock(Math.floor(to / 60_000));
   for (const f of [0, 0.3, 0.6]) { const s = demoSample(id, to - f * 10_000); const { row, meta } = flattenSample(s); appendToBlock(tb, to - f * 10_000, row, meta); }
   const tpl = summarizeBlock(tb);
@@ -186,13 +187,13 @@ export function demoSumRows(id, from, to, stepMs) {
   const pct = tpl.keys.map((k) => PCT_KEY.test(k)); const cpu = tpl.keys.map((k) => CPU_KEY.test(k));
   let h = 0; for (const ch of String(id)) h = (h * 31 + ch.charCodeAt(0)) % 997;
   const r2 = (v) => Math.round(v * 100) / 100;
-  const today = Math.floor((now + KST) / day);
+  const today = dayIndex(now);
   const out = [];
   const start = Math.floor(from / stepMs) * stepMs;
   for (let t = start; t <= to && out.length < 2000; t += stepMs) {
-    const tod = ((t + KST) % day + day) % day;
-    if (today - Math.floor((t + KST) / day) === 2 && tod >= 5 * 3_600_000 && tod < 8.34 * 3_600_000) continue;
-    const work = tod > 9 * 3_600_000 && tod < 18 * 3_600_000 ? 1 : 0.55;
+    const di = dayIndex(t); const tod = t - dayStartMs(di);
+    if (today - di === 2 && tod >= 5 * H && tod < 8.34 * H) continue;
+    const work = tod > 9 * H && tod < 18 * H ? 1 : 0.55;
     const w1 = 1 + 0.12 * Math.sin(t / 3.7e6 + h) + 0.06 * Math.sin(t / 9.1e5 + 2 * h);
     const w2 = 1 + 0.08 * Math.sin(t / 5.3e6 + h / 3);
     const a = new Array(K); const lo = new Array(K); const hi = new Array(K);
