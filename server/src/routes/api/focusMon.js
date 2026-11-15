@@ -709,10 +709,11 @@ api.get('/tools/focus-mon/export.csv', adminOnly, fullScopeOnly, csvPerm, async 
       const metric = COMPARE_METRICS.includes(String(req.query.metric)) ? String(req.query.metric) : 'cpu';
       const opt = { metric, item: String(req.query.item || ''), scope: String(req.query.scope || 'all').slice(0, 220) };
       const r = w.long ? await L.longCompare(ids, w, opt) : await Q.compare(ids, w, opt);
-      const step = (w.to - w.from) / r.points;
+      const f0 = r.from ?? w.from; const t1 = r.to ?? w.to; // 긴 구간은 기억한 칸의 기준 시각(최대 60초 앞)
+      const step = (t1 - f0) / r.points;
       lines.push(csvLine(['time', ...r.targets.map((x) => name(x.id))]));
       for (let k = 0; k < r.points; k++) {
-        const t = new Date(w.from + step * (k + 0.5)).toISOString();
+        const t = new Date(f0 + step * (k + 0.5)).toISOString();
         lines.push(csvLine([t, ...r.targets.map((x) => (x.avg[k] == null ? '' : x.avg[k]))]));
       }
     }

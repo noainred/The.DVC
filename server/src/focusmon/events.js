@@ -67,18 +67,18 @@ export async function eventsFor(id, from, to) {
   const rows = await db.readEvents(id, from, to, 200);
   const runs = await db.listRuns(from - 31 * 86_400_000, 400);
   const out = [];
-  const explicit = new Set();
+  const explicit = new Set(); // `${수집}:s|e` — 서버마다 적은 시작 · 끝이 있는 수집 · 종류
   for (const r of rows || []) {
     // 시작 · 더함은 누가 시작했는지를 싣는다 · 그 밖의 자동 사건에는 사람 이름이 없다
     out.push({ id: r.id, at: r.at, kind: r.kind, text: r.text, by: r.kind === 'user' || r.kind === 'start' ? r.by || '' : '', scope: r.scope || 'server' });
-    const m = /^run:([^:]+):/.exec(r.id); if (m) explicit.add(m[1]);
+    const m = /^run:([^:]+):([se]):/.exec(r.id); if (m) explicit.add(`${m[1]}:${m[2]}`);
   }
-  // 업그레이드 전 수집(서버마다 적은 시작 · 끝이 없는 것)만 fm_run 에서 만든다(반증 F11)
+  // 서버마다 적은 시작 · 끝이 없는 것만 fm_run 에서 만든다(반증 F11) — **종류별로**(재검토 N5: 업그레이드 전에 시작해 지금 끝난 수집은 끝만 적혀 있어 시작 합성까지 건너뛰었다)
   for (const r of runs || []) {
-    if (!Array.isArray(r.targets) || !r.targets.includes(id) || explicit.has(r.id)) continue;
+    if (!Array.isArray(r.targets) || !r.targets.includes(id)) continue;
     const mode = r.mode === 'record' ? '계속 수집' : '잠깐 보기';
-    if (r.started >= from && r.started <= to) out.push({ id: `run-${r.id}-s`, at: r.started, kind: 'start', text: `${mode} 시작(${r.interval}초)`, by: r.by || '', scope: 'session' });
-    if (r.ended != null && r.ended >= from && r.ended <= to) out.push({ id: `run-${r.id}-e`, at: r.ended, kind: 'stop', text: `${mode} 끝`, by: '', scope: 'session' });
+    if (!explicit.has(`${r.id}:s`) && r.started >= from && r.started <= to) out.push({ id: `run-${r.id}-s`, at: r.started, kind: 'start', text: `${mode} 시작(${r.interval}초)`, by: r.by || '', scope: 'session' });
+    if (!explicit.has(`${r.id}:e`) && r.ended != null && r.ended >= from && r.ended <= to) out.push({ id: `run-${r.id}-e`, at: r.ended, kind: 'stop', text: `${mode} 끝`, by: '', scope: 'session' });
   }
   out.sort((a, b) => a.at - b.at || a.id.localeCompare(b.id));
   // 최근 200건(오래된 쪽을 자른다 — 반증 F2) · 번호는 남은 것의 시각 순

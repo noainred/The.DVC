@@ -111,9 +111,10 @@ export function ingestSample(id, ts, sample, hello, now = Date.now()) {
   // v3.13.0(⑭ 자동 사건): 가동 시간이 줄면 재부팅(30초 넘게 — 표본 순서가 바뀐 것과 가른다)
   if (Number.isFinite(sample.up)) {
     // 사건 시각 = 켜진 시각(지금 − 가동 시간) — 쉬던 동안의 재부팅을 다시 받은 시각에 찍지 않는다(반증 F9) · 앞 표본보다 앞으로는 가지 않는다
-    //   쉬던 동안(2분 넘게 표본이 없었다)은 '그동안 흘렀어야 할 가동 시간' 과도 견준다 — 다시 켜진 뒤 가동 시간이 예전 값보다 커졌어도 재부팅이다(여유 60초)
-    const gap = Number.isFinite(e.lastUpAt) ? (ts - e.lastUpAt) / 1000 : 0;
-    const rebooted = Number.isFinite(e.lastUp) && (sample.up + 30 < e.lastUp || (gap > 120 && sample.up + 60 < e.lastUp + gap));
+    //   가동 시간이 **줄었을 때만** 재부팅이다. 공백 뒤 '흘렀어야 할 가동 시간' 과 견주는 판정은 넣었다가 뺐다(반증 재검토 N1 — WAN 이 끊겼다 붙으면
+    //   중앙이 엣지 표본 시각을 수신 시각 − 10분으로 당겨 벽시계 공백만 커지고 가동 시간은 그대로라 재부팅이 없는데도 사건이 생겼다).
+    //   한계: 쉬던 동안 재부팅했고 새 가동 시간이 예전 값보다 커졌으면 놓친다(거짓 사건보다 놓침을 고른다).
+    const rebooted = Number.isFinite(e.lastUp) && sample.up + 30 < e.lastUp;
     if (rebooted && ts >= (e.lastUpAt || 0)) queueEvent(id, 'reboot', '재부팅 — 가동 시간이 줄었습니다', Math.max(e.lastUpAt || 0, Math.round(ts - sample.up * 1000)));
     if (ts >= (e.lastUpAt || 0)) { e.lastUp = sample.up; e.lastUpAt = ts; }
   }
@@ -288,6 +289,7 @@ function applyMoves(moved, now) {
   const set = new Set(moved);
   for (const s of [...S.values()]) {
     if (s.mode !== 'watch' || !s.targets.some((t) => set.has(t))) continue;
+    for (const t of s.targets) if (set.has(t)) runEvent(s, t, 'stop', `${MODE_NAME[s.mode]} 끝 — 계속 수집이 넘겨받음`, now); // 반증 재검토 N4
     s.targets = s.targets.filter((t) => !set.has(t));
     if (!s.targets.length) stopSession(s.id, 'moved', now);
   }

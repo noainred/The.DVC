@@ -219,8 +219,10 @@ test('③ 긴 구간 서버 상세 · 겹쳐 보기 — 그때 없던 칸은 nul
   const w30 = Q.normWindow({ win: 43200 }, Date.now(), { long: true });
   const r30 = await L.longServer(id, w30, {});
   assert.equal(r30.long.src, 'h');
-  assert.ok(r30.charts.cpu.usr.some((v) => v == null), '이틀 전 아침(수집하지 않은 시간)은 null — 0 이 아니다');
   assert.ok(r30.charts.cpu.usr.filter((v) => v != null).every((v) => v > 0));
+  // 빈 시간은 7일(1시간 칸 — 칸마다 1시간 요약 하나)에서 본다. 30일(4시간 칸)은 칸 경계가 지금 시각을 따라 움직여 3시간 남짓의 빈 시간이 한 칸을 다 덮지 않을 수 있다(시각에 따라 깨지던 시험)
+  const r7 = await L.longServer(id, Q.normWindow({ win: 10080 }, Date.now(), { long: true }), {});
+  assert.ok(r7.charts.cpu.usr.filter((v) => v == null).length >= 3, '이틀 전 아침(수집하지 않은 시간)은 null — 0 이 아니다');
   // 실제 대상 — 그때 수집하지 않은 앞날은 null
   const rid = 'fm-hist-d';
   const r2 = await L.longServer(rid, Q.normWindow({ win: 360 }, NOW, { long: true }), { cmp: '7d' }, NOW);
@@ -264,9 +266,12 @@ test('④ 자동 사건 — 가동 시간이 30초 넘게 줄면 재부팅 · �
   let ev = store.drainWrites(1000).filter((r) => r.kind === 'e');
   // 사건 시각 = 켜진 시각(받은 시각 − 가동 시간) — 앞 표본보다 앞으로는 가지 않는다(반증 F9)
   assert.equal(ev.length, 1); assert.equal(ev[0].ekind, 'reboot'); assert.equal(ev[0].at, NOW + 4000, '켜진 시각(NOW−34초)이 앞 표본보다 앞이라 앞 표본 시각');
-  store.ingestSample(id, NOW + 600_000, smp(100), null, NOW + 600_000); // 쉬던 동안(10분) 재부팅 — 다시 받은 시각이 아니라 켜진 시각
+  // 공백 뒤 가동 시간이 예전 값보다 커졌으면 재부팅으로 보지 않는다(반증 재검토 N1 — 엣지 표본 시각을 당기면 벽시계 공백만 커져 거짓 재부팅이 생겼다 · 놓침을 고른다)
+  store.ingestSample(id, NOW + 600_000, smp(100), null, NOW + 600_000);
+  assert.equal(store.drainWrites(1000).filter((r) => r.kind === 'e').length, 0, '가동 시간이 줄지 않았으면 사건 없음');
+  store.ingestSample(id, NOW + 610_000, smp(20), null, NOW + 610_000); // 쉬던 동안 재부팅 · 가동 시간이 줄었다 — 시각은 켜진 시각
   ev = store.drainWrites(1000).filter((r) => r.kind === 'e');
-  assert.deepEqual(ev.map((e) => [e.ekind, e.at]), [['reboot', NOW + 500_000]]);
+  assert.deepEqual(ev.map((e) => [e.ekind, e.at]), [['reboot', NOW + 600_000]], '켜진 시각(NOW+590초)이 앞 표본보다 앞이라 앞 표본 시각');
   store.ingestSample(id, NOW + 8000, smp(null), null, NOW + 8000);
   assert.equal(store.drainWrites(1000).filter((r) => r.kind === 'e').length, 0, '가동 시간을 못 읽으면 판정하지 않는다');
   store.setStatus(id, { state: 'auth' }, NOW);
@@ -603,4 +608,55 @@ test('⑦ F2 · F13 — 사건이 200건 넘으면 최근 쪽을 남긴다(DB ·
   assert.ok((await db.writeBlocks([mk(a0), mk(a1)])).ok);
   for (let i = 0; i < 400 && rollup.backfillState().building; i++) await rollup.backfillSlice(NOW, 1000);
   assert.equal((await db.readSum1(g, a1, a1)).length, 1, '공백 뒤의 분도 요약');
+});
+
+test('⑦ 재검토 N2 · N4 · N5 — 지금 시간 할 일은 세지 않음 · 넘겨받으면 끝 사건 · 합성은 종류별로', async () => {
+  // N2 — 지금 시간 항목만 많으면 '만드는 중' 이 아니다
+  rollup._resetForTest();
+  for (let k = 0; k < 35; k++) rollup.markDirty(`fm-cur-${k}`, MIN(Date.now()));
+  await rollup.backfillSlice(Date.now(), 1000); for (let i = 0; i < 200 && rollup.backfillState().building; i++) await rollup.backfillSlice(Date.now(), 1000);
+  assert.equal(rollup.backfillState().building, false, '지금 시간 할 일 35개 — 만드는 중 아님');
+  rollup._resetForTest();
+  // N4 — 잠깐 보기 서버를 계속 수집이 넘겨받으면 잠깐 보기 쪽 끝 사건
+  store._resetForTest();
+  const w1 = store.startSession({ targets: ['fm-mv-a', 'fm-mv-b'], interval: 2, mode: 'watch', by: 'u' }, NOW - 50_000);
+  assert.ok(w1.ok);
+  const r2 = store.startSession({ targets: ['fm-mv-a'], interval: 2, mode: 'record', by: 'u' }, NOW - 40_000);
+  assert.ok(r2.ok); assert.deepEqual(r2.moved, ['fm-mv-a']);
+  const ev = store.drainWrites(1000).filter((r) => r.kind === 'e' && r.target === 'fm-mv-a').map((r) => [r.ekind, r.text]);
+  assert.deepEqual(ev, [['start', '잠깐 보기 시작(2초)'], ['stop', '잠깐 보기 끝 — 계속 수집이 넘겨받음'], ['start', '계속 수집 시작(2초)']]);
+  // N5 — 업그레이드 전에 시작해 지금 끝난 수집: 끝만 서버마다 적혀 있어도 시작은 fm_run 에서 만든다
+  const id = 'fm-hist-n5';
+  await db.writeRun({ id: 'fs-old-n5', targets: [id], mode: 'record', interval: 2, started: NOW - 900_000, ended: NOW - 100_000, by: 'old' });
+  assert.ok((await db.writeBlocks([{ kind: 'e', id: `run:fs-old-n5:e:${NOW - 100_000}`, target: id, at: NOW - 100_000, ekind: 'stop', text: '계속 수집 끝', by: '', scope: 'session' }])).ok);
+  const r = await EV.eventsFor(id, NOW - 3_600_000, NOW);
+  assert.deepEqual(r.events.map((e) => [e.kind, e.at - NOW]), [['start', -900_000], ['stop', -100_000]], '시작은 합성 · 끝은 적은 것 하나(겹치지 않음)');
+});
+
+test('⑦ 재검토 N3 — 요약이 없으면 할 일 찾기를 끝낸다', async () => {
+  const DIR2 = fs.mkdtempSync(path.join(os.tmpdir(), 'focusmonhist3130-n3-'));
+  const { spawnSync } = await import('node:child_process');
+  const code = `process.env.CONFIG_DIR=${JSON.stringify(DIR2)};const r=await import(${JSON.stringify(new URL('../src/focusmon/rollup.js', import.meta.url).href)});await r.seedDirty(Date.now(),1000);await r.seedDirty(Date.now(),1000);console.log(JSON.stringify({n:await r.seedDirty(Date.now(),1000)}));`;
+  const out = spawnSync(process.execPath, ['--experimental-sqlite', '--input-type=module', '-e', code], { encoding: 'utf8', timeout: 60_000 });
+  assert.equal(out.status, 0, out.stderr.slice(0, 300));
+  assert.match(out.stdout, /\{"n":0\}/);
+  // 끝났는지 — 원본 코드: null 이면 seed.done = true (소스 확인 — 같은 프로세스의 상태를 들여다볼 출입구가 없다)
+  const src = fs.readFileSync(new URL('../src/focusmon/rollup.js', import.meta.url), 'utf8');
+  assert.match(src, /if \(o == null\) \{ seed\.done = true; return 0; \}/);
+});
+
+test('⑦ 재검토 F8 나머지 — 긴 구간 비교 · CSV 의 시각 축은 기억한 칸의 기준', async () => {
+  L._resetForTest();
+  const id = mock.DEMO_TARGETS[2].id;
+  const t = Date.now();
+  const w1 = Q.normWindow({ win: 1440 }, t, { long: true });
+  const a = await L.longCompare([id], w1, { metric: 'cpu', item: 'pct' }, t);
+  const w2 = Q.normWindow({ win: 1440 }, t + 20_000, { long: true });
+  const b = await L.longCompare([id], w2, { metric: 'cpu', item: 'pct' }, t + 20_000);
+  if (Math.floor(w1.to / 60_000) === Math.floor(w2.to / 60_000)) {
+    assert.equal(b.from, a.from, '기억한 칸 — 기준 시각도 기억한 것'); assert.equal(b.to, a.to);
+  }
+  assert.equal(a.from, w1.from); assert.equal(a.to, w1.to);
+  const csv = fs.readFileSync(new URL('../src/routes/api/focusMon.js', import.meta.url), 'utf8');
+  assert.match(csv, /const f0 = r\.from \?\? w\.from; const t1 = r\.to \?\? w\.to;/);
 });

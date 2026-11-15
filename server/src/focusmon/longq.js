@@ -113,13 +113,14 @@ export async function longOverview(ids, w, now = Date.now()) {
       out.push({ id, n: (rows || []).length, series });
       await y();
     }
-    v = { targets: out, partial, points: n, src };
+    v = { targets: out, partial, points: n, src, from: w.from, to: w.to };
     memoSet(key, v, now);
   }
   // 끝 값(카드 숫자 · 줄)은 기억하지 않는다 — 메모리의 최근 표본에서 매번(반증 F8: 60초 기억에 끝 값까지 넣어 수집 중인데 표가 묵었다)
   const targets = [];
   for (const x of v.targets) { const last = await lastSampleOf(x.id, w.to); targets.push({ ...x, lastAt: last?.at ?? null, sum: last ? summaryOf(last.s) : null }); }
-  return { targets, partial: v.partial, points: v.points, long: { src: v.src, building: backfillState().building } };
+  // from · to 는 기억한 칸의 기준(반증 재검토 — 60초 기억 안에서 응답 · CSV 의 시각 축이 칸과 어긋나지 않게)
+  return { targets, partial: v.partial, points: v.points, from: v.from, to: v.to, long: { src: v.src, building: backfillState().building } };
 }
 
 /** 지표 비교(긴 구간) — 같은 칸 수 · 칸 평균 · 최고 · 끝 값. */
@@ -141,7 +142,7 @@ export async function longCompare(ids, w, { metric = 'cpu', item = 'pct', scope 
     out.push({ id, key: sk, avg: b.avg, max: b.max, last, lastAt, n: (rows || []).length, ...((rows || []).length && !has ? { missing: 'no-series' } : {}) });
     await y();
   }
-  const v = { targets: out, partial, points: n, long: { src, building: backfillState().building } };
+  const v = { targets: out, partial, points: n, from: w.from, to: w.to, long: { src, building: backfillState().building } };
   memoSet(key, v, now);
   return v;
 }
@@ -187,7 +188,7 @@ export async function longServer(id, w, { dev = '', cmp = '' } = {}, now = Date.
       const cr = await sumRowsFor(id, w.from - shift, w.to - shift, src, y);
       overlay = { cmp, cpu: sumBuckets(cr, 'c.pct', w.from - shift, w.to - shift, n).avg, mem: sumBuckets(cr, 'm.pct', w.from - shift, w.to - shift, n).avg };
     }
-    v = { id, n: (rows || []).length, firstAt: rows?.length ? rows[0].t : null, charts, dev: devChart, points: n, sparkPoints: SP, partial: rows == null, overlay, src, rows: (rows || []).length };
+    v = { id, n: (rows || []).length, firstAt: rows?.length ? rows[0].t : null, charts, dev: devChart, points: n, sparkPoints: SP, partial: rows == null, overlay, src, rows: (rows || []).length, from: w.from, to: w.to };
     memoSet(key, v, now);
   }
   // 끝 순간 표 · 요약 · 인사(hello)는 기억하지 않는다 — 매번 메모리의 최근 표본에서(반증 F8)

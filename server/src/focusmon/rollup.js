@@ -59,7 +59,8 @@ export async function rollupTick(now = Date.now(), maxHours = 200, sliceMs = ROL
 export async function seedDirty(now = Date.now(), sliceMs = BACKFILL_SLICE_MS) {
   if (seed.done) return 0;
   const before = Math.floor(now / 3_600_000) * 60; // 끝난 시간만
-  if (seed.cursor == null) { const o = await db.oldestSumMinute(); if (o == null) return 0; seed.cursor = Math.floor(o / 60) * 60; }
+  // 요약이 하나도 없으면 찾을 것이 없다 — 끝(반증 재검토 N3: 요약이 없는 노드에서 타이머가 영구히 500ms 로 돌았다 · 새 요약은 기록기가 할 일로 적는다)
+  if (seed.cursor == null) { const o = await db.oldestSumMinute(); if (o == null) { seed.done = true; return 0; } seed.cursor = Math.floor(o / 60) * 60; }
   const t0 = Date.now(); let n = 0;
   for (let first = true; first || Date.now() - t0 < sliceMs; first = false) { // 적어도 한 조각
     if (seed.cursor >= before) { seed.done = true; break; }
@@ -119,7 +120,7 @@ export function startRollup({ paused = () => false } = {}) {
         if (!seed.done) { await seedDirty(); busy = true; }
         if (!bf.done) { await backfillSlice(); busy = true; }
         // 따라잡는 동안(할 일이 많을 때)은 여기서도 1시간 요약을 쓴다 — 기록기 틱(1분)만으로는 몇 시간 걸린다(반증 F4)
-        if (dirty.size > 30) { await rollupTick(); busy = true; }
+        if (pendingDone() > 30) { await rollupTick(); busy = true; }
       }
     } catch { bf.errors += 1; }
     bf.timer = setTimeout(tick, busy ? BACKFILL_GAP_MS : 60_000); bf.timer.unref?.();
@@ -129,5 +130,7 @@ export function startRollup({ paused = () => false } = {}) {
 export function stopRollup() { clearTimeout(bf.timer); bf.started = false; }
 
 /** 화면용 상태 — 긴 구간 응답이 '요약 만드는 중' 을 밝힌다. */
-export function backfillState() { return { building: !bf.done || dirty.size > 30, processed: bf.processed, empty: bf.empty, errors: bf.errors, cursorMinute: bf.cursor ?? null, hoursPending: dirty.size }; }
+/** 끝난 시간의 할 일 수 — 지금 시간 항목(수집 서버마다 늘 하나)은 세지 않는다(반증 재검토 N2: 31대 넘게 수집하면 '요약 만드는 중' 이 꺼지지 않았다). */
+function pendingDone(now = Date.now()) { const cur = Math.floor(now / 3_600_000); let n = 0; for (const x of dirty.values()) if (x.hour < cur) n += 1; return n; }
+export function backfillState() { return { building: !bf.done || pendingDone() > 30, processed: bf.processed, empty: bf.empty, errors: bf.errors, cursorMinute: bf.cursor ?? null, hoursPending: dirty.size }; }
 export function _resetForTest() { dirty.clear(); Object.assign(bf, { started: false, done: false, cursor: null, processed: 0, empty: 0, errors: 0, lastAt: 0 }); Object.assign(seed, { cursor: null, done: false, found: 0 }); clearTimeout(bf.timer); bf.timer = null; }
