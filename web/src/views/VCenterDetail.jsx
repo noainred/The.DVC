@@ -36,7 +36,8 @@ import { VeeamTag, VeeamSummaryCard, VeeamSnapSummary, VeeamDetailModal } from '
 import { authStopNote, authStopCell, authStopSingleText, plainText, skipNote, skipCell, skipSingleText } from './vcAuthStopText.js'; // v2.733(C3-01): 인증 정지로 조회하지 않음 · v2.744(감사 후속 FA-②): 직접 수집 대상 아님
 // v2.895(사용자 요청 — vSphere Client 의 vCenter 탭 12개 · 승인 시안 docs/design/vcenter-tabs ①~⑦ · 기본값 1~7): 탭 목록 · 옛 키 호환은 순수 모듈 하나.
 import { VCD_TABS, entryTab, saveTab, normTab, tabClass } from './vcd/vcdTabs.js';
-import useActiveTabInView from '../hooks/useActiveTabInView.js'; // v3.10.16: 탭 줄이 넘치면(400px) 열린 탭이 보이게 줄만 옮긴다
+import useActiveTabInView from '../hooks/useActiveTabInView.js';
+import { pressable } from '../components/pressable.js';   // v3.13.3 트리 노드 · 잎 · 호스트 이름 키보드(Enter/Space) // v3.10.16: 탭 줄이 넘치면(400px) 열린 탭이 보이게 줄만 옮긴다
 import SummaryTab from './vcd/SummaryTab.jsx';
 import MonitorTab from './vcd/MonitorTab.jsx';
 import ConfigureTab from './vcd/ConfigureTab.jsx';
@@ -841,7 +842,7 @@ export default function VCenterDetail({ site, onBack, siblings = null, onOpen = 
                   tail={<span style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}><VirtBadge alloc={cv.alloc} base={cv.cores} kind="cpu" /><VirtBadge alloc={cv.memAlloc} base={cv.memPhys} kind="mem" /></span>} />}>
                 {chosts.map((h) => (
                   <Tree key={h.id} k={`h:${h.id}`} open={open} toggle={toggle} icon="🖥️" action={<ObjBtn onClick={() => openObj('host', h.id)} />}
-                    label={<span className="vcd-link" onClick={(e) => { e.stopPropagation(); setHostDrawer(h); }}>{h.name}</span>}
+                    label={<span className="vcd-link" {...pressable((e) => { e.stopPropagation(); setHostDrawer(h); })} title="이 호스트 서랍(Enter)">{h.name}</span>}
                     sub={<UsageBars lead={<StateBadge state={h.connectionState} />} cpu={hostUsagePct(h, 'cpuUsagePct')} mem={hostUsagePct(h, 'memUsagePct')} tail={<span className="muted" style={{ fontSize: 12, display: 'inline-flex', gap: 10, alignItems: 'center' }}><span>VM {hostVmCount(h)}</span><VirtBadge alloc={vcpuByHost.get(h.name) || 0} base={h.cpuCores} kind="cpu" /><VirtBadge alloc={vmemByHost.get(h.name) || 0} base={h.memTotalMB} kind="mem" /></span>} />}>
                     {(vmsByHost.get(h.name) || []).map((vm) => (
                       <Leaf key={vm.id} icon="🧊" onClick={() => setVmDrawer(vm)} onObj={() => openObj('vm', vm.id)}
@@ -910,7 +911,7 @@ function Node({ label, sub, children, defaultOpen }) {
   const [o, setO] = useState(defaultOpen);
   return (
     <div>
-      <div className="vcd-node vcd-root" onClick={() => setO((v) => !v)}>
+      <div className="vcd-node vcd-root" {...pressable(() => setO((v) => !v))} aria-expanded={!!o}>
         <span className="vcd-caret">{o ? '▾' : '▸'}</span><b>{label}</b>{sub && <span className="muted vcd-sub">{sub}</span>}
       </div>
       {o && <div className="vcd-children">{children}</div>}
@@ -922,7 +923,8 @@ function Tree({ k, open, toggle, icon, label, sub, action, children }) {
   const hasKids = React.Children.count(children) > 0;
   return (
     <div>
-      <div className="vcd-node" onClick={() => toggle(k)}>
+      {/* v3.13.3: 자식이 있으면 Tab · Enter/Space 로 접고 펴기(aria-expanded) — 자식이 없으면 예전처럼 클릭만 */}
+      <div className="vcd-node" {...(hasKids ? pressable(() => toggle(k)) : { onClick: () => toggle(k) })} aria-expanded={hasKids ? !!o : undefined}>
         <span className="vcd-caret">{hasKids ? (o ? '▾' : '▸') : ''}</span>
         <span>{icon}</span> <span className="vcd-nlabel">{label}</span> {sub && <span className="vcd-sub">{sub}</span>} {action}
       </div>
@@ -932,7 +934,7 @@ function Tree({ k, open, toggle, icon, label, sub, action, children }) {
 }
 function Leaf({ icon, label, sub, badge, onClick, onObj }) {
   return (
-    <div className="vcd-node vcd-leaf" onClick={onClick}>
+    <div className="vcd-node vcd-leaf" {...pressable(onClick)}>
       <span className="vcd-caret" /><span>{icon}</span> <span className="vcd-link">{label}</span> {badge} {sub && <span className="vcd-sub">{sub}</span>}
       {onObj && <ObjBtn onClick={onObj} />}
     </div>

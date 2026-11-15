@@ -183,7 +183,7 @@
 
 ## 긴 구간 · 사건 · 가장 변했나(v3.13.0 ⑭)
 
-- **긴 구간(v3.13.0 — 2026-11-15 사용자 "기본값대로 모두 구현해줘" · 시안 ⑭ `History` · 컨펌 ①~⑥ 괄호 기본값)** — 회귀 `server/test/focusMonHistory3130.test.js` · `web/src/views/tools/focusMonHistory.test.js`.
+- **긴 구간(v3.13.0 — 2026-11-15 사용자 "기본값대로 모두 구현해줘" · 시안 ⑭ `History` · 컨펌 ①~⑥ 괄호 기본값 · **실제 릴리스 v3.14.0** — 코드 · 테스트 표지는 v3.13.0(`3130`) · main 이 v3.13.9 까지 먼저 나가 번호만 올렸다)** — 회귀 `server/test/focusMonHistory3130.test.js` · `web/src/views/tools/focusMonHistory.test.js`.
   ① 요약 표(`summary.js` 하나 — 판정 코어): 1분 묶음 하나의 열마다 [표본 수, 평균, 최저, 최고] · 못 읽은 값(null · NaN)은 **표본 수에 넣지 않는다**(다 못 읽은 열은 싣지 않는다 — 0 이 아니다) ·
      코어별(`c.k*`)은 빼고 장치는 물리 디스크의 util · rAwait · wAwait · rMB · wMB, 인터페이스는 가상이 아닌 것의 rx · tx · u, 나머지(요약 · CPU · 메모리 · 부하 · 더할 지표 · 파일시스템)는 모두 · 600열 상한 ·
      합치기는 **표본 수 가중**(최저 · 최고는 그대로) · 바이트는 deflateRaw(JSON) · 판 · 배열 길이가 다르면 null(던지지 않는다).
