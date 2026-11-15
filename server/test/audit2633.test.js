@@ -68,7 +68,7 @@ before(async () => {
   SCOPED = { username: 'adm2', role: 'admin', scope: { vcenters: [vc] } };
 });
 
-test('① 설정 로드 오류를 만드는 모든 모듈이 label + confirm 을 준다(새 모듈이 빠지면 확정 버튼이 뜨지 않는다) — v2.736 16개 · v2.769 17개(PDU 임계치) · v2.793 18개(VM 백업 잡) · v2.923 19개(튜닝 덮어쓰기) · v2.929 20개(성능 알림 규칙) · 6단계 23개(비교 세트 · 운영 주석 · 목표선) · 8a단계 24개(정비 창) · 다음 점검 ①(2차) 25개(식별 키 겹침 결정)', () => {
+test('① 설정 로드 오류를 만드는 모든 모듈이 label + confirm 을 준다(새 모듈이 빠지면 확정 버튼이 뜨지 않는다) — v2.736 16개 · v2.769 17개(PDU 임계치) · v2.793 18개(VM 백업 잡) · v2.923 19개(튜닝 덮어쓰기) · v2.929 20개(성능 알림 규칙) · 6단계 23개(비교 세트 · 운영 주석 · 목표선) · 8a단계 24개(정비 창) · 다음 점검 ①(2차) 25개(식별 키 겹침 결정) · 전체 점검 17회차 26개(엣지 배포 사용자)', () => {
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : e.name.endsWith('.js') ? [path.join(d, e.name)] : []));
   const calls = [];
   for (const f of walk(SRC)) {
@@ -76,7 +76,7 @@ test('① 설정 로드 오류를 만드는 모든 모듈이 label + confirm 을
     const s = stripComments(fs.readFileSync(f, 'utf8'));
     for (const m of s.matchAll(/makeSettingsLoadError\(([^\n]*)/g)) calls.push({ f: path.relative(SRC, f), line: m[1] });
   }
-  assert.equal(calls.length, 25, `등록 수가 바뀌었다 — 테스트의 FILES 목록도 갱신할 것: ${calls.map((c) => c.f).join(', ')}`);
+  assert.equal(calls.length, 26, `등록 수가 바뀌었다 — 테스트의 FILES 목록도 갱신할 것: ${calls.map((c) => c.f).join(', ')}`);
   for (const c of calls) assert.ok(/label:\s*'[^']+'/.test(c.line) && /confirm:/.test(c.line), `${c.f}: label·confirm 이 없다 — ${c.line}`);
 });
 
