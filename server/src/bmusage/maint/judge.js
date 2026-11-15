@@ -102,13 +102,13 @@ export function activeOccurrence(w, now) {
  * @returns {{ active:boolean, scopes:Record<string,boolean>, until:Record<string,number|null>, windows:Array<{id,name,start,end,scopes}> }}
  *   겹치는 창은 합집합(설계) — 범위마다 그 범위를 켠 창 중 가장 늦은 끝까지.
  */
-export function maintStateFor(windows = [], target = null, now = Date.now(), { tagsOf = null } = {}) {
+export function maintStateFor(windows = [], target = null, now = Date.now(), { tagsOf = null, occOf = activeOccurrence } = {}) {
   const scopes = Object.fromEntries(SCOPES.map((s) => [s, false]));
   const until = Object.fromEntries(SCOPES.map((s) => [s, null]));
   const hit = [];
   for (const w of Array.isArray(windows) ? windows : []) {
     if (!matchTarget(w, target, { tagsOf })) continue;
-    const o = activeOccurrence(w, now);
+    const o = occOf(w, now);   // 기본 activeOccurrence — 판정기(runtime.maintJudge)는 같은 시각 · 같은 창을 한 번만 센다(5회차 D4 — 값은 같다)
     if (!o) continue;
     const on = SCOPES.filter((s) => w.scopes?.[s] === true);
     hit.push({ id: t(w.id), name: t(w.name), start: o.start, end: o.end, scopes: on, origin: w.origin || 'local' });

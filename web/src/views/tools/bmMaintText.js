@@ -146,6 +146,11 @@ export function confirmOwnerNote(limits = {}) {
   const h = n(limits.ownerOverMin) != null ? limits.ownerOverMin / 60 : null;
   return `재확인은 설정 소유자 등급만 — 같은 서버를 덮는 창들의 합이 어느 24시간에서든 ${h != null ? `${h}시간` : '—'}을 넘습니다(고치기는 재확인이 아닙니다).`;
 }
+/** 점검 반복 5회차 D1 — 그 엣지 보관분이 엣지 상한에서 잘렸으면(배포 현황 targetsTruncated) 태그 창은 받은 대상만 펼친다는 사실. 잘리지 않았으면 null. */
+export function deployTruncatedNote(e = {}) {
+  const k = n(e?.targetsTruncated);
+  return k != null && k > 0 ? `태그 창은 받은 대상만 — 엣지 상한으로 ${k}대를 받지 못해 그 서버는 억제하지 않습니다` : null;
+}
 export function limitsNote(limits = {}) {
   const o = n(limits.onceMaxMin); const r = n(limits.recurMaxMin); const c = n(limits.confirmDays);
   return `최대 길이 일회 ${o != null ? durText(o) : '—'} · 반복 ${r != null ? durText(r) : '—'} · 반복 창은 확인 뒤 ${c == null ? '—' : `${c}일`}이 지나면 억제를 멈춥니다(재확인 필요 — 억제가 풀리지 않는 일을 막는 시한).`;

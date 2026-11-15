@@ -35,9 +35,12 @@ import { registerExitFlush } from './exitFlush.js'; // v2.621 LIFE-03
  * @param {number} [p.max]      링버퍼 상한(기본 500, 최소 50)
  * @param {string[]} [p.numFields] 도메인 전용 **수치** 필드 이름들. 유한수가 아니면 null 로 굳힌다
  *   (0 과 '미수집' 을 구분해야 하므로 0 으로 채우지 않는다 — types.js 정직 표기 규칙과 같은 이유).
+ * @param {number} [p.writeGapMs] 파일 쓰기 최소 간격(기본 ACTIVITY_WRITE_GAP_MS — 시험이 줄인다)
  * @returns {{recordActivity:Function, listActivity:Function, _resetForTest:Function}}
  */
-export function createActivityLog({ fileName, max = 500, numFields = [] }) {
+/** 파일 쓰기 최소 간격(점검 반복 5회차 I1) — 이 간격 안의 기록은 메모리에 두었다가 간격 끝에 한 번 쓴다. */
+export const ACTIVITY_WRITE_GAP_MS = 1_000;
+export function createActivityLog({ fileName, max = 500, numFields = [], writeGapMs = ACTIVITY_WRITE_GAP_MS }) {
   const FILE = path.join(config.configDir, fileName);
   registerStateFile(fileName); // v2.613 PERSIST2613-08: 링버퍼 캐시 — 상태 파일로 스스로 등록(이름 규약 -activity 와 이중)
   const MAX = Math.max(50, Number(max) || 500);
@@ -46,18 +49,29 @@ export function createActivityLog({ fileName, max = 500, numFields = [] }) {
    * v2.621(감사 LIFE-03 — 재현): 예전에는 기록 1건마다 링버퍼 전량(500건 ≈ 120KB)을 직렬화하고 atomicWriteFileSync
    *   (파일·디렉터리 fsync + rename)로 **동기** 저장했다. 중앙 push 수신은 장비마다 이 함수를 한 루프에서 부르므로
    *   (central/sanSwitchEdge·storageEdge·sanSwitchPerfEdge, routes/central.js curuser) 장비 60대 push 한 번이
-   *   이벤트 루프를 약 105ms 멈췄다(1건당 1.7ms × 60). 이제 **같은 틱의 기록을 묶는다**:
+   *   이벤트 루프를 약 105ms 멈췄다(1건당 1.7ms × 60). 그때 **같은 틱의 기록을 묶었다**(⚠ 5회차 I1 에 ‘같은 간격’ 으로 넓혔다 — 아래 단락):
    *   · 그 틱의 첫 기록은 예전처럼 곧바로 쓴다(따로 떨어진 기록 — 폴러의 장비별 완료 — 는 동작이 같다).
    *   · 같은 틱의 나머지는 메모리에만 넣고 틱 끝(마이크로태스크)에서 **한 번** 쓴다 → 루프 N건이 쓰기 2번이 된다.
    *   · 조회(listActivity)는 메모리를 보므로 방금 기록이 **즉시** 보이고, 조회·테스트 초기화 전에는 대기분을 먼저 쓴다
    *     (메모리와 파일이 다른 시점을 말하지 않게). `process.exit` 가 같은 틱에 오면 exit 훅이 대기분을 쓴다.
    *   상한(MAX)·손상 시 새로 시작·0600·원자 쓰기는 그대로다.
    */
-  let tickOpen = false; // 이 틱에 이미 한 번 썼다 — 나머지는 틱 끝에서
+  /*
+   * ⚠ 점검 반복 5회차 I1(정정 — 위 LIFE-03 의 ‘따로 떨어진 기록은 동작이 같다’ 가 폴러의 서버별 완료에는 비용이었다): 서버 1,000대 노드는 주기마다
+   *   완료 1,000건이 서로 다른 틱에 와서 1건마다 전량(500건 ≈ 115KB)을 직렬화 · fsync 2회 · rename 했다(단독 실측 1,000회 합 1.5~1.6초 동기).
+   *   이제 **간격 묶음 쓰기**: 직전 쓰기에서 WRITE_GAP 이 지났으면 곧바로 쓰고(따로 떨어진 기록은 예전처럼 즉시 — 앞 경계), 그 안이면 메모리에만 넣고
+   *   간격 끝에 한 번 쓴다(뒤 경계 타이머 — unref). 조회(listActivity) · 초기화 · 종료 flush 는 예전처럼 대기분을 먼저 쓴다(즉시 읽기 · 순서 그대로).
+   *   크래시(강제 종료)에 잃을 수 있는 것은 마지막 간격(기본 1초) 안의 기록뿐이다 — 재생성 가능한 캐시(머리말)라 받아들인다. 원자 쓰기 · 0600 · 상한은 그대로.
+   */
+  const GAP = Math.max(0, Number(writeGapMs) || 0);
+  let lastWriteAt = 0;  // 마지막 파일 쓰기 시각
+  let timer = null;     // 뒤 경계 쓰기 예약
   let dirty = false;    // 메모리에만 있고 아직 파일에 없는 기록이 있다
   function writeNow() {
+    if (timer) { clearTimeout(timer); timer = null; }
     if (!buf) return;
     dirty = false;
+    lastWriteAt = Date.now();
     try { atomicWriteFileSync(FILE, JSON.stringify(buf), { mode: 0o600 }); }
     catch { dirty = true; /* 영속 실패는 무시 — 인메모리 로그는 유지(다음 기록·조회에서 재시도) */ }
   }
@@ -93,10 +107,10 @@ export function createActivityLog({ fileName, max = 500, numFields = [] }) {
     for (const f of numFields) e[f] = Number.isFinite(evt[f]) ? evt[f] : null;
     b.push(e);
     if (b.length > MAX) b.splice(0, b.length - MAX);  // 오래된 것부터 폐기(링버퍼)
-    if (tickOpen) { dirty = true; return e; }         // v2.621 LIFE-03: 같은 틱의 나머지 — 틱 끝에서 한 번에
-    tickOpen = true;
-    writeNow();
-    queueMicrotask(() => { tickOpen = false; flush(); });
+    dirty = true;
+    const since = Date.now() - lastWriteAt;
+    if (!timer && since >= GAP) { writeNow(); return e; }   // 앞 경계 — 따로 떨어진 기록은 곧바로(5회차 I1)
+    if (!timer) { timer = setTimeout(() => { timer = null; flush(); }, Math.max(0, GAP - since)); timer.unref?.(); }   // 뒤 경계 — 간격 끝에 한 번
     return e;
   }
 
@@ -108,5 +122,5 @@ export function createActivityLog({ fileName, max = 500, numFields = [] }) {
   }
 
   // _resetForTest: 대기분을 먼저 쓰고 비운다 — 다음 load() 가 파일에서 다시 읽으므로 대기분을 버리면 사라진다.
-  return { recordActivity, listActivity, flush, _resetForTest: () => { flush(); buf = null; }, MAX, FILE };
+  return { recordActivity, listActivity, flush, _resetForTest: () => { flush(); buf = null; lastWriteAt = 0; }, MAX, FILE };
 }

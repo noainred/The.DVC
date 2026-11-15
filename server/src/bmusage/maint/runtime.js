@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js';
-import { maintStateFor, coverIntervals, scopeOccOf, SCOPES, RECUR_CONFIRM_DAYS } from './judge.js';
+import { maintStateFor, coverIntervals, scopeOccOf, activeOccurrence, SCOPES, RECUR_CONFIRM_DAYS } from './judge.js';
 import { windowsForJudge, windowFactsNoCache, DEPLOY_TTL_MS } from './store.js';
 import { maxMinOf, MIN, DAY } from './schedule.js';
 
@@ -56,10 +56,18 @@ export async function tagsReader() {
 export async function maintJudge({ now = Date.now(), windowsOf = windowsForJudge, tagsOf = null } = {}) {
   const w = windowsOf(now);
   const tg = tagsOf || await tagsReader();
+  // 점검 반복 5회차 D4: 창의 발생은 대상과 무관하다 — 같은 시각(at)에는 창마다 activeOccurrence 를 한 번만 센다(대상 1,000대 × 창 90개 전수가 같은 발생을 다시 셌다).
+  //   시각이 바뀌면 비운다(최근 한 시각만 — 기억이 쌓이지 않게). 판정기의 창 목록은 이 판정기 동안 그대로다.
+  let memoAt = null; let memo = null;
+  const occOf = (win, at) => {
+    if (memoAt !== at) { memoAt = at; memo = new Map(); }
+    if (!memo.has(win)) memo.set(win, activeOccurrence(win, at));
+    return memo.get(win);
+  };
   return {
     windows: w.windows,
     meta: { localUnreadable: !!w.localUnreadable, deployed: w.deployed, n: w.windows.filter((x) => !x.deleted && !x.history).length },
-    stateFor: (target, at = now) => maintStateFor(w.windows, target, at, { tagsOf: tg }),
+    stateFor: (target, at = now) => maintStateFor(w.windows, target, at, { tagsOf: tg, occOf }),
     /** 구간(합집합 · 지운 창은 지운 시각까지). only(w) — 이 계정에 보이는 창만 같은 거르기. */
     cover: (target, from, to, scope = null, { only = null } = {}) => coverIntervals(w.windows, target, from, to, { scope, tagsOf: tg, only }),
   };

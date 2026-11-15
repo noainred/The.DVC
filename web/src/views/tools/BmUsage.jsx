@@ -37,7 +37,7 @@ import {
   // v2.554 — iDRAC 라이선스 인식 · Enterprise 대체 수집 · 귀속 원인 · 엣지 보관분
   licenseMark, licenseNote, enterpriseConsentNote, enterpriseStatusNote, entDetailNotes, usageDetailNote,
   unassignedNote, edgePullState, edgePullNote, edgeNoteRows, blurNumber, BLANK_KEPT_TEXT, esxiCollectNote,
-  edgeDelegatedByAgent, edgeDelegatedChip, edgeDelegatedGuide, remoteUnknownNote } from './bmUsageText.js';   // v2.961 엣지 수집 — 엣지별 · 수집 서버 모름 갈래
+  edgeDelegatedByAgent, edgeDelegatedChip, edgeDelegatedGuide, remoteUnknownNote, alertCycleText, edgeTruncatedText } from './bmUsageText.js';   // v2.961 엣지 수집 — 엣지별 · 수집 서버 모름 갈래
 import Select from '../../components/Select.jsx';
 import { gateOk, gateTitle, settingsReadOnlyText, CORP_READ_ONLY_TITLE } from './bmWriteText.js'; // 점검 반복 2회차 E1 · E2 — 서버 쓰기 표지(actions)
 // v2.920(리눅스 성능 2단계 화면): USE 매트릭스 보드 · 서버 성능 상세 — 문구·표시 규약은 bmPerfText.js, 판정은 서버 useJudge.js.
@@ -583,9 +583,8 @@ export function BmUsage() {
           )}
           <span style={{ fontSize: 12, color: 'var(--muted)' }}>
             마지막 수집 {ageText(st.last?.at)} · 주기 {st.intervalMs ? `${Math.round(st.intervalMs / 60000)}분` : '—'} · 동시 {st.concurrency ?? '—'}
-            {st.last?.alerts && (st.last.alerts.sent > 0 || st.last.alerts.over > 0) && (
-              <> · 알림 {st.last.alerts.sent}건 발송{st.last.alerts.capped > 0 && ` (상한으로 ${st.last.alerts.capped}건 생략)`}</>
-            )}
+            {/* 점검 반복 5회차 D3: 넣은 수와 받은 결과(보냄 · 실패 · 보내는 중)를 나눠서 — 실패를 ‘발송’ 으로 세지 않는다 */}
+            {alertCycleText(st.last?.alerts, st.alertState?.delivery) && <> · {alertCycleText(st.last?.alerts, st.alertState?.delivery)}</>}
           </span>
         </div>
 
@@ -839,7 +838,10 @@ export function BmUsage() {
                             {/* v2.927: 중앙 켜기 지시 상태는 보관분 상태와 **함께**(대체하지 않는다 — 반증 F8). */}
                             {ev.instr && <div style={{ fontSize: 11, color: toneVar(ev.instr.tone) }}>중앙 켜기 · {ev.instr.label}</div>}
                           </td>
-                          <td className="right" data-sort={(r.targets || []).length}>{r.snapAt ? (r.targets || []).length : '—'}</td>
+                          <td className="right" data-sort={(r.targets || []).length}>{r.snapAt ? (r.targets || []).length : '—'}
+                            {/* 점검 반복 5회차 D1: 엣지 상한으로 잘렸으면 밝힌다(예전: 400대에서 잘려도 말하지 않았다) */}
+                            {r.snapAt && edgeTruncatedText(r) && <div style={{ fontSize: 11, color: toneVar('warn'), whiteSpace: 'nowrap' }}>{edgeTruncatedText(r)}</div>}
+                          </td>
                           <td data-sort={r.version || ''}>{r.version || <span style={{ color: 'var(--muted)' }}>—</span>}</td>
                           <td data-sort={r.snapAt || 0}>{r.snapAt ? ageText(r.snapAt) : <span style={{ color: 'var(--muted)' }}>—</span>}</td>
                           <td>

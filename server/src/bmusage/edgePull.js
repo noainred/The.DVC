@@ -29,21 +29,25 @@ import { buildPerfEntry, PERF_COL_META, compactPerfEntry } from './perfView.js';
 import { hwFactsReader, invCapState } from './hwFacts.js';
 import { freshMsFor } from './useJudge.js';
 import { getInventory } from '../idrac/invCache.js';   // 다음 점검 ③ 서버별 PowerCap(인벤토리 캐시 — 장비 왕복 0)
+import { createYielder } from '../util/timeSlice.js'; // 점검 반복 5회차 D5 — 서버 사이 양보
 
 /**
  * v2.919(리눅스 성능 1단계): 봉투에 판정이 붙은 성능 항목(`perf`)을 싣는다 — **엣지가 판정하고 중앙은 그대로 전한다**.
  *   행(rows)에서는 JSON 문자열 열(detail_json·tuning_json)을 뗀다(중앙 정제가 글자 512자로 잘라 깨진 JSON 이 되므로 — 같은 내용은 perf 에 객체로).
  *   하드웨어 사실은 이 엣지가 이미 가진 iDRAC 데이터(hwFacts — 장비 왕복 0). 실패해도 봉투는 나간다(perf 만 비고 perfError 로 밝힌다).
  */
-export async function perfForRows(rows, targets, s, { full = true, now = Date.now() } = {}) {
+export async function perfForRows(rows, targets, s, { full = true, now = Date.now(), yieldFn = null } = {}) {
   let hwOf = () => null; let perfError = '';
   try { hwOf = await hwFactsReader({ agent: config.agent?.name || '', now, freshMs: freshMsFor(s.intervalMs) }); }
   catch (e) { perfError = `하드웨어 사실을 읽지 못했습니다: ${String(e?.message || e).slice(0, 160)}`; }
   const byKey = new Map((targets || []).map((x) => [t(x.key), x]));
   const perf = [];
+  // 점검 반복 5회차 D5: 서버 사이 시간 기준 양보 — 1,000대분 판정이 한 덩어리(요청 경로 · 봉투 생성 최장 정지 184~347ms)였다. 결과 · 순서는 같다.
+  const y = yieldFn || createYielder(15);
   for (const r of rows || []) {
     try { perf.push(buildPerfEntry({ row: r, hw: hwOf(byKey.get(t(r.key))) || null, th: s.perf, intervalMs: s.intervalMs, now, full })); }
     catch (e) { perfError = perfError || `판정 실패: ${String(e?.message || e).slice(0, 160)}`; }
+    await y();
   }
   return { perf, perfError };
 }
