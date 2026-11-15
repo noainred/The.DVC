@@ -23,6 +23,7 @@ import {
   FOCUS_MISS_TEXT, ACTION_TEXT, FOCUS_HONEST, focusStatusView, focusCodeView, vText, progressCells, heatRows, heatAlpha, beforeRows, focusEvents, conclusionParts, missPathParts, osMissed,
   focusCsv, focusCsvName, FOCUS_POLL_MS, focusPollStep, FOCUS_METRIC_TEXT,
 } from './bmPerfOpsText.js';
+import { gateOk, gateWhy } from './bmWriteText.js'; // 점검 반복 8회차 F2 — 서버 표지(데모 · 역할)
 import './bmOps.css';
 import './bmPerfOps.css';
 
@@ -223,7 +224,9 @@ export default function BmFocusTab({ itemKey, vc = '', name = '' }) {
   const polls = useRef(0);
   const sessions = list.resp?.sessions || [];
   const live = sessions.find((x) => x.status === 'running' || x.status === 'queued') || null;
-  const roleOk = hasRole('admin', 'operator');
+  // 8회차 F2: 역할 · 데모는 서버 표지(actions.start — 시작 라우트와 같은 판정). 표지가 없으면(구버전 응답) 예전처럼 역할.
+  const startG = list.resp?.actions?.start;
+  const roleOk = startG ? gateOk(startG) : hasRole('admin', 'operator');
   const writable = list.resp?.writable;
   const canRun = roleOk && writable !== false;
   const plan = list.resp?.plan || null;
@@ -289,7 +292,7 @@ export default function BmFocusTab({ itemKey, vc = '', name = '' }) {
             <button className="btn bmp-touch" disabled={run.busy || reason.trim().length < 2 || !!live} onClick={start}>{run.busy ? '시작하는 중…' : live ? '진행 중 세션이 있습니다' : '집중 모니터링 시작'}</button>
             {live && live.status === 'running' && <button className="btn bmp-touch" onClick={() => stop(live.id)}>중지</button>}
           </div>
-        ) : !roleOk ? <p className="bmo-note">시작은 운영자(operator) 이상만 할 수 있습니다 — 아래 세션은 볼 수 있습니다.</p>
+        ) : !roleOk ? <p className="bmo-note">{startG?.why === 'demo' ? `시작 — ${gateWhy(startG)}` : '시작은 운영자(operator) 이상만 할 수 있습니다'} — 아래 세션은 볼 수 있습니다.</p>
           : <p className="bmo-note">{focusCodeView('forbidden').text} 아래 세션은 볼 수 있습니다.</p>}
         {cv && <p className="bmo-note" style={{ color: toneVar(cv.tone) }}>{cv.text}{run.resp?.queuePos ? ` — 대기 ${run.resp.queuePos}번째` : ''}{run.resp?.reason && !run.resp.ok ? ` (${run.resp.reason})` : ''}</p>}
         {run.err && <ErrorBox error={run.err} />}
