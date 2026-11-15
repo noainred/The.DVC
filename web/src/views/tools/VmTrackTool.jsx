@@ -11,6 +11,7 @@ import { errorBoxInput } from '../../components/accessDeniedText.js';
 import EscClose from '../../components/EscClose.jsx';
 import { fmtAgo } from '../../util/fmt.js';
 import { hasDsData, dsUnknownNote } from './storageTrack.js';
+import { vmNetSummary, vmNetUnaccountedTitle, signed } from './vmTrackText.js';   // v3.10.20 순증감 · 생성 · 삭제 한 벌(허브 카드와 같다)
 import { unitText } from '../unitText.js';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
@@ -198,9 +199,8 @@ export default function VmTrackTool() {
   }));
   const last = points[points.length - 1] || null;
   const first = points[0] || null;
-  const netRange = last && first ? last.total - first.total : 0;
-  const sumAdded = points.reduce((a, p) => a + (p.added || 0), 0);
-  const sumRemoved = points.reduce((a, p) => a + (p.removed || 0), 0);
+  const ns = vmNetSummary(points);   // v3.10.20: 순증감 ≠ 생성 − 삭제이면 '미집계 ±N' 을 카드에 적는다(기준선 · 건너뛴 슬롯)
+  const netRange = ns.net ?? 0; const sumAdded = ns.added; const sumRemoved = ns.removed;
   const sumOn = points.reduce((a, p) => a + (p.poweredOn || 0), 0);
   const sumOff = points.reduce((a, p) => a + (p.poweredOff || 0), 0);
   // 데이터스토어(v2.348): TB 환산은 화면에서만(저장은 GB REAL). 기간 사용량 증감 = 마지막 - 처음.
@@ -227,7 +227,8 @@ export default function VmTrackTool() {
           meta={last ? `켜짐 ${last.onCount.toLocaleString()} · ${fmtAgo(last.collectedAt)}` : '스냅샷 없음'} />
         <Kpi label={`${days}일 순증감`} value={`${netRange >= 0 ? '+' : ''}${netRange.toLocaleString()}`}
           accent={netRange > 0 ? 'var(--green)' : netRange < 0 ? 'var(--red)' : undefined} />
-        <Kpi label={`${days}일 생성/삭제`} value={`+${sumAdded.toLocaleString()} / -${sumRemoved.toLocaleString()}`} />
+        <Kpi label={`${days}일 생성/삭제`} value={`+${sumAdded.toLocaleString()} / -${sumRemoved.toLocaleString()}`}
+          meta={ns.unaccounted ? `미집계 ${signed(ns.unaccounted)}` : undefined} title={vmNetUnaccountedTitle(ns) || undefined} />
         <Kpi label="현재 켜짐/꺼짐" value={last ? `${last.onCount.toLocaleString()} / ${(last.offCount ?? (last.total - last.onCount)).toLocaleString()}` : '—'}
           meta={last ? `켜짐 ${last.total ? Math.round((last.onCount / last.total) * 100) : 0}%` : ''} />
         <Kpi label={`${days}일 전원 On/Off 전환`} value={`↑${sumOn.toLocaleString()} / ↓${sumOff.toLocaleString()}`}
