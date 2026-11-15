@@ -182,7 +182,8 @@ test('M5 · M6 · L2 커널 메시지 — boot_id 열쇠 · 첫 확인과 증분
   assert.ok(out.includes('on 25')); assert.ok(out.includes('f'), '첫 확인 표지');
   assert.ok(!run('110.000000', A).split('\n').includes('f'), '증분이면 f 없음');
   const memcg = run(-1, ['kern  :err   : [  500.100000] Memory cgroup out of memory: Kill process 4321 (java) score 1000 or sacrifice child',
-    'kern  :err   : [  500.100100] Killed process 4321 (java) total-vm:100kB']);
+    'kern  :err   : [  500.100100] Killed process 4321 (java) total-vm:100kB',
+    'kern  :err   : [  500.100200] Kill process 4322 (java) sharing same memory']); // RHEL 7(3.10) — 같은 메모리를 쓰는 프로세스도 죽인다는 줄(err)
   assert.match(memcg, /^e 0 0$/m, 'memcg OOM 줄은 커널 오류가 아니다'); assert.match(memcg, /^o 500\.100100 java$/m);
   const k = P.parseKmsg(['o 1.5 a', 'on 25', 'f', 'b 11111111-2222-3333-4444-555555555555', 'b ../../x', 'rc 0', 'e 3 9.5']);
   assert.equal(k.on, 25); assert.equal(k.f, true); assert.equal(k.bid, '11111111-2222-3333-4444-555555555555'); assert.equal(k.rc, 0);
