@@ -983,3 +983,7 @@
 - **v3.12.4 — 2차 루프 4회차: vCenter 상세 트리(호스트 및 클러스터 · VM 및 폴더 · 검색 결과)를 키보드로**: 노드 접기/펴기 · VM 잎(서랍) · 호스트 이름(서랍)이 div/span onClick 이라 마우스 전용이었다(스캔 재현).
   `Node` · `Tree`(자식이 있을 때만) = `pressable(접기)` + `aria-expanded` · `Leaf` = `pressable(onClick)` · 호스트 이름 span = `pressable(서랍 · stopPropagation)` — 안쪽에서 올라온 키는 노드가 받지 않으므로(`onPressKey`) 이름에서 Enter 는 서랍만 연다(노드는 접히지 않음).
   ‘⤢ 개체 보기’ 는 원래 button. 포커스 테두리 `.vcd-node[role=button] · .vcd-link[role=button]:focus-visible`. 새 트리 노드도 onClick 을 직접 달지 말 것(테스트가 `className="vcd-node…" onClick=` 을 막는다). 테스트 `pressable.test.js` v3.12.4.
+- **v3.12.5 — 2차 루프 5회차: 공용 표(DataTable)의 행 key 를 고유하게 — 라이선스 표가 정렬할 때마다 불어나던 결함**(`components/tableKeys.js uniqueKeys · baseRowKey`): DataTable 은 행 key 로 `r.id || r.key || i` 를 썼는데 라이선스 표(‘라이선스 한눈에’ · ‘라이선스 만료일’)는
+  가림 키(XXXXX-…-AAAAA)가 여러 vCenter 에서 같아(화면도 ‘여러 vCenter 가 같은 라이선스 키를 보고’ 라고 안내한다) key 가 겹쳤다 → 운영 빌드에서 열 머리를 누를 때마다 행이 55 → 105 → 155 … 로 불어났다(재현 · 개발 빌드 ‘same key’ 경고 150건).
+  겹치는 key 는 나온 차례대로 `~n`(겹치지 않는 표의 key 는 그대로). **발견 방법**: 개발 빌드(vite dev + 목 서버 4000)로 허브 하위 탭 전부를 눌러 React 경고를 모았다 — 운영 빌드 스윕은 이 경고를 보지 못한다. 테스트 `components/tableKeys.test.js`.
+- **v3.12.3 보완 — tr 안 공백 텍스트 노드**: 셀(`</td>`) 뒤 같은 줄에 공백 + `{/* 주석 */}` 을 두면 공백 텍스트 노드가 tr 의 자식이 된다(validateDOMNesting 경고 — 같은 개발 빌드 스윕에서 v3.12.3 이 만든 것을 찾았다). 주석은 셀 위 줄에. 회귀 검사 `views/jsxRowWhitespace.test.js`.
