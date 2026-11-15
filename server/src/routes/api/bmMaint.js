@@ -115,7 +115,7 @@ async function ownerGate(req, D, wins, { combined = null, now = Date.now() } = {
   if (await D.ownerTier(req)) return;
   const ST = await D.store();
   // 태그 창은 수동 용도 태그로 · 합 규칙 입력은 gateWindows(목록 canConfirm 과 같은 집합)
-  const need = ownerNeed(ST, wins, combined, combined ? gateWindows(ST, now) : [], now, combined ? await (await D.runtime()).tagsReader() : null);
+  const need = await ownerNeed(ST, wins, combined, combined ? gateWindows(ST, now) : [], now, combined ? await (await D.runtime()).tagsReader() : null, { yieldFn: D.yielder() });
   if (need === 'window') throw fail(403, 'owner-required', '법인 전체 · 태그 대상 · 12시간 넘는 창은 설정 소유자 등급(소유자 + 전체 범위)만 만들고 고칠 수 있습니다.');
   if (need === 'combined') throw fail(403, 'owner-required', '같은 서버를 덮는 창들(설정 소유자 창 · 법인 · 태그 창 포함)의 합이 어느 24시간에서든 12시간을 넘습니다 — 설정 소유자 등급만 만들고 · 고치고 · 재확인할 수 있습니다.');
 }
@@ -123,9 +123,10 @@ async function ownerGate(req, D, wins, { combined = null, now = Date.now() } = {
  * 비소유자에게 소유자 등급이 필요한가(순수 판정 묶음 — store.needsOwnerTier · store.coverNeedsOwner): 'window'(창 하나 규칙) · 'combined'(합 규칙) · null.
  *   쓰기 403(ownerGate)과 목록의 canConfirm 이 **같은 함수**다(점검 반복 3회차 D1 — 목록이 합 규칙을 보지 않아 재확인 버튼이 열리고 누르면 403 이었다).
  */
-export function ownerNeed(ST, wins, combined, all, now, tagsOf) {
+export async function ownerNeed(ST, wins, combined, all, now, tagsOf, { memo = null, yieldFn = null } = {}) {
   if (wins.some((w) => w && ST.needsOwnerTier(w))) return 'window';
-  if (combined && ST.coverNeedsOwner(combined, all, now, { tagsOf })) return 'combined';
+  // 합 규칙 — 동기 coverNeedsOwner 와 같은 단계 코어(coverNeedsOwnerAsync) · 단계 사이 시간 기준 양보(3회차 재확인 R1 ④) · 목록은 한 요청 메모를 넘긴다(①②)
+  if (combined && await ST.coverNeedsOwnerAsync(combined, all, now, { tagsOf, memo, yieldFn })) return 'combined';
   return null;
 }
 /** 합 규칙의 입력 — 이 노드의 창 + 신선한 배포본(엣지 노드라면 중앙 창도 그 서버를 덮는다). ownerGate · 목록 canConfirm 이 같은 집합. */
@@ -170,20 +171,21 @@ export async function bmMaintList(req, snap, deps = {}) {
   const owner = await D.ownerTier(req);
   const writable = (w) => w.origin !== 'central' && inUserWriteScope(req.user, snap, w.vcenterId);
   // 재확인 버튼 = 재확인 라우트와 같은 판정(ownerNeed — 창 하나 규칙 + 합 규칙 · 3회차 D1). 소유자 등급이면 합을 세지 않는다(라우트와 같다).
-  //   합 입력은 법인별로 미리 나눈다(matchTarget 은 법인이 같은 창만 맞춘다 — 같은 결과 · 창마다 전 창을 훑지 않게).
-  let confirmNeed = () => null;
+  //   ⚠ 3회차 재확인 R1: 비소유자 목록이 창마다 합 규칙을 세어 창 200 에서 20초 · 루프 정지 0.6초였다 — 한 요청 메모(store.coverMemo: 창별 발생 조각 ·
+  //   (법인, 키)별 동료 · 기준점)와 같은 동료 묶음 건너뛰기로 같은 계산을 행마다 다시 하지 않는다(답은 같다 — 시험이 메모 없는 정확 경로와 대조). 행 사이 시간 기준 양보는 그대로.
+  let confirmNeed = async () => null;
   if (!owner) {
-    const byVc = new Map();
-    for (const x of gateWindows(ST, now)) { const k = String(x?.vcenterId ?? '').trim(); if (!byVc.has(k)) byVc.set(k, []); byVc.get(k).push(x); }
+    const gate = gateWindows(ST, now);
     const tagsOf = await R.tagsReader();
-    confirmNeed = (w) => ownerNeed(ST, [w], { ...w, confirmedAt: now }, byVc.get(String(w.vcenterId ?? '').trim()) || [], now, tagsOf);
+    const memo = ST.coverMemo(now);
+    const yieldFn = D.yielder();
+    confirmNeed = (w) => ownerNeed(ST, [w], { ...w, confirmedAt: now }, gate, now, tagsOf, { memo, yieldFn });
   }
-  const view = (w) => {
+  const view = (w, cNeed) => {
     const st = J.windowStatus(w, now);
     const fmt = (o) => (o ? { start: o.start, end: o.end, startLocal: S.fmtLocal(w.tz, o.start), endLocal: S.fmtLocal(w.tz, o.end) } : null);
     const needOwner = ST.needsOwnerTier(w);
     const confirmable = writable(w) && w.schedule.kind !== 'once';
-    const cNeed = confirmable ? confirmNeed(w) : null;
     return {
       id: w.id, name: w.name, reason: w.reason, vcenterId: w.vcenterId, tz: w.tz, schedule: w.schedule, scopes: Object.keys(w.scopes || {}), origin: w.origin || 'local', rev: w.rev,
       target: { kind: w.target.kind, ...(w.target.tag ? { tag: w.target.tag } : {}), count: (w.target.keys || []).length, names: (w.target.names || []).map(maskName).slice(0, 20),
@@ -199,7 +201,10 @@ export async function bmMaintList(req, snap, deps = {}) {
   };
   const y = D.yielder();
   const rows0 = [];
-  for (const w of list) { rows0.push(view(w)); await y(); }   // 창마다 상태 한 번 · 사이 양보(F6)
+  for (const w of list) {
+    const confirmable = writable(w) && w.schedule.kind !== 'once';
+    rows0.push(view(w, confirmable ? await confirmNeed(w) : null)); await y();   // 창마다 상태 한 번 · 사이 양보(F6) · 합 규칙은 단계 사이에도 양보(R1)
+  }
   const rows = rows0.sort((a, b) => ({ active: 0, scheduled: 1, expired: 2, ended: 3 }[a.status] ?? 4) - ({ active: 0, scheduled: 1, expired: 2, ended: 3 }[b.status] ?? 4) || (a.next?.start ?? a.last?.start ?? 0) - (b.next?.start ?? b.last?.start ?? 0));
   const s = R.maintStats();
   // 엣지 배포 현황(중앙) — 인출 기록 + 엣지 봉투의 배포본 상태

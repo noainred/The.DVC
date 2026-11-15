@@ -72,69 +72,132 @@ export function needsOwnerTier(w) {
  *   지운 창 제외 · 만료 · 끝내기는 발생 계산이 자른다)와 후보를 합쳐, 후보의 발생에 걸치는 어느 24시간 구간에서든 덮임이 OWNER_OVER_MIN(12시간)을 넘으면 true(소유자 등급 필요).
  *   ‘12시간 넘게 덮는 억제는 소유자 등급’ 이라는 원래 뜻 — 소유자 창 옆에 운영자가 12시간을 붙여 24시간 상시가 되는 길(G1)을 막는다. approvedBy 는 **기록일 뿐 합 판정에 쓰지 않는다**
  *   (소유자가 운영자 창의 이름만 고쳐 approvedBy 가 붙어도 합에서 빠지지 않는다 — G2). 소유자 자신의 저장은 라우트가 이 검사 없이 허용한다.
- *   비용: 반복 창은 앞으로 36일(매월은 400일) · 일회 창은 그 발생 — 발생마다 앞뒤 2일만 다시 센다(쓰기 경로 · 같은 서버의 창 몇 개).
+ *   기준점: 반복 창은 앞으로 36일(매월은 400일) · 일회 창은 그 발생 — 발생마다 앞뒤 2일 안에서 24시간 창을 본다.
+ *   24시간 창 시작 후보 = 합친 구간의 시작 · (끝 − 24시간) + **후보 발생마다 (시작 − 24시간 + 1ms) · (끝 − 1ms)**(⚠ 점검 반복 3회차 재확인 R2: 합친 구간이 후보 발생 앞뒤로
+ *   하루 넘게 이어지면 구간 끝점에서 시작하는 24시간 창이 후보와 겹치지 않아 하나도 세지 않았다 — 소유자 창으로 상시 덮인 서버에 운영자가 ‘수요일 00:00 12h’ · ‘수요일 12:00 12h’ 를 만들 수 있었다.
+ *   덮임은 시작 위치에 대해 조각 선형이라 후보 발생과 겹치는 범위 안 최대는 꺾이는 점 또는 그 범위의 양끝에서 나온다).
  * @param {object} cand  정규화한 후보(고치기 뒤 · 재확인이면 confirmedAt 을 지금으로)
  * @param {Array} all   이 노드의 창 전부 + 신선한 배포본(후보의 앞 판 · 같은 id 는 뺀다)
- * @param {{tagsOf?:Function, exact?:boolean}} o  태그 창 판정(중앙 수동 용도 태그) — 없으면 태그 창은 펼친 keys 로만 ·
- *   exact = 빠른 길 · 발생 한 번 세기 없이 예전 계산 그대로(시험 대조용 — 답은 같다: 점검 반복 3회차)
+ * @param {{tagsOf?:Function, exact?:boolean, memo?:object}} o  태그 창 판정(중앙 수동 용도 태그) — 없으면 태그 창은 펼친 keys 로만 ·
+ *   exact = 빠른 길 · 메모 · 같은 동료 묶음 건너뛰기 없이 기준점마다 다시 센다(시험 대조용 — 답은 같다) ·
+ *   memo = coverMemo(now) — 한 요청 안에서 같은 창 목록(all) · 같은 now 로 여러 후보를 볼 때(목록 canConfirm) 창별 발생 조각 · (법인, 키)별 동료 · 기준점을 다시 세지 않는다(3회차 재확인 R1).
  */
-export function coverNeedsOwner(cand, all = [], now = Date.now(), { tagsOf = null, exact = false } = {}) {
+export function coverNeedsOwner(cand, all = [], now = Date.now(), o = {}) {
+  const it = coverSteps(cand, all, now, o);
+  let r = it.next();
+  while (!r.done) r = it.next();
+  return r.value;
+}
+/** coverNeedsOwner 와 같은 계산(같은 단계 함수) — 단계 사이에 yieldFn(시간 기준 양보)을 기다린다. 라우트(목록 · 쓰기)가 쓴다(3회차 재확인 R1 ④ — 큰 계산이 루프를 길게 막지 않게). */
+export async function coverNeedsOwnerAsync(cand, all = [], now = Date.now(), { yieldFn = null, ...o } = {}) {
+  const it = coverSteps(cand, all, now, o);
+  let r = it.next();
+  while (!r.done) { if (yieldFn) await yieldFn(); r = it.next(); }
+  return r.value;
+}
+/** 판정 단계(생성기 — 동기 · 비동기 두 꼴이 같은 코어). yield = 양보해도 되는 자리(발생 조각을 새로 센 뒤 · 기준점 하나 뒤). */
+function* coverSteps(cand, all, now, { tagsOf = null, exact = false, memo = null } = {}) {
   if (!cand || cand.target?.kind !== 'server' || cand.deleted) return false;
   const keys = cand.target.keys || [];
-  const live = (Array.isArray(all) ? all : []).filter((w) => w && w.id !== cand.id && !w.deleted && w.schedule);
-  const peersOf = (key) => live.filter((w) => matchTarget(w, { key, vcenterId: cand.vcenterId }, { tagsOf }));
-  const peers = keys.length ? live.filter((w) => keys.some((k) => matchTarget(w, { key: k, vcenterId: cand.vcenterId }, { tagsOf }))) : [];
-  if (!peers.length) return false;
-  const horizon = (w) => (w.schedule?.kind === 'weekly' ? 36 * DAY : FUTURE_MAX_DAYS * DAY);
-  const anchorsOf = (w) => effectiveOccurrences(w, now - DAY, now + horizon(w));
+  const list = Array.isArray(all) ? all : [];
   const limit = OWNER_OVER_MIN * MIN;
-  for (const key of keys) {
-    const ps = peersOf(key);
-    if (!ps.length) continue;
-    const group = [cand, ...ps];
-    // 빠른 길(점검 반복 3회차 — 목록 canConfirm 이 비소유자 행마다 이 함수를 부르게 되어 요청 경로 비용을 줄인다 · 답은 정확한 계산과 같다):
-    //   창 하나가 어느 24시간에서든 덮는 최대는 일회 = 그 길이 · 반복 = 길이 × 2(이웃 발생의 시작 간격은 시간대 변경이 있어도 18시간을 넘으므로 한 24시간에 걸치는 발생은 둘까지).
-    //   그 합이 상한 이하면 어떤 24시간도 넘을 수 없다(위로 잡은 값). 넘을 수 있으면 아래 정확한 계산. 시험이 무작위 입력으로 exact 와 대조한다(bmUsageLoop3 D1).
-    if (!exact) {
-      const bound = group.reduce((a, w) => { const d = durationMinOf(w.schedule, w.tz); return a + (d == null ? Infinity : (w.schedule?.kind === 'once' ? d : 2 * d)); }, 0);
-      if (bound * MIN <= limit) continue;
+  const horizon = (w) => (w.schedule?.kind === 'weekly' ? 36 * DAY : FUTURE_MAX_DAYS * DAY);
+  if (exact) {
+    // 정확 경로(시험 대조용 — 예전 계산 그대로 + R2 후보): 메모 · 빠른 길 · 같은 묶음 건너뛰기 없이 기준점마다 effectiveOccurrences 를 다시 센다.
+    const live = list.filter((w) => w && w.id !== cand.id && !w.deleted && w.schedule);
+    const anchorsOf = (w) => effectiveOccurrences(w, now - DAY, now + horizon(w));
+    for (const key of keys) {
+      const ps = live.filter((w) => matchTarget(w, { key, vcenterId: cand.vcenterId }, { tagsOf }));
+      if (!ps.length) continue;
+      const group = [cand, ...ps];
+      for (const a of [...anchorsOf(cand), ...ps.filter((w) => w.schedule?.kind !== 'weekly').flatMap(anchorsOf)]) {
+        if (windowOver(a, cand, group, (w, lo, hi) => effectiveOccurrences(w, lo, hi), limit)) return true;
+      }
     }
-    // 기준점 — 후보의 발생 + 매주가 아닌 동료의 발생(그 둘레에 후보 발생이 있으면 본다)
-    const anchors = [...anchorsOf(cand), ...ps.filter((w) => w.schedule?.kind !== 'weekly').flatMap(anchorsOf)];
-    if (!anchors.length) continue;
-    // 발생은 창마다 기준점 전체 구간을 한 번 세고(30일 조각 — OCC_MAX 에 잘리지 않게) 기준점마다 겹치는 것만 고른다(3회차 — 같은 답: 발생 값은 구간과 무관하고
-    //   effectiveOccurrences(w, lo, hi) = 넓은 구간 결과 중 [lo, hi) 와 겹치는 것). exact 는 예전처럼 기준점마다 다시 센다(시험 대조용).
-    const spanLo = Math.min(...anchors.map((a) => a.start)) - 2 * DAY; const spanHi = Math.max(...anchors.map((a) => a.end)) + 2 * DAY;
-    const cache = new Map();
-    const occOf = (w, lo, hi) => {
-      if (exact) return effectiveOccurrences(w, lo, hi);
-      let list = cache.get(w);
-      if (!list) {
-        list = []; let last = -Infinity;
-        for (let c0 = spanLo; c0 < spanHi; c0 += 30 * DAY) for (const o of effectiveOccurrences(w, c0, Math.min(spanHi, c0 + 30 * DAY))) if (o.start > last) { list.push(o); last = o.start; }
-        cache.set(w, list);
-      }
-      return list.filter((o) => o.end > lo && o.start < hi);
-    };
-    for (const a of anchors) {
+    return false;
+  }
+  // 메모 — 같은 now · 같은 목록 · 같은 태그 판정일 때만 동료 묶음을 다시 쓴다(아니면 이 호출만의 메모)
+  const M = memo && memo.now === now ? memo : coverMemo(now);
+  if (M.all === undefined) { M.all = list; M.tagsOf = tagsOf; }
+  const shareMembers = M.all === list && M.tagsOf === tagsOf;
+  const membersOf = (key) => {
+    const mk = `${String(cand.vcenterId ?? '').trim()}|${key}`;
+    let ms = shareMembers ? M.members.get(mk) : null;
+    if (!ms) {
+      ms = list.filter((w) => w && !w.deleted && w.schedule && matchTarget(w, { key, vcenterId: cand.vcenterId }, { tagsOf }));
+      if (shareMembers) M.members.set(mk, ms);
+    }
+    return ms;
+  };
+  const anchorsOf = (w) => {
+    let a = M.anchors.get(w);
+    if (!a) { a = effectiveOccurrences(w, now - DAY, now + horizon(w)); M.anchors.set(w, a); }
+    return a;
+  };
+  // 발생 — 창마다 지금 기준 8일 조각으로 한 번 세고(OCC_MAX 에 잘리지 않게) 구간마다 겹치는 것만 고른다.
+  //   같은 답: 발생 값은 세는 구간과 무관하고 effectiveOccurrences(w, lo, hi) = 조각 결과 중 [lo, hi) 와 겹치는 것.
+  const chunksOf = (w) => { let c = M.occ.get(w); if (!c) { c = new Map(); M.occ.set(w, c); } return c; };
+  const jRange = (lo, hi) => [Math.floor((lo - now) / CHUNK_MS), Math.floor((hi - 1 - now) / CHUNK_MS)];
+  /** [lo, hi) 의 조각을 미리 센다 — 새로 센 것이 있으면 true(양보 자리). */
+  const warm = (w, lo, hi) => {
+    const byChunk = chunksOf(w); const [j0, j1] = jRange(lo, hi); let fresh = false;
+    for (let j = j0; j <= j1; j += 1) if (!byChunk.has(j)) { byChunk.set(j, effectiveOccurrences(w, now + j * CHUNK_MS, now + (j + 1) * CHUNK_MS)); fresh = true; }
+    return fresh;
+  };
+  const occOf = (w, lo, hi) => {
+    warm(w, lo, hi);
+    const byChunk = chunksOf(w); const [j0, j1] = jRange(lo, hi);
+    const out = []; let last = -Infinity;
+    for (let j = j0; j <= j1; j += 1) for (const o of byChunk.get(j)) if (o.start > last) { last = o.start; if (o.end > lo && o.start < hi) out.push(o); }
+    return out;
+  };
+  const seen = new Set();
+  let candAnchors = null;
+  for (const key of keys) {
+    const ps = membersOf(key).filter((w) => w.id !== cand.id);
+    if (!ps.length) continue;
+    // 같은 동료 묶음은 같은 답(법인 · 태그 창만 동료인 키들 — 3회차 재확인 R1 ②) — 앞에서 false 였으면 다시 세지 않는다
+    const sig = ps.map((w) => w.id).join(',');
+    if (seen.has(sig)) continue;
+    seen.add(sig);
+    const group = [cand, ...ps];
+    // 빠른 길(3회차 — 답은 정확한 계산과 같다): 창 하나가 어느 24시간에서든 덮는 최대는 일회 = 그 길이 · 반복 = 길이 × 2(이웃 발생의 시작 간격은 시간대 변경이 있어도
+    //   18시간을 넘으므로 한 24시간에 걸치는 발생은 둘까지). 그 합이 상한 이하면 어떤 24시간도 넘을 수 없다(위로 잡은 값).
+    const bound = group.reduce((a, w) => { const d = durationMinOf(w.schedule, w.tz); return a + (d == null ? Infinity : (w.schedule?.kind === 'once' ? d : 2 * d)); }, 0);
+    if (bound * MIN <= limit) continue;
+    candAnchors ||= effectiveOccurrences(cand, now - DAY, now + horizon(cand));
+    for (const a of [...candAnchors, ...ps.filter((w) => w.schedule?.kind !== 'weekly').flatMap(anchorsOf)]) {
       const lo = a.start - 2 * DAY; const hi = a.end + 2 * DAY;
-      const mine = occOf(cand, lo, hi);
-      if (!mine.length) continue;
-      const iv = group.flatMap((w) => occOf(w, lo, hi)).map((o) => ({ from: Math.max(lo, o.start), to: Math.min(hi, o.end) })).sort((x, y) => x.from - y.from);
-      const m = [];
-      for (const x of iv) { const l = m[m.length - 1]; if (l && x.from <= l.to) l.to = Math.max(l.to, x.to); else m.push({ ...x }); }
-      // 24시간 창의 덮임 최대는 창 시작이 어느 구간 시작이거나 창 끝이 어느 구간 끝일 때 나온다 — 후보 발생과 겹치는 창만 본다.
-      for (const s0 of m.flatMap((x) => [x.from, x.to - DAY])) {
-        const s1 = s0 + DAY;
-        if (!mine.some((o) => o.start < s1 && o.end > s0)) continue;
-        const cov = m.reduce((acc, x) => acc + Math.max(0, Math.min(s1, x.to) - Math.max(s0, x.from)), 0);
-        if (cov > limit) return true;
-      }
+      if (!occOf(cand, lo, hi).length) continue;   // 그 둘레에 후보 발생이 없으면 동료를 세지 않는다(windowOver 와 같은 판단)
+      for (const w of ps) if (warm(w, lo, hi)) yield;   // 동료 발생 조각을 새로 셌으면 양보 자리(R1 ④)
+      if (windowOver(a, cand, group, occOf, limit)) return true;
+      yield;
     }
   }
   return false;
 }
-
+/** 발생 세기 조각(coverNeedsOwner 메모) — 8일(매일 창도 조각 하나에 9개 안팎 · OCC_MAX 와 멀다). */
+const CHUNK_MS = 8 * DAY;
+/** 한 요청 안의 계산 메모(목록 canConfirm — 3회차 재확인 R1). 창 객체가 그 요청 동안 바뀌지 않는다는 전제(목록 한 번 · 같은 now). */
+export function coverMemo(now) { return { now, all: undefined, tagsOf: undefined, members: new Map(), anchors: new WeakMap(), occ: new WeakMap() }; }
+/** 기준점 하나 둘레(앞뒤 2일)에서 후보 발생과 겹치는 24시간 창 중 덮임이 상한을 넘는 것이 있는가(순수 — 빠른 길 · 정확 경로가 같은 함수). */
+function windowOver(a, cand, group, occOf, limit) {
+  const lo = a.start - 2 * DAY; const hi = a.end + 2 * DAY;
+  const mine = occOf(cand, lo, hi);
+  if (!mine.length) return false;
+  const iv = group.flatMap((w) => occOf(w, lo, hi)).map((o) => ({ from: Math.max(lo, o.start), to: Math.min(hi, o.end) })).sort((x, y) => x.from - y.from);
+  const m = [];
+  for (const x of iv) { const l = m[m.length - 1]; if (l && x.from <= l.to) l.to = Math.max(l.to, x.to); else m.push({ ...x }); }
+  // 24시간 창의 덮임 최대(후보 발생과 겹치는 창만)는 창 시작이 구간 시작 · 창 끝이 구간 끝인 꺾이는 점, 또는 후보 발생과 겹치는 범위의 양끝(R2)에서 나온다.
+  const starts = [...m.flatMap((x) => [x.from, x.to - DAY]), ...mine.flatMap((o) => [o.start - DAY + 1, o.end - 1])];
+  for (const s0 of starts) {
+    const s1 = s0 + DAY;
+    if (!mine.some((o) => o.start < s1 && o.end > s0)) continue;
+    const cov = m.reduce((acc, x) => acc + Math.max(0, Math.min(s1, x.to) - Math.max(s0, x.from)), 0);
+    if (cov > limit) return true;
+  }
+  return false;
+}
 /**
  * 정규화 하나(엄격 = API 입력 — 형식 밖 400 · 느슨 = 파일 · 배포본 — 형식 밖이면 null).
  * @param {object} raw
@@ -393,11 +456,11 @@ let _dep = null;   // { m, s, data }
 export const DEPLOY_HISTORY_MAX = 500;
 export const DEPLOY_HISTORY_BYTES_MAX = 1_000_000;
 /** history 를 상한 안으로(순수 — 앞에서부터 남긴다: 호출자가 최근 것부터 줄 세운다). */
-export function capHistory(list = []) {
+export function capHistory(list = [], { sizeOf = (w) => JSON.stringify(w).length, maxBytes = DEPLOY_HISTORY_BYTES_MAX } = {}) {
   const out = []; let bytes = 0; let dropped = 0;
   for (const w of Array.isArray(list) ? list : []) {
-    const n = JSON.stringify(w).length;
-    if (out.length >= DEPLOY_HISTORY_MAX || bytes + n > DEPLOY_HISTORY_BYTES_MAX) { dropped += 1; continue; }
+    const n = sizeOf(w);
+    if (out.length >= DEPLOY_HISTORY_MAX || bytes + n > maxBytes) { dropped += 1; continue; }
     out.push(w); bytes += n;
   }
   return { list: out, dropped };
@@ -405,7 +468,15 @@ export function capHistory(list = []) {
 /** 파일에 쓸 꼴 — 메모리 표지(origin · history)는 읽을 때 다시 붙인다. */
 const bareWin = (w) => { const o = { ...w }; delete o.origin; delete o.history; return o; };
 /** history 줄 세우기 열쇠(최근 것부터) — 가벼운 값만(지운 시각 · 끝낸 시각 · 재확인 · 만든 시각 중 늦은 것). */
-export const historyRecency = (w) => Math.max(Number(w?.deleted?.at) || 0, Number(w?.endedAt) || 0, Number(w?.confirmedAt) || 0, Number(w?.at) || 0);
+/**
+ * ⚠ 정정(3회차 재확인 R3): 처음 판은 지운 · 끝낸 · 재확인 · 만든 시각만 보아, 오래전에 만들어 어제 저절로 끝난 일회 창(지난 31일 계산에 실제로 걸리는 창)이 먼저 버려졌다.
+ *   이제 그 창의 **유효 끝**(일회 = 마지막 발생의 끝 onceEndOf · 반복 = 재확인 만료 시각)과 지운 · 끝낸 시각 중 늦은 것.
+ */
+export const historyRecency = (w) => {
+  if (!w) return 0;
+  const end = w.schedule?.kind === 'once' ? onceEndOf(w.deleted ? { ...w, deleted: undefined } : w) : (expiresAt(w) ?? 0);
+  return Math.max(Number(end) || 0, Number(w.deleted?.at) || 0, Number(w.endedAt) || 0);
+};
 /**
  * 배포본 저장(엣지 인출 워커) — 같은 정규화를 다시 거친다(엣지는 중앙 문자열을 그대로 믿지 않는다). 형식 밖은 버리고 센다.
  * @param {Array} list  지금 억제에 쓰는 창(진행 중 · 예정 — 24시간 시한)
@@ -434,17 +505,17 @@ export function saveDeployed(list, { sig = '', now = Date.now(), history = undef
   const liveIds = new Set(items.map((w) => w.id));
   let hist = []; let historyDropped = 0; let historyAt = 0;
   if (Array.isArray(history)) {
-    const cand = [];
+    const cand = [];   // { w, n } — 크기는 **받은 원문 길이**로 잰다(3회차 재확인 R3 — 정규화 뒤 꼴(edits 등)로 다시 재면 중앙이 상한 안에서 보낸 것 중 하나를 더 버렸다)
     for (const x of history.slice(0, DEPLOY_HISTORY_MAX * 2)) {
       const w = normalizeWindow(x);
       if (!w) { historyDropped += 1; continue; }
       carry(x, w);
       if (liveIds.has(w.id) || !keptPast(w, now)) continue;
-      cand.push(w);
+      cand.push({ w, n: JSON.stringify(x).length });
     }
     historyDropped += Math.max(0, history.length - DEPLOY_HISTORY_MAX * 2);
-    const c = capHistory(cand.sort((a, b) => historyRecency(b) - historyRecency(a)));
-    hist = c.list; historyDropped += c.dropped; historyAt = now;
+    const c = capHistory(cand.sort((a, b) => historyRecency(b.w) - historyRecency(a.w)), { sizeOf: (p) => p.n });
+    hist = c.list.map((p) => p.w); historyDropped += c.dropped; historyAt = now;
   } else {
     const p = prevOf();
     hist = p.history.filter((w) => !liveIds.has(w.id) && keptPast(w, now));
@@ -470,7 +541,8 @@ export function loadDeployed(now = Date.now()) {
     const items = o.items.map((x) => normalizeWindow(x)).filter(Boolean).map((w) => ({ ...w, origin: 'central' }));
     // history(3회차 D2) — 같은 정규화 · 지난 구간 전용 표지(history: true — judge.activeOccurrence 가 지금 판정에서 뺀다) · 상한 다시 · 없거나 형식 밖이면 [](옛 배포본)
     const ids = new Set(items.map((w) => w.id));
-    const history = capHistory((Array.isArray(o.history) ? o.history.slice(0, DEPLOY_HISTORY_MAX) : []).map((x) => normalizeWindow(x)).filter((w) => w && !ids.has(w.id))).list
+    // 읽을 때는 개수 상한 + 넉넉한 크기 상한(저장한 꼴은 정규화 뒤라 받은 원문보다 길다 — 저장 때 받은 것을 다시 버리지 않게: R3)
+    const history = capHistory((Array.isArray(o.history) ? o.history.slice(0, DEPLOY_HISTORY_MAX) : []).map((x) => normalizeWindow(x)).filter((w) => w && !ids.has(w.id)), { maxBytes: DEPLOY_HISTORY_BYTES_MAX * 2 }).list
       .map((w) => ({ ...w, origin: 'central', history: true }));
     let at = Number(o.at) || 0; let clampedFrom = Number(o.atClampedFrom) || null;
     if (at > now + DEPLOY_FUTURE_SKEW_MS) {

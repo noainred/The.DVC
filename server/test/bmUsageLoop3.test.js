@@ -119,36 +119,119 @@ test('D1 — 이름 · 사유만 고치기는 재확인이 아니다(만료 그�
   assert.equal(row(await call('opA', 'GET', ''), once.id).canConfirm, false);
 });
 
-test('D1 — 합 규칙(coverNeedsOwner)의 빠른 길 · 발생 한 번 세기는 정확한 계산과 같은 답(무작위 입력 · DST 둘레 · 목록이 행마다 부르게 된 비용 줄이기)', () => {
-  // 시드 고정 난수(재현 가능) — 창 꼴 · 시간대 · 요일 · 길이 · 재확인 · 끝내기를 섞는다
+test('D1 · R1 · R2 — 합 규칙(coverNeedsOwner)의 빠른 길 · 메모 · 같은 묶음 건너뛰기 · 비동기 단계는 정확한 계산과 같은 답(무작위 · DST 둘레 · 법인 창 · 여러 키)', async () => {
+  // 시드 고정 난수(재현 가능) — 창 꼴 · 대상(서버 키 묶음 · 법인) · 시간대 · 요일 · 길이 · 재확인을 섞는다. 정확 경로(exact)는 기준점마다 다시 세는 예전 계산 + R2 후보.
   let seed = 20261115;
   const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
   const pick = (a) => a[Math.floor(rnd() * a.length)];
   const TZS = ['Asia/Seoul', 'Europe/Warsaw', 'America/New_York', 'Australia/Lord_Howe', 'Antarctica/Troll'];
   const NOWS = [T0, Date.UTC(2027, 2, 24, 13), Date.UTC(2027, 9, 27, 22), Date.UTC(2027, 2, 12, 3), Date.UTC(2027, 3, 1, 9)];
+  const KEYSETS = [['P1'], ['P2'], ['P1', 'P2'], ['P1', 'P2', 'P3'], ['P3']];
   const mk = (i, now) => {
-    const tz = pick(TZS); const kind = pick(['weekly', 'weekly', 'monthly', 'once']);
+    const tz = pick(TZS); const kind = pick(['weekly', 'weekly', 'weekly', 'monthly', 'once']);
     const time = `${String(Math.floor(rnd() * 24)).padStart(2, '0')}:${pick(['00', '30'])}`;
     let schedule;
     if (kind === 'once') { const st = now + Math.floor((rnd() * 40 - 2) * 24) * HOUR; const len = (1 + Math.floor(rnd() * 24)) * HOUR; schedule = { kind, start: S.fmtLocal(tz, st).replace(' ', 'T'), end: S.fmtLocal(tz, st + len).replace(' ', 'T') }; }
-    else if (kind === 'weekly') schedule = { kind, days: all7.filter(() => rnd() < 0.6).concat([Math.floor(rnd() * 7)]), time, durMin: 30 * (1 + Math.floor(rnd() * 24)) };
+    else if (kind === 'weekly') schedule = { kind, days: all7.filter(() => rnd() < 0.5).concat([Math.floor(rnd() * 7)]), time, durMin: 30 * (1 + Math.floor(rnd() * 24)) };
     else schedule = { kind, nth: 1 + Math.floor(rnd() * 5), weekday: Math.floor(rnd() * 7), time, durMin: 30 * (1 + Math.floor(rnd() * 24)) };
-    const w = ST.normalizeWindow({ id: `mw-prop${String(i).padStart(6, '0')}`, name: 'p', reason: 'p', tz, vcenterId: 'vcA', target: { kind: 'server', keys: ['P1'] }, schedule, scopes: { hold: true },
+    const target = rnd() < 0.15 ? { kind: 'corp' } : { kind: 'server', keys: pick(KEYSETS) };
+    return ST.normalizeWindow({ id: `mw-prop${String(i).padStart(6, '0')}`, name: 'p', reason: 'p', tz, vcenterId: 'vcA', target, schedule, scopes: { hold: true },
       at: now - 10 * DAY, confirmedAt: now - Math.floor(rnd() * 100) * DAY });
-    return w;
   };
   let n = 0; let trues = 0;
-  for (let c = 0; c < 240; c += 1) {
+  for (let c = 0; c < 150; c += 1) {
     const now = NOWS[c % NOWS.length];
     const group = Array.from({ length: 2 + Math.floor(rnd() * 5) }, (_, i) => mk(c * 10 + i, now)).filter(Boolean);
-    if (group.length < 2) continue;
-    const cand = { ...group[0], confirmedAt: now };
-    const fast = ST.coverNeedsOwner(cand, group, now);
-    const exact = ST.coverNeedsOwner(cand, group, now, { exact: true });
-    assert.equal(fast, exact, `사례 ${c}: ${JSON.stringify(group.map((w) => [w.tz, w.schedule]))}`);
-    n += 1; if (exact) trues += 1;
+    const memo = ST.coverMemo(now);   // 목록처럼 한 요청 메모를 후보끼리 나눈다
+    for (const w of group.filter((x) => x.target.kind === 'server').slice(0, 3)) {
+      const cand = { ...w, confirmedAt: now };
+      const exact = ST.coverNeedsOwner(cand, group, now, { exact: true });
+      const tag = `사례 ${c}: ${JSON.stringify(group.map((x) => [x.tz, x.target, x.schedule]))}`;
+      assert.equal(ST.coverNeedsOwner(cand, group, now), exact, `빠른 길 · ${tag}`);
+      assert.equal(ST.coverNeedsOwner(cand, group, now, { memo }), exact, `메모 · ${tag}`);
+      assert.equal(await ST.coverNeedsOwnerAsync(cand, group, now, { memo, yieldFn: async () => {} }), exact, `비동기 · ${tag}`);
+      n += 1; if (exact) trues += 1;
+    }
   }
   assert.ok(n >= 200 && trues >= 20 && n - trues >= 20, `참 · 거짓 둘 다 충분히(${trues}/${n})`);
+});
+
+test('R2(3회차 재확인) — 이미 넓게 덮인 구간 한가운데의 드문 창도 합 규칙이 본다(실제 라우터 · 예전 200)', async (t) => {
+  resetAll();
+  const { call } = await setup(t);
+  // 소유자가 매일 00:00 12h · 12:00 12h 로 상시 덮은 서버
+  assert.equal((await call('own', 'POST', '', srvWin('MTAGA2', '소유자 오전', { kind: 'weekly', days: all7, time: '00:00', durMin: 720 }))).status, 200);
+  assert.equal((await call('own', 'POST', '', srvWin('MTAGA2', '소유자 오후', { kind: 'weekly', days: all7, time: '12:00', durMin: 720 }))).status, 200);
+  for (const time of ['00:00', '12:00']) {
+    const r = await call('opA', 'POST', '', srvWin('MTAGA2', `수요일 ${time}`, { kind: 'weekly', days: [3], time, durMin: 720 }));
+    assert.equal(r.status, 403, `재현 r3 재확인 — 예전 200(수요일 ${time} 12h)`); assert.equal(r.body.code, 'owner-required');
+  }
+  assert.equal((await call('opA', 'POST', '', srvWin('MTAGA2', '매일 12h', { kind: 'weekly', days: all7, time: '00:00', durMin: 720 }))).status, 403, '대조 — 예전에도 403');
+  // 직접 — 후보 매월 마지막 월 10h · 법인 매주 12h 창들로 후보 둘레가 하루 넘게 이어져 덮임
+  const now = T0;
+  const corp = Array.from({ length: 14 }, (_, i) => ST.normalizeWindow({ id: `mw-corp${String(i).padStart(5, '0')}`, name: 'c', reason: 'r', tz: 'Asia/Seoul', vcenterId: 'vcA', target: { kind: 'corp' },
+    schedule: { kind: 'weekly', days: [i % 7], time: i < 7 ? '00:00' : '12:00', durMin: 720 }, scopes: { hold: true }, at: now, confirmedAt: now }));
+  const cand = ST.normalizeWindow({ id: 'mw-candmon01', name: 'm', reason: 'r', tz: 'Asia/Seoul', vcenterId: 'vcA', target: { kind: 'server', keys: ['Z1'] },
+    schedule: { kind: 'monthly', nth: 5, weekday: 1, time: '06:00', durMin: 600 }, scopes: { hold: true }, at: now, confirmedAt: now });
+  assert.equal(ST.coverNeedsOwner(cand, corp, now, { exact: true }), true, '정확 경로(예전 false)');
+  assert.equal(ST.coverNeedsOwner(cand, corp, now), true, '빠른 경로(예전 false)');
+});
+
+test('R1(3회차 재확인) — 비소유자 정비 창 목록 비용: 소유자 목록 대비 비율 · 루프 정지 · 답은 정확 경로와 같다(창 200 — 법인 5 · 서버 20대 창 50 · 서버 1대 창 145)', async () => {
+  resetAll();
+  const now0 = Date.now();
+  const hh = (h) => `${String(h % 24).padStart(2, '0')}:00`;
+  const keys20 = Array.from({ length: 20 }, (_, i) => `K${i + 1}`);
+  const items = [];
+  const put = (i, name, target, schedule, ageDays) => items.push({ id: `mw-r1${String(i).padStart(6, '0')}`, name, reason: 'r', tz: 'Asia/Seoul', vcenterId: 'vcA', target, schedule,
+    scopes: { alerts: true, hold: true }, by: 'op', at: now0 - ageDays * DAY, rev: 1, approvedBy: '', confirmedAt: now0 - ageDays * DAY, edits: [] });
+  for (let i = 0; i < 5; i += 1) put(i, `corp${i}`, { kind: 'corp' }, { kind: 'monthly', nth: i + 1, weekday: i % 7, time: hh(i * 3), durMin: 240 }, i * 10);
+  for (let i = 0; i < 50; i += 1) put(100 + i, `s20-${i}`, { kind: 'server', keys: keys20, names: keys20 }, { kind: 'weekly', days: all7, time: hh(i), durMin: 120 }, (i % 9) * 9);
+  for (let i = 0; i < 145; i += 1) put(200 + i, `s1-${i}`, { kind: 'server', keys: ['K1'], names: ['K1'] }, { kind: 'weekly', days: [i % 7], time: hh(i), durMin: 60 }, (i % 9) * 9);
+  fs.writeFileSync(path.join(DIR, 'maintenance-windows.json'), JSON.stringify({ v: 1, seq: 400, items }));
+  ST._resetMaintStoreForTest();
+  const { bmMaintList } = await import('../src/routes/api/bmMaint.js');
+  const { createYielder } = await import('../src/util/timeSlice.js');
+  let yields = 0;
+  const run = async (owner) => {
+    yields = 0;
+    let maxGap = 0; let last = performance.now();
+    const iv = setInterval(() => { const x = performance.now(); maxGap = Math.max(maxGap, x - last); last = x; }, 2);
+    await new Promise((r) => setTimeout(r, 10)); last = performance.now(); maxGap = 0;
+    const t0 = performance.now();
+    const r = await bmMaintList({ user: { username: 'opa', role: 'operator', scope: null }, query: {} }, { vcenters: [{ id: 'vcA' }] },
+      { currentTargets: async () => ({ targets: [] }), listEdgeBmUsage: async () => [], ownerTier: async () => owner, minEdgeVersion: async () => '0',
+        yielder: () => { const y = createYielder(15); return async () => { yields += 1; return y(); }; } });
+    const ms = performance.now() - t0; clearInterval(iv);
+    return { r, ms, maxGap, yields };
+  };
+  await run(true);   // 모듈 · 캐시 데우기
+  const best = async (owner) => { const a = await run(owner); const b = await run(owner); return a.ms <= b.ms ? a : b; };
+  const own = await best(true);
+  const op = await best(false);
+  assert.equal(op.r.windows.length, 200);
+  // 재현 r3 재확인: 예전(4b69a1079) 비소유자 20~32초 · 정지 0.27~0.64초(소유자 0.2초 — 비율 100배 넘음). 실측 판(이 컨테이너): 비소유자 0.36~0.43초 · 정지 32~48ms.
+  assert.ok(op.ms <= 6 * own.ms + 100, `비소유자 ${Math.round(op.ms)}ms · 소유자 ${Math.round(own.ms)}ms(비율 6배 이하)`);
+  assert.ok(op.maxGap <= Math.max(150, 3 * own.maxGap), `루프 최대 정지 ${Math.round(op.maxGap)}ms(소유자 ${Math.round(own.maxGap)}ms)`);
+  assert.ok(op.yields > op.r.windows.length + 50, `합 규칙 단계 사이에도 양보 기회(${op.yields} — 행 사이만이면 ${op.r.windows.length})`);
+  // 답 — 행의 canConfirm · confirmOwner 가 정확 경로(메모 없음)와 같다(행 표본 — 정확 경로는 느리다)
+  const tagsOf = await R.tagsReader();
+  const gate = ST.listWindows();
+  const now = op.r.now;
+  for (const row of op.r.windows.filter((_, i) => i % 13 === 0)) {
+    const w = gate.find((x) => x.id === row.id);
+    const need = ST.needsOwnerTier(w) ? 'window' : (ST.coverNeedsOwner({ ...w, confirmedAt: now }, gate, now, { tagsOf, exact: true }) ? 'combined' : null);
+    assert.equal(row.canConfirm, !need, `${row.name}`); assert.equal(row.confirmOwner ?? null, need === 'combined' ? 'combined' : null, `${row.name}`);
+  }
+  // 같은 동료 묶음(법인 · 같은 키 묶음) — 서버 20대를 같이 덮는 같은 꼴 창 40개(합 12시간 이하라 끝까지 센다): 키마다 다시 세지 않는다(예전 31.6초 · 묶음 건너뛰기 없이 약 20배)
+  fs.writeFileSync(path.join(DIR, 'maintenance-windows.json'), JSON.stringify({ v: 1, seq: 500, items: Array.from({ length: 40 }, (_, i) => ({ id: `mw-dup${String(i).padStart(6, '0')}`, name: `dup${i}`, reason: 'r',
+    tz: 'Asia/Seoul', vcenterId: 'vcA', target: { kind: 'server', keys: keys20, names: keys20 }, schedule: { kind: 'weekly', days: all7, time: '02:00', durMin: 120 }, scopes: { alerts: true },
+    by: 'op', at: now0 - (i % 9) * DAY, rev: 1, approvedBy: '', confirmedAt: now0 - (i % 9) * DAY, edits: [] })) }));
+  ST._resetMaintStoreForTest();
+  await run(true);
+  const own2 = await best(true); const op2 = await best(false);
+  assert.equal(op2.r.windows.filter((w) => w.canConfirm).length, 40, '합 12시간 이하 — 모두 재확인 가능');
+  assert.ok(op2.ms <= 15 * own2.ms + 100, `같은 묶음 — 비소유자 ${Math.round(op2.ms)}ms · 소유자 ${Math.round(own2.ms)}ms(실측 약 6배 · 예전 700배)`);
 });
 
 /** 성능 알림 규칙 한 주기(실제 runPerfAlerts — 판정기는 주입하거나 저장소에서) → 주기 끝 점검. */

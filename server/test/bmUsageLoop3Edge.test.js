@@ -245,3 +245,50 @@ test('④ 구버전 엣지 호환 · 엣지 정제(형식 밖 · 90일 · 개수
     fs.rmSync(ODIR, { recursive: true, force: true });
   }
 });
+
+test('R3(3회차 재확인) — history 상한을 넘으면 최근에 끝난 창부터 남긴다(유효 끝 열쇠) · 엣지는 받은 원문 길이로 잰다', async () => {
+  // 열흘 전 만든 · 아흐레 전 끝난 일회 창 500 + 85일 전 만들고 어제 끝난 창 1(지난 31일 계산에 걸리는 창) — 파일에 바로 쓴다(만들기 500번을 피한다)
+  const f = path.join(DIR, 'maintenance-windows.json');
+  const o = JSON.parse(fs.readFileSync(f, 'utf8'));
+  const mk = (id, name, startMs, createdMs) => ({ id, name, reason: 'r', target: { kind: 'server', keys: ['E1'] }, vcenterId: 'vcE', tz: 'Asia/Seoul',
+    schedule: { kind: 'once', start: loc(startMs), end: loc(startMs + HOUR) }, scopes: { exclude: true }, by: 'op', at: createdMs, rev: 1, approvedBy: '', confirmedAt: createdMs, edits: [] });
+  for (let i = 0; i < 500; i += 1) o.items.push(mk(`mw-old${String(i).padStart(5, '0')}`, `옛 ${i}`, T0 - 9 * DAY - i * MIN, T0 - 10 * DAY));
+  const late = mk('mw-yday00001', '어제 끝남', T0 - DAY, T0 - 85 * DAY);
+  o.items.push(late);
+  fs.writeFileSync(f, JSON.stringify(o));
+  ST._resetMaintStoreForTest();
+  const now = Date.now();
+  const body = await DP.deployFor('Edge-A', { verified: true, now });
+  assert.equal(body.history.length, ST.DEPLOY_HISTORY_MAX); assert.ok(body.historyDropped > 0);
+  assert.ok(body.history.some((x) => x.id === late.id), '재현 r3 재확인 — 예전 열쇠(만든 · 재확인 시각)로는 85일 전 만든 이 창이 가장 먼저 버려졌다');
+  assert.ok(!body.history.some((x) => x.id === 'mw-old00499'), '버린 것은 가장 오래전에 끝난 창');
+  // 엣지 — 받은 그대로 남기고 어제 끝난 창의 지난 구간이 남는다(중앙과 같다)
+  const ODIR = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'bmloop3e-r3-'));
+  const { config } = await import('../src/config.js');
+  const keep = config.configDir;
+  try {
+    config.configDir = ODIR; ST._resetMaintStoreForTest();
+    const r = ST.saveDeployed(body.windows, { sig: body.sig, now, history: body.history });
+    assert.equal(r.history, body.history.length, '엣지가 더 버리지 않는다');
+    const cv = (await R.maintJudge({ now })).cover(TARGET, now - 31 * DAY, now, 'exclude');
+    assert.ok(cv.some((x) => x.ids.includes(late.id)), '어제 끝난 창의 ⑤ 구간(예전 엣지: 없음)');
+    // 크기 상한 경계 — 중앙이 잰 대로 보낸 개수를 엣지가 그대로 받는다(정규화 뒤 길이(edits 등)로 다시 재면 하나 더 버렸다).
+    //   보낸 꼴 그대로 한 개 정확히 10,000자 × 100개 = 상한 1,000,000자(남는 자리 0 — 정규화로 늘어난 몇 글자가 경계를 넘긴다)
+    const one = (i, keys) => ({ id: `mw-sz${String(i).padStart(5, '0')}`, name: `크기 ${String(i).padStart(3, '0')}`, reason: 'r', target: { kind: 'tag', tag: 'role:web', keys },
+      vcenterId: 'vcE', tz: 'Asia/Seoul', schedule: { kind: 'once', start: loc(now - 2 * DAY), end: loc(now - 2 * DAY + HOUR) }, scopes: { exclude: true }, rev: 1, by: 'op', at: now - 3 * DAY, approvedBy: '', confirmedAt: now - 3 * DAY });
+    const per = ST.DEPLOY_HISTORY_BYTES_MAX / 100;
+    const keys = [];
+    while (JSON.stringify(one(0, keys)).length < per - 260) keys.push(`S${String(keys.length).padStart(4, '0')}`);
+    keys.push('P'.repeat(per - JSON.stringify(one(0, keys)).length - 3));   // 서버 키 형식(256자 이하) 안에서 남은 글자를 채운다
+    const items = Array.from({ length: 101 }, (_, i) => one(i, keys));
+    const sent = ST.capHistory(items);
+    assert.equal(sent.list.length, 100); assert.equal(sent.dropped, 1);
+    const r2 = ST.saveDeployed([], { sig: body.sig, now, history: JSON.parse(JSON.stringify(sent.list)) });
+    assert.equal(r2.history, 100, `중앙 100개 = 엣지(예전: 정규화 뒤 길이로 재어 ${r2.history}개)`);
+    ST._resetMaintStoreForTest();
+    assert.equal(ST.loadDeployed(now).history.length, 100, '다시 읽어도 그대로(읽을 때 다시 재어 버리지 않는다)');
+  } finally {
+    config.configDir = keep; ST._resetMaintStoreForTest();
+    fs.rmSync(ODIR, { recursive: true, force: true });
+  }
+});
