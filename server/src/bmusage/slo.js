@@ -46,7 +46,7 @@ export const SLO_DEFAULTS = Object.freeze({
   profiles: Object.freeze({ gpdb: Object.freeze([Object.freeze({ id: 'g-space', metric: 'disk_used_pct', basis: 'avg', op: 'lt', value: 75, objectivePct: 99 })]) }),
   servers: Object.freeze({}),
 });
-const _err = makeSettingsLoadError(FILE, { label: '베어메탈 성능 목표선(SLO)', confirm: () => writeFile(normalizeSlo({}, { strict: false }).value) });
+const _err = makeSettingsLoadError(FILE, { label: '베어메탈 성능 목표선(SLO)', confirm: () => writeFile(normalizeSlo({}, { strict: false }).value), ownerOnly: true });   // 20회차 F8: 쓰기 라우트가 소유자 등급
 const BAD_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 function fieldError(field, msg) { const e = new Error(`${field}: ${msg}`); e.status = 400; e.field = field; return e; }
 

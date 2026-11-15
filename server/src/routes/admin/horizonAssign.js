@@ -201,17 +201,17 @@ adminRouter.get('/assignments', adminOnly, fleetOnly, (_req, res) => {
 
 adminRouter.post('/assignments', adminOnly, fleetOnly, (req, res) => {
   const result = addAssignment(req.body || {});
-  res.status(result.ok ? 201 : 400).json(result);
+  res.status(result.ok ? 201 : (result.status || 400)).json(result);
 });
 
 adminRouter.put('/assignments/:agent', adminOnly, fleetOnly, (req, res) => {
   const result = updateAssignment(req.params.agent, req.body || {});
-  res.status(result.ok ? 200 : 400).json(result);
+  res.status(result.ok ? 200 : (result.status || 400)).json(result);
 });
 
 adminRouter.delete('/assignments/:agent', adminOnly, fleetOnly, (req, res) => {
   const result = removeAssignment(req.params.agent);
-  res.status(result.ok ? 200 : 404).json(result);
+  res.status(result.ok ? 200 : (result.status || 404)).json(result);
 });
 
 // Import assignments from CSV text or a JSON array. Body:
@@ -222,6 +222,6 @@ adminRouter.post('/assignments/import', csvPerm, adminOnly, fleetOnly, (req, res
   if (typeof b.csv === 'string') list = parseAssignmentsCsv(b.csv);
   else list = Array.isArray(b) ? b : b.assignments;
   const result = importAssignments(list, b.mode === 'replace' ? 'replace' : 'merge');
-  res.status(result.ok ? 200 : 400).json(result);
+  res.status(result.ok ? 200 : (result.status || 400)).json(result);
 });
 }

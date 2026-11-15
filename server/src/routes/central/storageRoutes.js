@@ -7,6 +7,7 @@
  */
 import { numOrNull } from '../../util/numOrNull.js';
 import { capTrim } from '../../util/capStr.js';
+import { edgeId } from '../../central/edgeRecord.js';   // 전체 점검 14회차(C-1): 거절 판정은 저장 키와 같은 정규화로
 // central.js 의 공용 판정 — 등록 때 인자로 받는다(import 하면 central.js ↔ 이 파일 순환이 생긴다 — archScan IMPORT_CYCLE_MAX)
 let edgeNameKnown, edgeNameRegistered, intervalsPartOrUnreadable, receiveRegistryUnreadable, registryUnreadable, requireCentral, settingsUnreadable, strAgent;
 
@@ -51,9 +52,12 @@ export async function onlyDelegated(list, idOf, registryPath) {
   const reg = await import(new URL(registryPath, new URL('../central.js', import.meta.url)).href);
   const direct = new Set(reg.listDevices().filter((d) => d && d.id != null && !String(d.agent || '').trim()).map((d) => String(d.id)));
   if (!direct.size) return { list, denied: 0 };
+  // 전체 점검 14회차(C-1 — 재현): 받은 글자 그대로 비교하면 ' unity-1 ' · '\t' 꼬리 · {deviceId:'', id:'unity-1'} 로 비켜 갔다(저장은 edgeId 로 공백을 떼
+  //   중앙 직접 장비 키에 적재 — v2.607 CEN2607-03 시나리오). idOf 는 값 하나 또는 후보 배열(저장이 쓰는 순서) — 후보 중 하나라도 직접 장비면 거절.
   const kept = list.filter((d) => {
-    const id = d && typeof d === 'object' ? idOf(d) : null;
-    return !((typeof id === 'string' || typeof id === 'number') && direct.has(String(id)));
+    if (!d || typeof d !== 'object') return true;   // 객체가 아니면 저장 단계가 뺀다
+    const raw = idOf(d);
+    return !(Array.isArray(raw) ? raw : [raw]).some((v) => { const id = edgeId(v); return !!id && direct.has(id); });
   });
   return { list: kept, denied: list.length - kept.length };
 }
@@ -321,7 +325,7 @@ export function registerStorageRoutes(centralRouter, deps) {
     const now = Date.now();
     devices = devices.map((d) => stampEdgeCollectedAt(d, now)); // v2.630 A4-02: 원본 엣지 시각은 edgeCollectedAt 으로 따로
     {
-      const r = await onlyDelegated(devices, (d) => d.deviceId ?? d.id, '../storage/registry.js'); // v2.607 CEN2607-03
+      const r = await onlyDelegated(devices, (d) => [d.deviceId, d.id], '../storage/registry.js'); // v2.607 CEN2607-03 · 14회차 C-1(저장의 deviceId || id 후보 둘 다)
       devices = r.list; notOwned += r.denied;
       if (r.denied) console.warn(`[central] storage-data: ${String(agent).slice(0, 64)} 중앙 직접 수집 장비 ${r.denied}건 거절`);
     }

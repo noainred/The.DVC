@@ -969,6 +969,16 @@
     닿지 않음 · 판 모름은 단정하지 않는다. 판 번호는 `featureMinEdgeVersion`(릴리스 노트 제목 표지)에서 — 상수로 박지 않는다.
     엣지 연결 시험은 엣지 한 곳에 동시 8건(`store.EDGE_TEST_CONCURRENCY`) — 중앙이 같은 본문의 `diag.testsBusy` 만큼 덜 배달하고 워커도 상한에서 멈춘다(옛 판은 진단이 없어 예전처럼 20).
     '다시 연결' 대기열은 `retryTargets`(그 엣지 몫 접속 정보)를 함께 싣는다 — 엣지가 수집 목록 밖 대상(시험만 한 서버)의 인증 정지도 풀 수 있게(v2.978 사용자 보고).
+- **전체 점검 16 · 17회차 — 중앙→엣지 점검의 토큰 스킴 · 수집 서버 id · 못 읽은 배포 파일 쓰기 거절**(회귀 `edgeFullAudit16` · `edgeFullAudit17`):
+  ① `relaycheck` 의 포탈 점검은 토큰을 **등록 URL 의 스킴**(`buildTargets` t.scheme)으로만 싣는다 — 스킴을 모르는데 토큰이 있으면 https(평문으로 비밀을 보내지 않는다).
+  ② `linkcheck` 는 수집 서버를 **id 로** 찾는다(`ctx.collectors` = id 키 · 이름 조회는 이름이 하나뿐일 때만 `collectorsByName`) — 이름 Map 은 겹친 이름의 마지막 항목 토큰을 다른 URL 로 보냈다.
+  ③ `central/agentUsers.js` 는 파일을 못 읽은 동안 upsert · bulk · remove 를 **503 registry-unreadable** 로 거절한다 — 해제는 보존본 복구 또는 서비스 점검 '기본값으로 확정'.
+     (settingsLoadError 의 '관리자 저장이 푼다' 규약의 예외 — 한 엣지 저장이 다른 모든 엣지의 managed 계정 삭제가 되기 때문.)
+  ④ (18회차 반증) 같은 예외를 **iDRAC 스캔 배정**(`central/assignments.js` — 바꾸기 가져오기만 허용)에도 둔다. 성능점검 엣지 배정(`svcmonAssign`)은
+     배정 탭이 '한 엣지를 저장하면 파일이 그 엣지 하나로 새로 써진다' 고 경고하는 설계라 바꾸지 않았다(문서화된 한계) — 무보고 감시는 판정 보류를 밝힌다(B-4).
+  ⑤ `confirmSettingsDefault` 는 오류 중 **파일이 다시 있으면** 덮지 않는다(409 `file-present` — 되돌린 보존본) · `ownerOnly` 로 등록한 파일은 확정도 설정 소유자 등급(B-1 · B-2).
+  ⑥ '중앙 → 엣지' 링크 id 는 `links.js centralEdgeLinkId` 하나(통신 지도도 같은 함수 — A-2) · 중계 점검 https 의 인증서 · 프로토콜 실패는 'cert' 단계(A-3) ·
+     엣지 로그는 원문(상한 16KB)을 다 가린 뒤 2,000자로 자른다(먼저 자르면 경계에 걸친 비밀이 남는다 — A-1).
 - **전체 점검 4회차 V-9 — 엣지 시각은 시계 보정이 0 이어도 수신 시각으로 자른다**(`central/veeamEdge.js` poller.at · `veeam/parse.js` authStop.since · 회귀 `veeamFullAudit2` ⑦):
   보정 창 밖(차이 2분 미만 · 30일 초과)이면 결과 ts 만 미래를 잘랐고 두 값은 미래 시각 그대로 저장돼 진행 상태에 보였다. 새 엣지 시각 칸도 `shift`(보정 + `Math.min(now)`)를 지날 것.
   **남긴 것(4회차 V-8 — 추정)**: Veeam EM VM 기록(`veeam/em/vmStore.js keyOf`)은 '백업 서버 + VM 이름' 키라 같은 서버의 동명 VM 두 대(moref 다름)의 마지막 작업 · 복원 지점이 한 기록에 섞인다.

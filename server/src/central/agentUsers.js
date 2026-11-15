@@ -19,6 +19,7 @@ import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atom
 import { hashPassword } from '../auth/auth.js';
 import { agentKeyOf } from '../util/agentKey.js';
 import { capStr } from '../util/capStr.js'; // v2.612: 상주 사유 문자열은 평탄화해 자른다(v2.607 TIM2607-01)
+import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 
 const FILE = path.join(config.configDir, 'central-agent-users.json');
 const VALID_ROLES = ['admin', 'operator', 'viewer'];
@@ -34,6 +35,20 @@ let byAgent = Object.create(null); // agent -> { at, users: [...] }
 //   답해 엣지가 관리 계정(managed)을 전부 지우지 않게. 다음 저장이 성공하면 풀린다.
 let _loadError = null;
 export function registryLoadError() { return _loadError; }
+/*
+ * 전체 점검 17회차(C-10 — 재현): 읽지 못한 동안 **쓰지 않는다**. 예전에는 관리자가 아무 엣지 하나에 사용자를 추가하면 그 1건만 든 파일이
+ *   쓰이고 표지가 풀렸다 — /users-config 가 503 대신 200 으로 줄어든 목록을 내려 **다른 모든 엣지의 managed 계정이 지워졌다**
+ *   (엣지 agent/usersConfigPull.js 는 빠진 managed 계정을 제거한다). 관리 화면은 손상을 알리지 않아 관리자는 빈 목록만 보고 저장했다.
+ *   해제는 ① 손상 보존본(.corrupt.*)을 되돌리고 재시작 ② 서비스 점검 › 설정 파일 '기본값으로 확정'(지금 메모리 값 = 빈 목록을 배포 —
+ *   사람이 정한다, settingsLoadError 규약) 둘뿐이다. 표지 원문(_loadError.reason)은 그대로 둔다 — 503 의 위치 요약(summarizeRegistryError)의 원천.
+ *   `_svc` 는 서비스 점검 목록 · 확정 경로에 올리는 사본이다(같은 자리에서 함께 세우고 푼다).
+ */
+const _svc = makeSettingsLoadError(() => FILE, { label: '엣지 배포 사용자(엣지별) — 확정하면 모든 엣지의 배포 계정이 지워집니다', confirm: () => persist(), ownerOnly: true });   // 18회차 반증 B-2: 쓰기 라우트(requireSettingsOwner)와 같은 등급
+function writeRefusal() {
+  if (!_loadError) return null;
+  return { ok: false, code: 'registry-unreadable', status: 503,
+    reason: '엣지 배포 사용자 파일(central-agent-users.json)을 읽지 못한 상태라 저장하지 않았습니다 — 지금 저장하면 손상 보존본(.corrupt.*)에만 남은 다른 엣지의 배포 사용자가 모든 엣지에서 지워집니다. 보존본을 되돌리고 재시작하거나, 서비스 점검의 설정 파일에서 기본값으로 확정한 뒤 다시 저장하세요.' };
+}
 /**
  * v2.742(LEFT-01 — 재현): 대소문자만 다른 중복 키를 하나로 합친다(순수). 예전 쓰기(upsertAgentUser·removeAgentUser)는 읽기와 달리
  *   **글자 그대로** 키를 써서, 'edge-a' 에 배포된 사용자를 'Edge-A' 이름으로 추가하면 그 사용자 하나만 든 **새 목록**이 생겼다 — 'Edge-A'
@@ -72,7 +87,7 @@ try {
   } else {
     const base = path.basename(FILE) + '.corrupt.';
     const hit = fs.readdirSync(path.dirname(FILE)).filter((n) => n.startsWith(base)).sort().pop();
-    if (hit) _loadError = { at: Date.now(), reason: `등록부 파일이 없고 손상 보존본(${hit})만 있습니다` };
+    if (hit) { _loadError = { at: Date.now(), reason: `등록부 파일이 없고 손상 보존본(${hit})만 있습니다` }; _svc.missing(); }
   }
 } catch (err) {
   if (fs.existsSync(FILE)) {
@@ -81,6 +96,7 @@ try {
     //   관리자용 줄·칸 위치가 이 원문에서 나온다.
     preserveCorrupt(FILE, err.message); console.error(`[central] central-agent-users.json 파싱 실패: ${safeLoadText(err) || '사유 미상'}`);
     _loadError = { at: Date.now(), reason: capStr(String(err?.message || err), 200) };
+    _svc.corrupt(err);
   }
   byAgent = Object.create(null);
 }
@@ -88,7 +104,8 @@ try {
 function persist() {
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   atomicWriteFileSync(FILE, JSON.stringify(byAgent), { mode: 0o600 });
-  _loadError = null; // v2.612 LEFT2612-01
+  _loadError = null; // v2.612 LEFT2612-01 — 17회차(C-10)부터 쓰기 함수는 읽지 못한 동안 여기에 오지 않는다(확정 경로만)
+  _svc.ok();
 }
 const cleanAgent = (a) => String(a || '').trim();
 
@@ -113,6 +130,7 @@ export function getEffectiveUsers(agent) {
 
 /** 사용자 추가/수정(비밀번호 주면 해시로 변환 저장, 없으면 기존 유지). 반환 { ok, reason? }. */
 export function upsertAgentUser(agent, { username, name, role = 'viewer', password } = {}) {
+  const refused = writeRefusal(); if (refused) return refused;
   const a = cleanAgent(agent);
   if (!a) return { ok: false, reason: 'agent 필요' };
   username = String(username || '').trim();
@@ -146,6 +164,7 @@ export function upsertAgentUsersBulk(targets, spec) {
   const seen = new Set();
   const list = Array.isArray(targets) ? targets.map(cleanAgent).filter((t) => t && !seen.has(t.toLowerCase()) && seen.add(t.toLowerCase())) : [];
   if (!list.length) return { ok: false, reason: '대상이 없습니다.' };
+  const refused = writeRefusal(); if (refused) return refused;
   const applied = []; const failed = [];
   for (const t of list) {
     const r = upsertAgentUser(t, spec);
@@ -156,6 +175,7 @@ export function upsertAgentUsersBulk(targets, spec) {
 
 /** 사용자 제거(다음 pull에 엣지에서도 삭제됨). */
 export function removeAgentUser(agent, username) {
+  const refused = writeRefusal(); if (refused) return refused;
   const a = cleanAgent(agent);
   const k = a ? agentKeyOf(byAgent, a) : null; // v2.742(LEFT-01): 'Edge-A' 로도 'edge-a' 목록에서 지운다
   const entry = k != null ? byAgent[k] : null;

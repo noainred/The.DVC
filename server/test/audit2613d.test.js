@@ -191,13 +191,13 @@ test('EDGE2613-10: relaycheck·linkcheck 의 중앙→엣지 호출이 수집 �
   mockReply = (req) => ({ status: 200, body: req.url.startsWith('/api/health') ? { ok: true, version: 'x' } : { ok: true, agent: 'tag-r', hostname: 'h', version: 'x' } });
   resetOutboundStats();
   const { runCheck } = await import('../src/relaycheck/checks.js');
-  const r = await runCheck({ host: '127.0.0.1', port: mockPort, kind: 'edge-portal', token: 'tok', expectAgent: 'tag-r', collectorId: 'tag-r', otherIds: [] }, { timeoutMs: 3_000 });
+  const r = await runCheck({ host: '127.0.0.1', port: mockPort, kind: 'edge-portal', scheme: 'http', token: 'tok', expectAgent: 'tag-r', collectorId: 'tag-r', otherIds: [] }, { timeoutMs: 3_000 });
   assert.equal(r.ok, true, JSON.stringify(r));
   const ping = outboundStats().rows.find((x) => x.path === '/api/collector/ping');
   assert.ok(ping, 'relaycheck ping 기록'); assert.equal(ping.tag, 'tag-r');
   // 수집 서버를 모르는 대상(hq-portal 류 · collectorId 없음)은 예전대로 태그 없이 기록된다.
   resetOutboundStats();
-  await runCheck({ host: '127.0.0.1', port: mockPort, kind: 'edge-portal', token: 'tok', otherIds: [] }, { timeoutMs: 3_000 });
+  await runCheck({ host: '127.0.0.1', port: mockPort, kind: 'edge-portal', scheme: 'http', token: 'tok', otherIds: [] }, { timeoutMs: 3_000 });
   assert.equal(outboundStats().rows.find((x) => x.path === '/api/collector/ping')?.tag, '');
   // linkcheck stepHttp — 호출부가 tag 를 주면 기록에 붙는다(전역 fetch 경로라 withOutboundTag 문맥이 없다).
   resetOutboundStats();

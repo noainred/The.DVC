@@ -1,11 +1,11 @@
 # 공통 기능 목록 (자동 생성)
 
-솔루션 전체가 함께 쓰는 공용 모듈 **157개**를 코드에서 뽑은 목록이다. 새 헬퍼·컴포넌트를 만들기 전에 여기서 먼저 찾는다
+솔루션 전체가 함께 쓰는 공용 모듈 **158개**를 코드에서 뽑은 목록이다. 새 헬퍼·컴포넌트를 만들기 전에 여기서 먼저 찾는다
 (같은 판정을 복제하지 말 것 — 루트 `CLAUDE.md` '판정 코어는 하나').
 
 - 생성: `node scripts/common-doc.mjs` · 최신 여부: `node scripts/common-doc.mjs --check`
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다. 설명을 고치려면 그 모듈의 **머리 주석 첫 단락**을 고친다.
-- 훑은 소스 4179개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
+- 훑은 소스 4189개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
 
 ## 읽는 법 · 한계
 
@@ -19,23 +19,23 @@
 
 | 구분 | 위치 | 모듈 | 사용처 0 | 테스트 0 |
 |---|---|---|---|---|
-| 서버 공용 유틸 | `server/src/util/` | 88 | 0 | 10 |
+| 서버 공용 유틸 | `server/src/util/` | 89 | 0 | 10 |
 | 웹 공용 컴포넌트 | `web/src/components/` | 46 | 0 | 12 |
 | 웹 공용 훅 | `web/src/hooks/` | 8 | 0 | 2 |
 | 웹 공용 유틸 | `web/src/util/` | 3 | 0 | 0 |
 | 웹 최상위 공용 모듈 | `web/src/` | 12 | 0 | 1 |
-| **합계** | | **157** | **0** | **25** |
+| **합계** | | **158** | **0** | **25** |
 
-## 서버 공용 유틸 — `server/src/util/` (88)
+## 서버 공용 유틸 — `server/src/util/` (89)
 
 사용처가 많은 순.
 
 | 모듈 | 하는 일 | 내보내는 이름 | 사용처 | 영역 | 테스트 |
 |---|---|---|---|---|---|
-| `numOrNull.js` | `numOrNull` — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정 (v2.561). | `numOrNull` `default` | 289 | 61 | 4 |
+| `numOrNull.js` | `numOrNull` — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정 (v2.561). | `numOrNull` `default` | 290 | 61 | 4 |
 | `atomicWrite.js` | 원자적 파일 쓰기 — 임시파일에 기록 후 rename으로 교체한다. writeFileSync는 기록 도중 크래시/정전 시 파일을 truncate/부분기록 상태로 남겨, 다음 로드에서 JSON 파싱 실패 → 빈 값 반환 → 다음 저장이 손상본을 덮어쓰며 데이터가 영구 유… | `atomicWriteFileSync` `classifyLoadReason` `loadReasonWhere` `summarizeLoadReason` `safeLoadText` `preserveCorrupt` 외 1 | 251 | 72 | 8 |
 | `dayKey.js` | 날짜 경계 코어 — 하나다(v2.582 ARCH-2). | `resolveDayOffsetMin` `toMs` `dayKey` `todayStamp` `dayIndex` `dayStartMs` 외 9 | 135 | 35 | 34 |
-| `capStr.js` | 외부 문자열을 **상주 구조**(Map 키·보관 레코드)에 넣을 때의 길이 상한(v2.606 감사 TIM2606-02). | `flatStr` `capStr` `capTrim` | 103 | 23 | 2 |
+| `capStr.js` | 외부 문자열을 **상주 구조**(Map 키·보관 레코드)에 넣을 때의 길이 상한(v2.606 감사 TIM2606-02). | `flatStr` `capStr` `capTrim` | 104 | 23 | 2 |
 | `resilientFetch.js` | 크로스-WAN(중앙↔수집서버/에이전트) 호출용 견고한 fetch. | `loadWanCa` `wanTlsConnectOptions` `wanTlsStatus` `dispatcherFor` `abortableSleep` `headersWithoutSecrets` 외 9 | 77 | 24 | 14 |
 | `csv.js` | RFC 4180 CSV 토크나이저 — 따옴표("...")로 감싼 필드 안의 쉼표·줄바꿈·이스케이프된 따옴표("")를 온전히 처리한다. 순진한 line.split(',')은 비밀번호에 쉼표(p@ss,w0rd)나 줄바꿈이 있으면 필드를 잘라 잘못된 자격증명을 저장했다(특수… | `parseCsvRows` `guardCell` `unguardCell` `delimiterHint` `csvCell` `csvLine` 외 1 | 65 | 21 | 22 |
 | `pool.js` | 동시성 제한 실행 풀 — **단일 소스**(v2.575 IMP-08). | `poolSettled` `poolRun` `default` | 63 | 34 | 2 |
@@ -52,7 +52,7 @@
 | `pushAll.js` | 큰 배열 붙이기(v2.603 감사 CEN2603-03 후속). | `pushAll` | 30 | 16 | 1 |
 | `exitFlush.js` | 종료 시 flush 레지스트리(v2.582 ARCH-4) — 하나다. | `registerExitFlush` `runExitFlush` `exitFlushNames` `_resetExitFlushForTest` | 29 | 15 | 10 |
 | `coercionTrap.js` | 요청 값을 글자·수로 바꿀 때 던지지 않게 하는 공용 규칙(v2.603 감사 CEN2603-05). | `stripCoercionTraps` `strOf` | 28 | 7 | 1 |
-| `settingsLoadError.js` | **중앙 설정 파일**의 로드 오류 상태(v2.631 EDGE2631-01). | `makeSettingsLoadError` `listSettingsLoadErrors` `confirmSettingsDefault` | 26 | 16 | 6 |
+| `settingsLoadError.js` | **중앙 설정 파일**의 로드 오류 상태(v2.631 EDGE2631-01). | `makeSettingsLoadError` `listSettingsLoadErrors` `settingsFileOwnerOnly` `settingsFileSuperOnly` `confirmSettingsDefault` | 28 | 17 | 9 |
 | `secretCarry.js` | "접속 대상이 바뀌면 저장 비밀을 승계하지 않는다" — 공용 판정(v2.500). | `accessMoved` `dropCarriedSecrets` `secretProvided` | 24 | 19 | 3 |
 | `ssrfLookup.js` | **DNS 리바인딩(TOCTOU) 차단용 공용 lookup 훅**(v2.506). | `filterAddresses` `addressBlockReason` `ssrfLookupError` `makeSsrfLookup` `pinnedLookup` `ssrfLookup` 외 1 | 24 | 17 | 1 |
 | `agentNameHeader.js` | 엣지 → 중앙 push 에 `X-Agent-Name` 헤더를 싣는다(v2.620 RECENT2620-02). | `agentNameHeader` | 20 | 9 | 1 |
@@ -81,7 +81,7 @@
 | `ping.js` | ICMP ping 유틸 — OS의 ping CLI를 호출해 도달성/RTT를 반환한다(raw 소켓 불필요). Linux/Windows 모두 지원. 모든 실패는 격리되어 { alive:false }로 떨어진다. | `pingProbeMode` `pingProbeStats` `parsePingOutput` `pingOne` `tcpConnect` `tcpProbeMany` 외 1 | 7 | 5 | 3 |
 | `readPrefix.js` | 응답 본문을 **앞부분만** 읽는다(v2.603 감사 SEC2603-03). | `readBodyPrefix` | 7 | 7 | 0 |
 | `scanJournal.js` | 실행 중 스캔 기록 + 재시작 뒤 자동 재개(v2.737). | `resumeDelayMs` `scanStarted` `scanProgress` `scanFinished` `scanQueued` `scanQueuedMany` 외 21 | 7 | 7 | 9 |
-| `activityLog.js` | 수집 '작업 로그' 링버퍼 **공용 팩토리**(v2.516). | `createActivityLog` `ACTIVITY_WRITE_GAP_MS` | 6 | 5 | 5 |
+| `activityLog.js` | 수집 '작업 로그' 링버퍼 **공용 팩토리**(v2.516). | `createActivityLog` `ACTIVITY_WRITE_GAP_MS` | 6 | 5 | 6 |
 | `bulkText.js` | 대량 등록용 **자유텍스트** 파싱/직렬화(순수, v2.513). | `splitCells` `splitCellsRaw` `splitLine` `parseKeyed` `parseFreeRows` `rowsToFreeText` 외 3 | 6 | 6 | 3 |
 | `central404.js` | 엣지 설정 pull 의 404 판정(v2.600 감사 EDGE2600-06 · v2.613 DEPS2613-01 에 agent/ → util/ 로 이동, 옛 경로는 재수출). | `classifyCentral404` `classifyCentral404Body` | 6 | 2 | 1 |
 | `collectRequestQueue.js` | 엣지 위임 '지금 수집' 요청 큐의 공용 코어(v2.590 P16 · v2.591 재설계). | `createCollectRequestQueue` `SEEN_MAX` | 6 | 5 | 7 |
@@ -100,6 +100,7 @@
 | `runtimeCheck.js` | Node 런타임 계약과 기동 시 호환성 자가 점검(검토 I-06). | `enginesRange` `parseNodeVersion` `judgeVersion` `selfCheckFetchDispatcher` `overallState` `runtimeStatus` 외 7 | 3 | 3 | 1 |
 | `sameHostName.js` | 두 호스트 이름이 같은 장비를 가리키는가(v2.777 — 사용자 요청 '엣지에서 보고하는 호스트네임을 기록해서 검증'). 대소문자 무시 · 끝 점 무시 · 한쪽만 FQDN 이면 첫 마디(짧은 이름)로 비교한다(os.hostname() 이 배포판마다 짧은 이름·FQDN… | `sameHostName` | 3 | 3 | 1 |
 | `secureCompare.js` | 공유 토큰/시크릿 비교를 상수시간(timing-safe)으로 수행한다. 일반 `===`는 첫 불일치 바이트에서 조기 반환해 응답시간 차이로 토큰을 한 바이트씩 복구당할 수 있다. 길이를 먼저 HMAC으로 정규화해 길이 자체도 누설하지 않는다. | `timingSafeEqualStr` `tokenMatches` | 3 | 1 | 1 |
+| `sshKeyKdf.js` | OpenSSH 새 형식 개인키(openssh-key-v1)의 bcrypt KDF **반복 횟수(rounds)** 를 parseKey 전에 읽는다(순수 · 전체 점검 21회차 L-6). | `opensshKdfRounds` `sshKdfRoundsIssue` `SSH_KDF_ROUNDS_MAX` | 3 | 2 | 1 |
 | `xlsxInternalLink.js` | 같은 파일 안 시트로 가는 링크(`#'시트'!A1`)를 OOXML 규격 모양으로 쓴다(v2.802 — 호스트·클러스터 엑셀). | `ensureInternalLinks` `internalLinkState` `sheetLink` | 3 | 3 | 2 |
 | `zip.js` | 단일 파일 ZIP 생성기 — 의존성 없이(zlib만) 한 파일을 deflate 압축한 .zip 버퍼를 만든다. 대용량 내보내기를 zip으로 압축해 전송할 때 사용(에어갭 Rocky9에서 외부 패키지 불필요). | `zipSingle` `zipMany` `zipManyAsync` `sendMaybeZip` `ZIP_THRESHOLD` | 3 | 2 | 4 |
 | `bigJsonGate.js` | 대용량 JSON 파서를 **인증된 요청에만** 태우는 게이트(v2.538). | `bigJsonStats` `sessionBigBodyAllowed` `bigJsonGate` | 2 | 2 | 8 |
@@ -205,7 +206,7 @@
 
 | 모듈 | 하는 일 | 내보내는 이름 | 사용처 | 영역 | 테스트 |
 |---|---|---|---|---|---|
-| `api.js` | v2.498: 진행 중 요청 레지스트리 + 장기 로딩(hang) 보고. perfClient 는 api.js 를 import 하지 않으므로 순환이 없다(설정 조회는 fetchJson 을 인자로 받는다). | `noteHttpError` `permissionInfoFor` `httpInfoFor` `fetchJson` `postJson` `sendJson` 외 34 | 399 | 19 | 42 |
+| `api.js` | v2.498: 진행 중 요청 레지스트리 + 장기 로딩(hang) 보고. perfClient 는 api.js 를 import 하지 않으므로 순환이 없다(설정 조회는 fetchJson 을 인자로 받는다). | `noteHttpError` `permissionInfoFor` `httpInfoFor` `fetchJson` `postJson` `sendJson` 외 34 | 399 | 19 | 43 |
 | `numOrNull.js` | `numOrNull`(웹) — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정. | `numOrNull` `default` | 137 | 11 | 2 |
 | `dayStamp.js` | 브라우저 쪽 날짜 표기(v2.582 BUG-3) — 내려받기 파일명·만료일은 **사용자의 로컬 날짜**다. `new Date().toISOString().slice(0, 10)` 은 UTC 날짜라 한국 시각 00:00~09:00 에는 **어제**가 된다 (보고서 파일명… | `dayStamp` | 24 | 5 | 1 |
 | `regions.js` | 지역(region) 목록 — 웹 단일 소스(v2.575 IMP-10). ⚠ 값은 서버 `server/src/util/regions.js` 와 **글자 그대로 같아야 한다**(웹은 서버 소스를 import 할 수 없어 복사가 불가피하다). `web/src/regions.`… | `REGIONS` `default` | 5 | 2 | 2 |
@@ -231,12 +232,12 @@
 | `server/src/config.js` | (머리 주석 없음) | 509 | 86 | 175 |
 | `server/src/store.js` | (머리 주석 없음) | 205 | 43 | 305 |
 | `server/src/collector/registry.js` | Collector registry — the list of remote collector agents (one per datacenter) the central portal pulls power from. Stored in CONFIG_DIR/collectors.jso… | 83 | 32 | 49 |
-| `server/src/security/secretVault.js` | 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). | 40 | 28 | 23 |
+| `server/src/security/secretVault.js` | 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). | 40 | 28 | 24 |
 | `server/src/mock/demo/flags.js` | 데모(DATA_SOURCE=mock) 모드 공용 판정(v2.708). | 85 | 26 | 3 |
 | `server/src/alerts.js` | Alerting — evaluates threshold/condition rules against the current snapshot on an interval and pushes notifications to Slack(incoming webhook) and/or… | 31 | 23 | 28 |
 | `server/src/proxy/sshExec.js` | Small SSH helper built on ssh2: connect, run commands, and upload files via SFTP. Shared by the proxy auto-deploy and the agent auto-deploy features.… | 47 | 17 | 30 |
 | `server/src/datacenter/store.js` | DataCenter(법인) 레지스트리 — vCenter의 '상위 개념'. | 46 | 16 | 12 |
-| `server/src/vcenter/registry.js` | vCenter registry — read/write the managed list of vCenters in config/vcenters.json (the same file the live collector polls), with validation, password… | 31 | 15 | 6 |
+| `server/src/vcenter/registry.js` | vCenter registry — read/write the managed list of vCenters in config/vcenters.json (the same file the live collector polls), with validation, password… | 31 | 15 | 7 |
 | `server/src/vcenter/soapParse.js` | 순수(사이드이펙트 없음) SOAP 응답 파서 — worker_threads 워커에서도 재사용하기 위해 soapClient.js에서 분리했다. 여기에는 config/DB/네트워크 등 부수효과 있는 import를 절대 추가하지 말 것(워커가 로드할 때 부수효과가 워커 스레… | 25 | 15 | 17 |
 | `server/src/mail/service.js` | 포탈 공용 메일 발송 진입점 (v2.454). | 18 | 14 | 17 |
 | `server/src/agent/envTimeout.js` | 호환 재수출(v2.613 DEPS2613-01) — 본체는 `util/envTimeout.js` 로 옮겼다. config.js 가 agent/ 를 import 하는 방향(설정 leaf → 엣지 워커 디렉터리)이 잠재 순환의 씨앗이었고, agent/ 밖 18개 파일이 이… | 33 | 13 | 2 |
@@ -245,7 +246,7 @@
 | `server/src/mock/demo/edge.js` | 데모(DATA_SOURCE=mock) 엣지(수집 서버) 그룹(v2.708). | 23 | 12 | 2 |
 | `server/src/mail/settings.js` | 포탈 공용 메일(SMTP) 설정 (`mail.json`, v2.454). | 21 | 12 | 21 |
 | `server/src/audit.js` | Audit log — records security/operational actions (who did what, when) so the portal's write operations (VM 생성, 원격접속, 설정 변경 등)이 추적된다. Appended to CONFI… | 133 | 11 | 43 |
-| `server/src/auth/auth.js` | (머리 주석 없음) | 144 | 10 | 55 |
+| `server/src/auth/auth.js` | (머리 주석 없음) | 145 | 10 | 58 |
 | `server/src/runtime-settings.js` | Runtime-adjustable settings that can be changed from the portal UI (and persisted), overriding the env defaults. Currently: the data source (mock \| li… | 19 | 10 | 23 |
 | `server/src/security/tlsTrust.js` | 장비 TLS 상대 인증(2026-10-09 검토 S-02) — 자격증명을 보내는 HTTPS 연결이 **정말 그 장비인지** 확인한다. | 14 | 10 | 4 |
 | `server/src/storage/registry.js` | 스토리지 장비 등록부(v2.302). | 28 | 9 | 39 |
@@ -273,15 +274,15 @@
 | `server/src/metrics/unreadVcenters.js` | '지금 값' 으로 쓰지 않는 vCenter 와 그 사유(순수 leaf — import 0). | 10 | 6 | 4 |
 | `server/src/security/emergencyStop.js` | 긴급중단(Emergency Stop) — 2인 승인(관리자 2명 OTP)으로만 켜고/끄는 전역 수집 정지 스위치. | 8 | 6 | 3 |
 | `server/src/security/certMonitor.js` | TLS 인증서 만료 감시 — 등록된 vCenter·NSX Manager의 443 인증서를 주기적으로 프로브해 만료일(D-90 경고 / D-30 위험)을 추적한다. 28개 vCenter 규모에서 수동 추적이 불가능한 항목(커뮤니티 단골 장애: vCenter STS/머신… | 7 | 6 | 8 |
-| `server/src/auth/addressMask.js` | 비-admin 응답에서 장비 관리 주소·계정명을 가린다(v2.599 AUTHZ-2599-03). | 44 | 5 | 15 |
+| `server/src/auth/addressMask.js` | 비-admin 응답에서 장비 관리 주소·계정명을 가린다(v2.599 AUTHZ-2599-03). | 44 | 5 | 16 |
 | `server/src/bareos/settings.js` | Bareos 연동 설정(v2.820 · v2.823 법인별 Director). 파일: CONFIG_DIR/bareos.json (0600 · 원자적 쓰기 · 비밀 봉인). | 31 | 5 | 25 |
-| `server/src/auth/permissions.js` | 기능별 권한(Permission) 프레임워크 — "모든 기능에 대해 역할별 권한을 켜고 끈다". | 17 | 5 | 14 |
-| `server/src/isidu/settings.js` | 아이실론 디렉터리 사용량 수집 대상 설정(v2.736). | 17 | 5 | 17 |
+| `server/src/auth/permissions.js` | 기능별 권한(Permission) 프레임워크 — "모든 기능에 대해 역할별 권한을 켜고 끈다". | 17 | 5 | 16 |
+| `server/src/isidu/settings.js` | 아이실론 디렉터리 사용량 수집 대상 설정(v2.736). | 17 | 5 | 18 |
 | `server/src/collector/remoteInventory.js` | Remote (edge-collected) iDRAC server inventory, pulled from collector agents' /api/collector/export (the `servers` field). Keyed by collectorId so eac… | 15 | 5 | 23 |
 | `server/src/vcenter/dsBrowse.js` | 데이터스토어 브라우즈 (v2.276) — 데이터스토어 상세에서 ① 어떤 VM 이 할당돼 있는지, ② 실제 어떤 파일들이 있는지 보여준다. | 15 | 5 | 4 |
 | `server/src/ipam/ledger.js` | IPAM ledger builder — turns a snapshot into a per-center IP record list. Shared by the /tools/ipam API and the SQLite exporter so both stay in sync. | 14 | 5 | 23 |
 | `server/src/metrics/db.js` | Generic metrics time-series store (host temperature, datastore usage, GPU utilization …). Mirrors the iDRAC power DB: Node built-in SQLite when the --… | 14 | 5 | 33 |
-| `server/src/central/storageEdge.js` | 엣지들이 push 한 스토리지 스냅샷의 중앙 보관(v2.302). agent → { at, devices:[NormalizedSnapshot] }. 파일 영속: central-agent-storage.json (central-agent-* 는 .gitignore 와일드… | 12 | 5 | 17 |
+| `server/src/central/storageEdge.js` | 엣지들이 push 한 스토리지 스냅샷의 중앙 보관(v2.302). agent → { at, devices:[NormalizedSnapshot] }. 파일 영속: central-agent-storage.json (central-agent-* 는 .gitignore 와일드… | 12 | 5 | 18 |
 | `server/src/idrac/db.js` | Time-series storage for iDRAC power samples. | 12 | 5 | 22 |
 | `server/src/agent/deploy.js` | iDRAC-scan collector agent auto-deploy. The central portal pushes its offline install package to a fresh Rocky 9 host over SSH, runs install.sh, injec… | 11 | 5 | 8 |
 | `server/src/sanswitch/store.js` | 이 노드가 수집한 최신 스냅샷 보관(v2.410, storage/store.js 와 동일 철학). deviceId → NormalizedSwitchSnapshot. 재시작 후에도 마지막 화면이 비지 않게 파일로 영속 (자격증명 없음 — 정규화 스냅샷만. 그래도 0600… | 11 | 5 | 19 |

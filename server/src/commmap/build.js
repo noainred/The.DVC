@@ -29,7 +29,7 @@
  *  ⑥ 판정은 여기서 `state` + `reasons`(코드)만 만들고 **문장은 웹**(`commMapText.js`)이 만든다
  *     (v2.553 remedy 규약 — 코드 목록과 문구가 1:1 이어야 하고 테스트가 대조한다).
  */
-import { linkIdOf } from '../linkcheck/links.js';
+import { linkIdOf, centralEdgeLinkId, collectorNameCount } from '../linkcheck/links.js';
 import { numOrNull } from '../util/numOrNull.js';
 
 const t = (v) => String(v ?? '').trim();
@@ -221,6 +221,7 @@ export function buildCommMap(p = {}) {
   placeDevices(p.storage, 'storage'); placeDevices(p.sanswitch, 'sanswitch'); placeDevices(p.pdu, 'pdu');
 
   // ── 엣지 행 ──
+  const nameCount = collectorNameCount(collectors);   // 18회차 반증 A-2: '중앙 → 엣지' 링크 id 는 buildLinks 와 같은 함수로
   const edges = collectors.map((c) => {
     const id = t(c.id || c.name);
     const name = t(c.name) || id;
@@ -264,14 +265,12 @@ export function buildCommMap(p = {}) {
     push.rejects = rej ? { total: rej.total, lastAt: rej.lastAt, lastKind: t(rej.lastKind), lastReason: t(rej.lastReason).slice(0, 200), unverified: true } : null;
 
     // 통신 점검(v2.552) 최신값 — 있으면 싣고, 없으면 null(정상으로 칠하지 않는다)
-    const lk = (kind, from, to) => {
-      const r = linkById.get(linkIdOf(kind, from, to));
-      return r ? { ok: !!r.ok, ts: r.ts, phase: t(r.phase), failKind: t(r.fail_kind), streak: num(r.streak) ?? 1, sinceTs: num(r.since_ts), totalMs: num(r.total_ms) } : null;
-    };
+    const lkRow = (r) => (r ? { ok: !!r.ok, ts: r.ts, phase: t(r.phase), failKind: t(r.fail_kind), streak: num(r.streak) ?? 1, sinceTs: num(r.since_ts), totalMs: num(r.total_ms) } : null);
+    const lk = (kind, from, to) => lkRow(linkById.get(linkIdOf(kind, from, to)));
     const rep = edgeReports[linkFrom] || edgeReports[id] || null;
     const linkCheck = {
       enabled: linkCheckEnabled,
-      'central->edge': lk('central->edge', 'central', linkFrom),
+      'central->edge': lkRow(linkById.get(centralEdgeLinkId(c, nameCount))),
       'edge->central': lk('edge->central', linkFrom, 'central'),
       'edge->central-pull': lk('edge->central-pull', linkFrom, 'central'),
       reportAt: tsOrNull(rep?.at), reportStale: rep ? !!rep.stale : null, reportVersion: t(rep?.version),

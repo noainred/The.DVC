@@ -125,7 +125,7 @@ export const DEFAULTS = Object.freeze({
   maintenance: { backupWindows: true },
 });
 
-const _err = makeSettingsLoadError(FILE, { label: '베어메탈 성능 알림 규칙 · 집중 모니터링', confirm: () => writeFile(normalizeRules({}, { strict: false }).value) });
+const _err = makeSettingsLoadError(FILE, { label: '베어메탈 성능 알림 규칙 · 집중 모니터링', confirm: () => writeFile(normalizeRules({}, { strict: false }).value), ownerOnly: true });   // 20회차 F8: 쓰기 라우트가 소유자 등급
 let _cache = null; let _mtime = '';
 const mtimeOf = () => { try { const st = fs.statSync(FILE()); return `${st.mtimeMs}:${st.size}`; } catch { return ''; } };
 function fieldError(field, msg) { const e = new Error(`${field}: ${msg}`); e.status = 400; e.field = field; return e; }

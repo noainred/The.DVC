@@ -28,7 +28,7 @@ export function relayRunText(r) {
   return `점검 완료 — 대상 ${show(r.total)} · 정상 ${show(r.okCount)} · 실패 ${show(r.fail)}${sec}${demo}`;
 }
 
-const PHASE = { ok: '정상', refused: '리스너 없음', timeout: '무응답', unreach: '경로 없음', tls: 'TLS 무응답', http: 'HTTP 무응답', identity: '대상 불일치', auth: '토큰 거부', hq: '중앙 아님', banner: 'SSH 아님', unknown: '오류' };
+const PHASE = { ok: '정상', refused: '리스너 없음', timeout: '무응답', unreach: '경로 없음', tls: 'TLS 무응답', cert: 'TLS 인증서', http: 'HTTP 무응답', identity: '대상 불일치', auth: '토큰 거부', hq: '중앙 아님', banner: 'SSH 아님', unknown: '오류' };
 
 export default function RelayCheckTool() {
   // ⚠ 훅은 전부 조기 return 위에(React #310 회귀 방지).

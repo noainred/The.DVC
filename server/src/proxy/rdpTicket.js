@@ -69,12 +69,17 @@ export function issueRdpTicket(creds = {}, { owner = '' } = {}) {
   return id;
 }
 
-/** 티켓을 소비(1회용) — 유효하면 creds 반환 후 삭제, 아니면 null. */
-export function consumeRdpTicket(id) {
+/**
+ * 티켓을 소비(1회용) — 유효하면 creds 반환 후 삭제, 아니면 null.
+ * 전체 점검 19회차 A-11(심층 방어): 발급자(owner)와 쓰는 사람(user)을 대조한다 — 티켓 ID 는 WS 쿼리스트링(상위 프록시 로그)에 남아,
+ *   60초 안에 다른 remote.access 사용자가 먼저 쓰면 피해자의 RDP 자격증명이 그 사람의 매핑으로 갔다. 다른 사람의 시도는 티켓을 지우지 않는다(주인이 쓸 수 있게).
+ */
+export function consumeRdpTicket(id, { user = '' } = {}) {
   prune();
   const key = String(id || '');
   const t = tickets.get(key);
   if (!t) return null;
+  if (t.owner && t.owner !== capStr(user, 256)) return null;
   tickets.delete(key);
   if (t.exp <= Date.now()) return null;
   return t.creds;

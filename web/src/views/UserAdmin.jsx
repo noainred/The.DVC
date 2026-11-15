@@ -1,6 +1,19 @@
 import React, { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
-import { fetchJson, postJson, patchJson, delJson, putJson, getCurrentUser } from '../api.js';
+import { fetchJson, postJson, patchJson, delJson, putJson, sendJson, getCurrentUser } from '../api.js';
+
+/** 실패를 { ok:false, reason, needCurrentOtp } 로(서버가 본인 계정 변경에 현재 OTP 를 요구하면 needCurrentOtp — 전체 점검 20회차 F1). */
+const otpFail = (e) => ({ ok: false, reason: e?.message, needCurrentOtp: e?.body?.needCurrentOtp === true });
+/** 본인 계정의 OTP · 비밀번호 변경은 지금 OTP 코드를 요구받는다 — 받으면 한 번 입력받아 다시 보낸다. */
+async function withCurrentOtp(call) {
+  let r = await call({});
+  if (r && r.ok === false && r.needCurrentOtp) {
+    const code = window.prompt('본인 계정입니다 — 지금 쓰는 OTP 앱의 6자리 코드를 입력하세요:', '');
+    if (!code) return { ok: false, reason: '취소했습니다(현재 OTP 코드 미입력).' };
+    r = await call({ currentCode: code.trim() });
+  }
+  return r;
+}
 import { roleOptions, superTargetLocked, isAdminTier, permCell, toggleAdminDenied, roleBadgeTone, SUPER_LOCK_TITLE, SUPER_ROLE_TITLE, MATRIX_NOTE } from './userAdmin/roleText.js';
 import { Loading, ErrorBox, Modal } from '../components/ui.jsx';
 import { TOOLS as SPECIAL_TOOLS } from './specialToolsList.js';
@@ -125,7 +138,7 @@ export default function UserAdmin() {
   };
 
   const startEnroll = async (u) => {
-    const r = await postJson(`/admin/users/${encodeURIComponent(u.username)}/totp/begin`, {}).catch((e) => ({ ok: false, reason: e.message }));
+    const r = await withCurrentOtp((body) => postJson(`/admin/users/${encodeURIComponent(u.username)}/totp/begin`, body).catch(otpFail));
     if (!r.ok) return flash(false, r.reason);
     const qr = await QRCode.toDataURL(r.otpauthURL, { width: 200, margin: 1 }).catch(() => null);
     setEnroll({ username: u.username, secret: r.secret, otpauthURL: r.otpauthURL, qr, code: '', error: null });
@@ -139,8 +152,9 @@ export default function UserAdmin() {
 
   const disableTotp = async (u) => {
     if (!window.confirm(`'${u.username}'의 OTP를 해제할까요? (다시 비밀번호/재등록 필요)`)) return;
-    const call = (body) => postJson(`/admin/users/${encodeURIComponent(u.username)}/totp/disable`, body).catch((e) => ({ ok: false, reason: e.message }));
-    let r = await call({});
+    let cur = {};   // 20회차 F1: 본인 계정이면 서버가 현재 OTP 를 요구한다 — 받은 코드는 임시 비밀번호 재시도에도 싣는다
+    const call = (body) => postJson(`/admin/users/${encodeURIComponent(u.username)}/totp/disable`, { ...cur, ...body }).catch(otpFail);
+    let r = await withCurrentOtp((body) => { cur = body.currentCode ? { currentCode: body.currentCode } : {}; return call(body); });
     // v2.277 잠금 방지: 비밀번호 없는 OTP 전용 계정은 서버가 임시 비밀번호를 요구한다 —
     // 없이 해제하면 비번도 OTP 도 없는 '로그인 완전 불가' 계정이 되기 때문(확정 버그 수정).
     // 서버 거부 사유를 보고 즉석에서 임시 비밀번호를 받아 1회 재시도한다.
@@ -217,14 +231,15 @@ export default function UserAdmin() {
   const savePassword = async () => {
     if (pwEdit.pw.length < 8) return setPwEdit((s) => ({ ...s, error: '비밀번호는 8자 이상이어야 합니다.' }));
     if (pwEdit.pw !== pwEdit.pw2) return setPwEdit((s) => ({ ...s, error: '비밀번호가 서로 일치하지 않습니다.' }));
-    const r = await postJson(`/admin/users/${encodeURIComponent(pwEdit.username)}/password`, { password: pwEdit.pw })
-      .catch((e) => ({ ok: false, reason: e.message }));
+    const r = await withCurrentOtp((body) => postJson(`/admin/users/${encodeURIComponent(pwEdit.username)}/password`, { password: pwEdit.pw, ...body }).catch(otpFail));
     if (r.ok) { setPwEdit(null); await load(); flash(true, '비밀번호를 설정했습니다 — 이제 이 계정으로 로그인할 수 있습니다.'); }
     else setPwEdit((s) => ({ ...s, error: r.reason }));
   };
   const blockLogin = async (u) => {
     if (!window.confirm(`'${u.username}' 계정의 비밀번호/OTP를 제거해 로그인을 차단할까요?\n(활성 세션도 즉시 종료됩니다. 다시 허용하려면 비밀번호를 새로 설정하면 됩니다.)`)) return;
-    const r = await delJson(`/admin/users/${encodeURIComponent(u.username)}/password`).catch((e) => ({ ok: false, reason: e.message }));
+    const r = await withCurrentOtp((body) => (body.currentCode
+      ? sendJson(`/admin/users/${encodeURIComponent(u.username)}/password`, 'DELETE', body)
+      : delJson(`/admin/users/${encodeURIComponent(u.username)}/password`)).catch(otpFail));
     if (r?.ok !== false) { await load(); flash(true, '로그인을 차단했습니다(자격증명 제거).'); } else flash(false, r.reason);
   };
 
@@ -383,6 +398,10 @@ export default function UserAdmin() {
               <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={resetPerms}>기본값</button>
             </div>
           </div>
+          {/* 전체 점검 22회차 반증 D-11: 권한 파일을 못 읽어 최소 권한으로 동작 중이면 밝힌다 — 아래 행은 저장된 설정이 아니라 잠금 값이다 */}
+          {perms.loadError ? (
+            <div style={{ marginBottom: 8, minWidth: 0, overflowWrap: 'anywhere' }}><span className="badge amber">권한 파일 못 읽음</span> <span className="muted" style={{ fontSize: 12 }}>{perms.loadError.reason}</span></div>
+          ) : null}
           <div className="muted" style={{ fontSize: 12, marginBottom: 10, lineHeight: 1.7 }}>
             <BoldText text={MATRIX_NOTE} />
           </div>

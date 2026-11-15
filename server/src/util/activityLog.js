@@ -94,8 +94,11 @@ export function createActivityLog({ fileName, max = 500, numFields = [], writeGa
    */
   function recordActivity(evt = {}) {
     const b = load();
+    // 전체 점검 14회차(C-4): 엣지가 보낸 완료 시각(엣지 시계)은 수신 시각으로 자르고 원본은 edgeAt 에 따로(v2.630 A4-02 규칙 — 표시 at 에 미래 시각이 찍혔다)
+    const nowMs = Date.now();
+    const at0 = Number(evt.at) || nowMs;
     const e = {
-      at: Number(evt.at) || Date.now(),
+      at: Math.min(at0, nowMs), ...(at0 > nowMs ? { edgeAt: at0 } : {}),
       deviceId: String(evt.deviceId || ''),
       name: String(evt.name || evt.deviceId || ''),
       host: String(evt.host || ''),

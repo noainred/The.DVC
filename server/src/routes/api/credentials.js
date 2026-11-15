@@ -56,7 +56,9 @@ api.put('/tools/credentials/:id', adminOnly, fullScopeOnly, reauth, (req, res) =
 });
 
 api.delete('/tools/credentials/:id', adminOnly, fullScopeOnly, reauth, (req, res) => {
-  const gone = deleteCredential(String(req.params.id));
+  let gone;
+  try { gone = deleteCredential(String(req.params.id)); }
+  catch (e) { return res.status(e?.code === 'SECRETS_KEY_MISSING' || e?.code === 'SECRETS_POLICY_UNAVAILABLE' ? 503 : 500).json({ ok: false, code: e?.code || null, reason: String(e?.message || e).slice(0, 300) }); }   // 22회차 D-12: 사유를 그대로
   if (!gone) return res.status(404).json({ ok: false, reason: '계정을 찾을 수 없습니다.' });
   logAudit({ user: req.user?.username, action: '통합 계정 삭제', target: gone.name, detail: `${gone.kind}/${gone.username}`, ip: req.ip });
   res.json({ ok: true });

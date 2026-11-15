@@ -68,7 +68,7 @@ before(async () => {
   SCOPED = { username: 'adm2', role: 'admin', scope: { vcenters: [vc] } };
 });
 
-test('① 설정 로드 오류를 만드는 모든 모듈이 label + confirm 을 준다(새 모듈이 빠지면 확정 버튼이 뜨지 않는다) — v2.736 16개 · v2.769 17개(PDU 임계치) · v2.793 18개(VM 백업 잡) · v2.923 19개(튜닝 덮어쓰기) · v2.929 20개(성능 알림 규칙) · 6단계 23개(비교 세트 · 운영 주석 · 목표선) · 8a단계 24개(정비 창) · 다음 점검 ①(2차) 25개(식별 키 겹침 결정)', () => {
+test('① 설정 로드 오류를 만드는 모든 모듈이 label + confirm 을 준다(새 모듈이 빠지면 확정 버튼이 뜨지 않는다) — v2.736 16개 · v2.769 17개(PDU 임계치) · v2.793 18개(VM 백업 잡) · v2.923 19개(튜닝 덮어쓰기) · v2.929 20개(성능 알림 규칙) · 6단계 23개(비교 세트 · 운영 주석 · 목표선) · 8a단계 24개(정비 창) · 다음 점검 ①(2차) 25개(식별 키 겹침 결정) · 전체 점검 17회차 26개(엣지 배포 사용자) · 19회차 27개(권한 매트릭스)', () => {
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : e.name.endsWith('.js') ? [path.join(d, e.name)] : []));
   const calls = [];
   for (const f of walk(SRC)) {
@@ -76,7 +76,7 @@ test('① 설정 로드 오류를 만드는 모든 모듈이 label + confirm 을
     const s = stripComments(fs.readFileSync(f, 'utf8'));
     for (const m of s.matchAll(/makeSettingsLoadError\(([^\n]*)/g)) calls.push({ f: path.relative(SRC, f), line: m[1] });
   }
-  assert.equal(calls.length, 25, `등록 수가 바뀌었다 — 테스트의 FILES 목록도 갱신할 것: ${calls.map((c) => c.f).join(', ')}`);
+  assert.equal(calls.length, 27, `등록 수가 바뀌었다 — 테스트의 FILES 목록도 갱신할 것: ${calls.map((c) => c.f).join(', ')}`);
   for (const c of calls) assert.ok(/label:\s*'[^']+'/.test(c.line) && /confirm:/.test(c.line), `${c.f}: label·confirm 이 없다 — ${c.line}`);
 });
 
@@ -101,7 +101,13 @@ test('③ 라우트 게이트: operator 403 · 범위 관리자 403 · 파일 �
 test('② 18개 전부 관리자 확정이 성공하고, 오류가 풀리며, 보존본은 남는다 · 두 번째는 409 · 감사 로그', async () => {
   const u = '/tools/service-check/settings-files/confirm';
   for (const f of FILES) {
-    const r = await call(api, FULL, 'POST', u, { file: f });
+    // 전체 점검 20회차 반증 F8: 쓰기 라우트가 super_admin 전용인 설정(아이실론)은 확정도 super_admin — admin 은 403
+    if (f === 'isidu-settings.json') assert.equal((await call(api, FULL, 'POST', u, { file: f })).status, 403, 'isidu 확정은 super_admin');
+    //   쓰기 라우트가 설정 소유자 등급인 설정(베어메탈 SLO · 알림 규칙 · 튜닝)은 확정도 소유자 — admin 은 403
+    const OWNER_ONLY = ['bm-perf-slo.json', 'bm-perf-rules.json', 'bmusage-tuning.json'];
+    if (OWNER_ONLY.includes(f)) assert.equal((await call(api, FULL, 'POST', u, { file: f })).status, 403, `${f} 확정은 설정 소유자`);
+    const who = f === 'isidu-settings.json' ? { ...FULL, superAdmin: true } : OWNER_ONLY.includes(f) ? { ...FULL, username: 'noainred' } : FULL;
+    const r = await call(api, who, 'POST', u, { file: f });
     assert.equal(r.status, 200, `${f}: ${JSON.stringify(r.body)}`);
     assert.equal(r.body.ok, true);
     assert.ok(fs.existsSync(path.join(CFG, f)), `${f}: 기본값 파일이 써지지 않았다`);

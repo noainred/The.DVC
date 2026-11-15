@@ -111,8 +111,11 @@ async function pushStorageOnce() {
     if (ds?.rejected) console.warn(`[storage-push] 중앙이 장비 ${ds.rejected}대를 받지 않았습니다(${dropText(ds.dropped)}) — 그 장비는 중앙 화면에 나오지 않습니다`);
     let samples = null;
     if (nodeLoadSamples.length) {
-      markNodeLoadSamplesSent(nodeLoadSamples); // 200 = 중앙이 본문을 받았다(모르는 키였어도 다시 보내 봐야 같다)
       const ack = ds?.nodeLoadSamples || null;
+      // 200 = 중앙이 본문을 받았다(모르는 키였어도 다시 보내 봐야 같다). 전체 점검 14회차(C-2): 단, 중앙이 '표본 DB 를 쓰지 못했다'(dbUnavailable — 잠김 · 쓰기 예외)고
+      //   답하면 고리를 지우지 않는다 — 예전에는 200 만 보고 지워 그 구간이 영구 결손됐다(다시 보내면 중앙이 중복은 세고 넘긴다).
+      if (ack?.dbUnavailable) console.warn(`[storage-push] 중앙이 노드 부하 표본을 적재하지 못했습니다(중앙 DB) — 표본을 지우지 않고 다음 주기에 다시 보냅니다`);
+      else markNodeLoadSamplesSent(nodeLoadSamples);
       samples = { sent: nodeLoadSamples.reduce((a, d) => a + d.samples.length, 0), devices: nodeLoadSamples.length, ack };
       if (!ack) console.warn(`[storage-push] 노드 부하 표본 ${samples.sent}개를 보냈지만 중앙 응답에 확인(nodeLoadSamples)이 없습니다 — 중앙이 v2.932 이전이면 표본은 버려집니다`);
     }

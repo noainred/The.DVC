@@ -78,11 +78,11 @@ test('checks.runCheck: SSH 배너 / 리스너 없음 / 포탈 정체 불일치·
   const refused = await runCheck({ host: '127.0.0.1', port: cp, kind: 'irs-portal', token: 't' }, { timeoutMs: 3000 });
   assert.equal(refused.ok, false); assert.equal(refused.phase, 'refused');
   // IRS 포트가 중계 엣지(AZ) 자신으로 되돌아옴 → identity
-  const loop = await runCheck({ host: '127.0.0.1', port: edgePort, kind: 'irs-portal', token: 'tA', expectAgent: 'AZ-IRS', relayAgent: 'AZ', otherIds: ['AZ', 'AZ-IRS'] }, { timeoutMs: 3000 });
+  const loop = await runCheck({ host: '127.0.0.1', port: edgePort, kind: 'irs-portal', scheme: 'http', token: 'tA', expectAgent: 'AZ-IRS', relayAgent: 'AZ', otherIds: ['AZ', 'AZ-IRS'] }, { timeoutMs: 3000 });
   assert.equal(loop.ok, false); assert.equal(loop.phase, 'identity'); assert.equal(loop.got.agent, 'AZ');
-  const auth = await runCheck({ host: '127.0.0.1', port: edgePort, kind: 'irs-portal', token: 'wrong', expectAgent: 'AZ-IRS' }, { timeoutMs: 3000 });
+  const auth = await runCheck({ host: '127.0.0.1', port: edgePort, kind: 'irs-portal', scheme: 'http', token: 'wrong', expectAgent: 'AZ-IRS' }, { timeoutMs: 3000 });
   assert.equal(auth.phase, 'auth');
-  const okp = await runCheck({ host: '127.0.0.1', port: edgePort, kind: 'edge-portal', token: 'tA', expectAgent: 'AZ', otherIds: ['AZ', 'AZ-IRS'] }, { timeoutMs: 3000 });
+  const okp = await runCheck({ host: '127.0.0.1', port: edgePort, kind: 'edge-portal', scheme: 'http', token: 'tA', expectAgent: 'AZ', otherIds: ['AZ', 'AZ-IRS'] }, { timeoutMs: 3000 });
   assert.equal(okp.ok, true);
   const hqBad = await runCheck({ host: '127.0.0.1', port: edgePort, kind: 'hq-portal' }, { timeoutMs: 3000 });
   assert.equal(hqBad.ok, false); assert.equal(hqBad.phase, 'hq');

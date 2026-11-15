@@ -48,6 +48,14 @@ export function makeSettingsLoadError(fileOf, opts = {}) {
       //   아니라 요약이다 — 이 사유는 엣지 설정 pull 503·콘솔·서비스 점검 화면에 실린다. 원문은 보존본 파일에 그대로 있다.
       set(`설정 파일을 읽지 못했습니다(${safeLoadText(msg, 120) || '사유 미상'}) — 손상 보존본으로 옮겼습니다`);
     },
+    /**
+     * 20회차 반증 F4: **읽기 오류**(EACCES · EISDIR — 원본을 옮기지 않았다). 사유가 '보존본으로 옮겼습니다' 가 아니고, '기본값으로 확정' 할 수 없다
+     *   (파일이 그대로 있어 확정은 file-present 로 막히고, 재시작해도 같은 오류다 — 사람이 권한 · 소유자를 고쳐야 한다).
+     */
+    readError(e) {
+      const code = String((e && typeof e === 'object' ? e.code : '') || 'read-error').slice(0, 32);
+      err = { at: Date.now(), reason: `설정 파일을 읽지 못했습니다(${code}) — 원본은 그대로 두었습니다. 파일 권한 · 소유자(포탈 서비스 계정)를 고치고 재시작하세요`, readError: true };
+    },
     missing() {
       let why = null;
       try { why = corruptOnlyReason(fileOf()); } catch { why = null; }
@@ -55,7 +63,7 @@ export function makeSettingsLoadError(fileOf, opts = {}) {
       if (!err) set(why.replace('등록부 파일', '설정 파일'));   // 이미 세운 오류의 시각(since)은 유지한다
     },
   };
-  _registry.push({ fileOf, api, label: String(opts.label || ''), confirm: typeof opts.confirm === 'function' ? opts.confirm : null });
+  _registry.push({ fileOf, api, label: String(opts.label || ''), confirm: typeof opts.confirm === 'function' ? opts.confirm : null, ownerOnly: opts.ownerOnly === true, superOnly: opts.superOnly === true });
   return api;
 }
 
@@ -67,10 +75,10 @@ export function makeSettingsLoadError(fileOf, opts = {}) {
 export function listSettingsLoadErrors() {
   const out = [];
   for (const ent of _registry) {
-    const { label, confirm } = ent;
+    const { label, confirm, ownerOnly } = ent;
     const file = fileNameOf(ent);
     const e = currentError(ent);
-    if (e) out.push({ file: file || '(경로 미상)', label, at: e.at, reason: e.reason, confirmable: !!(confirm && file) });
+    if (e) out.push({ file: file || '(경로 미상)', label, at: e.at, reason: e.reason, confirmable: !!(confirm && file && !e.readError), ...(ownerOnly ? { ownerOnly: true } : {}), ...(e.readError ? { readError: true } : {}) });
   }
   return out;
 }
@@ -90,14 +98,38 @@ function currentError(ent) {
  *   그러면 로드 오류가 풀리고 설정 pull 이 다시 200 으로 답한다(= 이 기본값이 엣지에 배포된다 — 화면이 확인을 받는다).
  *   손상 보존본(.corrupt.*)은 **지우지 않는다**(원인 분석·수동 복구용).
  * @param {string} fileName  `listSettingsLoadErrors()` 가 준 file(베이스 이름)
- * @returns {{ ok:true, file:string, label:string } | { ok:false, code:'unknown-file'|'not-in-error'|'not-confirmable'|'confirm-failed'|'still-error', file:string, detail?:string }}
+ * @returns {{ ok:true, file:string, label:string } | { ok:false, code:'unknown-file'|'not-in-error'|'not-confirmable'|'file-present'|'confirm-failed'|'still-error', file:string, detail?:string }}
  */
+/**
+ * 전체 점검 18회차 반증 B-2: 확정이 그 설정의 쓰기 라우트보다 약한 게이트가 되지 않게 — `ownerOnly` 로 등록한 파일(예: 엣지 배포 사용자 —
+ *   쓰기 라우트가 requireSettingsOwner)은 확정 라우트도 설정 소유자 등급을 요구한다(routes/api/checksLogs.js).
+ */
+export function settingsFileOwnerOnly(fileName) {
+  const want = String(fileName || '');
+  const ent = want ? _registry.find((x) => fileNameOf(x) === want) : null;
+  return !!ent?.ownerOnly;
+}
+/** 20회차 반증 F8: 쓰기 라우트가 super_admin 전용인 파일(예: 아이실론 디렉터리 사용량 설정)은 확정도 super_admin. */
+export function settingsFileSuperOnly(fileName) {
+  const want = String(fileName || '');
+  const ent = want ? _registry.find((x) => fileNameOf(x) === want) : null;
+  return !!ent?.superOnly;
+}
+
 export function confirmSettingsDefault(fileName, { by = '' } = {}) {
   const want = String(fileName || '');
   const ent = want ? _registry.find((x) => fileNameOf(x) === want) : null;
   if (!ent) return { ok: false, code: 'unknown-file', file: want };
   if (!currentError(ent)) return { ok: false, code: 'not-in-error', file: want };
   if (!ent.confirm) return { ok: false, code: 'not-confirmable', file: want };
+  if (currentError(ent)?.readError) return { ok: false, code: 'not-confirmable', file: want, detail: '읽기 오류(권한 · 소유자)라 확정으로 풀 수 없습니다 — 파일 권한을 고치고 재시작하세요.' };   // 20회차 F4
+  // 전체 점검 18회차 반증 B-1(재현): 오류가 서 있는데 **파일이 다시 있으면**(운영자가 보존본을 되돌림) 기본값으로 덮지 않는다 — 로드는 기동 때 한 번이라
+  //   메모리는 여전히 빈 기본값이고, 확정이 되돌린 파일을 그 값으로 덮어 복구본을 잃고 기본값(빈 배포 목록 등)을 전 엣지에 내렸다.
+  //   손상되면 원본은 preserveCorrupt 로 옮겨지므로, 오류 중 파일이 있다는 것은 사람이 놓았다는 뜻이다 — 재시작이 그 파일을 읽는다.
+  try {
+    const full = fullPathOf(ent);
+    if (full && fs.existsSync(full)) return { ok: false, code: 'file-present', file: want, detail: '설정 파일이 다시 있습니다(되돌린 보존본으로 보입니다) — 기본값으로 덮지 않았습니다. 포탈을 재시작하면 그 파일을 읽습니다.' };
+  } catch { /* 판정 실패는 예전 동작(확정 진행) */ }
   try { ent.confirm({ by: String(by || '').slice(0, 64) }); } catch (e) { return { ok: false, code: 'confirm-failed', file: want, detail: String(e?.message || e).slice(0, 200) }; }
   if (currentError(ent)) return { ok: false, code: 'still-error', file: want };
   return { ok: true, file: want, label: ent.label };

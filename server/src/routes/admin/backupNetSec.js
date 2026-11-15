@@ -439,7 +439,8 @@ adminRouter.put('/security/guest-scans', adminOnly, (req, res) => {
   }
   const code = guestScanAccess(req.user, b.vcenterId);
   if (code) return res.status(code).json({ ok: false, reason: code === 403 ? GUEST_SCAN_READONLY : 'vCenter 를 찾을 수 없습니다(범위 제한 계정은 자기 범위 vCenter 를 지정해야 합니다).' });
-  res.json(saveGuestScan(b));
+  // 22회차 반증 D-12: 저장이 던지면(21회차 L-3 — 잠금 · 키 없음 · 디스크) 사유를 그대로(500 'internal error' 로 사유가 사라지던 것)
+  try { res.json(saveGuestScan(b)); } catch (e) { res.status(e?.code === 'SECRETS_KEY_MISSING' || e?.code === 'SECRETS_POLICY_UNAVAILABLE' ? 503 : 500).json({ ok: false, code: e?.code || null, reason: String(e?.message || e).slice(0, 300) }); }
 });
 function denyGuestScanOutOfScope(req, res) {
   const snap = store.get();
@@ -450,6 +451,6 @@ function denyGuestScanOutOfScope(req, res) {
   res.status(code).json({ ok: false, reason: code === 403 ? GUEST_SCAN_READONLY : '작업을 찾을 수 없습니다.' });
   return true;
 }
-adminRouter.delete('/security/guest-scans/:id', adminOnly, (req, res) => { if (denyGuestScanOutOfScope(req, res)) return; res.json({ ok: removeGuestScan(req.params.id) }); });
+adminRouter.delete('/security/guest-scans/:id', adminOnly, (req, res) => { if (denyGuestScanOutOfScope(req, res)) return; try { res.json({ ok: removeGuestScan(req.params.id) }); } catch (e) { res.status(500).json({ ok: false, code: e?.code || null, reason: String(e?.message || e).slice(0, 300) }); } });   // 22회차 D-12
 adminRouter.post('/security/guest-scans/:id/run', adminOnly, async (req, res) => { if (denyGuestScanOutOfScope(req, res)) return; try { res.json(await runGuestScanNow(req.params.id)); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); } });
 }

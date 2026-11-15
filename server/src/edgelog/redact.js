@@ -145,5 +145,5 @@ export function redactLogLine(line) {
     .replace(/\b(Bearer\s+)\S+/gi, `$1${MASK}`)
     .replace(/\b((?:Proxy-)?Authorization\s*[=:]\s*(?:Basic|Digest)\s+)\S+/gi, `$1${MASK}`)
     .replace(/(\b[a-z][a-z0-9+.-]{0,20}:\/\/[^\s/@:]{1,256}:)[^\s/@]{1,512}@/gi, `$1${MASK}@`)
-    .replace(/(X-[A-Za-z-]*Token\s*[=:]\s*)\S+/gi, `$1${MASK}`);
+    .replace(/(X-[A-Za-z-]{0,64}Token\s*[=:]\s*)\S+/gi, `$1${MASK}`);   // 전체 점검 16회차(T-3): 반복 상한(앵커 없는 무제한 반복 — 'X-' 가 많은 줄에 O(n²))
 }

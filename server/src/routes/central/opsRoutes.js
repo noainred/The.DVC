@@ -288,7 +288,8 @@ export function registerOpsRoutes(centralRouter, deps) {
     // v2.600(CEN2600-02): 조회의 진짜 vCenter 가 direct 면 엣지 결과를 받지 않는다(중앙이 자기 로그 DB 로 답한다).
     //   ⚠ 미등록 id 는 거부하지 않는다 — 연합 조회의 원격 목록은 배정표에서 오고 중앙 등록부에 없을 수 있다(checksLogs.js).
     { const lqDeny = edgeVcWriteDenied(vcenterOfReq(b.reqId)); if (lqDeny) return res.status(403).json({ ok: false, reason: lqDeny }); }
-    setLogQueryResult(String(b.reqId), b);
+    // 전체 점검 14회차(C-5): 반영하지 못한(발급 안 함 · 만료) reqId 는 410 — 형제 idrac-scan-result · capture-result(v2.621 · v2.622)와 같게. 예전에는 늘 200 이라 엣지가 '보냄' 으로 셌다
+    if (!setLogQueryResult(String(b.reqId), b)) return res.status(410).json({ ok: false, reason: 'unknown-job' });
     res.json({ ok: true });
   });
 

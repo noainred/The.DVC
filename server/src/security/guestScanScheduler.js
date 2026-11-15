@@ -55,7 +55,10 @@ function load() {
 }
 // 원자적 쓰기(0600) — runJob이 매 실행마다 lastRun/lastErr을 저장하므로 쓰기 빈도가 높고,
 // 그중 한 번이라도 부분기록으로 끊기면 load가 []가 되어 자격증명 포함 작업 정의가 사라진다.
-function persist() { try { atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(cache), null, 2), { mode: 0o600 }); } catch { /* */ } }
+function persist() { try { writeList(cache); } catch { /* 실행 기록(lastRun 등)만 — 다음 저장에 함께 */ } }
+// 21회차 L-3(재현): 사람이 하는 저장 · 삭제는 쓰기 실패를 삼키지 않는다 — 예전에는 응답이 정상인데 메모리만 바뀌어(파일은 그대로)
+//   메모리 작업이 게스트 로그인을 하고 재시작 뒤 사라졌다(삭제 실패면 되살아났다). 쓰기가 성공한 뒤에만 메모리를 바꾼다.
+function writeList(list) { atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(list), null, 2), { mode: 0o600 }); }
 
 const redact = (j) => ({ id: j.id, name: j.name, type: j.type, vcenterId: j.vcenterId, os: j.os, intervalMin: j.intervalMin, days: j.days, maxVms: j.maxVms, enabled: j.enabled, lastRun: j.lastRun || null, lastFound: j.lastFound ?? null, lastErr: j.lastErr || '', lastAuth: j.lastAuth || null });
 export function listGuestScans() { return load().map(redact); }
@@ -88,16 +91,29 @@ export function saveGuestScan(body = {}) {
     lastRun: null, lastFound: null, lastErr: '',
   };
   const idx = cache.findIndex((x) => x.id === id);
+  let next;
   if (idx >= 0) {
     const p = cache[idx];
-    j.guestUser = body.guestUser || p.guestUser; j.guestPass = body.guestPass || p.guestPass; // 비우면 기존 유지
+    j.guestUser = body.guestUser || p.guestUser;
+    // 21회차 L-2(재현): 계정 이름이나 vCenter 가 바뀌면 저장된 게스트 비밀번호를 물려주지 않는다(gpu/settings.js v2.611 과 같은 규약 —
+    //   빈 칸 = 기존 유지는 '같은 계정 · 같은 대상' 일 때만). 예전에는 vc-A 의 도메인 계정 비밀번호가 vc-B 의 다른 계정 이름으로 쓰였다.
+    const moved = j.guestUser !== p.guestUser || j.vcenterId !== p.vcenterId;
+    j.guestPass = body.guestPass || (moved ? '' : p.guestPass);
     j.lastRun = p.lastRun; j.lastFound = p.lastFound; j.lastErr = p.lastErr; j.lastAuth = p.lastAuth || null;
-    cache[idx] = j;
-  } else cache.push(j);
-  persist();
+    next = cache.map((x, i) => (i === idx ? j : x));
+  } else next = [...cache, j];
+  writeList(next);   // 21회차 L-3: 실패면 던진다(메모리 불변)
+  cache = next;
   return redact(j);
 }
-export function removeGuestScan(id) { load(); const b = cache.length; cache = cache.filter((x) => x.id !== id); if (cache.length !== b) persist(); return b !== cache.length; }
+export function removeGuestScan(id) {
+  load();
+  const next = cache.filter((x) => x.id !== id);
+  if (next.length === cache.length) return false;
+  writeList(next);   // 21회차 L-3
+  cache = next;
+  return true;
+}
 
 
 /**

@@ -133,7 +133,7 @@
   '부트스트랩 → 강제 등록 → 비번 폐기' 3단계로 도달한다. 이 3단계를 하나라도 빼면 안 된다:
   1. OTP 미등록 계정만 비밀번호 로그인 허용(최초 설치·계정 발급 직후 경로).
   2. 그 세션은 `mustEnrollOtp`가 붙고 **`requireEnrolled`가 /api 전 보호 라우터를 차단**한다
-     (`/api/auth/{me,totp/begin,totp/confirm}`만 열림). 새 보호 라우터를 mount 할 때
+     (`/api/auth/{me,totp/begin,totp/confirm}` 와 `/auth/logout` · `/auth/activity` 만 열림 — 19회차 B-3 정정: 뒤 둘은 의도된 것). 새 보호 라우터를 mount 할 때
      `authMiddleware` 뒤에 `requireEnrolled`를 빠뜨리면 등록 전 세션이 그 API를 쓸 수 있다.
   3. `confirmTotpEnroll`이 **passwordHash 삭제 + tokenVersion 인상**을 수행한다 — 이 삭제를
      제거하면 비밀번호 로그인 경로가 영구히 남아 정책이 무의미해진다. admin이면
@@ -242,6 +242,14 @@
   작업은 범위 계정에 밖이다. GET 은 조회 범위로 보여 주고 쓰기 밖 항목에 `writable:false` 를 달아 화면이 버튼을 잠근다.
   ⚠ v2.904(점검 P-1 — 재현): '전체 범위 관리자'(남의 글 삭제 · 공유 필터 관리 등 isMod 류)는 `auth/scope.js isFullReadWriteScope`(조회 ∧ 쓰기 무제한) 하나로 —
   `!scopedVcenterIds(...)` 만 보면 같은 함정이다. 회귀 `test/wikiIssues2904.test.js`.
+- **전체 점검 19회차(인증 · `securityFullAudit19`)**: 로그인 인증은 진행 중 **계정당 1건 · 출발지당 8건**(AD bind 대기 중 잠금 검사 통과 — 넘치면 429, 실패로 안 셈) ·
+  OTP 가 등록된 계정의 **본인 재등록은 현재 OTP**(begin `currentCode` → 10분 안 confirm — 세션 탈취가 영구 탈취가 되지 않게) ·
+  users.json **읽기 오류는 fail-closed**(원본 유지 · 계정 생성 금지 · 저장 거절) · 권한 파일을 못 읽으면 **최소 권한**(재시작 뒤 보존본만이어도) ·
+  로그인 성공은 그 계정의 실패만큼만 출발지 카운터에서 뺀다 · RDP 티켓은 발급자만 소비. 상세 `docs/rules/security-api.md` '전체 점검 19회차'.
+  20회차(반증): 본인 자격증명 변경의 현재 OTP 판정은 **`auth/otpRebind.js` 하나** — 관리자 라우트를 자기 자신에게 쓰는 경로(OTP · 비밀번호 · 로그인 차단)도 같다 ·
+  읽기 오류 중에는 AD 로그인 · 계정 생성 · 중앙 배포 적용도 막는다 · 확정 게이트 ≥ 쓰기 게이트(`ownerOnly` · `superOnly`).
+- **전체 점검 21 · 22회차(비밀 보관)**: 봉인된 값이 있으면 **키를 새로 만들지 않고 비밀 파일 저장을 거절**(env 누락 재시작 → 저장 한 번이 전 비밀 소거 · 탈출은 `SECRETS_KEY_LOST=true`) ·
+  `openSecretsDeep` 는 비밀 칸만 연다(복호 오라클) · 저장은 쓰기 성공 뒤에 메모리 반영 · SSH 키 KDF rounds 상한(`util/sshKeyKdf.js`).
 
 ## 옮긴 절 (2026-10-20 — 이 파일을 짧게 유지하려고)
 

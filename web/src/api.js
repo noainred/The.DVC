@@ -430,7 +430,10 @@ export async function login(username, password, { keep = true } = {}) {
     body: JSON.stringify({ username, password }),
   });
   if (!res.ok) {
-    const msg = res.status === 401 ? '아이디 또는 비밀번호가 올바르지 않습니다.' : `로그인 실패 (${res.status})`;
+    // 전체 점검 20회차 반증 F7: 429(잠금 · 진행 중 인증)는 서버 문구를 보인다 — '로그인 실패 (429)' 만으로는 기다리면 된다는 것을 알 수 없다.
+    let srv = '';
+    if (res.status === 429) { try { srv = String((await res.json())?.error || '').slice(0, 200); } catch { srv = ''; } }
+    const msg = res.status === 401 ? '아이디 또는 비밀번호가 올바르지 않습니다.' : (srv || `로그인 실패 (${res.status})`);
     throw new Error(msg);
   }
   const data = await res.json();

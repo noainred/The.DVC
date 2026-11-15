@@ -28,6 +28,7 @@ import { admitAgent } from './edgeRecord.js';
 import { capStr } from '../util/capStr.js';
 import { safeLoadText } from '../util/atomicWrite.js';
 import { REGISTRY_ERROR_CODES } from '../util/registryCore.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const t = (v) => String(v ?? '').trim();
 const s = (v, n) => capStr(t(v), n); // v2.607(TIM2607-01): 평탄화 — `.slice` 는 본문 원문을 붙잡는다
@@ -172,7 +173,7 @@ export async function putEdgeReport(agent, body = {}) {
   let scanned = null;
   let scannedDropped = false;
   if (isObj(body.scanned)) {
-    try { scanned = JSON.stringify(body.scanned).length <= SCANNED_MAX_BYTES ? body.scanned : null; } catch { scanned = null; }
+    try { scanned = JSON.stringify(body.scanned).length <= SCANNED_MAX_BYTES ? sanitizeScanned(body.scanned) : null; } catch { scanned = null; }
     scannedDropped = scanned === null;
   }
   _map.set(key, {
@@ -184,6 +185,42 @@ export async function putEdgeReport(agent, body = {}) {
     registryUnreadable: sanitizeRegistryUnreadable(body.registryUnreadable),
   });
   return { ok: true, protocol, devices: devices.length, rejected, open: openN, partsOmitted };
+}
+
+/**
+ * 전체 점검 17회차(C-11): 엣지 보고의 scanned 요약을 **아는 필드만** 남긴다(순수). 예전에는 크기(32KB)만 보고 원본 객체를 그대로
+ *   보관 · 응답했다(웹 partFaultText edgeScanTotals 가 a.scanned.summary 를 KPI 에 더한다). 모양은 partfault/scan.js 가 만드는 것.
+ *   개수는 0 이상 정수 · 못 읽으면 null(0 을 지어내지 않는다) · notCollected 는 키 64자 · LIST_MAX 개 · 장비군 표지는 sanitizeRegistryUnreadable 과 같은 규칙.
+ */
+const SCOPE_COUNT_KEYS = {
+  idrac: ['devices', 'ok', 'failed', 'stale', 'unreachable', 'legacy', 'partial', 'parts', 'capped', 'keyUnstable'],
+  storage: ['devices', 'ok', 'failed', 'parts'],
+  sanswitch: ['devices', 'ok', 'failed', 'parts', 'notJudged'],
+};
+const SUMMARY_KEYS = ['total', 'ok', 'warn', 'fault', 'unknown', 'absent'];
+const cnt = (v) => { const n = numOrNull(v); return n != null && n >= 0 ? Math.min(Math.round(n), 1e9) : null; };
+export function sanitizeScanned(v) {
+  if (!isObj(v)) return null;
+  const out = {};
+  if (Object.hasOwn(v, 'at')) { const at = numOrNull(v.at); out.at = at != null && at > 0 && at < 1e14 ? Math.round(at) : null; }   // ms 시각(1e9 개수 상한과 다르다)
+  if (Object.hasOwn(v, 'agent')) out.agent = s(v.agent, 128);
+  const ru = sanitizeRegistryUnreadable(Object.fromEntries(REGISTRY_SCOPES.filter((sc) => isObj(v[sc]) && isObj(v[sc].registryUnreadable)).map((sc) => [sc, v[sc].registryUnreadable])));
+  for (const [sc, keys] of Object.entries(SCOPE_COUNT_KEYS)) {
+    if (!Object.hasOwn(v, sc) || !isObj(v[sc])) continue;
+    const src = v[sc]; const o = {};
+    for (const k of keys) if (Object.hasOwn(src, k)) o[k] = cnt(src[k]);
+    if (sc !== 'idrac' && isObj(src.notCollected)) {
+      const nc = {};
+      for (const k of Object.keys(src.notCollected).slice(0, LIST_MAX)) { const kk = s(k, 64); if (kk) nc[kk] = cnt(src.notCollected[k]); }
+      o.notCollected = nc;
+    }
+    if (sc === 'sanswitch' && Object.hasOwn(src, 'extractor')) o.extractor = src.extractor === true;
+    if (ru?.[sc]) o.registryUnreadable = ru[sc];
+    out[sc] = o;
+  }
+  if (isObj(v.summary)) { const o = {}; for (const k of SUMMARY_KEYS) if (Object.hasOwn(v.summary, k)) o[k] = cnt(v.summary[k]); out.summary = o; }
+  if (Object.hasOwn(v, 'devicesFailed')) out.devicesFailed = cnt(v.devicesFailed);
+  return out;
 }
 
 /**

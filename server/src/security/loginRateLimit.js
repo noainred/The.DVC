@@ -158,9 +158,17 @@ export function recordLoginFailure(ip, username, now = Date.now()) {
 /** 로그인 성공 시 호출 — per-IP + 계정 전역 카운터/잠금 모두 해제(정상 로그인이 앞선 실패를 리셋). */
 export function recordLoginSuccess(ip, username) {
   if (DISABLED) return;
+  // 전체 점검 19회차 A-5(재현): 출발지 카운터(계정명 무관 — 사용자명 로테이션 · 열거 · scrypt 소모 차단)를 **통째로** 지우면 공격자가 자기 계정
+  //   성공을 40회마다 끼워 출발지 한도를 영원히 비웠다(300회 실패 중 차단 0회). 이제 **이 계정이 이 출발지에서 낸 실패 수만큼만** 뺀다 —
+  //   본인 오타(NAT 뒤 정상 사용자)는 예전처럼 풀리고, 다른 이름으로 뿌린 실패는 남는다. 이미 잠긴 출발지는 건드리지 않는다.
+  const own = attempts.get(keyOf(ip, username));
+  const src = attempts.get(ipKeyOf(ip));
+  if (src && !(src.lockUntil > Date.now())) {
+    src.count = Math.max(0, (src.count || 0) - (own?.count || 0));
+    if (src.count === 0) attempts.delete(ipKeyOf(ip));
+  }
   attempts.delete(keyOf(ip, username));
   attempts.delete(acctKeyOf(username));
-  attempts.delete(ipKeyOf(ip));   // 정상 로그인 1회가 출발지 카운터도 리셋(NAT 오탐 완화)
 }
 
 /* --------------------- OTP 재인증 잠금(별도 키 공간, 감사 M1) --------------------- */

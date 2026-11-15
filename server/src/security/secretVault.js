@@ -39,7 +39,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 
 // ⚠ 경로는 지연 평가(함수) — config.js 가 이 모듈을 import 하므로(loadVcenterConfig 복호 배선)
 // 모듈 평가 시점에 config.configDir 를 읽으면 순환 import TDZ 로 기동이 죽는다. 함수 호출
@@ -176,7 +176,8 @@ function encryptionEvidence() {
   for (const name of SECRET_FILES) {
     try {
       const fp = path.join(config.configDir, name);
-      if (fs.existsSync(fp) && fs.readFileSync(fp, 'utf8').includes(PREFIX)) { ev.push('sealed-values'); break; }
+      // 22회차 반증 D-9: 원문에 'enc$1$' 글자가 있는지만 보면 평문 설치의 이름 등에 그 글자가 있을 때 '봉인 흔적' 이 됐다 — JSON 문자열 값의 시작 + 알고리즘 · 레벨 모양까지.
+      if (fs.existsSync(fp) && SEALED_VALUE_RE.test(fs.readFileSync(fp, 'utf8'))) { ev.push('sealed-values'); break; }
     } catch { /* 읽지 못한 파일은 건너뛴다 */ }
   }
   _evidence = ev; _evidenceAt = now;
@@ -271,13 +272,43 @@ export function saveSecretsPolicy(partial = {}) {
 /* ── 마스터 키 ────────────────────────────────────────────────────────────── */
 
 let _key = null;
+/*
+ * 전체 점검 21회차 M-1(재현): 키(SECRETS_KEY env · secrets-key 파일)가 없을 때 **복호(읽기) 중에** 새 무작위 키를 만들어 저장했다 —
+ *   재시작 때 env 가 빠지면 새 키 파일이 생기고 모든 비밀이 '' 로 열린 뒤, 관리자가 아무 항목이나 저장하면 전 항목 암호문이 '' 로 기록됐다
+ *   (env 를 되돌려도 복구 불가). 이제 **봉인된 값이 이미 있으면 키를 만들지 않는다**(SECRETS_KEY_MISSING — 복호는 실패, 봉인은 거절).
+ *   키 파일이 있는데 읽지 못하면(EACCES) 임시 메모리 키로 넘어가지 않고 같은 거절이다(예전 콘솔 문구 '쓰기 실패' 도 틀렸다).
+ *   키를 쓸 수 없는 동안은 비밀 파일 저장을 거절한다(sealSecretsDeep — 22회차 반증으로 '복호 실패 암호문 되돌리기' 를 대체).
+ */
+const _keyWarned = new Set();
+let _keyMissing = null;   // 22회차 반증: 키를 쓸 수 없다고 판정했으면 그 오류(다시 판정하지 않는다 — 복호 실패마다 흔적을 다시 읽던 비용 · 저장 거절 표지)
+/** 키를 쓸 수 없어 비밀 파일 저장을 막고 있으면 그 사유, 아니면 null(자가진단 · 화면용). */
+export function secretsKeyMissing() { return _keyMissing ? _keyMissing.message : null; }
+function keyUnavailable(why) {
+  const e = new Error(`자격증명 암호화 키를 쓸 수 없습니다(${why}) — 새 키를 만들지 않습니다(기존 암호문 보호). SECRETS_KEY env 또는 CONFIG_DIR/secrets-key 를 되돌리고 재시작하세요.`);
+  e.code = 'SECRETS_KEY_MISSING';
+  if (!_keyWarned.has(why)) { _keyWarned.add(why); console.error(`[secrets] ⚠ ${e.message}`); }
+  _keyMissing = e;
+  return e;
+}
 function masterKey() {
   if (_key) return _key;
+  if (_keyMissing) throw _keyMissing;
   const env = process.env.SECRETS_KEY;
   if (env && env.length >= 16) { _key = Buffer.from(env, 'utf8'); return _key; }
-  try {
-    const cur = fs.existsSync(keyFile()) ? fs.readFileSync(keyFile(), 'utf8').trim() : '';
+  let exists = false;
+  try { exists = fs.existsSync(keyFile()); } catch { exists = false; }
+  if (exists) {
+    let cur;
+    try { cur = fs.readFileSync(keyFile(), 'utf8').trim(); } catch (e) { throw keyUnavailable(`키 파일을 읽지 못함 ${String(e?.code || '')}`.trim()); }
     if (cur.length >= 32) { _key = Buffer.from(cur, 'utf8'); return _key; }
+  }
+  _evidence = null;   // 흔적을 지금 다시 본다(30초 기억을 쓰지 않는다)
+  if (encryptionEvidence().includes('sealed-values')) {
+    // 22회차 반증 D-2: 키를 정말 잃은 설치의 탈출 — 운영자가 명시적으로 SECRETS_KEY_LOST=true 로 재시작하면 새 키를 만든다(옛 암호문은 복호 실패 · 저장 때 지워진다).
+    if (process.env.SECRETS_KEY_LOST !== 'true') throw keyUnavailable(exists ? '키 파일이 짧거나 비었는데 봉인된 비밀이 있음' : '봉인된 비밀이 있는데 키가 없음');
+    console.error('[secrets] ⚠ SECRETS_KEY_LOST=true — 키 분실을 확정해 새 키를 만듭니다. 옛 키로 봉인한 비밀은 복호되지 않고, 저장할 때 지워집니다. 모든 장비 비밀번호를 다시 입력하세요(끝나면 이 env 를 지울 것).');
+  }
+  try {
     const gen = crypto.randomBytes(32).toString('base64url');
     atomicWriteFileSync(keyFile(), gen, { mode: 0o600 });
     console.log(`[secrets] 암호화 키가 없어 ${keyFile()} 에 생성·영속했습니다(0600). 멀티노드/외부 비밀관리가 필요하면 SECRETS_KEY env 를 설정하세요.`);
@@ -294,6 +325,7 @@ function masterKey() {
 /* ── 봉인/복호(단일 값) ───────────────────────────────────────────────────── */
 
 const PREFIX = 'enc$1$';
+const SEALED_VALUE_RE = /"enc\$1\$[a-z0-9-]{3,40}\$\d{1,2}\$/;   // 22회차 반증 D-9: JSON 문자열 값으로 들어 있는 봉인(알고리즘 · 레벨 모양까지)
 export const isSealed = (v) => typeof v === 'string' && v.startsWith(PREFIX);
 
 // scrypt 파생키 캐시 — 캐시 키는 (alg|logN|salt). 복호는 salt 마다 1회 유도하고 여기 둔다.
@@ -443,7 +475,7 @@ export function openSecret(v) {
     return Buffer.concat([d.update(Buffer.from(ct, 'base64url')), d.final()]).toString('utf8');
   } catch (e) {
     const k = String(e.message).slice(0, 60);
-    if (!warned.has(k)) { warned.add(k); console.warn(`[secrets] ⚠ 자격증명 복호 실패(${k}) — 빈 값으로 대체. 키(secrets-key/SECRETS_KEY) 변경·유실 여부를 확인하고 해당 계정 비밀번호를 재입력하세요.`); }
+    if (!warned.has(k)) { warned.add(k); console.warn(`[secrets] ⚠ 자격증명 복호 실패(${k}) — 빈 값으로 대체. 키(secrets-key/SECRETS_KEY) 변경·유실 여부를 확인하세요(되돌리고 재시작 · 정말 잃었으면 SECRETS_KEY_LOST=true 로 재시작 후 재입력).`); }
     // 빈 값 반환은 유지한다(봉인문을 비밀번호로 쓰면 매 폴링마다 잘못된 비밀번호로 로그인해 서비스 계정 잠금 위험). 대신
     // v2.480(3차 감사 코어2 S2): 실패 횟수를 세어 migrateSecretFiles 가 복호 실패 파일의 재기록(암호문 소거)을 건너뛴다.
     _decryptFailures += 1;
@@ -485,11 +517,17 @@ function walk(obj, fn) {
   return obj;
 }
 
-/** 로드 경계용 — 봉인 포맷인 문자열을 **키 이름과 무관하게** 전부 복호(과거 필드 개명에도 안전). in-place. */
+/**
+ * 로드 경계용 — **비밀 칸(SECRET_FIELDS · extraFields)** 의 봉인 문자열을 복호. in-place.
+ * ⚠ 전체 점검 21회차 M-2(재현 — 복호 오라클): 예전에는 키 이름과 무관하게 전부 복호해, 유출된 다른 계정의 암호문을 이름 · 메모 같은 **표시 칸**에
+ *   넣어 저장하면 목록 응답이 평문을 보여 줬다. 봉인은 비밀 칸에만 하므로(sealSecretsDeep) 그 밖의 칸 · 배열 원소에 봉인 문자열이 있을 이유가 없다 — 열지 않는다.
+ *   (비밀 칸 → 비밀 칸 이식은 문맥을 묶는 새 형식이 필요하다 — 남긴 것, docs/rules/security-api.md 21회차)
+ */
 export function openSecretsDeep(obj, extraFields = null) {
   const seen = new Set();   // v2.599: 한 파일 안에서 같은 문맥이 두 번 나오면 첫 것만 기억한다(뒤 것이 덮어 엉뚱한 대상에 재사용되지 않게)
   return walkCtx(obj, (k, v, parent, segs) => {
     if (!isSealed(v)) return undefined;
+    if (!(k && (SECRET_FIELDS.has(k) || extraFields?.has(k)))) return undefined;   // 21회차 M-2: 비밀 칸만
     const plain = openSecret(v);
     // v2.598 L2598-01: 연 값의 암호문을 기억해 다음 저장에서 재사용한다(평문이 안 바뀐 값은 파일이 글자 그대로 같게).
     if (plain !== '' && k && (SECRET_FIELDS.has(k) || extraFields?.has(k))) {
@@ -517,6 +555,11 @@ function walkCtx(obj, fn, segs = []) {
  * 실행 중 메모리가 암호문으로 오염돼 다음 vCenter 로그인부터 전부 실패한다.
  */
 export function sealSecretsDeep(obj, pol = policy(), extraFields = null) {
+  // 21회차 M-1 · 22회차 반증: 키를 쓸 수 없는 동안(봉인된 값이 있는데 키 없음)은 **어느 모드든 비밀 파일을 저장하지 않는다** — 복호에 실패한 칸이
+  //   '' 로 열려 있어, 저장하면 그 암호문이 지워진다(재현: 이름만 고친 저장 한 번이 전 vCenter 비밀번호 소거). 예전 안(복호 실패 암호문을 근사 문맥으로
+  //   되돌려 쓰기)은 반증에서 엉뚱한 항목에 옛 비밀을 붙였다(위치 문맥 · 파일 이름 없음 · 접속처 변경 · 사람이 지운 칸) — 파일 단위로 닫는다.
+  //   해제: 키(SECRETS_KEY · secrets-key)를 되돌리고 재시작. 키를 정말 잃었으면 SECRETS_KEY_LOST=true 로 재시작(새 키 · 옛 암호문은 저장 때 지워진다).
+  if (_keyMissing) throw _keyMissing;
   if (pol?.mode === 'plain') return obj;                  // 평문 모드 — 복제 비용도 생략
   if (pol?.mode !== 'encrypted') return sealLocked(obj, pol, extraFields);   // S-07: 정책을 읽지 못함(잠금)
   const clone = structuredClone(obj);
@@ -611,7 +654,7 @@ export function migrateSecretFiles(newPolicy) {
     } catch (e) {
       // 한 파일 실패가 전체 전환을 막지 않는다 — 자기서술 포맷이라 혼재 상태로도 동작하며,
       // 실패 파일은 보고돼 사용자가 원인(손상·권한)을 고치고 재시도할 수 있다.
-      out.errors.push({ file: name, error: e.message });
+      out.errors.push({ file: name, error: safeLoadText(e, 200) || '사유 미상' });   // 21회차 L-5: JSON.parse 원문(파일 조각 — 비밀번호 끝 글자)이 응답에 실리던 것
     }
   }
   return out;

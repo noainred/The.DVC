@@ -315,18 +315,18 @@ adminRouter.get('/edge-users/:agent', adminOnly, fleetReadOnly, (req, res) => {
 // 사용자 추가/수정(비밀번호 주면 해시로 변환 저장). Body { username, name, role, password }.
 adminRouter.post('/edge-users/:agent', adminOnly, fleetOnly, requireSettingsOwner, (req, res) => {
   const r = upsertAgentUser(req.params.agent, req.body || {});
-  res.status(r.ok ? 200 : 400).json(r.ok ? { ok: true, users: listAgentUsers(req.params.agent) } : r);
+  res.status(r.ok ? 200 : (r.status || 400)).json(r.ok ? { ok: true, users: listAgentUsers(req.params.agent) } : r);
 });
 // 여러 엣지(또는 '*'=모든 엣지)에 같은 사용자를 한 번에 배포. Body { targets:[...], username, name, role, password }.
 adminRouter.post('/edge-users-bulk', adminOnly, fleetOnly, requireSettingsOwner, (req, res) => {
   const { targets, ...spec } = req.body || {};
   const r = upsertAgentUsersBulk(targets, spec);
-  res.status(r.ok ? 200 : 400).json(r);
+  res.status(r.ok ? 200 : (r.status || 400)).json(r);
 });
 // 사용자 제거(다음 pull에 엣지에서도 삭제).
 adminRouter.delete('/edge-users/:agent/:username', adminOnly, fleetOnly, requireSettingsOwner, (req, res) => {
   const r = removeAgentUser(req.params.agent, req.params.username);
-  res.status(r.ok ? 200 : 400).json(r.ok ? { ok: true, users: listAgentUsers(req.params.agent) } : r);
+  res.status(r.ok ? 200 : (r.status || 400)).json(r.ok ? { ok: true, users: listAgentUsers(req.params.agent) } : r);
 });
 
 // ── 물리(베어메탈) 서버 GPU 수집 — IP+계정으로 SSH nvidia-smi(가상화 안 한 서버) ──────
