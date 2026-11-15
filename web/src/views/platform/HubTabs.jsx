@@ -2,7 +2,8 @@
 //   가상화 서버 허브의 탭 줄(v2.909 VmHubTabs)을 일반화한 것 — 모양(.vmh-tabs · .vmh-tab)은 그대로라 세 탭(vCenter · 호스트 · VM)이 같은 줄을 쓴다.
 //   도구 키는 그대로(권한 파일의 값)이고 권한이 없는 도구는 숨긴다(카탈로그 adminOnly 는 관리자만 — 서버 게이트와 같은 판정).
 //   400px 에서는 탭 줄만 가로로 넘긴다(페이지는 밀리지 않는다) — 열린 탭이 보이게 줄만 옮긴다.
-import React, { useLayoutEffect, useRef } from 'react';
+import React, { useRef } from 'react';
+import useActiveTabInView from '../../hooks/useActiveTabInView.js'; // v3.10.16: 열린 탭이 보이게 줄만 옮기는 규칙을 훅으로(상세 · 개체 보기 탭 줄과 공유)
 import { hasRole, toolAllowed } from '../../api.js';
 import { TOOLS } from '../specialToolsList.js';
 import '../vms/vmHub.css';
@@ -26,14 +27,7 @@ export function toolsFor(list) {
  */
 export default function HubTabs({ label, views, tools = [], active, right = null }) {
   const listRef = useRef(null);
-  useLayoutEffect(() => {
-    const list = listRef.current;
-    const a = list?.querySelector('[aria-selected="true"]');
-    if (!list || !a || list.scrollWidth <= list.clientWidth) return;
-    const l = list.getBoundingClientRect(); const r = a.getBoundingClientRect();
-    if (r.right > l.right) list.scrollLeft += r.right - l.right + 8;
-    else if (r.left < l.left) list.scrollLeft -= l.left - r.left + 8;
-  }, [active]);
+  useActiveTabInView(listRef, active);
   return (
     <div ref={listRef} role="tablist" aria-label={label} className="vmh-tabs tabstrip-noscroll">
       {views.map((v) => {

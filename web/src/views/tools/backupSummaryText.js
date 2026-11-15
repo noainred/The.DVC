@@ -174,6 +174,7 @@ export function staleQuery(o, scope = {}) {
     src: STALE_SOURCES.includes(o.src) ? o.src : 'all',
     excludeNone: o.excludeNone === false ? '0' : '1', onlyOn: o.onlyOn === false ? '0' : '1', includeNever: o.includeNever === false ? '0' : '1',
     power: scope.power || 'all', excl: scope.excl === false ? '0' : '1',
+    ...(scope.region ? { region: String(scope.region) } : {}),   // v3.10.17 Summary 의 리전 Select(법인 하나를 고르면 서버가 그 법인만 — 리전은 그 안)
     ...(o.vc ? { vc: String(o.vc) } : {}),   // v2.837 법인 하나(빈 값 = 전체)
   };
 }

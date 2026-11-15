@@ -20,7 +20,7 @@ const Legend = ({ items }) => (
 );
 const SITE_N = 8;
 
-function Capacity({ rows, em, bp }) {
+function Capacity({ rows, em, bp, emFleetWide = false }) {   // v3.10.21 emFleetWide: 리전 보기인데 EM 값은 전 법인(나눌 수 없음)
   const [all, setAll] = useState(false);
   const cap = capacityRows(rows, all ? 0 : 5);
   const pts = linePoints(em?.series30);
@@ -50,7 +50,7 @@ function Capacity({ rows, em, bp }) {
       ) : <div className="muted" style={{ fontSize: 12.5 }}>크기를 읽은 VM 이 없습니다 — Veeam 복원 지점 · Bareos 실행 크기를 아직 못 읽었거나 백업이 없습니다(0 이 아닙니다).</div>}
       <div style={{ borderTop: '1px solid var(--border-soft)', paddingTop: 10, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))', gap: 10, fontSize: 12 }}>
         <div style={{ minWidth: 0 }}>
-          <div className="muted">Veeam 저장소 사용 30일 추이(EM)</div>
+          <div className="muted" title={emFleetWide ? 'EM 은 여러 B&R 서버를 묶어 읽어 리전으로 나눌 수 없습니다 — 이 추이 · 30일 전 대비는 전 법인 값입니다' : undefined}>Veeam 저장소 사용 30일 추이(EM{emFleetWide ? ' · 전 법인 기준' : ''})</div>
           {pts ? <svg width="100%" height="44" viewBox="0 0 220 44" preserveAspectRatio="none" role="img" aria-label="Veeam 저장소 사용 30일 추이"><polyline fill="none" stroke="#22d3ee" strokeWidth="2" points={pts} /></svg>
             : <div className="muted" style={{ height: 44, display: 'flex', alignItems: 'center' }}>{em ? '이력이 이틀보다 적습니다' : 'EM 자료는 전체 범위 계정만 봅니다'}</div>}
           <div>{tr ? <>{bytesText(tr.before)} → {bytesText(tr.now)} <span style={{ color: tr.pct > 0 ? TONE.warn : TONE.ok }}>{tr.pct > 0 ? '+' : ''}{tr.pct}%</span></> : <span className="muted">30일 전 값 —</span>}</div>
@@ -80,7 +80,7 @@ function Lane({ items, from, color, full, top }) {
   });
 }
 
-function Schedule({ reloadKey }) {
+function Schedule({ reloadKey, region = '' }) {   // v3.10.17 region: Summary 의 리전
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -90,11 +90,11 @@ function Schedule({ reloadKey }) {
   const load = useCallback(() => {
     const my = ++gen.current;
     setLoading(true); setError(null);
-    fetchJson('/tools/backup-summary/schedule')
+    fetchJson('/tools/backup-summary/schedule', region ? { region } : {})
       .then((r) => { if (my === gen.current) setData(r); })
       .catch((e) => { if (my === gen.current) setError(e); })
       .finally(() => { if (my === gen.current) setLoading(false); });
-  }, []);
+  }, [region]);
   useEffect(() => { load(); return () => { gen.current++; }; }, [load, reloadKey]);
   const from = hourStart(data?.at || Date.now());
   const rows = sortSchedRows(data?.rows);
@@ -162,11 +162,11 @@ function Schedule({ reloadKey }) {
   );
 }
 
-export default function BackupSummaryCapSched({ rows, em, bp = null, reloadKey }) {
+export default function BackupSummaryCapSched({ rows, em, bp = null, reloadKey, region = '', emFleetWide = false }) {   // v3.10.17 region: Summary 의 리전(일정도 같은 법인만)
   return (
     <div role="group" aria-label="용량과 일정" data-backup-capsched="" style={{ display: 'flex', flexWrap: 'wrap', gap: 12, minWidth: 0 }}>
-      <Capacity rows={rows} em={em} bp={bp} />
-      <Schedule reloadKey={reloadKey} />
+      <Capacity rows={rows} em={em} bp={bp} emFleetWide={emFleetWide} />
+      <Schedule reloadKey={reloadKey} region={region} />
     </div>
   );
 }

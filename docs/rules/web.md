@@ -949,3 +949,25 @@
 - **v3.10.15 — 가상화 플랫폼 점검 3회차: VM 수량 · 스토리지 사용량 추이 도구에 ‘리전’ 선택 · KPI 카드가 리전도 넘긴다**(자율 개선 루프): KPI 줄은 리전 범위를 합했는데(v2.958) 카드를 누르면 도구가 전체로 열렸다(도구에 리전이 없었다).
   도구: 리전 Select(리전이 2개 이상이거나 골라져 있을 때만) + vCenter Select(리전 안만 · `platformText.regionsOf · vcInRegion`) · 요청은 `vcenterId` 가 없을 때만 `region` · 제목은 `scopeText`(vCenter 이름 / ‘리전 X 합계’ / ‘전체 vCenter 합계’ — 예전엔 id 를 그대로 보였다).
   인계: `handoffKpiScope(targets, {vcenterId, region})` — vCenter 가 있으면 vCenter 만, 없으면 리전(`KPI_HANDOFF.vmTrackRegion · storageTrackRegion`). 서버 `vcenterList` 항목에 `region`.
+- **v3.10.16 — 가상화 플랫폼 점검 4회차: 탭 줄이 넘치면(400px) 열린 탭이 보이게 그 줄만 옮긴다 — 허브 · vCenter 상세 · 개체 보기 한 훅**(자율 개선 루프):
+  허브 탭 줄(HubTabs v2.915)과 Backup 현황 머리(VeeamHeader v2.822)에 두 벌 있던 규칙을 `hooks/useActiveTabInView.js`(순수 `keepActiveTabInView` + 훅) 하나로 모으고 vCenter 상세 · VM · 호스트 개체 보기의 `.vcd-views` 도 쓴다 —
+  400px 에서 ‹ 이전 · 다음 › 으로 넘어가거나 기억 탭으로 열면 ‘네트워크’ 같은 뒤쪽 탭 · 강조 탭(‘호스트 및 클러스터’ · ‘VM’)이 줄 밖에 숨어 있었다.
+  규칙: 넘칠 때만 · `scrollLeft` 만(창 스크롤 금지 — 요소를 창 안으로 끌어오는 DOM 호출은 상단을 가린다) · 8px 여유. 새 탭 줄은 `role="tablist"` + `aria-selected` + 이 훅. 테스트 `hooks/useActiveTabInView.test.js`(소스 계약 네 곳 · 옛 사본 없음).
+- **v3.10.17 — 가상화 플랫폼 점검 5회차: 리전만 고른 채 백업 KPI 카드 → Backup 현황 · Summary 가 그 리전만 센다**(자율 개선 루프): VM · 스토리지 카드는 v3.10.15 에 리전을 넘겼는데 백업 카드만 전체 Summary 로 열렸다.
+  서버 `veeam/summaryRegion.js`(`regionQuery · inRegion · regionsOf`) 하나로 `/tools/backup-summary`(+`.csv`) · `/schedule` · `/errors` · `/stale`(staleQueryOf.region) 이 **사용자 범위 교집합 뒤**에 리전을 거른다 — 응답에 `region · regions`.
+  화면: Summary 에 리전 Select(`data-backup-region` — 리전이 2개 이상이거나 골라져 있을 때만 · 모르는 리전은 ‘(법인 없음)’) · 머리 ‘N개 법인 · 리전 X’ · 숫자 줄 · 두 카드 · 트리 · CSV · 찾기 · 일정 · 에러가 같은 `?region=`(‘제목뿐이지 않게’ — v3.10.15 교훈) · 리전을 바꾸면 선택(한 법인 안)을 푼다 · 기억하지 않는다.
+  인계: `KPI_HANDOFF.backupSummaryRegion`(메모리 · 30초) — 허브 `backupGo` 는 법인이 있으면 Detail(v2.959), 리전만이면 Summary+리전. 테스트 `platformText.test.js` v3.10.17 · `server/test/backupSummaryRegion31017.test.js`.
+- **v3.10.18 — 가상화 플랫폼 점검 6회차: 허브 부제의 옛 가정 문구 정정**(자율 개선 루프): `PlatformHub` 부제가 ‘법인 = vCenter = Bareos 한 단위’ 라고 말했다 — 2026-11-13 사용자 정정(법인 1 : 서비스 N · 서비스 1 = vCenter 1 + Bareos 1)과 어긋나는 **화면 문구**라 고쳤다
+  (‘서비스 = vCenter 1 + Bareos 1 · 한 법인에 서비스가 여럿일 수 있습니다’). 같은 옛 가정이 남은 다른 문구(`BareosCorp` 라벨 ‘1:1:1’ · `bareosText` 혼합 엣지 안내 · 카드 ‘vCenter · 법인’ 류의 느슨한 ‘법인’)는
+  루트 CLAUDE.md 대로 **정리 범위를 사용자가 정한 뒤**에 손댄다(이 회차는 부제 한 줄만). 테스트 `platformText.test.js` v3.10.18.
+- **v3.10.19 — 가상화 플랫폼 점검 7회차: 누르는 카드 · 행에 키보드 접근(`components/pressable.js` 한 벌)**(자율 개선 루프): 허브 vCenter 카드 · KPI 카드 3장(VM 백업 · VM 증가 · 스토리지 증가)은
+  div onClick 이라 Tab 으로 닿지 않고 Enter · Space 로 열리지 않았다(마우스 전용). `pressable(onClick)` = role="button" · tabIndex 0 · Enter/Space → onClick(+preventDefault) · onClick 없으면 빈 props.
+  `primitives.Kpi` 의 같은 인라인 코드도 이 한 벌로. 법인별 비교 표는 행 클릭을 두고 **이름을 `button.cell-link`** 로(호스트 · VM 수 버튼과 같은 꼴 — 키보드로 상세). 포커스 테두리는 `platform.css :focus-visible`.
+  규칙: 새 '누르는 div' 는 onClick 을 직접 달지 말고 `pressable` 로(테스트가 `className="card kpi|vc-card" … onClick=` 을 막는다). **안쪽 버튼에서 올라온 키는 무시**(`target !== currentTarget` — 반증 재현: ‘호스트 →’ 에서 Enter 가 카드 상세를 열고 버튼 클릭은 막혔다). 테스트 `components/pressable.test.js`.
+- **v3.10.20 — 가상화 플랫폼 점검 8회차: VM 순증감 ≠ 생성 − 삭제이면 ‘미집계 ±N’ 을 숨기지 않는다(`tools/vmTrackText.js` 한 벌)**(자율 개선 루프): 허브 KPI 카드와 VM 수량 추이 도구가
+  순증감(마지막 − 처음 total)과 생성 · 삭제 합을 따로 세어 ‘+61 · 생성 +0 · 삭제 −0’ 처럼 모순으로 보였다 — 기준선 슬롯(첫 스냅샷 · DB 재설정 뒤)과 vCenter 를 건너뛴 슬롯은 생성 · 삭제를 세지 않는다(데모 백필도 같다).
+  `vmNetSummary(points)` → `{net, added, removed, unaccounted, baselines, skippedSlots}` · `vmNetMetaText` · `vmNetUnaccountedTitle`(이유). 카드 meta ‘생성 +A · 삭제 −R · 미집계 ±U’ · 도구 ‘생성/삭제’ 칸 meta · title.
+  점이 없으면 net null(‘—’). 테스트 `tools/vmTrackText.test.js`(소스 계약: 두 화면이 따로 reduce 하지 않는다).
+- **v3.10.21 — 가상화 플랫폼 점검 9회차: Summary 리전 보기 — Director 정책 요약 · 오류 볼륨도 그 리전만, 나눌 수 없는 EM 값은 ‘전 법인 기준’ 으로 밝힌다**(자율 개선 루프 · v3.10.17 후속): `bareosPolicySummary` · `bareosErrorVolumeItems` 가
+  `allowed`(사용자 범위)만 받아 리전 보기에서도 범위 전체를 셌다 → `regionSet`(리전 법인 id · 리전이 없으면 `allowed` 그대로). EM(Enterprise Manager)은 B&R 여러 대를 묶어 읽어 리전으로 나눌 수 없다 —
+  Summary 응답 `emFleetWide`(Veeam 카드 ‘· EM · 저장소 · 라이선스는 전 법인 기준’) · 에러 로그 응답 `emSkippedForRegion`(리전 보기에서는 EM 세션 · EM 상태 행을 빼고 그 사실을 문구로). 테스트 `backupSummaryRegion31017`(소스 계약) · `platformText.test.js` v3.10.21.

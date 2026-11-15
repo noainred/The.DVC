@@ -56,7 +56,7 @@ export default function VcTable({ sites, byVc, backupText, onOpen, onGoHosts, on
               const bk = backupText(s);
               return (
                 <tr key={s.id} style={{ cursor: 'pointer' }} onClick={() => onOpen(s.id)} title="클릭 — 이 vCenter 상세">
-                  <td data-sort={s.name}><b>{s.name}</b><div className="muted" style={{ fontSize: 11 }}>{s.location?.region || '—'} · {s.location?.city || '—'}</div></td>
+                  <td data-sort={s.name}><button type="button" className="cell-link" style={{ fontWeight: 700 }} onClick={(e) => { stop(e); onOpen(s.id); }} title="이 vCenter 상세(요약 탭)">{s.name}</button><div className="muted" style={{ fontSize: 11 }}>{s.location?.region || '—'} · {s.location?.city || '—'}</div></td>
                   <td data-sort={s.status || ''} title={cs.countable ? undefined : (cs.title || undefined)}><VcStateBadge s={s} /></td>
                   <td style={{ textAlign: 'right' }} data-sort={m.hosts ?? ''}>
                     {Number.isFinite(m.hosts) ? <button type="button" className="cell-link tabular" onClick={(e) => { stop(e); onGoHosts(s.id); }} title="호스트 탭을 이 법인 범위로">{fmtN(m.hosts)} →</button> : '—'}
