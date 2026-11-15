@@ -170,7 +170,8 @@ export function cleanSamples(v, now = Date.now()) {
 
 /** CVP 상태 1건 정제(아는 필드만). */
 export function cleanStatus(x, now = Date.now()) {
-  const auth = isPlainObj(x.authStopped) ? { since: numOrNull(x.authStopped.since), at: numOrNull(x.authStopped.at), attempts: numOrNull(x.authStopped.attempts), reason: s(x.authStopped.reason, 300) } : null;
+  // 25회차 F-9: 인증 정지 시각도 수신 시각으로 자른다(같은 함수의 다른 시각처럼 tsClamp — 4회차 V-9 Veeam 과 같은 유형)
+  const auth = isPlainObj(x.authStopped) ? { since: tsClamp(x.authStopped.since, now), at: tsClamp(x.authStopped.at, now), attempts: numOrNull(x.authStopped.attempts), reason: s(x.authStopped.reason, 300) } : null;
   const seen = {};
   if (isPlainObj(x.seenFields)) for (const [k, v] of Object.entries(x.seenFields).slice(0, 32)) if (KINDS.has(k) && Array.isArray(v)) seen[k] = v.filter((y) => typeof y === 'string').slice(0, 40).map((y) => s(y, 64));
   const samples = cleanSamples(x.samples, now);

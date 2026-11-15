@@ -5,6 +5,7 @@
  * keyed by IP address.
  */
 
+import { makeSettingsLoadError } from '../util/settingsLoadError.js';   // 25회차 F-4
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
@@ -17,10 +18,17 @@ let cache = null;
 let rev = 0; // 메모/태그 변경 리비전(대장 캐시 무효화 키)
 export function annotationsRev() { return rev; }
 
+// 전체 점검 25회차 F-4: 손상 표지 · 서비스 점검 등재 · 오류 중 쓰기 거절(overrides.js 와 같은 판단)
+const _loadErr = makeSettingsLoadError(() => FILE, { label: 'IP 관리 메모 · 태그', confirm: () => { fs.mkdirSync(path.dirname(FILE), { recursive: true }); atomicWriteFileSync(FILE, JSON.stringify({ ...load() }, null, 2)); _loadErr.ok(); } });
+export function annotationsLoadError() { load(); return _loadErr.get(); }
+const ANNOTATION_REFUSAL = { ok: false, code: 'settings-unreadable', reason: 'IP 관리 메모 파일(ipam-annotations.json)을 읽지 못한 상태라 저장하지 않았습니다 — 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리고 재시작하세요.' };
 function load() {
   if (cache) return cache;
   cache = {};
-  try { if (fs.existsSync(FILE)) cache = JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}; } catch (e) { preserveCorrupt(FILE, e.message); cache = {}; }
+  try {
+    if (fs.existsSync(FILE)) { cache = JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}; _loadErr.ok(); }
+    else _loadErr.missing();
+  } catch (e) { _loadErr.corrupt(e); preserveCorrupt(FILE, e.message); cache = {}; }
   return cache;
 }
 
@@ -39,7 +47,8 @@ export function setAnnotation(ip, { memo = '', tags = [] } = {}, user) {
   if (!raw) return { ok: false, reason: 'IP가 필요합니다.' };
   // v2.594(감사 LO-2): IPv4 로 읽히면 정규형 키로 저장한다(선행 0 표기가 원장 행과 어긋나 유령이 되던 것).
   const key = canonIp(raw) || raw;
-  const data = load();
+  if (annotationsLoadError()) return { ...ANNOTATION_REFUSAL };   // 25회차 F-4
+  const data = { ...load() };   // 25회차 F-5: 사본 — persist 성공 뒤에만 캐시 교체
   if (raw !== key && data[raw]) delete data[raw];
   const m = String(memo || '').trim().slice(0, 2000);
   const t = cleanTags(tags);
@@ -50,7 +59,7 @@ export function setAnnotation(ip, { memo = '', tags = [] } = {}, user) {
   }
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   atomicWriteFileSync(FILE, JSON.stringify(data, null, 2)); // 부분기록 시 메모/태그 전량 유실 방지
-  cache = data; rev++;
+  cache = data; rev++; _loadErr.ok();
   return { ok: true, annotation: data[key] || null };
 }
 
@@ -60,7 +69,8 @@ export function setAnnotation(ip, { memo = '', tags = [] } = {}, user) {
  * @param {{ip:string, memo:string, tags:string[]}[]} entries
  */
 export function setAnnotationsMany(entries, user) {
-  const data = load();
+  if (annotationsLoadError()) return { ...ANNOTATION_REFUSAL };   // 25회차 F-4
+  const data = { ...load() };   // 25회차 F-5: 사본 — persist 성공 뒤에만 캐시 교체
   const now = new Date().toISOString();
   const by = user?.username || 'unknown';
   let changed = 0; let removed = 0;
@@ -78,7 +88,7 @@ export function setAnnotationsMany(entries, user) {
   if (changed || removed) {
     fs.mkdirSync(path.dirname(FILE), { recursive: true });
     atomicWriteFileSync(FILE, JSON.stringify(data, null, 2));
-    cache = data; rev++;
+    cache = data; rev++; _loadErr.ok();
   }
   return { ok: true, changed, removed };
 }

@@ -21,6 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeSettingsLoadError } from '../util/settingsLoadError.js';   // 25회차 F-4
 import { isIpv4 } from './scan.js';
 import { canonIp } from '../util/ipv4.js';
 import { DAY_MS, DAY_OFFSET_MIN, dayStartMs, dayKey } from '../util/dayKey.js';
@@ -36,10 +37,20 @@ let cache = null;
 let rev = 0; // override 변경 리비전(대장 캐시 무효화 키)
 export function overridesRev() { return rev; }
 
+/*
+ * 전체 점검 25회차 F-4(재현): 손상되면 표지 없이 빈 값으로 넘어가 ① 예약 · 담당 기록이 화면과 ipam.db 에서 사라지고 ② 다음 저장 한 번이 그 한 건만 든
+ *   파일을 만들었다(서비스 점검에도 없었다). 이제 로드 오류를 세우고(서비스 점검 목록) 오류 중 쓰기는 거절한다 — 해제는 확정 · 보존본 복구.
+ */
+const _loadErr = makeSettingsLoadError(() => FILE, { label: 'IP 관리 예약 · 담당(override)', confirm: () => persist({ ...load() }) });
+/** override 파일을 못 읽었으면 { at, reason }, 아니면 null. */
+export function overridesLoadError() { load(); return _loadErr.get(); }
 function load() {
   if (cache) return cache;
   cache = {};
-  try { if (fs.existsSync(FILE)) cache = JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}; } catch (e) { preserveCorrupt(FILE, e.message); cache = {}; }
+  try {
+    if (fs.existsSync(FILE)) { cache = JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}; _loadErr.ok(); }
+    else _loadErr.missing();
+  } catch (e) { _loadErr.corrupt(e); preserveCorrupt(FILE, e.message); cache = {}; }
   return cache;
 }
 
@@ -121,7 +132,9 @@ function isEmpty(rec) {
 function persist(data) {
   atomicWriteFileSync(FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
   cache = data; rev++;
+  _loadErr.ok();
 }
+const OVERRIDE_REFUSAL = { ok: false, code: 'settings-unreadable', reason: 'IP 관리 예약 · 담당 파일(ipam-overrides.json)을 읽지 못한 상태라 저장하지 않았습니다 — 지금 저장하면 그 한 건만 든 파일이 됩니다. 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리고 재시작하세요.' };
 
 /**
  * 한 IP의 override를 생성/수정/삭제. 부분 업데이트(주어진 필드만 갱신).
@@ -131,7 +144,8 @@ export function setOverride(ip, partial = {}, user) {
   const raw = String(ip || '').trim();
   const key = canonIp(raw);
   if (!key) return { ok: false, reason: '유효한 IPv4 주소가 아닙니다.' };
-  const data = load();
+  if (overridesLoadError()) return { ...OVERRIDE_REFUSAL };   // 25회차 F-4
+  const data = { ...load() };   // 25회차 F-5: 사본에 고치고 persist 성공 뒤에만 캐시 교체(쓰기 실패 시 메모리≠디스크 방지)
   const prev = data[key] || (raw !== key ? data[raw] : null) || {};
   if (raw !== key && data[raw]) delete data[raw];   // 예전에 원문 키로 저장된 유령 항목을 정규 키로 옮긴다
   const next = { ...prev, ...clean(partial) };
@@ -151,7 +165,8 @@ export function setOverride(ip, partial = {}, user) {
 export function clearOverride(ip) {
   const raw = String(ip || '').trim();
   const key = canonIp(raw) || raw;
-  const data = load();
+  if (overridesLoadError()) return { ...OVERRIDE_REFUSAL };   // 25회차 F-4
+  const data = { ...load() };   // 25회차 F-5: 사본에 고치고 persist 성공 뒤에만 캐시 교체(쓰기 실패 시 메모리≠디스크 방지)
   let hit = false;
   for (const k of new Set([raw, key])) if (data[k]) { delete data[k]; hit = true; }
   if (hit) persist(data);
@@ -201,11 +216,12 @@ export function invalidBatchResult(invalid) {
  * v2.744(감사 WEB-02): opts.rejectInvalid 면 무효 토큰이 하나라도 있을 때 아무것도 쓰지 않고 거부한다(라우트는 이 판정을 먼저 한다).
  */
 export function setOverrideBatch(ips, partial = {}, user, opts = {}) {
+  if (overridesLoadError()) return { ...OVERRIDE_REFUSAL };   // 25회차 F-4
   const { ips: list, invalid } = splitBatchIps(ips); // 유효 IPv4만(정규형 — v2.594), 중복 제거
   if (opts?.rejectInvalid) { const bad = invalidBatchResult(invalid); if (bad) return bad; }
   if (!list.length) return { ok: false, reason: '유효한 대상 IP가 없습니다.', ...(invalid.length ? { invalid: invalid.slice(0, INVALID_SHOW_MAX), invalidCount: invalid.length } : {}) };
   if (list.length > MAX_BATCH) return { ok: false, reason: `한 번에 ${MAX_BATCH}개까지만 일괄 적용할 수 있습니다.` };
-  const data = load();
+  const data = { ...load() };   // 25회차 F-5: 사본에 고치고 persist 성공 뒤에만 캐시 교체(쓰기 실패 시 메모리≠디스크 방지)
   const patch = clean(partial);
   const now = new Date().toISOString();
   const by = user?.username || 'unknown';
@@ -230,7 +246,8 @@ export function setOverrideBatch(ips, partial = {}, user, opts = {}) {
  * @returns {{ok:true, changed:number, removed:number}}
  */
 export function setOverridesMany(entries, user) {
-  const data = load();
+  if (overridesLoadError()) return { ...OVERRIDE_REFUSAL };   // 25회차 F-4
+  const data = { ...load() };   // 25회차 F-5: 사본에 고치고 persist 성공 뒤에만 캐시 교체(쓰기 실패 시 메모리≠디스크 방지)
   const now = new Date().toISOString();
   const by = user?.username || 'unknown';
   let changed = 0; let removed = 0;
