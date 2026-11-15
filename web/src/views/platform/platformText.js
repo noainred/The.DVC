@@ -93,7 +93,29 @@ export function bareosSumOf(rows, ids) {
  * KPI 카드를 누르면 그 도구 화면으로 가면서 **고른 vCenter 를 메모리 인계**(hooks/searchHandoff — URL 에 싣지 않는다 · 30초 · 꺼내면 지운다)로 넘긴다.
  * 받는 도구는 마운트 때 한 번 꺼내 vCenter 선택 칸의 초기값으로 쓴다(VmTrackTool · StorageTrackTool). 범위가 리전뿐이면(vCenter 없음) 넘길 것이 없어 전체로 연다.
  */
-export const KPI_HANDOFF = Object.freeze({ vmTrack: 'vm-track:vcenter', storageTrack: 'storage-track:vcenter' });
+export const KPI_HANDOFF = Object.freeze({ vmTrack: 'vm-track:vcenter', storageTrack: 'storage-track:vcenter', vmTrackRegion: 'vm-track:region', storageTrackRegion: 'storage-track:region' });
+/**
+ * v3.10.15(점검 3회차): KPI 카드 → 도구에 **리전도** 넘긴다(법인을 고르지 않고 리전만 골랐을 때 — 전에는 전체로 열렸다). 한 번의 인계에 vCenter · 리전을 함께 남긴다(handoffMany 는 새로 남길 때 이전 것을 지운다).
+ * 도구 쪽 보조: regionsOf(목록의 리전 · 빈 값 제외 · 이름순) · vcInRegion(리전 안 vCenter — 리전이 없으면 전부).
+ */
+export function handoffKpiScope(targets, scope) {
+  const vc = String(scope?.vcenterId || '').trim(); const region = String(scope?.region || '').trim();
+  const entries = [];
+  if (vc && targets?.vc) entries.push([targets.vc, vc]);
+  else if (region && targets?.region) entries.push([targets.region, region]);
+  if (!entries.length) return false;
+  handoffMany(entries);
+  return true;
+}
+export function regionsOf(vcList) {
+  const set = new Set((Array.isArray(vcList) ? vcList : []).map((v) => String(v?.region || '').trim()).filter(Boolean));
+  return [...set].sort((a, b) => a.localeCompare(b, 'ko'));
+}
+export function vcInRegion(vcList, region) {
+  const r = String(region || '').trim();
+  const list = (Array.isArray(vcList) ? vcList : []).filter((v) => v && typeof v === 'object');
+  return r ? list.filter((v) => String(v.region || '') === r) : list;
+}
 export function handoffKpiVcenter(target, vcenterId) {
   const id = String(vcenterId || '').trim();
   if (!id) return false;

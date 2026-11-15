@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  PLATFORM_TABS, PLATFORM_TAB_KEYS, isPlatformTab, scopeLabel, bareosSumOf, KPI_HANDOFF, handoffKpiVcenter, takeKpiVcenter, keywordsOf, vcMatches, siblingSites, siblingScopeText, chipSites, chipRegionNote, VC_TOOLS, HOST_TOOLS, PLATFORM_TOOL_KEYS, entityTabs, chipCount, chipLegend, signalSegments,
+  PLATFORM_TABS, PLATFORM_TAB_KEYS, isPlatformTab, scopeLabel, bareosSumOf, KPI_HANDOFF, handoffKpiVcenter, takeKpiVcenter, keywordsOf, vcMatches, siblingSites, siblingScopeText, chipSites, chipRegionNote, handoffKpiScope, regionsOf, vcInRegion, VC_TOOLS, HOST_TOOLS, PLATFORM_TOOL_KEYS, entityTabs, chipCount, chipLegend, signalSegments,
   VM_ITEM_TOOL_KEYS, HV_ITEM_TOOL_KEYS, platformMenuLabel,
   loadChipsCollapsed, saveChipsCollapsed, loadVcView, saveVcView, SCOPE_SEARCH_PLACEHOLDER, SCOPE_NOTE,
 } from './platformText.js';
@@ -166,7 +166,7 @@ describe('KPI 범위 문구 · Bareos 범위 합(v2.958)', () => {
 // v2.959(사용자 요청 2026-11-10) — KPI 카드 → 도구 화면에 고른 vCenter 인계(메모리 · 꺼내면 지운다).
 describe('KPI 카드 → 도구 인계(v2.959)', () => {
   it('target 은 도구마다 하나 · 넘긴 id 를 그 target 에서만 한 번 꺼낸다 · 빈 id 는 넘기지 않는다', () => {
-    expect(KPI_HANDOFF).toEqual({ vmTrack: 'vm-track:vcenter', storageTrack: 'storage-track:vcenter' });
+    expect(KPI_HANDOFF).toEqual({ vmTrack: 'vm-track:vcenter', storageTrack: 'storage-track:vcenter', vmTrackRegion: 'vm-track:region', storageTrackRegion: 'storage-track:region' });
     expect(handoffKpiVcenter(KPI_HANDOFF.vmTrack, 'vc-a')).toBe(true);
     expect(takeKpiVcenter(KPI_HANDOFF.storageTrack)).toBe('');
     expect(takeKpiVcenter(KPI_HANDOFF.vmTrack)).toBe('vc-a');
@@ -238,5 +238,44 @@ describe('바로가기 칩 범위(v3.10.14)', () => {
     expect(app).toMatch(/<PlatformHub[\s\S]*?region=\{region\}[\s\S]*?onPickVcenter=\{\(id\) => patchFilter\(\{ vcenterId: id \}\)\}/);
     const hub = fs.readFileSync(new URL('./PlatformHub.jsx', import.meta.url), 'utf8');
     expect(hub).toMatch(/const sites = chipSites\(vcenters, region\)/);
+  });
+});
+
+// v3.10.15(점검 3회차) — KPI 카드가 리전도 넘긴다 · 도구의 리전 보조.
+describe('KPI 카드 → 도구 리전 인계(v3.10.15)', () => {
+  const T = { vc: KPI_HANDOFF.vmTrack, region: KPI_HANDOFF.vmTrackRegion };
+  it('handoffKpiScope — vCenter 가 있으면 vCenter 만, 없고 리전만 있으면 리전, 둘 다 없으면 false(남기지 않음)', () => {
+    expect(handoffKpiScope(T, { vcenterId: 'vc-a', region: '유럽' })).toBe(true);
+    expect(takeKpiVcenter(T.region)).toBe('');
+    expect(takeKpiVcenter(T.vc)).toBe('vc-a');
+    expect(handoffKpiScope(T, { region: '유럽' })).toBe(true);
+    expect(takeKpiVcenter(T.vc)).toBe('');
+    expect(takeKpiVcenter(T.region)).toBe('유럽');
+    expect(handoffKpiScope(T, {})).toBe(false);
+    expect(takeKpiVcenter(T.region)).toBe('');
+  });
+  it('regionsOf · vcInRegion — 빈 리전 제외 · 이름순 · 리전 없으면 전부', () => {
+    const list = [{ id: 'a', region: '유럽' }, { id: 'b', region: '아시아' }, { id: 'c', region: '' }, { id: 'd', region: '유럽' }, null];
+    expect(regionsOf(list)).toEqual(['아시아', '유럽']);
+    expect(vcInRegion(list, '유럽').map((v) => v.id)).toEqual(['a', 'd']);
+    expect(vcInRegion(list, '').map((v) => v.id)).toEqual(['a', 'b', 'c', 'd']);
+    expect(vcInRegion(null, '유럽')).toEqual([]);
+  });
+  it('도구 두 곳이 region 을 요청에 싣고(vcenterId 없을 때만) 서버 목록이 region 을 준다(소스 계약)', async () => {
+    const fs = await import('node:fs');
+    for (const f of ['../tools/VmTrackTool.jsx', '../tools/StorageTrackTool.jsx']) {
+      const s = fs.readFileSync(new URL(f, import.meta.url), 'utf8');
+      expect(s).toMatch(/\.\.\.\(region && !vcenterId \? \{ region \} : \{\}\)/);
+      expect(s).toMatch(/useState\(\(\) => takeKpiVcenter\(KPI_HANDOFF\.(vmTrackRegion|storageTrackRegion)\)\)/);
+    }
+    const srv = fs.readFileSync(new URL('../../../../server/src/routes/api/vmtrack.js', import.meta.url), 'utf8');
+    expect(srv).toMatch(/region: String\(vc\.location\?\.region \|\| ''\)/);
+    // 하위 구획(DS 목록 · 상위 · 변경 이력 · 피벗)과 상세 모달도 리전을 싣는다 — 제목이 '리전 X 합계' 인데 본문이 전 법인이면 안 된다
+    const st = fs.readFileSync(new URL('../tools/StorageTrackTool.jsx', import.meta.url), 'utf8');
+    expect((st.match(/\.\.\.\(region && !vcenterId \? \{ region \} : \{\}\)/g) || []).length).toBeGreaterThanOrEqual(5);
+    expect(st).toMatch(/<DsDetail \{\.\.\.detail\} region=\{vcenterId \? '' : region\}/);
+    const vt = fs.readFileSync(new URL('../tools/VmTrackTool.jsx', import.meta.url), 'utf8');
+    expect((vt.match(/region=\{vcenterId \? '' : region\}/g) || []).length).toBe(2);
+    expect((vt.match(/\.\.\.\(region \? \{ region \} : \{\}\)/g) || []).length).toBe(2);
   });
 });

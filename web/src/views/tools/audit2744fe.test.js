@@ -174,7 +174,7 @@ describe('RA-R2 VM 수량 추이 — 다시 조회는 진행 중 잠기고 요�
     const code = stripComments(fs.readFileSync(path.join(here, 'VmTrackTool.jsx'), 'utf8'));
     expect(code).toMatch(/const retry = \(\) => retryGate\.current\.start\(\(\) => load\(/);
     expect(code).toMatch(/<VmTrackLoadFailed error=\{error\} onRetry=\{retry\} busy=\{retrying\} failedRetries=\{retryFails\} \/>/);
-    expect(code).toMatch(/useEffect\(\(\) => \{ retryGate\.current\.reset\(setRetrying\); setRetryFails\(0\); setData\(null\); setError\(null\); load\(\); \}, \[days, vcenterId\]\)/);
+    expect(code).toMatch(/useEffect\(\(\) => \{ retryGate\.current\.reset\(setRetrying\); setRetryFails\(0\); setData\(null\); setError\(null\); load\(\); \}, \[days, vcenterId, region\]\)/);   // v3.10.15: 리전도 조건
     // 늦은 응답 버림은 그대로 useLatest 다.
     expect(code).toMatch(/const run = useLatest\(\);/);
   });
