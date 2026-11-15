@@ -11,6 +11,12 @@ describe('pressable', () => {
     expect(onClick).toHaveBeenCalledTimes(2);
     const e = { key: 'Tab', preventDefault: vi.fn() }; p.onKeyDown(e); expect(e.preventDefault).not.toHaveBeenCalled(); expect(onClick).toHaveBeenCalledTimes(2);
   });
+  it('안쪽 버튼에서 올라온 Enter/Space 는 무시한다(target ≠ currentTarget) — 카드가 대신 열리지 않고 버튼의 기본 클릭도 막지 않는다(v3.10.19 보완 · 반증 재현)', () => {
+    const onClick = vi.fn(); const p = pressable(onClick); const card = {}; const btn = {};
+    for (const key of PRESS_KEYS) { const e = { key, target: btn, currentTarget: card, preventDefault: vi.fn() }; p.onKeyDown(e); expect(e.preventDefault).not.toHaveBeenCalled(); }
+    expect(onClick).not.toHaveBeenCalled();
+    const own = { key: 'Enter', target: card, currentTarget: card, preventDefault: vi.fn() }; p.onKeyDown(own); expect(onClick).toHaveBeenCalledTimes(1); expect(own.preventDefault).toHaveBeenCalledTimes(1);
+  });
   it('onClick 이 없거나 disabled 면 빈 props(장식 카드는 그대로 · tabIndex 도 없음)', () => {
     expect(pressable(null)).toEqual({}); expect(pressable(undefined)).toEqual({}); expect(pressable('x')).toEqual({});
     expect(pressable(() => {}, { disabled: true })).toEqual({});

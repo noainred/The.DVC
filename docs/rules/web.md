@@ -963,4 +963,4 @@
 - **v3.10.19 — 가상화 플랫폼 점검 7회차: 누르는 카드 · 행에 키보드 접근(`components/pressable.js` 한 벌)**(자율 개선 루프): 허브 vCenter 카드 · KPI 카드 3장(VM 백업 · VM 증가 · 스토리지 증가)은
   div onClick 이라 Tab 으로 닿지 않고 Enter · Space 로 열리지 않았다(마우스 전용). `pressable(onClick)` = role="button" · tabIndex 0 · Enter/Space → onClick(+preventDefault) · onClick 없으면 빈 props.
   `primitives.Kpi` 의 같은 인라인 코드도 이 한 벌로. 법인별 비교 표는 행 클릭을 두고 **이름을 `button.cell-link`** 로(호스트 · VM 수 버튼과 같은 꼴 — 키보드로 상세). 포커스 테두리는 `platform.css :focus-visible`.
-  규칙: 새 '누르는 div' 는 onClick 을 직접 달지 말고 `pressable` 로(테스트가 `className="card kpi|vc-card" … onClick=` 을 막는다). 테스트 `components/pressable.test.js`.
+  규칙: 새 '누르는 div' 는 onClick 을 직접 달지 말고 `pressable` 로(테스트가 `className="card kpi|vc-card" … onClick=` 을 막는다). **안쪽 버튼에서 올라온 키는 무시**(`target !== currentTarget` — 반증 재현: ‘호스트 →’ 에서 Enter 가 카드 상세를 열고 버튼 클릭은 막혔다). 테스트 `components/pressable.test.js`.
