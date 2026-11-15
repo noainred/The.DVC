@@ -116,7 +116,7 @@ function Result({ row, now, labels }) {
           </div>
           <div className="fm-col">
             <div className="fm-row fm-between fm-pad-x"><b>근거 — 오류 기록 {errs.length}줄 · 그 밖 {others.length}줄{d.evidenceTotal > d.evidence.length ? `(전체 ${countText(d.evidenceTotal)}줄 중 앞 ${d.evidence.length}줄)` : ''}</b><span className="fm-dim">프로그램의 ‘상세 근거’ 를 표로 옮긴 것 · 번호는 보고서와 같음</span></div>
-            <STable className="fm-table" minWidth={1180}>
+            <STable className="fm-table" minWidth={1120}>
               <thead><tr><th className="fm-r">#</th><th>종류</th><th>어디서</th><th>시각</th><th>식별자</th><th>장치 · 슬롯</th><th>기록</th></tr></thead>
               <tbody>{[...errs, ...others].map((e, i) => (
                 <tr key={`${e.n}-${i}`}>
