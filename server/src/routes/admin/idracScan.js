@@ -31,7 +31,8 @@ import { findHostByServiceTag } from '../../idrac/hostMatch.js';
 import { getDatacenterAssign } from '../../datacenter/store.js';
 import { allCollectorStatus } from '../../collector/state.js';
 import { listAssignments, getResults } from '../../central/assignments.js';
-import { adminOnly, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
+import { adminOnly, requireSettingsOwner, fullScopeOnlyWith, fullReadWriteScopeOnlyWith } from './shared.js';
+import { isFullReadWriteScope } from '../../auth/scope.js';
 import { numOrNull } from '../../util/numOrNull.js';
 import { idracScopeOf, idracInScope } from './idracCore.js'; // v2.629 AUTHZ2629-03: 서버 분석 범위 절단 판정 한 벌
 // v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
@@ -52,10 +53,12 @@ const csvPerm = requireCsvPerm('data.csv');
 // v2.629(AUTHZ2629-03 · A6-02): 서버별 상세 조회는 범위 계정에 **귀속 vCenter 가 허용 집합인 서버만** 보여 주고
 //   (범위 밖·귀속 없음은 존재 은닉 404), 장비에 실시간으로 로그인하는 동작(GPU 프로브·인벤토리 즉시 재수집·센서 즉시 수집)은
 //   '읽기' 가 아니라 '실행' 이라 전체 범위 계정만 한다(v2.611 denyScopedRun 계열).
-const LIVE_REASON = '실시간 iDRAC 로그인(GPU 프로브·인벤토리 즉시 재수집·센서 즉시 수집)은 저장된 BMC 자격증명으로 장비에 접속하는 동작이라 전체 범위(vCenter 제한 없는) 계정만 실행할 수 있습니다.';
-const liveFleetOnly = fullScopeOnlyWith(LIVE_REASON);
+// 점검 반복 6회차 X 재확인: 이 셋은 GET 이지만 '실행' 이라 공용 게이트의 안전 메서드 통과(6회차 A1)를 타면 안 된다 — 조회 ∧ 쓰기 전체 범위(isFullReadWriteScope 하나).
+//   예전에는 조회 범위만 봐서, 쓰기가 vcA 뿐인 관리자가 vcB 서버에 저장된 BMC 계정으로 실시간 로그인(gpu-probe · inventory?refresh=1 · sensors?live=1)할 수 있었다.
+const LIVE_REASON = '실시간 iDRAC 로그인(GPU 프로브·인벤토리 즉시 재수집·센서 즉시 수집)은 저장된 BMC 자격증명으로 장비에 접속하는 동작이라 조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 계정만 실행할 수 있습니다.';
+const liveFleetOnly = fullReadWriteScopeOnlyWith(LIVE_REASON);
 const hiddenByScope = (req, s) => { const sc = idracScopeOf(req); return !!sc && !idracInScope(sc, s); };
-const denyLive = (req, res) => { if (!idracScopeOf(req)) return false; res.status(403).json({ ok: false, error: 'forbidden', reason: LIVE_REASON }); return true; };
+const denyLive = (req, res) => { if (isFullReadWriteScope(req.user, store.get())) return false; res.status(403).json({ ok: false, error: 'forbidden', reason: LIVE_REASON }); return true; };
 const NOT_FOUND = { ok: false, reason: '서버를 찾을 수 없습니다.' };
 
 const normIdracMode = (m) => (['replace', 'replace-vcenter', 'merge'].includes(m) ? m : 'merge');

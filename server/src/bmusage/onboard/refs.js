@@ -16,7 +16,7 @@ import { stopMatch } from '../../sshaccess/state.js';   // v3.9.0: 긴급 조치
 import { addrKey } from './bindRule.js';
 import { parsePrivateKey } from './keyParse.js';
 import { sshHostKeyFingerprint } from '../../proxy/sshExec.js';
-import { keyPlacementIssue, lostFeatures, featureLabels } from './placement.js';
+import { keyPlacementIssue, lostFeatures, featureLabels, keyShape, keyWriteIssue, accountCorpOk } from './placement.js';
 
 const t = (v) => String(v ?? '').trim();
 
@@ -126,6 +126,45 @@ export function placementConflicts(key, { serversUsing = () => false, accountsUs
     else if (probe.folderCorp && a.corp !== probe.folderCorp) out.push({ kind: 'account', name: a.name, corp: a.corp, why: 'other-corp' });
   }
   return out;
+}
+
+/**
+ * 6회차 점검 A2: 공통 계정 저장(법인 · 기본 키 · 종류)이 **그 계정을 쓰는 서버(credRef)** 를 끊는가 — 쓰기 전 판정(라우트가 본인 OTP 앞에서 · 저장 직전에 한 번 더).
+ *   예전에는 키 폴더 = 새 계정 법인이면 저장됐고(B-4), 그 계정을 쓰는 옛 법인 서버는 다음 주기부터 key-folder 로 접속하지 않았다
+ *   (비밀번호만 쓰는 계정이면 옛 법인 서버가 다른 법인 계정 비밀번호로 접속했다 — 온보딩 분석은 cred-other-corp 로 거부하는 조합).
+ *   서버마다(서버 키가 있거나 비밀번호 고정이면 계정 키를 쓰지 않는다 — resolveOsAuth 순서):
+ *     ① 효력 키 폴더 — placement.keyWriteIssue(= keyPlacementIssue) 로 저장 전 · 뒤를 보고 **새로 어긋나는** 서버만 센다(이미 어긋나 있던 서버는 이 쓰기가 만든 문제가 아니다).
+ *     ② 계정 법인 ↔ 서버 법인 — placement.accountCorpOk(온보딩 분석 cred-other-corp 와 같은 함수) · 같은 규칙으로 새로 어긋나는 서버만.
+ *     ③ 종류 — OS 계정을 iDRAC 계정으로 바꾸면 쓰는 서버 전부가 account-kind 로 접속하지 않는다.
+ *   등록부를 못 읽으면 모름 — 503(저장하지 않는다). 거부 문구에는 서버 · 키 이름을 싣지 않고 대수만.
+ * @param {object|null} before  저장 전 계정 원본(새 계정이면 null — 쓰는 서버가 없다)
+ * @param {{kind:string, corp:string, keyRef:string}} after  저장 뒤 모양(keyStore.saveAccount dryRun 의 next)
+ * @returns {null | {ok:false, code:string, status:number, reason:string, servers?:object}}
+ */
+export function accountUseIssue(before, after = {}) {
+  if (!before || !before.id) return null;
+  let servers;
+  try { if (registryLoadError()) throw new Error('unread'); servers = listBmServersRaw(); }
+  catch { return { ok: false, code: 'registry-unreadable', status: 503, reason: 'OS 계정 등록부를 읽지 못해 이 계정을 쓰는 서버를 모릅니다 — 저장하지 않았습니다.' }; }
+  const using = servers.filter((s) => t(s.credRef) === before.id);
+  if (!using.length) return null;
+  const keyOf = (acc) => (acc && acc.kind === 'os' && t(acc.keyRef) ? keyShape(KS.keyById(acc.keyRef)) : null);
+  const kBefore = keyOf(before); const kAfter = keyOf(after);
+  const n = { kind: 0, keyFolder: 0, otherCorp: 0 };
+  for (const s of using) {
+    if (before.kind === 'os' && after.kind !== 'os') { n.kind += 1; continue; }
+    const server = { vcenterId: t(s.vcenterId), name: t(s.name) };
+    if (!accountCorpOk(after.corp, server.vcenterId) && accountCorpOk(before.corp, server.vcenterId)) n.otherCorp += 1;
+    if (t(s.keyRef) || s.osAuth === 'password') continue;   // 계정 키를 쓰지 않는 서버
+    if (keyWriteIssue(kAfter, server).folder && !keyWriteIssue(kBefore, server).folder) n.keyFolder += 1;
+  }
+  const parts = [];
+  if (n.kind) parts.push(`${n.kind}대가 OS 계정이 아니게 되어 접속하지 못합니다`);
+  if (n.keyFolder) parts.push(`${n.keyFolder}대가 바꾼 기본 키의 폴더(법인 · 서버) 밖이 됩니다`);
+  if (n.otherCorp) parts.push(`${n.otherCorp}대가 다른 법인의 계정을 쓰게 됩니다`);
+  if (!parts.length) return null;
+  const code = n.kind ? 'account-kind' : (n.keyFolder ? 'key-folder' : 'cred-other-corp');
+  return { ok: false, code, status: 409, reason: `이 계정을 쓰는 서버 중 ${parts.join(' · ')} — 저장하지 않았습니다. 그 서버들의 계정을 먼저 바꾸거나(서버 등록 · SSH 공용 접속) 같은 법인의 새 계정을 만드세요.`, servers: n };
 }
 
 /** 접속 자격 해석 오류 문구(화면 · 수집 오류 · 연결 시험 공용). */

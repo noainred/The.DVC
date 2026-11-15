@@ -466,7 +466,7 @@ export function _removeKey(id) {
  *  · 비밀번호 빈 값 · '********' 는 기존 유지(편집 UX — secretCarry 규약과 같은 신호). 접속처가 없는 계정이라 '주소 이동' 은 없다 —
  *    대신 **법인 · 종류 · 계정명**이 바뀌면 저장 비밀 · 기본 키 참조를 승계하지 않는다(다른 법인 · 다른 계정으로 같은 비밀이 가지 않게).
  */
-export function saveAccount(body = {}, { by = '', now = Date.now() } = {}) {
+export function saveAccount(body = {}, { by = '', now = Date.now(), dryRun = false } = {}) {
   const u = unreadable(); if (u) return u;
   const d = draft();
   const id = t(body.id, 32);
@@ -505,6 +505,9 @@ export function saveAccount(body = {}, { by = '', now = Date.now() } = {}) {
   Object.assign(acc, { name, kind, corp, username, keyRef, password, updatedAt: now });
   if (kind !== 'idrac') acc.copies = [];
   if (!existing) d.accounts.push(acc);
+  // 6회차 A2: dryRun — 위 검사(B-4 포함)를 **같은 코드로** 다 돌리고 쓰지 않는다. 라우트가 본인 OTP(reauth) **앞에서** 불러 거절이 OTP 를 소모하지 않게 하고,
+  //   저장 뒤 모양(kind · corp · keyRef — 비밀 없음)으로 그 계정을 쓰는 서버를 본다(refs.accountUseIssue).
+  if (dryRun) return { ok: true, dryRun: true, next: { id: acc.id, kind, corp, keyRef } };
   const c = commit(d); if (!c.ok) return c;
   return { ok: true, account: publicAccountView(acc), ...(dropped.length ? { droppedSecrets: dropped } : {}), ...(copiesStale ? { copiesStale } : {}) };
 }

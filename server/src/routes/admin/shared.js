@@ -12,17 +12,43 @@ import { analysisFilter, hostVcByTag, hostNameByTag, hostNicsByTag, withMappedVc
 export const adminOnly = requireRole('admin');
 
 /**
+ * 6회차 점검 A1(메인 결정): **안전 메서드(GET · HEAD · OPTIONS)는 조회 범위만** 본다(조회 무제한 계정의 함대 조회를 막지 않는다 — 예전 그대로).
+ *   **그 밖의 메서드(쓰기 · 실행)는 조회 ∧ 쓰기 모두 전체 범위**(`isFullReadWriteScope` — v2.904 · v2.935 와 같은 판정 하나)여야 통과한다.
+ *   예전에는 두 공용 게이트(fullScopeOnlyWith · requireSettingsOwner)가 조회 범위만 봐서, 조회는 무제한이고 쓰기만 일부 법인으로 줄인 계정
+ *   (scope = { vcenters: [], writeVcenters: [vcA] })이 전 법인 공용 쓰기(서버 귀속 · 수집 설정 · 백업 설정 · 공용 비밀 …)를 그대로 했다.
+ *   라우트 수백 개를 하나씩 fullReadWriteScopeOnlyWith 로 바꾸다 빠뜨리지 않게 게이트 한 곳에서 가른다.
+ *   판정이 던지면 거부한다(isFullReadWriteScope 의 기본값 false). 쓰기 범위 때문에 막을 때는 사유를 따로 준다(조회 범위 사유는 이 계정에 틀린 설명).
+ */
+export const SAFE_METHODS = Object.freeze(['GET', 'HEAD', 'OPTIONS']);
+export const isSafeMethod = (req) => SAFE_METHODS.includes(String(req?.method || '').toUpperCase());
+export const WRITE_SCOPE_PARTIAL_REASON = '이 작업은 쓰기 범위도 전체(vCenter 제한 없는)인 계정만 할 수 있습니다 — 이 계정은 쓰기 범위가 일부 법인으로 제한되어 있습니다.';
+/** 쓰기 · 실행 요청을 조회 ∧ 쓰기 전체 범위로 판정(안전 메서드 · 읽기성 POST 예외는 통과). 통과면 null, 막으면 응답 본문. */
+function writeScopeDenial(req, { readPost = false } = {}) {
+  if (isSafeMethod(req)) return null;
+  if (readPost && String(req?.method || '').toUpperCase() === 'POST') return null;
+  if (isFullReadWriteScope(req.user, store.get())) return null;
+  return { ok: false, error: 'forbidden', reason: WRITE_SCOPE_PARTIAL_REASON, writeScope: 'partial' };
+}
+
+/**
  * 전체 범위(vCenter 제한 없는) 계정만 통과(v2.583 — 공용 팩토리). 로그·엣지·토큰처럼 **법인 축으로
  * 나눌 수 없는** 데이터를 주는 라우트가 쓴다. 예전에는 라우트 파일마다 같은 6줄을 복사했다
  * (routes/api 8곳 — 사유 문구만 다르다). 새 라우트는 이것을 쓴다.
+ * 6회차 A1: 안전 메서드가 아닌 요청은 쓰기 범위도 전체여야 한다(위 머리말).
+ * @param {string} reason  조회 범위 때문에 막을 때의 사유(예전 그대로)
+ * @param {{readPost?:boolean}} [opts]  readPost — **본문만 계산하는 읽기성 POST**(저장 0 · 왕복 0 · 저장 비밀 사용 0 · 뒤따르는 쓰기 없이 혼자 쓰이는 진단)만 쓰기 판정에서 뺀다.
+ *   예외는 최소로 둔다 — 지금 하나: POST /tools/cvp/parse-preview(docs/rules/security-api.md 6회차 A1 목록). 저장 직전 검증 · 미리보기(rma tests/validate 등)는
+ *   그 저장이 어차피 막히므로 예외로 두지 않는다(san-flow/preview 가 v2.935 부터 같은 판정으로 막혀 있는 것과 같다).
  */
-export function fullScopeOnlyWith(reason = '이 화면은 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.') {
+export function fullScopeOnlyWith(reason = '이 화면은 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.', { readPost = false } = {}) {
   const fullScopeGate = (req, res, next) => {
     if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', reason });
+    const w = writeScopeDenial(req, { readPost });
+    if (w) return res.status(403).json(w);
     next();
   };
   // v2.614(아키텍처 점검): `fleetOnly`·`fleetWideOnly` 류는 전부 이 팩토리의 산물이라 태그 하나로 판정기가 알아본다.
-  fullScopeGate.gate = Object.freeze({ kind: 'fullScope' });
+  fullScopeGate.gate = Object.freeze({ kind: 'fullScope', ...(readPost ? { readPost: true } : {}) });
   return fullScopeGate;
 }
 
@@ -60,17 +86,34 @@ export function fullReadWriteScopeOnlyWith(reason = '이 작업은 조회 · 쓰
 //   판정을 여기 두면 새 소유자 라우트도 자동으로 따른다(아키텍처 점검 archScan 도 이 게이트를 전체 범위로 센다).
 //   거부 응답은 fullScopeOnlyWith 와 같은 모양({ok,error,reason}) — requiredOwner 를 싣지 않는다(이미 소유자인 계정에
 //   '소유자 목록에 등록하라' 는 틀린 조치를 화면이 말하지 않게. 화면은 서버 사유와 함께 '범위' 안내로 그린다).
+export const SETTINGS_OWNER_WRITE_SCOPE_REASON = '설정 소유자 등급의 변경은 전 법인 공용이라 쓰기 범위도 전체(vCenter 제한 없는)인 계정만 할 수 있습니다 — 이 계정은 쓰기 범위가 일부 법인으로 제한되어 있습니다.';
 export const SETTINGS_OWNER_FULL_SCOPE_REASON = '설정 소유자 등급은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다 — 이 계정은 소유자 목록에 있지만 범위가 지정되어 있습니다.';
-export function requireSettingsOwner(req, res, next) {
-  if (!config.auth.enabled) return next();
+/**
+ * 설정 소유자 **등급** 판정(소유자 ∧ 조회 전체 범위 — v2.744 그대로). 통과면 null, 아니면 403 응답 본문.
+ *   라우트 게이트(requireSettingsOwner)와 **등급 질의**(bmOnboard.isOwnerTier — 법인마다 쓰기 범위를 따로 보는 라우트 안의 행 · 창 승인 등급:
+ *   8a 정비 창 · 7b 온보딩 묶음 행)가 같은 하나를 쓴다. 등급 질의는 6회차 A1 의 쓰기 범위 판정을 더하지 않는다 — 그 라우트는 대상 법인의 쓰기 범위를
+ *   따로 본다(쓰기 vcA 소유자는 vcA 법인 창만 — bmMaint8aRoute 가 고정). 범위 판정이 던지면(스냅샷 이상) 범위 계정으로 본다 — 거부 기본값.
+ */
+export function settingsOwnerGradeDenial(req) {
+  if (!config.auth.enabled) return null;
   let owners = [];
   try { owners = loadSessionSecurity().settingsOwners || []; } catch { owners = []; }
-  const u = req.user || {};
-  if (!owners.includes(u.username)) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '설정 소유 계정만 변경할 수 있습니다.' });
-  // 범위 판정이 던지면(스냅샷 이상) 범위 계정으로 본다 — 거부 기본값.
+  const u = req?.user || {};
+  if (!owners.includes(u.username)) return { ok: false, error: 'forbidden', requiredOwner: true, reason: '설정 소유 계정만 변경할 수 있습니다.' };
   let scoped = true;
   try { scoped = !!scopedVcenterIds(u, store.get()); } catch { scoped = true; }
-  if (scoped) return res.status(403).json({ ok: false, error: 'forbidden', reason: SETTINGS_OWNER_FULL_SCOPE_REASON });
+  if (scoped) return { ok: false, error: 'forbidden', reason: SETTINGS_OWNER_FULL_SCOPE_REASON };
+  return null;
+}
+export function requireSettingsOwner(req, res, next) {
+  const g = settingsOwnerGradeDenial(req);
+  if (g) return res.status(403).json(g);
+  if (!config.auth.enabled) return next();
+  // 6회차 A1: 쓰기 · 실행은 쓰기 범위도 전체여야 한다(fullScopeOnlyWith 와 같은 writeScopeDenial — 판정 isFullReadWriteScope 하나 · 던지면 거부).
+  //   ⚠ **GET(백업 내려받기 · 상태 · 비밀 정책 조회 등)은 이번에 바꾸지 않았다** — 쓰기 범위가 지정된 소유자에게 전 법인 공용 비밀이 든 조회를 줄지는
+  //   사용자 결정 대기(docs/rules/security-api.md 6회차 A1 '결정 대기'). 바꾸면 쓰기 범위 소유자는 소유자 라우트의 GET 도 잃는다.
+  const w = writeScopeDenial(req);
+  if (w) return res.status(403).json({ ...w, reason: SETTINGS_OWNER_WRITE_SCOPE_REASON });
   return next();
 }
 requireSettingsOwner.gate = Object.freeze({ kind: 'settingsOwner' }); // v2.614 아키텍처 점검 태그
