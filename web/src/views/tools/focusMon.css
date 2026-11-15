@@ -290,3 +290,42 @@
   .fm-wrap .fm-sub.fm-cardline { grid-template-columns: minmax(0, 1fr); }
   .fm-wrap .fm-sub.fm-cardline > span:nth-child(even) { text-align: left; }
 }
+
+/* v3.11.0 디스크 점검 탭(시안 ⑰ · docs/design/focus-mon/README.md §20) */
+.fm-wrap .fm-badge.bad { background: rgba(239,68,68,.18); color: #fca5a5; }
+.fm-wrap .fm-badge.live { background: rgba(59,130,246,.18); color: #93c5fd; }
+.fm-wrap .fm-bad { color: #fca5a5; font-weight: 700; }
+.fm-wrap .fm-warn { color: #fbbf24; }
+.fm-wrap .fm-audit .fm-card { padding: 0; gap: 10px; }
+.fm-wrap .fm-audit .fm-card.fm-kpi { padding: 14px 16px; gap: 2px; }
+.fm-wrap .fm-audit .fm-card.fm-pad { padding: 14px 16px; }
+.fm-wrap .fm-audit .fm-card.fm-empty { padding: 14px 16px; }
+.fm-wrap .fm-pad-x { padding-left: 16px; padding-right: 16px; }
+.fm-wrap .fm-pad-t { padding-top: 14px; }
+.fm-wrap .fm-mar-x { margin-left: 16px; margin-right: 16px; }
+.fm-wrap .fm-grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(520px, 100%), 1fr)); gap: 14px; align-items: start; }
+.fm-wrap .fm-grid2 > * { min-width: 0; }
+.fm-wrap .fm-audit-res { padding-bottom: 4px; }
+.fm-wrap .fm-audit-res .fm-sub-card { padding: 0 0 8px; gap: 8px; min-width: 0; }
+.fm-wrap .fm-verdicts { display: flex; flex-direction: column; gap: 6px; }
+.fm-wrap .fm-vd { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 8px; align-items: start; font-size: 12.5px; line-height: 1.55; overflow-wrap: anywhere; }
+.fm-wrap .fm-vd .fm-badge { margin-left: 0; justify-content: center; }
+.fm-wrap .fm-vd.in { padding-left: 18px; color: var(--text-dim); }
+.fm-wrap .fm-rate { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.fm-wrap .fm-rate i { display: block; height: 8px; border-radius: 4px; background: #1b2a48; flex: 1 1 60px; min-width: 40px; overflow: hidden; }
+.fm-wrap .fm-rate i u { display: block; height: 8px; border-radius: 4px; background: #ef4444; }
+.fm-wrap .fm-cross { gap: 14px; }
+.fm-wrap .fm-xhead { padding: 8px 16px; background: rgba(255,255,255,.02); border-top: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); }
+.fm-wrap .fm-xhead .fm-badge { margin-left: 0; }
+.fm-wrap .fm-table td.fm-msg { min-width: 260px; font-size: 11.5px; }
+.fm-wrap .fm-audit .fm-brk { white-space: normal; overflow-wrap: anywhere; }
+.fm-wrap .fm-grow { flex: 1 1 auto; min-width: 0; }
+.fm-wrap .fm-audit pre.fm-code { margin: 0; white-space: pre; overflow-x: auto; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border-soft); background: var(--panel-deep); font-family: var(--mono); font-size: 12px; line-height: 1.6; }
+.fm-wrap .fm-audit .fm-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; line-height: 1.55; }
+.fm-wrap .fm-audit .fm-st > .fm-badge { align-self: flex-start; margin-left: 0; }
+.fm-wrap .fm-audit .fm-nowrap-t { white-space: nowrap; }
+.fm-wrap .fm-audit table.fm-xtable { table-layout: fixed; }
+.fm-wrap .fm-audit table.fm-xtable td { overflow-wrap: anywhere; }
+.fm-wrap .fm-audit .fm-atable td.fm-stcol { max-width: 280px; }
+.fm-wrap .fm-audit .fm-st > span > .fm-badge { margin-left: 6px; }
+.fm-wrap .fm-audit .fm-res-stack { gap: 12px; }

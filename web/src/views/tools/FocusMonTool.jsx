@@ -28,6 +28,7 @@ import { niceMax, yScale, yTicks, linePath, areaPath, stackedAreas, spreadLabels
 import { Seg, Badge, copyText, CsvPanel, NodeCard, InstallCard } from './FocusMonBulk.jsx';
 import { usePoll } from './focusMonPoll.js';
 import { LoadTab } from './FocusMonLoad.jsx';
+import { AuditTab } from './FocusMonAudit.jsx'; // v3.11.0 디스크 점검(배드 섹터 점검 프로그램)
 import './focusMon.css';
 
 const BASE = ['tools', 'focus-mon'];
@@ -1025,7 +1026,7 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
     const f = edit?.form; if (!f) return;
     // 포트는 글자 그대로 보낸다 — 화면에서 22 로 바꾸면 틀린 값이 조용히 22 가 된다(서버가 1~65535 를 검사해 알린다)
     run('edit', async () => {
-      const r = await putJson(`/tools/focus-mon/targets/${encodeURIComponent(t.id)}`, { name: f.name.trim(), host: f.host.trim(), port: String(f.port).trim(), username: f.username.trim(), agent: f.agent, group: f.group || '' });
+      const r = await putJson(`/tools/focus-mon/targets/${encodeURIComponent(t.id)}`, { name: f.name.trim(), host: f.host.trim(), port: String(f.port).trim(), username: f.username.trim(), agent: f.agent, group: f.group || '', ...((f.corp || '') !== (t.corp || '') ? { corp: f.corp || '' } : {}) });
       if (r?.ok === false) return r;
       setEdit(null);
       return { ok: true, reason: editResultText(r, t.name) };
@@ -1083,7 +1084,7 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
     if (ed) {
       const f = ed.form;
       const set = (k) => (e) => setEdit({ ...ed, form: { ...f, [k]: e.target.value.slice(0, 64) } });
-      const ch = editChanges(t, f);
+      const ch = editChanges(t, f, { corpName: (id) => (main.corps || []).find((c) => c.id === id)?.name || id });
       const notes = editNotes(t, f, { inSession: sIdx.has(t.id) });
       const canSave = !busy && ch.changes.length > 0 && !!f.name.trim() && !!f.host.trim();
       const key = (e) => { if (e.key === 'Escape') setEdit(null); else if (e.key === 'Enter' && canSave) saveEdit(t); };
@@ -1105,6 +1106,11 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
                 <option value="">{GROUP_NONE}</option>
                 {ownGroups.map((g) => <option key={g.name} value={g.name}>{g.name}</option>)}
                 {f.group && !ownGroups.some((g) => g.name === f.group) ? <option value={f.group}>{f.group}</option> : null}
+              </Select></label>
+              <label className="fm-fld" title="디스크 점검 '법인별로 보기' 에 씁니다 — 비우면 담당 엣지의 법인을 따릅니다"><span>법인</span><Select sort={false} className="fm-input" value={f.corp || ''} onChange={(e) => setEdit({ ...ed, form: { ...f, corp: e.target.value } })}>
+                <option value="">지정 안 함(담당 엣지의 법인)</option>
+                {(main.corps || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {f.corp && !(main.corps || []).some((c) => c.id === f.corp) ? <option value={f.corp}>{f.corp}(목록에 없는 법인)</option> : null}
               </Select></label>
               <span className="fm-row fm-nowrap">
                 <button type="button" className="fm-btn pri" disabled={!canSave} onClick={() => saveEdit(t)}>저장</button>
@@ -1182,6 +1188,7 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
               ))}
               <label className="fm-fld"><span>담당 노드</span><Select sort={false} className="fm-input" value={form.agent} onChange={(e) => setForm({ ...form, agent: e.target.value })}><option value="">중앙</option>{main.nodes.filter((x) => x.kind === 'edge').map((x) => <option key={x.agent} value={x.agent}>엣지 {x.agent}</option>)}</Select></label>
               <label className="fm-fld fm-fld-g"><span>그룹</span><Select sort={false} className="fm-input" value={form.group || ''} onChange={(e) => setForm({ ...form, group: e.target.value })}><option value="">{GROUP_NONE}</option>{ownGroups.map((g) => <option key={g.name} value={g.name}>{g.name}</option>)}</Select></label>
+              {(main.corps || []).length ? <label className="fm-fld fm-fld-g" title="디스크 점검 '법인별로 보기' 에 씁니다 — 비우면 담당 엣지의 법인을 따릅니다"><span>법인</span><Select sort={false} className="fm-input" value={form.corp || ''} onChange={(e) => setForm({ ...form, corp: e.target.value })}><option value="">지정 안 함</option>{main.corps.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select></label> : null}
               <button type="button" className="fm-btn pri" disabled={!!busy || !form.host || !form.name} onClick={() => run('add', async () => { const r = await postJson('/tools/focus-mon/targets', { ...form, port: Number(form.port) || 22 }); if (r?.ok) setForm({ ...form, name: '', host: '' }); return r?.ok ? { ok: true, reason: `${r.target.name} 을(를) 등록했습니다.` } : r; })}>추가</button>
             </div>
             {csv ? <CsvPanel main={main} busy={busy} run={run} onClose={() => setCsv(false)} /> : null}
@@ -1389,7 +1396,7 @@ export default function FocusMonTool() {
           ))}
         </div>
       ) : null}
-      {!active && lastEnded && route.tab !== 'targets' ? <div className="fm-ban">수집이 끝났습니다({ENDED_TEXT[lastEnded.why] || lastEnded.why}). 수집한 값은 DB 에 {main.settings.retentionDays}일 남아 시간 띠로 다시 볼 수 있습니다.</div> : null}
+      {!active && lastEnded && route.tab !== 'targets' && route.tab !== 'audit' ? <div className="fm-ban">수집이 끝났습니다({ENDED_TEXT[lastEnded.why] || lastEnded.why}). 수집한 값은 DB 에 {main.settings.retentionDays}일 남아 시간 띠로 다시 볼 수 있습니다.</div> : null}
       {active?.mode === 'watch' && active.remainMs != null && active.remainMs < 2 * 60_000 ? <div className="fm-ban">남은 시간 {remainText(active.remainMs)} — 그 뒤 수집이 스스로 멈춥니다.</div> : null}
       {['overview', 'compare', 'procs'].includes(route.tab) && viewChips.length > 2 ? (
         <div className="fm-row" role="group" aria-label="그룹으로 거르기"><span className="fm-lbl">그룹</span>
@@ -1397,8 +1404,9 @@ export default function FocusMonTool() {
           <span className="fm-dim">보고 있는 서버 {ids.length}대 가운데 · 그룹은 ‘대상 · 키’ 탭에서 정합니다</span>
         </div>
       ) : null}
-      {route.tab === 'load' || (route.tab !== 'targets' && ids.length) ? <TimeBar tb={tb} now={now} coverage={route.tab === 'load' ? null : cov.data} oldestMinute={main.db.oldestMinute} /> : null}
+      {route.tab === 'load' || (route.tab !== 'targets' && route.tab !== 'audit' && ids.length) ? <TimeBar tb={tb} now={now} coverage={route.tab === 'load' ? null : cov.data} oldestMinute={main.db.oldestMinute} /> : null}
       {route.tab === 'load' ? <LoadTab main={main} tb={tb} /> : null}
+      {route.tab === 'audit' ? <AuditTab setMsg={setMsg} /> : null}
       {route.tab === 'overview' ? <Overview main={main} ids={shownIds} tb={tb} now={now} onOpen={onOpen} /> : null}
       {route.tab === 'compare' ? (
         <>

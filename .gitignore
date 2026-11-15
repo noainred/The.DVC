@@ -291,3 +291,6 @@ server/config/*
 # 2026-10-09 검토 S-10: 릴리스 서명 개인키는 저장소에 두지 않는다(scripts/release-keygen.mjs 는 저장소 밖에만 쓴다 — 사람이 옮겨 둔 경우 대비).
 *.key.pem
 release-signing-*.key*
+
+# python 바이트코드(디스크 점검 프로그램을 시험으로 불러올 때 생긴다)
+__pycache__/
