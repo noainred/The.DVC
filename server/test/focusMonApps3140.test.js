@@ -101,6 +101,7 @@ test('③ 엣지 정제 — 아는 칸만 · 이름 규칙 · 상한 · 음수 �
   } });
   assert.deepEqual(c.apps.sv.map((a) => a.k), ['oracle-db.service', R.APP_KERNEL], '서비스 기준은 .service · .scope 또는 정해진 세 이름만');
   assert.equal(c.apps.sv[0].evil, undefined);
+  assert.equal(edge.cleanProcs({ n: 1, top: [], apps: { sv: [{ k: 'a.service', n: 1, u: 'bad user;rm' }], cm: [] } }).apps.sv[0].u, undefined, '계정 이름 규칙 밖은 버린다');
   assert.equal(c.apps.sv[1].cpu, null, '음수는 null'); assert.equal(c.apps.sv[1].io, 'none');
   assert.deepEqual(c.apps.cm.map((a) => a.k), ['ora_p*'], '프로그램 이름 규칙 · 수가 없으면 버린다');
   const big = { sv: Array.from({ length: 50 }, (_, k) => ({ k: `s${k}.service`, n: 1 })), cm: [] };
