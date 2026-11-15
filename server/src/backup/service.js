@@ -64,7 +64,7 @@ export function fileCapFor(name) {
  */
 export const RUNTIME_STATE_NAMES = new Set([
   'diskbad-cursors.json', 'diskbad-auth-stops.json', // v3.8.0 디스크 배드 섹터 — 서버별 마지막 읽은 로그 항목 · 인증 실패 정지(registerStateFile 과 이중 안전망)
-  'focusmon-sessions.json', 'focusmon-keys.json', 'focusmon-auth-stops.json', // v2.976 집중 모니터링 계속 수집 정의 · 엣지 공개키 기록 · 인증 정지(registerStateFile 과 이중 안전망)
+  'focusmon-sessions.json', 'focusmon-keys.json', 'focusmon-auth-stops.json', 'focusmon-audit.json', // v2.976 집중 모니터링 계속 수집 정의 · 엣지 공개키 기록 · 인증 정지 · v3.11.0 디스크 점검 작업 · 준비 상태(registerStateFile 과 이중 안전망)
   'storage-inspect-runs.json', 'storage-inspect-ring.json', 'storage-inspect-state.json', // v2.965 PowerScale 점검 이력 · 엣지 미전송 고리 · 회차 기록(registerStateFile 과 이중 안전망)
   'issue-notify-state.json', // v2.871 이슈 기한 알림 기록(issues/notify.js — registerStateFile 과 이중 안전망)
   'ipam-changes.json', 'ipam-change-baseline.json', // v3.1.0 IP 변화 기록 · 대역 줄 기준선(ipam/changeLog.js · scanStore.js — registerStateFile 과 이중 안전망)
