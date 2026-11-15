@@ -166,7 +166,7 @@ describe('KPI 범위 문구 · Bareos 범위 합(v2.958)', () => {
 // v2.959(사용자 요청 2026-11-10) — KPI 카드 → 도구 화면에 고른 vCenter 인계(메모리 · 꺼내면 지운다).
 describe('KPI 카드 → 도구 인계(v2.959)', () => {
   it('target 은 도구마다 하나 · 넘긴 id 를 그 target 에서만 한 번 꺼낸다 · 빈 id 는 넘기지 않는다', () => {
-    expect(KPI_HANDOFF).toEqual({ vmTrack: 'vm-track:vcenter', storageTrack: 'storage-track:vcenter', vmTrackRegion: 'vm-track:region', storageTrackRegion: 'storage-track:region' });
+    expect(KPI_HANDOFF).toEqual({ vmTrack: 'vm-track:vcenter', storageTrack: 'storage-track:vcenter', vmTrackRegion: 'vm-track:region', storageTrackRegion: 'storage-track:region', backupSummaryRegion: 'backup-summary:region' });   // v3.10.17 +backupSummaryRegion
     expect(handoffKpiVcenter(KPI_HANDOFF.vmTrack, 'vc-a')).toBe(true);
     expect(takeKpiVcenter(KPI_HANDOFF.storageTrack)).toBe('');
     expect(takeKpiVcenter(KPI_HANDOFF.vmTrack)).toBe('vc-a');
@@ -277,5 +277,53 @@ describe('KPI 카드 → 도구 리전 인계(v3.10.15)', () => {
     const vt = fs.readFileSync(new URL('../tools/VmTrackTool.jsx', import.meta.url), 'utf8');
     expect((vt.match(/region=\{vcenterId \? '' : region\}/g) || []).length).toBe(2);
     expect((vt.match(/\.\.\.\(region \? \{ region \} : \{\}\)/g) || []).length).toBe(2);
+  });
+});
+
+describe('v3.10.17 — 점검 5회차: 리전만 고른 채 백업 KPI 카드 → Backup 현황 · Summary 가 그 리전만 센다', () => {
+  it('KPI_HANDOFF 에 backupSummaryRegion · handoffKpiScope 는 리전 대상만 있어도 리전을 남긴다(vCenter 대상이 없으면 vCenter 는 남기지 않는다)', () => {
+    expect(KPI_HANDOFF.backupSummaryRegion).toBe('backup-summary:region');
+    expect(handoffKpiScope({ region: KPI_HANDOFF.backupSummaryRegion }, { region: '유럽' })).toBe(true);
+    expect(takeKpiVcenter(KPI_HANDOFF.backupSummaryRegion)).toBe('유럽');
+    expect(takeKpiVcenter(KPI_HANDOFF.backupSummaryRegion)).toBe('');   // 한 번 읽으면 비운다
+    // vCenter 대상이 없는 호출(백업 카드는 법인을 골랐으면 Detail 로 가므로 Summary 쪽은 리전 대상만 준다) — vCenter 가 있어도 리전을 남긴다(대상이 리전뿐이라)
+    expect(handoffKpiScope({ region: KPI_HANDOFF.backupSummaryRegion }, { vcenterId: 'vc-1', region: '유럽' })).toBe(true);
+    expect(takeKpiVcenter(KPI_HANDOFF.backupSummaryRegion)).toBe('유럽');
+    expect(handoffKpiScope({ region: KPI_HANDOFF.backupSummaryRegion }, {})).toBe(false);
+  });
+  it('소스 계약 — 허브 백업 카드가 리전을 넘기고 · Summary 가 받아 다섯 요청에 싣는다 · 하위 구획 셋이 region 을 받는다', () => {
+    const vc = fs.readFileSync(new URL('../VCenters.jsx', import.meta.url), 'utf8');
+    expect(vc).toMatch(/handoffKpiScope\(\{ region: KPI_HANDOFF\.backupSummaryRegion \}, \{ region: regSel \}\); window\.location\.hash = '#\/tools\/backup-summary'/);
+    const t = fs.readFileSync(new URL('../tools/BackupSummaryTool.jsx', import.meta.url), 'utf8');
+    expect(t).toMatch(/takeKpiVcenter\(KPI_HANDOFF\.backupSummaryRegion\)/);
+    expect((t.match(/\.\.\.\(region \? \{ region \} : \{\}\)/g) || []).length).toBe(2);   // 조회 · CSV
+    expect(t).toMatch(/const scope = \{ power: opts\.power, excl: opts\.excl, region \}/);   // 찾기(stale)
+    expect(t).toMatch(/<BackupSummaryCapSched [^\n]*region=\{region\}/); expect(t).toMatch(/<BackupSummaryErrors [^\n]*region=\{region\}/);
+    expect(t).toMatch(/data-backup-region=""/);
+    const st = fs.readFileSync(new URL('../tools/backupSummaryText.js', import.meta.url), 'utf8');
+    expect(st).toMatch(/\.\.\.\(scope\.region \? \{ region: String\(scope\.region\) \} : \{\}\)/);
+    for (const f of ['../tools/BackupSummaryCapSched.jsx', '../tools/BackupSummaryErrors.jsx']) expect(fs.readFileSync(new URL(f, import.meta.url), 'utf8')).toMatch(/region = ''/);
+    expect(fs.readFileSync(new URL('../tools/BackupSummaryStale.jsx', import.meta.url), 'utf8')).toMatch(/scopeSig = `[^`]*scope\?\.region/);
+  });
+});
+
+describe('v3.10.18 — 점검 6회차: 허브 부제가 옛 가정(법인 = vCenter = Bareos 1:1:1)을 말하지 않는다', () => {
+  it('2026-11-13 사용자 정정 — 법인 1 : 서비스 N · 서비스 1 = vCenter 1 + Bareos 1(소스 계약)', () => {
+    const s = fs.readFileSync(new URL('./PlatformHub.jsx', import.meta.url), 'utf8');
+    expect(s).not.toMatch(/법인 = vCenter = Bareos/);
+    expect(s).toMatch(/서비스 = vCenter 1 \+ Bareos 1 · 한 법인에 서비스가 여럿일 수 있습니다/);
+  });
+});
+
+describe('v3.10.21 — 점검 9회차: Summary 리전 보기에서 나눌 수 없는 EM 값은 전 법인 기준임을 밝힌다(소스 계약)', () => {
+  it('Veeam 카드 — data.emFleetWide 면 안내 · 에러 로그 — emSkippedForRegion 문구', () => {
+    const t = fs.readFileSync(new URL('../tools/BackupSummaryTool.jsx', import.meta.url), 'utf8');
+    expect(t).toMatch(/\{data\.emFleetWide && <span className="muted"[^\n]*data-em-fleet=""/);
+    expect(t).toMatch(/EM · 저장소 · 라이선스는 전 법인 기준/);
+    const e = fs.readFileSync(new URL('../tools/BackupSummaryErrors.jsx', import.meta.url), 'utf8');
+    expect(e).toMatch(/data\.emSkippedForRegion \? '리전 보기에서는 뺐습니다/);
+    expect(t).toMatch(/<BackupSummaryCapSched [^\n]*emFleetWide=\{!!data\.emFleetWide\}/);
+    const c = fs.readFileSync(new URL('../tools/BackupSummaryCapSched.jsx', import.meta.url), 'utf8');
+    expect(c).toMatch(/30일 추이\(EM\{emFleetWide \? ' · 전 법인 기준' : ''\}\)/);
   });
 });

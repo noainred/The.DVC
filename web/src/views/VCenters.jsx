@@ -5,9 +5,11 @@ import { usePolling, fetchJson, toolAllowed, can } from '../api.js';
 import HubTabs, { toolsFor } from './platform/HubTabs.jsx';
 import { VC_TOOLS, VC_VIEWS, loadVcView, saveVcView, scopeLabel, bareosSumOf, KPI_HANDOFF, handoffKpiScope, keywordsOf, vcMatches, siblingSites, siblingScopeText } from './platform/platformText.js';
 import { HUB_ENTRY_TAB } from './vcd/vcdTabs.js'; // v2.958: 허브에서 법인을 누르면 상세는 '요약' 부터
-import { openBackupDetail } from './tools/backupViewText.js'; // v2.959: 백업 KPI 카드 → 고른 법인의 Backup 세부내용(순수 모듈 — 도구 화면을 끌어오지 않는다)
+import { openBackupDetail } from './tools/backupViewText.js';
+import { pressable } from '../components/pressable.js';   // v3.10.19: 누르는 카드(KPI 3장 · vCenter 카드)에 키보드 접근 // v2.959: 백업 KPI 카드 → 고른 법인의 Backup 세부내용(순수 모듈 — 도구 화면을 끌어오지 않는다)
 const VcTable = lazy(() => import('./platform/VcTable.jsx'));
 import { growth, hasDsData, gbTb } from './tools/storageTrack.js'; // 추이 KPI(v2.358) 계산 재사용
+import { vmNetSummary, vmNetMetaText, vmNetUnaccountedTitle, signed } from './tools/vmTrackText.js'; // v3.10.20 순증감 · 생성 · 삭제 한 벌(도구와 같다 — 미집계를 숨기지 않는다)
 import { Loading, ErrorBox, StateBadge, usageColor } from '../components/ui.jsx';
 // v2.596(감사 PERFWEB-04): 상세는 recharts 를 쓴다 — 목록 화면이 그 청크를 받지 않게 상세를 열 때만 받는다.
 const VCenterDetail = lazy(() => import('./VCenterDetail.jsx'));
@@ -181,11 +183,9 @@ function TrendKpis({ vcenterId = '', region = '', scopeText = '' }) {
   }, [allowed, vcenterId, region]);
   if (!allowed || dead || !d) return null;
   const pts = d.points || [];
-  const vmFirst = pts[0] || null;
   const vmLast = pts[pts.length - 1] || null;
-  const vmNet = vmFirst && vmLast ? vmLast.total - vmFirst.total : 0;
-  const sumAdded = pts.reduce((a, p) => a + (p.added || 0), 0);
-  const sumRemoved = pts.reduce((a, p) => a + (p.removed || 0), 0);
+  const ns = vmNetSummary(pts);   // v3.10.20: 순증감 ≠ 생성 − 삭제이면 '미집계 ±N'(기준선 · 건너뛴 슬롯) — 전에는 '+61 · 생성 +0 · 삭제 −0' 으로 보였다
+  const vmNet = ns.net ?? 0;
   const g = growth(pts); // 스토리지 순증감 — 구버전(ds 열 0) 행은 내부에서 기준 제외(v2.351 원칙)
   const dsLast = [...pts].reverse().find(hasDsData) || null;
   // v2.959: 법인을 고른 상태면 그 vCenter 를 도구 화면에 인계한다(메모리 · 마운트 때 1회) — 도구가 그 법인으로 열린다. v3.10.15: 리전만 골랐으면 리전을 넘긴다(도구에 리전 선택이 생겼다).
@@ -193,15 +193,15 @@ function TrendKpis({ vcenterId = '', region = '', scopeText = '' }) {
   const scopedTitle = vcenterId || region ? ` — ${scopeText} 로 열립니다` : '';
   return (
     <>
-      <div className="card kpi" onClick={() => go('#/tools/vm-track', { vc: KPI_HANDOFF.vmTrack, region: KPI_HANDOFF.vmTrackRegion })} style={{ cursor: 'pointer' }} title={`클릭 — VM 수량 추이 화면${scopedTitle}`}>
+      <div className="card kpi" {...pressable(() => go('#/tools/vm-track', { vc: KPI_HANDOFF.vmTrack, region: KPI_HANDOFF.vmTrackRegion }))} style={{ cursor: 'pointer' }} title={`클릭 — VM 수량 추이 화면${scopedTitle}${vmNetUnaccountedTitle(ns) ? `\n${vmNetUnaccountedTitle(ns)}` : ''}`}>
         <div className="label">VM 증가 추이(30일){scopeText && scopeText !== '전체' ? <span className="muted" style={{ fontWeight: 500 }}> · {scopeText}</span> : null}</div>
         <div className="value" style={{ color: vmNet > 0 ? 'var(--green)' : vmNet < 0 ? 'var(--red)' : undefined }}>
-          {vmLast ? `${vmNet > 0 ? '+' : ''}${vmNet.toLocaleString()}` : '—'}
+          {vmLast ? signed(vmNet) : '—'}
         </div>
-        <div className="meta">{vmLast ? `생성 +${sumAdded.toLocaleString()} · 삭제 −${sumRemoved.toLocaleString()}` : '스냅샷 없음(매일 00·12시 자동)'}</div>
+        <div className="meta">{vmLast ? vmNetMetaText(ns) : '스냅샷 없음(매일 00·12시 자동)'}</div>
         <Spark points={pts.map((p) => p.total)} color="#60a5fa" />
       </div>
-      <div className="card kpi" onClick={() => go('#/tools/storage-track', { vc: KPI_HANDOFF.storageTrack, region: KPI_HANDOFF.storageTrackRegion })} style={{ cursor: 'pointer' }} title={`클릭 — 스토리지 사용량 추이 화면${scopedTitle}`}>
+      <div className="card kpi" {...pressable(() => go('#/tools/storage-track', { vc: KPI_HANDOFF.storageTrack, region: KPI_HANDOFF.storageTrackRegion }))} style={{ cursor: 'pointer' }} title={`클릭 — 스토리지 사용량 추이 화면${scopedTitle}`}>
         <div className="label">스토리지 증가 추이(30일){scopeText && scopeText !== '전체' ? <span className="muted" style={{ fontWeight: 500 }}> · {scopeText}</span> : null}</div>
         <div className="value" style={{ color: g.netGB > 0 ? 'var(--amber)' : g.netGB < 0 ? 'var(--green)' : undefined }}>
           {dsLast ? `${g.netGB > 0 ? '+' : ''}${gbTb(g.netGB)}` : '—'}
@@ -310,7 +310,7 @@ export default function VCenters({ onSelectSite, onGoVms, resetSignal, scope = {
   //   도구 권한이 없으면 누를 수 없다(커서 · 제목 없음). 리전만 골랐으면 Summary(전체)로 — Detail 은 법인 하나만 본다.
   const backupGo = vcSel
     ? (toolAllowed('backup-detail') ? () => openBackupDetail(vcSel) : null)
-    : (toolAllowed('backup-summary') ? () => { window.location.hash = '#/tools/backup-summary'; } : null);
+    : (toolAllowed('backup-summary') ? () => { handoffKpiScope({ region: KPI_HANDOFF.backupSummaryRegion }, { region: regSel }); window.location.hash = '#/tools/backup-summary'; } : null);   // v3.10.17 리전만 골랐으면 Summary 가 그 리전만 센다
   const backupTextOf = (s) => backupVbCell(backupBy?.[s.id], bareosBy.get(s.id) || null, Number.isFinite(s.metrics?.vms) ? s.metrics.vms : null, Date.now(), { refreshError: backupRefreshErr, bareosAllowed: bareosOk });
   // 허브 탭 줄: 카드 | 표 ‖ vCenter 성격의 특수 기능(권한 없는 도구는 숨김 — 도구 키 그대로)
   const vcTools = toolsFor(VC_TOOLS);
@@ -322,8 +322,8 @@ export default function VCenters({ onSelectSite, onGoVms, resetSignal, scope = {
       <HubTabs label="vCenter 보기 · 도구" active={vcView} tools={vcTools}
         views={VC_VIEWS.map(([k, label]) => ({ k, label: k === 'table' ? `${label} · 법인별 비교` : label, onClick: () => setVcView(k) }))} />
       <div className="kpis kpis-1row ph-kpis" style={{ margin: '12px 0 18px' }}>
-        <div className="card kpi" data-kpi-backup="" onClick={backupGo || undefined} style={backupGo ? { cursor: 'pointer' } : undefined}
-          title={`VM 백업 — veeam/bareos · 범위: ${kpiScope}${backupGo ? `\n클릭 — ${vcSel ? `${kpiScope} 의 Backup 현황 · Detail` : 'Backup 현황 · Summary'}` : ''}\nVeeam: 연동된 Veeam 서버가 백업 대상으로 가진 VM 수(vCenter 카드의 앞 수 합)\nBareos: 각 법인 Bareos 에 잡이 등록된 VM 수(Bareos 백업 현황의 법인 줄 합 — 도구 권한이 있을 때만)\n못 읽은 vCenter 는 0 으로 더하지 않고 따로 셉니다` + (bt?.partial || bareosPartial ? '\n* 일부만 읽은 vCenter 가 있어 실제보다 적을 수 있습니다' : '')}>
+        <div className="card kpi" data-kpi-backup="" {...pressable(backupGo)} style={backupGo ? { cursor: 'pointer' } : undefined}
+          title={`VM 백업 — veeam/bareos · 범위: ${kpiScope}${backupGo ? `\n클릭 — ${vcSel ? `${kpiScope} 의 Backup 현황 · Detail` : regSel ? `Backup 현황 · Summary(리전 ${regSel})` : 'Backup 현황 · Summary'}` : ''}\nVeeam: 연동된 Veeam 서버가 백업 대상으로 가진 VM 수(vCenter 카드의 앞 수 합)\nBareos: 각 법인 Bareos 에 잡이 등록된 VM 수(Bareos 백업 현황의 법인 줄 합 — 도구 권한이 있을 때만)\n못 읽은 vCenter 는 0 으로 더하지 않고 따로 셉니다` + (bt?.partial || bareosPartial ? '\n* 일부만 읽은 vCenter 가 있어 실제보다 적을 수 있습니다' : '')}>
           <div className="label">VM 백업 (Veeam / Bareos){scoped ? <span className="muted" style={{ fontWeight: 500 }}> · {kpiScope}</span> : null}</div>
           {(() => {
             const t = `${bt ? `${num(bt.veeam)}${bt.partial ? '*' : ''}` : '—'}/${bareosSum == null ? '—' : `${num(bareosSum)}${bareosPartial ? '*' : ''}`}`;
@@ -358,7 +358,7 @@ export default function VCenters({ onSelectSite, onGoVms, resetSignal, scope = {
           const m = s.metrics || {};
           const cs = vcCardState(s); // v2.583 #39: 상태별 본문(대기·점검·비활성·연결 실패를 나눈다)
           return (
-            <div className="card vc-card" key={s.id} ref={(el) => { cardRefs.current[s.id] = el; }} onClick={() => setOpenId(s.id, HUB_ENTRY_TAB)} title={`${s.name} — 누르면 이 vCenter 의 요약 탭`}>
+            <div className="card vc-card" key={s.id} ref={(el) => { cardRefs.current[s.id] = el; }} {...pressable(() => setOpenId(s.id, HUB_ENTRY_TAB))} title={`${s.name} — 누르면 이 vCenter 의 요약 탭`}>
               <div className="vc-head">
                 <div>
                   <div className="vc-name">{s.name}</div>

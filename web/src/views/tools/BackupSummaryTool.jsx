@@ -14,6 +14,8 @@ import { fmtNum, shortTs, loadOpts, saveOpts, scopeQuery, scopeNote, veeamStateO
 import { summaryPolicyKpis, bundlesOf, okPct, hhmm, rpoLabel } from './backupSummaryText.js';
 import VeeamHeader, { visibleTabs } from './VeeamHeader.jsx';
 import BackupOptions from './BackupOptions.jsx';
+import Select from '../../components/Select.jsx';
+import { KPI_HANDOFF, takeKpiVcenter } from '../platform/platformText.js';   // v3.10.17 가상화 플랫폼 백업 KPI 카드가 넘긴 리전(메모리 인계 — 주소에 싣지 않는다)
 import BackupSummaryBar from './BackupSummaryBar.jsx';
 import BackupSummaryStale from './BackupSummaryStale.jsx';
 import BackupSummaryTree from './BackupSummaryTree.jsx';
@@ -55,22 +57,24 @@ export default function BackupSummaryTool() {
   const [csvErr, setCsvErr] = useState(null);
   // v2.837 선택 — 트리 표 · 찾기 결과가 함께 쓴다(시안 '선택은 한 법인 안에서만' — 다른 법인 칸은 화면이 막는다)
   const [sel, setSel] = useState(() => ({ vc: null, ids: new Set() }));
+  // v3.10.17 리전(허브 KPI 카드 인계 · 화면 Select) — 숫자 줄 · 두 카드 · 트리 · CSV · 찾기 · 일정 · 에러가 모두 같은 ?region= 으로 센다. 기억하지 않는다(다음에 열면 전체).
+  const [region, setRegion] = useState(() => takeKpiVcenter(KPI_HANDOFF.backupSummaryRegion) || '');
   const gen = useRef(0);
   // 전원·제외는 서버가 센다(같은 backupRow — 세부내용과 같은 수) · 바꾸면 그 조건으로 다시 읽는다. RPO 기준은 같은 응답에서 고른다.
   const load = useCallback(() => {
     const my = ++gen.current;
     setLoading(true); setError(null);
-    fetchJson('/tools/backup-summary', scopeQuery(opts))
+    fetchJson('/tools/backup-summary', { ...scopeQuery(opts), ...(region ? { region } : {}) })
       .then((r) => { if (my === gen.current) setData(r); })
       .catch((e) => { if (my === gen.current) setError(e); })
       .finally(() => { if (my === gen.current) setLoading(false); });
-  }, [opts.power, opts.excl]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [opts.power, opts.excl, region]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { load(); return () => { gen.current++; }; }, [load]);
   const changeOpts = useCallback((o) => { setOpts(o); saveOpts(o); }, []);
   const csv = useCallback(async () => {
     setCsvErr(null);
-    try { await downloadFile(`/tools/backup-summary.csv?${new URLSearchParams(scopeQuery(opts))}`); } catch (e) { setCsvErr(e); }
-  }, [opts]);
+    try { await downloadFile(`/tools/backup-summary.csv?${new URLSearchParams({ ...scopeQuery(opts), ...(region ? { region } : {}) })}`); } catch (e) { setCsvErr(e); }
+  }, [opts, region]);
   // 선택 바꾸기 — vc 가 다르면 무시(화면이 막지만 한 번 더) · 다 풀리면 법인도 풀린다
   const pick = useCallback((vc, ids, on) => setSel((cur) => {
     if (cur.vc && cur.vc !== vc && cur.ids.size) return cur;
@@ -101,19 +105,29 @@ export default function BackupSummaryTool() {
   const bp = data.bareosPolicy || null;   // v2.839 Director 정책 수집본 요약(범위 안 · 없으면 null — 수집 전)
   const bNext = [g?.next, bp?.next].filter((x) => Number.isFinite(x)).reduce((a, b) => (a == null || b < a ? b : a), null);
   const dirs = data.directors;
-  const scope = { power: opts.power, excl: opts.excl };
+  const scope = { power: opts.power, excl: opts.excl, region };   // region: 찾기(stale) 요청에도 실린다(backupSummaryText.staleQuery)
+  const regionsKnown = Array.isArray(data.regions) ? data.regions : [];
+  const regions = region && !regionsKnown.includes(region) ? [...regionsKnown, region] : regionsKnown;   // 모르는 리전(법인 0)도 고른 값은 보여 준다
+  const pickRegion = (r) => { setRegion(r); clearSel(); };   // 선택은 한 법인 안 — 리전이 바뀌면 푼다
   const link = { marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: '#93c5fd', textDecoration: 'none', whiteSpace: 'nowrap' };
   const partial = rows.filter((r) => r.veeamState && r.veeamState !== 'ok' && r.veeamState !== 'unlinked');
 
   return (
     <div data-backup-summary="" style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
-      <VeeamHeader active="summary" desc={`${fmtNum(t.vcenters)}개 법인 · Veeam + Bareos 를 한 기준으로 — 보호 대상 · RPO 충족 · 용량 · 일정 · 에러`}
+      <VeeamHeader active="summary" desc={`${fmtNum(t.vcenters)}개 법인${region ? ` · 리전 ${region}` : ''} · Veeam + Bareos 를 한 기준으로 — 보호 대상 · RPO 충족 · 용량 · 일정 · 에러`}
         actions={<>
           <span className="muted" style={{ fontSize: 12, alignSelf: 'center' }}>기준 {shortTs(data.at)}{error ? ' · 최근 새로고침 실패 — 이전 값' : ''}</span>
           <button type="button" className="tab" disabled={loading} onClick={load} style={{ padding: '6px 14px' }}>{loading ? '읽는 중…' : '새로고침'}</button>
           {canCsv() && <button type="button" className="tab" onClick={csv} style={{ padding: '6px 14px' }}>CSV</button>}
         </>} />
       <div className="flex gap wrap" style={{ alignItems: 'center', rowGap: 6 }}>
+        {(regions.length > 1 || region) && (
+          <Select className="input" value={region} onChange={(e) => pickRegion(e.target.value)} disabled={loading} aria-label="리전" data-backup-region="" style={{ padding: '6px 10px', fontSize: 12.5 }}
+            title="리전을 고르면 그 리전 법인만 셉니다 — 숫자 줄 · 두 카드 · 트리 · CSV · 백업 안 된 VM 찾기 · 용량과 일정 · 에러 로그(가상화 플랫폼에서 리전을 고른 채 백업 카드를 누르면 그 리전으로 열립니다)">
+            <option value="">전체 리전</option>
+            {regions.map((r) => <option key={r} value={r}>{r}{regionsKnown.includes(r) ? '' : '(법인 없음)'}</option>)}
+          </Select>
+        )}
         <BackupOptions opts={opts} onChange={changeOpts} disabled={loading} />
         {note && <span className="muted" style={{ fontSize: 12, overflowWrap: 'anywhere', minWidth: 0 }}>{note}</span>}
       </div>
@@ -138,6 +152,7 @@ export default function BackupSummaryTool() {
             <span style={{ padding: '2px 10px', borderRadius: 999, fontSize: 12, fontWeight: 800, color: '#93c5fd', background: 'rgba(59,130,246,.18)' }}>Veeam</span>
             <b style={{ fontSize: 13 }}>B&amp;R 서버 {fmtNum(sum('veeamServers'))} · EM {em ? fmtNum(em.ems) : '—'} · 잡 {em?.jobs != null ? fmtNum(em.jobs) : '—'}</b>
             <span className="muted" style={{ fontSize: 11.5 }}>연동 법인 {fmtNum(linked)}/{fmtNum(rows.length)}</span>
+            {data.emFleetWide && <span className="muted" style={{ fontSize: 11.5 }} data-em-fleet="" title="EM(Enterprise Manager)은 여러 B&R 서버를 묶어 읽어 리전으로 나눌 수 없습니다 — EM 수 · 잡 · 저장소 사용 · 라이선스 · 30일 추이는 전 법인 값입니다(B&R 서버 수 · 보호 VM · 7일 성공률 · 다음 창은 이 리전 값)">· EM · 저장소 · 라이선스는 전 법인 기준</span>}   {/* v3.10.21 */}
             <a href="#/tools/backup-em" style={link}>Veeam 메뉴 →</a>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8 }}>
@@ -180,8 +195,8 @@ export default function BackupSummaryTool() {
       <BackupSummaryBar sel={sel} rows={rows} onClear={clearSel} onSaved={load} />
       <BackupSummaryStale scope={scope} rows={rows} sel={sel} onPick={pick} onOpenDetail={openDetail} />
       <BackupSummaryTree rows={rows} opts={opts} reloadKey={data.at} onOpenDetail={openDetail} sel={sel} onPick={pick} />
-      <BackupSummaryCapSched rows={rows} em={em} bp={bp} reloadKey={data.at} />
-      <BackupSummaryErrors reloadKey={data.at} onOpenDetail={openDetail} />
+      <BackupSummaryCapSched rows={rows} em={em} bp={bp} reloadKey={data.at} region={region} emFleetWide={!!data.emFleetWide} />
+      <BackupSummaryErrors reloadKey={data.at} onOpenDetail={openDetail} region={region} />
 
       <div className="card" data-backup-source="" style={{ padding: '10px 14px', fontSize: 11.5, lineHeight: 1.6, color: 'var(--text-dim)' }}>
         <b style={{ color: 'var(--text)' }}>값 출처</b> — 보호 대상 · 정책 · RPO: 백업 정책(Detail 에서 정한 값)과 실제 백업(Veeam 대조 · Bareos 원장)을 VM 마다 같은 판정으로 센 값 ·

@@ -153,8 +153,9 @@ describe('v2.838 화면 소스', () => {
   });
   it('무거운 집계는 폴링하지 않는다 — 처음 · 기간 · 새로고침만 · 늦게 온 응답은 버린다', () => {
     for (const s of [cs, er, al]) expect(s).not.toMatch(/usePolling|setInterval/);
-    expect(cs).toMatch(/fetchJson\('\/tools\/backup-summary\/schedule'\)/);
-    expect(er).toMatch(/fetchJson\('\/tools\/backup-summary\/errors', \{ days: String\(days\) \}\)/);
+    // v3.10.17: Summary 의 리전(?region=)만 더 싣는다 — 폴링은 여전히 없다
+    expect(cs).toMatch(/fetchJson\('\/tools\/backup-summary\/schedule', region \? \{ region \} : \{\}\)/);
+    expect(er).toMatch(/fetchJson\('\/tools\/backup-summary\/errors', \{ days: String\(days\), \.\.\.\(region \? \{ region \} : \{\}\) \}\)/);
     for (const s of [cs, er]) expect(s).toMatch(/if \(my === gen\.current\) setData\(r\);/);
     expect(er).toMatch(/<STable minWidth=\{1000\} limit=\{all \? 0 : 50\}>/);
   });
