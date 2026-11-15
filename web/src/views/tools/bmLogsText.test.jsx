@@ -164,6 +164,15 @@ describe('7a 로그 분석 — 그리기(SSR · 서버 정제본 그대로)', ()
     expect(csv).toContain(`"'=HYPERLINK(""x"")"`);
     expect(csv).toContain("'@cmd");
   });
+  it('CSV — 8회차 I1: 공용 toCsv(앞 탭 · CR 도 가드 — 예전 자체 사본은 빠졌다) · 사본 없음', () => {
+    const csv = T.patternCsv({ patterns: [{ cls: 'issue', severity: 'info', count: 1, unit: '\t=HYPERLINK("x")', src: '\r=1+1', tmpl: 't', ruleId: 'R', samples: [] }] });
+    expect(csv).toContain(`"'\t=HYPERLINK(""x"")"`);
+    expect(csv).toContain(`"'\r=1+1"`);
+    expect(csv.endsWith('\r\n')).toBe(true);
+    const src = fs.readFileSync(path.join(import.meta.dirname, 'bmLogsText.js'), 'utf8');
+    expect(src).toMatch(/import \{ toCsv \} from '\.\.\/\.\.\/util\/csv\.js'/);
+    expect(src).not.toMatch(/const csvCell =/);
+  });
 });
 
 describe('7a 로그 분석 — 소스 스윕', () => {

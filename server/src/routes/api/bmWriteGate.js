@@ -41,6 +41,9 @@ export const BM_ACTIONS = Object.freeze({
   maintDelete: Object.freeze({ method: 'DELETE', path: '/tools/bm-usage/maintenance/x', roles: OP, fullScope: false }),
   keyDecide: Object.freeze({ method: 'POST', path: '/tools/bm-usage/key-overlaps/decision', roles: OP, fullScope: false }),
   keyClear: Object.freeze({ method: 'DELETE', path: '/tools/bm-usage/key-overlaps/decision', roles: OP, fullScope: false }),
+  // 점검 반복 8회차 F2: 서버 상세 실행 동작 — 데모 · 역할(쓰기 범위는 GET 의 writable 이 따로 — 조회 밖 404 → 쓰기 밖 403)
+  snapshotRun: Object.freeze({ method: 'POST', path: '/tools/bm-usage/perf/x/snapshot', roles: OP, fullScope: false }),
+  focusStart: Object.freeze({ method: 'POST', path: '/tools/bm-usage/perf/x/focus', roles: OP, fullScope: false }),
 });
 
 /** 이유 code(화면 문구는 web bmWriteText.js WRITE_WHY_TEXT — 1:1 시험). */
