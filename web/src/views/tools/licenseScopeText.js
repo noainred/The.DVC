@@ -25,3 +25,14 @@ export function licenseDupNote(data) {
   if (typeof n !== 'number' || !Number.isInteger(n) || n <= 0) return null;
   return `여러 vCenter 가 같은 라이선스 키를 보고한 ${n.toLocaleString('en-US')}건은 제품별 합계에서 한 번만 셌습니다(아래 표는 vCenter 별 보고 그대로라 행을 더한 값과 합계가 다를 수 있습니다)`;
 }
+
+/**
+ * v3.12.10(가상화 플랫폼 2차 루프 9회차): 'VMware 솔루션 / NSX' vCenter 카드 머리의 법인 글자.
+ *   서버 corp 는 배정된 DataCenter 이름(사용자가 붙인 이름 — '○○ 법인' 처럼 '법인' 으로 끝나기도 한다) → 그대로 '법인 ○○ 법인' 이 되지 않게
+ *   '법인' 으로 끝나면 앞에 붙이지 않는다. 빈 값이면 ''.
+ */
+export function corpTag(corp) {
+  const c = String(corp ?? '').trim();
+  if (!c) return '';
+  return /법인$/.test(c) ? c : `법인 ${c}`;
+}

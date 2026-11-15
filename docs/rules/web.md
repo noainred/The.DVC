@@ -996,3 +996,5 @@
 - **v3.12.9 — 2차 루프 8회차: ‘실제 OS 확인’ 주기 스캔 설정 — 이름 · 칸 · 단위 한 묶음 · 숫자 칸 폭 · 버튼 줄 줄바꿈**(400px 스크린샷 판독): 줄이 바뀔 때 ‘분 최대’ 처럼 앞 칸의 단위와 다음 칸의 이름이 한 줄에 붙고 칸과 떨어졌고,
   버튼 줄(flexWrap 없음)은 ‘지금 스캔 (전체 vCenter)’ 가 세 줄로 접히고 오류 문구가 짓눌렸다. 칸마다 `<label className="flex" style={FIELD}>`(nowrap · 칸의 이름도 된다) · 버튼 줄 `flexWrap`.
   ⚠ 전역 `.input { min-width: 220px }` 가 인라인 숫자 칸의 `width: 90` 등을 덮어 칸이 늘 220px 였다 — 짧은 숫자 칸은 `minWidth: 0` 을 함께 줄 것(안 주면 nowrap 묶음이 카드 밖으로 잘린다 — 이번에 한 번 재현). 다른 화면의 같은 패턴은 이번 범위 밖. 테스트 `tools/guestOsForm3129.test.js`.
+- **v3.12.10 — 2차 루프 9회차: ‘VMware 솔루션 / NSX’ vCenter 카드 머리 — 글자 붙음 · ‘법인 ○○ 법인’ 중복**(400px 스크린샷 판독): 머리(`flex between`)에 gap · flexWrap 이 없어 왼쪽(이름 · 법인)이 접히면 오른쪽 ‘vCenter v…’ 와 글자가 붙었다(‘…San vCenter v8.0.2’).
+  서버 corp 는 배정된 DataCenter 이름이라 ‘○○ 법인’ 처럼 끝나면 화면이 ‘법인 ○○ 법인’ 으로 보였다 → `licenseScopeText.corpTag`(‘법인’ 으로 끝나면 앞에 붙이지 않음) · 머리 `gap '4px 12px'` + `flexWrap`. 테스트 `licenseScopeText.test.js` v3.12.10.
