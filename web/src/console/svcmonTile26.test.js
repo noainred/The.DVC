@@ -36,3 +36,10 @@ describe('svcmonTile(26회차 F2)', () => {
     expect(none.meta).toMatch(/직접 실행하지 않습니다/);
   });
 });
+
+describe('svcmonTile(28회차 N-7 — 기동 유예 중인 엣지는 주의가 아니다)', () => {
+  it('첫 보고 대기만 있으면 판정하지 않는다(재시작 직후 주황 금지)', () => {
+    expect(svcmonLevel({ total: 4, pending: 4 }, { agents: 0, rows: 0, assignedNoReport: 0, awaitingFirstReport: 3 }, false)).toBeNull();
+    expect(svcmonLevel({ total: 4, pending: 4 }, { agents: 0, rows: 0, assignedNoReport: 1, awaitingFirstReport: 2 }, false)).toBe(1);
+  });
+});

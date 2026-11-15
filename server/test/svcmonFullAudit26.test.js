@@ -202,3 +202,53 @@ test('27 D-9 — 일 요약: 용량은 짝이 되는 사용량과 같은 관측�
   assert.equal(used, 90e12);
   assert.equal(total, 100e12, `수정 전: total 50T · used 90T(180%) ${JSON.stringify(last)}`);
 });
+
+/* ── 28회차(26 · 27회차 수정 반증) ── */
+test('28 N-1 · N-2 · N-3 — 로그 설정 확정은 총량 무제한 · null/[]/0 도 손상 · 손상 중에는 CSV 기록을 멈춘다', () => {
+  for (const body of ['null', '[]', '0']) {
+    const { out } = sub((d) => {
+      fs.writeFileSync(path.join(d, 'svcmon-log.json'), body);
+      const ld = path.join(d, 'svcmon-logs'); fs.mkdirSync(ld);
+      const t0 = Date.now() - 400 * 86_400_000;
+      for (let i = 0; i < 120; i += 1) { const f = path.join(ld, `results-2025${String(i).padStart(4, '0')}.csv`); fs.writeFileSync(f, 'x'); fs.utimesSync(f, new Date(t0 + i * 86_400_000), new Date(t0 + i * 86_400_000)); }
+    }, `const L = await import(${J('svcmon/logsettings.js')}); const C = await import(${J('svcmon/csvlog.js')});
+       const err = !!L.logSettingsLoadError(); const removed = C.pruneOld(L.logDir(), L.getLogSettings());
+       C.appendResult({ ts: Date.now(), target: { path: 'p', name: 'n', host: 'h' }, test: { name: 't', type: 'tcp' }, result: { status: 'ok', reply: 'r' }, changed: true });
+       const paused = C.logStats().pausedUnreadable || 0; const buffered = C.logStats().buffered;
+       const u = await import(${J('util/settingsLoadError.js')});
+       const c = u.confirmSettingsDefault('svcmon-log.json', { by: 't' });
+       const s = L.getLogSettings();
+       console.log(JSON.stringify({ err, removed, paused, buffered, conf: c.ok, keep: s.keepFiles, total: s.maxTotalMB }));`);
+    assert.equal(out.err, true, `${body}: 손상(수정 전: 조용히 기본 90개)`);
+    assert.equal(out.removed, 0, body);
+    assert.equal(out.paused, 1, `${body}: 손상 중 기록 멈춤(수정 전: 기본 위치에 총량 상한 없이 쌓임)`);
+    assert.equal(out.buffered, 0);
+    assert.equal(out.conf, true);
+    assert.equal(out.keep, 3650);
+    assert.equal(out.total, 0, `${body}: 확정은 총량 무제한(수정 전: 51200 — 확정 직후 정리가 이력을 지웠다)`);
+  }
+});
+
+test('28 N-5 · N-6 — 점검 lookup 은 점검 시한 · 차단 사유를 결과에 · 같은 이름 경고는 한 번', async () => {
+  const C = await import('../src/svcmon/checker.js');
+  assert.equal(C.checkLookup(4000), C.checkLookup(4000), '시한별 lookup 재사용');
+  assert.notEqual(C.checkLookup(4000), C.checkLookup(6000));
+  const warns = []; const orig = console.warn; console.warn = (...a) => { warns.push(a.join(' ')); };
+  try {
+    const rs = [];
+    for (let i = 0; i < 3; i += 1) rs.push(await C.runCheck({ id: `n5-${i}`, type: 'tcp', port: 9 }, 'localhost'));
+    const blocked = rs.filter((r) => /차단된 대상/.test(r.reply)).length;
+    const notFound = rs.filter((r) => /이름 해석/.test(r.reply)).length;
+    assert.ok(blocked === 3 || notFound === 3, `차단 · 해석 실패 사유가 결과 문구에 있다: ${rs.map((r) => r.reply).join(' | ')}`);
+    assert.ok(warns.filter((w) => /\[ssrf\]/.test(w) && /localhost/.test(w)).length <= 1, `같은 이름 경고는 한 줄: ${warns.length}`);
+  } finally { console.warn = orig; }
+});
+
+test('28 N-7 · P-3 · P-4 · P-5 — 유예 중 엣지는 따로 · 알림 설정 손상 표시 · 대역 이전 보류 사유 · 확정 문구', () => {
+  const edge = stripComments(rd('central/svcmonEdge.js'));
+  assert.match(edge, /if \(s\.assignedOnly\) \{ if \(s\.awaitingFirstReport\) t\.awaitingFirstReport \+= 1; else t\.assignedNoReport \+= 1; continue; \}/);
+  assert.match(rd('routes/svcmon/settingsSync.js'), /\.\.\.\(le \? \{ loadError: \{ at: le\.at, reason: le\.reason \} \} : \{\}\)/);
+  assert.match(fs.readFileSync(path.join(WEB, 'views/svcmon/AlertTab.jsx'), 'utf8'), /\{d\.loadError \?/);
+  assert.match(rd('routes/admin/centralIpam.js'), /else if \(r\.reason\) held = String\(r\.reason\)\.slice\(0, 300\);/);
+  assert.match(fs.readFileSync(path.join(WEB, 'views/tools/ScanRangeMigration.jsx'), 'utf8'), /\{m\.held \?/);
+});

@@ -20,7 +20,7 @@ import { execFile } from 'node:child_process';
 import { Resolver } from 'node:dns/promises';
 import dns from 'node:dns';
 import { Agent } from 'undici';
-import { withSsrfLookup, ssrfLookup } from '../util/ssrfLookup.js';
+import { withSsrfLookup, ssrfLookup, makeSsrfLookup } from '../util/ssrfLookup.js';
 import { pingOne } from '../util/ping.js';
 import { ssrfBlockReasonResolved } from '../collector/registry.js';
 // v2.603(SEC2603-03): 본문 앞부분 읽기는 util 하나(rma/testRunner.js 도 같은 헬퍼) — 재수출은 import+export 형태(v2.575)
@@ -31,7 +31,45 @@ import { readBodyPrefix } from '../util/readPrefix.js';
  *   UDP · NTP 점검이 전부 EADDRNOTAVAIL 로 실패한다(실측). IP 리터럴은 net.connect 와 같게 검증 없이 통과(저장 시점 ssrfBlockReason 이 본다),
  *   **이름만** 검증 lookup 으로 푼다.
  */
-export const dgramLookup = (h, o, cb) => (net.isIP(String(h ?? '')) ? dns.lookup(h, o, cb) : ssrfLookup(h, o, cb));
+export const dgramLookupFor = (ms) => (h, o, cb) => (net.isIP(String(h ?? '')) ? dns.lookup(h, o, cb) : checkLookup(ms)(h, o, cb));
+export const dgramLookup = dgramLookupFor(3000);
+
+/**
+ * 28회차 N-5 · N-6 — 점검용 검증 lookup. ① DNS 시한을 **그 점검의 시한**에 맞춘다(공용 ssrfLookup 의 3초는 첫 네임서버가 죽은 환경(glibc 5초)에서
+ *   DNS 장애를 '포트 연결 실패' 로 오진했다 — 수정 전에는 시한 없이 기다려 ok 였다) ② 차단 · 걸러냄 경고는 **이름마다 10분에 한 줄**
+ *   (듀얼 스택 이름은 점검마다 '[ssrf] … 제외' 한 줄씩 남겼다). 시한별 lookup 을 하나씩 만들어 재사용한다.
+ */
+const _ssrfWarnAt = new Map();
+function ssrfWarnOnce(key, msg) {
+  const now = Date.now();
+  const t = _ssrfWarnAt.get(key);
+  if (t && now - t < 10 * 60_000) return;
+  if (_ssrfWarnAt.size > 2000) _ssrfWarnAt.clear();
+  _ssrfWarnAt.set(key, now);
+  console.warn(msg);
+}
+const _checkLookups = new Map();
+export function checkLookup(timeoutMs) {
+  const ms = Math.max(1000, Math.min(30_000, Math.round(Number(timeoutMs) || 3000)));
+  let lk = _checkLookups.get(ms);
+  if (!lk) {
+    lk = makeSsrfLookup({
+      timeoutMs: ms,
+      onBlock: ({ hostname, reason }) => ssrfWarnOnce(`b:${hostname}`, `[ssrf] DNS 리바인딩 차단: ${hostname} — ${reason}`),
+      onDrop: ({ hostname, dropped, kept }) => ssrfWarnOnce(`d:${hostname}`, `[ssrf] ${hostname}: 차단 대역 ${dropped.length}개 제외(허용 ${kept}개로 접속) — ${dropped[0]?.reason || ''}`),
+    });
+    _checkLookups.set(ms, lk);
+  }
+  return lk;
+}
+/** 접속 실패 사유 — 차단 · 이름 해석 실패는 '포트 연결 실패' 로 뭉개지 않는다(28회차 N-5). */
+function connFailText(e) {
+  const code = String(e?.code || '');
+  if (code === 'ESSRFBLOCKED') return '차단된 대상(이름이 허용되지 않은 주소로 풀림)';
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return `이름 해석 실패(${code})`;
+  if (code === 'ETIMEDOUT' && /DNS/.test(String(e?.message || ''))) return '이름 해석 시간 초과';
+  return '';
+}
 export { readBodyPrefix };
 
 // v2.537: DNS 리바인딩(TOCTOU) 차단 — util/ssrfLookup.js 머리말. v2.506 배선(11곳)에서 빠져 있던 dispatcher. 저장 시점 ssrfBlockReason·실행 시점 ssrfBlockReasonResolved 는 **해석한 IP 로 접속하지 않으므로** 리바인딩 창이 남는다.
@@ -124,7 +162,7 @@ async function runCheckInner(test, host) {
   try {
     // 비-HTTP 점검(tcp · 배너 · ldap · cert · udp · ntp · whois)의 실행 시점 SSRF 재검증: v2.322 는 '시한 없는 DNS 조회' 때문에 보류했는데,
     // 그 사유는 v2.537 util/ssrfLookup.js(3초 시한 · 차단 대역 필터 — 접속이 쓰는 바로 그 해석)로 해소됐다. 26회차 F10 이 접속부마다
-    // lookup: ssrfLookup 을 붙였다(net · tls · dgram 이 같은 옵션을 받는다 — 추가 조회 없음). 저장 시점 검사는 IP 리터럴 · 'localhost' 만 보므로
+    // 검증 lookup 을 붙였다(net · tls · dgram 이 같은 옵션을 받는다 — 추가 조회 없음 · 28회차부터 점검 시한에 맞춘 checkLookup). 저장 시점 검사는 IP 리터럴 · 'localhost' 만 보므로
     // 내부 이름이 루프백 · 링크로컬로 풀리면 여기서 접속 없이 실패한다. ping 은 CLI 가 해석한다(남긴 것).
     switch (test.type) {
       case 'ping': {
@@ -147,7 +185,7 @@ async function runCheckInner(test, host) {
       }
       case 'tcp': {
         const alive = await tcpPort(host, port, 4000);
-        return alive ? ok(`포트 ${port} 열림`, Date.now() - started) : bad(`포트 ${port} 연결 실패`, started);
+        return alive === true ? ok(`포트 ${port} 열림`, Date.now() - started) : bad(`포트 ${port} 연결 실패${alive?.why ? ` — ${alive.why}` : ''}`, started);
       }
       case 'udp': {
         const bytes = await udpProbe(host, port, test.payload || '', 4000);
@@ -265,18 +303,18 @@ const bad = (reply, started) => ({ status: 'bad', reply, ms: Date.now() - starte
 
 function tcpPort(host, port, timeoutMs) {
   return new Promise((resolve) => {
-    const sock = net.connect({ host, port, timeout: timeoutMs, lookup: ssrfLookup });   // 26회차 F10: 실행 시점 해석 검증
+    const sock = net.connect({ host, port, timeout: timeoutMs, lookup: checkLookup(timeoutMs) });   // 26회차 F10: 실행 시점 해석 검증 · 28회차 N-5 시한
     const done = (v) => { try { sock.destroy(); } catch { /* noop */ } resolve(v); };
     sock.once('connect', () => done(true));   // 바이트를 보내지 않는다(대상 로그 오염 방지)
     sock.once('timeout', () => done(false));
-    sock.once('error', () => done(false));
+    sock.once('error', (e) => { const why = connFailText(e); done(why ? { why } : false); });
   });
 }
 
 /** 배너 검사 공통 — 연결 후 첫 응답 1줄이 기대 패턴인지 본다. */
 function banner(host, port, pattern, label, started, test) {
   return new Promise((resolve) => {
-    const sock = net.connect({ host, port, timeout: 5000, lookup: ssrfLookup });   // 26회차 F10
+    const sock = net.connect({ host, port, timeout: 5000, lookup: checkLookup(5000) });   // 26회차 F10 · 28회차 N-5
     let buf = '';
     let done = false;
     const finish = (r) => { if (done) return; done = true; try { sock.destroy(); } catch { /* noop */ } resolve(r); };
@@ -306,7 +344,7 @@ function banner(host, port, pattern, label, started, test) {
 
 function udpProbe(host, port, payload, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const sock = dgram.createSocket({ type: 'udp4', lookup: dgramLookup });   // 26회차 F10(bind 주소도 lookup 으로 풀린다 — dgramLookup 머리말)
+    const sock = dgram.createSocket({ type: 'udp4', lookup: dgramLookupFor(timeoutMs) });   // 26회차 F10(bind 주소도 lookup 으로 풀린다 — dgramLookup 머리말)
     const timer = setTimeout(() => { try { sock.close(); } catch { /* noop */ } resolve(0); }, timeoutMs);
     sock.once('message', (msg) => { clearTimeout(timer); try { sock.close(); } catch { /* noop */ } resolve(msg.length); });
     sock.once('error', (e) => { clearTimeout(timer); try { sock.close(); } catch { /* noop */ } reject(e); });
@@ -397,7 +435,7 @@ function traceroute(host, maxHops) {
 
 function certDaysLeft(host, port, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const sock = tls.connect({ host, port, servername: host, rejectUnauthorized: false, timeout: timeoutMs, lookup: ssrfLookup });   // 26회차 F10
+    const sock = tls.connect({ host, port, servername: host, rejectUnauthorized: false, timeout: timeoutMs, lookup: checkLookup(timeoutMs) });   // 26회차 F10 · 28회차 N-5
     const fail = (e) => { try { sock.destroy(); } catch { /* noop */ } reject(e); };
     sock.once('secureConnect', () => {
       const cert = sock.getPeerCertificate();
@@ -496,7 +534,7 @@ function ntpTimestamp(ms) {
  */
 export function ntpQuery(server, timeoutMs, port = 123) {
   return new Promise((resolve, reject) => {
-    const sock = dgram.createSocket({ type: 'udp4', lookup: dgramLookup });   // 26회차 F10
+    const sock = dgram.createSocket({ type: 'udp4', lookup: dgramLookupFor(timeoutMs) });   // 26회차 F10
     const pkt = Buffer.alloc(48);
     pkt[0] = 0x1b;                       // LI=0, VN=3, Mode=3(client)
     const t1 = Date.now();
@@ -621,7 +659,7 @@ function ldapBind(host, port, timeoutMs) {
     const bindReq = Buffer.concat([Buffer.from([0x60, body.length]), body]);
     const msg = Buffer.concat([Buffer.from([0x02, 0x01, 0x01]), bindReq]);
     const pdu = Buffer.concat([Buffer.from([0x30, msg.length]), msg]);
-    const sock = net.connect({ host, port, timeout: timeoutMs, lookup: ssrfLookup });   // 26회차 F10
+    const sock = net.connect({ host, port, timeout: timeoutMs, lookup: checkLookup(timeoutMs) });   // 26회차 F10
     // done 가드 — data 로 resolve 하면 destroy→close 가 뒤따르므로 close 핸들러가 재차 reject 하지
     // 않게 막는다.
     let done = false;
@@ -686,7 +724,7 @@ export function parseWhoisExpiry(text) {
 
 function whois(server, query, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const sock = net.connect({ host: server, port: 43, timeout: timeoutMs, lookup: ssrfLookup });   // 26회차 F10(refer 로 받은 서버 이름도)
+    const sock = net.connect({ host: server, port: 43, timeout: timeoutMs, lookup: checkLookup(timeoutMs) });   // 26회차 F10(refer 로 받은 서버 이름도)
     let buf = '';
     sock.once('connect', () => sock.write(`${query}\r\n`));
     sock.on('data', (c) => { buf += c.toString('utf8'); if (buf.length > 65536) sock.destroy(); });

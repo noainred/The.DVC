@@ -108,8 +108,8 @@ test('svcmon/checker: http/soap 실행시점 SSRF 재검증 유지 + 비-HTTP �
   assert.doesNotMatch(s, /보류\(v2\.322 보안 감사 LOW/, '보류 주석은 정정됐다');
   const conns = s.match(/(?:net|tls)\.connect\(\{[^}]*\}\)/g) || [];
   assert.ok(conns.length >= 5, `접속부 ${conns.length}`);
-  for (const c of conns) assert.match(c, /lookup: ssrfLookup/, c);
+  for (const c of conns) assert.match(c, /lookup: checkLookup\(/, c);   // 28회차 N-5: 점검 시한에 맞춘 검증 lookup(ssrfLookup 공장)
   const udp = s.match(/dgram\.createSocket\([^)]*\)/g) || [];
   assert.ok(udp.length >= 2);
-  for (const c of udp) assert.match(c, /lookup: dgramLookup/, `dgram 은 bind 주소(0.0.0.0)도 lookup 으로 풀어 ssrfLookup 을 그대로 쓰면 UDP 점검이 전부 실패한다: ${c}`);
+  for (const c of udp) assert.match(c, /lookup: dgramLookupFor\(/, `dgram 은 bind 주소(0.0.0.0)도 lookup 으로 풀어 ssrfLookup 을 그대로 쓰면 UDP 점검이 전부 실패한다: ${c}`);
 });

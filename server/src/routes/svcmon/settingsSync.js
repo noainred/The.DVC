@@ -26,6 +26,7 @@ import { store as _storeForScope } from '../../store.js';
 import { recordBatch } from '../../svcmon/batches.js';
 import { buildDashAsync } from '../../svcmon/dash.js';
 import { recentTransitions, hourlySeries, getAlertSettings, saveAlertSettings, alertStats, transitionsSince, alertBatchInfo, HOURS_KEEP } from '../../svcmon/transitions.js';
+import { alertSettingsLoadError } from '../../svcmon/alertSettings.js';   // 28회차 P-3
 import { getResults, executesHere, pollerRole } from '../../svcmon/poller.js';
 import { edgeSummary, edgeState, listAgentNames, MAX_ROWS_PER_AGENT } from '../../central/svcmonEdge.js';
 import { listAssignments } from '../../central/svcmonAssign.js';
@@ -226,7 +227,9 @@ svcmonRouter.get('/overview', async (req, res) => {
 /* ── 실패 알림 설정 ── */
 svcmonRouter.get('/alert-settings', canEdit, (req, res) => {
   // v2.932(점검 D1-08): 요약 묶음 창·기준 건수를 싣는다 — 화면이 '20초 안에 6건' 을 박지 않게(+1 해석은 서버 alertBatchInfo 한 곳).
-  res.json({ ok: true, settings: getAlertSettings(), stats: alertStats(), batch: alertBatchInfo() });
+  // 28회차 P-3: 설정 파일을 못 읽었으면 그 사실을 싣는다(화면이 기본값을 저장값처럼 보이지 않게)
+  const le = alertSettingsLoadError();
+  res.json({ ok: true, settings: getAlertSettings(), stats: alertStats(), batch: alertBatchInfo(), ...(le ? { loadError: { at: le.at, reason: le.reason } } : {}) });
 });
 svcmonRouter.put('/alert-settings', adminOnly, fullScopeOnly, (req, res) => {
   try {

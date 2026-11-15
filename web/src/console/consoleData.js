@@ -253,7 +253,7 @@ export function svcmonTile(summary, edgeTotals = null, executes = true) {
   const disabled = s ? n(s.disabled) : 0;
   const edgeRows = e ? n(e.rows) : 0;
   const silentEdges = e ? n(e.silent) : 0;
-  const noReportEdges = e ? n(e.assignedNoReport) : 0;
+  const noReportEdges = e ? n(e.assignedNoReport) : 0;   // 28회차 N-7: 기동 유예 중(awaitingFirstReport)은 서버가 따로 센다 — 주의가 아니다
   const bad = (s ? n(s.bad) : 0) + (e ? n(e.bad) : 0);
   const warn = (s ? n(s.warn) : 0) + (e ? n(e.warn) : 0);
   const stale = (s ? n(s.stale) : 0) + (e ? n(e.stale) : 0);

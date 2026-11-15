@@ -49,7 +49,7 @@ let cache = null;
  *   해제는 서비스 점검 '기본값으로 확정' 또는 보존본 복구. ⚠ 로그 위치(dirPath)는 기본(CONFIG_DIR)으로 돌아간 채다(남긴 것).
  */
 export const LOG_LIMITS = Object.freeze({ keepFilesMax: 3650, maxTotalMBMax: 2_000_000 });
-const _loadErr = makeSettingsLoadError(() => FILE(), { label: '성능점검 로그(CSV) 보관 설정 — 확정 시 보관 개수는 최대값(이력을 지우지 않음)', confirm: () => { const v = { ...DEFAULTS, keepFiles: LOG_LIMITS.keepFilesMax }; atomicWriteFileSync(FILE(), JSON.stringify(v, null, 2)); cache = v; _loadErr.ok(); } });
+const _loadErr = makeSettingsLoadError(() => FILE(), { label: '성능점검 로그(CSV) 보관 설정 — 손상 중 CSV 기록 멈춤 · 확정하면 보관 개수 최대 · 총량 무제한(이력을 지우지 않음) · 기록 위치는 기본 위치로', confirm: () => { const v = { ...DEFAULTS, keepFiles: LOG_LIMITS.keepFilesMax, maxTotalMB: 0 };   /* 28회차 N-1(재현): 총량 상한도 무제한(0) — 기본 50GB 로 확정하면 직후 정리가 이력을 지웠다 */ atomicWriteFileSync(FILE(), JSON.stringify(v, null, 2)); cache = v; _loadErr.ok(); } });
 /** 로그 설정 파일을 못 읽었으면 { at, reason }, 아니면 null. */
 export function logSettingsLoadError() { getLogSettings(); return _loadErr.get(); }
 
@@ -57,7 +57,10 @@ export function getLogSettings() {
   if (cache) return { ...cache };
   try {
     const raw = fs.readFileSync(FILE(), 'utf8');
-    cache = normalize(JSON.parse(raw));
+    const j = JSON.parse(raw);
+    // 28회차 N-2(재현): 객체가 아닌 JSON(null · 배열 · 수)도 손상이다 — 예전에는 조용히 기본값(보관 90개)이 되어 26회차 F1 의 손실이 그대로 남았다
+    if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('객체가 아닌 JSON 값');
+    cache = normalize(j);
     _loadErr.ok();
   } catch (e) {
     if (e.code === 'ENOENT') _loadErr.missing();

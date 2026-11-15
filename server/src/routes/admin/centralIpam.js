@@ -383,14 +383,15 @@ adminRouter.post('/ipam/scan/agent/delete', adminOnly, fleetOnly, (req, res) => 
  */
 function migrationView() {
   let st = readMigrationState();
+  let held = '';   // 28회차 P-4: 이전을 보류한 사유(배정 파일 손상 등 — 27회차 D-8)를 화면에 싣는다(예전에는 버렸다)
   if (!st?.done && !store.get()?.initial) {
-    try { const r = runVcRangeMigration(); if (r.ran) { st = r.state; try { rescheduleScanPoller(); } catch { /* */ } } } catch { /* 화면이 '아직 이전 안 함' 으로 말한다 */ }
+    try { const r = runVcRangeMigration(); if (r.ran) { st = r.state; try { rescheduleScanPoller(); } catch { /* */ } } else if (r.reason) held = String(r.reason).slice(0, 300); } catch { /* 화면이 '아직 이전 안 함' 으로 말한다 */ }
   }
   const vcName = {};
   for (const v of store.get().vcenters || []) vcName[v.id] = v.name || v.id;
   const remaining = listVcRanges().map((e) => ({ vcenterId: e.vcenterId, vcenterName: vcName[e.vcenterId] || e.vcenterId, ranges: e.ranges || [], enabled: e.enabled !== false }));
   const agents = [...new Set([LOCAL, ...listScanAgents().map((a) => a.name)])];
-  return { ok: true, state: st, remaining, agents };
+  return { ok: true, state: st, remaining, agents, ...(held ? { held } : {}) };
 }
 adminRouter.get('/ipam/scan/migration', adminOnly, fleetOnly, (_req, res) => { res.json(migrationView()); });
 adminRouter.post('/ipam/scan/migration/move', adminOnly, fleetOnly, (req, res) => {

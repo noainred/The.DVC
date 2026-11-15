@@ -59,7 +59,7 @@ export function cleanEdgeCaps(c) {
 }
 export function cleanEdgeLog(l) {
   const o = l && typeof l === 'object' && !Array.isArray(l) ? l : {};
-  return { written: capNum(o.written, 1e15), dropped: capNum(o.dropped, 1e15), bytes: capNum(o.bytes, 1e18), rotations: capNum(o.rotations, 1e9), buffered: capNum(o.buffered, 1e9), bufferBytes: capNum(o.bufferBytes, 1e15), lastError: text(o.lastError, 300) };
+  return { written: capNum(o.written, 1e15), dropped: capNum(o.dropped, 1e15), bytes: capNum(o.bytes, 1e18), rotations: capNum(o.rotations, 1e9), buffered: capNum(o.buffered, 1e9), bufferBytes: capNum(o.bufferBytes, 1e15), pausedUnreadable: capNum(o.pausedUnreadable, 1e15), lastError: text(o.lastError, 300) };   // 28회차 N-3: 손상 중 멈춘 기록 수
 }
 /** 26회차 F12: 엣지가 알리는 push 주기 · 점검 주기의 범위(정상 엣지는 clampIntervalMs · 저장소 TEST_FIELDS 범위로 보낸다). */
 export const EDGE_EXPECT_MS = Object.freeze({ min: 15_000, max: 24 * 3600_000 });
@@ -620,9 +620,11 @@ export function edgeState(agent, { path: scope = '', limit = 500, only = '', sor
 /** 전체 엣지 합산(중앙 화면 KPI 에 더할 값). 무보고 엣지는 unknown 으로만 센다. */
 export function edgeTotals(now = Date.now()) {
   // v2.630(감사 UI2630-03): 배정만 있고 보고가 없는 엣지는 별도 축(assignedNoReport)으로 센다 — agents(보고 중)와 섞지 않는다.
-  const t = { agents: 0, silent: 0, rows: 0, ok: 0, warn: 0, bad: 0, stale: 0, unknown: 0, notRun: 0, assignedNoReport: 0 };
+  // 28회차 N-7(재현): 기동 유예 중(awaitingFirstReport — 중앙 재시작 직후 첫 보고 대기)인 엣지도 assignedNoReport 로 세어 콘솔 타일이 릴리스마다 '주의' 였다 —
+  //   유예 중은 awaitingFirstReport 로 따로 센다(assignedNoReport 는 유예가 끝난 무보고 — 예전 화면 의미 유지).
+  const t = { agents: 0, silent: 0, rows: 0, ok: 0, warn: 0, bad: 0, stale: 0, unknown: 0, notRun: 0, assignedNoReport: 0, awaitingFirstReport: 0 };
   for (const s of edgeSummaryWithAssigned(now)) {
-    if (s.assignedOnly) { t.assignedNoReport += 1; continue; }
+    if (s.assignedOnly) { if (s.awaitingFirstReport) t.awaitingFirstReport += 1; else t.assignedNoReport += 1; continue; }
     t.agents += 1;
     if (s.silent) { t.silent += 1; t.unknown += s.rows; }
     else { t.ok += s.counts.ok; t.warn += s.counts.warn; t.bad += s.counts.bad; t.stale += s.counts.stale; }
