@@ -987,3 +987,6 @@
   가림 키(XXXXX-…-AAAAA)가 여러 vCenter 에서 같아(화면도 ‘여러 vCenter 가 같은 라이선스 키를 보고’ 라고 안내한다) key 가 겹쳤다 → 운영 빌드에서 열 머리를 누를 때마다 행이 55 → 105 → 155 … 로 불어났다(재현 · 개발 빌드 ‘same key’ 경고 150건).
   겹치는 key 는 나온 차례대로 `~n`(겹치지 않는 표의 key 는 그대로). **발견 방법**: 개발 빌드(vite dev + 목 서버 4000)로 허브 하위 탭 전부를 눌러 React 경고를 모았다 — 운영 빌드 스윕은 이 경고를 보지 못한다. 테스트 `components/tableKeys.test.js`.
 - **v3.12.4 보완 — tr 안 공백 텍스트 노드**: 셀(`</td>`) 뒤 같은 줄에 공백 + `{/* 주석 */}` 을 두면 공백 텍스트 노드가 tr 의 자식이 된다(validateDOMNesting 경고 — 같은 개발 빌드 스윕에서 v3.12.4 이 만든 것을 찾았다). 주석은 셀 위 줄에. 회귀 검사 `views/jsxRowWhitespace.test.js`.
+- **v3.12.7 — 2차 루프 6회차: 허브 하위 도구의 마우스 전용 요소 · 누를 수 없는 머리의 손가락 커서**: 허브 탭 줄의 도구 16곳을 스캔(cursor:pointer 인데 Tab 으로 닿지 않는 것) — ‘VM 정밀 검색’ 필터 칩(span onClick)은 `pressable` + `aria-pressed`,
+  ‘현재 사용자’ 법인 행(tr onClick — 법인 고르기)은 이름을 `button.cell-link`(aria-pressed · 행 클릭 그대로). 전역 `thead th { cursor:pointer }` 때문에 정렬하지 않는 머리(`data-nosort`)도 눌리는 것처럼 보였다 → `thead th[data-nosort] { cursor: default }`.
+  누르는 배지 포커스 `.badge[role=button]:focus-visible`. 테스트 `pressable.test.js` v3.12.7.

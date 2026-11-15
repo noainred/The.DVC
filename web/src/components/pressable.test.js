@@ -67,3 +67,16 @@ describe('v3.12.5 — vCenter 상세 트리(노드 · 잎 · 호스트 이름) �
     expect(css).toMatch(/\.vcd-node\[role="button"\]:focus-visible, \.vcd-link\[role="button"\]:focus-visible/);
   });
 });
+
+describe('v3.12.7 — 허브 하위 도구의 마우스 전용 요소(VM 정밀 검색 필터 칩 · 현재 사용자 법인 행) · 누를 수 없는 머리의 손가락 커서', () => {
+  it('소스 계약 — VmFinder 칩 pressable + aria-pressed · CurrentUsers 이름 버튼 · CSS', () => {
+    const vf = fs.readFileSync(new URL('../views/tools/VmFinderTool.jsx', import.meta.url), 'utf8');
+    expect(vf).toMatch(/\{\.\.\.pressable\(\(\) => onToggle\(x\)\)\} aria-pressed=\{sel\.includes\(x\)\}/);
+    expect(vf).not.toMatch(/onClick=\{\(\) => onToggle\(x\)\}/);
+    const cu = fs.readFileSync(new URL('../views/tools/CurrentUsers.jsx', import.meta.url), 'utf8');
+    expect(cu).toMatch(/<button type="button" className="cell-link" aria-pressed=\{v\.vcenterId === picked\}/);
+    const css = fs.readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
+    expect(css).toMatch(/thead th\[data-nosort\] \{ cursor: default; \}/);
+    expect(css).toMatch(/\.badge\[role="button"\]:focus-visible/);
+  });
+});
