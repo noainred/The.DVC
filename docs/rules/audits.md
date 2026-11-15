@@ -3099,4 +3099,16 @@ high 0 · 반증 1(A3-01 — 경로 오독, 데모 계정은 READ_DENY 하위라
 - **백업 화면(6회차)**: `docs/rules/web.md` '전체 점검 6회차'.
 - **작업 방식 교훈**: 권한 수정은 반증이 같은 모양의 빈칸을 더 찾는다 — 2회차 V-1(공용 쓰기 판정)을 고친 뒤 반증이 사용자 관리 권한 상승 · vCenter 등록 · 20여 곳을 더 찾았다.
   처음 고칠 때 **같은 모양 전수 스윕**(쓰기 핸들러인데 `scopedVcenterIds` 만 보는 곳)을 먼저 돌릴 것. 동시성 수정(V-4)은 소스 모양 시험으로 고정하지 말고 실제 두 틱 동작으로 잴 것(첫 수정이 틀렸다 — R-4).
+- **Bareos(8 · 10 · 11 · 13회차)**: 법인별 설정 되돌리기(끊긴 세션의 디렉터리 · SELinux 규칙은 새 세션으로 · 되돌리기 SD 재시작도 RUN=0 확인 — `bareosManage2845` ④-4c · d) ·
+  완전 설치 중앙 단계는 설정 손상이면 저장하지 않음(`requireSettingsReadable`) · 실패 기록 rolledBack 기본값 없음 · runner.sh SELinux 규칙 첫 칸 정확 일치 ·
+  **설치 번들 검증 기억 열쇠에 신뢰 상태(회수)** · 일일 요약 '진행 · 대기' 칸 · 콘솔 인증 프레임 선형 · 번들 받기 시한 실제 값(30분 — resilientFetch 상한) ·
+  그룹 파일을 못 읽으면 정책 화면은 모름(`policyView groupsKnown`).
+- **백업 복원(9회차 V-20 · `backupRestoreFullAudit9`)**: 복원은 OTP 를 묻지 않으므로 security-session.json 의 OTP 로만 바꾸는 값(loginPolicy · 설정 소유자 · 단일 세션 ·
+  유휴 로그아웃 · 세션 상한)과 secrets-policy(평문 ↔ 암호화)를 **약하게 되돌리지 않는다**(`reconcileSecuritySessionText` · `reconcileSecretsPolicyText`). 새 'OTP 로 바꾸는' 보안 설정을
+  security-session.json 에 더하면 이 함수의 강도 규칙에도 넣을 것.
+- **Veeam(9 · 12회차)**: '백업 안 된 VM' 일일 메일은 골격 스냅샷이면 차례를 쓰지 않음(notReady) · EM 이력 기록 거부 .catch · Summary 라이선스 · 저장소 부분 합에 모름 수 ·
+  EM VM 단위 읽기가 잘리면 기준 시각을 읽은 가장 오래된 시각까지(창이 날마다 커지던 것) · 오류로만 미완결이어도 8일 창 상한.
+- **남긴 것(다음 점검 첫 후보)**: ① EM VM 기록의 이름 키(4회차 V-8 — `docs/rules/edge.md`) ② 대조 결과(byVm)가 rp 0 을 싣지 않아 '최근 N일 Veeam 백업 여부' 의 '아니오(한 번도 없음)'
+  분기에 닿지 않는다(12회차 V-31 — 지금은 보수적으로 '모름' · 여러 B&R 의 rp 모름과 섞이는 판정이라 설계가 필요) ③ 원격 접속(probe · quick-connect · mappings)의 쓰기 범위 적용은 사용자 결정
+  (`docs/rules/security-api.md` 7회차 전수) ④ 백업 영역은 13회차 동안 회차마다 결함이 나와 '연속 2회차 0건' 에 닿지 못했다 — 모든 파일을 한 번 이상 읽은 뒤 다른 영역으로 넘어갔다.
 
