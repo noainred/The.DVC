@@ -268,7 +268,9 @@ test('⑤ v2.862 복원 검증 · 일일 요약 — 전체 범위 · OTP · 입�
   // v2.870 감사 A3-03: '지금 보내 보기' 도 쓰기 범위 무제한만 — 거부 사유가 fullWriteOnly 의 것인지(다른 게이트의 403 으로 통과하지 않게 · audits.md 교훈)
   const ws = await call('wadm', 'POST', '/digest/send', {});
   assert.equal(ws.s, 403, ws.t);
-  assert.match(ws.j.reason, /쓰기 범위\(수정 가능 vCenter\)가 지정되지 않은 계정만/);
+  // 6회차 A1: 이 라우트의 fleetOnly(공용 fullScopeOnlyWith)가 쓰기 메서드에 쓰기 범위 전체를 먼저 보게 되어 공용 사유로 막힌다 — 두 사유 모두 '쓰기 범위' 판정이다
+  //   (다른 판정의 403 으로 통과하는 것이 아니다 — 조회 범위 사유 · 소유자 사유가 아니다).
+  assert.match(ws.j.reason, /쓰기 범위\(수정 가능 vCenter\)가 지정되지 않은 계정만|쓰기 범위도 전체\(vCenter 제한 없는\)인 계정만/);
 });
 
 test('⑥ v2.866 복원 › 폴더 표 — 목록에 전원 · 용량 · 마지막 성공 · 폴더 VM 수는 조회 범위 안 vCenter 만', async () => {

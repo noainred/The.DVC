@@ -9,7 +9,8 @@
  *   · PowerCap — 인벤토리 powerCap.limitWatts(이 노드 iDRAC 서버 · 2시간 넘은 인벤토리는 쓰지 않는다). ‘걸림’ = 지금 W ≥ 상한 × capHitPct%(기본 98%).
  *     ⚠ 정정(다음 점검 ③ · 2026-11-08): 8b 판은 엣지 위임 서버의 상한을 ‘—’(엣지 인벤토리 축약에 없음)로 두었다 — 이제 엣지 봉투 powerCaps(서버별 limitWatts · 켜짐 · 읽은 시각 —
  *     bmusage/edgePull.js envelopePowerCaps · 중앙 정제 central/bmPowerCapSanitize.js)를 대상의 edgeCap 으로 받아 쓴다. 상태 capState 로 이유를 가른다:
- *     set(값 있음) · unset(상한 꺼짐 — 0 · 빈 값) · unread(인벤토리 없음 · 낡음 · PowerLimit 미보고) · stale(엣지가 읽은 시각이 2시간 넘음) · old-version(봉투에 표지 없음 — 그때만 ‘엣지 버전 낮음’).
+ *     set(값 있음) · unset(상한 꺼짐 — 0 · 빈 값) · unread(인벤토리 없음 · PowerLimit 미보고) · stale(읽은 시각이 2시간 넘음 · 없음) · old-version(봉투에 표지 없음 — 그때만 ‘엣지 버전 낮음’).
+ *     ⚠ 6회차 Y: ‘2시간’ 판정은 이 노드 인벤토리 · 엣지 사본 인벤토리 · 봉투 상한 모두 hwFacts capStateAt 하나(예전: 이 노드 낡음 = unread · 엣지 사본 = 3일 전도 set · 봉투 = stale).
  *   · 흡기 · 최대 온도 — 서버 분석 › 법인별 온도와 같은 원천(로컬 sensorStore 최신 · 엣지 export s.sensors · roomTemp 분류 · 신선도). **지금 값만** —
  *     흡기 시계열은 IDRAC_TEMP_SERIES_DETAIL=true(옵트인 · 기본 꺼짐)일 때만 metrics DB 에 있어 이 화면은 시계열을 그리지 않는다(지어내지 않는다).
  *   · 팬 경고 — 파트 장애(⑦)의 열린 팬 장애 수(재판정하지 않는다) · 센서 표본이 없거나 낡았으면 ‘못 읽음’(정상으로 세지 않는다 — 파트 장애 F1 규칙).
@@ -23,8 +24,7 @@ import { targetIdOf } from './maint/judge.js';
 import { periodKeyOf, periodRange } from './monthStore.js';
 import { dayKey, DAY_MS } from '../util/dayKey.js';
 import { DEFAULTS as RULE_DEFAULTS } from './perfRules.js';
-import { INV_FRESH_MS } from './powerSources.js';
-import { invCapState } from './hwFacts.js';   // 점검 반복 2회차 E3 — 상한 상태 판정 하나
+import { invCapState, capStateAt } from './hwFacts.js';   // 점검 반복 2회차 E3 — 상한 상태 판정 하나 · 6회차 Y — 신선도 판정 하나(capStateAt)
 
 const n = numOrNull;
 const HOUR = 3_600_000;
@@ -301,19 +301,19 @@ export async function gatherPower({ targets = [], deps, now = Date.now(), withWe
     let capW = null; let capState = 'unread'; let capAt = null;
     if (tg.via === 'edge') {
       const ec = tg.edgeCap && typeof tg.edgeCap === 'object' ? tg.edgeCap : { state: 'unread' };
-      capState = CAP_STATES.includes(ec.state) ? ec.state : 'unread';
       capAt = n(ec.at);
-      if (capState === 'set') {
-        const lw = n(ec.limitWatts);
-        if (lw == null || lw <= 0) capState = 'unread';
-        else if (capAt == null || now - capAt > INV_FRESH_MS) capState = 'stale';   // 엣지가 읽은 시각이 2시간 넘으면 ‘지금 사실’ 이 아니다(로컬과 같은 기준)
-        else capW = lw;
+      if (ec.state === 'old-version') capState = 'old-version';
+      else {
+        // 6회차 Y: 엣지가 읽은 상한도 같은 신선도 판정(capStateAt — set · unset 둘 다 2시간 · 예전에는 set 만 보고 unset 은 3일 전 것도 unset)
+        const c = capStateAt({ state: ec.state, limitWatts: ec.limitWatts }, ec.at, now);
+        capState = c.state; capW = c.limitWatts; if (c.state === 'unread') capAt = null;
       }
     } else {
-      // 점검 반복 2회차 E3: 상한 상태 판정은 hwFacts invCapState 하나(하드웨어 U 와 같은 함수).
+      // 점검 반복 2회차 E3: 상한 상태 판정은 hwFacts invCapState 하나(하드웨어 U 와 같은 함수) · 6회차 Y: 신선도도 capStateAt 하나(이 노드 · 엣지 사본 인벤토리 같이 —
+      //   예전 powerSources 가 이 노드 것만 2시간을 보고 엣지 사본(a.remote)은 3일 전 상한도 set 으로 넘겨 걸림 판정 · 알림에 썼다).
       const inv = D.inventoryOf(a, regId);
-      const cs = invCapState(inv);
-      if (cs.state !== 'unread') { capAt = n(inv.collectedAt); capState = cs.state; capW = cs.limitWatts; }
+      const c = capStateAt(invCapState(inv), inv?.collectedAt, now);
+      capState = c.state; capW = c.limitWatts; capAt = c.at;
     }
     const latest = a ? (a.remote ? a.sensors : D.sensorLatest(t(a.id))) : (regId ? D.sensorLatest(regId) : null);
     const tp = tempsOf(latest, { now, maxAgeMs: maxAgeOf(latest, !!a?.remote), classify });

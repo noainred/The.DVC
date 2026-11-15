@@ -134,7 +134,11 @@ test('D1 ③ bm-storage 저장(bmBindCheck · 실제 라우터) — 저장 뒤 �
   assert.deepEqual([f1.code, f1.status, f1.binds], ['key-folder', 409, undefined], JSON.stringify(f1)); assert.match(f1.error, /다른 법인 · 다른 서버의 폴더/);
   assert.deepEqual(await bmBindCheck({ name: 'db-b1', host: '10.42.0.1', username: 'mon', vcenterId: 'vcA', keyRef: kA.id }), { binds: true });
   assert.equal((await bmBindCheck({ name: 'db-b2', host: '10.42.0.2', username: 'mon', vcenterId: 'vcB', credRef: accA.id })).code, 'key-folder', '공통 계정의 기본 키도 같은 판정');
-  assert.deepEqual(await bmBindCheck({ name: 'db-b3', host: '10.42.0.3', username: 'mon', vcenterId: 'vcB', credRef: accA.id, osAuth: 'password' }), { binds: true }, '비밀번호 고정이면 키를 쓰지 않는다');
+  // 6회차 A2: 계정 법인(vcA) ≠ 서버 법인(vcB)은 비밀번호 고정이어도 거부(cred-other-corp — 온보딩 분석 · 계정 저장과 같은 placement.accountCorpOk)
+  assert.equal((await bmBindCheck({ name: 'db-b3', host: '10.42.0.3', username: 'mon', vcenterId: 'vcB', credRef: accA.id, osAuth: 'password' })).code, 'cred-other-corp');
+  // 비밀번호 고정이면 계정의 기본 키를 쓰지 않는다 — 법인 귀속 없는 서버(계정 법인 대조 통과)에서 키 폴더는 보지 않는다
+  assert.equal((await bmBindCheck({ name: 'db-b3', host: '10.42.0.3', username: 'mon', credRef: accA.id })).code, 'key-folder');
+  assert.deepEqual(await bmBindCheck({ name: 'db-b3', host: '10.42.0.3', username: 'mon', credRef: accA.id, osAuth: 'password' }), { binds: true }, '비밀번호 고정이면 키를 쓰지 않는다');
   // 이 화면은 법인(vcenterId)을 보내지 않는다 — 새 항목은 귀속이 없어 법인 폴더 키는 접속 때도 key-folder 다(같은 판정)
   const f4 = await bmBindCheck({ name: 'db-b4', host: '10.42.0.4', username: 'mon', keyRef: kA.id });
   assert.equal(f4.code, 'key-folder');

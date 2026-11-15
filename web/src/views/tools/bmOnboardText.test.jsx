@@ -73,4 +73,20 @@ describe('bmOnboardText', () => {
     expect(T.rotateResultText({ ...base, accounts: undefined, warnings: [{ code: 'x' }] }).text).toMatch(/공통 계정 —개/);   // 모르는 수는 — · 문구 없는 경고는 붙이지 않는다
     expect(T.rotateResultText({ ...base, warnings: [{ code: 'x' }] }).tone).toBe('ok');
   });
+  it('6회차 B4 — bm-storage 인증 목록: 서버 selectable 그대로(웹 판정 없음) · 지금 설정은 남김 · 뺀 수 · 법인 귀속 없음 안내 · 못 읽으면 비움', () => {
+    const r = { ok: true, corpless: true, keys: [{ id: 'a', name: 'k-vcA', selectable: false, issue: 'key-folder' }, { id: 'g', name: 'k-global', selectable: true }, { id: 'b', name: 'k-vcB', selectable: false, current: true }],
+      accounts: [{ id: 'x', name: 'a-ops', selectable: false, issue: 'key-folder' }, { id: 'y', name: 'b-ops', selectable: true }] };
+    const v = T.authChoicesView(r);
+    expect(v.keys.map((k) => [k.name, k.fit])).toEqual([['k-global', true], ['k-vcB', false]]);
+    expect(v.accounts.map((a) => a.name)).toEqual(['b-ops']);
+    expect(v.hidden).toBe(2);
+    expect(T.authChoicesNote(v)).toMatch(/2개는 목록에서 뺐습니다/);
+    expect(T.authChoicesNote(v)).toMatch(/서버 등록\(CSV\)에서 법인을 정한 뒤/);
+    expect(T.authChoicesNote(T.authChoicesView({ ...r, corpless: false }))).not.toMatch(/법인 귀속이 없어/);
+    expect(T.authChoicesNote(T.authChoicesView({ ok: true, keys: [{ id: 'g', selectable: true }] }))).toBe('');
+    const bad = T.authChoicesView(null);
+    expect([bad.keys.length, bad.accounts.length, bad.error]).toEqual([0, 0, true]);
+    expect(T.authChoicesNote(bad)).toMatch(/읽지 못했습니다/);
+    for (const t of [T.authChoicesNote(v), T.authChoicesNote(bad)]) expect(t.includes('`')).toBe(false);
+  });
 });

@@ -57,7 +57,7 @@ export function marginText(r) {
  * 서버 상한 상태(서버 powerAgg capState) → 이유 문구. ⚠ ‘엣지 버전 낮음’ 은 old-version(봉투에 표지 없음)일 때만 — 못 읽음 · 낡음에 버전 이유를 붙이지 않는다.
  */
 export const CAP_STATE_TEXT = Object.freeze({
-  set: '상한 설정', unset: '상한 값 없음(0 · 빈 값)', unread: '못 읽음(인벤토리 없음 · 2시간 넘음 · PowerLimit 미보고)', stale: '엣지가 읽은 지 2시간 넘음', 'old-version': '엣지 버전 낮음',
+  set: '상한 설정', unset: '상한 값 없음(0 · 빈 값)', unread: '못 읽음(인벤토리 없음 · PowerLimit 미보고)', stale: '읽은 지 2시간 넘음(지금 사실이 아님)', 'old-version': '엣지 버전 낮음',
 });
 export function capText(s, cfg = {}, minEdgeVersion = null) {
   if (num(s?.capW) == null) return s?.capState === 'old-version' ? `— 엣지 버전 낮음${minEdgeVersion ? `(v${minEdgeVersion} 이상)` : ''}` : '—';

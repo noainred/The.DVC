@@ -10,7 +10,7 @@
  * 저장소를 못 읽으면 503(registryUnreadable) — 빈 목록을 내려보내지 않는다.
  */
 import { requireRole, requirePerm } from '../../auth/auth.js';
-import { requireSettingsOwner } from '../admin/shared.js';
+import { requireSettingsOwner, settingsOwnerGradeDenial } from '../admin/shared.js';
 import { reauth } from './reauth.js';
 import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
@@ -66,7 +66,11 @@ export function runGate(mw, req) {
   });
 }
 /** 설정 소유자 등급(소유자 ∧ 전체 범위)인가 — requireSettingsOwner 와 같은 판정 하나(routes/auth.js settingsOwnerTier 와 같은 방식). */
-export async function isOwnerTier(req) { return (await runGate(requireSettingsOwner, req)).ok; }
+/**
+ * 설정 소유자 **등급** 질의(소유자 ∧ 조회 전체 범위) — 법인마다 쓰기 범위를 따로 보는 라우트 안의 승인 등급(8a 정비 창 · 7b 온보딩 묶음 행).
+ *   6회차 A1: 라우트 게이트 requireSettingsOwner 는 쓰기 메서드에 쓰기 범위 전체를 더했지만, 이 질의는 등급만 본다(shared.settingsOwnerGradeDenial — 같은 하나).
+ */
+export async function isOwnerTier(req) { return !settingsOwnerGradeDenial(req); }
 
 export function registerBmOnboard(api, deps = {}) {
   /* ── SSH 키 저장소 ─────────────────────────────────────────────── */
@@ -124,13 +128,26 @@ export function registerBmOnboard(api, deps = {}) {
     res.json({ ok: true, ...v });
   });
 
-  api.post('/tools/bm-usage/accounts', ...keyAdmin, (req, res) => {
+  /*
+   * 6회차 점검 A2: 계정 저장의 거절은 **본인 OTP(reauth) 앞에서** — 같은 검사를 dryRun 으로 돌리고(B-4 키 폴더 포함 · 예전에는 reauth 뒤라 거절이 OTP 를 소모했다)
+   *   그 계정을 쓰는 서버가 끊기는지(refs.accountUseIssue — 키 폴더 · 계정 법인 · 종류) 본다. 소유자 게이트 뒤라 소유자만 이 판정을 본다.
+   *   저장 직전(OTP 뒤)에 같은 판정을 한 번 더 한다(사이에 등록부가 바뀌었을 수 있다).
+   */
+  const accountInputOf = (input) => ({
+    id: input.id, name: input.name, kind: input.kind, corp: input.corp, username: input.username,
+    keyRef: input.keyRef, password: typeof input.password === 'string' ? input.password : undefined, clearPassword: input.clearPassword === true,
+  });
+  const accountWriteIssue = (input) => {
+    const dry = KS.saveAccount(accountInputOf(input), { dryRun: true });
+    if (!dry.ok) return dry;
+    return REFS.accountUseIssue(input.id ? KS.accountById(t(input.id, 32)) : null, dry.next);
+  };
+  const accountFirst = (req, res, next) => { const { otp, ...input } = bodyOf(req); void otp; const w = accountWriteIssue(input); if (w) return send(res, w); return next(); };
+  api.post('/tools/bm-usage/accounts', adminOnly, toolsPerm, requireSettingsOwner, accountFirst, reauth, (req, res) => {
     const b = bodyOf(req);
     const { otp, ...input } = b; void otp;
-    const r = KS.saveAccount({
-      id: input.id, name: input.name, kind: input.kind, corp: input.corp, username: input.username,
-      keyRef: input.keyRef, password: typeof input.password === 'string' ? input.password : undefined, clearPassword: input.clearPassword === true,
-    }, { by: who(req) });
+    const w = accountWriteIssue(input);
+    const r = w || KS.saveAccount(accountInputOf(input), { by: who(req) });
     logAudit({ user: who(req), action: input.id ? 'bm-usage.account.update' : 'bm-usage.account.add', target: t(input.name, 64), ip: req.ip || '',
       detail: JSON.stringify(r.ok ? { kind: r.account.kind, corp: r.account.corp, keyRef: r.account.keyRef, secretChanged: typeof input.password === 'string' && input.password !== '' && input.password !== '********', dropped: r.droppedSecrets || [] } : { ok: false, code: r.code }).slice(0, 300) });
     send(res, r);
