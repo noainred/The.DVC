@@ -145,7 +145,7 @@ export async function ingestResult(job, r, { node = '', now = Date.now() } = {})
     const prevKeys = prev && prev.outcome === 'done' && Array.isArray(prev.summary?.ek) ? new Set(prev.summary.ek) : null;
     const out = Array.isArray(r.out) ? r.out : [];
     const a = analyzeRun({ ...r, out }, { prevKeys });
-    rec.lastExecAt = job.startedAt || now; // root 프로그램이 실제로 돌았을 때만 실행 간격을 센다
+    if (a.begun) rec.lastExecAt = job.startedAt || now; // root 프로그램이 실제로 돌았을 때만 실행 간격을 센다
     let report = null; if (out.length) { try { report = await gzipAsync(Buffer.from(out.join('\n'), 'utf8')); } catch { report = null; } }
     const row = { id: job.runId, target: tid, at: job.startedAt || job.requestedAt || now, ended: now, node, by: job.by || '', outcome: a.outcome, rc: a.rc, ver: programSha()?.slice(0, 12) || '', summary: { ...a.summary, prevId: prev?.id || null, ms: Number.isFinite(r.ms) ? r.ms : null, ep: job.ep || null }, ready: readyLines.slice(0, 200), report };
     if (spaceLow()) rec.lastError = { at: now, kind: 'db', error: 'DB 폴더 여유 공간이 부족해 결과를 기록하지 않았습니다.' };
