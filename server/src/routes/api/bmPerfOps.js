@@ -10,7 +10,7 @@
  *   · 응답 캐시(memoJson)는 변경 이벤트 · 띠 · 비교만 — 키에 범위 서명 + 역할 + 마지막 수집 시각 + 규칙 저장 시각. 집중은 진행 중 값이라 캐시하지 않는다.
  */
 import { requireRole, requirePerm } from '../../auth/auth.js';
-import { scopedVcenterIds, inUserWriteScope } from '../../auth/scope.js';
+import { scopedVcenterIds, inUserWriteScope, isFullReadWriteScope } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { requireSettingsOwner, fullScopeOnlyWith } from '../admin/shared.js';
@@ -222,7 +222,9 @@ export async function bmRulesRead(req, snap, deps = {}) {
     sent: sentShown, ...(edgeDropped && isAdmin ? { edgeSentDropped: edgeDropped } : {}),
     // 정직 기록 — 이 노드 전용 설정(엣지 배포는 다음 판) · 유지보수 창 억제 원천 없음.
     scope: config.agent?.centralUrl ? 'edge-local' : 'central-local', maintenanceSource: 'none',
-    readOnly: !isAdmin || !!allowed, ...(isAdmin ? {} : { addressHidden: true }),
+    // 7회차 관찰 ①(6회차 A1 뒤): 쓰기(PUT 규칙 · POST 시험 실행)는 공용 게이트가 조회 ∧ 쓰기 전체 범위로 본다 — 표지도 같은 판정(isFullReadWriteScope).
+    //   예전에는 조회 범위만 봐서 쓰기가 일부인 관리자 · 소유자에게 '시험 실행' 버튼이 열리고 누르면 403 이었다.
+    readOnly: !isAdmin || !!allowed || !isFullReadWriteScope(req.user, snap), ...(isAdmin ? {} : { addressHidden: true }),
   };
 }
 async function rulesWrite(req, res) {
