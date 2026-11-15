@@ -3,7 +3,7 @@ import { usePolling, fetchJson, toolAllowed, can } from '../api.js';
 // v2.915 가상화 플랫폼 허브(설계 docs/design/virt-platform-menu 시안 A ② · ⑨): 이 화면은 허브의 'vCenter 탭' 본문이다 — 제목 · 전체 vCenter/호스트/VM 카드 · 바로가기는
 //   허브(views/platform/PlatformHub.jsx)가 그리고, 여기는 카드 | 표 보기 ‖ vCenter 도구 줄 · 백업 KPI · 추이 · 카드/표만 남는다. 범위(리전 · vCenter · 검색)는 App 의 공용 바.
 import HubTabs, { toolsFor } from './platform/HubTabs.jsx';
-import { VC_TOOLS, VC_VIEWS, loadVcView, saveVcView, scopeLabel, bareosSumOf, KPI_HANDOFF, handoffKpiVcenter } from './platform/platformText.js';
+import { VC_TOOLS, VC_VIEWS, loadVcView, saveVcView, scopeLabel, bareosSumOf, KPI_HANDOFF, handoffKpiScope, keywordsOf, vcMatches, siblingSites, siblingScopeText } from './platform/platformText.js';
 import { HUB_ENTRY_TAB } from './vcd/vcdTabs.js'; // v2.958: 허브에서 법인을 누르면 상세는 '요약' 부터
 import { openBackupDetail } from './tools/backupViewText.js'; // v2.959: 백업 KPI 카드 → 고른 법인의 Backup 세부내용(순수 모듈 — 도구 화면을 끌어오지 않는다)
 const VcTable = lazy(() => import('./platform/VcTable.jsx'));
@@ -188,12 +188,12 @@ function TrendKpis({ vcenterId = '', region = '', scopeText = '' }) {
   const sumRemoved = pts.reduce((a, p) => a + (p.removed || 0), 0);
   const g = growth(pts); // 스토리지 순증감 — 구버전(ds 열 0) 행은 내부에서 기준 제외(v2.351 원칙)
   const dsLast = [...pts].reverse().find(hasDsData) || null;
-  // v2.959: 법인을 고른 상태면 그 vCenter 를 도구 화면에 인계한다(메모리 · 마운트 때 1회) — 도구가 그 법인으로 열린다. 리전만 골랐으면 전체로.
-  const go = (h, target) => { handoffKpiVcenter(target, vcenterId); window.location.hash = h; };
-  const scopedTitle = vcenterId ? ` — ${scopeText} 로 열립니다` : '';
+  // v2.959: 법인을 고른 상태면 그 vCenter 를 도구 화면에 인계한다(메모리 · 마운트 때 1회) — 도구가 그 법인으로 열린다. v3.10.15: 리전만 골랐으면 리전을 넘긴다(도구에 리전 선택이 생겼다).
+  const go = (h, targets) => { handoffKpiScope(targets, { vcenterId, region }); window.location.hash = h; };
+  const scopedTitle = vcenterId || region ? ` — ${scopeText} 로 열립니다` : '';
   return (
     <>
-      <div className="card kpi" onClick={() => go('#/tools/vm-track', KPI_HANDOFF.vmTrack)} style={{ cursor: 'pointer' }} title={`클릭 — VM 수량 추이 화면${scopedTitle}`}>
+      <div className="card kpi" onClick={() => go('#/tools/vm-track', { vc: KPI_HANDOFF.vmTrack, region: KPI_HANDOFF.vmTrackRegion })} style={{ cursor: 'pointer' }} title={`클릭 — VM 수량 추이 화면${scopedTitle}`}>
         <div className="label">VM 증가 추이(30일){scopeText && scopeText !== '전체' ? <span className="muted" style={{ fontWeight: 500 }}> · {scopeText}</span> : null}</div>
         <div className="value" style={{ color: vmNet > 0 ? 'var(--green)' : vmNet < 0 ? 'var(--red)' : undefined }}>
           {vmLast ? `${vmNet > 0 ? '+' : ''}${vmNet.toLocaleString()}` : '—'}
@@ -201,7 +201,7 @@ function TrendKpis({ vcenterId = '', region = '', scopeText = '' }) {
         <div className="meta">{vmLast ? `생성 +${sumAdded.toLocaleString()} · 삭제 −${sumRemoved.toLocaleString()}` : '스냅샷 없음(매일 00·12시 자동)'}</div>
         <Spark points={pts.map((p) => p.total)} color="#60a5fa" />
       </div>
-      <div className="card kpi" onClick={() => go('#/tools/storage-track', KPI_HANDOFF.storageTrack)} style={{ cursor: 'pointer' }} title={`클릭 — 스토리지 사용량 추이 화면${scopedTitle}`}>
+      <div className="card kpi" onClick={() => go('#/tools/storage-track', { vc: KPI_HANDOFF.storageTrack, region: KPI_HANDOFF.storageTrackRegion })} style={{ cursor: 'pointer' }} title={`클릭 — 스토리지 사용량 추이 화면${scopedTitle}`}>
         <div className="label">스토리지 증가 추이(30일){scopeText && scopeText !== '전체' ? <span className="muted" style={{ fontWeight: 500 }}> · {scopeText}</span> : null}</div>
         <div className="value" style={{ color: g.netGB > 0 ? 'var(--amber)' : g.netGB < 0 ? 'var(--green)' : undefined }}>
           {dsLast ? `${g.netGB > 0 ? '+' : ''}${gbTb(g.netGB)}` : '—'}
@@ -277,17 +277,13 @@ export default function VCenters({ onSelectSite, onGoVms, resetSignal, scope = {
   // v2.915: 상세에 ‹ 이전 · 다음 › vCenter(목록 순서) — 브레드크럼 줄에서 법인을 옮겨 다닌다(시안 ⑤)
   // v2.926: key — 같은 페이지에서 해시로 **다른 vCenter 의 개체**로 건너뛰면 상세가 그대로 남아 옛 vCenter 의 개체 id(obj)로 새 목록을 찾다 '이 VM 이 없습니다' 가 떴다
   //   (Chromium A/B 재현). vCenter 가 바뀌면 새로 마운트해 주소에서 다시 읽는다(검색 · 펼침 · 탭 상태도 그 vCenter 의 것으로).
-  if (openSite) return <Suspense fallback={<Loading />}><VCenterDetail key={openSite.id} site={openSite} onBack={() => setOpenId(null)} siblings={siblingsOf(sites, openId)} onOpen={(id) => setOpenId(id)} initialTab={openTab} /></Suspense>;
+  if (openSite) return <Suspense fallback={<Loading />}><VCenterDetail key={openSite.id} site={openSite} onBack={() => setOpenId(null)} siblings={{ ...siblingsOf(siblingSites(sites, scope), openId), scopeText: siblingScopeText(scope) }} onOpen={(id) => setOpenId(id)} initialTab={openTab} /></Suspense>;
   // v2.915 허브 범위(리전 · vCenter)로 먼저 거른다 — 세 탭이 같은 범위를 쓴다. 검색은 그 다음.
   const regSel = String(scope?.region || ''); const vcSel = String(scope?.vcenterId || '');
   const inScope = sites.filter((s) => (!vcSel || s.id === vcSel) && (!regSel || s.location?.region === regSel));
-  // 공백 구분 다중 키워드 AND — 이름·id·도시·국가·리전·버전에서 검색(허브 검색과 같은 규칙).
-  const keywords = query.toLowerCase().split(/\s+/).filter(Boolean);
-  const shown = keywords.length === 0 ? inScope : inScope.filter((s) => {
-    const hay = [s.name, s.id, s.location?.city, s.location?.country, s.location?.region, s.version]
-      .filter(Boolean).join(' ').toLowerCase();
-    return keywords.every((kw) => hay.includes(kw));
-  });
+  // 공백 구분 다중 키워드 AND — 이름·id·도시·국가·리전·버전에서 검색(허브 검색과 같은 규칙 · v3.10.13 부터 platformText.vcMatches 한 벌 — 상세의 이전 · 다음 이웃 목록도 같은 규칙).
+  const keywords = keywordsOf(query);
+  const shown = keywords.length === 0 ? inScope : inScope.filter((s) => vcMatches(s, keywords));
   // v2.732(그룹 i3) vcCountMeta(연결됨 수 + 낡은 값)는 v2.915 부터 허브의 엔티티 탭이 서버 요약으로 말한다(이 파일의 export 는 테스트 · 다른 화면이 쓴다).
   // 다빈치/IRS 분류(사용자 요구): vCenter 이름에 'IRS'(단어, 대소문자 무시 — 예: AZ-IRS·GM1-IRS)가
   // 들어가면 IRS, 나머지(AZ·GM1 등)는 다빈치. 하이픈은 단어 경계라 '-IRS' 접미가 매칭된다.

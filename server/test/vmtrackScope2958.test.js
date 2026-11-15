@@ -43,3 +43,15 @@ test('라우트가 region 을 읽어 교집합으로 넘긴다(소스 계약) �
   const svc = fs.readFileSync(new URL('../src/vmtrack/service.js', import.meta.url), 'utf8');
   assert.match(svc, /filter\(\(r\) => scopeIds\.has\(r\.vcenter_id\)\)/, '범위 집합은 has 로만 거른다(빈 집합 = 없음)');
 });
+
+test('v3.10.15 — 하위 라우트 6개(changes · ds-changes · ds-list · ds-change-log · ds-pivot · ds-top)도 ?region= 을 사용자 범위와의 교집합으로 받는다(소스 계약)', () => {
+  const src = fs.readFileSync(new URL('../src/routes/api/vmtrack.js', import.meta.url), 'utf8');
+  for (const name of ['changes', 'ds-changes', 'ds-list', 'ds-change-log', 'ds-pivot', 'ds-top']) {
+    const i = src.indexOf(`api.get('/tools/vm-track/${name}'`);
+    assert.ok(i >= 0, name);
+    const next = src.indexOf("api.get('/tools/vm-track/", i + 10);
+    const block = src.slice(i, next < 0 ? undefined : next);
+    assert.match(block, /trackScopeIds\(\{ allowed: scopedVcenterIds\(req\.user, snapR\), region: String\(req\.query\.region \|\| ''\)/, `${name} 에 region 교집합이 없다`);
+  }
+  assert.match(src, /region: String\(vc\.location\?\.region \|\| ''\)/, 'vcenterList 에 region 이 없다');
+});

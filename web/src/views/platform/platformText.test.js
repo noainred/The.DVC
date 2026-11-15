@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  PLATFORM_TABS, PLATFORM_TAB_KEYS, isPlatformTab, scopeLabel, bareosSumOf, KPI_HANDOFF, handoffKpiVcenter, takeKpiVcenter, VC_TOOLS, HOST_TOOLS, PLATFORM_TOOL_KEYS, entityTabs, chipCount, chipLegend, signalSegments,
+  PLATFORM_TABS, PLATFORM_TAB_KEYS, isPlatformTab, scopeLabel, bareosSumOf, KPI_HANDOFF, handoffKpiVcenter, takeKpiVcenter, keywordsOf, vcMatches, siblingSites, siblingScopeText, chipSites, chipRegionNote, handoffKpiScope, regionsOf, vcInRegion, VC_TOOLS, HOST_TOOLS, PLATFORM_TOOL_KEYS, entityTabs, chipCount, chipLegend, signalSegments,
   VM_ITEM_TOOL_KEYS, HV_ITEM_TOOL_KEYS, platformMenuLabel,
   loadChipsCollapsed, saveChipsCollapsed, loadVcView, saveVcView, SCOPE_SEARCH_PLACEHOLDER, SCOPE_NOTE,
 } from './platformText.js';
@@ -166,7 +166,7 @@ describe('KPI 범위 문구 · Bareos 범위 합(v2.958)', () => {
 // v2.959(사용자 요청 2026-11-10) — KPI 카드 → 도구 화면에 고른 vCenter 인계(메모리 · 꺼내면 지운다).
 describe('KPI 카드 → 도구 인계(v2.959)', () => {
   it('target 은 도구마다 하나 · 넘긴 id 를 그 target 에서만 한 번 꺼낸다 · 빈 id 는 넘기지 않는다', () => {
-    expect(KPI_HANDOFF).toEqual({ vmTrack: 'vm-track:vcenter', storageTrack: 'storage-track:vcenter' });
+    expect(KPI_HANDOFF).toEqual({ vmTrack: 'vm-track:vcenter', storageTrack: 'storage-track:vcenter', vmTrackRegion: 'vm-track:region', storageTrackRegion: 'storage-track:region' });
     expect(handoffKpiVcenter(KPI_HANDOFF.vmTrack, 'vc-a')).toBe(true);
     expect(takeKpiVcenter(KPI_HANDOFF.storageTrack)).toBe('');
     expect(takeKpiVcenter(KPI_HANDOFF.vmTrack)).toBe('vc-a');
@@ -183,5 +183,99 @@ describe('KPI 카드 → 도구 인계(v2.959)', () => {
     }
     const q = fs.readFileSync(new URL('../../components/invSearchQuery.js', import.meta.url), 'utf8');
     expect(q).not.toMatch(/vm-track:vcenter|storage-track:vcenter/);
+  });
+});
+
+// v3.10.13(점검 1회차) — 상세의 ‹ 이전 · 다음 › 이웃 목록 = 허브 범위(리전 · 검색어) 안 · 고른 법인 하나는 범위로 치지 않는다 · 검색 규칙은 카드 목록과 한 벌.
+describe('이웃 목록 · 검색 규칙(v3.10.13)', () => {
+  const sites = [
+    { id: 'vc-a', name: 'VC-KR1', version: '8.0.2', location: { city: 'Seoul', country: 'Korea', region: '아시아' } },
+    { id: 'vc-b', name: 'VC-KR2', version: '7.0.3', location: { city: 'Busan', country: 'Korea', region: '아시아' } },
+    { id: 'vc-c', name: 'VC-DE1', version: '8.0.3', location: { city: 'Frankfurt', country: 'Germany', region: '유럽' } },
+    null, 'x',
+  ];
+  it('keywordsOf · vcMatches — 공백 구분 AND · 이름 id 도시 국가 리전 버전 · 대소문자 무시 · 쓰레기 행 false', () => {
+    expect(keywordsOf('  Kr1  seoul ')).toEqual(['kr1', 'seoul']);
+    expect(vcMatches(sites[0], keywordsOf('kr1 seoul'))).toBe(true);
+    expect(vcMatches(sites[0], keywordsOf('kr1 busan'))).toBe(false);
+    expect(vcMatches(sites[2], keywordsOf('8.0.3'))).toBe(true);
+    expect(vcMatches(sites[1], keywordsOf('유럽'))).toBe(false);
+    expect(vcMatches(sites[1], [])).toBe(true);
+    expect(vcMatches(null, [])).toBe(false);
+  });
+  it('siblingSites — 리전 · 검색어로만 거른다(vcenterId 는 무시) · 범위 없으면 전부', () => {
+    expect(siblingSites(sites, {}).map((s) => s.id)).toEqual(['vc-a', 'vc-b', 'vc-c']);
+    expect(siblingSites(sites, { region: '아시아', vcenterId: 'vc-a' }).map((s) => s.id)).toEqual(['vc-a', 'vc-b']);
+    expect(siblingSites(sites, { q: 'de1' }).map((s) => s.id)).toEqual(['vc-c']);
+    expect(siblingSites(sites, { region: '유럽', q: 'kr' })).toEqual([]);
+    expect(siblingSites(null, { region: '유럽' })).toEqual([]);
+  });
+  it('siblingScopeText — 리전 · 검색어가 있을 때만', () => {
+    expect(siblingScopeText({})).toBe('');
+    expect(siblingScopeText({ vcenterId: 'vc-a' })).toBe('');
+    expect(siblingScopeText({ region: '유럽' })).toBe('리전 유럽');
+    expect(siblingScopeText({ region: '유럽', q: ' kr1 ' })).toBe('리전 유럽 · ‘kr1’');
+  });
+});
+
+// v3.10.14(점검 2회차) — 바로가기 칩은 고른 리전 안의 법인만 · 칩을 눌러도 리전은 남는다(App 소스 계약).
+describe('바로가기 칩 범위(v3.10.14)', () => {
+  const vcs = [{ id: 'a', location: { region: '아시아' } }, { id: 'b', location: { region: '유럽' } }, { id: 'c' }, null];
+  it('chipSites — 리전 없으면 전부(쓰레기 행 제외) · 리전이면 그 리전만 · 맞는 법인이 없으면 빈 목록', () => {
+    expect(chipSites(vcs, '').map((s) => s.id)).toEqual(['a', 'b', 'c']);
+    expect(chipSites(vcs, '유럽').map((s) => s.id)).toEqual(['b']);
+    expect(chipSites(vcs, '중동')).toEqual([]);
+    expect(chipSites(null, '유럽')).toEqual([]);
+  });
+  it('chipRegionNote — 리전이 있을 때만 · 법인 수', () => {
+    expect(chipRegionNote('', 3)).toBe('');
+    expect(chipRegionNote('유럽', 5)).toBe('리전 유럽 · 5법인');
+    expect(chipRegionNote('유럽', NaN)).toBe('리전 유럽 · 0법인');
+  });
+  it('App 은 칩에 region 을 넘기고 칩을 눌러도 region 을 지우지 않는다(소스 계약)', async () => {
+    const fs = await import('node:fs');
+    const app = fs.readFileSync(new URL('../../App.jsx', import.meta.url), 'utf8');
+    expect(app).toMatch(/<PlatformHub[\s\S]*?region=\{region\}[\s\S]*?onPickVcenter=\{\(id\) => patchFilter\(\{ vcenterId: id \}\)\}/);
+    const hub = fs.readFileSync(new URL('./PlatformHub.jsx', import.meta.url), 'utf8');
+    expect(hub).toMatch(/const sites = chipSites\(vcenters, region\)/);
+  });
+});
+
+// v3.10.15(점검 3회차) — KPI 카드가 리전도 넘긴다 · 도구의 리전 보조.
+describe('KPI 카드 → 도구 리전 인계(v3.10.15)', () => {
+  const T = { vc: KPI_HANDOFF.vmTrack, region: KPI_HANDOFF.vmTrackRegion };
+  it('handoffKpiScope — vCenter 가 있으면 vCenter 만, 없고 리전만 있으면 리전, 둘 다 없으면 false(남기지 않음)', () => {
+    expect(handoffKpiScope(T, { vcenterId: 'vc-a', region: '유럽' })).toBe(true);
+    expect(takeKpiVcenter(T.region)).toBe('');
+    expect(takeKpiVcenter(T.vc)).toBe('vc-a');
+    expect(handoffKpiScope(T, { region: '유럽' })).toBe(true);
+    expect(takeKpiVcenter(T.vc)).toBe('');
+    expect(takeKpiVcenter(T.region)).toBe('유럽');
+    expect(handoffKpiScope(T, {})).toBe(false);
+    expect(takeKpiVcenter(T.region)).toBe('');
+  });
+  it('regionsOf · vcInRegion — 빈 리전 제외 · 이름순 · 리전 없으면 전부', () => {
+    const list = [{ id: 'a', region: '유럽' }, { id: 'b', region: '아시아' }, { id: 'c', region: '' }, { id: 'd', region: '유럽' }, null];
+    expect(regionsOf(list)).toEqual(['아시아', '유럽']);
+    expect(vcInRegion(list, '유럽').map((v) => v.id)).toEqual(['a', 'd']);
+    expect(vcInRegion(list, '').map((v) => v.id)).toEqual(['a', 'b', 'c', 'd']);
+    expect(vcInRegion(null, '유럽')).toEqual([]);
+  });
+  it('도구 두 곳이 region 을 요청에 싣고(vcenterId 없을 때만) 서버 목록이 region 을 준다(소스 계약)', async () => {
+    const fs = await import('node:fs');
+    for (const f of ['../tools/VmTrackTool.jsx', '../tools/StorageTrackTool.jsx']) {
+      const s = fs.readFileSync(new URL(f, import.meta.url), 'utf8');
+      expect(s).toMatch(/\.\.\.\(region && !vcenterId \? \{ region \} : \{\}\)/);
+      expect(s).toMatch(/useState\(\(\) => takeKpiVcenter\(KPI_HANDOFF\.(vmTrackRegion|storageTrackRegion)\)\)/);
+    }
+    const srv = fs.readFileSync(new URL('../../../../server/src/routes/api/vmtrack.js', import.meta.url), 'utf8');
+    expect(srv).toMatch(/region: String\(vc\.location\?\.region \|\| ''\)/);
+    // 하위 구획(DS 목록 · 상위 · 변경 이력 · 피벗)과 상세 모달도 리전을 싣는다 — 제목이 '리전 X 합계' 인데 본문이 전 법인이면 안 된다
+    const st = fs.readFileSync(new URL('../tools/StorageTrackTool.jsx', import.meta.url), 'utf8');
+    expect((st.match(/\.\.\.\(region && !vcenterId \? \{ region \} : \{\}\)/g) || []).length).toBeGreaterThanOrEqual(5);
+    expect(st).toMatch(/<DsDetail \{\.\.\.detail\} region=\{vcenterId \? '' : region\}/);
+    const vt = fs.readFileSync(new URL('../tools/VmTrackTool.jsx', import.meta.url), 'utf8');
+    expect((vt.match(/region=\{vcenterId \? '' : region\}/g) || []).length).toBe(2);
+    expect((vt.match(/\.\.\.\(region \? \{ region \} : \{\}\)/g) || []).length).toBe(2);
   });
 });

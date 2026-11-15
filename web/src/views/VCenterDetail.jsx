@@ -570,9 +570,9 @@ export default function VCenterDetail({ site, onBack, siblings = null, onOpen = 
         <span aria-hidden="true">›</span><b>{site.name}</b>
         {siblings && onOpen && (siblings.prev || siblings.next) && (
           <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            {siblings.prev && <button type="button" className="tab" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => onOpen(siblings.prev.id)} title="이전 vCenter(목록 순서)">‹ {siblings.prev.name}</button>}
-            <span className="muted tabular" style={{ fontSize: 11.5 }}>{siblings.index + 1} / {siblings.total}</span>
-            {siblings.next && <button type="button" className="tab" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => onOpen(siblings.next.id)} title="다음 vCenter(목록 순서)">{siblings.next.name} ›</button>}
+            {siblings.prev && <button type="button" className="tab" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => onOpen(siblings.prev.id)} title={siblings.scopeText ? `이전 vCenter(허브 범위 ${siblings.scopeText} 안)` : "이전 vCenter(목록 순서)"}>‹ {siblings.prev.name}</button>}
+            <span className="muted tabular" style={{ fontSize: 11.5 }} title={siblings.scopeText ? `허브 범위(${siblings.scopeText}) 안의 vCenter 순서` : 'vCenter 목록 순서'}>{siblings.index + 1} / {siblings.total}{siblings.scopeText ? ` · ${siblings.scopeText}` : ''}</span>
+            {siblings.next && <button type="button" className="tab" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => onOpen(siblings.next.id)} title={siblings.scopeText ? `다음 vCenter(허브 범위 ${siblings.scopeText} 안)` : "다음 vCenter(목록 순서)"}>{siblings.next.name} ›</button>}
           </span>
         )}
       </nav>

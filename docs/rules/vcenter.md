@@ -511,3 +511,4 @@
   - 사용자가 바꾸지 않은 `allowGuestControl` 은 읽은 값을 지킨다. 본문(`deviceInner`)과 `backingXml` 은 열거 불가 — GET `/vm/:id/hardware` 응답에 DVS connectionCookie 를 싣지 않는다.
   - 새 vim25 쓰기(deviceChange · RelocateSpec 등)를 손으로 조립할 때는 govmomi `vim25/types` 필드 순서(= WSDL sequence)와 대조하는 테스트를 둘 것. 회귀 `server/test/nicConnectInfo301.test.js`(변이 9/9 · 반증 1인).
   - 남긴 것(반증 판독 — 실환경 미확인): 프로비저닝 RelocateSpec 의 스토리지 정책이 `<profile><profile …><profileName>` 모양이다(스키마는 배열 원소 하나 + 필수 `profileId`) — 정책을 입력한 클론은 거부될 것으로 본다.
+- **v3.10.15 `/tools/vm-track` `vcenterList[].region`**: 화면의 리전 선택용(스냅샷 `location.region` 그대로 · 없으면 빈 글자). `?region=` 의 교집합 규약(v2.958)은 그대로.

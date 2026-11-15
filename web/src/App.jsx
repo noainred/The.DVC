@@ -859,7 +859,7 @@ function Portal({ user, onLogout }) {
           {platformOn && (
             <PlatformHub tab={tab} tabs={PLATFORM_TAB_KEYS.filter((t) => isAllowed(t))} summary={platformSummary}
               onTab={(t) => { if (t === 'vcenters') setPlatformResetSeq((n) => n + 1); setTab(t); }}
-              vcenters={vcenters} vcenterId={vcenterId} onPickVcenter={(id) => patchFilter({ vcenterId: id, region: '' })} />
+              vcenters={vcenters} vcenterId={vcenterId} region={region} onPickVcenter={(id) => patchFilter({ vcenterId: id })} />
           )}
 
           {tabBody}
