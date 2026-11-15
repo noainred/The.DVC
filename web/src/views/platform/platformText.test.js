@@ -9,6 +9,7 @@ import {
   loadChipsCollapsed, saveChipsCollapsed, loadVcView, saveVcView, SCOPE_SEARCH_PLACEHOLDER, SCOPE_NOTE,
 } from './platformText.js';
 import * as PT from './platformText.js';
+import { REGIONS } from '../../regions.js';   // v3.12.8 테스트 — 지역 목록 단일 소스
 import { HUB_TOOL_KEYS } from '../vms/vmHubText.js';
 import { TOOLS } from '../specialToolsList.js';
 import { MENU_GROUPS, locate } from '../topMenu.js';
@@ -356,10 +357,10 @@ describe('v3.12.2 — 2차 루프 1회차: 공용 범위 바의 vCenter 선택�
 });
 
 describe('v3.12.8 — 2차 루프 7회차: 범위 바 리전 선택지 = 정해진 4리전 + 등록 데이터에만 있는 리전', () => {
-  const BASE = ['아시아', '중국', '유럽', '북미'];
+  const BASE = REGIONS;   // 지역 목록은 regions.js 단일 소스(인라인 사본 금지 — server/test/audit2575 IMP-10)
   const VCS = [{ location: { region: '유럽' } }, { location: { region: 'Unknown' } }, { location: { region: ' 중동 ' } }, { location: {} }, null, { location: { region: '중동' } }];
   it('정해진 순서 그대로 뒤에 데이터 리전(중복 · 빈 값 제외 · 이름순 · Unknown 은 맨 뒤) · Unknown 은 ‘리전 미지정(Unknown)’ 표시', () => {
-    expect(scopeRegionOptions(BASE, VCS).map((o) => o.value)).toEqual(['아시아', '중국', '유럽', '북미', '중동', 'Unknown']);
+    expect(scopeRegionOptions(BASE, VCS).map((o) => o.value)).toEqual([...REGIONS, '중동', 'Unknown']);
     expect(scopeRegionOptions(BASE, VCS).find((o) => o.value === 'Unknown').label).toBe('리전 미지정(Unknown)');
     expect(scopeRegionOptions(BASE, []).map((o) => o.value)).toEqual(BASE);
     expect(scopeRegionOptions(BASE, null).map((o) => o.value)).toEqual(BASE);
