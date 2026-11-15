@@ -11,17 +11,22 @@
 import { getUser, verifyUserOtp } from './auth.js';
 
 export const SELF_REBIND_MS = 10 * 60_000;
-const _ok = new Map();   // username → 현재 OTP 를 확인한 시각
+// 22회차 반증 D-10: 기억은 **계정 · 세션(sid) · 동작(purpose)** 단위이고 성공하면 지운다 — 계정 단위였을 때는 진짜 사용자가 재등록을 시작한 10분 동안
+//   같은 계정의 다른 세션(탈취)이 코드 없이 비밀번호 설정 · 로그인 차단 · OTP 해제를 했다.
+const _ok = new Map();   // `${username}|${sid}|${purpose}` → 현재 OTP 를 확인한 시각
+const okKey = (username, { sid = '', purpose = '' } = {}) => `${username}|${String(sid || '')}|${String(purpose || '')}`;
+/** 22회차 반증 D-1: 경로 인자의 앞뒤 공백으로 본인 판정을 비켜 가지 못하게(실행 함수는 trim 해서 찾는다) — 저장된 계정 이름으로. */
+const userOf = (name) => getUser(String(name ?? '').trim());
 
 /** OTP 가 실제로 등록된(로그인에 쓰이는) 계정인가. 레거시 '시작만 하고 미확정'(totpSecret && !totpEnabled)은 아니다. */
 export function otpEnrolled(name) {
-  const u = getUser(name);
+  const u = userOf(name);
   return !!(u && u.totpEnabled && u.totpSecret);
 }
 
 /** 대상이 요청자 자신인가 — 저장된 계정 이름으로 비교한다(대소문자만 다른 경로 인자로 비켜 가지 못하게). */
 export function isSelfTarget(req, targetName) {
-  const u = getUser(targetName);
+  const u = userOf(targetName);
   return !!(u && req?.user?.username && u.username === req.user.username);
 }
 
@@ -29,22 +34,24 @@ export function isSelfTarget(req, targetName) {
  * 현재 OTP 를 확인한다. 등록되지 않은 계정은 확인할 것이 없다(null).
  * @returns {null | { status:number, body:{ ok:false, needCurrentOtp:true, reason:string } }}
  */
-export function requireCurrentOtp(name, currentCode, what = '본인 자격증명 변경') {
+export function requireCurrentOtp(name, currentCode, what = '본인 자격증명 변경', ctx = {}) {
   if (!otpEnrolled(name)) return null;
+  const u = userOf(name);
   const cur = String(currentCode ?? '').trim();
-  const v = cur ? verifyUserOtp(name, cur) : { ok: false, reason: '현재 코드가 없습니다' };
+  const v = cur ? verifyUserOtp(u.username, cur) : { ok: false, reason: '현재 코드가 없습니다' };
   if (!v.ok) {
     return { status: v.locked ? 429 : 403, body: { ok: false, needCurrentOtp: true,
       reason: `본인 계정의 ${what}에는 지금 쓰는 OTP 앱의 코드(currentCode)가 필요합니다(${v.reason || '확인 실패'}). 폰을 잃었으면 다른 관리자에게 대리 등록을 요청하세요.` } };
   }
-  _ok.set(getUser(name).username, Date.now());
+  _ok.set(okKey(u.username, ctx), Date.now());
   return null;
 }
 
-/** begin 에서 현재 코드를 확인한 지 10분 안인가(confirm 이 본다). 등록되지 않은 계정은 늘 참. */
-export function selfRebindVerified(name) {
+/** 같은 세션 · 같은 동작에서 현재 코드를 확인한 지 10분 안인가(confirm · 임시 비밀번호 재시도가 본다). 등록되지 않은 계정은 늘 참. */
+export function selfRebindVerified(name, ctx = {}) {
   if (!otpEnrolled(name)) return true;
-  return Date.now() - (_ok.get(getUser(name).username) || 0) < SELF_REBIND_MS;
+  return Date.now() - (_ok.get(okKey(userOf(name).username, ctx)) || 0) < SELF_REBIND_MS;
 }
-export function clearSelfRebind(name) { const u = getUser(name); if (u) _ok.delete(u.username); }
+/** 동작이 성공하면 그 기억을 지운다(한 번 확인 = 한 번 변경). */
+export function clearSelfRebind(name, ctx = {}) { const u = userOf(name); if (u) _ok.delete(okKey(u.username, ctx)); }
 export function _resetOtpRebindForTest() { _ok.clear(); }

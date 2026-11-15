@@ -372,7 +372,7 @@ authRouter.post('/totp/begin', authMiddleware, (req, res) => {
     auditTotpSelf(req, 'OTP 등록 시작 거부(본인 — 등록 강제 아님)', { gate: totpFailAuditGate });
     return res.status(403).json({ ok: false, reason: '본인 OTP 등록은 등록이 필요한 세션에서만 할 수 있습니다 — 관리자에게 대리 등록을 요청하세요.' });
   }
-  const need = requireCurrentOtp(req.user.username, (req.body || {}).currentCode, 'OTP 재등록');
+  const need = requireCurrentOtp(req.user.username, (req.body || {}).currentCode, 'OTP 재등록', { sid: req.user?.sid, purpose: 'rebind' });
   if (need) {
     auditTotpSelf(req, 'OTP 재등록 거부(본인 — 현재 코드 확인 실패)', { gate: totpFailAuditGate });
     return res.status(need.status).json(need.body);
@@ -391,12 +391,12 @@ authRouter.post('/totp/confirm', authMiddleware, (req, res) => {
     auditTotpSelf(req, 'OTP 등록 확정 거부(본인 — 등록 강제 아님)', { gate: totpFailAuditGate });
     return res.status(403).json({ ok: false, reason: '본인 OTP 등록은 등록이 필요한 세션에서만 할 수 있습니다 — 관리자에게 대리 등록을 요청하세요.' });
   }
-  if (!selfRebindVerified(req.user.username)) {
+  if (!selfRebindVerified(req.user.username, { sid: req.user?.sid, purpose: 'rebind' })) {
     auditTotpSelf(req, 'OTP 재등록 확정 거부(본인 — 현재 코드 확인 없음)', { gate: totpFailAuditGate });
     return res.status(403).json({ ok: false, needCurrentOtp: true, reason: '이미 OTP 가 등록된 계정입니다 — 재등록 시작(begin)에서 지금 OTP 코드를 확인한 뒤 10분 안에 확정하세요.' });
   }
   const r = confirmTotpEnroll(req.user.username, (req.body || {}).code, { actor: req.user.username, actorUser: req.user });
-  if (r.ok) clearSelfRebind(req.user.username);
+  if (r.ok) clearSelfRebind(req.user.username, { sid: req.user?.sid, purpose: 'rebind' });
   if (r.ok) auditTotpSelf(req, 'OTP 등록 확정(본인)');
   else auditTotpSelf(req, 'OTP 등록 확정 실패(본인)', { detail: r.reason || '', gate: totpFailAuditGate });
   res.status(r.ok ? 200 : 400).json(r);

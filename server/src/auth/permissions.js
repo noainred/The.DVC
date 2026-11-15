@@ -302,7 +302,7 @@ export function permissionsWriteRefusal({ reset = false } = {}) {
   return { status: e.readError ? 503 : 409, body: { ok: false, code: 'permissions-unreadable',
     reason: e.readError
       ? '권한 파일을 읽지 못하는 상태(파일 권한 · 소유자)라 저장하지 않았습니다 — 원본을 덮지 않습니다. 파일 권한을 고치고 재시작하세요.'
-      : '권한 파일이 손상돼 최소 권한으로 동작 중이라 부분 저장을 받지 않습니다 — 손상 보존본(.corrupt.*)을 되돌리고 재시작하거나, 서비스 점검에서 기본값으로 확정(지금 최소 권한 저장)하거나, 초기화하세요.' } };
+      : '권한 파일이 손상돼 최소 권한(operator · viewer 는 대시보드만 · admin CSV 끔)으로 동작 중이라 부분 저장을 받지 않습니다 — 손상 보존본(.corrupt.*)을 되돌리고 재시작하는 것이 가장 낫습니다. 서비스 점검의 기본값 확정은 지금의 최소 권한(CSV 끔 포함 — 되살리기는 super_admin)을 저장하고, 기본값 초기화는 super_admin 만 할 수 있습니다.' } };   // 22회차 D-11: 경로 안내 정정
 }
 
 function persistMatrix() {

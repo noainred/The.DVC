@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **751개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **752개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-15)
@@ -345,7 +345,7 @@
 | `BMSTOR_PUSH_TIMEOUT_MS` | `180000` |  | bmstor/poller.js |
 | `BMSTOR_SSH_TIMEOUT_MS` |  |  | bmstor/collect.js |
 
-## 보안 (17)
+## 보안 (18)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -362,6 +362,7 @@
 | `OTP_LOCKOUT_MS` | `10` |  | security/loginRateLimit.js |
 | `OTP_MAX_FAILS` | `5` |  | security/loginRateLimit.js |
 | `OTP_RATELIMIT_DISABLED` | `기본 아님('true' 일 때만 적용)` |  | security/loginRateLimit.js |
+| `SECRETS_KEY_LOST` | `기본 적용('true' 로 끄기)` |  | security/secretVault.js |
 | `SETTINGS_OWNERS` | `''` | ✅ | security/securitySettings.js |
 | `SSH_HOSTKEY_POLICY` | `미지정 — peer-trust.json 정책(새 설치 enforce · 기존 현장 observe)` |  | security/peerTrust.js |
 | `TLS_PEER_POLICY` | `미지정 — peer-trust.json 정책(새 설치 enforce · 기존 현장 observe)` |  | security/peerTrust.js |
@@ -940,4 +941,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 751
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 752

@@ -42,10 +42,11 @@ test('A-1 — AD bind 를 기다리는 동안 같은 계정 동시 로그인은 
 test('A-2 — 등록된 계정의 본인 재등록: 현재 코드 없으면 403 · 맞으면 begin → confirm · confirm 만 단독 거부', async () => {
   // 20회차 F1: 판정은 auth/otpRebind.js 하나(본인 경로 · 관리자 자기 대상 경로가 같이 쓴다)
   const src = fs.readFileSync(path.join(SRC, 'routes/auth.js'), 'utf8');
-  assert.match(src, /const need = requireCurrentOtp\(req\.user\.username, \(req\.body \|\| \{\}\)\.currentCode, 'OTP 재등록'\);/);
-  assert.match(src, /if \(!selfRebindVerified\(req\.user\.username\)\) \{/);
+  // 22회차 D-10: 기억은 세션 · 동작 단위
+  assert.match(src, /const need = requireCurrentOtp\(req\.user\.username, \(req\.body \|\| \{\}\)\.currentCode, 'OTP 재등록', \{ sid: req\.user\?\.sid, purpose: 'rebind' \}\);/);
+  assert.match(src, /if \(!selfRebindVerified\(req\.user\.username, \{ sid: req\.user\?\.sid, purpose: 'rebind' \}\)\) \{/);
   const rb = fs.readFileSync(path.join(SRC, 'auth/otpRebind.js'), 'utf8');
-  assert.match(rb, /const v = cur \? verifyUserOtp\(name, cur\) : \{ ok: false, reason: '현재 코드가 없습니다' \};/);
+  assert.match(rb, /const v = cur \? verifyUserOtp\(u\.username, cur\) : \{ ok: false, reason: '현재 코드가 없습니다' \};/);
   assert.match(rb, /return !!\(u && u\.totpEnabled && u\.totpSecret\);/);
 });
 

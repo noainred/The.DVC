@@ -621,8 +621,8 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | POST | `/perf/measure` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/admin/perfMonitor.js:47](../server/src/routes/admin/perfMonitor.js#L47) |
 | PUT | `/perf/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/admin/perfMonitor.js:31](../server/src/routes/admin/perfMonitor.js#L31) |
 | GET | `/permissions` | 역할 `admin` | [server/src/routes/admin/users.js:145](../server/src/routes/admin/users.js#L145) |
-| PUT | `/permissions` | 역할 `admin` | [server/src/routes/admin/users.js:207](../server/src/routes/admin/users.js#L207) |
-| POST | `/permissions/reset` | 역할 `admin` | [server/src/routes/admin/users.js:227](../server/src/routes/admin/users.js#L227) |
+| PUT | `/permissions` | 역할 `admin` | [server/src/routes/admin/users.js:209](../server/src/routes/admin/users.js#L209) |
+| POST | `/permissions/reset` | 역할 `admin` | [server/src/routes/admin/users.js:229](../server/src/routes/admin/users.js#L229) |
 | GET | `/portal-db` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/statusTools.js:110](../server/src/routes/admin/statusTools.js#L110) |
 | GET | `/portal-db/guide` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/statusTools.js:114](../server/src/routes/admin/statusTools.js#L114) |
 | GET | `/portal-db/health` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/statusTools.js:128](../server/src/routes/admin/statusTools.js#L128) |
@@ -644,8 +644,8 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | PUT | `/secrets/policy` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/opsSettings.js:193](../server/src/routes/admin/opsSettings.js#L193) |
 | GET | `/security/guest-scans` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:422](../server/src/routes/admin/backupNetSec.js#L422) |
 | PUT | `/security/guest-scans` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:433](../server/src/routes/admin/backupNetSec.js#L433) |
-| DELETE | `/security/guest-scans/:id` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:453](../server/src/routes/admin/backupNetSec.js#L453) |
-| POST | `/security/guest-scans/:id/run` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:454](../server/src/routes/admin/backupNetSec.js#L454) |
+| DELETE | `/security/guest-scans/:id` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:454](../server/src/routes/admin/backupNetSec.js#L454) |
+| POST | `/security/guest-scans/:id/run` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:455](../server/src/routes/admin/backupNetSec.js#L455) |
 | GET | `/security/login-fails` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:394](../server/src/routes/admin/backupNetSec.js#L394) |
 | POST | `/security/login-fails/run` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:412](../server/src/routes/admin/backupNetSec.js#L412) |
 | PUT | `/security/login-fails/settings` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:411](../server/src/routes/admin/backupNetSec.js#L411) |
@@ -671,16 +671,16 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/usage/settings` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/usage.js:62](../server/src/routes/admin/usage.js#L62) |
 | PUT | `/usage/settings` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/usage.js:74](../server/src/routes/admin/usage.js#L74) |
 | GET | `/usage/user/:user` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/usage.js:42](../server/src/routes/admin/usage.js#L42) |
-| PUT | `/user-tools/:username` | 역할 `admin` | [server/src/routes/admin/users.js:182](../server/src/routes/admin/users.js#L182) |
+| PUT | `/user-tools/:username` | 역할 `admin` | [server/src/routes/admin/users.js:184](../server/src/routes/admin/users.js#L184) |
 | GET | `/users` | 역할 `admin` | [server/src/routes/admin/users.js:103](../server/src/routes/admin/users.js#L103) |
 | POST | `/users` | 역할 `admin` | [server/src/routes/admin/users.js:113](../server/src/routes/admin/users.js#L113) |
 | DELETE | `/users/:username` | 역할 `admin` | [server/src/routes/admin/users.js:135](../server/src/routes/admin/users.js#L135) |
 | PATCH | `/users/:username` | 역할 `admin` | [server/src/routes/admin/users.js:124](../server/src/routes/admin/users.js#L124) |
-| DELETE | `/users/:username/password` | 역할 `admin` | [server/src/routes/admin/users.js:269](../server/src/routes/admin/users.js#L269) |
-| POST | `/users/:username/password` | 역할 `admin` | [server/src/routes/admin/users.js:260](../server/src/routes/admin/users.js#L260) |
-| POST | `/users/:username/totp/begin` | 역할 `admin` | [server/src/routes/admin/users.js:283](../server/src/routes/admin/users.js#L283) |
-| POST | `/users/:username/totp/confirm` | 역할 `admin` | [server/src/routes/admin/users.js:290](../server/src/routes/admin/users.js#L290) |
-| POST | `/users/:username/totp/disable` | 역할 `admin` | [server/src/routes/admin/users.js:300](../server/src/routes/admin/users.js#L300) |
+| DELETE | `/users/:username/password` | 역할 `admin` | [server/src/routes/admin/users.js:273](../server/src/routes/admin/users.js#L273) |
+| POST | `/users/:username/password` | 역할 `admin` | [server/src/routes/admin/users.js:263](../server/src/routes/admin/users.js#L263) |
+| POST | `/users/:username/totp/begin` | 역할 `admin` | [server/src/routes/admin/users.js:288](../server/src/routes/admin/users.js#L288) |
+| POST | `/users/:username/totp/confirm` | 역할 `admin` | [server/src/routes/admin/users.js:295](../server/src/routes/admin/users.js#L295) |
+| POST | `/users/:username/totp/disable` | 역할 `admin` | [server/src/routes/admin/users.js:305](../server/src/routes/admin/users.js#L305) |
 | GET | `/vcenter-order` | 역할 `admin` | [server/src/routes/admin/vcenters.js:130](../server/src/routes/admin/vcenters.js#L130) |
 | PUT | `/vcenter-order` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/vcenters.js:139](../server/src/routes/admin/vcenters.js#L139) |
 | GET | `/vcenter/relay-test` | 역할 `admin` | [server/src/routes/admin/statusTools.js:93](../server/src/routes/admin/statusTools.js#L93) |
@@ -1151,7 +1151,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/tools/credentials` | 역할 `admin` · `fullScopeOnly` · `reauth` | [server/src/routes/api/credentials.js:38](../server/src/routes/api/credentials.js#L38) |
 | DELETE | `/tools/credentials/:id` | 역할 `admin` · `fullScopeOnly` · `reauth` | [server/src/routes/api/credentials.js:58](../server/src/routes/api/credentials.js#L58) |
 | PUT | `/tools/credentials/:id` | 역할 `admin` · `fullScopeOnly` · `reauth` | [server/src/routes/api/credentials.js:48](../server/src/routes/api/credentials.js#L48) |
-| POST | `/tools/credentials/:id/test` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/credentials.js:66](../server/src/routes/api/credentials.js#L66) |
+| POST | `/tools/credentials/:id/test` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/credentials.js:68](../server/src/routes/api/credentials.js#L68) |
 | POST | `/tools/credentials/inspect-key` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/credentials.js:33](../server/src/routes/api/credentials.js#L33) |
 | GET | `/tools/current-users/combined` | 권한 `tools` | [server/src/routes/api/horizonSessions.js:325](../server/src/routes/api/horizonSessions.js#L325) |
 | GET | `/tools/curuser` | 권한 `tools` | [server/src/routes/api/curUser.js:57](../server/src/routes/api/curUser.js#L57) |

@@ -23,7 +23,7 @@ const run = (dir, code, env = {}) => {
   try { return JSON.parse(line); } catch { throw new Error(`${r.stdout}\n${r.stderr}`); }
 };
 
-test('M-1 — env 가 빠진 재시작: 키를 만들지 않고 · 이름만 고친 저장이 암호문을 지우지 않는다 · env 복구 후 그대로 복호', () => {
+test('M-1(22회차 반증 반영) — env 가 빠진 재시작: 키를 만들지 않고 · 비밀 파일 저장을 거절(파일 그대로) · env 복구 후 그대로 복호 · SECRETS_KEY_LOST 탈출', () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'sec21-'));
   try {
     fs.writeFileSync(path.join(d, 'secrets-policy.json'), JSON.stringify({ mode: 'encrypted', level: 2 }));
@@ -32,18 +32,37 @@ test('M-1 — env 가 빠진 재시작: 키를 만들지 않고 · 이름만 고
       const b = r.addVcenter({ id: 'vc-b', name: 'B', host: 'https://10.0.0.2', username: 'u', password: 'PwB-2!' });
       console.log(JSON.stringify({ a: a.ok, b: b.ok }));`, { SECRETS_KEY: KEY });
     assert.deepEqual(seed, { a: true, b: true });
-    assert.ok(fs.readFileSync(path.join(d, 'vcenters.json'), 'utf8').includes('enc$1$'), '봉인됐다(전제)');
+    const before = fs.readFileSync(path.join(d, 'vcenters.json'), 'utf8');
+    assert.ok(before.includes('enc$1$'), '봉인됐다(전제)');
     const noEnv = run(d, `const r = await import(${JSON.stringify(REG)});
+      const v = await import(${JSON.stringify(VAULT)});
       const list = r.loadRegistry(); let up;
       try { up = r.updateVcenter('vc-b', { name: 'B2', host: 'https://10.0.0.2', username: 'u' }); } catch (e) { up = { ok: false, code: e.code }; }
-      try { r.updateVcenter('vc-a', { name: 'A', host: 'https://10.0.0.9', username: 'u' }); } catch { /* 접속처 변경 */ }
-      console.log(JSON.stringify({ pw: list.map((v) => v.password), up: up.ok ?? false, code: up.code || null }));`);
+      console.log(JSON.stringify({ pw: list.map((x) => x.password), up: up.ok ?? false, code: up.code || null, missing: !!v.secretsKeyMissing() }));`);
     assert.deepEqual(noEnv.pw, ['', ''], 'env 없이 복호 실패(전제)');
+    assert.equal(noEnv.up, false); assert.equal(noEnv.code, 'SECRETS_KEY_MISSING', '저장을 거절한다(수정 전: 저장되며 암호문 소거)');
+    assert.equal(noEnv.missing, true);
     assert.ok(!fs.existsSync(path.join(d, 'secrets-key')), '봉인된 값이 있으면 새 키를 만들지 않는다(수정 전: 새 키 생성)');
+    assert.equal(fs.readFileSync(path.join(d, 'vcenters.json'), 'utf8'), before, '파일은 그대로');
     const back = run(d, `const r = await import(${JSON.stringify(REG)});
-      console.log(JSON.stringify(r.loadRegistry().map((v) => [v.id, v.name, v.password])));`, { SECRETS_KEY: KEY });
-    assert.equal(back[1][2], 'PwB-2!', '이름만 고친 vc-b 는 env 를 되돌리면 그대로(수정 전: \'\')');
-    assert.ok(!back[0][2], '접속처(host)를 바꾼 vc-a 는 옛 비밀을 승계하지 않는다(secretCarry 규약)');
+      console.log(JSON.stringify(r.loadRegistry().map((v) => v.password)));`, { SECRETS_KEY: KEY });
+    assert.deepEqual(back, ['PwA-1!', 'PwB-2!'], 'env 를 되돌리면 그대로');
+    // 키를 정말 잃었으면 명시적 탈출 — 새 키 · 저장 허용(옛 암호문은 지워진다)
+    const lost = run(d, `const r = await import(${JSON.stringify(REG)});
+      r.loadRegistry(); const up = r.updateVcenter('vc-b', { name: 'B3', host: 'https://10.0.0.2', username: 'u', password: 'NewPw-3!' });
+      console.log(JSON.stringify({ ok: up.ok }));`, { SECRETS_KEY_LOST: 'true' });
+    assert.equal(lost.ok, true); assert.ok(fs.existsSync(path.join(d, 'secrets-key')), 'SECRETS_KEY_LOST 면 새 키');
+  } finally { fs.rmSync(d, { recursive: true, force: true }); }
+});
+
+test('M-1 · D-9 — 평문 설치의 이름에 enc$1$ 글자가 있어도 봉인 흔적으로 보지 않는다(암호화 켜기가 막히지 않음)', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'sec21e-'));
+  try {
+    fs.writeFileSync(path.join(d, 'vcenters.json'), JSON.stringify({ vcenters: [{ id: 'vc-x', name: 'lab enc$1$ test', host: 'https://10.0.0.5', username: 'u', password: 'plain-pw' }] }));
+    const out = run(d, `const v = await import(${JSON.stringify(VAULT)});
+      let ok = true; try { v.saveSecretsPolicy({ mode: 'encrypted', level: 2 }); } catch (e) { ok = e.code || e.message; }
+      console.log(JSON.stringify({ ok, key: (await import('node:fs')).existsSync(${JSON.stringify(path.join(d, 'secrets-key'))}) }));`);
+    assert.equal(out.ok, true, JSON.stringify(out)); assert.equal(out.key, true);
   } finally { fs.rmSync(d, { recursive: true, force: true }); }
 });
 
@@ -131,4 +150,32 @@ test('L-5 · L-6 · L-7 — 파싱 오류 요약 · KDF 반복 상한 · 자가�
   assert.equal(r.ok, false); assert.match(r.reason, /상한/); assert.ok(ms < 1_000, `bcrypt 를 돌리지 않는다 ${ms.toFixed(0)}ms`);
   const { RELAX_SWITCHES } = await import('../src/security/selfCheck.js');
   for (const e of ['VEEAM_TLS_VERIFY', 'TLS_PEER_POLICY', 'SSH_HOSTKEY_POLICY']) assert.ok(RELAX_SWITCHES.some((x) => x.env === e), e);
+});
+
+test('22회차 반증 D-1 · D-10 · D-11 · D-12 — 공백 경로 인자 · 세션 · 동작 단위 기억 · 권한 손상 표지 · 저장 오류 사유', async () => {
+  const rb = fs.readFileSync(path.join(HERE, '../src/auth/otpRebind.js'), 'utf8');
+  assert.match(rb, /const userOf = \(name\) => getUser\(String\(name \?\? ''\)\.trim\(\)\);/);
+  assert.match(rb, /const okKey = \(username, \{ sid = '', purpose = '' \} = \{\}\) => `\$\{username\}\|\$\{String\(sid \|\| ''\)\}\|\$\{String\(purpose \|\| ''\)\}`;/);
+  const us = fs.readFileSync(path.join(HERE, '../src/routes/admin/users.js'), 'utf8');
+  for (const p of ["'비밀번호 설정', 'password'", "'로그인 차단', 'clear'", "'OTP 재등록', 'rebind'", "'OTP 해제', 'disable'"]) assert.ok(us.includes(`denySelfWithoutOtp(req, res, ${p})`), p);
+  assert.match(us, /loadError: \{ code: r\.body\.code, reason: r\.body\.reason \}/);
+  const bn = fs.readFileSync(path.join(HERE, '../src/routes/admin/backupNetSec.js'), 'utf8');
+  assert.match(bn, /try \{ res\.json\(saveGuestScan\(b\)\); \} catch \(e\)/);
+  const cr = fs.readFileSync(path.join(HERE, '../src/routes/api/credentials.js'), 'utf8');
+  assert.match(cr, /try \{ gone = deleteCredential\(String\(req\.params\.id\)\); \}/);
+  // 동작: 같은 계정 · 다른 세션은 기억을 쓰지 못한다
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'sec22-'));
+  try {
+    const out = run(d, `const A = await import(${JSON.stringify(path.join(HERE, '../src/auth/auth.js'))});
+      const T = await import(${JSON.stringify(path.join(HERE, '../src/auth/totp.js'))});
+      const R = await import(${JSON.stringify(path.join(HERE, '../src/auth/otpRebind.js'))});
+      A.createUser({ username: 'adm9', role: 'admin', password: 'Passw0rd!Passw0rd!z' }, { trusted: true });
+      const b = A.beginTotpEnroll('adm9', '', { trusted: true }); A.confirmTotpEnroll('adm9', T.generateToken(b.secret), { trusted: true });
+      const now = Math.floor(Date.now() / 1000 / 30);
+      const need = R.requireCurrentOtp(' adm9 ', T.generateToken(A.getUser('adm9').totpSecret, { counter: now + 1 }), 'x', { sid: 's1', purpose: 'rebind' });
+      console.log(JSON.stringify({ need, same: R.selfRebindVerified('adm9', { sid: 's1', purpose: 'rebind' }), otherSid: R.selfRebindVerified('adm9', { sid: 's2', purpose: 'rebind' }), otherPurpose: R.selfRebindVerified('adm9', { sid: 's1', purpose: 'password' }), selfTrim: R.isSelfTarget({ user: { username: 'adm9' } }, ' adm9') }));`);
+    assert.equal(out.need, null); assert.equal(out.same, true);
+    assert.equal(out.otherSid, false, '다른 세션은 기억을 쓰지 못한다'); assert.equal(out.otherPurpose, false, '다른 동작도');
+    assert.equal(out.selfTrim, true, '앞뒤 공백 인자도 본인');
+  } finally { fs.rmSync(d, { recursive: true, force: true }); }
 });

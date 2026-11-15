@@ -398,6 +398,10 @@ export default function UserAdmin() {
               <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={resetPerms}>기본값</button>
             </div>
           </div>
+          {/* 전체 점검 22회차 반증 D-11: 권한 파일을 못 읽어 최소 권한으로 동작 중이면 밝힌다 — 아래 행은 저장된 설정이 아니라 잠금 값이다 */}
+          {perms.loadError ? (
+            <div style={{ marginBottom: 8, minWidth: 0, overflowWrap: 'anywhere' }}><span className="badge amber">권한 파일 못 읽음</span> <span className="muted" style={{ fontSize: 12 }}>{perms.loadError.reason}</span></div>
+          ) : null}
           <div className="muted" style={{ fontSize: 12, marginBottom: 10, lineHeight: 1.7 }}>
             <BoldText text={MATRIX_NOTE} />
           </div>

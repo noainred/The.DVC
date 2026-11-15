@@ -246,7 +246,7 @@
 | `server/src/mock/demo/edge.js` | 데모(DATA_SOURCE=mock) 엣지(수집 서버) 그룹(v2.708). | 23 | 12 | 2 |
 | `server/src/mail/settings.js` | 포탈 공용 메일(SMTP) 설정 (`mail.json`, v2.454). | 21 | 12 | 21 |
 | `server/src/audit.js` | Audit log — records security/operational actions (who did what, when) so the portal's write operations (VM 생성, 원격접속, 설정 변경 등)이 추적된다. Appended to CONFI… | 133 | 11 | 43 |
-| `server/src/auth/auth.js` | (머리 주석 없음) | 145 | 10 | 57 |
+| `server/src/auth/auth.js` | (머리 주석 없음) | 145 | 10 | 58 |
 | `server/src/runtime-settings.js` | Runtime-adjustable settings that can be changed from the portal UI (and persisted), overriding the env defaults. Currently: the data source (mock \| li… | 19 | 10 | 23 |
 | `server/src/security/tlsTrust.js` | 장비 TLS 상대 인증(2026-10-09 검토 S-02) — 자격증명을 보내는 HTTPS 연결이 **정말 그 장비인지** 확인한다. | 14 | 10 | 4 |
 | `server/src/storage/registry.js` | 스토리지 장비 등록부(v2.302). | 28 | 9 | 39 |
