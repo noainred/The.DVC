@@ -9,6 +9,7 @@ import { WHY_TEXT } from './bmFolders/whyText.js';
 import { REASON_TEXT } from './bmCollectText.js';
 import { FOCUS_MISS_TEXT } from './bmPerfOpsText.js';
 import { NO_PATH_REASON } from '../../../../server/src/bmusage/targets.js';
+import { agentNoteOf, AGENT_UNKNOWN_TEXT, AGENT_UNKNOWN_HINT } from './bmOsSuggestText.js';
 
 const SKIP_NEW = ['idrac-disabled', 'os-disabled', 'os-edge'];
 const IDRAC_NEW = ['forbidden', 'ids-unmatched', 'cert-untrusted'];
@@ -32,5 +33,12 @@ describe('점검 반복 1회차 — 새 사유 문구', () => {
     const all = [...SKIP_NEW.flatMap((c) => [NO_PATH_REASON[c], SKIP_LABEL[c], MISSING_MARK[c], MISS_REASON_TEXT[c], WHY_TEXT[c].s, WHY_TEXT[c].l, WHY_TEXT[c].a, ...missingFootnotes([{ missing: [c] }])]),
       ...IDRAC_NEW.flatMap((c) => [REASON_TEXT[c].label, REASON_TEXT[c].action, FOCUS_MISS_TEXT[c]])];
     for (const v of all) expect(String(v).includes('`')).toBe(false);
+  });
+  it('OS 주소 제안 — 어느 엣지인지 모르면 한 줄(못 읽음 · 항목 없음) · 아니면 빈 글자', () => {
+    expect(agentNoteOf({ agentUnknown: 'unread' })).toMatch(/못 읽음/);
+    expect(agentNoteOf({ agentUnknown: 'not-found' })).toMatch(/수집 서버 없음/);
+    for (const r of [{}, { agent: 'edge-a' }, { agentUnknown: '__proto__' }, null]) expect(agentNoteOf(r)).toBe('');
+    for (const v of [...Object.values(AGENT_UNKNOWN_TEXT), AGENT_UNKNOWN_HINT]) { expect(v.includes('`')).toBe(false); expect(v.length).toBeLessThan(80); }
+    expect(AGENT_UNKNOWN_HINT).toMatch(/중앙 직접/);
   });
 });

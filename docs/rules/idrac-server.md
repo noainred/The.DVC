@@ -1659,14 +1659,18 @@
   - **D4 엣지(agent) OS 등록**: bmstor 는 agent 있는 등록을 그 엣지로 보낸다 — 중앙은 그 등록으로 SSH 하지 않는다. 쓸 수 있는 중앙 iDRAC 경로가 없으면 `edge-delegated`
     (`delegatedBy:'os-registry'` · 이름은 `canonicalAgentRef`) · 있으면 iDRAC 만 + missing `os-edge`. 엣지 노드는 빈 값 · 자기 이름 등록만. iDRAC 등록부를 못 읽은 동안은 위임을 단정하지 않는다.
     불변식(시험 ③ — 생성 입력 2,000 · 작업 때 기준판 targets.js 4,000 입력 대조): 켜진 · agent 없는 등록으로 수집하던 대상은 그대로 · 새 대상은 상대가 빠져 풀린 키 충돌뿐.
-    ⚠ **남은 것(메인 결정 대기)**: OS 주소 제안(`bmfolders/osSuggest.js` · `routes/admin/bmOsSuggest.js`)은 원격 수집 서버 출처 서버(collectorId · remoteAgent 없음)를 agent '' 로 등록한다.
-    그 칸은 bmstor 잡의 엣지 인출 이름(엣지 `config.agent.name` — `agent/bmstorWorker.js`)이어야 하는데 v2.961 색인의 이름(name)과 인증 이름(등록 id 가 원칙 — `collector/registry.js` 정체 대조)이
-    다를 수 있어 바꾸지 않았다(주소만 · 비활성 등록이라 사람이 켜기 전에는 접속하지 않는다).
+    **OS 주소 제안의 엣지 칸(메인 결정 — 고침)**: 그 칸은 bmstor 잡의 엣지 인출 이름(엣지 `config.agent.name` — `agent/bmstorWorker.js` · 수집 서버 등록 id 가 원칙 — `collector/registry.js` 정체 대조)이다.
+    예전에는 원격 수집 서버 출처 서버(collectorId · remoteAgent 없음)를 agent '' = 중앙 직접으로 등록했다. 이제 `osSuggest.suggestAgentOf`: fleet 경로 → remoteAgent · 원격 출처 + 등록부를 읽었고 그 id 항목이 있음 →
+    **그 항목의 id(원형)**(v2.961 색인의 name 이 아니다 — name ≠ id 인 엣지는 잡을 가져가지 못한다) · 그 밖(못 읽음 · 항목 없음) → '' + `agentUnknown` 표지(화면 상태 칸 한 줄 ‘어느 엣지가 수집하는지 모름’).
+    제안 등록에 계정을 넣고 켜면 대상 해석은 edge-delegated(정규화 이름)로 남는다(시험 bmUsageLoop1 D4 ③ — 실제 라우트 · 등록부 · currentTargets).
   - **D1 누적 차분의 장비 동일성**: `_prev` 는 키 하나로 들고 다닌다 — 같은 키의 OS 등록 주소가 다른 장비로 바뀌면 이전 장비 누적과 차분해 가짜 값(재현 disk_busy 100 · 8.7 GB/s)이 원시 · 롤업에 남았다.
     직전 표본에 `osDev{ep(host:port) · boot(/proc/stat btime) · hn(uname)}` · `idracDev{reg · host}` 를 싣고 다르면 첫 표본(null + 노트). 새 SSH 호출 없음(##STAT · ##HOST 에 이미 있다).
     btime 은 30초 넘게 바뀌어야 재부팅(시계 보정 흔들림 — 추정). 식별 없는 직전 표본(업그레이드 직후)은 예전처럼 차분한다(모름 ≠ 다른 장비).
   - **D2 df 시한**: ##DF · ##DFI 의 df 도 `timeout 2`(멈춘 마운트 하나가 주 명령 전체를 exec 시한에 걸리게 했다 — 전 구획 유실 · 사유 not-linux). 8b 산수가 30초에 꽉 차 있어
-    주 명령 시한 30 → 34초 · 집중 예산 45 → 49초(시한 50초). 최악이면 주 명령 뒤 Top-N · 피크 창 · Windows 재시도는 예산 부족으로 건너뛴다(예전엔 5초 남았다). D 상태(깰 수 없는 대기)면 timeout 도 못 끝낸다.
+    주 명령 시한 30 → 34초 · 집중 예산 45 → 49초(시한 50초 — 메인 결정: 그대로 둔다). **동작 차이(정직 기록)**: 세션 예산은 그대로(50초 − 연결 15초 = exec 35초)라 주 명령이 최악(34초)까지 가면
+    뒤에 남는 시간이 약 1초다 — 피크 창(planWindow) · 덧붙인 exec(7a 로그 · 집중 스냅샷) · Top-N exec · Windows 재시도는 MIN_SLICE(5초) 미만이라 그 주기 건너뛴다(사유 'budget' 등 — 조용히 생략하지 않는다).
+    예전(30초)에도 최악이면 남는 시간이 5초에서 왕복만큼 모자라 대부분 같은 경계였다(추정 — 실측 아님). 주 명령이 최악까지 가지 않는 보통 주기는 예전과 같다. 장비 시한(60초) · 집중 시한(50초)은 그대로이고
+    모든 exec 는 같은 세션 예산(slice)에 묶여 합이 예산을 넘지 않는다. D 상태(깰 수 없는 대기)면 timeout 도 df 를 못 끝낸다.
   - **D5 사유**: (a) 주 명령 exec 거부(시한 · 채널 · 출력 상한)는 `execError` 로 남겨 timeout · ssh-error · error(예전 전부 not-linux) — 오류 원문(명령 전문)은 싣지 않는다.
     (b) iDRAC `forbidden`(403) · `ids-unmatched` · `cert-untrusted`(장비 신뢰) 새 code — 수집 건강 · 집중 · 중앙 정제 · 중앙 집중 인출 열거와 웹 문구를 함께. 구버전 중앙은 모르는 code 의 사유 줄을 버리고(실패 수는 그대로) 집중 결측은 'error' 로 본다.
   - **D6**: 자격 해석이 막아(authErrorCode) · 주소가 없어 접속하지 않은 서버는 SSH 소요에 넣지 않는다(정지 서버와 같은 원칙).

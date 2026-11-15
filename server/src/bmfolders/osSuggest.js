@@ -87,14 +87,34 @@ export function indexScanByName(rows, want) {
 }
 
 /**
+ * 점검 반복 1회차(메인 결정) — 등록할 OS 주소의 **엣지 칸(bmstor agent)** = 그 서버를 수집하는 엣지가 bmstor 잡을 가져갈 때 쓰는 이름(엣지 config.agent.name —
+ *   agent/bmstorWorker.js · 수집 서버 등록 id 가 원칙 — collector/registry.js 의 정체 대조). 예전에는 remoteAgent 만 봐서 원격 수집 서버 출처 서버(collectorId 만 있음 —
+ *   v2.961 엣지 위임 서버)를 agent '' = ‘중앙 직접’ 으로 등록했다(계정을 넣고 켜면 중앙이 법인 사설 주소로 SSH).
+ *   ① fleet 경로(remoteAgent 있음) → remoteAgent 그대로 ② 원격 수집 서버 출처(remoteAgent 없음 · collectorId 있음) · 수집 서버 등록부를 읽었고 그 id 항목이 있음 → 그 항목의 id(원형)
+ *   ③ 그 밖(등록부 못 읽음 · 항목 없음) → '' 그대로 + agentUnknown('unread' | 'not-found') 표지 — 사람이 켜기 전에 ‘어느 엣지인지 모름’ 을 본다(이름을 추측하지 않는다).
+ * @returns {{ agent:string, agentUnknown?:'unread'|'not-found' }}
+ */
+export function suggestAgentOf(m, remoteCollectors) {
+  const ra = t(m?.remoteAgent);
+  if (ra) return { agent: ra };
+  const cid = t(m?.collectorId);
+  if (!cid) return { agent: '' };
+  const rc = remoteCollectors;
+  if (!rc || rc.readable !== true || !(rc.byId instanceof Map)) return { agent: '', agentUnknown: 'unread' };
+  const hit = rc.byId.get(cid.toLowerCase());
+  return hit && t(hit.id) ? { agent: t(hit.id) } : { agent: '', agentUnknown: 'not-found' };
+}
+
+/**
  * 제안 행 만들기(순수).
  * @param {object} p
  * @param {object[]} p.members   membersOf(g).members
  * @param {Iterable} p.scanRows  스캔 결과 행(getScanResults 의 값들)
  * @param {object}   p.osIndex   bmusage/targets.js indexOsHosts(OS 등록 전부 — 주소만 등록 포함)
  * @param {function} p.pickOsEntry bmusage/targets.js pickOsEntry
+ * @param {object|null} [p.remoteCollectors] insights/fleetInventory.js readRemoteCollectorIndex() — 원격 수집 서버 출처 서버의 엣지 칸(suggestAgentOf). 없으면 ‘못 읽음’.
  */
-export function buildOsSuggest({ members = [], scanRows = [], osIndex = null, pickOsEntry = null, corpsOf = null } = {}) {
+export function buildOsSuggest({ members = [], scanRows = [], osIndex = null, pickOsEntry = null, corpsOf = null, remoteCollectors = null } = {}) {
   const corpMemo = new Map();
   const corpsFor = (ag) => { if (typeof corpsOf !== 'function') return null; if (!corpMemo.has(ag)) { let v = null; try { v = corpsOf(ag); } catch { v = null; } corpMemo.set(ag, v instanceof Set ? v : null); } return corpMemo.get(ag); };
   const sameCorp = (c, m) => c.agent === agentKey(m.remoteAgent) || !!(t(m.corp) && corpsFor(c.agent)?.has(t(m.corp)));
@@ -120,7 +140,7 @@ export function buildOsSuggest({ members = [], scanRows = [], osIndex = null, pi
     }
     counts[state] += 1;
     rows.push({
-      key: m.key, corp: t(m.corp), name: t(m.name), serviceTag: t(m.serviceTag), mgmtHost: t(m.mgmtHost), agent: t(m.remoteAgent),
+      key: m.key, corp: t(m.corp), name: t(m.name), serviceTag: t(m.serviceTag), mgmtHost: t(m.mgmtHost), ...suggestAgentOf(m, remoteCollectors),
       state, cands: cands.slice(0, 8),
       ...(reg ? { reg: { host: t(reg.host), addrOnly: reg.addrOnly === true, id: t(reg.id) } } : {}),
     });

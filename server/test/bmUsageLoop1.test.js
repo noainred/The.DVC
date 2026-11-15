@@ -380,3 +380,49 @@ test('의심 2 — 물리서버 폴더 사유 색인: 같은 키의 가상화 �
   assert.equal(W.usageWhyOf({ kind: 'bm', corp: 'vcA', usageKey: 'E1', usage: { state: 'unread' } }, ix2).code, 'edge-no-record');
   assert.equal(W.usageWhyOf({ kind: 'bm', corp: 'vcA', usageKey: 'T1', usage: { state: 'unread' } }, ix2).code, 'no-record');
 });
+
+/* ── D4 후속(메인 결정) — OS 주소 제안의 엣지 칸 ───────────────────────── */
+test('D4 ② OS 주소 제안 엣지 칸 — 원격 출처 · 등록부 정상 → 수집 서버 id(원형) · 못 읽음 · 항목 없음 → \'\' + 모름 표지 · fleet 경로 → remoteAgent', async () => {
+  const OSG = await import('../src/bmfolders/osSuggest.js');
+  const m = (o) => ({ kind: 'bm', key: `st:${o.tag}`, corp: 'vcA', name: o.name, serviceTag: o.tag, remoteAgent: o.ra ?? '', collectorId: o.cid ?? '', mgmtHost: '' });
+  const scan = (ip, name, agent = '') => ({ ip, openPorts: [22], hostname: name, agent, lastSeen: 1 });
+  const build = (members, remoteCollectors) => OSG.buildOsSuggest({ members, scanRows: [scan('10.7.0.7', 'db07'), scan('10.7.0.8', 'db08', 'edge-kr')], osIndex: T.indexOsHosts([], { includeAddrOnly: true }), pickOsEntry: T.pickOsEntry, remoteCollectors });
+  const rows = (r) => Object.fromEntries(r.rows.map((x) => [x.name, x]));
+  const ok = rows(build([m({ tag: 'T7', name: 'db07', cid: 'EDGE-PL-ID' }), m({ tag: 'T8', name: 'db08', ra: 'edge-kr' })], RC));
+  assert.equal(ok.db07.agent, 'edge-pl-id', '수집 서버 등록 id(원형 — 대소문자 무시로 찾고 등록부 값을 쓴다)'); assert.equal(ok.db07.agentUnknown, undefined);
+  assert.equal(ok.db07.state, 'suggest');
+  assert.equal(ok.db08.agent, 'edge-kr', 'fleet 경로는 remoteAgent 그대로');
+  const unread = rows(build([m({ tag: 'T7', name: 'db07', cid: 'edge-pl-id' })], { readable: false, byId: new Map() }));
+  assert.deepEqual([unread.db07.agent, unread.db07.agentUnknown], ['', 'unread']);
+  assert.deepEqual([rows(build([m({ tag: 'T7', name: 'db07', cid: 'c-gone' })], RC)).db07.agentUnknown], ['not-found']);
+  assert.deepEqual(OSG.suggestAgentOf(m({ tag: 'T9', name: 'x' }), RC), { agent: '' }, '중앙 수집 서버는 빈 칸(표지 없음)');
+});
+
+test('D4 ③ 실제 경로 — 제안 등록(실제 라우트 · 등록부) → 사람이 계정을 넣고 켬 → 대상 해석은 edge-delegated(정규화 이름) · 중앙 SSH 없음', async (t) => {
+  const { registerBmOsSuggest } = await import('../src/routes/admin/bmOsSuggest.js');
+  const R = await import('../src/bmstor/registry.js');
+  const h = {};
+  const rt = { get: (p, ...f) => { h[`GET ${p}`] = f.at(-1); }, post: (p, ...f) => { h[`POST ${p}`] = f.at(-1); } };
+  const member = { kind: 'bm', key: 'st:T7', corp: 'vcA', name: 'db07', serviceTag: 'T7', remoteAgent: '', collectorId: 'edge-pl-id', mgmtHost: '' };
+  registerBmOsSuggest(rt, { D: { snap: () => ({ vcenters: [] }), members: async () => [member], corpsOf: null, remoteCollectors: () => RC,
+    getScanResults: () => ({ a: { ip: '10.7.0.7', openPorts: [22], hostname: 'db07', agent: '', lastSeen: 1 } }) } });
+  const res = { code: 200, body: null, status(c) { this.code = c; return this; }, json(b) { this.body = b; return this; } };
+  await h['POST /ipam/scan/bm-os-suggest/apply']({ body: { items: [{ key: 'st:T7', ip: '10.7.0.7' }] }, user: { username: 't' }, ip: '' }, res);
+  assert.equal(res.code, 200, JSON.stringify(res.body)); assert.equal(res.body.added, 1);
+  const e0 = R.listBmServersRaw().find((x) => x.host === '10.7.0.7');
+  assert.deepEqual([e0.agent, e0.enabled, e0.addrOnly], ['edge-pl-id', false, true], '주소만 · 비활성 · 엣지 칸 = 수집 서버 id');
+  // 사람이 설정 › 베어메탈 스토리지에서 계정을 넣고 켠다(화면은 행의 엣지 칸을 그대로 보낸다)
+  const sv = R.saveBmServer({ id: e0.id, name: e0.name, host: e0.host, port: 22, username: 'mon', password: 'pw', mounts: ['/'], agent: e0.agent, vcenterId: e0.vcenterId, enabled: true });
+  assert.equal(sv.ok, true, JSON.stringify(sv));
+  const e1 = R.listBmServersRaw().find((x) => x.id === e0.id);
+  assert.equal(e1.addrOnly, undefined, '계정이 생기면 주소만 표지가 지워진다'); assert.equal(e1.enabled, true);
+  fs.writeFileSync(path.join(DIR, 'bmusage-settings.json'), JSON.stringify({ enabled: true, corps: { vcA: true }, osSsh: true, idracTelemetry: true }));
+  (await import('../src/bmusage/settings.js'))._resetForTest();
+  const P = await import('../src/bmusage/poller.js');
+  P._setFleetForTest(async () => ({ bareMetal: [{ serverId: 'remote:edge-pl-id:7', name: 'db07', serviceTag: 'T7', vcenterId: 'vcA', source: 'remote', collectorId: 'edge-pl-id' }], virtualizationHosts: [], remoteCollectors: RC }));
+  t.after(() => P._setFleetForTest(null));
+  const tg = await P.currentTargets();
+  assert.ok(!tg.targets.some((x) => x.key === 'T7'), '중앙이 법인 사설 주소로 SSH 하지 않는다(예전: 제안 등록 agent \'\' → 켜면 paths [\'os\'])');
+  const s = tg.skipped.find((x) => x.key === 'T7');
+  assert.deepEqual([s.reason, s.agent, s.delegatedBy], ['edge-delegated', 'edge-pl', 'os-registry'], '엣지 위임 · 이름은 수집 서버 등록부 name 으로 정규화');
+});
