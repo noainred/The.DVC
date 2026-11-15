@@ -17,7 +17,7 @@ import { unitText } from '../unitText.js';
 import { shortStamp } from './bmOpsText.js';
 import {
   SCOPE_ORDER, SCOPE_TEXT, STATUS_TEXT, TARGET_KIND_TEXT, WEEKDAY_OPTIONS, NTH_OPTIONS, TZ_OPTIONS, DEPLOY_STATUS_TEXT,
-  scheduleText, statusLine, targetText, scopesText, countsText, leakText, formToBody, emptyForm, windowToForm, approvalNote, confirmOwnerNote, limitsNote, maintHonest, durText,
+  scheduleText, statusLine, targetText, scopesText, countsText, leakText, formToBody, emptyForm, windowToForm, approvalNote, confirmOwnerNote, limitsNote, maintHonest, durText, deployTruncatedNote,
 } from './bmMaintText.js';
 import './bmOps.css';
 import './bmPerfOps.css';
@@ -199,7 +199,8 @@ export default function BmMaintPanel({ vcenters = [] }) {
             <tbody>{resp.deploy.edges.map((e) => (
               <tr key={e.agent}>
                 <td data-sort={e.agent}>{e.agent}</td>
-                <td data-sort={e.status} style={{ color: toneVar(DEPLOY_STATUS_TEXT[e.status]?.tone || 'idle') }}>{DEPLOY_STATUS_TEXT[e.status]?.label || e.status}{e.status === 'old' && resp.deploy.minEdgeVersion ? ` · v${resp.deploy.minEdgeVersion} 이상 필요` : ''}</td>
+                <td data-sort={e.status} style={{ color: toneVar(DEPLOY_STATUS_TEXT[e.status]?.tone || 'idle') }}>{DEPLOY_STATUS_TEXT[e.status]?.label || e.status}{e.status === 'old' && resp.deploy.minEdgeVersion ? ` · v${resp.deploy.minEdgeVersion} 이상 필요` : ''}
+                  {deployTruncatedNote(e) && <div className="bmo-note" style={{ color: toneVar('warn') }}>{deployTruncatedNote(e)}</div>}</td>
                 <td data-sort={e.lastPullAt ?? ''}>{e.lastPullAt ? shortStamp(e.lastPullAt) : '—'}</td>
                 <td data-sort={e.envelope?.n ?? ''}>{e.envelope ? `${unitText(e.envelope.n, '개')}${e.envelope.stale ? ' · 오래됨' : ''}${e.envelope.unreadable ? ' · 읽지 못함' : ''}` : '—'}</td>
                 <td data-sort={e.envelope?.leak ?? ''}>{e.envelope?.leak == null ? '—' : `${e.envelope.leak}건`}</td>

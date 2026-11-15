@@ -1019,3 +1019,36 @@ export function lastPruneNote(lp, now = Date.now()) {
   const del = raw == null && daily == null ? '' : ` — 원시 ${raw == null ? '—' : raw.toLocaleString()}행 · 롤업 ${daily == null ? '—' : daily.toLocaleString()}행 삭제`;
   return `마지막 정리 ${when}${del}${lp.done === false ? ' (다음 정리에서 이어서 지웁니다)' : ''}`;
 }
+
+/**
+ * 점검 반복 5회차 D2 · D3 — 마지막 주기 알림 한 줄. 서버는 발송을 대기열에 넣고 주기를 기다리지 않는다(last.alerts.queued = 넣은 수) ·
+ *   보냄 · 실패 · 정책상 안 보냄 · 보내는 중 · 재시도 예약은 결과가 온 뒤 alertState.delivery 가 센다(받은 채널 기준 — 실패를 ‘발송’ 으로 세지 않는다).
+ *   옛 서버(queued 없음 · sent 만)는 예전 문구. 값이 없으면 말하지 않는다(null).
+ */
+export function alertCycleText(last = null, delivery = null) {
+  if (!last) return null;
+  const capped = Number(last.capped) > 0 ? ` (상한으로 ${last.capped}건 생략)` : '';
+  if (last.queued == null) return Number(last.sent) > 0 || Number(last.over) > 0 ? `알림 ${Number(last.sent) || 0}건 발송${capped}` : null;
+  if (!(Number(last.queued) > 0) && !(Number(last.over) > 0)) return null;
+  const d = delivery && typeof delivery === 'object' ? delivery : null;
+  const parts = [];
+  if (d) {
+    parts.push(`보냄 ${Number(d.sent) || 0}`);
+    if (Number(d.failed) > 0) parts.push(`실패 ${d.failed}${Number(d.retry) > 0 ? `(재시도 예약 ${d.retry})` : ''}`);
+    if (Number(d.skipped) > 0) parts.push(`안 보냄 ${d.skipped}(억제 · 채널 꺼짐 등)`);
+    if (Number(d.pending) > 0) parts.push(`보내는 중 ${d.pending}`);
+  }
+  return `알림 ${Number(last.queued) || 0}건${parts.length ? ` — ${parts.join(' · ')}` : ''}${capped}`;
+}
+/**
+ * 점검 반복 5회차 D1 — 엣지 보관분이 엣지 상한에서 잘렸는가(봉투 truncated — 서버가 범위 계정에는 수 대신 true 만 준다).
+ *   관리자 · 전체 범위: ‘n대 중 m대만 가져옴’ · 범위 계정: ‘일부만 가져옴’(다른 법인 대수를 말하지 않는다). 잘리지 않았으면 null.
+ */
+export function edgeTruncatedText(row = {}) {
+  const tr = row?.truncated;
+  if (tr === true) return '엣지 상한으로 일부만 가져옴';
+  const n = Number(tr);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const m = Array.isArray(row?.targets) ? row.targets.length : 0;
+  return `${(m + n).toLocaleString('ko-KR')}대 중 ${m.toLocaleString('ko-KR')}대만 가져옴(엣지 상한)`;
+}
