@@ -145,6 +145,23 @@ test('② 백필 — 요약 없는 원본 분만 · 못 읽은 묶음은 빈 요
   assert.equal(empties.length, 1);
   const back = await L.sumRowsFor(id, m0 * 60_000, (m0 + 60) * 60_000, 'm');
   assert.equal(back.length, 45, '빈 요약은 조회에서 뺀다(수집하지 않은 칸 — 0 이 아니다)');
+  // 백필한 분의 시간도 1시간 요약 할 일이 된다(변이 — 할 일을 적지 않으면 30일 화면이 비었다)
+  assert.ok(rollup.dirtyCount() >= 1, '백필 뒤 1시간 할 일');
+  await rollup.rollupTick(NOW, 100);
+  assert.ok((await db.readSum60(id, Math.floor(m0 / 60), Math.floor((m0 + 50) / 60))).length >= 1, '백필한 시간의 1시간 요약');
+});
+
+test('② 기록기 — 쓴 1분 요약의 시간을 할 일로 적는다(끝난 시간이면 다음 1시간 요약 틱에 쓴다)', async () => {
+  store._resetForTest(); rollup._resetForTest(); recorder._resetForTest();
+  const id = 'fm-hist-r';
+  const t0 = HOUR - 2 * 3_600_000 + 5 * 60_000;
+  store.ingestSample(id, t0, { cpu: { pct: 33, usr: 33, sys: 0, iow: 0, stl: 0 } }, null, t0 + 500);
+  store.ingestSample(id, t0 + 60_000, { cpu: { pct: 44, usr: 44, sys: 0, iow: 0, stl: 0 } }, null, t0 + 60_500); // 앞 분이 닫힌다
+  assert.equal(rollup.dirtyCount(), 0);
+  await recorder.recordTick(NOW);
+  assert.ok(rollup.dirtyCount() >= 1, '기록기가 쓴 1분 요약의 시간 → 할 일');
+  assert.ok((await rollup.rollupTick(NOW)) >= 1);
+  assert.equal(SUM.sumCol(SUM.decodeSum((await db.readSum60(id, Math.floor(t0 / 3_600_000), Math.floor(t0 / 3_600_000)))[0].data), 'c.pct').a, 33);
 });
 
 test('② 정리 — 보관 기간 밖 요약 · 사건도 지운다 · 종료 쓰기는 모르는 kind 를 원본 표에 넣지 않는다', async () => {
@@ -208,6 +225,18 @@ test('③ 긴 구간 서버 상세 · 겹쳐 보기 — 그때 없던 칸은 nul
   const rid = 'fm-hist-d';
   const r2 = await L.longServer(rid, Q.normWindow({ win: 360 }, NOW, { long: true }), { cmp: '7d' }, NOW);
   assert.ok(r2.overlay.cpu.every((v) => v == null), '지난주 이 시간에는 기록이 없다 — 칸을 지어내지 않는다');
+  // 어제 같은 시간 — 하루 앞의 기록을 같은 칸으로 옮긴다(지금 구간에는 기록이 없다)
+  const yid = 'fm-hist-y';
+  const yMin = MIN(NOW - 86_400_000 - 30 * 60_000);
+  assert.ok((await db.writeBlocks([sumRow(yid, yMin, { 'c.pct': 42, 'm.pct': 61 })])).ok);
+  L._resetForTest();
+  const ry = await L.longServer(yid, Q.normWindow({ win: 360 }, NOW, { long: true }), { cmp: '1d' }, NOW);
+  assert.ok(ry.charts.band.avg.every((v) => v == null), '지금 구간에는 기록이 없다');
+  assert.deepEqual(ry.overlay.cpu.filter((v) => v != null), [42], '어제 기록이 같은 자리 칸에 하나');
+  assert.deepEqual(ry.overlay.mem.filter((v) => v != null), [61]);
+  const k = ry.overlay.cpu.findIndex((v) => v != null);
+  const step = (6 * 3_600_000) / ry.points;
+  assert.equal(k, Math.floor(((yMin * 60_000 + 30_000 + 86_400_000) - (NOW - 6 * 3_600_000)) / step), '하루 뒤로 옮긴 시각의 칸');
 });
 
 test('③ 데모 요약 비용 — 개요 20대 × 24시간이 이벤트 루프를 오래 막지 않는다', async () => {
@@ -275,7 +304,7 @@ test('④ 사건 목록 — 기록된 사건 + 수집 시작 · 끝(fm_run) · �
   const id = 'fm-hist-f';
   const plan = EV.planUserEvent({ target: { id }, all: [{ id }], text: '패치 적용', by: 'ops', at: NOW - 600_000 }, NOW);
   assert.ok((await EV.writeUserEvent(plan)).ok);
-  assert.ok((await db.writeBlocks([{ kind: 'e', id: 'ev-aaaaaaaaaaaa', target: id, at: NOW - 900_000, ekind: 'reboot', text: '재부팅', by: '', scope: 'server' }])).ok);
+  assert.ok((await db.writeBlocks([{ kind: 'e', id: 'ev-aaaaaaaaaaaa', target: id, at: NOW - 900_000, ekind: 'reboot', text: '재부팅', by: 'mallory', scope: 'server' }])).ok);
   await db.writeRun({ id: 'run-h1', targets: [id], mode: 'record', interval: 2, started: NOW - 1_200_000, ended: NOW - 60_000, by: 'ops', why: 'stopped' });
   const r = await EV.eventsFor(id, NOW - 3_600_000, NOW);
   assert.deepEqual(r.events.map((e) => e.kind), ['start', 'reboot', 'user', 'stop']);
@@ -382,5 +411,15 @@ test('⑥ 라우트 — 긴 구간 분기 · iostat 은 원본 · 사건 쓰기 
     assert.equal(del.status, 200); assert.equal(del.body.removed, 1);
     assert.equal((await call('DELETE', `/api/tools/focus-mon/events/${ok.body.id}`)).status, 404, '두 번째는 없다');
     assert.ok(auditEntriesWithAction('focus-mon.event-delete').some((e) => e.detail.includes('적은 사람 a') && e.detail.includes('배포 v1.2')), '지우기 감사');
+    // 등록부를 못 읽으면 적기는 503(등록부 함수의 거절에만 기대지 않는다) · 파일은 그대로
+    const registry = await import('../src/focusmon/registry.js');
+    const FILE = path.join(DIR, 'focusmon-targets.json');
+    const had = fs.existsSync(FILE) ? fs.readFileSync(FILE) : null;
+    fs.writeFileSync(FILE, '{ broken'); registry._resetForTest();
+    const bad = await call('POST', '/api/tools/focus-mon/events', { body });
+    assert.equal(bad.status, 503); assert.equal(bad.body.reason, 'registryUnreadable');
+    for (const f of fs.readdirSync(DIR)) if (f.startsWith('focusmon-targets.json.corrupt')) fs.rmSync(path.join(DIR, f));
+    if (had) fs.writeFileSync(FILE, had); else fs.rmSync(FILE, { force: true });
+    registry._resetForTest();
   } finally { svc.stopFocusMon(); srv.close(); }
 });

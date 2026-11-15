@@ -43,14 +43,15 @@
   쓰기 넷은 수집 시작과 같은 문 + 503 + 감사 · **CSV 그룹 열이 없으면 그대로** · 데모 계정에 등록부 그룹 이름 없음 · 그룹 색 없음.
 - **수집 부하(v2.983)** — 원문은 `docs/rules/focusmon.md`(v3.11.0 에 상한 때문에 옮김). 요지: 원격은 상수 12개 `SCRIPT_TABLE` · 묶음 tick 은 셸 내장 명령만 · 계산 코어 `load.js` 하나 · 못 읽음 null ·
   엣지 `cleanLoad`/`cleanNodeLoad` 화이트리스트 · **수집기가 있을 때만 노드 표본** · 보는 화면 심박은 잠깐 보기 서버만.
-- **카드 아래 줄 고르기(v2.992 — 사용자 '빨간 부분을 선택해서 볼 수 있게 · Disk write/read · Network in/out · disk wait 등')** — `rates.summaryOf` 에 rMB · wMB · rIo · wIo · qu(물리 디스크 합) ·
-  iow · stl · load1 · cores · swU · swT(**이미 저장된 열에서** — 새 열 없음 · 못 읽음 null) · 웹 `CARD_LINE_ITEMS`(최대 4 · 기본 네트워크 + 쓰기 지연 · `fm.ov.line`) · 회귀 `focusMonCard2992` · web `focusMonCard`.
-- **더할 지표(v3.12.0 ⑬ — 시안 Metrics · '기본값대로 모두 구현해줘')** — 원격은 여전히 상수(`/proc/stat` ctxt · processes · intr 첫 칸 · `/proc/vmstat` · `net/snmp`+`netstat` · `sockstat` ·
-  60초마다 `timeout -s KILL 3 df -P -l`(-T -k · -i — 로컬만 · rc 137 = 응답 없음)). 새 구획은 **기본 묶음**(수집 부하 CB 경계가 FSI 뒤 — `focusMonLoad2983` ①) ·
-  파서 `parseVm`(회수 줄은 경로별 합 — `_anon/_file` · `direct_throttle` 제외) · `parseSnmp` · `parseSock` · `parseFs`/`parseFsi`(`okMount` — 마운트는 시리즈 이름) ·
-  계산 `rates.computeSample`(초당 값 · 카운터 감소 null · 보낸 것 0 이면 재전송률 null) · D/좀비 `procStates`(수집기 지도로 이어진 시간) · 파일시스템 · D 는 **수집기가 마지막 값을 표본마다** 싣는다(age) ·
-  열 `k.* v.* p.* q.* f.<마운트>.p|i` · 묶음 메타 fs 는 **합친다**(`codec.mergeMeta` — 마지막 표본에 없을 수 있다) · 엣지 `cleanSample` 화이트리스트 · 가득 찰 때까지 `query.fillEstimate`
-  (계속 수집만 · 24시간 · 10분 묶음 하나씩 · 6시간 미만 short · 10분 캐시 · 추정). 회귀 `focusMonMetrics3120` · web `focusMonMetrics`.
+- **카드 아래 줄 고르기(v2.992)** — 원문은 `docs/rules/focusmon.md`. 요지: `rates.summaryOf` 의 **이미 저장된 열에서**(새 열 없음 · 못 읽음 null) · 웹 `CARD_LINE_ITEMS`(최대 4 · `fm.ov.line`) ·
+  회귀 `focusMonCard2992` · web `focusMonCard`.
+- **더할 지표(v3.12.0 ⑬)** — 원문은 `docs/rules/focusmon.md`(v3.13.0 에 상한 때문에 줄임). 요지: 원격은 상수 · 새 구획은 기본 묶음 · df 는 `-l` + `timeout -s KILL` · 카운터 감소 null ·
+  파일시스템 · D 는 마지막 값을 표본마다(age) · 묶음 메타 fs 는 `codec.mergeMeta` · 엣지 `cleanSample` 화이트리스트 · 가득 찰 때까지는 계속 수집만(추정). 회귀 `focusMonMetrics3120`.
+- **긴 구간 · 사건 · 가장 변했나(v3.13.0 ⑭ — 시안 History · '기본값대로 모두 구현해줘')** — 상세 `docs/rules/focusmon.md` · 회귀 `focusMonHistory3130` · web `focusMonHistory`.
+  요약 코어는 `summary.js` 하나(못 읽음은 표본 수에 없음 · 코어별 제외) · `fm_sum1` 은 기록할 때 같은 대기열(늦게 다시 쓴 분도) · `fm_sum60` 은 **끝난 시간만**(markDirty → rollupTick) ·
+  백필은 조각 + 쉼 · 못 읽은 묶음은 빈 요약(되풀이 없음) · 열린 분 제외 · 조회 `longq.js` 빈 칸 null · 60초 기억 · 프로세스 · iostat · 수집 부하는 원본 구간만 · 데모 요약은 본 한 번(칸마다 표본 금지 — 24시간 0.5초).
+  사건 `fm_event`: 자동은 상태가 **바뀐 순간**만 · 앞 상태를 모르면 적지 않는다 · 재부팅 = 가동 시간 30초 넘게 감소 · 직접 적기는 수집 시작과 같은 문 + 503 + 감사 · 지우기는 user 만 ·
+  가장 변했나 `changes.js` 는 두 구간 **같은 출처**(단추로만) · 링크는 해시 끝 ‘@’ 칸(물음표 금지 — 앱이 첫 두 칸으로 도구를 고른다).
 - **디스크 점검(v3.11.0 — 사용자 '배드섹터 점검 프로그램 추가' + 원문 · '법인별 · 모델별로' · '기본값대로 모두 구현')** — 이 폴더의 **유일한 sudo 예외**(사용자 승인: 고정 설치 + sudoers 한 줄).
   상세 `docs/rules/focusmon.md` · 설계 `docs/design/focus-mon/README.md` §20 · 회귀 `focusMonAudit3110` · web `focusMonAudit`. **되돌리면 안 되는 것**:
   ① 받은 프로그램 `audit/rhel_disk_audit.py` 는 **한 바이트도 고치지 않는다**(sha256 = 판본 · 고치면 전 서버 재설치) — 덧붙일 일은 감싸는 실행 파일 `WRAPPER_TEXT` 에(인자 거절 · 임시 폴더 · 시한 KILL · nice/ionice · 디스크 목록).
