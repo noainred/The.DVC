@@ -143,7 +143,8 @@ function useTimeBar(windows, longWindows, link) {
   // 링크(해시 끝 ‘@’ 칸)로 들어오면 그 구간 · 끝 시각 · 겹쳐 보기를 한 번 적용한다(응답의 구간 목록이 온 뒤 — 모르는 값은 버린다)
   const applied = useRef('');
   useEffect(() => {
-    if (!link || applied.current === link || !ws.length) return;
+    // 응답(구간 목록)이 오기 전에는 읽지 않는다 — 기본 목록으로 먼저 읽으면 긴 구간 값을 '모르는 값' 으로 버리고 다시 읽지 않았다(2026-11-15 화면 확인)
+    if (!link || applied.current === link || !Array.isArray(windows) || !Array.isArray(longWindows)) return;
     applied.current = link;
     const p = parseLinkSeg(link, [...ws, ...lws]);
     if (p.win != null) setWinRaw(p.win);
@@ -1457,8 +1458,10 @@ export default function FocusMonTool() {
   const viewTargets = useMemo(() => { const m = new Map((main?.targets || []).map((t) => [t.id, t])); return ids.map((id) => m.get(id)).filter(Boolean); }, [ids, main?.targets]);
   const viewChips = useMemo(() => groupChips(viewTargets, main?.groups?.list), [viewTargets, main?.groups?.list]);
   const shownIds = useMemo(() => filterByGroup(viewTargets, vgroup).map((t) => t.id), [viewTargets, vgroup]);
-  const covParams = useMemo(() => ({ targets: shownIds.join(','), to: tb.day ? dayRange(tb.day, Date.now()).to : '' }), [shownIds, tb.day]);
-  const cov = usePoll('/tools/focus-mon/coverage', covParams, 60_000, shownIds.length > 0 && route.tab !== 'targets');
+  // 서버 상세는 그 서버의 기록 시간(v3.13.0 — 링크로 들어와 수집 중인 서버가 없어도 시간 띠가 그 서버를 말한다)
+  const covIds = route.tab === 'server' && route.server ? route.server : shownIds.join(',');
+  const covParams = useMemo(() => ({ targets: covIds, to: tb.day ? dayRange(tb.day, Date.now()).to : '' }), [covIds, tb.day]);
+  const cov = usePoll('/tools/focus-mon/coverage', covParams, 60_000, covIds.length > 0 && route.tab !== 'targets');
   useEffect(() => { if (!picked.length && main?.targets?.length) setPicked(ids.length ? ids.slice() : []); }, [main?.targets?.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (mainQ.error && !main) return <ErrorBox error={mainQ.error} />;
@@ -1516,7 +1519,7 @@ export default function FocusMonTool() {
           <span className="fm-dim">보고 있는 서버 {ids.length}대 가운데 · 그룹은 ‘대상 · 키’ 탭에서 정합니다</span>
         </div>
       ) : null}
-      {route.tab === 'load' || (route.tab !== 'targets' && route.tab !== 'audit' && ids.length) ? <TimeBar tb={tb} now={now} coverage={route.tab === 'load' ? null : cov.data} oldestMinute={main.db.oldestMinute} route={route} /> : null}
+      {route.tab === 'load' || route.tab === 'server' || (route.tab !== 'targets' && route.tab !== 'audit' && ids.length) ? <TimeBar tb={tb} now={now} coverage={route.tab === 'load' ? null : cov.data} oldestMinute={main.db.oldestMinute} route={route} /> : null}
       {route.tab === 'load' ? (tb.long ? <div className="fm-card fm-empty">{rawOnlyText('수집 부하', tb.windows)}</div> : <LoadTab main={main} tb={tb} />) : null}
       {route.tab === 'audit' ? <AuditTab setMsg={setMsg} /> : null}
       {route.tab === 'overview' ? <Overview main={main} ids={shownIds} tb={tb} now={now} onOpen={onOpen} /> : null}

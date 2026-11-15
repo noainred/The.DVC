@@ -73,9 +73,9 @@ export function EventsCard({ id, t, d, main, onChanged, setMsg }) {
   };
   return (
     <div className="fm-card fm-flush">
-      <div className="fm-row fm-between fm-pad">
+      <div className="fm-col fm-pad">
         <h3 className="fm-h3">사건 — 이 구간 {events.length}건</h3>
-        <span className="fm-dim">번호는 CPU 차트 위 동그라미와 같습니다 · 자동: 재부팅(가동 시간이 줄어듦) · 키 로그인 거부 · 호스트키 · 수집 시작 · 끝</span>
+        <span className="fm-dim">번호는 CPU 차트 위 동그라미와 같습니다 · 자동으로 적는 것: 재부팅(가동 시간이 줄어듦) · 키 로그인 거부 · 호스트키 승인 필요 · 수집 시작 · 끝</span>
       </div>
       {d?.eventsPartial ? <div className="fm-note fm-pad">기록 DB 를 읽지 못해 사건 목록이 빠졌을 수 있습니다.</div> : null}
       {events.length ? (
