@@ -13,6 +13,7 @@
  * ⚠ 손상 · 못 읽음이면 그 쪽 창은 판정에 넣지 않는다(억제하지 않는 쪽 — 알림이 나간다) + 상태(unreadable)를 올려 수집 건강 · 화면이 밝힌다.
  * 권한 · 범위 · 승인 등급은 라우트(routes/api/bmMaint.js)가 본다 — 이 모듈은 형식 · 저장 · 일정 상한만.
  */
+import { pushAll } from '../../util/pushAll.js';   // 인벤토리 규모 배열은 전개 push 금지(audit2603a)
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -206,7 +207,7 @@ function dstAnchors(cand, group, now, occOf) {
   const out = [];
   // 6회차 Y 재확인 Y1: 앞 끝은 기본 기준점과 같은 아래 끝(now − 1일)보다 이르지 않게 — 전환이 2일 안이면 T − 2일이 지난 발생까지 끌어와,
   //   앞으로는 12시간을 넘지 않는 창이 지난 발생 때문에 운영자에게 403 이었다(재현: 바르샤바 전환 2시간 전 · 지난 목요일만 12.5h).
-  for (const tz of tzs) for (const T of tzTransitions(tz, now, end + DST_BEFORE_MS)) out.push(...occOf(cand, Math.max(T - DST_BEFORE_MS, now - DAY), T + DST_AFTER_MS));
+  for (const tz of tzs) for (const T of tzTransitions(tz, now, end + DST_BEFORE_MS)) pushAll(out, occOf(cand, Math.max(T - DST_BEFORE_MS, now - DAY), T + DST_AFTER_MS));
   return out;
 }
 /** 기준점 하나 둘레(앞뒤 2일)에서 후보 발생과 겹치는 24시간 창 중 덮임이 상한을 넘는 것이 있는가(순수 — 빠른 길 · 정확 경로가 같은 함수). */
