@@ -289,32 +289,6 @@ export function demoPerfLatestRows(rows = [], targets = []) {
   });
 }
 
-/**
- * 점검 반복 9회차 J1 — 데모 화면 KPI 의 경로 수를 성능 열 겹침과 맞춘다(응답 전용 · mock 이 아니면 그대로).
- *   위 demoPerfLatestRows 는 시나리오 9종 중 8종(idrac-only 밖)에 OS 열(os_at)을 겹쳐 경로 줄 · 신뢰 띠가 ‘둘 다 15’ 인데,
- *   KPI 는 대상의 등록 경로(paths — 데모 17대는 iDRAC 등록뿐)를 세어 ‘OS 경로 0’ 이었다(데모 사용자가 ‘OS 계정 없이도 OS 판정’ 으로 읽는다).
- *   paths 에 os 를 넣지 않는다 — 스냅샷 · 집중이 그 대상에 SSH 를 시도하게 된다. 같은 순위 · 같은 시나리오 표(겹침과 한 규칙).
- * @param {object} counts  대상 해석의 counts(또는 범위로 다시 센 것)
- * @param {Array} visible  counts 가 센 대상(원본 대상 객체 — 데모 표지가 있어야 한다)
- * @param {Array} all      순위를 정하는 전체 대상(겹침과 같은 목록 — tg.targets)
- */
-export function demoPathCounts(counts, visible = [], all = visible) {
-  if (!isMockMode() || !counts || typeof counts !== 'object') return counts;
-  const demoAll = (all || []).filter(isDemoBmTarget);
-  if (!demoAll.length) return counts;
-  const rank = new Map([...new Set(demoAll.map((tg) => String(tg.key || '')))].sort().map((k, i) => [k, i]));
-  let os = 0; let both = 0;
-  for (const tg of visible || []) {
-    const k = String(tg?.key || '');
-    if (!rank.has(k) || !isDemoBmTarget(tg)) continue;
-    if (DEMO_PERF_SCENARIOS[rank.get(k) % DEMO_PERF_SCENARIOS.length] === 'idrac-only') continue;
-    const p = Array.isArray(tg.paths) ? tg.paths : [];
-    if (p.includes('os')) continue;
-    os += 1; if (p.includes('idrac')) both += 1;
-  }
-  return os ? { ...counts, os: (Number(counts.os) || 0) + os, both: (Number(counts.both) || 0) + both, demoOsOverlay: os } : counts;
-}
-
 /** 폴러 결과 모양(`collectOne` 과 같은 {ok, target, built:{row}}). ⚠ 성능 열은 여기 넣지 않는다(적재 경로 — 위 D2). */
 export function demoBmUsageResults(targets = [], now = Date.now()) {
   return targets.map((tg) => ({ ok: true, target: tg, demo: true, built: { row: demoBmUsageRow(tg, now), srcOf: { cpu: 'idrac', mem: 'idrac', io: 'idrac', net: 'idrac', hba: 'idrac' }, notes: [] } }));

@@ -62,7 +62,8 @@ test('F2 — 서버 상세 실행 표지(데모 · 역할): 스냅샷 실행 · 
   // GET 응답에 표지가 실린다(스냅샷 · 집중 읽기 — 소스)
   const strip = (await import('./_stripComments.js')).stripComments;   // 주석 제거기는 하나(TESTDOC2613-08)
   const bu = strip(fs.readFileSync(new URL('../src/routes/api/bmUsage.js', import.meta.url), 'utf8'));
-  assert.match(bu, /actions:\s*\{\s*run:\s*bmGate\(req,\s*'snapshotRun'/);
+  assert.match(bu, /actions:\s*\{\s*run:\s*snapRunGateOf\(req,/);   // 10회차 L2: 데모 · 역할(bmGate) ∧ OS 경로
+  assert.match(bu, /function snapRunGateOf[\s\S]{0,120}bmGate\(req,\s*'snapshotRun'/);
   const po = strip(fs.readFileSync(new URL('../src/routes/api/bmPerfOps.js', import.meta.url), 'utf8'));
   assert.match(po, /actions:\s*\{\s*start:\s*bmGate\(req,\s*'focusStart'/);
   // 웹은 표지로 연다(역할만 보지 않는다)

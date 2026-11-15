@@ -144,7 +144,7 @@ async function buildEnvelopeRaw({ limit = DEFAULT_LIMIT } = {}) {
     targets,
     truncated: all.length > targets.length ? all.length - targets.length : 0,
     rows,
-    counts: isMockMode() ? (await import('../mock/demo/baremetal.js')).demoPathCounts(tg.counts || {}, tg.targets || [], tg.targets || []) : (tg.counts || {}),   // 9회차 J1 — 데모 KPI 경로 수(응답 전용)
+    counts: tg.counts || {},
     skippedCounts: (tg.counts || {}).byReason || {},
     // ⚠ 정지 대상은 **개수와 경로만**(이름은 targets 에 이미 있다 — 중복으로 싣지 않는다).
     authStops: authStopsFor(tg.targets || []).map(({ key, path, attempts, since, reason }) => ({ key, path, attempts, since, reason })),

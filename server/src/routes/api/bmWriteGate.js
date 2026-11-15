@@ -47,7 +47,7 @@ export const BM_ACTIONS = Object.freeze({
 });
 
 /** 이유 code(화면 문구는 web bmWriteText.js WRITE_WHY_TEXT — 1:1 시험). */
-export const WRITE_WHY = Object.freeze(['demo', 'role-admin', 'role-operator', 'full-scope', 'read-only']);
+export const WRITE_WHY = Object.freeze(['demo', 'role-admin', 'role-operator', 'full-scope', 'read-only', 'no-os-path']);   // no-os-path: 10회차 L2 — 스냅샷 실행 표지(실행 라우트와 같은 판정)
 
 /**
  * 이 계정이 그 동작을 보낼 수 있나 → { ok:true } | { ok:false, why }.

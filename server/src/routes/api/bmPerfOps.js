@@ -17,7 +17,8 @@ import { requireSettingsOwner, fullScopeOnlyWith } from '../admin/shared.js';
 import { addressMatcher, isAdminReq, maskedIdToken } from '../../auth/addressMask.js';
 import { currentTargets, bmUsageStatus } from '../../bmusage/poller.js';
 import { memoJson, scopeKey } from './shared.js';
-import { bmGate } from './bmWriteGate.js'; // 점검 반복 8회차 F2 — 집중 시작 표지(데모 · 역할)
+import { bmGate } from './bmWriteGate.js';
+import { scrubProcDeep } from './bmProcScrub.js'; // 10회차 K1 — 집중 표본 · 기간 비교의 프로세스 행 // 점검 반복 8회차 F2 — 집중 시작 표지(데모 · 역할)
 import { strOf } from '../../util/coercionTrap.js';
 import { config } from '../../config.js';
 import { resolvePerfTarget, perfTargetFail, perfVcOf, failParts, bmAddressHosts, maskBmList, applyScope } from './bmUsage.js';
@@ -30,6 +31,7 @@ const fullScopeOnly = fullScopeOnlyWith('알림 규칙 시험 실행은 이 노�
 const t = (v) => strOf(v, 4096).trim();
 const IPV4_RE = /\b\d{1,3}(?:\.\d{1,3}){3}\b/g;
 const scrubIp = (v) => (typeof v === 'string' ? v.replace(IPV4_RE, (ip) => maskedIdToken(ip)) : v);
+const PROC_FNS = { scrub: scrubIp, tok: (v) => maskedIdToken(v) };
 
 export function depsOf(deps = {}) {
   return {
@@ -57,8 +59,9 @@ async function resolve(req, snap, D) {
   return { found, key, isAdmin, allowed };
 }
 /** 세션 · 표본의 비관리자 가림 — 실행자 · 사유 IPv4. */
-function scrubFocus(body, isAdmin) {
-  if (isAdmin || !body || typeof body !== 'object') return body;
+function scrubFocus(body0, isAdmin) {
+  if (isAdmin || !body0 || typeof body0 !== 'object') return body0;
+  const body = scrubProcDeep(body0, PROC_FNS);   // 10회차 K1: 표본의 cpuTop · ioTop 이름 안 주소(스냅샷과 같은 함수)
   const s1 = (s) => (s && typeof s === 'object' ? (({ by: _b, ...x }) => ({ ...x, reason: scrubIp(x.reason) }))(s) : s);
   return { ...body, ...(Array.isArray(body.sessions) ? { sessions: body.sessions.map(s1) } : {}), ...(body.session ? { session: s1(body.session) } : {}), ...(body.reason ? { reason: scrubIp(body.reason) } : {}),
     ...(Array.isArray(body.changes) ? { changes: body.changes.map((e) => ({ ...e, before: scrubIp(e.before), after: scrubIp(e.after) })) } : {}) };
@@ -180,6 +183,7 @@ export async function bmPerfOpsRead(req, snap, mode, deps = {}) {
     if (Array.isArray(out.events)) out.events = out.events.map(scrubEv);
     if (Array.isArray(out.changes)) out.changes = out.changes.map(scrubEv);
     if (Array.isArray(out.tuning)) out.tuning = out.tuning.map(scrubEv);
+    if (out.procs && Array.isArray(out.procs.rows)) out.procs = { ...out.procs, rows: out.procs.rows.map((r) => (r && typeof r.name === 'string' ? { ...r, name: scrubIp(r.name) } : r)) };   // 10회차 K1
     out.addressHidden = true;
   }
   return out;
