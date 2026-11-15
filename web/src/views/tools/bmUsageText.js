@@ -106,6 +106,10 @@ export function emptyDiag(d = {}, { now = Date.now() } = {}) {
     if (by['os-ambiguous']) parts.push(`OS 등록을 하나로 못 정한 서버 **${by['os-ambiguous']}대**`);   // 2차 재확인 G3
     if (by['os-foreign']) parts.push(`OS 등록이 다른 법인 것인 서버 **${by['os-foreign']}대**`);
     if (by['remote-collector-unknown']) parts.push(`원격 수집 서버를 모르는 서버 **${by['remote-collector-unknown']}대**`);   // v2.961
+    // 1회차 점검 D3 · D4: 사람이 끈 등록 · 엣지 지정 OS 등록
+    if (by['idrac-disabled']) parts.push(`iDRAC 등록이 ‘사용 안 함’ 인 서버 **${by['idrac-disabled']}대**`);
+    if (by['os-disabled']) parts.push(`OS 등록이 ‘사용 안 함’ 인 서버 **${by['os-disabled']}대**`);
+    if (by['os-edge']) parts.push(`OS 등록이 엣지 수집으로 지정된 서버 **${by['os-edge']}대**`);
     return {
       kind: 'no-target', waiting: false,
       text: parts.length
@@ -147,6 +151,10 @@ export const MISSING_MARK = Object.freeze({
   'no-idrac-cred': 'iDRAC 계정 없음',
   'os-ambiguous': 'OS 등록 모호',      // 2차 재확인 G3 — 법인으로 하나를 못 정함
   'os-foreign': 'OS 등록 다른 법인',
+  // 1회차 점검 D3 · D4
+  'idrac-disabled': 'iDRAC 등록 꺼짐',
+  'os-disabled': 'OS 등록 꺼짐',
+  'os-edge': 'OS 등록 엣지 지정',
 });
 export function missingMark(list = []) {
   const parts = (list || []).map((k) => MISSING_MARK[k] || k);
@@ -166,6 +174,9 @@ export function missingFootnotes(rows = []) {
   if (kinds.has('no-idrac-cred')) out.push('**iDRAC 계정 없음** — 설정 › iDRAC 등록에서 계정·비밀번호를 채우세요.');
   if (kinds.has('os-ambiguous')) out.push('**OS 등록 모호** — 같은 이름 · 주소의 OS 등록이 여럿(주소가 다름)이거나, ‘수집에 추가’ 한 서버에 법인이 지정되지 않은 등록뿐입니다. 어느 장비인지 몰라 OS 로 접속하지 않습니다 — 설정 › 베어메탈 스토리지에서 그 등록에 법인을 지정하세요.');
   if (kinds.has('os-foreign')) out.push('**OS 등록 다른 법인** — 이름 · 주소가 맞는 OS 등록이 다른 법인으로 지정돼 있어 쓰지 않습니다(다른 법인 서버의 주소 · 계정으로 접속하지 않게).');
+  if (kinds.has('idrac-disabled')) out.push('**iDRAC 등록 꺼짐** — 그 iDRAC 등록이 ‘사용 안 함’ 이라 그 계정으로 로그인하지 않습니다. 설정 › iDRAC 등록에서 켜면 다음 주기부터 읽습니다.');
+  if (kinds.has('os-disabled')) out.push('**OS 등록 꺼짐** — 그 OS 계정 등록이 ‘사용 안 함’ 이라 SSH 하지 않습니다. 설정 › 베어메탈 스토리지에서 켜면 다음 주기부터 디스크·네트워크·HBA 까지 읽습니다.');
+  if (kinds.has('os-edge')) out.push('**OS 등록 엣지 지정** — 그 OS 계정 등록은 엣지 수집으로 지정돼 있어 이 노드에서는 그 주소 · 계정으로 접속하지 않습니다(엣지가 맡습니다).');
   return out;
 }
 
@@ -174,6 +185,7 @@ export const SKIP_LABEL = Object.freeze({
   'edge-delegated': '엣지 수집', 'corp-off': '법인 미선택', unassigned: '법인 귀속 없음', 'no-idrac': 'iDRAC 등록 없음', 'no-idrac-cred': 'iDRAC 계정 없음',
   'no-os-cred': 'OS 계정 없음', 'both-off': '두 경로 모두 꺼짐', 'key-conflict': '키 충돌', 'os-ambiguous': 'OS 등록 모호', 'os-foreign': 'OS 등록 다른 법인',
   'remote-collector-unknown': '수집 서버 모름',   // v2.961 — 원격 수집 서버가 맡은 서버인데 그 수집 서버를 등록부에서 못 찾음(못 읽음 · 삭제)
+  'idrac-disabled': 'iDRAC 등록 꺼짐', 'os-disabled': 'OS 등록 꺼짐', 'os-edge': 'OS 등록 엣지 지정',   // 1회차 점검 D3 · D4
 });
 /** 대상이 아닌 서버 — 사유마다 조치가 다르므로 **있는 사유만** 한 번씩 적는다. */
 export function skippedNotes(counts = {}, reasons = {}) {

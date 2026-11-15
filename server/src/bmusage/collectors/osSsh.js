@@ -36,7 +36,8 @@ import { reqTimeoutMs } from '../../agent/envTimeout.js';
 
 // v2.605(TIM2605-04): 음수·2^31 초과 env 가 즉시 타임아웃이 되지 않게 [1초, 10분] 으로 정규화한다(agent/envTimeout.js).
 const READY_TIMEOUT_MS = reqTimeoutMs(process.env.BMUSAGE_SSH_TIMEOUT_MS, 15_000);
-export const CMD_TIMEOUT_MS = reqTimeoutMs(process.env.BMUSAGE_CMD_TIMEOUT_MS, 30_000);
+// 1회차 점검 D2: 30초 → 34초 — ##DF · ##DFI 의 df 에 시한(DF_TIMEOUT_S × 2)을 두면서 늘린 몫. 8b 산수(안 timeout 최악 합 24초 + 여유 6초)가 30초에 꽉 차 있었다.
+export const CMD_TIMEOUT_MS = reqTimeoutMs(process.env.BMUSAGE_CMD_TIMEOUT_MS, 34_000);
 /**
  * ⚠⚠ 8b 반증 F1(8b 이전부터의 결함 — 4 · 5단계): 주 명령 **안** 구획 timeout(systemctl · chronyc · dmesg · needs-restarting · dnf …)의 최악 합 + 이 여유 ≤ CMD_TIMEOUT_MS.
  *   합이 시한보다 크면 ‘한 칸이 전 구획을 잃지 않게’ 둔 timeout 이 목적을 잃는다 — exec 시한에 걸리면 sshExec 가 모은 출력을 버려 그 주기 **전 구획**이 사라진다.
@@ -45,6 +46,13 @@ export const CMD_TIMEOUT_MS = reqTimeoutMs(process.env.BMUSAGE_CMD_TIMEOUT_MS, 3
  *   가짜 PATH(멈추는 명령) + 실제 collectOsUsage 로 주 표본이 살아남는지 본다. env 로 CMD_TIMEOUT_MS 를 낮추면 이 산수가 깨진다(운영 기본값만 보장).
  */
 export const CMD_INNER_MARGIN_MS = 6_000;
+/**
+ * 1회차 점검 D2 — ##DF · ##DFI 의 df 시한(초). 예전에는 시한이 없어 멈춘 마운트(응답 없는 NFS 등 — 일반적 현상 · 이 저장소 실측 아님) 하나가 df 를 붙잡으면
+ *   주 명령이 exec 시한(30초)에 걸려 **그 서버의 전 구획**(CPU · 메모리 · 디스크 · 네트워크)을 매 주기 잃고 사유는 'not-linux' 로 보였다(재현 30,029ms).
+ *   이제 df 만 시한에 걸리고 그 구획(디스크 사용 공간 · inode)만 missing 이다. ⚠ 커널이 깨우지 못하는 대기(TASK_UNINTERRUPTIBLE)면 timeout 도 df 를 끝내지 못한다 —
+ *   NFS 의 대기는 보통 kill 로 깨는 대기(TASK_KILLABLE)다(일반 지식 — 실장비 미확인). 그 경우는 바깥 exec 시한이 마지막 방어선이다.
+ */
+export const DF_TIMEOUT_S = 2;
 /**
  * ⚠⚠ **세션 예산 — 두 번 시도하는 경로는 장비 시한을 넘길 수 있다**(v2.550.3 에 고친 결함.
  *   CLAUDE.md v2.528 이 Unity 에서 겪은 것과 **같은 유형**):
@@ -112,9 +120,10 @@ export const LINUX_SECTIONS = Object.freeze(['STAT', 'MEM', 'DISK', 'NET', 'NETI
 
 /** Linux 수집 명령 — 구획 표지로 나눈 한 방. */
 export function linuxCommand(mounts = [], { sampler = false } = {}) {
-  const dfPart = mounts.length ? `df -P -k -- ${mounts.join(' ')} 2>/dev/null | head -n ${SECTION_LINE_CAP.DF + 1} | cut -c1-1024` : 'true';
+  // 1회차 점검 D2: df 도 다른 대기 명령처럼 timeout 으로 감싼다(멈춘 마운트가 주 명령 전체를 시한에 걸리게 하지 않게 — DF_TIMEOUT_S 머리말).
+  const dfPart = mounts.length ? `timeout ${DF_TIMEOUT_S} df -P -k -- ${mounts.join(' ')} 2>/dev/null | head -n ${SECTION_LINE_CAP.DF + 1} | cut -c1-1024` : 'true';
   // v2.919: inode(##DFI) — 같은 sanitize 된 마운트만(변수 삽입은 이 화이트리스트뿐).
-  const dfiPart = mounts.length ? `df -P -i -- ${mounts.join(' ')} 2>/dev/null | head -n ${SECTION_LINE_CAP.DFI}` : 'true';
+  const dfiPart = mounts.length ? `timeout ${DF_TIMEOUT_S} df -P -i -- ${mounts.join(' ')} 2>/dev/null | head -n ${SECTION_LINE_CAP.DFI}` : 'true';
   const cmds = [
     // v2.919: /proc/stat 전체 — cpu 합계 + cpuN(코어 수 = 줄 수) + ctxt·intr·procs_running·procs_blocked. 줄 폭은 cut 으로(intr 줄은 수천 칸).
     "echo '##STAT'", `grep -v '^cpu' /proc/stat 2>/dev/null | head -n ${SECTION_LINE_CAP.STAT_OTHER} | cut -c1-256`, `grep '^cpu' /proc/stat 2>/dev/null | head -n ${SECTION_LINE_CAP.STAT_CPU} | cut -c1-256`,
@@ -261,6 +270,8 @@ export function shapeLinux(stdout, mounts = [], { partitionIo = false, blkqMax =
       ctxt: perf.stat.value?.ctxt ?? null, intr: perf.stat.value?.intr ?? null,
       vm: perf.vmstat.value || null,
       tcp: perf.snmp.value ? { retransSegs: perf.snmp.value.retransSegs, outSegs: perf.snmp.value.outSegs, inErrs: perf.snmp.value.inErrs } : null,
+      // 1회차 점검 D1: 부팅 시각(/proc/stat btime — ##STAT 에 이미 온다 · 새 명령 없음). usage.js 가 직전 표본과 같은 장비 · 같은 부팅인지 본다.
+      btime: perf.stat.value?.btime ?? null,
     },
     // v2.919 — 순간값·튜닝 현재값(누적이 아니라 델타가 필요 없다)과 구획별 상태.
     perf,
@@ -305,13 +316,29 @@ export function shapePerfSections(sec = {}, { blkqMax = MAX_BLKQ } = {}) {
 }
 
 /**
+ * 1회차 점검 D5(a) — exec 거부 → 종류(순수). sshExec.exec 는 시한이면 'SSH exec 타임아웃(Ns): <명령>' · 출력 상한이면 '… 출력 상한 … 초과' 로 거부하고
+ *   채널 · 연결 오류(‘Channel open failure’ 등)는 그 오류 그대로 거부한다. 문구는 이 모듈이 정한 것만 싣는다(명령 전문을 결과에 싣지 않는다).
+ */
+export function execErrorKind(e) {
+  const m = String(e?.message ?? e ?? '').slice(0, 200);
+  if (/^SSH exec 타임아웃/.test(m) || /timed? ?out/i.test(m)) return 'timeout';
+  if (/^SSH exec 출력 상한/.test(m)) return 'output-limit';
+  return 'channel';
+}
+export const EXEC_ERROR_TEXT = Object.freeze({
+  timeout: '수집 명령이 시한 초과로 끊겨 출력을 받지 못했습니다(서버 부하 · 멈춘 명령일 수 있습니다 — OS 종류 문제가 아닙니다).',
+  'output-limit': '수집 명령의 출력이 상한을 넘어 버렸습니다(OS 종류 문제가 아닙니다).',
+  channel: '수집 명령을 실행하지 못했습니다(SSH 채널 오류 — sshd 세션 제한 · 연결 끊김일 수 있습니다).',
+});
+
+/**
  * 한 서버에서 수집한다. **자격증명은 반환값에 담지 않는다.**
  * @param {object} osHost  `bmstor` 등록 항목(host·port·username·password·mounts)
  * @param {{signal?:AbortSignal}} opt
  */
 export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_BUDGET_MS, partitionIo = false, blkqMax = MAX_BLKQ, peakWindowS = 0, sampler = false, samplerSha = '', peakCycle = null, extraCommands = [], top = false } = {}) {
   const host = String(osHost.host || '').trim();
-  if (!host) return { ok: false, error: 'OS host 가 없습니다.' };
+  if (!host) return { ok: false, error: 'OS host 가 없습니다.', notConnected: true };   // 1회차 점검 D6: 접속하지 않음(SSH 소요에 넣지 않는다)
   // 7b: 키 · 공통 계정 참조를 해석하지 못했으면(키 삭제 · 봉인 해제 실패 · 저장소 손상) 접속하지 않는다 — 빈 비밀번호로 시도해
   //   인증 실패 · 계정 잠금을 부르지 않게(onboard/refs.js withResolvedAuth 가 단다).
   if (osHost.authError) return { ok: false, error: String(osHost.authError).slice(0, 300), authErrorCode: String(osHost.authErrorCode || '') };
@@ -396,14 +423,27 @@ export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_B
 
       // 아는 쪽을 먼저, 실패하면 반대쪽을 **같은 세션에서** 한 번 더.
       const order = known === 'windows' ? [tryWin, tryLinux] : [tryLinux, tryWin];
+      /*
+       * 1회차 점검 D5(a): exec 자체가 실패한 시도(시한 · 채널 오류 · 출력 상한)를 삼키지 않는다 — 예전에는 catch(() => null) 이 ‘출력은 왔는데 표지가 없음’ 과
+       *   같은 갈래로 보내 사유가 'not-linux'(‘Linux 출력 아님 — OS 종류 · 셸을 확인’)였다(재현: uname 멈춤 30,030ms → not-linux). 첫 exec 오류의 종류를 결과에 남긴다
+       *   (execError: 'timeout' | 'channel' | 'output-limit') — missReason.osMissOf 가 문구가 아니라 이 값으로 가른다. 오류 원문(명령 전문이 실린다)은 싣지 않는다.
+       */
+      let execErr = '';
       for (const fn of order) {
         // ⚠ 남은 예산이 없으면 **시작하지 않고 사유를 남긴다**(조용히 생략하지 않는다 — v2.528 규약).
         if (slice() < MIN_SLICE_MS) {
           budgetSkipped = '남은 수집 시간이 부족해 다른 형식(Windows/Linux) 시도는 건너뛰었습니다.';
           break;
         }
-        const got = await fn().catch(() => null);
+        const got = await fn().catch((e) => { if (!execErr) execErr = execErrorKind(e); return null; });
         if (got) { _osKind.set(hostKey, got.osKind); return got; }
+      }
+      if (execErr) {
+        return {
+          ok: false, execError: execErr,
+          error: `${EXEC_ERROR_TEXT[execErr]}${budgetSkipped ? ` ${budgetSkipped}` : ''}`,
+          budgetSkipped: !!budgetSkipped,
+        };
       }
       return {
         ok: false,

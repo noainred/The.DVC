@@ -9,7 +9,9 @@
  *      ⚠ 8b 이전부터의 결함: 주 명령 최악 합이 34초(> 30초 — 4 · 5단계) · 로그 exec 46초(rdf 호출 수까지 61초 — 7a)였다 — 이 시험이 없어서 고정되지 않았다(반증 F1 · 후속).
  *   ② 실제 셸(dash): CHANGES 조각을 가짜 find · dnf · needs-restarting(호출 기록)으로 돌려 둘이 한 주기에 함께 돌지 않는지
  *   ③ 실제 collectOsUsage + 실제 sshExec(exec 시한 · 출력 버림) — ssh2 Client 만 로컬 dash 로 바꾼 자식 프로세스(--experimental-test-module-mocks).
- *      가짜 PATH 에서 systemctl · chronyc · dmesg · needs-restarting · dnf · top 이 전부 멈춤(`sleep 100`) → 주 표본이 살아남고(ok · CPU · 메모리) Top-N 은 /proc 대안으로.
+ *      가짜 PATH 에서 systemctl · chronyc · dmesg · needs-restarting · dnf · top · df 가 전부 멈춤(`sleep 100`) → 주 표본이 살아남고(ok · CPU · 메모리) Top-N 은 /proc 대안으로.
+ *      1회차 점검 D2: df(##DF · ##DFI)에 시한이 없어 멈춘 마운트 하나가 주 명령 전체를 exec 시한에 걸리게 했다(재현 30,029ms · 전 구획 유실 · 사유 not-linux) —
+ *      이제 df 도 timeout 안이고(① 산수에 df 두 번 · 주 명령 시한 34초) 멈추면 디스크 사용 공간 구획만 missing 이다(③).
  *      Top-N exec 실패 → 본 표본 유지 · top 만 missing. 집중 경로 옵션 → Top-N exec 없음(반증 F10). 반증 r-f1(rv8b/budget.test.mjs)을 옮긴 것.
  */
 import test from 'node:test';
@@ -67,7 +69,7 @@ export function worstOf(cmd, { exclusive = [] } = {}) {
 }
 
 test('① 기계 산수 — 주 명령 · Top-N exec · 7a 로그 exec · 집중 경로: 안 timeout · sleep 합 + 여유 ≤ exec 시한(같은 함수)', () => {
-  assert.equal(OS.CMD_TIMEOUT_MS, 30_000, '운영 기본값(env 없음)');
+  assert.equal(OS.CMD_TIMEOUT_MS, 34_000, '운영 기본값(env 없음) — 1회차 점검 D2: df 시한 2 × 2초만큼 30 → 34초');
   for (const sampler of [false, true]) {
     const cmd = OS.linuxCommand(['/'], { sampler });
     // 8b 끔/켬: Top-N 은 주 명령 밖이라 옵션이 주 명령을 바꾸지 않는다(반증 F1 — 예전에는 켬이면 +3초 timeout +1초 대기)
@@ -75,6 +77,9 @@ test('① 기계 산수 — 주 명령 · Top-N exec · 7a 로그 exec · 집중
     const { t } = waitsOf(cmd);
     assert.ok(t.length >= 6, `timeout 을 뽑았다(${t.length})`);
     const nr = t.filter((x) => x.what === 'needs-restarting'); const dnf = t.filter((x) => x.what === 'dnf');
+    // 1회차 점검 D2: df 두 곳(##DF · ##DFI)이 모두 timeout 안 — 시한 없는 df 가 남으면 실패(변이: timeout 을 빼면 여기서 잡힌다)
+    assert.deepEqual(t.filter((x) => x.what === 'df').map((x) => x.s), [OS.DF_TIMEOUT_S, OS.DF_TIMEOUT_S], 'df -k · df -i 둘 다 timeout 안');
+    assert.equal([...cmd.matchAll(/(?:^|[;|&{(]\s*)df -P/g)].length, 0, '시한 없이 시작하는 df 없음');
     assert.match(cmd, /\[ "\$_dh" = 1 \] && nrr=0;/, 'dnf 차례면 needs-restarting 을 건너뛰는 장치');
     const { worstS } = worstOf(cmd, { exclusive: [['needs-restarting', 'dnf']] });
     assert.ok(worstS * 1000 + OS.CMD_INNER_MARGIN_MS <= OS.CMD_TIMEOUT_MS,
@@ -196,6 +201,7 @@ const t0 = Date.now();
 const r = await OS.collectOsUsage({ host: '10.9.9.9', username: 'u', password: 'p', mounts: ['/'] }, opts);
 const top = r.perf?.top || null;
 process.stdout.write('@@' + JSON.stringify({ ms: Date.now() - t0, ok: r.ok, error: r.error || null, cpu: !!r.counters?.cpu, mem: !!r.mem?.totalBytes, changes: !!r.perf?.changes?.value,
+  missing: r.missing || null, read: r.read || null, dfi: r.perf?.dfi ? { missing: !!r.perf.dfi.missing, absent: !!r.perf.dfi.absent } : null, disks: (r.counters?.disks || []).length, nets: (r.counters?.nets || []).length,
   top: top ? { missing: !!top.missing, off: !!top.value?.off, src: top.value?.src || null, cands: top.value?.candidates ?? null, error: top.error || null, skipped: top.skipped || null } : null, execs }) + '\\n');
 process.exit(0);
 `;
@@ -213,13 +219,18 @@ function runChild(env, timeoutMs = 120_000) {
 test('③ 실제 collectOsUsage — 멈추는 명령이 다 시한까지 가도 주 표본은 살아남고 Top-N 은 같은 세션의 별도 exec(반증 r-f1)', { timeout: 150_000 }, async (t) => {
   if (!fs.existsSync('/bin/dash')) return t.skip('dash 없음');
   const hang = 'exec sleep 100';
-  const bin = fakeBin({ systemctl: hang, chronyc: hang, dmesg: hang, 'needs-restarting': hang, dnf: hang, top: hang,
+  const bin = fakeBin({ systemctl: hang, chronyc: hang, dmesg: hang, 'needs-restarting': hang, dnf: hang, top: hang, df: hang,   // df — 1회차 점검 D2(멈춘 마운트)
     // 패키지 DB 가 방금 바뀐 것처럼(dnf 차례) · 매일 창(03:00 — needs-restarting 도 해당) → 배타 쌍의 최악
     find: 'case "$*" in *rpm*) echo /var/lib/rpm/rpmdb.sqlite;; esac; exit 0', date: '[ "$1" = "+%H%M" ] && { echo 0300; exit 0; }; exec /bin/date "$@"' });
   t.after(() => fs.rmSync(bin, { recursive: true, force: true }));
   const r = runChild({ BUD_FAKEBIN: bin, BUD_OPTS: JSON.stringify({ top: true }) });
   assert.equal(r.ok, true, `주 표본이 살아남는다(예전: ok:false · 전 구획 유실) — ${r.error}`);
   assert.ok(r.cpu && r.mem && r.changes, 'CPU · 메모리 · 변경 사실 구획이 있다');
+  // 1회차 점검 D2: df 가 멈추면 그 구획(디스크 사용 공간)만 못 읽음 — 나머지(디스크 I/O · 네트워크)는 산다 · inode 구획도 값 없음(0 이 아니다)
+  assert.ok(r.missing.includes('diskspace'), `디스크 사용 공간만 missing(${r.missing})`);
+  assert.ok(r.read.includes('cpu') && r.read.includes('mem') && r.read.includes('diskio') && r.read.includes('net'), `나머지 구획은 읽었다(${r.read})`);
+  assert.ok(r.disks > 0 && r.nets > 0);
+  assert.ok(r.dfi && (r.dfi.absent || r.dfi.missing), `inode 구획은 값 없음(${JSON.stringify(r.dfi)})`);
   assert.deepEqual(r.execs, ['main', 'top'], '주 명령 → Top-N exec(같은 세션)');
   assert.ok(r.top && !r.top.missing && r.top.src === 'proc' && r.top.cands > 0, `top 이 멈추면 /proc 대안(${JSON.stringify(r.top)})`);
   assert.ok(r.ms < OS.SESSION_BUDGET_MS, `세션 ${r.ms}ms < 예산`);

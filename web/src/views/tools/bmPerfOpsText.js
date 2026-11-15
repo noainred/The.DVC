@@ -32,6 +32,7 @@ export const FOCUS_MISS_TEXT = Object.freeze({
   timeout: 'SSH 시한 초과', auth: '인증 거부(즉시 중단)', 'auth-stopped': '인증 정지 중이라 시도하지 않음', 'ssh-error': 'SSH 오류', 'host-key': '호스트키 확인 거부',
   'not-linux': '리눅스 셸이 아님', 'no-path': '경로 없음', 'pool-busy': '동시성 풀이 가득 차 이번 분을 건너뜀', unreachable: '응답 없음', 'no-telemetry': '텔레메트리 없음', error: '오류',
   'cred-config': '키 · 계정 설정 때문에 접속하지 않음(SSH 공용 접속)',
+  forbidden: 'iDRAC 리포트 권한 거부(403 — 권한 · 라이선스)', 'ids-unmatched': 'iDRAC 리포트에 아는 지표 없음', 'cert-untrusted': 'iDRAC 인증서 신뢰 안 됨(장비 신뢰에서 승인)',
 });
 /** 시작 · 중지 결과 code(서버 FOCUS_CODE_STATUS) → 문장 · 톤. */
 export const FOCUS_CODE_TEXT = Object.freeze({

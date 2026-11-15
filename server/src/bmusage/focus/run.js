@@ -41,7 +41,7 @@ export const FOCUS_METRICS = Object.freeze([
 export const FOCUS_COLS = Object.freeze(FOCUS_METRICS.map((m) => m.col));
 export const FOCUS_STATUS = Object.freeze(['queued', 'running', 'done', 'stopped', 'auth', 'interrupted', 'failed']);
 /** 결측 사유(웹 문구 1:1). */
-export const FOCUS_MISS = Object.freeze(['timeout', 'auth', 'auth-stopped', 'ssh-error', 'host-key', 'not-linux', 'no-path', 'pool-busy', 'unreachable', 'no-telemetry', 'error', 'cred-config']);
+export const FOCUS_MISS = Object.freeze(['timeout', 'auth', 'auth-stopped', 'ssh-error', 'host-key', 'not-linux', 'no-path', 'pool-busy', 'unreachable', 'no-telemetry', 'error', 'cred-config', 'forbidden', 'ids-unmatched', 'cert-untrusted']);   // 1회차 점검 D5(b): iDRAC 셋
 /** 결과 code → HTTP(라우트 · 엣지 대행 공용 — 스냅샷과 같은 규약: 업무 결과는 code 로). */
 export const FOCUS_CODE_STATUS = Object.freeze({
   ok: 200, queued: 200, 'bad-reason': 400, 'bad-request': 400, 'not-found': 404, forbidden: 403, 'no-path': 409, busy: 409, 'daily-cap': 429,
@@ -49,9 +49,13 @@ export const FOCUS_CODE_STATUS = Object.freeze({
   maintenance: 409,   // 8a단계 ③: 정비 창 안 자동 집중(수동은 이 code 가 나오지 않는다)
 });
 export const FOCUS_CODES = Object.freeze(Object.keys(FOCUS_CODE_STATUS));
-/** 세션 시한(SSH 연결 15 + 주 명령 30 + 피크 창 + 경량 스냅샷) — 50초 안(주기 수집 SESSION_BUDGET 과 같다). */
+/**
+ * 세션 시한(SSH 연결 15 + 주 명령 + 피크 창 + 경량 스냅샷) — 50초 안(주기 수집 SESSION_BUDGET 과 같다).
+ *   예산 − 연결(15) ≥ 주 명령 시한(osSsh CMD_TIMEOUT_MS)이어야 주 명령 안 timeout 산수가 집중 경로에서도 선다(bmTop8bBudget ①).
+ *   1회차 점검 D2: 주 명령 시한이 34초가 되어 45초 → 49초(시한 50초보다 작게 — 이 모듈의 예산 가드가 먼저 끊는다).
+ */
 export const FOCUS_DEADLINE_MS = 50_000;
-export const FOCUS_BUDGET_MS = 45_000;
+export const FOCUS_BUDGET_MS = 49_000;
 /** 1분 창 피크 — 같은 세션 1초 창(A 안). 설정 peakWindowS 보다 길게 잡지 않는다. */
 export const FOCUS_PEAK_WINDOW_S = 10;
 
@@ -129,6 +133,11 @@ async function refreshOsHost0(osHost) {
   if (String(raw.host || '').trim().toLowerCase() !== String(osHost.host || '').trim().toLowerCase() || (Number(raw.port) || 22) !== (Number(osHost.port) || 22)) {
     return fail('moved', 'OS 등록 항목의 접속처가 그 사이 바뀌어 접속하지 않았습니다(세션을 다시 시작하세요).');
   }
+  // 1회차 점검 D3 · D4: 그 사이 ‘사용 안 함’ 으로 꺼졌거나 엣지 등록(agent)으로 바뀐 항목으로는 접속하지 않는다(대상 해석과 같은 함수 — targets.js osEntryIssue).
+  const { osEntryIssue } = await import('../targets.js');
+  const issue = osEntryIssue(raw, { isEdge: !!config.agent?.centralUrl, agentName: config.agent?.name || '' });
+  if (issue === 'os-disabled') return fail('disabled', 'OS 등록 항목이 그 사이 ‘사용 안 함’ 으로 꺼져 접속하지 않았습니다.');
+  if (issue === 'os-edge') return fail('edge-registry', 'OS 등록 항목이 그 사이 엣지 수집으로 지정돼 이 노드에서는 접속하지 않았습니다.');
   const { withResolvedAuth } = await import('../onboard/refs.js');
   return withResolvedAuth([raw], { feature: 'bm-usage' })[0];
 }

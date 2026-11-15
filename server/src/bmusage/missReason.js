@@ -14,13 +14,23 @@ export function osMissOf(os) {
   if (os.authErrorCode) return 'cred-config';
   const e = String(os.error || '');
   if (os.busy) return 'pool-busy';
+  // 1회차 점검 D5(a): 수집 명령 exec 자체가 실패(osSsh execError) — 시한이면 timeout · 채널 오류는 ssh-error · 출력 상한은 error(OS 종류 문제가 아니다).
+  if (os.execError === 'timeout') return 'timeout';
+  if (os.execError === 'channel') return 'ssh-error';
+  if (os.execError) return 'error';
   if (isPeerRejectText(e)) return 'host-key';
   if (isAuthFailureText(e)) return 'auth';
   if (/시한 초과|timeout|타임아웃/i.test(e)) return 'timeout';
   if (/어느 형식으로도|Linux/i.test(e)) return 'not-linux';
   return 'ssh-error';
 }
-/** iDRAC 텔레메트리 결과 → 사유(없으면 ''). */
+/**
+ * iDRAC 텔레메트리 결과 → 사유(없으면 '').
+ *   1회차 점검 D5(b): 예전에는 아래 셋이 모두 'unreachable'(‘iDRAC 미도달 — 네트워크 · 서비스 확인’)이었다 — 조치가 다르다.
+ *     'forbidden'      — 403(인증은 통했고 그 리포트가 허락되지 않음: 라이선스 · 계정 권한 — redfish.js redfishFailKind 가 auth 와 따로 둔 값)
+ *     'ids-unmatched'  — 리포트는 왔는데 아는 메트릭 id 가 없다(상세의 응답 id 목록이 근거)
+ *     'cert-untrusted' — 장비 인증서를 신뢰하지 않아 연결을 끊었다(장비 신뢰 — PEER_REJECT_MARKERS)
+ */
 export function idracMissOf(idr) {
   if (!idr) return 'no-path';
   if (idr.ok) return '';
@@ -29,5 +39,8 @@ export function idracMissOf(idr) {
   if (idr.kind === 'auth-stopped') return 'auth-stopped';
   if (idr.kind === 'timeout') return 'timeout';
   if (idr.kind === 'no-telemetry' || idr.kind === 'empty-report') return 'no-telemetry';
+  if (idr.kind === 'forbidden') return 'forbidden';
+  if (idr.kind === 'ids-unmatched') return 'ids-unmatched';
+  if (isPeerRejectText(String(idr.error || ''))) return 'cert-untrusted';
   return 'unreachable';
 }

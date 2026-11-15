@@ -44,6 +44,7 @@
 - (2026-11-09 추가) 사용자 결정 기록 — 7b 공통 계정 묶기 · 8a 운영자 정비 창 12h · 법인 미지정 OS 등록 공유 · 전력 알림 랙 창/판정 노드 — 네 가지 모두 현행 유지(다시 묻지 않는다)
 - (v2.967 추가) 서버 하드웨어 정보 내보내기 — 값 카탈로그 하나(insights/hwExport/catalog.js) · 대상은 통합 서버 인벤토리 판정 그대로 · 못 읽은 값은 빈 칸 · 관리자 전용 값 · 사양서 파일 나눔
 - (v3.3.0 추가) 물리서버 폴더 하드웨어(iDRAC) 요약 · OS 이름 수집 · iDRAC 주소 접속 — 요약 코어 하나(idrac/hwSummary.js) · Dell ServerOS 속성 $select · 엣지 fleet 요약은 중앙 정제 · 주소는 관리자 판본만
+- (점검 반복 1회차 추가) 베어메탈 사용률 대상 해석 · 누적 차분 · 사유 — 꺼진 등록 · 엣지(agent) OS 등록은 경로가 아니다 · 직전 누적 표본은 같은 장비 · 같은 부팅만 · df 도 시한 안 · exec 오류 · iDRAC 403 등은 각자 사유
 - (v3.8.0 추가) 디스크 배드 섹터 이력(범위 A) — 엣지가 중앙 작업을 가져가 법인 안에서 Lifecycle 로그를 읽는다 · 분류는 ID · 근거 문서가 있는 ID 만 · 판정 코어 하나(verdict.js — 시리얼 = 확정 · 로그 연속성 = 추정 · 그 밖 판단 안 함) · 가져간 작업의 보고만 저장
 ## 본문
 
@@ -232,6 +233,7 @@
     (`remoteAgent` 있음)는 `getFleetInventory` 가 이미 잡힌 원격 항목과 태그 · 호스트가 겹쳐 버린다 → 중앙이 자기 iDRAC 등록부에서 찾다가 없으니
     **'iDRAC 등록 없음'**(사용자 화면 1,157대 · 엣지 수집 1대). 고친 판정(`bmusage/targets.js resolveTargets` 한 곳): **중앙 · 출처 `remote` ·
     `collectorId` 있음 · 이 노드에 그 서버 등록이 하나도 없음**(iDRAC 등록 id · 서비스태그 · OS 계정 · 법인이 맞지 않거나 모호한 OS 등록까지 — 등록이 있으면
+    ⚠ 점검 반복 1회차 D3: ‘사용 안 함’ 으로 끈 등록은 ‘이 노드가 수집할 수 있는 등록’ 이 아니다 — 꺼진 등록만 있는 원격 출처 서버는 이 위임 갈래를 탄다(주 iDRAC 폴러도 그 등록을 읽지 않는다).
     이 노드 설정의 문제라 예전 사유 그대로)이면 `edge-delegated` + `agent` = **수집 서버 등록부의 name**(`/tools/bm-usage/edges` 표의 agent 와 같은 값 ·
     엣지가 보낸 문자열이 아니다) + `vcenterId`(범위 계정은 범위 안 행만) + `delegatedBy:'collector'`. 수집 서버를 등록부에서 못 찾거나(삭제 · 이름 없음)
     등록부를 못 읽으면 **이름을 추측하지 않고** `remote-collector-unknown`(`collectorIssue` unread · not-found · no-name(등록부에 있는데 이름이 빔 — 반증 의심 2) —
@@ -550,7 +552,7 @@
     대상에서 사라진 서버의 최신값은 **마지막 성공 주기의 키**(`_lastLiveKeys`)로 정리한다 — 정리 틱에서 대상 해석(`currentTargets`)을 다시 부르면 bmstor 등록부 캐시를 오염시켰다(bmPerf2923Snapshot 404 — 이번 회차에 잡음).
   - **집중 모니터링(`focus/run.js`)**: 별도 타이머 · 별도 표(`focus_session` · `focus_sample` — 메인 bm-usage.db · 30일 · 폴러 정리 틱이 청크로) · 기본 10분 × 1분(간격 하한 30초 · 길이 상한 60분) ·
     1분 = **주기 수집과 같은 함수**(`collectOsUsage` + `extraCommands` 로 같은 SSH 세션에서 경량 스냅샷 `FOCUS_SNAPSHOT_COMMAND` — 상수 · ps 상위 5 · /proc/pid/io 2초 차이 · ss -s) + Redfish 1회(`idracTelemetryJob` 재사용) →
-    `buildUsage` · `buildPerfEntry`(판정 코어 하나). 세션 시한 `withDeadline` 50초 > 예산 45초(시한이 세션을 끊는다).
+    `buildUsage` · `buildPerfEntry`(판정 코어 하나). 세션 시한 `withDeadline` 50초 > 예산 49초(시한이 세션을 끊는다 · 예산 − 연결 15초 ≥ 주 명령 시한 34초 — 점검 반복 1회차 D2 에서 45초 → 49초).
     ⚠⚠ **법인당 동시 상한(기본 5)은 실행 중 + 시작 중(예약)을 동기적으로 세고 예약**한다(검사와 예약 사이 await 없음 — 4단계 스냅샷 R2 와 같은 판단) · 넘치면 법인별 대기열(순번) · 서버당 1세션.
     ⚠⚠ **인증 거부는 그 분에서 즉시 중단**(다음 분을 예약하지 않는다) — OS · iDRAC 결과를 **주기 수집과 같은 가드 · 같은 식별자**에 기록(실패는 주기 수집도 멈추고 성공은 푼다 — Focus 테스트 ③가 실제 poller 가드로 확인).
     자동 · 수동 모두 정지 계정이면 시작하지 않는다(반증 F11 — 아래). 결측 분은 **비우고** OS · iDRAC 를 따로 센다(경로가 없는 쪽은 요약 null — 화면 ‘경로 없음’).
@@ -1647,3 +1649,25 @@
     흔적 표는 전부 정렬한 뒤 상한(F13) · 값을 하나도 못 읽으면 흔적 수 null(F14) · 장비가 준 값 이름은 관리자 판본만(F15) · 서버 한 대 최악 = 로그 + 90초 + 90초(+ 수동 120초) ≤ 15분(F16 — 테스트 고정).
   - 남은 것(설계 §16 · §18 범위 B · C · §22): 보관 로그 내보내기(§22 2단계 — 장비에 보내는 요청형 동작) · 세션 재사용(3단계) · 지금 쓰이는 곳(OS · vCenter) · 교체 우선순위 · 조치 추적 · vSAN 상태 · 설정 점검. 디스크 값은 v3.10.1 에 텔레메트리 · DriveMetrics 로 읽는다(실장비 대조 전). 실장비 대조는 3.8.2 의 장비 진단으로 받는다(§14.1 명령 대신) — 그 답으로 분류표 · 읽는 방법을 고친다.
   - 회귀 `server/test/diskBad380.test.js` · `server/test/diskBadReview380.test.js` · `server/test/diskBadField382.test.js` · `server/test/diskBadField383.test.js` · `server/test/diskBadPast3101.test.js` · 웹 `diskBadText.test.js`.
+
+- ⚠⚠ **베어메탈 사용률 점검 반복 1회차(기준판 55d8e121) — 꺼진 등록 · 엣지 OS 등록은 경로가 아니다 · 직전 누적 표본은 같은 장비만 · df 도 시한 안 · 사유는 원인대로**
+  (`bmusage/{targets,usage,missReason,collectHealth,poller}.js` · `collectors/osSsh.js` · `parse/linuxProc.js`(btime) · `focus/run.js` · `bmfolders/usageWhy.js` · `central/bmPerfOpsPull.js` ·
+  웹 `bm{Usage,Onboard,Collect,PerfOps}Text.js` · `bmFolders/whyText.js`. 회귀 `server/test/bmUsageLoop1.test.js` · `bmTop8bBudget` ①③ · `bmPerfStage6Health` ②):
+  - **D3 꺼진 등록**: 고르는 순서(iDRAC id → 서비스태그 · OS ①주소 ②이름 ③이름=주소 + 법인)는 그대로 두고 **고른 등록이 `enabled:false` 면 쓰지 않는다** — `idrac-disabled` · `os-disabled`
+    (주 iDRAC 폴러 · bmstor 폴러와 같은 기준). iDRAC 은 다른 등록으로 갈아타지 않는다(같은 태그의 다른 등록은 공통 태그면 남의 iDRAC) — 그래서 대상을 늘리지 않는다.
+    같은 주소 OS 중복 등록은 쓸 수 있는 것(`pickOsEntry prefer`)을 먼저 — 같은 장비라 안전. 집중 모니터링 분마다 다시 해석(`refreshFocusOsHost`)도 같은 함수(`osEntryIssue`).
+  - **D4 엣지(agent) OS 등록**: bmstor 는 agent 있는 등록을 그 엣지로 보낸다 — 중앙은 그 등록으로 SSH 하지 않는다. 쓸 수 있는 중앙 iDRAC 경로가 없으면 `edge-delegated`
+    (`delegatedBy:'os-registry'` · 이름은 `canonicalAgentRef`) · 있으면 iDRAC 만 + missing `os-edge`. 엣지 노드는 빈 값 · 자기 이름 등록만. iDRAC 등록부를 못 읽은 동안은 위임을 단정하지 않는다.
+    불변식(시험 ③ — 생성 입력 2,000 · 작업 때 기준판 targets.js 4,000 입력 대조): 켜진 · agent 없는 등록으로 수집하던 대상은 그대로 · 새 대상은 상대가 빠져 풀린 키 충돌뿐.
+    ⚠ **남은 것(메인 결정 대기)**: OS 주소 제안(`bmfolders/osSuggest.js` · `routes/admin/bmOsSuggest.js`)은 원격 수집 서버 출처 서버(collectorId · remoteAgent 없음)를 agent '' 로 등록한다.
+    그 칸은 bmstor 잡의 엣지 인출 이름(엣지 `config.agent.name` — `agent/bmstorWorker.js`)이어야 하는데 v2.961 색인의 이름(name)과 인증 이름(등록 id 가 원칙 — `collector/registry.js` 정체 대조)이
+    다를 수 있어 바꾸지 않았다(주소만 · 비활성 등록이라 사람이 켜기 전에는 접속하지 않는다).
+  - **D1 누적 차분의 장비 동일성**: `_prev` 는 키 하나로 들고 다닌다 — 같은 키의 OS 등록 주소가 다른 장비로 바뀌면 이전 장비 누적과 차분해 가짜 값(재현 disk_busy 100 · 8.7 GB/s)이 원시 · 롤업에 남았다.
+    직전 표본에 `osDev{ep(host:port) · boot(/proc/stat btime) · hn(uname)}` · `idracDev{reg · host}` 를 싣고 다르면 첫 표본(null + 노트). 새 SSH 호출 없음(##STAT · ##HOST 에 이미 있다).
+    btime 은 30초 넘게 바뀌어야 재부팅(시계 보정 흔들림 — 추정). 식별 없는 직전 표본(업그레이드 직후)은 예전처럼 차분한다(모름 ≠ 다른 장비).
+  - **D2 df 시한**: ##DF · ##DFI 의 df 도 `timeout 2`(멈춘 마운트 하나가 주 명령 전체를 exec 시한에 걸리게 했다 — 전 구획 유실 · 사유 not-linux). 8b 산수가 30초에 꽉 차 있어
+    주 명령 시한 30 → 34초 · 집중 예산 45 → 49초(시한 50초). 최악이면 주 명령 뒤 Top-N · 피크 창 · Windows 재시도는 예산 부족으로 건너뛴다(예전엔 5초 남았다). D 상태(깰 수 없는 대기)면 timeout 도 못 끝낸다.
+  - **D5 사유**: (a) 주 명령 exec 거부(시한 · 채널 · 출력 상한)는 `execError` 로 남겨 timeout · ssh-error · error(예전 전부 not-linux) — 오류 원문(명령 전문)은 싣지 않는다.
+    (b) iDRAC `forbidden`(403) · `ids-unmatched` · `cert-untrusted`(장비 신뢰) 새 code — 수집 건강 · 집중 · 중앙 정제 · 중앙 집중 인출 열거와 웹 문구를 함께. 구버전 중앙은 모르는 code 의 사유 줄을 버리고(실패 수는 그대로) 집중 결측은 'error' 로 본다.
+  - **D6**: 자격 해석이 막아(authErrorCode) · 주소가 없어 접속하지 않은 서버는 SSH 소요에 넣지 않는다(정지 서버와 같은 원칙).
+  - **의심 1 · 2**: `hostKey` 끝 슬래시는 `trimTrailingSlashes`(선형) · 물리서버 폴더 사유 색인은 가상화 호스트 행을 빼고 (법인, 키) 쌍 → 키 순(공통 태그 ESXi 행이 베어메탈 사유를 덮었다 — 재현).
