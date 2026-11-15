@@ -136,7 +136,11 @@ test('D1 ③ bm-storage 저장(bmBindCheck · 실제 라우터) — 저장 뒤 �
   assert.equal((await bmBindCheck({ name: 'db-b2', host: '10.42.0.2', username: 'mon', vcenterId: 'vcB', credRef: accA.id })).code, 'key-folder', '공통 계정의 기본 키도 같은 판정');
   assert.deepEqual(await bmBindCheck({ name: 'db-b3', host: '10.42.0.3', username: 'mon', vcenterId: 'vcB', credRef: accA.id, osAuth: 'password' }), { binds: true }, '비밀번호 고정이면 키를 쓰지 않는다');
   // 이 화면은 법인(vcenterId)을 보내지 않는다 — 새 항목은 귀속이 없어 법인 폴더 키는 접속 때도 key-folder 다(같은 판정)
-  assert.equal((await bmBindCheck({ name: 'db-b4', host: '10.42.0.4', username: 'mon', keyRef: kA.id })).code, 'key-folder');
+  const f4 = await bmBindCheck({ name: 'db-b4', host: '10.42.0.4', username: 'mon', keyRef: kA.id });
+  assert.equal(f4.code, 'key-folder');
+  // 재확인 I1: 귀속이 없는 서버에는 '이 법인 폴더 키를 고르세요' 가 아니라 갈 길(전역 키 · 서버 등록에서 법인 지정)을 말한다 · 키 이름 · 폴더는 싣지 않는다
+  assert.match(f4.error, /법인\(vCenter\) 귀속이 없어/); assert.match(f4.error, /전역 키/); assert.doesNotMatch(f4.error, /이 서버 법인\(또는 이 서버\)의 폴더에 있는 키를 고르세요/);
+  assert.doesNotMatch(f4.error, new RegExp(`${kA.name}|vcA`), '키 이름 · 폴더 법인을 흘리지 않는다');
   assert.deepEqual(await bmBindCheck({ name: 'db-b4', host: '10.42.0.4', username: 'mon', keyRef: kAll.id }), { binds: true });
   // 기존 항목: 키 · 법인 · 이름이 그대로인 수정(마운트)은 판정하지 않는다 · 같은 항목에 폴더 밖 키를 새로 고르면 거부
   assert.deepEqual(await bmBindCheck({ id: e1.id, name: 'db-e1', host: '10.40.2.1', username: 'mon', mounts: ['/', '/data'] }), { binds: false });
