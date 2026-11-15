@@ -292,6 +292,14 @@ test('R1 수집 설정 — 전역 값은 조회 ∧ 쓰기 전체 범위만 · �
   // 재현: sadm2 가 조회 전용 vcB 수집을 켰다
   const r4 = await putSettings('sadm2', { corps: { vcA: true, vcB: true } });
   assert.equal(r4.s, 403); assert.equal(!!(await settingsNow()).corps.vcB, false);
+  // 재확인 2 — 낡은 폼: 화면은 쓰기 법인 키만 보낸다(corpsSavePatch). 폼을 연 뒤 다른 관리자가 조회 전용 vcB 를 바꿔도 쓰기 법인 변경은 200 · vcB 는 지금 값 보존.
+  const r4a = await putSettings('sadm2', { corps: { vcA: false } });
+  assert.equal(r4a.s, 200, JSON.stringify(r4a.j)); s = await settingsNow(); assert.equal(!!s.corps.vcA, false); assert.equal(!!s.corps.vcB, false);
+  assert.equal((await putSettings('adm', { corps: { vcA: false, vcB: true } })).s, 200);   // 다른 관리자가 조회 전용 법인을 켬(sadm2 의 폼은 vcB=false 로 낡았다)
+  const r4b = await putSettings('sadm2', { corps: { vcA: true } });
+  assert.equal(r4b.s, 200, JSON.stringify(r4b.j)); s = await settingsNow(); assert.equal(s.corps.vcA, true); assert.equal(s.corps.vcB, true, '조회 전용 법인 값은 요청과 무관하게 지금 값 보존');
+  assert.equal(r4b.j.ignoredOutOfScope, undefined);
+  assert.equal((await putSettings('adm', { corps: { vcA: true, vcB: false } })).s, 200);
   // 조회 밖 법인 키는 예전처럼 무시하고 밝힌다(존재 은닉 — 404 류)
   const r5 = await putSettings('sadm2', { corps: { vcA: true, vcZ: true } });
   assert.equal(r5.s, 200); assert.equal(r5.j.ignoredOutOfScope, 1);

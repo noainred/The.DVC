@@ -39,7 +39,7 @@ import {
   unassignedNote, edgePullState, edgePullNote, edgeNoteRows, blurNumber, BLANK_KEPT_TEXT, esxiCollectNote,
   edgeDelegatedByAgent, edgeDelegatedChip, edgeDelegatedGuide, remoteUnknownNote } from './bmUsageText.js';   // v2.961 엣지 수집 — 엣지별 · 수집 서버 모름 갈래
 import Select from '../../components/Select.jsx';
-import { gateOk, gateTitle, settingsReadOnlyText, CORP_READ_ONLY_TITLE } from './bmWriteText.js'; // 점검 반복 2회차 E1 · E2 — 서버 쓰기 표지(actions)
+import { gateOk, gateTitle, settingsReadOnlyText, CORP_READ_ONLY_TITLE, corpsSavePatch } from './bmWriteText.js'; // 점검 반복 2회차 E1 · E2 — 서버 쓰기 표지(actions) · 재확인 2: 법인 칸은 쓰기 법인 키만 보낸다
 // v2.920(리눅스 성능 2단계 화면): USE 매트릭스 보드 · 서버 성능 상세 — 문구·표시 규약은 bmPerfText.js, 판정은 서버 useJudge.js.
 import BmPerfBoard from './BmPerfBoard.jsx';
 import BmPerfDetail from './BmPerfDetail.jsx';
@@ -903,7 +903,7 @@ export function BmUsage() {
                 <input
                   type="checkbox" disabled={dlCorp || v.writable !== true}
                   checked={!!(form.corps || {})[v.id]}
-                  onChange={(e) => saveSettings({ corps: { ...(form.corps || {}), [v.id]: e.target.checked } })}
+                  onChange={(e) => saveSettings({ corps: corpsSavePatch({ corps: form.corps, vcenters: data?.vcenters || [], id: v.id, on: e.target.checked, fullRw: canGlobal }) })}
                 />
                 {' '}{v.name}
               </label>

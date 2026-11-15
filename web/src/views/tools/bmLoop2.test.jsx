@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { WRITE_WHY_TEXT, gateOk, gateShown, gateWhy, gateTitle, settingsReadOnlyText, SETTINGS_CORPS_ONLY_TEXT } from './bmWriteText.js';
+import { WRITE_WHY_TEXT, gateOk, gateShown, gateWhy, gateTitle, settingsReadOnlyText, SETTINGS_CORPS_ONLY_TEXT, corpsSavePatch } from './bmWriteText.js';
 import { usageTone, bmUtilThresholds, corpSummary } from './bmUsageText.js';
 import { columnStateView, focusBlockText, OTHER_CORP_SCOPED_NOTE } from './bmCompareText.js';
 import { statusTone } from './bmCapacityText.js';
@@ -196,5 +196,26 @@ describe('재확인 R1 · R4 — 쓰기만 좁은 관리자 · 데모 계정', (
     const m = src('BmMaintPanel.jsx'); const k = src('BmKeyOverlaps.jsx');
     expect(m).not.toMatch(/hasRole\(/); expect(m).toMatch(/const writer = gateOk\(cg\);/);
     expect(k).not.toMatch(/hasRole\(/); expect(k).toMatch(/const canWrite = gateOk\(dg\) && gateOk\(st\.resp\?\.actions\?\.clear\);/);
+  });
+});
+
+describe('재확인 2 — 낡은 폼의 거짓 403: 법인 칸 저장 본문은 쓰기 법인 키만', () => {
+  const vcs = [{ id: 'vcA', writable: true }, { id: 'vcB', writable: false }, { id: 'vcC', writable: true }];
+  it('범위 관리자 — 조회 전용 법인(vcB) 키가 본문에 없다 · 쓰기 법인은 전부(빠진 키는 서버가 끈다)', () => {
+    const b = corpsSavePatch({ corps: { vcA: true, vcB: true }, vcenters: vcs, id: 'vcC', on: true });
+    expect(b).toEqual({ vcA: true, vcC: true });
+    expect('vcB' in b).toBe(false);
+    expect(corpsSavePatch({ corps: { vcA: true, vcB: true }, vcenters: vcs, id: 'vcA', on: false })).toEqual({ vcA: false, vcC: false });
+    expect(corpsSavePatch({ corps: { vcA: true }, vcenters: vcs, id: 'vcB', on: true })).toEqual({ vcA: true, vcC: false }, '조회 전용 칸은 바꾸지 않는다');
+    expect(corpsSavePatch({ corps: { vcZ: true }, vcenters: vcs, id: 'vcA', on: true })).toEqual({ vcA: true, vcC: false }, '목록 밖 키는 범위 관리자 본문에 없다');
+  });
+  it('전체 범위 관리자 — 목록 밖에 켜진 법인 키도 그대로(서버가 맵을 통째로 바꾼다 — 빼면 꺼진다)', () => {
+    const all = vcs.map((v) => ({ ...v, writable: true }));
+    expect(corpsSavePatch({ corps: { vcA: true, vcZ: true }, vcenters: all, id: 'vcB', on: true, fullRw: true })).toEqual({ vcA: true, vcB: true, vcC: false, vcZ: true });
+  });
+  it('화면 — 법인 칸 onChange 가 이 함수를 쓴다(보이는 법인 전부 펼침 금지)', () => {
+    const s = src('BmUsage.jsx');
+    expect(s).toMatch(/saveSettings\(\{ corps: corpsSavePatch\(\{ corps: form\.corps, vcenters: data\?\.vcenters \|\| \[\], id: v\.id, on: e\.target\.checked, fullRw: canGlobal \}\) \}\)/);
+    expect(s).not.toMatch(/corps: \{ \.\.\.\(form\.corps \|\| \{\}\), \[v\.id\]/);
   });
 });

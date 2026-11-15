@@ -53,5 +53,21 @@ export function settingsReadOnlyText(g, globalGate = undefined) {
   return '';
 }
 export const SETTINGS_CORPS_ONLY_TEXT = '일부 읽기 전용 — 법인 켜기/끄기는 쓰기 범위 법인만 바꿀 수 있습니다. 수집 켜기 · 주기 · 보존 · 경로 · Enterprise · 알림 같은 전역 값은 조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 관리자만 바꿉니다.';
+/**
+ * 재확인 2 — 수집 설정 법인 칸 저장 본문(순수). **쓰기 법인 키만** 보낸다(서버 vcenters[].writable === true):
+ *   조회 전용 법인 값을 같이 보내면 폼을 연 뒤 다른 관리자가 그 값을 바꿨을 때 낡은 값이 ‘조회 전용 법인 변경’ 403 이 됐다(자기 쓰기 법인 하나만 바꿔도).
+ *   서버 병합(writeScopedVcenterIds)은 쓰기 법인 중 빠진 키를 끄므로 **쓰기 법인 전부**를 보낸다.
+ *   전체 범위 관리자(fullRw — actions.settingsGlobal)는 서버가 맵을 통째로 바꾸므로 목록에 없는 켜진 법인 키도 그대로 보낸다(빼면 꺼진다 — 예전 동작 보존).
+ * @param {{corps?:object, vcenters?:Array<{id:string, writable?:boolean}>, id:string, on:boolean, fullRw?:boolean}} p
+ */
+export function corpsSavePatch({ corps = {}, vcenters = [], id, on, fullRw = false } = {}) {
+  const cur = corps && typeof corps === 'object' ? corps : {};
+  const listed = new Map((vcenters || []).map((v) => [String(v?.id ?? ''), v?.writable === true]));
+  const out = {};
+  if (fullRw) for (const [k, v] of Object.entries(cur)) if (!listed.has(k) || listed.get(k)) out[k] = !!v;
+  for (const [k, w] of listed) if (w && k) out[k] = !!cur[k];
+  if (listed.get(String(id)) === true || (fullRw && !listed.has(String(id)))) out[id] = !!on;
+  return out;
+}
 /** 쓰기 범위 밖 법인 칸의 마우스 설명(재확인 R1 — 서버 vcenters[].writable). */
 export const CORP_READ_ONLY_TITLE = '조회 전용 법인(쓰기 범위 밖) — 수집을 켜고 끌 수 없습니다';
