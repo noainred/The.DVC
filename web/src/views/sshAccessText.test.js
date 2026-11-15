@@ -855,3 +855,32 @@ describe('5회차 반증 R5R-2 · R5R-3 — 읽기는 됐는데 기록에 적지
     expect(serverSrc('routes/api/bmstor.js')).toMatch(/\.\.\.\(registryReadFailed\(\) \? \{ registryUnreadable: true \} : \{\}\)/);
   });
 });
+
+describe('6회차 B6-1 · E6-2 · A6-3 — 부분 성공 · 추가 칸 글자 · 키 고르기 칩 · 위 목록 · 봉인 못 풂 띠', () => {
+  it('키 작업 · 키 사용 code 글자 — partial-auth · more-auth(서버가 내는 code 와 같다)', () => {
+    expect(JOB_CODE_TEXT['partial-auth']).toBe('비밀번호는 받아들여졌지만 서버가 다른 인증도 요구함(키를 넣지 못함)');
+    expect(JOB_CODE_TEXT['more-auth']).toBe('비밀번호 뒤에 다른 칸(인증 코드 등)을 더 물음 — 비밀번호가 맞았는지 모름');
+    const txt = fs.readFileSync(path.join(HERE, 'sshAccessText.js'), 'utf8');
+    expect(txt).toMatch(/'partial-auth': '비밀번호는 받아들여짐 · 다른 인증 더 요구', 'more-auth': '비밀번호 뒤 다른 칸을 더 물음\(맞았는지 모름\)'/);
+    const kl = serverSrc('sshaccess/keyLogin.js');
+    expect(kl).toMatch(/e\?\.code === 'SSH_PARTIAL_AUTH' \? 'partial-auth' : e\?\.code === 'SSH_MORE_AUTH' \? 'more-auth'/);
+    expect(serverSrc('sshaccess/service.js')).toMatch(/e\?\.code === 'SSH_PARTIAL_AUTH' \? 'partial-auth' : e\?\.code === 'SSH_MORE_AUTH' \? 'more-auth'/);
+  });
+  it('installedReadText — 기록에 적지 못한 문구는 목록 아래 상태 줄이라 ‘위 목록’ · 다음 창에는 이번 결과가 남지 않는다', () => {
+    const a = installedReadText({ ok: true, keys: [{}], saved: false });
+    expect(a.text).toContain('위 목록은 이번에 읽은 내용이고, 서버 표 · 다음에 여는 창에는 이번 결과가 남지 않습니다');
+    expect(a.text).not.toContain('아래 목록');
+  });
+  it('키 고르기 창 — fresh 를 보일 때 칩은 그 목록의 지문으로(installedOf) · 머리글 세 갈래(소스)', () => {
+    const jsx = fs.readFileSync(path.join(HERE, 'SshAccessSettings.jsx'), 'utf8');
+    expect(jsx).toMatch(/const freshFps = fresh && !fresh\.error \? new Set\(\(fresh\.keys \|\| \[\]\)\.map\(\(x\) => x\.fingerprint\)\) : null;/);
+    expect(jsx).toMatch(/\{installedOf\(k\) === true && <Chip tone="ok">이 서버에 들어 있음<\/Chip>\}/);
+    expect(jsx).toMatch(/\{installedOf\(k\) === false && <Chip tone="warn">이 서버에 없음<\/Chip>\}/);
+    expect(jsx).toMatch(/c\.installedReadFailed \? '이 창을 닫으면 다시 모름' : c\.installed \? '다시 열면 이전 기록이 보입니다' : '다시 열면 읽지 않음으로 보입/);
+  });
+  it('봉인을 못 푼 동안 화면 띠(소스) — 저장소를 읽지 못한 때는 그 띠가 대신 말한다', () => {
+    const jsx = fs.readFileSync(path.join(HERE, 'SshAccessSettings.jsx'), 'utf8');
+    expect(jsx).toMatch(/\{!v\.storeUnreadable && v\.storeUndecryptable > 0 && \(\s*<p className="ssa-banner" style=\{\{ color: toneVar\('bad'\) \}\}>\s*SSH 키 저장소에 봉인을 풀지 못한 비밀이 \{v\.storeUndecryptable\}개 있습니다/);
+    expect(serverSrc('sshaccess/service.js')).toMatch(/storeUndecryptable: storeErr \? 0 : KS\.keyStoreUndecryptable\(\),/);
+  });
+});
