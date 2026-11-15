@@ -204,7 +204,9 @@ function dstAnchors(cand, group, now, occOf) {
   if (!(end > now)) return [];
   const tzs = new Set(group.filter((w) => w.schedule?.kind === 'weekly').map((w) => w.tz));
   const out = [];
-  for (const tz of tzs) for (const T of tzTransitions(tz, now, end + DST_BEFORE_MS)) out.push(...occOf(cand, T - DST_BEFORE_MS, T + DST_AFTER_MS));
+  // 6회차 Y 재확인 Y1: 앞 끝은 기본 기준점과 같은 아래 끝(now − 1일)보다 이르지 않게 — 전환이 2일 안이면 T − 2일이 지난 발생까지 끌어와,
+  //   앞으로는 12시간을 넘지 않는 창이 지난 발생 때문에 운영자에게 403 이었다(재현: 바르샤바 전환 2시간 전 · 지난 목요일만 12.5h).
+  for (const tz of tzs) for (const T of tzTransitions(tz, now, end + DST_BEFORE_MS)) out.push(...occOf(cand, Math.max(T - DST_BEFORE_MS, now - DAY), T + DST_AFTER_MS));
   return out;
 }
 /** 기준점 하나 둘레(앞뒤 2일)에서 후보 발생과 겹치는 24시간 창 중 덮임이 상한을 넘는 것이 있는가(순수 — 빠른 길 · 정확 경로가 같은 함수). */

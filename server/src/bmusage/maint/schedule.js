@@ -180,9 +180,12 @@ function tzTransitionsOfYear(tz, y) {
   _tzYears.set(k, r);
   return r;
 }
+/** 한 번에 보는 구간 상한(6회차 Y 재확인 의심 — 연도마다 Intl 을 365번 부르므로 아주 먼 to 는 사실상 멈췄다 · 지금 호출처는 400일 + 2일로 묶인다). */
+export const TZ_TRANSITIONS_SPAN_MAX_MS = 5 * 366 * DAY;
 export function tzTransitions(tz, from, to) {
   const out = [];
   if (!(Number.isFinite(from) && Number.isFinite(to) && to > from)) return out;
+  to = Math.min(to, from + TZ_TRANSITIONS_SPAN_MAX_MS);
   for (let y = new Date(from).getUTCFullYear(); y <= new Date(to).getUTCFullYear(); y += 1) {
     for (const x of tzTransitionsOfYear(String(tz ?? ''), y)) if (x >= from && x < to) out.push(x);
   }

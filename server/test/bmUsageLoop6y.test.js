@@ -215,8 +215,13 @@ test('A3 비용 — 목록 꼴(비소유자 canConfirm · 메모 · 200창 · �
     await run();
     return Math.min(await run(), await run());
   };
-  const multi = await listMs(['Europe/Warsaw', 'America/New_York', 'Australia/Sydney', 'Asia/Seoul']);
-  const seoul = await listMs(['Asia/Seoul']);
+  // 6회차 Y 재확인 Y2: 두 꼴을 번갈아 두 번씩 재고 각자 최소값을 비교한다 — 한 번씩 차례로 재면 그 사이 러너 부하가 바뀔 때 비율이 흔들렸다(부하 러너 4회 중 2회 실패 재현)
+  const ms = { multi: [], seoul: [] };
+  for (let k = 0; k < 2; k += 1) {
+    ms.multi.push(await listMs(['Europe/Warsaw', 'America/New_York', 'Australia/Sydney', 'Asia/Seoul']));
+    ms.seoul.push(await listMs(['Asia/Seoul']));
+  }
+  const multi = Math.min(...ms.multi); const seoul = Math.min(...ms.seoul);
   // 실측(이 컨테이너 · 기준판 → 고친 판): 4개 시간대 0.93~1.05s → 1.35~1.44s(전환 3개 · 전환 하나당 약 130ms) · 서울만 0.88~1.19s(그대로 — 전환 없음)
   assert.ok(multi <= 2.5 * seoul + 150, `4개 시간대 ${Math.round(multi)}ms · 서울만 ${Math.round(seoul)}ms`);
   ST._resetMaintStoreForTest();
@@ -277,6 +282,18 @@ test('A3 실제 라우터 — 운영자 쓰기 403 · 목록 canConfirm = 재확
   const cf = await call('opA', 'POST', `/${W.id}/confirm`, { rev: W.rev });
   assert.equal(cf.status, 403); assert.equal(cf.body.code, 'owner-required');
   assert.equal(l.body.windows.find((x) => x.id === K.id).canConfirm, true, '서울 창은 재확인 가능(바르샤바가 만료라 합에 없다)');
+});
+
+test('A3 재확인 Y1 — 전환 둘레 기준점은 지난 발생(now − 1일 이전)을 세지 않는다: 앞으로 11.5h 인 창이 지난 목요일 12.5h 때문에 403 이 되지 않는다', async (t) => {
+  ST._resetMaintStoreForTest();
+  for (const f of ['maintenance-windows.json', 'maintenance-windows-deployed.json']) fs.rmSync(path.join(DIR, f), { force: true });
+  const now = Date.UTC(2027, 2, 27, 23);   // 바르샤바 전환(03-28 01:00Z) 2시간 전
+  const { call } = await setup(t, now);
+  // 소유자: 바르샤바 매일 01:30 5.5h(전환 전 00:30~06:00Z · 뒤 23:30~05:00Z)
+  assert.equal((await call('own', 'POST', '', srvWin('MTAGA1', '바르샤바 새벽', 'Europe/Warsaw', daily('01:30', 330)))).status, 200);
+  // 운영자: 뉴욕 목 13:30 8h(17:30~01:30Z) — 지난 목요일(03-25 · 전환 전)만 12.5h, 앞으로의 목요일은 11.5h
+  const w = await call('opA', 'POST', '', srvWin('MTAGA1', '뉴욕 목요일', 'America/New_York', { kind: 'weekly', days: [4], time: '13:30', durMin: 480 }));
+  assert.equal(w.status, 200, `재현 r6 Y1 — 수정 판 403(지난 발생을 기준점에) · ${JSON.stringify(w.body)}`);
 });
 
 /* ── PowerCap 신선도 하나(hwFacts capStateAt · invFreshAt) ── */
