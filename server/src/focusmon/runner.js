@@ -10,7 +10,7 @@
  */
 import { createCollector, testTarget, focusAuthGuard, authIdOf } from './collector.js';
 import { normInterval, normProcEvery } from './script.js';
-import { demoSample, demoProcs, demoHello, demoLoad, isDemoTarget } from './mock.js';
+import { demoSample, demoProcs, demoHello, demoLoad, isDemoTarget, demoKmsg } from './mock.js';
 import { TOPO_EVERY_S } from './script.js';
 
 export const MAX_STREAMS = Math.max(1, Math.min(200, Number(process.env.FOCUSMON_MAX_STREAMS) || 40));
@@ -19,10 +19,12 @@ export const RETRY_MIN_MS = 60_000;
 const sameEndpoint = (a, b) => a.host === b.host && Number(a.port) === Number(b.port) && a.username === b.username;
 
 function createDemoCollector(t, { interval, procEvery, sink }) {
+  let lastKm = 0;
   let iv = normInterval(interval); let pe = normProcEvery(procEvery); let timer = null; let ptimer = null; let ltimer = null; let st = { state: 'connecting', since: Date.now(), lastSampleAt: null, error: '', hello: demoHello(t.id), osVerified: true, interval: iv };
   const tick = () => {
     const ts = Date.now();
     const s = demoSample(t.id, ts, iv);
+    if (s && ts - (lastKm || 0) >= 60_000) { const k = demoKmsg(t.id, ts); if (k) s.km = k; lastKm = ts; } // v3.16.0 ⑯ C2 데모 커널 메시지(60초마다)
     if (s) { sink.sample(t.id, ts, s, st.hello); st = { ...st, state: 'ok', lastSampleAt: ts }; sink.status(t.id, { ...st }); }
   };
   const ptick = () => { const ts = Date.now(); const p = demoProcs(t.id, ts); if (p) sink.procs(t.id, ts, p); };

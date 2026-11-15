@@ -41,6 +41,8 @@ export const SETTING_RANGES = Object.freeze({
   edgeIdleSec: [5, 60, 10],
   // v2.983 수집 부하(시안 ⑪ 컨펌 ③ ④): 판정 문턱(코어 1개 기준 % — 가벼움 < 주의 ≤ 보통 < 큼) · 프로세스 표본 주기(초 — 5 · 15 · 30 중 하나, script.PROC_EVERY_CHOICES)
   loadWarnPct: [1, 50, 1], loadCritPct: [2, 100, 3], procEvery: [5, 30, 5],
+  // v3.16.0(⑯ C3 — 컨펌 ⑥ '기본 꺼짐'): 수집 부하 자동 조절(0 꺼짐 · 1 켜짐) — 문턱은 위 판정 문턱을 그대로 쓴다
+  autoTune: [0, 1, 0],
 });
 export const DEFAULT_SETTINGS = Object.freeze(Object.fromEntries(Object.entries(SETTING_RANGES).map(([k, v]) => [k, v[2]])));
 
