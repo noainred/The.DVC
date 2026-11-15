@@ -34,6 +34,7 @@
 - (8a단계 추가) 리눅스 성능 8a단계 정비 창 · 용량 예측 — 조회 밖 404 → 쓰기 밖 403(한 함수) · 법인/태그/12h 초과는 소유자 등급 · 고치기는 전후 모두 · 줄이는 동작은 쓰기 범위 · 배포는 개별 토큰만
 - (8b단계 추가) 리눅스 성능 8b단계 Top-N · 저활용 · 전력 API — 범위 먼저(합하기 전) · 단건 404 · 검토 쓰기 404 → 403 · 프로세스 사용자는 관리자 판본만 원문 · 인자 · 환경은 수집 단계에서 없음
 - (v2.976) 집중 모니터링 — admin + 전체 범위 · 키 로그인만 · 인증 거부 자동 재시도 금지 · 프로세스 comm 만 · 원격 명령 상수
+- (베어메탈 사용률 점검 6회차 A1 추가) 공용 게이트 fullScopeOnlyWith · requireSettingsOwner — 안전 메서드(GET · HEAD · OPTIONS)는 조회 범위만 · 그 밖은 조회 ∧ 쓰기 전체(isFullReadWriteScope) · 사유 따로 · 던지면 거부 · 읽기성 POST 예외 1 · 소유자 GET 은 결정 대기
 
 ## 본문
 
@@ -548,6 +549,24 @@
      (베어메탈 사용률 점검 4회차 D1) **키 배치 판정도 쓰기 때 같은 하나**: 키 폴더(법인 · 서버) 밖 키를 서버에 묶는 쓰기는 거부한다 — 온보딩 분석(중앙 · 엣지 적용 공통 — 행 `key-folder`) ·
      `bmBindCheck`(409 — 소유자 · OTP 게이트 **전**이라 OTP 를 소모하지 않는다) · 회전(B-4 `placementConflicts`). 판정은 `onboard/placement.js keyPlacementIssue`(refs 가 다시 내보낸다 — 접속 때 resolveOsAuth 와 같은 함수) ·
      효력 키는 적용 본문 그대로의 참조(`bindOfWrite` cred · key → 공통 계정 기본 키 · 비밀번호 고정이면 없음). 허용 기능 제한은 경고만(분석 행 · 회전 결과 — 메인 결정). 거부 문구에 키 폴더 값 · 키 이름을 싣지 않는다.
+     (6회차 A2) **공통 계정 저장도 쓰는 서버를 끊기 전에 거절** — 판정은 본인 OTP **앞**(`saveAccount dryRun` = 같은 검사 · `refs.accountUseIssue` — 키 폴더 · 계정 법인 · 종류 ·
+     새로 어긋나는 서버만 · 대수만 · 등록부 못 읽음 503)과 저장 직전 한 번 더. 계정 법인 ↔ 서버 법인은 `placement.accountCorpOk` 하나(온보딩 분석 cred-other-corp · bm-storage 저장 · 계정 저장).
+
+- ⚠⚠ **공용 게이트 — 쓰기 메서드는 조회 ∧ 쓰기 전체 범위(베어메탈 사용률 점검 6회차 A1 · `routes/admin/shared.js`)**
+  - 문제(재현 — 기준판 04fad6d1): `fullScopeOnlyWith`(게이트 인스턴스 85곳 · 라우트 568개 — 6회차 점검 정적 집계)와 `requireSettingsOwner` 가 **조회 범위만** 봐서, 조회는 무제한이고 쓰기만 일부 법인으로 줄인 계정
+    (scope = { vcenters: [], writeVcenters: [vcA] } — 사용자 관리에서 만들 수 있다)이 전 법인 공용 쓰기를 했다 — 관리자 wadm `PUT /api/insights/fleet/assign {vcenterId: vcB}` 200 · fleet-assign.json 에 씀 ·
+    `PUT /tools/bm-storage/settings` 200 · 소유자 wown `PUT /tools/bm-usage/perf-rules` · `PUT /admin/backup/settings` 200. 형제 `fullReadWriteScopeOnlyWith`(v2.935)는 이미 조회 ∧ 쓰기를 봤다.
+  - 고침(메인 결정): 두 게이트 모두 **안전 메서드(GET · HEAD · OPTIONS)는 예전 그대로**(조회 범위만 — 조회 무제한 계정의 함대 조회를 막지 않는다) · **그 밖의 메서드는 게이트 한 곳에서 `isFullReadWriteScope`**
+    (`writeScopeDenial` — 라우트를 하나씩 바꾸다 빠뜨리지 않게) · 쓰기 범위 때문에 막으면 사유를 따로(`WRITE_SCOPE_PARTIAL_REASON` · 소유자는 `SETTINGS_OWNER_WRITE_SCOPE_REASON` · `writeScope: 'partial'`) —
+    조회 범위 사유('전체 범위 계정만 조회')는 이 계정에 틀린 설명이라서. 판정이 던지면 거부(isFullReadWriteScope 의 기본값 false). 게이트 태그(kind)는 그대로라 아키텍처 점검이 여전히 전체 범위로 센다.
+  - **읽기성 POST 예외는 최소 — 지금 하나**: `POST /tools/cvp/parse-preview`(본문만 파싱 · 왕복 0 · 저장 0 · 저장 비밀 0 · 뒤따르는 쓰기 없이 혼자 쓰이는 진단 — `fullScopeOnlyWith(reason, { readPost: true })`).
+    예외로 두지 않은 것(판독): `rma/tests/validate` · `credentials/inspect-key` · `focus-mon/targets/import/preview` · `bm-usage/perf-rules/dry-run` · 메일 미리보기 — 저장 직전 검증 · 미리보기라 그 저장이 어차피 막힌다
+    (`san-flow/preview` 가 v2.935 부터 같은 판정으로 막혀 있는 것과 같다). 연결 시험 · probe · run · pull(api · admin · insights 라우터에서 이름이 시험 · 미리보기 · 실행성인 비안전 메서드 77개 중 나머지 — 이름 기준 판독)은 저장 비밀로 접속하거나 동작을 시키므로 막는 것이 맞다.
+  - **등급 질의는 쓰기 범위를 보지 않는다**: `settingsOwnerGradeDenial`(소유자 ∧ 조회 전체 — v2.744 그대로)을 라우트 게이트와 `bmOnboard.isOwnerTier`(법인마다 쓰기 범위를 따로 보는 라우트 안의 승인 등급 —
+    8a 정비 창 · 7b 온보딩 묶음 행)가 같이 쓴다. 쓰기 vcA 소유자의 vcA 법인 창은 그대로 200(bmMaint8aRoute). `/auth/me settingsOwnerTier` 는 쓰기 메서드로 묻는다(그 버튼의 저장이 403 이면 잠근다).
+  - **결정 대기(사용자)**: `requireSettingsOwner` 의 **GET**(백업 내려받기 · 상태 · 비밀 정책 조회 — 전 법인 공용 비밀이 든 조회)을 쓰기 범위가 지정된 소유자에게 줄지. 이번에는 바꾸지 않았다(바꾸면 그 소유자는 소유자 라우트의 GET 도 잃는다).
+  - 바뀌는 흐름(정직 기록): 쓰기 범위가 지정된 관리자 · 소유자는 전 법인 공용 쓰기 · 시험 · 실행 라우트에서 403 을 받는다(버튼은 지금처럼 역할로 열리고, 서버 사유가 화면에 그대로 보인다 — 통합 서버 인벤토리 · bm-storage 주기 저장 확인).
+    회귀 `server/test/bmUsageLoop6x.test.js` A1 ①② · 정정 `bareosRestoreBulkRoutes2861` ⑤(사유가 공용 쓰기 범위 사유로 먼저 나온다).
 
 - ⚠⚠ **리눅스 성능 8a단계 정비 창 · 용량 예측 API — 억제를 늘리는 쓰기는 등급 게이트, 줄이는 쓰기는 쓰기 범위, 판정은 서버 하나**
   (`routes/api/bmMaint.js` · `routes/api/bmCapacity.js` · `routes/central.js GET /bm-maint` · 회귀 `bmMaint8aRoute` · `bmMaint8aEdge` · `bmCapacity8aRoute`):

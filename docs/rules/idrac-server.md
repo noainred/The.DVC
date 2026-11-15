@@ -48,6 +48,7 @@
 - (점검 반복 2회차 추가) 베어메탈 사용률 화면 쓰기 버튼은 서버 표지(bmWriteGate — 라우트와 같은 판정)로만 · PowerCap 꺼짐 = 해당 없음(판정 하나 invCapState) · 사용률 색 = 설정값 · 피크 창 ‘줄임’ 은 설정 상한과
 - (점검 반복 3회차 추가) 정비 창 · 알림 — 재확인은 재확인 라우트 하나(고치기는 confirmedAt 그대로 · 버튼 = 같은 판정) · 끝남 · 지움 · 만료 창은 엣지에 history 로(지난 구간 전용 · 시한 없음 · 억제 안 함) · 창 끝 뒤 억제 점검은 창마다 · 모르는 규칙은 unknown
 - (v3.8.0 추가) 디스크 배드 섹터 이력(범위 A) — 엣지가 중앙 작업을 가져가 법인 안에서 Lifecycle 로그를 읽는다 · 분류는 ID · 근거 문서가 있는 ID 만 · 판정 코어 하나(verdict.js — 시리얼 = 확정 · 로그 연속성 = 추정 · 그 밖 판단 안 함) · 가져간 작업의 보고만 저장
+- (점검 반복 6회차 X 추가) 공용 게이트(fullScopeOnlyWith · requireSettingsOwner)는 쓰기 메서드에 쓰기 범위도 전체를 본다(조회 GET 은 그대로) · 공통 계정 저장은 그 계정을 쓰는 서버를 끊지 않는다(OTP 앞 판정) · bm-storage 폼은 쓸 수 있는 키만
 - (점검 반복 4회차 추가) 7b 등록 · 키 — 키 폴더 밖은 쓰기 전에 거절(온보딩 분석 · bm-storage 저장 · 회전 — 판정 하나 onboard/placement.js keyPlacementIssue) · 허용 기능 제한은 경고 · 대상 해석이 고른 OS 등록은 누락 점검에서 ‘함대에 있음’ · 로그 공통 원인 후보는 (법인, 키) 쌍
 ## 본문
 
@@ -1655,6 +1656,27 @@
   - 남은 것(설계 §16 · §18 범위 B · C · §22): 보관 로그 내보내기(§22 2단계 — 장비에 보내는 요청형 동작) · 세션 재사용(3단계) · 지금 쓰이는 곳(OS · vCenter) · 교체 우선순위 · 조치 추적 · vSAN 상태 · 설정 점검. 디스크 값은 v3.10.1 에 텔레메트리 · DriveMetrics 로 읽는다(실장비 대조 전). 실장비 대조는 3.8.2 의 장비 진단으로 받는다(§14.1 명령 대신) — 그 답으로 분류표 · 읽는 방법을 고친다.
   - 회귀 `server/test/diskBad380.test.js` · `server/test/diskBadReview380.test.js` · `server/test/diskBadField382.test.js` · `server/test/diskBadField383.test.js` · `server/test/diskBadPast3101.test.js` · 웹 `diskBadText.test.js`.
 
+- ⚠⚠ **베어메탈 사용률 점검 반복 6회차 X(기준판 04fad6d1) — 공용 게이트는 쓰기에 쓰기 범위도 본다 · 계정 저장이 쓰는 서버를 끊지 않는다 · 폼은 쓸 수 있는 키만**
+  (`routes/admin/shared.js` · `routes/api/{bmOnboard,bmstor,cvp}.js` · `bmusage/onboard/{placement,refs,keyStore,importAnalyze}.js` · 웹 `BmStorageTool.jsx` · `bmOnboardText.js authChoicesView`.
+  회귀 `server/test/bmUsageLoop6x.test.js` · 웹 `bmOnboardText.test.jsx`(6회차 B4) · 정정 `bmUsageLoop4` D1 ③(계정 법인 대조) · `bareosRestoreBulkRoutes2861` ⑤(사유 문구)). 6회차 Y 는 별도 소절.
+  - **A1 (보안) 공용 게이트**: 상세 `docs/rules/security-api.md` 6회차 A1. 이 영역에서 보이는 것 — 쓰기 범위가 일부 법인인 관리자 · 소유자는 수집 설정 · 알림 규칙 · 함대 귀속 · bm-storage 설정 등
+    전 법인 공용 쓰기에서 403(쓰기 범위 사유)을 받는다. 법인마다 쓰기 범위를 따로 보는 라우트 안의 **승인 등급**(`isOwnerTier` — 8a 정비 창 · 7b 온보딩 묶음 행)은
+    등급만 본다(`settingsOwnerGradeDenial` — 쓰기 vcA 소유자의 vcA 법인 창은 그대로 200).
+  - **A2 공통 계정 저장**: 법인 · 기본 키를 함께 바꾸면(B-4 통과) 그 계정을 credRef 로 쓰는 옛 법인 서버가 key-folder 로 끊겼고(재현: 200 → 두 서버 key-folder),
+    비밀번호만 쓰는 계정을 다른 법인으로 옮기면 옛 법인 서버가 다른 법인 계정 비밀번호로 접속했다. B-4 거절은 reauth 뒤라 OTP 를 소모했다.
+    고침: 라우트가 **본인 OTP 앞에서** `saveAccount(…, { dryRun: true })`(같은 검사 코드 — 쓰지 않음)와 `refs.accountUseIssue(전, 후)`를 부르고 저장 직전에 한 번 더 —
+    그 계정을 쓰는 서버마다 ① 효력 키 폴더(서버 키 · 비밀번호 고정이면 계정 키를 쓰지 않음 · `placement.keyWriteIssue`) ② 계정 법인 ↔ 서버 법인(`placement.accountCorpOk` —
+    온보딩 분석 cred-other-corp 와 같은 함수로 뺐다) ③ 종류(OS → iDRAC)를 보고 **새로 어긋나는** 서버만 센다(이미 어긋나 있던 서버는 이 쓰기가 만든 문제가 아니다).
+    409 문구는 대수만(서버 · 키 이름 · 폴더 값 없음) · 등록부를 못 읽으면 503(저장하지 않음). 계정 저장 경로는 이 라우트 하나뿐이다(saveAccount 호출처 전수 — SSH 공용 접속 화면은 키 · 폴더만 · 엣지 배포는 계정을 만들지 않는다 ·
+    키 저장소 복원 · 다시 읽기는 계정 '저장' 이 아니다). 같은 법인 대조를 bm-storage 서버 저장(`bmPlacementIssue` — 계정 · 법인이 그대로면 판정 안 함)에도 걸었다.
+  - **B4 bm-storage 폼 인증 목록**: 폼은 활성 키 전부를 보였고 법인(vcenterId)을 보낼 칸이 없어 새 서버에 법인 폴더 키를 고르면 늘 409 · OTP 칸이 비었다.
+    `GET /tools/bm-storage/auth-choices`(admin · 전체 범위 · 설정 소유자) — 폼과 같은 입력(id · name · host)으로 고른 것마다 **저장과 같은 `bmPlacementIssue`** 를 돌려 selectable · issue · current 를 준다
+    (웹은 그대로 쓴다 — 사본 없음). 화면은 고를 수 있는 것 + 지금 설정만 보이고 뺀 수 · 법인 귀속 없음 안내('서버 등록(CSV)에서 법인을 정한 뒤')를 한 줄로. 이름 · 주소가 바뀌면 300ms 뒤 다시 묻고 늦은 응답은 버린다.
+  - **남은 것(고치지 않음 — 근거와 함께)**: ① 접속 때 판정(`resolveOsAuth`)에는 계정 법인 ↔ 서버 법인 대조를 넣지 않았다 — 이미 그렇게 쓰는 서버의 수집이 멈춘다(쓰기만 막는다 · 메인 결정).
+    그런 서버는 쓰기 판정의 '이미 어긋남' 예외로 남는다. ② 판정 미들웨어와 저장 사이(본인 OTP 확인 동안)의 등록부 변경은 저장 직전 재판정으로 줄였을 뿐 직렬화는 없다(serialOnboard 같은 큐 없음 — 낮음).
+    ③ 400px 에서 bm-storage 서버 폼의 오른쪽 열(그룹 · SSH 포트 · 비밀번호)이 모달 밖으로 잘린다 — 기존부터(이번 안내 줄을 빼도 격자 252px + 220px 그대로 · 실측) · 이번 범위 밖.
+    ④ 회전(`rotateKey`)의 계정 기본 키 교체는 placementConflicts 가 계정 법인과 새 키 폴더만 본다 — 그 계정을 쓰는 서버 법인은 ②의 계정 법인 대조가 지키지만, 이미 어긋나 있던 서버는 그대로다.
+
 - ⚠⚠ **베어메탈 사용률 점검 반복 4회차(기준판 47afbb1c) — 키 폴더 밖은 쓰기 전에 거절 · 허용 기능 제한은 경고 · 고른 OS 등록은 함대에 있음 · 공통 원인 후보는 (법인, 키) 쌍**
   (`bmusage/onboard/{placement(새 · 순수),refs,importAnalyze,onboardRun,missing}.js` · `bmusage/{targets,logs/view,maint/judge}.js` · `routes/api/{bmstor,bmOnboard,bmUsage}.js` ·
   웹 `bmOnboardText.js rotateResultText` · `BmOnboardPanel.jsx`. 회귀 `server/test/bmUsageLoop4.test.js` · 웹 `bmOnboardText.test.jsx`(4회차 D1) · `bmPerfKeyPair` ⑤ 스윕 정정). 3회차 절은 이 파일 끝.
@@ -1677,7 +1699,7 @@
     vCenter 등록부 remoteAgent 가 수집 서버 id(별칭)로 저장되는 경로를 확인하지 못해 재현하지 않았다. ② 엣지 사용률 봉투의 `targets[].vcenterId` 는 엣지가 말한 값 그대로 범위 판정(resolvePerfTarget · bmLogsFleet · applyScope)에 쓰인다 —
     알림 이슈는 중앙이 법인을 정한다(`edge.md` 반증 F9)와 다르다. 엣지는 자기 법인 서버만 수집한다는 설계 결정 범위라 결함으로 세지 않았다(바꾸려면 봉투 대상의 법인을 그 엣지 담당 vCenter 로 자르는 것이 후보 — edge.md 에 차이 기록).
     ③ 이미 폴더 밖인 기존 항목은 쓰기 점검이 건드리지 않는다(키 · 법인 · 이름 그대로) — 그 서버는 수집 건강 · 서버 상세가 key-folder 로 말한다.
-    ④ (구현 중 재현 · 고치지 않음 — 범위 밖 · 메인 판단 대기) 공통 계정의 법인 · 기본 키를 함께 바꾸는 저장(`keyStore.saveAccount` — 키 폴더 = 새 계정 법인이면 통과)은 그 계정을 쓰는 기존 서버(옛 법인)를 다시 보지 않는다 —
+    ④ (**6회차 X A2 에서 고침** — 위 6회차 X 절: 계정 저장 앞에서 그 계정을 쓰는 서버의 키 폴더 · 계정 법인 · 종류를 본다) 공통 계정의 법인 · 기본 키를 함께 바꾸는 저장(`keyStore.saveAccount` — 키 폴더 = 새 계정 법인이면 통과)은 그 계정을 쓰는 기존 서버(옛 법인)를 다시 보지 않는다 —
     재현: vcA 계정(vcA 폴더 키)을 쓰는 vcA 서버 → 계정을 vcB · vcB 폴더 키로 저장 ok → 그 서버 수집 자격 key-folder. 같은 꼴(쓰기 경로 판정 누락)이라 다음 점검의 첫 후보(placementConflicts 의 서버 쪽 효력 키 대조로 막을 수 있다 — 추정).
   - **재확인(반증 · 표준)**: D1 ①~④ · D2 · D3 닫힘 · 회귀 0 — 판정 동치(생성 입력 20만 건 차이 0) · '같으면 판정 안 함' 예외 우회 9가지 시도(키만 · 법인만 · 이름 · 계정 · 주소 이동 · 비밀번호 고정 해제 → 409, 이름 대소문자 · 고정 유지는 접속 판정과 같게 저장) ·
     bmBindCheck 409 뒤 같은 OTP 로 정상 저장 200(OTP 소모 없음) · osRegId 응답 경로 0건 · 누락 점검 차이는 '함대가 고른 등록' 의 untracked 행이 빠진 것뿐. ④ 는 사실로 확인(6회차 후보).

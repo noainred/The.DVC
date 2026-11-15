@@ -54,6 +54,8 @@ const adminOnly = requireRole('admin');
 const writer = requireRole('admin', 'operator');
 const toolsPerm = requirePerm('tools');
 const fullScopeOnly = fullScopeOnlyWith('CVP 네트워크 스위치는 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.');
+// 6회차 A1: 파서 시험(parse-preview)만 읽기성 POST — 본문만 파싱(왕복 0 · 저장 0 · 저장 비밀 0)하는 혼자 쓰이는 진단이라 쓰기 범위 판정에서 뺀다(예외 목록 security-api.md).
+const fullScopeReadPost = fullScopeOnlyWith('CVP 네트워크 스위치는 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.', { readPost: true });
 const DEVICE_LIST_MAX = 5000;
 /** v2.641: CPU·메모리 '높음' 경계(%) — 웹 cvpText.SYS_HIGH_PCT 와 같은 값(테스트 대조). */
 export const SYS_HIGH_PCT = 80;
@@ -714,7 +716,7 @@ api.post('/tools/cvp/faults/close', adminOnly, toolsPerm, fullScopeOnly, async (
  * v2.640 ② — 파서 시험(adminOnly): 관리자가 CVP 응답 원문을 붙여넣으면 이 포탈의 파서가 무엇을 읽는지 보여준다. **네트워크 왕복 0**,
  * 저장 0. 본문 상한은 express.json 기본(1MB) — 그보다 큰 응답은 앞부분만 붙여넣으라고 화면이 말한다(PREVIEW_TEXT_MAX 는 문자 기준).
  */
-api.post('/tools/cvp/parse-preview', adminOnly, toolsPerm, fullScopeOnly, (req, res) => {
+api.post('/tools/cvp/parse-preview', adminOnly, toolsPerm, fullScopeReadPost, (req, res) => {
   const b = req.body && typeof req.body === 'object' ? req.body : {};
   const kind = typeof b.kind === 'string' ? b.kind : '';
   if (!PREVIEW_KINDS.includes(kind)) return res.status(400).json({ ok: false, reason: `kind 는 ${PREVIEW_KINDS.join('·')} 중 하나여야 합니다.`, kinds: PREVIEW_KINDS });
