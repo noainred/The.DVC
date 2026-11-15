@@ -263,7 +263,10 @@ test('알림 상태는 파일에 남긴다 — 인메모리면 재시작마다 �
   assert.match(nf, /atomicWriteFileSync/, '원자적 쓰기');
   assert.match(nf, /chmodSync\(FILE\(\), 0o600\)/, '0600(v2.535 규약)');
   assert.match(nf, /bmusage-alert-state\.json/);
-  assert.match(nf, /await sendAlert\(/, '순차 발송');
+  // 정정(점검 반복 5회차 D2): ‘순차 발송(await sendAlert)’ 은 응답 없는 채널 하나가 수집 주기를 붙잡았다 — 이제 알림 대기열(채널별 레인 · 상한 —
+  //   동시에 수백 개 열지 않는 것도 그 레인이 지킨다)에 넣고 주기는 기다리지 않는다(bmUsageLoop5 D2).
+  assert.match(nf, /enqueueNotify\(alertOf\(f\)/, '알림 대기열(alerts.enqueueNotify)');
+  assert.doesNotMatch(nf, /await sendAlert\(/, '주기 안 순차 await 를 되살리지 않는다');
   assert.match(nf, /capped:/, '상한으로 잘린 개수를 밝힌다');
   // 위험한 것을 먼저 보낸다 — 상한에 걸려 해제 알림이 초과를 밀어내면 안 된다
   assert.match(nf, /a\.kind === 'over' \? -1 : 1/);

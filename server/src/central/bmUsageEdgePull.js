@@ -191,7 +191,12 @@ export function _resetForTest() { _store.clear(); }
  * 한 엣지에서 당긴다. **저장까지** 하고 결과를 돌려준다.
  * @returns {{ok:boolean, kind?:string, reason?:string, ms:number, rec?:object}}
  */
-export async function pullBmUsage(agent, { limit = 0 } = {}) {
+/**
+ * 엣지 봉투 당김 대상 상한(점검 반복 5회차 D1) — 사람 인출(라우트 ‘지금 가져오기’)과 정비 창 배포의 자동 인출이 **같은 값**. 엣지 쪽 상한(bmusage/edgePull.MAX_LIMIT)과
+ *   같은 수다(시험이 대조). 예전 자동 인출은 limit 없이 당겨 엣지 기본(DEFAULT_LIMIT 400)에서 잘렸다 — 1,000대 엣지면 보관분 400대 · 태그 창 펼침 400대.
+ */
+export const EDGE_PULL_LIMIT = 2_000;
+export async function pullBmUsage(agent, { limit = EDGE_PULL_LIMIT } = {}) {
   const qs = Number(limit) > 0 ? `?limit=${Math.round(Number(limit))}` : '';
   const r = await pullFromEdge(agent, `/api/collector/bm-usage${qs}`, {
     timeoutMs: TIMEOUT_MS, retries: 1, minVersion: MIN_EDGE_VERSION, what: '사용률을 읽을', label: '엣지 사용률 응답',

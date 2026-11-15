@@ -46,6 +46,7 @@ import { runBmUsageAlerts, alertStateInfo } from './notify.js';
 import { isMockMode } from '../mock/demo/flags.js'; // v2.708: 데모(mock)는 장비에 접속하지 않고 합성 행
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
 import { numOrNull } from '../util/numOrNull.js';
+import { createYielder } from '../util/timeSlice.js'; // 점검 반복 5회차 D4 — 대상 전수 정비 창 판정 사이 양보
 import { capStr } from '../util/capStr.js'; // v2.744(RV2744F-WEB-03): 상주 상세 문자열 평탄화
 import { idracAuthStopFor as mainIdracAuthStopFor, releaseIdracAuthStop } from '../idrac/poller.js'; // v2.590: 같은 iDRAC 계정을 쓰는 주 폴러의 인증 실패 정지
 import { withSlot, configureSlots, slotPeakReset } from './slots.js'; // v2.929(5단계): 전역 동시성 풀 — 집중 수집과 슬롯을 나눠 쓴다 · 6단계: 주기 최대 사용(수집 건강)
@@ -1007,9 +1008,13 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
     try { mj = await MAINT.maintJudge({ now: t0 }); } catch { mj = null; }
     const maintOf = (tg) => (mj ? mj.stateFor(tg, Date.now()) : null);
     const maintSkip = []; const collectTargets = [];
+    // ⚠ 점검 반복 5회차 D4: 대상 전수 판정을 한 시각(tM)으로 — 판정기가 창마다 그 시각의 발생을 한 번만 센다(runtime.maintJudge 메모 · 예전에는 대상마다
+    //   같은 창의 발생을 다시 세어 1,000대 · 창 90개에서 304ms 단일 정지) · 대상 사이 시간 기준 양보.
+    const tM = Date.now(); const yM = createYielder(15);
     for (const tg of realTargets) {
-      const ms = maintOf(tg);
+      const ms = mj ? mj.stateFor(tg, tM) : null;
       if (ms?.scopes?.collect) maintSkip.push({ tg, ms }); else collectTargets.push(tg);
+      await yM();
     }
     const realResults0 = collectTargets.length ? await pool(collectTargets, CONCURRENCY, (tg) => withSlot(() => collectOne(tg, { trigger, intervalMs, prevRunMs, runT0: t0, peakPlan, logExtra: (tg.paths || []).includes('os') ? L.logExtraFor(tg, logCtx) : null, top: topOn })).catch((e) => ({ ok: false, target: tg, error: String(e?.message || e) }))) : [];
     const MR = mj ? MAINT : null;
@@ -1119,7 +1124,8 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
       // v2.922(반증 D6): 마이그레이션 상태(단계 · 시도 · 다음 재시도) — 수집 건강 ⑫ 이 쓸 값.
       migration: migrationLast(),
       dbOk: !!ins.ok, dbError: ins.error || null, ...(ins.migrateError ? { dbMigrateError: { count: ins.migrateError.count, at: ins.migrateError.at } } : {}), counts, ...srcErr, trigger, ...(demo ? { demo: true } : {}),
-      alerts: alerts && !alerts.skipped ? { sent: alerts.sent ?? 0, suppressed: alerts.suppressed ?? 0, capped: alerts.capped ?? 0, over: alerts.counts?.over ?? 0, error: alerts.error || null } : null,
+      // 5회차 D2 · D3: 발송은 대기열 — 주기 끝에는 넣은 수(queued)만 안다. 보냄 · 실패 · 재시도는 결과가 온 뒤 alertState.delivery(화면이 함께 그린다).
+      alerts: alerts && !alerts.skipped ? { queued: alerts.queued ?? 0, capped: alerts.capped ?? 0, over: alerts.counts?.over ?? 0, error: alerts.error || null } : null,
       // v2.929(5단계): 소모품 · 변경 이벤트 · 성능 알림 규칙 — 개수만(서버 이름 없음 · status 는 무스코프로 나간다).
       ...(perfAlerts?.skipped ? { perfAlertsSkipped: perfAlerts.skipped } : {}),
       cycleOps: cycleOps ? { health: cycleOps.health ?? 0, events: cycleOps.events ?? 0, written: changeRes?.ok ? changeRes.events ?? 0 : null, error: cycleOps.error || (changeRes && !changeRes.ok ? changeRes.reason || 'write-failed' : null) } : null,

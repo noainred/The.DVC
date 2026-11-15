@@ -33,6 +33,7 @@
 - (8a단계 추가) 용량 소진 예측은 요청 경로에서 함대 90일을 읽지 않는다 — 수집 노드 하루 1회 · 서버마다 점 조회 + 시간 양보 · 진행 중 공유 · 결과 행만 저장
 - (8b단계 추가) 프로세스 Top-N 은 날 파일(보존 = 파일 삭제) · 변화 있을 때만 행 · 저활용은 하루 1회 미리 계산 · 전력 함대 원천 모으기는 60초 공유 + 양보 + 끝난 날 캐시
 - (v2.976) 집중 모니터링 기록 — 1분 묶음 코덱 · 트랜잭션 대기열 · rowid 조각 정리 · 용량 상한 · 차트 칸 ≥ 표본 간격 1.5배
+- (점검 반복 5회차 추가) 베어메탈 사용률 — 알림 발송은 주기 밖 대기열(받은 결과로 세고 실패는 재시도) · 판정기는 같은 시각 · 같은 창의 발생을 한 번 · 요청 경로 서버 루프 양보 · 작업 로그는 간격 묶음 쓰기
 
 ## 본문
 
@@ -313,6 +314,17 @@
   (예전 34초 — needs-restarting 8 + dnf 8). 이제 needs-restarting ↔ dnf 한 주기 하나 · 각 6초 → 24초 + 여유 `CMD_INNER_MARGIN_MS` 6초 ≤ 30초 · Top-N 은 같은 세션 별도 exec(`topCommand` · `TOP_EXEC_TIMEOUT_MS` 20초 ≥ 안 합 15 + 5 · 남은 예산과 작은 쪽 · 실패 격리).
   새 구획 · 새 exec 를 더할 때 **`server/test/bmTop8bBudget.test.js` 의 기계 산수**(명령 문자열에서 `timeout N` · `sleep N` 을 뽑아 합)가 깨지지 않게 할 것. 셸 함수(7a 로그의 `rdf`) 안 timeout 은 **호출 수만큼** 센다(`worstOf`). 7a 로그 exec 도 같은 결함이었다(46초 · rdf 호출 4번까지 61초 > 30초 — 시한이면 그 주기 로그 구획 전체와 커서 전진을 잃었다) → journalctl 6 ×2 · dmesg 3 · systemctl 한 번 3 · find 1 × rdf 4 = 22초 + 여유 `LOG_INNER_MARGIN_MS` 8초 ≤ 30초(로그는 증분 — 덜 읽어도 커서가 본 데까지 넘어가 다음 주기가 이어 읽는다).
 
+- ⚠⚠ **(점검 반복 5회차) 베어메탈 사용률 — 주기 · 요청 경로가 붙잡거나 한 덩어리로 도는 것 넷**(회귀 `server/test/bmUsageLoop5.test.js` · 상세 · 실측 표는 `idrac-server.md` 5회차 절):
+  · **알림 발송을 주기 안에서 기다리지 않는다**(`bmusage/notify.js` — D2): 순차 await 였던 다섯 지표 알림을 형제 성능 알림 규칙과 같은 대기열(`alerts.enqueueNotify` — 채널별 레인 · 상한)로.
+    응답 없는 웹훅 하나가 주기 재진입 가드(`_running`)를 붙잡았다(3건 91.5초). 결과는 끝난 뒤 `deliveryOutcome` 으로 세고 실패는 `retryDelayMs` 로 다시 보낸다(D3 — 같은 함수 · 복제 금지) ·
+    상태 고치기는 직렬 큐(`withState`). **주기 상한(abort)은 넣지 않았다**(검토): D2 뒤 주기 안 await 는 로컬 작업(분류 · DB · 판정 · 대기열 넣기)과 장비 시한(`withDeadline`)에 묶인 수집뿐이고,
+    abort 로 가드를 풀면 남은 옛 주기가 공유 상태(`_prev` 누적 카운터 · `_detail`)를 새 주기와 같이 고친다 — 새 await 를 넣을 때 ‘이 주기가 영원히 끝나지 않으면’ 을 다시 물을 것.
+  · **판정기는 같은 시각 · 같은 창의 발생을 한 번만 센다**(`maint/runtime.maintJudge` 메모 → `judge.maintStateFor` occOf — D4): 창의 발생은 대상과 무관한데 대상 1,000대 × 창 90개가 같은 발생을 다시 셌다.
+    폴러 전수 판정은 한 시각(tM) + 대상 사이 `createYielder(15)`. 메모는 최근 한 시각만(시각이 바뀌면 비운다).
+  · **요청 경로 서버 루프 양보**(D5): `edgePull.perfForRows`(주 조회 · /onboard/missing · 봉투) · /profiles 함대 항목 · `opsView.fleetProfileViewAsync`(같은 누적기 — 결과 같음).
+  · **작업 로그 간격 묶음 쓰기**(`util/activityLog.js` — I1 · 공용: storage · sanswitch(둘) · horizon · curuser · bmusage): 직전 쓰기에서 1초(`ACTIVITY_WRITE_GAP_MS`)가 지났으면 곧바로(앞 경계 —
+    따로 떨어진 기록은 예전처럼), 그 안이면 메모리에 두었다가 간격 끝에 한 번(뒤 경계 타이머 · unref). 조회 · 초기화 · 종료 flush 는 대기분을 먼저 쓴다(즉시 읽기 · 순서 그대로).
+    강제 종료 때 잃을 수 있는 것은 마지막 간격 안의 기록뿐(재생성 가능한 캐시). LIFE-03 의 ‘같은 틱 묶기’ 는 ‘같은 간격 묶기’ 로 넓어졌다(audit2621d 정정).
 - **(v2.976) 집중 모니터링 기록 · 조회**(`server/src/focusmon/{codec,db,recorder,query}.js`):
   - 서버 하나의 1분을 한 행으로(열 단위 varint + deflateRaw · 실측 약 8KB/분/서버 · 20대 1분 쓰기 중앙값 0.37ms — `docs/design/focus-mon/bench`). 2초 표본을 행으로 쓰지 않는다.
   - 정리는 `minute` 단독 인덱스 rowid 조각(`PRUNE_CHUNK` — 실행 계획 테스트) · 용량 상한이면 가장 오래된 분부터 · 디스크 여유가 모자라면 기록만 멈춘다.
