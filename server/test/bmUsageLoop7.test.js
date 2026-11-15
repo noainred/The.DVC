@@ -81,4 +81,25 @@ test('①(6회차 A1 뒤) — 알림 규칙 GET readOnly = 쓰기 게이트와 �
   assert.equal((await bmRulesRead(reqOf({ vcenters: [], writeVcenters: ['vcA'] }), snap, deps)).readOnly, true, '재현 r7 — 예전 false(시험 실행이 열리고 누르면 403)');
   assert.equal((await bmRulesRead(reqOf({ vcenters: ['vcA'] }), snap, deps)).readOnly, true, '조회 범위 관리자 — 그대로');
   assert.equal((await bmRulesRead({ user: { username: 'o', role: 'operator', scope: null }, query: {}, params: {} }, snap, deps)).readOnly, true, '운영자 — 그대로');
+  // 재확인 R1: 화면 괄호 ‘자기 법인 예외만’ 은 조회 범위 표지(scoped)로 — 쓰기만 일부인 계정은 전 법인 예외를 받는다(readOnly 로 가르면 틀린 말)
+  assert.equal((await bmRulesRead(reqOf({ vcenters: [], writeVcenters: ['vcA'] }), snap, deps)).scoped, false);
+  assert.equal((await bmRulesRead(reqOf({ vcenters: ['vcA'] }), snap, deps)).scoped, true);
+  const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const panel = strip(fs.readFileSync(new URL('../../web/src/views/tools/BmPerfRulesPanel.jsx', import.meta.url), 'utf8'));
+  assert.match(panel, /resp\.scoped && hasRole\('admin'\) \? '\(범위가 지정된 계정은 자기 법인 예외만 봅니다\)'/);
+});
+
+test('C1 재확인 — 운영 코드의 auditCycle 은 모두 묶음을 준다(범위 없는 호출은 다른 묶음 기록까지 가져가고 leakBy 를 비운다 — 시험 · 옛 호출 전용)', () => {
+  const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const root = new URL('../src/', import.meta.url);
+  const files = fs.readdirSync(root, { recursive: true }).filter((f) => String(f).endsWith('.js'));
+  const bad = [];
+  for (const f of files) {
+    const src = strip(fs.readFileSync(new URL(String(f), root), 'utf8'));
+    for (const m of src.matchAll(/auditCycle\)?\(\s*([^)]*)\)/g)) {
+      if (/export\s+async\s+function\s+auditCycle/.test(src.slice(Math.max(0, m.index - 30), m.index + 12))) continue;
+      if (!/group\s*:/.test(m[1])) bad.push(`${f}: ${m[0].slice(0, 80)}`);
+    }
+  }
+  assert.deepEqual(bad, []);
 });

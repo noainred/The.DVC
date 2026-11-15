@@ -225,6 +225,8 @@ export async function bmRulesRead(req, snap, deps = {}) {
     // 7회차 관찰 ①(6회차 A1 뒤): 쓰기(PUT 규칙 · POST 시험 실행)는 공용 게이트가 조회 ∧ 쓰기 전체 범위로 본다 — 표지도 같은 판정(isFullReadWriteScope).
     //   예전에는 조회 범위만 봐서 쓰기가 일부인 관리자 · 소유자에게 '시험 실행' 버튼이 열리고 누르면 403 이었다.
     readOnly: !isAdmin || !!allowed || !isFullReadWriteScope(req.user, snap), ...(isAdmin ? {} : { addressHidden: true }),
+    // 7회차 재확인 R1: 법인 예외를 조회 범위로 걸렀는가(화면 괄호 ‘자기 법인 예외만’ 의 근거 — readOnly 는 이제 쓰기 범위도 보므로 그것으로 가르면 전 법인을 받는 계정에 틀린 말이 붙었다).
+    scoped: !!allowed,
   };
 }
 async function rulesWrite(req, res) {
