@@ -791,10 +791,14 @@ export async function bmFaultsFleetView(req, snap, deps = {}) {
 
 /* ── 진단 스냅샷(원격 명령 실행 경로 — 규약은 bmusage/snapshot/run.js 머리말 · security-api.md v2.923) ─────────── */
 const _snapInflight = new Set();   // 중앙 → 엣지 대행 중복 전송 막기(같은 서버 동시 1건 — 엣지도 다시 막는다)
-function scrubSnapshot(res, isAdmin) {
+export function scrubSnapshot(res, isAdmin) {   // 9회차 G1 시험이 직접 부른다
   if (isAdmin || !res || typeof res !== 'object') return res;
   const r = res.result && typeof res.result === 'object' ? res.result : null;
-  const scrubResult = (x) => (x ? { ...x, dmesg: (x.dmesg || []).map(scrubIp), ss: (x.ss || []).map(scrubIp), ...(x.error ? { error: scrubIp(x.error) } : {}),
+  // 점검 반복 9회차 G1: 프로세스 사용자 이름은 관리자 판본만 원문(8b 규약 — Top-N maskTopRows 와 같은 토큰) · comm 안 주소도 가린다. 예전에는 cpuTop · memTop · ioTop 이 그대로 나갔다.
+  const tok = (v) => (v ? maskedIdToken(String(v)) : v);
+  const topRows = (arr) => arr.map((p) => (p && typeof p === 'object' ? { ...p, ...('user' in p ? { user: tok(p.user) } : {}), ...(typeof p.comm === 'string' ? { comm: scrubIp(p.comm) } : {}) } : p));
+  const tops = (x) => Object.fromEntries(['cpuTop', 'memTop', 'ioTop'].filter((k) => Array.isArray(x[k])).map((k) => [k, topRows(x[k])]));
+  const scrubResult = (x) => (x ? { ...x, ...tops(x), dmesg: (x.dmesg || []).map(scrubIp), ss: (x.ss || []).map(scrubIp), ...(x.error ? { error: scrubIp(x.error) } : {}),
     ...(x.idrac ? { idrac: { ...x.idrac, events: Array.isArray(x.idrac.events) ? x.idrac.events.map((e) => ({ ...e, message: scrubIp(e.message) })) : x.idrac.events } } : {}) } : x);
   const out = { ...res, ...(r ? { result: scrubResult(r) } : {}), ...(res.reason ? { reason: scrubIp(res.reason) } : {}) };
   if (Array.isArray(out.snapshots)) out.snapshots = out.snapshots.map(({ by: _b, ...x }) => ({ ...x, reason: scrubIp(x.reason) }));
@@ -1007,6 +1011,9 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
           os: targets.filter((x) => (x.paths || []).includes('os')).length,
           both: targets.filter((x) => (x.paths || []).length > 1).length }
       : tg.counts;
+    // 9회차 J1: 데모(mock)는 KPI 경로 수를 성능 열 겹침과 맞춘다(응답 전용 — 대상 paths 는 그대로).
+    let countsOut = counts;
+    if (isMockMode()) { const vis = new Set(targets0.map((x) => x.key)); countsOut = (await import('../../mock/demo/baremetal.js')).demoPathCounts(counts, (tg.targets || []).filter((x) => vis.has(x.key)), tg.targets || []); }
     const keys = new Set(targets0.map((x) => x.key));
     // 최신값은 **대상 목록 안의 것만** 준다(법인을 끄거나 등록이 사라진 서버의 옛 값이 새어 나가지 않게).
     // v2.920(반증 D2): 데모(mock) 대상의 성능 열은 응답 단계에서만 겹친다(적재하지 않는다 — mock/demo/baremetal.js demoPerfLatestRows).
@@ -1027,7 +1034,7 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
       // '왜 대상이 아닌지' 는 개수와 사유로만 준다(범위 밖 서버 이름을 흘리지 않기 위해).
       skippedCounts,
       skipped,
-      counts,
+      counts: countsOut,
       /* 키 충돌 — 범위 계정에는 보이는 것만(v2.550.3). 조용히 두면 한 서버 값이 다른 서버로 보인다. */
       // 반증 F3: 범위 계정에는 보이는 줄만 · `peers`(범위 밖 서버까지 센 수)는 싣지 않는다 — counts.keyConflicts 도 아래에서 보이는 줄로 다시 센다.
       keyConflicts: (isAdmin ? (x) => x : (l) => maskBmList(l, match))(applyScope(tg.keyConflicts || [], allowed).map((x) => (allowed ? (({ peers: _p, ...r }) => r)(x) : x))),
