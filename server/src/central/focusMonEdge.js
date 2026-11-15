@@ -17,9 +17,9 @@ import * as store from '../focusmon/store.js';
 import { listTargets, registryLoadError, getSettings } from '../focusmon/registry.js';
 import { setWakeImpl, setAlertDeps } from '../focusmon/service.js';
 import { procEveryFor } from '../focusmon/tune.js'; // v3.16.0 ⑯ C3 — 엣지 서버의 프로세스 표본 주기도 중앙의 자동 조절을 따른다
-import { enqueueNotify } from '../alerts.js'; // v3.16.0 ⑯ C1 — 포탈의 기존 알람 · 메일 채널(대기열 — 한 번에 하나씩)
-import { IOSTAT_COLS, TOP_N, APP_TOP, APP_KERNEL, APP_SESSION, APP_NOSVC } from '../focusmon/rates.js';
-import { okMount } from '../focusmon/parse.js'; // v3.12.0 ⑬ 파일시스템 마운트 이름 규칙(수집 파서와 같은 함수)
+import { enqueueNotify, noteEventSent, deliveryOutcome } from '../alerts.js'; // v3.16.0 ⑯ C1 — 포탈의 기존 알람 · 메일 채널(대기열 — 한 번에 하나씩)
+import { IOSTAT_COLS, TOP_N, APP_TOP, APP_KERNEL, APP_SESSION, APP_NOSVC, APP_ALL_MAX } from '../focusmon/rates.js';
+import { okMount, BOOT_ID_RE } from '../focusmon/parse.js'; // v3.12.0 ⑬ 파일시스템 마운트 이름 규칙(수집 파서와 같은 함수)
 import { FS_ROWS_MAX } from '../focusmon/codec.js';
 import { INTERVALS, PROC_EVERY_CHOICES } from '../focusmon/script.js';
 import { handleEdgeAudit } from '../focusmon/audit/service.js'; // v3.11.0 디스크 점검 — 작업 배달 · 원문 결과 받기(중앙이 다시 해석)
@@ -132,7 +132,27 @@ function cleanKm(k) {
   const boot = (() => { const x = n(k.boot); return x != null && x > 0 && x < 1e10 ? Math.round(x) : null; })();
   const oom = (Array.isArray(k.oom) ? k.oom.slice(0, 20) : []).filter(isObj).map((o) => ({ s: ts(o.s), c: typeof o.c === 'string' && COMM_RE.test(o.c) && !o.c.includes('*') ? o.c : null })).filter((o) => o.s && o.c);
   const en = Number.isInteger(k.en) && k.en >= 0 && k.en <= 1e9 ? k.en : null;
-  return { rc, boot, oom, en, es: ts(k.es), last: ts(k.last) };
+  const on = Number.isInteger(k.on) && k.on > 20 && k.on <= 1e9 ? k.on : null;
+  return { rc, boot, oom, en, es: ts(k.es), last: ts(k.last), on, f: k.f === true, bid: typeof k.bid === 'string' && BOOT_ID_RE.test(k.bid) ? k.bid : null };
+}
+/**
+ * 반증 M4 · M7: 커널 메시지는 대상마다 **표본 시각으로 50초에 한 번**만 받는다(정상 엣지는 60초에 한 번 싣는다 — 위조한 km 으로
+ *   동기화마다 사건 수만 개를 만들어 기록 대기열에서 다른 서버의 분 묶음을 밀어내지 못하게) · 켜진 시각은 **중앙이 다시 계산**한다
+ *   (옮긴 표본 시각 − 표본 가동 시간 — 엣지 시계를 믿지 않는다: 시계가 앞선 엣지의 최근 OOM 이 '미래' 로 버려졌다).
+ */
+export const KM_MIN_GAP_MS = 50_000;
+export const KM_FIRST_GAP_MS = 5_000; // 첫 확인(f — 다시 연결한 새 세션)은 앞 확인 직후에도 온다(보는 화면을 열고 닫으면 주기가 바뀌어 다시 연결) — 짧은 간격만
+const kmSeen = new Map(); // targetId → 마지막으로 받은 km 의 표본 시각(중앙 시각)
+export function _resetKmGateForTest() { kmSeen.clear(); }
+export function gateKm(id, ts, s) {
+  if (!s.km) return true;
+  const prev = kmSeen.get(id);
+  const ok = s.up != null && (prev == null || ts - prev >= (s.km.f ? KM_FIRST_GAP_MS : KM_MIN_GAP_MS));
+  if (!ok) { delete s.km; return false; }
+  kmSeen.set(id, ts);
+  if (kmSeen.size > 5000) kmSeen.delete(kmSeen.keys().next().value);
+  s.km = { ...s.km, boot: Math.round(ts / 1000 - s.up) };
+  return true;
 }
 
 /* v3.14.0(⑮) 앱 단위 묶음 — 아는 칸만 · 기준마다 APP_TOP · 이름은 서비스 · 프로그램 이름 규칙(또는 정해진 세 이름) · 수는 0 이상 · 상한. */
@@ -149,7 +169,13 @@ function cleanApps(a) {
     return row.n == null ? null : row;
   };
   const list = (v, keyOk) => (Array.isArray(v) ? v.slice(0, APP_TOP).map((x) => one(x, keyOk)).filter(Boolean) : null);
-  return { sv: list(a.sv, (k) => APP_FIXED.has(k) || APP_UNIT_RE.test(k)), cm: list(a.cm, (k) => COMM_RE.test(k)) || [] };
+  // v3.16.0 ⑯ 반증 H1: 서비스마다 프로세스 수(all) — 서비스 이름만 · 정수 · 상한 개수(필수 앱 알림 판정)
+  let all = null;
+  if (isObj(a.all)) {
+    all = Object.create(null); let c = 0;
+    for (const [k, v] of Object.entries(a.all)) { if (c >= APP_ALL_MAX) break; if (!APP_UNIT_RE.test(k)) continue; const x = n(v); if (x == null || !Number.isInteger(x) || x < 0 || x > 1e6) continue; all[k] = x; c += 1; }
+  }
+  return { sv: list(a.sv, (k) => APP_FIXED.has(k) || APP_UNIT_RE.test(k)), cm: list(a.cm, (k) => COMM_RE.test(k)) || [], ...(all ? { all } : {}) };
 }
 
 function cleanStatus(st, now) {
@@ -265,6 +291,7 @@ export function handleEdgeSync(agent, body, now = Date.now()) {
     if (c > MAX_PER_TARGET) { got.bad += 1; continue; }
     const ts = toCentral(x.t); const s = cleanSample(x.s);
     if (ts == null || !s) { got.bad += 1; continue; }
+    if (!gateKm(x.id, ts, s)) got.kmDropped = (got.kmDropped || 0) + 1;
     if (store.ingestSample(x.id, ts, s, cleanHello(x.hello), now)) got.samples += 1;
   }
   for (const id of perTarget.keys()) store.flushReopened(id); // 늦은 표본은 분마다 한 번만 다시 쓴다
@@ -348,4 +375,5 @@ export async function wakeEdge(agent, { by = 'auto', pull = pullFromEdge } = {})
 }
 setWakeImpl((agent) => { wakeEdge(agent).catch(() => {}); });
 // v3.16.0 ⑯ C1 — 알림 발송(기존 채널 대기열) · 정비 창 판정기(베어메탈 사용률의 정비 창 — 처음 쓸 때 불러온다)
-setAlertDeps({ send: (a) => enqueueNotify(a), maintJudge: async (now) => (await import('../bmusage/maint/runtime.js')).maintJudge({ now }) });
+// 반증 L6: 발송 결과를 포탈 '최근 통지' 에 남기고(같은 엔진 밖 발송인 ipam/changeNotify 와 같은 길) 판정(delivered · failed · skipped)을 돌려준다 — failed 면 다음 주기에 다시
+setAlertDeps({ send: async (a) => { let res = []; try { res = await enqueueNotify(a); } catch (e) { res = [`queue:err ${String(e?.message || e).slice(0, 120)}`]; } try { noteEventSent(a, res); } catch { /* 최근 통지는 보조 */ } return deliveryOutcome(res); }, maintJudge: async (now) => (await import('../bmusage/maint/runtime.js')).maintJudge({ now }) });

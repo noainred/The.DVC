@@ -19,6 +19,9 @@ import { every } from '../util/longTimer.js';
 import { startAuditService } from './audit/service.js';
 import { tuneTick, procEveryFor } from './tune.js'; // v3.16.0 ⑯ C3 수집 부하 자동 조절
 import { alertCycle } from './alerts.js'; // v3.16.0 ⑯ C1 지속 시간 조건 알림
+import { maintStateForTarget } from './maintMatch.js'; // v3.16.0 ⑯ 반증 H2 — 법인(DataCenter) → vCenter 들로 정비 창 판정
+import { corpResolver } from './audit/corp.js';
+import { getDatacenterAssign } from '../datacenter/store.js';
 import { startRollup, stopRollup } from './rollup.js'; // v3.13.0 ⑭ 요약 표 백필 · 1시간 요약 // v3.11.0 디스크 점검 — 중앙 실행기 키 · 재시작 전 작업 정리
 
 export const focusKeys = createSshKeyStore({
@@ -78,8 +81,15 @@ export async function minuteTick(now = Date.now(), { send = null, maintJudge = n
     store.queueEvent(c.id, 'tune', `수집 조절 — 프로세스 표본 ${c.from}초 → ${c.to}초(${c.why})`.slice(0, 300), now, { scope: 'server' });
   }
   // 정비 창(베어메탈 사용률의 정비 창 — 같은 법인 · 같은 IP 의 서버를 덮는 창이 '알림' 을 켰으면 억제) · 판정기를 못 만들면 억제하지 않는다(알림이 나가는 쪽)
+  //   반증 H2: 등록부 법인은 DataCenter id · 정비 창은 vCenter id — 법인의 vCenter 들로 풀어 묻는다(maintMatch.js).
   const J = maintJudge ? await maintJudge(now).catch(() => null) : null;
-  const maintState = J ? (t) => { try { return J.stateFor({ vcenterId: t.corp || '', key: t.host }, now); } catch { return null; } } : null;
+  let maintState = null;
+  if (J) {
+    let cr = null; let assign = {};
+    try { cr = corpResolver(); } catch { cr = null; }
+    try { assign = getDatacenterAssign(); } catch { assign = {}; }
+    maintState = (t) => { try { return maintStateForTarget(J, t, cr?.of(t)?.id || null, assign, now); } catch { return null; } };
+  }
   return alertCycle({ store, targets: allTargets(), recordIds, send, maintState, mock: isMockMode(), now });
 }
 let sendImpl = null; let maintImpl = null;

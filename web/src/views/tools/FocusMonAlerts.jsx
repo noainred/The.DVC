@@ -11,7 +11,7 @@ import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import { DASH, clockText, agoShort } from './focusMonText.js';
-import { SEV_TEXT, READ_TEXT, scopeText, nowText, thresholdIssue, previewText, kerrText } from './focusMonAlertsText.js';
+import { SEV_TEXT, READ_TEXT, scopeText, nowText, thresholdIssue, previewText, kmCell } from './focusMonAlertsText.js';
 import { usePoll } from './focusMonPoll.js';
 import { Seg } from './FocusMonBulk.jsx';
 
@@ -121,10 +121,10 @@ export function AlertsTab({ main, setMsg, reloadMain }) {
                 </STable>
               </div>
             ) : <div className="fm-note fm-pad">규칙이 없습니다 — 오른쪽에서 만드세요.</div>}
-            <div className="fm-note fm-pad">규칙은 계속 수집 서버에만 겁니다 — 잠깐 보기는 끝나면 값이 끊겨 ‘얼마 동안’ 을 판정할 수 없습니다. 값을 못 읽은 동안(수집 끊김 · 엣지 응답 없음)은 정상도 발생도 아닌 판정 보류로 따로 셉니다(해제로 알리지 않습니다). 해제는 문턱보다 {Math.round(d.limits.resolveMargin * 100)}% 낮은 값이 같은 시간 이어질 때입니다. 정비 창(베어메탈 사용률 — 같은 법인 · IP 의 서버를 덮고 ‘알림’ 을 켠 창) 동안은 보내지 않고 기록만 남깁니다. 판정은 중앙이 1분마다 받은 표본으로 합니다.</div>
+            <div className="fm-note fm-pad">규칙은 계속 수집 서버에만 겁니다 — 잠깐 보기는 끝나면 값이 끊겨 ‘얼마 동안’ 을 판정할 수 없습니다. 값을 못 읽은 동안(수집 끊김 · 엣지 응답 없음)은 정상도 발생도 아닌 판정 보류로 따로 셉니다(해제로 알리지 않습니다). 해제는 문턱보다 {Math.round(d.limits.resolveMargin * 100)}% 낮은 값이 같은 시간 이어질 때입니다. 정비 창(베어메탈 사용률 — 그 법인의 vCenter 와 서버 주소를 덮고 ‘알림’ 을 켠 창 · 한 법인에 vCenter 가 여럿이면 주소를 적은 서버 창만) 동안은 보내지 않고 기록만 남깁니다. 판정은 중앙이 1분마다 받은 표본으로 합니다.</div>
           </div>
           <div className="fm-card fm-flush">
-            <div className="fm-pad fm-row fm-between"><h3 className="fm-h3">최근 24시간 발생 · 해제 · 보류</h3><span className="fm-dim">포탈 알람 · 메일과 같은 기록 · 서버 상세의 사건에도 붙습니다</span></div>
+            <div className="fm-pad fm-row fm-between"><h3 className="fm-h3">최근 24시간 발생 · 해제 · 보류</h3><span className="fm-dim">보낸 알림은 포탈 알람의 최근 통지에도 남습니다 · 서버 상세의 사건에도 붙습니다</span></div>
             {d.history.length ? (
               <div className="fm-tblbox"><STable className="fm-table" minWidth={620}>
                 <thead><tr><th>시각</th><th>서버</th><th>내용</th></tr></thead>
@@ -139,21 +139,22 @@ export function AlertsTab({ main, setMsg, reloadMain }) {
         <div className="fm-pad fm-row fm-between"><h3 className="fm-h3">OOM · 커널 오류</h3><span className="fm-dim">60초마다 · 새 줄만 · 원문은 보관하지 않고 종료된 프로그램 이름 · 횟수 · 시각만</span></div>
         {d.kmsg.length ? (
           <div className="fm-tblbox"><STable className="fm-table" minWidth={680}>
-            <thead><tr><th>서버</th><th>커널 메시지 읽기</th><th className="fm-r">OOM(24시간)</th><th>마지막 OOM</th><th>그 밖 커널 오류(24시간)</th></tr></thead>
+            <thead><tr><th>서버</th><th>커널 메시지 읽기</th><th className="fm-r">OOM(24시간)</th><th>마지막 OOM</th><th>그 밖 커널 오류(24시간 · 수집 중 새로 생긴 것)</th></tr></thead>
             <tbody>{d.kmsg.map((k) => { const rd = READ_TEXT[k.read]; return (
               <tr key={k.id}><td>{k.name}</td>
                 <td>{rd ? <span className={`fm-badge ${rd.tone}`}>{rd.label}</span> : <span className="fm-dim">아직 모름</span>}</td>
-                <td className="fm-r fm-num" data-sort={k.oom}>{k.read === 'denied' && !k.oom ? DASH : k.oom}</td>
+                <td className="fm-r fm-num" data-sort={k.oom ?? null}>{kmCell(k.read, k.oom, 'oom')}</td>
                 <td data-sort={k.lastOom?.at ?? null}>{k.lastOom ? `${clockText(k.lastOom.at, true)} · ${k.lastOom.text.replace(/^OOM — /, '')}` : DASH}</td>
-                <td>{k.read === 'denied' && !k.kerr ? DASH : kerrText(k.kerr)}</td></tr>); })}</tbody>
+                <td data-sort={k.kerr ?? null}>{kmCell(k.read, k.kerr, 'kerr')}</td></tr>); })}</tbody>
           </STable></div>
         ) : <div className="fm-note fm-pad">계속 수집 중인 서버가 없습니다.</div>}
-        <div className="fm-note fm-pad">커널 메시지는 서버 설정(kernel.dmesg_restrict = 0)일 때만 일반 계정이 읽습니다 — 막힌 서버는 ‘권한 없음’ 이지 ‘OOM 없음’ 이 아닙니다(‘—’). OOM 은 서버 상세의 사건에도 붙습니다.</div>
+        {d.eventsUnreadable ? <div className="fm-note fm-pad">기록 DB 를 읽지 못해 횟수를 셀 수 없습니다(‘—’).</div> : null}
+        <div className="fm-note fm-pad">커널 메시지는 서버 설정(kernel.dmesg_restrict = 0)일 때만 일반 계정이 읽습니다 — 막힌 서버 · 응답 없는 서버는 ‘OOM 없음’ 이 아니라 ‘—’ 입니다. 한 번에 OOM 이 20건을 넘으면 가장 최근 20건과 그 밖 건수만 받습니다. OOM 은 서버 상세의 사건에도 붙습니다.</div>
       </div>
       <div className="fm-card fm-flush">
         <div className="fm-pad fm-row fm-between"><h3 className="fm-h3">수집 부하 자동 조절</h3>
           <Seg label="자동 조절" value={d.tune.enabled ? 'on' : 'off'} onChange={(v) => act(putJson('/tools/focus-mon/settings', { autoTune: v === 'on' ? 1 : 0 }).then(() => reloadMain?.()), v === 'on' ? '자동 조절을 켰습니다.' : '자동 조절을 껐습니다.')} options={[['off', '꺼짐'], ['on', '켜짐']]} /></div>
-        <div className="fm-note fm-pad">켜면 계속 수집 서버마다 수집 비용이 주의 문턱({d.tune.warnPct}% — 수집 부하 탭의 판정 문턱)을 두 창(30초씩) 넘으면 프로세스 표본 주기를 한 단계 늘리고(5 → 15 → 30초), 문턱의 절반 아래가 1시간 이어지면 한 단계씩 되돌립니다(설정 {d.tune.base}초까지). 원격 명령은 미리 만든 상수 가운데 고르기만 합니다. 바꿀 때 접속을 한 번 다시 열고(몇 초 공백) 사건에 남깁니다.</div>
+        <div className="fm-note fm-pad">켜면 계속 수집 서버마다 수집 비용이 주의 문턱({d.tune.warnPct}% — 수집 부하 탭의 판정 문턱)을 두 창(30초씩) 넘으면 프로세스 표본 주기를 한 단계 늘리고(5 → 15 → 30초), 문턱의 절반 아래가 1시간 이어지면 한 단계씩 되돌립니다(설정 {d.tune.base}초까지 — 설정이 하한입니다). 되돌린 뒤 6시간 안에 다시 늘면 그 서버는 24시간 되돌리지 않습니다(오가며 접속을 다시 열지 않게). 원격 명령은 미리 만든 상수 가운데 고르기만 합니다. 바꿀 때 접속을 한 번 다시 열고(몇 초 공백) 사건에 남깁니다.</div>
         {d.tune.recent.length ? (
           <div className="fm-tblbox"><STable className="fm-table" minWidth={600}>
             <thead><tr><th>시각</th><th>서버</th><th>바꾼 것</th><th>까닭</th></tr></thead>

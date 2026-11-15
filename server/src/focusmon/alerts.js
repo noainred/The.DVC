@@ -38,7 +38,7 @@ export const METRICS = Object.freeze({
   iow: { label: 'I/O 대기(iowait)', unit: '%', col: 'c.iow', op: 'ge', range: [1, 100] },
   mem: { label: '메모리 사용률', unit: '%', col: 'm.pct', op: 'ge', range: [1, 100] },
   disk: { label: '디스크 사용률(%util — 가장 바쁜)', unit: '%', col: 's.disk', op: 'ge', range: [1, 100] },
-  wa: { label: '디스크 쓰기 지연', unit: 'ms', col: 's.wa', op: 'ge', range: [1, 100_000] },
+  wa: { label: '디스크 쓰기 지연', unit: 'ms', col: 's.wa', idleCol: 't.w', op: 'ge', range: [1, 100_000] }, // 끝난 쓰기 0건(t.w = 0)이면 값 없음 = 조용함(못 읽음 아님 — 반증 M3)
   fs: { label: '파일시스템 사용률(가장 높은)', unit: '%', col: 's.fs', op: 'ge', range: [1, 100] },
   rt: { label: 'TCP 재전송률', unit: '%', col: 'p.rt', op: 'ge', range: [0.1, 100] },
   procD: { label: 'D 상태 프로세스 수', unit: '개', col: 'q.D', op: 'ge', range: [1, 100_000] },
@@ -86,7 +86,8 @@ export function loadRules() {
   if (rulesCache) return rulesCache;
   loadErr.clear();
   let raw = null;
-  try { raw = fs.readFileSync(rulesPath(), 'utf8'); } catch (e) { if (e?.code !== 'ENOENT') loadErr.set(e); rulesCache = []; return rulesCache; }
+  // 반증 M8: 파일이 없고 손상 보존본만 있으면(손상 뒤 재시작) 그 사유를 오류로 — 빈 목록으로 쓰기를 열면 옛 규칙이 보존본에만 남는다
+  try { raw = fs.readFileSync(rulesPath(), 'utf8'); } catch (e) { if (e?.code !== 'ENOENT') loadErr.set(e); else loadErr.checkCorruptOnly(rulesPath()); rulesCache = []; return rulesCache; }
   try {
     const j = JSON.parse(raw);
     const list = Array.isArray(j?.rules) ? j.rules : [];
@@ -130,10 +131,28 @@ export function writeRule(op, input, { by = '', now = Date.now() } = {}) {
   return { ok: true, rule: r.rule };
 }
 
+/**
+ * 그룹 이름 바꾸기 · 지우기와 맞추기(반증 M11 — 규칙은 그룹 이름으로 대상을 고른다: 등록부만 바꾸면 규칙이 아무 서버도 덮지 않았다).
+ * 대소문자 무시(ruleTargets 와 같은 비교). 규칙 파일을 못 읽으면 { ok:false } — 부르는 쪽이 503 으로 먼저 막는다.
+ */
+export function rulesUsingGroup(name) {
+  const g = String(name ?? '').toLowerCase();
+  return loadRules().filter((r) => r.scope.kind === 'group' && r.scope.group.toLowerCase() === g);
+}
+export function renameGroupInRules(from, to, { now = Date.now() } = {}) {
+  const list = loadRules();
+  if (loadErr.get()) return { ok: false, code: 'rules-unreadable' };
+  const f = String(from ?? '').toLowerCase(); let n = 0;
+  const next = list.map((r) => { if (r.scope.kind !== 'group' || r.scope.group.toLowerCase() !== f) return r; n += 1; return { ...r, scope: { kind: 'group', group: String(to) }, updatedAt: now }; });
+  if (n) saveRules(next); // 상태(규칙|서버 짝)는 그대로 — 같은 서버를 같은 규칙이 계속 덮는다
+  return { ok: true, n };
+}
+
 /* ── 판정 코어(순수) ───────────────────────────────────────────────────── */
 /**
  * 한 (규칙, 서버)의 다음 상태.
- * @param {Array<[number, number|null]>} pts  [시각, 값] 시각 순 — 지속 구간과 그 앞을 덮는 표본(값 null = 못 읽음)
+ * @param {Array<[number, number|null, boolean?]>} pts  [시각, 값, 조용함] 시각 순 — 지속 구간과 그 앞을 덮는 표본(값 null = 못 읽음 ·
+ *   세 번째 칸 true = 값이 없는 것이 정상인 표본 — 예: 끝난 쓰기 0건의 쓰기 지연. 넘지 않음 · 해제 쪽으로 친다 · 보류가 아니다: 반증 M3)
  * @param {{op, threshold, durMin}} rule
  * @param {{state, since}} prev  'ok' | 'firing' | 'hold' (없으면 ok)
  * @returns {{state, since, event: null|'fire'|'resolve'|'hold'|'unhold', value}}
@@ -143,8 +162,9 @@ export function judge(pts, rule, prev = null, now = Date.now(), { holdAfterMs = 
   const durMs = rule.durMin * 60_000;
   const last = pts.length ? pts[pts.length - 1] : null;
   const lastVal = last ? last[1] : null;
-  // 보류 — 표본이 없거나 오래됐거나 지금 값을 못 읽었다
-  if (!last || now - last[0] > holdAfterMs || lastVal == null) {
+  const lastIdle = !!(last && last[1] == null && last[2] === true);
+  // 보류 — 표본이 없거나 오래됐거나 지금 값을 못 읽었다(조용한 표본은 보류가 아니다)
+  if (!last || now - last[0] > holdAfterMs || (lastVal == null && !lastIdle)) {
     if (st === 'hold') return { state: 'hold', since: prev.since, event: null, value: null, was: prev.was };
     return { state: 'hold', since: now, event: 'hold', value: null, was: st };
   }
@@ -152,15 +172,16 @@ export function judge(pts, rule, prev = null, now = Date.now(), { holdAfterMs = 
   const win = pts.filter(([t]) => t >= from);
   // 구간을 표본이 덮었는가 — 첫 표본이 구간 시작 근처(지속의 10% 또는 30초 안)에 있고, 사이에 큰 틈(60초 넘게)이 없다
   const covered = win.length > 0 && win[0][0] - from <= Math.max(30_000, durMs * 0.1) && win.every(([t], i) => i === 0 || t - win[i - 1][0] <= 60_000);
-  const over = (v) => v != null && (rule.op === 'lt' ? v < rule.threshold : v >= rule.threshold);
-  const calm = (v) => v != null && (rule.op === 'lt' ? v >= rule.threshold * (1 + RESOLVE_MARGIN) || v >= rule.threshold + 1 : v < rule.threshold * (1 - RESOLVE_MARGIN));
+  const over = ([, v]) => v != null && (rule.op === 'lt' ? v < rule.threshold : v >= rule.threshold);
+  const calm = ([, v, idle]) => (v == null ? idle === true : (rule.op === 'lt' ? v >= rule.threshold * (1 + RESOLVE_MARGIN) || v >= rule.threshold + 1 : v < rule.threshold * (1 - RESOLVE_MARGIN)));
   const base = st === 'hold' ? (prev?.was || 'ok') : st; // 보류에서 돌아오면 보류 전 상태에서 이어서(보류를 해제로 치지 않는다)
+  const idle = lastIdle ? { idle: true } : {};
   if (base === 'firing') {
-    if (covered && win.every(([, v]) => calm(v))) return { state: 'ok', since: now, event: 'resolve', value: lastVal };
-    return { state: 'firing', since: st === 'hold' ? prev?.firedAt ?? now : prev?.since ?? now, event: st === 'hold' ? 'unhold' : null, value: lastVal, firedAt: prev?.firedAt ?? prev?.since ?? now };
+    if (covered && win.every(calm)) return { state: 'ok', since: now, event: 'resolve', value: lastVal, ...idle };
+    return { state: 'firing', since: st === 'hold' ? prev?.firedAt ?? now : prev?.since ?? now, event: st === 'hold' ? 'unhold' : null, value: lastVal, firedAt: prev?.firedAt ?? prev?.since ?? now, ...idle };
   }
-  if (covered && win.every(([, v]) => over(v))) return { state: 'firing', since: now, event: 'fire', value: lastVal, firedAt: now };
-  return { state: 'ok', since: st === 'ok' ? prev?.since ?? now : now, event: st === 'hold' ? 'unhold' : null, value: lastVal };
+  if (covered && win.every(over)) return { state: 'firing', since: now, event: 'fire', value: lastVal, firedAt: now };
+  return { state: 'ok', since: st === 'ok' ? prev?.since ?? now : now, event: st === 'hold' ? 'unhold' : null, value: lastVal, ...idle };
 }
 
 /**
@@ -211,7 +232,7 @@ function forgetRuleState(ruleId) {
 export function _resetForTest() { rulesCache = null; stateCache = null; loadErr.clear(); }
 
 /* ── 판정 주기(중앙만 — 서비스 1분 틱) ─────────────────────────────────── */
-export const MAX_SEND = 20; // 주기당 보내는 상한(넘친 것은 다음 주기 — 잘린 수를 상태에 남긴다)
+export const MAX_SEND = 20; // 주기당 보내는 상한(넘친 것은 상태를 앞 상태로 두어 다음 주기에 — 반증 M1)
 const isEdgeNode = () => !!String(process.env.CENTRAL_URL || '').trim();
 const fmtVal = (m, v) => (v == null ? '—' : `${Math.round(v * 10) / 10}${METRICS[m].unit === '%' ? '%' : ` ${METRICS[m].unit}`}`);
 const condText = (r) => `${METRICS[r.metric].label}${r.app ? `(${r.app})` : ''} ${METRICS[r.metric].op === 'lt' ? '<' : '≥'} ${fmtVal(r.metric, r.threshold)} · ${r.durMin}분`;
@@ -227,11 +248,16 @@ export function pointsFor(store, rule, id, now) {
   const from = now - rule.durMin * 60_000 - 120_000;
   const out = [];
   if (rule.metric === 'app') {
-    for (const [, list] of store.memProcs(id)) for (const s of list) {
-      if (!(s.t >= from) || !s.apps) continue;
+    // 반증 H1: 서비스마다 프로세스 수(apps.all — 수집기가 약 20초마다 싣는다)가 있으면 그것만 쓴다(없는 이름 = 0 — 죽음). 상위 20(sv)은
+    //   CPU 순이라 조용한 서비스 · 죽은 서비스를 가르지 못한다(흔한 RHEL 서버는 서비스가 20개를 넘어 목록이 늘 꽉 찬다).
+    //   all 이 하나도 없으면(옛 엣지) 예전 규칙: 상위 20 에 있으면 그 수 · 목록이 20개 미만이면 0 · 꽉 찼으면 모름.
+    const rows = [];
+    for (const [, list] of store.memProcs(id)) for (const s of list) if (s.t >= from && s.apps) rows.push(s);
+    const withAll = rows.some((s) => s.apps.all && typeof s.apps.all === 'object');
+    for (const s of rows) {
+      if (withAll) { if (s.apps.all && typeof s.apps.all === 'object') { const v = Object.hasOwn(s.apps.all, rule.app) ? Number(s.apps.all[rule.app]) : 0; out.push([s.t, Number.isFinite(v) ? v : null]); } continue; }
       if (!Array.isArray(s.apps.sv)) { out.push([s.t, null]); continue; } // 서비스 지도 없음 — 모름
       const a = s.apps.sv.find((x) => x.k === rule.app);
-      // 상위 20 에 없으면: 그 서비스의 프로세스가 0 이거나(죽음) 상위 밖(아주 조용함) — 목록이 20개 미만이면 0 으로 확정, 꽉 찼으면 모름
       out.push([s.t, a ? a.n : (s.apps.sv.length < 20 ? 0 : null)]);
     }
     return out.sort((x, y) => x[0] - y[0]);
@@ -244,7 +270,7 @@ export function pointsFor(store, rule, id, now) {
       const t = b.ts[i]; if (t < from) continue;
       let v;
       if (M.cols) { const xs = M.cols.map((k) => get(k, i)); v = xs.some((x) => x == null) ? null : xs.reduce((a, x) => a + x, 0); } else v = get(M.col, i);
-      out.push([t, v]);
+      out.push(v == null && M.idleCol && get(M.idleCol, i) === 0 ? [t, null, true] : [t, v]);
     }
   }
   return out;
@@ -252,45 +278,82 @@ export function pointsFor(store, rule, id, now) {
 
 /**
  * 한 주기 — 모든 켜진 규칙 × 덮는 서버. 사건(fm_event 'alert')을 남기고, 정비 창이 아니면 포탈 알람 · 메일로 보낸다(목 모드는 보내지 않는다).
- * @param {{store, targets, recordIds, send, maintState, mock, now}} o  send(alert) → Promise · maintState(target) → {scopes:{alerts}} | null
+ * @param {{store, targets, recordIds, send, maintState, mock, now}} o  send(alert) → Promise<'delivered'|'failed'|'skipped'|…> · maintState(target) → {scopes:{alerts}} | null
+ *  · 반증 M1: 주기당 MAX_SEND 를 넘은 발생 · 해제는 **상태를 앞 상태로 둔다** — 다음 주기에 같은 판정이 다시 나와 그때 보낸다(사라지지 않는다).
+ *  · 반증 L6: 발송 결과가 'failed'(받은 채널 없이 오류)면 상태를 되돌려 다음 주기에 다시 보낸다 — 짝마다 SEND_RETRY 번까지(채널이 고장 난 동안 매분 쌓이지 않게).
+ *    다시 보낼 때는 사건을 또 적지 않는다. 결과는 부르는 쪽(central/focusMonEdge.js)이 포탈 '최근 통지' 에 남긴다.
+ *  · 반증 M2: 발생 알림 열쇠에 발생 시각을 넣는다 — 같은 열쇠면 포탈의 억제 창(기본 5분)이 '해제 → 다시 발생' 을 삼켜 마지막 알림이 '[해제]' 로 남았다.
+ *  · 겹쳐 돌지 않는다(발송이 채널 시한만큼 걸려 60초를 넘기면 다음 주기는 건너뛴다).
  */
 let lastCycleAt = null;
+let cycling = false;
+export const SEND_RETRY = 2;
 /** 마지막 판정 시각(화면 — 기동 직후 '판정 전' 을 '덮는 서버 없음' 과 가른다). */
 export function lastCycle() { return lastCycleAt; }
 export async function alertCycle({ store, targets = [], recordIds = new Set(), send = null, maintState = null, mock = false, now = Date.now() } = {}) {
   if (isEdgeNode()) return { skipped: 'edge' };
+  if (cycling) return { skipped: 'busy' };
+  cycling = true;
+  try { return await cycleOnce({ store, targets, recordIds, send, maintState, mock, now }); } finally { cycling = false; }
+}
+let warnedAt = 0;
+async function cycleOnce({ store, targets, recordIds, send, maintState, mock, now }) {
   lastCycleAt = now;
-  const rules = loadRules().filter((r) => r.enabled);
+  const all = loadRules();
+  if (loadErr.get()) { // 규칙 파일을 못 읽음 — 상태를 비우지 않고(재시작 폭주 방지) 판정만 건너뛴다 · 화면은 503 으로 알린다
+    if (now - warnedAt > 3_600_000) { warnedAt = now; console.warn(`[focusmon] 알림 규칙 파일(${RULES_FILE})을 읽지 못해 알림 판정을 건너뜁니다 — ${loadErr.get().reason}`); }
+    return { skipped: 'rules-unreadable' };
+  }
+  const rules = all.filter((r) => r.enabled);
   const prev = loadState();
   const next = {};
   const fires = [];
   for (const r of rules) {
     for (const t of ruleTargets(r, targets, recordIds)) {
       const key = `${r.id}|${t.id}`;
-      const j = judge(pointsFor(store, r, t.id, now), { ...r, op: METRICS[r.metric].op }, prev[key] || null, now);
-      next[key] = { state: j.state, since: j.since, ...(j.firedAt ? { firedAt: j.firedAt } : {}), ...(j.state === 'hold' ? { was: j.was ?? prev[key]?.was ?? 'ok' } : {}), value: j.value, at: now };
-      if (j.event === 'fire' || j.event === 'resolve' || j.event === 'hold') fires.push({ r, t, j });
+      const p0 = prev[key] || null;
+      const j = judge(pointsFor(store, r, t.id, now), { ...r, op: METRICS[r.metric].op }, p0, now);
+      const retry = j.event === 'fire' || j.event === 'resolve' ? (p0?.retryOf === j.event ? (p0.retry || 0) : 0) : 0;
+      next[key] = { state: j.state, since: j.since, ...(j.firedAt ? { firedAt: j.firedAt } : {}), ...(j.state === 'hold' ? { was: j.was ?? p0?.was ?? 'ok' } : {}), value: j.value, at: now };
+      if (j.event === 'fire' || j.event === 'resolve' || j.event === 'hold') fires.push({ r, t, j, key, p0, retry });
     }
   }
   // 덮지 않게 된(규칙을 끄거나 수집이 끝난) 짝은 상태에서 뺀다 — 다시 덮이면 '새로' 판정한다
-  saveState(next);
-  let sent = 0; let suppressed = 0; let cut = 0;
-  for (const { r, t, j } of fires) {
+  // 보낼 것 고르기 — 보류는 기록만 · 정비 창은 억제 · 목 모드 · 발송기 없음은 기록만 · 상한을 넘은 것은 앞 상태로(다음 주기)
+  let sent = 0; let suppressed = 0; let cut = 0; let failed = 0;
+  const toSend = [];
+  for (const f of fires) {
+    const { r, t, j, key, p0 } = f;
+    let sup = false;
+    if (j.event !== 'hold' && maintState) { try { sup = !!maintState(t)?.scopes?.alerts; } catch { sup = false; } }
+    if (sup) { suppressed += 1; f.suppressed = true; } else if (j.event !== 'hold' && !mock && send) {
+      if (toSend.length >= MAX_SEND) { cut += 1; if (p0) next[key] = p0; else delete next[key]; continue; }
+      toSend.push(f);
+    }
+    if (f.retry > 0) continue; // 다시 보내는 것 — 사건은 처음 한 번만
     const kindText = j.event === 'fire' ? '발생' : j.event === 'resolve' ? '해제' : '판정 보류';
-    const text = `${r.name} — ${condText(r)} · ${kindText}${j.value != null ? ` · 값 ${fmtVal(r.metric, j.value)}` : ' · 값을 못 읽음(수집 끊김 · 엣지 응답 없음)'}`;
-    store.queueEvent(t.id, 'alert', text.slice(0, 300), now, { id: `al:${r.id}:${j.event}:${now}`, scope: 'server' });
-    if (j.event === 'hold') continue; // 보류는 기록만(알림으로 보내지 않는다 — 수집 끊김은 수집 화면이 말한다)
-    const ms = maintState ? maintState(t) : null;
-    if (ms?.scopes?.alerts) { suppressed += 1; continue; }
-    if (mock || !send) continue;
-    if (sent >= MAX_SEND) { cut += 1; continue; }
+    const valText = j.value != null ? ` · 값 ${fmtVal(r.metric, j.value)}` : j.idle ? ' · 값 없음(쓰기 없음)' : ' · 값을 못 읽음(수집 끊김 · 엣지 응답 없음)';
+    store.queueEvent(t.id, 'alert', `${r.name} — ${condText(r)} · ${kindText}${valText}${f.suppressed ? ' · 정비 창이라 보내지 않음' : ''}`.slice(0, 300), now, { id: `al:${r.id}:${t.id}:${j.event}:${now}`, scope: 'server' });
+  }
+  saveState(next);
+  for (const f of toSend) {
+    const { r, t, j, key } = f;
     sent += 1;
     const sev = r.severity === 'crit' ? 'critical' : 'warning';
+    let out = null;
     try {
-      await send({ key: `focusmon:${r.id}:${t.id}:${j.event}`, severity: j.event === 'resolve' ? 'info' : sev,
+      out = await send({ key: `focusmon:${r.id}:${t.id}:${j.event}:${j.event === 'fire' ? j.firedAt : j.since}`, severity: j.event === 'resolve' ? 'info' : sev,
         title: `${j.event === 'resolve' ? '[해제] ' : ''}${t.name} — ${r.name}`.slice(0, 180),
         detail: `${condText(r)}${j.value != null ? ` · 지금 ${fmtVal(r.metric, j.value)}` : ''} · 서버 집중 모니터링 › 알림에서 확인하세요.` });
-    } catch { /* 발송 실패는 alerts 대기열이 센다 */ }
+    } catch { out = 'failed'; }
+    if (out === 'failed') {
+      failed += 1;
+      if (f.retry < SEND_RETRY) { // 앞 상태로 되돌려 다음 주기에 다시(횟수를 남긴다)
+        const st = loadState();
+        st[key] = { ...(f.p0 || { state: 'ok', since: now, at: now }), retry: f.retry + 1, retryOf: j.event };
+        saveState(st);
+      }
+    }
   }
-  return { rules: rules.length, fires: fires.length, sent, suppressed, cut };
+  return { rules: rules.length, fires: fires.length, sent, suppressed, cut, failed };
 }

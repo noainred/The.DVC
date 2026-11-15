@@ -132,7 +132,7 @@ test('④ 판정 주기 — 계속 수집만 · 정비 창 억제 · 목 모드�
   const r = await AL.alertCycle({ store, targets, recordIds: new Set([a, m]), send: async (x) => { sent.push(x); }, maintState: (t) => ({ scopes: { alerts: t.id === m } }), now });
   assert.equal(r.fires, 2, '계속 수집 서버 둘만(b 는 잠깐 보기 — 알림 없음)');
   assert.equal(sent.length, 1, '정비 창(m)은 억제'); assert.equal(r.suppressed, 1);
-  assert.match(sent[0].key, new RegExp(`^focusmon:${c.rule.id}:${a}:fire$`)); assert.equal(sent[0].severity, 'critical');
+  assert.match(sent[0].key, new RegExp(`^focusmon:${c.rule.id}:${a}:fire:\\d+$`), '발생 열쇠에 발생 시각(반증 M2)'); assert.equal(sent[0].severity, 'critical');
   const ev = store.drainWrites(1000).filter((x) => x.kind === 'e' && x.ekind === 'alert');
   assert.equal(ev.length, 2, '억제한 것도 사건에는 남긴다');
   // 다음 주기 — 같은 상태면 다시 보내지 않는다
@@ -156,7 +156,8 @@ test('④ 판정 주기 — 계속 수집만 · 정비 창 억제 · 목 모드�
 /* ── ⑤ ── */
 test('⑤ 커널 메시지 — 원격 awk(실제 bash) · 파서 · 사건 열쇠 · 엣지 정제 · 원문 없음', () => {
   const sc = SCRIPT.scriptFor(2);
-  assert.match(sc, /KO=\$\(timeout -s KILL 3 dmesg -x 2>\/dev\/null \| awk -v L="\$KL"/, 'dmesg 는 시한 KILL · 증분 기준 KL');
+  assert.match(sc, /KO=\$\( \{ timeout -s KILL 3 dmesg -x 2>\/dev\/null; echo "##RC \$\?"; \} \| awk -v L="\$KL"/, 'dmesg 는 시한 KILL · 증분 기준 KL · 종료값은 POSIX(반증 L3 — PIPESTATUS 없음)');
+  assert.ok(!/PIPESTATUS/.test(sc), 'bash 전용 문법 없음');
   assert.match(sc, /echo '##KMSG'/);
   assert.ok(!/dmesg[^\n]*\| *(tee|cat)\b/.test(sc));
   const awk = sc.match(/\| (awk -v L="\$KL" '[^\n]*?\}')/)[1];
@@ -172,7 +173,7 @@ test('⑤ 커널 메시지 — 원격 awk(실제 bash) · 파서 · 사건 열�
   assert.deepEqual(k.oom.map((o) => o.c), ['java', 'my_prog_rm']); assert.equal(k.rc, 0); assert.equal(k.en, 1);
   // 사건 — 같은 줄을 또 받아도 한 줄(열쇠) · 시각 = 켜진 시각 + 부팅 뒤 초
   store._resetForTest();
-  const id = 'fm-dddddddd44'; const at = Date.now(); const boot = Math.round(at / 1000) - 1000;
+  const id = 'fm-dddddddd44'; const at = Date.now(); const boot = Math.floor((Math.round(at / 1000) - 1000) / 10) * 10 + 2; // 옛 열쇠(10초 반올림) 경계에서 떨어뜨림
   store.ingestKmsg(id, { rc: 0, boot, oom: [{ s: '100.600000', c: 'java' }], en: 1, es: '200.000000' }, at);
   store.ingestKmsg(id, { rc: 0, boot: boot + 1, oom: [{ s: '100.600000', c: 'java' }], en: 0 }, at);
   const ev = store.drainWrites(100).filter((x) => x.kind === 'e');
@@ -187,7 +188,7 @@ test('⑤ 커널 메시지 — 원격 awk(실제 bash) · 파서 · 사건 열�
   assert.deepEqual(c.oom, [{ s: '1.5', c: 'java' }]); assert.equal(c.raw, undefined); assert.equal(c.en, 3);
   assert.equal(edge.cleanSample({ dt: 2, km: { rc: 999, boot: -5 } }).km.rc, null);
   // 이 컨테이너의 실제 dmesg 로 한 번(읽히면 rc 0 · 막히면 rc 1 — 어느 쪽이든 파서가 rc 를 읽는다)
-  const real = spawnSync('bash', ['-c', `KL=-1; KO=$(timeout -s KILL 3 dmesg -x 2>/dev/null | ${awk}; echo "rc \${PIPESTATUS[0]}"); printf '%s\\n' "$KO"`], { encoding: 'utf8' }).stdout;
+  const real = spawnSync('bash', ['-c', `KL=-1; KO=$( { timeout -s KILL 3 dmesg -x 2>/dev/null; echo "##RC $?"; } | ${awk} ); printf '%s\\n' "$KO"`], { encoding: 'utf8' }).stdout;
   assert.ok(P.parseKmsg(real.trim().split('\n')).rc != null, real.slice(0, 200));
 });
 

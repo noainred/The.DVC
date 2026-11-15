@@ -90,8 +90,10 @@ test('① 원격 명령 — 12개 상수 · 목록 밖 값은 기본 · ##SELF �
   // 묶음 위치: 기본은 기본 구획의 끝(v3.12.0 ⑬ 부터 DISK 뒤 VM · SNMP · SOCK · 60초 FS · FSI 까지 — 그 if 블록을 닫는 fi 바로 뒤) ·
   //   구성은 UNIT 바로 뒤 · 프로세스는 IO 바로 뒤(파서 SECTION_GROUP 과 같은 경계)
   const at = (re) => lines.findIndex((l) => re.test(l));
-  assert.equal(at(/ck; CB=/), at(/echo '##FSI'/) + 2);
-  assert.equal(lines[at(/echo '##FSI'/) + 1].trim(), 'fi');
+  // v3.16.0 ⑯: 60초 블록 안에 FSI 뒤 커널 메시지(KMSG) 세 줄이 더 있다 — 묶음 줄은 그 블록을 닫는 fi 바로 뒤
+  const fiAfter = lines.findIndex((l, i) => i > at(/echo '##FSI'/) && l.trim() === 'fi');
+  assert.ok(fiAfter > at(/echo '##KMSG'/) && at(/echo '##KMSG'/) > at(/echo '##FSI'/), 'KMSG 는 같은 60초 블록 안');
+  assert.equal(at(/ck; CB=/), fiAfter + 1);
   for (const sec of ['DISK', 'VM', 'SNMP', 'SOCK', 'FS', 'FSI']) {
     assert.ok(at(new RegExp(`echo '##${sec}'`)) < at(/ck; CB=/), `${sec} 는 기본 묶음 안`);
     assert.equal(P.SECTION_GROUP[sec], 'base', `파서도 ${sec} 를 기본 묶음으로`);

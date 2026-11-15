@@ -73,11 +73,16 @@ const UNIT_AWK = 'awk -F: \'{split($1,a,"/");p=a[3];if(p!~/^[0-9]+$/)next;x=subs
  * v3.16.0(⑯ C2) 커널 메시지 — `dmesg -x`(레벨 표시) 가운데 지난 확인(KL — 부팅 뒤 초) 뒤의 줄만 · **원문은 내보내지 않는다**:
  *   `o <부팅 뒤 초> <프로그램 이름>`(OOM 으로 끝난 프로세스 — 이름은 안전한 글자만 · 20개까지) · `e <줄 수> <마지막 초>`(그 밖 err 이상 — OOM 줄 제외) · `last <초>`(다음 확인의 기준).
  *   일반 계정은 kernel.dmesg_restrict = 0 일 때만 읽는다 — 막히면 dmesg 가 1 로 끝나 `rc 1`(화면 '권한 없음' · 'OOM 없음' 이 아니다).
+ *   반증 반영(v3.16.0): ① OOM 이 20개를 넘으면 **가장 최근 20개**와 `on <전체 수>`(예전에는 가장 오래된 20개만 내고 기준을 가장 새 줄로 옮겨 그 사이 OOM 을 잃었다)
+ *   ② 종료값은 `##RC <값>` 줄을 awk 에 함께 흘려 받는다(bash 의 PIPESTATUS 는 dash · zsh 에서 Bad substitution) ③ 첫 확인(KL = -1 — 새 세션)이면 `f`
+ *   (커널 오류 수는 버퍼 전체라 증분과 섞지 않는다) ④ OOM 판정 문구는 대소문자 무시 · memcg 의 'Kill process' 도 OOM 줄(커널 오류로 세지 않는다 — RHEL 7 문구는 소스 기준 · 실서버 원문 미확인).
+ *   부팅 식별은 `b <boot_id>`(커널이 만든 UUID — 켜진 시각 반올림은 받은 시각에 따라 흔들려 같은 OOM 이 두 사건이 됐다).
  */
 //   시각은 **글자 그대로** 내보낸다(awk 의 숫자 출력은 6자리 — 400.123456 이 400.123 이 되어 다음 확인에서 같은 줄을 또 셌다 · 큰 가동 시간은 지수 표기).
-const KMSG_AWK = 'awk -v L="$KL" \'{if(!match($0,/\\[ *[0-9]+\\.[0-9]+\\]/))next;s=substr($0,RSTART+1,RLENGTH-2);gsub(/ /,"",s);ts=s+0;if(ts>last){last=ts;ls=s}if(ts<=L+0)next;'
-  + 'if(match($0,/Killed process [0-9]+ \\([^)]*\\)/)){x=substr($0,RSTART,RLENGTH);sub(/^[^(]*\\(/,"",x);sub(/\\)$/,"",x);gsub(/[^A-Za-z0-9._:@+-]/,"_",x);if(x=="")x="_";if(no<20)print "o",s,substr(x,1,64);no++;next}'
-  + 'if($0~/Out of memory|oom-kill|oom_reaper/)next;if($0~/^[a-z]+ *:(emerg|alert|crit|err) *:/){ne++;if(ts>lt){lt=ts;lts=s}}}END{print "e",ne+0,(lts==""?0:lts);if(ls!="")print "last",ls}\'';
+const KMSG_AWK = 'awk -v L="$KL" \'{if($0~/^##RC [0-9]+$/){rc=$2;next}if(!match($0,/\\[ *[0-9]+\\.[0-9]+\\]/))next;s=substr($0,RSTART+1,RLENGTH-2);gsub(/ /,"",s);ts=s+0;if(ts>last){last=ts;ls=s}if(ts<=L+0)next;'
+  + 'if(match($0,/Killed process [0-9]+ \\([^)]*\\)/)){x=substr($0,RSTART,RLENGTH);sub(/^[^(]*\\(/,"",x);sub(/\\)$/,"",x);gsub(/[^A-Za-z0-9._:@+-]/,"_",x);if(x=="")x="_";os[no%20]=s;oc[no%20]=substr(x,1,64);no++;next}'
+  + 'if($0~/[Oo][Uu][Tt] [Oo][Ff] [Mm][Ee][Mm][Oo][Rr][Yy]|[Oo][Oo][Mm]-[Kk]ill|oom_reaper|Kill process/)next;if($0~/^[a-z]+ *:(emerg|alert|crit|err) *:/){ne++;if(ts>lt){lt=ts;lts=s}}}'
+  + 'END{k=(no>20?no-20:0);for(i=k;i<no;i++)print "o",os[i%20],oc[i%20];if(no>20)print "on",no;print "e",ne+0,(lts==""?0:lts);if(ls!="")print "last",ls;if(L+0<0)print "f";if(rc!="")print "rc",rc}\'';
 const IO_AWK = 'awk \'{split($1,a,"/");p=a[3];if(p!~/^[0-9]+$/)next;if(index($1,"read_bytes"))r[p]=$2;else w[p]=$2}END{for(p in r)if(p in w)print p,r[p],w[p]}\'';
 
 /**
@@ -127,8 +132,8 @@ function build(I, PE = PROC_EVERY_S) {
     `    echo '##FS'; ( timeout -s KILL ${DF_TIMEOUT_S} df -P -l -T -k ${DF_SKIP} 2>/dev/null; echo "rc $?" ) | head -n 258`,
     `    echo '##FSI'; ( timeout -s KILL ${DF_TIMEOUT_S} df -P -l -i ${DF_SKIP} 2>/dev/null; echo "rc $?" ) | head -n 258`,
     // v3.16.0(⑯ C2): 같은 60초마다 커널 메시지 증분(시한 KILL · 원문 없음 · 막히면 rc 1) — KL 은 셸 변수로 다음 확인까지 이어진다
-    `    KO=$(timeout -s KILL ${DF_TIMEOUT_S} dmesg -x 2>/dev/null | ${KMSG_AWK}; echo "rc \${PIPESTATUS[0]}")`,
-    "    echo '##KMSG'; printf '%s\\n' \"$KO\" | head -n 24",
+    `    KO=$( { timeout -s KILL ${DF_TIMEOUT_S} dmesg -x 2>/dev/null; echo "##RC $?"; } | ${KMSG_AWK} )`,
+    "    echo '##KMSG'; printf '%s\\n' \"$KO\" | head -n 25; echo \"b $(tr -cd '0-9a-f-' </proc/sys/kernel/random/boot_id 2>/dev/null | cut -c1-36)\"",
     "    KN=$(printf '%s\\n' \"$KO\" | awk '$1==\"last\"{print $2}' | tail -n 1); [ -n \"$KN\" ] && KL=$KN",
     '  fi',
     ckAdd('CB', '  '),

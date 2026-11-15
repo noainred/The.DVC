@@ -235,13 +235,18 @@ api.post('/tools/focus-mon/groups', adminOnly, fullRwOnly, demoBlockWrite, (req,
 });
 api.put('/tools/focus-mon/groups/:name', adminOnly, fullRwOnly, demoBlockWrite, (req, res) => {
   if (registryUnreadable(res)) return;
+  if (alertRulesUnreadable(res)) return; // v3.16.0 ⑯ 반증 M11 — 그룹 대상 알림 규칙도 같이 바꾼다(못 읽으면 둘 다 바꾸지 않는다)
   const r = registry.renameGroup(req.params.name, req.body?.name);
   if (!r.ok) return res.status(groupStatus(r)).json(r);
-  logAudit({ user: req.user?.username, action: 'focus-mon.group.rename', target: r.group, detail: `${String(req.params.name).slice(0, 32)} → ${r.group} · 서버 ${r.moved}대`, ip: req.ip });
-  res.json(r);
+  const ar = r.moved >= 0 && r.group !== String(req.params.name) ? AL.renameGroupInRules(String(req.params.name), r.group) : { ok: true, n: 0 };
+  logAudit({ user: req.user?.username, action: 'focus-mon.group.rename', target: r.group, detail: `${String(req.params.name).slice(0, 32)} → ${r.group} · 서버 ${r.moved}대${ar.n ? ` · 알림 규칙 ${ar.n}개` : ''}`, ip: req.ip });
+  res.json({ ...r, rules: ar.n || 0 });
 });
 api.delete('/tools/focus-mon/groups/:name', adminOnly, fullRwOnly, demoBlockWrite, (req, res) => {
   if (registryUnreadable(res)) return;
+  if (alertRulesUnreadable(res)) return;
+  const using = AL.rulesUsingGroup(req.params.name); // 반증 M11 — 그 그룹을 쓰는 알림 규칙이 있으면 지우지 않는다(규칙이 아무 서버도 덮지 않게 되므로)
+  if (using.length) return res.status(409).json({ ok: false, code: 'group-in-rules', reason: `이 그룹을 대상으로 하는 알림 규칙 ${using.length}개가 있습니다 — 규칙의 대상을 먼저 바꾸거나 지우세요.`, rules: using.map((x) => x.name).slice(0, 10) });
   const r = registry.deleteGroup(req.params.name);
   if (!r.ok) return res.status(groupStatus(r)).json(r);
   logAudit({ user: req.user?.username, action: 'focus-mon.group.remove', target: String(req.params.name).slice(0, 32), detail: `서버 ${r.freed}대는 그룹 없음으로`, ip: req.ip });
@@ -662,6 +667,13 @@ api.get('/tools/focus-mon/procs', adminOnly, fullScopeOnly, async (req, res) => 
 });
 
 /* ── 알림 · OOM · 자동 조절(v3.16.0 ⑯ — 시안 Alerts · 컨펌 ①~⑥ 기본값) ─────────────────────── */
+/** 데모 계정의 알림 기록 글 — 규칙 이름 · 앱 이름을 가린다(반증 M9 — 지운 규칙의 이름도: 규칙 목록이 아니라 글 모양으로). 글은 '<이름> — <조건> · …' 꼴. */
+function maskAlertText(text) {
+  let t = String(text || '');
+  const i = t.indexOf(' — ');
+  if (i >= 0) t = `규칙${t.slice(i)}`;
+  return t.replace(/\([A-Za-z0-9@._:-]{1,96}\.(service|scope)\)/g, '(서비스.service)');
+}
 function alertRulesUnreadable(res) {
   const e = AL.rulesLoadError();
   if (!e) return false;
@@ -670,25 +682,36 @@ function alertRulesUnreadable(res) {
 }
 /** 알림 탭 — 규칙 · 지금 상태 · 지난 24시간 발생 · 해제 · 보류 · OOM · 커널 오류 표 · 자동 조절. 조회와 같은 문(admin + 전체 범위) · 보이는 대상만. */
 api.get('/tools/focus-mon/alerts', adminOnly, fullScopeOnly, async (req, res) => {
+  if (alertRulesUnreadable(res)) return; // 반증 M8 — 손상이면 200 + 빈 목록이 아니라 503(빈 목록을 '규칙 없음' 으로 보이지 않게)
   const now = Date.now();
   const vis = visibleById(req);
+  const demo = isDemoGuest(req.user);
   const rules = AL.loadRules();
   const st = AL.loadState();
   const stateRows = Object.entries(st).map(([k, v]) => { const [rid, tid] = k.split('|'); return { rule: rid, target: tid, ...v }; }).filter((x) => vis.has(x.target));
-  const ruleView = rules.filter((r) => !isDemoGuest(req.user) || r.scope.kind !== 'server' || vis.has(r.scope.target)).map((r) => ({ ...r, cond: AL.condText(r),
-    firing: stateRows.filter((x) => x.rule === r.id && x.state === 'firing').length, hold: stateRows.filter((x) => x.rule === r.id && x.state === 'hold').length,
-    covered: stateRows.filter((x) => x.rule === r.id).length, ...(isDemoGuest(req.user) ? { createdBy: '' } : {}) }));
+  // 반증 M9: 데모 계정에는 사람이 쓴 규칙 이름 · 그룹 이름 · 서비스 이름을 싣지 않는다(본 화면 groupsView 와 같은 규칙) — 조건의 종류 · 문턱 · 지속만
+  const ruleView = rules.filter((r) => !demo || r.scope.kind !== 'server' || vis.has(r.scope.target)).map((r, i) => {
+    const counts = { firing: stateRows.filter((x) => x.rule === r.id && x.state === 'firing').length, hold: stateRows.filter((x) => x.rule === r.id && x.state === 'hold').length,
+      covered: stateRows.filter((x) => x.rule === r.id).length };
+    if (!demo) return { ...r, cond: AL.condText(r), ...counts };
+    const masked = { ...r, name: `규칙 ${i + 1}`, createdBy: '', scope: r.scope.kind === 'group' ? { kind: 'group', group: '그룹' } : r.scope, ...(r.app ? { app: '서비스.service' } : {}) };
+    return { ...masked, cond: AL.condText(masked), ...counts };
+  });
   const ev = await db.readEventsOfKinds(now - 86_400_000, now + 60_000, ['alert', 'oom', 'kerr', 'tune'], 3000);
-  const evs = (ev || []).filter((e) => vis.has(e.target));
+  const evs = (ev || []).filter((e) => vis.has(e.target)).map((e) => (demo && e.kind === 'alert' ? { ...e, text: maskAlertText(e.text) } : e));
   const recordIds = new Set(store.listSessions(now).filter((x) => x.mode === 'record').flatMap((x) => x.targets));
   const kmsg = [...vis.values()].filter((t) => recordIds.has(t.id) || evs.some((e) => e.target === t.id && (e.kind === 'oom' || e.kind === 'kerr'))).map((t) => {
     const k = store.kmsgOf(t.id); const ooms = evs.filter((e) => e.target === t.id && e.kind === 'oom');
     const kerr = evs.filter((e) => e.target === t.id && e.kind === 'kerr').reduce((a, e) => a + (Number(/(\d+)줄/.exec(e.text)?.[1]) || 0), 0);
-    return { id: t.id, name: t.name, read: k ? (k.rc === 0 ? 'ok' : k.rc === 137 ? 'timeout' : 'denied') : null, readAt: k?.at ?? null,
-      oom: ooms.length, lastOom: ooms[0] ? { at: ooms[0].at, text: ooms[0].text } : null, kerr };
+    // OOM 수 — '그 밖 N건' 줄은 N 으로(한 번에 20건을 넘은 증분) · 마지막 OOM 은 실제 줄
+    const oomN = ooms.reduce((a, e) => a + (Number(/그 밖 (\d+)건/.exec(e.text)?.[1]) || 1), 0);
+    const lastReal = ooms.find((e) => !/그 밖 \d+건/.test(e.text)) || ooms[0];
+    // 읽기: rc 0 = 읽음 · 137 = 시한 · 1~255 = 권한 없음(dmesg 가 실패) · rc 를 모르면(줄이 없음) null — '권한 없음' 으로 단정하지 않는다(반증 L3)
+    const read = !k ? null : k.rc === 0 ? 'ok' : k.rc === 137 ? 'timeout' : Number.isInteger(k.rc) ? 'denied' : null;
+    return { id: t.id, name: t.name, read, readAt: k?.at ?? null, oom: ev == null ? null : oomN, lastOom: lastReal ? { at: lastReal.at, text: lastReal.text } : null, kerr: ev == null ? null : kerr };
   });
   const settings = registry.getSettings();
-  res.json({ ok: true, now, lastCycleAt: AL.lastCycle(), rules: ruleView, states: stateRows, history: evs.filter((e) => e.kind === 'alert').slice(0, 300), kmsg,
+  res.json({ ok: true, now, lastCycleAt: AL.lastCycle(), rules: ruleView, states: stateRows, history: evs.filter((e) => e.kind === 'alert').slice(0, 300), kmsg, eventsUnreadable: ev == null,
     tune: { enabled: !!settings.autoTune, warnPct: settings.loadWarnPct, base: settings.procEvery, recent: recentTunes().filter((x) => vis.has(x.id)) },
     metrics: Object.fromEntries(Object.entries(AL.METRICS).map(([k, m]) => [k, { label: m.label, unit: m.unit, op: m.op, range: m.range }])),
     limits: { maxRules: AL.MAX_RULES, dur: AL.DUR_CHOICES, severities: AL.SEVERITIES, scopes: AL.SCOPE_KINDS, holdAfterS: AL.HOLD_AFTER_MS / 1000, resolveMargin: AL.RESOLVE_MARGIN },
@@ -712,7 +735,7 @@ api.post('/tools/focus-mon/alerts/preview', adminOnly, fullScopeOnly, async (req
   const body = req.body || {};
   const id = String(body.target || '');
   if (!visibleById(req).has(id)) return res.status(404).json({ ok: false, code: 'not-found', reason: '없는 서버입니다.' });
-  const r = AL.normalizeRule({ name: 'preview', ...(body.rule || {}), scope: { kind: 'server', target: id } });
+  const r = AL.normalizeRule({ ...(body.rule || {}), name: 'preview', scope: { kind: 'server', target: id } }); // 이름은 저장하지 않는다 — 폼의 빈 이름이 미리 보기를 막지 않게(반증 L4)
   if (!r.ok) return res.status(400).json(r);
   if (r.rule.metric === 'app') return res.json({ ok: true, unsupported: true, reason: '필수 앱 규칙은 1분 요약이 없어 미리 보기를 하지 않습니다.' });
   const now = Date.now();

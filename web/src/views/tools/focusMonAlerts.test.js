@@ -1,7 +1,7 @@
 // v3.16.0 ⑯ 서버 집중 모니터링 알림 · OOM · 자동 조절 — 순수 함수 · 화면 소스(시안 Alerts · 사용자 "기본값대로 모두 구현해줘").
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
-import { scopeText, nowText, thresholdIssue, previewText, kerrText, READ_TEXT } from './focusMonAlertsText.js';
+import { scopeText, nowText, thresholdIssue, previewText, kerrText, kmCell, READ_TEXT } from './focusMonAlertsText.js';
 import { TABS } from './focusMonText.js';
 
 const read = (p) => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
@@ -25,6 +25,10 @@ describe('알림 글', () => {
     expect(previewText({ coveredMin: 1440, count: 2 })).toMatch(/2번 발생했을 것입니다\(추정/);
     expect(previewText({ unsupported: true, reason: 'x' })).toBe('x');
     expect(kerrText(null)).toBe('—'); expect(kerrText(0)).toBe('없음'); expect(kerrText(3)).toBe('3줄');
+    // 반증 L5 — 읽지 못했으면(권한 없음 · 응답 없음 · 아직 모름) 0 · '없음' 이 아니라 '—' · DB 를 못 읽었으면(null) '—'
+    for (const rd of ['denied', 'timeout', null]) { expect(kmCell(rd, 0, 'oom')).toBe('—'); expect(kmCell(rd, 0, 'kerr')).toBe('—'); }
+    expect(kmCell('ok', 0, 'oom')).toBe('0'); expect(kmCell('ok', 0, 'kerr')).toBe('없음');
+    expect(kmCell('timeout', 2, 'oom')).toBe('2'); expect(kmCell('ok', null, 'oom')).toBe('—'); expect(kmCell('ok', 5, 'kerr')).toBe('5줄');
   });
 });
 

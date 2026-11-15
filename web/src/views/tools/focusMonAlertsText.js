@@ -41,3 +41,12 @@ export function previewText(p) {
 }
 /** 커널 오류 줄 수 글. */
 export function kerrText(v) { const x = n(v); return x == null ? DASH : x === 0 ? '없음' : `${x}줄`; }
+/**
+ * OOM · 커널 오류 칸(반증 L5) — 커널 메시지를 읽지 못했으면(권한 없음 · 응답 없음 · 아직 모름) 0 · '없음' 이 아니라 '—'(기록이 있으면 그 수) ·
+ * 기록 DB 를 못 읽었으면(null) '—'. kind = 'oom' | 'kerr'.
+ */
+export function kmCell(read, v, kind = 'oom') {
+  const x = n(v);
+  if (x == null || (read !== 'ok' && x === 0)) return DASH;
+  return kind === 'kerr' ? kerrText(x) : String(x);
+}

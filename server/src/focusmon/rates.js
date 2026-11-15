@@ -265,7 +265,7 @@ export function fsMaxOf(fs) {
  * 반증 F10: 새 칸 가운데 null 은 싣지 않는다(DB 묶음 크기 — 읽는 쪽은 모두 `?? null`).
  */
 const NEW_KEYS = Object.freeze(['us', 'sy', 'pp', 'pc', 'sv', 'ns', 'ni', 'st', 'vsz', 'mf', 'io', 'rb', 'wb', 'sk']);
-export function topProcs(prevList, curList, { dt, tck, page, ncpu, up, users, units, io, prevIo, dacct = null, usersUp = null, unitsUp = null } = {}) {
+export function topProcs(prevList, curList, { dt, tck, page, ncpu, up, users, units, io, prevIo, dacct = null, usersUp = null, unitsUp = null, withAll = false } = {}) {
   if (!Array.isArray(prevList) || !Array.isArray(curList) || !(dt > 0) || !(tck > 0)) return null;
   const before = new Map(prevList.map((p) => [p.pid, p]));
   const rows = [];
@@ -311,7 +311,7 @@ export function topProcs(prevList, curList, { dt, tck, page, ncpu, up, users, un
     for (const k of NEW_KEYS) if (row[k] == null) delete row[k];
     return row;
   });
-  const apps = appGroups(curList, rows, { tck, dt, page: pg, users, units, io, prevIo, usersUp, unitsUp });
+  const apps = appGroups(curList, rows, { tck, dt, page: pg, users, units, io, prevIo, usersUp, unitsUp, withAll });
   return { n: curList.length, top: out, da: dacct === true ? true : dacct === false ? false : null, ...(apps ? { apps } : {}) };
 }
 
@@ -323,6 +323,8 @@ export function topProcs(prevList, curList, { dt, tck, page, ncpu, up, users, un
  *  · 합: 프로세스 수 · 스레드 · CPU(코어 1개 = 100% · 두 표본에 다 있던 프로세스만) · RSS(MB — 공유 메모리를 여러 번 센다) ·
  *    디스크 읽기 · 쓰기(MB/s — /proc/<pid>/io 를 읽은 프로세스만 · 다 읽었으면 io 'all' · 일부면 'part' · 못 읽었으면 값 null).
  *  · 기준마다 CPU 순 상위 `APP_TOP`(20).
+ *  · `all`(v3.16.0 ⑯ 반증 H1): 서비스 이름 → 프로세스 수 전부(상한 APP_ALL_MAX · 수집기가 약 20초마다만 싣는다 — 메모리) — 필수 앱 알림이 상위 20 밖의
+ *    조용한 서비스 · 죽은 서비스(목록에 없음 = 0)를 가른다. 서비스 지도가 없으면 싣지 않는다(모름). DB 에는 남기지 않는다(알림 판정 전용).
  */
 export const APP_TOP = 20;
 export const APP_KERNEL = '커널 스레드';
@@ -335,7 +337,9 @@ export function appServiceKey(unit, ppid, pid) {
   if (pid === 2 || ppid === 2) return APP_KERNEL;
   return APP_NOSVC;
 }
-export function appGroups(curList, rows, { tck, dt, page = 4096, users, units, io, prevIo, usersUp = null, unitsUp = null } = {}) {
+/** 서비스마다 프로세스 수(상위 20 과 따로 — 반증 H1: 필수 앱 규칙은 조용한 서비스도 세어야 한다). 이름이 서비스인 것만 · 상한. */
+export const APP_ALL_MAX = 400;
+export function appGroups(curList, rows, { tck, dt, page = 4096, users, units, io, prevIo, usersUp = null, unitsUp = null, withAll = false } = {}) {
   if (!Array.isArray(curList) || !curList.length || !(tck > 0) || !(dt > 0)) return null;
   const cpu = new Map(); for (const r of rows || []) cpu.set(r.p.pid, r.cpu);
   const after = (mapUp, p) => mapUp != null && p.start != null && p.start / tck > mapUp;
@@ -365,7 +369,13 @@ export function appGroups(curList, rows, { tck, dt, page = 4096, users, units, i
     if (!row.u) delete row.u;
     return row;
   });
-  return { sv: haveUnits ? fin(acc.sv) : null, cm: fin(acc.cm) };
+  let all = null;
+  if (withAll && haveUnits) {
+    all = {};
+    let k = 0;
+    for (const g of acc.sv.values()) { if (g.k === APP_KERNEL || g.k === APP_SESSION || g.k === APP_NOSVC) continue; if (k >= APP_ALL_MAX) break; all[g.k] = g.n; k += 1; }
+  }
+  return { sv: haveUnits ? fin(acc.sv) : null, cm: fin(acc.cm), ...(all ? { all } : {}) };
 }
 
 /** 개요 카드 요약(서버 1대 · 표본 1개) — 화면 · 비교 · 정렬이 같은 값을 쓴다. */

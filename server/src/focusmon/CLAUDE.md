@@ -52,8 +52,8 @@
   가장 변했나 `changes.js` 는 두 구간 **같은 출처**(단추로만) · 링크는 해시 끝 ‘@’ 칸(물음표 금지 — 앱이 첫 두 칸으로 도구를 고른다).
 - **앱 단위 묶음(v3.15.0 ⑮)** — 상세 `docs/rules/focusmon.md` · 회귀 `focusMonApps3140`. 원격 명령 추가 없음 · 코어 `rates.appGroups` · 열쇠 `appServiceKey`/`appNameOf` 하나(펼침도) ·
   서비스 지도가 없으면 서비스 기준 null · 지도 뒤 시작한 프로세스에 옛 서비스 금지 · 못 읽은 디스크 null · DB 는 분마다 마지막 표본만 · 엣지 `cleanApps` · 계정 이름은 관리자 판본만.
-- **알림 · OOM · 자동 조절(v3.16.0 ⑯)** — 상세 `docs/rules/focusmon.md` · 회귀 `focusMonAlerts3160`. 코어 `alerts.judge`(지속 내내 · 덮어야 · 못 읽으면 **보류** · 해제 여유 5%) ·
-  중앙만 판정 · 계속 수집만 · 정비 창 억제 · 목 모드 발송 금지 · 규칙 쓰기 = 수집 시작 문 + 503 + 감사 · `dmesg -x` 증분은 **원문 없이** · 엣지 `cleanKm` · 자동 조절 `tune.decide`(기본 꺼짐).
+- **알림 · OOM · 자동 조절(v3.16.0 ⑯)** — 상세 `docs/rules/focusmon.md` · 회귀 `focusMonAlerts3160` · `…Fix3160`. 코어 `alerts.judge`(지속 내내 · 덮어야 · 못 읽으면 **보류** · 조용함은 보류 아님) ·
+  중앙만 판정 · 계속 수집만 · 정비 창은 `maintMatch`(DataCenter → vCenter) · 목 모드 발송 금지 · 규칙 503 + 감사 · `dmesg -x` **원문 없이** · boot_id 열쇠 · 엣지 `cleanKm` 50초 · `tune.decide`(설정이 하한).
 - **디스크 점검(v3.11.0 — 사용자 '배드섹터 점검 프로그램 추가' + 원문 · '법인별 · 모델별로' · '기본값대로 모두 구현')** — 이 폴더의 **유일한 sudo 예외**(사용자 승인: 고정 설치 + sudoers 한 줄).
   상세 `docs/rules/focusmon.md` · 설계 `docs/design/focus-mon/README.md` §20 · 회귀 `focusMonAudit3110` · web `focusMonAudit`. **되돌리면 안 되는 것**:
   ① 받은 프로그램 `audit/rhel_disk_audit.py` 는 **한 바이트도 고치지 않는다**(sha256 = 판본 · 고치면 전 서버 재설치) — 덧붙일 일은 감싸는 실행 파일 `WRAPPER_TEXT` 에(인자 거절 · 임시 폴더 · 시한 KILL · nice/ionice · 디스크 목록).
