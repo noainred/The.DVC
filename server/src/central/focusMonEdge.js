@@ -81,7 +81,7 @@ export function cleanSample(s) {
     })).filter((r, i, a) => r.m && a.findIndex((y) => y.m === r.m) === i),
   } : null;
   return {
-    dt: n(s.dt), cpu, mem, net, dsk, dtot, nPhys: n(s.nPhys),
+    dt: n(s.dt), up: pos(s.up, 1e10), cpu, mem, net, dsk, dtot, nPhys: n(s.nPhys),
     load: Array.isArray(s.load) ? [n(s.load[0]), n(s.load[1]), n(s.load[2])] : null, run: n(s.run), blk: n(s.blk), thr: n(s.thr),
     sched, vmp, tcp, ...(pst ? { pst } : {}), ...(fs ? { fs } : {}),
   };

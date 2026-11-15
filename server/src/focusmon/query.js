@@ -17,6 +17,8 @@ import { createYielder } from '../util/timeSlice.js';
 import { pushAll } from '../util/pushAll.js';
 
 export const WINDOWS = Object.freeze([1, 5, 10, 30]);
+/** v3.13.0(⑭ 컨펌 ①) 긴 구간(분) — 1시간 · 6시간 · 24시간 · 7일 · 30일. 데이터 · 비교 · 서버 상세만 받는다(프로세스 · iostat 비교 · 수집 부하는 원본 구간만). */
+export const LONG_WINDOWS = Object.freeze([60, 360, 1440, 10080, 43200]);
 export const MAX_POINTS = 150;
 export const OVERVIEW_POINTS = 90;
 const LRU_MAX = 600;
@@ -25,14 +27,14 @@ const lru = new Map();
 const isNum = (x) => typeof x === 'number' && Number.isFinite(x);
 const r2 = (v) => (v == null ? null : Math.round(v * 100) / 100);
 
-/** 구간 정규화. end 가 지금에 가까우면(2초 안) 최근 구간으로 본다. */
-export function normWindow({ win, end } = {}, now = Date.now()) {
-  const w = WINDOWS.includes(Number(win)) ? Number(win) : 5;
+/** 구간 정규화. end 가 지금에 가까우면(2초 안) 최근 구간으로 본다. long 이면 긴 구간도 받는다(아니면 목록 밖 = 5분). */
+export function normWindow({ win, end } = {}, now = Date.now(), { long = false } = {}) {
+  const w = WINDOWS.includes(Number(win)) || (long && LONG_WINDOWS.includes(Number(win))) ? Number(win) : 5;
   let e = end == null || end === '' ? null : Number(end);
   if (e != null && (!Number.isFinite(e) || e > now - 2_000)) e = null;
   if (e != null && e < now - 120 * 86_400_000) e = now - 120 * 86_400_000;
   const to = e ?? now;
-  return { win: w, end: e, from: to - w * 60_000, to, past: e != null };
+  return { win: w, end: e, from: to - w * 60_000, to, past: e != null, long: LONG_WINDOWS.includes(w) };
 }
 
 /** 묶음 읽기 도우미 — 열린 묶음(배열)과 닫힌 묶음(Float32 · NaN = null)을 같은 모양으로 읽는다. */
@@ -109,16 +111,17 @@ export function sampleSpacing(pos) {
 export function bucketize(pos, key, from, to, points, { fixed = false } = {}) {
   const n = fixed ? Math.max(1, points) : pointsFor(pos, from, to, points);
   const step = (to - from) / n;
-  const sum = new Float64Array(n); const cnt = new Uint16Array(n); const mx = new Array(n).fill(null);
+  const sum = new Float64Array(n); const cnt = new Uint16Array(n); const mx = new Array(n).fill(null); const mn = new Array(n).fill(null);
   for (const [b, i, t] of pos) {
     const v = val(b, key, i);
     if (v == null) continue;
     const k = Math.min(n - 1, Math.max(0, Math.floor((t - from) / step)));
     sum[k] += v; cnt[k] += 1;
     if (mx[k] == null || v > mx[k]) mx[k] = v;
+    if (mn[k] == null || v < mn[k]) mn[k] = v;
   }
   const avg = new Array(n); for (let k = 0; k < n; k++) avg[k] = cnt[k] ? r2(sum[k] / cnt[k]) : null;
-  return { avg, max: mx.map(r2) };
+  return { avg, max: mx.map(r2), min: mn.map(r2) };
 }
 
 /** 한 서버의 칸 수 — 칸 폭이 표본 간격의 1.5배 이상이 되게(bucketize 규칙). 간격을 모르면 points. */
@@ -298,7 +301,7 @@ export async function compare(ids, w, { metric = 'cpu', item = 'pct', scope = 'a
 }
 
 /** 서버 상세 — 차트 · 표(끝 순간 또는 구간 평균) · 고른 장치의 처리량 · 지연. */
-export async function serverDetail(id, w, { at = 'end', dev = '' } = {}) {
+export async function serverDetail(id, w, { at = 'end', dev = '', cmp = '' } = {}) {
   const { blocks, partial } = await blocksFor(id, w.from, w.to);
   const pos = positions(blocks, w.from, w.to);
   const lp = lastPos(pos);
@@ -328,9 +331,24 @@ export async function serverDetail(id, w, { at = 'end', dev = '' } = {}) {
   // 파일시스템 표는 구간 안 마지막 확인(끝 순간 표본에 없을 수 있다 — 60초마다)
   let fsLast = null;
   for (let k = pos.length - 1; k >= 0 && !fsLast; k--) { const [b, i, t] = pos[k]; if (val(b, 'f.rc', i) != null || val(b, 'f.age', i) != null) { const sm = sampleAt(b, i); fsLast = sm.fs ? { ...sm.fs, at: t - (sm.fs.age ?? 0) * 1000 } : null; } }
+  // v3.13.0(⑭): CPU 사용률 띠(칸 안 최저 ~ 최고) · 겹쳐 보기(하루 · 이레 앞 같은 칸 수 — 그때 수집 안 한 칸은 null)
+  const cpuB = bucketize(pos, 'c.pct', w.from, w.to, P);
+  charts.band = { min: cpuB.min, max: cpuB.max, avg: cpuB.avg };
+  let overlay = null;
+  const shift = cmp === '1d' ? 86_400_000 : cmp === '7d' ? 7 * 86_400_000 : 0;
+  if (shift) {
+    const sh = await blocksFor(id, w.from - shift, w.to - shift);
+    const sp = positions(sh.blocks, w.from - shift, w.to - shift);
+    // 그때 표본이 더 성길 수 있다(계속 수집은 보는 화면이 없으면 10초) — 그때 표본에 맞는 칸 수로 묶은 뒤 지금 칸 수로 늘인다(반증 F6:
+    //   지금 칸 수에 고정하면 10초 표본이 2초 칸에 하나 걸러 들어가 점선이 그려지지 않았다)
+    const n = cpuB.avg.length;
+    const m = Math.max(1, Math.min(n, pointsFor(sp, w.from - shift, w.to - shift, n)));
+    const stretch = (arr) => (m === n ? arr : Array.from({ length: n }, (_, k) => arr[Math.min(m - 1, Math.floor((k * m) / n))]));
+    overlay = { cmp, cpu: stretch(bucketize(sp, 'c.pct', w.from - shift, w.to - shift, m, { fixed: true }).avg), mem: stretch(bucketize(sp, 'm.pct', w.from - shift, w.to - shift, m, { fixed: true }).avg) };
+  }
   return {
     id, n: pos.length, firstAt: pos.length ? pos[0][2] : null, lastAt: lp ? lp[2] : null, coverMs: table?.coverMs ?? null, at, table, summary: summarize(table), charts: { ...charts, ext }, dev: devChart, points: P, sparkPoints: SP, partial, hello: store.helloOf(id),
-    fs: fsLast, fill: await fillEstimate(id, { rows: fsLast?.rows || [] }),
+    fs: fsLast, fill: await fillEstimate(id, { rows: fsLast?.rows || [] }), overlay,
   };
 }
 

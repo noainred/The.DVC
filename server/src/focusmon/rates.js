@@ -211,6 +211,7 @@ export function computeSample(prev, cur, ctx = {}) {
 
   return {
     dt: okDt ? dt : null,
+    up: Number.isFinite(cur?.up) ? cur.up : null, // v3.13.0 ⑭ 가동 시간(초) — 줄면 재부팅 사건(store)
     cpu: cpuAll ? { ...cpuAll, cores } : null,
     load: cur?.load?.load || null, run: cur?.stat?.running ?? null, blk: cur?.stat?.blocked ?? null, thr: cur?.load?.threads ?? null,
     mem, net, dsk, dtot: total, nPhys: phys.length,

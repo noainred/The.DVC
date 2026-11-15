@@ -13,6 +13,7 @@ import path from 'node:path';
 import * as store from './store.js';
 import * as db from './db.js';
 import { getSettings } from './registry.js';
+import { markDirty, rollupTick } from './rollup.js'; // v3.13.0 ⑭ 요약 표
 
 const MIN_FREE_BYTES = 2 * 2 ** 30;
 const MIN_FREE_RATIO = 0.05;
@@ -49,11 +50,13 @@ export async function recordTick(now = Date.now()) {
       const rows = store.drainWrites(400);
       if (rows.length) {
         const r = await db.writeBlocks(rows);
+        if (r.ok) { for (const x of rows) if (x.kind === 's1') markDirty(x.target, x.minute); } // v3.13.0 ⑭ 1시간 요약 할 일
         if (r.ok) { st.bytesWritten += rows.reduce((a, x) => a + rowBytes(x), 0); st.lastWriteAt = now; st.lastWriteRows = rows.length; st.lastWriteMs = Math.round(r.ms * 100) / 100; st.maxWriteMs = Math.max(st.maxWriteMs, r.ms); st.writes += 1; st.lastError = ''; }
         else { st.errors += 1; st.lastError = r.error || ''; }
       }
     }
     tick += 1;
+    if (tick % 6 === 0 && !st.paused) await rollupTick(now); // v3.13.0 ⑭ 끝난 시간의 1시간 요약(1분마다)
     if (tick % 30 === 0) await housekeep(now);
   } finally { busy = false; }
   return st;
