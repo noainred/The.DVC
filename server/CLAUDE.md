@@ -82,7 +82,7 @@
 - **8a 정비 창(`bmusage/maint/*` · `routes/api/bmMaint.js`)**: 억제를 **늘리는** 쓰기(법인 · 태그 · 12h 초과 창 만들기 · 고치기 전/후 · 재확인)는 소유자 등급(`isOwnerTier`), 줄이는 쓰기(지금 끝내기 · 지우기)는 쓰기 범위 ·
   판정은 `maint/judge.js` 하나(서버 · 엣지 · 화면) · **억제에는 시한**(발생 끝 · 길이 상한을 계산에서도 · 반복 92일 재확인 · 엣지 배포본 24h) · 못 읽은 창 파일은 억제가 아니다 ·
   인증 거부(authGuard)는 창과 무관 · 배포 인출은 개별 토큰만 · 엣지는 같은 `normalizeWindow` 로 다시 자른다. **서버 대상 = (법인, 키) 쌍**(판정 · 배포 · 쓰기 — IP 키는 법인끼리 겹친다) ·
-  12h 소유자 규칙은 **같은 서버를 덮는 창 전부(소유자 · 법인 · 태그 창 포함)의 합**(`store.coverNeedsOwner` · 재확인 포함 · approvedBy 는 기록만) · rev 없는 쓰기 409 · 해제 알림은 억제하지 않는다. 상세 `docs/rules/{idrac-server,security-api,edge}.md` 8a 항목.
+  12h 소유자 규칙은 **같은 서버를 덮는 창 전부(소유자 · 법인 · 태그 창 포함)의 합**(`store.coverNeedsOwner` · 재확인 포함 · approvedBy 는 기록만) · rev 없는 쓰기 409 · 해제 알림은 억제하지 않는다 · **재확인은 재확인 라우트 하나**(고치기는 confirmedAt 을 바꾸지 않는다 — 점검 반복 3회차) · 엣지 배포 history 창은 지난 구간 제외용이라 **지금 판정(억제)에서 뺀다**. 상세 `docs/rules/{idrac-server,security-api,edge}.md` 8a 항목.
 - **SSH exec 안 timeout 합 + 여유 ≤ 그 exec 시한**(8b 반증 F1 — 4 · 5단계부터의 결함): 주 명령은 exec 하나라 넘치면 그 주기 전 구획을 잃는다 — 새 구획 · exec 는 `test/bmTop8bBudget.test.js` 기계 산수를 지킨다(needs-restarting ↔ dnf 한 주기 하나).
 - **8b Top-N · 저활용 · 전력(`bmusage/{parse/linuxTop,topStore,idle,powerAgg}.js` · `routes/api/{bmTop,bmIdle,bmPower}.js`)**: Top-N 은 **같은 세션 별도 exec**(주 명령 밖 · 실패 격리) · **comm 만**(인자 · 환경 · 열린 파일 · kill 없음 —
   top COMMAND 열은 셸 밖으로 내지 않는다) · 줄마다 고정 접두 · awk getline 으로 /proc 을 읽지 않는다(mawk 중단) · 권한 없는 I/O = null · 프로세스 사용자 이름은 관리자 판본만 원문 ·

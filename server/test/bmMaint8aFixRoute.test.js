@@ -56,7 +56,7 @@ async function setup(t) {
 const w = (key, name, schedule, scopes = { alerts: true, hold: true, focus: true }) => ({ name, reason: '상시', tz: 'Asia/Seoul', target: { kind: 'server', keys: [key] }, schedule, scopes });
 const P = '/maintenance';
 
-test('① F5 — 12시간 소유자 규칙은 같은 서버를 덮는 창들의 합(창 2개 · 일회 이어 붙이기 · 고치기 · 재확인 · 이름만 고치기는 예외) · ② 보류가 하루 12시간을 넘지 못한다', async (t) => {
+test('① F5 — 12시간 소유자 규칙은 같은 서버를 덮는 창들의 합(창 2개 · 일회 이어 붙이기 · 고치기 · 재확인 · 이름만 고치기는 예외 — 재확인이 아니라서) · ② 보류가 하루 12시간을 넘지 못한다', async (t) => {
   const { call } = await setup(t);
   // 반증 r4 재현 — 반복 12h × 2 = 매일 24시간
   const a = await call('opA', 'POST', P, w('MTAGA1', '오전', { kind: 'weekly', days: all7, time: '00:00', durMin: 720 }));
@@ -78,10 +78,15 @@ test('① F5 — 12시간 소유자 규칙은 같은 서버를 덮는 창들의 
   const ob = await call('own', 'POST', P, w('MTAGA1', '오후(소유자)', { kind: 'weekly', days: all7, time: '12:00', durMin: 720 }));
   assert.equal(ob.status, 200, JSON.stringify(ob.body));
   // 비소유자가 소유자 창의 일정을 고치면(덮임이 바뀜) 합 규칙 — 24시간이므로 403 · 이름만 고치는 것은 억제를 늘리지 않아 된다(approvedBy 는 기록 — 비워진다)
+  //   ⚠ 정정(점검 반복 3회차 D1): 이 전제는 예전에 틀렸다 — store.editWindow 가 고치기마다 confirmedAt 을 지금으로 잡아 이름만 고쳐도 92일 시한이 다시 잡혔다
+  //   (운영자가 소유자 창의 만료를 연장 · 만료된 창 되살리기). 이제 고치기는 confirmedAt 을 바꾸지 않는다 — 아래에서 그대로인지 본다(재현은 bmUsageLoop3 D1).
   const e = await call('opA', 'PUT', `${P}/${ob.body.id}`, { rev: ob.body.rev, schedule: { kind: 'weekly', days: all7, time: '12:00', durMin: 700 } });
   assert.equal(e.status, 403); assert.equal(e.body.code, 'owner-required');
+  const S0 = await import('../src/bmusage/maint/store.js');
+  const confirmedBefore = S0.getWindow(ob.body.id).confirmedAt;
   const rn = await call('opA', 'PUT', `${P}/${ob.body.id}`, { rev: ob.body.rev, name: '오후 바꿈' });
   assert.equal(rn.status, 200, JSON.stringify(rn.body));
+  assert.equal(S0.getWindow(ob.body.id).confirmedAt, confirmedBefore, '이름만 고치기는 재확인이 아니다(confirmedAt 그대로 — 3회차 D1)');
   // 일회 12h 두 개 이어 붙이기(다른 서버)
   const s0 = NOW + HOUR;
   assert.equal((await call('opA', 'POST', P, w('MTAGA2', '전반', { kind: 'once', start: loc(s0), end: loc(s0 + 12 * HOUR) }))).status, 200);

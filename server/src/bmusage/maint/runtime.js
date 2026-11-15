@@ -5,7 +5,8 @@
  *   · 창 = store.windowsForJudge(이 노드의 창 + 신선한 중앙 배포본)
  *   · 태그 = 이 노드의 수동 용도 태그(insights/fleetTags purposes — role · apps). 엣지는 중앙 태그가 없어 배포본의 펼친 keys 로 맞춘다.
  * 억제 계수(창마다 — 화면 ‘억제 알림 n · 창 뒤 발송 n’)는 이 노드 메모리 + 상태 파일(`maintenance-stats.json` — 원자 쓰기 · 손상 보존 · 손상이면 0 부터 · 그 사실을 표지로).
- * ⚠⚠ ‘창 끝 뒤 억제 0’ 점검(설계 안전장치 — 반증 F8 로 다시 짰다): 억제를 적용할 때마다 근거(창 id · 발생 시작 since · 끝 until)를 기록하고,
+ * ⚠⚠ ‘창 끝 뒤 억제 0’ 점검(설계 안전장치 — 반증 F8 로 다시 짰다): 억제를 적용할 때마다 근거(**창마다** 창 id · 그 창 발생의 시작 since · 끝 until —
+ *   judge.scopeOccOf · 점검 반복 3회차 D3)를 기록하고,
  *   **판정과 독립된 단순 기준**으로만 본다 — ① 적용 시각이 그 발생의 끝(until) 뒤 ② 발생 길이(until − since)가 창 꼴의 상한(일회 24h · 반복 12h) 초과
  *   ③ **캐시 없이 다시 읽은 파일**(store.windowFactsNoCache — 정규화 · 판정을 거치지 않는다)에서 그 창이 적용 시각 전에 지워졌거나 · 끝냈거나 · 재확인이 만료됐거나 ·
  *   배포본이면 받은 지 24시간이 지났음. 대상을 다시 판정하지 않는다(엣지 서버의 법인 창 보류 같은 정당한 보류를 결함으로 세지 않는다).
@@ -16,7 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js';
-import { maintStateFor, coverIntervals, SCOPES, RECUR_CONFIRM_DAYS } from './judge.js';
+import { maintStateFor, coverIntervals, scopeOccOf, SCOPES, RECUR_CONFIRM_DAYS } from './judge.js';
 import { windowsForJudge, windowFactsNoCache, DEPLOY_TTL_MS } from './store.js';
 import { maxMinOf, MIN, DAY } from './schedule.js';
 
@@ -57,7 +58,7 @@ export async function maintJudge({ now = Date.now(), windowsOf = windowsForJudge
   const tg = tagsOf || await tagsReader();
   return {
     windows: w.windows,
-    meta: { localUnreadable: !!w.localUnreadable, deployed: w.deployed, n: w.windows.filter((x) => !x.deleted).length },
+    meta: { localUnreadable: !!w.localUnreadable, deployed: w.deployed, n: w.windows.filter((x) => !x.deleted && !x.history).length },
     stateFor: (target, at = now) => maintStateFor(w.windows, target, at, { tagsOf: tg }),
     /** 구간(합집합 · 지운 창은 지운 시각까지). only(w) — 이 계정에 보이는 창만 같은 거르기. */
     cover: (target, from, to, scope = null, { only = null } = {}) => coverIntervals(w.windows, target, from, to, { scope, tagsOf: tg, only }),
@@ -107,25 +108,37 @@ export function countSuppression(kind, windowIds = [], { now = Date.now() } = {}
     c[kind] = (Number(c[kind]) || 0) + 1; c.at = now;
   }
 }
-/** 억제를 적용했다는 기록(점검용) — 시한(until) · 그 발생의 시작(since — 판정 결과 windows[].start 의 최소) · 적용 시각. */
-export function noteApplied(scope, key, until, windowIds = [], at = Date.now(), { since = null } = {}) {
-  if (_cycle.length < 20_000) _cycle.push({ scope, key: t(key), until: Number(until), since: Number.isFinite(Number(since)) && since != null ? Number(since) : null, at, windowIds: (windowIds || []).slice(0, 8) });
+/**
+ * 억제를 적용했다는 기록(점검용) — 시한(until — 그 범위의 억제 끝) · 적용 시각 · **창마다의 발생 occ**(judge.scopeOccOf — 창 id · 그 창 발생의 시작 · 끝).
+ *   ⚠ 점검 반복 3회차 D3: occ 없이 since(창들 시작의 최소)와 until(끝의 최대)을 한 쌍으로 보면 겹친 창 둘(12h 반복 + 10h 일회)이 20시간 발생으로 보여 거짓 over-cap 이었다.
+ *   occ 를 주지 않은 호출(옛 꼴)은 windowIds 마다 since · until 을 그대로 쓴다.
+ */
+export function noteApplied(scope, key, until, windowIds = [], at = Date.now(), { since = null, occ = null } = {}) {
+  if (_cycle.length >= 20_000) return;
+  const num = (v) => (v != null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
+  const o = Array.isArray(occ) ? occ.filter((x) => x && t(x.id)).slice(0, 8).map((x) => ({ id: t(x.id), since: num(x.since), until: num(x.until) })) : null;
+  _cycle.push({ scope, key: t(key), until: Number(until), since: num(since), at, windowIds: o ? o.map((x) => x.id) : (windowIds || []).slice(0, 8), ...(o ? { occ: o } : {}) });
 }
-/** 판정 결과(maintStateFor)에서 그 범위의 발생 시작(최소) — noteApplied 의 since. */
+/** 판정 결과(maintStateFor)에서 그 범위의 발생 시작(최소). 랙 교집합(perfAlerts.groupMaintState)의 시작을 정할 때 쓴다 — 점검 기록은 scopeOccOf(창마다). */
 export const sinceOf = (ms, scope) => { const s = (ms?.windows || []).filter((w) => (w.scopes || []).includes(scope)).map((w) => Number(w.start)).filter(Number.isFinite); return s.length ? Math.min(...s) : null; };
+/** 창마다의 발생 — judge.scopeOccOf 그대로(호출처가 judge 를 따로 import 하지 않게 다시 내보낸다 · 판정 코어 하나). */
+export { scopeOccOf };
 /**
  * 적용 기록 하나가 ‘창 끝 뒤 억제’ 인가(순수 — 판정과 독립된 단순 기준 · 머리말 ①~③). facts = windowFactsNoCache().byId.
+ *   창마다 **그 창 발생의** 시작 · 끝으로 본다(occ — 3회차 D3). ① 적용 시각이 억제 끝(until — 그 범위를 켠 창들 끝의 최대) 뒤 ② 그 창 발생 길이가 그 창 꼴의 상한 초과
+ *   ③ 파일 사실(지움 · 끝냄(그 창 발생의 시작으로 맞춘다) · 재확인 만료 · 배포본 시한).
  * @returns {string|null} 사유(leak) 또는 null
  */
 export function leakReason(x, facts = new Map()) {
   if (!(Number.isFinite(x?.until) && x.at < x.until)) return 'after-end';
-  for (const id of x.windowIds || []) {
-    const f = facts.get(String(id));
+  const occ = Array.isArray(x.occ) ? x.occ : (x.windowIds || []).map((id) => ({ id, since: x.since, until: x.until }));
+  for (const o of occ) {
+    const f = facts.get(String(o?.id));
     if (!f) continue;   // 파일에 없다(그 사이 정리 · 새 배포본) — 사실로 반박할 수 없어 세지 않는다(unverified)
     const cap = maxMinOf({ kind: f.kind }) * MIN;
-    if (x.since != null && x.until - x.since > cap + MIN) return 'over-cap';
+    if (o.since != null && Number.isFinite(o.until) && o.until - o.since > cap + MIN) return 'over-cap';
     if (f.deleted != null && f.deleted <= x.at) return 'deleted';
-    if (f.endedAt != null && f.endedAt <= x.at && (f.kind === 'once' || (x.since != null && f.endedOccStart === x.since))) return 'ended';
+    if (f.endedAt != null && f.endedAt <= x.at && (f.kind === 'once' || (o.since != null && f.endedOccStart === o.since))) return 'ended';
     if (f.kind !== 'once' && f.confirmedAt != null && f.confirmedAt + RECUR_CONFIRM_DAYS * DAY <= x.at) return 'expired';
     if (f.deployedAt != null && x.at - f.deployedAt > DEPLOY_TTL_MS) return 'deploy-stale';
   }
