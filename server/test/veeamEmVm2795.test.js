@@ -248,3 +248,24 @@ test('H 등록 — .gitignore · 포탈 DB 목록 · DB 안내', async () => {
   const { DB_GUIDE_DATA } = await import('../src/insights/dbGuideData.js');
   assert.ok(DB_GUIDE_DATA['veeam-em-vms.json']?.sources?.includes('server/src/veeam/em/vmStore.js'));
 });
+
+test('전체 점검 12회차(V-30) — 잘린 읽기는 실제로 읽은 가장 오래된 시각까지 기준을 올린다 · 오류로만 미완결이어도 창은 첫 채움을 넘지 않는다', async () => {
+  const since = NOW - 24 * H;
+  const rows = Array.from({ length: 2500 }, (_, i) => ({ VmDisplayName: `vm${i}`, Name: `vm${i}@x`, Result: 'Success', State: 'Stopped', CreationTimeUTC: iso(NOW - i * 30_000), EndTimeUTC: iso(NOW - i * 30_000), ...srvLink('S') }));
+  const fake = { mask: (x) => x, get: async (p) => { const q = new URLSearchParams(p.split('?')[1]); const page = Number(q.get('page')); return { Entities: { X: { X: rows.slice((page - 1) * EC.VM_PAGE, page * EC.VM_PAGE) } } }; } };
+  // 예산이 첫 쪽 뒤 끊긴다 → 그 쪽의 가장 오래된 행 시각이 capFloor
+  let tick = NOW; const clock = () => (tick += 50_000);
+  const r = await EC.readVmBackups(fake, { since, budgetMs: 60_000, clock });
+  assert.equal(r.complete, false);
+  assert.equal(r.capFloor, NOW - (EC.VM_PAGE - 1) * 30_000, '첫 쪽의 가장 오래된 행');
+  assert.equal(r.windowMs, EC.VM_WINDOW_MS);
+  // 합치기: 잘렸으면 since 를 그 시각까지 올린다(예전: 고정 → 창이 날마다 커졌다)
+  VS.mergeEmVms('em-v30', 'tgt', { ...r, since }, { startedAt: NOW });
+  assert.equal(VS.emVmSince('em-v30', 'tgt'), r.capFloor);
+  // 오류로만 미완결(capFloor 없음) — 옛 since 가 첫 채움 창보다 오래됐으면 창으로 자른다
+  VS.mergeEmVms('em-v30b', 'tgt', { since: NOW - 30 * 24 * H, complete: false, capFloor: null, windowMs: EC.VM_WINDOW_MS, tasks: [], points: [] }, { startedAt: NOW });
+  assert.equal(VS.emVmSince('em-v30b', 'tgt'), NOW - EC.VM_WINDOW_MS);
+  // 완결이면 예전 그대로(시작 − 겹침)
+  VS.mergeEmVms('em-v30c', 'tgt', { since, complete: true, tasks: [], points: [] }, { startedAt: NOW });
+  assert.equal(VS.emVmSince('em-v30c', 'tgt'), NOW - VS.OVERLAP_MS);
+});
