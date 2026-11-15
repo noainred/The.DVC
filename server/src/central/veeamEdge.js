@@ -79,7 +79,7 @@ export function saveVeeamEdgeStatus(agent, st, push = null, { clockOffsetMs = 0,
   const pAt = num(p.at);
   _status.set(k, {
     agent: s(String(agent), 64), at: Date.now(),
-    status: { servers: num(x.servers), version: s(x.version, 32) || null, poller: { at: pAt != null && clockOffsetMs ? Math.min(now, Math.max(0, pAt + clockOffsetMs)) : pAt, ok: num(p.ok), fail: num(p.fail), intervalMs: intervalOrNull(p.intervalMs), running: p.running === true } },
+    status: { servers: num(x.servers), version: s(x.version, 32) || null, poller: { at: pAt != null ? Math.min(now, Math.max(0, pAt + (clockOffsetMs || 0))) : null,   /* 전체 점검 4회차 V-9: 보정이 0 이어도 수신 시각으로 자른다(미래 시각 금지) */ ok: num(p.ok), fail: num(p.fail), intervalMs: intervalOrNull(p.intervalMs), running: p.running === true } },
     ...(clockOffsetMs ? { clockOffsetMs } : {}),
     ...(push ? { lastPush: push } : {}),
   });

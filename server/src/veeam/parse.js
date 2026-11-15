@@ -474,7 +474,8 @@ export function sanitizeServerResult(r, now = Date.now(), { maxVms = 20_000, max
     // v2.762(G1): 접속처 지문(registry.accessFingerprint — 16자 hex). 형식이 다르면 싣지 않는다(지문 없음 = 옛 엣지와 같이 취급).
     ...(typeof r.target === 'string' && /^[0-9a-f]{16}$/.test(r.target) ? { target: r.target } : {}),
     notes: (Array.isArray(r.notes) ? r.notes : []).filter((x) => typeof x === 'string').slice(0, 10).map((x) => s(x, 300)),
-    authStop: isObj(r.authStop) ? { since: off ? shift(numOrNull(r.authStop.since)) : numOrNull(r.authStop.since), attempts: numOrNull(r.authStop.attempts), reason: s(r.authStop.reason, 200) } : null,
+    // 전체 점검 4회차 V-9: 보정이 0 이어도 엣지 시각은 수신 시각으로 자른다(ts 와 같은 규칙 — 미래 시각이 진행 상태에 보이던 것)
+    authStop: isObj(r.authStop) ? { since: shift(numOrNull(r.authStop.since)), attempts: numOrNull(r.authStop.attempts), reason: s(r.authStop.reason, 200) } : null,
     jobs, vms, counts, backups,
     ...(isObj(r.license) && sanitizeLicense(r.license) ? { license: sanitizeLicense(r.license) } : {}),   // v2.788 — 화이트리스트(빠뜨리면 엣지 서버의 라이선스가 조용히 사라진다)
   };

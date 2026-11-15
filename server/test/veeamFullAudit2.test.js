@@ -263,3 +263,19 @@ test('⑥ V-7 — 같은 이름 B&R 두 대: 어느 서버로 보낼지 단정�
   const r2 = runStatusOf(vm, { servers: [{ id: 's-a', name: 'VBR-A' }, { id: 's-b', name: 'VBR-B' }], known: true, entry: { rp: 3, lb: Date.now(), servers: ['VBR-B'] } });
   assert.equal(r2.status, 'protected'); assert.equal(r2.serverId, 's-b');
 });
+
+test('⑦ V-9(4회차) — 시계 보정이 0 이어도 엣지가 보낸 poller.at · authStop.since 는 수신 시각으로 자른다', async () => {
+  const { saveVeeamEdgeStatus, veeamEdgeStatus, _resetForTest } = await import('../src/central/veeamEdge.js');
+  const { sanitizeServerResult } = await import('../src/veeam/parse.js');
+  const now = Date.parse('2026-11-15T10:00:00Z');
+  const future = now + 40 * 86_400_000;   // 40일 앞선 엣지 시계(보정 창 밖 — 보정 0)
+  _resetForTest();
+  saveVeeamEdgeStatus('edge-x', { poller: { at: future, ok: 1, fail: 0 } }, null, { clockOffsetMs: 0, now });
+  assert.equal(veeamEdgeStatus('edge-x').status.poller.at, now, 'poller.at 는 미래가 아니다');
+  saveVeeamEdgeStatus('edge-y', { poller: { at: now - 60_000 } }, null, { clockOffsetMs: 0, now });
+  assert.equal(veeamEdgeStatus('edge-y').status.poller.at, now - 60_000, '과거 값은 그대로');
+  const r = sanitizeServerResult({ ok: true, ts: now - 1000, jobs: [], vms: [], authStop: { since: future, attempts: 1, reason: 'x' } }, now, { clockOffsetMs: 0 });
+  assert.equal(r.authStop.since, now, 'authStop.since 도 미래가 아니다');
+  const r2 = sanitizeServerResult({ ok: true, ts: now - 1000, jobs: [], vms: [], authStop: { since: now - 5000, attempts: 1, reason: 'x' } }, now, { clockOffsetMs: 0 });
+  assert.equal(r2.authStop.since, now - 5000);
+});
