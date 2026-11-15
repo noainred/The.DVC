@@ -102,6 +102,20 @@ test('③ 미리 보기 — 1분 요약을 같은 규칙으로 · 요약 없는 
   const p = AL.preview(m([50, 95, 95, 95, 95, 50, 50, 50, 95, 95, null, 95, 95]), r);
   assert.equal(p.count, 1); assert.deepEqual(p.intervals[0], [60_000, 8 * 60_000], '3분 이어진 뒤 발생 · 3분 낮아 해제');
   assert.equal(p.coveredMin, 12);
+  // 요약이 빠진 분(행이 없음 — 수집 공백)도 이어짐을 끊는다
+  const gap = AL.preview([[0, 95], [60_000, 95], [5 * 60_000, 95], [6 * 60_000, 50]], r);
+  assert.equal(gap.count, 0, '두 분 + 공백 + 한 분 — 3분 이어지지 않았다');
+});
+
+test('④ 필수 앱 — 상위 20 밖이면 목록이 꽉 찼을 때 모름(null) · 20개 미만이면 0 으로 확정', () => {
+  const rule = { metric: 'app', app: 'oracle-db.service', durMin: 1 };
+  const now = Date.now();
+  const mk = (sv) => ({ memProcs: () => new Map([[1, [{ t: now - 1000, apps: { sv, cm: [] } }]]]) });
+  const full = Array.from({ length: 20 }, (_, k) => ({ k: `s${k}.service`, n: 1 }));
+  assert.deepEqual(AL.pointsFor(mk(full), rule, 'x', now).map((p) => p[1]), [null], '꽉 찬 목록에 없으면 모름');
+  assert.deepEqual(AL.pointsFor(mk(full.slice(0, 5)), rule, 'x', now).map((p) => p[1]), [0], '목록이 덜 찼는데 없으면 0(죽음)');
+  assert.deepEqual(AL.pointsFor(mk([{ k: 'oracle-db.service', n: 3 }]), rule, 'x', now).map((p) => p[1]), [3]);
+  assert.deepEqual(AL.pointsFor(mk(null), rule, 'x', now).map((p) => p[1]), [null], '서비스 지도 없음 — 모름');
 });
 
 /* ── ④ ── */
@@ -165,6 +179,9 @@ test('⑤ 커널 메시지 — 원격 awk(실제 bash) · 파서 · 사건 열�
   assert.equal(new Set(ev.filter((x) => x.ekind === 'oom').map((x) => x.id)).size, 1, '다시 연결해 같은 OOM 을 받아도 열쇠가 같다');
   assert.equal(ev.find((x) => x.ekind === 'oom').at, (boot + 100.6) * 1000);
   assert.equal(store.kmsgOf(id).rc, 0);
+  // 켜진 시각이 틀려 미래로 가는 사건은 받지 않는다(받은 시각 + 60초 넘게)
+  store.ingestKmsg(id, { rc: 0, boot: Math.round(at / 1000) + 3600, oom: [{ s: '1.000000', c: 'x' }] }, at);
+  assert.equal(store.drainWrites(100).filter((x) => x.kind === 'e').length, 0, '미래 시각 사건 없음');
   // 엣지 정제 — 아는 칸만 · 원문 칸 없음
   const c = edge.cleanSample({ dt: 2, km: { rc: 0, boot, oom: [{ s: '1.5', c: 'java' }, { s: 'x', c: 'a' }, { s: '2', c: 'a b' }], en: 3, es: '9.5', raw: 'SECRET' } }).km;
   assert.deepEqual(c.oom, [{ s: '1.5', c: 'java' }]); assert.equal(c.raw, undefined); assert.equal(c.en, 3);
