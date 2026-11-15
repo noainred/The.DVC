@@ -69,6 +69,15 @@ const PROC_AWK = 'awk \'function e(  s,p,q,o,c,n,f,a,sp){if(cf!~/^\\/proc\\/[0-9
 const UNIT_AWK = 'awk -F: \'{split($1,a,"/");p=a[3];if(p!~/^[0-9]+$/)next;x=substr($0,length($1)+length($2)+length($3)+4);n=split(x,b,"/");u="";'
   + 'for(i=1;i<=n;i++)if(b[i]~/\\.(service|scope)$/){u=b[i];break}if(u=="")next;gsub(/[^A-Za-z0-9@._:-]/,"_",u);print p,substr(u,1,96)}\'';
 /** 입출력 줄(v2.981): `pid readBytes writeBytes` — grep 이 읽을 수 있었던 /proc/<pid>/io 두 줄을 하나로. 읽기 · 쓰기 둘 다 있을 때만. */
+/**
+ * v3.16.0(⑯ C2) 커널 메시지 — `dmesg -x`(레벨 표시) 가운데 지난 확인(KL — 부팅 뒤 초) 뒤의 줄만 · **원문은 내보내지 않는다**:
+ *   `o <부팅 뒤 초> <프로그램 이름>`(OOM 으로 끝난 프로세스 — 이름은 안전한 글자만 · 20개까지) · `e <줄 수> <마지막 초>`(그 밖 err 이상 — OOM 줄 제외) · `last <초>`(다음 확인의 기준).
+ *   일반 계정은 kernel.dmesg_restrict = 0 일 때만 읽는다 — 막히면 dmesg 가 1 로 끝나 `rc 1`(화면 '권한 없음' · 'OOM 없음' 이 아니다).
+ */
+//   시각은 **글자 그대로** 내보낸다(awk 의 숫자 출력은 6자리 — 400.123456 이 400.123 이 되어 다음 확인에서 같은 줄을 또 셌다 · 큰 가동 시간은 지수 표기).
+const KMSG_AWK = 'awk -v L="$KL" \'{if(!match($0,/\\[ *[0-9]+\\.[0-9]+\\]/))next;s=substr($0,RSTART+1,RLENGTH-2);gsub(/ /,"",s);ts=s+0;if(ts>last){last=ts;ls=s}if(ts<=L+0)next;'
+  + 'if(match($0,/Killed process [0-9]+ \\([^)]*\\)/)){x=substr($0,RSTART,RLENGTH);sub(/^[^(]*\\(/,"",x);sub(/\\)$/,"",x);gsub(/[^A-Za-z0-9._:@+-]/,"_",x);if(x=="")x="_";if(no<20)print "o",s,substr(x,1,64);no++;next}'
+  + 'if($0~/Out of memory|oom-kill|oom_reaper/)next;if($0~/^[a-z]+ *:(emerg|alert|crit|err) *:/){ne++;if(ts>lt){lt=ts;lts=s}}}END{print "e",ne+0,(lts==""?0:lts);if(ls!="")print "last",ls}\'';
 const IO_AWK = 'awk \'{split($1,a,"/");p=a[3];if(p!~/^[0-9]+$/)next;if(index($1,"read_bytes"))r[p]=$2;else w[p]=$2}END{for(p in r)if(p in w)print p,r[p],w[p]}\'';
 
 /**
@@ -100,7 +109,7 @@ function build(I, PE = PROC_EVERY_S) {
     "echo '##END'",
     CK_FN,
     'CK=0; CKBAD=; ck; L=$CK; CB=0; CC=0; CP=0',
-    'n=0',
+    'n=0; KL=-1',
     'while [ $n -lt $MAXN ]; do',
     '  echo "##T $(cut -d" " -f1 /proc/uptime) $(date +%s)"',
     // v3.12.0(⑬ A3): ctxt · processes(fork 누적) · intr 첫 합계 칸 — intr 줄은 수천 칸이라 awk 가 앞 두 칸만 낸다(줄 상한 안)
@@ -117,6 +126,10 @@ function build(I, PE = PROC_EVERY_S) {
     '  if [ $(( (n * I) % FE )) -lt $I ]; then',
     `    echo '##FS'; ( timeout -s KILL ${DF_TIMEOUT_S} df -P -l -T -k ${DF_SKIP} 2>/dev/null; echo "rc $?" ) | head -n 258`,
     `    echo '##FSI'; ( timeout -s KILL ${DF_TIMEOUT_S} df -P -l -i ${DF_SKIP} 2>/dev/null; echo "rc $?" ) | head -n 258`,
+    // v3.16.0(⑯ C2): 같은 60초마다 커널 메시지 증분(시한 KILL · 원문 없음 · 막히면 rc 1) — KL 은 셸 변수로 다음 확인까지 이어진다
+    `    KO=$(timeout -s KILL ${DF_TIMEOUT_S} dmesg -x 2>/dev/null | ${KMSG_AWK}; echo "rc \${PIPESTATUS[0]}")`,
+    "    echo '##KMSG'; printf '%s\\n' \"$KO\" | head -n 24",
+    "    KN=$(printf '%s\\n' \"$KO\" | awk '$1==\"last\"{print $2}' | tail -n 1); [ -n \"$KN\" ] && KL=$KN",
     '  fi',
     ckAdd('CB', '  '),
     '  if [ $((n % TE)) -eq 0 ]; then',

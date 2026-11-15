@@ -15,7 +15,9 @@ import { pullFromEdge } from './edgePull.js';
 import { featureMinEdgeVersion } from './featureMinEdgeVersion.js';
 import * as store from '../focusmon/store.js';
 import { listTargets, registryLoadError, getSettings } from '../focusmon/registry.js';
-import { setWakeImpl } from '../focusmon/service.js';
+import { setWakeImpl, setAlertDeps } from '../focusmon/service.js';
+import { procEveryFor } from '../focusmon/tune.js'; // v3.16.0 ⑯ C3 — 엣지 서버의 프로세스 표본 주기도 중앙의 자동 조절을 따른다
+import { enqueueNotify } from '../alerts.js'; // v3.16.0 ⑯ C1 — 포탈의 기존 알람 · 메일 채널(대기열 — 한 번에 하나씩)
 import { IOSTAT_COLS, TOP_N, APP_TOP, APP_KERNEL, APP_SESSION, APP_NOSVC } from '../focusmon/rates.js';
 import { okMount } from '../focusmon/parse.js'; // v3.12.0 ⑬ 파일시스템 마운트 이름 규칙(수집 파서와 같은 함수)
 import { FS_ROWS_MAX } from '../focusmon/codec.js';
@@ -83,7 +85,7 @@ export function cleanSample(s) {
   return {
     dt: n(s.dt), up: pos(s.up, 1e10), cpu, mem, net, dsk, dtot, nPhys: n(s.nPhys),
     load: Array.isArray(s.load) ? [n(s.load[0]), n(s.load[1]), n(s.load[2])] : null, run: n(s.run), blk: n(s.blk), thr: n(s.thr),
-    sched, vmp, tcp, ...(pst ? { pst } : {}), ...(fs ? { fs } : {}),
+    sched, vmp, tcp, ...(pst ? { pst } : {}), ...(fs ? { fs } : {}), ...(isObj(s.km) ? { km: cleanKm(s.km) } : {}),
   };
 }
 
@@ -120,6 +122,17 @@ export function cleanProcs(p) {
     da: p.da === true ? true : p.da === false ? false : null,
     ...(isObj(p.apps) ? { apps: cleanApps(p.apps) } : {}),
   };
+}
+
+/* v3.16.0(⑯ C2) 커널 메시지 증분 — 아는 칸만 · 시각은 글자(부팅 뒤 초 · 소수 6자리) · 이름은 COMM · 20개 · 원문 칸은 없다. */
+const KTS_RE = /^\d{1,10}(\.\d{1,6})?$/;
+function cleanKm(k) {
+  const ts = (v) => (typeof v === 'string' && KTS_RE.test(v) ? v : null);
+  const rc = Number.isInteger(k.rc) && k.rc >= 0 && k.rc <= 255 ? k.rc : null;
+  const boot = (() => { const x = n(k.boot); return x != null && x > 0 && x < 1e10 ? Math.round(x) : null; })();
+  const oom = (Array.isArray(k.oom) ? k.oom.slice(0, 20) : []).filter(isObj).map((o) => ({ s: ts(o.s), c: typeof o.c === 'string' && COMM_RE.test(o.c) && !o.c.includes('*') ? o.c : null })).filter((o) => o.s && o.c);
+  const en = Number.isInteger(k.en) && k.en >= 0 && k.en <= 1e9 ? k.en : null;
+  return { rc, boot, oom, en, es: ts(k.es), last: ts(k.last) };
 }
 
 /* v3.14.0(⑮) 앱 단위 묶음 — 아는 칸만 · 기준마다 APP_TOP · 이름은 서비스 · 프로그램 이름 규칙(또는 정해진 세 이름) · 수는 0 이상 · 상한. */
@@ -296,7 +309,7 @@ export function handleEdgeSync(agent, body, now = Date.now()) {
   const tests = store.pendingTestsFor(key, now, { busy: diag ? diag.testsBusy : null }).filter((id) => mine.has(id)).map((id) => { const t = mine.get(id); return { id, host: t.host, port: t.port, username: t.username }; });
   return {
     ok: true, now, validUntil: now + VALID_MS,
-    targets: desired.map((d) => ({ id: d.id, host: d.host, port: d.port, username: d.username, interval: d.interval, procEvery: getSettings().procEvery })), // v2.983 procEvery — 프로세스 표본 주기(중앙 설정)
+    targets: desired.map((d) => ({ id: d.id, host: d.host, port: d.port, username: d.username, interval: d.interval, procEvery: procEveryFor(d.id, getSettings().procEvery) })), // v2.983 procEvery — 프로세스 표본 주기(중앙 설정 · v3.16.0 자동 조절)
     // retries(id) 는 옛 판 엣지용 · retryTargets(v2.978)는 접속 정보까지 — 수집 중이 아닌 대상(시험만 한 서버)의 인증 정지도 엣지가 풀 수 있게.
     //   예전에는 엣지가 수집 목록에서만 대상을 찾아, 시험만 한 서버의 '다시 연결' 이 아무것도 풀지 못했다(사용자 보고 2026-11-12 — 키를 넣어도 '거부로 멈춤').
     ...(() => { const ids = store.takeEdgeRetries(key, now).filter((id) => mine.has(id)); return { retries: ids, retryTargets: ids.map((id) => { const t = mine.get(id); return { id, host: t.host, port: t.port, username: t.username }; }) }; })(),
@@ -334,3 +347,5 @@ export async function wakeEdge(agent, { by = 'auto', pull = pullFromEdge } = {})
   return out;
 }
 setWakeImpl((agent) => { wakeEdge(agent).catch(() => {}); });
+// v3.16.0 ⑯ C1 — 알림 발송(기존 채널 대기열) · 정비 창 판정기(베어메탈 사용률의 정비 창 — 처음 쓸 때 불러온다)
+setAlertDeps({ send: (a) => enqueueNotify(a), maintJudge: async (now) => (await import('../bmusage/maint/runtime.js')).maintJudge({ now }) });

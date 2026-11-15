@@ -33,16 +33,14 @@
 - 조회는 **admin + 전체 범위**(전 법인 서버의 주소 · 프로세스) · 쓰기는 전체 쓰기 범위 · 프로세스 사용자 이름은 관리자 판본(`isAdminDetailUser`)만 원문.
 - ⚠ 실제 RHEL 7.8 서버에서는 아직 수집해 보지 않았다(이 환경에 없음 — 컨테이너 리눅스 6.18 원문만 픽스처). 실서버 원문을 받으면 픽스처로 고정할 것.
 - **v2.976 반증 · v2.978 CSV · 일괄 시험 · 다시 연결** — 원문 `docs/rules/focusmon.md`. 요지: 늦은 표본은 분마다 한 번 · `safeKey` + 프로토타입 없는 객체 · 실패 횟수는 표본을 받았을 때만 되돌림 · 등록부 손상이면 동기화도 503 · **인증 정지를 지우지 않는다** · 엣지 시험 동시 8.
-- **표의 값 단추 · 구간 평균은 시간 가중(v2.979)** — 원문은 `docs/rules/focusmon.md`(v2.981 에 상한 때문에 옮김). 요지: 세 단추는 상태 하나(`fm.srv.at`) · 평균은 **시간 가중**(`query.sampleWeights` · `rates.timeAverageIostat(rows, weights)` — 표본 평균으로 되돌리지 말 것) · 캡션은 응답 `lastAt` · `coverMs` 로 말한다.
+- **표의 값 단추 · 구간 평균(v2.979)** — 원문 `docs/rules/focusmon.md`. 요지: 세 단추는 상태 하나(`fm.srv.at`) · 평균은 **시간 가중**(`query.sampleWeights` — 표본 평균으로 되돌리지 말 것).
 - **서버는 수집 하나에만(v2.979) · 등록 수정(v2.980) · 저장된 계속 수집의 겹침 정리(v2.980)** — 원문은 `docs/rules/focusmon.md`(v3.11.0 에 상한 때문에 옮김). 요지: 판정은 `store.planJoin` 하나 ·
   계속 수집이 잠깐 보기의 서버를 넘겨받는다 · 수정은 같은 id · `EDIT_FIELDS` 는 웹과 대조 · 접속처가 바뀌면 틱 **뒤에** 상태를 지우고 **인증 정지는 지우지 않는다** · `loadSessions` 가 겹친 서버를 먼저 시작한 수집에만.
 - **프로세스 세부 정보(v2.981)** — 원문은 `docs/rules/focusmon.md`(v2.982 에 상한 때문에 옮김). 요지: PROC 줄 14칸(옛 6칸도 읽는다) · `##UNIT`(30초 · 경로의 **첫** .service/.scope) ·
   `##IO`(그 계정 · root 만 · 못 읽으면 null) · io · cgroup 읽기는 `timeout -s KILL` · pid 는 `grep -H` 파일 경로에서 · 부트 줄은 `grep -c nodelayacct` 개수만 ·
   `query.procDetail` 은 pid + 시작 tick · 상위 30 밖 · 못 읽음은 null(0 아님) · 서버 전체 네트워크는 참고 · 라우트 admin + 전체 범위 · 사용자 이름은 관리자 판본만.
-- **서버 그룹(v2.982)** — 원문은 `docs/rules/focusmon.md`(v2.992 에 상한 때문에 줄임). 요지: 서버마다 그룹 하나 · `GROUP_RE` 1~32자(웹과 대조) · 대소문자 무시로 하나 · 상한 50 ·
-  쓰기 넷은 수집 시작과 같은 문 + 503 + 감사 · **CSV 그룹 열이 없으면 그대로** · 데모 계정에 등록부 그룹 이름 없음 · 그룹 색 없음.
-- **수집 부하(v2.983)** — 원문은 `docs/rules/focusmon.md`(v3.11.0 에 상한 때문에 옮김). 요지: 원격은 상수 12개 `SCRIPT_TABLE` · 묶음 tick 은 셸 내장 명령만 · 계산 코어 `load.js` 하나 · 못 읽음 null ·
-  엣지 `cleanLoad`/`cleanNodeLoad` 화이트리스트 · **수집기가 있을 때만 노드 표본** · 보는 화면 심박은 잠깐 보기 서버만.
+- **서버 그룹(v2.982)** — 원문 `docs/rules/focusmon.md`. 요지: 서버마다 하나 · `GROUP_RE`(웹과 대조) · 대소문자 무시 · 상한 50 · 쓰기는 수집 시작 문 + 503 + 감사 · **CSV 그룹 열이 없으면 그대로**.
+- **수집 부하(v2.983)** — 원문 `docs/rules/focusmon.md`. 요지: 원격은 상수 12개 `SCRIPT_TABLE` · 코어 `load.js` · 못 읽음 null · 엣지 `cleanLoad` · 보는 화면 심박은 잠깐 보기 서버만.
 - **카드 아래 줄 고르기(v2.992)** — 원문은 `docs/rules/focusmon.md`. 요지: `rates.summaryOf` 의 **이미 저장된 열에서**(새 열 없음 · 못 읽음 null) · 웹 `CARD_LINE_ITEMS`(최대 4 · `fm.ov.line`) ·
   회귀 `focusMonCard2992` · web `focusMonCard`.
 - **더할 지표(v3.12.0 ⑬)** — 원문은 `docs/rules/focusmon.md`(v3.13.0 에 상한 때문에 줄임). 요지: 원격은 상수 · 새 구획은 기본 묶음 · df 는 `-l` + `timeout -s KILL` · 카운터 감소 null ·
@@ -54,6 +52,8 @@
   가장 변했나 `changes.js` 는 두 구간 **같은 출처**(단추로만) · 링크는 해시 끝 ‘@’ 칸(물음표 금지 — 앱이 첫 두 칸으로 도구를 고른다).
 - **앱 단위 묶음(v3.15.0 ⑮)** — 상세 `docs/rules/focusmon.md` · 회귀 `focusMonApps3140`. 원격 명령 추가 없음 · 코어 `rates.appGroups` · 열쇠 `appServiceKey`/`appNameOf` 하나(펼침도) ·
   서비스 지도가 없으면 서비스 기준 null · 지도 뒤 시작한 프로세스에 옛 서비스 금지 · 못 읽은 디스크 null · DB 는 분마다 마지막 표본만 · 엣지 `cleanApps` · 계정 이름은 관리자 판본만.
+- **알림 · OOM · 자동 조절(v3.16.0 ⑯)** — 상세 `docs/rules/focusmon.md` · 회귀 `focusMonAlerts3160`. 코어 `alerts.judge`(지속 내내 · 덮어야 · 못 읽으면 **보류** · 해제 여유 5%) ·
+  중앙만 판정 · 계속 수집만 · 정비 창 억제 · 목 모드 발송 금지 · 규칙 쓰기 = 수집 시작 문 + 503 + 감사 · `dmesg -x` 증분은 **원문 없이** · 엣지 `cleanKm` · 자동 조절 `tune.decide`(기본 꺼짐).
 - **디스크 점검(v3.11.0 — 사용자 '배드섹터 점검 프로그램 추가' + 원문 · '법인별 · 모델별로' · '기본값대로 모두 구현')** — 이 폴더의 **유일한 sudo 예외**(사용자 승인: 고정 설치 + sudoers 한 줄).
   상세 `docs/rules/focusmon.md` · 설계 `docs/design/focus-mon/README.md` §20 · 회귀 `focusMonAudit3110` · web `focusMonAudit`. **되돌리면 안 되는 것**:
   ① 받은 프로그램 `audit/rhel_disk_audit.py` 는 **한 바이트도 고치지 않는다**(sha256 = 판본 · 고치면 전 서버 재설치) — 덧붙일 일은 감싸는 실행 파일 `WRAPPER_TEXT` 에(인자 거절 · 임시 폴더 · 시한 KILL · nice/ionice · 디스크 목록).

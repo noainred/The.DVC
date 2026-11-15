@@ -35,6 +35,9 @@ import * as L from '../../focusmon/longq.js'; // v3.13.0 ⑭ 긴 구간(요약 �
 import { planUserEvent, writeUserEvent, eventsFor, SCOPES as EVENT_SCOPES, TEXT_MAX as EVENT_TEXT_MAX, SCOPE_MAX as EVENT_SCOPE_MAX } from '../../focusmon/events.js';
 import { biggestChanges } from '../../focusmon/changes.js';
 import { apps as appsQuery } from '../../focusmon/apps.js'; // v3.14.0 ⑮ 앱 단위 묶음
+import * as AL from '../../focusmon/alerts.js'; // v3.16.0 ⑯ 알림
+import { recentTunes } from '../../focusmon/tune.js'; // v3.16.0 ⑯ 자동 조절
+import { sumCol } from '../../focusmon/summary.js';
 import { backfillState } from '../../focusmon/rollup.js';
 import { focusKeys, allTargets, findTarget, isMockMode, startCollection, stopCollection, addToCollection, removeFromCollection, targetEndpointChanged, localRunner, serviceStatus } from '../../focusmon/service.js';
 import { recorderStatus } from '../../focusmon/recorder.js';
@@ -656,6 +659,69 @@ api.get('/tools/focus-mon/procs', adminOnly, fullScopeOnly, async (req, res) => 
   const admin = isAdminDetailUser(req.user);
   const r = await Q.procs(ids, w, { at: req.query.at === 'avg' ? 'avg' : 'end', maskUser: admin ? (u) => u : (u) => maskedIdToken(u) });
   res.json({ ok: true, win: w.win, from: w.from, to: w.to, past: w.past, missing, usersMasked: !admin, ...r });
+});
+
+/* ── 알림 · OOM · 자동 조절(v3.16.0 ⑯ — 시안 Alerts · 컨펌 ①~⑥ 기본값) ─────────────────────── */
+function alertRulesUnreadable(res) {
+  const e = AL.rulesLoadError();
+  if (!e) return false;
+  res.status(503).json({ ok: false, reason: 'rulesUnreadable', detail: `알림 규칙 파일(${AL.RULES_FILE})을 읽지 못했습니다 — 손상 보존본을 확인하세요.` });
+  return true;
+}
+/** 알림 탭 — 규칙 · 지금 상태 · 지난 24시간 발생 · 해제 · 보류 · OOM · 커널 오류 표 · 자동 조절. 조회와 같은 문(admin + 전체 범위) · 보이는 대상만. */
+api.get('/tools/focus-mon/alerts', adminOnly, fullScopeOnly, async (req, res) => {
+  const now = Date.now();
+  const vis = visibleById(req);
+  const rules = AL.loadRules();
+  const st = AL.loadState();
+  const stateRows = Object.entries(st).map(([k, v]) => { const [rid, tid] = k.split('|'); return { rule: rid, target: tid, ...v }; }).filter((x) => vis.has(x.target));
+  const ruleView = rules.filter((r) => !isDemoGuest(req.user) || r.scope.kind !== 'server' || vis.has(r.scope.target)).map((r) => ({ ...r, cond: AL.condText(r),
+    firing: stateRows.filter((x) => x.rule === r.id && x.state === 'firing').length, hold: stateRows.filter((x) => x.rule === r.id && x.state === 'hold').length,
+    covered: stateRows.filter((x) => x.rule === r.id).length, ...(isDemoGuest(req.user) ? { createdBy: '' } : {}) }));
+  const ev = await db.readEventsOfKinds(now - 86_400_000, now + 60_000, ['alert', 'oom', 'kerr', 'tune'], 3000);
+  const evs = (ev || []).filter((e) => vis.has(e.target));
+  const recordIds = new Set(store.listSessions(now).filter((x) => x.mode === 'record').flatMap((x) => x.targets));
+  const kmsg = [...vis.values()].filter((t) => recordIds.has(t.id) || evs.some((e) => e.target === t.id && (e.kind === 'oom' || e.kind === 'kerr'))).map((t) => {
+    const k = store.kmsgOf(t.id); const ooms = evs.filter((e) => e.target === t.id && e.kind === 'oom');
+    const kerr = evs.filter((e) => e.target === t.id && e.kind === 'kerr').reduce((a, e) => a + (Number(/(\d+)줄/.exec(e.text)?.[1]) || 0), 0);
+    return { id: t.id, name: t.name, read: k ? (k.rc === 0 ? 'ok' : k.rc === 137 ? 'timeout' : 'denied') : null, readAt: k?.at ?? null,
+      oom: ooms.length, lastOom: ooms[0] ? { at: ooms[0].at, text: ooms[0].text } : null, kerr };
+  });
+  const settings = registry.getSettings();
+  res.json({ ok: true, now, lastCycleAt: AL.lastCycle(), rules: ruleView, states: stateRows, history: evs.filter((e) => e.kind === 'alert').slice(0, 300), kmsg,
+    tune: { enabled: !!settings.autoTune, warnPct: settings.loadWarnPct, base: settings.procEvery, recent: recentTunes().filter((x) => vis.has(x.id)) },
+    metrics: Object.fromEntries(Object.entries(AL.METRICS).map(([k, m]) => [k, { label: m.label, unit: m.unit, op: m.op, range: m.range }])),
+    limits: { maxRules: AL.MAX_RULES, dur: AL.DUR_CHOICES, severities: AL.SEVERITIES, scopes: AL.SCOPE_KINDS, holdAfterS: AL.HOLD_AFTER_MS / 1000, resolveMargin: AL.RESOLVE_MARGIN },
+    mock: isMockMode() });
+});
+/** 규칙 쓰기 — 수집 시작과 같은 문(관리자 · 조회 · 쓰기 전체 범위 · 데모 차단) · 규칙 파일 손상 503 · 감사(컨펌 ③). 서버 하나 대상은 보이는 서버만. */
+const ruleWrite = (op) => (req, res) => {
+  if (alertRulesUnreadable(res)) return;
+  const body = req.body || {};
+  if (op !== 'delete' && body.scope?.kind === 'server' && !visibleById(req).has(String(body.scope?.target || ''))) return res.status(404).json({ ok: false, code: 'not-found', reason: '없는 서버입니다.' });
+  const r = AL.writeRule(op, op === 'create' ? body : { ...body, id: String(req.params.id || '') }, { by: req.user?.username || '' });
+  if (!r.ok) return res.status(r.code === 'not-found' ? 404 : r.code === 'rules-unreadable' ? 503 : 400).json(r);
+  logAudit({ user: req.user?.username, action: `focus-mon.alert-${op}`, target: r.rule.id, detail: `${r.rule.name} — ${AL.condText(r.rule)} · ${r.rule.scope.kind}${r.rule.scope.group ? ` ${r.rule.scope.group}` : ''}${r.rule.enabled === false ? ' · 꺼짐' : ''}`, ip: req.ip });
+  res.json({ ok: true, rule: r.rule });
+};
+api.post('/tools/focus-mon/alerts/rules', adminOnly, fullRwOnly, demoBlockWrite, ruleWrite('create'));
+api.put('/tools/focus-mon/alerts/rules/:id', adminOnly, fullRwOnly, demoBlockWrite, ruleWrite('update'));
+api.delete('/tools/focus-mon/alerts/rules/:id', adminOnly, fullRwOnly, demoBlockWrite, ruleWrite('delete'));
+/** ‘지난 24시간에 걸었다면’(추정) — 서버 하나의 1분 요약으로. 조회 문 · 보이는 서버만 · 규칙은 저장하지 않는다(정제만). */
+api.post('/tools/focus-mon/alerts/preview', adminOnly, fullScopeOnly, async (req, res) => {
+  const body = req.body || {};
+  const id = String(body.target || '');
+  if (!visibleById(req).has(id)) return res.status(404).json({ ok: false, code: 'not-found', reason: '없는 서버입니다.' });
+  const r = AL.normalizeRule({ name: 'preview', ...(body.rule || {}), scope: { kind: 'server', target: id } });
+  if (!r.ok) return res.status(400).json(r);
+  if (r.rule.metric === 'app') return res.json({ ok: true, unsupported: true, reason: '필수 앱 규칙은 1분 요약이 없어 미리 보기를 하지 않습니다.' });
+  const now = Date.now();
+  const rows = await L.sumRowsFor(id, now - 86_400_000, now, 'm');
+  if (rows == null) return res.status(503).json({ ok: false, code: 'db', reason: '기록 DB 를 열지 못했습니다.' });
+  const M = AL.METRICS[r.rule.metric];
+  const mins = rows.map((x) => { if (M.cols) { const cs = M.cols.map((k) => sumCol(x.s, k)); return [x.t, cs.some((c) => !c) ? null : cs.reduce((a, c) => a + c.a, 0)]; } const c = sumCol(x.s, M.col); return [x.t, c ? c.a : null]; });
+  const p = AL.preview(mins, { ...r.rule, op: M.op });
+  res.json({ ok: true, from: now - 86_400_000, to: now, ...p, series: mins.length > 1440 ? mins.slice(-1440) : mins });
 });
 
 /**

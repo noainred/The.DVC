@@ -210,6 +210,20 @@ export function demoSumRows(id, from, to, stepMs) {
   return out;
 }
 
+/**
+ * v3.16.0(⑯ C2) 데모 커널 메시지 — 첫째 서버는 2시간 전 OOM(oracle) 하나 · 둘째는 읽기 막힘(rc 1 — '권한 없음') · 그 밖은 읽힘 · 없음.
+ * 켜진 시각은 3일 전으로 고정(10초 단위) — 같은 OOM 이 같은 열쇠로 와서 사건이 한 줄만 남는다.
+ */
+export function demoKmsg(id, ts) {
+  const i = BY_ID.get(String(id));
+  if (i == null) return null;
+  const boot = Math.floor((ts - 3 * 86_400_000) / 86_400_000) * 86_400; // 3일 전 0시(하루 동안 같은 값 — 실제 서버의 켜진 시각처럼 바뀌지 않는다)
+  if (i === 1) return { rc: 1, boot, oom: [], en: null, es: null, last: null };
+  const oomAt = Math.floor((ts - 2 * 3_600_000) / 3_600_000) * 3_600_000 + 4 * 60_000; // 2시간 전 정시 + 4분
+  const rel = ((oomAt / 1000) - boot).toFixed(6);
+  return i === 0 ? { rc: 0, boot, oom: [{ s: rel, c: 'oracle' }], en: 1, es: rel, last: rel } : { rc: 0, boot, oom: [], en: 0, es: null, last: null };
+}
+
 /** v3.12.0(⑬) 데모의 '가득 찰 때까지' — kr-db-01 은 /var · /oradata 가 차오르는 중(시안과 같은 값) · 나머지는 늘지 않음. */
 export function demoFill(id) {
   const i = BY_ID.get(String(id));

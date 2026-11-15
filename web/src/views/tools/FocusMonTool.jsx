@@ -28,6 +28,7 @@ import {
 import { pollMsFor, rawOnlyText, axisTime, parseLinkSeg, CMP_TEXT } from './focusMonHistoryText.js'; // v3.13.0 ⑭ 긴 구간
 import { CpuHistoryLayers, CmpSeg, EventsCard, ChangesCard, LinkCopy } from './FocusMonHistory.jsx';
 import { AppsView } from './FocusMonApps.jsx'; // v3.14.0 ⑮ 앱 단위 묶음
+import { AlertsTab } from './FocusMonAlerts.jsx'; // v3.16.0 ⑯ 알림 · OOM · 자동 조절
 import { niceMax, yScale, yTicks, linePath, areaPath, stackedAreas, spreadLabels, heatColor, cellShade, seriesMax, indexAtFrac, valueAtFrac, timeAtIndex, xAtIndex, tipRows } from './focusMonChart.js';
 import { Seg, Badge, copyText, CsvPanel, NodeCard, InstallCard } from './FocusMonBulk.jsx';
 import { usePoll } from './focusMonPoll.js';
@@ -1516,7 +1517,7 @@ export default function FocusMonTool() {
           ))}
         </div>
       ) : null}
-      {!active && lastEnded && route.tab !== 'targets' && route.tab !== 'audit' ? <div className="fm-ban">수집이 끝났습니다({ENDED_TEXT[lastEnded.why] || lastEnded.why}). 수집한 값은 DB 에 {main.settings.retentionDays}일 남아 시간 띠로 다시 볼 수 있습니다.</div> : null}
+      {!active && lastEnded && route.tab !== 'targets' && route.tab !== 'audit' && route.tab !== 'alerts' ? <div className="fm-ban">수집이 끝났습니다({ENDED_TEXT[lastEnded.why] || lastEnded.why}). 수집한 값은 DB 에 {main.settings.retentionDays}일 남아 시간 띠로 다시 볼 수 있습니다.</div> : null}
       {active?.mode === 'watch' && active.remainMs != null && active.remainMs < 2 * 60_000 ? <div className="fm-ban">남은 시간 {remainText(active.remainMs)} — 그 뒤 수집이 스스로 멈춥니다.</div> : null}
       {['overview', 'compare', 'procs'].includes(route.tab) && viewChips.length > 2 ? (
         <div className="fm-row" role="group" aria-label="그룹으로 거르기"><span className="fm-lbl">그룹</span>
@@ -1524,9 +1525,10 @@ export default function FocusMonTool() {
           <span className="fm-dim">보고 있는 서버 {ids.length}대 가운데 · 그룹은 ‘대상 · 키’ 탭에서 정합니다</span>
         </div>
       ) : null}
-      {route.tab === 'load' || route.tab === 'server' || (route.tab !== 'targets' && route.tab !== 'audit' && ids.length) ? <TimeBar tb={tb} now={now} coverage={route.tab === 'load' ? null : cov.data} oldestMinute={main.db.oldestMinute} route={route} /> : null}
+      {route.tab === 'load' || route.tab === 'server' || (route.tab !== 'targets' && route.tab !== 'audit' && route.tab !== 'alerts' && ids.length) ? <TimeBar tb={tb} now={now} coverage={route.tab === 'load' ? null : cov.data} oldestMinute={main.db.oldestMinute} route={route} /> : null}
       {route.tab === 'load' ? (tb.long ? <div className="fm-card fm-empty">{rawOnlyText('수집 부하', tb.windows)}</div> : <LoadTab main={main} tb={tb} />) : null}
       {route.tab === 'audit' ? <AuditTab setMsg={setMsg} /> : null}
+      {route.tab === 'alerts' ? <AlertsTab main={main} setMsg={setMsg} reloadMain={mainQ.reload} /> : null}
       {route.tab === 'overview' ? <Overview main={main} ids={shownIds} tb={tb} now={now} onOpen={onOpen} /> : null}
       {route.tab === 'compare' ? (
         <>

@@ -108,6 +108,7 @@ export function ingestSample(id, ts, sample, hello, now = Date.now()) {
     if (!appendToBlock(b, ts, row, meta)) { counters.lateDropped += 1; return false; }
   }
   if (!e.latest || ts >= e.latest.ts) e.latest = { ts, sample };
+  if (sample.km) ingestKmsg(id, sample.km, ts); // v3.16.0 ⑯ C2 — 커널 메시지 증분(표본마다 한 번 실린다)
   e.lastAt = Math.max(e.lastAt, ts);
   // v3.13.0(⑭ 자동 사건): 가동 시간이 줄면 재부팅(30초 넘게 — 표본 순서가 바뀐 것과 가른다)
   if (Number.isFinite(sample.up)) {
@@ -122,6 +123,21 @@ export function ingestSample(id, ts, sample, hello, now = Date.now()) {
   return true;
 }
 
+/* ── 커널 메시지(v3.16.0 ⑯ C2 — OOM · 커널 오류) ─────────────────────────────── */
+const KM = new Map(); // targetId → { rc, at } — 화면 '읽기' 칸(rc 0 = 읽음 · 그 밖 = 권한 없음 · 응답 없음)
+/** 증분 하나 → 사건(OOM 은 프로그램마다 · 그 밖 오류는 줄 수 한 줄). 열쇠는 (켜진 시각 10초 단위, 부팅 뒤 초) — 다시 연결해 같은 줄을 또 받아도 한 줄. 원문은 없다. */
+export function ingestKmsg(id, km, at = Date.now()) {
+  if (!km || typeof km !== 'object') return;
+  KM.set(String(id), { rc: Number.isInteger(km.rc) ? km.rc : null, at });
+  const boot = Number(km.boot);
+  if (!(boot > 0)) return;
+  const b10 = Math.round(boot / 10);
+  const wall = (s) => { const t = Math.round((boot + Number(s)) * 1000); return t > 0 && t <= at + 60_000 ? t : null; };
+  for (const o of Array.isArray(km.oom) ? km.oom.slice(0, 20) : []) { const t = wall(o.s); if (t != null) queueEvent(id, 'oom', `OOM — ${o.c} 종료`, t, { id: `oom:${b10}:${o.s}` }); }
+  if (km.en > 0 && km.es) { const t = wall(km.es); if (t != null) queueEvent(id, 'kerr', `커널 오류 ${km.en}줄`, t, { id: `kerr:${b10}:${km.es}` }); }
+}
+export function kmsgOf(id) { const v = KM.get(String(id)); return v ? { ...v } : null; }
+
 /* ── 사건(v3.13.0 ⑭ 컨펌 ⑥ — 자동 · 직접) ───────────────────────────────── */
 const MODE_NAME = Object.freeze({ watch: '잠깐 보기', record: '계속 수집' });
 /** 수집 시작 · 끝 · 더함 · 뺌 — 서버마다 따로 적는다(반증 F11: fm_run 의 지금 서버 목록으로 만들면 뺀 서버의 시작 · 끝이 사라지고 더한 서버의 시작이 수집 시작 시각에 찍혔다).
@@ -130,7 +146,7 @@ function runEvent(s, target, kind, text, now) {
   queueEvent(target, kind, text, now, { id: `run:${s.id}:${kind === 'start' ? 's' : 'e'}:${now}`, by: kind === 'start' ? s.by : '', scope: 'session' });
 }
 /** 자동 사건 종류 → 판정 글(화면은 같은 열쇠로 색을 고른다). */
-export const EVENT_KINDS = Object.freeze(['reboot', 'auth', 'hostkey', 'start', 'stop', 'user']);
+export const EVENT_KINDS = Object.freeze(['reboot', 'auth', 'hostkey', 'start', 'stop', 'user', 'oom', 'kerr', 'alert', 'tune']); // v3.16.0 ⑯: OOM · 커널 오류 · 알림 · 수집 조절
 /** 사건을 기록 대기열에 — 대상마다 한 줄(id 를 같이 쓰면 여러 대상을 한 사건으로 묶는다). 글은 300자. */
 export function queueEvent(target, kind, text, at = Date.now(), { id = null, by = '', scope = 'server' } = {}) {
   if (!EVENT_KINDS.includes(kind)) return null;
