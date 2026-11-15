@@ -6,13 +6,15 @@
  *    parse.js readyState 하나. 중앙은 엣지가 보낸 원문(준비 줄 · 실행 줄)을 다시 해석한다(엣지 해석값을 믿지 않는다).
  *  · 시한 `AUDIT_DEADLINE_MS` 이 지나면 세션을 실제로 끊는다(withSsh signal). 실행 파일 안의 timeout 이 대상 서버 쪽 프로세스도 끝낸다.
  *  · 인증 거부는 집중 모니터링 수집과 같은 정지 기록(focusAuthGuard)에 남기고 자동으로 다시 시도하지 않는다. 정지된 대상은 접속하지 않는다.
- *  · 출력 보관은 구획별 예산(`SECTION_BUDGET`) — 보고서가 커도 구획 머리 · 판정 · 디스크 목록이 남는다. 넘친 구획에는 '…(이 구획 N줄 생략)' 한 줄.
+ *  · 출력 보관은 구획별 예산(`SECTION_BUDGET`) + 전체 줄 수(`OUT_LINES_MAX`) — 보고서가 커도 구획 머리 · 판정 · 디스크 목록이 남는다. 넘친 구획은 그 뒤를 받지 않고
+ *    '…(이 구획 N줄 생략)' 한 줄. 예산 밖은 **그 실행의 표지 줄(난수 — 최대 8줄)과 첫 줄뿐**이다(반증 F1 — 표지 꼴 줄이 예산 밖이라 결과가 23.5MB 가 됐다).
+ *    구획 머리도 예산(`HEAD_BUDGET`) 안에서만 머리로 받는다(로그에서 온 줄일 수 있다).
  *  · 데모(mock) 대상은 SSH 없이 mock.js 의 보고서를 같은 길로 낸다.
  */
 import { withSsh, isSshAuthError, isSshHostKeyError } from '../../proxy/sshExec.js';
 import { focusAuthGuard, authDevOf, READY_TIMEOUT_MS } from '../collector.js';
 import { READY_COMMAND, RUN_COMMAND, AUDIT_DEADLINE_MS, READY_EXEC_MS, PROGRAM_PATH, WRAPPER_PATH, programSha, wrapperSha } from './bundle.js';
-import { parseReady, readyState, sectionOf, LINE_MAX } from './parse.js';
+import { parseReady, readyState, sectionOf, firstLineOf, markOf, LINE_MAX } from './parse.js';
 import { demoAuditOutput } from './mock.js';
 import { isDemoTarget } from '../mock.js';
 
@@ -25,39 +27,59 @@ export const SECTION_BUDGET = Object.freeze({
   '로그 수집 범위': 256 * 1024, 'PERC/StorCLI 조회': 256 * 1024, 'OS/SMART 조회': 256 * 1024, 'RAID 경유 물리 SMART 조회': 256 * 1024,
   '현재 디스크 인벤토리': 256 * 1024, '판정': 1024 * 1024, '상세 근거': 1536 * 1024, '해석 범위': 64 * 1024, other: 256 * 1024, disks: 512 * 1024,
 });
-export const OUTPUT_MAX_BYTES = Object.values(SECTION_BUDGET).reduce((a, b) => a + b, 0);
+/** 구획 머리 줄 예산 — 넘으면 머리로 보지 않고 그 구획의 글자로 센다. */
+export const HEAD_BUDGET = 32 * 1024;
+/** 보관 줄 수 상한(중앙 정제 상한 `cleanEdgeResult` 80,000줄보다 작게 — 엣지가 보낸 결과의 끝 표지가 중앙에서 잘리지 않게). */
+export const OUT_LINES_MAX = 70_000;
+/** 그 실행의 표지 줄 상한(EXIT · DISKS · RAID · END — 되풀이는 버린다). */
+const MARKS_MAX = 8;
+export const OUTPUT_MAX_BYTES = Object.values(SECTION_BUDGET).reduce((a, b) => a + b, 0) + HEAD_BUDGET;
 
 const short = (e) => String(e?.message || e || '').replace(/\s+/g, ' ').slice(0, 240);
 
 /**
  * 실행 출력 모으기(순수 — 테스트 고정). push(line) 을 차례로 부르고 done() 으로 줄 목록을 받는다.
- * 구획 머리 · ##DA 표지는 예산과 상관없이 남긴다. 넘친 구획에는 생략 줄을 하나 붙인다.
+ *  · 첫 줄(빈 줄 제외)은 늘 남긴다 — 실행 파일의 BEGIN(표지) 또는 ERR. 표지 판정은 parse.js firstLineOf · markOf 하나(해석과 같다).
+ *  · 그 실행의 표지 줄만 예산 밖(최대 MARKS_MAX). END 뒤는 받지 않는다.
+ *  · 구획이 예산을 넘으면 그 구획의 나머지를 받지 않는다(앞부분만 남는다 — 근거 번호가 중간에서 빠지지 않게). 넘친 구획에는 생략 줄을 하나 붙인다.
  */
-export function createOutputKeeper({ budget = SECTION_BUDGET } = {}) {
-  const out = []; const used = {}; const cut = {}; let sec = 'other'; let part = ''; let bytes = 0; let phase = null;
+export function createOutputKeeper({ budget = SECTION_BUDGET, linesMax = OUT_LINES_MAX, headBudget = HEAD_BUDGET } = {}) {
+  const out = []; const used = {}; const cut = {}; const closed = new Set();
+  let sec = 'other'; let part = ''; let bytes = 0; let phase = null; let nonce = null; let started = false; let ended = false; let heads = 0; let marks = 0;
   const flushCut = () => { if (cut[sec]) { out.push(`…(이 구획 ${cut[sec]}줄 생략)`); cut[sec] = 0; } };
   return {
     push(raw) {
-      const line = String(raw ?? '').length > LINE_MAX ? `${String(raw).slice(0, LINE_MAX)}…(잘림)` : String(raw ?? '');
-      bytes += Buffer.byteLength(line) + 1;
-      if (line.startsWith('##DA ')) {
-        flushCut();
-        if (line === '##DA DISKS' || line === '##DA RAID') { part = 'disks'; sec = 'disks'; phase = '디스크 목록'; }
-        else if (line.startsWith('##DA EXIT') || line === '##DA END') { part = ''; sec = 'other'; }
+      const s0 = String(raw ?? '');
+      const line = s0.length > LINE_MAX ? `${s0.slice(0, LINE_MAX)}…(잘림)` : s0;
+      const n = Buffer.byteLength(line) + 1;
+      bytes += n;
+      if (ended) return;
+      if (!started) {
+        if (!line) return;
+        started = true;
+        const f = firstLineOf(line);
+        if (f?.nonce) nonce = f.nonce;
         out.push(line); return;
       }
+      const mk = markOf(line, nonce);
+      if (mk) {
+        flushCut();
+        if (mk === 'DISKS' || mk === 'RAID') { part = 'disks'; sec = 'disks'; phase = '디스크 목록'; }
+        else { part = ''; sec = 'other'; if (mk === 'END') ended = true; }
+        if (marks < MARKS_MAX) { marks += 1; out.push(line); }
+        return;
+      }
       const s = part === 'disks' ? null : sectionOf(line);
-      if (s) { flushCut(); sec = s; phase = s; out.push(line); return; }
+      if (s && heads + n <= headBudget && out.length < linesMax) { flushCut(); sec = s; phase = s; heads += n; out.push(line); return; }
       const key = part === 'disks' ? 'disks' : sec;
       const lim = budget[key] ?? budget.other;
-      const n = Buffer.byteLength(line) + 1;
-      if ((used[key] || 0) + n > lim) { cut[key] = (cut[key] || 0) + 1; return; }
+      if (closed.has(key) || (used[key] || 0) + n > lim || out.length >= linesMax) { closed.add(key); cut[key] = (cut[key] || 0) + 1; return; }
       used[key] = (used[key] || 0) + n; out.push(line);
     },
     done() { flushCut(); return out; },
     phase: () => phase,
     bytes: () => bytes,
-    truncated: () => Object.values(cut).some(Boolean) || out.some((l) => l.startsWith('…(이 구획 ')),
+    truncated: () => closed.size > 0 || out.some((l) => l.startsWith('…(이 구획 ')),
   };
 }
 
@@ -84,7 +106,7 @@ export async function auditOnce(t, { mode = 'run', keys, connect = withSsh, onPh
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), deadlineMs); timer.unref?.();
   const keep = createOutputKeeper();
-  let ready = []; let code = null; let stderr = ''; let ranRun = false; let state = null;
+  let ready = []; let code = null; let stderr = ''; let ranRun = false; let state = null; let longCut = 0;
   try {
     onPhase('준비 확인');
     await connect({ host: t.host, port: t.port, username: t.username, privateKey: pem, readyTimeout: READY_TIMEOUT_MS, signal: ctl.signal }, async (api) => {
@@ -96,21 +118,23 @@ export async function auditOnce(t, { mode = 'run', keys, connect = withSsh, onPh
       if (mode !== 'run' || state.state !== 'ready') return {};
       ranRun = true;
       let last = '준비 확인';
+      // 긴 한 줄은 끊지 않고 자른다(반증 F9-e — 일반 계정이 남긴 긴 로그 한 줄로 실행 전체를 'bad-output' 으로 만들 수 있었다)
       const s = await api.execStream(RUN_COMMAND, {
-        maxLine: MAX_LINE_BYTES, signal: ctl.signal,
+        maxLine: MAX_LINE_BYTES, cutLong: true, signal: ctl.signal,
         onLine: (l) => { keep.push(l); const p = keep.phase(); if (p && p !== last) { last = p; try { onPhase(p); } catch { /* */ } } },
       });
-      code = s.code ?? null; stderr = String(s.stderr || '').slice(0, STDERR_MAX);
+      code = s.code ?? null; stderr = String(s.stderr || '').slice(0, STDERR_MAX); longCut = s.cutLines || 0;
       if (s.aborted) throw new Error('aborted');
       return {};
     }, { signal: ctl.signal });
     focusAuthGuard.clearAuthStop(dev.id);
     const out = keep.done();
     if (!ranRun) return { ...base, ok: true, kind: mode === 'run' ? 'not-ready' : 'done', ready, ms: Date.now() - t0 };
-    return { ...base, ok: true, kind: 'done', ready, out, outBytes: keep.bytes(), truncated: keep.truncated(), code, stderr, ms: Date.now() - t0 };
+    // ran: 실행을 시도했다(출력이 비어도 — sudo 자체가 실패하면 표준 출력은 비고 표준 오류에만 남는다 · 반증 F4)
+    return { ...base, ok: true, kind: 'done', ran: true, ready, out, outBytes: keep.bytes(), truncated: keep.truncated() || longCut > 0, code, stderr, ms: Date.now() - t0 };
   } catch (e) {
     const out = keep.done();
-    const partial = { ready, out, outBytes: keep.bytes(), truncated: keep.truncated(), code, stderr, ms: Date.now() - t0 };
+    const partial = { ran: ranRun, ready, out, outBytes: keep.bytes(), truncated: keep.truncated(), code, stderr, ms: Date.now() - t0 };
     if (isSshHostKeyError(e)) return { ...base, ...partial, kind: 'hostkey', error: short(e) };
     if (isSshAuthError(e)) { focusAuthGuard.markAuthStopped(dev.id, dev, '키 로그인 거부(디스크 점검)'); return { ...base, ...partial, kind: 'auth', error: '키 로그인이 거부됐습니다 — 공개키를 확인하세요.' }; }
     if (ctl.signal.aborted) return { ...base, ...partial, kind: 'timeout', error: `${Math.round(deadlineMs / 60_000)}분 안에 끝나지 않아 끊었습니다.` };
@@ -146,6 +170,8 @@ export function createAuditRunner({ keys, connect, onResult, onPhase = () => {},
       return { ok: true };
     },
     has: (runId) => running.has(String(runId)) || queue.some((x) => x.runId === String(runId)),
+    /** 줄에서 기다리는 작업 지우기(도는 중인 것은 끝까지 — 결과는 받는 쪽이 버린다). @returns {boolean} */
+    cancel(runId) { const i = queue.findIndex((x) => x.runId === String(runId)); if (i < 0) return false; queue.splice(i, 1); return true; },
     state(runId) { const r = running.get(String(runId)); if (r) return { state: 'running', phase: r.phase, startedAt: r.startedAt }; const q = queue.findIndex((x) => x.runId === String(runId)); return q >= 0 ? { state: 'queued', position: q + 1 } : null; },
     list: () => [...[...running.values()].map((j) => ({ runId: j.runId, id: j.target.id, mode: j.mode, state: 'running', phase: j.phase, startedAt: j.startedAt })), ...queue.map((j, i) => ({ runId: j.runId, id: j.target.id, mode: j.mode, state: 'queued', position: i + 1 }))],
     size: () => queue.length + running.size,

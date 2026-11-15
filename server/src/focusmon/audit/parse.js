@@ -3,8 +3,10 @@
  *
  *  · parseReady  — 준비 확인(`##DR …`) → python · 두 파일(sha · 소유자 · 권한) · 경로 폴더 · sudo · 서버 모델
  *  · readyState  — 위 값 + 포탈 판본 → 'ready' | 'nopy' | 'pyold' | 'notinstalled' | 'unreadable' | 'version' | 'owner' | 'nosudo' | 'bad-output'
- *  · splitRun    — 실행 출력(`##DA …`) → 보고서 줄 · 종료값 · 디스크 목록(lsblk · RAID) · 오류 표지
- *  · parseReport — 받은 프로그램의 보고서 글자 → 판정 줄 · 인벤토리 · 읽은 자료 · 근거 · 해석 범위
+ *  · splitRun    — 실행 출력(`##DA …`) → 보고서 줄 · 종료값 · 디스크 목록(lsblk · RAID) · 오류 표지. **표지는 첫 줄의 난수가 붙은 줄만**(반증 F2 — 보고서에는
+ *                  대상 서버 로그 내용이 들어가고 일반 계정도 줄바꿈이 든 로그를 남길 수 있다).
+ *  · parseReport — 받은 프로그램의 보고서 글자 → 판정 줄 · 인벤토리 · 읽은 자료 · 근거 · 해석 범위 + **모양 검사**(shape — 구획 순서 · 완료 줄 · 근거 번호 ·
+ *                  판정 건수 합). 받은 프로그램이 줄바꿈을 지우지 않아 로그 한 줄이 보고서 여러 줄이 될 수 있다 — 숫자를 바꾸는 꼴이면 그 회차의 숫자를 쓰지 않는다.
  *  · parseDisks  — 디스크 목록 → [{식별자 · 모델 · 크기 · 종류}]
  *  · summarize   — 위 둘을 합쳐 화면 · 묶어 보기가 쓰는 요약(종류별 줄 수 · 물리 디스크별 기록 · 모델)
  *
@@ -83,7 +85,8 @@ const OWN = /^(\d{1,10}):(\d{1,10}):([0-7]{3,4})$/;
 function ownOf(s) { const m = OWN.exec(String(s || '')); return m ? { uid: Number(m[1]), gid: Number(m[2]), mode: parseInt(m[3], 8) } : null; }
 
 export function parseReady(lines) {
-  const r = { begun: false, ended: false, py: null, pyVer: null, files: {}, dirs: {}, sudo: null, dmi: null };
+  // 원격 줄에서 온 이름을 열쇠로 쓰는 표는 프로토타입 없는 객체(반증 F9-g — '__proto__' 줄)
+  const r = { begun: false, ended: false, py: null, pyVer: null, files: Object.create(null), dirs: Object.create(null), sudo: null, dmi: null };
   for (const raw of (Array.isArray(lines) ? lines : String(lines || '').split('\n')).slice(0, 200)) {
     const l = cleanLine(raw, 400);
     if (l === '##DR 1') { r.begun = true; continue; }
@@ -139,25 +142,59 @@ export function readyState(r, { programPath, wrapperPath, programSha, wrapperSha
 }
 
 /* ── 실행 출력 나누기 ───────────────────────────────────────────────────── */
+/** 실행 파일 첫 줄 — 판 2 · 실행마다 만든 표지(난수 16자). */
+export const BEGIN_RE = /^##DA BEGIN 2 ([0-9a-f]{16})$/;
+/** 실행 파일이 프로그램을 돌리기 전에 내는 오류(첫 줄). */
+export const WRAPPER_ERRS = Object.freeze(['args', 'nopython', 'busy', 'tmp', 'nonce']);
+/** 실행 출력의 첫 줄이 실행 파일의 줄인가 → {nonce} | {err} | null(실행 파일 출력이 아니다). 출력 보관(runner)과 나누기가 같은 판정을 쓴다. */
+export function firstLineOf(l) {
+  const m = BEGIN_RE.exec(String(l ?? ''));
+  if (m) return { nonce: m[1] };
+  const t = String(l ?? '');
+  if (t.startsWith('##DA ERR ') && t.length <= 40) { const e = t.slice(9); return { err: WRAPPER_ERRS.includes(e) ? e : 'other' }; }
+  return null;
+}
+/** 표지 줄 → 'EXIT n' · 'DISKS' · 'RAID' · 'END' 의 뒷부분(그 실행의 표지가 붙은 줄만) | null */
+export function markOf(l, nonce) {
+  if (!nonce) return null;
+  const tag = `##DA ${nonce} `;
+  const t = String(l ?? '');
+  if (!t.startsWith(tag) || t.length > tag.length + 16) return null;
+  const v = t.slice(tag.length);
+  if (v === 'DISKS' || v === 'RAID' || v === 'END' || /^EXIT \d{1,3}$/.test(v)) return v;
+  return null;
+}
 /**
  * @param {string[]} lines  실행 출력 줄(그대로)
- * @returns {{begun:boolean, ended:boolean, err:string|null, rc:number|null, report:string[], lsblk:string[], raid:string[]}}
+ * @returns {{begun:boolean, ended:boolean, err:string|null, rc:number|null, nonce:string|null, report:string[], lsblk:string[], raid:string[]}}
+ *  · 첫 줄(빈 줄 제외)이 BEGIN 이면 그 표지가 붙은 줄만 표지다 — 표지 없는 `##DA` 줄은 보고서 글자다(로그에서 온 것일 수 있다).
+ *  · 첫 줄이 ERR 이면 실행 파일이 프로그램을 돌리지 않았다. 그 밖이면 실행 파일 출력이 아니다(아무것도 받지 않는다).
+ *  · 같은 표지가 되풀이되면 처음 것만 · END 뒤는 버린다.
  */
 export function splitRun(lines) {
-  const out = { begun: false, ended: false, err: null, rc: null, report: [], lsblk: [], raid: [] };
-  let part = '';
+  const out = { begun: false, ended: false, err: null, rc: null, nonce: null, report: [], lsblk: [], raid: [] };
+  let part = ''; let started = false; const seen = new Set();
   for (const raw of lines || []) {
     const l = String(raw ?? '');
-    if (l.startsWith('##DA ')) {
-      const t = cleanLine(l, 80);
-      if (t === '##DA BEGIN 1') { out.begun = true; part = 'report'; continue; }
-      if (t.startsWith('##DA EXIT ')) { const n = Number(t.slice(10)); out.rc = Number.isInteger(n) && n >= 0 && n < 512 ? n : null; part = ''; continue; }
-      if (t === '##DA DISKS') { part = 'lsblk'; continue; }
-      if (t === '##DA RAID') { part = 'raid'; continue; }
-      if (t === '##DA END') { out.ended = true; part = ''; continue; }
-      if (t.startsWith('##DA ERR ')) { const e = t.slice(9); out.err = ['args', 'nopython', 'tmp'].includes(e) ? e : 'other'; continue; }
+    if (!started) {
+      if (!l) continue;
+      started = true;
+      const f = firstLineOf(l);
+      if (f?.nonce) { out.begun = true; out.nonce = f.nonce; part = 'report'; continue; }
+      if (f?.err) out.err = f.err;
+      break;
     }
-    if (part === 'report') { if (out.report.length < REPORT_LINES_MAX) out.report.push(l); }
+    const mk = markOf(l, out.nonce);
+    if (mk) {
+      const kind = mk.startsWith('EXIT ') ? 'EXIT' : mk;
+      if (seen.has(kind)) continue;
+      seen.add(kind);
+      if (kind === 'EXIT') { const n = Number(mk.slice(5)); out.rc = Number.isInteger(n) && n >= 0 && n < 512 ? n : null; part = ''; continue; }
+      if (kind === 'DISKS') { part = 'lsblk'; continue; }
+      if (kind === 'RAID') { part = 'raid'; continue; }
+      out.ended = true; break; // END
+    }
+    if (part === 'report') { if (out.report.length < REPORT_LINES_MAX) out.report.push(l); else out.reportCut = true; }
     else if (part === 'lsblk') { if (out.lsblk.length < DISK_ROWS_MAX) out.lsblk.push(l); }
     else if (part === 'raid') { if (out.raid.length < 8000) out.raid.push(l); }
   }
@@ -210,17 +247,25 @@ export function parseReport(text) {
   const r = {
     header: null, complete: false, sections: [], verdicts: [], inventory: [], sources: [], missing: [], partial: [], evidence: [], others: [],
     evidenceTotal: 0, counts: { media: 0, io: 0, realloc: 0, fsok: 0, fscmd: 0 }, gaps: null, scope: [], judgeCounts: {}, fsPattern: null,
+    cutSections: [], linesCut: lines.length > REPORT_LINES_MAX, shape: [], idCounts: new Map(), idCountsCut: false, unattributedAll: 0,
   };
-  let sec = '';
+  let sec = ''; let doneSeen = 0; let nextNo = 1; let unnumberedSeen = false; let rank = -1;
+  const issue = (k) => { if (!r.shape.includes(k)) r.shape.push(k); };
   for (let k = 0; k < Math.min(lines.length, REPORT_LINES_MAX); k += 1) {
     const raw = cleanLine(lines[k]);
     if (!raw) continue;
     if (k < 3 && raw.startsWith('RHEL 디스크 오류 이력 점검 | ')) { r.header = raw.slice('RHEL 디스크 오류 이력 점검 | '.length); continue; }
+    if (raw.startsWith('…(이 구획 ') && raw.endsWith('생략)')) { r.cut = (r.cut || 0) + 1; if (sec && !r.cutSections.includes(sec)) r.cutSections.push(sec); continue; }
+    if (doneSeen) { issue('after-done'); continue; } // 완료 줄 뒤에는 아무 줄도 없다(프로그램의 마지막 줄)
     const s = sectionOf(raw);
-    if (s) { sec = s; if (!r.sections.includes(s)) r.sections.push(s); continue; }
-    if (raw.startsWith('완료 | ')) { r.complete = true; continue; }
+    if (s) {
+      // 모양 검사 — 구획은 프로그램 순서대로 한 번씩만 나온다(되풀이 · 거꾸로 = 로그에서 온 줄)
+      const i = SECTIONS.indexOf(s);
+      if (r.sections.includes(s) || i < rank) issue('section-order');
+      rank = Math.max(rank, i); sec = s; if (!r.sections.includes(s)) r.sections.push(s); continue;
+    }
+    if (raw.startsWith('완료 | ')) { if (sec !== '해석 범위') issue('done-early'); doneSeen += 1; r.complete = true; continue; }
     if (k < 4 && raw.startsWith('보고서 | ')) continue; // 대상 서버의 임시 보고서 파일 경로(실행 파일이 끝나면 지운다)
-    if (raw.startsWith('…(이 구획 ') && raw.endsWith('생략)')) { r.cut = (r.cut || 0) + 1; continue; }
     const ind = lead(raw); const body = raw.slice(ind);
     if (sec === '로그 수집 범위' || sec === 'PERC/StorCLI 조회' || sec === 'OS/SMART 조회' || sec === 'RAID 경유 물리 SMART 조회') {
       if (body.startsWith('수집 불가 | ')) { if (r.missing.length < 200) r.missing.push({ section: sec, what: cleanLine(body.slice(9), 300) }); continue; }
@@ -245,7 +290,7 @@ export function parseReport(text) {
       const vm = /^\[(확정|추정|불명)\] /.exec(body);
       if (vm) { if (r.verdicts.length < 600) r.verdicts.push({ tag: vm[1], text: cleanLine(body.slice(vm[0].length), 600), depth: ind >= 4 ? 1 : 0 }); continue; }
       const cm = /^(.{2,20}) \| (\d{1,9})건$/.exec(body);
-      if (cm && ERROR_KINDS.includes(cm[1])) { r.judgeCounts[KIND_KEY[cm[1]]] = Number(cm[2]); continue; }
+      if (cm && ERROR_KINDS.includes(cm[1])) { const jk = KIND_KEY[cm[1]]; if (jk in r.judgeCounts) issue('judge-dup'); r.judgeCounts[jk] = Number(cm[2]); continue; }
       const fm = /^파일시스템 생성 성공 패턴 (\d{1,9})줄, 명령\/시도 패턴 (\d{1,9})줄$/.exec(body);
       if (fm) { r.fsPattern = { ok: Number(fm[1]), cmd: Number(fm[2]) }; r.verdicts.push({ tag: '참고', text: body, depth: 0 }); continue; }
       if (ind === 2 && body.includes(' | 오류 근거 ')) { if (r.verdicts.length < 600) r.verdicts.push({ tag: '대상', text: cleanLine(body, 600), depth: 0 }); continue; }
@@ -256,22 +301,51 @@ export function parseReport(text) {
       const hm = /^#(\d{1,7}) /.exec(body);
       if (hm) { n = Number(hm[1]); rest = body.slice(hm[0].length); }
       const ev = parseEvidence(rest);
-      if (!ev) continue;
+      if (!ev) continue; // 근거 꼴이 아닌 줄(여러 줄 로그의 이어진 줄 등) — 숫자를 바꾸지 않으므로 버린다
+      // 모양 검사 — 오류 근거는 #1 부터 빠짐없이 번호가 붙고, 번호 없는 기록(파일시스템 생성)은 그 뒤에만 나온다
+      const isErr = ERROR_KINDS.includes(ev.kind);
+      if (n != null) {
+        if (!isErr) issue('evidence-kind');
+        if (n !== nextNo || unnumberedSeen) issue('evidence-number');
+        nextNo = n + 1;
+      } else { if (isErr) issue('evidence-kind'); unnumberedSeen = true; }
       r.evidenceTotal += 1;
       r.counts[ev.key] += 1;
+      if (isErr) {
+        // 디스크별 계수는 **모든** 근거 줄로(반증 F5 — 화면에 싣는 근거 상한과 따로) · 식별자 조합마다 하나
+        if (ev.ids.sn || ev.ids.wwn) {
+          const ik = `${ev.ids.sn || ''}\u0000${ev.ids.wwn || ''}`;
+          let c = r.idCounts.get(ik);
+          if (!c) { if (r.idCounts.size >= ID_COUNTS_MAX) { r.idCountsCut = true; c = null; } else { c = { ids: ev.ids, media: 0, io: 0, realloc: 0 }; r.idCounts.set(ik, c); } }
+          if (c) c[ev.key] += 1;
+        } else r.unattributedAll += 1;
+      }
       if (r.evidence.length < EVIDENCE_MAX) r.evidence.push({ n, ...ev });
       continue;
     }
     if (sec === '해석 범위') {
       const gm = /^확인하지 못했거나 일부만 수집한 소스\/항목 (\d{1,6})개\.$/.exec(body);
-      if (gm) r.gaps = Number(gm[1]);
+      if (gm) { if (r.gaps != null) issue('scope-dup'); r.gaps = Number(gm[1]); }
       if (r.scope.length < 40) r.scope.push(cleanLine(body, 300));
       continue;
     }
     if (r.others.length < 20) r.others.push(cleanLine(raw, 300));
   }
+  // 판정 건수 합 = 번호 붙은 근거 수(근거를 다 읽었을 때만 — 잘렸으면 맞출 수 없다)
+  if (!r.linesCut && !r.cutSections.includes('상세 근거') && r.sections.includes('상세 근거')) {
+    const judged = ERROR_KINDS.reduce((a, kd) => a + (r.judgeCounts[KIND_KEY[kd]] || 0), 0);
+    if (judged !== nextNo - 1) issue('judge-mismatch');
+  }
   return r;
 }
+/** 식별자 조합 계수 상한(디스크별 계수 — 넘으면 디스크 값을 '모름' 으로). */
+export const ID_COUNTS_MAX = 5000;
+/** 모양 검사 결과 → 화면 글(판정 코어 — 웹은 열쇠만 받는다). */
+export const SHAPE_TEXT = Object.freeze({
+  'section-order': '구획 머리가 되풀이되거나 순서가 다릅니다', 'done-early': '완료 줄이 제자리에 있지 않습니다', 'after-done': '완료 줄 뒤에 줄이 더 있습니다',
+  'judge-dup': '판정 건수 줄이 되풀이됩니다', 'judge-mismatch': '판정 건수 합이 근거 줄 수와 다릅니다', 'evidence-number': '근거 번호가 이어지지 않습니다',
+  'evidence-kind': '근거 종류와 번호가 맞지 않습니다', 'scope-dup': '해석 범위 줄이 되풀이됩니다',
+});
 
 /* ── 디스크 목록(모델) ─────────────────────────────────────────────────── */
 const LSBLK_PAIR = /([A-Z][A-Z0-9_-]{0,15})="([^"]{0,200})"/g;
@@ -302,11 +376,16 @@ export function parseDisks(lsblkLines = [], raidLines = []) {
     if (h) { cur = h[1]; if (!bySlot.has(cur)) bySlot.set(cur, { src: 'raid', dev: cur, sn: '', wwn: '', model: '', size: '', media: '', tran: '' }); continue; }
     if (!cur) continue;
     const d = bySlot.get(cur);
-    const kv = /^(SN|WWN|Model Number) *= *(.{0,120})$/.exec(l);
-    if (kv) {
-      if (kv[1] === 'SN') d.sn = normSerial(kv[2].trim()) || d.sn;
-      else if (kv[1] === 'WWN') d.wwn = normWwn(kv[2].trim()) || d.wwn;
-      else d.model = tidy(kv[2]) || d.model;
+    // 'SN = …' · 'WWN = …' · 'Model Number = …' — 정규식 되돌아가기 없이(반증 F9-c: 공백이 긴 줄 8,000개에 546ms) indexOf 로
+    const eq = l.indexOf('=');
+    const key = eq > 0 && eq <= 20 ? l.slice(0, eq).trimEnd() : '';
+    if (key === 'SN' || key === 'WWN' || key === 'Model Number') {
+      const v = l.slice(eq + 1).trim();
+      if (v.length <= 120) {
+        if (key === 'SN') d.sn = normSerial(v) || d.sn;
+        else if (key === 'WWN') d.wwn = normWwn(v) || d.wwn;
+        else d.model = tidy(v) || d.model;
+      }
       continue;
     }
     const t = l.trim().split(/ +/);
@@ -342,23 +421,25 @@ export function summarize(report, diskRows = []) {
     const hit = (diskRows || []).find((x) => sameDisk(ids(x), p.ids)) || null;
     if (hit) { p.model = hit.model || ''; p.size = hit.size || ''; p.media = hit.media || ''; }
   }
-  let unattributed = 0;
+  let unattributed = r.unattributedAll || 0;
   // 근거를 다 받지 못했으면(보고서 상한 · 화면 상한) 종류별 수는 프로그램의 판정 줄(‘매체 오류 기록 | N건’)을 쓴다 — 받은 줄만 세면 적게 말한다
-  const evidenceCut = r.evidenceTotal > r.evidence.length || !!r.cut;
+  const evidenceCut = r.evidenceTotal > r.evidence.length || !!r.cut || !!r.linesCut;
+  // 디스크별 값은 상세 근거를 끝까지 읽었을 때만 안다(반증 F5) — 잘렸으면 디스크 값은 null(0 이 아니다 · 비율 분모에서 빠진다)
+  const disksKnown = !r.linesCut && !r.idCountsCut && !(r.cutSections || []).includes('상세 근거');
   const counts = { ...r.counts };
   if (evidenceCut) for (const k of ['media', 'io', 'realloc']) if (Number.isInteger(r.judgeCounts[k])) counts[k] = Math.max(counts[k], r.judgeCounts[k]);
-  for (const e of r.evidence) {
-    if (!ERROR_KINDS.includes(e.kind)) continue;
-    const p = (e.ids.sn || e.ids.wwn) ? phys.find((x) => sameDisk(x.ids, e.ids)) : null;
-    if (!p) { unattributed += 1; continue; }
-    if (e.key === 'media') p.media_n += 1; else if (e.key === 'realloc') p.realloc_n += 1; else p.io_n += 1;
+  for (const c of (r.idCounts instanceof Map ? r.idCounts.values() : [])) {
+    const p = phys.find((x) => sameDisk(x.ids, c.ids));
+    if (!p) { unattributed += c.media + c.io + c.realloc; continue; }
+    p.media_n += c.media; p.realloc_n += c.realloc; p.io_n += c.io;
   }
   const errTotal = counts.media + counts.io + counts.realloc;
+  const kn = (v) => (disksKnown ? v : null);
   return {
-    complete: r.complete, counts, errTotal, evidenceTotal: r.evidenceTotal, evidenceCut, gaps: r.gaps,
-    missing: r.missing.length, partial: r.partial.length,
-    disks: phys.slice(0, 500).map((p) => ({ label: p.label, sn: p.ids.sn || '', wwn: p.ids.wwn || '', model: p.model, size: p.size, media: p.media, scope: p.scope, mediaN: p.media_n, reallocN: p.realloc_n, ioN: p.io_n })),
-    unattributed, // 디스크에 붙이지 못한 오류 근거 줄(받은 줄 기준 — evidenceCut 이면 더 있을 수 있다)
+    complete: r.complete, counts, errTotal, evidenceTotal: r.evidenceTotal, evidenceCut, disksKnown, gaps: r.gaps,
+    missing: r.missing.length, partial: r.partial.length, shape: [...(r.shape || [])],
+    disks: phys.slice(0, 500).map((p) => ({ label: p.label, sn: p.ids.sn || '', wwn: p.ids.wwn || '', model: p.model, size: p.size, media: p.media, scope: p.scope, mediaN: kn(p.media_n), reallocN: kn(p.realloc_n), ioN: kn(p.io_n) })),
+    unattributed: kn(unattributed), // 디스크에 붙이지 못한 오류 근거 줄(모든 근거 줄 기준 — 근거가 잘렸으면 null)
     hit: errTotal > 0,
   };
 }

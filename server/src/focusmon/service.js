@@ -143,7 +143,7 @@ export function nodeTick(now = Date.now()) {
 
 export function startFocusMon() {
   if (timers.length) return;
-  try { startAuditService({ keys: focusKeys }); } catch (e) { console.warn(`[focusmon] 디스크 점검 시작 실패: ${String(e?.message || e).slice(0, 160)}`); }
+  try { startAuditService({ keys: focusKeys, spaceLow: () => { const r = recorderStatus(); return !!(r.paused && r.pauseReason === 'disk-low'); } }); } catch (e) { console.warn(`[focusmon] 디스크 점검 시작 실패: ${String(e?.message || e).slice(0, 160)}`); }
   timers = [
     every(() => { try { tick1(); } catch (e) { console.warn(`[focusmon] 틱 실패: ${String(e?.message || e).slice(0, 160)}`); } }, 1_000),
     every(() => { recordTick().catch((e) => console.warn(`[focusmon] 기록 실패: ${String(e?.message || e).slice(0, 160)}`)); }, 10_000),

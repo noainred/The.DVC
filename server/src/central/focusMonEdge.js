@@ -263,7 +263,7 @@ export function handleEdgeSync(agent, body, now = Date.now()) {
     //   예전에는 엣지가 수집 목록에서만 대상을 찾아, 시험만 한 서버의 '다시 연결' 이 아무것도 풀지 못했다(사용자 보고 2026-11-12 — 키를 넣어도 '거부로 멈춤').
     ...(() => { const ids = store.takeEdgeRetries(key, now).filter((id) => mine.has(id)); return { retries: ids, retryTargets: ids.map((id) => { const t = mine.get(id); return { id, host: t.host, port: t.port, username: t.username }; }) }; })(),
     tests,
-    ...(audit.jobs.length || audit.ack.length ? { audit } : {}),
+    ...(audit.jobs.length || audit.ack.length || audit.cancel.length ? { audit } : {}),
     ensureKey: mine.size > 0,
     // v2.978 시작 지연 줄이기: 맡은 서버가 있는 엣지는 쉬는 동안에도 이 주기로 조회한다(깨우기가 닿지 않는 중계 엣지 — 예전 30초 고정).
     // 맡은 서버가 없으면 싣지 않는다(엣지 기본 30초). 옛 판 엣지는 이 칸을 모르고 30초를 쓴다.

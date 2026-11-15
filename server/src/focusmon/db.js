@@ -220,6 +220,15 @@ export async function writeAudit(a, now = Date.now()) {
     return false;
   }
 }
+/**
+ * 용량 상한을 넘었을 때(recorder housekeep) — 하루보다 오래된 회차의 **원문만** 한 조각 비운다(요약 · 판정은 남는다 · 반증 F9-b: 정리가 지표만 지웠다).
+ * fm_audit 는 대상당 10회 · 90일이라 작다 — at 인덱스 없이 훑어도 된다. 비운 줄 수.
+ */
+export async function pruneAuditBlobs(olderThan, limit = 50) {
+  const db = await getDb();
+  if (!db) return 0;
+  try { return db.prepare('UPDATE fm_audit SET report = NULL WHERE rowid IN (SELECT rowid FROM fm_audit WHERE report IS NOT NULL AND at < ? LIMIT ?)').run(olderThan, limit).changes; } catch { return 0; }
+}
 /** 한 대상의 회차(최근부터 · 원문 없이). */
 export async function listAudits(target, limit = AUDIT_KEEP) {
   const db = await getDb();

@@ -1,13 +1,13 @@
-##DA BEGIN 1
-RHEL 디스크 오류 이력 점검 | vm | 2026-11-15T00:06:07.530988+00:00
-보고서 | /tmp/dvc-disk-audit.JgFWytvY/rhel_disk_audit_20261115_000607_530561.txt
+##DA BEGIN 2 2bd51359c93ae937
+RHEL 디스크 오류 이력 점검 | vm | 2026-11-15T01:10:46.283770+00:00
+보고서 | /tmp/dvc-disk-audit.HE3wrS6J/rhel_disk_audit_20261115_011046_283437.txt
 
 [로그 수집 범위]
   /usr/bin/journalctl --list-boots --no-pager | 종료값 0 | No journal files were found.
   journalctl 전체 보존 부트 | 0줄, 후보 0줄, 해석 실패 0줄 | 시간 비교 불가 ~ 시간 비교 불가
   수집 불가 | /var/log/messages*
   /usr/bin/dmesg --color=never | 종료값 0
-  dmesg (현재 부트, 상대 시간) | 375줄, 후보 0줄, 해석 실패 0줄 | 시간 비교 불가 ~ 시간 비교 불가
+  dmesg (현재 부트, 상대 시간) | 380줄, 후보 0줄, 해석 실패 0줄 | 시간 비교 불가 ~ 시간 비교 불가
 
 [PERC/StorCLI 조회]
   수집 불가 | perccli/storcli (RAID 구성이라면 물리 디스크 가시성 제한)
@@ -55,9 +55,9 @@ RHEL 디스크 오류 이력 점검 | vm | 2026-11-15T00:06:07.530988+00:00
   SMART RAID 인덱스는 물리 슬롯이나 과거 교체 이력으로 사용하지 않음.
   서로 다른 소스에 복제된 기록은 각각 표시. 건수는 장애 횟수가 아님.
 
-완료 | /tmp/dvc-disk-audit.JgFWytvY/rhel_disk_audit_20261115_000607_530561.txt
-##DA EXIT 0
-##DA DISKS
+완료 | /tmp/dvc-disk-audit.HE3wrS6J/rhel_disk_audit_20261115_011046_283437.txt
+##DA 2bd51359c93ae937 EXIT 0
+##DA 2bd51359c93ae937 DISKS
 NAME="zram0" TYPE="disk" MODEL="" SERIAL="" WWN="" SIZE="0B" ROTA="0" TRAN=""
 NAME="vda" TYPE="disk" MODEL="" SERIAL="" WWN="" SIZE="256G" ROTA="1" TRAN="virtio"
 NAME="vdb" TYPE="disk" MODEL="" SERIAL="" WWN="" SIZE="9.5M" ROTA="1" TRAN="virtio"
@@ -65,5 +65,4 @@ NAME="vdc" TYPE="disk" MODEL="" SERIAL="" WWN="" SIZE="382.3M" ROTA="1" TRAN="vi
 NAME="vdd" TYPE="disk" MODEL="" SERIAL="" WWN="" SIZE="49.5M" ROTA="1" TRAN="virtio"
 NAME="vde" TYPE="disk" MODEL="" SERIAL="" WWN="" SIZE="752K" ROTA="1" TRAN="virtio"
 NAME="vdf" TYPE="disk" MODEL="" SERIAL="" WWN="" SIZE="5.8M" ROTA="1" TRAN="virtio"
-##DA RAID
-##DA END
+##DA 2bd51359c93ae937 END

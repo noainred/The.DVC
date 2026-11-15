@@ -1,6 +1,6 @@
-##DA BEGIN 1
-RHEL 디스크 오류 이력 점검 | vm | 2026-11-15T00:06:02.149949+00:00
-보고서 | /tmp/dvc-disk-audit.8bjR0va6/rhel_disk_audit_20261115_000602_149592.txt
+##DA BEGIN 2 033a303884190669
+RHEL 디스크 오류 이력 점검 | vm | 2026-11-15T01:10:46.175363+00:00
+보고서 | /tmp/dvc-disk-audit.CixQoutY/rhel_disk_audit_20261115_011046_174969.txt
 
 [로그 수집 범위]
   /usr/bin/journalctl --list-boots --no-pager | 종료값 0 | No journal files were found.
@@ -8,7 +8,7 @@ RHEL 디스크 오류 이력 점검 | vm | 2026-11-15T00:06:02.149949+00:00
   /var/log/messages | 6줄, 후보 4줄, 해석 실패 0줄 | 시간 비교 불가 ~ 시간 비교 불가
   /var/log/messages-20261004.gz | 1줄, 후보 1줄, 해석 실패 0줄 | 시간 비교 불가 ~ 시간 비교 불가
   /usr/bin/dmesg --color=never | 종료값 0
-  dmesg (현재 부트, 상대 시간) | 375줄, 후보 0줄, 해석 실패 0줄 | 시간 비교 불가 ~ 시간 비교 불가
+  dmesg (현재 부트, 상대 시간) | 380줄, 후보 0줄, 해석 실패 0줄 | 시간 비교 불가 ~ 시간 비교 불가
 
 [PERC/StorCLI 조회]
   /opt/MegaRAID/perccli/perccli64 show J | 종료값 0
@@ -22,7 +22,7 @@ RHEL 디스크 오류 이력 점검 | vm | 2026-11-15T00:06:02.149949+00:00
     /c0/e32/s5 | other error count = 0
     /c0/e32/s5 | predictive failure count = 0
     /c0/e32/s5 | s.m.a.r.t alert flagged by drive = No
-  /opt/MegaRAID/perccli/perccli64 /c0 show events file=/tmp/rhel-disk-audit-0i2l_4h8/events_0.txt | 종료값 0
+  /opt/MegaRAID/perccli/perccli64 /c0 show events file=/tmp/rhel-disk-audit-0hplvxkl/events_0.txt | 종료값 0
   /c0 컨트롤러 이벤트 | 16줄, 후보 1줄, 해석 실패 0줄 | 시간 비교 불가 ~ 시간 비교 불가
 
 [OS/SMART 조회]
@@ -104,9 +104,9 @@ RHEL 디스크 오류 이력 점검 | vm | 2026-11-15T00:06:02.149949+00:00
   SMART RAID 인덱스는 물리 슬롯이나 과거 교체 이력으로 사용하지 않음.
   서로 다른 소스에 복제된 기록은 각각 표시. 건수는 장애 횟수가 아님.
 
-완료 | /tmp/dvc-disk-audit.8bjR0va6/rhel_disk_audit_20261115_000602_149592.txt
-##DA EXIT 0
-##DA DISKS
+완료 | /tmp/dvc-disk-audit.CixQoutY/rhel_disk_audit_20261115_011046_174969.txt
+##DA 033a303884190669 EXIT 0
+##DA 033a303884190669 DISKS
 NAME="zram0" TYPE="disk" MODEL="" SERIAL="" WWN="" SIZE="0B" ROTA="0" TRAN=""
 NAME="vda" TYPE="disk" MODEL="" SERIAL="" WWN="" SIZE="256G" ROTA="1" TRAN="virtio"
 NAME="vdb" TYPE="disk" MODEL="" SERIAL="" WWN="" SIZE="9.5M" ROTA="1" TRAN="virtio"
@@ -114,7 +114,7 @@ NAME="vdc" TYPE="disk" MODEL="" SERIAL="" WWN="" SIZE="382.3M" ROTA="1" TRAN="vi
 NAME="vdd" TYPE="disk" MODEL="" SERIAL="" WWN="" SIZE="49.5M" ROTA="1" TRAN="virtio"
 NAME="vde" TYPE="disk" MODEL="" SERIAL="" WWN="" SIZE="752K" ROTA="1" TRAN="virtio"
 NAME="vdf" TYPE="disk" MODEL="" SERIAL="" WWN="" SIZE="5.8M" ROTA="1" TRAN="virtio"
-##DA RAID
+##DA 033a303884190669 RAID
 Drive /c0/e32/s4 :
 32:4     4 Onln   0 3.637 TB SATA HDD N   N  512B ST4000NM0035-1V4107 U  -
 Drive /c0/e32/s4 - Detailed Information :
@@ -131,4 +131,4 @@ Drive /c0/e32/s5 Device attributes :
 SN = ZC1A2B3C
 Model Number = ST4000NM0035-1V4107
 WWN = 5000C500A1B2C3D4
-##DA END
+##DA 033a303884190669 END

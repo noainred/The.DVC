@@ -39,8 +39,13 @@ export function programSha() { const b = programBytes(); return b ? sha256(b) : 
 
 /**
  * 감싸는 실행 파일(POSIX sh · root 로 돈다 · 인자 없이만). 출력은 표준 출력 한 줄씩:
- *   ##DA BEGIN 1 → (프로그램 보고서 줄들) → ##DA EXIT <rc> → ##DA DISKS → (lsblk -P 줄) → [##DA RAID → (perccli/storcli 줄)] → ##DA END
- *   오류: ##DA ERR args|nopython|tmp
+ *   ##DA BEGIN 2 <표지> → (프로그램 보고서 줄들) → ##DA <표지> EXIT <rc> → ##DA <표지> DISKS → (lsblk -P 줄) → [##DA <표지> RAID → (perccli/storcli 줄)] → ##DA <표지> END
+ *   오류(첫 줄 · 프로그램이 돌기 전): ##DA ERR args|nopython|busy|tmp|nonce
+ *  · **표지 = 실행마다 만드는 난수 16자**(v3.11.0 반증 F2) — 보고서에는 대상 서버의 로그 내용이 들어가고, 일반 계정도 줄바꿈이 든 로그를 남길 수 있다.
+ *    해석은 첫 줄의 표지가 붙은 `##DA` 줄만 표지로 받는다(로그는 실행 전에 쓰였으므로 그 난수를 알 수 없다). 표지는 변수로만 두고 내보내지 않는다.
+ *  · 겹쳐 돌지 않게 /run 의 잠금(flock) — 채널이 끊긴 뒤에도 root 프로그램은 시한까지 돈다(같은 서버를 곧바로 다시 누르면 'busy').
+ *  · SIGPIPE 도 끝내기 처리(trap) — dash 계열 sh 에서 채널이 먼저 닫히면 EXIT trap 없이 죽어 임시 폴더가 남았다(반증 F9-d).
+ *  · python 은 -I -S(사용자 · site 경로를 보지 않는다 — 프로그램은 표준 라이브러리만 쓴다).
  *  · 프로그램 시한은 timeout -s KILL(채널이 끊겨도 root 프로세스가 끝없이 남지 않게 — 프로그램은 끊긴 파이프를 만나도 계속 돈다).
  *  · 우선순위 nice 19 · ionice best-effort 7(유휴 등급은 바쁜 서버에서 끝나지 않을 수 있어 쓰지 않는다).
  *  · 보고서 파일은 임시 폴더에 쓰이고 끝나면 폴더째 지운다(대상 서버에 남기지 않는다).
@@ -57,26 +62,34 @@ PROG=${PROGRAM_PATH}
 if [ "$#" -ne 0 ]; then echo '##DA ERR args'; exit 64; fi
 PY=$(command -v python3 2>/dev/null)
 if [ -z "$PY" ]; then echo '##DA ERR nopython'; exit 69; fi
+if command -v flock >/dev/null 2>&1 && [ -d /run ] && [ -w /run ]; then
+  exec 9>/run/dvc-disk-audit.lock
+  flock -n 9 || { echo '##DA ERR busy'; exit 75; }
+fi
+N=$(od -An -N8 -tx1 /dev/urandom 2>/dev/null | tr -dc '0-9a-f')
+case "$N" in ''|*[!0-9a-f]*) echo '##DA ERR nonce'; exit 70 ;; esac
+if [ "\${#N}" -ne 16 ]; then echo '##DA ERR nonce'; exit 70; fi
 D=$(mktemp -d /tmp/dvc-disk-audit.XXXXXXXX) || { echo '##DA ERR tmp'; exit 70; }
 trap 'rm -rf "$D"' EXIT
 trap 'exit 143' HUP INT TERM
+trap 'exit 141' PIPE
 IO=''
 if command -v ionice >/dev/null 2>&1; then IO='ionice -c2 -n7'; fi
-echo '##DA BEGIN 1'
+echo "##DA BEGIN 2 $N"
 cd "$D" || exit 70
-timeout -s KILL ${WRAPPER_TIMEOUT_S} nice -n 19 $IO "$PY" -I "$PROG" --output-dir "$D" --timeout ${PROGRAM_TIMEOUT_S} 2>&1
-echo "##DA EXIT $?"
-echo '##DA DISKS'
+timeout -s KILL ${WRAPPER_TIMEOUT_S} nice -n 19 $IO "$PY" -I -S "$PROG" --output-dir "$D" --timeout ${PROGRAM_TIMEOUT_S} 2>&1
+echo "##DA $N EXIT $?"
+echo "##DA $N DISKS"
 lsblk -d -n -P -o NAME,TYPE,MODEL,SERIAL,WWN,SIZE,ROTA,TRAN 2>/dev/null | head -n 512 || true
 if ! lsblk -d -n -o SERIAL >/dev/null 2>&1; then lsblk -d -n -P -o NAME,TYPE,MODEL,WWN,SIZE,ROTA,TRAN 2>/dev/null | head -n 512; fi
 for T in perccli64 perccli storcli64 storcli /opt/MegaRAID/perccli/perccli64 /opt/MegaRAID/perccli/perccli /opt/MegaRAID/storcli/storcli64 /opt/MegaRAID/storcli/storcli /opt/lsi/perccli/perccli64 /opt/lsi/storcli/storcli64; do
   P=$(command -v "$T" 2>/dev/null) || continue
   [ -n "$P" ] || continue
-  echo '##DA RAID'
+  echo "##DA $N RAID"
   timeout -s KILL ${RAID_TIMEOUT_S} "$P" /call/eall/sall show all 2>/dev/null | grep -E '^Drive /c[0-9]|^ *[0-9]+:[0-9]+ +[0-9]+ |^(SN|WWN|Model Number) *=' | head -n 8000
   break
 done
-echo '##DA END'
+echo "##DA $N END"
 `;
 export function wrapperSha() { return sha256(Buffer.from(WRAPPER_TEXT, 'utf8')); }
 
@@ -85,6 +98,8 @@ export function wrapperSha() { return sha256(Buffer.from(WRAPPER_TEXT, 'utf8'));
  *  · sudo -n -l <명령> 은 비밀번호 없이 그 명령이 허용되는지만 본다(실행하지 않는다).
  */
 export const READY_COMMAND = [
+  // 실행 파일과 같은 PATH(반증 F6) — 수집 계정의 PATH 에만 있는 python3(/usr/local/bin · SCL)는 실행 파일이 찾지 못한다
+  'PATH=/usr/sbin:/usr/bin:/sbin:/bin; export PATH',
   'LC_ALL=C; export LC_ALL',
   "echo '##DR 1'",
   'P=$(command -v python3 2>/dev/null)',

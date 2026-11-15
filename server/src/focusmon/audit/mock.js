@@ -34,7 +34,8 @@ function readyLines(name) {
 
 function runLines(name) {
   const st = STATE[name] || 'clean'; const hw = hwOf(name); const sd = seedOf(name);
-  const L = ['##DA BEGIN 1', `RHEL 디스크 오류 이력 점검 | ${name} | 2026-11-15T08:12:00.000000+09:00`, '보고서 | /tmp/dvc-disk-audit.demo/rhel_disk_audit_demo.txt', '', '[로그 수집 범위]',
+  const N = ((sd >>> 0).toString(16).padStart(8, '0') + ((sd * 2654435761) >>> 0).toString(16).padStart(8, '0')).slice(0, 16); // 실행 표지(데모 — 이름에서 고정)
+  const L = [`##DA BEGIN 2 ${N}`, `RHEL 디스크 오류 이력 점검 | ${name} | 2026-11-15T08:12:00.000000+09:00`, '보고서 | /tmp/dvc-disk-audit.demo/rhel_disk_audit_demo.txt', '', '[로그 수집 범위]',
     '  /usr/bin/journalctl --list-boots --no-pager | 종료값 0',
     `  journalctl 전체 보존 부트 | ${(800_000 + (sd % 2_000_000)).toLocaleString('en-US')}줄, 후보 ${st === 'hit' ? 2 : st === 'iohit' ? 6 : 0}줄, 해석 실패 0줄 | 2026-08-19T03:10:00+00:00 ~ 2026-11-14T23:11:00+00:00`,
     `  /var/log/messages | ${(40_000 + (sd % 90_000)).toLocaleString('en-US')}줄, 후보 ${st === 'hit' ? 1 : 0}줄, 해석 실패 0줄 | 시간 비교 불가 ~ 시간 비교 불가`,
@@ -79,10 +80,10 @@ function runLines(name) {
   if (st === 'hit') L.push(`  [파일시스템 생성 명령] journalctl 전체 보존 부트:2210773 | 2026-10-28T02:14:51+00:00 | 식별자 없음 | 장치 /dev/sdc1 | sudo boot=7c1e9a host=${name} | ops-kim : TTY=pts/1 ; USER=root ; COMMAND=/usr/sbin/mkfs.xfs /dev/sdc1`);
   L.push('', '[해석 범위]', `  확인하지 못했거나 일부만 수집한 소스/항목 ${phys.length ? (st === 'hit' ? 1 : 0) : 1}개.`,
     '  삭제·회전·덮어쓰기·휘발성 로그, 오프호스트 로그 및 다른 journal namespace는 범위 밖.', '  일반 I/O 오류는 케이블·경로·컨트롤러·가상디스크 등에서도 발생할 수 있음.',
-    '  서로 다른 소스에 복제된 기록은 각각 표시. 건수는 장애 횟수가 아님.', '', '완료 | /tmp/dvc-disk-audit.demo/rhel_disk_audit_demo.txt', '##DA EXIT 0', '##DA DISKS',
+    '  서로 다른 소스에 복제된 기록은 각각 표시. 건수는 장애 횟수가 아님.', '', '완료 | /tmp/dvc-disk-audit.demo/rhel_disk_audit_demo.txt', `##DA ${N} EXIT 0`, `##DA ${N} DISKS`,
     `NAME="sda" TYPE="disk" MODEL="${phys.length ? 'PERC H740P Mini' : 'Virtual disk'}" SERIAL="" WWN="0x6d0946607a1b2c00271f3e5a0c9d4411" SIZE="${phys.length ? '14.6T' : '100G'}" ROTA="1" TRAN=""`);
-  if (phys.length) { L.push('##DA RAID'); for (const p of phys) L.push(`Drive ${p.slot} :`, `${p.slot.split('/e')[1].replace('/s', ':')}     ${p.slot.split('/s')[1]} Onln   0 ${p.size} SATA ${p.med} N   N  512B ${p.model} U  -`, `Drive ${p.slot} Device attributes :`, `SN = ${p.sn}`, `Model Number = ${p.model}`, `WWN = ${p.wwn.toUpperCase()}`); }
-  L.push('##DA END');
+  if (phys.length) { L.push(`##DA ${N} RAID`); for (const p of phys) L.push(`Drive ${p.slot} :`, `${p.slot.split('/e')[1].replace('/s', ':')}     ${p.slot.split('/s')[1]} Onln   0 ${p.size} SATA ${p.med} N   N  512B ${p.model} U  -`, `Drive ${p.slot} Device attributes :`, `SN = ${p.sn}`, `Model Number = ${p.model}`, `WWN = ${p.wwn.toUpperCase()}`); }
+  L.push(`##DA ${N} END`);
   return L;
 }
 

@@ -1,7 +1,7 @@
 ##DR 1
 ##DR py 3.13.18
 ##DR file /usr/local/libexec/dvc/rhel_disk_audit.py 1296f3e5b4914fdcd0a94b13eaf85825ae8261fe5862c4bbfe1768b2d70c038c 0:0:644
-##DR file /usr/local/sbin/dvc-disk-audit 0a17a22745246fa487ae204978df26a216b4cb2b0e9a3302c5406350fb280fb6 0:0:755
+##DR file /usr/local/sbin/dvc-disk-audit da12cce07aaa85f28cde3fe0a43d6656be494f221446da3c44468bd5d71fd4d0 0:0:755
 ##DR dir /usr/local/libexec/dvc 0:0:755
 ##DR dir /usr/local/libexec 0:0:755
 ##DR dir /usr/local/sbin 0:0:755

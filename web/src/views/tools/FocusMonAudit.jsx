@@ -14,7 +14,7 @@ import { Seg, Badge, copyText } from './FocusMonBulk.jsx';
 import { usePoll } from './focusMonPoll.js';
 import {
   DASH, AUDIT_VIEWS, AUDIT_VIEW_KEYS, READY_TEXT, OUTCOME_TEXT, PHASE_NOTE, countText, whenText, durText, nodeText, corpText, smodelText, rowStatus, canRunRow, lastCounts,
-  rateText, chipCounts, chipFilter, scopeFilter, scopeText, notReadyText, VERDICT_TONE, KIND_TONE, installSteps,
+  rateText, chipCounts, chipFilter, scopeFilter, scopeText, notReadyText, VERDICT_TONE, KIND_TONE, installSteps, notDoneText, diskCountText,
 } from './focusMonAuditText.js';
 
 const ls = () => { try { return window.localStorage; } catch { return null; } };
@@ -77,12 +77,15 @@ function Result({ row, now, labels }) {
         </div>
         <div className="fm-row">
           <span className="fm-lbl">회차</span>
-          {(runsQ.data?.runs || [row.last]).map((x) => <button key={x.id} type="button" className={`fm-chip ${x.id === runId ? 'on' : ''}`} aria-pressed={x.id === runId} onClick={() => setRunId(x.id)}>{whenText(x.at, now)}</button>)}
+          {(runsQ.data?.runs || [row.last]).map((x) => <button key={x.id} type="button" className={`fm-chip ${x.id === runId ? 'on' : ''}`} aria-pressed={x.id === runId} title={x.oldEndpoint ? '접속처(주소 · 포트 · 계정 · 담당 노드)가 바뀌기 전의 회차' : undefined} onClick={() => setRunId(x.id)}>{whenText(x.at, now)}{x.oldEndpoint ? ' · 예전 접속처' : ''}</button>)}
           <button type="button" className="fm-btn sm" onClick={() => downloadFile(`/tools/focus-mon/audit/run/${encodeURIComponent(runId)}/report.txt`).catch(() => {})}>보고서 원문 받기(.txt)</button>
         </div>
       </div>
       <span className="fm-dim fm-pad-x">{whenText(run.at, now)} · 걸린 시간 {durText(s.ms ?? (run.ended && run.at ? run.ended - run.at : null))} · 실행 노드 {nodeText(run.node)} · 프로그램 판본 {run.ver || DASH} · 실행한 사람 {run.by || DASH}{s.outBytes ? ` · 출력 ${Math.round(s.outBytes / 1024).toLocaleString('ko-KR')} KB` : ''}{s.truncated ? ' · 출력이 커서 구획마다 일부를 생략해 보관' : ''}</span>
-      {!done ? <div className="fm-ban w fm-mar-x">{OUTCOME_TEXT[run.outcome] || run.outcome}{run.rc != null ? `(종료값 ${run.rc})` : ''} — 끝까지 돌지 않은 회차라 숫자를 합계로 쓰지 않습니다. 받은 데까지의 원문은 ‘보고서 원문 받기’ 로 볼 수 있습니다.</div> : null}
+      {!done ? <div className="fm-ban w fm-mar-x">{notDoneText(run)}</div> : null}
+      {d?.shape?.length ? <div className="fm-ban w fm-mar-x">보고서 모양 검사: {d.shape.join(' · ')}</div> : null}
+      {d?.run?.oldEndpoint ? <div className="fm-ban fm-mar-x">이 회차는 접속처(주소 · 포트 · 계정 · 담당 노드)가 바뀌기 전에 돈 것입니다 — 지금 서버의 결과로 쓰지 않습니다.</div> : null}
+      {done && s.disksKnown === false ? <div className="fm-ban w fm-mar-x">상세 근거가 보관 상한에서 잘려 디스크별 기록 수를 모릅니다 — 묶어 보기의 비율에서 이 서버의 디스크를 뺐습니다(서버 합계는 판정 줄의 건수).</div> : null}
       {detQ.error ? <div className="fm-pad-x"><ErrorBox error={detQ.error} /></div> : !d ? <div className="fm-pad-x"><Loading /></div> : (
         <>
           <div className="fm-pad-x fm-verdicts">
@@ -243,7 +246,7 @@ export function AuditTab({ setMsg }) {
               <thead><tr><th>디스크 모델</th><th>종류 · 크기</th><th className="fm-r">디스크</th><th className="fm-r">서버</th><th>법인</th><th className="fm-r">기록 있는 디스크</th><th className="fm-r">매체 오류</th><th className="fm-r">재할당</th><th>비율</th><th>어디서 봤나</th></tr></thead>
               <tbody>{d.views.disk.map((x) => (
                 <tr key={x.model} className="fm-click" onClick={() => { setScope({ k: 'disk', key: x.model, name: x.model }); setView('server'); }}>
-                  <td className="fm-mono" data-sort={x.model}><b>{x.model}</b></td><td className="fm-dim">{x.kind || DASH}</td><td className="fm-r fm-num">{x.n}</td><td className="fm-r fm-num">{x.servers}</td><td className="fm-brk">{x.corps.join(' · ')}</td>
+                  <td className="fm-mono" data-sort={x.model}><b>{x.model}</b></td><td className="fm-dim">{x.kind || DASH}</td><td className="fm-r fm-num" data-sort={x.n}>{diskCountText(x)}</td><td className="fm-r fm-num">{x.servers}</td><td className="fm-brk">{x.corps.join(' · ')}</td>
                   <td className={`fm-r fm-num ${x.bad ? 'fm-bad' : ''}`}>{x.bad}</td><td className="fm-r fm-num">{x.mediaN}</td><td className="fm-r fm-num">{x.reallocN}</td>
                   <td data-sort={x.rate ?? ''}><span className="fm-rate"><i><u style={{ width: `${x.rate != null ? Math.min(100, Math.max(x.bad ? 3 : 0, x.rate)) : 0}%` }} /></i><span className="fm-num">{rateText(x, d.limits.rateMinDisks)}</span></span></td>
                   <td className="fm-dim fm-brk">{x.where.join(' · ') || '기록 없음'}</td>
@@ -258,7 +261,7 @@ export function AuditTab({ setMsg }) {
             {(outer === 'corp' ? d.views.crossCorp : d.views.crossModel).map((g) => (
               <div key={g.key || '-'} className="fm-col">
                 <div className="fm-row fm-xhead"><b>{g.name}</b>
-                  <span className="fm-badge off">{outer === 'corp' ? `서버 ${g.n}대 중 결과 ${g.done}대 · 물리 디스크 ${g.total.n}개` : `${g.total.kind || DASH} · 디스크 ${g.total.n}개 · 법인 ${g.corps}곳`}</span>
+                  <span className="fm-badge off">{outer === 'corp' ? `서버 ${g.n}대 중 결과 ${g.done}대 · 물리 디스크 ${g.total.n}개${g.total.unknown ? ` · 기록 수 모름 ${g.total.unknown}개` : ''}` : `${g.total.kind || DASH} · 디스크 ${g.total.n}개${g.total.unknown ? ` · 기록 수 모름 ${g.total.unknown}개` : ''} · 법인 ${g.corps}곳`}</span>
                   {g.total.bad ? <span className="fm-badge bad">기록 있는 디스크 {g.total.bad}개</span> : null}
                   <span className="fm-dim">{outer === 'corp' ? (g.noResult?.length ? `결과 없는 서버: ${g.noResult.slice(0, 4).join(' · ')}${g.noResult.length > 4 ? ` 외 ${g.noResult.length - 4}` : ''}` : '전 서버 결과 있음') : `전체 ${rateText(g.total, d.limits.rateMinDisks)}`}</span>
                 </div>
@@ -273,7 +276,7 @@ export function AuditTab({ setMsg }) {
                         <tr key={x.key || '-'} className="fm-click" onClick={() => { setScope({ k: 'cross', corp: corp.key, corpName: corp.name, model }); setView('server'); }}>
                           <td className={outer === 'corp' ? 'fm-mono' : ''} data-sort={x.name}>{x.name}</td>
                           <td className="fm-dim fm-brk">{outer === 'corp' ? (x.kind || DASH) : x.serverNames.join(' · ')}</td>
-                          <td className="fm-r fm-num">{x.n}</td><td className="fm-r fm-num">{x.servers}</td>
+                          <td className="fm-r fm-num" data-sort={x.n}>{diskCountText(x)}</td><td className="fm-r fm-num">{x.servers}</td>
                           <td className={`fm-r fm-num ${x.mediaN ? 'fm-bad' : ''}`}>{x.mediaN}</td><td className="fm-r fm-num">{x.reallocN}</td>
                           <td data-sort={x.bad}><span className="fm-rate"><i><u style={{ width: `${x.n ? Math.min(100, Math.max(x.bad ? 4 : 0, (x.bad / x.n) * 100)) : 0}%` }} /></i><span className="fm-num">{rateText(x, d.limits.rateMinDisks)}</span></span></td>
                           <td className="fm-dim fm-brk">{x.where.join(' · ') || '기록 없음'}</td>

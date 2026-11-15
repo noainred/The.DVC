@@ -4,6 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   DASH, AUDIT_VIEW_KEYS, READY_TEXT, rowStatus, canRunRow, lastCounts, rateText, chipCounts, chipFilter, scopeFilter, scopeText, notReadyText, installSteps, countText, durText,
+  notDoneText, diskCountText, OUTCOME_TEXT, ERROR_TEXT,
 } from './focusMonAuditText.js';
 import { TABS, EDIT_FIELDS, editChanges } from './focusMonText.js';
 
@@ -68,5 +69,18 @@ describe('디스크 점검 — 글 · 표시 규칙', () => {
     const t = installSteps({ program: '/p.py', wrapper: '/w', sudoers: '/s', run: 'sudo -n /w' }, { program: 'abc', wrapper: 'def' });
     expect(t).toContain('sudo -n /w'); expect(t).toContain('rm -f /s /w /p.py'); expect(t).toContain('프로그램 abc');
     expect(t.includes('`')).toBe(false);
+  });
+
+  it('반증 반영 — 끝 상태 문구 · 시작 실패 까닭 · 모르는 디스크 수(0 이 아님)', () => {
+    for (const k of ['report-shape', 'wrapper-busy', 'wrapper-nonce']) expect(OUTCOME_TEXT[k]).toBeTruthy();
+    for (const k of ['busy', 'queue-full', 'too-big']) expect(ERROR_TEXT[k]).toBeTruthy();
+    expect(notDoneText({ outcome: 'done' })).toBe('');
+    expect(notDoneText({ outcome: 'report-shape', rc: 0 })).toMatch(/줄바꿈이 든 기록/);
+    expect(notDoneText({ outcome: 'no-start', rc: null, summary: { stderr: 'sudo: unable to execute' } })).toMatch(/까닭: sudo: unable to execute/);
+    expect(rowStatus(row({ ready: { state: 'ready' }, last: { outcome: 'no-start', summary: { stderr: 'sudo: x' } } })).sub).toBe('sudo: x');
+    expect(diskCountText({ n: 12, unknown: 0 })).toBe('12');
+    expect(diskCountText({ n: 0, unknown: 4 })).toBe('0 · 모름 4');
+    expect(diskCountText(null)).toBe(DASH);
+    expect(notDoneText({ outcome: 'report-shape' }).includes('`')).toBe(false);
   });
 });

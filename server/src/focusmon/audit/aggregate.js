@@ -6,6 +6,7 @@
  *  · 숫자는 **끝까지 돈 점검(outcome 'done')** 만 더한다 — 시한 초과 · 중단 · 오류 회차의 일부 숫자를 합계에 넣지 않는다(‘—’ 와 0 을 섞지 않는다).
  *  · 디스크는 식별자(SN · WWN)로 하나씩 센다(summarize 가 이미 하나로 묶었다). 식별자가 없어 디스크에 붙이지 못한 근거는 디스크 모델 집계에 넣지 않고 따로 센다.
  *  · 비율은 디스크 10개 이상일 때만(`RATE_MIN_DISKS`) — 그 밖은 '기록 있는 수 / 본 수'.
+ *  · 상세 근거가 잘린 회차(summary.disksKnown false)의 디스크는 기록 수를 모른다(null) — n · bad · 비율에 넣지 않고 `unknown` 으로 따로 센다(반증 F5 — 0 으로 세면 '0%').
  */
 export const RATE_MIN_DISKS = 10;
 export const NO_CORP = '법인 미지정';
@@ -40,22 +41,27 @@ export function groupRows(rows, keyOf, order = []) {
     });
 }
 
-/** 서버 행의 물리 디스크(끝까지 돈 회차만) → [{model, size, media, bad, mediaN, reallocN, ioN, slot, sn}] */
+/** 서버 행의 물리 디스크(끝까지 돈 회차만) → [{model, size, media, known, bad, mediaN, reallocN, ioN, label}] — known false 면 기록 수를 모른다. */
 function disksOf(r) {
   const d = doneOf(r);
   if (!d || !Array.isArray(d.summary?.disks)) return [];
-  return d.summary.disks.map((x) => ({ model: x.model || NO_MODEL, size: x.size || '', media: x.media || '', mediaN: x.mediaN | 0, reallocN: x.reallocN | 0, ioN: x.ioN | 0, label: x.label || '', bad: (x.mediaN | 0) + (x.reallocN | 0) + (x.ioN | 0) > 0 }));
+  const all = d.summary.disksKnown !== false;
+  return d.summary.disks.map((x) => {
+    const known = all && Number.isFinite(x.mediaN) && Number.isFinite(x.reallocN) && Number.isFinite(x.ioN);
+    return { model: x.model || NO_MODEL, size: x.size || '', media: x.media || '', known, mediaN: known ? x.mediaN : 0, reallocN: known ? x.reallocN : 0, ioN: known ? x.ioN : 0, label: x.label || '', bad: known && x.mediaN + x.reallocN + x.ioN > 0 };
+  });
 }
 const kindText = (list) => {
   const c = new Map(); for (const d of list) { const k = [d.media, d.size].filter(Boolean).join(' · '); if (k) c.set(k, (c.get(k) || 0) + 1); }
   return [...c.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || '';
 };
 function foldDisks(parts) {
-  const all = parts.flatMap((p) => p.disks);
+  const seen = parts.flatMap((p) => p.disks);
+  const all = seen.filter((d) => d.known);
   const bad = all.filter((d) => d.bad);
   return {
-    n: all.length, bad: bad.length, mediaN: all.reduce((a, d) => a + d.mediaN, 0), reallocN: all.reduce((a, d) => a + d.reallocN, 0), ioN: all.reduce((a, d) => a + d.ioN, 0),
-    servers: new Set(parts.filter((p) => p.disks.length).map((p) => p.row.id)).size, kind: kindText(all),
+    n: all.length, unknown: seen.length - all.length, bad: bad.length, mediaN: all.reduce((a, d) => a + d.mediaN, 0), reallocN: all.reduce((a, d) => a + d.reallocN, 0), ioN: all.reduce((a, d) => a + d.ioN, 0),
+    servers: new Set(parts.filter((p) => p.disks.length).map((p) => p.row.id)).size, kind: kindText(seen),
     where: bad.slice(0, 4).map((d) => `${d.srv} ${d.label}`.trim()), rate: all.length >= RATE_MIN_DISKS ? Math.round((bad.length / all.length) * 1000) / 10 : null,
   };
 }

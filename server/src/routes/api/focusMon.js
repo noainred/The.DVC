@@ -196,7 +196,7 @@ api.put('/tools/focus-mon/targets/:id', adminOnly, fullRwOnly, demoBlockWrite, (
   if (!r.ok) return res.status(r.code === 'not-found' ? 404 : r.code === 'registry-unreadable' ? 503 : 400).json(r);
   if (!r.changes.length) return res.json({ ...r, cleared: false });
   // v2.980(사용자 '등록된 서버 수정하는 기능 추가'): 접속처가 바뀌면 바로 다시 맞추고 예전 접속처의 상태 · 시험 결과를 지운다.
-  if (r.moved) { targetEndpointChanged(r.before, r.target); auditForgetReadiness(r.target.id); } // v3.11.0 디스크 점검 준비 상태는 예전 접속처의 것
+  if (r.moved) { targetEndpointChanged(r.before, r.target); auditForgetReadiness(r.target.id); } // v3.11.0 디스크 점검 준비 상태 · 진행 중 작업은 예전 접속처의 것
   const named = r.changes.map((c) => (c.k === 'corp' ? { ...c, from: c.from ? (cr.name(c.from) || c.from) : '', to: c.to ? (cr.name(c.to) || c.to) : '' } : c));
   logAudit({ user: req.user?.username, action: 'focus-mon.target.update', target: r.target.name, detail: `${changesText(named)}${r.moved ? ' (접속처 바뀜)' : ''}`, ip: req.ip });
   res.json({ ok: true, target: r.target, moved: r.moved, changes: r.changes, cleared: r.moved });
@@ -271,6 +271,7 @@ api.post('/tools/focus-mon/targets/import', adminOnly, fullRwOnly, csvPerm, demo
   const b = req.body || {};
   const r = registry.applyCsv(String(b.text ?? ''), { agents: knownAgentNames(), by: req.user?.username, mode: b.mode === 'valid' ? 'valid' : 'all', update: b.update === true, corps: corpResolver().list });
   if (!r.ok) return res.status(r.code === 'registry-unreadable' ? 503 : 400).json(r);
+  for (const id of r.moved || []) auditForgetReadiness(id); // v3.11.0 디스크 점검 — 접속처가 바뀐 대상의 작업 · 준비 상태(반증 F7)
   logAudit({ user: req.user?.username, action: 'focus-mon.target.import', target: 'focus-mon', detail: `새로 ${r.added}대 · 갱신 ${r.updated}대 · 그대로 ${r.same}대 · 건너뜀 ${r.skipped}줄${r.moved.length ? ` · 접속처 바뀜 ${r.moved.length}대` : ''}`, ip: req.ip });
   res.json(r);
 });
@@ -326,6 +327,7 @@ api.post('/tools/focus-mon/targets/move', adminOnly, fullRwOnly, demoBlockWrite,
   const agents = knownAgentNames();
   const r = registry.moveTargets({ from: String(b.from ?? ''), to: String(b.to ?? ''), ids: Array.isArray(b.ids) ? b.ids : null }, { agents });
   if (!r.ok) return res.status(r.code === 'registry-unreadable' ? 503 : 400).json(r);
+  for (const id of r.moved || []) auditForgetReadiness(id); // v3.11.0 디스크 점검 — 담당 노드가 바뀐 대상의 작업 · 준비 상태(반증 F7 — 옛 노드로 고정된 작업은 아무에게도 배달되지 않는다)
   if (r.moved.length) {
     logAudit({ user: req.user?.username, action: 'focus-mon.target.move', target: 'focus-mon', detail: `${String(b.from || '') || '중앙'} → ${String(b.to || '') || '중앙'} · ${r.moved.length}대${r.skipped ? ` · 겹쳐 건너뜀 ${r.skipped}대` : ''}`, ip: req.ip });
     if (b.to) wakeEdge(String(b.to)).catch(() => {});

@@ -9,7 +9,8 @@
  *  · 실행 · 준비 확인 = admin + 조회 · 쓰기 모두 전체 범위(fullReadWriteScopeOnly) + 데모 계정 차단 · 감사. 실행은 대상 서버에서 sudo 로 고정 명령 하나를 부른다.
  *  · 설치 파일 내려받기 = admin + 전체 범위 · 감사(비밀 없음 — 프로그램 · 실행 파일 · sudoers 한 줄을 만드는 셸 파일).
  *  · 요청 본문으로 주소 · 계정을 받지 않는다 — 대상은 등록부에서만. 범위 밖 · 없는 대상은 404.
- *  · 등록부를 못 읽었으면 503(registryUnreadable).
+ *  · 등록부를 못 읽었으면 503(registryUnreadable) — 본 탭 · 진행 중 작업 · 회차 목록 · 회차 보기 · 원문 내려받기 모두(반증 F9-i).
+ *  · '최근 결과' 는 **지금 접속처의 회차만**(회차 summary.ep = audit/service endpointKey) — 예전 주소로 돈 결과를 새 주소의 서버 값으로 쓰지 않는다.
  *  · 무거운 조회(요약 · 묶어 보기)는 화면이 탭을 열 때와 작업이 끝날 때만 부른다. 진행 중에는 가벼운 `audit/jobs`(메모리만)를 본다.
  */
 import zlib from 'node:zlib';
@@ -26,7 +27,7 @@ import * as A from '../../focusmon/audit/service.js';
 import * as db from '../../focusmon/db.js';
 import { corpResolver } from '../../focusmon/audit/corp.js';
 import { groupRows, byDiskModel, crossCorpModel, auditKpis, NO_CORP, NO_MODEL, NO_GROUP, RATE_MIN_DISKS } from '../../focusmon/audit/aggregate.js';
-import { splitRun, parseReport, parseDisks, evidenceKey, ERROR_KINDS } from '../../focusmon/audit/parse.js';
+import { splitRun, parseReport, parseDisks, evidenceKey, ERROR_KINDS, SHAPE_TEXT } from '../../focusmon/audit/parse.js';
 import { installScript, programSha, wrapperSha, PROGRAM_PATH, WRAPPER_PATH, SUDOERS_PATH, RUN_COMMAND } from '../../focusmon/audit/bundle.js';
 import crypto from 'node:crypto';
 
@@ -53,6 +54,9 @@ function lastView(r) {
   return { id: r.id, at: r.at, ended: r.ended, node: r.node, by: r.by, outcome: r.outcome, rc: r.rc, ver: r.ver, summary: rest };
 }
 
+/** 회차가 지금 접속처의 것인가(접속처 지문이 같을 때만 — 지문이 없는 회차도 쓰지 않는다). */
+const sameEndpoint = (row, t) => (row && row.summary && row.summary.ep && row.summary.ep === A.endpointKey(t) ? row : null);
+
 /** 서버 행(묶어 보기 · 표의 한 줄) — 판정 코어는 audit/service · aggregate 에 있고 여기는 모으기만 한다. */
 function rowsOf(targets, latest, cr) {
   return targets.map((t) => {
@@ -61,7 +65,7 @@ function rowsOf(targets, latest, cr) {
       id: t.id, name: t.name, host: t.host, agent: t.demo ? (t.agent || '') : (t.agent || ''), group: t.group || '', demo: !!t.demo,
       corp: cr.of(t), smodel: ready?.dmi?.product || null, svendor: ready?.dmi?.vendor || null,
       ready: ready ? { state: ready.state || null, reason: ready.reason || '', at: ready.at || null, py: ready.py || null, node: ready.node ?? null, lastExecAt: ready.lastExecAt || null } : null,
-      lastError: ready?.lastError || null, job: A.jobOf(t.id), last: lastView(latest.get(t.id)),
+      lastError: ready?.lastError || null, job: A.jobOf(t.id), last: lastView(sameEndpoint(latest.get(t.id), t)),
     };
   });
 }
@@ -104,6 +108,7 @@ api.get('/tools/focus-mon/audit', adminOnly, fullScopeOnly, async (req, res) => 
 
 /** 진행 중 작업만(메모리) — 화면이 작업이 있는 동안 5초마다 본다. */
 api.get('/tools/focus-mon/audit/jobs', adminOnly, fullScopeOnly, (req, res) => {
+  if (registryUnreadable(res)) return;
   A.sweep();
   const vis = new Set(visibleTargets(req).map((t) => t.id));
   const jobs = [];
@@ -113,15 +118,18 @@ api.get('/tools/focus-mon/audit/jobs', adminOnly, fullScopeOnly, (req, res) => {
 
 /** 한 서버의 회차 목록(최근부터 · 원문 없이). */
 api.get('/tools/focus-mon/audit/:id/runs', adminOnly, fullScopeOnly, async (req, res) => {
+  if (registryUnreadable(res)) return;
   const t = visibleTargets(req).find((x) => x.id === String(req.params.id));
   if (!t) return res.status(404).json({ ok: false, code: 'not-found', reason: '없는 대상입니다.' });
   const runs = await db.listAudits(t.id);
   if (runs == null) return res.status(503).json({ ok: false, code: 'db', reason: '기록 DB 를 열지 못했습니다.' });
-  res.json({ ok: true, runs: runs.map(lastView) });
+  // 예전 접속처(주소 · 포트 · 계정 · 담당 노드)로 돈 회차는 표시만 남긴다(oldEndpoint)
+  res.json({ ok: true, runs: runs.map((r) => ({ ...lastView(r), oldEndpoint: !sameEndpoint(r, t) })) });
 });
 
 /** 회차 하나의 자세한 결과 — 보고서 원문을 다시 해석한다(판정 줄 · 읽은 자료 · 근거 · 해석 범위 · 디스크). 지난 회차에 없던 근거에 new. */
 api.get('/tools/focus-mon/audit/run/:runId', adminOnly, fullScopeOnly, async (req, res) => {
+  if (registryUnreadable(res)) return;
   const row = await db.readAudit(String(req.params.runId).slice(0, 40));
   const vis = new Set(visibleTargets(req).map((t) => t.id));
   if (!row || !vis.has(row.target)) return res.status(404).json({ ok: false, code: 'not-found', reason: '없는 점검 회차입니다.' });
@@ -135,7 +143,8 @@ api.get('/tools/focus-mon/audit/run/:runId', adminOnly, fullScopeOnly, async (re
   const evidence = rep.evidence.map((e) => ({ ...e, isNew: prevKeys ? !prevKeys.has(hash12(evidenceKey(e))) : null }));
   const modelOf = (ids) => { const d = disks.find((x) => (ids.sn && x.sn === ids.sn) || (ids.wwn && x.wwn === ids.wwn)); return d ? d.model : ''; };
   res.json({
-    ok: true, run: lastView(row), reportLines: lines.length,
+    ok: true, run: { ...lastView(row), oldEndpoint: !sameEndpoint(row, visibleTargets(req).find((x) => x.id === row.target)) }, reportLines: lines.length,
+    shape: rep.shape.map((k) => SHAPE_TEXT[k] || k),
     verdicts: rep.verdicts, sources: rep.sources, missing: rep.missing, partial: rep.partial, scope: rep.scope, gaps: rep.gaps,
     inventory: rep.inventory.map((d) => ({ ...d, model: modelOf(d.ids) })), evidence, evidenceTotal: rep.evidenceTotal, errorKinds: ERROR_KINDS,
     disks: disks.slice(0, 500), header: rep.header, complete: rep.complete, readyLines: (row.ready || []).length,
@@ -144,6 +153,7 @@ api.get('/tools/focus-mon/audit/run/:runId', adminOnly, fullScopeOnly, async (re
 
 /** 보고서 원문 내려받기(.txt) — 대상 서버의 실행 출력 그대로(구획 예산으로 줄인 것이면 생략 줄이 들어 있다). */
 api.get('/tools/focus-mon/audit/run/:runId/report.txt', adminOnly, fullScopeOnly, async (req, res) => {
+  if (registryUnreadable(res)) return;
   const row = await db.readAudit(String(req.params.runId).slice(0, 40));
   const t = row ? visibleTargets(req).find((x) => x.id === row.target) : null;
   if (!row || !t) return res.status(404).json({ ok: false, code: 'not-found', reason: '없는 점검 회차입니다.' });
