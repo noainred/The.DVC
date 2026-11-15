@@ -20,7 +20,7 @@ import { dsTrendMeta } from './dsTrendKpiText.js'; // v2.631(감사 WEB2631-09)
 import BoldText from '../components/boldText.jsx';
 import { alarmsUnknown, restFallbackBadge } from './restFallbackText.js'; // v2.607 WEB2607-06
 import STable from '../components/STable.jsx';
-import { vmSearchTerm, vmSearchSummary, vcNameOf, powerLabel, memText, VM_SEARCH_LIMIT } from './vcVmSearchText.js';
+import { vmSearchTerm, vmSearchSummary, vcNameOf, powerLabel, memText, VM_SEARCH_LIMIT, vmSearchScopeParams, vmSearchScopeText } from './vcVmSearchText.js';
 import { countableTotals } from './corpSiteStatus.js'; // v2.741(WEB-01) 법인 표와 같은 '셀 수 있는 vCenter' 판정(v2.915: 전체 VM 수 — 백업 KPI 의 분모)
 import { hostCapShort, hostCapFootnote, hostCapTotal } from './hostCapacityText.js'; // v2.742(LEFT-06): 용량 모름 호스트는 총량에서 빠졌다
 import { parseVcRoute, vcHash, currentHash, goHash, onHashChange } from './vcd/vcdRoute.js'; // v2.895: 상세 · 개체 보기 주소(#/vcenters/<id>[/vm|host/<id>])
@@ -93,7 +93,7 @@ export function vcCountMeta(sites, now = Date.now()) {
  * 입력이 멈추고 300ms 뒤 서버 /vms?nameOnly=1 을 한 번 부른다(폴링 안 함). 늦게 온 이전 응답은 버린다.
  * 범위(scope)는 서버가 강제하고, inv.vms 권한이 없으면 부르지 않고 그 사실을 말한다.
  */
-function VmNameSearch({ term, sites }) {
+function VmNameSearch({ term, sites, scope = null, scopeText = '전체 vCenter' }) {   // v3.12.2 scope: 허브 범위(리전 · vCenter) — 없으면 전체(v2.671)
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
   const [sel, setSel] = useState(null);
@@ -103,19 +103,19 @@ function VmNameSearch({ term, sites }) {
     if (!term || !allowed) return undefined;
     let active = true;
     const t = setTimeout(() => {
-      fetchJson('/vms', { q: term, nameOnly: '1', sortBy: 'name', order: 'asc', limit: VM_SEARCH_LIMIT })
+      fetchJson('/vms', { q: term, nameOnly: '1', sortBy: 'name', order: 'asc', limit: VM_SEARCH_LIMIT, ...vmSearchScopeParams(scope) })
         .then((r) => { if (active) setData(r); })
         .catch((e) => { if (active) setErr(e?.status === 403 ? 'VM 목록 조회 권한이 없습니다(설정 › 사용자 관리 › 권한).' : `VM 조회 실패: ${e?.message || e}`); });
     }, 300);
     return () => { active = false; clearTimeout(t); };
-  }, [term, allowed]);
+  }, [term, allowed, scope?.region, scope?.vcenterId]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!term) return null;
   const items = Array.isArray(data?.items) ? data.items : [];
   return (
     <div className="card" style={{ marginBottom: 16 }}>
       <div className="flex between" style={{ flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-        <b>VM 이름 검색 — 전체 vCenter</b>
-        <span className="muted" style={{ fontSize: 12 }}>{!allowed ? 'VM 목록 조회 권한이 없어 VM 은 찾지 않았습니다.' : err || vmSearchSummary(term, data)}</span>
+        <b>VM 이름 검색 — {scopeText}</b>
+        <span className="muted" style={{ fontSize: 12 }}>{!allowed ? 'VM 목록 조회 권한이 없어 VM 은 찾지 않았습니다.' : err || vmSearchSummary(term, data, scopeText)}</span>
       </div>
       {items.length > 0 && (
         <STable className="v3-table" minWidth={760}>
@@ -336,7 +336,7 @@ export default function VCenters({ onSelectSite, onGoVms, resetSignal, scope = {
         <TrendKpis vcenterId={vcSel} region={regSel} scopeText={kpiScope} />
       </div>
 
-      <VmNameSearch term={vmSearchTerm(query)} sites={sites} />
+      <VmNameSearch term={vmSearchTerm(query)} sites={sites} scope={{ region: regSel, vcenterId: vcSel }} scopeText={vmSearchScopeText(kpiScope)} />
 
       {keywords.length > 0 && shown.length === 0 && (
         <div className="card" style={{ padding: '18px 16px', color: 'var(--text-dim)' }}>

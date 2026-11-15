@@ -974,3 +974,6 @@
 - **v3.12.1 — 가상화 플랫폼 2차 루프 1회차: 공용 범위 바의 vCenter 선택지는 고른 리전 안만 · 리전 밖 vCenter 를 고르면 리전을 비운다**(`platformText.scopeVcOptions · scopeVcPatch`): 리전(유럽)을 고른 뒤에도 vCenter 선택지가 전 법인을 보여
   리전 밖 vCenter(us-east)를 고를 수 있었다 — 허브 카드는 그 vCenter 숫자(/platform/summary 는 vcenterId 만 본다)를, 본문은 리전 ∩ vCenter = 0건을 보였다(재현). 이 바는 허브 세 탭과 데이터스토어 등 인벤토리 탭 공용이다.
   선택지 = `chipSites` 와 같은 판정(리전 안) · 첫 선택지 ‘리전 X 전체’ · 리전 밖 값이 이미 들어 있으면 ‘이름 (리전 밖)’ 으로 맨 앞에 남긴다(거짓 ‘전체’ 금지) · 고를 때 리전 밖이면 `{ vcenterId, region: '' }`. 테스트 `platformText.test.js` v3.12.1.
+- **v3.12.2 — 2차 루프 2회차: vCenter 탭의 ‘VM 이름 검색’ 이 허브 범위(리전 · vCenter)를 따른다**(`vcVmSearchText.vmSearchScopeParams · vmSearchScopeText`): 범위 바 안내는 ‘범위 · 검색은 세 탭에 함께 적용’ 인데 이 조회만 리전을 골라도
+  전 vCenter 를 찾고 ‘(전체 vCenter)’ 라고 말했다(재현 — 리전 유럽에서 ‘app’ 결과에 ap-south · br-sao). 요청에 vCenter(있으면) 또는 리전을 싣고, 제목 · 0건 문구에 범위 글자(`scopeLabel` — ‘전체’ 만 ‘전체 vCenter’)를 쓴다 · 범위가 바뀌면 다시 찾는다.
+  범위를 고르지 않으면 지금처럼 전체(v2.671 요청 그대로). 테스트 `vcVmSearchText.test.js` v3.12.2.
