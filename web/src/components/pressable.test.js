@@ -34,7 +34,7 @@ describe('pressable', () => {
   });
 });
 
-describe('v3.12.4 — 정렬 열 머리 키보드(onPressKey 한 벌 · STable · DataTable)', () => {
+describe('v3.13.2 — 정렬 열 머리 키보드(onPressKey 한 벌 · STable · DataTable)', () => {
   it('onPressKey — 자기 자신의 Enter/Space 만 · 안쪽에서 올라온 키 · 다른 키는 무시', () => {
     const fn = vi.fn(); const h = onPressKey(fn); const el = {};
     const e1 = { key: 'Enter', target: el, currentTarget: el, preventDefault: vi.fn() }; h(e1); expect(fn).toHaveBeenCalledTimes(1); expect(e1.preventDefault).toHaveBeenCalled();
@@ -55,7 +55,7 @@ describe('v3.12.4 — 정렬 열 머리 키보드(onPressKey 한 벌 · STable �
   });
 });
 
-describe('v3.12.5 — vCenter 상세 트리(노드 · 잎 · 호스트 이름) 키보드', () => {
+describe('v3.13.3 — vCenter 상세 트리(노드 · 잎 · 호스트 이름) 키보드', () => {
   it('소스 계약 — Node · Tree(자식이 있을 때) · Leaf · 호스트 이름이 pressable · aria-expanded · 포커스 CSS', () => {
     const s = fs.readFileSync(new URL('../views/VCenterDetail.jsx', import.meta.url), 'utf8');
     expect(s).toMatch(/className="vcd-node vcd-root" \{\.\.\.pressable\(\(\) => setO\(\(v\) => !v\)\)\} aria-expanded=\{!!o\}/);
@@ -68,7 +68,7 @@ describe('v3.12.5 — vCenter 상세 트리(노드 · 잎 · 호스트 이름) �
   });
 });
 
-describe('v3.12.7 — 허브 하위 도구의 마우스 전용 요소(VM 정밀 검색 필터 칩 · 현재 사용자 법인 행) · 누를 수 없는 머리의 손가락 커서', () => {
+describe('v3.13.5 — 허브 하위 도구의 마우스 전용 요소(VM 정밀 검색 필터 칩 · 현재 사용자 법인 행) · 누를 수 없는 머리의 손가락 커서', () => {
   it('소스 계약 — VmFinder 칩 pressable + aria-pressed · CurrentUsers 이름 버튼 · CSS', () => {
     const vf = fs.readFileSync(new URL('../views/tools/VmFinderTool.jsx', import.meta.url), 'utf8');
     expect(vf).toMatch(/\{\.\.\.pressable\(\(\) => onToggle\(x\)\)\} aria-pressed=\{sel\.includes\(x\)\}/);

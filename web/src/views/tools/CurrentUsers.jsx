@@ -187,7 +187,7 @@ export function WindowsUsersPanel({ scope }) {
           <tbody>
             {vcenters.map((v) => (
               <tr key={v.vcenterId} onClick={() => { setPicked(v.vcenterId === picked ? '' : v.vcenterId); clearHist(); }} style={{ cursor: 'pointer', background: v.vcenterId === picked ? 'var(--hover)' : undefined }}>
-                {/* v3.12.7: 행 클릭(법인 고르기)을 키보드로도 — 이름 버튼(aria-pressed) · 행 클릭은 그대로 */}
+                {/* v3.13.5: 행 클릭(법인 고르기)을 키보드로도 — 이름 버튼(aria-pressed) · 행 클릭은 그대로 */}
                 <td data-sort={v.vcenterName || v.vcenterId}><button type="button" className="cell-link" aria-pressed={v.vcenterId === picked} title="이 법인을 고르기 · 다시 누르면 해제" onClick={(e) => { e.stopPropagation(); setPicked(v.vcenterId === picked ? '' : v.vcenterId); clearHist(); }}>{v.vcenterName || v.vcenterId}</button></td>
                 <td data-sort={String(v.users ?? '')}>{usersCountText(v.users, v.usersLowerBound)}</td>
                 <td data-sort={String(v.usersActive ?? '')}>{v.usersActive ?? '—'}</td>

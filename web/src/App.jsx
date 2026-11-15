@@ -605,10 +605,10 @@ function Portal({ user, onLogout }) {
             <Select className="select" value={region} onChange={(e) => { setRegion(e.target.value); setVcenterId(''); }}>
               <option value="">전체 리전</option>
               {/* scope.regions 가 지정된 사용자는 허용 리전만 선택 가능(데이터도 서버에서 동일 제한). */}
-              {/* v3.12.8: 정해진 4리전 + 등록 데이터에만 있는 리전('Unknown' 등) — 그런 vCenter 도 리전으로 거른다(도구의 리전 선택과 같은 범위) */}
+              {/* v3.13.6: 정해진 4리전 + 등록 데이터에만 있는 리전('Unknown' 등) — 그런 vCenter 도 리전으로 거른다(도구의 리전 선택과 같은 범위) */}
               {scopeRegionOptions(REGIONS, vcenters, user.scope?.regions).map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
             </Select>
-            {/* v3.12.2: 리전을 골랐으면 그 리전 vCenter 만 · 리전 밖 vCenter 를 고르면(다른 경로의 값) 리전을 비운다 — 허브 카드와 본문이 엇갈리지 않게 */}
+            {/* v3.13.0: 리전을 골랐으면 그 리전 vCenter 만 · 리전 밖 vCenter 를 고르면(다른 경로의 값) 리전을 비운다 — 허브 카드와 본문이 엇갈리지 않게 */}
             <Select className="select" value={vcenterId} onChange={(e) => patchFilter(scopeVcPatch(vcenters, region, e.target.value))}>
               <option value="">{region ? `${regionText(region)} 전체` : '전체 vCenter'}</option>
               {scopeVcOptions(vcenters, region, vcenterId).map((v) => <option key={v.id} value={v.id}>{v.outside ? `${v.name} (리전 밖)` : v.name}</option>)}

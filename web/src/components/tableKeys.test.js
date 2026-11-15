@@ -1,4 +1,4 @@
-// v3.12.6 — 표 행 key 고유화: 겹치는 key 는 ~n · 겹치지 않으면 그대로 · DataTable 이 쓴다
+// v3.13.4 — 표 행 key 고유화: 겹치는 key 는 ~n · 겹치지 않으면 그대로 · DataTable 이 쓴다
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import { uniqueKeys, baseRowKey } from './tableKeys.js';

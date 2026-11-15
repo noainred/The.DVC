@@ -93,7 +93,7 @@ export function vcCountMeta(sites, now = Date.now()) {
  * 입력이 멈추고 300ms 뒤 서버 /vms?nameOnly=1 을 한 번 부른다(폴링 안 함). 늦게 온 이전 응답은 버린다.
  * 범위(scope)는 서버가 강제하고, inv.vms 권한이 없으면 부르지 않고 그 사실을 말한다.
  */
-function VmNameSearch({ term, sites, scope = null, scopeText = '전체 vCenter' }) {   // v3.12.3 scope: 허브 범위(리전 · vCenter) — 없으면 전체(v2.671)
+function VmNameSearch({ term, sites, scope = null, scopeText = '전체 vCenter' }) {   // v3.13.1 scope: 허브 범위(리전 · vCenter) — 없으면 전체(v2.671)
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
   const [sel, setSel] = useState(null);
@@ -123,7 +123,7 @@ function VmNameSearch({ term, sites, scope = null, scopeText = '전체 vCenter' 
           <tbody>
             {items.map((v) => (
               <tr key={v.id} style={{ cursor: 'pointer' }} title="클릭 — VM 상세" onClick={() => setSel(v)}>
-                {/* v3.12.4 키보드로 상세(행 클릭은 그대로) — 주석은 td 와 같은 줄에 두지 않는다(tr 안 공백 텍스트 노드 · validateDOMNesting 경고 · v3.12.6) */}
+                {/* v3.13.2 키보드로 상세(행 클릭은 그대로) — 주석은 td 와 같은 줄에 두지 않는다(tr 안 공백 텍스트 노드 · validateDOMNesting 경고 · v3.13.4) */}
                 <td data-sort={v.name}><button type="button" className="cell-link" onClick={(e) => { e.stopPropagation(); setSel(v); }} title="이 VM 상세">{v.name}</button></td>
                 <td>{vcNameOf(sites, v.vcenterId)}</td>
                 <td className="muted">{v.host || '—'}</td>

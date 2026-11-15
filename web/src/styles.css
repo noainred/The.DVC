@@ -3794,13 +3794,13 @@ table.bmu-util tbody td { padding: 9px 10px; }
 .ipam-rep-grid > label.muted { padding-top: 6px; font-size: 12.5px; }
 @media (max-width: 640px) { .ipam-rep-grid { grid-template-columns: minmax(0, 1fr); gap: 4px; } .ipam-rep-grid > label.muted { padding-top: 8px; } }
 
-/* v3.12.4 정렬 열 머리(STable · DataTable — th[aria-sort])의 키보드 포커스 — 마우스 클릭엔 안 보인다 */
+/* v3.13.2 정렬 열 머리(STable · DataTable — th[aria-sort])의 키보드 포커스 — 마우스 클릭엔 안 보인다 */
 th[aria-sort]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-/* v3.12.5 vCenter 상세 트리(노드 · 잎 · 호스트 이름)의 키보드 포커스 */
+/* v3.13.3 vCenter 상세 트리(노드 · 잎 · 호스트 이름)의 키보드 포커스 */
 .vcd-node[role="button"]:focus-visible, .vcd-link[role="button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: 6px; }
 
-/* v3.12.7 정렬하지 않는 열 머리(data-nosort)는 손가락 커서를 쓰지 않는다 — 전역 'thead th { cursor:pointer }' 가 누를 수 없는 머리도 눌리는 것처럼 보였다 */
+/* v3.13.5 정렬하지 않는 열 머리(data-nosort)는 손가락 커서를 쓰지 않는다 — 전역 'thead th { cursor:pointer }' 가 누를 수 없는 머리도 눌리는 것처럼 보였다 */
 thead th[data-nosort] { cursor: default; }
-/* v3.12.7 누르는 배지(필터 칩 — pressable)의 키보드 포커스 */
+/* v3.13.5 누르는 배지(필터 칩 — pressable)의 키보드 포커스 */
 .badge[role="button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

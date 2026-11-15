@@ -4,7 +4,7 @@ import { postJson, usePolling } from '../../api.js';
 import { DataTable, ErrorBox, StateBadge, UsageCell, VmLink } from '../../components/ui.jsx';
 import { Card } from './shared.jsx';
 import Select from '../../components/Select.jsx';
-import { pressable } from '../../components/pressable.js';   // v3.12.7 필터 칩(vCenter · 클러스터 …) 키보드 — Tab · Enter/Space · aria-pressed
+import { pressable } from '../../components/pressable.js';   // v3.13.5 필터 칩(vCenter · 클러스터 …) 키보드 — Tab · Enter/Space · aria-pressed
 import BoldText from '../../components/boldText.jsx';
 import { authStopNote, authStopCell, skipNote, skipCell } from '../vcAuthStopText.js'; // v2.733(C3-01): 인증 정지로 평균을 조회하지 않은 vCenter · v2.744(감사 후속 FA-②): 직접 수집 대상 아님
 

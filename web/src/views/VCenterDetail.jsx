@@ -37,7 +37,7 @@ import { authStopNote, authStopCell, authStopSingleText, plainText, skipNote, sk
 // v2.895(사용자 요청 — vSphere Client 의 vCenter 탭 12개 · 승인 시안 docs/design/vcenter-tabs ①~⑦ · 기본값 1~7): 탭 목록 · 옛 키 호환은 순수 모듈 하나.
 import { VCD_TABS, entryTab, saveTab, normTab, tabClass } from './vcd/vcdTabs.js';
 import useActiveTabInView from '../hooks/useActiveTabInView.js';
-import { pressable } from '../components/pressable.js';   // v3.12.5 트리 노드 · 잎 · 호스트 이름 키보드(Enter/Space) // v3.10.16: 탭 줄이 넘치면(400px) 열린 탭이 보이게 줄만 옮긴다
+import { pressable } from '../components/pressable.js';   // v3.13.3 트리 노드 · 잎 · 호스트 이름 키보드(Enter/Space) // v3.10.16: 탭 줄이 넘치면(400px) 열린 탭이 보이게 줄만 옮긴다
 import SummaryTab from './vcd/SummaryTab.jsx';
 import MonitorTab from './vcd/MonitorTab.jsx';
 import ConfigureTab from './vcd/ConfigureTab.jsx';
@@ -923,7 +923,7 @@ function Tree({ k, open, toggle, icon, label, sub, action, children }) {
   const hasKids = React.Children.count(children) > 0;
   return (
     <div>
-      {/* v3.12.5: 자식이 있으면 Tab · Enter/Space 로 접고 펴기(aria-expanded) — 자식이 없으면 예전처럼 클릭만 */}
+      {/* v3.13.3: 자식이 있으면 Tab · Enter/Space 로 접고 펴기(aria-expanded) — 자식이 없으면 예전처럼 클릭만 */}
       <div className="vcd-node" {...(hasKids ? pressable(() => toggle(k)) : { onClick: () => toggle(k) })} aria-expanded={hasKids ? !!o : undefined}>
         <span className="vcd-caret">{hasKids ? (o ? '▾' : '▸') : ''}</span>
         <span>{icon}</span> <span className="vcd-nlabel">{label}</span> {sub && <span className="vcd-sub">{sub}</span>} {action}

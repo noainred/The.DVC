@@ -9,7 +9,7 @@ import {
   loadChipsCollapsed, saveChipsCollapsed, loadVcView, saveVcView, SCOPE_SEARCH_PLACEHOLDER, SCOPE_NOTE,
 } from './platformText.js';
 import * as PT from './platformText.js';
-import { REGIONS } from '../../regions.js';   // v3.12.8 테스트 — 지역 목록 단일 소스
+import { REGIONS } from '../../regions.js';   // v3.13.6 테스트 — 지역 목록 단일 소스
 import { HUB_TOOL_KEYS } from '../vms/vmHubText.js';
 import { TOOLS } from '../specialToolsList.js';
 import { MENU_GROUPS, locate } from '../topMenu.js';
@@ -329,7 +329,7 @@ describe('v3.10.21 — 점검 9회차: Summary 리전 보기에서 나눌 수 �
   });
 });
 
-describe('v3.12.2 — 2차 루프 1회차: 공용 범위 바의 vCenter 선택지는 고른 리전 안만 · 리전 밖 vCenter 를 고르면 리전을 비운다', () => {
+describe('v3.13.0 — 2차 루프 1회차: 공용 범위 바의 vCenter 선택지는 고른 리전 안만 · 리전 밖 vCenter 를 고르면 리전을 비운다', () => {
   const VCS = [{ id: 'a', name: 'A', location: { region: '유럽' } }, { id: 'b', name: 'B', location: { region: '북미' } }, { id: 'c', name: 'C', location: { region: '유럽' } }, { id: 'd', name: 'D' }];
   it('scopeVcOptions — 리전이 없으면 전부 · 있으면 그 리전만 · 지금 고른 리전 밖 vCenter 는 맨 앞에 outside', () => {
     expect(scopeVcOptions(VCS, '').map((o) => o.id)).toEqual(['a', 'b', 'c', 'd']);
@@ -351,12 +351,12 @@ describe('v3.12.2 — 2차 루프 1회차: 공용 범위 바의 vCenter 선택�
     const app = fs.readFileSync(new URL('../../App.jsx', import.meta.url), 'utf8');
     expect(app).toMatch(/onChange=\{\(e\) => patchFilter\(scopeVcPatch\(vcenters, region, e\.target\.value\)\)\}/);
     expect(app).toMatch(/scopeVcOptions\(vcenters, region, vcenterId\)\.map/);
-    expect(app).toMatch(/\{region \? `\$\{regionText\(region\)\} 전체` : '전체 vCenter'\}/);   // v3.12.8 부터 리전 글자는 regionText(Unknown → 리전 미지정)
+    expect(app).toMatch(/\{region \? `\$\{regionText\(region\)\} 전체` : '전체 vCenter'\}/);   // v3.13.6 부터 리전 글자는 regionText(Unknown → 리전 미지정)
     expect(app).not.toMatch(/\(vcenters \|\| \[\]\)\.map\(\(v\) => <option key=\{v\.id\} value=\{v\.id\}>\{v\.name\}<\/option>\)/);
   });
 });
 
-describe('v3.12.8 — 2차 루프 7회차: 범위 바 리전 선택지 = 정해진 4리전 + 등록 데이터에만 있는 리전', () => {
+describe('v3.13.6 — 2차 루프 7회차: 범위 바 리전 선택지 = 정해진 4리전 + 등록 데이터에만 있는 리전', () => {
   const BASE = REGIONS;   // 지역 목록은 regions.js 단일 소스(인라인 사본 금지 — server/test/audit2575 IMP-10)
   const VCS = [{ location: { region: '유럽' } }, { location: { region: 'Unknown' } }, { location: { region: ' 중동 ' } }, { location: {} }, null, { location: { region: '중동' } }];
   it('정해진 순서 그대로 뒤에 데이터 리전(중복 · 빈 값 제외 · 이름순 · Unknown 은 맨 뒤) · Unknown 은 ‘리전 미지정(Unknown)’ 표시', () => {

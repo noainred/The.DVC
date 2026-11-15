@@ -1,4 +1,4 @@
-// v3.12.9 — 실제 OS 확인 주기 스캔 설정: 이름 · 칸 · 단위 한 묶음(label) · 버튼 줄 flexWrap(400px 에서 칸과 이름이 떨어졌다)
+// v3.13.7 — 실제 OS 확인 주기 스캔 설정: 이름 · 칸 · 단위 한 묶음(label) · 버튼 줄 flexWrap(400px 에서 칸과 이름이 떨어졌다)
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 
@@ -18,7 +18,7 @@ describe('실제 OS 확인 — 주기 스캔 설정 칸 묶음', () => {
   });
 });
 
-describe('v3.12.11 — Guest OS 종류/버전 필터: 이름 + 버튼 한 묶음(role=group) · aria-pressed', () => {
+describe('v3.13.9 — Guest OS 종류/버전 필터: 이름 + 버튼 한 묶음(role=group) · aria-pressed', () => {
   it('전원 · 종류 묶음이 각각 role="group" 안에 이름과 버튼을 함께 둔다', () => {
     expect(src).toMatch(/<span role="group" aria-label="전원" className="flex" style=\{FILTER_GROUP\}>\s*<span className="muted" style=\{\{ fontSize: 12 \}\}>전원<\/span>/);
     expect(src).toMatch(/<span role="group" aria-label="종류" className="flex" style=\{FILTER_GROUP\}>\s*<span className="muted" style=\{\{ fontSize: 12 \}\}>종류<\/span>/);

@@ -971,32 +971,32 @@
 - **v3.10.21 — 가상화 플랫폼 점검 9회차: Summary 리전 보기 — Director 정책 요약 · 오류 볼륨도 그 리전만, 나눌 수 없는 EM 값은 ‘전 법인 기준’ 으로 밝힌다**(자율 개선 루프 · v3.10.17 후속): `bareosPolicySummary` · `bareosErrorVolumeItems` 가
   `allowed`(사용자 범위)만 받아 리전 보기에서도 범위 전체를 셌다 → `regionSet`(리전 법인 id · 리전이 없으면 `allowed` 그대로). EM(Enterprise Manager)은 B&R 여러 대를 묶어 읽어 리전으로 나눌 수 없다 —
   Summary 응답 `emFleetWide`(Veeam 카드 ‘· EM · 저장소 · 라이선스는 전 법인 기준’) · 에러 로그 응답 `emSkippedForRegion`(리전 보기에서는 EM 세션 · EM 상태 행을 빼고 그 사실을 문구로). 테스트 `backupSummaryRegion31017`(소스 계약) · `platformText.test.js` v3.10.21.
-- **v3.12.2 — 가상화 플랫폼 2차 루프 1회차: 공용 범위 바의 vCenter 선택지는 고른 리전 안만 · 리전 밖 vCenter 를 고르면 리전을 비운다**(`platformText.scopeVcOptions · scopeVcPatch`): 리전(유럽)을 고른 뒤에도 vCenter 선택지가 전 법인을 보여
+- **v3.13.0 — 가상화 플랫폼 2차 루프 1회차: 공용 범위 바의 vCenter 선택지는 고른 리전 안만 · 리전 밖 vCenter 를 고르면 리전을 비운다**(`platformText.scopeVcOptions · scopeVcPatch`): 리전(유럽)을 고른 뒤에도 vCenter 선택지가 전 법인을 보여
   리전 밖 vCenter(us-east)를 고를 수 있었다 — 허브 카드는 그 vCenter 숫자(/platform/summary 는 vcenterId 만 본다)를, 본문은 리전 ∩ vCenter = 0건을 보였다(재현). 이 바는 허브 세 탭과 데이터스토어 등 인벤토리 탭 공용이다.
-  선택지 = `chipSites` 와 같은 판정(리전 안) · 첫 선택지 ‘리전 X 전체’ · 리전 밖 값이 이미 들어 있으면 ‘이름 (리전 밖)’ 으로 맨 앞에 남긴다(거짓 ‘전체’ 금지) · 고를 때 리전 밖이면 `{ vcenterId, region: '' }`. 테스트 `platformText.test.js` v3.12.2.
-- **v3.12.3 — 2차 루프 2회차: vCenter 탭의 ‘VM 이름 검색’ 이 허브 범위(리전 · vCenter)를 따른다**(`vcVmSearchText.vmSearchScopeParams · vmSearchScopeText`): 범위 바 안내는 ‘범위 · 검색은 세 탭에 함께 적용’ 인데 이 조회만 리전을 골라도
+  선택지 = `chipSites` 와 같은 판정(리전 안) · 첫 선택지 ‘리전 X 전체’ · 리전 밖 값이 이미 들어 있으면 ‘이름 (리전 밖)’ 으로 맨 앞에 남긴다(거짓 ‘전체’ 금지) · 고를 때 리전 밖이면 `{ vcenterId, region: '' }`. 테스트 `platformText.test.js` v3.13.0.
+- **v3.13.1 — 2차 루프 2회차: vCenter 탭의 ‘VM 이름 검색’ 이 허브 범위(리전 · vCenter)를 따른다**(`vcVmSearchText.vmSearchScopeParams · vmSearchScopeText`): 범위 바 안내는 ‘범위 · 검색은 세 탭에 함께 적용’ 인데 이 조회만 리전을 골라도
   전 vCenter 를 찾고 ‘(전체 vCenter)’ 라고 말했다(재현 — 리전 유럽에서 ‘app’ 결과에 ap-south · br-sao). 요청에 vCenter(있으면) 또는 리전을 싣고, 제목 · 0건 문구에 범위 글자(`scopeLabel` — ‘전체’ 만 ‘전체 vCenter’)를 쓴다 · 범위가 바뀌면 다시 찾는다.
-  범위를 고르지 않으면 지금처럼 전체(v2.671 요청 그대로). 테스트 `vcVmSearchText.test.js` v3.12.3.
-- **v3.12.4 — 2차 루프 3회차: 정렬 열 머리(STable · DataTable)를 키보드로 — Tab 으로 닿고 Enter/Space 로 정렬 · 키 처리 코어 `onPressKey` 한 벌**: 표 정렬이 마우스 전용이었다(허브 세 탭 스캔에서 th 가 cursor:pointer 인데 tabindex 없음 — 포탈 전 표 공통).
+  범위를 고르지 않으면 지금처럼 전체(v2.671 요청 그대로). 테스트 `vcVmSearchText.test.js` v3.13.1.
+- **v3.13.2 — 2차 루프 3회차: 정렬 열 머리(STable · DataTable)를 키보드로 — Tab 으로 닿고 Enter/Space 로 정렬 · 키 처리 코어 `onPressKey` 한 벌**: 표 정렬이 마우스 전용이었다(허브 세 탭 스캔에서 th 가 cursor:pointer 인데 tabindex 없음 — 포탈 전 표 공통).
   STable 머리에 `tabIndex 0` + `onKeyDown = onPressKey(정렬)` — **role 은 바꾸지 않는다**(columnheader · aria-sort 유지 — `pressable` 의 role=button 을 th 에 쓰면 안 된다). DataTable 머리도 같은 것 + `aria-sort`. 포커스 테두리 `styles.css th[aria-sort]:focus-visible`.
-  title 은 ‘클릭하면 이 열로 정렬합니다(… · 키보드는 Enter · Space)’(기존 문구 포함 — 테스트가 찾는다). vCenter 탭 VM 이름 검색 결과의 이름도 `button.cell-link`(키보드로 상세). 자체 정렬 표(SortTh 컴포넌트 4곳)는 이번 범위 밖. 테스트 `pressable.test.js` v3.12.4 · `STable.test.jsx`.
-- **v3.12.5 — 2차 루프 4회차: vCenter 상세 트리(호스트 및 클러스터 · VM 및 폴더 · 검색 결과)를 키보드로**: 노드 접기/펴기 · VM 잎(서랍) · 호스트 이름(서랍)이 div/span onClick 이라 마우스 전용이었다(스캔 재현).
+  title 은 ‘클릭하면 이 열로 정렬합니다(… · 키보드는 Enter · Space)’(기존 문구 포함 — 테스트가 찾는다). vCenter 탭 VM 이름 검색 결과의 이름도 `button.cell-link`(키보드로 상세). 자체 정렬 표(SortTh 컴포넌트 4곳)는 이번 범위 밖. 테스트 `pressable.test.js` v3.13.2 · `STable.test.jsx`.
+- **v3.13.3 — 2차 루프 4회차: vCenter 상세 트리(호스트 및 클러스터 · VM 및 폴더 · 검색 결과)를 키보드로**: 노드 접기/펴기 · VM 잎(서랍) · 호스트 이름(서랍)이 div/span onClick 이라 마우스 전용이었다(스캔 재현).
   `Node` · `Tree`(자식이 있을 때만) = `pressable(접기)` + `aria-expanded` · `Leaf` = `pressable(onClick)` · 호스트 이름 span = `pressable(서랍 · stopPropagation)` — 안쪽에서 올라온 키는 노드가 받지 않으므로(`onPressKey`) 이름에서 Enter 는 서랍만 연다(노드는 접히지 않음).
-  ‘⤢ 개체 보기’ 는 원래 button. 포커스 테두리 `.vcd-node[role=button] · .vcd-link[role=button]:focus-visible`. 새 트리 노드도 onClick 을 직접 달지 말 것(테스트가 `className="vcd-node…" onClick=` 을 막는다). 테스트 `pressable.test.js` v3.12.5.
-- **v3.12.6 — 2차 루프 5회차: 공용 표(DataTable)의 행 key 를 고유하게 — 라이선스 표가 정렬할 때마다 불어나던 결함**(`components/tableKeys.js uniqueKeys · baseRowKey`): DataTable 은 행 key 로 `r.id || r.key || i` 를 썼는데 라이선스 표(‘라이선스 한눈에’ · ‘라이선스 만료일’)는
+  ‘⤢ 개체 보기’ 는 원래 button. 포커스 테두리 `.vcd-node[role=button] · .vcd-link[role=button]:focus-visible`. 새 트리 노드도 onClick 을 직접 달지 말 것(테스트가 `className="vcd-node…" onClick=` 을 막는다). 테스트 `pressable.test.js` v3.13.3.
+- **v3.13.4 — 2차 루프 5회차: 공용 표(DataTable)의 행 key 를 고유하게 — 라이선스 표가 정렬할 때마다 불어나던 결함**(`components/tableKeys.js uniqueKeys · baseRowKey`): DataTable 은 행 key 로 `r.id || r.key || i` 를 썼는데 라이선스 표(‘라이선스 한눈에’ · ‘라이선스 만료일’)는
   가림 키(XXXXX-…-AAAAA)가 여러 vCenter 에서 같아(화면도 ‘여러 vCenter 가 같은 라이선스 키를 보고’ 라고 안내한다) key 가 겹쳤다 → 운영 빌드에서 열 머리를 누를 때마다 행이 55 → 105 → 155 … 로 불어났다(재현 · 개발 빌드 ‘same key’ 경고 150건).
   겹치는 key 는 나온 차례대로 `~n`(겹치지 않는 표의 key 는 그대로). **발견 방법**: 개발 빌드(vite dev + 목 서버 4000)로 허브 하위 탭 전부를 눌러 React 경고를 모았다 — 운영 빌드 스윕은 이 경고를 보지 못한다. 테스트 `components/tableKeys.test.js`.
-- **v3.12.4 보완 — tr 안 공백 텍스트 노드**: 셀(`</td>`) 뒤 같은 줄에 공백 + `{/* 주석 */}` 을 두면 공백 텍스트 노드가 tr 의 자식이 된다(validateDOMNesting 경고 — 같은 개발 빌드 스윕에서 v3.12.4 이 만든 것을 찾았다). 주석은 셀 위 줄에. 회귀 검사 `views/jsxRowWhitespace.test.js`.
-- **v3.12.7 — 2차 루프 6회차: 허브 하위 도구의 마우스 전용 요소 · 누를 수 없는 머리의 손가락 커서**: 허브 탭 줄의 도구 16곳을 스캔(cursor:pointer 인데 Tab 으로 닿지 않는 것) — ‘VM 정밀 검색’ 필터 칩(span onClick)은 `pressable` + `aria-pressed`,
+- **v3.13.2 보완 — tr 안 공백 텍스트 노드**: 셀(`</td>`) 뒤 같은 줄에 공백 + `{/* 주석 */}` 을 두면 공백 텍스트 노드가 tr 의 자식이 된다(validateDOMNesting 경고 — 같은 개발 빌드 스윕에서 v3.13.2 이 만든 것을 찾았다). 주석은 셀 위 줄에. 회귀 검사 `views/jsxRowWhitespace.test.js`.
+- **v3.13.5 — 2차 루프 6회차: 허브 하위 도구의 마우스 전용 요소 · 누를 수 없는 머리의 손가락 커서**: 허브 탭 줄의 도구 16곳을 스캔(cursor:pointer 인데 Tab 으로 닿지 않는 것) — ‘VM 정밀 검색’ 필터 칩(span onClick)은 `pressable` + `aria-pressed`,
   ‘현재 사용자’ 법인 행(tr onClick — 법인 고르기)은 이름을 `button.cell-link`(aria-pressed · 행 클릭 그대로). 전역 `thead th { cursor:pointer }` 때문에 정렬하지 않는 머리(`data-nosort`)도 눌리는 것처럼 보였다 → `thead th[data-nosort] { cursor: default }`.
-  누르는 배지 포커스 `.badge[role=button]:focus-visible`. 테스트 `pressable.test.js` v3.12.7.
-- **v3.12.8 — 2차 루프 7회차: 범위 바 리전 선택지 = 정해진 4리전 + 등록 데이터에만 있는 리전 · ‘Unknown’ 은 ‘리전 미지정’**(`platformText.scopeRegionOptions · regionText`): 범위 바는 `regions.js` 의 4리전만 보여,
+  누르는 배지 포커스 `.badge[role=button]:focus-visible`. 테스트 `pressable.test.js` v3.13.5.
+- **v3.13.6 — 2차 루프 7회차: 범위 바 리전 선택지 = 정해진 4리전 + 등록 데이터에만 있는 리전 · ‘Unknown’ 은 ‘리전 미지정’**(`platformText.scopeRegionOptions · regionText`): 범위 바는 `regions.js` 의 4리전만 보여,
   위치를 비워 등록해 서버(`vcenter/registry.js`)가 region 을 ‘Unknown’(또는 정해지지 않은 글자)으로 둔 vCenter 는 리전으로 거를 수 없었다 — 도구의 리전 선택(`regionsOf`)은 데이터에서 만들어 보였다(어긋남).
-  선택지 = 4리전 + 데이터 리전(이름순 · Unknown 맨 뒤 · 범위 계정은 scope.regions 안만). 글자 `regionText`(Unknown → ‘리전 미지정’)를 범위 글자 · 칩 안내 · 이웃 범위 · vCenter 첫 선택지가 함께 쓴다. 테스트 `platformText.test.js` v3.12.8.
-- **v3.12.9 — 2차 루프 8회차: ‘실제 OS 확인’ 주기 스캔 설정 — 이름 · 칸 · 단위 한 묶음 · 숫자 칸 폭 · 버튼 줄 줄바꿈**(400px 스크린샷 판독): 줄이 바뀔 때 ‘분 최대’ 처럼 앞 칸의 단위와 다음 칸의 이름이 한 줄에 붙고 칸과 떨어졌고,
+  선택지 = 4리전 + 데이터 리전(이름순 · Unknown 맨 뒤 · 범위 계정은 scope.regions 안만). 글자 `regionText`(Unknown → ‘리전 미지정’)를 범위 글자 · 칩 안내 · 이웃 범위 · vCenter 첫 선택지가 함께 쓴다. 테스트 `platformText.test.js` v3.13.6.
+- **v3.13.7 — 2차 루프 8회차: ‘실제 OS 확인’ 주기 스캔 설정 — 이름 · 칸 · 단위 한 묶음 · 숫자 칸 폭 · 버튼 줄 줄바꿈**(400px 스크린샷 판독): 줄이 바뀔 때 ‘분 최대’ 처럼 앞 칸의 단위와 다음 칸의 이름이 한 줄에 붙고 칸과 떨어졌고,
   버튼 줄(flexWrap 없음)은 ‘지금 스캔 (전체 vCenter)’ 가 세 줄로 접히고 오류 문구가 짓눌렸다. 칸마다 `<label className="flex" style={FIELD}>`(nowrap · 칸의 이름도 된다) · 버튼 줄 `flexWrap`.
   ⚠ 전역 `.input { min-width: 220px }` 가 인라인 숫자 칸의 `width: 90` 등을 덮어 칸이 늘 220px 였다 — 짧은 숫자 칸은 `minWidth: 0` 을 함께 줄 것(안 주면 nowrap 묶음이 카드 밖으로 잘린다 — 이번에 한 번 재현). 다른 화면의 같은 패턴은 이번 범위 밖. 테스트 `tools/guestOsForm3129.test.js`.
-- **v3.12.10 — 2차 루프 9회차: ‘VMware 솔루션 / NSX’ vCenter 카드 머리 — 글자 붙음 · ‘법인 ○○ 법인’ 중복**(400px 스크린샷 판독): 머리(`flex between`)에 gap · flexWrap 이 없어 왼쪽(이름 · 법인)이 접히면 오른쪽 ‘vCenter v…’ 와 글자가 붙었다(‘…San vCenter v8.0.2’).
-  서버 corp 는 배정된 DataCenter 이름이라 ‘○○ 법인’ 처럼 끝나면 화면이 ‘법인 ○○ 법인’ 으로 보였다 → `licenseScopeText.corpTag`(‘법인’ 으로 끝나면 앞에 붙이지 않음) · 머리 `gap '4px 12px'` + `flexWrap`. 테스트 `licenseScopeText.test.js` v3.12.10.
-- **v3.12.11 — 2차 루프 10회차(마지막): ‘Guest OS 종류/버전’ 필터 — 이름 + 버튼 한 묶음(role=group) · aria-pressed**(400px 판독): ‘전원 [전체]’ 다음 줄에 ‘켜짐 꺼짐 종류 [전체] VM 템플릿’ 처럼 갈라져 켜짐 · 꺼짐이 ‘종류’ 것처럼 보였다.
-  묶음마다 `<span role="group" aria-label=… className="flex" style={FILTER_GROUP}>`(flex: none) · 고른 버튼 `aria-pressed`. 같은 꼴(이름 span 뒤에 버튼 · 칸을 평평하게 늘어놓은 flex wrap 줄)은 좁은 화면에서 이름과 대상이 떨어진다 — 묶어서 둘 것(8 · 10회차 공통 교훈). 테스트 `tools/guestOsForm3129.test.js` v3.12.11.
+- **v3.13.8 — 2차 루프 9회차: ‘VMware 솔루션 / NSX’ vCenter 카드 머리 — 글자 붙음 · ‘법인 ○○ 법인’ 중복**(400px 스크린샷 판독): 머리(`flex between`)에 gap · flexWrap 이 없어 왼쪽(이름 · 법인)이 접히면 오른쪽 ‘vCenter v…’ 와 글자가 붙었다(‘…San vCenter v8.0.2’).
+  서버 corp 는 배정된 DataCenter 이름이라 ‘○○ 법인’ 처럼 끝나면 화면이 ‘법인 ○○ 법인’ 으로 보였다 → `licenseScopeText.corpTag`(‘법인’ 으로 끝나면 앞에 붙이지 않음) · 머리 `gap '4px 12px'` + `flexWrap`. 테스트 `licenseScopeText.test.js` v3.13.8.
+- **v3.13.9 — 2차 루프 10회차(마지막): ‘Guest OS 종류/버전’ 필터 — 이름 + 버튼 한 묶음(role=group) · aria-pressed**(400px 판독): ‘전원 [전체]’ 다음 줄에 ‘켜짐 꺼짐 종류 [전체] VM 템플릿’ 처럼 갈라져 켜짐 · 꺼짐이 ‘종류’ 것처럼 보였다.
+  묶음마다 `<span role="group" aria-label=… className="flex" style={FILTER_GROUP}>`(flex: none) · 고른 버튼 `aria-pressed`. 같은 꼴(이름 span 뒤에 버튼 · 칸을 평평하게 늘어놓은 flex wrap 줄)은 좁은 화면에서 이름과 대상이 떨어진다 — 묶어서 둘 것(8 · 10회차 공통 교훈). 테스트 `tools/guestOsForm3129.test.js` v3.13.9.

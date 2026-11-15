@@ -33,7 +33,7 @@ describe('전체 vCenter VM 이름 조회(v2.671)', () => {
   });
 });
 
-describe('v3.12.3 — VM 이름 조회가 허브 범위(리전 · vCenter)를 따른다', () => {
+describe('v3.13.1 — VM 이름 조회가 허브 범위(리전 · vCenter)를 따른다', () => {
   it('vmSearchScopeParams — vCenter 가 있으면 vCenter 만 · 없으면 리전 · 둘 다 없으면 빈 객체(전체 — v2.671)', () => {
     expect(vmSearchScopeParams({ region: '유럽', vcenterId: 'vc1' })).toEqual({ vcenterId: 'vc1' });
     expect(vmSearchScopeParams({ region: ' 유럽 ' })).toEqual({ region: '유럽' });

@@ -1,5 +1,5 @@
-// v3.12.6 — 표 행(tr) 안에서 셀 뒤 같은 줄에 공백 + {표현식}(주석 포함)을 두면 공백 텍스트 노드가 tr 의 자식이 된다 →
-//   React 'validateDOMNesting: Whitespace text nodes cannot appear as a child of <tr>' (2차 루프 개발 빌드 스윕에서 v3.12.4 이 만든 것을 재현).
+// v3.13.4 — 표 행(tr) 안에서 셀 뒤 같은 줄에 공백 + {표현식}(주석 포함)을 두면 공백 텍스트 노드가 tr 의 자식이 된다 →
+//   React 'validateDOMNesting: Whitespace text nodes cannot appear as a child of <tr>' (2차 루프 개발 빌드 스윕에서 v3.13.2 이 만든 것을 재현).
 //   셀(td · th)을 닫은 뒤 같은 줄에 공백과 { 가 오면 막는다 — 주석은 셀 위 줄에 둔다.
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';

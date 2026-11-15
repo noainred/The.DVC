@@ -8,7 +8,7 @@
 // 셸 역참조는 순환의 씨앗이다(views/ 는 셸 사용 유지: 86개 소비자 import 무변경).
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { pressable, onPressKey } from './pressable.js';
-import { uniqueKeys, baseRowKey } from './tableKeys.js';   // v3.12.6 행 key 고유화(겹치면 정렬마다 표가 불어났다)   // v3.12.4 DataTable 정렬 머리 키보드
+import { uniqueKeys, baseRowKey } from './tableKeys.js';   // v3.13.4 행 key 고유화(겹치면 정렬마다 표가 불어났다)   // v3.13.2 DataTable 정렬 머리 키보드
 // 권한 거부(403) 안내 — AccessDenied 는 api.js 만 참조하므로 이 import 로 순환이 생기지 않는다
 // (api.js 는 컴포넌트를 import 하지 않는다). 위 '순환의 씨앗' 주의사항과 배치되지 않음.
 import { permissionInfoFor, httpInfoFor, reportLoadingStall, ensurePerfClientConfig, pollLoadingServerStatus } from '../api.js';
@@ -162,7 +162,7 @@ export function DataTable({
 
   // ⚠ 자르는 것은 **정렬 뒤**다(위 주석). limit 0/미지정은 전부 그린다.
   const shown = limit > 0 ? sorted.slice(0, limit) : sorted;
-  const rowKeys = uniqueKeys(shown.map(baseRowKey));   // v3.12.6 행 key 고유화 — 같은 id/key 가 둘 이상이면 ~n(라이선스 표: 가림 키가 vCenter 마다 같아 정렬마다 표가 불어났다)
+  const rowKeys = uniqueKeys(shown.map(baseRowKey));   // v3.13.4 행 key 고유화 — 같은 id/key 가 둘 이상이면 ~n(라이선스 표: 가림 키가 vCenter 마다 같아 정렬마다 표가 불어났다)
   // 보이는 행을 호출부에 알린다(키 목록이 바뀔 때만 — 매 렌더 호출하면 부모가 무한 갱신된다).
   const shownKey = shown.map((r) => r.key ?? r.id ?? '').join(',');
   useEffect(() => { if (onVisible) onVisible(shown); }, [shownKey]); // eslint-disable-line react-hooks/exhaustive-deps

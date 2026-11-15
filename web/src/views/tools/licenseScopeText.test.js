@@ -20,7 +20,7 @@ describe('licenseScopeNote (v2.603 AUTHZ-2603-01)', () => {
   });
 });
 
-describe('v3.12.10 — corpTag: 솔루션 카드의 법인 글자', () => {
+describe('v3.13.8 — corpTag: 솔루션 카드의 법인 글자', () => {
   it('‘법인’ 으로 끝나면 그대로 · 아니면 ‘법인 ○○’ · 빈 값은 빈 글자', () => {
     expect(corpTag('Ashburn 법인')).toBe('Ashburn 법인');
     expect(corpTag('KR-Seoul')).toBe('법인 KR-Seoul');
