@@ -71,5 +71,3 @@
 - **v2.892 사전 점검**(`health.js` · `bareosHealth2892`): 판정 `judgeCorp` 하나 · vCenter 접속은 엣지 시점만 판정(중앙 = 참고) · 디스크는 엣지 + Director 가 그 서버일 때만 · timer · 지문 기준은 라우트로만 — audits.md.
 - **v2.844 완전 설치**: 전문 `install/CLAUDE.md`(엣지 노드 안 러너 · 그 단계만 되돌림 · 볼륨 삭제 세 겹 · 번들 서명 · OTP 코드 없음).
 - **v2.845 법인별 설정 · 계정 통합**: 전문 `manage/CLAUDE.md`(표지 파일만 · 재시작 직전 재확인 · 등록부 SSH 는 담당 엣지 것만).
-- **전체 점검 1 · 3회차**(`bareosFullAudit1`): 엣지가 시한 안에 결과 모름으로 **회신한** 작업은 늦은 회신 대기(`_late`)에 올리지 않는다(`completeEdgeOp` 가 onLate 를 비운다 — 시한 · abort 로 닫은 것만 기다린다) ·
-  `finishedRuns` 의 같은 실행은 뒤에 온 자세한 행으로 **빈 칸만** 채운다 · 단건 '지금 실행' 의 보낸 뒤 끊김(`MID_COMMAND_CODES`)은 결과 모름(504) + `lastError.unknown` → `registry.runUnknownHeld`(10분 · 그 뒤 시작한 실행이 원장에 보이면 먼저 풀림)가 재요청을 409 로 막는다.
