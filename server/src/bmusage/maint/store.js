@@ -8,7 +8,8 @@
  *   · 지운 창은 **묘비**(deleted.at)로 남는다 — 지금 판정에서는 빠지고 지난 구간(⑤ 분모 제외 · 음영)에는 지운 시각까지 남는다(judge.js 머리말 · 보관 90일).
  *   · 상한 2,000 — 넘으면 지운 창 · 90일 전에 끝난 창부터 비우고 그래도 넘치면 409.
  * 정규화는 **한 함수**(normalizeWindow) — API 입력(엄격) · 파일 읽기 · 엣지가 받은 배포본(느슨 — 형식 밖 항목은 버리고 센다)이 같은 함수를 지난다.
- * 판정 입력(windowsForJudge) = 이 노드의 창 + 중앙 배포본(받은 지 DEPLOY_TTL_MS 안일 때만 — 배포가 끊긴 엣지가 지워진 창으로 영원히 억제하지 않게: 억제 시한).
+ * 판정 입력(windowsForJudge) = 이 노드의 창 + 중앙 배포본(받은 지 DEPLOY_TTL_MS 안일 때만 — 배포가 끊긴 엣지가 지워진 창으로 영원히 억제하지 않게: 억제 시한)
+ *   + 배포 history(중앙의 끝남 · 지움 · 만료 창 — 지난 구간 전용 · 시한 없음 · 지금 판정에서 빠진다: 점검 반복 3회차 D2).
  * ⚠ 손상 · 못 읽음이면 그 쪽 창은 판정에 넣지 않는다(억제하지 않는 쪽 — 알림이 나간다) + 상태(unreadable)를 올려 수집 건강 · 화면이 밝힌다.
  * 권한 · 범위 · 승인 등급은 라우트(routes/api/bmMaint.js)가 본다 — 이 모듈은 형식 · 저장 · 일정 상한만.
  */
@@ -74,9 +75,10 @@ export function needsOwnerTier(w) {
  *   비용: 반복 창은 앞으로 36일(매월은 400일) · 일회 창은 그 발생 — 발생마다 앞뒤 2일만 다시 센다(쓰기 경로 · 같은 서버의 창 몇 개).
  * @param {object} cand  정규화한 후보(고치기 뒤 · 재확인이면 confirmedAt 을 지금으로)
  * @param {Array} all   이 노드의 창 전부 + 신선한 배포본(후보의 앞 판 · 같은 id 는 뺀다)
- * @param {{tagsOf?:Function}} o  태그 창 판정(중앙 수동 용도 태그) — 없으면 태그 창은 펼친 keys 로만
+ * @param {{tagsOf?:Function, exact?:boolean}} o  태그 창 판정(중앙 수동 용도 태그) — 없으면 태그 창은 펼친 keys 로만 ·
+ *   exact = 빠른 길 · 발생 한 번 세기 없이 예전 계산 그대로(시험 대조용 — 답은 같다: 점검 반복 3회차)
  */
-export function coverNeedsOwner(cand, all = [], now = Date.now(), { tagsOf = null } = {}) {
+export function coverNeedsOwner(cand, all = [], now = Date.now(), { tagsOf = null, exact = false } = {}) {
   if (!cand || cand.target?.kind !== 'server' || cand.deleted) return false;
   const keys = cand.target.keys || [];
   const live = (Array.isArray(all) ? all : []).filter((w) => w && w.id !== cand.id && !w.deleted && w.schedule);
@@ -90,13 +92,35 @@ export function coverNeedsOwner(cand, all = [], now = Date.now(), { tagsOf = nul
     const ps = peersOf(key);
     if (!ps.length) continue;
     const group = [cand, ...ps];
+    // 빠른 길(점검 반복 3회차 — 목록 canConfirm 이 비소유자 행마다 이 함수를 부르게 되어 요청 경로 비용을 줄인다 · 답은 정확한 계산과 같다):
+    //   창 하나가 어느 24시간에서든 덮는 최대는 일회 = 그 길이 · 반복 = 길이 × 2(이웃 발생의 시작 간격은 시간대 변경이 있어도 18시간을 넘으므로 한 24시간에 걸치는 발생은 둘까지).
+    //   그 합이 상한 이하면 어떤 24시간도 넘을 수 없다(위로 잡은 값). 넘을 수 있으면 아래 정확한 계산. 시험이 무작위 입력으로 exact 와 대조한다(bmUsageLoop3 D1).
+    if (!exact) {
+      const bound = group.reduce((a, w) => { const d = durationMinOf(w.schedule, w.tz); return a + (d == null ? Infinity : (w.schedule?.kind === 'once' ? d : 2 * d)); }, 0);
+      if (bound * MIN <= limit) continue;
+    }
     // 기준점 — 후보의 발생 + 매주가 아닌 동료의 발생(그 둘레에 후보 발생이 있으면 본다)
     const anchors = [...anchorsOf(cand), ...ps.filter((w) => w.schedule?.kind !== 'weekly').flatMap(anchorsOf)];
+    if (!anchors.length) continue;
+    // 발생은 창마다 기준점 전체 구간을 한 번 세고(30일 조각 — OCC_MAX 에 잘리지 않게) 기준점마다 겹치는 것만 고른다(3회차 — 같은 답: 발생 값은 구간과 무관하고
+    //   effectiveOccurrences(w, lo, hi) = 넓은 구간 결과 중 [lo, hi) 와 겹치는 것). exact 는 예전처럼 기준점마다 다시 센다(시험 대조용).
+    const spanLo = Math.min(...anchors.map((a) => a.start)) - 2 * DAY; const spanHi = Math.max(...anchors.map((a) => a.end)) + 2 * DAY;
+    const cache = new Map();
+    const occOf = (w, lo, hi) => {
+      if (exact) return effectiveOccurrences(w, lo, hi);
+      let list = cache.get(w);
+      if (!list) {
+        list = []; let last = -Infinity;
+        for (let c0 = spanLo; c0 < spanHi; c0 += 30 * DAY) for (const o of effectiveOccurrences(w, c0, Math.min(spanHi, c0 + 30 * DAY))) if (o.start > last) { list.push(o); last = o.start; }
+        cache.set(w, list);
+      }
+      return list.filter((o) => o.end > lo && o.start < hi);
+    };
     for (const a of anchors) {
       const lo = a.start - 2 * DAY; const hi = a.end + 2 * DAY;
-      const mine = effectiveOccurrences(cand, lo, hi);
+      const mine = occOf(cand, lo, hi);
       if (!mine.length) continue;
-      const iv = group.flatMap((w) => effectiveOccurrences(w, lo, hi)).map((o) => ({ from: Math.max(lo, o.start), to: Math.min(hi, o.end) })).sort((x, y) => x.from - y.from);
+      const iv = group.flatMap((w) => occOf(w, lo, hi)).map((o) => ({ from: Math.max(lo, o.start), to: Math.min(hi, o.end) })).sort((x, y) => x.from - y.from);
       const m = [];
       for (const x of iv) { const l = m[m.length - 1]; if (l && x.from <= l.to) l.to = Math.max(l.to, x.to); else m.push({ ...x }); }
       // 24시간 창의 덮임 최대는 창 시작이 어느 구간 시작이거나 창 끝이 어느 구간 끝일 때 나온다 — 후보 발생과 겹치는 창만 본다.
@@ -258,14 +282,20 @@ function onceEndOf(w) {
   _endMemo.set(k, end);
   return end;
 }
-function pruneOld(all, now) {
+/**
+ * 지난 구간 계산에 남는 창인가(가벼운 판정 하나 — 쓰기 때 정리 · 엣지 history 배포 · 엣지 history 보관이 같은 함수): 지운 지 · 끝난 지 · 만료된 지 KEEP_ENDED_DAYS 안.
+ *   ‘중앙이 지난 구간 계산에 쓰는 것과 같은 집합’(점검 반복 3회차 D2 — 엣지에도 같은 날짜까지 남긴다).
+ */
+export function keptPast(w, now = Date.now()) {
   const keep = now - KEEP_ENDED_DAYS * DAY;
-  all.items = all.items.filter((w) => {
-    if (w.deleted) return Number(w.deleted.at) > keep;
-    if (w.schedule?.kind === 'once') return onceEndOf(w) > keep || Number(w.at) > keep;
-    const exp = expiresAt(w);
-    return exp == null || exp > keep;
-  });
+  if (!w) return false;
+  if (w.deleted) return Number(w.deleted.at) > keep;
+  if (w.schedule?.kind === 'once') return onceEndOf(w) > keep || Number(w.at) > keep;
+  const exp = expiresAt(w);
+  return exp == null || exp > keep;
+}
+function pruneOld(all, now) {
+  all.items = all.items.filter((w) => keptPast(w, now));
 }
 
 /** rev 검사 — 없으면 409(마지막 쓰기 승리 금지 · 웹은 항상 보낸다) · 다르면 409. */
@@ -290,7 +320,12 @@ export function addWindow(input, { by = '', approvedBy = '', now = Date.now() } 
     return copy(rec);
   });
 }
-/** 고치기 — rev 가 다르면 409(그 사이 누가 바꿨다). 대상 법인은 바꾸지 않는다(범위가 바뀌는 쓰기를 만들지 않는다 — 지우고 새로). */
+/**
+ * 고치기 — rev 가 다르면 409(그 사이 누가 바꿨다). 대상 법인은 바꾸지 않는다(범위가 바뀌는 쓰기를 만들지 않는다 — 지우고 새로).
+ * ⚠ 정정(점검 반복 3회차 D1): 고치기는 **재확인이 아니다** — confirmedAt 을 바꾸지 않는다(만료된 반복 창은 고쳐도 만료 그대로). 예전에는 고치기마다
+ *   confirmedAt 을 지금으로 잡아 이름 · 사유만 고쳐도 92일 시한이 다시 잡혔고, 그 경로는 합 규칙(12시간 소유자 규칙)을 거치지 않아 운영자 혼자 만료된 12h 창 둘을
+ *   되살려 24시간 상시 억제를 만들 수 있었다(재현 336/336 칸). 재확인(시한 연장)은 confirmWindow 하나 — 라우트가 소유자 등급 · 합 규칙을 본다.
+ */
 export function editWindow(id, input, { by = '', approvedBy = null, rev = null, now = Date.now() } = {}) {
   return withStore((all) => {
     const i = all.items.findIndex((w) => w.id === String(id));
@@ -298,7 +333,7 @@ export function editWindow(id, input, { by = '', approvedBy = null, rev = null, 
     if (!cur || cur.deleted) throw fail(404, 'not-found', '그 정비 창을 찾지 못했습니다.');
     revCheck(cur, rev);
     if (String(input?.vcenterId ?? cur.vcenterId) !== cur.vcenterId) throw fail(400, 'bad-window', '법인은 바꿀 수 없습니다 — 지우고 새로 만드세요.', 'vcenterId');
-    const next = normalizeWindow({ ...cur, ...input, id: cur.id, by: cur.by, at: cur.at, rev: cur.rev + 1, approvedBy: approvedBy ?? cur.approvedBy, confirmedAt: now, edits: cur.edits }, { strict: true, now, fresh: input?.schedule != null });
+    const next = normalizeWindow({ ...cur, ...input, id: cur.id, by: cur.by, at: cur.at, rev: cur.rev + 1, approvedBy: approvedBy ?? cur.approvedBy, confirmedAt: cur.confirmedAt, edits: cur.edits }, { strict: true, now, fresh: input?.schedule != null });
     const fields = ['name', 'reason', 'target', 'tz', 'schedule', 'scopes'].filter((k) => JSON.stringify(next[k]) !== JSON.stringify(cur[k]));
     if (!fields.length) return copy(cur);
     next.edits = [...(cur.edits || []), { at: now, by: String(by).slice(0, 64), fields }].slice(-EDITS_MAX);
@@ -351,27 +386,74 @@ export function deleteWindow(id, { by = '', rev = null, now = Date.now() } = {})
 
 /* ── 엣지 배포본(중앙이 보낸 창 — 엣지에서만 쓴다) ─────────────────────── */
 let _dep = null;   // { m, s, data }
-/** 배포본 저장(엣지 인출 워커) — 같은 정규화를 다시 거친다(엣지는 중앙 문자열을 그대로 믿지 않는다). 형식 밖은 버리고 센다. */
-export function saveDeployed(list, { sig = '', now = Date.now() } = {}) {
+/**
+ * history(지난 구간용 — 점검 반복 3회차 D2) 상한: 개수 · 크기(JSON 글자 수 — 중앙이 보낼 때와 엣지가 받을 때 같은 값). 넘치면 최근 것부터 남기고 센다.
+ *   크기 상한은 인출 본문 상한(agent/bmMaintPull BODY_MAX 4MB) 안에서 지금 억제 창(windows)의 자리를 빼앗지 않게 잡았다.
+ */
+export const DEPLOY_HISTORY_MAX = 500;
+export const DEPLOY_HISTORY_BYTES_MAX = 1_000_000;
+/** history 를 상한 안으로(순수 — 앞에서부터 남긴다: 호출자가 최근 것부터 줄 세운다). */
+export function capHistory(list = []) {
+  const out = []; let bytes = 0; let dropped = 0;
+  for (const w of Array.isArray(list) ? list : []) {
+    const n = JSON.stringify(w).length;
+    if (out.length >= DEPLOY_HISTORY_MAX || bytes + n > DEPLOY_HISTORY_BYTES_MAX) { dropped += 1; continue; }
+    out.push(w); bytes += n;
+  }
+  return { list: out, dropped };
+}
+/** 파일에 쓸 꼴 — 메모리 표지(origin · history)는 읽을 때 다시 붙인다. */
+const bareWin = (w) => { const o = { ...w }; delete o.origin; delete o.history; return o; };
+/** history 줄 세우기 열쇠(최근 것부터) — 가벼운 값만(지운 시각 · 끝낸 시각 · 재확인 · 만든 시각 중 늦은 것). */
+export const historyRecency = (w) => Math.max(Number(w?.deleted?.at) || 0, Number(w?.endedAt) || 0, Number(w?.confirmedAt) || 0, Number(w?.at) || 0);
+/**
+ * 배포본 저장(엣지 인출 워커) — 같은 정규화를 다시 거친다(엣지는 중앙 문자열을 그대로 믿지 않는다). 형식 밖은 버리고 센다.
+ * @param {Array} list  지금 억제에 쓰는 창(진행 중 · 예정 — 24시간 시한)
+ * @param {{sig?:string, now?:number, history?:Array|undefined}} o  history = 지난 구간용 창(끝남 · 지움 · 만료 — 3회차 D2).
+ *   배열이 아니면(구버전 중앙 · 필드 없음) **직전 history 를 그대로 둔다**(과거 사실 — 억제가 아니라 시한을 걸지 않는다 · 90일 지난 것만 비운다).
+ */
+export function saveDeployed(list, { sig = '', now = Date.now(), history = undefined } = {}) {
   const items = []; let dropped = 0; let carried = 0;
   // v2.954(점검 D-1 반증 재수정): 중앙이 그 엣지 대상을 몰라 태그 창에 keysUnknown 을 달아 보내면(중앙 재시작 직후) 직전 배포본의 같은 창(id · 태그) keys 를 이어 쓴다 —
-  //   빈 keys 로 억제가 꺼지지 않게. 직전 배포본이 없거나 시한이 지났거나 새 창이면 이어 쓸 것이 없다(0대 — 예전과 같다).
-  let prevById = null;
+  //   빈 keys 로 억제가 꺼지지 않게. 직전 배포본이 없거나 시한이 지났거나 새 창이면 이어 쓸 것이 없다(0대 — 예전과 같다). history 도 같은 규칙(직전 items · history 에서).
+  let prev = null;
+  const prevOf = () => { if (!prev) { prev = { byId: new Map(), history: [], historyAt: 0 }; try { const d = loadDeployed(now); for (const p of [...(d?.items || []), ...(d?.history || [])]) if (!prev.byId.has(p.id)) prev.byId.set(p.id, p); prev.history = d?.history || []; prev.historyAt = Number(d?.historyAt) || 0; } catch { /* 직전 판을 못 읽으면 이어 쓸 것이 없다 */ } } return prev; };
+  const carry = (x, w) => {
+    if (!(x?.target?.keysUnknown === true && w.target?.kind === 'tag')) return;
+    const p = prevOf().byId.get(w.id);
+    if (p?.target?.kind === 'tag' && p.target.tag === w.target.tag && Array.isArray(p.target.keys) && p.target.keys.length) { w.target = { ...w.target, keys: p.target.keys.slice(0, 5_000) }; carried += 1; }
+  };
   for (const x of (Array.isArray(list) ? list : []).slice(0, WINDOWS_MAX)) {
     const w = normalizeWindow(x);
     if (!w) { dropped += 1; continue; }
-    if (x?.target?.keysUnknown === true && w.target?.kind === 'tag') {
-      if (!prevById) { prevById = new Map(); try { for (const p of loadDeployed(now)?.items || []) prevById.set(p.id, p); } catch { /* 직전 판을 못 읽으면 이어 쓸 것이 없다 */ } }
-      const p = prevById.get(w.id);
-      if (p?.target?.kind === 'tag' && p.target.tag === w.target.tag && Array.isArray(p.target.keys) && p.target.keys.length) { w.target = { ...w.target, keys: p.target.keys.slice(0, 5_000) }; carried += 1; }
-    }
+    carry(x, w);
     items.push({ ...w, origin: 'central' });
   }
   dropped += Math.max(0, (Array.isArray(list) ? list.length : 0) - WINDOWS_MAX);
-  const data = { v: 1, at: now, sig: String(sig).slice(0, 64), items, dropped };
+  // history — 같은 정규화 · 지금 억제 창과 같은 id 는 뺀다(지금 창이 이긴다) · 90일 지난 것은 비운다 · 개수 · 크기 상한
+  const liveIds = new Set(items.map((w) => w.id));
+  let hist = []; let historyDropped = 0; let historyAt = 0;
+  if (Array.isArray(history)) {
+    const cand = [];
+    for (const x of history.slice(0, DEPLOY_HISTORY_MAX * 2)) {
+      const w = normalizeWindow(x);
+      if (!w) { historyDropped += 1; continue; }
+      carry(x, w);
+      if (liveIds.has(w.id) || !keptPast(w, now)) continue;
+      cand.push(w);
+    }
+    historyDropped += Math.max(0, history.length - DEPLOY_HISTORY_MAX * 2);
+    const c = capHistory(cand.sort((a, b) => historyRecency(b) - historyRecency(a)));
+    hist = c.list; historyDropped += c.dropped; historyAt = now;
+  } else {
+    const p = prevOf();
+    hist = p.history.filter((w) => !liveIds.has(w.id) && keptPast(w, now));
+    historyAt = p.historyAt;
+  }
+  const data = { v: 1, at: now, sig: String(sig).slice(0, 64), items, dropped, history: hist.map(bareWin), historyDropped, historyAt };
   atomicWriteFileSync(DEPLOYED_FILE(), JSON.stringify(data), { mode: 0o600 });
   _dep = null;
-  return { ok: true, n: items.length, dropped, ...(carried ? { carried } : {}) };
+  return { ok: true, n: items.length, dropped, history: hist.length, ...(historyDropped ? { historyDropped } : {}), ...(carried ? { carried } : {}) };
 }
 /**
  * 배포본 읽기 — 없으면 null · 손상이면 보존하고 null(억제하지 않는 쪽) + unreadable.
@@ -386,6 +468,10 @@ export function loadDeployed(now = Date.now()) {
     const o = JSON.parse(fs.readFileSync(DEPLOYED_FILE(), 'utf8'));
     if (!o || typeof o !== 'object' || !Array.isArray(o.items)) throw new Error('형식이 다릅니다');
     const items = o.items.map((x) => normalizeWindow(x)).filter(Boolean).map((w) => ({ ...w, origin: 'central' }));
+    // history(3회차 D2) — 같은 정규화 · 지난 구간 전용 표지(history: true — judge.activeOccurrence 가 지금 판정에서 뺀다) · 상한 다시 · 없거나 형식 밖이면 [](옛 배포본)
+    const ids = new Set(items.map((w) => w.id));
+    const history = capHistory((Array.isArray(o.history) ? o.history.slice(0, DEPLOY_HISTORY_MAX) : []).map((x) => normalizeWindow(x)).filter((w) => w && !ids.has(w.id))).list
+      .map((w) => ({ ...w, origin: 'central', history: true }));
     let at = Number(o.at) || 0; let clampedFrom = Number(o.atClampedFrom) || null;
     if (at > now + DEPLOY_FUTURE_SKEW_MS) {
       clampedFrom = at; at = now;
@@ -393,20 +479,24 @@ export function loadDeployed(now = Date.now()) {
       console.warn('[bmusage] 정비 창 배포본의 받은 시각이 미래라 지금으로 잘랐습니다(엣지 시계 변경 — 24시간 시한은 지금부터)');
       try { st = fs.statSync(DEPLOYED_FILE()); } catch { /* */ }
     }
-    const data = { at, sig: String(o.sig || '').slice(0, 64), items, dropped: Number(o.dropped) || 0, ...(clampedFrom ? { atClampedFrom: clampedFrom } : {}) };
+    const data = { at, sig: String(o.sig || '').slice(0, 64), items, dropped: Number(o.dropped) || 0, history, historyAt: Number(o.historyAt) || 0, ...(Number(o.historyDropped) ? { historyDropped: Number(o.historyDropped) } : {}),
+      ...(clampedFrom ? { atClampedFrom: clampedFrom } : {}) };
     _dep = { m: st.mtimeMs, s: st.size, data };
     return data;
   } catch (e) {
     preserveCorrupt(DEPLOYED_FILE(), String(e?.message || e));
     _dep = null;
-    return { at: 0, sig: '', items: [], unreadable: true };
+    return { at: 0, sig: '', items: [], history: [], unreadable: true };
   }
 }
 /** 배포본이 시한을 넘었나(판정 · 화면이 같은 함수). */
 export const deployedStale = (dep, now = Date.now()) => !!dep && (now - Number(dep.at || 0) > DEPLOY_TTL_MS);
 
 /**
- * 판정 입력 — 이 노드의 창(지운 것 제외) + 신선한 배포본. 못 읽은 쪽은 넣지 않고 표지로 밝힌다.
+ * 판정 입력 — 이 노드의 창(묘비 포함) + 신선한 배포본 + 배포 history(지난 구간 전용). 못 읽은 쪽은 넣지 않고 표지로 밝힌다.
+ *   ⚠ 점검 반복 3회차 D2: 배포본 24시간 시한은 **지금 억제**(items)에만 건다. history(중앙의 끝남 · 지움 · 만료 창 — history: true)는 억제가 아니라 과거 사실이라
+ *   시한이 지나도 마지막으로 받은 것을 넣는다 — 지금 판정(judge.activeOccurrence)은 history 를 빼고, 지난 구간(coverIntervals — ⑤ 분모 제외 · 음영)만 쓴다.
+ *   예전에는 끝난 일회 창이 다음 배포본에서 빠져 엣지 서버의 용량 · 저활용 · 베이스라인 제외가 소급해 사라졌다(중앙은 남는다 — 같은 창이 두 노드에서 다른 과거).
  * @returns {{ windows:Array, localUnreadable:boolean, deployed:{at:number,sig:string,n:number,stale:boolean,unreadable?:boolean}|null }}
  */
 export function windowsForJudge(now = Date.now()) {
@@ -416,7 +506,7 @@ export function windowsForJudge(now = Date.now()) {
   const dep = loadDeployed(now);
   const stale = deployedStale(dep, now);
   const deployed = dep ? { at: dep.at, sig: dep.sig, n: dep.items.length, stale, ...(dep.unreadable ? { unreadable: true } : {}) } : null;
-  return { windows: [...local, ...(dep && !stale ? dep.items : [])], localUnreadable, deployed };
+  return { windows: [...local, ...(dep && !stale ? dep.items : []), ...(dep?.history || [])], localUnreadable, deployed };
 }
 /**
  * 점검용 사실(캐시 없이 — 반증 F8): 파일 두 개를 지금 다시 읽어 창마다 지운 시각 · 지금 끝낸 시각 · 재확인 · 일정 꼴만 돌려준다(정규화 · 판정을 거치지 않는다).

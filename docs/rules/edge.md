@@ -894,7 +894,7 @@
   (`bmusage/maint/deploy.js` · `routes/central.js GET /bm-maint` · `agent/bmMaintPull.js` · `central/bmMaintCapSanitize.js` · `central/bmCapacityPull.js` · `routes/collector.js /bm-usage/capacity` ·
   `central/featureMinEdgeVersion.js STAGE8A_TITLE_RE` · 회귀 `bmMaint8aEdge`(엣지 = 자식 프로세스 · 실제 centralRouter ↔ 실제 `pullBmMaintNow`) · `bmCapacity8aRoute`(실제 collector ↔ 실제 `pullEdgeCapacity`)):
   - 배포는 15차 · 7b 경로와 같은 꼴: 엣지 주기 인출(기본 10분 · `AGENT_BM_MAINT_PULL_MS`) · **개별 토큰으로 인증된 이름에만** · 결과(적용 서명)는 다음 인출의 쿼리 · 0건이어도 `_last` · edgelog spec 등재.
-  - 엣지는 **자기 법인 창만** 받는다 — 법인 = ‘중앙에서 켜기’ 매핑(`edgeCorpsSource`) ∪ 그 엣지 봉투 대상의 법인 · 진행 중 · 예정 창만 · 이력 없음. **태그 창은 중앙이 그 엣지 대상 중 그 태그(수동 용도 태그)를 가진 서버 키로 펼친다**
+  - 엣지는 **자기 법인 창만** 받는다 — 법인 = ‘중앙에서 켜기’ 매핑(`edgeCorpsSource`) ∪ 그 엣지 봉투 대상의 법인 · 지금 억제용 `windows` = 진행 중 · 예정 창만 · 이력(edits) 없음(지난 구간용 `history` 는 아래 3회차 D2). **태그 창은 중앙이 그 엣지 대상 중 그 태그(수동 용도 태그)를 가진 서버 키로 펼친다**
     (엣지에는 중앙 태그가 없다 — 엣지 판정 = 중앙 판정을 테스트가 대조).
   - 엣지는 받은 창을 **같은 `normalizeWindow`** 로 다시 자르고(형식 밖은 버리고 센다) `maintenance-windows-deployed.json` 에 둔다. distribute:false · 404 · 503 · 실패면 **바꾸지 않는다** —
     대신 받은 지 24시간(`DEPLOY_TTL_MS`)이 지나면 판정에 넣지 않는다(중앙이 지운 창이 끊긴 엣지에서 계속 억제하지 않게 — 억제 시한).
@@ -907,6 +907,15 @@
     엣지의 배포 태그 창은 **펼친 keys 만**으로 맞춘다(F10 — 엣지 로컬 수동 태그로 넓히지 않는다) · 배포본 받은 시각이 5분 넘게 미래면 **지금으로 자르고 파일에 남긴다**(F7 — 엣지 시계가 앞서 있다 바로잡히면
     24h 시한이 92일 재확인 만료까지 늘던 일 · 원래 값은 `atClampedFrom`) · 배포 현황은 창 상태를 **요청마다 한 번** 세고 엣지마다 다시 쓴다(F6 — 엣지 28곳마다 전 창을 다시 세던 것).
     봉투 `capacity` 는 행 상한 내역 `cap`(서버 수 · 계산 안 한 서버 · 마운트 일부만 서버 · 뺀 마운트 수 — 수만) · 행의 `lastDay · staleDays · stale` 을 싣고 중앙 정제 화이트리스트에도 넣었다.
+  - ⚠⚠ **점검 반복 3회차 D2 — 배포 `history`(지난 구간 전용)**(회귀 `bmUsageLoop3Edge` — 실제 centralRouter ↔ 실제 `pullBmMaintNow` · 엣지 = 자식 프로세스 · 변이 5건):
+    예전에는 진행 중 · 예정 창만 보내고 엣지가 배포본을 통째 교체해, 끝난 일회 창 · 지운 창(묘비) · 만료 창이 다음 인출에서 빠졌다 — 엣지 서버의 ⑤ 분모 제외(용량 예측 날 · 저활용 날 · 베이스라인 롤업)가
+    소급해 사라졌다(재현: 다음 날 인출 뒤 제외 구간 [] · 용량 제외 날 [] · exclOf 0구간 — 중앙은 그대로). 이제 인출 응답에 `history`(끝남 · 지움 · 만료 — 중앙이 지난 구간 계산에 쓰는 것과 같은 집합 `store.keptPast` 90일 ·
+    같은 법인 · 같은 태그 펼침 `windowsForEdge` · 묘비는 `deleted` 를 싣는다) · `historyVer` 를 함께 싣는다. **서명(sig)은 지금 억제용 windows 만으로**(배포 현황 ‘반영됨’ 뜻 그대로) ·
+    구버전 엣지는 `history` 를 모르고 무시한다(`maintBodyOk` 는 windows · sig 만 본다 — 예전과 같다). 엣지는 history 를 **같은 `normalizeWindow`** 로 다시 자르고 지금 창과 같은 id 는 빼며
+    90일 지난 것은 비우고 상한(`DEPLOY_HISTORY_MAX` 500 · `DEPLOY_HISTORY_BYTES_MAX` 1,000,000자 — 최근 것부터 · 중앙이 보낼 때도 같은 상한: 인출 본문 상한 4MB 안에서 지금 억제 창 자리를 빼앗지 않게)을 둔다.
+    **history 는 지금 판정(억제)에 쓰지 않는다**(`judge.activeOccurrence` 가 history 표지 창을 뺀다 — 그 발생 시각에서도) · **24시간 시한은 지금 억제(items)에만** — history 는 억제가 아니라 과거 사실이라
+    마지막으로 받은 것을 유지한다(배열이 오지 않으면 — 구버전 중앙 — 직전 history 그대로 · 90일 지난 것만 비움). 남은 것: 배포본이 24시간 넘게 끊기면 그때 **진행 중이던** 창(items)의 지난 발생은 ⑤ 에서 빠진다
+    (지금 억제와 함께 시한에 걸린다 — 다음 인출에 그 창이 live 또는 history 로 돌아오면 복구 · 엣지 하루 계산이 그 사이에 돌면 그날 결과만 다르다 — 고치지 않음).
 - ⚠⚠ **리눅스 성능 8b단계 — 프로세스 Top-N 엣지 대행(`/api/collector/bm-usage/top` · `/top/band`) · 봉투 `topVer` · `idleVer` · `idle`**
   - 대행: 같은 url · 같은 토큰(`pullFromEdge`) · **bodyOk 명시**(`topPointBodyOk` · `topBandBodyOk` — 봉투 모양 `{ok,node}` 는 본문이 아니다) · 실제 collector 라우터 ↔ 실제 `pullEdgeTop` · `pullEdgeTopBand` 성공 왕복 시험(`bmTop8bRoute`) ·
     대상 밖 키는 엣지가 404 · 보관 없음(프로세스 표는 법인 밖에 쌓지 않는다 — 볼 때 당긴다).
@@ -924,7 +933,7 @@
   - 정제: 아는 필드 4개 · 대상 키만 · 중복 첫 것 · limitWatts 수(1~100,000 W 밖 null) · enabled 불리언만(값 없는 true 는 null) · at 은 수신 시각으로 자르고 원본 `atRaw` · 뺀 수 `powerCapsDropped`.
     중앙 보기는 at 이 2시간 넘으면 ‘낡음’(값을 쓰지 않는다 — 로컬 인벤토리와 같은 기준). **‘엣지 버전 낮음’ 은 표지가 없을 때만**(응답 `capOldEdge` · `capMinEdgeVersion` — 표지 `POWER_ALERT_TITLE_RE`
     = `/베어메탈 사용률 — 전력 알림 규칙 · 엣지 PowerCap/` 의 릴리스 노트 첫 번호 · 노트에 없으면 지금 판 — 게이트 아님).
-  - 발송 기록: 중앙 정제의 규칙 열거는 `perfRules.RULE_IDS` 하나(⚠ 정정 — 손 목록에 8a capacity 가 빠져 ‘use’ 로 바뀌었다) · 랙 기록(키 `rack:<법인>|<랙>`)은 대상 목록과 대지 않고
+  - 발송 기록: 중앙 정제의 규칙 열거는 `perfRules.RULE_IDS` 하나(⚠ 정정 — 손 목록에 8a capacity 가 빠져 ‘use’ 로 바뀌었다 · ⚠ 점검 반복 3회차 I1: 목록 밖 규칙은 'use' 가 아니라 'unknown' — 제목 ‘알 수 없는 규칙’ · 이슈 없음 · 화면 sentRuleText) · 랙 기록(키 `rack:<법인>|<랙>`)은 대상 목록과 대지 않고
     랙 이름 형식만 받으며 **법인은 중앙이 정해**(엣지 주장 ∩ 그 엣지 담당) 키 · 이름 · 제목을 다시 만든다 — 엣지가 다른 법인 이름을 키에 넣어 그 법인 이력에 끼워 넣지 못한다.
   - 반증 n2 F4: 중앙 · 엣지 사이 판정 분담은 `bmusage/powerJudge.js judgeOf` 하나 — 대상 노드와 전력 원천 노드가 같을 때만 판정 · 중앙은 **법인을 엣지가 맡으면** 자기 대상이어도 판정하지 않는다
     (`edgeCorps.corpOwnerSource` · 같은 서버가 두 iDRAC 등록부에 있을 때의 이중 알림 S1 방지) · 중앙 전력 보기가 같은 함수로 ‘알림 판정 없음 + 사유’ 를 보인다.

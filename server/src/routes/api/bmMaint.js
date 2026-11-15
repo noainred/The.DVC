@@ -10,6 +10,7 @@
  *     12시간 초과: 반증 F5 · 재확인 G1) — 재확인도 같은 규칙. approvedBy(소유자 등급이 저장했다 · 비소유자가 고치면 비운다)는 **기록일 뿐 합 판정에 쓰지 않는다**(G2).
  *     고치기는 **고치기 전과 뒤 중 하나라도** 소유자 등급이 필요하면 소유자 등급(범위 관리자가 법인 창을 서버 창으로 바꿔 쥐거나, 서버 창을 법인 창으로 넓히지 못하게).
  *     억제를 **줄이는** 동작(지금 끝내기 · 지우기)은 그 법인 쓰기 범위면 된다(안전한 쪽).
+ *     **재확인(반복 창 시한 연장)은 재확인 라우트 하나**다 — 고치기는 confirmedAt 을 바꾸지 않는다(점검 반복 3회차 D1) · 목록 canConfirm 은 그 라우트와 같은 판정(ownerNeed).
  *   · 엣지 배포본(origin central)은 엣지에서 고칠 수 없다(중앙에서 고친다 — 다음 인출에 반영).
  *   · 감사 `bm-perf.maintenance`(op · id · 대상 종류 · 법인 · 서버 수 · 길이 · 범위 · 사유 앞 120자).
  *   · 미리보기(다음 5회 · DST 표지)는 서버가 계산한다 — 웹은 시간대 · 일정 계산을 복제하지 않는다.
@@ -113,16 +114,24 @@ async function writeGate(req, snap, D, b) {
 async function ownerGate(req, D, wins, { combined = null, now = Date.now() } = {}) {
   if (await D.ownerTier(req)) return;
   const ST = await D.store();
-  if (wins.some((w) => w && ST.needsOwnerTier(w))) throw fail(403, 'owner-required', '법인 전체 · 태그 대상 · 12시간 넘는 창은 설정 소유자 등급(소유자 + 전체 범위)만 만들고 고칠 수 있습니다.');
-  if (combined) {
-    // 이 노드의 창 + 신선한 배포본(엣지 노드라면 중앙 창도 그 서버를 덮는다) · 태그 창은 수동 용도 태그로
-    const dep = ST.loadDeployed(now);
-    const all = [...ST.listWindows(), ...(dep && !dep.unreadable && !ST.deployedStale(dep, now) ? dep.items : [])];
-    const tagsOf = await (await D.runtime()).tagsReader();
-    if (ST.coverNeedsOwner(combined, all, now, { tagsOf })) {
-      throw fail(403, 'owner-required', '같은 서버를 덮는 창들(설정 소유자 창 · 법인 · 태그 창 포함)의 합이 어느 24시간에서든 12시간을 넘습니다 — 설정 소유자 등급만 만들고 · 고치고 · 재확인할 수 있습니다.');
-    }
-  }
+  // 태그 창은 수동 용도 태그로 · 합 규칙 입력은 gateWindows(목록 canConfirm 과 같은 집합)
+  const need = ownerNeed(ST, wins, combined, combined ? gateWindows(ST, now) : [], now, combined ? await (await D.runtime()).tagsReader() : null);
+  if (need === 'window') throw fail(403, 'owner-required', '법인 전체 · 태그 대상 · 12시간 넘는 창은 설정 소유자 등급(소유자 + 전체 범위)만 만들고 고칠 수 있습니다.');
+  if (need === 'combined') throw fail(403, 'owner-required', '같은 서버를 덮는 창들(설정 소유자 창 · 법인 · 태그 창 포함)의 합이 어느 24시간에서든 12시간을 넘습니다 — 설정 소유자 등급만 만들고 · 고치고 · 재확인할 수 있습니다.');
+}
+/**
+ * 비소유자에게 소유자 등급이 필요한가(순수 판정 묶음 — store.needsOwnerTier · store.coverNeedsOwner): 'window'(창 하나 규칙) · 'combined'(합 규칙) · null.
+ *   쓰기 403(ownerGate)과 목록의 canConfirm 이 **같은 함수**다(점검 반복 3회차 D1 — 목록이 합 규칙을 보지 않아 재확인 버튼이 열리고 누르면 403 이었다).
+ */
+export function ownerNeed(ST, wins, combined, all, now, tagsOf) {
+  if (wins.some((w) => w && ST.needsOwnerTier(w))) return 'window';
+  if (combined && ST.coverNeedsOwner(combined, all, now, { tagsOf })) return 'combined';
+  return null;
+}
+/** 합 규칙의 입력 — 이 노드의 창 + 신선한 배포본(엣지 노드라면 중앙 창도 그 서버를 덮는다). ownerGate · 목록 canConfirm 이 같은 집합. */
+function gateWindows(ST, now) {
+  const dep = ST.loadDeployed(now);
+  return [...ST.listWindows(), ...(dep && !dep.unreadable && !ST.deployedStale(dep, now) ? dep.items : [])];
 }
 /** 기존 창 찾기 — 조회 밖 404 → 쓰기 밖 403 · 엣지 배포본은 409. */
 async function existingGate(req, snap, D, id) {
@@ -160,10 +169,21 @@ export async function bmMaintList(req, snap, deps = {}) {
   const maskName = (nm) => (isAdmin ? nm : (match && match(nm) ? maskedIdToken(nm) : String(nm).replace(IPV4_RE, (ip) => maskedIdToken(ip))));
   const owner = await D.ownerTier(req);
   const writable = (w) => w.origin !== 'central' && inUserWriteScope(req.user, snap, w.vcenterId);
+  // 재확인 버튼 = 재확인 라우트와 같은 판정(ownerNeed — 창 하나 규칙 + 합 규칙 · 3회차 D1). 소유자 등급이면 합을 세지 않는다(라우트와 같다).
+  //   합 입력은 법인별로 미리 나눈다(matchTarget 은 법인이 같은 창만 맞춘다 — 같은 결과 · 창마다 전 창을 훑지 않게).
+  let confirmNeed = () => null;
+  if (!owner) {
+    const byVc = new Map();
+    for (const x of gateWindows(ST, now)) { const k = String(x?.vcenterId ?? '').trim(); if (!byVc.has(k)) byVc.set(k, []); byVc.get(k).push(x); }
+    const tagsOf = await R.tagsReader();
+    confirmNeed = (w) => ownerNeed(ST, [w], { ...w, confirmedAt: now }, byVc.get(String(w.vcenterId ?? '').trim()) || [], now, tagsOf);
+  }
   const view = (w) => {
     const st = J.windowStatus(w, now);
     const fmt = (o) => (o ? { start: o.start, end: o.end, startLocal: S.fmtLocal(w.tz, o.start), endLocal: S.fmtLocal(w.tz, o.end) } : null);
     const needOwner = ST.needsOwnerTier(w);
+    const confirmable = writable(w) && w.schedule.kind !== 'once';
+    const cNeed = confirmable ? confirmNeed(w) : null;
     return {
       id: w.id, name: w.name, reason: w.reason, vcenterId: w.vcenterId, tz: w.tz, schedule: w.schedule, scopes: Object.keys(w.scopes || {}), origin: w.origin || 'local', rev: w.rev,
       target: { kind: w.target.kind, ...(w.target.tag ? { tag: w.target.tag } : {}), count: (w.target.keys || []).length, names: (w.target.names || []).map(maskName).slice(0, 20),
@@ -173,7 +193,7 @@ export async function bmMaintList(req, snap, deps = {}) {
       ...(w.endedAt != null ? { endedAt: w.endedAt, endedBy: w.endedBy || '' } : {}),
       counts: counts[w.id] || null, needOwner,
       canEdit: writable(w) && (!needOwner || owner), canEnd: writable(w) && st.status === 'active', canDelete: writable(w),
-      canConfirm: writable(w) && w.schedule.kind !== 'once' && (!needOwner || owner),
+      canConfirm: confirmable && !cNeed, ...(cNeed === 'combined' ? { confirmOwner: 'combined' } : {}),
       edits: (w.edits || []).slice(-5),
     };
   };
@@ -272,8 +292,10 @@ async function edit(req, res, D) {
     const next = ST.normalizeWindow({ ...cur, ...(b.name !== undefined ? { name: b.name } : {}), ...(b.reason !== undefined ? { reason: b.reason } : {}), ...(b.tz !== undefined ? { tz: b.tz } : {}),
       ...(b.schedule !== undefined ? { schedule: b.schedule } : {}), ...(b.scopes !== undefined ? { scopes: b.scopes } : {}), target, vcenterId }, { strict: true, now, fresh: b.schedule !== undefined });
     // 합 규칙은 덮임이 바뀌는 고치기(대상 · 시간대 · 일정 · 범위)에만 — 이름 · 사유만 고치는 것은 억제를 늘리지 않는다(창 하나 규칙은 그대로).
+    //   ⚠ 정정(점검 반복 3회차 D1): 예전에는 store.editWindow 가 고치기마다 confirmedAt 을 지금으로 잡아 이 전제가 틀렸다(이름만 고쳐도 만료된 창이 되살아났다).
+    //   이제 고치기는 confirmedAt 을 바꾸지 않는다 — 후보도 저장될 값 그대로(next.confirmedAt = 지금 값)로 본다. 시한 연장은 재확인 라우트 하나.
     const coverChanged = ['target', 'tz', 'schedule', 'scopes'].some((k) => JSON.stringify(next[k]) !== JSON.stringify(cur[k]));
-    await ownerGate(req, D, [cur, next], { combined: coverChanged ? { ...next, id: cur.id, confirmedAt: now } : null, now });
+    await ownerGate(req, D, [cur, next], { combined: coverChanged ? { ...next, id: cur.id } : null, now });
     const owner = !!(await D.ownerTier(req));
     const by = String(req.user?.username || '');
     const rec = await ST.editWindow(cur.id, { name: next.name, reason: next.reason, tz: next.tz, schedule: next.schedule, scopes: next.scopes, target: next.target, vcenterId: next.vcenterId },
