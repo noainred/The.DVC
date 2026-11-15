@@ -14,6 +14,7 @@ export const WRITE_WHY_TEXT = Object.freeze({
   'role-operator': '운영자(operator) 이상만 할 수 있습니다',
   'full-scope': '조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 계정만 할 수 있습니다 — 전 법인에 닿는 동작입니다',
   'read-only': '이 법인은 조회 전용입니다(쓰기 범위 밖)',
+  'no-os-path': '이 서버에는 OS 계정(SSH 등록)이 없습니다 — 스냅샷은 OS 경로가 있는 서버만',   // 10회차 L2
 });
 
 /** 버튼을 열어도 되나 — 서버 표지가 ok 일 때만(없으면 닫는다). */

@@ -21,6 +21,9 @@ import { isAuthFailureText, isPeerRejectText } from '../../util/authGuard.js';
 import { cleanReason } from './reason.js';
 
 /** 세션 시한(연결 + 명령 — 명령 안 sleep 2초 포함). 장비 시한보다 짧은 명령 시한(산수는 테스트가 고정). */
+/** 이 서버에 OS 경로(SSH 등록)가 있는가 — 실행(아래)과 GET 표지(routes/api/bmUsage.js actions.run — 10회차 L2)가 같은 판정. */
+export const snapshotOsPathIssue = (target) => (!target?.osHost || !String(target.osHost.host || '').trim() ? 'no-os-path' : null);
+
 export const SNAPSHOT_READY_MS = 15_000;
 export const SNAPSHOT_CMD_MS = 30_000;
 export const SNAPSHOT_DEADLINE_MS = 50_000;
@@ -95,7 +98,7 @@ export async function runSnapshotLocal({ target, reason, by = '', settings = {},
   const r = cleanReason(reason);
   if (!r) return { ok: false, code: 'bad-reason', reason: '사유를 2자 이상 적어야 합니다(감사 기록에 남습니다).' };
   if (!target || !target.key) return { ok: false, code: 'not-found', reason: '대상 서버를 찾지 못했습니다.' };
-  if (!target.osHost || !String(target.osHost.host || '').trim()) return { ok: false, code: 'no-os-path', reason: '이 서버에는 OS 계정(베어메탈 스토리지 등록부)이 없습니다 — 스냅샷은 SSH 경로가 있어야 합니다.' };
+  if (snapshotOsPathIssue(target)) return { ok: false, code: 'no-os-path', reason: '이 서버에는 OS 계정(베어메탈 스토리지 등록부)이 없습니다 — 스냅샷은 SSH 경로가 있어야 합니다.' };
   // 7b: 키 · 공통 계정 참조를 해석하지 못한 서버는 접속하지 않는다(주기 수집과 같은 판정 — onboard/refs.js).
   if (target.osHost.authError) return { ok: false, code: 'auth-unresolved', reason: String(target.osHost.authError).slice(0, 300) };
   // ⚠ 동시 1건: 검사와 등록 사이에 await 를 두지 않는다(같은 틱의 두 요청이 둘 다 통과하지 않게).

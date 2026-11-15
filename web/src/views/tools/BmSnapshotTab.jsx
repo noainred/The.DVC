@@ -175,7 +175,7 @@ export default function BmSnapshotTab({ itemKey, vc = '' }) {
             <input className="input bmo-input" type="text" maxLength={300} placeholder="사유(필수 — 감사 기록에 남습니다)" value={reason} onChange={(e) => setReason(e.target.value)} />
             <button className="btn bmp-touch" disabled={run.busy || reason.trim().length < 2} onClick={doRun}>{run.busy ? '실행 중… (SSH 1회 · 최대 1분)' : '진단 스냅샷 실행'}</button>
           </div>
-        ) : gate === 'role' ? <p className="bmo-note">{runG?.why === 'demo' ? `실행 — ${gateWhy(runG)}` : '실행은 운영자(operator) 이상만 할 수 있습니다'} — 아래 보관분은 볼 수 있습니다.</p>
+        ) : gate === 'role' ? <p className="bmo-note">{runG && !runG.ok && !String(runG.why || '').startsWith('role-') && gateWhy(runG) ? `실행 — ${gateWhy(runG)}` : '실행은 운영자(operator) 이상만 할 수 있습니다'} — 아래 보관분은 볼 수 있습니다.</p>
           : <p className="bmo-note">{SNAP_CODE_TEXT.forbidden.text} 아래 보관분은 볼 수 있습니다.</p>}
         {run.err && <ErrorBox error={run.err} />}
       </section>
