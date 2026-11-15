@@ -41,6 +41,7 @@ import { fleetPartialsSummary } from '../../central/fleet.js'; // v2.607 LEFT260
 import { poolSettled } from '../../util/pool.js'; // v2.613 RUNTIME2613-03(a)
 import { reqTimeoutMs } from '../../agent/envTimeout.js';
 import { memoJson, scopeKey } from './shared.js'; // v2.919: 서버 1대 성능 상세(응답 캐시 + 범위 서명)
+import { createYielder } from '../../util/timeSlice.js'; // 점검 반복 5회차 D5 — 함대 루프 양보
 import { perfForRows, stripJsonCols } from '../../bmusage/edgePull.js'; // v2.919: 판정이 붙은 성능 항목(엣지 봉투와 같은 함수)
 import { buildPerfEntry, PERF_COL_META, compactPerfEntry } from '../../bmusage/perfView.js';
 import { hwFactsReader } from '../../bmusage/hwFacts.js';
@@ -661,10 +662,12 @@ async function opsFleetItems(req, snap, D) {
   const items = [];
   const judge = await tagJudgeFor(D, tg); // 요청당 한 번(purposeFor 가 대상마다 만들던 것)
   const edgeRecs = await D.listEdgeBmUsage();
+  const y = createYielder(15);   // 점검 반복 5회차 D5: 서버 사이 시간 기준 양보(1,000대 함대가 한 덩어리였다 — 결과 같음)
   for (const x of local) {
     const row = byKey.get(t(x.key)) || null;
     items.push({ key: t(x.key), name: x.name || x.key, vcenterId: t(x.vcenterId), serviceTag: x.serviceTag || '', regId: x.idrac?.regId || '',
       row, ...(row ? O.factsOfRow(row) : { tuning: null, detail: null }), entry: entryByKey.get(t(x.key)) || null, manual: await purposeFor(D, x, x.key, judge) });
+    await y();
   }
   for (const rec of edgeRecs || []) {
     const sn = rec?.snap;
@@ -676,6 +679,7 @@ async function opsFleetItems(req, snap, D) {
       const entry = perfBy.get(k) || null;
       items.push({ key: k, name: x.name || k, vcenterId: t(x.vcenterId), agent: rec.agent, serviceTag: x.serviceTag || '', regId: '',
         row: rowBy.get(k) || null, tuning: entry?.tuning || null, detail: entry?.detail || null, entry, manual: await purposeFor(D, x, k, judge) });
+      await y();
     }
   }
   if (isAdmin) return { items, isAdmin, allowed };
@@ -694,7 +698,7 @@ export async function bmOpsFleetView(req, snap, deps = {}) {
   if (probe?.error) return { __status: 503, ok: false, code: 'settingsUnreadable', reason: probe.error.reason };
   const { items, isAdmin, allowed, masked } = await opsFleetItems(req, snap, D);
   const O = await import('../../bmusage/opsView.js');
-  const v = O.fleetProfileView(items.map((it) => ({ ...it, overridesFor })), { overridesFor });
+  const v = await O.fleetProfileViewAsync(items.map((it) => ({ ...it, overridesFor })), { overridesFor, yieldFn: createYielder(15) });   // 5회차 D5: 같은 누적기 · 서버 사이 양보
   let overrides = null;
   if (isAdmin) {
     const all = (await import('../../bmusage/tuning/overrides.js')).loadTuningOverrides();
@@ -1342,7 +1346,8 @@ api.get('/tools/bm-usage/edges', toolsPerm, async (req, res) => {
         targets, rows: snap ? (isAdmin ? (l) => l : (l) => maskBmList(l, em))((snap.rows || []).filter((r) => keys.has(t(r.key)))) : [],
         counts: snap && !allowed ? (snap.counts || {}) : null,
         skippedCounts: snap && !allowed ? (snap.skippedCounts || {}) : null,
-        truncated: snap?.truncated || 0,
+        // 5회차 D1: 잘린 대수는 엣지 전체(다른 법인 서버 포함)의 수 — 범위 계정에는 잘렸다는 사실(true)만(다른 법인 대수를 주지 않는다)
+        truncated: !allowed ? (snap?.truncated || 0) : (snap?.truncated ? true : 0),
         // v2.919: 엣지가 판정한 성능 항목 — 보이는 대상의 것만 · 목록에는 code 표만(근거·장치별은 /tools/bm-usage/perf/:key) · 기준값은 그 엣지 설정.
         perf: snap ? (isAdmin ? (l) => l : (l) => maskBmList(l, em))((snap.perf || []).filter((p) => keys.has(t(p.key))).map(compactPerf)) : [],
         perfThresholds: snap?.perfThresholds || null,
@@ -1386,7 +1391,7 @@ api.post('/tools/bm-usage/edges/pull', writeRole, toolsPerm, async (req, res) =>
   const agents = Array.isArray(req.body?.agents) ? req.body.agents.map(t).filter(Boolean).slice(0, 40) : [];
   if (!agents.length) return res.status(400).json({ ok: false, reason: '가져올 엣지 이름이 필요합니다.' });
   try {
-    const { pullBmUsage } = await import('../../central/bmUsageEdgePull.js');
+    const { pullBmUsage, EDGE_PULL_LIMIT } = await import('../../central/bmUsageEdgePull.js');
     const deadline = Date.now() + EDGE_PULL_BUDGET_MS;
     let budgetExceeded = 0;
     const settled = await poolSettled(agents, EDGE_PULL_CONCURRENCY, async (a) => {
@@ -1397,7 +1402,7 @@ api.post('/tools/bm-usage/edges/pull', writeRole, toolsPerm, async (req, res) =>
       }
       _pulling.add(a.toLowerCase());
       // v2.628(EDGE2628-01): limit 을 주지 않으면 엣지 기본(400대)에서 잘렸다 — ESXi 포함으로 대상이 늘었다. 기본을 상한(2,000)으로.
-      try { return { agent: a, ...(await pullBmUsage(a, { limit: Number(req.body?.limit) || 2_000 })) }; }
+      try { return { agent: a, ...(await pullBmUsage(a, { limit: Number(req.body?.limit) || EDGE_PULL_LIMIT })) }; }   // 5회차 D1: 자동 인출과 같은 상수
       finally { _pulling.delete(a.toLowerCase()); }
     });
     // 입력 순서 보존(poolSettled) — 예전 순차 for 와 같은 순서로 응답한다.

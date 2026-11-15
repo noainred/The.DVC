@@ -84,14 +84,18 @@ export function recordMaintPull(agent, { appliedSig = '', version = '', n = null
 async function edgeContext(agent) {
   const corps = new Set();
   try { const { edgeCorpsSource } = await import('../edgeCorps.js'); for (const c of edgeCorpsSource()(agent) || []) corps.add(String(c)); } catch { /* 매핑을 모르면 봉투 법인만 */ }
-  let edgeTargets = []; let targetsKnown = false;
+  let edgeTargets = []; let targetsKnown = false; let truncated = 0;
   try {
     const rec = (await import('../../central/bmUsageEdgePull.js')).getEdgeBmUsage(agent);
     targetsKnown = !!rec?.snap && Array.isArray(rec.snap.targets);
     edgeTargets = (rec?.snap?.targets || []).map((x) => ({ key: t(x.key), serviceTag: t(x.serviceTag), vcenterId: t(x.vcenterId) }));
     for (const x of edgeTargets) if (x.vcenterId) corps.add(x.vcenterId);
+    // 5회차 D1: 보관분이 엣지 상한에서 잘렸는가(그 수 — 태그 창 펼침은 받은 대상만 · 화면에 밝힌다). keysUnknown 으로 바꾸지 않는다:
+    //   자동 인출도 사람 인출과 같은 상한(EDGE_PULL_LIMIT)이라 잘림은 엣지 대상이 그 상한을 넘을 때만이고, 다시 당겨도 같다 — 직전 배포본 keys 를
+    //   이어 써도(그것도 잘린 판) 나아지지 않고 빠진 서버를 계속 쥘 수 있다. 받지 못한 서버는 억제하지 않는다(모르는 대상은 억제가 아니다 — 알림이 나가는 쪽).
+    truncated = Math.max(0, Number(rec?.snap?.truncated) || 0);
   } catch { edgeTargets = []; targetsKnown = false; }
-  return { corps, edgeTargets, targetsKnown };
+  return { corps, edgeTargets, targetsKnown, truncated };
 }
 
 /** v2.954(점검 D-1): 대상을 모르는데 그 엣지 법인에 살아 있는 태그 창이 있는가(순수) — 있으면 빈 keys 로 펼치게 된다. */
@@ -102,7 +106,8 @@ export function tagWindowsBlind({ live = [], corps = new Set(), targetsKnown = f
 /** 대상을 모를 때 그 엣지 봉투 자동 인출 — 엣지별 간격(같은 엣지를 인출 주기마다 다시 당기지 않게). */
 export const AUTO_PULL_GAP_MS = 10 * 60_000;
 const _autoPullAt = new Map();   // agent(소문자) → 마지막 자동 인출 시각
-let _autoPull = async (agent) => (await import('../../central/bmUsageEdgePull.js')).pullBmUsage(agent);
+// 5회차 D1: 사람 인출과 같은 상한(EDGE_PULL_LIMIT) — 예전에는 limit 없이 당겨 엣지 기본 400대에서 잘렸다(태그 창 펼침도 400대)
+let _autoPull = async (agent) => { const E = await import('../../central/bmUsageEdgePull.js'); return E.pullBmUsage(agent, { limit: E.EDGE_PULL_LIMIT }); };
 export function _setAutoPullForTest(fn) { _autoPull = fn; _autoPullAt.clear(); }
 function autoPullTargets(agent, now) {
   const k = t(agent).toLowerCase(); if (!k) return false;
@@ -150,11 +155,11 @@ export async function deployStatusView(edges = [], now = Date.now()) {
     const rec = edges.find((r) => t(r.agent).toLowerCase() === k);
     const env = rec?.snap?.maint || null;
     const maintVer = Number.isInteger(rec?.snap?.maintVer) ? rec.snap.maintVer : null;
-    let expectSig = null; let blind = false;
-    if (live) { const ctx = await edgeContext(rec?.agent || k); expectSig = sigOf(windowsForEdge({ live, ...ctx, tagsOf })); blind = tagWindowsBlind({ live, ...ctx }); }
+    let expectSig = null; let blind = false; let truncated = 0;
+    if (live) { const ctx = await edgeContext(rec?.agent || k); expectSig = sigOf(windowsForEdge({ live, ...ctx, tagsOf })); blind = tagWindowsBlind({ live, ...ctx }); truncated = ctx.truncated; }
     // v2.954(점검 D-1): 대상을 모르면(중앙 재시작 뒤 · 첫 인출 전) 기대 판을 빈 keys 로 계산하게 된다 — ‘반영됨’ 으로 보이지 않게 따로 말한다
     const status = rec && maintVer == null ? 'old' : blind ? 'targets-unknown' : !p ? 'never' : (expectSig && p.appliedSig === expectSig ? 'applied' : 'pending');
-    rows.push({ agent: rec?.agent || k, status, lastPullAt: p?.at ?? null, version: p?.version || '',
+    rows.push({ agent: rec?.agent || k, status, lastPullAt: p?.at ?? null, version: p?.version || '', ...(truncated ? { targetsTruncated: truncated } : {}),
       envelope: env ? { deployedAt: env.deployed?.at ?? null, n: env.deployed?.n ?? null, stale: env.deployed?.stale ?? null, unreadable: !!env.deployed?.unreadable, leak: env.leak?.n ?? null } : null, maintVer });
   }
   return { edges: rows, now, ...(windows ? {} : { unreadable: true }) };
