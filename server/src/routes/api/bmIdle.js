@@ -9,7 +9,7 @@
  * ⚠ ‘저활용 ≠ 불필요’ — 점수는 후보 표시다. 제외(데이터 부족 · 정비 창 · 대기 · DR)는 수를 적고 숨기지 않는다 · 후보 전력 합은 측정한 후보만(미측정 수를 함께).
  */
 import { requireRole, requirePerm } from '../../auth/auth.js';
-import { scopedVcenterIds, inUserWriteScope } from '../../auth/scope.js';
+import { scopedVcenterIds, inUserWriteScope, isFullReadWriteScope } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { config } from '../../config.js';
@@ -165,7 +165,10 @@ export function registerBmIdle(api, deps = {}) {
     let l = 0; try { l = Number((await import('../../bmusage/idle.js')).loadIdle()?.at) || 0; } catch { l = 0; }
     let a = 0; try { a = (await import('../../bmusage/annotations.js')).listAnnotations().length; } catch { a = -1; }
     // 점검 반복 2회차: 응답에 쓰기 표지(actions · 행 writable)가 실린다 — 역할 · 데모 · 쓰기 범위가 다른 계정끼리 캐시를 나누지 않게(gateKey).
-    return `${scopeKey(req.user, store.get())}|${isAdminReq(req) ? 'a' : 'u'}|${gateKey(req, store.get())}|${bmUsageStatus().last?.at || 0}|i${l}|e${e}|n${a}`;
+    // 재확인 R2: 비관리자 판본은 ‘본인 검토 사유는 원문 · 남의 것은 가림’(maskBy — me) 이라 사용자마다 다르다 — 열쇠에 사용자(관리자 판본은 모두 원문이라 함께 쓴다).
+    //   예전에는 같은 범위 · 역할의 다른 운영자가 12초 안에 앞 사람의 원문(주소)을 받았다.
+    const me = isAdminReq(req) ? '' : encodeURIComponent(String(req.user?.username || ''));
+    return `${scopeKey(req.user, store.get())}|${isAdminReq(req) ? 'a' : 'u'}|${gateKey(req, store.get())}|me${me}|${bmUsageStatus().last?.at || 0}|i${l}|e${e}|n${a}`;
   };
   api.get('/tools/bm-usage/idle', toolsPerm, async (req, res) => memoJson(req, res, 'bm-idle', (snap) => bmIdleFleet(req, snap, deps), { extraKey: await key(req) }));
   api.post('/tools/bm-usage/idle/review', writeRole, toolsPerm, async (req, res) => {
@@ -173,7 +176,8 @@ export function registerBmIdle(api, deps = {}) {
   });
   api.post('/tools/bm-usage/idle/recompute', writeRole, toolsPerm, async (req, res) => {
     try {
-      if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, code: 'full-scope-only', reason: '다시 계산은 전체 범위(vCenter 제한 없는) 계정만 할 수 있습니다.' });
+      // 점검 반복 2회차 재확인 R1: 조회 ∧ 쓰기 전체 범위(isFullReadWriteScope — 표지 bmGate 와 같은 함수 · 조회만 보면 쓰기만 좁힌 계정이 지나갔다).
+      if (!isFullReadWriteScope(req.user, store.get())) return res.status(403).json({ ok: false, code: 'full-scope-only', reason: '다시 계산은 조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 계정만 할 수 있습니다.' });
       const I = await deps0(deps).idle();
       const r = await I.recomputeIdle({ force: true });
       logAudit({ user: req.user?.username, action: 'bm-perf.idle.recompute', target: config.agent?.name || 'local', ip: req.ip || '', detail: JSON.stringify({ ok: !!r.ok, rows: r.rows ?? null }).slice(0, 200) });

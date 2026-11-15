@@ -9,7 +9,7 @@
  * ⚠ ‘못 읽음’ 은 0 이 아니다: 데이터 부족 · 불안정 · 상한 없음 · 계산 결과 없음(엣지 구버전 · 아직 계산 전 · 손상)을 각각 센다 — ‘예측 없음 = 안전’ 으로 보이지 않게.
  */
 import { requireRole, requirePerm } from '../../auth/auth.js';
-import { scopedVcenterIds } from '../../auth/scope.js';
+import { scopedVcenterIds, isFullReadWriteScope } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { config } from '../../config.js';
@@ -114,7 +114,8 @@ export function registerBmCapacity(api, deps = {}) {
   api.post('/tools/bm-usage/capacity/recompute', writeRole, toolsPerm, async (req, res) => {
     try {
       // 전 법인 대상 계산이라 전체 범위만(범위 계정이 다른 법인 계산을 일으키지 않게 — fullScopeOnly 와 같은 판단).
-      if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, code: 'full-scope-only', reason: '다시 계산은 전체 범위(vCenter 제한 없는) 계정만 할 수 있습니다.' });
+      // 점검 반복 2회차 재확인 R1: 조회 ∧ 쓰기 전체 범위(isFullReadWriteScope — 표지 bmGate 와 같은 함수 · 조회만 보면 쓰기만 좁힌 계정이 지나갔다).
+      if (!isFullReadWriteScope(req.user, store.get())) return res.status(403).json({ ok: false, code: 'full-scope-only', reason: '다시 계산은 조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 계정만 할 수 있습니다.' });
       const C = await deps0(deps).capacity();
       const r = await C.recomputeCapacity({ force: true });
       logAudit({ user: req.user?.username, action: 'bm-perf.capacity.recompute', target: config.agent?.name || 'local', ip: req.ip || '', detail: JSON.stringify({ ok: !!r.ok, rows: r.rows ?? null }).slice(0, 200) });

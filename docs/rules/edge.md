@@ -864,6 +864,8 @@
     `centralizeEdgeSent` 가 ① 서버 키는 **같은 봉투의 그 엣지 대상 목록(snap.targets)** 에 있는 것만(밖이면 버리고 dropped 로 센다) ② 법인은 **중앙이 정한다** — 파트 장애 자동 등록과 같은 함수
     `issues/autoCreate.js resolveIssueVcenter`(서비스 태그 → ESXi 호스트 vCenter · 아니면 대상이 말한 법인이 **그 엣지가 담당하는 vCenter 일 때만** · 아니면 담당이 하나일 때만 · 아니면 공용) ·
     ③ 제목 · 이름은 중앙이 code 로(규칙 이름 + 대상 이름 — URL 제거 · 상한). 규칙 화면의 ‘알림 이력’ 범위도 이 중앙 법인으로 가른다(엣지 vcenterId 로 가르지 않는다). 회귀 Alerts F9(실제 sanitizeBmUsageSnap → ingest → 이슈 저장소).
+    ⚠ 차이(베어메탈 사용률 점검 4회차 의심 — 고치지 않음 · 설계 결정 범위): 사용률 봉투 자체의 `targets[].vcenterId` 는 엣지가 말한 값 그대로 상세 · 로그 · 비교의 범위 판정(resolvePerfTarget · bmLogsFleet · applyScope)에 쓰인다 —
+    잘못 설정된 엣지가 남의 법인 id 를 달면 그 법인 범위 계정에게 보인다. 바꾸려면 봉투 대상의 법인을 이 함수처럼 그 엣지 담당 vCenter 로 자르는 것이 후보(docs/rules/idrac-server.md 4회차 남은 것 ②).
   - **이슈 중복 원천은 받은 발송 건**(반증 F2 · F3 · F12): 엣지 봉투는 24시간 기록을 매번 다시 싣는다 — 같은 묶음 안 같은 열쇠는 이슈 하나 + 댓글 · 이슈 출처에 그 열쇠로 받은 가장 늦은 시각(`lastAt` · 같은 ms 의 id `lastIds`)을 두어
     밀려난 partKeys(64개 상한) id 가 ‘새 건’ 이 되지 않게 · 중복 판정은 **닫힌 이슈 포함**(같은 건으로 되살리지 않는다 — 닫힌 뒤 **새** 발생은 새 이슈: 다른 알람 · 파트 장애와 같은 ‘열린 이슈면 댓글’ 규약) ·
     하루 상한은 **법인별**(F7 — 예전에는 전 법인 합계).

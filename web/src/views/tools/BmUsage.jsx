@@ -39,7 +39,7 @@ import {
   unassignedNote, edgePullState, edgePullNote, edgeNoteRows, blurNumber, BLANK_KEPT_TEXT, esxiCollectNote,
   edgeDelegatedByAgent, edgeDelegatedChip, edgeDelegatedGuide, remoteUnknownNote } from './bmUsageText.js';   // v2.961 엣지 수집 — 엣지별 · 수집 서버 모름 갈래
 import Select from '../../components/Select.jsx';
-import { gateOk, gateTitle, settingsReadOnlyText } from './bmWriteText.js'; // 점검 반복 2회차 E1 · E2 — 서버 쓰기 표지(actions)
+import { gateOk, gateTitle, settingsReadOnlyText, CORP_READ_ONLY_TITLE } from './bmWriteText.js'; // 점검 반복 2회차 E1 · E2 — 서버 쓰기 표지(actions)
 // v2.920(리눅스 성능 2단계 화면): USE 매트릭스 보드 · 서버 성능 상세 — 문구·표시 규약은 bmPerfText.js, 판정은 서버 useJudge.js.
 import BmPerfBoard from './BmPerfBoard.jsx';
 import BmPerfDetail from './BmPerfDetail.jsx';
@@ -396,7 +396,11 @@ export function BmUsage() {
   // 점검 반복 2회차 E1: 저장 표지(서버 actions.settings — PUT 라우트 게이트와 같은 판정)가 없으면 카드 전체를 읽기 전용으로(입력 잠금 · 저장 버튼 없음 · 한 줄 안내).
   const setGate = data?.actions?.settings;
   const canSet = gateOk(setGate);
-  const dl = saving || !!data?.central?.managed || !canSet;
+  // 재확인 R1: 전역 값(수집 켜기 · 주기 · 보존 · 경로 · Enterprise · 알림)은 actions.settingsGlobal(조회 ∧ 쓰기 전체 범위) · 법인 칸은 쓰기 범위 법인만(vcenters[].writable).
+  const globalGate = data?.actions?.settingsGlobal;
+  const canGlobal = gateOk(globalGate);
+  const dlCorp = saving || !!data?.central?.managed || !canSet;
+  const dl = dlCorp || !canGlobal;
   const collectGate = data?.actions?.collect;   // E2①: 지금 수집(운영자 이상 · 전체 범위 · 데모 허용)
   const pullGate = data?.actions?.edgePull;     // E2: 엣지 지금 가져오기(운영자 이상 · 전체 범위 · 데모 거부)
   const selRow = rows.find((r) => r.key === sel) || null;
@@ -882,7 +886,7 @@ export function BmUsage() {
         <div className="card" ref={settingsRef} style={{ minWidth: 0, scrollMarginTop: 72 }}>
           <h4 style={{ marginTop: 0 }}>수집 설정</h4>
           {/* 점검 반복 2회차 E1: 저장할 수 없는 계정은 읽기 전용(알림 규칙 패널과 같은 표현) — 입력은 dl 로 잠긴다. */}
-          {!canSet && <p className="bmo-note" role="note" style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--muted)' }}>{settingsReadOnlyText(setGate)}</p>}
+          {(!canSet || !canGlobal) && <p className="bmo-note" role="note" style={{ margin: '0 0 10px', fontSize: 12, color: 'var(--muted)' }}>{settingsReadOnlyText(setGate, globalGate)}</p>}
           {centralManagedNote(data?.central, fmtAgo) && (
             <p style={{ margin: '0 0 10px', fontSize: 13, lineHeight: 1.6, color: toneVar('warn') }}><BoldText text={centralManagedNote(data.central, fmtAgo)} /></p>
           )}
@@ -895,9 +899,9 @@ export function BmUsage() {
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 6, marginBottom: 10 }}>
             {(data?.vcenters || []).map((v) => (
-              <label key={v.id} style={{ fontSize: 12, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              <label key={v.id} style={{ fontSize: 12, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }} title={v.writable === true ? undefined : CORP_READ_ONLY_TITLE}>
                 <input
-                  type="checkbox" disabled={dl}
+                  type="checkbox" disabled={dlCorp || v.writable !== true}
                   checked={!!(form.corps || {})[v.id]}
                   onChange={(e) => saveSettings({ corps: { ...(form.corps || {}), [v.id]: e.target.checked } })}
                 />
@@ -958,10 +962,10 @@ export function BmUsage() {
           {!form.enterpriseAck ? (
             <>
               <label style={{ display: 'block', fontSize: 13, marginBottom: 6 }}>
-                <input type="checkbox" checked={entAgree} onChange={(e) => setEntAgree(e.target.checked)} disabled={saving || !canSet} />
+                <input type="checkbox" checked={entAgree} onChange={(e) => setEntAgree(e.target.checked)} disabled={saving || !canGlobal} />
                 {' '}위 부하를 확인했고 <b>사용하겠습니다</b>
               </label>
-              {canSet && (
+              {canGlobal && (
                 <button
                   onClick={() => saveSettings({ enterpriseAck: true, enterpriseEnabled: true })}
                   disabled={!entAgree || saving}
@@ -972,12 +976,12 @@ export function BmUsage() {
           ) : (
             <>
               <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>
-                <input type="checkbox" checked={!!form.enterpriseEnabled} onChange={(e) => saveSettings({ enterpriseEnabled: e.target.checked, enterpriseAck: true })} disabled={saving || !canSet} />
+                <input type="checkbox" checked={!!form.enterpriseEnabled} onChange={(e) => saveSettings({ enterpriseEnabled: e.target.checked, enterpriseAck: true })} disabled={saving || !canGlobal} />
                 {' '}대체 수집 켜기
               </label>
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
                 <label style={{ fontSize: 12 }}>방식{' '}
-                  <Select sort={false} value={form.enterpriseMode || 'auto'} disabled={saving || !canSet}
+                  <Select sort={false} value={form.enterpriseMode || 'auto'} disabled={saving || !canGlobal}
                     onChange={(e) => saveSettings({ enterpriseMode: e.target.value })} style={{ minWidth: 0 }}>
                     <option value="auto">자동 — Redfish 센서 먼저, 못 읽으면 SSH</option>
                     <option value="api">Redfish 센서만(부하 가장 적음)</option>

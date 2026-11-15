@@ -78,11 +78,11 @@
   (번들 가림 `keyBundle.js` — 봉인본도 싣지 않음) · 손상이면 쓰기 거절(로드 먼저) · 주소가 바뀌면 `keyRef` · `credRef` 승계 없음 · 키가 없으면 비밀번호로 넘어가지 않음 ·
   키 서버는 엣지 위임 잡에 싣지 않음 · **저장 비밀을 주소에 묶는 쓰기(CSV · bm-storage keyRef/credRef · iDRAC 사본 · 엣지 배포)도 소유자 등급 + OTP**(r2) ·
   복호 실패 중 쓰기 거절 · 퇴역 키 접속 거부. **묶음 판정은 `bmusage/onboard/bindRule.js` 하나 · 등록부 `applyServerInput` 이 choke point** — `bindApproved === true` 는
-  게이트를 통과한 호출만 세운다(bm-storage 라우트 OTP 뒤 · 온보딩 `plan.binds` · 엣지는 행의 중앙 승인 `bindOk`) · 새 쓰기 경로도 이 함수를 지나게(r3 R-N1). 상세 `docs/rules/security-api.md` 7b 항목 ⑨ ⑩ ⑪.
+  게이트를 통과한 호출만 세운다(bm-storage 라우트 OTP 뒤 · 온보딩 `plan.binds` · 엣지는 행의 중앙 승인 `bindOk`) · 새 쓰기 경로도 이 함수를 지나게(r3 R-N1). **키 배치(폴더 · 허용 기능)는 쓰기 때도 접속 때와 같은 판정**(`onboard/placement.js keyPlacementIssue` — 분석 · bmBindCheck · 회전: 폴더 밖 거부 · 기능은 경고 — 4회차 D1). 상세 `docs/rules/security-api.md` 7b 항목 ⑨ ⑩ ⑪.
 - **8a 정비 창(`bmusage/maint/*` · `routes/api/bmMaint.js`)**: 억제를 **늘리는** 쓰기(법인 · 태그 · 12h 초과 창 만들기 · 고치기 전/후 · 재확인)는 소유자 등급(`isOwnerTier`), 줄이는 쓰기(지금 끝내기 · 지우기)는 쓰기 범위 ·
   판정은 `maint/judge.js` 하나(서버 · 엣지 · 화면) · **억제에는 시한**(발생 끝 · 길이 상한을 계산에서도 · 반복 92일 재확인 · 엣지 배포본 24h) · 못 읽은 창 파일은 억제가 아니다 ·
   인증 거부(authGuard)는 창과 무관 · 배포 인출은 개별 토큰만 · 엣지는 같은 `normalizeWindow` 로 다시 자른다. **서버 대상 = (법인, 키) 쌍**(판정 · 배포 · 쓰기 — IP 키는 법인끼리 겹친다) ·
-  12h 소유자 규칙은 **같은 서버를 덮는 창 전부(소유자 · 법인 · 태그 창 포함)의 합**(`store.coverNeedsOwner` · 재확인 포함 · approvedBy 는 기록만) · rev 없는 쓰기 409 · 해제 알림은 억제하지 않는다. 상세 `docs/rules/{idrac-server,security-api,edge}.md` 8a 항목.
+  12h 소유자 규칙은 **같은 서버를 덮는 창 전부(소유자 · 법인 · 태그 창 포함)의 합**(`store.coverNeedsOwner` · 재확인 포함 · approvedBy 는 기록만) · rev 없는 쓰기 409 · 해제 알림은 억제하지 않는다 · **재확인은 재확인 라우트 하나**(고치기는 confirmedAt 을 바꾸지 않는다 — 점검 반복 3회차) · 엣지 배포 history 창은 지난 구간 제외용이라 **지금 판정(억제)에서 뺀다**. 상세 `docs/rules/{idrac-server,security-api,edge}.md` 8a 항목.
 - **SSH exec 안 timeout 합 + 여유 ≤ 그 exec 시한**(8b 반증 F1 — 4 · 5단계부터의 결함): 주 명령은 exec 하나라 넘치면 그 주기 전 구획을 잃는다 — 새 구획 · exec 는 `test/bmTop8bBudget.test.js` 기계 산수를 지킨다(needs-restarting ↔ dnf 한 주기 하나).
 - **8b Top-N · 저활용 · 전력(`bmusage/{parse/linuxTop,topStore,idle,powerAgg}.js` · `routes/api/{bmTop,bmIdle,bmPower}.js`)**: Top-N 은 **같은 세션 별도 exec**(주 명령 밖 · 실패 격리) · **comm 만**(인자 · 환경 · 열린 파일 · kill 없음 —
   top COMMAND 열은 셸 밖으로 내지 않는다) · 줄마다 고정 접두 · awk getline 으로 /proc 을 읽지 않는다(mawk 중단) · 권한 없는 I/O = null · 프로세스 사용자 이름은 관리자 판본만 원문 ·

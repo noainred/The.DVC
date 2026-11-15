@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { WRITE_WHY_TEXT, gateOk, gateShown, gateWhy, gateTitle, settingsReadOnlyText } from './bmWriteText.js';
+import { WRITE_WHY_TEXT, gateOk, gateShown, gateWhy, gateTitle, settingsReadOnlyText, SETTINGS_CORPS_ONLY_TEXT } from './bmWriteText.js';
 import { usageTone, bmUtilThresholds, corpSummary } from './bmUsageText.js';
 import { columnStateView, focusBlockText, OTHER_CORP_SCOPED_NOTE } from './bmCompareText.js';
 import { statusTone } from './bmCapacityText.js';
@@ -52,9 +52,12 @@ describe('E1 · E2 쓰기 표지 문구(서버 bmWriteGate 와 1:1)', () => {
   });
   it('E1 화면 조립 — 입력 잠금(dl)에 저장 표지 · Enterprise 칸도 잠금 · 403 은 ErrorBox(원문 forbidden 아님)', () => {
     const s = src('BmUsage.jsx');
-    expect(s).toMatch(/const dl = saving \|\| !!data\?\.central\?\.managed \|\| !canSet;/);
-    expect(s).toMatch(/setGate = data\?\.actions\?\.settings/);
-    expect(s).toMatch(/disabled=\{saving \|\| !canSet\} \/>\s*\{' '\}대체 수집 켜기/);
+    expect(s).toMatch(/const dlCorp = saving \|\| !!data\?\.central\?\.managed \|\| !canSet;/);
+    expect(s).toMatch(/const dl = dlCorp \|\| !canGlobal;/);   // 재확인 R1: 전역 값은 settingsGlobal(조회 ∧ 쓰기 전체 범위)
+    expect(s).toMatch(/setGate = data\?\.actions\?\.settings;/);
+    expect(s).toMatch(/globalGate = data\?\.actions\?\.settingsGlobal;/);
+    expect(s).toMatch(/disabled=\{dlCorp \|\| v\.writable !== true\}/);   // 법인 칸은 쓰기 범위 법인만(표지가 없으면 잠금)
+    expect(s).toMatch(/disabled=\{saving \|\| !canGlobal\} \/>\s*\{' '\}대체 수집 켜기/);
     expect(s).toMatch(/e\?\.status === 403 \? \{ tone: 'bad', err: e \}/);
     expect(s).toMatch(/msg\.err \? <ErrorBox error=\{msg\.err\} \/>/);
     // E2①: 지금 수집 · 엣지 지금 가져오기는 서버 표지로 잠근다
@@ -71,7 +74,7 @@ describe('E2 저활용 · 용량 · 비교 · 주석 — 서버 표지대로 버
     const html = renderToStaticMarkup(h(IdleFleetView, { resp: idleResp({ review: { ok: true }, recompute: { ok: false, why: 'full-scope' } }, rows) }));
     expect(html.match(/검토 상태…/g)).toHaveLength(1);
     expect(html).toContain('조회 전용 법인');
-    expect(html).toMatch(/<button[^>]*disabled=""[^>]*title="이 노드 다시 계산 — 전체 범위[^"]*"[^>]*>이 노드 다시 계산<\/button>/);
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*title="이 노드 다시 계산 — 조회 · 쓰기 모두 전체 범위[^"]*"[^>]*>이 노드 다시 계산<\/button>/);
     const vw = renderToStaticMarkup(h(IdleFleetView, { resp: idleResp({ review: { ok: false, why: 'role-operator' }, recompute: { ok: false, why: 'role-operator' } }, rows) }));
     expect(vw).not.toContain('검토 상태…'); expect(vw).not.toContain('이 노드 다시 계산'); expect(vw).not.toContain('조회 전용 법인');
     // 귀속 없는 행(전체 범위 계정 — 검토 쓰기는 법인을 요구해 거절된다)은 ‘조회 전용’ 이 아니라 귀속 없음
@@ -178,5 +181,20 @@ describe('E3 · E4 · E5 · E8 · I1 · I2', () => {
     expect(peakSrcText(['window10'], 5, null)).not.toMatch(/줄/);
     expect(src('bmTrendText.js')).not.toMatch(/w < 10/);
     expect(src('BmTrendTab.jsx')).toMatch(/devs\.data\?\.peakWindowCapS/);
+  });
+});
+
+describe('재확인 R1 · R4 — 쓰기만 좁은 관리자 · 데모 계정', () => {
+  it('R1 수집 설정 — 전역 값을 못 바꾸는 관리자는 ‘일부 읽기 전용’ 한 줄 · 전체 범위 이유는 조회 · 쓰기 모두', () => {
+    expect(settingsReadOnlyText({ ok: true }, { ok: false, why: 'full-scope' })).toBe(SETTINGS_CORPS_ONLY_TEXT);
+    expect(settingsReadOnlyText({ ok: true }, { ok: true })).toBe('');
+    expect(settingsReadOnlyText({ ok: false, why: 'demo' }, { ok: false, why: 'demo' })).toMatch(/데모 계정/);
+    expect(WRITE_WHY_TEXT['full-scope']).toMatch(/조회 · 쓰기 모두 전체 범위/);
+    expect(SETTINGS_CORPS_ONLY_TEXT.includes('`')).toBe(false);
+  });
+  it('R4 정비 창 ‘새 창’ · 키 겹침 결정 — 역할(hasRole)이 아니라 서버 표지로', () => {
+    const m = src('BmMaintPanel.jsx'); const k = src('BmKeyOverlaps.jsx');
+    expect(m).not.toMatch(/hasRole\(/); expect(m).toMatch(/const writer = gateOk\(cg\);/);
+    expect(k).not.toMatch(/hasRole\(/); expect(k).toMatch(/const canWrite = gateOk\(dg\) && gateOk\(st\.resp\?\.actions\?\.clear\);/);
   });
 });

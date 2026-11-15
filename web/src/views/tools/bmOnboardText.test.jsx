@@ -63,4 +63,14 @@ describe('bmOnboardText', () => {
     expect(T.BUCKET_ORDER).toContain('untracked');
     expect(T.MISS_REASON_TEXT['registry-only']).toMatch(/성능 수집 대상이 아닙니다/);
   });
+  it('4회차 D1 — 회전 결과: 서버 경고(새 키로 막히는 수집 기능)를 문구 그대로 붙이고 주의 색 · 경고가 없으면 예전 문구 그대로', () => {
+    const base = { ok: true, servers: ['s1', 's2'], accounts: 1, retestAdvised: true };
+    expect(T.rotateResultText(base)).toEqual({ text: '회전했습니다 — 서버 2대 · 공통 계정 1개가 새 키를 씁니다. 서버마다 ‘연결 시험’ 을 다시 하세요(자동 재시험 없음).', tone: 'ok' });
+    const w = T.rotateResultText({ ...base, warnings: [{ code: 'key-feature', features: ['bm-usage'], text: '새 키의 기능에 베어메탈 사용률 이(가) 없어 …' }] });
+    expect(w.tone).toBe('warn');
+    expect(w.text).toMatch(/다시 하세요\(자동 재시험 없음\)\. 주의: 새 키의 기능에 베어메탈 사용률/);
+    expect(T.rotateResultText({ ok: true, servers: [], accounts: 0, retestAdvised: false })).toEqual({ text: '회전했습니다 — 서버 0대 · 공통 계정 0개가 새 키를 씁니다.', tone: 'ok' });
+    expect(T.rotateResultText({ ...base, accounts: undefined, warnings: [{ code: 'x' }] }).text).toMatch(/공통 계정 —개/);   // 모르는 수는 — · 문구 없는 경고는 붙이지 않는다
+    expect(T.rotateResultText({ ...base, warnings: [{ code: 'x' }] }).tone).toBe('ok');
+  });
 });

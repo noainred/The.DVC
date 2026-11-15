@@ -43,6 +43,11 @@ const USERS = {
   op: { role: 'operator' },
   sop: { role: 'operator', scope: { vcenters: ['vcA', 'vcB'], writeVcenters: ['vcA'] } },   // vcB = 조회 전용
   vw: { role: 'viewer' },
+  // 재확인 R1 — 조회는 넓고 쓰기만 좁은 계정(server/CLAUDE.md v2.733 · v2.904 함정)
+  wadm: { role: 'admin', scope: { vcenters: [], writeVcenters: ['vcA'] } },          // 관리자 · 조회 무제한 + 쓰기 vcA
+  sadm2: { role: 'admin', scope: { vcenters: ['vcA', 'vcB'], writeVcenters: ['vcA'] } },   // 관리자 · 조회 vcA·vcB + 쓰기 vcA
+  wop: { role: 'operator', scope: { vcenters: [], writeVcenters: ['vcA'] } },          // 운영자 · 조회 무제한 + 쓰기 vcA
+  op2: { role: 'operator' },                                                         // 재확인 R2 — op 와 같은 조회 범위 · 역할
 };
 const TOK = {};
 let srv; let port; let api; let G; let poller;
@@ -96,8 +101,10 @@ test('① 표지 표(BM_ACTIONS) = 실제 라우터의 메서드 · 경로 · �
 test('② 실제 라우터 — 전 법인 동작 · 설정: GET 표지 ok ⟺ 같은 계정의 쓰기가 403 이 아니다(5계정)', async (t) => {
   if (!sqlite) return t.skip('node:sqlite 없음');
   const expectWhy = {
-    settings: { adm: null, sadm: null, op: 'role-admin', sop: 'role-admin', vw: 'role-admin' },
-    collect: { adm: null, sadm: 'full-scope', op: null, sop: 'full-scope', vw: 'role-operator' },
+    settings: { adm: null, sadm: null, op: 'role-admin', sop: 'role-admin', vw: 'role-admin', wadm: null, sadm2: null, wop: 'role-admin', op2: 'role-admin' },
+    // 재확인 R1: 전 법인 동작은 조회 ∧ 쓰기 전체 범위만(isFullReadWriteScope) — 쓰기만 좁은 wadm · wop 도 full-scope
+    collect: { adm: null, sadm: 'full-scope', op: null, sop: 'full-scope', vw: 'role-operator', wadm: 'full-scope', sadm2: 'full-scope', wop: 'full-scope', op2: null },
+    settingsGlobal: { adm: null, sadm: 'full-scope', op: 'role-admin', sop: 'role-admin', vw: 'role-admin', wadm: 'full-scope', sadm2: 'full-scope', wop: 'role-admin', op2: 'role-admin' },
   };
   for (const u of Object.keys(USERS)) {
     const main = await get(u, '/tools/bm-usage');
@@ -118,6 +125,8 @@ test('② 실제 라우터 — 전 법인 동작 · 설정: GET 표지 ok ⟺ �
       assert.equal(f.ok, writes[k].s !== 403, `${u} ${k}: 표지 ${JSON.stringify(f)} ↔ 실제 ${writes[k].s} ${JSON.stringify(writes[k].j).slice(0, 120)}`);
     }
     for (const k of ['settings', 'collect']) assert.equal(flags[k].ok ? null : flags[k].why, expectWhy[k][u], `${u} ${k} 이유`);
+    const sg = main.j.actions?.settingsGlobal;
+    assert.equal(sg?.ok ? null : sg?.why, expectWhy.settingsGlobal[u], `${u} 전역 설정 표지`);
     assert.deepEqual(flags.edgePull, flags.collect, `${u}: 엣지 인출 = 지금 수집과 같은 조건`);
   }
 });
@@ -251,4 +260,109 @@ test('I2 · I3 — 장치 응답 피크 창 상한 · 엣지 정제 · 용량 �
   assert.equal(dv.s, 200); assert.equal(dv.j.peakWindowCapS, 10, '이 노드 설정 기본값(settings.js STORE_DEFAULTS.peakWindowS)');
   const cd = await get('adm', '/tools/bm-usage/capacity/CTAGA1?vcenterId=vcA');
   assert.equal(cd.s, 200); assert.equal(cd.j.alertDays, 7, '함대 표 cfg.alertDays 와 같은 기준(규칙 기본 7일)');
+});
+
+/* ── 재확인(2회차 반증) R1~R4 — 기준판 5c6d87a6b 에서 재현한 입력 ───────────────────────── */
+const settingsNow = async () => (await get('adm', '/tools/bm-usage')).j.settings;
+const putSettings = (u, body) => call(u, 'PUT', '/tools/bm-usage/settings', body);
+
+test('R1 수집 설정 — 전역 값은 조회 ∧ 쓰기 전체 범위만 · 법인 켜기/끄기는 쓰기 범위 · 조회만 되는 법인을 바꾸면 403(아무것도 저장하지 않음)', async (t) => {
+  if (!sqlite) return t.skip('node:sqlite 없음');
+  const s0 = await settingsNow();
+  assert.equal(s0.corps.vcB, true);
+  const mw = (await get('wadm', '/tools/bm-usage')).j;
+  assert.deepEqual(mw.actions.settings, { ok: true });
+  assert.deepEqual(mw.actions.settingsGlobal, { ok: false, why: 'full-scope' });
+  assert.deepEqual(Object.fromEntries(mw.vcenters.map((v) => [v.id, v.writable])), { vcA: true, vcB: false }, '법인별 쓰기 표지(화면이 체크 칸을 잠근다)');
+  assert.equal(mw.distribution, null, '엣지 배포 관리 표는 조회 ∧ 쓰기 전체 범위 관리자만');
+  // 재현(기준판 200 · vcB 꺼짐 · 원시 보존 90 → 7): 조회 전용 법인 끄기 + 전역 값 → 403 · 아무것도 바뀌지 않는다
+  const r1 = await putSettings('wadm', { corps: { vcA: true, vcB: false }, rawRetentionDays: 7 });
+  assert.equal(r1.s, 403, JSON.stringify(r1.j));
+  let s = await settingsNow();
+  assert.equal(s.corps.vcB, true); assert.equal(s.rawRetentionDays, s0.rawRetentionDays);
+  // 전역 값만 보내면 버리고 밝힌다(기존 범위 계정 규약 — v2.607 ignoredGlobal)
+  const r2 = await putSettings('wadm', { rawRetentionDays: 7 });
+  assert.equal(r2.s, 200); assert.ok(r2.j.ignoredGlobal?.includes('rawRetentionDays'), JSON.stringify(r2.j).slice(0, 200));
+  assert.equal((await settingsNow()).rawRetentionDays, s0.rawRetentionDays);
+  // 화면처럼 보이는 법인을 다 보내되 쓰기 법인만 바꾸면 저장(같은 값을 되돌려 보낸 조회 전용 법인은 쓰기가 아니다 · 무시 경고도 없다)
+  const r3 = await putSettings('wadm', { corps: { vcA: false, vcB: true } });
+  assert.equal(r3.s, 200); assert.equal(r3.j.ignoredOutOfScope, undefined);
+  s = await settingsNow(); assert.equal(!!s.corps.vcA, false, '켠 법인만 저장된다(끈 법인은 키가 없다)'); assert.equal(s.corps.vcB, true);
+  assert.equal((await putSettings('adm', { corps: { vcA: true, vcB: false } })).s, 200);
+  // 재현: sadm2 가 조회 전용 vcB 수집을 켰다
+  const r4 = await putSettings('sadm2', { corps: { vcA: true, vcB: true } });
+  assert.equal(r4.s, 403); assert.equal(!!(await settingsNow()).corps.vcB, false);
+  // 조회 밖 법인 키는 예전처럼 무시하고 밝힌다(존재 은닉 — 404 류)
+  const r5 = await putSettings('sadm2', { corps: { vcA: true, vcZ: true } });
+  assert.equal(r5.s, 200); assert.equal(r5.j.ignoredOutOfScope, 1);
+  // 전체 관리자는 그대로
+  assert.equal((await putSettings('adm', { corps: { vcA: true, vcB: true }, rawRetentionDays: 60 })).s, 200);
+  s = await settingsNow(); assert.equal(s.rawRetentionDays, 60); assert.equal(s.corps.vcB, true);
+  assert.equal((await putSettings('adm', { rawRetentionDays: s0.rawRetentionDays })).s, 200);
+  // 엣지 배포(전 엣지 수집 범위) — 쓰기만 좁은 관리자 403
+  assert.equal((await call('wadm', 'PUT', '/tools/bm-usage/distribute', { enabled: false })).s, 403);
+  assert.equal((await call('wadm', 'PUT', '/tools/bm-usage/distribute/edge', { agent: 'edge-x', on: false })).s, 403);
+  assert.notEqual((await call('adm', 'PUT', '/tools/bm-usage/distribute', { enabled: false })).s, 403);
+});
+
+test('R2 저활용 응답 캐시 — 본인 검토 사유 원문이 같은 범위의 다른 계정에 새지 않는다', async (t) => {
+  if (!sqlite) return t.skip('node:sqlite 없음');
+  const w = await call('op', 'POST', '/tools/bm-usage/idle/review', { key: 'CTAGA1', vcenterId: 'vcA', status: 'review', reason: 'bm-a1 10.20.30.40 교체 예정' });
+  assert.equal(w.s, 200);
+  const mine = (await get('op', '/tools/bm-usage/idle')).j.rows.find((r) => r.vcenterId === 'vcA');
+  assert.match(mine.review.reason, /10\.20\.30\.40/, '본인 사유는 원문');
+  const other = (await get('op2', '/tools/bm-usage/idle')).j.rows.find((r) => r.vcenterId === 'vcA');   // 12초 캐시 안
+  assert.doesNotMatch(other.review.reason, /10\.20\.30\.40/, '다른 운영자에게는 가린 판');
+  const again = (await get('op', '/tools/bm-usage/idle')).j.rows.find((r) => r.vcenterId === 'vcA');
+  assert.match(again.review.reason, /10\.20\.30\.40/, '다른 계정 조회 뒤에도 본인은 원문');
+});
+
+test('R3 엣지 장치 응답의 피크 창(행 값 · 설정 상한) — 설정이 허용하는 범위의 정수만(밖이면 null)', async () => {
+  const { sanitizeDevicesBody } = await import('../src/central/bmUsageEdgePull.js');
+  const { peakWindowSOf, normalizeStoreSettings } = await import('../src/bmusage/settings.js');
+  const lim = [0, normalizeStoreSettings({ peakWindowS: 9999 }).peakWindowS];   // 설정 정규화가 자르는 상한 = 정제 상한(숫자를 따로 박지 않는다)
+  for (const [v, want] of [[99999, null], ['1e9', null], ['0x10', null], [30.5, null], [-1, null], [true, null], [[5], null], ['16', 16], [16, 16], [0, 0], [lim[1], lim[1]], [lim[1] + 1, null]]) {
+    const b = sanitizeDevicesBody({ ok: true, devices: {}, peakWindowS: v, peakWindowCapS: v });
+    assert.equal(b.peakWindowCapS, want, `cap ${JSON.stringify(v)}`); assert.equal(b.peakWindowS, want, `row ${JSON.stringify(v)}`);
+    assert.equal(peakWindowSOf(v), want);
+  }
+});
+
+test('R4 데모 계정 — 정비 창 · 키 겹침 쓰기 버튼은 서버 표지로 닫힌다(실제 라우터 · authMiddleware 의 데모 거부 함수)', async (t) => {
+  if (!sqlite) return t.skip('node:sqlite 없음');
+  const express = (await import('express')).default;
+  const { denyDemoGuest } = await import('../src/auth/demoGuest.js');
+  const DEMO = { username: 'thedvcdemp', name: 'Demo', role: 'admin', demoGuest: true };
+  const app = express();
+  app.use(express.json());
+  app.use('/api', (req, res, next) => { req.user = { ...DEMO }; if (denyDemoGuest(req, res)) return; next(); }, api);   // authMiddleware 의 데모 줄과 같은 함수
+  const s2 = http.createServer(app);
+  const p2 = await new Promise((r) => s2.listen(0, '127.0.0.1', () => r(s2.address().port)));
+  t.after(() => s2.close());
+  const dcall = (method, p, body) => fetch(`http://127.0.0.1:${p2}/api${p}`, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, ...(body ? { body: JSON.stringify(body) } : {}) })
+    .then(async (r) => ({ s: r.status, j: await r.json().catch(() => null) }));
+  const S = await import('../src/bmusage/maint/schedule.js');
+  const loc = (ms) => S.fmtLocal('Asia/Seoul', ms).replace(' ', 'T');
+  const T0 = Date.now();
+  const winBody = { name: '디스크 교체', reason: '시험', tz: 'Asia/Seoul', vcenterId: 'vcA', target: { kind: 'server', keys: ['CTAGA1'] },
+    schedule: { kind: 'once', start: loc(T0 + 3_600_000), end: loc(T0 + 2 * 3_600_000) }, scopes: { alerts: true } };
+  const made = await call('adm', 'POST', '/tools/bm-usage/maintenance', winBody);
+  assert.equal(made.s, 200, JSON.stringify(made.j));
+  // 정비 창 — 표지 ↔ 실제
+  const dm = await dcall('GET', '/tools/bm-usage/maintenance');
+  assert.deepEqual(dm.j.actions.create, { ok: false, why: 'demo' });
+  const w = dm.j.windows.find((x) => x.id === made.j.id);
+  assert.deepEqual([w.canEdit, w.canEnd, w.canDelete, w.canConfirm], [false, false, false, false], '데모는 행 버튼도 닫힌다');
+  assert.equal((await dcall('POST', '/tools/bm-usage/maintenance', winBody)).s, 403);
+  assert.equal((await dcall('DELETE', `/tools/bm-usage/maintenance/${made.j.id}?rev=${made.j.rev}`)).s, 403);
+  const am = (await get('adm', '/tools/bm-usage/maintenance')).j;
+  assert.deepEqual(am.actions.create, { ok: true });
+  assert.equal(am.windows.find((x) => x.id === made.j.id).canDelete, true);
+  assert.deepEqual((await get('vw', '/tools/bm-usage/maintenance')).j.actions.create, { ok: false, why: 'role-operator' });
+  // 키 겹침 결정 — 표지 ↔ 실제
+  const dk = await dcall('GET', '/tools/bm-usage/key-overlaps');
+  assert.deepEqual(dk.j?.actions?.decide, { ok: false, why: 'demo' }, JSON.stringify(dk).slice(0, 200));
+  assert.equal((await dcall('POST', '/tools/bm-usage/key-overlaps/decision', { oid: 'x', decision: 'add' })).s, 403);
+  assert.deepEqual((await get('op', '/tools/bm-usage/key-overlaps')).j.actions.decide, { ok: true });
+  assert.equal((await call('adm', 'DELETE', `/tools/bm-usage/maintenance/${made.j.id}?rev=${made.j.rev}`)).s, 200);
 });

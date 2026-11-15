@@ -48,6 +48,7 @@
 - (점검 반복 2회차 추가) 베어메탈 사용률 화면 쓰기 버튼은 서버 표지(bmWriteGate — 라우트와 같은 판정)로만 · PowerCap 꺼짐 = 해당 없음(판정 하나 invCapState) · 사용률 색 = 설정값 · 피크 창 ‘줄임’ 은 설정 상한과
 - (점검 반복 3회차 추가) 정비 창 · 알림 — 재확인은 재확인 라우트 하나(고치기는 confirmedAt 그대로 · 버튼 = 같은 판정) · 끝남 · 지움 · 만료 창은 엣지에 history 로(지난 구간 전용 · 시한 없음 · 억제 안 함) · 창 끝 뒤 억제 점검은 창마다 · 모르는 규칙은 unknown
 - (v3.8.0 추가) 디스크 배드 섹터 이력(범위 A) — 엣지가 중앙 작업을 가져가 법인 안에서 Lifecycle 로그를 읽는다 · 분류는 ID · 근거 문서가 있는 ID 만 · 판정 코어 하나(verdict.js — 시리얼 = 확정 · 로그 연속성 = 추정 · 그 밖 판단 안 함) · 가져간 작업의 보고만 저장
+- (점검 반복 4회차 추가) 7b 등록 · 키 — 키 폴더 밖은 쓰기 전에 거절(온보딩 분석 · bm-storage 저장 · 회전 — 판정 하나 onboard/placement.js keyPlacementIssue) · 허용 기능 제한은 경고 · 대상 해석이 고른 OS 등록은 누락 점검에서 ‘함대에 있음’ · 로그 공통 원인 후보는 (법인, 키) 쌍
 ## 본문
 
 - ⚠⚠ **물리 파트(부품) 장애 — v2.548 재설계. '확인 불가' 를 정상으로도 장애로도 세지 않고, 전이만 기록한다**
@@ -1654,6 +1655,33 @@
   - 남은 것(설계 §16 · §18 범위 B · C · §22): 보관 로그 내보내기(§22 2단계 — 장비에 보내는 요청형 동작) · 세션 재사용(3단계) · 지금 쓰이는 곳(OS · vCenter) · 교체 우선순위 · 조치 추적 · vSAN 상태 · 설정 점검. 디스크 값은 v3.10.1 에 텔레메트리 · DriveMetrics 로 읽는다(실장비 대조 전). 실장비 대조는 3.8.2 의 장비 진단으로 받는다(§14.1 명령 대신) — 그 답으로 분류표 · 읽는 방법을 고친다.
   - 회귀 `server/test/diskBad380.test.js` · `server/test/diskBadReview380.test.js` · `server/test/diskBadField382.test.js` · `server/test/diskBadField383.test.js` · `server/test/diskBadPast3101.test.js` · 웹 `diskBadText.test.js`.
 
+- ⚠⚠ **베어메탈 사용률 점검 반복 4회차(기준판 47afbb1c) — 키 폴더 밖은 쓰기 전에 거절 · 허용 기능 제한은 경고 · 고른 OS 등록은 함대에 있음 · 공통 원인 후보는 (법인, 키) 쌍**
+  (`bmusage/onboard/{placement(새 · 순수),refs,importAnalyze,onboardRun,missing}.js` · `bmusage/{targets,logs/view,maint/judge}.js` · `routes/api/{bmstor,bmOnboard,bmUsage}.js` ·
+  웹 `bmOnboardText.js rotateResultText` · `BmOnboardPanel.jsx`. 회귀 `server/test/bmUsageLoop4.test.js` · 웹 `bmOnboardText.test.jsx`(4회차 D1) · `bmPerfKeyPair` ⑤ 스윕 정정). 3회차 절은 이 파일 끝.
+  - **D1 키 배치 판정을 쓰기 경로에도(다른 세션 v3.9.0 과의 상호작용)**: 판정 `keyPlacementIssue`(키 폴더 법인 · 서버 · 허용 기능)는 접속 때(`resolveOsAuth`)만 돌았다 — 온보딩 분석(키 이름만) ·
+    bm-storage 저장 `bmBindCheck`(존재 · 퇴역만) · 회전(`placementConflicts` — 폴더만)은 성공하고 연결 시험(conn-test — 허용 기능을 보지 않는다)도 통과하는데 수집은 매 주기 key-folder · key-feature 로 접속하지 않았다.
+    판정은 순수 모듈 `onboard/placement.js` 로 옮겼고 refs 가 그대로 다시 내보낸다(같은 함수 — 시험이 `REFS.keyPlacementIssue === PL.keyPlacementIssue` 를 본다).
+    쓰기 점검 `keyWriteIssue(효력 키, 쓰기 뒤 서버(법인 · 이름), 쓰기 전)` — 효력 키 = 서버 키 → 공통 계정 기본 키(비밀번호 고정이면 없음 · `effectiveKeyOf`), 참조는 적용 본문 그대로 `bindOfWrite` 의 cred · key(등록부가 저장할 값).
+    메인 결정: **폴더 밖은 거부**(분석 행 `key-folder` · `bmBindCheck` 409 — OTP 게이트 전 · 회전은 예전 B-4 그대로) · **허용 기능에 없는 수집(bm-usage · bm-storage)은 경고**(분석 행 `key-feature` · 회전 결과 `warnings` —
+    기능 제한은 의도일 수 있어 적용 · 회전은 막지 않는다 · 회전 경고는 바뀐 서버 · 계정이 있을 때만). 키 · 법인 · 이름이 쓰기 전과 같으면 판정하지 않는다(이미 폴더 밖인 항목의 마운트만 고치는 저장을 막지 않는다).
+    엣지 배포 행은 중앙이 키를 모른다 — 엣지 적용(`applyEdgeDeployment`)이 같은 분석으로 자기 키를 보고 거부를 code 로 중앙에 보고한다. bm-storage 화면은 법인(vcenterId)을 보내지 않으므로 그 화면의 새 항목에
+    법인 폴더 키는 거부된다(귀속 없는 서버 — 접속 때도 key-folder · 같은 판정 · 재확인 I1: 그 경우 거부 문구는 '이 법인 폴더 키를 고르세요' 가 아니라 갈 길 — 전역 키 또는 서버 등록(CSV)에서 법인 지정 — 을 말한다 · 키 이름 · 폴더는 싣지 않는다). bm-storage 저장에는 허용 기능 경고를 넣지 않았다(그 화면은 스토리지 전용 키를 일부러 고를 수 있다).
+    수집 건강 사유는 `cred-config` 로 묶지만 서버 상세 `osError` 는 AUTH_ERROR 문구 그대로라 key-folder · key-feature 가 화면에서 구분된다(확인 — 바꾸지 않음).
+  - **D2 (1회차 D3 · D4 가 만든 회귀)**: 경로로 쓰지 않는 OS 등록(꺼짐 · 엣지 지정)이 누락 점검 usedIds(대상의 osHost.id 만)에서 빠져, 등록 이름이 함대와 다르면(pickOsEntry ① iDRAC 주소 = OS 주소 · ③ 함대 이름 = OS 주소)
+    ‘등록부에만 있음(함대에 없음 · 디스크 용량만)’ 으로 한 번 더 나왔다. 대상 해석이 **고른 등록 id** 를 그 갈래(꺼짐 · OS 등록 위임 · 수집 서버 위임 · 법인 꺼짐 · 귀속 없음 · 경로 없음 · iDRAC 만 대상)에도
+    `osRegId` 로 싣고 누락 점검이 함께 센다(pickOsEntry 결과 그대로 — 새 대조 없음). 응답 · 엣지 봉투에는 싣지 않는다(`publicTarget` · `publicSkipped`). 기준판 55d8e121 과 같은 1행(켬 · 끔 · agent · iDRAC + 끔/agent).
+    법인 꺼짐 · 귀속 없음 제외도 1행이 됐다(그 꼴은 55d8e121 에서도 2행이었다 — 같은 원리라 함께 고침).
+  - **D3**: 로그 공통 원인 후보의 ‘서버당 한 번’ 열쇠가 키 하나였다 — 입력이 이 노드 + 엣지 보관분이라 사설 대역을 겹쳐 쓰는 법인의 같은 IP 키가 한 대로 접혀 후보가 사라졌다(셋이면 하나 적고 한 대가 빠짐).
+    열쇠는 `maint/judge.js nodePairIdOf`(법인 있으면 targetIdOf · 귀속 없음은 `|키@노드`) — `resolvePerfTarget` 의 인라인 사본도 이 함수로(bmPerfKeyPair ⑤ 스윕이 정의를 대조). 담당 이동 중 두 노드에 함께 보이는 같은 서버는 같은 쌍이라 한 번.
+  - **남은 것(의심 · 고치지 않음 — 근거와 함께)**: ① 7b 엣지 배포 행의 저장 열쇠(`edgeOfFactory` — knownAgentNames 중 법인 매핑이 처음 맞는 이름)와 GET /bm-onboard 의 개별 토큰 이름이 갈릴 수 있다는 의심 —
+    vCenter 등록부 remoteAgent 가 수집 서버 id(별칭)로 저장되는 경로를 확인하지 못해 재현하지 않았다. ② 엣지 사용률 봉투의 `targets[].vcenterId` 는 엣지가 말한 값 그대로 범위 판정(resolvePerfTarget · bmLogsFleet · applyScope)에 쓰인다 —
+    알림 이슈는 중앙이 법인을 정한다(`edge.md` 반증 F9)와 다르다. 엣지는 자기 법인 서버만 수집한다는 설계 결정 범위라 결함으로 세지 않았다(바꾸려면 봉투 대상의 법인을 그 엣지 담당 vCenter 로 자르는 것이 후보 — edge.md 에 차이 기록).
+    ③ 이미 폴더 밖인 기존 항목은 쓰기 점검이 건드리지 않는다(키 · 법인 · 이름 그대로) — 그 서버는 수집 건강 · 서버 상세가 key-folder 로 말한다.
+    ④ (구현 중 재현 · 고치지 않음 — 범위 밖 · 메인 판단 대기) 공통 계정의 법인 · 기본 키를 함께 바꾸는 저장(`keyStore.saveAccount` — 키 폴더 = 새 계정 법인이면 통과)은 그 계정을 쓰는 기존 서버(옛 법인)를 다시 보지 않는다 —
+    재현: vcA 계정(vcA 폴더 키)을 쓰는 vcA 서버 → 계정을 vcB · vcB 폴더 키로 저장 ok → 그 서버 수집 자격 key-folder. 같은 꼴(쓰기 경로 판정 누락)이라 다음 점검의 첫 후보(placementConflicts 의 서버 쪽 효력 키 대조로 막을 수 있다 — 추정).
+  - **재확인(반증 · 표준)**: D1 ①~④ · D2 · D3 닫힘 · 회귀 0 — 판정 동치(생성 입력 20만 건 차이 0) · '같으면 판정 안 함' 예외 우회 9가지 시도(키만 · 법인만 · 이름 · 계정 · 주소 이동 · 비밀번호 고정 해제 → 409, 이름 대소문자 · 고정 유지는 접속 판정과 같게 저장) ·
+    bmBindCheck 409 뒤 같은 OTP 로 정상 저장 200(OTP 소모 없음) · osRegId 응답 경로 0건 · 누락 점검 차이는 '함대가 고른 등록' 의 untracked 행이 빠진 것뿐. ④ 는 사실로 확인(6회차 후보).
+
 - ⚠⚠ **베어메탈 사용률 점검 반복 1회차(기준판 55d8e121) — 꺼진 등록 · 엣지 OS 등록은 경로가 아니다 · 직전 누적 표본은 같은 장비만 · df 도 시한 안 · 사유는 원인대로**
   (`bmusage/{targets,usage,missReason,collectHealth,poller}.js` · `collectors/osSsh.js` · `parse/linuxProc.js`(btime) · `focus/run.js` · `bmfolders/usageWhy.js` · `central/bmPerfOpsPull.js` ·
   웹 `bm{Usage,Onboard,Collect,PerfOps}Text.js` · `bmFolders/whyText.js`. 회귀 `server/test/bmUsageLoop1.test.js` · `bmTop8bBudget` ①③ · `bmPerfStage6Health` ②):
@@ -1709,6 +1737,16 @@
     저활용 편집 상태 열쇠 = 행 식별(노드 · 법인 · 키 — `idleRowId`) · 404 상세 머리는 법인을 단정하지 않고(‘—’) 비교 추가를 잠근다(존재 은닉 — 없음 · 범위 밖을 가르는 문구 없음).
   - **I1 · I2 · I3**: 추이 창 문구는 날짜를 붙인 공용 코어(`vmPerfText.windowRangeText`) · 피크 창 ‘줄어듦’ 은 응답의 설정 상한(`peakWindowCapS` = 그 노드 `settings.store.peakWindowS` — 엣지 대행 정제 포함 · 모르면 말하지 않음) ·
     용량 ‘예측’ 색은 임박(도달일 ≤ alertDays — 상세 응답에도 alertDays)만 주의.
+  - **재확인(반증) R1~R4 — 같은 회차에 고침**(회귀 `bmUsageLoop2` R1~R4 · 계정 wadm/sadm2/wop = 조회는 넓고 쓰기만 좁은 계정):
+    R1 ‘전체 범위’ 는 **조회 ∧ 쓰기**(`isFullReadWriteScope`) — 지금 수집 · 엣지 인출 · 용량/저활용 다시 계산 · 엣지 배포 PUT 둘(`fullReadWriteScopeOnlyWith`) · 배포 관리 표 · 표지 bmGate ③ 이 같은 함수.
+    수집 설정 PUT: 전역 값(수집 켜기 · 주기 · 보존 · 경로 · Enterprise · 알림)은 조회 ∧ 쓰기 전체 범위만(그 밖 계정은 v2.607 처럼 버리고 ignoredGlobal) · 법인 칸은 `writeScopedVcenterIds` 로 병합 ·
+    **조회는 되는데 쓰기 범위 밖인 법인의 값을 바꾸는 요청은 403 read-only-corps(아무것도 저장하지 않음)** — 규약 ‘조회 밖 404 → 쓰기 밖 403’(v2.369 · v2.733: 보이는 법인이라 숨길 것이 없고,
+    조용히 무시하면 ‘저장했습니다’ 가 거짓) · 같은 값을 되돌려 보낸 것은 쓰기가 아니다(화면은 보이는 법인 전부를 보낸다) · 조회 밖 법인 키는 예전처럼 보존 + 개수만(존재 은닉).
+    주 조회 vcenters[].writable · actions.settingsGlobal 로 화면이 법인 칸 · 전역 칸을 따로 잠근다. 설정 소유자 등급(requireSettingsOwner)은 걸지 않았다 — 결정 대기(아래).
+    R2 저활용 응답 캐시 열쇠에 사용자(비관리자 — ‘본인 검토 사유는 원문’ 이 사용자마다 다르다). R3 엣지 장치 응답 peakWindowS · peakWindowCapS 는 `settings.peakWindowSOf`(설정 범위의 정수 · 10진 글자만 — ‘1e9’ · ‘0x10’ · 30.5 · 99999 → null).
+    R4 정비 창(새 창 · 행 고치기/끝내기/재확인/지우기) · 키 겹침 결정/되돌리기도 bmGate 표지(데모 · 역할) — 데모 계정에 열려 있던 버튼.
+  - **결정 대기(사용자)**: 수집 설정(원시 · 롤업 보존 줄이기 = 전 법인 이력 정리 포함)을 설정 소유자 등급으로 올릴지 — 형제 판단이 갈린다(bm-storage 수집 설정은 admin + 전체 범위 ·
+    용량 증가량 보존 · 리눅스 성능 알림 규칙 · 목표선 · 튜닝 덮어쓰기는 소유자 등급). 올리면 범위 관리자의 자기 법인 켜기/끄기(v2.605)가 막히므로 전역 값만 소유자 등급으로 나누는 안이 후보.
   - **남은 것(고치지 않음 — 의심 · 미재현)**: 데모에서 KPI ‘OS 경로 0’ ↔ 보드 · 누락 점검 ‘둘 다 15’ 어긋남(데모가 응답 단계에서 OS 성능 열을 겹친다 — 실장비에서는 생기지 않는다고 추정) ·
     수집 건강 저장 카드의 ‘피크 창 · 대상 없음’ 문구(iDRAC 만인 노드에서 오해 소지 — 데모에서만 봄).
 
