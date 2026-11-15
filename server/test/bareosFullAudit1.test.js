@@ -130,3 +130,30 @@ test('⑤ R-1 — markRunUnknown(쓰기 한 번) → runUnknownHeld · 그룹 �
   assert.match(src, /if \(st === 'unknown'\) markRunUnknown\(chunk\.map\(\(s\) => s\.job\.id\),/, '덩어리째 결과 모름');
   assert.match(src, /\} else if \(st === 'unknown'\) \{\n\s*patchJob\(s\.job\.id, \{ lastError: \{[^\n]*unknown: true \} \}\);/, '항목 결과 모름');
 });
+
+// ── 전체 점검 10회차(B-20 · B-21 · B-22) — 완전 설치 ──
+test('⑩ B-20 — 중앙 단계 4 · 7 · 전부 되돌리기의 포탈 정리는 Bareos 설정을 못 읽으면 저장하지 않는다', () => {
+  const src = fs.readFileSync(path.resolve(path.dirname(new URL(import.meta.url).pathname), '../src/bareos/install/job.js'), 'utf8');
+  const step = (n) => { const i = src.indexOf(`  if (n === ${n}) {`, src.indexOf('async function centralStep(')); return src.slice(i, i + 200); };
+  assert.match(step(4), /^ {2}if \(n === 4\) \{\n {4}requireSettingsReadable\('[^']+'\);\n {4}const cur = loadSettings\(\);/);
+  assert.match(step(7), /^ {2}if \(n === 7\) \{\n {4}requireSettingsReadable\('[^']+'\);\n {4}const cur = loadSettings\(\);/);
+  assert.match(src, /if \(registryLoadError\(\)\) throw fail\('unavailable', '백업 대상 원장을 읽지 못해 포탈 쪽 등록 · 매핑을 남겼습니다'\);\n\s*requireSettingsReadable\(/);
+  assert.match(src, /function requireSettingsReadable\(what\) \{\n\s*if \(settingsLoadError\(\)\) throw fail\('unavailable'/);
+});
+
+test('⑩ B-21 — 실패 기록의 rolledBack 기본값은 모름(null) · 중앙 단계 4 · 5 의 autoSetup 실패만 되돌림으로', () => {
+  const src = fs.readFileSync(path.resolve(path.dirname(new URL(import.meta.url).pathname), '../src/bareos/install/job.js'), 'utf8');
+  assert.match(src, /rolledBack: e\.rolledBack \?\? null, rollbackFailed/);
+  assert.doesNotMatch(src, /rolledBack: e\.rolledBack \?\? \(step === 4 \|\| step === 5 \? true : null\)/);
+});
+
+test('⑩ B-22 — runner.sh SELinux 규칙 확인은 첫 칸이 정확히 그 경로인 줄만(부분 문자열 아님)', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const src = fs.readFileSync(path.resolve(path.dirname(new URL(import.meta.url).pathname), '../src/bareos/install/runner.sh'), 'utf8');
+  const m = /semanage fcontext -l -C 2>\/dev\/null \| (awk -v d="\$VOLUME_DIR" '[^']+')/.exec(src);
+  assert.ok(m, 'awk 정확 일치');
+  const has = (listing, dir) => { try { execFileSync('bash', ['-c', `printf '%s\\n' "$L" | ${m[1]}`], { env: { ...process.env, L: listing, VOLUME_DIR: dir } }); return true; } catch { return false; } };
+  assert.equal(has('/data/bareos-old = /var/lib/bareos/storage', '/data/bareos'), false, '접두가 같은 다른 경로는 이미 있음이 아니다');
+  assert.equal(has('/data/bareos = /var/lib/bareos/storage', '/data/bareos'), true);
+  assert.equal(has('', '/data/bareos'), false);
+});

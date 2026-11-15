@@ -306,7 +306,8 @@ async function drive(id, { fromStep, resendBundle = false, mode = 'install', res
       const msg = await centralStep(j, creds, n);
       setStep(j, n, { status: 'ok', endedAt: Date.now(), msg: String(msg || '').slice(0, 300) });
     } catch (e) {
-      recordFailure(j, n, { message: String(e?.message || e), code: e?.code, sshAuth: isSshAuthError(e) }, creds);
+      // 전체 점검 10회차(B-21): '되돌렸습니다' 는 autoSetup 이 그 단계를 스스로 되돌린 실패(4 · 5단계 예외)에만 — 다른 경로(재시작 · 잠금 · drive 예외)는 모름(null)
+      recordFailure(j, n, { message: String(e?.message || e), code: e?.code, sshAuth: isSshAuthError(e), rolledBack: e?.rolledBack ?? (n === 4 || n === 5 ? e?.code !== 'unavailable' : null) }, creds);
       return;
     }
   }
@@ -463,7 +464,7 @@ function recordFailure(j, step, e, creds = null) {
   const output = scrubOutput(e.output || e.message || '', secretsOf(creds));
   const failure = { step, at: Date.now(), cmd: e.cmd || '', code: e.code ?? null, message: scrubOutput(String(e.message || ''), secretsOf(creds)).slice(0, 600),
     // 4·5단계는 autoSetup 이 그 단계에서 넣은 것을 되돌린다(사유 문구가 결과를 밝힌다) · 6·7단계는 되돌릴 것이 없다(반증 L6)
-    output, cause: c, rolledBack: e.rolledBack ?? (step === 4 || step === 5 ? true : null), rollbackFailed: !!e.rollbackFailed };
+    output, cause: c, rolledBack: e.rolledBack ?? null, rollbackFailed: !!e.rollbackFailed };   // 전체 점검 10회차(B-21): 기본값 true 를 없앴다(재시작으로 끊긴 4단계를 '되돌렸습니다' 로 보였다)
   if (step != null && j.steps[step]) j.steps[step] = { ...j.steps[step], status: 'failed', endedAt: Date.now() };
   const a = j.attempts[j.attempts.length - 1]; if (a) { a.endedAt = Date.now(); a.result = 'failed'; a.failedStep = step; a.cause = c.title; }
   touch(j, { status: 'failed', phase: 'idle', failure, currentStep: step });
@@ -492,9 +493,15 @@ function localConsoleCheck(creds) {
   };
 }
 
+/** 전체 점검 10회차(B-20): Bareos 설정(Director 등록부 · 매핑)을 못 읽은 채 저장하지 않는다 — 손상이면 로더가 빈 설정을 돌려줘
+ *  4단계가 재설치에도 Director 를 새로 더하고 그 하나만 든 파일을, 7단계가 매핑 한 줄만 든 파일을 써 다른 법인 등록이 라이브 파일에서 빠지고 로드 오류 표지도 지워졌다. */
+function requireSettingsReadable(what) {
+  if (settingsLoadError()) throw fail('unavailable', `Bareos 설정(Director 등록 · 매핑)을 읽지 못해 ${what} — 손상본(bareos.json.corrupt.*)을 확인하세요(다른 법인 등록을 덮지 않습니다).`);
+}
 async function centralStep(j, creds, n) {
   const b = sshBody(creds);
   if (n === 4) {
+    requireSettingsReadable('포탈 등록을 하지 않았습니다');
     const cur = loadSettings();
     const existing = j.directorId ? directorById(j.directorId, cur) : null;
     const dir = existing || { id: 'dir_pending_install', name: j.plan.directorName, timeoutMs: 15_000, tlsMax: 'TLSv1.3' };
@@ -527,6 +534,7 @@ async function centralStep(j, creds, n) {
     return `엣지 경유 접속 성공${pr?.version ? ` · ${pr.version}` : ''}`;
   }
   if (n === 7) {
+    requireSettingsReadable('매핑을 저장하지 않았습니다');
     const cur = loadSettings();
     // v2.851.1(2026-11-02 사용자 화면 — 재현): FD 가 접속할 vCenter 주소. 예전에는 작업의 vcHost(수집 스냅샷 — host 칸이 없어 늘 '')를 그대로 써
     //   빈 vcserver 로 매핑을 저장했고(재설치면 쓰던 매핑의 주소까지 지웠다) 마무리(FD 지문 · INI)가 거부됐다.
@@ -692,6 +700,7 @@ async function driveRollbackAll(j, creds, { resume = false } = {}) {
   try {
     // v2.846 D-7: 포탈 쪽 정리도 원장이 읽힐 때만(빈 원장으로 Director 삭제 판정을 하지 않는다)
     if (registryLoadError()) throw fail('unavailable', '백업 대상 원장을 읽지 못해 포탈 쪽 등록 · 매핑을 남겼습니다');
+    requireSettingsReadable('포탈 쪽 등록 · 매핑을 남겼습니다');   // 전체 점검 10회차(B-20)
     if (j.createdSite) {
       const cur = loadSettings();
       const jobDirs = new Map();
