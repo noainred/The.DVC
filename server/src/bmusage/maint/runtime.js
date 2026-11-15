@@ -100,8 +100,14 @@ function loadStats() {
       bw[id] = Object.fromEntries(['alerts', 'after', 'hold', 'focus', 'collect', 'collectFail', 'at'].map((k) => [k, Number.isFinite(Number(x[k])) ? Number(x[k]) : 0]));
     }
     const lk = o.leak && typeof o.leak === 'object' ? o.leak : {};
+    // 점검 묶음별 결과(7회차 C1 — leakBy: 'cycle' · 'hold'). 없으면(옛 파일) 합친 값 하나만 있는 것으로 본다.
+    const by = {};
+    for (const [g, x] of Object.entries(o.leakBy && typeof o.leakBy === 'object' ? o.leakBy : {}).slice(0, 8)) {
+      if (!AUDIT_GROUPS.includes(g) || !x || typeof x !== 'object' || !Number(x.at)) continue;
+      by[g] = { n: Number(x.n) || 0, last: Number(x.last) || 0, at: Number(x.at) || 0 };
+    }
     // 점검한 적이 없으면 n 은 null(‘0 = 정상’ 이 아니다 — 화면은 ‘아직 점검한 주기가 없습니다’)
-    _stats = { v: 1, byWindow: bw, leak: { n: Number(lk.at) ? (Number(lk.n) || 0) : null, last: Number(lk.last) || 0, at: Number(lk.at) || 0 } };
+    _stats = { v: 1, byWindow: bw, leakBy: by, leak: { n: Number(lk.at) ? (Number(lk.n) || 0) : null, last: Number(lk.last) || 0, at: Number(lk.at) || 0 } };
   } catch (e) {
     preserveCorrupt(STATS_FILE(), String(e?.message || e));
     _stats = { v: 1, byWindow: {}, leak: { n: null, last: 0, at: 0 }, unreadable: Date.now() };
@@ -157,8 +163,19 @@ export function leakReason(x, facts = new Map()) {
  *   적용 기록이 없는 주기는 지난 점검 결과를 덮지 않는다(다른 폴러가 찾은 leak 를 0 으로 지우지 않게) — 계수만 저장한다.
  * @returns {Promise<{checked:number, leak:number, unverified:number, reasons:object}>}
  */
-export async function auditCycle({ now = Date.now(), factsOf = windowFactsNoCache } = {}) {
-  const list = _cycle; _cycle = [];
+/**
+ * ⚠ 점검 반복 7회차 C1: 적용 기록 버퍼는 **점검 묶음별로** 비운다 — 예전에는 먼저 부른 쪽이 통째로 가져가, 파트 장애 폴러(10분)가 bmusage 주기 도중
+ *   auditCycle 을 부르면 그 주기의 collect · alerts 기록을 가져가 bmusage 주기 끝 점검이 checked 0 · leak 0 이었다(수집 건강 ‘0 · 정상’ ↔ 저장값 leak 1).
+ *   묶음: 'cycle' = bmusage 주기(collect · alerts · focus — 주기가 비운다) · 'hold' = 파트 장애 보류(그 폴러가 비운다). 범위를 주지 않으면 전부(옛 호출 · 시험).
+ *   저장 결과도 묶음별(leakBy)로 두고 합친 값(leak)을 화면 · 봉투에 준다 — 한 묶음의 점검이 다른 묶음이 찾은 leak 을 0 으로 덮지 않게.
+ */
+export const AUDIT_GROUPS = Object.freeze(['cycle', 'hold']);
+const GROUP_SCOPES = Object.freeze({ cycle: ['collect', 'alerts', 'focus'], hold: ['hold'] });
+export async function auditCycle({ now = Date.now(), factsOf = windowFactsNoCache, group = null } = {}) {
+  const scopes = group && GROUP_SCOPES[group] ? GROUP_SCOPES[group] : null;
+  let list;
+  if (scopes) { list = _cycle.filter((x) => scopes.includes(x.scope)); _cycle = _cycle.filter((x) => !scopes.includes(x.scope)); }
+  else { list = _cycle; _cycle = []; }
   let leak = 0; let unverified = 0; const reasons = {};
   if (list.length) {
     let facts = { ok: false, byId: new Map() };
@@ -169,7 +186,19 @@ export async function auditCycle({ now = Date.now(), factsOf = windowFactsNoCach
       if (r) { leak += 1; reasons[r] = (reasons[r] || 0) + 1; }
     }
     const st = loadStats();
-    st.leak = { n: leak, last: list.length, at: now, ...(unverified ? { unverified } : {}), ...(leak ? { reasons, since: st.leak?.n ? (st.leak.since || now) : now } : {}) };
+    const prevN = st.leak?.n;
+    const cur = { n: leak, last: list.length, at: now, ...(unverified ? { unverified } : {}), ...(leak ? { reasons } : {}) };
+    if (scopes) {
+      st.leakBy = { ...(st.leakBy || {}), [group]: cur };
+      const gs = Object.values(st.leakBy);
+      const sum = (k) => gs.reduce((a, g) => a + (Number(g[k]) || 0), 0);
+      const rs = {}; for (const g of gs) for (const [k, v] of Object.entries(g.reasons || {})) rs[k] = (rs[k] || 0) + v;
+      const n = sum('n'); const uv = sum('unverified');
+      st.leak = { n, last: sum('last'), at: Math.max(...gs.map((g) => Number(g.at) || 0)), ...(uv ? { unverified: uv } : {}), ...(n ? { reasons: rs, since: prevN ? (st.leak.since || now) : now } : {}) };
+    } else {
+      st.leakBy = {};
+      st.leak = { ...cur, ...(leak ? { since: prevN ? (st.leak.since || now) : now } : {}) };
+    }
   }
   saveStats();
   return { checked: list.length, leak, unverified, reasons };
@@ -178,7 +207,7 @@ function saveStats() {
   const st = loadStats();
   const ids = Object.keys(st.byWindow);
   if (ids.length > STATS_MAX) for (const id of ids.sort((a, b) => (st.byWindow[a].at || 0) - (st.byWindow[b].at || 0)).slice(0, ids.length - STATS_MAX)) delete st.byWindow[id];
-  try { atomicWriteFileSync(STATS_FILE(), JSON.stringify({ v: 1, byWindow: st.byWindow, leak: st.leak, at: Date.now() }), { mode: 0o600 }); } catch { /* 다음 주기에 다시 */ }
+  try { atomicWriteFileSync(STATS_FILE(), JSON.stringify({ v: 1, byWindow: st.byWindow, leak: st.leak, ...(st.leakBy && Object.keys(st.leakBy).length ? { leakBy: st.leakBy } : {}), at: Date.now() }), { mode: 0o600 }); } catch { /* 다음 주기에 다시 */ }
 }
 /** 화면 · 봉투용 사본. */
 export function maintStats() {
