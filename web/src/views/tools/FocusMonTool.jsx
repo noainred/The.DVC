@@ -356,6 +356,7 @@ function Compare({ main, ids, tb, now, onOpen }) {
   const [hf, setHf] = useState(null);
   const pinTouched = useRef(false);
   const [log, setLog] = useState(false);
+  const [dlErr, setDlErr] = useState('');   // 전체 점검 29회차 F8: 내려받기 실패(내보내기 동시 1건 거절 · DB 오류)를 삼키지 않는다
   const scopeParam = metric === 'disk' ? (scope === 'all' ? 'all' : scope === 'mount' ? `mount:${scopeText}` : `dev:${scopeText}`) : metric === 'net' ? (scope === 'if' && scopeText ? `if:${scopeText}` : 'top') : metric === 'fs' ? (scope === 'mount' && scopeText ? `mount:${scopeText}` : 'all') : 'all';
   const params = useMemo(() => ({ view: 'compare', targets: ids.join(','), win: tb.win, end: tb.end ?? '', metric, item: it, scope: scopeParam }), [ids, tb.win, tb.end, metric, it, scopeParam]);
   const q = usePoll('/tools/focus-mon/data', params, pollMsFor(tb.win, tb.end, 2_000), ids.length > 0);
@@ -414,7 +415,8 @@ function Compare({ main, ids, tb, now, onOpen }) {
             <div className="fm-row">
               <span className="fm-dim">{unit ? `단위 ${unit}` : ''}</span>
               {!pct ? <Seg label="눈금" value={log ? 'log' : 'lin'} onChange={(v) => setLog(v === 'log')} options={[['lin', '선형'], ['log', '로그']]} /> : null}
-              {canCsv() ? <button type="button" className="fm-btn" onClick={() => downloadFile(csvHref).catch(() => {})}>CSV</button> : <span className="fm-dim" title={CSV_DENIED_NOTE}>CSV 권한 없음</span>}
+              {canCsv() ? <button type="button" className="fm-btn" onClick={() => { setDlErr(''); downloadFile(csvHref).catch((e) => setDlErr(e?.body?.reason || e?.message || '내려받기에 실패했습니다.')); }}>CSV</button> : <span className="fm-dim" title={CSV_DENIED_NOTE}>CSV 권한 없음</span>}
+              {dlErr ? <span className="fm-dim" role="alert">{dlErr}</span> : null}
             </div>
           </div>
           <div className="fm-chart-wrap fm-chart-box">
@@ -478,6 +480,7 @@ function IostatCompare({ main, ids, tb, onOpen }) {
   const [col, setCol] = useState('wAwait');
   const [pins, setPins] = useState([]);
   const [hf, setHf] = useState(null);
+  const [dlErr, setDlErr] = useState('');   // 29회차 F8
   const cols = main.iostat?.cols || [];
   const params = useMemo(() => ({ view: 'iostat', targets: ids.join(','), win: tb.win, end: tb.end ?? '', at, scope, col, pins: pins.join(',') }), [ids, tb.win, tb.end, at, scope, col, pins]);
   const q = usePoll('/tools/focus-mon/data', params, tb.end == null ? 2_000 : 0, ids.length > 0);
@@ -522,7 +525,8 @@ function IostatCompare({ main, ids, tb, onOpen }) {
       <div className="fm-card fm-flush">
         <div className="fm-row fm-between fm-pad"><h3 className="fm-h3">고른 서버 {rows.length}대의 iostat — {at === 'avg' ? '구간 평균' : '구간 끝 순간'}</h3>
           <div className="fm-row"><span className="fm-dim">칸이 짙을수록 그 열에서 큰 값 · 열 제목을 누르면 정렬 · 줄 앞 네모를 누르면 아래 차트에 올림(4줄까지)</span>
-            {canCsv() ? <button type="button" className="fm-btn" onClick={() => downloadFile(`/tools/focus-mon/export.csv?${new URLSearchParams({ kind: 'iostat', targets: ids.join(','), win: String(tb.win), end: tb.end ? String(tb.end) : '', at, scope }).toString()}`).catch(() => {})}>CSV</button> : null}</div>
+            {canCsv() ? <button type="button" className="fm-btn" onClick={() => { setDlErr(''); downloadFile(`/tools/focus-mon/export.csv?${new URLSearchParams({ kind: 'iostat', targets: ids.join(','), win: String(tb.win), end: tb.end ? String(tb.end) : '', at, scope }).toString()}`).catch((e) => setDlErr(e?.body?.reason || e?.message || '내려받기에 실패했습니다.')); }}>CSV</button> : <span className="fm-dim" title={CSV_DENIED_NOTE}>CSV 권한 없음</span>}
+            {dlErr ? <span className="fm-dim" role="alert">{dlErr}</span> : null}</div>
         </div>
         {arrange === 'mix' ? (
           <STable className="fm-table fm-io" minWidth={1060}>

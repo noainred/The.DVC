@@ -171,18 +171,21 @@ function cleanApps(a) {
   const list = (v, keyOk) => (Array.isArray(v) ? v.slice(0, APP_TOP).map((x) => one(x, keyOk)).filter(Boolean) : null);
   // v3.16.0 ⑯ 반증 H1: 서비스마다 프로세스 수(all) — 서비스 이름만 · 정수 · 상한 개수(필수 앱 알림 판정)
   let all = null;
+  let allCut = a.allCut === true;   // 29회차 F6: 엣지가 잘랐다는 표시 — 여기서 상한 · 거른 칸이 있어도 세운다(빠진 이름을 '0개' 로 읽지 않게)
   if (isObj(a.all)) {
     all = Object.create(null); let c = 0;
-    for (const [k, v] of Object.entries(a.all)) { if (c >= APP_ALL_MAX) break; if (!APP_UNIT_RE.test(k)) continue; const x = n(v); if (x == null || !Number.isInteger(x) || x < 0 || x > 1e6) continue; all[k] = x; c += 1; }
+    for (const [k, v] of Object.entries(a.all)) { if (c >= APP_ALL_MAX) { allCut = true; break; } if (!APP_UNIT_RE.test(k)) { allCut = true; continue; } const x = n(v); if (x == null || !Number.isInteger(x) || x < 0 || x > 1e6) { allCut = true; continue; } all[k] = x; c += 1; }
   }
-  return { sv: list(a.sv, (k) => APP_FIXED.has(k) || APP_UNIT_RE.test(k)), cm: list(a.cm, (k) => COMM_RE.test(k)) || [], ...(all ? { all } : {}) };
+  return { sv: list(a.sv, (k) => APP_FIXED.has(k) || APP_UNIT_RE.test(k)), cm: list(a.cm, (k) => COMM_RE.test(k)) || [], ...(all ? { all, ...(allCut ? { allCut: true } : {}) } : {}) };
 }
 
-function cleanStatus(st, now) {
+function cleanStatus(st, now, toCentral = null) {
   if (!isObj(st)) return null;
   return {
     state: enumOr(st.state, STATES, 'error'), error: strOf(st.error, 240),
-    lastSampleAt: (() => { const v = n(st.lastSampleAt); return v == null ? null : Math.min(v, now); })(),
+    // 29회차 F2(재현): 표본 시각처럼 '보낸 시각 − 표본 시각' 으로 옮긴다 — 위쪽만 자르면 시계가 20초 늦은 엣지의 모든 서버가 '지연'(상태 나이 21초),
+    //   시계가 앞선 엣지는 10분 전 상태도 지연이 아니었다.
+    lastSampleAt: (() => { const v = n(st.lastSampleAt); if (v == null) return null; return toCentral ? toCentral(v) : Math.min(v, now); })(),
     interval: INTERVALS.includes(n(st.interval)) ? n(st.interval) : null,
     osVerified: st.osVerified === true ? true : st.osVerified === false ? false : null,
     hello: cleanHello(st.hello),
@@ -306,7 +309,7 @@ export function handleEdgeSync(agent, body, now = Date.now()) {
   if (isObj(b.status)) {
     for (const [id, st] of Object.entries(b.status).slice(0, 200)) {
       if (!mine.has(id)) { got.foreign += 1; continue; }
-      const c = cleanStatus(st, now);
+      const c = cleanStatus(st, now, sentAt != null ? toCentral : null);   // 보낸 시각이 없으면(옛 엣지) 예전처럼 위쪽만 자른다(나이 0 으로 '방금' 을 지어내지 않게)
       if (c) store.setStatus(id, { ...c, via: 'edge' }, now);
     }
   }

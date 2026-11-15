@@ -39,7 +39,7 @@ import * as AL from '../../focusmon/alerts.js'; // v3.16.0 ⑯ 알림
 import { recentTunes } from '../../focusmon/tune.js'; // v3.16.0 ⑯ 자동 조절
 import { sumCol } from '../../focusmon/summary.js';
 import { backfillState } from '../../focusmon/rollup.js';
-import { focusKeys, allTargets, findTarget, isMockMode, startCollection, stopCollection, addToCollection, removeFromCollection, targetEndpointChanged, localRunner, serviceStatus } from '../../focusmon/service.js';
+import { focusKeys, allTargets, findTarget, isMockMode, startCollection, stopCollection, addToCollection, removeFromCollection, targetEndpointChanged, targetsEndpointChanged, localRunner, serviceStatus } from '../../focusmon/service.js';
 import { recorderStatus } from '../../focusmon/recorder.js';
 import { wakeEdge, focusEdgeMinVersion, focusDiagMinVersion } from '../../central/focusMonEdge.js';
 import { startBulk, bulkJob, bulkProgress } from '../../focusmon/bulkTest.js';
@@ -219,6 +219,9 @@ api.delete('/tools/focus-mon/targets/:id', adminOnly, fullRwOnly, demoBlockWrite
   const t = registry.getTarget(req.params.id);
   const r = registry.removeTarget(req.params.id);
   if (!r.ok) return res.status(r.code === 'not-found' ? 404 : 503).json(r);
+  // 전체 점검 29회차 F5(재현): 수집 중인 서버를 지우면 수집 정의에 id 가 남아 한도를 차지하고(계속 수집 20대 중 1대를 지워도 새 서버 409) ·
+  //   그 서버의 '수집 종료' 는 '없는 대상' 404 였다 — 지울 때 그 수집에서 뺀다(마지막이면 그 수집이 끝난다).
+  { const sess = store.sessionOfTarget(String(req.params.id)); if (sess) removeFromCollection(sess.id, String(req.params.id)); }
   auditForgetTarget(String(req.params.id)); // v3.11.0 디스크 점검 준비 상태 · 진행 중 작업(결과 기록은 DB 보관 규칙대로)
   logAudit({ user: req.user?.username, action: 'focus-mon.target.remove', target: t?.name || req.params.id, ip: req.ip });
   res.json(r);
@@ -286,8 +289,11 @@ api.post('/tools/focus-mon/targets/import/preview', adminOnly, fullRwOnly, csvPe
 api.post('/tools/focus-mon/targets/import', adminOnly, fullRwOnly, csvPerm, demoBlockWrite, (req, res) => {
   if (registryUnreadable(res)) return;
   const b = req.body || {};
+  const before = new Map(registry.listTargets().map((t) => [t.id, t]));   // 29회차 F3: 접속처가 바뀐 대상의 예전 담당 노드(깨우기)
   const r = registry.applyCsv(String(b.text ?? ''), { agents: knownAgentNames(), by: req.user?.username, mode: b.mode === 'valid' ? 'valid' : 'all', update: b.update === true, corps: corpResolver().list });
   if (!r.ok) return res.status(r.code === 'registry-unreadable' ? 503 : 400).json(r);
+  // 29회차 F3(재현): PUT 수정만 예전 접속처의 상태 · 시험 결과 · 부하 창을 지웠다 — CSV 갱신도 같은 함수(targetEndpointChanged)를 부른다.
+  targetsEndpointChanged((r.moved || []).map((id) => [before.get(id) || null, registry.getTarget(id)]));
   for (const id of r.moved || []) auditForgetReadiness(id); // v3.11.0 디스크 점검 — 접속처가 바뀐 대상의 작업 · 준비 상태(반증 F7)
   logAudit({ user: req.user?.username, action: 'focus-mon.target.import', target: 'focus-mon', detail: `새로 ${r.added}대 · 갱신 ${r.updated}대 · 그대로 ${r.same}대 · 건너뜀 ${r.skipped}줄${r.moved.length ? ` · 접속처 바뀜 ${r.moved.length}대` : ''}`, ip: req.ip });
   res.json(r);
@@ -342,12 +348,15 @@ api.post('/tools/focus-mon/targets/move', adminOnly, fullRwOnly, demoBlockWrite,
   if (registryUnreadable(res)) return;
   const b = req.body || {};
   const agents = knownAgentNames();
+  const before = new Map(registry.listTargets().map((t) => [t.id, t]));   // 29회차 F3: 예전 담당 노드(저장된 글자 그대로 — 깨우기)
   const r = registry.moveTargets({ from: String(b.from ?? ''), to: String(b.to ?? ''), ids: Array.isArray(b.ids) ? b.ids : null }, { agents });
   if (!r.ok) return res.status(r.code === 'registry-unreadable' ? 503 : 400).json(r);
+  // 29회차 F3(재현): 담당 노드가 바뀌면 예전 노드의 상태 · 시험 결과가 새 노드의 것처럼 남았다 — PUT 과 같은 함수(예전 · 새 엣지 깨우기 포함).
+  targetsEndpointChanged((r.moved || []).map((id) => [before.get(id) || null, registry.getTarget(id)]));
   for (const id of r.moved || []) auditForgetReadiness(id); // v3.11.0 디스크 점검 — 담당 노드가 바뀐 대상의 작업 · 준비 상태(반증 F7 — 옛 노드로 고정된 작업은 아무에게도 배달되지 않는다)
   if (r.moved.length) {
     logAudit({ user: req.user?.username, action: 'focus-mon.target.move', target: 'focus-mon', detail: `${String(b.from || '') || '중앙'} → ${String(b.to || '') || '중앙'} · ${r.moved.length}대${r.skipped ? ` · 겹쳐 건너뜀 ${r.skipped}대` : ''}`, ip: req.ip });
-    if (b.to) wakeEdge(String(b.to)).catch(() => {});
+    // 받는 엣지 깨우기는 targetsEndpointChanged 가 한다(예전 · 새 엣지마다 한 번 — 29회차 F3)
   }
   res.json(r);
 });
@@ -369,6 +378,7 @@ api.post('/tools/focus-mon/edges/:agent/wake', adminOnly, fullRwOnly, demoBlockW
 
 /** 연결 시험 — 대상마다 진행 중 1건 · TEST_MIN_MS 에 한 번(TEST_MIN_MS · testGate 는 위 — 일괄 시험과 같은 문턱). */
 api.post('/tools/focus-mon/targets/:id/test', adminOnly, fullRwOnly, demoBlockWrite, async (req, res) => {
+  if (registryUnreadable(res)) return;   // 전체 점검 29회차 F7: 등록부 손상이면 '없는 대상'(404)이 아니라 503(메인 GET 과 같은 문)
   const t = visibleById(req).get(String(req.params.id));
   if (!t) return res.status(404).json({ ok: false, code: 'not-found', reason: '없는 대상입니다.' });
   const g = testGate.get(t.id);
@@ -396,6 +406,7 @@ api.post('/tools/focus-mon/targets/:id/test', adminOnly, fullRwOnly, demoBlockWr
  *  · 시험은 시험 문턱(10초 · 진행 중 1건)을 같이 쓴다 — 문턱에 걸리면 정지만 풀고 시험은 건너뛴다.
  */
 api.post('/tools/focus-mon/targets/:id/retry', adminOnly, fullRwOnly, demoBlockWrite, async (req, res) => {
+  if (registryUnreadable(res)) return;   // 29회차 F7
   const t = visibleById(req).get(String(req.params.id));
   if (!t) return res.status(404).json({ ok: false, code: 'not-found', reason: '없는 대상입니다.' });
   logAudit({ user: req.user?.username, action: 'focus-mon.target.retry', target: t.name, ip: req.ip });
@@ -439,6 +450,7 @@ api.put('/tools/focus-mon/settings', adminOnly, fullRwOnly, demoBlockWrite, (req
 /* ── 수집 ─────────────────────────────────────────────────────────────────── */
 
 api.post('/tools/focus-mon/sessions', adminOnly, fullRwOnly, demoBlockWrite, (req, res) => {
+  if (registryUnreadable(res)) return;   // 29회차 F7
   const b = req.body || {};
   const vis = visibleById(req);
   const ids = (Array.isArray(b.targets) ? b.targets : []).map(String).slice(0, 200);
@@ -460,6 +472,7 @@ api.post('/tools/focus-mon/sessions', adminOnly, fullRwOnly, demoBlockWrite, (re
  * 수집 시작과 같은 문(관리자 · 조회 · 쓰기 전체 범위 · 데모 차단) · 보이는 대상만 · 꺼 둔 대상은 거절.
  */
 api.post('/tools/focus-mon/sessions/:id/targets', adminOnly, fullRwOnly, demoBlockWrite, (req, res) => {
+  if (registryUnreadable(res)) return;   // 29회차 F7
   const vis = visibleById(req);
   const ids = (Array.isArray(req.body?.targets) ? req.body.targets : []).map(String).slice(0, 200);
   const unknown = ids.filter((id) => !vis.has(id));
@@ -474,6 +487,7 @@ api.post('/tools/focus-mon/sessions/:id/targets', adminOnly, fullRwOnly, demoBlo
 
 /** 수집에서 서버 하나 빼기(서버별 ‘수집 종료’ · v2.979) — 마지막 서버면 그 수집이 끝난다. */
 api.delete('/tools/focus-mon/sessions/:id/targets/:tid', adminOnly, fullRwOnly, demoBlockWrite, (req, res) => {
+  if (registryUnreadable(res)) return;   // 29회차 F7
   const vis = visibleById(req);
   const tid = String(req.params.tid);
   if (!vis.has(tid)) return res.status(404).json({ ok: false, code: 'not-found', reason: '없는 대상입니다.' });
@@ -506,6 +520,7 @@ api.delete('/tools/focus-mon/sessions/:id', adminOnly, fullRwOnly, demoBlockWrit
  */
 const CMP_CHOICES = Object.freeze(['1d', '7d']);
 api.get('/tools/focus-mon/data', adminOnly, fullScopeOnly, async (req, res) => {
+  if (registryUnreadable(res)) return;   // 29회차 F7
   const view = String(req.query.view || 'overview');
   const w = Q.normWindow({ win: req.query.win, end: req.query.end }, Date.now(), { long: view !== 'iostat' });
   const { ids, missing } = pickIds(req, view === 'server' ? 1 : 40);
@@ -538,6 +553,7 @@ api.get('/tools/focus-mon/data', adminOnly, fullScopeOnly, async (req, res) => {
  * ‘무엇이 가장 변했나’(v3.13.0 ⑭ — 컨펌 ⑤): 고른 구간 vs 앞 4배 구간 — 서버 × 지표 점수 순 상위. 조회와 같은 문 · 보이는 대상만 · 단추로만 묻는다(화면 폴링 없음).
  */
 api.get('/tools/focus-mon/changes', adminOnly, fullScopeOnly, async (req, res) => {
+  if (registryUnreadable(res)) return;   // 29회차 F7
   const w = Q.normWindow({ win: req.query.win, end: req.query.end }, Date.now(), { long: true });
   const { ids, missing, vis } = pickIds(req, 40);
   if (!ids.length) return res.status(404).json({ ok: false, code: 'not-found', reason: '볼 대상이 없습니다(없는 대상이거나 고르지 않았습니다).' });
@@ -657,6 +673,7 @@ api.get('/tools/focus-mon/load', adminOnly, fullScopeOnly, async (req, res) => {
 
 /** 프로세스 상위 30 — 서버별 · 통합 · 이름별 묶음. 사용자 이름은 관리자 판본만 원문. */
 api.get('/tools/focus-mon/procs', adminOnly, fullScopeOnly, async (req, res) => {
+  if (registryUnreadable(res)) return;   // 29회차 F7
   const w = Q.normWindow({ win: req.query.win, end: req.query.end });
   const { ids, missing } = pickIds(req, 40);
   if (!ids.length) return res.status(404).json({ ok: false, code: 'not-found', reason: '볼 대상이 없습니다.' });
@@ -682,6 +699,7 @@ function alertRulesUnreadable(res) {
 }
 /** 알림 탭 — 규칙 · 지금 상태 · 지난 24시간 발생 · 해제 · 보류 · OOM · 커널 오류 표 · 자동 조절. 조회와 같은 문(admin + 전체 범위) · 보이는 대상만. */
 api.get('/tools/focus-mon/alerts', adminOnly, fullScopeOnly, async (req, res) => {
+  if (registryUnreadable(res)) return;   // 29회차 F7
   if (alertRulesUnreadable(res)) return; // 반증 M8 — 손상이면 200 + 빈 목록이 아니라 503(빈 목록을 '규칙 없음' 으로 보이지 않게)
   const now = Date.now();
   const vis = visibleById(req);
@@ -721,6 +739,7 @@ api.get('/tools/focus-mon/alerts', adminOnly, fullScopeOnly, async (req, res) =>
 const ruleWrite = (op) => (req, res) => {
   if (alertRulesUnreadable(res)) return;
   const body = req.body || {};
+  if (op !== 'delete' && body.scope?.kind === 'server' && registryUnreadable(res)) return;   // 29회차 F7
   if (op !== 'delete' && body.scope?.kind === 'server' && !visibleById(req).has(String(body.scope?.target || ''))) return res.status(404).json({ ok: false, code: 'not-found', reason: '없는 서버입니다.' });
   const r = AL.writeRule(op, op === 'create' ? body : { ...body, id: String(req.params.id || '') }, { by: req.user?.username || '' });
   if (!r.ok) return res.status(r.code === 'not-found' ? 404 : r.code === 'rules-unreadable' ? 503 : 400).json(r);
@@ -732,6 +751,7 @@ api.put('/tools/focus-mon/alerts/rules/:id', adminOnly, fullRwOnly, demoBlockWri
 api.delete('/tools/focus-mon/alerts/rules/:id', adminOnly, fullRwOnly, demoBlockWrite, ruleWrite('delete'));
 /** ‘지난 24시간에 걸었다면’(추정) — 서버 하나의 1분 요약으로. 조회 문 · 보이는 서버만 · 규칙은 저장하지 않는다(정제만). */
 api.post('/tools/focus-mon/alerts/preview', adminOnly, fullScopeOnly, async (req, res) => {
+  if (registryUnreadable(res)) return;   // 29회차 F7
   const body = req.body || {};
   const id = String(body.target || '');
   if (!visibleById(req).has(id)) return res.status(404).json({ ok: false, code: 'not-found', reason: '없는 서버입니다.' });
@@ -752,6 +772,7 @@ api.post('/tools/focus-mon/alerts/preview', adminOnly, fullScopeOnly, async (req
  * 프로세스 목록과 같은 문(admin · 전체 범위) · 보이는 대상만 · 사용자 이름은 관리자 판본만 원문 · 원본 구간(30분 이하)만.
  */
 api.get('/tools/focus-mon/apps', adminOnly, fullScopeOnly, async (req, res) => {
+  if (registryUnreadable(res)) return;   // 29회차 F7
   const w = Q.normWindow({ win: req.query.win, end: req.query.end });
   const { ids, missing } = pickIds(req, 40);
   if (!ids.length) return res.status(404).json({ ok: false, code: 'not-found', reason: '볼 대상이 없습니다.' });
@@ -766,6 +787,7 @@ api.get('/tools/focus-mon/apps', adminOnly, fullScopeOnly, async (req, res) => {
  * 같은 문(admin · 전체 범위 — 전 법인 서버의 프로세스) · 사용자 이름은 관리자 판본만 원문 · 그 구간의 상위 30 에 없었으면 404.
  */
 api.get('/tools/focus-mon/proc', adminOnly, fullScopeOnly, async (req, res) => {
+  if (registryUnreadable(res)) return;   // 29회차 F7
   const vis = visibleById(req);
   const id = String(req.query.target || '');
   if (!vis.has(id)) return res.status(404).json({ ok: false, code: 'not-found', reason: '볼 대상이 없습니다.' });
@@ -784,6 +806,7 @@ api.get('/tools/focus-mon/proc', adminOnly, fullScopeOnly, async (req, res) => {
 
 /** 기록이 있는 시간 — 그 날(포탈 기준 날짜) 또는 최근 24시간. */
 api.get('/tools/focus-mon/coverage', adminOnly, fullScopeOnly, async (req, res) => {
+  if (registryUnreadable(res)) return;   // 29회차 F7
   const { ids } = pickIds(req, 40);
   if (!ids.length) return res.status(404).json({ ok: false, code: 'not-found', reason: '볼 대상이 없습니다.' });
   const now = Date.now();
@@ -794,6 +817,7 @@ api.get('/tools/focus-mon/coverage', adminOnly, fullScopeOnly, async (req, res) 
 
 /** CSV — kind=series(지표 비교 한 줄씩) | iostat(장치 줄 × 13칸). 구간은 화면과 같다(지표 비교는 긴 구간도 — 요약 칸 평균 · iostat 은 30분까지). */
 api.get('/tools/focus-mon/export.csv', adminOnly, fullScopeOnly, csvPerm, async (req, res) => {
+  if (registryUnreadable(res)) return;   // 29회차 F7
   const lock = acquireExport('focus-mon', req);
   if (!lock.ok) return res.status(lock.status).json(lock.body);
   try {

@@ -255,7 +255,8 @@ export function pointsFor(store, rule, id, now) {
     for (const [, list] of store.memProcs(id)) for (const s of list) if (s.t >= from && s.apps) rows.push(s);
     const withAll = rows.some((s) => s.apps.all && typeof s.apps.all === 'object');
     for (const s of rows) {
-      if (withAll) { if (s.apps.all && typeof s.apps.all === 'object') { const v = Object.hasOwn(s.apps.all, rule.app) ? Number(s.apps.all[rule.app]) : 0; out.push([s.t, Number.isFinite(v) ? v : null]); } continue; }
+      // 29회차 F6: 목록이 잘린 표본(allCut)에서 없는 이름은 0(죽음)이 아니라 모름(null — 판정 보류)
+      if (withAll) { if (s.apps.all && typeof s.apps.all === 'object') { const v = Object.hasOwn(s.apps.all, rule.app) ? Number(s.apps.all[rule.app]) : (s.apps.allCut === true ? null : 0); out.push([s.t, Number.isFinite(v) ? v : null]); } continue; }
       if (!Array.isArray(s.apps.sv)) { out.push([s.t, null]); continue; } // 서비스 지도 없음 — 모름
       const a = s.apps.sv.find((x) => x.k === rule.app);
       out.push([s.t, a ? a.n : (s.apps.sv.length < 20 ? 0 : null)]);

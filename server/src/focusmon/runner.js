@@ -77,11 +77,17 @@ export function createRunner({ keys, sink, connect } = {}) {
       if (normInterval(d.interval) !== x.interval) { x.col.setInterval(d.interval); x.interval = normInterval(d.interval); }
       if (normProcEvery(d.procEvery) !== x.procEvery) { x.col.setProcEvery?.(d.procEvery); x.procEvery = normProcEvery(d.procEvery); }
     }
+    const wasLimited = new Map(limited);
     limited.clear();
     for (const [id, d] of want) {
       if (live.has(id)) continue;
       if (live.size >= MAX_STREAMS) {
-        limited.set(id, { state: 'limit', since: Date.now(), error: `이 노드의 동시 수집 상한(${MAX_STREAMS}대)을 넘어 시작하지 않았습니다.`, interval: normInterval(d.interval) });
+        const prev = wasLimited.get(id);
+        const st = prev || { state: 'limit', since: Date.now(), error: `이 노드의 동시 수집 상한(${MAX_STREAMS}대)을 넘어 시작하지 않았습니다.`, interval: normInterval(d.interval) };
+        limited.set(id, st);
+        // 전체 점검 29회차 F4(재현): limited 에만 넣고 sink 로 내보내지 않아 화면 · 엣지 본문에 'limit' 이 닿지 않았다(머리말 '조용히 빼지 않는다' 위반).
+        //   새로 막힌 대상만 한 번 알린다(틱마다 다시 쓰지 않게).
+        if (!prev) { try { sink?.status?.(id, { ...st }); } catch { /* 상태 전달 실패가 조정을 멈추지 않게 */ } }
         continue;
       }
       const t = { id, host: d.host, port: Number(d.port) || 22, username: d.username, demo: !!d.demo };

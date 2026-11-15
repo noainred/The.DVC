@@ -370,12 +370,14 @@ export function appGroups(curList, rows, { tck, dt, page = 4096, users, units, i
     return row;
   });
   let all = null;
+  let allCut = false;
   if (withAll && haveUnits) {
     all = {};
     let k = 0;
-    for (const g of acc.sv.values()) { if (g.k === APP_KERNEL || g.k === APP_SESSION || g.k === APP_NOSVC) continue; if (k >= APP_ALL_MAX) break; all[g.k] = g.n; k += 1; }
+    // 전체 점검 29회차 F6(재현): 상한에서 자를 때 표시가 없어, 잘려 빠진 살아 있는 서비스를 알림이 '0개(죽음)' 로 읽었다 — 잘렸으면 allCut
+    for (const g of acc.sv.values()) { if (g.k === APP_KERNEL || g.k === APP_SESSION || g.k === APP_NOSVC) continue; if (k >= APP_ALL_MAX) { allCut = true; break; } all[g.k] = g.n; k += 1; }
   }
-  return { sv: haveUnits ? fin(acc.sv) : null, cm: fin(acc.cm), ...(all ? { all } : {}) };
+  return { sv: haveUnits ? fin(acc.sv) : null, cm: fin(acc.cm), ...(all ? { all, ...(allCut ? { allCut: true } : {}) } : {}) };
 }
 
 /** 개요 카드 요약(서버 1대 · 표본 1개) — 화면 · 비교 · 정렬이 같은 값을 쓴다. */

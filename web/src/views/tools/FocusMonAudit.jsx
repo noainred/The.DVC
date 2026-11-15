@@ -7,7 +7,7 @@
  *  · 숫자는 프로그램이 찾은 줄 수 — 장애 횟수 아님. 끝까지 돌지 않은 회차는 ‘—’. 결과의 판정 글자([확정] · [추정] · [불명])는 프로그램 그대로.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { postJson, downloadFile } from '../../api.js';
+import { postJson, downloadFile, canCsv, CSV_DENIED_NOTE } from '../../api.js';
 import { ErrorBox, Loading } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { Seg, Badge, copyText } from './FocusMonBulk.jsx';
@@ -44,7 +44,7 @@ function GroupTable({ head, list, onOpen, onRun, busy, now }) {
 }
 
 /** 결과 — 판정 줄 · 디스크 · 읽은 자료 · 근거 · 해석 범위 · 회차 · 원문. */
-function Result({ row, now, labels }) {
+function Result({ row, now, labels, setMsg }) {
   const [runId, setRunId] = useState(row.last?.id || '');
   const [scopeOpen, setScopeOpen] = useState(false);
   useEffect(() => { setRunId(row.last?.id || ''); }, [row.id, row.last?.id]);
@@ -78,7 +78,8 @@ function Result({ row, now, labels }) {
         <div className="fm-row">
           <span className="fm-lbl">회차</span>
           {(runsQ.data?.runs || [row.last]).map((x) => <button key={x.id} type="button" className={`fm-chip ${x.id === runId ? 'on' : ''}`} aria-pressed={x.id === runId} title={x.oldEndpoint ? '접속처(주소 · 포트 · 계정 · 담당 노드)가 바뀌기 전의 회차' : undefined} onClick={() => setRunId(x.id)}>{whenText(x.at, now)}{x.oldEndpoint ? ' · 예전 접속처' : ''}</button>)}
-          <button type="button" className="fm-btn sm" onClick={() => downloadFile(`/tools/focus-mon/audit/run/${encodeURIComponent(runId)}/report.txt`).catch(() => {})}>보고서 원문 받기(.txt)</button>
+          {/* 전체 점검 29회차 F8: 라우트가 data.csv 권한을 요구한다 — 권한이 없으면 단추 대신 안내, 실패는 삼키지 않고 알린다 */}
+          {canCsv() ? <button type="button" className="fm-btn sm" onClick={() => downloadFile(`/tools/focus-mon/audit/run/${encodeURIComponent(runId)}/report.txt`).catch((e) => setMsg?.({ tone: 'bad', text: e?.body?.reason || e?.message || '보고서를 받지 못했습니다.' }))}>보고서 원문 받기(.txt)</button> : <span className="fm-dim" title={CSV_DENIED_NOTE}>보고서 원문 받기 — 데이터 내보내기 권한 없음</span>}
         </div>
       </div>
       <span className="fm-dim fm-pad-x">{whenText(run.at, now)} · 걸린 시간 {durText(s.ms ?? (run.ended && run.at ? run.ended - run.at : null))} · 실행 노드 {nodeText(run.node)} · 프로그램 판본 {run.ver || DASH} · 실행한 사람 {run.by || DASH}{s.outBytes ? ` · 출력 ${Math.round(s.outBytes / 1024).toLocaleString('ko-KR')} KB` : ''}{s.truncated ? ' · 출력이 커서 구획마다 일부를 생략해 보관' : ''}</span>
@@ -291,10 +292,10 @@ export function AuditTab({ setMsg }) {
         ) : null}
         <span className="fm-dim fm-pad">숫자는 프로그램이 찾은 <b>기록 줄 수</b>이지 장애 횟수가 아닙니다(같은 일이 여러 로그에 겹쳐 남습니다). ‘—’ 는 점검하지 않았거나 끝까지 돌지 않은 것이고 0 과 다릅니다. 0 도 ‘과거에 문제가 없었다’ 가 아니라 ‘남아 있는 자료에서 찾지 못했다’ 입니다. 디스크는 식별자(시리얼 · WWN)로 하나씩 세고, 식별자가 없는 기록은 디스크 모델 집계에 넣지 않습니다. 점검은 단추를 누를 때만 돕니다(주기 실행 없음 · 같은 서버는 {d.limits.runGapMin}분에 한 번).</span>
       </div>
-      {selRow ? <Result row={selRow} now={now} labels={labels} /> : <div className="fm-card fm-empty">표의 서버 줄을 누르면 그 서버의 점검 결과가 여기에 나옵니다.</div>}
+      {selRow ? <Result row={selRow} now={now} labels={labels} setMsg={setMsg} /> : <div className="fm-card fm-empty">표의 서버 줄을 누르면 그 서버의 점검 결과가 여기에 나옵니다.</div>}
       <div className="fm-grid2">
         <div className="fm-card fm-pad fm-col">
-          <div className="fm-row fm-between"><h3 className="fm-h3">대상 서버 준비 — 서버마다 한 번 · root 로</h3><div className="fm-row"><span className="fm-badge off">판본 {d.version.program || DASH}</span><button type="button" className="fm-btn sm" onClick={() => downloadFile('/tools/focus-mon/audit/install.sh').catch(() => {})}>설치 파일 받기</button><button type="button" className="fm-btn sm" aria-expanded={showInstall} onClick={() => setShowInstall(!showInstall)}>{showInstall ? '명령 접기' : '명령 보기'}</button></div></div>
+          <div className="fm-row fm-between"><h3 className="fm-h3">대상 서버 준비 — 서버마다 한 번 · root 로</h3><div className="fm-row"><span className="fm-badge off">판본 {d.version.program || DASH}</span><button type="button" className="fm-btn sm" onClick={() => downloadFile('/tools/focus-mon/audit/install.sh').catch((e) => setMsg?.({ tone: 'bad', text: e?.body?.reason || e?.message || '설치 파일을 받지 못했습니다.' }))}>설치 파일 받기</button><button type="button" className="fm-btn sm" aria-expanded={showInstall} onClick={() => setShowInstall(!showInstall)}>{showInstall ? '명령 접기' : '명령 보기'}</button></div></div>
           <ol className="fm-list">
             <li>‘설치 파일 받기’ 로 받은 파일을 대상 서버에 올립니다(점검 프로그램 원본 · 실행 파일 · sudoers 한 줄이 한 파일에 들어 있습니다).</li>
             <li>root 로 <b>sh dvc-disk-audit-install.sh 수집계정</b> — 두 파일을 root 소유 고정 경로에 두고, 수집 계정이 <b>그 실행 파일 하나만 · 인자 없이</b> root 로 실행하도록 sudoers 에 한 줄을 넣습니다(visudo 검사 뒤).</li>
