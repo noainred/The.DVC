@@ -150,6 +150,17 @@ const STORE_LIMITS = Object.freeze({
   rawDays: [7, 365, false], hourlyDays: [30, 730, false], devRawDays: [1, 60, false], devHourlyDays: [7, 365, false],
   deviceMax: [1, 256, false], blkqMax: [1, 1_024, false], peakWindowS: [0, 30, false], peakCycleRatio: [0.3, 0.95, true], portTolPct: [0.5, 100, true],
 });
+/**
+ * 점검 반복 2회차 재확인 R3: 피크 창 길이(초) 값 하나를 **설정이 허용하는 범위의 정수**로 — 그 밖이면 null(지어내지 않는다 · 상한은 STORE_LIMITS 하나).
+ *   엣지 장치 응답의 행 값(peakWindowS) · 설정 상한(peakWindowCapS)을 중앙이 정제할 때 쓴다(central/bmUsageEdgePull.js sanitizeDevicesBody).
+ *   수 또는 10진 숫자 글자만 받는다 — ‘1e9’ · ‘0x10’ · 30.5 · 음수 · 불리언 · 배열은 null(엣지가 보낸 것은 정제한다 — 루트 규약 ‘문자열 수치는 수로’ 는 10진 표기만).
+ */
+export function peakWindowSOf(v) {
+  const [min, max] = STORE_LIMITS.peakWindowS;
+  const x = typeof v === 'number' ? v : (typeof v === 'string' && /^\d{1,6}$/.test(v.trim()) ? Number(v.trim()) : NaN);
+  return Number.isInteger(x) && x >= min && x <= max ? x : null;
+}
+
 /** 저장 구조 설정 정규화(순수) — 모르는 키는 버리고, 빈 칸은 기본값(clampSetting 규약). sha256 은 64자리 16진수만(아니면 ''). */
 export function normalizeStoreSettings(raw = {}) {
   const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};

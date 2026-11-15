@@ -39,7 +39,7 @@ function downloadText(text, name) {
  * @param {{itemKey:string, name?:string, init:{kind,metric,dev,rangeK,show,sel}, devices?:object, keepDays?:object|null, anchor?:number,
  *   initWin?:{from:number,to:number}|null, peakWindowS?:number|null, onClose:()=>void, onSel?:(sel)=>void, narrowOverride?:boolean}} p
  */
-export default function BmTrendPopup({ itemKey, vc = '', name = '', init = {}, devices = {}, keepDays = null, anchor = null, initWin = null, peakWindowS = null, onClose, onSel, narrowOverride = null }) {
+export default function BmTrendPopup({ itemKey, vc = '', name = '', init = {}, devices = {}, keepDays = null, anchor = null, initWin = null, peakWindowS = null, peakWindowCapS = null, onClose, onSel, narrowOverride = null }) {
   // ⚠ 훅은 전부 조기 return 위.
   const [spec, setSpec] = useState(() => ({ kind: init.kind || 'server', metric: init.metric || 'cpu_pct', dev: init.dev || '' }));
   const [rangeK, setRangeK] = useState(() => trendRangeOf(init.rangeK).k);
@@ -121,7 +121,7 @@ export default function BmTrendPopup({ itemKey, vc = '', name = '', init = {}, d
   const pctX = (ms) => ((ms - win.from) / (win.to - win.from)) * 100;
   const yTicks = [0, 0.25, 0.5, 0.75, 1].map((r) => ({ r, v: yMax * r }));
   const title = `${spec.dev ? `${spec.dev} · ` : ''}${info.label} — ${show === 'avg' ? '평균' : show === 'peak' ? '피크' : '평균 · 피크'}`;
-  const srcText = peakSrcText(d?.peakSrc || [], peakWindowS);
+  const srcText = peakSrcText(d?.peakSrc || [], peakWindowS, peakWindowCapS);
 
   return (
     <div className="bmt-pop-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>

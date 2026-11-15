@@ -25,6 +25,7 @@ import { strOf } from '../../util/coercionTrap.js';
 import { resolvePerfTarget, perfTargetFail, perfVcOf, bmAddressHosts, perfAddressMatcher } from './bmUsage.js';
 import { isOwnerTier } from './bmOnboard.js';
 import { createYielder } from '../../util/timeSlice.js';
+import { bmGates } from './bmWriteGate.js'; // 점검 반복 2회차 재확인 R4 — 쓰기 버튼 표지(데모 · 역할)
 
 const toolsPerm = requirePerm('tools');
 const writeRole = requireRole('admin', 'operator');
@@ -159,6 +160,8 @@ export async function bmMaintList(req, snap, deps = {}) {
   if (!isAdmin) { const tg = await D.currentTargets().catch(() => ({ targets: [] })); ({ match } = await perfAddressMatcher(D, tg)); }
   const maskName = (nm) => (isAdmin ? nm : (match && match(nm) ? maskedIdToken(nm) : String(nm).replace(IPV4_RE, (ip) => maskedIdToken(ip))));
   const owner = await D.ownerTier(req);
+  // 점검 반복 2회차 재확인 R4: 행 버튼 표지에 데모 · 역할(bmGate — authMiddleware 의 데모 거부 · 라우트 writeRole 과 같은 판정)을 더한다 — 데모 계정은 쓰기 범위가 넓어 행 버튼이 열리고 누르면 403 이었다.
+  const g = bmGates(req, ['maintCreate', 'maintEdit', 'maintEnd', 'maintConfirm', 'maintDelete'], { snap });
   const writable = (w) => w.origin !== 'central' && inUserWriteScope(req.user, snap, w.vcenterId);
   const view = (w) => {
     const st = J.windowStatus(w, now);
@@ -172,8 +175,8 @@ export async function bmMaintList(req, snap, deps = {}) {
       durationMin: ST.durationMinOf(w.schedule, w.tz), by: w.by, at: w.at, approvedBy: w.approvedBy || '', confirmedAt: w.confirmedAt ?? null,
       ...(w.endedAt != null ? { endedAt: w.endedAt, endedBy: w.endedBy || '' } : {}),
       counts: counts[w.id] || null, needOwner,
-      canEdit: writable(w) && (!needOwner || owner), canEnd: writable(w) && st.status === 'active', canDelete: writable(w),
-      canConfirm: writable(w) && w.schedule.kind !== 'once' && (!needOwner || owner),
+      canEdit: g.maintEdit.ok && writable(w) && (!needOwner || owner), canEnd: g.maintEnd.ok && writable(w) && st.status === 'active', canDelete: g.maintDelete.ok && writable(w),
+      canConfirm: g.maintConfirm.ok && writable(w) && w.schedule.kind !== 'once' && (!needOwner || owner),
       edits: (w.edits || []).slice(-5),
     };
   };
@@ -193,6 +196,7 @@ export async function bmMaintList(req, snap, deps = {}) {
     summary: { active: rows.filter((r) => r.status === 'active').length, scheduled: rows.filter((r) => r.status === 'scheduled').length, ended: rows.filter((r) => r.status === 'ended').length, expired: rows.filter((r) => r.status === 'expired').length },
     leak: s.leak, ownerTier: owner, ...(dep ? { deployed: { at: dep.at, sig: dep.sig, n: dep.items.length, ...(dep.unreadable ? { unreadable: true } : {}), stale: ST.deployedStale(dep, now) } } : {}),
     limits: { onceMaxMin: S.ONCE_MAX_MIN, recurMaxMin: S.RECUR_MAX_MIN, ownerOverMin: ST.OWNER_OVER_MIN, keysMax: ST.KEYS_MAX, confirmDays: J.RECUR_CONFIRM_DAYS, deployTtlMs: ST.DEPLOY_TTL_MS },
+    actions: { create: g.maintCreate },   // 재확인 R4: ‘새 창’ 표지(데모 · 역할 — 법인 · 소유자 등급은 저장 때 라우트가 다시 본다)
     scopes: J.SCOPES, defaultTz: S.DEFAULT_TZ, ...(deploy ? { deploy: { ...deploy, minEdgeVersion: await D.minEdgeVersion().catch(() => null) } } : {}), ...(isAdmin ? {} : { addressHidden: true }),
   };
 }

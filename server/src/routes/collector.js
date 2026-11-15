@@ -189,7 +189,7 @@ async function bmTrendCollector(req, res, mode) {
     const { loadBmUsageSettings } = await import('../bmusage/settings.js');
     const agent = config.agent?.name || '';
     const s = loadBmUsageSettings();
-    const r = mode === 'devices' ? await q.devicesFor({ agent, key }) : mode === 'nics' ? await q.nicLatestFor({ agent, key, intervalMs: s.intervalMs })
+    const r = mode === 'devices' ? await q.devicesFor({ agent, key, settings: s }) : mode === 'nics' ? await q.nicLatestFor({ agent, key, intervalMs: s.intervalMs })
       : await q.trendFor({ agent, key, q: req.query || {}, settings: s });
     if (r && r.__status) { const { __status, ...rest } = r; return res.status(__status).json(rest); }
     res.json(r);

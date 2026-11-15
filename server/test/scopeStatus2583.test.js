@@ -110,7 +110,8 @@ test('#3·#4·#5 — bm-usage 설정·상태 범위/역할 · 수동 수집 전�
   assert.equal(scopeEdgeSettings(s, new Set(['vc-a'])).corpsCount, 2, 'corps 맵 개수를 센다(예전엔 늘 null)');
   const src = fs.readFileSync(new URL('../src/routes/api/bmUsage.js', import.meta.url), 'utf8');
   const col = src.slice(src.indexOf("api.post('/tools/bm-usage/collect'"));
-  assert.match(col.slice(0, 600), /if \(scopedVcenterIds\(req\.user, store\.get\(\)\)\) \{\s*return res\.status\(403\)/);
+  // 점검 반복 2회차 재확인 R1: 전체 범위 = 조회 ∧ 쓰기(isFullReadWriteScope — 조회만 보면 쓰기만 좁힌 계정이 지나갔다)
+  assert.match(col.slice(0, 700), /if \(!isFullReadWriteScope\(req\.user, store\.get\(\)\)\) \{\s*return res\.status\(403\)/);
   const ins = fs.readFileSync(new URL('../src/routes/insights.js', import.meta.url), 'utf8');
   assert.match(ins, /\|vc:\$\{String\(req\.query\.vcenterId \|\| ''\)\}`;/);
 });

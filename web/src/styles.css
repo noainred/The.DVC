@@ -3650,6 +3650,8 @@ table.bmf-t mark { background: rgba(250, 204, 21, .28); color: #fef08a; border-r
 @media (max-width: 640px) {
   .bmp-seg { width: 100%; }
   .bmp-seg button { flex: 1 1 0; min-height: 44px; white-space: normal; line-height: 1.25; padding: 4px 6px; }
+  /* 점검 반복 2회차 E5: 함대 보기 탭(10개)도 상세 탭(bmOps.css .bmp-seg-tabs)과 같은 규칙 — 한 줄 4개 줄바꿈(한 줄에 몰면 탭마다 한 글자씩 세로로 쌓였다) · 낱말 안에서 끊지 않는다(‘매트릭/스’). */
+  .bmp-seg.bmp-seg-top button { flex: 1 1 calc(25% - 1px); border-left: 0; border-top: 1px solid var(--border); word-break: keep-all; }
   .bmp-touch { min-height: 44px; }
   .bmp-top-item { grid-template-columns: minmax(0, 1fr); }
   .bmp-kv { grid-template-columns: minmax(0, 1fr); }

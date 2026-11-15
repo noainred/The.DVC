@@ -29,6 +29,7 @@ import AnnotationsCard, { useAnnotations } from './BmAnnotations.jsx';
 import { annotMarks } from './bmAnnotText.js';
 import { violationBands } from './bmRunbookText.js'; // 6단계 목표선 위반 띠(서버 판정 그대로)
 import BmTrendPopup from './BmTrendPopup.jsx';
+import { windowRangeText } from '../../components/vmperf/vmPerfText.js'; // 점검 반복 2회차 I1 — 창 문구(날짜 포함 · 공용 코어)
 import {
   TREND_RANGES, trendRangeOf, SHOW_MODES, showAvg, showPeak, metricInfo, PANEL_ROWS, SOCKET_NOTE, SOURCE_TAGS, SOURCE_ORDER, RECO_TILES,
   SECOND_COLORS, recoMetrics, resText, resHint, peakSrcText, trendNotes, trendErrorText, valText, yMaxFor, noPeakRuns, nearestPoint,
@@ -223,7 +224,7 @@ export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays
   const res = headData?.res || null;
   const notes = trendNotes(headData || {});
   const peakSrcs = [...new Set([...(headData?.peakSrc || []), ...wanted.flatMap((s) => dataOf(s)?.peakSrc || [])])];
-  const pSrcText = peakSrcText(peakSrcs.length ? peakSrcs : (devs.data?.peakSrc ? [devs.data.peakSrc] : []), devs.data?.peakWindowS);
+  const pSrcText = peakSrcText(peakSrcs.length ? peakSrcs : (devs.data?.peakSrc ? [devs.data.peakSrc] : []), devs.data?.peakWindowS, devs.data?.peakWindowCapS);
   const loadingN = Object.values(series).filter((v) => v.status === 'loading').length;
   const err403 = headErr?.error?.status === 403 ? headErr.error : null;
   const setRange = (k) => { setRangeK(k); setClock((c) => ({ at: Date.now(), n: c.n })); };
@@ -235,7 +236,7 @@ export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays
     return { ...p, [which]: { ...p[which], ...patch } };
   });
   const tgNow = tg.linked || tg.editing === 'avg' ? tg.avg : tg.peak;
-  const selText = sel ? `${whenText(sel.from, span)} ~ ${whenText(sel.to, span)} (선택)` : '';
+  const selText = sel ? `${windowRangeText(sel.from, sel.to)} (선택)` : '';   // 점검 반복 2회차 I1: 날짜를 붙인 공용 코어(팝업 칩과 같은 글자)
 
   /** 패널 한 장. */
   const renderPanel = (which) => {
@@ -346,7 +347,8 @@ export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays
       </div>
       <div className="bmt-meta">
         <span className="bmp-chip">{headData ? resText(headData) : '해상도 —'}</span>
-        <span>{`${whenText(win.from, span)} ~ ${whenText(win.to, span)} · 서버가 창 · 해상도 · 결측을 정합니다`}</span>
+        {/* 점검 반복 2회차 I1: 창 문구는 날짜를 붙인 공용 코어(vmPerfText.windowRangeText — 팝업과 같은 글자) · 24시간 창이 ‘01:24 ~ 01:24’ 로 길이 0 처럼 읽혔다. 축 눈금은 그대로 whenText. */}
+        <span>{`${windowRangeText(win.from, win.to)} · 서버가 창 · 해상도 · 결측을 정합니다`}</span>
       </div>
       {res && <p className="bmt-note">{resHint(res)}</p>}
       {notes.map((x, i) => <p key={i} className="bmt-note"><BoldText text={x} /></p>)}
@@ -382,7 +384,7 @@ export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays
 
       {/* ── v2.929(5단계): 베이스라인 띠 · 변경 이벤트 · 집중 1분 점 · 구간 비교 ── */}
       <BaselineOverlay itemKey={itemKey} vc={vcenterId} win={win} changes={changes.data && changes.data.ok !== false ? changes.data : null} narrow={narrow} annotMarks={anMarks} maintBands={mb} />
-      <AnnotationsCard itemKey={itemKey} name={name} vcenterId={vcenterId} sel={sel} list={ann.list} err={ann.err} onChanged={() => setAnnTick((v) => v + 1)} />
+      <AnnotationsCard itemKey={itemKey} name={name} vcenterId={vcenterId} sel={sel} list={ann.list} err={ann.err} actions={ann.actions} onChanged={() => setAnnTick((v) => v + 1)} />
       {changes.err && <p className="bmt-note" style={{ color: toneVar('warn') }}>변경 이벤트를 읽지 못했습니다: {trendErrorText(changes.err)}</p>}
       <div className="bmt-ctl">
         <button type="button" className="btn btn-sm bmp-touch" aria-expanded={cmpOn} onClick={() => setCmpOn((v) => !v)}>{cmpOn ? '구간 비교 닫기' : '구간 비교(A/B) 열기'}</button>
@@ -690,7 +692,7 @@ export default function BmTrendTab({ itemKey, name = '', latest = null, keepDays
 
       {pop && (
         <BmTrendPopup itemKey={itemKey} vc={vcenterId} name={name} init={pop} devices={devices} keepDays={keepDays} anchor={clock.at}
-          initWin={pop.rangeK === rangeK ? win : null} peakWindowS={devs.data?.peakWindowS ?? null}
+          initWin={pop.rangeK === rangeK ? win : null} peakWindowS={devs.data?.peakWindowS ?? null} peakWindowCapS={devs.data?.peakWindowCapS ?? null}
           onClose={() => setPop(null)} onSel={(s) => setSel(s)} />
       )}
     </div>

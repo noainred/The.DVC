@@ -6,7 +6,7 @@
  * ⚠ 저장 결과는 r?.ok === false 로 검사(sendJson 은 400 · 409 를 던지지 않는다 — postJson 은 409 만). 조회는 창이 바뀔 때 1회(폴링 없음).
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson, postJson, putJson, delJson, hasRole } from '../../api.js';
+import { fetchJson, postJson, putJson, delJson } from '../../api.js';
 import { ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
@@ -15,23 +15,26 @@ import {
   ANNOT_KIND_TEXT, ANNOT_KIND_SHORT, TARGET_TYPE_TEXT, annotWhenText, annotTargetText, annotLinks, annotBody, annotEditPatch, localInputOf, msOfLocalInput, ANNOT_HONEST,
 } from './bmAnnotText.js';
 import './bmStage6.css';
+import { gateOk, gateShown, gateWhy } from './bmWriteText.js'; // 점검 반복 2회차 E2⑤ — 서버 쓰기 표지(actions.create)
 
 /**
  * 창의 주석 — keys(서버 키들) · from/to. 늦게 온 이전 창 응답은 버린다.
  * 다음 점검 ①: vcs = keys 와 같은 순서의 법인(서버 = (법인, 키) 쌍 — 같은 키 다른 법인 서버의 주석이 섞이지 않게 · 비면 서버가 정한다).
  */
 export function useAnnotations(keys = [], win = null, tick = 0, vcs = []) {
-  const [st, setSt] = useState({ list: [], err: null, loading: false });
+  const [st, setSt] = useState({ list: [], err: null, loading: false, actions: null });
   const gen = useRef(0);
   const vcList = keys.map((_, i) => String(vcs?.[i] || ''));
-  const sig = `${keys.join(',')}|${vcList.join(',')}|${Math.floor(win?.from || 0)}|${Math.floor(win?.to || 0)}|${tick}`;
+  const who = `${keys.join(',')}|${vcList.join(',')}`;   // 어느 서버들인가(쓰기 표지는 서버에 딸린다 — 창 · 시계가 바뀌어도 같은 서버면 유지)
+  const sig = `${who}|${Math.floor(win?.from || 0)}|${Math.floor(win?.to || 0)}|${tick}`;
   useEffect(() => {
-    if (!keys.length || !win) { setSt({ list: [], err: null, loading: false }); return; }
+    if (!keys.length || !win) { setSt({ list: [], err: null, loading: false, actions: null }); return; }
     const g = ++gen.current;
-    setSt((p) => ({ ...p, loading: true, err: null }));
+    // 쓰기 표지는 같은 서버들의 것만 이어 쓴다 — 다른 서버로 바뀌면 비운다(앞 서버의 표지로 버튼을 열지 않게 · 창 이동마다 깜박이지 않게).
+    setSt((p) => ({ ...p, loading: true, err: null, actions: p.who === who ? p.actions : null, who }));
     fetchJson('/tools/bm-usage/annotations', { keys: keys.join(','), ...(vcList.some(Boolean) ? { vcenterIds: vcList.join(',') } : {}), from: Math.floor(win.from), to: Math.floor(win.to) }, undefined, { timeoutMs: 30_000 })
-      .then((r) => { if (g === gen.current) setSt({ list: r.annotations || [], err: null, loading: false }); })
-      .catch((e) => { if (g === gen.current) setSt({ list: [], err: e, loading: false }); });
+      .then((r) => { if (g === gen.current) setSt({ list: r.annotations || [], err: null, loading: false, actions: r.actions || null, who }); })
+      .catch((e) => { if (g === gen.current) setSt({ list: [], err: e, loading: false, actions: null, who }); });   // 못 읽었으면 쓰기 표지도 없다 — 버튼을 닫는다
   }, [sig]); // eslint-disable-line react-hooks/exhaustive-deps
   return st;
 }
@@ -61,8 +64,10 @@ export function AnnotTable({ list = [], onEdit, onDelete }) {
 /**
  * @param {{itemKey:string, name?:string, vcenterId?:string, win:{from,to}, sel?:{from,to}|null, list:Array, err?:any, onChanged:()=>void, extraKeys?:string[]}} p
  */
-export default function AnnotationsCard({ itemKey, name = '', vcenterId = '', sel = null, list = [], err = null, onChanged }) {
-  const canWrite = hasRole('admin', 'operator');
+export default function AnnotationsCard({ itemKey, name = '', vcenterId = '', sel = null, list = [], err = null, actions = null, onChanged }) {
+  // 점검 반복 2회차 E2⑤: ‘주석 추가’ 는 서버 표지(actions.create — 쓰기 라우트와 같은 판정: 데모 · 역할 · 그 서버 법인의 쓰기 범위)로만 연다.
+  const cg = actions?.create;
+  const canWrite = gateOk(cg);
   const [form, setForm] = useState(null);   // { id?, at, end, kind, text, target:'server'|'corp', issue, wikiSpace, wikiId }
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -99,6 +104,7 @@ export default function AnnotationsCard({ itemKey, name = '', vcenterId = '', se
         {canWrite && !form && <button type="button" className="btn btn-sm bmp-touch" onClick={openNew}>주석 추가{sel ? '(선택 구간)' : ''}</button>}
       </div>
       {err && (err.status === 403 ? <ErrorBox error={err} /> : <p className="bmo-note" style={{ color: toneVar('warn') }}>주석을 읽지 못했습니다: {err.message || String(err)}</p>)}
+      {!err && gateShown(cg) && !canWrite && gateWhy(cg) && <p className="bmo-note">주석 추가 — {gateWhy(cg)}.</p>}
       {form && (
         <div className="bmr-grid" style={{ marginBottom: 8 }}>
           <label>시각<input className="input" type="datetime-local" value={form.at} onChange={(e) => setForm({ ...form, at: e.target.value })} /></label>

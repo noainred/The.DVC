@@ -9,7 +9,7 @@
  * ⚠ ‘못 읽음’ 은 0 이 아니다: 데이터 부족 · 불안정 · 상한 없음 · 계산 결과 없음(엣지 구버전 · 아직 계산 전 · 손상)을 각각 센다 — ‘예측 없음 = 안전’ 으로 보이지 않게.
  */
 import { requireRole, requirePerm } from '../../auth/auth.js';
-import { scopedVcenterIds } from '../../auth/scope.js';
+import { scopedVcenterIds, isFullReadWriteScope } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { config } from '../../config.js';
@@ -17,6 +17,7 @@ import { isAdminReq, maskedIdToken } from '../../auth/addressMask.js';
 import { currentTargets } from '../../bmusage/poller.js';
 import { strOf } from '../../util/coercionTrap.js';
 import { resolvePerfTarget, perfTargetFail, perfVcOf, bmAddressHosts, perfAddressMatcher } from './bmUsage.js';
+import { bmGate } from './bmWriteGate.js';
 
 const toolsPerm = requirePerm('tools');
 const writeRole = requireRole('admin', 'operator');
@@ -76,6 +77,8 @@ export async function bmCapacityFleet(req, snap, deps = {}) {
     ok: true, now, rows: out.slice(0, 20_000), truncated: out.length > 20_000, summary: C.summarize(visible, { soonDays: days, monthDays: 30 }),
     sources: allowed ? sources.filter((s) => shownNodes.has(s.node)) : sources, cfg: { ...C.CAP_DEFAULTS, targetPct: rules.capacity?.targetPct ?? C.CAP_DEFAULTS.targetPct, minDays: rules.capacity?.minDays ?? C.CAP_DEFAULTS.minDays, alertDays: days, recomputeAfterMin: C.RECOMPUTE_AFTER_MIN },
     minEdgeVersion: await D.minEdgeVersion().catch(() => null), ...(isAdmin ? {} : { addressHidden: true }),
+    // 점검 반복 2회차 E2②: ‘이 노드 다시 계산’ 표지 — 라우트(운영자 이상 · 전체 범위 · 데모 거부)와 같은 판정.
+    actions: { recompute: bmGate(req, 'capacityRecompute', { snap }) },
   };
 }
 
@@ -89,16 +92,18 @@ export async function bmCapacityDetail(req, snap, deps = {}) {
   if (bad) return bad;
   const rules = await D.rules().catch(() => ({}));
   const cfg = { targetPct: rules.capacity?.targetPct, minDays: rules.capacity?.minDays };
+  // 점검 반복 2회차 I3: ‘소진 임박’ 기준 일수(함대 표 cfg.alertDays 와 같은 값) — 화면이 예측 색을 임박일 때만 주의로 칠한다(숫자를 화면에 박지 않는다).
+  const alertDays = rules.capacity?.days ?? 7;
   if (f.via === 'edge') {
     const r = await D.pullEdgeCapacity(f.agent, f.realKey);
     if (!r.ok) return { ok: false, key, via: 'edge', agent: f.agent, kind: r.kind || 'error', reason: r.reason || '엣지에서 용량 예측을 읽지 못했습니다.' };
-    return { ...r.body, key, via: 'edge', agent: f.agent };
+    return { ...r.body, key, via: 'edge', agent: f.agent, alertDays };
   }
   const C = await D.capacity();
   const now = D.now();
   const judge = await D.maintJudge(now).catch(() => null);
   const r = await C.computeServer({ agent: f.agent, target: f.target, now, cfg, judge, series: true });
-  return { ...r, key, via: 'local' };
+  return { ...r, key, via: 'local', alertDays };
 }
 
 export function registerBmCapacity(api, deps = {}) {
@@ -109,7 +114,8 @@ export function registerBmCapacity(api, deps = {}) {
   api.post('/tools/bm-usage/capacity/recompute', writeRole, toolsPerm, async (req, res) => {
     try {
       // 전 법인 대상 계산이라 전체 범위만(범위 계정이 다른 법인 계산을 일으키지 않게 — fullScopeOnly 와 같은 판단).
-      if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, code: 'full-scope-only', reason: '다시 계산은 전체 범위(vCenter 제한 없는) 계정만 할 수 있습니다.' });
+      // 점검 반복 2회차 재확인 R1: 조회 ∧ 쓰기 전체 범위(isFullReadWriteScope — 표지 bmGate 와 같은 함수 · 조회만 보면 쓰기만 좁힌 계정이 지나갔다).
+      if (!isFullReadWriteScope(req.user, store.get())) return res.status(403).json({ ok: false, code: 'full-scope-only', reason: '다시 계산은 조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 계정만 할 수 있습니다.' });
       const C = await deps0(deps).capacity();
       const r = await C.recomputeCapacity({ force: true });
       logAudit({ user: req.user?.username, action: 'bm-perf.capacity.recompute', target: config.agent?.name || 'local', ip: req.ip || '', detail: JSON.stringify({ ok: !!r.ok, rows: r.rows ?? null }).slice(0, 200) });

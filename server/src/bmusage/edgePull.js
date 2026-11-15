@@ -26,7 +26,7 @@ import { currentTargets, bmUsageStatus, authStopsFor, collectHealthNow } from '.
 import { COLLECT_HEALTH_VER, hourlyTrend } from './collectHealth.js';
 import { latestUsage } from './db.js';
 import { buildPerfEntry, PERF_COL_META, compactPerfEntry } from './perfView.js';
-import { hwFactsReader } from './hwFacts.js';
+import { hwFactsReader, invCapState } from './hwFacts.js';
 import { freshMsFor } from './useJudge.js';
 import { getInventory } from '../idrac/invCache.js';   // 다음 점검 ③ 서버별 PowerCap(인벤토리 캐시 — 장비 왕복 0)
 
@@ -178,11 +178,11 @@ export function envelopePowerCaps(targets = [], keys = new Set(), { inventoryOf 
       const key = t(tg?.key); const regId = t(tg?.idrac?.regId);
       if (!key || !keys.has(key) || !regId) continue;
       let inv = null; try { inv = get(regId); } catch { inv = null; }
-      const pc = inv && typeof inv === 'object' ? inv.powerCap : null;
-      if (!pc || typeof pc !== 'object') continue;
-      const lw = Number(pc.limitWatts);
+      // 점검 반복 2회차 E3: 판정은 hwFacts invCapState 하나(하드웨어 U · 중앙 전력 보기와 같은 함수) — PowerLimit 미보고(unread)는 싣지 않는다.
+      const cs = invCapState(inv);
+      if (cs.state === 'unread') continue;
       const at = Number(inv.collectedAt);
-      list.push({ key, limitWatts: Number.isFinite(lw) && lw > 0 ? Math.round(lw) : null, enabled: Number.isFinite(lw) && lw > 0, at: Number.isFinite(at) && at > 0 ? at : null });
+      list.push({ key, limitWatts: cs.state === 'set' ? Math.round(cs.limitWatts) : null, enabled: cs.state === 'set', at: Number.isFinite(at) && at > 0 ? at : null });
     }
     out.powerCaps = list;
   } catch { /* 표지만 — 중앙은 값 없음으로 본다 */ }

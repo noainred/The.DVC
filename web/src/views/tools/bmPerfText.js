@@ -32,7 +32,8 @@ export const CODE_INFO = Object.freeze({
   warn: { short: '주의', tone: 'warn', rank: 2, judged: true },
   bad: { short: '초과', tone: 'bad', rank: 3, judged: true },
   missing: { short: '—', mark: '¹', tone: 'idle', rank: 0, judged: false, label: '못 읽음' },
-  none: { short: '—', mark: '²', tone: 'idle', rank: 0, judged: false, label: '그 커널에 없음' },
+  // 점검 반복 2회차 E3: ‘해당 없음’ 은 커널(PSI 없음)만이 아니라 장비(PowerCap 꺼짐)에도 쓴다 — 근거 한 줄은 basisText 가 항목별로(NONE_BASIS_TEXT).
+  none: { short: '—', mark: '²', tone: 'idle', rank: 0, judged: false, label: '해당 없음' },
   nopath: { short: '—', mark: '³', tone: 'idle', rank: 0, judged: false, label: '경로 없음' },
   stale: { short: '—', mark: '⁴', tone: 'idle', rank: 0, judged: false, label: '오래됨' },
 });
@@ -68,7 +69,7 @@ export function cellView(code, { value = null, unit = '' } = {}) {
 /** 각주 — 표에 **실제로 나온** 비판정 code 만 한 번씩(없으면 빈 배열). */
 export const CELL_FOOTNOTE = Object.freeze({
   missing: '‘—¹’ **못 읽음** — 경로는 있는데 이번에 읽지 못했습니다(첫 주기 · 출력 잘림 · 이 저장소가 받지 않는 값 포함). 0 이 아닙니다.',
-  none: '‘—²’ **그 커널에 없음** — 구획은 왔는데 비어 있습니다(예: PSI 가 없는 커널). 못 읽은 것과 다릅니다.',
+  none: '‘—²’ **해당 없음** — 그 커널 · 장비에 그 항목이 없습니다(예: PSI 가 없는 커널 · PowerCap 이 꺼진 iDRAC). 못 읽은 것과 다릅니다.',
   nopath: '‘—³’ **경로 없음** — 그 값을 주는 경로가 이 서버에 없습니다(OS 계정 없음 → OS 칸 · iDRAC 등록 없음 → 하드웨어 칸). 시도하지 않았으니 못 읽음과 다릅니다.',
   stale: '‘—⁴’ **오래됨** — 마지막 표본이 신선도 한계를 넘어 판정하지 않았습니다(옛 값을 지금 값처럼 칠하지 않습니다).',
 });
@@ -265,11 +266,15 @@ export function thresholdText(key, th) {
   return `주의 ${numText(w, m[2])} · 초과 ${numText(b, m[2])}`;
 }
 /** 근거 한 줄 — ‘nvme0n1 평균 대기열 9.2’. 값이 없으면 code 의 뜻(못 읽음 · 없음 · 경로 없음)을 적는다. */
+/** 점검 반복 2회차 E3: ‘해당 없음’(none) 근거의 항목별 이유 — 서버 판정 입력 key(useJudge) 기준. 모르는 key 는 CODE_INFO 의 ‘해당 없음’. */
+export const NONE_BASIS_TEXT = Object.freeze({ psi: '그 커널에 없음', power_cap_pct: 'PowerCap 꺼짐 — 상한 0 · 빈 값' });
+const noneBasisLabel = (key) => (/^psi_/.test(t(key)) ? NONE_BASIS_TEXT.psi : NONE_BASIS_TEXT[t(key)] || '');
 export function basisText(b = {}) {
   const c = codeInfo(b.code);
   const dev = t(b.device) ? `${t(b.device)} ` : '';
   const v = n(b.value);
-  return `${dev}${t(b.label)} ${v != null ? numText(v, t(b.unit)) : (c.judged ? '—' : `—(${c.label})`)}`;
+  const why = (b.code === 'none' && noneBasisLabel(b.key)) || c.label;
+  return `${dev}${t(b.label)} ${v != null ? numText(v, t(b.unit)) : (c.judged ? '—' : `—(${why})`)}`;
 }
 
 /**
@@ -446,7 +451,9 @@ export function hwFactRows(hw, { now = Date.now() } = {}) {
   const list = (v) => (Array.isArray(v) ? (v.length ? v.map((x) => `‘${t(x)}’`).join(' · ') : '없음') : '—(못 읽음)');
   const p = hw.power || null;
   const rows = [
-    { label: '전력', text: p && n(p.watts) != null ? `${numText(p.watts, 'W')}${n(p.capWatts) != null ? ` / cap ${numText(p.capWatts, 'W')}` : ' · cap 정보 없음'}${n(p.capPct) != null ? ` (${numText(p.capPct, '%')})` : ''}` : (p && n(p.capWatts) != null ? `—(전력 표본 없음) · cap ${numText(p.capWatts, 'W')}` : '—(못 읽음)') },
+    // 점검 반복 2회차 E3: 상한이 꺼진 장비(서버 capState unset)는 ‘cap 정보 없음’(못 읽음처럼 읽힌다)이 아니라 ‘상한 꺼짐’.
+    { label: '전력', text: p && n(p.watts) != null ? `${numText(p.watts, 'W')}${n(p.capWatts) != null ? ` / cap ${numText(p.capWatts, 'W')}` : (p.capState === 'unset' ? ' · 상한 꺼짐(PowerCap 0 · 빈 값)' : ' · cap 정보 없음')}${n(p.capPct) != null ? ` (${numText(p.capPct, '%')})` : ''}`
+      : (p && n(p.capWatts) != null ? `—(전력 표본 없음) · cap ${numText(p.capWatts, 'W')}` : (p?.capState === 'unset' ? '—(전력 표본 없음) · 상한 꺼짐' : '—(못 읽음)')) },
     { label: '흡기 온도', text: n(hw.inletC) != null ? `${numText(hw.inletC, '℃')}${n(hw.sensorAt) != null ? ` · ${ageText(hw.sensorAt, now)}` : ''}` : '—(흡기 센서를 찾지 못함)' },
     { label: 'iDRAC CPU', text: n(hw.cpuPct) != null ? numText(hw.cpuPct, '%') : '—(못 읽음)' },
     { label: 'DIMM 이상', text: hw.dimmBad == null ? '—(못 읽음)' : `Critical ${list(hw.dimmBad)} · Warning ${list(hw.dimmWarn)}` },

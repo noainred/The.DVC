@@ -22,7 +22,7 @@ import { logAudit } from '../../audit.js';
 import { loadBmUsageSettings, saveBmUsageSettings, bmUsageEnabled, DEFAULTS, enterpriseActive, dropUnspecifiedNumbers, bmUsageCentralState, distributionStatus, saveDistribution, setPerEdge, exclusionConflicts, perEdgeSuperseded, perEdgeFor, normalizeCorpIds } from '../../bmusage/settings.js';
 import { edgeCorpsSource } from '../../bmusage/edgeCorps.js'; // v2.927 중앙에서 켜기 — 엣지별 법인 매핑
 import { listAgentTokens } from '../../central/agentTokens.js';
-import { fullScopeOnlyWith, requireSettingsOwner } from '../admin/shared.js';
+import { fullReadWriteScopeOnlyWith, requireSettingsOwner } from '../admin/shared.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
 import { unassignedCauses, CAUSE as UNASSIGNED_CAUSE } from '../../bmusage/attribution.js';
 import { TIER_LABEL } from '../../bmusage/license.js';
@@ -31,6 +31,7 @@ import { maskActivityEvents, maskPollerStatus, scrubHosts, addressMatcher, isAdm
 import { targetIdOf } from '../../bmusage/maint/judge.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 정비 창 판정과 같은 식별 함수
 import { currentTargets, pollBmUsageOnce, bmUsageStatus, authStopsFor, sourceErrorsView, usageDetailFor } from '../../bmusage/poller.js';
 import { isDemoGuest } from '../../auth/demoGuest.js'; // v2.720(감사 R1-03)
+import { bmGates, writableVc } from './bmWriteGate.js'; // 점검 반복 2회차 E1 · E2 — 쓰기 버튼 표지
 import { latestUsage, usageHistory, usageDaily, dbStatus, METRICS } from '../../bmusage/db.js';
 import { bmUsageEvents, bmUsageLogInfo } from '../../bmusage/activityLog.js';
 import { scopeFilePaths } from '../../auth/scopeStatus.js';   // v2.598 AUTHZ-2598-04: log.file 절대 경로는 admin 만
@@ -50,7 +51,8 @@ const toolsPerm = requirePerm('tools');
 const writeRole = requireRole('admin', 'operator');
 const adminOnly = requireRole('admin');
 // v2.627: 엣지 배포는 28곳 전부의 수집 범위를 바꾼다 — 전 법인 공용 결정이라 전체 범위 관리자만.
-const fleetOnly = fullScopeOnlyWith('베어메탈 사용률 설정의 엣지 배포는 전체 범위(vCenter 제한 없는) 관리자만 바꿀 수 있습니다 — 모든 엣지의 수집 범위를 한 번에 정합니다.');
+// 점검 반복 2회차 재확인 R1: 조회 ∧ 쓰기 전체 범위(isFullReadWriteScope) — 조회만 보던 fullScopeOnlyWith 는 쓰기만 좁힌 관리자를 통과시켰다(v2.733 · v2.904 함정).
+const fleetOnly = fullReadWriteScopeOnlyWith('베어메탈 사용률 설정의 엣지 배포는 조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 관리자만 바꿀 수 있습니다 — 모든 엣지의 수집 범위를 한 번에 정합니다.');
 
 // v2.604(감사 CEN2604-03 2중 방어): 엣지 보관분 값이 객체면 String() 이 던져 이 라우트가 500 이었다 — 글자·수·불리언만.
 const t = (v) => strOf(v, 4096).trim();
@@ -316,7 +318,7 @@ export async function bmTrendView(req, snap, mode = 'history', deps = {}) {
   if (bad) return bad;
   if (found.via === 'local') {
     const agent = config.agent?.name || '';
-    const r = mode === 'devices' ? await D.devicesFor({ agent, key: found.realKey }) : await D.trendFor({ agent, key: found.realKey, q: req.query || {}, settings: loadBmUsageSettings() });
+    const r = mode === 'devices' ? await D.devicesFor({ agent, key: found.realKey, settings: loadBmUsageSettings() }) : await D.trendFor({ agent, key: found.realKey, q: req.query || {}, settings: loadBmUsageSettings() });
     return r && r.ok ? { ...r, key, via: 'local' } : r;
   }
   const r = await D.pullBmTrend(found.agent, mode, found.realKey, req.query || {});
@@ -1027,11 +1029,13 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
       // 다음 점검 ①(2차): 식별 키가 겹쳐 수집하지 않는(또는 결정한) 서버 수 — 보이는 법인 것만(목록 · 결정은 /tools/bm-usage/key-overlaps).
       keyOverlaps: (() => { const l = applyScope(tg.keyOverlaps || [], allowed); return { total: l.length, pending: l.filter((o) => !o.decision).length, added: l.filter((o) => o.decision?.decision === 'add').length }; })(),
       metrics: METRICS, reasons: NO_PATH_REASON,
-      vcenters: applyScope(tg.vcenters.map((v) => ({ ...v, vcenterId: v.id })), allowed),
+      // 재확인 R1: 법인별 쓰기 표지 — 수집 설정의 법인 켜기/끄기는 쓰기 범위 법인만(화면이 조회 전용 법인 칸을 잠근다 · 라우트도 403).
+      vcenters: applyScope(tg.vcenters.map((v) => ({ ...v, vcenterId: v.id, writable: writableVc(req, store.get(), v.id) })), allowed),
       isEdge: tg.isEdge,
       // v2.627: 이 노드가 중앙 배포값을 쓰는가(엣지 화면 배너·입력 잠금) · 중앙의 배포 현황(전체 범위 admin 에게만 — 전 엣지 이름).
       central: bmUsageCentralState(),
-      distribution: isAdmin && !allowed && !tg.isEdge ? distStatusNow() : null,
+      // 재확인 R1: 배포 관리 표(쓰기 버튼 포함)는 조회 ∧ 쓰기 전체 범위 관리자만 — 저장 게이트(fleetOnly)와 같은 함수.
+      distribution: isAdmin && isFullReadWriteScope(req.user, store.get()) && !tg.isEdge ? distStatusNow() : null,
       // ⚠ DB 파일 경로는 admin 에게만(operator 는 tools 를 기본 보유 — '거부 기본값' 규칙).
       db: isAdmin ? db : (({ path: _p, ...rest }) => ({ ...rest, redacted: ['path'] }))(db),
       // v2.744(최종 검토 FB — RD-R1·RG2744-03): 등록부 로드 오류 사유(last.sourceErrors)의 위치(줄·칸)는 관리자에게만 — 그 밖의 계정은 분류 문구만.
@@ -1066,6 +1070,8 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
        */
       perf, perfThresholds: perfSettings.perf, perfDefaults: PERF_DEFAULTS, perfCols: PERF_COL_META,
       ...(pf.perfError ? { perfError: pf.perfError } : {}),
+      // 점검 반복 2회차 E1 · E2: 쓰기 버튼 표지(수집 설정 · 지금 수집 · 엣지 인출) — 라우트 게이트와 같은 판정(bmWriteGate.js). 표시 게이팅 — 집행은 각 라우트.
+      actions: bmGates(req, ['settings', 'settingsGlobal', 'collect', 'edgePull'], { snap: store.get() }),
     });
   } catch (e) {
     res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) });
@@ -1202,8 +1208,9 @@ api.get('/tools/bm-usage/history', toolsPerm, async (req, res) => {
 api.post('/tools/bm-usage/collect', writeRole, toolsPerm, async (req, res) => {
   // v2.583(감사 확정): 범위 계정이 **전 법인** 수동 수집(인증 정지도 무시)을 걸고 전 법인 counts 를 받았다 —
   //   형제 /edges/pull 처럼 전체 범위 계정만 허용한다(수집 대상을 범위로 나누는 경로가 폴러에 없다).
-  if (scopedVcenterIds(req.user, store.get())) {
-    return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '지금 수집은 전 법인 서버에 접속합니다 — 전체 범위(vCenter 제한 없는) 계정만 실행할 수 있습니다.' });
+  // 재확인 R1: 조회 ∧ 쓰기 전체 범위(isFullReadWriteScope — 표지 bmGate 와 같은 함수). 조회만 보면 쓰기만 좁힌 계정이 전 법인 수집을 걸었다.
+  if (!isFullReadWriteScope(req.user, store.get())) {
+    return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '지금 수집은 전 법인 서버에 접속합니다 — 조회 · 쓰기 모두 전체 범위(vCenter 제한 없는) 계정만 실행할 수 있습니다.' });
   }
   const r = await pollBmUsageOnce({ trigger: 'manual', demoOnly: isDemoGuest(req.user) }); // v2.720(감사 R1-03): 데모 계정은 데모 대상만
   logAudit({
@@ -1373,8 +1380,8 @@ const _pulling = new Set();
  */
 api.post('/tools/bm-usage/edges/pull', writeRole, toolsPerm, async (req, res) => {
   // ⚠ 엣지 목록·보관분에는 다른 법인 서버가 섞여 있다 — 당기는 동작은 **전체 범위 계정만**.
-  if (scopedVcenterIds(req.user, store.get())) {
-    return res.status(403).json({ ok: false, requiredOwner: true, reason: '엣지 인출은 전체 범위 계정만 할 수 있습니다(엣지는 법인 축으로 나눌 수 없습니다).' });
+  if (!isFullReadWriteScope(req.user, store.get())) {   // 재확인 R1 — 조회 ∧ 쓰기 전체 범위
+    return res.status(403).json({ ok: false, requiredOwner: true, reason: '엣지 인출은 조회 · 쓰기 모두 전체 범위 계정만 할 수 있습니다(엣지는 법인 축으로 나눌 수 없습니다).' });
   }
   const agents = Array.isArray(req.body?.agents) ? req.body.agents.map(t).filter(Boolean).slice(0, 40) : [];
   if (!agents.length) return res.status(400).json({ ok: false, reason: '가져올 엣지 이름이 필요합니다.' });
@@ -1499,9 +1506,14 @@ api.put('/tools/bm-usage/settings', adminOnly, (req, res) => {
    *   (`normalizeSettings` 가 `enabled && ack` 로 못 박는다).
    */
   const prev = loadBmUsageSettings();
+  const snap = store.get();
+  // 점검 반복 2회차 재확인 R1: ‘전체 범위’ 는 조회 ∧ 쓰기(isFullReadWriteScope — 표지 bmGate settingsGlobal 과 같은 함수) · 법인 칸은 쓰기 범위(writeScopedVcenterIds).
+  //   예전에는 조회 범위만 봐 조회 무제한 + 쓰기 vcA 관리자가 vcB 수집을 끄고 원시 보존을 7일로 내렸다(다른 법인 이력 정리) — server/CLAUDE.md v2.733 · v2.904 함정.
+  const fullRw = isFullReadWriteScope(req.user, snap);
+  const writable = fullRw ? null : (writeScopedVcenterIds(req.user, snap) || new Set());
   // v2.607 AUTHZ2607-05: 범위 계정은 법인(corps) 키만 바꿀 수 있다 — 주기·보존일·임계·Enterprise 동의 같은 전역 필드는
-  //   전 법인 공용이라 버리고 응답에 밝힌다(예전에는 범위 admin 이 보존일을 하한으로 내려 다른 법인 이력을 지웠다).
-  const kg = keepScopedFields(req.body || {}, prev, scopedVcenterIds(req.user, store.get()), ['corps', 'corpsScoped']);
+  //   전 법인 공용이라 버리고 응답에 밝힌다(예전에는 범위 admin 이 보존일을 하한으로 내려 다른 법인 이력을 지웠다). 2회차 R1 부터 ‘범위 계정’ = 조회 ∧ 쓰기 전체 범위가 아닌 계정.
+  const kg = keepScopedFields(req.body || {}, prev, writable, ['corps', 'corpsScoped']);
   const body = kg.patch;
   if (body.enterpriseAck === true && !prev.enterpriseAck) {
     body.enterpriseAckAt = Date.now();
@@ -1509,10 +1521,24 @@ api.put('/tools/bm-usage/settings', adminOnly, (req, res) => {
   }
   // v2.605 AUTHZ2605-01: 범위 제한 admin 의 GET 은 corps 를 자기 범위로 거른다(scopeMainSettings) —
   //   그 값을 펼쳐 PUT 하면 다른 법인의 수집이 꺼졌다. 범위 밖 법인은 직전 값을 보존한다.
-  const allowed = scopedVcenterIds(req.user, store.get());
+  const allowed = scopedVcenterIds(req.user, snap);
   let ignoredOutOfScope = [];
-  if (allowed && body.corps !== undefined) {
-    const m = mergeScopedMap(prev.corps, body.corps, allowed); body.corps = m.merged; ignoredOutOfScope = m.ignored;
+  if (writable && body.corps !== undefined) {
+    const bc = body.corps && typeof body.corps === 'object' && !Array.isArray(body.corps) ? body.corps : {};
+    const before = prev.corps && typeof prev.corps === 'object' ? prev.corps : {};
+    /*
+     * 재확인 R1 — **조회는 되지만 쓰기 범위 밖인 법인의 값을 바꾸는 요청은 403**(아무것도 저장하지 않는다 — 한 요청 안의 쓰기 법인 변경도 함께 거절):
+     *   규약 ‘조회 밖 404 → 쓰기 밖 403’(server/CLAUDE.md v2.369 · v2.733) — 그 법인은 이미 보이므로 숨길 것이 없고, 조용히 무시하면 ‘저장했습니다’ 가 거짓이 된다.
+     *   같은 값을 되돌려 보낸 것은 쓰기가 아니다(화면은 보이는 법인 전부를 보낸다 — 쓰기 법인 하나만 바꿔도 거절되면 안 된다).
+     *   조회 밖 법인 키는 예전처럼 직전 값 보존 + 개수만 밝힌다(존재를 흘리지 않는다 — 404 쪽 규약).
+     */
+    const roChanged = Object.keys(bc).filter((id) => (!allowed || allowed.has(id)) && !writable.has(id) && !!bc[id] !== !!before[id]);
+    if (roChanged.length) {
+      return res.status(403).json({ ok: false, error: 'forbidden', code: 'read-only-corps', readOnly: roChanged.length,
+        reason: `조회만 되는 법인 ${roChanged.length}곳의 수집을 바꾸려 했습니다(쓰기 범위 밖) — 아무것도 저장하지 않았습니다.` });
+    }
+    const m = mergeScopedMap(prev.corps, body.corps, writable); body.corps = m.merged;
+    ignoredOutOfScope = m.ignored.filter((id) => allowed && !allowed.has(id));   // 조회 전용 법인을 같은 값으로 되돌려 보낸 것은 ‘무시’ 가 아니다
   }
   delete body.corpsScoped;
   const next = saveBmUsageSettings(body);

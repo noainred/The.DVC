@@ -144,7 +144,7 @@
 - ⚠⚠ **v2.920 — 베어메탈 사용률(`#/tools/bm-usage` · 도구 키 그대로) USE 매트릭스 보드 · 서버 성능 상세(리눅스 성능 2단계 · 설계 `docs/design/linux-bm-perf/README.md` §5 ①~④)**.
   화면 `views/tools/{BmPerfBoard,BmPerfDetail}.jsx`(조립만) · 문구 `bmPerfText.js`(순수) · 회귀 `bmPerfText.test.js`(문구 · 상태 9종 · 렌더 스모크 · 소스 스윕) + `server/test/bmPerf2920.test.js`(API 보강 `psiAbsent` · 정제 · 데모 합성):
   - **판정을 웹에서 다시 하지 않는다** — 칸 색은 서버 code(`ok·warn·bad·none·missing·nopath·stale`), 판정 한 줄(`line`)은 서버 문장 그대로, 기준 숫자는 API `perfThresholds` 를 **보여 주기만**(`thresholdText`). 테스트가 ‘기준값 키 + 비교 연산’ 을 소스 스윕으로 막는다.
-  - **‘—’ 넷은 각주 기호로 구분** — `—¹` 못 읽음 · `—²` 그 커널에 없음 · `—³` 경로 없음 · `—⁴` 오래됨(`CODE_INFO` · `cellFootnotes` — 표에 나온 것만). ‘경로 없음’(등록 없음)과 ‘못 읽음’(등록은 있는데 안 읽힘)은 상태도 다르다(`pathState` · `osOnly`/`osOnlyUnread` · `idracOnly`/`idracOnlyUnread` · `noPath`/`noneRead`).
+  - **‘—’ 넷은 각주 기호로 구분** — `—¹` 못 읽음 · `—²` 해당 없음(그 커널 · 장비에 없음 — PSI 없는 커널 · PowerCap 꺼짐 — 근거 한 줄은 항목별 `NONE_BASIS_TEXT` · 2회차 E3) · `—³` 경로 없음 · `—⁴` 오래됨(`CODE_INFO` · `cellFootnotes` — 표에 나온 것만). ‘경로 없음’(등록 없음)과 ‘못 읽음’(등록은 있는데 안 읽힘)은 상태도 다르다(`pathState` · `osOnly`/`osOnlyUnread` · `idracOnly`/`idracOnlyUnread` · `noPath`/`noneRead`).
   - **U 칸만 숫자**(입력이 하나 — 사용률), S·E 칸은 낱말(정상 · 주의 · 초과) — 여러 입력 중 가장 나쁜 것이 색을 정하는 칸에 대표값 하나를 적으면 색과 숫자가 어긋난다.
   - 보드 항목은 이 노드 대상 + **엣지 보관분**(`boardItems` — 위임 수집 환경에서 중앙 보드가 비지 않게) · 법인/경로 칩과 검색은 같은 `facetState` 를 이 목록에 다시 건다. 기존 다섯 지표 표는 ‘사용률 표’ 토글로 그대로 두었다(보기는 localStorage 편의 — 실패해도 기본값).
   - 서버 상세 탭은 **데이터가 있는 것만**(`DETAIL_TABS` — 요약 · 자원 · 하드웨어). 장애 기록 · 튜닝 · 용도 · 스냅샷 · 추이 탭은 그 기능이 생길 때 더한다(비활성 탭으로 그리지 않는다). 사용률 추이는 아래 기존 상세 카드 그대로(이 노드 대상만 — 엣지 위임 서버는 성능 상세만 연다).
