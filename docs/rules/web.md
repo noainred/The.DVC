@@ -960,3 +960,7 @@
 - **v3.10.18 — 가상화 플랫폼 점검 6회차: 허브 부제의 옛 가정 문구 정정**(자율 개선 루프): `PlatformHub` 부제가 ‘법인 = vCenter = Bareos 한 단위’ 라고 말했다 — 2026-11-13 사용자 정정(법인 1 : 서비스 N · 서비스 1 = vCenter 1 + Bareos 1)과 어긋나는 **화면 문구**라 고쳤다
   (‘서비스 = vCenter 1 + Bareos 1 · 한 법인에 서비스가 여럿일 수 있습니다’). 같은 옛 가정이 남은 다른 문구(`BareosCorp` 라벨 ‘1:1:1’ · `bareosText` 혼합 엣지 안내 · 카드 ‘vCenter · 법인’ 류의 느슨한 ‘법인’)는
   루트 CLAUDE.md 대로 **정리 범위를 사용자가 정한 뒤**에 손댄다(이 회차는 부제 한 줄만). 테스트 `platformText.test.js` v3.10.18.
+- **v3.10.19 — 가상화 플랫폼 점검 7회차: 누르는 카드 · 행에 키보드 접근(`components/pressable.js` 한 벌)**(자율 개선 루프): 허브 vCenter 카드 · KPI 카드 3장(VM 백업 · VM 증가 · 스토리지 증가)은
+  div onClick 이라 Tab 으로 닿지 않고 Enter · Space 로 열리지 않았다(마우스 전용). `pressable(onClick)` = role="button" · tabIndex 0 · Enter/Space → onClick(+preventDefault) · onClick 없으면 빈 props.
+  `primitives.Kpi` 의 같은 인라인 코드도 이 한 벌로. 법인별 비교 표는 행 클릭을 두고 **이름을 `button.cell-link`** 로(호스트 · VM 수 버튼과 같은 꼴 — 키보드로 상세). 포커스 테두리는 `platform.css :focus-visible`.
+  규칙: 새 '누르는 div' 는 onClick 을 직접 달지 말고 `pressable` 로(테스트가 `className="card kpi|vc-card" … onClick=` 을 막는다). 테스트 `components/pressable.test.js`.
