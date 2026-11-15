@@ -17,7 +17,8 @@
 import crypto from 'node:crypto';
 import { cellLooksSecret } from './keyParse.js';
 import { NAME_RE } from './keyStore.js';
-import { addrKey, bindDecision, bindOfWrite } from './bindRule.js';
+import { addrKey, bindDecision, bindOfWrite, entryTokens } from './bindRule.js';
+import { keyWriteIssue, featureLabels } from './placement.js';
 
 const t = (v) => String(v ?? '').trim();
 const lc = (v) => t(v).toLowerCase();
@@ -59,6 +60,8 @@ export const ROW_CODE = Object.freeze({
   'os-cred-empty': 'os_cred 가 비어 있습니다(공통 계정 이름 또는 ‘개별:계정명’).',
   'key-missing': 'SSH 키 이름이 키 저장소에 없습니다(값은 표시하지 않습니다).',
   'key-retired': '회전으로 퇴역한 SSH 키입니다 — 새 키 이름을 적으세요.',
+  // 4회차 점검 D1: 접속 때 판정(refs.resolveOsAuth → key-folder)과 같은 함수로 쓰기 전에 거절한다 — 적용하면 수집이 매 주기 접속하지 않는다.
+  'key-folder': 'SSH 키(직접 고른 키 또는 공통 계정의 기본 키)가 다른 법인 · 다른 서버의 폴더에 있어 이 서버에는 쓸 수 없습니다 — 이 서버 법인(또는 이 서버)의 폴더에 있는 키를 고르세요(설정 › 보안 › SSH 공용 접속).',
   'password-no-secret': 'os_key 가 password 인데 공통 계정에 비밀번호가 없습니다.',
   'dup-name': '같은 name 이 파일 안에 이미 있습니다.',
   'dup-tag': '같은 service_tag 가 파일 안에 이미 있습니다.',
@@ -98,6 +101,8 @@ export const WARN = Object.freeze({
   'edge-names': '공통 계정 · 키 이름은 엣지가 자기 저장소에서 찾습니다(중앙은 이름 꼴만 확인 — 키는 법인 밖으로 나가지 않음).',
   'idrac-cred-kept': 'idrac_cred 가 비어 기존 iDRAC 계정을 그대로 둡니다.',
   'os-cred-kept': 'os_cred 가 비어 기존 OS 계정을 그대로 둡니다.',
+  // 4회차 점검 D1(메인 결정 — 기능 제한은 의도일 수 있어 거부가 아니라 경고): 연결 시험은 허용 기능을 보지 않아 통과한다.
+  'key-feature': 'SSH 키의 ‘쓸 수 있는 기능’ 에 없는 수집은 이 키로 접속하지 않습니다(연결 시험은 이 제한을 보지 않아 통과합니다) — 의도한 제한이 아니면 설정 › 보안 › SSH 공용 접속 › 키 폴더에서 기능을 넓히세요.',
 });
 
 const boolOf = (v) => { const s = lc(v); if (!s) return null; if (TRUE.includes(s)) return true; if (FALSE.includes(s)) return false; return undefined; };
@@ -348,6 +353,21 @@ export function analyzeOnboardRows(rows = [], ctx = {}) {
     if (osPlan && !remote && !binds && bindOfWrite(exOs, osWriteOf(osPlan, exOs)).binds) {
       if (!ownerOk) { reject('bind-owner-only'); done(); continue; }
       binds = true;
+    }
+    /*
+     * 4회차 점검 D1: 이 쓰기 뒤 **효력 키**(서버 키 → 공통 계정 기본 키 · 비밀번호 고정이면 없음)를 이 서버(행 법인 · 이름)에 써도 되는가 —
+     *   판정은 placement.keyWriteIssue(= keyPlacementIssue · 접속 때 resolveOsAuth 와 같은 함수). 효력 참조는 적용 본문 그대로 bindOfWrite 로(등록부가 저장할 값).
+     *   폴더 밖은 거부(B-4 '쓰기 전에 거절') · 허용 기능에 없는 수집은 경고 · 키 · 법인 · 이름이 그대로인 갱신은 판정하지 않는다(이 쓰기가 만든 문제가 아니다).
+     *   엣지 배포 행(remote)은 중앙이 키를 모른다 — 엣지 적용이 같은 분석으로 자기 키를 본다(엣지 노드는 isEdge · remote 아님).
+     */
+    if (osPlan && !remote && typeof ctx.effectiveKeyOf === 'function') {
+      const wb = osWriteOf(osPlan, exOs);
+      const b = bindOfWrite(exOs, wb);
+      const after = ctx.effectiveKeyOf({ key: b.key, cred: b.cred, osAuth: wb.osAuth !== undefined ? wb.osAuth : (exOs?.osAuth === 'password' ? 'password' : '') });
+      const before = exOs ? { keyId: ctx.effectiveKeyOf(entryTokens(exOs))?.id || '', vcenterId: exOs.vcenterId, name: exOs.name } : null;
+      const ki = keyWriteIssue(after, { vcenterId: vc, name }, before);
+      if (ki.folder) { reject('key-folder'); done(); continue; }
+      if (ki.blocked.length) warn('key-feature', `— 막히는 수집: ${featureLabels(ki.blocked)}`);
     }
     let idrHostNorm = '';
     if (idracHost) {

@@ -100,6 +100,17 @@ export function suggestCsv(rows = []) {
   return `﻿${toCsv(body)}\r\n`;
 }
 
+/**
+ * 키 회전 결과 한 줄(4회차 점검 D1) — 서버가 판정한 경고(warnings — 새 키로 막히는 수집 기능)를 문구 그대로 붙이고 그때는 주의 색으로.
+ *   판정은 서버(refs.rotateKey — keyPlacementIssue)다. 여기는 이어 붙이기만 한다.
+ */
+export function rotateResultText(r = {}) {
+  const servers = Array.isArray(r.servers) ? r.servers.length : 0;
+  const warn = (Array.isArray(r.warnings) ? r.warnings : []).map((w) => (typeof w?.text === 'string' ? w.text : '')).filter(Boolean).join(' ');
+  const base = `회전했습니다 — 서버 ${servers}대 · 공통 계정 ${numOr(r.accounts)}개가 새 키를 씁니다.${r.retestAdvised ? ' 서버마다 ‘연결 시험’ 을 다시 하세요(자동 재시험 없음).' : ''}`;
+  return warn ? { text: `${base} 주의: ${warn}`, tone: 'warn' } : { text: base, tone: 'ok' };
+}
+
 /** 분석 행의 사유 · 경고 한 칸(서버 문구 그대로). */
 export function rowNote(r = {}) {
   if (r.action === 'reject') return r.reason || '거부';

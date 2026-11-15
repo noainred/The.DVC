@@ -103,10 +103,10 @@ export function registerBmOnboard(api, deps = {}) {
     const b = bodyOf(req);
     const r = REFS.rotateKey(t(b.from, 32), t(b.to, 32));
     logAudit({ user: who(req), action: 'bm-usage.ssh-key.rotate', target: `${t(b.from, 32)}→${t(b.to, 32)}`, ip: req.ip || '',
-      detail: JSON.stringify(r.ok ? { servers: r.servers.length, accounts: r.accounts, ok: true } : { ok: false, code: r.code }).slice(0, 300) });
+      detail: JSON.stringify(r.ok ? { servers: r.servers.length, accounts: r.accounts, ok: true, ...(r.warnings ? { featureLoss: r.warnings.flatMap((w) => w.features || []) } : {}) } : { ok: false, code: r.code }).slice(0, 300) });
     if (!r.ok) return send(res, r);
-    // 화면이 '전 서버 재시험' 을 권한다 — 자동 재시험 · 재시도는 하지 않는다(계정 잠금).
-    res.json({ ok: true, servers: r.servers, accounts: r.accounts, retestAdvised: r.servers.length > 0 });
+    // 화면이 '전 서버 재시험' 을 권한다 — 자동 재시험 · 재시도는 하지 않는다(계정 잠금). 4회차 D1: 새 키로 막히는 수집 기능 경고(warnings)를 그대로 싣는다.
+    res.json({ ok: true, servers: r.servers, accounts: r.accounts, retestAdvised: r.servers.length > 0, ...(r.warnings ? { warnings: r.warnings } : {}) });
   });
 
   api.delete('/tools/bm-usage/ssh-keys/:id', ...keyAdmin, (req, res) => {

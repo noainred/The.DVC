@@ -16,6 +16,7 @@ import { stopMatch } from '../../sshaccess/state.js';   // v3.9.0: 긴급 조치
 import { addrKey } from './bindRule.js';
 import { parsePrivateKey } from './keyParse.js';
 import { sshHostKeyFingerprint } from '../../proxy/sshExec.js';
+import { keyPlacementIssue, lostFeatures, featureLabels } from './placement.js';
 
 const t = (v) => String(v ?? '').trim();
 
@@ -83,7 +84,7 @@ export function deleteAccountIfUnused(id) {
 /**
  * 키 회전(참조 교체). 둘 다 있어야 하고 새 키는 활성이어야 한다. 순서: 서버 참조 → 계정 기본 키 → 옛 키 퇴역
  * (중간에 멈춰도 가리키는 키는 늘 존재한다 — 옛 키는 마지막에야 퇴역).
- * @returns {{ok:true, servers:string[], accounts:number} | {ok:false, ...}}
+ * @returns {{ok:true, servers:string[], accounts:number, warnings?:{code:'key-feature', features:string[], text:string}[]} | {ok:false, ...}}
  */
 export function rotateKey(fromId, toId, { now = Date.now() } = {}) {
   const from = KS.keyById(fromId); const to = KS.keyById(toId);
@@ -102,7 +103,11 @@ export function rotateKey(fromId, toId, { now = Date.now() } = {}) {
   if (!r2.ok) return { ...r2, partial: { servers: r1.ids } };
   const r3 = KS.markKeyRetired(from.id, { now });
   if (!r3.ok) return { ...r3, partial: { servers: r1.ids, accounts: r2.changed } };
-  return { ok: true, servers: r1.ids, accounts: r2.changed || 0 };
+  // 4회차 점검 D1(메인 결정): 옛 키로 되던 수집 기능이 새 키의 ‘쓸 수 있는 기능’ 에 없으면 **경고**(기능 제한은 의도일 수 있다 — 회전은 막지 않는다).
+  //   연결 시험(conn-test)은 허용 기능을 보지 않아 화면이 권하는 ‘전 서버 재시험’ 이 통과한다 — 그 차이를 결과가 말한다. 판정은 placement.lostFeatures(= keyPlacementIssue).
+  const lost = (r1.ids.length || r2.changed) ? lostFeatures(from, to) : [];
+  const warnings = lost.length ? [{ code: 'key-feature', features: lost, text: `새 키의 ‘쓸 수 있는 기능’ 에 ${featureLabels(lost)} 이(가) 없어 그 수집은 회전 뒤 이 키로 접속하지 않습니다(연결 시험은 이 제한을 보지 않아 통과합니다) — 의도한 제한이 아니면 설정 › 보안 › SSH 공용 접속 › 키 폴더에서 새 키의 기능을 넓히세요.` }] : [];
+  return { ok: true, servers: r1.ids, accounts: r2.changed || 0, ...(warnings.length ? { warnings } : {}) };
 }
 
 /**
@@ -140,23 +145,11 @@ export const AUTH_ERROR = Object.freeze({
   'corp-stopped': '이 법인의 SSH 키 사용이 중지됐습니다(긴급 조치) — 설정 › 보안 › SSH 공용 접속에서 재개하기 전에는 키로 접속하지 않습니다.',
   'state-unreadable': 'SSH 공용 접속 상태 파일(ssh-access-state.json)을 읽지 못해 키로 접속하지 않았습니다 — 사용 중지 기록을 모르는 채 키를 쓰지 않습니다.',
 });
-/** 허용 기능 목록과 무관하게 언제나 되는 쓰임 — 사람이 누르는 연결 시험(uname 한 줄). 그 밖의 호출은 기능 id 를 밝혀야 한다(빈 값 = 모르는 기능 — 목록이 있는 키는 거절). */
-export const ALWAYS_ALLOWED_FEATURES = Object.freeze(['conn-test']);
-/**
- * 키를 이 서버 · 이 기능에 써도 되는가(판정 하나 — 폴러 · 연결 시험 · SSH 공용 접속 화면의 키 고르기가 같은 함수).
- * @param {{folderCorp?:string, folderServer?:string, features?:string[]|null}} key
- * @param {{vcenterId?:string, name?:string}} server
- * @returns {null | 'key-folder' | 'key-feature'}
+/*
+ * 키 배치 판정(keyPlacementIssue · ALWAYS_ALLOWED_FEATURES)은 순수 모듈 placement.js 로 옮겼다(4회차 점검 D1 — 온보딩 분석이 같은 함수를 직접 부른다).
+ *   여기서 그대로 다시 내보낸다 — 기존 호출부(REFS.keyPlacementIssue · sshaccess)는 바뀌지 않는다. 판정은 여전히 하나다.
  */
-export function keyPlacementIssue(key = {}, server = {}, feature = '') {
-  const kc = t(key.folderCorp); const ks = t(key.folderServer);
-  if (kc) {
-    if (t(server.vcenterId) !== kc) return 'key-folder';
-    if (ks && ks.toLowerCase() !== t(server.name).toLowerCase()) return 'key-folder';
-  }
-  if (Array.isArray(key.features) && !ALWAYS_ALLOWED_FEATURES.includes(feature) && !key.features.includes(feature)) return 'key-feature';
-  return null;
-}
+export { ALWAYS_ALLOWED_FEATURES, keyPlacementIssue } from './placement.js';
 /**
  * 법인 사용 중지 판정 — 서버 법인 · 공통 계정 법인 · 키 폴더 법인 중 하나라도 멈췄거나, 중지할 때 적어 둔 서버(id · 접속처)이면.
  * 법인 칸만 보면 OTP 없이 칸을 비워 빠져나갈 수 있었다(점검 A-4). 상태 파일을 못 읽으면 멈춘 것으로 본다.
