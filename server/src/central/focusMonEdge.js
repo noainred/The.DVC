@@ -16,7 +16,7 @@ import { featureMinEdgeVersion } from './featureMinEdgeVersion.js';
 import * as store from '../focusmon/store.js';
 import { listTargets, registryLoadError, getSettings } from '../focusmon/registry.js';
 import { setWakeImpl } from '../focusmon/service.js';
-import { IOSTAT_COLS, TOP_N } from '../focusmon/rates.js';
+import { IOSTAT_COLS, TOP_N, APP_TOP, APP_KERNEL, APP_SESSION, APP_NOSVC } from '../focusmon/rates.js';
 import { okMount } from '../focusmon/parse.js'; // v3.12.0 ⑬ 파일시스템 마운트 이름 규칙(수집 파서와 같은 함수)
 import { FS_ROWS_MAX } from '../focusmon/codec.js';
 import { INTERVALS, PROC_EVERY_CHOICES } from '../focusmon/script.js';
@@ -118,7 +118,25 @@ export function cleanProcs(p) {
       ...procExtra(x), // v2.981 프로세스 세부 정보 — 아는 칸만 · 형식 · 범위 · 옛 엣지는 없음(읽는 쪽 null)
     })).filter((x) => x.pid != null),
     da: p.da === true ? true : p.da === false ? false : null,
+    ...(isObj(p.apps) ? { apps: cleanApps(p.apps) } : {}),
   };
+}
+
+/* v3.14.0(⑮) 앱 단위 묶음 — 아는 칸만 · 기준마다 APP_TOP · 이름은 서비스 · 프로그램 이름 규칙(또는 정해진 세 이름) · 수는 0 이상 · 상한. */
+const APP_UNIT_RE = /^(?!.*\.\.)[A-Za-z0-9@_:-][A-Za-z0-9@._:-]{0,95}\.(service|scope)$/;
+const APP_FIXED = new Set([APP_KERNEL, APP_SESSION, APP_NOSVC]);
+function cleanApps(a) {
+  const pos = (v, max) => { const x = n(v); return x == null || x < 0 || x > max ? null : x; };
+  const one = (x, keyOk) => {
+    if (!isObj(x) || typeof x.k !== 'string' || !keyOk(x.k)) return null;
+    const io = ['all', 'part', 'none'].includes(x.io) ? x.io : 'none';
+    const row = { k: x.k, n: pos(x.n, 1e6), th: pos(x.th, 1e7), cpu: pos(x.cpu, 1e6), rss: pos(x.rss, 1e9), io, un: pos(x.un, 1e5) };
+    if (io !== 'none') { row.rb = pos(x.rb, 1e6); row.wb = pos(x.wb, 1e6); }
+    if (typeof x.u === 'string' && /^[A-Za-z0-9._@+-]{1,32}$/.test(x.u)) row.u = x.u;
+    return row.n == null ? null : row;
+  };
+  const list = (v, keyOk) => (Array.isArray(v) ? v.slice(0, APP_TOP).map((x) => one(x, keyOk)).filter(Boolean) : null);
+  return { sv: list(a.sv, (k) => APP_FIXED.has(k) || APP_UNIT_RE.test(k)), cm: list(a.cm, (k) => COMM_RE.test(k)) || [] };
 }
 
 function cleanStatus(st, now) {

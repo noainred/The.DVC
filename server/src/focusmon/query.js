@@ -453,7 +453,7 @@ export async function iostatCompare(ids, w, { at = 'end', scope = 'phys', col = 
 /** 이름 묶음 열쇠 — 숫자 덩어리를 `*` 로(ora_p001_ORCL · ora_p007_ORCL → ora_p*_ORCL). */
 export const groupNameOf = (c) => String(c || '').replace(/\d+/g, '*').slice(0, 64);
 
-async function procSnaps(id, from, to) {
+export async function procSnaps(id, from, to) {
   const fromMin = Math.floor(from / 60_000); const toMin = Math.floor(to / 60_000);
   const mem = store.memProcs(id);
   const memMins = [...mem.keys()];

@@ -34,6 +34,7 @@ import * as Q from '../../focusmon/query.js';
 import * as L from '../../focusmon/longq.js'; // v3.13.0 ⑭ 긴 구간(요약 표)
 import { planUserEvent, writeUserEvent, eventsFor, SCOPES as EVENT_SCOPES, TEXT_MAX as EVENT_TEXT_MAX, SCOPE_MAX as EVENT_SCOPE_MAX } from '../../focusmon/events.js';
 import { biggestChanges } from '../../focusmon/changes.js';
+import { apps as appsQuery } from '../../focusmon/apps.js'; // v3.14.0 ⑮ 앱 단위 묶음
 import { backfillState } from '../../focusmon/rollup.js';
 import { focusKeys, allTargets, findTarget, isMockMode, startCollection, stopCollection, addToCollection, removeFromCollection, targetEndpointChanged, localRunner, serviceStatus } from '../../focusmon/service.js';
 import { recorderStatus } from '../../focusmon/recorder.js';
@@ -654,6 +655,20 @@ api.get('/tools/focus-mon/procs', adminOnly, fullScopeOnly, async (req, res) => 
   if (!w.past) store.touchView(ids);
   const admin = isAdminDetailUser(req.user);
   const r = await Q.procs(ids, w, { at: req.query.at === 'avg' ? 'avg' : 'end', maskUser: admin ? (u) => u : (u) => maskedIdToken(u) });
+  res.json({ ok: true, win: w.win, from: w.from, to: w.to, past: w.past, missing, usersMasked: !admin, ...r });
+});
+
+/**
+ * 앱 단위 묶음(v3.14.0 ⑮ — 시안 Apps · 컨펌 ① 서비스(systemd) · 프로그램 이름 단추 ② 프로세스 탭은 상위 30 그대로 · 앱 단위는 단추).
+ * 프로세스 목록과 같은 문(admin · 전체 범위) · 보이는 대상만 · 사용자 이름은 관리자 판본만 원문 · 원본 구간(30분 이하)만.
+ */
+api.get('/tools/focus-mon/apps', adminOnly, fullScopeOnly, async (req, res) => {
+  const w = Q.normWindow({ win: req.query.win, end: req.query.end });
+  const { ids, missing } = pickIds(req, 40);
+  if (!ids.length) return res.status(404).json({ ok: false, code: 'not-found', reason: '볼 대상이 없습니다.' });
+  if (!w.past) store.touchView(ids);
+  const admin = isAdminDetailUser(req.user);
+  const r = await appsQuery(ids, w, { by: req.query.by === 'cm' ? 'cm' : 'sv', at: req.query.at === 'avg' ? 'avg' : 'end', maskUser: admin ? (u) => u : (u) => maskedIdToken(u) });
   res.json({ ok: true, win: w.win, from: w.from, to: w.to, past: w.past, missing, usersMasked: !admin, ...r });
 });
 

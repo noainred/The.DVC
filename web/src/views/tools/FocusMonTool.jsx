@@ -27,6 +27,7 @@ import {
 } from './focusMonText.js';
 import { pollMsFor, rawOnlyText, axisTime, parseLinkSeg, CMP_TEXT } from './focusMonHistoryText.js'; // v3.13.0 ⑭ 긴 구간
 import { CpuHistoryLayers, CmpSeg, EventsCard, ChangesCard, LinkCopy } from './FocusMonHistory.jsx';
+import { AppsView } from './FocusMonApps.jsx'; // v3.14.0 ⑮ 앱 단위 묶음
 import { niceMax, yScale, yTicks, linePath, areaPath, stackedAreas, spreadLabels, heatColor, cellShade, seriesMax, indexAtFrac, valueAtFrac, timeAtIndex, xAtIndex, tipRows } from './focusMonChart.js';
 import { Seg, Badge, copyText, CsvPanel, NodeCard, InstallCard } from './FocusMonBulk.jsx';
 import { usePoll } from './focusMonPoll.js';
@@ -1007,13 +1008,15 @@ function ProcDetail({ id, p, tb, server, onClose }) {
 
 /* ── 프로세스 ─────────────────────────────────────────────────────────────── */
 function Procs({ main, ids, tb, onOpen }) {
-  const [mode, setMode] = useState('all');
+  // v3.14.0(⑮ 컨펌 ②): 기본은 지금처럼 상위 30 · ‘앱 단위’ 는 단추 — 고른 보기는 브라우저가 기억한다
+  const [mode, setModeRaw] = useState(() => { const v = lsGet('fm.procs.view', 'all'); return ['all', 'per', 'group', 'apps'].includes(v) ? v : 'all'; });
+  const setMode = (v) => { setModeRaw(v); lsSet('fm.procs.view', v); };
   const [at, setAt] = useState('end');
   const [basis, setBasis] = useState('core');
   const [find, setFind] = useState('');
   const [open, setOpen] = useState(null); // v2.981 펼친 프로세스 { k(procKey), id, p } — 목록에서 빠져도(찾기 · 상위 밖) 세부 정보는 계속 본다
   const params = useMemo(() => ({ targets: ids.join(','), win: tb.win, end: tb.end ?? '', at }), [ids, tb.win, tb.end, at]);
-  const q = usePoll('/tools/focus-mon/procs', params, tb.end == null ? 5_000 : 0, ids.length > 0);
+  const q = usePoll('/tools/focus-mon/procs', params, tb.end == null ? 5_000 : 0, ids.length > 0 && mode !== 'apps');
   const tById = useMemo(() => new Map(main.targets.map((t) => [t.id, t])), [main.targets]);
   const f = find.trim().toLowerCase();
   const ok = (p) => !f || String(p.c).toLowerCase().includes(f) || String(p.u || '').toLowerCase().includes(f) || String(p.pid).includes(f);
@@ -1047,14 +1050,15 @@ function Procs({ main, ids, tb, onOpen }) {
     <>
       <div className="fm-row fm-between">
         <div className="fm-row">
-          <span className="fm-lbl">보기</span><Seg label="보기" value={mode} onChange={setMode} options={[['all', `통합 상위 30`], ['per', '서버별 상위 30'], ['group', '이름별 묶음']]} />
-          <span className="fm-lbl">CPU 기준</span><Seg label="CPU 기준" value={basis} onChange={setBasis} options={[['core', '1코어 = 100%'], ['server', '서버 전체 대비']]} />
+          <span className="fm-lbl">보기</span><Seg label="보기" value={mode} onChange={setMode} options={[['all', `통합 상위 30`], ['per', '서버별 상위 30'], ['group', '이름별 묶음'], ['apps', '앱 단위']]} />
+          {mode !== 'apps' ? <><span className="fm-lbl">CPU 기준</span><Seg label="CPU 기준" value={basis} onChange={setBasis} options={[['core', '1코어 = 100%'], ['server', '서버 전체 대비']]} /></> : null}
           <span className="fm-lbl">시점</span><Seg label="시점" value={at} onChange={setAt} options={[['end', '구간 끝 순간'], ['avg', '구간 평균']]} />
         </div>
-        <div className="fm-row"><label className="fm-lbl" htmlFor="fm-pq">찾기</label><input id="fm-pq" className="fm-input" value={find} onChange={(e) => setFind(e.target.value.slice(0, 64))} placeholder="명령 · 사용자 · PID" /></div>
+        <div className="fm-row"><label className="fm-lbl" htmlFor="fm-pq">찾기</label><input id="fm-pq" className="fm-input" value={find} onChange={(e) => setFind(e.target.value.slice(0, 64))} placeholder={mode === 'apps' ? '묶음 · 계정' : '명령 · 사용자 · PID'} /></div>
       </div>
-      {q.error && !d ? <ErrorBox error={q.error} /> : null}
-      {!d ? <Loading /> : mode === 'group' ? (
+      {mode === 'apps' ? <AppsView ids={ids} tb={tb} tById={tById} onOpen={onOpen} at={at} find={find} /> : null}
+      {mode === 'apps' ? null : q.error && !d ? <ErrorBox error={q.error} /> : null}
+      {mode === 'apps' ? null : !d ? <Loading /> : mode === 'group' ? (
         <div className="fm-card fm-flush">
           <div className="fm-pad fm-row fm-between"><h3 className="fm-h3">이름별 묶음 — {ids.length}대 합</h3><span className="fm-dim">이름 = comm · 숫자 덩어리는 * 로 묶음(ora_p001 · ora_p007 → ora_p*)</span></div>
           <STable className="fm-table" minWidth={620}>
@@ -1074,7 +1078,7 @@ function Procs({ main, ids, tb, onOpen }) {
           <div className="fm-tblbox"><STable className="fm-table" minWidth={900}>{head}<tbody>{rowsAll.map((p, i) => prow(p, i, p.id))}</tbody></STable></div>
         </div>
       )}
-      {open && d && mode !== 'group' && !(mode === 'per' ? d.per.some((x) => x.top.filter(ok).some((p) => procKey(x.id, p) === open.k)) : rowsAll.some((p) => procKey(p.id, p) === open.k)) ? (
+      {open && d && mode !== 'group' && mode !== 'apps' && !(mode === 'per' ? d.per.some((x) => x.top.filter(ok).some((p) => procKey(x.id, p) === open.k)) : rowsAll.some((p) => procKey(p.id, p) === open.k)) ? (
         <div className="fm-card"><div className="fm-note">펼친 프로세스({tById.get(open.id)?.name} · PID {open.p.pid} · {open.p.c})는 지금 표에 없습니다(찾기 · 상위 30 밖) — 세부 정보는 계속 보여 줍니다.</div>
           <ProcDetail id={open.id} p={open.p} tb={tb} server={tById.get(open.id)?.name} onClose={() => setOpen(null)} /></div>
       ) : null}
