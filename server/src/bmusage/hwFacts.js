@@ -25,7 +25,14 @@ const BAD_HEALTH = /^(critical)$/i;
  *   iDRAC 경로를 ‘읽음’ 으로 보지 않고 cap·DIMM·SMART·SEL 칸은 missing 이다(디스크 캐시는 재시작 뒤에도 남아 있어 더 위험하다).
  */
 export const IDRAC_INVENTORY_REFRESH_MS = 30 * 60_000;
-export const inventoryFreshMsFor = (freshMs) => Math.max(4 * IDRAC_INVENTORY_REFRESH_MS, numOrNull(freshMs) ?? 0);
+/** 인벤토리 신선도 한계(2시간 = 위 주기의 4배) — 하드웨어 U(아래 inventoryFreshMsFor 의 바닥) · 전력 보기 · 알림(powerAgg capStateAt)이 같은 값. */
+export const INV_FRESH_MS = 4 * IDRAC_INVENTORY_REFRESH_MS;
+export const inventoryFreshMsFor = (freshMs) => Math.max(INV_FRESH_MS, numOrNull(freshMs) ?? 0);
+/** 점검 반복 6회차 Y: 읽은 시각(at — 인벤토리 collectedAt · 엣지 봉투 상한 at)이 ‘지금 사실’ 인가 — **신선도 판정 하나**(at 이 수가 아니면 false). */
+export function invFreshAt(at, now, freshMs = INV_FRESH_MS) {
+  const a = n(at);
+  return a != null && now - a <= freshMs;
+}
 const WARN_HEALTH = /^(warning)$/i;
 
 /**
@@ -41,6 +48,22 @@ export function invCapState(inv) {
   const lw = n(pc.limitWatts);
   return lw != null && lw > 0 ? { state: 'set', limitWatts: lw } : { state: 'unset', limitWatts: null };
 }
+/**
+ * 점검 반복 6회차 Y: PowerCap 사실(invCapState 결과 + 읽은 시각)의 **지금 상태** — 전력 보기 · 알림(powerAgg)이 이 노드 인벤토리 · 엣지 사본 인벤토리(remote) ·
+ *   엣지 봉투 상한(edgeCap)에 같이 쓴다(예전: 로컬만 2시간을 봐 낡으면 unread · 엣지 사본은 3일 전 것도 set · 봉투는 set 만 stale — 같은 사실이 갈래마다 달랐다).
+ *   읽은 상태(set · unset)인데 읽은 시각이 신선도 한계를 넘었거나 없으면 'stale'(값 없음 — 낡은 상한으로 걸림을 판정하지 않는다). 못 읽음은 unread 그대로.
+ *   하드웨어 U(shapeHwFacts)는 같은 invFreshAt 으로 인벤토리 전체를 버린다(그 계약의 상태는 set · unset · unread 셋 — 엣지 정제 화이트리스트).
+ * @returns {{state:'set'|'unset'|'unread'|'stale', limitWatts:number|null, at:number|null}}
+ */
+export function capStateAt(cs, at, now, freshMs = INV_FRESH_MS) {
+  const st = cs?.state;
+  const a = n(at);
+  if (st !== 'set' && st !== 'unset') return { state: 'unread', limitWatts: null, at: null };
+  if (!invFreshAt(a, now, freshMs)) return { state: 'stale', limitWatts: null, at: a };
+  const lw = st === 'set' ? n(cs.limitWatts) : null;
+  if (st === 'set' && !(lw != null && lw > 0)) return { state: 'unread', limitWatts: null, at: a };
+  return { state: st, limitWatts: lw, at: a };
+}
 
 /**
  * 순수 — 이미 모은 원재료를 판정 입력 모양으로(테스트 대상).
@@ -51,7 +74,7 @@ export function shapeHwFacts(raw = {}, { now = Date.now(), freshMs = 15 * 60_000
   const fresh = (at) => n(at) != null && now - n(at) <= freshMs;
   const power = raw.power && fresh(raw.power.ts) ? { watts: n(raw.power.watts), at: n(raw.power.ts) } : null;
   const inv0 = raw.inv && typeof raw.inv === 'object' ? raw.inv : null;
-  const invStale = !!inv0 && !(n(inv0.collectedAt) != null && now - n(inv0.collectedAt) <= inventoryFreshMsFor(freshMs));
+  const invStale = !!inv0 && !invFreshAt(inv0.collectedAt, now, inventoryFreshMsFor(freshMs));   // 6회차 Y: 신선도 판정 하나(전력 보기 capStateAt 과 같은 함수)
   const inv = invStale ? null : inv0;
   const cap = invCapState(inv);   // 낡은 인벤토리는 위에서 null — unread
   const capW = cap.limitWatts;
