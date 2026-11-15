@@ -12,6 +12,9 @@ import { dayStamp } from '../../dayStamp.js';
 import BoldText from '../../components/boldText.jsx';
 import { guestAuthLines } from '../authSkipText.js'; // v2.591(감사 F2): 게스트 계정 인증 실패 정지·차단기
 
+// v3.12.9 설정 칸 한 묶음(이름 · 칸 · 단위) — 줄이 바뀌어도 함께 움직인다
+const FIELD = { alignItems: 'center', gap: 6, whiteSpace: 'nowrap' };
+
 
 export function GuestOs({ scope }) {
   const [q, setQ] = useState('');
@@ -251,14 +254,16 @@ export function RealOs({ scope }) {
         <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>게스트 OS에서 <code>/etc/os-release</code>·<code>/etc/redhat-release</code>(Linux)·<code>Win32_OperatingSystem</code>(Windows)를 직접 읽어 <b>실제 설치 OS</b>를 확인합니다(ESXi 보고값과 별개). 계정은 <b>설정 › GPU 게스트 수집</b>의 OS별 계정을 사용합니다. 상단 <b>vCenter 선택</b>이 스캔 범위입니다.</p>
         <div className="flex gap wrap" style={{ alignItems: 'center', gap: 14 }}>
           <label className="flex gap" style={{ alignItems: 'center', cursor: 'pointer' }}><input type="checkbox" checked={!!s.enabled} onChange={(e) => setS({ enabled: e.target.checked })} /> <b>주기 스캔</b></label>
-          <span className="muted">주기</span><input className="input" type="number" min={5} style={{ width: 90 }} value={s.intervalMin} onChange={(e) => setS({ intervalMin: e.target.value })} /><span className="muted">분</span>
-          <span className="muted">최대</span><input className="input" type="number" min={1} style={{ width: 80 }} value={s.maxVms} onChange={(e) => setS({ maxVms: e.target.value })} /><span className="muted">대/회</span>
-          <span className="muted">재스캔</span><input className="input" type="number" min={0} style={{ width: 70 }} value={s.rescanDays} onChange={(e) => setS({ rescanDays: e.target.value })} /><span className="muted">일(0=안함)</span>
-          <span className="muted">동시</span><input className="input" type="number" min={1} max={16} style={{ width: 56 }} value={s.concurrency} onChange={(e) => setS({ concurrency: e.target.value })} />
+          {/* v3.12.9: 이름 · 칸 · 단위를 한 묶음(label)으로 — 400px 에서 줄이 바뀔 때 '분 최대' 처럼 앞 칸의 단위와 다음 칸의 이름이 한 줄에 붙고 칸과 떨어졌다. label 이라 칸의 이름도 된다.
+              숫자 칸은 minWidth 0 — 전역 '.input { min-width: 220px }' 가 width 90 · 80 · 70 · 56 을 덮어 칸이 늘 220px 이었다. */}
+          <label className="flex" style={FIELD}><span className="muted">주기</span><input className="input" type="number" min={5} style={{ width: 90, minWidth: 0 }} value={s.intervalMin} onChange={(e) => setS({ intervalMin: e.target.value })} /><span className="muted">분</span></label>
+          <label className="flex" style={FIELD}><span className="muted">최대</span><input className="input" type="number" min={1} style={{ width: 80, minWidth: 0 }} value={s.maxVms} onChange={(e) => setS({ maxVms: e.target.value })} /><span className="muted">대/회</span></label>
+          <label className="flex" style={FIELD}><span className="muted">재스캔</span><input className="input" type="number" min={0} style={{ width: 70, minWidth: 0 }} value={s.rescanDays} onChange={(e) => setS({ rescanDays: e.target.value })} /><span className="muted">일(0=안함)</span></label>
+          <label className="flex" style={FIELD}><span className="muted">동시</span><input className="input" type="number" min={1} max={16} style={{ width: 56, minWidth: 0 }} value={s.concurrency} onChange={(e) => setS({ concurrency: e.target.value })} /></label>
         </div>
-        <div className="flex gap" style={{ marginTop: 12, alignItems: 'center' }}>
+        <div className="flex gap" style={{ marginTop: 12, alignItems: 'center', flexWrap: 'wrap', rowGap: 8 }}>{/* v3.12.9 버튼 여러 개 행은 flexWrap — 400px 에서 '지금 스캔(전체 vCenter)' 이 세 줄로 접히고 오류 문구가 짓눌렸다 */}
           <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy === 'save'} onClick={saveSettings}>설정 저장</button>
-          <button className="logout-btn" style={{ padding: '8px 16px' }} disabled={busy === 'run'} onClick={runNow}>{busy === 'run' ? '스캔 중…' : `지금 스캔 (${scope || '전체 vCenter'})`}</button>
+          <button className="logout-btn" style={{ padding: '8px 16px', flex: 'none', whiteSpace: 'nowrap' }} disabled={busy === 'run'} onClick={runNow}>{busy === 'run' ? '스캔 중…' : `지금 스캔 (${scope || '전체 vCenter'})`}</button>
           {st.fleetRunHidden ? <span className="muted" style={{ fontSize: 12 }}>마지막 실행 결과(탐지 수·오류·인증 정지)는 전 vCenter 기준이라 범위가 제한된 계정에는 표시하지 않습니다.</span> : null}
           {st.lastErr ? <span className="muted" style={{ fontSize: 12, color: 'var(--amber)' }}>최근 오류: {st.lastErr.slice(0, 60)}</span> : null}
           {msg && <span className="muted" style={{ fontSize: 13 }}>{msg}</span>}

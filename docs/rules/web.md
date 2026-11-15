@@ -993,3 +993,6 @@
 - **v3.12.8 — 2차 루프 7회차: 범위 바 리전 선택지 = 정해진 4리전 + 등록 데이터에만 있는 리전 · ‘Unknown’ 은 ‘리전 미지정’**(`platformText.scopeRegionOptions · regionText`): 범위 바는 `regions.js` 의 4리전만 보여,
   위치를 비워 등록해 서버(`vcenter/registry.js`)가 region 을 ‘Unknown’(또는 정해지지 않은 글자)으로 둔 vCenter 는 리전으로 거를 수 없었다 — 도구의 리전 선택(`regionsOf`)은 데이터에서 만들어 보였다(어긋남).
   선택지 = 4리전 + 데이터 리전(이름순 · Unknown 맨 뒤 · 범위 계정은 scope.regions 안만). 글자 `regionText`(Unknown → ‘리전 미지정’)를 범위 글자 · 칩 안내 · 이웃 범위 · vCenter 첫 선택지가 함께 쓴다. 테스트 `platformText.test.js` v3.12.8.
+- **v3.12.9 — 2차 루프 8회차: ‘실제 OS 확인’ 주기 스캔 설정 — 이름 · 칸 · 단위 한 묶음 · 숫자 칸 폭 · 버튼 줄 줄바꿈**(400px 스크린샷 판독): 줄이 바뀔 때 ‘분 최대’ 처럼 앞 칸의 단위와 다음 칸의 이름이 한 줄에 붙고 칸과 떨어졌고,
+  버튼 줄(flexWrap 없음)은 ‘지금 스캔 (전체 vCenter)’ 가 세 줄로 접히고 오류 문구가 짓눌렸다. 칸마다 `<label className="flex" style={FIELD}>`(nowrap · 칸의 이름도 된다) · 버튼 줄 `flexWrap`.
+  ⚠ 전역 `.input { min-width: 220px }` 가 인라인 숫자 칸의 `width: 90` 등을 덮어 칸이 늘 220px 였다 — 짧은 숫자 칸은 `minWidth: 0` 을 함께 줄 것(안 주면 nowrap 묶음이 카드 밖으로 잘린다 — 이번에 한 번 재현). 다른 화면의 같은 패턴은 이번 범위 밖. 테스트 `tools/guestOsForm3129.test.js`.
