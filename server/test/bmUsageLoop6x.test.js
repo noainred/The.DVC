@@ -239,3 +239,20 @@ test('B4 bm-storage 폼 인증 목록 — 서버 판정(저장과 같은 함수)
   assert.ok(!/privateKey|password|"b"/.test(e.txt), '비밀 칸 없음');
   void accB; void accA;
 });
+
+test('A1 재확인(6회차 X) — 실행성 GET(실시간 iDRAC 로그인)은 조회 ∧ 쓰기 전체 범위만 · 캐시 조회는 그대로', async () => {
+  const REG = await import('../src/idrac/registry.js');
+  const r = REG.importServers([{ id: 'idr-b6', name: 'idr-b6', host: '10.96.0.6', username: 'u', password: 'p', vcenterId: 'vcB' }], 'merge');
+  assert.ok(r.ok !== false, JSON.stringify(r));
+  // 재현 꼴(기준판 04fad6d1): wadm(쓰기 vcA) 이 vcB 서버에 저장된 BMC 계정으로 실시간 로그인 → 200
+  const gp = await call('wadm', 'GET', '/admin/idrac/idr-b6/gpu-probe');
+  assert.equal(gp.s, 403, gp.txt.slice(0, 200)); assert.match(gp.j.reason, /조회 · 쓰기 모두 전체 범위/);
+  const inv = await call('wadm', 'GET', '/admin/idrac/idr-b6/inventory?refresh=1');
+  assert.equal(inv.s, 403, inv.txt.slice(0, 200)); assert.match(inv.j.reason, /실시간 iDRAC 로그인/);
+  const sen = await call('wadm', 'GET', '/admin/idrac/idr-b6/sensors?live=1');
+  assert.equal(sen.s, 403, sen.txt.slice(0, 200));
+  assert.equal((await call('sadm', 'GET', '/admin/idrac/idr-b6/inventory?refresh=1')).s, 404, '조회 범위 밖은 존재 은닉 그대로');
+  assert.equal((await call('adm', 'GET', '/admin/idrac/nope/gpu-probe')).s, 404, '전체 관리자는 게이트를 지나 처리기(없는 서버 404)');
+  // 캐시 조회(실시간 아님)는 쓰기 일부 계정에도 그대로 — 읽기
+  assert.notEqual((await call('wadm', 'GET', '/admin/idrac/idr-b6/inventory')).s, 403);
+});

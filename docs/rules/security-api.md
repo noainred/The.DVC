@@ -564,6 +564,10 @@
     (`san-flow/preview` 가 v2.935 부터 같은 판정으로 막혀 있는 것과 같다). 연결 시험 · probe · run · pull(api · admin · insights 라우터에서 이름이 시험 · 미리보기 · 실행성인 비안전 메서드 77개 중 나머지 — 이름 기준 판독)은 저장 비밀로 접속하거나 동작을 시키므로 막는 것이 맞다.
   - **등급 질의는 쓰기 범위를 보지 않는다**: `settingsOwnerGradeDenial`(소유자 ∧ 조회 전체 — v2.744 그대로)을 라우트 게이트와 `bmOnboard.isOwnerTier`(법인마다 쓰기 범위를 따로 보는 라우트 안의 승인 등급 —
     8a 정비 창 · 7b 온보딩 묶음 행)가 같이 쓴다. 쓰기 vcA 소유자의 vcA 법인 창은 그대로 200(bmMaint8aRoute). `/auth/me settingsOwnerTier` 는 쓰기 메서드로 묻는다(그 버튼의 저장이 403 이면 잠근다).
+  - **재확인(반증) 뒤 — 실행성 GET 도 쓰기와 같게**: 안전 메서드 통과는 '읽기' 라서, GET 이지만 **실행**인 라우트는 이 규칙의 빈칸이었다 —
+    `routes/admin/idracScan.js` 실시간 iDRAC 로그인(`gpu-probe` · `inventory?refresh=1` · `sensors?live=1` — 저장된 BMC 계정으로 장비에 접속)은 조회 범위만 봐서
+    쓰기 vcA 관리자가 vcB 서버에 실시간 로그인했다(재현 200) → `liveFleetOnly = fullReadWriteScopeOnlyWith` · `denyLive` = `isFullReadWriteScope`(캐시 조회는 그대로).
+    새 GET 라우트가 장비에 접속하거나 상태를 바꾸면 안전 메서드 통과에 기대지 말고 `fullReadWriteScopeOnlyWith` 를 직접 건다(Bareos `?refresh=1` 은 콘솔 조회 — 읽기).
   - **결정 대기(사용자)**: `requireSettingsOwner` 의 **GET**(백업 내려받기 · 상태 · 비밀 정책 조회 — 전 법인 공용 비밀이 든 조회)을 쓰기 범위가 지정된 소유자에게 줄지. 이번에는 바꾸지 않았다(바꾸면 그 소유자는 소유자 라우트의 GET 도 잃는다).
   - 바뀌는 흐름(정직 기록): 쓰기 범위가 지정된 관리자 · 소유자는 전 법인 공용 쓰기 · 시험 · 실행 라우트에서 403 을 받는다(버튼은 지금처럼 역할로 열리고, 서버 사유가 화면에 그대로 보인다 — 통합 서버 인벤토리 · bm-storage 주기 저장 확인).
     회귀 `server/test/bmUsageLoop6x.test.js` A1 ①② · 정정 `bareosRestoreBulkRoutes2861` ⑤(사유가 공용 쓰기 범위 사유로 먼저 나온다).
