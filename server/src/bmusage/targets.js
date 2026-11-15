@@ -293,6 +293,13 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
     const osPick = osIssue ? { entry: null, reason: osPick0.reason } : osPick0;
     const osEdgeAgent = osIssue === 'os-edge' ? t(osPick0.entry.agent) : '';
     /*
+     * 4회차 점검 D2: pickOsEntry 가 **이 함대 서버에 고른 OS 등록** id — 그 등록을 경로로 쓰지 않는 갈래(꺼짐 · 엣지 지정 · 위임 · 법인 꺼짐 · 귀속 없음 · 경로 없음)에도
+     *   싣는다(osRegId). 누락 점검(onboard/missing.js)이 이 id 를 ‘함대에 있는 서버의 등록’ 으로 세어, 이름이 함대와 다른 등록을 ‘등록부에만 있음(함대에 없음)’ 으로
+     *   한 번 더 올리지 않게(1회차 D3 · D4 가 만든 회귀). 새 대조가 아니라 고른 결과 그대로다. 응답에는 싣지 않는다(publicTarget · publicSkipped 가 뺀다).
+     */
+    const osRegId = osPick0.entry ? t(osPick0.entry.id) : '';
+    const regIdOf = osRegId ? { osRegId } : {};
+    /*
      * v2.961 — **원격 수집 서버(엣지)가 iDRAC 을 맡은 서버는 그 엣지가 수집한다**(사용자 보고: 엣지 iDRAC 스캔이 자동 등록한 서버가 중앙에서
      *   ‘iDRAC 등록 없음’ 1,157대로 보였다). 그 서버의 bareMetal 행은 원격 전력(collector/state.js — 수집 서버 pull) 출처라 `remoteAgent` 가 없고
      *   (엣지 이름은 fleet 보고에만 실리는데 같은 서버의 fleet 보고는 fleetInventory 가 겹침으로 버린다), 중앙은 자기 iDRAC 등록부에서 찾다가 없으니 no-idrac 이었다.
@@ -316,20 +323,20 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
      */
     const idracUsable = !!(settings.idracTelemetry && reg && t(reg.host) && t(reg.username) && t(reg.password));
     if (osEdgeAgent && !idracUsable && !idracUnread) {
-      skipped.push({ ...idOf(b), reason: 'edge-delegated', ...(isEdge ? { agent: osEdgeAgent } : delegatedAgentFields(remoteCollectors, osEdgeAgent)), vcenterId: vc, delegatedBy: 'os-registry' });
+      skipped.push({ ...idOf(b), reason: 'edge-delegated', ...(isEdge ? { agent: osEdgeAgent } : delegatedAgentFields(remoteCollectors, osEdgeAgent)), vcenterId: vc, delegatedBy: 'os-registry', ...regIdOf });
       continue;
     }
     // 1회차 점검 D3: 꺼진 등록(iDRAC · OS)은 ‘이 노드가 수집할 수 있는 등록’ 이 아니다 — 원격 수집 서버가 맡은 서버면 그 엣지 위임이다(예전: 꺼진 계정으로 중앙이 접속).
     if (!isEdge && !bmRegUnread && t(b.source) === 'remote' && t(b.collectorId) && !reg && !osPick.entry && !osPick.reason) {
       const who = remoteCollectorNameOf(remoteCollectors, b.collectorId);
-      if (who.name) skipped.push({ ...idOf(b), reason: 'edge-delegated', agent: who.name, ...(agentNameClash(remoteCollectors, who.name, who.id) ? { agentClash: true } : {}), vcenterId: vc, delegatedBy: 'collector', ...edgeKeyOf(b) });
-      else skipped.push({ ...idOf(b), reason: 'remote-collector-unknown', vcenterId: vc, collectorIssue: who.issue });
+      if (who.name) skipped.push({ ...idOf(b), reason: 'edge-delegated', agent: who.name, ...(agentNameClash(remoteCollectors, who.name, who.id) ? { agentClash: true } : {}), vcenterId: vc, delegatedBy: 'collector', ...edgeKeyOf(b), ...regIdOf });
+      else skipped.push({ ...idOf(b), reason: 'remote-collector-unknown', vcenterId: vc, collectorIssue: who.issue, ...regIdOf });
       continue;
     }
     if (!vc) {
-      if (!settings.includeUnassigned) { skipped.push({ ...idOf(b), reason: 'unassigned' }); continue; }
+      if (!settings.includeUnassigned) { skipped.push({ ...idOf(b), reason: 'unassigned', ...regIdOf }); continue; }
     } else if (!corps[vc]) {
-      skipped.push({ ...idOf(b), reason: 'corp-off', vcenterId: vc }); continue;
+      skipped.push({ ...idOf(b), reason: 'corp-off', vcenterId: vc, ...regIdOf }); continue;
     }
     const osEntry = osPick.entry;
     const osReason = osPick.reason || osIssue || 'no-os-cred';
@@ -353,7 +360,7 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
         : (settings.osSsh && osWhy) ? osWhy
           : (settings.osSsh && !osEntry && idracReason) ? idracReason
             : (idracReason || osReason);
-      skipped.push({ ...idOf(b), reason, vcenterId: vc, osMissing: !osEntry, ...(osWhy || osIssue ? { osIssue: osWhy || osIssue } : {}), ...(idracReason && reason !== idracReason ? { idracIssue: idracReason } : {}) });
+      skipped.push({ ...idOf(b), reason, vcenterId: vc, osMissing: !osEntry, ...(osWhy || osIssue ? { osIssue: osWhy || osIssue } : {}), ...(idracReason && reason !== idracReason ? { idracIssue: idracReason } : {}), ...regIdOf });
       continue;
     }
     /*
@@ -377,6 +384,7 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
       // `regId`(v2.590): 주 iDRAC 폴러의 인증 실패 정지 기록을 같은 id 로 조회하기 위한 것(poller.js).
       idrac: paths.includes('idrac') ? { regId: t(reg.id), host: t(reg.host), username: t(reg.username), password: reg.password } : null,
       osHost: paths.includes('os') ? osEntry : null,
+      ...(paths.includes('os') ? {} : regIdOf),   // 4회차 D2: 고른 OS 등록을 쓰지 않는 대상(꺼짐 · 엣지 지정 — iDRAC 만)
       // OS 계정은 있는데 iDRAC 이 없거나 반대인 경우 — 그 사실을 화면이 말해야 한다.
       missing: [idracReason, (settings.osSsh && !osEntry) ? osReason : ''].filter(Boolean),
     });
@@ -661,8 +669,15 @@ export function maskBmIdentity(x, match) {
 }
 
 /** 응답용 — 자격증명을 뺀다. ⚠ 라우트는 반드시 이것만 내보낼 것. */
+/** 제외 행(skipped) 응답용 — 누락 점검 전용 칸(osRegId)을 뺀다(4회차 D2 · 가림 규약: 등록 id 는 화면이 쓰지 않는다). */
+export function publicSkipped(s = {}) {
+  if (!s || typeof s !== 'object' || !('osRegId' in s)) return s;
+  const { osRegId: _osRegId, ...rest } = s;
+  return rest;
+}
+
 export function publicTarget(x = {}) {
-  const { idrac, osHost, ...rest } = x;
+  const { idrac, osHost, osRegId: _osRegId, ...rest } = x;   // 4회차 D2: osRegId(고른 OS 등록 id — 누락 점검 전용)는 응답 · 엣지 봉투에 싣지 않는다
   return {
     ...rest,
     idracHost: idrac ? idrac.host : null,

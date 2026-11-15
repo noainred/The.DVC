@@ -16,6 +16,7 @@ import { config } from '../../config.js';
 import { analyzeOnboardRows, analysisSig, edgeRowFromPlan, osWriteOf } from './importAnalyze.js';
 import { atomicWriteFileSync } from '../../util/atomicWrite.js';
 import { parseOnboardFile } from './importParse.js';
+import { keyShape, effectiveKeyOf } from './placement.js';
 
 
 let _chain = Promise.resolve();
@@ -67,7 +68,10 @@ export function buildOnboardCtx({ D, corps = [], canView, canWrite, fullScope = 
     osRegistry: D.BM.listBmServers(),
     edgeRows: isEdge ? [] : D.ED.allEdgeRows(),
     accountByName: (kind, name) => pubAcc(D.KS.accountByName(kind, name)),
-    keyByName: (name) => { const k = D.KS.keyByName(name); return k ? { id: k.id, name: k.name, status: k.status } : null; },
+    // 4회차 점검 D1: 키 폴더(법인 · 서버) · 허용 기능도 넘긴다(비밀 없음) — 분석이 접속 때와 같은 판정(placement.keyPlacementIssue)을 쓰기 전에 건다.
+    keyByName: (name) => keyShape(D.KS.keyByName(name)),
+    /** 쓰기 뒤 효력 키(서버 키 → 공통 계정 기본 키 · 비밀번호 고정이면 없음) — 참조 id 토큰(bindRule)으로. */
+    effectiveKeyOf: (refs) => effectiveKeyOf(refs, { keyById: D.KS.keyById, accountById: D.KS.accountById }),
     osIssue: D.BM.bmServerInputIssue,
     idracIssue: D.IDR.idracInputIssue,
     sanitizeMounts: D.MNT.sanitizeMounts,
