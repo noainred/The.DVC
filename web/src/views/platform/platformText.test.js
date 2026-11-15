@@ -314,3 +314,16 @@ describe('v3.10.18 — 점검 6회차: 허브 부제가 옛 가정(법인 = vCen
     expect(s).toMatch(/서비스 = vCenter 1 \+ Bareos 1 · 한 법인에 서비스가 여럿일 수 있습니다/);
   });
 });
+
+describe('v3.10.21 — 점검 9회차: Summary 리전 보기에서 나눌 수 없는 EM 값은 전 법인 기준임을 밝힌다(소스 계약)', () => {
+  it('Veeam 카드 — data.emFleetWide 면 안내 · 에러 로그 — emSkippedForRegion 문구', () => {
+    const t = fs.readFileSync(new URL('../tools/BackupSummaryTool.jsx', import.meta.url), 'utf8');
+    expect(t).toMatch(/\{data\.emFleetWide && <span className="muted"[^\n]*data-em-fleet=""/);
+    expect(t).toMatch(/EM · 저장소 · 라이선스는 전 법인 기준/);
+    const e = fs.readFileSync(new URL('../tools/BackupSummaryErrors.jsx', import.meta.url), 'utf8');
+    expect(e).toMatch(/data\.emSkippedForRegion \? '리전 보기에서는 뺐습니다/);
+    expect(t).toMatch(/<BackupSummaryCapSched [^\n]*emFleetWide=\{!!data\.emFleetWide\}/);
+    const c = fs.readFileSync(new URL('../tools/BackupSummaryCapSched.jsx', import.meta.url), 'utf8');
+    expect(c).toMatch(/30일 추이\(EM\{emFleetWide \? ' · 전 법인 기준' : ''\}\)/);
+  });
+});

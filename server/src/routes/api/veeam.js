@@ -800,8 +800,9 @@ async function summaryData(req, snap, scope, region = '') {
   const em = allowed ? null : await emSummary(now);
   // v2.839 Bareos 카드 '풀 사용' · '스케줄' · 용량 카드 'Full 풀 가득 참' — 범위 안 Director 의 정책 수집본(없으면 null — '수집 전')
   let bareosPolicy = null;
-  try { if (bset) bareosPolicy = bareosPolicySummary(bset, allowed, bareosRegistryLoadError() ? [] : bareosJobDigests(), { now, demo: bareosIsDemoActive() }); } catch { bareosPolicy = null; }
-  return { ok: true, at: Date.now(), scope, region, regions: regionsOf(vcsAll), rows, totals, bareosGroups: bareosGroupCounts(new Set(vcs.map((v) => v.id)), now), bareosPolicy, directors: bareosDirectorHealth(rows, bset), em, priority: prioOk ? { items: prio, total: prioTotal, truncated: prioTotal > prio.length || undefined } : { withheld: 'detail-tool' }, ...(admin ? { runningJobs: jobs } : {}), registryUnreadable: registryBroken() || undefined,
+  const regionSet = region ? new Set(vcs.map((v) => v.id)) : allowed;   // v3.10.21 리전 보기면 Director 정책 요약(풀 · 스케줄 · 다음 회차)도 그 리전 법인만 — 리전이 없으면 사용자 범위 그대로(null = 전체)
+  try { if (bset) bareosPolicy = bareosPolicySummary(bset, regionSet, bareosRegistryLoadError() ? [] : bareosJobDigests(), { now, demo: bareosIsDemoActive() }); } catch { bareosPolicy = null; }
+  return { ok: true, at: Date.now(), scope, region, regions: regionsOf(vcsAll), rows, totals, bareosGroups: bareosGroupCounts(new Set(vcs.map((v) => v.id)), now), bareosPolicy, directors: bareosDirectorHealth(rows, bset), em, emFleetWide: !!(em && region), priority: prioOk ? { items: prio, total: prioTotal, truncated: prioTotal > prio.length || undefined } : { withheld: 'detail-tool' }, ...(admin ? { runningJobs: jobs } : {}), registryUnreadable: registryBroken() || undefined,
     marksUnreadable: unreadable || undefined, marksCorruptKept: (!unreadable && marksCorruptKept()) || undefined };
 }
 
@@ -1067,7 +1068,8 @@ async function errorsData(req, snap, scope, days, region = '') {
     }
   }
   let emIncluded = false;
-  if (!allowed) {
+  const emSkippedForRegion = !allowed && !!region;   // v3.10.21 EM 세션 · EM 상태 행은 리전으로 나눌 수 없다 — 리전 보기에서는 빼고 그 사실을 응답에 적는다(전체 리전에서 보인다)
+  if (!allowed && !region) {
     try {
       const d = await emData(admin);
       emIncluded = true;
@@ -1080,12 +1082,12 @@ async function errorsData(req, snap, scope, days, region = '') {
   if (bset) {
     try {
       const names = new Map((snap?.vcenters || []).map((v) => [v.id, v.name || v.id]));
-      pushAll(rows, volumeRows(bareosErrorVolumeItems(bset, allowed), since, (id) => names.get(id) || id));
+      pushAll(rows, volumeRows(bareosErrorVolumeItems(bset, region ? new Set(vcs.map((v) => v.id)) : allowed), since, (id) => names.get(id) || id));   // v3.10.21 리전 보기면 그 리전 Director 만
     } catch { /* 수집본을 못 읽음 — 행 없음(정책 탭이 손상을 밝힌다) */ }
   }
   const fin = finishErrors(rows);
   let relayLimitsNow = null; try { relayLimitsNow = bareosRelayLimits(); } catch { relayLimitsNow = null; }
-  return { ok: true, at: now, days, scope, ...fin, sources: { veeamVm: true, em: emIncluded, bareos: true }, ...(bareosUnknownSites ? { bareosUnknownSites } : {}), ...(relayLimitsNow ? { relayLimits: relayLimitsNow } : {}) };
+  return { ok: true, at: now, days, scope, ...fin, sources: { veeamVm: true, em: emIncluded, bareos: true }, ...(emSkippedForRegion ? { emSkippedForRegion: true } : {}), ...(bareosUnknownSites ? { bareosUnknownSites } : {}), ...(relayLimitsNow ? { relayLimits: relayLimitsNow } : {}) };
 }
 
 /**

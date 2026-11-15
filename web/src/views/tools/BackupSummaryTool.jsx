@@ -152,6 +152,7 @@ export default function BackupSummaryTool() {
             <span style={{ padding: '2px 10px', borderRadius: 999, fontSize: 12, fontWeight: 800, color: '#93c5fd', background: 'rgba(59,130,246,.18)' }}>Veeam</span>
             <b style={{ fontSize: 13 }}>B&amp;R 서버 {fmtNum(sum('veeamServers'))} · EM {em ? fmtNum(em.ems) : '—'} · 잡 {em?.jobs != null ? fmtNum(em.jobs) : '—'}</b>
             <span className="muted" style={{ fontSize: 11.5 }}>연동 법인 {fmtNum(linked)}/{fmtNum(rows.length)}</span>
+            {data.emFleetWide && <span className="muted" style={{ fontSize: 11.5 }} data-em-fleet="" title="EM(Enterprise Manager)은 여러 B&R 서버를 묶어 읽어 리전으로 나눌 수 없습니다 — EM 수 · 잡 · 저장소 사용 · 라이선스 · 30일 추이는 전 법인 값입니다(B&R 서버 수 · 보호 VM · 7일 성공률 · 다음 창은 이 리전 값)">· EM · 저장소 · 라이선스는 전 법인 기준</span>}   {/* v3.10.21 */}
             <a href="#/tools/backup-em" style={link}>Veeam 메뉴 →</a>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8 }}>
@@ -194,7 +195,7 @@ export default function BackupSummaryTool() {
       <BackupSummaryBar sel={sel} rows={rows} onClear={clearSel} onSaved={load} />
       <BackupSummaryStale scope={scope} rows={rows} sel={sel} onPick={pick} onOpenDetail={openDetail} />
       <BackupSummaryTree rows={rows} opts={opts} reloadKey={data.at} onOpenDetail={openDetail} sel={sel} onPick={pick} />
-      <BackupSummaryCapSched rows={rows} em={em} bp={bp} reloadKey={data.at} region={region} />
+      <BackupSummaryCapSched rows={rows} em={em} bp={bp} reloadKey={data.at} region={region} emFleetWide={!!data.emFleetWide} />
       <BackupSummaryErrors reloadKey={data.at} onOpenDetail={openDetail} region={region} />
 
       <div className="card" data-backup-source="" style={{ padding: '10px 14px', fontSize: 11.5, lineHeight: 1.6, color: 'var(--text-dim)' }}>

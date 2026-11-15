@@ -968,3 +968,6 @@
   순증감(마지막 − 처음 total)과 생성 · 삭제 합을 따로 세어 ‘+61 · 생성 +0 · 삭제 −0’ 처럼 모순으로 보였다 — 기준선 슬롯(첫 스냅샷 · DB 재설정 뒤)과 vCenter 를 건너뛴 슬롯은 생성 · 삭제를 세지 않는다(데모 백필도 같다).
   `vmNetSummary(points)` → `{net, added, removed, unaccounted, baselines, skippedSlots}` · `vmNetMetaText` · `vmNetUnaccountedTitle`(이유). 카드 meta ‘생성 +A · 삭제 −R · 미집계 ±U’ · 도구 ‘생성/삭제’ 칸 meta · title.
   점이 없으면 net null(‘—’). 테스트 `tools/vmTrackText.test.js`(소스 계약: 두 화면이 따로 reduce 하지 않는다).
+- **v3.10.21 — 가상화 플랫폼 점검 9회차: Summary 리전 보기 — Director 정책 요약 · 오류 볼륨도 그 리전만, 나눌 수 없는 EM 값은 ‘전 법인 기준’ 으로 밝힌다**(자율 개선 루프 · v3.10.17 후속): `bareosPolicySummary` · `bareosErrorVolumeItems` 가
+  `allowed`(사용자 범위)만 받아 리전 보기에서도 범위 전체를 셌다 → `regionSet`(리전 법인 id · 리전이 없으면 `allowed` 그대로). EM(Enterprise Manager)은 B&R 여러 대를 묶어 읽어 리전으로 나눌 수 없다 —
+  Summary 응답 `emFleetWide`(Veeam 카드 ‘· EM · 저장소 · 라이선스는 전 법인 기준’) · 에러 로그 응답 `emSkippedForRegion`(리전 보기에서는 EM 세션 · EM 상태 행을 빼고 그 사실을 문구로). 테스트 `backupSummaryRegion31017`(소스 계약) · `platformText.test.js` v3.10.21.

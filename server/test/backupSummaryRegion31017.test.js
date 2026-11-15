@@ -47,3 +47,14 @@ test('소스 계약 — 범위 교집합 뒤에 리전 · 다섯 집계가 inReg
   assert.equal((s.match(/regionQuery\(req\.query\)/g) || []).length, 4, 'summary · summary.csv · schedule · errors');
   assert.match(s, /return \{ ok: true, at: Date\.now\(\), scope, region, regions: regionsOf\(vcsAll\), rows, totals,/);
 });
+
+test('v3.10.21 — 리전 보기: Director 정책 요약 · 오류 볼륨은 그 리전 법인만(regionSet) · EM 은 나눌 수 없어 응답이 emFleetWide · emSkippedForRegion 으로 밝힌다', () => {
+  const s = fs.readFileSync(new URL('../src/routes/api/veeam.js', import.meta.url), 'utf8');
+  assert.match(s, /const regionSet = region \? new Set\(vcs\.map\(\(v\) => v\.id\)\) : allowed;/);
+  assert.match(s, /bareosPolicySummary\(bset, regionSet,/);
+  assert.match(s, /emFleetWide: !!\(em && region\)/);
+  assert.match(s, /const emSkippedForRegion = !allowed && !!region;/);
+  assert.match(s, /if \(!allowed && !region\) \{/);
+  assert.match(s, /bareosErrorVolumeItems\(bset, region \? new Set\(vcs\.map\(\(v\) => v\.id\)\) : allowed\)/);
+  assert.match(s, /\.\.\.\(emSkippedForRegion \? \{ emSkippedForRegion: true \} : \{\}\)/);
+});
