@@ -27,6 +27,7 @@ export const DEFAULT_LOG_LIMIT = 400;
 export const MAX_LOG_LIMIT = 1_000;
 /** 로그 한 줄 길이 상한(스택·SSH 추적이 통째로 들어온다 — `util/activityLog.js:67` 와 같은 규칙). */
 const LINE_MAX = 2_000;
+const SCAN_MAX = 16_384;   // 가림 정규식에 넣는 원문 상한(logbuffer MSG_MAX 8,192 + 생략 표지보다 넉넉히)
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
@@ -81,8 +82,10 @@ export async function collectEdgeLog({ since = 0, level = '', limit = DEFAULT_LO
   const all = Array.isArray(raw.items) ? raw.items : [];
   // 상한을 넘으면 **최신 쪽을 남긴다** — 진행상태를 보려는 것이므로 오래된 줄보다 방금 줄이 중요하다.
   const kept = all.length > cap ? all.slice(-cap) : all;
-  // 16회차 T-3: 먼저 자르고 가린다(정규식에 8KB 줄 전체를 넣지 않는다 — 루트 규칙 '길이를 먼저 자르고') · 가림 글자로 늘어난 만큼 다시 자른다
-  const items = kept.map((e) => ({ id: e.id, time: e.time, level: e.level, msg: redactLogLine(String(e.msg ?? '').slice(0, LINE_MAX)).slice(0, LINE_MAX) }));
+  // 16회차 T-3 · 18회차 반증 A-1: 가림 정규식은 모두 길이 한정 선형이라, **줄 원문(logbuffer MSG_MAX 8,192자 + 생략 표지)을 다 가린 뒤** 화면 길이로 자른다.
+  //   먼저 LINE_MAX 에서 자르면 끝 표지('@' · 닫는 따옴표)가 잘린 비밀 앞부분이 원문으로 나갔다(재현: URL 비밀번호 · 공백 든 따옴표 값).
+  //   SCAN_MAX 는 상주 상한을 넘는 비정상 입력만 막는 바깥 상한이다(정규식 입력 길이를 묶는다).
+  const items = kept.map((e) => ({ id: e.id, time: e.time, level: e.level, msg: redactLogLine(String(e.msg ?? '').slice(0, SCAN_MAX)).slice(0, LINE_MAX) }));
 
   const status = withStatus ? await collectStatus() : null;
   return {

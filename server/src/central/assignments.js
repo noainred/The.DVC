@@ -53,6 +53,18 @@ export function loadAssignments() {
   }
 }
 
+/*
+ * 전체 점검 18회차 반증 B-3(재현): 못 읽은 동안 **한 엣지의 추가 · 수정 · 삭제 · 병합 가져오기는 쓰지 않는다**. 예전에는 그 저장이 빈 목록에 한 건을 얹어
+ *   파일을 쓰고 표지를 풀어, 다른 모든 엣지가 /api/central/assignment 에서 200 assigned:false 를 받고 위임 iDRAC 스캔을 조용히 멈췄다(관리 화면은
+ *   손상을 알리지 않는다). 해제는 손상 보존본을 되돌리고 재시작 · 서비스 점검 '기본값으로 확정' · 전체 목록 가져오기(replace — 사람이 목록 전체를 다시 정함).
+ *   agentUsers(17회차 C-10)와 같은 판단.
+ */
+function writeRefusal() {
+  if (!_loadErr.get()) return null;
+  return { ok: false, code: 'registry-unreadable', status: 503,
+    reason: 'iDRAC 스캔 배정 파일(agent-assignments.json)을 읽지 못한 상태라 저장하지 않았습니다 — 지금 한 엣지를 저장하면 손상 보존본(.corrupt.*)에만 남은 다른 엣지의 배정이 빠져 그 엣지들의 위임 스캔이 멈춥니다. 보존본을 되돌리고 재시작하거나, 서비스 점검의 설정 파일에서 기본값으로 확정하거나, 전체 목록 가져오기(바꾸기)로 목록 전체를 다시 정하세요.' };
+}
+
 function save(list) {
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ assignments: list }), null, 2), { mode: 0o600 });
   _loadErr.ok(); // v2.727(D-01): 관리자 저장이 로드 오류를 푼다(settingsLoadError 규약)
@@ -122,6 +134,7 @@ function normalize(body, existing = null) {
 
 export function addAssignment(body) {
   const list = loadAssignments();
+  const refused = writeRefusal(); if (refused) return refused;
   const [entry, err] = normalize(body);
   if (err) return { ok: false, reason: err };
   if (list.some((a) => a.agent.toLowerCase() === entry.agent.toLowerCase())) return { ok: false, reason: `이미 존재하는 에이전트: ${entry.agent}` };
@@ -131,6 +144,7 @@ export function addAssignment(body) {
 
 export function updateAssignment(agent, body) {
   const list = loadAssignments();
+  const refused = writeRefusal(); if (refused) return refused;
   const idx = list.findIndex((a) => a.agent.toLowerCase() === String(agent).toLowerCase());
   if (idx === -1) return { ok: false, reason: `없는 에이전트: ${agent}` };
   const [entry, err, dropped] = normalize({ ...body, agent: list[idx].agent }, list[idx]);
@@ -142,6 +156,7 @@ export function updateAssignment(agent, body) {
 
 export function removeAssignment(agent) {
   const list = loadAssignments();
+  const refused = writeRefusal(); if (refused) return refused;
   const next = list.filter((a) => a.agent.toLowerCase() !== String(agent).toLowerCase());
   if (next.length === list.length) return { ok: false, reason: `없는 에이전트: ${agent}` };
   save(next);
@@ -186,6 +201,7 @@ export function parseCsv(text) {
 export function importAssignments(incoming, mode = 'merge') {
   if (!Array.isArray(incoming)) return { ok: false, reason: 'assignments 배열을 찾을 수 없습니다.' };
   const existing = loadAssignments();
+  if (mode !== 'replace') { const refused = writeRefusal(); if (refused) return refused; }   // 18회차 B-3: 바꾸기(목록 전체)만 손상 중에도 쓴다
   const result = mode === 'replace' ? [] : [...existing];
   let added = 0, updated = 0;
   const skipped = [];

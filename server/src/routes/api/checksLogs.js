@@ -8,8 +8,8 @@ import { config, loadVcenterConfig } from '../../config.js';
 import { scanResultList, getIpHistoryMap } from '../../ipam/scanStore.js';
 import { snapshotFilter, slimVm, filterScanResults } from '../../search/deepSearch.js';
 import { getServiceCheck } from '../../health/services.js';
-import { confirmSettingsDefault } from '../../util/settingsLoadError.js';
-import { fullScopeOnlyWith } from '../admin/shared.js';
+import { confirmSettingsDefault, settingsFileOwnerOnly } from '../../util/settingsLoadError.js';
+import { fullScopeOnlyWith, settingsOwnerGradeDenial } from '../admin/shared.js';
 import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { logAudit } from '../../audit.js';
 import { getNetworkCheck } from '../../health/network.js';
@@ -228,9 +228,11 @@ const settingsFleetOnly = fullScopeOnlyWith('설정 파일을 기본값으로 �
 api.post('/tools/service-check/settings-files/confirm', requireRole('admin'), settingsFleetOnly, (req, res) => {
   const file = typeof req.body?.file === 'string' ? req.body.file.slice(0, 128) : '';
   if (!file) return res.status(400).json({ ok: false, code: 'bad-request', reason: 'file 이 필요합니다' });
+  // 18회차 반증 B-2: 쓰기 라우트가 설정 소유자 등급인 파일은 확정도 같은 등급(확정 = 그 쓰기와 같은 결과를 전 엣지에 내린다)
+  if (settingsFileOwnerOnly(file)) { const g = settingsOwnerGradeDenial(req); if (g) return res.status(403).json(g); }
   const r = confirmSettingsDefault(file, { by: req.user?.username || '' });
   if (!r.ok) {
-    const status = r.code === 'unknown-file' ? 404 : r.code === 'not-in-error' ? 409 : r.code === 'not-confirmable' ? 409 : 500;
+    const status = r.code === 'unknown-file' ? 404 : r.code === 'not-in-error' || r.code === 'not-confirmable' || r.code === 'file-present' ? 409 : 500;
     return res.status(status).json(r);
   }
   logAudit({ user: req.user?.username, action: 'settings-file.confirm-default', target: r.file, detail: `${r.label || r.file} 을(를) 기본값으로 확정 — 이 기본값이 엣지에 배포됩니다(손상 보존본은 보관)`, ip: req.ip });

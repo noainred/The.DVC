@@ -54,7 +54,7 @@ function SettingsFiles({ files }) {
   const confirmOne = async (f) => {
     if (!window.confirm(confirmPrompt(f))) return;
     setBusy(f.file);
-    try { const r = await postJson('/tools/service-check/settings-files/confirm', { file: f.file }); setMsg((m) => ({ ...m, [f.file]: { ok: true, text: resultText(r) } })); }
+    try { const r = await postJson('/tools/service-check/settings-files/confirm', { file: f.file }); setMsg((m) => ({ ...m, [f.file]: { ok: !!r?.ok, text: resultText(r) } })); }   // 409(이미 정상 · 파일 있음)는 postJson 이 던지지 않는다 — 성공 색으로 칠하지 않는다
     catch (e) { setMsg((m) => ({ ...m, [f.file]: { ok: false, text: resultText({ code: e?.body?.code, detail: e?.body?.code ? e?.body?.detail : e?.message }) } })); }
     finally { setBusy(''); }
   };

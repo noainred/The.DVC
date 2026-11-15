@@ -43,7 +43,7 @@ export function registryLoadError() { return _loadError; }
  *   사람이 정한다, settingsLoadError 규약) 둘뿐이다. 표지 원문(_loadError.reason)은 그대로 둔다 — 503 의 위치 요약(summarizeRegistryError)의 원천.
  *   `_svc` 는 서비스 점검 목록 · 확정 경로에 올리는 사본이다(같은 자리에서 함께 세우고 푼다).
  */
-const _svc = makeSettingsLoadError(() => FILE, { label: '엣지 배포 사용자(엣지별)', confirm: () => persist() });
+const _svc = makeSettingsLoadError(() => FILE, { label: '엣지 배포 사용자(엣지별) — 확정하면 모든 엣지의 배포 계정이 지워집니다', confirm: () => persist(), ownerOnly: true });   // 18회차 반증 B-2: 쓰기 라우트(requireSettingsOwner)와 같은 등급
 function writeRefusal() {
   if (!_loadError) return null;
   return { ok: false, code: 'registry-unreadable', status: 503,

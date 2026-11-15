@@ -68,5 +68,59 @@ test('③ T-3 — 엣지 로그 가림 정규식은 선형 · 먼저 자른다',
   assert.equal(redactLogLine('X-Collector-Token: abc'), 'X-Collector-Token: ********'.replace('********', redactLogLine('X-Collector-Token: abc').split(': ')[1]));
   assert.ok(!redactLogLine('X-Collector-Token: SECRETVALUE').includes('SECRETVALUE'), '가림은 그대로');
   const c = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '../src/edgelog/collect.js'), 'utf8');
-  assert.match(c, /redactLogLine\(String\(e\.msg \?\? ''\)\.slice\(0, LINE_MAX\)\)\.slice\(0, LINE_MAX\)/);
+  // 18회차 반증 A-1: 원문을 다 가린 뒤 화면 길이로 자른다(먼저 자르면 경계에 걸친 비밀 앞부분이 남았다)
+  assert.match(c, /redactLogLine\(String\(e\.msg \?\? ''\)\.slice\(0, SCAN_MAX\)\)\.slice\(0, LINE_MAX\)/);
+});
+
+test('③ A-1 — 2,000자 경계에 걸친 비밀도 가린다(URL 사용자정보 · 따옴표 값)', async () => {
+  const { collectEdgeLog } = await import('../src/edgelog/collect.js');
+  const { pushLog } = await import('../src/logbuffer.js');
+  const pad = (n) => 'p'.repeat(n);
+  const lines = [
+    `${pad(1_975)} https://admin:S3cr3tXYZLONGSECRET@corp.example/x`,   // 비밀 앞부분은 2,000자 안 · '@' 는 뒤
+    `${pad(1_965)} {"password":"alpha bravoSECRET2 charlie"}`,     // 'bravoSECRET2' 는 2,000자 안 · 닫는 따옴표는 뒤
+  ];
+  for (const l of lines) pushLog('info', l);
+  const r = await collectEdgeLog({ withStatus: false, limit: 50 });
+  const its = r.logs.items; const txt = its.map((x) => x.msg).join('\n');
+  assert.ok(!txt.includes('S3cr3t'), 'URL 비밀번호 앞부분이 남지 않는다');
+  assert.ok(!txt.includes('bravoSECRET2'), '따옴표 값의 뒷 단어가 남지 않는다');
+  for (const it of its) assert.ok(it.msg.length <= 2_000);
+});
+
+test('② A-2 — 통신 지도는 이름이 겹친 엣지의 \'중앙 → 엣지\' 점검 실패를 찾는다(링크 id 판정 하나)', async () => {
+  const { buildLinks } = await import('../src/linkcheck/links.js');
+  const { buildCommMap } = await import('../src/commmap/build.js');
+  const NOW = Date.now();
+  const cols = [
+    { id: 'seoul-old', name: 'Seoul', url: 'https://10.1.1.1:3001', enabled: true },
+    { id: 'seoul', name: 'Seoul', url: 'https://10.2.2.2:3001', enabled: true },
+    { id: 'busan', name: 'Busan', url: 'https://10.3.3.3:3001', enabled: true },
+  ];
+  const ce = buildLinks({ collectors: cols, settings: {} }).links.filter((l) => l.kind === 'central->edge');
+  const latestLinks = ce.map((l) => ({ link_id: l.id, ok: 0, ts: NOW - 1_000, phase: 'tcp', fail_kind: 'timeout', streak: 3 }));
+  const r = buildCommMap({ now: NOW, collectors: cols, latestLinks, linkCheckEnabled: true });
+  for (const id of ['seoul-old', 'seoul', 'busan']) {
+    const e = r.edges.find((x) => x.id === id);
+    assert.ok(e, id);
+    assert.equal(e.linkCheck['central->edge']?.ok, false, `${id} — 실패 최신값을 찾는다(예전: 이름이 겹치면 null)`);
+    assert.ok(e.reasons.includes('link-fail'), `${id} — 장애 사유`);
+  }
+});
+
+test('① A-3 — https 점검의 인증서 · 프로토콜 실패는 \'cert\'(HTTP 무응답으로 오진하지 않는다)', async () => {
+  const http = await import('node:http');
+  const { runCheck } = await import('../src/relaycheck/checks.js');
+  const { remedyFor } = await import('../src/relaycheck/remedy.js');
+  const srv = http.createServer((_q, r) => r.end('{}'));
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  try {
+    const t = { host: '127.0.0.1', port: srv.address().port, kind: 'edge-portal', token: 'T', scheme: 'https', expectAgent: 'e1' };
+    const r = await runCheck(t, { timeoutMs: 3_000 });
+    assert.equal(r.ok, false); assert.equal(r.phase, 'cert', JSON.stringify(r));
+    const rem = remedyFor({ kind: t.kind, host: t.host, port: t.port, phase: r.phase, error: r.error });
+    assert.match(rem.title, /인증서/); assert.match(rem.steps.join(' '), /WAN_TLS_CA_FILE/);
+  } finally { srv.close(); }
+  const web = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '../../web/src/views/tools/RelayCheckTool.jsx'), 'utf8');
+  assert.match(web, /cert: 'TLS 인증서'/, '화면 단계 이름');
 });

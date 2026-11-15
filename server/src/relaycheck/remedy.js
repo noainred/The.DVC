@@ -42,6 +42,11 @@ export function remedyFor(r = {}) {
     return { title: `${k} ${hp}: TCP 는 되나 TLS 응답 없음(백엔드 끊김)`, cause: 'HAProxy frontend 는 살아 있는데 backend(vCenter)로 전달이 끊긴 상태가 가장 유력합니다(backend DOWN·잘못된 backend 주소·vCenter 다운).',
       steps: ['중계 엣지에서 `echo "show stat" | socat stdio /var/run/haproxy.sock | grep ' + r.port + '` 또는 HAProxy stats 로 backend 상태 확인', `haproxy.cfg 의 listen :${r.port} 의 server 주소가 ${backendHint} 인지 확인`, '중계 엣지에서 `nc -vz <backend IP> 443` 로 직접 도달 확인', `수정 후 \`${restart}\``], haproxy: snippet(r.port, backendHint) };
   }
+  if (phase === 'cert') {
+    return { title: `${k} ${hp}: TLS 인증서 · 프로토콜 확인 실패(${err.slice(0, 60) || '사유 미상'})`,
+      cause: '중앙이 등록 URL 의 https 로 붙었으나 인증서를 신뢰하지 못했거나(자체 서명 · 사설 CA · 만료 · 이름 불일치) 그 포트가 https 가 아닙니다(ERR_SSL_WRONG_VERSION_NUMBER — 평문 http 포트).',
+      steps: [`중앙에서 \`openssl s_client -connect ${hp} -servername ${r.host}\` 로 인증서 체인 · 만료 · 이름 확인`, '사설 CA 로 발급한 인증서면 중앙 portal.env 의 WAN_TLS_CA_FILE 에 그 CA 를 넣고 재시작(WAN_TLS_INSECURE 로 검증을 끄지 말 것)', '평문 포트면 수집 서버 등록 URL 의 스킴 · 포트를 실제 서비스와 맞춤'], haproxy: '' };
+  }
   if (phase === 'http') {
     return { title: `${k} ${hp}: TLS 는 되나 HTTP 응답 없음`, cause: '백엔드 서비스(vpxd/포탈)가 지연·중단됐거나, 포워딩이 엉뚱한 서비스로 갑니다.', steps: ['백엔드 장비에서 서비스 상태 확인(vCenter: `service-control --status`, 포탈: `systemctl status vmware-portal`)', `haproxy.cfg 의 :${r.port} backend 주소 재확인`], haproxy: '' };
   }

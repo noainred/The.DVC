@@ -74,6 +74,9 @@ function sshBanner(host, port, timeoutMs) {
   });
 }
 
+/** TLS 인증서 · 프로토콜 실패 코드(node:tls · undici 가 cause.code 로 싣는 것) — 'cert' 단계. 접두 판정이라 선형. */
+const CERT_CODE_RE = /^(?:CERT_|ERR_TLS_|ERR_SSL_|DEPTH_ZERO_SELF_SIGNED_CERT$|SELF_SIGNED_CERT_IN_CHAIN$|UNABLE_TO_(?:VERIFY_LEAF_SIGNATURE|GET_ISSUER_CERT|GET_ISSUER_CERT_LOCALLY)$)/;
+
 async function portalPing(host, port, { token, expectAgent, otherIds = [], timeoutMs, tag = '', scheme = '' }) {
   const t0 = Date.now();
   // 전체 점검 16회차(T-1): 토큰을 싣는 요청은 등록 URL 의 스킴(https 기본) — 스킴을 모르는데 토큰이 있으면 https(평문으로 비밀을 보내지 않는다)
@@ -108,7 +111,10 @@ async function portalPing(host, port, { token, expectAgent, otherIds = [], timeo
     return { ok: true, detail: `health 200 v${remoteText(j.version, 40) || '?'}`, got: { instance: remoteText(j.instance, 80) || undefined, agent: remoteText(j.agent), ...(instanceBad ? { instanceBad: true } : {}) }, ms: Date.now() - t0 };
   } catch (e) {
     const code = e?.cause?.code || e?.code || '';
-    return { ok: false, phase: code === 'ECONNREFUSED' ? 'refused' : /timeout|abort/i.test(e.name || e.message) ? 'timeout' : 'http', error: code || e.message, ms: Date.now() - t0 };
+    // 18회차 반증 A-3: 16회차(T-1)부터 https 로 등록된 엣지는 https 로 붙는다 — 인증서 검증 실패 · 평문 포트(ERR_SSL_WRONG_VERSION_NUMBER)를
+    //   'http'(백엔드 서비스 점검 안내)로 오진하지 않게 'cert' 로 가른다(해결방안이 인증서 · 사설 CA · 스킴을 말한다).
+    const phase = code === 'ECONNREFUSED' ? 'refused' : CERT_CODE_RE.test(String(code)) ? 'cert' : /timeout|abort/i.test(e.name || e.message) ? 'timeout' : 'http';
+    return { ok: false, phase, error: code || e.message, ms: Date.now() - t0 };
   }
 }
 
