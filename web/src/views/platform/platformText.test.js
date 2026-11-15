@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  PLATFORM_TABS, PLATFORM_TAB_KEYS, isPlatformTab, scopeLabel, bareosSumOf, KPI_HANDOFF, handoffKpiVcenter, takeKpiVcenter, keywordsOf, vcMatches, siblingSites, siblingScopeText, chipSites, chipRegionNote, handoffKpiScope, regionsOf, vcInRegion, VC_TOOLS, HOST_TOOLS, PLATFORM_TOOL_KEYS, entityTabs, chipCount, chipLegend, signalSegments,
+  PLATFORM_TABS, PLATFORM_TAB_KEYS, scopeVcOptions, scopeVcPatch, isPlatformTab, scopeLabel, bareosSumOf, KPI_HANDOFF, handoffKpiVcenter, takeKpiVcenter, keywordsOf, vcMatches, siblingSites, siblingScopeText, chipSites, chipRegionNote, handoffKpiScope, regionsOf, vcInRegion, VC_TOOLS, HOST_TOOLS, PLATFORM_TOOL_KEYS, entityTabs, chipCount, chipLegend, signalSegments,
   VM_ITEM_TOOL_KEYS, HV_ITEM_TOOL_KEYS, platformMenuLabel,
   loadChipsCollapsed, saveChipsCollapsed, loadVcView, saveVcView, SCOPE_SEARCH_PLACEHOLDER, SCOPE_NOTE,
 } from './platformText.js';
@@ -325,5 +325,32 @@ describe('v3.10.21 — 점검 9회차: Summary 리전 보기에서 나눌 수 �
     expect(t).toMatch(/<BackupSummaryCapSched [^\n]*emFleetWide=\{!!data\.emFleetWide\}/);
     const c = fs.readFileSync(new URL('../tools/BackupSummaryCapSched.jsx', import.meta.url), 'utf8');
     expect(c).toMatch(/30일 추이\(EM\{emFleetWide \? ' · 전 법인 기준' : ''\}\)/);
+  });
+});
+
+describe('v3.12.1 — 2차 루프 1회차: 공용 범위 바의 vCenter 선택지는 고른 리전 안만 · 리전 밖 vCenter 를 고르면 리전을 비운다', () => {
+  const VCS = [{ id: 'a', name: 'A', location: { region: '유럽' } }, { id: 'b', name: 'B', location: { region: '북미' } }, { id: 'c', name: 'C', location: { region: '유럽' } }, { id: 'd', name: 'D' }];
+  it('scopeVcOptions — 리전이 없으면 전부 · 있으면 그 리전만 · 지금 고른 리전 밖 vCenter 는 맨 앞에 outside', () => {
+    expect(scopeVcOptions(VCS, '').map((o) => o.id)).toEqual(['a', 'b', 'c', 'd']);
+    expect(scopeVcOptions(VCS, '유럽').map((o) => o.id)).toEqual(['a', 'c']);
+    expect(scopeVcOptions(VCS, '유럽', 'b')).toEqual([{ id: 'b', name: 'B', outside: true }, { id: 'a', name: 'A', outside: false }, { id: 'c', name: 'C', outside: false }]);
+    expect(scopeVcOptions(VCS, '유럽', 'a').map((o) => o.id)).toEqual(['a', 'c']);
+    expect(scopeVcOptions(VCS, '', 'zz')[0]).toEqual({ id: 'zz', name: 'zz', outside: false });   // 목록에 없는 id(지워진 vCenter) — 이름 대신 id
+    expect(scopeVcOptions(null, '유럽')).toEqual([]);
+  });
+  it('scopeVcPatch — 리전 안이면 vCenter 만 · 리전 밖이면 리전을 비운다 · 리전이 없거나 모르는 id 면 vCenter 만', () => {
+    expect(scopeVcPatch(VCS, '유럽', 'a')).toEqual({ vcenterId: 'a' });
+    expect(scopeVcPatch(VCS, '유럽', 'b')).toEqual({ vcenterId: 'b', region: '' });
+    expect(scopeVcPatch(VCS, '유럽', 'd')).toEqual({ vcenterId: 'd', region: '' });
+    expect(scopeVcPatch(VCS, '', 'b')).toEqual({ vcenterId: 'b' });
+    expect(scopeVcPatch(VCS, '유럽', '')).toEqual({ vcenterId: '' });
+    expect(scopeVcPatch(VCS, '유럽', 'zz')).toEqual({ vcenterId: 'zz' });
+  });
+  it('소스 계약 — App 범위 바가 두 함수를 쓰고 · 리전이 있으면 첫 선택지가 ‘리전 X 전체’', () => {
+    const app = fs.readFileSync(new URL('../../App.jsx', import.meta.url), 'utf8');
+    expect(app).toMatch(/onChange=\{\(e\) => patchFilter\(scopeVcPatch\(vcenters, region, e\.target\.value\)\)\}/);
+    expect(app).toMatch(/scopeVcOptions\(vcenters, region, vcenterId\)\.map/);
+    expect(app).toMatch(/\{region \? `리전 \$\{region\} 전체` : '전체 vCenter'\}/);
+    expect(app).not.toMatch(/\(vcenters \|\| \[\]\)\.map\(\(v\) => <option key=\{v\.id\} value=\{v\.id\}>\{v\.name\}<\/option>\)/);
   });
 });

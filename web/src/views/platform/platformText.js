@@ -222,6 +222,28 @@ export function chipSites(vcenters, region) {
   const list = (Array.isArray(vcenters) ? vcenters : []).filter((s) => s && typeof s === 'object');
   return r ? list.filter((s) => String(s.location?.region ?? '') === r) : list;
 }
+/**
+ * v3.12.1(2차 루프 1회차): 공용 범위 바의 vCenter 선택지 — 리전을 골랐으면 **그 리전 vCenter 만**(칩과 같은 판정 chipSites).
+ *   예전에는 리전과 무관하게 전부를 보여 리전 밖 vCenter 를 고를 수 있었고, 그러면 허브 카드(그 vCenter 숫자)와 본문(리전 ∩ vCenter = 0건)이 엇갈렸다.
+ *   지금 고른 vCenter 가 리전 밖이면(다른 경로에서 넘어온 값) 맨 앞에 남기고 outside 로 표시한다 — 선택 상자가 거짓 '전체 vCenter' 를 보이지 않게.
+ * @returns {Array<{id:string, name:string, outside:boolean}>}
+ */
+export function scopeVcOptions(vcenters, region, vcenterId = '') {
+  const list = chipSites(vcenters, region).map((v) => ({ id: String(v.id), name: String(v.name || v.id), outside: false }));
+  const id = String(vcenterId || '');
+  if (id && !list.some((o) => o.id === id)) {
+    const v = (Array.isArray(vcenters) ? vcenters : []).find((x) => x && String(x.id) === id);
+    list.unshift({ id, name: String(v?.name || id), outside: !!String(region || '') });
+  }
+  return list;
+}
+/** vCenter 를 고를 때의 patch — 리전 밖 vCenter 면 리전을 비운다(vCenter 하나가 리전보다 좁다 · 둘이 엇갈리면 화면이 빈다). 목록에 없는 id 는 리전을 그대로 둔다. */
+export function scopeVcPatch(vcenters, region, id) {
+  const v = String(id || ''); const r = String(region || '');
+  if (!v || !r) return { vcenterId: v };
+  const vc = (Array.isArray(vcenters) ? vcenters : []).find((x) => x && String(x.id) === v);
+  return vc && String(vc.location?.region ?? '') !== r ? { vcenterId: v, region: '' } : { vcenterId: v };
+}
 /** 칩 줄 범례 앞에 붙는 리전 안내 — '리전 유럽 · 5법인'(리전이 없으면 ''). */
 export function chipRegionNote(region, n) {
   const r = String(region || '').trim();

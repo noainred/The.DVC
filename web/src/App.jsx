@@ -39,7 +39,7 @@ const SvcMonitor = lazy(() => import('./views/SvcMonitor.jsx'));
 import { movedTabHash, legacyShellHash, LEGACY_SHELL_KEY, hashSegments } from './hooks/hashTab.js';
 // v2.915 '서버 › 가상화 플랫폼' 허브(설계 docs/design/virt-platform-menu 시안 A · 컨펌 2026-11-07): vcenters · hosts · vms 세 탭 위에 한 셸 — 탭 id · 해시는 그대로.
 import PlatformHub from './views/platform/PlatformHub.jsx';
-import { isPlatformTab, PLATFORM_TAB_KEYS, SCOPE_SEARCH_PLACEHOLDER, SCOPE_NOTE } from './views/platform/platformText.js';
+import { isPlatformTab, PLATFORM_TAB_KEYS, SCOPE_SEARCH_PLACEHOLDER, SCOPE_NOTE, scopeVcOptions, scopeVcPatch } from './views/platform/platformText.js';
 // v2.725 상단 메뉴 재구성(시안 A '2단 탭') — 대메뉴·하위 메뉴·현재 위치 판정은 views/topMenu.js 하나가 소유한다.
 import { visibleMenu, locate, entryOf, hashOf, menuTabOf } from './views/topMenu.js';
 import { lockReasonOf } from './views/toolVisibility.js';
@@ -608,9 +608,10 @@ function Portal({ user, onLogout }) {
               {((user.scope?.regions?.length) ? REGIONS.filter((r) => user.scope.regions.includes(r)) : REGIONS)
                 .map((r) => <option key={r} value={r}>{r}</option>)}
             </Select>
-            <Select className="select" value={vcenterId} onChange={(e) => setVcenterId(e.target.value)}>
-              <option value="">전체 vCenter</option>
-              {(vcenters || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+            {/* v3.12.1: 리전을 골랐으면 그 리전 vCenter 만 · 리전 밖 vCenter 를 고르면(다른 경로의 값) 리전을 비운다 — 허브 카드와 본문이 엇갈리지 않게 */}
+            <Select className="select" value={vcenterId} onChange={(e) => patchFilter(scopeVcPatch(vcenters, region, e.target.value))}>
+              <option value="">{region ? `리전 ${region} 전체` : '전체 vCenter'}</option>
+              {scopeVcOptions(vcenters, region, vcenterId).map((v) => <option key={v.id} value={v.id}>{v.outside ? `${v.name} (리전 밖)` : v.name}</option>)}
             </Select>
             {/* v2.915: 허브 세 탭은 공용 바가 똑같다(범위 · 검색 · 안내) — 탭 고유 조건(상태 · 전원 · 메모 · IPMS)은 그 탭의 탭 줄 오른쪽으로 내렸다 */}
             {MENU_FILTERS[tab] && !platformOn && (

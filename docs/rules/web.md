@@ -971,3 +971,6 @@
 - **v3.10.21 — 가상화 플랫폼 점검 9회차: Summary 리전 보기 — Director 정책 요약 · 오류 볼륨도 그 리전만, 나눌 수 없는 EM 값은 ‘전 법인 기준’ 으로 밝힌다**(자율 개선 루프 · v3.10.17 후속): `bareosPolicySummary` · `bareosErrorVolumeItems` 가
   `allowed`(사용자 범위)만 받아 리전 보기에서도 범위 전체를 셌다 → `regionSet`(리전 법인 id · 리전이 없으면 `allowed` 그대로). EM(Enterprise Manager)은 B&R 여러 대를 묶어 읽어 리전으로 나눌 수 없다 —
   Summary 응답 `emFleetWide`(Veeam 카드 ‘· EM · 저장소 · 라이선스는 전 법인 기준’) · 에러 로그 응답 `emSkippedForRegion`(리전 보기에서는 EM 세션 · EM 상태 행을 빼고 그 사실을 문구로). 테스트 `backupSummaryRegion31017`(소스 계약) · `platformText.test.js` v3.10.21.
+- **v3.12.1 — 가상화 플랫폼 2차 루프 1회차: 공용 범위 바의 vCenter 선택지는 고른 리전 안만 · 리전 밖 vCenter 를 고르면 리전을 비운다**(`platformText.scopeVcOptions · scopeVcPatch`): 리전(유럽)을 고른 뒤에도 vCenter 선택지가 전 법인을 보여
+  리전 밖 vCenter(us-east)를 고를 수 있었다 — 허브 카드는 그 vCenter 숫자(/platform/summary 는 vcenterId 만 본다)를, 본문은 리전 ∩ vCenter = 0건을 보였다(재현). 이 바는 허브 세 탭과 데이터스토어 등 인벤토리 탭 공용이다.
+  선택지 = `chipSites` 와 같은 판정(리전 안) · 첫 선택지 ‘리전 X 전체’ · 리전 밖 값이 이미 들어 있으면 ‘이름 (리전 밖)’ 으로 맨 앞에 남긴다(거짓 ‘전체’ 금지) · 고를 때 리전 밖이면 `{ vcenterId, region: '' }`. 테스트 `platformText.test.js` v3.12.1.
