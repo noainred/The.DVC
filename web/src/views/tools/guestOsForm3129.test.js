@@ -17,3 +17,12 @@ describe('실제 OS 확인 — 주기 스캔 설정 칸 묶음', () => {
     expect(src).toMatch(/style=\{\{ padding: '8px 16px', flex: 'none', whiteSpace: 'nowrap' \}\} disabled=\{busy === 'run'\}/);
   });
 });
+
+describe('v3.12.11 — Guest OS 종류/버전 필터: 이름 + 버튼 한 묶음(role=group) · aria-pressed', () => {
+  it('전원 · 종류 묶음이 각각 role="group" 안에 이름과 버튼을 함께 둔다', () => {
+    expect(src).toMatch(/<span role="group" aria-label="전원" className="flex" style=\{FILTER_GROUP\}>\s*<span className="muted" style=\{\{ fontSize: 12 \}\}>전원<\/span>/);
+    expect(src).toMatch(/<span role="group" aria-label="종류" className="flex" style=\{FILTER_GROUP\}>\s*<span className="muted" style=\{\{ fontSize: 12 \}\}>종류<\/span>/);
+    expect(src).toMatch(/aria-pressed=\{power === k\}/); expect(src).toMatch(/aria-pressed=\{kind === k\}/);
+    expect(src).toMatch(/const FILTER_GROUP = \{ alignItems: 'center', gap: 6, flex: 'none' \};/);
+  });
+});

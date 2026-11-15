@@ -998,3 +998,5 @@
   ⚠ 전역 `.input { min-width: 220px }` 가 인라인 숫자 칸의 `width: 90` 등을 덮어 칸이 늘 220px 였다 — 짧은 숫자 칸은 `minWidth: 0` 을 함께 줄 것(안 주면 nowrap 묶음이 카드 밖으로 잘린다 — 이번에 한 번 재현). 다른 화면의 같은 패턴은 이번 범위 밖. 테스트 `tools/guestOsForm3129.test.js`.
 - **v3.12.10 — 2차 루프 9회차: ‘VMware 솔루션 / NSX’ vCenter 카드 머리 — 글자 붙음 · ‘법인 ○○ 법인’ 중복**(400px 스크린샷 판독): 머리(`flex between`)에 gap · flexWrap 이 없어 왼쪽(이름 · 법인)이 접히면 오른쪽 ‘vCenter v…’ 와 글자가 붙었다(‘…San vCenter v8.0.2’).
   서버 corp 는 배정된 DataCenter 이름이라 ‘○○ 법인’ 처럼 끝나면 화면이 ‘법인 ○○ 법인’ 으로 보였다 → `licenseScopeText.corpTag`(‘법인’ 으로 끝나면 앞에 붙이지 않음) · 머리 `gap '4px 12px'` + `flexWrap`. 테스트 `licenseScopeText.test.js` v3.12.10.
+- **v3.12.11 — 2차 루프 10회차(마지막): ‘Guest OS 종류/버전’ 필터 — 이름 + 버튼 한 묶음(role=group) · aria-pressed**(400px 판독): ‘전원 [전체]’ 다음 줄에 ‘켜짐 꺼짐 종류 [전체] VM 템플릿’ 처럼 갈라져 켜짐 · 꺼짐이 ‘종류’ 것처럼 보였다.
+  묶음마다 `<span role="group" aria-label=… className="flex" style={FILTER_GROUP}>`(flex: none) · 고른 버튼 `aria-pressed`. 같은 꼴(이름 span 뒤에 버튼 · 칸을 평평하게 늘어놓은 flex wrap 줄)은 좁은 화면에서 이름과 대상이 떨어진다 — 묶어서 둘 것(8 · 10회차 공통 교훈). 테스트 `tools/guestOsForm3129.test.js` v3.12.11.

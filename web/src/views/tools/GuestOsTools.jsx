@@ -14,6 +14,8 @@ import { guestAuthLines } from '../authSkipText.js'; // v2.591(감사 F2): 게�
 
 // v3.12.9 설정 칸 한 묶음(이름 · 칸 · 단위) — 줄이 바뀌어도 함께 움직인다
 const FIELD = { alignItems: 'center', gap: 6, whiteSpace: 'nowrap' };
+// v3.12.11 필터 묶음(이름 + 버튼들) — 줄이 바뀌어도 함께 움직인다
+const FILTER_GROUP = { alignItems: 'center', gap: 6, flex: 'none' };
 
 
 export function GuestOs({ scope }) {
@@ -63,14 +65,19 @@ export function GuestOs({ scope }) {
         <button className={view === 'vcenter' ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView('vcenter')}>vCenter별 ({(data.byVcenter || []).length})</button>
         <SearchBox className="input" style={{ maxWidth: 260 }} placeholder={view === 'vcenter' ? 'vCenter 이름 검색' : 'OS 이름 검색 (예: Windows, Ubuntu 22)'} value={q} onChange={setQ} />
         <span style={{ width: 8 }} />
-        <span className="muted" style={{ fontSize: 12 }}>전원</span>
-        {[['all', '전체'], ['on', '켜짐'], ['off', '꺼짐']].map(([k, l]) => (
-          <button key={k} className={power === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 11px', fontSize: 12 }} onClick={() => setPower(k)}>{l}</button>
-        ))}
-        <span className="muted" style={{ fontSize: 12, marginLeft: 6 }}>종류</span>
-        {[['all', '전체'], ['vm', 'VM'], ['template', '템플릿']].map(([k, l]) => (
-          <button key={k} className={kind === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 11px', fontSize: 12 }} onClick={() => setKind(k)}>{l}</button>
-        ))}
+        {/* v3.12.11: 이름과 버튼을 한 묶음(role=group)으로 — 400px 에서 '전원 [전체]' 다음 줄에 '켜짐 꺼짐 종류 [전체] …' 처럼 갈라져 켜짐 · 꺼짐이 '종류' 것처럼 보였다. 고른 버튼은 aria-pressed. */}
+        <span role="group" aria-label="전원" className="flex" style={FILTER_GROUP}>
+          <span className="muted" style={{ fontSize: 12 }}>전원</span>
+          {[['all', '전체'], ['on', '켜짐'], ['off', '꺼짐']].map(([k, l]) => (
+            <button key={k} type="button" aria-pressed={power === k} className={power === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 11px', fontSize: 12 }} onClick={() => setPower(k)}>{l}</button>
+          ))}
+        </span>
+        <span role="group" aria-label="종류" className="flex" style={FILTER_GROUP}>
+          <span className="muted" style={{ fontSize: 12 }}>종류</span>
+          {[['all', '전체'], ['vm', 'VM'], ['template', '템플릿']].map(([k, l]) => (
+            <button key={k} type="button" aria-pressed={kind === k} className={kind === k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 11px', fontSize: 12 }} onClick={() => setKind(k)}>{l}</button>
+          ))}
+        </span>
       </div>
       {view === 'vcenter' ? (
         // vCenter별 — 각 행 클릭 시 그 vCenter의 OS별 VM 수·할당 vCPU 분해를 펼친다(사용자 요구).
