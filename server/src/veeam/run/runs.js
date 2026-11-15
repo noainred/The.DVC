@@ -38,6 +38,7 @@ const FINAL = new Set(['success', 'warning', 'failed', 'skipped', 'unknown']);
 let _runs = null;
 let _timer = null;
 let _tracking = false;
+const _trackBusy = new Set();   // 지금 세션을 읽는 서버 id(전체 점검 2회차 V-4 — 서버마다 가드)
 
 function load() {
   if (_runs) return _runs;
@@ -86,6 +87,8 @@ export function claimServer(serverId, kind, user = '') {
   return token;
 }
 export function releaseServer(serverId, token) { if (_manageBusy.get(serverId) === token) _manageBusy.delete(serverId); }
+/** 진행 중인 관리 작업 자리(업그레이드 대기 — veeam/run/inflight.js · 사용자 · 토큰 없이 서버 · 종류 · 시각만). */
+export function manageBusyView() { return [..._manageBusy].map(([serverId, t]) => ({ serverId, kind: t.kind, at: t.at })); }
 
 const vmState = (s) => {
   const t = String(s || '').toLowerCase();
@@ -220,11 +223,17 @@ export function applySession(run, sessionId, s) {
   }
 }
 
-/** 추적 1회 — 끝나지 않은 세션을 서버마다 한 번에 읽는다(재진입 가드). */
+/**
+ * 추적 1회 — 끝나지 않은 세션을 서버마다 한 번에 읽는다.
+ * 전체 점검 2회차(V-4): 가드는 **서버마다**(`_trackBusy`) — 예전 전역 가드는 꺼진 엣지 하나의 회신 시한(인출 + sessions 최대 약 5분) 동안
+ *   다음 틱을 통째로 건너뛰어, 다른 서버(중앙 직접 등)의 진행률 · 결과 · 409 해제가 20초가 아니라 몇 분씩 늦었다(N8 주석과 어긋남).
+ *   이제 그 서버만 건너뛰고 나머지는 다음 틱에 읽는다. 모으기(동기 구간)는 `_tracking` 이 겹치지 않게 한다.
+ */
 export async function trackOnce(now = Date.now()) {
   if (_tracking) return { skipped: true };
   _tracking = true;
   let changed = false;
+  const mine = [];   // 이번 틱이 맡은 서버(끝나면 _trackBusy 에서 뺀다)
   try {
     const active = load().filter((r) => r.status === 'running');
     for (const run of active) {
@@ -240,8 +249,17 @@ export async function trackOnce(now = Date.now()) {
         for (const s of g.sessions) if (!s.finished && s.id) { const a = byServer.get(g.serverId) || []; a.push({ run, g, s }); byServer.set(g.serverId, a); }
       }
     }
-    // 서버마다 병렬(동시 4) — 꺼진 엣지 하나의 회신 시한이 다른 서버의 추적을 늦추지 않게(2차 반증 N8).
-    await poolRun([...byServer], TRACK_CONCURRENCY, async ([serverId, list]) => {
+    for (const e of byServer) if (!_trackBusy.has(e[0])) { _trackBusy.add(e[0]); mine.push(e); }
+  } catch (e) {
+    for (const [sid] of mine) _trackBusy.delete(sid);
+    _tracking = false;
+    if (changed) persist();
+    throw e;
+  }
+  _tracking = false;   // 모으기 끝 — 아래 회신 대기 동안 다음 틱이 다른 서버를 읽는다
+  try {
+    // 서버마다 병렬(동시 4) — 꺼진 엣지 하나의 회신 시한이 다른 서버의 추적을 늦추지 않게(2차 반증 N8 · 다음 틱까지 — V-4).
+    await poolRun(mine, TRACK_CONCURRENCY, async ([serverId, list]) => {
       const server = getServerWithSecret(serverId);
       if (!server) {
         for (const { run, s } of list) { s.finished = true; for (const v of run.vms) if (v.sessionId === s.id && !FINAL.has(v.state)) { v.state = 'unknown'; v.detail = 'Veeam 서버 등록이 삭제돼 결과를 읽을 수 없습니다.'; } }
@@ -265,7 +283,7 @@ export async function trackOnce(now = Date.now()) {
       settle(run);
     }
   } finally {
-    _tracking = false;
+    for (const [sid] of mine) _trackBusy.delete(sid);
     if (changed) persist();
   }
   return { ok: true };
@@ -311,4 +329,4 @@ export function startVeeamRunTracker() {
   _timer.unref?.();
 }
 
-export function _resetForTest() { _runs = null; _tracking = false; _manageBusy.clear(); try { fs.rmSync(FILE()); } catch { /* 없음 */ } }
+export function _resetForTest() { _runs = null; _tracking = false; _trackBusy.clear(); _manageBusy.clear(); try { fs.rmSync(FILE()); } catch { /* 없음 */ } }

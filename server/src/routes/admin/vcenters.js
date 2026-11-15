@@ -7,7 +7,7 @@ import { listRegistry, addVcenter, updateVcenter, removeVcenter, testConnection 
 import { getOrder, saveOrder, sortByOrder } from '../../vcenter/order.js';
 import { probeRelayPath } from '../../vcenter/relayProbe.js';
 import { adminOnly, fullScopeOnlyWith } from './shared.js';
-import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
+import { scopedVcenterIds, writeScopedVcenterIds, isFullReadWriteScope, WRITE_SCOPE_PARTIAL_REASON } from '../../auth/scope.js';
 
 /*
  * v2.607 AUTHZ2607-03 — vCenter 등록부는 법인 축이 있다. 예전에는 adminOnly 뿐이라 범위 제한 admin 이 범위 밖
@@ -87,11 +87,12 @@ adminRouter.delete('/vcenters/:id', adminOnly, async (req, res) => {
 // Test connectivity to a vCenter (new entry or a saved one by id).
 adminRouter.post('/vcenters/test', adminOnly, async (req, res) => {
   // v2.607: 범위 계정은 저장된 범위 안 vCenter 만 시험한다(새 항목 시험은 등록과 같은 전 법인 동작 — 403).
-  if (scopedVcenterIds(req.user, store.get())) {
+  // 전체 점검 2회차 V-1: 새 항목 시험은 등록(fleetWideOnly — POST 는 조회 ∧ 쓰기 전체)과 같은 판정. 조회만 보면 쓰기만 줄인 관리자가 새 항목(임의 호스트)을 시험했다.
+  if (!isFullReadWriteScope(req.user, store.get())) {
     const id = String((req.body || {}).id || '');
-    if (!id) return res.status(403).json({ ok: false, error: 'forbidden', reason: '새 vCenter 연결 테스트는 전체 범위(vCenter 제한 없는) 계정만 할 수 있습니다.' });
     const read = scopedVcenterIds(req.user, store.get());
-    if (!read.has(id)) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
+    if (!id) return res.status(403).json(read ? { ok: false, error: 'forbidden', reason: '새 vCenter 연결 테스트는 전체 범위(vCenter 제한 없는) 계정만 할 수 있습니다.' } : { ok: false, error: 'forbidden', reason: WRITE_SCOPE_PARTIAL_REASON, writeScope: 'partial' });
+    if (read && !read.has(id)) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
     // v2.630 AUTHZ2630-02: 범위 계정의 테스트는 저장된 접속처(host·port)로만 — body.host 로 바꿔 임의 호스트를 두드리지 못하게.
     return res.json(await testConnection(req.body || {}, { pinSavedHost: true }));
   }

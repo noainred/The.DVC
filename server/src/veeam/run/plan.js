@@ -66,8 +66,14 @@ export function runStatusOf(vm, { servers = [], known = false, entry } = {}) {
   const lb = typeof entry.lb === 'number' && Number.isFinite(entry.lb) ? entry.lb : null;
   const jobs = Array.isArray(entry.jobs) ? entry.jobs.slice(0, 10) : [];
   const names = new Set((Array.isArray(entry.servers) ? entry.servers : []).map(lc));
-  const owner = servers.find((s) => names.has(lc(s.name))) || null;
+  const owners = servers.filter((s) => names.has(lc(s.name)));
   const base = { objectId, restorePoints: rp, lastBackup: lb, jobs, running: entry.run === 1 };
+  // 전체 점검 2회차(V-7): 대조 결과는 서버를 **표시명**으로 적는다(veeam/parse.js byVm.servers) — 이 vCenter 를 맡는 B&R 둘이 같은 이름이면
+  //   어느 쪽 백업인지 가를 수 없다. 등록 순서상 첫 서버로 보내면 그 VM 을 모르는 서버가 거절했다 — 단정하지 않고 보내지 않는다(이름을 다르게 하면 풀린다).
+  if (owners.length > 1) {
+    return { status: 'unknown', ...base, reason: `이 vCenter 를 맡는 Veeam B&R 서버 ${owners.length}대가 같은 이름('${owners[0].name}')이라 이 VM 의 백업이 어느 서버 것인지 가를 수 없습니다 — Veeam 서버 설정에서 이름을 서로 다르게 하세요.` };
+  }
+  const owner = owners[0] || null;
   // 게스트 에이전트 백업(컴퓨터 이름으로 맞춘 것 — ag 1)이 하나라도 섞이면 VM 단위 백업인지 이 값만으로는 가를 수 없다(대조 코어가 근거를 합친다):
   //   Quick Backup 근거로 쓰지 않고(에이전트 백업이면 Veeam 이 거절), 미보호로 단정해 포탈 잡에 넣지도 않는다(v2.820.1 재검토 — 'agent').
   if (entry.ag === 1) return { status: 'agent', ...base, serverId: (owner || servers[0]).id, serverName: (owner || servers[0]).name,

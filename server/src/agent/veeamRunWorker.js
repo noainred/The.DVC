@@ -22,6 +22,7 @@ import { getServerWithSecret } from '../veeam/registry.js';
 import { authGuard } from '../veeam/poller.js';
 import { runOp, MUTATING } from '../veeam/run/ops.js';
 import { SANITIZERS } from '../veeam/run/parse.js';
+import { noteVeeamEdgeOpStart, noteVeeamEdgeOpEnd } from '../veeam/run/inflight.js';   // 전체 점검 2회차 V-3: 실행 중 상태 변경은 업그레이드가 기다린다
 
 const POLL_MS = clampIntervalMs(Number(process.env.AGENT_VEEAM_RUN_POLL_MS) || 5_000, 5_000, 1_000);
 const OP_CONCURRENCY = 2;
@@ -111,9 +112,14 @@ export async function runVeeamRunWorkerOnce({ fetchImpl } = {}) {
     if (!ops.length) { _last = { at: Date.now(), ok: true, ops: 0 }; return _last; }
     let postErr = null;
     await poolRun(ops, OP_CONCURRENCY, async (op) => {
-      const res = await runEdgeOp(op, { receivedAt, fetchImpl });
-      console.log(`[veeam-run-agent] ${op.kind} → ${op.serverId}: ${res.ok ? '성공' : `${res.unknown ? '결과 모름' : res.notSent ? '보내지 않음' : '실패'} — ${String(res.reason || '').slice(0, 160)}`}`);
-      postErr = (await postResult(op.id, res, op.kind)) || postErr;
+      // 상태 변경은 실행부터 회신까지 업그레이드 대기 목록에(재시작하면 Veeam 에는 실행됐는데 중앙이 결과를 모른다 — bareosOpWorker 와 같은 모양)
+      const track = MUTATING.has(op.kind);
+      if (track) noteVeeamEdgeOpStart(op.id, op.kind, op.serverId);
+      try {
+        const res = await runEdgeOp(op, { receivedAt, fetchImpl });
+        console.log(`[veeam-run-agent] ${op.kind} → ${op.serverId}: ${res.ok ? '성공' : `${res.unknown ? '결과 모름' : res.notSent ? '보내지 않음' : '실패'} — ${String(res.reason || '').slice(0, 160)}`}`);
+        postErr = (await postResult(op.id, res, op.kind)) || postErr;
+      } finally { if (track) noteVeeamEdgeOpEnd(op.id); }
     });
     _last = postErr ? { at: Date.now(), ok: false, ops: ops.length, error: postErr } : { at: Date.now(), ok: true, ops: ops.length };
     if (postErr) noteError(postErr);

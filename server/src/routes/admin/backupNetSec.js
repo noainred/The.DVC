@@ -21,7 +21,7 @@ import { listMonitors, saveMonitor, removeMonitor, runMonitorNow } from '../../n
 import { addUsersToVms } from '../../guest/accountService.js';
 import { onDemandErrorFields } from '../../vcenter/dsBrowse.js';   // v2.742(VC-03 후속): 주문형 로그인 문이 막은 409 의 사유 필드
 import { inUserWriteScope, scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
-import { denyScopedRun } from '../../auth/scopeMerge.js';   // v2.607 AUTHZ2607-06
+import { denyScopedRun, denyFleetWrite } from '../../auth/scopeMerge.js';   // v2.607 AUTHZ2607-06
 import { snapshotFilter, slimVm, guestProbe } from '../../search/deepSearch.js';
 import { analyzeLoginFails, clampLoginFailParams } from '../../security/loginFails.js';
 import { snapMemo, snapCacheClear } from '../../util/snapCache.js';
@@ -239,7 +239,7 @@ adminRouter.get('/vclogs/status', adminOnly, async (req, res) => {
   try { res.json(scopeVcLogStatus(await logStatus(), scopedVcenterIds(req.user, store.get()))); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 adminRouter.put('/vclogs/settings', adminOnly, async (req, res) => {
-  if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: 'vCenter 로그 보관 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.' }); // v2.607
+  if (denyFleetWrite(req, res, 'vCenter 로그 보관 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.')) return; // v2.607 · 전체 점검 2회차 V-1(조회 ∧ 쓰기 전체)
   // v2.480(3차 감사 S4): storagePath 무검증 → 임의 절대경로에 SQLite(+wal/shm) 생성. 절대경로·상위경로·제어문자·시스템 디렉터리 거부.
   const sp = typeof req.body?.storagePath === 'string' ? req.body.storagePath.trim() : '';
   if (sp) {
@@ -408,7 +408,7 @@ adminRouter.get('/security/login-fails', adminOnly, async (req, res) => {
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 adminRouter.get('/security/login-fails/status', adminOnly, fleetOnly, (_req, res) => res.json(loginMonitorStatus()));
-adminRouter.put('/security/login-fails/settings', adminOnly, (req, res) => (scopedVcenterIds(req.user, store.get()) ? res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '로그인 실패 감시 설정은 전 법인 공용이라 전체 범위 계정만 바꿀 수 있습니다.' }) : res.json(saveLoginMonitor(req.body || {}))));
+adminRouter.put('/security/login-fails/settings', adminOnly, (req, res) => { if (denyFleetWrite(req, res, '로그인 실패 감시 설정은 전 법인 공용이라 전체 범위 계정만 바꿀 수 있습니다.')) return; res.json(saveLoginMonitor(req.body || {})); });   // 전체 점검 2회차 V-1
 adminRouter.post('/security/login-fails/run', adminOnly, async (req, res) => { if (denyScopedRun(req, res, '로그인 실패 수동 분석')) return; try { await runLoginAnalysisNow(); snapCacheClear('loginFails'); res.json({ ok: true, ...loginMonitorStatus() }); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); } });
 
 // 게스트 네트워크 이슈(패킷드랍/에러) 분석.

@@ -8,7 +8,7 @@ import { Router } from 'express';
 import { store } from '../store.js';
 import { requireRole, requirePerm } from '../auth/auth.js';
 import { scopedVcenterIds } from '../auth/scope.js';
-import { mergeScopedList } from '../auth/scopeMerge.js';   // v2.607 RECENT2607-03
+import { mergeScopedList, denyFleetWrite } from '../auth/scopeMerge.js';   // v2.607 RECENT2607-03 · 전체 점검 2회차 V-1
 import {
   getConfig, getConfigSafe, saveConfig,
   listMappings, listMappingsForUser, getMapping, addMapping, removeMapping, setMappingStatus, touchMapping, mappingPortOf,
@@ -182,7 +182,7 @@ remoteRouter.get('/config', adminOnly, (req, res) => {
 });
 
 remoteRouter.put('/config', adminOnly, (req, res) => {
-  if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '기본 중계 서버 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.' }); // v2.607 RECENT2607-03
+  if (denyFleetWrite(req, res, '기본 중계 서버 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.')) return; // v2.607 RECENT2607-03 · 전체 점검 2회차 V-1(조회 ∧ 쓰기 전체)
   // v2.537: saveConfig 가 proxyHost 차단(루프백·링크로컬)을 throw 로 알린다 — 500 으로 흘리면 사용자는
   // '서버 오류' 로만 보고 무엇을 고칠지 모른다. 400 + reason 으로 돌려준다.
   try { res.json({ ok: true, config: saveConfig(req.body || {}) }); }

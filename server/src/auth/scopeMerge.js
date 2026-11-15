@@ -1,4 +1,4 @@
-import { scopedVcenterIds } from './scope.js';
+import { scopedVcenterIds, isFullReadWriteScope, WRITE_SCOPE_PARTIAL_REASON } from './scope.js';
 import { store } from '../store.js';
 
 /**
@@ -75,11 +75,23 @@ export function mergeScopedIds(before, body, allowed, allIds) {
  * 실행 자체가 범위 밖 vCenter·서버에 접속한다. 거절했으면 true.
  */
 export function denyScopedRun(req, res, what = '이 실행') {
-  if (!scopedVcenterIds(req.user, store.get())) return false;
-  res.status(403).json({
-    ok: false, error: 'forbidden', requiredOwner: true,
-    reason: `${what}은(는) 전 법인에 접속하고 전 법인 결과를 돌려줍니다 — 전체 범위(vCenter 제한 없는) 계정만 실행할 수 있습니다.`,
-  });
+  return denyFleetWrite(req, res, `${what}은(는) 전 법인에 접속하고 전 법인 결과를 돌려줍니다 — 전체 범위(vCenter 제한 없는) 계정만 실행할 수 있습니다.`);
+}
+
+/**
+ * 전 법인 공용 **쓰기 · 실행**의 판정 하나(전체 점검 2회차 V-1 — 6회차 A1 · v2.904 규칙의 남은 빈칸).
+ * 통과 = 조회 ∧ 쓰기 모두 전체 범위(`isFullReadWriteScope` — 던지면 거부). 공용 게이트(`fullScopeOnlyWith` · `requireSettingsOwner`)는 6회차에 고쳤지만
+ * 이 함수(예전 `denyScopedRun`)와 라우트 안 인라인 검사(`if (scopedVcenterIds(...)) 403`)는 조회 범위만 봐서, writeVcenters 로 쓰기만 줄인 관리자가
+ * 전 법인 설정(vCenter 로그 보관 · 로그인 실패 감시 · OS 스캔 · 중계 서버 · 역할 권한)을 바꾸고 전 법인 수동 실행을 돌렸다.
+ * 조회 범위 때문에 막으면 그 라우트의 사유를, 쓰기 범위 때문이면 `WRITE_SCOPE_PARTIAL_REASON`(writeScope:'partial')을 준다. 거절했으면 true.
+ */
+export function denyFleetWrite(req, res, reason) {
+  if (isFullReadWriteScope(req.user, store.get())) return false;
+  let readScoped = true;
+  try { readScoped = !!scopedVcenterIds(req.user, store.get()); } catch { readScoped = true; }
+  res.status(403).json(readScoped
+    ? { ok: false, error: 'forbidden', requiredOwner: true, reason }
+    : { ok: false, error: 'forbidden', requiredOwner: true, reason: WRITE_SCOPE_PARTIAL_REASON, writeScope: 'partial' });
   return true;
 }
 

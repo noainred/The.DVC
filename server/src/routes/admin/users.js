@@ -7,6 +7,7 @@ import { logAudit } from '../../audit.js';
 import { adminOnly } from './shared.js';
 import { store } from '../../store.js';
 import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
+import { denyFleetWrite } from '../../auth/scopeMerge.js';   // 전체 점검 2회차 V-1 — 전 법인 공용 쓰기는 조회 ∧ 쓰기 전체
 
 /*
  * ⚠⚠ v2.607 AUTHZ2607-01 — 범위(scope) 제한 admin 의 사용자 관리 경계.
@@ -194,7 +195,7 @@ adminRouter.put('/user-tools/:username', adminOnly, (req, res) => {
   res.json({ ok: true, entry: r.entry, effective: eff, users: ov.users, ...(ov.scoped ? { scoped: true, omittedOutOfScope: ov.omitted, byHidden: ov.byHidden } : {}) });
 });
 adminRouter.put('/permissions', adminOnly, (req, res) => {
-  if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '역할별 기능 권한은 전 사용자 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.' }); // v2.607 AUTHZ2607-01
+  if (denyFleetWrite(req, res, '역할별 기능 권한은 전 사용자 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.')) return; // v2.607 AUTHZ2607-01 · 전체 점검 2회차 V-1(조회 ∧ 쓰기 전체)
   const b = req.body || {};
   const next = b.matrix || b; // { operator:[...], viewer:[...], toolsDenied:{...} } 또는 { matrix:{...} }
   // v2.643: admin 행(CSV 등 관리자 전용 키)을 바꾸는 것은 super_admin 만 — admin 이 스스로 권한을 되살리지 못하게.
@@ -213,7 +214,7 @@ adminRouter.put('/permissions', adminOnly, (req, res) => {
   res.json({ ok: true, matrix: { admin: rolePermissions('admin'), ...matrix } });
 });
 adminRouter.post('/permissions/reset', adminOnly, (req, res) => {
-  if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '역할별 기능 권한은 전 사용자 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.' }); // v2.607 AUTHZ2607-01
+  if (denyFleetWrite(req, res, '역할별 기능 권한은 전 사용자 공용이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.')) return; // v2.607 AUTHZ2607-01 · 전체 점검 2회차 V-1(조회 ∧ 쓰기 전체)
   // v2.643: 초기화는 admin 행(adminDenied)도 기본(허용)으로 되돌린다 — admin 이 super_admin 의 결정을 우회하지 못하게.
   if ((loadMatrix().adminDenied || []).length && !actorIsSuperAdmin(req.user || null)) {
     return res.status(403).json({ ok: false, error: 'forbidden', code: 'super-admin-only', reason: 'super_admin 이 끈 admin 권한(CSV)이 있어 초기화는 super_admin 만 할 수 있습니다.' });

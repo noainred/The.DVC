@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { config } from '../../config.js';
 import { requireRole } from '../../auth/auth.js';
 import { loadSessionSecurity } from '../../security/securitySettings.js';
-import { scopedVcenterIds, isFullReadWriteScope } from '../../auth/scope.js';
+import { scopedVcenterIds, isFullReadWriteScope, WRITE_SCOPE_PARTIAL_REASON } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { analysisFilter, hostVcByTag, hostNameByTag, hostNicsByTag, withMappedVc, collectorToDatacenterMap, remoteServersResolved, analysisServersWithRemote, invForServer, ensureCollectorDatacenter } from '../../insights/analysisServers.js'; // v2.579: 재수출용
 
@@ -21,7 +21,7 @@ export const adminOnly = requireRole('admin');
  */
 export const SAFE_METHODS = Object.freeze(['GET', 'HEAD', 'OPTIONS']);
 export const isSafeMethod = (req) => SAFE_METHODS.includes(String(req?.method || '').toUpperCase());
-export const WRITE_SCOPE_PARTIAL_REASON = '이 작업은 쓰기 범위도 전체(vCenter 제한 없는)인 계정만 할 수 있습니다 — 이 계정은 쓰기 범위가 일부 법인으로 제한되어 있습니다.';
+export { WRITE_SCOPE_PARTIAL_REASON };   // 문구는 auth/scope.js 하나(scopeMerge.denyFleetWrite 와 같은 사유)
 /** 쓰기 · 실행 요청을 조회 ∧ 쓰기 전체 범위로 판정(안전 메서드 · 읽기성 POST 예외는 통과). 통과면 null, 막으면 응답 본문. */
 function writeScopeDenial(req, { readPost = false } = {}) {
   if (isSafeMethod(req)) return null;
