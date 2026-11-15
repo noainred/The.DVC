@@ -282,10 +282,10 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | PUT | `/folders/rename` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/tree.js:32](../server/src/routes/svcmon/tree.js#L32) |
 | GET | `/log` | — | [server/src/routes/svcmon/logs.js:44](../server/src/routes/svcmon/logs.js#L44) |
 | PUT | `/log` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/logs.js:48](../server/src/routes/svcmon/logs.js#L48) |
-| GET | `/log/analyze` | 역할 `admin/operator` | [server/src/routes/svcmon/logs.js:97](../server/src/routes/svcmon/logs.js#L97) |
-| GET | `/log/files/:name` | 역할 `admin/operator` | [server/src/routes/svcmon/logs.js:68](../server/src/routes/svcmon/logs.js#L68) |
-| POST | `/log/prune` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/logs.js:121](../server/src/routes/svcmon/logs.js#L121) |
-| GET | `/log/windows` | — | [server/src/routes/svcmon/logs.js:81](../server/src/routes/svcmon/logs.js#L81) |
+| GET | `/log/analyze` | 역할 `admin/operator` | [server/src/routes/svcmon/logs.js:100](../server/src/routes/svcmon/logs.js#L100) |
+| GET | `/log/files/:name` | 역할 `admin/operator` | [server/src/routes/svcmon/logs.js:71](../server/src/routes/svcmon/logs.js#L71) |
+| POST | `/log/prune` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/logs.js:124](../server/src/routes/svcmon/logs.js#L124) |
+| GET | `/log/windows` | — | [server/src/routes/svcmon/logs.js:84](../server/src/routes/svcmon/logs.js#L84) |
 | GET | `/overview` | — | [server/src/routes/svcmon/settingsSync.js:208](../server/src/routes/svcmon/settingsSync.js#L208) |
 | POST | `/push-now` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/edge.js:178](../server/src/routes/svcmon/edge.js#L178) |
 | POST | `/refresh` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/overview.js:127](../server/src/routes/svcmon/overview.js#L127) |

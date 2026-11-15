@@ -75,6 +75,12 @@ export default function LogSettingsTab({ isAdmin }) {
     <div className="flex col gap">
       {err && <ErrorBox message={err} />}
       {done && <div className="svc-ok">{done}</div>}
+      {cfg.settingsUnreadable && (
+        // 26회차 F1: 설정 파일을 못 읽은 동안은 기본값이 보이므로 저장을 잠근다(서버도 409). 정리는 설정 상한으로만 돈다.
+        <div className="svc-warn">
+          로그 보관 설정 파일을 읽지 못해 지금은 기본값으로 동작합니다. 그동안 옛 로그는 설정 상한까지만 지우고, 저장은 잠깁니다 — 설정 › 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리세요.
+        </div>
+      )}
 
       <div className="card" style={{ padding: 14 }}>
         <b>기록</b>
@@ -159,7 +165,7 @@ export default function LogSettingsTab({ isAdmin }) {
       </div>
 
       <div className="flex gap">
-        <button className="login-btn" disabled={!canEdit || busy === 'save'} onClick={save}>
+        <button className="login-btn" disabled={!canEdit || busy === 'save' || !!cfg.settingsUnreadable} onClick={save}>
           {busy === 'save' ? '저장 중…' : '저장'}
         </button>
         <button className="tab" disabled={!isAdmin || busy === 'prune'} onClick={prune}

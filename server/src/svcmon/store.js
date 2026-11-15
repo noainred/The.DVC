@@ -288,7 +288,10 @@ function cleanTarget(data, existing = null, opts = {}) {
   // 밀리초 타임스탬프이므로 상한을 1e9(=1970-01-12)로 두면 값이 들어올 때 뭉개진다.
   target.order = num(data.order, 0, Number.MAX_SAFE_INTEGER, base.order ?? Date.now());
   // 대량 등록 배치 태그 — 롤백이 '정확히 그 배치만' 지우는 근거.
-  target.batch = text(data.batch, 40, base.batch || '') || undefined;
+  //   전체 점검 26회차 F6(재현): 예전에는 data.batch(사용자 입력)를 받았다 — 'mock-demo' 로 고치면 live 폴러가 데모로 보고 점검을 건너뛰고,
+  //   'central:<sig>' 면 엣지 재배정 때 지워지고, 남의 import 배치 id 면 그 배치 롤백이 함께 지웠다. 이제 origin 과 같게 **서버만** 발급한다 —
+  //   opts.batch(대량 등록의 서버 태그 · 엣지 pull · 데모 시드) 또는 기존 값 승계. data.batch 는 읽지 않는다.
+  target.batch = (Object.prototype.hasOwnProperty.call(opts, 'batch') ? text(opts.batch, 40, '') : (base.batch || '')) || undefined;
   // 출처 — opts.origin 이 있으면(null 포함) 그 값으로, 없으면 기존 값 승계. data.origin 은 **읽지 않는다**(cleanOrigin 머리말).
   target.origin = Object.prototype.hasOwnProperty.call(opts, 'origin') ? cleanOrigin(opts.origin) : (base.origin ? cleanOrigin(base.origin) : undefined);
   target.tests = base.tests || [];
@@ -454,6 +457,9 @@ export function addTarget(data) {
   const dbx = load();
   if (dbx.targets.length >= MAX_TARGETS) throw new Error(`대상은 최대 ${MAX_TARGETS}개까지입니다.`);
   const t = cleanTarget(data);
+  // 전체 점검 26회차 F4(재현): 단건 추가 · 수정만 (구분 · 경로 · 이름 소문자) 중복을 보지 않았다 — 대량 등록 · CSV · 엣지 pull 은 이 키로 대상을 가린다.
+  //   같은 키가 둘이면 엣지 적용이 둘째를 건너뛰어 배정이 mismatch 로 굳고(둘째는 엣지에서 영영 점검되지 않음) CSV 왕복이 실패했다.
+  dupTargetCheck(dbx, t, null);
   // 경로가 폴더 목록에 없으면 자동 등록(트리에서 즉시 보이게).
   // 폴더 상한 초과로 던질 수 있으므로 대상 push 보다 **먼저** — 순서를 바꾸면 실패한 등록의
   // 대상이 메모리에 남는다.
@@ -506,6 +512,8 @@ export function updateTarget(id, data, opts = {}) {
   if (i < 0) return null;
   // opts.origin 은 설정 연동(svcmon/settingsSync.js)만 넘긴다 — 라우트(/targets/:id)는 data 만 넘기므로 출처를 바꿀 수 없다.
   const next = cleanTarget(data, dbx.targets[i], Object.prototype.hasOwnProperty.call(opts, 'origin') ? { origin: opts.origin } : {});
+  // 26회차 F4 · 27회차 D-6 교훈: 수정은 **키(구분 · 경로 · 이름)를 바꿀 때만** 견준다(이미 있던 중복 두 대가 사용/중지 · 주소 수정까지 잠기지 않게)
+  if (dupKey(next) !== dupKey(dbx.targets[i])) dupTargetCheck(dbx, next, dbx.targets[i]);
   ensureFolderPath(dbx, next.kind, next.path);   // 실패 시 기존 대상을 덮어쓰지 않는다
   dbx.targets[i] = next;
   save();
@@ -589,6 +597,12 @@ export function deleteTest(targetId, testId) {
 
 /** 대상 동일성 — 한 폴더 안에서는 이름이 식별자다(CSV 행 그룹핑과 같은 키). */
 const dupKey = (t) => `${t.kind} ${t.path} ${t.name.toLowerCase()}`;
+/** 단건 추가 · 수정의 중복 검사(26회차 F4) — 자기 자신(self)은 뺀다. 대량 등록(planBulkTargets)과 같은 키. */
+function dupTargetCheck(dbx, t, self) {
+  const k = dupKey(t);
+  const hit = dbx.targets.find((x) => x !== self && dupKey(x) === k);
+  if (hit) throw new Error(`같은 폴더(${t.path || '최상위'})에 같은 이름의 대상이 이미 있습니다 — '${String(hit.name).slice(0, 80)}'(이름은 대소문자를 가리지 않습니다).`);
+}
 
 /**
  * 대량 등록(가져오기·자동 생성) — 검증을 **전량 끝낸 뒤** 한 번의 저장으로 커밋한다.
@@ -605,9 +619,9 @@ const dupKey = (t) => `${t.kind} ${t.path} ${t.name.toLowerCase()}`;
  * @returns {{added:number, errors:object[], skipped:object[], newFolders:number, newTests:number,
  *            committed:boolean, saved:boolean}}
  */
-export function bulkAddTargets(list = [], { atomic = true, dedup = true, batch = '', trustedOrigin = false } = {}) {
+export function bulkAddTargets(list = [], { atomic = true, dedup = true, batch = '', trustedOrigin = false, trustedBatch = false } = {}) {
   const dbx = load();
-  const plan = planBulkTargets(list, { dedup, batch, trustedOrigin });
+  const plan = planBulkTargets(list, { dedup, batch, trustedOrigin, trustedBatch });
   const fail = plan.over.length > 0 || (atomic && plan.errors.length > 0);
   if (fail) {
     return {
@@ -641,7 +655,7 @@ export function bulkAddTargets(list = [], { atomic = true, dedup = true, batch =
  * 대량 등록 계획 — **저장하지 않고** 커밋과 똑같은 검증을 수행한다.
  * 미리보기와 실제 등록이 다른 코드로 판정하면 "미리보기는 통과인데 등록은 실패"가 생긴다.
  */
-export function planBulkTargets(list = [], { dedup = true, batch = '', trustedOrigin = false } = {}) {
+export function planBulkTargets(list = [], { dedup = true, batch = '', trustedOrigin = false, trustedBatch = false } = {}) {
   const dbx = load();
   const errors = [];
   const skipped = [];
@@ -656,7 +670,8 @@ export function planBulkTargets(list = [], { dedup = true, batch = '', trustedOr
   list.forEach((row, i) => {
     try {
       // trustedOrigin 은 설정 연동만 켠다 — 가져오기·대량 등록 행의 origin 은 버린다(cleanOrigin 머리말).
-      const t = cleanTarget({ ...row, batch: row?.batch || batch }, null, trustedOrigin ? { origin: row?.origin } : {});
+      // 26회차 F6: 행의 batch 는 trustedBatch(엣지 pull 롤백이 이전 배포분을 되살릴 때 — 서버가 발급했던 태그)일 때만 쓴다
+      const t = cleanTarget(row && typeof row === 'object' ? row : {}, null, { ...(trustedOrigin ? { origin: row?.origin } : {}), batch: (trustedBatch && row?.batch) || batch });
       const key = dupKey(t);
       if (dedup && nameIdx.has(key)) {
         skipped.push({ row: i + 1, name: t.name, path: t.path, reason: '이미 있는 대상(구분+경로+이름 중복)' });

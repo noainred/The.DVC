@@ -8,6 +8,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { makeSettingsLoadError } from '../util/settingsLoadError.js';   // 26회차 F1 형제
 
 const FILE = () => path.join(config.configDir, 'svcmon-alert.json');
 const _listeners = new Set();
@@ -36,6 +37,13 @@ export function cleanAlertSettings(input = {}, prev = ALERT_DEFAULTS) {
 }
 
 let _settings = null;
+/*
+ * 전체 점검 26회차 F1 형제(코드 읽기): 손상되면 표지 없이 기본값(enabled:false)으로 넘어가 점검 실패 알림이 **조용히** 꺼졌다.
+ *   이제 로드 오류를 세워 서비스 점검 목록에 올린다 — 해제는 화면에서 다시 저장(전체 폼 저장이라 기본값이 섞이지 않는다) · '기본값으로 확정'(알림 꺼짐) · 보존본 복구.
+ */
+const _loadErr = makeSettingsLoadError(() => FILE(), { label: '성능점검 실패 알림 설정 — 손상 중에는 알림이 꺼져 있습니다(확정하면 기본값: 꺼짐)', confirm: () => { saveAlertSettings({ ...ALERT_DEFAULTS }); } });
+/** 알림 설정 파일을 못 읽었으면 { at, reason }, 아니면 null. */
+export function alertSettingsLoadError() { getAlertSettings(); return _loadErr.get(); }
 export function getAlertSettings() {
   if (_settings) return { ..._settings };
   try {
@@ -43,9 +51,14 @@ export function getAlertSettings() {
       const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류');
       _settings = cleanAlertSettings(raw, ALERT_DEFAULTS);
+      _loadErr.ok();
       return { ..._settings };
     }
-  } catch (e) { preserveCorrupt(FILE(), e?.message); }
+    _loadErr.missing();
+  } catch (e) {
+    if (e?.code) _loadErr.readError(e);   // EACCES · EISDIR — 원본을 옮기지 않는다(20회차 반증 F4 규약)
+    else { _loadErr.corrupt(e); preserveCorrupt(FILE(), e?.message); }
+  }
   _settings = { ...ALERT_DEFAULTS };
   return { ..._settings };
 }
@@ -53,9 +66,10 @@ export function saveAlertSettings(input = {}) {
   const next = cleanAlertSettings(input, getAlertSettings());
   atomicWriteFileSync(FILE(), JSON.stringify(next, null, 2));
   _settings = next;
+  _loadErr.ok();
   for (const fn of _listeners) { try { fn({ ...next }); } catch { /* 듣는 쪽 오류가 저장을 막지 않는다 */ } }
   return { ...next };
 }
 
 /** 테스트·transitions 전용 — 캐시를 바꾼다(null 이면 다음 조회에서 파일을 다시 읽는다). */
-export function _setAlertSettingsCache(v) { _settings = v ? { ...v } : null; }
+export function _setAlertSettingsCache(v) { _settings = v ? { ...v } : null; if (!v) _loadErr.ok(); }

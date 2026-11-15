@@ -51,7 +51,8 @@ let _cache = null;
  *   오류면 라우트가 perf 를 싣지 않고 `perfSettingsUnreadable` 을 싣는다(엣지는 body.perf 가 없으면 적용하지 않는다 — 구버전 엣지도).
  *   저장 성공만 해제한다(관리자가 다시 저장하면 풀린다).
  */
-const _loadErr = makeSettingsLoadError(() => FILE, { label: 'SAN 포트 사용량 설정', confirm: () => savePerfSettings({}) });
+// 27회차 반증 D-3: 확정은 보존 칸을 최대값으로(기본 90일로 확정하면 그 직후 정리가 긴 이력을 지웠다 — 관리자가 나중에 줄인다)
+const _loadErr = makeSettingsLoadError(() => FILE, { label: 'SAN 포트 사용량 설정 — 확정 시 보존은 최대값(이력을 지우지 않음)', confirm: () => savePerfSettings({ retentionDays: LIMITS.retentionDays.max, rollupRetentionDays: LIMITS.rollupRetentionDays.max }) });
 /** 설정 파일을 못 읽었으면 { at, reason }, 읽었으면 null. */
 export function perfSettingsLoadError() { loadPerfSettings(); return _loadErr.get(); }
 

@@ -41,7 +41,7 @@ test('S-2 — 기존 장비를 다른 장비와 같은 host+type 으로 고치�
   void a;
 });
 
-test('S-3 — 보존 설정 손상: 정리 보류 · 저장 409 · 확정으로 풀림', () => {
+test('S-3 · 27회차 D-3/D-4/D-5 — 보존 설정 손상: 설정 상한으로만 정리 · 저장 409 · 확정은 최대 보존으로', () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'stfa23b-'));
   try {
     fs.writeFileSync(path.join(d, 'storage-growth-settings.json'), '{"rawKeepDays":400,"dailyKeepDays":36');
@@ -50,15 +50,32 @@ test('S-3 — 보존 설정 손상: 정리 보류 · 저장 409 · 확정으로 
       g.applyGrowthSettings();
       let save = 'ok'; try { g.saveGrowthSettings({ rawKeepDays: 120 }); } catch (e) { save = e.code; }
       const hold = db.pruneHold();
+      const kd = db.effectiveKeepDays();
       const u = await import(${JSON.stringify(path.join(SRC, 'util/settingsLoadError.js'))});
       const row = u.listSettingsLoadErrors().find((x) => /growth/.test(x.file));
       const c = row ? u.confirmSettingsDefault(row.file, { by: 't' }) : null;
-      console.log(JSON.stringify({ hold: !!hold, save, row: row?.file || null, conf: c?.ok ?? null, holdAfter: db.pruneHold() }));`;
+      const after = g.loadGrowthSettings();
+      console.log(JSON.stringify({ hold: !!hold, kd, save, row: row?.file || null, owner: !!row?.ownerOnly, conf: c?.ok ?? null, err: !!g.growthSettingsLoadError(), after, kdAfter: db.effectiveKeepDays() }));`;
     const r = spawnSync(process.execPath, ['--input-type=module', '-e', code], { env: { ...process.env, CONFIG_DIR: d, DATA_DIR: d }, encoding: 'utf8' });
     const out = JSON.parse(r.stdout.trim().split('\n').pop());
-    assert.equal(out.hold, true, '정리 보류(수정 전: 기본 보존으로 지움)'); assert.equal(out.save, 'settings-unreadable');
-    assert.ok(out.row, '서비스 점검 목록'); assert.equal(out.conf, true); assert.equal(out.holdAfter, null, '확정 뒤 정리 재개');
+    assert.equal(out.hold, false, '27회차 D-4: 전면 보류(무한 증가)가 아니다');
+    assert.equal(out.kd.raw, 1825, '손상 중 원시 보존 = 설정 상한(수정 전: 기본 90일로 지움)'); assert.equal(out.kd.daily, 3650);
+    assert.equal(out.save, 'settings-unreadable');
+    assert.ok(out.row, '서비스 점검 목록'); assert.equal(out.owner, true, '27회차 D-1: 확정은 소유자 등급');
+    assert.equal(out.conf, true); assert.equal(out.err, false, '확정으로 풀림');
+    assert.equal(out.after.rawKeepDays, 1825, '27회차 D-3: 확정은 최대 보존을 쓴다(기본값으로 확정하면 직후 정리가 이력을 지웠다)');
+    assert.equal(out.after.dailyKeepDays, 3650);
   } finally { fs.rmSync(d, { recursive: true, force: true }); }
+  // 27회차 D-5: 객체가 아닌 JSON 도 손상
+  for (const body of ['null', '[]']) {
+    const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'stfa23c-'));
+    try {
+      fs.writeFileSync(path.join(d2, 'storage-growth-settings.json'), body);
+      const code2 = `const g = await import(${JSON.stringify(path.join(SRC, 'storage/growthSettings.js'))}); console.log(JSON.stringify({ err: !!g.growthSettingsLoadError() }));`;
+      const r2 = spawnSync(process.execPath, ['--input-type=module', '-e', code2], { env: { ...process.env, CONFIG_DIR: d2, DATA_DIR: d2 }, encoding: 'utf8' });
+      assert.equal(JSON.parse(r2.stdout.trim().split('\n').pop()).err, true, body);
+    } finally { fs.rmSync(d2, { recursive: true, force: true }); }
+  }
   const src = fs.readFileSync(path.join(SRC, 'routes/api/storageMon.js'), 'utf8');
   assert.match(src, /if \(e\?\.code === 'settings-unreadable'\) return res\.status\(409\)/);
 });

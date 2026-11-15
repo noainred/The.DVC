@@ -105,6 +105,8 @@ export function setKeepDays({ rawKeepDays, dailyKeepDays, nodeLoadRawKeepDays, n
 /*
  * 전체 점검 23회차 S-3(재현): 보존 기간 설정 파일이 손상되면 기본값(원시 90일 · 일 요약 5년)으로 떨어져, 관리자가 400일 · 10년으로 둔 이력을
  *   **다음 정리가 되돌릴 수 없게 지웠다**. 설정을 못 읽은 동안은 정리를 보류한다(growthSettings 가 세운다 — 보류에는 해제 경로가 있다: 확정 · 보존본 복구).
+ *   ⚠ 27회차 D-4: growthSettings 는 이제 보류 대신 **설정 상한 보존(setKeepDays(max))** 으로 정리한다(보류는 디스크가 끝없이 찼다) — 이 표지는 지금 세우는 곳이 없고
+ *   다른 호출부를 위한 장치로만 남았다.
  */
 let _pruneHold = null;
 let _pruneHoldWarned = null;
@@ -370,16 +372,18 @@ async function openInner() {
        */
       // 전체 점검 23회차 S-6(재현): 그날 마지막 관측의 '못 읽음'(null)이 앞선 유효값을 덮었다(used null → 증가량 no-latest-used 로 합계에서 빠짐).
       //   사용량 · 매체 칸은 **그날 마지막 유효 관측**(새 관측이 null 이면 기존 값 유지). total 은 적재 조건(capacityPointEligible)이 양수를 보장한다.
+      //   27회차 반증 D-9: 용량(total · hdd_total · ssd_total)은 **짝이 되는 used 와 같은 관측일 때만** 바꾼다 — used 가 null 인 늦은 관측의 total 만
+      //   들어가 한 행에 다른 시점의 total 과 used 가 섞였다(09시 100T/90T → 18시 50T/null 이 50T/90T = 180%). 그날 used 가 아직 없으면 그대로 최신 total.
       upDaily: conn.prepare(`INSERT INTO capacity_daily
           (device_id, day, last_ts, total_bytes, used_bytes, hdd_total, hdd_used, ssd_total, ssd_used, max_used, samples)
         VALUES (?,?,?,?,?,?,?,?,?,?,1)
         ON CONFLICT(device_id, day) DO UPDATE SET
           last_ts     = CASE WHEN excluded.last_ts > capacity_daily.last_ts THEN excluded.last_ts     ELSE capacity_daily.last_ts     END,
-          total_bytes = CASE WHEN excluded.last_ts > capacity_daily.last_ts THEN excluded.total_bytes ELSE capacity_daily.total_bytes END,
+          total_bytes = CASE WHEN excluded.last_ts > capacity_daily.last_ts AND (excluded.used_bytes IS NOT NULL OR capacity_daily.used_bytes IS NULL) THEN excluded.total_bytes ELSE capacity_daily.total_bytes END,
           used_bytes  = CASE WHEN excluded.last_ts > capacity_daily.last_ts AND excluded.used_bytes IS NOT NULL THEN excluded.used_bytes  ELSE capacity_daily.used_bytes  END,
-          hdd_total   = CASE WHEN excluded.last_ts > capacity_daily.last_ts AND excluded.hdd_total IS NOT NULL THEN excluded.hdd_total   ELSE capacity_daily.hdd_total   END,
+          hdd_total   = CASE WHEN excluded.last_ts > capacity_daily.last_ts AND excluded.hdd_total IS NOT NULL AND (excluded.hdd_used IS NOT NULL OR capacity_daily.hdd_used IS NULL) THEN excluded.hdd_total   ELSE capacity_daily.hdd_total   END,
           hdd_used    = CASE WHEN excluded.last_ts > capacity_daily.last_ts AND excluded.hdd_used IS NOT NULL THEN excluded.hdd_used    ELSE capacity_daily.hdd_used    END,
-          ssd_total   = CASE WHEN excluded.last_ts > capacity_daily.last_ts AND excluded.ssd_total IS NOT NULL THEN excluded.ssd_total   ELSE capacity_daily.ssd_total   END,
+          ssd_total   = CASE WHEN excluded.last_ts > capacity_daily.last_ts AND excluded.ssd_total IS NOT NULL AND (excluded.ssd_used IS NOT NULL OR capacity_daily.ssd_used IS NULL) THEN excluded.ssd_total   ELSE capacity_daily.ssd_total   END,
           ssd_used    = CASE WHEN excluded.last_ts > capacity_daily.last_ts AND excluded.ssd_used IS NOT NULL THEN excluded.ssd_used    ELSE capacity_daily.ssd_used    END,
           -- v2.574 BUG-04 — COALESCE(..., 0) 은 '못 읽음' 을 '최대 사용량 0바이트' 로 바꾼다.
           -- v2.561 이 used_bytes 는 고쳤는데 여기만 남아 있었다. 근거·정답 형태는 이 함수의
@@ -410,6 +414,7 @@ async function openInner() {
       prune2: conn.prepare('DELETE FROM capacity_history WHERE rowid IN (SELECT rowid FROM capacity_history WHERE ts < ? LIMIT ?)'),
       prune3: conn.prepare('DELETE FROM capacity_daily WHERE day < ?'),
       // v2.789 하위 항목 일 롤업 — capacity_daily 와 같은 upsert 규칙(더 늦은 관측만 갱신).
+      //   27회차 반증 D-9: total 도 짝이 되는 used 와 같은 관측일 때만(capacity_daily 와 같은 규칙).
       upRes: conn.prepare(`INSERT INTO resource_daily
           (device_id, rkey, day, last_ts, kind, name, pool, total_bytes, used_bytes, samples)
         VALUES (?,?,?,?,?,?,?,?,?,1)
@@ -417,7 +422,7 @@ async function openInner() {
           last_ts     = CASE WHEN excluded.last_ts > resource_daily.last_ts THEN excluded.last_ts     ELSE resource_daily.last_ts     END,
           name        = CASE WHEN excluded.last_ts > resource_daily.last_ts THEN excluded.name        ELSE resource_daily.name        END,
           pool        = CASE WHEN excluded.last_ts > resource_daily.last_ts THEN excluded.pool        ELSE resource_daily.pool        END,
-          total_bytes = CASE WHEN excluded.last_ts > resource_daily.last_ts THEN excluded.total_bytes ELSE resource_daily.total_bytes END,
+          total_bytes = CASE WHEN excluded.last_ts > resource_daily.last_ts AND (excluded.used_bytes IS NOT NULL OR resource_daily.used_bytes IS NULL) THEN excluded.total_bytes ELSE resource_daily.total_bytes END,
           used_bytes  = CASE WHEN excluded.last_ts > resource_daily.last_ts AND excluded.used_bytes IS NOT NULL THEN excluded.used_bytes  ELSE resource_daily.used_bytes  END,
           samples     = resource_daily.samples + 1`),
       // 조회는 **일 구간 조각**으로 읽는다(resourceDailyRange — 조각 사이 양보). day 인덱스를 탄다.

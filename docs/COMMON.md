@@ -5,7 +5,7 @@
 
 - 생성: `node scripts/common-doc.mjs` · 최신 여부: `node scripts/common-doc.mjs --check`
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다. 설명을 고치려면 그 모듈의 **머리 주석 첫 단락**을 고친다.
-- 훑은 소스 4192개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
+- 훑은 소스 4194개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
 
 ## 읽는 법 · 한계
 
@@ -47,9 +47,9 @@
 | `sqliteOpen.js` | SQLite 첫 open 공용 규칙(v2.599 감사 DB2599-02 후속). | `isSqliteLockError` `applyStdPragmas` `createLockRetry` `chmodDbFiles` `openSqlite` `withOpenCleanup` 외 1 | 37 | 29 | 3 |
 | `ipv4.js` | IPv4 점표기 ↔ uint32 의 **단일 소스**(v2.586). | `ipToNum` `numToIp` `strictIpv4Num` `cidrMatch` `canonIp` `isIpv4` | 34 | 13 | 7 |
 | `authGuard.js` | 인증 실패(401/403) 대상의 **주기 수집 정지** 공용 코어(v2.535). | `isPeerRejectText` `isAuthFailureText` `credHashOf` `createAuthGuard` `createAuthBreaker` `runWithBreakerWarmup` 외 2 | 33 | 27 | 11 |
+| `settingsLoadError.js` | **중앙 설정 파일**의 로드 오류 상태(v2.631 EDGE2631-01). | `makeSettingsLoadError` `listSettingsLoadErrors` `settingsFileOwnerOnly` `settingsFileSuperOnly` `confirmSettingsDefault` | 33 | 18 | 12 |
 | `adaptiveTimer.js` | 주기를 스스로 다시 잡는 타이머(v2.409 에서 storage/intervals.js 로 도입, v2.410 에서 공용 유틸로 분리 — SAN 스위치 폴러도 같은 규칙을 쓴다). | `startAdaptiveTimer` | 32 | 17 | 6 |
 | `chunkedPrune.js` | 대량 시계열 DELETE 를 청크로 끊어 이벤트 루프를 막지 않는다 (v2.453). | `shouldContinuePrune` `nextAdaptiveChunk` `chunkedDelete` `createPruneFlight` `PRUNE_CHUNK_ROWS` `PRUNE_MAX_ROWS` | 31 | 24 | 3 |
-| `settingsLoadError.js` | **중앙 설정 파일**의 로드 오류 상태(v2.631 EDGE2631-01). | `makeSettingsLoadError` `listSettingsLoadErrors` `settingsFileOwnerOnly` `settingsFileSuperOnly` `confirmSettingsDefault` | 31 | 17 | 11 |
 | `pushAll.js` | 큰 배열 붙이기(v2.603 감사 CEN2603-03 후속). | `pushAll` | 30 | 16 | 1 |
 | `exitFlush.js` | 종료 시 flush 레지스트리(v2.582 ARCH-4) — 하나다. | `registerExitFlush` `runExitFlush` `exitFlushNames` `_resetExitFlushForTest` | 29 | 15 | 10 |
 | `coercionTrap.js` | 요청 값을 글자·수로 바꿀 때 던지지 않게 하는 공용 규칙(v2.603 감사 CEN2603-05). | `stripCoercionTraps` `strOf` | 28 | 7 | 1 |
@@ -207,7 +207,7 @@
 | 모듈 | 하는 일 | 내보내는 이름 | 사용처 | 영역 | 테스트 |
 |---|---|---|---|---|---|
 | `api.js` | v2.498: 진행 중 요청 레지스트리 + 장기 로딩(hang) 보고. perfClient 는 api.js 를 import 하지 않으므로 순환이 없다(설정 조회는 fetchJson 을 인자로 받는다). | `noteHttpError` `permissionInfoFor` `httpInfoFor` `fetchJson` `postJson` `sendJson` 외 34 | 399 | 19 | 43 |
-| `numOrNull.js` | `numOrNull`(웹) — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정. | `numOrNull` `default` | 137 | 11 | 2 |
+| `numOrNull.js` | `numOrNull`(웹) — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정. | `numOrNull` `default` | 138 | 11 | 2 |
 | `dayStamp.js` | 브라우저 쪽 날짜 표기(v2.582 BUG-3) — 내려받기 파일명·만료일은 **사용자의 로컬 날짜**다. `new Date().toISOString().slice(0, 10)` 은 UTC 날짜라 한국 시각 00:00~09:00 에는 **어제**가 된다 (보고서 파일명… | `dayStamp` | 24 | 5 | 1 |
 | `regions.js` | 지역(region) 목록 — 웹 단일 소스(v2.575 IMP-10). ⚠ 값은 서버 `server/src/util/regions.js` 와 **글자 그대로 같아야 한다**(웹은 서버 소스를 import 할 수 없어 복사가 불가피하다). `web/src/regions.`… | `REGIONS` `default` | 5 | 2 | 2 |
 | `perfClientLogic.js` | 브라우저 성능 보고의 **순수 로직**(v2.498): 경로 정규화·장기 로딩 문구· 쿨다운/상한 판정. 웹 테스트는 node 환경(DOM 없음)이라 판정·문구는 여기서 회귀로 고정한다. | `normPath` `loadingText` `allowReport` `stallPayload` `statusPollTargets` `requesterText` 외 3 | 4 | 2 | 3 |
@@ -249,7 +249,7 @@
 | `server/src/auth/auth.js` | (머리 주석 없음) | 145 | 10 | 58 |
 | `server/src/runtime-settings.js` | Runtime-adjustable settings that can be changed from the portal UI (and persisted), overriding the env defaults. Currently: the data source (mock \| li… | 19 | 10 | 23 |
 | `server/src/security/tlsTrust.js` | 장비 TLS 상대 인증(2026-10-09 검토 S-02) — 자격증명을 보내는 HTTPS 연결이 **정말 그 장비인지** 확인한다. | 14 | 10 | 4 |
-| `server/src/storage/registry.js` | 스토리지 장비 등록부(v2.302). | 28 | 9 | 40 |
+| `server/src/storage/registry.js` | 스토리지 장비 등록부(v2.302). | 28 | 9 | 41 |
 | `server/src/gpu/settings.js` | GPU 게스트 수집 설정 — 어떤 법인(vCenter)의 패스쓰루 GPU VM을 게스트 OS 계정으로 모니터링할지, 폴링 주기/동시성/타임아웃, 그리고 vCenter별 게스트 OS 자격증명을 보관한다. config/gpu-guest.json (gitignore, 060… | 13 | 9 | 9 |
 | `server/src/perf/monitor.js` | 서버 성능 측정기(v2.498). 요청 지연·이벤트 루프 정체·진행 중 요청을 **상시 O(1)** 로 계측하고, 임계를 넘은 것만 남긴다. 설정 › 서버 성능 측정 화면(/api/admin/perf)이 이 값을 읽는다. | 13 | 9 | 4 |
 | `server/src/idrac/invCache.js` | Cache of the latest hardware/firmware inventory collected per iDRAC server. Inventory is mostly static, so it is refreshed on a slow cadence and persi… | 25 | 8 | 8 |
@@ -265,10 +265,10 @@
 | `server/src/vcenter/collectTarget.js` | '이 포탈이 직접 로그인해 수집하는 vCenter 인가' 판정(순수 · import 0) — v2.732(점검 2회차 B4-01). | 9 | 7 | 2 |
 | `server/src/dscfg/collect.js` | 데이터스토어 운영 속성 갱신(v2.700 — A17). 인벤토리 수집 한 주기 안에서 오래된 DS 부터 상한만큼. 캐시는 vmcfg 처럼 인메모리이고 DS 전용이다(다른 캐시의 prune 이 지우지 않게). 실패는 격리한다. | 7 | 7 | 2 |
 | `server/src/auth/scope.js` | 사용자 데이터 범위(scope) 해석 — "이 사용자가 볼 수 있는 vCenter"를 계산한다. scope = { vcenters:[id...], regions:[name...] }. 둘 다 비면 제한 없음(전체). 명시 vCenter + 지정 리전에 속한 모든 vCe… | 103 | 6 | 7 |
-| `server/src/svcmon/store.js` | 성능점검 대상/폴더 저장소 — `CONFIG_DIR/svcmon.json` 전용 파일(포탈 코어와 분리). | 21 | 6 | 19 |
+| `server/src/svcmon/store.js` | 성능점검 대상/폴더 저장소 — `CONFIG_DIR/svcmon.json` 전용 파일(포탈 코어와 분리). | 21 | 6 | 20 |
 | `server/src/logs/db.js` | vCenter 이벤트 로그 장기 보관 DB. vCenter는 이벤트를 단기간만 보관하므로, 포탈이 주기적으로 수집해 여기 누적한다. Node 내장 SQLite(--experimental-sqlite) 우선, 없으면 NDJSON 폴백. 중복은 (vcenterId, key… | 17 | 6 | 43 |
 | `server/src/partfault/types.js` | 물리 파트 장애의 **공용 계약**(순수, v2.547). | 16 | 6 | 9 |
-| `server/src/sanswitch/registry.js` | SAN 스위치 등록부(v2.410). | 15 | 6 | 42 |
+| `server/src/sanswitch/registry.js` | SAN 스위치 등록부(v2.410). | 15 | 6 | 43 |
 | `server/src/storage/store.js` | 이 노드가 수집한 최신 스냅샷 보관(v2.302). deviceId → NormalizedSnapshot. 재시작 후에도 마지막 뷰가 비지 않게 파일로 영속 (자격증명 없음 — 정규화 스냅샷만. 그래도 계정 목록이 있어 0600 + gitignore). 시계열(용량 추… | 15 | 6 | 15 |
 | `server/src/upgrade/signature.js` | 업그레이드 번들 배포자 서명 검증의 **런타임 판정 하나**(검토 S-10, v2.730). | 13 | 6 | 9 |
 | `server/src/metrics/unreadVcenters.js` | '지금 값' 으로 쓰지 않는 vCenter 와 그 사유(순수 leaf — import 0). | 10 | 6 | 4 |
@@ -308,7 +308,7 @@
 |---|---|---|---|---|
 | `web/src/views/unitText.js` | 값 + 단위 표기 — **값이 없으면 단위를 붙이지 않는다**(v2.575 BUG-20). | 53 | 7 | 3 |
 | `web/src/views/tools/relTime.js` | 상대시각 문구 — **공용 코어** (v2.574 IMP-03). | 49 | 4 | 2 |
-| `web/src/views/changeResult.js` | v2.731(점검 1회차 A5-01): 변경 요청 응답 판정 — 순수 모듈(화면·테스트가 같이 쓴다). | 40 | 4 | 4 |
+| `web/src/views/changeResult.js` | v2.731(점검 1회차 A5-01): 변경 요청 응답 판정 — 순수 모듈(화면·테스트가 같이 쓴다). | 43 | 4 | 4 |
 | `web/src/views/tools/toneVar.js` | toneVar — 판정 톤(`ok`/`warn`/`bad`, 또는 진단 어휘 `green`/`amber`/`red`) → CSS 색 변수. **공용 코어** (v2.613 DEPS2613-11). 예전에는 `bmUsageText`·`edgeLogText`·`partFa`… | 29 | 1 | 1 |
 | `web/src/views/blankOr.js` | 숫자 입력칸 → 요청 값(v2.596, 감사 CLAMP2596-02·05). 빈 칸은 **보내지 않는다**(undefined — JSON 에서 빠진다) — `Number('')` 는 0 이라 '임계 끔'·'보존 무제한' 으로 둔갑했다. 서버도 빈 값을 미지정으로 받지만… | 27 | 3 | 1 |
 | `web/src/views/tools/shared.jsx` | SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동. | 26 | 1 | 3 |

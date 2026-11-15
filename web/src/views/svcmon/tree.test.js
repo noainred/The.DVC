@@ -69,3 +69,12 @@ describe('matchNode — 폴더/대상/호스트 검색(하위 폴더 전파)', (
     expect(matchNode(root.children.get('A'), '')).toBe(true); // 빈 검색 = 전부
   });
 });
+
+describe('avgReplyMs(26회차 F11 — 표본이 없으면 null)', () => {
+  it('빈 표본 · null 만 → null', async () => {
+    const { avgReplyMs } = await import('./tree.js');
+    expect(avgReplyMs([])).toBeNull();
+    expect(avgReplyMs([null, undefined, ''])).toBeNull();
+    expect(avgReplyMs([10, null, 20])).toBe(15);
+  });
+});

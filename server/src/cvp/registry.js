@@ -162,7 +162,10 @@ export function saveServer(input = {}) {
   });
   if (!existing && db.servers.length >= MAX_SERVERS) throw new Error(`CVP 서버는 최대 ${MAX_SERVERS}개까지 등록할 수 있습니다.`);
   // 25회차 F-7(재현): 중복(주소 + 담당) 검사가 신규에만 있어 수정으로 같은 CVP 를 두 번 수집했다(장비 행 두 벌 · Overview 부풀림) — 자기 자신을 뺀 목록과
-  if (db.servers.some((s) => s !== existing && baseUrlOf(s.host).base === baseUrlOf(f.host).base && agentKeyEq(s.agent, srv.agent))) throw new Error('같은 주소·같은 담당의 CVP 서버가 이미 등록되어 있습니다.');
+  //   27회차 반증 D-6: 수정은 **키(주소 · 담당)를 바꿀 때만** 견준다(이미 있던 중복 두 대가 비활성화까지 잠기던 것) · 상대 서버를 밝힌다.
+  const keyChanged = !existing || baseUrlOf(existing.host).base !== baseUrlOf(f.host).base || !agentKeyEq(existing.agent, srv.agent);
+  const dupSrv = keyChanged ? db.servers.find((s) => s !== existing && baseUrlOf(s.host).base === baseUrlOf(f.host).base && agentKeyEq(s.agent, srv.agent)) : null;
+  if (dupSrv) throw new Error(`같은 주소·같은 담당의 CVP 서버가 이미 등록되어 있습니다 — '${String(dupSrv.name || dupSrv.id || '').slice(0, 80)}'.`);
   const nextList = existing ? db.servers.map((s) => (s === existing ? srv : s)) : [...db.servers, srv];
   persist(nextList);
   db.servers = nextList;

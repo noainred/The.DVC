@@ -5,6 +5,7 @@
 // (ipamCsvChunk.js — 서버 파서와 같은 행 경계), 결과를 합쳐 말한다. 입력은 편집 초안에 남는다(다른 페이지로 옮겨도 그대로).
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { downloadFile, postJson, canCsv, CSV_DENIED_NOTE } from '../../api.js';
+import { requireChanged } from '../changeResult.js';   // 27회차 반증 D-2: 409(설정 파일 손상 중 거절)를 성공으로 보이지 않게
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { downloadFailText } from '../downloadFailText.js';
@@ -113,7 +114,7 @@ function ManageCsv({ scope, canManage, onApplied }) {
     try {
       for (let i = 0; i < chunks.length; i++) {
         setProgress({ phase: '적용', done: i, total: chunks.length });
-        results.push(await postJson('/tools/ipam/manage/import', { csv: chunks[i].csv, dryRun: false, lineOffset: chunks[i].lineOffset }));
+        results.push(requireChanged(await postJson('/tools/ipam/manage/import', { csv: chunks[i].csv, dryRun: false, lineOffset: chunks[i].lineOffset })));
       }
       const m = mergeManageReports(results);
       const sum = (k) => results.reduce((a, r) => a + (r?.[k] || 0), 0);

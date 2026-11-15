@@ -83,8 +83,11 @@ export default function AssignTab({ canEdit }) {
     } catch (e) { setErr(e.message); } finally { setBusy(''); }
   };
 
-  const remove = async (agent) => {
-    if (!window.confirm(`'${agent}' 배정을 삭제할까요?\n\n엣지에 이미 적용된 대상은 이 삭제로 지워지지 않습니다 — 엣지가 다음 pull 에서 '배정 없음'을 받아도 기존 정의를 유지합니다(감시를 원격에서 임의로 끊지 않습니다).`)) return;
+  // 전체 점검 26회차 F3: 예전 문구('엣지에 적용된 대상은 지워지지 않습니다')는 실제 동작과 반대였다 — 엣지는 '배정 없음' 을 받으면
+  //   중앙이 배포한 대상(central:* 배치)을 지운다(agent/svcmonConfigPull.js v2.596 EF-2). 확인창이 사실대로 말한다.
+  const remove = async (agent, nTargets) => {
+    const n = Number.isFinite(Number(nTargets)) && nTargets != null ? ` ${Number(nTargets)}개` : '';
+    if (!window.confirm(`'${agent}' 배정을 삭제할까요?\n\n엣지가 다음 정의 확인(pull) 때 '배정 없음' 을 받으면 이 중앙이 배포한 점검 대상${n}을 엣지에서 지웁니다 — 그 엣지에서 해당 감시가 멈춥니다. 엣지에서 직접 만든 대상은 그대로 둡니다.`)) return;
     setBusy('del'); setErr('');
     try {
       const r = await delJson(`/svcmon/assign/${encodeURIComponent(agent)}`);
@@ -268,7 +271,7 @@ export default function AssignTab({ canEdit }) {
                             title="마지막 보고의 소스 IP 로 ping·TCP 연결(RTT)을 찍습니다">
                             {busy === `probe:${a.agent}` ? '진단 중…' : '통신 진단'}
                           </button>
-                          <button className="tab" disabled={busy === 'del'} onClick={() => remove(a.agent)}>삭제</button>
+                          <button className="tab" disabled={busy === 'del'} onClick={() => remove(a.agent, a.counts?.targets)}>삭제</button>
                         </div>
                       )}
                     </td>

@@ -132,7 +132,9 @@ export function saveDevice(input = {}) {
   const dev = existing ? { ...existing } : { id: `st-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, createdAt: Date.now(), pulled: false };
   // 전체 점검 23회차 S-2(재현): 중복(host+type) 검사가 신규 등록에만 있어, 기존 장비를 다른 장비와 같은 host 로 고치면 같은 어레이가 두 대가 됐다
   //   (증가량 · 보고표 · 전력 합계 이중 계산 · 세션 둘 · CSV 멱등 키 깨짐). 수정도 **자기 자신을 뺀** 등록부와 견준다 — 메모리를 바꾸기 전에.
-  if (existing) {
+  //   27회차 반증 D-6: 수정은 **이번 수정이 키(host · type)를 바꿀 때만** 견준다 — 예전(검사 없는 수정)에 이미 생긴 중복 두 대가
+  //   비활성화 · 비밀번호 저장까지 둘 다 잠기던 것(삭제만 남았다). 이미 있던 충돌은 막지 않는다.
+  if (existing && (String(existing.host || '').trim() !== host || String(existing.type || '').trim() !== type)) {
     const dupU = duplicateIssue(db.devices.filter((d) => d !== existing), { host, type });
     if (dupU) { const e = new Error(dupU.message); e.conflict = dupU.conflict; throw e; }
   }

@@ -19,7 +19,7 @@ import { createAuthGuard, authStopView } from '../util/authGuard.js';
 import { poolSettled } from '../util/pool.js';
 import { createChangeLogger } from '../util/logThrottle.js';
 import { serversForThisNode, getServerWithSecret } from './registry.js';
-import { loadSettings, onSettingsChange, cvpSettingsLoadError } from './settings.js';
+import { loadSettings, onSettingsChange, cvpSettingsLoadError, LIMITS as CVP_LIMITS } from './settings.js';
 import { collectCvp, testCvp } from './client.js';
 import { portDelta, cpuPctFromCounters } from './parse.js';
 import * as db from './db.js';
@@ -33,7 +33,9 @@ function prunePerSettings(settings) {
   let le = null;
   try { le = cvpSettingsLoadError(); } catch { le = { reason: '판정 실패' }; }
   if (le) {
-    if (!_pruneHoldWarned) { _pruneHoldWarned = true; console.warn(`[cvp] 설정 파일을 읽지 못해 보존 정리를 보류합니다(기본값으로 지우지 않음) — ${String(le.reason || '').slice(0, 160)}`); }
+    // 27회차 반증 D-4: 보류(무한 증가) 대신 설정 상한(최대 보존)으로 정리 — 관리자가 둘 수 있었던 어떤 값보다 오래된 것만
+    if (!_pruneHoldWarned) { _pruneHoldWarned = true; console.warn(`[cvp] 설정 파일을 읽지 못해 보존 정리를 설정 상한(최대 보존)으로만 합니다(기본값으로 지우지 않음) — ${String(le.reason || '').slice(0, 160)}`); }
+    db.maybePrune({ ...settings, rawRetentionDays: CVP_LIMITS.rawRetentionDays.max, dailyRetentionDays: CVP_LIMITS.dailyRetentionDays.max }).catch(() => {});
     return;
   }
   _pruneHoldWarned = false;

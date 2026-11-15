@@ -10,7 +10,7 @@ import BulkTab from './svcmon/BulkTab.jsx';           // 통합 등록 마법사
 import EscClose from '../components/EscClose.jsx';
 // v2.295 분리 모듈(1차 모듈화 감사 확정 #1·#5): 상수 카탈로그 · 트리/집계 순수 함수 · 점검 마법사.
 import { STATUS, METHOD, statusOf, methodText } from './svcmon/constants.js';
-import { buildTree, statsOf, matchNode, summarize } from './svcmon/tree.js';
+import { buildTree, statsOf, matchNode, summarize, avgReplyMs } from './svcmon/tree.js';
 import { TestWizard } from './svcmon/TestWizard.jsx';
 import { blankOr } from './blankOr.js';
 import { edgeCardKind, edgeCardWarn, edgeCardMeta, edgeNoReportTotal } from './svcmon/edgeCardText.js';
@@ -292,10 +292,7 @@ export default function SvcMonitor() {
   }).filter((g) => g.tests.length > 0);   // 결과 0인 대상은 그룹 헤더도 숨김(README)
 
   const shown = groups.reduce((a, g) => a + g.tests.length, 0);
-  const avgMs = (() => {
-    const v = groups.flatMap((g) => g.tests.map((x) => x.result?.ms).filter((n) => n != null));
-    return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : 0;
-  })();
+  const avgMs = avgReplyMs(groups.flatMap((g) => g.tests.map((x) => x.result?.ms)));   // 26회차 F11: 표본이 없으면 null('—')
   // v2.928: 대상을 고르면 내부 id(g-4c30c45c) 대신 '경로\이름' 을 보인다(예전에는 sel 문자열을 그대로 붙였다).
   const selPath = (() => {
     if (!sel) return 'Root';
@@ -827,7 +824,7 @@ export default function SvcMonitor() {
 
           <div className="pc-footer">
             <span>SHOWN {shown} / {summary.total}</span>
-            <span>AVG REPLY {avgMs} ms</span>
+            <span>AVG REPLY {avgMs == null ? '—' : `${avgMs} ms`}</span>
             {/* 다중 노드에서는 전역 sweep 시각이 의미가 없다 — 이 포탈 로컬 실행 기준임을 명시 */}
             <span>LOCAL SWEEP {data?.lastSweep ? new Date(data.lastSweep).toLocaleTimeString('ko-KR', { hour12: false }) : '—'}</span>
             <span className="pc-live">● LIVE POLLING</span>

@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeSettingsLoadError } from '../util/settingsLoadError.js';   // 26회차 F1
 import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = () => path.join(config.configDir, 'svcmon-log.json');
@@ -41,14 +42,27 @@ const DEFAULTS = {
 };
 
 let cache = null;
+/*
+ * 전체 점검 26회차 F1(재현): 손상되면 표지 없이 기본값(보관 90개)으로 넘어가 다음 회전이 CSV 이력을 지웠다(365 → 90: 300개 중 210개 삭제 ·
+ *   재시작 뒤에도 — 원본은 보존본으로 옮겨져 없다). 이제 로드 오류를 세우고 그동안은 **설정 상한(파일 3650개 · 총량 무제한)으로만** 정리(csvlog.pruneOld —
+ *   27회차 반증 D-4: 전부 보류하면 시간 회전에서 디스크가 끝없이 찬다) · 저장 409 · 확정은 보관 개수를 상한으로 쓴다(이력을 지우지 않게).
+ *   해제는 서비스 점검 '기본값으로 확정' 또는 보존본 복구. ⚠ 로그 위치(dirPath)는 기본(CONFIG_DIR)으로 돌아간 채다(남긴 것).
+ */
+export const LOG_LIMITS = Object.freeze({ keepFilesMax: 3650, maxTotalMBMax: 2_000_000 });
+const _loadErr = makeSettingsLoadError(() => FILE(), { label: '성능점검 로그(CSV) 보관 설정 — 확정 시 보관 개수는 최대값(이력을 지우지 않음)', confirm: () => { const v = { ...DEFAULTS, keepFiles: LOG_LIMITS.keepFilesMax }; atomicWriteFileSync(FILE(), JSON.stringify(v, null, 2)); cache = v; _loadErr.ok(); } });
+/** 로그 설정 파일을 못 읽었으면 { at, reason }, 아니면 null. */
+export function logSettingsLoadError() { getLogSettings(); return _loadErr.get(); }
 
 export function getLogSettings() {
   if (cache) return { ...cache };
   try {
     const raw = fs.readFileSync(FILE(), 'utf8');
     cache = normalize(JSON.parse(raw));
+    _loadErr.ok();
   } catch (e) {
-    if (e.code !== 'ENOENT') preserveCorrupt(FILE(), e?.message);
+    if (e.code === 'ENOENT') _loadErr.missing();
+    else if (e.code) _loadErr.readError(e);   // EACCES · EISDIR — 원본을 옮기지 않는다(20회차 반증 F4 규약)
+    else { _loadErr.corrupt(e); preserveCorrupt(FILE(), e?.message); }
     cache = { ...DEFAULTS };
   }
   return { ...cache };
@@ -78,6 +92,9 @@ export function cleanLogPatch(patch) {
 }
 
 export function setLogSettings(patch) {
+  if (logSettingsLoadError()) {   // 26회차 F1: 손상 중 부분 저장은 기본값(짧은 보관)을 굳혀 다음 회전이 이력을 지운다
+    const e = new Error('로그 보관 설정 파일을 읽지 못한 상태라 저장하지 않았습니다 — 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리고 재시작하세요.'); e.code = 'settings-unreadable'; e.status = 409; throw e;
+  }
   const next = normalize({ ...getLogSettings(), ...cleanLogPatch(patch) });
   // 절대 경로를 바꾸는 저장은 **실제 쓰기 시험**을 통과해야 한다. 검증 없이 저장하면
   // 오타 경로에서 라이터가 조용히 실패해 로그가 통째로 유실된다(라이터는 best-effort).
@@ -94,8 +111,9 @@ export function setLogSettings(patch) {
     }
     if (!st.isDirectory()) throw new Error(`디렉터리가 아닙니다: ${next.dirPath}`);
   }
-  cache = next;
   atomicWriteFileSync(FILE(), JSON.stringify(next, null, 2));
+  cache = next;   // 쓰기 성공 뒤에만
+  _loadErr.ok();
   return { ...next };
 }
 
@@ -111,9 +129,9 @@ function normalize(v) {
     enabled: o.enabled === undefined ? DEFAULTS.enabled : !!o.enabled,
     mode: o.mode === 'changes' ? 'changes' : 'all',
     rotate: ROTATE_UNITS.includes(o.rotate) ? o.rotate : DEFAULTS.rotate,
-    keepFiles: Number.isFinite(keep) ? Math.min(3650, Math.max(1, Math.round(keep))) : DEFAULTS.keepFiles,
+    keepFiles: Number.isFinite(keep) ? Math.min(LOG_LIMITS.keepFilesMax, Math.max(1, Math.round(keep))) : DEFAULTS.keepFiles,
     maxFileMB: clamp(o.maxFileMB, 8, 8192, DEFAULTS.maxFileMB),
-    maxTotalMB: o.maxTotalMB === 0 ? 0 : clamp(o.maxTotalMB, 100, 2_000_000, DEFAULTS.maxTotalMB),
+    maxTotalMB: o.maxTotalMB === 0 ? 0 : clamp(o.maxTotalMB, 100, LOG_LIMITS.maxTotalMBMax, DEFAULTS.maxTotalMB),
     // 디렉터리는 이름만 받는다(경로 구분자 금지 — CONFIG_DIR 밖으로 나가지 못하게).
     dirName: String(o.dirName || DEFAULTS.dirName).replace(/[^A-Za-z0-9._-]/g, '') || DEFAULTS.dirName,
     // 절대 경로는 그대로 두되 정규화한다. 상대 경로는 받지 않는다 — 프로세스 cwd 에 따라
@@ -134,4 +152,4 @@ export function logDir() {
   return dir;
 }
 
-export function _resetLogSettingsCache() { cache = null; }
+export function _resetLogSettingsCache() { cache = null; _loadErr.ok(); }

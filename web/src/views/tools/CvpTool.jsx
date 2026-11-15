@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import BoldText from '../../components/boldText.jsx';
 import { fetchJson, postJson, putJson, delJson, getCurrentUser, downloadFile, canCsv } from '../../api.js';
+import { requireChanged } from '../changeResult.js';   // 27회차 반증 D-2: 409(설정 파일 손상 중 거절)를 성공으로 보이지 않게
 import { Loading, ErrorBox, Kpi, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { droppedSecretNote } from '../droppedSecretText.js';
@@ -1194,7 +1195,7 @@ function AdminPanel({ onChanged }) {
   const saveSettings = async () => {
     setBusy(true); setSmsg(null);
     try {
-      const r = await putJson('/tools/cvp/settings', settingsPayload(sform));
+      const r = requireChanged(await putJson('/tools/cvp/settings', settingsPayload(sform)));
       setSform(settingsToForm(r && r.settings ? r.settings : r));
       setSmsg({ ok: true, text: '설정을 저장했습니다(빈 칸은 이전 값을 유지합니다).' });
       onChanged && onChanged();
