@@ -669,7 +669,9 @@ async function collectOne(target, { trigger = 'auto', intervalMs = null, prevRun
   jobs.push((target.paths.includes('os') && !stopped)
     ? withDeadline(DEVICE_TIMEOUT_MS, (signal) => collectOsUsage(target.osHost, { signal, budgetMs: OS_BUDGET.effective, ...osStoreOpts(storeOf(), peakPlan), ...(logExtra ? { extraCommands: [logExtra] } : {}), top }), 'OS 수집 시한 초과')
       .catch((e) => ({ ok: false, error: String(e?.message || e).slice(0, 300) }))
-      .then((r) => { osMs = Date.now() - osT0; return r; })
+      // 1회차 점검 D6: 자격 해석이 막아(authErrorCode — 키 사용 중지 · 폴더 · 기능 · 퇴역 · 바꿔치기) 또는 주소가 없어 **접속하지 않은** 결과는 소요에 넣지 않는다
+      //   (예전: 0~1ms 로 들어가 p50 을 끌어내렸다 — 법인 키 사용 중지면 한 법인 전체). 정지 · 경로 없음과 같은 원칙(bmPerfStage6Health ②).
+      .then((r) => { osMs = (r?.authErrorCode || r?.notConnected) ? null : Date.now() - osT0; return r; })
     : Promise.resolve(stopped ? { ok: false, error: `인증 실패로 주기 수집이 정지됐습니다(${stopped.attempts}회 시도). 비밀번호를 고치면 자동 재개합니다.`, authStopped: stopped } : null));
   const [idrac, os] = await Promise.all(jobs);
   // 자격 해석이 막아 접속하지 않은 키(사용 중지 · 폴더 · 기능 · 바꿔치기)는 ‘사용’ 이 아니다 — 주기마다 실패로 쌓지 않는다(반증 D3).

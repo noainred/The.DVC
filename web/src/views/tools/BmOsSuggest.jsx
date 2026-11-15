@@ -9,7 +9,7 @@ import { fetchJson, postJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
-import { STATE_TEXT, VIA_TEXT, suggestRowsOf, applyResultText, pickableOf, initialFilter } from './bmOsSuggestText.js';
+import { STATE_TEXT, VIA_TEXT, suggestRowsOf, applyResultText, pickableOf, initialFilter, agentNoteOf, AGENT_UNKNOWN_HINT } from './bmOsSuggestText.js';
 
 const FILTERS = [['suggest', '제안 있음'], ['pick', '고르기 필요'], ['none', '못 찾음'], ['differs', '등록된 주소와 다름'], ['all', '전체']];
 const STACK = [['registered', '#22c55e'], ['suggest', '#3b82f6'], ['pick', '#f59e0b'], ['none', '#8b9bb4']];
@@ -99,7 +99,8 @@ export function BmOsSuggest() {
                     </td>
                     <td style={{ fontSize: 12 }}>{r.cands.length ? [...new Set(r.cands.flatMap((x) => x.vias || []))].map((v) => <span key={v} className={`badge ${v === 'fwd' ? 'blue' : 'gray'}`} style={{ marginRight: 4 }}>{VIA_TEXT[v] || v}</span>) : <span className="muted">—</span>}</td>
                     <td style={{ fontSize: 12 }}>{r.cands.length ? (sshC.length === r.cands.length ? <span className="badge green">{r.cands.length > 1 ? '모두 열림' : '열림'}</span> : sshC.length ? <span className="badge amber">{sshC.length}/{r.cands.length} 열림</span> : <span className="badge red">닫힘</span>) : <span className="muted">—</span>}</td>
-                    <td data-sort={r.state}><span className={`badge ${st[1]}`}>{st[0]}</span> <span className="muted" style={{ fontSize: 12 }}>{st[2]}{r.state === 'registered' && r.reg?.addrOnly ? ' · 주소만(계정 없음)' : ''}</span></td>
+                    <td data-sort={r.state}><span className={`badge ${st[1]}`}>{st[0]}</span> <span className="muted" style={{ fontSize: 12 }}>{st[2]}{r.state === 'registered' && r.reg?.addrOnly ? ' · 주소만(계정 없음)' : ''}</span>
+                      {agentNoteOf(r) ? <div title={AGENT_UNKNOWN_HINT} style={{ fontSize: 11.5, color: 'var(--amber)', marginTop: 2, whiteSpace: 'normal', minWidth: 0 }}>{agentNoteOf(r)} · 등록하면 중앙 직접</div> : null}</td>
                     <td>
                       {r.state === 'suggest' ? <button type="button" className="logout-btn" style={{ flex: 'none', padding: '4px 10px', fontSize: 12 }} disabled={busy} onClick={() => apply([[r.key, sshC[0]?.ip]])}>등록</button>
                         : r.state === 'pick' ? (

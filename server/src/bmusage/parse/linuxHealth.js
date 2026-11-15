@@ -9,7 +9,7 @@
  *   · 표지는 정확 일치 · 순서 · 재개방 금지(splitSections — LINUX_SECTIONS 에 이 순서로 넣었다).
  *   · 구획마다 줄 수(head) · 줄 폭(cut) 상한 — 바이트 산수(SECTION_BYTES_SUM < OUTPUT_MAX_BYTES < EXEC_MAX_OUTPUT)에 더한다(osSsh).
  *   · 멈출 수 있는 명령은 `timeout`(chronyc 3 · dmesg 3 · systemctl 3 · needs-restarting 6 · dnf 6) — 주기 명령 전체가 시한 하나라 한 칸이 전 구획을 잃게 하지 않는다(R8).
- *     ⚠⚠ 8b 반증 F1(8b 이전부터의 결함): 구획 안 timeout 의 **합**이 바깥 exec 시한(osSsh CMD_TIMEOUT_MS 30초)보다 크면 그 목적이 성립하지 않는다 — 시한에 걸리면
+ *     ⚠⚠ 8b 반증 F1(8b 이전부터의 결함): 구획 안 timeout 의 **합**이 바깥 exec 시한(osSsh CMD_TIMEOUT_MS — 1회차 점검 D2 부터 34초)보다 크면 그 목적이 성립하지 않는다 — 시한에 걸리면
  *     sshExec 가 모은 출력을 버려 그 주기의 **전 구획**을 잃는다. 예전 최악 합 34초(systemctl 3×4 · chronyc 3 · dmesg 3 · needs-restarting 8 · dnf 8) > 30초였다.
  *     이제 needs-restarting 과 dnf history 는 **한 주기에 둘 다 돌지 않고**(패키지 DB 가 20분 안에 바뀌면 dnf 차례 · needs-restarting 은 20~40분 창) 각 6초 —
  *     최악 합 24초 + 여유 6초 ≤ 30초(bmTop8bBudget 시험이 명령 문자열에서 timeout 을 뽑아 합을 고정하고, 실제 셸로 ‘둘 다 돌지 않음’ 을 확인한다).

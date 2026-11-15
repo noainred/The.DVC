@@ -34,7 +34,8 @@ export function _resetPerfOpsMinEdgeVersionForTest() { _resetFeatureMinEdgeVersi
 const FOCUS_CODES = new Set(['ok', 'queued', 'bad-reason', 'bad-request', 'not-found', 'no-path', 'busy', 'daily-cap', 'auth-stopped', 'store-unavailable', 'settings-unreadable']);
 const FOCUS_STATUS = new Set(['queued', 'running', 'done', 'stopped', 'auth', 'interrupted', 'failed']);
 const VERDICTS = new Set(['bottleneck', 'saturated', 'errors', 'warn', 'ok', 'partial', 'stale', 'unknown']);
-const MISS = new Set(['timeout', 'auth', 'auth-stopped', 'ssh-error', 'host-key', 'not-linux', 'no-path', 'pool-busy', 'unreachable', 'no-telemetry', 'error', 'cred-config']);
+// 1회차 점검 D5(b): iDRAC 셋 추가(focus/run.js FOCUS_MISS 와 같은 열거 — 시험이 대조). 구버전 중앙은 모르는 값을 'error' 로 본다(아래 enumOr).
+const MISS = new Set(['timeout', 'auth', 'auth-stopped', 'ssh-error', 'host-key', 'not-linux', 'no-path', 'pool-busy', 'unreachable', 'no-telemetry', 'error', 'cred-config', 'forbidden', 'ids-unmatched', 'cert-untrusted', 'os-disabled', 'os-edge']);   // 재확인 N4: os-disabled · os-edge
 const CHANGE_KINDS = new Set(['reboot', 'kernel', 'needs-restart', 'package', 'sysctl', 'sysctl-file', 'sysctl-all', 'cron', 'tuned', 'selinux', 'firewalld', 'units-failed', 'firmware', 'cvp-map', 'health', 'idle']);
 const VAL_KEYS = new Set(['cpu_pct', 'cpu_iowait_pct', 'runq_per_core', 'disk_busy_pct', 'disk_await_ms', 'disk_aqu', 'psi_io_full10', 'mem_pct', 'swap_out_ps', 'net_pct', 'net_drop_delta', 'net_err_delta', 'power_w', 'inlet_c', 'idrac_cpu_pct', 'dmesg_err']);
 const RES_KEYS = new Set(['cpu', 'mem', 'disk', 'net', 'hw']);

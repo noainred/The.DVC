@@ -23,6 +23,7 @@ import { licenseFromInventory } from './license.js';
 import { hbaBasisFor } from './hbaBasis.js'; // v2.744(감사 LEFT-08 ②)
 import { addressMatcher, extendMatcher, maskIdentityFields, maskedIdToken, maskedAddressName } from '../auth/addressMask.js';
 import { overlapIdOf, decidedKeyOf } from './keyDecisions.js'; // 다음 점검 ①(2차): 식별 키가 겹치는 서버 — 사용자 결정
+import { trimTrailingSlashes } from '../util/trimSlashes.js';
 
 const t = (v) => String(v ?? '').trim();
 const norm = (v) => t(v).toLowerCase();
@@ -34,7 +35,8 @@ const norm = (v) => t(v).toLowerCase();
  *   스킴·끝 슬래시·포트·대괄호(IPv6)를 떼고 비교한다.
  */
 export function hostKey(v) {
-  let s = norm(v).replace(/^[a-z][a-z0-9+.-]*:\/\//, '').replace(/\/+$/, '');
+  // 1회차 점검 의심 1(재현 — 슬래시 4만 자 + 글자 하나 855ms): 끝 슬래시는 정규식(/\/+$/ — O(n²))이 아니라 선형 함수로 뗀다(CLAUDE.md 금지 패턴).
+  let s = trimTrailingSlashes(norm(v).replace(/^[a-z][a-z0-9+.-]*:\/\//, ''));
   if (s.startsWith('[')) { const m = /^\[([^\]]+)\]/.exec(s); return m ? m[1] : s; }   // IPv6 리터럴
   s = s.split('/')[0];
   const colon = s.lastIndexOf(':');
@@ -46,7 +48,9 @@ export function hostKey(v) {
 export const NO_PATH_REASON = Object.freeze({
   'corp-off': '이 법인은 수집을 켜지 않았습니다.',
   unassigned: '법인 귀속이 없습니다(어느 법인 부하인지 알 수 없어 기본 제외).',
-  'edge-delegated': '엣지가 수집하는 서버입니다 — 중앙에서는 접속하지 않습니다.',
+  // 재확인 N1: OS 등록 엣지 지정으로 넘긴 서버(delegatedBy 'os-registry')도 이 사유다 — 엣지는 그 계정을 갖지 않으므로(bmstor 위임은 잡마다 비밀을 실어 보내고 엣지는 저장하지 않는다)
+  //   ‘엣지가 수집한다’ 고 단정하지 않는다(값이 있는지는 엣지 보관분 · 누락 점검이 말한다).
+  'edge-delegated': '엣지가 맡는 서버입니다 — 중앙에서는 접속하지 않습니다(값은 그 엣지 보관분에서 옵니다. OS 등록 엣지 지정으로 넘긴 서버는 그 엣지 포탈에 이 서버의 OS 등록이 있어야 수집됩니다).',
   'no-idrac': 'iDRAC 등록이 없습니다(수동 태그로 베어메탈이 된 ESXi 호스트일 수 있습니다).',
   'no-idrac-cred': 'iDRAC 등록에 계정·비밀번호가 없습니다.',
   'no-os-cred': 'OS 계정이 없습니다 — 설정 › 베어메탈 스토리지에 이 호스트를 등록하면 디스크·네트워크·HBA 까지 읽습니다.',
@@ -57,6 +61,11 @@ export const NO_PATH_REASON = Object.freeze({
   'key-conflict': '식별 키가 이 노드의 다른 서버와 겹칩니다 — 두 서버의 값이 한 행에 섞이지 않게 수집하지 않습니다(설정 › iDRAC 등록에서 서비스태그를 채우면 키가 갈려 다음 주기부터 수집합니다).',
   // v2.961: 원격 수집 서버(엣지)가 보낸 전력으로만 보이는데 이 노드에 iDRAC · OS 등록이 없고, 그 수집 서버의 이름을 등록부에서 확인하지 못했다.
   //   어느 엣지가 수집하는지 모르므로 ‘엣지 수집’ 으로도 ‘iDRAC 등록 없음’ 으로도 말하지 않는다(못 읽음 ≠ 없음). 갈래는 행의 collectorIssue(unread · not-found · no-name).
+  // 1회차 점검 D3: 사람이 ‘사용 안 함’ 으로 끈 등록은 경로로 쓰지 않는다(주 iDRAC 폴러 · bmstor 폴러와 같다 — 끈 계정으로 로그인하지 않게). 등록 없음 · 계정 없음과 섞지 않는다.
+  'idrac-disabled': 'iDRAC 등록이 ‘사용 안 함’ 으로 꺼져 있어 쓰지 않습니다(그 계정으로 로그인하지 않습니다). 설정 › iDRAC 등록에서 켜면 다음 주기부터 수집합니다.',
+  'os-disabled': 'OS 계정 등록이 ‘사용 안 함’ 으로 꺼져 있어 쓰지 않습니다(그 계정으로 SSH 하지 않습니다). 설정 › 베어메탈 스토리지에서 켜면 다음 주기부터 수집합니다.',
+  // 1회차 점검 D4: OS 등록에 엣지(agent)가 지정돼 있다 — 그 엣지의 등록이라 이 노드는 그 주소 · 계정으로 접속하지 않는다(bmstor 경계와 같다). 다른 경로가 없으면 사유는 edge-delegated 다.
+  'os-edge': 'OS 계정 등록이 엣지 지정이라 이 노드에서는 그 주소 · 계정으로 접속하지 않습니다 — 그 엣지 포탈에 이 서버의 OS 등록이 있어야 수집됩니다(중앙 등록은 디스크 용량 측정 위임용).',
   'remote-collector-unknown': '원격 수집 서버(엣지)가 보낸 전력으로만 보이는 서버인데, 그 수집 서버의 이름을 등록부에서 확인하지 못했습니다(수집 서버 등록부를 읽지 못함 · 등록부에 없는 수집 서버(삭제됨) · 이름이 빈 등록 중 하나) — 어느 엣지가 수집하는지 몰라 중앙에서 접속하지 않습니다. 설정 › 엣지·원격 › 수집 서버(원격)를 확인하세요.',
 });
 
@@ -157,7 +166,7 @@ export function indexOsHosts(bmServers = [], { includeAddrOnly = false } = {}) {
  *     법인 지정 등록과 미지정 등록이 섞이면 지정 등록을 먼저. 그 서버는 OS 경로 없이(iDRAC 만 · 둘 다 없으면 대상이 아닌 서버) 사유가 화면에 보인다.
  * @returns {{ entry: object|null, reason: ''|'os-ambiguous'|'os-foreign' }}
  */
-export function pickOsEntry(os, { regHost = '', name = '', vc = '', strict = false } = {}) {
+export function pickOsEntry(os, { regHost = '', name = '', vc = '', strict = false, prefer = null } = {}) {
   const v = t(vc);
   const stages = [os?.allByHost?.get(hostKey(regHost)), os?.allByName?.get(norm(name)), os?.allByHost?.get(hostKey(name))];
   let foreign = false; let unknownStrict = false;
@@ -169,10 +178,26 @@ export function pickOsEntry(os, { regHost = '', name = '', vc = '', strict = fal
     if (list.some((s) => t(s.vcenterId) && t(s.vcenterId) !== v)) { if (v) foreign = true; else unknownStrict = true; }
     const use = own.length ? own : (strict ? [] : unk);
     if (!use.length) { if (strict && unk.length) unknownStrict = true; continue; }
-    if (new Set(use.map((s) => hostKey(s.host))).size === 1) return { entry: use[0], reason: '' };
+    // 1회차 점검 D3 · D4: 같은 주소의 중복 등록이면 이 노드가 쓸 수 있는 것(prefer — 켜짐 · 이 노드 담당)을 먼저 고른다. 모호 판정(주소 수)은 예전 그대로.
+    if (new Set(use.map((s) => hostKey(s.host))).size === 1) return { entry: (typeof prefer === 'function' ? use.find((s) => prefer(s)) : null) || use[0], reason: '' };
     return { entry: null, reason: 'os-ambiguous' };
   }
   return { entry: null, reason: unknownStrict ? 'os-ambiguous' : foreign ? 'os-foreign' : '' };
+}
+
+/**
+ * 1회차 점검 D3 · D4 — 고른 OS 등록을 **이 노드가 쓸 수 있는가**(순수 · 대상 해석 · 집중 모니터링 분마다 다시 해석이 같은 함수).
+ *   · 'os-disabled' — 사람이 ‘사용 안 함’ 으로 끈 등록(bmstor 폴러 `s.enabled !== false` 와 같은 기준 — 끈 계정으로 SSH 하지 않는다).
+ *   · 'os-edge'     — 등록의 agent(bmstor: 엣지 이름 · 빈 값 = 중앙 직접)가 이 노드가 아니다. 중앙은 agent 없는 등록만, 엣지는 빈 값 · 자기 이름만 쓴다
+ *                     (베어메탈 담당 판정 isMine 과 같은 꼴 — bmstor 폴러는 agent 있는 등록을 그 엣지로 보낸다).
+ *   · ''            — 쓸 수 있다.
+ */
+export function osEntryIssue(entry, { isEdge = false, agentName = '' } = {}) {
+  if (!entry || typeof entry !== 'object') return '';
+  if (entry.enabled === false) return 'os-disabled';
+  const a = norm(entry.agent);
+  if (!a) return '';
+  return isEdge && a === norm(agentName) ? '' : 'os-edge';
 }
 
 /**
@@ -198,7 +223,13 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
   const bmRegUnread = idracUnread || !!(registryUnread && registryUnread.os);
   const regById = new Map(registry.map((r) => [t(r.id), r]));
   const regByTag = new Map(registry.filter((r) => t(r.serviceTag)).map((r) => [norm(r.serviceTag), r]));
+  /*
+   * 1회차 점검 D3: 고르는 순서(id → 서비스태그 · 같은 태그면 목록 뒤 항목)는 예전 그대로 두고, **고른 등록이 ‘사용 안 함’ 이면 쓰지 않는다**(idrac-disabled —
+   *   주 iDRAC 폴러 idrac/poller.js `s.enabled !== false` 와 같은 기준 · 끈 계정으로 로그인하지 않게). 다른 등록으로 갈아타지 않는다 — 같은 태그의 다른 등록은
+   *   공통 태그(‘To Be Filled By O.E.M.’)면 남의 iDRAC 이다. 그래서 이 판정은 대상을 늘리지 않는다(시험 bmUsageLoop1 ③).
+   */
   const os = indexOsHosts(bmServers);
+  const osUsable = (s) => !osEntryIssue(s, { isEdge, agentName });
   const corps = settings.corps || {};
   const me = norm(agentName);
 
@@ -250,9 +281,17 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
     if (!mine) { skipped.push({ ...idOf(b), reason: 'edge-delegated', ...(isEdge ? { agent: b.remoteAgent || '' } : delegatedAgentFields(remoteCollectors, b.remoteAgent)) }); continue; }
 
     // 다음 점검 ①(2차): 별도 키로 수집하는 서버(keyOverride)는 서비스태그로 등록을 찾지 않는다 — 공통 태그면 다른 서버의 iDRAC 을 집는다.
-    const reg = regById.get(t(b.serverId)) || (t(b.serviceTag) && !b.keyOverride ? regByTag.get(norm(b.serviceTag)) : null) || null;
+    const reg0 = regById.get(t(b.serverId)) || (t(b.serviceTag) && !b.keyOverride ? regByTag.get(norm(b.serviceTag)) : null) || null;
+    // 1회차 점검 D3: 고른 등록이 ‘사용 안 함’ 이면 경로로 쓰지 않는다(위 머리말) — 사유 idrac-disabled.
+    //   ⚠ OS 등록을 고르는 주소(regHost)는 예전 그대로 그 등록의 주소다(OS 고르는 순서를 바꾸지 않는다 — 바뀌는 것은 ‘그 등록을 쓰는가’ 뿐).
+    const regOff = !!(reg0 && reg0.enabled === false);
+    const reg = regOff ? null : reg0;
     // 2차 재확인 G3: OS 등록은 법인으로 가른다(pickOsEntry) — 별도 키 서버(keyOverride)는 법인이 맞는 등록만(strict).
-    const osPick = pickOsEntry(os, { regHost: reg?.host, name: b.name, vc, strict: !!b.keyOverride });
+    const osPick0 = pickOsEntry(os, { regHost: reg0?.host, name: b.name, vc, strict: !!b.keyOverride, prefer: osUsable });
+    // 1회차 점검 D3 · D4: 고른 등록이 꺼졌거나(os-disabled) 엣지 것(os-edge)이면 이 노드 경로가 아니다.
+    const osIssue = osEntryIssue(osPick0.entry, { isEdge, agentName });
+    const osPick = osIssue ? { entry: null, reason: osPick0.reason } : osPick0;
+    const osEdgeAgent = osIssue === 'os-edge' ? t(osPick0.entry.agent) : '';
     /*
      * v2.961 — **원격 수집 서버(엣지)가 iDRAC 을 맡은 서버는 그 엣지가 수집한다**(사용자 보고: 엣지 iDRAC 스캔이 자동 등록한 서버가 중앙에서
      *   ‘iDRAC 등록 없음’ 1,157대로 보였다). 그 서버의 bareMetal 행은 원격 전력(collector/state.js — 수집 서버 pull) 출처라 `remoteAgent` 가 없고
@@ -263,9 +302,24 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
      *   불변식 시험 bmRemoteDelegate2961). 사유 순서: 법인 꺼짐 · 귀속 없음보다 먼저 — 중앙 설정(법인 켜기 · 귀속 포함)을 바꿔도 중앙은 수집할 수 없고
      *   수집 여부는 그 엣지 설정이 정한다(엣지 보관분 표의 ‘엣지에서 꺼짐’ → ‘중앙에서 켜기’). 법인 축(vcenterId)은 싣는다 — 범위 계정은 범위 안 행만 본다.
      *   수집 서버를 등록부에서 못 찾거나 등록부를 못 읽으면 이름을 추측하지 않고 remote-collector-unknown(엣지 수집에도 no-idrac 에도 넣지 않는다).
+     *   1회차 점검 D3: ‘사용 안 함’ 으로 끈 등록(iDRAC · OS)은 ‘이 노드가 수집할 수 있는 등록’ 이 아니다 — 주 iDRAC 폴러도 그 등록으로 전력을 읽지 않으므로
+     *   원격 출처 행이면 그 서버를 실제로 읽는 쪽은 그 엣지다. 그래서 꺼진 등록만 있는 원격 서버는 엣지 위임이다(예전: 꺼진 계정으로 중앙이 접속).
      *   반증 F1: **이 노드의 iDRAC · OS 등록부를 못 읽은 동안은 이 갈래를 타지 않는다**(빈 목록은 '등록 없음' 이 아니라 '모름' — 중앙이 수집하던 서버를
      *   '엣지 수집' 으로 단정했다). 예전 사유(no-idrac · no-os-cred · 법인 꺼짐 …)로 두고 sourceErrors 경고가 그 이유를 말한다.
      */
+    /*
+     * 1회차 점검 D4 — **OS 등록에 엣지(agent)가 지정된 서버는 그 엣지의 등록**이다(bmstor 폴러가 그 등록을 엣지로 보낸다 — bmstor/registry.js agent).
+     *   예전에는 agent 를 보지 않아 중앙이 법인 사설 주소로 직접 SSH 했다(고 RTT · 미도달이면 매 주기 시한 · 원격 위임 행에 계정을 넣으면 v2.961 위임이 사라졌다).
+     *   이 노드에 쓸 수 있는 다른 경로(켜진 iDRAC 등록 + 계정 + 텔레메트리 켬)가 없으면 ‘엣지 수집 — 그 엣지’ 로 밝힌다(이름은 수집 서버 등록부 name 으로 — canonicalAgentRef).
+     *   다른 경로가 있으면 그 경로로 수집하고 OS 쪽 사유(os-edge)를 missing 으로 싣는다. 사유 순서는 v2.961 과 같다(법인 꺼짐 · 귀속 없음보다 먼저 — 수집 여부는 그 엣지가 정한다).
+     *   iDRAC 등록부를 못 읽은 동안은 ‘다른 경로가 없다’ 를 모른다(반증 F1 과 같은 원칙) — 위임으로 단정하지 않고 예전 사유(no-idrac + osIssue os-edge)로 둔다.
+     */
+    const idracUsable = !!(settings.idracTelemetry && reg && t(reg.host) && t(reg.username) && t(reg.password));
+    if (osEdgeAgent && !idracUsable && !idracUnread) {
+      skipped.push({ ...idOf(b), reason: 'edge-delegated', ...(isEdge ? { agent: osEdgeAgent } : delegatedAgentFields(remoteCollectors, osEdgeAgent)), vcenterId: vc, delegatedBy: 'os-registry' });
+      continue;
+    }
+    // 1회차 점검 D3: 꺼진 등록(iDRAC · OS)은 ‘이 노드가 수집할 수 있는 등록’ 이 아니다 — 원격 수집 서버가 맡은 서버면 그 엣지 위임이다(예전: 꺼진 계정으로 중앙이 접속).
     if (!isEdge && !bmRegUnread && t(b.source) === 'remote' && t(b.collectorId) && !reg && !osPick.entry && !osPick.reason) {
       const who = remoteCollectorNameOf(remoteCollectors, b.collectorId);
       if (who.name) skipped.push({ ...idOf(b), reason: 'edge-delegated', agent: who.name, ...(agentNameClash(remoteCollectors, who.name, who.id) ? { agentClash: true } : {}), vcenterId: vc, delegatedBy: 'collector', ...edgeKeyOf(b) });
@@ -278,12 +332,13 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
       skipped.push({ ...idOf(b), reason: 'corp-off', vcenterId: vc }); continue;
     }
     const osEntry = osPick.entry;
-    const osReason = osPick.reason || 'no-os-cred';
+    const osReason = osPick.reason || osIssue || 'no-os-cred';
 
     const paths = [];
     let idracReason = '';
     if (settings.idracTelemetry) {
-      if (!reg || !t(reg.host)) idracReason = 'no-idrac';
+      if (regOff) idracReason = 'idrac-disabled';
+      else if (!reg || !t(reg.host)) idracReason = 'no-idrac';
       else if (!t(reg.username) || !t(reg.password)) idracReason = 'no-idrac-cred';
       else paths.push('idrac');
     }
@@ -292,11 +347,13 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
     if (!paths.length) {
       // 3차 재확인 H2: OS 등록이 있는데 법인이 맞지 않아 쓰지 않았으면(os-foreign · os-ambiguous) 그것이 사유다 — 예전에는 iDRAC 사유(no-idrac)만 보여
       //   기준판에서 OS 로 수집되던 서버가 왜 빠졌는지 화면이 말하지 못했다. iDRAC 쪽 사유는 idracIssue 로 함께 싣는다.
+      // 1회차 점검 D3: OS 등록이 꺼져 있으면(os-disabled) 그것이 OS 쪽 사유다(os-foreign · os-ambiguous 와 같은 자리 — iDRAC 사유는 idracIssue 로).
+      const osWhy = osPick.reason || (osIssue === 'os-disabled' ? osIssue : '');
       const reason = (!settings.idracTelemetry && !settings.osSsh) ? 'both-off'
-        : (settings.osSsh && osPick.reason) ? osPick.reason
+        : (settings.osSsh && osWhy) ? osWhy
           : (settings.osSsh && !osEntry && idracReason) ? idracReason
             : (idracReason || osReason);
-      skipped.push({ ...idOf(b), reason, vcenterId: vc, osMissing: !osEntry, ...(osPick.reason ? { osIssue: osPick.reason } : {}), ...(idracReason && reason !== idracReason ? { idracIssue: idracReason } : {}) });
+      skipped.push({ ...idOf(b), reason, vcenterId: vc, osMissing: !osEntry, ...(osWhy || osIssue ? { osIssue: osWhy || osIssue } : {}), ...(idracReason && reason !== idracReason ? { idracIssue: idracReason } : {}) });
       continue;
     }
     /*
@@ -364,7 +421,10 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
       const owner = norm(siteAgent.get(vc) || '');
       const mine = owner ? (isEdge && owner === me) : true;
       if (!mine) { skipped.push({ ...idv, role: 'virt', reason: 'edge-delegated', ...(isEdge ? { agent: siteAgent.get(vc) || '' } : delegatedAgentFields(remoteCollectors, siteAgent.get(vc))), vcenterId: vc }); continue; }
-      const reg = regById.get(t(h.idracServerId)) || (t(h.serviceTag) ? regByTag.get(norm(h.serviceTag)) : null) || null;
+      const vreg0 = regById.get(t(h.idracServerId)) || (t(h.serviceTag) ? regByTag.get(norm(h.serviceTag)) : null) || null;
+      // 1회차 점검 D3: 고른 iDRAC 등록이 꺼졌으면 쓰지 않는다(베어메탈과 같은 규칙) — 원격 받침이면 아래 위임 갈래, 아니면 idrac-disabled.
+      const vregOff = !!(vreg0 && vreg0.enabled === false);
+      const reg = vregOff ? null : vreg0;
       /*
        * 반증 F4(가상화 호스트 — 같은 결함): 중앙이 직접 수집하는 vCenter 의 ESXi 호스트인데 그 호스트를 받치는 iDRAC 이 **엣지 원격 전력뿐**이면
        *   (classifyFleet 이 받침 원격 항목의 수집 서버 id 를 idracCollectorId 로 싣는다) 중앙 iDRAC 등록부에서 찾다가 없으니 no-idrac 이었다.
@@ -380,7 +440,8 @@ export function resolveTargets({ bareMetal = [], virtHosts = [], vcenters = [], 
       if (!corps[vc]) { skipped.push({ ...idv, role: 'virt', reason: 'corp-off', vcenterId: vc }); continue; }
       if (!settings.idracTelemetry) { skipped.push({ ...idv, role: 'virt', reason: 'both-off', vcenterId: vc }); continue; }
       let idracReason = '';
-      if (!reg || !t(reg.host)) idracReason = 'no-idrac';
+      if (vregOff) idracReason = 'idrac-disabled';
+      else if (!reg || !t(reg.host)) idracReason = 'no-idrac';
       else if (!t(reg.username) || !t(reg.password)) idracReason = 'no-idrac-cred';
       if (idracReason) { skipped.push({ ...idv, role: 'virt', reason: idracReason, vcenterId: vc }); continue; }
       const license = typeof inventoryOf === 'function'
