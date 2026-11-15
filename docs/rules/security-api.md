@@ -576,6 +576,16 @@
     → 판정 하나 `auth/scopeMerge.js denyFleetWrite(req, res, reason)`(조회 ∧ 쓰기 전체 · 던지면 거부 · 쓰기 범위 사유는 `WRITE_SCOPE_PARTIAL_REASON` — 문구는 `auth/scope.js` 하나로 옮겼다) ·
     `denyScopedRun` 은 그것을 부른다. 회귀 `veeamFullAudit2` ①(라우트 9개 · 소스 스윕). 남은 같은 모양 판독: `routes/` 의 나머지 `scopedVcenterIds(...)` 403 은 전부 GET(조회)이다.
     회귀 `server/test/bmUsageLoop6x.test.js` A1 ①② · 정정 `bareosRestoreBulkRoutes2861` ⑤(사유가 공용 쓰기 범위 사유로 먼저 나온다).
+  - ⚠⚠ **2회차 수정의 반증(R-1~R-4) → 전체 점검 7회차 전수(2026-11-15 · 재현)**: 쓰기 메서드인데 조회 범위만 보던 경로가 더 있었다 —
+    ① **사용자 관리(권한 상승)**: `users.js scopeWithinActor` 첫 줄이 '조회 무제한이면 true' 라 쓰기 vcA 관리자가 자기 scope 를 null(조회 · 쓰기 무제한)로 바꾸고 전체 범위 관리자를 만들 · 고칠 수 있었다
+    → `isFullReadWriteScope` 가 아니면 대상의 조회 ⊆ 요청자 조회 · 대상의 쓰기 ⊆ 요청자 쓰기(`subset` 은 바깥 null 을 먼저 본다) · 보이는 계정은 403 · 조회 범위 계정은 404 그대로.
+    ② `vcenters.js denyVcOutOfScope` 의 `if (!read) return false` 가 쓰기 검사 앞 → 조회 밖 404 → 쓰기 밖 403(저장 항목 시험도 · test-all 은 쓰기 범위 안만).
+    ③ Ping 대상 쓰기(`scopedWriteDenied` → 404 | 403) · 일괄(`denyScopedBulk` — 조회 ∧ 쓰기 전체) · 중계 서버 저장/삭제/시험/상태 확인/배포(`proxyWriteScope` · `proxyActionDenied`) ·
+    데이터 삭제 2곳 · OS 스캔 실행 · **설정 저장 8곳의 병합 · 전역 필드 보존은 `scopeMerge.writeMergeScope`(쓰기 범위)** — 응답 가림은 조회 범위로 둔다(보이는 것).
+    성능 트래킹 설정은 쓰기 제한 관리자의 저장이 대상에서 뺀 다른 법인의 DB 파일까지 지웠다. 회귀 `scopeWriteFullAudit7`(라우트 · 계정 셋).
+    **새 쓰기 라우트 점검법**: 핸들러가 `scopedVcenterIds` 만 보면 의심 — `writeScopedVcenterIds` · `inUserWriteScope` · `isFullReadWriteScope` · `denyFleetWrite` · `writeMergeScope` 중 하나가 있어야 한다(읽기성 POST 는 예외 — 판독 기록).
+    **남긴 것(사용자 결정)**: 원격 접속(`/remote/probe` · `quick-connect` · `mappings`)은 대상 호스트를 **조회** 범위 인벤토리로만 본다 — VM 콘솔(`/vms/:id/console`)은 쓰기 범위(조작 능력)인데
+    원격 SSH/RDP 는 v2.320(쓰기 범위 v2.369 이전) 판정 그대로다. 같은 기준으로 바꿀지는 정책 결정이라 이번에 바꾸지 않았다.
 
 - ⚠⚠ **리눅스 성능 8a단계 정비 창 · 용량 예측 API — 억제를 늘리는 쓰기는 등급 게이트, 줄이는 쓰기는 쓰기 범위, 판정은 서버 하나**
   (`routes/api/bmMaint.js` · `routes/api/bmCapacity.js` · `routes/central.js GET /bm-maint` · 회귀 `bmMaint8aRoute` · `bmMaint8aEdge` · `bmCapacity8aRoute`):
