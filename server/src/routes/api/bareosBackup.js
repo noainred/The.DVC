@@ -17,7 +17,7 @@ import {
   directorConn, directorCred, directorById, loadSettings, jobDirectorId, siteMissing, anyDirectorConfigured, LIMITS,
 } from '../../bareos/settings.js';
 import {
-  listJobs, getJob, patchJob, deleteJob, markPending, addRestore, registryLoadError, jobVmIds, MAX_JOBS, restoreOpen, restoreHeld, restoreUnknownHeld, restoreFinishing, clearPending, applyRunRow, applyRestoreRow, registryRev, inBatch, markCancelReq,
+  listJobs, getJob, patchJob, deleteJob, markPending, addRestore, registryLoadError, jobVmIds, MAX_JOBS, restoreOpen, restoreHeld, restoreUnknownHeld, restoreFinishing, clearPending, applyRunRow, applyRestoreRow, registryRev, inBatch, markCancelReq, runUnknownHeld, RUN_UNKNOWN_HOLD_MS,
 } from '../../bareos/registry.js';
 import { cancelInfo, cancelGate, CANCEL_WAIT_MS } from '../../bareos/cancelState.js';
 import { parseBanner } from '../../bareos/director.js';
@@ -913,6 +913,7 @@ api.post('/tools/bareos-backup/jobs/:id/run', adminOnly, async (req, res) => {
 async function runRoute(req, res, job) {
   const mm = modeMismatch(job); if (mm) return res.status(409).json({ ok: false, reason: mm });
   if (job.pending?.jobid) return res.status(409).json({ ok: false, reason: `이미 실행 중입니다(jobid ${job.pending.jobid}).` });
+  if (runUnknownHeld(job)) return res.status(409).json({ ok: false, code: 'held', reason: `직전 실행 요청의 결과를 모릅니다(Director 가 받았을 수 있습니다) — 같은 백업이 두 번 돌지 않게 ${Math.round(RUN_UNKNOWN_HOLD_MS / 60_000)}분 동안 다시 보내지 않습니다. Director 에서 실행 여부를 확인하세요(실행이 원장에 보이면 먼저 풀립니다).` });
   if (!job.enabled) return res.status(409).json({ ok: false, reason: '비활성 대상입니다 — 먼저 활성화하세요.' });
   const level = normLevel(req.body?.level || job.level);
   try {
@@ -922,9 +923,11 @@ async function runRoute(req, res, job) {
     audit(req, 'Bareos 백업 실행', `${job.vcenterId}/${job.vmName}`, `jobid ${jobid} · ${level}`);
     res.status(202).json({ ok: true, jobid });
   } catch (e) {
-    patchJob(job.id, { lastError: { at: Date.now(), message: String(e?.message || e).slice(0, 300) } });
-    audit(req, 'Bareos 백업 실행', `${job.vcenterId}/${job.vmName}`, `실패 — ${String(e?.message || e).slice(0, 160)}`);
-    sendErr(res, e);
+    // 전체 점검 3회차(B-3): 보낸 뒤 끊김 · 엣지 대행 결과 모름은 '실패' 가 아니다 — 원장에 결과 모름 표지(시한부 재요청 막기)를 남기고 504
+    const unknown = !!e?.unknown || e?.code === 'unknown';
+    patchJob(job.id, { lastError: { at: Date.now(), message: String(e?.message || e).slice(0, 300), ...(unknown ? { unknown: true } : {}) } });
+    audit(req, 'Bareos 백업 실행', `${job.vcenterId}/${job.vmName}`, `${unknown ? '결과 모름' : '실패'} — ${String(e?.message || e).slice(0, 160)}`);
+    sendErr(res, unknown ? Object.assign(new Error(String(e?.message || e)), { code: 'unknown' }) : e);
   }
 }
 

@@ -9,7 +9,7 @@
  *   pending: { jobid, since, level, by, trigger } | null,   // 포탈이 실행했고 아직 끝나지 않은 백업
  *   cancelReq: { jobid, at, by, via:'single'|'group' } | null,   // v2.867 그 실행에 취소를 보냈다(판정은 cancelState.js — 지금 도는 실행일 때만 유효)
  *   lastRun: { jobid, status, state, level, startedAt, endedAt, bytes, files, errors, checkedAt } | null,
- *   lastError: { at, message } | null,
+ *   lastError: { at, message, unknown? } | null,   // unknown: 단건 실행이 결과 모름(전체 점검 3회차 B-3 — runUnknownHeld 가 잠시 다시 보내기를 막는다)
  *   missingInDirector: boolean,                         // Director `.jobs` 에 없으면 true(누가 conf 를 지웠다)
  *   restores: [ { jobid, fromJobids, mode, target, status, state, startedAt, endedAt, by, at, batchId?, nic?, finish? } ],   // 최근 RESTORES_KEEP 건
  *     v2.861 batchId(묶음 복원) · nic('disconnect'|'keep' — 새 VM 은 끊기가 기본) · finish{ nic:'pending'|'ok'|'failed'|'skipped', detail, at, opId?, tries? }
@@ -329,6 +329,15 @@ export function deleteJob(id, { directorId = '' } = {}) {
   return true;
 }
 
+/** 전체 점검 3회차(B-3): 단건 실행이 '결과 모름' 으로 끝난 뒤 다시 누르기를 막는 시간 — 그 사이 폴러 대조(list jobs days=)가 실제 실행을 원장에 넣으면 먼저 풀린다. */
+export const RUN_UNKNOWN_HOLD_MS = 10 * 60_000;
+/** 결과 모름으로 끝난 직전 실행 요청이 아직 붙잡혀 있는가(그 뒤 시작한 실행이 원장에 보이면 풀린다). */
+export function runUnknownHeld(job, now = Date.now()) {
+  const le = job?.lastError;
+  if (!le?.unknown || !Number.isFinite(le.at) || now - le.at >= RUN_UNKNOWN_HOLD_MS) return false;
+  const st = Number.isFinite(job?.lastRun?.startedAt) ? job.lastRun.startedAt : null;
+  return !(st !== null && st >= le.at - 120_000);   // Director 현지 시각 · 왕복 여유 2분
+}
 /** 실행 시작 기록(포탈이 run 을 보냈다). */
 export function markPending(id, { jobid, level, by, trigger = 'manual', late = false }) {
   // v2.938 반증 B-4: 늦은 회신은 trigger 를 바꾸지 않고 late 표지를 따로 단다(화면 triggerText 가 'group-late' 를 '수동' 으로 읽었다)

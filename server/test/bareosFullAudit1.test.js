@@ -75,3 +75,42 @@ test('② B-2 — finishedRuns 의 빈 칸은 뒤에 온 자세한 행으로 채
   assert.equal(f2.bytes, 5_000_000); assert.equal(f2.errors, 0);
   assert.equal(R.getJob(id).finishedRuns.filter((x) => x.jobid === 100).length, 1, '중복 행을 만들지 않는다');
 });
+
+// ── 전체 점검 3회차(B-3) — 단건 '지금 실행' 이 명령을 보낸 뒤 끊기면 결과 모름(그룹 실행 · 복원과 같은 표) · 시한부 재요청 막기 ──
+test('③ B-3 — ops.runJob: 보낸 뒤 끊김(timeout · closed · protocol)은 unknown · 보내기 전 오류는 그대로', async () => {
+  const { OPS } = await import('../src/bareos/ops.js');
+  for (const code of ['timeout', 'closed', 'protocol', 'aborted', 'too-large']) {
+    const s = { call: async () => { throw Object.assign(new Error('끊김'), { code }); } };
+    await assert.rejects(OPS.runJob(s, { job: 'pv-pl-vm-1', level: 'Full' }), (e) => e.code === 'unknown' && e.unknown === true, code);
+  }
+  // jobid 없는 응답(명령은 이미 Director 에 갔다) — director.jobIdOf 의 protocol 도 결과 모름
+  await assert.rejects(OPS.runJob({ call: async () => ({}) }, { job: 'pv-pl-vm-1', level: 'Full' }), (e) => e.code === 'unknown');
+  // Director 가 거부(jsonrpc) · 접속 실패(connect)는 확정 실패 그대로
+  for (const code of ['jsonrpc', 'connect', 'auth']) {
+    const s = { call: async () => { throw Object.assign(new Error('거부'), { code }); } };
+    await assert.rejects(OPS.runJob(s, { job: 'pv-pl-vm-1', level: 'Full' }), (e) => e.code === code, code);
+  }
+  // 성공은 jobid 그대로
+  assert.equal(await OPS.runJob({ call: async () => ({ jobid: '812' }) }, { job: 'pv-pl-vm-1', level: 'Full' }), 812);
+});
+
+test('③ B-3 — runUnknownHeld: 결과 모름 뒤 10분 동안 막고 · 그 뒤 시작한 실행이 원장에 보이면 먼저 풀린다', () => {
+  const now = Date.parse('2026-11-15T10:00:00Z');
+  const le = { at: now - 60_000, message: 'x', unknown: true };
+  assert.equal(R.runUnknownHeld({ lastError: le }, now), true);
+  assert.equal(R.runUnknownHeld({ lastError: le }, now - 60_000 + R.RUN_UNKNOWN_HOLD_MS), false, '시한이 지나면 풀린다');
+  assert.equal(R.runUnknownHeld({ lastError: { ...le, unknown: undefined } }, now), false, '확정 실패는 막지 않는다');
+  assert.equal(R.runUnknownHeld({ lastError: le, lastRun: { jobid: 9, startedAt: now - 30_000 } }, now), false, '그 뒤 시작한 실행이 보이면 풀린다');
+  assert.equal(R.runUnknownHeld({ lastError: le, lastRun: { jobid: 8, startedAt: now - 3_600_000 } }, now), true, '더 오래된 실행은 풀지 않는다');
+  assert.equal(R.runUnknownHeld({ lastError: le, lastRun: { jobid: 8, startedAt: null } }, now), true, '시각을 모르면 풀지 않는다');
+});
+
+test('③ B-3 — 라우트 소스: 결과 모름은 표지 · 감사 결과 모름 · 504 · 다시 누르면 409', () => {
+  const src = fs.readFileSync(path.resolve(path.dirname(new URL(import.meta.url).pathname), '../src/routes/api/bareosBackup.js'), 'utf8');
+  const i = src.indexOf('async function runRoute(req, res, job) {');
+  const body = src.slice(i, src.indexOf('\n}\n', i));
+  assert.match(body, /if \(runUnknownHeld\(job\)\) return res\.status\(409\)/);
+  assert.match(body, /lastError: \{ at: Date\.now\(\), message: [^\n]*\.\.\.\(unknown \? \{ unknown: true \} : \{\}\) \}/);
+  assert.match(body, /\$\{unknown \? '결과 모름' : '실패'\}/);
+  assert.ok(body.indexOf('runUnknownHeld(job)') < body.indexOf("onDirector(jobDir(job), 'runJob'"), '보내기 전에 막는다');
+});
