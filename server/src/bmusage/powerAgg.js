@@ -24,6 +24,7 @@ import { periodKeyOf, periodRange } from './monthStore.js';
 import { dayKey, DAY_MS } from '../util/dayKey.js';
 import { DEFAULTS as RULE_DEFAULTS } from './perfRules.js';
 import { INV_FRESH_MS } from './powerSources.js';
+import { invCapState } from './hwFacts.js';   // 점검 반복 2회차 E3 — 상한 상태 판정 하나
 
 const n = numOrNull;
 const HOUR = 3_600_000;
@@ -309,12 +310,10 @@ export async function gatherPower({ targets = [], deps, now = Date.now(), withWe
         else capW = lw;
       }
     } else {
+      // 점검 반복 2회차 E3: 상한 상태 판정은 hwFacts invCapState 하나(하드웨어 U 와 같은 함수).
       const inv = D.inventoryOf(a, regId);
-      if (inv && inv.powerCap && typeof inv.powerCap === 'object') {
-        const lw = n(inv.powerCap.limitWatts);
-        capAt = n(inv.collectedAt);
-        if (lw != null && lw > 0) { capW = lw; capState = 'set'; } else capState = 'unset';
-      }
+      const cs = invCapState(inv);
+      if (cs.state !== 'unread') { capAt = n(inv.collectedAt); capState = cs.state; capW = cs.limitWatts; }
     }
     const latest = a ? (a.remote ? a.sensors : D.sensorLatest(t(a.id))) : (regId ? D.sensorLatest(regId) : null);
     const tp = tempsOf(latest, { now, maxAgeMs: maxAgeOf(latest, !!a?.remote), classify });

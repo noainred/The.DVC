@@ -13,6 +13,15 @@ export const STATUS_TEXT = Object.freeze({
   forecast: { label: '예측', tone: 'warn' }, reached: { label: '이미 목표선 위', tone: 'bad' }, 'no-growth': { label: '증가 없음', tone: 'idle' },
   unstable: { label: '불안정 · 예측 안 함', tone: 'idle' }, insufficient: { label: '데이터 부족', tone: 'idle' }, 'no-limit': { label: '상한 없음', tone: 'idle' },
 });
+/**
+ * 점검 반복 2회차 I3: 상태 칸 색 — ‘예측’ 은 **소진 임박**(목표선 도달일 ≤ 서버 기준 일수 cfg.alertDays — 함대 요약 ‘n일 안 목표선 도달’ 과 같은 기준)일 때만 주의,
+ *   그 밖(먼 도달일 · 1년 넘음 · 기준 일수를 모름)은 중립 — 설계 Capacity ‘예측은 참고 · 판정(정상/주의/이상)이 아니다’. 다른 상태는 STATUS_TEXT 색 그대로.
+ */
+export function statusTone(r = {}, cfg = {}) {
+  if (r.status !== 'forecast') return STATUS_TEXT[r.status]?.tone || 'idle';
+  const d = n(r.daysToTarget); const lim = n(cfg?.alertDays);
+  return d != null && lim != null && d <= lim ? 'warn' : 'idle';
+}
 /** 사유(서버 CAP_REASONS 와 1:1). */
 export const REASON_TEXT = Object.freeze({
   'few-days': '14일 창의 점이 기준보다 적음', flat: '값이 거의 그대로(추세 없음)', r2: 'R² 가 낮음(직선으로 설명되지 않음)', 'slope-diff': '14일 · 30일 기울기가 크게 다름(계단형 · 주기 정리 추정)',

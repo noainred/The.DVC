@@ -159,7 +159,10 @@ describe('구간 요약 — 공용 seriesStats(결측은 분모에서 뺀다)', 
 describe('문구 — 피크 출처 · 해상도 · 응답 안내 · 값 글자', () => {
   it('피크 옆 출처는 창 길이까지(줄였으면 그 사실) · 0 이면 꺼짐 · 여럿이면 다 적는다', () => {
     expect(T.peakSrcText(['window10'], 10)).toContain('10초 창');
-    expect(T.peakSrcText(['window10'], 5)).toContain('주기 예산으로 줄임');
+    // 2회차 I2: ‘줄었다’ 는 응답의 설정 상한(peakWindowCapS)과 견준다 — 상한을 모르면 말하지 않는다 · 설정이 5 면 5초 창은 줄인 것이 아니다.
+    expect(T.peakSrcText(['window10'], 5)).not.toMatch(/줄/);
+    expect(T.peakSrcText(['window10'], 5, 10)).toContain('설정 10초에서 줄어듦');
+    expect(T.peakSrcText(['window10'], 5, 5)).not.toMatch(/줄/);
     expect(T.peakSrcText(['window10'], 0)).toContain('꺼짐');
     expect(T.peakSrcText(['psi'])).toContain('피크 값이 아님');
     expect(T.peakSrcText(['window10', 'none'])).toContain('피크 없음');

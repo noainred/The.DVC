@@ -21,6 +21,7 @@ import { capStr } from '../util/capStr.js';
 import { sanitizePerfFields } from './bmPerfSanitize.js'; // v2.919: 리눅스 성능 항목 화이트리스트
 import { PERF_COL_NAMES, PEAK_SQL_COLS, PEAK_SRC, SRC_CM_RE } from '../bmusage/perfCols.js'; // v2.993: SRC_CM_RE 지표별 출처 두 글자 꼴
 import { clampEdgeTs } from '../util/clampEdgeTs.js'; // v2.932(점검 A1-06): 피크 시각도 수신 시각으로 자른다
+import { peakWindowSOf } from '../bmusage/settings.js'; // 점검 반복 2회차 재확인 R3: 피크 창 길이 — 설정 범위의 정수만(상한은 설정 한 곳)
 /**
  * v2.919 — 행의 **새** 수치 열(리눅스 성능 열 + 두 경로 읽은 시각)은 수로 좁힌다('1.5' → 1.5 · 못 읽으면 null).
  * ⚠ 기존 9개 열은 예전 계약(원시값 그대로 — audit2604a CEN2604-03 이 고정)을 바꾸지 않는다.
@@ -248,7 +249,7 @@ export function sanitizeDevicesBody(b) {
     if (a.length > DEV_MAX) cut += a.length - DEV_MAX;
     return a.slice(0, DEV_MAX).filter(isObj).map((d) => ({ dev: strOf(d.dev, 256), ord: numOrNull(d.ord), color: numOrNull(d.color), firstTs: numOrNull(d.firstTs), lastTs: numOrNull(d.lastTs), ...(d.info ? { info: strOf(d.info, 32) } : {}) })).filter((d) => d.dev);
   };
-  return { ok: b.ok === true, devices: { disk: list('disk'), nic: list('nic'), mount: list('mount') }, over: numOrNull(b.over), peakSrc: b.peakSrc == null ? null : strOf(b.peakSrc, 16), peakWindowS: numOrNull(b.peakWindowS), ...(cut ? { sanitizeTruncated: cut } : {}) };
+  return { ok: b.ok === true, devices: { disk: list('disk'), nic: list('nic'), mount: list('mount') }, over: numOrNull(b.over), peakSrc: b.peakSrc == null ? null : strOf(b.peakSrc, 16), peakWindowS: peakWindowSOf(b.peakWindowS), peakWindowCapS: peakWindowSOf(b.peakWindowCapS), ...(cut ? { sanitizeTruncated: cut } : {}) };   // 점검 반복 2회차 I2 · 재확인 R3: 행 값 · 엣지 설정 상한 — 설정 범위의 정수만(구버전 엣지 · 범위 밖은 null)
 }
 export function sanitizeNicsBody(b) {
   if (!isObj(b)) return null;
