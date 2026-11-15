@@ -1101,7 +1101,8 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
     catch (e) { perfAlerts = { ok: false, error: String(e?.message || e).slice(0, 200) }; }
     // 8a단계: ‘창 끝 뒤 억제 0’ 점검 — 이번 주기에 적용한 억제(수집 건너뜀 · 알림 보류 · 자동 집중)를 파일 기준으로 다시 만든 판정과 대조(수집 건강 행).
     let maintAudit = null;
-    try { maintAudit = await MAINT.auditCycle(); } catch (e) { maintAudit = { error: String(e?.message || e).slice(0, 120) }; }
+    // 7회차 C1: 이 주기 묶음만 점검한다(파트 장애 보류 기록은 그 폴러가 — 먼저 부른 쪽이 통째로 비우던 것)
+    try { maintAudit = await MAINT.auditCycle({ group: 'cycle' }); } catch (e) { maintAudit = { error: String(e?.message || e).slice(0, 120) }; }
     if (_health?.node?.maint) _health.node.maint = { ..._health.node.maint, leak: maintAudit?.leak ?? null, checked: maintAudit?.checked ?? null, ...(mj?.meta ? { windows: mj.meta.n, localUnreadable: mj.meta.localUnreadable, deployed: mj.meta.deployed } : { judge: 'unavailable' }) };
     const okCount = results.filter((r) => r?.ok).length;
     _last = {

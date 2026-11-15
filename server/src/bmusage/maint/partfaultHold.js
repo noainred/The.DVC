@@ -74,7 +74,7 @@ async function centralTargets() {
 export async function partfaultMaintHold(devices = [], { now = Date.now(), deps = {} } = {}) {
   try {
     const judge = deps.judge || await maintJudge({ now });
-    if (!judge.windows.some((w) => w.scopes?.hold && !w.deleted)) { await (deps.audit || auditCycle)({ now }).catch(() => null); return { hold: new Set(), byDevice: new Map() }; }
+    if (!judge.windows.some((w) => w.scopes?.hold && !w.deleted)) { await (deps.audit || auditCycle)({ now, group: 'hold' }).catch(() => null); return { hold: new Set(), byDevice: new Map() }; }
     const targets = deps.targets || await centralTargets();
     // v2.954(점검 D-2): 대상을 모르는 엣지의 장비 — 그 엣지 법인에 진행 중인 hold 창이 있을 때만 ‘모름’ 으로 센다(법인 매핑을 모르면 센다)
     const holdCorps = new Set(judge.windows.filter((w) => w.scopes?.hold && !w.deleted && windowStatus(w, now).status === 'active').map((w) => t(w.vcenterId)));
@@ -90,7 +90,7 @@ export async function partfaultMaintHold(devices = [], { now = Date.now(), deps 
       if (fresh.length) countSuppression('hold', fresh, { now });
     }
     // 점검 · 계수 저장(중앙 — 로컬 bmusage 대상이 0대여도 남게: 반증 의심 항목 ‘flushMaintStats 호출처 0’)
-    const audit = await (deps.audit || auditCycle)({ now }).catch(() => null);
+    const audit = await (deps.audit || auditCycle)({ now, group: 'hold' }).catch(() => null);
     return { ...r, ...(audit ? { audit: { checked: audit.checked, leak: audit.leak } } : {}) };
   } catch (e) { return { hold: new Set(), byDevice: new Map(), error: String(e?.message || e).slice(0, 160) }; }
 }

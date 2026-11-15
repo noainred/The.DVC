@@ -125,7 +125,7 @@ export default function BmPerfRulesPanel({ vcenters = [] }) {
       <h4 style={{ margin: 0 }}>리눅스 성능 알림 규칙 · 집중 모니터링 · 베이스라인</h4>
       <p className="bmo-note"><BoldText text={'규칙 조건은 수집 노드가 판정한 값의 **변화**에만 걸립니다 — 같은 상태가 이어지면 다시 보내지 않고, 지속 · 재발 억제 · 하루 상한이 있습니다. 채널은 설정 › 알림(메일 · 웹훅 · Slack · Teams)을 그대로 씁니다. **켠 규칙만 저장합니다.**'} /></p>
       {resp.loadError && <p className="bmo-note" style={{ color: toneVar('warn') }}>설정 파일을 읽지 못해 기본값(전부 꺼짐)으로 동작 중입니다 — {resp.loadError.reason}. 저장하면 새 파일로 바뀝니다(손상본은 보존).</p>}
-      {ro && <p className="bmo-note">읽기 전용 — 저장은 설정 소유자(전체 범위 관리자)만 할 수 있습니다{resp.readOnly && hasRole('admin') ? '(범위가 지정된 계정은 자기 법인 예외만 봅니다)' : ''}.</p>}
+      {ro && <p className="bmo-note">읽기 전용 — 저장은 설정 소유자(전체 범위 관리자)만 할 수 있습니다{resp.scoped && hasRole('admin') ? '(범위가 지정된 계정은 자기 법인 예외만 봅니다)' : ''}.</p>}
       <STable minWidth={1040} className="bmo-t bmr-t" style={{ fontSize: 12 }}>
         <thead><tr><th>켬</th><th>규칙</th><th>조건</th><th className="right">지속(주기)</th><th className="right">재발 억제(분)</th><th>채널</th><th>이슈 자동 등록</th><th>자동 집중</th><th>법인 예외</th></tr></thead>
         <tbody>
