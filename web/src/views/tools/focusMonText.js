@@ -89,6 +89,7 @@ export const TABS = Object.freeze([
   { key: 'procs', label: '프로세스' },
   { key: 'load', label: '수집 부하' },
   { key: 'audit', label: '디스크 점검' }, // v3.11.0 배드 섹터 점검 프로그램(시안 ⑰)
+  { key: 'alerts', label: '알림' }, // v3.16.0 ⑯ 지속 시간 알림 · OOM · 자동 조절(시안 Alerts)
   { key: 'targets', label: '대상 · 키' },
 ]);
 

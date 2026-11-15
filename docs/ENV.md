@@ -536,7 +536,7 @@
 |---|---|---|---|
 | `AGENT_CENTRAL_TOKEN` |  |  | config.js, rma/agent.js |
 | `AGENT_NAME` |  | ✅ | config.js, rma/agent.js |
-| `CENTRAL_URL` | `''` | ✅ | config.js, rma/agent.js |
+| `CENTRAL_URL` | `''` | ✅ | config.js, focusmon/alerts.js 외 2 |
 | `COLLECTOR_DATACENTER` |  | ✅ | config.js, rma/agent.js |
 | `EDGE_TOKEN` | `''` | ✅ | config.js, rma/agent.js |
 | `RMA_ACK_GRACE_MS` | `30000` |  | rma/jobs.js |

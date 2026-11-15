@@ -11,13 +11,13 @@
  *  · 정규식은 전부 앵커가 있고 길이가 한정된 꼴이다(외부 입력 — ReDoS 규약).
  */
 
-export const SECTIONS = Object.freeze(['STAT', 'LOAD', 'MEM', 'NET', 'DISK', 'VM', 'SNMP', 'SOCK', 'FS', 'FSI', 'NETTOPO', 'BLK', 'PS', 'UNIT', 'PROC', 'IO', 'SELF']);
+export const SECTIONS = Object.freeze(['STAT', 'LOAD', 'MEM', 'NET', 'DISK', 'VM', 'SNMP', 'SOCK', 'FS', 'FSI', 'KMSG', 'NETTOPO', 'BLK', 'PS', 'UNIT', 'PROC', 'IO', 'SELF']);
 /** v2.983 수집 부하 — 구획 → 세 묶음(기본 지표 · 구성 · 프로세스 · 자기 측정). 원격 스크립트의 ck 위치와 같다(테스트가 대조). */
 // v3.12.0(⑬): VM · SNMP · SOCK · FS · FSI 는 기본 묶음 — 수집 부하 탭이 그 비용을 기본 지표 몫으로 잰다(따로 묶지 않는다)
-export const SECTION_GROUP = Object.freeze({ STAT: 'base', LOAD: 'base', MEM: 'base', NET: 'base', DISK: 'base', VM: 'base', SNMP: 'base', SOCK: 'base', FS: 'base', FSI: 'base', NETTOPO: 'topo', BLK: 'topo', PS: 'topo', UNIT: 'topo', PROC: 'proc', IO: 'proc', SELF: 'self' });
+export const SECTION_GROUP = Object.freeze({ STAT: 'base', LOAD: 'base', MEM: 'base', NET: 'base', DISK: 'base', VM: 'base', SNMP: 'base', SOCK: 'base', FS: 'base', FSI: 'base', KMSG: 'base', NETTOPO: 'topo', BLK: 'topo', PS: 'topo', UNIT: 'topo', PROC: 'proc', IO: 'proc', SELF: 'self' });
 const ORDER = Object.freeze(Object.fromEntries(SECTIONS.map((s, i) => [s, i])));
 /** 구획별 줄 수 상한(스크립트의 head -n 과 같거나 조금 크다). */
-export const SECTION_MAX_LINES = Object.freeze({ STAT: 1104, LOAD: 4, MEM: 128, NET: 258, DISK: 1024, VM: 64, SNMP: 8, SOCK: 8, FS: 258, FSI: 258, NETTOPO: 256, BLK: 512, PS: 20000, PROC: 20000, UNIT: 20000, IO: 20000, SELF: 4 });
+export const SECTION_MAX_LINES = Object.freeze({ STAT: 1104, LOAD: 4, MEM: 128, NET: 258, DISK: 1024, VM: 64, SNMP: 8, SOCK: 8, FS: 258, FSI: 258, KMSG: 26, NETTOPO: 256, BLK: 512, PS: 20000, PROC: 20000, UNIT: 20000, IO: 20000, SELF: 4 });
 export const LINE_MAX = 4096;
 /** 프레임 하나가 붙잡을 수 있는 글자 수 상한(원래 줄 길이로 센다). 정상 프레임은 프로세스 2만 개여도 약 2MB —
  *  줄 수 상한 합(약 4만 3천 줄) × 줄 길이 상한이면 대상 1대가 수백 MB 를 붙잡을 수 있었다(2026-11-11 반증 4번). 넘으면 그 프레임을 버린다. */
@@ -204,6 +204,28 @@ export function parseFs(lines = []) {
   return { rc, rows };
 }
 /** ##FSI(df -P -l -i + 'rc N') → { rc, rows:[{m, ipct}] } — inode 수가 0(동적 · 모름)이면 null. */
+/**
+ * v3.16.0(⑯ C2) ##KMSG — `o <부팅 뒤 초> <이름>` · `e <줄 수> <마지막 초>` · `last <초>` · `rc <종료값>` · `on <OOM 전체 수>` · `f`(첫 확인) · `b <boot_id>`.
+ * 시각은 글자 그대로(소수 6자리까지 — 같은 줄을 같은 열쇠로) · 이름은 COMM 규칙 · 20개 · 그 밖 줄은 버린다.
+ * @returns {{rc:number|null, oom:Array<{s:string, c:string}>, en:number|null, es:string|null, last:string|null}}
+ */
+const KTS_RE = /^\d{1,10}(\.\d{1,6})?$/;
+export const BOOT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export function parseKmsg(lines = []) {
+  const out = { rc: null, oom: [], en: null, es: null, last: null, on: null, f: false, bid: null };
+  for (const l of lines.slice(0, 26)) {
+    const f = words(l);
+    if (f[0] === 'o' && f.length === 3 && KTS_RE.test(f[1]) && /^[A-Za-z0-9._:@+-]{1,64}$/.test(f[2]) && out.oom.length < 20) out.oom.push({ s: f[1], c: f[2] });
+    else if (f[0] === 'e' && f.length === 3 && /^\d{1,9}$/.test(f[1]) && (f[2] === '0' || KTS_RE.test(f[2]))) { out.en = Number(f[1]); out.es = f[2] === '0' ? null : f[2]; }
+    else if (f[0] === 'last' && f.length === 2 && KTS_RE.test(f[1])) out.last = f[1];
+    else if (f[0] === 'rc' && f.length === 2 && /^\d{1,3}$/.test(f[1])) out.rc = Number(f[1]);
+    else if (f[0] === 'on' && f.length === 2 && /^\d{1,9}$/.test(f[1])) out.on = Number(f[1]); // OOM 전체 수(20개를 넘을 때만 — 가장 최근 20개만 실린다)
+    else if (f[0] === 'f' && f.length === 1) out.f = true; // 첫 확인(새 세션 — 커널 오류 수는 버퍼 전체)
+    else if (f[0] === 'b' && f.length === 2 && BOOT_ID_RE.test(f[1])) out.bid = f[1]; // 부팅 식별(boot_id)
+  }
+  return out;
+}
+
 export function parseFsi(lines = []) {
   let rc = null; const rows = [];
   for (const l of lines) {
@@ -468,6 +490,7 @@ export function frameToRaw(frame) {
     disk: s.DISK ? parseDiskstats(s.DISK) : null,
     vm: s.VM ? parseVm(s.VM) : null, snmp: s.SNMP ? parseSnmp(s.SNMP) : null, sock: s.SOCK ? parseSock(s.SOCK) : null,
     fs: s.FS ? mergeFs(parseFs(s.FS), s.FSI ? parseFsi(s.FSI) : null) : null,
+    kmsg: s.KMSG ? parseKmsg(s.KMSG) : null, // v3.16.0 ⑯ C2
     netTopo: s.NETTOPO ? parseNetTopo(s.NETTOPO) : null,
     blk: s.BLK ? parseBlk(s.BLK) : null,
     ps: s.PS ? parsePs(s.PS) : null,

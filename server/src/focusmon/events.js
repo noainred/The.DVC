@@ -15,7 +15,7 @@ import * as store from './store.js';
 export const SCOPE_MAX = 200;
 export const TEXT_MAX = 300;
 export const SCOPES = Object.freeze(['server', 'group', 'session']);
-export const EVENT_TEXT = Object.freeze({ reboot: '재부팅', auth: '키 로그인 거부', hostkey: '호스트키 승인 필요', start: '수집 시작', stop: '수집 끝', user: '직접 적음' });
+export const EVENT_TEXT = Object.freeze({ reboot: '재부팅', auth: '키 로그인 거부', hostkey: '호스트키 승인 필요', start: '수집 시작', stop: '수집 끝', user: '직접 적음', oom: 'OOM', kerr: '커널 오류', alert: '알림', tune: '수집 조절' });
 
 /** 글 정리 — 제어 글자 → 공백 · 앞뒤 공백 · 상한. 비면 ''. */
 export function cleanEventText(s) {

@@ -23,6 +23,7 @@ import { registerStateFile } from '../util/stateFiles.js';
 import { flattenSample, newBlock, appendToBlock, encodeBlock, encodeProcBlock } from './codec.js';
 import { normInterval } from './script.js';
 import { summarizeBlock, encodeSum } from './summary.js'; // v3.13.0 ⑭ 1분 요약
+import { BOOT_ID_RE } from './parse.js'; // v3.16.0 ⑯ 반증 M5 — 부팅 식별(boot_id)
 
 export const RECENT_MIN = 31;
 export const GRACE_MS = 15_000;
@@ -43,7 +44,11 @@ const sessFile = () => path.join(config.configDir, SESS_FILE);
 /* ── 대상 메모리 ─────────────────────────────────────────────────────────────── */
 const T = new Map(); // id → { cur, recent:[closed], procs: Map(minute → [snap]), latest, latestProcs, hello, lastAt }
 const writeQ = [];   // { kind, target, minute, n?, data }
-const counters = { lateDropped: 0, rewrites: 0, closed: 0 };
+const counters = { lateDropped: 0, rewrites: 0, closed: 0, eventsDropped: 0, kmCut: 0 };
+/** 반증 M4: 사건은 데이터와 같은 대기열이지만 **따로 상한**(사건이 다른 서버의 분 묶음을 밀어내지 않게 — 넘치면 새 사건을 버리고 센다). */
+export const MAX_Q_EVENTS = 5000;
+let qEv = 0;
+const recountEv = () => { qEv = 0; for (const r of writeQ) if (r.kind === 'e') qEv += 1; };
 
 function entry(id) {
   let e = T.get(id);
@@ -68,8 +73,8 @@ function enqueueBlock(id, block, procList) {
   // v3.13.0(⑭ 컨펌 ② '기록할 때 같이 만든다'): 1분 요약 — 늦은 표본으로 다시 쓸 때(flushReopened)도 같은 길이라 요약도 다시 쓴다
   try { const sm = summarizeBlock(block); if (sm) writeQ.push({ kind: 's1', target: id, minute: block.minute, data: encodeSum(sm) }); } catch { /* 요약 하나가 대기열을 깨지 않게 */ }
   // v3.14.0(⑮ 컨펌 ③ '분마다 상위 20 · 30일'): 앱 묶음은 그 분의 **마지막 표본에만** 남긴다(표본마다 남기면 프로세스 기록이 두 배가 된다 · 메모리의 최근 표본은 그대로)
-  if (procList && procList.length) { try { const last = procList.length - 1; writeQ.push({ kind: 'p', target: id, minute: block.minute, data: encodeProcBlock(procList.map((s, i) => (i === last || !s.apps ? s : { ...s, apps: undefined }))) }); } catch { /* */ } }
-  if (writeQ.length > 20_000) writeQ.splice(0, writeQ.length - 20_000); // DB 가 오래 막혀도 메모리가 끝없이 자라지 않게(오래된 것부터 버림)
+  if (procList && procList.length) { try { const last = procList.length - 1; writeQ.push({ kind: 'p', target: id, minute: block.minute, data: encodeProcBlock(procList.map((s, i) => (!s.apps ? s : i === last ? (s.apps.all ? { ...s, apps: { sv: s.apps.sv, cm: s.apps.cm } } : s) : { ...s, apps: undefined }))) }); } catch { /* */ } }
+  if (writeQ.length > 20_000) { writeQ.splice(0, writeQ.length - 20_000); recountEv(); } // DB 가 오래 막혀도 메모리가 끝없이 자라지 않게(오래된 것부터 버림)
 }
 
 function closeCur(id, e) {
@@ -108,6 +113,7 @@ export function ingestSample(id, ts, sample, hello, now = Date.now()) {
     if (!appendToBlock(b, ts, row, meta)) { counters.lateDropped += 1; return false; }
   }
   if (!e.latest || ts >= e.latest.ts) e.latest = { ts, sample };
+  if (sample.km) ingestKmsg(id, sample.km, ts); // v3.16.0 ⑯ C2 — 커널 메시지 증분(표본마다 한 번 실린다)
   e.lastAt = Math.max(e.lastAt, ts);
   // v3.13.0(⑭ 자동 사건): 가동 시간이 줄면 재부팅(30초 넘게 — 표본 순서가 바뀐 것과 가른다)
   if (Number.isFinite(sample.up)) {
@@ -122,6 +128,58 @@ export function ingestSample(id, ts, sample, hello, now = Date.now()) {
   return true;
 }
 
+/* ── 커널 메시지(v3.16.0 ⑯ C2 — OOM · 커널 오류) ─────────────────────────────── */
+const KM = new Map(); // targetId → { rc, at } — 화면 '읽기' 칸(rc 0 = 읽음 · 그 밖 = 권한 없음 · 응답 없음)
+const KMT = new Map(); // targetId → { bid, tot } — 이번 부팅의 커널 오류 누계(첫 확인의 버퍼 전체 수 + 증분 · 모르면 tot null)
+const KMR = new Map(); // targetId → { m, n } — 분당 OOM 사건 수(반증 M4 상한)
+export const KM_OOM_PER_MIN = 40;
+/**
+ * 증분 하나 → 사건(OOM 은 프로그램마다 · 그 밖 오류는 줄 수 한 줄). 원문은 없다.
+ *  · 열쇠는 (부팅 식별, 부팅 뒤 초) — 부팅 식별은 boot_id(반증 M5: 켜진 시각 10초 반올림은 받은 시각에 따라 흔들려 같은 OOM 이 두 사건이 됐다) ·
+ *    옛 엣지(boot_id 없음)는 예전 열쇠(켜진 시각 10초 — 't' 를 붙여 구분).
+ *  · 커널 오류 수: 첫 확인(f — 새 세션)은 **버퍼 전체 수**라 증분과 섞지 않는다(반증 M5-D: 같은 열쇠로 덮어써 합이 두 배가 됐다).
+ *    같은 부팅을 이미 세고 있었으면 늘어난 만큼만(다시 연결한 사이) · 재부팅을 지켜본 경우(앞 부팅을 알았다)는 새 부팅의 버퍼 전체 ·
+ *    처음 보면 기준만 잡는다(수집 전 오류는 '새로 생긴 오류' 로 세지 않는다). 한계: 중앙 재시작과 다시 연결이 겹치면 그 사이 오류를 놓친다 · 버퍼가 돌아 오래된 줄이 빠지면 덜 센다.
+ *  · OOM 사건은 대상마다 분당 KM_OOM_PER_MIN · 한 번에 20개를 넘었으면(증분) '그 밖 N건' 한 줄.
+ */
+export function ingestKmsg(id, km, at = Date.now()) {
+  if (!km || typeof km !== 'object') return;
+  const sid = String(id);
+  KM.set(sid, { rc: Number.isInteger(km.rc) ? km.rc : null, at });
+  const boot = Number(km.boot);
+  if (!(boot > 0)) return;
+  const bk = typeof km.bid === 'string' && BOOT_ID_RE.test(km.bid) ? km.bid : `t${Math.round(boot / 10)}`;
+  const wall = (s) => { const t = Math.round((boot + Number(s)) * 1000); return t > 0 && t <= at + 60_000 ? t : null; };
+  const m = Math.floor(at / 60_000);
+  let r = KMR.get(sid); if (!r || r.m !== m) { r = { m, n: 0 }; KMR.set(sid, r); }
+  const ooms = Array.isArray(km.oom) ? km.oom.slice(-20) : [];
+  for (const o of ooms) {
+    if (r.n >= KM_OOM_PER_MIN) { counters.kmCut += 1; break; }
+    const t = wall(o.s); if (t == null) continue;
+    if (queueEvent(sid, 'oom', `OOM — ${o.c} 종료`, t, { id: `oom:${bk}:${o.s}` })) r.n += 1;
+  }
+  if (!km.f && Number.isInteger(km.on) && km.on > ooms.length && ooms.length) {
+    const t = wall(ooms[0].s);
+    if (t != null) queueEvent(sid, 'oom', `OOM — 그 밖 ${km.on - ooms.length}건(한 번에 최근 20건만 받음)`, t - 1, { id: `oom:${bk}:more:${ooms[0].s}` });
+  }
+  const en = Number.isInteger(km.en) && km.en >= 0 ? km.en : null;
+  if (en == null) return;
+  const cur = KMT.get(sid);
+  const known = cur && cur.bid === bk && cur.tot != null ? cur.tot : null;
+  const kerr = (cnt, why) => { const t = km.es ? wall(km.es) : null; if (cnt > 0 && t != null) queueEvent(sid, 'kerr', `커널 오류 ${cnt}줄${why}`, t, { id: `kerr:${bk}:${km.es}` }); };
+  if (km.f) {
+    if (known != null) kerr(en - known, '(다시 연결한 사이)');
+    else if (cur && cur.bid !== bk) kerr(en, '(재부팅 뒤 버퍼)');
+    KMT.set(sid, { bid: bk, tot: en });
+  } else {
+    kerr(en, '');
+    KMT.set(sid, { bid: bk, tot: known != null ? known + en : null });
+  }
+  if (KMT.size > 5000) KMT.delete(KMT.keys().next().value);
+  if (KMR.size > 5000) KMR.delete(KMR.keys().next().value);
+}
+export function kmsgOf(id) { const v = KM.get(String(id)); return v ? { ...v } : null; }
+
 /* ── 사건(v3.13.0 ⑭ 컨펌 ⑥ — 자동 · 직접) ───────────────────────────────── */
 const MODE_NAME = Object.freeze({ watch: '잠깐 보기', record: '계속 수집' });
 /** 수집 시작 · 끝 · 더함 · 뺌 — 서버마다 따로 적는다(반증 F11: fm_run 의 지금 서버 목록으로 만들면 뺀 서버의 시작 · 끝이 사라지고 더한 서버의 시작이 수집 시작 시각에 찍혔다).
@@ -130,13 +188,14 @@ function runEvent(s, target, kind, text, now) {
   queueEvent(target, kind, text, now, { id: `run:${s.id}:${kind === 'start' ? 's' : 'e'}:${now}`, by: kind === 'start' ? s.by : '', scope: 'session' });
 }
 /** 자동 사건 종류 → 판정 글(화면은 같은 열쇠로 색을 고른다). */
-export const EVENT_KINDS = Object.freeze(['reboot', 'auth', 'hostkey', 'start', 'stop', 'user']);
+export const EVENT_KINDS = Object.freeze(['reboot', 'auth', 'hostkey', 'start', 'stop', 'user', 'oom', 'kerr', 'alert', 'tune']); // v3.16.0 ⑯: OOM · 커널 오류 · 알림 · 수집 조절
 /** 사건을 기록 대기열에 — 대상마다 한 줄(id 를 같이 쓰면 여러 대상을 한 사건으로 묶는다). 글은 300자. */
 export function queueEvent(target, kind, text, at = Date.now(), { id = null, by = '', scope = 'server' } = {}) {
   if (!EVENT_KINDS.includes(kind)) return null;
   const eid = id || `ev-${crypto.randomBytes(6).toString('hex')}`;
+  if (qEv >= MAX_Q_EVENTS) { counters.eventsDropped += 1; return null; }
   writeQ.push({ kind: 'e', id: eid, target: String(target), at, ekind: kind, text: String(text).slice(0, 300), by: String(by || '').slice(0, 64), scope });
-  if (writeQ.length > 20_000) writeQ.splice(0, writeQ.length - 20_000);
+  qEv += 1;
   return eid;
 }
 
@@ -191,7 +250,7 @@ export function latestProcsOf(id) { return T.get(id)?.latestProcs || null; }
 export function helloOf(id) { return T.get(id)?.hello || null; }
 export function memOldestMinute(id) { const b = memBlocks(id); return b.length ? b[0].minute : null; }
 
-export function drainWrites(max = 400) { const rows = writeQ.splice(0, max); for (const r of rows) r.written = true; return rows; }
+export function drainWrites(max = 400) { const rows = writeQ.splice(0, max); for (const r of rows) { r.written = true; if (r.kind === 'e') qEv -= 1; } if (qEv < 0) qEv = 0; return rows; }
 export function pendingWrites() { return writeQ.length; }
 /** 종료 직전 — 열린 묶음을 모두 닫아 대기열에 넣는다(recorder.flushSync 가 쓴다). */
 export function closeAll() { flushReopened(); for (const [id, e] of T) closeCur(id, e); }
@@ -614,6 +673,6 @@ export function forgetTargetState(id) {
 }
 
 export function _resetForTest() {
-  T.clear(); writeQ.length = 0; S.clear(); lastView.clear(); ST.clear(); EDGE.clear(); WAKES.clear(); TESTS.clear(); RETRIES.clear(); ended.length = 0;
+  T.clear(); writeQ.length = 0; qEv = 0; KM.clear(); KMT.clear(); KMR.clear(); S.clear(); lastView.clear(); ST.clear(); EDGE.clear(); WAKES.clear(); TESTS.clear(); RETRIES.clear(); ended.length = 0;
   sessLoaded = false; keysLoaded = false; counters.lateDropped = 0; counters.rewrites = 0; counters.closed = 0; loadFixes.length = 0;
 }

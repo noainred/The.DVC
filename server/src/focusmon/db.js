@@ -278,6 +278,14 @@ export async function readEvents(target, from, to, limit = 200) {
   // 최근 쪽을 남긴다(반증 F2 — 오래된 것부터 자르면 자동 사건이 많을 때 최근에 직접 적은 사건이 빠졌다) · 돌려줄 때는 시각 순
   return db.prepare('SELECT id, target, at, kind, text, by, scope FROM fm_event WHERE target = ? AND at >= ? AND at <= ? ORDER BY at DESC LIMIT ?').all(String(target), from, to, limit).reverse();
 }
+/** v3.16.0(⑯) 모든 대상의 사건 [from, to] 중 종류(알림 · OOM · 커널 오류 · 수집 조절) — 알림 탭 기록 · 표. at 인덱스 범위 · 최근 쪽 상한. */
+export async function readEventsOfKinds(from, to, kinds = [], limit = 2000) {
+  const db = await getDb();
+  if (!db) return null;
+  const ks = kinds.filter((k) => /^[a-z]{1,12}$/.test(k)).slice(0, 8);
+  if (!ks.length) return [];
+  return db.prepare(`SELECT id, target, at, kind, text FROM fm_event WHERE at >= ? AND at <= ? AND kind IN (${ks.map(() => '?').join(',')}) ORDER BY at DESC LIMIT ?`).all(from, to, ...ks, limit);
+}
 /** 사건(id 로) — 지우기 전 확인(직접 적은 것인지 · 누가 · 어느 서버들). null = DB 를 못 열었다 · [] = 없다. */
 export async function eventById(id) {
   const db = await getDb();
