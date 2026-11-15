@@ -990,3 +990,6 @@
 - **v3.12.7 — 2차 루프 6회차: 허브 하위 도구의 마우스 전용 요소 · 누를 수 없는 머리의 손가락 커서**: 허브 탭 줄의 도구 16곳을 스캔(cursor:pointer 인데 Tab 으로 닿지 않는 것) — ‘VM 정밀 검색’ 필터 칩(span onClick)은 `pressable` + `aria-pressed`,
   ‘현재 사용자’ 법인 행(tr onClick — 법인 고르기)은 이름을 `button.cell-link`(aria-pressed · 행 클릭 그대로). 전역 `thead th { cursor:pointer }` 때문에 정렬하지 않는 머리(`data-nosort`)도 눌리는 것처럼 보였다 → `thead th[data-nosort] { cursor: default }`.
   누르는 배지 포커스 `.badge[role=button]:focus-visible`. 테스트 `pressable.test.js` v3.12.7.
+- **v3.12.8 — 2차 루프 7회차: 범위 바 리전 선택지 = 정해진 4리전 + 등록 데이터에만 있는 리전 · ‘Unknown’ 은 ‘리전 미지정’**(`platformText.scopeRegionOptions · regionText`): 범위 바는 `regions.js` 의 4리전만 보여,
+  위치를 비워 등록해 서버(`vcenter/registry.js`)가 region 을 ‘Unknown’(또는 정해지지 않은 글자)으로 둔 vCenter 는 리전으로 거를 수 없었다 — 도구의 리전 선택(`regionsOf`)은 데이터에서 만들어 보였다(어긋남).
+  선택지 = 4리전 + 데이터 리전(이름순 · Unknown 맨 뒤 · 범위 계정은 scope.regions 안만). 글자 `regionText`(Unknown → ‘리전 미지정’)를 범위 글자 · 칩 안내 · 이웃 범위 · vCenter 첫 선택지가 함께 쓴다. 테스트 `platformText.test.js` v3.12.8.
