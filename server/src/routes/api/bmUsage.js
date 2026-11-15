@@ -31,7 +31,8 @@ import { maskActivityEvents, maskPollerStatus, scrubHosts, addressMatcher, isAdm
 import { nodePairIdOf } from '../../bmusage/maint/judge.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 정비 창 판정과 같은 식별 함수(targetIdOf · 귀속 없음은 노드까지 — 4회차 D3 로 하나로)
 import { currentTargets, pollBmUsageOnce, bmUsageStatus, authStopsFor, sourceErrorsView, usageDetailFor } from '../../bmusage/poller.js';
 import { isDemoGuest } from '../../auth/demoGuest.js'; // v2.720(감사 R1-03)
-import { bmGate, bmGates, writableVc } from './bmWriteGate.js'; // 점검 반복 2회차 E1 · E2 — 쓰기 버튼 표지
+import { bmGate, bmGates, writableVc } from './bmWriteGate.js';
+import { PROC_KEYS, scrubProcRow } from './bmProcScrub.js'; // 10회차 K1 // 점검 반복 2회차 E1 · E2 — 쓰기 버튼 표지
 import { latestUsage, usageHistory, usageDaily, dbStatus, METRICS } from '../../bmusage/db.js';
 import { bmUsageEvents, bmUsageLogInfo } from '../../bmusage/activityLog.js';
 import { scopeFilePaths } from '../../auth/scopeStatus.js';   // v2.598 AUTHZ-2598-04: log.file 절대 경로는 admin 만
@@ -728,6 +729,7 @@ function faultDeps(deps = {}) {
 }
 const IPV4_RE = /\b\d{1,3}(?:\.\d{1,3}){3}\b/g;
 const scrubIp = (v) => (typeof v === 'string' ? v.replace(IPV4_RE, (ip) => maskedIdToken(ip)) : v);
+const PROC_FNS = { scrub: scrubIp, tok: (v) => maskedIdToken(v) };   // 10회차 K1 — 프로세스 행 가림(bmProcScrub)
 
 /** GET /tools/bm-usage/perf/:key/faults?days= — 요약 5칸 · 발생 1건=1행 · 시간순(부품 전이 + SEL/LC). */
 export async function bmFaultsView(req, snap, deps = {}) {
@@ -791,10 +793,20 @@ export async function bmFaultsFleetView(req, snap, deps = {}) {
 
 /* ── 진단 스냅샷(원격 명령 실행 경로 — 규약은 bmusage/snapshot/run.js 머리말 · security-api.md v2.923) ─────────── */
 const _snapInflight = new Set();   // 중앙 → 엣지 대행 중복 전송 막기(같은 서버 동시 1건 — 엣지도 다시 막는다)
-function scrubSnapshot(res, isAdmin) {
+/** 10회차 L2: 스냅샷 실행 표지 = 데모 · 역할(bmGate) ∧ OS 경로(실행이 409 no-os-path 로 거절하는 판정 그대로) — 예전에는 경로를 보지 않아 iDRAC 만 서버에 실행 칸이 열리고 누르면 409. */
+export function snapRunGateOf(req, snap, target, osPathIssue, via = 'local') {   // 10회차 L2 시험이 직접 부른다
+  const g = bmGate(req, 'snapshotRun', { snap });
+  if (!g.ok) return g;
+  // 이 노드 대상은 실행과 같은 함수(osHost) · 엣지 대행 대상은 봉투의 공개 대상(osHost 를 싣지 않는다 — publicTarget)이라 그 경로 표지(paths 'os' = 엣지가 OS 등록을 해석함)로.
+  const why = via === 'edge' ? (Array.isArray(target?.paths) && !target.paths.includes('os') ? 'no-os-path' : null) : osPathIssue(target);
+  return why ? { ok: false, why } : g;
+}
+export function scrubSnapshot(res, isAdmin) {   // 9회차 G1 시험이 직접 부른다
   if (isAdmin || !res || typeof res !== 'object') return res;
   const r = res.result && typeof res.result === 'object' ? res.result : null;
-  const scrubResult = (x) => (x ? { ...x, dmesg: (x.dmesg || []).map(scrubIp), ss: (x.ss || []).map(scrubIp), ...(x.error ? { error: scrubIp(x.error) } : {}),
+  // 점검 반복 9회차 G1 · 10회차 K1: 프로세스 사용자 이름은 관리자 판본만 원문(8b 규약 — Top-N 과 같은 토큰) · 이름(name — 파서가 만드는 칸) 안 주소도 가린다(bmProcScrub 하나).
+  const tops = (x) => Object.fromEntries(PROC_KEYS.filter((k) => Array.isArray(x[k])).map((k) => [k, x[k].map((p) => scrubProcRow(p, PROC_FNS))]));
+  const scrubResult = (x) => (x ? { ...x, ...tops(x), dmesg: (x.dmesg || []).map(scrubIp), ss: (x.ss || []).map(scrubIp), ...(x.error ? { error: scrubIp(x.error) } : {}),
     ...(x.idrac ? { idrac: { ...x.idrac, events: Array.isArray(x.idrac.events) ? x.idrac.events.map((e) => ({ ...e, message: scrubIp(e.message) })) : x.idrac.events } } : {}) } : x);
   const out = { ...res, ...(r ? { result: scrubResult(r) } : {}), ...(res.reason ? { reason: scrubIp(res.reason) } : {}) };
   if (Array.isArray(out.snapshots)) out.snapshots = out.snapshots.map(({ by: _b, ...x }) => ({ ...x, reason: scrubIp(x.reason) }));
@@ -860,7 +872,7 @@ export async function bmSnapshotRead(req, snap, deps = {}) {
   const code = res?.code || (res?.ok ? 'ok' : 'edge');
   // 반증 W4: 실행 칸을 잠글지 화면이 알 수 있게 — 쓰기 범위(조건 없이 · 실행 라우트와 같은 판정). 역할(operator 이상)은 화면이 따로 본다.
   // 8회차 F2: 데모 · 역할 표지(실행 라우트 앞의 authMiddleware denyDemoGuest · writeRole 과 같은 판정 — bmGate) — 예전에는 writable 만 실어 데모 계정에 실행 칸이 열리고 누르면 403.
-  const body = scrubSnapshot({ ...res, key, via: found.via, ...(found.via === 'edge' ? { agent: found.agent } : {}), writable: inUserWriteScope(req.user, snap, t(found.target.vcenterId)), actions: { run: bmGate(req, 'snapshotRun', { snap }) } }, isAdmin);
+  const body = scrubSnapshot({ ...res, key, via: found.via, ...(found.via === 'edge' ? { agent: found.agent } : {}), writable: inUserWriteScope(req.user, snap, t(found.target.vcenterId)), actions: { run: snapRunGateOf(req, snap, found.target, (await import('../../bmusage/snapshot/run.js')).snapshotOsPathIssue, found.via) } }, isAdmin);
   const st = code === 'ok' ? 200 : snapStatus(code);
   return st === 200 ? body : { __status: st, ...body };
 }

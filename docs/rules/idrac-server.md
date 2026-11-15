@@ -54,6 +54,8 @@
 - (점검 반복 5회차 추가) 성능 · 폴러 — 정비 창 자동 인출은 사람 인출과 같은 상한 · 알림은 대기열(받은 결과로 · 실패 재시도) · 판정기 발생 한 번 · 요청 경로 양보 · 작업 로그 간격 묶음 쓰기
 - (점검 반복 7회차 추가) 정비 창 ‘창 끝 뒤 억제’ 점검 기록은 점검 묶음별로 비운다(bmusage 주기 · 파트 장애 보류 — 저장 결과도 묶음별 합) · 알림 규칙 읽기 전용 표지는 쓰기 게이트와 같은 판정
 - (점검 반복 8회차 추가) 로그 보안 상위 목록은 종류마다 · 서버 상세 실행(스냅샷 · 집중 시작)은 서버 표지(데모 · 역할) · 로그 패턴 CSV 는 공용 가드
+- (점검 반복 9회차 추가) 진단 스냅샷의 프로세스 사용자 이름은 관리자 판본만 원문(Top-N 과 같은 토큰) · (데모 KPI 겹침은 10회차에서 되돌림)
+- (점검 반복 10회차 추가) 프로세스 행 가림 하나(bmProcScrub — 스냅샷 · 집중 표본 · 기간 비교 · 이름 칸 name) · 스냅샷 실행 표지에 OS 경로 판정
 ## 본문
 
 - ⚠⚠ **물리 파트(부품) 장애 — v2.548 재설계. '확인 불가' 를 정상으로도 장애로도 세지 않고, 전이만 기록한다**
@@ -1928,3 +1930,31 @@
     `BM_ACTIONS` 에 snapshotRun · focusStart(데모 · 역할) · GET 응답 `actions.run` · `actions.start` · 웹은 표지로 연다(표지가 없는 구버전 응답은 예전처럼 역할) · 데모는 이유 한 줄.
   - **I1**(낮음 · 판정 복제) 로그 패턴 CSV 만 자체 csvCell 사본을 써 앞 탭 · CR 가드가 빠졌다(journald 식별자 ‘탭 + =…’ 가 unit 칸에 그대로 — 실제 journald · 엑셀 동작은 추정) → 공용 `util/csv.js toCsv`.
   - **의심 · 세지 않음**: 엣지 봉투 logsTruncated 를 표시하는 곳 없음(성능 항목을 다 뺀 뒤에도 8MB 를 넘어야 — 지금 규모에서 닿지 않음 · 미실측) · 비관리자 응답의 수집 계정 uid · 그룹(설계 범위) · 'Invalid user ' 500자 줄 2만 개 분류 1.3초(줄 길이 비례 · 256줄마다 양보 — ReDoS 아님).
+
+- ⚠⚠ **베어메탈 사용률 점검 반복 9회차(기준판 15ac5e53a) — 스냅샷 프로세스 사용자 이름 가림 · 데모 KPI 경로 수**
+  (`routes/api/bmUsage.js scrubSnapshot` · `mock/demo/baremetal.js demoPathCounts` · `bmusage/edgePull.js`. 회귀 `server/test/bmUsageLoop9.test.js` · 변이 2건 잡힘). 점검: 8회차 점검 에이전트 · 확정 1 · 개선 1.
+  - **G1**(낮음 · 4단계 v2.923 부터) 진단 스냅샷 cpuTop · memTop · ioTop 의 user 가 비관리자(운영자 · 조회자 · 데모)에게 원문 — 8b 규약 ‘프로세스 사용자 이름은 관리자 판본만 원문’(Top-N 은 토큰 · 집중 표본은 칸 없음)과
+    어긋났다(‘가림은 그 값이 실리는 응답 경로 전부에’). 이제 scrubSnapshot 이 같은 `maskedIdToken`(Top-N 과 같은 값 = 같은 토큰). 실행 응답 · 보관분 조회 둘 다 이 함수를 지난다.
+    ⚠ 정정(10회차 K1): 처음 판은 ‘comm 안 IPv4 도 가린다’ 고 적었으나 실제 파서 칸은 `name` 이라 이름 안 주소는 가려지지 않았다(시험이 합성 행을 썼다) — 10회차에서 고침.
+  - **J1 — 10회차에서 되돌림(정정)**: 아래 수정은 어긋남을 칩 · 사용률 표 · CSV · 스냅샷 409 쪽으로 옮겼을 뿐이다(10회차 L1) — 지금 코드에는 없다. 원래 관찰(데모 KPI ‘OS 경로 0’ ↔ 신뢰 띠 ‘둘 다 15’)은 남은 것.
+    (기록) 데모 KPI ‘OS 경로 0’ ↔ 경로 줄 · 신뢰 띠 ‘둘 다 15’ — 원인은 목 데이터: `demoPerfLatestRows` 가 시나리오 9종 중 8종에 OS 열(os_at)을 응답 단계에서 겹치는데
+    KPI 는 대상 등록 경로(paths — 데모 17대는 iDRAC 만)를 셌다. `demoPathCounts` 가 같은 순위 · 같은 시나리오 표로 KPI os · both 도 응답 단계에서 겹친다(GET 주 조회 · 엣지 봉투 — paths 는 그대로: 스냅샷 · 집중이 SSH 를 시도하지 않게).
+    실운영은 어긋나지 않는다(판정 코드는 목 경로에서 다르게 돌지 않는다 — coverageOf 는 같은 함수). 기존 범위 시험(bmUsage2550 — `const counts = allowed` 소스 고정)을 지키려 응답에는 `countsOut` 을 싣는다.
+  - **관찰 · 세지 않음**: 데모 수집 건강 ‘피크 창 대상 없음’(실제 SSH 수집 대상만 센다 — 설계 · 문구만) · 목표선 상태가 유효 주기 비율을 보지 않음(같은 줄에 ‘1/1주기 · 결측 8,639주기’ 를 밝힘) ·
+    스냅샷 · 집중 탭은 GET 실패 때 역할로만 실행 칸을 연다(기존 시험이 고정한 결정) · 8회차 F1 종류별 조회 비용 7일 38ms(예전 15ms — 응답 캐시 뒤).
+
+- ⚠⚠ **베어메탈 사용률 점검 반복 10회차(마지막 · 기준판 34f0dfbd9) — 프로세스 행 가림 하나 · 스냅샷 실행 표지에 OS 경로 · 데모 KPI 겹침 되돌림**
+  (`routes/api/bmProcScrub.js`(새) · `routes/api/{bmUsage,bmPerfOps,bmWriteGate}.js` · `bmusage/snapshot/run.js snapshotOsPathIssue` · 웹 `BmSnapshotTab` · `bmWriteText`. 회귀 `server/test/bmUsageLoop10.test.js` · `bmUsageLoop9` G1 입력을 실제 파서 출력으로).
+  점검: 새 에이전트 · 목 서버(인증 켬) + Chromium 3계정 × 1440/400 · 실제 중앙 ↔ 엣지 HTTP 왕복(자기 등록) — 확정 1 · 개선 2.
+  - **K1**(낮음 · 9회차 G1 수정이 실제 데이터에 닿지 않음 — 정정) 파서(parsePsLine · iotop)가 만드는 칸은 `name` 인데 9회차는 `comm` 만 가려, 이름 안 IPv4 가 비관리자 스냅샷에 원문(화면 ‘프로세스(이름)’ 칸에서 재현).
+    같은 꼴이 집중 표본(focus/run.js snap.cpuTop · ioTop) · 기간 비교 procs.rows 에도 있었다. 이제 `bmProcScrub`(scrubProcRow · scrubProcDeep — name · comm 은 IPv4 토큰 · user 는 Top-N 과 같은 토큰)를 세 경로가 함께 쓴다.
+    한계: 등록부 호스트 이름 matcher 는 쓰지 않는다(IPv4 패턴만 — 같은 응답의 dmesg · ss 가림과 같은 수준).
+  - **재확인 K1b**(낮음) 집중 모니터링 ‘원인 후보’(focus/summary.js — 표본 name 을 그대로 옮긴다: 단건 · 목록 summary.candidates · 함대 candidate)의 이름 안 IPv4 가 비관리자에게 원문 —
+    `PROC_KEYS` 에 candidates 를 더하고(scrubProcDeep) 함대 목록 candidate(문자열)도 scrubIp. 재확인: scrubProcDeep 은 cpuTop · memTop · ioTop · candidates 배열 안만 바꾼다(세션 name 등 그대로) ·
+    엣지 paths 'os' ⟺ 엣지 실행 osHost 는 같은 조건(targets.js — osSsh ∧ osEntry) · 엣지 대행 표지는 마지막 인출 봉투 기준(다시 가져오기 전까지 · 남은 것) · osHost.authError 는 표지에 없음(남은 것).
+  - **L2**(낮음 · 실운영 포함) OS 경로가 없는 서버에도 스냅샷 실행 칸이 열리고 누르면 409 no-os-path — 표지 = 데모 · 역할(bmGate) ∧ 실행과 같은 판정(`snapshotOsPathIssue` — 엣지 대행은 봉투 paths 'os') ·
+    `WRITE_WHY` 에 'no-os-path'(웹 문구 1:1) · 웹은 역할이 아닌 이유를 한 줄로.
+  - **L1**(낮음 · 데모만) 9회차 J1 이 어긋남을 옮겼을 뿐 — 되돌렸다. 모든 표시(KPI · 칩 · 표 · CSV · 띠 · 상세 머리)를 맞추려면 데모 대상의 표시 경로를 한 규칙으로(예: 데모 합성 OS 경로 표지) 정해야 한다 — 다음 작업 후보.
+  - **의심 · 세지 않음**: 엣지 응답 16MB 초과 때 사유가 ‘응답 형식이 다릅니다’(공용 central/edgePull.js 가 상한 오류 문장을 버림 · 엣지가 8MB 로 줄여 기본값에서는 닿지 않음) ·
+    봉투 행 시각(os_at · idrac_at · ts)을 수신 시각으로 자르지 않음(읽는 웹 없음) · 대상 · 행 정제가 아는 필드 목록이 아니라 칸 수 상한(가짜 엣지의 ‘password’ 칸이 관리자 응답에 — 화면에는 안 그림) ·
+    엣지 ↔ 법인 대조 없음(설계 범위) · 창이 없을 때 정비 창 문구. 다음 작업 후보로 남긴다.

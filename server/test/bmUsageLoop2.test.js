@@ -95,7 +95,7 @@ test('① 표지 표(BM_ACTIONS) = 실제 라우터의 메서드 · 경로 · �
     assert.ok(role, `${name}: 역할 게이트가 없다`);
     assert.deepEqual([...role.arg].sort(), [...a.roles].sort(), `${name}: 역할 인자가 라우트와 다르다`);
   }
-  assert.deepEqual([...G.WRITE_WHY].sort(), ['demo', 'full-scope', 'read-only', 'role-admin', 'role-operator']);
+  assert.deepEqual([...G.WRITE_WHY].sort(), ['demo', 'full-scope', 'no-os-path', 'read-only', 'role-admin', 'role-operator']);   // no-os-path: 10회차 L2
 });
 
 test('② 실제 라우터 — 전 법인 동작 · 설정: GET 표지 ok ⟺ 같은 계정의 쓰기가 403 이 아니다(5계정)', async (t) => {
