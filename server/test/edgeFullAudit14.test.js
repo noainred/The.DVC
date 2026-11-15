@@ -43,7 +43,8 @@ test('② C-2 — 중앙이 표본 DB 를 못 쓰면 엣지는 고리를 지우�
 
 test('③ C-3 · ⑤ C-5 — generatedAt 좁히기 · 모르는 reqId 410(소스)', () => {
   const c = rd('routes/central.js');
-  assert.match(c, /const genAt = typeof genIn === 'number' && Number\.isFinite\(genIn\) \? genIn : \(typeof genIn === 'string' && genIn\.trim\(\) \? genIn\.trim\(\)\.slice\(0, 40\) : null\);/);
+  // 17회차 반증 R-1: 글자는 capTrim(평탄화 — slice 는 원문을 붙잡는다)
+  assert.match(c, /const genAt = typeof genIn === 'number' && Number\.isFinite\(genIn\) \? genIn : \(typeof genIn === 'string' \? \(capTrim\(genIn, 40\) \|\| null\) : null\);/);
   assert.doesNotMatch(c, /setInventory\(vcId, slice, agent, b\.generatedAt \|\| null\)/);
   assert.match(rd('routes/central/opsRoutes.js'), /if \(!setLogQueryResult\(String\(b\.reqId\), b\)\) return res\.status\(410\)/);
 });
