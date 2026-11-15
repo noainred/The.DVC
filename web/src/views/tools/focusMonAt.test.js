@@ -37,7 +37,8 @@ describe('표의 값 단추 문구', () => {
   });
   it('서버의 값 키(at)와 같다 — 라우트는 avg 가 아니면 end 로 읽는다', () => {
     const src = fs.readFileSync(new URL('../../../../server/src/routes/api/focusMon.js', import.meta.url), 'utf8');
-    expect(src).toMatch(/view === 'server'[\s\S]{0,200}at: req\.query\.at === 'avg' \? 'avg' : 'end'/);
+    // v3.13.0(⑭): 긴 구간에는 구간 평균이 없다 — 짧은 구간에서만 avg 를 받는다
+    expect(src).toMatch(/view === 'server'[\s\S]{0,400}at: !w\.long && req\.query\.at === 'avg' \? 'avg' : 'end'/);
   });
 });
 
@@ -69,11 +70,13 @@ describe('서버 상세 — 네트워크 · 디스크 카드에 단추(소스 �
     expect(m[1]).toMatch(/const x = normAt\(v\)/);
   });
   it('캡션은 과거 구간 판정 · 응답의 덮은 시간으로 만든다 · 표가 바뀌는 카드 전부(CPU · 메모리 · 네트워크 · 디스크 · 프로세스)에 붙는다', () => {
-    expect(body).toMatch(/const atText = atCaption\(at, \{ win: tb\.win, past: tb\.end != null, lastAt: d\?\.lastAt \?\? null, coverMs: d\?\.coverMs \?\? null/);
+    expect(body).toMatch(/const atEff = tb\.long \? 'end' : at;/);
+    expect(body).toMatch(/const atText = atCaption\(atEff, \{ win: tb\.win, past: tb\.end != null, lastAt: d\?\.lastAt \?\? null, coverMs: d\?\.coverMs \?\? null/);
     expect((body.match(/<span className="fm-dim fm-at">· \{atText\}<\/span>/g) || []).length).toBe(5);
   });
   it('프로세스 상위 5 도 같은 값을 따른다(요청에 at)', () => {
-    expect(body).toMatch(/usePoll\('\/tools\/focus-mon\/procs', useMemo\(\(\) => \(\{ targets: id, win: tb\.win, end: tb\.end \?\? '', at \}\)/);
+    expect(body).toMatch(/usePoll\('\/tools\/focus-mon\/procs', useMemo\(\(\) => \(\{ targets: id, win: tb\.win, end: tb\.end \?\? '', at: atEff \}\)/);
+    expect(body).toMatch(/!!t && !tb\.long\)/); // 긴 구간에는 프로세스를 묻지 않는다(원본 구간만)
   });
   it('안내문의 구간 목록은 응답 값(숫자를 박지 않는다 — 반증 5)', () => {
     expect(body).not.toMatch(/1 · 5 · 10 · 30분/);

@@ -69,7 +69,7 @@ describe('화면 소스', () => {
   const tool = fs.readFileSync(new URL('./FocusMonTool.jsx', import.meta.url), 'utf8');
   it('탭 키 load · 메인에서 그 탭을 그린다', () => {
     expect(TABS.map((t) => t.key)).toContain('load');
-    expect(tool).toMatch(/route\.tab === 'load' \? <LoadTab main=\{main\} tb=\{tb\} \/>/);
+    expect(tool).toMatch(/route\.tab === 'load' \? \(tb\.long \? <div className="fm-card fm-empty">\{rawOnlyText\('수집 부하', tb\.windows\)\}<\/div> : <LoadTab main=\{main\} tb=\{tb\} \/>\)/);
   });
   it('최근 구간만 30초 폴링 · 과거 구간은 한 번', () => {
     expect(src).toMatch(/usePoll\('\/tools\/focus-mon\/load', params, tb\.end == null \? 30_000 : 0, true\)/);

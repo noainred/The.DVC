@@ -339,3 +339,9 @@
 .fm-wrap .fm-audit .fm-atable td.fm-stcol { max-width: 280px; }
 .fm-wrap .fm-audit .fm-st > span > .fm-badge { margin-left: 6px; }
 .fm-wrap .fm-audit .fm-res-stack { gap: 12px; }
+/* v3.13.0 ⑭ 긴 구간 · 사건 · 가장 변했나 */
+.fm-wrap [hidden] { display: none !important; }
+.fm-wrap .fm-evn { font-size: 9.5px; font-weight: 700; fill: #0b1220; pointer-events: none; }
+.fm-wrap .fm-evdot { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px; color: #0b1220; font-size: 11px; font-weight: 700; }
+.fm-wrap .fm-evform { flex-wrap: wrap; }
+.fm-wrap .fm-evform .fm-grow { flex: 1 1 260px; min-width: 0; }

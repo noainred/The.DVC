@@ -230,11 +230,27 @@ export function cardBadge(target, sum, settings) {
 }
 
 /** 시간 띠 아래 글. */
+/** 구간 길이 글자(v3.13.0 ⑭) — 5분 · 1시간 · 24시간 · 7일 · 30일. */
+export function winText(w) {
+  const x = n(w);
+  if (x == null || x <= 0) return DASH;
+  if (x < 60) return `${x}분`;
+  if (x === 1440) return '24시간';
+  if (x % 1440 === 0) return `${x / 1440}일`;
+  if (x % 60 === 0) return `${x / 60}시간`;
+  return `${x}분`;
+}
+/** 긴 구간(요약 표 — 1시간부터)인가. */
+export const isLongWin = (w) => (n(w) ?? 0) >= 60;
 export function windowCaption({ past, from, to, win }) {
-  const span = `${clockText(from, true)} ~ ${clockText(to)}`;
+  const long = isLongWin(win);
+  const span = `${clockText(from, true)} ~ ${long ? clockText(to, true) : clockText(to)}`;
+  const src = !long ? '' : win <= 1440 ? ' · 칸마다 1분 요약(최저 · 평균 · 최고)' : ' · 칸마다 1시간 요약(최저 · 평균 · 최고)';
   return past
-    ? `과거 구간 · ${span} · 이 구간은 갱신하지 않습니다 — 수집과 기록은 계속됩니다`
-    : `최근 구간 · ${span} · ${win}분 · 슬라이더는 최근 24시간(날짜를 고르면 그 날 하루) · 기록은 DB 에 보관합니다`;
+    ? `과거 구간 · ${span} · ${winText(win)}${src} · 이 구간은 갱신하지 않습니다 — 수집과 기록은 계속됩니다`
+    : long
+      ? `최근 구간 · ${span} · ${winText(win)}${src} · 기록은 DB 에 보관합니다`
+      : `최근 구간 · ${span} · ${winText(win)} · 슬라이더는 최근 24시간(날짜를 고르면 그 날 하루) · 기록은 DB 에 보관합니다`;
 }
 
 /**

@@ -51,6 +51,25 @@ export function linePath(vals, { x0, x1, y }) {
   return d;
 }
 
+/** 띠(v3.13.0 ⑭) — 칸마다 최저 ~ 최고 사이를 채운 면(둘 다 있는 이어진 칸마다 닫는다 · 못 읽은 칸은 비운다). */
+export function bandPath(lo, hi, { x0, x1, y }) {
+  const L = Math.min(Array.isArray(lo) ? lo.length : 0, Array.isArray(hi) ? hi.length : 0);
+  if (!L) return '';
+  const step = L > 1 ? (x1 - x0) / (L - 1) : 0;
+  let d = ''; let seg = [];
+  const flush = () => {
+    if (seg.length >= 2) {
+      const top = seg.map((i) => `${(x0 + i * step).toFixed(1)} ${y(n(hi[i])).toFixed(1)}`);
+      const bot = seg.slice().reverse().map((i) => `${(x0 + i * step).toFixed(1)} ${y(n(lo[i])).toFixed(1)}`);
+      d += `M${top.join(' L')} L${bot.join(' L')} Z `;
+    }
+    seg = [];
+  };
+  for (let i = 0; i < L; i++) { if (n(lo[i]) == null || n(hi[i]) == null) { flush(); continue; } seg.push(i); }
+  flush();
+  return d.trim();
+}
+
 /** 아래를 채운 면(이어진 구간마다 닫는다). */
 export function areaPath(vals, { x0, x1, y, base }) {
   const L = Array.isArray(vals) ? vals.length : 0;
