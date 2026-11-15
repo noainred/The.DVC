@@ -1949,6 +1949,9 @@
   - **K1**(낮음 · 9회차 G1 수정이 실제 데이터에 닿지 않음 — 정정) 파서(parsePsLine · iotop)가 만드는 칸은 `name` 인데 9회차는 `comm` 만 가려, 이름 안 IPv4 가 비관리자 스냅샷에 원문(화면 ‘프로세스(이름)’ 칸에서 재현).
     같은 꼴이 집중 표본(focus/run.js snap.cpuTop · ioTop) · 기간 비교 procs.rows 에도 있었다. 이제 `bmProcScrub`(scrubProcRow · scrubProcDeep — name · comm 은 IPv4 토큰 · user 는 Top-N 과 같은 토큰)를 세 경로가 함께 쓴다.
     한계: 등록부 호스트 이름 matcher 는 쓰지 않는다(IPv4 패턴만 — 같은 응답의 dmesg · ss 가림과 같은 수준).
+  - **재확인 K1b**(낮음) 집중 모니터링 ‘원인 후보’(focus/summary.js — 표본 name 을 그대로 옮긴다: 단건 · 목록 summary.candidates · 함대 candidate)의 이름 안 IPv4 가 비관리자에게 원문 —
+    `PROC_KEYS` 에 candidates 를 더하고(scrubProcDeep) 함대 목록 candidate(문자열)도 scrubIp. 재확인: scrubProcDeep 은 cpuTop · memTop · ioTop · candidates 배열 안만 바꾼다(세션 name 등 그대로) ·
+    엣지 paths 'os' ⟺ 엣지 실행 osHost 는 같은 조건(targets.js — osSsh ∧ osEntry) · 엣지 대행 표지는 마지막 인출 봉투 기준(다시 가져오기 전까지 · 남은 것) · osHost.authError 는 표지에 없음(남은 것).
   - **L2**(낮음 · 실운영 포함) OS 경로가 없는 서버에도 스냅샷 실행 칸이 열리고 누르면 409 no-os-path — 표지 = 데모 · 역할(bmGate) ∧ 실행과 같은 판정(`snapshotOsPathIssue` — 엣지 대행은 봉투 paths 'os') ·
     `WRITE_WHY` 에 'no-os-path'(웹 문구 1:1) · 웹은 역할이 아닌 이유를 한 줄로.
   - **L1**(낮음 · 데모만) 9회차 J1 이 어긋남을 옮겼을 뿐 — 되돌렸다. 모든 표시(KPI · 칩 · 표 · CSV · 띠 · 상세 머리)를 맞추려면 데모 대상의 표시 경로를 한 규칙으로(예: 데모 합성 OS 경로 표지) 정해야 한다 — 다음 작업 후보.

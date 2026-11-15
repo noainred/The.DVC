@@ -158,6 +158,8 @@ export async function bmFocusFleet(req, snap, deps = {}) {
   if (!isAdmin) {
     const hosts = await D.bmAddressHosts(tg);
     list = maskBmList(list, addressMatcher(hosts));
+    // 10회차 재확인 K1b: 함대 목록의 ‘원인 후보’ 프로세스 이름(candidate) 안 IPv4 — maskBmList 는 등록부 호스트만 가린다
+    list = list.map((s) => (typeof s.candidate === 'string' ? { ...s, candidate: scrubIp(s.candidate) } : s));
   }
   const running = list.filter((s) => s.status === 'running').length;
   const queued = list.filter((s) => s.status === 'queued').length;

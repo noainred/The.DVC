@@ -4,7 +4,8 @@
  *   닿지 않았다(시험이 합성 행을 썼다 — 정정). 이름 안 IPv4 는 토큰으로 · 사용자 이름은 관리자 판본만 원문(8b 규약 — Top-N maskTopRows 와 같은 토큰).
  *   깊이 상한 안에서 cpuTop · memTop · ioTop 배열을 찾아 바꾼다(세션 · 표본 · 보관분 꼴이 달라도 같은 함수). 원본은 바꾸지 않는다.
  */
-export const PROC_KEYS = Object.freeze(['cpuTop', 'memTop', 'ioTop']);
+// candidates: 집중 모니터링 요약의 '원인 후보'(focus/summary.js — 표본 name 을 그대로 옮긴다 · 10회차 재확인 K1b)
+export const PROC_KEYS = Object.freeze(['cpuTop', 'memTop', 'ioTop', 'candidates']);
 export function scrubProcRow(p, { scrub, tok }) {
   if (!p || typeof p !== 'object') return p;
   const o = { ...p };

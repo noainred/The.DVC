@@ -53,3 +53,19 @@ test('L2 — 스냅샷 실행 표지: OS 경로가 없으면 no-os-path(실행�
   const run = stripComments(fs.readFileSync(new URL('../src/bmusage/snapshot/run.js', import.meta.url), 'utf8'));
   assert.match(run, /if \(snapshotOsPathIssue\(target\)\) return \{ ok: false, code: 'no-os-path'/);
 });
+
+test('K1b(10회차 재확인) — 집중 모니터링 원인 후보(summary.candidates · 함대 candidate)의 이름 안 주소도 가림(실제 summarizeFocus 출력)', async () => {
+  const { summarizeFocus } = await import('../src/bmusage/focus/summary.js');
+  const { scrubProcDeep } = await import('../src/routes/api/bmProcScrub.js');
+  const samples = [1, 2, 3].map((i) => ({ at: i * 60_000, vals: {}, snap: { cpuTop: [{ name: '10.20.30.40:80', cpuPct: 50 }], ioTop: [{ name: '10.20.30.40:80', readBps: 1000, writeBps: 0 }] } }));
+  const summary = summarizeFocus(samples, { hasOs: true });
+  assert.ok((summary.candidates || []).some((c) => c.name === '10.20.30.40:80'), `전제 — 원인 후보는 표본 name 을 옮긴다 · ${JSON.stringify(summary.candidates)}`);
+  const fns = { scrub: (s) => s.replace(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g, 'MASK'), tok: (v) => `tok-${v}` };
+  const body = { ok: true, session: { id: 'f1', summary, samples }, sessions: [{ id: 'f1', summary }] };
+  const out = JSON.stringify(scrubProcDeep(body, fns));
+  assert.ok(!out.includes('10.20.30.40'), `재현 r10 K1b — 원인 후보 이름 안 주소 · ${out.slice(0, 300)}`);
+  // 함대 목록 candidate(문자열) — 라우트가 scrubIp(소스)
+  const { stripComments } = await import('./_stripComments.js');
+  const po = stripComments(fs.readFileSync(new URL('../src/routes/api/bmPerfOps.js', import.meta.url), 'utf8'));
+  assert.match(po, /typeof s\.candidate === 'string' \? \{ \.\.\.s, candidate: scrubIp\(s\.candidate\) \}/);
+});
