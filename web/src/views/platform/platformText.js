@@ -191,6 +191,21 @@ export function chipCount(row, tab) {
 }
 
 /** 칩 숫자의 뜻(줄 끝 안내). */
+/**
+ * v3.10.14(점검 2회차): 바로가기 칩은 **고른 리전 안의 법인만** 보인다(전에는 리전을 골라도 28곳 전부 — 리전 밖 칩을 누르면 리전이 지워져 범위가 튀었다).
+ * 리전이 없으면 전부. 리전에 맞는 법인이 없으면 빈 목록(칩 줄은 안내만 — 전체로 넓히지 않는다).
+ */
+export function chipSites(vcenters, region) {
+  const r = String(region || '');
+  const list = (Array.isArray(vcenters) ? vcenters : []).filter((s) => s && typeof s === 'object');
+  return r ? list.filter((s) => String(s.location?.region ?? '') === r) : list;
+}
+/** 칩 줄 범례 앞에 붙는 리전 안내 — '리전 유럽 · 5법인'(리전이 없으면 ''). */
+export function chipRegionNote(region, n) {
+  const r = String(region || '').trim();
+  return r ? `리전 ${r} · ${Number.isFinite(n) ? n : 0}법인` : '';
+}
+
 export function chipLegend(tab) {
   return tab === 'hosts' ? '숫자 = 그 vCenter 의 확인 대상 호스트 · 고른 법인은 파랗게'
     : tab === 'vms' ? '숫자 = 그 vCenter 의 조치 필요 VM · 고른 법인은 파랗게'
