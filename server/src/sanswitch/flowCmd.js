@@ -160,7 +160,7 @@ export function parseFlowList(text) {
   const names = new Set();
   for (const m of s.matchAll(/Name\s*:\s*([A-Za-z0-9_]{1,64})/g)) names.add(m[1]);
   for (const line of s.split(/\r?\n/).slice(0, 2000)) {
-    const m = /^\s*\|?\s*([A-Za-z][A-Za-z0-9_]{0,63})\s*\|/.exec(line);
+    const m = /^\s*(?:\|\s*)?([A-Za-z][A-Za-z0-9_]{0,63})\s*\|/.exec(line);   // 24회차 #8: \s*\|?\s* 는 공백 줄에서 O(n²)(16KB 88ms) — 선택 묶음으로
     if (m && !/^(name|flow|feature|sys)$/i.test(m[1])) names.add(m[1]);
   }
   const list = [...names].slice(0, 600);

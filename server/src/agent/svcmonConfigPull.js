@@ -207,7 +207,7 @@ export async function pullSvcmonConfigNow() {
     if (!r.committed) {
       // 사전 검증을 통과했는데 여기서 거부되는 것은 예상 밖이다 — 지운 이전 배포분을 되돌린다(점검 공백 방지).
       //   ⚠ 되돌린 대상·점검의 id 는 새로 발급된다(store 가 id 를 입력에서 받지 않는다) — 그 사실을 오류에 밝힌다.
-      const back = snapshot.length ? bulkAddTargets(snapshot, { atomic: true, dedup: true }) : { committed: true, added: 0 };
+      const back = snapshot.length ? bulkAddTargets(snapshot, { atomic: true, dedup: true, trustedBatch: true }) : { committed: true, added: 0 };   // 26회차 F6: 되살린 대상이 원래 central:* 태그를 지닌다(다음 배정 교체 때 지워지게)
       for (const e of (r.errors || []).slice(0, 10)) errors.push(`${e.row}행 ${e.name}: ${e.reason}`);
       errors.push(back.committed
         ? `검증 실패로 새 정의를 적용하지 않았습니다 — 이전 배포분 ${back.added || 0}개를 되돌렸습니다(점검 id 는 새로 발급됨).`

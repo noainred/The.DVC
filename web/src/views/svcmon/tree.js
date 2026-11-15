@@ -9,6 +9,7 @@
  * 없었다(1차 감사가 지목한 유일한 테스트 가능 지점).
  */
 import { statusOf } from './constants.js';
+import { numOrNull } from '../../numOrNull.js';
 
 export function buildTree(targets, folders = [], sortMode = 'manual') {
   const root = { id: '', name: 'Root', children: new Map(), targets: [] };
@@ -78,4 +79,14 @@ export function summarize(targets) {
     if (st !== 'total' && s[st] !== undefined) s[st] += 1; else s.pending += 1;
   }
   return s;
+}
+
+/**
+ * 응답 시간 평균(ms) — 표본이 없으면 **null**(화면은 '—', 단위 없음).
+ * 전체 점검 26회차 F11: 예전에는 표본 0개면 0 을 돌려 'AVG REPLY 0 ms' 로 보였다(못 읽은 값은 0 이 아니다).
+ * @param {Array<number|null|undefined|string>} values
+ */
+export function avgReplyMs(values) {
+  const v = (values || []).map(numOrNull).filter((n) => n != null);
+  return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : null;
 }

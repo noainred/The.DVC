@@ -34,6 +34,8 @@ export function ScanRangeMigration({ onChanged }) {
   const moved = items.filter((x) => x.it.result === 'moved').length;
   return (
     <section className="card" style={{ padding: 14, marginBottom: 12, borderColor: remaining.length ? 'var(--amber)' : 'var(--border)' }} aria-label="기존 대역 이전 안내">
+      {/* 28회차 P-4: 서버가 이전을 보류했으면(배정 파일 손상 등) 그 사유를 그대로 말한다 */}
+      {m.held ? <div role="status" style={{ fontSize: 12, color: 'var(--amber)', marginBottom: 6 }}>아직 옮기지 않았습니다 — {m.held}</div> : null}
       <div className="flex between wrap" style={{ alignItems: 'center', gap: 8 }}>
         <b style={{ fontSize: 14 }}>vCenter 별 스캔 대역을 에이전트로 옮겼습니다{moved ? ` (${moved}건)` : ''}</b>
         <span className="flex gap wrap">

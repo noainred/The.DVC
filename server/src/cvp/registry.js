@@ -57,8 +57,8 @@ function load() {
   return _db;
 }
 
-function persist() {
-  atomicWriteFileSync(FILE(), JSON.stringify(sealSecretsDeep({ version: 1, servers: load().servers }), null, 2), { mode: 0o600 });
+function persist(servers = load().servers) {
+  atomicWriteFileSync(FILE(), JSON.stringify(sealSecretsDeep({ version: 1, servers }), null, 2), { mode: 0o600 });
   loadErr.clear(); // v2.612 LEFT2612-01
 }
 
@@ -138,7 +138,8 @@ export function saveServer(input = {}) {
   const issue = serverInputIssue(input, existing);
   if (issue) throw new Error(issue);
   const f = normFields(input);
-  const srv = existing || { id: `cvp-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, createdAt: Date.now() };
+  // 25회차 F-6(재현): 사본에 고치고 쓰기 성공 뒤에만 메모리를 바꾼다(저장 실패에도 폴러 · /cvp-config 가 새 host · 토큰을 쓰던 것)
+  const srv = existing ? { ...existing } : { id: `cvp-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, createdAt: Date.now() };
   const moved = !!existing && accessMoved(existing, f, ['host', 'username', 'authMode']);
   let droppedSecrets = [];
   if (moved) droppedSecrets = dropCarriedSecrets(srv, input, ['token', 'password']);
@@ -159,12 +160,15 @@ export function saveServer(input = {}) {
     note: String(input.note ?? '').slice(0, 200),
     updatedAt: Date.now(),
   });
-  if (!existing) {
-    if (db.servers.length >= MAX_SERVERS) throw new Error(`CVP 서버는 최대 ${MAX_SERVERS}개까지 등록할 수 있습니다.`);
-    if (db.servers.some((s) => baseUrlOf(s.host).base === baseUrlOf(f.host).base && agentKeyEq(s.agent, srv.agent))) throw new Error('같은 주소·같은 담당의 CVP 서버가 이미 등록되어 있습니다.');
-    db.servers.push(srv);
-  }
-  persist();
+  if (!existing && db.servers.length >= MAX_SERVERS) throw new Error(`CVP 서버는 최대 ${MAX_SERVERS}개까지 등록할 수 있습니다.`);
+  // 25회차 F-7(재현): 중복(주소 + 담당) 검사가 신규에만 있어 수정으로 같은 CVP 를 두 번 수집했다(장비 행 두 벌 · Overview 부풀림) — 자기 자신을 뺀 목록과
+  //   27회차 반증 D-6: 수정은 **키(주소 · 담당)를 바꿀 때만** 견준다(이미 있던 중복 두 대가 비활성화까지 잠기던 것) · 상대 서버를 밝힌다.
+  const keyChanged = !existing || baseUrlOf(existing.host).base !== baseUrlOf(f.host).base || !agentKeyEq(existing.agent, srv.agent);
+  const dupSrv = keyChanged ? db.servers.find((s) => s !== existing && baseUrlOf(s.host).base === baseUrlOf(f.host).base && agentKeyEq(s.agent, srv.agent)) : null;
+  if (dupSrv) throw new Error(`같은 주소·같은 담당의 CVP 서버가 이미 등록되어 있습니다 — '${String(dupSrv.name || dupSrv.id || '').slice(0, 80)}'.`);
+  const nextList = existing ? db.servers.map((s) => (s === existing ? srv : s)) : [...db.servers, srv];
+  persist(nextList);
+  db.servers = nextList;
   return { ...pub(srv), ...(droppedSecrets.length ? { droppedSecrets: [...new Set(droppedSecrets)] } : {}) };
 }
 
@@ -172,8 +176,8 @@ export function deleteServer(id) {
   const db = load();
   const i = db.servers.findIndex((s) => s.id === id);
   if (i < 0) return false;
-  db.servers.splice(i, 1);
-  persist();
+  const nextList = db.servers.filter((_, j) => j !== i);
+  persist(nextList); db.servers = nextList;   // 25회차 F-6: 쓰기 성공 뒤에만
   return true;
 }
 
@@ -197,8 +201,8 @@ export function applyPulledServers(list) {
     .filter((s) => s && typeof s === 'object' && typeof s.id === 'string' && s.id)
     .slice(0, MAX_SERVERS)
     .map((s) => ({ ...s, pulled: true }));
-  db.servers = [...keep, ...next];
-  persist();
+  const all = [...keep, ...next];
+  persist(all); db.servers = all;   // 25회차 F-6: 쓰기 성공 뒤에만
   const nextIds = new Set(next.map((s) => s.id));
   return { count: next.length, removed: [...before].filter((id) => !nextIds.has(id)) };
 }

@@ -43,6 +43,7 @@ export default function AlertTab({ isAdmin = false }) {
   const batchText = win && from ? `${win} 안에 ${from}건 이상 몰리면(회선·엣지 장애)` : '짧은 시간에 한꺼번에 몰리면(회선·엣지 장애)';
   return (
     <div className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 760 }}>
+      {d.loadError ? <div className="svc-warn">알림 설정 파일을 읽지 못해 지금은 기본값(알림 꺼짐)으로 동작합니다 — 아래 값은 저장된 값이 아닙니다. 다시 저장하거나 설정 › 서비스 점검에서 확정 · 손상 보존본 복구로 풀립니다.</div> : null}
       <div style={{ fontSize: 13, lineHeight: 1.6 }}>
         점검이 <b>연속 N회 실패</b>하면 포탈 알림 채널(설정 › 알림)로 보냅니다. 상태가 바뀔 때 한 번만 보내고, 정상으로 돌아오면 복구 알림을 한 번 보냅니다.{' '}
         {batchText} 요약 1건으로 묶습니다. 엣지 무보고 알림은 지금처럼 따로 나갑니다.

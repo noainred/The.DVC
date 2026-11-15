@@ -147,6 +147,10 @@ test('EDGE2632-03: 통신 점검·IP 스캔 설정 손상 → 503(enabled:false 
   assert.equal(ls.linkCheckSettingsLoadError(), null);
   assert.equal((await cget('/link-check-config?agent=edge-a')).status, 200);
   const ss = await import('../src/ipam/scanStore.js');
+  // 전체 점검 25회차 F-3: 손상 중 한 에이전트 저장은 거절된다(다른 배정이 빠지지 않게) — 해제는 서비스 점검 '기본값으로 확정'
+  assert.throws(() => ss.saveScanSettings('edge-a', { enabled: true, ranges: ['10.9.0.0/30'] }), (e) => e.code === 'settings-unreadable');
+  const { confirmSettingsDefault } = await import('../src/util/settingsLoadError.js');
+  assert.equal(confirmSettingsDefault('ipam-scan.json', { by: 't' }).ok, true);
   ss.saveScanSettings('edge-a', { enabled: true, ranges: ['10.9.0.0/30'] });
   assert.equal(ss.scanSettingsLoadError(), null);
   const ja = await (await cget('/ip-scan-assignment?agent=edge-a')).json();

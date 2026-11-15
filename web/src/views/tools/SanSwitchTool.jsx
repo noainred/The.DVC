@@ -1313,7 +1313,7 @@ function DcStoragePerf({ dcPerf, onClose }) {
                     <td>
                       {s.capacity
                         ? <span title={`${s.capacity.name} (${s.capacity.type})`}>
-                            <UsageCell pct={s.capacity.pct ?? 0} />
+                            <UsageCell pct={s.capacity.pct /* 24회차 #7: 못 읽은 사용률은 0% 막대가 아니라 '—'(UsageCell 이 null 을 그린다) */} />
                             <span className="muted" style={{ fontSize: 10.5, display: 'block', ...ELLIPSIS }}>{s.capacity.name}</span>
                           </span>
                         : <span className="muted" title="등록된 스토리지와 시리얼이 일치하지 않아 용량을 붙이지 않았습니다(억지 매칭 금지).">—</span>}

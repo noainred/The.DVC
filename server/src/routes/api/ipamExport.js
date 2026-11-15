@@ -20,8 +20,8 @@ import { vcRangesToCsv } from '../../ipam/vcRangesCsv.js';
 import { rangeSize } from '../../ipam/scan.js';
 import { checkRangeSpec } from '../../ipam/rangeSyntax.js'; // v2.639: 저장된 옛 값 중 이제 무효인 줄을 밝힌다
 import { makeVcResolver } from '../../ipam/vcResolve.js';
-import { getAnnotation, setAnnotation, getAnnotations, setAnnotationsMany } from '../../ipam/annotations.js';
-import { getOverride, setOverride, clearOverride, setOverrideBatch, splitBatchIps, invalidBatchResult, overridesSummary, STATUSES, DEVICE_TYPES, reservedUntilDay, getOverrides, setOverridesMany } from '../../ipam/overrides.js';
+import { getAnnotation, setAnnotation, getAnnotations, setAnnotationsMany, annotationsLoadError } from '../../ipam/annotations.js';
+import { getOverride, setOverride, clearOverride, setOverrideBatch, splitBatchIps, invalidBatchResult, overridesSummary, STATUSES, DEVICE_TYPES, reservedUntilDay, getOverrides, setOverridesMany, overridesLoadError } from '../../ipam/overrides.js';
 import { manageToCsv, manageSampleCsv, parseManageCsv, analyzeManageImport, MANAGE_CHUNK_MAX } from '../../ipam/manageCsv.js';
 import { getPolicies, getPolicy, setPolicy, deletePolicy, policiesSummary, findPolicy, specToRange, POLICY_STATUSES } from '../../ipam/rangePolicies.js';
 import { ipToNum } from '../../ipam/ledger.js';
@@ -360,6 +360,7 @@ api.delete('/tools/ipam/ip/:ip', canWrite, requirePerm('tools'), (req, res) => {
   }
   if (writeScopeDenied(req, snap, owners, req.params.ip, claimed)) return res.status(403).json({ ok: false, reason: WRITE_DENIED_MSG });
   const r = clearOverride(req.params.ip);
+  if (!r.ok) return res.status(409).json(r);   // 25회차 F-4: 파일을 못 읽은 동안
   logAudit({ user: req.user?.username, action: 'IP 관리상태 삭제', target: `IP ${req.params.ip}` });
   res.json(r);
 });
@@ -640,6 +641,8 @@ api.post('/tools/ipam/manage/import', csvPerm, canWrite, requirePerm('tools'), (
     statuses: STATUSES, deviceTypes: DEVICE_TYPES, dayOf: (iso) => reservedUntilDay(iso),
   });
   if (dryRun) return res.json({ ok: true, dryRun: true, columns: parsed.columns, report: a.report, summary: a.summary, total: parsed.rows.length });
+  // 25회차 F-4: 파일을 못 읽은 동안은 가져오지 않는다(그 몇 건만 든 파일이 되어 나머지 예약 · 메모가 사라진다)
+  { const le = overridesLoadError() || annotationsLoadError(); if (le) return res.status(409).json({ ok: false, code: 'settings-unreadable', reason: 'IP 관리 예약 · 메모 파일을 읽지 못한 상태라 가져오지 않았습니다 — 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리고 재시작하세요.' }); }
   const ovEntries = a.plans.filter((p) => p.override).map((p) => ({ ip: p.ip, partial: p.override }));
   const anEntries = a.plans.filter((p) => p.annotation).map((p) => ({ ip: p.ip, memo: p.annotation.memo, tags: p.annotation.tags }));
   const ov = ovEntries.length ? setOverridesMany(ovEntries, req.user) : { changed: 0, removed: 0 };

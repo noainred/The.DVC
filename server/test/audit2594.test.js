@@ -129,17 +129,20 @@ test('SEC-2594-04 — vmware-config 다운로드 파일명은 안전한 문자�
   assert.ok(!/vmware-config-\$\{data\.meta\.scope\}/.test(s));
 });
 
-/* ── EDGE2-01 svcmon 엣지 보고 부속 객체 크기 상한 ── */
-test('EDGE2-01 — svcmon 엣지 poller·caps·log 가 16KB 를 넘으면 버리고 그 사실을 남긴다', async () => {
+/* ── EDGE2-01 svcmon 엣지 보고 부속 객체 크기 상한 → 26회차 F5: 아는 필드만(크기는 필드 정제로 묶인다) ── */
+test('EDGE2-01 · 26회차 F5 — svcmon 엣지 poller·caps·log 는 아는 필드 · 수 · 길이 상한으로만 상주한다', async () => {
   const m = await import('../src/central/svcmonEdge.js');
-  const big = { junk: 'x'.repeat(40_000) };
-  m.ingestReport('edge-big', { snapId: 's1', seq: 1, total: 1, poller: big, caps: { portalPort: 4000, blob: 'y'.repeat(40_000) }, log: { small: 1 }, rows: [] });
+  const big = { junk: 'x'.repeat(40_000), tickMs: '1000' };
+  m.ingestReport('edge-big', { snapId: 's1', seq: 1, total: 1, poller: big, caps: { portalPort: 4000, blob: 'y'.repeat(40_000), version: 'v'.repeat(500) }, log: { small: 1, lastError: 'E'.repeat(5000) }, rows: [] });
   const a = m.getAgentRaw('edge-big');
-  assert.equal(a.poller.dropped, true);
-  assert.ok(a.poller.bytes > m.EDGE_AUX_MAX_BYTES);
-  assert.equal(a.caps.dropped, true);
-  assert.equal(a.portalPort, 4000, '포트는 원본에서 읽는다');
-  assert.deepEqual(a.log, { small: 1 }, '작은 객체는 그대로');
+  assert.equal(a.poller.junk, undefined, '모르는 필드는 버린다');
+  assert.equal(a.poller.tickMs, 1000, '문자열 수치는 수로');
+  assert.equal(a.caps.blob, undefined);
+  assert.ok(a.caps.version.length <= 40);
+  assert.equal(a.portalPort, 4000, '포트는 정제한 caps 에서 읽는다');
+  assert.equal(a.log.small, undefined);
+  assert.ok(a.log.lastError.length <= 300);
+  assert.ok(JSON.stringify({ p: a.poller, c: a.caps, l: a.log }).length < 2000, '정제한 부속 객체는 작다');
 });
 
 /* ── EDGE2-02 SAN 사용량 엣지 상태 퇴출 순서 ── */

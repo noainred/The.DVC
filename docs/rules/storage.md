@@ -894,3 +894,17 @@
   · 드로어 연계: `NodeLoadPanel openFromGraph` → `NodeClientsDrawer focus={client, range, at}` — 그래프 창(24h → 24h · 7d/30d → 7d)에 맞추고 응답 뒤 `tr[data-client]` 로 스크롤 · `nl-rowhit` 강조 · 그 창에 없으면 문장(30일 창에서만 보인 클라이언트).
     보기 ‘연결 그래프’ 는 분포 보기처럼 창 이동 줄 · 타일 · 추이를 쓰지 않는다(`distLike`).
   · Chromium 1440/400(목 서버 데모 — 노드 6 · 클라이언트 22): 오류 0 · 가로 넘침 0 · 호 → 드로어 · 칩 → 줄 강조 확인. ② 생키 · ④ 매트릭스 · ⑤ 3D 는 시안만(미구현). 실장비 표본 모양은 여전히 미확인(v2.937 과 같다).
+
+- **전체 점검 23회차(`storageFullAudit23` · web `storageColumns.test.js`)**:
+  ① 저장 비밀번호 승계 판정은 `storage/registry.js storageAccessMoved`(host · 계정 · 둘 다 ssh 일 때 포트) 하나 — 저장 · 단건 연결 테스트 · 대량 테스트가 같이 쓴다(SAN `sanAccessMoved` 와 같은 모양).
+  ② host+type 중복 검사는 **수정에도**(자기 자신을 뺀 등록부 · 메모리를 바꾸기 전에).
+  ③ 보존 기간 설정(storage-growth-settings.json)을 못 읽으면 ~~정리 보류~~ → **27회차 정정: 칸마다 설정 상한(max)으로만 정리**(`setKeepDays(max)` — 전면 보류는 디스크가 끝없이 찼다(D-4)) ·
+    저장 409 · 확정은 **소유자 등급**(D-1)이고 **보존 칸을 최대값으로** 쓴다(기본값으로 확정하면 직후 정리가 이력을 지웠다 — D-3) · 객체가 아닌 JSON(null · 배열)도 손상(D-5) · 보존본 복구로도 풀림.
+  ④ 엣지 extra 의 jobs · criticalEvents · clusters · perf 는 아는 모양(배열 · 객체 원소 · 글자/수 칸 · 상한 · perf 는 수) — `narrowStorageExtraLists`.
+  ⑤ 표의 노드 · 계정 개수는 그 섹션이 'ok' 일 때만(미수집을 0 으로 그리지 않는다).
+  ⑥ 일 요약의 사용량 · 매체 칸은 그날 **마지막 유효 관측**(새 관측 null 이면 유지) ⑦ 엣지 용량 점 적재가 실패하면(던짐 · DB 없음) 중복 제거 표지를 되돌려 다음 push 에 다시 적재.
+  **남긴 것**: S-8 5년 이력 요청 경로 313ms(지금은 이력이 짧아 영향 없음 — dailyRange 조각화 후보) · S-9 베어메탈 현황 합계의 미발견 마운트(부분 합) 표기 ·
+  S-10 엣지 시각 하한 · 같은 id 의 장비 교체(데이터 모델 — 사용자 결정) · PowerMax `*_tb` 단위 확인은 Unisphere 화면이 아니라 SE `symcfg list -srp` 와 대조할 것.
+- **전체 점검 27회차(23~25회차 반증 · `svcmonFullAudit26` 27 D-*)**: 수정의 중복 검사는 **키(host · type)를 바꿀 때만**(예전 '검사 없는 수정' 으로 이미 생긴 중복 두 대가 비활성화까지 잠기던 것 — D-6) ·
+  일 요약(capacity_daily · resource_daily)의 용량 칸은 **짝이 되는 used 와 같은 관측일 때만** 바꾼다(09시 100T/90T → 18시 50T/null 이 50T/90T = 180% — D-9) ·
+  보존 설정 저장 409 를 화면이 성공으로 보이지 않게 `requireChanged`(D-2). **남긴 것**: D-10 엣지 용량 점의 insCap → upDaily → 하위 항목 적재가 한 트랜잭션이 아니다(insCap 뒤 실패면 다음 push 가 duplicate 로 건너뜀 — 드묾).

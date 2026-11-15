@@ -57,7 +57,10 @@ svcmonRouter.put('/log', adminOnly, fullScopeOnly, (req, res) => {
     }
     logAudit({ user: req.user?.username, action: 'svcmon.log.settings', detail: `${next.rotate}/${next.keepFiles}` });
     res.json(logStatus());
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) {   // 26회차 F1: 설정 파일 손상 중 저장은 409(settingsUnreadable — 다른 설정 409 와 같은 모양)
+    if (e?.code === 'settings-unreadable') return res.status(409).json({ error: e.message, code: e.code, settingsUnreadable: true });
+    res.status(400).json({ error: e.message });
+  }
 });
 
 /**

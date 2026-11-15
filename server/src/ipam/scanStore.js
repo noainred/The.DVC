@@ -13,7 +13,7 @@ import { config, clampIntervalMs } from '../config.js';
 import { clampSetting } from '../util/clampSetting.js';
 import { DEFAULT_PORTS, isIpv4 } from './scan.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
-import { getOverrides } from './overrides.js';
+import { getOverrides, overridesLoadError } from './overrides.js';
 import { getPolicies, isCoveredByAnyPolicy, findPolicy, specToRange } from './rangePolicies.js';
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
 import { ipToNum, canonIp } from '../util/ipv4.js';
@@ -44,6 +44,8 @@ const _ipNum = ipToNum;
 // 루프 안에서 매번 override 맵/정책 목록을 다시 읽지 않도록 컨텍스트를 캡처하고,
 // 활성 정책이 하나도 없으면 findPolicy 자체를 건너뛴다(대다수 환경에서 O(N)로 동작).
 function managedChecker() {
+  // 25회차 F-4 ③: override 파일을 못 읽었으면 '관리 IP' 를 알 수 없다 — 모두 관리로 본다(관리 IP 의 스캔 결과 · 1년 이력이 정리되지 않게)
+  if (overridesLoadError()) return () => true;
   const ovMap = getOverrides();
   const hasPolicies = getPolicies().some((p) => p.enabled !== false);
   // ⚠ 회귀 방지(v2.287, 확정 버그 #11): 여기서 findPolicy(ip, '') 를 쓰면 claimedVcenterId 가
@@ -355,8 +357,21 @@ export function loadScanSettings(agent = LOCAL) {
 }
 
 /** 에이전트별 설정 저장(부분 업데이트). */
+/*
+ * 전체 점검 25회차 F-3(재현): 배정 파일 손상 중 한 에이전트 저장 · 삭제가 {agents:{그 하나}} 를 쓰고 표지를 풀어, 다른 엣지가
+ *   /api/central/ip-scan-assignment 에서 200 assigned:false 를 받고 스캔이 조용히 멈췄다(18회차 B-3 iDRAC 배정과 같은 유형).
+ *   손상 중에는 쓰지 않는다 — 해제는 서비스 점검 '기본값으로 확정' 또는 보존본 복구.
+ */
+function scanCfgWriteRefusal() {
+  const e = _cfgLoadErr.get();
+  if (!e) return null;
+  const err = new Error(`IP 스캔 배정 파일(ipam-scan.json)을 읽지 못한 상태라 저장하지 않았습니다 — 지금 한 에이전트를 저장하면 다른 에이전트의 배정이 빠져 스캔이 멈춥니다. 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리고 재시작하세요.`);
+  err.code = 'settings-unreadable'; err.status = 409;
+  return err;
+}
 export function saveScanSettings(agent, partial = {}) {
   const all = loadAll();
+  { const r = scanCfgWriteRefusal(); if (r) throw r; }
   // v2.604 RECENT2604-01: 대소문자만 다른 기존 키가 있으면 그 키를 갱신한다(같은 엣지의 설정이 두 벌로 갈라지지 않게).
   const key = agentKeyOf(all.agents, agent) ?? agent;
   const cur = normalizeCfg(all.agents[key] || {});
@@ -393,6 +408,7 @@ export function saveScanSettings(agent, partial = {}) {
  */
 export function deleteScanAgent(agent) {
   const all = loadAll();
+  { const r = scanCfgWriteRefusal(); if (r) throw r; }   // 25회차 F-3
   const key = agentKeyOf(all.agents, agent);
   const ranges = key != null ? normalizeCfg(all.agents[key] || {}).ranges : [];
   let removedSettings = false;
@@ -1246,6 +1262,7 @@ export function cleanMacStats(v) {
 
 export function recordAgentReport(agent, { scanned = 0, alive = 0, durationMs = null, nameStats = null } = {}) {
   const name = agent || LOCAL;
+  if (name === '__proto__') return;   // 25회차 F-10: 형제 recordAgentIncomplete 와 같은 가드(평범한 객체 맵의 프로토타입을 바꾸지 않게)
   // v2.601 CEN2601-01: 엣지 본문의 수치를 그대로 저장하지 않는다(객체·문자열이 화면·이력으로 새지 않게).
   scanned = numOrNull(scanned); alive = numOrNull(alive); durationMs = numOrNull(durationMs);
   const ns = cleanNameStats(nameStats);

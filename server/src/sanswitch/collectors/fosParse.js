@@ -296,7 +296,8 @@ export function parseCounter(raw) {
   const m = s.match(/^([\d.]+)\s*([kmgt])?$/);
   if (!m) return null;
   const mult = { k: 1e3, m: 1e6, g: 1e9, t: 1e12 }[m[2]] || 1;
-  return Math.round(Number(m[1]) * mult);
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? Math.round(n * mult) : null;   // 24회차 #11: '.' · '1.2.3' 이 NaN 이던 것 — 못 읽음은 null
 }
 
 /**

@@ -15,7 +15,7 @@ import { logAudit } from '../../audit.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
 import { listServers, getServer, getServerWithSecret, saveServer, deleteServer, agentKeyEq } from '../../cvp/registry.js';
-import { loadSettings, saveSettings, LIMITS } from '../../cvp/settings.js';
+import { loadSettings, saveSettings, cvpSettingsLoadError, LIMITS } from '../../cvp/settings.js';
 import { cvpPollerStatus, pollCvpOnce, isPollerBusy, testServerConnection } from '../../cvp/poller.js';
 import { getStatus, dropStatus } from '../../cvp/store.js';
 import * as cdb from '../../cvp/db.js';
@@ -861,9 +861,12 @@ api.post('/tools/cvp/servers/:id/test', adminOnly, toolsPerm, fullScopeOnly, asy
 
 // ── 설정(adminOnly) ──────────────────────────────────────────────────────────
 api.get('/tools/cvp/settings', adminOnly, toolsPerm, fullScopeOnly, (_req, res) => {
-  res.json({ settings: loadSettings(), limits: LIMITS });
+  const le = cvpSettingsLoadError();   // 25회차 F-2: 손상이면 밝힌다(화면의 값은 저장값이 아니라 기본값)
+  res.json({ settings: loadSettings(), limits: LIMITS, ...(le ? { loadError: { reason: String(le.reason || '').slice(0, 200) } } : {}) });
 });
 api.put('/tools/cvp/settings', adminOnly, toolsPerm, fullScopeOnly, (req, res) => {
+  // 25회차 F-2: 손상 중 저장은 받지 않는다 — 기본값(짧은 보존)을 굳히고 표지를 풀어 이력이 정리됐다. 서비스 점검 확정 · 보존본 복구로만.
+  if (cvpSettingsLoadError()) return res.status(409).json({ ok: false, code: 'settings-unreadable', reason: 'CloudVision 수집 설정 파일을 읽지 못한 상태라 저장하지 않았습니다 — 지금 저장하면 기본값(짧은 보존)이 굳습니다. 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리고 재시작하세요.' });
   const before = loadSettings();
   const next = saveSettings(req.body && typeof req.body === 'object' ? req.body : {});
   logAudit({ user: req.user?.username, action: 'CVP 수집 설정 변경', target: 'cvp-settings', detail: JSON.stringify({ before, after: next }).slice(0, 500) });

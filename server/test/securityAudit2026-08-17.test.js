@@ -100,9 +100,16 @@ test('sshGateway: mappingAccessIssue 소유·scope 재검사 + handleConnection(
 
 /* ── [LOW·보류] svcmon 비-HTTP SSRF 재검증 — 타임아웃 없는 DNS 재조회가 폴러를 지연시켜
    되돌림. http/soap 의 실행시점 재검증은 유지되어야 한다(회귀 방지). ── */
-test('svcmon/checker: http/soap 실행시점 SSRF 재검증 유지 + 비-HTTP 는 보류 표기', () => {
+test('svcmon/checker: http/soap 실행시점 SSRF 재검증 유지 + 비-HTTP 는 접속 lookup 으로 검증(26회차 F10)', () => {
   const s = read('svcmon/checker.js');
   assert.match(s, /const reason = await ssrfBlockReasonResolved\(test\.url\)/, 'http/soap 재검증 유지');
   assert.doesNotMatch(s, /SSRF_RECHECK_TYPES/, '비-HTTP 재검증(타임아웃 없는 DNS)은 되돌림');
-  assert.match(s, /보류\(v2\.322 보안 감사 LOW/, '보류 사유 주석 존재');
+  // 26회차 F10: v2.322 의 '보류' 사유(시한 없는 DNS)는 v2.537 ssrfLookup(3초 시한)으로 해소 — 접속부마다 lookup 을 붙인다(추가 조회 없음)
+  assert.doesNotMatch(s, /보류\(v2\.322 보안 감사 LOW/, '보류 주석은 정정됐다');
+  const conns = s.match(/(?:net|tls)\.connect\(\{[^}]*\}\)/g) || [];
+  assert.ok(conns.length >= 5, `접속부 ${conns.length}`);
+  for (const c of conns) assert.match(c, /lookup: checkLookup\(/, c);   // 28회차 N-5: 점검 시한에 맞춘 검증 lookup(ssrfLookup 공장)
+  const udp = s.match(/dgram\.createSocket\([^)]*\)/g) || [];
+  assert.ok(udp.length >= 2);
+  for (const c of udp) assert.match(c, /lookup: dgramLookupFor\(/, `dgram 은 bind 주소(0.0.0.0)도 lookup 으로 풀어 ssrfLookup 을 그대로 쓰면 UDP 점검이 전부 실패한다: ${c}`);
 });

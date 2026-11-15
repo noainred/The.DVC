@@ -23,6 +23,10 @@ export function serviceDownKind(message, http = null) {
   const status = Number(http?.status) || 0;
   // 4xx(권한·잘못된 요청·없음·충돌)는 재시도해도 결과가 같다 — 절대 이 안내로 바꾸지 않는다.
   if (status >= 400 && status < 500) return null;
+  // 전체 점검 30회차 A: 서버가 '파일을 못 읽음'(등록부 · 설정 손상 — registryUnreadable 등)이라고 밝힌 503 은 업그레이드 중이 아니다 —
+  //   다시 시도해도 같고 사람이 보존본을 확인해야 한다. 이 안내로 바꾸지 않고 서버 사유를 그대로 보인다.
+  const b = http?.body;
+  if (status === 503 && b && typeof b === 'object' && [b.reason, b.code].some((v) => typeof v === 'string' && /Unreadable$/.test(v))) return null;
   if (DOWN_STATUS.includes(status)) return status === 500 ? 'internal' : 'gateway';
   const m = typeof message === 'string' ? message : String(message?.message || '');
   if (!m) return null;

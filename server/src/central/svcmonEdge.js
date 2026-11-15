@@ -36,13 +36,34 @@ import { noteResult, noteAlertOnly, alertKeyOf, forgetHeld, forgetAlertedWhere, 
 
 const envNum = (k, d) => { const n = Number(process.env[k]); return Number.isFinite(n) && n > 0 ? Math.round(n) : d; };
 
-/** 보고 부속 객체의 직렬화 크기 상한(16KB). 넘으면 원본 대신 {dropped, bytes} 로 그 사실을 남긴다. */
-export const EDGE_AUX_MAX_BYTES = 16 * 1024;
-function boundedObj(o) {
-  let len = 0;
-  try { len = JSON.stringify(o).length; } catch { return { dropped: true, reason: 'unserializable' }; }
-  return len > EDGE_AUX_MAX_BYTES ? { dropped: true, bytes: len } : o;
+// v2.594(EDGE2-01)의 크기 상한(boundedObj · 16KB)은 26회차 F5 의 필드 정제(cleanEdge* — 아래)로 대체됐다(정제한 값은 필드 수 · 길이가 묶인다).
+
+/*
+ * 전체 점검 26회차 F5(재현): poller · caps · log 를 크기만 보고 그대로 상주시켜 응답에 실었다 — ① caps.portalPort 가 남아 최상위 portalPort 가림(v2.595)이 무력
+ *   ② 엣지 CSV 라이터의 log.lastError(파일 경로 원문)가 범위 · viewer 계정에 나갔다 ③ 엣지가 보낸 미정의 필드도 16KB 까지 그대로. 이제 **아는 필드 · 수 · 길이 상한**으로
+ *   정제한다(엣지 svcmonPush 가 보내는 필드 그대로 — 새 필드는 여기에도 넣을 것). 가림은 auth/scopeStatus.js redactEdgeSummary.
+ */
+const capNum = (v, max) => { const n = numOrNull(v); return n == null ? null : Math.max(0, Math.min(max, n)); };
+export function cleanEdgePoller(p) {
+  const o = p && typeof p === 'object' && !Array.isArray(p) ? p : {};
+  return { tickMs: capNum(o.tickMs, 1e9), maxPerTick: capNum(o.maxPerTick, 1e7), lastSweepMs: capNum(o.lastSweepMs, 1e9), lastCount: capNum(o.lastCount, 1e7), overdueSkipped: capNum(o.overdueSkipped, 1e9), maxLagMs: capNum(o.maxLagMs, 1e12) };
 }
+export function cleanEdgeCaps(c) {
+  const o = c && typeof c === 'object' && !Array.isArray(c) ? c : {};
+  const port = numOrNull(o.portalPort);
+  return {
+    platform: text(o.platform, 32), pingMode: text(o.pingMode, 32), svcmonEnabled: o.svcmonEnabled === true,
+    portalPort: port != null && port >= 1 && port <= 65535 ? Math.round(port) : null,
+    workers: capNum(o.workers, 1024), inlineFallbacks: capNum(o.inlineFallbacks, 1e9), version: text(o.version, 40),
+  };
+}
+export function cleanEdgeLog(l) {
+  const o = l && typeof l === 'object' && !Array.isArray(l) ? l : {};
+  return { written: capNum(o.written, 1e15), dropped: capNum(o.dropped, 1e15), bytes: capNum(o.bytes, 1e18), rotations: capNum(o.rotations, 1e9), buffered: capNum(o.buffered, 1e9), bufferBytes: capNum(o.bufferBytes, 1e15), pausedUnreadable: capNum(o.pausedUnreadable, 1e15), lastError: text(o.lastError, 300) };   // 28회차 N-3: 손상 중 멈춘 기록 수
+}
+/** 26회차 F12: 엣지가 알리는 push 주기 · 점검 주기의 범위(정상 엣지는 clampIntervalMs · 저장소 TEST_FIELDS 범위로 보낸다). */
+export const EDGE_EXPECT_MS = Object.freeze({ min: 15_000, max: 24 * 3600_000 });
+export const EDGE_IV_SEC = Object.freeze({ min: 10, max: 86400 });
 
 export const MAX_AGENTS = envNum('SVCMON_EDGE_MAX_AGENTS', 64);
 /** v2.606 EDGE2606-02: 예열 완결의 GC 보류 상한(엣지 SVCMON_WARM_MAX_MS 기본 15분보다 길게). */
@@ -254,7 +275,10 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
   a.counters.chunks += 1;
   if (sentAt) a.skewMs = recvAt - sentAt;   // 편도 지연 포함 → 오차의 상한 추정치
   if (Number.isFinite(Number(body?.expectMs)) && Number(body.expectMs) > 0) {
-    a.expectMs = Number(body.expectMs);
+    // 26회차 F12: 상한 없이 받으면(1e15) 그 엣지는 영원히 무보고가 아니고 행도 낡지 않아 마지막 ok 가 계속 정상으로 보였다 — 범위로 자르고 원본은 따로
+    const rawExpect = Number(body.expectMs);
+    a.expectMs = Math.min(EDGE_EXPECT_MS.max, Math.max(EDGE_EXPECT_MS.min, rawExpect));
+    if (a.expectMs !== rawExpect) a.expectMsRaw = rawExpect; else delete a.expectMsRaw;
     // v2.630(감사 R2630-06): 재시작 뒤 '기동 후 보고 없음' 유예가 이 엣지의 실제 주기를 쓰게 영속한다(바뀔 때만 쓴다).
     try { noteExpectMs(name, a.expectMs); } catch (e) { console.warn(`[svcmon-edge] 엣지 주기 기록 실패(${name}): ${e?.message || e}`); }
   }
@@ -263,13 +287,13 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
   // v2.594(감사 EDGE2-01): poller·caps·log 는 엣지가 보낸 객체를 그대로 상주시키고 edgeSummary 로 되돌려 줬다 —
   //   크기 상한이 없어 한 엣지가 수 MB 를 반복해 중앙 메모리·화면 응답을 부풀릴 수 있었다. 직렬화 크기 상한을 넘으면
   //   버리고 그 사실만 남긴다(partFaultEdge SCANNED_MAX_BYTES 와 같은 방식 — 조용히 자르지 않는다).
-  if (body?.poller && typeof body.poller === 'object') a.poller = boundedObj(body.poller);
+  //   26회차 F5: 크기 상한에 더해 아는 필드만(위 cleanEdge* — 정제한 값은 크기가 묶인다).
+  if (body?.poller && typeof body.poller === 'object') a.poller = cleanEdgePoller(body.poller);
   if (body?.caps && typeof body.caps === 'object') {
-    a.caps = boundedObj(body.caps);
-    const p = Number(body.caps.portalPort);
-    if (Number.isFinite(p) && p >= 1 && p <= 65535) a.portalPort = Math.round(p);
+    a.caps = cleanEdgeCaps(body.caps);
+    if (a.caps.portalPort != null) a.portalPort = a.caps.portalPort;
   }
-  if (body?.log && typeof body.log === 'object') a.log = boundedObj(body.log);
+  if (body?.log && typeof body.log === 'object') a.log = cleanEdgeLog(body.log);
   if (net?.sourceIp) a.sourceIp = text(net.sourceIp, 64);
 
   let accepted = 0;
@@ -329,7 +353,7 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
       }
       metaSet(a, id, {
         p: text(m?.p, 620), n: text(m?.n, 120), h: text(m?.h, 253),
-        t: text(m?.t, 80), y: text(m?.y, 16), iv: num(m?.iv) || 60,
+        t: text(m?.t, 80), y: text(m?.y, 16), iv: (() => { const v = num(m?.iv); return v > 0 ? Math.min(EDGE_IV_SEC.max, Math.max(EDGE_IV_SEC.min, v)) : 60; })(),   // 26회차 F12: 음수 · 거대값 자름
         // v2.988(쉬운 등록 후속 — 구분): 대상 구분(infra|service). 아는 값만 받는다(정제 화이트리스트) — 옛 엣지는 싣지 않는다(빈 값 = 모름).
         k: KIND_OK.has(m?.k) ? m.k : '',
       });
@@ -596,9 +620,11 @@ export function edgeState(agent, { path: scope = '', limit = 500, only = '', sor
 /** 전체 엣지 합산(중앙 화면 KPI 에 더할 값). 무보고 엣지는 unknown 으로만 센다. */
 export function edgeTotals(now = Date.now()) {
   // v2.630(감사 UI2630-03): 배정만 있고 보고가 없는 엣지는 별도 축(assignedNoReport)으로 센다 — agents(보고 중)와 섞지 않는다.
-  const t = { agents: 0, silent: 0, rows: 0, ok: 0, warn: 0, bad: 0, stale: 0, unknown: 0, notRun: 0, assignedNoReport: 0 };
+  // 28회차 N-7(재현): 기동 유예 중(awaitingFirstReport — 중앙 재시작 직후 첫 보고 대기)인 엣지도 assignedNoReport 로 세어 콘솔 타일이 릴리스마다 '주의' 였다 —
+  //   유예 중은 awaitingFirstReport 로 따로 센다(assignedNoReport 는 유예가 끝난 무보고 — 예전 화면 의미 유지).
+  const t = { agents: 0, silent: 0, rows: 0, ok: 0, warn: 0, bad: 0, stale: 0, unknown: 0, notRun: 0, assignedNoReport: 0, awaitingFirstReport: 0 };
   for (const s of edgeSummaryWithAssigned(now)) {
-    if (s.assignedOnly) { t.assignedNoReport += 1; continue; }
+    if (s.assignedOnly) { if (s.awaitingFirstReport) t.awaitingFirstReport += 1; else t.assignedNoReport += 1; continue; }
     t.agents += 1;
     if (s.silent) { t.silent += 1; t.unknown += s.rows; }
     else { t.ok += s.counts.ok; t.warn += s.counts.warn; t.bad += s.counts.bad; t.stale += s.counts.stale; }

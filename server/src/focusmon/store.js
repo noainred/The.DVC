@@ -670,6 +670,10 @@ export function forgetTargetState(id) {
   ST.delete(k); TESTS.delete(k); RETRIES.delete(k);
   const e = T.get(k); if (e) { e.lastUp = undefined; e.lastUpAt = undefined; } // 반증 F9 — 접속처가 바뀌면 옛 서버의 가동 시간으로 '재부팅' 을 만들지 않게
   LOAD.delete(k); // v2.983 반증 F13 — 예전 주소의 수집 부하 창을 새 주소의 것처럼 보이지 않게
+  // 전체 점검 29회차 F1(재현): v3.16.0 의 커널 메시지 기준(KMT 부팅 id · 누계) · 읽기 상태(KM) · OOM 상한(KMR)과 hello(OS · 코어)가 남아,
+  //   새 서버의 첫 확인이 그 서버 버퍼의 오류 전부를 '커널 오류 N줄(재부팅 뒤 버퍼)' 사건으로 적고 상세 머리글에 예전 서버의 OS 가 보였다.
+  KM.delete(k); KMT.delete(k); KMR.delete(k);
+  if (e) e.hello = null;
 }
 
 export function _resetForTest() {

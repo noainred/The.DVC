@@ -26,7 +26,7 @@ import { config, loadVcenterConfig } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { registerStateFile } from '../util/stateFiles.js';
 import { listVcRanges, removeVcRanges } from './rangeStore.js';
-import { loadScanSettings, saveScanSettings, listScanAgents, LOCAL } from './scanStore.js';
+import { loadScanSettings, saveScanSettings, listScanAgents, LOCAL, scanSettingsLoadError } from './scanStore.js';
 import { checkRangeList } from './rangeSyntax.js';
 import { RANGE_CAP } from './scan.js';
 import { store } from '../store.js';
@@ -127,6 +127,9 @@ function moveInto(agent, ranges) {
 export function runVcRangeMigration({ now = Date.now(), force = false } = {}) {
   const prev = readMigrationState();
   if (prev?.done && !force) return { ran: false, state: prev };
+  // 27회차 반증 D-8: 배정 파일(ipam-scan.json)을 못 읽는 동안은 시작하지 않는다 — 옮기기가 전부 settings-unreadable 로 실패한 채
+  //   'done' 으로 기록되어 확정 · 복구 뒤에도 다시 돌지 않았다. 다른 보류 분기와 같이 reason 만 돌려 다음 실행에서 다시 본다.
+  if (scanSettingsLoadError()) return { ran: false, state: prev, reason: 'IP 스캔 배정 파일을 읽지 못해 옮기지 않았습니다(설정 파일 점검에서 확정 · 복구 뒤 다시 시도합니다).' };
   const vcRanges = listVcRanges();
   if (!vcRanges.length) {
     const st = { version: 1, done: true, at: now, items: [], backup: null, dismissedAt: now };

@@ -72,7 +72,8 @@ export function mergeSettings(cur, patch = {}) {
 }
 
 let _cache = null;
-const _loadErr = makeSettingsLoadError(() => FILE(), { label: 'CloudVision 수집 설정', confirm: () => saveSettings({}) });
+// 27회차 반증 D-3: 확정은 보존 칸을 최대값으로(기본 7일 · 730일로 확정하면 그 직후 정리가 긴 이력을 지웠다)
+const _loadErr = makeSettingsLoadError(() => FILE(), { label: 'CloudVision 수집 설정 — 확정 시 보존은 최대값(이력을 지우지 않음)', confirm: () => saveSettings({ rawRetentionDays: LIMITS.rawRetentionDays.max, dailyRetentionDays: LIMITS.dailyRetentionDays.max }) });
 /** v2.631(EDGE2631-01): 설정 파일을 못 읽었으면 사유(배포 라우트가 설정을 싣지 않는다), 읽었으면 null. */
 export function cvpSettingsLoadError() { loadSettings(); return _loadErr.get(); }
 export function loadSettings() {

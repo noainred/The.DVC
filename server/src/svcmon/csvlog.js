@@ -19,7 +19,7 @@ import { guardCell } from '../util/csv.js';
 import { portalParts } from '../util/dayKey.js';
 import fs from 'node:fs';
 import path from 'node:path';
-import { getLogSettings, logDir, ROTATE_UNITS, ROTATE_LABEL } from './logsettings.js';
+import { getLogSettings, logDir, ROTATE_UNITS, ROTATE_LABEL, logSettingsLoadError, LOG_LIMITS } from './logsettings.js';
 
 const HEADER = ['시각', '경로', '대상', '호스트', '점검명', '유형', '상태', '응답', 'ms', '연속횟수'];
 const BOM = '﻿';
@@ -144,6 +144,9 @@ function schedule() {
  */
 export function appendResult({ ts, target, test, result, changed }) {
   const cfg = getLogSettings();
+  // 28회차 N-3(재현): 보관 설정을 못 읽는 동안은 **기록을 멈춘다** — 기록 위치(dirPath) · 기록 여부(enabled) · 총량 상한을 모르는 채 기본 위치(CONFIG_DIR — 시스템 디스크)에
+  //   총량 상한 없이 쌓였다(꺼 둔 기록도 다시 켜졌다). 점검 · 화면 · 알림은 그대로 돈다(이 함수는 CSV 기록만). 멈춘 수는 stats.pausedUnreadable.
+  if (logSettingsLoadError()) { stats.pausedUnreadable = (stats.pausedUnreadable || 0) + 1; return; }
   if (!cfg.enabled) return;
   if (cfg.mode === 'changes' && !changed) return;
   const line = [
@@ -172,6 +175,10 @@ export function appendResult({ ts, target, test, result, changed }) {
  * mtime(수정시각) 오름차순으로 '진짜 오래된 것부터' 지우고, 현재 열려 있는 파일(curFile)은 제외한다.
  */
 export function pruneOld(dir, cfg = getLogSettings()) {
+  // 26회차 F1 · 27회차 D-4: 보관 설정을 못 읽은 동안은 기본값(90개)이 아니라 설정 상한(파일 3650개)으로만 지운다 — 총량은 설정이 '0 = 무제한' 을
+  //   허용하므로 총량 기준으로는 지우지 않는다(사용자가 둘 수 있었던 어떤 설정보다 많이 지우지 않게).
+  //   ⚠ 28회차 N-3 정정: '파일 수 상한이 디스크를 묶는다' 는 성립하지 않았다(512MB 분할 파일도 개수라 수 TB) — 그래서 손상 중에는 기록 자체를 멈춘다(appendResult).
+  if (logSettingsLoadError()) cfg = { ...cfg, keepFiles: LOG_LIMITS.keepFilesMax, maxTotalMB: 0 };
   try {
     const rd = () => fs.readdirSync(dir).filter((f) => /^results-.*\.csv$/.test(f))
       .map((f) => { let st; try { st = fs.statSync(path.join(dir, f)); } catch { return null; } return { f, size: st.size, mtime: st.mtimeMs, cur: path.join(dir, f) === curFile }; })
@@ -268,6 +275,7 @@ export function logStatus() {
     fileCount: files.length,
     totalBytes: files.reduce((a, f) => a + f.sizeBytes, 0),
     stats: logStats(),
+    settingsUnreadable: !!logSettingsLoadError(),   // 26회차 F1: 화면이 저장 버튼을 잠그고 서비스 점검으로 안내한다
   };
 }
 

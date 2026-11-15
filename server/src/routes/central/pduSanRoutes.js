@@ -5,6 +5,7 @@
  *   **글자 그대로** 옮겼다. 등록은 central.js 가 원래 자리에서 `registerPduSanRoutes(centralRouter)` 로 부른다 — 라우트 순서 · 미들웨어 · 응답이 같다
  *   (회귀 `test/centralSplit2954.test.js` 가 등록 순서 · 개수 · 순환 없음을 고정한다 — 분할 때 라우트 본문은 원문 비교로 0 차이). 공용 판정(requireCentral · 503 응답 등)은 central.js 의 것을 그대로 쓴다.
  */
+import { numOrNull } from '../../util/numOrNull.js';   // 24회차 #9
 import { logAudit } from '../../audit.js';
 import { REJECT_KIND } from '../../central/ingestReject.js';
 import { getJob as getRmaJob, jobAgentOf as rmaJobAgentOf, noteHeartbeat as noteRmaHeartbeat, onlineInstances as rmaOnlineInstances, setJobResult as setRmaJobResult, takeJobsWait as takeRmaJobsWait } from '../../rma/jobs.js';
@@ -149,7 +150,7 @@ export function registerPduSanRoutes(centralRouter, deps) {
     const metaIn = Array.isArray(req.body?.meta) ? req.body.meta.slice(0, 20_000) : [];
     // v2.602: 장비 id·수치는 글자·숫자만 받는다 — 객체면 String()/Number() 가 던졌다(async 핸들러 500).
     const idOf = (v) => (typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v)) ? String(v) : '');
-    const nOf = (v) => (typeof v === 'number' || typeof v === 'string' ? Number(v) : NaN);
+    const nOf = (v) => (typeof v === 'number' || typeof v === 'string' ? (numOrNull(v) ?? NaN) : NaN);   // 24회차 #9: Number('')===0 — 빈 글자를 '포트 0 · 0 B/s' 로 적재하던 것
     const rows = rowsIn.filter((r) => Array.isArray(r) && owned.has(idOf(r[0]))).map((r) => ({ d: idOf(r[0]), ts: Math.min(nOf(r[1]) || now, now), p: nOf(r[2]), b: nOf(r[3]) }));
     const meta = metaIn.filter((m) => Array.isArray(m) && owned.has(idOf(m[0]))).map((m) => ({ d: idOf(m[0]), p: nOf(m[1]), ts: Math.min(nOf(m[2]) || now, now), name: m[3], wwn: m[4], speed: m[5], type: m[6] }));
     const dropped = rowsIn.length - rows.length;

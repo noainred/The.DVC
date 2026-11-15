@@ -6,7 +6,7 @@ import { requireRole, requirePerm } from '../../auth/auth.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { STORAGE_TYPES, collectMethodsFor, normalizeCollectMethod } from '../../storage/types.js';
-import { listDevices, listDevicesWithSecrets, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithSecret, registryLoadError } from '../../storage/registry.js';
+import { listDevices, listDevicesWithSecrets, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithSecret, registryLoadError, storageAccessMoved } from '../../storage/registry.js';
 import { requireSettingsOwner } from '../admin/shared.js';
 import { localSnapshots, dropSnapshot } from '../../storage/store.js';
 import { collectDeviceNow, storagePollerStatus, pollStorageOnce, testDeviceConnection } from '../../storage/poller.js';
@@ -161,10 +161,12 @@ api.post('/tools/storage/test', adminOnly, fullScopeOnly, async (req, res) => {
   // 수정 화면은 비밀번호를 비워 보낸다(= '기존 유지'). host 가 그대로일 때만 저장분을 쓴다.
   let password = String(body.password || '');
   let pwSource = 'input';
-  if (!password && existing && existing.host === host) { password = existing.password || ''; pwSource = 'stored'; }
+  // 23회차 S-1: host 만이 아니라 계정 · SSH 포트까지(저장과 같은 판정 storageAccessMoved) — 바뀌었으면 저장 비밀번호를 쓰지 않는다
+  const moved = !!existing && storageAccessMoved(existing, body);
+  if (!password && existing && !moved) { password = existing.password || ''; pwSource = 'stored'; }
   if (!password) {
-    return res.status(400).json({ ok: false, reason: existing && existing.host !== host
-      ? 'host 를 변경했으므로 비밀번호를 다시 입력해야 테스트할 수 있습니다(저장된 비밀번호는 새 주소로 보내지 않습니다).'
+    return res.status(400).json({ ok: false, reason: existing && moved
+      ? '접속처(host · 계정 · SSH 포트)를 바꿨으므로 비밀번호를 다시 입력해야 테스트할 수 있습니다(저장된 비밀번호는 바뀐 접속처로 보내지 않습니다).'
       : '비밀번호를 입력하세요.' });
   }
 
@@ -529,6 +531,7 @@ api.post('/tools/storage/devices/import/test', csvPerm, adminOnly, fullScopeOnly
         const prev = existing.get(key(row.host, row.type));
         const full = prev ? getDeviceWithSecret(prev.id) : null;
         if (!full?.password) return { ok: false, reason: '비밀번호가 없습니다 — 신규 등록이면 password 열에 비밀번호를 적으세요.' };
+        if (storageAccessMoved(full, input)) return { ok: false, reason: '계정 · SSH 포트가 저장된 값과 달라 저장 비밀번호로 시험하지 않습니다 — password 열에 비밀번호를 적으세요.' };   // 23회차 S-1
         input.password = full.password;
       }
       try {
@@ -860,7 +863,10 @@ api.get('/tools/storage-growth/settings', toolsPerm, fullScopeOnly, (req, res) =
  * `prune:true` 일 때만 즉시 정리한다(화면이 '지금 정리' 를 눌렀을 때).
  */
 api.post('/tools/storage-growth/settings', adminOnly, fullScopeOnly, requireSettingsOwner, async (req, res) => {
-  const { values, issues } = saveGrowthSettings(req.body || {});
+  let saved;
+  try { saved = saveGrowthSettings(req.body || {}); }
+  catch (e) { if (e?.code === 'settings-unreadable') return res.status(409).json({ ok: false, code: e.code, reason: e.message }); throw e; }   // 23회차 S-3
+  const { values, issues } = saved;
   let pruned = false;
   if (req.body?.prune === true) pruned = await pruneNow();
   logAudit({

@@ -195,7 +195,10 @@ export function httpInfoFor(message) { return memoHit(message); }
 
 /** !res.ok 공통 처리 — 사유를 살리고 상태·경로를 사이드 채널에 보존한다. */
 function httpFail(path, res, data) {
-  const msg = data?.reason || data?.error || `${path} -> ${res.status}`;
+  // 전체 점검 30회차 A(재현): '파일을 못 읽음' 503 은 reason 에 영문 코드(registryUnreadable · settingsUnreadable 등 — 엣지 계약)를, detail 에 한국어 조치를 싣는다.
+  //   예전에는 코드가 그대로 메시지가 되어(그리고 아래 serviceDownKind 가 '업그레이드 중' 으로 바꿔) 사람이 할 일이 보이지 않았다 — detail 을 메시지로.
+  const unreadable = typeof data?.reason === 'string' && /^[a-z][A-Za-z]{2,40}Unreadable$/.test(data.reason) && typeof data?.detail === 'string' && data.detail.trim();
+  const msg = (unreadable ? data.detail : '') || data?.reason || data?.error || `${path} -> ${res.status}`;
   const err = new HttpError(msg, { status: res.status, path, body: data });
   noteHttpError(msg, err);
   return err;

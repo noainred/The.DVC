@@ -19,7 +19,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
-import { setKeepDays, RAW_KEEP_DAYS_DEF, DAILY_KEEP_DAYS_DEF, NODE_LOAD_RAW_KEEP_DAYS_DEF, NODE_LOAD_HOURLY_KEEP_DAYS_DEF,
+import { makeSettingsLoadError } from '../util/settingsLoadError.js';   // 23회차 S-3
+import { setKeepDays, setPruneHold, RAW_KEEP_DAYS_DEF, DAILY_KEEP_DAYS_DEF, NODE_LOAD_RAW_KEEP_DAYS_DEF, NODE_LOAD_HOURLY_KEEP_DAYS_DEF,
   NODE_CLIENT_RAW_KEEP_DAYS_DEF, NODE_CLIENT_HOURLY_KEEP_DAYS_DEF, NODE_CLIENT_DAILY_KEEP_DAYS_DEF } from './db.js';
 
 const FILE = () => path.join(config.configDir, 'storage-growth-settings.json');
@@ -96,15 +97,32 @@ export function normalizeGrowthSettings(input = {}) {
 }
 
 let _cache = null;
+/*
+ * 전체 점검 23회차 S-3(재현): 손상 → 기본값 → 다음 정리가 긴 보존 이력을 지웠다. 이제 못 읽은 동안(손상 · 재시작 뒤 보존본만)은
+ *   ① 칸마다 **설정 상한(max)** 으로만 정리(27회차 D-4 — 23회차의 전면 보류는 디스크가 끝없이 찼다) ② 저장은 409(부분 저장이 나머지 칸을
+ *   기본값으로 굳히지 않게) ③ 서비스 점검 목록에 올라 '확정'(보존 칸 최대값 저장 — 27회차 D-3) 또는 보존본 복구로만 풀린다.
+ */
+// 27회차 반증 D-1 · D-3: 쓰기 라우트가 설정 소유자 등급이라 확정도 소유자(ownerOnly) · 확정은 **보존 칸을 최대값으로** 쓴다
+//   (기본값으로 확정하면 그 직후 정리가 기본 보존으로 돌아 보류가 막으려던 이력을 지웠다 — 관리자가 나중에 줄인다).
+const maxRetention = () => Object.fromEntries(GROWTH_SPEC.map((s) => [s.key, s.max]));
+const _loadErr = makeSettingsLoadError(() => FILE(), { label: '스토리지 증가량 보존 기간 — 못 읽는 동안 · 확정 시 보존은 최대값(이력을 지우지 않음)', confirm: () => { const v = maxRetention(); atomicWriteFileSync(FILE(), JSON.stringify(v, null, 2), { mode: 0o600 }); _cache = normalizeGrowthSettings(v).values; _loadErr.ok(); applyGrowthSettings(); }, ownerOnly: true });
+/** 보존 설정을 못 읽었으면 { at, reason }, 아니면 null. */
+export function growthSettingsLoadError() { loadGrowthSettings(); return _loadErr.get(); }
 
 /** 저장된 설정 + 기본값을 합친 실효값. `source` 로 '어디서 온 값인지' 를 함께 준다. */
 export function loadGrowthSettings() {
   if (!_cache) {
     let saved = {};
-    try { saved = JSON.parse(fs.readFileSync(FILE(), 'utf8')) || {}; }
+    try {
+      saved = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+      // 27회차 D-5: 객체가 아닌 JSON(null · 배열 · 수)도 손상이다(v2.601 규약 — 형제 SAN · CVP · 스캔 설정과 같게)
+      if (!saved || typeof saved !== 'object' || Array.isArray(saved)) { const e = new Error('객체가 아닌 JSON 값'); throw e; }
+      _loadErr.ok();
+    }
     catch (e) {
-      // ENOENT 는 '아직 저장한 적 없음' 이라 정상이다. 그 밖(손상)은 원본을 보존하고 기본으로 간다.
-      if (e?.code !== 'ENOENT') { try { preserveCorrupt(FILE()); } catch { /* best effort */ } }
+      // ENOENT 는 '아직 저장한 적 없음' 이라 정상이다(손상 보존본만 남았으면 여전히 못 읽은 것 — missing). 그 밖(손상)은 원본을 보존한다.
+      if (e?.code === 'ENOENT') _loadErr.missing();
+      else { _loadErr.corrupt(e); try { preserveCorrupt(FILE()); } catch { /* best effort */ } }
       saved = {};
     }
     _cache = normalizeGrowthSettings(saved).values;
@@ -131,6 +149,10 @@ export function loadGrowthSettings() {
 
 /** 저장 → 즉시 DB 에 반영. prune 은 여기서 돌리지 않는다(호출부 결정 — 위 머리말 참조). */
 export function saveGrowthSettings(input) {
+  if (growthSettingsLoadError()) {   // 23회차 S-3
+    const e = new Error('저장된 보존 기간 설정 파일을 읽지 못했습니다 — 지금 저장하면 적지 않은 칸이 기본값(더 짧은 보존)으로 굳습니다. 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리고 재시작하세요.');
+    e.code = 'settings-unreadable'; throw e;
+  }
   const { values, issues } = normalizeGrowthSettings(input);
   // v2.733(점검 3회차 C4-04): 캐시·DB 반영은 **디스크 쓰기 성공 뒤에만** — 예전에는 먼저 바꿔, 저장 실패 뒤에도 실패한 값이 출처 'saved' 로
   //   보였다(재시작하면 옛 값). 저장 전에 한 번 읽어 둔다(_cache 가 비어 있으면 다른 저장값을 빠뜨린 채 덮어쓰지 않게).
@@ -145,10 +167,20 @@ export function saveGrowthSettings(input) {
 /** 기동 시·저장 시 DB 모듈에 보존 일수를 주입한다. */
 export function applyGrowthSettings() {
   const v = loadGrowthSettings();
+  // 23회차 S-3 → 27회차 D-4: 못 읽은 동안은 보류(무한 증가)가 아니라 **칸마다 설정 상한(max)** 으로 정리한다 — 관리자가 둘 수 있었던
+  //   어떤 값보다 오래된 행만 지운다(이력을 잃지 않고 디스크는 묶인다).
+  setPruneHold(null);
+  if (_loadErr.get()) {
+    const m = maxRetention();
+    setKeepDays({ rawKeepDays: m.rawKeepDays, dailyKeepDays: m.dailyKeepDays, nodeLoadRawKeepDays: m.nodeLoadRawKeepDays,
+      nodeLoadHourlyKeepDays: m.nodeLoadHourlyKeepDays, nodeClientRawKeepDays: m.nodeClientRawKeepDays,
+      nodeClientHourlyKeepDays: m.nodeClientHourlyKeepDays, nodeClientDailyKeepDays: m.nodeClientDailyKeepDays });
+    return v;
+  }
   setKeepDays({ rawKeepDays: v.rawKeepDays, dailyKeepDays: v.dailyKeepDays, nodeLoadRawKeepDays: v.nodeLoadRawKeepDays,
     nodeLoadHourlyKeepDays: v.nodeLoadHourlyKeepDays, nodeClientRawKeepDays: v.nodeClientRawKeepDays,
     nodeClientHourlyKeepDays: v.nodeClientHourlyKeepDays, nodeClientDailyKeepDays: v.nodeClientDailyKeepDays });
   return v;
 }
 
-export function _resetForTest() { _cache = null; }
+export function _resetForTest() { _cache = null; _loadErr.ok(); }

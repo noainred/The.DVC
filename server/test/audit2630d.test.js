@@ -234,5 +234,10 @@ test('UI2630-03 — 배정만 있고 보고 없는 엣지가 카드 요약에 no
 
   const t = edge.edgeTotals(T0 + 2_000);
   assert.equal(t.agents, 1, '보고 중 엣지 수는 그대로');
-  assert.equal(t.assignedNoReport, 1);
+  // 전체 점검 28회차 N-7: 기동 유예 중(첫 보고 대기)은 '보고 없음' 이 아니라 따로 센다(재시작마다 콘솔 타일이 주의였다)
+  assert.equal(t.assignedNoReport, 0);
+  assert.equal(t.awaitingFirstReport, 1);
+  const tl = edge.edgeTotals(T0 + 10 * 60_000);
+  assert.equal(tl.assignedNoReport, 1, '유예가 끝난 무보고는 보고 없음');
+  assert.equal(tl.awaitingFirstReport, 0);
 });

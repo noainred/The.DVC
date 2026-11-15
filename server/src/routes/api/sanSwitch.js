@@ -27,7 +27,7 @@ import { zonesFromCompact, buildZoneGraph, buildZoneMatrix, zoneFindings, zoneSu
 import { listDatacenters } from '../../datacenter/store.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
 import { requestCollect, hasPendingRequest, requestPerfCollect, hasPendingPerfRequest, recentCollectDrops } from '../../sanswitch/collectRequests.js';
-import { loadPerfSettings, savePerfSettings, LIMITS as PERF_LIMITS } from '../../sanswitch/perfSettings.js';
+import { loadPerfSettings, savePerfSettings, perfSettingsLoadError, LIMITS as PERF_LIMITS } from '../../sanswitch/perfSettings.js';
 import { pollPerfOnce, sanSwitchPerfStatus } from '../../sanswitch/perfPoller.js';
 import { listActivity as listPerfActivity, latestEventByDevice as latestPerfEventByDevice } from '../../sanswitch/perfActivityLog.js';
 import { perfEmptyDiag } from '../../sanswitch/perfDiag.js';
@@ -435,11 +435,14 @@ api.get('/tools/sanswitch/perf/settings', adminOnly, fullScopeOnly, async (_req,
   // ⚠ `status` 는 **이 노드(중앙 직접 수집)** 의 폴러 상태다 — 위임 장비는 여기 안 들어온다.
   //   v2.516 까지 화면이 이것을 '전체 상태' 처럼 보여줘서, 엣지가 꺼졌거나 실패해도 알 수 없었다.
   //   `edges` 가 엣지들이 보고한 상태이고, 화면은 둘을 **나눠서** 표시해야 한다(v2.517).
+  const le = perfSettingsLoadError();   // 24회차 #4: 손상이면 밝힌다(화면의 값은 저장된 설정이 아니라 기본값이다)
   res.json({ ok: true, settings: loadPerfSettings(), limits: PERF_LIMITS,
-    status: sanSwitchPerfStatus(), edges: listEdgePerfStatus(), db: await perfDbStats() });
+    status: sanSwitchPerfStatus(), edges: listEdgePerfStatus(), db: await perfDbStats(), ...(le ? { loadError: { reason: String(le.reason || '').slice(0, 200) } } : {}) });
 });
+const PERF_UNREADABLE = '포트 사용량 설정 파일을 읽지 못한 상태라 받지 않습니다 — 지금 저장 · 정리하면 기본값(보관 90일)으로 이력이 지워질 수 있습니다. 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리고 재시작하세요.';
 
 api.put('/tools/sanswitch/perf/settings', adminOnly, fullScopeOnly, fullRwOnly, async (req, res) => {
+  if (perfSettingsLoadError()) return res.status(409).json({ ok: false, code: 'settings-unreadable', reason: PERF_UNREADABLE });   // 24회차 #4
   try {
     const before = loadPerfSettings();
     const saved = savePerfSettings(req.body || {});
@@ -455,6 +458,7 @@ api.put('/tools/sanswitch/perf/settings', adminOnly, fullScopeOnly, fullRwOnly, 
  * 않고 현재 retentionDays 기준으로 DELETE 1회 — ts 단독 인덱스를 타므로 풀스캔이 아니다.
  */
 api.post('/tools/sanswitch/perf/prune', adminOnly, fullScopeOnly, fullRwOnly, async (req, res) => {
+  if (perfSettingsLoadError()) return res.status(409).json({ ok: false, code: 'settings-unreadable', reason: PERF_UNREADABLE });   // 24회차 #4
   try {
     const st = loadPerfSettings();
     const r = await pruneNow(st.retentionDays);
@@ -1208,6 +1212,9 @@ api.post('/tools/sanswitch/devices/import/test', csvPerm, adminOnly, fullScopeOn
         const saved = existing.get(String(row.host).toLowerCase());
         const full = saved ? getDeviceWithSecret(saved.id) : null;
         if (!full?.password) return { ok: false, reason: '비밀번호가 없습니다 — 신규 등록이면 마지막 열에 비밀번호를 적으세요.' };
+        // 전체 점검 24회차 #1(재현): 단건 테스트 · 저장과 같은 판정(sanAccessMoved — host · 계정 · 포트 · 수집 방식) — 예전에는 host 만 같으면
+        //   계정 · 포트가 바뀐 행에도 저장 비밀번호를 보냈다(가짜 SSH 서버가 root/22222 로 'SAVED-SECRET' 을 받음).
+        if (sanAccessMoved(full, input)) return { ok: false, reason: '계정 · 포트 · 수집 방식이 저장된 값과 달라 저장 비밀번호로 시험하지 않습니다 — 비밀번호 칸을 채우세요.' };
         input.password = full.password;
       }
       try {
@@ -1271,18 +1278,21 @@ api.post('/tools/sanswitch/devices/import', csvPerm, adminOnly, fullScopeOnly, f
     requireTested: tested,
   });
 
-  let added = 0; let updated = 0; const failed = [];
+  let added = 0; let updated = 0; const failed = []; const droppedSecrets = [];
   for (const row of picked) {
     const prev = existing.get(String(row.host).toLowerCase());
     const input = swBulk.toSaveInput(row, resolveDc);
     if (prev) input.id = prev.id;
     if (!row._hasPassword) delete input.password;     // 비우면 기존 유지(saveDevice 규칙)
-    try { saveDevice(input); if (prev) updated++; else added++; }
-    catch (e) { failed.push({ line: row._line, name: row.name || row.host, reason: e.message }); }
+    try {
+      const r = saveDevice(input); if (prev) updated++; else added++;
+      // 24회차 #2: 접속처가 바뀌어 저장 비밀번호를 버린 줄을 밝힌다(다음 주기에 빈 비밀번호로 인증 실패 → 인증 정지로 이어진다)
+      if (Array.isArray(r?.droppedSecrets) && r.droppedSecrets.length) droppedSecrets.push({ line: row._line, name: row.name || row.host, fields: r.droppedSecrets });
+    } catch (e) { failed.push({ line: row._line, name: row.name || row.host, reason: e.message }); }
   }
   logAudit({ user: req.user?.username, action: `SAN 스위치 대량 가져오기(${p.format === 'text' ? '자유텍스트' : 'CSV'})`,
-    detail: `추가 ${added}·수정 ${updated}·실패 ${failed.length}·제외 ${skipped.length}${tested ? ' (연결 통과분만)' : ''}` });
-  res.json({ ok: true, added, updated, failed, skipped, total: p.rows.length, format: p.format });
+    detail: `추가 ${added}·수정 ${updated}·실패 ${failed.length}·제외 ${skipped.length}${droppedSecrets.length ? `·비밀번호 버림 ${droppedSecrets.length}` : ''}${tested ? ' (연결 통과분만)' : ''}` });
+  res.json({ ok: true, added, updated, failed, skipped, total: p.rows.length, format: p.format, ...(droppedSecrets.length ? { droppedSecrets } : {}) });
 });
 
 }

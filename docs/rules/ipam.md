@@ -340,3 +340,14 @@
   · ④ **알림 평가는 원장을 만들지 않는다**(`ledger.peekIpamRows` — 캐시에 있을 때만). 없으면(새 스냅샷 직후 원장 동기화 전) 그 회차는 `heldPrefixes`(ipdup: · ipfull:)로 보류 —
     알림 엔진 해소 단계가 키 앞부분 보류를 본다(발생 중인 것을 해소로 기록하지 않음). 평가 예외도 보류다. 동기 경로에서 원장을 새로 만드는 코드를 다시 넣지 말 것(소스 단언).
 
+
+- **전체 점검 25회차(`cvpIpamFullAudit25`)**: ① IPMS 설정 PUT 전체 저장은 **조회 ∧ 쓰기 전체**(`isFullReadWriteScope`)만 — 조회 무제한 + 쓰기 vcA 가 전역 · 모든 vCenter 무시 대역을 바꾸던 것(7회차 R-3 누락)
+  ② IP 스캔 배정(ipam-scan.json) 손상 중 한 에이전트 저장 · 삭제 · 줄 수정 · 가져오기 409(다른 배정이 빠져 스캔이 멈추던 것 — 18회차 B-3 IPAM 판) · 손상 중 결과 정리 보류
+  ③ override · 메모 파일에 로드 오류 표지(서비스 점검 등재) · 오류 중 쓰기 거절 · override 를 못 읽으면 관리 IP 를 모두 관리로 봄(스캔 결과 · 1년 이력 정리 방지)
+  ④ override · 메모 쓰기는 사본에 고치고 쓰기 성공 뒤에 캐시 교체 ⑤ 에이전트 보고 이름 `__proto__` 가드.
+  **남긴 것**: IPMS 설정(ipam-settings.json) · 대역 정책(rangePolicies) 손상 표지 · F-8 '바로 알림'(중복 IP · 대역 가득 참)이 원장 캐시 세대 때문에 평상시 보류(입력 지문 같으면 마지막 원장 재사용 — 설계) ·
+  E-2 정기 보고의 동기 원장 재구성 · E-3 vcRangeWritable 쓰기 밖 404(403 이어야) · E-4 스캔 보고 끊김 '한 번도 보고 없음' 시한 없는 보류(설계 질문).
+- **전체 점검 27회차(25회차 반증)**: 배정 파일(ipam-scan.json) 손상 중에는 vCenter 대역 자동 이전(`vcRangeMigrate`)을 **시작하지 않는다**(전부 settings-unreadable 로 실패한 채 'done' 으로 굳어 복구 뒤에도 다시 돌지 않던 것 — D-8) ·
+  CSV 적용 409 를 화면이 성공으로 세지 않게 `requireChanged`(D-2).
+  **남긴 것(D-7)**: override 파일 손상 중 '읽기' 소비처는 여전히 빈 값을 본다 — 원장(`ledger.js` · ipam.db — 예약 · 담당 칸과 override 만 있는 'manual' 행이 사라짐, 외부 리더 포함) ·
+  `changeNotify.js` macAlertOff 제외(꺼 둔 MAC 변화 알림이 나감) · `scanStore.js mgmtStatusOf`(예약 IP 응답 시작 판정 누락). 25회차는 쓰기 거절 · 표지 · 스캔 정리 보존만 고쳤다.

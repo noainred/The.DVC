@@ -237,12 +237,38 @@ export function ipamStats(subnets) {
   return { count: list.length, over90: pcts.filter((p) => p >= 90).length, avgPct: Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length) };
 }
 
-/** svcmon summary → 레벨. 실패(bad) 있으면 위험, 경고·지연(stale) 있으면 주의, 항목 없으면 null. */
-export function svcmonLevel(summary) {
-  if (!summary || !summary.total) return null;
-  if (summary.bad > 0) return 2;
-  if (summary.warn > 0 || summary.stale > 0) return 1;
-  return 0;
+/**
+ * svcmon /state → 타일 판정(레벨 · 숫자). 실패(bad) 있으면 위험, 경고·지연·무보고 엣지가 있으면 주의, 잰 것이 없으면 null.
+ * 전체 점검 26회차 F2(재현): 예전에는 로컬 summary 만 봐 **중앙 노드(점검을 직접 실행하지 않음 — 로컬은 전부 pending)에서 늘 '정상'** 이었다
+ *   (엣지 실패 15 · 무보고 엣지 1 이어도 level 0). 이제 ① 실행하지 않는 노드(executes:false)의 로컬 요약은 세지 않고 ② 엣지 합계(edgeTotals)를 더하며
+ *   ③ 미실행(pending)은 정상에도 장애에도 넣지 않고 따로 센다(전부 미실행이면 null — '못 읽은 값은 0 이 아니다').
+ * @returns {{ level:(0|1|2|null), total:number, bad:number, warn:number, stale:number, pending:number, silentEdges:number, noReportEdges:number, local:boolean, edges:boolean }}
+ */
+export function svcmonTile(summary, edgeTotals = null, executes = true) {
+  const s = executes === false ? null : (summary || null);
+  const e = edgeTotals && typeof edgeTotals === 'object' ? edgeTotals : null;
+  const n = (v) => num(v) ?? 0;
+  const localTotal = s ? n(s.total) : 0;
+  const pending = s ? n(s.pending) : 0;
+  const disabled = s ? n(s.disabled) : 0;
+  const edgeRows = e ? n(e.rows) : 0;
+  const silentEdges = e ? n(e.silent) : 0;
+  const noReportEdges = e ? n(e.assignedNoReport) : 0;   // 28회차 N-7: 기동 유예 중(awaitingFirstReport)은 서버가 따로 센다 — 주의가 아니다
+  const bad = (s ? n(s.bad) : 0) + (e ? n(e.bad) : 0);
+  const warn = (s ? n(s.warn) : 0) + (e ? n(e.warn) : 0);
+  const stale = (s ? n(s.stale) : 0) + (e ? n(e.stale) : 0);
+  const out = { total: localTotal + edgeRows, bad, warn, stale, pending, silentEdges, noReportEdges, local: localTotal > 0, edges: edgeRows > 0 || silentEdges > 0 || noReportEdges > 0 };
+  if (!out.local && !out.edges) return { ...out, level: null };
+  if (bad > 0) return { ...out, level: 2 };
+  if (warn > 0 || stale > 0 || silentEdges > 0 || noReportEdges > 0) return { ...out, level: 1 };
+  // 잰 것이 하나도 없으면(로컬 전부 미실행 · 중지이고 엣지 행도 없음) 판정하지 않는다
+  const measuredLocal = Math.max(0, localTotal - pending - disabled);
+  if (!measuredLocal && !edgeRows) return { ...out, level: null };
+  return { ...out, level: 0 };
+}
+/** svcmon summary → 레벨(호환 — 로컬 요약만 넘기면 예전과 같다. 콘솔 타일은 svcmonTile 을 쓴다). */
+export function svcmonLevel(summary, edgeTotals = null, executes = true) {
+  return svcmonTile(summary, edgeTotals, executes).level;
 }
 
 /** iDRAC 온도(°C) 셀 색 — 디자인 시안 눈금(파랑 <22 · 회색 22–24 · 노랑 24–26 · 빨강 ≥26). 미측정은 null. */
@@ -477,12 +503,16 @@ export function buildDomainTiles({ global: g, alarms, nsx, svcmon, pdu, idracPol
   // 표시하면 거짓 원인이 되므로(CLAUDE.md v2.493 규칙) permission.svcmon===false 를 따로 밝힌다.
   {
     const s = svcmon?.summary || null;
-    const level = svcmonLevel(s);
+    const tl = svcmonTile(s, svcmon?.edgeTotals, svcmon?.executes);   // 26회차 F2: 엣지 합계 · 실행 여부까지
     const noPerm = !s && permission.svcmon === false;
+    // 30회차 J: 기동 유예 중(첫 보고 대기) 엣지는 레벨에 넣지 않되 문구에서는 밝힌다(아무 데도 세지 않으면 사라진다)
+    const awaiting = num(svcmon?.edgeTotals?.awaitingFirstReport) ?? 0;
+    const extra = [tl.pending ? `미실행 ${fmtInt(tl.pending)}` : '', tl.silentEdges ? `무보고 엣지 ${fmtInt(tl.silentEdges)}` : '', tl.noReportEdges ? `보고 전 엣지 ${fmtInt(tl.noReportEdges)}` : '', awaiting ? `첫 보고 대기 ${fmtInt(awaiting)}` : ''].filter(Boolean).join(' · ');
     const meta = s
-      ? (s.total ? `점검 항목 · 실패 ${s.bad} · 경고 ${s.warn} · 지연 ${s.stale}` : '등록된 점검 항목 없음')
+      ? (tl.total || tl.edges ? `점검 항목 · 실패 ${fmtInt(tl.bad)} · 경고 ${fmtInt(tl.warn)} · 지연 ${fmtInt(tl.stale)}${extra ? ` · ${extra}` : ''}`
+        : svcmon?.executes === false ? `이 포탈은 점검을 직접 실행하지 않습니다 · ${awaiting ? `엣지 첫 보고 대기 ${fmtInt(awaiting)}` : '엣지 보고 없음'}` : '등록된 점검 항목 없음')
       : noPerm ? '조회 권한 없음 (서비스 모니터)' : '점검 상태 대기';
-    tiles.push({ page: 'alarms', name: '서비스 점검', level, value: s ? fmtInt(s.total) : '—', meta, crit: String(s?.bad || 0), warn: String(s?.warn || 0), info: String(s?.stale || 0) });
+    tiles.push({ page: 'alarms', name: '서비스 점검', level: tl.level, value: s ? fmtInt(tl.total) : '—', meta, crit: String(tl.bad), warn: String(tl.warn), info: String(tl.stale) });
   }
   return tiles;
 }

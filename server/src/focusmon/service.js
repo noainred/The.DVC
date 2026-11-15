@@ -11,7 +11,7 @@ import { getDataSource } from '../runtime-settings.js';
 import * as store from './store.js';
 import * as db from './db.js';
 import { createRunner } from './runner.js';
-import { listTargets, getTarget, getSettings } from './registry.js';
+import { listTargets, getTarget, getSettings, registryLoadError } from './registry.js';
 import { createNodeSampler } from './load.js';
 import { DEMO_TARGETS, isDemoTarget } from './mock.js';
 import { recordTick, flushOnExit, recorderStatus } from './recorder.js';
@@ -74,6 +74,9 @@ export function tick1(now = Date.now()) {
  */
 export async function minuteTick(now = Date.now(), { send = null, maintJudge = null } = {}) {
   if (String(process.env.CENTRAL_URL || '').trim()) return { skipped: 'edge' };
+  // 전체 점검 30회차 C(재현): 등록부를 못 읽으면 대상 목록이 비어 알림 주기가 발생 중 상태를 지웠다(해제 알림도 없이 — 복구 뒤 같은 알림이 다시 나감).
+  //   규칙 파일 손상과 같이 이 주기를 건너뛴다(판정 · 조절 모두 — 대상이 없다는 뜻이 아니다).
+  if (registryLoadError()) return { skipped: 'registry-unreadable' };
   const settings = getSettings();
   const recordIds = new Set(store.listSessions(now).filter((x) => x.mode === 'record').flatMap((x) => x.targets));
   const targets = allTargets().filter((t) => recordIds.has(t.id));
@@ -134,12 +137,23 @@ export function removeFromCollection(id, targetId) {
  * 예전 엣지는 다음 동기화에서 손을 뗀다 — 깨우지 않으면 쉬는 주기만큼 늦다).
  */
 export function targetEndpointChanged(before, after) {
-  if (!after?.id) return;
+  targetsEndpointChanged([[before, after]]);
+}
+/**
+ * 여러 대가 한꺼번에 바뀐 경우(29회차 F3 — CSV 갱신 · 노드 옮기기): 틱 한 번 → 대상마다 상태 지움 → **엣지마다 한 번** 깨운다
+ *   (대상마다 targetEndpointChanged 를 부르면 50대 옮기기가 같은 엣지에 깨우기 100번이었다).
+ * @param {Array<[object|null, object|null]>} pairs [예전, 지금]
+ */
+export function targetsEndpointChanged(pairs = []) {
+  const list = (Array.isArray(pairs) ? pairs : []).filter((p) => Array.isArray(p) && p[1]?.id);
+  if (!list.length) return;
   tick1();
-  store.forgetTargetState(after.id);
-  const agents = new Set([before?.agent, after.agent].map((a) => String(a || '')).filter(Boolean).map((a) => a.toLowerCase()));
-  const names = [...agents].map((k) => [before?.agent, after.agent].find((a) => String(a || '').toLowerCase() === k));
-  for (const a of names) wakeImpl?.(a);
+  const wake = new Map();   // 소문자 → 저장된 글자
+  for (const [before, after] of list) {
+    store.forgetTargetState(after.id);
+    for (const a of [before?.agent, after.agent]) { const s = String(a || ''); if (s && !wake.has(s.toLowerCase())) wake.set(s.toLowerCase(), s); }
+  }
+  for (const a of wake.values()) wakeImpl?.(a);
 }
 
 export function stopCollection(id, why = 'stopped') {
