@@ -217,7 +217,8 @@ export async function applyManage(plan, b = {}, secret = {}, ctx = {}) {
     const r = await R.runSsh(ssh, async (api) => { await R.requireRoot(api.exec); return { text: String((await api.exec(scanScript(plan.path || ''), 90_000))?.stdout || '') }; }, ctx.signal);
     return parseScan(r.text);
   }
-  const placed = []; const madeDirs = []; let settled = false; let restarted = false; let reloaded = false;
+  // 전체 점검 8회차(I-1): 이번에 만든 디렉터리 · SELinux 규칙은 세션 밖에도 둔다 — 세션이 시한으로 끊기면 새 세션으로 되돌린다(파일과 같게 · manage/CLAUDE.md F5)
+  const placed = []; const made = { dirs: [], seRule: '' }; let settled = false; let restarted = false; let reloaded = false;
   try {
     const out = await R.runSsh(ssh, async (api) => {
       await R.requireRoot(api.exec);
@@ -247,7 +248,6 @@ export async function applyManage(plan, b = {}, secret = {}, ctx = {}) {
         if (run !== '0') throw fail('conflict', `Director 에 ${runText(run)} — SD 를 다시 띄우면 백업이 끊기므로 멈췄습니다(아무것도 바꾸지 않았습니다).`);
       }
       // 4) 경로 준비 · 놓기 · 검사 · 적용 — 어디서 실패해도 이번에 만든 디렉터리 · SELinux 규칙까지 되돌린다(F5)
-      const made = { dirs: madeDirs, seRule: '' };
       let tmp = '';
       try {
         if (plan.action === 'storage.add') await prepareDir(api, plan, made, mask);
@@ -292,13 +292,19 @@ export async function applyManage(plan, b = {}, secret = {}, ctx = {}) {
           settled = !left.length;
           let again = '';
           if (settled) {
-            if (restarted) again += (await api.exec('systemctl restart bareos-sd 2>&1', BUDGET.reloadMs).catch(() => null))?.code === 0 ? ' · SD 를 다시 시작했습니다' : ' · SD 를 다시 시작하지 못했습니다(직접 확인하세요)';
+            // 전체 점검 8회차(I-2): 되돌리기 재시작도 같은 셸에서 실행 중 작업 0 을 확인한 뒤에만(F4 — 그 사이 옛 설정 Director 가 시작한 백업을 끊지 않게)
+            if (restarted) {
+              const o2 = String((await api.exec(SD_RESTART_CMD, BUDGET.reloadMs + 45_000).catch(() => null))?.stdout || '');
+              const run2 = /RUN=(\S+)/.exec(o2)?.[1];
+              again += run2 !== '0' ? ` · Director 에 ${runText(run2)} — SD 를 다시 시작하지 않았습니다(작업이 끝난 뒤 systemctl restart bareos-sd 로 직접 다시 시작하세요)`
+                : /^RESTART=0$/m.test(o2) ? ' · SD 를 다시 시작했습니다' : ' · SD 를 다시 시작하지 못했습니다(직접 확인하세요)';
+            }
             if (reloaded) again += (await api.exec(R.RELOAD_CMD, BUDGET.reloadMs).catch(() => null))?.code === 0 ? ' · Director 를 다시 읽혔습니다' : ' · Director 를 다시 읽히지 못했습니다(직접 reload 하세요)';
             e.message = `${e.message} — 바꾼 파일을 되돌렸습니다${again}.`;
           } else e.message = `${e.message} — 되돌리지 못한 파일: ${left.join(', ')}(직접 확인하세요).`;
         } else settled = true;
         const undo = await undoMade(api, made);
-        if (undo) e.message = `${e.message} ${undo}`;
+        if (undo) e.undoNote = undo;   // 전체 점검 8회차(I-1): 마지막 문구는 세션 밖이 정한다(세션이 끊겼으면 새 세션 되돌리기가 이어 받는다)
         throw e;
       } finally { if (tmp) await api.exec(`rm -rf ${tmp}`).catch(() => {}); }
     }, ctx.signal);
@@ -308,6 +314,15 @@ export async function applyManage(plan, b = {}, secret = {}, ctx = {}) {
       const rb = await R.rollbackInNewSession(ssh, placed, { reload: true });
       e.message = `${mask(String(e?.message || e))} — 세션이 끊겨 새 세션으로 ${rb.left.length ? `되돌리려 했지만 남은 파일이 있습니다: ${rb.left.join(', ')}` : '바꾼 파일을 되돌렸습니다'}${restarted ? '(SD 는 직접 다시 시작하세요)' : ''}.`;
     } else e.message = mask(String(e?.message || e));
+    // 전체 점검 8회차(I-1): 세션 안 되돌리기가 못 지운(세션이 끊긴) 디렉터리 · SELinux 규칙은 새 세션으로 한 번 더(시한 신호 없이 — 되돌리기 세션 규칙)
+    if (made.seRule || made.dirs.length) {
+      let u = '';
+      try { u = String((await R.runSsh(ssh, async (api) => ({ note: await undoMade(api, made) })))?.note || ''); }   // runSsh 는 fn 결과를 객체로 펼쳐 돌려준다
+      catch { u = `세션이 끊겨 새 세션으로도 이번에 만든 디렉터리(${made.dirs.join(', ') || '없음'})${made.seRule ? ` · SELinux 규칙(${made.seRule})` : ''}을 되돌리지 못했습니다 — 직접 확인하세요.`; }
+      if (!u && !made.seRule && !made.dirs.length) u = '이번에 만든 디렉터리 · SELinux 규칙은 새 세션으로 되돌렸습니다.';
+      else if (!u) u = `이번에 만든 디렉터리(${made.dirs.join(', ')})가 남았습니다 — 비어 있으면 직접 지우세요.`;
+      e.message = `${e.message} ${mask(u)}`;
+    } else if (e?.undoNote) e.message = `${e.message} ${mask(e.undoNote)}`;
     throw e;
   }
 }
@@ -437,8 +452,13 @@ async function undoMade(api, made) {
   if (made.seRule) {
     const r = await api.exec(`semanage fcontext -d ${made.seRule} >/dev/null 2>&1 && { [ -d ${made.seRule} ] && restorecon -R ${made.seRule} >/dev/null 2>&1; true; }`, 60_000).catch(() => null);
     if (r?.code !== 0) notes.push(`이번에 넣은 SELinux 규칙(${made.seRule})을 지우지 못했습니다 — semanage fcontext -d ${made.seRule} 로 직접 지우세요.`);
+    else made.seRule = '';   // 지웠다 — 새 세션 되돌리기가 다시 지우려다 거짓 실패를 적지 않게(전체 점검 8회차 I-1)
   }
-  for (const d of [...made.dirs].reverse()) await api.exec(`[ -d ${d} ] && [ ! -L ${d} ] && rmdir ${d} 2>/dev/null; true`).catch(() => {});
+  for (const d of [...made.dirs].reverse()) {
+    // 지웠거나 원래 없으면 목록에서 뺀다 · 남았거나 확인 못 하면(세션 끊김) 남긴다 — 새 세션 되돌리기가 이어 받는다(I-1)
+    const r = await api.exec(`[ -d ${d} ] && [ ! -L ${d} ] && rmdir ${d} 2>/dev/null; [ -e ${d} ] && echo LEFT; true`).catch(() => null);
+    if (r && !/LEFT/.test(String(r.stdout || ''))) made.dirs.splice(made.dirs.indexOf(d), 1);
+  }
   return notes.join(' ');
 }
 
