@@ -5,20 +5,23 @@
  * ⚠ 조회는 보기를 고를 때 1회 + ‘다시 읽기’(폴링 없음) · 상세 카드는 그 서버를 열 때 1회.
  */
 import React, { useMemo, useState } from 'react';
-import { postJson, hasRole } from '../../api.js';
+import { postJson } from '../../api.js';
 import Select from '../../components/Select.jsx';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
 import { unitText } from '../unitText.js';
 import { OpsError, useOpsLoad } from './BmTuningTab.jsx';
-import { KIND_TEXT, STATUS_TEXT, resText, currentText, slopeText, daysText, confText, noteText, summaryCards, sourceText, capChart, CAPACITY_HONEST } from './bmCapacityText.js';
+import { KIND_TEXT, STATUS_TEXT, statusTone, resText, currentText, slopeText, daysText, confText, noteText, summaryCards, sourceText, capChart, CAPACITY_HONEST } from './bmCapacityText.js';
+import { gateOk, gateShown, gateTitle } from './bmWriteText.js'; // 점검 반복 2회차 E2② — 서버 쓰기 표지
 import './bmOps.css';
 import './bmMaint.css';
 
 const KIND_ORDER = ['fs', 'inode', 'mem'];
 
-export function CapacityFleetView({ resp, onOpen, onReload, loading = false, canRecompute = false }) {
+export function CapacityFleetView({ resp, onOpen, onReload, loading = false }) {
+  // 점검 반복 2회차 E2②: ‘이 노드 다시 계산’ 은 서버 표지(actions.recompute — 운영자 이상 · 전체 범위 · 데모 거부 · 라우트와 같은 판정)로만 연다.
+  const rg = resp?.actions?.recompute;
   const [corp, setCorp] = useState('');
   const [kind, setKind] = useState('');
   const [st, setSt] = useState('');
@@ -54,7 +57,7 @@ export function CapacityFleetView({ resp, onOpen, onReload, loading = false, can
           <Select sort={false} className="select select-sm" value={st} onChange={(e) => setSt(e.target.value)} aria-label="상태"><option value="">상태 전체</option>{Object.entries(STATUS_TEXT).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</Select>
           <input className="input bmc-q" value={q} onChange={(e) => setQ(e.target.value)} placeholder="서버 · 마운트" aria-label="서버 · 마운트 검색" />
           <button className="btn btn-sm" onClick={onReload} disabled={loading}>{loading ? '읽는 중…' : '다시 읽기'}</button>
-          {canRecompute && <button className="btn btn-sm" onClick={recompute} disabled={re?.busy}>{re?.busy ? '계산 중…' : '이 노드 다시 계산'}</button>}
+          {gateShown(rg) && <button className="btn btn-sm" onClick={recompute} disabled={re?.busy || !gateOk(rg)} title={gateTitle(rg, '이 노드 다시 계산')}>{re?.busy ? '계산 중…' : '이 노드 다시 계산'}</button>}
           <span className="bmo-sub">{rows.length} / {(resp?.rows || []).length}행</span>
           {re && !re.busy && <span className="bmo-sub" style={{ color: toneVar(re.ok ? 'ok' : 'bad') }}>{re.text}</span>}
         </div>
@@ -71,7 +74,7 @@ export function CapacityFleetView({ resp, onOpen, onReload, loading = false, can
                 <td className="bmo-wrap" data-sort={r.status === 'reached' ? 0 : (r.daysToTarget ?? '')} style={{ color: toneVar(r.status === 'reached' ? 'bad' : r.daysToTarget != null && r.daysToTarget <= (cfg.alertDays ?? 7) ? 'bad' : 'idle') }}>{daysText(r, 'target')}</td>
                 <td className="bmo-wrap" data-sort={r.daysTo100 ?? ''}>{r.status === 'forecast' || r.status === 'reached' ? daysText(r, '100') : '—'}</td>
                 <td data-sort={r.r2 ?? ''} style={{ whiteSpace: 'normal', wordBreak: 'keep-all', minWidth: 64 }}>{confText(r)}</td>
-                <td data-sort={r.status} style={{ color: toneVar(STATUS_TEXT[r.status]?.tone || 'idle'), whiteSpace: 'normal', wordBreak: 'keep-all', minWidth: 72 }}>{STATUS_TEXT[r.status]?.label || r.status}</td>
+                <td data-sort={r.status} style={{ color: toneVar(statusTone(r, cfg)), whiteSpace: 'normal', wordBreak: 'keep-all', minWidth: 72 }}>{STATUS_TEXT[r.status]?.label || r.status}</td>
                 <td className="bmo-wrap" data-sort={noteText(r)}>{noteText(r) || '—'}</td>
               </tr>
             ))}
@@ -91,7 +94,7 @@ export default function BmCapacityFleet({ onOpen }) {
     <div className="card" style={{ minWidth: 0 }}>
       <OpsError err={st.err} />
       {!st.resp && !st.err && <p className="bmo-note">용량 소진 예측을 불러오는 중…</p>}
-      {st.resp && <CapacityFleetView resp={st.resp} onOpen={onOpen} onReload={st.reload} loading={st.loading} canRecompute={hasRole('admin', 'operator')} />}
+      {st.resp && <CapacityFleetView resp={st.resp} onOpen={onOpen} onReload={st.reload} loading={st.loading} />}
     </div>
   );
 }
@@ -143,7 +146,7 @@ export function BmCapacityCard({ itemKey, vc = '' }) {
                 <td className="right" data-sort={slopeText(r) === '—' ? '' : r.slope}>{slopeText(r)}</td>
                 <td data-sort={r.daysToTarget ?? ''}>{daysText(r, 'target')}</td>
                 <td data-sort={r.r2 ?? ''}>{confText(r)}</td>
-                <td data-sort={r.status} style={{ color: toneVar(STATUS_TEXT[r.status]?.tone || 'idle') }}>{STATUS_TEXT[r.status]?.label || r.status}</td>
+                <td data-sort={r.status} style={{ color: toneVar(statusTone(r, { alertDays: d.alertDays })) }}>{STATUS_TEXT[r.status]?.label || r.status}</td>
               </tr>))}</tbody>
           </STable>
           {pick && <>

@@ -31,6 +31,7 @@ import { maskActivityEvents, maskPollerStatus, scrubHosts, addressMatcher, isAdm
 import { targetIdOf } from '../../bmusage/maint/judge.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 정비 창 판정과 같은 식별 함수
 import { currentTargets, pollBmUsageOnce, bmUsageStatus, authStopsFor, sourceErrorsView, usageDetailFor } from '../../bmusage/poller.js';
 import { isDemoGuest } from '../../auth/demoGuest.js'; // v2.720(감사 R1-03)
+import { bmGates } from './bmWriteGate.js'; // 점검 반복 2회차 E1 · E2 — 쓰기 버튼 표지
 import { latestUsage, usageHistory, usageDaily, dbStatus, METRICS } from '../../bmusage/db.js';
 import { bmUsageEvents, bmUsageLogInfo } from '../../bmusage/activityLog.js';
 import { scopeFilePaths } from '../../auth/scopeStatus.js';   // v2.598 AUTHZ-2598-04: log.file 절대 경로는 admin 만
@@ -316,7 +317,7 @@ export async function bmTrendView(req, snap, mode = 'history', deps = {}) {
   if (bad) return bad;
   if (found.via === 'local') {
     const agent = config.agent?.name || '';
-    const r = mode === 'devices' ? await D.devicesFor({ agent, key: found.realKey }) : await D.trendFor({ agent, key: found.realKey, q: req.query || {}, settings: loadBmUsageSettings() });
+    const r = mode === 'devices' ? await D.devicesFor({ agent, key: found.realKey, settings: loadBmUsageSettings() }) : await D.trendFor({ agent, key: found.realKey, q: req.query || {}, settings: loadBmUsageSettings() });
     return r && r.ok ? { ...r, key, via: 'local' } : r;
   }
   const r = await D.pullBmTrend(found.agent, mode, found.realKey, req.query || {});
@@ -1066,6 +1067,8 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
        */
       perf, perfThresholds: perfSettings.perf, perfDefaults: PERF_DEFAULTS, perfCols: PERF_COL_META,
       ...(pf.perfError ? { perfError: pf.perfError } : {}),
+      // 점검 반복 2회차 E1 · E2: 쓰기 버튼 표지(수집 설정 · 지금 수집 · 엣지 인출) — 라우트 게이트와 같은 판정(bmWriteGate.js). 표시 게이팅 — 집행은 각 라우트.
+      actions: bmGates(req, ['settings', 'collect', 'edgePull'], { snap: store.get() }),
     });
   } catch (e) {
     res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) });

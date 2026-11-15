@@ -19,6 +19,7 @@ import { strOf } from '../../util/coercionTrap.js';
 import { memoJson, scopeKey } from './shared.js';
 import { resolvePerfTarget, perfTargetFail, failParts, bmAddressHosts, perfAddressMatcher } from './bmUsage.js';
 import { IDLE_REVIEW } from '../../bmusage/idleConst.js';
+import { bmGate, writableVc, gateKey } from './bmWriteGate.js';
 
 const toolsPerm = requirePerm('tools');
 const writeRole = requireRole('admin', 'operator');
@@ -102,7 +103,8 @@ export async function bmIdleFleet(req, snap, deps = {}) {
   const maskText = (v) => (isAdmin || typeof v !== 'string' ? v : v.replace(/[^\s,;()[\]<>'"]+/g, (w) => maskName(w)));
   const maskBy = (r) => (r.review ? { ...r, review: { ...r.review, by: isAdmin ? r.review.by : (r.review.by ? maskedIdToken(r.review.by) : ''),
     reason: isAdmin || (me && r.review.by === me) ? r.review.reason : maskText(r.review.reason) } } : r);
-  const out = visible.map((r) => maskBy({ ...r, key: maskKey(r.key), name: maskName(r.name || r.key) }))
+  // 점검 반복 2회차 E2④: 행의 쓰기 범위(검토 상태 쓰기 라우트와 같은 inUserWriteScope — 조회 전용 법인 행은 ‘검토 상태…’ 를 닫는다). 역할 · 데모는 actions.review.
+  const out = visible.map((r) => maskBy({ ...r, key: maskKey(r.key), name: maskName(r.name || r.key), writable: writableVc(req, snap, r.vcenterId, { requireCorp: true }) }))
     .sort((a, b) => (SORT[a.status] ?? 9) - (SORT[b.status] ?? 9) || (b.score ?? -1) - (a.score ?? -1) || String(a.name).localeCompare(String(b.name)));
   const summary = I.summarizeIdle(visible);
   const cand = visible.filter((r) => r.status === 'candidate');
@@ -121,6 +123,8 @@ export async function bmIdleFleet(req, snap, deps = {}) {
     ok: true, now, rows: out.slice(0, 20_000), truncated: out.length > 20_000, summary, reviewLabel: REVIEW_LABEL, ...(reviewUnreadable ? { reviewUnreadable: true } : {}),
     sources: allowed ? sources.filter((s) => shownNodes.has(s.node)) : sources, cfg: rules || (await import('../../bmusage/idle.js')).IDLE_DEFAULTS, recomputeAfterMin: I.RECOMPUTE_AFTER_MIN,
     minEdgeVersion: await D.minEdgeVersion().catch(() => null), ...(isAdmin ? {} : { addressHidden: true }),
+    // 점검 반복 2회차 E2③④: ‘이 노드 다시 계산’(전체 범위) · ‘검토 상태’(역할 · 데모 — 법인은 행 writable) 표지 — 라우트와 같은 판정.
+    actions: { recompute: bmGate(req, 'idleRecompute', { snap }), review: bmGate(req, 'idleReview', { snap }) },
   };
 }
 
@@ -160,7 +164,8 @@ export function registerBmIdle(api, deps = {}) {
     let e = 0; try { for (const r of (await import('../../central/bmUsageEdgePull.js')).listEdgeBmUsage()) e = Math.max(e, Number(r?.snapAt) || 0); } catch { e = 0; }
     let l = 0; try { l = Number((await import('../../bmusage/idle.js')).loadIdle()?.at) || 0; } catch { l = 0; }
     let a = 0; try { a = (await import('../../bmusage/annotations.js')).listAnnotations().length; } catch { a = -1; }
-    return `${scopeKey(req.user, store.get())}|${isAdminReq(req) ? 'a' : 'u'}|${bmUsageStatus().last?.at || 0}|i${l}|e${e}|n${a}`;
+    // 점검 반복 2회차: 응답에 쓰기 표지(actions · 행 writable)가 실린다 — 역할 · 데모 · 쓰기 범위가 다른 계정끼리 캐시를 나누지 않게(gateKey).
+    return `${scopeKey(req.user, store.get())}|${isAdminReq(req) ? 'a' : 'u'}|${gateKey(req, store.get())}|${bmUsageStatus().last?.at || 0}|i${l}|e${e}|n${a}`;
   };
   api.get('/tools/bm-usage/idle', toolsPerm, async (req, res) => memoJson(req, res, 'bm-idle', (snap) => bmIdleFleet(req, snap, deps), { extraKey: await key(req) }));
   api.post('/tools/bm-usage/idle/review', writeRole, toolsPerm, async (req, res) => {

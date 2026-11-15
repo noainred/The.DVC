@@ -29,6 +29,20 @@ export const inventoryFreshMsFor = (freshMs) => Math.max(4 * IDRAC_INVENTORY_REF
 const WARN_HEALTH = /^(warning)$/i;
 
 /**
+ * 점검 반복 2회차 E3: 인벤토리 하나의 **PowerCap 상태**(순수) — 판정 하나를 하드웨어 U(useJudge) · 전력 보기(powerAgg capState) · 엣지 봉투(edgePull
+ *   envelopePowerCaps)가 같이 쓴다(예전에는 세 벌이었고, 하드웨어 U 만 ‘상한 꺼짐’ 을 ‘못 읽음’ 으로 셌다).
+ *   set(상한 값 > 0 W) · unset(PowerLimit 은 보고했는데 값이 0 · 빈 값 — 상한 꺼짐: 그 장비에 구조적으로 없다) · unread(인벤토리 없음 · PowerLimit 미보고).
+ *   ⚠ 신선도(2시간)는 부르는 쪽이 inv 를 넘기기 전에 거른다 — 낡은 인벤토리는 null 을 넘겨 unread 다.
+ * @returns {{state:'set'|'unset'|'unread', limitWatts:number|null}}
+ */
+export function invCapState(inv) {
+  const pc = inv && typeof inv === 'object' ? inv.powerCap : null;
+  if (!pc || typeof pc !== 'object') return { state: 'unread', limitWatts: null };
+  const lw = n(pc.limitWatts);
+  return lw != null && lw > 0 ? { state: 'set', limitWatts: lw } : { state: 'unset', limitWatts: null };
+}
+
+/**
  * 순수 — 이미 모은 원재료를 판정 입력 모양으로(테스트 대상).
  * @param {{power?:{watts,ts}|null, inv?:object|null, sensor?:{t,cpu,temps}|null, faults?:Array}} raw
  * @param {{now?:number, freshMs?:number}} [o]  freshMs: 전력·센서 표본을 ‘지금 값’ 으로 볼 한계
@@ -39,8 +53,9 @@ export function shapeHwFacts(raw = {}, { now = Date.now(), freshMs = 15 * 60_000
   const inv0 = raw.inv && typeof raw.inv === 'object' ? raw.inv : null;
   const invStale = !!inv0 && !(n(inv0.collectedAt) != null && now - n(inv0.collectedAt) <= inventoryFreshMsFor(freshMs));
   const inv = invStale ? null : inv0;
-  const capW = n(inv?.powerCap?.limitWatts);
-  const capPct = power?.watts != null && capW != null && capW > 0 ? Math.round((power.watts / capW) * 1000) / 10 : null;
+  const cap = invCapState(inv);   // 낡은 인벤토리는 위에서 null — unread
+  const capW = cap.limitWatts;
+  const capPct = power?.watts != null && capW != null ? Math.round((power.watts / capW) * 1000) / 10 : null;
   const sensor = raw.sensor && fresh(raw.sensor.t) ? raw.sensor : null;
   let inletC = null;
   if (sensor?.temps && typeof sensor.temps === 'object') {
@@ -59,7 +74,8 @@ export function shapeHwFacts(raw = {}, { now = Date.now(), freshMs = 15 * 60_000
   const faultView = (list) => (list ? list.slice(0, 16).map((f) => ({ kind: t(f.kind).slice(0, 16), label: t(f.label).slice(0, 80), state: t(f.state).slice(0, 16) })) : null);
   return {
     read: !!(power || sensor || inv),
-    power: power ? { ...power, capWatts: capW, capPct } : (capW != null ? { watts: null, at: null, capWatts: capW, capPct: null } : null),
+    // capState: 하드웨어 U 가 ‘상한 꺼짐’(unset)을 해당 없음으로 · 못 읽음(unread)을 못 읽음으로 가른다(E3).
+    power: power ? { ...power, capWatts: capW, capPct, capState: cap.state } : (cap.state !== 'unread' ? { watts: null, at: null, capWatts: capW, capPct: null, capState: cap.state } : null),
     inletC, sensorAt: sensor ? n(sensor.t) : null,
     cpuPct: sensor ? n(sensor.cpu) : null,
     inventoryAt: inv0 ? n(inv0.collectedAt) : null, inventoryStale: invStale,

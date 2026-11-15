@@ -30,6 +30,7 @@ import { strOf } from '../../util/coercionTrap.js';
 import { poolSettled } from '../../util/pool.js';
 import { config } from '../../config.js';
 import { resolvePerfTarget, perfTargetFail, failParts, perfPairsOf, bmAddressHosts, demoPerfRows, perfAddressMatcher } from './bmUsage.js';
+import { bmGate, bmGates, writableVc } from './bmWriteGate.js';
 import { depsOf as focusDepsOf, focusStartResolved } from './bmPerfOps.js';
 import * as M from '../../bmusage/multiCompare.js';
 
@@ -127,7 +128,8 @@ export async function bmCompareView(req, snap, deps = {}) {
     if (!found) return { key, cid, ...(askedVc ? { vcenterId: askedVc } : {}), state: candidates ? 'ambiguous' : 'none', ...(candidates ? { candidates } : {}) };
     const target = found.target;
     const vc = t(target.vcenterId);
-    const base = { key, cid, name: nameOf(target), vcenterId: vc || '', via: found.via, ...(found.via === 'edge' ? { agent: found.agent } : {}) };
+    // 점검 반복 2회차 E2⑥: writable — 동시 집중 라우트(bmCompareFocus)와 같은 inUserWriteScope(하나라도 밖이면 아무것도 시작하지 않는다).
+    const base = { key, cid, name: nameOf(target), vcenterId: vc || '', via: found.via, ...(found.via === 'edge' ? { agent: found.agent } : {}), writable: writableVc(req, snap, vc) };
     if (!cross && vc !== corp) return { ...base, state: 'other-corp' };
     let entry = null; let hw = null; let facts = {}; let readAt = null; let snapAt = null;
     if (found.via === 'local') {
@@ -183,6 +185,8 @@ export async function bmCompareView(req, snap, deps = {}) {
     ok: true, at: Date.now(), corp, cross, crossAllowed: !allowed, maxServers, ...w, metrics, value,
     groups: M.COMPARE_GROUP_IDS, groupMetrics: M.COMPARE_GROUPS, metricMeta: Object.fromEntries(M.COMPARE_METRICS.map((m) => [m.col, { unit: m.unit, scaleMax: m.scaleMax, src: m.src }])),
     columns, corps, table, ...(minEdge ? { minEdgeVersion: minEdge } : {}), ...(isAdmin ? {} : { addressHidden: true }),
+    // 점검 반복 2회차 E2⑥: 동시 집중 표지(데모 · 역할 — 법인은 열 writable).
+    actions: { focus: bmGate(req, 'compareFocus', { snap }) },
   };
 }
 
@@ -222,7 +226,9 @@ export async function bmCompareFocus(req, deps = {}) {
 async function setsRead(req, res) {
   try {
     const C = await import('../../bmusage/compareSets.js');
-    res.json({ ok: true, sets: C.listCompareSets(req.user?.username || ''), max: C.SETS_PER_USER, maxServers: await maxServersOf(deps0()) });
+    // 점검 반복 2회차: 세트 저장 · 지우기 표지(데모 계정은 쓰기 403 — 화면이 버튼을 닫는다).
+    res.json({ ok: true, sets: C.listCompareSets(req.user?.username || ''), max: C.SETS_PER_USER, maxServers: await maxServersOf(deps0()),
+      actions: bmGates(req, ['compareSetSave', 'compareSetDelete'], { snap: store.get() }) });
   } catch (e) {
     if (e?.status === 503) return res.status(503).json({ ok: false, code: 'settingsUnreadable', reason: String(e.message || e).slice(0, 300) });
     res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) });

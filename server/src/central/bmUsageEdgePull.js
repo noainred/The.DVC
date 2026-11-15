@@ -248,7 +248,7 @@ export function sanitizeDevicesBody(b) {
     if (a.length > DEV_MAX) cut += a.length - DEV_MAX;
     return a.slice(0, DEV_MAX).filter(isObj).map((d) => ({ dev: strOf(d.dev, 256), ord: numOrNull(d.ord), color: numOrNull(d.color), firstTs: numOrNull(d.firstTs), lastTs: numOrNull(d.lastTs), ...(d.info ? { info: strOf(d.info, 32) } : {}) })).filter((d) => d.dev);
   };
-  return { ok: b.ok === true, devices: { disk: list('disk'), nic: list('nic'), mount: list('mount') }, over: numOrNull(b.over), peakSrc: b.peakSrc == null ? null : strOf(b.peakSrc, 16), peakWindowS: numOrNull(b.peakWindowS), ...(cut ? { sanitizeTruncated: cut } : {}) };
+  return { ok: b.ok === true, devices: { disk: list('disk'), nic: list('nic'), mount: list('mount') }, over: numOrNull(b.over), peakSrc: b.peakSrc == null ? null : strOf(b.peakSrc, 16), peakWindowS: numOrNull(b.peakWindowS), peakWindowCapS: numOrNull(b.peakWindowCapS), ...(cut ? { sanitizeTruncated: cut } : {}) };   // 점검 반복 2회차 I2: 엣지 설정 상한(구버전 엣지는 null)
 }
 export function sanitizeNicsBody(b) {
   if (!isObj(b)) return null;

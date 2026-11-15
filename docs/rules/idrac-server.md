@@ -45,6 +45,7 @@
 - (v2.967 추가) 서버 하드웨어 정보 내보내기 — 값 카탈로그 하나(insights/hwExport/catalog.js) · 대상은 통합 서버 인벤토리 판정 그대로 · 못 읽은 값은 빈 칸 · 관리자 전용 값 · 사양서 파일 나눔
 - (v3.3.0 추가) 물리서버 폴더 하드웨어(iDRAC) 요약 · OS 이름 수집 · iDRAC 주소 접속 — 요약 코어 하나(idrac/hwSummary.js) · Dell ServerOS 속성 $select · 엣지 fleet 요약은 중앙 정제 · 주소는 관리자 판본만
 - (점검 반복 1회차 추가) 베어메탈 사용률 대상 해석 · 누적 차분 · 사유 — 꺼진 등록 · 엣지(agent) OS 등록은 경로가 아니다 · 직전 누적 표본은 같은 장비 · 같은 부팅만 · df 도 시한 안 · exec 오류 · iDRAC 403 등은 각자 사유
+- (점검 반복 2회차 추가) 베어메탈 사용률 화면 쓰기 버튼은 서버 표지(bmWriteGate — 라우트와 같은 판정)로만 · PowerCap 꺼짐 = 해당 없음(판정 하나 invCapState) · 사용률 색 = 설정값 · 피크 창 ‘줄임’ 은 설정 상한과
 - (v3.8.0 추가) 디스크 배드 섹터 이력(범위 A) — 엣지가 중앙 작업을 가져가 법인 안에서 Lifecycle 로그를 읽는다 · 분류는 ID · 근거 문서가 있는 ID 만 · 판정 코어 하나(verdict.js — 시리얼 = 확정 · 로그 연속성 = 추정 · 그 밖 판단 안 함) · 가져간 작업의 보고만 저장
 ## 본문
 
@@ -1687,3 +1688,23 @@
     ② 같은 주소에 포트만 다른 두 OS 등록 중 고른 앞 등록이 꺼졌으면 같은 주소의 켜진 등록(다른 포트)을 고른다(`pickOsEntry prefer` — hostKey 는 포트를 뗀다). NAT 포트 포워딩으로 다른 장비면 다른 장비다.
     기준판의 모호 판정도 같은 전제(주소 = 장비)이고 재확인 생성 입력 20,000건에서 0건이라 새 결함으로 보지 않았다(D1 의 접속처 식별이 포트까지 보므로 누적 차분은 섞이지 않는다).
   - **의심 1 · 2**: `hostKey` 끝 슬래시는 `trimTrailingSlashes`(선형) · 물리서버 폴더 사유 색인은 가상화 호스트 행을 빼고 (법인, 키) 쌍 → 키 순(공통 태그 ESXi 행이 베어메탈 사유를 덮었다 — 재현).
+
+- ⚠⚠ **베어메탈 사용률 점검 반복 2회차(기준판 68b220406) — 쓰기 버튼은 서버 표지로만 · PowerCap 꺼짐은 해당 없음 · 같은 값은 같은 색**
+  (`routes/api/{bmWriteGate,bmUsage,bmCapacity,bmIdle,bmAnnotations,bmCompare}.js` · `bmusage/{hwFacts,useJudge,powerAgg,edgePull,trendQuery}.js` · `central/{bmPerfSanitize,bmUsageEdgePull}.js` ·
+  웹 `bmWriteText.js` · `Bm{Usage,CapacityFleet,IdleFleet,Annotations,CompareView,PerfDetail,TrendTab}.jsx`. 회귀 `server/test/bmUsageLoop2.test.js` · 웹 `bmLoop2.test.jsx`):
+  - **E1 · E2 쓰기 버튼 표지**: 화면이 역할(hasRole)만 보고 연 버튼(수집 설정 카드 · 지금 수집 · 엣지 지금 가져오기 · 용량/저활용 다시 계산 · 저활용 검토 상태 · 주석 추가 · 비교 동시 집중 · 비교 세트)이
+    범위 계정 · 조회 전용 법인 · 데모 계정에서 403 이었다. 판정은 **서버 `bmWriteGate.bmGate` 하나** — 요청이 거치는 순서 그대로 ① 데모(authMiddleware 의 `demoGuestDenial` 같은 함수 — ‘지금 수집’ 만 SAFE)
+    ② 역할(라우트 requireRole 인자 — `BM_ACTIONS` 표를 시험이 라우터 스택과 대조) ③ 전 법인 동작은 `scopedVcenterIds`(라우트 본문 검사 그대로) · 법인 하나는 `inUserWriteScope`.
+    GET 응답이 `actions.<동작> = { ok, why }`(why: demo · role-admin · role-operator · full-scope · read-only) · 행/열 `writable` 을 싣고 웹(`bmWriteText.js`)은 그것으로 잠그거나(이유 툴팁 · 한 줄) 숨긴다
+    (역할이 모자란 계정에는 예전처럼 그리지 않는다 · 표지가 없으면 닫는다). 저활용 응답 캐시 열쇠에 `gateKey`(역할 · 데모 · 쓰기 범위) — 같은 조회 범위의 operator · viewer 가 표지를 나누지 않게.
+    귀속 없는 저활용 행은 검토 쓰기가 법인을 요구해(400) ‘귀속 없음 — 검토 불가’. 수집 설정 PUT 403 은 원문 ‘forbidden’ 대신 ErrorBox(권한 안내).
+  - **E3 PowerCap 꺼짐**: 인벤토리를 읽었고 상한이 0 · 빈 값이면 하드웨어 U 는 `none`(해당 없음 — 못 읽음 아님)이고 ‘읽은 칸’ 분모에서도 뺀다(applicable − none). 판정은 `hwFacts.invCapState` 하나 —
+    하드웨어 U · 전력 보기(powerAgg capState) · 엣지 봉투(envelopePowerCaps)가 공유. hw.power.capState 는 엣지 봉투로도 오므로 중앙 정제(`bmPerfSanitize hwOf`)가 아는 값만 싣는다(구버전 엣지는 null → 예전처럼 못 읽음).
+    웹: ‘—²’ 각주는 ‘해당 없음’(커널 · 장비) · 근거 한 줄은 항목별(`NONE_BASIS_TEXT` — PSI ‘그 커널에 없음’ · 전력 ‘PowerCap 꺼짐’).
+  - **E4 같은 값 같은 색**: 사용률 표 · 상위 · 법인별 색과 ‘초과’ 대수 기준 = 응답 perfThresholds(utilWarn · utilBad — USE 판정과 같은 설정값 · `bmUtilThresholds`). `usageTone` 기본값(75/90)은 법인별 서버 사용량(CorpUsage)용으로 그대로.
+  - **E5 · E6 · E7 · E8**: 400 보기 탭 줄바꿈(상세 탭과 같은 한 줄 4개 · 낱말 안에서 끊지 않음) · 범위 계정 비교의 다른 법인 안내는 보이지 않는 ‘법인 간 허용’ 을 가리키지 않는다 ·
+    저활용 편집 상태 열쇠 = 행 식별(노드 · 법인 · 키 — `idleRowId`) · 404 상세 머리는 법인을 단정하지 않고(‘—’) 비교 추가를 잠근다(존재 은닉 — 없음 · 범위 밖을 가르는 문구 없음).
+  - **I1 · I2 · I3**: 추이 창 문구는 날짜를 붙인 공용 코어(`vmPerfText.windowRangeText`) · 피크 창 ‘줄어듦’ 은 응답의 설정 상한(`peakWindowCapS` = 그 노드 `settings.store.peakWindowS` — 엣지 대행 정제 포함 · 모르면 말하지 않음) ·
+    용량 ‘예측’ 색은 임박(도달일 ≤ alertDays — 상세 응답에도 alertDays)만 주의.
+  - **남은 것(고치지 않음 — 의심 · 미재현)**: 데모에서 KPI ‘OS 경로 0’ ↔ 보드 · 누락 점검 ‘둘 다 15’ 어긋남(데모가 응답 단계에서 OS 성능 열을 겹친다 — 실장비에서는 생기지 않는다고 추정) ·
+    수집 건강 저장 카드의 ‘피크 창 · 대상 없음’ 문구(iDRAC 만인 노드에서 오해 소지 — 데모에서만 봄).

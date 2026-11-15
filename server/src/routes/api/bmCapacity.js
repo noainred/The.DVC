@@ -17,6 +17,7 @@ import { isAdminReq, maskedIdToken } from '../../auth/addressMask.js';
 import { currentTargets } from '../../bmusage/poller.js';
 import { strOf } from '../../util/coercionTrap.js';
 import { resolvePerfTarget, perfTargetFail, perfVcOf, bmAddressHosts, perfAddressMatcher } from './bmUsage.js';
+import { bmGate } from './bmWriteGate.js';
 
 const toolsPerm = requirePerm('tools');
 const writeRole = requireRole('admin', 'operator');
@@ -76,6 +77,8 @@ export async function bmCapacityFleet(req, snap, deps = {}) {
     ok: true, now, rows: out.slice(0, 20_000), truncated: out.length > 20_000, summary: C.summarize(visible, { soonDays: days, monthDays: 30 }),
     sources: allowed ? sources.filter((s) => shownNodes.has(s.node)) : sources, cfg: { ...C.CAP_DEFAULTS, targetPct: rules.capacity?.targetPct ?? C.CAP_DEFAULTS.targetPct, minDays: rules.capacity?.minDays ?? C.CAP_DEFAULTS.minDays, alertDays: days, recomputeAfterMin: C.RECOMPUTE_AFTER_MIN },
     minEdgeVersion: await D.minEdgeVersion().catch(() => null), ...(isAdmin ? {} : { addressHidden: true }),
+    // 점검 반복 2회차 E2②: ‘이 노드 다시 계산’ 표지 — 라우트(운영자 이상 · 전체 범위 · 데모 거부)와 같은 판정.
+    actions: { recompute: bmGate(req, 'capacityRecompute', { snap }) },
   };
 }
 
@@ -89,16 +92,18 @@ export async function bmCapacityDetail(req, snap, deps = {}) {
   if (bad) return bad;
   const rules = await D.rules().catch(() => ({}));
   const cfg = { targetPct: rules.capacity?.targetPct, minDays: rules.capacity?.minDays };
+  // 점검 반복 2회차 I3: ‘소진 임박’ 기준 일수(함대 표 cfg.alertDays 와 같은 값) — 화면이 예측 색을 임박일 때만 주의로 칠한다(숫자를 화면에 박지 않는다).
+  const alertDays = rules.capacity?.days ?? 7;
   if (f.via === 'edge') {
     const r = await D.pullEdgeCapacity(f.agent, f.realKey);
     if (!r.ok) return { ok: false, key, via: 'edge', agent: f.agent, kind: r.kind || 'error', reason: r.reason || '엣지에서 용량 예측을 읽지 못했습니다.' };
-    return { ...r.body, key, via: 'edge', agent: f.agent };
+    return { ...r.body, key, via: 'edge', agent: f.agent, alertDays };
   }
   const C = await D.capacity();
   const now = D.now();
   const judge = await D.maintJudge(now).catch(() => null);
   const r = await C.computeServer({ agent: f.agent, target: f.target, now, cfg, judge, series: true });
-  return { ...r, key, via: 'local' };
+  return { ...r, key, via: 'local', alertDays };
 }
 
 export function registerBmCapacity(api, deps = {}) {

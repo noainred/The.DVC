@@ -52,13 +52,32 @@ export function bpsText(v) {
  */
 export const ageText = (ts, now = Date.now()) => _ago(ts, now, { subMinute: 'seconds' });
 
-/** 임계 색 — 사용률 공통 기준(75/90, V4 규약과 같은 값). 값이 없으면 회색이다(빨강 아니다). */
-export function usageTone(v) {
+/**
+ * 임계 색 — 기본은 사용률 공통 기준(75/90, V4 규약과 같은 값 — 법인별 서버 사용량 CorpUsage 가 이 기본을 쓴다). 값이 없으면 회색이다(빨강 아니다).
+ * 점검 반복 2회차 E4: 베어메탈 화면은 `th`(서버 응답 perfThresholds 의 utilWarn · utilBad — bmUtilThresholds)를 넘긴다 —
+ *   같은 값이 USE 매트릭스(서버 판정 · 설정값)와 사용률 표(예전 75/90 고정)에서 다른 색이던 결함.
+ * @param {number|null} v
+ * @param {{warn?:number, bad?:number}|null} [th]  없거나 칸이 수가 아니면 기본값(75 · 90)
+ */
+export function usageTone(v, th = null) {
   const x = n(v);
   if (x == null) return 'idle';
-  if (x >= 90) return 'bad';
-  if (x >= 75) return 'warn';
+  const bad = n(th?.bad) ?? 90;
+  const warn = n(th?.warn) ?? 75;
+  if (x >= bad) return 'bad';
+  if (x >= warn) return 'warn';
   return 'ok';
+}
+/**
+ * 점검 반복 2회차 E4: 베어메탈 사용률 색 기준 — 주 조회 응답의 perfThresholds(이 노드 설정 utilWarn · utilBad · USE 판정과 같은 값),
+ *   없으면 perfDefaults. 둘 다 없으면 null(usageTone 기본값 — 지어내지 않는다).
+ */
+export function bmUtilThresholds(data) {
+  for (const src of [data?.perfThresholds, data?.perfDefaults]) {
+    const warn = n(src?.utilWarn); const bad = n(src?.utilBad);
+    if (warn != null && bad != null) return { warn, bad };
+  }
+  return null;
 }
 // v2.613 DEPS2613-11: 톤 → 색 변수는 공용 toneVar.js 하나다(예전 사본은 정의되지 않은 --ok/--warn/--bad 에 hex 폴백).
 export { toneVar };
@@ -572,17 +591,19 @@ export function topBusiest(rows = [], { metric = 'cpu_pct', limit = 5 } = {}) {
  * 법인별 집계. ⚠ **`null` 을 분모에 넣지 않는다** — 넣으면 '못 읽은 서버' 가 평균을 끌어내린다
  * (v2.550 DB 롤업과 같은 규칙). 읽은 대수(`n`)를 함께 내 화면이 '몇 대 기준' 인지 말할 수 있게 한다.
  */
-export function corpSummary(rows = [], { metric = 'cpu_pct' } = {}) {
+export function corpSummary(rows = [], { metric = 'cpu_pct', bad = 90 } = {}) {
+  // 점검 반복 2회차 E4: ‘초과’ 대수의 기준은 색과 같은 값(bmUtilThresholds().bad — 서버 utilBad) · 기본 90.
+  const lim = n(bad) ?? 90;
   const by = new Map();
   for (const r of rows || []) {
     const k = t(r.vcenterId) || '(귀속 없음)';
-    const cur = by.get(k) || { vcenterId: k, servers: 0, n: 0, sum: 0, max: null, over90: 0 };
+    const cur = by.get(k) || { vcenterId: k, servers: 0, n: 0, sum: 0, max: null, overBad: 0 };
     cur.servers += 1;
     const v = n(r[metric]);
     if (v != null) {
       cur.n += 1; cur.sum += v;
       if (cur.max == null || v > cur.max) cur.max = v;
-      if (v >= 90) cur.over90 += 1;
+      if (v >= lim) cur.overBad += 1;
     }
     by.set(k, cur);
   }

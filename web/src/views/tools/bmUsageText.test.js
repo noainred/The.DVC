@@ -254,7 +254,7 @@ describe('집계·상위N·CSV (v2.551)', () => {
     expect(vc1.n).toBe(1);
     expect(vc1.avg).toBe(91.5);
     expect(vc1.unread).toBe(1);
-    expect(vc1.over90).toBe(1);
+    expect(vc1.overBad).toBe(1);   // 2회차 E4: 기준은 인자 bad(기본 90 — 이름 over90 → overBad)
   });
   it('읽은 대수가 0 이면 평균은 null 이다(0 이 아니다)', () => {
     const c = corpSummary([{ key: 'X', vcenterId: 'vc9', cpu_pct: null }], { metric: 'cpu_pct' });
