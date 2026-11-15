@@ -950,6 +950,6 @@
   도구: 리전 Select(리전이 2개 이상이거나 골라져 있을 때만) + vCenter Select(리전 안만 · `platformText.regionsOf · vcInRegion`) · 요청은 `vcenterId` 가 없을 때만 `region` · 제목은 `scopeText`(vCenter 이름 / ‘리전 X 합계’ / ‘전체 vCenter 합계’ — 예전엔 id 를 그대로 보였다).
   인계: `handoffKpiScope(targets, {vcenterId, region})` — vCenter 가 있으면 vCenter 만, 없으면 리전(`KPI_HANDOFF.vmTrackRegion · storageTrackRegion`). 서버 `vcenterList` 항목에 `region`.
 - **v3.10.16 — 가상화 플랫폼 점검 4회차: 탭 줄이 넘치면(400px) 열린 탭이 보이게 그 줄만 옮긴다 — 허브 · vCenter 상세 · 개체 보기 한 훅**(자율 개선 루프):
-  허브 탭 줄(HubTabs v2.915)에만 있던 규칙을 `hooks/useActiveTabInView.js`(순수 `keepActiveTabInView` + 훅)로 빼서 vCenter 상세 · VM · 호스트 개체 보기의 `.vcd-views` 도 쓴다 —
+  허브 탭 줄(HubTabs v2.915)과 Backup 현황 머리(VeeamHeader v2.822)에 두 벌 있던 규칙을 `hooks/useActiveTabInView.js`(순수 `keepActiveTabInView` + 훅) 하나로 모으고 vCenter 상세 · VM · 호스트 개체 보기의 `.vcd-views` 도 쓴다 —
   400px 에서 ‹ 이전 · 다음 › 으로 넘어가거나 기억 탭으로 열면 ‘네트워크’ 같은 뒤쪽 탭 · 강조 탭(‘호스트 및 클러스터’ · ‘VM’)이 줄 밖에 숨어 있었다.
-  규칙: 넘칠 때만 · `scrollLeft` 만(창 스크롤 금지 — 요소를 창 안으로 끌어오는 DOM 호출은 상단을 가린다) · 8px 여유. 새 탭 줄은 `role="tablist"` + `aria-selected` + 이 훅. 테스트 `hooks/useActiveTabInView.test.js`(소스 계약 세 곳).
+  규칙: 넘칠 때만 · `scrollLeft` 만(창 스크롤 금지 — 요소를 창 안으로 끌어오는 DOM 호출은 상단을 가린다) · 8px 여유. 새 탭 줄은 `role="tablist"` + `aria-selected` + 이 훅. 테스트 `hooks/useActiveTabInView.test.js`(소스 계약 네 곳 · 옛 사본 없음).

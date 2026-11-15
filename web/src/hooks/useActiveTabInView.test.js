@@ -25,10 +25,11 @@ describe('keepActiveTabInView', () => {
     expect(keepActiveTabInView(null)).toBe(false);
     expect(keepActiveTabInView(undefined)).toBe(false);
   });
-  it('탭 줄 세 곳(허브 · vCenter 상세 · 개체 보기)이 같은 훅을 쓴다(소스 계약) · 창을 내리는 scrollIntoView 는 쓰지 않는다', () => {
-    for (const f of ['../views/platform/HubTabs.jsx', '../views/VCenterDetail.jsx', '../views/vcd/ObjectShell.jsx']) {
+  it('탭 줄 네 곳(허브 · vCenter 상세 · 개체 보기 · Backup 현황 머리)이 같은 훅을 쓴다(소스 계약) · 창을 내리는 scrollIntoView 는 쓰지 않는다 · 사본 없음', () => {
+    for (const f of ['../views/platform/HubTabs.jsx', '../views/VCenterDetail.jsx', '../views/vcd/ObjectShell.jsx', '../views/tools/VeeamHeader.jsx']) {
       const s = fs.readFileSync(new URL(f, import.meta.url), 'utf8');
       expect(s).toMatch(/useActiveTabInView\(/);
+      expect(s).not.toMatch(/list\.scrollLeft \+=/);   // 옛 사본(HubTabs v2.915 · VeeamHeader v2.822)이 남아 있지 않다
     }
     expect(fs.readFileSync(new URL('./useActiveTabInView.js', import.meta.url), 'utf8')).not.toMatch(/scrollIntoView/);
   });
