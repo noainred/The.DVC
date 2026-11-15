@@ -21,7 +21,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { openSqlite, createLockRetry } from '../util/sqliteOpen.js';
 import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
-import { loadPerfSettings } from './perfSettings.js';
+import { loadPerfSettings, perfSettingsLoadError } from './perfSettings.js';
 import { isMockMode } from '../mock/demo/flags.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { isDemoPerfQuery, demoStorageMultiAsync, demoStorageOne, demoPortSeries } from './demoPerfSynth.js';   // v2.715 목업: 수식으로 만든다
@@ -303,7 +303,20 @@ const _pruneFlight = createPruneFlight();   // util/chunkedPrune.js — 같은 �
 function holdDb(db) { db.users = (db.users || 0) + 1; return () => { db.users -= 1; if (db.retired && db.users <= 0) closeDb(db); }; }
 function closeDb(db) { if (db.closed) return; db.closed = true; try { db.conn?.close?.(); } catch { /* 닫기 실패는 무시 — 새로 연다 */ } }
 function retireDb(db) { if (!db || db === 'unavailable') return; db.retired = true; if (!(db.users > 0)) closeDb(db); }
+/*
+ * 전체 점검 24회차 #4(재현): 설정 파일이 손상되면 1시간 집계는 기본 730일 · 원본은 기본 90일로 정리돼(v2.632 는 중앙 수신 경로의 원본만 보류했다)
+ *   관리자가 3650일로 둔 이력이 되돌릴 수 없게 지워졌다. 못 읽은 동안은 **모든 진입점의 정리를 보류**한다(스토리지 23회차 S-3 과 같은 판단).
+ */
+let _holdWarned = false;
+function pruneHeld() {
+  let e = null;
+  try { e = perfSettingsLoadError(); } catch { e = { reason: '판정 실패' }; }
+  if (!e) { _holdWarned = false; return null; }
+  if (!_holdWarned) { _holdWarned = true; console.warn(`[sanswitch-perf] 설정 파일을 읽지 못해 보존 정리를 보류합니다(기본값으로 지우지 않음) — ${String(e.reason || '').slice(0, 160)}`); }
+  return e;
+}
 function pruneOld(db, retentionDays) {
+  if (pruneHeld()) return Promise.resolve({ deleted: 0, done: true, metaDeleted: 0, rollupDeleted: 0, held: true });
   const days = Math.max(1, Number(retentionDays) || 90);
   return _pruneFlight.run(days, async () => {
     if (db.retired || db.closed) db = await open();
@@ -356,7 +369,7 @@ export async function pruneNow(retentionDays) {
   if (!db) return { deleted: 0, unavailable: true };
   try {
     const r = await pruneOld(db, retentionDays);
-    return { deleted: r.deleted, done: r.done, metaDeleted: r.metaDeleted, rollupDeleted: r.rollupDeleted ?? 0 };
+    return { deleted: r.deleted, done: r.done, metaDeleted: r.metaDeleted, rollupDeleted: r.rollupDeleted ?? 0, ...(r.held ? { held: true } : {}) };
   } catch (e) { console.warn(`[sanswitch-perf] prune 실패: ${e.message}`); return { deleted: 0, error: e.message }; }
 }
 

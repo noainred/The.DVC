@@ -177,20 +177,20 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | POST | `/log-query-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:277](../server/src/routes/central/opsRoutes.js#L277) |
 | POST | `/part-faults` | `requireCentral` | [server/src/routes/central/storageRoutes.js:120](../server/src/routes/central/storageRoutes.js#L120) |
 | GET | `/partfault-config` | `requireCentral` | [server/src/routes/central/storageRoutes.js:224](../server/src/routes/central/storageRoutes.js#L224) |
-| GET | `/pdu-config` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:35](../server/src/routes/central/pduSanRoutes.js#L35) |
-| POST | `/pdu-data` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:66](../server/src/routes/central/pduSanRoutes.js#L66) |
+| GET | `/pdu-config` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:36](../server/src/routes/central/pduSanRoutes.js#L36) |
+| POST | `/pdu-data` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:67](../server/src/routes/central/pduSanRoutes.js#L67) |
 | GET | `/ping-jobs` | `requireCentral` | [server/src/routes/central/opsRoutes.js:207](../server/src/routes/central/opsRoutes.js#L207) |
 | POST | `/ping-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:215](../server/src/routes/central/opsRoutes.js#L215) |
 | POST | `/register-collector` | `requireCentral` | [server/src/routes/central.js:486](../server/src/routes/central.js#L486) |
 | POST | `/result` | `requireCentral` | [server/src/routes/central.js:568](../server/src/routes/central.js#L568) |
-| POST | `/rma-credential` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:286](../server/src/routes/central/pduSanRoutes.js#L286) |
-| POST | `/rma-poll` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:227](../server/src/routes/central/pduSanRoutes.js#L227) |
-| POST | `/rma-result` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:306](../server/src/routes/central/pduSanRoutes.js#L306) |
-| GET | `/sanswitch-config` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:102](../server/src/routes/central/pduSanRoutes.js#L102) |
-| POST | `/sanswitch-data` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:319](../server/src/routes/central/pduSanRoutes.js#L319) |
-| POST | `/sanswitch-flow-result` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:208](../server/src/routes/central/pduSanRoutes.js#L208) |
-| POST | `/sanswitch-perf` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:137](../server/src/routes/central/pduSanRoutes.js#L137) |
-| POST | `/sanswitch-test-result` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:196](../server/src/routes/central/pduSanRoutes.js#L196) |
+| POST | `/rma-credential` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:287](../server/src/routes/central/pduSanRoutes.js#L287) |
+| POST | `/rma-poll` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:228](../server/src/routes/central/pduSanRoutes.js#L228) |
+| POST | `/rma-result` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:307](../server/src/routes/central/pduSanRoutes.js#L307) |
+| GET | `/sanswitch-config` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:103](../server/src/routes/central/pduSanRoutes.js#L103) |
+| POST | `/sanswitch-data` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:320](../server/src/routes/central/pduSanRoutes.js#L320) |
+| POST | `/sanswitch-flow-result` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:209](../server/src/routes/central/pduSanRoutes.js#L209) |
+| POST | `/sanswitch-perf` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:138](../server/src/routes/central/pduSanRoutes.js#L138) |
+| POST | `/sanswitch-test-result` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:197](../server/src/routes/central/pduSanRoutes.js#L197) |
 | GET | `/storage-config` | `requireCentral` | [server/src/routes/central/storageRoutes.js:90](../server/src/routes/central/storageRoutes.js#L90) |
 | POST | `/storage-data` | `requireCentral` | [server/src/routes/central/storageRoutes.js:311](../server/src/routes/central/storageRoutes.js#L311) |
 | GET | `/svcmon-config` | `requireCentral` | [server/src/routes/central.js:676](../server/src/routes/central.js#L676) |
@@ -1475,38 +1475,38 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/san-storage/report/preview` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanStorage.js:277](../server/src/routes/api/sanStorage.js#L277) |
 | POST | `/tools/san-storage/report/send-now` | 역할 `admin` · `fullRwOnly` | [server/src/routes/api/sanStorage.js:284](../server/src/routes/api/sanStorage.js#L284) |
 | GET | `/tools/sanswitch` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:196](../server/src/routes/api/sanSwitch.js#L196) |
-| GET | `/tools/sanswitch/activity` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:1051](../server/src/routes/api/sanSwitch.js#L1051) |
+| GET | `/tools/sanswitch/activity` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:1055](../server/src/routes/api/sanSwitch.js#L1055) |
 | GET | `/tools/sanswitch/attribution` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/hostSan.js:477](../server/src/routes/api/hostSan.js#L477) |
-| POST | `/tools/sanswitch/collect-all` | 역할 `admin` · `fullScopeOnly` · `fullRwOnly` | [server/src/routes/api/sanSwitch.js:1075](../server/src/routes/api/sanSwitch.js#L1075) |
+| POST | `/tools/sanswitch/collect-all` | 역할 `admin` · `fullScopeOnly` · `fullRwOnly` | [server/src/routes/api/sanSwitch.js:1079](../server/src/routes/api/sanSwitch.js#L1079) |
 | POST | `/tools/sanswitch/devices` | 역할 `admin` · `fullScopeOnly` · `fullRwOnly` | [server/src/routes/api/sanSwitch.js:347](../server/src/routes/api/sanSwitch.js#L347) |
 | DELETE | `/tools/sanswitch/devices/:id` | 역할 `admin` · `fullScopeOnly` · `fullRwOnly` | [server/src/routes/api/sanSwitch.js:355](../server/src/routes/api/sanSwitch.js#L355) |
 | POST | `/tools/sanswitch/devices/:id/collect` | 역할 `admin` · `fullScopeOnly` · `fullRwOnly` | [server/src/routes/api/sanSwitch.js:405](../server/src/routes/api/sanSwitch.js#L405) |
-| DELETE | `/tools/sanswitch/devices/:id/err-baseline` | 역할 `admin` · `fullScopeOnly` · `fullRwOnly` | [server/src/routes/api/sanSwitch.js:675](../server/src/routes/api/sanSwitch.js#L675) |
-| POST | `/tools/sanswitch/devices/:id/err-baseline` | 역할 `admin` · `fullScopeOnly` · `fullRwOnly` | [server/src/routes/api/sanSwitch.js:663](../server/src/routes/api/sanSwitch.js#L663) |
-| GET | `/tools/sanswitch/devices/:id/healthcheck` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:555](../server/src/routes/api/sanSwitch.js#L555) |
-| GET | `/tools/sanswitch/devices/:id/healthcheck/history` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:596](../server/src/routes/api/sanSwitch.js#L596) |
-| GET | `/tools/sanswitch/devices/:id/perf` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:747](../server/src/routes/api/sanSwitch.js#L747) |
-| GET | `/tools/sanswitch/devices/:id/perf/storage` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:759](../server/src/routes/api/sanSwitch.js#L759) |
-| GET | `/tools/sanswitch/devices/:id/port-usage` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:836](../server/src/routes/api/sanSwitch.js#L836) |
-| GET | `/tools/sanswitch/devices/:id/port-usage.csv` | 권한 `data.csv`, `tools` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:845](../server/src/routes/api/sanSwitch.js#L845) |
+| DELETE | `/tools/sanswitch/devices/:id/err-baseline` | 역할 `admin` · `fullScopeOnly` · `fullRwOnly` | [server/src/routes/api/sanSwitch.js:679](../server/src/routes/api/sanSwitch.js#L679) |
+| POST | `/tools/sanswitch/devices/:id/err-baseline` | 역할 `admin` · `fullScopeOnly` · `fullRwOnly` | [server/src/routes/api/sanSwitch.js:667](../server/src/routes/api/sanSwitch.js#L667) |
+| GET | `/tools/sanswitch/devices/:id/healthcheck` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:559](../server/src/routes/api/sanSwitch.js#L559) |
+| GET | `/tools/sanswitch/devices/:id/healthcheck/history` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:600](../server/src/routes/api/sanSwitch.js#L600) |
+| GET | `/tools/sanswitch/devices/:id/perf` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:751](../server/src/routes/api/sanSwitch.js#L751) |
+| GET | `/tools/sanswitch/devices/:id/perf/storage` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:763](../server/src/routes/api/sanSwitch.js#L763) |
+| GET | `/tools/sanswitch/devices/:id/port-usage` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:840](../server/src/routes/api/sanSwitch.js#L840) |
+| GET | `/tools/sanswitch/devices/:id/port-usage.csv` | 권한 `data.csv`, `tools` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:849](../server/src/routes/api/sanSwitch.js#L849) |
 | GET | `/tools/sanswitch/devices/:id/ports` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:255](../server/src/routes/api/sanSwitch.js#L255) |
 | GET | `/tools/sanswitch/devices/:id/zoning` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:293](../server/src/routes/api/sanSwitch.js#L293) |
-| GET | `/tools/sanswitch/devices/export.csv` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:1148](../server/src/routes/api/sanSwitch.js#L1148) |
-| GET | `/tools/sanswitch/devices/export.txt` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:1156](../server/src/routes/api/sanSwitch.js#L1156) |
-| POST | `/tools/sanswitch/devices/import` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` · `fullRwOnly` | [server/src/routes/api/sanSwitch.js:1239](../server/src/routes/api/sanSwitch.js#L1239) |
-| POST | `/tools/sanswitch/devices/import/test` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` · `fullRwOnly` | [server/src/routes/api/sanSwitch.js:1184](../server/src/routes/api/sanSwitch.js#L1184) |
-| GET | `/tools/sanswitch/devices/import/test/:id` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:1227](../server/src/routes/api/sanSwitch.js#L1227) |
-| GET | `/tools/sanswitch/devices/sample.csv` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:1164](../server/src/routes/api/sanSwitch.js#L1164) |
-| GET | `/tools/sanswitch/devices/sample.txt` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:1170](../server/src/routes/api/sanSwitch.js#L1170) |
-| GET | `/tools/sanswitch/healthcheck-all` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:613](../server/src/routes/api/sanSwitch.js#L613) |
-| GET | `/tools/sanswitch/perf/activity` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:686](../server/src/routes/api/sanSwitch.js#L686) |
-| POST | `/tools/sanswitch/perf/collect` | 역할 `admin` · `fullScopeOnly` · `fullRwOnly` | [server/src/routes/api/sanSwitch.js:474](../server/src/routes/api/sanSwitch.js#L474) |
-| POST | `/tools/sanswitch/perf/prune` | 역할 `admin` · `fullScopeOnly` · `fullRwOnly` | [server/src/routes/api/sanSwitch.js:457](../server/src/routes/api/sanSwitch.js#L457) |
+| GET | `/tools/sanswitch/devices/export.csv` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:1152](../server/src/routes/api/sanSwitch.js#L1152) |
+| GET | `/tools/sanswitch/devices/export.txt` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:1160](../server/src/routes/api/sanSwitch.js#L1160) |
+| POST | `/tools/sanswitch/devices/import` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` · `fullRwOnly` | [server/src/routes/api/sanSwitch.js:1246](../server/src/routes/api/sanSwitch.js#L1246) |
+| POST | `/tools/sanswitch/devices/import/test` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` · `fullRwOnly` | [server/src/routes/api/sanSwitch.js:1188](../server/src/routes/api/sanSwitch.js#L1188) |
+| GET | `/tools/sanswitch/devices/import/test/:id` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:1234](../server/src/routes/api/sanSwitch.js#L1234) |
+| GET | `/tools/sanswitch/devices/sample.csv` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:1168](../server/src/routes/api/sanSwitch.js#L1168) |
+| GET | `/tools/sanswitch/devices/sample.txt` | 역할 `admin` · 권한 `data.csv` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:1174](../server/src/routes/api/sanSwitch.js#L1174) |
+| GET | `/tools/sanswitch/healthcheck-all` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:617](../server/src/routes/api/sanSwitch.js#L617) |
+| GET | `/tools/sanswitch/perf/activity` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:690](../server/src/routes/api/sanSwitch.js#L690) |
+| POST | `/tools/sanswitch/perf/collect` | 역할 `admin` · `fullScopeOnly` · `fullRwOnly` | [server/src/routes/api/sanSwitch.js:478](../server/src/routes/api/sanSwitch.js#L478) |
+| POST | `/tools/sanswitch/perf/prune` | 역할 `admin` · `fullScopeOnly` · `fullRwOnly` | [server/src/routes/api/sanSwitch.js:460](../server/src/routes/api/sanSwitch.js#L460) |
 | GET | `/tools/sanswitch/perf/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:434](../server/src/routes/api/sanSwitch.js#L434) |
-| PUT | `/tools/sanswitch/perf/settings` | 역할 `admin` · `fullScopeOnly` · `fullRwOnly` | [server/src/routes/api/sanSwitch.js:442](../server/src/routes/api/sanSwitch.js#L442) |
-| GET | `/tools/sanswitch/perf/storage-summary` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:882](../server/src/routes/api/sanSwitch.js#L882) |
-| GET | `/tools/sanswitch/perf/traffic-total` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:994](../server/src/routes/api/sanSwitch.js#L994) |
-| POST | `/tools/sanswitch/poll` | 역할 `admin` · `fullScopeOnly` · `fullRwOnly` | [server/src/routes/api/sanSwitch.js:1099](../server/src/routes/api/sanSwitch.js#L1099) |
+| PUT | `/tools/sanswitch/perf/settings` | 역할 `admin` · `fullScopeOnly` · `fullRwOnly` | [server/src/routes/api/sanSwitch.js:444](../server/src/routes/api/sanSwitch.js#L444) |
+| GET | `/tools/sanswitch/perf/storage-summary` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:886](../server/src/routes/api/sanSwitch.js#L886) |
+| GET | `/tools/sanswitch/perf/traffic-total` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:998](../server/src/routes/api/sanSwitch.js#L998) |
+| POST | `/tools/sanswitch/poll` | 역할 `admin` · `fullScopeOnly` · `fullRwOnly` | [server/src/routes/api/sanSwitch.js:1103](../server/src/routes/api/sanSwitch.js#L1103) |
 | POST | `/tools/sanswitch/test` | 역할 `admin` · `fullScopeOnly` · `fullRwOnly` | [server/src/routes/api/sanSwitch.js:371](../server/src/routes/api/sanSwitch.js#L371) |
 | GET | `/tools/sanswitch/test/:runId` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/sanSwitch.js:394](../server/src/routes/api/sanSwitch.js#L394) |
 | GET | `/tools/secret-scan` | 역할 `admin` · `fleetOnly` | [server/src/routes/api/toolsInfo.js:39](../server/src/routes/api/toolsInfo.js#L39) |

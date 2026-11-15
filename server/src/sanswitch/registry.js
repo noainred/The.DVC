@@ -58,8 +58,8 @@ function load() {
   return _db;
 }
 
-function persist() {
-  atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ version: 1, devices: load().devices }), null, 2), { mode: 0o600 });
+function persist(devices = load().devices) {
+  atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ version: 1, devices }), null, 2), { mode: 0o600 });
   loadErr.clear(); // v2.612 LEFT2612-01
 }
 
@@ -139,7 +139,13 @@ export function saveDevice(input = {}) {
   const datacenterId = String(input.datacenterId || '').trim();
 
   const existing = input.id ? db.devices.find((d) => d.id === input.id) : null;
-  const dev = existing || { id: `sw-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, createdAt: Date.now(), pulled: false };
+  // 전체 점검 24회차 #3(재현): host 중복 검사가 신규에만 있고 대소문자를 구별했다 — 수정으로 같은 스위치가 장비 둘이 되어 법인 합산이 두 배였다.
+  //   수정에도 · trim · 소문자로(대량 경로 bulk.js 와 같은 비교) · 메모리를 바꾸기 전에.
+  const hostKey = host.toLowerCase();
+  if (db.devices.some((d) => d !== existing && String(d.host || '').trim().toLowerCase() === hostKey)) throw new Error('같은 host 의 스위치가 이미 등록되어 있습니다.');
+  // 24회차 #5(재현): 사본에 고치고 **쓰기가 성공한 뒤에** 메모리를 바꾼다 — 예전에는 저장 실패(비밀 보관 잠금 · 키 없음)에도 메모리가 새 값이라
+  //   폴러가 저장되지 않은 host · 계정 · 비밀번호로 접속하고 중앙 설정 pull 이 그 값을 엣지에 배포했다.
+  const dev = existing ? { ...existing } : { id: `sw-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, createdAt: Date.now(), pulled: false };
   // v2.607(감사 SEC2607-07·LEFT2607-06) → v2.770(R5-E3-4): 판정은 sanAccessMoved 하나(연결 테스트와 공유).
   const moved = sanAccessMoved(existing, input);
   const password = String(input.password ?? '');
@@ -154,12 +160,10 @@ export function saveDevice(input = {}) {
   const vfId = input.vfId === '' || input.vfId == null ? null : Math.max(1, Math.min(128, Math.floor(Number(input.vfId)) || 128));
   Object.assign(dev, { type, name, host, username, agent, datacenterId, collectMethod, sshPort, httpsPort, vfId,
     enabled: input.enabled !== false, note: String(input.note || '').slice(0, 200) });
-  if (!existing) {
-    if (db.devices.length >= MAX_DEVICES) throw new Error(`스위치는 최대 ${MAX_DEVICES}개까지 등록할 수 있습니다.`);
-    if (db.devices.some((d) => d.host === host)) throw new Error('같은 host 의 스위치가 이미 등록되어 있습니다.');
-    db.devices.push(dev);
-  }
-  persist();
+  if (!existing && db.devices.length >= MAX_DEVICES) throw new Error(`스위치는 최대 ${MAX_DEVICES}개까지 등록할 수 있습니다.`);
+  const next = existing ? db.devices.map((d) => (d === existing ? dev : d)) : [...db.devices, dev];
+  persist(next);
+  db.devices = next;
   const { password: _p, ...safe } = dev;
   return { ...safe, hasPassword: !!dev.password, ...(droppedSecrets.length ? { droppedSecrets } : {}) };
 }
@@ -168,7 +172,8 @@ export function deleteDevice(id) {
   const db = load();
   const i = db.devices.findIndex((d) => d.id === id);
   if (i < 0) return false;
-  db.devices.splice(i, 1); persist();
+  const next = db.devices.filter((_, j) => j !== i);
+  persist(next); db.devices = next;   // 24회차 #5: 쓰기 성공 뒤에만
   return true;
 }
 
@@ -189,8 +194,8 @@ export function applyPulledDevices(list, { onRemoved = null } = {}) {
   const keep = db.devices.filter((d) => String(d.agent || '').toLowerCase() !== mine);
   const before = new Set(db.devices.filter((d) => String(d.agent || '').toLowerCase() === mine).map((d) => d.id));
   const next = (list || []).map((d) => ({ ...d, pulled: true }));
-  db.devices = [...keep, ...next];
-  persist();
+  const all = [...keep, ...next];
+  persist(all); db.devices = all;   // 24회차 #5: 쓰기 성공 뒤에만
   // 중앙에서 삭제/이관된 장비의 id — 호출자가 로컬 스냅샷을 지워야 한다(안 지우면 낡은 스냅샷이
   // 매 주기 중앙으로 push 돼 중앙 화면에 orphan 으로 영구 표시된다 — v2.416 리뷰 결함 #4).
   const nextIds = new Set(next.map((d) => d.id));
