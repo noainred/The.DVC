@@ -980,3 +980,6 @@
 - **v3.12.3 — 2차 루프 3회차: 정렬 열 머리(STable · DataTable)를 키보드로 — Tab 으로 닿고 Enter/Space 로 정렬 · 키 처리 코어 `onPressKey` 한 벌**: 표 정렬이 마우스 전용이었다(허브 세 탭 스캔에서 th 가 cursor:pointer 인데 tabindex 없음 — 포탈 전 표 공통).
   STable 머리에 `tabIndex 0` + `onKeyDown = onPressKey(정렬)` — **role 은 바꾸지 않는다**(columnheader · aria-sort 유지 — `pressable` 의 role=button 을 th 에 쓰면 안 된다). DataTable 머리도 같은 것 + `aria-sort`. 포커스 테두리 `styles.css th[aria-sort]:focus-visible`.
   title 은 ‘클릭하면 이 열로 정렬합니다(… · 키보드는 Enter · Space)’(기존 문구 포함 — 테스트가 찾는다). vCenter 탭 VM 이름 검색 결과의 이름도 `button.cell-link`(키보드로 상세). 자체 정렬 표(SortTh 컴포넌트 4곳)는 이번 범위 밖. 테스트 `pressable.test.js` v3.12.3 · `STable.test.jsx`.
+- **v3.12.4 — 2차 루프 4회차: vCenter 상세 트리(호스트 및 클러스터 · VM 및 폴더 · 검색 결과)를 키보드로**: 노드 접기/펴기 · VM 잎(서랍) · 호스트 이름(서랍)이 div/span onClick 이라 마우스 전용이었다(스캔 재현).
+  `Node` · `Tree`(자식이 있을 때만) = `pressable(접기)` + `aria-expanded` · `Leaf` = `pressable(onClick)` · 호스트 이름 span = `pressable(서랍 · stopPropagation)` — 안쪽에서 올라온 키는 노드가 받지 않으므로(`onPressKey`) 이름에서 Enter 는 서랍만 연다(노드는 접히지 않음).
+  ‘⤢ 개체 보기’ 는 원래 button. 포커스 테두리 `.vcd-node[role=button] · .vcd-link[role=button]:focus-visible`. 새 트리 노드도 onClick 을 직접 달지 말 것(테스트가 `className="vcd-node…" onClick=` 을 막는다). 테스트 `pressable.test.js` v3.12.4.

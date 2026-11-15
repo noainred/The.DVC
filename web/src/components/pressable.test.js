@@ -54,3 +54,16 @@ describe('v3.12.3 — 정렬 열 머리 키보드(onPressKey 한 벌 · STable �
     expect(vc).toMatch(/className="cell-link" onClick=\{\(e\) => \{ e\.stopPropagation\(\); setSel\(v\); \}\}/);
   });
 });
+
+describe('v3.12.4 — vCenter 상세 트리(노드 · 잎 · 호스트 이름) 키보드', () => {
+  it('소스 계약 — Node · Tree(자식이 있을 때) · Leaf · 호스트 이름이 pressable · aria-expanded · 포커스 CSS', () => {
+    const s = fs.readFileSync(new URL('../views/VCenterDetail.jsx', import.meta.url), 'utf8');
+    expect(s).toMatch(/className="vcd-node vcd-root" \{\.\.\.pressable\(\(\) => setO\(\(v\) => !v\)\)\} aria-expanded=\{!!o\}/);
+    expect(s).toMatch(/className="vcd-node" \{\.\.\.\(hasKids \? pressable\(\(\) => toggle\(k\)\) : \{ onClick: \(\) => toggle\(k\) \}\)\} aria-expanded=\{hasKids \? !!o : undefined\}/);
+    expect(s).toMatch(/className="vcd-node vcd-leaf" \{\.\.\.pressable\(onClick\)\}/);
+    expect(s).toMatch(/className="vcd-link" \{\.\.\.pressable\(\(e\) => \{ e\.stopPropagation\(\); setHostDrawer\(h\); \}\)\}/);
+    expect(s).not.toMatch(/className="vcd-node[^"]*" onClick=/);
+    const css = fs.readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
+    expect(css).toMatch(/\.vcd-node\[role="button"\]:focus-visible, \.vcd-link\[role="button"\]:focus-visible/);
+  });
+});
