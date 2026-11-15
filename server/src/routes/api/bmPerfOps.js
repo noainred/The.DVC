@@ -17,6 +17,7 @@ import { requireSettingsOwner, fullScopeOnlyWith } from '../admin/shared.js';
 import { addressMatcher, isAdminReq, maskedIdToken } from '../../auth/addressMask.js';
 import { currentTargets, bmUsageStatus } from '../../bmusage/poller.js';
 import { memoJson, scopeKey } from './shared.js';
+import { bmGate } from './bmWriteGate.js'; // 점검 반복 8회차 F2 — 집중 시작 표지(데모 · 역할)
 import { strOf } from '../../util/coercionTrap.js';
 import { config } from '../../config.js';
 import { resolvePerfTarget, perfTargetFail, perfVcOf, failParts, bmAddressHosts, maskBmList, applyScope } from './bmUsage.js';
@@ -84,7 +85,7 @@ export async function bmFocusRead(req, snap, deps = {}) {
   } else res = await (await D.pull()).pullEdgeFocus(found.agent, { key: found.realKey, id });
   const plan = await focusPlan(D);
   const writable = inUserWriteScope(req.user, snap, t(found.target.vcenterId));
-  const body = scrubFocus({ ...res, key, via: found.via, ...(found.via === 'edge' ? { agent: found.agent } : {}), writable, plan, pathsOs: (found.target.paths || []).includes('os'), pathsIdrac: (found.target.paths || []).includes('idrac') }, isAdmin);
+  const body = scrubFocus({ ...res, key, via: found.via, ...(found.via === 'edge' ? { agent: found.agent } : {}), writable, actions: { start: bmGate(req, 'focusStart', { snap }) }, plan, pathsOs: (found.target.paths || []).includes('os'), pathsIdrac: (found.target.paths || []).includes('idrac') }, isAdmin);
   const st = res?.ok ? 200 : await focusStatusOf(res?.code || 'edge');
   return st === 200 ? body : { __status: st, ...body };
 }

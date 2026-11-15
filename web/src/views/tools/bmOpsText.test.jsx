@@ -228,7 +228,8 @@ describe('4단계 반증 반영(W1~W5 · R4 · R5) — 화면', () => {
     expect(T.snapRunGate({ roleOk: true, writable: false })).toBe('scope');
     expect(T.snapRunGate({ roleOk: true, writable: true })).toBe('ok');
     expect(T.snapRunGate({ roleOk: true })).toBe('ok');
-    expect(tab).toMatch(/snapRunGate\(\{ roleOk: hasRole\('admin', 'operator'\), writable: list\.resp\?\.writable \}\)/);
+    // 8회차 F2: 역할 · 데모는 서버 표지(actions.run) — 표지가 없으면(구버전 응답) 예전처럼 역할
+    expect(tab).toMatch(/snapRunGate\(\{ roleOk: runG \? gateOk\(runG\) : hasRole\('admin', 'operator'\), writable: list\.resp\?\.writable \}\)/);
     const resp = { ok: true, key: 'K', via: 'local', ...profileViewFor({ tuning: TU, manual: null }), writable: false, canTag: false };
     const html = renderToStaticMarkup(h(ProfileView, { resp, itemKey: 'K', canTag: false, showReadOnly: true }));
     expect(html).toContain('쓰기 권한이 없어 수동 태그를 바꿀 수 없습니다');

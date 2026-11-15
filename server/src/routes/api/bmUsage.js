@@ -31,7 +31,7 @@ import { maskActivityEvents, maskPollerStatus, scrubHosts, addressMatcher, isAdm
 import { nodePairIdOf } from '../../bmusage/maint/judge.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 정비 창 판정과 같은 식별 함수(targetIdOf · 귀속 없음은 노드까지 — 4회차 D3 로 하나로)
 import { currentTargets, pollBmUsageOnce, bmUsageStatus, authStopsFor, sourceErrorsView, usageDetailFor } from '../../bmusage/poller.js';
 import { isDemoGuest } from '../../auth/demoGuest.js'; // v2.720(감사 R1-03)
-import { bmGates, writableVc } from './bmWriteGate.js'; // 점검 반복 2회차 E1 · E2 — 쓰기 버튼 표지
+import { bmGate, bmGates, writableVc } from './bmWriteGate.js'; // 점검 반복 2회차 E1 · E2 — 쓰기 버튼 표지
 import { latestUsage, usageHistory, usageDaily, dbStatus, METRICS } from '../../bmusage/db.js';
 import { bmUsageEvents, bmUsageLogInfo } from '../../bmusage/activityLog.js';
 import { scopeFilePaths } from '../../auth/scopeStatus.js';   // v2.598 AUTHZ-2598-04: log.file 절대 경로는 admin 만
@@ -859,7 +859,8 @@ export async function bmSnapshotRead(req, snap, deps = {}) {
     : await D.pullEdge(found.agent, { key: found.realKey, id });
   const code = res?.code || (res?.ok ? 'ok' : 'edge');
   // 반증 W4: 실행 칸을 잠글지 화면이 알 수 있게 — 쓰기 범위(조건 없이 · 실행 라우트와 같은 판정). 역할(operator 이상)은 화면이 따로 본다.
-  const body = scrubSnapshot({ ...res, key, via: found.via, ...(found.via === 'edge' ? { agent: found.agent } : {}), writable: inUserWriteScope(req.user, snap, t(found.target.vcenterId)) }, isAdmin);
+  // 8회차 F2: 데모 · 역할 표지(실행 라우트 앞의 authMiddleware denyDemoGuest · writeRole 과 같은 판정 — bmGate) — 예전에는 writable 만 실어 데모 계정에 실행 칸이 열리고 누르면 403.
+  const body = scrubSnapshot({ ...res, key, via: found.via, ...(found.via === 'edge' ? { agent: found.agent } : {}), writable: inUserWriteScope(req.user, snap, t(found.target.vcenterId)), actions: { run: bmGate(req, 'snapshotRun', { snap }) } }, isAdmin);
   const st = code === 'ok' ? 200 : snapStatus(code);
   return st === 200 ? body : { __status: st, ...body };
 }
