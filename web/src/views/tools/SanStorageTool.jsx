@@ -16,6 +16,7 @@ import { TABS, RANGES, rangeOf, rangeQuery, windowLabel, GROUPINGS, MODES, rateT
 import './sanStorage.css';
 import useSearchHandoff from '../../hooks/useSearchHandoff.js';   // v2.955 ⌘K 검색 → 현황 검색 칸(검색어는 URL 에 싣지 않는다 — v2.616 규약)
 import { handoffMany } from '../../hooks/searchHandoff.js';   // v2.955 Flow Vision 으로 어레이 포트 WWN 인계
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
 
 const BASE = ['tools', 'san-storage'];
 const TAB_KEYS = ['list', 'check', 'mapping', 'array'];
@@ -353,8 +354,7 @@ function ArrayDetail({ arrayKey, dcId, onBack }) {
   const downloadCsv = () => {
     if (!data) return;
     const blob = new Blob([csvText(data.buckets, data.sum, series)], { type: 'text/csv;charset=utf-8' });
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = csvFileName(data.key, rangeK, data.until || Date.now()); a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    saveBlob(blob, csvFileName(data.key, rangeK, data.until || Date.now()));
   };
   const ticks = model ? tickLabels(data.buckets, 6) : [];
   return (

@@ -1,7 +1,8 @@
 // shared.jsx — SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동.
 import React, { useEffect, useState } from 'react';
-import { fetchJson, HttpError } from '../../api.js';
+import { fetchJson, HttpError, dispositionName } from '../../api.js';
 import { numOrNull } from '../../numOrNull.js'; // v2.727(C-01)
+import { fmtW, fmtWh } from '../../util/fmt.js';
 
 
 
@@ -30,12 +31,10 @@ export async function saveResponseAsFile(res, fallbackName) {
     const data = await res.json().catch(() => ({}));
     throw new HttpError(data?.reason || data?.error || `HTTP ${res.status}`, { status: res.status, body: data || {} });
   }
-  const cd = res.headers.get('content-disposition') || '';
-  const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(cd);
-  const name = m ? decodeURIComponent(m[1]) : fallbackName;
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url);
+  // v3.17.5: 이름 판정은 api.js dispositionName 하나(filename* 를 먼저 · 깨진 % 인코딩에 던지지 않는다 — 예전 정규식은 첫 filename= 을 집어
+  //   'filename="ascii"; filename*=UTF-8''한글' 에서 한글 이름을 버렸고 decodeURIComponent 가 URIError 로 저장을 깼다).
+  const name = dispositionName(res.headers.get('content-disposition')) || fallbackName;
+  saveBlob(await res.blob(), name);
 }
 
 export function useTool(path, params) {
@@ -57,7 +56,9 @@ export function useTool(path, params) {
  */
 export { TEMP_WARN_C, TEMP_HOT_C } from './serverTemp/board.js';
 import { TEMP_WARN_C, TEMP_HOT_C } from './serverTemp/board.js';
-export function tempColor(c) { return c == null ? 'var(--text-faint)' : c >= TEMP_HOT_C ? 'var(--red)' : c >= TEMP_WARN_C ? 'var(--amber)' : 'var(--green)'; }
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나(즉시 revoke · 문서 밖 click 금지)
+// v3.17.5: 결측은 numOrNull — 예전엔 null 만 걸러 빈 문자열('')이 0℃ 로 읽혀 초록(정상)이었다.
+export function tempColor(c0) { const c = numOrNull(c0); return c == null ? 'var(--text-faint)' : c >= TEMP_HOT_C ? 'var(--red)' : c >= TEMP_WARN_C ? 'var(--amber)' : 'var(--green)'; }
 
 // 집계 단위(bucketMs)에 맞춰 X축 라벨: 분/시간이면 시각, 일 이상이면 날짜.
 function fmtTempTick(ts, bucketMs) {
@@ -89,19 +90,7 @@ export function Card({ label, value, meta, accent, onClick, active }) {
 }
 
 // 전력 단위: 1,000 넘으면 상위 단위(kW→MW→GW).
-const pdec1 = (n) => Number(n).toLocaleString(undefined, { maximumFractionDigits: 1 });
-export function fmtWatts(w) {
-  if (w == null || !Number.isFinite(Number(w))) return '—';
-  const a = Math.abs(w);
-  if (a >= 1e9) return `${pdec1(w / 1e9)} GW`;
-  if (a >= 1e6) return `${pdec1(w / 1e6)} MW`;
-  if (a >= 1e3) return `${pdec1(w / 1e3)} kW`;
-  return `${Math.round(w).toLocaleString()} W`;
-}
-export function fmtKwh(kwh) {
-  if (kwh == null || !Number.isFinite(Number(kwh))) return '—';
-  const a = Math.abs(kwh);
-  if (a >= 1e6) return `${pdec1(kwh / 1e6)} GWh`;
-  if (a >= 1e3) return `${pdec1(kwh / 1e3)} MWh`;
-  return `${pdec1(kwh)} kWh`;
-}
+// v3.17.5: util/fmt.js fmtW · fmtWh 의 사본이었다 — 같은 출력이지만 결측 판정이 `Number.isFinite(Number(v))` 라 빈 문자열이 '0 W'·'0 kWh' 가 됐다
+//   (fmt.js 는 v3.10.7 에 numOrNull 로 고쳤고 이 사본은 남아 있었다). 코어는 하나 — 이름만 남긴다.
+export function fmtWatts(w) { return fmtW(w); }
+export function fmtKwh(kwh) { return fmtWh(kwh); }

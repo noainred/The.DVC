@@ -5,6 +5,7 @@ import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
 import { countText, durationText, strField } from './agentScanText.js'; // v2.598 CENTRAL-03: 숫자만 글자로, 나머지는 —
 import { droppedSecretNote, passwordDroppedLines } from './droppedSecretText.js'; // v2.731(A3-01 ②): 대역·계정 변경 시 비밀번호 폐기 안내
+import { saveBlob } from '../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나(즉시 revoke · 문서 밖 click 금지)
 
 const EMPTY = { agent: '', ips: '', username: 'root', password: '', enabled: true };
 
@@ -31,11 +32,7 @@ export default function AgentScans() {
 
   const downloadSample = () => {
     const blob = new Blob([SAMPLE_CSV], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = 'agent-assignments-sample.csv';
-    document.body.appendChild(a); a.click(); a.remove();
-    URL.revokeObjectURL(url);
+    saveBlob(blob, 'agent-assignments-sample.csv');
   };
 
   const onFile = async (e) => {

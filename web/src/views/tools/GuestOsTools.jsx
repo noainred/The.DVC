@@ -11,6 +11,7 @@ import { STable } from '../../components/STable.jsx';
 import { dayStamp } from '../../dayStamp.js';
 import BoldText from '../../components/boldText.jsx';
 import { guestAuthLines } from '../authSkipText.js'; // v2.591(감사 F2): 게스트 계정 인증 실패 정지·차단기
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나(즉시 revoke · 문서 밖 click 금지)
 
 // v3.13.7 설정 칸 한 묶음(이름 · 칸 · 단위) — 줄이 바뀌어도 함께 움직인다
 const FIELD = { alignItems: 'center', gap: 6, whiteSpace: 'nowrap' };
@@ -142,8 +143,7 @@ export function GuestOsVmsModal({ label, params, onClose }) {
     const lines = [head.join(',')];
     for (const r of items) lines.push([r.name, r.vcenterId, r.cluster, r.host, r.cpu, r.memGB, r.diskGB ?? '', r.ip, r.powerState === 'POWERED_ON' ? 'On' : 'Off'].map(esc).join(','));   // v2.727(C-01): 못 읽은 용량은 빈 칸
     const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `guestos-${String(label).replace(/[^a-zA-Z0-9._-]+/g, '_')}-${dayStamp()}.csv`; a.click(); URL.revokeObjectURL(url);
+    saveBlob(blob, `guestos-${String(label).replace(/[^a-zA-Z0-9._-]+/g, '_')}-${dayStamp()}.csv`);
   };
   const cols = [
     { key: 'name', label: 'VM', render: (r) => <VmLink name={r.name} vcenterId={r.vcenterId} label={r.name} /> },

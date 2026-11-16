@@ -6,6 +6,7 @@ import {
   backupRuns, runTone, cloneBytes, fmtBytes, agoText, durText, execText, busyOp, KIND_LABEL, triggerText, keepText, HISTORY_FILTERS, historyFilter, historyCsv,
   rpoText, ganttRows, pointTimeline, progressOf,
 } from './vmCloneView.js';
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
 
 /**
  * VM 백업 센터 › 잡 상세(시안 ②, v2.793) — 복원 지점(검증·복구) · 세션 타임라인 · 세션 이력.
@@ -35,11 +36,7 @@ export default function VmCloneJobDetail({ d, job, now, msg, busy, onBack, onRun
   const history = useMemo(() => [...(job.history || [])].sort((a, b) => (b.at || 0) - (a.at || 0)), [job.history]);
   const shownHist = useMemo(() => historyFilter(history, hf), [history, hf]);
   const exportCsv = () => {
-    const url = URL.createObjectURL(new Blob(['\ufeff' + historyCsv(job, shownHist)], { type: 'text/csv;charset=utf-8' }));
-    const a = document.createElement('a');
-    a.href = url; a.download = `vm-backup-history-${String(job.vmName || job.id).replace(/[^A-Za-z0-9._-]/g, '_')}.csv`;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    saveBlob(new Blob(['\ufeff' + historyCsv(job, shownHist)], { type: 'text/csv;charset=utf-8' }), `vm-backup-history-${String(job.vmName || job.id).replace(/[^A-Za-z0-9._-]/g, '_')}.csv`);
   };
   const clones = useMemo(() => [...(job.clones || [])].sort((a, b) => (b.at || 0) - (a.at || 0)), [job.clones]);
   const b = cloneBytes(job.clones);

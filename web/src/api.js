@@ -2,6 +2,7 @@
 // 않으므로 순환이 없다(설정 조회는 fetchJson 을 인자로 받는다).
 import { startReq, endReq, reportStall, loadPerfClientConfig, ridOf, pollServerStatus } from './perfClient.js';
 import { useEffect, useRef, useState } from 'react';
+import { saveBlob } from './util/saveBlob.js';
 
 const BASE = '/api';
 const TOKEN_KEY = 'vmportal.token';
@@ -384,14 +385,7 @@ export async function downloadFile(path, filename = '') {
     throw httpFail(path, res, data || {});
   }
   const name = filename || dispositionName(res.headers.get('content-disposition')) || path.split('/').pop() || 'download';
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  saveBlob(await res.blob(), name);   // v3.17.5: 공용 util/saveBlob.js(같은 규약 — 붙여 누르고 1초 뒤 revoke)
   return name;
 }
 
@@ -412,17 +406,9 @@ export async function postDownload(path, body = {}, filename = '') {
     // 403 이면 권한 정보를 보존한다 — 다운로드 버튼도 '권한 없음' 안내로 이어져야 한다.
     throw httpFail(path, res, data || {});
   }
-  const cd = res.headers.get('content-disposition') || '';
-  const m = /filename="?([^";]+)"?/i.exec(cd);
-  const name = filename || (m && decodeURIComponent(m[1])) || path.split('/').pop() || 'download';
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  // v3.17.5: 이름 판정은 dispositionName 하나(GET downloadFile 과 같게 — filename* 우선 · 깨진 % 인코딩에 던지지 않는다).
+  const name = filename || dispositionName(res.headers.get('content-disposition')) || path.split('/').pop() || 'download';
+  saveBlob(await res.blob(), name);   // v3.17.5: 공용 util/saveBlob.js(같은 규약 — 붙여 누르고 1초 뒤 revoke)
   return name;
 }
 

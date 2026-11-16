@@ -19,6 +19,7 @@ import {
   NONE_DC, fmtBps, pctTone, deltaText, ratioText, reasonText, reasonBadge, kindTag, SAN_TYPE_CHIPS, typesQuery,
   measuredText, bmBasisText, sanBasisText, compareRows, chipMeta, statusLine, latestCapAt, bytesText, pctText,
 } from './bmSanCompareText.js';
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
 
 const HOURS = [{ h: 1, label: '최근 1시간' }, { h: 24, label: '24시간' }, { h: 168, label: '7일' }];
 const toneColor = (p) => { const t = pctTone(p); return t === 'red' ? 'var(--red)' : t === 'amber' ? 'var(--amber)' : t === 'green' ? 'var(--green)' : 'var(--text-dim)'; };
@@ -102,10 +103,7 @@ export default function BmSanCompare() {
     const line = (r) => [kindTag(r.kind === 'bm' ? 'bm' : r.type).label, r.name, r.where, r.totalBytes ?? '', r.usedBytes ?? '', r.pct ?? '', r.bps ?? '', r.peakBps ?? '', r.measured || '', r.reason ? reasonBadge(r.reason) : '']
       .map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',');
     const csv = `﻿${[head.join(','), ...table.totals.map(line), ...shownRows.map(line)].join('\r\n')}\r\n`;
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-    a.download = `bm-san-compare-${dayStamp()}.csv`;
-    a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    saveBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `bm-san-compare-${dayStamp()}.csv`);
   };
 
   return (

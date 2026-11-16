@@ -23,6 +23,7 @@ import { unitText } from './unitText.js';
 import { forecastStaleText, FORECAST_STALE_TITLE, forecastLimitKind } from './forecastRowText.js'; // v2.733(C2-07): 마지막 표본이 오래된 항목 표지
 import { suggestCell, heldNote } from './rightsizeText.js';
 import Select from '../components/Select.jsx';
+import { saveBlob } from '../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나(즉시 revoke · 문서 밖 click 금지)
 const fmtDay = (ts) => (ts ? new Date(ts).toLocaleDateString('ko-KR') : '—');
 // v2.727(감사 C-01): 값이 없으면(null — 못 읽은 디스크 용량) '0 GB' 가 아니라 '—'.
 const tb = (gb) => { const n = numOrNull(gb); return n == null ? '—' : (n >= 1024 ? `${(n / 1024).toFixed(1)} TB` : `${Math.round(n)} GB`); };
@@ -31,9 +32,7 @@ const tb = (gb) => { const n = numOrNull(gb); return n == null ? '—' : (n >= 1
 function exportCsv(name, head, rows) {
   const csv = [head.map(csvCell).join(','), ...rows.map((r) => r.map(csvCell).join(','))].join('\n');
   const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = `${name}-${dayStamp()}.csv`; a.click();
-  URL.revokeObjectURL(url);
+  saveBlob(blob, `${name}-${dayStamp()}.csv`);
 }
 
 const STATUS_BADGE = {
