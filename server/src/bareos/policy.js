@@ -394,7 +394,7 @@ export function policyView(o) {
 
   // ── Director 수집 상태 ──
   const directors = [];
-  let schedN = 0; let unusedN = 0; let jobdefsN = null; let filesetsN = null; let aiN = 0; let poolsN = null; let volsN = null; let fullPools = 0; let errorVols = 0; let maxPct = null;
+  let schedN = 0; let unusedN = 0; let jobdefsN = null; let filesetsN = null; let aiN = 0; let poolsN = null; let volsN = null; const pk = newPoolKpi();   // 52회차 F3
   const scheduleRows = [];
   const week = Array.from({ length: 7 }, (_, i) => ({ day: today + i * DAY, F: 0, D: 0, I: 0, other: 0, jobs: 0, groups: 0 }));
   const addWeek = (at, level, n) => {
@@ -450,9 +450,7 @@ export function policyView(o) {
       poolsN = (poolsN || 0) + pr.length;
       for (const p of pr) {
         if (p.numVols !== null) volsN = (volsN || 0) + p.numVols;
-        if (p.full === true) fullPools++;
-        errorVols += p.vol?.status?.Error || 0;
-        if (p.pct !== null && (maxPct === null || p.pct > maxPct)) maxPct = p.pct;
+        addPoolKpi(pk, p);
         poolTable.push({ ...p, director: dir.name, directorId: id });
       }
     }
@@ -520,7 +518,7 @@ export function policyView(o) {
     kpis: {
       schedules: { director: collected ? schedN : null, group: groupsKnown ? groupSchedN : null, unused: collected ? unusedN : null },   // 전체 점검 13회차(W-10): 그룹 파일을 못 읽으면 0 이 아니라 모름
       jobdefs: jobdefsN, filesets: filesetsN, ai: jobdefsN === null ? null : aiN,
-      pools: poolsN === null ? null : { n: poolsN, vols: volsN, full: fullPools, errorVols, maxPct },
+      pools: poolsN === null ? null : { n: poolsN, vols: volsN, full: pk.full, unknownFull: pk.unknownFull, errorVols: poolErrorVols(pk), errorVolsUnknown: pk.errorVolsUnknown, maxPct: pk.maxPct },
       vm: { total: digestsKnown ? Object.values(counts).reduce((a, b) => a + b, 0) : null, ...counts },
     },
     week, schedules: scheduleRows.slice(0, 1000), jobdefs: jobdefRows.slice(0, 500), filesets: filesetRows.slice(0, 500), pools: poolTable.slice(0, 1000),
@@ -532,8 +530,23 @@ export function policyView(o) {
 }
 
 /**
+ * 52회차 F3(재현): 풀 하나를 합계에 더한다 — 세는 곳 셋(policyView · policySummary · poolsView)이 같은 판정. 볼륨 목록을 못 읽은 풀은
+ *   가득 참을 모름(full null)으로, 오류 볼륨도 0 이 아니라 모름(errorVolsUnknown)으로 센다(예전에는 '가득 참 0 · 오류 볼륨 0' 으로 보였다).
+ */
+export function addPoolKpi(acc, p) {
+  acc.n += 1;
+  if (p.full === true) acc.full += 1; else if (p.full === null) acc.unknownFull += 1;
+  if (p.vol) acc.errorVols += p.vol?.status?.Error || 0; else acc.errorVolsUnknown += 1;
+  if (p.pct !== null && (acc.maxPct === null || p.pct > acc.maxPct)) acc.maxPct = p.pct;
+  return acc;
+}
+export const newPoolKpi = () => ({ n: 0, full: 0, unknownFull: 0, errorVols: 0, errorVolsUnknown: 0, maxPct: null });
+/** 55회차 #7: 볼륨을 전부 모르면 오류 볼륨은 0 이 아니라 null(풀 탭 poolsView 와 같은 규칙 — 세 곳이 같은 판정). */
+export const poolErrorVols = (acc) => (acc.n > 0 && acc.errorVolsUnknown === acc.n ? null : acc.errorVols);
+
+/**
  * Backup › Summary 의 Bareos 카드 · 용량 카드에 쓰는 요약(범위 안 Director 수집본만). 수집본이 하나도 없으면 null(— '수집 전').
- * @returns {null | { pools:{ n, full, errorVols, maxPct }|null, schedules:number|null, next:number|null, collected:number, directors:number }}
+ * @returns {null | { pools:{ n, full, unknownFull, errorVols, errorVolsUnknown, maxPct }|null, schedules:number|null, next:number|null, collected:number, directors:number }}
  */
 export function policySummary(settings, allowed, digests = [], { now = Date.now(), demo = false, db = loadPolicy() } = {}) {
   const scoped = scopedDirectors(settings, allowed);
@@ -546,8 +559,8 @@ export function policySummary(settings, allowed, digests = [], { now = Date.now(
     collected++;
     const pr = poolRows(d);
     if (pr) {
-      pools = pools || { n: 0, full: 0, errorVols: 0, maxPct: null };
-      for (const p of pr) { pools.n++; if (p.full === true) pools.full++; pools.errorVols += p.vol?.status?.Error || 0; if (p.pct !== null && (pools.maxPct === null || p.pct > pools.maxPct)) pools.maxPct = p.pct; }
+      pools = pools || newPoolKpi();
+      for (const p of pr) addPoolKpi(pools, p);   // 52회차 F3
     }
     const sch = val(d, 'scheduler');
     if (sch) {
@@ -555,7 +568,7 @@ export function policySummary(settings, allowed, digests = [], { now = Date.now(
       for (const r of previewRuns(d, jobOk, byJob)) if (r.at >= now && (next === null || r.at < next)) next = r.at;
     }
   }
-  return collected ? { pools, schedules, next, collected, directors: scoped.size } : null;
+  return collected ? { pools: pools ? { ...pools, errorVols: poolErrorVols(pools) } : pools, schedules, next, collected, directors: scoped.size } : null;   // 55회차 #7
 }
 
 /**
@@ -657,7 +670,7 @@ export function poolsView(o) {
   const mine = digests.filter((j) => !!j.demo === demo && (!allowed || allowed.has(j.vcenterId)));
   const myGroups = groups.filter((g) => !allowed || allowed.has(g.vcenterId));
   const directors = []; const pools = []; const clients = [];
-  let poolsN = null; let volsN = null; let full = 0; let errorVols = 0; let maxPct = null; let clientsN = null; let unknownFull = 0;
+  let poolsN = null; let volsN = null; let full = 0; let errorVols = 0; let maxPct = null; let clientsN = null; let unknownFull = 0; let errorVolsUnknown = 0;
   for (const [id, { dir, vcIds }] of scoped) {
     const d = db.directors[id];
     directors.push({
@@ -674,8 +687,9 @@ export function poolsView(o) {
       poolsN = (poolsN || 0) + pr.length;
       for (const p of pr) {
         if (p.numVols !== null) volsN = (volsN || 0) + p.numVols;
-        if (p.full === true) full++; else if (p.full === null) unknownFull++;
-        errorVols += p.vol?.status?.Error || 0;
+        // 53회차 N6: 판정을 복제하지 않고 addPoolKpi 하나로(가득 참 · 판정 모름 · 오류 볼륨 · 볼륨 모르는 풀)
+        const one = addPoolKpi(newPoolKpi(), p);
+        full += one.full; unknownFull += one.unknownFull; errorVols += one.errorVols; errorVolsUnknown += one.errorVolsUnknown;
         if (p.pct !== null && (maxPct === null || p.pct > maxPct)) maxPct = p.pct;
         pools.push({
           ...p, director: dir.name, directorId: id, poolAt: d.data?.pools?.at ?? null, volAt: d.data?.volumes?.at ?? null,
@@ -698,7 +712,7 @@ export function poolsView(o) {
   clients.sort((a, b) => a.director.localeCompare(b.director) || a.name.localeCompare(b.name));
   return {
     ok: true, at: now, directors,
-    kpis: { pools: poolsN, vols: volsN, full: poolsN === null ? null : full, unknownFull: poolsN === null ? null : unknownFull, errorVols: poolsN === null ? null : errorVols, maxPct, clients: clientsN },
+    kpis: { pools: poolsN, vols: volsN, full: poolsN === null ? null : full, unknownFull: poolsN === null ? null : unknownFull, errorVols: poolsN === null || (poolsN > 0 && errorVolsUnknown === poolsN) ? null : errorVols, errorVolsUnknown: poolsN === null ? null : errorVolsUnknown, maxPct, clients: clientsN },   // 53회차 N6: 볼륨을 전부 모르면 0 이 아니라 —
     pools: pools.slice(0, 1000), clients: clients.slice(0, 2000), ...(pools.length > 1000 ? { poolsTruncated: true } : {}),
     ...(digestsKnown ? {} : { registryUnreadable: true }), loadError: !!policyLoadError() || undefined,
   };
@@ -717,7 +731,7 @@ export function poolPolicyOf(directorId, poolName, db = loadPolicy()) {
   const p = findPool(pr, poolName);
   if (!p) return { name: str(poolName, 64), missing: true, retentionSec: null, retentionFrom: null, full: null, pct: null, errorVols: 0, at };
   const retentionFrom = p.volRetentionSec !== null ? 'pool' : p.vol?.retentionSec != null ? 'volumes' : null;
-  return { name: p.name, retentionSec: p.volRetentionSec ?? p.vol?.retentionSec ?? null, retentionFrom, full: p.full, pct: p.pct, errorVols: p.vol?.status?.Error || 0, at };
+  return { name: p.name, retentionSec: p.volRetentionSec ?? p.vol?.retentionSec ?? null, retentionFrom, full: p.full, pct: p.pct, errorVols: p.vol ? (p.vol?.status?.Error || 0) : null, at };   // 52회차 F3: 볼륨 모름이면 null
 }
 
 /**

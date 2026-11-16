@@ -40,15 +40,17 @@ export function countByHost(vms) {
  *                      /vms 응답 상한에 걸릴 수 있는 대형 vCenter 에서도 전체 수는 서버 값이 정확하다.
  */
 export function virtSum(hosts, vcpu, vmem, vmCount) {
-  let alloc = 0, cores = 0, vmc = 0, memAlloc = 0, memPhys = 0;
+  let alloc = 0, cores = 0, vmc = 0, memAlloc = 0, memPhys = 0, capUnknown = 0;
+  const known = (v) => typeof v === 'number' && Number.isFinite(v);
   for (const h of hosts || []) {
     alloc += (vcpu && vcpu.get(h.name)) || 0;
-    cores += Number(h.cpuCores) || 0;
     vmc += vmCount ? vmCount.get(h.name) || 0 : Number(h.vmCount) || 0;
     memAlloc += (vmem && vmem.get(h.name)) || 0;
-    memPhys += Number(h.memTotalMB) || 0;
+    // 54회차(다른 세션 9 · 10회차 반증 — 재현): 용량(코어 · 메모리)을 못 읽은 호스트가 하나라도 있으면 분모가 부분 합이라 비율이 부풀었다(다 읽었으면 1.25 가 2.5 · 주의 · 위험 색).
+    //   서버 store.hostCapacityKnown 과 같은 뜻(여기서는 비율에 쓰는 두 칸) — 모르면 분모를 null(배지 없음 · 표 '—').
+    if (known(h.cpuCores) && known(h.memTotalMB)) { cores += h.cpuCores; memPhys += h.memTotalMB; } else capUnknown += 1;
   }
-  return { alloc, cores, vmc, memAlloc, memPhys };
+  return { alloc, cores: capUnknown ? null : cores, vmc, memAlloc, memPhys: capUnknown ? null : memPhys, capUnknown };
 }
 
 /**

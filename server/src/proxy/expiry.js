@@ -6,8 +6,9 @@
 
 import { listMappings, getMapping, removeMapping } from './registry.js';
 import { deprovision } from './provision.js';
+import { envPositive } from '../util/envNumber.js';   // 55회차: 양수 env 는 하나로
 
-const DAY_MS = Number(process.env.REMOTE_MAPPING_TTL_MS) || 24 * 60 * 60 * 1000;
+const DAY_MS = envPositive(process.env.REMOTE_MAPPING_TTL_MS, 86_400_000);   // 1일 · 55회차 #10: 음수 · Infinity 를 통과시키지 않는다
 
 export async function pruneExpiredMappings(now = Date.now()) {
   let removed = 0;

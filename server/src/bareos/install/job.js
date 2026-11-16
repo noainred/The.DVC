@@ -186,8 +186,21 @@ export async function runPrecheck({ vcenterId, body = {} }) {
   const judged = judgePrecheck(facts, { mode: t.mode, bundle: bundle?.contents || null, plan });
   const hostIds = [facts.hostAddr, facts.hostname, ...(facts.addrs || [])].filter(Boolean);
   if (t.resetUnregistered) resetChecked(t0r, body, hostIds);   // 러너가 읽은 서버 주소 · 이름 · 모든 주소로 한 번 더(등록된 Director · 다른 법인 작업이면 던진다)
-  const ledger = t.director ? listJobs().filter((x) => !x.demo && x.vcenterId === vcenterId).length : 0;
-  return { at: Date.now(), ms: Date.now() - t0, target: t, mode: t.mode, ...(t.resetUnregistered ? { resetUnregistered: true, hostIds } : {}), ...judged, ledgerTargets: ledger, bundle: bundle ? { version: bundle.version, contents: bundle.contents, size: bundle.size } : null };
+  // 52회차 F4(재현): 재설치는 그 Director 서버의 설정 · 카탈로그를 지운다 — 수는 그 vCenter 가 아니라 **그 Director 를 쓰는 대상 전부**(전부 되돌리기 M4 와 같은 판정 jobDirectorId).
+  //   한 Director 에 vCenter 가 둘 이상 묶여 있으면(옛 1:1:1 정리 전 · 규칙 밖) 확인 화면이 1개라고 하고 다른 서비스의 잡 설정 40개를 지웠다. 그 vCenter 들을 함께 싣는다.
+  let ledger = 0; let sharedVcenters = [];
+  if (t.director) {
+    let st = null; try { st = loadSettings(); } catch { st = null; }
+    const mineDir = st ? listJobs().filter((x) => !x.demo && jobDirectorId(x, st) === t.director.id) : listJobs().filter((x) => !x.demo && x.vcenterId === vcenterId);
+    ledger = mineDir.length;
+    if (st) {
+      const others = new Map();
+      for (const s of st.sites || []) if (s.directorId === t.director.id && s.vcenterId !== vcenterId) others.set(s.vcenterId, 0);
+      for (const x of mineDir) if (x.vcenterId !== vcenterId) others.set(x.vcenterId, (others.get(x.vcenterId) || 0) + 1);
+      sharedVcenters = [...others.entries()].map(([id, n]) => ({ vcenterId: id, targets: n })).slice(0, 50);
+    }
+  }
+  return { at: Date.now(), ms: Date.now() - t0, target: t, mode: t.mode, ...(t.resetUnregistered ? { resetUnregistered: true, hostIds } : {}), ...judged, ledgerTargets: ledger, sharedVcenters, bundle: bundle ? { version: bundle.version, contents: bundle.contents, size: bundle.size } : null };
 }
 
 /* ───────── 시작 ───────── */

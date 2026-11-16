@@ -44,7 +44,7 @@ const ledgerWarnLog = createChangeLogger({ windowMs: 3_600_000, maxKeys: 4 }); /
 // 일시 실패(고RTT 타임아웃 등)로 vCenter 인벤토리가 스냅샷에서 사라지지 않는다(호스트/VM 소실·
 // ipam.db 대량 재기록·알람 전원 해소→재발송 방지). 이 창을 넘겨 계속 실패하면 진짜 장기 장애로
 // 보고 unreachable 엔트리로 떨어뜨린다(낡은 데이터를 영원히 정상처럼 보여주지 않기 위함).
-const LASTGOOD_HOLD_MS = Number(process.env.LASTGOOD_HOLD_MS) || 6 * 3_600_000; // 기본 6시간
+const LASTGOOD_HOLD_MS = envPositive(process.env.LASTGOOD_HOLD_MS, 21_600_000); // 기본 6시간 · 54회차: 식 기본값도 envPositive
 
 // 매 폴링 주기의 동시 vCenter 수집 개수 상한(고RTT·다수 vCenter에서 CPU 스파이크 완화).
 const COLLECT_CONCURRENCY = Math.max(1, Number(process.env.COLLECT_CONCURRENCY) || 8);

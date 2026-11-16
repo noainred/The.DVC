@@ -111,7 +111,10 @@ export function directorState({ mapped, configured, authStopped, poll } = {}) {
   else if (relayWaiting(poll)) state = 'relay';
   else if (poll.ok === true) state = 'ok';
   else state = 'pending';
-  return { state, resultsKnown: !['unset', 'auth', 'error'].includes(state) };
+  // 53회차 N1(재현): 상태 조회가 시한에 잘렸어도(aborted) 읽은 행은 원장에 반영됐다 — 고RTT 법인의 백업 창에서 늘 생기는 일이라
+  //   그때마다 결과를 '모름' 으로 빼면 현황판 · 통합 화면이 빨간 표지 · 합계 제외로 흔들렸다. 상태(state 'error')는 그대로 두어 잘림을 밝힌다.
+  const partialOk = state === 'error' && poll?.code === 'aborted' && Number(poll?.checked) > 0;
+  return { state, resultsKnown: partialOk || !['unset', 'auth', 'error'].includes(state) };
 }
 
 /**

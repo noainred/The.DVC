@@ -86,7 +86,13 @@ describe('virtSum — 클러스터·DC 합계', () => {
 
   it('맵이 없거나 VM 없는 호스트도 0으로 안전하게 합산', () => {
     const s = virtSum([{ name: 'lonely', cpuCores: 4, memTotalMB: 4096 }], undefined, undefined);
-    expect(s).toEqual({ alloc: 0, cores: 4, vmc: 0, memAlloc: 0, memPhys: 4096 });
+    expect(s).toEqual({ alloc: 0, cores: 4, vmc: 0, memAlloc: 0, memPhys: 4096, capUnknown: 0 });
     expect(virtSum(undefined, new Map(), new Map()).cores).toBe(0);
+  });
+  it('54회차: 용량을 못 읽은 호스트가 있으면 분모(코어 · 물리 메모리)는 null — 부분 합으로 비율을 부풀리지 않는다', () => {
+    const s = virtSum([{ name: 'a', cpuCores: 16, memTotalMB: 65536 }, { name: 'b', cpuCores: null, memTotalMB: null }], new Map([['a', 20], ['b', 20]]), new Map([['a', 51200], ['b', 51200]]));
+    expect(s.capUnknown).toBe(1);
+    expect(s.cores).toBeNull();
+    expect(s.memPhys).toBeNull();
   });
 });

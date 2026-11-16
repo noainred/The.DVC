@@ -82,7 +82,9 @@ export function corpAttention(c) {
 }
 /** 법인 줄의 칸 — unknown(결과 모름) · attn(확인 필요) · ok(정상). 세 칸은 겹치지 않는다(칩 수의 합 = 전체). */
 export function corpBucket(row) {
-  if (!row?.director || ['auth', 'error', 'unset'].includes(row.director.state)) return 'unknown';
+  // 55회차 #1(53 N1 회귀): '결과 모름' 은 판정 코어의 resultsKnown 으로(잘렸지만 읽은 행이 있는 법인은 state 'error' 여도 결과를 안다 — 서버 합계와 같게)
+  if (!row?.director) return 'unknown';
+  if (row.director.resultsKnown === false || (row.director.resultsKnown == null && ['auth', 'error', 'unset'].includes(row.director.state))) return 'unknown';
   const a = corpAttention(row.counts);
   return a.n === null ? 'unknown' : a.n > 0 ? 'attn' : 'ok';
 }

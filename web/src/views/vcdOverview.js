@@ -63,7 +63,7 @@ export function powerSum(list) {
   for (const h of list || []) { const v = num(h?.powerWatts); if (v != null) { sum += v; n += 1; } }
   return { powerW: n ? sum : null, powerHosts: n };
 }
-const toGb = (mb) => Math.round((Number(mb) || 0) / 1024);
+const toGb = (mb) => (mb == null ? null : Math.round((Number(mb) || 0) / 1024));   // 54회차: 모르는 용량은 0 GB 가 아니다
 
 /**
  * 평면 행 생성: vCenter 1행 → (클러스터 1행 → 그 클러스터 호스트 n행) 반복.
@@ -105,9 +105,9 @@ export function buildOverviewRows({ site = {}, hosts = [], vms = [], metrics = {
         level: '호스트', vcenter: vcName, cluster: cl, host: h.name || '', state: stateKo(h.connectionState),
         hostCount: 1, vmCount: vmCountByHost ? vmCountByHost.get(h.name) || 0 : Number(h.vmCount) || 0,
         cpuPct: hostUsagePct(h, 'cpuUsagePct'), memPct: hostUsagePct(h, 'memUsagePct'),
-        cpuRatio: ratioText(alloc, h.cpuCores), vcpuAlloc: alloc, cpuCores: Number(h.cpuCores) || 0,
+        cpuRatio: ratioText(alloc, h.cpuCores), vcpuAlloc: alloc, cpuCores: typeof h.cpuCores === 'number' && Number.isFinite(h.cpuCores) ? h.cpuCores : null,   // 55회차 #5: 모르는 코어는 0 이 아니다
         cpuThreads: Number(h.cpuThreads) || 0,
-        memRatio: ratioText(memAlloc, h.memTotalMB), memAllocGB: toGb(memAlloc), memPhysGB: toGb(h.memTotalMB),
+        memRatio: ratioText(memAlloc, h.memTotalMB), memAllocGB: toGb(memAlloc), memPhysGB: toGb(typeof h.memTotalMB === 'number' && Number.isFinite(h.memTotalMB) ? h.memTotalMB : null),
         version: h.version || '', vendor: h.vendor || '', model: h.model || '',
         powerW: num(h.powerWatts), powerHosts: null, tempC: num(h.tempC),
       });

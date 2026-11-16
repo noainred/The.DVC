@@ -63,7 +63,7 @@ function Capacity({ rows, em, bp, emFleetWide = false }) {   // v3.10.21 emFleet
             {rw.more > 0 && <div className="muted">… {fmtNum(rw.more)}곳 더 — Veeam 메뉴</div>}
           </> : <div className="muted">EM 자료는 전체 범위 계정만 봅니다</div>}
           <div className={bp?.pools?.full ? undefined : 'muted'} style={bp?.pools?.full ? { color: TONE.bad, fontWeight: 700 } : undefined} title="Director 정책 수집본 — 볼륨 수가 상한에 닿았고 쓸 수 있는 볼륨(Append · Recycle · Purged)과 Scratch 볼륨이 없는 풀 · Bareos › 정책 · 일정">
-            Bareos 풀 가득 참 {bp?.pools ? fmtNum(bp.pools.full) : bp ? '—(풀 수집 실패)' : '—(수집 전)'}{bp?.pools?.errorVols ? ` · 오류 볼륨 ${fmtNum(bp.pools.errorVols)}` : ''}
+            Bareos 풀 가득 참 {bp?.pools ? fmtNum(bp.pools.full) : bp ? '—(풀 수집 실패)' : '—(수집 전)'}{bp?.pools?.unknownFull ? ` · 판정 모름 ${fmtNum(bp.pools.unknownFull)}` : ''}{bp?.pools?.errorVols ? ` · 오류 볼륨 ${fmtNum(bp.pools.errorVols)}` : ''}{bp?.pools?.errorVolsUnknown ? ` · 볼륨 모르는 풀 ${fmtNum(bp.pools.errorVolsUnknown)}` : ''}
           </div>
         </div>
       </div>

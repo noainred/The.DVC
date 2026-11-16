@@ -369,6 +369,8 @@ api.get('/hosts', invHosts, (req, res) => memoJson(req, res, 'inv:hosts', (snap)
   for (const h of hosts) { const v = h.version || 'unknown'; verMap[v] = (verMap[v] || 0) + 1; }
   const physicalCores = sm((h) => h.cpuCores);
   const physicalMemMB = sm((h) => h.memTotalMB);
+  // 54회차(다른 세션 9 · 10회차 반증 — 재현): 용량을 못 읽은 호스트가 있으면 비율의 분모가 부분 합이다 — 알림 · Summary 와 같은 판정(hostCapacityKnown)으로 비율을 내지 않는다
+  const hostsCapacityUnknown = hosts.filter((h) => !hostCapacityKnown(h)).length;
   const summary = {
     total: hosts.length,
     connected: hosts.filter((h) => h.connectionState === 'CONNECTED').length,
@@ -380,11 +382,12 @@ api.get('/hosts', invHosts, (req, res) => memoJson(req, res, 'inv:hosts', (snap)
     physicalCores,
     logicalCores: sm((h) => h.cpuThreads || h.cpuCores),
     vcoreAllocated,
-    vcorePerCore: physicalCores > 0 ? Math.round((vcoreAllocated / physicalCores) * 100) / 100 : 0,
+    vcorePerCore: hostsCapacityUnknown ? null : physicalCores > 0 ? Math.round((vcoreAllocated / physicalCores) * 100) / 100 : 0,
+    hostsCapacityUnknown,
     memTotalGB: Math.round(physicalMemMB / 1024),
     // 메모리 가상화율(오버커밋) = 할당된 VM 메모리 합 / 물리 호스트 메모리 합. 1.0 초과면 오버커밋.
     vmemAllocatedGB: Math.round(vmemAllocatedMB / 1024),
-    memOvercommit: physicalMemMB > 0 ? Math.round((vmemAllocatedMB / physicalMemMB) * 100) / 100 : 0,
+    memOvercommit: hostsCapacityUnknown ? null : physicalMemMB > 0 ? Math.round((vmemAllocatedMB / physicalMemMB) * 100) / 100 : 0,
     powerKw: Math.round(sm((h) => h.powerWatts) / 100) / 10,
     esxiVersions: Object.entries(verMap).map(([version, count]) => ({ version, count })).sort((a, b) => b.count - a.count),
   };

@@ -196,6 +196,7 @@ import { startLinkCheckWorker } from './agent/linkCheckWorker.js'; // 엣지가 
 import { startPowerOffPoller } from './tools/powerOffPoller.js';     // 전원 꺼짐 점검(v2.484)
 import { resumeHostAccessPending } from './hostaccess/service.js';  // 호스트 접근 제어 확정 대기 복구(v2.485)
 import { startSshAccessScheduler } from './sshaccess/service.js';
+import { envPositive } from './util/envNumber.js';   // 55회차: 양수 env 는 하나로
 import { flushKeyUsage } from './sshaccess/usage.js';  // 종료 직전 키 사용 기록 쓰기(30초 묶음이 남긴 것 — 점검 D-5)  // v3.9.0 SSH 공용 접속 — 키 바꿔치기 감시 · 받는 곳 새 파일 · 사용 기록 쓰기(10분)
 import { resumeInstallJobs, reserveInstallResumeLocks } from './bareos/install/job.js';  // v2.844 Bareos 완전 설치 — 진행 중이던 작업 이어 읽기(러너는 엣지 노드 안에서 계속 돈다)
 import { startStoragePush } from './storage/push.js';            // 엣지→중앙 스냅샷 push(v2.302)
@@ -724,9 +725,10 @@ function wireListener(server, port) {
   //   재연결 churn/죽은 소켓 재사용을 유발 → 75s로 상향.
   // - headersTimeout는 keepAliveTimeout보다 커야 함(Node 권장). requestTimeout은 느린 대용량
   //   업로드가 중간에 끊기지 않도록 넉넉히(0=무제한 대신 명시적 큰 값).
-  server.keepAliveTimeout = Number(process.env.SERVER_KEEPALIVE_MS) || 75_000;
-  server.headersTimeout = Number(process.env.SERVER_HEADERS_TIMEOUT_MS) || 90_000;
-  server.requestTimeout = Number(process.env.SERVER_REQUEST_TIMEOUT_MS) || 600_000;
+  // 55회차 #10: 음수를 주면 헤더 · 요청 시한 검사가 꺼졌다(slowloris 방어) — 양수만(envPositive)
+  server.keepAliveTimeout = envPositive(process.env.SERVER_KEEPALIVE_MS, 75_000);
+  server.headersTimeout = envPositive(process.env.SERVER_HEADERS_TIMEOUT_MS, 90_000);
+  server.requestTimeout = envPositive(process.env.SERVER_REQUEST_TIMEOUT_MS, 600_000);
 
   // listen 오류(포트 충돌/특권포트 등)를 명확히 안내. 특권포트(<1024) EACCES가 흔한 원인.
   server.on('error', (err) => {
