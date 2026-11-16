@@ -26,6 +26,7 @@ import { atomicWriteFileSync } from './atomicWrite.js';
 import { registerStateFile } from './stateFiles.js'; // v2.613 PERSIST2613-08
 import { credFingerprintParts } from './credFingerprint.js';
 import { poolRun } from './pool.js';
+import { parseJsonObject } from './jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
 
 /**
  * 문구가 '인증 실패' 인가(순수).
@@ -104,7 +105,7 @@ export function createAuthGuard({ file }) {
   let _mem = null;
   const load = () => {
     if (_mem) return _mem;
-    try { _mem = JSON.parse(fs.readFileSync(FILE(), 'utf8')) || {}; }
+    try { _mem = parseJsonObject(fs.readFileSync(FILE(), 'utf8')); }
     catch { _mem = {}; }
     if (!_mem || typeof _mem !== 'object') _mem = {};
     return _mem;

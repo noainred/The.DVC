@@ -1,11 +1,11 @@
 # 공통 기능 목록 (자동 생성)
 
-솔루션 전체가 함께 쓰는 공용 모듈 **158개**를 코드에서 뽑은 목록이다. 새 헬퍼·컴포넌트를 만들기 전에 여기서 먼저 찾는다
+솔루션 전체가 함께 쓰는 공용 모듈 **159개**를 코드에서 뽑은 목록이다. 새 헬퍼·컴포넌트를 만들기 전에 여기서 먼저 찾는다
 (같은 판정을 복제하지 말 것 — 루트 `CLAUDE.md` '판정 코어는 하나').
 
 - 생성: `node scripts/common-doc.mjs` · 최신 여부: `node scripts/common-doc.mjs --check`
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다. 설명을 고치려면 그 모듈의 **머리 주석 첫 단락**을 고친다.
-- 훑은 소스 4212개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
+- 훑은 소스 4215개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
 
 ## 읽는 법 · 한계
 
@@ -19,14 +19,14 @@
 
 | 구분 | 위치 | 모듈 | 사용처 0 | 테스트 0 |
 |---|---|---|---|---|
-| 서버 공용 유틸 | `server/src/util/` | 89 | 0 | 10 |
+| 서버 공용 유틸 | `server/src/util/` | 90 | 0 | 10 |
 | 웹 공용 컴포넌트 | `web/src/components/` | 46 | 0 | 12 |
 | 웹 공용 훅 | `web/src/hooks/` | 8 | 0 | 2 |
 | 웹 공용 유틸 | `web/src/util/` | 3 | 0 | 0 |
 | 웹 최상위 공용 모듈 | `web/src/` | 12 | 0 | 1 |
-| **합계** | | **158** | **0** | **25** |
+| **합계** | | **159** | **0** | **25** |
 
-## 서버 공용 유틸 — `server/src/util/` (89)
+## 서버 공용 유틸 — `server/src/util/` (90)
 
 사용처가 많은 순.
 
@@ -53,6 +53,7 @@
 | `pushAll.js` | 큰 배열 붙이기(v2.603 감사 CEN2603-03 후속). | `pushAll` | 30 | 16 | 1 |
 | `exitFlush.js` | 종료 시 flush 레지스트리(v2.582 ARCH-4) — 하나다. | `registerExitFlush` `runExitFlush` `exitFlushNames` `_resetExitFlushForTest` | 29 | 15 | 10 |
 | `coercionTrap.js` | 요청 값을 글자·수로 바꿀 때 던지지 않게 하는 공용 규칙(v2.603 감사 CEN2603-05). | `stripCoercionTraps` `strOf` | 28 | 7 | 1 |
+| `jsonObject.js` | 설정 · 저장소 파일 읽기의 '객체 JSON' 판정(v3.17.2 — 2차 공통 기능 점검 1회차). | `parseJsonObject` `default` | 25 | 18 | 1 |
 | `secretCarry.js` | "접속 대상이 바뀌면 저장 비밀을 승계하지 않는다" — 공용 판정(v2.500). | `accessMoved` `dropCarriedSecrets` `secretProvided` | 24 | 19 | 3 |
 | `ssrfLookup.js` | **DNS 리바인딩(TOCTOU) 차단용 공용 lookup 훅**(v2.506). | `filterAddresses` `addressBlockReason` `ssrfLookupError` `makeSsrfLookup` `pinnedLookup` `ssrfLookup` 외 1 | 24 | 17 | 1 |
 | `agentNameHeader.js` | 엣지 → 중앙 push 에 `X-Agent-Name` 헤더를 싣는다(v2.620 RECENT2620-02). | `agentNameHeader` | 20 | 9 | 1 |
@@ -138,7 +139,7 @@
 | `EntityDetail.jsx` | ui.jsx(구 633줄)에서 분리(v2.295). 본문은 원본 192~606행 그대로 이동. | `DRow` `VmIpPing` `HostVmsModal` `VmPartitionsSection` `VmCfgSection` `PerfcSection` 외 10 | 16 | 6 | 8 |
 | `vmperf/vmPerfText.js` | VM · ESXi 호스트 성능 화면(v2.911 · 시안 docs/design/vm-perf ②~④)의 **순수** 보조(vitest 고정). 기간 · 지표 상수 · 값 글자 · 구간 통계 · 과거 창 계산(◀ 이전 · 슬라이더 · 날짜로 이동) · 차트 좌표 · CS… | `chartKeys` `fmtRate` `fmtVal` `rollupLabel` `fmtClock` `fmtHm` 외 24 | 13 | 2 | 3 |
 | `DataList.jsx` | 공용 자동완성 목록(v2.708) — 날 `<datalist>` 대신 이것을 쓴다. 제안 목록을 글자 순으로 정렬한다(selectSort.js 와 같은 규칙). | `default` | 12 | 4 | 0 |
-| `accessDeniedText.js` | 권한 거부(403) 안내 문구 생성 — 순수 함수만 둔다(AccessDenied.jsx 가 렌더). | `describePermission` `deniedRoleLabel` `deniedSubText` `buildRequestText` `errorBoxInput` `PERM_LABEL` 외 5 | 9 | 4 | 5 |
+| `accessDeniedText.js` | 권한 거부(403) 안내 문구 생성 — 순수 함수만 둔다(AccessDenied.jsx 가 렌더). | `describePermission` `deniedRoleLabel` `deniedSubText` `buildRequestText` `errorBoxInput` `PERM_LABEL` 외 5 | 9 | 4 | 6 |
 | `VmMetrics.jsx` | '📈 성능 그래프 보기' 단추(VM · ESXi 호스트). v2.911(시안 docs/design/vm-perf ② · 사용자 컨펌 '개선'): 예전에는 여기의 MetricModal(900px 모달 · recharts · 지표마다 vCenter 로그인)을 띄웠다. 이제… | `VmMetricButton` `HostMetricButton` | 5 | 4 | 1 |
 | `VmRemote.jsx` | (머리 주석 없음) | `VmRemoteButton` | 5 | 4 | 2 |
 | `pressable.js` | 누르는 카드 · 행(div · td)에 **키보드 접근**을 주는 props(v3.10.19 · 가상화 플랫폼 점검 7회차). - 마우스로만 열리던 div(onClick) 는 Tab 으로 닿지 않고 Enter · Space 로 열리지 않았다(허브 vCenter 카드 ·… | `onPressKey` `pressable` `PRESS_KEYS` | 5 | 3 | 1 |
@@ -159,6 +160,7 @@
 | `UpgradeNotice.jsx` | '프로그램이 업그레이드되었으니 새로고침 하세요' 상자(v2.999 · 설계 docs/design/upgrade-reload ①③). 오류 경계(ErrorBoundary)가 '이 창의 판 ≠ 서버의 판' 이거나 화면 조각을 못 받은 오류일 때 그린다. ⚠ 주 번들에 둔다… | `useUpgradeVersions` `useSinceNotes` `UpgradeChanges` `RefreshIcon` `default` | 2 | 2 | 2 |
 | `selectSort.js` | 드롭다운(&lt;select>) 선택지 정렬(순수, v2.708 — 사용자 요청 "모든 드롭박스 메뉴를 정렬해서 보이게, 앞으로 만드는 드롭박스도 정렬"). 화면은 `components/Select.jsx` 를 쓰고, 날 `<select>` 는 테스트가 금지한다. | `optionText` `isPinnedOption` `sortSelectChildren` | 2 | 1 | 1 |
 | `serviceDownText.js` | '서비스 일시 미가용' 판정·문구(순수, v2.459). | `serviceDownKind` `headlineFor` `probeOutcome` `reconnectStep` `reconnectStatusText` `diagnosticLines` 외 4 | 2 | 1 | 3 |
+| `sortableText.js` | 표 자동 정렬의 순수 로직(v2.422, 사용자 요구 '모든 표에 제목 클릭 정렬'). DOM 없이 React 엘리먼트 트리만 다루므로 node 환경 테스트로 고정한다. STable.jsx 가 이 함수들로 헤더 클릭 → tbody 행 재정렬을 수행한다. | `textOf` `sortKeyOf` `isEmptyCellValue` `compareCellValues` `compareKeys` `cellText` 외 4 | 2 | 1 | 7 |
 | `useNarrowScreen.js` | 좁은 화면 여부 훅(v2.987 — VmDistPanels.jsx 에서 옮김 · 물리서버 폴더와 함께 쓴다). matchMedia 가 없거나 던지면 넓은 화면으로 본다(SSR · 구형 브라우저). | `useNarrowScreen` | 2 | 2 | 0 |
 | `vmperf/VmPerfView.jsx` | VM · ESXi 호스트 **성능** 화면(v2.911 · 시안 docs/design/vm-perf ②③④ · 사용자 컨펌 '개선' = 기본값). 예전 성능 모달(VmMetrics.jsx MetricModal — 지표 4 + 기간 5 버튼 한 줄 · datetime-l… | `default` | 2 | 1 | 3 |
 | `AccessDenied.jsx` | AccessDenied — 권한 부족(403) 안내 화면. | `default` | 1 | 1 | 2 |
@@ -170,7 +172,6 @@
 | `invSearchQuery.js` | 헤더 ⌘K '통합 장비 검색' 의 화면 쪽 순수 모듈(v2.909). | `splitPrefix` `withKindPrefix` `focusPlan` `listPlan` `normPlan` `recentKeyFor` 외 26 | 1 | 1 | 4 |
 | `loadState.js` | 화면이 '비어 있는 이유' 를 정직하게 말하게 하는 판정(v2.509, 순수 모듈). v2.747: V4 셸 삭제로 version_4/loadState.js 에서 옮겼다(관제 콘솔이 쓴다). | `isTimeoutError` `isNetworkError` `loadPhase` `collectProgress` `loadText` | 1 | 1 | 1 |
 | `palette.js` | 헤더 ⌘K 기능 찾기의 후보 목록과 매칭(v2.508, 순수). | `catsOfFrom` `tabEntries` `search` `flatten` `TAB_GROUP` | 1 | 1 | 2 |
-| `sortableText.js` | 표 자동 정렬의 순수 로직(v2.422, 사용자 요구 '모든 표에 제목 클릭 정렬'). DOM 없이 React 엘리먼트 트리만 다루므로 node 환경 테스트로 고정한다. STable.jsx 가 이 함수들로 헤더 클릭 → tbody 행 재정렬을 수행한다. | `textOf` `sortKeyOf` `compareKeys` `cellText` `sortChildren` `nextSortState` 외 2 | 1 | 1 | 7 |
 | `tableKeys.js` | 표 행 React key 를 **고유하게**(v3.13.4 · 2차 루프 5회차). - DataTable 은 행 key 로 `r.id \|\| r.key \|\| i` 를 썼다. 라이선스 표는 가림 처리된 키(XXXXX-…-AAAAA)가 여러 vCenter 에서 같아 key… | `uniqueKeys` `baseRowKey` | 1 | 1 | 1 |
 | `vmMetricsText.js` | 성능 모달의 조회 실패 판정(순수 — vitest 고정, v2.591 감사 F6). | `metricErrorState` `metricSkipText` `metricAuthStopText` `edgePortalHref` `stopsAutoRefresh` | 1 | 1 | 3 |
 | `vmRemoteProbeText.js` | VM 원격 접속 버튼의 사전 도달성 점검 문구(순수 — 판정과 문구를 한 곳에 둔다). | `probeFailState` `probeRow` `probeTip` `probeColor` `probeFooter` | 1 | 1 | 2 |
@@ -250,7 +251,7 @@
 | `server/src/runtime-settings.js` | Runtime-adjustable settings that can be changed from the portal UI (and persisted), overriding the env defaults. Currently: the data source (mock \| li… | 19 | 10 | 23 |
 | `server/src/security/tlsTrust.js` | 장비 TLS 상대 인증(2026-10-09 검토 S-02) — 자격증명을 보내는 HTTPS 연결이 **정말 그 장비인지** 확인한다. | 14 | 10 | 4 |
 | `server/src/storage/registry.js` | 스토리지 장비 등록부(v2.302). | 28 | 9 | 41 |
-| `server/src/gpu/settings.js` | GPU 게스트 수집 설정 — 어떤 법인(vCenter)의 패스쓰루 GPU VM을 게스트 OS 계정으로 모니터링할지, 폴링 주기/동시성/타임아웃, 그리고 vCenter별 게스트 OS 자격증명을 보관한다. config/gpu-guest.json (gitignore, 060… | 13 | 9 | 10 |
+| `server/src/gpu/settings.js` | GPU 게스트 수집 설정 — 어떤 법인(vCenter)의 패스쓰루 GPU VM을 게스트 OS 계정으로 모니터링할지, 폴링 주기/동시성/타임아웃, 그리고 vCenter별 게스트 OS 자격증명을 보관한다. config/gpu-guest.json (gitignore, 060… | 13 | 9 | 11 |
 | `server/src/perf/monitor.js` | 서버 성능 측정기(v2.498). 요청 지연·이벤트 루프 정체·진행 중 요청을 **상시 O(1)** 로 계측하고, 임계를 넘은 것만 남긴다. 설정 › 서버 성능 측정 화면(/api/admin/perf)이 이 값을 읽는다. | 13 | 9 | 4 |
 | `server/src/idrac/invCache.js` | Cache of the latest hardware/firmware inventory collected per iDRAC server. Inventory is mostly static, so it is refreshed on a slow cadence and persi… | 25 | 8 | 8 |
 | `server/src/vcenter/soapClient.js` | vim25 SOAP collector — gathers REAL host/VM/datastore metrics that the vSphere REST list endpoints do not expose (CPU/memory capacity & live usage, da… | 17 | 8 | 43 |
@@ -276,7 +277,7 @@
 | `server/src/security/certMonitor.js` | TLS 인증서 만료 감시 — 등록된 vCenter·NSX Manager의 443 인증서를 주기적으로 프로브해 만료일(D-90 경고 / D-30 위험)을 추적한다. 28개 vCenter 규모에서 수동 추적이 불가능한 항목(커뮤니티 단골 장애: vCenter STS/머신… | 7 | 6 | 8 |
 | `server/src/auth/addressMask.js` | 비-admin 응답에서 장비 관리 주소·계정명을 가린다(v2.599 AUTHZ-2599-03). | 44 | 5 | 16 |
 | `server/src/bareos/settings.js` | Bareos 연동 설정(v2.820 · v2.823 법인별 Director). 파일: CONFIG_DIR/bareos.json (0600 · 원자적 쓰기 · 비밀 봉인). | 31 | 5 | 25 |
-| `server/src/auth/permissions.js` | 기능별 권한(Permission) 프레임워크 — "모든 기능에 대해 역할별 권한을 켜고 끈다". | 17 | 5 | 16 |
+| `server/src/auth/permissions.js` | 기능별 권한(Permission) 프레임워크 — "모든 기능에 대해 역할별 권한을 켜고 끈다". | 17 | 5 | 17 |
 | `server/src/isidu/settings.js` | 아이실론 디렉터리 사용량 수집 대상 설정(v2.736). | 17 | 5 | 18 |
 | `server/src/collector/remoteInventory.js` | Remote (edge-collected) iDRAC server inventory, pulled from collector agents' /api/collector/export (the `servers` field). Keyed by collectorId so eac… | 15 | 5 | 23 |
 | `server/src/vcenter/dsBrowse.js` | 데이터스토어 브라우즈 (v2.276) — 데이터스토어 상세에서 ① 어떤 VM 이 할당돼 있는지, ② 실제 어떤 파일들이 있는지 보여준다. | 15 | 5 | 4 |

@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
 
 const FILE = path.join(config.configDir, 'ipam-subnet-notes.json');
 export const SUBNET_PURPOSE_MAX = 80;
@@ -30,7 +31,7 @@ export function subnetKey(v) {
 function load() {
   if (cache) return cache;
   cache = {};
-  try { if (fs.existsSync(FILE)) cache = JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}; } catch (e) { preserveCorrupt(FILE, e.message); cache = {}; }
+  try { if (fs.existsSync(FILE)) cache = parseJsonObject(fs.readFileSync(FILE, 'utf8')); } catch (e) { preserveCorrupt(FILE, e.message); cache = {}; }
   if (!cache || typeof cache !== 'object' || Array.isArray(cache)) cache = {};
   return cache;
 }

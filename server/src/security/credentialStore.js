@@ -29,6 +29,7 @@ import { registerExitFlush } from '../util/exitFlush.js';
 import { openSecretsDeep, sealSecretsDeep } from './secretVault.js';
 import { ssrfBlockReason } from '../collector/registry.js';
 import { isMockMode } from '../mock/demo/flags.js';
+import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
 
 const FILE = () => path.join(config.configDir, 'credentials.json');
 const MAX_ITEMS = 500;
@@ -53,7 +54,7 @@ const USAGE_FILE = () => path.join(config.configDir, 'credentials-usage.json');
 const USAGE_DEBOUNCE_MS = 5_000;
 let _usageTimer = null;
 function loadUsage() {
-  try { if (fs.existsSync(USAGE_FILE())) return JSON.parse(fs.readFileSync(USAGE_FILE(), 'utf8')) || {}; } catch { /* 카운터는 손실 허용 */ }
+  try { if (fs.existsSync(USAGE_FILE())) return parseJsonObject(fs.readFileSync(USAGE_FILE(), 'utf8')); } catch { /* 카운터는 손실 허용 */ }
   return {};
 }
 function flushUsage() {

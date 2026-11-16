@@ -1,6 +1,37 @@
 {
   "notes": [
     {
+      "version": "3.17.4",
+      "date": "2026-11-16",
+      "title": "2차 공통 기능 점검 3회차: 권한 거부 안내의 권한 이름 표를 서버 카탈로그와 맞춤",
+      "notes": [
+        "403 안내(AccessDenied)의 권한 이름 표가 서버 권한 카탈로그와 갈라져 있었다 — 서버 키 20개 중 6개만 알고 서버에 없는 키 7개가 남아 있어, 가장 흔한 403(inv.vms 등)이 '필요: inv.vms 권한' 처럼 원문 키로 보였다.",
+        "이름을 서버 카탈로그(auth/permissions.js PERMISSION_CATALOG) label 그대로 맞추고, 서버 테스트가 두 벌을 대조한다(서버에 권한을 더하면 먼저 깨진다).",
+        "회귀 server/test/commonRound13_3173.test.js · web accessDeniedText.test.js."
+      ]
+    },
+    {
+      "version": "3.17.3",
+      "date": "2026-11-16",
+      "title": "2차 공통 기능 점검 2회차: 표 정렬 빈 값 · Kpi 막대 · 한글 조합 중 ESC",
+      "notes": [
+        "DataTable(데이터 표 181곳 이상) 열 정렬: 빈 문자열 · '—' · NaN 이 null 이 아니라서 값 사이에 섞였고(NaN 은 순서를 깨뜨림), 글자는 숫자를 인식하지 않아 vc-10 이 vc-2 앞에 왔다 — 공용 compareCellValues(빈 값은 오름 · 내림 모두 뒤 · 숫자 인식 · Collator 재사용)로.",
+        "Kpi 사용률 막대: NaN 도 typeof 'number' 라 'NaN%' 막대(초록)를 그렸다 · 음수 폭 — 유한수일 때만, 폭은 0~100.",
+        "모달 ESC: 한글 조합 중(isComposing · keyCode 229)의 ESC 는 조합 취소다 — 모달을 닫아 입력하던 글을 잃지 않게.",
+        "회귀 sortableText.test.js · Chromium(#/vms 1,000행 — 빈 값 941행이 두 방향 모두 뒤 · IP 자연 순서 · ESC 조합 중 유지)."
+      ]
+    },
+    {
+      "version": "3.17.2",
+      "date": "2026-11-16",
+      "title": "2차 공통 기능 점검 1회차: 저장소 읽기의 '객체 아닌 JSON' 판정을 공용 헬퍼 하나로",
+      "notes": [
+        "설정 · 저장소 25곳이 JSON.parse(...) || {} 로 읽어 객체가 아닌 JSON(5 · \"live\" · true · [])을 그대로 썼다 — IP 메모 · IP 재정의처럼 캐시를 고쳐 쓰는 저장소는 배열이면 정상으로 읽혀 '저장됐다' 고 답하고 재시작 뒤 사라졌고, 수 · 글자면 500, 엣지 설정 사본은 '0'·'1' 같은 엉뚱한 키가 생겼다.",
+        "공용 util/jsonObject.js parseJsonObject 로 바꿨다 — 객체가 아니면 깨진 JSON 과 같이 다뤄 각 저장소의 기존 손상 경로(원본 .corrupt 보존 · 못 읽은 파일 쓰기 거절)로 간다.",
+        "회귀 server/test/commonRound11_3172.test.js(헬퍼 · 소스 스윕 · IP 메모 실제 저장 — 수정 전 실패 확인)."
+      ]
+    },
+    {
       "version": "3.17.1",
       "date": "2026-11-16",
       "title": "전체 점검 31~37회차(서비스 허브 · vCenter 점검 · iDRAC · 파트 장애 · 베어메탈 사용률 · GPU · Horizon · 아이실론): 저장 비밀 유출 경로 · 계정 관리 · 손상 중 저장 · 거짓 정상 표시 등 결함 수정",

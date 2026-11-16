@@ -19,6 +19,7 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js'; /
 
 const FILE = path.join(config.configDir, 'vmperf.json');
 import { numOrNull } from '../util/numOrNull.js';
+import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
 const FIELDS = ['enabled', 'retentionDays', 'vcenterIds', 'trackTotal'];
 
 // 가드레일: 보존기간은 0(무제한)~5년. UI 오입력·손상 파일이 그대로 prune 에 흘러가지 않게 한다.
@@ -26,7 +27,7 @@ const MAX_RETENTION_DAYS = 1830;
 
 function readFile() {
   if (!fs.existsSync(FILE)) return {};
-  try { return JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}; } catch (e) { preserveCorrupt(FILE, e.message); return {}; }
+  try { return parseJsonObject(fs.readFileSync(FILE, 'utf8')); } catch (e) { preserveCorrupt(FILE, e.message); return {}; }
 }
 
 function coerce(field, v) {

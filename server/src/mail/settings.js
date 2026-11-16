@@ -21,6 +21,7 @@ import { KINDS, isKind } from './kinds.js';
 
 import { ssrfBlockReason } from '../collector/registry.js';   // v2.575 SEC-15
 import { clampSetting } from '../util/clampSetting.js';
+import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
 const FILE = path.join(config.configDir, 'mail.json');
 
 export const DEFAULTS = Object.freeze({
@@ -64,7 +65,7 @@ export function load() {
   out.kinds = normKinds({});
   try {
     if (fs.existsSync(FILE)) {
-      const p = openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8')) || {});
+      const p = openSecretsDeep(parseJsonObject(fs.readFileSync(FILE, 'utf8')));
       if (typeof p.enabled === 'boolean') out.enabled = p.enabled;
       if (p.smtp && typeof p.smtp === 'object') out.smtp = { ...out.smtp, ...p.smtp };
       out.defaultTo = normalizeAddresses(p.defaultTo).ok;

@@ -80,6 +80,26 @@ const cmpStr = COLLATOR
   ? (x, y) => COLLATOR.compare(x, y)
   : (x, y) => x.localeCompare(y, undefined, { numeric: true, sensitivity: 'base' });
 
+/**
+ * 원값(셀에 그리기 전의 값) 비교 — `DataTable` 의 열 정렬용(v3.17.3 · 2차 공통 기능 점검 2회차).
+ * 예전 DataTable 은 `x - y` · `String(x).localeCompare(String(y))` 를 직접 썼다:
+ *  · `''`·'—'·NaN 은 null 이 아니라서 값 사이에 섞였고(STable · CLAUDE.md '빈 값은 항상 뒤로' 와 다르다), NaN 은 비교기가 NaN 을 돌려 순서가 깨졌다.
+ *  · 비교마다 localeCompare 가 Collator 를 새로 만들고(v2.503 실측 21배) 숫자를 인식하지 않아 'vc-10' 이 'vc-2' 앞에 왔다.
+ * 반환: `{ empty, cmp }` — empty 가 1/-1 이면 방향과 무관하게 그 쪽이 뒤다(호출부가 방향을 곱하지 않는다).
+ */
+export function isEmptyCellValue(v) {
+  if (v == null) return true;
+  if (typeof v === 'number') return !Number.isFinite(v);
+  if (typeof v === 'string') return EMPTY_TOKENS.has(v.trim());
+  return false;
+}
+export function compareCellValues(x, y) {
+  const ex = isEmptyCellValue(x); const ey = isEmptyCellValue(y);
+  if (ex || ey) return { empty: ex && ey ? 0 : ex ? 1 : -1, cmp: 0 };
+  if (typeof x === 'number' && typeof y === 'number') return { empty: null, cmp: x - y };
+  return { empty: null, cmp: cmpStr(String(x), String(y)) };
+}
+
 /** 두 정렬 키 비교(오름차순). 빈 값은 방향과 무관하게 뒤로(호출자가 dir 반전 시에도 유지). */
 export function compareKeys(a, b) {
   if (a.kind === 'empty' && b.kind === 'empty') return 0;

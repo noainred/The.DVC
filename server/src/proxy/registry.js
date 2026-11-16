@@ -17,6 +17,7 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
 
 /**
  * v2.606(감사 WEB2606-04): 포트 칸 → 저장값. 1~65535 정수만 받고 **빈 값·숫자 아님·범위 밖은 이전 값 유지**다.
@@ -68,7 +69,7 @@ let cache = null;
 function load() {
   if (cache) return cache;
   let saved = {};
-  try { if (fs.existsSync(FILE)) saved = openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}); } catch { preserveCorrupt(FILE); saved = {}; } // v2.296 dataplane/SSH 자격증명 복호 · v2.322 손상본 보존
+  try { if (fs.existsSync(FILE)) saved = openSecretsDeep(parseJsonObject(fs.readFileSync(FILE, 'utf8'))); } catch { preserveCorrupt(FILE); saved = {}; } // v2.296 dataplane/SSH 자격증명 복호 · v2.322 손상본 보존
   cache = {
     ...DEFAULTS, ...saved,
     dataplane: { ...DEFAULTS.dataplane, ...(saved.dataplane || {}) },
