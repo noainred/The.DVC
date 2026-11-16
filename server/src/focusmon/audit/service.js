@@ -26,7 +26,10 @@ import { parseReady, readyState, splitRun, parseReport, parseDisks, summarize, e
 import { programSha, wrapperSha, AUDIT_DEADLINE_MS, pathsFor, dirIssue, dirsToCheck, INSTALL_FAILS } from './bundle.js';
 import { installDir } from './settings.js'; // v3.17.0 설치 디렉터리
 import { installExec, NODE_INSTALL_CONCURRENCY, INSTALL_CODES, INSTALL_TIMEOUT_MS } from './install.js'; // v3.17.0 자동 설치
-import { installCredFor, credView, CRED_STATES } from './installCred.js';
+import { installCredFor, credView, CRED_STATES, PREP_FEATURE, INSTALL_FEATURE } from './installCred.js';
+import { prepExec, PREP_CODES, PREP_FAILS, AUDIT_SKIPS, PREP_TIMEOUT_MS } from './prep.js'; // v3.18.0 접속 자동 준비
+import { putTestResult } from '../store.js'; // v3.18.0 — 준비 뒤 연결 시험 결과를 '키 로그인' 칸에(엣지 시험 결과와 같은 정제)
+import { cleanHello, LOGIN_KINDS } from '../hello.js';
 
 const gzipAsync = promisify(zlib.gzip);
 export const RUN_GAP_MS = 10 * 60_000;
@@ -45,7 +48,7 @@ export const MAX_JOBS = 500;
 export const RESULTS_PER_SYNC = 2;
 /** 화면에 싣는 한도(박지 않는다 — 응답 limits). */
 export const LIMITS = Object.freeze({ runGapMin: RUN_GAP_MS / 60_000, checkGapSec: CHECK_GAP_MS / 1000, nodeConcurrency: 1, deadlineMin: Math.round(AUDIT_DEADLINE_MS / 60_000), keepRuns: db.AUDIT_KEEP, keepDays: db.AUDIT_KEEP_DAYS,
-  installConcurrency: NODE_INSTALL_CONCURRENCY, installTimeoutSec: INSTALL_TIMEOUT_MS / 1000 });
+  installConcurrency: NODE_INSTALL_CONCURRENCY, installTimeoutSec: INSTALL_TIMEOUT_MS / 1000, prepTimeoutSec: PREP_TIMEOUT_MS / 1000 });
 /** 엣지가 알려 온 설치 계정 상태를 믿는 시간 — 지나면 '모름'(엣지가 옛 판이거나 끊김). 설치 작업도 이 안에 알려 온 엣지에만 내려보낸다(옛 판 엣지는 'install' 을 점검 실행으로 읽는다). */
 export const EDGE_CRED_TTL_MS = 10 * 60_000;
 
@@ -139,7 +142,9 @@ export async function ingestResult(job, r, { node = '', now = Date.now() } = {})
   const readyLines = Array.isArray(r.ready) ? r.ready : [];
   // v3.17.0: 준비 줄은 **그 작업이 정한 후보 디렉터리 가운데** 결과가 말한 곳으로 다시 해석한다(엣지가 다른 곳을 말하면 반영하지 않는다).
   //   옛 작업 · 옛 엣지(디렉터리 칸 없음)는 기본 경로.
-  const cands = job.mode === 'install' ? [job.dir ?? ''] : (Array.isArray(job.cands) ? job.cands : ['']);
+  // v3.18.0: 접속 준비 + 디스크 점검 함께(job.audit)도 설치와 같이 그 디렉터리 하나 · 함께가 아니면 준비 줄을 받지 않는다(후보 없음)
+  const instLike = job.mode === 'install' || (job.mode === 'prep' && job.audit === true && !!r.install);
+  const cands = instLike ? [job.dir ?? ''] : job.mode === 'prep' ? [] : (Array.isArray(job.cands) ? job.cands : ['']);
   const rdir = r.dir === undefined || r.dir === null ? (cands.includes('') ? '' : null) : (typeof r.dir === 'string' && !dirIssue(r.dir) && cands.includes(r.dir) ? r.dir : null);
   let rsState = null;
   if (readyLines.length && rdir !== null) {
@@ -149,7 +154,19 @@ export async function ingestResult(job, r, { node = '', now = Date.now() } = {})
     rsState = rs.state;
     Object.assign(rec, { at: now, state: rs.state, reason: rs.reason, dmi: rd.dmi, py: rd.pyVer ? rd.pyVer.join('.') : null, node, dir: rs.state === 'notinstalled' ? null : rdir });
   }
-  if (job.mode === 'install') {
+  if (job.mode === 'prep') {
+    // v3.18.0 접속 자동 준비 — 노드가 정제해 올린 까닭 이름 · 단계만(원격 글 없음). 연결 시험 결과는 '키 로그인' 칸(store.putTestResult)으로.
+    const p = r.prep && typeof r.prep === 'object' ? r.prep : {};
+    const lg = r.login && typeof r.login === 'object' ? r.login : null;
+    const code = PREP_CODES.includes(p.code) ? p.code : 'unreachable';
+    rec.lastPrep = { at: now, by: job.by || '', ok: code === 'ok', code, fail: p.fail || null, step: Number.isInteger(p.step) ? p.step : 0, rc: Number.isInteger(p.rc) ? p.rc : null,
+      acct: p.acct || '', key: p.key || '', src: p.src || null, cred: p.cred || null, priv: p.priv || null, created: !!p.created, exists: !!p.exists, added: !!p.added, have: !!p.have,
+      differs: !!p.differs, partial: !!p.partial, warn: Array.isArray(p.warn) ? p.warn : [],
+      from: p.from === true, fromAsked: !!job.from, age: job.age === 'default' ? 'default' : 'never', login: lg ? lg.kind : null, // 반증 D2 — from 은 실제로 넣었을 때만
+      audit: !job.audit ? 'off' : r.install ? 'done' : (AUDIT_SKIPS.includes(r.auditSkip) ? r.auditSkip : 'skip') };
+    if (lg) { try { putTestResult(tid, { ok: lg.ok === true, kind: LOGIN_KINDS.includes(lg.kind) ? lg.kind : 'unreachable', error: lg.error || '', hello: cleanHello(lg.hello), ms: Number.isFinite(lg.ms) ? lg.ms : null, via: node ? 'edge' : 'central' }, now); } catch { /* 시험 칸은 다음 시험이 채운다 */ } }
+  }
+  if (instLike) {
     const ins = r.install && typeof r.install === 'object' ? r.install : {};
     // v3.17.0 반증 D4: 노드가 말한 'ok' 를 믿지 않는다 — 중앙이 준비 줄을 다시 판정해 준비됨일 때만 'ok'.
     //   준비 줄이 없거나 후보 밖이면 '설치함 · 확인 못 함'(check), 판정이 준비됨이 아니면 '설치함 · 준비 안 됨'(not-ready — 까닭은 준비 상태 칸).
@@ -159,8 +176,8 @@ export async function ingestResult(job, r, { node = '', now = Date.now() } = {})
       rc: Number.isInteger(ins.rc) ? ins.rc : null, acct: ins.acct || '', key: ins.key || '', src: ins.src || null, cred: ins.cred || null, dir: job.dir ?? '', nopy: !!ins.nopy, oldRm: ins.oldRm || 0, oldKeep: ins.oldKeep || 0, priv: ins.priv || null };
     if (rec.lastInstall.ok && (!readyLines.length || rdir === null)) rec.dir = job.dir ?? ''; // 설치는 됐는데 준비 줄이 없다(수집 계정 로그인 거부 등) — 설치한 곳은 안다
   }
-  else rec.lastError = r.ok && (r.kind === 'done' || r.kind === 'not-ready') ? null : { at: now, kind: KINDS.includes(r.kind) ? r.kind : 'unreachable', error: cleanLine(r.error || '', 240) };
-  if (readyLines.length && rdir === null && job.mode !== 'install') rec.lastError = { at: now, kind: 'bad-output', error: '결과가 말한 설치 위치가 작업의 후보가 아닙니다 — 반영하지 않았습니다.' };
+  else if (job.mode !== 'prep') rec.lastError = r.ok && (r.kind === 'done' || r.kind === 'not-ready') ? null : { at: now, kind: KINDS.includes(r.kind) ? r.kind : 'unreachable', error: cleanLine(r.error || '', 240) };
+  if (readyLines.length && rdir === null && !instLike && job.mode !== 'prep') rec.lastError = { at: now, kind: 'bad-output', error: '결과가 말한 설치 위치가 작업의 후보가 아닙니다 — 반영하지 않았습니다.' };
   let wrote = null;
   // 실행을 시도했으면 출력이 비어도 회차를 남긴다(반증 F4 — sudo 자체가 실패하면 표준 출력이 빈다)
   if (job.mode === 'run' && (r.ran === true || (Array.isArray(r.out) && r.out.length))) {
@@ -190,7 +207,10 @@ export async function ingestResult(job, r, { node = '', now = Date.now() } = {})
 /* ── 접수 ───────────────────────────────────────────────────────────────── */
 let localRunner = null;
 let localInstaller = null;
+let localPrepper = null;
 let keysRef = null;
+/** 작업 종류 → 중앙 실행기(점검 · 확인 = 동시 1 · 설치 · 준비 = 동시 NODE_INSTALL_CONCURRENCY 따로). */
+const runnerOf = (mode) => (mode === 'install' ? localInstaller : mode === 'prep' ? localPrepper : localRunner);
 /** 중앙 실행기 — 처음 쓸 때 만든다(엣지 노드에는 만들지 않는다 · 키는 service.js 의 focusKeys). */
 function local() {
   if (!localRunner) {
@@ -220,6 +240,21 @@ function localInstall() {
     });
   }
   return localInstaller;
+}
+/** 중앙 접속 준비기(v3.18.0) — 설치기와 같은 모양 · 줄은 따로. */
+function localPrep() {
+  if (!localPrepper) {
+    localPrepper = createAuditRunner({
+      keys: keysRef, concurrency: NODE_INSTALL_CONCURRENCY, exec: prepExec(),
+      onPhase: (job, phase) => { const j = load().jobs.find((x) => x.runId === job.runId); if (j) { j.phase = phase; j.state = 'running'; j.startedAt = j.startedAt || job.startedAt || Date.now(); } },
+      onResult: (job, result) => {
+        const j = liveJob(job.runId);
+        if (!j) return;
+        ingestResult({ ...j, startedAt: j.startedAt || job.startedAt }, result, { node: '' }).catch((e) => console.warn('[focusmon-audit] 접속 준비 결과 반영 실패:', String(e?.message || e).slice(0, 160)));
+      },
+    });
+  }
+  return localPrepper;
 }
 /** 시작 — 키 저장소를 넘기고 상태 파일을 읽는다(앞 프로세스의 중앙 작업 정리는 load 가 처음 읽을 때 한다). */
 export function startAuditService({ keys, spaceLow: probe } = {}) {
@@ -273,10 +308,13 @@ export function dirCandidates(rec) {
 }
 /** 작업에 실을 기대 판본 — 프로그램 · 후보 디렉터리별 실행 파일(중앙이 아는 값 — 엣지 판이 달라도 중앙 기준). */
 export function expectFor(job) {
-  const dirs = job.mode === 'install' ? [job.dir ?? ''] : (job.cands || ['']);
+  const inst = job.mode === 'install' || (job.mode === 'prep' && job.audit === true);
+  const dirs = inst ? [job.dir ?? ''] : (job.cands || ['']);
   const wrappers = {}; for (const d of dirs) { const w = wrapperSha(d); if (w) wrappers[d] = w; }
   return { program: programSha(), wrapper: wrapperSha(''), wrappers, cands: dirs,
-    ...(job.mode === 'install' ? { dir: job.dir ?? '', oldDirs: job.oldDirs || [], pick: job.pick || null, corpVcs: job.corpVcs || [] } : {}) };
+    ...(inst ? { dir: job.dir ?? '', oldDirs: job.oldDirs || [] } : {}),
+    ...(job.mode === 'install' || job.mode === 'prep' ? { pick: job.pick || null, corpVcs: job.corpVcs || [] } : {}),
+    ...(job.mode === 'prep' ? { from: job.from === true, age: job.age === 'default' ? 'default' : 'never', audit: job.audit === true } : {}) };
 }
 
 /* ── 자동 설치(v3.17.0) ─────────────────────────────────────────────────── */
@@ -287,16 +325,19 @@ export const KNOWN_EVERY_MS = 60_000;
  * 그 서버의 설치 계정 상태(화면 · 접수 공용 — 비밀 없음). 중앙 직접 서버는 이 노드에서 해석, 엣지 서버는 그 엣지가 알려 온 값(시한 안 · 없으면 'edge-unknown').
  * @param {object} t  대상  @param {{corpVcs?:string[], pick?:string|null, now?:number}} o
  */
-export function credOfTarget(t, { corpVcs = [], pick = null, now = Date.now() } = {}) {
-  if (t.demo) return demoCred(t);
-  if (!t.agent) return credView(installCredFor(t, { corpVcs, pick }));
+export function credOfTarget(t, { corpVcs = [], pick = null, now = Date.now(), feature = INSTALL_FEATURE } = {}) {
+  if (t.demo) return demoCred(t, feature);
+  if (!t.agent) return credView(installCredFor(t, { corpVcs, pick, feature }));
   const e = edgeCred.get(String(t.agent).toLowerCase());
   if (!e || now - e.at > EDGE_CRED_TTL_MS) return { state: 'edge-unknown', src: null, acct: '', key: '' };
-  return e.rows.get(t.id) || { state: 'edge-unknown', src: null, acct: '', key: '' };
+  // v3.18.0: 접속 준비 계정은 따로 알려 온다(credPrep) — 옛 엣지(3.17.x)는 보내지 않는다 → 'edge-unknown'
+  const rows = feature === PREP_FEATURE ? e.prepRows : e.rows;
+  return (rows && rows.get(t.id)) || { state: 'edge-unknown', src: null, acct: '', key: '' };
 }
 /** 데모 대상 — 장비에 닿지 않는 고정 값(일부는 '설치' 기능이 꺼진 모양). */
-function demoCred(t) {
+function demoCred(t, feature = INSTALL_FEATURE) {
   const n = Number(String(t.id).replace(/\D/g, '').slice(-2)) || 0;
+  if (feature === PREP_FEATURE) return n % 7 === 4 ? { state: 'noentry', src: null, acct: '', key: '' } : { state: 'ok', src: n % 2 ? 'server' : 'corp', acct: 'dvcadmin', key: 'demo-common' };
   if (n % 5 === 3) return { state: 'feature', src: 'corp', acct: 'dvcadmin', key: 'demo-common' };
   return { state: 'ok', src: n % 2 ? 'server' : 'corp', acct: 'dvcadmin', key: 'demo-common' };
 }
@@ -322,7 +363,7 @@ export function requestInstall(t, { by = '', pick = null, corpVcs = [], now = Da
   const same = (Array.isArray(peers) ? peers : []).filter((p) => p && p.id !== t.id && sameHost(p, t));
   if (same.some((p) => String(p.username || '') !== String(t.username || ''))) return { ok: false, code: 'host-shared', reason: '같은 주소에 다른 수집 계정으로 등록된 항목이 있습니다 — sudoers 파일 하나에 계정 하나만 적으므로 자동 설치가 다른 계정의 sudo 규칙을 지웁니다. 손으로 설치하세요.' };
   const sameIds = new Set(same.map((p) => p.id));
-  if (st.jobs.some((x) => x.mode === 'install' && sameIds.has(x.tid))) return { ok: false, code: 'host-busy', reason: '같은 주소의 다른 항목을 설치하는 중입니다 — 그 설치가 끝난 뒤 다시 누르세요.' };
+  if (st.jobs.some((x) => (x.mode === 'install' || x.mode === 'prep') && sameIds.has(x.tid))) return { ok: false, code: 'host-busy', reason: '같은 주소의 다른 항목을 설치 · 준비하는 중입니다 — 그 작업이 끝난 뒤 다시 누르세요.' };
   if (st.jobs.length >= MAX_JOBS) return { ok: false, code: 'queue-full', reason: '대기 중인 작업이 너무 많습니다 — 잠시 뒤 다시 누르세요.' };
   const c = credOfTarget(t, { corpVcs, pick, now });
   const pickOk = c.state === 'ambig' && pick && Array.isArray(c.choices) && c.choices.some((x) => x.id === pick);
@@ -339,6 +380,49 @@ export function requestInstall(t, { by = '', pick = null, corpVcs = [], now = Da
     if (!s.ok) { st.jobs = st.jobs.filter((x) => x.runId !== job.runId); persist(); return { ok: false, code: s.code, reason: s.code === 'busy' ? '이 서버의 설치가 이미 줄에 있습니다.' : '설치 줄이 가득 찼습니다.' }; }
   }
   return { ok: true, runId: job.runId, via: job.node ? 'edge' : 'central' };
+}
+
+/**
+ * v3.18.0 접속 자동 준비 요청(서버 하나) — 수집 계정 · 공개키(+ 고르면 디스크 점검 설치). 한 서버에 작업 하나 · 같은 주소의 설치 · 준비와 겹치지 않는다.
+ * @param {object} t  등록부 대상
+ * @param {{by?, pick?, corpVcs?, now?, keys?, peers?, withAudit?:boolean, from?:boolean, age?:'never'|'default'}} o
+ *   withAudit — 디스크 점검 함께(설정을 못 읽거나 같은 주소에 다른 수집 계정이 있으면 그 서버는 준비만 — 까닭 auditWhy)
+ * @returns {{ok:true, runId, via, audit:boolean, auditWhy:string|null} | {ok:false, code, reason}}
+ */
+export function requestPrep(t, { by = '', pick = null, corpVcs = [], now = Date.now(), keys = null, peers = [], withAudit = false, from = false, age = 'never' } = {}) {
+  if (!keysRef && keys) keysRef = keys;
+  const st = load();
+  sweep(now);
+  if (String(t.username || '') === 'root') return { ok: false, code: 'acct-root', reason: '수집 계정이 root 입니다 — 일반 계정으로 등록을 고치세요(root 에는 넣지 않습니다).' };
+  if (st.jobs.some((x) => x.tid === t.id)) return { ok: false, code: 'busy', reason: '이 서버는 이미 점검 · 확인 · 설치 · 준비 작업이 진행 중이거나 차례를 기다리고 있습니다.' };
+  const same = (Array.isArray(peers) ? peers : []).filter((p) => p && p.id !== t.id && sameHost(p, t));
+  const sameIds = new Set(same.map((p) => p.id));
+  if (st.jobs.some((x) => (x.mode === 'install' || x.mode === 'prep') && sameIds.has(x.tid))) return { ok: false, code: 'host-busy', reason: '같은 주소의 다른 항목을 설치 · 준비하는 중입니다 — 그 작업이 끝난 뒤 다시 누르세요.' };
+  if (st.jobs.length >= MAX_JOBS) return { ok: false, code: 'queue-full', reason: '대기 중인 작업이 너무 많습니다 — 잠시 뒤 다시 누르세요.' };
+  const c = credOfTarget(t, { corpVcs, pick, now, feature: PREP_FEATURE });
+  const pickOk = c.state === 'ambig' && pick && Array.isArray(c.choices) && c.choices.some((x) => x.id === pick);
+  if (c.state !== 'ok' && !pickOk) return { ok: false, code: `cred-${c.state}`, reason: '이 서버는 접속 준비에 쓸 계정이 정해지지 않았습니다.' };
+  if (c.state === 'ok' && c.acct && c.acct === String(t.username || '')) return { ok: false, code: 'acct-prep', reason: '수집 계정이 준비에 쓸 계정(root · sudo) 자신입니다 — 집중 모니터링 키를 그 계정에 넣지 않습니다. 수집 계정을 일반 계정으로 등록하세요.' };
+  // 디스크 점검 함께 — 서버마다 판단(준비는 그대로 한다)
+  let audit = false; let auditWhy = null; let dir = null;
+  if (withAudit) {
+    dir = installDir();
+    if (dir === null) auditWhy = 'settings-unreadable';
+    else if (same.some((p) => String(p.username || '') !== String(t.username || ''))) auditWhy = 'host-shared';
+    else audit = true;
+  }
+  const rec = st.ready[t.id] || {};
+  const oldDirs = audit && typeof rec.dir === 'string' && rec.dir !== dir ? [rec.dir] : [];
+  const job = { runId: newRunId(), tid: t.id, mode: 'prep', node: t.demo ? '' : String(t.agent || ''), by: String(by || '').slice(0, 64), requestedAt: now, state: 'queued', phase: null, deliveredAt: null, deliveries: 0, startedAt: null, seenAt: null, ep: endpointKey(t),
+    pick: pickOk ? pick : null, corpVcs: t.agent ? [] : corpVcs.slice(0, 20), from: from === true, age: age === 'default' ? 'default' : 'never', audit, auditWhy, ...(audit ? { dir, oldDirs } : {}) };
+  st.jobs.push(job);
+  persist();
+  if (!job.node) {
+    if (!keysRef) { st.jobs = st.jobs.filter((x) => x.runId !== job.runId); persist(); return { ok: false, code: 'not-started', reason: '준비기가 아직 준비되지 않았습니다 — 잠시 뒤 다시 누르세요.' }; }
+    const s2 = localPrep().submit({ runId: job.runId, mode: 'prep', target: { id: t.id, name: t.name, host: t.host, port: t.port, username: t.username, demo: !!t.demo }, expect: expectFor(job) });
+    if (!s2.ok) { st.jobs = st.jobs.filter((x) => x.runId !== job.runId); persist(); return { ok: false, code: s2.code, reason: s2.code === 'busy' ? '이 서버의 준비가 이미 줄에 있습니다.' : '준비 줄이 가득 찼습니다.' }; }
+  }
+  return { ok: true, runId: job.runId, via: job.node ? 'edge' : 'central', audit, auditWhy };
 }
 
 /**
@@ -362,7 +446,10 @@ export function sweep(now = Date.now()) {
     const rec = st.ready[j.tid] || {};
     rec.lastError = { at: now, kind: 'lost', error: j.node && !j.deliveredAt ? `엣지 ${j.node} 가 ${DELIVER_TTL_MS / 60_000}분 안에 작업을 받아 가지 않았습니다.` : '시한 안에 결과를 받지 못했습니다(늦게 오면 그때 반영합니다).' };
     st.ready[j.tid] = rec; changed = true;
-    st.lost[j.runId] = { runId: j.runId, tid: j.tid, mode: j.mode, node: j.node || '-', by: j.by || '', requestedAt: j.requestedAt, startedAt: j.startedAt || null, ep: j.ep || null, lostAt: now };
+    // v3.18.0 반증 D5: 늦게 온 결과를 그 작업이 정한 값으로 해석하게 — 설치 디렉터리 · 후보 · 준비 선택(예전에는 빠져 설치 결과 · 위치를 버리고 선택 값을 다르게 적었다 — v3.17.0 설치에도 있던 빈틈)
+    st.lost[j.runId] = { runId: j.runId, tid: j.tid, mode: j.mode, node: j.node || '-', by: j.by || '', requestedAt: j.requestedAt, startedAt: j.startedAt || null, ep: j.ep || null, lostAt: now,
+      ...(Array.isArray(j.cands) ? { cands: j.cands } : {}), ...(typeof j.dir === 'string' ? { dir: j.dir, oldDirs: j.oldDirs || [] } : {}),
+      ...(j.mode === 'prep' ? { audit: j.audit === true, auditWhy: j.auditWhy || null, from: j.from === true, age: j.age === 'default' ? 'default' : 'never' } : {}) };
     return false;
   });
   const lostIds = Object.keys(st.lost);
@@ -395,7 +482,10 @@ export function handleEdgeAudit(agent, mine, a, now = Date.now()) {
   if (isObj(b.cred)) {
     const rows = new Map();
     for (const [tid, v] of Object.entries(b.cred).slice(0, 500)) { if (mine.has(tid)) { const c = cleanEdgeCred(v); if (c) rows.set(tid, c); } }
-    edgeCred.set(key, { at: now, rows });
+    // v3.18.0: 접속 준비 계정(credPrep — 같은 정제). 옛 엣지는 보내지 않는다 → null(접수 'cred-edge-unknown' · 배달 안 함)
+    let prepRows = null;
+    if (isObj(b.credPrep)) { prepRows = new Map(); for (const [tid, v] of Object.entries(b.credPrep).slice(0, 500)) { if (mine.has(tid)) { const c = cleanEdgeCred(v); if (c) prepRows.set(tid, c); } } }
+    edgeCred.set(key, { at: now, rows, prepRows });
     if (edgeCred.size > 200) edgeCred.delete(edgeCred.keys().next().value);
   }
   for (const x of Array.isArray(b.active) ? b.active.slice(0, ACTIVE_MAX) : []) {
@@ -426,11 +516,14 @@ export function handleEdgeAudit(agent, mine, a, now = Date.now()) {
   const jobs = [];
   const credFresh = (() => { const e = edgeCred.get(key); return !!e && now - e.at <= EDGE_CRED_TTL_MS; })();
   const canInstall = Array.isArray(b.caps) && b.caps.slice(0, 10).includes('install'); // 반증 S1 — 이번 본문의 표시만 믿는다
+  const canPrep = Array.isArray(b.caps) && b.caps.slice(0, 10).includes('prep'); // v3.18.0 — 3.17.x 엣지는 'prep' 을 모른다(점검 실행으로 읽는다)
+  const prepFresh = (() => { const e = edgeCred.get(key); return !!e && !!e.prepRows && now - e.at <= EDGE_CRED_TTL_MS; })();
   for (const j of st.jobs) {
     if (String(j.node).toLowerCase() !== key || !mine.has(j.tid) || active.has(j.runId) || j.state === 'ingesting') continue;
     if (j.deliveredAt && (now - j.deliveredAt < REDELIVER_MS || j.deliveries >= MAX_DELIVER)) continue;
     // 설치 작업은 설치 계정 상태를 알려 오는 엣지(이 판 이상)에만 — 옛 엣지는 모르는 작업 종류를 점검 실행('run')으로 읽는다
     if (j.mode === 'install' && (!credFresh || !canInstall)) continue;
+    if (j.mode === 'prep' && (!prepFresh || !canPrep || (j.audit && !canInstall))) continue;
     const t = mine.get(j.tid);
     j.deliveredAt = now; j.deliveries = (j.deliveries || 0) + 1; changed = true;
     jobs.push({ runId: j.runId, mode: j.mode, id: t.id, name: t.name, host: t.host, port: t.port, username: t.username, expect: expectFor(j) });
@@ -464,15 +557,31 @@ export function cleanEdgeResult(x) {
   const dir = typeof x.dir === 'string' && !dirIssue(x.dir) ? x.dir : (x.dir === undefined ? undefined : null);
   const ii = (v, lo, hi) => (Number.isInteger(v) && v >= lo && v <= hi ? v : null);
   const nm = (v) => (typeof v === 'string' && /^[A-Za-z0-9가-힣_.@ -]{0,64}$/.test(v) ? v : '');
-  const install = x.mode === 'install' && x.install && typeof x.install === 'object' && !Array.isArray(x.install) ? {
-    code: INSTALL_CODES.includes(x.install.code) ? x.install.code : 'unreachable', fail: INSTALL_FAILS.includes(x.install.fail) ? x.install.fail : (x.install.fail == null ? null : 'other'),
-    step: ii(x.install.step, 0, 7) ?? 0, rc: ii(x.install.rc, 0, 255), acct: nm(x.install.acct), key: nm(x.install.key), src: ['server', 'corp'].includes(x.install.src) ? x.install.src : null,
-    cred: CRED_STATES.includes(x.install.cred) ? x.install.cred : null, nopy: x.install.nopy === true, oldRm: ii(x.install.oldRm, 0, 10) ?? 0, oldKeep: ii(x.install.oldKeep, 0, 10) ?? 0,
-    priv: ['root', 'sudo', 'tty', 'no'].includes(x.install.priv) ? x.install.priv : null,
+  const cleanInstall = (v) => ({
+    code: INSTALL_CODES.includes(v.code) ? v.code : 'unreachable', fail: INSTALL_FAILS.includes(v.fail) ? v.fail : (v.fail == null ? null : 'other'),
+    step: ii(v.step, 0, 7) ?? 0, rc: ii(v.rc, 0, 255), acct: nm(v.acct), key: nm(v.key), src: ['server', 'corp'].includes(v.src) ? v.src : null,
+    cred: CRED_STATES.includes(v.cred) ? v.cred : null, nopy: v.nopy === true, oldRm: ii(v.oldRm, 0, 10) ?? 0, oldKeep: ii(v.oldKeep, 0, 10) ?? 0,
+    priv: ['root', 'sudo', 'tty', 'no'].includes(v.priv) ? v.priv : null,
+  });
+  const install = x.mode === 'install' && x.install && typeof x.install === 'object' && !Array.isArray(x.install) ? cleanInstall(x.install) : null;
+  // v3.18.0 접속 준비 결과(아는 까닭 · 정수 · 이름 · 참거짓만 — 원격 글 없음) · 연결 시험(엣지 시험 결과와 같은 정제) · 디스크 점검 건너뛴 까닭
+  const isPrep = x.mode === 'prep';
+  const pp = isPrep && x.prep && typeof x.prep === 'object' && !Array.isArray(x.prep) ? x.prep : null;
+  const prep = pp ? {
+    code: PREP_CODES.includes(pp.code) ? pp.code : 'unreachable', fail: PREP_FAILS.includes(pp.fail) ? pp.fail : (pp.fail == null ? null : 'other'),
+    step: ii(pp.step, 0, 7) ?? 0, rc: ii(pp.rc, 0, 255), acct: nm(pp.acct), key: nm(pp.key), src: ['server', 'corp'].includes(pp.src) ? pp.src : null,
+    cred: CRED_STATES.includes(pp.cred) ? pp.cred : null, priv: ['root', 'sudo', 'tty', 'no'].includes(pp.priv) ? pp.priv : null,
+    created: pp.created === true, exists: pp.exists === true, added: pp.added === true, have: pp.have === true, differs: pp.differs === true, partial: pp.partial === true, from: pp.from === true,
+    warn: Array.isArray(pp.warn) ? pp.warn.filter((w) => ['home-perm', 'passwd', 'chage'].includes(w)).slice(0, 3) : [],
   } : null;
+  const lg = isPrep && x.login && typeof x.login === 'object' && !Array.isArray(x.login) ? x.login : null;
+  const login = lg ? { ok: lg.ok === true, kind: LOGIN_KINDS.includes(lg.kind) ? lg.kind : 'unreachable', error: typeof lg.error === 'string' ? cleanLine(lg.error, 240) : '', hello: cleanHello(lg.hello), ms: Number.isFinite(lg.ms) && lg.ms >= 0 ? Math.min(lg.ms, 600_000) : null } : null;
+  const auditSkip = isPrep && AUDIT_SKIPS.includes(x.auditSkip) ? x.auditSkip : null;
+  const prepInstall = isPrep && x.install && typeof x.install === 'object' && !Array.isArray(x.install) ? cleanInstall(x.install) : null;
   return {
-    mode: x.mode === 'check' ? 'check' : x.mode === 'install' ? 'install' : 'run', ok: x.ok === true, ran: x.ran === true, kind, error: typeof x.error === 'string' ? cleanLine(x.error, 240) : '',
-    ...(dir !== undefined ? { dir } : {}), ...(install ? { install } : {}),
+    mode: x.mode === 'check' ? 'check' : x.mode === 'install' ? 'install' : isPrep ? 'prep' : 'run', ok: x.ok === true, ran: x.ran === true, kind, error: typeof x.error === 'string' ? cleanLine(x.error, 240) : '',
+    ...(dir !== undefined ? { dir } : {}), ...(install ? { install } : {}), ...(prepInstall ? { install: prepInstall } : {}),
+    ...(prep ? { prep } : {}), ...(login ? { login } : {}), ...(isPrep ? { auditSkip } : {}),
     ready: lines(x.ready, 200, 400, 64 * 1024), out: lines(x.out, 80_000, LINE_CAP, 5 * 1024 * 1024),
     outBytes: Number.isFinite(x.outBytes) && x.outBytes >= 0 ? Math.min(x.outBytes, 1e10) : 0, truncated: x.truncated === true, code,
     stderr: typeof x.stderr === 'string' ? x.stderr.slice(0, 4096) : '', ms: Number.isFinite(x.ms) && x.ms >= 0 ? Math.min(x.ms, 4 * 3600_000) : 0,
@@ -499,13 +608,13 @@ export function readinessOf(tid) { const r = load().ready[tid]; return r ? { ...
 export function jobOf(tid) {
   const j = load().jobs.find((x) => x.tid === tid);
   if (!j) return null;
-  const lr = !j.node ? (j.mode === 'install' ? localInstaller : localRunner)?.state(j.runId) || null : null;
+  const lr = !j.node ? runnerOf(j.mode)?.state(j.runId) || null : null;
   return { runId: j.runId, mode: j.mode, node: j.node, state: lr?.state || j.state || 'queued', phase: lr?.phase || j.phase || null, position: lr?.position || null, requestedAt: j.requestedAt, startedAt: lr?.startedAt || j.startedAt || null, delivered: !!j.deliveredAt };
 }
 export function activeJobs() { return load().jobs.map((j) => jobOf(j.tid)).filter(Boolean); }
 const dropJobsOf = (st, tid) => {
   const gone = st.jobs.filter((x) => x.tid === tid);
-  for (const j of gone) if (!j.node) (j.mode === 'install' ? localInstaller : localRunner)?.cancel(j.runId);
+  for (const j of gone) if (!j.node) runnerOf(j.mode)?.cancel(j.runId);
   st.jobs = st.jobs.filter((x) => x.tid !== tid);
   for (const [k, v] of Object.entries(st.lost)) if (v.tid === tid) delete st.lost[k];
   return gone.length;
@@ -533,4 +642,4 @@ export function cleanEdgeCred(v) {
   const choices = state === 'ambig' && Array.isArray(v.choices) ? v.choices.slice(0, 10).filter((c) => c && typeof c === 'object' && typeof c.id === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(c.id)).map((c) => ({ id: c.id, name: nm(c.name), acct: nm(c.acct), key: nm(c.key) })) : null;
   return { state, src: ['server', 'corp'].includes(v.src) ? v.src : null, acct: nm(v.acct), key: nm(v.key), ...(choices ? { choices } : {}) };
 }
-export function _resetForTest() { S = null; loadErr = ''; latest.clear(); localRunner = null; localInstaller = null; keysRef = null; spaceLow = () => false; edgeCred.clear(); knownSentAt.clear(); }
+export function _resetForTest() { S = null; loadErr = ''; latest.clear(); localRunner = null; localInstaller = null; localPrepper = null; keysRef = null; spaceLow = () => false; edgeCred.clear(); knownSentAt.clear(); }

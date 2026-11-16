@@ -34,6 +34,7 @@ import { Seg, Badge, copyText, CsvPanel, NodeCard, InstallCard } from './FocusMo
 import { usePoll } from './focusMonPoll.js';
 import { LoadTab } from './FocusMonLoad.jsx';
 import { AuditTab } from './FocusMonAudit.jsx'; // v3.11.0 디스크 점검(배드 섹터 점검 프로그램)
+import { PrepPanel } from './FocusMonPrep.jsx'; // v3.18.0 접속 자동 준비(수집 계정 · 공개키)
 import './focusMon.css';
 
 const BASE = ['tools', 'focus-mon'];
@@ -1275,13 +1276,14 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
   return (
     <>
       <div className="fm-card fm-steps">
-        <div><b>1</b><span>서버를 맡은 노드(중앙 또는 엣지)의 <strong>공개키</strong>를 대상 서버 계정의 authorized_keys 에 넣습니다.</span></div>
+        <div><b>1</b><span>서버를 맡은 노드(중앙 또는 엣지)의 <strong>공개키</strong>를 대상 서버 계정의 authorized_keys 에 넣습니다 — 손으로, 또는 등록한 뒤 아래 <strong>접속 자동 준비</strong>로.</span></div>
         <div><b>2</b><span>서버를 <strong>IP 로 등록</strong>합니다 — 포트 · 계정 · 담당 노드. 비밀번호는 받지 않습니다.</span></div>
         <div><b>3</b><span><strong>연결 시험</strong>으로 키 로그인과 OS 를 확인합니다(리눅스 · RHEL 7.8 기준).</span></div>
         <div><b>4</b><span>최대 <strong>{L.maxPerSession}대</strong>를 골라 시작합니다. 수집한 값은 DB 에 남아 시간 띠로 다시 볼 수 있습니다.</span></div>
       </div>
       {msg ? <div className={`fm-ban ${msg.tone === 'bad' ? 'w' : ''}`}>{msg.text}</div> : null}
       {bulk ? <div className={`fm-ban ${bulk.tone === 'warn' ? 'w' : ''}`} role="status">{bulk.text}</div> : null}
+      <PrepPanel setMsg={setMsg} onDone={reload} />
       <div className="fm-two wide">
         <div className="fm-card fm-flush">
           <div className="fm-row fm-between fm-pad"><h3 className="fm-h3">모니터링 대상 서버 — {main.targets.length}대 등록</h3>

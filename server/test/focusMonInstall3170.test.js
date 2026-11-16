@@ -350,7 +350,7 @@ test('⑨ 엣지 — 설치 작업은 설치 줄로 · 설치 계정 보고는 �
   assert.match(src, /const sub = j\.mode === 'install'\n\s+\? installRunner\.submit\(/, '설치 작업은 점검 실행 줄이 아니라 설치 줄로');
   assert.match(src, /exec: installExec\(\{ edge: true, edgeVcs \}\)/, '엣지는 자기 법인의 계정(edge 모드 · 스냅샷 vCenter)');
   assert.match(src, /credOf\(t, \{ edge: true, corpVcs \}\)/, '설치 계정 보고도 같은 법인 거르기');
-  assert.match(src, /caps: \['install'\]/, '매 동기화에 설치 능력 표시(반증 S1)');
+  assert.match(src, /caps: \[\.\.\.EDGE_AUDIT_CAPS\]/, '매 동기화에 설치 능력 표시(반증 S1)'); assert.ok(Wk.EDGE_AUDIT_CAPS.includes('install')); // v3.18.0 — 목록 상수로(‘prep’ 더함)
   assert.ok(Array.isArray(Wk.edgeVcs()), '엣지 법인 = 스냅샷 vCenter 목록(못 읽으면 빈 목록)');
   assert.equal(Wk.credReport(Date.now(), () => ({ state: 'ok' })), null, '맡은 서버 목록을 받기 전에는 보고하지 않는다');
   Wk._setKnownForTest([{ id: 'fm-eeeeeeee01', name: 'pl-db-01', host: '10.48.0.1', port: 22 }]);
