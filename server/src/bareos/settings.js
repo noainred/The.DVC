@@ -256,6 +256,34 @@ const cloneSettings = (cur) => ({ version: 2, directors: cur.directors.map((d) =
  * @returns {{ settings: object, droppedSecrets: string[] }}  settings 는 publicSettings 모양
  * @throws Error(message = 사람이 읽는 사유, code invalid|conflict)
  */
+/**
+ * 52회차 D1(사용자 결정 — 2026-11-17 '권장 사항으로 진행'): 서비스 1 = vCenter 1 + Bareos 1 — Director 하나에 vCenter 하나.
+ * **새로** 같은 Director 에 둘째 vCenter 를 묶는 저장은 거부한다. 이미 함께 묶여 있던 짝(이전 설정 · 옛 1:1:1 정리 전)은 그대로 둔다
+ * (막으면 운영 중인 법인이 깨진다 — 화면이 경고만 한다 · `sharedDirectorsOf`). 판정은 이 함수 하나(설정 저장 · 완전 설치 시작 · 7단계 매핑).
+ * @returns {string} 사유 · 없으면 ''
+ */
+export function directorBindIssue(nextSites = [], curSites = [], directors = []) {
+  const byDir = new Map();
+  for (const s of nextSites) { if (!s?.directorId) continue; const a = byDir.get(s.directorId) || []; a.push(String(s.vcenterId)); byDir.set(s.directorId, a); }
+  for (const [dir, vcs] of byDir) {
+    if (vcs.length < 2) continue;
+    const had = new Set(curSites.filter((x) => x?.directorId === dir).map((x) => String(x.vcenterId)));
+    const added = vcs.filter((vc) => !had.has(vc));
+    if (!added.length) continue;
+    const name = directors.find((d) => d.id === dir)?.name || dir;
+    const others = vcs.filter((vc) => vc !== added[0]);
+    return `Director ‘${name}’ 에는 이미 vCenter ‘${others.join(', ')}’ 가 묶여 있습니다 — 서비스 하나 = vCenter 하나 + Bareos 하나입니다. ‘${added[0]}’ 는 그 서비스의 Director 에 묶으세요(같은 Director 에 새 vCenter 를 더 묶지 않습니다).`;
+  }
+  return '';
+}
+
+/** 52회차 D1: 이미 vCenter 둘 이상이 묶인 Director(경고용 — 저장은 막지 않는다). */
+export function sharedDirectorsOf(s = loadSettings()) {
+  const byDir = new Map();
+  for (const x of s.sites || []) { const a = byDir.get(x.directorId) || []; a.push(x.vcenterId); byDir.set(x.directorId, a); }
+  return [...byDir.entries()].filter(([, vcs]) => vcs.length > 1).map(([id, vcs]) => ({ directorId: id, name: (s.directors || []).find((d) => d.id === id)?.name || id, vcenterIds: vcs }));
+}
+
 export function saveSettings(body = {}, { jobDirs = new Map() } = {}) {
   if (body.director !== undefined) throw fail('invalid', 'Director 접속값은 법인별 Director 화면(설정 › 백업 › Bareos 백업 서버 › Director)에서 저장합니다.');
   const cur = loadSettings();
@@ -287,6 +315,8 @@ export function saveSettings(body = {}, { jobDirs = new Map() } = {}) {
       }
       if ([...dirs].some((id) => id !== now.directorId)) throw fail('conflict', `‘${vc}’ 에 백업 대상이 있어 다른 Director 로 옮길 수 없습니다 — 잡은 지금 Director 의 설정에 있습니다. 백업 대상을 먼저 지우세요.`);
     }
+    // 52회차 D1: Director 하나에 vCenter 하나 — 백업 대상 이동 409(더 구체적인 사유)를 먼저 본 뒤
+    { const why = directorBindIssue(sites, cur.sites, next.directors); if (why) throw fail('invalid', why); }
     next.sites = sites;
   }
   persist(next);
@@ -439,3 +469,12 @@ export function directorConnSig(d) {
 
 export function onSettingsChange(cb) { _listeners.add(cb); return () => _listeners.delete(cb); }
 export function _resetForTest() { _cache = null; _loadErr.clear(); }
+/**
+ * 시험 전용 — 52회차 D1 이전의 옛 설정(Director 하나에 vCenter 여럿)을 **이미 저장된 파일** 로 놓는다(저장 판정을 거치지 않는다).
+ * 업그레이드 전 설치본의 bareos.json 이 이 모양이고, 그 짝은 이후 저장에서도 그대로 둔다(directorBindIssue). 한 Director 로 여러 vCenter 흐름을 보는 시험의 준비용.
+ */
+export function _seedLegacySitesForTest(sites) {
+  const next = cloneSettings(loadSettings());
+  next.sites = (Array.isArray(sites) ? sites : []).map((x) => normalizeSite(x).site).filter(Boolean);
+  persist(next);
+}

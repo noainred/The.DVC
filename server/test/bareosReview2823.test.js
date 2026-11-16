@@ -245,7 +245,7 @@ test('P4: 매핑 저장은 읽은 설정 세대가 다르면 409 — 다른 화�
 
 test('W1: 인벤토리에서 빠진 vCenter 의 저장된 매핑은 다시 보내도 받는다(막다른 길 없음) · 새로 묶는 vCenter 는 인벤토리에 있어야 한다', async () => {
   const cur = S.loadSettings().sites;
-  S.saveSettings({ sites: [...cur, { vcenterId: 'vc-gone', directorId: DB }] });   // 등록 해제된 vCenter 의 옛 매핑(모듈로 직접)
+  S._seedLegacySitesForTest([...cur, { vcenterId: 'vc-gone', directorId: DB }]);   // 등록 해제된 vCenter 의 옛 매핑(파일에 이미 있던 것 — 52회차 D1 뒤에는 저장 판정이 새로 묶는 것을 막으므로 파일로 놓는다)
   const g = (await call('admin', 'GET', '/settings')).j;
   const keep = await call('admin', 'PUT', '/settings', { rev: g.rev, sites: g.sites.map((s) => (s.vcenterId === 'vc-a' ? { ...s, pool: 'P2' } : s)) });
   assert.equal(keep.s, 200, `다른 Director 의 저장이 막히지 않는다 — ${keep.t}`);

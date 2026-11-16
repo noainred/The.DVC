@@ -50,7 +50,7 @@ export function directorInfo(vcenterId, settings, poller, demo) {
   const st = directorState({ mapped: !!site, configured, authStopped, poll });
   return {
     id: d?.id || '', name: d?.name || '', via: d?.agent ? 'edge' : 'central',
-    state: st.state, resultsKnown: st.resultsKnown, at: Number.isFinite(poll?.at) ? poll.at : null,
+    state: st.state, resultsKnown: st.resultsKnown, ...(st.partial ? { partial: true } : {}), at: Number.isFinite(poll?.at) ? poll.at : null,
     ...(site ? { schedule: site.schedule || '', pool: site.pool || '' } : {}),
   };
 }
@@ -135,13 +135,13 @@ export function summaryData(req, snap, { rpoDays = 1, now = Date.now(), detailOk
   for (const vc of p.vcs) {
     const dir = directorInfo(vc.id, p.settings, p.poller, p.demo);
     const { rows, vmTotal } = corpRows(vc.id, vmsBy.get(vc.id) || [], p.byVcVm.get(vc.id) || new Map(), p.marks, p);
-    const counts = corpCounts(rows, { marksKnown: p.marksKnown, resultsKnown: dir.resultsKnown, registryKnown: p.registryKnown, rpoDays, now });
+    const counts = corpCounts(rows, { marksKnown: p.marksKnown, resultsKnown: dir.resultsKnown, registryKnown: p.registryKnown, rpoDays, now, partial: !!dir.partial });
     // 버그 점검 S13: '마지막 백업' = 마지막으로 **백업이 만들어진**(성공·경고) 시각(b.ok) — 끝난 실행(b.at)이면 실패도 들어가 법인별 화면·우선 목록과 달랐다
     let lastAt = null;
     for (const r of rows) if (r.b?.ok && (lastAt == null || r.b.ok > lastAt)) lastAt = r.b.ok;
     out.push({ id: vc.id, name: vc.name || vc.id, region: vc.location?.region || '', vm: vmTotal, director: dir, counts, lastAt: dir.resultsKnown ? lastAt : null });
     for (const r of rows) {
-      const kind = priorityKind(r, { resultsKnown: dir.resultsKnown, marksKnown: p.marksKnown, rpoDays, now });
+      const kind = priorityKind(r, { resultsKnown: dir.resultsKnown, marksKnown: p.marksKnown, rpoDays, now, partial: !!dir.partial });
       if (kind) prio.push({ vcenterId: vc.id, vcName: vc.name || vc.id, id: r.id, name: r.name, folder: r.folder, crit: r.crit, kind, at: r.b?.at ?? null, ok: r.b?.ok ?? null, st: r.b?.st ?? null });
     }
   }
@@ -167,7 +167,7 @@ export function detailData(req, snap, vcenterId, { rpoDays = 1, now = Date.now()
   const dir = directorInfo(vc.id, p.settings, p.poller, p.demo);
   const vms = (snap?.vms || []).filter((v) => v.vcenterId === vc.id);
   const { rows, vmTotal } = corpRows(vc.id, vms, p.byVcVm.get(vc.id) || new Map(), p.marks, p, { withJob: true });
-  const counts = corpCounts(rows, { marksKnown: p.marksKnown, resultsKnown: dir.resultsKnown, registryKnown: p.registryKnown, rpoDays, now });
+  const counts = corpCounts(rows, { marksKnown: p.marksKnown, resultsKnown: dir.resultsKnown, registryKnown: p.registryKnown, rpoDays, now, partial: !!dir.partial });
   return {
     ok: true, at: now, rpoDays, vcenter: { id: vc.id, name: vc.name || vc.id }, vm: vmTotal, director: dir, counts, rows,
     // 법인 고르기 · 바로가기 칩(범위 안 vCenter 의 이름과 Director 상태만 — 다른 법인의 VM 은 싣지 않는다)

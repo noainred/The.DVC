@@ -17,6 +17,7 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { normalizeGuacdFlags } from './guacdFlags.js';   // 48회차 F2
 import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
 
 /**
@@ -56,7 +57,7 @@ const DEFAULTS = {
   },
   proxyHost: process.env.PROXY_PUBLIC_HOST || '', // what users connect to (and the SSH gateway dials)
   publicPortBase: Number(process.env.PROXY_PUBLIC_PORT_BASE) || 20000,
-  guacd: { host: process.env.GUACD_HOST || '', port: Number(process.env.GUACD_PORT) || 4822 },
+  guacd: { host: process.env.GUACD_HOST || '', port: Number(process.env.GUACD_PORT) || 4822, tls: false, verifyRdpCert: false },   // 48회차 F2: tls · verifyRdpCert(guacdTransport.js)
   // Additional per-vCenter proxies. Each: { id, name, vcenterIds:[], proxyHost,
   // publicPortBase, dataplane, deploy, guacd }. A VM's vCenter selects its proxy;
   // when none matches, the top-level ("기본") proxy above is used.
@@ -185,7 +186,7 @@ export function saveConfig(partial = {}) {
   if (partial.guacd) {
     const g = { ...partial.guacd };
     if ('port' in g) g.port = portOrPrev(g.port, c.guacd?.port);
-    c.guacd = { ...c.guacd, ...g };
+    c.guacd = normalizeGuacdFlags({ ...c.guacd, ...g });   // 48회차 F2: 불리언 칸은 true/'true' 만 켬
   }
   // v2.537: proxyHost 는 SSH 게이트웨이가 다이얼하는 주소다 — 루프백·링크로컬 거부(사용자가 접속할
   // 주소이기도 하므로 127.x 는 어차피 동작하지 않는다). 이름은 통과시킨다(접속 시 lookup 훅이 본다).
@@ -302,7 +303,7 @@ export function saveProxy(body = {}) {
     const baseG = base.guacd || DEFAULTS.guacd;
     const g = { ...body.guacd };
     if ('port' in g) g.port = portOrPrev(g.port, baseG.port);
-    next.guacd = { ...baseG, ...g };
+    next.guacd = normalizeGuacdFlags({ ...baseG, ...g });
   }
   if (existing) c.proxies = c.proxies.map((p) => (p.id === existing.id ? next : p));
   else c.proxies.push(next);

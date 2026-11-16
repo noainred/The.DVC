@@ -124,8 +124,10 @@ export const DETAIL_FILTERS = [
 export const DETAIL_FILTERS_MAIN = Object.freeze(['all', 'attn', 'run', 'bad', 'missing', 'old']);
 export const DETAIL_FILTERS_MORE = Object.freeze(['job', 'never', 'off', 'mismatch', 'gone']);
 /** 행이 보기 필터에 드는가. resultsKnown=false 면 결과 기준 필터(run·bad·old·never)에 넣지 않는다(모름). */
-export function rowMatches(r, f, { rpoDays = 1, now = Date.now(), resultsKnown = true } = {}) {
+export function rowMatches(r, f, { rpoDays = 1, now = Date.now(), resultsKnown = true, partial = false } = {}) {
   const k = bareosClass(r?.b, { rpoDays, now });
+  // 55회차 #9: 잘린 조회(서버 director.partial)면 진행 중인 실행이 있는 VM 의 결과는 모름 — 진행 중(run)에는 들지만 결과 기준(bad·old·never·확인 필요)에는 넣지 않는다(서버 corpCounts 와 같게)
+  if (partial && k.run && ['attn', 'bad', 'old', 'never'].includes(f)) return f === 'attn' ? k.missing : false;
   if (f === 'job') return k.job;
   if (f === 'missing') return k.missing;
   if (f === 'off') return k.off;
@@ -158,14 +160,14 @@ const nat = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
  * 폴더 트리(법인별 현황) — 보기·검색에 드는 행만 담고, 폴더마다 그 아래 전체 행의 집계(잡·성공·경고·실패·진행·미등록)를 단다.
  *   인벤토리에 없는 잡(gone)은 원장의 등록 때 위치로 놓인다.
  */
-export function buildBareosTree(rows, { filter = 'all', q = '', rpoDays = 1, now = Date.now(), resultsKnown = true } = {}) {
+export function buildBareosTree(rows, { filter = 'all', q = '', rpoDays = 1, now = Date.now(), resultsKnown = true, partial = false } = {}) {
   const mk = (key, name) => ({ key, name, children: new Map(), rows: [], agg: { n: 0, job: 0, ok: 0, warn: 0, fail: 0, cancel: 0, run: 0, missing: 0, gb: 0 }, hit: 0 });
   const root = mk('', '');
   const needle = String(q || '').trim().toLowerCase();
   for (const r of Array.isArray(rows) ? rows : []) {
     const parts = folderParts(r.folder);
     const k = bareosClass(r.b, { rpoDays, now });
-    const show = rowMatches(r, filter, { rpoDays, now, resultsKnown }) && (!needle || String(r.name || '').toLowerCase().includes(needle) || parts.join('/').toLowerCase().includes(needle));
+    const show = rowMatches(r, filter, { rpoDays, now, resultsKnown, partial }) && (!needle || String(r.name || '').toLowerCase().includes(needle) || parts.join('/').toLowerCase().includes(needle));
     let node = root; const path = [root];
     for (const p of parts) {
       const key = node.key ? `${node.key}/${p}` : p;

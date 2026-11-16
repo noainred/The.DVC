@@ -488,3 +488,51 @@ test('48회차 F1: guacd 핸드셰이크(ready) 전의 브라우저 프레임은
     ws.close(1000, 'bye');
   } finally { gd._setRdpDepsForTest(null); }
 });
+
+test('48회차 F2(사용자 결정): guacd.tls 면 TLS(인증서 검증)로 열고 secureConnect 뒤에 select · verifyRdpCert 면 ignore-cert=false', async () => {
+  mkUser('rdp48tls');
+  reg.saveConfig({ guacd: { host: 'guacd.corp.example', port: 4823, tls: 'true', verifyRdpCert: true } });
+  assert.equal(reg.getConfig().guacd.tls, true, "저장은 불리언으로('true' 도 켬)");
+  const tok = login('rdp48tls');
+  const r = reg.addMapping({ protocol: 'rdp', targetHost: '127.0.0.1', targetPort: 3389, owner: 'rdp48tls', vcenterId: 'vc-a' });
+  assert.equal(r.ok, true, r.reason);
+  const ticket = issueRdpTicket({ username: 'u', password: 'p' }, { owner: 'rdp48tls' });
+  const sock = Object.assign(new EventEmitter(), {
+    writes: [], destroyed: false,
+    write(s) { this.writes.push(String(s)); return true; },
+    destroy() { this.destroyed = true; setImmediate(() => this.emit('close')); },
+    end() { this.destroy(); }, setTimeout() {},
+  });
+  const calls = { net: 0, tls: [] };
+  gd._setRdpDepsForTest({ connect: () => { calls.net++; return sock; }, tlsConnect: (o) => { calls.tls.push(o); return sock; } });
+  try {
+    const ws = new FakeWs();
+    gd._rdpHandleForTest(ws, new URLSearchParams({ mappingId: r.mapping.id, ticket }), auth.resolveTokenUser(tok), tok);
+    assert.equal(calls.net, 0, 'TLS 설정이면 평문 TCP 로 열지 않는다');
+    assert.equal(calls.tls.length, 1);
+    assert.equal(calls.tls[0].rejectUnauthorized, true, '인증서 검증을 끄지 않는다(이 구간에 RDP 비밀번호가 흐른다)');
+    assert.equal(calls.tls[0].servername, 'guacd.corp.example');
+    assert.equal(calls.tls[0].port, 4823);
+    sock.emit('connect');
+    assert.equal(sock.writes.length, 0, 'TCP 연결만으로는 쓰지 않는다 — TLS 확인(secureConnect) 뒤에');
+    sock.emit('secureConnect');
+    assert.ok(sock.writes[0]?.startsWith('6.select,3.rdp;'));
+    sock.emit('data', Buffer.from('4.args,13.VERSION_1_5_0,8.hostname,11.ignore-cert;'));
+    const connect = sock.writes.find((s) => s.startsWith('7.connect'));
+    assert.ok(connect && connect.endsWith(',5.false;'), `verifyRdpCert 면 ignore-cert=false: ${connect}`);
+    ws.close(1000, 'bye');
+  } finally { gd._setRdpDepsForTest(null); reg.saveConfig({ guacd: { host: '127.0.0.1', port: 4822, tls: false, verifyRdpCert: false } }); }
+  // 기본(예전 동작): 평문 · ignore-cert=true
+  const sock2 = Object.assign(new EventEmitter(), { writes: [], write(s) { this.writes.push(String(s)); return true; }, destroy() {}, end() {}, setTimeout() {} });
+  let netCalls = 0;
+  gd._setRdpDepsForTest({ connect: () => { netCalls++; return sock2; }, tlsConnect: () => { throw new Error('평문 설정인데 TLS'); } });
+  try {
+    const ws2 = new FakeWs();
+    const t2 = issueRdpTicket({ username: 'u', password: 'p' }, { owner: 'rdp48tls' });
+    gd._rdpHandleForTest(ws2, new URLSearchParams({ mappingId: r.mapping.id, ticket: t2 }), auth.resolveTokenUser(tok), tok);
+    assert.equal(netCalls, 1);
+    sock2.emit('connect');
+    sock2.emit('data', Buffer.from('4.args,13.VERSION_1_5_0,11.ignore-cert;'));
+    assert.ok(sock2.writes.find((s) => s.startsWith('7.connect'))?.endsWith(',4.true;'), '기본은 예전처럼 ignore-cert=true');
+  } finally { gd._setRdpDepsForTest(null); }
+});

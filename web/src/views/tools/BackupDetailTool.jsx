@@ -240,7 +240,7 @@ export default function BackupDetailTool({ scope }) {
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 18, fontWeight: 800 }}>{data.vcenter?.name}</div>
             <div className="muted" style={{ fontSize: 12, overflowWrap: 'anywhere' }}>
-              Veeam {vs.text}{(data.servers || []).length ? ` · 서버 ${(data.servers || []).map((x) => x.name).join(', ')}` : ''} · Bareos 원장 {bareosUnknown ? '못 읽음' : '읽음'} · 기준 {shortTs(data.at)}{error ? ' · 최근 새로고침 실패 — 이전 값' : ''}
+              Veeam {vs.text}{(data.servers || []).length ? ` · 서버 ${(data.servers || []).map((x) => x.name).join(', ')}` : ''} · Bareos 원장 {bareosUnknown ? (data.bareosDirFail ? '결과 모름(Director 조회 실패)' : '못 읽음') : '읽음'} · 기준 {shortTs(data.at)}{error ? ' · 최근 새로고침 실패 — 이전 값' : ''}
             </div>
           </div>
           <div className="flex wrap" style={{ gap: '10px 24px', marginLeft: 'auto' }}>
@@ -282,7 +282,7 @@ export default function BackupDetailTool({ scope }) {
           {/* v2.782(점검 K4 B-B3): 이 vCenter 의 Veeam 서버 중 첫 수집 전·한 번도 읽지 못한 서버가 있으면 맞지 않은 VM 은 '없음' 이 아니라 '모름' — 이유를 밝힌다. */}
           {r.veeam != null && r.veeamAbsentUnknown && <div style={{ flexBasis: '100%', fontSize: 12, color: '#fcd34d' }}>이 vCenter 를 맡은 Veeam 서버 중 아직 첫 수집 전이거나 한 번도 읽지 못한 서버가 있어, 백업 목록에 없는 VM 의 Veeam 칸은 ‘없음’ 이 아니라 ‘모름’ 입니다 — 그 서버를 읽으면 바로잡힙니다.</div>}
           {veeamUnknown && <div style={{ flexBasis: '100%', fontSize: 12, color: '#fcd34d' }}>Veeam 쪽을 읽지 못해({vs.text}) 실제 백업의 Veeam 칸·정책≠실제·RPO 는 ‘모름’ 입니다 — 설정 › Veeam 백업 서버에서 상태를 확인하세요.</div>}
-          {bareosUnknown && <div style={{ flexBasis: '100%', fontSize: 12, color: '#fcd34d' }}>Bareos 원장을 읽지 못해 실제 백업의 Bareos 칸·정책≠실제·RPO 는 ‘모름’ 입니다(0 이 아님) — Bareos › 설정에서 원장 상태를 확인하세요.</div>}
+          {bareosUnknown && <div style={{ flexBasis: '100%', fontSize: 12, color: '#fcd34d' }}>{data.bareosDirFail ? 'Bareos Director 조회가 실패(또는 인증 정지)해 원장의 결과가 옛 값일 수 있습니다 — 실제 백업의 Bareos 칸·정책≠실제·RPO 는 ‘모름’ 입니다(0 이 아님). Bareos › 진행 · 이력에서 Director 상태를 확인하세요.' : 'Bareos 원장을 읽지 못해 실제 백업의 Bareos 칸·정책≠실제·RPO 는 ‘모름’ 입니다(0 이 아님) — Bareos › 설정에서 원장 상태를 확인하세요.'}</div>}
           {Array.isArray(data.aliasHosts) && data.aliasHosts.length > 0 && <div className="muted" style={{ flexBasis: '100%', fontSize: 12 }}>Veeam 이 이 vCenter 를 {data.aliasHosts.map((h) => `‘${h}’`).join(', ')} 로 적었습니다 — VM 의 moref·이름이 맞아 같은 vCenter 로 맞췄습니다.</div>}
         </div>
       )}

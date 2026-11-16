@@ -23,7 +23,7 @@ import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js'
 import { withSsh, isSshAuthError } from '../../proxy/sshExec.js';
 import { remoteTmpDir } from '../../agent/deploy.js';
 import { listJobs, registryLoadError } from '../registry.js';
-import { loadSettings, settingsLoadError, addDirector, updateDirector, directorById, saveSettings, jobDirectorId, deleteDirector } from '../settings.js';
+import { loadSettings, settingsLoadError, addDirector, updateDirector, directorById, saveSettings, jobDirectorId, deleteDirector, directorBindIssue } from '../settings.js';   // 52회차 D1
 import { setupDirector, setupFdPlugin, newConsolePassword, VMWARE_POOL_FULL, VMWARE_SCHEDULE } from '../autoSetup.js';
 import { onDirector } from '../service.js';
 import { isResourceName } from '../names.js';
@@ -186,21 +186,47 @@ export async function runPrecheck({ vcenterId, body = {} }) {
   const judged = judgePrecheck(facts, { mode: t.mode, bundle: bundle?.contents || null, plan });
   const hostIds = [facts.hostAddr, facts.hostname, ...(facts.addrs || [])].filter(Boolean);
   if (t.resetUnregistered) resetChecked(t0r, body, hostIds);   // 러너가 읽은 서버 주소 · 이름 · 모든 주소로 한 번 더(등록된 Director · 다른 법인 작업이면 던진다)
-  // 52회차 F4(재현): 재설치는 그 Director 서버의 설정 · 카탈로그를 지운다 — 수는 그 vCenter 가 아니라 **그 Director 를 쓰는 대상 전부**(전부 되돌리기 M4 와 같은 판정 jobDirectorId).
-  //   한 Director 에 vCenter 가 둘 이상 묶여 있으면(옛 1:1:1 정리 전 · 규칙 밖) 확인 화면이 1개라고 하고 다른 서비스의 잡 설정 40개를 지웠다. 그 vCenter 들을 함께 싣는다.
-  let ledger = 0; let sharedVcenters = [];
-  if (t.director) {
-    let st = null; try { st = loadSettings(); } catch { st = null; }
-    const mineDir = st ? listJobs().filter((x) => !x.demo && jobDirectorId(x, st) === t.director.id) : listJobs().filter((x) => !x.demo && x.vcenterId === vcenterId);
-    ledger = mineDir.length;
-    if (st) {
-      const others = new Map();
-      for (const s of st.sites || []) if (s.directorId === t.director.id && s.vcenterId !== vcenterId) others.set(s.vcenterId, 0);
-      for (const x of mineDir) if (x.vcenterId !== vcenterId) others.set(x.vcenterId, (others.get(x.vcenterId) || 0) + 1);
-      sharedVcenters = [...others.entries()].map(([id, n]) => ({ vcenterId: id, targets: n })).slice(0, 50);
-    }
+  const { ledger, sharedVcenters } = t.director ? sharedOfDirector(t.director.id, vcenterId) : { ledger: 0, sharedVcenters: [] };
+  const bindIssue = directorBindIssueFor(t, vcenterId);   // 52회차 D1 — 화면이 시작 전에 보인다(시작도 같은 판정으로 거부)
+  return { at: Date.now(), ms: Date.now() - t0, target: t, mode: t.mode, ...(t.resetUnregistered ? { resetUnregistered: true, hostIds } : {}), ...judged, ledgerTargets: ledger, sharedVcenters, ...(bindIssue ? { bindIssue } : {}), bundle: bundle ? { version: bundle.version, contents: bundle.contents, size: bundle.size } : null };
+}
+
+/**
+ * 52회차 F4(재현): 재설치는 그 Director 서버의 설정 · 카탈로그를 지운다 — 수는 그 vCenter 가 아니라 **그 Director 를 쓰는 대상 전부**(전부 되돌리기 M4 와 같은 판정 jobDirectorId).
+ *   한 Director 에 vCenter 가 둘 이상 묶여 있으면(옛 1:1:1 정리 전 · 규칙 밖) 확인 화면이 1개라고 하고 다른 서비스의 잡 설정 40개를 지웠다. 그 vCenter 들을 함께 싣는다.
+ *   53회차 N4(사용자 결정): 시작 · 0단계 다시 하기도 이 목록으로 '함께 지워짐' 확인을 대조한다(sharedAckIssue).
+ * @returns {{ ledger:number, sharedVcenters:{vcenterId:string, targets:number}[] }}
+ */
+function sharedOfDirector(directorId, vcenterId) {
+  let st = null; try { st = loadSettings(); } catch { st = null; }
+  const mineDir = st ? listJobs().filter((x) => !x.demo && jobDirectorId(x, st) === directorId) : listJobs().filter((x) => !x.demo && x.vcenterId === vcenterId);
+  const others = new Map();
+  if (st) {
+    for (const s of st.sites || []) if (s.directorId === directorId && s.vcenterId !== vcenterId) others.set(s.vcenterId, 0);
+    for (const x of mineDir) if (x.vcenterId !== vcenterId) others.set(x.vcenterId, (others.get(x.vcenterId) || 0) + 1);
   }
-  return { at: Date.now(), ms: Date.now() - t0, target: t, mode: t.mode, ...(t.resetUnregistered ? { resetUnregistered: true, hostIds } : {}), ...judged, ledgerTargets: ledger, sharedVcenters, bundle: bundle ? { version: bundle.version, contents: bundle.contents, size: bundle.size } : null };
+  return { ledger: mineDir.length, sharedVcenters: [...others.entries()].map(([id, n]) => ({ vcenterId: id, targets: n })).slice(0, 50) };
+}
+
+/** 52회차 D1: 이 설치가 7단계에서 저장할 매핑(이 vCenter → 그 Director)이 'Director 하나에 vCenter 하나' 를 새로 어기는가 — 설정 저장과 같은 판정. */
+function directorBindIssueFor(t, vcenterId) {
+  if (!t?.director?.id) return '';
+  let st = null; try { st = loadSettings(); } catch { return ''; }
+  const next = [...st.sites.filter((x) => x.vcenterId !== vcenterId), { vcenterId, directorId: t.director.id }];
+  return directorBindIssue(next, st.sites, st.directors);
+}
+
+/**
+ * 53회차 N4(사용자 결정 — 2026-11-17): 함께 쓰는 Director 를 초기화하면 다른 vCenter(다른 서비스)의 잡 설정 · 기록(볼륨 삭제를 고르면 백업 볼륨)도 지워진다 —
+ *   화면이 그 vCenter 목록을 보이고 **따로** 확인받으며(본문 sharedAck.vcenterIds), 서버는 지금 목록과 같을 때만 시작한다(그사이 묶인 vCenter 가 늘었으면 거부).
+ * @returns {string} 사유 · 없으면 ''
+ */
+export function sharedAckIssue(sharedIds, ack, { volumes = false } = {}) {
+  const now = [...new Set((sharedIds || []).map(String))].sort();
+  if (!now.length) return '';
+  const got = Array.isArray(ack) ? [...new Set(ack.map(String))].sort() : null;
+  if (got && got.length === now.length && got.every((x, i) => x === now[i])) return '';
+  return `이 Director 를 함께 쓰는 다른 vCenter ${now.length}곳(${now.slice(0, 5).join(', ')}${now.length > 5 ? ' …' : ''})의 잡 설정 · 실행 기록${volumes ? ' · 백업 볼륨' : ''}도 함께 지워집니다 — 초기화 확인 화면에서 그 vCenter 들을 확인한 뒤 다시 시작하세요(확인한 목록과 지금 목록이 다르면 시작하지 않습니다).`;
 }
 
 /* ───────── 시작 ───────── */
@@ -228,6 +254,9 @@ async function startInner(t, vcenterId, body, by) {
   if (pre.blocked) throw fail('precheck', `사전 점검에 ✗ 항목이 있어 시작하지 않았습니다: ${pre.items.filter((i) => i.status === 'bad').map((i) => i.label).join(', ')}`, { precheck: pre });
   if (!pre.hostAddr) throw fail('precheck', '서버 주소를 읽지 못해 시작하지 않았습니다.');
   if (t.resetUnregistered && !pre.resetUnregistered) throw fail('precheck', '사전 점검이 초기화 후 재설치로 돌지 않았습니다 — 다시 점검하세요.');
+  if (pre.bindIssue) throw fail('invalid', pre.bindIssue);   // 52회차 D1 — 7단계 매핑 저장에서야 거부되지 않게 시작 전에
+  const sharedIds = (pre.sharedVcenters || []).map((x) => x.vcenterId);
+  if (plan.mode === 'reinstall') { const why = sharedAckIssue(sharedIds, body.sharedAck?.vcenterIds, { volumes: !!plan.reset?.volumes }); if (why) throw fail('precheck', why, { precheck: pre }); }   // 53회차 N4
   const resetVolumeDirs = plan.reset?.volumes ? (pre.volumes || []).filter((v) => !v.missing).map((v) => v.path) : [];
   const id = `bi_${crypto.randomBytes(6).toString('hex')}`;
   const firstStep = plan.mode === 'reinstall' ? 0 : 1;
@@ -237,6 +266,7 @@ async function startInner(t, vcenterId, body, by) {
     bundle: { version: bundle.version, sha256: bundle.sha256, size: bundle.size, bareosVersion: bundle.contents.bareosVersion },
     install: bundle.contents.install,
     directorId: t.director?.id || '', existingDirector: !!t.director, createdDirector: false, createdSite: false,
+    ...(plan.mode === 'reinstall' && sharedIds.length ? { sharedAck: [...new Set(sharedIds.map(String))].sort().slice(0, 50) } : {}),   // 53회차 N4: 확인받은 목록(0단계 다시 하기가 대조)
     ...(t.resetUnregistered ? { resetUnregistered: true, hostIds: (pre.hostIds || []).slice(0, 34) } : {}),   // v2.876 포탈 미등록 Bareos 를 지우고 설치(4단계가 Director 를 새로 등록)
     by, createdAt: Date.now(), updatedAt: Date.now(), status: 'running', phase: 'upload',
     steps: Object.fromEntries(STEPS.filter((s) => s.n >= firstStep).map((s) => [s.n, { status: 'pending' }])),
@@ -595,6 +625,11 @@ export async function retryInstall(id, { body = {}, by = '' } = {}) {
   const fromStep = Number.isInteger(j.failure?.step) ? j.failure.step : (Number.isInteger(j.currentStep) ? j.currentStep : j.startStep);
   if (!Number.isInteger(fromStep) || fromStep < j.startStep || fromStep > LAST_STEP) throw fail('invalid', '다시 시작할 단계를 알 수 없습니다 — 전부 되돌린 뒤 새로 하세요.');
   if (fromStep === 0) guardResetJob(j);   // v2.876 반증 B: 0단계를 다시 띄우기 전에 같은 판정(그사이 이 서버가 Director 로 등록됐을 수 있다)
+  if (fromStep === 0 && j.mode === 'reinstall' && j.directorId) {   // 53회차 N4: 그사이 이 Director 에 다른 vCenter 가 더 묶였으면 확인받은 목록과 다르다 — 다시 지우지 않는다
+    const nowIds = sharedOfDirector(j.directorId, j.vcenterId).sharedVcenters.map((x) => x.vcenterId);
+    const extra = nowIds.filter((x) => !(j.sharedAck || []).includes(String(x)));
+    if (extra.length) throw fail('precheck', sharedAckIssue(nowIds, j.sharedAck || [], { volumes: !!j.plan?.reset?.volumes }));
+  }
   _stopReq.delete(j.id);
   const bundle = await _pick(j.bundle.version);
   if (!bundle) throw fail('invalid', `번들 ${j.bundle.version} 이 중앙에 없습니다 — 번들을 다시 받으세요.`);

@@ -33,6 +33,7 @@
  *     upgrade-status.json 의 edgeSyncState 로 재시작을 넘긴다(persistState·restoreState) — 같은 장애를 재시작마다 다시 알리지 않는다.
  */
 import { loadCollectors, ssrfBlockReason } from '../collector/registry.js';
+import { PUSH_HOLD_MAX_MS } from './pushDeferred.js';   // 51회차 #3
 import { getCollectorStatus } from '../collector/state.js';
 import { pushUpgradeToCollectors, pushConcurrencyOf } from '../collector/upgradePush.js';
 import { resolveBundleBytes, lastBundleReject } from './bundleSource.js';
@@ -185,6 +186,10 @@ export function planEdgeSync({ collectors = [], statusOf = () => null, attemptsO
         if (ne > 0) {
           const wait = noEffectWaitMs(ne, settleMs, maxBackoffMs);
           if (now - a.at < wait) { state = 'no-effect'; row.nextAt = a.at + wait; row.reason = `번들을 받았다고 ${ne + 1}번 답했지만 ${Math.round(settleMs / 60_000)}분 뒤에도 v${v} 를 보고합니다 — 엣지의 설치 경로(UPGRADE_INSTALL_DIR) · 서비스 재시작을 확인하세요`; }
+        }
+        else if (a && a.target === cur && a.ok && Number.isFinite(a.holdUntil) && now < a.holdUntil + settleMs) {
+          // 51회차 #3: 엣지가 진행 중 작업을 기다리며 설치를 미뤘다 — 그 상한 + settle 까지 다시 밀지 않는다
+          state = 'waiting'; row.nextAt = a.holdUntil + settleMs; row.reason = '엣지가 진행 중 작업이 끝나기를 기다렸다가 설치합니다';
         }
         else if (a && a.target === cur && a.ok && now - a.at < settleMs) { state = 'waiting'; row.nextAt = a.at + settleMs; }
         else if (a && a.target === cur && !a.ok) {
@@ -343,9 +348,14 @@ export class EdgeSyncRunner {
     //   예전에는 직전 기록이 성공일 때만 이어져, 성공 → (엣지 재시작 중) 실패 → 성공 … 이 반복되면 noEffect 가 매번 0 으로 돌아가
     //   다시 밀기 간격 상한 · '효과 없음' 알림에 끝내 닿지 않았다(실패 attempts 도 성공마다 0). 대상 버전이 바뀌면 처음부터.
     const same = !!prev && prev.target === cur;
-    const okSeen = (same ? Math.max(0, Math.floor(numOrNull(prev.okSeen) ?? 0)) : 0) + (ok ? 1 : 0);   // attempts 는 메모리 기록뿐(파일에 쓰지 않는다)
+    // 51회차 #3(사용자 결정): 엣지가 진행 중 작업을 기다리느라 설치를 미뤘다(deferred) — 그 성공은 '효과 없음' 으로 세지 않고(아직 설치 전),
+    //   남은 대기 시간(waitMs — 엣지가 정한 상한 안) 동안은 다시 밀지 않는다(holdUntil — planEdgeSync 가 그 뒤 settle 까지 'waiting').
+    const deferred = ok && r.deferred === true;
+    const okSeen = (same ? Math.max(0, Math.floor(numOrNull(prev.okSeen) ?? 0)) : 0) + (ok && !deferred ? 1 : 0);   // attempts 는 메모리 기록뿐(파일에 쓰지 않는다)
     const noEffect = Math.max(0, okSeen - 1);
-    this.attempts.set(r.id, { at: this.now(), ok, target: cur, attempts, reason, ...(okSeen ? { okSeen } : {}), ...(noEffect ? { noEffect } : {}) });
+    const now = this.now();
+    const holdMs = deferred ? Math.min(PUSH_HOLD_MAX_MS, Math.max(0, numOrNull(r.waitMs) ?? 0)) : 0;
+    this.attempts.set(r.id, { at: now, ok, target: cur, attempts, reason, ...(okSeen ? { okSeen } : {}), ...(noEffect ? { noEffect } : {}), ...(deferred ? { holdUntil: now + holdMs } : {}) });
     const row = rowsById.get(r.id) || {};
     const mark = `${r.id}|${cur}`;
     const base = this.intervalMs || this.fixedIntervalMs || edgeSyncIntervalMs();
@@ -439,7 +449,7 @@ export class EdgeSyncRunner {
                   const settled = await poolSettled(legacyPush, pushConcurrencyOf(), (e) => this.pushEdgeFn({ url: e.url, token: e.token }, bundle.path, { manifestText: bundle.manifest || undefined }));
                   settled.forEach((s, i) => {
                     const e = legacyPush[i];
-                    if (s.status === 'fulfilled' && s.value) results.push({ id: e.id, name: e.name, ok: s.value.ok === true, upToDate: s.value.upToDate === true, status: s.value.status, reason: s.value.reason, version: s.value.version });
+                    if (s.status === 'fulfilled' && s.value) results.push({ id: e.id, name: e.name, ok: s.value.ok === true, upToDate: s.value.upToDate === true, status: s.value.status, reason: s.value.reason, version: s.value.version, ...(s.value.deferred ? { deferred: true, waitMs: s.value.waitMs } : {}) });
                     else results.push({ id: e.id, name: e.name, ok: false, reason: String(s.reason?.message || s.reason || 'push 실패').slice(0, 300) });
                   });
                 }

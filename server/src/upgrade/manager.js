@@ -44,8 +44,9 @@ import { cmpVersion } from '../util/cmpVersion.js';
  * v2.737(사용자 신고 "업그레이드되면 scan 하던 게 중단된다"): 자동 적용은 이 노드에서 **실행 중인 스캔**(아이실론 du·iDRAC 대역·IP 대역 —
  *   util/scanJournal)이 끝날 때까지 기다린다. 상한(기본 2시간)을 넘기면 적용한다 — 끝나지 않는 스캔이 업그레이드를 영원히 막지 않게.
  *   기다리는 동안 1분마다 다시 보고, 스캔이 끝나면 곧바로 적용한다(다음 확인 주기까지 미루지 않는다). 0 이면 기다리지 않는다.
- *   ⚠ 수동 '업그레이드 적용' 은 기다리지 않는다(화면이 실행 중 스캔을 먼저 경고한다). 중앙이 보낸 번들 push 도 기다리지 않는다 —
- *   그 경로는 받은 즉시 설치 디렉터리를 바꾸므로 재시작만 미루면 옛 프로세스가 새 파일을 읽게 된다. 끊긴 스캔은 자동 재개가 잇는다.
+ *   ⚠ 수동 '업그레이드 적용' 은 기다리지 않는다(화면이 실행 중 스캔을 먼저 경고한다). 끊긴 스캔은 자동 재개가 잇는다.
+ *   51회차 #3(사용자 결정 — 2026-11-17): 중앙이 보낸 번들 push(재시작 요청)도 같은 목록을 같은 상한까지 기다린다 — 재시작만 미루면 옛 프로세스가
+ *   새 파일을 읽게 되므로 **설치 자체를 미룬다**(번들을 메모리에 들고 있다가 설치 · 재시작 — upgrade/pushHold.js).
  */
 export function scanDeferMaxMs(v = process.env.UPGRADE_SCAN_DEFER_MAX_MS) {
   const n = numOrNull(v);
@@ -100,6 +101,14 @@ function focusMonWork() {
  */
 function queuedEntries(list) { return (Array.isArray(list) ? list : []).filter((x) => x && x.queued); }
 const queuedLabel = (x) => `'지금 수집' 대기 ${x.label || x.key || x.kind}`.slice(0, 120);
+
+/**
+ * 재시작하면 끊기거나 결과를 잃는 진행 중 작업(기다릴 목록) — 자동 적용(#deferDecision)과 중앙 push 보류(upgrade/pushHold.js · 51회차 #3)가 같은 목록을 쓴다.
+ * 재시작 뒤 같은 작업에 다시 붙는 스캔(resumable)과 기록이 남은 대기 요청은 뺀다(v2.741 TIMING-03 · v2.742 RECENT-02).
+ */
+export function restartBlockers({ all = runningScans(), queued = queuedScans() } = {}) {
+  return [...all.filter((x) => !x.resumable), ...queued.filter((x) => !x.resumable).map((x) => ({ ...x, label: queuedLabel(x) })), ...runningVmClones(), ...runningBulkDeploys(), ...bareosWork(), ...veeamWork(), ...focusMonWork()];
+}
 
 /** 상한을 넘겨 적용할 때 — 스캔은 자동 재개가 잇고(resumeOutlookText), VM 복제·대량 배포·기록 못 한 대기 요청은 잇지 않는다(조용히 '재개된다' 고 말하지 않는다). */
 const NON_SCAN_KINDS = new Set(['vm-clone', 'bulk-deploy', 'bareos', 'veeam', 'focusmon']);
@@ -164,6 +173,7 @@ export function summarizeCollectorPush(results) {
     ok: r.ok === true, status: Number.isFinite(r.status) ? r.status : null,
     version: typeof r.version === 'string' ? r.version.slice(0, 32) : '', reason: typeof r.reason === 'string' ? r.reason.slice(0, 300) : '',
     ...(r.upToDate === true ? { upToDate: true } : {}), // v2.859: 엣지의 '이미 최신' 응답은 실패가 아니다
+    ...(r.deferred === true ? { deferred: true } : {}), // 51회차 #3: 엣지가 진행 중 작업을 기다리며 설치를 미뤘다
   }));
   return { total: list.length, ok: list.filter((r) => r.ok === true).length, items };
 }
@@ -452,7 +462,7 @@ export class UpgradeManager {
     const queuedKept = queued.filter((x) => x.resumable);
     // v2.741(감사 TIMING-01 ③): 실행 중 VM 복제 잡도 기다린다(재시작이 오면 원본 VM 에 임시 스냅샷이 남는다 — 이어 받는 경로가 없다).
     // v2.742(감사 TIMING-04): 진행 중인 에이전트 대량 배포도 기다린다(재시작이 원격 설치를 중간에 끊는다 — 이어 받는 경로가 없다).
-    const scans = [...all.filter((x) => !x.resumable), ...queued.filter((x) => !x.resumable).map((x) => ({ ...x, label: queuedLabel(x) })), ...runningVmClones(), ...runningBulkDeploys(), ...bareosWork(), ...veeamWork(), ...focusMonWork()];
+    const scans = restartBlockers({ all, queued });   // 51회차 #3: 중앙 push 보류(pushHold.js)와 같은 목록 하나
     if (!scans.length || max <= 0) { const forced = false; this.#clearDeferral(); return { wait: false, forced, scans, detached, queuedKept }; }
     if (!this.deferral || this.deferral.latest !== latest) this.deferral = { since: now, until: now + max, latest, scans: [] };
     this.deferral.scans = scans.map((x) => ({ kind: x.kind, label: x.label, since: x.since }));

@@ -41,7 +41,8 @@ import { nextSlot as bareosNextSlot } from '../../bareos/groupSchedule.js';
 import { policyFields } from '../../veeam/backupPolicy.js';   // v2.835 백업 정책 · 실제 · 정책≠실제 · 마지막 성공
 import { newSiteAgg, addSiteVm, finishSiteAgg, sumSiteAggs, countVeeamWindow, staleQueryOf, newStaleAcc, addStaleRows, finishStaleRows } from '../../veeam/backupSummaryAgg.js';
 import { inRegion, regionsOf, regionQuery } from '../../veeam/summaryRegion.js';   // v3.10.17 Summary 리전 범위(허브 KPI 카드 → ?region=)   // v2.836 Summary 법인 집계 · 전체 법인 찾기
-import { corpView as bareosCorpView } from './bareosLive.js';   // v2.837 Summary '멈춤 의심'(진행 현황과 같은 판정 — 조회를 새로 일으키지 않는다)
+import { corpView as bareosCorpView } from './bareosLive.js';
+import { directorInfo as bareosDirectorInfo } from './bareosViews.js';   // 53회차 S1: Director 조회 실패 법인은 결과 모름(현황판 · 그룹과 같은 판정 코어)   // v2.837 Summary '멈춤 의심'(진행 현황과 같은 판정 — 조회를 새로 일으키지 않는다)
 import { effectiveSettings as bareosEffectiveSettings, isDemoActive as bareosIsDemoActive } from '../../bareos/service.js';
 import { directorById as bareosDirectorById, jobDirectorId as bareosJobDirectorId } from '../../bareos/settings.js';
 import { directorNextByJob, policySummary as bareosPolicySummary, directorScheduleItems, policyRev as bareosPolicyRev, errorVolumeItems as bareosErrorVolumeItems } from '../../bareos/policy.js';   // v2.839 Director 정책 수집본(접속하지 않는다)
@@ -782,7 +783,7 @@ async function summaryData(req, snap, scope, region = '') {
     if (prioOk) for (const c of priorityCandidates(b.scopedVms, { byVm: b.match?.byVm || null, marks, veeamKnown: b.row.veeam != null || !b.linked, absentKnown: !b.row.veeamAbsentUnknown, now, cloneOf })) {
       prio.push({ ...c, vcenterId: vc.id, vcName: vc.name || vc.id });
     }
-    rows.push({ id: vc.id, name: vc.name || vc.id, ...b.row, pa: finishSiteAgg(pa), ...(vr.bareosKnown ? {} : { bareosUnknown: true }), ...bx,
+    rows.push({ id: vc.id, name: vc.name || vc.id, ...b.row, pa: finishSiteAgg(pa), ...(vr.bareosKnown ? {} : { bareosUnknown: true, ...(vr.bareosDirFail ? { bareosDirFail: true } : {}) }), ...bx,
       w: marksWritable(req, snap, vc.id), veeamAuth: b.views.filter((v) => v.authStopped).length,
       veeamReason: b.vcnt?.reason || '', veeamServers: b.views.length, veeamFailed: b.vcnt?.failed || 0, veeamStale: b.vcnt?.stale || 0,
       ...(b.vcnt?.hostMismatch ? { hostMismatch: true } : {}), snapReason: b.sc?.reason || '', ...(isMockMode() && b.linked && !veeamLinked(vc.id) ? { demo: true } : {}) });
@@ -794,7 +795,7 @@ async function summaryData(req, snap, scope, region = '') {
   const prioTotal = prio.length;
   prio.sort(priorityRank);
   if (prio.length > PRIORITY_MAX) prio = prio.slice(0, PRIORITY_MAX);
-  const totals = { ...backupTotals(rows), pa: sumSiteAggs(rows.map((r) => r.pa)), bareosUnknownSites: rows.filter((r) => r.bareosUnknown).length,
+  const totals = { ...backupTotals(rows), pa: sumSiteAggs(rows.map((r) => r.pa)), bareosUnknownSites: rows.filter((r) => r.bareosUnknown).length, bareosDirFailSites: rows.filter((r) => r.bareosDirFail).length,   // 53회차 S1: 그중 Director 조회 실패
     stuck: rows.some((r) => Number.isFinite(r.stuck)) ? rows.reduce((n, r) => n + (Number.isFinite(r.stuck) ? r.stuck : 0), 0) : null };
   // v2.837 두 카드 — EM 은 전 법인 자료라 전체 범위 계정만(범위 계정은 null · 화면 '—' — /tools/backup-em 과 같은 게이트) · Director 조회 상태는 범위 안 법인의 Director 만
   const em = allowed ? null : await emSummary(now);
@@ -818,7 +819,7 @@ async function detailData(req, snap, t, scope) {
   return { ok: true, at: now, scope, vcenter: { id: vc.id, name: vc.name || vc.id }, row: { ...b.row, veeamReason: b.vcnt?.reason || '', snapReason: b.sc?.reason || '', ...(b.vcnt?.hostMismatch ? { hostMismatch: true } : {}) },
     linked: b.linked, servers: views, snapDays: b.ev?.days ?? null, snapSource: b.ev?.source || '', vms, ...(b.match?.aliasHosts && admin ? { aliasHosts: b.match.aliasHosts } : {}),
     writable: marksWritable(req, snap, vc.id), marksUnreadable: unreadable || undefined, marksCorruptKept: (!unreadable && marksCorruptKept()) || undefined,
-    bareosUnreadable: !vr.bareosKnown || undefined };   // 버그 점검 W2: Bareos 원장을 못 읽었다 — 화면의 Bareos 칩은 '—'(0 이 아니다)
+    bareosUnreadable: !vr.bareosKnown || undefined, bareosDirFail: vr.bareosDirFail || undefined };   // 버그 점검 W2: Bareos 원장을 못 읽었다 — 화면의 Bareos 칩은 '—'(0 이 아니다) · 53회차 S1: 그 까닭이 Director 조회 실패
 }
 
 /**
@@ -832,12 +833,24 @@ function backupVmRows(vc, b, { now = Date.now(), marks = getMarks(), unreadable 
   const veeamKnown = b.row.veeam != null;
   const snapKnown = b.row.snap != null;
   const clones = withClone ? cloneStatesOf(vc.id) : null;   // v2.803 — 못 읽으면 null(Clone 칸 '모름')
-  const bareos = bareosStatesOf(vc.id);   // v2.828 — Bareos 잡(원장) · 못 읽으면 null(Bareos 칸 '모름')
+  // 53회차 S1(재현): Director 조회가 인증 정지 · 실패면 원장의 결과(마지막 성공 · 실패 · 오래됨)는 옛 값이다 — 3일째 조회 실패 법인의 7일 성공률 · RPO ·
+  //   '백업 안 된 VM' · 일일 메일이 '모름' 대신 '오래됨(확정)' 으로 보였다. 그 법인은 원장을 못 읽은 것과 같이 '모름'(null)으로 둔다(소비처가 이미 그 판정을 한다).
+  //   Director 를 묶지 않은 법인(unset)은 빼지 않는다 — 방식 bareos 인 VM 의 '미등록' 은 실제로 아는 사실이다.
+  const dirFail = bareosDirResultsUnknown(vc.id);
+  const bareos = dirFail ? null : bareosStatesOf(vc.id);   // v2.828 — Bareos 잡(원장) · 못 읽으면 null(Bareos 칸 '모름')
   const groupNext = bareosGroupNext(vc.id, now, bareos);   // v2.835 — VM id → 다음 그룹 회차 { at, lv, g } · v2.839 Director 스케줄 { at, lv, s }(못 읽으면 빈 맵 — 칸 '—')
   const vms = b.scopedVms.map((vm) => vmBackupView(vm, b.match?.byVm?.[vm.id], b.ev?.byVm?.[vm.id], { veeamKnown: veeamKnown || !b.linked, snapKnown, absentKnown: !b.row.veeamAbsentUnknown, now, mark: markView(marks[vm.id]),
     clone: withClone ? (clones ? cloneView(clones.get(vm.id)) : null) : undefined })).map((row) => withBareos(row, bareos, unreadable))
     .map((row) => { const nx = groupNext.get(row.id); return { ...row, ...policyFields(row, { marksKnown: !unreadable, bareosKnown: bareos != null, now }), ...(nx ? { nx } : {}) }; });
-  return { vms, bareosKnown: bareos != null, bareos };
+  return { vms, bareosKnown: bareos != null, bareos, ...(dirFail ? { bareosDirFail: true } : {}) };
+}
+
+/** 53회차 S1: 이 vCenter 의 Director 조회가 인증 정지 · 실패라 결과를 믿을 수 없는가(directorInfo 하나 — 현황판 · 그룹과 같은 판정). 판정을 못 하면 false(예전대로). */
+function bareosDirResultsUnknown(vcenterId) {
+  try {
+    const info = bareosDirectorInfo(vcenterId, bareosEffectiveSettings(), bareosPollerStatus(), bareosIsDemoActive());
+    return !info.resultsKnown && (info.state === 'auth' || info.state === 'error');
+  } catch { return false; }
 }
 
 /** v2.836 Summary 의 Bareos 카드 — 범위 안 법인의 백업 그룹 수 · 예약이 켜진 그룹 수. 그룹 파일을 못 읽으면 null(0 이 아니다). */
