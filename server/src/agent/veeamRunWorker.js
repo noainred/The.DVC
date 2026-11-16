@@ -112,7 +112,7 @@ export async function runVeeamRunWorkerOnce({ fetchImpl } = {}) {
     }
     let body;
     try { body = await readJsonCapped(r, 1_048_576, '인출 응답'); } catch (e) { _last = { at: Date.now(), ok: false, error: `인출 응답 형식 오류 — ${String(e?.message || e).slice(0, 120)}` }; return null; }
-    ops = (Array.isArray(body?.ops) ? body.ops : []).filter((o) => o && typeof o.id === 'string' && typeof o.kind === 'string').slice(0, SLOT_MAX)
+    ops = (Array.isArray(body?.ops) ? body.ops : []).filter((o) => o && typeof o.id === 'string' && typeof o.kind === 'string').slice(0, 10)   // 55회차 #2(재현): 받은 작업은 버리지 않는다 — 옛 중앙(3.18.3 이하)은 ?max 를 몰라 5건까지 넘긴다(동시 실행은 OP_CONCURRENCY 가 묶는다)
       .sort((a, b) => MUTATING.has(b.kind) - MUTATING.has(a.kind));
     if (!ops.length) { _last = { at: Date.now(), ok: true, ops: 0 }; return _last; }
     // 52회차 F5: 상태 변경 작업은 받은 즉시(실행 전 대기 자리 포함) 업그레이드 대기 목록에 — 재시작하면 중앙이 '결과 모름' 으로 닫는다

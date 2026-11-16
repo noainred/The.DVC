@@ -4,6 +4,7 @@ import { ComposableMap, Geographies, Geography, Marker } from 'react-simple-maps
 import geoData from 'world-atlas/countries-110m.json';
 import { Modal } from './Modal.jsx'; // v2.295: ui.jsx(셸) 역참조 순환 절단 — 구현 파일 직접 import
 import { vmOnText, alarmText } from './worldMapText.js';
+import { alarmsUnknown } from '../views/restFallbackText.js';   // 55회차 #6
 import { numOrNull } from '../numOrNull.js';   // 2차 공통 기능 점검 8회차: 못 읽은 지표는 '—'
 
 // 지도 높이 clamp — 대시보드에 과도하게 커지지 않도록 상한을 둔다(이전 상한 1200은 너무 커
@@ -19,6 +20,7 @@ function markerStyle(site) {
   if (site.status === 'maintenance') return { fill: '#f59e0b', r: 6, ring: '#f59e0b' };
   if (site.status === 'disabled') return { fill: '#6b7280', r: 5, ring: '#6b7280' };
   if (site.status !== 'connected') return { fill: '#ef4444', r: 7, ring: '#ef4444' };
+  if (alarmsUnknown(site)) return { fill: '#94a3b8', r: 5, ring: '#94a3b8' };   // 55회차 #6: 경보 미조회(REST 폴백) — 상세 창 '—(경보 미조회)' 와 같게, 초록(정상)으로 칠하지 않는다
   if (m.alarmsCritical > 0) return { fill: '#ef4444', r: 6, ring: '#ef4444' };
   if (m.alarmsWarning > 0) return { fill: '#f59e0b', r: 6, ring: '#f59e0b' };
   return { fill: '#22c55e', r: 5, ring: '#22c55e' };

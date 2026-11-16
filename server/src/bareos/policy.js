@@ -518,7 +518,7 @@ export function policyView(o) {
     kpis: {
       schedules: { director: collected ? schedN : null, group: groupsKnown ? groupSchedN : null, unused: collected ? unusedN : null },   // 전체 점검 13회차(W-10): 그룹 파일을 못 읽으면 0 이 아니라 모름
       jobdefs: jobdefsN, filesets: filesetsN, ai: jobdefsN === null ? null : aiN,
-      pools: poolsN === null ? null : { n: poolsN, vols: volsN, full: pk.full, unknownFull: pk.unknownFull, errorVols: pk.errorVols, errorVolsUnknown: pk.errorVolsUnknown, maxPct: pk.maxPct },
+      pools: poolsN === null ? null : { n: poolsN, vols: volsN, full: pk.full, unknownFull: pk.unknownFull, errorVols: poolErrorVols(pk), errorVolsUnknown: pk.errorVolsUnknown, maxPct: pk.maxPct },
       vm: { total: digestsKnown ? Object.values(counts).reduce((a, b) => a + b, 0) : null, ...counts },
     },
     week, schedules: scheduleRows.slice(0, 1000), jobdefs: jobdefRows.slice(0, 500), filesets: filesetRows.slice(0, 500), pools: poolTable.slice(0, 1000),
@@ -541,6 +541,8 @@ export function addPoolKpi(acc, p) {
   return acc;
 }
 export const newPoolKpi = () => ({ n: 0, full: 0, unknownFull: 0, errorVols: 0, errorVolsUnknown: 0, maxPct: null });
+/** 55회차 #7: 볼륨을 전부 모르면 오류 볼륨은 0 이 아니라 null(풀 탭 poolsView 와 같은 규칙 — 세 곳이 같은 판정). */
+export const poolErrorVols = (acc) => (acc.n > 0 && acc.errorVolsUnknown === acc.n ? null : acc.errorVols);
 
 /**
  * Backup › Summary 의 Bareos 카드 · 용량 카드에 쓰는 요약(범위 안 Director 수집본만). 수집본이 하나도 없으면 null(— '수집 전').
@@ -566,7 +568,7 @@ export function policySummary(settings, allowed, digests = [], { now = Date.now(
       for (const r of previewRuns(d, jobOk, byJob)) if (r.at >= now && (next === null || r.at < next)) next = r.at;
     }
   }
-  return collected ? { pools, schedules, next, collected, directors: scoped.size } : null;
+  return collected ? { pools: pools ? { ...pools, errorVols: poolErrorVols(pools) } : pools, schedules, next, collected, directors: scoped.size } : null;   // 55회차 #7
 }
 
 /**

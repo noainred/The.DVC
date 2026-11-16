@@ -15,6 +15,7 @@ import { config, clampIntervalMs } from '../config.js';
 import { isMockVcenter } from '../mock/generator.js';
 import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
 import { registerExitFlush } from '../util/exitFlush.js';
+import { envPositive } from '../util/envNumber.js';   // 55회차: 양수 env 는 하나로
 
 const FILE = path.join(config.configDir, 'central-inventory.json');
 
@@ -88,7 +89,7 @@ function persistSoon() {
 }
 
 /** 마지막 정상 목록 보존 창 — store.js LASTGOOD_HOLD_MS 와 같은 값·같은 env(순환 import 를 피해 여기서 읽는다). */
-const HOLD_MS = Number(process.env.LASTGOOD_HOLD_MS) || 6 * 3_600_000;
+const HOLD_MS = envPositive(process.env.LASTGOOD_HOLD_MS, 21_600_000);   // 6시간 · 55회차 #4: store.js 와 같은 판정(음수 · Infinity 를 통과시키지 않는다 — 한 기준)
 // v2.601(감사 EDGE2601-03): maintenance 추가 — 엣지 agent/inventoryPush.js UNREAD_STATUSES 와 같은 집합(한 기준). 캐시 없는
 //   점검중 vCenter(엣지 재시작 직후)의 빈 조각이 마지막 정상 목록을 지우지 않게 상태만 갱신한다(보존은 HOLD_MS 까지).
 const UNREAD = new Set(['unreachable', 'pending', 'maintenance']);

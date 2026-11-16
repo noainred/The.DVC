@@ -21,7 +21,7 @@ import { summarizeRegistryError, REGISTRY_ERROR_LABEL } from '../util/registryCo
 import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 const FILE = path.join(config.configDir, 'central-fleet.json');
-const TTL_MS = envPositive(process.env.CENTRAL_FLEET_TTL_MS, 30 * 60_000); // 30분 무보고 시 만료 · 54회차: 식 기본값도 envPositive(음수면 바로 만료되던 것)
+const TTL_MS = envPositive(process.env.CENTRAL_FLEET_TTL_MS, 1_800_000); // 30분 무보고 시 만료 · 54회차: 식 기본값도 envPositive(음수면 바로 만료되던 것)
 const MAX_AGENTS = envPositive(process.env.CENTRAL_FLEET_MAX_AGENTS, 500); // 에이전트 수 상한(메모리 보호)
 // v2.601(감사 CEN2601-03): 원소 상한. 예전에는 에이전트당 50,000 × 500 에이전트를 받았고, 공유 토큰은 본문 agent 이름을
 //   마음대로 고를 수 있어 이름 40개 × 50,000 원소로 RSS 가 크게 불고 central-fleet.json 이 195MB 가 되어 **저장마다 약 1.8초**

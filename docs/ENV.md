@@ -349,17 +349,17 @@
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
-| `LOGIN_FAIL_WINDOW_MS` | `15` |  | security/loginRateLimit.js |
+| `LOGIN_FAIL_WINDOW_MS` | `900000` |  | security/loginRateLimit.js |
 | `LOGIN_GLOBAL_FACTOR` | `10` |  | security/loginRateLimit.js |
 | `LOGIN_IP_FACTOR` | `6` |  | security/loginRateLimit.js |
 | `LOGIN_IP_LOCKOUT_MS` | `60000` |  | security/loginRateLimit.js |
-| `LOGIN_LOCKOUT_MS` | `15` |  | security/loginRateLimit.js |
+| `LOGIN_LOCKOUT_MS` | `900000` |  | security/loginRateLimit.js |
 | `LOGIN_MAX_FAILS` | `8` |  | security/loginRateLimit.js |
 | `LOGIN_POLICY_USERS` | `''` |  | security/securitySettings.js |
 | `LOGIN_RATELIMIT_DISABLED` | `기본 아님('true' 일 때만 적용)` |  | security/loginRateLimit.js |
 | `NODE_EXTRA_CA_CERTS` |  |  | security/tlsTrust.js |
-| `OTP_FAIL_WINDOW_MS` | `10` |  | security/loginRateLimit.js |
-| `OTP_LOCKOUT_MS` | `10` |  | security/loginRateLimit.js |
+| `OTP_FAIL_WINDOW_MS` | `600000` |  | security/loginRateLimit.js |
+| `OTP_LOCKOUT_MS` | `600000` |  | security/loginRateLimit.js |
 | `OTP_MAX_FAILS` | `5` |  | security/loginRateLimit.js |
 | `OTP_RATELIMIT_DISABLED` | `기본 아님('true' 일 때만 적용)` |  | security/loginRateLimit.js |
 | `SECRETS_KEY_LOST` | `기본 적용('true' 로 끄기)` |  | security/secretVault.js |
@@ -513,7 +513,7 @@
 | `CVP_CONFIG_PULL_MS` | `5` |  | agent/cvpConfigPull.js |
 | `EDGE_ADVERTISE_URL` | `''` | ✅ | agent/selfRegister.js |
 | `ISIDU_CONFIG_PULL_MS` | `300000` |  | agent/isiduConfigPull.js |
-| `LASTGOOD_HOLD_MS` | `6` |  | agent/inventoryPush.js, central/inventory.js 외 2 |
+| `LASTGOOD_HOLD_MS` | `21600000` |  | agent/inventoryPush.js, central/inventory.js 외 2 |
 | `SANSW_CONFIG_PULL_MS` | `5` |  | agent/sanSwitchConfigPull.js |
 | `SVCMON_CONFIG_FAIL_BACKOFF_MS` | `1800000` |  | agent/svcmonConfigPull.js |
 | `SVCMON_CONFIG_PULL` | `기본 적용('false' 로 끄기)` |  | agent/svcmonConfigPull.js |
@@ -594,7 +594,7 @@
 | `PROXY_SSH_USER` | `''` |  | proxy/registry.js |
 | `PROXY_VALIDATE_CMD` | `'haproxy -c -f {file}'` |  | proxy/registry.js |
 | `REMOTE_IDLE_TIMEOUT_MS` |  |  | proxy/sshGateway.js |
-| `REMOTE_MAPPING_TTL_MS` | `24` |  | proxy/expiry.js |
+| `REMOTE_MAPPING_TTL_MS` | `86400000` |  | proxy/expiry.js |
 | `REMOTE_MAX_SESSIONS` | `80` |  | proxy/sshGateway.js |
 | `REMOTE_MAX_SESSIONS_PER_USER` | `20` |  | proxy/sshGateway.js |
 | `REMOTE_REVALIDATE_MS` | `30000` |  | proxy/sshGateway.js |
@@ -678,7 +678,7 @@
 | `CENTRAL_FLEET_MAX_TOTAL` | `20000` |  | central/fleet.js |
 | `CENTRAL_FLEET_MAX_UNVERIFIED_AGENTS` | `20` |  | central/fleet.js |
 | `CENTRAL_FLEET_MAX_UNVERIFIED_TOTAL` | `5000` |  | central/fleet.js |
-| `CENTRAL_FLEET_TTL_MS` | `30` |  | central/fleet.js |
+| `CENTRAL_FLEET_TTL_MS` | `1800000` |  | central/fleet.js |
 | `CENTRAL_FLEET_UNREADABLE_HOLD_MS` | `86400000` |  | central/fleet.js |
 | `CENTRAL_INVENTORY_PERSIST_MS` | `30000` |  | central/inventory.js |
 | `CENTRAL_PDU_TTL_MS` | `6` |  | central/pduEdge.js |
