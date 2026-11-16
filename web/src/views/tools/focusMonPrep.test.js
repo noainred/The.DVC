@@ -22,6 +22,12 @@ describe('prepRowState', () => {
     expect(prepRowState(amb, 'a2').can).toBe(true);
     expect(prepRowState(amb, 'zz').can).toBe(false);
   });
+  it('반증 D4 · D7 — 준비 계정 자신이면 못 함 · 공통 계정을 고르는 행은 함께 설치를 단정하지 않는다', () => {
+    expect(prepRowState(row({ username: 'dvcadmin', cred: { state: 'ok', acct: 'dvcadmin', key: 'k1' } })).why).toBe('수집 계정이 준비 계정 자신');
+    const amb = row({ cred: { state: 'ambig', choices: [{ id: 'a1' }] }, credInstall: { state: 'ambig' } });
+    const a = prepRowState(amb, 'a1').audit; expect(a.can).toBe(true); expect(a.maybe).toBe(true); expect(a.why).toContain('노드가 판단');
+    const b = prepRowState(row({ cred: { state: 'ok', key: 'k1', acct: 'root' }, credInstall: { state: 'ambig' } })).audit; expect(b.maybe).toBe(true);
+  });
   it('디스크 점검 함께 — 같은 주소 다른 계정 · ‘설치’ 꺼짐 · 다른 키면 준비만', () => {
     expect(prepRowState(row({ hostShared: true })).audit).toEqual({ can: false, why: '같은 주소에 다른 수집 계정 — 손으로 설치' });
     expect(prepRowState(row({ credInstall: { state: 'feature' } })).audit.why).toBe('그 키에 ‘설치’ 가 꺼져 있음');
@@ -39,6 +45,12 @@ describe('결과 · 로그인 문구', () => {
     const s = prepResultText({ code: 'script', fail: 'sshd-allow' });
     expect(s.tone).toBe('bad'); expect(s.label).toBe('준비 파일이 멈춤 — sshd AllowUsers 에 이 계정이 없음'); expect(s.sub).toContain('포탈은 바꾸지 않았습니다');
     expect(prepResultText({ code: 'login', exists: true, have: true }).tone).toBe('warn');
+    // 반증 D6 · D2 — 계정을 만든 뒤 멈췄으면 '바꾸지 않았다' 고 하지 않는다 · 넣지 않았으면 주소 제한이라 하지 않는다
+    const c = prepResultText({ code: 'script', fail: 'no-runuser', created: true });
+    expect(c.sub).toContain('계정은 생겼습니다'); expect(c.sub).not.toContain('포탈은 바꾸지 않았습니다');
+    expect(prepResultText({ code: 'script', fail: 'acct-create', partial: true }).sub).toContain('홈을 만들지 못함');
+    const d = prepResultText({ code: 'ok', exists: true, differs: true, from: false, fromAsked: true });
+    expect(d.sub).toContain('다른 옵션'); expect(d.sub).toContain('주소 제한은 적용되지 않음'); expect(d.sub).not.toMatch(/(^| · )주소 제한( · |$)/);
     expect(prepResultText(null)).toBe(null);
   });
   it('loginText · loginOk · prepCredText · 미리 보기', () => {

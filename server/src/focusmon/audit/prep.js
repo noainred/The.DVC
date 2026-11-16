@@ -14,7 +14,7 @@
  */
 import crypto from 'node:crypto';
 import { withSsh, isSshAuthError, isSshHostKeyError } from '../../proxy/sshExec.js';
-import { READY_TIMEOUT_MS, testTarget } from '../collector.js';
+import { READY_TIMEOUT_MS, testTarget, focusAuthGuard, authDevOf } from '../collector.js';
 import { ACCT_RE } from './bundle.js';
 import { installCredFor, PREP_FEATURE, INSTALL_FEATURE } from './installCred.js';
 import { installOnce, PRIV_COMMAND, within, keyStopped, noteAuth } from './install.js';
@@ -29,10 +29,10 @@ export const PREP_MARGIN_MS = 5_000;
 export const PREP_TIMEOUT_MS = 140_000;
 /** 준비 파일이 멈춘 까닭(웹 `PREP_FAIL_TEXT` 와 같다 · 시험 대조). */
 export const PREP_FAILS = Object.freeze(['args', 'not-root', 'acct-root', 'sshd-missing', 'sshd-unread', 'sshd-pubkey', 'sshd-akfile', 'sshd-allow', 'sshd-deny', 'sshd-groups',
-  'acct-create', 'acct-shell', 'acct-home', 'key-symlink', 'key-write', 'no-runuser']);
+  'sshd-authmethods', 'acct-create', 'acct-shell', 'acct-home', 'acct-sudo', 'key-symlink', 'key-write', 'no-runuser']);
 /** 결과 까닭(웹 `PREP_CODE_TEXT` 와 같다). 'login' = 넣었지만 키 로그인 거부 · 실패. */
-export const PREP_CODES = Object.freeze(['ok', 'login', 'cred', 'bad-acct', 'acct-root', 'no-key', 'from-unknown', 'key-stopped', 'auth', 'hostkey', 'unreachable', 'timeout',
-  'sudo-password', 'sudo-tty', 'upload', 'script', 'script-other']);
+export const PREP_CODES = Object.freeze(['ok', 'login', 'cred', 'bad-acct', 'acct-root', 'acct-prep', 'no-key', 'conn-unknown', 'key-stopped', 'auth', 'hostkey', 'unreachable', 'timeout',
+  'sudo-password', 'sudo-tty', 'upload', 'script', 'script-other', 'busy', 'queue-full']);
 /** 단계(0 ~ 7 — 화면 막대 · 시안의 8칸). */
 export const PREP_STEPS = Object.freeze(['cred', 'connect', 'priv', 'sshd', 'acct', 'key', 'login', 'audit']);
 /** 디스크 점검을 함께 하지 않은 까닭. */
@@ -44,8 +44,19 @@ const IPV4_RE = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1
 const IPV6_RE = /^[0-9a-fA-F:]{2,39}$/;
 /** from= 에 넣을 수 있는 주소인가(정규 IPv4 · IPv6 — 그 밖의 글자는 넣지 않는다). */
 export const fromIpOk = (ip) => typeof ip === 'string' && (IPV4_RE.test(ip) || (ip.includes(':') && IPV6_RE.test(ip)));
-/** 권한 확인 + 이 접속의 출발 주소(대상 서버가 본 노드 주소 — SSH_CONNECTION 첫 칸). 상수. */
-export const PREP_PRIV_COMMAND = `${PRIV_COMMAND}; echo "##DP from \${SSH_CONNECTION%% *}"`;
+/**
+ * 권한 확인 + 이 접속의 SSH_CONNECTION(대상 서버가 본 노드 주소 · 포트 · 서버 주소 · 포트). 상수.
+ * v3.18.0 반증 D1: sshd 설정은 **이 주소 · 포트로** 판정한다(Match Address · LocalAddress · LocalPort 안의 Allow/Deny 를 놓치지 않게) —
+ * 같은 노드가 같은 길로 수집하러 오므로 이 접속의 값이 수집 접속의 값이다(추정 — 노드에 주소가 여럿이고 길마다 다르면 다를 수 있다).
+ */
+export const PREP_PRIV_COMMAND = `${PRIV_COMMAND}; echo "##DP conn $SSH_CONNECTION"`;
+const portOk = (p) => /^\d{1,5}$/.test(String(p)) && Number(p) >= 1 && Number(p) <= 65535;
+/** SSH_CONNECTION 값 → { caddr, laddr, lport } (검사를 지난 것만 — 아니면 null). */
+export function connOf(text) {
+  const m = /^##DP conn (\S{1,45}) (\d{1,5}) (\S{1,45}) (\d{1,5})\s*$/m.exec(String(text || ''));
+  if (!m || !fromIpOk(m[1]) || !fromIpOk(m[3]) || !portOk(m[2]) || !portOk(m[4])) return null;
+  return { caddr: m[1], laddr: m[3], lport: Number(m[4]) };
+}
 
 /** 넣을 한 줄 — restrict(+ from=) + 종류 + 블롭 + 주석. 규칙 밖이면 null. */
 export function keyLineFor(pub, { from = null } = {}) {
@@ -60,8 +71,9 @@ export function keyLineFor(pub, { from = null } = {}) {
  * @param {{line:string, blob:string}} key  keyLineFor 의 결과(검사를 지난 값)
  * @param {{age?:'never'|'default'}} o
  */
-export function prepScript(key, { age = 'never' } = {}) {
+export function prepScript(key, { age = 'never', conn = null } = {}) {
   if (!key || typeof key.line !== 'string' || typeof key.blob !== 'string' || /['\n\\]/.test(key.line) || !/^[A-Za-z0-9+/=]+$/.test(key.blob)) throw new Error('공개키 줄이 규칙에 맞지 않습니다');
+  if (!conn || !fromIpOk(conn.caddr) || !fromIpOk(conn.laddr) || !portOk(conn.lport)) throw new Error('접속 주소 · 포트가 규칙에 맞지 않습니다');
   const fail = (code, rc) => `{ echo '##DP fail ${code}'; exit ${rc}; }`;
   const ageLine = age === 'default' ? '  : # 만료: 서버 기본값(포탈은 바꾸지 않는다)' : "  chage -M 99999 -E -1 -I -1 \"$A\" >/dev/null 2>&1 || echo '##DP warn chage'";
   return `#!/bin/sh
@@ -78,16 +90,21 @@ if [ "$(id -u)" != 0 ]; then ${fail('not-root', 77)}; fi
 if [ "$A" = root ]; then ${fail('acct-root', 65)}; fi
 KEYLINE='${key.line}'
 BLOB='${key.blob}'
+CADDR='${conn.caddr}'
+LADDR='${conn.laddr}'
+LPORT='${Number(conn.lport)}'
 echo '##DP step sshd'
 SSHD=$(command -v sshd 2>/dev/null || true)
 [ -n "$SSHD" ] || { [ -x /usr/sbin/sshd ] && SSHD=/usr/sbin/sshd; }
 [ -n "$SSHD" ] || ${fail('sshd-missing', 70)}
-T=$("$SSHD" -T -C "user=$A,host=localhost,addr=127.0.0.1" 2>/dev/null) || ${fail('sshd-unread', 70)}
+T=$("$SSHD" -T -C "user=$A,host=$CADDR,addr=$CADDR,laddr=$LADDR,lport=$LPORT" 2>/dev/null) || ${fail('sshd-unread', 70)}
 [ -n "$T" ] || ${fail('sshd-unread', 70)}
 printf '%s\\n' "$T" | grep -qix 'pubkeyauthentication yes' || ${fail('sshd-pubkey', 71)}
 AK=$(printf '%s\\n' "$T" | awk 'tolower($1)=="authorizedkeysfile"{ $1=""; print; exit }')
 case " $AK " in *' .ssh/authorized_keys '*|*' %h/.ssh/authorized_keys '*) ;; *) ${fail('sshd-akfile', 71)} ;; esac
 if printf '%s\\n' "$T" | grep -qiE '^(allowgroups|denygroups) '; then ${fail('sshd-groups', 71)}; fi
+AM=$(printf '%s\\n' "$T" | awk 'tolower($1)=="authenticationmethods"{ $1=""; print; exit }')
+case " $AM " in *' any '*|*' publickey '*|'  ') ;; *) ${fail('sshd-authmethods', 71)} ;; esac
 set -f
 for p in $(printf '%s\\n' "$T" | awk 'tolower($1)=="denyusers"{ for (i = 2; i <= NF; i++) print $i }'); do
   case "$p" in *[,!]*) ${fail('sshd-deny', 71)} ;; esac
@@ -104,15 +121,27 @@ if [ -n "$AU" ]; then
   [ "$ok" = 1 ] || ${fail('sshd-allow', 71)}
 fi
 set +f
+RU=$(command -v runuser 2>/dev/null || true)
+[ -n "$RU" ] || ${fail('no-runuser', 69)}
 echo '##DP step acct'
 if E=$(getent passwd "$A"); then
   U=$(printf '%s' "$E" | cut -d: -f3); SH=$(printf '%s' "$E" | cut -d: -f7)
   [ "$U" = 0 ] && ${fail('acct-root', 65)}
   case "$SH" in */nologin|*/false|'') ${fail('acct-shell', 66)} ;; esac
+  # 반증 D4: 이미 sudo 로 모든 명령을 할 수 있는 계정에는 넣지 않는다(집중 모니터링 키가 root 와 같은 힘이 된다 — 디스크 점검 실행 파일 한 줄 같은 좁은 허용은 괜찮다)
+  G=$(id -Gn "$A" 2>/dev/null || true)
+  case " $G " in *' wheel '*|*' sudo '*|*' admin '*) ${fail('acct-sudo', 66)} ;; esac
+  if command -v sudo >/dev/null 2>&1; then
+    SL=$(sudo -n -l -U "$A" 2>/dev/null || true)
+    if printf '%s\\n' "$SL" | grep -Eq '(^|[[:space:],:])ALL[[:space:]]*$'; then ${fail('acct-sudo', 66)}; fi
+  fi
   echo '##DP exists'
 else
   S=/bin/bash; [ -x "$S" ] || S=/bin/sh
-  useradd -m -s "$S" "$A" >/dev/null 2>&1 || ${fail('acct-create', 66)}
+  if ! useradd -m -s "$S" "$A" >/dev/null 2>&1; then
+    getent passwd "$A" >/dev/null 2>&1 && echo '##DP partial'
+    ${fail('acct-create', 66)}
+  fi
   usermod -p '*' "$A" >/dev/null 2>&1 || echo '##DP warn passwd'
 ${ageLine}
   echo '##DP created'
@@ -125,9 +154,7 @@ case "$D" in /*) ;; *) ${fail('acct-home', 66)} ;; esac
 case "$D" in *[!A-Za-z0-9._/-]*) ${fail('acct-home', 66)} ;; esac
 if [ ! -d "$D" ] || [ -L "$D" ]; then ${fail('acct-home', 66)}; fi
 echo '##DP step key'
-W='umask 077; cd "$1" || exit 81; if [ -L .ssh ]; then exit 82; fi; [ -d .ssh ] || mkdir .ssh || exit 83; F=.ssh/authorized_keys; if [ -L "$F" ]; then exit 82; fi; if [ -f "$F" ] && grep -qF -- "$3" "$F"; then echo "##DP have"; else if [ -s "$F" ] && [ -n "$(tail -c 1 "$F")" ]; then echo >> "$F" || exit 84; fi; printf "%s\\n" "$2" >> "$F" || exit 84; echo "##DP added"; fi; chmod 700 .ssh && chmod 600 "$F" || exit 84'
-RU=$(command -v runuser 2>/dev/null || true)
-[ -n "$RU" ] || ${fail('no-runuser', 69)}
+W='umask 077; cd "$1" || exit 81; if [ -L .ssh ]; then exit 82; fi; [ -d .ssh ] || mkdir .ssh || exit 83; F=.ssh/authorized_keys; if [ -L "$F" ]; then exit 82; fi; if [ -f "$F" ] && grep -qxF -- "$2" "$F"; then echo "##DP have"; elif [ -f "$F" ] && grep -qF -- "$3" "$F"; then echo "##DP differs"; else if [ -s "$F" ] && [ -n "$(tail -c 1 "$F")" ]; then echo >> "$F" || exit 84; fi; printf "%s\\n" "$2" >> "$F" || exit 84; echo "##DP added"; fi; chmod 700 .ssh && chmod 600 "$F" || exit 84'
 "$RU" -u "$A" -- /bin/sh -c "$W" dvcprep "$D" "$KEYLINE" "$BLOB"
 R=$?
 case "$R" in 0) ;; 81) ${fail('acct-home', 66)} ;; 82) ${fail('key-symlink', 73)} ;; *) ${fail('key-write', 74)} ;; esac
@@ -150,7 +177,7 @@ export function prepCleanupCommand(file) {
 
 /** 준비 파일 출력 → 표지만(순수 — 시험 고정). */
 export function parsePrepOut(text) {
-  const out = { steps: [], fail: null, ok: false, rc: null, created: false, exists: false, added: false, have: false, warn: [] };
+  const out = { steps: [], fail: null, ok: false, rc: null, created: false, exists: false, added: false, have: false, differs: false, partial: false, warn: [] };
   for (const raw of String(text || '').split('\n').slice(0, 200)) {
     const l = raw.trim();
     if (!l.startsWith('##DP ')) continue;
@@ -163,6 +190,8 @@ export function parsePrepOut(text) {
     else if (k === 'exists' && v === undefined) out.exists = true;
     else if (k === 'added' && v === undefined) out.added = true;
     else if (k === 'have' && v === undefined) out.have = true;
+    else if (k === 'differs' && v === undefined) out.differs = true;
+    else if (k === 'partial' && v === undefined) out.partial = true;
     else if (k === 'warn' && ['home-perm', 'passwd', 'chage'].includes(v) && !out.warn.includes(v)) out.warn.push(v);
   }
   return out;
@@ -172,8 +201,8 @@ const stepOfPrep = (p) => (p.ok ? 6 : p.steps.includes('key') ? 5 : p.steps.incl
 export function parsePrivOut(text) {
   const s = String(text || '');
   const m = /##DI priv (root|sudo|tty|no)\b/.exec(s);
-  const f = /##DP from (\S{1,45})/.exec(s);
-  return { priv: m ? m[1] : 'no', from: f && fromIpOk(f[1]) ? f[1] : null };
+  const conn = connOf(s);
+  return { priv: m ? m[1] : 'no', from: conn ? conn.caddr : null, conn };
 }
 
 /**
@@ -227,23 +256,26 @@ export async function prepOnce(t, { keys, connect = withSsh, expect = {}, credOf
   const cred = credOf(t, { edge: !!expect?.edge, corpVcs: credVcs(), pick: expect?.pick || null, withAuth: true, feature: PREP_FEATURE });
   if (!cred || cred.state !== 'ok' || !cred.auth) return res('cred', { cred: cred?.state || 'error', acct: cred?.acct || '', key: cred?.key || '', src: cred?.src || null });
   const who = { acct: cred.acct, key: cred.key, src: cred.src };
+  // 반증 D4: 수집 계정이 준비 계정 자신이면 넣지 않는다(root 로 갈 수 있는 계정에 집중 모니터링 키를 주게 된다)
+  if (String(cred.auth.username || '') === acct) return res('acct-prep', { step: 1, ...who });
   const fp = cred.auth.fingerprint || '';
   if (keyStopped(fp, now())) return res('key-stopped', { step: 1, ...who });
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeoutMs); timer.unref?.();
   const file = `.dvc-fm-prep.${crypto.randomBytes(8).toString('hex')}.sh`;
-  let step = 1; let priv = null; let parsed = null; let execTimedOut = false; let fromIp = null; let fromBad = false;
+  let step = 1; let priv = null; let parsed = null; let execTimedOut = false; let connBad = false;
   try {
     ph('접속');
     await connect({ host: t.host, port: t.port, username: cred.auth.username, privateKey: cred.auth.privateKey, passphrase: cred.auth.passphrase || undefined, readyTimeout: READY_TIMEOUT_MS, signal: ctl.signal }, async (api) => {
       step = 2; ph('권한 확인');
       const pr = await api.exec(PREP_PRIV_COMMAND, PREP_PRIV_MS);
       const pv = parsePrivOut(pr.stdout);
-      priv = pv.priv; fromIp = pv.from;
+      priv = pv.priv;
       if (priv === 'no' || priv === 'tty') return {};
-      if (wantFrom && !fromIp) { fromBad = true; return {}; } // 주소 제한을 골랐는데 출발 주소를 모른다 — 아무것도 올리지 않는다
-      const kl = keyLineFor(info.publicKey, { from: wantFrom ? fromIp : null });
-      const text = prepScript(kl, { age });
+      // 반증 D1: sshd 판정 · 주소 제한은 이 접속의 SSH_CONNECTION 으로 — 모르면 아무것도 올리지 않는다
+      if (!pv.conn) { connBad = true; return {}; }
+      const kl = keyLineFor(info.publicKey, { from: wantFrom ? pv.conn.caddr : null });
+      const text = prepScript(kl, { age, conn: pv.conn });
       step = 3; ph('준비 파일 올림');
       try { await within(api.writeFile(file, text, 0o600), PREP_UPLOAD_MS, '파일 올림'); } catch (e) {
         parsed = { upload: String(e?.message || e).slice(0, 80) };
@@ -268,10 +300,14 @@ export async function prepOnce(t, { keys, connect = withSsh, expect = {}, credOf
     return res('unreachable', { step, priv, ...who });
   } finally { clearTimeout(timer); }
   if (priv === 'no' || priv === 'tty') return res(priv === 'tty' ? 'sudo-tty' : 'sudo-password', { step: 2, priv, ...who });
-  if (fromBad) return res('from-unknown', { step: 2, priv, ...who });
+  if (connBad) return res('conn-unknown', { step: 2, priv, ...who });
   if (parsed?.upload) return res('upload', { step: 3, priv, ...who });
-  const prep = { step: parsed ? stepOfPrep(parsed) : 3, fail: parsed?.fail || null, rc: parsed?.rc ?? null, priv, created: !!parsed?.created, exists: !!parsed?.exists, added: !!parsed?.added, have: !!parsed?.have, warn: parsed?.warn || [], from: wantFrom, ...who };
+  // 반증 D2: 주소 제한은 이번에 그 줄을 넣었을 때만 '적용' — 같은 키가 다른 옵션으로 있으면(differs) 그대로 두고 알린다
+  const prep = { step: parsed ? stepOfPrep(parsed) : 3, fail: parsed?.fail || null, rc: parsed?.rc ?? null, priv, created: !!parsed?.created, exists: !!parsed?.exists, added: !!parsed?.added, have: !!parsed?.have,
+    differs: !!parsed?.differs, partial: !!parsed?.partial, warn: parsed?.warn || [], from: wantFrom && !!parsed?.added, ...who };
   if (!parsed?.ok) return res(parsed?.fail ? 'script' : 'script-other', prep);
+  // 반증 D3: 사람이(OTP) 누른 준비로 키가 들어갔다 — 그 대상 · 이 노드 키의 인증 정지를 한 번 푼다('다시 연결' 과 같은 판단 · 시험은 한 번만)
+  try { focusAuthGuard.clearAuthStop(authDevOf(t, info.fingerprint).id); } catch { /* 정지 기록을 못 지워도 시험이 'auth-stopped' 로 알린다 */ }
   return after(prep, cred);
 }
 

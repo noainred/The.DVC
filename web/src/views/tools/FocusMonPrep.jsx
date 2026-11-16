@@ -111,7 +111,7 @@ export function PrepPanel({ setMsg, onDone }) {
                       <small>{lr ? `${lr.label} · ${whenText(r.lastPrep.at, now)}` : s.can ? (r.login?.kind ? '공개키를 넣습니다(계정이 없으면 만듭니다)' : '계정이 없으면 만들고 공개키를 넣습니다') : ''}</small>
                     </span>
                   </td>
-                  <td data-sort={s.audit.can ? '0' : '1'} className="fm-stcol"><span className="fm-st">{!s.can ? <span className="fm-dim">{DASH}</span> : s.audit.can ? <span className="fm-badge live">함께 설치할 수 있음</span> : <span className="fm-badge">접속 준비만</span>}<small>{s.can && !s.audit.can ? s.audit.why : ''}</small></span></td>
+                  <td data-sort={s.audit.can ? '0' : '1'} className="fm-stcol"><span className="fm-st">{!s.can ? <span className="fm-dim">{DASH}</span> : s.audit.can ? <span className="fm-badge live">{s.audit.maybe ? '함께 설치 — 고른 계정 기준' : '함께 설치할 수 있음'}</span> : <span className="fm-badge">접속 준비만</span>}<small>{s.can && (!s.audit.can || s.audit.maybe) ? s.audit.why : ''}</small></span></td>
                   <td data-nosort className="fm-r"><button type="button" className={`fm-btn sm ${s.can ? 'pri' : ''}`} disabled={!s.can || busy} onClick={() => { setPicked([r.id]); setConfirm(true); }}>{s.settled ? '준비됨' : '준비'}</button></td>
                 </tr>
               );
@@ -131,7 +131,7 @@ export function PrepPanel({ setMsg, onDone }) {
                 <tr key={r.id}><td className="fm-mono">{r.name}</td><td>{nodeText(r.agent)}</td>
                   <td>{ch ? `${ch.acct} · 키 ${ch.key}` : c.acct ? `${c.acct}${c.key ? ` · 키 ${c.key}` : ''}` : r.agent ? '엣지가 고름' : DASH}</td>
                   <td className="fm-mono">{r.username || DASH}</td><td className="fm-mono fm-brk">{r.keyFp || '노드 키 모름'}</td>
-                  <td>{!withAudit ? '하지 않음' : auditDirBad ? '못 함 — 설치 디렉터리 설정을 읽지 못함' : a.can ? '이어서 설치' : `건너뜀 — ${a.why}`}</td></tr>
+                  <td>{!withAudit ? '하지 않음' : auditDirBad ? '못 함 — 설치 디렉터리 설정을 읽지 못함' : a.can ? (a.maybe ? `이어서 설치 — ${a.why}` : '이어서 설치') : `건너뜀 — ${a.why}`}</td></tr>
               ); })}</tbody>
             </STable>
           ) : <div className="fm-dim">준비할 수 있는 서버가 없습니다.</div>}
@@ -145,7 +145,8 @@ export function PrepPanel({ setMsg, onDone }) {
               <span className="fm-dim">{age === 'never' ? '포탈이 만든 계정에만 — 비밀번호 만료가 오면 PAM 이 키 로그인을 막습니다(이 개발 환경 sshd 로 확인)' : '서버의 만료 정책을 따릅니다 — 만료 뒤 키 로그인이 거부될 수 있습니다'}</span></dd>
             <dt>넣는 줄(한 줄)</dt><dd className="fm-mono fm-brk">{keyLinePreview(from)}</dd>
             <dt>서버에 생기는 것</dt><dd>수집 계정이 없던 서버에 계정 하나(홈 · 비밀번호 칸 ‘*’{age === 'never' ? ' · 만료 없음' : ''}) · 그 계정의 ~/.ssh(700) · authorized_keys(600)에 위의 한 줄. 같은 키가 이미 있으면 넣지 않습니다.</dd>
-            <dt>건드리지 않는 것</dt><dd>sshd 설정 · 방화벽 · 패키지 · 다른 계정 · 그 계정에 이미 있던 줄. 이미 있는 계정의 셸 · 그룹 · 비밀번호도 바꾸지 않습니다.</dd>
+            <dt>건드리지 않는 것</dt><dd>sshd 설정 · 방화벽 · 패키지 · 다른 계정 · 그 계정에 이미 있던 줄(같은 키가 다른 옵션으로 있으면 그대로 두고 알립니다). 이미 있는 계정의 셸 · 그룹 · 비밀번호도 바꾸지 않습니다 — ~/.ssh · authorized_keys 권한만 700 · 600 으로 맞춥니다(sshd 가 넓은 권한을 거부).
+              sshd 판정은 이 노드가 그 서버에 닿은 주소 · 포트로 합니다. sudo 로 모든 명령을 할 수 있는 계정 · 준비 계정 자신에는 넣지 않습니다.</dd>
           </dl>
           <div className="fm-row">
             <label className="fm-row"><span className="fm-lbl">본인 OTP</span><input className="fm-input fm-mono" style={{ width: 110 }} inputMode="numeric" maxLength={8} autoComplete="one-time-code" value={otp} onChange={(e) => setOtp(e.target.value)} /></label>

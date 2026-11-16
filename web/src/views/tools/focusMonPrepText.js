@@ -31,8 +31,9 @@ export const PREP_CODE_TEXT = Object.freeze({
   cred: '준비에 쓸 계정이 정해지지 않음',
   'bad-acct': '수집 계정 이름이 규칙에 맞지 않음',
   'acct-root': '수집 계정이 root — 넣지 않음',
+  'acct-prep': '수집 계정이 준비 계정 자신 — 넣지 않음',
   'no-key': '이 노드의 집중 모니터링 키가 없음',
-  'from-unknown': '접속 주소 제한을 골랐지만 노드 주소를 알 수 없음',
+  'conn-unknown': '이 접속의 주소 · 포트를 알 수 없음(SSH_CONNECTION)',
   'key-stopped': '같은 키가 연달아 거부돼 잠시 쓰지 않음',
   auth: '준비 계정의 키 로그인 거부',
   hostkey: '호스트키 승인 필요',
@@ -43,6 +44,8 @@ export const PREP_CODE_TEXT = Object.freeze({
   upload: '준비 파일을 올리지 못함(SFTP)',
   script: '준비 파일이 멈춤',
   'script-other': '준비 파일이 끝까지 돌지 못함',
+  busy: '엣지에서 같은 서버의 작업이 아직 끝나지 않음',
+  'queue-full': '엣지 대기열이 가득 참',
 });
 /** 준비 파일이 멈춘 까닭(서버 PREP_FAILS) — 멈춘 경우 대상 서버에서 바뀐 것이 없다(계정 만들기 뒤 단계는 계정만 생긴다). */
 export const PREP_FAIL_TEXT = Object.freeze({
@@ -56,9 +59,11 @@ export const PREP_FAIL_TEXT = Object.freeze({
   'sshd-allow': 'sshd AllowUsers 에 이 계정이 없음',
   'sshd-deny': 'sshd DenyUsers 가 이 계정을 막음',
   'sshd-groups': 'sshd AllowGroups · DenyGroups 가 있음(판단하지 않고 멈춤)',
+  'sshd-authmethods': 'sshd AuthenticationMethods 가 공개키만으로는 로그인을 허용하지 않음',
   'acct-create': '수집 계정을 만들지 못함',
   'acct-shell': '수집 계정의 셸이 nologin · false',
   'acct-home': '수집 계정의 홈 디렉터리가 없거나 이상함',
+  'acct-sudo': '수집 계정이 이미 sudo 로 모든 명령을 할 수 있음(wheel · sudo 그룹 포함) — 넣지 않음',
   'key-symlink': '.ssh 또는 authorized_keys 가 심링크',
   'key-write': 'authorized_keys 에 쓰지 못함',
   'no-runuser': 'runuser 가 없음(그 계정 권한으로 쓸 수 없음)',
@@ -72,11 +77,13 @@ export const PREP_FIX_TEXT = Object.freeze({
   'key-stopped': '같은 키가 연달아 거부됐습니다 — 키를 확인한 뒤 10분 뒤에 다시 누르세요.',
   hostkey: '설정 › 보안 › 장비 신뢰에서 그 서버의 호스트키를 승인하세요.',
   upload: '그 서버의 SSH 에 SFTP 가 꺼져 있을 수 있습니다 — 손으로 넣으세요.',
-  'from-unknown': '접속 주소 제한 없이 다시 누르거나 손으로 넣으세요.',
+  'conn-unknown': '그 서버의 sshd 가 SSH_CONNECTION 을 주지 않습니다 — 손으로 넣으세요.',
+  'acct-prep': '수집 계정을 일반 계정으로 등록을 고치세요 — root 로 갈 수 있는 계정에는 넣지 않습니다.',
   'no-key': '노드별 SSH 공개키 카드에서 키 상태를 확인하세요.',
   login: '홈 · .ssh 권한(StrictModes) · SELinux · PAM(만료 · access.conf)을 확인한 뒤 ‘다시 연결’ 을 누르세요.',
   'acct-root': '등록을 일반 계정으로 고치세요 — root 에는 넣지 않습니다.',
   script: '서버 담당자가 고칠 것(sshd 설정 · 계정) — 포탈은 바꾸지 않았습니다. 손으로 넣을 수도 있습니다.',
+  scriptAfterAcct: '계정은 생겼습니다(그 뒤 단계에서 멈춤) — 까닭을 고친 뒤 다시 누르면 그 계정에 이어서 넣습니다.',
 });
 /** 디스크 점검을 함께 하지 않은 까닭(서버 AUDIT_SKIPS + 'skip'). */
 export const AUDIT_SKIP_TEXT = Object.freeze({
@@ -107,6 +114,7 @@ export function prepRowState(r, pick = null) {
   if (settled) why = null;
   else if (r?.job) why = '이미 작업이 진행 중';
   else if (String(r?.username || '') === 'root') why = '수집 계정이 root';
+  else if (c.state === 'ok' && c.acct && c.acct === String(r?.username || '')) why = '수집 계정이 준비 계정 자신';
   else if (r?.login?.kind === 'hostkey') why = '호스트키 승인 먼저';
   else if (c.state === 'ambig') why = pick && (c.choices || []).some((x) => x.id === pick) ? null : '공통 계정을 고르지 않음';
   else if (c.state !== 'ok') why = prepCredText(c).label.replace(/^(못 함|모름|고르면 됨) — /, '');
@@ -116,6 +124,8 @@ export function prepRowState(r, pick = null) {
   let awhy = null;
   if (!can) awhy = null;
   else if (r?.hostShared) awhy = '같은 주소에 다른 수집 계정 — 손으로 설치';
+  // 반증 D7: 공통 계정을 고르는 행은 노드가 고른 계정으로 설치 계정을 다시 푼다 — 화면은 단정하지 않는다(maybe)
+  else if (c.state === 'ambig' || ci.state === 'ambig') return { settled, can, why, audit: { can: true, maybe: true, why: '고른 계정의 키가 ‘설치’ 도 켰을 때만(노드가 판단)' } };
   else if (ci.state === 'feature') awhy = '그 키에 ‘설치’ 가 꺼져 있음';
   else if (ci.state !== 'ok') awhy = '설치 계정이 정해지지 않음';
   else if (c.state === 'ok' && ci.key && c.key && ci.key !== c.key) awhy = '설치에 다른 키를 씀 — 디스크 점검 탭에서';
@@ -127,11 +137,14 @@ export function prepResultText(lp) {
   if (!lp) return null;
   const base = PREP_CODE_TEXT[lp.code] || lp.code;
   const why = lp.code === 'script' && lp.fail ? ` — ${PREP_FAIL_TEXT[lp.fail] || lp.fail}` : '';
-  const did = [lp.created ? '계정 만듦' : lp.exists ? '계정은 있었음' : '', lp.added ? '공개키 넣음' : lp.have ? '같은 키가 이미 있음' : '', lp.from ? '주소 제한' : ''].filter(Boolean).join(' · ');
+  const did = [lp.created ? '계정 만듦' : lp.partial ? '계정은 생겼지만 홈을 만들지 못함' : lp.exists ? '계정은 있었음' : '',
+    lp.added ? '공개키 넣음' : lp.have ? '같은 키가 이미 있음' : lp.differs ? '같은 키가 다른 옵션(주소 제한 등)으로 이미 있어 그대로 둠 — 바꾸려면 그 줄을 손으로 고치세요' : '',
+    lp.from ? '주소 제한' : lp.fromAsked && !lp.added ? '주소 제한은 적용되지 않음(새 줄을 넣지 않았음)' : ''].filter(Boolean).join(' · ');
   const audit = lp.audit && lp.audit !== 'off' ? `디스크 점검: ${AUDIT_SKIP_TEXT[lp.audit] || lp.audit}` : '';
   const warn = (lp.warn || []).map((w) => WARN_TEXT[w] || w).join(' · ');
   const tone = lp.code === 'ok' ? 'ok' : lp.code === 'login' ? 'warn' : 'bad';
-  return { tone, label: `${base}${why}`, sub: [did, audit, warn, lp.code === 'script' ? PREP_FIX_TEXT.script : PREP_FIX_TEXT[lp.code] || ''].filter(Boolean).join(' · ') };
+  const fix = lp.code === 'script' ? ((lp.created || lp.partial) ? PREP_FIX_TEXT.scriptAfterAcct : PREP_FIX_TEXT.script) : PREP_FIX_TEXT[lp.code] || '';
+  return { tone, label: `${base}${why}`, sub: [did, audit, warn, fix].filter(Boolean).join(' · ') };
 }
 
 /** 단계 막대(서버 PREP_STEPS 0 ~ 7). */

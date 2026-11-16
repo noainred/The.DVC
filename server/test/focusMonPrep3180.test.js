@@ -46,6 +46,7 @@ VAULT.saveSecretsPolicy({ mode: 'encrypted', level: 1 });
 const KS = await import('../src/bmusage/onboard/keyStore.js');
 const BM = await import('../src/bmstor/registry.js');
 
+const CONN = { caddr: '10.48.0.5', laddr: '10.1.0.1', lport: 22 };
 const PUB = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMAk2Lxi5YNyB4sH7jV4nJGJiWlU4HAy6+YojtTxQLC3 dvc-focusmon@node1';
 const BLOB = PUB.split(' ')[1];
 
@@ -58,17 +59,20 @@ test('① 공개키 줄 · 준비 파일 문법 · 명령 값 · 표지 해석',
   for (const bad of ['10.0.0.1" command="id', '10.0.0.256', '010.0.0.1', '*', '10.0.0.1,10.0.0.2', 'host.example']) assert.equal(PR.keyLineFor(PUB, { from: bad }), null, `주소 ${bad}`);
   for (const bad of ['', 'ssh-dss AAAAB3NzaC1kc3MAAACBAP7 x', `${PUB}'; id`, `ssh-ed25519 ${BLOB} a b`, `ssh-ed25519 ${BLOB} co'mment`, 'ssh-ed25519 AAAA$(id)AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA']) assert.equal(PR.keyLineFor(bad), null, `공개키 ${bad}`);
   assert.equal(PR.keyLineFor('ssh-ed25519 ' + BLOB).line, `restrict ssh-ed25519 ${BLOB} dvc-focusmon`, '주석이 없으면 dvc-focusmon');
-  assert.throws(() => PR.prepScript({ line: "restrict x'y", blob: 'AAAA' }), /규칙/);
-  assert.throws(() => PR.prepScript({ line: 'restrict x', blob: 'AA$(id)' }), /규칙/);
-  const s = PR.prepScript(k);
+  assert.throws(() => PR.prepScript({ line: "restrict x'y", blob: 'AAAA' }, { conn: CONN }), /규칙/);
+  assert.throws(() => PR.prepScript({ line: 'restrict x', blob: 'AA$(id)' }, { conn: CONN }), /규칙/);
+  assert.throws(() => PR.prepScript(k), /접속 주소/, '접속 주소 · 포트 없이는 만들지 않는다(반증 D1)');
+  for (const bad of [{ caddr: '1.2.3.4;id', laddr: '10.0.0.1', lport: 22 }, { caddr: '10.0.0.1', laddr: '10.0.0.1', lport: 0 }, { caddr: '10.0.0.1', laddr: '10.0.0.1', lport: '22;id' }]) assert.throws(() => PR.prepScript(k, { conn: bad }), /접속 주소/);
+  const s = PR.prepScript(k, { conn: CONN });
   const f = path.join(DIR, 'p.sh'); fs.writeFileSync(f, s);
   for (const sh of ['dash', 'bash']) { if (spawnSync('sh', ['-c', `command -v ${sh}`]).status === 0) assert.equal(spawnSync(sh, ['-n', f]).status, 0, `${sh} 문법`); }
   assert.ok(s.includes(`KEYLINE='${k.line}'`) && s.includes(`BLOB='${BLOB}'`), '공개키 줄은 파일 안에(명령에 넣지 않는다)');
-  assert.match(s, /"\$SSHD" -T -C "user=\$A,host=localhost,addr=127\.0\.0\.1"/, 'sshd 설정은 읽기만(-T)');
+  assert.match(s, /"\$SSHD" -T -C "user=\$A,host=\$CADDR,addr=\$CADDR,laddr=\$LADDR,lport=\$LPORT"/, 'sshd 설정은 읽기만(-T) — 이 접속의 주소 · 포트로');
+  assert.ok(s.includes("CADDR='10.48.0.5'") && s.includes("LADDR='10.1.0.1'") && s.includes("LPORT='22'"));
   assert.doesNotMatch(s, /sshd_config|systemctl|service sshd|>\s*\/etc\/ssh/, 'sshd 설정 · 서비스를 바꾸지 않는다');
   assert.match(s, /"\$RU" -u "\$A" -- \/bin\/sh -c "\$W"/, '공개키는 그 계정 권한으로 쓴다');
   assert.match(s, /chage -M 99999 -E -1 -I -1 "\$A"/, '만든 계정 기본 = 만료 없음');
-  assert.doesNotMatch(PR.prepScript(k, { age: 'default' }), /chage -M/, '서버 기본값이면 만료를 바꾸지 않는다');
+  assert.doesNotMatch(PR.prepScript(k, { age: 'default', conn: CONN }), /chage -M/, '서버 기본값이면 만료를 바꾸지 않는다');
   assert.match(s, /usermod -p '\*' "\$A"/, '비밀번호 칸은 *(잠금 표시 ! 가 아니다 — UsePAM no 에서도 키 로그인)');
   // 명령 값
   assert.equal(PR.prepCommand({ sudo: true, file: '.dvc-fm-prep.0123456789abcdef.sh', acct: 'dvcmon' }), 'sudo -n /bin/sh "$HOME/.dvc-fm-prep.0123456789abcdef.sh" dvcmon; echo "##DP rc $?"; rm -f "$HOME/.dvc-fm-prep.0123456789abcdef.sh"');
@@ -76,14 +80,15 @@ test('① 공개키 줄 · 준비 파일 문법 · 명령 값 · 표지 해석',
   assert.throws(() => PR.prepCommand({ sudo: true, file: '.dvc-fm-prep.0123456789abcdef.sh', acct: 'x;id' }));
   assert.throws(() => PR.prepCleanupCommand('.dvc-da-install.0123456789abcdef.sh'), '준비 파일 이름 규칙만');
   // 표지
+  assert.equal(PR.parsePrepOut('##DP differs\n##DP partial').differs, true); assert.equal(PR.parsePrepOut('##DP partial').partial, true);
   const p = PR.parsePrepOut('##DP step sshd\n##DP step acct\n##DP created\n##DP step key\n##DP added\n##DP warn home-perm\n##DP warn evil\n##DP ok\n##DP rc 0\nnoise');
   assert.deepEqual([p.ok, p.created, p.added, p.rc, p.warn], [true, true, true, 0, ['home-perm']]);
   assert.equal(PR.parsePrepOut('##DP fail nope').fail, 'other'); assert.equal(PR.parsePrepOut('##DP fail sshd-allow').fail, 'sshd-allow');
-  assert.deepEqual(PR.parsePrivOut('##DI priv sudo\n##DP from 10.48.0.5'), { priv: 'sudo', from: '10.48.0.5' });
-  assert.deepEqual(PR.parsePrivOut('##DI priv root\n##DP from 10.0.0.1"x'), { priv: 'root', from: null }, '출발 주소는 규칙을 지난 것만');
+  assert.deepEqual(PR.parsePrivOut('##DI priv sudo\n##DP conn 10.48.0.5 51515 10.1.0.1 22'), { priv: 'sudo', from: '10.48.0.5', conn: CONN });
+  for (const bad of ['##DP conn 10.0.0.1"x 1 10.0.0.2 22', '##DP conn 10.0.0.1 1 10.0.0.2 99999', '##DP conn 10.0.0.1 1 10.0.0.2', '##DP conn ', '']) assert.equal(PR.parsePrivOut(`##DI priv root\n${bad}`).conn, null, `주소 · 포트는 규칙을 지난 것만: ${bad}`);
   assert.equal(PR.parsePrivOut('').priv, 'no');
-  const po = spawnSync('sh', ['-c', PR.PREP_PRIV_COMMAND], { encoding: 'utf8', env: { ...process.env, SSH_CONNECTION: '10.1.2.3 51515 10.9.9.9 22' } }).stdout;
-  assert.match(po, /^##DI priv (root|sudo|tty|no)$/m); assert.match(po, /^##DP from 10\.1\.2\.3$/m);
+  const po = spawnSync('sh', ['-c', PR.PREP_PRIV_COMMAND], { encoding: 'utf8', env: { ...process.env, SSH_CONNECTION: '10.1.2.3 51515 10.9.9.9 2222' } }).stdout;
+  assert.match(po, /^##DI priv (root|sudo|tty|no)$/m); assert.deepEqual(PR.connOf(po), { caddr: '10.1.2.3', laddr: '10.9.9.9', lport: 2222 });
 });
 
 /* ── ② 준비 파일을 셸로(가짜 sshd · getent · useradd · runuser) ── */
@@ -100,12 +105,13 @@ function sandbox({ sshdT, passwd = '', sshdRc = 0 } = {}) {
   w('usermod', `echo "usermod $*" >> '${log}'`);
   w('chage', `echo "chage $*" >> '${log}'`);
   w('runuser', `echo "runuser $1 $2" >> '${log}'; shift 3; exec "$@"`); // -u A -- /bin/sh -c W arg0 D LINE BLOB → 지금 계정으로 W 를 돌린다
-  w('id', 'echo 0');
+  w('id', `if [ "$1" = "-Gn" ]; then cat '${root}/groups' 2>/dev/null; else echo 0; fi`);
+  w('sudo', `cat '${root}/sudol' 2>/dev/null`); // sudo -n -l -U A → 시험이 쓴 목록
   return { root, bin, homes, pw, log, T };
 }
 /** 준비 파일을 가짜 bin 으로 — PATH 줄만 바꾼다(그 밖은 받은 그대로). */
 function runPrep(sb, acct, { age = 'never', from = null, args } = {}) {
-  const s = PR.prepScript(PR.keyLineFor(PUB, { from }), { age }).replace('PATH=/usr/sbin:/usr/bin:/sbin:/bin; export PATH', `PATH=${sb.bin}:/usr/bin:/bin; export PATH`);
+  const s = PR.prepScript(PR.keyLineFor(PUB, { from }), { age, conn: CONN }).replace('PATH=/usr/sbin:/usr/bin:/sbin:/bin; export PATH', `PATH=${sb.bin}:/usr/bin:/bin; export PATH`);
   const f = path.join(sb.root, 'prep.sh'); fs.writeFileSync(f, s);
   const r = spawnSync('sh', [f, ...(args || [acct])], { encoding: 'utf8' });
   return { rc: r.status, out: r.stdout, p: PR.parsePrepOut(r.stdout), log: fs.readFileSync(sb.log, 'utf8') };
@@ -115,7 +121,7 @@ test('② 준비 파일을 실제로 돌린다 — sshd 정책 · 계정 · 키 
   let sb = sandbox();
   let r = runPrep(sb, 'dvcmon');
   assert.equal(r.rc, 0, r.out); assert.equal(r.p.ok, true); assert.equal(r.p.created, true); assert.equal(r.p.added, true);
-  assert.match(r.log, /sshd -T -C user=dvcmon,host=localhost,addr=127\.0\.0\.1/); assert.match(r.log, /useradd -m -s \/bin\/(bash|sh) dvcmon/);
+  assert.match(r.log, /sshd -T -C user=dvcmon,host=10\.48\.0\.5,addr=10\.48\.0\.5,laddr=10\.1\.0\.1,lport=22/, '이 접속의 주소 · 포트로 판정(반증 D1)'); assert.match(r.log, /useradd -m -s \/bin\/(bash|sh) dvcmon/);
   assert.match(r.log, /usermod -p \* dvcmon/); assert.match(r.log, /chage -M 99999 -E -1 -I -1 dvcmon/); assert.match(r.log, /runuser -u dvcmon/);
   const ak = path.join(sb.homes, 'dvcmon', '.ssh', 'authorized_keys');
   assert.equal(fs.readFileSync(ak, 'utf8'), `restrict ${PUB}\n`);
@@ -152,7 +158,7 @@ test('② 준비 파일을 실제로 돌린다 — sshd 정책 · 계정 · 키 
   // 패턴이 작업 폴더의 파일 이름으로 펼쳐지지 않는다(set -f) — 'dvc*' 가 파일 'dvcfile' 로 바뀌면 맞는 계정을 막는다
   sb = sandbox({ sshdT: `${base}allowusers dvc*\n` });
   { const cwd = fs.mkdtempSync(path.join(sb.root, 'cwd-')); fs.writeFileSync(path.join(cwd, 'dvcfile'), '');
-    const s2 = PR.prepScript(PR.keyLineFor(PUB)).replace('PATH=/usr/sbin:/usr/bin:/sbin:/bin; export PATH', `PATH=${sb.bin}:/usr/bin:/bin; export PATH`);
+    const s2 = PR.prepScript(PR.keyLineFor(PUB), { conn: CONN }).replace('PATH=/usr/sbin:/usr/bin:/sbin:/bin; export PATH', `PATH=${sb.bin}:/usr/bin:/bin; export PATH`);
     const f2 = path.join(sb.root, 'p2.sh'); fs.writeFileSync(f2, s2);
     const rr = spawnSync('sh', [f2, 'dvcmon'], { encoding: 'utf8', cwd }); assert.equal(PR.parsePrepOut(rr.stdout).ok, true, rr.stdout); }
   sb = sandbox({ sshdT: 'pubkeyauthentication no\nauthorizedkeysfile .ssh/authorized_keys\n' }); assert.equal(runPrep(sb, 'dvcmon').p.fail, 'sshd-pubkey');
@@ -175,13 +181,41 @@ test('② 준비 파일을 실제로 돌린다 — sshd 정책 · 계정 · 키 
   assert.equal(runPrep(sb, 'sym').p.fail, 'key-symlink'); assert.equal(fs.readFileSync(path.join(victim, 'authorized_keys'), 'utf8'), 'ORIG\n');
   fs.unlinkSync(path.join(sb.homes, 'sym', '.ssh')); fs.mkdirSync(path.join(sb.homes, 'sym', '.ssh')); fs.symlinkSync(path.join(victim, 'authorized_keys'), path.join(sb.homes, 'sym', '.ssh', 'authorized_keys'));
   assert.equal(runPrep(sb, 'sym').p.fail, 'key-symlink'); assert.equal(fs.readFileSync(path.join(victim, 'authorized_keys'), 'utf8'), 'ORIG\n');
+  // 반증 D1: AuthenticationMethods — 공개키만으로 로그인할 수 없으면 멈춘다
+  for (const [am, ok] of [['any', true], ['publickey', true], ['publickey publickey,password', true], ['publickey,password', false], ['password', false], ['keyboard-interactive publickey,keyboard-interactive', false]]) {
+    sb = sandbox({ sshdT: `${base}authenticationmethods ${am}\n` }); r = runPrep(sb, 'dvcmon');
+    assert.equal(r.p.ok, ok, am); if (!ok) { assert.equal(r.p.fail, 'sshd-authmethods'); assert.doesNotMatch(r.log, /useradd/); }
+  }
+  // 반증 D2: 같은 키가 다른 옵션(주소 제한 등)으로 있으면 그대로 두고 'differs' — 글자까지 같을 때만 'have'
+  sb = sandbox({ passwd: 'mon2:x:905:905::@HOME@/mon2:/bin/bash\n' }); fs.mkdirSync(path.join(sb.homes, 'mon2', '.ssh'), { recursive: true });
+  fs.writeFileSync(path.join(sb.homes, 'mon2', '.ssh', 'authorized_keys'), `restrict ${PUB}\n`);
+  r = runPrep(sb, 'mon2', { from: '10.48.0.5' });
+  assert.equal(r.p.differs, true); assert.equal(r.p.have, false); assert.equal(r.p.added, false);
+  assert.equal(fs.readFileSync(path.join(sb.homes, 'mon2', '.ssh', 'authorized_keys'), 'utf8'), `restrict ${PUB}\n`, '이미 있던 줄은 그대로');
+  r = runPrep(sb, 'mon2'); assert.equal(r.p.have, true, '글자까지 같으면 have');
+  // 반증 D4: sudo 로 모든 명령을 하는 계정 · wheel 그룹이면 넣지 않는다(좁은 허용 — 디스크 점검 한 줄은 괜찮다)
+  for (const [groups, sudol, fail] of [['mon3 wheel', '', 'acct-sudo'], ['mon3', '    (ALL) NOPASSWD: ALL', 'acct-sudo'], ['mon3', '    (ALL : ALL) ALL', 'acct-sudo'],
+    ['mon3', '    (root) NOPASSWD: /usr/local/sbin/dvc-disk-audit ""', null], ['mon3 users', '', null]]) {
+    sb = sandbox({ passwd: 'mon3:x:906:906::@HOME@/mon3:/bin/bash\n' }); fs.mkdirSync(path.join(sb.homes, 'mon3'));
+    fs.writeFileSync(path.join(sb.root, 'groups'), groups); fs.writeFileSync(path.join(sb.root, 'sudol'), sudol);
+    r = runPrep(sb, 'mon3'); assert.equal(r.p.fail, fail, `${groups} / ${sudol}`); if (fail) assert.doesNotMatch(r.log, /runuser/);
+  }
+  // 반증 D6: runuser 가 없으면 계정을 만들기 **전에** 멈춘다 · useradd 가 실패했는데 계정이 남으면 'partial'
+  sb = sandbox(); fs.unlinkSync(path.join(sb.bin, 'runuser'));
+  { const s3 = PR.prepScript(PR.keyLineFor(PUB), { conn: CONN }).replace('PATH=/usr/sbin:/usr/bin:/sbin:/bin; export PATH', `PATH=${sb.bin}:/usr/bin:/bin; export PATH`);
+    const f3 = path.join(sb.root, 'p3.sh'); fs.writeFileSync(f3, s3);
+    const rr = spawnSync('/bin/sh', [f3, 'dvcnew'], { encoding: 'utf8', env: { PATH: `${sb.bin}:/usr/bin:/bin` } });
+    const pp = PR.parsePrepOut(rr.stdout); const lg = fs.readFileSync(sb.log, 'utf8');
+    if (spawnSync('sh', ['-c', `PATH=${sb.bin}:/usr/bin:/bin command -v runuser`]).status !== 0) { assert.equal(pp.fail, 'no-runuser', rr.stdout); assert.doesNotMatch(lg, /useradd/, '계정을 만들기 전에 멈춘다'); } }
+  sb = sandbox(); fs.writeFileSync(path.join(sb.bin, 'useradd'), `#!/bin/sh\nfor a; do n="$a"; done; echo "$n:x:1501:1501::${sb.homes}/$n:/bin/bash" >> '${sb.pw}'; exit 12\n`);
+  r = runPrep(sb, 'dvchalf'); assert.equal(r.p.fail, 'acct-create'); assert.equal(r.p.partial, true, '계정이 남았다고 알린다');
   // 인자 · root · 계정 이름
   sb = sandbox();
   for (const args of [['x;id'], ['a', 'b'], [], ['-x'], ['1abc'], [`a${'b'.repeat(40)}`]]) assert.equal(runPrep(sb, null, { args }).p.fail, 'args', JSON.stringify(args));
   assert.equal(runPrep(sb, 'root').p.fail, 'acct-root');
   // root 가 아니면(가짜 id 를 빼고 실제 id — CI 계정이 root 일 수 있어 그때는 건너뛴다)
   if (process.getuid && process.getuid() !== 0) {
-    const s = PR.prepScript(PR.keyLineFor(PUB)); const f = path.join(sb.root, 'real.sh'); fs.writeFileSync(f, s);
+    const s = PR.prepScript(PR.keyLineFor(PUB), { conn: CONN }); const f = path.join(sb.root, 'real.sh'); fs.writeFileSync(f, s);
     const rr = spawnSync('sh', [f, 'dvcmon'], { encoding: 'utf8' }); assert.equal(rr.status, 77); assert.match(rr.stdout, /##DP fail not-root/);
   }
 });
@@ -199,7 +233,7 @@ function fakeConn({ priv = 'root', from = '10.48.0.5', out = '##DP step sshd\n##
     return fn({
       exec: async (cmd, ms) => {
         log.execs.push([cmd, ms]);
-        if (cmd === PR.PREP_PRIV_COMMAND) return { stdout: `##DI priv ${priv}\n${from ? `##DP from ${from}\n` : ''}`, code: 0 };
+        if (cmd === PR.PREP_PRIV_COMMAND) return { stdout: `##DI priv ${priv}\n${from ? `##DP conn ${from} 51515 10.1.0.1 22\n` : '##DP conn \n'}`, code: 0 };
         if (cmd.includes('.dvc-fm-prep.') && cmd.includes('/bin/sh') && execThrow) throw execThrow;
         if (cmd.includes('.dvc-fm-prep.') && cmd.includes('/bin/sh')) return { stdout: out, code: 0 };
         return { stdout: '', code: 0 };
@@ -217,10 +251,27 @@ test('③ 준비 실행 — 권한 · 주소 제한 · 올린 파일 · 연결 �
   let r = await PR.prepOnce(T, { keys: KEYS, connect: f.connect, credOf: credPrep(), test: okTest });
   assert.equal(r.prep.code, 'sudo-password'); assert.equal(f.log.writes.length, 0); assert.equal(r.login, null);
   f = fakeConn({ priv: 'tty' }); assert.equal((await PR.prepOnce(T, { keys: KEYS, connect: f.connect, credOf: credPrep(), test: okTest })).prep.code, 'sudo-tty');
-  // 주소 제한을 골랐는데 출발 주소를 모른다 — 올리지 않는다
-  f = fakeConn({ from: null });
-  r = await PR.prepOnce(T, { keys: KEYS, connect: f.connect, credOf: credPrep(), test: okTest, expect: { from: true } });
-  assert.equal(r.prep.code, 'from-unknown'); assert.equal(f.log.writes.length, 0);
+  // 이 접속의 주소 · 포트(SSH_CONNECTION)를 모른다 — 주소 제한과 상관없이 올리지 않는다(sshd 판정을 그 값으로 하므로 · 반증 D1)
+  for (const fr of [true, false]) {
+    f = fakeConn({ from: null });
+    r = await PR.prepOnce(T, { keys: KEYS, connect: f.connect, credOf: credPrep(), test: okTest, expect: { from: fr } });
+    assert.equal(r.prep.code, 'conn-unknown'); assert.equal(f.log.writes.length, 0);
+  }
+  // 반증 D4: 수집 계정이 준비 계정 자신이면 접속하지 않고 거절
+  f = fakeConn();
+  r = await PR.prepOnce({ ...T, username: 'dvcadmin' }, { keys: KEYS, connect: f.connect, credOf: (t, o) => ({ ...credPrep()(t, o), acct: 'dvcadmin', auth: { username: 'dvcadmin', privateKey: 'X', fingerprint: 'fpx' } }), test: okTest });
+  assert.equal(r.prep.code, 'acct-prep'); assert.equal(f.log.conns.length, 0);
+  // 반증 D3: 인증 정지가 걸린 서버 — 키를 넣은 뒤 그 정지를 한 번 풀고 시험한다
+  { const CO = await import('../src/focusmon/collector.js');
+    const dev = CO.authDevOf(T, 'SHA256:focusfp'); CO.focusAuthGuard.markAuthStopped(dev.id, dev, '키 로그인 거부(연결 시험)');
+    assert.ok(CO.focusAuthGuard.peekAuthStop(dev));
+    let stoppedAtTest = null; f = fakeConn();
+    r = await PR.prepOnce(T, { keys: KEYS, connect: f.connect, credOf: credPrep(), test: async () => { stoppedAtTest = !!CO.focusAuthGuard.peekAuthStop(dev); return { ok: true, kind: 'ok' }; } });
+    assert.equal(stoppedAtTest, false, '시험할 때는 정지가 풀려 있다'); assert.equal(r.prep.code, 'ok');
+    CO.focusAuthGuard.markAuthStopped(dev.id, dev, 'x'); f = fakeConn({ out: '##DP step sshd\n##DP fail sshd-allow\n##DP rc 71' });
+    await PR.prepOnce(T, { keys: KEYS, connect: f.connect, credOf: credPrep(), test: okTest });
+    assert.ok(CO.focusAuthGuard.peekAuthStop(dev), '준비가 멈췄으면(키를 넣지 않음) 정지를 풀지 않는다');
+    CO.focusAuthGuard.clearAuthStop(dev.id); }
   // 성공 — 파일 0600 · 이름 · 안의 공개키 · 주소 제한 · 명령 값 · 연결 시험
   f = fakeConn({ priv: 'sudo' });
   r = await PR.prepOnce(T, { keys: KEYS, connect: f.connect, credOf: credPrep(), test: okTest, expect: { from: true } });
@@ -229,6 +280,11 @@ test('③ 준비 실행 — 권한 · 주소 제한 · 올린 파일 · 연결 �
   assert.equal(f.log.conns[0].username, 'root'); assert.equal(f.log.conns[0].key, 'ROOT-PEM', '준비는 준비 계정의 키로');
   assert.equal(f.log.writes.length, 1); assert.match(f.log.writes[0].p, PR.PREP_FILE_RE); assert.equal(f.log.writes[0].m, 0o600);
   assert.ok(f.log.writes[0].c.includes(`KEYLINE='restrict,from="10.48.0.5" ${PUB}'`), '대상 서버가 본 노드 주소로 제한');
+  assert.ok(f.log.writes[0].c.includes("CADDR='10.48.0.5'") && f.log.writes[0].c.includes("LPORT='22'"), 'sshd 판정도 그 접속의 주소 · 포트로');
+  assert.equal(r.prep.from, true, '이번에 넣었으니 주소 제한 적용');
+  { const fd = fakeConn({ out: '##DP step sshd\n##DP step acct\n##DP exists\n##DP step key\n##DP differs\n##DP ok\n##DP rc 0' });
+    const rd = await PR.prepOnce(T, { keys: KEYS, connect: fd.connect, credOf: credPrep(), test: okTest, expect: { from: true } });
+    assert.equal(rd.prep.differs, true); assert.equal(rd.prep.from, false, '반증 D2 — 넣지 않았으면 주소 제한은 적용되지 않았다'); }
   const ex = f.log.execs.find(([c]) => c.includes('/bin/sh "$HOME/'));
   assert.match(ex[0], /^sudo -n \/bin\/sh "\$HOME\/\.dvc-fm-prep\.[0-9a-f]{16}\.sh" dvcmon; echo "##DP rc \$\?"; rm -f "\$HOME\/\.dvc-fm-prep\.[0-9a-f]{16}\.sh"$/);
   assert.equal(ex[1], PR.PREP_EXEC_MS);
@@ -337,11 +393,11 @@ test('⑤ 중앙 — 접수 · 엣지 배달(caps · 준비 계정 보고) · �
   const P0 = B.pathsFor('');
   const ready = ['##DR 1', '##DR py 3.6.8', `##DR file ${P0.program} ${B.programSha()} 0:0:644`, `##DR file ${P0.wrapper} ${B.wrapperSha('')} 0:0:755`, ...B.dirsToCheck(P0).all.map((d) => `##DR dir ${d} 0:0:755`), '##DR sudo ok', '##DR end'];
   A.handleEdgeAudit('edge-pl', mine, { caps: ['install', 'prep'], results: [{ runId: r.runId, result: { mode: 'prep', ok: true, kind: 'done', dir: '', ready,
-    prep: { code: 'ok', step: 7, acct: 'root', key: 'pl-root', src: 'corp', created: true, added: true }, login: { ok: true, kind: 'ok', hello: { isLinux: true, rhelMajor: '7.8' }, ms: 9 },
+    prep: { code: 'ok', step: 7, acct: 'root', key: 'pl-root', src: 'corp', created: true, added: true, from: true }, login: { ok: true, kind: 'ok', hello: { isLinux: true, rhelMajor: '7.8' }, ms: 9 },
     install: { code: 'ok', step: 7, acct: 'root' } } }] }, Date.now() + 3000);
   await new Promise((res) => setTimeout(res, 50));
   const rec = A.readinessOf(te.id);
-  assert.equal(rec.lastPrep.code, 'ok'); assert.equal(rec.lastPrep.created, true); assert.equal(rec.lastPrep.audit, 'done'); assert.equal(rec.lastPrep.from, true); assert.equal(rec.lastPrep.age, 'default');
+  assert.equal(rec.lastPrep.code, 'ok'); assert.equal(rec.lastPrep.created, true); assert.equal(rec.lastPrep.audit, 'done'); assert.equal(rec.lastPrep.from, true); assert.equal(rec.lastPrep.fromAsked, true); assert.equal(rec.lastPrep.age, 'default');
   assert.equal(rec.lastInstall.code, 'ok'); assert.equal(rec.state, 'ready');
   assert.equal(FS.testOf(te.id).result.kind, 'ok', '연결 시험 결과가 키 로그인 칸으로'); assert.equal(FS.testOf(te.id).result.via, 'edge');
   // 디스크 점검을 고르지 않은 준비 작업에 설치 결과 · 준비 줄이 실려 와도 반영하지 않는다(엣지가 작업에 없던 일을 말함)
@@ -353,6 +409,27 @@ test('⑤ 중앙 — 접수 · 엣지 배달(caps · 준비 계정 보고) · �
   await new Promise((res) => setTimeout(res, 50));
   const rq2 = A.readinessOf(tq.id);
   assert.equal(rq2.lastPrep.audit, 'off'); assert.equal(rq2.lastInstall, undefined, '고르지 않은 설치는 반영하지 않는다'); assert.equal(rq2.state, undefined, '준비 줄도');
+  // 반증 D4(중앙): 엣지가 알려 온 준비 계정이 수집 계정과 같으면 받지 않는다
+  { const tz = { id: 'fm-pppppppp56', name: 'z', host: '10.48.5.6', port: 22, username: 'root2', agent: 'edge-pl' };
+    A.handleEdgeAudit('edge-pl', new Map([[tz.id, tz]]), { caps: ['install', 'prep'], cred: { [tz.id]: { state: 'ok' } }, credPrep: { [tz.id]: { state: 'ok', acct: 'root2' } } }, Date.now() + 5500);
+    assert.equal(A.requestPrep(tz, { by: 'own' }).code, 'acct-prep'); }
+  // 반증 D5: 시한이 지나 'lost' 로 정리된 준비 작업의 늦은 결과도 그 작업의 선택(함께 · 디렉터리 · 주소 제한 · 만료)으로 반영한다
+  { SET.saveInstallDir('/opt/dvcaudit', { by: 'own' });
+    const tl = { id: 'fm-pppppppp55', name: 'pl-db-55', host: '10.48.5.5', port: 22, username: 'dvcmon', agent: 'edge-pl' };
+    const ml = new Map([[tl.id, tl]]); const t0 = Date.now() + 6000;
+    A.handleEdgeAudit('edge-pl', ml, { caps: ['install', 'prep'], cred: { [tl.id]: { state: 'ok' } }, credPrep: { [tl.id]: { state: 'ok' } } }, t0);
+    const rl = A.requestPrep(tl, { by: 'own', withAudit: true, from: true, age: 'default', now: t0 }); assert.equal(rl.ok, true);
+    assert.equal(A.handleEdgeAudit('edge-pl', ml, { caps: ['install', 'prep'], cred: { [tl.id]: { state: 'ok' } }, credPrep: { [tl.id]: { state: 'ok' } } }, t0 + 1000).jobs.length, 1);
+    A.sweep(t0 + A.SEEN_TTL_MS + 120_000); assert.equal(A.jobOf(tl.id), null, 'lost 로 정리됨');
+    const PD = B.pathsFor('/opt/dvcaudit');
+    const readyD = ['##DR 1', '##DR py 3.6.8', `##DR file ${PD.program} ${B.programSha()} 0:0:644`, `##DR file ${PD.wrapper} ${B.wrapperSha('/opt/dvcaudit')} 0:0:755`, ...B.dirsToCheck(PD).all.map((d) => `##DR dir ${d} 0:0:755`), '##DR sudo ok', '##DR end'];
+    A.handleEdgeAudit('edge-pl', ml, { caps: ['install', 'prep'], results: [{ runId: rl.runId, result: { mode: 'prep', ok: true, kind: 'done', dir: '/opt/dvcaudit', ready: readyD,
+      prep: { code: 'ok', step: 7, added: true, from: true }, login: { ok: true, kind: 'ok' }, install: { code: 'ok', step: 7 } } }] }, t0 + A.SEEN_TTL_MS + 180_000);
+    await new Promise((res) => setTimeout(res, 50));
+    const rr = A.readinessOf(tl.id);
+    assert.equal(rr.lastPrep.audit, 'done'); assert.equal(rr.lastPrep.fromAsked, true); assert.equal(rr.lastPrep.age, 'default');
+    assert.equal(rr.lastInstall?.code, 'ok'); assert.equal(rr.dir, '/opt/dvcaudit'); assert.equal(rr.state, 'ready');
+    SET.saveInstallDir('', { by: 'own' }); }
   // 같은 주소에 다른 수집 계정 — 준비는 하되 디스크 점검은 함께 하지 않는다
   const t2 = { id: 'fm-pppppppp52', name: 'a', host: '10.1.5.2', port: 22, username: 'dvcmon', demo: true };
   const t3 = { id: 'fm-pppppppp53', name: 'b', host: '10.1.5.2', port: 22, username: 'other', demo: true };

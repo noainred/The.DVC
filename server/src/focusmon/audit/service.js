@@ -161,7 +161,8 @@ export async function ingestResult(job, r, { node = '', now = Date.now() } = {})
     const code = PREP_CODES.includes(p.code) ? p.code : 'unreachable';
     rec.lastPrep = { at: now, by: job.by || '', ok: code === 'ok', code, fail: p.fail || null, step: Number.isInteger(p.step) ? p.step : 0, rc: Number.isInteger(p.rc) ? p.rc : null,
       acct: p.acct || '', key: p.key || '', src: p.src || null, cred: p.cred || null, priv: p.priv || null, created: !!p.created, exists: !!p.exists, added: !!p.added, have: !!p.have,
-      warn: Array.isArray(p.warn) ? p.warn : [], from: !!job.from, age: job.age === 'default' ? 'default' : 'never', login: lg ? lg.kind : null,
+      differs: !!p.differs, partial: !!p.partial, warn: Array.isArray(p.warn) ? p.warn : [],
+      from: p.from === true, fromAsked: !!job.from, age: job.age === 'default' ? 'default' : 'never', login: lg ? lg.kind : null, // 반증 D2 — from 은 실제로 넣었을 때만
       audit: !job.audit ? 'off' : r.install ? 'done' : (AUDIT_SKIPS.includes(r.auditSkip) ? r.auditSkip : 'skip') };
     if (lg) { try { putTestResult(tid, { ok: lg.ok === true, kind: LOGIN_KINDS.includes(lg.kind) ? lg.kind : 'unreachable', error: lg.error || '', hello: cleanHello(lg.hello), ms: Number.isFinite(lg.ms) ? lg.ms : null, via: node ? 'edge' : 'central' }, now); } catch { /* 시험 칸은 다음 시험이 채운다 */ } }
   }
@@ -401,6 +402,7 @@ export function requestPrep(t, { by = '', pick = null, corpVcs = [], now = Date.
   const c = credOfTarget(t, { corpVcs, pick, now, feature: PREP_FEATURE });
   const pickOk = c.state === 'ambig' && pick && Array.isArray(c.choices) && c.choices.some((x) => x.id === pick);
   if (c.state !== 'ok' && !pickOk) return { ok: false, code: `cred-${c.state}`, reason: '이 서버는 접속 준비에 쓸 계정이 정해지지 않았습니다.' };
+  if (c.state === 'ok' && c.acct && c.acct === String(t.username || '')) return { ok: false, code: 'acct-prep', reason: '수집 계정이 준비에 쓸 계정(root · sudo) 자신입니다 — 집중 모니터링 키를 그 계정에 넣지 않습니다. 수집 계정을 일반 계정으로 등록하세요.' };
   // 디스크 점검 함께 — 서버마다 판단(준비는 그대로 한다)
   let audit = false; let auditWhy = null; let dir = null;
   if (withAudit) {
@@ -444,7 +446,10 @@ export function sweep(now = Date.now()) {
     const rec = st.ready[j.tid] || {};
     rec.lastError = { at: now, kind: 'lost', error: j.node && !j.deliveredAt ? `엣지 ${j.node} 가 ${DELIVER_TTL_MS / 60_000}분 안에 작업을 받아 가지 않았습니다.` : '시한 안에 결과를 받지 못했습니다(늦게 오면 그때 반영합니다).' };
     st.ready[j.tid] = rec; changed = true;
-    st.lost[j.runId] = { runId: j.runId, tid: j.tid, mode: j.mode, node: j.node || '-', by: j.by || '', requestedAt: j.requestedAt, startedAt: j.startedAt || null, ep: j.ep || null, lostAt: now };
+    // v3.18.0 반증 D5: 늦게 온 결과를 그 작업이 정한 값으로 해석하게 — 설치 디렉터리 · 후보 · 준비 선택(예전에는 빠져 설치 결과 · 위치를 버리고 선택 값을 다르게 적었다 — v3.17.0 설치에도 있던 빈틈)
+    st.lost[j.runId] = { runId: j.runId, tid: j.tid, mode: j.mode, node: j.node || '-', by: j.by || '', requestedAt: j.requestedAt, startedAt: j.startedAt || null, ep: j.ep || null, lostAt: now,
+      ...(Array.isArray(j.cands) ? { cands: j.cands } : {}), ...(typeof j.dir === 'string' ? { dir: j.dir, oldDirs: j.oldDirs || [] } : {}),
+      ...(j.mode === 'prep' ? { audit: j.audit === true, auditWhy: j.auditWhy || null, from: j.from === true, age: j.age === 'default' ? 'default' : 'never' } : {}) };
     return false;
   });
   const lostIds = Object.keys(st.lost);
@@ -566,7 +571,7 @@ export function cleanEdgeResult(x) {
     code: PREP_CODES.includes(pp.code) ? pp.code : 'unreachable', fail: PREP_FAILS.includes(pp.fail) ? pp.fail : (pp.fail == null ? null : 'other'),
     step: ii(pp.step, 0, 7) ?? 0, rc: ii(pp.rc, 0, 255), acct: nm(pp.acct), key: nm(pp.key), src: ['server', 'corp'].includes(pp.src) ? pp.src : null,
     cred: CRED_STATES.includes(pp.cred) ? pp.cred : null, priv: ['root', 'sudo', 'tty', 'no'].includes(pp.priv) ? pp.priv : null,
-    created: pp.created === true, exists: pp.exists === true, added: pp.added === true, have: pp.have === true,
+    created: pp.created === true, exists: pp.exists === true, added: pp.added === true, have: pp.have === true, differs: pp.differs === true, partial: pp.partial === true, from: pp.from === true,
     warn: Array.isArray(pp.warn) ? pp.warn.filter((w) => ['home-perm', 'passwd', 'chage'].includes(w)).slice(0, 3) : [],
   } : null;
   const lg = isPrep && x.login && typeof x.login === 'object' && !Array.isArray(x.login) ? x.login : null;

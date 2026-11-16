@@ -326,7 +326,7 @@ export async function syncOnce(now = Date.now()) {
             ? prepRunner.submit({ runId: j.runId, mode: 'prep', target: tgt, expect })
             : auditRunner.submit({ runId: j.runId, mode: j.mode === 'check' ? 'check' : 'run', target: tgt, expect });
         // 받지 못한 작업은 결과로 알린다(반증 F3 — 예전에는 소리 없이 버려 중앙이 3번 다시 보낸 뒤 'lost' 로 지웠다)
-        if (!sub.ok) queueAuditResult(j.runId, { mode: j.mode === 'check' ? 'check' : j.mode === 'install' ? 'install' : j.mode === 'prep' ? 'prep' : 'run', ...(j.mode === 'install' ? { install: { code: 'unreachable', step: 0 } } : {}), ...(j.mode === 'prep' ? { prep: { code: 'unreachable', step: 0 } } : {}), ok: false, kind: sub.code === 'queue-full' ? 'queue-full' : 'busy', ready: [], out: [], outBytes: 0, truncated: false, code: null, stderr: '', ms: 0, error: sub.code === 'queue-full' ? '엣지 점검 대기열이 가득 찼습니다.' : '이 엣지에서 같은 서버의 이전 점검 작업이 아직 끝나지 않았습니다.' });
+        if (!sub.ok) queueAuditResult(j.runId, { mode: j.mode === 'check' ? 'check' : j.mode === 'install' ? 'install' : j.mode === 'prep' ? 'prep' : 'run', ...(j.mode === 'install' ? { install: { code: 'unreachable', step: 0 } } : {}), ...(j.mode === 'prep' ? { prep: { code: sub.code === 'queue-full' ? 'queue-full' : 'busy', step: 0 } } : {}), ok: false, kind: sub.code === 'queue-full' ? 'queue-full' : 'busy', ready: [], out: [], outBytes: 0, truncated: false, code: null, stderr: '', ms: 0, error: sub.code === 'queue-full' ? '엣지 점검 대기열이 가득 찼습니다.' : '이 엣지에서 같은 서버의 이전 점검 작업이 아직 끝나지 않았습니다.' });
       }
     }
     _last = { at: Date.now(), ok: true, ms: Date.now() - t0, sent: sendS.length, targets: lastTargets, note: lastTargets ? '' : '수집할 대상이 없습니다.' };

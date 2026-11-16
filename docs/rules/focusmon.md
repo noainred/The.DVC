@@ -346,7 +346,16 @@
   ⑥ **이 개발 환경에서 실제로 확인한 것**(OpenSSH 9.6 sshd 두 개 — UsePAM yes · no): 새 계정 → 키 로그인(둘 다) · 같은 키 다시 → 한 줄 · from= 맞는 주소만 · AllowUsers/DenyUsers/AllowGroups/공개키 꺼짐/다른 키 위치 → 계정도 안 만들고 멈춤 ·
      nologin · 심링크 두 곳 거절(가리킨 파일 그대로) · 줄바꿈 없는 기존 파일 · root 아님 77 · **비밀번호 만료(90일 서버 · 마지막 변경 오래전)면 UsePAM yes 에서 키 로그인이 'Password change required but no TTY' 로 거부**(그래서 만료 없음이 기본) ·
      `prepOnce` 를 실제 SSH(withSsh)로 — sudo 계정으로 새 계정 · 같은 키 · sudo 없음 'sudo-password' · from= · 디스크 점검 함께(이 컨테이너에 실제 설치까지 돌아 sudoers 줄이 시험 계정으로 바뀐 것을 원래 `dvcmon` 으로 되돌렸다).
-  남은 것(추정 · 실서버 미확인): RHEL 7 의 OpenSSH 7.4 에서 `sshd -T -C` 꼴(이 환경은 9.6) · SELinux 문맥(restorecon — 이 환경에 없음) · LDAP/SSSD 계정 환경에서 useradd · 엣지 OS root 키 등록은 사람이 한다(콘솔 도구 없음 — 컨펌 ⑮).
+  ⑦ **반증 1인 반영**(8건 — 재현 7 · 추정 1 · 원문 scratchpad review3180): **D1(중간)** sshd 를 127.0.0.1 로 판정해 `Match Address` 안의 DenyUsers 를 놓쳤다(실제 sshd 로 재현 — 계정 · 키가 들어가고 로그인 거부) →
+     권한 확인이 `SSH_CONNECTION` 을 통째로 받아(검사 — 정규 IP · 1~65535) **그 접속의 addr · host · laddr · lport** 로 `sshd -T` · 모르면 'conn-unknown'(아무것도 안 올림) · `AuthenticationMethods` 가 any 나 publickey 단독 목록이 없으면 'sshd-authmethods'
+     (이 환경 sshd 로 Match Address → sshd-deny · Match LocalPort → sshd-authmethods 확인) · **D2(중간)** 같은 키가 다른 옵션으로 있으면 'have' 로 끝나 주소 제한이 적용되지 않았는데 '주소 제한' 으로 보고 → 글자까지 같을 때만 have ·
+     다르면 'differs'(그대로 두고 알림) · `from` 은 실제로 넣었을 때만(요청은 fromAsked) · **D3(중간)** 인증 정지가 걸린 서버는 키를 넣어도 시험이 'auth-stopped' → 준비 파일이 끝까지 돌았으면(OTP 로 누른 사람의 동작) 그 대상 · 노드 키의 정지를 한 번 풀고 시험('다시 연결' 과 같은 판단) ·
+     **D4** 수집 계정이 sudo 로 모든 명령을 하는 계정(wheel · sudo · admin 그룹 · `sudo -l -U` 가 ALL)이거나 준비 계정 자신이면 넣지 않는다('acct-sudo' · 'acct-prep' — 디스크 점검 실행 파일 한 줄 같은 좁은 허용은 괜찮다) ·
+     **D5** 'lost' 기록에 작업의 디렉터리 · 후보 · 준비 선택을 남긴다(늦은 결과가 설치 결과 · 위치를 버리고 선택 값을 다르게 적었다 — **v3.17.0 설치 작업에도 있던 빈틈**) ·
+     **D6** runuser 확인을 계정 만들기 **전에** · useradd 가 실패했는데 계정이 남으면 'partial' · 화면은 계정을 만든 뒤 멈췄으면 '바꾸지 않았습니다' 라고 하지 않는다 · **D7** 공통 계정을 고르는 행의 '디스크 점검 함께' 는 화면이 단정하지 않는다(노드가 고른 계정으로 판단) ·
+     **D8** 엣지가 받지 못한 준비 작업은 'busy' · 'queue-full'(예전 '접속하지 못함'). 덧붙여 **변이 검증이 찾은 결함**: 같은 키가 이미 있으면 권한을 맞추지 않았다(그룹 쓰기 .ssh 가 남아 StrictModes 거부) — 이제 늘 700 · 600.
+  남은 것(추정 · 실서버 미확인): RHEL 7 의 OpenSSH 7.4 에서 `sshd -T -C` 의 laddr · lport 꼴(이 환경은 9.6) · SELinux 문맥(restorecon — 이 환경에 없음) · LDAP/SSSD 계정 환경에서 useradd ·
+     노드에 주소가 여럿이라 준비 접속과 수집 접속의 출발 주소가 다르면 Match Address 판정 · from= 이 어긋날 수 있다 · `sudo -l -U` 의 ALL 판정은 줄 끝 글자 기준(별칭 Cmnd_Alias 로 넓게 준 경우는 못 알아본다) · 엣지 OS root 키 등록은 사람이 한다(콘솔 도구 없음 — 컨펌 ⑮).
 
 ## 서버는 수집 하나에만(v2.979) · 등록 수정 · 저장된 계속 수집의 겹침 정리(v2.980) — server/src/focusmon/CLAUDE.md 에서 옮긴 원문(v3.11.0)
 
