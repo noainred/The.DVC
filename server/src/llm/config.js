@@ -11,6 +11,7 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { ssrfBlockReason } from '../util/ssrfBlock.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { reqTimeoutMs } from '../agent/envTimeout.js';
+import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
 
 const FILE = path.join(config.configDir, 'llm.json');
 
@@ -35,7 +36,7 @@ export function normTimeoutMs(v) {
 
 export function loadLlmConfig() {
   let saved = {};
-  try { if (fs.existsSync(FILE)) saved = JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}; } catch (e) { preserveCorrupt(FILE, e.message); saved = {}; } // v2.479(감사 S-9)
+  try { if (fs.existsSync(FILE)) saved = parseJsonObject(fs.readFileSync(FILE, 'utf8')); } catch (e) { preserveCorrupt(FILE, e.message); saved = {}; } // v2.479(감사 S-9)
   const merged = { ...DEFAULTS, ...saved };
   // 이미 저장된 문자열·범위 밖 값도 로드에서 복구한다(저장 경로만 고치면 옛 파일이 계속 검색을 막는다).
   merged.timeoutMs = normTimeoutMs(merged.timeoutMs) ?? DEFAULTS.timeoutMs;

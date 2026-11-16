@@ -12,6 +12,7 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // v2.538: 이 파일은 v2.537 까지 봉인 대상 미등록이었다(감사 M4 계열)
 import { accessMoved, secretProvided } from '../util/secretCarry.js';
 import { trimTrailingSlashes } from '../util/trimSlashes.js';
+import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
 
 // Persisted in CONFIG_DIR (default app/server/config; set to e.g.
 // /etc/vmware-portal to survive upgrades).
@@ -23,7 +24,7 @@ const FIELDS = ['enabled', 'watchDir', 'installDir', 'packageName', 'remoteBase'
 
 function readFile() {
   if (!fs.existsSync(FILE)) return {};
-  try { return openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}); } catch (e) { if (fs.existsSync(FILE)) preserveCorrupt(FILE, e.message); return {}; }
+  try { return openSecretsDeep(parseJsonObject(fs.readFileSync(FILE, 'utf8'))); } catch (e) { if (fs.existsSync(FILE)) preserveCorrupt(FILE, e.message); return {}; }
 }
 
 /** Effective settings = env defaults overlaid with persisted overrides. */

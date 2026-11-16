@@ -9,6 +9,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { listManagedUsers } from '../auth/auth.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
 
 const FILE = path.join(config.configDir, 'security-session.json');
 // 설정 소유 계정을 '파일/환경변수'로도 지정할 수 있게 하는 경로(운영자가 직접 편집).
@@ -62,7 +63,7 @@ export function loadConfiguredSecurity() {
   // 파싱 실패를 조용히 DEFAULTS 로 리셋하면 UI 로 저장한 설정 소유자·완화 정책이 소리 없이
   // 사라지고, 다음 저장이 손상본을 덮어써 복구 기회도 없다 → 손상본을 보존하고 로그를 남긴다
   // (auth.js·deployRegistry.js 와 같은 패턴. 2026-08-13 감사 잔여 항목).
-  try { if (fs.existsSync(FILE)) p = JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}; }
+  try { if (fs.existsSync(FILE)) p = parseJsonObject(fs.readFileSync(FILE, 'utf8')); }
   catch (e) { preserveCorrupt(FILE, e.message); p = {}; }
   const owners = normOwners(p.settingsOwners);
   return {

@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
 
 const FILE = path.join(config.configDir, 'perf-monitor.json');
 
@@ -50,7 +51,7 @@ export function loadPerfSettings() {
   const out = { ...DEFAULTS };
   try {
     if (fs.existsSync(FILE)) {
-      const p = JSON.parse(fs.readFileSync(FILE, 'utf8')) || {};
+      const p = parseJsonObject(fs.readFileSync(FILE, 'utf8'));
       if (typeof p.enabled === 'boolean') out.enabled = p.enabled;
       if (given(p.slowRequestMs)) out.slowRequestMs = clamp(p.slowRequestMs, LIMITS.slowRequestMs, DEFAULTS.slowRequestMs);
       if (given(p.hangLagMs)) out.hangLagMs = clamp(p.hangLagMs, LIMITS.hangLagMs, DEFAULTS.hangLagMs);

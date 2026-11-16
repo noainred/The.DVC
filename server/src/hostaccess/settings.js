@@ -8,6 +8,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { normalizeSettings } from './render.js';
 import { listeningPortalPorts } from '../util/httpsServer.js';
+import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
 
 const FILE = path.join(config.configDir, 'host-access.json');
 let cache = null;
@@ -15,7 +16,7 @@ let cache = null;
 export function loadHostAccess() {
   if (cache) return cache;
   let raw = {};
-  try { if (fs.existsSync(FILE)) raw = JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}; }
+  try { if (fs.existsSync(FILE)) raw = parseJsonObject(fs.readFileSync(FILE, 'utf8')); }
   catch (e) { preserveCorrupt(FILE); console.warn(`[host-access] 설정 로드 실패 — 원본을 .corrupt 로 보존하고 기본값으로 시작합니다: ${safeLoadText(e) || '사유 미상'}`); raw = {}; }
   // v2.731(G2b A4-02): 포탈 포트는 config.port 가 아니라 **실제로 듣는 포트 전부**(TLS_PORT 만 열면 PORT 는 듣지 않는다).
   const { settings } = normalizeSettings(raw.draft || {}, { portalPorts: listeningPortalPorts(config.port) });

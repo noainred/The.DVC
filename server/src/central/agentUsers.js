@@ -20,6 +20,7 @@ import { hashPassword } from '../auth/auth.js';
 import { agentKeyOf } from '../util/agentKey.js';
 import { capStr } from '../util/capStr.js'; // v2.612: 상주 사유 문자열은 평탄화해 자른다(v2.607 TIM2607-01)
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';
+import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
 
 const FILE = path.join(config.configDir, 'central-agent-users.json');
 const VALID_ROLES = ['admin', 'operator', 'viewer'];
@@ -81,7 +82,7 @@ export function foldCaseDuplicateAgentUsers(map) {
 }
 try {
   if (fs.existsSync(FILE)) {
-    const folded = foldCaseDuplicateAgentUsers(JSON.parse(fs.readFileSync(FILE, 'utf8')) || {});
+    const folded = foldCaseDuplicateAgentUsers(parseJsonObject(fs.readFileSync(FILE, 'utf8')));
     byAgent = Object.assign(Object.create(null), folded.map);
     for (const m of folded.merged) console.warn(`[central] central-agent-users.json: 대소문자만 다른 엣지 이름 ${[m.kept, ...m.dropped].join(', ')} 의 배포 사용자를 ${m.kept} 하나로 합쳤습니다(사용자 합집합 · 같은 ID 는 최근 목록). 배포 사용자 화면에서 확인하세요.`);
   } else {

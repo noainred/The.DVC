@@ -25,6 +25,7 @@ import { makeSettingsLoadError } from '../util/settingsLoadError.js';   // 25회
 import { isIpv4 } from './scan.js';
 import { canonIp } from '../util/ipv4.js';
 import { DAY_MS, DAY_OFFSET_MIN, dayStartMs, dayKey } from '../util/dayKey.js';
+import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
 
 
 const FILE = path.join(config.configDir, 'ipam-overrides.json');
@@ -48,7 +49,7 @@ function load() {
   if (cache) return cache;
   cache = {};
   try {
-    if (fs.existsSync(FILE)) { cache = JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}; _loadErr.ok(); }
+    if (fs.existsSync(FILE)) { cache = parseJsonObject(fs.readFileSync(FILE, 'utf8')); _loadErr.ok(); }
     else _loadErr.missing();
   } catch (e) { _loadErr.corrupt(e); preserveCorrupt(FILE, e.message); cache = {}; }
   return cache;

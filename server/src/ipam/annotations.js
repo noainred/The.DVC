@@ -11,6 +11,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { canonIp } from '../util/ipv4.js';
+import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
 
 const FILE = path.join(config.configDir, 'ipam-annotations.json');
 
@@ -26,7 +27,7 @@ function load() {
   if (cache) return cache;
   cache = {};
   try {
-    if (fs.existsSync(FILE)) { cache = JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}; _loadErr.ok(); }
+    if (fs.existsSync(FILE)) { cache = parseJsonObject(fs.readFileSync(FILE, 'utf8')); _loadErr.ok(); }
     else _loadErr.missing();
   } catch (e) { _loadErr.corrupt(e); preserveCorrupt(FILE, e.message); cache = {}; }
   return cache;

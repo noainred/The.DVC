@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
 import { atomicWriteFileSync, preserveCorrupt } from './util/atomicWrite.js';
+import { parseJsonObject } from './util/jsonObject.js';
 
 const FILE = path.join(config.configDir, 'runtime.json');
 const VALID_SOURCES = ['mock', 'live', 'auto'];
@@ -21,11 +22,8 @@ function load() {
   if (cache) return cache;
   cache = {};
   try {
-    if (fs.existsSync(FILE)) {
-      const v = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-      if (v && typeof v === 'object' && !Array.isArray(v)) cache = v;
-      else if (v != null) preserveCorrupt(FILE, '객체가 아닌 JSON');
-    }
+    // v3.17.2: 판정은 공용 util/jsonObject.js 하나 — 객체가 아니면 던져 아래 catch 가 원본을 보존한다.
+    if (fs.existsSync(FILE)) cache = parseJsonObject(fs.readFileSync(FILE, 'utf8'));
   } catch (e) { preserveCorrupt(FILE, e.message); cache = {}; }
   return cache;
 }

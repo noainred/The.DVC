@@ -20,6 +20,7 @@ import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atom
 import { TOP_N_MIN, TOP_N_MAX } from './scan.js';
 import { normalizeAddresses } from '../util/smtp.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
 
 const FILE = path.join(config.configDir, 'dirusage.json');
 
@@ -82,7 +83,7 @@ export function load() {
   const out = structuredClone(DEFAULTS);
   try {
     if (fs.existsSync(FILE)) {
-      const p = JSON.parse(fs.readFileSync(FILE, 'utf8')) || {};
+      const p = parseJsonObject(fs.readFileSync(FILE, 'utf8'));
       if (typeof p.enabled === 'boolean') out.enabled = p.enabled;
       if (Array.isArray(p.targets)) out.targets = p.targets.slice(0, MAX_TARGETS).map((t, i) => normTarget(t, i));
       if (p.mail && typeof p.mail === 'object') {
