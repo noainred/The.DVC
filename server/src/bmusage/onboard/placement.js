@@ -30,7 +30,7 @@ export function keyPlacementIssue(key = {}, server = {}, feature = '') {
 
 /** OS 계정 등록 항목을 쓰는 주기 수집 기능(bmusage/poller · bmstor/poller 의 withResolvedAuth feature). 이름은 SSH 공용 접속 FEATURE_CATALOG 와 같다(시험이 대조). */
 export const COLLECT_FEATURES = Object.freeze(['bm-usage', 'bm-storage']);
-export const FEATURE_LABEL = Object.freeze({ 'bm-usage': '베어메탈 사용률', 'bm-storage': '베어메탈 스토리지' });
+export const FEATURE_LABEL = Object.freeze({ 'bm-usage': '베어메탈 사용률', 'bm-storage': '베어메탈 스토리지', 'disk-audit-install': '디스크 점검 프로그램 설치(root)', 'focus-mon-prep': '집중 모니터링 접속 준비(root)' });
 export const featureLabels = (ids = []) => ids.map((f) => FEATURE_LABEL[f] || f).join(' · ');
 
 /** 판정에 필요한 칸만(비밀 없음). */

@@ -8,7 +8,7 @@ import { Loading, ErrorBox, usageColor, Modal } from '../components/ui.jsx';
 import { GuestOsVmsModal } from './SpecialTools.jsx';
 import { STable } from '../components/STable.jsx';
 import { unitText } from './unitText.js';
-import { ratioOrNull, serverRatio, ratioLabel, ratioBadge, ratioKpi, numCell, RATIO_HI } from './virtRatioText.js';
+import { ratioOrNull, serverRatio, ratioLabel, ratioBadge, ratioKpi, numCell, RATIO_HI, capUnknownOf, capUnknownTitle } from './virtRatioText.js';
 // v2.632(감사 WEB2632-01·02): 기여도 표·설치 용량 판정은 corpContribution.js 하나가 한다(v2.747 에 version_6/v6Data.js 에서 옮겼다).
 import { corpContribution, contribNote, contribTotalLabel, dsUnknownMark, physStorageTB } from './corpContribution.js';
 import Select from '../components/Select.jsx';
@@ -42,9 +42,10 @@ function RatioModal({ rows, kind = 'cpu', onClose }) {
   const isMem = kind === 'mem';
   const [sort, setSort] = useState({ key: 'ratio', dir: 'desc' });
   // 분모가 0(호스트 없음 — 첫 수집 중·연결 실패)이면 비율은 null('—')이고 배지는 '미수집'(virtRatioText).
+  // 2차 공통 기능 점검 10회차: 물리 용량을 못 읽은 호스트가 섞인 vCenter 는 분모가 부분 합이라 비율이 부푼다 — 판정하지 않는다('—' · 미수집 배지).
   const ratioOf = isMem
-    ? (vc) => ratioOrNull(vc.ramAllocatedGB, vc.memTotalGB)
-    : (vc) => ratioOrNull(vc.vcpuAllocated, vc.cpuCores);
+    ? (vc) => (capUnknownOf(vc) > 0 ? null : ratioOrNull(vc.ramAllocatedGB, vc.memTotalGB))
+    : (vc) => (capUnknownOf(vc) > 0 ? null : ratioOrNull(vc.vcpuAllocated, vc.cpuCores));
   const base = (rows || []).map((vc) => ({ ...vc, ratio: ratioOf(vc) }));
   const list = [...base].sort((a, b) => {
     const va = a[sort.key], vb = b[sort.key];
@@ -83,9 +84,11 @@ function RatioModal({ rows, kind = 'cpu', onClose }) {
                 {COLS.map(([key, , align]) => {
                   if (key === 'name') return <td key={key}><b>{vc.name}</b></td>;
                   if (key === 'ratio') return <td key={key} style={{ textAlign: 'right', fontWeight: 700, color: ratioColor(vc.ratio) }} className="tabular">{ratioLabel(vc.ratio)}</td>;
-                  return <td key={key} style={{ textAlign: align }} className="tabular">{numCell(vc[key])}</td>;
+                  // 10회차 보완: 미상 호스트가 있으면 물리 칸은 부분 합이다 — 값 옆 '*' + 툴팁(판정은 위 ratioOf 가 보류).
+                  const partial = (key === 'cpuCores' || key === 'memTotalGB') ? capUnknownTitle(vc) : null;
+                  return <td key={key} style={{ textAlign: align }} className="tabular" title={partial || undefined}>{numCell(vc[key])}{partial && <span className="muted" style={{ marginLeft: 2 }}>*</span>}</td>;
                 })}
-                {(() => { const b = ratioBadge(vc.ratio, kind); return <td><span className={`badge ${b.cls}`} title={vc.ratio == null ? '물리 자원(코어·RAM)을 아직 읽지 못해 판정하지 않았습니다(첫 수집 중 또는 연결 실패).' : undefined}>{b.text}</span></td>; })()}
+                {(() => { const b = ratioBadge(vc.ratio, kind); return <td><span className={`badge ${b.cls}`} title={vc.ratio == null ? (capUnknownTitle(vc) || '물리 자원(코어·RAM)을 아직 읽지 못해 판정하지 않았습니다(첫 수집 중 또는 연결 실패).') : undefined}>{b.text}</span></td>; })()}
               </tr>
             ))}
           </tbody>

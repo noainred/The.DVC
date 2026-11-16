@@ -16,18 +16,21 @@ import * as KS from '../../bmusage/onboard/keyStore.js';
 import { resolveOsAuth } from '../../bmusage/onboard/refs.js';
 
 export const INSTALL_FEATURE = 'disk-audit-install';
+/** v3.18.0 접속 자동 준비(수집 계정 · 공개키) — 같은 찾는 순서 · 같은 '직접 켠 키만' 규칙, 기능만 다르다. */
+export const PREP_FEATURE = 'focus-mon-prep';
+export const CRED_FEATURES = Object.freeze([INSTALL_FEATURE, PREP_FEATURE]);
 /** 상태(화면 문구 키 — 웹 `focusMonAuditInstallText.js CRED_TEXT` 와 같다 · 시험 대조). */
 export const CRED_STATES = Object.freeze(['ok', 'feature', 'noentry', 'ambig', 'dup', 'password', 'stopped', 'folder', 'key-missing', 'unreadable', 'error']);
 const t = (v) => String(v ?? '').trim();
-const explicit = (key) => !!key && Array.isArray(key.features) && key.features.includes(INSTALL_FEATURE);
+const explicit = (key, feature = INSTALL_FEATURE) => !!key && Array.isArray(key.features) && key.features.includes(feature);
 const CODE_STATE = { 'corp-stopped': 'stopped', 'state-unreadable': 'unreadable', 'store-unreadable': 'unreadable', 'key-feature': 'feature', 'key-folder': 'folder', 'key-missing': 'key-missing', 'account-missing': 'key-missing' };
 
 /** 한 자격(해석된 원본) → 상태 · 이름(비밀은 withAuth 일 때만). */
-function fromAuth(a, keyId, src, withAuth) {
+function fromAuth(a, keyId, src, withAuth, feature = INSTALL_FEATURE) {
   if (!a.ok) return { state: CODE_STATE[a.code] || 'error', code: a.code || null, src };
   if (a.authKind !== 'key') return { state: 'password', src, acct: a.username };
   const key = KS.keyById(a.keyId || keyId);
-  if (!explicit(key)) return { state: 'feature', src, acct: a.username, key: a.keyName || key?.name || '' };
+  if (!explicit(key, feature)) return { state: 'feature', src, acct: a.username, key: a.keyName || key?.name || '' };
   return { state: 'ok', src, acct: a.username, key: a.keyName || key?.name || '', keyId: a.keyId || keyId,
     ...(withAuth ? { auth: { username: a.username, privateKey: a.privateKey, passphrase: a.passphrase || '', fingerprint: a.keyFingerprint || '' } } : {}) };
 }
@@ -38,7 +41,8 @@ function fromAuth(a, keyId, src, withAuth) {
  *   edge — 엣지 노드 · corpVcs — 중앙: 대상 법인의 vCenter id 들 / 엣지: 그 엣지 스냅샷의 vCenter id 들 · pick — 화면에서 고른 공통 계정 id
  * @returns {{state:string, src?:'server'|'corp', acct?:string, key?:string, keyId?:string, choices?:Array<{id,name,acct,key}>, auth?:object, code?:string}}
  */
-export function installCredFor(target, { edge = false, corpVcs = [], pick = null, withAuth = false } = {}) {
+export function installCredFor(target, { edge = false, corpVcs = [], pick = null, withAuth = false, feature = INSTALL_FEATURE } = {}) {
+  if (!CRED_FEATURES.includes(feature)) return { state: 'error', code: 'feature-unknown' };
   try {
     if (KS.keyStoreLoadError() || bmLoadError()) return { state: 'unreadable' };
     const host = t(target?.host); const port = Number(target?.port) || 22;
@@ -47,8 +51,8 @@ export function installCredFor(target, { edge = false, corpVcs = [], pick = null
     if (same.length > 1) return { state: 'dup', src: 'server' };
     if (same.length === 1) {
       const s = same[0];
-      const a = resolveOsAuth(s, { feature: INSTALL_FEATURE });
-      return fromAuth(a, t(s.keyRef), 'server', withAuth);
+      const a = resolveOsAuth(s, { feature });
+      return fromAuth(a, t(s.keyRef), 'server', withAuth, feature);
     }
     // ② 법인 공통 계정(키가 있는 OS 계정 · 법인이 정해진 것)
     const vcs = new Set((corpVcs || []).map(t).filter(Boolean));
@@ -56,12 +60,12 @@ export function installCredFor(target, { edge = false, corpVcs = [], pick = null
     //   못 읽었으면 빈 목록 → 'noentry' 로 닫힌다)
     const accs = KS.listAccountsRaw().filter((a) => a.kind === 'os' && t(a.corp) && t(a.keyRef) && vcs.has(t(a.corp)));
     if (!accs.length) return { state: 'noentry' };
-    const withFeat = accs.filter((a) => explicit(KS.keyById(a.keyRef)));
+    const withFeat = accs.filter((a) => explicit(KS.keyById(a.keyRef), feature));
     if (!withFeat.length) return { state: 'feature', src: 'corp', acct: accs[0].username, key: KS.keyById(accs[0].keyRef)?.name || '' };
     let acc = withFeat.length === 1 ? withFeat[0] : withFeat.find((a) => a.id === t(pick)) || null;
     if (!acc) return { state: 'ambig', src: 'corp', choices: withFeat.slice(0, 10).map((a) => ({ id: a.id, name: a.name, acct: a.username, key: KS.keyById(a.keyRef)?.name || '' })) };
-    const a = resolveOsAuth({ id: target?.id, name: target?.name, host, port, credRef: acc.id, vcenterId: acc.corp }, { feature: INSTALL_FEATURE });
-    return fromAuth(a, acc.keyRef, 'corp', withAuth);
+    const a = resolveOsAuth({ id: target?.id, name: target?.name, host, port, credRef: acc.id, vcenterId: acc.corp }, { feature });
+    return fromAuth(a, acc.keyRef, 'corp', withAuth, feature);
   } catch (e) {
     return { state: 'error', code: String(e?.message || e).slice(0, 80) };
   }

@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from './util/atomicWrite.js';
-import { store, SITE_STALE_MS } from './store.js';
+import { store, SITE_STALE_MS, hostCapacityKnown } from './store.js';
 import { logAudit } from './audit.js';
 import { resilientFetch } from './util/resilientFetch.js';
 import { ssrfBlockReasonResolved } from './collector/registry.js';
@@ -363,8 +363,12 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
     const byC = new Map();
     for (const h of snap.hosts || []) {
       const k = `${h.vcenterId} ${h.cluster || 'standalone'}`;
-      const c = byC.get(k) || { name: h.cluster || 'standalone', vc: h.vcenterId, cores: 0, memGB: 0, vcpu: 0, ramGB: 0 };
-      c.cores += h.cpuCores || 0; c.memGB += (h.memTotalMB || 0) / 1024; byC.set(k, c);
+      const c = byC.get(k) || { name: h.cluster || 'standalone', vc: h.vcenterId, cores: 0, memGB: 0, vcpu: 0, ramGB: 0, capUnknown: 0 };
+      // 2차 공통 기능 점검 9회차: 못 읽은 용량(연결 끊긴 호스트 · REST 폴백)을 0 으로 더하면 분모만 줄어 그 클러스터 VM 들의 할당은 그대로라
+      //   **오버커밋을 부풀린 거짓 알림**이 났다(CLAUDE.md '부분 합은 정상에도 장애에도 넣지 않는다'). 판정은 용량 도구(routes/api/toolsCapacity.js ·
+      //   v2.733 C2-06)와 같은 store.hostCapacityKnown 하나 — 못 읽은 호스트가 하나라도 있으면 그 클러스터의 오버커밋 판정은 건너뛴다.
+      if (hostCapacityKnown(h)) { c.cores += h.cpuCores; c.memGB += h.memTotalMB / 1024; } else c.capUnknown++;
+      byC.set(k, c);
     }
     for (const v of snap.vms || []) {
       if (v.powerState !== 'POWERED_ON' || v.template) continue;
@@ -372,11 +376,17 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
       const c = byC.get(k); if (c) { c.vcpu += v.cpuCount || 0; c.ramGB += (v.memMB || 0) / 1024; }
     }
     for (const c of byC.values()) {
-      if (R.ramOvercommitPct?.enabled && c.memGB > 0) {
+      // 9회차 보완: 판정을 건너뛴 클러스터는 '해소' 가 아니라 '모름' 이다 — 이미 발생 중인 오버커밋 알림이 호스트 하나가 끊긴 순간
+      //   거짓 '해소' 알림을 내지 않게 보류 키로 둔다(HELD_MAX_MS 시한 그대로 — 오래 못 읽으면 알림 없이 끊긴다).
+      if (c.capUnknown) {
+        if (R.ramOvercommitPct?.enabled) held.add(`ramoc:${c.vc}:${c.name}`);
+        if (R.vcpuPerCore?.enabled) held.add(`vcpuoc:${c.vc}:${c.name}`);
+      }
+      if (R.ramOvercommitPct?.enabled && c.memGB > 0 && !c.capUnknown) {
         const pct = Math.round((c.ramGB / c.memGB) * 100);
         if (pct >= (Number(R.ramOvercommitPct.threshold) || 120)) out.push({ key: `ramoc:${c.vc}:${c.name}`, severity: 'warning', title: `RAM 오버커밋 ${pct}%: ${c.name}`, detail: `${c.vc} · 할당 ${Math.round(c.ramGB)}/${Math.round(c.memGB)}GB` });
       }
-      if (R.vcpuPerCore?.enabled && c.cores > 0) {
+      if (R.vcpuPerCore?.enabled && c.cores > 0 && !c.capUnknown) {
         const ratio = Number((c.vcpu / c.cores).toFixed(1));
         if (ratio >= (Number(R.vcpuPerCore.threshold) || 5)) out.push({ key: `vcpuoc:${c.vc}:${c.name}`, severity: 'warning', title: `vCPU:코어 ${ratio}:1: ${c.name}`, detail: `${c.vc} · vCPU ${c.vcpu}/코어 ${c.cores}` });
       }

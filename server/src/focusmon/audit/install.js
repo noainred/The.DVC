@@ -53,7 +53,7 @@ export function cleanupCommand(file) {
   return `rm -f "$HOME/${file}"`;
 }
 /** 시한 경주(파일 올림처럼 자체 시한이 없는 단계 — 넘치면 던진다). */
-function within(p, ms, what) {
+export function within(p, ms, what) {
   let t; const lim = new Promise((_, rej) => { t = setTimeout(() => rej(new Error(`${what} 시한(${Math.round(ms / 1000)}s) 초과`)), ms); t.unref?.(); });
   return Promise.race([p, lim]).finally(() => clearTimeout(t));
 }
@@ -77,11 +77,11 @@ export function parseInstallOut(text) {
 }
 const stepOf = (p) => (p.ok ? 6 : p.steps.includes('sudoers') ? 5 : p.steps.includes('files') ? 4 : 3);
 
-/* ── 같은 키 연속 거부(노드 기억) ─────────────────────────────────────── */
+/* ── 같은 키 연속 거부(노드 기억 — v3.18.0 접속 준비도 같은 기억을 쓴다: 같은 root 키가 설치 · 준비 양쪽에서 거부를 쌓는다) ── */
 const authFails = new Map(); // keyFingerprint → { n, at }
 export function _resetInstallForTest() { authFails.clear(); }
-function keyStopped(fp, now) { const r = authFails.get(fp); return !!r && r.n >= AUTH_STOP_AFTER && now - r.at < AUTH_STOP_MS; }
-function noteAuth(fp, ok, now) {
+export function keyStopped(fp, now) { const r = authFails.get(fp); return !!r && r.n >= AUTH_STOP_AFTER && now - r.at < AUTH_STOP_MS; }
+export function noteAuth(fp, ok, now) {
   if (!fp) return;
   if (ok) { authFails.delete(fp); return; }
   const r = authFails.get(fp); const n = r && now - r.at < AUTH_STOP_MS ? r.n + 1 : 1;
