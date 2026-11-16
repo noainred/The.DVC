@@ -22,7 +22,7 @@ import { corruptOnlyReason } from '../util/registryCore.js';
 import { listDatacenters } from '../datacenter/store.js';
 import { listRegistry as listVcenters } from '../vcenter/registry.js';
 import { listRegistry as listNsx } from '../nsx/registry.js';
-import { listHorizon } from '../horizon/horizon.js';
+import { listHorizon, horizonLoadError } from '../horizon/horizon.js';
 import { registryLoadError as idracLoadError } from '../idrac/registry.js';
 import { listServers as listVeeam, registryLoadError as veeamLoadError } from '../veeam/registry.js';
 import { loadSettings as loadBareos, settingsLoadError as bareosLoadError } from '../bareos/settings.js';
@@ -64,7 +64,7 @@ export function settingsStatusSources({ now = Date.now() } = {}) {
       return { loadError: damaged('vcenters.json'), count: len(listVcenters()), authStopped: Array.isArray(errs) ? errs.filter((e) => e && e.authStopped).length : null };
     },
     'nsx-admin': () => ({ loadError: damaged('nsx.json'), count: len(listNsx()) }),
-    'horizon-admin': () => ({ loadError: damaged('horizon.json'), count: len(listHorizon()) }),
+    'horizon-admin': () => { const loadError = damaged('horizon.json') || !!horizonLoadError(); return { loadError, count: loadError ? null : len(listHorizon()) }; },   // 38회차 R3: 읽기 오류 · 손상 기억도
     'idrac-admin': () => ({ loadError: !!idracLoadError() }),
     veeam: () => { const loadError = !!veeamLoadError(); return { loadError, count: loadError ? null : len(listVeeam()) }; },
     bareos: () => { const loadError = !!bareosLoadError(); return { loadError, directors: loadError ? null : len(loadBareos().directors) }; },

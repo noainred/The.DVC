@@ -30,7 +30,7 @@ export const RULES = Object.freeze({
     return null;
   },
   'nsx-admin': (f) => (f.count === 0 ? { grade: 'off', text: '사용 안 함(등록 없음)' } : null),
-  'horizon-admin': (f) => (f.count === 0 ? { grade: 'off', text: '사용 안 함(등록 없음)' } : null),
+  'horizon-admin': (f) => (f.loadError ? { grade: 'warn', text: '등록부를 읽지 못함' } : f.count === 0 ? { grade: 'off', text: '사용 안 함(등록 없음)' } : null),   // 38회차 R3: 못 읽음을 '등록 없음' 으로 보이지 않게
   'idrac-admin': (f) => (f.loadError ? { grade: 'warn', text: '등록부를 읽지 못함' } : null),
   // --- 백업 ---
   veeam: (f) => {

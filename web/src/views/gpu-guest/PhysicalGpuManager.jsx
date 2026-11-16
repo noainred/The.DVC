@@ -15,7 +15,7 @@ import { physicalGpuErrView, physicalGpuErrServers, PGPU_GPU_ERR_TITLE } from '.
 const PEMPTY = { id: '', name: '', host: '', port: 22, username: 'root', password: '', os: 'linux', vcenterId: '', enabled: true };
 import ScopeOmitBanner from '../ScopeOmitBanner.jsx'; // v2.631 A6-2631-06: 범위 제외 문구 단일 소스
 // 오류 분류별 배지 색: 로그인 안됨=red · 드라이버 없음=amber · 접속 불가=gray · 기타=red
-const PGPU_ERR_COLOR = { login: 'red', nodriver: 'amber', unreachable: 'gray', error: 'red' };
+const PGPU_ERR_COLOR = { login: 'red', nodriver: 'amber', unreachable: 'gray', error: 'red', config: 'amber' };   // 38회차 R5: config = 주소 확인(호스트명 등 수집하지 않는 주소)
 
 /** 물리(베어메탈) 서버 GPU 수집 — 가상화 안 한 서버를 IP+계정으로 등록해 SSH nvidia-smi로 수집. */
 export function PhysicalGpuManager({ vcs }) {
@@ -173,8 +173,9 @@ export function PhysicalGpuManager({ vcs }) {
 
       {(d?.servers || []).length > 0 && (() => {
         const rs = d.servers.map((s) => results.get(s.id)).filter(Boolean);
-        const c = { ok: rs.filter((r) => r.count != null).length, login: 0, nodriver: 0, unreachable: 0, error: 0 };
-        for (const r of rs) if (r.error) c[r.errorCode || 'error'] = (c[r.errorCode || 'error'] || 0) + 1;
+        const c = { ok: rs.filter((r) => r.count != null).length, login: 0, nodriver: 0, unreachable: 0, config: 0, error: 0 };
+        // 38회차 R5: 모르는 오류 코드는 '오류' 칸에 센다(어느 칸에도 안 그려져 사라지지 않게).
+        for (const r of rs) if (r.error) { const k = Object.hasOwn(c, r.errorCode || '') && r.errorCode !== 'ok' ? r.errorCode : 'error'; c[k] += 1; }
         const stopped = rs.filter((r) => r.authStopped).length; // v2.590: 인증 실패로 주기 수집을 멈춘 서버(login 에 포함돼 있다)
         const gpuErrSv = physicalGpuErrServers(rs); // v2.782(점검 K5 E-B2): 수집은 됐지만 일부 GPU 가 응답하지 않은 서버(ok 에 포함돼 있다)
         return (
@@ -185,6 +186,7 @@ export function PhysicalGpuManager({ vcs }) {
             {stopped > 0 && <span className="badge red" title="같은 계정으로 반복 로그인하면 계정이 잠기므로 주기 수집을 멈췄습니다. 수정에서 비밀번호를 고치면 자동으로 다시 시작하고, 각 행의 테스트(저장된 계정)가 성공해도 풀립니다.">그중 인증 실패 정지 {stopped}</span>}
             {c.nodriver > 0 && <span className="badge amber">드라이버 없음 {c.nodriver}</span>}
             {c.unreachable > 0 && <span className="badge gray">접속 불가 {c.unreachable}</span>}
+            {c.config > 0 && <span className="badge amber" title="IPv4 주소가 아닌 등록(호스트명 등) — 수집 경로가 쓰지 않는 주소입니다. IP 로 다시 등록하세요.">주소 확인 {c.config}</span>}
             {c.error > 0 && <span className="badge red">오류 {c.error}</span>}
           </div>
         );

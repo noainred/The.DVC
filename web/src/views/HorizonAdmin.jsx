@@ -36,6 +36,7 @@ const LINE_MARK = { ok: '✓', warn: '✗', bad: '!', info: 'ⓘ', muted: '·' }
 export function HorizonServerManager({ variant = 'details', onChanged }) {
   const [hz, setHz] = useState(null);
   const [hzErr, setHzErr] = useState(null);
+  const [hzLoadErr, setHzLoadErr] = useState(null);   // 38회차 R3: 서버가 등록부 파일을 읽지 못함(손상 · 권한) — 빈 목록을 '등록 없음' 으로 보이지 않는다
   const [hzDenied, setHzDenied] = useState(false);
   const [hzBulk, setHzBulk] = useState(false);
   const [hzForm, setHzForm] = useState(EMPTY);
@@ -48,7 +49,7 @@ export function HorizonServerManager({ variant = 'details', onChanged }) {
   const load = () => {
     const my = ++loadSeq.current;
     fetchJson('/admin/horizon')
-      .then((r) => { if (my !== loadSeq.current) return; setHz(r.servers || []); setHzDenied(false); setHzErr(null); })
+      .then((r) => { if (my !== loadSeq.current) return; setHz(r.servers || []); setHzDenied(false); setHzErr(null); setHzLoadErr(r.loadError || null); })   // 38회차 R3
       .catch((e) => { if (my !== loadSeq.current) return; if (e?.status === 403) setHzDenied(true); else setHzErr(e?.message || String(e) || '알 수 없는 오류'); });
   };
   useEffect(() => { load(); return () => { loadSeq.current += 1; }; }, []);
@@ -98,6 +99,7 @@ export function HorizonServerManager({ variant = 'details', onChanged }) {
 
   const body = (
     <>
+      {hzLoadErr && <div className="banner warn" style={{ marginTop: 8 }}>Horizon 등록부(horizon.json)를 읽지 못했습니다(0대라는 뜻이 아닙니다): {hzLoadErr.reason} — 저장은 막혀 있습니다.</div>}
       {hzErr && <div className="banner warn" style={{ marginTop: 8 }}>Horizon 등록 목록을 읽지 못했습니다(0대라는 뜻이 아닙니다): {hzErr} <button className="tab" style={{ marginLeft: 8, padding: '2px 10px' }} onClick={() => { setHzErr(null); load(); }}>다시 읽기</button></div>}
       <div className="card" style={{ marginTop: 8, padding: 14 }}>
         {(hz || []).length > 0 && (
@@ -116,7 +118,7 @@ export function HorizonServerManager({ variant = 'details', onChanged }) {
             </tbody>
           </STable>
         )}
-        {Array.isArray(hz) && hz.length === 0 && !hzErr && (
+        {Array.isArray(hz) && hz.length === 0 && !hzErr && !hzLoadErr && (
           <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>등록된 Horizon 연결 서버가 없습니다. 아래에 입력해 등록하세요.</div>
         )}
         <div className="spec-grid">
@@ -143,7 +145,7 @@ export function HorizonServerManager({ variant = 'details', onChanged }) {
           </div>
         )}
         <div className="flex gap wrap" style={{ marginTop: 10 }}>
-          <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy || !hzForm.host} onClick={hzSave}>{busy ? '저장 중…' : '저장'}</button>
+          <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy || !hzForm.host || !!hzLoadErr} onClick={hzSave}>{busy ? '저장 중…' : '저장'}</button>
           <button className="logout-btn" style={{ padding: '8px 16px' }} disabled={busy || (!hzForm.host && !hzForm.id)} onClick={hzTest}>연결 테스트</button>
           {hzForm.id && <button className="tab" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy} onClick={() => { setHzForm(EMPTY); setHzMsg(null); }}>새로 입력</button>}
           {/* v2.525: 스토리지·SAN 스위치와 같은 공용 모달 — 식별 키는 id 단독, 타입 열 없음 */}

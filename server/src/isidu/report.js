@@ -211,7 +211,7 @@ export async function listUsers(targetId, { q = '', filter = 'all', sort = 'size
   const sp = spark && f !== 'removed' ? await sparksFor(targetId, page.map((r) => r.name), c.okScan.ts - 30 * DAY) : null;
   return {
     state: 'ok', scanId: c.okScan.id, scanTs: c.okScan.ts, total, offset: off, limit: lim, filter: f, sort: srt, dir: asc ? 'asc' : 'desc',
-    hasBase7: !!c.base7, hasBase30: !!c.base30, sparkTs: sp ? sp.ts : [],
+    hasBase7: !!c.base7, hasBase30: !!c.base30, compareLimited: !!c.compareLimited7, sparkTs: sp ? sp.ts : [],   // 38회차 R6
     rows: page.map((r) => (r.removed ? { name: r.name, bytes: r.bytes, res: r.res, removed: true } : rowView(r, sp ? (sp.series.get(r.name) || null) : null))),
   };
 }
@@ -300,6 +300,7 @@ async function overviewOf(targetId, pool = OVERVIEW_POOL) {
   const top = (await db.topEntriesOf(okScan.id, pool)) || [];
   const b7 = base7 ? ((await db.entriesByNames(base7.id, top.map((r) => r.name))) || new Map()) : null;
   const denom = denomOf(okScan);
+  const lim7 = !!(okScan.truncated || base7?.truncated);   // 38회차 R1
   const scans = (await db.scansIn(HISTORY_AGENT, targetId, okScan.ts - 30 * DAY, 5000)) || [];
   const points = thinPoints(scans.filter((sc) => sc.ok).map((sc) => ({ ts: sc.ts, bytes: denomOf(sc), partial: (sc.errLines || 0) > 0 })));
   const value = {
@@ -311,7 +312,8 @@ async function overviewOf(targetId, pool = OVERVIEW_POOL) {
     top: top.map((r) => {
       const p = b7 ? b7.get(r.name) : undefined;
       // 기준이 없으면 증감·신규를 판정하지 않는다(null) — 보고서와 같은 규칙.
-      return { rank: r.rank, name: r.name, bytes: r.bytes, res: r.res, share: denom ? r.bytes / denom : null, d7: p ? deltaOf(r, p) : null, new7: b7 ? !b7.has(r.name) : null };
+      // 38회차 R1(반증 — 재현): 보고서(comparison)와 같은 잘림 판정 — 현재나 기준 스캔이 폴더 상한으로 잘렸으면 신규를 판정하지 않는다(개요 카드 · 종합 메일).
+      return { rank: r.rank, name: r.name, bytes: r.bytes, res: r.res, share: denom ? r.bytes / denom : null, d7: p ? deltaOf(r, p) : null, new7: b7 && !lim7 ? !b7.has(r.name) : null };
     }),
   };
   _ovCache.set(key, { at: Date.now(), value });

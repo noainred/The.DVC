@@ -206,9 +206,9 @@ describe('스윕 — 반환값을 받아 놓고 ok·requireChanged 를 보지 �
   //   한계: 검사 창은 그 줄부터 25줄 · 같은 이름 재선언 · 다음 async 처리기 시작 전까지다. postJson 은 보지 않는다(409 만 던지지 않고
   //   호출부가 100곳이 넘는다 — WEB-03 두 곳은 audit2742l 이 따로 고정한다).
   const ALLOW2 = {
-    'views/AnomalyDetection.jsx': 1, 'views/GpuGuestSettings.jsx': 1, 'views/GpuSettings.jsx': 1, 'views/Insights.jsx': 1,
+    'views/AnomalyDetection.jsx': 1, 'views/GpuSettings.jsx': 1, 'views/Insights.jsx': 1,
     'views/LoginFails.jsx': 1, 'views/MetricsSettings.jsx': 1, 'views/PortalBackup.jsx': 1, 'views/PowerOffCheckSettings.jsx': 1,
-    'views/ToolsReports.jsx': 1, 'views/tools/BmUsage.jsx': 1 /* v2.927: 배포 저장(PUT /distribute)은 409 충돌이 생겨 r.ok 를 본다 — 남은 1 = 수집 설정 저장 */, 'views/tools/GuestOsTools.jsx': 1,   // 전체 점검 27회차 D-2: CvpTool 설정 저장은 requireChanged 로 판정 — 목록에서 뺐다
+    'views/ToolsReports.jsx': 1, 'views/tools/GuestOsTools.jsx': 1,   // 전체 점검 27회차 D-2: CvpTool 설정 저장은 requireChanged 로 판정 — 목록에서 뺐다 · 38회차: GpuGuestSettings · BmUsage 수집 설정 저장도 r.ok 를 본다(409 settings-unreadable)
     'views/tools/LinkCheck.jsx': 1,
   };
   const walk2 = (d, out = []) => {

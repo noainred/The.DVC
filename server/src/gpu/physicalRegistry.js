@@ -77,13 +77,11 @@ export function addPhysical(body = {}) {
 export function updatePhysical(id, body = {}) {
   const s = getPhysicalRaw(id);
   if (!s) return { ok: false, reason: '서버를 찾을 수 없습니다.' };
+  // 38회차 R4(반증 — 재현): 접속처 판정은 **어떤 칸도 바꾸기 전에** — s 는 캐시 객체라, 이름을 먼저 바꾼 뒤 거부하면 400 인데도 이름이 메모리에 남아 다음 저장에 굳었다.
+  if (body.host !== undefined) { const h = String(body.host || '').trim(); if (h !== s.host) { const why = physicalHostIssue(h); if (why) return { ok: false, reason: why }; } }
   const before = { host: s.host, port: s.port, username: s.username };   // 접속처 변경 판정용(아래)
   if (body.name !== undefined) s.name = String(body.name || '').trim() || s.host;
-  if (body.host !== undefined) {
-    const h = String(body.host || '').trim();
-    if (h !== s.host) { const why = physicalHostIssue(h); if (why) return { ok: false, reason: why }; }   // 36회차: 바꿀 때만(이미 등록된 호스트명 항목의 다른 칸 수정은 막지 않는다)
-    s.host = h;
-  }
+  if (body.host !== undefined) s.host = String(body.host || '').trim();   // 판정은 위(36회차 · 38회차 R4 — 바꿀 때만 · 바꾸기 전에)
   if (body.port !== undefined) s.port = Number(body.port) || 22;
   if (body.username !== undefined) s.username = String(body.username || '').trim();
   // 빈 비밀번호 = 기존 유지
