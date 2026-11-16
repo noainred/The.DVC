@@ -3190,3 +3190,10 @@ high 0 · 반증 1(A3-01 — 경로 오독, 데모 계정은 READ_DENY 하위라
   R3 33회차 F2 교체 규칙이 이름이 부품마다 같은 장비에서 남은 다른 부품을 교체품으로 보고 닫음 → 그 장비 · 종류에서 2개 이상 읽혔고 이름이 모두 다를 때만 ·
   R4 viewer 에게 초기 비밀번호 파일 경로(meta 포함) · R5 사용자명 `.`·`..`·`/` 거부 · R6 못 읽음 상태 쓰기는 메모리를 바꾸기 전에 거절 · 로그 1회 · R7 엣지 bmusage truncated · counts 정제.
   - 작업 방식 교훈: '영속화' 를 더할 때는 **그 입력이 인증된 것인지**를 먼저 볼 것(R1 — 메모리에서는 무해했던 무상한 입력이 디스크 · 잠금 비용이 됐다). 같은 파일을 읽는 **모든 경로**(R2 — 백업)를 같은 규칙으로.
+- **GPU · Horizon · 아이실론(36회차 · `gpuHorizonIsilonAudit36` · web isiduText)**: 확정 5(높음 1 · 중간 2 · 낮음 2) — 전부 고침. F1(높음) GPU 게스트 연결 테스트의 고정 IP 검사가
+  '요청에 username/password 글자가 있나' 로 판정돼 `useShared:true` + 아무 계정을 덧붙이면 저장된 **법인 공용 게스트 비밀번호가 임의 IP 의 sshd 로** 갔다(가짜 sshd 수신 재현 · 피어 신뢰 observe 일 때) →
+  '이번에 쓸 비밀번호가 본문에서 왔나'(`ownSecret`) · F2 · F3 물리 GPU 자동 등록이 SSRF 가드 없이 접속 · 호스트명 등록은 폴러가 한 번도 접속하지 않고 'VMware Tools' 사유 →
+  접속처 판정 하나(`physicalHostIssue` = 수집 경로의 `usableIp` — **정책 ㉠ IPv4 만**, 예전 호스트명 항목은 '주소 확인' 오류로 밝힘) · F4 Horizon 등록부 · GPU 게스트 설정 손상 중 저장이 주 파일을 그 한 건만으로 →
+  `makeSettingsLoadError` 등록(34개) · 쓰기 409 · 읽기 오류는 옮기지 않음(엣지의 중앙 배포 적용은 손상이면 허용 · 읽기 오류면 거절) · F5 아이실론 잘린 조사의 신규 · 사라짐 → null + `compareLimited` · CSV 표지.
+  **남긴 것**: 같은 꼴(손상 시 빈 값 · 저장 거절 없음)이 `gpu/physicalRegistry.js` · `horizon/sessionSettings.js` 에 남았다(34회차 '남긴 것' 계열) · 물리 GPU 호스트명 지원(정책 ㉡)은 사용자 결정 ·
+  깊이 보지 못한 곳: Horizon sessionCollect · appUsage 집계, curuser quser 파서, 아이실론 notify/digest 발송 조건 · detach 재개, GPU allocTree.

@@ -59,7 +59,7 @@ test('gpu/settings: atomicWriteFileSync 사용 + 로드 catch preserveCorrupt', 
   const s = read('gpu/settings.js');
   assert.match(s, /import \{ atomicWriteFileSync, preserveCorrupt \}/);
   assert.match(s, /atomicWriteFileSync\(FILE,/);
-  assert.match(s, /catch \(e\) \{ preserveCorrupt\(FILE, e\.message\); return \{\}; \}/);
+  assert.match(s, /catch \(e\) \{ (?:_loadErr\.corrupt\(e\); )?preserveCorrupt\(FILE, e\.message\); return \{\}; \}/);   // 36회차 F4: 손상 기억(_loadErr) 뒤 보존
   assert.doesNotMatch(s, /fs\.writeFileSync\(FILE/, 'writeFileSync 직접 쓰기 잔존 금지');
 });
 

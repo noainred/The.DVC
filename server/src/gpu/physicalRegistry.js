@@ -13,6 +13,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.503: 접속처 변경 시 저장 비밀 폐기
+import { usableIp } from './sshCollect.js';
 
 const FILE = path.join(config.configDir, 'gpu-physical.json');
 
@@ -43,9 +44,21 @@ export function listPhysical() {
 export function getPhysicalRaw(id) { return loadPhysical().find((s) => s.id === id) || null; }
 export function findPhysicalByHost(host) { const h = String(host || '').trim().toLowerCase(); return loadPhysical().find((s) => (s.host || '').toLowerCase() === h) || null; }
 
+/**
+ * 전체 점검 36회차 F2 · F3(재현): 물리 GPU 서버의 접속처 판정은 **수집 경로와 같은 하나**(`usableIp` — 정규형 IPv4 · 루프백 · 링크로컬 제외).
+ *   예전에는 등록 · 자동 등록이 호스트명과 루프백까지 받아 ① 자동 등록이 SSRF 가드 없이 그 주소로 SSH 접속했고 ② 폴러는 정규형 IPv4 만 써서
+ *   호스트명 서버에 한 번도 접속하지 않은 채 'VMware Tools 가 IP 미보고' 라는 엉뚱한 사유를 남겼다. 사유 문구 또는 null.
+ */
+export function physicalHostIssue(host) {
+  const h = String(host ?? '').trim();
+  if (!h) return 'IP 가 필요합니다.';
+  return usableIp(h) ? null : `IPv4 주소로 적으세요(${h.slice(0, 64)}) — 호스트명 · 루프백 · 링크로컬 · 비정규 표기는 수집하지 않습니다.`;
+}
+
 export function addPhysical(body = {}) {
   const host = String(body.host || '').trim();
   if (!host) return { ok: false, reason: 'IP/호스트가 필요합니다.' };
+  { const why = physicalHostIssue(host); if (why) return { ok: false, reason: why }; }
   if (!body.username) return { ok: false, reason: '계정이 필요합니다.' };
   const list = loadPhysical();
   const id = String(body.id || `pgpu-${crypto.randomBytes(3).toString('hex')}`).trim();
@@ -66,7 +79,11 @@ export function updatePhysical(id, body = {}) {
   if (!s) return { ok: false, reason: '서버를 찾을 수 없습니다.' };
   const before = { host: s.host, port: s.port, username: s.username };   // 접속처 변경 판정용(아래)
   if (body.name !== undefined) s.name = String(body.name || '').trim() || s.host;
-  if (body.host !== undefined) s.host = String(body.host || '').trim();
+  if (body.host !== undefined) {
+    const h = String(body.host || '').trim();
+    if (h !== s.host) { const why = physicalHostIssue(h); if (why) return { ok: false, reason: why }; }   // 36회차: 바꿀 때만(이미 등록된 호스트명 항목의 다른 칸 수정은 막지 않는다)
+    s.host = h;
+  }
   if (body.port !== undefined) s.port = Number(body.port) || 22;
   if (body.username !== undefined) s.username = String(body.username || '').trim();
   // 빈 비밀번호 = 기존 유지

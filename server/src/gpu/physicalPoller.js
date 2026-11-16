@@ -5,7 +5,7 @@
  */
 
 import { loadGpuGuestSettings } from './settings.js';
-import { loadPhysical, updatePhysical } from './physicalRegistry.js';
+import { loadPhysical, updatePhysical, physicalHostIssue } from './physicalRegistry.js';
 import { collectVmGpuSsh, detectPhysicalGpu, gpuAuthGuard, gpuStopView, isGpuAuthError } from './sshCollect.js';
 import { setPhysicalGpu, prunePhysicalGpu, physicalGpuCounts } from './physicalStore.js';
 import { isStopped } from '../security/emergencyStop.js';
@@ -42,6 +42,9 @@ export async function pollPhysicalOnce({ manual = false } = {}) {
     let ok = 0; let failed = 0; let authStopped = 0;
     await poolSettled(servers, Math.max(1, s.concurrency || 4), async (sv) => {
       const vm = { name: sv.name, ipAddresses: [sv.host], ipAddress: sv.host };
+      // 36회차 F3: 예전에 호스트명으로 등록된 항목 — 수집 경로가 쓰지 않는 주소라는 사실을 그대로 말한다('VMware Tools 가 IP 미보고' 가 아니다).
+      const hostWhy = physicalHostIssue(sv.host);
+      if (hostWhy) { setPhysicalGpu(sv.id, { id: sv.id, name: sv.name, host: sv.host, vcenterId: sv.vcenterId || '', error: hostWhy, errorCode: 'config', errorLabel: '주소 확인' }); failed++; return; }
       const creds = { username: sv.username, password: sv.password || '' };
       const authDev = { id: `phys|${sv.id}`, username: sv.username, password: sv.password || '' };
       const stop = manual ? null : gpuAuthGuard.authStopFor(authDev);

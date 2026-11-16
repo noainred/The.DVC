@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
+import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js'; // 자격증명 파일 규칙(v2.322): 원자적 쓰기 + 로드 손상 보존
 import { clampSetting } from '../util/clampSetting.js';
 import { secretProvided } from '../util/secretCarry.js'; // v2.611 LEFT2611-03: 계정명이 바뀌면 저장 비밀번호를 승계하지 않는다
@@ -32,12 +33,18 @@ const DEFAULTS = {
   vcenters: {},
 };
 
+// 전체 점검 36회차 F4(재현): 손상 · 읽기 오류를 기억하고 그동안 관리자 저장을 거절한다 — 예전에는 빈 값으로 돌고 저장을 막지 않아 손상 뒤 첫 PUT 이
+//   주 파일을 그 vCenter 하나만으로 만들었다. 읽기 오류(EACCES · EISDIR)는 옮기지 않는다. 엣지의 중앙 배포 적용(applyPulled)은 막지 않는다(중앙이 원본).
+const _loadErr = makeSettingsLoadError(() => FILE, { label: 'GPU 게스트 수집 설정(게스트 계정) — 확정하면 빈 설정으로 시작합니다(손상 보존본은 그대로 · 계정은 다시 입력)', confirm: () => { fs.mkdirSync(path.dirname(FILE), { recursive: true }); atomicWriteFileSync(FILE, JSON.stringify({}, null, 2), { mode: 0o600 }); _loadErr.ok(); } });
+export function gpuGuestSettingsLoadError() { readFile(); return _loadErr.get(); }
 function readFile() {
-  if (!fs.existsSync(FILE)) return {};
+  if (!fs.existsSync(FILE)) { _loadErr.missing(); return {}; }
+  let text;
+  try { text = fs.readFileSync(FILE, 'utf8'); } catch (e) { _loadErr.readError(e); return {}; }
   // v2.322 보안 감사(자격증명 파일 규칙): 파싱 실패 시 손상본을 보존한 뒤 빈 값 반환 —
   // 그냥 {} 를 넘기면 다음 저장이 온전했던 원본을 빈 목록으로 덮어써 게스트 OS 계정이 영구 유실된다.
-  try { return openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}); }
-  catch (e) { preserveCorrupt(FILE, e.message); return {}; } // v2.296 게스트 OS 계정 복호(메모리 평문)
+  try { const v = openSecretsDeep(JSON.parse(text) || {}); _loadErr.ok(); return v; }
+  catch (e) { _loadErr.corrupt(e); preserveCorrupt(FILE, e.message); return {}; } // v2.296 게스트 OS 계정 복호(메모리 평문)
 }
 
 /**
@@ -191,6 +198,10 @@ export function gpuGuestNonDefaultPatch(copy) {
 /** Persist a partial update. vcenters는 병합하며, 빈 password는 기존 값을 유지한다. */
 export function saveGpuGuestSettings(partial, dropped = []) {
   const cur = readFile();
+  if (_loadErr.get()) {   // 36회차 F4
+    const e = new Error('GPU 게스트 설정(gpu-guest.json)을 읽지 못한 상태라 저장하지 않았습니다 — 서비스 점검에서 확정하거나 손상 보존본을 되돌리고 재시작하세요(지금 저장하면 이 vCenter 만 남습니다).');
+    e.code = 'settings-unreadable'; e.status = 409; throw e;
+  }
   const next = mergeGpuGuestSettings(cur, partial, dropped);
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   // 원자적 쓰기(v2.322): writeFileSync 는 'w'(선-truncate)라 쓰기 도중 종료 시 0바이트/부분 파일이
@@ -225,8 +236,10 @@ export function mergePulledGpuGuestSettings(cur, pulled = {}) {
 /** 중앙 배포 설정 적용(엣지 pull) — mergePulledGpuGuestSettings 로 병합해 원자 저장. 반환 { settings, removed }. */
 export function applyPulledGpuGuestSettings(pulled) {
   const { next, removed } = mergePulledGpuGuestSettings(readFile(), pulled);
+  if (_loadErr.get()?.readError) { const e = new Error('GPU 게스트 설정 파일을 읽지 못해(권한) 중앙 배포를 적용하지 않았습니다.'); e.code = 'settings-unreadable'; throw e; }   // 읽기 오류면 원본을 덮지 않는다
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(next), null, 2), { mode: 0o600 });
+  _loadErr.ok();
   return { settings: loadGpuGuestSettings(), removed };
 }
 

@@ -9,7 +9,7 @@ import { gpuGuestStatus, rescheduleGpuGuestPoller, gpuHostIds, vmUsesGpu, getGpu
 import { testVmGuest, VimSoapClient } from '../../gpu/guestops.js';
 import { onDemandLogin, onDemandErrorFields } from '../../vcenter/dsBrowse.js'; // v2.743(감사 VC-03): 주문형 vCenter 로그인 문
 import { testVmGuestSsh, detectPhysicalGpu, guestIps, gpuAuthGuard, pinnedIpCheck, unknownPinnedIps } from '../../gpu/sshCollect.js';
-import { listPhysical, addPhysical, updatePhysical, removePhysical, getPhysicalRaw, findPhysicalByHost } from '../../gpu/physicalRegistry.js';
+import { listPhysical, addPhysical, updatePhysical, removePhysical, getPhysicalRaw, findPhysicalByHost, physicalHostIssue } from '../../gpu/physicalRegistry.js';
 import { getAllPhysicalGpu } from '../../gpu/physicalStore.js';
 import { physicalPollerStatus, pollPhysicalOnce, reschedulePhysicalPoller } from '../../gpu/physicalPoller.js';
 import { getGuestGpuVms } from '../../gpu/store.js';
@@ -204,7 +204,11 @@ adminRouter.put('/gpu-guest/settings', adminOnly, (req, res) => {
     return res.status(400).json({ ok: false, reason: `고정 IP ${bad.length}개가 그 VM 이 보고한 IP 가 아닙니다 — 저장 자격증명을 VM 이 보고한 적 없는 주소로 보내지 않습니다(VM 의 알려진 IP 중에서 고르세요).`, rejected: bad.slice(0, 50) });
   }
   const droppedSecrets = [];
-  const settings = saveGpuGuestSettings(body, droppedSecrets);
+  let settings;
+  try { settings = saveGpuGuestSettings(body, droppedSecrets); } catch (e) {   // 36회차 F4: 못 읽은 설정은 덮지 않는다
+    if (e?.code === 'settings-unreadable') return res.status(409).json({ ok: false, code: e.code, reason: e.message });
+    throw e;
+  }
   rescheduleGpuGuestPoller();
   reschedulePhysicalPoller();   // v2.597(LC2597-02): 같은 주기 설정을 쓰는 물리 GPU 폴러도
   res.json({
@@ -357,6 +361,7 @@ adminRouter.post('/gpu-physical/auto-register', adminOnly, fleetOnly, async (req
   const host = String(b.host || '').trim();
   const username = String(b.username || '').trim();
   if (!host || !username) return res.status(400).json({ ok: false, reason: 'IP/호스트와 계정이 필요합니다.' });
+  { const why = physicalHostIssue(host); if (why) return res.status(400).json({ ok: false, reason: why }); }   // 36회차 F2 · F3: 접속 전에 수집 경로와 같은 판정
   const st = loadGpuGuestSettings();
   const det = await detectPhysicalGpu(host, { username, password: b.password || '' }, { timeoutMs: st.timeoutMs, port: Number(b.port) || 22 });
   if (!det.reachable) return res.status(400).json({ ok: false, reason: `SSH 접속 실패 — ${det.error || '계정/네트워크 확인'}`, detected: det });
@@ -389,6 +394,7 @@ adminRouter.post('/gpu-physical/bulk-auto-register', adminOnly, fleetOnly, async
   const results = new Array(targets.length);
   // v2.575 IMP-08: 동시성 풀 단일 소스(index 를 함께 받아 결과 순서를 보존한다).
   await poolRun(targets, 8, async (ip, i) => {
+    { const why = physicalHostIssue(ip); if (why) { results[i] = { ip, ok: false, reachable: false, error: why }; return; } }   // 36회차 F2
     const det = await detectPhysicalGpu(ip, { username, password }, { timeoutMs: st.timeoutMs, port }).catch((e) => ({ reachable: false, error: e.message, gpuModels: [] }));
     if (!det.reachable) { results[i] = { ip, ok: false, reachable: false, error: det.error || '접속 실패' }; return; }
     if (!det.gpuModels.length && !force) { results[i] = { ip, ok: false, reachable: true, noGpu: true, host: det.hostname || '' }; return; }
@@ -409,6 +415,7 @@ adminRouter.post('/gpu-physical/test', adminOnly, fleetOnly, async (req, res) =>
   let host = String(b.host || '').trim(); let username = String(b.username || '').trim(); let password = String(b.password || ''); let port = Number(b.port) || 22;
   if (b.id) { const s = getPhysicalRaw(b.id); if (s) { host = s.host; username = s.username; password = b.password || s.password; port = s.port || 22; } }
   if (!host || !username) return res.status(400).json({ ok: false, reason: 'host, username이 필요합니다.' });
+  { const why = physicalHostIssue(host); if (why) return res.json({ ok: false, host, port, login: false, read: false, error: why, trace: [] }); }   // 36회차 F3: 'VMware Tools' 사유 대신
   const st = loadGpuGuestSettings();
   const seed = b.revealCreds ? [{ t: Date.now(), msg: `🔓 자격증명: id=${username} · pw=${maskPw(password)} · 포트=${port}` }] : [];
   try {
@@ -493,7 +500,11 @@ adminRouter.post('/gpu-guest/test', adminOnly, async (req, res) => {
         const preferIp = it.ip !== undefined ? String(it.ip || '').trim() : ((s.vcenters[vcenterId]?.vmIps || {})[it.vmId] || '');
         // v2.480(3차 감사 S5): 요청에 비밀번호를 직접 싣지 않은(공용/저장 자격증명) 테스트는 SSH 대상 IP 를 그 VM 의 알려진 IP 로만 —
         // {vmId, useShared:true, ip:'공격자'} 로 법인 공용 비밀번호를 외부 sshd 에 보내던 경로 차단.
-        if (preferIp && !(it.username && it.password)) {
+        // 전체 점검 36회차 F1(재현 — 높음): 판정은 '요청에 글자가 있나' 가 아니라 **이번에 쓸 비밀번호가 요청 본문에서 왔나** 다 — 예전에는
+        //   useShared:true 에 아무 username/password 를 덧붙이면 이 검사를 건너뛰고 실제로는 저장된 법인 공용 비밀번호를 임의 IP 의 sshd 로 보냈다.
+        //   useShared 는 본문 계정을 무시하므로 언제나 핀 검사 · 별도 계정도 비밀번호를 저장값에서 물려받으면 핀 검사.
+        const ownSecret = !it.useShared && !!it.username && (!!it.password || !!it.passwordless);
+        if (preferIp && !ownSecret) {
           // v2.606(LEFT2606-01): 폴러와 같은 판정 헬퍼(gpu/sshCollect.js pinnedIpCheck)를 쓴다.
           const pin = pinnedIpCheck(v, preferIp);
           if (!pin.ok) { results[i] = { vmId: it.vmId, login: false, read: false, error: '요청 IP 가 이 VM 의 알려진 IP 가 아님', trace: [{ t: Date.now(), msg: `✗ 거부 — ${preferIp} 는 VM 의 알려진 IP(${pin.known.join(', ') || '없음'})가 아닙니다(저장 자격증명 보호)` }] }; continue; }
