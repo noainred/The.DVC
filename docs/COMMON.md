@@ -5,13 +5,13 @@
 
 - 생성: `node scripts/common-doc.mjs` · 최신 여부: `node scripts/common-doc.mjs --check`
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다. 설명을 고치려면 그 모듈의 **머리 주석 첫 단락**을 고친다.
-- 훑은 소스 4221개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
+- 훑은 소스 4217개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
 
 ## 읽는 법 · 한계
 
 - **하는 일**: 그 파일 맨 앞 주석의 첫 단락(150자에서 자름). 머리 주석이 없는 모듈은 4개다.
 - **사용처**: 그 모듈을 import 하는 파일 수(테스트 제외). **영역**: 사용처가 속한 폴더 수(서버 `server/src/<영역>` · 웹 `web/src/<영역>`, `views/tools` 는 따로).
-- **테스트**: 그 모듈의 경로를 **import 하거나 문자열로 가리키는**(소스 스윕) 테스트 파일 수. 경로를 조각으로 조합하면(`path.join(SRC, 'util', 'x.js')`) 세지 못하므로 0 이 '검증 없음' 을 뜻하지는 않는다(0 인 모듈 25개).
+- **테스트**: 그 모듈의 경로를 **import 하거나 문자열로 가리키는**(소스 스윕) 테스트 파일 수. 경로를 조각으로 조합하면(`path.join(SRC, 'util', 'x.js')`) 세지 못하므로 0 이 '검증 없음' 을 뜻하지는 않는다(0 인 모듈 24개).
 - 사용처로 세는 것은 정적 import · 재수출 · 문자열 리터럴 동적 import 다. 경로를 런타임에 조합하는 동적 import 는 세지 못했다 — 8건 · 파일 8개(`server/src/edgelog/collect.js` · `server/src/linkcheck/settingsLinks.js` · `server/src/portalcheck/archScan.js` · `server/src/routes/api/bmFolders.js` · `server/src/routes/api/partFaults.js` · `server/src/routes/central/storageRoutes.js` · `server/src/routes/central.js` · `scripts/tools-catalog.mjs`).
 - 사용처 수는 '얼마나 널리 쓰이는가' 이지 품질 지표가 아니다.
 
@@ -23,8 +23,8 @@
 | 웹 공용 컴포넌트 | `web/src/components/` | 46 | 0 | 12 |
 | 웹 공용 훅 | `web/src/hooks/` | 8 | 0 | 2 |
 | 웹 공용 유틸 | `web/src/util/` | 4 | 0 | 0 |
-| 웹 최상위 공용 모듈 | `web/src/` | 12 | 0 | 1 |
-| **합계** | | **161** | **0** | **25** |
+| 웹 최상위 공용 모듈 | `web/src/` | 12 | 0 | 0 |
+| **합계** | | **161** | **0** | **24** |
 
 ## 서버 공용 유틸 — `server/src/util/` (91)
 
@@ -218,7 +218,7 @@
 | `upgradeNotice.js` | 업그레이드 뒤 '새로고침 하세요' 안내의 판정 코어(v2.999 · 사용자 요청 2026-11-13 · 설계 docs/design/upgrade-reload · 컨펌 '추천대로 전부 진행'). | `normVersion` `cmpVersion` `isStale` `markNoticeShown` `noteServerVersion` `subscribeUpgrade` 외 15 | 3 | 2 | 2 |
 | `chunkReload.js` | 업그레이드 뒤 옛 화면 조각(청크) 404 에서 빠져나오기(v2.977 전체 점검 · 화면 축 1번 — 재현). | `isChunkLoadError` `claimAutoReload` `reloadOnChunkError` `installChunkReload` `RELOAD_KEY` `RELOAD_GAP_MS` | 2 | 2 | 1 |
 | `cmpVersion.js` | semver 형태 버전 비교. 서버 `server/src/util/cmpVersion.js` 와 **같은 규칙**(v2.826 — 웹에도 하나만 둔다): - 선행 `v`/공백을 벗긴다 · 세그먼트가 전부 숫자가 아니면 null(모르는 것 — **낮은 버전으로 보지 않는… | `cmpVersion` `default` | 2 | 2 | 3 |
-| `pwa.js` | PWA 부트스트랩 — 서비스워커 등록(설치 가능) + 위험 인시던트 브라우저 알림(폴링). 브라우저 푸시(VAPID) 없이도 세션이 떠 있는 동안 새 위험 경보를 데스크톱/모바일 알림으로 띄운다. 알림 권한은 사용자 제스처(인사이트 › 인시던트의 "알림 켜기")로 요청… | `registerPwa` `enableNotifications` `startAlertNotifications` | 2 | 2 | 0 |
+| `pwa.js` | PWA 부트스트랩 — 서비스워커 등록(설치 가능) + 위험 인시던트 브라우저 알림(폴링). 브라우저 푸시(VAPID) 없이도 세션이 떠 있는 동안 새 위험 경보를 데스크톱/모바일 알림으로 띄운다. 알림 권한은 사용자 제스처(인사이트 › 인시던트의 "알림 켜기")로 요청… | `registerPwa` `enableNotifications` `swReadyWithin` `startAlertNotifications` | 2 | 2 | 1 |
 | `sessionActivity.js` | 서버측 세션 정리(2026-10-09 검토 S-05) — 로그아웃을 서버에 알리고, 서버측 유휴 만료의 기준인 '사용자 활동' 을 보낸다. | `createActivityPinger` `sendActivity` `serverLogout` `ACTIVITY_MIN_INTERVAL_MS` `ACTIVITY_EVENTS` | 1 | 1 | 1 |
 | `usageTracker.js` | 기능 사용 추적(화면 쪽, v2.913 · 설계 docs/design/feature-usage §4.2·§4.6). | `usageKeyFromHash` `createUsageTracker` `sendUsage` `POLL_MS` `STABLE_MS` `BEAT_MS` 외 2 | 1 | 1 | 3 |
 
@@ -233,11 +233,11 @@
 | 모듈 | 하는 일 | 사용처 | 다른 영역 | 테스트 |
 |---|---|---|---|---|
 | `server/src/config.js` | (머리 주석 없음) | 510 | 86 | 175 |
-| `server/src/store.js` | (머리 주석 없음) | 206 | 43 | 308 |
+| `server/src/store.js` | (머리 주석 없음) | 206 | 43 | 307 |
 | `server/src/collector/registry.js` | Collector registry — the list of remote collector agents (one per datacenter) the central portal pulls power from. Stored in CONFIG_DIR/collectors.jso… | 83 | 32 | 49 |
 | `server/src/security/secretVault.js` | 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). | 40 | 28 | 25 |
 | `server/src/mock/demo/flags.js` | 데모(DATA_SOURCE=mock) 모드 공용 판정(v2.708). | 85 | 26 | 3 |
-| `server/src/alerts.js` | Alerting — evaluates threshold/condition rules against the current snapshot on an interval and pushes notifications to Slack(incoming webhook) and/or… | 31 | 23 | 30 |
+| `server/src/alerts.js` | Alerting — evaluates threshold/condition rules against the current snapshot on an interval and pushes notifications to Slack(incoming webhook) and/or… | 31 | 23 | 28 |
 | `server/src/proxy/sshExec.js` | Small SSH helper built on ssh2: connect, run commands, and upload files via SFTP. Shared by the proxy auto-deploy and the agent auto-deploy features.… | 48 | 17 | 30 |
 | `server/src/datacenter/store.js` | DataCenter(법인) 레지스트리 — vCenter의 '상위 개념'. | 47 | 16 | 12 |
 | `server/src/vcenter/registry.js` | vCenter registry — read/write the managed list of vCenters in config/vcenters.json (the same file the live collector polls), with validation, password… | 31 | 15 | 7 |
@@ -312,7 +312,7 @@
 |---|---|---|---|---|
 | `web/src/views/unitText.js` | 값 + 단위 표기 — **값이 없으면 단위를 붙이지 않는다**(v2.575 BUG-20). | 53 | 7 | 3 |
 | `web/src/views/tools/relTime.js` | 상대시각 문구 — **공용 코어** (v2.574 IMP-03). | 49 | 4 | 2 |
-| `web/src/views/changeResult.js` | v2.731(점검 1회차 A5-01): 변경 요청 응답 판정 — 순수 모듈(화면·테스트가 같이 쓴다). | 44 | 4 | 4 |
+| `web/src/views/changeResult.js` | v2.731(점검 1회차 A5-01): 변경 요청 응답 판정 — 순수 모듈(화면·테스트가 같이 쓴다). | 43 | 4 | 4 |
 | `web/src/views/tools/toneVar.js` | toneVar — 판정 톤(`ok`/`warn`/`bad`, 또는 진단 어휘 `green`/`amber`/`red`) → CSS 색 변수. **공용 코어** (v2.613 DEPS2613-11). 예전에는 `bmUsageText`·`edgeLogText`·`partFa`… | 29 | 1 | 1 |
 | `web/src/views/blankOr.js` | 숫자 입력칸 → 요청 값(v2.596, 감사 CLAMP2596-02·05). 빈 칸은 **보내지 않는다**(undefined — JSON 에서 빠진다) — `Number('')` 는 0 이라 '임계 끔'·'보존 무제한' 으로 둔갑했다. 서버도 빈 값을 미지정으로 받지만… | 27 | 3 | 1 |
 | `web/src/views/tools/shared.jsx` | SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동. | 26 | 1 | 4 |
