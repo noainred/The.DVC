@@ -151,7 +151,7 @@ export async function ingestResult(job, r, { node = '', now = Date.now() } = {})
     const ins = r.install && typeof r.install === 'object' ? r.install : {};
     rec.lastInstall = { at: now, by: job.by || '', ok: ins.code === 'ok' || ins.code === 'check', code: INSTALL_CODES.includes(ins.code) ? ins.code : 'unreachable', fail: ins.fail || null, step: Number.isInteger(ins.step) ? ins.step : 0,
       rc: Number.isInteger(ins.rc) ? ins.rc : null, acct: ins.acct || '', key: ins.key || '', src: ins.src || null, cred: ins.cred || null, dir: job.dir ?? '', nopy: !!ins.nopy, oldRm: ins.oldRm || 0, oldKeep: ins.oldKeep || 0, priv: ins.priv || null };
-    if (rec.lastInstall.ok && rdir === null) rec.dir = job.dir ?? ''; // 설치는 됐는데 준비 줄이 없다(수집 계정 로그인 거부 등) — 설치한 곳은 안다
+    if (rec.lastInstall.ok && (!readyLines.length || rdir === null)) rec.dir = job.dir ?? ''; // 설치는 됐는데 준비 줄이 없다(수집 계정 로그인 거부 등) — 설치한 곳은 안다
   }
   else rec.lastError = r.ok && (r.kind === 'done' || r.kind === 'not-ready') ? null : { at: now, kind: KINDS.includes(r.kind) ? r.kind : 'unreachable', error: cleanLine(r.error || '', 240) };
   if (readyLines.length && rdir === null && job.mode !== 'install') rec.lastError = { at: now, kind: 'bad-output', error: '결과가 말한 설치 위치가 작업의 후보가 아닙니다 — 반영하지 않았습니다.' };

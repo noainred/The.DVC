@@ -19,6 +19,7 @@ import { installScript, programSha, dirIssue, ACCT_RE, INSTALL_FAILS } from './b
 import { installCredFor } from './installCred.js';
 import { auditOnce } from './runner.js';
 import { isDemoTarget } from '../mock.js';
+import { demoAuditOutput } from './mock.js';
 
 export const INSTALL_TIMEOUT_MS = 120_000;
 export const NODE_INSTALL_CONCURRENCY = 4;
@@ -86,7 +87,8 @@ export async function installOnce(t, { keys, connect = withSsh, expect = {}, cre
   if (/^[0-9a-f]{64}$/.test(expect?.program || '') && expect.program !== programSha()) return res('version');
   if (t.demo || isDemoTarget(t.id)) {
     try { onPhase('설치'); } catch { /* */ }
-    return { ...res('ok', { step: 7, acct: 'dvcadmin', key: 'demo-common', src: 'corp', priv: 'sudo' }), ready: [], dir };
+    // 데모 — 장비에 닿지 않는다. 준비 확인은 실데이터와 같은 길(그 디렉터리의 준비 줄)을 탄다.
+    return { ...res('ok', { step: 7, acct: 'dvcadmin', key: 'demo-common', src: 'corp', priv: 'sudo' }), ready: demoAuditOutput(t.id, 'check', dir).ready, dir };
   }
   const cred = credOf(t, { edge: !!expect?.edge, corpVcs: Array.isArray(expect?.corpVcs) ? expect.corpVcs : [], pick: expect?.pick || null, withAuth: true });
   if (!cred || cred.state !== 'ok' || !cred.auth) return res('cred', { cred: cred?.state || 'error', acct: cred?.acct || '', key: cred?.key || '', src: cred?.src || null });

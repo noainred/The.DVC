@@ -119,8 +119,8 @@ export function InstallPanel({ d, rows, now, setMsg, reload }) {
             <button type="button" className="fm-btn pri" disabled={!picked.length || busy} onClick={() => setConfirm(true)}>고른 서버에 설치</button>
           </div>
         </div>
-        <STable className="fm-table" minWidth={1180}>
-          <thead><tr><th data-nosort /><th>서버</th><th>법인 · 담당 노드</th><th>지금 상태</th><th>설치된 곳</th><th>설치에 쓸 계정</th><th>자동 설치</th><th>마지막 설치</th><th data-nosort /></tr></thead>
+        <STable className="fm-table fm-itable" minWidth={1060}>
+          <thead><tr><th data-nosort /><th>서버</th><th>법인 · 담당 노드</th><th>지금 상태 · 설치된 곳</th><th>설치에 쓸 계정</th><th>자동 설치</th><th>마지막 설치</th><th data-nosort /></tr></thead>
           <tbody>{rows.map((r) => {
             const c = credOf(r); const ct = credText(c); const s = info.get(r.id); const st = rowStatus(r, now); const li = installResultText(r.lastInstall);
             return (
@@ -128,18 +128,18 @@ export function InstallPanel({ d, rows, now, setMsg, reload }) {
                 <td data-nosort><input type="checkbox" checked={picked.includes(r.id)} aria-label={`${r.name} 고르기`} onChange={() => toggle(r.id)} /></td>
                 <td data-sort={r.name}><span className="fm-st"><b className="fm-mono">{r.name}</b><small className="fm-mono">{r.host}</small></span></td>
                 <td data-sort={corpText(r, labels)}><span className="fm-st"><span>{corpText(r, labels)}</span><small>{nodeText(r.agent)}</small></span></td>
-                <td data-sort={st.label} className="fm-stcol"><span className="fm-st"><span className="fm-row" style={{ gap: 6 }}><span className={`fm-badge ${st.tone}`}>{st.label}</span>{s.old ? <span className="fm-badge warn">옛 디렉터리</span> : null}</span>{st.sub ? <small className="fm-brk">{st.sub}</small> : null}</span></td>
-                <td data-sort={s.at ?? ''}><span className="fm-st"><span className="fm-mono fm-brk">{s.at === null ? DASH : dirLabel(s.at)}</span><small>{s.at === null ? '' : s.old ? '지금 설정과 다름 — 그대로 동작합니다' : '지금 설정과 같음'}</small></span></td>
+                <td data-sort={st.label} className="fm-stcol" title={[st.sub, s.old ? '지금 설정과 다른 디렉터리 — 그대로 동작합니다(다시 설치하면 옮깁니다)' : ''].filter(Boolean).join(' · ')}><span className="fm-st"><span className="fm-row" style={{ gap: 6 }}><span className={`fm-badge ${st.tone}`}>{st.label}</span>{s.old ? <span className="fm-badge warn">옛 디렉터리</span> : null}</span>
+                  {r.job && st.sub ? <small className="fm-brk">{st.sub}</small> : <small className="fm-mono fm-path">{s.at === null ? '설치된 곳 모름' : dirLabel(s.at)}</small>}</span></td>
                 <td data-sort={c.acct || ''}>
                   {c.state === 'ambig' ? (
                     <Select sort={false} className="fm-input fm-sel-sm" aria-label={`${r.name} 설치 계정 고르기`} value={picks[r.id] || ''} onChange={(e) => setPicks({ ...picks, [r.id]: e.target.value })}>
                       <option value="">계정 고르기</option>
                       {(c.choices || []).map((x) => <option key={x.id} value={x.id}>{x.name} — {x.acct} · 키 {x.key}</option>)}
                     </Select>
-                  ) : <span className="fm-st"><span>{c.acct ? `계정 ${c.acct}${c.key ? ` · 키 ${c.key}` : ''}` : DASH}</span><small>{c.src ? SRC_TEXT[c.src] : r.agent ? '엣지가 고름' : ''}</small></span>}
+                  ) : <span className="fm-st" title={c.src ? SRC_TEXT[c.src] : ''}><span>{c.acct ? c.acct : DASH}</span><small>{c.key ? `키 ${c.key}` : ''}{c.src ? ` · ${c.src === 'server' ? '서버 항목' : '법인 공통'}` : r.agent && !c.acct ? '엣지가 고름' : ''}</small></span>}
                 </td>
-                <td data-sort={ct.label} className="fm-stcol"><span className="fm-st"><span className={`fm-badge ${ct.tone}`}>{ct.label}</span>{c.state === 'ok' ? <small>{s.settled ? '할 일 없음 — 지금 디렉터리에 준비됨' : s.act}</small> : ct.hint ? <small className="fm-brk">{ct.hint}</small> : null}</span></td>
-                <td data-sort={r.lastInstall?.at || ''}>{li ? <span className="fm-st"><span className={`fm-badge ${li.tone}`}>{li.label}</span><small className="fm-brk">{whenText(r.lastInstall.at, now)}{r.lastInstall.acct ? ` · ${r.lastInstall.acct}` : ''}{li.sub ? ` · ${li.sub}` : ''}</small></span> : <span className="fm-dim">{DASH}</span>}</td>
+                <td data-sort={ct.label} className="fm-stcol" title={ct.hint || ''}><span className="fm-st"><span className={`fm-badge ${ct.tone}`}>{ct.label}</span><small>{c.state === 'ok' || c.state === 'ambig' ? (s.settled ? '할 일 없음' : s.act) : '까닭은 표 아래'}</small></span></td>
+                <td data-sort={r.lastInstall?.at || ''} title={li?.sub || ''}>{li ? <span className="fm-st"><span className={`fm-badge ${li.tone}`}>{li.label}</span><small>{whenText(r.lastInstall.at, now)}{r.lastInstall.acct ? ` · ${r.lastInstall.acct}` : ''}</small></span> : <span className="fm-dim">{DASH}</span>}</td>
                 <td data-nosort className="fm-r"><button type="button" className={`fm-btn sm ${s.can ? 'pri' : ''}`} disabled={!s.can || busy} onClick={() => { setPicked([r.id]); setConfirm(true); }}>{s.settled ? '준비됨' : s.at === null ? '설치' : '다시 설치'}</button></td>
               </tr>
             );
@@ -171,6 +171,7 @@ export function InstallPanel({ d, rows, now, setMsg, reload }) {
             </div>
           </div>
         ) : null}
+        {(() => { const bad = [...new Set(rows.map((r) => credOf(r).state).filter((x) => x !== 'ok'))]; return bad.length ? <ul className="fm-list fm-pad-x">{bad.map((x) => <li key={x}><b>{credText({ state: x }).label}</b> — {credText({ state: x }).hint || '—'}</li>)}</ul> : null; })()}
         <span className="fm-dim fm-pad">설치는 맡은 노드가 설치 계정의 키로 접속 → 비밀번호 없는 sudo 확인 → 설치 파일(‘설치 파일 받기’ 와 같은 내용)을 설치 계정 홈에 잠깐 올려 root 로 한 번 실행 → 올린 파일 지움 → 수집 계정으로 준비 확인 순서입니다. 점검 실행은 자동으로 하지 않습니다. 서버가 돌려준 글은 남기지 않고 정해 둔 까닭 이름만 남깁니다.</span>
       </div>
     </>
