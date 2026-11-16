@@ -3302,3 +3302,23 @@ high 0 · 반증 1(A3-01 — 경로 오독, 데모 계정은 READ_DENY 하위라
   **남긴 것**: #8(추정) 결과 모름 법인이라도 원장 실행 · 대기 행이 있으면 '조회 전' · '멈춤 의심' 으로 보여 '조회 실패' 필터와 KPI 수가 어긋날 수 있다 · #9(추정) 잘린 조회가 회전 커서로 한 바퀴 도는 동안
   못 읽은 VM 이 '결과 앎' 으로 집계(RPO 1일 경계 — 처리량 실측 전) · 서버(코어 · MHz · 메모리)와 웹(코어 · 메모리) 용량 판정 차이는 54회차 F5 를 고칠 때 맞춘다.
   - 회차 정리(46~55): 분석 4쌍(덜 본 3영역 · 보안 2차 · 엣지 통신 2차 · 백업 2차) + 다른 세션 변경 검토 — 반증 회차마다 직전 수정의 회귀가 1~3건 나왔다(47: 3 · 49: 0 · 51: R1 미완 · 53: N1 등 · 55: 2).
+
+## 남긴 결정 5건 · 남은 작업 7건(2026-11-17 · 사용자 '결정이 필요한 5건을 권장 사항으로 진행해줘' · '그리고 남은 작업 수행해줘' · 표준 검증 + 위험 수정 변이 · 반증 1인)
+
+- **결정(권장안대로)**: 48 F2 guacd TLS(인증서 검증) · RDP 대상 인증서 검증 옵션(기본 꺼짐 — 예전 동작) · 평문 원격 경고(`proxy/guacdFlags.js` · 웹 `proxyGuacdText.js` 같은 판정 · `security-api.md`) ·
+  51 #3 중앙이 민 번들도 자동 적용과 같은 진행 중 작업을 같은 상한까지 기다린다 — **설치 자체를 미룬다**(`upgrade/pushHold.js` · 미리 확인 `preverifyBundleBytes` · 중앙 `edgeSync holdUntil` · `edge.md`) ·
+  52 D1 Director 하나에 vCenter 하나(새로 묶는 저장 · 완전 설치 거부 — 옛 짝은 경고 · `settings.directorBindIssue` · 웹 `bindAllowed`) · 52 D2 수동 조회 대조는 그 Director 의 vCenter 가 모두 쓰기 범위 안인 계정만(`pollOnce reconcileOnly`) ·
+  53 N4 공유 Director 재설치 — 함께 쓰는 vCenter 목록을 따로 확인(`sharedAck`) · 시작 · 0단계 다시 하기가 지금 목록과 대조(`sharedAckIssue`).
+- **남은 작업**: 51 #2 엣지 동기화 한 번의 결과 저장을 한 번으로(`focusmon/audit/service.js inPersistBatch` — 대상 2,000 · 8건 28~42ms → 3.4~8.4ms 실측) · 53 N8 `.jobs` 확인 창을 업그레이드 대기 목록에(`addJobs-settle`) ·
+  53 S1 Backup Summary · Detail · 메일이 Director 조회 실패 · 인증 정지 법인의 Bareos 결과를 모름으로(`veeam.js bareosDirResultsUnknown` — directorInfo 하나 · 묶지 않은 법인은 예전대로) ·
+  54 F4 VM 사양 변경 — 못 읽은 vCPU · RAM · 디스크는 null, 기준을 모르면 그 항목 변경 거부(400 · ReconfigVM_Task 0번) · 화면 '—' · 잠금(`provision/reconfig.js` · 웹 `vmReconfigText.js`) ·
+  54 F5 SOAP 호스트 용량 못 읽음 · 0 이하는 null(`soapClient.hostCapacityOf`) · 웹 판정 세 칸(`web/src/hostCapacity.js` — 서버와 대조) · 55 #8 현황판 결과 모름 법인 = '조회 실패' 거르기(KPI 와 같은 수) ·
+  55 #9 잘린 조회(`directorState.partial`)에서 진행 중 실행이 있는 VM 의 결과는 모름(`corpCounts` · `priorityKind` · 웹 `rowMatches`).
+- 회귀: `leftoverA56`(guacd 판정 대조 · push 보류 · 실제 수집기 라우트 + 중앙 push) · `leftoverB56`(Bareos 7건) · `leftoverC56`(F4 · F5 · #2) · `rvH_remoteSession` '48회차 F2' · 웹 `vmReconfigText.test.js`.
+  변이: guacd 4/4 · push 보류 5/5 · Bareos 10/10(처음 D2 every→some 생존 — Director 하나에 vCenter 둘인 옛 설정 입력을 더해 잡음) · F4 10/10 · F5 5/5 · #2 3/3.
+- **작업 방식 교훈**: ① D1(새 저장 거부)이 기존 Bareos 시험 12개 파일 92건을 깨뜨렸다 — 준비 단계가 Director 하나에 vCenter 둘을 **새로** 묶고 있었다. 기대값은 바꾸지 않고
+  준비만 옛 파일 모양(`_seedLegacySitesForTest`)으로 · 판정 순서는 대상 이동 409 를 먼저(구체적인 사유가 앞). 규칙을 바꾸는 수정은 그 규칙을 준비 단계로 쓰는 시험부터 grep 할 것.
+  ② push 보류 시험에서 설치 뒤 250ms 재시작 타이머가 **시험이 주입을 되돌린 뒤** 진짜 `restartProcess` 를 불러 시험 프로세스가 스스로를 다시 띄웠다(출력 91배) — 타이머에는 그 시점의 함수를 잡아 둔다.
+- 남긴 것: 실 vCenter 응답에서 못 읽은 값이 어떤 모양(속성 생략 · 0 · 옛 값)으로 오는지는 미확인(F4 · F5 는 '0 이하 = 못 읽음' 판단) · 예전 판 엣지는 못 읽은 용량을 여전히 0 으로 올린다(엣지 업그레이드 뒤 반영) ·
+  store 전역 · vCenter 별 사용률은 '사용량은 읽고 총량은 못 읽은' 호스트가 있으면 부분 합(예전 0 과 결과가 같아 그대로).
+- 규칙 위치: `server/src/bareos/CLAUDE.md` · `bareos/install/CLAUDE.md` 가 크기 상한(15,000B) 직전이라 D1 · D2 · N4 · #9 규칙은 이 절과 시험(`leftoverB56`)에 둔다 — 그 폴더를 고치기 전에 이 절을 읽을 것.
