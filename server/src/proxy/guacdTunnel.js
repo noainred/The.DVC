@@ -53,8 +53,11 @@ function parseInstruction(str, start) {
   while (i < str.length) {
     const dot = str.indexOf('.', i);
     if (dot < 0) return null;
-    const len = parseInt(str.slice(i, dot), 10);
-    if (Number.isNaN(len)) return null;
+    // 49회차 F49-1(재현 — 높음): 길이 칸은 숫자만(1~10자리) — parseInt 는 '-4' 를 받아 i 가 뒤로 가 루프가 끝나지 않았다
+    //   (브라우저 프레임 '9.dvc-token,-4.' 하나로 이벤트 루프 약 10초 정지 · 작은 힙이면 OOM). guacd 쪽 데이터도 같은 파서를 쓴다.
+    const lenText = str.slice(i, dot);
+    if (!/^\d{1,10}$/.test(lenText)) return null;
+    const len = Number(lenText);
     const vEnd = dot + 1 + len;
     if (vEnd > str.length) return null;
     els.push(str.slice(dot + 1, vEnd));
@@ -118,8 +121,8 @@ function handle(ws, params, user, token = null) {
   const settings = {
     hostname: host, port: String(port),
     username: cred('username'), password: cred('password'), domain: cred('domain'),
-    // width/height 는 비민감 렌더 파라미터라 쿼리에서 받는다(자격증명 아님).
-    width: params.get('width') || '1024', height: params.get('height') || '768', dpi: '96',
+    // width/height 는 비민감 렌더 파라미터라 쿼리에서 받는다(자격증명 아님). 48회차: 정수 · 범위만(guacd 인자로 그대로 간다).
+    width: rdpDim(params.get('width'), '1024'), height: rdpDim(params.get('height'), '768'), dpi: '96',
     security: cred('security') || 'any', 'ignore-cert': 'true', 'resize-method': 'display-update',
   };
 
@@ -193,6 +196,11 @@ function handle(ws, params, user, token = null) {
         return;
       }
     }
+    // 48회차 F1(재현 — 높음): 포탈이 guacd 와 핸드셰이크(select rdp → args → connect → ready)를 끝내기 **전** 의 브라우저 프레임은 버린다.
+    //   예전에는 그대로 guacd 로 써서, 범위 계정이 자기 rdp 매핑 · 티켓으로 연 WS 에 'select ssh' + 'connect <임의 호스트:포트>' 를 먼저 보내면
+    //   guacd 가 그것을 첫 select · connect 로 받아 매핑 대상 · targetHostScope · 프로토콜 · 프록시 경로를 모두 건너뛰었다.
+    //   정상 클라이언트는 ready 를 받기 전에 세션 명령을 보내지 않는다(그 전 키 · 마우스 입력은 버려도 무해 — 연결 전이다).
+    if (!ready) return;
     // 키·마우스·터치 입력 = 사용자 활동(서버측 유휴 — 그룹 F). 연결마다 1분 1회로 묶는다(touch 가 거른다).
     if (RDP_INPUT_RE.test(text)) session.touch();
     try { guacd.write(text); } catch { /* */ }
@@ -201,6 +209,15 @@ function handle(ws, params, user, token = null) {
   ws.on('error', () => { closed = true; session.release(); try { guacd.destroy(); } catch { /* */ } }); // ws 오류에도 소켓 정리
   return { session, isClosed: () => closed };
 }
+
+/** 48회차: RDP 화면 크기 — 정수만(아니면 기본값) · 49회차 F49-3: 범위 밖은 100~8192 로 자른다(8192 를 넘는 창이 기본 1024 로 떨어져 비율이 깨졌다). */
+export function rdpDim(v, dflt) {
+  const s = String(v ?? '').trim();
+  if (!/^\d{1,6}$/.test(s)) return dflt;
+  return String(Math.min(8192, Math.max(100, Number(s))));
+}
+/** 시험 전용 — Guacamole 명령 파서(49회차 F49-1). */
+export const _parseInstructionForTest = parseInstruction;
 
 /** 테스트 전용 — 실제 RDP 연결 처리기(가짜 ws·가짜 guacd 소켓으로 폐기를 재현한다). */
 export const _rdpHandleForTest = handle;

@@ -28,7 +28,7 @@ import { EDGE_TEST_CONCURRENCY } from '../focusmon/store.js';
 import { createNodeSampler } from '../focusmon/load.js';
 import { createAuditRunner } from '../focusmon/audit/runner.js';
 import { installExec, NODE_INSTALL_CONCURRENCY } from '../focusmon/audit/install.js'; // v3.17.0 자동 설치(이 엣지의 SSH 공용 접속 키로)
-import { installCredFor, credView, PREP_FEATURE } from '../focusmon/audit/installCred.js';
+import { installCredFor, credView, credSnapshot, PREP_FEATURE } from '../focusmon/audit/installCred.js';
 import { prepExec } from '../focusmon/audit/prep.js'; // v3.18.0 접속 자동 준비(수집 계정 · 공개키 — 이 엣지의 SSH 공용 접속 root 키로)
 import { store } from '../store.js';
 const TEST_RESULTS_PER_SYNC = 50; // 중앙이 동기화당 받는 시험 결과 상한(central/focusMonEdge.js arr(b.tests, 50))과 같게 — 넘는 것은 다음 동기화에(반증 3)
@@ -97,9 +97,16 @@ const runner = createRunner({
  *  · 결과를 실은 동기화가 실패하면 다음 한 번은 결과 없이 보낸다(표본 · 보류 시한이 먼저) · 413 이면 그 결과의 원문을 버린다.
  *  · 보관 시한 `AUDIT_HOLD_MS`(1시간 — 중앙이 'lost' 작업을 기억하는 2시간보다 짧게) — 지나면 버리고 센다(auditDropped · 콘솔 한 번).
  */
-const AUDIT_RESULTS_MAX = 4;
+// 50회차 R1(재현): 4건 상한은 v3.11 디스크 점검(동시 1) 기준이었다 — v3.17 설치 · v3.18 접속 준비는 동시 4 · 중앙이 한 번에 20건까지 내려보내
+//   빨리 끝난 결과(예: 같은 root 키 3대 거부 뒤 'key-stopped')가 5건째부터 소리 없이 밀려나 중앙에 'lost' 로 남았다. 개수는 일괄 규모 이상으로,
+//   메모리는 바이트 상한(AUDIT_QUEUE_MAX_BYTES)으로 묶고, 버리면 콘솔에 남긴다.
+const AUDIT_RESULTS_MAX = 64;
+export const AUDIT_QUEUE_MAX_BYTES = 32 * 1024 * 1024;
 const AUDIT_BYTES_PER_SYNC = 6 * 1024 * 1024;
+/** 동기화 한 번에 싣는 결과 수 — 중앙 focusmon/audit/service.js RESULTS_PER_SYNC 와 같게(넘는 것은 다음 동기화에). */
+export const AUDIT_RESULTS_PER_SYNC = 8;
 export const AUDIT_RESULT_MAX_BYTES = 10 * 1024 * 1024;
+const AUDIT_TOO_BIG_ON_413 = 1024 * 1024;   // 51회차 #5
 export const AUDIT_HOLD_MS = 60 * 60_000;
 let auditResults = []; let auditDropped = 0; let auditSkipNext = false;
 const tooBig = (result, size) => ({ mode: result?.mode === 'check' ? 'check' : 'run', ok: false, ran: result?.ran === true, kind: 'too-big', ready: Array.isArray(result?.ready) ? result.ready.slice(0, 200) : [], out: [], outBytes: result?.outBytes || 0, truncated: true, code: result?.code ?? null, stderr: '', ms: result?.ms || 0, error: `결과가 너무 커서(${Math.round(size / 2 ** 20)}MB) 원문을 보내지 못했습니다.` });
@@ -109,7 +116,14 @@ export function queueAuditResult(runId, result, now = Date.now()) {
   try { size = Buffer.byteLength(JSON.stringify(r)); } catch { size = Infinity; }
   if (size > AUDIT_RESULT_MAX_BYTES) { r = tooBig(result, size); size = Buffer.byteLength(JSON.stringify(r)); }
   auditResults.push({ runId: String(runId), result: r, size, at: now });
-  if (auditResults.length > AUDIT_RESULTS_MAX) { auditDropped += auditResults.length - AUDIT_RESULTS_MAX; auditResults = auditResults.slice(-AUDIT_RESULTS_MAX); }
+  let dropped = 0;
+  while (auditResults.length > AUDIT_RESULTS_MAX) { auditResults.shift(); dropped += 1; }
+  // 51회차 #6: 바이트 상한을 넘으면 **가장 큰 것부터** 버린다(오래된 것부터 버리면 큰 결과 하나 자리를 만드느라 작은 설치 · 준비 결과 수십 건이 사라졌다)
+  while (auditResults.length > 1 && auditResults.reduce((a, x) => a + (x.size || 0), 0) > AUDIT_QUEUE_MAX_BYTES) {
+    let big = 0; for (let i = 1; i < auditResults.length; i++) if ((auditResults[i].size || 0) > (auditResults[big].size || 0)) big = i;
+    auditResults.splice(big, 1); dropped += 1;
+  }
+  if (dropped) { auditDropped += dropped; console.warn(`[focus-mon] 보낼 점검 · 설치 · 준비 결과 ${dropped}건을 버렸습니다(대기열 상한 ${AUDIT_RESULTS_MAX}건 · ${AUDIT_QUEUE_MAX_BYTES / 2 ** 20}MB) — 중앙에는 'lost' 로 남습니다`); }
 }
 const auditRunner = createAuditRunner({
   keys: focusKeys,
@@ -125,12 +139,12 @@ export function edgeVcs() {
   try { return (store.get()?.vcenters || []).filter((v) => v && v.id).slice(0, 100).map((v) => String(v.id)); } catch { return []; }
 }
 const installRunner = createAuditRunner({
-  keys: focusKeys, concurrency: NODE_INSTALL_CONCURRENCY, exec: installExec({ edge: true, edgeVcs }),
+  keys: focusKeys, concurrency: NODE_INSTALL_CONCURRENCY, exec: installExec({ edge: true, edgeVcs }), kind: 'install',
   onResult: (job, result) => { queueAuditResult(job.runId, result); schedule(0); },
 });
 /** v3.18.0 접속 준비 줄(설치 줄과 따로 — 같은 동시 상한). 준비 뒤 연결 시험은 이 엣지의 집중 모니터링 키로 · 고르면 디스크 점검 설치까지. */
 const prepRunner = createAuditRunner({
-  keys: focusKeys, concurrency: NODE_INSTALL_CONCURRENCY, exec: prepExec({ edge: true, edgeVcs }),
+  keys: focusKeys, concurrency: NODE_INSTALL_CONCURRENCY, exec: prepExec({ edge: true, edgeVcs }), kind: 'prep',
   onResult: (job, result) => { queueAuditResult(job.runId, result); schedule(0); },
 });
 /** 이 엣지가 돌릴 줄 아는 작업 종류(매 동기화에 싣는다 — 중앙은 이번 본문의 표시만 믿는다 · v3.17.0 반증 S1). */
@@ -142,9 +156,10 @@ export function credReport(now = Date.now(), credOf = installCredFor) {
   if (!knownTargets.length || now < credDueAt) return null;
   credDueAt = now + CRED_EVERY_MS;
   const out = {}; const prep = {}; const corpVcs = edgeVcs();
+  const snap = credSnapshot();   // 50회차 R2(측정): 대상 × 기능마다 등록부 전량을 복사해 500 대상 · 1,000 서버에서 매 60초 2초 넘게 막았다
   for (const t of knownTargets) {
-    out[t.id] = credView(credOf(t, { edge: true, corpVcs }));
-    prep[t.id] = credView(credOf(t, { edge: true, corpVcs, feature: PREP_FEATURE }));
+    out[t.id] = credView(credOf(t, { edge: true, corpVcs, ...snap }));
+    prep[t.id] = credView(credOf(t, { edge: true, corpVcs, feature: PREP_FEATURE, ...snap }));
   }
   lastPrepReport = prep;
   return out;
@@ -160,7 +175,7 @@ export function auditResultsToSend() {
     const b = r.size || 0;
     if (out.length && bytes + b > AUDIT_BYTES_PER_SYNC) break;
     out.push(r); bytes += b;
-    if (out.length >= 2) break;
+    if (out.length >= AUDIT_RESULTS_PER_SYNC) break;
   }
   return out;
 }
@@ -169,8 +184,14 @@ export function auditSendFailed(sent, status, now = Date.now()) {
   if (!sent.length) return;
   auditSkipNext = true;
   if (status === 413) {
+    // 51회차 #5(재현): 413 원인이 표본 · 프로세스여도 실린 결과 전부(이제 최대 8건)를 too-big 으로 바꿔, 성공한 설치 · 준비가 중앙에 'unreachable' 로 남았다 —
+    //   원문이 큰 결과(1MB 넘음)는 곧바로, 작은 결과는 413 을 두 번 함께 맞았을 때만 원문을 뺀다(같은 본문으로 영원히 막히지 않게 — 첫 번은 한 번 건너뛴 뒤 그대로 다시).
     const ids = new Set(sent.map((r) => r.runId));
-    auditResults = auditResults.map((r) => (ids.has(r.runId) && r.result.kind !== 'too-big' ? { ...r, result: tooBig(r.result, r.size), size: 4096 } : r));
+    auditResults = auditResults.map((r) => {
+      if (!ids.has(r.runId) || r.result.kind === 'too-big') return r;
+      const hits = (r.hits413 || 0) + 1;
+      return r.size > AUDIT_TOO_BIG_ON_413 || hits >= 2 ? { ...r, result: tooBig(r.result, r.size), size: 4096, hits413: hits } : { ...r, hits413: hits };
+    });
   }
   expireAuditResults(now);
 }

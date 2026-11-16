@@ -41,11 +41,14 @@ export const JOB_MAX_MS = 12 * 3600_000;
 export const LOST_KEEP_MS = 2 * 3600_000;
 const LOST_MAX = 300;
 /** 엣지 진행 목록 받기 상한 — 엣지 대기열(runner QUEUE_MAX 200) + 보낼 결과보다 크게. */
-const ACTIVE_MAX = 250;
+const ACTIVE_MAX = 300;   // 51회차 #7: 엣지 대기열(runner QUEUE_MAX 200) + 보낼 결과(엣지 AUDIT_RESULTS_MAX 64) 보다 크게
+/** 51회차 #1(재현): 엣지 한 곳에 동시에 맡기는 작업(대기 · 실행 · 결과 보내는 중) 상한 — 엣지 결과 대기열(64)보다 작게. 배압이 없으면
+ *  접속 전에 끝나는 작업(key-stopped · version · queue-full)이 100건을 넘을 때 결과가 대기열을 넘쳐 'lost' 로 남았다(200건 중 64건). */
+export const EDGE_INFLIGHT_MAX = 40;
 export const REDELIVER_MS = 2 * 60_000;
 export const MAX_DELIVER = 3;
 export const MAX_JOBS = 500;
-export const RESULTS_PER_SYNC = 2;
+export const RESULTS_PER_SYNC = 8;   // 50회차 R1: 엣지 AUDIT_RESULTS_PER_SYNC 와 같게(일괄 설치 · 준비 결과를 몇 번의 동기화 안에 받는다 — 바이트 상한은 엣지가 지킨다)
 /** 화면에 싣는 한도(박지 않는다 — 응답 limits). */
 export const LIMITS = Object.freeze({ runGapMin: RUN_GAP_MS / 60_000, checkGapSec: CHECK_GAP_MS / 1000, nodeConcurrency: 1, deadlineMin: Math.round(AUDIT_DEADLINE_MS / 60_000), keepRuns: db.AUDIT_KEEP, keepDays: db.AUDIT_KEEP_DAYS,
   installConcurrency: NODE_INSTALL_CONCURRENCY, installTimeoutSec: INSTALL_TIMEOUT_MS / 1000, prepTimeoutSec: PREP_TIMEOUT_MS / 1000 });
@@ -230,7 +233,7 @@ function local() {
 function localInstall() {
   if (!localInstaller) {
     localInstaller = createAuditRunner({
-      keys: keysRef, concurrency: NODE_INSTALL_CONCURRENCY, exec: installExec(),
+      keys: keysRef, concurrency: NODE_INSTALL_CONCURRENCY, exec: installExec(), kind: 'install',
       onPhase: (job, phase) => { const j = load().jobs.find((x) => x.runId === job.runId); if (j) { j.phase = phase; j.state = 'running'; j.startedAt = j.startedAt || job.startedAt || Date.now(); } },
       onResult: (job, result) => {
         const j = liveJob(job.runId);
@@ -245,7 +248,7 @@ function localInstall() {
 function localPrep() {
   if (!localPrepper) {
     localPrepper = createAuditRunner({
-      keys: keysRef, concurrency: NODE_INSTALL_CONCURRENCY, exec: prepExec(),
+      keys: keysRef, concurrency: NODE_INSTALL_CONCURRENCY, exec: prepExec(), kind: 'prep',
       onPhase: (job, phase) => { const j = load().jobs.find((x) => x.runId === job.runId); if (j) { j.phase = phase; j.state = 'running'; j.startedAt = j.startedAt || job.startedAt || Date.now(); } },
       onResult: (job, result) => {
         const j = liveJob(job.runId);
@@ -325,9 +328,9 @@ export const KNOWN_EVERY_MS = 60_000;
  * 그 서버의 설치 계정 상태(화면 · 접수 공용 — 비밀 없음). 중앙 직접 서버는 이 노드에서 해석, 엣지 서버는 그 엣지가 알려 온 값(시한 안 · 없으면 'edge-unknown').
  * @param {object} t  대상  @param {{corpVcs?:string[], pick?:string|null, now?:number}} o
  */
-export function credOfTarget(t, { corpVcs = [], pick = null, now = Date.now(), feature = INSTALL_FEATURE } = {}) {
+export function credOfTarget(t, { corpVcs = [], pick = null, now = Date.now(), feature = INSTALL_FEATURE, snap = null } = {}) {
   if (t.demo) return demoCred(t, feature);
-  if (!t.agent) return credView(installCredFor(t, { corpVcs, pick, feature }));
+  if (!t.agent) return credView(installCredFor(t, { corpVcs, pick, feature, ...(snap || {}) }));   // 51회차 #4: 여러 대상이면 호출부가 사본(credSnapshot)을 한 번
   const e = edgeCred.get(String(t.agent).toLowerCase());
   if (!e || now - e.at > EDGE_CRED_TTL_MS) return { state: 'edge-unknown', src: null, acct: '', key: '' };
   // v3.18.0: 접속 준비 계정은 따로 알려 온다(credPrep) — 옛 엣지(3.17.x)는 보내지 않는다 → 'edge-unknown'
@@ -518,7 +521,8 @@ export function handleEdgeAudit(agent, mine, a, now = Date.now()) {
   const canInstall = Array.isArray(b.caps) && b.caps.slice(0, 10).includes('install'); // 반증 S1 — 이번 본문의 표시만 믿는다
   const canPrep = Array.isArray(b.caps) && b.caps.slice(0, 10).includes('prep'); // v3.18.0 — 3.17.x 엣지는 'prep' 을 모른다(점검 실행으로 읽는다)
   const prepFresh = (() => { const e = edgeCred.get(key); return !!e && !!e.prepRows && now - e.at <= EDGE_CRED_TTL_MS; })();
-  for (const j of st.jobs) {
+  const deliverMax = Math.min(20, Math.max(0, EDGE_INFLIGHT_MAX - (Array.isArray(b.active) ? Math.min(b.active.length, ACTIVE_MAX) : 0)));
+  for (const j of deliverMax > 0 ? st.jobs : []) {
     if (String(j.node).toLowerCase() !== key || !mine.has(j.tid) || active.has(j.runId) || j.state === 'ingesting') continue;
     if (j.deliveredAt && (now - j.deliveredAt < REDELIVER_MS || j.deliveries >= MAX_DELIVER)) continue;
     // 설치 작업은 설치 계정 상태를 알려 오는 엣지(이 판 이상)에만 — 옛 엣지는 모르는 작업 종류를 점검 실행('run')으로 읽는다
@@ -527,7 +531,7 @@ export function handleEdgeAudit(agent, mine, a, now = Date.now()) {
     const t = mine.get(j.tid);
     j.deliveredAt = now; j.deliveries = (j.deliveries || 0) + 1; changed = true;
     jobs.push({ runId: j.runId, mode: j.mode, id: t.id, name: t.name, host: t.host, port: t.port, username: t.username, expect: expectFor(j) });
-    if (jobs.length >= 20) break;
+    if (jobs.length >= deliverMax) break;
   }
   // 상태가 실제로 바뀐 때만 쓴다(반증 F8 — 엣지는 작업이 있는 동안 2초마다 동기화한다 · 원자 쓰기는 fsync 둘)
   if (changed) persist();

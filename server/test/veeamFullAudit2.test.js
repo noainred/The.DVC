@@ -211,7 +211,7 @@ test('③ V-3 — 업그레이드 대기: Veeam 관리 작업 · 보내는 중 �
   assert.equal(IF.runningVeeamWork().length, 0);
   // 소스: 업그레이드 관리자 · 엣지 워커 · 삭제 라우트의 요청 감사(보내기 전)
   const mg = rd('upgrade/manager.js');
-  assert.match(mg, /\.\.\.bareosWork\(\), \.\.\.veeamWork\(\)\]/);
+  assert.match(mg, /\.\.\.bareosWork\(\), \.\.\.veeamWork\(\)(\]|, \.\.\.focusMonWork\(\)\])/);   // 50회차 R3: 집중 모니터링 작업도 기다린다
   assert.match(mg, /NON_SCAN_KINDS = new Set\(\[[^\]]*'veeam'/);
   const wk = rd('agent/veeamRunWorker.js');
   assert.match(wk, /if \(track\) noteVeeamEdgeOpStart\(op\.id, op\.kind, op\.serverId\);\n\s*try \{/);

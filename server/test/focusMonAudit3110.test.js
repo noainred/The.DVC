@@ -597,8 +597,12 @@ test('⑪ 반증 F1 · F3 · F9-e — 엣지 결과 크기 · 413 · 보관 시�
   worker.queueAuditResult('da-bbbbbbbbbbbb', { mode: 'run', ok: true, kind: 'done', ready: [], out: ['x'] }, 1000);
   const sent = worker.auditResultsToSend(); assert.equal(sent.length, 1);
   worker.auditSendFailed(sent, 413, 2000);
-  assert.equal(worker._auditForTest().results[0].result.kind, 'too-big', '413 — 그 결과의 원문을 버린다(같은 본문으로 영원히 막히지 않게)');
+  // 51회차 #5: 작은 결과는 첫 413 에 원문을 지우지 않는다(원인이 표본 · 프로세스일 수 있다 — 성공한 설치가 'unreachable' 로 남던 것) — 두 번째 413 에 지운다
+  assert.equal(worker._auditForTest().results[0].result.kind, 'done', '첫 413 — 작은 결과는 그대로');
   assert.deepEqual(worker.auditResultsToSend(), [], '실패 뒤 한 번은 결과 없이(표본 · 보류 시한이 먼저)');
+  worker.auditSendFailed(worker._auditForTest().results.slice(), 413, 2100);
+  assert.equal(worker._auditForTest().results[0].result.kind, 'too-big', '두 번째 413 — 그 결과의 원문을 버린다(같은 본문으로 영원히 막히지 않게)');
+  worker.auditResultsToSend();
   worker.expireAuditResults(1000 + worker.AUDIT_HOLD_MS + 1);
   assert.equal(worker._auditForTest().results.length, 0); assert.equal(worker._auditForTest().dropped, 1, '보관 시한 — 버리고 센다');
   W.reset();

@@ -17,6 +17,7 @@ import { AUDIT_DEADLINE_MS, READY_EXEC_MS, programSha, wrapperSha, pathsFor, dir
 import { parseReady, readyState, sectionOf, firstLineOf, markOf, LINE_MAX } from './parse.js';
 import { demoAuditOutput } from './mock.js';
 import { isDemoTarget } from '../mock.js';
+import { trackAuditRunner } from './inflight.js';   // 50회차 R3
 
 export const NODE_CONCURRENCY = 1;
 export const QUEUE_MAX = 200;
@@ -170,7 +171,7 @@ export async function auditOnce(t, { mode = 'run', keys, connect = withSsh, onPh
  * 대기열 실행기 — 노드마다 하나. submit 은 같은 대상이 이미 줄에 있으면 거절한다(겹쳐 띄우지 않는다).
  * @param {{keys:object, connect?:Function, onResult:(job, result)=>void, onPhase?:(job, phase)=>void, concurrency?:number}} o
  */
-export function createAuditRunner({ keys, connect, onResult, onPhase = () => {}, concurrency = NODE_CONCURRENCY, exec = auditOnce } = {}) {
+export function createAuditRunner({ keys, connect, onResult, onPhase = () => {}, concurrency = NODE_CONCURRENCY, exec = auditOnce, kind = 'audit' } = {}) {
   const queue = []; const running = new Map(); // runId → job
   const pump = () => {
     while (running.size < concurrency && queue.length) {
@@ -181,7 +182,7 @@ export function createAuditRunner({ keys, connect, onResult, onPhase = () => {},
         .then((result) => { const j = running.get(job.runId); running.delete(job.runId); try { onResult({ ...job, startedAt: j?.startedAt || Date.now() }, result); } catch { /* */ } pump(); });
     }
   };
-  return {
+  return trackAuditRunner({
     /** @returns {{ok:boolean, code?:string}} */
     submit(job) {
       const id = String(job?.target?.id || '');
@@ -196,7 +197,7 @@ export function createAuditRunner({ keys, connect, onResult, onPhase = () => {},
     /** 줄에서 기다리는 작업 지우기(도는 중인 것은 끝까지 — 결과는 받는 쪽이 버린다). @returns {boolean} */
     cancel(runId) { const i = queue.findIndex((x) => x.runId === String(runId)); if (i < 0) return false; queue.splice(i, 1); return true; },
     state(runId) { const r = running.get(String(runId)); if (r) return { state: 'running', phase: r.phase, startedAt: r.startedAt }; const q = queue.findIndex((x) => x.runId === String(runId)); return q >= 0 ? { state: 'queued', position: q + 1 } : null; },
-    list: () => [...[...running.values()].map((j) => ({ runId: j.runId, id: j.target.id, mode: j.mode, state: 'running', phase: j.phase, startedAt: j.startedAt })), ...queue.map((j, i) => ({ runId: j.runId, id: j.target.id, mode: j.mode, state: 'queued', position: i + 1 }))],
+    list: () => [...[...running.values()].map((j) => ({ runId: j.runId, id: j.target.id, mode: j.mode, kind, state: 'running', phase: j.phase, startedAt: j.startedAt })), ...queue.map((j, i) => ({ runId: j.runId, id: j.target.id, mode: j.mode, state: 'queued', position: i + 1 }))],
     size: () => queue.length + running.size,
-  };
+  });
 }

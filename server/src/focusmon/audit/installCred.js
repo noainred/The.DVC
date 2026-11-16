@@ -41,13 +41,19 @@ function fromAuth(a, keyId, src, withAuth, feature = INSTALL_FEATURE) {
  *   edge — 엣지 노드 · corpVcs — 중앙: 대상 법인의 vCenter id 들 / 엣지: 그 엣지 스냅샷의 vCenter id 들 · pick — 화면에서 고른 공통 계정 id
  * @returns {{state:string, src?:'server'|'corp', acct?:string, key?:string, keyId?:string, choices?:Array<{id,name,acct,key}>, auth?:object, code?:string}}
  */
-export function installCredFor(target, { edge = false, corpVcs = [], pick = null, withAuth = false, feature = INSTALL_FEATURE } = {}) {
+/** 50회차 R2: 여러 대상을 볼 때 한 번만 만드는 사본(등록부 서버 · OS 계정) — 못 만들면 빈 객체(대상마다 예전처럼 읽는다). */
+export function credSnapshot() {
+  try { return { servers: listBmServersRaw(), accounts: KS.listAccountsRaw() }; } catch { return {}; }
+}
+
+export function installCredFor(target, { edge = false, corpVcs = [], pick = null, withAuth = false, feature = INSTALL_FEATURE, servers = null, accounts = null } = {}) {
   if (!CRED_FEATURES.includes(feature)) return { state: 'error', code: 'feature-unknown' };
   try {
     if (KS.keyStoreLoadError() || bmLoadError()) return { state: 'unreadable' };
     const host = t(target?.host); const port = Number(target?.port) || 22;
     // ① 같은 주소 · 포트의 SSH 공용 접속 서버(이 노드가 직접 맡은 것)
-    const same = listBmServersRaw().filter((s) => !t(s.agent) && t(s.host) === host && (Number(s.port) || 22) === port);
+    // 50회차 R2: 여러 대상을 한 번에 볼 때(엣지 credReport) 호출부가 한 번 만든 사본을 넘긴다 — 대상마다 등록부 전량을 structuredClone 했다
+    const same = (Array.isArray(servers) ? servers : listBmServersRaw()).filter((s) => !t(s.agent) && t(s.host) === host && (Number(s.port) || 22) === port);
     if (same.length > 1) return { state: 'dup', src: 'server' };
     if (same.length === 1) {
       const s = same[0];
@@ -58,7 +64,7 @@ export function installCredFor(target, { edge = false, corpVcs = [], pick = null
     const vcs = new Set((corpVcs || []).map(t).filter(Boolean));
     // v3.17.0 반증 S2: 엣지도 법인을 거른다 — 엣지는 corpVcs 에 자기 스냅샷의 vCenter 들을 넘긴다(그 엣지가 맡은 법인 밖 공통 계정은 쓰지 않는다 ·
     //   못 읽었으면 빈 목록 → 'noentry' 로 닫힌다)
-    const accs = KS.listAccountsRaw().filter((a) => a.kind === 'os' && t(a.corp) && t(a.keyRef) && vcs.has(t(a.corp)));
+    const accs = (Array.isArray(accounts) ? accounts : KS.listAccountsRaw()).filter((a) => a.kind === 'os' && t(a.corp) && t(a.keyRef) && vcs.has(t(a.corp)));
     if (!accs.length) return { state: 'noentry' };
     const withFeat = accs.filter((a) => explicit(KS.keyById(a.keyRef), feature));
     if (!withFeat.length) return { state: 'feature', src: 'corp', acct: accs[0].username, key: KS.keyById(accs[0].keyRef)?.name || '' };

@@ -605,6 +605,8 @@ function handleConnection(ws, user, opts = {}) {
         }),
       });
     } else if (msg.type === 'data' && stream) {
+      // 49회차 F49-2: data 는 글자만 — 숫자 · 객체면 stream.write 가 처리기 밖으로 던져 '[fatal] uncaughtException' 거짓 장애 로그를 남겼다
+      if (typeof msg.data !== 'string') return;
       session.touch(); // 키 입력 = 사용자 활동(서버측 유휴 — 그룹 F). 1분 1회로 묶는다.
       stream.write(msg.data);
     } else if (msg.type === 'resize' && stream) {
