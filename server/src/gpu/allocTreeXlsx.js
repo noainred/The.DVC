@@ -184,7 +184,7 @@ async function addTreeSheet(wb, name, tree, meta, depth, o) {
   // 요약 칸 — 두 칸씩(이름 / 값)
   const kpis = [
     ['전체 용량(GB)', num(T.capGB), C.title, C.kpiBg], ['할당(GB)', num(T.allocGB), C.alloc, C.kpiBg], ['예비(GB)', num(T.spareGB), C.spare, C.spareBg],
-    ['할당률(%)', num(T.allocPct), C.title, C.kpiBg], ['꺼진 VM(GB)', num(T.offGB), C.off, C.offBg], ['GPU · 호스트', `${T.gpus}장 · ${T.hosts}대`, C.title, C.kpiBg],
+    ['할당률(%)', num(T.allocPct), C.title, C.kpiBg], ['꺼진 VM(GB)', num(T.offGB), C.off, C.offBg], ['GPU · 호스트', `${T.gpus}장 · ${T.hosts}대${T.hostsDown > 0 ? ` · 끊긴 호스트 ${T.hostsDown}대(합계는 부분)` : ''}`, C.title, C.kpiBg],   // 44회차 R5: '모름' 의 이유
   ];
   const kName = ws.addRow(kpis.map((k) => k[0]));
   const kVal = ws.addRow(kpis.map((k) => (k[1] == null ? '모름' : k[1])));

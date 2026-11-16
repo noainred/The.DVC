@@ -299,6 +299,8 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
       out.push({ key, vcenterId: vc.id, severity: over ? 'critical' : 'warning', title: `GPU 할당률 ${t.allocPct}%: ${vc.name || vc.id}`,
         detail: `${vc.id} · 할당 ${t.allocGB} / 전체 ${t.capGB} GB · 예비 ${t.spareGB} GB${over ? ' — 할당이 용량을 넘음(확인 필요)' : ''} · GPU ${t.gpus}장 · 호스트 ${t.hosts}대` });
     }
+    // 44회차 R3(반증 — 재현): GPU 호스트가 전부 끊긴 법인은 계층 노드가 없다 — 위 루프에 없어 발생 중이던 알림이 '해소' 로 나갔다. 일부만 끊긴 법인과 같이 보류.
+    for (const id of Object.keys(tree.hostsDownByVc || {})) held.add(`gpualloc:${id}`);
   }
   // v3.1.0(설계 ipam-alerts-mac-dns ③): IP 충돌 의심 — VM 의 IP 에 그 VM 의 NIC 이 아닌 MAC 이 연속 N회 응답(판정 ipam/conflict.js 하나).
   //   모르는 것(NIC MAC 미수집 · 여러 VM · 지난 스캔에 못 봄 · MAC 이 지워짐) · 지금 값을 못 읽은 vCenter 의 VM 은 판정 보류(held — 해소로 기록하지 않는다).

@@ -98,9 +98,9 @@ export function GpuAllocTree({ scope }) {
   if (err && !data) return <ErrorBox error={err} />;
   if (!data) return <Loading />;
   const TABS = [['tree', '계층 표'], ['place', '배치 추천'], ['history', '추이'], ['diag', '수집 점검']];
-  const T = sumTotals(data, vcSel) || {};
+  const T = sumTotals(data, vcSel, { chips }) || {};   // 44회차 R6: 칩의 '모름' 법인도 합계 판정에
   const kpis = [
-    { label: '전체 용량', value: numText(T.capGB), unit: T.capGB != null ? 'GB' : '', sub: `GPU ${T.gpus}장 · 호스트 ${T.hosts}대${T.hostsDown ? ` · 끊겨 못 읽은 호스트 ${T.hostsDown}대(합계는 부분)` : ''}${T.vsga ? ` · vSGA ${T.vsga}장 제외` : ''}${T.capUnknown ? ` · 모름 ${T.capUnknown}장` : ''}` },
+    { label: '전체 용량', value: numText(T.capGB), unit: T.capGB != null ? 'GB' : '', sub: `GPU ${T.gpus}장 · 호스트 ${T.hosts}대${T.hostsDown ? ` · 끊겨 못 읽은 호스트 ${T.hostsDown}대(합계는 부분)` : ''}${T.corpsUnknown ? ` · GPU 호스트 수를 모르는 법인 ${T.corpsUnknown}곳(합계에 없음)` : ''}${T.vsga ? ` · vSGA ${T.vsga}장 제외` : ''}${T.capUnknown ? ` · 모름 ${T.capUnknown}장` : ''}` },
     { label: '할당(켜진 VM)', value: numText(T.allocGB), unit: 'GB', sub: `vGPU·GPU VM ${T.vmsOn}대 켜짐${T.allocUnknown ? ` · 모름 ${T.allocUnknown}대` : ''}`, tone: 'alloc' },
     { label: '예비', value: numText(T.spareGB), unit: T.spareGB != null ? 'GB' : '', sub: `빈 GPU ${T.freeGpus}장${T.spareGB == null ? ' · 모르는 값이 섞여 계산 안 함' : ''}`, tone: 'spare' },
     { label: '할당률', value: pctText(T.allocPct), unit: '', sub: T.allocPct != null && T.allocPct >= 90 ? '포화에 가깝습니다' : '전체 대비 할당' },
@@ -166,9 +166,9 @@ export function GpuAllocTree({ scope }) {
       {tab === 'history' && <GpuAllocHistory vcSel={vcSel} scope={scope} />}
       {tab === 'diag' && <GpuAllocDiag />}
       {tab !== 'tree' ? null : (data.vcenters || []).length === 0 ? (
-        <div className="card" style={{ padding: 16 }}><span className="muted">{allocEmptyText(data, null)}.</span></div>
+        <div className="card" style={{ padding: 16 }}><span className="muted">{allocEmptyText(data, null, { chips })}.</span></div>
       ) : rows.length === 0 ? (
-        <div className="card" style={{ padding: 16 }}><span className="muted">{allocEmptyText(data, vcSel, { query })}{vcSel.size ? ` (법인 ${[...vcSel].join(', ')} 선택 중)` : ''}.</span></div>
+        <div className="card" style={{ padding: 16 }}><span className="muted">{allocEmptyText(data, vcSel, { query, chips })}{vcSel.size ? ` (법인 ${[...vcSel].join(', ')} 선택 중)` : ''}.</span></div>
       ) : (
         <STable className="gpu-alloc-table" minWidth={1620}>
           <thead>

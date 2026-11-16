@@ -134,7 +134,7 @@ test('42회차 R3 · R5 · R6: 원시 행 수 하한 표지 · 카탈로그 HAS_
   const s = read('horizon/sessionCollect.js');
   assert.match(s, /if \(more !== true && body\.length < CATALOG_PAGE\) break;/);
   assert.match(s, /if \(more === true && body\.length === 0\) \{ if \(page === 1 \|\| prevLen < size\) break; truncated = true; break; \}/);   // 43회차 R6
-  assert.match(s, /if \(!r\.ok && page > 1 && prevLen < size\) break;/, '43회차 R7: 짧은 쪽 다음 요청의 오류는 끝');
+  assert.match(s, /if \(!r\.ok && page > 1 && prevLen < size && PAGE_END_STATUS\.has\(Number\(r\.status\)\)\) break;/, '43회차 R7 → 44회차 R1: 짧은 쪽 다음 요청의 범위 밖 코드만 끝');
   assert.match(s, /if \(!r\.ok && page > 1\) \{ truncated\[kind\] = true; break; \}/, '43회차 R7: 카탈로그 2쪽 이후 오류는 앞 쪽까지');
 });
 
@@ -168,3 +168,92 @@ test('43회차: 끊긴 GPU 호스트가 있는 법인 · 전체 합계는 예비
   assert.equal(t.totals.spareGB, null);
 });
 
+
+/* ── 44회차(43회차 수정 반증) ── */
+test('44회차 R1: 쪽 상한이 작은 서버의 2쪽 이후 401 · 503 은 앞 쪽까지를 전체로 적재하지 않는다(범위 밖 404 만 끝)', async () => {
+  const { collectServerSessions } = await import('../src/horizon/sessionCollect.js');
+  const orig = globalThis.fetch;
+  const json = (body, status = 200, headers = {}) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...headers } });
+  const SRV = { id: 'hz44', name: 'HZ', host: 'https://hz.example.com', username: 'u', password: 'p', domain: 'CORP', timeoutMs: 5_000 };
+  const run = async (failStatus) => {
+    globalThis.fetch = async (url) => {
+      const u = String(url);
+      if (u.endsWith('/rest/login')) return json({ access_token: 't' });
+      if (u.endsWith('/rest/logout')) return json({});
+      const p = Number(new URL(u).searchParams.get('page'));
+      if (failStatus && p === 3) return json({ error_message: 'x' }, failStatus);
+      const n = p < 4 ? 2 : 1;   // 서버 쪽 상한 2(요청 5) · 전체 7건
+      return json(Array.from({ length: n }, (_, i) => ({ id: `s${p}-${i}`, user_name: `u${p}-${i}`, session_state: 'CONNECTED' })), 200, { HAS_MORE_RECORDS: p < 4 ? 'true' : 'false' });
+    };
+    try { return await collectServerSessions(SRV, { pageSize: 5, maxPages: 10, catalog: false }); } finally { globalThis.fetch = orig; }
+  };
+  const ok = await run(0);
+  assert.equal(ok.ok, true); assert.equal(ok.sessions, 7);
+  for (const st of [401, 429, 503]) {
+    const r = await run(st);
+    assert.ok(r.ok === false || r.truncated === true, `HTTP ${st}: 앞 쪽까지(${r.sessions}건)를 truncated:false 전체로 적재하면 안 된다`);
+  }
+  const end = await run(404);
+  assert.equal(end.ok, true); assert.equal(end.truncated, false); assert.equal(end.sessions, 4);
+});
+
+test('44회차 R2: 재개는 장비에서 작업을 확인한 뒤에만 du 시작 기준(onAttach) — 확인 전 실패는 이번 실행의 실패', async () => {
+  const { runDetached } = await import('../src/isidu/detach.js');
+  const t = { id: 'tA', path: '/ifs/a', sizeMode: 'h' };
+  const started = Date.now() - 100 * 60_000;
+  let attached = null;
+  const broken = { exec: async () => { throw new Error('연결 끊김'); } };
+  await runDetached(broken, t, { cmdMs: 180 * 60_000, attachJob: 'isidu-tA-1', started, pollMinMs: 1, onAttach: (ts) => { attached = ts; } }).catch(() => {});
+  assert.equal(attached, null, '첫 상태 확인이 끊기면 onAttach 를 부르지 않는다');
+  const seq = ['DVC-RUNNING', 'DVC-DONE 0'];
+  const api = { exec: async () => ({ stdout: `${seq.length ? seq.shift() : ''}\n` }) };
+  await runDetached(api, t, { cmdMs: 180 * 60_000, attachJob: 'isidu-tA-1', started, pollMinMs: 1, onAttach: (ts) => { attached = ts; } });
+  assert.equal(attached, started, '확인하면 원래 du 시작 시각');
+  const c = read('isidu/collect.js');
+  assert.match(c, /let runStart = attachJob \? Date\.now\(\) : started;/);
+  assert.match(c, /onAttach: \(ts\) => \{ runStart = ts; \}/);
+});
+
+test('44회차 R3 · R4: GPU 호스트가 전부 끊긴 법인 — 알림은 보류(해소 아님) · 헬스체크는 사유를 나눠 센다', async () => {
+  const { evaluate } = await import('../src/alerts.js');
+  const { computeHealthReport } = await import('../src/reports/healthReport.js');
+  const gpu = (i) => ({ model: 'NVIDIA A40', memGB: 48, mode: 'vgpu', vgpuMode: true, pciId: `0000:${i}:00.0`, vms: [] });
+  const vg = { type: 'vgpu', vgpu: 1, passthrough: 0, profile: 'nvidia_a40-24q', count: 1 };
+  const snap = {
+    vcenters: [{ id: 'vc1', status: 'ok' }, { id: 'vc2', status: 'ok' }],
+    hosts: [{ id: 'vc1:esx1', vcenterId: 'vc1', name: 'esx1', connectionState: 'CONNECTED', gpus: [gpu(1)] },
+      { id: 'vc1:esx2', vcenterId: 'vc1', name: 'esx2', connectionState: 'NOT_RESPONDING', gpus: [] },
+      { id: 'vc2:esx9', vcenterId: 'vc2', name: 'esx9', connectionState: 'NOT_RESPONDING', gpus: [] }],
+    vms: [{ id: 'vc1:vm-1', name: 'a', vcenterId: 'vc1', host: 'esx1', powerState: 'POWERED_ON', gpu: vg },
+      { id: 'vc1:vm-2', name: 'b', vcenterId: 'vc1', host: 'esx2', powerState: 'POWERED_ON', gpu: vg },
+      { id: 'vc2:vm-9', name: 'c', vcenterId: 'vc2', host: 'esx9', powerState: 'POWERED_ON', gpu: vg }],
+    datastores: [], alarms: [],
+  };
+  const out = evaluate(snap, { channels: {}, rules: { gpuAllocPct: { enabled: true, threshold: 90 } } });
+  assert.ok(out.held.has('gpualloc:vc2'), '전부 끊긴 법인(노드 없음)도 보류');
+  assert.ok(out.held.has('gpualloc:vc1'));
+  const s = computeHealthReport(snap, { now: Date.now() }).sections.find((x) => x.key === 'gpuAlloc');
+  assert.equal(s.unknown, 2);
+  assert.match(s.detail, /GPU 호스트가 끊긴 법인 2곳/);
+  assert.doesNotMatch(s.detail, /VM 이 섞인 법인/, '끊긴 호스트 법인을 할당 모름 사유로 세지 않는다');
+  const only = { ...snap, vcenters: [{ id: 'vc2', status: 'ok' }], hosts: [snap.hosts[2]], vms: [snap.vms[2]] };
+  const s2 = computeHealthReport(only, { now: Date.now() }).sections.find((x) => x.key === 'gpuAlloc');
+  assert.ok(s2, '범위가 전부 끊긴 법인뿐이어도 절을 싣는다');
+  assert.equal(s2.status, 'unknown');
+});
+
+test('44회차 R5: 엑셀 계층 표 KPI 에 끊긴 호스트(합계는 부분) — 노드 없는 법인뿐이어도 이유가 시트에 남는다', async () => {
+  const { buildGpuAllocTree } = await import('../src/gpu/allocTree.js');
+  const { buildGpuAllocWorkbookInline } = await import('../src/gpu/allocTreeXlsx.js');
+  const ExcelJS = (await import('exceljs')).default;
+  const gpu = { model: 'NVIDIA A40', memGB: 48, mode: 'vgpu', vgpuMode: true, pciId: '0000:1:00.0', vms: [] };
+  const snap = { vcenters: [{ id: 'vc2', status: 'ok' }, { id: 'vc3', status: 'ok' }],
+    hosts: [{ id: 'vc2:e', vcenterId: 'vc2', name: 'e', connectionState: 'NOT_RESPONDING', gpus: [] }, { id: 'vc3:f', vcenterId: 'vc3', name: 'f', connectionState: 'CONNECTED', gpus: [gpu] }],
+    vms: [{ id: 'vc2:vm-1', name: 'a', vcenterId: 'vc2', host: 'e', powerState: 'POWERED_ON', gpu: { type: 'vgpu', vgpu: 1, passthrough: 0, profile: 'nvidia_a40-24q', count: 1 } }] };
+  const tree = buildGpuAllocTree(snap);
+  const buf = await buildGpuAllocWorkbookInline(tree, { stamp: '2026-11-16 17:00', tz: 'KST' }, { sheets: ['tree'] });
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf);
+  const top = [];
+  wb.worksheets[0].eachRow((row, n) => { if (n <= 6) top.push(JSON.stringify(row.values)); });
+  assert.match(top.join('\n'), /끊긴 호스트 1대\(합계는 부분\)/);
+});

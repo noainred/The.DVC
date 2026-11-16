@@ -108,27 +108,46 @@ export function pickVcenters(tree, vcSel) {
 
 const TOT_KEYS = ['hosts', 'gpus', 'vsga', 'capGB', 'capUnknown', 'allocGB', 'allocUnknown', 'offGB', 'offUnknown', 'vmsOn', 'vmsOff', 'unplaced', 'freeGpus', 'noPlacement'];
 const r1 = (n) => Math.round(n * 10) / 10;
+/** 44회차 R6: 고른(없으면 전체) 법인 칩 가운데 GPU 호스트 수를 모르는 것 — 끊긴 호스트(hostsDown)는 hostsDownByVc 로 따로 센다. */
+export function unknownChipsOf(chips, vcSel) {
+  const pick = vcSel && vcSel.size ? (chips || []).filter((c) => vcSel.has(c.id)) : (chips || []);
+  return pick.filter((c) => c?.unknown && c.unknown !== 'hostsDown');
+}
+const unknownReasonText = (list) => [...new Set(list.map((c) => CORP_UNKNOWN_TEXT[c.unknown] || '모름'))].join(' · ');
 /**
- * v2.853: 고른 법인들의 합계 — 서버 합계(allocTree.js finishTotals)와 같은 규칙: 용량·할당 중 모르는 것이 섞이면 예비·할당률은 null
- * (부분 합을 예비로 보이지 않는다). 하나도 안 고르면 서버 전체 합계를 그대로 쓴다.
+ * v2.853: 고른 법인들의 합계 — 용량·할당 중 모르는 것이 섞이면 예비·할당률은 null(부분 합을 예비로 보이지 않는다). 하나도 안 고르면 서버 전체 합계를 그대로 쓴다.
+ * 44회차 R7(정정): '서버 합계와 같은 규칙' 이지만 값은 다를 수 있다 — 서버는 반올림 전 합을 반올림하고, 여기서는 이미 반올림한 법인 합계를 더한다(0.1 GB 안팎 차이).
+ * 44회차 R6: chips 를 주면 GPU 호스트 수를 모르는 법인(수집 전 · 접속 불가 · 수집 꺼짐 · 점검 중 · 상한)을 corpsUnknown 으로 센다 —
+ *   고른 법인에 있으면 예비 · 할당률을 내지 않는다. 전체(선택 없음)는 서버 합계(엑셀 KPI 와 같은 값)를 그대로 두고 개수만 밝힌다(합계가 하나도 없으면 비운다).
  */
-export function sumTotals(tree, vcSel) {
-  if (!vcSel || !vcSel.size) return tree?.totals || null;
+export function sumTotals(tree, vcSel, { chips = null } = {}) {
+  const corpsUnknown = chips ? unknownChipsOf(chips, vcSel).length : 0;
+  if (!vcSel || !vcSel.size) {
+    const T = tree?.totals || null;
+    if (!T || !corpsUnknown) return T;
+    const none = !(tree?.vcenters || []).length;
+    return { ...T, corpsUnknown, ...(none ? { spareGB: null, allocPct: null } : {}) };
+  }
   const t = Object.fromEntries(TOT_KEYS.map((k) => [k, 0]));
   for (const vc of pickVcenters(tree, vcSel)) for (const k of TOT_KEYS) t[k] += numOrNull(vc.totals?.[k]) || 0;
   // 43회차 R2: 고른 법인의 끊긴 GPU 호스트(계층 노드가 없는 법인 포함 — hostsDownByVc) — 있으면 용량이 부분이라 예비 · 할당률을 내지 않는다(서버 합계와 같은 규칙)
   let hostsDown = 0;
   for (const id of vcSel) hostsDown += numOrNull(tree?.hostsDownByVc?.[id]) || 0;
-  const known = t.capUnknown === 0 && t.allocUnknown === 0 && hostsDown === 0;
-  return { ...t, ...(hostsDown ? { hostsDown } : {}), capGB: r1(t.capGB), allocGB: r1(t.allocGB), offGB: r1(t.offGB),
+  const known = t.capUnknown === 0 && t.allocUnknown === 0 && hostsDown === 0 && corpsUnknown === 0;
+  return { ...t, ...(hostsDown ? { hostsDown } : {}), ...(corpsUnknown ? { corpsUnknown } : {}), capGB: r1(t.capGB), allocGB: r1(t.allocGB), offGB: r1(t.offGB),
     spareGB: known ? r1(t.capGB - t.allocGB) : null, allocPct: known && t.capGB > 0 ? Math.round((t.allocGB / t.capGB) * 100) : null };
 }
-/** 43회차 R2: 계층이 비거나 고른 법인에 행이 없을 때의 문구 — 끊긴 GPU 호스트가 있으면 '없음' 이 아니라 '못 읽음'. */
-export function allocEmptyText(tree, vcSel, { query = '' } = {}) {
+/**
+ * 43회차 R2: 계층이 비거나 고른 법인에 행이 없을 때의 문구 — 끊긴 GPU 호스트가 있으면 '없음' 이 아니라 '못 읽음'.
+ * 44회차 R6: chips 를 주면 칩의 '모름' 사유(수집 전 · 접속 불가 · 수집 꺼짐 · 점검 중 · 상한)도 같은 판정으로 — 칩은 '—' 인데 문구만 '없습니다' 이던 어긋남.
+ */
+export function allocEmptyText(tree, vcSel, { query = '', chips = null } = {}) {
   const ids = vcSel && vcSel.size ? [...vcSel] : Object.keys(tree?.hostsDownByVc || {});
   const down = ids.reduce((a, id) => a + (numOrNull(tree?.hostsDownByVc?.[id]) || 0), 0);
   if (query) return `‘${query}’ 에 맞는 법인·호스트·VM 이 없습니다`;
   if (down) return `GPU VM 이 있는 호스트 ${down}대가 끊겨 GPU 를 읽지 못했습니다 — GPU 호스트가 없다는 뜻이 아닙니다`;
+  const unk = chips ? unknownChipsOf(chips, vcSel) : [];
+  if (unk.length) return `법인 ${unk.length}곳의 GPU 호스트 수를 모릅니다(${unknownReasonText(unk)}) — GPU 호스트가 없다는 뜻이 아닙니다`;
   return vcSel && vcSel.size ? '고른 법인에 GPU 가 설치된 호스트가 없습니다' : 'GPU 가 설치된 호스트가 없습니다';
 }
 

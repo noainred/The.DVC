@@ -122,20 +122,23 @@ export function computeHealthReport(snap, opts = {}) {
   //   90% 이상 경고 · 예비 음수(할당 > 용량) 위험. 모르는 값이 섞여 할당률을 못 낸 법인은 '확인 불가' 로 센다(정상에 넣지 않는다).
   const gpuWarnPct = Number(opts.gpuWarnPct) || 90;
   const gtree = buildGpuAllocTree(snap);
-  if (gtree.vcenters.length) {
+  // 44회차 R4(반증 — 재현): 끊긴 GPU 호스트가 있는 법인(계층 노드가 없는 법인 포함 — hostsDownByVc)은 사유를 따로 센다
+  //   (예전에는 '할당을 모르는 VM 이 섞인 법인' 으로 틀리게 세고, 전부 끊긴 법인은 세지 않았다 — 범위가 그런 법인뿐이면 절이 없었다).
+  const gpuDownVc = new Set(Object.keys(gtree.hostsDownByVc || {}));
+  if (gtree.vcenters.length || gpuDownVc.size) {
     const gpuItems = [];
     let gpuUnknown = 0; let gpuOver = 0;
     for (const vc of gtree.vcenters) {
       const t = vc.totals;
-      if (numOrNull(t.allocPct) == null) { gpuUnknown += 1; continue; }
+      if (numOrNull(t.allocPct) == null) { if (!gpuDownVc.has(String(vc.id))) gpuUnknown += 1; continue; }
       if (t.allocPct < gpuWarnPct) continue;
       if (numOrNull(t.spareGB) != null && t.spareGB < 0) gpuOver += 1;
       gpuItems.push({ name: vc.name || vc.id, vcenterId: vc.id, usagePct: t.allocPct, spareGB: t.spareGB, capGB: t.capGB });
     }
     gpuItems.sort((a, b) => b.usagePct - a.usagePct);
-    S('gpuAlloc', withUnknown(lv(gpuItems.length, gpuOver), gpuUnknown), gpuItems.length, gpuItems.slice(0, 50), `법인 GPU 할당률 ${gpuWarnPct}% 이상`,
-      unknownDetail([['할당을 모르는 VM 이 섞인 법인', gpuUnknown, '곳']]));
-    sec.gpuAlloc.unknown = gpuUnknown;
+    S('gpuAlloc', withUnknown(lv(gpuItems.length, gpuOver), gpuUnknown + gpuDownVc.size), gpuItems.length, gpuItems.slice(0, 50), `법인 GPU 할당률 ${gpuWarnPct}% 이상`,
+      unknownDetail([['할당 · 용량을 모르는 GPU · VM 이 섞인 법인', gpuUnknown, '곳'], ['GPU 호스트가 끊긴 법인', gpuDownVc.size, '곳']]));
+    sec.gpuAlloc.unknown = gpuUnknown + gpuDownVc.size;
   }
 
   const sections = Object.values(sec);

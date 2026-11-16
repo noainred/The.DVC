@@ -107,14 +107,15 @@ function sleep(ms, signal) {
  * @returns {Promise<{x:{stdout:string, stderr:string, code:number|null}, mode:'detached'|'attached-fallback', attached:boolean, jobId:string|null, detachFallback?:string}>}
  *   던지는 오류에는 `jobId` 가 붙는다(호출부가 시한 실패 때 작업을 멈출 수 있게).
  */
-export async function runDetached(api, t, { cmdMs, attachJob = null, onJob = null, onRestart = null, signal = null, started = Date.now(), now = () => Date.now(), pollMinMs = POLL_MIN_MS } = {}) {
+export async function runDetached(api, t, { cmdMs, attachJob = null, onJob = null, onRestart = null, onAttach = null, signal = null, started = Date.now(), now = () => Date.now(), pollMinMs = POLL_MIN_MS } = {}) {
   const span = Math.max(10_000, Number(cmdMs) || 0);
   let deadline = started + span;
   let jobId = attachJob && JOB_RE.test(String(attachJob)) ? String(attachJob) : null;
   let attached = false;
   if (jobId) {
     const st = parseStatus((await api.exec(statusCommand(jobId), 20_000)).stdout);
-    if (st.state === 'done' || st.state === 'running') attached = true;
+    // 44회차 R2: 장비에서 그 작업을 확인한 뒤에만 호출부 소요 기준을 du 시작 시각으로 돌린다(확인 전 실패는 이번 실행의 실패)
+    if (st.state === 'done' || st.state === 'running') { attached = true; try { onAttach?.(started); } catch { /* */ } }
     else jobId = null; // 끝난 흔적이 없다(재부팅·정리) — 새로 시작한다
   }
   if (!jobId) {

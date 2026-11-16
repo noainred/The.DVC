@@ -26,6 +26,8 @@ import { readJsonCapped } from '../util/readCapped.js'; // v2.686 SEC-2686-01: �
 import { isDemoEntryId, demoHorizonSessionsRaw, demoHorizonCatalogRaw } from '../mock/demo/users.js'; // v2.708 데모(mock 에서만)
 /** 한 페이지 상한 — size 최대 1000 세션 × 수 KB 를 넉넉히 덮는다. 넘으면 그 페이지는 형식 미인식이다. */
 const PAGE_MAX_BYTES = 32 * 1_048_576;
+/** 44회차 R1: 짧은 쪽 다음 요청의 오류 가운데 '범위 밖 쪽(끝)' 으로 읽는 코드 — 추정(실측 근거 없음). 그 밖(401 · 403 · 429 · 5xx)은 실패. */
+const PAGE_END_STATUS = new Set([400, 404, 416]);
 
 /*
  * v2.684 — 앱·데스크톱 이름 카탈로그(앱 풀·데스크톱 풀·팜 목록).
@@ -115,7 +117,9 @@ export async function collectServerSessions(s, { pageSize = 500, maxPages = 20, 
       for (let page = 1; ; page++) {
         const r = await get(SESSION_PATH, { query: { page: String(page), size: String(size) } });
         // 43회차 R7: '더 있음' 을 믿고 짧은 쪽 다음을 요청했는데 오류면 끝으로 본다(41회차 전과 같이 — 그 쪽은 원래 요청하지 않았다).
-        if (!r.ok && page > 1 && prevLen < size) break;
+        //   44회차 R1(반증 — 재현): 오류 전부를 끝으로 보면 401 · 429 · 503 이 앞 쪽까지를 truncated:false 인 '전체' 로 적재했다(쪽 상한이 작은 서버의 모든 쪽).
+        //   '범위 밖 쪽' 으로 읽을 수 있는 코드(PAGE_END_STATUS — 추정, Horizon 실측 근거 없음)만 끝으로 보고, 그 밖은 꽉 찬 쪽 서버와 같이 실패로 던진다.
+        if (!r.ok && page > 1 && prevLen < size && PAGE_END_STATUS.has(Number(r.status))) break;
         if (!r.ok) {
           const e = new Error(`세션 조회 실패 (HTTP ${r.status})`);
           e.httpStatus = r.status;
