@@ -160,6 +160,7 @@
 | `UpgradeNotice.jsx` | '프로그램이 업그레이드되었으니 새로고침 하세요' 상자(v2.999 · 설계 docs/design/upgrade-reload ①③). 오류 경계(ErrorBoundary)가 '이 창의 판 ≠ 서버의 판' 이거나 화면 조각을 못 받은 오류일 때 그린다. ⚠ 주 번들에 둔다… | `useUpgradeVersions` `useSinceNotes` `UpgradeChanges` `RefreshIcon` `default` | 2 | 2 | 2 |
 | `selectSort.js` | 드롭다운(&lt;select>) 선택지 정렬(순수, v2.708 — 사용자 요청 "모든 드롭박스 메뉴를 정렬해서 보이게, 앞으로 만드는 드롭박스도 정렬"). 화면은 `components/Select.jsx` 를 쓰고, 날 `<select>` 는 테스트가 금지한다. | `optionText` `isPinnedOption` `sortSelectChildren` | 2 | 1 | 1 |
 | `serviceDownText.js` | '서비스 일시 미가용' 판정·문구(순수, v2.459). | `serviceDownKind` `headlineFor` `probeOutcome` `reconnectStep` `reconnectStatusText` `diagnosticLines` 외 4 | 2 | 1 | 3 |
+| `sortableText.js` | 표 자동 정렬의 순수 로직(v2.422, 사용자 요구 '모든 표에 제목 클릭 정렬'). DOM 없이 React 엘리먼트 트리만 다루므로 node 환경 테스트로 고정한다. STable.jsx 가 이 함수들로 헤더 클릭 → tbody 행 재정렬을 수행한다. | `textOf` `sortKeyOf` `isEmptyCellValue` `compareCellValues` `compareKeys` `cellText` 외 4 | 2 | 1 | 7 |
 | `useNarrowScreen.js` | 좁은 화면 여부 훅(v2.987 — VmDistPanels.jsx 에서 옮김 · 물리서버 폴더와 함께 쓴다). matchMedia 가 없거나 던지면 넓은 화면으로 본다(SSR · 구형 브라우저). | `useNarrowScreen` | 2 | 2 | 0 |
 | `vmperf/VmPerfView.jsx` | VM · ESXi 호스트 **성능** 화면(v2.911 · 시안 docs/design/vm-perf ②③④ · 사용자 컨펌 '개선' = 기본값). 예전 성능 모달(VmMetrics.jsx MetricModal — 지표 4 + 기간 5 버튼 한 줄 · datetime-l… | `default` | 2 | 1 | 3 |
 | `AccessDenied.jsx` | AccessDenied — 권한 부족(403) 안내 화면. | `default` | 1 | 1 | 2 |
@@ -171,7 +172,6 @@
 | `invSearchQuery.js` | 헤더 ⌘K '통합 장비 검색' 의 화면 쪽 순수 모듈(v2.909). | `splitPrefix` `withKindPrefix` `focusPlan` `listPlan` `normPlan` `recentKeyFor` 외 26 | 1 | 1 | 4 |
 | `loadState.js` | 화면이 '비어 있는 이유' 를 정직하게 말하게 하는 판정(v2.509, 순수 모듈). v2.747: V4 셸 삭제로 version_4/loadState.js 에서 옮겼다(관제 콘솔이 쓴다). | `isTimeoutError` `isNetworkError` `loadPhase` `collectProgress` `loadText` | 1 | 1 | 1 |
 | `palette.js` | 헤더 ⌘K 기능 찾기의 후보 목록과 매칭(v2.508, 순수). | `catsOfFrom` `tabEntries` `search` `flatten` `TAB_GROUP` | 1 | 1 | 2 |
-| `sortableText.js` | 표 자동 정렬의 순수 로직(v2.422, 사용자 요구 '모든 표에 제목 클릭 정렬'). DOM 없이 React 엘리먼트 트리만 다루므로 node 환경 테스트로 고정한다. STable.jsx 가 이 함수들로 헤더 클릭 → tbody 행 재정렬을 수행한다. | `textOf` `sortKeyOf` `compareKeys` `cellText` `sortChildren` `nextSortState` 외 2 | 1 | 1 | 7 |
 | `tableKeys.js` | 표 행 React key 를 **고유하게**(v3.13.4 · 2차 루프 5회차). - DataTable 은 행 key 로 `r.id \|\| r.key \|\| i` 를 썼다. 라이선스 표는 가림 처리된 키(XXXXX-…-AAAAA)가 여러 vCenter 에서 같아 key… | `uniqueKeys` `baseRowKey` | 1 | 1 | 1 |
 | `vmMetricsText.js` | 성능 모달의 조회 실패 판정(순수 — vitest 고정, v2.591 감사 F6). | `metricErrorState` `metricSkipText` `metricAuthStopText` `edgePortalHref` `stopsAutoRefresh` | 1 | 1 | 3 |
 | `vmRemoteProbeText.js` | VM 원격 접속 버튼의 사전 도달성 점검 문구(순수 — 판정과 문구를 한 곳에 둔다). | `probeFailState` `probeRow` `probeTip` `probeColor` `probeFooter` | 1 | 1 | 2 |

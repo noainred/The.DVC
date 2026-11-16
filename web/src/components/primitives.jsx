@@ -22,6 +22,7 @@ import ServiceDown from './ServiceDown.jsx';
 import { serviceDownKind } from './serviceDownText.js';
 import { numOrNull } from '../numOrNull.js';
 import { errorBoxInput } from './accessDeniedText.js';
+import { compareCellValues } from './sortableText.js';
 
 /** VM GPU 배지 — vGPU/패스쓰루/혼합. Vms.jsx 에 있던 것을 공용으로 옮겼다(상세 화면 단일화). */
 const GPU_TYPE = { vgpu: ['vGPU', 'green'], passthrough: ['패스쓰루', 'amber'], mixed: ['혼합', 'purple'] };
@@ -56,9 +57,10 @@ export function Kpi({ label, value, unit, meta, pct, accent, onClick, title }) {
         {value}
         {unit && <small> {unit}</small>}
       </div>
-      {typeof pct === 'number' && (
+      {/* v3.17.3: NaN 도 typeof 'number' 라 'NaN%' 막대(초록)를 그렸다 — 유한수일 때만, 폭은 0~100 */}
+      {typeof pct === 'number' && Number.isFinite(pct) && (
         <div className="usage-bar">
-          <span style={{ width: `${Math.min(pct, 100)}%`, background: usageColor(pct) }} />
+          <span style={{ width: `${Math.max(0, Math.min(pct, 100))}%`, background: usageColor(pct) }} />
         </div>
       )}
       {meta && <div className="meta">{meta}</div>}
@@ -73,7 +75,7 @@ export function UsageCell({ pct }) {
   return (
     <span className="nowrap">
       <span className="mini-bar">
-        <span style={{ width: `${Math.min(v, 100)}%`, background: usageColor(v) }} />
+        <span style={{ width: `${Math.max(0, Math.min(v, 100))}%`, background: usageColor(v) }} />
       </span>{' '}
       <span className="pct tabular">{v}%</span>
     </span>
@@ -148,11 +150,10 @@ export function DataTable({
   const sorted = useMemo(() => {
     const col = columns.find((c) => c.key === sort.key);
     const val = (r) => (col?.sortValue ? col.sortValue(r) : r[sort.key]);
+    // v3.17.3: 비교는 공용 compareCellValues — 빈 값('' · '—' · NaN 포함)은 방향과 무관하게 뒤 · 글자는 숫자 인식(Collator 재사용).
     return [...rows].sort((a, b) => {
-      const x = val(a), y = val(b);
-      if (x == null) return 1;
-      if (y == null) return -1;
-      const cmp = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y));
+      const { empty, cmp } = compareCellValues(val(a), val(b));
+      if (empty != null) return empty;
       return sort.dir === 'asc' ? cmp : -cmp;
     });
   }, [rows, sort, columns]);

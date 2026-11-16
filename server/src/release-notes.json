@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "3.17.3",
+      "date": "2026-11-16",
+      "title": "2차 공통 기능 점검 2회차: 표 정렬 빈 값 · Kpi 막대 · 한글 조합 중 ESC",
+      "notes": [
+        "DataTable(데이터 표 181곳 이상) 열 정렬: 빈 문자열 · '—' · NaN 이 null 이 아니라서 값 사이에 섞였고(NaN 은 순서를 깨뜨림), 글자는 숫자를 인식하지 않아 vc-10 이 vc-2 앞에 왔다 — 공용 compareCellValues(빈 값은 오름 · 내림 모두 뒤 · 숫자 인식 · Collator 재사용)로.",
+        "Kpi 사용률 막대: NaN 도 typeof 'number' 라 'NaN%' 막대(초록)를 그렸다 · 음수 폭 — 유한수일 때만, 폭은 0~100.",
+        "모달 ESC: 한글 조합 중(isComposing · keyCode 229)의 ESC 는 조합 취소다 — 모달을 닫아 입력하던 글을 잃지 않게.",
+        "회귀 sortableText.test.js · Chromium(#/vms 1,000행 — 빈 값 941행이 두 방향 모두 뒤 · IP 자연 순서 · ESC 조합 중 유지)."
+      ]
+    },
+    {
       "version": "3.17.2",
       "date": "2026-11-16",
       "title": "2차 공통 기능 점검 1회차: 저장소 읽기의 '객체 아닌 JSON' 판정을 공용 헬퍼 하나로",
