@@ -705,5 +705,6 @@
     권한 파일 손상은 GET `/admin/permissions` 의 `loadError` 와 화면 표지 · 복구 안내 정정(D-11) · 저장 함수가 던지는 사유를 라우트가 그대로(D-12).
 
 - **RDP 게이트웨이는 guacd 핸드셰이크(ready) 전 브라우저 프레임을 버린다**(전체 점검 48회차 F1 — `proxy/guacdTunnel.js`): 그 전 프레임을 guacd 로 쓰면 브라우저가 첫 `select` · `connect` 를 바꿔
-  매핑 대상 · 범위 · 프로토콜을 건너뛴다. 세션 연장(`dvc-token`)만 서버가 소비한다. 쿼리의 화면 크기는 `rdpDim`(정수 · 범위). 회귀 `test/rvH_remoteSession.test.js` 48회차 · `fullAudit48`.
+  매핑 대상 · 범위 · 프로토콜을 건너뛴다. 세션 연장(`dvc-token`)만 서버가 소비한다. 쿼리의 화면 크기는 `rdpDim`(정수 · 범위로 자름).
+  Guacamole 명령 파서의 길이 칸은 **숫자 1~10자리만**(49회차 F49-1 — 음수 길이로 무한 루프 · 이벤트 루프 정지). 동기 무한 루프 회귀 시험은 자식 프로세스 + 시한으로. 회귀 `test/rvH_remoteSession.test.js` 48회차 · `fullAudit48`.
 - **경로 기반 skip · 게이트는 소문자로 판정**(48회차 F3 — 전역 레이트리밋): express 라우팅은 대소문자를 가리지 않는다(v2.506 toolGate 와 같은 갈래).

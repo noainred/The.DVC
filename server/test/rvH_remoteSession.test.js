@@ -481,7 +481,7 @@ test('48회차 F1: guacd 핸드셰이크(ready) 전의 브라우저 프레임은
     assert.ok(!sock.writes.some((s) => s.includes('3.ssh') || s.includes('192.168.7.9')), 'ready 전 브라우저 프레임을 guacd 로 쓰면 안 된다');
     sock.emit('data', Buffer.from('4.args,13.VERSION_1_5_0,8.hostname,4.port,5.width,6.height;'));
     const connect = sock.writes.find((s) => s.startsWith('7.connect'));
-    assert.ok(connect && connect.includes('4.1024') && connect.includes('3.768'), `크기는 정수 · 범위만: ${connect}`);
+    assert.ok(connect && connect.includes('4.1024') && connect.includes('4.8192'), `크기는 정수만 · 범위 밖은 자른다(49회차 F49-3): ${connect}`);
     sock.emit('data', Buffer.from('5.ready,5.$abcd;'));
     ws.input('5.mouse,1.1,1.1,1.0;');
     assert.ok(sock.writes.some((s) => s.startsWith('5.mouse')), 'ready 뒤 입력은 그대로 간다');

@@ -53,8 +53,11 @@ function parseInstruction(str, start) {
   while (i < str.length) {
     const dot = str.indexOf('.', i);
     if (dot < 0) return null;
-    const len = parseInt(str.slice(i, dot), 10);
-    if (Number.isNaN(len)) return null;
+    // 49회차 F49-1(재현 — 높음): 길이 칸은 숫자만(1~10자리) — parseInt 는 '-4' 를 받아 i 가 뒤로 가 루프가 끝나지 않았다
+    //   (브라우저 프레임 '9.dvc-token,-4.' 하나로 이벤트 루프 약 10초 정지 · 작은 힙이면 OOM). guacd 쪽 데이터도 같은 파서를 쓴다.
+    const lenText = str.slice(i, dot);
+    if (!/^\d{1,10}$/.test(lenText)) return null;
+    const len = Number(lenText);
     const vEnd = dot + 1 + len;
     if (vEnd > str.length) return null;
     els.push(str.slice(dot + 1, vEnd));
@@ -207,13 +210,14 @@ function handle(ws, params, user, token = null) {
   return { session, isClosed: () => closed };
 }
 
-/** 48회차: RDP 화면 크기 — 100~8192 정수만(그 밖은 기본값). */
+/** 48회차: RDP 화면 크기 — 정수만(아니면 기본값) · 49회차 F49-3: 범위 밖은 100~8192 로 자른다(8192 를 넘는 창이 기본 1024 로 떨어져 비율이 깨졌다). */
 export function rdpDim(v, dflt) {
   const s = String(v ?? '').trim();
-  if (!/^\d{1,5}$/.test(s)) return dflt;
-  const n = Number(s);
-  return n >= 100 && n <= 8192 ? String(n) : dflt;
+  if (!/^\d{1,6}$/.test(s)) return dflt;
+  return String(Math.min(8192, Math.max(100, Number(s))));
 }
+/** 시험 전용 — Guacamole 명령 파서(49회차 F49-1). */
+export const _parseInstructionForTest = parseInstruction;
 
 /** 테스트 전용 — 실제 RDP 연결 처리기(가짜 ws·가짜 guacd 소켓으로 폐기를 재현한다). */
 export const _rdpHandleForTest = handle;
