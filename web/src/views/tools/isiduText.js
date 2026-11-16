@@ -463,7 +463,8 @@ export function usersFootNote(res, shownCount) {
   const total = numOrNull(res.total) || 0;
   const from = (numOrNull(res.offset) || 0) + 1;
   const to = (numOrNull(res.offset) || 0) + (numOrNull(shownCount) || 0);
-  if (!total) return '조건에 맞는 폴더가 없습니다.';
+  // 38회차 R6: 잘린 조사라 신규 · 사라짐을 판정하지 않았으면 '없음' 이 아니라 그 사실을 말한다.
+  if (!total) return res.compareLimited && (res.filter === 'new' || res.filter === 'removed') ? '신규 · 사라짐은 판정하지 않았습니다(폴더 상한으로 잘린 조사).' : '조건에 맞는 폴더가 없습니다.';
   const rest = Math.max(0, total - to);
   return `${countText(total)}개 중 ${countText(from)}–${countText(to)}${rest ? ` · 나머지 ${countText(rest)}개는 다음 쪽이나 검색으로 엽니다` : ''}.`;
 }

@@ -199,7 +199,8 @@ api.get('/tools/isilon-dirusage/export.csv', adminOnly, fullScopeOnly, csvPerm, 
   }
   for (const row of r.removed7) lines.push(csvLine(['', row.name, row.bytes, row.res, '', '', '', '', '사라짐(7일 전 크기)']));
   // 36회차 F5: 폴더 상한으로 잘린 스캔이면 파일만 받은 사람도 알게(잘린 CSV 에 표지 — 32회차와 같은 규칙).
-  if (r.scan?.truncated) lines.push(csvLine([`(폴더 상한으로 일부만 저장된 조사 — 목록이 전체가 아닙니다${r.compareLimited ? ' · 신규 · 사라짐은 판정하지 않았습니다' : ''})`]));
+  // 38회차 R6: 기준 조사만 잘린 경우도 밝힌다(그때는 이 목록은 전체지만 신규 · 사라짐 판정이 없다 — 파일만 받은 사람이 '변화 없음' 으로 읽지 않게).
+  if (r.scan?.truncated || r.compareLimited) lines.push(csvLine([`(${r.scan?.truncated ? '폴더 상한으로 일부만 저장된 조사 — 목록이 전체가 아닙니다' : '7일 전 조사가 폴더 상한으로 잘렸습니다'}${r.compareLimited ? ' · 신규 · 사라짐은 판정하지 않았습니다' : ''})`]));
   const stamp = fileStamp();
   const safe = String(tg.label || tg.id).replace(/[^\w.-]+/g, '_').slice(0, 40) || 'target';
   logAudit({ user: req.user?.username, action: 'isidu.export', target: tg.id, detail: `rows=${r.rows.length} removed=${r.removed7.length}`, ip: req.ip });

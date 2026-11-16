@@ -202,7 +202,7 @@ export function unreadVcenterIds(snap) {
   for (const v of snap?.vcenters || []) if (v && v.id != null && UNREAD_VC_EXTRA_STATUS.has(v.status)) out.add(String(v.id));
   return out;
 }
-const UNREAD_VC_KEY_RE = /^(alarm|host|ds):/;
+const UNREAD_VC_KEY_RE = /^(alarm|host|ds|gpualloc):/;   // 45회차 F1: 수집 꺼짐 · 장기 장애로 인벤토리가 비면 gpualloc 도 노드가 사라져 '해소' 로 기록됐다
 
 /*
  * v2.769(점검 R4-D1-5): '엣지 보고 끊김'(vcstale:) 판정 기준 시각 = max(receivedAt, 프로세스 기동 시각).
@@ -290,6 +290,7 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
   if (R.gpuAllocPct?.enabled) {
     const th = Number(R.gpuAllocPct.threshold) || 90;
     const tree = buildGpuAllocTree(snap);
+    if (tree.truncated) heldPrefixes.add('gpualloc:');   // 45회차 F2: 주석대로 '전부' — GPU 호스트가 통째로 잘린 법인은 루프에 없어 해소로 나갔다
     for (const vc of tree.vcenters) {
       const key = `gpualloc:${vc.id}`;
       const t = vc.totals;
@@ -299,6 +300,8 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
       out.push({ key, vcenterId: vc.id, severity: over ? 'critical' : 'warning', title: `GPU 할당률 ${t.allocPct}%: ${vc.name || vc.id}`,
         detail: `${vc.id} · 할당 ${t.allocGB} / 전체 ${t.capGB} GB · 예비 ${t.spareGB} GB${over ? ' — 할당이 용량을 넘음(확인 필요)' : ''} · GPU ${t.gpus}장 · 호스트 ${t.hosts}대` });
     }
+    // 44회차 R3(반증 — 재현): GPU 호스트가 전부 끊긴 법인은 계층 노드가 없다 — 위 루프에 없어 발생 중이던 알림이 '해소' 로 나갔다. 일부만 끊긴 법인과 같이 보류.
+    for (const id of Object.keys(tree.hostsDownByVc || {})) held.add(`gpualloc:${id}`);
   }
   // v3.1.0(설계 ipam-alerts-mac-dns ③): IP 충돌 의심 — VM 의 IP 에 그 VM 의 NIC 이 아닌 MAC 이 연속 N회 응답(판정 ipam/conflict.js 하나).
   //   모르는 것(NIC MAC 미수집 · 여러 VM · 지난 스캔에 못 봄 · MAC 이 지워짐) · 지금 값을 못 읽은 vCenter 의 VM 은 판정 보류(held — 해소로 기록하지 않는다).

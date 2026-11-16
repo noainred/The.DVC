@@ -290,6 +290,10 @@ export async function dbStatus() {
     const dailyRows = Number(daily) + Number(files?.d1?.rows || 0);
     return {
       available: true, path: FILE(), rawRows, dailyRows, countsAt: _counts?.at ?? null, firstTs: span.a ?? null, lastTs: span.b ?? null, bytes,
+      // 42회차 R3: 못 연 시간 단위 파일이 있으면 행 수는 하한(40회차 F5 표지를 화면까지) · 장치 1시간 롤업 누락(40회차 F2)
+      ...(files?.raw?.rowsPartial ? { rawRowsPartial: true, rawUnread: Number(files.raw.unreadCount) || (files.raw.unread || []).length } : {}),
+      ...(files?.d1?.rowsPartial ? { dailyRowsPartial: true } : {}),
+      ...(files?.devRollupMissed ? { devRollupMissed: files.devRollupMissed } : {}),
       // v2.922: 시간 단위 파일(가족별 파일 수·행 수·바이트) · 예전 표 잔여 행 · 마이그레이션 상태
       legacyRows: { raw: Number(raw), daily: Number(daily) }, files, migration: mig ? migrationView(mig) : null,
       ...(_migrateError ? { migrateError: _migrateError } : {}),

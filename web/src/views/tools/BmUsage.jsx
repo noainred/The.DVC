@@ -337,6 +337,9 @@ export function BmUsage() {
     setSaving(true);
     try {
       const r = await putJson('/tools/bm-usage/settings', patch);
+      // 38회차(34회차 F4 의 화면 짝): 설정 파일을 읽지 못한 상태의 409(settings-unreadable) · 403(범위) 본문은 던지지 않고 돌아온다 —
+      //   '설정을 저장했습니다' 로 보이고 폼이 undefined 로 비던 것을 막는다.
+      if (r?.ok === false) { setMsg({ tone: 'bad', text: r.reason || '저장하지 못했습니다.' }); return null; }
       loadGen.current += 1; // 진행 중이던 이전 GET 은 저장 전 값이다 — 버린다
       setForm(r.settings); { const warn = scopeSaveSuffix(r) + ignoredCentralNote(r); setMsg({ tone: warn ? 'bad' : 'ok', text: `설정을 저장했습니다.${warn}` }); }
       load();

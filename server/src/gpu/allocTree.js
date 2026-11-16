@@ -270,6 +270,15 @@ export function buildGpuAllocTree(snap, { allowed = null, vcenterId = null, vcen
   const vcs = new Map();
   let truncated = 0;
   let n = 0;
+  // 41회차 F4(재현): 끊긴 호스트는 GPU 목록이 빈 배열('없음')로 와 계층 · 합계 · 일 이력에서 **조용히** 빠졌다(용량과 할당이 함께 줄어 할당률은 그럴듯하게 남음).
+  //   GPU VM 이 그 호스트에 있다고 알려진 끊긴 호스트는 'GPU 를 못 읽은 호스트' 로 세어(hostsDown) 법인 합계가 부분임을 밝히고 일 이력에 쓰지 않는다.
+  const downByVc = new Map();
+  for (const h of snap?.hosts || []) {
+    if (!h || !inScope(h.vcenterId) || !hostDown(h) || (Array.isArray(h.gpus) && h.gpus.length)) continue;
+    if (!(gpuVmsByHost.get(`${h.vcenterId}\t${h.name}`) || []).length) continue;
+    const id = str(h.vcenterId);
+    downByVc.set(id, (downByVc.get(id) || 0) + 1);
+  }
   for (const h of snap?.hosts || []) {
     if (!h || !inScope(h.vcenterId) || !Array.isArray(h.gpus) || !h.gpus.length) continue;
     if (n >= ALLOC_TREE_HOSTS_MAX) { truncated += 1; continue; }
@@ -306,9 +315,13 @@ export function buildGpuAllocTree(snap, { allowed = null, vcenterId = null, vcen
       return { name: dc.name, totals: finishTotals(dt), clusters };
     }).sort((a, b) => (a.name === NO_DC) - (b.name === NO_DC) || a.name.localeCompare(b.name));
     addTotals(all, vt);
-    return { id: vc.id, name: vc.name, city: vc.city, country: vc.country, region: vc.region, totals: finishTotals(vt), datacenters };
+    const down = downByVc.get(vc.id) || 0;
+    // 43회차: 끊긴 GPU 호스트가 있으면 용량이 부분이라 예비 · 할당률을 내지 않는다(모름 — 부분 합을 비율로 보이지 않는다)
+    return { id: vc.id, name: vc.name, city: vc.city, country: vc.country, region: vc.region, totals: { ...finishTotals(vt), ...(down ? { hostsDown: down, spareGB: null, allocPct: null } : {}) }, datacenters };
   }).sort(byName);
-  return { totals: finishTotals(all), vcenters, truncated };
+  const downAll = [...downByVc.values()].reduce((a, b) => a + b, 0);
+  // 42회차 R2: GPU 호스트가 모두 끊긴 법인은 계층 노드가 없다 — 법인 목록(allocCorpRoster · 웹 corpChips)이 '실제 0대' 로 읽지 않게 법인별 수를 싣는다.
+  return { totals: { ...finishTotals(all), ...(downAll ? { hostsDown: downAll, spareGB: null, allocPct: null } : {}) }, vcenters, truncated, ...(downAll ? { hostsDownByVc: Object.fromEntries(downByVc) } : {}) };
 }
 
 /**
@@ -319,15 +332,16 @@ export function buildGpuAllocTree(snap, { allowed = null, vcenterId = null, vcen
  * @returns {''|'pending'|'unreachable'|'disabled'|'maintenance'|'truncated'} '' = 아는 값(노드가 있거나 실제 0대)
  */
 export const CORP_INV_EMPTY = Object.freeze(['pending', 'unreachable', 'disabled', 'maintenance']);
-export function corpUnknownOf(meta, hasNode, truncated = 0) {
+export function corpUnknownOf(meta, hasNode, truncated = 0, hostsDown = 0) {
   if (hasNode) return '';
   const st = str(meta?.status);
   if (!meta?.stale && CORP_INV_EMPTY.includes(st)) return st;
+  if (Number(hostsDown) > 0) return 'hostsDown';   // 42회차 R2: GPU VM 이 있는 끊긴 호스트뿐 — 0대가 아니라 모름
   return truncated > 0 ? 'truncated' : '';
 }
 /** 목차·창 칩 글자(모름 사유) — 웹 gpuAllocText.js CORP_UNKNOWN_TEXT 와 같은 글자. */
 export const CORP_UNKNOWN_TEXT = Object.freeze({
-  pending: '수집 전', unreachable: '접속 불가', disabled: '수집 꺼짐', maintenance: '점검 중', truncated: '상한으로 잘림',
+  pending: '수집 전', unreachable: '접속 불가', disabled: '수집 꺼짐', maintenance: '점검 중', truncated: '상한으로 잘림', hostsDown: 'GPU 호스트 끊김',
 });
 
 /**
@@ -346,7 +360,7 @@ export function allocCorpRoster(snap, opt = {}, tree = null) {
     const id = str(m.id);
     if (!id || out.has(id) || !inScope(id)) continue;
     const vc = byId.get(id) || null;
-    out.set(id, { id, name: str(m.name) || id, city: str(m.location?.city), country: str(m.location?.country), vc, unknown: corpUnknownOf(m, !!vc, truncated) });
+    out.set(id, { id, name: str(m.name) || id, city: str(m.location?.city), country: str(m.location?.country), vc, unknown: corpUnknownOf(m, !!vc, truncated, tree?.hostsDownByVc?.[id]) });
   }
   for (const v of byId.values()) if (!out.has(v.id) && inScope(v.id)) out.set(v.id, { id: v.id, name: v.name, city: v.city, country: v.country, vc: v, unknown: '' });
   return [...out.values()].sort((a, b) => a.id.localeCompare(b.id));

@@ -135,7 +135,7 @@ async function usageReport({ days, serverId }) {
   const hit = _usageCache.get(key);
   if (hit) return hit.body;
   const range = await usageRangeShared({ fromDay, toDay, serverId, latestTs });
-  const fresh = latest.filter((r) => Number(r.ts) === latestTs && r.ok && (!serverId || r.serverId === serverId));
+  const fresh = latest.filter((r) => Number(r.ts) === latestTs && r.ok && r.parsed !== false && (!serverId || r.serverId === serverId));   // 41회차 F1
   const report = buildUsageReport(range, {
     fromDay, toDay, intervalMs: s.intervalMs,
     servers: serverId ? 1 : Math.max(1, targetServers(s).length),

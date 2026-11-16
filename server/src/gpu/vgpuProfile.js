@@ -11,7 +11,8 @@
 export function vgpuProfileGB(profile) {
   const s = String(profile ?? '').trim();
   if (!s || s.length > 128) return null;
-  const m = /-(\d{1,3})([a-z]{1,2})$/i.exec(s);
+  // 41회차 F7: B 시리즈 다중 디스플레이 이름(…-2b4 · -1b4)도 읽는다 — 시리즈 글자 뒤 디스플레이 수 한 자리(그런 VM 1대가 법인 · 전체 할당률을 통째로 지웠다).
+  const m = /-(\d{1,3})([a-z]{1,2})\d?$/i.exec(s);
   if (!m) return null;
   const n = Number(m[1]);
   if (!Number.isFinite(n)) return null;

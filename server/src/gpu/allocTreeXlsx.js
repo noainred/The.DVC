@@ -98,6 +98,7 @@ function totalsCells(t) {
   const pct = num(t.allocPct);
   const notes = [];
   if (t.capUnknown) notes.push(`용량 모르는 GPU ${t.capUnknown}장`);
+  if (num(t.hostsDown) > 0) notes.push(`GPU 를 못 읽은 끊긴 호스트 ${t.hostsDown}대 — 합계는 부분`);   // 43회차 R3: 화면 totalsNote 와 같은 말
   if (t.allocUnknown) notes.push(`할당 모르는 VM ${t.allocUnknown}대`);
   if (t.noPlacement) notes.push(`배치 정보 없는 GPU ${t.noPlacement}장`);
   if (t.offUnknown) notes.push(`꺼진 VM 용량 모름 ${t.offUnknown}대`);   // v2.870 감사 A4-01: 꺼진 VM 합에서 빠진 수(예전에는 어디에도 없었다)
@@ -183,7 +184,7 @@ async function addTreeSheet(wb, name, tree, meta, depth, o) {
   // 요약 칸 — 두 칸씩(이름 / 값)
   const kpis = [
     ['전체 용량(GB)', num(T.capGB), C.title, C.kpiBg], ['할당(GB)', num(T.allocGB), C.alloc, C.kpiBg], ['예비(GB)', num(T.spareGB), C.spare, C.spareBg],
-    ['할당률(%)', num(T.allocPct), C.title, C.kpiBg], ['꺼진 VM(GB)', num(T.offGB), C.off, C.offBg], ['GPU · 호스트', `${T.gpus}장 · ${T.hosts}대`, C.title, C.kpiBg],
+    ['할당률(%)', num(T.allocPct), C.title, C.kpiBg], ['꺼진 VM(GB)', num(T.offGB), C.off, C.offBg], ['GPU · 호스트', `${T.gpus}장 · ${T.hosts}대${T.hostsDown > 0 ? ` · 끊긴 호스트 ${T.hostsDown}대(합계는 부분)` : ''}`, C.title, C.kpiBg],   // 44회차 R5: '모름' 의 이유
   ];
   const kName = ws.addRow(kpis.map((k) => k[0]));
   const kVal = ws.addRow(kpis.map((k) => (k[1] == null ? '모름' : k[1])));
@@ -255,7 +256,7 @@ function addTocSheet(wb, roster, names, meta, skipped) {
     const r = ws.addRow([c.name, locationText(c), t ? t.hosts : why ? null : 0, t ? t.gpus : why ? null : 0,
       t ? partial(num(t.capGB), t.capUnknown, '장') : null, t ? partial(num(t.allocGB), t.allocUnknown, '대') : null, t ? num(t.spareGB) : null,
       pct, pct == null ? '' : barText(pct / 100, 10), sheetText,
-      t ? totalsCells(t).note : why ? `${why} — 인벤토리를 읽지 못해 GPU 호스트가 있는지 모릅니다(0 이 아님)` : '']);
+      t ? totalsCells(t).note : why ? (c.unknown === 'hostsDown' ? `${why} — GPU VM 이 있는 호스트가 끊겨 GPU 를 읽지 못했습니다(0 이 아님)` : `${why} — 인벤토리를 읽지 못해 GPU 호스트가 있는지 모릅니다(0 이 아님)`) : '']);   // 43회차 R3
     r.height = 20;
     r.eachCell({ includeEmpty: true }, (cell, col) => {
       cell.border = BORDER;

@@ -236,12 +236,17 @@ export function mergePulledGpuGuestSettings(cur, pulled = {}) {
 
 /** 중앙 배포 설정 적용(엣지 pull) — mergePulledGpuGuestSettings 로 병합해 원자 저장. 반환 { settings, removed }. */
 export function applyPulledGpuGuestSettings(pulled) {
-  const { next, removed } = mergePulledGpuGuestSettings(readFile(), pulled);
+  const cur = readFile();
+  const corruptBefore = !!_loadErr.get() && !_loadErr.get().readError;
+  const { next, removed } = mergePulledGpuGuestSettings(cur, pulled);
   if (_loadErr.get()?.readError) { const e = new Error('GPU 게스트 설정 파일을 읽지 못해(권한) 중앙 배포를 적용하지 않았습니다.'); e.code = 'settings-unreadable'; throw e; }   // 읽기 오류면 원본을 덮지 않는다
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(next), null, 2), { mode: 0o600 });
   _loadErr.ok();
-  return { settings: loadGpuGuestSettings(), removed };
+  // 38회차 R7(반증): 로컬 파일이 손상된 상태에서 적용하면 중앙 배포분만으로 다시 쓴다 — 엣지 로컬 전용 vCenter 계정은 보존본에만 남는다(중앙은 전부의 원본이 아니다).
+  //   조용히 지나가지 않게 결과와 콘솔에 밝힌다.
+  if (corruptBefore) console.warn('[gpu-guest] 로컬 gpu-guest.json 이 손상된 상태에서 중앙 배포분만으로 다시 썼습니다 — 이 엣지에만 있던 vCenter 계정은 손상 보존본(gpu-guest.json.corrupt.*)에서 다시 입력하세요.');
+  return { settings: loadGpuGuestSettings(), removed, ...(corruptBefore ? { rebuiltFromCorrupt: true } : {}) };
 }
 
 /** 비밀번호를 가려 클라이언트로 안전하게 내보낸다(VM별 자격증명 포함). */

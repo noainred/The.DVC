@@ -102,10 +102,15 @@ async function killRemoteJob(creds, jobId) {
  *   v2.737: t.detach !== false 면 장비에서 분리 실행한다(isidu/detach.js) — attachJob 은 재시작 전에 띄운 작업 id(같은 작업에 다시 붙는다),
  *   onJob 은 새 작업을 띄운 직후 불린다(실행 중 스캔 기록에 작업 id 를 남긴다).
  */
-export async function collectTarget(t, { trigger = 'schedule', manual = false, attachJob = null, onJob = null } = {}) {
-  const started = Date.now();
+export async function collectTarget(t, { trigger = 'schedule', manual = false, attachJob = null, onJob = null, startedAt = null } = {}) {
+  // 41회차 F5: 다시 붙는 작업(attachJob)이면 원래 시작 시각을 받는다 — 시한(runDetached)과 소요(durationMs)가 du 시작부터 센다.
+  //   42회차 R1: 재개 대상이 장비에 없어 새로 띄우면 runDetached 가 지금부터 시한을 잡고 실제 시작(startedAt)을 돌려준다 — 소요도 그 기준(runStart).
+  const started = attachJob && Number(startedAt) > 0 && Number(startedAt) <= Date.now() ? Number(startedAt) : Date.now();
+  // 44회차 R2(반증 — 재현): 재개는 작업을 장비에서 확인한 뒤에만(onAttach) du 시작 기준 — 확인 전 실패(연결 거부 · 첫 상태 확인 끊김)를 옛 du 시작부터 세면
+  //   '오래 돈 실패' 가 되어 다음 시도가 1시간이 아니라 주기(24시간) 뒤로 밀렸다.
+  let runStart = attachJob ? Date.now() : started;
   const base = { agent: '', targetId: t.id, path: t.path, host: t.host, sizeMode: t.sizeMode || 'h', trig: trigger };
-  const fail = (kind, error, extra = {}) => ({ ...base, ts: Date.now(), ok: false, kind, error: String(error || '').slice(0, 600), durationMs: Date.now() - started, ...extra });
+  const fail = (kind, error, extra = {}) => ({ ...base, ts: Date.now(), ok: false, kind, error: String(error || '').slice(0, 600), durationMs: Date.now() - runStart, ...extra });
   if (t.issue) return fail(t.issue, t.issue === 'device-missing' ? '스토리지 등록부에서 그 아이실론이 사라졌습니다' : '고른 장비가 아이실론이 아닙니다');
 
   let stdout = ''; let stderr = ''; let code = null; let runInfo = {};
@@ -125,15 +130,17 @@ export async function collectTarget(t, { trigger = 'schedule', manual = false, a
     try {
       const r = await withDeadline(plan.sessionMs, (signal) => withSsh({ ...c.creds, signal }, async (api) => {
         if (detach) {
-          return runDetached(api, t, { cmdMs: plan.cmdMs, attachJob, signal, started,
+          return runDetached(api, t, { cmdMs: plan.cmdMs, attachJob, signal, started, onRestart: (ts) => { runStart = ts; }, onAttach: (ts) => { runStart = ts; },
             onJob: (job) => { jobRef = job.id; try { onJob?.(job); } catch { /* */ } } });
         }
         const x = await api.exec(duCommand(t.path, t.sizeMode), plan.cmdMs, { long: true });
         return { x, mode: 'attached' };
       }), 'du 시한 초과', { long: true });   // v2.739: 세션 시한도 긴 작업 상한(3시간)까지 연다 — 명령 시한(EXEC_LONG_MAX_MS)과 같은 값
       stdout = r.x?.stdout || ''; stderr = r.x?.stderr || ''; code = r.x?.code ?? null;
+      if (Number(r.startedAt) > 0) runStart = Number(r.startedAt);
       runInfo = { runMode: r.mode || 'attached', ...(r.attached ? { attached: true } : {}), ...(r.detachFallback ? { detachFallback: r.detachFallback } : {}) };
     } catch (e) {
+      if (Number(e?.startedAt) > 0) runStart = Number(e.startedAt);   // 42회차 R1
       const kind = classify(e);
       if (kind === 'auth') authGuard.markAuthStopped(c.credId.id, c.credId, e.message);
       // 포탈 쪽 시한(세션 시한)에 걸리면 장비의 du 를 멈춘다 — 재시작으로 끝날 때는 여기 오지 않는다(그때는 이어 받는다).
@@ -152,7 +159,7 @@ export async function collectTarget(t, { trigger = 'schedule', manual = false, a
   }
   const tot = totalsOf(parsed.entries, parsed.total);
   return {
-    ...base, ts: Date.now(), ok: true, durationMs: Date.now() - started,
+    ...base, ts: Date.now(), ok: true, durationMs: Date.now() - runStart,
     total: parsed.total, sumBytes: tot.sumBytes, sumRes: tot.sumRes, count: parsed.entries.length,
     skipped: parsed.skipped, errLines: parsed.errLines, errSample: parsed.errSample, truncated: parsed.truncated,
     entries: parsed.entries, ...runInfo,

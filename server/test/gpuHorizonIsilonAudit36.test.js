@@ -79,3 +79,40 @@ test('F5: 잘린 조사끼리 비교하면 신규 · 사라짐은 null + compare
   assert.match(s, /compareLimited: !!compareLimited7/);
   assert.match(fs.readFileSync(new URL('routes/api/isilonDirUsage.js', SRC), 'utf8'), /폴더 상한으로 일부만 저장된 조사/);
 });
+
+/* ── 38회차(36회차 수정 반증) ── */
+test('38회차 R1: 아이실론 개요(overviewOf)도 보고서와 같은 잘림 판정', () => {
+  const s = fs.readFileSync(new URL('isidu/report.js', SRC), 'utf8');
+  const ov = s.slice(s.indexOf('const top = (await db.topEntriesOf('));
+  assert.match(ov, /const lim7 = !!\(okScan\.truncated \|\| base7\?\.truncated\);/);
+  assert.match(ov, /new7: b7 && !lim7 \? !b7\.has\(r\.name\) : null/);
+  assert.doesNotMatch(s, /new7: b7 \? !b7\.has\(r\.name\) : null/, '잘림을 보지 않는 신규 판정이 남지 않는다');
+});
+
+test('38회차 R2 · R3: GET 이 loadError 를 싣고 Horizon 설정 현황 배지는 못 읽음을 등록 없음으로 보이지 않는다', async () => {
+  const g = fs.readFileSync(new URL('routes/admin/gpuGuest.js', SRC), 'utf8');
+  assert.match(g, /const le = gpuGuestSettingsLoadError\(\);/);
+  const { RULES } = await import('../src/settingsStatus/grade.js');
+  assert.equal(RULES['horizon-admin']({ loadError: true, count: null }).grade, 'warn');
+  assert.equal(RULES['horizon-admin']({ loadError: false, count: 0 }).grade, 'off');
+});
+
+test('38회차 R4: 물리 GPU 수정이 주소 검사로 거부되면 어떤 칸도 바뀌지 않는다', async () => {
+  const reg = await import('../src/gpu/physicalRegistry.js');
+  const r = reg.addPhysical({ host: '10.0.0.77', name: 'gpu77', username: 'u', password: 'p' });
+  assert.equal(r.ok, true);
+  const bad = reg.updatePhysical(r.id, { name: 'SHOULD-NOT-STICK', host: 'bad host' });
+  assert.equal(bad.ok, false);
+  assert.equal(reg.getPhysicalRaw(r.id).name, 'gpu77');
+});
+
+test('38회차 R7: 엣지 손상 중 중앙 배포 적용은 rebuiltFromCorrupt 로 밝힌다', async () => {
+  const g = await import('../src/gpu/settings.js');
+  const file = path.join(process.env.CONFIG_DIR, 'gpu-guest.json');
+  for (const f of fs.readdirSync(process.env.CONFIG_DIR)) if (f.startsWith('gpu-guest.json')) fs.rmSync(path.join(process.env.CONFIG_DIR, f), { force: true });
+  fs.writeFileSync(file, '{bad');
+  g.loadGpuGuestSettings();
+  const r = g.applyPulledGpuGuestSettings({ vcenters: { 'vc-central': { enabled: true, username: 'u', password: 'p' } } });
+  assert.equal(r.rebuiltFromCorrupt, true);
+  assert.equal(g.gpuGuestSettingsLoadError(), null);
+});

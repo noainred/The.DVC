@@ -26,6 +26,8 @@ import { readJsonCapped } from '../util/readCapped.js'; // v2.686 SEC-2686-01: �
 import { isDemoEntryId, demoHorizonSessionsRaw, demoHorizonCatalogRaw } from '../mock/demo/users.js'; // v2.708 데모(mock 에서만)
 /** 한 페이지 상한 — size 최대 1000 세션 × 수 KB 를 넉넉히 덮는다. 넘으면 그 페이지는 형식 미인식이다. */
 const PAGE_MAX_BYTES = 32 * 1_048_576;
+/** 44회차 R1: 짧은 쪽 다음 요청의 오류 가운데 '범위 밖 쪽(끝)' 으로 읽는 코드 — 추정(실측 근거 없음). 그 밖(401 · 403 · 429 · 5xx)은 실패. */
+const PAGE_END_STATUS = new Set([400, 404, 416]);
 
 /*
  * v2.684 — 앱·데스크톱 이름 카탈로그(앱 풀·데스크톱 풀·팜 목록).
@@ -63,11 +65,16 @@ async function fetchCatalog(get) {
       let status = 0; let bad = false;
       for (let page = 1; page <= CATALOG_MAX_PAGES; page++) {
         const r = await get(p, { query: { page: String(page), size: String(CATALOG_PAGE) } });
+        if (!r.ok && page > 1) { truncated[kind] = true; break; }   // 43회차 R7: 2쪽 이후 오류는 앞 쪽까지 쓴다(종류 전체를 버리지 않는다)
         if (!r.ok) { status = r.status; break; }
         const body = await readJsonCapped(r, PAGE_MAX_BYTES, 'Horizon 응답').catch(() => null);
         if (!Array.isArray(body)) { bad = true; break; }
         pushAll(acc, body);
-        if (body.length < CATALOG_PAGE) break;
+        // 42회차 R5: 세션 페이징(41회차 F2)과 같은 규칙 — '더 있음' 헤더면 짧은 쪽에서도 다음 쪽, 헤더가 없을 때만 길이로 끝을 판정
+        const more = headerSaysMore(r);
+        if (more === false) break;
+        if (more !== true && body.length < CATALOG_PAGE) break;
+        if (more === true && body.length === 0) break;   // 빈 쪽 — 이름 대응만 덜 될 뿐(못 찾은 것은 ID 로 남는다)
         if (page === CATALOG_MAX_PAGES) truncated[kind] = true;
       }
       if (status === 404) { errors[kind] = `${p}: 404`; continue; }   // 이 버전에 없는 경로 — 다음 후보
@@ -106,11 +113,17 @@ export async function collectServerSessions(s, { pageSize = 500, maxPages = 20, 
       const acc = [];
       let pages = 0;
       let truncated = false;
+      let prevLen = size;
       for (let page = 1; ; page++) {
         const r = await get(SESSION_PATH, { query: { page: String(page), size: String(size) } });
+        // 43회차 R7: '더 있음' 을 믿고 짧은 쪽 다음을 요청했는데 오류면 끝으로 본다(41회차 전과 같이 — 그 쪽은 원래 요청하지 않았다).
+        //   44회차 R1(반증 — 재현): 오류 전부를 끝으로 보면 401 · 429 · 503 이 앞 쪽까지를 truncated:false 인 '전체' 로 적재했다(쪽 상한이 작은 서버의 모든 쪽).
+        //   '범위 밖 쪽' 으로 읽을 수 있는 코드(PAGE_END_STATUS — 추정, Horizon 실측 근거 없음)만 끝으로 보고, 그 밖은 꽉 찬 쪽 서버와 같이 실패로 던진다.
+        if (!r.ok && page > 1 && prevLen < size && PAGE_END_STATUS.has(Number(r.status))) break;
         if (!r.ok) {
           const e = new Error(`세션 조회 실패 (HTTP ${r.status})`);
           e.httpStatus = r.status;
+          e.page = page;   // 45회차 F6: 2쪽 이후 404 를 'no-endpoint'(경로 없음 · 6시간 쉼)로 읽지 않게
           throw e;
         }
         const body = await readJsonCapped(r, PAGE_MAX_BYTES, 'Horizon 응답').catch(() => null);
@@ -123,7 +136,13 @@ export async function collectServerSessions(s, { pageSize = 500, maxPages = 20, 
         pages = page;
         const more = headerSaysMore(r);
         if (more === false) break;
-        if (body.length < size) break;       // 마지막 페이지
+        // 41회차 F2(재현): 서버가 '더 있음(HAS_MORE_RECORDS: true)' 이라고 말하면 페이지 길이와 무관하게 다음 페이지 — 요청보다 작은 페이지 상한을 쓰는 서버에서
+        //   첫 페이지만 읽고 절단 표지 없이 '전체' 로 적재했다. 헤더가 없을 때만 길이로 판정한다(cap 에 닿으면 아래에서 truncated).
+        if (more !== true && body.length < size) break;       // 마지막 페이지
+        // 42회차 R6: '더 있음' 인데 빈 페이지 — 직전 페이지가 요청보다 짧았으면 끝으로 본다(마지막 쪽에도 true 를 주는 서버가 매 주기 '절단' · 추이 NULL 이 되지 않게).
+        //   직전 페이지가 꽉 찼는데 빈 페이지면 더 읽을 수 없다(하한으로).
+        if (more === true && body.length === 0) { if (page === 1 || prevLen < size) break; truncated = true; break; }   // 43회차 R6: 1쪽이 비면 0건(41회차 전과 같다)
+        prevLen = body.length;
         if (page >= cap) { truncated = true; break; }
       }
       // 카탈로그 — 같은 로그인 안에서, 낡았을 때만. 실패해도 세션 결과는 그대로 쓴다(이름만 ID 로 남는다).
@@ -173,7 +192,7 @@ export async function collectServerSessions(s, { pageSize = 500, maxPages = 20, 
         : atLogin && (st === 401 || st === 403) ? 'auth'
           : atLogin && st === 404 ? 'no-login-endpoint'
             : st === 401 || st === 403 ? 'forbidden'
-              : st === 404 ? 'no-endpoint'
+              : st === 404 && !(Number(e?.page) > 1) ? 'no-endpoint'
                 : st > 0 ? 'http'
                   : /timeout|aborted|timed out/i.test(String(d.message)) ? 'timeout' : 'error';
     return {

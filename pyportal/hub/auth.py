@@ -482,6 +482,17 @@ class SessionStore:
     def _token_id(token) -> str:
         return hashlib.sha256(str(token).encode("utf-8", "surrogateescape")).hexdigest()
 
+    @staticmethod
+    def _token_exp(token):
+        """서명된 토큰 본문의 만료 시각(e) — 못 읽으면 None."""
+        try:
+            encoded = str(token).rpartition(".")[0]
+            body = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode("utf-8"))
+            exp = float(body.get("e", 0))
+            return exp if exp > 0 else None
+        except (ValueError, TypeError, AttributeError):
+            return None
+
     def _load_revoked(self) -> dict:
         if not self._revoked_path:
             return {}
@@ -638,7 +649,7 @@ class SessionStore:
             return issued
 
     REVOKED_MAX = 5000      # 35회차 R1: 폐기 목록 전체 상한
-    REVOKED_PER_USER = 50   # 37회차 R5: 계정당 상한 — 넘치면 그 계정 단위 폐기(tokenVersion 인상)로 접는다
+    REVOKED_PER_USER = 200  # 37회차 R5: 계정당 상한 — 넘치면 그 계정 단위 폐기(tokenVersion 인상)로 접는다(39회차 R3: 50 은 정상 사용에서도 닿을 수 있어 올렸다)
 
     def destroy(self, token) -> None:
         if not token:
@@ -650,9 +661,11 @@ class SessionStore:
             return
         uname = str(user.get("username", ""))
         fold = set()
+        # 39회차 R3: 항목은 **그 토큰의 만료 시각**까지만 둔다(예전엔 로그아웃 시각 + TTL — 이미 만료됐을 토큰이 상한을 채웠다).
+        exp = self._token_exp(token) or (time.time() + self._ttl)
         with self._lock:
             key = self._token_id(token)
-            self._revoked[key] = time.time() + self._ttl
+            self._revoked[key] = exp
             self._revoked_user[key] = uname
             self._purge_revoked()
             # 37회차 R5(반증 — 재현): 상한을 넘칠 때 남의 항목을 버리면 그 계정이 로그아웃한 토큰이 되살아났다(유효 계정 하나로 5,000번 로그인 ·
@@ -662,11 +675,20 @@ class SessionStore:
             if len(self._revoked) > self.REVOKED_MAX:
                 for k, _exp in sorted(self._revoked.items(), key=lambda kv: kv[1])[: len(self._revoked) - self.REVOKED_MAX]:
                     fold.add(self._revoked_user.get(k, ""))
+        folded = set()
         for name in fold:
-            if name:
+            if not name:
+                continue
+            try:
                 self.destroy_user(name)   # tokenVersion 인상(재기동 뒤에도) + 메모리 컷오프 — 그 계정의 남은 세션도 끊긴다(남용일 때만)
+                folded.add(name)
+                print(f"[auth] 로그아웃 폐기 목록 상한을 넘어 계정 '{name}' 의 세션을 모두 끊었습니다(계정 단위 폐기).", flush=True)
+            except AuthError:
+                # 39회차 R4(반증 — 재현): users.json 을 못 읽는 동안은 계정 단위 폐기를 못 한다 — 그 계정의 항목은 지우지 않고 그대로 저장한다
+                #   (예전엔 예외로 로그아웃이 400 이 되고 그 토큰이 저장되지 않아 재기동 뒤 되살아났다).
+                pass
         with self._lock:
-            for k in [k for k, u in self._revoked_user.items() if u in fold]:
+            for k in [k for k, u in self._revoked_user.items() if u in folded]:
                 self._revoked.pop(k, None)
                 self._revoked_user.pop(k, None)
             if len(self._revoked) > self.REVOKED_MAX:   # 계정을 모르는 옛 항목만 남았을 때의 마지막 방어

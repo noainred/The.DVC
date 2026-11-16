@@ -4,7 +4,7 @@ import { morefOf } from '../../vcenter/registry.js';   // v2.447: vcenterId 에 
 import { loadMetricsSettings, saveMetricsSettings, METRICS_LIMITS } from '../../metrics/settings.js';
 import { forceGpuUtilCollect, clearGpuUtilForce } from '../../vcenter/soapClient.js';
 import { metricsSamplerStatus, rescheduleMetricsSampler } from '../../metrics/sampler.js';
-import { loadGpuGuestSettings, saveGpuGuestSettings, redactGpuGuestSettings, resolveVmCreds, resolveCollectMethod } from '../../gpu/settings.js';
+import { loadGpuGuestSettings, saveGpuGuestSettings, redactGpuGuestSettings, resolveVmCreds, resolveCollectMethod, gpuGuestSettingsLoadError } from '../../gpu/settings.js';
 import { gpuGuestStatus, rescheduleGpuGuestPoller, gpuHostIds, vmUsesGpu, getGpuGuestDiag } from '../../gpu/poller.js';
 import { testVmGuest, VimSoapClient } from '../../gpu/guestops.js';
 import { onDemandLogin, onDemandErrorFields } from '../../vcenter/dsBrowse.js'; // v2.743(감사 VC-03): 주문형 vCenter 로그인 문
@@ -183,7 +183,8 @@ function scopedGpuGuestView(settings, allowed) {
 adminRouter.get('/gpu-guest/settings', adminOnly, (req, res) => {
   const allowed = scopedVcenterIds(req.user, store.get());
   const settings = loadGpuGuestSettings();
-  res.json({ ...scopedGpuGuestView(settings, allowed), status: scopeGpuGuestStatus(gpuGuestStatus(), allowed, settings) });
+  const le = gpuGuestSettingsLoadError();   // 38회차 R2: 손상 · 읽기 오류면 화면이 배너로 밝히고 저장을 잠근다(사유 글자만)
+  res.json({ ...scopedGpuGuestView(settings, allowed), status: scopeGpuGuestStatus(gpuGuestStatus(), allowed, settings), ...(le ? { loadError: { reason: le.reason, at: le.at, readError: !!le.readError } } : {}) });
 });
 adminRouter.put('/gpu-guest/settings', adminOnly, (req, res) => {
   const allowed = writeMergeScope(req);   // 전체 점검 7회차: 병합 · 전역 필드는 쓰기 범위(응답 가림은 조회 범위 — 아래 read)

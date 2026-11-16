@@ -410,6 +410,9 @@ async function writeServerRowsInner(rows, agent, { rollup, pend, pendDaily }) {
   for (const [k, list] of groupBy(valid, 'raw', (r) => Number(r.ts))) {
     await withPeriodFile('raw', k, { create: true }, (db) => {
       if (!db) { res.ok = false; res.errors.push(`${fileNameOf('raw', k)}: ${_failed.get(fileNameOf('raw', k))?.reason || '열기 실패'}`); return; }
+      // 40회차 F1(재현): 새 행 · 새 대기는 **COMMIT 을 마친 뒤에만** res · fresh 로 옮긴다 — 예전에는 트랜잭션 안에서 바로 넣어, 행 중간 실패로
+      //   ROLLBACK 돼도 그 행들이 1시간 · 1일 롤업에 더해졌고(원시 0행 · 롤업 N표본) 대기도 함께 롤백돼 보정이 되돌리지 못했다(재전송하면 이중 계수).
+      const newRows = []; const newPend = []; let dup = 0;
       try {
         txn(db, () => {
           const st = prep(db, fileNameOf('raw', k), 'ins', RAW_INS);
@@ -430,17 +433,18 @@ async function writeServerRowsInner(rows, agent, { rollup, pend, pendDaily }) {
             });
             const out = st.run(...vals);
             const isNew = !!Number(out?.changes);
-            if (isNew) { res.inserted += 1; res.insertedRows.push(r); } else res.duplicates += 1;
+            if (isNew) newRows.push(r); else dup += 1;
             if (pend === 'none' || (pend === 'inserted' && !isNew)) continue;
             const key = String(r.key).trim(); const h = hourOf(Number(r.ts));
             const sk = `${key}|${h}`;
             if (seen.has(sk)) continue;
             seen.add(sk);
             const ex = selP.get(agent, key, h);
-            if (!ex) { insP.run(agent, key, h, pendDaily ? 1 : 0, Date.now()); fresh.push([k, key, h]); }
+            if (!ex) { insP.run(agent, key, h, pendDaily ? 1 : 0, Date.now()); newPend.push([k, key, h]); }
             else if (pendDaily && !Number(ex.daily)) upP.run(agent, key, h);
           }
         });
+        res.inserted += newRows.length; for (const r of newRows) res.insertedRows.push(r); res.duplicates += dup; for (const p of newPend) fresh.push(p);   // 40회차 F1: 커밋된 것만(펼침 push 금지 — 큰 배열)
       } catch (e) { res.ok = false; res.errors.push(`${fileNameOf('raw', k)}: ${String(e?.message || e).slice(0, 160)}`); }
     });
   }
@@ -596,6 +600,9 @@ async function repairPendingInner({ dailyLiveAfter, rawKeepFrom, max, budgetMs, 
           const hourOk = [];
           for (const pd of g.items) {
             const h = Number(pd.h);
+            // 40회차 F3(재현): 버킷 시작이 원시 보존 밖이면 다시 집계하지 않는다(원시가 지워져 0행 · 덜 센 값으로 1시간 롤업을 지우거나 덮었다) —
+            //   1일의 expired 와 같은 규칙. 대기만 지운다.
+            if (rawKeepFrom != null && h < rawKeepFrom) { out.expiredHourly = (out.expiredHourly || 0) + 1; hourOk.push(pd); continue; }
             if (run.failed.has(fileNameOf('h1', month0('h1', h)))) continue;   // 이 실행에서 이미 실패한 파일은 다시 열지 않는다
             const rows = dayRows ? dayRows.filter((r) => Number(r.ts) >= h && Number(r.ts) < h + HOUR_MS) : sel.all(pd.agent, pd.key, h, h + HOUR_MS);
             const ok = await replaceRollup('h1', month0('h1', h), 'usage_hourly', H1_COLS, 'h', h, rows, { agent: pd.agent, key: pd.key, rolls: ROLL }, out, run);
@@ -763,6 +770,7 @@ export async function writeDeviceRows(rows = [], agent = '') {
   for (const [k, list] of groupBy(valid, 'dev', (r) => Number(r.ts))) {
     await withPeriodFile('dev', k, { create: true }, (db) => {
       if (!db) { res.ok = false; res.errors.push(`${fileNameOf('dev', k)}: ${_failed.get(fileNameOf('dev', k))?.reason || '열기 실패'}`); return; }
+      const newRows = []; let dup = 0;   // 40회차 F1: 커밋된 것만 롤업 대상으로(서버 행과 같은 규칙)
       try {
         txn(db, () => {
           const st = prep(db, fileNameOf('dev', k), 'ins', DEV_INS);
@@ -770,15 +778,16 @@ export async function writeDeviceRows(rows = [], agent = '') {
             const vals = DEV_COLS.map((c) => (c === 'agent' ? agent : c === 'key' ? String(r.key).trim() : c === 'ts' ? Number(r.ts)
               : c === 'kind' ? r.kind : c === 'dev' ? String(r.dev).slice(0, 64) : c === 'oper' ? (r.oper ? String(r.oper).slice(0, 16) : null) : n(r[c])));
             const out = st.run(...vals);
-            if (Number(out?.changes)) { res.inserted += 1; ins.push(r); } else res.duplicates += 1;
+            if (Number(out?.changes)) newRows.push(r); else dup += 1;
           }
         });
+        res.inserted += newRows.length; for (const r of newRows) ins.push(r); res.duplicates += dup;
       } catch (e) { res.ok = false; res.errors.push(`${fileNameOf('dev', k)}: ${String(e?.message || e).slice(0, 160)}`); }
     });
   }
   for (const [k, list] of groupBy(ins, 'dev1h', (r) => Number(r.ts))) {
     await withPeriodFile('dev1h', k, { create: true }, (db) => {
-      if (!db) { res.ok = false; res.errors.push(`${fileNameOf('dev1h', k)}: 열기 실패`); return; }
+      if (!db) { res.ok = false; res.errors.push(`${fileNameOf('dev1h', k)}: 열기 실패`); noteDevRollupMissed(list.length, fileNameOf('dev1h', k)); return; }
       try {
         txn(db, () => {
           const st = prep(db, fileNameOf('dev1h', k), 'up', DEV1H_UPSERT);
@@ -788,11 +797,18 @@ export async function writeDeviceRows(rows = [], agent = '') {
               ...DEV_ROLL.flatMap((c) => { const v = n(r[c]); return [v ?? 0, v == null ? 0 : 1, v]; }), ...peakVals(r, DEVICE_PEAK_COLS));
           }
         });
-      } catch (e) { res.ok = false; res.errors.push(`${fileNameOf('dev1h', k)}: ${String(e?.message || e).slice(0, 160)}`); }
+      } catch (e) { res.ok = false; res.errors.push(`${fileNameOf('dev1h', k)}: ${String(e?.message || e).slice(0, 160)}`); noteDevRollupMissed(list.length, fileNameOf('dev1h', k)); }
     });
   }
   return res;
 }
+/*
+ * 40회차 F2(재현): 장치 1시간 롤업(dev1h)은 서버 행의 보정 대기(_pend) 같은 장치가 없어 한 번 실패하면 그 표본이 롤업에서 영구히 빠진다
+ *   (원시는 커밋돼 재전송은 중복 처리). 보정 설계(장치 대기 표)는 남긴 것으로 두고, 지금은 **빠진 사실을 상태에 센다**(못 읽음을 숨기지 않게).
+ */
+let _devRollupMissed = { rows: 0, at: 0, file: '' };
+function noteDevRollupMissed(n, file) { _devRollupMissed = { rows: _devRollupMissed.rows + (Number(n) || 0), at: Date.now(), file: String(file || '') }; }
+export function devRollupMissed() { return _devRollupMissed.rows ? { ..._devRollupMissed } : null; }
 
 /** 마운트(공간·inode) — 일 롤업만(5분 원시 없음 · 설계 §9 B). rows: `{ key, ts, mount, used_pct, inode_pct, size_bytes, used_bytes }` */
 export async function writeMountRows(rows = [], agent = '') {
@@ -949,7 +965,7 @@ async function countAll() {
   const mod = await sqliteMod();
   for (const fam of Object.keys(FAMILIES)) {
     const files = listFamilyFiles(fam);
-    let rows = 0; let bytes = 0;
+    let rows = 0; let bytes = 0; const unread = [];
     for (const f of files) {
       const file = path.join(dbDir(), f.name);
       try { bytes += fs.statSync(file).size; } catch { /* */ }
@@ -958,12 +974,12 @@ async function countAll() {
       try {
         const db = h ? h.db : (mod ? (tmp = new mod.DatabaseSync(file, { readOnly: true })) : null);
         if (db) rows += Number(db.prepare(`SELECT COUNT(*) c FROM ${FAMILIES[fam].table}`).get()?.c ?? 0);
-      } catch { /* 못 연 파일은 행 수에서 빠진다(failed 로 밝힌다) */ } finally { try { tmp?.close(); } catch { /* */ } }
+      } catch { unread.push(f.name); } finally { try { tmp?.close(); } catch { /* */ } }   // 40회차 F5: 못 연 파일을 0행으로 더하지 않고 따로 센다
       await maybeYield();
     }
-    out[fam] = { files: files.length, first: files[0]?.key ?? null, last: files.at(-1)?.key ?? null, rows, bytes };
+    out[fam] = { files: files.length, first: files[0]?.key ?? null, last: files.at(-1)?.key ?? null, rows, bytes, ...(unread.length ? { unread: unread.slice(0, 8), unreadCount: unread.length, rowsPartial: true } : {}) };
   }
-  _counts = { at: Date.now(), v: { ...out, countsAt: Date.now(), failed: failedFiles().slice(0, 8) } };
+  _counts = { at: Date.now(), v: { ...out, countsAt: Date.now(), failed: failedFiles().slice(0, 8), ...(devRollupMissed() ? { devRollupMissed: devRollupMissed() } : {}) } };   // 40회차 F2
   return _counts.v;
 }
 /** 낡음 표시만(지난 값은 남긴다 — 다음 조회가 바로 돌려받고 뒤에서 다시 센다). */
