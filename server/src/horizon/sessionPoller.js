@@ -32,10 +32,11 @@ import { localStamp } from '../util/dayKey.js';
 import { demoOn, isMockMode } from '../mock/demo/flags.js';
 import { ensureDemoHorizonSeed, isDemoEntryId, demoHorizonBackfillRows, demoHorizonCatalogRaw } from '../mock/demo/users.js'; // v2.708 데모(mock 에서만)
 import { normalizeCatalog, usageFromSessions } from './appUsage.js';
+import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 const CONCURRENCY_CAP = 8;
 const PRUNE_EVERY_RUNS = 12;                        // 5분 × 12 = 1시간에 1회
-const FIRST_DELAY_MS = Number(process.env.HZSESS_FIRST_DELAY_MS) || 60_000;
+const FIRST_DELAY_MS = envPositive(process.env.HZSESS_FIRST_DELAY_MS, 60_000);
 
 let running = false;
 let tick = 0;

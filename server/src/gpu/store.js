@@ -11,6 +11,7 @@ let byVm = new Map();   // vmId   -> { utilPct, memUsedPct, memUsedMB, memTotalM
 import { numOrNull } from '../util/numOrNull.js';
 import { loadGpuGuestSettings } from './settings.js'; // v2.742(VC-01): 독립 GC 가 실행할 때 폴 주기를 읽는다
 import { getAllGpuGuestDiag } from '../central/gpuGuestDiag.js'; // v2.743(LEFT-02): 엣지 항목 TTL — 그 엣지가 보고한 push 주기(잎 모듈 — util 만 import)
+import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 /**
  * v2.600(CEN2600-01 2차 방어): 사용률은 0~100 유한수만 싣는다. 예전에는 원소 값을 그대로 저장해 객체 하나가 지표 샘플러의
@@ -33,7 +34,7 @@ const cntOrNull = (v) => { const n = numOrNull(v); return n != null && n >= 0 &&
  *     (조용한 상한 금지 — 호출부가 응답·로그에 싣는다). 검증되지 않은 이름(공유 토큰 + 중앙이 모르는 이름)은 더 작은 상한.
  *  ③ 로컬 폴러(agent='')는 vCenter 단위로 나눠 부르므로 교체하지 않는다(기존 upsert) — 전체 상한만 적용한다.
  */
-const envInt = (v, d) => { const n = numOrNull(v); return n != null && n > 0 ? Math.floor(n) : d; };
+const envInt = (v, d) => envPositive(v, d);   // v3.17.6: 지역 사본 → 공용 util/envNumber.js(같은 규칙)
 export const GPU_LIMITS = {
   vmsTotal: envInt(process.env.GUEST_GPU_MAX_VMS, 50_000),
   hostsTotal: envInt(process.env.GUEST_GPU_MAX_HOSTS, 10_000),

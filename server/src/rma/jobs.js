@@ -33,6 +33,7 @@ import { capStr, capTrim } from '../util/capStr.js';
 import { signJob } from './signing.js';
 import { rmaPasswordFor } from './agentSecrets.js';
 import { DU_TOP_MAX_OUTPUT } from './commands.js';
+import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 const jobs = new Map();            // reqId -> job
 const pendingByAgent = new Map();  // agentLower -> Set<reqId>
@@ -46,10 +47,10 @@ export const DONE_TTL = 30 * 60_000;      // 완료 잡 결과 보존(UI 가 결
 const UNDONE_TTL = 15 * 60_000;           // 대기/진행 잡 보존 — RMA 가 영영 안 오면 정리
 const MAX_PENDING = 20;                   // 법인당 대기 상한
 const MAX_CLAIMS = 1;                     // ⚠ 비멱등 — 재인출 금지
-const ACK_GRACE_MS = Number(process.env.RMA_ACK_GRACE_MS) || 30_000;
+const ACK_GRACE_MS = envPositive(process.env.RMA_ACK_GRACE_MS, 30_000);
 const HISTORY_MAX = 300;
 const HISTORY_OUTPUT_MAX = 16 * 1024;     // 이력에는 출력 앞부분만(잡 본체는 DONE_TTL 동안 전문 보존)
-export const HEARTBEAT_STALE_MS = Number(process.env.RMA_HEARTBEAT_STALE_MS) || 90_000; // 롱폴 20s·재시도 백오프 여유
+export const HEARTBEAT_STALE_MS = envPositive(process.env.RMA_HEARTBEAT_STALE_MS, 90_000); // 롱폴 20s·재시도 백오프 여유
 /**
  * v2.605(CEN2605-05·TIM2605-03): 하트비트 보관 상한. 예전에는 삭제 경로가 _resetRma 뿐이라 인스턴스 이름을 바꿔 가며 폴링하면
  * (또는 호스트명이 바뀐 인스턴스가) 프로세스 수명 내내 쌓였고, 정책 문자열 길이도 무제한이라 원소 4,000자 × 200개로 인스턴스당
