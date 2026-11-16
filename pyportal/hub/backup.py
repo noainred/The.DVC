@@ -102,6 +102,7 @@ class BackupService:
 
             write_json(path, payload)
             self._last_run = time.time()
+            self._last_error = None   # 39회차 R6: 어떤 백업이든 성공하면 지난 자동 백업 실패 경고를 지운다
             kept, removed = self._prune_locked()
             self._last_result = {
                 "name": name,
@@ -219,7 +220,7 @@ class BackupService:
         #   traceback 이 쌓이고 화면은 마지막 성공 백업만 보여 실패를 알 수 없었다. 재시도 간격은 그대로(다음 틱).
         try:
             result = self.create(reason="auto")
-        except ValueError as exc:
+        except (ValueError, OSError) as exc:   # 39회차 R5: 디스크 가득 등 쓰기 실패(OSError)도 같은 처리(매 분 traceback 대신)
             reason = str(exc)[:300]
             if not self._last_error or self._last_error.get("reason") != reason:
                 print(f"[backup] 자동 백업 실패: {reason}", flush=True)
@@ -238,5 +239,6 @@ class BackupService:
             "latest": entries[0] if entries else None,
             "totalBytes": sum(entry["sizeBytes"] for entry in entries),
             "directory": str(self._dir),
-            "lastError": dict(self._last_error) if self._last_error else None,   # 37회차 R6
+            # 37회차 R6 · 39회차 R6: 자동 백업이 켜져 있을 때만(꺼면 지난 실패를 경고로 남기지 않는다) — 수동 · 자동 백업이 성공하면 create 가 지운다.
+            "lastError": dict(self._last_error) if (self._last_error and cfg.get("enabled")) else None,
         }

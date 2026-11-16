@@ -81,11 +81,13 @@ test('F4: 설정 경로를 읽지 못하면(EISDIR) 원본을 옮기지 않고 �
   } finally { fs.rmSync(file, { recursive: true, force: true }); }
 });
 
-test('37회차 R1: 로그 exec 는 시작 최소 시간(안 timeout 최악 합) 아래면 시작하지 않고 예산 사유', async () => {
+test('37회차 R1 · 39회차 R1: 로그 exec 는 남은 예산으로 시작하되, 최소 시간 아래로 시작해 시한에 걸리면 실패가 아니라 예산 사유', async () => {
   const LR = await import('../src/bmusage/logs/run.js');
   const LC = await import('../src/bmusage/logs/command.js');
   const s = fs.readFileSync(new URL('bmusage/collectors/osSsh.js', SRC), 'utf8');
-  assert.match(s, /if \(slice\(\) < Math\.max\(MIN_SLICE_MS, Number\(x\.minMs\) \|\| 0\)\) \{ extra\[x\.name\] = \{ skipped: 'budget' \}; continue; \}/);
+  assert.match(s, /const short = slice\(\) < \(Number\(x\.minMs\) \|\| 0\);/);
+  assert.match(s, /short && \/타임아웃\|timed\? \?out\/i\.test\(msg\) \? \{ skipped: 'budget' \}/);
+  assert.doesNotMatch(s, /slice\(\) < Math\.max\(MIN_SLICE_MS, Number\(x\.minMs\)/, '최소 시간 못 미치면 건너뛰던 37회차 규칙은 되돌렸다(매 주기 로그 유실)');
   const r = fs.readFileSync(new URL('bmusage/logs/run.js', SRC), 'utf8');
   assert.match(r, /minMs: LOG_EXEC_TIMEOUT_MS - LOG_INNER_MARGIN_MS/);
   assert.equal(LR.LOG_EXEC_TIMEOUT_MS - LC.LOG_INNER_MARGIN_MS, 22_000);

@@ -205,6 +205,8 @@ export function getAssignedGpuGuest(agent) {
 export function setAssignedGpuGuest(agent, partial, dropped = []) {
   const a = cleanAgent(agent);
   if (!a) return null;
+  // 39회차 R2(반증)는 '손상 중 저장이 다른 엣지 배포를 지운다' 를 지적했지만, 전체 점검 18회차 B-3 결정(엣지는 로컬 값을 유지해 파괴적이지 않다 —
+  //   관리자 저장이 손상을 푼다)과 충돌해 바꾸지 않았다(사용자 결정 사항 — audits.md 39회차 남긴 것).
   const k = agentKeyOf(byAgent, a) ?? a;
   const cur = byAgent[k] || {};
   const next = mergeGpuGuestSettings(cur, partial || {}, dropped);

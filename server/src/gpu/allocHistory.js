@@ -99,6 +99,7 @@ export function allocDailyRows(snap) {
     const t = vc.totals;
     if (unread.has(String(vc.id))) continue;
     if (t.capUnknown || t.allocUnknown || !(numOrNull(t.capGB) > 0) || numOrNull(t.allocGB) == null) continue;
+    if (numOrNull(t.hostsDown) > 0) continue;   // 41회차 F4: GPU 를 못 읽은 끊긴 호스트가 있으면 줄어든 용량을 그 날 값으로 쓰지 않는다
     out.push({ vc: String(vc.id).slice(0, 200), cap: t.capGB, alloc: t.allocGB, gpus: t.gpus, hosts: t.hosts });
   }
   // 계층이 상한으로 잘렸으면(ALLOC_TREE_HOSTS_MAX) 어느 법인이 덜 셌는지 모른다 — 그 시각에는 아무것도 쓰지 않는다.

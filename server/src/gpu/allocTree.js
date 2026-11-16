@@ -270,6 +270,15 @@ export function buildGpuAllocTree(snap, { allowed = null, vcenterId = null, vcen
   const vcs = new Map();
   let truncated = 0;
   let n = 0;
+  // 41회차 F4(재현): 끊긴 호스트는 GPU 목록이 빈 배열('없음')로 와 계층 · 합계 · 일 이력에서 **조용히** 빠졌다(용량과 할당이 함께 줄어 할당률은 그럴듯하게 남음).
+  //   GPU VM 이 그 호스트에 있다고 알려진 끊긴 호스트는 'GPU 를 못 읽은 호스트' 로 세어(hostsDown) 법인 합계가 부분임을 밝히고 일 이력에 쓰지 않는다.
+  const downByVc = new Map();
+  for (const h of snap?.hosts || []) {
+    if (!h || !inScope(h.vcenterId) || !hostDown(h) || (Array.isArray(h.gpus) && h.gpus.length)) continue;
+    if (!(gpuVmsByHost.get(`${h.vcenterId}\t${h.name}`) || []).length) continue;
+    const id = str(h.vcenterId);
+    downByVc.set(id, (downByVc.get(id) || 0) + 1);
+  }
   for (const h of snap?.hosts || []) {
     if (!h || !inScope(h.vcenterId) || !Array.isArray(h.gpus) || !h.gpus.length) continue;
     if (n >= ALLOC_TREE_HOSTS_MAX) { truncated += 1; continue; }
@@ -306,9 +315,11 @@ export function buildGpuAllocTree(snap, { allowed = null, vcenterId = null, vcen
       return { name: dc.name, totals: finishTotals(dt), clusters };
     }).sort((a, b) => (a.name === NO_DC) - (b.name === NO_DC) || a.name.localeCompare(b.name));
     addTotals(all, vt);
-    return { id: vc.id, name: vc.name, city: vc.city, country: vc.country, region: vc.region, totals: finishTotals(vt), datacenters };
+    const down = downByVc.get(vc.id) || 0;
+    return { id: vc.id, name: vc.name, city: vc.city, country: vc.country, region: vc.region, totals: { ...finishTotals(vt), ...(down ? { hostsDown: down } : {}) }, datacenters };
   }).sort(byName);
-  return { totals: finishTotals(all), vcenters, truncated };
+  const downAll = [...downByVc.values()].reduce((a, b) => a + b, 0);
+  return { totals: { ...finishTotals(all), ...(downAll ? { hostsDown: downAll } : {}) }, vcenters, truncated };
 }
 
 /**

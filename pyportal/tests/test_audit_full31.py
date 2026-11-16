@@ -296,6 +296,55 @@ class Review37Test(unittest.TestCase):
         ctx.close()
 
 
+class Review39Test(unittest.TestCase):
+    """39회차 반증 — R3 · R4 · R5 · R6."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_revoked_entry_lives_until_token_expiry(self):
+        """R3: 폐기 항목은 토큰 만료 시각까지(로그아웃 시각 + TTL 이 아니다)."""
+        s = SessionStore(3600, 8, 300, secret_path=self.base / "session-secret")
+        tok = s.create({"username": "a", "role": "admin", "tokenVersion": 1})
+        s.destroy(tok["token"])
+        self.assertEqual(len(s._revoked), 1)
+        self.assertAlmostEqual(list(s._revoked.values())[0], tok["expiresAt"], delta=1)
+
+    def test_fold_failure_keeps_entries(self):
+        """R4: 계정 단위 폐기가 실패하면(계정 파일 못 읽음) 항목을 지우지 않고 저장한다."""
+        users = UserStore(self.base / "users.json")
+        users.add("admin", "admin", "admin-pass-123")
+        s = SessionStore(3600, 8, 300, secret_path=self.base / "session-secret", users=users,
+                         revoked_path=self.base / "session-revoked.json")
+        s.REVOKED_PER_USER = 2
+        toks = [s.create(users.authenticate("admin", "admin-pass-123"))["token"] for _ in range(3)]
+        with mock.patch.object(UserStore, "bump_token_version", side_effect=AuthError("못 읽음")):
+            for t in toks:
+                s.destroy(t)
+        s2 = SessionStore(3600, 8, 300, secret_path=self.base / "session-secret", users=users,
+                          revoked_path=self.base / "session-revoked.json")
+        for t in toks:
+            self.assertIsNone(s2.resolve(t), "재기동 뒤에도 로그아웃 토큰이 되살아나지 않는다")
+
+    def test_auto_backup_oserror_and_warning_lifecycle(self):
+        """R5 · R6"""
+        ctx = AppContext(self.base, start_workers=False)
+        ctx.settings.update_section("backup", {"enabled": True, "intervalMinutes": 60, "keep": 3})
+        with mock.patch("hub.backup.write_json", side_effect=OSError(28, "No space left on device")):
+            self.assertIsNone(ctx.backups.run_if_due())
+        self.assertIsNotNone(ctx.backups.status()["lastError"], "R5: OSError 도 기록")
+        ctx.settings.update_section("backup", {"enabled": False})
+        self.assertIsNone(ctx.backups.status()["lastError"], "R6: 자동 백업을 끄면 경고를 보이지 않는다")
+        ctx.settings.update_section("backup", {"enabled": True})
+        ctx.backups.create(reason="manual")
+        self.assertIsNone(ctx.backups.status()["lastError"], "R6: 수동 백업이 성공하면 지운다")
+        ctx.close()
+
+
 class SmallTest(unittest.TestCase):
     def test_latency_only_when_measured(self):
         """F8"""

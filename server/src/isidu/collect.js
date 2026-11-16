@@ -102,8 +102,9 @@ async function killRemoteJob(creds, jobId) {
  *   v2.737: t.detach !== false 면 장비에서 분리 실행한다(isidu/detach.js) — attachJob 은 재시작 전에 띄운 작업 id(같은 작업에 다시 붙는다),
  *   onJob 은 새 작업을 띄운 직후 불린다(실행 중 스캔 기록에 작업 id 를 남긴다).
  */
-export async function collectTarget(t, { trigger = 'schedule', manual = false, attachJob = null, onJob = null } = {}) {
-  const started = Date.now();
+export async function collectTarget(t, { trigger = 'schedule', manual = false, attachJob = null, onJob = null, startedAt = null } = {}) {
+  // 41회차 F5: 다시 붙는 작업(attachJob)이면 원래 시작 시각을 받는다 — 시한(runDetached)과 소요(durationMs)가 du 시작부터 센다.
+  const started = attachJob && Number(startedAt) > 0 && Number(startedAt) <= Date.now() ? Number(startedAt) : Date.now();
   const base = { agent: '', targetId: t.id, path: t.path, host: t.host, sizeMode: t.sizeMode || 'h', trig: trigger };
   const fail = (kind, error, extra = {}) => ({ ...base, ts: Date.now(), ok: false, kind, error: String(error || '').slice(0, 600), durationMs: Date.now() - started, ...extra });
   if (t.issue) return fail(t.issue, t.issue === 'device-missing' ? '스토리지 등록부에서 그 아이실론이 사라졌습니다' : '고른 장비가 아이실론이 아닙니다');

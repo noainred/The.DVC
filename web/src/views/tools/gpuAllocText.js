@@ -301,7 +301,7 @@ export function allocExportQuery({ scope = '', vcSel = null, depth = 'vm', sheet
 export function profileGB(profile) {
   const s = String(profile ?? '').trim();
   if (!s || s.length > 128) return null;
-  const m = /-(\d{1,3})([a-z]{1,2})$/i.exec(s);
+  const m = /-(\d{1,3})([a-z]{1,2})\d?$/i.exec(s);   // 41회차 F7: 서버와 같은 규칙(B 시리즈 …-2b4)
   if (!m) return null;
   const n = Number(m[1]);
   return Number.isFinite(n) ? (n === 0 ? 0.5 : n) : null;

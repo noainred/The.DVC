@@ -526,10 +526,12 @@ export function saveDeployed(list, { sig = '', now = Date.now(), history = undef
   // v2.954(점검 D-1 반증 재수정): 중앙이 그 엣지 대상을 몰라 태그 창에 keysUnknown 을 달아 보내면(중앙 재시작 직후) 직전 배포본의 같은 창(id · 태그) keys 를 이어 쓴다 —
   //   빈 keys 로 억제가 꺼지지 않게. 직전 배포본이 없거나 시한이 지났거나 새 창이면 이어 쓸 것이 없다(0대 — 예전과 같다). history 도 같은 규칙(직전 items · history 에서).
   let prev = null;
-  const prevOf = () => { if (!prev) { prev = { byId: new Map(), history: [], historyAt: 0 }; try { const d = loadDeployed(now); for (const p of [...(d?.items || []), ...(d?.history || [])]) if (!prev.byId.has(p.id)) prev.byId.set(p.id, p); prev.history = d?.history || []; prev.historyAt = Number(d?.historyAt) || 0; } catch { /* 직전 판을 못 읽으면 이어 쓸 것이 없다 */ } } return prev; };
-  const carry = (x, w) => {
+  // 40회차 F4(재현): 지금 억제 창(items)은 **시한 안의 직전 items** 에서만 keys 를 이어 쓴다 — 예전에는 시한(24h)이 지난 직전 배포본과 시한 없는 history 에서도
+  //   가져와, 끊겼다 돌아온 엣지가 며칠 전 구성원으로 억제를 다시 켰다(주석 '시한이 지났으면 이어 쓸 것이 없다' 와 달랐다). history 창은 지난 구간용이라 둘 다에서.
+  const prevOf = () => { if (!prev) { prev = { live: new Map(), any: new Map(), history: [], historyAt: 0 }; try { const d = loadDeployed(now); const fresh = d && !deployedStale(d, now); for (const p of d?.items || []) { if (fresh && !prev.live.has(p.id)) prev.live.set(p.id, p); if (!prev.any.has(p.id)) prev.any.set(p.id, p); } for (const p of d?.history || []) if (!prev.any.has(p.id)) prev.any.set(p.id, p); prev.history = d?.history || []; prev.historyAt = Number(d?.historyAt) || 0; } catch { /* 직전 판을 못 읽으면 이어 쓸 것이 없다 */ } } return prev; };
+  const carry = (x, w, { live = true } = {}) => {
     if (!(x?.target?.keysUnknown === true && w.target?.kind === 'tag')) return;
-    const p = prevOf().byId.get(w.id);
+    const p = (live ? prevOf().live : prevOf().any).get(w.id);
     if (p?.target?.kind === 'tag' && p.target.tag === w.target.tag && Array.isArray(p.target.keys) && p.target.keys.length) { w.target = { ...w.target, keys: p.target.keys.slice(0, 5_000) }; carried += 1; }
   };
   for (const x of (Array.isArray(list) ? list : []).slice(0, WINDOWS_MAX)) {
@@ -547,7 +549,7 @@ export function saveDeployed(list, { sig = '', now = Date.now(), history = undef
     for (const x of history.slice(0, DEPLOY_HISTORY_MAX * 2)) {
       const w = normalizeWindow(x);
       if (!w) { historyDropped += 1; continue; }
-      carry(x, w);
+      carry(x, w, { live: false });   // 지난 구간용 — 시한과 무관
       if (liveIds.has(w.id) || !keptPast(w, now)) continue;
       cand.push({ w, n: historySizeOf(x) });
     }

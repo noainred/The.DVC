@@ -375,13 +375,19 @@ export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_B
         const extra = {};
         for (const x of Array.isArray(extraCommands) ? extraCommands.slice(0, 2) : []) {
           if (!x || typeof x.cmd !== 'string' || !/^[a-z]{1,16}$/.test(String(x.name || ''))) continue;
-          // 37회차 R1: 덧붙인 exec 마다 시작 최소 시간(minMs — 로그는 안 timeout 최악 합)을 둔다. 못 미치면 시작해서 잘리는 대신 '예산' 사유로 건너뛴다.
-          if (slice() < Math.max(MIN_SLICE_MS, Number(x.minMs) || 0)) { extra[x.name] = { skipped: 'budget' }; continue; }
+          if (slice() < MIN_SLICE_MS) { extra[x.name] = { skipped: 'budget' }; continue; }
+          // 39회차 R1(반증 — 재현): 37회차의 '시작 최소 시간(minMs) 못 미치면 건너뜀' 은 주 명령이 13초를 넘는 서버에서 로그를 **매 주기** 버렸다
+          //   (정상 서버의 로그 exec 는 1~2초에 끝난다). 이제 남은 예산으로 시작하되, minMs 보다 짧은 시한으로 시작한 exec 가 **시한에 걸리면**
+          //   실패가 아니라 '예산' 사유로 센다(37회차 R1 — 잘린 exec 가 '실패' 로 집계되던 것). 커서는 어느 쪽이든 제자리라 다음 주기가 이어 읽는다.
+          const short = slice() < (Number(x.minMs) || 0);
           try {
             const EXTRA_TMO = Math.min(Number(x.timeoutMs) || 15_000, slice());   // ⚠ 위치 인자(숫자) — 객체를 넘기면 NaN → 즉시 시한
             const er = await exec(x.cmd, EXTRA_TMO);
             extra[x.name] = { stdout: String(er.stdout || '').slice(0, Math.max(1_024, Number(x.maxBytes) || 64 * 1024)) };
-          } catch (e) { extra[x.name] = { error: String(e?.message || e).slice(0, 160) }; }
+          } catch (e) {
+            const msg = String(e?.message || e);
+            extra[x.name] = short && /타임아웃|timed? ?out/i.test(msg) ? { skipped: 'budget' } : { error: msg.slice(0, 160) };
+          }
         }
         // v2.922 피크 A 안 — 같은 세션에서 1초 창. 남은 예산이 모자라면 줄이고(planWindow) 그 사실을 남긴다. 1초 표본은 여기서 집계 뒤 버린다.
         const plan = planWindow({ wantS: peakWindowS, remainingMs: endsAt - Date.now() });
