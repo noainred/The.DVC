@@ -17,7 +17,7 @@ from pathlib import Path
 from .catstore import DEFAULT_CATEGORY_ID, LEGACY_IDS, SEED_CATEGORIES
 from .datacenters import DATACENTER_IDS
 from .defaults import default_shortcuts
-from .jsonfile import now_iso as _now_iso, read_json, write_json
+from .jsonfile import StoreUnavailable, load_error_text, now_iso as _now_iso, read_json_state, write_json
 from .ssrf import ValidationError, normalize_url
 
 MAX_SHORTCUTS = 500
@@ -89,6 +89,7 @@ class ShortcutStore:
         self._items: list = []
         self._loaded = False
         self._reissued = False
+        self._load_error = None
 
     def _clean_category(self, value) -> str:
         if not self._resolve_category:
@@ -96,6 +97,9 @@ class ShortcutStore:
         try:
             # 삭제된 카테고리를 참조하던 바로가기는 기본 카테고리로 떨어진다(사라지지 않게).
             return self._resolve_category(value) or DEFAULT_CATEGORY_ID
+        except StoreUnavailable:
+            # 46회차 H2(재현): 카테고리 파일을 못 읽는 동안에는 원값 그대로 — 기본 분류로 바꾸면 다음 저장이 영구히 굳힌다
+            return _clean_text(value, limit=64, default=DEFAULT_CATEGORY_ID)
         except Exception:  # noqa: BLE001 — 카테고리 저장소 문제로 바로가기 저장이 막히면 안 된다
             return _fallback_category(value)
 
@@ -103,6 +107,8 @@ class ShortcutStore:
         text = _clean_text(value, limit=32, default="all")
         try:
             known = self._dc_ids()
+        except StoreUnavailable:
+            return text   # 46회차 H2: 데이터센터 파일을 못 읽는 동안에는 원값 그대로('all' 로 바꿔 굳히지 않는다)
         except Exception:  # noqa: BLE001 — DC 저장소 문제로 바로가기 저장이 막히면 안 된다
             known = DATACENTER_IDS
         return text if text in known else "all"
@@ -110,10 +116,15 @@ class ShortcutStore:
     # ---------- 파일 입출력 ----------
 
     def _read(self) -> list:
-        raw = read_json(self._path, None, expect=list)
+        # 47회차 #4(재현): 손상 · 읽기 오류를 첫 기동과 구분한다(46회차 데이터센터 · 분류와 같은 규칙) — 예전에는 권한 오류도 손상으로 보고 원본을
+        #   옮긴 뒤 샘플 13개로 돌았고, 다음 저장이 샘플을 굳혀 재기동하면 첫 기동처럼 보였다. 못 읽으면 빈 목록 + 표지(쓰기 거절).
+        raw, state = read_json_state(self._path, expect=list, quiet=self._load_error == "unreadable")
+        self._load_error = state if state in ("corrupt", "unreadable") else None
         self._reissued = False
-        if raw is None:
+        if state == "missing":
             return default_shortcuts()
+        if self._load_error:
+            return []
         items = []
         for entry in raw:
             item = self._sanitize(entry, keep_id=True)
@@ -125,12 +136,26 @@ class ShortcutStore:
         return items
 
     def _write(self, items: list) -> None:
+        if self._load_error:
+            raise ValidationError(load_error_text("shortcuts.json", self._load_error))
         write_json(self._path, items)
+
+    def _ensure_writable(self) -> None:
+        """47회차 #4: 못 읽음 상태의 쓰기는 목록을 바꾸기 전에 거절한다(#1 과 같은 규칙)."""
+        self._ensure_loaded()
+        if self._load_error:
+            raise ValidationError(load_error_text("shortcuts.json", self._load_error))
+
+    def load_error(self):
+        with self._lock:
+            self._ensure_loaded()
+            return self._load_error
 
     def _ensure_loaded(self) -> None:
         if not self._loaded:
             self._items = self._read()
-            self._loaded = True
+            # 읽기 오류는 캐시하지 않는다(권한을 고치면 다음 호출에 읽힌다)
+            self._loaded = self._load_error != "unreadable"
             if getattr(self, "_reissued", False):
                 # v2.767(점검 R2-B5-4): 새로 발급한 id 를 곧바로 저장한다 — 안 그러면 재기동마다 다른 id 가 붙어
                 # 그 바로가기의 점검 이력이 끊긴다. 저장이 실패해도 읽기는 계속한다(다음 저장 때 다시 기록).
@@ -210,7 +235,7 @@ class ShortcutStore:
 
     def add(self, data: dict) -> dict:
         with self._lock:
-            self._ensure_loaded()
+            self._ensure_writable()
             if len(self._items) >= MAX_SHORTCUTS:
                 raise ValidationError(f"바로가기는 최대 {MAX_SHORTCUTS}개까지 등록할 수 있습니다.")
             payload = dict(data)
@@ -224,7 +249,7 @@ class ShortcutStore:
 
     def update(self, shortcut_id: str, data: dict):
         with self._lock:
-            self._ensure_loaded()
+            self._ensure_writable()
             for index, item in enumerate(self._items):
                 if item["id"] != shortcut_id:
                     continue
@@ -243,6 +268,8 @@ class ShortcutStore:
         """
         with self._lock:
             self._ensure_loaded()
+            if self._load_error:
+                return 0   # 47회차 #4: 못 읽는 동안에는 옮기지 않는다(다른 저장소 작업을 막지 않게 — 쓸 수 없는 파일)
             moved = 0
             for item in self._items:
                 if item["category"] == from_id:
@@ -262,6 +289,8 @@ class ShortcutStore:
         valid = set(valid_ids or ())
         with self._lock:
             self._ensure_loaded()
+            if self._load_error:
+                return 0   # 47회차 #4: 못 읽는 동안에는 옮기지 않는다(다른 저장소 작업을 막지 않게 — 쓸 수 없는 파일)
             moved = 0
             for item in self._items:
                 dc = item.get("datacenterId") or "all"
@@ -277,6 +306,8 @@ class ShortcutStore:
         """유효 목록에 없는 카테고리를 전부 기본값으로 정리한다(기본값 복원 후처리)."""
         with self._lock:
             self._ensure_loaded()
+            if self._load_error:
+                return 0   # 47회차 #4: 못 읽는 동안에는 옮기지 않는다(다른 저장소 작업을 막지 않게 — 쓸 수 없는 파일)
             moved = 0
             for item in self._items:
                 if item["category"] not in valid_ids:
@@ -295,7 +326,7 @@ class ShortcutStore:
         원천으로 두고 여기서만 바꾼다.
         """
         with self._lock:
-            self._ensure_loaded()
+            self._ensure_writable()
             for index, item in enumerate(self._items):
                 if item["id"] != shortcut_id:
                     continue
@@ -310,7 +341,7 @@ class ShortcutStore:
 
     def delete(self, shortcut_id: str) -> bool:
         with self._lock:
-            self._ensure_loaded()
+            self._ensure_writable()
             remaining = [item for item in self._items if item["id"] != shortcut_id]
             if len(remaining) == len(self._items):
                 return False
@@ -320,6 +351,7 @@ class ShortcutStore:
 
     def reset(self) -> list:
         with self._lock:
+            self._ensure_writable()
             self._items = [item for item in (self._sanitize(entry, keep_id=True)
                                              for entry in default_shortcuts()) if item]
             self._loaded = True
@@ -335,7 +367,7 @@ class ShortcutStore:
         if not isinstance(entries, list):
             raise ValidationError("가져오기 데이터가 올바르지 않습니다.")
         with self._lock:
-            self._ensure_loaded()
+            self._ensure_writable()
             existing_urls = {item["url"].lower() for item in self._items}
             added, skipped = 0, 0
             for entry in entries:
@@ -379,17 +411,31 @@ class ShortcutStore:
             raise ValidationError("가져오기 파일은 바로가기 목록(JSON 배열)이어야 합니다.")
         if len(entries) > MAX_SHORTCUTS:
             raise ValidationError(f"한 번에 {MAX_SHORTCUTS}개를 넘길 수 없습니다.")
-        cleaned = [item for item in (self._sanitize(entry, keep_id=True) for entry in entries) if item]
-        if not cleaned:
+        pairs = []
+        for entry in entries:
+            item = self._sanitize(entry, keep_id=True)
+            if item:
+                pairs.append((item, isinstance(entry, dict) and bool(str(entry.get("id") or "").strip())))
+        if not pairs:
             raise ValidationError("가져올 수 있는 유효한 바로가기가 없습니다(이름·URL 확인).")
-        seen = set()
-        unique = []
-        for item in cleaned:
-            if item["id"] in seen:
-                item["id"] = "sc-" + uuid.uuid4().hex[:12]
-            seen.add(item["id"])
-            unique.append(item)
         with self._lock:
+            # 46회차 H3(재현): id 가 없는 항목(CSV 는 id 열이 없다)은 URL 이 같은 기존 바로가기의 id 를 이어받는다(한 URL 에 한 번) —
+            #   예전에는 내보낸 CSV 를 그대로 '교체' 해도 전부 새 id 라 점검 이력 · 알림 기준점이 끊겼다(JSON 은 id 를 지켰다).
+            self._ensure_writable()
+            prior = {}
+            for old in self._items:
+                prior.setdefault(str(old.get("url") or "").lower(), old.get("id"))
+            seen = set()
+            unique = []
+            for item, had_id in pairs:
+                if not had_id:
+                    inherit = prior.pop(str(item.get("url") or "").lower(), None)
+                    if inherit and inherit not in seen:
+                        item["id"] = inherit
+                if item["id"] in seen:
+                    item["id"] = "sc-" + uuid.uuid4().hex[:12]
+                seen.add(item["id"])
+                unique.append(item)
             self._items = unique
             self._loaded = True
             self._write(self._items)

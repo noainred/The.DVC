@@ -58,11 +58,13 @@ def _bump_token_versions(restored, current):
 
 
 class BackupService:
-    def __init__(self, backup_dir: Path, files: dict, settings_store):
-        """files: {"shortcuts": Path, "datacenters": Path, "users": Path, "settings": Path}"""
+    def __init__(self, backup_dir: Path, files: dict, settings_store, load_errors=None):
+        """files: {"shortcuts": Path, "datacenters": Path, "users": Path, "settings": Path}
+        load_errors: 47회차 #5 — () -> {파일 이름: 'corrupt'|'unreadable'} 데이터 파일을 못 읽는 동안 정리를 멈춘다."""
         self._dir = Path(backup_dir)
         self._files = {key: Path(value) for key, value in files.items()}
         self._settings = settings_store
+        self._load_errors = load_errors
         self._lock = threading.RLock()
         self._last_run = 0.0
         self._last_result = None
@@ -188,6 +190,12 @@ class BackupService:
     # ---------- 보관 수량 ----------
 
     def _prune_locked(self):
+        # 46회차 H1(재현): 설정을 못 읽는 동안(기본 보관 14개)에는 지우지 않는다 — 관리자가 정한 보관 수량을 모른다.
+        load_error = getattr(self._settings, "load_error", None)
+        if (callable(load_error) and load_error()) or self.data_load_errors():
+            # 47회차 #5(재현): 센터 · 분류 · 바로가기 파일이 손상된 동안에도 정리하면 keep 회 뒤 정상 목록이 든 마지막 백업이 지워져
+            #   안내 문구의 '백업에서 복원' 이 불가능해졌다 — 못 읽는 동안에는 지우지 않는다.
+            return len(self.list()), 0
         keep = int(self._settings.section("backup").get("keep", 14))
         keep = max(1, min(MAX_KEEP, keep))
         entries = self.list()
@@ -199,6 +207,15 @@ class BackupService:
             except OSError:
                 pass
         return min(len(entries), keep), removed
+
+    def data_load_errors(self) -> dict:
+        """47회차 #5: 못 읽은 데이터 파일 {이름: 상태} — 없으면 {}."""
+        if not callable(self._load_errors):
+            return {}
+        try:
+            return {k: v for k, v in (self._load_errors() or {}).items() if v}
+        except Exception:  # noqa: BLE001 — 표지 수집 실패가 백업을 막지 않게(정리는 아래에서 보수적으로 멈춘다)
+            return {"unknown": "unreadable"}
 
     # ---------- 스케줄 ----------
 
@@ -241,4 +258,7 @@ class BackupService:
             "directory": str(self._dir),
             # 37회차 R6 · 39회차 R6: 자동 백업이 켜져 있을 때만(꺼면 지난 실패를 경고로 남기지 않는다) — 수동 · 자동 백업이 성공하면 create 가 지운다.
             "lastError": dict(self._last_error) if (self._last_error and cfg.get("enabled")) else None,
+            # 46회차 H1: 설정 파일을 못 읽어 기본값으로 동작 중이면 표지(그동안 오래된 백업 정리를 멈춘다)
+            "settingsLoadError": (self._settings.load_error() if callable(getattr(self._settings, "load_error", None)) else None),
+            "dataLoadErrors": self.data_load_errors() or None,   # 47회차 #5 · #6
         }

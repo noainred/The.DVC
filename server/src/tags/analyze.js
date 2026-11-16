@@ -96,8 +96,9 @@ export function analyzeTags(vcenters, vms, policy = {}, { q = '' } = {}) {
         const t = inv.tags[i]; if (!t) continue;
         const cname = t.cat != null ? inv.categories[t.cat]?.name : null;
         if (!cname) continue;
-        const ck = lc(cname); present.add(ck);
-        const e = cats.get(ck); if (e) e.vms += 1;
+        const ck = lc(cname);
+        // 46회차 V2(재현): '붙은 VM' 은 VM 당 카테고리 한 번 — 여러 개를 붙일 수 있는 카테고리에서 태그 수만큼 세어 100% 를 넘었다
+        if (!present.has(ck)) { present.add(ck); const e = cats.get(ck); if (e) e.vms += 1; }
         if (corpKey && ck === corpKey) corpTags.push(t.name);
       }
       const missing = req.filter((r) => !present.has(r.key)).map((r) => r.name);

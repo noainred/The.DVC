@@ -88,6 +88,8 @@ function hostStats(list, readable, capKnown) {
 }
 
 /** 할당 비율 — 분모(용량)를 일부라도 못 읽었으면 null(분자만 남은 틀린 비율 금지 — toolsCapacity 와 같은 규칙). */
+/** 46회차 V3: 호스트를 모르는 법인의 비율 칸(모름). */
+const UNKNOWN_RATIOS = Object.freeze({ vcpuPerCore: null, ramPct: null });
 function ratios(st, vm) {
   const ok = st.capUnknown === 0 && st.cores != null;
   return {
@@ -198,6 +200,9 @@ export function hostCorpOf({ vcenters = [], hosts = [], vms = [], readable, capK
       vms: vm.n, vmsOn: vm.on, vcpu: vm.vcpu, vcpuUnknown: vm.vcpuUnknown, vmMemGB: Math.round(vm.memMB / 1024), ...ratios(st, vm),
       powerKw: Math.round(sum(list, (h) => (numOrNull(h.powerWatts) > 0 ? h.powerWatts : 0)) / 100) / 10,
       clusterCount: cls.length, standalone, rtt: rttOf(vc.id) || null,
+      // 46회차 V3(재현): 호스트를 모르는 법인은 VM · vCPU · 코어 · 메모리 · 전력 · 여유도 0 이 아니라 모름(화면 '—') — 개수만 null 이고
+      //   나머지가 0 으로 남아 'VM 0 · 물리 코어 0' 으로 보였다. 웹 요약(corpKpis)은 이미 그런 법인을 더하지 않는다.
+      ...(unknownHosts ? { vms: null, vmsOn: null, vcpu: null, vcpuUnknown: null, vmMemGB: null, cores: null, memTotalGB: null, powerKw: null, headroomGB: null, ...UNKNOWN_RATIOS } : {}),
       clusters: cls.sort((a, b) => SEV_RANK[b.sev] - SEV_RANK[a.sev] || (b.cpuMax ?? -1) - (a.cpuMax ?? -1) || String(a.name).localeCompare(String(b.name))),
     };
     if (cfgOk) {
