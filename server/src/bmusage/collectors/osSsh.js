@@ -375,7 +375,8 @@ export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_B
         const extra = {};
         for (const x of Array.isArray(extraCommands) ? extraCommands.slice(0, 2) : []) {
           if (!x || typeof x.cmd !== 'string' || !/^[a-z]{1,16}$/.test(String(x.name || ''))) continue;
-          if (slice() < MIN_SLICE_MS) { extra[x.name] = { skipped: 'budget' }; continue; }
+          // 37회차 R1: 덧붙인 exec 마다 시작 최소 시간(minMs — 로그는 안 timeout 최악 합)을 둔다. 못 미치면 시작해서 잘리는 대신 '예산' 사유로 건너뛴다.
+          if (slice() < Math.max(MIN_SLICE_MS, Number(x.minMs) || 0)) { extra[x.name] = { skipped: 'budget' }; continue; }
           try {
             const EXTRA_TMO = Math.min(Number(x.timeoutMs) || 15_000, slice());   // ⚠ 위치 인자(숫자) — 객체를 넘기면 NaN → 즉시 시한
             const er = await exec(x.cmd, EXTRA_TMO);

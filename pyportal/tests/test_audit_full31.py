@@ -245,6 +245,57 @@ class Review35Test(unittest.TestCase):
             self.assertIn("bob", [u["username"] for u in users.public_list()])
 
 
+class Review37Test(unittest.TestCase):
+    """37회차 반증 — R5 · R6."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_revoked_overflow_does_not_revive_other_accounts_tokens(self):
+        """R5: 한 계정이 로그인 · 로그아웃을 반복해 상한을 넘겨도 다른 계정의 로그아웃 토큰은 되살아나지 않는다."""
+        users = UserStore(self.base / "users.json")
+        users.add("admin", "admin", "admin-pass-123")
+        users.add("mallory", "viewer", "mallory-pass-1")
+        s = SessionStore(3600, 8, 300, secret_path=self.base / "session-secret", users=users,
+                         revoked_path=self.base / "session-revoked.json")
+        s.REVOKED_MAX = 20
+        s.REVOKED_PER_USER = 5
+        admin_tok = s.create(users.authenticate("admin", "admin-pass-123"))["token"]
+        s.destroy(admin_tok)
+        for _ in range(40):
+            t = s.create(users.authenticate("mallory", "mallory-pass-1"))["token"]
+            s.destroy(t)
+        self.assertIsNone(s.resolve(admin_tok), "admin 이 로그아웃한 토큰은 계속 거부")
+        s2 = SessionStore(3600, 8, 300, secret_path=self.base / "session-secret", users=users,
+                          revoked_path=self.base / "session-revoked.json")
+        self.assertIsNone(s2.resolve(admin_tok), "재기동 뒤에도")
+        self.assertLessEqual(len(s._revoked), 20)
+
+    def test_auto_backup_failure_is_visible_and_throttled(self):
+        """R6"""
+        ctx = AppContext(self.base, start_workers=False)
+        ctx.settings.update_section("backup", {"enabled": True, "intervalMinutes": 60, "keep": 3})
+        real = Path.read_text
+
+        def deny(self_path, *a, **k):
+            if self_path.name == "users.json":
+                raise PermissionError(13, "Permission denied")
+            return real(self_path, *a, **k)
+
+        with mock.patch.object(Path, "read_text", deny):
+            self.assertIsNone(ctx.backups.run_if_due())
+            st = ctx.backups.status()
+            self.assertIsNotNone(st["lastError"])
+            self.assertIn("users.json", st["lastError"]["reason"])
+            self.assertIsNone(ctx.backups.run_if_due(), "바로 다시 시도하지 않는다(10분 뒤)")
+        self.assertTrue((self.base / "users.json").exists())
+        ctx.close()
+
+
 class SmallTest(unittest.TestCase):
     def test_latency_only_when_measured(self):
         """F8"""

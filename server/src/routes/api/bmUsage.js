@@ -1507,7 +1507,7 @@ api.put('/tools/bm-usage/distribute/edge', adminOnly, fleetOnly, async (req, res
     } else {
       r = setPerEdge(name, false, by);
     }
-    if (!r.ok) return res.status(r.conflict ? 409 : 400).json({ ok: false, ...(r.conflict ? { conflict: r.conflict } : { code: r.code }), reason: r.reason });
+    if (!r.ok) return res.status(r.conflict || r.code === 'settings-unreadable' ? 409 : 400).json({ ok: false, ...(r.conflict ? { conflict: r.conflict } : { code: r.code }), reason: r.reason });   // 37회차 R4: 같은 상태의 다른 저장과 같은 409
     const saved = r.distribution?.perEdge ? perEdgeFor(name, r.distribution) : null;
     logAudit({ user: req.user?.username, action: 'bm-usage.distribute.edge', target: name, ip: req.ip || '',
       detail: JSON.stringify({ agent: name, on: b.on, changed: r.changed, ...(saved ? { corps: saved.corps.slice(0, 8), corpsCount: saved.corps.length } : {}) }).slice(0, 300) });

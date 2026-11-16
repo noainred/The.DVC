@@ -66,6 +66,8 @@ class BackupService:
         self._lock = threading.RLock()
         self._last_run = 0.0
         self._last_result = None
+        self._last_error = None   # 37회차 R6: 마지막 자동 백업 실패 {at, reason} — 성공하면 지운다
+        self._retry_after = 0.0
 
     # ---------- 생성 ----------
 
@@ -211,9 +213,21 @@ class BackupService:
         return (time.time() - last) >= interval
 
     def run_if_due(self):
-        if not self.due():
+        if time.time() < self._retry_after or not self.due():
             return None
-        return self.create(reason="auto")
+        # 37회차 R6(반증): 자동 백업 실패(예: users.json 을 읽지 못함)는 상태에 남기고 사유가 바뀔 때만 한 줄 — 예전에는 60초마다
+        #   traceback 이 쌓이고 화면은 마지막 성공 백업만 보여 실패를 알 수 없었다. 재시도 간격은 그대로(다음 틱).
+        try:
+            result = self.create(reason="auto")
+        except ValueError as exc:
+            reason = str(exc)[:300]
+            if not self._last_error or self._last_error.get("reason") != reason:
+                print(f"[backup] 자동 백업 실패: {reason}", flush=True)
+            self._last_error = {"at": time.time(), "reason": reason}
+            self._retry_after = time.time() + 600   # 실패하면 10분 뒤 다시(매 분 재시도 · 로그 폭주 대신)
+            return None
+        self._last_error = None
+        return result
 
     def status(self):
         entries = self.list()
@@ -224,4 +238,5 @@ class BackupService:
             "latest": entries[0] if entries else None,
             "totalBytes": sum(entry["sizeBytes"] for entry in entries),
             "directory": str(self._dir),
+            "lastError": dict(self._last_error) if self._last_error else None,   # 37회차 R6
         }

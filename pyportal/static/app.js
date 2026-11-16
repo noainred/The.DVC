@@ -1341,7 +1341,8 @@
       ? "백업 현황(저장 위치 · 파일)은 admin 계정만 볼 수 있습니다."
       : "저장 위치 " + (status.directory || "-") +
         " · 총 " + bytes(status.totalBytes || 0) +
-        (status.latest ? " · 최근 " + fullStamp(status.latest.modifiedTs) : " · 백업 없음");
+        (status.latest ? " · 최근 " + fullStamp(status.latest.modifiedTs) : " · 백업 없음") +
+        (status.lastError ? " · ⚠ 자동 백업 실패: " + status.lastError.reason : "");
 
     var body = $("backup-tbody");
     clear(body);

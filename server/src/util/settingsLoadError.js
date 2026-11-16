@@ -60,7 +60,8 @@ export function makeSettingsLoadError(fileOf, opts = {}) {
       let why = null;
       try { why = corruptOnlyReason(fileOf()); } catch { why = null; }
       if (!why) { err = null; return; }
-      if (!err) set(why.replace('등록부 파일', '설정 파일'));   // 이미 세운 오류의 시각(since)은 유지한다
+      // 37회차 R3: 읽기 오류 표지는 덮는다 — 파일을 지웠고 예전 손상 보존본이 남았으면 이제 '손상 보존본만 있음'(확정 가능)이다. 그 밖의 이미 세운 오류는 시각(since)을 유지한다.
+      if (!err || err.readError) set(why.replace('등록부 파일', '설정 파일'));
     },
   };
   _registry.push({ fileOf, api, label: String(opts.label || ''), confirm: typeof opts.confirm === 'function' ? opts.confirm : null, ownerOnly: opts.ownerOnly === true, superOnly: opts.superOnly === true });

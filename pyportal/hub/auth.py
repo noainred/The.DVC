@@ -441,6 +441,7 @@ class SessionStore:
         self._users = users
         self._secret = self._load_secret(secret_path)
         self._revoked_path = Path(revoked_path) if revoked_path else None
+        self._revoked_user = {}   # sha256(token) -> 계정(37회차 R5 — 상한을 넘치면 계정 단위 폐기로 접는다)
         self._revoked = self._load_revoked()   # sha256(token) -> 만료시각(개별 로그아웃 — 31회차 F5: 파일에도)
         self._user_revoked = {}  # username -> 이 시각 이전 발급 토큰 거부(계정 단위 폐기)
         # 마지막 발급시각 — time.time() 이 같은 마이크로초에 같은 값을 돌려주면 '폐기 직후
@@ -487,20 +488,27 @@ class SessionStore:
         raw = read_json(self._revoked_path, {}, expect=dict)
         now = time.time()
         out = {}
-        for key, exp in raw.items():
+        for key, val in raw.items():
+            # 값은 [만료, 계정](37회차 R5) — 옛 꼴(만료 숫자만)도 읽는다(계정 모름).
+            user = None
+            if isinstance(val, list) and val:
+                user = val[1] if len(val) > 1 and isinstance(val[1], str) else None
+                val = val[0]
             try:
-                exp = float(exp)
+                exp = float(val)
             except (TypeError, ValueError):
                 continue
             if isinstance(key, str) and len(key) == 64 and exp >= now:
                 out[key] = exp
+                if user:
+                    self._revoked_user[key] = user
         return out
 
     def _save_revoked(self) -> None:
         if not self._revoked_path:
             return
         try:
-            write_json(self._revoked_path, self._revoked)
+            write_json(self._revoked_path, {k: [exp, self._revoked_user.get(k, "")] for k, exp in self._revoked.items()})
         except OSError as exc:   # 저장 실패가 로그아웃을 막지는 않는다(이 프로세스에서는 메모리로 막힌다)
             print(f"[auth] 로그아웃 폐기 목록 저장 실패({exc}) — 재기동하면 그 토큰이 만료까지 다시 통할 수 있습니다.", flush=True)
 
@@ -629,21 +637,42 @@ class SessionStore:
             self._last_issued = issued
             return issued
 
-    REVOKED_MAX = 5000   # 35회차 R1: 폐기 목록 상한(만료가 가까운 것부터 버린다 — 그 토큰은 곧 스스로 만료된다)
+    REVOKED_MAX = 5000      # 35회차 R1: 폐기 목록 전체 상한
+    REVOKED_PER_USER = 50   # 37회차 R5: 계정당 상한 — 넘치면 그 계정 단위 폐기(tokenVersion 인상)로 접는다
 
     def destroy(self, token) -> None:
         if not token:
             return
         # 35회차 R1(재현): 서명 · 만료가 유효한 토큰만 기록한다 — 예전에는 아무 문자열이나 받아(미인증 로그아웃 요청) 폐기 파일이 끝없이 자라고
         #   요청마다 전체 파일을 세션 잠금 안에서 다시 써 정상 세션 판정이 수 초씩 밀렸다. 이미 무효인 토큰은 기록할 필요가 없다.
-        if self.resolve(token) is None:
+        user = self.resolve(token)
+        if user is None:
             return
+        uname = str(user.get("username", ""))
+        fold = set()
         with self._lock:
-            self._revoked[self._token_id(token)] = time.time() + self._ttl
+            key = self._token_id(token)
+            self._revoked[key] = time.time() + self._ttl
+            self._revoked_user[key] = uname
             self._purge_revoked()
+            # 37회차 R5(반증 — 재현): 상한을 넘칠 때 남의 항목을 버리면 그 계정이 로그아웃한 토큰이 되살아났다(유효 계정 하나로 5,000번 로그인 ·
+            #   로그아웃). 버리는 대신 **그 계정 단위 폐기로 접는다** — 계정당 상한을 넘은 계정, 그리고 전체 상한을 넘으면 만료가 가까운 항목의 계정.
+            if sum(1 for u in self._revoked_user.values() if u == uname) > self.REVOKED_PER_USER:
+                fold.add(uname)
             if len(self._revoked) > self.REVOKED_MAX:
-                for key, _exp in sorted(self._revoked.items(), key=lambda kv: kv[1])[: len(self._revoked) - self.REVOKED_MAX]:
-                    self._revoked.pop(key, None)
+                for k, _exp in sorted(self._revoked.items(), key=lambda kv: kv[1])[: len(self._revoked) - self.REVOKED_MAX]:
+                    fold.add(self._revoked_user.get(k, ""))
+        for name in fold:
+            if name:
+                self.destroy_user(name)   # tokenVersion 인상(재기동 뒤에도) + 메모리 컷오프 — 그 계정의 남은 세션도 끊긴다(남용일 때만)
+        with self._lock:
+            for k in [k for k, u in self._revoked_user.items() if u in fold]:
+                self._revoked.pop(k, None)
+                self._revoked_user.pop(k, None)
+            if len(self._revoked) > self.REVOKED_MAX:   # 계정을 모르는 옛 항목만 남았을 때의 마지막 방어
+                for k, _exp in sorted(self._revoked.items(), key=lambda kv: kv[1])[: len(self._revoked) - self.REVOKED_MAX]:
+                    self._revoked.pop(k, None)
+                    self._revoked_user.pop(k, None)
             self._save_revoked()
 
     def destroy_user(self, username) -> None:
@@ -667,6 +696,7 @@ class SessionStore:
         for token, expires in list(self._revoked.items()):
             if expires < now:
                 self._revoked.pop(token, None)
+                self._revoked_user.pop(token, None)
         # 컷오프는 TTL 이 지나면 의미가 없다(그 이전 토큰은 어차피 만료).
         for username, cutoff in list(self._user_revoked.items()):
             if cutoff + self._ttl < now:

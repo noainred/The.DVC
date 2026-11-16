@@ -38,21 +38,24 @@ test('F1: 시계가 앞선 엣지의 멈춘 CPU 값은 6시간 뒤 낡음(stale)
   assert.equal(bmCpuRowOf({ serviceTag: 'ABC1234', id: 'x' }, idx, later).fresh, false);
 });
 
-test('F2: 어느 시간도 측정 서버가 다 모이지 않으면 24h 피크는 null · 부분 시간을 센다', async () => {
+test('F2 · 37회차 R7: 어느 시간도 측정 서버가 다 모이지 않으면 피크는 부분 합 표지와 함께(n/m대) · 부분 시간을 센다', async () => {
   const { aggregatePower, hourSummary } = await import('../src/bmusage/powerAgg.js');
   const H = 3_600_000; const base = Math.floor(Date.now() / H) * H - 24 * H;
   const hours = (from, to, w) => Array.from({ length: to - from }, (_, i) => ({ ts: base + (from + i) * H, avg: w, max: w }));
   const mk = (key, h, w) => ({ key, name: key, vcenterId: 'vc1', w, h24: hourSummary(h) });
   const f = aggregatePower([mk('A', hours(0, 12, 500), null), mk('B', hours(12, 24, 500), 500), mk('C', hours(0, 24, 400), 400)], {}).fleet;
-  assert.equal(f.peak24Kw, null);
+  assert.equal(f.peakPartial, true);
+  assert.equal(f.peakServers, 2);
+  assert.equal(f.avg24Servers, 3);
   assert.equal(f.partialHours, 24);
   // 대조: 셋 다 24시간이면 피크가 있다
   const g = aggregatePower([mk('A', hours(0, 24, 500), 500), mk('C', hours(0, 24, 400), 400)], {}).fleet;
   assert.equal(g.peak24Kw, 0.9);
   assert.equal(g.partialHours, 0);
+  assert.equal(g.peakPartial, false);
   const { powerCards } = await import('../../web/src/views/tools/bmPowerText.js');
   const card = powerCards(f).find((c) => c.k === 'peak');
-  assert.match(card.sub, /다 모인 시간이 없습니다/);
+  assert.match(card.sub, /2\/3대 기준 부분 합/);
 });
 
 test('F3: 덧붙인 exec 는 피크 창 계획보다 먼저(소스 순서)', () => {
@@ -76,4 +79,31 @@ test('F4: 설정 경로를 읽지 못하면(EISDIR) 원본을 옮기지 않고 �
     assert.deepEqual(fs.readdirSync(process.env.CONFIG_DIR).filter((x) => x.includes('.corrupt.')), []);
     assert.throws(() => M.saveBmUsageSettings({ enabled: true }), (e) => e.code === 'settings-unreadable' && e.status === 409);
   } finally { fs.rmSync(file, { recursive: true, force: true }); }
+});
+
+test('37회차 R1: 로그 exec 는 시작 최소 시간(안 timeout 최악 합) 아래면 시작하지 않고 예산 사유', async () => {
+  const LR = await import('../src/bmusage/logs/run.js');
+  const LC = await import('../src/bmusage/logs/command.js');
+  const s = fs.readFileSync(new URL('bmusage/collectors/osSsh.js', SRC), 'utf8');
+  assert.match(s, /if \(slice\(\) < Math\.max\(MIN_SLICE_MS, Number\(x\.minMs\) \|\| 0\)\) \{ extra\[x\.name\] = \{ skipped: 'budget' \}; continue; \}/);
+  const r = fs.readFileSync(new URL('bmusage/logs/run.js', SRC), 'utf8');
+  assert.match(r, /minMs: LOG_EXEC_TIMEOUT_MS - LOG_INNER_MARGIN_MS/);
+  assert.equal(LR.LOG_EXEC_TIMEOUT_MS - LC.LOG_INNER_MARGIN_MS, 22_000);
+});
+
+test('37회차 R3: 읽기 오류 뒤 파일을 지웠고 예전 손상 보존본이 남았으면 손상(확정 가능)으로 바뀐다', async () => {
+  const { makeSettingsLoadError } = await import('../src/util/settingsLoadError.js');
+  const f = path.join(process.env.CONFIG_DIR, 'r3-test.json');
+  fs.writeFileSync(`${f}.corrupt.2026-01-01T00-00-00`, 'x');
+  const le = makeSettingsLoadError(() => f, { label: 'r3', confirm: () => {} });
+  le.readError(Object.assign(new Error('EACCES'), { code: 'EACCES' }));
+  assert.equal(le.get().readError, true);
+  le.missing();
+  assert.ok(le.get(), '보존본이 있어 오류는 남지만');
+  assert.ok(!le.get().readError, '읽기 오류 표지는 풀린다(확정 가능)');
+});
+
+test('37회차 R4: 엣지별 중앙 켜기의 읽지 못한 파일 거절도 409', () => {
+  const s = fs.readFileSync(new URL('routes/api/bmUsage.js', SRC), 'utf8');
+  assert.match(s, /res\.status\(r\.conflict \|\| r\.code === 'settings-unreadable' \? 409 : 400\)/);
 });
