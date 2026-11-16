@@ -7,20 +7,31 @@
  */
 
 // 서버 권한 키(requirePerm) → 사람이 읽는 이름. 없는 키는 원문을 그대로 보여준다(추측 금지).
+// v3.17.4(2차 공통 기능 점검 3회차): 이 표가 서버 카탈로그(server/src/auth/permissions.js PERMISSION_CATALOG)와 갈라져 있었다 —
+//   서버 키 20개 중 6개만 있었고(dashboard · inv.* · insights · settings · upgrade · users.manage · guest.deploy · data.csv · issues.request 없음),
+//   서버에 없는 키 7개(vm.power · host.power · ipam · idrac · nsx · backup · audit)가 남아 있었다. 그래서 가장 흔한 403(inv.vms 등)이
+//   '필요: inv.vms 권한' 처럼 원문 키로 보였다. 이름은 서버 카탈로그의 label 그대로이고, server/test/commonRound13_3173.test.js 가 두 벌을 대조한다.
 export const PERM_LABEL = {
-  tools: '특수 기능(도구)',
-  'vm.console': 'VM 콘솔 열기',
-  'vm.reconfig': 'VM 사양 변경',
-  'vm.power': 'VM 전원 제어',
-  'vm.provision': 'VM 생성·복제',
-  'host.power': '호스트 전원 제어',
-  'remote.access': '원격 접속(RDP/SSH)',
-  svcmon: '성능점검 관리',
-  ipam: 'IP 관리',
-  idrac: '서버 하드웨어(iDRAC)',
-  nsx: 'NSX 네트워크',
-  backup: '백업·복원',
-  audit: '감사 로그',
+  dashboard: '대시보드·요약·플랫폼·탐색',
+  'inv.hosts': '호스트',
+  'inv.vms': '가상머신',
+  'inv.datastores': '스토리지',
+  'inv.networks': '네트워크',
+  'inv.nsx': 'NSX',
+  'inv.alarms': '알람(음소거 포함)',
+  tools: '특수 기능(IPAM·핑·검색 등)',
+  insights: '인사이트(FinOps·이상탐지 등)',
+  svcmon: '서비스 모니터(성능점검)',
+  'remote.access': '원격 접속(SSH/RDP 터널)',
+  'vm.console': '원격 콘솔(VMRC/웹 콘솔)',
+  'vm.reconfig': 'VM 사양 변경(재구성)',
+  'vm.provision': 'VM 프로비저닝(생성)',
+  'guest.deploy': '게스트 계정 배포',
+  settings: '설정',
+  upgrade: '업그레이드',
+  'users.manage': '사용자·권한 관리',
+  'data.csv': 'CSV 가져오기/내보내기',
+  'issues.request': '이슈 요청 등록(요청 유형만)',
 };
 export const ROLE_LABEL = { super_admin: '슈퍼 관리자(super_admin)', admin: '관리자(admin)', operator: '운영자(operator)', viewer: '조회자(viewer)' };
 
