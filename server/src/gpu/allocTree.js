@@ -319,7 +319,8 @@ export function buildGpuAllocTree(snap, { allowed = null, vcenterId = null, vcen
     return { id: vc.id, name: vc.name, city: vc.city, country: vc.country, region: vc.region, totals: { ...finishTotals(vt), ...(down ? { hostsDown: down } : {}) }, datacenters };
   }).sort(byName);
   const downAll = [...downByVc.values()].reduce((a, b) => a + b, 0);
-  return { totals: { ...finishTotals(all), ...(downAll ? { hostsDown: downAll } : {}) }, vcenters, truncated };
+  // 42회차 R2: GPU 호스트가 모두 끊긴 법인은 계층 노드가 없다 — 법인 목록(allocCorpRoster · 웹 corpChips)이 '실제 0대' 로 읽지 않게 법인별 수를 싣는다.
+  return { totals: { ...finishTotals(all), ...(downAll ? { hostsDown: downAll } : {}) }, vcenters, truncated, ...(downAll ? { hostsDownByVc: Object.fromEntries(downByVc) } : {}) };
 }
 
 /**
@@ -330,15 +331,16 @@ export function buildGpuAllocTree(snap, { allowed = null, vcenterId = null, vcen
  * @returns {''|'pending'|'unreachable'|'disabled'|'maintenance'|'truncated'} '' = 아는 값(노드가 있거나 실제 0대)
  */
 export const CORP_INV_EMPTY = Object.freeze(['pending', 'unreachable', 'disabled', 'maintenance']);
-export function corpUnknownOf(meta, hasNode, truncated = 0) {
+export function corpUnknownOf(meta, hasNode, truncated = 0, hostsDown = 0) {
   if (hasNode) return '';
   const st = str(meta?.status);
   if (!meta?.stale && CORP_INV_EMPTY.includes(st)) return st;
+  if (Number(hostsDown) > 0) return 'hostsDown';   // 42회차 R2: GPU VM 이 있는 끊긴 호스트뿐 — 0대가 아니라 모름
   return truncated > 0 ? 'truncated' : '';
 }
 /** 목차·창 칩 글자(모름 사유) — 웹 gpuAllocText.js CORP_UNKNOWN_TEXT 와 같은 글자. */
 export const CORP_UNKNOWN_TEXT = Object.freeze({
-  pending: '수집 전', unreachable: '접속 불가', disabled: '수집 꺼짐', maintenance: '점검 중', truncated: '상한으로 잘림',
+  pending: '수집 전', unreachable: '접속 불가', disabled: '수집 꺼짐', maintenance: '점검 중', truncated: '상한으로 잘림', hostsDown: 'GPU 호스트 끊김',
 });
 
 /**
@@ -357,7 +359,7 @@ export function allocCorpRoster(snap, opt = {}, tree = null) {
     const id = str(m.id);
     if (!id || out.has(id) || !inScope(id)) continue;
     const vc = byId.get(id) || null;
-    out.set(id, { id, name: str(m.name) || id, city: str(m.location?.city), country: str(m.location?.country), vc, unknown: corpUnknownOf(m, !!vc, truncated) });
+    out.set(id, { id, name: str(m.name) || id, city: str(m.location?.city), country: str(m.location?.country), vc, unknown: corpUnknownOf(m, !!vc, truncated, tree?.hostsDownByVc?.[id]) });
   }
   for (const v of byId.values()) if (!out.has(v.id) && inScope(v.id)) out.set(v.id, { id: v.id, name: v.name, city: v.city, country: v.country, vc: v, unknown: '' });
   return [...out.values()].sort((a, b) => a.id.localeCompare(b.id));

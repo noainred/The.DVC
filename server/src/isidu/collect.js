@@ -104,9 +104,11 @@ async function killRemoteJob(creds, jobId) {
  */
 export async function collectTarget(t, { trigger = 'schedule', manual = false, attachJob = null, onJob = null, startedAt = null } = {}) {
   // 41회차 F5: 다시 붙는 작업(attachJob)이면 원래 시작 시각을 받는다 — 시한(runDetached)과 소요(durationMs)가 du 시작부터 센다.
+  //   42회차 R1: 재개 대상이 장비에 없어 새로 띄우면 runDetached 가 지금부터 시한을 잡고 실제 시작(startedAt)을 돌려준다 — 소요도 그 기준(runStart).
   const started = attachJob && Number(startedAt) > 0 && Number(startedAt) <= Date.now() ? Number(startedAt) : Date.now();
+  let runStart = started;
   const base = { agent: '', targetId: t.id, path: t.path, host: t.host, sizeMode: t.sizeMode || 'h', trig: trigger };
-  const fail = (kind, error, extra = {}) => ({ ...base, ts: Date.now(), ok: false, kind, error: String(error || '').slice(0, 600), durationMs: Date.now() - started, ...extra });
+  const fail = (kind, error, extra = {}) => ({ ...base, ts: Date.now(), ok: false, kind, error: String(error || '').slice(0, 600), durationMs: Date.now() - runStart, ...extra });
   if (t.issue) return fail(t.issue, t.issue === 'device-missing' ? '스토리지 등록부에서 그 아이실론이 사라졌습니다' : '고른 장비가 아이실론이 아닙니다');
 
   let stdout = ''; let stderr = ''; let code = null; let runInfo = {};
@@ -133,8 +135,10 @@ export async function collectTarget(t, { trigger = 'schedule', manual = false, a
         return { x, mode: 'attached' };
       }), 'du 시한 초과', { long: true });   // v2.739: 세션 시한도 긴 작업 상한(3시간)까지 연다 — 명령 시한(EXEC_LONG_MAX_MS)과 같은 값
       stdout = r.x?.stdout || ''; stderr = r.x?.stderr || ''; code = r.x?.code ?? null;
+      if (Number(r.startedAt) > 0) runStart = Number(r.startedAt);
       runInfo = { runMode: r.mode || 'attached', ...(r.attached ? { attached: true } : {}), ...(r.detachFallback ? { detachFallback: r.detachFallback } : {}) };
     } catch (e) {
+      if (Number(e?.startedAt) > 0) runStart = Number(e.startedAt);   // 42회차 R1
       const kind = classify(e);
       if (kind === 'auth') authGuard.markAuthStopped(c.credId.id, c.credId, e.message);
       // 포탈 쪽 시한(세션 시한)에 걸리면 장비의 du 를 멈춘다 — 재시작으로 끝날 때는 여기 오지 않는다(그때는 이어 받는다).
@@ -153,7 +157,7 @@ export async function collectTarget(t, { trigger = 'schedule', manual = false, a
   }
   const tot = totalsOf(parsed.entries, parsed.total);
   return {
-    ...base, ts: Date.now(), ok: true, durationMs: Date.now() - started,
+    ...base, ts: Date.now(), ok: true, durationMs: Date.now() - runStart,
     total: parsed.total, sumBytes: tot.sumBytes, sumRes: tot.sumRes, count: parsed.entries.length,
     skipped: parsed.skipped, errLines: parsed.errLines, errSample: parsed.errSample, truncated: parsed.truncated,
     entries: parsed.entries, ...runInfo,

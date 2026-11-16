@@ -37,6 +37,8 @@ export function totalsNote(t) {
   if (spare != null && spare < 0) { notes.push('할당이 용량을 넘음 — 확인 필요'); tone = 'warn'; } else if (pct != null && pct >= 90) { notes.push('포화'); tone = 'warn'; }
   if (t.allocUnknown) { notes.push(`할당 모르는 VM ${t.allocUnknown}`); tone = 'warn'; }
   if (t.capUnknown) { notes.push(`용량 모르는 GPU ${t.capUnknown}`); tone = 'warn'; }
+  // 42회차 R2: GPU 를 못 읽은 끊긴 호스트(GPU VM 이 있는) — 합계는 부분이고 그 시각 일 이력에 쓰지 않았다
+  if (numOrNull(t.hostsDown) > 0) { notes.push(`GPU 를 못 읽은 끊긴 호스트 ${t.hostsDown}대 — 합계는 부분`); tone = 'warn'; }
   if (t.noPlacement) notes.push(`배치 정보 없는 GPU ${t.noPlacement}`);
   if (t.offUnknown) notes.push(`꺼진 VM 용량 모름 ${t.offUnknown}대`);   // v2.870 감사 A4-01: 꺼진 VM 합에서 빠진 수(엑셀 totalsCells 와 같은 말)
   if (t.unplaced) notes.push(`미배치 VM ${t.unplaced}`);
@@ -131,14 +133,15 @@ export function sumTotals(tree, vcSel) {
  * @returns {''|'pending'|'unreachable'|'disabled'|'maintenance'|'truncated'}
  */
 export const CORP_INV_EMPTY = Object.freeze(['pending', 'unreachable', 'disabled', 'maintenance']);
-export function corpUnknownOf(meta, hasNode, truncated = 0) {
+export function corpUnknownOf(meta, hasNode, truncated = 0, hostsDown = 0) {
   if (hasNode) return '';
   const st = typeof meta?.status === 'string' ? meta.status : '';
   if (!meta?.stale && CORP_INV_EMPTY.includes(st)) return st;
+  if (Number(hostsDown) > 0) return 'hostsDown';   // 42회차 R2: 서버와 같은 판정(GPU VM 이 있는 끊긴 호스트뿐 — 0대가 아니라 모름)
   return truncated > 0 ? 'truncated' : '';
 }
 export const CORP_UNKNOWN_TEXT = Object.freeze({
-  pending: '수집 전', unreachable: '접속 불가', disabled: '수집 꺼짐', maintenance: '점검 중', truncated: '상한으로 잘림',
+  pending: '수집 전', unreachable: '접속 불가', disabled: '수집 꺼짐', maintenance: '점검 중', truncated: '상한으로 잘림', hostsDown: 'GPU 호스트 끊김',
 });
 
 /** 칩 글자(제목 · 개수) — 모르면 0 이 아니라 '—'(v2.871 A4-02). */
@@ -154,7 +157,7 @@ export function corpChips(tree, vcs) {
   const truncated = Number(tree?.truncated) || 0;
   return list.map((x) => {
     const node = byId.get(x.id);
-    const unknown = corpUnknownOf(x.site, !!node, truncated);
+    const unknown = corpUnknownOf(x.site, !!node, truncated, tree?.hostsDownByVc?.[x.id]);
     // 모르면 hosts·gpus 는 null(0 이 아니다 — 소비처는 corpChipText 로 글자를 만든다)
     return { ...x, unknown, hosts: unknown ? null : node?.totals?.hosts || 0, gpus: unknown ? null : node?.totals?.gpus || 0 };
   }).sort((a, b) => a.id.localeCompare(b.id));

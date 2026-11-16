@@ -543,7 +543,10 @@ export function retentionNote(settings = {}, db = {}) {
   if (raw == null || daily == null) return '';
   const years = Math.round((daily / 365) * 10) / 10;
   const rows = n(db.rawRows);
-  return `원시 표본은 **${raw}일**, 하루 단위 롤업은 **${years}년** 보관합니다(롤업은 평균과 **최대**를 함께 둡니다 — 평균만 두면 피크가 사라집니다).${rows != null ? ` 현재 원시 ${rows.toLocaleString()}행.` : ''}`;
+  // 42회차 R3: 못 연 파일이 있으면 행 수는 하한('최소') · 장치 1시간 롤업 누락은 따로 밝힌다(못 읽음을 숨기지 않는다).
+  const rowsText = rows != null ? ` 현재 원시 ${db.rawRowsPartial ? '최소 ' : ''}${rows.toLocaleString()}행${db.rawRowsPartial ? `(파일 ${n(db.rawUnread) ?? '일부'}개 못 읽음)` : ''}.` : '';
+  const devMiss = n(db.devRollupMissed?.rows);
+  return `원시 표본은 **${raw}일**, 하루 단위 롤업은 **${years}년** 보관합니다(롤업은 평균과 **최대**를 함께 둡니다 — 평균만 두면 피크가 사라집니다).${rowsText}${devMiss ? ` 장치 1시간 롤업에서 빠진 표본 ${devMiss.toLocaleString()}건(롤업 파일 쓰기 실패 — 원시에는 있음).` : ''}`;
 }
 
 /** 엣지 노드에서 본 화면 — 자기 것만 수집한다는 사실을 말한다. */

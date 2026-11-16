@@ -108,7 +108,8 @@ function sleep(ms, signal) {
  *   던지는 오류에는 `jobId` 가 붙는다(호출부가 시한 실패 때 작업을 멈출 수 있게).
  */
 export async function runDetached(api, t, { cmdMs, attachJob = null, onJob = null, signal = null, started = Date.now(), now = () => Date.now(), pollMinMs = POLL_MIN_MS } = {}) {
-  const deadline = started + Math.max(10_000, Number(cmdMs) || 0);
+  const span = Math.max(10_000, Number(cmdMs) || 0);
+  let deadline = started + span;
   let jobId = attachJob && JOB_RE.test(String(attachJob)) ? String(attachJob) : null;
   let attached = false;
   if (jobId) {
@@ -117,6 +118,10 @@ export async function runDetached(api, t, { cmdMs, attachJob = null, onJob = nul
     else jobId = null; // 끝난 흔적이 없다(재부팅·정리) — 새로 시작한다
   }
   if (!jobId) {
+    // 42회차 R1(반증 — 재현): 새로 띄우는 작업은 **지금부터** 시한을 받는다 — 41회차 F5 의 '원래 시작 시각' 은 다시 붙는 작업에만 맞다
+    //   (재개 대상이 장비에 없어 새로 띄운 du 가 옛 시각 기준 시한을 받아 곧바로 '시한 초과' 로 죽었다).
+    started = now();
+    deadline = started + span;
     const id = newJobId(t.id);
     const s = await api.exec(startCommand(t, id), 20_000);
     const m = /DVC-STARTED\s+(\d+)/.exec(s?.stdout || '');
@@ -126,7 +131,7 @@ export async function runDetached(api, t, { cmdMs, attachJob = null, onJob = nul
         : (String(s?.stderr || s?.stdout || '').trim().split('\n')[0] || `종료코드 ${s?.code ?? '?'}`).slice(0, 200);
       const left = Math.max(10_000, deadline - now());
       const x = await api.exec(duCommand(t.path, t.sizeMode), left, { long: true });
-      return { x, mode: 'attached-fallback', attached: false, jobId: null, detachFallback: why };
+      return { x, mode: 'attached-fallback', attached: false, jobId: null, detachFallback: why, startedAt: started };
     }
     jobId = id;
     try { onJob?.({ id: jobId }); } catch { /* 기록 실패는 조사를 막지 않는다 */ }
@@ -158,9 +163,9 @@ export async function runDetached(api, t, { cmdMs, attachJob = null, onJob = nul
     const out = await api.exec(readOutCommand(jobId), 120_000);
     const err = await api.exec(readErrCommand(jobId), 30_000);
     await api.exec(cleanupCommand(jobId), 20_000).catch(() => {});
-    return { x: { stdout: out?.stdout || '', stderr: err?.stdout || '', code: rc }, mode: 'detached', attached, jobId };
+    return { x: { stdout: out?.stdout || '', stderr: err?.stdout || '', code: rc }, mode: 'detached', attached, jobId, startedAt: started };   // 42회차 R1: 실제 시작 기준(소요 계산)
   } catch (e) {
-    if (e && typeof e === 'object') e.jobId = jobId;
+    if (e && typeof e === 'object') { e.jobId = jobId; e.startedAt = started; }
     throw e;
   }
 }

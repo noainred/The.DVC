@@ -67,7 +67,11 @@ async function fetchCatalog(get) {
         const body = await readJsonCapped(r, PAGE_MAX_BYTES, 'Horizon 응답').catch(() => null);
         if (!Array.isArray(body)) { bad = true; break; }
         pushAll(acc, body);
-        if (body.length < CATALOG_PAGE) break;
+        // 42회차 R5: 세션 페이징(41회차 F2)과 같은 규칙 — '더 있음' 헤더면 짧은 쪽에서도 다음 쪽, 헤더가 없을 때만 길이로 끝을 판정
+        const more = headerSaysMore(r);
+        if (more === false) break;
+        if (more !== true && body.length < CATALOG_PAGE) break;
+        if (more === true && body.length === 0) break;   // 빈 쪽 — 이름 대응만 덜 될 뿐(못 찾은 것은 ID 로 남는다)
         if (page === CATALOG_MAX_PAGES) truncated[kind] = true;
       }
       if (status === 404) { errors[kind] = `${p}: 404`; continue; }   // 이 버전에 없는 경로 — 다음 후보
@@ -106,6 +110,7 @@ export async function collectServerSessions(s, { pageSize = 500, maxPages = 20, 
       const acc = [];
       let pages = 0;
       let truncated = false;
+      let prevLen = size;
       for (let page = 1; ; page++) {
         const r = await get(SESSION_PATH, { query: { page: String(page), size: String(size) } });
         if (!r.ok) {
@@ -126,7 +131,10 @@ export async function collectServerSessions(s, { pageSize = 500, maxPages = 20, 
         // 41회차 F2(재현): 서버가 '더 있음(HAS_MORE_RECORDS: true)' 이라고 말하면 페이지 길이와 무관하게 다음 페이지 — 요청보다 작은 페이지 상한을 쓰는 서버에서
         //   첫 페이지만 읽고 절단 표지 없이 '전체' 로 적재했다. 헤더가 없을 때만 길이로 판정한다(cap 에 닿으면 아래에서 truncated).
         if (more !== true && body.length < size) break;       // 마지막 페이지
-        if (more === true && body.length === 0) { truncated = true; break; }   // '더 있음' 인데 빈 페이지 — 더 읽을 수 없다(하한으로)
+        // 42회차 R6: '더 있음' 인데 빈 페이지 — 직전 페이지가 요청보다 짧았으면 끝으로 본다(마지막 쪽에도 true 를 주는 서버가 매 주기 '절단' · 추이 NULL 이 되지 않게).
+        //   직전 페이지가 꽉 찼는데 빈 페이지면 더 읽을 수 없다(하한으로).
+        if (more === true && body.length === 0) { if (page > 1 && prevLen < size) break; truncated = true; break; }
+        prevLen = body.length;
         if (page >= cap) { truncated = true; break; }
       }
       // 카탈로그 — 같은 로그인 안에서, 낡았을 때만. 실패해도 세션 결과는 그대로 쓴다(이름만 ID 로 남는다).

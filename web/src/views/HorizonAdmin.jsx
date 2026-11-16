@@ -99,7 +99,7 @@ export function HorizonServerManager({ variant = 'details', onChanged }) {
 
   const body = (
     <>
-      {hzLoadErr && <div className="banner warn" style={{ marginTop: 8 }}>Horizon 등록부(horizon.json)를 읽지 못했습니다(0대라는 뜻이 아닙니다): {hzLoadErr.reason} — 저장은 막혀 있습니다.</div>}
+      {hzLoadErr && <div className="banner warn" style={{ marginTop: 8 }}>Horizon 등록부(horizon.json)를 읽지 못했습니다(0대라는 뜻이 아닙니다): {hzLoadErr.reason} — 저장은 막혀 있습니다. 서비스 점검에서 확정하거나 보존본을 되돌린 뒤 다시 읽으세요. <button className="tab" style={{ marginLeft: 8, padding: '2px 10px' }} onClick={() => load()}>다시 읽기</button></div>}
       {hzErr && <div className="banner warn" style={{ marginTop: 8 }}>Horizon 등록 목록을 읽지 못했습니다(0대라는 뜻이 아닙니다): {hzErr} <button className="tab" style={{ marginLeft: 8, padding: '2px 10px' }} onClick={() => { setHzErr(null); load(); }}>다시 읽기</button></div>}
       <div className="card" style={{ marginTop: 8, padding: 14 }}>
         {(hz || []).length > 0 && (

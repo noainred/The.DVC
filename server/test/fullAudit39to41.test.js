@@ -91,3 +91,47 @@ test('41회차 F7: B 시리즈 다중 디스플레이 프로파일(…-2b4)', as
   assert.equal(vgpuProfileGB('grid_a40-24q'), 24);
   assert.equal(vgpuProfileGB('grid_a100-3-20c'), 20);
 });
+
+/* ── 42회차(38~41회차 수정 반증) ── */
+test('42회차 R1: 재개 대상이 장비에 없어 새로 띄운 du 는 지금부터 시한을 받는다(옛 시작 시각 기준으로 곧바로 죽지 않는다)', async () => {
+  const { runDetached } = await import('../src/isidu/detach.js');
+  let clock = Date.now();
+  const seq = ['DVC-NONE', 'STARTED', 'DVC-RUNNING', 'DVC-RUNNING', 'DVC-DONE 0'];
+  const calls = [];
+  const api = { exec: async (cmd) => {
+    calls.push(cmd.slice(0, 40)); clock += 10 * 60_000;
+    if (/DVC-STARTED|nohup|setsid/.test(cmd) && seq[0] === 'STARTED') { seq.shift(); return { stdout: 'DVC-STARTED 1234\n', code: 0 }; }
+    if (/cat .*\.out|readOut|head -c/.test(cmd) && !seq.length) return { stdout: '1.0K\t/ifs/a\n', code: 0 };
+    const s = seq.length ? seq.shift() : 'DVC-DONE 0';
+    return { stdout: `${s}\n`, code: 0 };
+  } };
+  const t = { id: 'tA', path: '/ifs/a', sizeMode: 'h' };
+  const started = clock - 175 * 60_000;   // 재시작 전 du 가 175분 돌았다(시한 180분)
+  const r = await runDetached(api, t, { cmdMs: 180 * 60_000, attachJob: 'isidu-tA-1', started, now: () => clock, pollMinMs: 1 }).catch((e) => ({ err: e.message }));
+  assert.ok(!r.err || !/시한 초과/.test(r.err), `새 작업이 옛 시각 기준 시한으로 죽으면 안 된다: ${r.err || ''}`);
+  if (!r.err) assert.ok(r.startedAt > started, '실제 시작 시각(새 작업)을 돌려준다');
+});
+
+test('42회차 R2: GPU 호스트가 모두 끊긴 법인은 0대가 아니라 모름(hostsDown) — 서버 · 웹 같은 판정', async () => {
+  const { buildGpuAllocTree, allocCorpRoster, corpUnknownOf } = await import('../src/gpu/allocTree.js');
+  const web = await import('../../web/src/views/tools/gpuAllocText.js');
+  const vms = [{ id: 'vc1:vm-1', name: 'vm1', vcenterId: 'vc1', host: 'esx1', powerState: 'POWERED_ON', gpu: { type: 'vgpu', vgpu: 1, passthrough: 0, profile: 'nvidia_a40-24q', count: 1 } }];
+  const snap = { vcenters: [{ id: 'vc1', name: 'KR', status: 'ok' }], hosts: [{ id: 'vc1:esx1', vcenterId: 'vc1', name: 'esx1', connectionState: 'NOT_RESPONDING', gpus: [] }], vms };
+  const tree = buildGpuAllocTree(snap);
+  assert.equal(tree.hostsDownByVc?.vc1, 1);
+  const roster = allocCorpRoster(snap, {}, tree);
+  assert.equal(roster.find((c) => c.id === 'vc1').unknown, 'hostsDown');
+  for (const args of [[{ status: 'ok' }, false, 0, 1], [{ status: 'ok' }, false, 0, 0], [{ status: 'pending' }, false, 0, 1], [{ status: 'ok' }, true, 0, 1]]) {
+    assert.equal(web.corpUnknownOf(...args), corpUnknownOf(...args), JSON.stringify(args));
+  }
+  const chips = web.corpChips(tree, [{ id: 'vc1', name: 'KR', status: 'ok' }]);
+  assert.equal(chips[0].unknown, 'hostsDown');
+  assert.match(web.totalsNote({ hostsDown: 1, gpus: 2 }).note, /끊긴 호스트 1대/);
+});
+
+test('42회차 R3 · R5 · R6: 원시 행 수 하한 표지 · 카탈로그 HAS_MORE · 빈 마지막 쪽(소스)', () => {
+  assert.match(read('bmusage/db.js'), /rawRowsPartial: true/);
+  const s = read('horizon/sessionCollect.js');
+  assert.match(s, /if \(more !== true && body\.length < CATALOG_PAGE\) break;/);
+  assert.match(s, /if \(more === true && body\.length === 0\) \{ if \(page > 1 && prevLen < size\) break; truncated = true; break; \}/);
+});
