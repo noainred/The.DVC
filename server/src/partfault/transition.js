@@ -182,9 +182,22 @@ export function transition({ open = [], observed = [], scan = {}, now = Date.now
    *   새 부품이 나쁘면 그것은 위의 관측 루프가 이미 새 장애로 열었다(다른 부품의 장애다). 모호하면(이름이 겹침 · 이름 없음) 닫지 않는다.
    */
   const labelSlotOf = (p) => `${t(p.agent)}|${t(p.deviceId)}|${t(p.scope)}|${t(p.kind)}|${t(p.label)}`;
+  const kindSlotOf = (p) => `${t(p.agent)}|${t(p.deviceId)}|${t(p.scope)}|${t(p.kind)}`;
   const obsByLabel = new Map();
+  /*
+   * 35회차 R3(반증 — 재현): 이름이 **부품마다 같은 장비**(예: 베이와 무관하게 같은 이름을 주는 BMC)에서는 '교체' 와 '고장 부품이 목록에서 빠짐'
+   *   을 가를 수 없어, 남은 다른 부품을 교체품으로 보고 진행 중 장애를 닫았다(다음 주기에 다시 열리고 알림 재발송). 그래서 이 규칙은 그 장비 ·
+   *   종류에서 이번에 **두 개 이상** 읽혔고 이름이 **모두 다를 때**(이름이 슬롯 구실을 할 때)만 쓴다 — 한 개만 읽혔거나 이름이 겹치면 예전처럼 보류.
+   */
+  const kindStat = new Map();   // kindSlot -> { n, labels:Set, dup }
   for (const p of byKey.values()) {
-    if (!t(p.label)) continue;
+    const ks = kindSlotOf(p);
+    const st = kindStat.get(ks) || { n: 0, labels: new Set(), dup: false };
+    st.n += 1;
+    const lb = t(p.label);
+    if (!lb || st.labels.has(lb)) st.dup = true; else st.labels.add(lb);
+    kindStat.set(ks, st);
+    if (!lb) continue;
     const ls = labelSlotOf(p);
     obsByLabel.set(ls, [...(obsByLabel.get(ls) || []), p]);
   }
@@ -196,6 +209,8 @@ export function transition({ open = [], observed = [], scan = {}, now = Date.now
   }
   const replacementOf = (o) => {
     if (o.keyKind !== KEY_KIND.serial || !t(o.label)) return null;
+    const ks = kindStat.get(kindSlotOf(o));
+    if (!ks || ks.n < 2 || ks.dup) return null;   // 35회차 R3: 이름이 슬롯 구실을 할 때만
     const ls = labelSlotOf(o);
     if (unseenByLabel.get(ls) !== 1) return null;
     const obs = obsByLabel.get(ls) || [];

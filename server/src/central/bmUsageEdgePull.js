@@ -115,6 +115,9 @@ function objList(v, fn) {
   const kept = arr.slice(0, SNAP_LIST_MAX).filter(isObj).map(fn);
   return { list: kept, dropped: arr.length - kept.length };
 }
+// 35회차 R7(재현): 개수는 0 이상 정수 · 상한(1e9) — 예전에는 음수 · 1e300 이 그대로 들어가 한 엣지의 음수가 다른 엣지의 잘림 수를 지웠다
+//   (법인 사용량 edgeTruncated 합이 0). partFaultEdge.js cnt 와 같은 규칙.
+const cnt = (v) => { const n = numOrNull(v); return n != null && n >= 0 ? Math.min(Math.round(n), 1e9) : null; };
 function numMap(v) {
   if (!isObj(v)) return {};
   const out = {};
@@ -122,7 +125,7 @@ function numMap(v) {
     if (BAD_KEYS.has(k)) continue;
     const x = v[k];
     if (isObj(x)) out[k] = numMap(x); // counts.byReason 처럼 한 단계 중첩
-    else { const n = numOrNull(x); if (n != null) out[k] = n; }
+    else { const n = cnt(x); if (n != null) out[k] = n; }   // 이 맵은 개수(counts · skippedCounts)만 담는다
   }
   return out;
 }
@@ -166,7 +169,7 @@ export function sanitizeBmUsageSnap(snap, { receivedAt = Date.now() } = {}) {
       enterpriseMode: strOf(st.enterpriseMode, 32), enterpriseActive: st.enterpriseActive === true,
     } : null,
     targets: targets.list,
-    truncated: numOrNull(snap.truncated) ?? 0,
+    truncated: cnt(snap.truncated) ?? 0,   // 35회차 R7
     rows: rows.list,
     counts: numMap(snap.counts),
     skippedCounts: numMap(snap.skippedCounts),
@@ -240,7 +243,7 @@ export function sanitizeTrendBody(b) {
     from: numOrNull(b.from), to: numOrNull(b.to), res: RES_SET.has(b.res) ? b.res : null, resReason: strOf(b.resReason, 32), stepMs: numOrNull(b.stepMs),
     points, gaps, baseline: bl,
     peakSrc: (Array.isArray(b.peakSrc) ? b.peakSrc : []).slice(0, 8).map((x) => strOf(x, 16)).filter(Boolean),
-    ...(numOrNull(b.truncated) ? { truncated: numOrNull(b.truncated) } : {}),
+    ...(cnt(b.truncated) ? { truncated: cnt(b.truncated) } : {}),   // 35회차 R7
     ...(b.truncatedRows === true ? { truncatedRows: true } : {}),
     ...(Array.isArray(b.missingPeriods) ? { missingPeriods: b.missingPeriods.slice(0, 16).filter(isObj).map((m) => ({ period: strOf(m.period, 16), reason: strOf(m.reason, 200) })) } : {}),
     ...(numOrNull(b.filesCapped) ? { filesCapped: numOrNull(b.filesCapped) } : {}),

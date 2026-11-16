@@ -1255,8 +1255,10 @@
       ]));
     });
 
+    // 35회차 R4: 비-admin 에게는 서버가 경로 대신 true(있음)만 준다.
     $("initial-password-note").textContent = state.initialPasswordFile
-      ? "초기 비밀번호 파일이 아직 남아 있습니다: " + state.initialPasswordFile +
+      ? "초기 비밀번호 파일이 아직 남아 있습니다" +
+        (typeof state.initialPasswordFile === "string" ? ": " + state.initialPasswordFile : "(경로는 admin 계정만 볼 수 있습니다)") +
         " — 비밀번호를 변경하면 자동 삭제됩니다."
       : "초기 비밀번호 파일은 삭제된 상태입니다.";
   }

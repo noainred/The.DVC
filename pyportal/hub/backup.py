@@ -90,7 +90,13 @@ class BackupService:
                 if not source or not source.exists():
                     payload["data"][key] = None
                     continue
-                payload["data"][key] = read_json(source, None)
+                # 35회차 R2(재현): 읽기 오류(권한)는 손상이 아니다 — non-strict 로 읽으면 users.json 을 .corrupt 로 옮겨 전원 로그인 불가 ·
+                #   재기동 때 새 admin 하나만 남았다(31회차 F3 가 UserStore 만 고쳤다). 못 읽으면 백업을 만들지 않고 실패로 끝낸다
+                #   (그 멤버를 None 으로 두면 복원 때 '없음' 으로 오해된다).
+                try:
+                    payload["data"][key] = read_json(source, None, strict_io=True)
+                except OSError as exc:
+                    raise ValueError(f"{source.name} 을(를) 읽지 못해 백업을 만들지 않았습니다({exc.strerror or exc}) — 파일 소유자 · 권한을 확인하세요.") from exc
 
             write_json(path, payload)
             self._last_run = time.time()

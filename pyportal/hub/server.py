@@ -341,7 +341,8 @@ class HubHandler(BaseHTTPRequestHandler):
             # 경로는 **로그인한 사용자에게만** 준다(6차 감사 수정). 미인증 응답에 절대경로를
             # 실으면 서버 구조가 드러나고, "초기 비밀번호가 아직 살아 있다"는 사실까지 알려
             # 공격자에게 표적을 지정해 주는 셈이 된다.
-            "initialPasswordFile": (str(config.initial_password_file)
+            # 35회차 R4: 경로(데이터 폴더 절대경로)는 admin 에게만 — 그 밖의 로그인 사용자는 있음 여부만(true).
+            "initialPasswordFile": ((str(config.initial_password_file) if user.get("role") == "admin" else True)
                                     if user and self.ctx.users.initial_password_present() else None),
             "setupPending": bool(self.ctx.users.initial_password_present()) if user else None,
         })
@@ -488,7 +489,8 @@ class HubHandler(BaseHTTPRequestHandler):
             "users": self.ctx.users.public_list(),
             "backup": backup,
             "history": self.ctx.history.stats(),
-            "initialPasswordFile": (str(config.initial_password_file)
+            # 35회차 R4: 초기 비밀번호 파일 경로도 데이터 폴더 절대경로다 — 비-admin 에게는 있음 여부만.
+            "initialPasswordFile": ((str(config.initial_password_file) if is_admin else True)
                                     if self.ctx.users.initial_password_present() else None),
             "dataDir": str(self.ctx.data_dir) if is_admin else None,
         })

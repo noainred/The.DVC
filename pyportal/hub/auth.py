@@ -121,10 +121,10 @@ class UserStore:
             mtime = None
         if self._users is None or mtime != self._mtime:
             try:
-                raw = read_json(self._path, [], expect=list, strict_io=True)
+                raw = read_json(self._path, [], expect=list, strict_io=True, quiet=self._unreadable)
             except OSError:
                 # 31회차 F3: 읽지 못함은 손상이 아니다 — 원본을 옮기지 않고, 직전 목록이 있으면 그대로 쓴다(mtime 은 두어 다음에 다시 읽는다).
-                #   처음부터 못 읽었으면 빈 목록 + 표지(저장 · 새 admin 생성 금지).
+                #   처음부터 못 읽었으면 빈 목록 + 표지(저장 · 새 admin 생성 금지). 로그는 상태가 바뀔 때 한 번(35회차 R6 — 요청마다 찍혔다).
                 self._unreadable = True
                 if self._users is None:
                     self._users = []
@@ -134,10 +134,15 @@ class UserStore:
             self._unreadable = False
         return self._users
 
-    def _save(self):
+    def _refuse_if_unreadable(self):
+        """35회차 R6(재현): 못 읽음 상태의 쓰기는 **바꾸기 전에** 거절한다 — 예전에는 메모리 목록을 먼저 고친 뒤 저장에서 실패해, 400 을 주고도
+        새 비밀번호 · 중지 · 삭제가 메모리에서 효력을 가졌고 파일이 다시 읽히면 조용히 되돌아갔다."""
         if self._unreadable:
             raise AuthError(f"{self._path.name} 을(를) 읽지 못해 저장하지 않습니다 — 파일 소유자 · 권한을 확인하세요"
                             "(서비스 계정이 읽을 수 있어야 합니다).")
+
+    def _save(self):
+        self._refuse_if_unreadable()
         write_json(self._path, self._users)
         try:
             self._mtime = self._path.stat().st_mtime_ns
@@ -282,6 +287,7 @@ class UserStore:
         """그 계정으로 발급된 모든 토큰을 즉시 무효화한다."""
         with self._lock:
             users = self._load()
+            self._refuse_if_unreadable()   # 35회차 R6
             for user in users:
                 if user["username"] == username:
                     user["tokenVersion"] = int(user["tokenVersion"]) + 1
@@ -295,10 +301,14 @@ class UserStore:
         username = str(username or "").strip()
         if not username or len(username) > 64:
             raise AuthError("사용자명을 입력하세요(64자 이하).")
+        if username in (".", "..") or "/" in username:
+            # 35회차 R5: 브라우저가 URL 경로의 점 조각을 정규화해 이 이름의 계정은 화면에서 관리(중지 · 삭제 · 비밀번호)할 수 없다.
+            raise AuthError("사용자명으로 '.' · '..' 과 '/' 는 쓸 수 없습니다.")
         if role not in ROLES:
             raise AuthError("역할은 admin 또는 viewer 여야 합니다.")
         with self._lock:
             users = self._load()
+            self._refuse_if_unreadable()   # 35회차 R6
             if any(u["username"].lower() == username.lower() for u in users):
                 raise AuthError("이미 존재하는 사용자명입니다.")
             record = hash_password(password)
@@ -313,6 +323,7 @@ class UserStore:
     def update(self, username: str, *, role=None, enabled=None):
         with self._lock:
             users = self._load()
+            self._refuse_if_unreadable()   # 35회차 R6
             target = None
             for user in users:
                 if user["username"] == username:
@@ -341,6 +352,7 @@ class UserStore:
     def set_password(self, username: str, password: str):
         with self._lock:
             users = self._load()
+            self._refuse_if_unreadable()   # 35회차 R6
             target = next((u for u in users if u["username"] == username), None)
             if not target:
                 raise AuthError("사용자를 찾을 수 없습니다.")
@@ -384,6 +396,7 @@ class UserStore:
     def delete(self, username: str):
         with self._lock:
             users = self._load()
+            self._refuse_if_unreadable()   # 35회차 R6
             remaining = [u for u in users if u["username"] != username]
             if len(remaining) == len(users):
                 raise AuthError("사용자를 찾을 수 없습니다.")
@@ -616,12 +629,21 @@ class SessionStore:
             self._last_issued = issued
             return issued
 
+    REVOKED_MAX = 5000   # 35회차 R1: 폐기 목록 상한(만료가 가까운 것부터 버린다 — 그 토큰은 곧 스스로 만료된다)
+
     def destroy(self, token) -> None:
         if not token:
+            return
+        # 35회차 R1(재현): 서명 · 만료가 유효한 토큰만 기록한다 — 예전에는 아무 문자열이나 받아(미인증 로그아웃 요청) 폐기 파일이 끝없이 자라고
+        #   요청마다 전체 파일을 세션 잠금 안에서 다시 써 정상 세션 판정이 수 초씩 밀렸다. 이미 무효인 토큰은 기록할 필요가 없다.
+        if self.resolve(token) is None:
             return
         with self._lock:
             self._revoked[self._token_id(token)] = time.time() + self._ttl
             self._purge_revoked()
+            if len(self._revoked) > self.REVOKED_MAX:
+                for key, _exp in sorted(self._revoked.items(), key=lambda kv: kv[1])[: len(self._revoked) - self.REVOKED_MAX]:
+                    self._revoked.pop(key, None)
             self._save_revoked()
 
     def destroy_user(self, username) -> None:

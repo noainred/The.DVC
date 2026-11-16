@@ -61,6 +61,9 @@ class UserRouteNamesTest(ServerCase):
         self.assertNotIn("directory", payload["backup"])
         self.assertNotIn("latest", payload["backup"])
         self.assertIsNone(payload["dataDir"])
+        self.assertNotIsInstance(payload["initialPasswordFile"], str, "R4: 초기 비밀번호 파일 경로도 admin 에게만")
+        code, meta, _ = request(self.url + "/api/meta", headers=self.auth(token))
+        self.assertNotIsInstance(meta["initialPasswordFile"], str)
         code, payload, _ = request(self.url + "/api/settings", headers=self.auth())
         self.assertIn("directory", payload["backup"])
         self.assertIsNotNone(payload["dataDir"])
@@ -166,6 +169,80 @@ class TokenAndFileTest(unittest.TestCase):
         self.assertEqual(r["username"], "Admin2")
         self.assertFalse(r["created"])
         self.assertIsNotNone(users.authenticate("Admin2", r["password"]))
+
+
+class Review35Test(unittest.TestCase):
+    """35회차 반증 — R1 · R2 · R5 · R6."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_logout_of_invalid_token_is_not_recorded(self):
+        """R1: 서명 안 된 토큰 로그아웃은 폐기 목록 · 파일에 남지 않는다."""
+        revoked = self.base / "session-revoked.json"
+        s = SessionStore(3600, 8, 300, secret_path=self.base / "session-secret", revoked_path=revoked)
+        for i in range(50):
+            s.destroy(f"junk-{i}.sig")
+        self.assertEqual(len(s._revoked), 0)
+        self.assertFalse(revoked.exists())
+        token = s.create({"username": "a", "role": "admin", "tokenVersion": 1})["token"]
+        s.destroy(token)
+        self.assertEqual(len(s._revoked), 1)
+
+    def test_backup_does_not_move_unreadable_users_file(self):
+        """R2: 자동 · 수동 백업도 읽기 오류면 원본을 옮기지 않고 실패한다."""
+        ctx = AppContext(self.base, start_workers=False)
+        users = self.base / "users.json"
+        real = Path.read_text
+
+        def deny(self_path, *a, **k):
+            if self_path.name == "users.json":
+                raise PermissionError(13, "Permission denied")
+            return real(self_path, *a, **k)
+
+        with mock.patch.object(Path, "read_text", deny):
+            with self.assertRaises(ValueError):
+                ctx.backups.create(reason="auto")
+        self.assertTrue(users.exists())
+        self.assertEqual(list(self.base.glob("users.json.corrupt.*")), [])
+        ctx.close()
+
+    def test_dot_names_are_rejected(self):
+        """R5"""
+        users = UserStore(self.base / "users.json")
+        for bad in (".", "..", "a/b"):
+            with self.assertRaises(AuthError):
+                users.add(bad, "viewer", "pass-word-123")
+
+    def test_writes_refused_before_mutation_while_unreadable(self):
+        """R6: 못 읽음 상태의 쓰기는 메모리를 바꾸기 전에 거절한다."""
+        path = self.base / "users.json"
+        users = UserStore(path)
+        users.add("admin", "admin", "admin-pass-123")
+        users.add("bob", "viewer", "bob-pass-1234")
+        v_before = users.token_version("bob")
+        real = Path.read_text
+
+        def deny(self_path, *a, **k):
+            if self_path.name == "users.json":
+                raise PermissionError(13, "Permission denied")
+            return real(self_path, *a, **k)
+
+        import os as _os
+        _os.utime(path, ns=(1, 1))   # mtime 을 바꿔 다시 읽게 한다
+        with mock.patch.object(Path, "read_text", deny):
+            with self.assertRaises(AuthError):
+                users.set_password("bob", "new-pass-5678")
+            self.assertIsNotNone(users.authenticate("bob", "bob-pass-1234"), "옛 비밀번호가 그대로")
+            self.assertIsNone(users.authenticate("bob", "new-pass-5678"))
+            self.assertEqual(users.token_version("bob"), v_before)
+            with self.assertRaises(AuthError):
+                users.delete("bob")
+            self.assertIn("bob", [u["username"] for u in users.public_list()])
 
 
 class SmallTest(unittest.TestCase):

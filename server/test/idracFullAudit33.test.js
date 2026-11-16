@@ -72,6 +72,29 @@ test('F2: 시리얼 키 PSU 교체 → 옛 장애는 제거됨으로 닫힘 · �
   assert.ok(t5.held.length >= 1);
 });
 
+test('35회차 R3: 이름이 부품마다 같은 장비에서 고장 부품이 목록에서 빠지면 닫지 않는다(보류)', async () => {
+  const { extractIdracParts } = await import('../src/partfault/extract/idrac.js');
+  const { transition } = await import('../src/partfault/transition.js');
+  const server = { id: '10.0.0.6', name: 'srv2', serviceTag: 'XYZ9999', agent: '' };
+  const coll = { system: 'ok', psus: 'ok', disks: 'ok', storageControllers: 'ok', memoryDimms: 'ok', cpus: 'ok', gpus: 'ok', pcie: 'ok', fans: 'ok' };
+  const inv = (disks) => ({ reachable: true, collections: coll, system: { serviceTag: 'XYZ9999', model: 'DL380' }, psus: [], disks, memoryDimms: [], cpus: [], gpus: [], pcie: [], storageControllers: [], fans: [] });
+  const scan = { deviceOk: { '|10.0.0.6': true }, kindFailed: {}, agentsReported: new Set(['']) };
+  const t1 = transition({ open: [], observed: extractIdracParts(server, inv([{ name: 'Drive', serial: 'SA', health: 'Critical', state: 'Enabled' }, { name: 'Drive', serial: 'SB', health: 'OK', state: 'Enabled' }])).parts, scan, now: 1000 });
+  assert.equal(t1.opened.length, 1);
+  const t2 = transition({ open: t1.opened, observed: extractIdracParts(server, inv([{ name: 'Drive', serial: 'SB', health: 'OK', state: 'Enabled' }])).parts, scan, now: 2000 });
+  assert.equal(t2.closed.length, 0, '남은 다른 부품을 교체품으로 보지 않는다');
+  assert.equal(t2.held[0]?.holdReason, 'missing');
+});
+
+test('35회차 R7: 엣지 bmusage 보고의 truncated · counts 는 0 이상 정수 · 상한', async () => {
+  const { sanitizeBmUsageSnap } = await import('../src/central/bmUsageEdgePull.js');
+  const now = Date.now();
+  const a = sanitizeBmUsageSnap({ truncated: -40, counts: { a: -7, b: 1e308, c: 2.6, byReason: { x: -1, y: 3 } } }, { receivedAt: now });
+  assert.equal(a.truncated, 0);
+  assert.deepEqual(a.counts, { b: 1e9, c: 3, byReason: { y: 3 } });
+  assert.equal(sanitizeBmUsageSnap({ truncated: 1e300 }, { receivedAt: now }).truncated, 1e9);
+});
+
 test('F3: 물리 코어 대체 합 — 장착 소켓 전부를 읽었을 때만, 아니면 null', async () => {
   const { capacityOfInventory, aggregatePhysical } = await import('../src/idrac/physicalCapacity.js');
   const two = { cpu: { count: 2 }, memory: { totalGiB: 512 }, cpus: [{ cores: 32, state: 'Enabled' }, { cores: 32, state: 'Enabled' }] };

@@ -120,3 +120,4 @@
 - **복원은 계정별 tokenVersion 을 max(복원값, 현재값)+1 로**(`backup._bump_token_versions`) · **로그아웃 폐기 목록은 `session-revoked.json`**(토큰 SHA-256 — 원문 금지) · 실패 카운터는 시간 창 안만.
 - **users.json 읽기 오류(OSError)는 손상이 아니다**(`read_json(strict_io=True)`): 옮기지 않고 저장 · 새 admin 생성을 막는다. 콘솔 복구는 데이터 폴더 소유자로(root 거부).
 - 핀 연결 opener 는 `ProxyHandler({})` — 환경 프록시가 끼면 '대상 IP : 프록시 포트' 로 붙는다. 센터 id `all` 은 예약어.
+- 35회차 반증: 폐기 목록에는 **서명 · 만료가 유효한 토큰만**(미인증 로그아웃으로 파일이 자라지 않게 · 상한) · 백업도 users.json 을 strict 로 읽는다 · 못 읽음 상태 쓰기는 **바꾸기 전에** 거절 · 비-admin 에게 경로(초기 비밀번호 파일 포함) 금지 · 사용자명 `.`·`..`·`/` 거부.
