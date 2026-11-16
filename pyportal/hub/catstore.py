@@ -102,6 +102,14 @@ class CategoryStore:
             items.append(dict(fallback))
         return items
 
+    def _load_writable(self):
+        """47회차 #1(재현): 손상 · 읽기 오류 상태의 쓰기는 **메모리를 바꾸기 전에** 거절한다 — 예전에는 add · reset · delete 가 목록을 먼저 고친 뒤
+        _save 에서 400 으로 거절돼, 거절된 변경(샘플 28곳 · 지운 분류)이 화면에 남았고 읽기 오류 상태가 재기동 전까지 굳었다."""
+        items = self._load()
+        if self._load_error:
+            raise ValidationError(load_error_text("categories.json", self._load_error))
+        return items
+
     def load_error(self):
         with self._lock:
             self._load()
@@ -162,7 +170,7 @@ class CategoryStore:
 
     def add(self, data):
         with self._lock:
-            items = self._load()
+            items = self._load_writable()
             if len(items) >= MAX_CATEGORIES:
                 raise ValidationError(f"카테고리는 최대 {MAX_CATEGORIES}개까지 만들 수 있습니다.")
             item = self._clean(data)
@@ -180,7 +188,7 @@ class CategoryStore:
 
     def update(self, cat_id, data):
         with self._lock:
-            items = self._load()
+            items = self._load_writable()
             for index, cat in enumerate(items):
                 if cat["id"] != cat_id:
                     continue
@@ -196,7 +204,7 @@ class CategoryStore:
         if cat_id == DEFAULT_CATEGORY_ID:
             raise ValidationError("기본 카테고리는 삭제할 수 없습니다.")
         with self._lock:
-            items = self._load()
+            items = self._load_writable()
             remaining = [cat for cat in items if cat["id"] != cat_id]
             if len(remaining) == len(items):
                 return False
@@ -207,7 +215,7 @@ class CategoryStore:
     def move(self, cat_id, delta):
         """표시 순서 한 칸 이동 — 대시보드 필터 칩과 선택 목록이 이 순서로 나온다."""
         with self._lock:
-            items = self._load()
+            items = self._load_writable()
             for index, cat in enumerate(items):
                 if cat["id"] != cat_id:
                     continue
@@ -221,6 +229,7 @@ class CategoryStore:
 
     def reset(self):
         with self._lock:
+            self._load_writable()
             self._items = [dict(cat) for cat in SEED_CATEGORIES]
             self._save()
             return self.all()

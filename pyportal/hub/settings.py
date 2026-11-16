@@ -163,6 +163,11 @@ class SettingsStore:
             if self._load_error == "unreadable":
                 # 읽지 못한 파일을 기본값 + 이 칸으로 덮어쓰지 않는다(손상은 보존본이 있어 관리자의 새 저장이 복구 경로다)
                 raise ValueError(load_error_text("settings.json", "unreadable"))
+            if self._load_error == "corrupt" and name != "backup":
+                # 47회차 #2(재현): 손상 중 다른 칸만 저장하면 백업 칸이 화면의 기본값(보관 14개)으로 파일에 굳고 표지가 풀려, 다음 백업이
+                #   관리자가 정한 보관 수량 밖 백업을 지웠다(H1 우회). 백업 칸(보관 수량)을 먼저 확인 · 저장하게 한다.
+                raise ValueError("settings.json 이 손상되어 기본값으로 동작 중입니다 — 먼저 '백업' 칸(보관 수량 · 주기)을 확인해 저장하세요"
+                                 "(그때까지 오래된 백업 정리를 멈춥니다). 그 뒤 다른 칸을 저장할 수 있습니다.")
             merged = dict(data[name])
             if isinstance(values, dict):
                 merged.update(values)

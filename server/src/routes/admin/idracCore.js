@@ -283,7 +283,7 @@ adminRouter.get('/idrac/hardware-summary', adminOnly, (req, res) => {
   const merged = scoped.servers;
   const servers = merged.filter((s) => (!dcFilter || dcOf(s) === (dcFilter === '__unmapped__' ? '' : dcFilter)) && (dcFilter !== '__unmapped__' || !dcOf(s)));
   const byModel = new Map(), byCpu = new Map(), byMem = new Map(), byGpu = new Map();
-  let collected = 0, missing = 0, totalGpuCards = 0;
+  let collected = 0, missing = 0, totalGpuCards = 0, gpuUnread = 0;
   const bump = (map, key, by = 1) => { const k = String(key || '').trim(); if (!k) return; map.set(k, (map.get(k) || 0) + by); };
   for (const s of servers) {
     const inv = invForServer(s);
@@ -295,12 +295,14 @@ adminRouter.get('/idrac/hardware-summary', adminOnly, (req, res) => {
     bump(byCpu, cpuLabel);
     const gib = inv.memory?.totalGiB;
     if (gib != null && Number.isFinite(Number(gib))) bump(byMem, `${Math.round(Number(gib))} GiB`);
+    // 47회차 #7: Processors 컬렉션을 못 읽은 서버는 GPU 0장이 아니다(GPU 찾기 · 카드와 같은 판정 — 합계는 최소값)
+    if (inv.collections && inv.collections.gpus === 'failed') { gpuUnread++; continue; }
     for (const g of (inv.gpus || [])) { const m = (g.model || g.name || '').trim(); if (m) { bump(byGpu, m); totalGpuCards++; } }
   }
   const toArr = (map, numericKey = false) => [...map.entries()].map(([key, count]) => ({ key, count }))
     .sort((a, b) => (numericKey ? (parseInt(b.key) - parseInt(a.key)) : 0) || b.count - a.count || NUM_COLLATOR.compare(String(a.key), String(b.key)));
   res.json({
-    ok: true, datacenterId: dcFilter, totalServers: servers.length, collected, missing, totalGpuCards,
+    ok: true, datacenterId: dcFilter, totalServers: servers.length, collected, missing, totalGpuCards, gpuUnread,
     byModel: toArr(byModel), byCpu: toArr(byCpu), byMemory: toArr(byMem, true), byGpu: toArr(byGpu),
     ...scopeFields(scoped),
   });
@@ -608,7 +610,7 @@ adminRouter.get('/idrac/gpu-inventory', adminOnly, (req, res) => {
     totalGpus: counts.gpus,
     models,
     servers: serverList.sort((a, b) => b.gpuCount - a.gpuCount),
-    collectedServers: counts.invRead + counts.invStale - (counts.gpuUnread || 0), totalServers: counts.count, gpuUnread: counts.gpuUnread || 0,   // 46회차 I1: GPU 목록을 못 읽은 서버는 수집으로 세지 않는다
+    collectedServers: counts.invRead + counts.invStale - (counts.gpuUnread || 0), totalServers: counts.count, gpuUnread: counts.gpuUnread || 0, gpuUnreadServers: counts.gpuUnreadServers || [],   // 46회차 I1: GPU 목록을 못 읽은 서버는 수집으로 세지 않는다
     inventoryStale: counts.invStale, gpusStale: counts.gpusStale, gpusUnnamed: counts.gpusUnnamed, disabledServers: counts.disabled,
     physicalServers: physCount, physicalGpus: physGpus,
     missing,

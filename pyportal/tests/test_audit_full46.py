@@ -132,5 +132,121 @@ class CsvReplaceKeepsIdsTest(_Base):
         ctx.close()
 
 
+class Review47Test(_Base):
+    """47회차 반증: 거절은 바꾸기 전에 · 손상 중 다른 칸 저장 금지 · 바로가기 파일도 손상 구분 · 데이터 파일 손상 동안 정리 중지."""
+
+    def _corrupt(self, *names):
+        ctx = AppContext(self.base, start_workers=False)
+        ctx.datacenters.all(); ctx.categories.all(); ctx.shortcuts.all()   # 첫 기동 seed 를 파일로 굳힌 뒤 손상시킨다
+        ctx.close()
+        for name in names:
+            path = self.base / name
+            path.write_text(path.read_text(encoding="utf-8")[:-5], encoding="utf-8")
+
+    def test_rejected_writes_do_not_change_memory(self):
+        ctx = AppContext(self.base, start_workers=False)
+        ctx.close()
+        self._corrupt("datacenters.json", "categories.json")
+        ctx2 = AppContext(self.base, start_workers=False)
+        with self.assertRaises(ValidationError):
+            ctx2.datacenters.reset()
+        self.assertEqual(ctx2.datacenters.all(), [], "거절된 '기본값으로 되돌리기' 가 샘플 28곳을 메모리에 남기면 안 된다")
+        with self.assertRaises(ValidationError):
+            ctx2.datacenters.add({"code": "WAW", "name": "Warsaw"})
+        self.assertEqual(ctx2.datacenters.all(), [])
+        before = [c["id"] for c in ctx2.categories.all()]
+        with self.assertRaises(ValidationError):
+            ctx2.categories.delete("network")
+        self.assertEqual([c["id"] for c in ctx2.categories.all()], before)
+        with self.assertRaises(ValidationError):
+            ctx2.categories.add({"label": "SBP"})
+        self.assertEqual(len(ctx2.categories.all()), len(before))
+        ctx2.close()
+        src = (Path(__file__).resolve().parents[1] / "hub" / "server.py").read_text(encoding="utf-8")
+        self.assertIn("cat_err = self.ctx.categories.load_error()", src, "가져오기 분류 생성은 못 읽음이면 반복 없이 400")
+
+    def test_unreadable_reset_does_not_stick(self):
+        ctx = AppContext(self.base, start_workers=False)
+        ctx.close()
+        real = Path.read_text
+
+        def deny(self_path, *a, **k):
+            if self_path.name in ("datacenters.json", "categories.json"):
+                raise PermissionError(13, "Permission denied")
+            return real(self_path, *a, **k)
+
+        ctx.datacenters.all(); ctx.categories.all()
+        with mock.patch.object(Path, "read_text", deny):
+            ctx2 = AppContext(self.base, start_workers=False)
+            with self.assertRaises(ValidationError):
+                ctx2.datacenters.reset()
+            with self.assertRaises(ValidationError):
+                ctx2.categories.reset()
+        self.assertIsNone(ctx2.datacenters.load_error(), "권한을 고치면 다음 호출에 읽힌다(거절이 상태를 굳히지 않는다)")
+        self.assertIsNone(ctx2.categories.load_error())
+        ctx2.datacenters.add({"code": "WAW", "name": "Warsaw"})
+        ctx2.close()
+
+    def test_corrupt_settings_require_backup_section_first(self):
+        ctx = AppContext(self.base, start_workers=False)
+        ctx.settings.update_section("backup", {"keep": 50})
+        ctx.close()
+        (self.base / "settings.json").write_text("{bad", encoding="utf-8")
+        ctx2 = AppContext(self.base, start_workers=False)
+        for name, values in (("health", {"intervalMinutes": 10}), ("display", {"datacenterLimit": 3}), ("notify", {"enabled": True})):
+            with self.assertRaises(ValueError):
+                ctx2.settings.update_section(name, values)
+        self.assertEqual(ctx2.settings.load_error(), "corrupt", "다른 칸 저장이 표지를 풀면 안 된다")
+        ctx2.settings.update_section("backup", {"keep": 50})
+        self.assertIsNone(ctx2.settings.load_error())
+        ctx2.settings.update_section("health", {"intervalMinutes": 10})
+        ctx2.close()
+
+    def test_shortcuts_file_corrupt_and_unreadable(self):
+        ctx = AppContext(self.base, start_workers=False)
+        ctx.shortcuts.add({"name": "Mine", "url": "https://mine.example.com"})
+        ctx.close()
+        real = Path.read_text
+
+        def deny(self_path, *a, **k):
+            if self_path.name == "shortcuts.json":
+                raise PermissionError(13, "Permission denied")
+            return real(self_path, *a, **k)
+
+        with mock.patch.object(Path, "read_text", deny):
+            ctx2 = AppContext(self.base, start_workers=False)
+            self.assertEqual(ctx2.shortcuts.load_error(), "unreadable")
+            self.assertEqual(ctx2.shortcuts.all(), [], "샘플 13개로 돌지 않는다")
+            with self.assertRaises(ValidationError):
+                ctx2.shortcuts.add({"name": "x", "url": "https://x.example.com"})
+            ctx2.close()
+        self.assertEqual(list(self.base.glob("shortcuts.json.corrupt.*")), [], "읽기 오류는 옮기지 않는다")
+        self._corrupt("shortcuts.json")
+        ctx3 = AppContext(self.base, start_workers=False)
+        self.assertEqual(ctx3.shortcuts.load_error(), "corrupt")
+        self.assertEqual(ctx3.shortcuts.all(), [])
+        with self.assertRaises(ValidationError):
+            ctx3.shortcuts.reset()
+        self.assertFalse((self.base / "shortcuts.json").exists(), "샘플을 파일에 굳히지 않는다")
+        ctx3.close()
+        ctx4 = AppContext(self.base, start_workers=False)
+        self.assertEqual(ctx4.shortcuts.load_error(), "corrupt", "재기동해도 첫 기동으로 보지 않는다")
+        ctx4.close()
+
+    def test_backup_prune_paused_while_data_file_corrupt(self):
+        ctx = AppContext(self.base, start_workers=False)
+        ctx.settings.update_section("backup", {"keep": 3})
+        first = ctx.backups.create(reason="manual")["name"]
+        for i in range(5):
+            shutil.copy(self.base / "backups" / first, self.base / "backups" / f"backup-20200101-{i:06d}-manual.json")
+        ctx.close()
+        self._corrupt("datacenters.json")
+        ctx2 = AppContext(self.base, start_workers=False)
+        ctx2.backups.create(reason="auto")
+        self.assertGreaterEqual(len(ctx2.backups.list()), 6, "정상 목록이 든 백업을 지우지 않는다")
+        self.assertIn("datacenters.json", ctx2.backups.status()["dataLoadErrors"])
+        ctx2.close()
+
+
 if __name__ == "__main__":
     unittest.main()

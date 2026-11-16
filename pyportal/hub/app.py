@@ -47,7 +47,12 @@ class AppContext:
             "categories": base / "categories.json",
             "users": base / "users.json",
             "settings": base / "settings.json",
-        }, self.settings)
+        }, self.settings, load_errors=lambda: {
+            # 47회차 #5: 데이터 파일을 못 읽는 동안 백업 정리를 멈춘다(정상 목록이 든 마지막 백업을 지키려고)
+            "datacenters.json": self.datacenters.load_error(),
+            "categories.json": self.categories.load_error(),
+            "shortcuts.json": self.shortcuts.load_error(),
+        })
 
         # 계정이 없으면 초기 비밀번호를 만들어 파일로 남긴다(경로만 로그에 찍는다).
         self.bootstrap_password_created = bool(self.users.bootstrap())

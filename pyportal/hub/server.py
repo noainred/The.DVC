@@ -32,6 +32,7 @@ from .catstore import COLORS as CATEGORY_COLORS, DEFAULT_CATEGORY_ID, slugify as
 from . import csvio
 from .config import APP_NAME, STATIC_DIR, VERSION, config
 from .history import RANGE_LABELS, RANGES
+from .jsonfile import load_error_text
 from .settings import BACKUP_INTERVAL_CHOICES, HEALTH_INTERVAL_CHOICES
 from .ssrf import ValidationError
 
@@ -331,6 +332,9 @@ class HubHandler(BaseHTTPRequestHandler):
                 self.ctx.settings.section("display").get("datacenterLimit", 0))),
             "datacenterRegistered": len(self.ctx.datacenters.all()),
             "shortcutCount": len(self.ctx.shortcuts.all()),
+            # 47회차 #6: 분류 · 바로가기 파일을 못 읽었으면 화면이 '0개 · 없음' 대신 못 읽음을 밝힌다(상태만 — 경로는 싣지 않는다)
+            "loadErrors": {k: v for k, v in (("categories", self.ctx.categories.load_error()),
+                                             ("shortcuts", self.ctx.shortcuts.load_error())) if v} or None,
             "healthTlsVerify": config.health_tls_verify,
             # 메인 모니터링 포탈로 돌아가는 링크(설정된 경우에만). 등록된 바로가기 URL 이
             # 이미 공개 조회로 나가므로 이 주소만 따로 감출 이유는 없다.
@@ -650,8 +654,8 @@ class HubHandler(BaseHTTPRequestHandler):
         actor = self._require_admin()
         if not actor:
             return None
-        self._audit("datacenter.reset", actor=actor["username"])
         datacenters = self.ctx.datacenters.reset()
+        self._audit("datacenter.reset", actor=actor["username"])   # 47회차 #1: 거절(손상 · 읽기 오류)이면 남기지 않는다 — 성공한 뒤에
         moved = self.ctx.shortcuts.reassign_missing_datacenters({dc["id"] for dc in datacenters})
         return self._json({"success": True, "datacenters": datacenters,
                            "shortcuts": self.ctx.shortcuts.all(), "movedShortcuts": moved})
@@ -848,6 +852,10 @@ class HubHandler(BaseHTTPRequestHandler):
         if user.get("role") != "admin":
             return None, self._error(HTTPStatus.BAD_REQUEST,
                                      f"카테고리가 없습니다: {text} (생성은 admin 만 가능)")
+        cat_err = self.ctx.categories.load_error()
+        if cat_err:
+            # 47회차 #1: 분류 파일을 못 읽는 동안의 거절을 '슬러그 충돌' 로 오인해 접미를 붙여 수십 번 다시 만들지 않는다
+            return None, self._error(HTTPStatus.BAD_REQUEST, load_error_text("categories.json", cat_err))
         try:
             created = self.ctx.categories.add({"label": text})
         except ValidationError:

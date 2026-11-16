@@ -63,6 +63,14 @@ class DatacenterStore:
                 self._items = [dc for dc in (self._clean(entry, keep_id=True) for entry in raw) if dc]
         return self._items
 
+    def _load_writable(self):
+        """47회차 #1(재현): 손상 · 읽기 오류 상태의 쓰기는 **메모리를 바꾸기 전에** 거절한다 — 예전에는 add · reset · delete 가 목록을 먼저 고친 뒤
+        _save 에서 400 으로 거절돼, 거절된 변경(샘플 28곳 · 지운 분류)이 화면에 남았고 읽기 오류 상태가 재기동 전까지 굳었다."""
+        items = self._load()
+        if self._load_error:
+            raise ValidationError(load_error_text("datacenters.json", self._load_error))
+        return items
+
     def load_error(self):
         with self._lock:
             self._load()
@@ -156,7 +164,7 @@ class DatacenterStore:
 
     def add(self, data):
         with self._lock:
-            items = self._load()
+            items = self._load_writable()
             if len(items) >= MAX_DATACENTERS:
                 raise ValidationError(f"데이터센터는 최대 {MAX_DATACENTERS}개까지 등록할 수 있습니다.")
             item = self._clean(data)
@@ -168,7 +176,7 @@ class DatacenterStore:
 
     def update(self, dc_id, data):
         with self._lock:
-            items = self._load()
+            items = self._load_writable()
             for index, dc in enumerate(items):
                 if dc["id"] != dc_id:
                     continue
@@ -184,7 +192,7 @@ class DatacenterStore:
         어떤 사이트를 화면에 띄울지는 결국 이 순서로 정해진다.
         """
         with self._lock:
-            items = self._load()
+            items = self._load_writable()
             for index, dc in enumerate(items):
                 if dc["id"] != dc_id:
                     continue
@@ -198,7 +206,7 @@ class DatacenterStore:
 
     def delete(self, dc_id):
         with self._lock:
-            items = self._load()
+            items = self._load_writable()
             remaining = [dc for dc in items if dc["id"] != dc_id]
             if len(remaining) == len(items):
                 return False
@@ -208,6 +216,7 @@ class DatacenterStore:
 
     def reset(self):
         with self._lock:
+            self._load_writable()
             self._items = [self._clean(dc, keep_id=True) for dc in SEED_DATACENTERS]
             self._save()
             return self.all()

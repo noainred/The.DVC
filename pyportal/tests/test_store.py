@@ -74,7 +74,9 @@ class StoreTest(unittest.TestCase):
         self.path.write_text("{이건 JSON 이 아니다", encoding="utf-8")
         store = ShortcutStore(self.path)
         items = store.all()
-        self.assertGreater(len(items), 0)  # 기본값으로 복구
+        # 47회차 #4: 손상은 첫 기동이 아니다 — 샘플로 '복구' 하면 다음 저장이 샘플을 굳힌다. 빈 목록 + 표지(쓰기 거절)로 바꿨다.
+        self.assertEqual(items, [])
+        self.assertEqual(store.load_error(), "corrupt")
         preserved = list(self.path.parent.glob("shortcuts.json.corrupt.*"))
         self.assertEqual(len(preserved), 1,
                          "손상 파일을 보존하지 않으면 다음 저장이 원본을 덮어써 전량 유실된다.")

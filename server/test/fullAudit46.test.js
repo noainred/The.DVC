@@ -86,3 +86,24 @@ test('46회차 I1: GPU 목록을 못 읽은 서버는 GPU 0장이 아니라 못 
   assert.equal(web.gpuCardValue(card).partial, true, '최소값 표지');
   assert.match(web.gpuCardMeta(card), /GPU 목록을 못 읽은 서버 1대/);
 });
+
+/* ── 47회차(46회차 수정 반증) ── */
+test('47회차 #7: 파트 집계도 컬렉션을 못 읽은 서버를 수집 · 0개로 세지 않는다 · GPU 찾기는 서버 이름을 싣는다', async () => {
+  const { partBuckets } = await import('../src/idrac/partsInventory.js');
+  const { idracGpuCounts } = await import('../src/idrac/gpuCount.js');
+  const at = new Date(Date.now() - 60_000).toISOString();
+  const invs = {
+    a: { collectedAt: at, gpus: [{ model: 'NVIDIA H100' }, { model: 'NVIDIA H100' }], collections: { gpus: 'ok' } },
+    b: { collectedAt: at, gpus: [], collections: { gpus: 'failed' } },
+  };
+  const servers = [{ id: 'a', name: 'srv-a', type: 'idrac' }, { id: 'b', name: 'srv-b', type: 'idrac' }];
+  const g = partBuckets(servers, (s) => invs[s.id], { cat: 'gpu' });
+  assert.equal(g.collected, 1, '고른 파트를 못 읽은 서버는 수집으로 세지 않는다');
+  assert.deepEqual(g.unread.map((x) => x.name), ['srv-b']);
+  const all = partBuckets(servers, (s) => invs[s.id], {});
+  assert.equal(all.collected, 2, '전체 보기에서는 인벤토리가 있으면 수집(그 파트만 빠진다)');
+  assert.equal(all.unread[0].cats[0], 'gpu');
+  const c = idracGpuCounts(servers, (s) => invs[s.id]);
+  assert.equal(c.invRead + c.invStale - c.gpuUnread, g.collected, 'GPU 찾기와 파트 › GPU 의 수집 수가 같다');
+  assert.deepEqual(c.gpuUnreadServers, [{ id: 'b', name: 'srv-b' }]);
+});
