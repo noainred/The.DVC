@@ -12,6 +12,7 @@ import { requireChanged } from '../changeResult.js'; // v2.732 B5-03: 실패 본
 import { prunePlan, pruneDoneText } from './fleetPruneText.js'; // v2.783(점검 Q2 P-B3): 확인창은 미리보기 결과로
 import { FleetHwExportModal } from './FleetHwExportModal.jsx'; // v2.967: 서버 하드웨어 정보 내보내기(엑셀 · CSV · 사양서)
 import { CORP_SRC, inCorp, corpOptions, COLLECTOR_DC_HREF } from './fleetCorpText.js'; // v2.969: 법인(DataCenter) 기준(수집한 Agent 의 법인)
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나(즉시 revoke · 문서 밖 click 금지)
 
 /**
  * v2.732(점검 2회차 B5-03): 일괄 등록 응답 → 완료 문구. 실패 본문이면 사유를 던진다(requireChanged).
@@ -191,8 +192,7 @@ export function FleetInventory({ isAdmin }) {
       : vh.map((h) => [h.name, h.corpName || '미지정', h.vcenter, h.region, h.model, h.serviceTag, h.idracBacked ? 'O' : 'X', h.watts ?? '']);
     const body = [head, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n');
     const blob = new Blob(['﻿' + body], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `fleet-${view}-${dayStamp()}.csv`; a.click(); URL.revokeObjectURL(url);
+    saveBlob(blob, `fleet-${view}-${dayStamp()}.csv`);
   };
 
   return (

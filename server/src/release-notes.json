@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "3.17.5",
+      "date": "2026-11-16",
+      "title": "2차 공통 기능 점검 4회차: 내려받기 공용 헬퍼 하나 · 파일 이름 판정 하나 · 전력 포맷터 사본",
+      "notes": [
+        "화면 34곳이 내려받기를 손으로 적었고 세 갈래였다 — 13곳은 누르자마자 revokeObjectURL(브라우저 · 상황에 따라 빈 파일 · 실패), 일부는 문서 밖 click, 일부는 해제 없음. 공용 util/saveBlob.js(문서에 붙여 누르고 떼고 1초 뒤 해제) 하나로 바꿨다(api.js downloadFile · postDownload 포함).",
+        "Content-Disposition 파일 이름은 api.js dispositionName 하나 — postDownload · saveResponseAsFile 의 손 정규식은 첫 filename= 을 집어 filename* 의 한글 이름을 버렸고 decodeURIComponent 가 URIError 로 저장을 깼다.",
+        "tools/shared.jsx 의 전력 포맷터(fmtWatts · fmtKwh)는 util/fmt.js 사본이라 빈 문자열을 '0 W'·'0 kWh' 로 보였다 → fmt.js 로 위임 · 온도 색(tempColor)은 빈 값을 0℃(초록)로 보던 것을 numOrNull 로.",
+        "회귀 server/test/commonRound14_3174.test.js(웹 소스 스윕 · saveBlob 실제 호출 — 수정 전 실패 확인) · sharedFmt3174.test.js · Chromium 8곳 CSV 내려받기(이름 · 크기 · 첫 줄) 확인."
+      ]
+    },
+    {
       "version": "3.17.4",
       "date": "2026-11-16",
       "title": "2차 공통 기능 점검 3회차: 권한 거부 안내의 권한 이름 표를 서버 카탈로그와 맞춤",

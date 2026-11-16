@@ -27,6 +27,7 @@ import BmShareButtons from './BmShareButtons.jsx'; // 6단계 공유 링크 · �
 import './bmStage6.css';
 import { gateOk, gateShown, gateWhy } from './bmWriteText.js'; // 점검 반복 2회차 E2⑥ — 서버 쓰기 표지(동시 집중 · 세트)
 import { focusBlockText } from './bmCompareText.js';
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
 
 /** 조회기 — 세대로 늦게 온 이전 응답을 버린다(테스트가 가짜 fetcher 로 고정). */
 export function createCompareLoader(fetcher = (q) => fetchJson('/tools/bm-usage/compare', q, undefined, { timeoutMs: 120_000, retries: 0 })) {
@@ -281,8 +282,7 @@ export default function BmCompareView({ keys = [], onKeys, names = {}, onOpen, i
     try {
       const csv = compareCsv(resp, { view: view === 'table' ? 'table' : 'side', nameOf });
       const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
-      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = compareCsvName(view, resp?.to); a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      saveBlob(blob, compareCsvName(view, resp?.to));
     } catch (e) { setMsg({ tone: 'bad', text: `내보내기 실패: ${e?.message || e}` }); }
   }
 

@@ -215,7 +215,8 @@ describe('소스 스윕', () => {
   });
   it('폴링은 집중 진행 중 화면만(setTimeout 1곳 · FOCUS_POLL_MS · 상한) — setInterval · usePolling 없음', () => {
     for (const [f, s] of Object.entries(src)) { expect(s, f).not.toMatch(/setInterval\(|usePolling\(/); }
-    expect((src['BmFocusTab.jsx'].match(/setTimeout\(/g) || []).length).toBe(2, '폴링 1 + 내려받기 URL 해제 1');
+    // v3.17.5: 내려받기 URL 해제는 공용 util/saveBlob.js 로 옮겨 이 파일의 setTimeout 은 폴링 1곳뿐이다(예전 2 = 폴링 1 + 해제 1).
+    expect((src['BmFocusTab.jsx'].match(/setTimeout\(/g) || []).length).toBe(1, '폴링 1');
     expect(src['BmFocusTab.jsx']).toMatch(/focusPollStep/);
     expect(T.focusPollMax({ count: 10, intervalS: 60 })).toBe(24);
   });

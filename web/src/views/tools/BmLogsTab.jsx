@@ -17,6 +17,7 @@ import {
 } from './bmLogsText.js';
 import './bmOps.css';
 import './bmLogs.css';
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
 
 /** 규칙 등급 — 로그 규칙 뜻(LOG_GRADE_TEXT)으로(튜닝 근거 등급 문구를 빌리지 않는다). */
 function LogGrade({ grade }) {
@@ -91,7 +92,7 @@ export function LogsView({ resp, range, onRange, onTab, onReload, loading = fals
   const exportCsv = () => {
     try {
       const blob = new Blob([`﻿${patternCsv(resp)}`], { type: 'text/csv;charset=utf-8' });
-      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `bm-logs-${resp?.key || 'server'}-${range}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      saveBlob(blob, `bm-logs-${resp?.key || 'server'}-${range}.csv`);
     } catch { /* 내보내기 실패는 화면을 바꾸지 않는다 */ }
   };
   return (

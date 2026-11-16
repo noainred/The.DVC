@@ -21,6 +21,7 @@ import {
   maxBackOf, windowOf, windowLabel, windowRangeText, dateJumpEnd, dateInputOf, backForEnd, yMaxOf, ticksOf, chartModel, hoverIndex, csvText, csvFileName,
 } from './vmPerfText.js';
 import './vmPerf.css';
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
 
 const VB_W = 1360; const VB_H = 270; const X0 = 56; const X1 = 1330; const Y0 = 16; const Y1 = 236;
 // 좁은 화면(720 미만)은 뷰박스 폭 400 — 1360 그대로면 340px 폭에서 높이가 68px 띠가 되고 글자가 6px 로 줄어든다(v2.911 Chromium 400 확인 · 시안 ③은 360 뷰박스).
@@ -33,11 +34,7 @@ const clockSec = (ms) => { const d = new Date(ms); return `${two(d.getHours())}:
 function downloadCsv(series, name, rangeK, endMs) {
   if (typeof document === 'undefined' || typeof URL === 'undefined' || typeof Blob === 'undefined') return;
   const blob = new Blob([csvText(series, METRIC_KEYS)], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = csvFileName(name, rangeK, endMs);
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  saveBlob(blob, csvFileName(name, rangeK, endMs));
 }
 
 export default function VmPerfView({ entityType = 'vm', id, name, vcenterId = null, powered = true, initialRange = null }) {

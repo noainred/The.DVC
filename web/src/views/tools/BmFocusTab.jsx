@@ -26,12 +26,12 @@ import {
 import { gateOk, gateWhy } from './bmWriteText.js'; // 점검 반복 8회차 F2 — 서버 표지(데모 · 역할)
 import './bmOps.css';
 import './bmPerfOps.css';
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
 
 function download(text, name) {
   try {
     const blob = new Blob([`﻿${text}`], { type: 'text/csv;charset=utf-8' });
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1_000);
+    saveBlob(blob, name);
   } catch { /* 내려받기 실패는 화면을 바꾸지 않는다 */ }
 }
 
