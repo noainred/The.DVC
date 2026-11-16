@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "3.17.4",
+      "date": "2026-11-16",
+      "title": "2차 공통 기능 점검 3회차: 권한 거부 안내의 권한 이름 표를 서버 카탈로그와 맞춤",
+      "notes": [
+        "403 안내(AccessDenied)의 권한 이름 표가 서버 권한 카탈로그와 갈라져 있었다 — 서버 키 20개 중 6개만 알고 서버에 없는 키 7개가 남아 있어, 가장 흔한 403(inv.vms 등)이 '필요: inv.vms 권한' 처럼 원문 키로 보였다.",
+        "이름을 서버 카탈로그(auth/permissions.js PERMISSION_CATALOG) label 그대로 맞추고, 서버 테스트가 두 벌을 대조한다(서버에 권한을 더하면 먼저 깨진다).",
+        "회귀 server/test/commonRound13_3173.test.js · web accessDeniedText.test.js."
+      ]
+    },
+    {
       "version": "3.17.3",
       "date": "2026-11-16",
       "title": "2차 공통 기능 점검 2회차: 표 정렬 빈 값 · Kpi 막대 · 한글 조합 중 ESC",

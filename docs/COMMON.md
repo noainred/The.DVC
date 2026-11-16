@@ -5,7 +5,7 @@
 
 - 생성: `node scripts/common-doc.mjs` · 최신 여부: `node scripts/common-doc.mjs --check`
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다. 설명을 고치려면 그 모듈의 **머리 주석 첫 단락**을 고친다.
-- 훑은 소스 4210개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
+- 훑은 소스 4211개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
 
 ## 읽는 법 · 한계
 
@@ -139,7 +139,7 @@
 | `EntityDetail.jsx` | ui.jsx(구 633줄)에서 분리(v2.295). 본문은 원본 192~606행 그대로 이동. | `DRow` `VmIpPing` `HostVmsModal` `VmPartitionsSection` `VmCfgSection` `PerfcSection` 외 10 | 16 | 6 | 8 |
 | `vmperf/vmPerfText.js` | VM · ESXi 호스트 성능 화면(v2.911 · 시안 docs/design/vm-perf ②~④)의 **순수** 보조(vitest 고정). 기간 · 지표 상수 · 값 글자 · 구간 통계 · 과거 창 계산(◀ 이전 · 슬라이더 · 날짜로 이동) · 차트 좌표 · CS… | `chartKeys` `fmtRate` `fmtVal` `rollupLabel` `fmtClock` `fmtHm` 외 24 | 13 | 2 | 3 |
 | `DataList.jsx` | 공용 자동완성 목록(v2.708) — 날 `<datalist>` 대신 이것을 쓴다. 제안 목록을 글자 순으로 정렬한다(selectSort.js 와 같은 규칙). | `default` | 12 | 4 | 0 |
-| `accessDeniedText.js` | 권한 거부(403) 안내 문구 생성 — 순수 함수만 둔다(AccessDenied.jsx 가 렌더). | `describePermission` `deniedRoleLabel` `deniedSubText` `buildRequestText` `errorBoxInput` `PERM_LABEL` 외 5 | 9 | 4 | 5 |
+| `accessDeniedText.js` | 권한 거부(403) 안내 문구 생성 — 순수 함수만 둔다(AccessDenied.jsx 가 렌더). | `describePermission` `deniedRoleLabel` `deniedSubText` `buildRequestText` `errorBoxInput` `PERM_LABEL` 외 5 | 9 | 4 | 6 |
 | `VmMetrics.jsx` | '📈 성능 그래프 보기' 단추(VM · ESXi 호스트). v2.911(시안 docs/design/vm-perf ② · 사용자 컨펌 '개선'): 예전에는 여기의 MetricModal(900px 모달 · recharts · 지표마다 vCenter 로그인)을 띄웠다. 이제… | `VmMetricButton` `HostMetricButton` | 5 | 4 | 1 |
 | `VmRemote.jsx` | (머리 주석 없음) | `VmRemoteButton` | 5 | 4 | 2 |
 | `pressable.js` | 누르는 카드 · 행(div · td)에 **키보드 접근**을 주는 props(v3.10.19 · 가상화 플랫폼 점검 7회차). - 마우스로만 열리던 div(onClick) 는 Tab 으로 닿지 않고 Enter · Space 로 열리지 않았다(허브 vCenter 카드 ·… | `onPressKey` `pressable` `PRESS_KEYS` | 5 | 3 | 1 |
@@ -277,7 +277,7 @@
 | `server/src/security/certMonitor.js` | TLS 인증서 만료 감시 — 등록된 vCenter·NSX Manager의 443 인증서를 주기적으로 프로브해 만료일(D-90 경고 / D-30 위험)을 추적한다. 28개 vCenter 규모에서 수동 추적이 불가능한 항목(커뮤니티 단골 장애: vCenter STS/머신… | 7 | 6 | 8 |
 | `server/src/auth/addressMask.js` | 비-admin 응답에서 장비 관리 주소·계정명을 가린다(v2.599 AUTHZ-2599-03). | 44 | 5 | 16 |
 | `server/src/bareos/settings.js` | Bareos 연동 설정(v2.820 · v2.823 법인별 Director). 파일: CONFIG_DIR/bareos.json (0600 · 원자적 쓰기 · 비밀 봉인). | 31 | 5 | 25 |
-| `server/src/auth/permissions.js` | 기능별 권한(Permission) 프레임워크 — "모든 기능에 대해 역할별 권한을 켜고 끈다". | 17 | 5 | 16 |
+| `server/src/auth/permissions.js` | 기능별 권한(Permission) 프레임워크 — "모든 기능에 대해 역할별 권한을 켜고 끈다". | 17 | 5 | 17 |
 | `server/src/isidu/settings.js` | 아이실론 디렉터리 사용량 수집 대상 설정(v2.736). | 17 | 5 | 18 |
 | `server/src/collector/remoteInventory.js` | Remote (edge-collected) iDRAC server inventory, pulled from collector agents' /api/collector/export (the `servers` field). Keyed by collectorId so eac… | 15 | 5 | 23 |
 | `server/src/vcenter/dsBrowse.js` | 데이터스토어 브라우즈 (v2.276) — 데이터스토어 상세에서 ① 어떤 VM 이 할당돼 있는지, ② 실제 어떤 파일들이 있는지 보여준다. | 15 | 5 | 4 |
