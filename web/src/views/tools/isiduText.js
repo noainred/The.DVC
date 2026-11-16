@@ -312,7 +312,7 @@ export function kpiCards(rep, target, now = Date.now()) {
   const res = rep.scan?.sizeMode === 'k' ? '정확(-k)' : '반올림(-h)';
   return [
     { key: 'total', label: '디렉터리 전체', value: bytesText(k.denomBytes), sub: `7일 ${d7.text} · ${res}`, tone: d7.tone },
-    { key: 'users', label: '사용자 폴더', value: countText(k.users), sub: rep.base7 ? `신규 ${countText(k.new7)} · 사라짐 ${countText(k.removed7)} (7일 전 대비)` : '신규·사라짐: 7일 전 수집 없음' },
+    { key: 'users', label: '사용자 폴더', value: countText(k.users), sub: k.compareLimited ? '신규·사라짐: 폴더 상한으로 잘린 조사라 판정하지 않음' : rep.base7 ? `신규 ${countText(k.new7)} · 사라짐 ${countText(k.removed7)} (7일 전 대비)` : '신규·사라짐: 7일 전 수집 없음' },
     { key: 'top', label: `Top ${k.topN || 10} 비중`, value: shareText(k.topShare), sub: `${bytesText(k.topBytes)} / ${bytesText(k.denomBytes)}`, bar: numOrNull(k.topShare) },
     { key: 'last', label: '마지막 수집', value: agoText(rep.scan?.ts, now), sub: `소요 ${durationText(rep.scan?.durationMs)} · ${everyText(target?.intervalHours)} · ${nodeText(rep.scan?.node || '')}` },
   ];

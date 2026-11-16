@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import base64
+from collections import deque
 import hashlib
 import hmac
 import json
@@ -106,6 +107,7 @@ class UserStore:
         self._lock = threading.RLock()
         self._users = None
         self._mtime = None   # 파일 변경 감지(아래 _load) — 외부 프로세스의 수정을 재시작 없이 반영
+        self._unreadable = False   # 31회차 F3: 파일은 있는데 읽지 못함(권한) — 저장 · 부트스트랩을 막는다(fail-closed)
 
     # ---------- 로드/저장 ----------
 
@@ -118,12 +120,29 @@ class UserStore:
         except OSError:
             mtime = None
         if self._users is None or mtime != self._mtime:
-            raw = read_json(self._path, [], expect=list)
+            try:
+                raw = read_json(self._path, [], expect=list, strict_io=True, quiet=self._unreadable)
+            except OSError:
+                # 31회차 F3: 읽지 못함은 손상이 아니다 — 원본을 옮기지 않고, 직전 목록이 있으면 그대로 쓴다(mtime 은 두어 다음에 다시 읽는다).
+                #   처음부터 못 읽었으면 빈 목록 + 표지(저장 · 새 admin 생성 금지). 로그는 상태가 바뀔 때 한 번(35회차 R6 — 요청마다 찍혔다).
+                self._unreadable = True
+                if self._users is None:
+                    self._users = []
+                return self._users
             self._users = [u for u in (self._clean(entry) for entry in raw) if u]
             self._mtime = mtime
+            self._unreadable = False
         return self._users
 
+    def _refuse_if_unreadable(self):
+        """35회차 R6(재현): 못 읽음 상태의 쓰기는 **바꾸기 전에** 거절한다 — 예전에는 메모리 목록을 먼저 고친 뒤 저장에서 실패해, 400 을 주고도
+        새 비밀번호 · 중지 · 삭제가 메모리에서 효력을 가졌고 파일이 다시 읽히면 조용히 되돌아갔다."""
+        if self._unreadable:
+            raise AuthError(f"{self._path.name} 을(를) 읽지 못해 저장하지 않습니다 — 파일 소유자 · 권한을 확인하세요"
+                            "(서비스 계정이 읽을 수 있어야 합니다).")
+
     def _save(self):
+        self._refuse_if_unreadable()
         write_json(self._path, self._users)
         try:
             self._mtime = self._path.stat().st_mtime_ns
@@ -165,6 +184,11 @@ class UserStore:
         with self._lock:
             users = self._load()
             if users:
+                return None
+            if self._unreadable:
+                # 31회차 F3: 파일이 있는데 읽지 못했다 — 계정이 없는 것이 아니다. 새 admin 을 만들면 기존 계정 전부를 덮는다.
+                print(f"[auth] {self._path.name} 을(를) 읽지 못해 초기 admin 을 만들지 않습니다 — 소유자 · 권한을 고친 뒤 재시작하세요.",
+                      flush=True)
                 return None
             password = generate_password()
             users.append({
@@ -263,6 +287,7 @@ class UserStore:
         """그 계정으로 발급된 모든 토큰을 즉시 무효화한다."""
         with self._lock:
             users = self._load()
+            self._refuse_if_unreadable()   # 35회차 R6
             for user in users:
                 if user["username"] == username:
                     user["tokenVersion"] = int(user["tokenVersion"]) + 1
@@ -276,10 +301,14 @@ class UserStore:
         username = str(username or "").strip()
         if not username or len(username) > 64:
             raise AuthError("사용자명을 입력하세요(64자 이하).")
+        if username in (".", "..") or "/" in username:
+            # 35회차 R5: 브라우저가 URL 경로의 점 조각을 정규화해 이 이름의 계정은 화면에서 관리(중지 · 삭제 · 비밀번호)할 수 없다.
+            raise AuthError("사용자명으로 '.' · '..' 과 '/' 는 쓸 수 없습니다.")
         if role not in ROLES:
             raise AuthError("역할은 admin 또는 viewer 여야 합니다.")
         with self._lock:
             users = self._load()
+            self._refuse_if_unreadable()   # 35회차 R6
             if any(u["username"].lower() == username.lower() for u in users):
                 raise AuthError("이미 존재하는 사용자명입니다.")
             record = hash_password(password)
@@ -294,6 +323,7 @@ class UserStore:
     def update(self, username: str, *, role=None, enabled=None):
         with self._lock:
             users = self._load()
+            self._refuse_if_unreadable()   # 35회차 R6
             target = None
             for user in users:
                 if user["username"] == username:
@@ -322,6 +352,7 @@ class UserStore:
     def set_password(self, username: str, password: str):
         with self._lock:
             users = self._load()
+            self._refuse_if_unreadable()   # 35회차 R6
             target = next((u for u in users if u["username"] == username), None)
             if not target:
                 raise AuthError("사용자를 찾을 수 없습니다.")
@@ -345,6 +376,14 @@ class UserStore:
         """
         password = generate_password()
         existing = self.get(username)
+        if not existing:
+            # 31회차 F10(재현): 로그인은 대소문자를 무시하는데 복구는 정확 일치만 찾아, 'Admin2' 를 'admin2' 로 부르면
+            #   add 의 중복 검사(대소문자 무시)에 걸려 예외로 끝났다. 대소문자만 다른 기존 계정을 찾아 그 이름으로 초기화한다.
+            name = str(username or "").strip().lower()
+            with self._lock:
+                existing = next((u for u in self._load() if u["username"].lower() == name), None)
+            if existing:
+                username = existing["username"]
         if existing:
             self.set_password(username, password)      # tokenVersion 인상 포함
             if not existing.get("enabled", True):
@@ -357,6 +396,7 @@ class UserStore:
     def delete(self, username: str):
         with self._lock:
             users = self._load()
+            self._refuse_if_unreadable()   # 35회차 R6
             remaining = [u for u in users if u["username"] != username]
             if len(remaining) == len(users):
                 raise AuthError("사용자를 찾을 수 없습니다.")
@@ -384,8 +424,9 @@ class SessionStore:
     무효화는 어떻게 하나(무상태의 약점 보완):
     - **계정 단위**: `users.json` 의 `tokenVersion` 을 올리면 그 계정 토큰이 전부 죽는다
       (비밀번호 변경·계정 중지·삭제 시 자동). 서명 안에 발급 시점 버전이 들어 있다.
-    - **개별 로그아웃**: 만료 전까지만 유지되는 메모리 폐기 목록에 담는다(재시작하면
-      사라지지만, 그때는 어차피 서명 검증이 아니라 tokenVersion 으로 통제된다).
+    - **개별 로그아웃**: 만료 전까지만 유지되는 폐기 목록에 담는다. 전체 점검 31회차 F5(재현): 예전에는 메모리에만 두어
+      재기동하면 로그아웃한 토큰이 TTL 안에서 다시 통과했다(옛 주석의 'tokenVersion 으로 통제' 는 사실이 아니었다 — 로그아웃은
+      tokenVersion 을 올리지 않는다). 이제 `session-revoked.json`(토큰 SHA-256 → 만료시각, 0600, 원자적 쓰기)에도 남긴다.
 
     서명 키는 데이터 폴더에 0600 으로 보관한다 — 키가 새면 임의 계정 토큰을 위조할 수 있다.
     """
@@ -393,20 +434,22 @@ class SessionStore:
     GLOBAL_FACTOR = 10          # 전역 임계값 = max_fails × 이 배수
 
     def __init__(self, ttl_seconds: int, max_fails: int, lockout_seconds: int,
-                 secret_path=None, users=None):
+                 secret_path=None, users=None, revoked_path=None):
         self._ttl = ttl_seconds
         self._max_fails = max_fails
         self._lockout = lockout_seconds
         self._users = users
         self._secret = self._load_secret(secret_path)
-        self._revoked = {}       # token -> 만료시각(개별 로그아웃)
+        self._revoked_path = Path(revoked_path) if revoked_path else None
+        self._revoked_user = {}   # sha256(token) -> 계정(37회차 R5 — 상한을 넘치면 계정 단위 폐기로 접는다)
+        self._revoked = self._load_revoked()   # sha256(token) -> 만료시각(개별 로그아웃 — 31회차 F5: 파일에도)
         self._user_revoked = {}  # username -> 이 시각 이전 발급 토큰 거부(계정 단위 폐기)
         # 마지막 발급시각 — time.time() 이 같은 마이크로초에 같은 값을 돌려주면 '폐기 직후
         # 재로그인' 토큰의 i 가 컷오프와 같아져(i <= cutoff) 튕긴다. 발급시각을 단조 증가로
         # 보정해 폐기(cutoff=마지막 발급시각 이상) / 재발급(i > cutoff)을 결정적으로 만든다.
         self._last_issued = 0.0
-        self._fails = {}         # client -> [실패수, 잠금해제시각]
-        self._global_fails = 0
+        self._fails = {}         # client -> [실패수, 잠금해제시각, 창 시작(첫 실패) 시각]
+        self._global_fails = deque()   # 창 안 실패 시각들(31회차 F6 — 예전에는 성공 전까지 기간 없이 쌓였다)
         self._global_until = 0.0
         self._lock = threading.RLock()
 
@@ -433,7 +476,47 @@ class SessionStore:
             print(f"[auth] 세션 서명 키 저장 실패({exc}) — 재시작 시 로그아웃됩니다.", flush=True)
         return secret
 
+    # ---------- 개별 로그아웃 폐기 목록(31회차 F5) ----------
+
+    @staticmethod
+    def _token_id(token) -> str:
+        return hashlib.sha256(str(token).encode("utf-8", "surrogateescape")).hexdigest()
+
+    def _load_revoked(self) -> dict:
+        if not self._revoked_path:
+            return {}
+        raw = read_json(self._revoked_path, {}, expect=dict)
+        now = time.time()
+        out = {}
+        for key, val in raw.items():
+            # 값은 [만료, 계정](37회차 R5) — 옛 꼴(만료 숫자만)도 읽는다(계정 모름).
+            user = None
+            if isinstance(val, list) and val:
+                user = val[1] if len(val) > 1 and isinstance(val[1], str) else None
+                val = val[0]
+            try:
+                exp = float(val)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(key, str) and len(key) == 64 and exp >= now:
+                out[key] = exp
+                if user:
+                    self._revoked_user[key] = user
+        return out
+
+    def _save_revoked(self) -> None:
+        if not self._revoked_path:
+            return
+        try:
+            write_json(self._revoked_path, {k: [exp, self._revoked_user.get(k, "")] for k, exp in self._revoked.items()})
+        except OSError as exc:   # 저장 실패가 로그아웃을 막지는 않는다(이 프로세스에서는 메모리로 막힌다)
+            print(f"[auth] 로그아웃 폐기 목록 저장 실패({exc}) — 재기동하면 그 토큰이 만료까지 다시 통할 수 있습니다.", flush=True)
+
     # ---------- 잠금 ----------
+
+    def _fail_window(self) -> float:
+        """실패를 세는 창(31회차 F6) — 잠금 시간의 3배, 최소 15분. 이보다 오래된 실패는 세지 않는다."""
+        return max(self._lockout * 3, 900)
 
     def lock_remaining(self, client: str = "-") -> int:
         with self._lock:
@@ -444,25 +527,36 @@ class SessionStore:
 
     def note_failure(self, client: str = "-") -> None:
         with self._lock:
-            entry = self._fails.setdefault(client, [0, 0.0])
+            now = time.time()
+            window = self._fail_window()
+            entry = self._fails.setdefault(client, [0, 0.0, now])
+            # 31회차 F6(재현): 창이 지난 실패는 세지 않는다 — 예전에는 30일 전 7회 + 오타 1회로 잠겼다.
+            if entry[0] and now - entry[2] > window:
+                entry[0] = 0
+            if entry[0] == 0:
+                entry[2] = now
             entry[0] += 1
             if entry[0] >= self._max_fails:
-                entry[1] = time.time() + self._lockout
+                entry[1] = now + self._lockout
                 entry[0] = 0
-            self._global_fails += 1
-            if self._global_fails >= self._max_fails * self.GLOBAL_FACTOR:
-                self._global_until = time.time() + self._lockout
-                self._global_fails = 0
+            self._global_fails.append(now)
+            while self._global_fails and now - self._global_fails[0] > window:
+                self._global_fails.popleft()
+            if len(self._global_fails) >= self._max_fails * self.GLOBAL_FACTOR:
+                self._global_until = now + self._lockout
+                self._global_fails.clear()
 
     def note_success(self, client: str = "-") -> None:
         with self._lock:
             self._fails.pop(client, None)
-            self._global_fails = 0
+            self._global_fails.clear()
 
     def _purge_fails(self) -> None:
         now = time.time()
+        window = self._fail_window()
         for client, entry in list(self._fails.items()):
-            if entry[0] == 0 and entry[1] < now:
+            # 잠금이 끝났고 남은 실패가 없거나 창 밖이면 지운다(31회차 F6 — 1~7회 항목이 영구히 남아 메모리가 자랐다).
+            if entry[1] < now and (entry[0] == 0 or now - entry[2] > window):
                 self._fails.pop(client, None)
 
     # ---------- 토큰 ----------
@@ -517,7 +611,7 @@ class SessionStore:
         username = str(body.get("u", ""))
         with self._lock:
             self._purge_revoked()
-            if token in self._revoked:
+            if self._token_id(token) in self._revoked:
                 return None
             cutoff = self._user_revoked.get(username)
             if cutoff is not None and float(body.get("i", 0)) <= cutoff:
@@ -543,12 +637,43 @@ class SessionStore:
             self._last_issued = issued
             return issued
 
+    REVOKED_MAX = 5000      # 35회차 R1: 폐기 목록 전체 상한
+    REVOKED_PER_USER = 50   # 37회차 R5: 계정당 상한 — 넘치면 그 계정 단위 폐기(tokenVersion 인상)로 접는다
+
     def destroy(self, token) -> None:
         if not token:
             return
+        # 35회차 R1(재현): 서명 · 만료가 유효한 토큰만 기록한다 — 예전에는 아무 문자열이나 받아(미인증 로그아웃 요청) 폐기 파일이 끝없이 자라고
+        #   요청마다 전체 파일을 세션 잠금 안에서 다시 써 정상 세션 판정이 수 초씩 밀렸다. 이미 무효인 토큰은 기록할 필요가 없다.
+        user = self.resolve(token)
+        if user is None:
+            return
+        uname = str(user.get("username", ""))
+        fold = set()
         with self._lock:
-            self._revoked[token] = time.time() + self._ttl
+            key = self._token_id(token)
+            self._revoked[key] = time.time() + self._ttl
+            self._revoked_user[key] = uname
             self._purge_revoked()
+            # 37회차 R5(반증 — 재현): 상한을 넘칠 때 남의 항목을 버리면 그 계정이 로그아웃한 토큰이 되살아났다(유효 계정 하나로 5,000번 로그인 ·
+            #   로그아웃). 버리는 대신 **그 계정 단위 폐기로 접는다** — 계정당 상한을 넘은 계정, 그리고 전체 상한을 넘으면 만료가 가까운 항목의 계정.
+            if sum(1 for u in self._revoked_user.values() if u == uname) > self.REVOKED_PER_USER:
+                fold.add(uname)
+            if len(self._revoked) > self.REVOKED_MAX:
+                for k, _exp in sorted(self._revoked.items(), key=lambda kv: kv[1])[: len(self._revoked) - self.REVOKED_MAX]:
+                    fold.add(self._revoked_user.get(k, ""))
+        for name in fold:
+            if name:
+                self.destroy_user(name)   # tokenVersion 인상(재기동 뒤에도) + 메모리 컷오프 — 그 계정의 남은 세션도 끊긴다(남용일 때만)
+        with self._lock:
+            for k in [k for k, u in self._revoked_user.items() if u in fold]:
+                self._revoked.pop(k, None)
+                self._revoked_user.pop(k, None)
+            if len(self._revoked) > self.REVOKED_MAX:   # 계정을 모르는 옛 항목만 남았을 때의 마지막 방어
+                for k, _exp in sorted(self._revoked.items(), key=lambda kv: kv[1])[: len(self._revoked) - self.REVOKED_MAX]:
+                    self._revoked.pop(k, None)
+                    self._revoked_user.pop(k, None)
+            self._save_revoked()
 
     def destroy_user(self, username) -> None:
         """그 계정의 모든 토큰을 무효화한다.
@@ -571,6 +696,7 @@ class SessionStore:
         for token, expires in list(self._revoked.items()):
             if expires < now:
                 self._revoked.pop(token, None)
+                self._revoked_user.pop(token, None)
         # 컷오프는 TTL 이 지나면 의미가 없다(그 이전 토큰은 어차피 만료).
         for username, cutoff in list(self._user_revoked.items()):
             if cutoff + self._ttl < now:

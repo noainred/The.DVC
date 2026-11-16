@@ -76,8 +76,15 @@ function addTo(g, s) {
 /** 그룹 마감(순수) — 피크는 측정 서버가 다 모인 시간(n = 최대)만. */
 function finishGroup(g, { capKw = null, rackLowPct = 10 } = {}) {
   const hrs = [...g.hours.entries()].sort((a, b) => a[0] - b[0]);
-  const full = hrs.length ? Math.max(...hrs.map(([, e]) => e.n)) : 0;
-  const complete = hrs.filter(([, e]) => e.n === full);
+  // 전체 점검 34회차 F2(재현): '다 모인 시간' 의 기준은 24h 행이 있는 서버 수(avg24N) — 예전에는 시간별 n 의 최댓값이라, 어느 시간도 전원이
+  //   모이지 않으면(한 서버는 앞 12h · 다른 서버는 뒤 12h) 부분 합이 피크가 되고 partialHours 는 0 이었다.
+  // 37회차 R7(반증): 다 모인 시간이 없을 때 피크를 null 로 비우면 600대 중 1대만 들고 나도 그룹 피크가 사라진다 — 가장 많이 모인 시간의 피크를
+  //   **부분 합 표지(peakPartial · peakServers/avg24Servers)와 함께** 싣는다(화면이 'n/m대 기준 부분 합' 이라고 말한다 — 조용히 전체처럼 쓰지 않는다).
+  const full = g.avg24N;
+  let complete = hrs.filter(([, e]) => e.n >= full);
+  let peakN = full; let peakPartial = false;
+  if (!complete.length && hrs.length) { peakN = Math.max(...hrs.map(([, e]) => e.n)); complete = hrs.filter(([, e]) => e.n === peakN); peakPartial = true; }
+  const partialHours = hrs.filter(([, e]) => e.n < full).length;
   const pk = complete.reduce((a, [t, e]) => (a == null || e.w > a.w ? { t, w: e.w } : a), null);
   const nowKw = g.measured ? r2(g.nowW / 1000) : null;
   /*
@@ -90,8 +97,8 @@ function finishGroup(g, { capKw = null, rackLowPct = 10 } = {}) {
   const margin = capKw != null && g.measured && !partial ? r1(((capKw * 1000 - g.nowW) / (capKw * 1000)) * 100) : null;
   return {
     servers: g.servers, measured: g.measured, unmeasured: g.unmeasured, unmeasuredN: g.servers - g.measured,
-    nowW: g.measured ? Math.round(g.nowW) : null, nowKw, avg24Kw: g.avg24N ? r2(g.avg24W / 1000) : null, avg24Servers: g.avg24N, peak24Kw: pk ? r2(pk.w / 1000) : null, peak24At: pk ? pk.t : null, peakServers: full,
-    partialHours: hrs.length - complete.length, kwh24: g.kwh24N ? r1(g.kwh24) : null, kwhMonth: g.monthN ? r1(g.kwhMonth) : null, monthServers: g.monthN, monthPartial: g.monthPartial,
+    nowW: g.measured ? Math.round(g.nowW) : null, nowKw, avg24Kw: g.avg24N ? r2(g.avg24W / 1000) : null, avg24Servers: g.avg24N, peak24Kw: pk ? r2(pk.w / 1000) : null, peak24At: pk ? pk.t : null, peakServers: pk ? peakN : 0, peakPartial,
+    partialHours, kwh24: g.kwh24N ? r1(g.kwh24) : null, kwhMonth: g.monthN ? r1(g.kwhMonth) : null, monthServers: g.monthN, monthPartial: g.monthPartial,
     capKw, marginPct: margin, low: margin != null ? margin < rackLowPct : null, marginPartial: capKw != null && partial,
     inletAvg: g.inletN ? r1(g.inletSum / g.inletN) : null, inletMax: g.inletMax, maxC: g.maxC, inletServers: g.inletN,
     fanWarn: g.fanWarn, fanUnread: g.fanUnread, capSet: g.capSet, capHit: g.capHit, notTarget: g.notTarget || 0,

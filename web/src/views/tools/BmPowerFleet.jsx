@@ -66,7 +66,7 @@ export function PowerFleetView({ resp, onOpen, onReload, loading = false }) {
             <tr key={c.vcenterId}>
               <td data-sort={c.vcenterId}>{c.vcenterId || '—'}</td><td className="right" data-sort={c.servers}>{c.servers}</td>
               <td className="right" data-sort={c.nowKw ?? ''}>{kwText(c.nowKw)}</td><td className="right" data-sort={c.avg24Kw ?? ''}>{kwText(c.avg24Kw)}</td>
-              <td className="right" data-sort={c.peak24Kw ?? ''} title={c.peak24At ? hourText(c.peak24At) : ''}>{kwText(c.peak24Kw)}</td>
+              <td className="right" data-sort={c.peak24Kw ?? ''} title={c.peak24At ? `${hourText(c.peak24At)}${c.peakPartial ? ` · ${c.peakServers}/${c.avg24Servers}대 기준 부분 합(측정 서버가 다 모인 시간이 없음)` : ''}` : ''}>{kwText(c.peak24Kw)}{c.peakPartial ? <span className="muted"> (부분)</span> : null}</td>
               <td className="right" data-sort={c.kwh24 ?? ''}>{kwhText(c.kwh24)}</td><td className="right" data-sort={c.kwhMonth ?? ''}>{kwhText(c.kwhMonth)}</td>
               <td className="bmo-wrap" data-sort={c.unmeasuredN}>{c.unmeasuredN ? unmeasuredText(c.unmeasured) : '—'}</td>
               <td className="right" data-sort={c.inletMax ?? ''}>{c.inletAvg == null ? '—' : `${c.inletAvg} / ${c.inletMax}`}</td>

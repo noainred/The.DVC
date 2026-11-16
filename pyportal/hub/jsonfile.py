@@ -27,17 +27,25 @@ def preserve_corrupt(path: Path) -> None:
         print(f"[store] 손상 파일 보존 실패: {exc}", flush=True)
 
 
-def read_json(path: Path, default, *, expect=None):
+def read_json(path: Path, default, *, expect=None, strict_io: bool = False, quiet: bool = False):
     """파일을 읽어 파싱한다. 없으면 default, 손상되면 보존 후 default.
 
     expect 를 주면(list/dict) 타입이 다를 때도 손상으로 취급한다.
+    strict_io=True 면 읽기 오류(권한 · 입출력 — OSError)는 손상이 아니다: 옮기지 않고 그대로 올린다
+    (전체 점검 31회차 F3 — root 로 콘솔 복구를 돌려 users.json 이 root 소유가 되면, 서비스가 'Permission denied' 를 손상으로 보고
+    원본을 옮긴 뒤 빈 목록으로 돌았고 재기동 때 새 admin 하나만 남았다). 계정 파일처럼 '못 읽음' 을 따로 다뤄야 하는 쪽이 쓴다.
     """
     path = Path(path)
     if not path.exists():
         return default
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError) as exc:   # UnicodeDecodeError 는 ValueError — 깨진 바이트는 손상이다
+        if strict_io and isinstance(exc, OSError):
+            if not quiet:   # 35회차 R6: 같은 상태가 이어지면 호출부가 quiet 으로 — 요청마다 로그가 쌓이지 않게
+                print(f"[store] {path.name} 을(를) 읽지 못했습니다({exc}) — 파일을 옮기지 않습니다(권한 · 소유자를 확인하세요).",
+                      flush=True)
+            raise
         print(f"[store] {path.name} 을(를) 읽을 수 없습니다({exc}) — 보존 후 기본값으로 시작합니다.",
               flush=True)
         preserve_corrupt(path)

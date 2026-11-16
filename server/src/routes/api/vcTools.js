@@ -8,6 +8,7 @@ import { visibleNsxManagers } from '../../nsx/scope.js';
 import { listDatacenters, datacenterOfVcenter } from '../../datacenter/store.js';
 import { vcListUnread, vcListItems, LIST_UNREAD_TEXT } from '../../corelicense/analyze.js'; // v2.742(VC-06): 확장 목록을 읽었는가 — 판정 한 벌
 import { isAdminReq } from '../../auth/addressMask.js';
+import { vmToolsDistribution, TOOLS_IDS_MAX } from '../../inventory/vmToolsDist.js';
 
 export function registerVcTools(api) {
 
@@ -134,19 +135,11 @@ api.get('/tools/vmtools', requirePerm('tools'), (req, res) => {
   const allowed = scopedVcenterIds(req.user, snap);
   if (allowed) vms = vms.filter((v) => allowed.has(v.vcenterId));
   if (req.query.vcenterId) vms = vms.filter((v) => v.vcenterId === req.query.vcenterId);
-  const map = new Map();
-  for (const v of vms) {
-    const ver = v.toolsVersion || '없음';
-    if (!map.has(ver)) map.set(ver, { version: ver, count: 0, running: 0, outdated: 0, notRunning: 0, ids: [] });
-    const e = map.get(ver); e.count++;
-    if (e.ids.length < 2000) e.ids.push(v.id);
-    if (v.toolsStatus === 'RUNNING') e.running++;
-    else if (v.toolsStatus === 'OUTDATED') e.outdated++;
-    else e.notRunning++;
-  }
+  // 전체 점검 32회차 F1 · F3: 집계는 inventory/vmToolsDist.js 하나(오래됨 = VM 신호와 같은 집합 · 미수집 따로 · 업그레이드 id 는 켜진 VM · 템플릿 제외).
   res.json({
     scannedVms: vms.length,
-    versions: [...map.values()].sort((a, b) => b.count - a.count),
+    idsMax: TOOLS_IDS_MAX,
+    versions: vmToolsDistribution(vms),
   });
 });
 

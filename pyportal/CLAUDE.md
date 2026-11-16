@@ -114,3 +114,10 @@
 ## v2.769 버그 점검 4회차 조치 — 되돌리지 말 것(`tests/test_audit2769.py`)
 - **요청 전체 시한 ≠ 소켓 시한**(`pinned.total_deadline_seconds` — 기본 소켓 × 3, 상한 90초 · env `HUB_HEALTH_TOTAL_TIMEOUT` 우선): v2.768 은 둘을 같은 값(4초)으로 잡아 RTT 800ms TLS 대상의 정상 서버가 '응답 시간 초과' 로 떨어졌다. 배수는 4 미만(드립 시험 상한 = 시한 × 4). 웹훅도 같은 구조.
 - **헤더 단계에서 워치독이 끊었으면 시한 초과**(`deadline.fired` 를 `opener.open` 직후·HTTPError 에서 본다): 평문 http.client 는 shutdown 뒤 EOF 를 '헤더 끝' 으로 읽어 잘린 상태줄만으로 healthy 가 됐다(TLS 와 판정이 갈렸다).
+
+## 전체 점검 31회차 조치 — 되돌리지 말 것(`tests/test_audit_full31.py`)
+- **사용자 라우트는 `USER_PATTERN` + 디코드**(`server.py _user_arg`): 생성은 1~64자 아무 글자를 받으므로 관리 라우트를 ID_PATTERN 으로 좁히면 `.`·`@`·한글 계정을 폐기할 수 없다.
+- **복원은 계정별 tokenVersion 을 max(복원값, 현재값)+1 로**(`backup._bump_token_versions`) · **로그아웃 폐기 목록은 `session-revoked.json`**(토큰 SHA-256 — 원문 금지) · 실패 카운터는 시간 창 안만.
+- **users.json 읽기 오류(OSError)는 손상이 아니다**(`read_json(strict_io=True)`): 옮기지 않고 저장 · 새 admin 생성을 막는다. 콘솔 복구는 데이터 폴더 소유자로(root 거부).
+- 핀 연결 opener 는 `ProxyHandler({})` — 환경 프록시가 끼면 '대상 IP : 프록시 포트' 로 붙는다. 센터 id `all` 은 예약어.
+- 35회차 반증: 폐기 목록에는 **서명 · 만료가 유효한 토큰만**(미인증 로그아웃으로 파일이 자라지 않게 · 상한) · 백업도 users.json 을 strict 로 읽는다 · 못 읽음 상태 쓰기는 **바꾸기 전에** 거절 · 비-admin 에게 경로(초기 비밀번호 파일 포함) 금지 · 사용자명 `.`·`..`·`/` 거부.

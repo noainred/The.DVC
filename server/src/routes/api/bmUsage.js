@@ -1453,7 +1453,11 @@ api.put('/tools/bm-usage/distribute', adminOnly, fleetOnly, (req, res) => {
     return res.status(409).json({ ok: false, conflict: 'per-edge', agents: clash.slice(0, 20),
       reason: `중앙 켜기가 저장된 엣지(${clash.slice(0, 5).join(', ')}${clash.length > 5 ? ` 외 ${clash.length - 5}곳` : ''})는 제외할 수 없습니다 — '이 엣지는 로컬 설정' 과 '중앙이 켠다' 는 반대 지시입니다. 그 엣지의 중앙 켜기를 먼저 해제하세요.` });
   }
-  const next = saveDistribution(patch, String(req.user?.username || ''));
+  let next;
+  try { next = saveDistribution(patch, String(req.user?.username || '')); } catch (e) {   // 34회차 F4: 읽지 못한 배포 파일은 덮지 않는다
+    if (e?.code === 'settings-unreadable') return res.status(409).json({ ok: false, code: e.code, reason: e.message });
+    throw e;
+  }
   const superseded = perEdgeSuperseded(next);
   logAudit({ user: req.user?.username, action: 'bm-usage.distribute', ip: req.ip || '',
     detail: JSON.stringify({ enabled: next.enabled, excluded: Object.keys(next.excluded).length, ...(superseded.length ? { perEdgeSuperseded: superseded.length } : {}) }).slice(0, 300) });
@@ -1503,7 +1507,7 @@ api.put('/tools/bm-usage/distribute/edge', adminOnly, fleetOnly, async (req, res
     } else {
       r = setPerEdge(name, false, by);
     }
-    if (!r.ok) return res.status(r.conflict ? 409 : 400).json({ ok: false, ...(r.conflict ? { conflict: r.conflict } : { code: r.code }), reason: r.reason });
+    if (!r.ok) return res.status(r.conflict || r.code === 'settings-unreadable' ? 409 : 400).json({ ok: false, ...(r.conflict ? { conflict: r.conflict } : { code: r.code }), reason: r.reason });   // 37회차 R4: 같은 상태의 다른 저장과 같은 409
     const saved = r.distribution?.perEdge ? perEdgeFor(name, r.distribution) : null;
     logAudit({ user: req.user?.username, action: 'bm-usage.distribute.edge', target: name, ip: req.ip || '',
       detail: JSON.stringify({ agent: name, on: b.on, changed: r.changed, ...(saved ? { corps: saved.corps.slice(0, 8), corpsCount: saved.corps.length } : {}) }).slice(0, 300) });
@@ -1559,7 +1563,11 @@ api.put('/tools/bm-usage/settings', adminOnly, (req, res) => {
     ignoredOutOfScope = m.ignored.filter((id) => allowed && !allowed.has(id));   // 조회 전용 법인을 같은 값으로 되돌려 보낸 것은 ‘무시’ 가 아니다
   }
   delete body.corpsScoped;
-  const next = saveBmUsageSettings(body);
+  let next;
+  try { next = saveBmUsageSettings(body); } catch (e) {   // 34회차 F4: 읽지 못한 설정 파일은 덮지 않는다
+    if (e?.code === 'settings-unreadable') return res.status(409).json({ ok: false, code: e.code, reason: e.message });
+    throw e;
+  }
   logAudit({
     user: req.user?.username, action: 'bm-usage.settings', ip: req.ip || '',
     detail: JSON.stringify({

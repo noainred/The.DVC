@@ -23,6 +23,7 @@ import { buildCorpUsage } from '../../corpusage/build.js';
 import { loadBmUsageSettings, bmUsageEnabled } from '../../bmusage/settings.js';
 import { latestUsage } from '../../bmusage/db.js';
 import { numOrNull } from '../../util/numOrNull.js';
+import { capacityOfInventory } from '../../idrac/physicalCapacity.js'; // 전체 점검 33회차 F4: 용량 판정 하나
 import { isMockMode } from '../../mock/demo/flags.js';
 
 const toolsPerm = requirePerm('tools');
@@ -72,11 +73,12 @@ export function rowsByAgentKeyOf(rows) {
 export function makeCapOf({ getInventory, registry = [], remoteServers = [] }) {
   const regByTag = new Map(registry.filter((r) => t(r?.serviceTag)).map((r) => [t(r.serviceTag).toLowerCase(), r]));
   const remByTag = new Map(remoteServers.filter((s) => t(s?.serviceTag)).map((s) => [t(s.serviceTag).toLowerCase(), s]));
+  // 전체 점검 33회차 F4(재현): 코어 · 메모리 판정은 capacityOfInventory 하나(Overview · 하드웨어 요약 · 내보내기와 같은 값) — 예전에는
+  //   CoreCount 만 봐 소켓 합으로 코어를 아는 서버가 여기서만 '코어 모름' 이었다.
   const fromInv = (inv) => {
-    if (!inv || typeof inv !== 'object') return null;
-    const cores = numOrNull(inv.cpu?.cores);
-    const mem = numOrNull(inv.memory?.totalGiB);
-    return (cores || mem) ? { cores, memGB: mem } : null;
+    const cap = capacityOfInventory(inv);
+    if (!cap) return null;
+    return (cap.cores || cap.memGiB) ? { cores: cap.cores, memGB: cap.memGiB } : null;
   };
   return (b) => {
     const tag = t(b?.serviceTag).toLowerCase();

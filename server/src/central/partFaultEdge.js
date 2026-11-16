@@ -179,7 +179,7 @@ export async function putEdgeReport(agent, body = {}) {
   _map.set(key, {
     at: Date.now(), reportedAt: Number(body.at) || null,
     version: s(body.version, 32), protocol,
-    devices, rejected, omitted: Number(body.omitted) || 0, partsOmitted, scannedDropped,
+    devices, rejected, omitted: cnt(body.omitted) ?? 0, partsOmitted, scannedDropped,
     scanned,
     // v2.744(감사 EDGE-01): 엣지가 장비군 등록부를 읽지 못했다는 표지 — 아는 장비군(scope)만, 사유 글자 200자(아는 필드만).
     registryUnreadable: sanitizeRegistryUnreadable(body.registryUnreadable),

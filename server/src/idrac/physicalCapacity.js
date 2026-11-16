@@ -17,8 +17,13 @@ export function capacityOfInventory(inv) {
   if (!inv || typeof inv !== 'object') return null;
   let cores = num(inv.cpu?.cores);
   if (cores == null && Array.isArray(inv.cpus) && inv.cpus.length) {
-    const s = inv.cpus.reduce((a, c) => a + (num(c?.cores) || 0), 0);
-    cores = s > 0 ? s : null;
+    // 전체 점검 33회차 F3(재현): 대체 합은 장착 소켓을 **전부** 읽었을 때만 — 예전에는 못 읽은 소켓을 0 으로 더하고(멤버 GET 실패로 빠진 소켓도)
+    //   2소켓 중 1소켓분을 '전체 코어' 로 셌다(부분 합을 전체처럼). 빈 소켓(Absent)은 분모에서 뺀다. ProcessorSummary.Count 가 있으면
+    //   읽은 장착 소켓 수가 그와 같아야 한다(목록에서 빠진 소켓). 아니면 코어를 모르는 서버(null)로 센다.
+    const installed = inv.cpus.filter((c) => c && typeof c === 'object' && !/^absent$/i.test(String(c.state || '')));
+    const want = num(inv.cpu?.count);
+    const allRead = installed.length > 0 && installed.every((c) => num(c.cores) != null) && (want == null || installed.length === want);
+    cores = allRead ? installed.reduce((a, c) => a + num(c.cores), 0) : null;
   }
   return {
     cores,

@@ -365,6 +365,24 @@ export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_B
         const r = await exec(linuxCommand(mounts, { sampler }), slice());
         const shaped = shapeLinux(r.stdout || '', mounts, { partitionIo, blkqMax, samplerSha });
         if (!shaped) return null;
+        // 전체 점검 34회차 F3(재현): 덧붙인 exec(로그 · 스냅샷)를 **피크 창보다 먼저** 돌린다 — 피크 창은 남은 예산에 맞춰 줄일 수 있지만(planWindow ·
+        //   사유를 남긴다) 로그 exec 는 안 timeout 합(최악 22초)보다 짧은 시한으로 시작하면 통째로 잘려 출력 0바이트 · 커서 제자리였다
+        //   (피크 10초 + 여유가 남은 예산을 먼저 써서 로그 시한이 13초까지 줄었다 — 'exec 안 timeout 합 + 여유 ≤ 그 exec 시한' 위반).
+        /*
+         * v2.929(5단계 — 집중 모니터링 경량 스냅샷): 같은 세션에서 덧붙일 **상수 명령**(호출부가 상수만 넘긴다 — snapshot/command.js FOCUS_SNAPSHOT_COMMAND).
+         *   남은 예산 안에서만 돌리고(MIN_SLICE 아래면 건너뛰고 사유) 출력은 상한으로 자른다. 실패해도 본 수집 결과는 그대로다(그 칸만 비운다).
+         */
+        const extra = {};
+        for (const x of Array.isArray(extraCommands) ? extraCommands.slice(0, 2) : []) {
+          if (!x || typeof x.cmd !== 'string' || !/^[a-z]{1,16}$/.test(String(x.name || ''))) continue;
+          // 37회차 R1: 덧붙인 exec 마다 시작 최소 시간(minMs — 로그는 안 timeout 최악 합)을 둔다. 못 미치면 시작해서 잘리는 대신 '예산' 사유로 건너뛴다.
+          if (slice() < Math.max(MIN_SLICE_MS, Number(x.minMs) || 0)) { extra[x.name] = { skipped: 'budget' }; continue; }
+          try {
+            const EXTRA_TMO = Math.min(Number(x.timeoutMs) || 15_000, slice());   // ⚠ 위치 인자(숫자) — 객체를 넘기면 NaN → 즉시 시한
+            const er = await exec(x.cmd, EXTRA_TMO);
+            extra[x.name] = { stdout: String(er.stdout || '').slice(0, Math.max(1_024, Number(x.maxBytes) || 64 * 1024)) };
+          } catch (e) { extra[x.name] = { error: String(e?.message || e).slice(0, 160) }; }
+        }
         // v2.922 피크 A 안 — 같은 세션에서 1초 창. 남은 예산이 모자라면 줄이고(planWindow) 그 사실을 남긴다. 1초 표본은 여기서 집계 뒤 버린다.
         const plan = planWindow({ wantS: peakWindowS, remainingMs: endsAt - Date.now() });
         let peak = { windowS: 0, wantS: Math.max(0, Number(peakWindowS) || 0), reduced: plan.reduced, reason: plan.reason,
@@ -382,20 +400,6 @@ export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_B
               // v2.922(반증 D12): 예산으로 줄인 것(plan)과 창을 돌렸는데 표본 구간이 모자란 것(short — 원인 미확인)을 따로 남긴다.
               plannedS: plan.windowS, reduced: plan.reduced || pk.windowS < plan.windowS, reason: plan.reason, shortBy: Math.max(0, plan.windowS - pk.windowS) };
           } catch (e) { peak = { ...peak, windowS: 0, reason: 'error', error: String(e?.message || e).slice(0, 160) }; }
-        }
-        /*
-         * v2.929(5단계 — 집중 모니터링 경량 스냅샷): 같은 세션에서 덧붙일 **상수 명령**(호출부가 상수만 넘긴다 — snapshot/command.js FOCUS_SNAPSHOT_COMMAND).
-         *   남은 예산 안에서만 돌리고(MIN_SLICE 아래면 건너뛰고 사유) 출력은 상한으로 자른다. 실패해도 본 수집 결과는 그대로다(그 칸만 비운다).
-         */
-        const extra = {};
-        for (const x of Array.isArray(extraCommands) ? extraCommands.slice(0, 2) : []) {
-          if (!x || typeof x.cmd !== 'string' || !/^[a-z]{1,16}$/.test(String(x.name || ''))) continue;
-          if (slice() < MIN_SLICE_MS) { extra[x.name] = { skipped: 'budget' }; continue; }
-          try {
-            const EXTRA_TMO = Math.min(Number(x.timeoutMs) || 15_000, slice());   // ⚠ 위치 인자(숫자) — 객체를 넘기면 NaN → 즉시 시한
-            const er = await exec(x.cmd, EXTRA_TMO);
-            extra[x.name] = { stdout: String(er.stdout || '').slice(0, Math.max(1_024, Number(x.maxBytes) || 64 * 1024)) };
-          } catch (e) { extra[x.name] = { error: String(e?.message || e).slice(0, 160) }; }
         }
         /*
          * 8b단계 프로세스 Top-N — 같은 세션의 **별도 exec**(반증 F1 · S1). 주 명령 · 피크 · 덧붙인 exec 뒤 남은 예산 안에서만(MIN_SLICE 아래면 건너뛰고 사유 'budget') ·

@@ -21,7 +21,10 @@ import { capStr } from '../util/capStr.js';
 import { sanitizePerfFields } from './bmPerfSanitize.js'; // v2.919: 리눅스 성능 항목 화이트리스트
 import { PERF_COL_NAMES, PEAK_SQL_COLS, PEAK_SRC, SRC_CM_RE } from '../bmusage/perfCols.js'; // v2.993: SRC_CM_RE 지표별 출처 두 글자 꼴
 import { clampEdgeTs } from '../util/clampEdgeTs.js'; // v2.932(점검 A1-06): 피크 시각도 수신 시각으로 자른다
-import { peakWindowSOf } from '../bmusage/settings.js'; // 점검 반복 2회차 재확인 R3: 피크 창 길이 — 설정 범위의 정수만(상한은 설정 한 곳)
+import { peakWindowSOf, MIN_INTERVAL_MS, MAX_INTERVAL_MS } from '../bmusage/settings.js'; // 점검 반복 2회차 재확인 R3: 피크 창 길이 — 설정 범위의 정수만(상한은 설정 한 곳)
+// 전체 점검 33회차 F6(재현): 엣지가 보고한 수집 주기는 엣지 설정과 같은 범위로 자른다 — 상한이 없으면 법인 사용량의 신선도 창(3 × 주기)이
+//   수백 년이 되어 멈춘 엣지의 며칠 전 행이 '지금 값' 으로 합계에 들어갔다.
+const clampInterval = (v) => { const n = numOrNull(v); return n == null ? null : Math.min(Math.max(n, MIN_INTERVAL_MS), MAX_INTERVAL_MS); };
 /**
  * v2.919 — 행의 **새** 수치 열(리눅스 성능 열 + 두 경로 읽은 시각)은 수로 좁힌다('1.5' → 1.5 · 못 읽으면 null).
  * ⚠ 기존 9개 열은 예전 계약(원시값 그대로 — audit2604a CEN2604-03 이 고정)을 바꾸지 않는다.
@@ -112,6 +115,9 @@ function objList(v, fn) {
   const kept = arr.slice(0, SNAP_LIST_MAX).filter(isObj).map(fn);
   return { list: kept, dropped: arr.length - kept.length };
 }
+// 35회차 R7(재현): 개수는 0 이상 정수 · 상한(1e9) — 예전에는 음수 · 1e300 이 그대로 들어가 한 엣지의 음수가 다른 엣지의 잘림 수를 지웠다
+//   (법인 사용량 edgeTruncated 합이 0). partFaultEdge.js cnt 와 같은 규칙.
+const cnt = (v) => { const n = numOrNull(v); return n != null && n >= 0 ? Math.min(Math.round(n), 1e9) : null; };
 function numMap(v) {
   if (!isObj(v)) return {};
   const out = {};
@@ -119,7 +125,7 @@ function numMap(v) {
     if (BAD_KEYS.has(k)) continue;
     const x = v[k];
     if (isObj(x)) out[k] = numMap(x); // counts.byReason 처럼 한 단계 중첩
-    else { const n = numOrNull(x); if (n != null) out[k] = n; }
+    else { const n = cnt(x); if (n != null) out[k] = n; }   // 이 맵은 개수(counts · skippedCounts)만 담는다
   }
   return out;
 }
@@ -155,7 +161,7 @@ export function sanitizeBmUsageSnap(snap, { receivedAt = Date.now() } = {}) {
     at: numOrNull(snap.at),
     enabled: snap.enabled === true,
     settings: st ? {
-      intervalMs: numOrNull(st.intervalMs), osSsh: st.osSsh === true, idracTelemetry: st.idracTelemetry === true,
+      intervalMs: clampInterval(st.intervalMs), osSsh: st.osSsh === true, idracTelemetry: st.idracTelemetry === true,
       idracFullTelemetry: st.idracFullTelemetry === true, includeUnassigned: st.includeUnassigned === true,
       includeVirtualization: st.includeVirtualization === true,
       corps: (Array.isArray(st.corps) ? st.corps : []).slice(0, 1_000).map((c) => strOf(c, 128)).filter(Boolean),
@@ -163,7 +169,7 @@ export function sanitizeBmUsageSnap(snap, { receivedAt = Date.now() } = {}) {
       enterpriseMode: strOf(st.enterpriseMode, 32), enterpriseActive: st.enterpriseActive === true,
     } : null,
     targets: targets.list,
-    truncated: numOrNull(snap.truncated) ?? 0,
+    truncated: cnt(snap.truncated) ?? 0,   // 35회차 R7
     rows: rows.list,
     counts: numMap(snap.counts),
     skippedCounts: numMap(snap.skippedCounts),
@@ -237,7 +243,7 @@ export function sanitizeTrendBody(b) {
     from: numOrNull(b.from), to: numOrNull(b.to), res: RES_SET.has(b.res) ? b.res : null, resReason: strOf(b.resReason, 32), stepMs: numOrNull(b.stepMs),
     points, gaps, baseline: bl,
     peakSrc: (Array.isArray(b.peakSrc) ? b.peakSrc : []).slice(0, 8).map((x) => strOf(x, 16)).filter(Boolean),
-    ...(numOrNull(b.truncated) ? { truncated: numOrNull(b.truncated) } : {}),
+    ...(cnt(b.truncated) ? { truncated: cnt(b.truncated) } : {}),   // 35회차 R7
     ...(b.truncatedRows === true ? { truncatedRows: true } : {}),
     ...(Array.isArray(b.missingPeriods) ? { missingPeriods: b.missingPeriods.slice(0, 16).filter(isObj).map((m) => ({ period: strOf(m.period, 16), reason: strOf(m.reason, 200) })) } : {}),
     ...(numOrNull(b.filesCapped) ? { filesCapped: numOrNull(b.filesCapped) } : {}),

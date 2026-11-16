@@ -816,7 +816,8 @@
                                    text: HEALTH_LABEL[row.status] || row.status })]),
         el("td", { text: row.statusCode ? String(row.statusCode)
                          : (row.port ? ":" + row.port : "-") }),
-        el("td", { text: row.latencyMs != null ? row.latencyMs + "ms" : "-" }),
+        // 31회차 F8: 응답을 받은 행(정상 · 확인 필요)만 지연을 보인다 — 차단 · 응답 없음은 재지 않았거나 '실패까지 걸린 시간' 이라 '0ms' 로 읽혔다.
+        el("td", { text: (row.status === "healthy" || row.status === "warning") && row.latencyMs != null ? row.latencyMs + "ms" : "-" }),
         el("td", { className: "muted", text: row.message || "" })
       ]));
     });
@@ -1254,8 +1255,10 @@
       ]));
     });
 
+    // 35회차 R4: 비-admin 에게는 서버가 경로 대신 true(있음)만 준다.
     $("initial-password-note").textContent = state.initialPasswordFile
-      ? "초기 비밀번호 파일이 아직 남아 있습니다: " + state.initialPasswordFile +
+      ? "초기 비밀번호 파일이 아직 남아 있습니다" +
+        (typeof state.initialPasswordFile === "string" ? ": " + state.initialPasswordFile : "(경로는 admin 계정만 볼 수 있습니다)") +
         " — 비밀번호를 변경하면 자동 삭제됩니다."
       : "초기 비밀번호 파일은 삭제된 상태입니다.";
   }
@@ -1333,9 +1336,13 @@
 
     $("backup-count").textContent = "(" + state.backups.length + "개)";
     var status = state.backupStatus || {};
-    $("backup-status").textContent = "저장 위치 " + (status.directory || "-") +
-      " · 총 " + bytes(status.totalBytes || 0) +
-      (status.latest ? " · 최근 " + fullStamp(status.latest.modifiedTs) : " · 백업 없음");
+    // 31회차 F4: 비-admin 에게는 서버가 백업 현황을 가린다(redacted) — '백업 없음' 으로 읽히지 않게 따로 말한다.
+    $("backup-status").textContent = status.redacted
+      ? "백업 현황(저장 위치 · 파일)은 admin 계정만 볼 수 있습니다."
+      : "저장 위치 " + (status.directory || "-") +
+        " · 총 " + bytes(status.totalBytes || 0) +
+        (status.latest ? " · 최근 " + fullStamp(status.latest.modifiedTs) : " · 백업 없음") +
+        (status.lastError ? " · ⚠ 자동 백업 실패: " + status.lastError.reason : "");
 
     var body = $("backup-tbody");
     clear(body);

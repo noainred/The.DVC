@@ -25,7 +25,7 @@ from http.cookies import SimpleCookie
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from .auth import AuthError
 from .catstore import COLORS as CATEGORY_COLORS, DEFAULT_CATEGORY_ID, slugify as cat_slugify
@@ -53,6 +53,10 @@ SECURITY_HEADERS = {
 
 ID_PATTERN = r"([A-Za-z0-9_-]{1,64})"
 NAME_PATTERN = r"([A-Za-z0-9._-]{1,80})"
+# 전체 점검 31회차 F1(재현): 사용자 라우트는 ID_PATTERN 을 쓰면 안 된다 — 계정 생성은 1~64자 아무 글자나 받는데(`.`·`@`·한글)
+#   관리 라우트가 [A-Za-z0-9_-] 만 받아 그런 계정은 로그인은 되지만 중지·삭제·비밀번호 변경이 전부 404 였다(퇴사자 계정을 폐기할 수 없음).
+#   퍼센트 인코딩된 한 경로 조각을 받아 핸들러가 디코드한다(_user_arg — 64자 넘으면 404).
+USER_PATTERN = r"([^/]{1,800})"
 
 
 def _route(pattern: str):
@@ -337,7 +341,8 @@ class HubHandler(BaseHTTPRequestHandler):
             # 경로는 **로그인한 사용자에게만** 준다(6차 감사 수정). 미인증 응답에 절대경로를
             # 실으면 서버 구조가 드러나고, "초기 비밀번호가 아직 살아 있다"는 사실까지 알려
             # 공격자에게 표적을 지정해 주는 셈이 된다.
-            "initialPasswordFile": (str(config.initial_password_file)
+            # 35회차 R4: 경로(데이터 폴더 절대경로)는 admin 에게만 — 그 밖의 로그인 사용자는 있음 여부만(true).
+            "initialPasswordFile": ((str(config.initial_password_file) if user.get("role") == "admin" else True)
                                     if user and self.ctx.users.initial_password_present() else None),
             "setupPending": bool(self.ctx.users.initial_password_present()) if user else None,
         })
@@ -464,7 +469,11 @@ class HubHandler(BaseHTTPRequestHandler):
         # admin 전용인데 값 읽기가 일반 세션에 열려 권한 경계가 어긋났다. 비-admin 에게는 저장
         # 여부만 알린다(있다/없다) — 값을 가린 사실을 숨기지 않으려 hasWebhookUrl 로 표시한다.
         settings = self.ctx.settings.all()
-        if user.get("role") != "admin":
+        is_admin = user.get("role") == "admin"
+        # 31회차 F4(재현): 백업 개수 · 최신 파일명 · 저장 디렉터리 절대경로와 데이터 폴더 경로는 admin 에게만 — v2.500 L2 가 백업 목록 라우트를
+        #   admin 전용으로 막은 것과 같은 값이 이 응답으로 viewer 에게 나갔다(가림은 그 값이 실리는 응답 경로 전부에).
+        backup = self.ctx.backups.status() if is_admin else {"settings": (self.ctx.backups.status() or {}).get("settings"), "redacted": True}
+        if not is_admin:
             notify = dict(settings.get("notify") or {})
             notify["hasWebhookUrl"] = bool(notify.get("webhookUrl"))
             notify["webhookUrl"] = ""
@@ -478,11 +487,12 @@ class HubHandler(BaseHTTPRequestHandler):
                 "healthIntervalMinutes": list(HEALTH_INTERVAL_CHOICES),
             },
             "users": self.ctx.users.public_list(),
-            "backup": self.ctx.backups.status(),
+            "backup": backup,
             "history": self.ctx.history.stats(),
-            "initialPasswordFile": (str(config.initial_password_file)
+            # 35회차 R4: 초기 비밀번호 파일 경로도 데이터 폴더 절대경로다 — 비-admin 에게는 있음 여부만.
+            "initialPasswordFile": ((str(config.initial_password_file) if is_admin else True)
                                     if self.ctx.users.initial_password_present() else None),
-            "dataDir": str(self.ctx.data_dir),
+            "dataDir": str(self.ctx.data_dir) if is_admin else None,
         })
 
     def api_settings_section(self, section):
@@ -544,10 +554,19 @@ class HubHandler(BaseHTTPRequestHandler):
                             "role": str(payload.get("role", "viewer"))[:16]})
         return self._json({"success": True, "users": users}, status=HTTPStatus.CREATED)
 
+    @staticmethod
+    def _user_arg(raw):
+        """사용자 라우트의 경로 조각 → 사용자명(퍼센트 디코드). 64자 넘으면 None(없는 계정 — 31회차 F1)."""
+        name = unquote(str(raw or ""), errors="strict") if raw else ""
+        return name if 0 < len(name) <= 64 else None
+
     def api_users_update(self, username):
         actor = self._require_admin()
         if not actor:
             return None
+        username = self._user_arg(username)
+        if username is None:
+            return self._error(HTTPStatus.NOT_FOUND, "사용자를 찾을 수 없습니다.")
         payload = self._body_dict()
         users = self.ctx.users.update(username, role=payload.get("role"),
                                       enabled=payload.get("enabled"))
@@ -562,6 +581,9 @@ class HubHandler(BaseHTTPRequestHandler):
         actor = self._require_session()
         if not actor:
             return None
+        username = self._user_arg(username)
+        if username is None:
+            return self._error(HTTPStatus.NOT_FOUND, "사용자를 찾을 수 없습니다.")
         # 남의 비밀번호를 바꾸려면 admin 이어야 한다(자기 것은 누구나).
         if actor["username"] != username and actor.get("role") != "admin":
             return self._error(HTTPStatus.FORBIDDEN, "본인 비밀번호만 변경할 수 있습니다.")
@@ -576,6 +598,9 @@ class HubHandler(BaseHTTPRequestHandler):
         actor = self._require_admin()
         if not actor:
             return None
+        username = self._user_arg(username)
+        if username is None:
+            return self._error(HTTPStatus.NOT_FOUND, "사용자를 찾을 수 없습니다.")
         if actor["username"] == username:
             return self._error(HTTPStatus.BAD_REQUEST, "로그인 중인 계정은 삭제할 수 없습니다.")
         users = self.ctx.users.delete(username)
@@ -1067,10 +1092,10 @@ ROUTES = [
 
     ("GET", _route(r"/api/settings/users"), HubHandler.api_users_list),
     ("POST", _route(r"/api/settings/users"), HubHandler.api_users_create),
-    ("POST", _route(r"/api/settings/users/" + ID_PATTERN + r"/password"),
+    ("POST", _route(r"/api/settings/users/" + USER_PATTERN + r"/password"),
      HubHandler.api_users_password),
-    ("PUT", _route(r"/api/settings/users/" + ID_PATTERN), HubHandler.api_users_update),
-    ("DELETE", _route(r"/api/settings/users/" + ID_PATTERN), HubHandler.api_users_delete),
+    ("PUT", _route(r"/api/settings/users/" + USER_PATTERN), HubHandler.api_users_update),
+    ("DELETE", _route(r"/api/settings/users/" + USER_PATTERN), HubHandler.api_users_delete),
 
     ("GET", _route(r"/api/settings/datacenters"), HubHandler.api_dc_list),
     ("POST", _route(r"/api/settings/datacenters/reset"), HubHandler.api_dc_reset),
