@@ -31,7 +31,7 @@ import { splitRun, parseReport, parseDisks, evidenceKey, ERROR_KINDS, SHAPE_TEXT
 import { installScript, programSha, wrapperSha, PROGRAM_PATH, WRAPPER_PATH, SUDOERS_PATH, pathsFor, DIR_ISSUE_TEXT, DIR_DENY, DIR_MAX, DIR_DEPTH_MIN, DIR_DEPTH_MAX, runCommandFor, sudoersLine } from '../../focusmon/audit/bundle.js';
 import { installSettingsView, installSettingsError, installDir, saveInstallDir } from '../../focusmon/audit/settings.js'; // v3.17.0 설치 디렉터리
 import { INSTALL_CODES, INSTALL_STEPS } from '../../focusmon/audit/install.js';
-import { CRED_STATES, PREP_FEATURE } from '../../focusmon/audit/installCred.js';
+import { CRED_STATES, PREP_FEATURE, credSnapshot } from '../../focusmon/audit/installCred.js';
 import { PREP_CODES, PREP_STEPS, PREP_FAILS, AUDIT_SKIPS, PREP_TIMEOUT_MS } from '../../focusmon/audit/prep.js'; // v3.18.0 접속 자동 준비
 import * as fstore from '../../focusmon/store.js';
 import { requireSettingsOwner } from '../admin/shared.js';
@@ -77,7 +77,8 @@ function installView(targets, cr, demo = false) {
   const st = demo ? { ...st0, by: '' } : st0; // 데모 계정에는 저장한 계정 이름을 싣지 않는다(실제 계정 이름)
   const P = st.dir === null ? null : pathsFor(st.dir);
   const cred = {};
-  for (const t of targets) cred[t.id] = A.credOfTarget(t, { corpVcs: t.agent ? [] : corpVcsOf(t, cr, assign) });
+  const snap = credSnapshot();   // 51회차 #4(실측): 대상마다 등록부 전량을 structuredClone(500 대상 · 1,000 서버 2.15초) — 한 번만
+  for (const t of targets) cred[t.id] = A.credOfTarget(t, { corpVcs: t.agent ? [] : corpVcsOf(t, cr, assign), snap });
   return {
     settings: st, defaultPaths: { program: PROGRAM_PATH, wrapper: WRAPPER_PATH }, sudoers: SUDOERS_PATH,
     paths: P ? { program: P.program, wrapper: P.wrapper, run: runCommandFor(P), sudoersLine: sudoersLine('<수집 계정>', P) } : null,
@@ -211,13 +212,14 @@ api.get('/tools/focus-mon/prep', adminOnly, fullScopeOnly, (req, res) => {
   const everyone = allTargets();
   const cr = corpResolver();
   let assign = {}; try { assign = getDatacenterAssign(); } catch { assign = {}; }
+  const snap = credSnapshot();   // 51회차 #4
   const rows = targets.map((t) => {
     const corpVcs = t.agent ? [] : corpVcsOf(t, cr, assign);
     const lp = A.readinessOf(t.id)?.lastPrep || null;
     return {
       id: t.id, name: t.name, host: t.host, port: t.port, username: t.username || '', agent: t.agent || '', demo: !!t.demo, corp: demo && !t.demo ? null : cr.of(t),
       login: loginOf(t), keyFp: nodeKeyFp(t),
-      cred: A.credOfTarget(t, { corpVcs, feature: PREP_FEATURE }), credInstall: A.credOfTarget(t, { corpVcs }),
+      cred: A.credOfTarget(t, { corpVcs, feature: PREP_FEATURE, snap }), credInstall: A.credOfTarget(t, { corpVcs, snap }),
       hostShared: everyone.some((p) => p.id !== t.id && A.sameHost(p, t) && String(p.username || '') !== String(t.username || '')),
       lastPrep: lp ? (demo ? { ...lp, by: '' } : lp) : null, job: A.jobOf(t.id),
     };

@@ -106,6 +106,7 @@ const AUDIT_BYTES_PER_SYNC = 6 * 1024 * 1024;
 /** 동기화 한 번에 싣는 결과 수 — 중앙 focusmon/audit/service.js RESULTS_PER_SYNC 와 같게(넘는 것은 다음 동기화에). */
 export const AUDIT_RESULTS_PER_SYNC = 8;
 export const AUDIT_RESULT_MAX_BYTES = 10 * 1024 * 1024;
+const AUDIT_TOO_BIG_ON_413 = 1024 * 1024;   // 51회차 #5
 export const AUDIT_HOLD_MS = 60 * 60_000;
 let auditResults = []; let auditDropped = 0; let auditSkipNext = false;
 const tooBig = (result, size) => ({ mode: result?.mode === 'check' ? 'check' : 'run', ok: false, ran: result?.ran === true, kind: 'too-big', ready: Array.isArray(result?.ready) ? result.ready.slice(0, 200) : [], out: [], outBytes: result?.outBytes || 0, truncated: true, code: result?.code ?? null, stderr: '', ms: result?.ms || 0, error: `결과가 너무 커서(${Math.round(size / 2 ** 20)}MB) 원문을 보내지 못했습니다.` });
@@ -116,7 +117,12 @@ export function queueAuditResult(runId, result, now = Date.now()) {
   if (size > AUDIT_RESULT_MAX_BYTES) { r = tooBig(result, size); size = Buffer.byteLength(JSON.stringify(r)); }
   auditResults.push({ runId: String(runId), result: r, size, at: now });
   let dropped = 0;
-  while (auditResults.length > AUDIT_RESULTS_MAX || (auditResults.length > 1 && auditResults.reduce((a, x) => a + (x.size || 0), 0) > AUDIT_QUEUE_MAX_BYTES)) { auditResults.shift(); dropped += 1; }
+  while (auditResults.length > AUDIT_RESULTS_MAX) { auditResults.shift(); dropped += 1; }
+  // 51회차 #6: 바이트 상한을 넘으면 **가장 큰 것부터** 버린다(오래된 것부터 버리면 큰 결과 하나 자리를 만드느라 작은 설치 · 준비 결과 수십 건이 사라졌다)
+  while (auditResults.length > 1 && auditResults.reduce((a, x) => a + (x.size || 0), 0) > AUDIT_QUEUE_MAX_BYTES) {
+    let big = 0; for (let i = 1; i < auditResults.length; i++) if ((auditResults[i].size || 0) > (auditResults[big].size || 0)) big = i;
+    auditResults.splice(big, 1); dropped += 1;
+  }
   if (dropped) { auditDropped += dropped; console.warn(`[focus-mon] 보낼 점검 · 설치 · 준비 결과 ${dropped}건을 버렸습니다(대기열 상한 ${AUDIT_RESULTS_MAX}건 · ${AUDIT_QUEUE_MAX_BYTES / 2 ** 20}MB) — 중앙에는 'lost' 로 남습니다`); }
 }
 const auditRunner = createAuditRunner({
@@ -133,12 +139,12 @@ export function edgeVcs() {
   try { return (store.get()?.vcenters || []).filter((v) => v && v.id).slice(0, 100).map((v) => String(v.id)); } catch { return []; }
 }
 const installRunner = createAuditRunner({
-  keys: focusKeys, concurrency: NODE_INSTALL_CONCURRENCY, exec: installExec({ edge: true, edgeVcs }),
+  keys: focusKeys, concurrency: NODE_INSTALL_CONCURRENCY, exec: installExec({ edge: true, edgeVcs }), kind: 'install',
   onResult: (job, result) => { queueAuditResult(job.runId, result); schedule(0); },
 });
 /** v3.18.0 접속 준비 줄(설치 줄과 따로 — 같은 동시 상한). 준비 뒤 연결 시험은 이 엣지의 집중 모니터링 키로 · 고르면 디스크 점검 설치까지. */
 const prepRunner = createAuditRunner({
-  keys: focusKeys, concurrency: NODE_INSTALL_CONCURRENCY, exec: prepExec({ edge: true, edgeVcs }),
+  keys: focusKeys, concurrency: NODE_INSTALL_CONCURRENCY, exec: prepExec({ edge: true, edgeVcs }), kind: 'prep',
   onResult: (job, result) => { queueAuditResult(job.runId, result); schedule(0); },
 });
 /** 이 엣지가 돌릴 줄 아는 작업 종류(매 동기화에 싣는다 — 중앙은 이번 본문의 표시만 믿는다 · v3.17.0 반증 S1). */
@@ -178,8 +184,14 @@ export function auditSendFailed(sent, status, now = Date.now()) {
   if (!sent.length) return;
   auditSkipNext = true;
   if (status === 413) {
+    // 51회차 #5(재현): 413 원인이 표본 · 프로세스여도 실린 결과 전부(이제 최대 8건)를 too-big 으로 바꿔, 성공한 설치 · 준비가 중앙에 'unreachable' 로 남았다 —
+    //   원문이 큰 결과(1MB 넘음)는 곧바로, 작은 결과는 413 을 두 번 함께 맞았을 때만 원문을 뺀다(같은 본문으로 영원히 막히지 않게 — 첫 번은 한 번 건너뛴 뒤 그대로 다시).
     const ids = new Set(sent.map((r) => r.runId));
-    auditResults = auditResults.map((r) => (ids.has(r.runId) && r.result.kind !== 'too-big' ? { ...r, result: tooBig(r.result, r.size), size: 4096 } : r));
+    auditResults = auditResults.map((r) => {
+      if (!ids.has(r.runId) || r.result.kind === 'too-big') return r;
+      const hits = (r.hits413 || 0) + 1;
+      return r.size > AUDIT_TOO_BIG_ON_413 || hits >= 2 ? { ...r, result: tooBig(r.result, r.size), size: 4096, hits413: hits } : { ...r, hits413: hits };
+    });
   }
   expireAuditResults(now);
 }

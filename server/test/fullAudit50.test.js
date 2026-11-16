@@ -52,3 +52,43 @@ test('50회차 R3: 실행 중인 집중 모니터링 작업을 업그레이드 �
   assert.match(mg, /\.\.\.focusMonWork\(\)\]/);
   assert.match(mg, /NON_SCAN_KINDS = new Set\(\[[^\]]*'focusmon'/);
 });
+
+/* ── 51회차(50회차 수정 반증) ── */
+test('51회차 #1 · #7: 중앙은 엣지가 이미 든 작업(대기 · 실행 · 보내는 중)만큼 새 배달을 줄인다(배압) · ACTIVE_MAX 는 엣지 대기열 + 결과보다 크다', async () => {
+  const S = await import('../src/focusmon/audit/service.js');
+  const W = await import('../src/agent/focusMonWorker.js');
+  assert.ok(S.EDGE_INFLIGHT_MAX < 64, '엣지 결과 대기열(64)보다 작게');
+  const src = fs.readFileSync(new URL('../src/focusmon/audit/service.js', import.meta.url), 'utf8');
+  assert.match(src, /const deliverMax = Math\.min\(20, Math\.max\(0, EDGE_INFLIGHT_MAX - /);
+  assert.match(src, /if \(jobs\.length >= deliverMax\) break;/);
+  assert.ok(Number(/const ACTIVE_MAX = (\d+)/.exec(src)[1]) >= 200 + 64, 'ACTIVE_MAX ≥ 대기열 200 + 결과 64');
+  assert.equal(W.AUDIT_RESULTS_PER_SYNC, S.RESULTS_PER_SYNC);
+});
+
+test('51회차 #8 · #9: 설치 · 준비 실행기는 이름대로 · 상한 넘김 문구에 집중 모니터링 작업', async () => {
+  const { createAuditRunner } = await import('../src/focusmon/audit/runner.js');
+  const { runningAuditWork } = await import('../src/focusmon/audit/inflight.js');
+  let release;
+  const r = createAuditRunner({ keys: {}, onResult: () => {}, kind: 'prep', exec: () => new Promise((res) => { release = res; }) });
+  r.submit({ runId: 'p1', mode: 'run', target: { id: 't9', host: '10.0.0.9' } });
+  assert.match(runningAuditWork().find((x) => x.key === 'focusmon:p1').label, /접속 준비/);
+  release({ mode: 'run', ok: true, ready: [], out: [] });
+  const mg = fs.readFileSync(new URL('../src/upgrade/manager.js', import.meta.url), 'utf8');
+  assert.match(mg, /const fm = list\.filter\(\(x\) => x\.kind === 'focusmon'\)\.length;/);
+  for (const f of ['agent/focusMonWorker.js', 'focusmon/audit/service.js']) {
+    const s = fs.readFileSync(new URL(`../src/${f}`, import.meta.url), 'utf8');
+    assert.match(s, /installExec\([^\n]*kind: 'install'/, f);
+    assert.match(s, /prepExec\([^\n]*kind: 'prep'/, f);
+  }
+});
+
+test('51회차 #6: 바이트 상한을 넘으면 가장 큰 결과부터 버린다(작은 결과를 지키려고)', async () => {
+  const W = await import('../src/agent/focusMonWorker.js');
+  const A = W._auditForTest(); A.reset();
+  for (let i = 0; i < 10; i++) W.queueAuditResult(`s-${i}`, { mode: 'run', ok: false, kind: 'key-stopped', ready: [], out: [] });
+  const big = { mode: 'run', ok: true, kind: 'done', ready: [], out: Array.from({ length: 900 }, () => 'z'.repeat(9000)) };   // ~8MB
+  for (let i = 0; i < 4; i++) W.queueAuditResult(`b-${i}`, big);
+  const ids = W._auditForTest().results.map((r) => r.runId);
+  assert.equal(ids.filter((x) => x.startsWith('s-')).length, 10, `작은 결과 10건은 남는다: ${ids}`);
+  A.reset();
+});

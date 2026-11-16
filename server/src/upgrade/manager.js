@@ -110,8 +110,10 @@ function cloneOutlookText(blocking) {
   const d = list.filter((x) => x.kind === 'bulk-deploy').length;
   const b = list.filter((x) => x.kind === 'bareos').length;
   const vm = list.filter((x) => x.kind === 'veeam').length;
+  const fm = list.filter((x) => x.kind === 'focusmon').length;
   const q = queuedEntries(list).length;
   return joinOutlook(
+    fm ? `집중 모니터링 디스크 점검 · 자동 설치 · 접속 준비 ${fm}건은 결과를 받지 못합니다 — 그 서버의 디스크 점검 · 준비 화면에서 다시 실행하세요` : '',   // 51회차 #9
     b ? `Bareos 작업 ${b}건은 결과를 받지 못합니다 — 백업 대상·Director(자동 설정은 그 서버의 설정 파일)를 확인하세요` : '',
     vm ? `Veeam 작업 ${vm}건은 결과를 받지 못합니다 — Veeam 콘솔에서 실행 · 삭제 여부를 확인하세요` : '',
     n ? `VM 복제 ${n}개는 중간에 끊깁니다 — 원본 VM 에 임시 스냅샷(portal-clone-*)이 남았는지 VM 복제 화면에서 확인하세요` : '',

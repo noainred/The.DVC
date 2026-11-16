@@ -16,7 +16,8 @@ export function runningAuditWork() {
     try { list = r.list() || []; } catch { list = []; }
     for (const j of list) {
       if (j?.state !== 'running') continue;
-      const what = j.mode === 'install' ? '자동 설치' : j.mode === 'prep' ? '접속 준비' : '디스크 점검';
+      // 51회차 #8: 실행기 종류(kind)로 — submit 이 mode 를 'run' 으로 접어 설치 · 준비가 '디스크 점검' 으로 보였다
+      const what = j.kind === 'install' ? '자동 설치' : j.kind === 'prep' ? '접속 준비' : '디스크 점검';
       out.push({ kind: 'focusmon', key: `focusmon:${j.runId}`, label: `집중 모니터링 ${what}(대상 ${j.id})`.slice(0, 120), since: Number.isFinite(j.startedAt) ? j.startedAt : null, resumable: false });
     }
   }
