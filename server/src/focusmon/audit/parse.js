@@ -122,7 +122,7 @@ const safeOwn = (o, { file }) => !!o && o.uid === 0 && (o.mode & 0o022) === 0 &&
  * 준비 판정(판정 코어 — 화면 · 실행 문 · 묶어 보기가 이 값 하나를 쓴다).
  * @returns {{state:string, reason:string}}
  */
-export function readyState(r, { programPath, wrapperPath, programSha, wrapperSha }) {
+export function readyState(r, { programPath, wrapperPath, programSha, wrapperSha, dirs = null }) {
   if (!r || !r.begun || !r.ended) return { state: 'bad-output', reason: '준비 확인 출력을 끝까지 받지 못했습니다(셸이 sh 계열인지 확인하세요).' };
   if (!r.py) return { state: 'nopy', reason: 'python3 가 없습니다 — 점검 프로그램은 Python 3.6 이상이 필요합니다.' };
   if (!r.pyVer || r.pyVer[0] < MIN_PY[0] || (r.pyVer[0] === MIN_PY[0] && r.pyVer[1] < MIN_PY[1])) {
@@ -132,9 +132,10 @@ export function readyState(r, { programPath, wrapperPath, programSha, wrapperSha
   if (!p?.present || !w?.present) return { state: 'notinstalled', reason: '점검 프로그램이 설치돼 있지 않습니다 — 설치 파일을 root 로 실행해 주세요.' };
   if (p.readable === false || w.readable === false) return { state: 'unreadable', reason: '설치된 파일을 수집 계정이 읽지 못해 판본을 확인할 수 없습니다 — 설치 파일로 다시 설치해 주세요(0644 · 0755).' };
   if (p.sha !== programSha || w.sha !== wrapperSha) return { state: 'version', reason: '설치된 파일이 포탈 판본과 다릅니다 — 무엇이 실행될지 알 수 없어 실행하지 않습니다. 설치 파일로 다시 설치해 주세요.' };
-  const dirs = ['/usr/local/libexec/dvc', '/usr/local/libexec', '/usr/local/sbin', '/usr/local'];
-  if (!safeOwn(p.own, { file: true }) || !safeOwn(w.own, { file: true }) || dirs.some((d) => r.dirs[d] !== undefined && r.dirs[d] !== null && !safeOwn(r.dirs[d], { file: false }))
-    || !r.dirs['/usr/local/libexec/dvc'] || !r.dirs['/usr/local/sbin']) {
+  // v3.17.0: 경로 폴더는 설치 디렉터리에 따라(bundle.dirsToCheck — all: 있으면 root 소유 · 쓰기 금지 · need: 있어야 함). 주지 않으면 기본 경로(예전 그대로).
+  const D = dirs || { all: ['/usr/local/libexec/dvc', '/usr/local/libexec', '/usr/local/sbin', '/usr/local'], need: ['/usr/local/libexec/dvc', '/usr/local/sbin'] };
+  if (!safeOwn(p.own, { file: true }) || !safeOwn(w.own, { file: true }) || D.all.some((d) => r.dirs[d] !== undefined && r.dirs[d] !== null && !safeOwn(r.dirs[d], { file: false }))
+    || D.need.some((d) => !r.dirs[d])) {
     return { state: 'owner', reason: '설치 파일이나 경로 폴더가 root 소유가 아니거나 다른 계정이 쓸 수 있습니다 — root 로 도는 파일을 바꿀 수 있게 되므로 실행하지 않습니다.' };
   }
   if (r.sudo !== true) return { state: 'nosudo', reason: '수집 계정이 점검 실행 파일을 비밀번호 없이 root 로 실행할 권한(sudoers 한 줄)이 없습니다.' };

@@ -12,6 +12,7 @@ import { ErrorBox, Loading } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { Seg, Badge, copyText } from './FocusMonBulk.jsx';
 import { usePoll } from './focusMonPoll.js';
+import { InstallPanel } from './FocusMonAuditInstall.jsx'; // v3.17.0 자동 설치 · 설치 디렉터리
 import {
   DASH, AUDIT_VIEWS, AUDIT_VIEW_KEYS, READY_TEXT, OUTCOME_TEXT, PHASE_NOTE, countText, whenText, durText, nodeText, corpText, smodelText, rowStatus, canRunRow, lastCounts,
   rateText, chipCounts, chipFilter, scopeFilter, scopeText, notReadyText, VERDICT_TONE, KIND_TONE, installSteps, notDoneText, diskCountText,
@@ -293,16 +294,17 @@ export function AuditTab({ setMsg }) {
         <span className="fm-dim fm-pad">숫자는 프로그램이 찾은 <b>기록 줄 수</b>이지 장애 횟수가 아닙니다(같은 일이 여러 로그에 겹쳐 남습니다). ‘—’ 는 점검하지 않았거나 끝까지 돌지 않은 것이고 0 과 다릅니다. 0 도 ‘과거에 문제가 없었다’ 가 아니라 ‘남아 있는 자료에서 찾지 못했다’ 입니다. 디스크는 식별자(시리얼 · WWN)로 하나씩 세고, 식별자가 없는 기록은 디스크 모델 집계에 넣지 않습니다. 점검은 단추를 누를 때만 돕니다(주기 실행 없음 · 같은 서버는 {d.limits.runGapMin}분에 한 번).</span>
       </div>
       {selRow ? <Result row={selRow} now={now} labels={labels} setMsg={setMsg} /> : <div className="fm-card fm-empty">표의 서버 줄을 누르면 그 서버의 점검 결과가 여기에 나옵니다.</div>}
+      <InstallPanel d={d} rows={rows} now={now} setMsg={setMsg} reload={q.reload} />
       <div className="fm-grid2">
         <div className="fm-card fm-pad fm-col">
-          <div className="fm-row fm-between"><h3 className="fm-h3">대상 서버 준비 — 서버마다 한 번 · root 로</h3><div className="fm-row"><span className="fm-badge off">판본 {d.version.program || DASH}</span><button type="button" className="fm-btn sm" onClick={() => downloadFile('/tools/focus-mon/audit/install.sh').catch((e) => setMsg?.({ tone: 'bad', text: e?.body?.reason || e?.message || '설치 파일을 받지 못했습니다.' }))}>설치 파일 받기</button><button type="button" className="fm-btn sm" aria-expanded={showInstall} onClick={() => setShowInstall(!showInstall)}>{showInstall ? '명령 접기' : '명령 보기'}</button></div></div>
+          <div className="fm-row fm-between"><h3 className="fm-h3">손으로 설치 — 서버마다 한 번 · root 로</h3><div className="fm-row"><span className="fm-badge off">판본 {d.version.program || DASH}</span><button type="button" className="fm-btn sm" onClick={() => downloadFile('/tools/focus-mon/audit/install.sh').catch((e) => setMsg?.({ tone: 'bad', text: e?.body?.reason || e?.message || '설치 파일을 받지 못했습니다.' }))}>설치 파일 받기</button><button type="button" className="fm-btn sm" aria-expanded={showInstall} onClick={() => setShowInstall(!showInstall)}>{showInstall ? '명령 접기' : '명령 보기'}</button></div></div>
           <ol className="fm-list">
             <li>‘설치 파일 받기’ 로 받은 파일을 대상 서버에 올립니다(점검 프로그램 원본 · 실행 파일 · sudoers 한 줄이 한 파일에 들어 있습니다).</li>
             <li>root 로 <b>sh dvc-disk-audit-install.sh 수집계정</b> — 두 파일을 root 소유 고정 경로에 두고, 수집 계정이 <b>그 실행 파일 하나만 · 인자 없이</b> root 로 실행하도록 sudoers 에 한 줄을 넣습니다(visudo 검사 뒤).</li>
             <li>포탈에서 ‘준비 상태 다시 확인’ — 판본 · 소유자 · sudo 규칙을 일반 계정으로 확인합니다.</li>
           </ol>
           {showInstall ? <div className="fm-row"><pre className="fm-code fm-grow">{installSteps(d.paths, d.version)}</pre><button type="button" className="fm-btn sm" onClick={() => copyText(installSteps(d.paths, d.version))}>복사</button></div> : null}
-          <span className="fm-dim">포탈은 이 고정 명령만 부르고, root 로 돌 코드를 보내지 않습니다. 실행 전마다 두 파일의 sha256 · 소유자 · 쓰기 권한을 일반 계정으로 읽어, 포탈 판본과 다르거나 root 소유가 아니면 실행하지 않습니다. 프로그램은 Python 3.6 이상이 필요합니다(RHEL 7 은 python3 를 따로 설치해야 합니다).</span>
+          <span className="fm-dim">점검 때 포탈은 이 고정 명령만 부릅니다. root 로 돌 코드를 보내는 것은 위 ‘자동 설치’ 를 누를 때 한 번(설치 계정으로 이 설치 파일을)뿐입니다. 실행 전마다 두 파일의 sha256 · 소유자 · 쓰기 권한을 일반 계정으로 읽어, 포탈 판본과 다르거나 root 소유가 아니면 실행하지 않습니다. 프로그램은 Python 3.6 이상이 필요합니다(RHEL 7 은 python3 를 따로 설치해야 합니다).</span>
         </div>
         <div className="fm-card fm-pad fm-col">
           <h3 className="fm-h3">실행 규칙 · 밝혀 둘 것</h3>

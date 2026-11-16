@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>집중 모니터링 — 접속 자동 준비(수집 계정 · 공개키)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.num{font-variant-numeric:tabular-nums}
+.dim{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0;box-sizing:border-box}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.btn{height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#141b2d;color:#e6edf6;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap;box-sizing:border-box}
+.btn.sm{height:28px;padding:0 10px;font-size:12px}
+.btn.pri{background:#2563eb;border-color:#2563eb;color:#fff}
+.btn.off{opacity:.45;cursor:not-allowed}
+.h3{margin:0;font-size:14.5px;font-weight:600}
+.badge{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:11px;font-size:12px;font-weight:600;white-space:nowrap;background:rgba(139,155,180,.16);color:#c3cede}
+.badge.new{background:rgba(125,211,252,.12);color:#7dd3fc}
+.badge.ok{background:rgba(34,197,94,.14);color:#86efac}
+.badge.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.badge.bad{background:rgba(239,68,68,.16);color:#fca5a5}
+.badge.live{background:rgba(59,130,246,.18);color:#93c5fd}
+.chip{height:30px;padding:0 12px;border-radius:15px;border:1px solid #243049;background:#0f1626;color:#c3cede;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.chip.on{background:#1e3a8a;border-color:#2563eb;color:#fff}
+.pc{padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.cap{font-size:12px;color:#8b9bb4;overflow-wrap:anywhere}
+.kp{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr));gap:12px}
+.k{padding:12px 16px;display:flex;flex-direction:column;gap:2px}
+.k b{font-size:24px;line-height:1.2}
+.g2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(560px,100%),1fr));gap:14px;align-items:start}
+.tw{overflow-x:auto}
+.sg{display:grid;grid-template-columns:26px 150px 104px 84px minmax(170px,1fr) minmax(190px,1.15fr) minmax(190px,1.15fr) minmax(170px,1fr) 92px;column-gap:12px;align-items:center;padding:6px 16px;min-width:1330px;box-sizing:border-box}
+.cg{display:grid;grid-template-columns:150px 92px minmax(230px,1.4fr) minmax(170px,1fr) 84px minmax(190px,1.1fr);column-gap:12px;align-items:center;padding:6px 16px;min-width:1000px;box-sizing:border-box}
+.xg{display:grid;grid-template-columns:150px minmax(220px,1fr);column-gap:12px;align-items:center;padding:6px 16px;min-width:420px;box-sizing:border-box}
+.pg{display:grid;grid-template-columns:150px 92px 300px minmax(260px,1fr);column-gap:12px;align-items:center;padding:8px 16px;min-width:880px;box-sizing:border-box}
+.fg{display:grid;grid-template-columns:minmax(170px,.8fr) minmax(220px,1.2fr) minmax(220px,1.2fr);column-gap:12px;align-items:start;padding:8px 16px;min-width:680px;box-sizing:border-box}
+.kg{display:grid;grid-template-columns:minmax(150px,1fr) minmax(130px,.8fr) minmax(300px,2fr);column-gap:12px;align-items:center;padding:8px 16px;min-width:640px;box-sizing:border-box}
+.og{display:grid;grid-template-columns:170px minmax(0,1fr);column-gap:12px;row-gap:10px;align-items:center;font-size:12.5px}
+.og>span:nth-child(odd){color:#8b9bb4}
+.seg{display:inline-flex;flex-wrap:wrap;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{height:30px;padding:0 12px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap}
+.seg button:first-child{border-left:0}
+.seg button.on{background:#1e3a8a;color:#fff}
+.th{min-height:34px;font-size:12px;color:#8b9bb4;background:#0f1626;border-top:1px solid #1f2a40;border-bottom:1px solid #1f2a40}
+.tr{min-height:46px;border-bottom:1px solid #1a2236;font-size:12.5px}
+.tr.sel{background:rgba(59,130,246,.10)}
+.chk{width:16px;height:16px;border-radius:4px;border:1.5px solid #5b6b86;display:inline-flex;align-items:center;justify-content:center;font-size:11px;cursor:pointer;background:transparent;color:#fff;padding:0}
+.chk.on{background:#2563eb;border-color:#2563eb}
+.chk.no{opacity:.35;cursor:not-allowed}
+.code{font-family:"JetBrains Mono",monospace;font-size:12px;background:#0b111d;border:1px solid #1f2a40;border-radius:8px;padding:10px 12px;line-height:1.6;white-space:pre;overflow-x:auto;color:#c3cede}
+.ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:#c3cede}
+.st{display:grid;grid-template-columns:24px minmax(0,1fr);column-gap:8px;row-gap:8px;font-size:12.5px}
+.st i{display:block;width:20px;height:20px;border-radius:10px;background:#1e3a8a;color:#fff;font-style:normal;font-size:11px;font-weight:700;line-height:20px;text-align:center}
+.cf{display:grid;grid-template-columns:28px minmax(0,1fr);column-gap:10px;row-gap:8px;font-size:12.5px}
+.cf>b{color:#7dd3fc}
+.inp{height:34px;padding:0 10px;border-radius:8px;border:1px solid #2f3d5c;background:#0b111d;color:#e6edf6;font:inherit;font-size:13px;box-sizing:border-box;min-width:0}
+.fld{display:flex;flex-direction:column;gap:4px;min-width:0}
+.fld label{font-size:12px;color:#8b9bb4}
+.two{display:flex;flex-direction:column;min-width:0}
+.two small{color:#8b9bb4;overflow-wrap:anywhere}
+.dots{display:flex;align-items:center;gap:4px;flex-wrap:nowrap}
+.dots u{display:block;width:30px;height:8px;border-radius:4px;background:#1b2a48;text-decoration:none;box-sizing:border-box}
+.dots u.d{background:#22c55e}
+.dots u.n{background:#3b82f6}
+.dots u.f{background:#ef4444}
+.dots u.w{background:#f59e0b}
+.dots u.s{background:transparent;border:1px dashed #3a4a6b}
+.pv{display:grid;grid-template-columns:132px minmax(0,1fr);column-gap:10px;row-gap:6px;font-size:12.5px;align-items:baseline}
+.pv>span:nth-child(odd){color:#8b9bb4}
+.pv .mono{overflow-wrap:anywhere}
+.note{font-size:12.5px;color:#c3cede;background:#0f1626;border:1px solid #1f2a40;border-radius:8px;padding:8px 12px;overflow-wrap:anywhere}
+.note.key{border-color:rgba(125,211,252,.4)}
+.vs{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(240px,100%),1fr));gap:10px}
+.vs>div{background:#0f1626;border:1px solid #1f2a40;border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.vs b{font-size:12.5px}
+</style>
+</helmet>
+<div style="max-width:1440px;margin:0 auto;box-sizing:border-box;padding:24px 32px 32px;display:flex;flex-direction:column;gap:14px">
+  <div style="display:flex;flex-direction:column;gap:2px">
+    <div class="dim" style="font-size:12px">특수 기능 › 서버 집중 모니터링 › 대상 · 키 — 수집 계정과 공개키를 포탈이 대상 서버에 넣습니다(지금은 서버마다 root 로 들어가 명령 9줄을 손으로 실행)</div>
+    <div class="dim" style="font-size:12px">가상의 서버 · 계정 · 키입니다. 눌러 볼 수 있는 것: 키의 ‘접속 준비’ · ‘설치’ 기능 켜기 · 서버 고르기 · 고른 서버 준비 → 확인 창(디스크 점검 함께 · 주소 제한 · 비밀번호 만료) → 진행 → 결과.</div>
+  </div>
+
+  <div class="kp">
+    <sc-for list="{{ kpis }}" as="k" hint-placeholder-count="4"><div class="card k"><span class="cap">{{ k.label }}</span><b class="num" style="{{ k.color }}">{{ k.v }}</b><span class="cap">{{ k.sub }}</span></div></sc-for>
+  </div>
+
+  <div class="g2">
+    <div class="card pc">
+      <div class="row" style="justify-content:space-between"><h3 class="h3">무엇이 바뀌나 — 1단계 ‘공개키 넣기’ 를 포탈이</h3><span class="badge new">새</span></div>
+      <div class="vs">
+        <div><b>지금</b><span class="cap">서버마다 root 로 들어가 계정을 만들고, 맡은 노드의 공개키를 authorized_keys 에 붙여 넣습니다(대상 · 키 탭의 복사용 명령 9줄). 서버가 많으면 이 일이 등록보다 오래 걸립니다.</span></div>
+        <div><b style="color:#7dd3fc">자동 준비</b><span class="cap">서버를 등록한 뒤 고르고 누르면, 그 서버를 맡은 노드(중앙 또는 엣지)가 <b style="color:#e6edf6">이미 root 로 들어갈 수 있는 키</b>로 접속해 같은 일을 하고 연결 시험까지 합니다.</span></div>
+      </div>
+      <div class="st">
+        <i>1</i><span>서버를 <b>IP 로 등록</b>합니다(지금과 같음 — 포트 · 수집 계정 · 담당 노드 · CSV 대량 등록).</span>
+        <i>2</i><span><b>접속 자동 준비</b> — 키 로그인이 안 되는 서버를 골라 누릅니다. 수집 계정이 없으면 만들고, 그 노드의 공개키 한 줄을 넣습니다. <span class="badge new">새</span></span>
+        <i>3</i><span>포탈이 이어서 <b>연결 시험</b>을 합니다(수집 계정 · 집중 모니터링 키 — 지금 있는 시험).</span>
+        <i>4</i><span>고르면 <b>디스크 점검 프로그램</b>도 이어서 설치합니다(v3.17.0 의 자동 설치와 같은 절차). <span class="badge new">고르면</span></span>
+        <i>5</i><span>모니터링 시작은 지금처럼 사람이 누릅니다.</span>
+      </div>
+      <div class="note key"><b style="color:#e6edf6">엣지에서 지금 root 로 SSH 가 된다면</b> — 그 접속에 쓰는 개인키(엣지 OS 의 root 키)를 <b style="color:#e6edf6">그 엣지 포탈의 SSH 공용 접속에 한 번</b> 등록하고 오른쪽의 ‘접속 준비’ 기능을 켜면 됩니다. 포탈은 서비스 계정으로 돌아 OS 의 ~root/.ssh 를 직접 읽지 못합니다. 엣지마다 한 번이고, 서버마다 하는 일은 없습니다.</div>
+      <span class="cap">손으로 넣는 길(복사용 명령)은 그대로 둡니다 — 자동 준비가 안 되는 서버는 지금처럼 하면 됩니다.</span>
+    </div>
+
+    <div class="card" style="padding:14px 0 10px;display:flex;flex-direction:column;gap:10px">
+      <div class="row" style="justify-content:space-between;padding:0 16px"><h3 class="h3">준비에 쓰는 root 접속 — SSH 공용 접속에 등록한 키</h3><span class="badge new">새 기능 하나</span></div>
+      <div class="cap" style="padding:0 16px">설정 › 보안 › SSH 공용 접속의 키마다 ‘쓸 수 있는 기능’ 에 <b style="color:#e6edf6">집중 모니터링 접속 준비(root)</b> 가 생깁니다. 이 기능을 <b style="color:#e6edf6">직접 켠 키만</b> 씁니다 — v3.17.0 의 ‘디스크 점검 프로그램 설치(root)’ 와 따로 켭니다. 아래에서 켜고 꺼 보면 서버 표가 바뀝니다.</div>
+      <div class="tw">
+        <div class="kg th"><span>키 · 계정</span><span>폴더</span><span>쓸 수 있는 기능</span></div>
+        <sc-for list="{{ keys }}" as="k" hint-placeholder-count="4">
+          <div class="kg tr">
+            <span class="two"><span class="mono" style="font-weight:600">{{ k.name }}</span><small>{{ k.acct }}</small></span>
+            <span class="two"><span>{{ k.folder }}</span><small>{{ k.where }}</small></span>
+            <span class="row" style="gap:6px"><sc-for list="{{ k.feats }}" as="f" hint-placeholder-count="3"><button type="button" class="{{ f.cls }}" onClick="{{ f.pick }}">{{ f.label }}</button></sc-for><small class="dim">{{ k.note }}</small></span>
+          </div>
+        </sc-for>
+      </div>
+      <ul class="ul" style="padding:0 16px 0 34px">
+        <li>준비에 쓸 계정은 서버마다 v3.17.0 과 같은 순서로 찾습니다 — ① 같은 주소로 등록된 SSH 공용 접속 서버의 접속 자격 ② 없으면 그 법인의 공통 계정 가운데 ‘접속 준비’ 를 켠 키가 하나뿐일 때 그 계정. 둘 이상이면 표에서 고릅니다.</li>
+        <li>그 계정은 대상 서버에서 <b>root 이거나 비밀번호 없이 sudo</b> 할 수 있어야 합니다. 저장된 비밀번호를 sudo 에 넣지 않습니다.</li>
+        <li>엣지가 맡은 서버는 <b>그 엣지 포탈에 등록한 키</b>를 씁니다. 중앙은 키를 보내지 않고, 엣지가 알려 준 계정 이름과 ‘할 수 있음 · 없음(까닭)’ 만 봅니다.</li>
+        <li>‘디스크 점검 함께’ 는 그 키가 <b>두 기능을 모두</b> 켰을 때만 됩니다. 하나만 켠 키는 접속 준비까지만 하고 설치는 건너뜁니다(까닭 표시).</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card" style="padding:12px 0 10px;display:flex;flex-direction:column;gap:10px">
+    <div class="row" style="justify-content:space-between;padding:0 16px">
+      <div class="row"><h3 class="h3">서버별 접속 준비</h3><span class="badge new">대상 · 키 탭 · 서버 표 위</span>
+        <sc-for list="{{ chips }}" as="c" hint-placeholder-count="4"><button type="button" class="{{ c.cls }}" onClick="{{ c.pick }}">{{ c.label }}</button></sc-for></div>
+      <div class="row"><span style="font-weight:600">{{ pickedText }}</span><button type="button" class="btn" onClick="{{ pickAll }}">준비할 수 있는 서버 모두 고르기</button><button type="button" class="{{ goCls }}" onClick="{{ goConfirm }}">고른 서버 접속 준비</button></div>
+    </div>
+    <div class="tw">
+      <div class="sg th"><span></span><span>서버</span><span>법인 · 담당 노드</span><span>수집 계정</span><span>키 로그인(지금)</span><span>준비에 쓸 계정(root)</span><span>자동 준비</span><span>디스크 점검 함께</span><span></span></div>
+      <sc-for list="{{ rows }}" as="r" hint-placeholder-count="10">
+        <div class="{{ r.cls }}">
+          <span><button type="button" class="{{ r.chk }}" onClick="{{ r.pick }}" aria-label="고르기">{{ r.mark }}</button></span>
+          <span class="two"><span class="mono" style="font-weight:600">{{ r.name }}</span><small>{{ r.addr }}</small></span>
+          <span class="two"><span>{{ r.corp }}</span><small>{{ r.node }}</small></span>
+          <span class="mono">{{ r.acct }}</span>
+          <span class="two" style="gap:2px"><span><span class="{{ r.stCls }}">{{ r.st }}</span></span><small>{{ r.stSub }}</small></span>
+          <span class="two"><span>{{ r.cred }}</span><small>{{ r.credSub }}</small></span>
+          <span class="two" style="gap:2px"><span><span class="{{ r.autoCls }}">{{ r.auto }}</span></span><small>{{ r.autoSub }}</small></span>
+          <span class="two" style="gap:2px"><span><span class="{{ r.audCls }}">{{ r.aud }}</span></span><small>{{ r.audSub }}</small></span>
+          <span style="text-align:right"><button type="button" class="{{ r.btnCls }}" onClick="{{ r.one }}">{{ r.btn }}</button></span>
+        </div>
+      </sc-for>
+    </div>
+    <div class="cap" style="padding:0 16px">‘수집 계정’ 은 평소 집중 모니터링이 접속하는 일반 계정(등록할 때 적은 이름)이고, ‘준비에 쓸 계정’ 은 이번 한 번 root 로 계정 · 공개키를 넣는 데 쓰는 계정입니다. 키 로그인이 이미 되는 서버는 할 일이 없어 고를 수 없습니다.</div>
+  </div>
+
+  <div class="card" style="padding:12px 0 12px;display:flex;flex-direction:column;gap:10px">
+    <div class="row" style="justify-content:space-between;padding:0 16px">
+      <div class="row"><h3 class="h3">{{ sceneTitle }}</h3><span class="badge new">새</span></div>
+      <div class="row"><span class="cap">시안 장면</span><div class="seg"><sc-for list="{{ sceneBtns }}" as="b" hint-placeholder-count="4"><button type="button" class="{{ b.cls }}" onClick="{{ b.pick }}">{{ b.label }}</button></sc-for></div></div>
+    </div>
+
+    <sc-if value="{{ isPick }}" hint-placeholder-val="{{ false }}">
+      <div class="cap" style="padding:0 16px">위 표에서 서버를 고르고 ‘고른 서버 접속 준비’ 를 누르면 확인 창이 이 자리에 열립니다. 줄 끝의 ‘준비’ 는 그 서버 하나만 고른 확인 창을 엽니다.</div>
+    </sc-if>
+
+    <sc-if value="{{ isConfirm }}" hint-placeholder-val="{{ true }}">
+      <div class="row" style="padding:0 16px"><span class="badge live">{{ doText }}</span><sc-if value="{{ hasSkip }}" hint-placeholder-val="{{ true }}"><span class="badge warn">{{ skipText }}</span></sc-if><span class="cap">{{ nodeText }}</span></div>
+      <div class="tw">
+        <div class="cg th"><span>서버</span><span>담당 노드</span><span>하는 일</span><span>준비에 쓸 계정(root)</span><span>수집 계정</span><span>디스크 점검</span></div>
+        <sc-for list="{{ doRows }}" as="d" hint-placeholder-count="5">
+          <div class="cg tr"><span class="mono" style="font-weight:600">{{ d.name }}</span><span>{{ d.node }}</span><span class="two"><span>{{ d.act }}</span><small>{{ d.actSub }}</small></span><span>{{ d.cred }}</span><span class="mono">{{ d.acct }}</span><span class="two"><span>{{ d.aud }}</span><small>{{ d.audSub }}</small></span></div>
+        </sc-for>
+      </div>
+      <sc-if value="{{ hasSkip }}" hint-placeholder-val="{{ true }}">
+        <div class="tw">
+          <div class="xg th"><span>건너뛰는 서버</span><span>까닭</span></div>
+          <sc-for list="{{ skipRows }}" as="s" hint-placeholder-count="2"><div class="xg tr"><span class="mono">{{ s.name }}</span><span>{{ s.why }}</span></div></sc-for>
+        </div>
+      </sc-if>
+      <div style="padding:0 16px;display:flex;flex-direction:column;gap:12px">
+        <div class="og">
+          <span>디스크 점검 프로그램</span><span class="row"><button type="button" class="{{ audChk }}" onClick="{{ toggleAudit }}" aria-label="디스크 점검 프로그램도 설치">{{ audMark }}</button><span>디스크 점검 프로그램도 설치</span><span class="cap">{{ audNote }}</span></span>
+          <span>접속 주소 제한</span><span class="row"><div class="seg"><sc-for list="{{ fromBtns }}" as="b" hint-placeholder-count="2"><button type="button" class="{{ b.cls }}" onClick="{{ b.pick }}">{{ b.label }}</button></sc-for></div><span class="cap">{{ fromNote }}</span></span>
+          <span>만든 계정의 비밀번호 만료</span><span class="row"><div class="seg"><sc-for list="{{ ageBtns }}" as="b" hint-placeholder-count="2"><button type="button" class="{{ b.cls }}" onClick="{{ b.pick }}">{{ b.label }}</button></sc-for></div><span class="cap">{{ ageNote }}</span></span>
+        </div>
+        <div class="pv">
+          <span>넣는 줄(한 줄)</span><span class="mono">{{ keyLine }}</span>
+          <span>서버에 생기는 것</span><span>{{ madeText }}</span>
+          <span>건드리지 않는 것</span><span>sshd 설정 · 방화벽 · 패키지 · 다른 계정 · 그 계정에 이미 있던 authorized_keys 줄. 이미 있는 계정의 셸 · 그룹 · 비밀번호도 바꾸지 않습니다.</span>
+        </div>
+        <div class="row" style="align-items:flex-end">
+          <div class="fld"><label for="f-otp">내 OTP 코드(6자리)</label><input id="f-otp" class="inp mono" style="width:140px" type="text" inputmode="numeric" maxlength="6" value="{{ otp }}" onChange="{{ onOtp }}" autocomplete="off"></div>
+          <button type="button" class="{{ startCls }}" onClick="{{ start }}">준비 시작</button><button type="button" class="btn" onClick="{{ cancel }}">취소</button>
+          <span class="cap">{{ startNote }}</span>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isRun }}" hint-placeholder-val="{{ false }}">
+      <div class="row" style="padding:0 16px"><span class="badge live">{{ runText }}</span><span class="cap">노드마다 한 번에 {{ limNode }}대 · 서버당 시한 {{ limMin }}분 · 화면을 닫아도 계속됩니다(맡은 노드가 돕니다)</span><button type="button" class="btn sm" onClick="{{ toDone }}">끝난 모습 보기</button></div>
+      <div class="tw">
+        <div class="pg th"><span>서버</span><span>담당 노드</span><span>단계 — root 계정 · 접속 · 권한 · sshd 확인 · 수집 계정 · 공개키 · 키 로그인 확인 · 디스크 점검</span><span>지금</span></div>
+        <sc-for list="{{ runRows }}" as="p" hint-placeholder-count="5">
+          <div class="pg tr"><span class="mono" style="font-weight:600">{{ p.name }}</span><span>{{ p.node }}</span><span class="dots" role="img" aria-label="{{ p.aria }}"><sc-for list="{{ p.dots }}" as="x" hint-placeholder-count="8"><u class="{{ x.c }}"></u></sc-for></span><span>{{ p.now }}</span></div>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isDone }}" hint-placeholder-val="{{ false }}">
+      <div class="row" style="padding:0 16px"><span class="badge ok">{{ okText }}</span><sc-if value="{{ hasWarn }}" hint-placeholder-val="{{ true }}"><span class="badge warn">{{ warnText }}</span></sc-if><sc-if value="{{ hasFail }}" hint-placeholder-val="{{ true }}"><span class="badge bad">{{ failText }}</span></sc-if><span class="cap">실패한 서버는 자동으로 다시 시도하지 않습니다 — 까닭을 고친 뒤 그 서버만 다시 누릅니다.</span></div>
+      <div class="tw">
+        <div class="pg th"><span>서버</span><span>담당 노드</span><span>단계</span><span>결과</span></div>
+        <sc-for list="{{ doneRows }}" as="p" hint-placeholder-count="5">
+          <div class="pg tr"><span class="mono" style="font-weight:600">{{ p.name }}</span><span>{{ p.node }}</span><span class="dots" role="img" aria-label="{{ p.aria }}"><sc-for list="{{ p.dots }}" as="x" hint-placeholder-count="8"><u class="{{ x.c }}"></u></sc-for></span><span class="two" style="gap:2px"><span><span class="{{ p.cls }}">{{ p.res }}</span></span><small>{{ p.sub }}</small></span></div>
+        </sc-for>
+      </div>
+      <div class="cap" style="padding:0 16px">단계 막대의 점선 칸은 하지 않은 단계입니다(디스크 점검을 고르지 않았거나, 그 키에 ‘설치’ 가 꺼져 있거나, 앞 단계에서 멈춤).</div>
+    </sc-if>
+  </div>
+
+  <div class="g2">
+    <div class="card pc">
+      <h3 class="h3">대상 서버에서 일어나는 일 — 준비할 때 한 번</h3>
+      <div class="st">
+        <i>1</i><span>맡은 노드가 <b>준비에 쓸 계정의 키</b>로 접속하고, root 인지 · 비밀번호 없는 sudo 가 되는지 먼저 봅니다. 안 되면 여기서 끝냅니다(아무것도 올리지 않습니다).</span>
+        <i>2</i><span>준비 파일 하나를 그 계정 홈에 올려(0600 · 이름에 난수) root 로 한 번 실행합니다. 그 노드의 공개키는 <b>파일 안에</b> 들어 있고, 명령에 들어가는 값은 등록부의 수집 계정 이름 하나입니다.</span>
+        <i>3</i><span>준비 파일이 <b>sshd 의 실제 설정을 읽어</b>(sshd -T) 그 계정이 공개키로 들어올 수 있는지 봅니다 — 공개키 로그인 꺼짐 · AllowUsers 에 없음 · authorized_keys 위치가 기본이 아님이면 <b>아무것도 바꾸지 않고</b> 멈춥니다.</span>
+        <i>4</i><span>수집 계정이 없으면 만듭니다(일반 계정 · 홈 · 비밀번호 잠금). 있으면 그대로 둡니다 — uid 0 이거나 셸이 nologin 이거나 홈이 없으면 멈춥니다.</span>
+        <i>5</i><span>공개키 한 줄을 넣습니다. <b>쓰기는 그 계정의 권한으로</b> 합니다(root 가 남의 홈에 직접 쓰지 않습니다 — 심링크로 다른 파일을 덮게 만드는 길을 막습니다). 같은 키가 이미 있으면 넣지 않습니다.</span>
+        <i>6</i><span>올린 파일을 지우고, <b>수집 계정 · 집중 모니터링 키로 연결 시험</b>을 합니다. 고른 경우에만 이어서 디스크 점검 프로그램을 설치합니다.</span>
+      </div>
+      <div class="code">{{ cmdText }}</div>
+      <span class="cap">서버가 돌려준 글자는 명령에 넣지 않습니다. 화면 · 감사에는 정해 둔 까닭 이름과 단계 · 종료값만 남기고, 원격 출력 원문은 싣지 않습니다.</span>
+    </div>
+
+    <div class="card" style="padding:14px 0 10px;display:flex;flex-direction:column;gap:10px">
+      <h3 class="h3" style="padding:0 16px">자동 준비가 안 될 때 — 화면이 말하는 까닭</h3>
+      <div class="tw">
+        <div class="fg th" style="align-items:center"><span>까닭</span><span>뜻</span><span>고칠 곳</span></div>
+        <sc-for list="{{ fails }}" as="f" hint-placeholder-count="12"><div class="fg tr"><span style="font-weight:600">{{ f.a }}</span><span>{{ f.b }}</span><span class="dim">{{ f.c }}</span></div></sc-for>
+      </div>
+      <span class="cap" style="padding:0 16px">어느 것이든 지금처럼 복사용 명령으로 손으로 넣을 수 있습니다.</span>
+    </div>
+  </div>
+
+  <div class="card pc">
+    <h3 class="h3">정직하게 밝힐 것</h3>
+    <ul class="ul">
+      <li>지금까지 집중 모니터링은 ‘접속은 키만 · 공개키는 사람이 넣는다 · 포탈은 대상 서버에 계정을 만들지 않는다’ 였습니다. 자동 준비는 그 규칙의 예외입니다 — <b>준비할 때 한 번</b>, 준비에 쓸 계정으로만, 포탈이 만든 준비 파일만 root 로 돕니다. v3.17.0 의 ‘설치할 때 한 번’ 에 이어 root 로 도는 경우가 둘이 됩니다.</li>
+      <li><b>엣지 OS 의 root 키를 포탈이 알아서 쓰지는 못합니다.</b> 엣지에서 사람이 root 로 SSH 가 되는 것과 포탈이 그 키를 쓸 수 있는 것은 다릅니다 — 엣지마다 한 번, 그 엣지 포탈의 SSH 공용 접속에 키를 등록해야 합니다(소유자 등급 + OTP). 그 키가 root 접속용이라는 점은 등록하는 분이 판단합니다.</li>
+      <li>sshd 설정은 <b>읽기만</b> 합니다. AllowUsers · AllowGroups · DenyUsers 로 막혀 있거나 공개키 로그인이 꺼져 있으면 포탈이 고치지 않고 멈춥니다(서버 담당자의 정책이므로).</li>
+      <li>새로 만든 계정은 비밀번호가 잠긴 상태입니다. <b>서버의 비밀번호 만료 정책(예: 90일)이 그 계정에도 걸리면 몇 달 뒤 키 로그인이 거부될 수 있습니다</b>(추정 — PAM 계정 검사. 이 환경에서 재현해 보지 않았습니다). 그래서 포탈이 만든 계정에는 만료를 끄는 것을 기본값으로 제안합니다(확인 창에서 바꿀 수 있음 · 이미 있던 계정은 건드리지 않음).</li>
+      <li>sshd 가 PAM 을 쓰지 않도록(UsePAM no) 설정된 서버에서는 비밀번호가 잠긴 계정의 키 로그인이 거부될 수 있습니다(추정). 준비 직후의 연결 시험이 이것을 바로 드러냅니다 — ‘넣었지만 키 로그인 거부’.</li>
+      <li>‘접속 주소 제한(from=)’ 을 켜면 그 노드의 주소가 바뀔 때(주소 변경 · 다른 경로) 키 로그인이 한꺼번에 거부됩니다. 지금 손으로 넣는 안내와 같게 <b>끄는 것을 기본값</b>으로 두었습니다.</li>
+      <li>계정을 지우거나 넣은 키를 거두는 단추는 넣지 않았습니다(지우는 명령 안내만). 넣은 줄 끝의 주석(vmware-portal-focusmon@노드)으로 찾을 수 있습니다.</li>
+      <li>같은 주소에 수집 계정이 다른 항목이 둘이면 접속 준비는 계정마다 됩니다(계정별 authorized_keys 라 서로 덮지 않음). 다만 ‘디스크 점검 함께’ 는 v3.17.0 규칙대로 그런 서버에서는 하지 않습니다(sudoers 파일이 서버에 하나).</li>
+      <li>준비에 쓸 계정의 키 로그인이 거부되면 자동으로 다시 시도하지 않고, 같은 키가 연속 3대 거부되면 10분 동안 그 키를 쓰지 않습니다(v3.17.0 과 같음 — root 계정 잠금 방지).</li>
+      <li>엣지 서버는 그 엣지 포탈이 이 판 이상이어야 합니다. 실제 RHEL 7 서버에서는 돌려 보지 못했습니다 — 구현 때 이 개발 환경에서 sshd 를 띄워 계정 만들기 · 키 넣기 · 실제 키 로그인까지 돌려 보고, 확인한 것과 못 한 것을 나눠 적겠습니다.</li>
+      <li>시안의 서버 · 계정 · 키 이름 · 결과는 가상이고, 동시 대수 · 시한은 제안입니다(재지 않았습니다).</li>
+    </ul>
+  </div>
+
+  <div class="card pc">
+    <h3 class="h3">컨펌 받을 것(답이 없으면 괄호 값으로 구현)</h3>
+    <div class="cf">
+      <b>①</b><span>root 접속에 쓰는 키 — (SSH 공용 접속에서 새 기능 ‘집중 모니터링 접속 준비(root)’ 를 직접 켠 키만 · 기능 목록이 없는 예전 키는 쓰지 않는다 · v3.17.0 의 ‘설치’ 기능과 따로)</span>
+      <b>②</b><span>준비에 쓸 계정을 찾는 순서 — (v3.17.0 과 같다: 같은 주소로 등록된 SSH 공용 접속 서버의 자격 → 없으면 그 법인 공통 계정 가운데 켠 키가 하나뿐일 때 · 둘 이상이면 고르기)</span>
+      <b>③</b><span>수집 계정이 없을 때 — (만든다: 일반 계정 · 홈 디렉터리 · 비밀번호 잠금 · 그룹 추가 없음 · sudo 권한 없음)</span>
+      <b>④</b><span>수집 계정이 있을 때 — (계정은 건드리지 않고 공개키만 넣는다 · uid 0(root) · nologin 셸 · 홈 없음이면 멈춘다)</span>
+      <b>⑤</b><span>넣는 줄 — (restrict + 그 노드의 공개키 한 줄 · 같은 키가 있으면 넣지 않는다 · 다른 줄은 건드리지 않는다 · 쓰기는 그 계정 권한으로)</span>
+      <b>⑥</b><span>접속 주소 제한 from= — (기본은 넣지 않는다 · 확인 창에서 켜면 대상 서버가 본 그 노드의 주소로 제한)</span>
+      <b>⑦</b><span>포탈이 만든 계정의 비밀번호 만료 — (만료 없음으로 둔다 · 확인 창에서 ‘서버 기본값’ 으로 바꿀 수 있다 · 이미 있던 계정은 건드리지 않는다)</span>
+      <b>⑧</b><span>sshd 설정 — (읽기만 한다 · 막혀 있으면 아무것도 바꾸지 않고 멈춘다)</span>
+      <b>⑨</b><span>준비 뒤 — (수집 계정으로 연결 시험까지 · 모니터링 시작은 사람이 누를 때만)</span>
+      <b>⑩</b><span>디스크 점검 함께 — (확인 창에서 고르면 · 키 로그인 확인이 된 서버에만 · 그 키가 ‘설치’ 도 켰을 때만 · v3.17.0 의 절차 · 설치 디렉터리 그대로)</span>
+      <b>⑪</b><span>누가 누를 수 있나 — (관리자 · 설정 소유자 · 전체 범위 + 내 OTP 코드 · 데모 계정 차단 · 감사 기록 — v3.17.0 설치와 같은 문)</span>
+      <b>⑫</b><span>한 번에 — (노드마다 4대 · 서버당 시한 3분(디스크 점검을 함께 하면 그 설치 시한이 더해짐) · 자동 재시도 없음)</span>
+      <b>⑬</b><span>화면 자리 — (대상 · 키 탭의 서버 표 위 · 손으로 넣는 복사용 명령은 그대로)</span>
+      <b>⑭</b><span>계정 지우기 · 키 거두기 단추 — (넣지 않는다 · 지우는 명령 안내만)</span>
+      <b>⑮</b><span>엣지 OS 의 root 키를 포탈로 가져오는 콘솔 도구 — (넣지 않는다 · 엣지 포탈의 SSH 공용 접속 화면에서 한 번 등록)</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":3600}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { usPrep: false, plAudit: false, picked: ['kr-db-03', 'kr-was-02', 'pl-db-01', 'pl-db-02', 'pl-was-03', 'us-db-01'], filter: 'all', scene: 'confirm', otp: '', from: false, age: 'never', withAudit: true }; }
+  renderVals() {
+    const S = this.state;
+    const LIM = { node: 4, min: 3 };
+    // 키: [id, 이름, 계정, 폴더, 어디, 접속 준비, 설치]
+    const KEYS = [
+      { id: 'kr', name: 'kr-admin-2026', acct: 'dvcadmin · 비밀번호 없는 sudo', folder: '한국 법인 공통', where: '중앙 포탈', prep: true, audit: true, fixed: true },
+      { id: 'pl', name: 'pl-root-2026', acct: 'root', folder: '폴란드 법인 공통', where: '엣지 PL 포탈', prep: true, audit: S.plAudit },
+      { id: 'us', name: 'us-common', acct: 'us-ops · 비밀번호 없는 sudo', folder: '미국 법인 공통', where: '엣지 NJ 포탈', prep: S.usPrep, audit: true },
+      { id: 'old', name: 'kr-legacy-2024', acct: 'root', folder: '폴더 없음', where: '중앙 포탈', legacy: true },
+    ];
+    const keyOf = (id) => KEYS.find((k) => k.id === id) || null;
+    // [이름, 주소, 노드, 법인, 수집 계정, 키 로그인, 자격, 준비 계정, 키 id, 출처]
+    // 키 로그인: ok | auth | never | down | hostkey     자격: key(키 기능으로 판정) | noentry | edgeold | ambig
+    const SV = [
+      ['kr-db-01', '10.10.20.11', '중앙', '한국', 'dvcmon', 'ok', 'key', 'dvcadmin', 'kr', 'srv'],
+      ['kr-db-03', '10.10.20.13', '중앙', '한국', 'dvcmon', 'auth', 'key', 'dvcadmin', 'kr', 'srv'],
+      ['kr-was-02', '10.10.30.22', '중앙', '한국', 'dvcmon', 'never', 'key', 'dvcadmin', 'kr', 'corp'],
+      ['kr-bak-01', '10.10.40.5', '중앙', '', 'dvcmon', 'auth', 'noentry', '', '', ''],
+      ['pl-db-01', '10.48.30.11', '엣지 PL', '폴란드', 'dvcmon', 'never', 'key', 'root', 'pl', 'edge'],
+      ['pl-db-02', '10.48.30.12', '엣지 PL', '폴란드', 'dvcmon', 'never', 'key', 'root', 'pl', 'edge'],
+      ['pl-was-01', '10.48.20.11', '엣지 PL', '폴란드', 'dvcmon', 'ok', 'key', 'root', 'pl', 'edge'],
+      ['pl-was-03', '10.48.20.13', '엣지 PL', '폴란드', 'svcmon', 'auth', 'key', 'root', 'pl', 'edge'],
+      ['us-db-01', '10.60.30.11', '엣지 NJ', '미국', 'dvcmon', 'auth', 'key', 'us-ops', 'us', 'edge'],
+      ['us-db-02', '10.60.30.12', '엣지 NJ', '미국', 'dvcmon', 'never', 'key', 'us-ops', 'us', 'edge'],
+      ['us-web-01', '10.60.10.21', '엣지 NJ', '미국', 'dvcmon', 'hostkey', 'key', 'us-ops', 'us', 'edge'],
+      ['jp-db-01', '10.36.30.11', '엣지 JP', '일본', 'root', 'never', 'key', 'root', 'pl', 'edge'],
+      ['de-db-01', '10.72.30.11', '엣지 DE', '독일', 'dvcmon', 'never', 'edgeold', '', '', ''],
+      ['vn-was-01', '10.84.20.11', '엣지 VN', '베트남', 'dvcmon', 'auth', 'ambig', '', '', ''],
+    ];
+    const LOGIN = {
+      ok: ['badge ok', '연결됨', '마지막 시험 3분 전 · RHEL 7.8'],
+      auth: ['badge bad', '키 로그인 거부', '그 계정에 이 노드의 공개키가 없는 것으로 보임'],
+      never: ['badge', '시험한 적 없음', '등록만 한 서버'],
+      down: ['badge warn', '접속 못 함', '포트 응답 없음'],
+      hostkey: ['badge warn', '호스트키 승인 필요', '설정 › 보안 › 장비 신뢰'],
+    };
+    const SRC = { srv: '같은 주소의 서버 자격', corp: '법인 공통 계정', edge: '엣지가 알려 줌' };
+    const info = SV.map((v) => {
+      const [name, addr, node, corp, acct, login, credK, credAcct, keyId, src] = v;
+      const key = keyOf(keyId);
+      const settled = login === 'ok';
+      let why = '';
+      if (settled) why = '';
+      else if (acct === 'root') why = '수집 계정이 root';
+      else if (credK === 'noentry') why = '준비에 쓸 계정이 없음';
+      else if (credK === 'edgeold') why = '엣지 포탈이 옛 판';
+      else if (credK === 'ambig') why = '공통 계정이 둘 — 고르지 않음';
+      else if (!key || !key.prep) why = '키에 ‘접속 준비’ 가 꺼져 있음';
+      else if (login === 'hostkey') why = '호스트키 승인 먼저';
+      const can = !settled && !why;
+      const audOk = can && !!key && key.audit;
+      return { name, addr, node, corp, acct, login, credK, credAcct, key, src, settled, can, why, audOk };
+    });
+    const byName = new Map(info.map((x) => [x.name, x]));
+    const picked = S.picked.filter((n) => byName.has(n) && !byName.get(n).settled);
+    const setPicked = (list) => this.setState({ picked: list, scene: S.scene === 'pick' ? 'pick' : 'confirm' });
+    const FIX = {
+      '수집 계정이 root': '등록을 일반 계정으로 고치세요 — root 에는 넣지 않습니다',
+      '준비에 쓸 계정이 없음': 'SSH 공용 접속에 그 서버(같은 주소)나 법인 공통 계정을 등록',
+      '엣지 포탈이 옛 판': '엣지를 이 판 이상으로 올리면 알려 옵니다',
+      '공통 계정이 둘 — 고르지 않음': '이 칸에서 쓸 계정을 고르면 됩니다',
+      '키에 ‘접속 준비’ 가 꺼져 있음': '위 키 표에서 켜 보세요',
+      '호스트키 승인 먼저': '승인 전에는 어떤 키로도 접속하지 않습니다',
+    };
+    const filt = { all: () => true, can: (x) => x.can, no: (x) => !x.settled && !x.can, ok: (x) => x.settled };
+    const rows = info.filter(filt[S.filter] || filt.all).map((x) => {
+      const L = LOGIN[x.login];
+      const on = picked.includes(x.name);
+      const cred = x.credK === 'key' ? x.credAcct : x.credK === 'ambig' ? '고르기 — pl-root · pl-ops' : '—';
+      const credSub = x.credK === 'key' ? `키 ${x.key.name} · ${SRC[x.src]}` : x.credK === 'noentry' ? 'SSH 공용 접속에 이 서버 · 법인의 계정이 없음' : x.credK === 'edgeold' ? '엣지가 알려 오지 않음' : '켠 키를 가진 공통 계정이 둘';
+      return {
+        name: x.name, addr: x.addr, corp: x.corp || '법인 없음', node: x.node, acct: x.acct,
+        cls: `sg tr${on ? ' sel' : ''}`, chk: `chk${on ? ' on' : ''}${x.settled ? ' no' : ''}`, mark: on ? '✓' : '',
+        pick: () => { if (x.settled) return; setPicked(on ? picked.filter((n) => n !== x.name) : [...picked, x.name]); },
+        stCls: L[0], st: L[1], stSub: L[2],
+        cred, credSub,
+        autoCls: x.settled ? 'badge' : x.can ? 'badge ok' : 'badge warn',
+        auto: x.settled ? '할 일 없음' : x.can ? '할 수 있음' : `못 함 — ${x.why}`,
+        autoSub: x.settled ? '키 로그인이 됩니다' : x.can ? (x.login === 'auth' ? '공개키를 넣습니다(계정이 없으면 만듭니다)' : '계정이 없으면 만들고 공개키를 넣습니다') : FIX[x.why] || '',
+        audCls: !x.can ? 'dim' : x.audOk ? 'badge new' : 'badge',
+        aud: !x.can ? '—' : x.audOk ? '함께 설치할 수 있음' : '접속 준비만',
+        audSub: x.settled ? '디스크 점검 탭에서 설치' : !x.can ? '' : x.audOk ? '그 키가 ‘설치’ 도 켬' : '그 키에 ‘설치’ 가 꺼져 있음',
+        btnCls: `btn sm${x.can ? '' : ' off'}`, btn: x.settled ? '준비됨' : '준비',
+        one: () => { if (x.can) this.setState({ picked: [x.name], scene: 'confirm', otp: '' }); },
+      };
+    });
+    const nCan = info.filter((x) => x.can).length; const nOk = info.filter((x) => x.settled).length; const nNo = info.length - nCan - nOk;
+    const whyCount = {}; info.filter((x) => !x.settled && !x.can).forEach((x) => { whyCount[x.why] = (whyCount[x.why] || 0) + 1; });
+    const kpis = [
+      { label: '키 로그인이 되는 서버', v: `${nOk} / ${info.length}대`, color: 'color:#86efac', sub: '할 일 없음 — 이미 수집할 수 있습니다' },
+      { label: '자동 준비할 수 있는 서버', v: `${nCan}대`, color: 'color:#7dd3fc', sub: '고르고 누르면 계정 · 공개키를 넣고 연결 시험까지' },
+      { label: '자동 준비를 못 하는 서버', v: `${nNo}대`, color: nNo ? 'color:#fcd34d' : 'color:#e6edf6', sub: Object.entries(whyCount).map(([k, n]) => `${k.replace(/ — .*/, '')} ${n}`).join(' · ') || '없음' },
+      { label: '디스크 점검까지 한 번에 되는 서버', v: `${info.filter((x) => x.audOk).length}대`, color: 'color:#e6edf6', sub: '그 키가 ‘접속 준비’ 와 ‘설치’ 를 모두 켬' },
+    ];
+    const chips = [['all', `전체 ${info.length}`], ['can', `할 수 있음 ${nCan}`], ['no', `못 함 ${nNo}`], ['ok', `키 로그인 됨 ${nOk}`]].map(([k, label]) => ({ label, cls: `chip${S.filter === k ? ' on' : ''}`, pick: () => this.setState({ filter: k }) }));
+    const keys = KEYS.map((k) => ({
+      name: k.name, acct: k.acct, folder: k.folder, where: k.where,
+      note: k.legacy ? '기능 목록이 없는 예전 키 — 접속 준비 · 설치에 쓰지 않습니다' : k.fixed ? '' : '눌러서 켜고 꺼 보세요',
+      feats: k.legacy ? [{ label: '목록 없음(모든 수집 기능에 쓰임)', cls: 'chip', pick: () => {} }] : [
+        { label: `접속 준비(root) ${k.prep ? '켬' : '끔'}`, cls: `chip${k.prep ? ' on' : ''}`, pick: () => { if (k.id === 'us') this.setState({ usPrep: !S.usPrep }); } },
+        { label: `디스크 점검 프로그램 설치(root) ${k.audit ? '켬' : '끔'}`, cls: `chip${k.audit ? ' on' : ''}`, pick: () => { if (k.id === 'pl') this.setState({ plAudit: !S.plAudit }); } },
+      ],
+    }));
+    const pk = picked.map((n) => byName.get(n));
+    const doList = pk.filter((x) => x.can); const skipList = pk.filter((x) => !x.can);
+    const audState = (x) => (!S.withAudit ? ['하지 않음', '고르지 않음'] : x.audOk ? ['이어서 설치', '키 로그인 확인 뒤 · 설치 디렉터리는 지금 설정'] : ['건너뜀', '그 키에 ‘설치’ 가 꺼져 있음']);
+    const doRows = doList.map((x) => ({
+      name: x.name, node: x.node, acct: x.acct, cred: `${x.credAcct} · ${x.key.name}`,
+      act: x.login === 'auth' ? '공개키 넣기 → 연결 시험' : '계정 확인 → 없으면 만들기 → 공개키 넣기 → 연결 시험',
+      actSub: x.login === 'auth' ? '계정이 없으면 만듭니다' : '계정이 있는지는 접속해 봐야 압니다',
+      aud: audState(x)[0], audSub: audState(x)[1],
+    }));
+    const skipRows = skipList.map((x) => ({ name: x.name, why: `${x.why} — ${FIX[x.why] || ''}` }));
+    const nodes = [...new Set(doList.map((x) => x.node))];
+    const otpOk = /^[0-9]{6}$/.test(S.otp);
+    const canStart = doList.length > 0 && otpOk;
+    const PUB = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFq…Qm7 vmware-portal-focusmon@<노드>';
+    const keyLine = S.from ? `restrict,from="<대상 서버가 본 그 노드의 주소>" ${PUB}` : `restrict ${PUB}`;
+    const nAud = S.withAudit ? doList.filter((x) => x.audOk).length : 0;
+    const madeText = `수집 계정이 없던 서버에는 계정 하나(홈 · 비밀번호 잠금${S.age === 'never' ? ' · 만료 없음' : ''}) · 그 계정의 ~/.ssh(700)와 authorized_keys(600)에 위의 한 줄.${nAud ? ` 디스크 점검을 함께 하는 ${nAud}대에는 프로그램 파일 둘 · sudoers 한 줄(v3.17.0 과 같음).` : ''}`;
+    // 결과(시안 값) — 서버마다 정해 둔 모습
+    const STEPS = 8;
+    const dots = (done, kind, audit) => Array.from({ length: STEPS }, (_, i) => {
+      if (i === STEPS - 1) return { c: audit === 'done' ? 'd' : audit === 'warn' ? 'w' : audit === 'now' ? 'n' : audit === 'wait' ? '' : 's' };
+      if (i < done) return { c: 'd' };
+      if (i === done && kind) return { c: kind };
+      return { c: kind === 'f' || kind === 'w' ? 's' : '' };
+    });
+    const audPart = (x, okTxt) => (!S.withAudit ? '' : x.audOk ? ` · 디스크 점검: ${okTxt}` : ' · 디스크 점검: 건너뜀(그 키에 ‘설치’ 가 꺼져 있음)');
+    const RES = {
+      'kr-db-03': (x) => ({ d: 7, k: '', a: S.withAudit && x.audOk ? 'done' : 'skip', cls: 'badge ok', res: '준비됨 — 키 로그인 확인', sub: `계정은 있었음 · 공개키 넣음${audPart(x, '설치함 — 준비됨')}` }),
+      'kr-was-02': (x) => ({ d: 7, k: '', a: S.withAudit && x.audOk ? 'done' : 'skip', cls: 'badge ok', res: '준비됨 — 키 로그인 확인', sub: `계정 만듦(dvcmon) · 공개키 넣음${audPart(x, '설치함 — 준비됨')}` }),
+      'pl-db-01': (x) => ({ d: 7, k: '', a: S.withAudit && x.audOk ? 'warn' : 'skip', cls: 'badge ok', res: '준비됨 — 키 로그인 확인', sub: `계정 만듦(dvcmon) · 공개키 넣음${audPart(x, '설치함 — python3 없음(점검은 아직 못 돕니다)')}` }),
+      'pl-db-02': () => ({ d: 3, k: 'f', a: 'skip', cls: 'badge bad', res: '못 함 — sshd 가 이 계정의 로그인을 막음', sub: 'AllowUsers 에 dvcmon 이 없습니다 · 아무것도 바꾸지 않았습니다' }),
+      'pl-was-03': () => ({ d: 6, k: 'w', a: 'skip', cls: 'badge warn', res: '공개키는 넣었지만 키 로그인 거부', sub: '계정은 있었음 · 홈 디렉터리 권한 · SELinux · PAM 을 확인하세요 — 자동으로 다시 시도하지 않습니다' }),
+      'us-db-01': () => ({ d: 2, k: 'f', a: 'skip', cls: 'badge bad', res: '못 함 — sudo 가 비밀번호를 물음', sub: 'us-ops 에 비밀번호 없는 sudo 가 없습니다 · 아무것도 올리지 않았습니다' }),
+      'us-db-02': (x) => ({ d: 7, k: '', a: S.withAudit && x.audOk ? 'done' : 'skip', cls: 'badge ok', res: '준비됨 — 키 로그인 확인', sub: `계정 만듦(dvcmon) · 공개키 넣음${audPart(x, '설치함 — 준비됨')}` }),
+    };
+    const resOf = (x) => (RES[x.name] ? RES[x.name](x) : { d: 7, k: '', a: S.withAudit && x.audOk ? 'done' : 'skip', cls: 'badge ok', res: '준비됨 — 키 로그인 확인', sub: `공개키 넣음${audPart(x, '설치함 — 준비됨')}` });
+    const STEP_NAMES = ['root 계정', '접속', '권한', 'sshd 확인', '수집 계정', '공개키', '키 로그인 확인', '디스크 점검'];
+    const doneRows = doList.map((x) => { const r = resOf(x); return { name: x.name, node: x.node, dots: dots(r.d, r.k, r.a), aria: `${STEPS}단계 가운데 ${r.d}단계까지`, cls: r.cls, res: r.res, sub: r.sub }; });
+    const RUN = [[7, 'wait', '디스크 점검 프로그램 설치 차례'], [5, null, '공개키 넣는 중'], [3, null, 'sshd 설정 확인 중'], [1, null, '접속 중'], [0, null, '차례를 기다림']];
+    const runRows = doList.map((x, i) => { const [d, a, now] = RUN[Math.min(i, RUN.length - 1)]; const withA = S.withAudit && x.audOk; const dd = d >= 7 && !withA ? 6 : d; return { name: x.name, node: x.node, dots: dots(dd, dd < 7 ? 'n' : '', withA ? (d >= 7 ? 'now' : 'wait') : 'skip'), aria: `${STEPS}단계 가운데 ${STEP_NAMES[Math.min(dd, STEPS - 1)]} 단계`, now: d >= 7 && !withA ? '키 로그인 확인 중' : now }; });
+    const nFail = doneRows.filter((r) => r.cls === 'badge bad').length; const nWarn = doneRows.filter((r) => r.cls === 'badge warn').length;
+    const sceneBtns = [['pick', '고르기 전'], ['confirm', '확인 창'], ['run', '진행 중'], ['done', '끝난 뒤']].map(([k, label]) => ({ label, cls: S.scene === k ? 'on' : '', pick: () => this.setState({ scene: k }) }));
+    const cmdText = [
+      '# 맡은 노드 → 대상 서버 · 준비에 쓸 계정의 키로 한 번',
+      'sudo -n true                       # root 가 아니면: 비밀번호 없는 sudo 인가',
+      'sudo -n /bin/sh ~/.dvc-fm-prep.<난수>.sh dvcmon',
+      '  sshd -T -C user=dvcmon …         # 공개키 로그인 · AllowUsers · authorized_keys 위치(읽기만)',
+      '  getent passwd dvcmon             # 없으면 useradd -m(비밀번호 잠금) · 있으면 그대로',
+      '  runuser -u dvcmon -- …           # ~/.ssh(700) · authorized_keys(600)에 한 줄 — 그 계정 권한으로',
+      '  restorecon -R ~dvcmon/.ssh       # SELinux 문맥',
+      'rm -f ~/.dvc-fm-prep.<난수>.sh',
+      '# 이어서 수집 계정 · 집중 모니터링 키로 연결 시험(지금 있는 시험)',
+    ].join('\n');
+    const fails = [
+      { a: '준비에 쓸 계정이 없음', b: 'SSH 공용 접속에 그 서버(같은 주소)도, 그 법인의 공통 계정도 없음', c: 'SSH 공용 접속에 등록(엣지 서버는 그 엣지 포탈에서)' },
+      { a: '키에 ‘접속 준비’ 가 꺼져 있음', b: '계정은 있지만 그 키에 이 기능을 직접 켜지 않음', c: '그 키의 ‘쓸 수 있는 기능’ 에서 켬(소유자 등급 + OTP)' },
+      { a: '공통 계정이 여럿', b: '켠 키를 가진 그 법인 공통 계정이 둘 이상', c: '표의 ‘준비에 쓸 계정’ 칸에서 고름' },
+      { a: '엣지 포탈이 옛 판', b: '엣지가 준비 계정 상태를 알려 오지 않음', c: '엣지를 이 판 이상으로 업그레이드' },
+      { a: 'sudo 가 비밀번호 · tty 를 요구', b: '준비에 쓸 계정이 root 가 아니고 NOPASSWD 가 아니거나 requiretty', c: 'sudoers 를 고치거나 root 키를 등록 · 손으로 넣기' },
+      { a: '준비 계정의 키 로그인 거부', b: '그 서버가 등록한 root(또는 sudo) 키를 받지 않음', c: '그 계정의 authorized_keys 확인 — 자동으로 다시 시도하지 않음' },
+      { a: '호스트키 승인 필요', b: '장비 신뢰 정책이 그 서버의 호스트키를 아직 승인하지 않음', c: '설정 › 보안 › 장비 신뢰에서 승인' },
+      { a: '수집 계정이 root', b: '등록한 수집 계정이 root 이거나 그 서버에서 uid 0', c: '등록을 일반 계정으로 고침 — root 에는 넣지 않음' },
+      { a: 'sshd 가 이 계정의 로그인을 막음', b: '공개키 로그인 꺼짐 · AllowUsers / AllowGroups 에 없음 · DenyUsers 에 있음', c: '서버 담당자가 sshd 설정을 고침(포탈은 바꾸지 않음)' },
+      { a: 'authorized_keys 위치가 기본이 아님', b: 'AuthorizedKeysFile 이 홈의 .ssh/authorized_keys 가 아님', c: '그 위치에 손으로 넣기' },
+      { a: '계정은 있는데 쓸 수 없음', b: '홈 디렉터리가 없음 · 셸이 nologin', c: '계정을 고치거나 다른 수집 계정으로 등록' },
+      { a: '넣었지만 키 로그인 거부', b: '공개키는 들어갔는데 연결 시험이 거부됨', c: '홈 · .ssh 권한(StrictModes) · SELinux · PAM(만료 · access.conf) 확인 뒤 ‘다시 연결’' },
+    ];
+    return {
+      kpis, chips, keys, rows, fails, cmdText,
+      pickedText: `${picked.length}대 고름`, pickAll: () => setPicked(info.filter((x) => x.can).map((x) => x.name)),
+      goCls: `btn pri${picked.length ? '' : ' off'}`, goConfirm: () => { if (picked.length) this.setState({ scene: 'confirm', otp: '' }); },
+      sceneBtns, sceneTitle: { pick: '고른 서버 접속 준비', confirm: '확인 — 고른 서버에 계정 · 공개키를 넣습니다', run: '진행 중', done: '결과' }[S.scene],
+      isPick: S.scene === 'pick', isConfirm: S.scene === 'confirm', isRun: S.scene === 'run', isDone: S.scene === 'done',
+      doRows, skipRows, hasSkip: skipRows.length > 0, doText: `접속 준비 ${doRows.length}대`, skipText: `건너뜀 ${skipRows.length}대`,
+      nodeText: nodes.length ? `맡은 노드 ${nodes.join(' · ')} 가 각자 자기 키로 합니다` : '준비할 수 있는 서버가 없습니다',
+      audChk: `chk${S.withAudit ? ' on' : ''}`, audMark: S.withAudit ? '✓' : '', toggleAudit: () => this.setState({ withAudit: !S.withAudit }),
+      audNote: S.withAudit ? `${nAud}대는 이어서 설치 · ${doList.length - nAud}대는 건너뜀(그 키에 ‘설치’ 가 꺼져 있음)` : '접속 준비만 합니다 — 설치는 나중에 디스크 점검 탭에서 할 수 있습니다',
+      fromBtns: [[false, '제한 없음'], [true, '이 노드 주소로 제한']].map(([v, label]) => ({ label, cls: S.from === v ? 'on' : '', pick: () => this.setState({ from: v }) })),
+      fromNote: S.from ? '대상 서버가 본 그 노드의 주소에서만 이 키를 받습니다 — 노드 주소가 바뀌면 키 로그인이 거부됩니다' : '지금 손으로 넣는 안내와 같은 줄입니다',
+      ageBtns: [['never', '만료 없음'], ['default', '서버 기본값']].map(([v, label]) => ({ label, cls: S.age === v ? 'on' : '', pick: () => this.setState({ age: v }) })),
+      ageNote: S.age === 'never' ? '포탈이 만든 계정에만 · 비밀번호가 잠겨 있어 만료가 의미 없고, 만료되면 키 로그인이 막힐 수 있습니다(추정)' : '서버의 만료 정책을 따릅니다 — 만료 뒤 키 로그인이 거부될 수 있습니다(추정)',
+      keyLine, madeText, otp: S.otp, onOtp: (e) => this.setState({ otp: String(e && e.target ? e.target.value : '').replace(/[^0-9]/g, '').slice(0, 6) }),
+      startCls: `btn pri${canStart ? '' : ' off'}`, start: () => { if (canStart) this.setState({ scene: 'run' }); }, cancel: () => this.setState({ scene: 'pick', otp: '' }),
+      startNote: !doList.length ? '준비할 수 있는 서버를 골라 주세요.' : otpOk ? '누르면 맡은 노드가 차례로 진행합니다.' : 'OTP 코드 6자리를 넣으면 시작할 수 있습니다(시안 — 아무 숫자 6자리).',
+      runText: `진행 중 ${runRows.length}대`, runRows, limNode: LIM.node, limMin: LIM.min, toDone: () => this.setState({ scene: 'done' }),
+      doneRows, okText: `준비됨 ${doneRows.length - nFail - nWarn}대`, hasFail: nFail > 0, failText: `못 함 ${nFail}대`, hasWarn: nWarn > 0, warnText: `확인 필요 ${nWarn}대`,
+    };
+  }
+}
+</script>
+</body>
+</html>

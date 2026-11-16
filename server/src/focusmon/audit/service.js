@@ -23,7 +23,10 @@ import { registerStateFile } from '../../util/stateFiles.js';
 import * as db from '../db.js';
 import { createAuditRunner } from './runner.js';
 import { parseReady, readyState, splitRun, parseReport, parseDisks, summarize, evidenceKey, cleanLine } from './parse.js';
-import { PROGRAM_PATH, WRAPPER_PATH, programSha, wrapperSha, AUDIT_DEADLINE_MS } from './bundle.js';
+import { programSha, wrapperSha, AUDIT_DEADLINE_MS, pathsFor, dirIssue, dirsToCheck, INSTALL_FAILS } from './bundle.js';
+import { installDir } from './settings.js'; // v3.17.0 설치 디렉터리
+import { installExec, NODE_INSTALL_CONCURRENCY, INSTALL_CODES, INSTALL_TIMEOUT_MS } from './install.js'; // v3.17.0 자동 설치
+import { installCredFor, credView, CRED_STATES } from './installCred.js';
 
 const gzipAsync = promisify(zlib.gzip);
 export const RUN_GAP_MS = 10 * 60_000;
@@ -41,7 +44,10 @@ export const MAX_DELIVER = 3;
 export const MAX_JOBS = 500;
 export const RESULTS_PER_SYNC = 2;
 /** 화면에 싣는 한도(박지 않는다 — 응답 limits). */
-export const LIMITS = Object.freeze({ runGapMin: RUN_GAP_MS / 60_000, checkGapSec: CHECK_GAP_MS / 1000, nodeConcurrency: 1, deadlineMin: Math.round(AUDIT_DEADLINE_MS / 60_000), keepRuns: db.AUDIT_KEEP, keepDays: db.AUDIT_KEEP_DAYS });
+export const LIMITS = Object.freeze({ runGapMin: RUN_GAP_MS / 60_000, checkGapSec: CHECK_GAP_MS / 1000, nodeConcurrency: 1, deadlineMin: Math.round(AUDIT_DEADLINE_MS / 60_000), keepRuns: db.AUDIT_KEEP, keepDays: db.AUDIT_KEEP_DAYS,
+  installConcurrency: NODE_INSTALL_CONCURRENCY, installTimeoutSec: INSTALL_TIMEOUT_MS / 1000 });
+/** 엣지가 알려 온 설치 계정 상태를 믿는 시간 — 지나면 '모름'(엣지가 옛 판이거나 끊김). 설치 작업도 이 안에 알려 온 엣지에만 내려보낸다(옛 판 엣지는 'install' 을 점검 실행으로 읽는다). */
+export const EDGE_CRED_TTL_MS = 10 * 60_000;
 
 export const OUTCOMES = Object.freeze(['done', 'timeout', 'program-timeout', 'program-error', 'incomplete', 'cut', 'report-shape', 'no-start', 'sudo-denied', 'sudo-tty', 'wrapper-nopython', 'wrapper-args', 'wrapper-busy', 'wrapper-tmp', 'wrapper-nonce', 'wrapper-other']);
 export const KINDS = Object.freeze(['done', 'not-ready', 'no-key', 'auth', 'auth-stopped', 'hostkey', 'unreachable', 'timeout', 'bad-output', 'busy', 'queue-full', 'too-big']);
@@ -131,12 +137,30 @@ export async function ingestResult(job, r, { node = '', now = Date.now() } = {})
   if (!liveJob(job.runId)) return { wrote: null, dropped: true };
   const rec = { ...(st.ready[tid] || {}) };
   const readyLines = Array.isArray(r.ready) ? r.ready : [];
-  if (readyLines.length) {
+  // v3.17.0: 준비 줄은 **그 작업이 정한 후보 디렉터리 가운데** 결과가 말한 곳으로 다시 해석한다(엣지가 다른 곳을 말하면 반영하지 않는다).
+  //   옛 작업 · 옛 엣지(디렉터리 칸 없음)는 기본 경로.
+  const cands = job.mode === 'install' ? [job.dir ?? ''] : (Array.isArray(job.cands) ? job.cands : ['']);
+  const rdir = r.dir === undefined || r.dir === null ? (cands.includes('') ? '' : null) : (typeof r.dir === 'string' && !dirIssue(r.dir) && cands.includes(r.dir) ? r.dir : null);
+  let rsState = null;
+  if (readyLines.length && rdir !== null) {
+    const P = pathsFor(rdir);
     const rd = parseReady(readyLines);
-    const rs = readyState(rd, { programPath: PROGRAM_PATH, wrapperPath: WRAPPER_PATH, programSha: programSha(), wrapperSha: wrapperSha() });
-    Object.assign(rec, { at: now, state: rs.state, reason: rs.reason, dmi: rd.dmi, py: rd.pyVer ? rd.pyVer.join('.') : null, node });
+    const rs = readyState(rd, { programPath: P.program, wrapperPath: P.wrapper, programSha: programSha(), wrapperSha: wrapperSha(rdir), dirs: dirsToCheck(P) });
+    rsState = rs.state;
+    Object.assign(rec, { at: now, state: rs.state, reason: rs.reason, dmi: rd.dmi, py: rd.pyVer ? rd.pyVer.join('.') : null, node, dir: rs.state === 'notinstalled' ? null : rdir });
   }
-  rec.lastError = r.ok && (r.kind === 'done' || r.kind === 'not-ready') ? null : { at: now, kind: KINDS.includes(r.kind) ? r.kind : 'unreachable', error: cleanLine(r.error || '', 240) };
+  if (job.mode === 'install') {
+    const ins = r.install && typeof r.install === 'object' ? r.install : {};
+    // v3.17.0 반증 D4: 노드가 말한 'ok' 를 믿지 않는다 — 중앙이 준비 줄을 다시 판정해 준비됨일 때만 'ok'.
+    //   준비 줄이 없거나 후보 밖이면 '설치함 · 확인 못 함'(check), 판정이 준비됨이 아니면 '설치함 · 준비 안 됨'(not-ready — 까닭은 준비 상태 칸).
+    let code = INSTALL_CODES.includes(ins.code) ? ins.code : 'unreachable';
+    if (code === 'ok') code = rsState === null ? 'check' : rsState === 'ready' ? 'ok' : 'not-ready';
+    rec.lastInstall = { at: now, by: job.by || '', ok: code === 'ok' || code === 'check', code, ready: code === 'not-ready' ? rsState : null, fail: ins.fail || null, step: Number.isInteger(ins.step) ? ins.step : 0,
+      rc: Number.isInteger(ins.rc) ? ins.rc : null, acct: ins.acct || '', key: ins.key || '', src: ins.src || null, cred: ins.cred || null, dir: job.dir ?? '', nopy: !!ins.nopy, oldRm: ins.oldRm || 0, oldKeep: ins.oldKeep || 0, priv: ins.priv || null };
+    if (rec.lastInstall.ok && (!readyLines.length || rdir === null)) rec.dir = job.dir ?? ''; // 설치는 됐는데 준비 줄이 없다(수집 계정 로그인 거부 등) — 설치한 곳은 안다
+  }
+  else rec.lastError = r.ok && (r.kind === 'done' || r.kind === 'not-ready') ? null : { at: now, kind: KINDS.includes(r.kind) ? r.kind : 'unreachable', error: cleanLine(r.error || '', 240) };
+  if (readyLines.length && rdir === null && job.mode !== 'install') rec.lastError = { at: now, kind: 'bad-output', error: '결과가 말한 설치 위치가 작업의 후보가 아닙니다 — 반영하지 않았습니다.' };
   let wrote = null;
   // 실행을 시도했으면 출력이 비어도 회차를 남긴다(반증 F4 — sudo 자체가 실패하면 표준 출력이 빈다)
   if (job.mode === 'run' && (r.ran === true || (Array.isArray(r.out) && r.out.length))) {
@@ -165,6 +189,7 @@ export async function ingestResult(job, r, { node = '', now = Date.now() } = {})
 
 /* ── 접수 ───────────────────────────────────────────────────────────────── */
 let localRunner = null;
+let localInstaller = null;
 let keysRef = null;
 /** 중앙 실행기 — 처음 쓸 때 만든다(엣지 노드에는 만들지 않는다 · 키는 service.js 의 focusKeys). */
 function local() {
@@ -180,6 +205,21 @@ function local() {
     });
   }
   return localRunner;
+}
+/** 중앙 설치기 — 점검 실행 줄(동시 1)과 따로(동시 NODE_INSTALL_CONCURRENCY · 서버당 시한). */
+function localInstall() {
+  if (!localInstaller) {
+    localInstaller = createAuditRunner({
+      keys: keysRef, concurrency: NODE_INSTALL_CONCURRENCY, exec: installExec(),
+      onPhase: (job, phase) => { const j = load().jobs.find((x) => x.runId === job.runId); if (j) { j.phase = phase; j.state = 'running'; j.startedAt = j.startedAt || job.startedAt || Date.now(); } },
+      onResult: (job, result) => {
+        const j = liveJob(job.runId);
+        if (!j) return;
+        ingestResult({ ...j, startedAt: j.startedAt || job.startedAt }, result, { node: '' }).catch((e) => console.warn('[focusmon-audit] 설치 결과 반영 실패:', String(e?.message || e).slice(0, 160)));
+      },
+    });
+  }
+  return localInstaller;
 }
 /** 시작 — 키 저장소를 넘기고 상태 파일을 읽는다(앞 프로세스의 중앙 작업 정리는 load 가 처음 읽을 때 한다). */
 export function startAuditService({ keys, spaceLow: probe } = {}) {
@@ -210,13 +250,93 @@ export function requestAudit(t, { mode = 'run', by = '', now = Date.now(), keys 
     const waitSec = Math.ceil((CHECK_GAP_MS - (now - rec.at)) / 1000);
     return { ok: false, code: 'too-soon', waitSec, reason: `준비 확인은 ${CHECK_GAP_MS / 1000}초에 한 번입니다(${waitSec}초 뒤).` };
   }
-  const job = { runId: newRunId(), tid: t.id, mode: m, node: t.demo ? '' : String(t.agent || ''), by: String(by || '').slice(0, 64), requestedAt: now, state: 'queued', phase: null, deliveredAt: null, deliveries: 0, startedAt: null, seenAt: null, ep: endpointKey(t) };
+  const job = { runId: newRunId(), tid: t.id, mode: m, node: t.demo ? '' : String(t.agent || ''), by: String(by || '').slice(0, 64), requestedAt: now, state: 'queued', phase: null, deliveredAt: null, deliveries: 0, startedAt: null, seenAt: null, ep: endpointKey(t),
+    cands: dirCandidates(rec) };
   st.jobs.push(job);
   persist();
   if (!job.node) {
     if (!keysRef) { st.jobs = st.jobs.filter((x) => x.runId !== job.runId); persist(); return { ok: false, code: 'not-started', reason: '디스크 점검 실행기가 아직 준비되지 않았습니다 — 잠시 뒤 다시 누르세요.' }; }
-    const s = local().submit({ runId: job.runId, mode: m, target: { id: t.id, host: t.host, port: t.port, username: t.username, demo: !!t.demo } });
+    const s = local().submit({ runId: job.runId, mode: m, target: { id: t.id, host: t.host, port: t.port, username: t.username, demo: !!t.demo }, expect: expectFor(job) });
     if (!s.ok) { st.jobs = st.jobs.filter((x) => x.runId !== job.runId); persist(); return { ok: false, code: s.code, reason: s.code === 'busy' ? '이 서버의 점검이 이미 실행기 줄에 있습니다.' : '실행기 줄이 가득 찼습니다.' }; }
+  }
+  return { ok: true, runId: job.runId, via: job.node ? 'edge' : 'central' };
+}
+
+/** 준비 확인 후보 — 기억한 설치 위치 → 지금 설정 → 기본 경로(검사를 지난 것 · 겹침 없이). 설정을 못 읽으면 그 칸은 뺀다. */
+export function dirCandidates(rec) {
+  const out = [];
+  const add = (d) => { if (typeof d === 'string' && !dirIssue(d) && !out.includes(d)) out.push(d); };
+  if (rec && typeof rec.dir === 'string') add(rec.dir);
+  const sd = installDir(); if (sd !== null) add(sd);
+  add('');
+  return out.slice(0, 3);
+}
+/** 작업에 실을 기대 판본 — 프로그램 · 후보 디렉터리별 실행 파일(중앙이 아는 값 — 엣지 판이 달라도 중앙 기준). */
+export function expectFor(job) {
+  const dirs = job.mode === 'install' ? [job.dir ?? ''] : (job.cands || ['']);
+  const wrappers = {}; for (const d of dirs) { const w = wrapperSha(d); if (w) wrappers[d] = w; }
+  return { program: programSha(), wrapper: wrapperSha(''), wrappers, cands: dirs,
+    ...(job.mode === 'install' ? { dir: job.dir ?? '', oldDirs: job.oldDirs || [], pick: job.pick || null, corpVcs: job.corpVcs || [] } : {}) };
+}
+
+/* ── 자동 설치(v3.17.0) ─────────────────────────────────────────────────── */
+const edgeCred = new Map(); // agent(소문자) → { at, rows: Map(tid → credView) }
+const knownSentAt = new Map(); // agent(소문자) → 맡은 서버 목록을 마지막으로 실은 때
+export const KNOWN_EVERY_MS = 60_000;
+/**
+ * 그 서버의 설치 계정 상태(화면 · 접수 공용 — 비밀 없음). 중앙 직접 서버는 이 노드에서 해석, 엣지 서버는 그 엣지가 알려 온 값(시한 안 · 없으면 'edge-unknown').
+ * @param {object} t  대상  @param {{corpVcs?:string[], pick?:string|null, now?:number}} o
+ */
+export function credOfTarget(t, { corpVcs = [], pick = null, now = Date.now() } = {}) {
+  if (t.demo) return demoCred(t);
+  if (!t.agent) return credView(installCredFor(t, { corpVcs, pick }));
+  const e = edgeCred.get(String(t.agent).toLowerCase());
+  if (!e || now - e.at > EDGE_CRED_TTL_MS) return { state: 'edge-unknown', src: null, acct: '', key: '' };
+  return e.rows.get(t.id) || { state: 'edge-unknown', src: null, acct: '', key: '' };
+}
+/** 데모 대상 — 장비에 닿지 않는 고정 값(일부는 '설치' 기능이 꺼진 모양). */
+function demoCred(t) {
+  const n = Number(String(t.id).replace(/\D/g, '').slice(-2)) || 0;
+  if (n % 5 === 3) return { state: 'feature', src: 'corp', acct: 'dvcadmin', key: 'demo-common' };
+  return { state: 'ok', src: n % 2 ? 'server' : 'corp', acct: 'dvcadmin', key: 'demo-common' };
+}
+/**
+ * 설치 요청(서버 하나). 한 서버에 작업 하나 · 설치 계정이 'ok' 인 서버만(고르면 되는 'ambig' 는 고른 계정이 후보일 때) · 설정을 못 읽으면 거절.
+ * @returns {{ok:true, runId, via} | {ok:false, code, reason}}
+ */
+/** 같은 서버 주소인가(대소문자 무시 — 별칭 · IP 와 이름이 다른 등록은 알아보지 못한다: 문서의 남은 것). */
+export const sameHost = (a, b) => String(a?.host || '').trim().toLowerCase() === String(b?.host || '').trim().toLowerCase() && String(a?.host || '').trim() !== '';
+/**
+ * @param {object} t  등록부 대상
+ * @param {{peers?: object[]}} o  peers = 등록부의 다른 대상 전부(범위와 무관 — 같은 주소를 찾는다)
+ *   v3.17.0 반증 S3: sudoers 파일은 서버마다 하나(계정 한 줄)라 같은 주소에 다른 수집 계정이 등록돼 있으면 설치가 서로의 sudo 규칙을 덮는다 —
+ *   그런 서버는 자동 설치하지 않는다('host-shared'). 같은 주소의 설치가 진행 중이면 차례를 겹치지 않는다('host-busy').
+ */
+export function requestInstall(t, { by = '', pick = null, corpVcs = [], now = Date.now(), keys = null, peers = [] } = {}) {
+  if (!keysRef && keys) keysRef = keys;
+  const st = load();
+  sweep(now);
+  const dir = installDir();
+  if (dir === null) return { ok: false, code: 'settings-unreadable', reason: '설치 디렉터리 설정을 읽지 못해 설치하지 않습니다 — 손상 보존본을 확인하세요.' };
+  if (st.jobs.some((x) => x.tid === t.id)) return { ok: false, code: 'busy', reason: '이 서버는 이미 점검 · 확인 · 설치 작업이 진행 중이거나 차례를 기다리고 있습니다.' };
+  const same = (Array.isArray(peers) ? peers : []).filter((p) => p && p.id !== t.id && sameHost(p, t));
+  if (same.some((p) => String(p.username || '') !== String(t.username || ''))) return { ok: false, code: 'host-shared', reason: '같은 주소에 다른 수집 계정으로 등록된 항목이 있습니다 — sudoers 파일 하나에 계정 하나만 적으므로 자동 설치가 다른 계정의 sudo 규칙을 지웁니다. 손으로 설치하세요.' };
+  const sameIds = new Set(same.map((p) => p.id));
+  if (st.jobs.some((x) => x.mode === 'install' && sameIds.has(x.tid))) return { ok: false, code: 'host-busy', reason: '같은 주소의 다른 항목을 설치하는 중입니다 — 그 설치가 끝난 뒤 다시 누르세요.' };
+  if (st.jobs.length >= MAX_JOBS) return { ok: false, code: 'queue-full', reason: '대기 중인 작업이 너무 많습니다 — 잠시 뒤 다시 누르세요.' };
+  const c = credOfTarget(t, { corpVcs, pick, now });
+  const pickOk = c.state === 'ambig' && pick && Array.isArray(c.choices) && c.choices.some((x) => x.id === pick);
+  if (c.state !== 'ok' && !pickOk) return { ok: false, code: `cred-${c.state}`, reason: '이 서버는 자동 설치에 쓸 계정이 정해지지 않았습니다.' };
+  const rec = st.ready[t.id] || {};
+  const oldDirs = typeof rec.dir === 'string' && rec.dir !== dir ? [rec.dir] : [];
+  const job = { runId: newRunId(), tid: t.id, mode: 'install', node: t.demo ? '' : String(t.agent || ''), by: String(by || '').slice(0, 64), requestedAt: now, state: 'queued', phase: null, deliveredAt: null, deliveries: 0, startedAt: null, seenAt: null, ep: endpointKey(t),
+    dir, oldDirs, pick: pickOk ? pick : null, corpVcs: t.agent ? [] : corpVcs.slice(0, 20) };
+  st.jobs.push(job);
+  persist();
+  if (!job.node) {
+    if (!keysRef) { st.jobs = st.jobs.filter((x) => x.runId !== job.runId); persist(); return { ok: false, code: 'not-started', reason: '설치기가 아직 준비되지 않았습니다 — 잠시 뒤 다시 누르세요.' }; }
+    const s = localInstall().submit({ runId: job.runId, mode: 'install', target: { id: t.id, name: t.name, host: t.host, port: t.port, username: t.username, demo: !!t.demo }, expect: expectFor(job) });
+    if (!s.ok) { st.jobs = st.jobs.filter((x) => x.runId !== job.runId); persist(); return { ok: false, code: s.code, reason: s.code === 'busy' ? '이 서버의 설치가 이미 줄에 있습니다.' : '설치 줄이 가득 찼습니다.' }; }
   }
   return { ok: true, runId: job.runId, via: job.node ? 'edge' : 'central' };
 }
@@ -271,6 +391,13 @@ export function handleEdgeAudit(agent, mine, a, now = Date.now()) {
   const b = isObj(a) ? a : {};
   const active = new Set();
   const lostOf = (runId) => { const l = st.lost[runId]; return l && String(l.node).toLowerCase() === key ? l : null; };
+  // v3.17.0: 엣지가 알려 온 설치 계정 상태(그 엣지가 맡은 대상만 · 아는 상태 · 이름은 정리 · 비밀 칸은 애초에 없다)
+  if (isObj(b.cred)) {
+    const rows = new Map();
+    for (const [tid, v] of Object.entries(b.cred).slice(0, 500)) { if (mine.has(tid)) { const c = cleanEdgeCred(v); if (c) rows.set(tid, c); } }
+    edgeCred.set(key, { at: now, rows });
+    if (edgeCred.size > 200) edgeCred.delete(edgeCred.keys().next().value);
+  }
   for (const x of Array.isArray(b.active) ? b.active.slice(0, ACTIVE_MAX) : []) {
     if (!isObj(x) || typeof x.runId !== 'string' || x.runId.length > 40) continue;
     const j = st.jobs.find((y) => y.runId === x.runId && String(y.node).toLowerCase() === key);
@@ -297,17 +424,28 @@ export function handleEdgeAudit(agent, mine, a, now = Date.now()) {
   }
   // 내려보낼 작업: 아직 안 보낸 것 · 보냈는데 엣지 목록에 없고 결과도 없이 2분이 지난 것(엣지 재시작) — 최대 3번
   const jobs = [];
+  const credFresh = (() => { const e = edgeCred.get(key); return !!e && now - e.at <= EDGE_CRED_TTL_MS; })();
+  const canInstall = Array.isArray(b.caps) && b.caps.slice(0, 10).includes('install'); // 반증 S1 — 이번 본문의 표시만 믿는다
   for (const j of st.jobs) {
     if (String(j.node).toLowerCase() !== key || !mine.has(j.tid) || active.has(j.runId) || j.state === 'ingesting') continue;
     if (j.deliveredAt && (now - j.deliveredAt < REDELIVER_MS || j.deliveries >= MAX_DELIVER)) continue;
+    // 설치 작업은 설치 계정 상태를 알려 오는 엣지(이 판 이상)에만 — 옛 엣지는 모르는 작업 종류를 점검 실행('run')으로 읽는다
+    if (j.mode === 'install' && (!credFresh || !canInstall)) continue;
     const t = mine.get(j.tid);
     j.deliveredAt = now; j.deliveries = (j.deliveries || 0) + 1; changed = true;
-    jobs.push({ runId: j.runId, mode: j.mode, id: t.id, host: t.host, port: t.port, username: t.username, expect: { program: programSha(), wrapper: wrapperSha() } });
+    jobs.push({ runId: j.runId, mode: j.mode, id: t.id, name: t.name, host: t.host, port: t.port, username: t.username, expect: expectFor(j) });
     if (jobs.length >= 20) break;
   }
   // 상태가 실제로 바뀐 때만 쓴다(반증 F8 — 엣지는 작업이 있는 동안 2초마다 동기화한다 · 원자 쓰기는 fsync 둘)
   if (changed) persist();
-  return { jobs, ack, cancel };
+  // v3.17.0: 그 엣지가 맡은 등록 서버 목록(설치 계정 상태를 알려 오게) — 60초에 한 번만 싣는다(비밀 없음 · 이름 · 주소 · 포트)
+  let known;
+  const kAt = knownSentAt.get(key) || 0;
+  if (now - kAt >= KNOWN_EVERY_MS || now < kAt) {
+    knownSentAt.set(key, now); if (knownSentAt.size > 200) knownSentAt.delete(knownSentAt.keys().next().value);
+    known = [...mine.values()].slice(0, 500).map((t) => ({ id: t.id, name: t.name, host: t.host, port: t.port }));
+  }
+  return { jobs, ack, cancel, ...(known ? { known } : {}) };
 }
 
 const LINE_CAP = 8200;
@@ -322,8 +460,19 @@ export function cleanEdgeResult(x) {
   };
   const kind = KINDS.includes(x.kind) ? x.kind : 'unreachable';
   const code = Number.isInteger(x.code) && x.code >= 0 && x.code < 512 ? x.code : null;
+  // v3.17.0: 설치 위치(검사를 지난 글자만 — 작업 후보인지는 ingestResult 가 본다) · 설치 결과(아는 까닭 · 정수 · 이름 정리)
+  const dir = typeof x.dir === 'string' && !dirIssue(x.dir) ? x.dir : (x.dir === undefined ? undefined : null);
+  const ii = (v, lo, hi) => (Number.isInteger(v) && v >= lo && v <= hi ? v : null);
+  const nm = (v) => (typeof v === 'string' && /^[A-Za-z0-9가-힣_.@ -]{0,64}$/.test(v) ? v : '');
+  const install = x.mode === 'install' && x.install && typeof x.install === 'object' && !Array.isArray(x.install) ? {
+    code: INSTALL_CODES.includes(x.install.code) ? x.install.code : 'unreachable', fail: INSTALL_FAILS.includes(x.install.fail) ? x.install.fail : (x.install.fail == null ? null : 'other'),
+    step: ii(x.install.step, 0, 7) ?? 0, rc: ii(x.install.rc, 0, 255), acct: nm(x.install.acct), key: nm(x.install.key), src: ['server', 'corp'].includes(x.install.src) ? x.install.src : null,
+    cred: CRED_STATES.includes(x.install.cred) ? x.install.cred : null, nopy: x.install.nopy === true, oldRm: ii(x.install.oldRm, 0, 10) ?? 0, oldKeep: ii(x.install.oldKeep, 0, 10) ?? 0,
+    priv: ['root', 'sudo', 'tty', 'no'].includes(x.install.priv) ? x.install.priv : null,
+  } : null;
   return {
-    mode: x.mode === 'check' ? 'check' : 'run', ok: x.ok === true, ran: x.ran === true, kind, error: typeof x.error === 'string' ? cleanLine(x.error, 240) : '',
+    mode: x.mode === 'check' ? 'check' : x.mode === 'install' ? 'install' : 'run', ok: x.ok === true, ran: x.ran === true, kind, error: typeof x.error === 'string' ? cleanLine(x.error, 240) : '',
+    ...(dir !== undefined ? { dir } : {}), ...(install ? { install } : {}),
     ready: lines(x.ready, 200, 400, 64 * 1024), out: lines(x.out, 80_000, LINE_CAP, 5 * 1024 * 1024),
     outBytes: Number.isFinite(x.outBytes) && x.outBytes >= 0 ? Math.min(x.outBytes, 1e10) : 0, truncated: x.truncated === true, code,
     stderr: typeof x.stderr === 'string' ? x.stderr.slice(0, 4096) : '', ms: Number.isFinite(x.ms) && x.ms >= 0 ? Math.min(x.ms, 4 * 3600_000) : 0,
@@ -350,13 +499,13 @@ export function readinessOf(tid) { const r = load().ready[tid]; return r ? { ...
 export function jobOf(tid) {
   const j = load().jobs.find((x) => x.tid === tid);
   if (!j) return null;
-  const lr = !j.node && localRunner ? localRunner.state(j.runId) : null;
+  const lr = !j.node ? (j.mode === 'install' ? localInstaller : localRunner)?.state(j.runId) || null : null;
   return { runId: j.runId, mode: j.mode, node: j.node, state: lr?.state || j.state || 'queued', phase: lr?.phase || j.phase || null, position: lr?.position || null, requestedAt: j.requestedAt, startedAt: lr?.startedAt || j.startedAt || null, delivered: !!j.deliveredAt };
 }
 export function activeJobs() { return load().jobs.map((j) => jobOf(j.tid)).filter(Boolean); }
 const dropJobsOf = (st, tid) => {
   const gone = st.jobs.filter((x) => x.tid === tid);
-  for (const j of gone) if (!j.node && localRunner) localRunner.cancel(j.runId);
+  for (const j of gone) if (!j.node) (j.mode === 'install' ? localInstaller : localRunner)?.cancel(j.runId);
   st.jobs = st.jobs.filter((x) => x.tid !== tid);
   for (const [k, v] of Object.entries(st.lost)) if (v.tid === tid) delete st.lost[k];
   return gone.length;
@@ -376,4 +525,12 @@ export function forgetReadiness(tid) {
   persist();
 }
 
-export function _resetForTest() { S = null; loadErr = ''; latest.clear(); localRunner = null; keysRef = null; spaceLow = () => false; }
+/** 엣지 설치 계정 보고 한 줄 정제(비밀 칸 없음 · 아는 상태 · 이름 정리 · 고르기 후보 10개). */
+export function cleanEdgeCred(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const nm = (x) => (typeof x === 'string' && /^[A-Za-z0-9가-힣_.@ -]{0,64}$/.test(x) ? x : '');
+  const state = CRED_STATES.includes(v.state) ? v.state : 'error';
+  const choices = state === 'ambig' && Array.isArray(v.choices) ? v.choices.slice(0, 10).filter((c) => c && typeof c === 'object' && typeof c.id === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(c.id)).map((c) => ({ id: c.id, name: nm(c.name), acct: nm(c.acct), key: nm(c.key) })) : null;
+  return { state, src: ['server', 'corp'].includes(v.src) ? v.src : null, acct: nm(v.acct), key: nm(v.key), ...(choices ? { choices } : {}) };
+}
+export function _resetForTest() { S = null; loadErr = ''; latest.clear(); localRunner = null; localInstaller = null; keysRef = null; spaceLow = () => false; edgeCred.clear(); knownSentAt.clear(); }

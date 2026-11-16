@@ -63,6 +63,7 @@ export const smodelText = (r, labels) => r?.smodel || labels?.noModel || '모델
 /** 서버 한 줄의 상태 — 작업 > 연결 오류 > 준비 상태 > 최근 결과. { tone, label, sub } */
 export function rowStatus(r, now = Date.now()) {
   if (r?.job) {
+    if (r.job.mode === 'install') return { tone: 'live', label: r.job.state === 'running' ? '설치 중' : '설치 차례를 기다림', sub: r.job.state === 'running' ? (r.job.phase ? `지금 단계: ${r.job.phase}` : '') : r.job.node ? (r.job.delivered ? `엣지 ${r.job.node} 에 보냄` : `엣지 ${r.job.node} 가 받아 가기를 기다림`) : '' };
     if (r.job.state === 'running') return { tone: 'live', label: `실행 중${r.job.mode === 'check' ? ' — 준비 확인' : ''}`, sub: r.job.phase ? `지금 단계: ${r.job.phase}${r.job.startedAt ? ` · ${durText(now - r.job.startedAt)}째` : ''}` : '' };
     return { tone: 'live', label: r.job.mode === 'check' ? '준비 확인 대기' : '차례를 기다림', sub: r.job.node ? (r.job.delivered ? `엣지 ${r.job.node} 에 보냄` : `엣지 ${r.job.node} 가 받아 가기를 기다림`) : r.job.position ? `중앙 줄 ${r.job.position}번째` : '' };
   }
