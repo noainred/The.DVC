@@ -206,7 +206,7 @@ test('② 준비 파일을 실제로 돌린다 — sshd 정책 · 계정 · 키 
     const f3 = path.join(sb.root, 'p3.sh'); fs.writeFileSync(f3, s3);
     const rr = spawnSync('/bin/sh', [f3, 'dvcnew'], { encoding: 'utf8', env: { PATH: `${sb.bin}:/usr/bin:/bin` } });
     const pp = PR.parsePrepOut(rr.stdout); const lg = fs.readFileSync(sb.log, 'utf8');
-    if (spawnSync('sh', ['-c', `PATH=${sb.bin}:/usr/bin:/bin command -v runuser`]).status !== 0) { assert.equal(pp.fail, 'no-runuser', rr.stdout); assert.doesNotMatch(lg, /useradd/, '계정을 만들기 전에 멈춘다'); } }
+    if (!fs.existsSync('/usr/bin/runuser') && !fs.existsSync('/bin/runuser')) { assert.equal(pp.fail, 'no-runuser', rr.stdout); assert.doesNotMatch(lg, /useradd/, '계정을 만들기 전에 멈춘다'); } }
   sb = sandbox(); fs.writeFileSync(path.join(sb.bin, 'useradd'), `#!/bin/sh\nfor a; do n="$a"; done; echo "$n:x:1501:1501::${sb.homes}/$n:/bin/bash" >> '${sb.pw}'; exit 12\n`);
   r = runPrep(sb, 'dvchalf'); assert.equal(r.p.fail, 'acct-create'); assert.equal(r.p.partial, true, '계정이 남았다고 알린다');
   // 인자 · root · 계정 이름
@@ -424,10 +424,10 @@ test('⑤ 중앙 — 접수 · 엣지 배달(caps · 준비 계정 보고) · �
     const PD = B.pathsFor('/opt/dvcaudit');
     const readyD = ['##DR 1', '##DR py 3.6.8', `##DR file ${PD.program} ${B.programSha()} 0:0:644`, `##DR file ${PD.wrapper} ${B.wrapperSha('/opt/dvcaudit')} 0:0:755`, ...B.dirsToCheck(PD).all.map((d) => `##DR dir ${d} 0:0:755`), '##DR sudo ok', '##DR end'];
     A.handleEdgeAudit('edge-pl', ml, { caps: ['install', 'prep'], results: [{ runId: rl.runId, result: { mode: 'prep', ok: true, kind: 'done', dir: '/opt/dvcaudit', ready: readyD,
-      prep: { code: 'ok', step: 7, added: true, from: true }, login: { ok: true, kind: 'ok' }, install: { code: 'ok', step: 7 } } }] }, t0 + A.SEEN_TTL_MS + 180_000);
+      prep: { code: 'ok', step: 7, differs: true, from: false }, login: { ok: true, kind: 'ok' }, install: { code: 'ok', step: 7 } } }] }, t0 + A.SEEN_TTL_MS + 180_000);
     await new Promise((res) => setTimeout(res, 50));
     const rr = A.readinessOf(tl.id);
-    assert.equal(rr.lastPrep.audit, 'done'); assert.equal(rr.lastPrep.fromAsked, true); assert.equal(rr.lastPrep.age, 'default');
+    assert.equal(rr.lastPrep.audit, 'done'); assert.equal(rr.lastPrep.fromAsked, true); assert.equal(rr.lastPrep.from, false, '반증 D2 — 노드가 넣지 않았다고 했으면 주소 제한이 아니다'); assert.equal(rr.lastPrep.differs, true); assert.equal(rr.lastPrep.age, 'default');
     assert.equal(rr.lastInstall?.code, 'ok'); assert.equal(rr.dir, '/opt/dvcaudit'); assert.equal(rr.state, 'ready');
     SET.saveInstallDir('', { by: 'own' }); }
   // 같은 주소에 다른 수집 계정 — 준비는 하되 디스크 점검은 함께 하지 않는다
@@ -498,6 +498,7 @@ test('⑦ 엣지 워커(caps · 준비 계정 보고 · 준비 줄) · SSH 공�
   assert.match(src, /exec: prepExec\(\{ edge: true, edgeVcs \}\)/, '엣지 준비는 엣지 스냅샷 법인으로');
   assert.match(src, /: j\.mode === 'prep'\n\s+\? prepRunner\.submit\(/, '준비 작업은 준비 줄로(점검 실행 줄이 아니다)');
   assert.match(src, /from: ex\.from === true, age: ex\.age === 'default' \? 'default' : 'never', audit: ex\.audit === true/, '중앙이 보낸 준비 값은 참거짓 · 정해 둔 값만');
+  assert.match(src, /prep: \{ code: sub\.code === 'queue-full' \? 'queue-full' : 'busy', step: 0 \}/, '반증 D8 — 받지 못한 준비 작업은 busy · queue-full(접속 못 함 아님)');
   Wk._setKnownForTest([{ id: 'fm-pppppppp71', name: 'x', host: '10.48.7.1', port: 22 }]);
   const feats = [];
   const rep = Wk.credReport(Date.now(), (t, o) => { feats.push(o.feature || 'install'); return { state: 'ok', acct: 'root', key: 'k', auth: { privateKey: 'SECRET' } }; });
