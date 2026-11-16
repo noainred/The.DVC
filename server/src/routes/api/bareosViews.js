@@ -238,11 +238,12 @@ export function registerBareosViews(api) {
         '마지막 백업(UTC)', '진행 중', `${d.rpoDays}일+ 경과`, '인벤토리에 없음'])];
       for (const r of d.rows) {
         const k = bareosClass(r.b, { rpoDays: d.rpoDays, now });
+        const known = d.director.resultsKnown && !(d.director.partial && r.b?.run);   // 반증 G1(55회차 #9): 잘린 조회의 진행 중 VM 은 결과 모름(화면 칩과 같은 판정)
         lines.push(csvLine([d.vcenter.name, r.folder, r.name, r.power === 'POWERED_ON' ? '켜짐' : r.power ? '꺼짐' : '', n(r.gb),
           r.method == null ? '모름' : METHOD_TEXT[r.method] || '', r.b == null ? '모름' : k.job ? '있음' : k.missing ? '미등록' : '', k.job ? (k.on ? '예' : '아니오') : '',
           // 버그 점검 S17: 결과를 모르는 법인(인증 정지·조회 실패·미설정)은 결과·진행 칸에 '모름' 을 덧붙인다(값은 마지막으로 읽은 것 — 화면의 회색 칩과 같은 뜻)
-          k.job ? `${ST_TEXT[r.b.st] || ''}${d.director.resultsKnown ? '' : '(모름 — 마지막으로 읽은 값)'}` : '', iso(r.b?.at), r.b?.lv || '', n(r.b?.by), iso(r.b?.ok),
-          d.director.resultsKnown ? (r.b?.run ? '예' : '') : (k.job ? '모름' : ''), d.director.resultsKnown ? (k.old ? '예' : '') : '모름', r.gone ? '예' : '']));
+          k.job ? `${ST_TEXT[r.b.st] || ''}${known ? '' : '(모름 — 마지막으로 읽은 값)'}` : '', iso(r.b?.at), r.b?.lv || '', n(r.b?.by), iso(r.b?.ok),
+          d.director.resultsKnown ? (r.b?.run ? '예' : '') : (k.job ? '모름' : ''), known ? (k.old ? '예' : '') : '모름', r.gone ? '예' : '']));
       }
       logAudit({ user: req.user?.username, action: 'bareos-detail.csv', target: vcenterId, detail: `${d.rows.length} rows`, ip: req.ip });
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');

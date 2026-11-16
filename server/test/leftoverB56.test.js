@@ -35,6 +35,9 @@ test('D1: 새로 같은 Director 에 둘째 vCenter 를 묶으면 거부 · 이�
   assert.equal(web.bindAllowed('b', new Set(['a']), new Set(['a'])), false);
   assert.equal(web.bindAllowed('b', new Set(['a']), new Set(['a', 'b'])), true);
   assert.equal(web.bindAllowed('a', new Set(), new Set()), true);
+  // 반증 C1: 저장된 a 를 끄고 새 c 를 켠 뒤 a 를 다시 켜기 — 서버는 거부하므로 웹도 막는다
+  assert.equal(web.bindAllowed('a', new Set(['c']), new Set(['a'])), false);
+  assert.match(S.directorBindIssue([{ vcenterId: 'c', directorId: 'dA' }, { vcenterId: 'a', directorId: 'dA' }], [{ vcenterId: 'a', directorId: 'dA' }], dirs), /‘c’/);
   // 실제 저장 경로
   const da = S.addDirector({ name: '한국', host: 'kr.corp', consoleName: 'portal', password: 'pw' }).director.id;
   S.saveSettings({ sites: [{ vcenterId: 'vc-a', directorId: da }] });
@@ -61,8 +64,12 @@ test('N4: 함께 쓰는 vCenter 확인 — 지금 목록과 같을 때만 · 시
   const t = { mode: 'reinstall', vcenterName: '한국' };
   const p = { pyvmomi: '8.0.3.0.1', volumeDir: '/var/lib/bareos/storage', reset: { ack: true, catalog: true, volumes: false, confirmName: '' } };
   assert.match(web.planIssues(p, t, pre).join(' '), /함께 쓰는 다른 vCenter 1곳/);
-  assert.deepEqual(web.planBody({ ...p, reset: { ...p.reset, sharedAck: true } }, { pre, target: t }).sharedAck, { vcenterIds: ['vc-b'] });
-  assert.equal('sharedAck' in web.planBody({ ...p, reset: { ...p.reset, sharedAck: true } }, { pre: { sharedVcenters: [] }, target: t }), false, '지금 점검에 함께 쓰는 vCenter 가 없으면 싣지 않는다');
+  assert.deepEqual(web.planBody({ ...p, reset: { ...p.reset, sharedAck: ['vc-b'] } }, { pre, target: t }).sharedAck, { vcenterIds: ['vc-b'] });
+  assert.equal('sharedAck' in web.planBody({ ...p, reset: { ...p.reset, sharedAck: ['vc-b'] } }, { pre: { sharedVcenters: [] }, target: t }), false, '지금 점검에 함께 쓰는 vCenter 가 없으면 싣지 않는다');
+  // 반증 E1: '다시 점검' 으로 목록이 늘면 앞의 확인은 풀린다(본 적 없는 목록을 싣지 않는다)
+  const pre2 = { sharedVcenters: [{ vcenterId: 'vc-b', targets: 3 }, { vcenterId: 'vc-c', targets: 1 }] };
+  assert.equal('sharedAck' in web.planBody({ ...p, reset: { ...p.reset, sharedAck: ['vc-b'] } }, { pre: pre2, target: t }), false);
+  assert.match(web.planIssues({ ...p, reset: { ...p.reset, sharedAck: ['vc-b'] } }, t, pre2).join(' '), /2곳/);
 });
 
 test('D2: 수동 대조는 그 Director 의 vCenter 가 모두 쓰기 범위 안인 계정만 — 조회 전용은 상태만', async () => {
@@ -80,7 +87,8 @@ test('D2: 수동 대조는 그 Director 의 vCenter 가 모두 쓰기 범위 안
   const route = SRC('routes/api/bareosBackup.js');
   const h = route.slice(route.indexOf("api.post('/tools/bareos-backup/poll'"), route.indexOf("api.get('/tools/bareos-backup/badges'"));
   assert.match(h, /reconcileOnly: recOnly/);
-  assert.match(SRC('bareos/poller.js'), /doReconcile: doReconcile && \(!recOnly \|\| recOnly\.has\(d\.id\)\)/);
+  assert.match(SRC('bareos/poller.js'), /doReconcile: doReconcile && \(!recOnly \|\| recOnly\.has\(d\.id\)\), reconcileAllowed: !recOnly \|\| recOnly\.has\(d\.id\)/);
+  assert.match(SRC('bareos/poller.js'), /const due = reconcileAllowed && \(doReconcile \|\| _reconcileDue\.has\(d\.id\)\)/, '반증 D1: 밀린 대조도 막는다');
 });
 
 test('N8: 등록 명령 도중 끊긴 뒤 .jobs 확인 · 끄기는 업그레이드 대기 목록에 있다', async () => {
@@ -99,8 +107,10 @@ test('S1: Director 조회 실패 · 인증 정지 법인의 Bareos 결과는 Bac
   assert.equal(directorState({ mapped: true, configured: true, poll: { ok: false, code: 'connect' } }).resultsKnown, false);
   assert.equal(directorState({ mapped: true, configured: true, authStopped: true }).state, 'auth');
   const v = SRC('routes/api/veeam.js');
-  assert.match(v, /const dirFail = bareosDirResultsUnknown\(vc\.id\);\s*const bareos = dirFail \? null : bareosStatesOf\(vc\.id\);/);
-  assert.match(v, /!info\.resultsKnown && \(info\.state === 'auth' \|\| info\.state === 'error'\)/, "unset 은 빼지 않는다(방식 bareos VM 의 '미등록' 은 아는 사실)");
+  assert.match(v, /const dirFail = !!dirInfo && !dirInfo\.resultsKnown && \(dirInfo\.state === 'auth' \|\| dirInfo\.state === 'error'\);/, "unset 은 빼지 않는다(방식 bareos VM 의 '미등록' 은 아는 사실)");
+  assert.match(v, /const ledger = bareosStatesOf\(vc\.id\);[^\n]*\n\s*const bareos = dirFail \? null : ledger;/);
+  assert.match(v, /if \(partialPoll && b && b\.run\) return \{ \.\.\.row, b: null \};/, '반증 G1: Summary 도 잘린 조회의 진행 중 VM 은 모름');
+  assert.match(v, /if \(vr\.ledger\) pushAll\(rows, bareosRows\(vr\.ledger,/, '반증 F1: 오류 목록은 Director 조회 실패여도 원장의 지난 실패를 낸다');
   const web = await import('../../web/src/views/tools/backupSummaryText.js');
   assert.match(web.siteNote({ bareosUnknown: true, bareosDirFail: true }), /Director 조회 실패/);
   assert.match(web.siteNote({ bareosUnknown: true }), /원장 못 읽음/);
@@ -140,4 +150,12 @@ test('#9: 잘린 조회 — 진행 중 실행이 있는 VM 은 결과 모름(서
   assert.equal(web.rowMatches(rows[1], 'bad', { now: NOW, partial: true }), true);
   const s = V.corpCounts(rows, { now: NOW });
   assert.equal(s.old, 2, '잘리지 않았으면 예전대로');
+});
+
+test('반증 G1: 그룹 카드도 잘린 조회의 진행 중 VM 결과는 세지 않는다', async () => {
+  const g = await import('../../web/src/views/tools/bareosGroupText.js');
+  const rows = [{ b: { st: 'error', run: 'running' } }, { b: { st: 'ok', run: null } }];
+  const m = g.memberResults(rows, { partial: true });
+  assert.equal(m.fail, 0, '옛 실패를 세지 않는다'); assert.equal(m.ok, 1); assert.equal(m.run, 1); assert.equal(m.runUnread, 1);
+  assert.equal(g.memberResults(rows).fail, 1, '잘리지 않았으면 예전대로');
 });

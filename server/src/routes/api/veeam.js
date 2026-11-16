@@ -836,21 +836,21 @@ function backupVmRows(vc, b, { now = Date.now(), marks = getMarks(), unreadable 
   // 53회차 S1(재현): Director 조회가 인증 정지 · 실패면 원장의 결과(마지막 성공 · 실패 · 오래됨)는 옛 값이다 — 3일째 조회 실패 법인의 7일 성공률 · RPO ·
   //   '백업 안 된 VM' · 일일 메일이 '모름' 대신 '오래됨(확정)' 으로 보였다. 그 법인은 원장을 못 읽은 것과 같이 '모름'(null)으로 둔다(소비처가 이미 그 판정을 한다).
   //   Director 를 묶지 않은 법인(unset)은 빼지 않는다 — 방식 bareos 인 VM 의 '미등록' 은 실제로 아는 사실이다.
-  const dirFail = bareosDirResultsUnknown(vc.id);
-  const bareos = dirFail ? null : bareosStatesOf(vc.id);   // v2.828 — Bareos 잡(원장) · 못 읽으면 null(Bareos 칸 '모름')
+  const dirInfo = bareosDirInfoOf(vc.id);
+  const dirFail = !!dirInfo && !dirInfo.resultsKnown && (dirInfo.state === 'auth' || dirInfo.state === 'error');
+  const partialPoll = !!dirInfo?.partial;   // 반증 G1(55회차 #9): 잘린 조회 — 진행 중 VM 의 결과는 모름(법인 칩 · 그룹 · CSV 와 같은 판정)
+  const ledger = bareosStatesOf(vc.id);   // 반증 F1: 원장 그대로(지난 실패 · 경고 실행 기록은 Director 가 지금 닿지 않아도 사실이다 — 오류 목록 · 멈춤 의심은 이것으로)
+  const bareos = dirFail ? null : ledger;   // v2.828 — Bareos 잡(원장) · 못 읽으면 null(Bareos 칸 '모름') · 53회차 S1: Director 조회 실패면 현재 결과는 모름
   const groupNext = bareosGroupNext(vc.id, now, bareos);   // v2.835 — VM id → 다음 그룹 회차 { at, lv, g } · v2.839 Director 스케줄 { at, lv, s }(못 읽으면 빈 맵 — 칸 '—')
   const vms = b.scopedVms.map((vm) => vmBackupView(vm, b.match?.byVm?.[vm.id], b.ev?.byVm?.[vm.id], { veeamKnown: veeamKnown || !b.linked, snapKnown, absentKnown: !b.row.veeamAbsentUnknown, now, mark: markView(marks[vm.id]),
-    clone: withClone ? (clones ? cloneView(clones.get(vm.id)) : null) : undefined })).map((row) => withBareos(row, bareos, unreadable))
+    clone: withClone ? (clones ? cloneView(clones.get(vm.id)) : null) : undefined })).map((row) => withBareos(row, bareos, unreadable, partialPoll))
     .map((row) => { const nx = groupNext.get(row.id); return { ...row, ...policyFields(row, { marksKnown: !unreadable, bareosKnown: bareos != null, now }), ...(nx ? { nx } : {}) }; });
-  return { vms, bareosKnown: bareos != null, bareos, ...(dirFail ? { bareosDirFail: true } : {}) };
+  return { vms, bareosKnown: bareos != null, bareos, ledger, ...(dirFail ? { bareosDirFail: true } : {}) };
 }
 
-/** 53회차 S1: 이 vCenter 의 Director 조회가 인증 정지 · 실패라 결과를 믿을 수 없는가(directorInfo 하나 — 현황판 · 그룹과 같은 판정). 판정을 못 하면 false(예전대로). */
-function bareosDirResultsUnknown(vcenterId) {
-  try {
-    const info = bareosDirectorInfo(vcenterId, bareosEffectiveSettings(), bareosPollerStatus(), bareosIsDemoActive());
-    return !info.resultsKnown && (info.state === 'auth' || info.state === 'error');
-  } catch { return false; }
+/** 53회차 S1: 이 vCenter 의 Director 상태(directorInfo 하나 — 현황판 · 그룹과 같은 판정). 판정을 못 하면 null(예전대로 — 결과를 안다고 본다). */
+function bareosDirInfoOf(vcenterId) {
+  try { return bareosDirectorInfo(vcenterId, bareosEffectiveSettings(), bareosPollerStatus(), bareosIsDemoActive()); } catch { return null; }
 }
 
 /** v2.836 Summary 의 Bareos 카드 — 범위 안 법인의 백업 그룹 수 · 예약이 켜진 그룹 수. 그룹 파일을 못 읽으면 null(0 이 아니다). */
@@ -885,9 +885,9 @@ function bareosSiteExtras(vc, vr, bset, now) {
     const d = bareosDirectorById(site.directorId, bset);
     if (d?.agent) out.bEdge = true;
   }
-  if (site && vr.bareos) {
+  if (site && vr.ledger) {
     try {
-      const cv = bareosCorpView(site, bset, [...vr.bareos.values()], { now });
+      const cv = bareosCorpView(site, bset, [...vr.ledger.values()], { now });
       if (cv?.live?.ok && Number.isFinite(cv.live.at) && now - cv.live.at <= BAREOS_LIVE_IDLE_MS) out.stuck = cv.stuck || 0;
     } catch { /* 모름 — 키 없음 */ }
   }
@@ -1066,12 +1066,13 @@ async function errorsData(req, snap, scope, days, region = '') {
     const sd0 = bset?.sites?.find?.((x) => x.vcenterId === vc.id);
     // v2.872 relay = 그 법인 Director 가 엣지 대행 — 화면의 로그 서랍이 엣지 회신 시한(relayLimits)만큼 기다린다(숫자를 화면에 박지 않는다)
     const relay = !!(sd0 && (bset?.directors || []).find?.((d) => d.id === sd0.directorId)?.agent);
-    if (vr.bareos) pushAll(rows, bareosRows(vr.bareos, new Set(vr.vms.map((x) => x.id)), relay ? { ...site, relay } : site, since)); else bareosUnknownSites++;
+    // 반증 F1: Director 조회 실패(53회차 S1)여도 원장의 지난 실패 · 경고 기록은 낸다 — 원장을 못 읽었을 때만 모름
+    if (vr.ledger) pushAll(rows, bareosRows(vr.ledger, new Set(vr.vms.map((x) => x.id)), relay ? { ...site, relay } : site, since)); else bareosUnknownSites++;
     for (const v of b.views) if (v.ok === false || v.authStopped) collect.push({ at: v.ts, vc: site.id, vcName: site.name, src: 'veeam', name: v.name, error: v.error, auth: !!v.authStopped });
     const sd = bset?.sites?.find?.((x) => x.vcenterId === vc.id);
-    if (sd && vr.bareos) {   // 멈춤 의심 — 진행 현황이 신선할 때만(Summary 배지와 같은 규칙 · 조회를 새로 일으키지 않는다)
+    if (sd && vr.ledger) {   // 멈춤 의심 — 진행 현황이 신선할 때만(Summary 배지와 같은 규칙 · 조회를 새로 일으키지 않는다)
       try {
-        const cv = bareosCorpView(sd, bset, [...vr.bareos.values()], { now });
+        const cv = bareosCorpView(sd, bset, [...vr.ledger.values()], { now });
         if (cv?.live?.ok && Number.isFinite(cv.live.at) && now - cv.live.at <= BAREOS_LIVE_IDLE_MS) pushAll(rows, stuckRows(cv.rows, site, cv.live.at));
       } catch { /* 모름 — 행 없음 */ }
     }
@@ -1180,10 +1181,11 @@ function bareosStatesOf(vcenterId) {
  *   원장을 못 읽었으면 방식이 Bareos 인 VM 에 b:null(모름) — 잡이 있는지 모르므로 '미등록' 이라 하지 않는다.
  *   표시 파일을 못 읽었으면 방식을 모르니 잡이 있는 VM 만 싣는다(미등록 판정 없음).
  */
-function withBareos(row, bareos, marksBad) {
+function withBareos(row, bareos, marksBad, partialPoll = false) {
   const method = marksBad ? '' : row.m?.method || '';
   if (bareos == null) return method === 'bareos' ? { ...row, b: null } : row;
   const b = bareosVmView(bareos.get(row.id), method);
+  if (partialPoll && b && b.run) return { ...row, b: null };   // 반증 G1: 잘린 조회의 진행 중 VM — 마지막 결과가 옛 값일 수 있어 모름(RPO · 성공률에 넣지 않는다)
   return b === undefined ? row : { ...row, b };
 }
 

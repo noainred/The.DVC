@@ -10,7 +10,7 @@ import {
   RUNNING_UNKNOWN_OK_LABEL, runningUnknown, volumesSizeText, okOrThrow, rollbackCauseText,
   bundleFromText, importDirStateText, bundleWhereText, bundleStateView, bundleSourceHelp,
   canLink, linkChoices, linkDoneText, isSshAuthFail,
-  sharedIdsOf, SHARED_ACK_LABEL,   // 53회차 N4
+  sharedIdsOf, sharedAckMatches, SHARED_ACK_LABEL,   // 53회차 N4 · 반증 E1
 } from './bareosInstallText.js';
 import { copyText as copyToClipboard } from '../../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 
@@ -235,7 +235,7 @@ function ResetStep({ t, pre, plan, setPlan, onBack, onNext, onRecheck, busy }) {
   const volSize = volumesSizeText(vols);   // v2.846 U-12: 못 읽은 크기를 0 으로 더하지 않는다('일부 모름')
   const nameOk = !r.volumes || String(r.confirmName || '').trim() === String(t.vcenterName).trim();
   const shared = sharedIdsOf(pre);   // 53회차 N4: 함께 쓰는 다른 vCenter — 따로 확인
-  const sharedOk = !shared.length || r.sharedAck === true;
+  const sharedOk = !shared.length || sharedAckMatches(r.sharedAck, pre);   // 반증 E1: 본 목록에 묶인 확인
   return (
     <div className="card" style={CARD}>
       <div style={ROW}><b style={{ flex: '1 1 auto' }}>초기화 확인 — {t.vcenterName}</b><Badge cls="amber">초기화 후 재설치</Badge>
@@ -267,7 +267,7 @@ function ResetStep({ t, pre, plan, setPlan, onBack, onNext, onRecheck, busy }) {
           {shared.length > 0 && (
             <div className="banner bad" style={{ marginTop: 10, fontSize: 12.5 }}>
               <b>다른 서비스도 함께 지워집니다.</b> 이 Director 를 vCenter {shared.length}곳({shared.slice(0, 5).join(', ')}{shared.length > 5 ? ' …' : ''})이 함께 씁니다 — 초기화하면 그 vCenter 들의 잡 설정 · 실행 기록{r.volumes ? ' · 백업 볼륨' : ''}도 지워집니다.
-              <label style={{ ...ROW, fontSize: 13, marginTop: 6 }}><input type="checkbox" checked={r.sharedAck === true} onChange={(e) => set({ sharedAck: e.target.checked })} /> {SHARED_ACK_LABEL}</label>
+              <label style={{ ...ROW, fontSize: 13, marginTop: 6 }}><input type="checkbox" checked={sharedOk} onChange={(e) => set({ sharedAck: e.target.checked ? shared : false })} /> {SHARED_ACK_LABEL}</label>
             </div>
           )}
           <div className="banner" style={{ marginTop: 10, fontSize: 12.5 }}>실행 화면 맨 앞에 <b>0 기존 제거</b> 단계가 붙습니다 — 지운 것은 되돌릴 수 없어, 이 단계가 실패하면 되돌리지 않고 남은 것을 보인 뒤 이어서 다시 합니다.</div>

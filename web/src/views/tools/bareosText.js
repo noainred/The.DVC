@@ -1181,7 +1181,10 @@ export function directorAgentAdviceText(a) {
  * @param {string} vcId  @param {Set<string>} bound 편집 중 묶인 vCenter  @param {Set<string>} saved 이 Director 에 저장된 vCenter
  */
 export function bindAllowed(vcId, bound, saved) {
-  return bound.has(vcId) || saved.has(vcId) || bound.size === 0;
+  if (bound.has(vcId)) return true;   // 이미 켜져 있다(끄기는 언제나 된다)
+  // 반증 C1: 서버와 같은 판정 — 켠 뒤 묶인 vCenter 가 둘 이상이면 그 전부가 이미 저장된 짝이어야 한다(저장된 것을 끄고 새것을 켠 뒤 다시 켜기 우회를 막는다)
+  const next = [...bound, vcId];
+  return next.length < 2 || next.every((x) => saved.has(x));
 }
 export const BIND_ONE_TEXT = '이 Director 에는 이미 다른 vCenter 가 묶여 있습니다 — 서비스 하나 = vCenter 하나 + Bareos 하나입니다(그 vCenter 는 자기 서비스의 Director 에 묶으세요).';
 export const SHARED_DIRECTOR_TEXT = 'vCenter 가 둘 이상 묶인 Director 입니다(예전 설정 — 그대로 둡니다). 서비스 하나 = vCenter 하나 + Bareos 하나 규칙에 맞추려면 vCenter 마다 자기 Director 로 옮기세요.';

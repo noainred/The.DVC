@@ -475,6 +475,6 @@ export function _resetForTest() { _cache = null; _loadErr.clear(); }
  */
 export function _seedLegacySitesForTest(sites) {
   const next = cloneSettings(loadSettings());
-  next.sites = (Array.isArray(sites) ? sites : []).map((x) => normalizeSite(x).site).filter(Boolean);
+  next.sites = (Array.isArray(sites) ? sites : []).map((x) => { const r = normalizeSite(x); if (r.issue) throw new Error(`시험 준비 매핑 오류: ${r.issue}`); return r.site; });   // 반증 C3b: 조용히 버리지 않는다
   persist(next);
 }

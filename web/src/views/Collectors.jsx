@@ -553,7 +553,7 @@ export default function Collectors() {
                     <div className="muted" style={{ fontSize: 11 }} title="최근 동기화">동기화 {s?.at ? new Date(s.at).toLocaleTimeString('ko-KR') : '—'}</div>
                     {/* v2.775: 실패 이유·시각·자동 여부까지(예전에는 '업그레이드 실패' 만) */}
                     {upgradeCell(s?.upgrade) && (() => { const u = upgradeCell(s.upgrade); return (
-                      <div style={{ fontSize: 11, color: u.tone === 'ok' ? 'var(--green)' : 'var(--red)', whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: 320 }}>
+                      <div style={{ fontSize: 11, color: u.tone === 'ok' ? 'var(--green)' : u.tone === 'warn' ? 'var(--amber)' : 'var(--red)', whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: 320 }}>
                         {u.text}{u.reason && <div className="muted" style={{ fontSize: 11 }}>{u.reason}</div>}
                       </div>); })()}
                   </td>

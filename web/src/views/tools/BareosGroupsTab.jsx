@@ -320,7 +320,7 @@ export default function BareosGroupsTab({ d }) {
 
 function CorpBar({ vc, setVc, options, tree, vms, loading, onReload }) {
   const inGroup = vms.filter((v) => v.groupId).length;
-  const m = memberResults(vms.filter((v) => v.groupId), { resultsKnown: resultsKnownOf(tree) });
+  const m = memberResults(vms.filter((v) => v.groupId), { resultsKnown: resultsKnownOf(tree), partial: tree?.director?.partial === true });
   const dir = tree?.director;
   return (
     <section className="card" style={{ padding: '12px 14px', marginBottom: 12, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 10, minWidth: 0 }}>
@@ -401,7 +401,7 @@ function GroupCard({ g, tree, byId, writable, busy, marking = false, ovl, onRun,
   const size = sizeSum(rows);
   const ss = groupStopState(g);   // v2.867 회차 중단 상태(멈추는 중 · 이번 회차 실행 중 · 중단됨)
   const badge = ss.kind === 'stopping' || ss.kind === 'cancelable' ? { text: g.pruning ? '보관 정리 중' : ss.text, tone: ss.tone }
-    : g.running ? { text: g.pruning ? '보관 정리 중' : '실행 중', tone: 'run' } : resultBadge(memberResults(rows, { resultsKnown: resultsKnownOf(tree) }));
+    : g.running ? { text: g.pruning ? '보관 정리 중' : '실행 중', tone: 'run' } : resultBadge(memberResults(rows, { resultsKnown: resultsKnownOf(tree), partial: tree?.director?.partial === true }));
   const sp = scheduleParts(g.schedule);
   const kp = keepParts(g);
   const ov = overlapOf(ovl, g);
@@ -808,7 +808,7 @@ function GroupDetail({ tree, g, byId, writable, busy, marking = false, onBack, o
   const size = sizeSum(rows.filter((r) => !r.missing));
   const ss = groupStopState(g);
   const badge = ss.kind === 'stopping' || ss.kind === 'cancelable' ? { text: g.pruning ? '보관 정리 중' : ss.text, tone: ss.tone }
-    : g.running ? { text: g.pruning ? '보관 정리 중' : '실행 중', tone: 'run' } : resultBadge(memberResults(rows.filter((r) => !r.missing), { resultsKnown: resultsKnownOf(tree) }));
+    : g.running ? { text: g.pruning ? '보관 정리 중' : '실행 중', tone: 'run' } : resultBadge(memberResults(rows.filter((r) => !r.missing), { resultsKnown: resultsKnownOf(tree), partial: tree?.director?.partial === true }));
   const sp = scheduleParts(g.schedule);
   const kp = keepParts(g);
   const fires = Array.isArray(g.fires) ? g.fires : [];

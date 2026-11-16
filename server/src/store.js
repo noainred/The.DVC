@@ -786,7 +786,8 @@ export function carryVmGpu(snap, prevSnap) {
   snap.vcenter.vmGpuCarried = n;
   return n;
 }
-export const hostCapacityKnown = (h) => !!h && [h.cpuCores, h.cpuTotalMhz, h.memTotalMB].every((v) => typeof v === 'number' && Number.isFinite(v));
+// 반증 K1(54회차 F5): 0 이하도 못 읽음 — 예전 판 엣지는 못 읽은 용량을 0 으로 올리고 중앙 정제(INV_NUM_KEYS)를 그대로 지난다(0 코어 · 0 MHz · 0 MB 호스트는 실재하지 않는다)
+export const hostCapacityKnown = (h) => !!h && [h.cpuCores, h.cpuTotalMhz, h.memTotalMB].every((v) => typeof v === 'number' && Number.isFinite(v) && v > 0);
 
 /**
  * v2.599 RECENT2599-03: 데이터스토어 사용량을 읽었는가 — usedGB·freeGB 가 둘 다 null 이면 못 읽은 것이다

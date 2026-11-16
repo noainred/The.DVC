@@ -16,6 +16,9 @@ import { restartBlockers, scanDeferMaxMs, upgradeManager } from './manager.js';
 import { preverifyBundleBytes, upgradeFromBundleBytes, restartProcess } from './upgrade.js';
 import { currentVersion } from '../config.js';
 import { localStamp } from '../util/dayKey.js';
+import { cmpVersion } from '../util/cmpVersion.js';
+import { checkpointConfigDbs } from './dbCheckpoint.js';
+import { config } from '../config.js';
 
 const RECHECK_MS = 60_000;
 const defaults = {
@@ -23,6 +26,8 @@ const defaults = {
   maxMs: () => scanDeferMaxMs(),
   now: () => Date.now(),
   preverify: (bytes, o) => preverifyBundleBytes(bytes, currentVersion(), o.pkgName, { allowSame: o.allowSame, manifestText: o.manifestText, where: o.where }),
+  // 반증 A1: 설치(설정 디렉터리 재귀 복사) 직전에 WAL SQLite 체크포인트 — 받을 때 한 번만 하면 몇 시간 뒤 설치에서 .db 와 -wal 이 다른 순간으로 복사된다
+  checkpoint: async () => { try { await checkpointConfigDbs(config.configDir); } catch { /* 업그레이드를 막지 않는다(수신 경로와 같다) */ } },
   install: (bytes, o) => upgradeFromBundleBytes(bytes, o.installDir, currentVersion(), o.pkgName, { allowSame: o.allowSame, manifestText: o.manifestText, where: o.where }),
   restart: () => restartProcess(),
   applying: () => !!upgradeManager._applying,
@@ -59,18 +64,27 @@ export function holdPushIfBusy({ bytes, installDir, pkgName, allowSame = false, 
   const pre = deps.preverify(bytes, { pkgName, allowSame, manifestText, where });
   if (!pre.ok) return pre;
   const now = deps.now();
-  const keep = !!pending && pending.version === pre.version;
-  const since = keep ? pending.since : now;
-  const until = keep ? pending.until : now + maxMs;
-  pending = { bytes, installDir, pkgName, allowSame, manifestText, where, source, version: pre.version, from: pre.from, since, until };
-  if (!timer) { timer = setInterval(() => { tickPushHold(); }, RECHECK_MS); timer.unref?.(); }
+  // 반증 A3(재현): 상한은 **처음 보류한 시각**부터 — 판이 바뀌어도 다시 시작하지 않는다(진행 중 작업이 계속 있으면 판마다 상한이 새로 시작돼 몇 시간 동안 설치 0회였다).
+  // 반증 A4(재현): 들고 있는 판보다 낮은 판이 오면 바꾸지 않는다(같은 판 재전송 · force 는 번들만 바꾼다).
+  const lower = !!pending && (cmpVersion(pre.version, pending.version) ?? 0) < 0;
+  const since = pending ? pending.since : now;
+  const until = pending ? pending.until : now + maxMs;
+  if (!lower) pending = { bytes, installDir, pkgName, allowSame, manifestText, where, source, version: pre.version, from: pre.from, since, until };
+  if (!timer) { timer = setInterval(() => { tickPushHold().catch((e) => console.warn(`[upgrade] 중앙 push 보류 확인 실패: ${e?.message || e}`)); }, RECHECK_MS); timer.unref?.(); }
   const labels = labelsOf(blockers);
-  const reason = `진행 중 작업 ${blockers.length}건(${labels.slice(0, 3).join(', ')}${blockers.length > 3 ? ' …' : ''})이 끝나면 v${pre.version} 를 설치하고 재시작합니다 — 늦어도 ${localStamp(until)}`;
-  return { ok: true, deferred: true, version: pre.version, from: pre.from, waitMs: Math.max(0, until - now), reason, waitingFor: labels.slice(0, 10) };
+  const v = pending.version;
+  const reason = `진행 중 작업 ${blockers.length}건(${labels.slice(0, 3).join(', ')}${blockers.length > 3 ? ' …' : ''})이 끝나면 v${v} 를 설치하고 재시작합니다 — 늦어도 ${localStamp(until)}${lower ? ` · 받은 v${pre.version} 는 들고 있는 판보다 낮아 쓰지 않습니다` : ''}`;
+  return { ok: true, deferred: true, version: v, from: pending.from, waitMs: Math.max(0, until - now), reason, waitingFor: labels.slice(0, 10) };
 }
 
-/** 1분마다(그리고 테스트가 직접) — 작업이 끝났거나 상한이면 설치 · 재시작. 자동 적용이 설치 중이면 이번은 건너뛴다. */
-export function tickPushHold() {
+/** 1분마다(그리고 테스트가 직접) — 작업이 끝났거나 상한이면 체크포인트 · 설치 · 재시작. 자동 적용이 설치 중이면 이번은 건너뛴다. */
+let _ticking = false;
+export async function tickPushHold() {
+  if (_ticking) return { outcome: 'busy' };
+  _ticking = true;
+  try { return await tickInner(); } finally { _ticking = false; }
+}
+async function tickInner() {
   if (!pending) { clearPushHold(); return { outcome: 'none' }; }
   if (deps.applying()) return { outcome: 'busy' };
   const now = deps.now();
@@ -80,6 +94,7 @@ export function tickPushHold() {
   clearPushHold();
   const forced = blockers.length > 0;
   let r;
+  await deps.checkpoint();
   try { r = deps.install(p.bytes, p); } catch (e) { r = { ok: false, reason: String(e?.message || e).slice(0, 300) }; }
   const note = forced
     ? `진행 중 작업 ${blockers.length}건(${labelsOf(blockers).slice(0, 3).join(', ')})이 대기 상한을 넘겨 설치합니다 — 그 작업은 결과를 받지 못합니다`
@@ -90,3 +105,6 @@ export function tickPushHold() {
   if (r && r.ok) setTimeout(() => restartFn(), 250);
   return { outcome: r?.ok ? 'installed' : 'install-failed', forced, result: r };
 }
+
+// 반증 A7: 수동 · 자동 적용이 성공하면 보류를 지운다(manager 가 부른다 — manager 는 이 파일을 import 하지 않는다)
+upgradeManager.onApplied = () => clearPushHold();

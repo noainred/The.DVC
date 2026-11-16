@@ -199,7 +199,7 @@ export default function SettingsTab({ onSaved, writable = true, hashBase = SETTI
                     <td data-sort={d.host || ''} style={{ fontSize: 12.5 }}><span style={{ fontFamily: 'var(--font-mono)' }}>{d.host ? `${d.host}:${d.port}` : '—'}</span><div className="muted" style={{ fontSize: 11.5 }}>콘솔 {d.consoleName || '—'} · {d.tlsMax || '—'}</div></td>
                     <td data-sort={d.agent || ''} style={{ fontSize: 12.5 }}>{d.agent ? <span className="badge blue">엣지 {d.agent}</span> : <span className="muted">중앙 직접</span>}</td>
                     <td>{d.hasPassword ? <span className="badge green">저장됨</span> : <span className="badge gray">없음</span>}</td>
-                    <td data-sort={vcs.length} style={{ fontSize: 12.5 }}><div style={{ maxWidth: 320, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{vcs.length ? `${vcs.length} · ${vcs.join(' · ')}` : '—'}</div>{vcs.length > 1 && <span className="badge amber" title={SHARED_DIRECTOR_TEXT}>vCenter 둘 이상</span>}</td>
+                    <td data-sort={vcs.length} style={{ fontSize: 12.5 }}><div style={{ maxWidth: 320, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{vcs.length ? `${vcs.length} · ${vcs.join(' · ')}` : '—'}</div>{vcs.length > 1 && !s.demo && <span className="badge amber" title={SHARED_DIRECTOR_TEXT}>vCenter 둘 이상</span>}</td>
                     <td className="right" data-sort={d.jobs ?? 0}>{d.jobs ?? 0}</td>
                     <td><button type="button" className="logout-btn" style={BTN} onClick={() => setSel(sel === d.id ? '' : d.id)}>{sel === d.id ? '닫기' : '편집'}</button></td>
                   </tr>
@@ -573,7 +573,7 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
             })}
           </div>
           <div className="muted" style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.6 }}>vCenter 하나는 Director 하나에만, Director 하나에는 vCenter 하나만 묶습니다(서비스 하나 = vCenter 하나 + Bareos 하나). 백업 대상이 있는 vCenter 는 다른 Director 로 옮길 수 없습니다(잡은 지금 Director 의 설정에 있습니다).</div>
-          {savedHere.size > 1 && <div style={{ fontSize: 11.5, marginTop: 6, color: 'var(--amber)', lineHeight: 1.6 }}>⚠ {SHARED_DIRECTOR_TEXT}</div>}
+          {savedHere.size > 1 && !s.demo && <div style={{ fontSize: 11.5, marginTop: 6, color: 'var(--amber)', lineHeight: 1.6 }}>⚠ {SHARED_DIRECTOR_TEXT}</div>}
         </div>
       </div>
 

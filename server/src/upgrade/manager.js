@@ -330,7 +330,12 @@ export class UpgradeManager {
     // 수동 apply가 겹치면 같은 installDir에 renameSync 스왑이 경합해 설치가 깨질 수 있다.
     if (this._applying) return { ok: false, reason: '업그레이드 적용이 이미 진행 중입니다.' };
     this._applying = true;
-    try { return await this.#applyInner({ source, restart, trigger }); }
+    try {
+      const r = await this.#applyInner({ source, restart, trigger });
+      // 반증 A7: 수동 · 자동 적용이 성공하면 중앙 push 보류(upgrade/pushHold.js)는 지운다 — 그 뒤 옛 보류 번들이 새 설치를 덮어쓰지 않게(등록으로 받는다 — 순환 import 회피)
+      if (r?.ok) { try { this.onApplied?.(); } catch { /* 보류 정리 실패가 적용 결과를 바꾸지 않는다 */ } }
+      return r;
+    }
     finally { this._applying = false; }
   }
 

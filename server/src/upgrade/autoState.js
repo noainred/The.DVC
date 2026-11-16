@@ -121,6 +121,8 @@ export function sanitizeResult(r) {
     code: txt(r.code, 60), version: ver(r.version), target: ver(r.target), from: ver(r.from), backup: txt(r.backup, 400),
     appliedArchive: txt(r.appliedArchive, 400), restarting: bool(r.restarting) || undefined,
     downloaded: num(r.downloaded), upToDate: bool(r.upToDate) || undefined,
+    // 반증 A2: 중앙 push 보류(51회차 #3) — 성공(설치) 으로 보이지 않게 표지 · 남은 시간을 남긴다
+    deferred: bool(r.deferred) || undefined, waitMs: num(r.waitMs), heldMs: num(r.heldMs), forced: bool(r.forced) || undefined, note: txt(r.note, 400),
   };
   const sig = sanitizeSignature(r.signature);
   if (sig) out.signature = sig;

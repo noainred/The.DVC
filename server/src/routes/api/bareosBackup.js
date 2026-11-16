@@ -17,7 +17,7 @@ import {
   directorConn, directorCred, directorById, loadSettings, jobDirectorId, siteMissing, anyDirectorConfigured, LIMITS,
 } from '../../bareos/settings.js';
 import {
-  listJobs, getJob, patchJob, deleteJob, markPending, addRestore, registryLoadError, jobVmIds, MAX_JOBS, restoreOpen, restoreHeld, restoreUnknownHeld, restoreFinishing, clearPending, applyRunRow, applyRestoreRow, registryRev, inBatch, markCancelReq, runUnknownHeld, RUN_UNKNOWN_HOLD_MS,
+  listJobs, jobDigests, getJob, patchJob, deleteJob, markPending, addRestore, registryLoadError, jobVmIds, MAX_JOBS, restoreOpen, restoreHeld, restoreUnknownHeld, restoreFinishing, clearPending, applyRunRow, applyRestoreRow, registryRev, inBatch, markCancelReq, runUnknownHeld, RUN_UNKNOWN_HOLD_MS,
 } from '../../bareos/registry.js';
 import { cancelInfo, cancelGate, CANCEL_WAIT_MS } from '../../bareos/cancelState.js';
 import { parseBanner } from '../../bareos/director.js';
@@ -264,7 +264,7 @@ function reconcileDirectorIds(user, settings) {
   const vcsOf = new Map();
   const add = (dir, vc) => { const a = vcsOf.get(dir) || new Set(); a.add(String(vc)); vcsOf.set(dir, a); };
   for (const s of settings.sites || []) add(s.directorId, s.vcenterId);
-  for (const j of listJobs()) add(jobDirectorId(j, settings), j.vcenterId);
+  for (const j of jobDigests()) add(jobDirectorId(j, settings), j.vcenterId);   // 반증 D1b: 얕은 요약으로(깊은 복사 listJobs 는 3,000건 약 100ms)
   return new Set([...vcsOf.entries()].filter(([, vcs]) => vcs.size > 0 && [...vcs].every((v) => w.has(v))).map(([id]) => id));
 }
 

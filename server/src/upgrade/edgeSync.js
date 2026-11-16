@@ -182,19 +182,21 @@ export function planEdgeSync({ collectors = [], statusOf = () => null, attemptsO
         // v2.870 감사 A2-01: 성공이라 답한 push 를 같은 대상 버전으로 다시 밀었는데도(=효과 없음 noEffect 회) 뒤처져 있으면 settle 을 밑으로
         // settle × 2^n(상한 6시간)까지 기다린다. 예전에는 settle(30분)이 지나면 매번 'behind' 로 다시 밀어 번들 전송 + 엣지 재시작이 영구 반복됐다
         // (재현 — 엣지 설치 경로가 실행 경로와 다르거나 재시작 뒤 롤백). 성공이면 attempts 를 0 으로 돌리므로 실패 백오프가 걸리지 않았다.
+        if (a && a.target === cur && a.ok && Number.isFinite(a.holdUntil) && now < a.holdUntil + settleMs) {
+          // 51회차 #3: 엣지가 진행 중 작업을 기다리며 설치를 미뤘다 — 그 상한 + settle 까지 다시 밀지 않는다(반증 A5: '효과 없음' 판정보다 먼저)
+          state = 'waiting'; row.nextAt = a.holdUntil + settleMs; row.reason = '엣지가 진행 중 작업이 끝나기를 기다렸다가 설치합니다';
+        }
+        else {
         const ne = a && a.target === cur && a.ok ? Math.max(0, Math.floor(numOrNull(a.noEffect) ?? 0)) : 0;
         if (ne > 0) {
           const wait = noEffectWaitMs(ne, settleMs, maxBackoffMs);
           if (now - a.at < wait) { state = 'no-effect'; row.nextAt = a.at + wait; row.reason = `번들을 받았다고 ${ne + 1}번 답했지만 ${Math.round(settleMs / 60_000)}분 뒤에도 v${v} 를 보고합니다 — 엣지의 설치 경로(UPGRADE_INSTALL_DIR) · 서비스 재시작을 확인하세요`; }
         }
-        else if (a && a.target === cur && a.ok && Number.isFinite(a.holdUntil) && now < a.holdUntil + settleMs) {
-          // 51회차 #3: 엣지가 진행 중 작업을 기다리며 설치를 미뤘다 — 그 상한 + settle 까지 다시 밀지 않는다
-          state = 'waiting'; row.nextAt = a.holdUntil + settleMs; row.reason = '엣지가 진행 중 작업이 끝나기를 기다렸다가 설치합니다';
-        }
         else if (a && a.target === cur && a.ok && now - a.at < settleMs) { state = 'waiting'; row.nextAt = a.at + settleMs; }
         else if (a && a.target === cur && !a.ok) {
           const wait = backoffMs(a.attempts, intervalMs, maxBackoffMs);
           if (now - a.at < wait) { state = 'backoff'; row.nextAt = a.at + wait; row.reason = txt(a.reason, 300); }
+        }
         }
         if (!state) { state = 'behind'; push.push(id); }
       }
