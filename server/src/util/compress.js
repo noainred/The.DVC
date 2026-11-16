@@ -15,8 +15,9 @@
 
 import zlib from 'node:zlib';
 import crypto from 'node:crypto';
+import { envPositive } from './envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
-const MIN_BYTES = Number(process.env.GZIP_MIN_BYTES) || 1024; // 이보다 작으면 압축 안 함(오버헤드 회피)
+const MIN_BYTES = envPositive(process.env.GZIP_MIN_BYTES, 1024); // 이보다 작으면 압축 안 함(오버헤드 회피)
 
 // 직렬화·gzip 결과 캐시(v2.343 #6) — payload '객체 identity' 키(WeakMap). memoJson(snapCache)은
 // 같은 스냅샷 TTL 동안 같은 payload 객체 참조를 모든 요청에 재사용하므로, 사용자 M명이 같은

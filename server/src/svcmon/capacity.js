@@ -14,15 +14,14 @@
  */
 
 import os from 'node:os';
+import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 const PER_WORKER_SOCKET = 62;   // 249/s ÷ 4워커 (소켓 대기형: tcp/http/dns/배너…)
 const PER_WORKER_PROC = 16;     // 64 동시 ÷ 4초 타임아웃 (프로세스 생성형: ping/trace)
 const PROC_TYPES = new Set(['ping', 'trace']);
 
-const envInt = (name, dflt) => {
-  const n = Number(process.env[name]);
-  return Number.isFinite(n) && n > 0 ? Math.round(n) : dflt;
-};
+// v3.17.6: 지역 사본 → 공용 util/envNumber.js(양수만 · 그 밖 기본값). 반올림 → 내림(개수 env 에 소수를 넣는 경우만 다르다).
+const envInt = (name, dflt) => envPositive(process.env[name], dflt);
 
 /** 워커 수 — poller/pool 과 같은 규칙(0 이면 인라인이라 1로 센다). */
 export function workerCount() {

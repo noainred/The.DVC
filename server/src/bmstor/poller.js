@@ -32,6 +32,7 @@ import { isMockMode, demoBmResults, isDemoId } from '../mock/demo/storage.js';
 import { ioSampleSec } from './diskstats.js';
 import { sanitizeDiskMap } from './diskMap.js';   // v2.971 — 엣지가 보낸 디스크별 누적 카운터(중앙 화이트리스트)
 import { recordIoSamples, pruneBmIo } from './ioDb.js';
+import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 /**
  * 베어메탈 스토리지 주기 수집의 **인증 실패 정지**(v2.590 — 감사 F2, server/CLAUDE.md v2.541 '아직 가드가 없는
@@ -57,7 +58,7 @@ function noteAuth(srv, r) {
 }
 
 const TICK_MS = 30_000;
-const PUSH_TIMEOUT_MS = Number(process.env.BMSTOR_PUSH_TIMEOUT_MS) || 180_000;
+const PUSH_TIMEOUT_MS = envPositive(process.env.BMSTOR_PUSH_TIMEOUT_MS, 180_000);
 /*
  * v2.631(EDGE2631-02): 중앙→엣지 PUSH 시한을 **서버 수에 비례**시킨다(폴링 위임 경로 bmstor/jobs.js 와 같은 식 — 60초 + 서버당
  *   20초, 상한 10분). 예전 고정 180초는 한 엣지 몫이 많거나 응답 없는 마운트(df 정지)가 몇 대 섞이면 엣지가 끝까지 수집한 결과

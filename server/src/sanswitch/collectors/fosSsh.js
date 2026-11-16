@@ -31,6 +31,7 @@ import { emptySnapshot, summarizePorts, MAX_PORTS } from '../types.js';
 import { applyRates, skipRates } from '../rates.js';
 import * as P from './fosParse.js';
 import { zoningFromText } from '../zoningCollect.js';
+import { envPositive } from '../../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 
 /** porterrshow 열 이름 → 포트 행 필드(축약 표시용, v2.590 F3). */
@@ -43,7 +44,7 @@ function approxFields(approx) {
   return { ...(errApprox.length ? { errApprox } : {}), ...(framesApprox ? { framesApprox: true } : {}) };
 }
 
-const RAW_LIMIT = Number(process.env.SANSW_CLI_RAW_LIMIT) || 4000;
+const RAW_LIMIT = envPositive(process.env.SANSW_CLI_RAW_LIMIT, 4000);
 export const CMD_TIMEOUT_MS = reqTimeoutMs(process.env.SANSW_CLI_TIMEOUT_MS, 45_000, { max: 1_800_000 });   // v2.606 TIM2606-03
 
 /*

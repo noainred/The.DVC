@@ -12,6 +12,27 @@
       ]
     },
     {
+      "version": "3.17.7",
+      "date": "2026-11-16",
+      "title": "2차 공통 기능 점검 6회차: 위험 알림의 서비스 워커 대기에 시한",
+      "notes": [
+        "브라우저 위험(critical) 알림(pwa.js)이 navigator.serviceWorker.ready 를 기다렸는데, 이 약속은 활성 워커가 생길 때까지 끝나지 않는다 — sw.js 등록이 실패하면(프록시 · 404 · 설치 오류) 그 뒤 위험 알림이 하나도 뜨지 않고 기다리는 약속만 쌓였다.",
+        "3초 안에 준비되지 않으면 일반 Notification 으로 넘어간다(swReadyWithin).",
+        "회귀 web/src/pwaReady.test.js."
+      ]
+    },
+    {
+      "version": "3.17.6",
+      "date": "2026-11-16",
+      "title": "2차 공통 기능 점검 5회차: 양수 환경변수 공용 판정 — 감사 로그 삭제 · 로그인 잠금 해제 방지",
+      "notes": [
+        "서버 35곳이 Number(process.env.X) || 기본값 으로 읽어 음수 · Infinity 를 통과시켰다 — AUDIT_MAX=-5 면 감사 로그 정리가 빈 배열을 써 감사 기록이 통째로 지워졌고(재현), LOGIN_MAX_FAILS · OTP_MAX_FAILS=Infinity 면 실패 잠금이 꺼졌다, POWER_NDJSON_MAX_ROWS 음수면 전력 기록 전 행을 버렸다.",
+        "공용 util/envNumber.js envPositive(유한한 양수만 — 그 밖은 기본값)로 바꾸고 지역 사본 3곳(agentIdentity · gpu/store · svcmon/capacity)도 이것으로.",
+        "ENV 문서 생성기가 헬퍼의 둘째 인자(envPositive · reqTimeoutMs 등)를 기본값으로 읽어 기본값 칸이 비어 있던 항목이 채워졌다.",
+        "회귀 server/test/commonRound15_3175.test.js(판정 · 소스 스윕 · AUDIT_MAX=-5 실제 감사 로그 — 수정 전 실패 확인)."
+      ]
+    },
+    {
       "version": "3.17.5",
       "date": "2026-11-16",
       "title": "2차 공통 기능 점검 4회차: 내려받기 공용 헬퍼 하나 · 파일 이름 판정 하나 · 전력 포맷터 사본",

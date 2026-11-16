@@ -21,8 +21,9 @@ import { onDemandVcBlock } from '../vcenter/dsBrowse.js';   // v2.743(감사 VC-
 import { describeError } from '../util/errors.js';
 import { isAdminDetailUser } from '../auth/demoGuest.js';   // v2.744(감사 AUTHZ-01): '남의 작업도 본다' 판정 하나
 import { poolRun } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(util/pool.js) — 손으로 쓴 사본 제거
+import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
-const CONCURRENCY = Number(process.env.PROVISION_CONCURRENCY) || 4;
+const CONCURRENCY = envPositive(process.env.PROVISION_CONCURRENCY, 4);
 const MAX_JOBS = 50; // keep the most recent N jobs in memory
 
 const jobs = []; // newest first

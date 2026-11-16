@@ -14,6 +14,7 @@ import { requireRole } from '../../auth/auth.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { listTargets, planBulkTargets } from '../../svcmon/store.js';
 import { judgeCapacity, suggestIntervalSec } from '../../svcmon/capacity.js';
+import { envPositive } from '../../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 // 변경은 admin/operator(CLAUDE.md RBAC 불변조건). 전 모듈이 이 게이트를 공유.
 // 조회 라우트에 개별 게이트가 없는 이유: v2.506 부터 마운트가 requirePerm('svcmon') 아래라
@@ -32,7 +33,7 @@ export const adminOnly = requireRole('admin');
 export const fullScopeOnly = fullScopeOnlyWith('성능점검 설정 변경은 전체 범위(vCenter 제한 없는) 계정만 할 수 있습니다 — 대상 트리·엣지 배정은 전 법인 공용이라 범위로 나눌 수 없습니다.');
 
 // XLSX 가져오기 디코딩 크기 상한(압축폭탄 완화). 정상 2,000행 xlsx 는 1MB 미만.
-export const XLSX_MAX_BYTES = Number(process.env.SVCMON_XLSX_MAX_BYTES) || 8_000_000;
+export const XLSX_MAX_BYTES = envPositive(process.env.SVCMON_XLSX_MAX_BYTES, 8_000_000);
 
 /**
  * 커밋 없이 판정만 — 미리보기와 실제 등록이 **같은 검증 코드**(planBulkTargets)를 쓴다.
