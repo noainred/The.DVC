@@ -76,8 +76,10 @@ function addTo(g, s) {
 /** 그룹 마감(순수) — 피크는 측정 서버가 다 모인 시간(n = 최대)만. */
 function finishGroup(g, { capKw = null, rackLowPct = 10 } = {}) {
   const hrs = [...g.hours.entries()].sort((a, b) => a[0] - b[0]);
-  const full = hrs.length ? Math.max(...hrs.map(([, e]) => e.n)) : 0;
-  const complete = hrs.filter(([, e]) => e.n === full);
+  // 전체 점검 34회차 F2(재현): '다 모인 시간' 의 기준은 24h 행이 있는 서버 수(avg24N) — 예전에는 시간별 n 의 최댓값이라, 어느 시간도 전원이
+  //   모이지 않으면(한 서버는 앞 12h · 다른 서버는 뒤 12h) 부분 합이 피크가 되고 partialHours 는 0 이었다. 다 모인 시간이 없으면 피크는 null.
+  const full = g.avg24N;
+  const complete = hrs.filter(([, e]) => e.n >= full);
   const pk = complete.reduce((a, [t, e]) => (a == null || e.w > a.w ? { t, w: e.w } : a), null);
   const nowKw = g.measured ? r2(g.nowW / 1000) : null;
   /*

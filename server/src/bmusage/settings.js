@@ -245,10 +245,19 @@ const CACHE_MS = 3_000;
 //   배포 라우트가 200 으로 내려보내면 전 엣지의 수집이 꺼진다 — 로드 오류를 기억해 /api/central/bmusage-config 가 503 으로 답한다.
 const _localErr = makeSettingsLoadError(FILE, { label: '베어메탈 사용률 설정', confirm: () => saveBmUsageSettings({}) });
 const _distErr = makeSettingsLoadError(DIST_FILE, { label: '베어메탈 사용률 배포(전체 배포 · 제외 · 중앙 켜기 — 기본값으로 확정하면 모두 비워집니다)', confirm: ({ by } = {}) => saveDistribution({}, by || '') });
+// 전체 점검 34회차 F4(재현): 읽기 오류(EACCES · EISDIR 등 — e.code 가 있다)는 손상이 아니다 — 원본을 옮기지 않고 readError 로 기억하며,
+//   그동안 그 파일의 저장은 거절한다(저장하면 원자적 쓰기가 읽지 못한 원본을 기본값 + 패치로 덮는다). 20회차 F4(svcmon · 권한 파일)와 같은 규약.
+const UNREADABLE_SAVE = '베어메탈 사용률 설정 파일을 읽지 못한 상태(권한 · 소유자)라 저장하지 않았습니다 — 파일 권한을 고치고 재시작하세요(지금 저장하면 원본이 기본값으로 덮입니다).';
+function unreadableError() { const e = new Error(UNREADABLE_SAVE); e.code = 'settings-unreadable'; e.status = 409; return e; }
+function readText(file, err) {
+  try { return fs.readFileSync(file, 'utf8'); } catch (e) { err.readError(e); return null; }
+}
 function readFile() {
   if (!fs.existsSync(FILE())) { _localErr.missing(); return {}; }
+  const text = readText(FILE(), _localErr);
+  if (text == null) return {};
   try {
-    const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    const raw = JSON.parse(text);
     if (!raw || typeof raw !== 'object') throw new Error('객체가 아닌 JSON 값');
     _localErr.ok();
     return raw;
@@ -339,7 +348,7 @@ function readCentralCopy() {
   try {
     const j = JSON.parse(fs.readFileSync(CENTRAL_COPY_FILE(), 'utf8'));
     _copy = j && typeof j === 'object' && j.settings && typeof j.settings === 'object' ? j : null;
-  } catch (e) { if (fs.existsSync(CENTRAL_COPY_FILE())) preserveCorrupt(CENTRAL_COPY_FILE(), e.message); _copy = null; }
+  } catch (e) { if (!e?.code && fs.existsSync(CENTRAL_COPY_FILE())) preserveCorrupt(CENTRAL_COPY_FILE(), e.message); _copy = null; }   // 34회차 F4: 읽기 오류(e.code)는 옮기지 않는다 — 중앙 사본이라 다음 인출이 다시 쓴다
   return _copy;
 }
 
@@ -385,8 +394,10 @@ export function bmUsageCentralState() {
 /** 중앙: 배포 설정(켬/끔 + 제외 엣지). 손상이면 보존 후 **꺼짐**(켜진 척하지 않는다). */
 export function loadDistribution() {
   if (!fs.existsSync(DIST_FILE())) { _distErr.missing(); return normalizeDistribution({}); }
+  const text = readText(DIST_FILE(), _distErr);   // 34회차 F4
+  if (text == null) return normalizeDistribution({});
   try {
-    const j = JSON.parse(fs.readFileSync(DIST_FILE(), 'utf8'));
+    const j = JSON.parse(text);
     if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('객체가 아닌 JSON 값');
     _distErr.ok();
     return normalizeDistribution(j);
@@ -444,6 +455,7 @@ export function normalizeDistribution(raw = {}) {
   return out;
 }
 function writeDistribution(next) {
+  if (_distErr.get()?.readError) throw unreadableError();   // 34회차 F4
   fs.mkdirSync(path.dirname(DIST_FILE()), { recursive: true });
   atomicWriteFileSync(DIST_FILE(), JSON.stringify(next, null, 2), { mode: 0o600 });
   _distErr.ok();
@@ -491,6 +503,7 @@ export function setPerEdge(agent, on, by = '', { corps = null } = {}) {
   const a = lowerAgent(agent);
   if (!a) return { ok: false, code: 'bad-name', reason: '엣지 이름이 필요합니다.' };
   const cur = loadDistribution();
+  if (_distErr.get()?.readError) return { ok: false, code: 'settings-unreadable', reason: UNREADABLE_SAVE };   // 34회차 F4
   const prev = perEdgeOf(cur, a);
   let ids = null;
   if (on === true) {
@@ -684,6 +697,8 @@ function notifyChange() { for (const cb of _listeners) { try { cb(); } catch { /
  * 돌려준다(화면이 '중앙이 정한 값이라 무시했다' 를 말한다 — 저장해도 다음 계산에서 중앙 값이 이기므로 조용히 버리면 거짓이다).
  */
 export function saveBmUsageSettings(body = {}) {
+  readFile();
+  if (_localErr.get()?.readError) throw unreadableError();   // 34회차 F4
   const { patch } = dropUnspecifiedNumbers(body);
   const ignoredCentralManaged = [];
   if (readCentralCopy()) for (const k of DISTRIBUTED_KEYS) if (Object.hasOwn(patch, k)) { delete patch[k]; ignoredCentralManaged.push(k); }
