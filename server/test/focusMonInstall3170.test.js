@@ -330,3 +330,19 @@ test('⑧ SSH 공용 접속 기능 목록 · 웹 글 1:1', () => {
   for (const s of B.INSTALL_FAILS) assert.ok(W.INSTALL_FAIL_TEXT[s], `웹 글: ${s}`);
   assert.equal(W.STEP_LABELS.length, I.INSTALL_STEPS.length);
 });
+
+test('⑨ 엣지 — 설치 작업은 설치 줄로 · 설치 계정 보고는 목록을 받은 뒤 60초에 한 번 · 비밀 없음', async () => {
+  const Wk = await import('../src/agent/focusMonWorker.js');
+  const src = fs.readFileSync(new URL('../src/agent/focusMonWorker.js', import.meta.url), 'utf8');
+  assert.match(src, /const sub = j\.mode === 'install'\n\s+\? installRunner\.submit\(/, '설치 작업은 점검 실행 줄이 아니라 설치 줄로');
+  assert.match(src, /exec: installExec\(\{ edge: true \}\)/, '엣지는 자기 법인의 계정(edge 모드)');
+  assert.equal(Wk.credReport(Date.now(), () => ({ state: 'ok' })), null, '맡은 서버 목록을 받기 전에는 보고하지 않는다');
+  Wk._setKnownForTest([{ id: 'fm-eeeeeeee01', name: 'pl-db-01', host: '10.48.0.1', port: 22 }]);
+  const now = Date.now();
+  const rep = Wk.credReport(now, () => ({ state: 'ok', src: 'corp', acct: 'pl-ops', key: 'pl-common', auth: { privateKey: 'SECRET-PEM' } }));
+  assert.deepEqual(rep['fm-eeeeeeee01'], { state: 'ok', src: 'corp', acct: 'pl-ops', key: 'pl-common' });
+  assert.equal(JSON.stringify(rep).includes('SECRET'), false, '보고에 비밀 없음');
+  assert.equal(Wk.credReport(now + 1000, () => ({ state: 'ok' })), null, '60초에 한 번');
+  assert.ok(Wk.credReport(now + 61_000, () => ({ state: 'ok' })));
+  Wk._setKnownForTest([]);
+});
