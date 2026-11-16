@@ -8,6 +8,7 @@
  * 그 아래에 **맥락 각주**(서버 · 법인 · 기간 · 커서 · 출처 · 생성자)를 캔버스 글자로 덧붙인다 — 보는 사람이 화면 없이도 읽게.
  */
 import { captureElementCanvas } from './reportExport.js';
+import { saveBlob } from '../../util/saveBlob.js';
 
 const PAINT = Object.freeze(['stroke', 'fill', 'stroke-opacity', 'fill-opacity', 'opacity', 'stroke-dasharray', 'stroke-width', 'color']);
 /** 복제 문서의 SVG 도형 칠을 계산값으로(순회만). root 아래 svg 만. */
@@ -50,11 +51,8 @@ export async function captureNodePng(el, { footer = [], scale = 2, capture = cap
     catch (e) { reject(e?.name === 'SecurityError' ? new Error('이 브라우저가 화면 그림 만들기를 막았습니다(보안 설정).') : e); }
   });
 }
-export function downloadBlob(blob, name) {
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1_000);
-}
+// v3.17.5: 본체는 공용 util/saveBlob.js(같은 규약) — 이 이름은 호출부 호환으로 남긴다.
+export function downloadBlob(blob, name) { saveBlob(blob, name); }
 /** 파일 이름(ASCII — 헤드리스 · 일부 브라우저가 한글 download 이름을 떨어뜨린다: v2.519). */
 export function captureName(kind, at = Date.now()) {
   const d = new Date(at);

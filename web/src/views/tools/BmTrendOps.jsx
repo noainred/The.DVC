@@ -23,6 +23,7 @@ import {
 } from './bmPerfOpsText.js';
 import './bmOps.css';
 import './bmPerfOps.css';
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
 
 const BAND_METRICS = Object.freeze(['cpu_pct', 'disk_await_ms', 'disk_busy_pct', 'net_pct', 'mem_pct']);
 
@@ -44,8 +45,7 @@ function useGenJson(path) {
 function download(text, name) {
   try {
     const blob = new Blob([`﻿${text}`], { type: 'text/csv;charset=utf-8' });
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1_000);
+    saveBlob(blob, name);
   } catch { /* */ }
 }
 

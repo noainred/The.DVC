@@ -19,6 +19,7 @@ import {
 } from './tuning.js';
 import { vmContentionFindings, CONTENTION_TEXT } from '../contention/contentionText.js';
 import { vmCfgFindings, VM_CFG_TEXT } from '../vmcfg/vmCfgText.js';
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나(즉시 revoke · 문서 밖 click 금지)
 
 const RightsizeReport = React.lazy(() => import('../tools/RightsizeReport.jsx'));
 const STATE_COLOR = { ok: 'var(--green)', warn: 'var(--amber)', crit: 'var(--red)', unknown: 'var(--text-dim)' };
@@ -41,10 +42,7 @@ function Axes({ axes }) {
 
 function download(name, text, type) {
   try {
-    const url = URL.createObjectURL(new Blob([text], { type }));
-    const a = document.createElement('a');
-    a.href = url; a.download = name; a.click();
-    URL.revokeObjectURL(url);
+    saveBlob(new Blob([text], { type }), name);
   } catch { /* 내려받기를 막은 환경 — 버튼이 아무것도 하지 않는다 */ }
 }
 

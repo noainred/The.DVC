@@ -61,6 +61,7 @@ import BmMaintPanel from './BmMaintPanel.jsx'; // 8a단계 정비 창 · 알림 
 import { addKey } from './bmCompareText.js';
 import { refOf, parseRef, normRef } from './bmPerfUrl.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 상세 · 비교 · 공유 링크에 법인을 싣는다
 import { parseShareHash } from './bmShare.js'; // 6단계 공유 링크(#/tools/bm-usage/share?… — 도구 키 그대로) // v2.929(5단계): 리눅스 성능 알림 규칙 · 집중 · 베이스라인 · 소모품 기준(별도 파일 · 별도 절)
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
 
 /** v2.920: 보기 기억(사용자별 편의 — 실패해도 화면은 기본값으로 그린다). */
 const VIEW_KEY = 'bmUsage.view';
@@ -242,9 +243,7 @@ export function BmUsage() {
     const name = `bm-usage-${stamp}${facets.facetOn || q.trim() ? '-filtered' : ''}.csv`;
     try {
       const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });   // BOM — 엑셀 한글
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob); a.download = name; a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      saveBlob(blob, name);
       setMsg({ tone: 'ok', text: `**${shown.length}대**를 CSV 로 내보냈습니다(${name}).${facets.facetOn || q.trim() ? ' 지금 화면에 보이는 것만 담았습니다.' : ''}` });
     } catch (e) { setMsg({ tone: 'bad', text: `내보내기 실패: ${e?.message || e}` }); }
   }

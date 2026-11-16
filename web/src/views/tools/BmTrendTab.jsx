@@ -39,6 +39,7 @@ import {
 } from './bmTrendText.js';
 import './bmTrend.css';
 import { perfPath } from './bmPerfUrl.js'; // 다음 점검 ①: 서버 = (법인, 키) 쌍 — 요청에 법인을 싣는다
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
 
 const DEV_SEGS = Object.freeze([
   { k: 'none', label: '서버 전체' },
@@ -55,11 +56,7 @@ const hm = (ms) => { const d = new Date(ms); return `${two(d.getHours())}:${two(
 function downloadText(text, name) {
   if (typeof document === 'undefined' || typeof URL === 'undefined' || typeof Blob === 'undefined') return;
   const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = name;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  saveBlob(blob, name);
 }
 
 /** 단순 조회(장치 목록 · 포트 대조) — 세대로 늦은 응답을 버린다. */

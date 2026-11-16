@@ -25,6 +25,7 @@ import { effVcOf, dcOfServer, scopeMatchServer, matchServerQuery } from './barem
 import BaremetalBoard from './BaremetalBoard.jsx'; // v2.917 물리 서버 › 상태 보드
 import useSearchHandoff from '../../hooks/useSearchHandoff.js'; // v2.909 헤더 ⌘K 통합 장비 검색 — 검색어 인계
 import { useFocusHandoff } from '../../hooks/useSearchHandoff.js'; // v2.911 고른 장비 상세 열기
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나(즉시 revoke · 문서 밖 click 금지)
 
 /**
  * v2.622(감사 RECENT-04): 상세 모달 열기 — 행이 벤더를 모르면(온도·GPU·드릴다운) 먼저 'BMC' 로 열고 서버 목록을
@@ -394,8 +395,7 @@ function ServerListBody({ corpName, model, servers, onRow }) {
     const lines = [head.join(',')];
     for (const s of rows) lines.push([s.name || s.id, s.model || model || '', serverCsvType(s), serverCsvVendor(s), String(s.host || '').replace(/^https?:\/\//, ''), s.serviceTag || '', s._vc || '', s.enabled === false ? '중지' : '수집'].map(esc).join(','));
     const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `servers-${String(model || corpName).replace(/[^a-zA-Z0-9._-]+/g, '_')}-${dayStamp()}.csv`; a.click(); URL.revokeObjectURL(url);
+    saveBlob(blob, `servers-${String(model || corpName).replace(/[^a-zA-Z0-9._-]+/g, '_')}-${dayStamp()}.csv`);
   };
   return (
     <>
@@ -492,10 +492,7 @@ function PartsInventory({ vc, onServer }) {
     .sort((a, b) => (sortKey === 'label' ? a.label.localeCompare(b.label) : (b[sortKey] || 0) - (a[sortKey] || 0)));
   const exportCsv = () => {
     const csv = ['분류,파트,상세,수량,서버수', ...rows.map((b) => [b.catName, b.label, b.detail, b.count, b.serverCount].map(esc).join(','))].join('\n');
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' }));
-    a.download = `hardware-parts-${dayStamp()}.csv`;
-    a.click(); URL.revokeObjectURL(a.href);
+    saveBlob(new Blob(['﻿' + csv], { type: 'text/csv' }), `hardware-parts-${dayStamp()}.csv`);
   };
   const th = (key, label) => (
     <th style={{ cursor: 'pointer', whiteSpace: 'nowrap' }} onClick={() => setSortKey(key)}>{label}{sortKey === key ? ' ▾' : ''}</th>

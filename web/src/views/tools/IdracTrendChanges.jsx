@@ -10,6 +10,7 @@ import { STable } from '../../components/STable.jsx';
 import {
   TABLE_SERIES, activeConds, changeEpisodes, episodeRangeText, episodeDeltaText, condOneText, episodesCsv, valueText, hoursLabel, ymd, hm,
 } from './idracTrendText.js';
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
 
 export function IdracTrendChanges({ row, conds, hours, since, onClose, onOpen }) {
   const act = useMemo(() => activeConds(conds), [conds]);
@@ -29,9 +30,7 @@ export function IdracTrendChanges({ row, conds, hours, since, onClose, onOpen })
   const missing = data ? keys.filter((k) => !Array.isArray(data.series?.[k]) || !data.series[k].length) : [];
   const saveCsv = () => {
     const blob = new Blob([episodesCsv(row.name, res.episodes)], { type: 'text/csv;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = `idrac-changes_${hours}h.csv`;
-    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    saveBlob(blob, `idrac-changes_${hours}h.csv`);
   };
 
   return (

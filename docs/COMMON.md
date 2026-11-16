@@ -1,11 +1,11 @@
 # 공통 기능 목록 (자동 생성)
 
-솔루션 전체가 함께 쓰는 공용 모듈 **159개**를 코드에서 뽑은 목록이다. 새 헬퍼·컴포넌트를 만들기 전에 여기서 먼저 찾는다
+솔루션 전체가 함께 쓰는 공용 모듈 **160개**를 코드에서 뽑은 목록이다. 새 헬퍼·컴포넌트를 만들기 전에 여기서 먼저 찾는다
 (같은 판정을 복제하지 말 것 — 루트 `CLAUDE.md` '판정 코어는 하나').
 
 - 생성: `node scripts/common-doc.mjs` · 최신 여부: `node scripts/common-doc.mjs --check`
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다. 설명을 고치려면 그 모듈의 **머리 주석 첫 단락**을 고친다.
-- 훑은 소스 4216개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
+- 훑은 소스 4219개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
 
 ## 읽는 법 · 한계
 
@@ -22,9 +22,9 @@
 | 서버 공용 유틸 | `server/src/util/` | 90 | 0 | 10 |
 | 웹 공용 컴포넌트 | `web/src/components/` | 46 | 0 | 12 |
 | 웹 공용 훅 | `web/src/hooks/` | 8 | 0 | 2 |
-| 웹 공용 유틸 | `web/src/util/` | 3 | 0 | 0 |
+| 웹 공용 유틸 | `web/src/util/` | 4 | 0 | 0 |
 | 웹 최상위 공용 모듈 | `web/src/` | 12 | 0 | 1 |
-| **합계** | | **159** | **0** | **25** |
+| **합계** | | **160** | **0** | **25** |
 
 ## 서버 공용 유틸 — `server/src/util/` (90)
 
@@ -191,14 +191,15 @@
 | `useStickyOffset.js` | 화면 안에서 sticky 로 붙이는 바의 top 을 '숫자를 박지 않고' 정하기 위한 높이 측정 훅(v2.810). | `useStickyHeadH` `useBoxHeight` `STICKY_HEADS` | 2 | 2 | 1 |
 | `useTreeDnd.js` | 트리 드래그앤드롭 상태 기계(v2.319, 모듈화 감사 #10). | `dropZone` `useTreeDnd` | 1 | 1 | 1 |
 
-## 웹 공용 유틸 — `web/src/util/` (3)
+## 웹 공용 유틸 — `web/src/util/` (4)
 
 사용처가 많은 순.
 
 | 모듈 | 하는 일 | 내보내는 이름 | 사용처 | 영역 | 테스트 |
 |---|---|---|---|---|---|
+| `saveBlob.js` | 만든 파일(Blob)을 사용자 PC 에 내려받게 한다 — **공용 하나**(v3.17.5 · 2차 공통 기능 점검 4회차). | `saveBlob` `saveText` `default` | 33 | 6 | 1 |
 | `copyText.js` | 글자를 클립보드에 복사한다 — **HTTP 포탈에서도 동작하는** 공용 판정(v3.10.1). | `copyText` `default` | 23 | 7 | 2 |
-| `fmt.js` | 공용 표시 포맷터(v2.319, 모듈화 감사 #9). | `fmtAgo` `num` `fmtDate` `fmtTime` `dec1` `fmtW` 외 3 | 20 | 4 | 2 |
+| `fmt.js` | 공용 표시 포맷터(v2.319, 모듈화 감사 #9). | `fmtAgo` `num` `fmtDate` `fmtTime` `dec1` `fmtW` 외 3 | 21 | 4 | 3 |
 | `csv.js` | 클라이언트 CSV 내보내기 공통 유틸 — **수식 인젝션 가드**를 한 곳에 모은다. 서버(server/src/util/csv.js guardCell)·pyportal(hub/csvio.py)과 동일 정책: Excel/Sheets 는 `= + - @` (및 앞선 탭/C… | `guardCell` `csvCell` `toCsv` | 19 | 2 | 3 |
 
 ## 웹 최상위 공용 모듈 — `web/src/` (12)
@@ -207,7 +208,7 @@
 
 | 모듈 | 하는 일 | 내보내는 이름 | 사용처 | 영역 | 테스트 |
 |---|---|---|---|---|---|
-| `api.js` | v2.498: 진행 중 요청 레지스트리 + 장기 로딩(hang) 보고. perfClient 는 api.js 를 import 하지 않으므로 순환이 없다(설정 조회는 fetchJson 을 인자로 받는다). | `noteHttpError` `permissionInfoFor` `httpInfoFor` `fetchJson` `postJson` `sendJson` 외 34 | 400 | 19 | 44 |
+| `api.js` | v2.498: 진행 중 요청 레지스트리 + 장기 로딩(hang) 보고. perfClient 는 api.js 를 import 하지 않으므로 순환이 없다(설정 조회는 fetchJson 을 인자로 받는다). | `noteHttpError` `permissionInfoFor` `httpInfoFor` `fetchJson` `postJson` `sendJson` 외 34 | 400 | 19 | 45 |
 | `numOrNull.js` | `numOrNull`(웹) — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정. | `numOrNull` `default` | 138 | 11 | 2 |
 | `dayStamp.js` | 브라우저 쪽 날짜 표기(v2.582 BUG-3) — 내려받기 파일명·만료일은 **사용자의 로컬 날짜**다. `new Date().toISOString().slice(0, 10)` 은 UTC 날짜라 한국 시각 00:00~09:00 에는 **어제**가 된다 (보고서 파일명… | `dayStamp` | 24 | 5 | 1 |
 | `regions.js` | 지역(region) 목록 — 웹 단일 소스(v2.575 IMP-10). ⚠ 값은 서버 `server/src/util/regions.js` 와 **글자 그대로 같아야 한다**(웹은 서버 소스를 import 할 수 없어 복사가 불가피하다). `web/src/regions.`… | `REGIONS` `default` | 5 | 2 | 2 |
@@ -313,7 +314,7 @@
 | `web/src/views/changeResult.js` | v2.731(점검 1회차 A5-01): 변경 요청 응답 판정 — 순수 모듈(화면·테스트가 같이 쓴다). | 44 | 4 | 4 |
 | `web/src/views/tools/toneVar.js` | toneVar — 판정 톤(`ok`/`warn`/`bad`, 또는 진단 어휘 `green`/`amber`/`red`) → CSS 색 변수. **공용 코어** (v2.613 DEPS2613-11). 예전에는 `bmUsageText`·`edgeLogText`·`partFa`… | 29 | 1 | 1 |
 | `web/src/views/blankOr.js` | 숫자 입력칸 → 요청 값(v2.596, 감사 CLAMP2596-02·05). 빈 칸은 **보내지 않는다**(undefined — JSON 에서 빠진다) — `Number('')` 는 0 이라 '임계 끔'·'보존 무제한' 으로 둔갑했다. 서버도 빈 값을 미지정으로 받지만… | 27 | 3 | 1 |
-| `web/src/views/tools/shared.jsx` | SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동. | 26 | 1 | 3 |
+| `web/src/views/tools/shared.jsx` | SpecialTools.jsx(구 5,070줄)에서 분리(v2.282 대형 파일 분할). 본문은 원본 그대로 이동. | 26 | 1 | 4 |
 | `web/src/views/droppedSecretText.js` | 저장 비밀 폐기 안내(v2.607, 감사 WEB2607-03 · LEFT2607-07). | 21 | 3 | 4 |
 | `web/src/views/hostcfg/hostCfgText.js` | v2.699 — ESXi 호스트 구성·보안 문구·판정. 서버 hostcfg/parse.js 와 같은 입력으로 대조한다(번들 경계라 두 벌). 문구에 백틱·별표 금지(BoldText 는 **강조** 만 해석). | 7 | 5 | 5 |
 

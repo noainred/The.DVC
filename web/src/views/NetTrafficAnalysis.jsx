@@ -7,6 +7,7 @@ import { netmonStopBadge } from './authSkipText.js'; // v2.591(감사 F5): SSH �
 import { requireChanged } from './changeResult.js'; // v2.732 B5-04: 실패 본문(200 {ok:false})을 성공으로 읽지 않는다
 import { numOrNull } from '../numOrNull.js';
 import { notCollectedNote } from './eventCoverageText.js'; // v2.733(C1-01): 이 포탈이 지금 이벤트를 수집하지 않는 vCenter
+import { saveBlob } from '../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
 
 /**
  * v2.732(점검 2회차 B5-04): 연속 모니터링 '+ 모니터 추가' 를 보일지 — 목록 조회가 **권한 거부(403)** 면 저장도 같은 403 이다
@@ -245,7 +246,7 @@ function Capture() {
       const r = await postJson('/admin/net/pcap', { hostA: { host: f.host, port: Number(f.port) || 22, username: f.username, password: f.password }, peer: f.peer, iface: f.iface, seconds: Number(f.seconds), maxPackets: Number(f.maxPackets), useSudo: f.useSudo });
       if (!r.ok) { setErr(r.reason || 'pcap 실패'); return; }
       const bin = atob(r.pcapBase64); const arr = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([arr], { type: 'application/vnd.tcpdump.pcap' })); a.download = r.fileName; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      saveBlob(new Blob([arr], { type: 'application/vnd.tcpdump.pcap' }), r.fileName);
       setPcapInfo({ captured: r.captured, size: r.size, summary: r.summary });
     } catch (e) { setErr(e.message); } finally { setPcapBusy(false); }
   };
