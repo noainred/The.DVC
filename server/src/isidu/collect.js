@@ -128,7 +128,7 @@ export async function collectTarget(t, { trigger = 'schedule', manual = false, a
     try {
       const r = await withDeadline(plan.sessionMs, (signal) => withSsh({ ...c.creds, signal }, async (api) => {
         if (detach) {
-          return runDetached(api, t, { cmdMs: plan.cmdMs, attachJob, signal, started,
+          return runDetached(api, t, { cmdMs: plan.cmdMs, attachJob, signal, started, onRestart: (ts) => { runStart = ts; },
             onJob: (job) => { jobRef = job.id; try { onJob?.(job); } catch { /* */ } } });
         }
         const x = await api.exec(duCommand(t.path, t.sizeMode), plan.cmdMs, { long: true });

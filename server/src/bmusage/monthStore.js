@@ -977,7 +977,7 @@ async function countAll() {
       } catch { unread.push(f.name); } finally { try { tmp?.close(); } catch { /* */ } }   // 40회차 F5: 못 연 파일을 0행으로 더하지 않고 따로 센다
       await maybeYield();
     }
-    out[fam] = { files: files.length, first: files[0]?.key ?? null, last: files.at(-1)?.key ?? null, rows, bytes, ...(unread.length ? { unread: unread.slice(0, 8), rowsPartial: true } : {}) };
+    out[fam] = { files: files.length, first: files[0]?.key ?? null, last: files.at(-1)?.key ?? null, rows, bytes, ...(unread.length ? { unread: unread.slice(0, 8), unreadCount: unread.length, rowsPartial: true } : {}) };
   }
   _counts = { at: Date.now(), v: { ...out, countsAt: Date.now(), failed: failedFiles().slice(0, 8), ...(devRollupMissed() ? { devRollupMissed: devRollupMissed() } : {}) } };   // 40회차 F2
   return _counts.v;

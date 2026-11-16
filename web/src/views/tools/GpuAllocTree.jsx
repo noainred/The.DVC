@@ -14,7 +14,7 @@ import { downloadFailText } from '../downloadFailText.js';
 import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
 import { vcQuickDot } from '../vcCardText.js';
 import { STable } from '../../components/STable.jsx';
-import { ALLOC_LEVELS, DEFAULT_LEVEL, KIND_TEXT, flattenAlloc, openForLevel, openAfterRefresh, numText, pctText, sumTotals, corpChips, corpChipText, allocExportQuery } from './gpuAllocText.js';
+import { ALLOC_LEVELS, DEFAULT_LEVEL, KIND_TEXT, flattenAlloc, openForLevel, openAfterRefresh, numText, pctText, sumTotals, corpChips, corpChipText, allocExportQuery, allocEmptyText } from './gpuAllocText.js';
 import { GpuAllocPlace } from './GpuAllocPlace.jsx';       // v2.939 개선 4 — 배치 추천
 import { GpuAllocHistory } from './GpuAllocHistory.jsx';   // v2.939 개선 7 — 추이 · 소진 예상
 import { GpuAllocDiag } from './GpuAllocDiag.jsx';         // v2.939 개선 2 — 수집 점검
@@ -100,12 +100,12 @@ export function GpuAllocTree({ scope }) {
   const TABS = [['tree', '계층 표'], ['place', '배치 추천'], ['history', '추이'], ['diag', '수집 점검']];
   const T = sumTotals(data, vcSel) || {};
   const kpis = [
-    { label: '전체 용량', value: numText(T.capGB), unit: T.capGB != null ? 'GB' : '', sub: `GPU ${T.gpus}장 · 호스트 ${T.hosts}대${T.vsga ? ` · vSGA ${T.vsga}장 제외` : ''}${T.capUnknown ? ` · 모름 ${T.capUnknown}장` : ''}` },
+    { label: '전체 용량', value: numText(T.capGB), unit: T.capGB != null ? 'GB' : '', sub: `GPU ${T.gpus}장 · 호스트 ${T.hosts}대${T.hostsDown ? ` · 끊겨 못 읽은 호스트 ${T.hostsDown}대(합계는 부분)` : ''}${T.vsga ? ` · vSGA ${T.vsga}장 제외` : ''}${T.capUnknown ? ` · 모름 ${T.capUnknown}장` : ''}` },
     { label: '할당(켜진 VM)', value: numText(T.allocGB), unit: 'GB', sub: `vGPU·GPU VM ${T.vmsOn}대 켜짐${T.allocUnknown ? ` · 모름 ${T.allocUnknown}대` : ''}`, tone: 'alloc' },
     { label: '예비', value: numText(T.spareGB), unit: T.spareGB != null ? 'GB' : '', sub: `빈 GPU ${T.freeGpus}장${T.spareGB == null ? ' · 모르는 값이 섞여 계산 안 함' : ''}`, tone: 'spare' },
     { label: '할당률', value: pctText(T.allocPct), unit: '', sub: T.allocPct != null && T.allocPct >= 90 ? '포화에 가깝습니다' : '전체 대비 할당' },
     { label: '꺼진 VM', value: numText(T.offGB), unit: T.offGB != null ? 'GB' : '', sub: `${T.vmsOff}대 — 켜면 필요한 양${T.offUnknown ? ` · 모름 ${T.offUnknown}대` : ''}`, tone: 'off' },
-    { label: '확인할 것', value: String((T.allocUnknown || 0) + (T.capUnknown || 0) + (T.unplaced || 0)), unit: '건', sub: `할당 모름 ${T.allocUnknown || 0} · 용량 모름 ${T.capUnknown || 0} · 미배치 VM ${T.unplaced || 0}` },
+    { label: '확인할 것', value: String((T.allocUnknown || 0) + (T.capUnknown || 0) + (T.unplaced || 0) + (T.hostsDown || 0)), unit: '건', sub: `할당 모름 ${T.allocUnknown || 0} · 용량 모름 ${T.capUnknown || 0} · 미배치 VM ${T.unplaced || 0}${T.hostsDown ? ` · 끊긴 GPU 호스트 ${T.hostsDown}` : ''}` },
   ];
   const arrow = (key) => (sort && sort.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '');
 
@@ -166,9 +166,9 @@ export function GpuAllocTree({ scope }) {
       {tab === 'history' && <GpuAllocHistory vcSel={vcSel} scope={scope} />}
       {tab === 'diag' && <GpuAllocDiag />}
       {tab !== 'tree' ? null : (data.vcenters || []).length === 0 ? (
-        <div className="card" style={{ padding: 16 }}><span className="muted">GPU 가 설치된 호스트가 없습니다.</span></div>
+        <div className="card" style={{ padding: 16 }}><span className="muted">{allocEmptyText(data, null)}.</span></div>
       ) : rows.length === 0 ? (
-        <div className="card" style={{ padding: 16 }}><span className="muted">{query ? `‘${query}’ 에 맞는 법인·호스트·VM 이 없습니다` : '고른 법인에 GPU 가 설치된 호스트가 없습니다'}{vcSel.size ? ` (법인 ${[...vcSel].join(', ')} 선택 중)` : ''}.</span></div>
+        <div className="card" style={{ padding: 16 }}><span className="muted">{allocEmptyText(data, vcSel, { query })}{vcSel.size ? ` (법인 ${[...vcSel].join(', ')} 선택 중)` : ''}.</span></div>
       ) : (
         <STable className="gpu-alloc-table" minWidth={1620}>
           <thead>

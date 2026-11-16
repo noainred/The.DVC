@@ -133,5 +133,38 @@ test('42회차 R3 · R5 · R6: 원시 행 수 하한 표지 · 카탈로그 HAS_
   assert.match(read('bmusage/db.js'), /rawRowsPartial: true/);
   const s = read('horizon/sessionCollect.js');
   assert.match(s, /if \(more !== true && body\.length < CATALOG_PAGE\) break;/);
-  assert.match(s, /if \(more === true && body\.length === 0\) \{ if \(page > 1 && prevLen < size\) break; truncated = true; break; \}/);
+  assert.match(s, /if \(more === true && body\.length === 0\) \{ if \(page === 1 \|\| prevLen < size\) break; truncated = true; break; \}/);   // 43회차 R6
+  assert.match(s, /if \(!r\.ok && page > 1 && prevLen < size\) break;/, '43회차 R7: 짧은 쪽 다음 요청의 오류는 끝');
+  assert.match(s, /if \(!r\.ok && page > 1\) \{ truncated\[kind\] = true; break; \}/, '43회차 R7: 카탈로그 2쪽 이후 오류는 앞 쪽까지');
 });
+
+/* ── 43회차(42회차 수정 반증) ── */
+test('43회차 R1: 재개 대상이 없어 새로 띄우면 호출부 소요 기준(onRestart)도 지금으로', async () => {
+  const { runDetached } = await import('../src/isidu/detach.js');
+  let clock = Date.now(); let restarted = null;
+  const seq = ['DVC-NONE', 'STARTED', 'DVC-DONE 0'];
+  const api = { exec: async (cmd) => { clock += 60_000; if (/DVC-STARTED|nohup|setsid/.test(cmd) && seq[0] === 'STARTED') { seq.shift(); return { stdout: 'DVC-STARTED 1\n' }; } const x = seq.length ? seq.shift() : 'DVC-DONE 0'; return { stdout: `${x}\n` }; } };
+  await runDetached(api, { id: 'tA', path: '/ifs/a', sizeMode: 'h' }, { cmdMs: 180 * 60_000, attachJob: 'isidu-tA-1', started: clock - 175 * 60_000, now: () => clock, pollMinMs: 1, onRestart: (ts) => { restarted = ts; } });
+  assert.ok(restarted && restarted > clock - 10 * 60_000, '새 작업 시작 시각을 알린다');
+  assert.match(read('isidu/collect.js'), /onRestart: \(ts\) => \{ runStart = ts; \}/);
+});
+
+test('43회차 R3 · R4: 엑셀 비고 · 목차 사유 · 못 읽은 파일 수(소스)', () => {
+  const x = read('gpu/allocTreeXlsx.js');
+  assert.match(x, /GPU 를 못 읽은 끊긴 호스트 \$\{t\.hostsDown\}대 — 합계는 부분/);
+  assert.match(x, /c\.unknown === 'hostsDown' \?/);
+  assert.match(read('bmusage/monthStore.js'), /unreadCount: unread\.length/);
+  assert.match(read('bmusage/db.js'), /Number\(files\.raw\.unreadCount\)/);
+});
+
+test('43회차: 끊긴 GPU 호스트가 있는 법인 · 전체 합계는 예비 · 할당률을 내지 않는다', async () => {
+  const { buildGpuAllocTree } = await import('../src/gpu/allocTree.js');
+  const gpu = (i) => ({ model: 'NVIDIA A40', memGB: 45, mode: 'vgpu', vgpuMode: true, pciId: `0000:${i}:00.0`, vms: [] });
+  const vms = ['esx1', 'esx2'].map((h, i) => ({ id: `vc1:vm-${i}`, name: `vm${i}`, vcenterId: 'vc1', host: h, powerState: 'POWERED_ON', gpu: { type: 'vgpu', vgpu: 1, passthrough: 0, profile: 'nvidia_a40-24q', count: 1 } }));
+  const snap = { vcenters: [{ id: 'vc1', status: 'ok' }], hosts: [{ id: 'vc1:esx1', vcenterId: 'vc1', name: 'esx1', connectionState: 'CONNECTED', gpus: [gpu(1)] }, { id: 'vc1:esx2', vcenterId: 'vc1', name: 'esx2', connectionState: 'NOT_RESPONDING', gpus: [] }], vms };
+  const t = buildGpuAllocTree(snap);
+  assert.equal(t.vcenters[0].totals.hostsDown, 1);
+  assert.equal(t.vcenters[0].totals.allocPct, null);
+  assert.equal(t.totals.spareGB, null);
+});
+

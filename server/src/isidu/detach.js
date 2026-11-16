@@ -107,7 +107,7 @@ function sleep(ms, signal) {
  * @returns {Promise<{x:{stdout:string, stderr:string, code:number|null}, mode:'detached'|'attached-fallback', attached:boolean, jobId:string|null, detachFallback?:string}>}
  *   던지는 오류에는 `jobId` 가 붙는다(호출부가 시한 실패 때 작업을 멈출 수 있게).
  */
-export async function runDetached(api, t, { cmdMs, attachJob = null, onJob = null, signal = null, started = Date.now(), now = () => Date.now(), pollMinMs = POLL_MIN_MS } = {}) {
+export async function runDetached(api, t, { cmdMs, attachJob = null, onJob = null, onRestart = null, signal = null, started = Date.now(), now = () => Date.now(), pollMinMs = POLL_MIN_MS } = {}) {
   const span = Math.max(10_000, Number(cmdMs) || 0);
   let deadline = started + span;
   let jobId = attachJob && JOB_RE.test(String(attachJob)) ? String(attachJob) : null;
@@ -118,10 +118,9 @@ export async function runDetached(api, t, { cmdMs, attachJob = null, onJob = nul
     else jobId = null; // 끝난 흔적이 없다(재부팅·정리) — 새로 시작한다
   }
   if (!jobId) {
-    // 42회차 R1(반증 — 재현): 새로 띄우는 작업은 **지금부터** 시한을 받는다 — 41회차 F5 의 '원래 시작 시각' 은 다시 붙는 작업에만 맞다
-    //   (재개 대상이 장비에 없어 새로 띄운 du 가 옛 시각 기준 시한을 받아 곧바로 '시한 초과' 로 죽었다).
-    started = now();
-    deadline = started + span;
+    // 42회차 R1(반증 — 재현): **재개하려던 작업이 없어** 새로 띄우면 지금부터 시한을 받는다 — 41회차 F5 의 '원래 시작 시각' 은 다시 붙는 작업에만 맞다
+    //   (재개 대상이 장비에 없어 새로 띄운 du 가 옛 시각 기준 시한을 받아 곧바로 '시한 초과' 로 죽었다). 처음부터 새 실행이면 호출부의 시작 시각 그대로.
+    if (attachJob) { started = now(); deadline = started + span; try { onRestart?.(started); } catch { /* */ } }   // 43회차 R1: 호출부 소요 기준도 같이(실패 · 세션 시한 경로 포함)
     const id = newJobId(t.id);
     const s = await api.exec(startCommand(t, id), 20_000);
     const m = /DVC-STARTED\s+(\d+)/.exec(s?.stdout || '');

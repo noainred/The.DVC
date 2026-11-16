@@ -63,6 +63,7 @@ async function fetchCatalog(get) {
       let status = 0; let bad = false;
       for (let page = 1; page <= CATALOG_MAX_PAGES; page++) {
         const r = await get(p, { query: { page: String(page), size: String(CATALOG_PAGE) } });
+        if (!r.ok && page > 1) { truncated[kind] = true; break; }   // 43회차 R7: 2쪽 이후 오류는 앞 쪽까지 쓴다(종류 전체를 버리지 않는다)
         if (!r.ok) { status = r.status; break; }
         const body = await readJsonCapped(r, PAGE_MAX_BYTES, 'Horizon 응답').catch(() => null);
         if (!Array.isArray(body)) { bad = true; break; }
@@ -113,6 +114,8 @@ export async function collectServerSessions(s, { pageSize = 500, maxPages = 20, 
       let prevLen = size;
       for (let page = 1; ; page++) {
         const r = await get(SESSION_PATH, { query: { page: String(page), size: String(size) } });
+        // 43회차 R7: '더 있음' 을 믿고 짧은 쪽 다음을 요청했는데 오류면 끝으로 본다(41회차 전과 같이 — 그 쪽은 원래 요청하지 않았다).
+        if (!r.ok && page > 1 && prevLen < size) break;
         if (!r.ok) {
           const e = new Error(`세션 조회 실패 (HTTP ${r.status})`);
           e.httpStatus = r.status;
@@ -133,7 +136,7 @@ export async function collectServerSessions(s, { pageSize = 500, maxPages = 20, 
         if (more !== true && body.length < size) break;       // 마지막 페이지
         // 42회차 R6: '더 있음' 인데 빈 페이지 — 직전 페이지가 요청보다 짧았으면 끝으로 본다(마지막 쪽에도 true 를 주는 서버가 매 주기 '절단' · 추이 NULL 이 되지 않게).
         //   직전 페이지가 꽉 찼는데 빈 페이지면 더 읽을 수 없다(하한으로).
-        if (more === true && body.length === 0) { if (page > 1 && prevLen < size) break; truncated = true; break; }
+        if (more === true && body.length === 0) { if (page === 1 || prevLen < size) break; truncated = true; break; }   // 43회차 R6: 1쪽이 비면 0건(41회차 전과 같다)
         prevLen = body.length;
         if (page >= cap) { truncated = true; break; }
       }

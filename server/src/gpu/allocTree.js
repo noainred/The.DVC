@@ -316,11 +316,12 @@ export function buildGpuAllocTree(snap, { allowed = null, vcenterId = null, vcen
     }).sort((a, b) => (a.name === NO_DC) - (b.name === NO_DC) || a.name.localeCompare(b.name));
     addTotals(all, vt);
     const down = downByVc.get(vc.id) || 0;
-    return { id: vc.id, name: vc.name, city: vc.city, country: vc.country, region: vc.region, totals: { ...finishTotals(vt), ...(down ? { hostsDown: down } : {}) }, datacenters };
+    // 43회차: 끊긴 GPU 호스트가 있으면 용량이 부분이라 예비 · 할당률을 내지 않는다(모름 — 부분 합을 비율로 보이지 않는다)
+    return { id: vc.id, name: vc.name, city: vc.city, country: vc.country, region: vc.region, totals: { ...finishTotals(vt), ...(down ? { hostsDown: down, spareGB: null, allocPct: null } : {}) }, datacenters };
   }).sort(byName);
   const downAll = [...downByVc.values()].reduce((a, b) => a + b, 0);
   // 42회차 R2: GPU 호스트가 모두 끊긴 법인은 계층 노드가 없다 — 법인 목록(allocCorpRoster · 웹 corpChips)이 '실제 0대' 로 읽지 않게 법인별 수를 싣는다.
-  return { totals: { ...finishTotals(all), ...(downAll ? { hostsDown: downAll } : {}) }, vcenters, truncated, ...(downAll ? { hostsDownByVc: Object.fromEntries(downByVc) } : {}) };
+  return { totals: { ...finishTotals(all), ...(downAll ? { hostsDown: downAll, spareGB: null, allocPct: null } : {}) }, vcenters, truncated, ...(downAll ? { hostsDownByVc: Object.fromEntries(downByVc) } : {}) };
 }
 
 /**

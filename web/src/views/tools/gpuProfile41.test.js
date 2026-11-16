@@ -12,3 +12,19 @@ describe('vGPU 프로파일 GB', () => {
     expect(webFn('grid_m10-2b4')).toBe(2);
   });
 });
+
+// 43회차 R2: 끊긴 GPU 호스트만 있는 법인을 골랐을 때 KPI · 빈 화면이 '0대 · 없음' 이라고 하지 않는다.
+describe('끊긴 GPU 호스트 — 합계 · 빈 문구', () => {
+  const tree = { vcenters: [], totals: { hosts: 0, gpus: 0 }, hostsDownByVc: { vc1: 1 } };
+  it('고른 법인에 끊긴 호스트가 있으면 예비 · 할당률을 내지 않고 hostsDown 을 싣는다', () => {
+    const t = T.sumTotals(tree, new Set(['vc1']));
+    expect(t.hostsDown).toBe(1);
+    expect(t.spareGB).toBeNull();
+    expect(t.allocPct).toBeNull();
+  });
+  it('빈 문구는 없음이 아니라 못 읽음', () => {
+    expect(T.allocEmptyText(tree, null)).toMatch(/끊겨 GPU 를 읽지 못했습니다/);
+    expect(T.allocEmptyText(tree, new Set(['vc1']))).toMatch(/끊겨/);
+    expect(T.allocEmptyText({ vcenters: [] }, null)).toBe('GPU 가 설치된 호스트가 없습니다');
+  });
+});

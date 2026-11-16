@@ -116,9 +116,20 @@ export function sumTotals(tree, vcSel) {
   if (!vcSel || !vcSel.size) return tree?.totals || null;
   const t = Object.fromEntries(TOT_KEYS.map((k) => [k, 0]));
   for (const vc of pickVcenters(tree, vcSel)) for (const k of TOT_KEYS) t[k] += numOrNull(vc.totals?.[k]) || 0;
-  const known = t.capUnknown === 0 && t.allocUnknown === 0;
-  return { ...t, capGB: r1(t.capGB), allocGB: r1(t.allocGB), offGB: r1(t.offGB),
+  // 43회차 R2: 고른 법인의 끊긴 GPU 호스트(계층 노드가 없는 법인 포함 — hostsDownByVc) — 있으면 용량이 부분이라 예비 · 할당률을 내지 않는다(서버 합계와 같은 규칙)
+  let hostsDown = 0;
+  for (const id of vcSel) hostsDown += numOrNull(tree?.hostsDownByVc?.[id]) || 0;
+  const known = t.capUnknown === 0 && t.allocUnknown === 0 && hostsDown === 0;
+  return { ...t, ...(hostsDown ? { hostsDown } : {}), capGB: r1(t.capGB), allocGB: r1(t.allocGB), offGB: r1(t.offGB),
     spareGB: known ? r1(t.capGB - t.allocGB) : null, allocPct: known && t.capGB > 0 ? Math.round((t.allocGB / t.capGB) * 100) : null };
+}
+/** 43회차 R2: 계층이 비거나 고른 법인에 행이 없을 때의 문구 — 끊긴 GPU 호스트가 있으면 '없음' 이 아니라 '못 읽음'. */
+export function allocEmptyText(tree, vcSel, { query = '' } = {}) {
+  const ids = vcSel && vcSel.size ? [...vcSel] : Object.keys(tree?.hostsDownByVc || {});
+  const down = ids.reduce((a, id) => a + (numOrNull(tree?.hostsDownByVc?.[id]) || 0), 0);
+  if (query) return `‘${query}’ 에 맞는 법인·호스트·VM 이 없습니다`;
+  if (down) return `GPU VM 이 있는 호스트 ${down}대가 끊겨 GPU 를 읽지 못했습니다 — GPU 호스트가 없다는 뜻이 아닙니다`;
+  return vcSel && vcSel.size ? '고른 법인에 GPU 가 설치된 호스트가 없습니다' : 'GPU 가 설치된 호스트가 없습니다';
 }
 
 /**
