@@ -47,13 +47,22 @@ function run(snap, req) {
   return r;
 }
 
+/** 범위 계정용 설정 판본 — 예외 원문 대신 개수만 · updatedBy 없음(v2.721 B2-02 · 32회차 F2 — 설정 GET 과 본 응답이 같은 모양). */
+export function maskedSettings(s) {
+  const n = Array.isArray(s?.exceptions) ? s.exceptions.length : 0;
+  return { ...s, exceptions: [], exceptionsCount: n, exceptionsHidden: true, updatedBy: null };
+}
+
 export function registerVmHygiene(api) {
   api.get('/tools/vm-hygiene', toolsPerm, (req, res) => memoJson(req, res, 'vm-hygiene', (snap) => {
     const r = run(snap, req);
     // v2.744(감사 AUTHZ-01): 판정은 isAdminDetailUser — 데모 계정(요청 문맥 admin + demoGuest)은 operator 와 같은 판본이고, memo 키도 역할 문자열이 아니라
     //   판정 결과(a/u)로 만든다(역할 문자열이면 데모와 진짜 관리자가 같은 캐시 칸을 써 한쪽 판본이 다른 쪽에 나간다).
     const isAdmin = isAdminDetailUser(req.user);
-    return { ...r, initial: snap.initial === true, generatedAt: snap.generatedAt || null, notify: isAdmin ? vmHygieneNotifierStatus() : null };
+    // 전체 점검 32회차 F2(재현): 본 응답의 settings.exceptions 도 범위 계정에는 가린다 — v2.721 B2-02 는 /settings 경로만 가려
+    //   같은 원문(다른 법인 VM 이름 · 메모 조각)이 이 경로로 나갔다. 두 경로가 maskedSettings 하나를 쓴다.
+    const settings = scopedVcenterIds(req.user, snap) ? maskedSettings(r.settings) : r.settings;
+    return { ...r, settings, initial: snap.initial === true, generatedAt: snap.generatedAt || null, notify: isAdmin ? vmHygieneNotifierStatus() : null };
   }, { extraKey: `${scopeKey(req.user, store.get())}|${loadVmHygieneSettings().rev}|${isAdminDetailUser(req.user) ? 'a' : 'u'}` }));
 
   api.get('/tools/vm-hygiene/settings', toolsPerm, (req, res) => {
@@ -61,8 +70,7 @@ export function registerVmHygiene(api) {
     // v2.721(감사 B2-02): exceptions 는 전 법인 공통 자유 입력(다른 법인 VM 이름·메모 조각)이고 updatedBy 는 계정명이다 —
     // 범위 계정에는 개수만(exceptionsHidden) · updatedBy null. 저장은 어차피 전체 범위 전용이다. 전체 범위 응답은 그대로.
     if (scopedVcenterIds(req.user, store.get())) {
-      const n = Array.isArray(s.exceptions) ? s.exceptions.length : 0;
-      return res.json({ ok: true, settings: { ...s, exceptions: [], exceptionsCount: n, exceptionsHidden: true, updatedBy: null }, codes: ALL_CODES });
+      return res.json({ ok: true, settings: maskedSettings(s), codes: ALL_CODES });
     }
     res.json({ ok: true, settings: s, codes: ALL_CODES });
   });

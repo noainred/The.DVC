@@ -141,6 +141,8 @@ export async function testConnection(body) {
   if (!entry.host || !entry.username || !entry.password) {
     return { ok: false, reason: 'host/username/password가 필요합니다.' };
   }
+  // 전체 점검 33회차 F1 의 형제(P1): 등록(normalize)과 같은 SSRF 정적 가드 — IP 리터럴은 ssrfLookup 을 타지 않는다.
+  { const ssrf = ssrfBlockReason(String(entry.host)); if (ssrf) return { ok: false, reason: `host 거부: ${ssrf}` }; }
   const started = Date.now();
   try {
     // 고RTT 블립으로 '연결 안 됨' 오판되지 않도록 일시 오류는 1회 재시도.

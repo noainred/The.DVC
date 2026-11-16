@@ -24,7 +24,7 @@ export function registerVmTrack(api) {
       const allowed = scopedVcenterIds(req.user, snap); // null = 전체 허용
       const vcenterId = String(req.query.vcenterId || '').trim();
       const days = Number(req.query.days) || 30;
-      // v2.958: ?region= 은 사용자 범위와의 교집합으로만 좁힌다(허브 범위 바 — 리전을 고르면 KPI 가 그 리전만 합한다). vcenterId 가 있으면 region 은 무시된다(service 가 vcenterId 를 먼저 본다).
+      // v2.958: ?region= 은 사용자 범위와의 교집합으로만 좁힌다(허브 범위 바 — 리전을 고르면 KPI 가 그 리전만 합한다). vcenterId 가 있으면 그 vCenter 가 region 으로 좁힌 범위 안일 때만 그 계열을 준다(밖이면 빈 결과 · scoped — 32회차 주석 정정: 예전 주석은 'region 무시' 였다).
       const scopeIds = trackScopeIds({ allowed, region: String(req.query.region || ''), vcenters: snap.vcenters || [] });
       const [series, info] = await Promise.all([
         vmtrackSeries({ days, vcenterId, scopeIds }),

@@ -25,6 +25,38 @@ MAX_KEEP = 200
 MEMBERS = ("shortcuts", "datacenters", "categories", "users", "settings")
 
 
+def _bump_token_versions(restored, current):
+    """복원할 계정 목록의 tokenVersion 을 계정별 max(복원값, 현재값) + 1 로 — 전체 점검 31회차 F2(재현).
+
+    백업은 그 시점의 tokenVersion 을 담고 있어 그대로 쓰면, 그 뒤 비밀번호 변경 · 중지 · 삭제로 폐기한 토큰(v=옛 값)이
+    복원 뒤(재기동이 끼면 즉시) 다시 통과했다. 메인 포탈 v2.769 와 같은 처방 — 복원하면 모든 세션이 다시 로그인한다(의도).
+    지금 파일에 없는 계정(삭제됨)은 무작위 시작값(auth._fresh_token_version)으로.
+    """
+    from .auth import _fresh_token_version   # 순환 import 를 피해 여기서
+
+    if not isinstance(restored, list):
+        return restored
+    cur = {}
+    for user in current if isinstance(current, list) else []:
+        if isinstance(user, dict) and isinstance(user.get("username"), str):
+            try:
+                cur[user["username"].lower()] = int(user.get("tokenVersion") or 0)
+            except (TypeError, ValueError):
+                cur[user["username"].lower()] = 0
+    out = []
+    for user in restored:
+        if not isinstance(user, dict) or not isinstance(user.get("username"), str):
+            out.append(user)
+            continue
+        try:
+            old = int(user.get("tokenVersion") or 0)
+        except (TypeError, ValueError):
+            old = 0
+        name = user["username"].lower()
+        out.append({**user, "tokenVersion": (max(old, cur[name]) + 1) if name in cur else _fresh_token_version()})
+    return out
+
+
 class BackupService:
     def __init__(self, backup_dir: Path, files: dict, settings_store):
         """files: {"shortcuts": Path, "datacenters": Path, "users": Path, "settings": Path}"""
@@ -134,6 +166,12 @@ class BackupService:
                 target = self._files.get(key)
                 if value is None or target is None:
                     continue
+                if key == "users":
+                    try:
+                        current = read_json(target, [], expect=list, strict_io=True)
+                    except OSError:
+                        current = []   # 지금 파일을 못 읽으면 전 계정을 무작위 시작값으로(옛 토큰과 겹치지 않는다)
+                    value = _bump_token_versions(value, current)
                 write_json(target, value)
                 restored.append(key)
             return {"restored": restored, "name": Path(str(name)).name}

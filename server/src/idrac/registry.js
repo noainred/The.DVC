@@ -529,6 +529,9 @@ export async function testServer(body) {
   let host = String(entry.host).trim();
   if (!/^https?:\/\//.test(host)) host = `https://${host}`;
   const normalized = { ...entry, host: host.replace(/\/+$/, '') };
+  // 전체 점검 33회차 F1(재현): 등록(normalize)과 같은 SSRF 정적 가드 — 예전에는 연결 테스트만 루프백 · 링크로컬 · 우회 표기를 그대로 찔렀다
+  //   (IP 리터럴은 dispatcher 의 ssrfLookup 을 타지 않는다). 저장 비밀을 물려받는 테스트는 host 가 저장값이라 등록 때 이미 지났다.
+  { const ssrf = ssrfBlockReason(normalized.host); if (ssrf) return { ok: false, reason: `host 거부: ${ssrf}` }; }
   const started = Date.now();
   try {
     if (entry.type === 'ome') {

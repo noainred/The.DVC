@@ -36,7 +36,8 @@ class AppContext:
         self.users = UserStore(base / "users.json", base / "initial-settings-password.txt")
         self.sessions = SessionStore(config.session_ttl_min * 60, config.login_max_fails,
                                      config.login_lockout_sec,
-                                     secret_path=base / "session-secret", users=self.users)
+                                     secret_path=base / "session-secret", users=self.users,
+                                     revoked_path=base / "session-revoked.json")   # 31회차 F5
         self.audit = AuditLog(base / "audit.log")
         self.notifier = Notifier(self.settings, self.audit)
         self.history = HealthHistory(base / "health-history.db", config.history_retention_days)

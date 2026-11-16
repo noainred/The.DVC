@@ -15,6 +15,7 @@ from .ssrf import ValidationError
 
 STATUSES = ("operational", "degraded", "maintenance")
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
+RESERVED_IDS = frozenset({"all"})   # 바로가기 datacenterId 의 '전체 공통' 표지(store.py) — 센터 id 로 쓰지 않는다
 MAX_DATACENTERS = 300
 
 
@@ -74,6 +75,10 @@ class DatacenterStore:
         dc_id = _text(data.get("id", base.get("id", "")), 32).lower()
         if not ID_RE.match(dc_id or ""):
             dc_id = re.sub(r"[^a-z0-9-]", "-", code.lower()).strip("-")[:32] or "dc"
+        if dc_id in RESERVED_IDS:
+            # 31회차 F7(재현): 'all' 은 바로가기의 '전체 공통' 표지다 — 코드 ALL 인 센터가 id 'all' 을 받으면 전체 공통 링크가
+            #   그 센터 전용으로 보이고, 센터를 지워도 옮길 링크를 구분할 수 없었다.
+            dc_id = f"dc-{dc_id}"
 
         region = data.get("region", base.get("region"))
         status = data.get("status", base.get("status"))

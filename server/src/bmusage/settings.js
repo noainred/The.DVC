@@ -234,8 +234,8 @@ export function normalizePerfThresholds(raw = {}) {
 }
 
 /** 하한·상한은 서버가 강제한다(화면 입력을 믿지 않는다). */
-const MIN_INTERVAL_MS = 60_000;
-const MAX_INTERVAL_MS = 6 * 3_600_000;
+export const MIN_INTERVAL_MS = 60_000;
+export const MAX_INTERVAL_MS = 6 * 3_600_000;   // 전체 점검 33회차 F6: 중앙의 엣지 보고 정제도 이 범위로 자른다(복제 금지)
 
 let _cache = null;
 let _cacheAt = 0;

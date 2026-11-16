@@ -21,7 +21,10 @@ import { capStr } from '../util/capStr.js';
 import { sanitizePerfFields } from './bmPerfSanitize.js'; // v2.919: 리눅스 성능 항목 화이트리스트
 import { PERF_COL_NAMES, PEAK_SQL_COLS, PEAK_SRC, SRC_CM_RE } from '../bmusage/perfCols.js'; // v2.993: SRC_CM_RE 지표별 출처 두 글자 꼴
 import { clampEdgeTs } from '../util/clampEdgeTs.js'; // v2.932(점검 A1-06): 피크 시각도 수신 시각으로 자른다
-import { peakWindowSOf } from '../bmusage/settings.js'; // 점검 반복 2회차 재확인 R3: 피크 창 길이 — 설정 범위의 정수만(상한은 설정 한 곳)
+import { peakWindowSOf, MIN_INTERVAL_MS, MAX_INTERVAL_MS } from '../bmusage/settings.js'; // 점검 반복 2회차 재확인 R3: 피크 창 길이 — 설정 범위의 정수만(상한은 설정 한 곳)
+// 전체 점검 33회차 F6(재현): 엣지가 보고한 수집 주기는 엣지 설정과 같은 범위로 자른다 — 상한이 없으면 법인 사용량의 신선도 창(3 × 주기)이
+//   수백 년이 되어 멈춘 엣지의 며칠 전 행이 '지금 값' 으로 합계에 들어갔다.
+const clampInterval = (v) => { const n = numOrNull(v); return n == null ? null : Math.min(Math.max(n, MIN_INTERVAL_MS), MAX_INTERVAL_MS); };
 /**
  * v2.919 — 행의 **새** 수치 열(리눅스 성능 열 + 두 경로 읽은 시각)은 수로 좁힌다('1.5' → 1.5 · 못 읽으면 null).
  * ⚠ 기존 9개 열은 예전 계약(원시값 그대로 — audit2604a CEN2604-03 이 고정)을 바꾸지 않는다.
@@ -155,7 +158,7 @@ export function sanitizeBmUsageSnap(snap, { receivedAt = Date.now() } = {}) {
     at: numOrNull(snap.at),
     enabled: snap.enabled === true,
     settings: st ? {
-      intervalMs: numOrNull(st.intervalMs), osSsh: st.osSsh === true, idracTelemetry: st.idracTelemetry === true,
+      intervalMs: clampInterval(st.intervalMs), osSsh: st.osSsh === true, idracTelemetry: st.idracTelemetry === true,
       idracFullTelemetry: st.idracFullTelemetry === true, includeUnassigned: st.includeUnassigned === true,
       includeVirtualization: st.includeVirtualization === true,
       corps: (Array.isArray(st.corps) ? st.corps : []).slice(0, 1_000).map((c) => strOf(c, 128)).filter(Boolean),
