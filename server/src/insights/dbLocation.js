@@ -22,6 +22,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
 
 // config.js 가 이 모듈을 import 하면 순환 참조가 되므로, 설정 파일 위치는 env 로 직접 계산한다.
 const CONFIG_DIR = process.env.CONFIG_DIR || path.resolve(process.cwd(), 'config');
@@ -77,7 +78,7 @@ export const MIGRATABLE_DIRS = [
 ];
 
 const readFile = () => {
-  try { return JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}; } catch { return {}; }
+  try { return parseJsonObject(fs.readFileSync(FILE, 'utf8')); } catch { return {}; }
 };
 
 /** 현재 설정된 DB 디렉터리(미설정이면 null = CONFIG_DIR 사용). */

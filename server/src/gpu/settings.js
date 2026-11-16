@@ -13,6 +13,7 @@ import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js'; // 자격증명 파일 규칙(v2.322): 원자적 쓰기 + 로드 손상 보존
 import { clampSetting } from '../util/clampSetting.js';
 import { secretProvided } from '../util/secretCarry.js'; // v2.611 LEFT2611-03: 계정명이 바뀌면 저장 비밀번호를 승계하지 않는다
+import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
 
 const FILE = path.join(config.configDir, 'gpu-guest.json');
 
@@ -43,7 +44,7 @@ function readFile() {
   try { text = fs.readFileSync(FILE, 'utf8'); } catch (e) { _loadErr.readError(e); return {}; }
   // v2.322 보안 감사(자격증명 파일 규칙): 파싱 실패 시 손상본을 보존한 뒤 빈 값 반환 —
   // 그냥 {} 를 넘기면 다음 저장이 온전했던 원본을 빈 목록으로 덮어써 게스트 OS 계정이 영구 유실된다.
-  try { const v = openSecretsDeep(JSON.parse(text) || {}); _loadErr.ok(); return v; }
+  try { const v = openSecretsDeep(parseJsonObject(text)); _loadErr.ok(); return v; }
   catch (e) { _loadErr.corrupt(e); preserveCorrupt(FILE, e.message); return {}; } // v2.296 게스트 OS 계정 복호(메모리 평문)
 }
 

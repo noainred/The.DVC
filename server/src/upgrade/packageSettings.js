@@ -10,6 +10,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // v2.538: 이 파일은 v2.537 까지 봉인 대상 미등록이었다(감사 M4 계열)
+import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
 
 const FILE = path.join(config.configDir, 'packages.json');
 
@@ -17,7 +18,7 @@ let cache = null;
 function load() {
   if (cache) return cache;
   cache = {};
-  try { if (fs.existsSync(FILE)) cache = openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}); } catch (e) {
+  try { if (fs.existsSync(FILE)) cache = openSecretsDeep(parseJsonObject(fs.readFileSync(FILE, 'utf8'))); } catch (e) {
     // v2.583: 손상 보존 — 조용히 {} 로 넘기면 다음 저장이 패키지 원본 주소·토큰 설정을 덮어쓴다.
     if (fs.existsSync(FILE)) preserveCorrupt(FILE, e?.message || String(e));
     cache = {};

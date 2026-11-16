@@ -11,6 +11,7 @@ import { redactEnvSecrets } from '../util/envRedact.js'; // v2.538
 import { KEY_FILE_NAME, redactKeyStoreText } from '../bmusage/onboard/keyBundle.js'; // 7b 감사 L-3
 // v2.582 ARCH-4 종료 flush 는 writer 가 등록한다. v2.599(CEN-2599-04): 엣지 수 상한 + 비동기 쓰기(storageEdge 와 같은 코어).
 import { admitAgent, createDebouncedWriter } from './edgeRecord.js';
+import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
 
 const FILE = path.join(config.configDir, 'central-agent-config.json');
 
@@ -20,7 +21,7 @@ let byAgent = Object.create(null); // agent -> { at, files:{ name: content } }
 // CENTRAL_TOKEN, users.json TOTP, vcenters.json 비밀번호). 손상 시 조용히 {} 로 넘어가면 3초 뒤
 // persistSoon 이 **온전했던 원본을 빈 객체로 덮어쓴다** — 전 법인 설정 사본이 영구 유실된다.
 // 다른 비밀 스토어와 같은 규약(preserveCorrupt)으로 원본을 보존한다.
-try { if (fs.existsSync(FILE)) byAgent = Object.assign(Object.create(null), JSON.parse(fs.readFileSync(FILE, 'utf8')) || {}); } catch (e) { preserveCorrupt(FILE, e.message); byAgent = Object.create(null); }
+try { if (fs.existsSync(FILE)) byAgent = Object.assign(Object.create(null), parseJsonObject(fs.readFileSync(FILE, 'utf8'))); } catch (e) { preserveCorrupt(FILE, e.message); byAgent = Object.create(null); }
 
 // 예전에는 타이머 안에서 전체를 동기로 썼다(엣지 사본이 수십 MB 면 그만큼 이벤트 루프가 멈춘다).
 const writer = createDebouncedWriter(FILE, () => JSON.stringify(byAgent), { delayMs: 3_000, name: 'agentConfig' });

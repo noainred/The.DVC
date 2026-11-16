@@ -22,6 +22,7 @@ import { getAllGpuGuestDiag } from './gpuGuestDiag.js';
 import { loadCollectors } from '../collector/registry.js';
 import { agentKeyOf } from '../util/agentKey.js';
 import { makeSettingsLoadError } from '../util/settingsLoadError.js'; // v2.727(감사 D-01): 손상 → 설정 pull 503(v2.631 규약)
+import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
 
 const FILE = path.join(config.configDir, 'central-agent-gpu-guest.json');
 
@@ -162,7 +163,7 @@ function resolveFoldOf(k) {
 // 원본(엣지 SSH/게스트 비밀번호 포함)을 덮어써 영구 유실된다 — preserveCorrupt 로 보존 후 빈 값.
 try {
   if (fs.existsSync(FILE)) {
-    const raw = openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8')) || {});
+    const raw = openSecretsDeep(parseJsonObject(fs.readFileSync(FILE, 'utf8')));
     // 이름 근거는 대소문자 중복이 있을 때만 읽는다(등록부·토큰 파일을 매 기동 끌어오지 않게).
     const keys = raw && typeof raw === 'object' ? Object.keys(raw) : [];
     const hasDup = new Set(keys.map((k) => k.toLowerCase())).size < keys.length;
