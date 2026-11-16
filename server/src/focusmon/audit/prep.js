@@ -125,7 +125,7 @@ case "$D" in /*) ;; *) ${fail('acct-home', 66)} ;; esac
 case "$D" in *[!A-Za-z0-9._/-]*) ${fail('acct-home', 66)} ;; esac
 if [ ! -d "$D" ] || [ -L "$D" ]; then ${fail('acct-home', 66)}; fi
 echo '##DP step key'
-W='umask 077; cd "$1" || exit 81; if [ -L .ssh ]; then exit 82; fi; [ -d .ssh ] || mkdir .ssh || exit 83; F=.ssh/authorized_keys; if [ -L "$F" ]; then exit 82; fi; if [ -f "$F" ] && grep -qF -- "$3" "$F"; then echo "##DP have"; exit 0; fi; if [ -s "$F" ] && [ -n "$(tail -c 1 "$F")" ]; then echo >> "$F" || exit 84; fi; printf "%s\\n" "$2" >> "$F" || exit 84; chmod 700 .ssh && chmod 600 "$F" || exit 84; echo "##DP added"'
+W='umask 077; cd "$1" || exit 81; if [ -L .ssh ]; then exit 82; fi; [ -d .ssh ] || mkdir .ssh || exit 83; F=.ssh/authorized_keys; if [ -L "$F" ]; then exit 82; fi; if [ -f "$F" ] && grep -qF -- "$3" "$F"; then echo "##DP have"; else if [ -s "$F" ] && [ -n "$(tail -c 1 "$F")" ]; then echo >> "$F" || exit 84; fi; printf "%s\\n" "$2" >> "$F" || exit 84; echo "##DP added"; fi; chmod 700 .ssh && chmod 600 "$F" || exit 84'
 RU=$(command -v runuser 2>/dev/null || true)
 [ -n "$RU" ] || ${fail('no-runuser', 69)}
 "$RU" -u "$A" -- /bin/sh -c "$W" dvcprep "$D" "$KEYLINE" "$BLOB"

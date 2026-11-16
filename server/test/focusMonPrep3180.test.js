@@ -128,6 +128,10 @@ test('② 준비 파일을 실제로 돌린다 — sshd 정책 · 계정 · 키 
   fs.writeFileSync(ak, 'ssh-rsa AAAAB3OTHER other@host');
   r = runPrep(sb, 'dvcmon');
   assert.equal(fs.readFileSync(ak, 'utf8'), `ssh-rsa AAAAB3OTHER other@host\nrestrict ${PUB}\n`, '앞 줄과 붙지 않는다');
+  // 이미 있던 .ssh · authorized_keys 가 넓은 권한이면 700 · 600 으로 좁힌다(sshd StrictModes 가 그룹 · 남 쓰기를 거부)
+  fs.chmodSync(path.dirname(ak), 0o775); fs.chmodSync(ak, 0o664);
+  runPrep(sb, 'dvcmon');
+  assert.equal(fs.statSync(path.dirname(ak)).mode & 0o777, 0o700); assert.equal(fs.statSync(ak).mode & 0o777, 0o600);
   // 만료 서버 기본값
   sb = sandbox(); r = runPrep(sb, 'svcmon', { age: 'default' });
   assert.equal(r.p.ok, true); assert.doesNotMatch(r.log, /chage/);
@@ -159,7 +163,8 @@ test('② 준비 파일을 실제로 돌린다 — sshd 정책 · 계정 · 키 
   sb = sandbox({ passwd: 'toor:x:0:0::@HOME@/toor:/bin/bash\n' }); assert.equal(runPrep(sb, 'toor').p.fail, 'acct-root');
   sb = sandbox({ passwd: 'svc:x:900:900::@HOME@/svc:/sbin/nologin\n' }); r = runPrep(sb, 'svc'); assert.equal(r.p.fail, 'acct-shell'); assert.doesNotMatch(r.log, /runuser|usermod/);
   sb = sandbox({ passwd: 'gone:x:901:901::@HOME@/gone:/bin/bash\n' }); assert.equal(runPrep(sb, 'gone').p.fail, 'acct-home');
-  sb = sandbox({ passwd: 'odd:x:902:902::@HOME@/o d:/bin/bash\n' }); assert.equal(runPrep(sb, 'odd').p.fail, 'acct-home', '홈 경로 글자 규칙');
+  sb = sandbox({ passwd: 'odd:x:902:902::@HOME@/o d:/bin/bash\n' }); fs.mkdirSync(path.join(sb.homes, 'o d'));
+  r = runPrep(sb, 'odd'); assert.equal(r.p.fail, 'acct-home', '홈 경로 글자 규칙(디렉터리가 있어도)'); assert.doesNotMatch(r.log, /runuser/);
   // 있는 계정은 바꾸지 않는다(usermod · chage 없음)
   sb = sandbox({ passwd: 'mon:x:903:903::@HOME@/mon:/bin/bash\n' }); fs.mkdirSync(path.join(sb.homes, 'mon'));
   r = runPrep(sb, 'mon'); assert.equal(r.p.ok, true); assert.equal(r.p.exists, true); assert.doesNotMatch(r.log, /usermod|chage|useradd/);
@@ -319,6 +324,7 @@ test('⑤ 중앙 — 접수 · 엣지 배달(caps · 준비 계정 보고) · �
   // 배달 — 이번 본문에 caps 'prep' 이 있어야 · 함께면 'install' 도
   assert.equal(A.handleEdgeAudit('edge-pl', mine, { caps: ['install'], cred: {}, credPrep: {} }, Date.now() + 500).jobs.length, 0, '‘prep’ 을 모르는 엣지(3.17.x)에는 보내지 않는다');
   assert.equal(A.handleEdgeAudit('edge-pl', mine, { caps: ['prep'], cred: {}, credPrep: {} }, Date.now() + 600).jobs.length, 0, '디스크 점검 함께면 ‘install’ 도 알아야');
+  assert.equal(A.handleEdgeAudit('edge-pl', mine, { caps: ['install', 'prep'], cred: { [te.id]: { state: 'ok' } } }, Date.now() + 700).jobs.length, 0, '준비 계정 보고(credPrep)가 없는 본문 — 보내지 않는다');
   const out = A.handleEdgeAudit('edge-pl', mine, { caps: ['install', 'prep'], cred: { [te.id]: { state: 'ok' } }, credPrep: { [te.id]: { state: 'ok' } } }, Date.now() + 1000);
   const job = out.jobs.find((j) => j.mode === 'prep');
   assert.ok(job); assert.deepEqual([job.expect.from, job.expect.age, job.expect.audit, job.expect.dir], [true, 'default', true, '']);
@@ -382,6 +388,8 @@ test('⑥ 라우트 — 문(어느 문이 막았는지) · 503 · 데모 · 감�
     assert.equal((await call('POST', '/api/tools/focus-mon/prep', { who: 'adm', body })).body.requiredOwner, true, '소유자 등급 문');
     assert.match(String((await call('POST', '/api/tools/focus-mon/prep', { who: 'demoOwn', body })).body.reason), /데모 계정/, '데모 차단 문');
     assert.equal((await call('POST', '/api/tools/focus-mon/prep', { body: { ids: [] } })).status, 400);
+    const rsrc = fs.readFileSync(new URL('../src/routes/api/focusMonAudit.js', import.meta.url), 'utf8');
+    assert.match(rsrc, /A\.requestPrep\(t, \{[^}]*peers: everyone[^}]*\}\)/, '같은 주소 찾기는 등록부 전부(범위 · 데모와 무관)');
     // 데모 대상 — 장비에 닿지 않는다
     const ins = await call('POST', '/api/tools/focus-mon/prep', { body: { ids: ['fm-d0000000', 'fm-nope0000'], withAudit: true, age: 'evil', from: 'yes' } });
     assert.equal(ins.status, 200); assert.equal(ins.body.results.find((x) => x.id === 'fm-nope0000').code, 'not-found');
