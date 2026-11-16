@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "3.17.7",
+      "date": "2026-11-16",
+      "title": "2차 공통 기능 점검 6회차: 위험 알림의 서비스 워커 대기에 시한",
+      "notes": [
+        "브라우저 위험(critical) 알림(pwa.js)이 navigator.serviceWorker.ready 를 기다렸는데, 이 약속은 활성 워커가 생길 때까지 끝나지 않는다 — sw.js 등록이 실패하면(프록시 · 404 · 설치 오류) 그 뒤 위험 알림이 하나도 뜨지 않고 기다리는 약속만 쌓였다.",
+        "3초 안에 준비되지 않으면 일반 Notification 으로 넘어간다(swReadyWithin).",
+        "회귀 web/src/pwaReady.test.js."
+      ]
+    },
+    {
       "version": "3.17.6",
       "date": "2026-11-16",
       "title": "2차 공통 기능 점검 5회차: 양수 환경변수 공용 판정 — 감사 로그 삭제 · 로그인 잠금 해제 방지",
