@@ -29,7 +29,7 @@ import { poolSettled } from './util/pool.js'; // v2.575 IMP-08 — 동시성 풀
  *   그 주석이 직접 "store.js 와 같은 env·같은 기본값" 이라 적고 있었다. 두 벌이면 한쪽만
  *   바꿨을 때 **인벤토리 점검 화면이 store 와 다른 기준으로 '낡음' 을 세면서도 오류가 없다**.
  */
-export const SITE_STALE_MS = Number(process.env.SITE_INVENTORY_STALE_MS) || 300_000;
+export const SITE_STALE_MS = envPositive(process.env.SITE_INVENTORY_STALE_MS, 300_000);
 import { pushAll } from './util/pushAll.js';
 import { msOrNull } from './publicapi/time.js'; // v2.771(R6-F3-5): 엣지 staleSince 를 시각으로 좁힌다(순수 leaf)
 import { createChangeLogger } from './util/logThrottle.js';
@@ -38,6 +38,7 @@ import { hostCfgStatus, syncVcConfigCaches } from './hostcfg/cache.js'; // v2.69
 import { contentionStatus } from './contention/cache.js'; // v2.706(C2·C3)
 import { dsCfgStatus } from './dscfg/collect.js'; // v2.700
 import { clusterCfgStatus } from './clustercfg/collect.js'; // v2.701
+import { envPositive } from './util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 const ledgerWarnLog = createChangeLogger({ windowMs: 3_600_000, maxKeys: 4 }); // v2.603: 같은 동기화 실패 사유는 1시간에 1줄
 // 수집 실패 시 마지막 정상 수집(lastGood)을 이월해 서빙하는 최대 시간(v2.279). 이 창 안에서는
 // 일시 실패(고RTT 타임아웃 등)로 vCenter 인벤토리가 스냅샷에서 사라지지 않는다(호스트/VM 소실·

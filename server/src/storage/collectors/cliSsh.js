@@ -21,9 +21,10 @@ import { withSsh, isSshAuthError } from '../../proxy/sshExec.js';
 import { reqTimeoutMs } from '../../agent/envTimeout.js';
 import { emptySnapshot } from '../types.js';
 import { recStart } from './uemcliParse.js'; // v2.770(R5-E2-03) — 레코드 시작 줄 선형 판정 한 벌
+import { envPositive } from '../../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 /** 캡처할 원문 상한(문자) — 응답/로그가 비대해지지 않게. */
-const RAW_LIMIT = Number(process.env.STORAGE_CLI_RAW_LIMIT) || 4000;
+const RAW_LIMIT = envPositive(process.env.STORAGE_CLI_RAW_LIMIT, 4000);
 /** 명령 1개 타임아웃(ms) — CLI 는 로그인 배너·페이지네이션으로 느릴 수 있어 넉넉히. */
 const CMD_TIMEOUT_MS = reqTimeoutMs(process.env.STORAGE_CLI_TIMEOUT_MS, 45_000, { max: 1_800_000 });   // v2.606 TIM2606-03
 /**

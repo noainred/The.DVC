@@ -18,6 +18,7 @@ import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디�
 import { capStr } from '../util/capStr.js';
 import { makeSettingsLoadError } from '../util/settingsLoadError.js'; // v2.727(감사 D-01): 손상 → 설정 pull 503(v2.631 규약)
 import { accessMoved } from '../util/secretCarry.js'; // v2.731(점검 A3-01 ②): 접속처가 바뀌면 저장 비밀번호를 승계하지 않는다
+import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 const FILE = path.join(config.configDir, 'agent-assignments.json');
 const RESULT_FILE = path.join(config.configDir, 'agent-results.json');
@@ -294,7 +295,7 @@ registerExitFlush('central/assignments.results', () => { if (!persistTimer) retu
 
 // v2.601(감사 CEN2601-04): 결과를 가진 agent 수 상한 — 라우트가 배정 없는 이름을 거절하지만(1차 방어), 배정이 지워진 옛 이름·
 //   파일에 이미 쌓인 이름이 무한히 남지 않게 가장 오래된 보고부터 밀어낸다.
-const RESULT_AGENTS_MAX = Number(process.env.CENTRAL_RESULT_AGENTS_MAX) || 500;
+const RESULT_AGENTS_MAX = envPositive(process.env.CENTRAL_RESULT_AGENTS_MAX, 500);
 export function setResult(agent, data) {
   const key = String(agent);
   if (!(key in results)) {

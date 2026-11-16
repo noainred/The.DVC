@@ -18,8 +18,9 @@
  */
 
 import crypto from 'node:crypto';
+import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
-const MAX_FAILS = Number(process.env.LOGIN_MAX_FAILS) || 8;
+const MAX_FAILS = envPositive(process.env.LOGIN_MAX_FAILS, 8);
 const LOCKOUT_MS = Number(process.env.LOGIN_LOCKOUT_MS) || 15 * 60_000;
 const WINDOW_MS = Number(process.env.LOGIN_FAIL_WINDOW_MS) || 15 * 60_000;
 const DISABLED = process.env.LOGIN_RATELIMIT_DISABLED === 'true';
@@ -47,7 +48,7 @@ const keyOf = (ip, username) => `${keyPart(ip)}|${keyPart(username)}`;
 // 단, 임계값을 낮게 잡으면 '아무나 몇 번 틀려 정상 관리자 로그인을 봉쇄'하는 가용성 공격이 되므로
 // per-IP 의 GLOBAL_FACTOR 배(기본 10×)로 높여, 단일 출발지 그리핑은 per-IP 잠금이 먼저 막고
 // 계정 전역 잠금은 진짜 분산 공격(다수 IP)에서만 발동하게 한다(pyportal SessionStore 와 동형).
-const GLOBAL_FACTOR = Number(process.env.LOGIN_GLOBAL_FACTOR) || 10;
+const GLOBAL_FACTOR = envPositive(process.env.LOGIN_GLOBAL_FACTOR, 10);
 const ACCT_MAX_FAILS = MAX_FAILS * GLOBAL_FACTOR;
 const acctKeyOf = (username) => `acct:${keyPart(username)}`; // ':' 라 per-IP('|') 키와 불충돌
 
@@ -77,7 +78,7 @@ const acctKeyOf = (username) => `acct:${keyPart(username)}`; // ':' 라 per-IP('
  *    `req.socket.remoteAddress` 고정이라 프록시 뒤 전 사용자가 한 키를 공유했다.
  * 정직한 한계: 그래도 공유 NAT 에서 48회 실패가 누적되면 그 출발지가 60초 잠긴다.
  */
-const IP_FACTOR = Number(process.env.LOGIN_IP_FACTOR) || 6;
+const IP_FACTOR = envPositive(process.env.LOGIN_IP_FACTOR, 6);
 const IP_MAX_FAILS = MAX_FAILS * IP_FACTOR;
 const IP_LOCKOUT_MS = Math.max(1_000, Number(process.env.LOGIN_IP_LOCKOUT_MS) || 60_000);
 const ipKeyOf = (ip) => `ip:${keyPart(ip)}`;                               // ':' 접두 — 위 두 키와 불충돌
@@ -175,7 +176,7 @@ export function recordLoginSuccess(ip, username) {
 // 6자리 OTP는 100만 조합뿐이라 시도 제한이 없으면 온라인 무차별이 현실적이다. 계정 단위로
 // 집계한다(IP는 넣지 않음 — 프록시/NAT/IP 로테이션으로 계정별 누적 잠금이 무력화되므로).
 // 키는 'otp:<user>' 로 파이프(|)가 없어 로그인 키('<ip>|<user>')와 절대 충돌하지 않는다.
-const OTP_MAX_FAILS = Number(process.env.OTP_MAX_FAILS) || 5;
+const OTP_MAX_FAILS = envPositive(process.env.OTP_MAX_FAILS, 5);
 const OTP_LOCKOUT_MS = Number(process.env.OTP_LOCKOUT_MS) || 10 * 60_000;
 // 창이 잠금보다 길면 잠금 해제 직후 카운터가 0이라 다시 풀 횟수를 시도할 수 있다(감사 L9).
 // 그래서 창은 잠금 시간 이하로 클램프한다.
