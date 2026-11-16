@@ -63,7 +63,7 @@ export function powerSum(list) {
   for (const h of list || []) { const v = num(h?.powerWatts); if (v != null) { sum += v; n += 1; } }
   return { powerW: n ? sum : null, powerHosts: n };
 }
-const toGb = (mb) => Math.round((Number(mb) || 0) / 1024);
+const toGb = (mb) => (mb == null ? null : Math.round((Number(mb) || 0) / 1024));   // 54회차: 모르는 용량은 0 GB 가 아니다
 
 /**
  * 평면 행 생성: vCenter 1행 → (클러스터 1행 → 그 클러스터 호스트 n행) 반복.

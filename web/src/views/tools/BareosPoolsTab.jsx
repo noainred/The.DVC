@@ -106,7 +106,7 @@ export default function BareosPoolsTab({ bare = false, reloadKey = 0 } = {}) {
           <span>풀 <b>{k.pools == null ? '—' : fmtNum(k.pools)}</b> <span className="muted">(Director {fmtNum(collected)}/{fmtNum(dirs.length)} 수집)</span></span>
           <span>볼륨 <b>{k.vols == null ? '—' : fmtNum(k.vols)}</b></span>
           <span style={{ color: k.full > 0 ? TONE.bad : undefined }}>가득 참 <b>{k.full == null ? '—' : fmtNum(k.full)}</b>{k.unknownFull ? <span className="muted"> · 판정 모름 {fmtNum(k.unknownFull)}</span> : null}</span>
-          <span style={{ color: k.errorVols > 0 ? TONE.bad : undefined }}>오류 볼륨 <b>{k.errorVols == null ? '—' : fmtNum(k.errorVols)}</b></span>
+          <span style={{ color: k.errorVols > 0 ? TONE.bad : undefined }}>오류 볼륨 <b>{k.errorVols == null ? '—' : fmtNum(k.errorVols)}</b>{k.errorVolsUnknown ? <span className="muted"> · 볼륨 모르는 풀 {fmtNum(k.errorVolsUnknown)}</span> : null}</span>
           <span>최대 사용 <b>{k.maxPct == null ? '—' : `${k.maxPct}%`}</b></span>
           <span>클라이언트 <b>{k.clients == null ? '—' : fmtNum(k.clients)}</b></span>
         </div>

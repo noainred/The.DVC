@@ -215,7 +215,7 @@ test('③ V-3 — 업그레이드 대기: Veeam 관리 작업 · 보내는 중 �
   assert.match(mg, /NON_SCAN_KINDS = new Set\(\[[^\]]*'veeam'/);
   const wk = rd('agent/veeamRunWorker.js');
   assert.match(wk, /for \(const op of ops\) if \(MUTATING\.has\(op\.kind\)\) noteVeeamEdgeOpStart\(op\.id, op\.kind, op\.serverId\);/);   // 52회차 F5: 받은 즉시(실행 전 대기 자리 포함)
-  assert.match(wk, /finally \{ if \(track\) noteVeeamEdgeOpEnd\(op\.id\); \}/);
+  assert.match(wk, /finally \{ if \(track\) noteVeeamEdgeOpEnd\(op\.id\);/);   // 53회차 N2: 같은 finally 에서 자리도 돌려준다
   const bm = rd('routes/api/backupManage.js');
   const iReq = bm.indexOf("action: 'Veeam 포탈 잡 백업 삭제 요청'"); const iSend = bm.indexOf("dispatchOp(server, 'deleteBackup'");
   assert.ok(iReq > 0 && iReq < iSend, '삭제 요청 감사는 보내기 전에');

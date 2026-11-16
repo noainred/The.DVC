@@ -241,7 +241,7 @@ export default function WorldMap({ sites = [], onSelect, height = 320, onResizeE
               {row('메모리 사용률', unitText(m.memUsagePct, '%'))}
               {row('스토리지 사용률', unitText(m.storageUsagePct, '%'))}
               {m.powerKw > 0 && row('소비전력', `${m.powerKw} kW`)}
-              {row('알람', alarmText(m))}
+              {row('알람', alarmText(m, picked))}
             </div>
             <div className="flex" style={{ justifyContent: 'flex-end', marginTop: 14 }}>
               <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} onClick={() => { onSelect?.(picked.id); setPicked(null); }}>

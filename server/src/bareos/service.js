@@ -203,7 +203,7 @@ export async function onDirector(directorId, kind, args = {}, { trigger = 'manua
   }
   // hooks: 중앙 직접 실행에서만 쓰는 함수(예: poll 의 disableNow — 그 순간의 원장으로 고른다). 직렬화하지 않는다(엣지 대행에는 없다).
   // 52회차 F1: 상태를 바꾸는 작업은 끝날 때까지 자동 업그레이드가 기다린다(bareos/inflight.js — 엣지 대행과 같은 판정 EDGE_MUTATING)
-  const noteId = EDGE_MUTATING.has(kind) ? noteDirectOpStart(kind, directorId) : null;
+  const noteId = EDGE_MUTATING.has(kind) && kind !== 'poll' ? noteDirectOpStart(kind, directorId) : null;   // 53회차 N3: 주기 조회(poll)는 빼다 — 엣지 대기열 보기와 같게
   try {
     return await withDirector(directorId, (s) => op(s, args, { signal, ...(hooks || {}) }), { trigger, signal, demoOnly });
   } finally { if (noteId) noteDirectOpEnd(noteId); }

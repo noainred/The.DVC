@@ -137,7 +137,7 @@ function AllView({ data, corps, counts, filter, setFilter, q, setQ, onOpen }) {
         <Kpi label="대기" main={t.waiting ?? 0} sub="스토리지·차례 대기" />
         <Kpi label="지금 처리 속도(합계)" main={t.running ? rateText(t.rateNow) : '—'} color={CYAN} sub={t.rateUnknownCorps ? `모름 ${t.rateUnknownCorps}곳 제외` : '실행 중 잡의 최근 속도 합'} />
         <Kpi label="오늘 끝난 백업" main={<><span style={{ color: TONE.ok }}>{(t.today?.ok ?? 0) + (t.today?.warn ?? 0)}</span> <span className="muted" style={{ fontSize: 15 }}>/ 실패</span> <span style={{ color: t.today?.fail ? TONE.bad : undefined }}>{t.today?.fail ?? 0}</span></>} sub={`경고 ${t.today?.warn ?? 0} · 취소 ${t.today?.canceled ?? 0}${t.resultsUnknownCorps ? ` · 결과 모르는 법인 ${t.resultsUnknownCorps}곳 제외` : ''}`} />
-        <Kpi label="오늘 저장한 양" main={sizeText(t.today?.bytes)} sub={t.today?.bytesUnknown ? `모름 ${t.today.bytesUnknown}건 제외 · VM 별 마지막 실행 기준` : 'VM 별 마지막 실행 기준'} />
+        <Kpi label="오늘 저장한 양" main={sizeText(t.today?.bytes)} sub={`${t.today?.bytesUnknown ? `모름 ${t.today.bytesUnknown}건 제외 · ` : ''}VM 별 마지막 실행 기준${t.resultsUnknownCorps ? ` · 결과 모르는 법인 ${t.resultsUnknownCorps}곳 제외` : ''}`} />
       </section>
       <div style={ROW}>
         <b style={{ fontSize: 15 }}>법인 {corps.length}곳</b>

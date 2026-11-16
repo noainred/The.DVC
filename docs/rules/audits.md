@@ -3284,3 +3284,14 @@ high 0 · 반증 1(A3-01 — 경로 오독, 데모 계정은 READ_DENY 하위라
   F5 Veeam 대행 워커의 running 가드가 실행 · 회신까지 덮어 다른 B&R 작업이 120초 뒤 '가져가지 않음' → 인출만 가드 · 빈 자리만큼(`?max=`) · 상태 변경은 받은 즉시 대기 목록에(소스 고정 veeamFullAudit2 ③ 정규식 갱신).
   **남긴 것**: F2 의 Backup Summary(`veeam.js backupVmRows` · Bareos 7일 성공률 · 24시간)도 같은 빈칸 — 다음 회차 · **결정 필요** D1 vCenter 를 아무 Director 에나 묶을 수 있고 Director 하나에 vCenter 여럿 허용(새 규칙 '서비스 1 = vCenter 1 + Bareos 1' 과 어긋남 — 저장 거부 · 경고) ·
   D2 조회 전용 범위 계정의 POST `/tools/bareos-backup/poll` 이 수동 대조로 Director 잡을 다시 disable(쓰기 범위로 좁힐지).
+- **53회차(52회차 수정 반증)**: 확정 7 · 추정 1 — 고친 것 N1(중간 · 52 회귀) 시한에 잘린 조회(aborted · 읽은 행 있음)도 '결과 모름' 으로 빼 고RTT 법인 현황판이 백업 창마다 빨갛게 →
+  판정 코어(`vmView.directorState`)에서 읽은 행이 있으면 결과는 안다(상태 'error' 는 그대로) · N2 Veeam 빈 자리를 작업마다 돌려줌 · 꽉 찬 틱도 상태에 · N3 주기 조회(poll)는 업그레이드 대기 목록 밖 ·
+  N5 '결과 모름' 배지가 실행 중 법인의 멈춤 · 느림을 덮지 않게 · 사유(설정 안 됨 · 인증 정지 · 조회 실패) · '오늘 저장한 양' 제외 표시 · N6 운영 화면(풀 탭 bare 줄)의 볼륨 모르는 풀 · `poolsView` 도 `addPoolKpi` 하나 ·
+  볼륨을 전부 모르면 오류 볼륨 '—' · policySummary JSDoc 자리 · N7 Veeam 엣지 동시 세션은 예전 2(`SLOT_MAX = OP_CONCURRENCY`).
+  **남긴 것**: N4(결정 필요 — D1 과 함께) 공유 Director 재설치의 볼륨 삭제 · 확인 게이트가 다른 서비스를 모른다 · N8(추정) 명령 도중 끊긴 등록 뒤 `.jobs` 확인 창(최대 60초)이 대기 목록 밖 ·
+  S1(52 남긴 것 재현) Backup Summary 가 Director 조회 상태를 보지 않아 3일째 실패 법인의 7일 성공률이 옛 값 · RPO · '백업 안 된 VM' · 일일 메일이 '모름' 대신 '오래됨(확정)'.
+- **54회차(다른 세션 v3.17.2~v3.18.1 변경 검토)**: 확정 3 · 추정 2 — 고친 것 F1(중간) 로그인 · OTP 잠금 시간 · 창 env 가 여전히 `Number(env) || 식`(음수면 30회 실패 뒤에도 잠기지 않음 — 그 세션은 횟수 env 만 고쳤다) →
+  `envPositive`(IP 잠금 · fleet TTL · store LASTGOOD_HOLD 포함) · F2(중간) 용량 미상 호스트의 부분 합이 vCenter 상세 트리 배지 · 현황 표 · CSV 와 호스트 화면 KPI 에 남음(1.25 가 2.5) → `virtSum` capUnknown · /hosts 요약 비율 null ·
+  F3 지도 상세 창 경보 미조회 vCenter '위험 0 · 경고 0' → '—(경보 미조회)'(카드 · 표와 같은 `alarmsUnknown`).
+  **남긴 것**: F4(추정) VM 사양 변경 — 서버 `parseHardware` 가 못 읽은 vCPU · 메모리를 0 으로 보내 '증설만' 검사가 0 기준 · F5(추정) SOAP 경로가 못 읽은 호스트 용량을 0 으로 실어 `hostCapacityKnown` 을 통과 —
+  수집기 변경이라 실 vCenter 응답 확인 뒤 · 문서 정정 2건(`docs/rules/focusmon.md` ③ SSH_CONNECTION · common.md 2차 요약)은 그 세션 문서 — 이 기록으로 남긴다.

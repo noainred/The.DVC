@@ -530,10 +530,6 @@ export function policyView(o) {
 }
 
 /**
- * Backup › Summary 의 Bareos 카드 · 용량 카드에 쓰는 요약(범위 안 Director 수집본만). 수집본이 하나도 없으면 null(— '수집 전').
- * @returns {null | { pools:{ n, full, errorVols, maxPct }|null, schedules:number|null, next:number|null, collected:number, directors:number }}
- */
-/**
  * 52회차 F3(재현): 풀 하나를 합계에 더한다 — 세는 곳 셋(policyView · policySummary · poolsView)이 같은 판정. 볼륨 목록을 못 읽은 풀은
  *   가득 참을 모름(full null)으로, 오류 볼륨도 0 이 아니라 모름(errorVolsUnknown)으로 센다(예전에는 '가득 참 0 · 오류 볼륨 0' 으로 보였다).
  */
@@ -546,6 +542,10 @@ export function addPoolKpi(acc, p) {
 }
 export const newPoolKpi = () => ({ n: 0, full: 0, unknownFull: 0, errorVols: 0, errorVolsUnknown: 0, maxPct: null });
 
+/**
+ * Backup › Summary 의 Bareos 카드 · 용량 카드에 쓰는 요약(범위 안 Director 수집본만). 수집본이 하나도 없으면 null(— '수집 전').
+ * @returns {null | { pools:{ n, full, unknownFull, errorVols, errorVolsUnknown, maxPct }|null, schedules:number|null, next:number|null, collected:number, directors:number }}
+ */
 export function policySummary(settings, allowed, digests = [], { now = Date.now(), demo = false, db = loadPolicy() } = {}) {
   const scoped = scopedDirectors(settings, allowed);
   const byJob = jobIndex(digests.filter((j) => !!j.demo === demo));
@@ -685,8 +685,9 @@ export function poolsView(o) {
       poolsN = (poolsN || 0) + pr.length;
       for (const p of pr) {
         if (p.numVols !== null) volsN = (volsN || 0) + p.numVols;
-        if (p.full === true) full++; else if (p.full === null) unknownFull++;
-        if (p.vol) errorVols += p.vol?.status?.Error || 0; else errorVolsUnknown++;   // 52회차 F3 — addPoolKpi 와 같은 판정
+        // 53회차 N6: 판정을 복제하지 않고 addPoolKpi 하나로(가득 참 · 판정 모름 · 오류 볼륨 · 볼륨 모르는 풀)
+        const one = addPoolKpi(newPoolKpi(), p);
+        full += one.full; unknownFull += one.unknownFull; errorVols += one.errorVols; errorVolsUnknown += one.errorVolsUnknown;
         if (p.pct !== null && (maxPct === null || p.pct > maxPct)) maxPct = p.pct;
         pools.push({
           ...p, director: dir.name, directorId: id, poolAt: d.data?.pools?.at ?? null, volAt: d.data?.volumes?.at ?? null,
@@ -709,7 +710,7 @@ export function poolsView(o) {
   clients.sort((a, b) => a.director.localeCompare(b.director) || a.name.localeCompare(b.name));
   return {
     ok: true, at: now, directors,
-    kpis: { pools: poolsN, vols: volsN, full: poolsN === null ? null : full, unknownFull: poolsN === null ? null : unknownFull, errorVols: poolsN === null ? null : errorVols, errorVolsUnknown: poolsN === null ? null : errorVolsUnknown, maxPct, clients: clientsN },
+    kpis: { pools: poolsN, vols: volsN, full: poolsN === null ? null : full, unknownFull: poolsN === null ? null : unknownFull, errorVols: poolsN === null || (poolsN > 0 && errorVolsUnknown === poolsN) ? null : errorVols, errorVolsUnknown: poolsN === null ? null : errorVolsUnknown, maxPct, clients: clientsN },   // 53회차 N6: 볼륨을 전부 모르면 0 이 아니라 —
     pools: pools.slice(0, 1000), clients: clients.slice(0, 2000), ...(pools.length > 1000 ? { poolsTruncated: true } : {}),
     ...(digestsKnown ? {} : { registryUnreadable: true }), loadError: !!policyLoadError() || undefined,
   };

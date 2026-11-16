@@ -26,7 +26,7 @@ test('52회차 F1: 중앙 직접 상태 변경은 끝날 때까지 업그레이�
   IF.noteDirectOpEnd(id);
   assert.equal(IF.runningBareosWork().filter((x) => x.key.startsWith('direct:')).length, 0);
   const svc = rd('bareos/service.js');
-  assert.match(svc, /const noteId = EDGE_MUTATING\.has\(kind\) \? noteDirectOpStart\(kind, directorId\) : null;/);
+  assert.match(svc, /const noteId = EDGE_MUTATING\.has\(kind\) && kind !== 'poll' \? noteDirectOpStart\(kind, directorId\) : null;/);   // 53회차 N3: 주기 조회는 뺀다
   assert.match(svc, /finally \{ if \(noteId\) noteDirectOpEnd\(noteId\); \}/);
 });
 
@@ -41,7 +41,7 @@ test('52회차 F4: 재설치 사전 점검은 그 Director 를 쓰는 대상 전
 test('52회차 F5: Veeam 대행 — 중앙은 엣지가 알려 온 빈 자리(max)만큼만 넘긴다 · 워커는 인출만 가드', async () => {
   const E = await import('../src/veeam/run/edgeOps.js');
   const W = rd('agent/veeamRunWorker.js');
-  assert.match(W, /if \(fetching \|\| inflight >= SLOT_MAX\) return null;/);
+  assert.match(W, /if \(fetching \|\| inflight >= SLOT_MAX\) \{/);
   assert.match(W, /veeam-run-ops\?max=\$\{SLOT_MAX - inflight\}/);
   assert.equal(typeof E.takeEdgeOps, 'function');
   assert.equal(E.TAKE_MAX, 5);
@@ -68,7 +68,33 @@ test('52회차 F3: 볼륨을 못 읽은 풀은 가득 참 · 오류 볼륨을 0 
   assert.deepEqual(acc, { n: 2, full: 1, unknownFull: 1, errorVols: 2, errorVolsUnknown: 1, maxPct: 100 });
   const src = rd('bareos/policy.js');
   assert.ok((src.match(/addPoolKpi\(/g) || []).length >= 3, 'policySummary · policyView 가 addPoolKpi 를 쓴다(정의 포함)');
-  assert.match(src, /if \(p\.vol\) errorVols \+= p\.vol\?\.status\?\.Error \|\| 0; else errorVolsUnknown\+\+;/);
+  assert.match(src, /const one = addPoolKpi\(newPoolKpi\(\), p\);/);   // 53회차 N6: 풀 탭도 같은 판정 하나
   const web = await import('../../web/src/views/tools/bareosPolicyText.js');
   assert.match(web.poolKpiText({ full: 0, unknownFull: 2, errorVols: 0, errorVolsUnknown: 2 }), /판정 모름 2 · 오류 볼륨 0\(볼륨 모르는 풀 2\)/);
+});
+
+/* ── 53회차(52회차 수정 반증) ── */
+test('53회차 N1 · N3 · N5: 시한에 잘렸어도 읽은 행이 있으면 결과는 안다 · 주기 조회는 대기 목록 밖 · 실행 중 법인의 멈춤 · 느림을 덮지 않는다', async () => {
+  const { directorState } = await import('../src/bareos/vmView.js');
+  const base = { mapped: true, configured: true, authStopped: false };
+  assert.equal(directorState({ ...base, poll: { ok: false, code: 'aborted', checked: 3 } }).resultsKnown, true);
+  assert.equal(directorState({ ...base, poll: { ok: false, code: 'aborted', checked: 3 } }).state, 'error', '상태는 그대로(잘림을 밝힌다)');
+  assert.equal(directorState({ ...base, poll: { ok: false, code: 'aborted', checked: 0 } }).resultsKnown, false);
+  assert.equal(directorState({ ...base, poll: { ok: false, code: 'ssh', checked: 5 } }).resultsKnown, false);
+  assert.match(rd('bareos/service.js'), /EDGE_MUTATING\.has\(kind\) && kind !== 'poll' \? noteDirectOpStart/);
+  const web = await import('../../web/src/views/tools/bareosLiveText.js');
+  assert.equal(web.corpBadge({ running: 2, waiting: 0, live: { ok: true }, slow: 1, stuck: 0, resultsKnown: false }).key, 'slow');
+  assert.equal(web.corpBadge({ running: 0, waiting: 0, resultsKnown: false, resultsState: 'unset' }).text, '결과 모름(Director 설정 안 됨)');
+});
+
+test('53회차 N2 · N7: Veeam 대행 — 자리는 작업마다 돌려주고 · 동시 상한은 예전 2(소스)', () => {
+  const W = rd('agent/veeamRunWorker.js');
+  assert.match(W, /export const SLOT_MAX = OP_CONCURRENCY;/);
+  assert.match(W, /if \(!released\) \{ released = true; inflight = Math\.max\(0, inflight - 1\); \}/);
+});
+
+test('53회차 N6: 풀 탭도 addPoolKpi 하나 · 볼륨을 전부 모르면 오류 볼륨은 0 이 아니라 null(소스)', () => {
+  const P = rd('bareos/policy.js');
+  assert.match(P, /const one = addPoolKpi\(newPoolKpi\(\), p\);/);
+  assert.match(P, /errorVols: poolsN === null \|\| \(poolsN > 0 && errorVolsUnknown === poolsN\) \? null : errorVols/);
 });

@@ -30,7 +30,7 @@ let timer = null;
 let fetching = false;   // 52회차 F5: 인출만 겹치지 않게(예전 running 은 실행 · 회신까지 덮어, 긴 세션 조회 동안 같은 엣지의 다른 B&R 작업을 가져가지 않아 120초 뒤 '엣지가 가져가지 않음' 으로 끝났다)
 let inflight = 0;
 /** 이 엣지가 동시에 들고 있는 대행 작업 상한(중앙 TAKE_MAX 와 같게 — 빈 자리만큼 ?max= 로 인출). */
-export const SLOT_MAX = 5;
+export const SLOT_MAX = OP_CONCURRENCY;   // 53회차 N7: 한 엣지의 동시 Veeam 세션은 예전처럼 2 — 빈 자리만큼만 더 가져온다
 let _last = null;
 // v2.977(전체 점검 — 재현 · audits.md '별건' 이던 것): 마지막 실패는 따로 10분 남긴다 — 5초마다 도는 빈 인출 틱이 `_last` 를 ok 로 덮어
 //   회신 실패가 엣지 로그에서 곧바로 사라졌다(bareosOpWorker G18 과 같은 모양 · 같은 고침).
@@ -92,7 +92,7 @@ export async function runEdgeOp(op, { receivedAt = Date.now(), fetchImpl, getSer
 
 export async function runVeeamRunWorkerOnce({ fetchImpl } = {}) {
   if (!config.agent.centralUrl) return null;
-  if (fetching || inflight >= SLOT_MAX) return null;
+  if (fetching || inflight >= SLOT_MAX) { if (inflight >= SLOT_MAX) _last = { at: Date.now(), ok: true, ops: 0, busy: inflight }; return null; }   // 53회차 N2: 꽉 찬 틱도 상태에 남긴다
   fetching = true;
   let ops = [];
   let receivedAt = 0;
@@ -124,17 +124,18 @@ export async function runVeeamRunWorkerOnce({ fetchImpl } = {}) {
     await poolRun(ops, OP_CONCURRENCY, async (op) => {
       // 상태 변경은 실행부터 회신까지 업그레이드 대기 목록에(재시작하면 Veeam 에는 실행됐는데 중앙이 결과를 모른다 — bareosOpWorker 와 같은 모양)
       const track = MUTATING.has(op.kind);
+      let released = false;
       try {
         const res = await runEdgeOp(op, { receivedAt, fetchImpl });
         console.log(`[veeam-run-agent] ${op.kind} → ${op.serverId}: ${res.ok ? '성공' : `${res.unknown ? '결과 모름' : res.notSent ? '보내지 않음' : '실패'} — ${String(res.reason || '').slice(0, 160)}`}`);
         postErr = (await postResult(op.id, res, op.kind)) || postErr;
-      } finally { if (track) noteVeeamEdgeOpEnd(op.id); }
+      } finally { if (track) noteVeeamEdgeOpEnd(op.id); if (!released) { released = true; inflight = Math.max(0, inflight - 1); } }   // 53회차 N2: 작업마다 자리를 돌려준다(묶음 끝이 아니라)
     });
     _last = postErr ? { at: Date.now(), ok: false, ops: ops.length, error: postErr } : { at: Date.now(), ok: true, ops: ops.length };
     if (postErr) noteError(postErr);
     if (postErr && _logChange('회신', postErr)) console.warn(`[veeam-run-agent] ${postErr}`);
     return _last;
-  } finally { inflight = Math.max(0, inflight - ops.length); }
+  } finally { /* 자리는 작업마다 돌려준다(위) */ }
 }
 
 export function startVeeamRunWorker() {
