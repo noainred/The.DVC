@@ -17,6 +17,7 @@ import { AUDIT_DEADLINE_MS, READY_EXEC_MS, programSha, wrapperSha, pathsFor, dir
 import { parseReady, readyState, sectionOf, firstLineOf, markOf, LINE_MAX } from './parse.js';
 import { demoAuditOutput } from './mock.js';
 import { isDemoTarget } from '../mock.js';
+import { trackAuditRunner } from './inflight.js';   // 50회차 R3
 
 export const NODE_CONCURRENCY = 1;
 export const QUEUE_MAX = 200;
@@ -181,7 +182,7 @@ export function createAuditRunner({ keys, connect, onResult, onPhase = () => {},
         .then((result) => { const j = running.get(job.runId); running.delete(job.runId); try { onResult({ ...job, startedAt: j?.startedAt || Date.now() }, result); } catch { /* */ } pump(); });
     }
   };
-  return {
+  return trackAuditRunner({
     /** @returns {{ok:boolean, code?:string}} */
     submit(job) {
       const id = String(job?.target?.id || '');
@@ -198,5 +199,5 @@ export function createAuditRunner({ keys, connect, onResult, onPhase = () => {},
     state(runId) { const r = running.get(String(runId)); if (r) return { state: 'running', phase: r.phase, startedAt: r.startedAt }; const q = queue.findIndex((x) => x.runId === String(runId)); return q >= 0 ? { state: 'queued', position: q + 1 } : null; },
     list: () => [...[...running.values()].map((j) => ({ runId: j.runId, id: j.target.id, mode: j.mode, state: 'running', phase: j.phase, startedAt: j.startedAt })), ...queue.map((j, i) => ({ runId: j.runId, id: j.target.id, mode: j.mode, state: 'queued', position: i + 1 }))],
     size: () => queue.length + running.size,
-  };
+  });
 }

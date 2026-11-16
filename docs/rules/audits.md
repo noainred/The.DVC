@@ -3263,3 +3263,7 @@ high 0 · 반증 1(A3-01 — 경로 오독, 데모 계정은 READ_DENY 하위라
   범위 계정이 자기 rdp 매핑 · 티켓으로 연 WS 에 'select ssh' + 'connect <임의 호스트:포트>' 를 먼저 보내면 매핑 대상 · targetHostScope · 프로토콜 · 프록시 경로를 모두 건너뛰었다(가짜 guacd 로 재현 — 실 guacd 동작은 프로토콜 규약 근거 추정) →
   ready 전 프레임은 버림(`dvc-token` 만 처리) · 화면 크기 정수 · 범위(`rdpDim`) · F3 전역 레이트리밋 skip 이 '/API/...' 를 건너뜀(express 는 대소문자 무시) → 소문자로 판정.
   **남긴 것(결정 필요)**: F2 포탈 → guacd 구간이 평문 TCP 이고 RDP 대상 인증서 검증이 꺼져 있다(`ignore-cert` 고정) — guacd 가 WAN 너머에 있으면 RDP 티켓 비밀번호가 평문으로 지난다(배치에 따라 — 추정). guacd TLS · 인증서 검증 옵션화는 사용자 결정.
+- **50회차(중앙↔엣지 통신 2차)**: 확정 2 · 추정 1 — 전부 고침. R1(중간) 엣지 결과 대기열 4건 상한(v3.11 디스크 점검 동시 1 기준)이 v3.17 설치 · v3.18 접속 준비(동시 4 · 응답당 20건)의
+  빨리 끝난 결과('key-stopped' 등)를 소리 없이 밀어내 중앙에 'lost' 로 남김(실제 centralRouter ↔ 워커 왕복 재현: 12건 중 8건) → 개수 64 · 바이트 32MB 상한 · 버리면 콘솔 · 동기화당 8건(중앙 RESULTS_PER_SYNC 와 같게) ·
+  R2 credReport 가 대상 × 기능마다 등록부 전량을 structuredClone(500 대상 · 1,000 서버 2초+ 매 60초) → `credSnapshot` 한 번 · R3(추정) 자동 업그레이드가 실행 중인 집중 모니터링 root 작업을 기다리지 않음 →
+  `focusmon/audit/inflight.js`(의존 없는 등록부) · `NON_SCAN_KINDS` 'focusmon'. 소스 고정 테스트 2건(focusMonInstall3170 ⑨ · veeamFullAudit2 ③)의 정규식을 새 꼴로 바꿨다.

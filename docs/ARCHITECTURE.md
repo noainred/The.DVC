@@ -76,7 +76,7 @@
 <!-- arch-doc:modules:start -->
 | 디렉터리 | 파일 | 줄 | 대표 파일(밖에서 import 수) | 머리말 첫 줄 |
 |---|---:|---:|---|---|
-| `agent/` | 53 | 8,176 | `agent/envTimeout.js` (24) | 호환 재수출(v2.613 DEPS2613-01) — 본체는 `util/envTimeout.js` 로 옮겼다. |
+| `agent/` | 53 | 8,185 | `agent/envTimeout.js` (24) | 호환 재수출(v2.613 DEPS2613-01) — 본체는 `util/envTimeout.js` 로 옮겼다. |
 | `attach/` | 1 | 272 | `attach/store.js` (3) | attach/store.js — 위키 문서 · 이슈 첨부 파일(v2.889 · 시안 ⑨⑩ '첨부' · C-4). |
 | `auth/` | 16 | 4,393 | `auth/scope.js` (102) | 사용자 데이터 범위(scope) 해석 — "이 사용자가 볼 수 있는 vCenter"를 계산한다. |
 | `availability/` | 1 | 205 | `availability/analyze.js` (2) | availability/analyze.js — 특수 기능 'VM 가용성(SLA)'(도구 키 `vm-availability`, v2.707 — C6) 판정(순수). |
@@ -105,7 +105,7 @@
 | `dscfg/` | 3 | 328 | `dscfg/collect.js` (7) | 데이터스토어 운영 속성 갱신(v2.700 — A17). 인벤토리 수집 한 주기 안에서 오래된 DS 부터 상한만큼. |
 | `edgelog/` | 3 | 456 | `edgelog/spec.js` (6) | edgelog/spec.js — 엣지 포탈의 **진행상태**를 어디서 읽는지 적은 표(순수 데이터, v2.549). |
 | `fieldcheck/` | 1 | 151 | `fieldcheck/judge.js` (1) | fieldcheck/judge.js — 법인별 실환경 확인(v2.938 · 사용자 요청 '개선 포인트 8번은 법인별로 적용'). |
-| `focusmon/` | 36 | 8,587 | `focusmon/service.js` (6) | focusmon/service.js — 이 노드의 집중 모니터링을 묶는다(v2.976): 키 · 중앙 직접 수집기 · 1초/10초 틱 · 수집 시작/끝 · 엣지 깨우기. |
+| `focusmon/` | 37 | 8,622 | `focusmon/service.js` (6) | focusmon/service.js — 이 노드의 집중 모니터링을 묶는다(v2.976): 키 · 중앙 직접 수집기 · 1초/10초 틱 · 수집 시작/끝 · 엣지 깨우기. |
 | `gpu/` | 18 | 3,550 | `gpu/settings.js` (10) | GPU 게스트 수집 설정 — 어떤 법인(vCenter)의 패스쓰루 GPU VM을 게스트 OS 계정으로 |
 | `guest/` | 1 | 69 | `guest/accountService.js` (1) | 게스트 계정 추가 오케스트레이션 — vCenter에 로그인해 선택된 VM들의 게스트 OS에 sudo 계정을 |
 | `guestdisk/` | 5 | 1,394 | `guestdisk/settings.js` (6) | guestdisk/settings.js — 게스트 디스크 회수 리포트 설정 (`guest-disk.json`, v2.459). |
@@ -159,7 +159,7 @@
 | `tags/` | 4 | 499 | `tags/analyze.js` (6) | tags/analyze.js — 특수 기능 '태그·사용자 지정 속성 점검'(도구 키 `vm-tags`, v2.703 — A15) 판정(순수). |
 | `toolcats/` | 2 | 363 | `toolcats/settings.js` (3) | toolcats/settings.js — 특수 기능 카테고리 설정 (`tool-categories.json`, v2.455). |
 | `tools/` | 17 | 3,257 | `tools/powerOffPoller.js` (3) | tools/powerOffPoller.js — 전원 꺼짐 점검기(v2.484). 설정 주기(기본 6시간)마다 스냅샷의 꺼진 VM 을 |
-| `upgrade/` | 19 | 4,217 | `upgrade/manager.js` (8) | Orchestrates the auto-upgrade feature for the running portal: tracks the last |
+| `upgrade/` | 19 | 4,222 | `upgrade/manager.js` (8) | Orchestrates the auto-upgrade feature for the running portal: tracks the last |
 | `usage/` | 4 | 927 | `usage/settings.js` (2) | usage/settings.js — 기능 사용 추적 설정(v2.913). 파일 `usage-settings.json`(CONFIG_DIR, 비밀 없음). |
 | `usermenu/` | 1 | 370 | `usermenu/store.js` (1) | usermenu/store.js — 계정별 좌측 메뉴(내 메뉴)와 슈퍼 관리자 배포 메뉴 저장소(v2.726, `user-menus.json`). |
 | `util/` | 91 | 9,091 | `util/numOrNull.js` (287) | `numOrNull` — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정 (v2.561). |
@@ -177,7 +177,7 @@
 | `wiki/` | 4 | 1,225 | `wiki/store.js` (6) | wiki/store.js — 위키(컨플루언스 같은 문서 공간) 저장소(v2.881 · 시안 docs/design/wiki-issues ①~⑤ · ⑫). |
 | `xferspeed/` | 7 | 1,993 | `xferspeed/schedule.js` (4) | xferspeed/schedule.js — 전송 속도 측정의 **실행 일정**(순수 — 파일·타이머 없음, v2.735). |
 
-디렉터리 100개 · 파일 1483개 · 337,229줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
+디렉터리 100개 · 파일 1484개 · 337,278줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
 <!-- arch-doc:modules:end -->
 
 ### 3-3. 라우트 그룹 → 게이트

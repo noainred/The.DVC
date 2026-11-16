@@ -45,7 +45,7 @@ const ACTIVE_MAX = 250;
 export const REDELIVER_MS = 2 * 60_000;
 export const MAX_DELIVER = 3;
 export const MAX_JOBS = 500;
-export const RESULTS_PER_SYNC = 2;
+export const RESULTS_PER_SYNC = 8;   // 50회차 R1: 엣지 AUDIT_RESULTS_PER_SYNC 와 같게(일괄 설치 · 준비 결과를 몇 번의 동기화 안에 받는다 — 바이트 상한은 엣지가 지킨다)
 /** 화면에 싣는 한도(박지 않는다 — 응답 limits). */
 export const LIMITS = Object.freeze({ runGapMin: RUN_GAP_MS / 60_000, checkGapSec: CHECK_GAP_MS / 1000, nodeConcurrency: 1, deadlineMin: Math.round(AUDIT_DEADLINE_MS / 60_000), keepRuns: db.AUDIT_KEEP, keepDays: db.AUDIT_KEEP_DAYS,
   installConcurrency: NODE_INSTALL_CONCURRENCY, installTimeoutSec: INSTALL_TIMEOUT_MS / 1000, prepTimeoutSec: PREP_TIMEOUT_MS / 1000 });

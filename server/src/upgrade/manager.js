@@ -32,7 +32,8 @@ import { runningBulkDeploys as bulkDeployRuns } from '../agent/bulkDeploy.js';  
 import { runnerStatus as vmcloneRunnerStatus } from '../vmclone/runner.js';  // v2.741(TIMING-01 ③): 실행 중 VM 복제 잡도 기다린다(읽기만)
 import { getJob as vmcloneJob } from '../vmclone/store.js';
 import { runningBareosFinishes } from '../vmclone/execOp.js';   // v2.874(점검 B2-02): Bareos 복원 마무리(NIC 끊기 · 검증 — vCenter 줄)도 기다린다(읽기만)
-import { runningVeeamWork } from '../veeam/run/inflight.js';   // 전체 점검 2회차 V-3: Veeam 관리 작업 · 보내는 중 실행 · 엣지 대행 상태 변경도 기다린다(읽기만)
+import { runningVeeamWork } from '../veeam/run/inflight.js';
+import { runningAuditWork } from '../focusmon/audit/inflight.js';   // 전체 점검 50회차 R3: 집중 모니터링 root 작업도 기다린다(읽기만)   // 전체 점검 2회차 V-3: Veeam 관리 작업 · 보내는 중 실행 · 엣지 대행 상태 변경도 기다린다(읽기만)
 import { runningBareosWork } from '../bareos/inflight.js';   // v2.825.1(G15): 엣지 대행 작업·늦은 회신·자동 설정도 기다린다(재시작하면 결과를 잃는다 · 읽기만)
 import { poolSettled } from '../util/pool.js';
 import { numOrNull } from '../util/numOrNull.js';
@@ -88,6 +89,10 @@ function bareosWork() {
 function veeamWork() {
   try { return runningVeeamWork(); } catch { return []; }
 }
+/** 전체 점검 50회차 R3: 실행 중인 집중 모니터링 디스크 점검 · 자동 설치 · 접속 준비(focusmon/audit/inflight.js). 상한은 스캔과 같다. */
+function focusMonWork() {
+  try { return runningAuditWork(); } catch { return []; }
+}
 /**
  * v2.742(감사 RECENT-02): 자동 적용이 기다리는 **시작하지 못한 '지금 수집' 대기 요청**(util/scanJournal queuedScans).
  *   기록이 파일에 남은(resumable) 대기 요청은 재시작 뒤 그 기능의 대기열로 돌아오므로 기다리지 않는다(분리 실행 du 와 같은 판단 — TIMING-03).
@@ -97,7 +102,7 @@ function queuedEntries(list) { return (Array.isArray(list) ? list : []).filter((
 const queuedLabel = (x) => `'지금 수집' 대기 ${x.label || x.key || x.kind}`.slice(0, 120);
 
 /** 상한을 넘겨 적용할 때 — 스캔은 자동 재개가 잇고(resumeOutlookText), VM 복제·대량 배포·기록 못 한 대기 요청은 잇지 않는다(조용히 '재개된다' 고 말하지 않는다). */
-const NON_SCAN_KINDS = new Set(['vm-clone', 'bulk-deploy', 'bareos', 'veeam']);
+const NON_SCAN_KINDS = new Set(['vm-clone', 'bulk-deploy', 'bareos', 'veeam', 'focusmon']);
 const scansOnly = (list) => (Array.isArray(list) ? list : []).filter((x) => !NON_SCAN_KINDS.has(x.kind) && !x.queued);
 function cloneOutlookText(blocking) {
   const list = Array.isArray(blocking) ? blocking : [];
@@ -445,7 +450,7 @@ export class UpgradeManager {
     const queuedKept = queued.filter((x) => x.resumable);
     // v2.741(감사 TIMING-01 ③): 실행 중 VM 복제 잡도 기다린다(재시작이 오면 원본 VM 에 임시 스냅샷이 남는다 — 이어 받는 경로가 없다).
     // v2.742(감사 TIMING-04): 진행 중인 에이전트 대량 배포도 기다린다(재시작이 원격 설치를 중간에 끊는다 — 이어 받는 경로가 없다).
-    const scans = [...all.filter((x) => !x.resumable), ...queued.filter((x) => !x.resumable).map((x) => ({ ...x, label: queuedLabel(x) })), ...runningVmClones(), ...runningBulkDeploys(), ...bareosWork(), ...veeamWork()];
+    const scans = [...all.filter((x) => !x.resumable), ...queued.filter((x) => !x.resumable).map((x) => ({ ...x, label: queuedLabel(x) })), ...runningVmClones(), ...runningBulkDeploys(), ...bareosWork(), ...veeamWork(), ...focusMonWork()];
     if (!scans.length || max <= 0) { const forced = false; this.#clearDeferral(); return { wait: false, forced, scans, detached, queuedKept }; }
     if (!this.deferral || this.deferral.latest !== latest) this.deferral = { since: now, until: now + max, latest, scans: [] };
     this.deferral.scans = scans.map((x) => ({ kind: x.kind, label: x.label, since: x.since }));
