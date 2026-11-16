@@ -40,6 +40,11 @@ describe('모르는 법인 칩 — 합계 · 빈 문구', () => {
     const t = T.sumTotals(tree, new Set(['vcP']), { chips });
     expect(t.spareGB).toBeNull();
     expect(t.corpsUnknown).toBe(1);
+    // 45회차 F3: 고른 법인에 계층 노드가 없으면 용량 · 할당 · 수량도 0 이 아니라 모름
+    expect(t.capGB).toBeNull();
+    expect(t.allocGB).toBeNull();
+    expect(t.hosts).toBeNull();
+    expect(t.freeGpus).toBeNull();
   });
   it('알고 있는 0대 법인만 고르면 예전처럼 없음', () => {
     expect(T.allocEmptyText(tree, new Set(['vcZ']), { chips })).toBe('고른 법인에 GPU 가 설치된 호스트가 없습니다');

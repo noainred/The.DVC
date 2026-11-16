@@ -130,7 +130,8 @@ export function computeHealthReport(snap, opts = {}) {
     let gpuUnknown = 0; let gpuOver = 0;
     for (const vc of gtree.vcenters) {
       const t = vc.totals;
-      if (numOrNull(t.allocPct) == null) { if (!gpuDownVc.has(String(vc.id))) gpuUnknown += 1; continue; }
+      // 45회차 F5: 할당률이 없어도 모르는 값이 0 이면(vSGA 만 · 할당형 GPU 0장) '해당 없음' — 확인 불가로 세면 종합이 매일 ❔ 에 머문다
+      if (numOrNull(t.allocPct) == null) { if (!gpuDownVc.has(String(vc.id)) && (t.capUnknown || t.allocUnknown)) gpuUnknown += 1; continue; }
       if (t.allocPct < gpuWarnPct) continue;
       if (numOrNull(t.spareGB) != null && t.spareGB < 0) gpuOver += 1;
       gpuItems.push({ name: vc.name || vc.id, vcenterId: vc.id, usagePct: t.allocPct, spareGB: t.spareGB, capGB: t.capGB });

@@ -123,6 +123,7 @@ export async function collectServerSessions(s, { pageSize = 500, maxPages = 20, 
         if (!r.ok) {
           const e = new Error(`세션 조회 실패 (HTTP ${r.status})`);
           e.httpStatus = r.status;
+          e.page = page;   // 45회차 F6: 2쪽 이후 404 를 'no-endpoint'(경로 없음 · 6시간 쉼)로 읽지 않게
           throw e;
         }
         const body = await readJsonCapped(r, PAGE_MAX_BYTES, 'Horizon 응답').catch(() => null);
@@ -191,7 +192,7 @@ export async function collectServerSessions(s, { pageSize = 500, maxPages = 20, 
         : atLogin && (st === 401 || st === 403) ? 'auth'
           : atLogin && st === 404 ? 'no-login-endpoint'
             : st === 401 || st === 403 ? 'forbidden'
-              : st === 404 ? 'no-endpoint'
+              : st === 404 && !(Number(e?.page) > 1) ? 'no-endpoint'
                 : st > 0 ? 'http'
                   : /timeout|aborted|timed out/i.test(String(d.message)) ? 'timeout' : 'error';
     return {

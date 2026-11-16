@@ -202,7 +202,7 @@ export function unreadVcenterIds(snap) {
   for (const v of snap?.vcenters || []) if (v && v.id != null && UNREAD_VC_EXTRA_STATUS.has(v.status)) out.add(String(v.id));
   return out;
 }
-const UNREAD_VC_KEY_RE = /^(alarm|host|ds):/;
+const UNREAD_VC_KEY_RE = /^(alarm|host|ds|gpualloc):/;   // 45회차 F1: 수집 꺼짐 · 장기 장애로 인벤토리가 비면 gpualloc 도 노드가 사라져 '해소' 로 기록됐다
 
 /*
  * v2.769(점검 R4-D1-5): '엣지 보고 끊김'(vcstale:) 판정 기준 시각 = max(receivedAt, 프로세스 기동 시각).
@@ -290,6 +290,7 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
   if (R.gpuAllocPct?.enabled) {
     const th = Number(R.gpuAllocPct.threshold) || 90;
     const tree = buildGpuAllocTree(snap);
+    if (tree.truncated) heldPrefixes.add('gpualloc:');   // 45회차 F2: 주석대로 '전부' — GPU 호스트가 통째로 잘린 법인은 루프에 없어 해소로 나갔다
     for (const vc of tree.vcenters) {
       const key = `gpualloc:${vc.id}`;
       const t = vc.totals;

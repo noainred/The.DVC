@@ -134,6 +134,10 @@ export function sumTotals(tree, vcSel, { chips = null } = {}) {
   let hostsDown = 0;
   for (const id of vcSel) hostsDown += numOrNull(tree?.hostsDownByVc?.[id]) || 0;
   const known = t.capUnknown === 0 && t.allocUnknown === 0 && hostsDown === 0 && corpsUnknown === 0;
+  // 45회차 F3: 고른 법인에 계층 노드가 하나도 없고 모르는 법인(끊긴 호스트 · 모름 칩)뿐이면 용량 · 할당 · 수량도 0 이 아니라 모름
+  if (!pickVcenters(tree, vcSel).length && (hostsDown || corpsUnknown)) {
+    return { ...t, ...(hostsDown ? { hostsDown } : {}), ...(corpsUnknown ? { corpsUnknown } : {}), hosts: null, gpus: null, freeGpus: null, capGB: null, allocGB: null, offGB: null, spareGB: null, allocPct: null };
+  }
   return { ...t, ...(hostsDown ? { hostsDown } : {}), ...(corpsUnknown ? { corpsUnknown } : {}), capGB: r1(t.capGB), allocGB: r1(t.allocGB), offGB: r1(t.offGB),
     spareGB: known ? r1(t.capGB - t.allocGB) : null, allocPct: known && t.capGB > 0 ? Math.round((t.allocGB / t.capGB) * 100) : null };
 }
