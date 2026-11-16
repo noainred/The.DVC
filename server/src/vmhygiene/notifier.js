@@ -19,6 +19,7 @@ import { store } from '../store.js';
 import { sendText } from '../alerts.js';
 import { loadVmHygieneSettings } from './settings.js';
 import { analyzeVmHygiene, snapshotPolicySummary } from './analyze.js';
+import { notReadVcentersOf, notReadPartialOf, notReadCsvLines } from '../corelicense/analyze.js';
 import { isMockMode } from '../mock/demo/flags.js';
 import { isMockVcenter } from '../mock/generator.js';
 
@@ -58,16 +59,27 @@ export async function vmHygieneNotifyOnce({ now = Date.now(), force = false, sen
     const mockExcluded = snap.vms.length - vms.length;
     if ((isMockMode() || mockExcluded > 0) && !vms.length) return (_last = { at: now, ok: true, sent: false, reason: 'demo', mockExcluded });
     const r = analyzeVmHygiene(vms, s, { now, vcName });
-    const text = snapshotPolicySummary(r);
-    if (!text) {
+    // 46회차 V1(재현): 첫 수집 중 · 불통(직전 값 없음) vCenter 는 VM 이 0대라 판정에서 빠진다 — 화면(routes/api/vmHygiene.js)과 같은 판정
+    //   (notReadVcentersOf · notReadPartialOf)으로 밝힌다. 예전에는 snap.initial 만 봐서 그 vCenter 를 뺀 '위반 0' 으로 그날을 닫았다.
+    const notRead = notReadVcentersOf(snap).filter((x) => !mockVc.has(x.vcenterId));
+    const partial = notReadPartialOf(notRead);
+    const summary = snapshotPolicySummary(r);
+    if (!summary) {
+      if (partial) {
+        // 읽지 못한 vCenter 가 있으면 '위반 없음' 으로 그날을 닫지 않는다 — 다음 확인(10분)에서 다시 본다(그 vCenter 에 위반이 있을 수 있다)
+        atomicWriteFileSync(FILE(), JSON.stringify({ ...st, lastCheckedAt: now }));
+        return (_last = { at: now, ok: true, sent: false, reason: 'partial', notRead: notRead.length });
+      }
       atomicWriteFileSync(FILE(), JSON.stringify({ ...st, lastSentDay: today, lastCheckedAt: now, lastSentAt: st.lastSentAt || null, lastCount: 0 }));
       return (_last = { at: now, ok: true, sent: false, reason: 'no-violation' });
     }
+    const tail = notReadCsvLines(notRead, { mode: 'judge', noun: 'VM' });
+    const text = tail.length ? `${summary}\n${tail.join('\n')}` : summary;
     const results = await send(text, 'VM 스냅샷 정책 위반', 'daily');
     const list = Array.isArray(results) ? results.slice(0, 8).map((x) => String(x).slice(0, 120)) : [];
     // 켜진 채널이 하나도 없으면 '보냈다' 고 하지 않는다(그날 다시 보내지 않게 기록은 남긴다 — 매 10분 같은 시도 방지).
     atomicWriteFileSync(FILE(), JSON.stringify({ ...st, lastSentDay: today, lastSentAt: list.length ? now : (st.lastSentAt || null), lastCheckedAt: now }));
-    const ex = mockExcluded ? { mockExcluded } : {};
+    const ex = { ...(mockExcluded ? { mockExcluded } : {}), ...(notRead.length ? { notRead: notRead.length } : {}) };
     if (!list.length) return (_last = { at: now, ok: false, sent: false, reason: 'no-channel', ...ex });
     return (_last = { at: now, ok: !list.some((x) => /err/.test(x)), sent: true, reason: 'sent', results: list, ...ex });
   } catch (e) {

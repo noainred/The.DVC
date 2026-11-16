@@ -10,7 +10,7 @@ import re
 import threading
 
 from .datacenters import DATACENTERS as SEED_DATACENTERS, REGIONS
-from .jsonfile import read_json, write_json
+from .jsonfile import StoreUnavailable, load_error_text, read_json_state, write_json
 from .ssrf import ValidationError
 
 STATUSES = ("operational", "degraded", "maintenance")
@@ -41,21 +41,36 @@ class DatacenterStore:
         self._path = path
         self._lock = threading.RLock()
         self._items = None
+        self._load_error = None
 
     # ---------- 내부 ----------
 
     def _load(self):
         if self._items is None:
-            raw = read_json(self._path, None, expect=list)
-            if raw is None:
+            raw, state = read_json_state(self._path, expect=list, quiet=self._load_error == "unreadable")
+            self._load_error = state if state in ("corrupt", "unreadable") else None
+            if state == "missing":
                 # 첫 기동: 내장 28개로 시작하고 즉시 파일로 굳힌다.
                 self._items = [self._clean(dc, keep_id=True) for dc in SEED_DATACENTERS]
                 write_json(self._path, self._items)
+            elif self._load_error:
+                # 46회차 H2(재현): 손상 · 읽기 오류는 첫 기동이 아니다 — 예전에는 내장 28곳을 파일에 굳혀 공개 대시보드에 샘플 센터가
+                #   실제처럼 떴고, 바로가기의 센터 연결이 'all' 로 바뀌었다. 빈 목록 + 표지(쓰기 거절). 읽기 오류는 캐시하지 않는다.
+                if state == "unreadable":
+                    return []
+                self._items = []
             else:
                 self._items = [dc for dc in (self._clean(entry, keep_id=True) for entry in raw) if dc]
         return self._items
 
+    def load_error(self):
+        with self._lock:
+            self._load()
+            return self._load_error
+
     def _save(self):
+        if self._load_error:
+            raise ValidationError(load_error_text("datacenters.json", self._load_error))
         write_json(self._path, self._items)
 
     def _clean(self, data, *, keep_id=False, existing=None):
@@ -106,7 +121,10 @@ class DatacenterStore:
 
     def ids(self):
         with self._lock:
-            return {dc["id"] for dc in self._load()}
+            items = self._load()
+            if self._load_error:
+                raise StoreUnavailable(self._load_error)
+            return {dc["id"] for dc in items}
 
     def visible(self, limit=0):
         """화면에 노출할 목록. limit 0(또는 범위 밖)이면 전체.

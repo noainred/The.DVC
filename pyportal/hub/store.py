@@ -17,7 +17,7 @@ from pathlib import Path
 from .catstore import DEFAULT_CATEGORY_ID, LEGACY_IDS, SEED_CATEGORIES
 from .datacenters import DATACENTER_IDS
 from .defaults import default_shortcuts
-from .jsonfile import now_iso as _now_iso, read_json, write_json
+from .jsonfile import StoreUnavailable, now_iso as _now_iso, read_json, write_json
 from .ssrf import ValidationError, normalize_url
 
 MAX_SHORTCUTS = 500
@@ -96,6 +96,9 @@ class ShortcutStore:
         try:
             # 삭제된 카테고리를 참조하던 바로가기는 기본 카테고리로 떨어진다(사라지지 않게).
             return self._resolve_category(value) or DEFAULT_CATEGORY_ID
+        except StoreUnavailable:
+            # 46회차 H2(재현): 카테고리 파일을 못 읽는 동안에는 원값 그대로 — 기본 분류로 바꾸면 다음 저장이 영구히 굳힌다
+            return _clean_text(value, limit=64, default=DEFAULT_CATEGORY_ID)
         except Exception:  # noqa: BLE001 — 카테고리 저장소 문제로 바로가기 저장이 막히면 안 된다
             return _fallback_category(value)
 
@@ -103,6 +106,8 @@ class ShortcutStore:
         text = _clean_text(value, limit=32, default="all")
         try:
             known = self._dc_ids()
+        except StoreUnavailable:
+            return text   # 46회차 H2: 데이터센터 파일을 못 읽는 동안에는 원값 그대로('all' 로 바꿔 굳히지 않는다)
         except Exception:  # noqa: BLE001 — DC 저장소 문제로 바로가기 저장이 막히면 안 된다
             known = DATACENTER_IDS
         return text if text in known else "all"
@@ -379,17 +384,31 @@ class ShortcutStore:
             raise ValidationError("가져오기 파일은 바로가기 목록(JSON 배열)이어야 합니다.")
         if len(entries) > MAX_SHORTCUTS:
             raise ValidationError(f"한 번에 {MAX_SHORTCUTS}개를 넘길 수 없습니다.")
-        cleaned = [item for item in (self._sanitize(entry, keep_id=True) for entry in entries) if item]
-        if not cleaned:
+        pairs = []
+        for entry in entries:
+            item = self._sanitize(entry, keep_id=True)
+            if item:
+                pairs.append((item, isinstance(entry, dict) and bool(str(entry.get("id") or "").strip())))
+        if not pairs:
             raise ValidationError("가져올 수 있는 유효한 바로가기가 없습니다(이름·URL 확인).")
-        seen = set()
-        unique = []
-        for item in cleaned:
-            if item["id"] in seen:
-                item["id"] = "sc-" + uuid.uuid4().hex[:12]
-            seen.add(item["id"])
-            unique.append(item)
         with self._lock:
+            # 46회차 H3(재현): id 가 없는 항목(CSV 는 id 열이 없다)은 URL 이 같은 기존 바로가기의 id 를 이어받는다(한 URL 에 한 번) —
+            #   예전에는 내보낸 CSV 를 그대로 '교체' 해도 전부 새 id 라 점검 이력 · 알림 기준점이 끊겼다(JSON 은 id 를 지켰다).
+            self._ensure_loaded()
+            prior = {}
+            for old in self._items:
+                prior.setdefault(str(old.get("url") or "").lower(), old.get("id"))
+            seen = set()
+            unique = []
+            for item, had_id in pairs:
+                if not had_id:
+                    inherit = prior.pop(str(item.get("url") or "").lower(), None)
+                    if inherit and inherit not in seen:
+                        item["id"] = inherit
+                if item["id"] in seen:
+                    item["id"] = "sc-" + uuid.uuid4().hex[:12]
+                seen.add(item["id"])
+                unique.append(item)
             self._items = unique
             self._loaded = True
             self._write(self._items)

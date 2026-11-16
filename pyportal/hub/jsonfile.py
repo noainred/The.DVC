@@ -27,6 +27,50 @@ def preserve_corrupt(path: Path) -> None:
         print(f"[store] 손상 파일 보존 실패: {exc}", flush=True)
 
 
+_ABSENT = object()
+
+
+class StoreUnavailable(RuntimeError):
+    """46회차 H2: 참조 저장소(데이터센터 · 카테고리)를 못 읽음 — 바로가기는 분류 · 센터 값을 바꾸지 않고 그대로 둔다."""
+
+
+def has_corrupt_copy(path: Path) -> bool:
+    """이전 기동이 옮겨 둔 손상 보존본(<이름>.corrupt.<ts>)이 남아 있는가."""
+    path = Path(path)
+    try:
+        return any(path.parent.glob(path.name + ".corrupt.*"))
+    except OSError:
+        return False
+
+
+def read_json_state(path: Path, *, expect=None, quiet: bool = False):
+    """46회차(전체 점검): (값, 상태) — 상태는 None(정상) · 'missing'(첫 기동) · 'corrupt'(손상) · 'unreadable'(읽기 오류).
+
+    손상은 보존본으로 옮기고, 읽기 오류는 옮기지 않는다(31회차 F3 과 같은 규칙). 파일이 없어도 손상 보존본이 남아 있으면
+    'corrupt' 다 — 손상으로 옮긴 뒤 재기동하면 '첫 기동' 으로 보고 내장 seed · 기본값을 파일에 굳혀, 바로가기 연결 · 보관 수량을
+    잃던 것(46회차 H1 · H2)을 막는다. 관리자가 복구(백업 복원 · 보존본 되살리기)하거나 보존본을 지우면 풀린다.
+    """
+    path = Path(path)
+    existed = path.exists()
+    try:
+        data = read_json(path, _ABSENT, expect=expect, strict_io=True, quiet=quiet)
+    except OSError:
+        return None, "unreadable"
+    if data is _ABSENT:
+        if existed or has_corrupt_copy(path):
+            return None, "corrupt"
+        return None, "missing"
+    return data, None
+
+
+def load_error_text(name: str, state: str) -> str:
+    """손상 · 읽기 오류 상태의 안내 문구(쓰기 거절 · 화면 표지 공용)."""
+    if state == "unreadable":
+        return f"{name} 을(를) 읽지 못했습니다(권한 · 입출력) — 파일 소유자 · 권한을 고칠 때까지 저장하지 않습니다."
+    return (f"{name} 이(가) 손상되어 {name}.corrupt.* 로 옮겼습니다 — 백업에서 복원하거나 보존본을 고쳐 되살리세요"
+            f"(처음부터 다시 쓰려면 보존본을 지우고 다시 시작). 그때까지 저장하지 않습니다.")
+
+
 def read_json(path: Path, default, *, expect=None, strict_io: bool = False, quiet: bool = False):
     """파일을 읽어 파싱한다. 없으면 default, 손상되면 보존 후 default.
 

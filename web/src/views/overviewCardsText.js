@@ -53,7 +53,8 @@ export function firstCollectNotice(ov) {
 export function gpuCardValue(g) {
   if (!g) return { value: null, partial: false, unknown: false };
   // v2.683: 오래된 인벤토리의 카드도 합계에 들어간다(사용자 결정 "iDRAC 에 등록된 카드만") — '읽음' 은 인벤토리가 있는 서버 전부.
-  const read = (Number(g.inventoryRead) || 0) + (Number(g.inventoryStale) || 0);
+  // 46회차 I1: GPU 목록(Processors)을 못 읽은 서버는 '읽음' 이 아니다(합계는 최소값)
+  const read = (Number(g.inventoryRead) || 0) + (Number(g.inventoryStale) || 0) - (Number(g.gpuUnread) || 0);
   const servers = Number(g.servers) || 0;
   const unknown = servers > 0 && read === 0;
   const partial = !unknown && read < servers;
@@ -63,8 +64,9 @@ export function gpuCardValue(g) {
 export function gpuCardMeta(g) {
   if (!g) return '';
   const v = gpuCardValue(g);
-  const read = (Number(g.inventoryRead) || 0) + (Number(g.inventoryStale) || 0);
+  const read = (Number(g.inventoryRead) || 0) + (Number(g.inventoryStale) || 0) - (Number(g.gpuUnread) || 0);
   return `iDRAC 인벤토리 카드만 · 수집 ${countText(read)}/${countText(g.servers)}대`
+    + (g.gpuUnread ? ` · GPU 목록을 못 읽은 서버 ${countText(g.gpuUnread)}대` : '')
     + (g.gpusStale ? ` · 오래된 인벤토리 ${countText(g.inventoryStale)}대의 ${countText(g.gpusStale)}장 포함` : g.inventoryStale ? ` · 오래된 인벤토리 ${countText(g.inventoryStale)}대` : '')
     + (g.gpusUnnamed ? ` · 모델 미상 ${countText(g.gpusUnnamed)}장 포함` : '')
     + (v.unknown ? ' · 아직 읽은 서버가 없습니다' : v.partial ? ' · 미수집 서버 제외(최소값)' : '');

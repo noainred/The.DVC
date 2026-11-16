@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import threading
 
-from .jsonfile import read_json, write_json
+from .jsonfile import load_error_text, read_json_state, write_json
 
 # 백업 주기·점검 주기는 화면에서 고르는 값이라 허용 목록을 서버에서도 강제한다.
 BACKUP_INTERVAL_CHOICES = (30, 60, 180, 360, 720, 1440, 10080)          # 분
@@ -90,12 +90,24 @@ class SettingsStore:
         self._path = path
         self._lock = threading.RLock()
         self._data = None
+        self._load_error = None
 
     def _load(self):
         if self._data is None:
-            raw = read_json(self._path, {}, expect=dict)
-            self._data = self._normalize(raw)
+            # 46회차 H1(재현): 손상 · 읽기 오류를 표지로 든다 — 예전에는 조용히 기본값(보관 14개 · 알림 꺼짐)으로 돌아, 다음 백업이
+            #   관리자가 정한 보관 수량(예: 50)을 무시하고 오래된 백업을 되돌릴 수 없게 지웠다. 읽기 오류는 캐시하지 않는다(권한을 고치면 다음 호출에 읽힌다).
+            raw, state = read_json_state(self._path, expect=dict, quiet=self._load_error == "unreadable")
+            self._load_error = state if state in ("corrupt", "unreadable") else None
+            if state == "unreadable":
+                return self._normalize({})
+            self._data = self._normalize(raw or {})
         return self._data
+
+    def load_error(self):
+        """None · 'corrupt' · 'unreadable' — 이 동안 백업 정리를 멈추고(backup._prune_locked) 화면에 표지를 싣는다."""
+        with self._lock:
+            self._load()
+            return self._load_error
 
     @staticmethod
     def _normalize(raw):
@@ -148,16 +160,21 @@ class SettingsStore:
             raise KeyError(name)
         with self._lock:
             data = self._load()
+            if self._load_error == "unreadable":
+                # 읽지 못한 파일을 기본값 + 이 칸으로 덮어쓰지 않는다(손상은 보존본이 있어 관리자의 새 저장이 복구 경로다)
+                raise ValueError(load_error_text("settings.json", "unreadable"))
             merged = dict(data[name])
             if isinstance(values, dict):
                 merged.update(values)
             data[name] = self._normalize({name: merged})[name]
             self._data = data
             write_json(self._path, data)
+            self._load_error = None
             return dict(data[name])
 
     def replace(self, values):
         with self._lock:
             self._data = self._normalize(values if isinstance(values, dict) else {})
             write_json(self._path, self._data)
+            self._load_error = None
             return self.all()

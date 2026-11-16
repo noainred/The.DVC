@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 import threading
 
-from .jsonfile import read_json, write_json
+from .jsonfile import StoreUnavailable, load_error_text, read_json_state, write_json
 from .ssrf import ValidationError
 
 # 화면 배지 색. CSS 는 `.cat-<color>` 클래스를 갖고 있다(styles.css).
@@ -69,15 +69,24 @@ class CategoryStore:
         self._path = path
         self._lock = threading.RLock()
         self._items = None
+        self._load_error = None
 
     # ---------- 내부 ----------
 
     def _load(self):
         if self._items is None:
-            raw = read_json(self._path, None, expect=list)
-            if raw is None:
+            raw, state = read_json_state(self._path, expect=list, quiet=self._load_error == "unreadable")
+            self._load_error = state if state in ("corrupt", "unreadable") else None
+            if state == "missing":
                 self._items = [dict(cat) for cat in SEED_CATEGORIES]
                 write_json(self._path, self._items)
+            elif self._load_error:
+                # 46회차 H2: 손상 · 읽기 오류는 첫 기동이 아니다 — seed 를 파일에 굳히지 않고(바로가기 분류가 'custom' 으로 바뀌던 원인)
+                #   화면이 쓸 수 있게 내장 분류만 메모리에 둔다(쓰기 거절 · 바로가기는 원값 유지 — resolve 가 StoreUnavailable).
+                items = [dict(cat) for cat in SEED_CATEGORIES]
+                if state == "unreadable":
+                    return items
+                self._items = items
             else:
                 cleaned = [cat for cat in (self._clean(entry, keep_id=True) for entry in raw) if cat]
                 self._items = self._ensure_default(cleaned)
@@ -93,7 +102,14 @@ class CategoryStore:
             items.append(dict(fallback))
         return items
 
+    def load_error(self):
+        with self._lock:
+            self._load()
+            return self._load_error
+
     def _save(self):
+        if self._load_error:
+            raise ValidationError(load_error_text("categories.json", self._load_error))
         write_json(self._path, self._items)
 
     def _clean(self, data, *, keep_id=False, existing=None):
@@ -134,6 +150,10 @@ class CategoryStore:
         text = _text(value, 64)
         if not text:
             return None
+        with self._lock:
+            self._load()
+            if self._load_error:
+                raise StoreUnavailable(self._load_error)
         known = self.ids()
         if text in known:
             return text

@@ -360,6 +360,8 @@ class HubHandler(BaseHTTPRequestHandler):
             "summary": self.ctx.datacenters.summary(visible),
             "displayLimit": limit,
             "totalRegistered": len(self.ctx.datacenters.all()),
+            # 46회차 H2: 목록을 못 읽었으면 '0곳' 이 아니라 못 읽음(손상 · 읽기 오류 — 내장 샘플을 대신 보이지 않는다)
+            "loadError": self.ctx.datacenters.load_error(),
         })
 
     def api_health_latest(self):

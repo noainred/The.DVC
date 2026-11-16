@@ -931,6 +931,7 @@ function ServerGpuFinder({ vc, onServer }) {
 GPU <b style={{ color: 'var(--accent)' }}>{d.totalGpus}</b>장 · <b>{d.models.length}</b>종 · iDRAC {d.collectedServers}/{d.totalServers}
           <span title="Overview 'GPU 카드' 와 같은 기준입니다 — iDRAC 인벤토리에 있는 카드만 셉니다(비활성 서버 제외).">{gpuFinderNote(d)}</span>
           {d.missing?.length > 0 && <span className="badge amber" style={{ marginLeft: 8 }} title={d.missing.map((x) => x.name).join(', ')}>미수집 {d.missing.length}대</span>}
+          {d.gpuUnread > 0 && <span className="badge amber" style={{ marginLeft: 8 }} title="인벤토리는 읽었지만 GPU 목록(Processors)을 못 읽은 서버입니다 — 합계는 최소값입니다(GPU 가 없다는 뜻이 아닙니다).">GPU 목록 못 읽음 {d.gpuUnread}대</span>}
         </div>
         <div className="flex gap" style={{ alignItems: 'center' }}>
           <SearchBox className="input" style={{ maxWidth: 260 }} placeholder="GPU 모델 / 서비스태그 검색" value={q} onChange={setQ} />

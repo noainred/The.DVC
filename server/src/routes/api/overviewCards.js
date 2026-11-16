@@ -190,7 +190,7 @@ export function registerOverviewCards(api) {
         farms: farms || { count: null, reason: FLEET_ONLY },
         physical: { count: pc.count, inventoryRead: pc.invRead, inventoryStale: pc.invStale, disabled: pc.disabled },
         virtual: { count: vms.length, poweredOn: vms.filter((v) => v.powerState === 'POWERED_ON').length, templates: vms.filter((v) => v.template).length, vcenters: vcs.length, vcentersPending: vcPending },
-        gpus: { count: pc.gpus, inventoryRead: pc.invRead, inventoryStale: pc.invStale, inventoryMissing: pc.invMissing, gpusStale: pc.gpusStale, gpusUnnamed: pc.gpusUnnamed, servers: pc.count },
+        gpus: { count: pc.gpus, inventoryRead: pc.invRead, inventoryStale: pc.invStale, inventoryMissing: pc.invMissing, gpusStale: pc.gpusStale, gpusUnnamed: pc.gpusUnnamed, gpuUnread: pc.gpuUnread || 0, servers: pc.count },   // 46회차 I1
         storage: storage || { totalBytes: null, reason: FLEET_ONLY },
         network: network || { count: null, reason: FLEET_ONLY },
         power: power || { totalWatts: null, reason: FLEET_ONLY },

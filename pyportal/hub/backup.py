@@ -188,6 +188,10 @@ class BackupService:
     # ---------- 보관 수량 ----------
 
     def _prune_locked(self):
+        # 46회차 H1(재현): 설정을 못 읽는 동안(기본 보관 14개)에는 지우지 않는다 — 관리자가 정한 보관 수량을 모른다.
+        load_error = getattr(self._settings, "load_error", None)
+        if callable(load_error) and load_error():
+            return len(self.list()), 0
         keep = int(self._settings.section("backup").get("keep", 14))
         keep = max(1, min(MAX_KEEP, keep))
         entries = self.list()
@@ -241,4 +245,6 @@ class BackupService:
             "directory": str(self._dir),
             # 37회차 R6 · 39회차 R6: 자동 백업이 켜져 있을 때만(꺼면 지난 실패를 경고로 남기지 않는다) — 수동 · 자동 백업이 성공하면 create 가 지운다.
             "lastError": dict(self._last_error) if (self._last_error and cfg.get("enabled")) else None,
+            # 46회차 H1: 설정 파일을 못 읽어 기본값으로 동작 중이면 표지(그동안 오래된 백업 정리를 멈춘다)
+            "settingsLoadError": (self._settings.load_error() if callable(getattr(self._settings, "load_error", None)) else None),
         }

@@ -608,7 +608,7 @@ adminRouter.get('/idrac/gpu-inventory', adminOnly, (req, res) => {
     totalGpus: counts.gpus,
     models,
     servers: serverList.sort((a, b) => b.gpuCount - a.gpuCount),
-    collectedServers: counts.invRead + counts.invStale, totalServers: counts.count,
+    collectedServers: counts.invRead + counts.invStale - (counts.gpuUnread || 0), totalServers: counts.count, gpuUnread: counts.gpuUnread || 0,   // 46회차 I1: GPU 목록을 못 읽은 서버는 수집으로 세지 않는다
     inventoryStale: counts.invStale, gpusStale: counts.gpusStale, gpusUnnamed: counts.gpusUnnamed, disabledServers: counts.disabled,
     physicalServers: physCount, physicalGpus: physGpus,
     missing,

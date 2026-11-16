@@ -561,7 +561,15 @@
     var stats = $("dc-stats");
     clear(stats);
     var sum = state.dcSummary;
-    if (sum) {
+    if (state.dcLoadError) {
+      // 46회차 H2: 목록 파일을 못 읽었으면 '0곳' 이 아니라 못 읽음(내장 샘플을 대신 보이지 않는다)
+      stats.appendChild(el("div", { className: "stat" }, [
+        el("div", { className: "stat-label", text: "데이터센터 목록" }),
+        el("div", { className: "stat-value v-amber", text: "읽지 못함" }),
+        el("div", { className: "stat-note", text: state.dcLoadError === "unreadable"
+          ? "파일 권한 · 입출력 오류 — 관리자 확인 필요" : "파일 손상 — 관리자가 백업에서 복원해야 합니다" })
+      ]));
+    } else if (sum) {
       [["운영 데이터센터", sum.operational + " / " + sum.total, "정상 가동", "v-emerald"],
        ["평균 PUE", String(sum.avgPue), "에너지 효율", "v-blue"],
        ["총 운용 랙", Number(sum.racks).toLocaleString(), "서버 랙", "v-indigo"],
@@ -1205,6 +1213,7 @@
   function refreshDatacenters() {
     return api("/api/datacenters").then(function (data) {
       state.datacenters = data.datacenters || [];
+      state.dcLoadError = data.loadError || null;   // 46회차 H2
       state.dcSummary = data.summary || null;
       state.dcRegistered = data.totalRegistered || state.datacenters.length;
       if (data.displayLimit != null) state.dcLimit = data.displayLimit;
@@ -1342,7 +1351,11 @@
       : "저장 위치 " + (status.directory || "-") +
         " · 총 " + bytes(status.totalBytes || 0) +
         (status.latest ? " · 최근 " + fullStamp(status.latest.modifiedTs) : " · 백업 없음") +
-        (status.lastError ? " · ⚠ 자동 백업 실패: " + status.lastError.reason : "");
+        (status.lastError ? " · ⚠ 자동 백업 실패: " + status.lastError.reason : "") +
+        // 46회차 H1: 설정 파일을 못 읽어 기본값으로 동작 중 — 그동안 오래된 백업 정리를 멈춘다
+        (status.settingsLoadError ? " · ⚠ 설정 파일(settings.json)을 " +
+          (status.settingsLoadError === "unreadable" ? "읽지 못해(권한 · 입출력)" : "읽지 못해(손상 — 보존본으로 옮김)") +
+          " 기본값으로 동작 중 — 오래된 백업 정리를 멈췄습니다" : "");
 
     var body = $("backup-tbody");
     clear(body);
@@ -2108,6 +2121,7 @@
         state.dcSummary = results[1].summary || null;
         state.dcRegistered = results[1].totalRegistered || state.datacenters.length;
         state.dcLimit = results[1].displayLimit || 0;
+        state.dcLoadError = results[1].loadError || null;
         if (!state.selectedDcId && state.datacenters.length) {
           state.selectedDcId = state.datacenters[0].id;
         }

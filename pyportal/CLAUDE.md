@@ -121,3 +121,4 @@
 - **users.json 읽기 오류(OSError)는 손상이 아니다**(`read_json(strict_io=True)`): 옮기지 않고 저장 · 새 admin 생성을 막는다. 콘솔 복구는 데이터 폴더 소유자로(root 거부).
 - 핀 연결 opener 는 `ProxyHandler({})` — 환경 프록시가 끼면 '대상 IP : 프록시 포트' 로 붙는다. 센터 id `all` 은 예약어.
 - 35회차 반증: 폐기 목록에는 **서명 · 만료가 유효한 토큰만**(미인증 로그아웃으로 파일이 자라지 않게 · 상한) · 백업도 users.json 을 strict 로 읽는다 · 못 읽음 상태 쓰기는 **바꾸기 전에** 거절 · 비-admin 에게 경로(초기 비밀번호 파일 포함) 금지 · 사용자명 `.`·`..`·`/` 거부.
+- 46회차: settings · categories · datacenters 도 **손상 · 읽기 오류 ≠ 첫 기동**(`jsonfile.read_json_state` — 보존본이 남아 있으면 재기동 뒤에도 'corrupt') — seed · 기본값을 파일에 굳히지 않고 쓰기 거절 · 바로가기는 분류 · 센터 원값 유지(`StoreUnavailable`) · 설정을 못 읽는 동안 백업 정리 중지 · CSV '교체' 는 같은 URL 의 id 를 이어받는다(`tests/test_audit_full46.py`).
