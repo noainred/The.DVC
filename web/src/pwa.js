@@ -20,6 +20,20 @@ export async function enableNotifications() {
   try { return await Notification.requestPermission(); } catch { return 'denied'; }
 }
 
+/**
+ * 2차 공통 기능 점검 6회차: `navigator.serviceWorker.ready` 는 **활성 워커가 생길 때까지 끝나지 않는다** — sw.js 등록이 실패하면(프록시 · 404 ·
+ *   설치 오류) 영원히 기다려, 그 뒤 위험(critical) 알림이 하나도 뜨지 않고 기다리는 약속만 쌓였다(알림 기능이 조용히 죽는다).
+ *   시한 안에 준비되지 않으면 null — 호출부가 `new Notification` 으로 넘어간다.
+ */
+export function swReadyWithin(sw, ms = 3_000) {
+  if (!sw?.ready) return Promise.resolve(null);
+  let t = null;
+  return Promise.race([
+    Promise.resolve(sw.ready).catch(() => null),
+    new Promise((resolve) => { t = setTimeout(() => resolve(null), ms); }),
+  ]).finally(() => clearTimeout(t));
+}
+
 let timer = null;
 let pausedUntil = 0;
 const seen = new Set();
@@ -38,7 +52,7 @@ export function startAlertNotifications(intervalMs = 60_000) {
         if (o.severity !== 'critical' || seen.has(o.key)) continue;
         seen.add(o.key);
         try {
-          const reg = await navigator.serviceWorker?.ready;
+          const reg = await swReadyWithin(navigator.serviceWorker);
           const body = o.detail || '';
           if (reg?.showNotification) reg.showNotification(`🔴 ${o.title}`, { body, tag: o.key, icon: '/icon.svg', badge: '/icon.svg' });
           else new Notification(`🔴 ${o.title}`, { body, tag: o.key, icon: '/icon.svg' });
