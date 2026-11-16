@@ -10,7 +10,8 @@ export const DASH = '—';
 export const DIR_MAX = 120;
 export const DIR_DEPTH_MIN = 2;
 export const DIR_DEPTH_MAX = 8;
-export const DIR_DENY = Object.freeze(['/tmp', '/var/tmp', '/dev', '/proc', '/sys', '/run', '/home', '/root', '/boot', '/mnt', '/media']);
+export const DIR_DENY = Object.freeze(['/tmp', '/var/tmp', '/dev', '/proc', '/sys', '/run', '/home', '/root', '/boot', '/mnt', '/media',
+  '/etc', '/var/spool', '/var/log', '/var/cache', '/var/lib', '/var/run', '/bin', '/sbin', '/lib', '/lib64', '/usr/bin', '/usr/sbin', '/usr/lib', '/usr/lib64', '/usr/libexec', '/usr/share', '/usr/include', '/usr/src', '/lost+found']);
 export const DIR_ISSUE_TEXT = Object.freeze({
   'not-string': '디렉터리는 글자여야 합니다.',
   'too-long': `${DIR_MAX}자를 넘습니다.`,
@@ -22,7 +23,7 @@ export const DIR_ISSUE_TEXT = Object.freeze({
   'dash-segment': '이름이 - 로 시작할 수 없습니다.',
   'too-shallow': '최상위 바로 아래 한 칸(/opt 같은 곳)에는 둘 수 없습니다 — 전용 폴더를 한 칸 더 두세요.',
   'too-deep': `${DIR_DEPTH_MAX}칸까지입니다.`,
-  denied: '다른 계정이 쓸 수 있거나 재부팅 · 마운트에 따라 바뀌는 곳(/tmp · /home · /run 등) 아래에는 둘 수 없습니다.',
+  denied: '다른 계정이 쓸 수 있거나 재부팅 · 마운트에 따라 바뀌는 곳(/tmp · /home · /run 등) · 시스템 설정 · 패키지 트리(/etc · /usr/bin · /usr/lib 등) 아래에는 둘 수 없습니다.',
 });
 /** 서버와 같은 판정(순수). '' = 기본 경로(문제 없음). */
 export function dirIssue(dir) {
@@ -71,6 +72,7 @@ export const SRC_TEXT = Object.freeze({ server: 'SSH 공용 접속 서버 항목
 export const INSTALL_CODE_TEXT = Object.freeze({
   ok: '설치함 — 준비됨',
   check: '설치함 — 준비 확인은 못 함',
+  'not-ready': '설치함 — 준비 안 됨',
   cred: '설치 계정이 정해지지 않음',
   'bad-dir': '설치 디렉터리가 규칙에 맞지 않음',
   'bad-acct': '수집 계정 이름이 규칙에 맞지 않음',
@@ -90,7 +92,7 @@ export const INSTALL_CODE_TEXT = Object.freeze({
 export const INSTALL_FAIL_TEXT = Object.freeze({
   args: '수집 계정 이름이 규칙에 맞지 않음', 'not-root': 'root 로 돌지 않음', 'no-acct': '수집 계정이 그 서버에 없음',
   'dir-symlink': '디렉터리 경로에 심링크가 있음', 'dir-notdir': '경로에 디렉터리가 아닌 것이 있음', 'dir-owner': '디렉터리가 root 소유가 아님',
-  'dir-writable': '디렉터리를 그룹 · 다른 계정이 쓸 수 있음', 'dir-netfs': '네트워크 파일시스템', 'dir-noexec': '실행 금지(noexec) 마운트',
+  'dir-writable': '디렉터리를 그룹 · 다른 계정이 쓸 수 있음', 'dir-traverse': '위쪽 폴더를 수집 계정이 지나갈 수 없음(다른 계정 실행 권한 없음)', 'dir-netfs': '네트워크 파일시스템', 'dir-noexec': '실행 금지(noexec) 마운트',
   'no-includedir': '/etc/sudoers 가 sudoers.d 를 읽지 않음', damaged: '설치 파일 손상', visudo: 'sudoers 검사(visudo) 실패', install: '파일을 놓지 못함', other: '알 수 없는 까닭',
 });
 /** 고칠 곳(까닭 → 안내). */
@@ -103,13 +105,17 @@ export const INSTALL_FIX_TEXT = Object.freeze({
   upload: '그 서버의 SSH 에 SFTP 가 꺼져 있을 수 있습니다 — 손으로 설치하세요.',
   version: '중앙 · 엣지 포탈 판이 같아진 뒤 다시 누르세요.',
   check: '수집 계정의 키 로그인을 확인한 뒤 ‘준비 상태 다시 확인’ 을 누르세요(대상 · 키 탭의 ‘다시 연결’).',
+  timeout: '설치 파일이 그 서버에서 늦게 끝났을 수 있습니다 — ‘준비 상태 다시 확인’ 으로 실제 상태를 본 뒤 다시 누르세요.',
+  'host-busy': '같은 주소의 다른 서버 항목을 설치하는 중입니다 — 그 설치가 끝난 뒤 다시 누르세요.',
+  'host-shared': '같은 주소에 다른 수집 계정 항목이 있어 sudoers 를 서로 덮습니다 — 손으로 설치하세요.',
+  'not-ready': '파일은 놓았지만 수집 계정으로 확인한 결과가 준비됨이 아닙니다 — ‘지금 상태’ 칸의 까닭을 보고 고친 뒤 다시 설치하세요.',
 });
 export function installResultText(li) {
   if (!li) return null;
   const base = INSTALL_CODE_TEXT[li.code] || li.code;
   const why = li.code === 'script' && li.fail ? ` — ${INSTALL_FAIL_TEXT[li.fail] || li.fail}` : li.code === 'cred' && li.cred ? ` — ${credText({ state: li.cred }).label.replace(/^(못 함|모름|고르면 됨) — /, '')}` : '';
   const extra = [li.nopy ? 'python3 없음(설치는 됨)' : '', li.oldRm ? `옛 파일 ${li.oldRm}개 지움` : '', li.oldKeep ? `옛 파일 ${li.oldKeep}개는 판본이 달라 둠` : ''].filter(Boolean).join(' · ');
-  return { tone: li.code === 'ok' ? 'ok' : li.code === 'check' ? 'warn' : 'bad', label: `${base}${why}`, sub: [extra, INSTALL_FIX_TEXT[li.code] || ''].filter(Boolean).join(' · ') };
+  return { tone: li.code === 'ok' ? 'ok' : li.code === 'check' || li.code === 'not-ready' ? 'warn' : 'bad', label: `${base}${why}`, sub: [extra, INSTALL_FIX_TEXT[li.code] || ''].filter(Boolean).join(' · ') };
 }
 
 /** 설치 단계 막대(서버 INSTALL_STEPS 0 ~ 7). */

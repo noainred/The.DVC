@@ -21,12 +21,21 @@ import { auditOnce } from './runner.js';
 import { isDemoTarget } from '../mock.js';
 import { demoAuditOutput } from './mock.js';
 
-export const INSTALL_TIMEOUT_MS = 120_000;
+/**
+ * 시한 산수(v3.17.0 반증 D5 — 설치 exec 시한이 장비 시한과 같아 넘치면 세션째 끊겨 올린 파일을 지우지 못했다):
+ *   접속(READY_TIMEOUT_MS) + 권한 확인 + 파일 올림 + 설치 exec + 정리 exec + 여유 ≤ 장비 시한. 시험이 산수를 고정한다.
+ */
+export const INSTALL_PRIV_MS = 20_000;
+export const INSTALL_UPLOAD_MS = 20_000;
+export const INSTALL_EXEC_MS = 90_000;
+export const INSTALL_CLEANUP_MS = 10_000;
+export const INSTALL_MARGIN_MS = 5_000;
+export const INSTALL_TIMEOUT_MS = 160_000;
 export const NODE_INSTALL_CONCURRENCY = 4;
 export const AUTH_STOP_AFTER = 3;
 export const AUTH_STOP_MS = 10 * 60_000;
 /** 결과 까닭(화면 문구 키 — 웹 `INSTALL_CODE_TEXT` 와 같다 · 시험 대조). 'script' 는 설치 파일이 멈춘 것(fail = INSTALL_FAILS). */
-export const INSTALL_CODES = Object.freeze(['ok', 'cred', 'bad-dir', 'bad-acct', 'version', 'key-stopped', 'auth', 'hostkey', 'unreachable', 'timeout', 'sudo-password', 'sudo-tty', 'upload', 'script', 'script-other', 'check']);
+export const INSTALL_CODES = Object.freeze(['ok', 'cred', 'bad-dir', 'bad-acct', 'version', 'key-stopped', 'auth', 'hostkey', 'unreachable', 'timeout', 'sudo-password', 'sudo-tty', 'upload', 'script', 'script-other', 'check', 'not-ready']);
 /** 단계(0 ~ 7 — 화면 막대). */
 export const INSTALL_STEPS = Object.freeze(['cred', 'connect', 'priv', 'dir', 'files', 'sudoers', 'old', 'check']);
 /** 권한 확인(상수) — root · 비밀번호 없는 sudo · 아님. */
@@ -37,6 +46,16 @@ export const FILE_RE = /^\.dvc-da-install\.[0-9a-f]{16}\.sh$/;
 export function installCommand({ sudo, file, acct }) {
   if (!FILE_RE.test(file) || !ACCT_RE.test(acct)) throw new Error('설치 명령 값이 규칙에 맞지 않습니다');
   return `${sudo ? 'sudo -n ' : ''}/bin/sh "$HOME/${file}" ${acct}; echo "##DI rc $?"; rm -f "$HOME/${file}"`;
+}
+/** 설치 exec 가 시한 · 오류로 끝났을 때 올린 파일만 지운다(이름은 FILE_RE — 값 삽입 규칙 그대로). */
+export function cleanupCommand(file) {
+  if (!FILE_RE.test(file)) throw new Error('설치 파일 이름이 규칙에 맞지 않습니다');
+  return `rm -f "$HOME/${file}"`;
+}
+/** 시한 경주(파일 올림처럼 자체 시한이 없는 단계 — 넘치면 던진다). */
+function within(p, ms, what) {
+  let t; const lim = new Promise((_, rej) => { t = setTimeout(() => rej(new Error(`${what} 시한(${Math.round(ms / 1000)}s) 초과`)), ms); t.unref?.(); });
+  return Promise.race([p, lim]).finally(() => clearTimeout(t));
 }
 
 /** 설치 파일 출력 → 표지만(순수 — 시험 고정). */
@@ -90,7 +109,9 @@ export async function installOnce(t, { keys, connect = withSsh, expect = {}, cre
     // 데모 — 장비에 닿지 않는다. 준비 확인은 실데이터와 같은 길(그 디렉터리의 준비 줄)을 탄다.
     return { ...res('ok', { step: 7, acct: 'dvcadmin', key: 'demo-common', src: 'corp', priv: 'sudo' }), ready: demoAuditOutput(t.id, 'check', dir).ready, dir };
   }
-  const cred = credOf(t, { edge: !!expect?.edge, corpVcs: Array.isArray(expect?.corpVcs) ? expect.corpVcs : [], pick: expect?.pick || null, withAuth: true });
+  // 엣지: 법인 = 그 엣지 스냅샷의 vCenter 들(installExec 의 edgeVcs — 중앙이 보낸 값이 아니다 · JSON 으로는 함수를 실을 수 없다)
+  const corpVcs = expect?.edge ? (typeof expect.edgeVcs === 'function' ? expect.edgeVcs() : []) : (Array.isArray(expect?.corpVcs) ? expect.corpVcs : []);
+  const cred = credOf(t, { edge: !!expect?.edge, corpVcs, pick: expect?.pick || null, withAuth: true });
   if (!cred || cred.state !== 'ok' || !cred.auth) return res('cred', { cred: cred?.state || 'error', acct: cred?.acct || '', key: cred?.key || '', src: cred?.src || null });
   const who = { acct: cred.acct, key: cred.key, src: cred.src };
   const fp = cred.auth.fingerprint || '';
@@ -98,21 +119,31 @@ export async function installOnce(t, { keys, connect = withSsh, expect = {}, cre
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeoutMs); timer.unref?.();
   const file = `.dvc-da-install.${crypto.randomBytes(8).toString('hex')}.sh`;
-  let step = 1; let priv = null; let parsed = null;
+  let step = 1; let priv = null; let parsed = null; let execTimedOut = false;
   try {
     let text;
     try { text = installScript({ dir, oldDirs }); } catch { return res('bad-dir', who); }
     onPhase('접속');
     await connect({ host: t.host, port: t.port, username: cred.auth.username, privateKey: cred.auth.privateKey, passphrase: cred.auth.passphrase || undefined, readyTimeout: READY_TIMEOUT_MS, signal: ctl.signal }, async (api) => {
       step = 2; onPhase('권한 확인');
-      const pr = await api.exec(PRIV_COMMAND, 20_000);
+      const pr = await api.exec(PRIV_COMMAND, INSTALL_PRIV_MS);
       const m = /##DI priv (root|sudo|tty|no)\b/.exec(String(pr.stdout || ''));
       priv = m ? m[1] : 'no';
       if (priv === 'no' || priv === 'tty') return {};
       step = 3; onPhase('설치 파일 올림');
-      try { await api.writeFile(file, text, 0o600); } catch (e) { parsed = { upload: String(e?.message || e).slice(0, 80) }; return {}; }
+      try { await within(api.writeFile(file, text, 0o600), INSTALL_UPLOAD_MS, '파일 올림'); } catch (e) {
+        parsed = { upload: String(e?.message || e).slice(0, 80) };
+        await api.exec(cleanupCommand(file), INSTALL_CLEANUP_MS).catch(() => null); // 반쯤 올라간 파일
+        return {};
+      }
       onPhase('설치');
-      const r = await api.exec(installCommand({ sudo: priv === 'sudo', file, acct: t.username }), timeoutMs);
+      let r;
+      try { r = await api.exec(installCommand({ sudo: priv === 'sudo', file, acct: t.username }), INSTALL_EXEC_MS); } catch (e) {
+        // 설치 exec 가 시한 · 오류로 끝났다 — 같은 세션에서 올린 파일만 지우고(명령 끝의 rm 이 돌지 않았다) 시한으로 알린다
+        execTimedOut = /타임아웃/.test(String(e?.message || ''));
+        await api.exec(cleanupCommand(file), INSTALL_CLEANUP_MS).catch(() => null);
+        throw e;
+      }
       parsed = parseInstallOut(r.stdout);
       return {};
     }, { signal: ctl.signal });
@@ -120,7 +151,7 @@ export async function installOnce(t, { keys, connect = withSsh, expect = {}, cre
   } catch (e) {
     if (isSshHostKeyError(e)) return res('hostkey', { step, ...who });
     if (isSshAuthError(e)) { noteAuth(fp, false, now()); return res('auth', { step: 1, ...who }); }
-    if (ctl.signal.aborted) return res('timeout', { step, priv, ...who });
+    if (ctl.signal.aborted || execTimedOut) return res('timeout', { step, priv, ...who });
     return res('unreachable', { step, priv, ...who });
   } finally { clearTimeout(timer); }
   if (priv === 'no' || priv === 'tty') return res(priv === 'tty' ? 'sudo-tty' : 'sudo-password', { step: 2, priv, ...who });

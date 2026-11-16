@@ -38,6 +38,7 @@ const SET = await import('../src/focusmon/audit/settings.js');
 const A = await import('../src/focusmon/audit/service.js');
 const R = await import('../src/focusmon/audit/runner.js');
 const W = await import('../../web/src/views/tools/focusMonAuditInstallText.js');
+const { READY_TIMEOUT_MS } = await import('../src/focusmon/collector.js');
 const F = await import('./_sshKeyFixtures.js');
 const VAULT = await import('../src/security/secretVault.js');
 VAULT.saveSecretsPolicy({ mode: 'encrypted', level: 1 });
@@ -146,7 +147,10 @@ test('④ 설치 계정 — 직접 켠 키만 · 같은 주소 둘 · 비밀번�
   const pickId = (a3.account || a3).id;
   assert.equal(C.installCredFor(t('10.9.9.9'), { corpVcs: ['vcA'], pick: pickId }).acct, 'inst2', '고른 계정');
   assert.equal(C.installCredFor(t('10.9.9.9'), { corpVcs: ['vcA'], pick: 'nope' }).state, 'ambig', '후보가 아닌 고르기는 무시');
-  assert.equal(C.installCredFor(t('10.9.9.9'), { edge: true }).state, 'ambig', '엣지는 법인이 정해진 계정 전부');
+  // 반증 S2: 엣지도 법인을 거른다 — 엣지 스냅샷의 vCenter 들(corpVcs)로. 못 읽으면(빈 목록) 닫힌다
+  assert.equal(C.installCredFor(t('10.9.9.9'), { edge: true }).state, 'noentry', '엣지라도 법인 목록이 없으면 공통 계정을 쓰지 않는다');
+  assert.equal(C.installCredFor(t('10.9.9.9'), { edge: true, corpVcs: ['vcB'] }).state, 'noentry', '엣지가 맡지 않은 법인의 계정은 쓰지 않는다');
+  assert.equal(C.installCredFor(t('10.9.9.9'), { edge: true, corpVcs: ['vcA'] }).state, 'ambig', '엣지가 맡은 법인의 계정');
   void a2;
 });
 
@@ -233,7 +237,10 @@ test('⑥ 중앙 — 접수 · 엣지 배달 · 결과 정제 · 설치 위치 �
   const r = A.requestInstall(te, { by: 'own' });
   assert.equal(r.ok, true, JSON.stringify(r)); assert.equal(r.via, 'edge');
   assert.equal(A.requestInstall(te, { by: 'own' }).code, 'busy', '한 서버에 작업 하나');
-  const out = A.handleEdgeAudit('edge-pl', mine, { cred: { [te.id]: { state: 'ok', acct: 'pl-ops' } } }, Date.now() + 1000);
+  // 반증 S1: 설치를 돌릴 줄 안다는 표시(caps)가 이번 본문에 없으면 내려보내지 않는다(계정 보고가 10분 안에 있었어도)
+  const noCap = A.handleEdgeAudit('edge-pl', mine, { cred: { [te.id]: { state: 'ok', acct: 'pl-ops' } } }, Date.now() + 500);
+  assert.equal(noCap.jobs.filter((j) => j.mode === 'install').length, 0, 'caps 없는 본문에는 설치 작업 없음');
+  const out = A.handleEdgeAudit('edge-pl', mine, { caps: ['install'], cred: { [te.id]: { state: 'ok', acct: 'pl-ops' } } }, Date.now() + 1000);
   const job = out.jobs.find((j) => j.mode === 'install');
   assert.ok(job); assert.equal(job.expect.dir, '/opt/dvc/disk-audit'); assert.deepEqual(job.expect.cands, ['/opt/dvc/disk-audit']); assert.equal(job.expect.wrappers['/opt/dvc/disk-audit'], B.wrapperSha('/opt/dvc/disk-audit'));
   assert.equal(out.known, undefined, '맡은 서버 목록은 60초에 한 번');
@@ -284,7 +291,8 @@ test('⑦ 설정 손상 · 라우트 문(관리자 · 설정 소유자 등급 ·
   const svc = await import('../src/focusmon/service.js');
   const { auditEntriesWithAction } = await import('../src/audit.js');
   const users = { own: { username: 'own', role: 'admin', scope: null }, adm: { username: 'adm', role: 'admin', scope: null }, op: { username: 'op', role: 'operator', scope: null },
-    sown: { username: 'sown', role: 'admin', scope: { vcenters: ['vcA'] } }, demo: { username: 'thedvcdemp', role: 'admin', scope: null, demoGuest: true } };
+    sown: { username: 'sown', role: 'admin', scope: { vcenters: ['vcA'] } }, demo: { username: 'thedvcdemp', role: 'admin', scope: null, demoGuest: true },
+    demoOwn: { username: 'own', role: 'admin', scope: null, demoGuest: true } }; // 데모 표시가 붙은 소유자 — 데모 차단 문 하나만 남는다
   const app = express(); app.use(express.json());
   app.use((req, _res, next) => { req.user = users[req.headers['x-test-user'] || 'own']; next(); });
   app.use('/api', api);
@@ -299,6 +307,11 @@ test('⑦ 설정 손상 · 라우트 문(관리자 · 설정 소유자 등급 ·
     for (const who of ['op', 'adm', 'sown', 'demo']) {
       assert.equal((await call('PUT', '/api/tools/focus-mon/audit/install-dir', { who, body: { dir: '/opt/dvc/x' } })).status, 403, `디렉터리 저장 ${who}`);
       assert.equal((await call('POST', '/api/tools/focus-mon/audit/install', { who, body: { ids: ['fm-d0000000'] } })).status, 403, `설치 ${who}`);
+    }
+    // 어느 문이 막았는지까지(문 하나를 빼도 다른 문이 403 을 내면 시험이 못 가른다 — 변이 검증에서 드러남)
+    for (const [m, p, body] of [['PUT', '/api/tools/focus-mon/audit/install-dir', { dir: '/opt/dvc/x' }], ['POST', '/api/tools/focus-mon/audit/install', { ids: ['fm-d0000000'] }]]) {
+      const a = await call(m, p, { who: 'adm', body }); assert.equal(a.body.requiredOwner, true, `소유자 아님 → 소유자 등급 문 ${p}`);
+      const d = await call(m, p, { who: 'demoOwn', body }); assert.equal(d.status, 403); assert.match(String(d.body.reason), /데모 계정/, `데모 차단 문 ${p}`);
     }
     assert.equal((await call('PUT', '/api/tools/focus-mon/audit/install-dir', { body: { dir: '/tmp/x' } })).body.code, 'denied');
     const ok = await call('PUT', '/api/tools/focus-mon/audit/install-dir', { body: { dir: '/opt/dvc/disk-audit' } });
@@ -335,7 +348,10 @@ test('⑨ 엣지 — 설치 작업은 설치 줄로 · 설치 계정 보고는 �
   const Wk = await import('../src/agent/focusMonWorker.js');
   const src = fs.readFileSync(new URL('../src/agent/focusMonWorker.js', import.meta.url), 'utf8');
   assert.match(src, /const sub = j\.mode === 'install'\n\s+\? installRunner\.submit\(/, '설치 작업은 점검 실행 줄이 아니라 설치 줄로');
-  assert.match(src, /exec: installExec\(\{ edge: true \}\)/, '엣지는 자기 법인의 계정(edge 모드)');
+  assert.match(src, /exec: installExec\(\{ edge: true, edgeVcs \}\)/, '엣지는 자기 법인의 계정(edge 모드 · 스냅샷 vCenter)');
+  assert.match(src, /credOf\(t, \{ edge: true, corpVcs \}\)/, '설치 계정 보고도 같은 법인 거르기');
+  assert.match(src, /caps: \['install'\]/, '매 동기화에 설치 능력 표시(반증 S1)');
+  assert.ok(Array.isArray(Wk.edgeVcs()), '엣지 법인 = 스냅샷 vCenter 목록(못 읽으면 빈 목록)');
   assert.equal(Wk.credReport(Date.now(), () => ({ state: 'ok' })), null, '맡은 서버 목록을 받기 전에는 보고하지 않는다');
   Wk._setKnownForTest([{ id: 'fm-eeeeeeee01', name: 'pl-db-01', host: '10.48.0.1', port: 22 }]);
   const now = Date.now();
@@ -345,4 +361,153 @@ test('⑨ 엣지 — 설치 작업은 설치 줄로 · 설치 계정 보고는 �
   assert.equal(Wk.credReport(now + 1000, () => ({ state: 'ok' })), null, '60초에 한 번');
   assert.ok(Wk.credReport(now + 61_000, () => ({ state: 'ok' })));
   Wk._setKnownForTest([]);
+});
+
+/* ── ⑩ 반증 반영(D3 · D4 · D5 · S3) ── */
+test('⑩-1 D4 — 노드가 ok 라고 해도 중앙이 준비 줄을 다시 판정한다(준비됨이 아니면 not-ready · 줄이 없으면 check)', async () => {
+  A._resetForTest(); SET._resetForTest(); SET.saveInstallDir('', { by: 'own' });
+  const te = { id: 'fm-eeeeeeee11', name: 'pl-db-11', host: '10.48.0.11', port: 22, username: 'dvcmon', agent: 'edge-pl' };
+  const mine = new Map([[te.id, te]]);
+  A.handleEdgeAudit('edge-pl', mine, { caps: ['install'], cred: { [te.id]: { state: 'ok', acct: 'pl-ops' } } }, Date.now());
+  const P0 = B.pathsFor('');
+  const base = ['##DR 1', '##DR py 3.6.8', `##DR file ${P0.program} ${B.programSha()} 0:0:644`, `##DR file ${P0.wrapper} ${B.wrapperSha('')} 0:0:755`, ...B.dirsToCheck(P0).all.map((d) => `##DR dir ${d} 0:0:755`)];
+  const runOnce = async (ready) => {
+    const r = A.requestInstall(te, { by: 'own' }); assert.equal(r.ok, true, JSON.stringify(r));
+    A.handleEdgeAudit('edge-pl', mine, { caps: ['install'], results: [{ runId: r.runId, result: { mode: 'install', ok: true, kind: 'done', dir: '', ready, install: { code: 'ok', step: 7, acct: 'pl-ops' } } }] }, Date.now() + 1000);
+    await new Promise((res) => setTimeout(res, 50));
+    return A.readinessOf(te.id).lastInstall;
+  };
+  let li = await runOnce([...base, '##DR sudo no', '##DR end']);
+  assert.equal(li.code, 'not-ready', 'sudo 규칙이 안 먹었다 — ok 가 아니다'); assert.equal(li.ready, 'nosudo'); assert.equal(li.ok, false);
+  li = await runOnce([]);
+  assert.equal(li.code, 'check', '준비 줄이 없으면 확인 못 함');
+  li = await runOnce([...base, '##DR sudo ok', '##DR end']);
+  assert.equal(li.code, 'ok'); assert.equal(li.ready, null);
+});
+
+test('⑩-2 S3 — 같은 주소에 다른 수집 계정 항목이 있으면 설치하지 않는다 · 같은 주소 설치는 겹치지 않는다', () => {
+  A._resetForTest(); SET._resetForTest(); SET.saveInstallDir('', { by: 'own' });
+  const a = { id: 'fm-ssssssss01', name: 'db-a', host: 'DB01.corp.local', port: 22, username: 'dvcmon', agent: 'edge-s3' };
+  const b = { id: 'fm-ssssssss02', name: 'db-b', host: 'db01.corp.local', port: 2222, username: 'othermon', agent: 'edge-s3' };
+  const c = { id: 'fm-ssssssss03', name: 'db-c', host: 'db01.corp.local', port: 22, username: 'dvcmon', agent: 'edge-s3' };
+  A.handleEdgeAudit('edge-s3', new Map([[a.id, a], [b.id, b], [c.id, c]]), { caps: ['install'], cred: { [a.id]: { state: 'ok', acct: 'x' }, [b.id]: { state: 'ok', acct: 'x' }, [c.id]: { state: 'ok', acct: 'x' } } }, Date.now());
+  assert.equal(A.requestInstall(a, { by: 'own', peers: [a, b, c] }).code, 'host-shared', '대소문자만 다른 같은 주소 · 다른 계정');
+  assert.equal(A.requestInstall(a, { by: 'own', peers: [a, c] }).ok, true, '같은 계정 항목만 있으면 설치');
+  assert.equal(A.requestInstall(c, { by: 'own', peers: [a, c] }).code, 'host-busy', '같은 주소 설치가 진행 중');
+  assert.equal(A.sameHost({ host: '' }, { host: '' }), false, '빈 주소는 같은 주소가 아니다');
+  const src = fs.readFileSync(new URL('../src/routes/api/focusMonAudit.js', import.meta.url), 'utf8');
+  assert.match(src, /peers: everyone/, '라우트가 등록부 전부를 넘긴다'); assert.match(src, /const everyone = allTargets\(\)/);
+});
+
+test('⑩-3 D5 — 시한 산수 · 설치 exec 가 시한을 넘기면 같은 세션에서 올린 파일만 지우고 timeout', async () => {
+  assert.ok(READY_TIMEOUT_MS + I.INSTALL_PRIV_MS + I.INSTALL_UPLOAD_MS + I.INSTALL_EXEC_MS + I.INSTALL_CLEANUP_MS + I.INSTALL_MARGIN_MS <= I.INSTALL_TIMEOUT_MS, '접속 + 권한 + 올림 + 설치 + 정리 + 여유 ≤ 장비 시한');
+  assert.ok(I.INSTALL_EXEC_MS < I.INSTALL_TIMEOUT_MS);
+  assert.equal(I.cleanupCommand('.dvc-da-install.0123456789abcdef.sh'), 'rm -f "$HOME/.dvc-da-install.0123456789abcdef.sh"');
+  assert.throws(() => I.cleanupCommand('../../etc/passwd'));
+  I._resetInstallForTest();
+  const f = fakeConnect({ priv: 'sudo' });
+  const execMs = [];
+  const conn = async (o, fn) => f.connect(o, (api) => fn({ ...api, exec: async (cmd, ms) => { execMs.push([cmd, ms]); if (cmd.includes('/bin/sh "$HOME/')) throw new Error(`SSH exec 타임아웃(${Math.round(ms / 1000)}s): ${cmd}`); return api.exec(cmd, ms); } }));
+  const r = await I.installOnce(T, { keys: KEYS, connect: conn, credOf: credOk, expect: { dir: '' } });
+  assert.equal(r.install.code, 'timeout', JSON.stringify(r.install));
+  const ic = execMs.find(([c]) => c.includes('/bin/sh "$HOME/'));
+  assert.equal(ic[1], I.INSTALL_EXEC_MS, '설치 exec 는 장비 시한이 아니라 INSTALL_EXEC_MS');
+  const file = /"\$HOME\/(\.dvc-da-install\.[0-9a-f]{16}\.sh)"/.exec(ic[0])[1];
+  const rm = execMs.find(([c]) => c === `rm -f "$HOME/${file}"`);
+  assert.ok(rm, '올린 파일만 지운다'); assert.equal(rm[1], I.INSTALL_CLEANUP_MS);
+});
+
+test('⑩-4 D3 — 데모 계정에는 설정 저장자 · 마지막 설치한 계정 이름을 싣지 않는다', () => {
+  const src = fs.readFileSync(new URL('../src/routes/api/focusMonAudit.js', import.meta.url), 'utf8');
+  assert.match(src, /const st = demo \? \{ \.\.\.st0, by: '' \} : st0;/);
+  assert.match(src, /lastInstall: ready\?\.lastInstall \? \(demo \? \{ \.\.\.ready\.lastInstall, by: '' \} : ready\.lastInstall\) : null/);
+  assert.match(src, /install: installView\(targets, cr, demo\)/); assert.match(src, /rowsOf\(targets, latest, cr, demo\)/);
+});
+
+test('⑩-5 D1 · D2 · 통과 권한 · D6 — 설치 파일 반증 반영', () => {
+  // D1: 기본 경로 ↔ /usr/local/libexec/dvc 는 프로그램 경로가 겹친다 — 방금 놓은 파일을 '옛 파일' 로 지우지 않는다
+  const a = B.installScript({ dir: '/usr/local/libexec/dvc', oldDirs: [''] });
+  assert.equal(a.includes('old_rm /usr/local/libexec/dvc/rhel_disk_audit.py'), false, '새 프로그램 경로는 지우지 않는다');
+  assert.ok(a.includes(`old_rm /usr/local/sbin/dvc-disk-audit ${B.wrapperSha('')}`), '옛 실행 파일은 정리');
+  assert.equal(a.includes('rmdir'), false, '기본 경로(옛 위치 \'\')의 폴더는 지우지 않는다');
+  const b = B.installScript({ dir: '', oldDirs: ['/usr/local/libexec/dvc'] });
+  assert.equal(b.includes('old_rm /usr/local/libexec/dvc/rhel_disk_audit.py'), false, '반대 방향도 새 프로그램 경로는 두기');
+  assert.ok(b.includes(`old_rm /usr/local/libexec/dvc/dvc-disk-audit ${B.wrapperSha('/usr/local/libexec/dvc')}`));
+  // D2: 시스템 설정 · 패키지 트리는 금지(웹 거울과 같다 — ① 의 대조)
+  for (const d of ['/etc/sudoers.d', '/etc/cron.hourly', '/usr/bin/x', '/usr/sbin/x', '/usr/lib/x', '/var/lib/x', '/var/log/dvc', '/usr/libexec/dvc', '/lib64/x']) assert.equal(B.dirIssue(d), 'denied', d);
+  for (const d of ['/usr/local/libexec/dvc', '/opt/dvc', '/app/tools/dvc', '/usr/local/dvc']) assert.equal(B.dirIssue(d), null, d);
+  for (const d of ['/etc/sudoers.d', '/usr/bin/x', '/usr/local/libexec/dvc']) assert.equal(W.dirIssue(d), B.dirIssue(d), `웹 ${d}`);
+  // 통과 권한: 다른 계정 실행(o+x) 비트가 없으면 멈춘다 — 실제 줄을 셸로 돌린다(기본 · 지정 둘 다)
+  for (const s of [B.installScript({ dir: '' }), B.installScript({ dir: '/opt/dvc/disk-audit' })]) {
+    const line = s.split('\n').find((l) => l.includes("'##DI fail dir-traverse'"));
+    assert.ok(line, '통과 권한 검사 줄');
+    const run = (m) => spawnSync('sh', ['-c', `d=/x; m=${m}; ${line}\necho PASS`], { encoding: 'utf8' });
+    for (const m of ['750', '700', '2750', '754']) { const r = run(m); assert.equal(r.status, 73, m); assert.match(r.stdout, /##DI fail dir-traverse/); }
+    for (const m of ['755', '751', '711', '1755']) assert.match(run(m).stdout, /PASS/, m);
+  }
+  // D6: 이미 있는 디렉터리는 install -d 로 소유자 · 권한을 바꾸지 않는다(없을 때만 만든다)
+  assert.match(B.installScript({ dir: '' }), /\[ -d \/usr\/local\/libexec\/dvc \] \|\| install -d -o root -g root -m 0755 \/usr\/local\/libexec\/dvc/);
+  assert.match(B.installScript({ dir: '/opt/dvc/disk-audit' }), /\[ -d \/opt\/dvc\/disk-audit \] \|\| install -d -o root -g root -m 0755 \/opt\/dvc\/disk-audit/);
+});
+
+test('⑩-6 S2 — 엣지 설치는 중앙이 보낸 corpVcs 가 아니라 엣지 스냅샷의 vCenter 로 계정을 고른다', async () => {
+  I._resetInstallForTest();
+  const seen = [];
+  const credSpy = (t, o) => { seen.push(o); return { state: 'noentry' }; };
+  await I.installOnce(T, { keys: KEYS, connect: fakeConnect().connect, credOf: credSpy, expect: { dir: '', edge: true, edgeVcs: () => ['vc-edge'], corpVcs: ['vc-central-evil'] } });
+  assert.deepEqual(seen[0].corpVcs, ['vc-edge']); assert.equal(seen[0].edge, true);
+  await I.installOnce(T, { keys: KEYS, connect: fakeConnect().connect, credOf: credSpy, expect: { dir: '', edge: true, corpVcs: ['vc-central-evil'] } });
+  assert.deepEqual(seen[1].corpVcs, [], '엣지인데 스냅샷 함수가 없으면 빈 목록(닫힘)');
+  await I.installOnce(T, { keys: KEYS, connect: fakeConnect().connect, credOf: credSpy, expect: { dir: '', corpVcs: ['vcA'] } });
+  assert.deepEqual(seen[2].corpVcs, ['vcA'], '중앙은 대상 법인의 vCenter');
+});
+
+test('⑩-7 옛 파일 정리는 실제로 돌려서 — 판본(sha256)이 같은 것만 지우고 다르면 · 심링크면 둔다', () => {
+  const s = B.installScript({ dir: '/opt/dvc/disk-audit', oldDirs: [''] });
+  const fn = /old_rm\(\) \{\n[\s\S]*?\n\}/.exec(s)[0];
+  const d = fs.mkdtempSync(path.join(DIR, 'oldrm-'));
+  const same = path.join(d, 'same'); const diff = path.join(d, 'diff'); const link = path.join(d, 'link');
+  fs.writeFileSync(same, 'portal-version'); fs.writeFileSync(diff, 'someone-elses'); fs.symlinkSync(same, link);
+  const sha = (f) => spawnSync('sha256sum', [f], { encoding: 'utf8' }).stdout.slice(0, 64);
+  const want = sha(same);
+  const r = spawnSync('sh', ['-c', `${fn}\nold_rm ${same} ${want}\nold_rm ${diff} ${want}\nold_rm ${link} ${want}`], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(fs.existsSync(same), false, '판본이 같으면 지운다'); assert.match(r.stdout, new RegExp(`##DI old-rm ${same}`));
+  assert.equal(fs.existsSync(diff), true, '판본이 다르면 둔다'); assert.match(r.stdout, new RegExp(`##DI old-keep ${diff}`));
+  assert.ok(fs.lstatSync(link).isSymbolicLink(), '심링크는 둔다'); assert.match(r.stdout, new RegExp(`##DI old-keep ${link}`));
+});
+
+test('⑩-8 S1 · 계정 보고 — caps 가 있어도 설치 계정 보고가 10분 넘게 끊긴 엣지에는 설치 작업을 내려보내지 않는다', () => {
+  A._resetForTest(); SET._resetForTest(); SET.saveInstallDir('', { by: 'own' });
+  const te = { id: 'fm-eeeeeeee21', name: 'pl-db-21', host: '10.48.0.21', port: 22, username: 'dvcmon', agent: 'edge-stale' };
+  const mine = new Map([[te.id, te]]);
+  const t0 = Date.now();
+  A.handleEdgeAudit('edge-stale', mine, { caps: ['install'], cred: { [te.id]: { state: 'ok', acct: 'pl-ops' } } }, t0);
+  assert.equal(A.requestInstall(te, { by: 'own', now: t0 + 1000 }).ok, true);
+  const late = A.handleEdgeAudit('edge-stale', mine, { caps: ['install'] }, t0 + A.EDGE_CRED_TTL_MS + 60_000);
+  assert.equal(late.jobs.filter((j) => j.mode === 'install').length, 0, '보고가 끊긴 엣지 — 내려보내지 않는다');
+  const fresh = A.handleEdgeAudit('edge-stale', mine, { caps: ['install'], cred: { [te.id]: { state: 'ok', acct: 'pl-ops' } } }, t0 + A.EDGE_CRED_TTL_MS + 70_000);
+  assert.equal(fresh.jobs.filter((j) => j.mode === 'install').length, 1, '보고가 다시 오면 보낸다');
+});
+
+test('⑩-9 설정 파일의 디렉터리가 규칙 밖이면(손으로 고침 · 옛 판 금지 목록) 읽지 못함 — 그 값으로 설치하지 않는다', () => {
+  for (const bad of ['/etc/sudoers.d', '/tmp/x', '/opt/../etc', 'relative/x']) {
+    fs.writeFileSync(path.join(DIR, SET.SETTINGS_FILE), JSON.stringify({ v: 1, dir: bad, at: 1, by: 'own' })); SET._resetForTest();
+    assert.equal(SET.installDir(), null, bad); assert.ok(SET.installSettingsError(), bad);
+    assert.equal(SET.installSettingsView().dir, null);
+  }
+  fs.writeFileSync(path.join(DIR, SET.SETTINGS_FILE), JSON.stringify({ v: 1, dir: '/opt/dvc', at: 1, by: 'own' })); SET._resetForTest();
+  assert.equal(SET.installDir(), '/opt/dvc');
+  fs.rmSync(path.join(DIR, SET.SETTINGS_FILE)); SET._resetForTest();
+  assert.equal(SET.installDir(), '');
+});
+
+test('⑩-10 준비 판정 — 설치 디렉터리(꼭 있어야 하는 폴더) 줄이 없으면 준비됨이 아니다', () => {
+  const p = B.pathsFor('/opt/dvc/disk-audit');
+  const want = { programPath: p.program, wrapperPath: p.wrapper, programSha: B.programSha(), wrapperSha: B.wrapperSha(p.dir), dirs: B.dirsToCheck(p) };
+  const base = ['##DR 1', '##DR py 3.6.8', `##DR file ${p.program} ${B.programSha()} 0:0:644`, `##DR file ${p.wrapper} ${B.wrapperSha(p.dir)} 0:0:755`];
+  const ok = [...base, '##DR dir /opt/dvc/disk-audit 0:0:755', '##DR dir /opt/dvc 0:0:755', '##DR dir /opt 0:0:755', '##DR sudo ok', '##DR end'];
+  assert.equal(P.readyState(P.parseReady(ok), want).state, 'ready');
+  const noNeed = ok.filter((l) => !l.startsWith('##DR dir /opt/dvc/disk-audit '));
+  assert.notEqual(P.readyState(P.parseReady(noNeed), want).state, 'ready', '설치 디렉터리 자체를 확인하지 못했으면 실행하지 않는다');
 });

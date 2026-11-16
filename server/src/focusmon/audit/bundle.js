@@ -35,7 +35,10 @@ export const DIR_MAX = 120;
 export const DIR_DEPTH_MIN = 2;
 export const DIR_DEPTH_MAX = 8;
 /** 둘 수 없는 곳(그 아래 전부) — 다른 계정이 쓸 수 있거나(임시 · 홈) 재부팅 · 마운트에 따라 바뀌는 곳. 웹이 같은 목록을 쓴다(시험 대조). */
-export const DIR_DENY = Object.freeze(['/tmp', '/var/tmp', '/dev', '/proc', '/sys', '/run', '/home', '/root', '/boot', '/mnt', '/media']);
+//   v3.17.0 반증 D2: 시스템 설정 · 패키지 트리도(/etc — sudoers.d · cron.* 처럼 그 안의 파일이 자동으로 읽히거나 실행되는 곳 · 패키지가 관리하는 /usr/{bin,sbin,lib…} 등).
+//   /usr/local 과 /opt · /app 같은 전용 트리는 된다.
+export const DIR_DENY = Object.freeze(['/tmp', '/var/tmp', '/dev', '/proc', '/sys', '/run', '/home', '/root', '/boot', '/mnt', '/media',
+  '/etc', '/var/spool', '/var/log', '/var/cache', '/var/lib', '/var/run', '/bin', '/sbin', '/lib', '/lib64', '/usr/bin', '/usr/sbin', '/usr/lib', '/usr/lib64', '/usr/libexec', '/usr/share', '/usr/include', '/usr/src', '/lost+found']);
 /** 판정 글(화면 · 응답) — code 는 웹 `focusMonAuditInstallText.js DIR_ISSUE_TEXT` 와 같다. */
 export const DIR_ISSUE_TEXT = Object.freeze({
   'not-string': '디렉터리는 글자여야 합니다.',
@@ -48,7 +51,7 @@ export const DIR_ISSUE_TEXT = Object.freeze({
   'dash-segment': '이름이 - 로 시작할 수 없습니다.',
   'too-shallow': '최상위 바로 아래 한 칸(/opt 같은 곳)에는 둘 수 없습니다 — 전용 폴더를 한 칸 더 두세요.',
   'too-deep': `${DIR_DEPTH_MAX}칸까지입니다.`,
-  denied: '다른 계정이 쓸 수 있거나 재부팅 · 마운트에 따라 바뀌는 곳(/tmp · /home · /run 등) 아래에는 둘 수 없습니다.',
+  denied: '다른 계정이 쓸 수 있거나 재부팅 · 마운트에 따라 바뀌는 곳(/tmp · /home · /run 등) · 시스템 설정 · 패키지 트리(/etc · /usr/bin · /usr/lib 등) 아래에는 둘 수 없습니다.',
 });
 /**
  * 설치 디렉터리 판정(판정 코어 하나 — 저장 · 명령 만들기 · 엣지 작업 받기 · 웹이 같은 규칙). '' = 기본 경로(문제 없음).
@@ -207,7 +210,7 @@ const EOF_WRAPPER = 'DVC_DISK_AUDIT_WRAPPER_EOF';
  *    root 소유 · 쓰기 금지 · 심링크 아님을 보고, 만든 뒤 네트워크 파일시스템 · 실행 금지(noexec) 마운트가 아닌지 본다. 옛 위치의 파일은 **포탈 판본과 같을 때만** 지운다.
  *    자동 설치가 읽는 표지는 `##DI …` 줄 — 단계(step) · 실패 까닭(fail) · 끝(ok). 그 밖의 글은 사람을 위한 것이다(자동 설치는 싣지 않는다).
  */
-export const INSTALL_FAILS = Object.freeze(['args', 'not-root', 'no-acct', 'dir-symlink', 'dir-notdir', 'dir-owner', 'dir-writable', 'dir-netfs', 'dir-noexec', 'no-includedir', 'damaged', 'visudo', 'install']);
+export const INSTALL_FAILS = Object.freeze(['args', 'not-root', 'no-acct', 'dir-symlink', 'dir-notdir', 'dir-owner', 'dir-writable', 'dir-traverse', 'dir-netfs', 'dir-noexec', 'no-includedir', 'damaged', 'visudo', 'install']);
 export const INSTALL_STEPS = Object.freeze(['dir', 'files', 'sudoers', 'old']);
 /** 네트워크 · 사용자 공간 파일시스템(stat -f %T 이름) — 설치하지 않는다. */
 const NETFS = ['nfs', 'nfs4', 'cifs', 'smb', 'smb2', 'smbfs', 'fuse', 'fuseblk', 'ceph', 'glusterfs', '9p', 'afs', 'lustre', 'gfs2', 'ocfs2', 'sshfs', 'davfs'];
@@ -230,6 +233,7 @@ export function installScript({ dir = '', oldDirs = [] } = {}) {
   o=$(stat -c '%u' "$d"); m=$(stat -c '%a' "$d")
   if [ "$o" != 0 ]; then echo '##DI fail dir-owner'; echo "$d 가 root 소유가 아닙니다 — 설치하지 않습니다."; exit 73; fi
   case "$m" in *[2367]?|*[2367]) echo '##DI fail dir-writable'; echo "$d 를 그룹 · 다른 계정이 쓸 수 있습니다(권한 $m) — 설치하지 않습니다."; exit 73 ;; esac
+  case "$m" in *[1357]) ;; *) echo '##DI fail dir-traverse'; echo "$d 를 다른 계정이 지나갈 수 없습니다(권한 $m) — 설치하지 않습니다."; exit 73 ;; esac
 done`
     : `for d in ${[...chk.all].reverse().join(' ')}; do
   if [ -L "$d" ]; then echo '##DI fail dir-symlink'; echo "$d 가 심링크입니다 — 설치하지 않습니다."; exit 73; fi
@@ -238,10 +242,12 @@ done`
   o=$(stat -c '%u' "$d"); m=$(stat -c '%a' "$d")
   if [ "$o" != 0 ]; then echo '##DI fail dir-owner'; echo "$d 가 root 소유가 아닙니다 — 설치하지 않습니다."; exit 73; fi
   case "$m" in *[2367]?|*[2367]) echo '##DI fail dir-writable'; echo "$d 를 그룹 · 다른 계정이 쓸 수 있습니다(권한 $m) — 설치하지 않습니다."; exit 73 ;; esac
+  case "$m" in *[1357]) ;; *) echo '##DI fail dir-traverse'; echo "$d 를 다른 계정이 지나갈 수 없습니다(권한 $m) — 수집 계정이 설치한 파일을 확인하지 못하므로 설치하지 않습니다."; exit 73 ;; esac
 done`;
+  // v3.17.0 반증 D6: 이미 있는 디렉터리는 소유자 · 권한을 바꾸지 않는다(검사만 — 없을 때만 root 0755 로 만든다)
   const makeDir = P.dir === ''
-    ? 'install -d -o root -g root -m 0755 /usr/local/libexec/dvc'
-    : `install -d -o root -g root -m 0755 ${P.dir} || ${fail('install', '디렉터리를 만들지 못했습니다.', 73)}
+    ? '[ -d /usr/local/libexec/dvc ] || install -d -o root -g root -m 0755 /usr/local/libexec/dvc'
+    : `[ -d ${P.dir} ] || install -d -o root -g root -m 0755 ${P.dir} || ${fail('install', '디렉터리를 만들지 못했습니다.', 73)}
 o=$(stat -c '%u' ${P.dir}); m=$(stat -c '%a' ${P.dir})
 if [ "$o" != 0 ] || [ -L ${P.dir} ]; then ${fail('dir-owner', `${P.dir} 가 root 소유 디렉터리가 아닙니다 — 설치하지 않습니다.`, 73)}; fi
 case "$m" in *[2367]?|*[2367]) ${fail('dir-writable', `${P.dir} 를 그룹 · 다른 계정이 쓸 수 있습니다 — 설치하지 않습니다.`, 73)} ;; esac
@@ -256,7 +262,12 @@ old_rm() {
   h=$(sha256sum "$1" 2>/dev/null | cut -c1-64)
   if [ "$h" = "$2" ]; then rm -f "$1" && echo "##DI old-rm $1"; else echo "##DI old-keep $1"; echo "$1 는 포탈 판본과 달라 두었습니다."; fi
 }
-${olds.map((o) => `old_rm ${o.program} ${pSha}\nold_rm ${o.wrapper} ${wrapperSha(o.dir)}${o.dir ? `\nrmdir ${o.dir} 2>/dev/null || true` : ''}`).join('\n')}
+${olds.map((o) => [
+    // v3.17.0 반증 D1: 방금 놓은 파일과 같은 경로는 건드리지 않는다(기본 경로 ↔ /usr/local/libexec/dvc 처럼 프로그램 경로가 겹친다)
+    o.program !== P.program && o.program !== P.wrapper ? `old_rm ${o.program} ${pSha}` : '',
+    o.wrapper !== P.wrapper && o.wrapper !== P.program ? `old_rm ${o.wrapper} ${wrapperSha(o.dir)}` : '',
+    o.dir && o.dir !== P.dir ? `rmdir ${o.dir} 2>/dev/null || true` : '',
+  ].filter(Boolean).join('\n')).filter(Boolean).join('\n')}
 ` : '';
   return `#!/bin/sh
 # 서버 집중 모니터링 — 디스크 점검(배드 섹터 점검 프로그램) 설치 파일

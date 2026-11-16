@@ -141,15 +141,21 @@ export async function ingestResult(job, r, { node = '', now = Date.now() } = {})
   //   옛 작업 · 옛 엣지(디렉터리 칸 없음)는 기본 경로.
   const cands = job.mode === 'install' ? [job.dir ?? ''] : (Array.isArray(job.cands) ? job.cands : ['']);
   const rdir = r.dir === undefined || r.dir === null ? (cands.includes('') ? '' : null) : (typeof r.dir === 'string' && !dirIssue(r.dir) && cands.includes(r.dir) ? r.dir : null);
+  let rsState = null;
   if (readyLines.length && rdir !== null) {
     const P = pathsFor(rdir);
     const rd = parseReady(readyLines);
     const rs = readyState(rd, { programPath: P.program, wrapperPath: P.wrapper, programSha: programSha(), wrapperSha: wrapperSha(rdir), dirs: dirsToCheck(P) });
+    rsState = rs.state;
     Object.assign(rec, { at: now, state: rs.state, reason: rs.reason, dmi: rd.dmi, py: rd.pyVer ? rd.pyVer.join('.') : null, node, dir: rs.state === 'notinstalled' ? null : rdir });
   }
   if (job.mode === 'install') {
     const ins = r.install && typeof r.install === 'object' ? r.install : {};
-    rec.lastInstall = { at: now, by: job.by || '', ok: ins.code === 'ok' || ins.code === 'check', code: INSTALL_CODES.includes(ins.code) ? ins.code : 'unreachable', fail: ins.fail || null, step: Number.isInteger(ins.step) ? ins.step : 0,
+    // v3.17.0 반증 D4: 노드가 말한 'ok' 를 믿지 않는다 — 중앙이 준비 줄을 다시 판정해 준비됨일 때만 'ok'.
+    //   준비 줄이 없거나 후보 밖이면 '설치함 · 확인 못 함'(check), 판정이 준비됨이 아니면 '설치함 · 준비 안 됨'(not-ready — 까닭은 준비 상태 칸).
+    let code = INSTALL_CODES.includes(ins.code) ? ins.code : 'unreachable';
+    if (code === 'ok') code = rsState === null ? 'check' : rsState === 'ready' ? 'ok' : 'not-ready';
+    rec.lastInstall = { at: now, by: job.by || '', ok: code === 'ok' || code === 'check', code, ready: code === 'not-ready' ? rsState : null, fail: ins.fail || null, step: Number.isInteger(ins.step) ? ins.step : 0,
       rc: Number.isInteger(ins.rc) ? ins.rc : null, acct: ins.acct || '', key: ins.key || '', src: ins.src || null, cred: ins.cred || null, dir: job.dir ?? '', nopy: !!ins.nopy, oldRm: ins.oldRm || 0, oldKeep: ins.oldKeep || 0, priv: ins.priv || null };
     if (rec.lastInstall.ok && (!readyLines.length || rdir === null)) rec.dir = job.dir ?? ''; // 설치는 됐는데 준비 줄이 없다(수집 계정 로그인 거부 등) — 설치한 곳은 안다
   }
@@ -298,13 +304,25 @@ function demoCred(t) {
  * 설치 요청(서버 하나). 한 서버에 작업 하나 · 설치 계정이 'ok' 인 서버만(고르면 되는 'ambig' 는 고른 계정이 후보일 때) · 설정을 못 읽으면 거절.
  * @returns {{ok:true, runId, via} | {ok:false, code, reason}}
  */
-export function requestInstall(t, { by = '', pick = null, corpVcs = [], now = Date.now(), keys = null } = {}) {
+/** 같은 서버 주소인가(대소문자 무시 — 별칭 · IP 와 이름이 다른 등록은 알아보지 못한다: 문서의 남은 것). */
+export const sameHost = (a, b) => String(a?.host || '').trim().toLowerCase() === String(b?.host || '').trim().toLowerCase() && String(a?.host || '').trim() !== '';
+/**
+ * @param {object} t  등록부 대상
+ * @param {{peers?: object[]}} o  peers = 등록부의 다른 대상 전부(범위와 무관 — 같은 주소를 찾는다)
+ *   v3.17.0 반증 S3: sudoers 파일은 서버마다 하나(계정 한 줄)라 같은 주소에 다른 수집 계정이 등록돼 있으면 설치가 서로의 sudo 규칙을 덮는다 —
+ *   그런 서버는 자동 설치하지 않는다('host-shared'). 같은 주소의 설치가 진행 중이면 차례를 겹치지 않는다('host-busy').
+ */
+export function requestInstall(t, { by = '', pick = null, corpVcs = [], now = Date.now(), keys = null, peers = [] } = {}) {
   if (!keysRef && keys) keysRef = keys;
   const st = load();
   sweep(now);
   const dir = installDir();
   if (dir === null) return { ok: false, code: 'settings-unreadable', reason: '설치 디렉터리 설정을 읽지 못해 설치하지 않습니다 — 손상 보존본을 확인하세요.' };
   if (st.jobs.some((x) => x.tid === t.id)) return { ok: false, code: 'busy', reason: '이 서버는 이미 점검 · 확인 · 설치 작업이 진행 중이거나 차례를 기다리고 있습니다.' };
+  const same = (Array.isArray(peers) ? peers : []).filter((p) => p && p.id !== t.id && sameHost(p, t));
+  if (same.some((p) => String(p.username || '') !== String(t.username || ''))) return { ok: false, code: 'host-shared', reason: '같은 주소에 다른 수집 계정으로 등록된 항목이 있습니다 — sudoers 파일 하나에 계정 하나만 적으므로 자동 설치가 다른 계정의 sudo 규칙을 지웁니다. 손으로 설치하세요.' };
+  const sameIds = new Set(same.map((p) => p.id));
+  if (st.jobs.some((x) => x.mode === 'install' && sameIds.has(x.tid))) return { ok: false, code: 'host-busy', reason: '같은 주소의 다른 항목을 설치하는 중입니다 — 그 설치가 끝난 뒤 다시 누르세요.' };
   if (st.jobs.length >= MAX_JOBS) return { ok: false, code: 'queue-full', reason: '대기 중인 작업이 너무 많습니다 — 잠시 뒤 다시 누르세요.' };
   const c = credOfTarget(t, { corpVcs, pick, now });
   const pickOk = c.state === 'ambig' && pick && Array.isArray(c.choices) && c.choices.some((x) => x.id === pick);
@@ -407,11 +425,12 @@ export function handleEdgeAudit(agent, mine, a, now = Date.now()) {
   // 내려보낼 작업: 아직 안 보낸 것 · 보냈는데 엣지 목록에 없고 결과도 없이 2분이 지난 것(엣지 재시작) — 최대 3번
   const jobs = [];
   const credFresh = (() => { const e = edgeCred.get(key); return !!e && now - e.at <= EDGE_CRED_TTL_MS; })();
+  const canInstall = Array.isArray(b.caps) && b.caps.slice(0, 10).includes('install'); // 반증 S1 — 이번 본문의 표시만 믿는다
   for (const j of st.jobs) {
     if (String(j.node).toLowerCase() !== key || !mine.has(j.tid) || active.has(j.runId) || j.state === 'ingesting') continue;
     if (j.deliveredAt && (now - j.deliveredAt < REDELIVER_MS || j.deliveries >= MAX_DELIVER)) continue;
     // 설치 작업은 설치 계정 상태를 알려 오는 엣지(이 판 이상)에만 — 옛 엣지는 모르는 작업 종류를 점검 실행('run')으로 읽는다
-    if (j.mode === 'install' && !credFresh) continue;
+    if (j.mode === 'install' && (!credFresh || !canInstall)) continue;
     const t = mine.get(j.tid);
     j.deliveredAt = now; j.deliveries = (j.deliveries || 0) + 1; changed = true;
     jobs.push({ runId: j.runId, mode: j.mode, id: t.id, name: t.name, host: t.host, port: t.port, username: t.username, expect: expectFor(j) });

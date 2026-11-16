@@ -35,7 +35,7 @@ function fromAuth(a, keyId, src, withAuth) {
 /**
  * @param {{id:string, name:string, host:string, port?:number}} target  집중 모니터링 대상
  * @param {{edge?:boolean, corpVcs?:string[], pick?:string|null, withAuth?:boolean}} o
- *   edge — 엣지 노드(법인 = 이 노드) · corpVcs — 중앙: 대상 법인의 vCenter id 들 · pick — 화면에서 고른 공통 계정 id
+ *   edge — 엣지 노드 · corpVcs — 중앙: 대상 법인의 vCenter id 들 / 엣지: 그 엣지 스냅샷의 vCenter id 들 · pick — 화면에서 고른 공통 계정 id
  * @returns {{state:string, src?:'server'|'corp', acct?:string, key?:string, keyId?:string, choices?:Array<{id,name,acct,key}>, auth?:object, code?:string}}
  */
 export function installCredFor(target, { edge = false, corpVcs = [], pick = null, withAuth = false } = {}) {
@@ -52,7 +52,9 @@ export function installCredFor(target, { edge = false, corpVcs = [], pick = null
     }
     // ② 법인 공통 계정(키가 있는 OS 계정 · 법인이 정해진 것)
     const vcs = new Set((corpVcs || []).map(t).filter(Boolean));
-    const accs = KS.listAccountsRaw().filter((a) => a.kind === 'os' && t(a.corp) && t(a.keyRef) && (edge || vcs.has(t(a.corp))));
+    // v3.17.0 반증 S2: 엣지도 법인을 거른다 — 엣지는 corpVcs 에 자기 스냅샷의 vCenter 들을 넘긴다(그 엣지가 맡은 법인 밖 공통 계정은 쓰지 않는다 ·
+    //   못 읽었으면 빈 목록 → 'noentry' 로 닫힌다)
+    const accs = KS.listAccountsRaw().filter((a) => a.kind === 'os' && t(a.corp) && t(a.keyRef) && vcs.has(t(a.corp)));
     if (!accs.length) return { state: 'noentry' };
     const withFeat = accs.filter((a) => explicit(KS.keyById(a.keyRef)));
     if (!withFeat.length) return { state: 'feature', src: 'corp', acct: accs[0].username, key: KS.keyById(accs[0].keyRef)?.name || '' };

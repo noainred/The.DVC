@@ -69,9 +69,10 @@ function corpVcsOf(t, cr, assign) {
   return Object.entries(assign || {}).filter(([, dc]) => String(dc) === String(id)).map(([vc]) => vc);
 }
 /** 설치 탭 묶음 — 설정 · 경로 · 서버별 설치 계정 상태(비밀 없음) · 한도. */
-function installView(targets, cr) {
+function installView(targets, cr, demo = false) {
   let assign = {}; try { assign = getDatacenterAssign(); } catch { assign = {}; }
-  const st = installSettingsView();
+  const st0 = installSettingsView();
+  const st = demo ? { ...st0, by: '' } : st0; // 데모 계정에는 저장한 계정 이름을 싣지 않는다(실제 계정 이름)
   const P = st.dir === null ? null : pathsFor(st.dir);
   const cred = {};
   for (const t of targets) cred[t.id] = A.credOfTarget(t, { corpVcs: t.agent ? [] : corpVcsOf(t, cr, assign) });
@@ -95,14 +96,14 @@ function lastView(r) {
 const sameEndpoint = (row, t) => (row && row.summary && row.summary.ep && row.summary.ep === A.endpointKey(t) ? row : null);
 
 /** 서버 행(묶어 보기 · 표의 한 줄) — 판정 코어는 audit/service · aggregate 에 있고 여기는 모으기만 한다. */
-function rowsOf(targets, latest, cr) {
+function rowsOf(targets, latest, cr, demo = false) {
   return targets.map((t) => {
     const ready = A.readinessOf(t.id);
     return {
       id: t.id, name: t.name, host: t.host, username: t.username || '', agent: t.demo ? (t.agent || '') : (t.agent || ''), group: t.group || '', demo: !!t.demo,
       corp: cr.of(t), smodel: ready?.dmi?.product || null, svendor: ready?.dmi?.vendor || null,
       ready: ready ? { state: ready.state || null, reason: ready.reason || '', at: ready.at || null, py: ready.py || null, node: ready.node ?? null, lastExecAt: ready.lastExecAt || null, dir: typeof ready.dir === 'string' ? ready.dir : null } : null,
-      lastInstall: ready?.lastInstall || null,
+      lastInstall: ready?.lastInstall ? (demo ? { ...ready.lastInstall, by: '' } : ready.lastInstall) : null,
       lastError: ready?.lastError || null, job: A.jobOf(t.id), last: lastView(sameEndpoint(latest.get(t.id), t)),
     };
   });
@@ -117,11 +118,11 @@ api.get('/tools/focus-mon/audit', adminOnly, fullScopeOnly, async (req, res) => 
   const targets = visibleTargets(req);
   const cr = corpResolver();
   const latest = await A.latestFor(targets.map((t) => t.id));
-  const rows = rowsOf(targets, latest, cr);
+  const demo = isDemoGuest(req.user);
+  const rows = rowsOf(targets, latest, cr, demo);
   const corpKey = (r) => (r.corp ? r.corp.id : '');
   const corpName = (r) => (r.corp ? r.corp.name : NO_CORP);
   const corpOrder = cr.list.map((d) => d.id);
-  const demo = isDemoGuest(req.user);
   res.json({
     ok: true, now: Date.now(), mock: isMockMode(), dbAvailable: await db.available(),
     limits: { ...A.LIMITS, rateMinDisks: RATE_MIN_DISKS },
@@ -142,7 +143,7 @@ api.get('/tools/focus-mon/audit', adminOnly, fullScopeOnly, async (req, res) => 
     // 데모 계정에는 실제 법인 목록을 싣지 않는다(등록부 그룹 이름과 같은 규칙)
     corps: demo ? [] : cr.list,
     stateError: A.auditStateError() || null,
-    install: installView(targets, cr),
+    install: installView(targets, cr, demo),
   });
 });
 
@@ -170,11 +171,12 @@ api.post('/tools/focus-mon/audit/install', ...installGate, (req, res) => {
   const cr = corpResolver();
   let assign = {}; try { assign = getDatacenterAssign(); } catch { assign = {}; }
   const results = []; const wake = new Set(); const started = [];
+  const everyone = allTargets(); // 같은 주소 찾기는 범위 · 데모와 무관하게 등록부 전부에서(반증 S3)
   for (const id of [...new Set(ids)]) {
     const t = vis.get(id);
     if (!t) { results.push({ id, ok: false, code: 'not-found', reason: '없는 대상입니다.' }); continue; }
     const pick = Object.hasOwn(picks, id) && typeof picks[id] === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(picks[id]) ? picks[id] : null;
-    const r = A.requestInstall(t, { by: req.user?.username || '', pick, corpVcs: t.agent ? [] : corpVcsOf(t, cr, assign), keys: focusKeys });
+    const r = A.requestInstall(t, { by: req.user?.username || '', pick, corpVcs: t.agent ? [] : corpVcsOf(t, cr, assign), keys: focusKeys, peers: everyone });
     results.push({ id, name: t.name, ...r });
     if (r.ok) { started.push(t.name); if (r.via === 'edge' && t.agent) wake.add(t.agent); }
   }

@@ -29,6 +29,7 @@ import { createNodeSampler } from '../focusmon/load.js';
 import { createAuditRunner } from '../focusmon/audit/runner.js';
 import { installExec, NODE_INSTALL_CONCURRENCY } from '../focusmon/audit/install.js'; // v3.17.0 자동 설치(이 엣지의 SSH 공용 접속 키로)
 import { installCredFor, credView } from '../focusmon/audit/installCred.js';
+import { store } from '../store.js';
 const TEST_RESULTS_PER_SYNC = 50; // 중앙이 동기화당 받는 시험 결과 상한(central/focusMonEdge.js arr(b.tests, 50))과 같게 — 넘는 것은 다음 동기화에(반증 3)
 
 const gzipAsync = promisify(zlib.gzip);
@@ -118,8 +119,12 @@ const auditRunner = createAuditRunner({
  * 설치 계정 상태(비밀 없음 — 상태 · 계정 이름 · 키 이름)는 중앙이 알려 준 맡은 서버 목록(audit.known)으로 60초에 한 번 audit.cred 에 싣는다 —
  * 중앙은 이 보고가 있는(이 판 이상인) 엣지에만 설치 작업을 내려보낸다.
  */
+/** 이 엣지가 맡은 법인 = 이 엣지 스냅샷의 vCenter 들(반증 S2 — 공통 계정을 그 법인 것만 쓴다 · bmOnboardPull 과 같은 출처). */
+export function edgeVcs() {
+  try { return (store.get()?.vcenters || []).filter((v) => v && v.id).slice(0, 100).map((v) => String(v.id)); } catch { return []; }
+}
 const installRunner = createAuditRunner({
-  keys: focusKeys, concurrency: NODE_INSTALL_CONCURRENCY, exec: installExec({ edge: true }),
+  keys: focusKeys, concurrency: NODE_INSTALL_CONCURRENCY, exec: installExec({ edge: true, edgeVcs }),
   onResult: (job, result) => { queueAuditResult(job.runId, result); schedule(0); },
 });
 const CRED_EVERY_MS = 60_000;
@@ -128,8 +133,8 @@ let knownTargets = []; let credDueAt = 0;
 export function credReport(now = Date.now(), credOf = installCredFor) {
   if (!knownTargets.length || now < credDueAt) return null;
   credDueAt = now + CRED_EVERY_MS;
-  const out = {};
-  for (const t of knownTargets) out[t.id] = credView(credOf(t, { edge: true }));
+  const out = {}; const corpVcs = edgeVcs();
+  for (const t of knownTargets) out[t.id] = credView(credOf(t, { edge: true, corpVcs }));
   return out;
 }
 export function _setKnownForTest(list) { knownTargets = list; credDueAt = 0; }
@@ -229,7 +234,9 @@ export async function syncOnce(now = Date.now()) {
     sentAudit = sendA;
     const auditActive = [...auditRunner.list(), ...installRunner.list()].map((j) => ({ runId: j.runId, state: j.state, phase: j.phase || null })).concat(auditResults.map((r) => ({ runId: r.runId, state: 'sending', phase: null })));
     const cred = credReport();
-    const auditBody = auditActive.length || sendA.length || cred ? { audit: { active: auditActive, results: sendA.map((r) => ({ runId: r.runId, result: r.result })), ...(cred ? { cred } : {}) } } : {};
+    // v3.17.0 반증 S1: 설치를 돌릴 줄 아는 엣지라고 **매 동기화** 알린다(caps) — 중앙은 이번 본문에 이 표시가 있을 때만 설치 작업을 내려보낸다
+    //   (설치 계정 보고가 10분 안에 있었다는 것만으로는 그사이 옛 판으로 내려간 엣지를 가르지 못한다)
+    const auditBody = { audit: { active: auditActive, results: sendA.map((r) => ({ runId: r.runId, result: r.result })), caps: ['install'], ...(cred ? { cred } : {}) } };
     const body = JSON.stringify({ v: 1, version: currentVersion(), sentAt: Date.now(), key: keyView, samples: sendS, procs: sendP, status: statuses, tests: sendT, load: sendL, diag: diagBody(), ...auditBody });
     let payload = body; let hdrs = { 'Content-Type': 'application/json' };
     try { payload = await gzipAsync(Buffer.from(body)); hdrs = { ...hdrs, 'Content-Encoding': 'gzip' }; } catch { /* 원문 */ }
