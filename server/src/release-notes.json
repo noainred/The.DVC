@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "3.17.8",
+      "date": "2026-11-16",
+      "title": "2차 공통 기능 점검 7회차: 호스트 상세의 못 읽은 값 0 둔갑",
+      "notes": [
+        "호스트 상세(EntityDetail HostBasicRows)가 못 읽은 값을 0 으로 그렸다 — 연결 끊긴 호스트 · 수집 전 호스트가 '메모리 0 GB' · 'null코어' · 'VM 0대 보기' · 'HBA / GPU 0개 / 0개' 로 보였다(gb() 의 (mb || 0) · vmCount ?? 0 · hbas?.length || 0).",
+        "못 읽은 값은 '—' 로(numOrNull) — VM 버튼은 수를 모르면 'VM 목록 보기'. 실제 0(VM 0대 · HBA 0개)은 그대로 0 이다.",
+        "회귀 web/src/components/hostBasicRows3177.test.jsx."
+      ]
+    },
+    {
       "version": "3.17.7",
       "date": "2026-11-16",
       "title": "2차 공통 기능 점검 6회차: 위험 알림의 서비스 워커 대기에 시한",
