@@ -15,6 +15,7 @@ import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atom
 import { registerStateFile } from '../util/stateFiles.js';
 import { dayIndex } from '../util/dayKey.js';
 import { linregSlope } from '../util/linreg.js';
+import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 const CONFIG_DIR = config.configDir;
 // 옮긴 DB 저장 경로(null = configDir 사용). db-location.json → config.dbDir (v2.379).
@@ -461,7 +462,7 @@ export function recordDbSizeSample(now = Date.now(), { persist = true } = {}) {
  *  - 감소 추세(prune 직후 등)면 예측은 현재 크기로 둔다(shrinking:true). 크게 줄어든 지점(80% 미만) 앞의 일 표본은 쓰지 않는다.
  *  - confidence: 관측 구간 길이로 low/medium/high.
  */
-const MIN_FORECAST_SPAN_MS = Number(process.env.PORTAL_DB_MIN_FORECAST_MS) || 3_600_000; // 1시간
+const MIN_FORECAST_SPAN_MS = envPositive(process.env.PORTAL_DB_MIN_FORECAST_MS, 3_600_000); // 1시간
 
 function forecastFrom(nowBytes, perDayBytes, spanMs) {
   if (!(spanMs >= MIN_FORECAST_SPAN_MS) || !Number.isFinite(perDayBytes)) {

@@ -46,6 +46,7 @@ import { numOrNull } from '../util/numOrNull.js';
 //   통과시켜 ssh2 readyTimeout 이 setTimeout 1ms 가 되고 모든 웹 터미널이 배너 직후 'handshake 시한 초과' 로 끊겼다.
 export const SSH_GATEWAY_READY_TIMEOUT_MS = reqTimeoutMs(process.env.SSH_READY_TIMEOUT_MS, 60_000);
 import { config, clampIntervalMs, MAX_TIMER_MS } from '../config.js';
+import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 /**
  * 원격(SSH·RDP) WS 사용자 판정 — **업그레이드·auth 프레임·주기 재검증·토큰 갱신이 같은 함수를 쓴다**(S-04).
@@ -363,7 +364,7 @@ export function safeWsClose(ws, code, reason = '') {
 
 // 동시 원격 SSH 세션 상한 + 유휴 타임아웃 — 무제한 세션이 포탈 서버 메모리/FD를 고갈시켜
 // 리붓되는 것을 막는다. 환경변수로 조정.
-const MAX_SESSIONS = Number(process.env.REMOTE_MAX_SESSIONS) || 80;
+const MAX_SESSIONS = envPositive(process.env.REMOTE_MAX_SESSIONS, 80);
 /**
  * 계정당 동시 SSH 세션 상한(2026-10-09 I-07 검토) — 전체 상한(80)을 한 계정이 다 쓰면 다른 사람이 열 수 없다.
  * 기본 20, 0 = 끔(예전처럼 전체 상한만). 빈 값은 미지정(기본).

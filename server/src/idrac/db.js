@@ -17,6 +17,7 @@ import { config } from '../config.js';
 import { chunkedDelete } from '../util/chunkedPrune.js';
 import { createYielder } from '../util/timeSlice.js';   // v2.731(A6-03): 서버 표 전력 요약 — 서버 사이 시간 기준 양보
 import { openSqlite, retryOnLock } from '../util/sqliteOpen.js';   // v2.599 DB2599-02: 첫 open 잠금 → 기다렸다 재시도(NDJSON 폴백 래치 금지)
+import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 const DB_PATH = config.idrac.dbPath;
 const deadbandPolicy = policyFromEnv();
@@ -296,7 +297,7 @@ function initJsonFallback() {
   // SQLite 없이 동작하는 폴백이라 prune만으로는 상한이 없다(90일 보존·다수 서버면 수백만 행이
   // 전부 RAM 상주 → OOM 위험). ts 오름차순 append 특성을 이용해 상한 초과 시 가장 오래된 행을
   // 잘라내고 파일도 재기록한다(newest 우선 보존). SQLite가 정상이면 이 경로는 애초에 안 탄다.
-  const MAX_ROWS = Number(process.env.POWER_NDJSON_MAX_ROWS) || 2_000_000;
+  const MAX_ROWS = envPositive(process.env.POWER_NDJSON_MAX_ROWS, 2_000_000);   // v3.17.6: 음수면 아래 정리가 전 행을 버렸다
   let rows = [];
   if (fs.existsSync(file)) {
     for (const line of fs.readFileSync(file, 'utf8').split('\n')) {

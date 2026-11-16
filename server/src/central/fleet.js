@@ -18,19 +18,20 @@ import { capStr } from '../util/capStr.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { sanitizeHwSummary, mgmtHostOf } from '../idrac/hwSummary.js'; // v3.3.0 엣지 하드웨어 요약 · iDRAC 주소 정제(엣지 agent/fleetPush.js 와 짝)
 import { summarizeRegistryError, REGISTRY_ERROR_LABEL } from '../util/registryCore.js'; // v2.744(회귀 검토 GD-R1)
+import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 const FILE = path.join(config.configDir, 'central-fleet.json');
 const TTL_MS = Number(process.env.CENTRAL_FLEET_TTL_MS) || 30 * 60_000; // 30분 무보고 시 만료
-const MAX_AGENTS = Number(process.env.CENTRAL_FLEET_MAX_AGENTS) || 500; // 에이전트 수 상한(메모리 보호)
+const MAX_AGENTS = envPositive(process.env.CENTRAL_FLEET_MAX_AGENTS, 500); // 에이전트 수 상한(메모리 보호)
 // v2.601(감사 CEN2601-03): 원소 상한. 예전에는 에이전트당 50,000 × 500 에이전트를 받았고, 공유 토큰은 본문 agent 이름을
 //   마음대로 고를 수 있어 이름 40개 × 50,000 원소로 RSS 가 크게 불고 central-fleet.json 이 195MB 가 되어 **저장마다 약 1.8초**
 //   이벤트 루프가 멈췄다(JSON.stringify 전량). 현실적인 에이전트당 상한 + 전체 상한 + '검증되지 않은 이름' 별도 상한을 둔다.
 //   잘린 원소는 **개수로 밝힌다**(omitted — 조용한 상한 금지).
-const PER_AGENT_MAX = Number(process.env.CENTRAL_FLEET_MAX_PER_AGENT) || 5_000;
-const TOTAL_MAX = Number(process.env.CENTRAL_FLEET_MAX_TOTAL) || 20_000;
+const PER_AGENT_MAX = envPositive(process.env.CENTRAL_FLEET_MAX_PER_AGENT, 5_000);
+const TOTAL_MAX = envPositive(process.env.CENTRAL_FLEET_MAX_TOTAL, 20_000);
 // 검증되지 않은 이름(공유 토큰 + 중앙이 모르는 이름)은 이름 수·원소 수를 작게 묶는다 — 검증된 엣지의 몫을 밀어내지 못하게.
-const UNVERIFIED_MAX_AGENTS = Number(process.env.CENTRAL_FLEET_MAX_UNVERIFIED_AGENTS) || 20;
-const UNVERIFIED_TOTAL_MAX = Number(process.env.CENTRAL_FLEET_MAX_UNVERIFIED_TOTAL) || 5_000;
+const UNVERIFIED_MAX_AGENTS = envPositive(process.env.CENTRAL_FLEET_MAX_UNVERIFIED_AGENTS, 20);
+const UNVERIFIED_TOTAL_MAX = envPositive(process.env.CENTRAL_FLEET_MAX_UNVERIFIED_TOTAL, 5_000);
 const norm = (s) => String(s || '').trim().toLowerCase();
 
 // null-proto: 에이전트 이름이 '__proto__' 등이어도 프로토타입 오염 없이 일반 키로 저장.

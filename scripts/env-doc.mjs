@@ -89,6 +89,9 @@ function defaultOf(line, key, ref) {
   // 형태가 흔하므로 닫는 괄호를 건너뛰고 기본값을 찾는다.
   let m = after.match(/^[\s)]*(?:\|\||\?\?)\s*(-?\d+(?:_\d+)*|'[^']{0,40}'|"[^"]{0,40}"|true|false)/);
   if (m) return m[1].replace(/_/g, '');
+  // v3.17.6: 헬퍼의 둘째 인자 — `envPositive(process.env.X, 300)` · `reqTimeoutMs(process.env.X, 30_000)`(util/envNumber.js · envTimeout.js).
+  m = after.match(/^\s*,\s*(\d+(?:_\d+)*(?:\.\d+)?)\s*[,)]/);
+  if (m) return m[1].replace(/_/g, '');
   m = after.match(/^\s*(===|!==)\s*('[^']*'|"[^"]*")/);
   if (m) return m[1] === '===' ? `기본 아님(${m[2]} 일 때만 적용)` : `기본 적용(${m[2]} 로 끄기)`;
   return '';
