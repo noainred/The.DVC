@@ -5,7 +5,7 @@
 
 - 생성: `node scripts/common-doc.mjs` · 최신 여부: `node scripts/common-doc.mjs --check`
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다. 설명을 고치려면 그 모듈의 **머리 주석 첫 단락**을 고친다.
-- 훑은 소스 4217개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
+- 훑은 소스 4218개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
 
 ## 읽는 법 · 한계
 
@@ -137,7 +137,7 @@
 | `EscClose.jsx` | 모달 · 팝업 안에 두면 ESC 로 닫힌다 — 중첩 모달에서는 **가장 위(마지막에 열린) 모달 하나만** 닫는다. | `default` | 30 | 9 | 0 |
 | `primitives.jsx` | ui.jsx(구 633줄)에서 분리(v2.295 모듈화 감사 2차 확정 #2·#7). 본문은 원본 10~162·608~633행 그대로 이동(기능 변화 없음). | `GpuBadge` `usageColor` `Kpi` `UsageCell` `StateBadge` `SeverityBadge` 외 5 | 21 | 8 | 7 |
 | `Modal.jsx` | ui.jsx(구 633줄)에서 분리(v2.295). 본문은 원본 164~190행 그대로. 단독 분리 이유: VmRemote/VmReconfig(EntityDetail 이 import)가 Modal 하나 때문에 ui.jsx 를 역참조하는 순환이 있었다(함수 선언 호이스팅… | `Modal` | 19 | 3 | 0 |
-| `EntityDetail.jsx` | ui.jsx(구 633줄)에서 분리(v2.295). 본문은 원본 192~606행 그대로 이동. | `DRow` `VmIpPing` `HostVmsModal` `VmPartitionsSection` `VmCfgSection` `PerfcSection` 외 10 | 16 | 6 | 8 |
+| `EntityDetail.jsx` | ui.jsx(구 633줄)에서 분리(v2.295). 본문은 원본 192~606행 그대로 이동. | `DRow` `VmIpPing` `HostVmsModal` `VmPartitionsSection` `VmCfgSection` `PerfcSection` 외 10 | 16 | 6 | 9 |
 | `vmperf/vmPerfText.js` | VM · ESXi 호스트 성능 화면(v2.911 · 시안 docs/design/vm-perf ②~④)의 **순수** 보조(vitest 고정). 기간 · 지표 상수 · 값 글자 · 구간 통계 · 과거 창 계산(◀ 이전 · 슬라이더 · 날짜로 이동) · 차트 좌표 · CS… | `chartKeys` `fmtRate` `fmtVal` `rollupLabel` `fmtClock` `fmtHm` 외 24 | 13 | 2 | 3 |
 | `DataList.jsx` | 공용 자동완성 목록(v2.708) — 날 `<datalist>` 대신 이것을 쓴다. 제안 목록을 글자 순으로 정렬한다(selectSort.js 와 같은 규칙). | `default` | 12 | 4 | 0 |
 | `accessDeniedText.js` | 권한 거부(403) 안내 문구 생성 — 순수 함수만 둔다(AccessDenied.jsx 가 렌더). | `describePermission` `deniedRoleLabel` `deniedSubText` `buildRequestText` `errorBoxInput` `PERM_LABEL` 외 5 | 9 | 4 | 6 |
@@ -210,7 +210,7 @@
 | 모듈 | 하는 일 | 내보내는 이름 | 사용처 | 영역 | 테스트 |
 |---|---|---|---|---|---|
 | `api.js` | v2.498: 진행 중 요청 레지스트리 + 장기 로딩(hang) 보고. perfClient 는 api.js 를 import 하지 않으므로 순환이 없다(설정 조회는 fetchJson 을 인자로 받는다). | `noteHttpError` `permissionInfoFor` `httpInfoFor` `fetchJson` `postJson` `sendJson` 외 34 | 400 | 19 | 45 |
-| `numOrNull.js` | `numOrNull`(웹) — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정. | `numOrNull` `default` | 138 | 11 | 2 |
+| `numOrNull.js` | `numOrNull`(웹) — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정. | `numOrNull` `default` | 139 | 11 | 2 |
 | `dayStamp.js` | 브라우저 쪽 날짜 표기(v2.582 BUG-3) — 내려받기 파일명·만료일은 **사용자의 로컬 날짜**다. `new Date().toISOString().slice(0, 10)` 은 UTC 날짜라 한국 시각 00:00~09:00 에는 **어제**가 된다 (보고서 파일명… | `dayStamp` | 24 | 5 | 1 |
 | `regions.js` | 지역(region) 목록 — 웹 단일 소스(v2.575 IMP-10). ⚠ 값은 서버 `server/src/util/regions.js` 와 **글자 그대로 같아야 한다**(웹은 서버 소스를 import 할 수 없어 복사가 불가피하다). `web/src/regions.`… | `REGIONS` `default` | 5 | 2 | 2 |
 | `perfClientLogic.js` | 브라우저 성능 보고의 **순수 로직**(v2.498): 경로 정규화·장기 로딩 문구· 쿨다운/상한 판정. 웹 테스트는 node 환경(DOM 없음)이라 판정·문구는 여기서 회귀로 고정한다. | `normPath` `loadingText` `allowReport` `stallPayload` `statusPollTargets` `requesterText` 외 3 | 4 | 2 | 3 |
