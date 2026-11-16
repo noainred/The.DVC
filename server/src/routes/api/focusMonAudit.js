@@ -31,7 +31,9 @@ import { splitRun, parseReport, parseDisks, evidenceKey, ERROR_KINDS, SHAPE_TEXT
 import { installScript, programSha, wrapperSha, PROGRAM_PATH, WRAPPER_PATH, SUDOERS_PATH, pathsFor, DIR_ISSUE_TEXT, DIR_DENY, DIR_MAX, DIR_DEPTH_MIN, DIR_DEPTH_MAX, runCommandFor, sudoersLine } from '../../focusmon/audit/bundle.js';
 import { installSettingsView, installSettingsError, installDir, saveInstallDir } from '../../focusmon/audit/settings.js'; // v3.17.0 설치 디렉터리
 import { INSTALL_CODES, INSTALL_STEPS } from '../../focusmon/audit/install.js';
-import { CRED_STATES } from '../../focusmon/audit/installCred.js';
+import { CRED_STATES, PREP_FEATURE } from '../../focusmon/audit/installCred.js';
+import { PREP_CODES, PREP_STEPS, PREP_FAILS, AUDIT_SKIPS, PREP_TIMEOUT_MS } from '../../focusmon/audit/prep.js'; // v3.18.0 접속 자동 준비
+import * as fstore from '../../focusmon/store.js';
 import { requireSettingsOwner } from '../admin/shared.js';
 import { reauth } from './reauth.js';
 import { getDatacenterAssign } from '../../datacenter/store.js';
@@ -184,6 +186,77 @@ api.post('/tools/focus-mon/audit/install', ...installGate, (req, res) => {
   const dir = installDir();
   if (started.length) logAudit({ user: req.user?.username, action: 'focus-mon.audit.install', target: started.slice(0, 20).join(', '), detail: `${started.length}대${started.length > 20 ? ' (앞 20대만 적음)' : ''} · 디렉터리 ${dir || '(기본 경로)'}`, ip: req.ip });
   res.json({ ok: true, results, started: started.length, dir });
+});
+
+/* ── v3.18.0 접속 자동 준비(수집 계정 · 공개키) — 대상 · 키 탭 ─────────────────────────────── */
+/** 그 서버의 키 로그인(지금) — 수집 상태가 있으면 그것, 없으면 마지막 연결 시험(엣지 서버도 시험 결과로 안다). */
+function loginOf(t) {
+  const st = fstore.statusOf(t.id); const tr = fstore.testOf(t.id);
+  if (st && st.state === 'ok') return { kind: 'ok', at: st.lastSampleAt || st.since || null };
+  if (tr?.result?.kind) return { kind: tr.result.kind, at: tr.at || null };
+  if (st && ['auth', 'hostkey', 'unreachable', 'no-key', 'unsupported-os'].includes(st.state)) return { kind: st.state, at: st.since || null };
+  return { kind: null, at: null };
+}
+/** 넣을 공개키(그 서버를 맡은 노드의 집중 모니터링 키 — 지문만 · 엣지는 그 엣지가 알려 온 것). */
+function nodeKeyFp(t) {
+  if (t.demo) return 'SHA256:demo';
+  const k = !t.agent ? focusKeys.publicKeyView() : fstore.edgeStateOf(t.agent)?.key || null;
+  return k && k.usable !== false && k.fingerprint ? String(k.fingerprint) : null;
+}
+api.get('/tools/focus-mon/prep', adminOnly, fullScopeOnly, (req, res) => {
+  if (registryUnreadable(res)) return;
+  A.sweep();
+  const demo = isDemoGuest(req.user);
+  const targets = visibleTargets(req);
+  const everyone = allTargets();
+  const cr = corpResolver();
+  let assign = {}; try { assign = getDatacenterAssign(); } catch { assign = {}; }
+  const rows = targets.map((t) => {
+    const corpVcs = t.agent ? [] : corpVcsOf(t, cr, assign);
+    const lp = A.readinessOf(t.id)?.lastPrep || null;
+    return {
+      id: t.id, name: t.name, host: t.host, port: t.port, username: t.username || '', agent: t.agent || '', demo: !!t.demo, corp: demo && !t.demo ? null : cr.of(t),
+      login: loginOf(t), keyFp: nodeKeyFp(t),
+      cred: A.credOfTarget(t, { corpVcs, feature: PREP_FEATURE }), credInstall: A.credOfTarget(t, { corpVcs }),
+      hostShared: everyone.some((p) => p.id !== t.id && A.sameHost(p, t) && String(p.username || '') !== String(t.username || '')),
+      lastPrep: lp ? (demo ? { ...lp, by: '' } : lp) : null, job: A.jobOf(t.id),
+    };
+  });
+  const st = installSettingsView();
+  res.json({ ok: true, now: Date.now(), mock: isMockMode(), rows,
+    limits: { concurrency: A.LIMITS.installConcurrency, timeoutSec: PREP_TIMEOUT_MS / 1000 },
+    codes: PREP_CODES, fails: PREP_FAILS, steps: PREP_STEPS, skips: AUDIT_SKIPS, credStates: CRED_STATES,
+    auditDir: st.dir, auditDirError: st.error || null });
+});
+
+/**
+ * v3.18.0 접속 자동 준비 — 본문 {ids:[...], accounts:{<서버 id>: <공통 계정 id>}, withAudit, from, age, otp}. 서버마다 시작 · 거절 까닭을 돌려준다.
+ * 문은 설치와 같다(installGate — 관리자 · 소유자 등급 · 전체 쓰기 범위 · 데모 차단 · OTP 마지막). 대상은 등록부에서만 · 주소 · 계정 · 키를 본문으로 받지 않는다.
+ */
+api.post('/tools/focus-mon/prep', ...installGate, (req, res) => {
+  if (registryUnreadable(res)) return;
+  const b = req.body && typeof req.body === 'object' ? req.body : {};
+  const withAudit = b.withAudit === true; const from = b.from === true; const age = b.age === 'default' ? 'default' : 'never';
+  if (withAudit && installSettingsUnreadable(res)) return; // 디스크 점검을 함께 할 때만 설치 디렉터리 설정이 필요하다
+  const ids = (Array.isArray(b.ids) ? b.ids : []).map((x) => String(x)).filter((x) => /^fm-[a-z0-9-]{4,40}$/.test(x)).slice(0, 100);
+  if (!ids.length) return res.status(400).json({ ok: false, code: 'no-ids', reason: '고른 서버가 없습니다.' });
+  const picks = b.accounts && typeof b.accounts === 'object' && !Array.isArray(b.accounts) ? b.accounts : {};
+  const vis = new Map(visibleTargets(req).map((t) => [t.id, t]));
+  const everyone = allTargets(); // 같은 주소 찾기는 범위 · 데모와 무관하게 등록부 전부에서
+  const cr = corpResolver();
+  let assign = {}; try { assign = getDatacenterAssign(); } catch { assign = {}; }
+  const results = []; const wake = new Set(); const started = [];
+  for (const id of [...new Set(ids)]) {
+    const t = vis.get(id);
+    if (!t) { results.push({ id, ok: false, code: 'not-found', reason: '없는 대상입니다.' }); continue; }
+    const pick = Object.hasOwn(picks, id) && typeof picks[id] === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(picks[id]) ? picks[id] : null;
+    const r = A.requestPrep(t, { by: req.user?.username || '', pick, corpVcs: t.agent ? [] : corpVcsOf(t, cr, assign), keys: focusKeys, peers: everyone, withAudit, from, age });
+    results.push({ id, name: t.name, ...r });
+    if (r.ok) { started.push(t.name); if (r.via === 'edge' && t.agent) wake.add(t.agent); }
+  }
+  for (const a of wake) wakeEdge(a).catch(() => {});
+  if (started.length) logAudit({ user: req.user?.username, action: 'focus-mon.prep', target: started.slice(0, 20).join(', '), detail: `${started.length}대${started.length > 20 ? ' (앞 20대만 적음)' : ''} · 디스크 점검 ${withAudit ? '함께' : '안 함'} · 주소 제한 ${from ? '켬' : '끔'} · 만든 계정 만료 ${age === 'never' ? '없음' : '서버 기본값'}`, ip: req.ip });
+  res.json({ ok: true, results, started: started.length });
 });
 
 /** 진행 중 작업만(메모리) — 화면이 작업이 있는 동안 5초마다 본다. */

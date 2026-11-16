@@ -28,7 +28,8 @@ import { EDGE_TEST_CONCURRENCY } from '../focusmon/store.js';
 import { createNodeSampler } from '../focusmon/load.js';
 import { createAuditRunner } from '../focusmon/audit/runner.js';
 import { installExec, NODE_INSTALL_CONCURRENCY } from '../focusmon/audit/install.js'; // v3.17.0 자동 설치(이 엣지의 SSH 공용 접속 키로)
-import { installCredFor, credView } from '../focusmon/audit/installCred.js';
+import { installCredFor, credView, PREP_FEATURE } from '../focusmon/audit/installCred.js';
+import { prepExec } from '../focusmon/audit/prep.js'; // v3.18.0 접속 자동 준비(수집 계정 · 공개키 — 이 엣지의 SSH 공용 접속 root 키로)
 import { store } from '../store.js';
 const TEST_RESULTS_PER_SYNC = 50; // 중앙이 동기화당 받는 시험 결과 상한(central/focusMonEdge.js arr(b.tests, 50))과 같게 — 넘는 것은 다음 동기화에(반증 3)
 
@@ -127,17 +128,30 @@ const installRunner = createAuditRunner({
   keys: focusKeys, concurrency: NODE_INSTALL_CONCURRENCY, exec: installExec({ edge: true, edgeVcs }),
   onResult: (job, result) => { queueAuditResult(job.runId, result); schedule(0); },
 });
+/** v3.18.0 접속 준비 줄(설치 줄과 따로 — 같은 동시 상한). 준비 뒤 연결 시험은 이 엣지의 집중 모니터링 키로 · 고르면 디스크 점검 설치까지. */
+const prepRunner = createAuditRunner({
+  keys: focusKeys, concurrency: NODE_INSTALL_CONCURRENCY, exec: prepExec({ edge: true, edgeVcs }),
+  onResult: (job, result) => { queueAuditResult(job.runId, result); schedule(0); },
+});
+/** 이 엣지가 돌릴 줄 아는 작업 종류(매 동기화에 싣는다 — 중앙은 이번 본문의 표시만 믿는다 · v3.17.0 반증 S1). */
+export const EDGE_AUDIT_CAPS = Object.freeze(['install', 'prep']);
 const CRED_EVERY_MS = 60_000;
-let knownTargets = []; let credDueAt = 0;
-/** 이번 동기화에 실을 설치 계정 상태(60초에 한 번 · 맡은 서버 목록을 받았을 때만). 시험에서도 부른다. */
+let knownTargets = []; let credDueAt = 0; let lastPrepReport = null;
+/** 이번 동기화에 실을 설치 계정 상태(60초에 한 번 · 맡은 서버 목록을 받았을 때만). 시험에서도 부른다. v3.18.0: 접속 준비 계정도 같이 만든다(credPrepReport). */
 export function credReport(now = Date.now(), credOf = installCredFor) {
   if (!knownTargets.length || now < credDueAt) return null;
   credDueAt = now + CRED_EVERY_MS;
-  const out = {}; const corpVcs = edgeVcs();
-  for (const t of knownTargets) out[t.id] = credView(credOf(t, { edge: true, corpVcs }));
+  const out = {}; const prep = {}; const corpVcs = edgeVcs();
+  for (const t of knownTargets) {
+    out[t.id] = credView(credOf(t, { edge: true, corpVcs }));
+    prep[t.id] = credView(credOf(t, { edge: true, corpVcs, feature: PREP_FEATURE }));
+  }
+  lastPrepReport = prep;
   return out;
 }
-export function _setKnownForTest(list) { knownTargets = list; credDueAt = 0; }
+/** credReport 가 같이 만든 접속 준비 계정 상태(같은 동기화에 싣고 비운다). */
+export function credPrepReport() { const p = lastPrepReport; lastPrepReport = null; return p; }
+export function _setKnownForTest(list) { knownTargets = list; credDueAt = 0; lastPrepReport = null; }
 /** 이번 동기화에 실을 결과(바이트 상한 — 큰 보고서 둘을 한 본문에 싣지 않는다 · 하나는 늘 싣는다 — 하나는 AUDIT_RESULT_MAX_BYTES 이하다). */
 export function auditResultsToSend() {
   if (auditSkipNext) return [];
@@ -232,11 +246,11 @@ export async function syncOnce(now = Date.now()) {
     const sendA = auditResultsToSend();
     auditSkipNext = false; // 한 번만 건너뛴다
     sentAudit = sendA;
-    const auditActive = [...auditRunner.list(), ...installRunner.list()].map((j) => ({ runId: j.runId, state: j.state, phase: j.phase || null })).concat(auditResults.map((r) => ({ runId: r.runId, state: 'sending', phase: null })));
-    const cred = credReport();
+    const auditActive = [...auditRunner.list(), ...installRunner.list(), ...prepRunner.list()].map((j) => ({ runId: j.runId, state: j.state, phase: j.phase || null })).concat(auditResults.map((r) => ({ runId: r.runId, state: 'sending', phase: null })));
+    const cred = credReport(); const credPrep = cred ? credPrepReport() : null;
     // v3.17.0 반증 S1: 설치를 돌릴 줄 아는 엣지라고 **매 동기화** 알린다(caps) — 중앙은 이번 본문에 이 표시가 있을 때만 설치 작업을 내려보낸다
     //   (설치 계정 보고가 10분 안에 있었다는 것만으로는 그사이 옛 판으로 내려간 엣지를 가르지 못한다)
-    const auditBody = { audit: { active: auditActive, results: sendA.map((r) => ({ runId: r.runId, result: r.result })), caps: ['install'], ...(cred ? { cred } : {}) } };
+    const auditBody = { audit: { active: auditActive, results: sendA.map((r) => ({ runId: r.runId, result: r.result })), caps: [...EDGE_AUDIT_CAPS], ...(cred ? { cred } : {}), ...(credPrep ? { credPrep } : {}) } };
     const body = JSON.stringify({ v: 1, version: currentVersion(), sentAt: Date.now(), key: keyView, samples: sendS, procs: sendP, status: statuses, tests: sendT, load: sendL, diag: diagBody(), ...auditBody });
     let payload = body; let hdrs = { 'Content-Type': 'application/json' };
     try { payload = await gzipAsync(Buffer.from(body)); hdrs = { ...hdrs, 'Content-Encoding': 'gzip' }; } catch { /* 원문 */ }
@@ -292,23 +306,27 @@ export async function syncOnce(now = Date.now()) {
       const acked = new Set((Array.isArray(au.ack) ? au.ack : []).map(String));
       if (acked.size) auditResults = auditResults.filter((r) => !acked.has(r.runId));
       // 중앙이 모르는 작업(접속처 변경 · 대상 삭제) — 줄에서 기다리는 것은 뺀다(도는 중인 것은 끝까지 — 결과는 중앙이 버린다)
-      for (const id of Array.isArray(au.cancel) ? au.cancel.slice(0, 50) : []) { auditRunner.cancel(String(id)); installRunner.cancel(String(id)); }
+      for (const id of Array.isArray(au.cancel) ? au.cancel.slice(0, 50) : []) { auditRunner.cancel(String(id)); installRunner.cancel(String(id)); prepRunner.cancel(String(id)); }
       // v3.17.0: 맡은 서버 목록(설치 계정 상태를 알려 주려고) — 받으면 다음 동기화에 바로 보고한다
       if (Array.isArray(au.known)) { knownTargets = au.known.slice(0, 500).filter((t) => t && typeof t.id === 'string').map((t) => ({ id: String(t.id), name: String(t.name || ''), host: String(t.host || ''), port: Number(t.port) || 22 })); credDueAt = 0; }
       for (const j of Array.isArray(au.jobs) ? au.jobs.slice(0, 20) : []) {
-        if (!j || typeof j.runId !== 'string' || auditRunner.has(j.runId) || installRunner.has(j.runId) || auditResults.some((r) => r.runId === j.runId)) continue;
+        if (!j || typeof j.runId !== 'string' || auditRunner.has(j.runId) || installRunner.has(j.runId) || prepRunner.has(j.runId) || auditResults.some((r) => r.runId === j.runId)) continue;
         const ex = j.expect && typeof j.expect === 'object' ? j.expect : {};
         // 기대 판본 · 후보 디렉터리 · 설치 값은 글자 모양만 맞춰 넘긴다 — 디렉터리 검사(bundle.dirIssue)는 runner · install 이 다시 한다
         const expect = { program: String(ex.program || ''), wrapper: String(ex.wrapper || ''),
           ...(Array.isArray(ex.cands) ? { cands: ex.cands.slice(0, 3).map((d) => (typeof d === 'string' ? d : '')) } : {}),
           ...(ex.wrappers && typeof ex.wrappers === 'object' && !Array.isArray(ex.wrappers) ? { wrappers: Object.fromEntries(Object.entries(ex.wrappers).slice(0, 3).map(([k, v]) => [String(k), String(v)])) } : {}),
-          ...(j.mode === 'install' ? { dir: typeof ex.dir === 'string' ? ex.dir : '', oldDirs: Array.isArray(ex.oldDirs) ? ex.oldDirs.slice(0, 3).map((d) => (typeof d === 'string' ? d : '')) : [], pick: typeof ex.pick === 'string' ? ex.pick : null } : {}) };
+          ...(j.mode === 'install' || j.mode === 'prep' ? { dir: typeof ex.dir === 'string' ? ex.dir : '', oldDirs: Array.isArray(ex.oldDirs) ? ex.oldDirs.slice(0, 3).map((d) => (typeof d === 'string' ? d : '')) : [], pick: typeof ex.pick === 'string' ? ex.pick : null } : {}),
+          // v3.18.0 접속 준비 — 참거짓 · 정해 둔 값만(중앙이 보낸 법인 목록은 쓰지 않는다 — 엣지 스냅샷 vCenter)
+          ...(j.mode === 'prep' ? { from: ex.from === true, age: ex.age === 'default' ? 'default' : 'never', audit: ex.audit === true } : {}) };
         const tgt = { id: String(j.id), name: String(j.name || ''), host: String(j.host), port: Number(j.port) || 22, username: String(j.username) };
         const sub = j.mode === 'install'
           ? installRunner.submit({ runId: j.runId, mode: 'install', target: tgt, expect })
-          : auditRunner.submit({ runId: j.runId, mode: j.mode === 'check' ? 'check' : 'run', target: tgt, expect });
+          : j.mode === 'prep'
+            ? prepRunner.submit({ runId: j.runId, mode: 'prep', target: tgt, expect })
+            : auditRunner.submit({ runId: j.runId, mode: j.mode === 'check' ? 'check' : 'run', target: tgt, expect });
         // 받지 못한 작업은 결과로 알린다(반증 F3 — 예전에는 소리 없이 버려 중앙이 3번 다시 보낸 뒤 'lost' 로 지웠다)
-        if (!sub.ok) queueAuditResult(j.runId, { mode: j.mode === 'check' ? 'check' : j.mode === 'install' ? 'install' : 'run', ...(j.mode === 'install' ? { install: { code: 'unreachable', step: 0 } } : {}), ok: false, kind: sub.code === 'queue-full' ? 'queue-full' : 'busy', ready: [], out: [], outBytes: 0, truncated: false, code: null, stderr: '', ms: 0, error: sub.code === 'queue-full' ? '엣지 점검 대기열이 가득 찼습니다.' : '이 엣지에서 같은 서버의 이전 점검 작업이 아직 끝나지 않았습니다.' });
+        if (!sub.ok) queueAuditResult(j.runId, { mode: j.mode === 'check' ? 'check' : j.mode === 'install' ? 'install' : j.mode === 'prep' ? 'prep' : 'run', ...(j.mode === 'install' ? { install: { code: 'unreachable', step: 0 } } : {}), ...(j.mode === 'prep' ? { prep: { code: 'unreachable', step: 0 } } : {}), ok: false, kind: sub.code === 'queue-full' ? 'queue-full' : 'busy', ready: [], out: [], outBytes: 0, truncated: false, code: null, stderr: '', ms: 0, error: sub.code === 'queue-full' ? '엣지 점검 대기열이 가득 찼습니다.' : '이 엣지에서 같은 서버의 이전 점검 작업이 아직 끝나지 않았습니다.' });
       }
     }
     _last = { at: Date.now(), ok: true, ms: Date.now() - t0, sent: sendS.length, targets: lastTargets, note: lastTargets ? '' : '수집할 대상이 없습니다.' };
@@ -321,7 +339,7 @@ export async function syncOnce(now = Date.now()) {
     if (!sentOk) { loads = { ...sendL, ...loads }; auditSendFailed(sentAudit, failStatus); } else expireAuditResults();
     running = false;
     expireIfStale();
-    const active = lastTargets > 0 || wakeAsked || auditRunner.size() > 0 || installRunner.size() > 0 || auditResults.length > 0;
+    const active = lastTargets > 0 || wakeAsked || auditRunner.size() > 0 || installRunner.size() > 0 || prepRunner.size() > 0 || auditResults.length > 0;
     wakeAsked = false;
     schedule(nextDelayMs({ active, idleHintMs }));
   }

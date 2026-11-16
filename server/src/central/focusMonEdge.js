@@ -22,6 +22,7 @@ import { IOSTAT_COLS, TOP_N, APP_TOP, APP_KERNEL, APP_SESSION, APP_NOSVC, APP_AL
 import { okMount, BOOT_ID_RE } from '../focusmon/parse.js'; // v3.12.0 ⑬ 파일시스템 마운트 이름 규칙(수집 파서와 같은 함수)
 import { FS_ROWS_MAX } from '../focusmon/codec.js';
 import { INTERVALS, PROC_EVERY_CHOICES } from '../focusmon/script.js';
+import { cleanHello, LOGIN_KINDS } from '../focusmon/hello.js';
 import { handleEdgeAudit } from '../focusmon/audit/service.js'; // v3.11.0 디스크 점검 — 작업 배달 · 원문 결과 받기(중앙이 다시 해석)
 
 export const VALID_MS = 30_000;
@@ -29,7 +30,7 @@ export const MAX_SAMPLES = 6000;
 export const MAX_PER_TARGET = 300;
 const BACKLOG_MS = 10 * 60_000;
 const STATES = new Set(['connecting', 'ok', 'stale', 'auth', 'hostkey', 'unreachable', 'no-key', 'unsupported-os', 'limit', 'stopped', 'error']);
-const TEST_KINDS = new Set(['ok', 'os-unverified', 'no-key', 'auth', 'auth-stopped', 'hostkey', 'timeout', 'unreachable', 'unsupported-os', 'bad-output']);
+const TEST_KINDS = new Set(LOGIN_KINDS);
 const NAME_RE = /^[^\s:/]{1,32}$/;
 const DEV_RE = /^[A-Za-z0-9_.!:+-]{1,64}$/;
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
@@ -38,16 +39,7 @@ const arr = (v, max) => (Array.isArray(v) ? v.slice(0, max) : []);
 const enumOr = (v, set, def) => (typeof v === 'string' && set.has(v) ? v : def);
 const nameOr = (v, re = NAME_RE) => (typeof v === 'string' && re.test(v) ? v : null);
 
-export function cleanHello(h) {
-  if (!isObj(h)) return null;
-  return {
-    kernel: strOf(h.kernel, 120), isLinux: h.isLinux === true, release: strOf(h.release, 120),
-    rhelMajor: typeof h.rhelMajor === 'string' && /^\d{1,2}\.\d{1,2}$/.test(h.rhelMajor) ? h.rhelMajor : null,
-    tck: n(h.tck), page: n(h.page), ncpu: n(h.ncpu), hidepid: h.hidepid === true ? true : h.hidepid === false ? false : null,
-    dacct: h.dacct === true ? true : h.dacct === false ? false : null, // v2.981 지연 집계(디스크 대기)
-    hostname: strOf(h.hostname, 64).replace(/[^A-Za-z0-9._-]/g, ''),
-  };
-}
+export { cleanHello }; // v3.18.0: 정제 코어는 focusmon/hello.js 하나(접속 준비 결과도 같이 쓴다)
 
 /** 표본 하나 정제(rates.computeSample 모양만 통과). */
 export function cleanSample(s) {
