@@ -84,7 +84,20 @@ function load() {
   }
   return S;
 }
-function persist() { try { atomicWriteFileSync(file(), JSON.stringify({ v: 1, ready: load().ready, jobs: load().jobs, lost: load().lost })); } catch (e) { console.warn('[focusmon-audit] 상태 파일을 쓰지 못했습니다:', String(e?.message || e).slice(0, 160)); } }
+function writeState() { try { atomicWriteFileSync(file(), JSON.stringify({ v: 1, ready: load().ready, jobs: load().jobs, lost: load().lost })); } catch (e) { console.warn('[focusmon-audit] 상태 파일을 쓰지 못했습니다:', String(e?.message || e).slice(0, 160)); } }
+/*
+ * 51회차 #2: 엣지 동기화 한 번(handleEdgeAudit)이 받은 설치 · 준비 · 확인 결과(최대 RESULTS_PER_SYNC 8건)를 ingestResult 마다 원자 쓰기(fsync 둘)해
+ *   한 요청에 상태 파일을 9번 썼다(실측 — 대상 2,000 개 상태 파일 291KB 에서 28~42ms 동기 · 이 컨테이너). 묶음 안에서는 persist 가 '더러움' 만 적고
+ *   묶음이 끝날 때 한 번 쓴다. 묶는 것은 **동기 구간뿐**이다 — 점검 결과(DB await 뒤)의 쓰기는 묶음이 끝난 뒤에 돌므로 예전처럼 곧바로 쓴다.
+ *   단건 경로(중앙 실행기 onResult · 접수 · 정리)는 묶음 밖이라 그대로다. 메모리는 예전처럼 쓰기 전에 바뀌고, 쓰기 실패는 예전처럼 콘솔 경고뿐(응답은 같다).
+ */
+let persistBatch = null;
+function persist() { if (persistBatch) { persistBatch.dirty = true; return; } writeState(); }
+function inPersistBatch(fn) {
+  if (persistBatch) return fn();
+  persistBatch = { dirty: false };
+  try { return fn(); } finally { const b = persistBatch; persistBatch = null; if (b.dirty) writeState(); }
+}
 export function auditStateError() { load(); return loadErr; }
 
 const newRunId = () => `da-${crypto.randomBytes(6).toString('hex')}`;
@@ -470,9 +483,13 @@ const ACTIVE_STATES = new Set(['queued', 'running']);
  * @param {Map<string, object>} mine  그 엣지가 맡은 대상(id → 대상)
  * @param {object} a  본문 audit(정제 전)
  * 동기 함수다(동기화 처리 handleEdgeSync 가 동기) — 결과 반영(DB 쓰기)은 뒤에서 이어 돈다(실패는 그 서버의 lastError 로 남긴다).
+ * 51회차 #2: 이 한 번의 상태 파일 쓰기는 끝에 한 번(정리 · 결과 반영 · 배달 표시를 묶는다 — inPersistBatch).
  * @returns {{jobs:object[], ack:string[]}}
  */
 export function handleEdgeAudit(agent, mine, a, now = Date.now()) {
+  return inPersistBatch(() => handleEdgeAuditOnce(agent, mine, a, now));
+}
+function handleEdgeAuditOnce(agent, mine, a, now) {
   sweep(now); // 시한 정리(바뀐 때만 쓴다)
   const st = load();
   const key = String(agent || '').toLowerCase();
@@ -646,4 +663,4 @@ export function cleanEdgeCred(v) {
   const choices = state === 'ambig' && Array.isArray(v.choices) ? v.choices.slice(0, 10).filter((c) => c && typeof c === 'object' && typeof c.id === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(c.id)).map((c) => ({ id: c.id, name: nm(c.name), acct: nm(c.acct), key: nm(c.key) })) : null;
   return { state, src: ['server', 'corp'].includes(v.src) ? v.src : null, acct: nm(v.acct), key: nm(v.key), ...(choices ? { choices } : {}) };
 }
-export function _resetForTest() { S = null; loadErr = ''; latest.clear(); localRunner = null; localInstaller = null; localPrepper = null; keysRef = null; spaceLow = () => false; edgeCred.clear(); knownSentAt.clear(); }
+export function _resetForTest() { S = null; loadErr = ''; persistBatch = null; latest.clear(); localRunner = null; localInstaller = null; localPrepper = null; keysRef = null; spaceLow = () => false; edgeCred.clear(); knownSentAt.clear(); }

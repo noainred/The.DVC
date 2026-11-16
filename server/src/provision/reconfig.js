@@ -15,18 +15,28 @@ import { VimSoapClient } from '../vcenter/soapClient.js';
 import { onDemandLogin } from '../vcenter/dsBrowse.js';
 // v3.0.1: connectable 은 스키마 순서(startConnected · allowGuestControl · connected)로 — 조립은 connectInfo.js 하나(순서가 틀리면 vCenter 가 SOAP 500 으로 거부).
 import { connectInfoXml, readConnectFlag, withConnectable, deviceInnerOf } from '../vcenter/connectInfo.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const GB_KB = 1024 * 1024;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const pickTag = (xml, tag) => { const m = new RegExp(`<${tag}>([^<]*)</${tag}>`).exec(xml || ''); return m ? m[1] : ''; };
 
+/**
+ * 54회차 F4: 못 읽은 하드웨어 수치(vCPU · 코어/소켓 · 메모리 MB · 디스크 용량)는 **null** — 0 이 아니다.
+ *   예전에는 `Number(x) || 0` 이라 vCenter 응답에 값이 없으면 0 이 되고, '증설만' 검사가 0 을 기준으로 판정해 어떤 값이든 '증설' 로 통과했다
+ *   (감소를 막는 검사가 꺼진 것과 같다 — 전원 OFF VM 은 vCenter 가 vCPU · RAM 감소를 받아들인다). 0 이하도 실재하지 않는 값이라 못 읽음이다.
+ */
+const posIntOrNull = (v) => { const n = numOrNull(v); return Number.isInteger(n) && n > 0 ? n : null; };
+/** 현재 값을 모르면 증설 여부를 판정할 수 없다 — 상태를 바꾸는 작업이라 막는다(fail-closed). 문구는 라우트가 400 reason 으로 그대로 싣는다. */
+const UNKNOWN_BASE = (what) => `현재 ${what}을(를) 읽지 못해 증설 여부를 판정할 수 없습니다 — ${what} 변경을 막았습니다(사양 변경 창을 다시 열어 조회한 뒤 시도하세요).`;
+
 const ETH_TYPES = new Set(['VirtualVmxnet3', 'VirtualVmxnet2', 'VirtualVmxnet', 'VirtualE1000', 'VirtualE1000e', 'VirtualPCNet32', 'VirtualSriovEthernetCard']);
 const SCSI_RE = /SCSIController|LsiLogic|BusLogic|ParaVirtual/;
 
 /**
  * config.hardware.device XML + 설정 플래그를 파싱해 구조화한 하드웨어 정보를 만든다.
- * 반환: { cpu, memMB, cpuHotAdd, memHotAdd, powerState, disks[], scsi[], nics[] }
+ * 반환: { cpu, memMB, cpuHotAdd, memHotAdd, powerState, disks[], scsi[], nics[] } — cpu · coresPerSocket · memMB · disks[].capacityKB/GB 는 못 읽으면 null.
  */
 export function parseHardware(deviceXml, meta = {}) {
   const disks = []; const scsi = []; const nics = [];
@@ -38,11 +48,14 @@ export function parseHardware(deviceXml, meta = {}) {
     if (!Number.isFinite(key)) continue;
     const label = /<deviceInfo>[\s\S]*?<label>([^<]*)<\/label>/.exec(blk)?.[1] || '';
     if (type === 'VirtualDisk') {
-      const capKB = Number(pickTag(blk, 'capacityInKB')) || Math.round((Number(pickTag(blk, 'capacityInBytes')) || 0) / 1024);
+      // 54회차 F4: 용량을 못 읽으면 null(예전 0 — '증설만' 검사가 0 기준이라 아무 크기나 통과했다)
+      const kb = posIntOrNull(pickTag(blk, 'capacityInKB'));
+      const bytes = posIntOrNull(pickTag(blk, 'capacityInBytes'));
+      const capKB = kb ?? (bytes != null && Math.round(bytes / 1024) > 0 ? Math.round(bytes / 1024) : null);
       disks.push({
         key, label,
         capacityKB: capKB,
-        capacityGB: Math.round((capKB / GB_KB) * 10) / 10,
+        capacityGB: capKB == null ? null : Math.round((capKB / GB_KB) * 10) / 10,
         controllerKey: Number(pickTag(blk, 'controllerKey')) || 0,
         unitNumber: Number(pickTag(blk, 'unitNumber')) || 0,
         fileName: /<fileName>([^<]*)<\/fileName>/.exec(blk)?.[1] || '',
@@ -72,9 +85,9 @@ export function parseHardware(deviceXml, meta = {}) {
     }
   }
   return {
-    cpu: Number(meta.numCPU) || 0,
-    coresPerSocket: Number(meta.coresPerSocket) || 0,
-    memMB: Number(meta.memoryMB) || 0,
+    cpu: posIntOrNull(meta.numCPU),                       // 54회차 F4: 못 읽으면 null(0 아님)
+    coresPerSocket: posIntOrNull(meta.coresPerSocket),
+    memMB: posIntOrNull(meta.memoryMB),
     cpuHotAdd: meta.cpuHotAdd === true || meta.cpuHotAdd === 'true',
     memHotAdd: meta.memHotAdd === true || meta.memHotAdd === 'true',
     powerState: meta.powerState || '',
@@ -96,7 +109,8 @@ export function buildReconfigSpec(hw, plan = {}) {
   const cps = plan.coresPerSocket != null ? Number(plan.coresPerSocket) : null;
   if (plan.numCPUs != null && Number(plan.numCPUs) !== hw.cpu) {
     const n = Number(plan.numCPUs);
-    if (!Number.isInteger(n) || n < 1) errors.push('vCPU 수가 올바르지 않습니다.');
+    if (hw.cpu == null) errors.push(UNKNOWN_BASE('vCPU 수'));   // 54회차 F4: 기준을 모르면 '증설' 로 보지 않는다
+    else if (!Number.isInteger(n) || n < 1) errors.push('vCPU 수가 올바르지 않습니다.');
     else if (n < hw.cpu) errors.push(`vCPU 감소는 허용되지 않습니다(증설만): ${hw.cpu} → ${n}`);
     else if (poweredOn && !hw.cpuHotAdd) errors.push('이 VM은 CPU hot-add가 비활성화되어 전원 ON 상태에서 vCPU 증설이 불가합니다. 전원 OFF 후 시도하세요.');
     else {
@@ -108,14 +122,16 @@ export function buildReconfigSpec(hw, plan = {}) {
     }
   } else if (cps != null && cps >= 1) {
     // vCPU 수 변경 없이 코어/소켓만 조정.
-    if (!Number.isInteger(cps) || hw.cpu % cps !== 0) errors.push(`코어/소켓(${cps})은 총 vCPU(${hw.cpu})의 약수여야 합니다.`);
+    if (hw.cpu == null) errors.push(UNKNOWN_BASE('vCPU 수'));   // 54회차 F4: 약수 판정의 기준을 모른다
+    else if (!Number.isInteger(cps) || hw.cpu % cps !== 0) errors.push(`코어/소켓(${cps})은 총 vCPU(${hw.cpu})의 약수여야 합니다.`);
     else { parts.push(`<numCoresPerSocket>${cps}</numCoresPerSocket>`); changes.push(`코어/소켓 →${cps}`); }
   }
 
   // --- RAM ---
   if (plan.memoryMB != null && Number(plan.memoryMB) !== hw.memMB) {
     const m = Number(plan.memoryMB);
-    if (!Number.isInteger(m) || m < 1) errors.push('RAM 값이 올바르지 않습니다.');
+    if (hw.memMB == null) errors.push(UNKNOWN_BASE('RAM'));   // 54회차 F4
+    else if (!Number.isInteger(m) || m < 1) errors.push('RAM 값이 올바르지 않습니다.');
     else if (m < hw.memMB) errors.push(`RAM 감소는 허용되지 않습니다(증설만): ${hw.memMB}MB → ${m}MB`);
     else if (poweredOn && !hw.memHotAdd) errors.push('이 VM은 메모리 hot-add가 비활성화되어 전원 ON 상태에서 RAM 증설이 불가합니다. 전원 OFF 후 시도하세요.');
     else { parts.push(`<memoryMB>${m}</memoryMB>`); changes.push(`RAM ${hw.memMB}→${m}MB`); }
@@ -125,6 +141,7 @@ export function buildReconfigSpec(hw, plan = {}) {
   for (const g of (plan.diskGrows || [])) {
     const d = hw.disks.find((x) => x.key === Number(g.key));
     if (!d) { errors.push(`디스크(key=${g.key})를 찾을 수 없습니다.`); continue; }
+    if (d.capacityKB == null) { errors.push(UNKNOWN_BASE(`${d.label || `디스크(key=${d.key})`} 용량`)); continue; }   // 54회차 F4
     const newKB = Math.round(Number(g.newGB) * GB_KB);
     if (!(newKB > d.capacityKB)) { errors.push(`${d.label}: 증설만 가능합니다(현재 ${d.capacityGB}GB 이하 불가).`); continue; }
     dev.push(

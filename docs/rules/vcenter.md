@@ -29,6 +29,7 @@
 - v2.906 — 분산 포트그룹 팀 구성 · LACP · VLAN(`vcinfo` dvpg — 6시간 · 이미 받은 포트그룹 moref 만 · Enhanced LACP 의 LAG)
 - v2.935 — ESXi 경로 카운터(`storpath/` — storagePath 그룹 · 한 시간마다 5분 표본 · 비율만 실측)
 - v3.2.1(코드·테스트 표지는 v3.0.1) — vim25 데이터 객체는 스키마 원소 순서로 보낸다(NIC connectable — `vcenter/connectInfo.js` 하나 · 장치 edit 은 읽은 본문 그대로 + connectable 만 교체)
+- 54회차 F4 · F5 — VM 사양 변경 · SOAP 호스트 용량의 못 읽음은 null(0 아님) · 현재 값을 모르면 변경을 막는다 · 용량 판정 서버 ↔ 웹 한 벌
 - (원래 5751행) v2.701 — 클러스터 HA·DRS 점검(A6) + 호스트 네트워크(A10). 클러스터 구성은 클러스터 전용 캐시(`clustercfg/`)이고 vcenter.clusterCfg
 
 ## 본문
@@ -512,3 +513,10 @@
   - 새 vim25 쓰기(deviceChange · RelocateSpec 등)를 손으로 조립할 때는 govmomi `vim25/types` 필드 순서(= WSDL sequence)와 대조하는 테스트를 둘 것. 회귀 `server/test/nicConnectInfo301.test.js`(변이 9/9 · 반증 1인).
   - 남긴 것(반증 판독 — 실환경 미확인): 프로비저닝 RelocateSpec 의 스토리지 정책이 `<profile><profile …><profileName>` 모양이다(스키마는 배열 원소 하나 + 필수 `profileId`) — 정책을 입력한 클론은 거부될 것으로 본다.
 - **v3.10.15 `/tools/vm-track` `vcenterList[].region`**: 화면의 리전 선택용(스냅샷 `location.region` 그대로 · 없으면 빈 글자). `?region=` 의 교집합 규약(v2.958)은 그대로.
+- **54회차 F4 · F5 — 못 읽은 하드웨어 수치는 null(0 아님)**(2026-11-16 · 회귀 `server/test/leftoverC56.test.js` · web `components/vmReconfigText.test.js`):
+  ① VM 사양 변경 `provision/reconfig.js parseHardware` 는 못 읽은(빈 값 · 수 아님 · 0 이하) vCPU · 코어/소켓 · 메모리 · 디스크 용량을 **null** 로 싣고, `buildReconfigSpec` 은
+  현재 값을 모르는 항목의 변경을 **막는다**(fail-closed — 라우트 400 · ReconfigVM_Task 를 보내지 않는다). '증설만' 검사의 기준을 0 으로 두지 말 것 — 어떤 값이든 '증설' 이 된다
+  (전원 OFF VM 은 vCenter 가 vCPU · RAM 감소를 받아들인다). 웹 창의 판정은 `components/vmReconfigText.js` 하나('—' · 입력 잠금 · 계획에 싣지 않음).
+  ② SOAP 호스트 용량(`vcenter/soapClient.js hostCapacityOf`)도 못 읽음 · 0 이하는 null · 총량을 모르면 사용률 null. 용량 판정은 서버 `store.hostCapacityKnown` ↔ 웹 `web/src/hostCapacity.js`
+  (세 칸 — 코어 · 총 MHz · 메모리)가 같은 입력에 같은 답이다(웹 `vcdVirt.virtSum` 도 이것 — 예전 두 칸). ⚠ 실 vCenter 가 끊긴 호스트 · 값 없는 VM 에 무엇을 주는지는 확인하지 못했다
+  (가짜 vCenter 의 '속성 없음 · 0' 만 고정). 예전 판 엣지는 못 읽은 용량을 0 으로 올린다 — 엣지가 업그레이드돼야 위임 vCenter 에도 반영된다.
