@@ -87,7 +87,7 @@ test('① 설치 묶음 — 원격 명령 상수 · 받은 프로그램 그대�
   assert.ok(inst.includes(`${B.programSha()}  $T/rhel_disk_audit.py`) && inst.includes(`${B.wrapperSha()}  $T/dvc-disk-audit`), '설치 전 sha 재확인');
   assert.match(inst, /NOPASSWD: \/usr\/local\/sbin\/dvc-disk-audit \\"\\""/, 'sudoers 는 인자 없이만("")');
   assert.match(inst, /visudo -cf/, 'visudo 검사 뒤에만 넣는다');
-  assert.match(inst, /\*\[!A-Za-z0-9._-\]\*\) echo "사용법/, '계정 이름 글자 제한');
+  assert.match(inst, /\*\[!A-Za-z0-9._-\]\*\) echo '##DI fail args'; echo "사용법/, '계정 이름 글자 제한(v3.17.0 — 자동 설치가 읽는 ##DI 표지 줄을 함께 낸다)');
   const bad = spawnSync('sh', [f, 'x;id'], { encoding: 'utf8' });
   assert.equal(bad.status, 64, '이상한 계정 이름은 바로 거절');
 });

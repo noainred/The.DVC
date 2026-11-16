@@ -28,7 +28,13 @@ import * as db from '../../focusmon/db.js';
 import { corpResolver } from '../../focusmon/audit/corp.js';
 import { groupRows, byDiskModel, crossCorpModel, auditKpis, NO_CORP, NO_MODEL, NO_GROUP, RATE_MIN_DISKS } from '../../focusmon/audit/aggregate.js';
 import { splitRun, parseReport, parseDisks, evidenceKey, ERROR_KINDS, SHAPE_TEXT } from '../../focusmon/audit/parse.js';
-import { installScript, programSha, wrapperSha, PROGRAM_PATH, WRAPPER_PATH, SUDOERS_PATH, RUN_COMMAND } from '../../focusmon/audit/bundle.js';
+import { installScript, programSha, wrapperSha, PROGRAM_PATH, WRAPPER_PATH, SUDOERS_PATH, pathsFor, DIR_ISSUE_TEXT, DIR_DENY, DIR_MAX, DIR_DEPTH_MIN, DIR_DEPTH_MAX, runCommandFor, sudoersLine } from '../../focusmon/audit/bundle.js';
+import { installSettingsView, installSettingsError, installDir, saveInstallDir } from '../../focusmon/audit/settings.js'; // v3.17.0 설치 디렉터리
+import { INSTALL_CODES, INSTALL_STEPS } from '../../focusmon/audit/install.js';
+import { CRED_STATES } from '../../focusmon/audit/installCred.js';
+import { requireSettingsOwner } from '../admin/shared.js';
+import { reauth } from './reauth.js';
+import { getDatacenterAssign } from '../../datacenter/store.js';
 import crypto from 'node:crypto';
 
 const gunzipAsync = promisify(zlib.gunzip);
@@ -45,6 +51,37 @@ function registryUnreadable(res) {
   return true;
 }
 function visibleTargets(req) { const all = allTargets(); return isDemoGuest(req.user) ? all.filter((t) => t.demo) : all; }
+/**
+ * v3.17.0 설치 · 설치 디렉터리 저장 문(컨펌 ④): 관리자 · 설정 소유자 등급(소유자 ∧ 조회 · 쓰기 전체 범위) · 데모 차단 · **본인 OTP(reauth — 마지막 게이트:
+ * 권한이 없는 요청이 OTP 를 쓰지 않게)** · 감사. 대상 서버에 root 로 설치하는 일이라 SSH 공용 접속에서 키를 바꿀 때와 같은 문이다.
+ */
+const installGate = [adminOnly, requireSettingsOwner, fullRwOnly, demoBlockWrite, reauth];
+function installSettingsUnreadable(res) {
+  const e = installSettingsError();
+  if (!e) return false;
+  res.status(503).json({ ok: false, reason: 'installSettingsUnreadable', detail: '설치 디렉터리 설정(focusmon-audit-settings.json)을 읽지 못했습니다 — 손상 보존본을 확인하세요.' });
+  return true;
+}
+/** 대상의 법인(DataCenter) → 그 법인의 vCenter 들(공통 계정 법인과 맞춘다 — v3.16.0 maintMatch 와 같은 풀이). */
+function corpVcsOf(t, cr, assign) {
+  const id = cr.of(t)?.id;
+  if (!id) return [];
+  return Object.entries(assign || {}).filter(([, dc]) => String(dc) === String(id)).map(([vc]) => vc);
+}
+/** 설치 탭 묶음 — 설정 · 경로 · 서버별 설치 계정 상태(비밀 없음) · 한도. */
+function installView(targets, cr) {
+  let assign = {}; try { assign = getDatacenterAssign(); } catch { assign = {}; }
+  const st = installSettingsView();
+  const P = st.dir === null ? null : pathsFor(st.dir);
+  const cred = {};
+  for (const t of targets) cred[t.id] = A.credOfTarget(t, { corpVcs: t.agent ? [] : corpVcsOf(t, cr, assign) });
+  return {
+    settings: st, defaultPaths: { program: PROGRAM_PATH, wrapper: WRAPPER_PATH }, sudoers: SUDOERS_PATH,
+    paths: P ? { program: P.program, wrapper: P.wrapper, run: runCommandFor(P), sudoersLine: sudoersLine('<수집 계정>', P) } : null,
+    rules: { max: DIR_MAX, depthMin: DIR_DEPTH_MIN, depthMax: DIR_DEPTH_MAX, deny: DIR_DENY, text: DIR_ISSUE_TEXT },
+    codes: INSTALL_CODES, steps: INSTALL_STEPS, credStates: CRED_STATES, cred,
+  };
+}
 
 /** 최근 회차 → 화면용(근거 열쇠 ek 는 싣지 않는다 — 크고 화면에 쓰지 않는다). */
 function lastView(r) {
@@ -62,9 +99,10 @@ function rowsOf(targets, latest, cr) {
   return targets.map((t) => {
     const ready = A.readinessOf(t.id);
     return {
-      id: t.id, name: t.name, host: t.host, agent: t.demo ? (t.agent || '') : (t.agent || ''), group: t.group || '', demo: !!t.demo,
+      id: t.id, name: t.name, host: t.host, username: t.username || '', agent: t.demo ? (t.agent || '') : (t.agent || ''), group: t.group || '', demo: !!t.demo,
       corp: cr.of(t), smodel: ready?.dmi?.product || null, svendor: ready?.dmi?.vendor || null,
-      ready: ready ? { state: ready.state || null, reason: ready.reason || '', at: ready.at || null, py: ready.py || null, node: ready.node ?? null, lastExecAt: ready.lastExecAt || null } : null,
+      ready: ready ? { state: ready.state || null, reason: ready.reason || '', at: ready.at || null, py: ready.py || null, node: ready.node ?? null, lastExecAt: ready.lastExecAt || null, dir: typeof ready.dir === 'string' ? ready.dir : null } : null,
+      lastInstall: ready?.lastInstall || null,
       lastError: ready?.lastError || null, job: A.jobOf(t.id), last: lastView(sameEndpoint(latest.get(t.id), t)),
     };
   });
@@ -87,8 +125,9 @@ api.get('/tools/focus-mon/audit', adminOnly, fullScopeOnly, async (req, res) => 
   res.json({
     ok: true, now: Date.now(), mock: isMockMode(), dbAvailable: await db.available(),
     limits: { ...A.LIMITS, rateMinDisks: RATE_MIN_DISKS },
-    version: { program: programSha()?.slice(0, 12) || null, wrapper: wrapperSha().slice(0, 12) },
-    paths: { program: PROGRAM_PATH, wrapper: WRAPPER_PATH, sudoers: SUDOERS_PATH, run: RUN_COMMAND },
+    // v3.17.0: 손으로 설치하는 안내 · 설치 파일도 지금 설치 디렉터리 기준(설정을 못 읽으면 기본 경로 — 설치 파일 받기 · 자동 설치는 503 으로 막힌다)
+    ...(() => { const P = pathsFor(installDir() ?? '') || pathsFor(''); return { version: { program: programSha()?.slice(0, 12) || null, wrapper: wrapperSha(P.dir).slice(0, 12) },
+      paths: { program: P.program, wrapper: P.wrapper, sudoers: SUDOERS_PATH, run: runCommandFor(P), dir: P.dir } }; })(),
     labels: { noCorp: NO_CORP, noModel: NO_MODEL, noGroup: NO_GROUP },
     rows,
     kpis: auditKpis(rows),
@@ -103,7 +142,46 @@ api.get('/tools/focus-mon/audit', adminOnly, fullScopeOnly, async (req, res) => 
     // 데모 계정에는 실제 법인 목록을 싣지 않는다(등록부 그룹 이름과 같은 규칙)
     corps: demo ? [] : cr.list,
     stateError: A.auditStateError() || null,
+    install: installView(targets, cr),
   });
+});
+
+/** v3.17.0 설치 디렉터리 저장 — 본문 {dir: '' | 절대 경로, otp}. '' = 기본 경로. 이미 설치된 서버는 그대로 동작한다(‘옛 디렉터리’ 로 표시 · 다시 설치하면 옮긴다). */
+api.put('/tools/focus-mon/audit/install-dir', ...installGate, (req, res) => {
+  const b = req.body && typeof req.body === 'object' ? req.body : {};
+  const r = saveInstallDir(typeof b.dir === 'string' ? b.dir : null, { by: req.user?.username || '' });
+  if (!r.ok) return res.status(r.code === 'settings-unreadable' ? 503 : 400).json({ ok: false, code: r.code, reason: r.reason || DIR_ISSUE_TEXT[r.code] || '디렉터리가 규칙에 맞지 않습니다.' });
+  logAudit({ user: req.user?.username, action: 'focus-mon.audit.install-dir', target: r.dir || '(기본 경로)', detail: `이전 ${r.prev || '(기본 경로)'}`, ip: req.ip });
+  res.json({ ok: true, dir: r.dir });
+});
+
+/**
+ * v3.17.0 자동 설치 — 본문 {ids:[...], accounts:{<서버 id>: <공통 계정 id>}, otp}. 서버마다 시작 · 거절 까닭을 돌려준다.
+ * 대상은 등록부에서만(주소 · 계정을 본문으로 받지 않는다) · 범위 밖 · 없는 대상은 404 · 설치 계정은 그 서버를 맡은 노드가 고른다(키는 노드 밖으로 나가지 않는다).
+ */
+api.post('/tools/focus-mon/audit/install', ...installGate, (req, res) => {
+  if (registryUnreadable(res)) return;
+  if (installSettingsUnreadable(res)) return;
+  const b = req.body && typeof req.body === 'object' ? req.body : {};
+  const ids = (Array.isArray(b.ids) ? b.ids : []).map((x) => String(x)).filter((x) => /^fm-[a-z0-9-]{4,40}$/.test(x)).slice(0, 100);
+  if (!ids.length) return res.status(400).json({ ok: false, code: 'no-ids', reason: '고른 서버가 없습니다.' });
+  const picks = b.accounts && typeof b.accounts === 'object' && !Array.isArray(b.accounts) ? b.accounts : {};
+  const vis = new Map(visibleTargets(req).map((t) => [t.id, t]));
+  const cr = corpResolver();
+  let assign = {}; try { assign = getDatacenterAssign(); } catch { assign = {}; }
+  const results = []; const wake = new Set(); const started = [];
+  for (const id of [...new Set(ids)]) {
+    const t = vis.get(id);
+    if (!t) { results.push({ id, ok: false, code: 'not-found', reason: '없는 대상입니다.' }); continue; }
+    const pick = Object.hasOwn(picks, id) && typeof picks[id] === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(picks[id]) ? picks[id] : null;
+    const r = A.requestInstall(t, { by: req.user?.username || '', pick, corpVcs: t.agent ? [] : corpVcsOf(t, cr, assign), keys: focusKeys });
+    results.push({ id, name: t.name, ...r });
+    if (r.ok) { started.push(t.name); if (r.via === 'edge' && t.agent) wake.add(t.agent); }
+  }
+  for (const a of wake) wakeEdge(a).catch(() => {});
+  const dir = installDir();
+  if (started.length) logAudit({ user: req.user?.username, action: 'focus-mon.audit.install', target: started.slice(0, 20).join(', '), detail: `${started.length}대${started.length > 20 ? ' (앞 20대만 적음)' : ''} · 디렉터리 ${dir || '(기본 경로)'}`, ip: req.ip });
+  res.json({ ok: true, results, started: started.length, dir });
 });
 
 /** 진행 중 작업만(메모리) — 화면이 작업이 있는 동안 5초마다 본다. */
@@ -168,9 +246,11 @@ api.get('/tools/focus-mon/audit/run/:runId/report.txt', adminOnly, fullScopeOnly
 
 /** 설치 파일(대상 서버에서 root 로: sh dvc-disk-audit-install.sh <수집 계정>). */
 api.get('/tools/focus-mon/audit/install.sh', adminOnly, fullScopeOnly, (req, res) => {
+  if (installSettingsUnreadable(res)) return; // v3.17.0 — 설치 디렉터리를 모르면 기본 경로로 지어 내려보내지 않는다
+  const dir = installDir();
   let text = '';
-  try { text = installScript(); } catch (e) { return res.status(500).json({ ok: false, code: 'bundle', reason: `설치 파일을 만들지 못했습니다: ${String(e?.message || e).slice(0, 160)}` }); }
-  logAudit({ user: req.user?.username, action: 'focus-mon.audit.install-download', target: 'dvc-disk-audit-install.sh', detail: `프로그램 ${programSha()?.slice(0, 12)} · 실행 파일 ${wrapperSha().slice(0, 12)}`, ip: req.ip });
+  try { text = installScript({ dir }); } catch (e) { return res.status(500).json({ ok: false, code: 'bundle', reason: `설치 파일을 만들지 못했습니다: ${String(e?.message || e).slice(0, 160)}` }); }
+  logAudit({ user: req.user?.username, action: 'focus-mon.audit.install-download', target: 'dvc-disk-audit-install.sh', detail: `프로그램 ${programSha()?.slice(0, 12)} · 실행 파일 ${wrapperSha(dir).slice(0, 12)} · 디렉터리 ${dir || '(기본 경로)'}`, ip: req.ip });
   res.setHeader('Content-Type', 'text/x-shellscript; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="dvc-disk-audit-install.sh"');
   res.send(text);

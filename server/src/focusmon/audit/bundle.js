@@ -10,6 +10,13 @@
  *    root 로 돌 코드를 보내지 않는다. 원격 명령은 상수 둘뿐이다 — 준비 확인(`READY_COMMAND` — 일반 계정) · 실행(`RUN_COMMAND` — sudo 인자 없이).
  *  · sudoers 는 그 실행 파일 **하나 · 인자 없이**(`""`)만 허용한다. 실행 전마다 일반 계정으로 두 파일의 sha256 · 소유자 · 쓰기 권한을 읽어
  *    포탈 판본과 다르거나 root 소유가 아니면 실행하지 않는다(server/src/focusmon/CLAUDE.md '디스크 점검' — 불변조건의 사용자 승인 예외 1건).
+ *
+ * v3.17.0(사용자 2026-11-16 "디스크 점검하는 프로그램을 자동으로 설치하는 기능 추가" · "설치 디렉터리를 사전에 사용자가 지정하는 기능 추가" · 시안 ⑱ §21 · '진행해' = 컨펌 기본값):
+ *  · **설치 디렉터리**(`dirIssue` 하나 — 웹 `focusMonAuditInstallText.js` 와 시험이 대조): '' = 기본 경로 두 곳(위 상수 — 바이트 그대로) · 지정하면 두 파일을 그 디렉터리에.
+ *    경로 · 실행 파일 본문 · 준비 확인 · 실행 명령은 **검사를 지난 디렉터리의 함수**(`pathsFor` · `wrapperTextFor` · `readyCommandFor` · `runCommandFor`) — 기본 경로의 결과는
+ *    예전 상수와 바이트까지 같다(이미 설치한 서버의 판본이 바뀌지 않게 — 시험이 고정). 실행 파일 본문에 프로그램 경로가 들어가므로 실행 파일 sha256 은 디렉터리마다 다르다.
+ *  · **자동 설치**(install.js)는 이 파일의 `installScript({ dir, oldDirs })` 를 설치 계정 홈에 올려 root 로 **한 번** 돌린다 — 디렉터리는 파일 안에 고정되고
+ *    원격 명령에 들어가는 값은 등록부의 수집 계정 이름 하나다(`INSTALL_COMMAND`). 손으로 받는 설치 파일도 같은 함수다.
  */
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -22,6 +29,47 @@ export const SUDOERS_PATH = '/etc/sudoers.d/dvc-disk-audit';
 export const WRAPPER_TIMEOUT_S = 1200;
 export const PROGRAM_TIMEOUT_S = 120;
 export const RAID_TIMEOUT_S = 120;
+
+/* ── 설치 디렉터리(v3.17.0) ─────────────────────────────────────────────── */
+export const DIR_MAX = 120;
+export const DIR_DEPTH_MIN = 2;
+export const DIR_DEPTH_MAX = 8;
+/** 둘 수 없는 곳(그 아래 전부) — 다른 계정이 쓸 수 있거나(임시 · 홈) 재부팅 · 마운트에 따라 바뀌는 곳. 웹이 같은 목록을 쓴다(시험 대조). */
+export const DIR_DENY = Object.freeze(['/tmp', '/var/tmp', '/dev', '/proc', '/sys', '/run', '/home', '/root', '/boot', '/mnt', '/media']);
+/** 판정 글(화면 · 응답) — code 는 웹 `focusMonAuditInstallText.js DIR_ISSUE_TEXT` 와 같다. */
+export const DIR_ISSUE_TEXT = Object.freeze({
+  'not-string': '디렉터리는 글자여야 합니다.',
+  'too-long': `${DIR_MAX}자를 넘습니다.`,
+  'not-absolute': '절대 경로(/ 로 시작)만 됩니다.',
+  'bad-char': '쓸 수 있는 글자는 영문 · 숫자 · . _ - / 입니다(공백 · 따옴표 · $ · ; · 한글은 안 됩니다).',
+  'trailing-slash': '끝의 / 는 빼 주세요.',
+  'empty-segment': '/ 가 겹쳤습니다.',
+  'dot-segment': '. 과 .. 은 쓸 수 없습니다.',
+  'dash-segment': '이름이 - 로 시작할 수 없습니다.',
+  'too-shallow': '최상위 바로 아래 한 칸(/opt 같은 곳)에는 둘 수 없습니다 — 전용 폴더를 한 칸 더 두세요.',
+  'too-deep': `${DIR_DEPTH_MAX}칸까지입니다.`,
+  denied: '다른 계정이 쓸 수 있거나 재부팅 · 마운트에 따라 바뀌는 곳(/tmp · /home · /run 등) 아래에는 둘 수 없습니다.',
+});
+/**
+ * 설치 디렉터리 판정(판정 코어 하나 — 저장 · 명령 만들기 · 엣지 작업 받기 · 웹이 같은 규칙). '' = 기본 경로(문제 없음).
+ * @returns {null | keyof DIR_ISSUE_TEXT}
+ */
+export function dirIssue(dir) {
+  if (dir === '' || dir == null) return null;
+  if (typeof dir !== 'string') return 'not-string';
+  if (dir.length > DIR_MAX) return 'too-long';
+  if (dir[0] !== '/') return 'not-absolute';
+  if (!/^[A-Za-z0-9._/-]+$/.test(dir)) return 'bad-char';
+  if (dir.length > 1 && dir.endsWith('/')) return 'trailing-slash';
+  const parts = dir.split('/').slice(1);
+  if (parts.some((x) => x === '')) return 'empty-segment';
+  if (parts.some((x) => x === '.' || x === '..')) return 'dot-segment';
+  if (parts.some((x) => x[0] === '-')) return 'dash-segment';
+  if (parts.length < DIR_DEPTH_MIN) return 'too-shallow';
+  if (parts.length > DIR_DEPTH_MAX) return 'too-deep';
+  if (DIR_DENY.some((d) => dir === d || dir.startsWith(`${d}/`))) return 'denied';
+  return null;
+}
 /** 노드가 SSH 세션을 끊는 시한 — 실행 파일 시한(20분) + 준비 확인 · 디스크 목록 · 여유. 산수는 테스트가 고정한다. */
 export const READY_EXEC_MS = 30_000;
 export const AUDIT_DEADLINE_MS = (WRAPPER_TIMEOUT_S + RAID_TIMEOUT_S + 60) * 1000 + READY_EXEC_MS;
@@ -37,6 +85,25 @@ export function programBytes() {
 const sha256 = (b) => crypto.createHash('sha256').update(b).digest('hex');
 export function programSha() { const b = programBytes(); return b ? sha256(b) : null; }
 
+/** 기본 경로(디렉터리 '') — 예전 상수 그대로. */
+export const DEFAULT_PATHS = Object.freeze({ dir: '', program: PROGRAM_PATH, wrapper: WRAPPER_PATH });
+/** 디렉터리 → 두 파일 경로. 검사를 지나지 못한 디렉터리는 null(그 값으로 명령 · 파일을 만들지 않는다). */
+export function pathsFor(dir = '') {
+  if (dir === '' || dir == null) return DEFAULT_PATHS;
+  if (dirIssue(dir)) return null;
+  return Object.freeze({ dir, program: `${dir}/rhel_disk_audit.py`, wrapper: `${dir}/dvc-disk-audit` });
+}
+/**
+ * 준비 판정이 보는 경로 폴더 — all(있으면 root 소유 · 그룹/남 쓰기 금지) · need(있어야 함). 기본 경로는 예전 그대로,
+ * 지정 디렉터리는 그 디렉터리와 위쪽 폴더 전부(최상위 제외 없이 — /opt 도 본다).
+ */
+export function dirsToCheck(paths) {
+  if (!paths || paths.dir === '') return { all: ['/usr/local/libexec/dvc', '/usr/local/libexec', '/usr/local/sbin', '/usr/local'], need: ['/usr/local/libexec/dvc', '/usr/local/sbin'] };
+  const parts = paths.dir.split('/').slice(1);
+  const all = parts.map((_, i) => `/${parts.slice(0, parts.length - i).join('/')}`);
+  return { all, need: [paths.dir] };
+}
+
 /**
  * 감싸는 실행 파일(POSIX sh · root 로 돈다 · 인자 없이만). 출력은 표준 출력 한 줄씩:
  *   ##DA BEGIN 2 <표지> → (프로그램 보고서 줄들) → ##DA <표지> EXIT <rc> → ##DA <표지> DISKS → (lsblk -P 줄) → [##DA <표지> RAID → (perccli/storcli 줄)] → ##DA <표지> END
@@ -51,14 +118,15 @@ export function programSha() { const b = programBytes(); return b ? sha256(b) : 
  *  · 보고서 파일은 임시 폴더에 쓰이고 끝나면 폴더째 지운다(대상 서버에 남기지 않는다).
  *  · 디스크 목록 — lsblk 의 SERIAL 칸이 없는 판(옛 util-linux)이면 SERIAL 없이 한 번 더.
  */
-export const WRAPPER_TEXT = `#!/bin/sh
+export function wrapperTextFor(paths = DEFAULT_PATHS) {
+  return `#!/bin/sh
 # dvc-disk-audit — 서버 집중 모니터링 '디스크 점검' 실행 파일(포탈 설치 묶음). root 소유 · sudoers 에서 인자 없이만 허용한다.
 # 고정 경로의 점검 프로그램(받은 그대로)을 낮은 우선순위 · 시한 ${WRAPPER_TIMEOUT_S}초로 돌리고, 임시 폴더의 보고서 파일은 지운다.
 # 끝에 디스크 목록(모델 · 시리얼 · WWN)을 덧붙인다. 출력은 표준 출력뿐이다.
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 umask 077
-PROG=${PROGRAM_PATH}
+PROG=${paths.program}
 if [ "$#" -ne 0 ]; then echo '##DA ERR args'; exit 64; fi
 PY=$(command -v python3 2>/dev/null)
 if [ -z "$PY" ]; then echo '##DA ERR nopython'; exit 69; fi
@@ -91,86 +159,147 @@ for T in perccli64 perccli storcli64 storcli /opt/MegaRAID/perccli/perccli64 /op
 done
 echo "##DA $N END"
 `;
-export function wrapperSha() { return sha256(Buffer.from(WRAPPER_TEXT, 'utf8')); }
+}
+export const WRAPPER_TEXT = wrapperTextFor(DEFAULT_PATHS);
+/** 실행 파일 판본 — 디렉터리마다 다르다(본문에 프로그램 경로). 검사를 지나지 못한 디렉터리는 null. */
+export function wrapperSha(dir = '') { const p = pathsFor(dir); return p ? sha256(Buffer.from(wrapperTextFor(p), 'utf8')) : null; }
 
 /**
  * 준비 확인(일반 계정 · root 아님 · 상수). python3 · 두 파일의 sha256 · 소유자 · 권한 · 경로 폴더 · sudo 규칙 · 서버 모델(/sys/class/dmi/id — 0444).
  *  · sudo -n -l <명령> 은 비밀번호 없이 그 명령이 허용되는지만 본다(실행하지 않는다).
  */
-export const READY_COMMAND = [
+export function readyCommandFor(paths = DEFAULT_PATHS) {
+  return [
   // 실행 파일과 같은 PATH(반증 F6) — 수집 계정의 PATH 에만 있는 python3(/usr/local/bin · SCL)는 실행 파일이 찾지 못한다
   'PATH=/usr/sbin:/usr/bin:/sbin:/bin; export PATH',
   'LC_ALL=C; export LC_ALL',
   "echo '##DR 1'",
   'P=$(command -v python3 2>/dev/null)',
   "if [ -n \"$P\" ]; then echo \"##DR py $(\"$P\" -c 'import sys; print(\"%d.%d.%d\" % sys.version_info[:3])' 2>/dev/null)\"; else echo '##DR py -'; fi",
-  `for f in ${PROGRAM_PATH} ${WRAPPER_PATH}; do if [ -r "$f" ]; then echo "##DR file $f $(sha256sum "$f" 2>/dev/null | cut -c1-64) $(stat -c '%u:%g:%a' "$f" 2>/dev/null)"; elif [ -e "$f" ]; then echo "##DR file $f unreadable -"; else echo "##DR file $f - -"; fi; done`,
-  "for d in /usr/local/libexec/dvc /usr/local/libexec /usr/local/sbin /usr/local; do echo \"##DR dir $d $(stat -c '%u:%g:%a' \"$d\" 2>/dev/null || echo -)\"; done",
-  `if sudo -n -l ${WRAPPER_PATH} >/dev/null 2>&1; then echo '##DR sudo ok'; else echo '##DR sudo no'; fi`,
+  `for f in ${paths.program} ${paths.wrapper}; do if [ -r "$f" ]; then echo "##DR file $f $(sha256sum "$f" 2>/dev/null | cut -c1-64) $(stat -c '%u:%g:%a' "$f" 2>/dev/null)"; elif [ -e "$f" ]; then echo "##DR file $f unreadable -"; else echo "##DR file $f - -"; fi; done`,
+  `for d in ${dirsToCheck(paths).all.join(' ')}; do echo "##DR dir $d $(stat -c '%u:%g:%a' "$d" 2>/dev/null || echo -)"; done`,
+  `if sudo -n -l ${paths.wrapper} >/dev/null 2>&1; then echo '##DR sudo ok'; else echo '##DR sudo no'; fi`,
   "V=$(head -c 64 /sys/class/dmi/id/sys_vendor 2>/dev/null | tr -d '\\n'); M=$(head -c 64 /sys/class/dmi/id/product_name 2>/dev/null | tr -d '\\n')",
   'echo "##DR dmi $V|$M"',
   "echo '##DR end'",
-].join('\n');
+  ].join('\n');
+}
+export const READY_COMMAND = readyCommandFor(DEFAULT_PATHS);
 
-/** 실행(상수) — sudoers 의 한 줄과 정확히 같다(인자 없음). */
-export const RUN_COMMAND = `sudo -n ${WRAPPER_PATH}`;
+/** 실행 — sudoers 의 한 줄과 정확히 같다(인자 없음). */
+export function runCommandFor(paths = DEFAULT_PATHS) { return `sudo -n ${paths.wrapper}`; }
+export const RUN_COMMAND = runCommandFor(DEFAULT_PATHS);
+/** 수집 계정 이름 규칙(등록부 `registry.USER_RE` 와 같다 — 설치 명령 · sudoers 줄에 들어가는 유일한 값). */
+export const ACCT_RE = /^[A-Za-z_][A-Za-z0-9_.-]{0,31}$/;
+/** sudoers 한 줄(화면 · 설치 파일이 같은 글). */
+export function sudoersLine(acct, paths = DEFAULT_PATHS) { return `${acct} ALL=(root) NOPASSWD: ${paths.wrapper} ""`; }
 
 const EOF_PROGRAM = 'DVC_DISK_AUDIT_PROGRAM_EOF';
 const EOF_WRAPPER = 'DVC_DISK_AUDIT_WRAPPER_EOF';
 
 /**
- * 설치 파일(관리자가 대상 서버에서 root 로: `sh dvc-disk-audit-install.sh <수집 계정>`).
+ * 설치 파일(관리자가 대상 서버에서 root 로: `sh dvc-disk-audit-install.sh <수집 계정>` · 자동 설치는 설치 계정이 sudo 로 같은 파일을 한 번).
  *  · 두 파일을 따옴표 heredoc 으로 싣는다(셸이 내용을 펼치지 않는다) — 끝 표지가 내용에 있으면 만들지 않는다(throw).
  *  · 싣은 파일의 sha256 을 설치 전에 다시 확인한다(내려받기 손상).
  *  · 경로 폴더가 root 소유이고 그룹 · 남이 쓸 수 없는지 확인한다(아니면 설치하지 않는다 — root 로 도는 파일을 남이 바꿀 수 있게 된다).
  *  · sudoers 는 임시 파일에 써서 visudo -cf 로 검사한 뒤에만 넣는다.
+ *  · v3.17.0: 디렉터리(`dir` — 검사를 지난 것만 · 파일 안에 고정)와 옛 위치(`oldDirs` — 다시 설치해 옮길 때)를 받는다. 지정 디렉터리는 위쪽 폴더까지
+ *    root 소유 · 쓰기 금지 · 심링크 아님을 보고, 만든 뒤 네트워크 파일시스템 · 실행 금지(noexec) 마운트가 아닌지 본다. 옛 위치의 파일은 **포탈 판본과 같을 때만** 지운다.
+ *    자동 설치가 읽는 표지는 `##DI …` 줄 — 단계(step) · 실패 까닭(fail) · 끝(ok). 그 밖의 글은 사람을 위한 것이다(자동 설치는 싣지 않는다).
  */
-export function installScript() {
+export const INSTALL_FAILS = Object.freeze(['args', 'not-root', 'no-acct', 'dir-symlink', 'dir-notdir', 'dir-owner', 'dir-writable', 'dir-netfs', 'dir-noexec', 'no-includedir', 'damaged', 'visudo', 'install']);
+export const INSTALL_STEPS = Object.freeze(['dir', 'files', 'sudoers', 'old']);
+/** 네트워크 · 사용자 공간 파일시스템(stat -f %T 이름) — 설치하지 않는다. */
+const NETFS = ['nfs', 'nfs4', 'cifs', 'smb', 'smb2', 'smbfs', 'fuse', 'fuseblk', 'ceph', 'glusterfs', '9p', 'afs', 'lustre', 'gfs2', 'ocfs2', 'sshfs', 'davfs'];
+export function installScript({ dir = '', oldDirs = [] } = {}) {
   const prog = programBytes();
   if (!prog) throw new Error('점검 프로그램 파일을 읽지 못했습니다');
+  const P = pathsFor(dir);
+  if (!P) throw new Error('설치 디렉터리가 규칙에 맞지 않습니다');
+  const olds = [...new Set((Array.isArray(oldDirs) ? oldDirs : []).map((x) => (x == null ? '' : x)))].filter((d) => d !== P.dir).map((d) => pathsFor(d)).filter(Boolean);
+  const wrapper = wrapperTextFor(P);
   const progText = prog.toString('utf8');
-  if (progText.includes(EOF_PROGRAM) || WRAPPER_TEXT.includes(EOF_WRAPPER)) throw new Error('설치 파일 끝 표지가 내용과 겹칩니다');
-  const pSha = programSha(); const wSha = wrapperSha();
+  if (progText.includes(EOF_PROGRAM) || wrapper.includes(EOF_WRAPPER)) throw new Error('설치 파일 끝 표지가 내용과 겹칩니다');
+  const pSha = programSha(); const wSha = wrapperSha(P.dir);
+  const fail = (code, msg, rc) => `{ echo '##DI fail ${code}'; echo ${shq(msg)}; exit ${rc}; }`;
+  const chk = dirsToCheck(P);
+  // 경로 폴더 검사 — 기본 경로는 예전처럼(있으면) · 지정 디렉터리는 위쪽부터 전부(있으면) + 심링크 금지
+  const dirCheck = P.dir === ''
+    ? `for d in /usr/local /usr/local/sbin /usr/local/libexec; do
+  [ -d "$d" ] || continue
+  o=$(stat -c '%u' "$d"); m=$(stat -c '%a' "$d")
+  if [ "$o" != 0 ]; then echo '##DI fail dir-owner'; echo "$d 가 root 소유가 아닙니다 — 설치하지 않습니다."; exit 73; fi
+  case "$m" in *[2367]?|*[2367]) echo '##DI fail dir-writable'; echo "$d 를 그룹 · 다른 계정이 쓸 수 있습니다(권한 $m) — 설치하지 않습니다."; exit 73 ;; esac
+done`
+    : `for d in ${[...chk.all].reverse().join(' ')}; do
+  if [ -L "$d" ]; then echo '##DI fail dir-symlink'; echo "$d 가 심링크입니다 — 설치하지 않습니다."; exit 73; fi
+  [ -e "$d" ] || continue
+  if [ ! -d "$d" ]; then echo '##DI fail dir-notdir'; echo "$d 가 디렉터리가 아닙니다 — 설치하지 않습니다."; exit 73; fi
+  o=$(stat -c '%u' "$d"); m=$(stat -c '%a' "$d")
+  if [ "$o" != 0 ]; then echo '##DI fail dir-owner'; echo "$d 가 root 소유가 아닙니다 — 설치하지 않습니다."; exit 73; fi
+  case "$m" in *[2367]?|*[2367]) echo '##DI fail dir-writable'; echo "$d 를 그룹 · 다른 계정이 쓸 수 있습니다(권한 $m) — 설치하지 않습니다."; exit 73 ;; esac
+done`;
+  const makeDir = P.dir === ''
+    ? 'install -d -o root -g root -m 0755 /usr/local/libexec/dvc'
+    : `install -d -o root -g root -m 0755 ${P.dir} || ${fail('install', '디렉터리를 만들지 못했습니다.', 73)}
+o=$(stat -c '%u' ${P.dir}); m=$(stat -c '%a' ${P.dir})
+if [ "$o" != 0 ] || [ -L ${P.dir} ]; then ${fail('dir-owner', `${P.dir} 가 root 소유 디렉터리가 아닙니다 — 설치하지 않습니다.`, 73)}; fi
+case "$m" in *[2367]?|*[2367]) ${fail('dir-writable', `${P.dir} 를 그룹 · 다른 계정이 쓸 수 있습니다 — 설치하지 않습니다.`, 73)} ;; esac
+FT=$(stat -f -c '%T' ${P.dir} 2>/dev/null || echo '?')
+case "$FT" in ${NETFS.map((x) => `${x}|${x}/*`).join('|')}) ${fail('dir-netfs', `${P.dir} 가 네트워크 · 사용자 공간 파일시스템($FT)입니다 — 설치하지 않습니다.`, 73)} ;; esac
+if command -v findmnt >/dev/null 2>&1; then OPTS=$(findmnt -n -o OPTIONS --target ${P.dir} 2>/dev/null || true); case ",$OPTS," in *,noexec,*) ${fail('dir-noexec', `${P.dir} 가 실행 금지(noexec)로 마운트돼 있습니다 — 설치하지 않습니다.`, 73)} ;; esac; fi`;
+  // 옛 위치 정리 — 포탈 판본(그 위치의 실행 파일 판본)과 같을 때만 지운다 · 심링크 · 일반 파일이 아니면 두고 알린다
+  const oldClean = olds.length ? `echo '##DI step old'
+old_rm() {
+  if [ -L "$1" ]; then echo "##DI old-keep $1"; echo "$1 는 심링크라 두었습니다."; return 0; fi
+  [ -f "$1" ] || return 0
+  h=$(sha256sum "$1" 2>/dev/null | cut -c1-64)
+  if [ "$h" = "$2" ]; then rm -f "$1" && echo "##DI old-rm $1"; else echo "##DI old-keep $1"; echo "$1 는 포탈 판본과 달라 두었습니다."; fi
+}
+${olds.map((o) => `old_rm ${o.program} ${pSha}\nold_rm ${o.wrapper} ${wrapperSha(o.dir)}${o.dir ? `\nrmdir ${o.dir} 2>/dev/null || true` : ''}`).join('\n')}
+` : '';
   return `#!/bin/sh
 # 서버 집중 모니터링 — 디스크 점검(배드 섹터 점검 프로그램) 설치 파일
-# 판본: 프로그램 ${pSha.slice(0, 12)} · 실행 파일 ${wSha.slice(0, 12)}
+# 판본: 프로그램 ${pSha.slice(0, 12)} · 실행 파일 ${wSha.slice(0, 12)} · 디렉터리 ${P.dir || '기본 경로'}
 # 사용법(대상 서버에서 root 로): sh dvc-disk-audit-install.sh <수집 계정>
-#   설치하는 것: ${PROGRAM_PATH}(0644) · ${WRAPPER_PATH}(0755) · ${SUDOERS_PATH}(0440 — <수집 계정> 이 그 실행 파일을 인자 없이만 root 로)
-#   지우려면: rm -f ${SUDOERS_PATH} ${WRAPPER_PATH} ${PROGRAM_PATH}
+#   설치하는 것: ${P.program}(0644) · ${P.wrapper}(0755) · ${SUDOERS_PATH}(0440 — <수집 계정> 이 그 실행 파일을 인자 없이만 root 로)
+#   지우려면: rm -f ${SUDOERS_PATH} ${P.wrapper} ${P.program}
 set -eu
 umask 022
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 ACCT="\${1:-}"
 case "$ACCT" in
-  ''|-*|*[!A-Za-z0-9._-]*) echo "사용법: sh $0 <수집 계정>   (계정 이름은 영문 · 숫자 · . _ - 만)"; exit 64 ;;
+  ''|-*|*[!A-Za-z0-9._-]*) echo '##DI fail args'; echo "사용법: sh $0 <수집 계정>   (계정 이름은 영문 · 숫자 · . _ - 만)"; exit 64 ;;
 esac
-if [ "$(id -u)" -ne 0 ]; then echo 'root 로 실행하세요.'; exit 77; fi
-if ! id "$ACCT" >/dev/null 2>&1; then echo "계정 $ACCT 가 이 서버에 없습니다."; exit 67; fi
-if ! command -v python3 >/dev/null 2>&1; then echo '주의: python3 가 없습니다 — 점검 프로그램은 Python 3.6 이상이 필요합니다(설치는 계속합니다).'; fi
-for d in /usr/local /usr/local/sbin /usr/local/libexec; do
-  [ -d "$d" ] || continue
-  o=$(stat -c '%u' "$d"); m=$(stat -c '%a' "$d")
-  if [ "$o" != 0 ]; then echo "$d 가 root 소유가 아닙니다 — 설치하지 않습니다."; exit 73; fi
-  case "$m" in *[2367]?|*[2367]) echo "$d 를 그룹 · 다른 계정이 쓸 수 있습니다(권한 $m) — 설치하지 않습니다."; exit 73 ;; esac
-done
-if [ ! -d /etc/sudoers.d ] || ! grep -Eq '^[#@]includedir[[:space:]]+/etc/sudoers.d' /etc/sudoers; then echo '/etc/sudoers 에 includedir /etc/sudoers.d 가 없습니다 — 설치하지 않습니다.'; exit 78; fi
+if [ "$#" -ne 1 ]; then echo '##DI fail args'; echo "사용법: sh $0 <수집 계정>"; exit 64; fi
+if [ "$(id -u)" -ne 0 ]; then echo '##DI fail not-root'; echo 'root 로 실행하세요.'; exit 77; fi
+if ! id "$ACCT" >/dev/null 2>&1; then echo '##DI fail no-acct'; echo "계정 $ACCT 가 이 서버에 없습니다."; exit 67; fi
+if ! command -v python3 >/dev/null 2>&1; then echo '##DI nopy'; echo '주의: python3 가 없습니다 — 점검 프로그램은 Python 3.6 이상이 필요합니다(설치는 계속합니다).'; fi
+echo '##DI step dir'
+${dirCheck}
+if [ ! -d /etc/sudoers.d ] || ! grep -Eq '^[#@]includedir[[:space:]]+/etc/sudoers.d' /etc/sudoers; then echo '##DI fail no-includedir'; echo '/etc/sudoers 에 includedir /etc/sudoers.d 가 없습니다 — 설치하지 않습니다.'; exit 78; fi
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 cat > "$T/rhel_disk_audit.py" <<'${EOF_PROGRAM}'
 ${progText}${progText.endsWith('\n') ? '' : '\n'}${EOF_PROGRAM}
 cat > "$T/dvc-disk-audit" <<'${EOF_WRAPPER}'
-${WRAPPER_TEXT}${WRAPPER_TEXT.endsWith('\n') ? '' : '\n'}${EOF_WRAPPER}
-echo "${pSha}  $T/rhel_disk_audit.py" | sha256sum -c --quiet - || { echo '점검 프로그램이 손상됐습니다 — 설치 파일을 다시 내려받으세요.'; exit 65; }
-echo "${wSha}  $T/dvc-disk-audit" | sha256sum -c --quiet - || { echo '실행 파일이 손상됐습니다 — 설치 파일을 다시 내려받으세요.'; exit 65; }
+${wrapper}${wrapper.endsWith('\n') ? '' : '\n'}${EOF_WRAPPER}
+echo "${pSha}  $T/rhel_disk_audit.py" | sha256sum -c --quiet - || { echo '##DI fail damaged'; echo '점검 프로그램이 손상됐습니다 — 설치 파일을 다시 내려받으세요.'; exit 65; }
+echo "${wSha}  $T/dvc-disk-audit" | sha256sum -c --quiet - || { echo '##DI fail damaged'; echo '실행 파일이 손상됐습니다 — 설치 파일을 다시 내려받으세요.'; exit 65; }
 printf '%s\\n' '# 서버 집중 모니터링 디스크 점검(포탈 설치 묶음) — 이 실행 파일 하나를 인자 없이만 허용한다' \\
-  'Defaults!${WRAPPER_PATH} !requiretty' \\
-  "$ACCT ALL=(root) NOPASSWD: ${WRAPPER_PATH} \\"\\"" > "$T/sudoers"
-visudo -cf "$T/sudoers" >/dev/null || { echo 'sudoers 검사(visudo)를 통과하지 못했습니다 — 아무것도 바꾸지 않았습니다.'; exit 65; }
-install -d -o root -g root -m 0755 /usr/local/libexec/dvc
-install -o root -g root -m 0644 "$T/rhel_disk_audit.py" ${PROGRAM_PATH}
-install -o root -g root -m 0755 "$T/dvc-disk-audit" ${WRAPPER_PATH}
+  'Defaults!${P.wrapper} !requiretty' \\
+  "$ACCT ALL=(root) NOPASSWD: ${P.wrapper} \\"\\"" > "$T/sudoers"
+visudo -cf "$T/sudoers" >/dev/null || { echo '##DI fail visudo'; echo 'sudoers 검사(visudo)를 통과하지 못했습니다 — 아무것도 바꾸지 않았습니다.'; exit 65; }
+${makeDir}
+echo '##DI step files'
+install -o root -g root -m 0644 "$T/rhel_disk_audit.py" ${P.program}
+install -o root -g root -m 0755 "$T/dvc-disk-audit" ${P.wrapper}
+echo '##DI step sudoers'
 install -o root -g root -m 0440 "$T/sudoers" ${SUDOERS_PATH}
-echo "설치했습니다 — 수집 계정 $ACCT · 포탈 › 서버 집중 모니터링 › 디스크 점검에서 '준비 상태 다시 확인' 을 누르세요."
+${oldClean}echo "##DI ok"
+echo "설치했습니다 — 수집 계정 $ACCT · 디렉터리 ${P.dir || '기본 경로'} · 포탈 › 서버 집중 모니터링 › 디스크 점검에서 '준비 상태 다시 확인' 을 누르세요."
 `;
 }
+/** 사람에게 보일 글을 셸의 작은따옴표 글로(작은따옴표는 '\'' 로) — 안에 디렉터리 경로(검사를 지난 글자)가 들어간다. */
+function shq(t) { return `'${String(t).replace(/'/g, "'\\''")}'`; }

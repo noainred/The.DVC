@@ -13,7 +13,7 @@
  */
 import { withSsh, isSshAuthError, isSshHostKeyError } from '../../proxy/sshExec.js';
 import { focusAuthGuard, authDevOf, READY_TIMEOUT_MS } from '../collector.js';
-import { READY_COMMAND, RUN_COMMAND, AUDIT_DEADLINE_MS, READY_EXEC_MS, PROGRAM_PATH, WRAPPER_PATH, programSha, wrapperSha } from './bundle.js';
+import { AUDIT_DEADLINE_MS, READY_EXEC_MS, programSha, wrapperSha, pathsFor, dirIssue, dirsToCheck, readyCommandFor, runCommandFor } from './bundle.js';
 import { parseReady, readyState, sectionOf, firstLineOf, markOf, LINE_MAX } from './parse.js';
 import { demoAuditOutput } from './mock.js';
 import { isDemoTarget } from '../mock.js';
@@ -83,6 +83,20 @@ export function createOutputKeeper({ budget = SECTION_BUDGET, linesMax = OUT_LIN
   };
 }
 
+/** 준비 확인할 설치 위치 후보(검사를 지난 것만 · 겹침 없이 · 셋까지). 작업에 없으면(옛 중앙) 기본 경로 하나. */
+export function candidateDirs(expect) {
+  const raw = Array.isArray(expect?.cands) ? expect.cands : [''];
+  const out = [];
+  for (const d of raw.slice(0, 3)) { const x = d == null ? '' : d; if (typeof x === 'string' && !dirIssue(x) && !out.includes(x)) out.push(x); }
+  return out.length ? out : [''];
+}
+/** 기대 판본 — 작업을 준 중앙이 아는 값(프로그램 · 디렉터리별 실행 파일) · 없으면 이 노드의 값. */
+export function expectedShas(expect, dir) {
+  const hex = (v) => (typeof v === 'string' && /^[0-9a-f]{64}$/.test(v) ? v : null);
+  const w = expect?.wrappers && typeof expect.wrappers === 'object' && !Array.isArray(expect.wrappers) && Object.hasOwn(expect.wrappers, dir) ? hex(expect.wrappers[dir]) : (dir === '' ? hex(expect?.wrapper) : null);
+  return { programSha: hex(expect?.program) || programSha(), wrapperSha: w || wrapperSha(dir) };
+}
+
 /**
  * 한 대상 실행(대기열 밖에서 쓰는 순수 실행기 — 대기열은 createAuditRunner).
  * @param {{id:string, host:string, port:number, username:string, demo?:boolean}} t
@@ -93,9 +107,10 @@ export async function auditOnce(t, { mode = 'run', keys, connect = withSsh, onPh
   const t0 = Date.now();
   const base = { mode, ok: false, kind: 'unreachable', error: '', ready: [], out: [], outBytes: 0, truncated: false, code: null, stderr: '', ms: 0 };
   if (t.demo || isDemoTarget(t.id)) {
-    const d = demoAuditOutput(t.id, mode);
+    const dir = candidateDirs(expect)[0]; // 데모는 첫 후보(기억한 곳 · 지금 설정)에 설치돼 있는 것으로 그린다
+    const d = demoAuditOutput(t.id, mode, dir);
     try { onPhase(mode === 'run' ? '판정' : '준비 확인'); } catch { /* */ }
-    return { ...base, ok: true, kind: 'done', ...d, ms: mode === 'run' ? 3000 : 400 };
+    return { ...base, ok: true, kind: 'done', ...d, dir, ms: mode === 'run' ? 3000 : 400 };
   }
   const info = keys.keyInfo();
   const pem = keys.privateKeyForConnect();
@@ -106,20 +121,28 @@ export async function auditOnce(t, { mode = 'run', keys, connect = withSsh, onPh
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), deadlineMs); timer.unref?.();
   const keep = createOutputKeeper();
-  let ready = []; let code = null; let stderr = ''; let ranRun = false; let state = null; let longCut = 0;
+  let ready = []; let code = null; let stderr = ''; let ranRun = false; let state = null; let longCut = 0; let found = '';
+  const cands = candidateDirs(expect);
   try {
     onPhase('준비 확인');
     await connect({ host: t.host, port: t.port, username: t.username, privateKey: pem, readyTimeout: READY_TIMEOUT_MS, signal: ctl.signal }, async (api) => {
-      const r = await api.exec(READY_COMMAND, READY_EXEC_MS);
-      ready = String(r.stdout || '').split('\n').slice(0, 200);
-      // 판본은 작업을 준 중앙이 아는 값(엣지 · 중앙 판이 달라도 중앙이 내려준 설치 파일과 맞춘다) — 없으면 이 노드의 값
-      const want = { programSha: /^[0-9a-f]{64}$/.test(expect?.program || '') ? expect.program : programSha(), wrapperSha: /^[0-9a-f]{64}$/.test(expect?.wrapper || '') ? expect.wrapper : wrapperSha() };
-      state = readyState(parseReady(ready), { programPath: PROGRAM_PATH, wrapperPath: WRAPPER_PATH, ...want });
+      // v3.17.0: 설치 위치 후보(기억한 곳 → 지금 설정 → 기본 경로 — 중앙이 정해 보낸다)를 차례로 — 파일이 있는 첫 곳을 그 서버의 설치 위치로 본다
+      let first = null;
+      for (const dir of cands) {
+        const P = pathsFor(dir);
+        const r = await api.exec(readyCommandFor(P), READY_EXEC_MS);
+        const lines = String(r.stdout || '').split('\n').slice(0, 200);
+        // 판본은 작업을 준 중앙이 아는 값(엣지 · 중앙 판이 달라도 중앙이 내려준 설치 파일과 맞춘다) — 없으면 이 노드의 값
+        const st = readyState(parseReady(lines), { programPath: P.program, wrapperPath: P.wrapper, dirs: dirsToCheck(P), ...expectedShas(expect, dir) });
+        if (!first) first = { dir, lines, st };
+        if (st.state !== 'notinstalled') { first = { dir, lines, st }; break; }
+      }
+      ({ dir: found, lines: ready, st: state } = first);
       if (mode !== 'run' || state.state !== 'ready') return {};
       ranRun = true;
       let last = '준비 확인';
       // 긴 한 줄은 끊지 않고 자른다(반증 F9-e — 일반 계정이 남긴 긴 로그 한 줄로 실행 전체를 'bad-output' 으로 만들 수 있었다)
-      const s = await api.execStream(RUN_COMMAND, {
+      const s = await api.execStream(runCommandFor(pathsFor(found)), {
         maxLine: MAX_LINE_BYTES, cutLong: true, signal: ctl.signal,
         onLine: (l) => { keep.push(l); const p = keep.phase(); if (p && p !== last) { last = p; try { onPhase(p); } catch { /* */ } } },
       });
@@ -129,12 +152,12 @@ export async function auditOnce(t, { mode = 'run', keys, connect = withSsh, onPh
     }, { signal: ctl.signal });
     focusAuthGuard.clearAuthStop(dev.id);
     const out = keep.done();
-    if (!ranRun) return { ...base, ok: true, kind: mode === 'run' ? 'not-ready' : 'done', ready, ms: Date.now() - t0 };
+    if (!ranRun) return { ...base, ok: true, kind: mode === 'run' ? 'not-ready' : 'done', ready, dir: found, ms: Date.now() - t0 };
     // ran: 실행을 시도했다(출력이 비어도 — sudo 자체가 실패하면 표준 출력은 비고 표준 오류에만 남는다 · 반증 F4)
-    return { ...base, ok: true, kind: 'done', ran: true, ready, out, outBytes: keep.bytes(), truncated: keep.truncated() || longCut > 0, code, stderr, ms: Date.now() - t0 };
+    return { ...base, ok: true, kind: 'done', ran: true, ready, dir: found, out, outBytes: keep.bytes(), truncated: keep.truncated() || longCut > 0, code, stderr, ms: Date.now() - t0 };
   } catch (e) {
     const out = keep.done();
-    const partial = { ran: ranRun, ready, out, outBytes: keep.bytes(), truncated: keep.truncated(), code, stderr, ms: Date.now() - t0 };
+    const partial = { ran: ranRun, ready, dir: found, out, outBytes: keep.bytes(), truncated: keep.truncated(), code, stderr, ms: Date.now() - t0 };
     if (isSshHostKeyError(e)) return { ...base, ...partial, kind: 'hostkey', error: short(e) };
     if (isSshAuthError(e)) { focusAuthGuard.markAuthStopped(dev.id, dev, '키 로그인 거부(디스크 점검)'); return { ...base, ...partial, kind: 'auth', error: '키 로그인이 거부됐습니다 — 공개키를 확인하세요.' }; }
     if (ctl.signal.aborted) return { ...base, ...partial, kind: 'timeout', error: `${Math.round(deadlineMs / 60_000)}분 안에 끝나지 않아 끊었습니다.` };

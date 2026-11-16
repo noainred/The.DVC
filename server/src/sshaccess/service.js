@@ -37,6 +37,8 @@ export const FEATURE_CATALOG = Object.freeze([
   Object.freeze({ id: 'bm-usage', label: '베어메탈 사용률', tool: 'bm-usage', ready: true, note: 'CPU · 메모리 · 디스크 · 네트워크 · HBA 수집(집중 모니터링 · 저활용 포함)' }),
   Object.freeze({ id: 'bm-storage', label: '베어메탈 스토리지', tool: 'bm-storage', ready: true, note: '마운트 용량(df) 수집' }),
   Object.freeze({ id: 'disk-audit', label: '디스크 오류 이력 점검', tool: 'disk-audit', ready: false, note: '로그 · SMART · RAID 기록에서 매체 오류 흔적 찾기(읽기 전용) — 다음 단계에서 붙습니다' }),
+  // v3.17.0 — 서버 집중 모니터링 › 디스크 점검의 자동 설치(대상 서버에 root 로 한 번). 직접 켠 키만 쓴다(기능 목록이 없는 예전 키는 쓰지 않는다).
+  Object.freeze({ id: 'disk-audit-install', label: '디스크 점검 프로그램 설치(root)', tool: 'focus-mon', ready: true, note: '서버 집중 모니터링 › 디스크 점검의 자동 설치 — 이 기능을 직접 켠 키만 · 비밀번호 없는 sudo 또는 root 계정이어야 합니다' }),
 ]);
 
 /** 이 노드가 아는 법인(vCenter) — id · 이름 · DataCenter 이름. */

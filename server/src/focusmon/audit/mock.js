@@ -2,7 +2,7 @@
  * focusmon/audit/mock.js — 데모(mock) 대상의 디스크 점검 출력(v3.11.0). 실제 프로그램의 글자 꼴(rhel_disk_audit.py emit) 그대로 만든다 —
  * 중앙의 해석 · 요약 · 묶어 보기 · 화면이 실데이터와 같은 길을 탄다. 값은 가상이고 화면이 데모라고 밝힌다.
  */
-import { PROGRAM_PATH, WRAPPER_PATH, programSha, wrapperSha } from './bundle.js';
+import { programSha, wrapperSha, pathsFor, dirsToCheck } from './bundle.js';
 import { DEMO_TARGETS } from '../mock.js';
 
 const nameOf = (id) => DEMO_TARGETS.find((t) => t.id === id)?.name || '';
@@ -19,15 +19,17 @@ function hwOf(name) {
 const hex = (n, w) => n.toString(16).padStart(w, '0');
 function seedOf(s) { let h = 2166136261; for (const ch of String(s)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; } return h; }
 
-function readyLines(name) {
+/** v3.17.0: 설치 위치(dir — '' 기본 경로)에 맞춘 준비 줄 — 데모에서 설치 디렉터리를 바꿔 설치해도 실데이터와 같은 해석을 탄다. */
+function readyLines(name, dir = '') {
   const st = STATE[name] || 'clean'; const hw = hwOf(name);
-  const pSha = st === 'version' ? 'a'.repeat(64) : programSha(); const wSha = wrapperSha();
+  const P = pathsFor(dir) || pathsFor('');
+  const pSha = st === 'version' ? 'a'.repeat(64) : programSha(); const wSha = wrapperSha(P.dir);
   const inst = st !== 'nopy';
   return [
     '##DR 1', st === 'nopy' ? '##DR py -' : '##DR py 3.6.8',
-    inst ? `##DR file ${PROGRAM_PATH} ${pSha} 0:0:644` : `##DR file ${PROGRAM_PATH} - -`,
-    inst ? `##DR file ${WRAPPER_PATH} ${wSha} 0:0:755` : `##DR file ${WRAPPER_PATH} - -`,
-    `##DR dir /usr/local/libexec/dvc ${inst ? '0:0:755' : '-'}`, '##DR dir /usr/local/libexec 0:0:755', '##DR dir /usr/local/sbin 0:0:755', '##DR dir /usr/local 0:0:755',
+    inst ? `##DR file ${P.program} ${pSha} 0:0:644` : `##DR file ${P.program} - -`,
+    inst ? `##DR file ${P.wrapper} ${wSha} 0:0:755` : `##DR file ${P.wrapper} - -`,
+    ...dirsToCheck(P).all.map((d, i) => `##DR dir ${d} ${inst || i > 0 || P.dir === '' ? '0:0:755' : '-'}`),
     st === 'nosudo' || !inst ? '##DR sudo no' : '##DR sudo ok', `##DR dmi ${hw.vendor}|${hw.product}`, '##DR end',
   ];
 }
@@ -88,9 +90,9 @@ function runLines(name) {
 }
 
 /** @returns {{ready:string[], out:string[], outBytes:number, truncated:boolean, code:number|null, stderr:string}} */
-export function demoAuditOutput(id, mode) {
+export function demoAuditOutput(id, mode, dir = '') {
   const name = nameOf(id);
-  const ready = readyLines(name);
+  const ready = readyLines(name, dir);
   const st = STATE[name] || 'clean';
   const canRun = mode === 'run' && !['nosudo', 'nopy', 'version'].includes(st);
   const out = canRun ? runLines(name) : [];

@@ -40,7 +40,8 @@ const USERNAME_BAD = /[\s'"`;|&<>$\\]/;
  *    폴더가 있는 키는 그 법인 서버에만(서버별이면 그 서버에만) 쓰인다 — 판정은 `refs.resolveOsAuth` 하나.
  *  · `features` — 이 키로 접속해도 되는 기능 id 목록. `null` = 모든 기능(예전 키 — 키 점검이 경고). 빈 배열 = 어느 기능도 못 쓴다.
  */
-export const KEY_FEATURES = Object.freeze(['bm-usage', 'bm-storage', 'disk-audit']);
+// v3.17.0: 'disk-audit-install' — 서버 집중 모니터링 디스크 점검 프로그램 자동 설치(root). **직접 켠 키만** 쓴다(목록 없는 예전 키는 이 기능에 쓰지 않는다 — focusmon/audit/installCred.js).
+export const KEY_FEATURES = Object.freeze(['bm-usage', 'bm-storage', 'disk-audit', 'disk-audit-install']);
 const FOLDER_RE = /^[^\u0000-\u001f\u007f/\\]{1,128}$/;   // 경로 조각이 아니다(id · 이름 — 슬래시 · 제어문자만 막는다)
 export function normFeatures(v) {
   if (v === null || v === undefined) return null;
