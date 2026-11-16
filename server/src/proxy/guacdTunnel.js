@@ -118,8 +118,8 @@ function handle(ws, params, user, token = null) {
   const settings = {
     hostname: host, port: String(port),
     username: cred('username'), password: cred('password'), domain: cred('domain'),
-    // width/height 는 비민감 렌더 파라미터라 쿼리에서 받는다(자격증명 아님).
-    width: params.get('width') || '1024', height: params.get('height') || '768', dpi: '96',
+    // width/height 는 비민감 렌더 파라미터라 쿼리에서 받는다(자격증명 아님). 48회차: 정수 · 범위만(guacd 인자로 그대로 간다).
+    width: rdpDim(params.get('width'), '1024'), height: rdpDim(params.get('height'), '768'), dpi: '96',
     security: cred('security') || 'any', 'ignore-cert': 'true', 'resize-method': 'display-update',
   };
 
@@ -193,6 +193,11 @@ function handle(ws, params, user, token = null) {
         return;
       }
     }
+    // 48회차 F1(재현 — 높음): 포탈이 guacd 와 핸드셰이크(select rdp → args → connect → ready)를 끝내기 **전** 의 브라우저 프레임은 버린다.
+    //   예전에는 그대로 guacd 로 써서, 범위 계정이 자기 rdp 매핑 · 티켓으로 연 WS 에 'select ssh' + 'connect <임의 호스트:포트>' 를 먼저 보내면
+    //   guacd 가 그것을 첫 select · connect 로 받아 매핑 대상 · targetHostScope · 프로토콜 · 프록시 경로를 모두 건너뛰었다.
+    //   정상 클라이언트는 ready 를 받기 전에 세션 명령을 보내지 않는다(그 전 키 · 마우스 입력은 버려도 무해 — 연결 전이다).
+    if (!ready) return;
     // 키·마우스·터치 입력 = 사용자 활동(서버측 유휴 — 그룹 F). 연결마다 1분 1회로 묶는다(touch 가 거른다).
     if (RDP_INPUT_RE.test(text)) session.touch();
     try { guacd.write(text); } catch { /* */ }
@@ -200,6 +205,14 @@ function handle(ws, params, user, token = null) {
   ws.on('close', () => { closed = true; session.release(); try { guacd.end(); } catch { /* */ } });
   ws.on('error', () => { closed = true; session.release(); try { guacd.destroy(); } catch { /* */ } }); // ws 오류에도 소켓 정리
   return { session, isClosed: () => closed };
+}
+
+/** 48회차: RDP 화면 크기 — 100~8192 정수만(그 밖은 기본값). */
+export function rdpDim(v, dflt) {
+  const s = String(v ?? '').trim();
+  if (!/^\d{1,5}$/.test(s)) return dflt;
+  const n = Number(s);
+  return n >= 100 && n <= 8192 ? String(n) : dflt;
 }
 
 /** 테스트 전용 — 실제 RDP 연결 처리기(가짜 ws·가짜 guacd 소켓으로 폐기를 재현한다). */

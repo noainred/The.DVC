@@ -297,7 +297,8 @@ app.use(cors(CORS_ORIGINS.length ? { origin: CORS_ORIGINS } : { origin: false })
 // 응답 gzip 압축(큰 JSON만, 비동기) + 레이트 리밋(폭주/DoS 방어). 헬스/정적/메트릭은 제외.
 app.use(compression());
 app.use(rateLimit({ skip: (req) => {
-  const p = req.path || '';
+  // 48회차 F3(재현): express 라우팅은 대소문자를 가리지 않는다 — '/API/...' 가 제한을 건너뛰고 같은 라우트에 닿았다(v2.506 toolGate 와 같은 갈래).
+  const p = String(req.path || '').toLowerCase();
   return p === '/api/health' || p === '/metrics' || p === '/dl' || p.startsWith('/dl/')
     || !p.startsWith('/api'); // 정적 자산/SPA는 제한 제외
 } }));

@@ -429,6 +429,7 @@ test('⑦-c 콘솔 입력은 서버측 유휴 활동이다(그룹 F touchSession
       gd._rdpHandleForTest(rws, new URLSearchParams({ mappingId: r.mapping.id, ticket }), auth.resolveTokenUser(tok2), tok2);
       sock.emit('connect');
       sock.emit('data', Buffer.from('4.args,13.VERSION_1_5_0,8.hostname,4.port;'));
+      sock.emit('data', Buffer.from('5.ready,5.$abcd;'));   // 48회차 F1: ready 전 프레임은 guacd 로 가지 않는다 — 활동 판정도 연결 뒤 입력으로
       const m0 = calls.length;
       rws.input('4.sync,8.12345678;');
       rws.input('4.size,4.1024,3.768,2.96;');
@@ -453,4 +454,37 @@ test('⑧ 연결이 모두 닫히면 재검증 타이머·폐기 구독이 남�
   assert.equal(gw.activeSshSessionCount(), 0);
   assert.equal(gw.sshOutputStats().perUserOpen, 0);
   assert.ok(st.closedBy.revoked >= 2 && st.closedBy['session-invalid'] >= 1, JSON.stringify(st.closedBy));
+});
+
+test('48회차 F1: guacd 핸드셰이크(ready) 전의 브라우저 프레임은 guacd 로 가지 않는다 — select · connect 주입 차단', async () => {
+  mkUser('rdp48');
+  reg.saveConfig({ guacd: { host: '127.0.0.1', port: 4822 } });
+  const tok = login('rdp48');
+  const r = reg.addMapping({ protocol: 'rdp', targetHost: '127.0.0.1', targetPort: 3389, owner: 'rdp48', vcenterId: 'vc-a' });
+  assert.equal(r.ok, true, r.reason);
+  const ticket = issueRdpTicket({ username: 'u', password: 'p' }, { owner: 'rdp48' });
+  const sock = Object.assign(new EventEmitter(), {
+    writes: [], destroyed: false,
+    write(s) { if (this.destroyed) throw new Error('destroyed'); this.writes.push(String(s)); return true; },
+    destroy() { this.destroyed = true; setImmediate(() => this.emit('close')); },
+    end() { this.destroy(); }, setTimeout() {},
+  });
+  gd._setRdpDepsForTest({ connect: () => sock });
+  try {
+    const ws = new FakeWs();
+    gd._rdpHandleForTest(ws, new URLSearchParams({ mappingId: r.mapping.id, ticket, width: '1024;7.connect', height: '99999' }), auth.resolveTokenUser(tok), tok);
+    // guacd 연결 전에 공격자가 먼저 보낸다
+    ws.input('6.select,3.ssh;');
+    ws.input('7.connect,11.192.168.7.9,2.22;');
+    sock.emit('connect');
+    assert.ok(sock.writes[0]?.startsWith('6.select,3.rdp;'), `첫 select 는 포탈의 rdp 여야 한다: ${sock.writes[0]}`);
+    assert.ok(!sock.writes.some((s) => s.includes('3.ssh') || s.includes('192.168.7.9')), 'ready 전 브라우저 프레임을 guacd 로 쓰면 안 된다');
+    sock.emit('data', Buffer.from('4.args,13.VERSION_1_5_0,8.hostname,4.port,5.width,6.height;'));
+    const connect = sock.writes.find((s) => s.startsWith('7.connect'));
+    assert.ok(connect && connect.includes('4.1024') && connect.includes('3.768'), `크기는 정수 · 범위만: ${connect}`);
+    sock.emit('data', Buffer.from('5.ready,5.$abcd;'));
+    ws.input('5.mouse,1.1,1.1,1.0;');
+    assert.ok(sock.writes.some((s) => s.startsWith('5.mouse')), 'ready 뒤 입력은 그대로 간다');
+    ws.close(1000, 'bye');
+  } finally { gd._setRdpDepsForTest(null); }
 });
