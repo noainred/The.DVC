@@ -29,8 +29,10 @@ function DirCard({ ins, onSaved, setMsg }) {
   const save = async () => {
     setBusy(true);
     try {
-      await putJson('/tools/focus-mon/audit/install-dir', { dir: want, otp });
-      setOtp(''); setMsg?.({ tone: 'ok', text: `설치 디렉터리를 ${dirLabel(want)} 로 저장했습니다 — 이미 설치된 서버는 그대로 동작하고 ‘옛 디렉터리’ 로 보입니다.` });
+      // 응답을 버리지 않는다(audit2727e 스윕 — 200 에 ok:false 가 실려 와도 '저장했습니다' 라고 하지 않게) · 문구에는 서버가 실제로 저장한 값을 쓴다
+      const r = await putJson('/tools/focus-mon/audit/install-dir', { dir: want, otp });
+      if (!r || r.ok !== true || typeof r.dir !== 'string') { setMsg?.({ tone: 'bad', text: r?.reason || '설치 디렉터리를 저장하지 못했습니다 — 응답을 확인하지 못했습니다.' }); return; }
+      setOtp(''); setMsg?.({ tone: 'ok', text: `설치 디렉터리를 ${dirLabel(r.dir)} 로 저장했습니다 — 이미 설치된 서버는 그대로 동작하고 ‘옛 디렉터리’ 로 보입니다.` });
       onSaved?.();
     } catch (e) { setMsg?.({ tone: 'bad', text: errText(e) }); } finally { setBusy(false); }
   };
