@@ -145,6 +145,12 @@ test('② 준비 파일을 실제로 돌린다 — sshd 정책 · 계정 · 키 
     assert.equal(r.p.fail, code, extra); assert.equal(r.rc, 71); assert.doesNotMatch(r.log, /useradd|runuser/, `${code} — 아무것도 바꾸지 않는다`);
   }
   sb = sandbox({ sshdT: `${base}allowusers dvc*\nallowusers admin\n` }); assert.equal(runPrep(sb, 'dvcmon').p.ok, true, 'AllowUsers 패턴이 맞으면 한다');
+  // 패턴이 작업 폴더의 파일 이름으로 펼쳐지지 않는다(set -f) — 'dvc*' 가 파일 'dvcfile' 로 바뀌면 맞는 계정을 막는다
+  sb = sandbox({ sshdT: `${base}allowusers dvc*\n` });
+  { const cwd = fs.mkdtempSync(path.join(sb.root, 'cwd-')); fs.writeFileSync(path.join(cwd, 'dvcfile'), '');
+    const s2 = PR.prepScript(PR.keyLineFor(PUB)).replace('PATH=/usr/sbin:/usr/bin:/sbin:/bin; export PATH', `PATH=${sb.bin}:/usr/bin:/bin; export PATH`);
+    const f2 = path.join(sb.root, 'p2.sh'); fs.writeFileSync(f2, s2);
+    const rr = spawnSync('sh', [f2, 'dvcmon'], { encoding: 'utf8', cwd }); assert.equal(PR.parsePrepOut(rr.stdout).ok, true, rr.stdout); }
   sb = sandbox({ sshdT: 'pubkeyauthentication no\nauthorizedkeysfile .ssh/authorized_keys\n' }); assert.equal(runPrep(sb, 'dvcmon').p.fail, 'sshd-pubkey');
   sb = sandbox({ sshdT: 'pubkeyauthentication yes\nauthorizedkeysfile /etc/ssh/keys/%u\n' }); assert.equal(runPrep(sb, 'dvcmon').p.fail, 'sshd-akfile');
   sb = sandbox({ sshdT: 'pubkeyauthentication yes\nauthorizedkeysfile %h/.ssh/authorized_keys\n' }); assert.equal(runPrep(sb, 'dvcmon').p.ok, true, '%h/.ssh/authorized_keys 도 기본 위치');
@@ -332,6 +338,15 @@ test('⑤ 중앙 — 접수 · 엣지 배달(caps · 준비 계정 보고) · �
   assert.equal(rec.lastPrep.code, 'ok'); assert.equal(rec.lastPrep.created, true); assert.equal(rec.lastPrep.audit, 'done'); assert.equal(rec.lastPrep.from, true); assert.equal(rec.lastPrep.age, 'default');
   assert.equal(rec.lastInstall.code, 'ok'); assert.equal(rec.state, 'ready');
   assert.equal(FS.testOf(te.id).result.kind, 'ok', '연결 시험 결과가 키 로그인 칸으로'); assert.equal(FS.testOf(te.id).result.via, 'edge');
+  // 디스크 점검을 고르지 않은 준비 작업에 설치 결과 · 준비 줄이 실려 와도 반영하지 않는다(엣지가 작업에 없던 일을 말함)
+  const tq = { id: 'fm-pppppppp54', name: 'pl-db-54', host: '10.48.5.4', port: 22, username: 'dvcmon', agent: 'edge-pl' };
+  const mine2 = new Map([[tq.id, tq]]);
+  A.handleEdgeAudit('edge-pl', mine2, { caps: ['install', 'prep'], cred: { [tq.id]: { state: 'ok' } }, credPrep: { [tq.id]: { state: 'ok' } } }, Date.now() + 4000);
+  const rq = A.requestPrep(tq, { by: 'own' }); assert.equal(rq.ok, true); assert.equal(rq.audit, false);
+  A.handleEdgeAudit('edge-pl', mine2, { caps: ['install', 'prep'], results: [{ runId: rq.runId, result: { mode: 'prep', ok: true, kind: 'done', dir: '', ready, prep: { code: 'ok', step: 7 }, login: { ok: true, kind: 'ok' }, install: { code: 'ok', step: 7 } } }] }, Date.now() + 5000);
+  await new Promise((res) => setTimeout(res, 50));
+  const rq2 = A.readinessOf(tq.id);
+  assert.equal(rq2.lastPrep.audit, 'off'); assert.equal(rq2.lastInstall, undefined, '고르지 않은 설치는 반영하지 않는다'); assert.equal(rq2.state, undefined, '준비 줄도');
   // 같은 주소에 다른 수집 계정 — 준비는 하되 디스크 점검은 함께 하지 않는다
   const t2 = { id: 'fm-pppppppp52', name: 'a', host: '10.1.5.2', port: 22, username: 'dvcmon', demo: true };
   const t3 = { id: 'fm-pppppppp53', name: 'b', host: '10.1.5.2', port: 22, username: 'other', demo: true };

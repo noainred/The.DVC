@@ -56,14 +56,15 @@
   상세 `docs/rules/focusmon.md` · 설계 `docs/design/focus-mon/README.md` §20 · 회귀 `focusMonAudit3110` · web `focusMonAudit`. **되돌리면 안 되는 것**:
   ① 받은 프로그램 `audit/rhel_disk_audit.py` 는 **한 바이트도 고치지 않는다**(sha256 = 판본 · 고치면 전 서버 재설치) — 덧붙일 일은 감싸는 실행 파일 `WRAPPER_TEXT` 에(인자 거절 · 임시 폴더 · 시한 KILL · nice/ionice · 디스크 목록).
   ② 원격 명령은 **검사를 지난 설치 디렉터리의 함수**(`readyCommandFor` 일반 계정 · `sudo -n -l` 허용 여부만 · `runCommandFor` sudoers 와 같은 인자 없는 한 줄) — 기본 경로는 예전 상수와 **바이트까지 같다**(시험 고정).
-     root 로 돌 코드는 **자동 설치(v3.17.0 · 사용자 요청) 때 한 번만** — 설치 계정 키(‘설치’ 를 직접 켠 키) · 포탈 판본 설치 파일(디렉터리는 파일 안) · 명령 값은 수집 계정 이름 · 난수 파일 이름뿐. 그 밖에 python3 · 셸을 sudo 로 열지 않는다.
+     root 로 돌 코드는 **자동 설치(v3.17.0) · 접속 준비(v3.18.0) 때 한 번씩만** — 그 기능을 직접 켠 키 · 포탈이 만든 파일(값은 파일 안) · 명령 값은 수집 계정 이름 · 난수 파일 이름뿐. 그 밖에 셸을 sudo 로 열지 않는다.
   ③ 실행 전 판정은 `parse.readyState` 하나 — 두 파일 sha256 · root 소유 · 그룹/남 쓰기 금지 · setuid 금지 · 경로 폴더 · sudo 규칙. 아니면 실행하지 않는다. 엣지 작업은 중앙이 아는 판본(`expect`)으로 맞춘다.
   ④ 결과는 **원문**으로 받아 중앙이 다시 해석(`service.analyzeRun`) — 엣지 해석값을 믿지 않는다 · `cleanEdgeResult` 상한(줄 · 줄 길이 · 5MB) · 그 엣지가 맡은 대상의 그 엣지 작업만 반영 · 모르는 결과도 ack(무한 재전송 방지).
   ⑤ 인증 거부는 `focusAuthGuard` 에 정지 · 정지된 대상은 접속하지 않는다(자동 재시도 금지). ⑥ 숫자는 **줄 수**(장애 횟수 아님) · 끝까지 돌지 않은 회차(outcome ≠ 'done')는 합계에 넣지 않는다(null).
   ⑦ 한도 — 노드당 동시 1 · 같은 서버 실행 10분에 한 번(실행된 때 기준) · 준비 확인 60초 · 엣지 미수령 30분/결과 없음 시한 뒤 'lost' · 보관 10회 · 90일. 조회 admin + 전체 범위 · 실행 + 쓰기 전체 범위 · 데모 차단 · 감사.
-  ⑧ 반증 1인 반영(9건 · 변이 37/37 — 원문 `docs/rules/focusmon.md`): **표지는 실행마다 난수** · **보고서 모양 검사**('report-shape') · 출력은 예산 · 줄 수 상한 · 엣지 결과 크기 상한(413 → 원문 버림 · 보관 1시간) ·
-     엣지 작업은 진행 목록에 실리는 동안 지우지 않고 'lost' 는 2시간 기억 · 접속처가 바뀌면 작업 · 준비 상태를 지우고 회차는 `ep` 로 거른다 · flock · SIGPIPE trap · `-I -S` · 같은 PATH.
-  ⑨ **자동 설치 · 설치 디렉터리(v3.17.0 · 회귀 `focusMonInstall3170` · web `focusMonAuditInstall`)**: 판정 `bundle.dirIssue` 하나(웹 대조 · 포탈 · 엣지 · 설치 파일) · 설정 손상은 재시작 뒤에도 503 ·
-     설치 계정은 **맡은 노드**의 SSH 공용 접속(`installCred` — 직접 켠 키만 · 같은 주소 둘 · 비밀번호 안 씀) · 비밀번호 없는 sudo · root 만 · 설치 파일이 위쪽 폴더 · 심링크 · 네트워크 FS · noexec 검사 ·
+  ⑧ 반증 1인 반영(9건 — 원문 `docs/rules/focusmon.md`): **표지는 실행마다 난수** · 보고서 모양 검사 · 출력 예산 · 엣지 결과 크기 상한 · 'lost' 2시간 · 접속처가 바뀌면 지우고 `ep` 로 거름 · flock · SIGPIPE trap.
+  ⑨ **자동 설치 · 설치 디렉터리(v3.17.0 · 회귀 `focusMonInstall3170` · web `focusMonAuditInstall`)**: 판정 `bundle.dirIssue` 하나(웹 대조) · 설정 손상은 재시작 뒤에도 503 ·
+     설치 계정은 **맡은 노드**의 SSH 공용 접속(`installCred` — 직접 켠 키만 · 같은 주소 둘 · 비밀번호 안 씀) · 비밀번호 없는 sudo · root 만 · 위쪽 폴더 · 심링크 · 네트워크 FS · noexec 검사 ·
      옛 파일은 판본이 같고 새 경로가 아닐 때만 지움 · 연속 3대 거부면 멈춤 · 위치 기억(후보 밖 무시) · **설치 작업은 이번 본문에 caps 'install' 을 실은 엣지에만** ·
      'ok' 는 중앙이 준비 줄을 다시 판정 · 같은 주소 다른 계정은 거부(sudoers 하나) · 엣지 법인 = 스냅샷 vCenter · 문 = 관리자 · 소유자 등급 · 데모 차단 · OTP(마지막) · 감사. 반증 기록 `docs/rules/focusmon.md`.
+  ⑩ **접속 자동 준비(v3.18.0 · 회귀 `focusMonPrep3180` · web `focusMonPrep`)**: 키 기능 `focus-mon-prep` 을 직접 켠 키만 · 준비 파일은 `sshd -T` **읽기만**(막혀 있으면 아무것도 안 바꿈) ·
+     공개키는 **그 계정 권한으로**(runuser) · 있는 계정은 안 바꿈 · 수집 계정 root 거부 · 엣지는 caps 'prep' + credPrep · 고르지 않은 설치 결과 무시. 상세 `docs/rules/focusmon.md`.
