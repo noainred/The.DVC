@@ -74,6 +74,8 @@ export function fdProgressMeta(row, live, fdl) {
  */
 export function corpBadge(c) {
   if (!c) return { key: 'none', text: '—', tone: 'muted' };
+  // 52회차 F2: 폴러가 그 Director 를 못 읽으면 '실행 없음' 이 아니라 결과 모름(조회 실패 거르기에 든다)
+  if (c.resultsKnown === false) return { key: 'fail', text: '결과 모름(Director 조회 실패)', tone: 'bad' };
   if (!(c.running > 0) && !(c.waiting > 0)) return { key: 'idle', text: '실행 없음', tone: 'muted' };
   if (!c.live) return { key: 'pending', text: '조회 전', tone: 'muted' };
   if (c.stuck > 0) return { key: 'stuck', text: `멈춤 의심 ${c.stuck}`, tone: 'warn' };   // v2.833.1 — FD 조회는 됐고 3시간 넘게 진행 보고 없음

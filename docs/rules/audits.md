@@ -3277,3 +3277,10 @@ high 0 · 반증 1(A3-01 — 경로 오독, 데모 계정은 READ_DENY 하위라
   #8 실행기 종류(kind)로 업그레이드 대기 문구(설치 · 준비가 '디스크 점검' 으로 보이던 것) · #9 상한 넘김 적용 문구에 집중 모니터링 작업. `focusMonAudit3110 ⑪` 의 '413 이면 곧바로 too-big' 기대를 두 번째 413 으로 바꿨다.
   **남긴 것**: #2 중앙이 설치 · 준비 결과 8건을 한 요청에서 persist 8번(동기 쓰기 26→68ms · 2,000 대상 40→110ms — 묶음 쓰기는 ingestResult 구조 변경) ·
   #3(기존 · 결정 필요) 중앙이 엣지에 번들을 밀면(`/api/collector/upgrade` · `/api/upgrade/bundle`) 엣지는 대기 판정 없이 곧바로 재시작한다 — R3 · Veeam · Bareos 엣지 대행의 '대기' 가 기본 업그레이드 경로에서 효과가 없다.
+- **52회차(백업 Veeam · Bareos 2차)**: 확정 5(중간 4 · 낮음 1) — 전부 고침. F1 중앙 직접 Director 의 상태 변경(단건 · 일괄 등록 · 그룹 저장 · 단건 실행 · 단건 복원)이 업그레이드 대기 목록에 없어,
+  일괄 등록 도중 재시작하면 Director 잡이 원장 밖에 남고(스케줄 켜진 채) 다시 등록하면 '-r2' 이중 잡 → `service.onDirector` 하나에서 `EDGE_MUTATING` 작업을 `inflight.noteDirectOpStart` ·
+  F2 진행 현황판이 폴러의 Director 조회 실패를 보지 않고 '실행 없음 · 오늘 0' 을 합계에 더함 → 판정 코어(`directorInfo` · `resultsKnown`)로 '결과 모름' · 합계 제외 · F3 볼륨을 못 읽은 풀이 '가득 참 0 · 오류 볼륨 0' →
+  `addPoolKpi`(세는 곳 셋 같은 판정 · 판정 모름 · 볼륨 모르는 풀) · F4 공유 Director '초기화 후 재설치' 사전 점검이 그 vCenter 대상만 셈(1 vs 41) → 그 Director 대상 전부 · 함께 쓰는 vCenter 를 확인 화면에 ·
+  F5 Veeam 대행 워커의 running 가드가 실행 · 회신까지 덮어 다른 B&R 작업이 120초 뒤 '가져가지 않음' → 인출만 가드 · 빈 자리만큼(`?max=`) · 상태 변경은 받은 즉시 대기 목록에(소스 고정 veeamFullAudit2 ③ 정규식 갱신).
+  **남긴 것**: F2 의 Backup Summary(`veeam.js backupVmRows` · Bareos 7일 성공률 · 24시간)도 같은 빈칸 — 다음 회차 · **결정 필요** D1 vCenter 를 아무 Director 에나 묶을 수 있고 Director 하나에 vCenter 여럿 허용(새 규칙 '서비스 1 = vCenter 1 + Bareos 1' 과 어긋남 — 저장 거부 · 경고) ·
+  D2 조회 전용 범위 계정의 POST `/tools/bareos-backup/poll` 이 수동 대조로 Director 잡을 다시 disable(쓰기 범위로 좁힐지).

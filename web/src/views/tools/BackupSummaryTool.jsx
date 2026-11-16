@@ -21,6 +21,7 @@ import BackupSummaryStale from './BackupSummaryStale.jsx';
 import BackupSummaryTree from './BackupSummaryTree.jsx';
 import BackupSummaryCapSched from './BackupSummaryCapSched.jsx';
 import BackupSummaryErrors from './BackupSummaryErrors.jsx';
+import { poolKpiText } from './bareosPolicyText.js';   // 52회차 F3
 
 export { DETAIL_VC_KEY };   // 서머리에서 고른 vCenter 를 세부내용이 이어받는다(이 브라우저에만) — v2.959: 값은 backupViewText.js(가상화 플랫폼 KPI 카드도 같은 키로 연다)
 
@@ -178,7 +179,7 @@ export default function BackupSummaryTool() {
             <Stat label="보호 VM" value={bareosAllUnknown ? '—' : `${fmtNum(pa?.act?.b)}${t.bareosUnknownSites ? '*' : ''}`} />
             <Stat label="7일 성공률" value={pctText(okPct(pa?.b7))} tone="ok" title="최근 7일에 끝난 VM 마지막 실행 중 성공·경고 비율(포탈 원장 기준)" />
             <Stat label="풀 사용(볼륨)" value={bp?.pools?.maxPct != null ? `${bp.pools.maxPct}%` : '—'} tone={bp?.pools?.full ? 'bad' : undefined}
-              extra={bp?.pools ? `가득 참 ${fmtNum(bp.pools.full)} · 오류 볼륨 ${fmtNum(bp.pools.errorVols)}` : bp ? '풀 수집 실패' : '수집 전'}
+              extra={bp?.pools ? poolKpiText(bp.pools, fmtNum) : bp ? '풀 수집 실패' : '수집 전'}
               title="Director 정책 수집본(하루 1회) — 가장 높은 풀 사용률(MaxVols × MaxVolBytes 를 알 때만) · 새 잡을 받을 볼륨이 없는 풀(가득 참) · 오류 상태 볼륨 — Bareos › 정책 · 일정" />
             <Stat label="다음 회차" value={bNext ? hhmm(bNext) : '—'} extra={bNext ? `그룹 ${g?.next ? fmtNum(g.nextN) : 0} · 스케줄 ${bp?.schedules == null ? '—' : fmtNum(bp.schedules)}` : ''}
               title="포탈 그룹 예약의 다음 회차와 Director 스케줄(정책 수집본)의 다음 실행 중 이른 것 · 그룹 수(1시간 안) · Director 스케줄 수" />

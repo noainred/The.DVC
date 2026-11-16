@@ -135,20 +135,20 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 
 | 메서드 | 경로 | 게이트(공통 제외) | 소스 |
 |---|---|---|---|
-| POST | `/agent-config` | `requireCentral` | [server/src/routes/central/opsRoutes.js:234](../server/src/routes/central/opsRoutes.js#L234) |
+| POST | `/agent-config` | `requireCentral` | [server/src/routes/central/opsRoutes.js:236](../server/src/routes/central/opsRoutes.js#L236) |
 | GET | `/assignment` | `requireCentral` | [server/src/routes/central.js:473](../server/src/routes/central.js#L473) |
-| GET | `/bareos-config` | `requireCentral` | [server/src/routes/central/opsRoutes.js:175](../server/src/routes/central/opsRoutes.js#L175) |
-| POST | `/bareos-op-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:197](../server/src/routes/central/opsRoutes.js#L197) |
-| GET | `/bareos-ops` | `requireCentral` | [server/src/routes/central/opsRoutes.js:187](../server/src/routes/central/opsRoutes.js#L187) |
+| GET | `/bareos-config` | `requireCentral` | [server/src/routes/central/opsRoutes.js:177](../server/src/routes/central/opsRoutes.js#L177) |
+| POST | `/bareos-op-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:199](../server/src/routes/central/opsRoutes.js#L199) |
+| GET | `/bareos-ops` | `requireCentral` | [server/src/routes/central/opsRoutes.js:189](../server/src/routes/central/opsRoutes.js#L189) |
 | GET | `/bm-folders` | `requireCentral` | [server/src/routes/central/storageRoutes.js:295](../server/src/routes/central/storageRoutes.js#L295) |
 | GET | `/bm-maint` | `requireCentral` | [server/src/routes/central/storageRoutes.js:278](../server/src/routes/central/storageRoutes.js#L278) |
 | GET | `/bm-onboard` | `requireCentral` | [server/src/routes/central/storageRoutes.js:258](../server/src/routes/central/storageRoutes.js#L258) |
-| GET | `/bmstor-jobs` | `requireCentral` | [server/src/routes/central/opsRoutes.js:346](../server/src/routes/central/opsRoutes.js#L346) |
-| POST | `/bmstor-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:351](../server/src/routes/central/opsRoutes.js#L351) |
+| GET | `/bmstor-jobs` | `requireCentral` | [server/src/routes/central/opsRoutes.js:348](../server/src/routes/central/opsRoutes.js#L348) |
+| POST | `/bmstor-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:353](../server/src/routes/central/opsRoutes.js#L353) |
 | GET | `/bmusage-config` | `requireCentral` | [server/src/routes/central/storageRoutes.js:235](../server/src/routes/central/storageRoutes.js#L235) |
 | POST | `/capacity-report` | `requireCentral` | [server/src/routes/central.js:634](../server/src/routes/central.js#L634) |
-| GET | `/capture-jobs` | `requireCentral` | [server/src/routes/central/opsRoutes.js:297](../server/src/routes/central/opsRoutes.js#L297) |
-| POST | `/capture-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:302](../server/src/routes/central/opsRoutes.js#L302) |
+| GET | `/capture-jobs` | `requireCentral` | [server/src/routes/central/opsRoutes.js:299](../server/src/routes/central/opsRoutes.js#L299) |
+| POST | `/capture-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:304](../server/src/routes/central/opsRoutes.js#L304) |
 | POST | `/curuser` | `requireCentral` | [server/src/routes/central.js:1260](../server/src/routes/central.js#L1260) |
 | GET | `/curuser-config` | `requireCentral` | [server/src/routes/central.js:1358](../server/src/routes/central.js#L1358) |
 | GET | `/cvp-config` | `requireCentral` | [server/src/routes/central/cvpIsiduRoutes.js:22](../server/src/routes/central/cvpIsiduRoutes.js#L22) |
@@ -162,25 +162,25 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/gpu-guest-config` | `requireCentral` | [server/src/routes/central.js:1628](../server/src/routes/central.js#L1628) |
 | POST | `/gpu-guest-data` | `requireCentral` | [server/src/routes/central.js:1548](../server/src/routes/central.js#L1548) |
 | POST | `/guest-disk` | `requireCentral` | [server/src/routes/central.js:1118](../server/src/routes/central.js#L1118) |
-| GET | `/health-probe` | `requireCentral` | [server/src/routes/central/opsRoutes.js:469](../server/src/routes/central/opsRoutes.js#L469) |
+| GET | `/health-probe` | `requireCentral` | [server/src/routes/central/opsRoutes.js:471](../server/src/routes/central/opsRoutes.js#L471) |
 | GET | `/idrac-scan-jobs` | `requireCentral` | [server/src/routes/central.js:1470](../server/src/routes/central.js#L1470) |
 | POST | `/idrac-scan-progress` | `requireCentral` | [server/src/routes/central.js:1480](../server/src/routes/central.js#L1480) |
 | POST | `/idrac-scan-result` | `requireCentral` | [server/src/routes/central.js:1492](../server/src/routes/central.js#L1492) |
 | POST | `/inventory` | `requireCentral` | [server/src/routes/central.js:971](../server/src/routes/central.js#L971) |
-| GET | `/ip-scan-assignment` | `requireCentral` | [server/src/routes/central/opsRoutes.js:375](../server/src/routes/central/opsRoutes.js#L375) |
-| POST | `/ip-scan-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:394](../server/src/routes/central/opsRoutes.js#L394) |
+| GET | `/ip-scan-assignment` | `requireCentral` | [server/src/routes/central/opsRoutes.js:377](../server/src/routes/central/opsRoutes.js#L377) |
+| POST | `/ip-scan-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:396](../server/src/routes/central/opsRoutes.js#L396) |
 | GET | `/isidu-config` | `requireCentral` | [server/src/routes/central/cvpIsiduRoutes.js:157](../server/src/routes/central/cvpIsiduRoutes.js#L157) |
 | POST | `/isidu-data` | `requireCentral` | [server/src/routes/central/cvpIsiduRoutes.js:179](../server/src/routes/central/cvpIsiduRoutes.js#L179) |
-| POST | `/link-check` | `requireCentral` | [server/src/routes/central/opsRoutes.js:483](../server/src/routes/central/opsRoutes.js#L483) |
-| GET | `/link-check-config` | `requireCentral` | [server/src/routes/central/opsRoutes.js:513](../server/src/routes/central/opsRoutes.js#L513) |
-| GET | `/log-queries` | `requireCentral` | [server/src/routes/central/opsRoutes.js:269](../server/src/routes/central/opsRoutes.js#L269) |
-| POST | `/log-query-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:277](../server/src/routes/central/opsRoutes.js#L277) |
+| POST | `/link-check` | `requireCentral` | [server/src/routes/central/opsRoutes.js:485](../server/src/routes/central/opsRoutes.js#L485) |
+| GET | `/link-check-config` | `requireCentral` | [server/src/routes/central/opsRoutes.js:515](../server/src/routes/central/opsRoutes.js#L515) |
+| GET | `/log-queries` | `requireCentral` | [server/src/routes/central/opsRoutes.js:271](../server/src/routes/central/opsRoutes.js#L271) |
+| POST | `/log-query-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:279](../server/src/routes/central/opsRoutes.js#L279) |
 | POST | `/part-faults` | `requireCentral` | [server/src/routes/central/storageRoutes.js:120](../server/src/routes/central/storageRoutes.js#L120) |
 | GET | `/partfault-config` | `requireCentral` | [server/src/routes/central/storageRoutes.js:224](../server/src/routes/central/storageRoutes.js#L224) |
 | GET | `/pdu-config` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:36](../server/src/routes/central/pduSanRoutes.js#L36) |
 | POST | `/pdu-data` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:67](../server/src/routes/central/pduSanRoutes.js#L67) |
-| GET | `/ping-jobs` | `requireCentral` | [server/src/routes/central/opsRoutes.js:207](../server/src/routes/central/opsRoutes.js#L207) |
-| POST | `/ping-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:215](../server/src/routes/central/opsRoutes.js#L215) |
+| GET | `/ping-jobs` | `requireCentral` | [server/src/routes/central/opsRoutes.js:209](../server/src/routes/central/opsRoutes.js#L209) |
+| POST | `/ping-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:217](../server/src/routes/central/opsRoutes.js#L217) |
 | POST | `/register-collector` | `requireCentral` | [server/src/routes/central.js:486](../server/src/routes/central.js#L486) |
 | POST | `/result` | `requireCentral` | [server/src/routes/central.js:568](../server/src/routes/central.js#L568) |
 | POST | `/rma-credential` | `requireCentral` | [server/src/routes/central/pduSanRoutes.js:287](../server/src/routes/central/pduSanRoutes.js#L287) |
@@ -200,9 +200,9 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/veeam-config` | `requireCentral` | [server/src/routes/central/opsRoutes.js:96](../server/src/routes/central/opsRoutes.js#L96) |
 | POST | `/veeam-data` | `requireCentral` | [server/src/routes/central/opsRoutes.js:111](../server/src/routes/central/opsRoutes.js#L111) |
 | GET | `/veeam-run-ops` | `requireCentral` | [server/src/routes/central/opsRoutes.js:157](../server/src/routes/central/opsRoutes.js#L157) |
-| POST | `/veeam-run-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:165](../server/src/routes/central/opsRoutes.js#L165) |
-| POST | `/vm-clone-report` | `requireCentral` | [server/src/routes/central/opsRoutes.js:333](../server/src/routes/central/opsRoutes.js#L333) |
-| GET | `/vm-clone-sync` | `requireCentral` | [server/src/routes/central/opsRoutes.js:317](../server/src/routes/central/opsRoutes.js#L317) |
+| POST | `/veeam-run-result` | `requireCentral` | [server/src/routes/central/opsRoutes.js:167](../server/src/routes/central/opsRoutes.js#L167) |
+| POST | `/vm-clone-report` | `requireCentral` | [server/src/routes/central/opsRoutes.js:335](../server/src/routes/central/opsRoutes.js#L335) |
+| GET | `/vm-clone-sync` | `requireCentral` | [server/src/routes/central/opsRoutes.js:319](../server/src/routes/central/opsRoutes.js#L319) |
 | POST | `/vmseries` | `requireCentral` | [server/src/routes/central.js:1200](../server/src/routes/central.js#L1200) |
 | GET | `/vmseries-config` | `requireCentral` | [server/src/routes/central.js:1382](../server/src/routes/central.js#L1382) |
 
@@ -992,7 +992,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/bareos-backup/jobs/:id/restore-points` | 역할 `admin` | [server/src/routes/api/bareosBackup.js:1076](../server/src/routes/api/bareosBackup.js#L1076) |
 | POST | `/tools/bareos-backup/jobs/:id/run` | 역할 `admin` | [server/src/routes/api/bareosBackup.js:909](../server/src/routes/api/bareosBackup.js#L909) |
 | POST | `/tools/bareos-backup/jobs/bulk` | 역할 `admin` | [server/src/routes/api/bareosBackup.js:877](../server/src/routes/api/bareosBackup.js#L877) |
-| GET | `/tools/bareos-backup/live` | 역할 `admin` | [server/src/routes/api/bareosLive.js:217](../server/src/routes/api/bareosLive.js#L217) |
+| GET | `/tools/bareos-backup/live` | 역할 `admin` | [server/src/routes/api/bareosLive.js:222](../server/src/routes/api/bareosLive.js#L222) |
 | POST | `/tools/bareos-backup/logs/bulk` | 역할 `admin` | [server/src/routes/api/bareosBackup.js:1217](../server/src/routes/api/bareosBackup.js#L1217) |
 | POST | `/tools/bareos-backup/policy/collect` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bareosPolicy.js:121](../server/src/routes/api/bareosPolicy.js#L121) |
 | GET | `/tools/bareos-backup/policy/volumes` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/bareosPolicy.js:91](../server/src/routes/api/bareosPolicy.js#L91) |

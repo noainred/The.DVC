@@ -27,7 +27,10 @@ import { noteVeeamEdgeOpStart, noteVeeamEdgeOpEnd } from '../veeam/run/inflight.
 const POLL_MS = clampIntervalMs(Number(process.env.AGENT_VEEAM_RUN_POLL_MS) || 5_000, 5_000, 1_000);
 const OP_CONCURRENCY = 2;
 let timer = null;
-let running = false;
+let fetching = false;   // 52회차 F5: 인출만 겹치지 않게(예전 running 은 실행 · 회신까지 덮어, 긴 세션 조회 동안 같은 엣지의 다른 B&R 작업을 가져가지 않아 120초 뒤 '엣지가 가져가지 않음' 으로 끝났다)
+let inflight = 0;
+/** 이 엣지가 동시에 들고 있는 대행 작업 상한(중앙 TAKE_MAX 와 같게 — 빈 자리만큼 ?max= 로 인출). */
+export const SLOT_MAX = 5;
 let _last = null;
 // v2.977(전체 점검 — 재현 · audits.md '별건' 이던 것): 마지막 실패는 따로 10분 남긴다 — 5초마다 도는 빈 인출 틱이 `_last` 를 ok 로 덮어
 //   회신 실패가 엣지 로그에서 곧바로 사라졌다(bareosOpWorker G18 과 같은 모양 · 같은 고침).
@@ -89,13 +92,15 @@ export async function runEdgeOp(op, { receivedAt = Date.now(), fetchImpl, getSer
 
 export async function runVeeamRunWorkerOnce({ fetchImpl } = {}) {
   if (!config.agent.centralUrl) return null;
-  if (running) return null;
-  running = true;
+  if (fetching || inflight >= SLOT_MAX) return null;
+  fetching = true;
+  let ops = [];
+  let receivedAt = 0;
   try {
     let r;
-    try { r = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}/api/central/veeam-run-ops`, config.agent.name), { headers: headers(), timeoutMs: 15_000, retries: 1 }); }
+    try { r = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}/api/central/veeam-run-ops?max=${SLOT_MAX - inflight}`, config.agent.name), { headers: headers(), timeoutMs: 15_000, retries: 1 }); }
     catch (e) { const msg = `인출 실패 — ${String(e?.message || e).slice(0, 200)}`; _last = { at: Date.now(), ok: false, error: msg }; noteError(msg); if (_logChange('인출', msg)) console.warn(`[veeam-run-agent] ${msg}`); return null; }
-    const receivedAt = Date.now();
+    receivedAt = Date.now();
     if (!r.ok) {
       let reason = '';
       try { const b = await r.json(); reason = String(b?.reason || '').slice(0, 200); } catch { /* */ }
@@ -107,14 +112,18 @@ export async function runVeeamRunWorkerOnce({ fetchImpl } = {}) {
     }
     let body;
     try { body = await readJsonCapped(r, 1_048_576, '인출 응답'); } catch (e) { _last = { at: Date.now(), ok: false, error: `인출 응답 형식 오류 — ${String(e?.message || e).slice(0, 120)}` }; return null; }
-    const ops = (Array.isArray(body?.ops) ? body.ops : []).filter((o) => o && typeof o.id === 'string' && typeof o.kind === 'string').slice(0, 10)
+    ops = (Array.isArray(body?.ops) ? body.ops : []).filter((o) => o && typeof o.id === 'string' && typeof o.kind === 'string').slice(0, SLOT_MAX)
       .sort((a, b) => MUTATING.has(b.kind) - MUTATING.has(a.kind));
     if (!ops.length) { _last = { at: Date.now(), ok: true, ops: 0 }; return _last; }
+    // 52회차 F5: 상태 변경 작업은 받은 즉시(실행 전 대기 자리 포함) 업그레이드 대기 목록에 — 재시작하면 중앙이 '결과 모름' 으로 닫는다
+    for (const op of ops) if (MUTATING.has(op.kind)) noteVeeamEdgeOpStart(op.id, op.kind, op.serverId);
+    inflight += ops.length;
+  } finally { fetching = false; }
+  try {
     let postErr = null;
     await poolRun(ops, OP_CONCURRENCY, async (op) => {
       // 상태 변경은 실행부터 회신까지 업그레이드 대기 목록에(재시작하면 Veeam 에는 실행됐는데 중앙이 결과를 모른다 — bareosOpWorker 와 같은 모양)
       const track = MUTATING.has(op.kind);
-      if (track) noteVeeamEdgeOpStart(op.id, op.kind, op.serverId);
       try {
         const res = await runEdgeOp(op, { receivedAt, fetchImpl });
         console.log(`[veeam-run-agent] ${op.kind} → ${op.serverId}: ${res.ok ? '성공' : `${res.unknown ? '결과 모름' : res.notSent ? '보내지 않음' : '실패'} — ${String(res.reason || '').slice(0, 160)}`}`);
@@ -125,7 +134,7 @@ export async function runVeeamRunWorkerOnce({ fetchImpl } = {}) {
     if (postErr) noteError(postErr);
     if (postErr && _logChange('회신', postErr)) console.warn(`[veeam-run-agent] ${postErr}`);
     return _last;
-  } finally { running = false; }
+  } finally { inflight = Math.max(0, inflight - ops.length); }
 }
 
 export function startVeeamRunWorker() {

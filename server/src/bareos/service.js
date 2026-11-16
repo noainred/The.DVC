@@ -13,7 +13,8 @@ import {
 } from './settings.js';
 import { OPS, JOB_NAME_SUFFIXES, MID_COMMAND_CODES } from './ops.js';
 import { addJobFailText } from './configurePerm.js';
-import { enqueueEdgeOp } from './edgeOps.js';
+import { enqueueEdgeOp, EDGE_MUTATING } from './edgeOps.js';
+import { noteDirectOpStart, noteDirectOpEnd } from './inflight.js';   // 52회차 F1
 import { config } from '../config.js';
 import { addJob as registryAddJob, addJobs as registryAddJobs, listJobs, findByVm, registryLoadError, jobCount, retireName, retiredNames, jobDigests, MAX_JOBS } from './registry.js';
 import { backupPluginOptions, jobNameFor, normLevel } from './names.js';
@@ -201,7 +202,11 @@ export async function onDirector(directorId, kind, args = {}, { trigger = 'manua
     }
   }
   // hooks: 중앙 직접 실행에서만 쓰는 함수(예: poll 의 disableNow — 그 순간의 원장으로 고른다). 직렬화하지 않는다(엣지 대행에는 없다).
-  return withDirector(directorId, (s) => op(s, args, { signal, ...(hooks || {}) }), { trigger, signal, demoOnly });
+  // 52회차 F1: 상태를 바꾸는 작업은 끝날 때까지 자동 업그레이드가 기다린다(bareos/inflight.js — 엣지 대행과 같은 판정 EDGE_MUTATING)
+  const noteId = EDGE_MUTATING.has(kind) ? noteDirectOpStart(kind, directorId) : null;
+  try {
+    return await withDirector(directorId, (s) => op(s, args, { signal, ...(hooks || {}) }), { trigger, signal, demoOnly });
+  } finally { if (noteId) noteDirectOpEnd(noteId); }
 }
 
 /**

@@ -13,8 +13,7 @@ import BareosTabs from './BareosTabs.jsx';
 import { saveBareosHandoff } from './bareosViewText.js';
 import { saveBareosGroupHandoff, fmtNum, shortTs } from './backupViewText.js';
 import {
-  POLICY_CMD_LABEL, POLICY_CMD_KEYS, codeText, directorResult, VERDICT, retentionText, defText, weekLevels, nextRunText, filterSchedules, filterVms, srcText, poolText, keepText,
-} from './bareosPolicyText.js';
+  POLICY_CMD_LABEL, POLICY_CMD_KEYS, codeText, directorResult, VERDICT, retentionText, defText, weekLevels, nextRunText, filterSchedules, filterVms, srcText, poolText, keepText, poolKpiText } from './bareosPolicyText.js';
 
 const WRAP = { display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 };
 const PAD = { padding: '7px 8px' };
@@ -167,7 +166,7 @@ export default function BareosPolicyTab({ bare = false, reloadKey = 0 } = {}) {
           sub={k.jobdefs == null ? (anyDenied ? 'show 권한 없음 — 위 안내' : '수집 전') : `Always Incremental 쓰는 JobDefs ${fmtNum(k.ai)}`} />
         <Kpi label="풀 · 볼륨" value={k.pools ? `${fmtNum(k.pools.n)} · ${k.pools.vols == null ? '—' : fmtNum(k.pools.vols)}` : '—'}
           color={k.pools?.full ? TONE.bad : undefined}
-          sub={k.pools ? `가장 높은 사용 ${k.pools.maxPct == null ? '—' : `${k.pools.maxPct}%`} · 가득 참 ${fmtNum(k.pools.full)} · 오류 볼륨 ${fmtNum(k.pools.errorVols)}` : '수집 전'} />
+          sub={k.pools ? `가장 높은 사용 ${k.pools.maxPct == null ? '—' : `${k.pools.maxPct}%`} · ${poolKpiText(k.pools, fmtNum)}` : '수집 전'} />
         <Kpi label="VM 적용 정책" value={k.vm?.total == null ? '—' : `${fmtNum(k.vm.policy)} / ${fmtNum(k.vm.total)}`} color={k.vm?.unregistered || k.vm?.mismatch ? TONE.warn : undefined}
           sub={k.vm?.total == null ? '원장을 읽지 못함' : `수동만 ${fmtNum(k.vm.manual)} · 미등록 ${fmtNum(k.vm.unregistered)} · 불일치 ${fmtNum(k.vm.mismatch)}${k.vm.unknown ? ` · 모름 ${fmtNum(k.vm.unknown)}` : ''}`} />
       </div>

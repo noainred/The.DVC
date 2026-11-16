@@ -156,9 +156,11 @@ export function registerOpsRoutes(centralRouter, deps) {
    */
   centralRouter.get('/veeam-run-ops', requireCentral(), async (req, res) => {
     if (req.centralAuth.mode !== 'agent') return res.status(403).json({ ok: false, reason: 'Veeam 백업 실행 대행은 엣지별 개별 토큰만 허용합니다 — 설정 › 엣지 토큰에서 이 엣지의 토큰을 발급하세요.' });
-    const { takeEdgeOps } = await import('../../veeam/run/edgeOps.js');
+    const { takeEdgeOps, TAKE_MAX: VTAKE } = await import('../../veeam/run/edgeOps.js');
     res.set('Cache-Control', 'no-store');
-    res.json({ ok: true, ops: takeEdgeOps(req.centralAuth.agent) });
+    // 52회차 F5: max = 엣지 워커의 빈 자리(bareos-ops 와 같은 규칙) — 없거나 틀리면 기본 상한
+    const max = /^[0-9]{1,2}$/.test(String(req.query.max ?? '')) ? Number(req.query.max) : VTAKE;
+    res.json({ ok: true, ops: takeEdgeOps(req.centralAuth.agent, max) });
   });
 
   // Body: { id, result }
