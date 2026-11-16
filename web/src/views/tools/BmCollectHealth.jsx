@@ -19,6 +19,7 @@ import {
 } from './bmCollectText.js';
 import { numOrNull } from '../../numOrNull.js';
 import './bmStage6.css';
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
 
 const n0 = (v) => { const x = numOrNull(v); return x != null && x > 0; };
 
@@ -151,8 +152,7 @@ export default function BmCollectHealth() {
   useEffect(() => { load(); }, [load]);
   function exportCsv() {
     const blob = new Blob([`\uFEFF${collectCsv(st.resp)}`], { type: 'text/csv;charset=utf-8' });
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = collectCsvName(st.resp?.at); a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    saveBlob(blob, collectCsvName(st.resp?.at));
   }
   return (
     <div className="card" style={{ minWidth: 0 }} data-capture="bm-collect-health">

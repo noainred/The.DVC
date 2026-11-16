@@ -14,6 +14,7 @@ import {
   probeLine, chartSeries, wideCsv, longCsv, csvFileName, SKIP_TEXT, MISSED_TEXT, DAY_LABELS, mailDirty, parseMailList,
   recipientCount, daysText, deltaOf, legendText, periodText, deviceSub, mailBodyText, ATTACH_TEXT,
 } from './storageUsageText.js';
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
 
 /**
  * 특수기능 › 스토리지 사용량 보고서(v2.789, 도구 키 storage-usage).
@@ -101,11 +102,7 @@ export default function StorageUsageTool({ isAdmin = false }) {
   const download = (kind) => {
     const opts = { dcName, typeLabel, unit, resources: showRes, pools: showPools, kindGroup };
     const body = kind === 'wide' ? wideCsv(shown, periods, opts) : longCsv(shown, periods, opts);
-    const url = URL.createObjectURL(new Blob(['﻿' + body], { type: 'text/csv;charset=utf-8' }));
-    const a = document.createElement('a');
-    a.href = url; a.download = csvFileName({ gran: d?.gran, asOfLabel: d?.asOfLabel, kind, filtered: facets.facetOn || !!query });
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    saveBlob(new Blob(['﻿' + body], { type: 'text/csv;charset=utf-8' }), csvFileName({ gran: d?.gran, asOfLabel: d?.asOfLabel, kind, filtered: facets.facetOn || !!query }));
   };
   // v2.791 엑셀 — 서버가 만든다(메일 첨부와 같은 파일: 주간 · 누적 전 주차 · 전 장비). 화면 필터는 적용되지 않는다(버튼 설명에 밝힌다).
   //   409(다른 내보내기 진행 중)·403 은 downloadFile 이 던진다 — 문구를 그대로 보인다.

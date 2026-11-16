@@ -8,6 +8,7 @@ import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 �
 import { STable } from '../../components/STable.jsx';
 import { dayStamp } from '../../dayStamp.js';
 import { vcPowerSkippedNote } from '../readGapText.js'; // v2.733(C2-02)
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나(즉시 revoke · 문서 밖 click 금지)
 
 
 /** 가로 막대(비중 표시) — recharts 없이 CSS만으로. */
@@ -38,10 +39,7 @@ export function PowerMap({ scope }) {
     const rows = (data.servers || []).map((s) => [s.name, s.model, s.serviceTag, s.vcenterId, s.region, s.source, s.watts, s.mapped ? 'O' : 'X']);
     const body = [head, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n');
     const blob = new Blob(['﻿' + body], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `power-breakdown-${dayStamp()}.csv`; a.click();
-    URL.revokeObjectURL(url);
+    saveBlob(blob, `power-breakdown-${dayStamp()}.csv`);
   };
 
   const term = q.trim().toLowerCase();

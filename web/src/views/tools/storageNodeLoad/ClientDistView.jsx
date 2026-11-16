@@ -7,6 +7,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, canCsv } from '../../../api.js'; // CSV 는 data.csv 권한(canCsv)이 있을 때만 — csvGate2643
 import { STable } from '../../../components/STable.jsx';
 import { opsText, shareText, clientNameText, skewBarsOf, candidateText, distNotes, distCsv, sampleText, windowRangeText, HEAT_RAMP } from './nodeLoadText.js';
+import { saveBlob } from '../../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
 
 const RANGES = [{ key: '24h', label: '24시간' }, { key: '7d', label: '7일' }, { key: '30d', label: '30일' }];
 function shareBin(p) { const n = Number(p); if (!Number.isFinite(n) || n <= 0) return null; return Math.min(HEAT_RAMP.length - 1, Math.floor((n / 100) * HEAT_RAMP.length)); }
@@ -33,8 +34,7 @@ export default function ClientDistView({ deviceId, end = null, offsetMin = 540, 
   const protos = ['all', ...(ready ? (d.protos || []) : [])];
   const download = () => {
     const blob = new Blob([distCsv(d)], { type: 'text/csv;charset=utf-8' });
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `client-dist-${deviceId}-${d.range}.csv`; a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    saveBlob(blob, `client-dist-${deviceId}-${d.range}.csv`);
   };
   return (
     <div className="nl-dist">

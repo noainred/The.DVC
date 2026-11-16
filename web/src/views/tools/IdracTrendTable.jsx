@@ -13,6 +13,7 @@ import {
   activeConds, isDevOp, condUnit, deviationOf, deviationText, EMPTY_TYPE, typeQuery, typeText, gpuStateOf,
 } from './idracTrendText.js';
 import Select from '../../components/Select.jsx';
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
 
 const ALL = '*';
 const SORT_BY = [['max', '최대'], ['avg', '평균'], ['min', '최소'], ['cur', '현재'], ['dev', '변화']];
@@ -50,9 +51,7 @@ export function IdracTrendTable({ corps, sitesFor, initCorp, initSite, typeFilte
   const hoursBad = !(Number.isInteger(Number(hoursDraft)) && Number(hoursDraft) >= 1 && Number(hoursDraft) <= TABLE_HOURS_MAX);
   const saveCsv = () => {
     const blob = new Blob([tableCsv(res.rows, hours)], { type: 'text/csv;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = `idrac-servers_${hours}h.csv`;
-    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    saveBlob(blob, `idrac-servers_${hours}h.csv`);
   };
 
   const cell = (r, s) => {

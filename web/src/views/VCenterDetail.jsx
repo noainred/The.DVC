@@ -52,6 +52,7 @@ import { platformMenuLabel } from './platform/platformText.js'; // v2.994: 경�
 import VmDrawer from './vms/VmDrawer.jsx';
 import HostDrawer from './hosts/HostDrawer.jsx';   // v2.975 호스트도 드로어(시안 docs/design/host-drawer ①) // v2.911(시안 docs/design/vm-perf ①): 트리의 VM 클릭 = 가상화 서버와 같은 드로어(옛 VM 모달 대신)
 import { treeVmRows, treeHostRows } from './vcd/treeRows.js';
+import { saveBlob } from '../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나(즉시 revoke · 문서 밖 click 금지)
 
 /** 브라우저 저장소 — 사생활 모드 · 차단에서 접근만으로 throw 할 수 있다(규약: try/catch). 기억은 사람별 편의라 실패해도 화면은 동작한다. */
 function lsSafe() {
@@ -444,13 +445,8 @@ export default function VCenterDetail({ site, onBack, siblings = null, onOpen = 
     const rows = overview ? overviewRows : buildOverviewRows({ site, hosts, vms: visibleVms, metrics: m, vmCountByHost });
     // BOM 을 붙여야 Excel 이 UTF-8 한글을 깨지 않는다(다른 CSV export 와 동일 관례).
     const blob = new Blob(['﻿' + overviewCsv(rows)], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
     // 파일명에 Off VM 포함 여부를 남긴다 — 가상화율 기준이 다른 두 파일을 나중에 구분하려면 필요.
-    a.download = `vcenter-overview-${String(vcenterId).replace(/[^a-zA-Z0-9._-]+/g, '_')}-${inclPoweredOff ? 'all' : 'poweredon'}-${dayStamp()}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    saveBlob(blob, `vcenter-overview-${String(vcenterId).replace(/[^a-zA-Z0-9._-]+/g, '_')}-${inclPoweredOff ? 'all' : 'poweredon'}-${dayStamp()}.csv`);
   };
 
   // folder path -> vms (vSphere "VMs and Templates")

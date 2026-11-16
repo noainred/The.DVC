@@ -10,6 +10,7 @@ import { HorizonServerManager } from '../HorizonAdmin.jsx'; // v2.685: Horizon �
 import BoldText from '../../components/boldText.jsx';
 import { numOrNull } from '../../numOrNull.js';
 import { licensesUnreadNotes, solutionsUnreadCell, solutionsUnreadNote, expiryUnreadNote } from './licenseUnreadText.js'; // v2.742(VC-06): 목록을 못 읽은 vCenter
+import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나(즉시 revoke · 문서 밖 click 금지)
 
 
 /**
@@ -285,8 +286,7 @@ export function LicenseExpiry({ scope, isAdmin, initialData = null }) {
     const head = ['family', 'name', 'source', 'where', 'edition', 'productVersion', 'key', 'used', 'total', 'expires', 'daysLeft', 'status'];
     const lines = rows.map((i) => [i.family, i.name, i.source, i.where, i.edition, i.productVersion, i.key, i.used ?? '', i.total ?? '', i.expires || 'perpetual', i.daysLeft ?? '', statusLabel[i.status]]);
     const csv = [head, ...lines].map((r) => r.map(csvCell).join(',')).join('\n');
-    const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }));
-    const a = document.createElement('a'); a.href = url; a.download = 'license-expiry.csv'; a.click(); URL.revokeObjectURL(url);
+    saveBlob(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }), 'license-expiry.csv');
   };
 
   return (
