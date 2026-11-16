@@ -330,9 +330,20 @@
   - **공용 모듈 점검 10회(v3.10.3 ~ v3.10.12, 2026-11-15)** — 회차별 회귀는 `server/test/commonRound{1,2,3,4,5,9}_31xx.test.js` 와 웹 테스트(6 · 7 · 8 · 10회차)에 있다.
     되풀이된 결함: 결측을 `Number()`·`|| 0` 으로 0 으로 읽음(cmpVersion 빈 세그먼트 · fmt · vmMetricsText) · 보류 · 잠금에 시한 없음(exportBusy · 활동 신호) ·
     공용 헬퍼를 두고 직접 부름(클립보드 26줄 → `util/copyText.js` 만 — 웹 소스 스윕이 막는다) · 머리말이 코드와 다름(relTime · selectSort).
-    **남긴 것(다음 점검의 첫 후보)**: ① `JSON.parse(fs.readFileSync(F)) || {}` 형태가 도메인 저장소 32곳에 남아 객체가 아닌 JSON(`5`·`[]`)을 그대로 쓴다
+    **남긴 것(다음 점검의 첫 후보)**: ① ✅ **v3.17.2(2차 1회차)에 고쳤다** — 공용 `util/jsonObject.js parseJsonObject` 로 저장소 25곳 + runtime-settings 를 옮겼고 자체 판정이 있는 2곳(`central/assignments.js` · `gpu/settings.js` 배지 경로)만 사유와 함께 스윕 예외(`commonRound11_3172`). 원래 기록: `JSON.parse(fs.readFileSync(F)) || {}` 형태가 도메인 저장소 32곳에 남아 객체가 아닌 JSON(`5`·`[]`)을 그대로 쓴다
     (runtime-settings 는 v3.10.11 에 고쳤다 — 공용 '객체 JSON 읽기' 헬퍼로 옮길 후보, 비밀을 담는 저장소가 섞여 있어 한꺼번에 바꾸지 않았다)
     ② `bmFoldersText.ageText` · `hostSanText` 의 자체 상대시각(문턱이 다른 의도된 사본 — relTime 으로 합칠지는 화면 계약 확인 뒤).
+  - **2차 공용 모듈 점검 10회(v3.17.2 ~ v3.18.1, 2026-11-15 ~ 16)** — 회차별 회귀는 `server/test/commonRound{11,13,14,15,19,20}_31xx.test.js` 와 웹 테스트
+    (`sortableText` · `sharedFmt3174` · `pwaReady` · `hostBasicRows3177` · `worldMapText`)에 있다.
+    공용으로 모은 것: 내려받기 34곳 → `web/src/util/saveBlob.js`(createObjectURL · revoke 를 다른 곳에 쓰면 스윕이 막는다 · 파일 이름 판정은 api.js 하나) ·
+    양수 환경변수 35곳 + 지역 사본 3 → `util/envNumber.js envPositive`(음수 · Infinity 가 감사 로그를 지우고 로그인 잠금을 풀던 것) ·
+    403 안내의 권한 이름 표(`accessDeniedText.js PERM_LABEL`)는 서버 `PERMISSION_CATALOG` 와 테스트가 대조 · 표 정렬의 빈 값 판정(`sortableText.compareCellValues`).
+    되풀이된 결함: **결측을 0 으로 읽는 것이 화면 · 알림 쪽에 남아 있었다** — 호스트 상세 · 지도 알람 · 사양 변경 창 'RAM NaN→0GB' ·
+    오버커밋 알림과 vCenter 별 가상화율의 부분 합(모르는 호스트는 `store.hostCapacityKnown` 으로 따로 세고 판정을 보류 — **판정을 건너뛰면 발생 중인 알림 키를 `held` 에 넣을 것**, 빠지면 거짓 '해소' 가 난다: 9회차 자체 점검에서 잡았다) · 시한 없는 대기(`serviceWorker.ready` → `swReadyWithin`).
+    **남긴 것(다음 점검의 첫 후보)**: ① `SessionExpiryGuard` 남은 시간이 브라우저 시계 기준(`exp − Date.now()` — 시계가 틀린 PC 는 일찍 · 늦게 경고)
+    ② `readBodyPrefix` 의 스트림이 아닌 응답 폴백은 본문 전체를 읽는다(undici 응답은 스트림이라 실사용 경로는 아니라고 본다 — 추정)
+    ③ `listAudit` 가 요청 경로에서 감사 파일을 동기로 통째 읽는다 ④ 사양 변경 창 1440px 라벨 줄바꿈 · Summary 가상화율 창 400px 가로 스크롤(외형)
+    ⑤ 1차의 ②(상대시각 사본)는 그대로다.
 - **테스트가 띄운 프로세스를 PID 로 정리할 때는 소유를 확인하고 죽인다**(2026-10-26 PR #779 → v3.8.1 이식): `npm test` 는 파일을 병렬로 돌리므로, 로그에 남긴 PID 의
   프로세스가 이미 끝났다면 그 번호가 다른 테스트 파일의 자식에 재사용됐을 수 있다(이 컨테이너 `pid_max` 32768). 로그된 PID 를 무조건
   `process.kill` 하지 말 것 — 가짜 `ping` 은 `test/_fakePing.js`(`installFakePing(dir)` → `killOwned()`: exec 된 sleep 환경의

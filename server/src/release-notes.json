@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "3.18.1",
+      "date": "2026-11-16",
+      "title": "2차 공통 기능 점검 10회차: vCenter 별 가상화율의 부분 합",
+      "notes": [
+        "/summary 의 vCenter 별 행(byVcenter)에 '용량을 못 읽은 호스트' 수(hostsCapacityUnknown)를 싣는다 — 판정은 전체 합계(v2.771)와 같은 store.hostCapacityKnown 하나. 합(cpuCores · memTotalGB)은 예전 그대로(공개 API 대조 계약).",
+        "Summary 의 vCenter 별 가상화율 창: 용량을 못 읽은 호스트가 섞인 vCenter 는 분모(물리 코어 · RAM)가 부분 합이라 비율이 부풀었다 — 판정하지 않는다('—' · 미수집), 물리 칸 값 옆에 '*' 와 '호스트 N대 용량 미상 — 부분 합' 툴팁, 배지 툴팁도 같은 이유.",
+        "규칙 문서(docs/rules/common.md): 1차 점검의 '남긴 것 ①'(객체 아닌 JSON)을 고쳤다고 정정하고 2차 점검 요약 · 남긴 것 5건을 적었다.",
+        "회귀 server/test/commonRound20_3180.test.js · Chromium 1440/400 확인."
+      ]
+    },
+    {
       "version": "3.18.0",
       "date": "2026-11-16",
       "title": "서버 집중 모니터링 — 접속 자동 준비(수집 계정 · 공개키를 엣지 root 키로)",

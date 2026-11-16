@@ -233,8 +233,10 @@ api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
   // vCenter마다 hosts/vms/datastores 전체를 재필터하면 O(vCenter×N)이라 28×5,800으로 커진다.
   // 호스트/VM/DS를 vcenterId 기준으로 '1회' 그룹핑(O(N))한 뒤 누적한다(롤업 규칙).
   const acc = new Map(); // vcId -> { hosts, vms, vmsOn, cpuCores, memMB, dsCapGB, dsUnknown, vcpu, ramMB, provGB, powerW }
-  const bucket = (id) => { let b = acc.get(id); if (!b) { b = { hosts: 0, vms: 0, vmsOn: 0, cpuCores: 0, memMB: 0, dsCapGB: 0, dsCapAllGB: 0, dsUnknown: 0, vcpu: 0, ramMB: 0, provGB: 0, storageUnknown: 0, powerW: 0, powerN: 0 }; acc.set(id, b); } return b; };
-  for (const h of hosts) { const b = bucket(h.vcenterId); b.hosts++; b.cpuCores += h.cpuCores || 0; b.memMB += h.memTotalMB || 0; if (h.powerWatts > 0) { b.powerW += h.powerWatts; b.powerN++; } }
+  const bucket = (id) => { let b = acc.get(id); if (!b) { b = { hosts: 0, vms: 0, vmsOn: 0, cpuCores: 0, memMB: 0, dsCapGB: 0, dsCapAllGB: 0, dsUnknown: 0, vcpu: 0, ramMB: 0, provGB: 0, storageUnknown: 0, powerW: 0, powerN: 0, capUnknown: 0 }; acc.set(id, b); } return b; };
+  // 2차 공통 기능 점검 10회차: vCenter 별로도 전체 합계(v2.771 R6-F3-2 hostsCapacityUnknown)와 같은 판정으로 '용량을 못 읽은 호스트' 를 센다.
+  //   예전엔 그 수를 싣지 않아 Summary 의 vCenter 별 가상화율(할당 ÷ 물리)이 분모만 빠진 부분 합으로 부풀었다. 합(cpuCores · memTotalGB)은 예전 그대로(공개 API 대조 계약).
+  for (const h of hosts) { const b = bucket(h.vcenterId); b.hosts++; b.cpuCores += h.cpuCores || 0; b.memMB += h.memTotalMB || 0; if (!hostCapacityKnown(h)) b.capUnknown++; if (h.powerWatts > 0) { b.powerW += h.powerWatts; b.powerN++; } }
   // v2.727(C-01): provGB 는 읽은 VM 만, 못 읽은 수는 storageUnknown.
   for (const v of vms) { const b = bucket(v.vcenterId); b.vms++; if (v.powerState === 'POWERED_ON') b.vmsOn++; b.vcpu += v.cpuCount || 0; b.ramMB += v.memMB || 0; const sg = numOrNull(v.storageGB); if (sg == null) b.storageUnknown++; else b.provGB += sg; }
   // v2.631(AX2-01): vCenter 카드(롤업 storageTotalTB)와 같은 기준 — 사용량 미상 DS 는 용량에서 빼고 개수를 싣는다.
@@ -249,6 +251,7 @@ api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
       vmsPoweredOn: b.vmsOn,
       cpuCores: b.cpuCores,
       memTotalGB: round(b.memMB / 1024),
+      hostsCapacityUnknown: b.capUnknown,                 // 2차 공통 기능 점검 10회차: 용량을 못 읽어 cpuCores · memTotalGB 에서 뺀 호스트 수
       storageTotalTB: round(b.dsCapGB / 1024, 1),
       storageTotalTBAll: round(b.dsCapAllGB / 1024, 1),   // 미상 DS 포함 설치 용량(프로비저닝 비교용)
       datastoresUsageUnknown: b.dsUnknown,
