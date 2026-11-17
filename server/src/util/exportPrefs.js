@@ -79,7 +79,8 @@ export function createExportPrefs({ fileName, resolveCols, knownKeys, normalizeO
   function getPrefs(username) {
     const e = load()[ukey(username)] || null;
     const slots = Array.from({ length: SLOT_COUNT }, (_, i) => viewValue(e?.slots?.[i]));
-    return { def: viewValue(e?.def), slots, at: e?.at || null, ...(unreadable ? { unreadable: true } : {}) };
+    // 113회차 메인: 읽기 오류면 readError 를 함께 싣는다 — 화면이 '손상 사본이 남았다' 고 말하지 않게(읽기 오류는 보존본이 없고 원본이 그대로다).
+    return { def: viewValue(e?.def), slots, at: e?.at || null, ...(unreadable ? { unreadable: true, ...(readErr ? { readError: true } : {}) } : {}) };
   }
 
   function write(next) {

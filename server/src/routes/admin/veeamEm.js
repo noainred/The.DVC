@@ -11,7 +11,7 @@ import { pollEmOnce, emPollerStatus, emAuthGuard } from '../../veeam/em/poller.j
 import { testEm } from '../../veeam/em/client.js';
 import { withDeadline } from '../../util/deadline.js';
 import { summarizeRegistryError } from '../../util/registryCore.js';
-import { getEmMap, setEmMap, emMapUnreadable, dropEmMapFor, mapKey } from '../../veeam/em/mapping.js';
+import { getEmMap, setEmMap, emMapUnreadable, emMapReadError, dropEmMapFor, mapKey } from '../../veeam/em/mapping.js';
 import { mapBackupServers } from '../../veeam/em/view.js';
 import { listServers } from '../../veeam/registry.js';
 import { store } from '../../store.js';
@@ -66,7 +66,7 @@ export function emMappingView(ems, { recOf = getEmRecord, map = getEmMap(), brSe
     }
   }
   return {
-    rows, counts: bsCounts, unreadable: emMapUnreadable() || undefined,
+    rows, counts: bsCounts, unreadable: emMapUnreadable() || undefined, readError: emMapReadError() || undefined,
     vcenters: vcenters.map((v) => ({ id: v.id, name: v.name || v.id })).sort((a, b) => String(a.name).localeCompare(String(b.name), 'en', { numeric: true })),
     brServers: brServers.map((b) => ({ id: b.id, name: b.name, host: b.host, vcenterIds: b.vcenterIds || [] })),
   };
