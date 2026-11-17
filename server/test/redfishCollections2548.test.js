@@ -25,7 +25,8 @@ process.env.IDRAC_TIMEOUT_MS = '1500';
 const { fetchInventory } = await import('../src/idrac/redfish.js');
 
 /** fetchInventory 가 찍는 컬렉션 — COLLECTION_KINDS 에서 `fans` 만 뺀 것(fans 는 fetchSensors 경로). */
-const INV_COLLECTIONS = [...Object.keys(COLLECTION_KINDS).filter((k) => k !== 'fans'), 'system'].sort();   // 'system' = Systems 멤버(sysId) 확보 여부(v2.548 C3)
+// 93회차 F1: 'events' = 매니저 로그(SEL · LC) 를 읽었는가(파트 종류가 아니다 — 소비처는 bmusage/hwFacts selCritical · 스냅샷).
+const INV_COLLECTIONS = [...Object.keys(COLLECTION_KINDS).filter((k) => k !== 'fans'), 'system', 'events'].sort();   // 'system' = Systems 멤버(sysId) 확보 여부(v2.548 C3)
 /** 하위 호환 — 예전부터 있던 배열 필드. 실패해도 빈 배열이어야 한다(소비처가 `.length`·`.map` 을 그대로 쓴다). */
 const ARRAY_FIELDS = ['psus', 'disks', 'storageControllers', 'memoryDimms', 'cpus', 'gpus', 'pcie', 'nics', 'events', 'licenses', 'idracUsers', 'firmware', 'network'];
 
@@ -85,6 +86,7 @@ test('② 일부 컬렉션만 실패: 실패한 것만 failed, 멤버 0개인 �
     assert.equal(inv.reachable, true);
     assert.deepEqual(inv.collections, {
       system: 'ok', psus: 'ok', disks: 'failed', storageControllers: 'failed', memoryDimms: 'ok', cpus: 'ok', gpus: 'ok', pcie: 'failed',
+      events: 'failed',   // 93회차 F1: Managers 라우트 없음 → 매니저 id 없음 → 로그를 읽지 못했다(빈 events 는 '0건' 이 아니다)
     });
     // 메타가 기존 값을 바꾸지 않는다.
     assert.equal(inv.system.serviceTag, 'SYNTH0000001');
@@ -109,6 +111,7 @@ test('③ Systems 만 실패(sysId 없음): 시도조차 못 한 컬렉션은 fa
     assert.equal(inv.reachable, true, 'Chassis(psus) 가 응답했다 — 장비는 닿았다');
     assert.deepEqual(inv.collections, {
       system: 'failed', psus: 'ok', disks: 'failed', storageControllers: 'failed', memoryDimms: 'failed', cpus: 'failed', gpus: 'failed', pcie: 'failed',
+      events: 'failed',   // 93회차 F1
     });
     assert.deepEqual(inv.system, {}, 'identity 는 실패 — 기존과 같이 빈 객체');
     assert.equal(inv.psus.length, 1);

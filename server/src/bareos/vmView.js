@@ -102,6 +102,12 @@ export function bareosClass(b, { rpoDays = 1, now = Date.now() } = {}) {
  */
 export const relayWaiting = (poll) => !!poll && poll.ok == null && (poll.relay === 'sent' || poll.relay === 'pending');
 
+/**
+ * 53회차 N1 · 104회차: 상태 조회가 시한에 잘렸어도(aborted) 읽은 행이 있는가 — 판정 하나(현황판 · Summary 의 directorState · 일일 요약 메일 digest.js).
+ *   poll = 폴러의 Director 결과({ ok, code, checked }).
+ */
+export const partialPoll = (poll) => !!poll && poll.ok === false && poll.code === 'aborted' && Number(poll.checked) > 0;
+
 export function directorState({ mapped, configured, authStopped, poll } = {}) {
   let state;
   if (!mapped || !configured) state = 'unset';
@@ -113,7 +119,7 @@ export function directorState({ mapped, configured, authStopped, poll } = {}) {
   else state = 'pending';
   // 53회차 N1(재현): 상태 조회가 시한에 잘렸어도(aborted) 읽은 행은 원장에 반영됐다 — 고RTT 법인의 백업 창에서 늘 생기는 일이라
   //   그때마다 결과를 '모름' 으로 빼면 현황판 · 통합 화면이 빨간 표지 · 합계 제외로 흔들렸다. 상태(state 'error')는 그대로 두어 잘림을 밝힌다.
-  const partialOk = state === 'error' && poll?.code === 'aborted' && Number(poll?.checked) > 0;
+  const partialOk = state === 'error' && partialPoll(poll);
   // 55회차 #9(사용자 '남은 작업 수행' — 2026-11-17): 잘린 조회는 진행 중 실행의 회전(work)을 다 읽지 못했다 — 그 법인에서 **진행 중인 실행이 있는 VM** 은
   //   마지막으로 읽은 상태가 옛 값일 수 있어 결과(성공 · 실패 · 오래됨 · 없음)를 세지 않고 모름으로 센다(partial — corpCounts · priorityKind · 웹 rowMatches).
   return { state, resultsKnown: partialOk || !['unset', 'auth', 'error'].includes(state), ...(partialOk ? { partial: true } : {}) };

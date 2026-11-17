@@ -13,7 +13,6 @@
  * 시각: 미리보기(status scheduler)는 epoch 초라 시간대와 무관하다(실측). 볼륨 lastwritten 은 카탈로그(Director 현지) — 포탈 서버 현지로 읽는다(기존 규칙).
  * 엣지에서는 돌지 않는다(중앙 전용 — 엣지는 작업 표로 대행만 한다).
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
@@ -55,9 +54,13 @@ function empty() { return { version: 1, directors: {}, sched: { day: '', ok: nul
 
 export function loadPolicy() {
   if (_db) return _db;
+  // 97회차 F4: 읽기 단계는 등록부 공용 읽기(util/registryCore.js read)다 — 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니라 원본을 옮기지 않고 ·
+  //   캐시하지 않고(30초 간격 재읽기) · 오류(readError)를 세워 쓰기를 거절한다(persist 의 assertWritable). parse · 형식 실패만 아래 catch(예전과 같다 — 보존본).
+  const rr = _loadErr.read(FILE(), (t) => t);
+  if (rr.kind === 'read-error') return empty();
   try {
-    if (fs.existsSync(FILE())) {
-      const p = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    if (rr.kind === 'ok') {
+      const p = JSON.parse(rr.value);
       if (!isObj(p) || !isObj(p.directors)) throw new Error('형식 오류');
       const db = empty();
       for (const [id, d] of Object.entries(p.directors)) if (isObj(d)) db.directors[id] = d;
@@ -78,6 +81,7 @@ export function policyLoadError() { loadPolicy(); return _loadErr.get(); }
 export const policyRev = () => _rev;
 function persist() {
   const db = loadPolicy();
+  _loadErr.assertWritable('Bareos 정책 수집본(bareos-policy.json)'); // 97회차 F4: 마지막 방어선 — 읽기 오류 중에는 원본을 덮지 않는다(던진다 — status 409)
   atomicWriteFileSync(FILE(), JSON.stringify(db), { mode: 0o600 });
   _rev++; _loadErr.clear();
 }

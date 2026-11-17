@@ -439,18 +439,34 @@ function agentOwnsVcenter(agent, vcenterId) {
  * ⚠ 공유 토큰에도 적용한다 — 소유권(누가)이 아니라 **대상의 구조적 성질**(엣지가 수집하지 않는 vCenter)이라 토큰 종류와 무관하다.
  * @returns {string|null} 거부 사유 또는 null(허용)
  */
-let _vcModes = { at: 0, map: null };
+let _vcModes = { at: 0, map: null, unreadable: null };
 function vcCollectModes() {
   const now = Date.now();
   if (_vcModes.map && now - _vcModes.at < 5_000) return _vcModes.map;
   let map = null;
+  let unreadable = null;
   try {
     map = new Map();
-    for (const v of loadVcenterConfig().vcenters || []) if (v && v.id != null) map.set(String(v.id), (v.collectMode || 'direct') === 'site' ? 'site' : 'direct');
+    const cfg = loadVcenterConfig();
+    for (const v of cfg.vcenters || []) if (v && v.id != null) map.set(String(v.id), (v.collectMode || 'direct') === 'site' ? 'site' : 'direct');
+    // 96회차(95회차 추정 ③ 반증): loadVcenterConfig 는 파일이 있는데 못 읽으면(읽기 오류 · 손상 · 복호 실패) 던지지 않고 빈 목록을 준다 — 위 map 은 null 이
+    //   아니라 **빈 Map** 이라 '판정하지 않음' 이 아니라 모든 id 가 등록 밖(거부)이 된다. 수신 거부 자체는 안전측이지만 사유가 '등록되지 않은 vCenter' 로
+    //   틀리게 남는다 — 그 사실을 따로 기록한다(gpu-guest-data 는 503 registryUnreadable 로 답한다). 반환 모양은 그대로(다른 수신은 예전처럼 거부).
+    const f = path.join(config.configDir, 'vcenters.json');
+    if (!cfg.file && fs.existsSync(f)) {
+      // 읽기 단계 실패(EACCES · EIO · EISDIR)인지 형식 · 복호 실패인지만 가른다(원문 · 파일 조각은 싣지 않는다 — 조치가 다르다).
+      let sysCode = null;
+      try { fs.readFileSync(f); } catch (e) { sysCode = typeof e?.code === 'string' && /^E[A-Z]{2,15}$/.test(e.code) ? e.code : 'EIO'; }
+      unreadable = sysCode
+        ? { at: now, readError: true, reason: `${sysCode}: vcenters.json 을 읽지 못했습니다` }
+        : { at: now, reason: 'vcenters.json 을 해석하지 못했습니다(형식 · 복호 — 중앙 콘솔의 [config] 줄)' };
+    }
   } catch { map = null; }
-  _vcModes = { at: now, map };
+  _vcModes = { at: now, map, unreadable };
   return map;
 }
+/** 96회차: vCenter 등록부(vcenters.json)를 못 읽는 중이면 { at, reason }, 아니면 null(5초 캐시 — vcCollectModes 와 같은 읽기). */
+function vcRegistryUnreadable() { vcCollectModes(); return _vcModes.unreadable; }
 function edgeVcWriteDenied(vcenterId, { requireSite = false } = {}) {
   const modes = vcCollectModes();
   if (!modes) return null;
@@ -460,7 +476,7 @@ function edgeVcWriteDenied(vcenterId, { requireSite = false } = {}) {
   if (!mode && requireSite) return `vcenterId '${id.slice(0, 128)}' 는 중앙 vCenter 등록부에 사이트 위임(site)으로 등록돼 있지 않습니다 — 설정 › vCenter 에서 수집 방식을 '사이트 위임' 으로 등록하세요.`;
   return null;
 }
-export function _resetVcModesForTest() { _vcModes = { at: 0, map: null }; }
+export function _resetVcModesForTest() { _vcModes = { at: 0, map: null, unreadable: null }; }
 
 // 위임 잡(iDRAC 스캔·캡처) reqId 소유권 판정. reqId 는 예측가능(idscan_<time>_<seq>·cap_<time>_<seq>)
 // 하므로, 개별 토큰 agent 가 남의 reqId 로 진행/결과를 위조 주입하지 못하게 막는다. 공유 CENTRAL_TOKEN
@@ -1554,6 +1570,9 @@ centralRouter.post('/gpu-guest-data', requireCentral(), (req, res) => {
   const b = req.body || {};
   const agent = req.centralAuth.agent || String(b.agent && strAgent(b.agent) || ''); // v2.600 CEN2600-10: 글자일 때만(객체면 String() 이 던졌다)
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  // 96회차(95회차 추정 ③ — 반증 결과): 등록부를 못 읽는 동안은 direct-mode 봉인 · site 판정을 할 수 없다 — 예전에는 빈 등록부로 판정해 전 항목을
+  //   '등록되지 않은 vCenter' 로 버리고 200 이었다(엣지는 받아들여진 줄 앎 · 중앙 콘솔 사유가 틀림). 지속형 503 으로 답해 엣지가 다음 주기에 다시 보낸다.
+  if (registryUnreadable(res, vcRegistryUnreadable, 'vCenter')) return;
   // v2.591(3차 감사 PR-8): null·문자열 원소를 건너뛴다(v2.548 S1 규약) — `{"hosts":[null]}` 가 `h.hostId` TypeError → 500 이었다.
   const isObj = (x) => x && typeof x === 'object' && !Array.isArray(x);
   // v2.600(감사 CEN2600-01): 원소를 **아는 필드만** 좁혀 싣는다. 예전에는 utilPct 가 그대로 저장돼 객체 하나가 다음

@@ -22,6 +22,7 @@
  *
  * node:sqlite 미지원 환경은 no-op 폴백 — 수집·화면은 살고 DB 만 비활성(`available()` 이 밝힌다).
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import fs from 'node:fs';
 import { pushAll } from '../util/pushAll.js';
 import path from 'node:path';
@@ -59,7 +60,7 @@ let _tried = false;
 let _opening = null;   // 진행 중인 open 프라미스
 let _tick = 0;
 let _counts = null;    // { raw, daily, at } — dbStatus 의 COUNT(*) 캐시(아래 주석 참조)
-const COUNT_CACHE_MS = Math.max(0, Number(process.env.BMUSAGE_COUNT_CACHE_MS) || 60_000);
+const COUNT_CACHE_MS = Math.max(0, envPositive(process.env.BMUSAGE_COUNT_CACHE_MS, 60_000));
 
 /**
  * ⚠⚠ **진행 중인 open 을 공유한다**(v2.550 실화면 검증에서 잡은 결함): 예전에는 `_tried = true` 를
@@ -387,7 +388,7 @@ export async function migrationReadRule() {
  *   ‘원시만 있고 롤업·최신값은 아직’ 상태를 보지 못한다(서버 단위 원자성은 예전과 같다). 조각 사이의 서버는 이번 주기 적재가 끝났거나 아직 시작 전이다 —
  *   한 서버의 부분 합은 생기지 않는다(지금 시간·날 버킷은 원래 진행 중인 값이다). 두 커밋 사이에 프로세스가 끝나는 경우는 예전과 같이 _pend 보정이 덮는다.
  */
-export const INSERT_CHUNK_ROWS = Math.max(16, Number(process.env.BMUSAGE_INSERT_CHUNK_ROWS) || 256);
+export const INSERT_CHUNK_ROWS = Math.max(16, envPositive(process.env.BMUSAGE_INSERT_CHUNK_ROWS, 256));
 /** 서버 키별로 묶어(처음 나온 순서 · 서버 안 순서 유지) 무게(서버 행 + 장치 행 + 마운트 행)가 상한을 넘기 전에 조각을 끊는다. 서버 하나는 쪼개지 않는다(순수). */
 export function chunkByServer(rows = [], devices = [], mounts = [], maxRows = INSERT_CHUNK_ROWS) {
   const by = new Map();

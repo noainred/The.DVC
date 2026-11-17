@@ -13,6 +13,7 @@ import path from 'node:path';
 import { config } from '../../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js';
 import { makeSettingsLoadError } from '../../util/settingsLoadError.js';
+import { makeJsonFileReader, READ_RETRY_MS } from '../../util/jsonFileRead.js';   // 105회차 A5: 읽기 오류 ≠ 손상
 import { ROLES, itemOf } from './catalog.js';
 
 const FILE = () => path.join(config.configDir, 'bmusage-tuning.json');
@@ -54,13 +55,26 @@ function cleanRoleMap(m) {
   return out;
 }
 
+/*
+ * 105회차 A5(103 남긴 것 — 엣지 배포 설정 4개 · cvp/settings F20 과 같은 최소 수정): 예전 catch 하나는 **읽기 오류**(EACCES · EIO · EISDIR)도 손상으로 보고
+ *   원본을 `.corrupt.*` 로 옮겨, 재시작 뒤 '보존본만 있음' 이 되고 '기본값으로 확정'(빈 덮어쓰기) · 수동 복구로만 풀렸다. 이제 원본을 두고 · 캐시하지 않고
+ *   (30초 간격 재읽기 — 읽히면 재시작 · 확정 없이 풀림) · 표지 readError(확정 불가 · 판정 거부 · 저장 409). parse 실패는 예전과 같다.
+ */
+const _reader = makeJsonFileReader(FILE, { parse: (t) => t, preserve: false, tag: 'bmusage-tuning' });
 function load() {
   const mt = mtimeOf();
   if (_cache && mt === _mtime) return _cache;
+  if (!mt) { _mtime = mt; _err.missing(); _cache = { v: 1, all: bare(), corps: bare(), by: '', at: 0 }; return _cache; }
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') {
+    _err.readError(rr.error, { retryMs: READ_RETRY_MS });
+    _cache = null; _mtime = '';   // 캐시하지 않는다 — 판정 · 저장은 _err 로 거절된다
+    return { v: 1, all: bare(), corps: bare(), by: '', at: 0 };
+  }
   _mtime = mt;
-  if (!mt) { _err.missing(); _cache = { v: 1, all: bare(), corps: bare(), by: '', at: 0 }; return _cache; }
   try {
-    const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    if (rr.kind === 'missing') { _err.missing(); _cache = { v: 1, all: bare(), corps: bare(), by: '', at: 0 }; return _cache; }
+    const raw = JSON.parse(rr.value);
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('객체가 아닙니다');
     const corps = bare();
     for (const [vc, m] of Object.entries(raw.corps && typeof raw.corps === 'object' ? raw.corps : {})) {
@@ -109,7 +123,7 @@ export function overridesFor({ role = 'general', vcenterId = '' } = {}) {
  */
 export function saveTuningOverride({ scope = 'all', role, itemId, value } = {}, { by = '' } = {}) {
   load();
-  if (_err.get()) return { ok: false, unreadable: true, reason: _err.get().reason };
+  if (_err.get()) return { ok: false, unreadable: true, ...(_err.get().readError ? { readError: true } : {}), reason: _err.get().reason };   // 105회차 A5: 읽기 오류는 라우트 409
   if (!ROLES.includes(role)) return { ok: false, reason: `역할은 ${ROLES.join(' · ')} 중 하나입니다.` };
   const item = itemOf(itemId);
   if (!item) return { ok: false, reason: '모르는 항목입니다.' };
@@ -139,4 +153,4 @@ export function saveTuningOverride({ scope = 'all', role, itemId, value } = {}, 
   return { ok: true, prev: prev === undefined ? null : prev, next: clear ? undefined : (value === null ? null : String(value)), cleared: clear };
 }
 
-export function _resetTuningOverridesForTest() { _cache = null; _mtime = ''; _err.ok(); }
+export function _resetTuningOverridesForTest() { _cache = null; _mtime = ''; _err.ok(); _reader.reset(); }

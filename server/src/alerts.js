@@ -10,10 +10,10 @@
  * re-notifies after cooldown while still active, and notes resolution.
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from './util/atomicWrite.js';
+import { makeJsonFileReader, readJsonFile } from './util/jsonFileRead.js';   // 103회차 F12: 읽기 오류 ≠ 손상
 import { store, SITE_STALE_MS, hostCapacityKnown } from './store.js';
 import { logAudit } from './audit.js';
 import { resilientFetch } from './util/resilientFetch.js';
@@ -136,12 +136,33 @@ export function mergeRules(curRules = {}, bodyRules = {}) {
 }
 
 let cache = null;
+/*
+ * 103회차 F12(재현 — EISDIR): 예전 catch 하나는 **읽기 오류**도 손상으로 보고 원본(채널 · 봉인된 웹훅 주소 · 규칙 임계)을 `.corrupt.*` 로 옮긴 뒤 기본값을 캐시했다 —
+ *   권한을 고쳐도 재시작 전까지 알림이 기본값(채널 꺼짐)으로 돌았고, 다음 저장이 그 기본값 위에 웹훅 주소 없는 파일을 썼다.
+ *   읽기 단계는 공용 읽기(util/jsonFileRead.js — 30초 간격 재읽기): 읽기 오류는 원본을 두고 · 기본값을 **캐시하지 않고** · 저장을 409 로 거절한다.
+ *   parse · 복호 실패는 예전과 같다(보존본 + 기본값).
+ */
+const _cfgReader = makeJsonFileReader(() => FILE, { parse: (t) => t, preserve: false, tag: 'alerts' });
+let _cfgReadErr = null;   // { at, code }
+/** 103회차 F12: 알림 설정 읽기 오류 중의 쓰기 거절(라우트 409) 또는 null. */
+export function alertConfigWriteRefusal() {
+  loadAlertConfig();
+  if (!_cfgReadErr) return null;
+  return { ok: false, status: 409, code: 'settings-unreadable', readError: true,
+    reason: `알림 설정 파일(${path.basename(FILE)})을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류(${_cfgReadErr.code})이고 원본(웹훅 주소 포함)은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` };
+}
 export function loadAlertConfig() {
   if (cache) return cache;
+  const rr = _cfgReader.read();
+  if (rr.kind === 'read-error') {
+    if (!_cfgReadErr) _cfgReadErr = { at: Date.now(), code: String(rr.error?.code || 'read-error').slice(0, 32) };
+    return structuredClone(DEFAULTS);   // 캐시하지 않는다 — 저장은 saveAlertConfig 가 거절한다
+  }
+  _cfgReadErr = null;
   cache = structuredClone(DEFAULTS);
   try {
-    if (fs.existsSync(FILE)) {
-      const s = openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8')), URL_SECRET_FIELDS);
+    if (rr.kind === 'ok') {
+      const s = openSecretsDeep(JSON.parse(rr.value), URL_SECRET_FIELDS);
       cache = {
         channels: {
           slack: { ...DEFAULTS.channels.slack, ...s.channels?.slack },
@@ -163,6 +184,8 @@ export function loadAlertConfig() {
   return cache;
 }
 export function saveAlertConfig(body = {}) {
+  const ref = alertConfigWriteRefusal();   // 103회차 F12
+  if (ref) throw Object.assign(new Error(ref.reason), { status: 409, code: ref.code, readError: true });
   const cur = loadAlertConfig();
   const next = {
     channels: {
@@ -742,8 +765,12 @@ let _restored = null;   // key -> { since, lastNotified, resolvedAt?, retries? }
 function loadAlertState() {
   if (_restored) return _restored;
   _restored = new Map();
+  // 103회차 F12: 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 원본을 보존본으로 옮기지 않는다(발송 상태라 빈 상태로 시작하고 다음 저장이 다시 쓴다).
+  const rr = readJsonFile(STATE_FILE, { parse: (t) => t, preserve: false });
+  if (rr.kind === 'read-error') { console.warn(`[alerts] 상태 파일을 읽지 못했습니다(읽기 오류 ${String(rr.error?.code || '').slice(0, 32)}) — 원본은 옮기지 않고 빈 상태로 시작합니다`); return _restored; }
   try {
-    const j = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+    if (rr.kind === 'missing') { const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; }
+    const j = JSON.parse(rr.value);
     for (const [k, v] of Object.entries(j?.firing || {})) {
       if (v && Number.isFinite(v.since)) {
         const e = { since: v.since, lastNotified: Number(v.lastNotified) || 0 };
@@ -785,6 +812,10 @@ function saveAlertStateSoon() {
   _stateTimer.unref?.();
 }
 registerExitFlush('alerts-state', () => { if (_stateTimer) writeAlertStateNow(); });
+/** 테스트 전용(103회차) — 알림 설정 캐시 · 읽기 오류 표지. */
+export function _resetAlertConfigForTest() { cache = null; _cfgReadErr = null; _cfgReader.reset(); }
+/** 테스트 전용(103회차) — 상태 파일을 읽어(첫 평가와 같은 경로) 이어받을 항목 수를 돌려준다. */
+export function _loadAlertStateForTest() { return loadAlertState().size; }
 export function _resetAlertStateForTest() { firing.clear(); _restored = null; _pendingSend.clear(); clearTimeout(_stateTimer); _stateTimer = null; }
 export { refreshState as _refreshStateForTest, writeAlertStateNow as _writeAlertStateForTest };
 const recent = [];          // recent notifications (in-memory, newest first)

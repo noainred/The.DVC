@@ -756,7 +756,7 @@ tbody tr:last-child td { border-bottom: none; }
    기존 다크 테마 토큰만 재사용(--panel·--border·--text·--text-dim·--accent·--amber·--red). */
 .collector-diag-section-title {
   font-size: 12px; font-weight: 700; margin: 14px 0 6px; color: var(--text-dim);
-  text-transform: uppercase; letter-spacing: .4px;
+  letter-spacing: .4px;   /* 96회차: text-transform uppercase 제거(루트 규칙 — 문구가 대소문자를 정한다 · 지금 제목은 전부 한글) */
 }
 .collector-diag-section-title:first-of-type { margin-top: 0; }
 .collector-diag-banner {
@@ -957,9 +957,9 @@ tbody tr:last-child td { border-bottom: none; }
 }
 /* 콘솔 헤더가 '글로벌 현황' 섹션 라벨을 겸하므로, 그 아래 첫 섹션 타이틀(지도 위)만 위 여백 축소 */
 .ov .kpis + .section-title { margin-top: 18px; }
-.ov-console-label { font-family: var(--mono); font-size: 12px; letter-spacing: .26em; color: var(--text-dim); text-transform: uppercase; }
+.ov-console-label { font-family: var(--mono); font-size: 12px; letter-spacing: .26em; color: var(--text-dim); }
 .ov-console-label b { color: var(--mint); margin-right: 10px; font-weight: 400; }
-.ov-console-status { font-family: var(--mono); font-size: 11px; letter-spacing: .16em; color: var(--text-faint); display: flex; align-items: center; gap: 8px; text-transform: uppercase; }
+.ov-console-status { font-family: var(--mono); font-size: 11px; letter-spacing: .16em; color: var(--text-faint); display: flex; align-items: center; gap: 8px; }
 .ov-console-status i { width: 7px; height: 7px; border-radius: 50%; background: var(--mint); box-shadow: 0 0 8px var(--mint-dim); animation: ovPulse 2.4s ease-in-out infinite; }
 .ov-console-status b { color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums; }
 @keyframes ovPulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }

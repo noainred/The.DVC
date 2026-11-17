@@ -5,6 +5,7 @@ import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
 import { guardCell } from '../../util/csv.js';
 import { store } from '../../store.js';
 import { config, loadVcenterConfig } from '../../config.js';
+import { envPositive } from '../../util/envNumber.js';
 import { scanResultList, getIpHistoryMap } from '../../ipam/scanStore.js';
 import { snapshotFilter, slimVm, filterScanResults } from '../../search/deepSearch.js';
 import { getServiceCheck } from '../../health/services.js';
@@ -16,6 +17,13 @@ import { logAudit } from '../../audit.js';
 import { getNetworkCheck } from '../../health/network.js';
 import { buildVmwareConfigExport } from '../../backup/vmwareExport.js';
 import { getLogsDb } from '../../logs/db.js';
+import { logSettingsUnknown } from '../../logs/settings.js';   // 96회차 R1: 설정을 못 읽는 동안 저장 위치를 모른다 — 기본 위치 DB 를 열어 '로그 없음' 을 보이지 않는다
+
+/** 96회차 R1(92회차 남긴 것 ④): 로그 보관 설정 읽기 오류 중의 조회 거절 본문(503 — 엣지 계약 형식: reason 영문 코드 · detail 한국어 조치) 또는 null. */
+export function vcLogsUnreadableBody() {
+  if (!logSettingsUnknown()) return null;
+  return { ok: false, reason: 'settingsUnreadable', detail: 'vCenter 로그 보관 설정 파일을 읽지 못해 로그 저장 위치를 모릅니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽습니다). 로그가 없다는 뜻이 아닙니다.' };
+}
 import { enqueueLogQuery, getLogQueryResult, bindingOfReq } from '../../central/logQueries.js';
 import { listInventory } from '../../central/inventory.js';
 import { getAllGpuGuestDiag } from '../../central/gpuGuestDiag.js';
@@ -381,6 +389,7 @@ api.get('/tools/vclogs/federate', requirePerm('tools'), (req, res) => {
 });
 // vCenter 장기 보관 로그 조회 — 필터: vcenterId·severity·q·since·until + 페이징.
 api.get('/tools/vclogs', requirePerm('tools'), async (req, res) => {
+  { const no = vcLogsUnreadableBody(); if (no) return res.status(503).json(no); }   // 96회차 R1
   try {
     const db = await getLogsDb();
     const f = { vcenterId: req.query.vcenterId || '', severity: req.query.severity || '', q: req.query.q || '',
@@ -411,6 +420,7 @@ api.get('/tools/vclogs', requirePerm('tools'), async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 api.get('/tools/vclogs/export.csv', csvPerm, requirePerm('tools'), async (req, res) => {
+  { const no = vcLogsUnreadableBody(); if (no) return res.status(503).json(no); }   // 96회차 R1: 빈 CSV 를 '로그 없음' 처럼 주지 않는다
   try {
     const db = await getLogsDb();
     const f = { vcenterId: req.query.vcenterId || '', severity: req.query.severity || '', q: req.query.q || '',
@@ -420,7 +430,7 @@ api.get('/tools/vclogs/export.csv', csvPerm, requirePerm('tools'), async (req, r
     // 과거: 10만 행 1회 조회 + 전체 join → 수십 MB 문자열을 만드는 동안 이벤트 루프 정지.
     // gpuSeriesExport 패턴: 청크 조회 + res.write 스트리밍 + 청크 사이 setImmediate 양보 +
     // 행 상한(초과 시 잘림을 CSV 안에 명시 — 잘린 결과를 완전한 것처럼 주지 않는다).
-    const MAX = Math.max(1000, Number(process.env.VCLOGS_EXPORT_MAX_ROWS) || 100_000);
+    const MAX = Math.max(1000, envPositive(process.env.VCLOGS_EXPORT_MAX_ROWS, 100_000));   // 102회차: Infinity → 기본값(행 상한이 꺼지지 않게)
     const CHUNK = 20_000;
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="vcenter-logs-${todayStamp()}.csv"`);

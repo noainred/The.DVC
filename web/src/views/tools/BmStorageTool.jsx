@@ -23,6 +23,7 @@ import Select from '../../components/Select.jsx';
 import { useHashTab } from '../../hooks/useHashTab.js'; // v2.915: 하위 탭(현황 · SAN 비교) — 주소 #/tools/bm-storage/compare
 import BmSanCompare from './BmSanCompare.jsx';          // v2.915: SAN 비교 탭(시안 docs/design/bm-san-compare)
 import BmCompareSet from './BmCompareSet.jsx';          // v2.962: 비교 세트 탭 — SAN · 베어메탈 서버 · 그룹 · 법인 합계를 2~4개 섞어 비교
+import { backdropClose } from '../../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만
 
 // 바이트 → 사람이 읽는 용량(TB/GB). 합산값이 크므로 TB 우선.
 const fmtBytes = (b) => {
@@ -392,7 +393,7 @@ export default function BmStorageTool() {
 
       {/* 서버 추가/수정 — 컬럼 형식 접속 정보 + 마운트 포인트 목록(줄바꿈 구분) */}
       {form && (
-        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget && !busy) setForm(null); }}>
+        <div className="modal-overlay" {...backdropClose(() => setForm(null), { disabled: busy })}>
           <EscClose onClose={() => { if (!busy) setForm(null); }} />
           <div className="modal card" style={{ maxWidth: 620 }}>
             <h3 style={{ marginTop: 0 }}>{form.id ? `서버 수정 — ${form.name || form.host}` : '서버 추가'}</h3>

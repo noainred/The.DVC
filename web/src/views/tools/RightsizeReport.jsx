@@ -20,6 +20,7 @@ import { TEMPLATES, localPhaseText, fmtSec, coverageText } from '../vmSeriesText
 // v2.578 D2·D3: 요청 기간이 프리셋으로 내려앉은 사실과 '기간 = 해상도' 인과를 화면이 말한다.
 import { normalizedDaysNote, resolutionNote, sourceNote } from '../trendMeta.js';
 import Select from '../../components/Select.jsx';
+import { backdropClose } from '../../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만
 
 /** 게스트 디스크 응답을 PDF 블록으로(게스트 디스크 상세 PDF 와 같은 구성, 파티션별 차트는 생략). */
 function guestDiskBlocks(gd, days) {
@@ -251,7 +252,7 @@ export default function RightsizeReport({ vm, onClose }) {
   };
 
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="modal-overlay" {...backdropClose(() => onClose())}>
       <EscClose onClose={onClose} />
       <div ref={sheetRef} className="modal card" style={{ maxWidth: 1100, width: '96vw', maxHeight: '92vh', overflowY: 'auto', overflowX: 'hidden' }}>
         {/* v2.496: 툴바는 줄바꿈된다. v2.481 에서 기간 버튼이 5개로 늘며 이 줄이 모달 폭을 넘쳐 가로 스크롤이

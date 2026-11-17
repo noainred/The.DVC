@@ -225,7 +225,11 @@ export async function pollOnce({ trigger = 'timer', reconcile = null, directorId
       _last = { ...EMPTY_LAST, at, trigger, configured: false };
       return pollerStatus();
     }
-    _tick += 1;
+    // 104회차(101회차 F2 반증 — 재현): 주기 대조 차례는 **주기 틱만** 센다. 예전에는 수동 조회도 _tick 을 세어 ① 범위 · 조회 전용 계정의 수동 조회가 차례를 차지하면
+    //   빠진 Director 대조가 10틱 밀렸고(101 F2) ② 101 F2 의 보정(_reconcileDue)은 반대로 범위 계정이 '지금 조회' 를 9번 누를 때마다 다른 법인 Director 대조를
+    //   다음 주기 틱으로 당겨(주기 대조 10분 → 1분 — WAN 800ms+ Director 에 .jobs · list jobs) v2.823 S1('범위 계정의 지금 조회는 다른 법인 Director 에 접속 · 대조를
+    //   일으키지 않는다')을 어겼다. 수동 조회는 대조를 자기 몫(trigger 'manual' → doReconcile)으로만 하고 주기 차례를 건드리지 않는다.
+    if (trigger === 'timer') _tick += 1;
     if (_reconcileAll) { for (const d of ready) _reconcileDue.add(d.id); _reconcileAll = false; }
     const doReconcile = reconcile ?? (trigger !== 'timer' || _tick % RECONCILE_EVERY === 1);
     const modeOk = (x) => (demo ? x.demo : !x.demo);

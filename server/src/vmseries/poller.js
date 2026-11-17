@@ -26,7 +26,7 @@ import { isMockVcenter } from '../mock/generator.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { withJob } from '../perf/monitor.js';
 import { describeError } from '../util/errors.js';
-import { loadVmSeriesSettings, onVmSeriesSettingsChange } from './settings.js';
+import { loadVmSeriesSettings, onVmSeriesSettingsChange, vmSeriesSettingsLoadError, VMSERIES_LIMITS } from './settings.js';
 import { resolveTargets, vcenterSelected } from './scope.js';
 import { collectVcenterSpikes } from './collect.js';
 import { commitVmSeries, loadCursors, pruneVmSeries, vmSeriesFreeBytes, setVmSeriesMeta, vmSeriesDiskUsage } from './db.js';
@@ -76,7 +76,8 @@ export function runVmSeriesPrune(reason = 'manual') {
     return pruneFlight;
   }
   const started = Date.now();
-  const days = loadVmSeriesSettings().retentionDays;
+  // 103회차 F21: 설정을 못 읽는 동안(읽기 오류 · 손상)은 기본 보존일로 지우지 않고 저장 상한으로만 정리한다(83 R1 '멈춤에도 상한' · 97 F14 와 같은 모양).
+  const days = vmSeriesSettingsLoadError() ? VMSERIES_LIMITS.maxRetentionDays : loadVmSeriesSettings().retentionDays;
   pruneFlightDays = days;
   pruneFlight = (async () => {
     let deleted = 0; let files = 0; const errors = [];

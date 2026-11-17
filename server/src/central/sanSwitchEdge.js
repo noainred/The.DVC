@@ -4,6 +4,7 @@
  * (central-agent-* 는 .gitignore 와일드카드로 이미 커밋 차단).
  * 저장 키는 라우트가 req.centralAuth.agent 로 강제한다(agent 바인딩 — server/CLAUDE.md).
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
@@ -271,5 +272,5 @@ export function edgeSanSwitchSnapshotFor(deviceId) {
   return hit ? { ...hit, agent: hitAgent, pushedAt: hitAt, staleMs: hitAt ? Date.now() - hitAt : null } : null;
 }
 /** 등록부에서 빠진 장비(orphan)의 엣지 보관분을 목록에서 내리는 기준 — 기본 7일(보고가 끊긴 엣지의 유령 스위치). */
-export const ORPHAN_TTL_MS = Math.max(3_600_000, Number(process.env.CENTRAL_SANSW_ORPHAN_TTL_MS) || 7 * 86_400_000);
+export const ORPHAN_TTL_MS = Math.max(3_600_000, envPositive(process.env.CENTRAL_SANSW_ORPHAN_TTL_MS, 7 * 86_400_000));
 export function _resetForTest() { _map = null; _lastRec.clear(); }

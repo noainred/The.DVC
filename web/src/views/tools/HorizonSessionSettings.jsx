@@ -80,6 +80,12 @@ export function HorizonSessionSettings({ onClose }) {
     const setServer = (id, on) => setS((p) => ({ ...p, servers: { ...(p.servers || {}), [id]: { enabled: on } } }));
     return (
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 12, minWidth: 0 }}>
+        {/* 90회차 F3: 설정 파일을 못 읽어 기본값(꺼짐)으로 도는 중이면 밝힌다 — 읽기 오류면 저장은 서버가 거절한다(원본 보호). */}
+        {src.loadError && (
+          <div style={{ border: '1px solid var(--amber)', borderRadius: 8, padding: '8px 10px', fontSize: 12.5, color: 'var(--text-dim)', whiteSpace: 'normal', lineHeight: 1.55, minWidth: 0 }}>
+            <b style={{ color: 'var(--amber)' }}>설정 파일을 읽지 못해 기본값(수집 꺼짐)으로 동작 중입니다</b> — {src.loadError.reason || '사유 미상'}
+          </div>
+        )}
         <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontWeight: 700 }}>
           <input type="checkbox" checked={s.enabled === true} onChange={(e) => setS({ ...s, enabled: e.target.checked })} />
           Horizon 실시간 사용자 수집 켜기

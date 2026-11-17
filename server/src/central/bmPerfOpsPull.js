@@ -8,6 +8,7 @@
  *   · 중앙은 받기만 한다(복제 적재 없음 — 상세는 볼 때 당긴다 · 설계 §13 ‘중앙은 요약만 봉투로’).
  * 이슈: 엣지 봉투의 발송 기록 중 ‘pending-central’(엣지 규칙이 이슈를 원함)을 **중앙의 문지기**(중앙 규칙의 같은 규칙 issue 켬 · 하루 상한 · 법인 예외)로 판단해 만든다(ingestEdgeAlertIssues).
  */
+import { envPositive, ENV_INT_MAX } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { pullFromEdge } from './edgePull.js';
 import { strOf } from '../util/coercionTrap.js';
 import { numOrNull } from '../util/numOrNull.js';
@@ -19,7 +20,7 @@ import { RULE_IDS as PERF_RULE_IDS, loadPerfRules } from '../bmusage/perfRules.j
 import { parseRackKey, rackKeyOf } from '../bmusage/powerAlerts.js';
 
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
-const TIMEOUT_MS = Math.max(5_000, Number(process.env.BMUSAGE_PULL_TIMEOUT_MS) || 20_000);
+const TIMEOUT_MS = Math.max(5_000, envPositive(process.env.BMUSAGE_PULL_TIMEOUT_MS, 20_000, { max: ENV_INT_MAX }));
 /**
  * 이 엔드포인트들을 내주기 시작한 엣지 버전 — **릴리스 노트(사실의 원천)에서 읽는다**(반증 F15 · v2.933 bmUsageMinEdgeVersion 와 같은 사고 방지).
  *   제목에 ‘리눅스 통합 성능 모니터링 5단계’ 가 든 가장 낮은 게시 번호 · 노트에 아직 없으면(개발 중 · 릴리스 직전) 지금 실행 중인 package.json 번호.

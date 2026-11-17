@@ -47,10 +47,15 @@ function load() {
 export function emRegistryWriteRefusal() { load(); return loadErr.writeRefusal(WHAT); }
 function assertWritable() { load(); loadErr.assertWritable(WHAT); }
 
-function persist() {
+function persist(ems = load().ems) {
   loadErr.assertWritable(WHAT); // 결정(78 남긴 것 ①): 마지막 방어선 — 읽기 오류 중에 원본을 덮지 않는다(던진다)
-  atomicWriteFileSync(FILE(), JSON.stringify(sealSecretsDeep({ version: 1, ems: load().ems }), null, 2), { mode: 0o600 });
+  atomicWriteFileSync(FILE(), JSON.stringify(sealSecretsDeep({ version: 1, ems }), null, 2), { mode: 0o600 });
   loadErr.clear();
+}
+/** 94회차 F1(형제 — veeam/registry.js commit 과 같은 규칙): 새 목록을 먼저 쓰고 성공했을 때만 메모리에 반영한다(쓰기 실패 뒤 메모리만 새 접속처 · 비밀번호로 돌지 않게). */
+function commit(db, next) {
+  persist(next);
+  db.ems = next;
 }
 
 const redact = ({ password, ...d }) => ({ ...d, hasPassword: !!password });
@@ -91,7 +96,7 @@ export function saveEm(input = {}) {
   const username = String(input.username || '').trim();
   const existing = input.id ? db.ems.find((d) => d.id === input.id) : null;
   if (input.id && !existing) throw new Error('Enterprise Manager 를 찾을 수 없습니다.');
-  const dev = existing || { id: `vem-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, createdAt: Date.now() };
+  const dev = existing ? { ...existing } : { id: `vem-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, createdAt: Date.now() };   // 94회차 F1: 사본 위에서
   const moved = !!existing && accessMoved({ host: existing.host, port: String(existing.port || DEFAULT_EM_PORT), username: existing.username || '' },
     { host, port: String(port), username }, ['host', 'port', 'username']);
   const password = String(input.password ?? '');
@@ -107,11 +112,8 @@ export function saveEm(input = {}) {
     name: String(input.name || '').trim(), host, port, username,
     enabled: input.enabled !== false, note: String(input.note || '').slice(0, 200),
   });
-  if (!existing) {
-    if (db.ems.length >= MAX_EMS) throw new Error(`Enterprise Manager 는 최대 ${MAX_EMS}대까지 등록할 수 있습니다.`);
-    db.ems.push(dev);
-  }
-  persist();
+  if (!existing && db.ems.length >= MAX_EMS) throw new Error(`Enterprise Manager 는 최대 ${MAX_EMS}대까지 등록할 수 있습니다.`);
+  commit(db, existing ? db.ems.map((d) => (d === existing ? dev : d)) : [...db.ems, dev]);
   return { ...redact(dev), ...(droppedSecrets.length ? { droppedSecrets } : {}), ...(moved ? { moved: true } : {}) };
 }
 
@@ -120,7 +122,7 @@ export function deleteEm(id) {
   const db = load();
   const i = db.ems.findIndex((d) => d.id === id);
   if (i < 0) return false;
-  db.ems.splice(i, 1); persist();
+  commit(db, db.ems.filter((_, k) => k !== i));   // 94회차 F1
   return true;
 }
 

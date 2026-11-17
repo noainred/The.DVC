@@ -22,6 +22,7 @@ import {
 } from './sshAccessText.js';
 import './sshAccess.css';
 import { copyText as copyToClipboard } from '../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
+import { backdropClose } from '../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만
 
 const errText = (e) => e?.body?.reason || e?.message || String(e);
 /** 쓰기 응답 — ok:false(400 · 409 를 던지지 않는 api.js 경로)를 오류로 바꾼다. */
@@ -276,7 +277,7 @@ function KeyPicker({ server, catalog, onClose, say }) {
   const chosenKey = (c?.keys || []).find((k) => k.id === choice);
   const noCollect = chosenKey && Array.isArray(chosenKey.features) && !COLLECT_FEATURES.some((f) => chosenKey.features.includes(f));
   return (
-    <div className="ssa-modal-back" role="presentation" onClick={(e) => { if (e.target === e.currentTarget) onClose(readDone.current); }}>
+    <div className="ssa-modal-back" role="presentation" {...backdropClose(() => onClose(readDone.current))}>
       <div className="ssa-modal" role="dialog" aria-modal="true" aria-labelledby="ssa-pick-t">
         <div className="ssa-modal-h">
           <h4 id="ssa-pick-t">{server.name} — 쓸 키 고르기</h4>

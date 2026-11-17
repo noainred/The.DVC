@@ -186,7 +186,8 @@ export function SnapshotAge({ scope }) {
             rows.map((r) => [r.name, r.vcenterId, r.ageDays ?? '', r.oldestTs ? new Date(r.oldestTs).toISOString() : '', r.snapshotCount, r.snapshotSizeGB, r.powerState]))}>CSV</button>}
         </div>
       </div>
-      <ResultCount count={rows.length} />
+      {/* 95회차: ResultCount 에는 count 인자가 없다 — '총 0개' 로만 보였다(total 기본값 0) */}
+      <ResultCount total={rows.length} label="스냅샷 보유 VM" />
       <DataTable columns={columns} rows={rows} initialSort={{ key: 'ageDays', dir: 'desc' }} emptyText="조건에 맞는 스냅샷 보유 VM이 없습니다." />
       <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>생성일은 vCenter 스냅샷 트리의 createTime 기준입니다(수집 주기 내 최신).</p>
     </>

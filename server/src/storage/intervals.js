@@ -23,13 +23,13 @@
  *     수집이 끝나기 전에 다음 주기가 오고 재진입 가드에 막혀 '설정만 바뀌고 실효 없음'이 된다.
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { startAdaptiveTimer as baseAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { agentValueOf } from '../util/agentKey.js';
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';
+import { makeJsonFileReader, READ_RETRY_MS } from '../util/jsonFileRead.js';   // 105회차 A5: 읽기 오류 ≠ 손상
 
 /** 조정 가능한 주기 항목. min/def 는 서버가 단일 소스 — UI 가 이 표를 받아 폼을 그린다. */
 export const INTERVAL_SPEC = [
@@ -164,11 +164,24 @@ const _loadErr = makeSettingsLoadError(() => FILE, { label: '스토리지 수집
 /** 설정 파일을 못 읽었으면 { at, reason }, 읽었으면 null. */
 export function storageIntervalsLoadError() { load(); return _loadErr.get(); }
 
+/*
+ * 105회차 A5(103 남긴 것 — cvp/settings F20 과 같은 최소 수정): 예전 catch 하나는 **읽기 오류**(EACCES · EIO · EISDIR)도 손상으로 보고 원본을 `.corrupt.*` 로 옮겼다 —
+ *   재시작 뒤 '보존본만 있음' 이 되고, 관리자 저장(전체 교체 · 오류 검사 없음)이 빈 설정 위에 쓴 값으로 엣지별 주기를 잃었다.
+ *   이제 원본을 두고 · 캐시하지 않고(30초 간격 재읽기 — 읽히면 재시작 · 확정 없이 풀림) · 표지 readError(배포에 intervals 를 싣지 않음은 그대로 · 확정 불가) · 저장 409.
+ */
+const _reader = makeJsonFileReader(() => FILE, { parse: (t) => t, preserve: false, tag: 'storage-intervals' });
+/** 105회차 A5: 읽기 오류 중 저장 거절 사유(라우트 409), 아니면 null. */
+export function storageIntervalsWriteRefusal() {
+  const le = storageIntervalsLoadError();
+  return le?.readError ? { ok: false, status: 409, code: 'settings-unreadable', readError: true, reason: '스토리지 수집 주기 파일(storage-intervals.json)을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).' } : null;
+}
 function load() {
   if (_db) return _db;
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') { _loadErr.readError(rr.error, { retryMs: READ_RETRY_MS }); return { global: {}, agents: {} }; }   // 캐시하지 않는다 — 저장은 409
   try {
-    if (fs.existsSync(FILE)) {
-      const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    if (rr.kind === 'ok') {
+      const p = JSON.parse(rr.value);
       if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('객체가 아닌 JSON 값');
       _db = {
         global: normalizeIntervals(p.global || {}).values,
@@ -192,6 +205,7 @@ export function loadIntervalConfig() { const d = load(); return { global: { ...d
  * — registry.js 의 agent '' 규약과 같다.
  */
 export function saveIntervalConfig({ global = {}, agents = {} } = {}) {
+  { const ref = storageIntervalsWriteRefusal(); if (ref) throw Object.assign(new Error(ref.reason), { status: 409, code: ref.code, readError: true }); }   // 105회차 A5
   const issues = [];
   const g = normalizeIntervals(global);
   issues.push(...g.issues);
@@ -232,4 +246,4 @@ export function applyOwnIntervals() {
   return applyCentralIntervals(intervalsForAgent(''));
 }
 
-export function _resetForTest() { _db = null; _override = {}; _overrideAt = 0; _loadErr.ok(); }
+export function _resetForTest() { _db = null; _override = {}; _overrideAt = 0; _loadErr.ok(); _reader.reset(); }

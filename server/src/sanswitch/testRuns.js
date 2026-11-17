@@ -12,6 +12,7 @@
  * 보안: 비밀번호는 run 객체 안(인메모리)에만 있고 GET 응답·결과에는 절대 넣지 않는다(sanitize). 결과 회신은
  * 요청을 받은 그 agent 만 할 수 있다(개별 토큰 바인딩 대조). TTL 30분, 동시 실행 상한 10.
  */
+import { envPositive, ENV_INT_MAX } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import crypto from 'node:crypto';
 import { testDeviceConnection } from './poller.js';
 import { classifyFailure } from './testDiag.js';
@@ -20,8 +21,8 @@ import { numOrNull } from '../util/numOrNull.js';
 
 const TTL_MS = 30 * 60_000;
 const MAX_ACTIVE = 10;
-const EDGE_PICKUP_MS = Math.max(60_000, Number(process.env.SANSW_TEST_PICKUP_MS) || 10 * 60_000); // 엣지가 가져갈 때까지 기다리는 상한
-const EDGE_RESULT_MS = Math.max(60_000, Number(process.env.SANSW_TEST_RESULT_MS) || 5 * 60_000);  // 가져간 뒤 결과 회신 상한
+const EDGE_PICKUP_MS = Math.max(60_000, envPositive(process.env.SANSW_TEST_PICKUP_MS, 10 * 60_000, { max: Math.floor(ENV_INT_MAX / 2) })); // 엣지가 가져갈 때까지 기다리는 상한
+const EDGE_RESULT_MS = Math.max(60_000, envPositive(process.env.SANSW_TEST_RESULT_MS, 5 * 60_000, { max: Math.floor(ENV_INT_MAX / 2) }));  // 가져간 뒤 결과 회신 상한
 const _runs = new Map();
 
 function prune() {

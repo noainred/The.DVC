@@ -6,6 +6,7 @@
  * 자격증명: 토폴로지 노드에 입력한 SSH(ip/id/pw/키) → 없으면 배포 대상(sshTargetId 또는 같은 IP) 순. IRS 는 중앙에서 직접 닿지 않으므로
  * 중계 엣지의 SSH 서비스 포트(기본 :4067)를 경유한다(토폴로지에 그 서비스가 있을 때).
  */
+import { envPositive, ENV_INT_MAX } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { withSsh, withDeadline } from '../proxy/sshExec.js';
 import { getTargetRaw, listTargetsRaw } from '../agent/deployRegistry.js';
 import { ipBlockReason } from '../collector/registry.js';
@@ -15,7 +16,7 @@ import { demoInspectNode } from '../mock/demo/edge.js'; // v2.708: 데모(mock) 
 import { isMockMode } from '../mock/demo/flags.js';
 import { poolRun as pool } from '../util/pool.js'; // v2.579(ARCH-01): 동시성 풀 단일 소스 — 손으로 쓴 사본 제거(첫 rejection 전파 = 예전과 같은 의미)
 
-const TIMEOUT_MS = Math.max(10_000, Number(process.env.RELAYTOPO_SSH_TIMEOUT_MS) || 45_000);
+const TIMEOUT_MS = Math.max(10_000, envPositive(process.env.RELAYTOPO_SSH_TIMEOUT_MS, 45_000, { max: ENV_INT_MAX }));
 const CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.RELAYTOPO_CONCURRENCY) || 4));
 const CFG = '/etc/haproxy/haproxy.cfg';
 const ENV_KEYS = 'PORT|CENTRAL_URL|EDGE_ADVERTISE_URL|AGENT_NAME|COLLECTOR_DATACENTER|COLLECTOR_NAME|EDGE_NAME|TRUST_PROXY';

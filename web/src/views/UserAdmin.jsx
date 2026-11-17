@@ -14,7 +14,7 @@ async function withCurrentOtp(call) {
   }
   return r;
 }
-import { roleOptions, superTargetLocked, isAdminTier, permCell, toggleAdminDenied, roleBadgeTone, SUPER_LOCK_TITLE, SUPER_ROLE_TITLE, MATRIX_NOTE } from './userAdmin/roleText.js';
+import { roleOptions, superTargetLocked, isAdminTier, permCell, toggleAdminDenied, roleBadgeTone, SUPER_LOCK_TITLE, SUPER_ROLE_TITLE, MATRIX_NOTE, otpEnrollDoneText } from './userAdmin/roleText.js';
 import { Loading, ErrorBox, Modal } from '../components/ui.jsx';
 import { TOOLS as SPECIAL_TOOLS } from './specialToolsList.js';
 import { enforcementOf, enforcementSummary, LEVEL_SERVER, LEVEL_PARTIAL } from './userAdmin/toolEnforcementText.js';
@@ -146,7 +146,7 @@ export default function UserAdmin() {
 
   const confirmEnroll = async () => {
     const r = await postJson(`/admin/users/${encodeURIComponent(enroll.username)}/totp/confirm`, { code: enroll.code }).catch((e) => ({ ok: false, reason: e.message }));
-    if (r.ok) { setEnroll(null); await load(); flash(true, 'OTP 등록 완료 — 이제 이 계정은 OTP로만 로그인합니다.'); }
+    if (r.ok) { setEnroll(null); await load(); flash(true, otpEnrollDoneText(r)); }   // 88회차 F5: 비밀번호가 남은 계정에 'OTP로만' 이라 말하지 않는다
     else setEnroll((s) => ({ ...s, error: r.reason }));
   };
 

@@ -20,7 +20,7 @@ import { mergeScopedMap, filterScopedMap, denyScopedRun, keepScopedFields, ignor
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
-import { loadVmSeriesSettings, saveVmSeriesSettings, VMSERIES_LIMITS } from '../../vmseries/settings.js';
+import { loadVmSeriesSettings, saveVmSeriesSettings, VMSERIES_LIMITS, vmSeriesSettingsLoadError } from '../../vmseries/settings.js';
 import { summarizeScope, normFolder } from '../../vmseries/scope.js';
 import { vmSeriesDiskUsage, dropVmSeriesDb, vmSeriesDbStats, vmSeriesMeta, vmSeriesFreeBytes } from '../../vmseries/db.js';
 import { dbFileName } from '../../metrics/vmperfDb.js';
@@ -174,6 +174,8 @@ api.get('/tools/vmseries/settings', requirePerm('tools'), (req, res) => {
 });
 
 api.put('/tools/vmseries/settings', requireRole('admin'), (req, res) => {
+  // 103회차 F21: 설정 파일 읽기 오류(원본 그대로) 중에는 저장하지 않는다 — 사유를 화면까지(전역 오류 처리기는 사유를 싣지 않는다).
+  { const le = vmSeriesSettingsLoadError(); if (le?.readError) return res.status(409).json({ ok: false, code: 'settings-unreadable', readError: true, reason: String(le.reason || '').slice(0, 300) }); }
   const b = req.body || {};
   const snap = store.get();
   const validVc = new Set((snap.vcenters || []).map((v) => v.id));

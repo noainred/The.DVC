@@ -34,3 +34,13 @@ describe('v2.643 super_admin 화면 판정', () => {
   });
   it('문구에 백틱 없음', () => { expect(MATRIX_NOTE.includes('`')).toBe(false); });
 });
+
+describe('88회차 F5 OTP 대리 등록 완료 문구', () => {
+  it('비밀번호가 남았으면 OTP 전용이라고 말하지 않는다', async () => {
+    const { otpEnrollDoneText } = await import('./roleText.js');
+    expect(otpEnrollDoneText({ ok: true, passwordKept: true })).not.toMatch(/OTP로만/);
+    expect(otpEnrollDoneText({ ok: true, passwordKept: true })).toMatch(/비밀번호 로그인이 계속/);
+    expect(otpEnrollDoneText({ ok: true, passwordKept: false })).toMatch(/OTP로만 로그인/);
+    expect(otpEnrollDoneText({ ok: true })).not.toMatch(/OTP로만 로그인합니다/);   // 옛 서버(값 없음)는 단정하지 않는다
+  });
+});

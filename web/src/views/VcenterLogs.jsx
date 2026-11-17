@@ -32,9 +32,18 @@ const SEV = { error: ['위험', 'red'], warning: ['경고', 'amber'], info: ['�
  */
 export function vcLogRunText(lastRun, fmt = (ts) => new Date(ts).toLocaleString('ko-KR')) {
   if (!lastRun) return '아직 수집 안 함';
+  // 96회차 R1(92회차 F3 덜 고침): 설정 파일을 못 읽어 건너뛴 주기도 skipped 다 — '수집 꺼짐' 이 아니다(관리자는 끄지 않았다 · 저장도 거절된다).
+  if (lastRun.settingsUnreadable) return `최근 확인 ${fmt(lastRun.at)} · 설정 파일을 읽지 못해 수집 · 정리를 건너뜀`;
   if (lastRun.skipped) return `최근 확인 ${fmt(lastRun.at)} · 수집 꺼짐`;
   const n = lastRun.collected;
   return `최근 수집 ${fmt(lastRun.at)} · ${Number.isFinite(n) ? `${n.toLocaleString()}건` : '—'}`;
+}
+
+/** 96회차 R1: 로그 보관 설정 파일을 못 읽는 동안의 안내(서버 settingsReason 이 있으면 그 문구). 아니면 ''. */
+export function vcLogSettingsUnreadableText(st) {
+  if (!st?.settingsUnreadable) return '';
+  const why = typeof st.settingsReason === 'string' && st.settingsReason.trim() ? st.settingsReason.trim() : 'vCenter 로그 보관 설정 파일을 읽지 못했습니다 — 읽기 오류이고 원본은 그대로 있습니다.';
+  return `${why} 그동안 수집 · 보관 정리를 건너뛰고(저장 위치 · 보관 기간을 모릅니다) 아래 값은 저장된 값이 아니라 기본값입니다. 로그 조회도 열지 않습니다(없다는 뜻이 아닙니다).`;
 }
 
 /**
@@ -50,6 +59,8 @@ export function vcLogCollectText(r, fmt = (ts) => new Date(ts).toLocaleString('k
   // v2.772(Z1-3): 서버가 150초 안에 끝나지 않아 먼저 응답했다 — 수집은 계속 진행 중이고, 이번 회차의 실패 목록은 응답에 없다(표의 상태 칸이 말한다).
   if (r.running) return `수집이 오래 걸려 먼저 응답했습니다${Number.isFinite(r.runningSince) ? `(${fmt(r.runningSince)} 시작)` : ''} — 수집은 계속 진행 중입니다. 결과(실패한 vCenter 포함)는 아래 표의 상태 칸에서 확인하세요.`;
   if (r.busy) return `이전 수집이 아직 진행 중입니다${Number.isFinite(r.runningSince) ? `(${fmt(r.runningSince)} 시작)` : ''} — 이번 요청으로 새로 수집하지 않았습니다. 끝나면 상태 줄이 바뀝니다.`;
+  // 96회차 R1: 설정 파일 읽기 오류로 건너뜀 — '켜고 저장하세요' 는 틀린 조치다(저장은 거절된다).
+  if (r.settingsUnreadable) return '로그 보관 설정 파일을 읽지 못해 수집하지 않았습니다 — 저장 위치 · 보관 기간을 모릅니다(원본은 그대로 · 30초마다 다시 읽음). 파일 권한 · 소유자 · 디스크를 확인하세요.';
   if (r.skipped) return '로그 수집이 꺼져 있어 수집하지 않았습니다 — 위에서 켜고 정책을 저장하세요.';
   const len = (v) => (Array.isArray(v) ? v.length : 0);
   const n = r.collected;
@@ -148,11 +159,13 @@ export default function VcenterLogs() {
       <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
         vCenter는 이벤트를 단기간만 보관합니다. 포탈이 주기적으로 수집해 <b>장기 보관</b>합니다.
         데이터는 <b>중앙 집중 저장이 아니라, 이 포탈(해당 지역 엣지)에 로컬 보관</b>됩니다 — 각 지역 로그는 그 지역 엣지 포탈에서 보세요.
-        <br />현재 보관 <b>{fmtNum(st.store?.count)}</b>건 · {st.dbKind === 'sqlite' ? 'SQLite' : 'NDJSON'} · {vcLogSizeText(st, fmtMB)}
+        <br />현재 보관 <b>{fmtNum(st.store?.count)}</b>건 · {st.dbKind === 'sqlite' ? 'SQLite' : st.dbKind ? 'NDJSON' : '—'} · {vcLogSizeText(st, fmtMB)}
         {st.store?.firstTs && ` · ${fmtTime(st.store.firstTs)} ~ ${fmtTime(st.store.lastTs)}`}
         {st.dbPath && <><br /><span style={{ fontSize: 11 }}>경로: <code>{st.dbPath}</code></span></>}
       </p>
 
+      {/* 96회차 R1: 설정 파일 읽기 오류 — 아래 값은 저장값이 아니라 자리 표시(기본값)이고, 수집 · 정리 · 저장이 멈춰 있다. */}
+      {st.settingsUnreadable && <div className="banner warn" style={{ marginBottom: 12, whiteSpace: 'normal' }}>{vcLogSettingsUnreadableText(st)}</div>}
       {/* 보관 정책 */}
       <div className="card" style={{ padding: 16, marginBottom: 14 }}>
         <div className="flex gap wrap" style={{ alignItems: 'center', gap: 18 }}>
@@ -177,7 +190,7 @@ export default function VcenterLogs() {
           <span className="muted" style={{ fontSize: 11 }}>서버의 디렉터리 경로. 변경 시 새 위치에 저장(기존 파일은 이동되지 않음).</span>
         </div>
         <div className="flex gap" style={{ marginTop: 12, alignItems: 'center' }}>
-          <button className="login-btn" style={{ padding: '8px 16px' }} disabled={busy === 'save'} onClick={save}>{busy === 'save' ? '저장 중…' : '정책 저장'}</button>
+          <button className="login-btn" style={{ padding: '8px 16px' }} disabled={busy === 'save' || !!st.settingsUnreadable} onClick={save}>{busy === 'save' ? '저장 중…' : '정책 저장'}</button>
           <button className="logout-btn" style={{ padding: '8px 16px' }} disabled={busy === 'collect'} onClick={collect}>{busy === 'collect' ? '수집 중…' : '⟳ 지금 수집'}</button>
           <span className="muted" style={{ fontSize: 12 }}>{vcLogRunText(st.lastRun, fmtTime)}{msg ? ` · ${msg}` : ''}</span>
         </div>

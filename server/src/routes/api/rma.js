@@ -14,7 +14,7 @@ import { signJob, scheduleSignRequired } from '../../rma/signing.js';
 import { rmaPasswordFor, setRmaPassword, listRmaPasswordMeta } from '../../rma/agentSecrets.js';
 import { getRmaSettings, setAgentMode, setDefaultMode, setAgentAccess, setAgentRemote } from '../../rma/settings.js';
 import { testCatalog, buildTest } from '../../rma/tests.js';
-import { scheduleFor, listSchedules, upsertScheduleItem, removeScheduleItem, scheduleSignNote } from '../../rma/schedules.js';
+import { scheduleFor, listSchedules, upsertScheduleItem, removeScheduleItem, scheduleSignNote, rmaSchedulesLoadError } from '../../rma/schedules.js';
 import { latestResults, testHistory, summarize, evaluateRmaItself, dropResult } from '../../rma/testResults.js';
 import { credentialUsable } from '../../security/credentialStore.js';
 import { deployRma, listRmaInstances, removeRmaInstance, deployInputIssue } from '../../rma/deploy.js';
@@ -79,10 +79,12 @@ api.put('/tools/rma/agents/:agent/schedule', adminOnly, fullScopeOnly, shellSche
     const row = upsertScheduleItem(agent, req.body || {});
     logAudit({ user: req.user?.username, action: 'RMA 점검 스케줄 저장', target: agent, detail: `${row.test}${row.name ? `(${row.name})` : ''} ${row.intervalSec}s${row.instance ? ` @${row.instance}` : ''}${row.enabled ? '' : ' (비활성)'}`, ip: req.ip });
     res.json({ ok: true, item: row, ...scheduleFor(agent) });
-  } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
+  } catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ ok: false, reason: e.message }); }   // 103회차 F16: 읽기 오류 중 저장은 409
 });
 api.delete('/tools/rma/agents/:agent/schedule/:id', adminOnly, fullScopeOnly, (req, res) => {
   const agent = String(req.params.agent || '').trim();
+  // 105회차 A7(103 F16 덜 고침): 읽기 오류 동안 load() 는 빈 스케줄이라 삭제가 '없음' 으로 ok:false(200)를 돌려 사유가 보이지 않았다 — 저장과 같은 409.
+  { const le = rmaSchedulesLoadError(); if (le?.readError) return res.status(409).json({ ok: false, code: 'settings-unreadable', readError: true, reason: String(le.reason || '').slice(0, 300) }); }
   const ok = removeScheduleItem(agent, String(req.params.id || ''));
   if (ok) { dropResult(agent, String(req.params.id)); logAudit({ user: req.user?.username, action: 'RMA 점검 스케줄 삭제', target: `${agent}/${req.params.id}`, ip: req.ip }); }
   res.json({ ok, ...scheduleFor(agent) });
@@ -185,7 +187,7 @@ api.put('/tools/rma/agents/:agent/password', adminOnly, fullScopeOnly, ownerOtpT
     const r = setRmaPassword(agent, req.body?.password ?? '');
     logAudit({ user: req.user?.username, action: r.hasPassword ? 'RMA 비밀번호 설정' : 'RMA 비밀번호 해제', target: agent, ip: req.ip });
     res.json({ ok: true, ...r });
-  } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
+  } catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ ok: false, reason: e.message, ...(e?.code ? { code: e.code } : {}) }); }   // 97회차 F2: 읽기 오류 409
 });
 
 /** 분배 설정 — Body { mode, primary } (법인) / PUT /settings { defaultMode } (전역). */

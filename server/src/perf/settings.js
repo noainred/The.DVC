@@ -3,11 +3,10 @@
  * 측정 메뉴 만들고, hang 현상이 발생할 때 로그를 찍어 나중에 튜닝할 때 쓰게 하자").
  * 다른 설정 스토어와 같이 원자적 쓰기 + preserveCorrupt + 모듈 캐시.
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
-import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
+import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 96회차 ⓑ: 읽기 오류 ≠ 손상(결정 G2 공용 판정 — 객체가 아닌 JSON 은 기본 parse(parseJsonObject)가 손상으로)
 
 const FILE = path.join(config.configDir, 'perf-monitor.json');
 
@@ -45,13 +44,32 @@ const clamp = (v, lim, dflt) => {
 const given = (v) => v != null && String(v).trim() !== '';
 
 let cache = null;
+/*
+ * 96회차 ⓑ(92회차 남긴 것 ③ — 결정 G2 의 형제): 예전 catch 하나는 **읽기 오류**(EACCES · EIO · EISDIR)도 손상으로 보고 원본을 `.corrupt` 로 옮긴 뒤
+ *   기본값(hang 로그 보존 14일)을 프로세스 수명 동안 캐시했다 — 관리자가 길게(최대 90일) 잡은 hang 로그를 다음 정리가 14일로 지웠고, 다음 저장이
+ *   한 칸만 든 새 파일을 썼다. 이제 공용 판정: 손상만 옮기고, 읽기 오류면 원본을 두고 캐시하지 않으며(30초마다 다시 읽음) 그동안 보존일은
+ *   **허용 최장(LIMITS.retentionDays.max)** 으로 둔다(83회차 R1 규칙 — 관리자가 둘 수 있는 어떤 값보다 길어 되돌릴 수 없는 삭제가 없고 크기는 상한에서 멈춘다) ·
+ *   저장은 거절(perfSettingsWriteRefusal — 라우트 409).
+ */
+const _reader = makeJsonFileReader(() => FILE, { tag: 'perf-settings' });
+let _readError = false;
+/** 96회차 ⓑ: 읽기 오류 중의 저장 거절 본문(409) 또는 null. */
+export function perfSettingsWriteRefusal() {
+  loadPerfSettings();
+  if (!_readError) return null;
+  return { ok: false, status: 409, code: 'settings-unreadable', readError: true, reason: `서버 성능 측정 설정 파일(${path.basename(FILE)})을 읽지 못해 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` };
+}
 
 export function loadPerfSettings() {
   if (cache) return cache;
   const out = { ...DEFAULTS };
+  const r = _reader.read();
+  if (r.kind === 'read-error') { _readError = true; return { ...out, retentionDays: LIMITS.retentionDays.max, readError: true }; }   // 캐시하지 않는다 — 자리 표시
+  _readError = false;
   try {
-    if (fs.existsSync(FILE)) {
-      const p = parseJsonObject(fs.readFileSync(FILE, 'utf8'));
+    if (r.kind === 'corrupt') throw r.error || new Error('손상');
+    if (r.kind === 'ok') {
+      const p = r.value;
       if (typeof p.enabled === 'boolean') out.enabled = p.enabled;
       if (given(p.slowRequestMs)) out.slowRequestMs = clamp(p.slowRequestMs, LIMITS.slowRequestMs, DEFAULTS.slowRequestMs);
       if (given(p.hangLagMs)) out.hangLagMs = clamp(p.hangLagMs, LIMITS.hangLagMs, DEFAULTS.hangLagMs);
@@ -62,7 +80,7 @@ export function loadPerfSettings() {
       if (given(p.retentionDays)) out.retentionDays = clamp(p.retentionDays, LIMITS.retentionDays, DEFAULTS.retentionDays);
     }
   } catch (e) {
-    preserveCorrupt(FILE);
+    // 손상 보존(preserveCorrupt)은 공용 판정이 이미 했다 — 경고만(예전 문구 그대로).
     console.warn(`[perf] 설정 로드 실패 — 원본을 .corrupt 로 보존하고 기본값으로 시작합니다: ${safeLoadText(e) || '사유 미상'}`);
   }
   cache = out;
@@ -70,6 +88,8 @@ export function loadPerfSettings() {
 }
 
 export function savePerfSettings(body = {}) {
+  const no = perfSettingsWriteRefusal();
+  if (no) throw Object.assign(new Error(no.reason), { status: 409, code: no.code });   // 96회차 ⓑ: 마지막 방어선(라우트가 먼저 409)
   const next = { ...loadPerfSettings() };
   if (typeof body.enabled === 'boolean') next.enabled = body.enabled;
   if (given(body.slowRequestMs)) next.slowRequestMs = clamp(body.slowRequestMs, LIMITS.slowRequestMs, next.slowRequestMs);
@@ -84,4 +104,4 @@ export function savePerfSettings(body = {}) {
   return next;
 }
 
-export function _resetPerfSettingsCache() { cache = null; }
+export function _resetPerfSettingsCache() { cache = null; _readError = false; _reader.reset(); }

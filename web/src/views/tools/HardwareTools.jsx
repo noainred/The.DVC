@@ -26,6 +26,7 @@ import BaremetalBoard from './BaremetalBoard.jsx'; // v2.917 물리 서버 › �
 import useSearchHandoff from '../../hooks/useSearchHandoff.js'; // v2.909 헤더 ⌘K 통합 장비 검색 — 검색어 인계
 import { useFocusHandoff } from '../../hooks/useSearchHandoff.js'; // v2.911 고른 장비 상세 열기
 import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나(즉시 revoke · 문서 밖 click 금지)
+import { backdropClose } from '../../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만
 
 /**
  * v2.622(감사 RECENT-04): 상세 모달 열기 — 행이 벤더를 모르면(온도·GPU·드릴다운) 먼저 'BMC' 로 열고 서버 목록을
@@ -139,7 +140,7 @@ function HwDrillModal({ dc, dim, keyVal, onClose, onServer }) {
   const { loading, data, error } = useTool('/admin/idrac/hardware-servers', { datacenterId: dc || '', dim, key: keyVal });
   const rows = data?.servers || [];
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="modal-overlay" {...backdropClose(() => onClose())}>
       <EscClose onClose={onClose} />
       <div className="modal card" style={{ maxWidth: 820, width: '92vw', maxHeight: '82vh', overflow: 'auto' }}>
         <div className="flex between" style={{ marginBottom: 10 }}>

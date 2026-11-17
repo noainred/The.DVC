@@ -53,6 +53,12 @@ export const RESTORE_EXCLUDE = new Map([
   ['bareos-dr-runs.json', 'Bareos 재해 복구 실행 상태 — 되돌리면 멈췄거나 끝난 회차가 되살아나 OTP 없이 복원을 다시 보낸다'],
   // v3.9.0 SSH 공용 접속: 법인 키 사용 중지(긴급 조치) — 백업 시점 판본으로 되돌리면 그 뒤에 건 사용 중지가 OTP 없이 풀린다
   ['ssh-access-state.json', 'SSH 키 사용 중지(긴급 조치) 기록 — 되돌리면 백업 이후에 건 사용 중지가 풀린다'],
+  // 98회차(긴급중단 손상 결정의 형제 — 재현): 긴급중단은 관리자 2명 OTP 로만 켜고 끈다. 복원은 소유자 한 사람 · OTP 없음이라 백업 시점 판본(꺼짐)이
+  //   2인 승인으로 켠 긴급중단을 재시작 뒤 풀었다(켜짐 판본은 지금 꺼진 수집을 멈춘다). 상태는 지금 파일 그대로 둔다.
+  ['emergency-stop.json', '긴급중단 상태 — 2인 승인(관리자 2명 OTP)으로만 켜고 끈다. 되돌리면 백업 시점 판본이 그 결정을 뒤집는다'],
+  // 98회차: 세션 보안 신뢰 사본은 복원하지 않는다 — 복원한 security-session.json(약화 금지로 맞춘 값)을 기동 때 정상으로 읽으면 사본이 그 값으로 다시 맞춰진다.
+  //   백업 판본(옛 · 약한 값)을 그대로 쓰면 본 파일을 못 읽는 기동에서 그 옛 값으로 돌았다.
+  ['security-session.trusted.json', '세션 보안 설정의 신뢰 사본 — 복원한 본 파일을 정상으로 읽을 때 다시 맞춰진다(옛 판본으로 되돌리지 않는다)'],
 ]);
 /** 예약 파일 읽기 상한 — 번들 해제 상한(64MB)의 JSON 이스케이프 팽창까지 감안한 여유. 넘으면 적용하지 않는다. */
 export const STAGED_MAX_BYTES = 512 * 1024 * 1024;
@@ -196,11 +202,139 @@ export function reconcileSecretsPolicyText(backupText, currentText) {
   return { text: backupText, keptCurrent: false };
 }
 
+/**
+ * 88회차 F7(재현): 연동 키(api-keys.json)의 **폐기 · 삭제는 복원으로 되돌리지 않는다** — 백업 판본을 그대로 쓰면 백업 이후 폐기(유출 등)하고 지운 키가
+ *   다시 'ok' 로 통과했다(전 함대 조회 자격증명 — 엣지 토큰 reconcileAgentTokensText · users.json tokenVersion 과 같은 종류).
+ *   규칙: 키마다 백업 판본을 쓰되 ① 지금 파일에서 폐기된 키는 폐기 그대로(revokedAt · revokedBy) ② 지금 파일에 없는 키(= 백업 이후 폐기하고 지운 키 —
+ *   산 키는 지울 수 없다, publicapi/keys.js deleteApiKey)는 되살리지 않는다 ③ 백업 이후 발급한 키(지금에만 있음)는 남긴다.
+ *   지금 파일이 없거나 깨졌으면(새 서버 재해 복구) 백업 그대로. 읽기 오류면 reconcileForApply 가 던진다(이 파일만 적용하지 않는다).
+ * @returns {{ text:string, keptRevoked:number, dropped:number, currentUnreadable:boolean }}
+ */
+export function reconcileApiKeysText(backupText, currentText) {
+  const b = parseJson(backupText);
+  if (!b || !Array.isArray(b.keys)) return { text: String(backupText), keptRevoked: 0, dropped: 0, currentUnreadable: false };
+  const cur = parseJson(currentText);
+  const curList = Array.isArray(cur?.keys) ? cur.keys.filter((k) => k && typeof k === 'object' && k.id != null) : null;
+  if (!curList) return { text: String(backupText), keptRevoked: 0, dropped: 0, currentUnreadable: true };
+  const curById = new Map(curList.map((k) => [String(k.id), k]));
+  const seen = new Set();
+  const keys = [];
+  let keptRevoked = 0; let dropped = 0;
+  for (const k of b.keys) {
+    if (!k || typeof k !== 'object' || k.id == null) continue;
+    const id = String(k.id);
+    const now = curById.get(id);
+    if (!now) { dropped += 1; continue; }
+    seen.add(id);
+    if (now.revokedAt && !k.revokedAt) { keys.push({ ...k, revokedAt: now.revokedAt, revokedBy: now.revokedBy || '' }); keptRevoked += 1; }
+    else keys.push(k);
+  }
+  for (const k of curList) if (!seen.has(String(k.id))) keys.push(k);
+  return { text: JSON.stringify({ ...b, keys }, null, 2), keptRevoked, dropped, currentUnreadable: false };
+}
+
+/**
+ * 88회차 F6(재현): AD 설정(auth.json)의 정책 카운터(policyEpoch)도 복원으로 **되돌리지 않는다** — AD 토큰은 발급 당시 `카운터.매핑지문` 을 싣고
+ *   지금 값과 같을 때만 유효하다(auth/ad.js S-08). 백업 판본을 그대로 쓰면 백업 이후 매핑을 바꿔 무효가 된 AD 세션(예: 관리자 그룹에서 빠진 계정의
+ *   admin 토큰)이 만료 전까지 되살아났다(users.json 의 tokenVersion 과 같은 종류 — reconcileUsersText). 카운터 = max(지금, 백업) + 1 — 복원 뒤 AD 세션은
+ *   전부 다시 로그인한다. 지금 파일을 **읽지 못하면**(ENOENT 아님) 던져서 이 파일만 적용하지 않는다(지금 카운터를 모른 채 낮은 값을 쓰지 않게).
+ * @returns {{ text:string, bumped:boolean, epoch?:number }}
+ */
+export function reconcileAdConfigText(backupText, currentText) {
+  let b;
+  try { b = JSON.parse(String(backupText)); } catch { return { text: backupText, bumped: false }; }   // 깨진 판본은 로더가 손상 보존 → env 기본값(카운터 0 — AD 토큰은 'ep' 가 맞지 않아 무효)
+  if (!b || typeof b !== 'object' || Array.isArray(b) || !b.ad || typeof b.ad !== 'object' || Array.isArray(b.ad)) return { text: backupText, bumped: false };
+  let c = null;
+  try { c = JSON.parse(String(currentText)); } catch { c = null; }
+  const ep = (o) => { const n = Math.floor(Number(o?.ad?.policyEpoch)); return Number.isFinite(n) && n > 0 ? n : 0; };
+  const epoch = Math.max(ep(b), ep(c)) + 1;
+  return { text: JSON.stringify({ ...b, ad: { ...b.ad, policyEpoch: epoch } }, null, 2), bumped: true, epoch };
+}
+
+/**
+ * 91회차(88회차 남긴 것 ① · 결정 — 권장안): 장비 신뢰(peer-trust.json)도 복원으로 **약해지지 않게** 맞춘다 — 복원 라우트는 OTP 를 묻지 않는데(정책을 observe 로
+ *   바꾸는 것은 소유자 + 본인 OTP — 91회차) 백업 판본을 그대로 쓰면 ① 백업 뒤 enforce 로 닫은 정책이 observe 로 돌아가고 ② 백업 뒤 회수(거부)한 지문이 다시
+ *   신뢰 지문으로 통과했다(가로챈 장비 · 유출된 키 — F7 연동 키 폐기와 같은 종류, v2.842 '켜기만' 규칙).
+ *   규칙: ⓐ 정책은 지금이 enforce 면 enforce(켜기만) ⓑ 지금 파일에서 거부된 지문은 백업 판본의 신뢰 · 대기 지문에서 빼고 거부 목록에 남긴다 ⓒ 백업 이후 생긴 항목(지금에만 있음)은 남긴다.
+ *   지금 파일이 없거나 깨졌으면(재해 복구 · 손상 — 로더가 enforce 로 닫는다) 백업 그대로. 읽기 오류면 reconcileForApply 가 던진다(이 파일만 적용하지 않는다).
+ *   ⚠ 이 모듈은 기동 때 다른 모듈보다 먼저 돈다(stagedRestoreBoot) — security/peerTrust.js 를 import 하지 않는다(config · audit 를 먼저 싣는다). 키 · 지문은 파일에 쓰인
+ *   정규형(peerTrust 가 쓸 때 정규화한다)을 가볍게 맞춰 비교한다.
+ */
+const PEER_KINDS_R = ['ssh', 'tls'];
+const peerKeyR = (e) => `${e.kind}|${String(e.host ?? '').trim().toLowerCase()}|${Math.floor(Number(e.port))}`;
+const peerFpR = (kind, fp) => {
+  const t = String(fp ?? '').slice(0, 200).trim();   // 지문은 200자 안(peerTrust normalizeFingerprint 상한) — 정규식 전에 자른다
+  if (kind === 'ssh') return t.replace(/^sha256:/i, '').replace(/=+$/, '');
+  return t.replace(/^sha256:/i, '').replace(/[\s:]/g, '').toUpperCase();
+};
+const peerTrustedListR = (e) => {
+  const out = [];
+  if (Array.isArray(e?.trusted)) for (const t of e.trusted) out.push(t); else if (e?.trusted && typeof e.trusted === 'object') out.push(e.trusted);
+  if (Array.isArray(e?.trustedMore)) for (const t of e.trustedMore) out.push(t);
+  return out.filter((t) => t && typeof t === 'object');
+};
+export function reconcilePeerTrustText(backupText, currentText) {
+  const b = parseJson(backupText);
+  if (!b || typeof b !== 'object' || !Array.isArray(b.entries)) return { text: String(backupText), keptPolicy: [], keptRevoked: 0 };
+  const c = parseJson(currentText);
+  if (!c || typeof c !== 'object' || !Array.isArray(c.entries)) return { text: String(backupText), keptPolicy: [], keptRevoked: 0 };
+  const bPolicy = b.policy && typeof b.policy === 'object' && !Array.isArray(b.policy) ? b.policy : {};
+  const out = { ...b, policy: { ...bPolicy } };
+  const keptPolicy = [];
+  for (const kind of PEER_KINDS_R) {
+    if (c.policy?.[kind] === 'enforce' && out.policy[kind] !== 'enforce') {
+      out.policy[kind] = 'enforce'; keptPolicy.push(kind);
+      if (c.origin?.[kind] && typeof c.origin[kind] === 'object') out.origin = { ...(b.origin && typeof b.origin === 'object' ? b.origin : {}), [kind]: c.origin[kind] };
+    }
+  }
+  const cur = new Map();
+  for (const e of c.entries) if (e && typeof e === 'object' && PEER_KINDS_R.includes(e.kind)) cur.set(peerKeyR(e), e);
+  const seen = new Set();
+  let keptRevoked = 0;
+  const entries = b.entries.map((e) => {
+    if (!e || typeof e !== 'object' || !PEER_KINDS_R.includes(e.kind)) return e;
+    const key = peerKeyR(e); seen.add(key);
+    const now = cur.get(key);
+    const nowRej = Array.isArray(now?.rejected) ? now.rejected.filter((r) => r && typeof r === 'object') : [];
+    if (!nowRej.length) return e;
+    const rev = new Set(nowRej.map((r) => peerFpR(e.kind, r.fp)).filter(Boolean));
+    const list = peerTrustedListR(e);
+    const kept = list.filter((t) => !rev.has(peerFpR(e.kind, t.fp)));
+    const bRej = Array.isArray(e.rejected) ? e.rejected.filter((r) => r && typeof r === 'object') : [];
+    const bRejFps = new Set(bRej.map((r) => peerFpR(e.kind, r.fp)));
+    const addRej = nowRej.filter((r) => !bRejFps.has(peerFpR(e.kind, r.fp)));
+    const pendRevoked = !!(e.pending && typeof e.pending === 'object' && rev.has(peerFpR(e.kind, e.pending.fp)));
+    if (kept.length === list.length && !addRej.length && !pendRevoked) return e;
+    keptRevoked += (list.length - kept.length) + (pendRevoked ? 1 : 0);
+    const ne = { ...e, trusted: kept[0] || null, rejected: [...bRej, ...addRej] };
+    if (kept.length > 1) ne.trustedMore = kept.slice(1); else delete ne.trustedMore;
+    if (pendRevoked) ne.pending = null;
+    return ne;
+  });
+  for (const [key, e] of cur) if (!seen.has(key)) entries.push(e);   // 백업 이후 생긴 항목(승인 · 거부 기록)
+  out.entries = entries;
+  return { text: JSON.stringify(out, null, 1), keptPolicy, keptRevoked };
+}
+
+/** 91회차: 지금 파일을 읽는다 — 없으면 null, 그 밖의 읽기 오류(EACCES · EIO · EISDIR)는 던져서 **이 파일만 적용하지 않는다**(지금 값을 모른 채 약한 백업으로 덮지 않게). */
+function readCurrentOrThrow(configDir, name, what) {
+  try { return fs.readFileSync(path.join(configDir, name), 'utf8'); } catch (e) {
+    if (e?.code === 'ENOENT') return null;
+    throw new Error(`지금 ${what}(${name})을 읽지 못해(${String(e?.code || 'read-error').slice(0, 32)}) 복원하지 않았습니다 — 지금 값을 모른 채 백업 판본으로 덮지 않게 지금 파일을 그대로 둡니다`);
+  }
+}
+
 export function reconcileForApply(name, content, configDir) {
   if (name === 'security-session.json') {
-    let cur = null;
-    try { cur = fs.readFileSync(path.join(configDir, name), 'utf8'); } catch { cur = null; }
-    const r = reconcileSecuritySessionText(content, cur);
+    // 91회차(88 F6 · F7 반증 — 형제): 지금 파일의 **읽기 오류**를 '없음' 으로 보면 기본값과 견줘 백업의 약한 값(예: 지금 otp_only · 백업 레거시)이 그대로 들어갔다
+    //   (원자 쓰기는 읽지 못한 원본도 대체한다). 없음(ENOENT)만 기본값과 견주고, 읽기 오류면 이 파일만 적용하지 않는다.
+    const cur = readCurrentOrThrow(configDir, name, '세션 보안 설정');
+    // 100회차(98회차 반증 — 재현): 본 파일이 없거나 객체로 읽히지 않으면 돌고 있는 값은 **신뢰 사본**(security-session.trusted.json — 98회차)이다.
+    //   예전에는 이때 기본값과 견줘, 사본의 otp_only · 단일 세션 · 총 상한 8시간 · 소유자 목록을 백업의 약한 값(레거시 · 끔 · 무제한 · 소유자 추가)으로
+    //   OTP 없이 내렸다. 사본과 견준다(사본을 못 읽으면 이 파일만 적용하지 않는다 — 지금 값을 모른 채 덮지 않는 91회차 규칙). 둘 다 없으면 예전과 같다(기본값과 견줌).
+    const objText = (t) => { try { const j = JSON.parse(String(t)); return j && typeof j === 'object' && !Array.isArray(j) ? t : null; } catch { return null; } };
+    const effective = objText(cur) ?? objText(readCurrentOrThrow(configDir, 'security-session.trusted.json', '세션 보안 신뢰 사본')) ?? cur;
+    const r = reconcileSecuritySessionText(content, effective);
     const others = r.kept.filter((k) => k !== 'bareosSetupOtp');
     if (r.forcedOn && !others.length) return { content: r.text, info: { bareosSetupOtpKeptOn: true }, warning: { file: name, reason: '백업에는 Bareos 자동 설정 본인 OTP 재확인이 꺼져 있었지만 복원으로는 끄지 않습니다(켬으로 적용) — 끄려면 설정 › 보안 › 세션 보안에서 본인 OTP 로 저장하세요.' } }
     if (r.kept.length) {
@@ -209,9 +343,42 @@ export function reconcileForApply(name, content, configDir) {
     }
     return { content: r.text };
   }
-  if (name === 'secrets-policy.json' || name === 'secrets-policy.trusted.json') {
+  if (name === 'peer-trust.json') {   // 91회차(88회차 남긴 것 ①)
+    const cur = readCurrentOrThrow(configDir, name, '장비 신뢰 목록');
+    const r = reconcilePeerTrustText(content, cur);
+    if (!r.keptPolicy.length && !r.keptRevoked) return { content: r.text };
+    const parts = [];
+    if (r.keptPolicy.length) parts.push(`정책은 지금 값(승인된 지문만 허용 — ${r.keptPolicy.join(' · ')})을 유지했습니다`);
+    if (r.keptRevoked) parts.push(`백업 이후 거부(회수)한 지문 ${r.keptRevoked}개는 신뢰 목록으로 되살리지 않았습니다`);
+    return { content: r.text, info: { peerTrustKeptPolicy: r.keptPolicy, peerTrustKeptRevoked: r.keptRevoked },
+      warning: { file: name, reason: `${parts.join(' · ')} — 복원은 본인 OTP 를 묻지 않으므로 장비 신뢰를 약하게 되돌리지 않습니다.` } };
+  }
+  if (name === 'api-keys.json') {   // 88회차 F7
     let cur = null;
-    try { cur = fs.readFileSync(path.join(configDir, name), 'utf8'); } catch { cur = null; }
+    try { cur = fs.readFileSync(path.join(configDir, name), 'utf8'); } catch (e) {
+      if (e?.code !== 'ENOENT') throw new Error(`지금 연동 키 파일(api-keys.json)을 읽지 못해(${String(e?.code || 'read-error').slice(0, 32)}) 복원하지 않았습니다 — 폐기 기록을 모른 채 되돌리지 않게 지금 파일을 그대로 둡니다`);
+      cur = null;
+    }
+    const r = reconcileApiKeysText(content, cur);
+    const out = { content: r.text, info: { apiKeysKeptRevoked: r.keptRevoked, apiKeysDropped: r.dropped } };
+    if (r.keptRevoked || r.dropped) out.warning = { file: name, reason: `백업 이후 폐기한 연동 키 ${r.keptRevoked}개는 폐기 그대로 두고, 폐기하고 지운 키 ${r.dropped}개는 되살리지 않았습니다 — 복원은 키 폐기를 되돌리지 않습니다(필요하면 새로 발급하세요).` };
+    return out;
+  }
+  if (name === 'auth.json') {   // 88회차 F6
+    let cur = null;
+    try { cur = fs.readFileSync(path.join(configDir, name), 'utf8'); } catch (e) {
+      if (e?.code !== 'ENOENT') throw new Error(`지금 AD 설정(auth.json)을 읽지 못해(${String(e?.code || 'read-error').slice(0, 32)}) 복원하지 않았습니다 — 정책 카운터를 모른 채 되돌리지 않게 지금 파일을 그대로 둡니다`);
+      cur = null;
+    }
+    const r = reconcileAdConfigText(content, cur);
+    return r.bumped
+      ? { content: r.text, info: { adPolicyEpochBumped: r.epoch }, warning: { file: name, reason: 'AD 정책 카운터를 지금보다 올려 적용했습니다 — 백업 이후 매핑을 바꿔 끝난 AD 세션이 되살아나지 않게 AD 계정은 모두 다시 로그인합니다.' } }
+      : { content: r.text };
+  }
+  if (name === 'secrets-policy.json' || name === 'secrets-policy.trusted.json') {
+    // 91회차: 읽기 오류를 '없음' 으로 보면 지금 암호화인 정책 파일(읽지 못함)을 평문 백업으로 덮었다 — 복원 뒤 로더는 읽히는 평문 정책을 쓴다(S-07 의 직전 · 신뢰 값 복구가
+    //   닿지 않는다). 없음(재해 복구)만 백업 그대로, 읽기 오류면 이 파일만 적용하지 않는다.
+    const cur = readCurrentOrThrow(configDir, name, '자격증명 저장 방식 정책');
     const r = reconcileSecretsPolicyText(content, cur);
     return r.keptCurrent
       ? { content: r.text, info: { secretsPolicyKept: true }, warning: { file: name, reason: '백업은 자격증명 평문 저장이지만 지금은 암호화라 지금 방식을 유지했습니다 — 복원은 본인 OTP 를 묻지 않으므로 약하게 되돌리지 않습니다.' } }

@@ -139,8 +139,14 @@ function load() {
   if (!st) { loadErr.missing(); _cache = { mtime: 0, size: -1, value: emptyValue() }; return _cache.value; }
   if (_cache && _cache.mtime === st.mtimeMs && _cache.size === st.size) return _cache.value;
   let raw;
+  // 90회차 F3(재현): 읽기 단계 실패(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전 catch 하나는 그것도 손상으로 보고 온전한 원본(대상 · 메일 설정)을
+  //   `.corrupt` 로 옮겨, 지나가는 읽기 오류 하나가 사람이 보존본을 되돌려야 하는 사고가 됐다(결정 G2 의 같은 꼴). 원본을 두고 빈 값으로 돌되
+  //   캐시하지 않는다(다음 읽기가 다시 본다) · 로드 오류가 서 있으니 저장 라우트는 예전처럼 409 이고 설정 pull 은 503 이다.
+  let text;
+  try { text = fs.readFileSync(FILE(), 'utf8'); }
+  catch (e) { loadErr.readError(e); _cache = null; return emptyValue(); }
   try {
-    raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    raw = JSON.parse(text);
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류');
   } catch (e) {
     preserveCorrupt(FILE(), e?.message);

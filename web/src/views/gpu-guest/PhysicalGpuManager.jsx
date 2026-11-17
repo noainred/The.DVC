@@ -10,7 +10,7 @@ import { Field } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
 import { ErrorBox } from '../../components/ui.jsx';
 import { errorBoxInput } from '../../components/accessDeniedText.js'; // v2.628(LEFT2628-04)
-import { physicalGpuErrView, physicalGpuErrServers, PGPU_GPU_ERR_TITLE } from './physicalGpuText.js'; // v2.782(점검 K5 E-B2)
+import { physicalGpuErrView, physicalGpuErrServers, PGPU_GPU_ERR_TITLE, physicalLoadErrorText } from './physicalGpuText.js'; // v2.782(점검 K5 E-B2) · 95회차 F1
 
 const PEMPTY = { id: '', name: '', host: '', port: 22, username: 'root', password: '', os: 'linux', vcenterId: '', enabled: true };
 import ScopeOmitBanner from '../ScopeOmitBanner.jsx'; // v2.631 A6-2631-06: 범위 제외 문구 단일 소스
@@ -90,7 +90,8 @@ export function PhysicalGpuManager({ vcs }) {
   const del = async (s) => {
     if (!window.confirm(`'${s.name}' 삭제?`)) return;
     setOpErr(null);
-    try { await delJson(`/admin/gpu-physical/${encodeURIComponent(s.id)}`); } catch (e) { setOpErr(`삭제 실패(${s.name}): ${e?.message || e}`); }
+    // 95회차 F1: delJson 은 400 · 409 를 던지지 않는다 — 거절 본문(ok:false)도 실패로 보인다(예전에는 조용히 목록만 다시 읽었다).
+    try { const r = await delJson(`/admin/gpu-physical/${encodeURIComponent(s.id)}`); if (r && r.ok === false) setOpErr(`삭제 실패(${s.name}): ${r.reason || '사유 미상'}`); } catch (e) { setOpErr(`삭제 실패(${s.name}): ${e?.message || e}`); }
     await load();
   };
   const test = async (payload, who) => {
@@ -123,6 +124,8 @@ export function PhysicalGpuManager({ vcs }) {
       <ScopeOmitBanner data={d} unit="물리 GPU 서버" counter="대" why="내 조회 범위 밖(또는 소속 vCenter 가 지정되지 않은)" style={{ marginBottom: 6 }} />
       {d?.status?.fleetCountsHidden && <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>전 법인 수집 현황(전체 서버·GPU 수·실행 집계)은 전체 범위 계정에만 표시합니다 — 아래 수치는 이 계정 범위 안의 서버만입니다.</div>}
       {opErr && <div className="banner warn" style={{ marginBottom: 8 }}>{opErr}</div>}
+      {/* 95회차 F1: 등록부 로드 오류 — 빈 목록을 '등록 없음' 으로 보이지 않는다(문구는 physicalGpuText.physicalLoadErrorText 하나) */}
+      {d?.loadError && <div className="banner warn" style={{ marginBottom: 8 }}>{physicalLoadErrorText(d.loadError)}</div>}
       <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
         ESXi/VM이 아닌 <b>물리 서버</b>에 직접 SSH로 접속해 <code>nvidia-smi</code>로 GPU 사용률을 수집합니다(주기는 위 '수집 주기' 공유). 서버 OS에 NVIDIA 드라이버 + SSH가 있어야 합니다.
       </div>
@@ -196,7 +199,7 @@ export function PhysicalGpuManager({ vcs }) {
         <STable className="data-table" style={{ width: '100%', fontSize: 13 }}>
           <thead><tr><th style={{ textAlign: 'left' }}>이름</th><th style={{ textAlign: 'left' }}>IP/계정</th><th style={{ textAlign: 'left' }}>소속</th><th style={{ textAlign: 'left' }}>GPU/사용률</th><th style={{ textAlign: 'left' }}>상태</th><th style={{ textAlign: 'right' }}>작업</th></tr></thead>
           <tbody>
-            {(d?.servers || []).length === 0 && <tr><td colSpan={6} className="center muted" style={{ padding: 18 }}>{!d ? (loadErr ? `물리 GPU 서버 목록을 읽지 못했습니다(${errorBoxInput(loadErr).text}) — 등록이 없다는 뜻이 아닙니다.` : '불러오는 중…') : '등록된 물리 GPU 서버가 없습니다.'}</td></tr>}
+            {(d?.servers || []).length === 0 && <tr><td colSpan={6} className="center muted" style={{ padding: 18 }}>{!d ? (loadErr ? `물리 GPU 서버 목록을 읽지 못했습니다(${errorBoxInput(loadErr).text}) — 등록이 없다는 뜻이 아닙니다.` : '불러오는 중…') : d.loadError ? '등록부를 읽지 못해 목록이 비어 있습니다 — 등록이 없다는 뜻이 아닙니다(위 안내).' : '등록된 물리 GPU 서버가 없습니다.'}</td></tr>}
             {(d?.servers || []).map((s) => {
               const r = results.get(s.id);
               const ge = physicalGpuErrView(r); // v2.782(점검 K5 E-B2): 일부 GPU 응답 없음이면 개수 옆 amber 표지 + 상태 배지 amber(모름은 표지 없음)

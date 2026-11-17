@@ -958,7 +958,7 @@ function tuningOverrideWrite(req, res) {
     const r = O.saveTuningOverride({ scope: b.scope, role: b.role, itemId: b.itemId, value: b.value }, { by: req.user?.username || '' });
     logAudit({ user: req.user?.username, action: 'bm-usage.tuning.override', target: t(b.itemId), ip: req.ip || '',
       detail: JSON.stringify({ item: t(b.itemId), scope: t(b.scope) || 'all', role: t(b.role), prev: r.prev ?? null, next: r.next ?? null, cleared: !!r.cleared, ok: r.ok }).slice(0, 300) });
-    res.status(r.ok ? 200 : r.unreadable ? 503 : 400).json(r.unreadable ? { ...r, code: 'settingsUnreadable' } : r);
+    res.status(r.ok ? 200 : r.readError ? 409 : r.unreadable ? 503 : 400).json(r.readError ? { ...r, code: 'settings-unreadable' } : r.unreadable ? { ...r, code: 'settingsUnreadable' } : r);   // 105회차 A5: 읽기 오류(원본 그대로)는 409
   }).catch((e) => res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }));
 }
 /*

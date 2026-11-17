@@ -12,7 +12,7 @@
 import { store } from '../../store.js';
 import { listInventory } from '../../central/inventory.js';
 import { listTargetsRaw } from '../../agent/deployRegistry.js';
-import { loadSettings, siteFor, directorById } from '../settings.js';
+import { loadSettings, siteFor, directorById, hostMatch, sameServerDirector } from '../settings.js';
 import { agentLastContact } from '../../central/agentContact.js';
 import { registryHosts, vcHostOf } from '../vcHost.js';
 
@@ -84,11 +84,8 @@ export function sshCredsFor(targetId) {
   return { host: t.host, port: Number(t.port) || 22, username: t.username, password: t.password || undefined, privateKey: t.privateKey || undefined, passphrase: t.passphrase || undefined };
 }
 
-const lcHost = (s) => String(s ?? '').trim().toLowerCase().replace(/\.$/, '');
-const ipLike = (s) => /^[0-9.]+$/.test(s) || s.includes(':');
-const shortName = (s) => (ipLike(s) ? s : s.split('.')[0]);
-// 루프백 이름 · 주소는 '어느 서버' 인지 말하지 않는다(설치 직후 Rocky 의 호스트 이름 localhost.localdomain) — 대조에서 빼고, 루프백으로 등록된 Director 는 담당 엣지로 대조한다
-const loopback = (s) => s === 'localhost' || s.startsWith('localhost.') || /^127\./.test(s) || s === '::1';
+// 104회차: 주소 대조 글자는 bareos/settings.js 하나(같은 서버 · 같은 Director 판정 — D1 우회 거부가 설정 저장에서 같은 판정을 쓴다)
+const { lcHost, shortName, loopback } = hostMatch;
 /**
  * v2.876(2026-11-04 사용자 화면 — 사전 점검 '이미 설치된 Bareos ✗' 에서 막다른 길): 포탈에 Director 가 등록되지 않은 법인의 엣지 노드에 Bareos 가 이미 있으면
  *   (사람이 직접 설치 · 이전 설치가 남김) 대상 표는 '새 설치' 이고 사전 점검이 막는데, 조치 문구가 가리키는 '초기화 후 재설치' 는 Director 가 있어야 열렸다.
@@ -114,3 +111,6 @@ export function resetTarget(t, body, settings, { ids = [], jobs = [] } = {}) {
   if (job) throw Object.assign(new Error(`같은 서버에 다른 법인 ‘${job.vcenterName || job.vcenterId}’ 의 완전 설치 작업(${job.id} · ${job.status})이 있습니다 — 그 법인에서 전부 되돌린 뒤에 하세요.`), { code: 'invalid' });
   return { ...t, mode: 'reinstall', resetUnregistered: true };
 }
+
+/** 101회차 F1 · 104회차: 같은 서버 판정은 bareos/settings.js sameServerDirector 하나(여기서 다시 내보낸다 — 완전 설치 쪽 호출부 · 시험이 이 경로를 쓴다). */
+export { sameServerDirector };

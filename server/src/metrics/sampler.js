@@ -12,14 +12,14 @@ import { store, usageReadable } from './../store.js';
 /** v2.666: 호스트별 vCenter CPU 사용률 적재(iDRAC 통합 추이의 비교 계열). '0' 이면 끈다. */
 const HOST_CPU_SERIES = String(process.env.HOST_CPU_SERIES ?? '').trim() !== '0';
 import { getMetricsDb } from './db.js';
-import { loadMetricsSettings } from './settings.js';
+import { loadMetricsSettings, metricsRetentionUnknown } from './settings.js';
 import { rollupBackfillStatus, scheduleRollupBackfill } from './rollupBackfill.js'; // v2.675: 롤업 도입 이전 원본 → 시간당 롤업
 import { getGuestGpuHost, getGuestGpuVms } from '../gpu/store.js';
 import { loadGpuGuestSettings } from '../gpu/settings.js';
 import { updateVmStats } from '../reports/vmStats.js';
 import { memSampleRows, maybeLogMem } from '../system/memtrack.js';
 import { insertVmperf, pruneVmperf } from './vmperfDb.js';
-import { loadVmperfSettings, vmperfTracks } from './vmperfSettings.js';
+import { loadVmperfSettings, vmperfTracks, vmperfRetentionUnknown } from './vmperfSettings.js';
 import { roomTempRows } from '../idrac/roomTempSeries.js';
 import { serverTempRows } from '../idrac/serverTempSeries.js';   // v2.504: 서버별 온도 추이(아래 주석)
 import { serverTrendRows } from '../idrac/serverTrendSeries.js'; // v2.660: iDRAC 통합 추이(CPU 사용률·CPU/GPU 온도)
@@ -404,7 +404,9 @@ async function sampleOnceInner() {
       // 보존기간 prune — DB 개수만큼 DELETE 가 돌므로 공용(20틱)보다 더 드물게(120틱 ≈ 2시간@1분).
       // v2.583: `% 120 === 1` 은 **기동 첫 샘플에서 즉시 참**이었다(v2.453 규약 위반 — 보존일을 줄이고 재시작하면
       //   첫 틱이 그 차액을 한 번에 지운다). `(++t % N) === 0` 으로 쓴다.
-      if (vmperfCfg.retentionDays > 0 && ((++_vmperfPruneTicks % 120) === 0)) {
+      // 92회차 F2: 설정 파일을 한 번도 못 읽었으면 보존일은 '모름' — 기본값(90일)으로 지우지 않는다.
+      if (vmperfCfg.retentionDays > 0 && (_vmperfPruneTicks + 1) % 120 === 0 && vmperfRetentionUnknown()) warnRetentionUnknown('VM 성능');   // 96회차: 위 지표와 같은 판단
+      if (vmperfCfg.retentionDays > 0 && ((++_vmperfPruneTicks % 120) === 0) && !vmperfRetentionUnknown()) {
         for (const vcId of vmperfByVc.keys()) {
           try { await pruneVmperf(vcId, vmperfCfg.retentionDays); } catch { /* per-DB 격리 */ }
         }
@@ -456,7 +458,11 @@ async function sampleOnceInner() {
   // 돌아, 보존기간을 줄인 직후 재시작한 포탈이 첫 1분 안에 대량 삭제를 시작한다 —
   // v2.451 에서 실제로 그렇게 멈췄다(34.3GB DB, accept 큐가 차서 웹 타임아웃).
   // 이제 삭제 자체도 청크로 양보하지만(metrics/db.js), 기동 직후를 피하는 것도 함께 유지한다.
-  if (retentionDays > 0 && (++_pruneTicks % 20 === 0)) {
+  // 92회차 F2: 설정 파일을 한 번도 못 읽었으면(읽기 오류) 보존일은 기본값이 아니라 '모름' 이다 — 기본값으로 지우지 않는다(다시 읽히면 그 값으로).
+  // 96회차(92 F2 반증): '모름' 동안의 건너뜀은 83회차 R1 의 '허용 최장 보존으로만 정리' 와 결과가 같다 — 이 설정은 0(무제한)을 허용하므로
+  //   허용 최장이 곧 무제한이다(유한한 상한 3,650일로 지우면 무제한을 고른 관리자의 이력을 지울 수 있다). 대신 조용히 서지 않게 콘솔(10분 1줄) · 상태(retentionUnknown)로 밝힌다.
+  if (retentionDays > 0 && (_pruneTicks + 1) % 20 === 0 && metricsRetentionUnknown()) warnRetentionUnknown('지표(온도 · 용량 · GPU)');
+  if (retentionDays > 0 && (++_pruneTicks % 20 === 0) && !metricsRetentionUnknown()) {
     try {
       // v2.451: 원본은 rawRetentionDays, 롤업은 retentionDays(기본 5년).
       // rawRetentionDays 가 0 이거나 retentionDays 보다 길면 예전처럼 같은 기준을 쓴다.
@@ -522,9 +528,20 @@ export function samplerWithheldOf(lastRun) {
 }
 const _num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
+/** 96회차: 설정 파일을 한 번도 못 읽어 보존 정리를 건너뛰는 중이면 10분에 1줄(조용히 서지 않게 — 크기는 무제한 보존과 같이 자란다). */
+let _retWarnAt = 0;
+function warnRetentionUnknown(what) {
+  const t = Date.now();
+  if (t - _retWarnAt < 600_000) return;
+  _retWarnAt = t;
+  console.warn(`[metrics] ${what} 보존 정리를 건너뜁니다 — 설정 파일을 읽지 못해 보존일을 모릅니다(읽기 오류 · 원본은 그대로 · 30초마다 다시 읽음). 그동안 DB 는 무제한 보존처럼 자랍니다 — 파일 권한 · 소유자 · 디스크를 확인하세요`);
+}
+
 export function metricsSamplerStatus() {
   const s = loadMetricsSettings();
-  return { intervalMs: s.sampleIntervalMs, retentionDays: s.retentionDays, rawRetentionDays: s.rawRetentionDays, lastRun, rollupBackfill: rollupBackfillStatus() };
+  // 96회차: 보존일을 모르는 동안(설정 파일 읽기 오류 · 한 번도 못 읽음) 위 retentionDays 는 기본값이다 — 표지로 밝힌다(prune 은 건너뛴다).
+  return { intervalMs: s.sampleIntervalMs, retentionDays: s.retentionDays, rawRetentionDays: s.rawRetentionDays, lastRun, rollupBackfill: rollupBackfillStatus(),
+    ...(metricsRetentionUnknown() ? { retentionUnknown: true } : {}), ...(vmperfRetentionUnknown() ? { vmperfRetentionUnknown: true } : {}) };
 }
 
 /** (Re)arm the periodic timer from the current effective settings. */

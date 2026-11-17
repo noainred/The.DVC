@@ -70,7 +70,7 @@ export function dirStorageText({ name, address, sdPassword, device, mediaType, c
 /**
  * @param {string} action 'storage.add'|'storage.edit'|'storage.delete'|'console.add'|'console.password'|'console.delete'|'pools.edit'|'scan'
  * @param {object} a 화면 입력(비밀 없음 — 계정 비밀번호는 secret 으로 따로)
- * @param {{ config?: { storages, consoles, profiles }, portalConsole?: string, address?: string }} known 그 Director 의 지금 설정(조회 결과 — 중앙이 준다)
+ * @param {{ config?: { storages, consoles, profiles }, portalConsole?: string, peerConsoles?: string[], address?: string }} known 그 Director 의 지금 설정(조회 결과 — 중앙이 준다)
  */
 export function planManage(action, a = {}, known = {}) {
   const cfg = known.config || {};
@@ -127,6 +127,8 @@ export function planManage(action, a = {}, known = {}) {
       const low = name.toLowerCase();
       if (RESERVED_CONSOLES.includes(low)) throw fail('invalid', `‘${name}’ 은 패키지 콘솔(트레이 모니터용)이라 바꾸지 않습니다.`);
       if (known.portalConsole && low === String(known.portalConsole).toLowerCase()) throw fail('invalid', `‘${name}’ 은 포탈이 Director 에 붙는 전용 콘솔이라 여기서 바꾸지 않습니다.`);
+      // 105회차: 같은 Director 를 가리키는 다른 포탈 등록의 전용 콘솔(knownFor peerConsoles)도 — 지우거나 바꾸면 그 등록의 조회가 인증 실패로 멈춘다
+      if (Array.isArray(known.peerConsoles) && known.peerConsoles.some((c) => String(c).toLowerCase() === low)) throw fail('invalid', `‘${name}’ 은 같은 Director 를 가리키는 다른 포탈 등록이 붙는 전용 콘솔이라 여기서 바꾸지 않습니다.`);
       const exists = consoles.some((c) => c.name.toLowerCase() === low);
       if (action === 'console.add') {
         if (exists) throw fail('invalid', `‘${name}’ 계정이 이미 있습니다 — 비밀번호를 바꾸려면 ‘비밀번호 변경’ 을 쓰세요.`);

@@ -18,7 +18,7 @@ import {
   VMWARE_POOL_FULL, VMWARE_SCHEDULE, WEEKDAYS, WEEKDAY_LABEL, MAPPING_FIELDS, newMappingRow, vcSlug,
   fillResultText, directorPlanFiles, directorConflicts, freeConsoleName, consoleTaken, conflictText, ownFromPaths, catalogErrorText,
   directorAgentAdvice, directorAgentAdviceText, defaultsPatch, mergeDefaultsOnReload,
-  bindAllowed, BIND_ONE_TEXT, SHARED_DIRECTOR_TEXT,   // 52회차 D1
+  bindAllowed, BIND_ONE_TEXT, BIND_PEER_TEXT, SHARED_DIRECTOR_TEXT,   // 52회차 D1 · 104회차 같은 Director 의 다른 등록
 } from './bareosText.js';
 import { copyText as copyToClipboard } from '../../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 
@@ -558,22 +558,28 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
         <div className="card" style={{ padding: 12, minWidth: 0, background: 'var(--panel-deep)' }}>
           <b>이 Director 에 묶는 vCenter</b>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8, maxHeight: 260, overflow: 'auto' }}>
-            {s.vcenters.map((v) => {
+            {(() => {
+              // 104회차: 같은 Director(주소 · 포트 · 담당)를 가리키는 다른 등록에 저장된 vCenter — 서버가 준 sameEndpoint(판정은 서버 하나)
+              const peerIds = new Set(dir.sameEndpoint || []);
+              const peerSaved = new Set(s.sites.filter((x) => peerIds.has(x.directorId)).map((x) => x.vcenterId));
+              return s.vcenters.map((v) => {
               const other = s.sites.find((x) => x.vcenterId === v.id && x.directorId !== dir.id);
               const otherName = other ? s.directors.find((d) => d.id === other.directorId)?.name || other.directorId : '';
               const on = bound.has(v.id);
               const lockedVc = on && lockedRow(v.id);
-              const oneOnly = !other && !bindAllowed(v.id, bound, savedHere);   // 52회차 D1: Director 하나에 vCenter 하나
+              const oneOnly = !other && !bindAllowed(v.id, bound, savedHere, peerSaved);   // 52회차 D1: Director 하나에 vCenter 하나 · 104회차 같은 Director 의 다른 등록도
+              const byPeer = oneOnly && bindAllowed(v.id, bound, savedHere);   // 이 등록만 보면 되는데 다른 등록 때문에 막힘
               return (
                 <label key={v.id} style={{ ...ROW, justifyContent: 'space-between', padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel)', opacity: other ? 0.6 : 1, cursor: other || lockedVc ? 'default' : 'pointer' }}>
-                  <span style={{ ...ROW, gap: 8 }}><input type="checkbox" checked={on} disabled={!!other || lockedVc || oneOnly || busy === 'suggest'} title={oneOnly ? BIND_ONE_TEXT : undefined} onChange={(e) => toggleVc(v.id, e.target.checked)} /><span>{v.name}</span></span>
-                  <span className="muted" style={{ fontSize: 11.5 }}>{other ? `${otherName} 에 묶임` : oneOnly ? '다른 vCenter 가 묶여 있음' : lockedVc ? `백업 대상 ${jobsOn(v.id)} — 대상을 지워야 뺄 수 있습니다` : on ? (mine.some((x) => x.vcenterId === v.id) ? '묶임' : '저장 전') : '—'}</span>
+                  <span style={{ ...ROW, gap: 8 }}><input type="checkbox" checked={on} disabled={!!other || lockedVc || oneOnly || busy === 'suggest'} title={oneOnly ? (byPeer ? BIND_PEER_TEXT : BIND_ONE_TEXT) : undefined} onChange={(e) => toggleVc(v.id, e.target.checked)} /><span>{v.name}</span></span>
+                  <span className="muted" style={{ fontSize: 11.5 }}>{other ? `${otherName} 에 묶임` : oneOnly ? (byPeer ? '같은 Director 의 다른 등록에 vCenter 가 묶여 있음' : '다른 vCenter 가 묶여 있음') : lockedVc ? `백업 대상 ${jobsOn(v.id)} — 대상을 지워야 뺄 수 있습니다` : on ? (mine.some((x) => x.vcenterId === v.id) ? '묶임' : '저장 전') : '—'}</span>
                 </label>
               );
-            })}
+            }); })()}
           </div>
           <div className="muted" style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.6 }}>vCenter 하나는 Director 하나에만, Director 하나에는 vCenter 하나만 묶습니다(서비스 하나 = vCenter 하나 + Bareos 하나). 백업 대상이 있는 vCenter 는 다른 Director 로 옮길 수 없습니다(잡은 지금 Director 의 설정에 있습니다).</div>
           {savedHere.size > 1 && !s.demo && <div style={{ fontSize: 11.5, marginTop: 6, color: 'var(--amber)', lineHeight: 1.6 }}>⚠ {SHARED_DIRECTOR_TEXT}</div>}
+          {(dir.sameEndpoint || []).length > 0 && !s.demo && <div style={{ fontSize: 11.5, marginTop: 6, color: 'var(--amber)', lineHeight: 1.6 }}>⚠ 같은 Director(같은 주소 · 포트 · 담당)를 가리키는 다른 등록이 있습니다: {(dir.sameEndpoint || []).map((id) => s.directors.find((d) => d.id === id)?.name || id).join(', ')} — vCenter 묶기는 이 등록들을 한 Director 로 셉니다(이미 묶인 짝은 그대로 둡니다).</div>}
         </div>
       </div>
 

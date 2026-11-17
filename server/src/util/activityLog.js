@@ -26,6 +26,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { registerStateFile } from './stateFiles.js'; // v2.613 PERSIST2613-08
 import { registerExitFlush } from './exitFlush.js'; // v2.621 LIFE-03
+import { envPositive } from './envNumber.js';
 
 /**
  * 도메인 하나의 작업 로그를 만든다.
@@ -43,7 +44,7 @@ export const ACTIVITY_WRITE_GAP_MS = 1_000;
 export function createActivityLog({ fileName, max = 500, numFields = [], writeGapMs = ACTIVITY_WRITE_GAP_MS }) {
   const FILE = path.join(config.configDir, fileName);
   registerStateFile(fileName); // v2.613 PERSIST2613-08: 링버퍼 캐시 — 상태 파일로 스스로 등록(이름 규약 -activity 와 이중)
-  const MAX = Math.max(50, Number(max) || 500);
+  const MAX = Math.max(50, envPositive(max, 500));   // 102회차: Infinity · 음수는 기본값(예전엔 Infinity 면 링버퍼 상한이 꺼졌다 — 호출부 env 는 99회차에 고쳤고 여기는 마지막 방어)
   let buf = null;
   /*
    * v2.621(감사 LIFE-03 — 재현): 예전에는 기록 1건마다 링버퍼 전량(500건 ≈ 120KB)을 직렬화하고 atomicWriteFileSync

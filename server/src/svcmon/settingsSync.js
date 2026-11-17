@@ -25,7 +25,7 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { fileStamp, dayKey } from '../util/dayKey.js';
 import { SETTING_KINDS, SETTINGS_PATHS, GROUP_ORDER, DEPTH_LABEL } from '../linkcheck/settingsKinds.js';
 import {
-  listTargets, bulkAddTargets, updateTarget, updateTest, addTest, deleteTarget, getTarget, validateEndpoint, cleanOrigin, LIMITS,
+  listTargets, bulkAddTargets, updateTarget, updateTest, addTest, deleteTarget, getTarget, validateEndpoint, cleanOrigin, LIMITS, svcmonStoreReadError,
 } from './store.js';
 
 const FILE = () => path.join(config.configDir, 'svcmon-settings-sync.json');
@@ -827,6 +827,9 @@ let _running = false;
 /** 감지 1회 — 카탈로그 읽기 + 이력 반영 + (켰으면) 자동 등록. 진행 중이면 건너뛴다. */
 export async function detectOnce(deps = {}) {
   if (_running) return null;
+  // 105회차 A6: 감시 대상 파일을 읽지 못한 동안(읽기 오류 — 빈 목록)에 감지하면 연동 대상이 전부 '새 항목' 으로 보여 거짓 감지 이벤트 · 일별 요약(연동 0)을
+  //   남겼다(자동 등록은 save 409 로 막혔다). 다시 읽힐 때까지 감지를 건너뛴다(다음 주기에 다시 본다).
+  if (!deps.svcTargets && svcmonStoreReadError()) return null;
   _running = true;
   try {
     const cat = await readCatalog(deps);

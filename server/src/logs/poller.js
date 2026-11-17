@@ -13,12 +13,13 @@ import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
 import { splitDirectCollectTargets } from '../vcenter/collectTarget.js'; // v2.732(B4-01): 직접 수집 대상 판정(store.js 주 폴러와 같은 조건)
 import { capStr } from '../util/capStr.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';   // v2.765: 수집 커서 영속(상태 파일)
+import { readJsonFile } from '../util/jsonFileRead.js';   // 96회차 ⓑ: 커서 파일 읽기 오류 ≠ 손상(공용 판정)
 import { numOrNull } from '../util/numOrNull.js';
 import { registerStateFile } from '../util/stateFiles.js';
 import { getLogsDb } from './db.js';
 import { FUTURE_CLOCK_TOLERANCE_MS } from './clockTolerance.js';   // v2.783(점검 Q3 L-B1): coverage·가용성과 같은 값 한 벌(import 0 모듈)
 import { ingestSnapRows } from '../veeam/snapDb.js';   // v2.759: 스냅샷 행은 Veeam 전용 DB 에도(카드 백업 수량을 바로 계산)
-import { loadLogSettings } from './settings.js';
+import { loadLogSettings, logSettingsUnknown, logSettingsRefusal } from './settings.js';
 import { demoLoginFailEvents } from '../mock/demo/users.js'; // v2.708 로그인 실패 분석 데모(mock 에서만)
 import { demoBackupEvents } from '../mock/demo/backup.js'; // v2.711 미보호 VM 데모(mock 에서만)
 
@@ -128,10 +129,22 @@ export function normalizeCursorEntry(v, now = Date.now()) {
 export function loadCursorFile({ now = Date.now(), force = false, dbKey = null } = {}) {
   if (_cursorLoaded && !force) return;
   _cursorLoaded = true;
+  // 96회차 ⓑ(92회차 남긴 것 ③ — 결정 G2 의 형제): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 원본을 `.corrupt` 로 옮기지 않고 다음 주기에 다시 읽는다
+  //   (그동안은 예전 '파일 없음' 과 같이 로그 DB 의 마지막 저장 시각부터). 손상(깨진 JSON · 모양 불일치)만 예전처럼 보존본으로 옮긴다(공용 판정).
+  const rr = readJsonFile(CURSOR_FILE, { parse: (text) => {
+    const v = JSON.parse(text);
+    if (!v || typeof v !== 'object' || Array.isArray(v) || !v.vcenters || typeof v.vcenters !== 'object' || Array.isArray(v.vcenters)) throw new Error('객체가 아님');
+    return v;
+  } });
+  if (rr.kind === 'read-error') {
+    _cursorLoaded = false;
+    const t = Date.now();
+    if (t - _cursorWarnAt > 3_600_000) { _cursorWarnAt = t; console.warn(`[vclogs] 수집 커서 파일(${CURSOR_FILE_NAME}) 읽기 오류(${String(rr.error?.code || 'read-error').slice(0, 32)}) — 손상이 아니라 원본은 그대로 둡니다 · 다음 주기에 다시 읽습니다(시간당 1줄)`); }
+    return;
+  }
+  if (rr.kind !== 'ok') return;   // 없음 · 손상(보존본으로 옮김 — 예전 그대로)
   try {
-    if (!fs.existsSync(CURSOR_FILE)) return;
-    const p = JSON.parse(fs.readFileSync(CURSOR_FILE, 'utf8'));
-    if (!p || typeof p !== 'object' || Array.isArray(p) || !p.vcenters || typeof p.vcenters !== 'object' || Array.isArray(p.vcenters)) throw new Error('객체가 아님');
+    const p = rr.value;
     if (dbKey && p.db && typeof p.db === 'object' && !sameLogsDb(p.db, dbKey)) {
       console.warn(`[vclogs] 수집 커서 파일(${CURSOR_FILE_NAME})이 다른 로그 DB 의 것입니다 — 무시하고 로그 DB 의 마지막 저장 시각부터 읽습니다(새 DB 가 첫 7일을 채우도록)`);
       _cursorDirty = true;   // 다음 저장이 새 DB 키로 덮는다
@@ -575,6 +588,9 @@ export async function pollLogsOnce({ manual = false, budgetMs: budgetOverride = 
   // v2.743(감사 WEB-04): 진행 중이면 **직전 결과(lastRun)를 돌려주지 않는다** — '지금 수집' 이 그 값을 이번 결과로 읽어
   //   '수집 완료: N건' 이라고 말했다(첫 실행 중이면 null 이라 0건). 이번 요청은 새로 수집하지 않았다는 사실을 busy 로 밝힌다.
   if (running) { _busySkips++; _busySkipAt = Date.now(); return { busy: true, runningSince }; }
+  // 92회차 F3: 설정 파일 읽기 오류 동안은 보관 기간 · 용량 · 저장 위치를 모른다 — 기본값으로 수집(기본 위치에 새 DB)하거나 정리(기본 365일 · 1,024MB 로
+  //   긴 이력 삭제)하지 않고 이번 주기를 건너뛴다(30초마다 다시 읽음 — 읽히면 다음 주기부터 예전대로 · 커서가 그동안을 따라잡는다).
+  if (logSettingsUnknown()) { lastRun = { at: Date.now(), collected: 0, skipped: true, settingsUnreadable: true }; return lastRun; }
   const s = loadLogSettings();
   // 꺼져 있으면 skipped:true(수집하지 않음) — '0건 수집' 과 다르다(화면이 구분한다).
   if (!s.enabled) { lastRun = { at: Date.now(), collected: 0, skipped: true }; return lastRun; }
@@ -878,6 +894,12 @@ function collectSkipMap() {
 }
 
 export async function logStatus() {
+  // 96회차 R1(92회차 F3 덜 고침): 설정 파일 읽기 오류 동안은 저장 위치를 모른다 — 기본 위치 DB 를 열지 않고(빈 DB 를 만들어 '0건' 으로 보이지 않게)
+  //   표지를 싣는다. 화면은 이 표지로 '수집 꺼짐' 이 아니라 '설정을 못 읽어 건너뜀' 을 말하고, 아래 값이 저장값이 아니라 자리 표시임을 밝힌다.
+  if (logSettingsUnknown()) {
+    return { settings: loadLogSettings(), settingsUnreadable: true, settingsReason: logSettingsRefusal()?.reason || null, lastRun, store: null, dbKind: null, dbPath: null,
+      dbSizeBytes: null, dbUsedBytes: null, dbFreeBytes: null, collect: [], busySkips: _busySkips, busySkipAt: _busySkipAt, runningSince: logPollRunningSince() };
+  }
   const db = await getLogsDb();
   // v2.741(DB-03): 파일 크기와 함께 사용 중 크기·빈 공간을 싣는다 — 용량 상한은 사용 중 크기로 판정하고 파일은 줄어들지 않는다.
   const used = typeof db.usedBytes === 'function' ? db.usedBytes() : null;

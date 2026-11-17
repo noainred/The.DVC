@@ -6,7 +6,7 @@ import { listPhysical } from '../../gpu/physicalRegistry.js';
 import { listRegistry as listServers, addServer, testServer, loadRegistry as loadIdracRegistry, isHpeEntry } from '../../idrac/registry.js';
 import { getPollerStatus, pollNow, pollNowManual, idracAuthStops } from '../../idrac/poller.js';
 import { purgeStalePower, measuredPowerBreakdown } from '../../idrac/service.js';
-import { loadPowerSettings, savePowerSettings } from '../../idrac/powerSettings.js';
+import { loadPowerSettings, savePowerSettings, powerSettingsWriteRefusal } from '../../idrac/powerSettings.js';
 import { getInventory as getIdracInventory } from '../../idrac/invCache.js';
 import { idracGpuCounts, gpuModelOf, gpuCountable } from '../../idrac/gpuCount.js'; // v2.683: Overview GPU 카드와 같은 집계
 import { idracServerVcOf, idracCorpIndex } from '../../idrac/corpAttribution.js'; // v2.630 R2630-01: 범위 귀속 한 벌 · v2.909 판정 함수도 이쪽
@@ -248,6 +248,7 @@ adminRouter.post('/idrac/poll', adminOnly, fleetOnly, async (_req, res) => {
 // 전력 집계 표시 설정 — excludeUnmapped: vCenter 미매핑 측정 전력을 총합/보고/목록에서 제외.
 adminRouter.get('/idrac/power-settings', adminOnly, (_req, res) => res.json({ ok: true, settings: loadPowerSettings() }));
 adminRouter.put('/idrac/power-settings', adminOnly, fleetOnly, async (req, res) => {
+  { const no = powerSettingsWriteRefusal(); if (no) return res.status(409).json(no); }   // 96회차 ⓑ: 설정 파일 읽기 오류 — 기본값 위에 쓰지 않는다
   const settings = savePowerSettings(req.body || {});
   await store.refresh().catch(() => {}); // Overview 총합/보고 즉시 반영
   logAudit({ user: req.user?.username, action: '전력 집계 설정 변경', target: `미매핑 제외=${settings.excludeUnmapped}` });

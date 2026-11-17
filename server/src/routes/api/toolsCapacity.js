@@ -34,7 +34,7 @@ import { metricsSamplerStatus, samplerWithheldOf, unreadVcenterReasons } from '.
 import { DEFAULT_MAX_AGE_MS } from '../../idrac/roomTemp.js';
 import { TEMP_SERIES_DETAIL } from '../../idrac/serverTempSeries.js'; // v2.556: 스파크 메트릭 선택(흡기 계열은 상세 적재일 때만 있다)
 import { vmperfHistory, vmperfMeta, vmperfDiskUsage, dropVmperfDb, dbFileName, VMPERF_METRICS, VMPERF_DISK_METRICS, VMPERF_VMDISK_METRICS } from '../../metrics/vmperfDb.js';
-import { loadVmperfSettings, saveVmperfSettings, VMPERF_LIMITS } from '../../metrics/vmperfSettings.js';
+import { loadVmperfSettings, saveVmperfSettings, vmperfSettingsRefusal, VMPERF_LIMITS } from '../../metrics/vmperfSettings.js';
 import { memoJson, hash, eachLimited, scopeSlice, scopeKey } from './shared.js';
 import { dsGrowthFor } from '../../tools/dsGrowth.js'; // v2.672 운영 장애: 용량 예측 증가율 — 롤업 전용·스냅샷 무관 캐시·시간 기준 양보
 import { lowerTerm } from '../../search/deepSearch.js'; // v2.629 AUTHZ2629-01: 검색어 1회 소문자화 + 길이 상한(한 벌)
@@ -973,6 +973,9 @@ api.get('/tools/waste/settings', requirePerm('tools'), (req, res) => {
 });
 
 api.put('/tools/waste/settings', requireRole('admin'), (req, res) => {
+  // 92회차 F2: 설정 파일 읽기 오류 중에는 저장하지 않는다(기본값 위에 쓰면 보존일 · 대상 목록을 덮는다 — 원본은 디스크에 그대로).
+  const unreadable = vmperfSettingsRefusal();
+  if (unreadable) return res.status(409).json(unreadable);
   const b = req.body || {};
   const snap = store.get();
   const validIds = new Set((snap.vcenters || []).map((v) => v.id));

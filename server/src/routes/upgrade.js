@@ -11,7 +11,7 @@ import { bundleShaIssue } from '../upgrade/upgrade.js'; // v2.480(3차 감사): 
 import { checkpointConfigDbs } from '../upgrade/dbCheckpoint.js';   // 86회차 F3: 설치 전 WAL 체크포인트(수집기 라우트와 같은 순서)
 import { upgradeFromBundleBytes, restartProcess } from '../upgrade/upgrade.js';
 import { decodeManifestHeader, MANIFEST_HEADER } from '../upgrade/signature.js'; // v2.730(검토 S-10): push 의 서명 manifest
-import { loadSettings as loadUpgradeSettings, upgradeTokenDropped } from '../upgrade/settings.js'; // v2.731(A3-01 ①)
+import { loadSettings as loadUpgradeSettings, upgradeTokenDropped, upgradeSettingsWriteRefusal } from '../upgrade/settings.js'; // v2.731(A3-01 ①)
 import { ssrfBlockReason } from '../collector/registry.js';
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
@@ -194,6 +194,9 @@ upgradeRouter.put('/settings', adminOnly, (req, res) => {
   // 경로/URL 형식 검증 — 통과하지 못하면 저장하지 않는다(감사 H16).
   const bad = validateUpgradeSettings(b);
   if (bad) return res.status(400).json({ ok: false, reason: bad });
+  // 103회차 F5: 설정 파일을 읽지 못한 동안(읽기 오류 — 원본 그대로)은 저장하지 않는다 — 사유를 화면까지(전역 오류 처리기는 사유를 싣지 않는다).
+  const unreadable = upgradeSettingsWriteRefusal();
+  if (unreadable) return res.status(409).json(unreadable);
   const allowed = ['enabled', 'watchDir', 'installDir', 'packageName', 'remoteBase', 'token', 'pollIntervalMs', 'autoApply', 'edgeAutoUpgrade']; // v2.859: 엣지 자동 업그레이드
   const partial = {};
   for (const k of allowed) if (b[k] !== undefined) partial[k] = b[k];

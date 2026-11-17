@@ -12,10 +12,10 @@
  * 그래서 로드 오류 동안은 loadError() 가 사유를 돌려주고 잡 저장 검사는 NFS 대상을 거부한다(fail-closed).
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 103회차 F17: 읽기 오류 ≠ 손상
 
 const FILE = path.join(config.configDir, 'vm-clone-corp.json');
 const MAX_CORPS = 200;
@@ -24,12 +24,24 @@ const ID_RE = /^[A-Za-z0-9._-]{1,80}$/;
 
 let _db = null;
 let _err = null;
+/*
+ * 103회차 F17(재현 — EISDIR): 예전 catch 하나는 **읽기 오류**도 손상으로 보고 원본(법인별 백업 마운트 지정)을 `.corrupt.*` 로 옮겨, 다음 지정 저장이 그 법인
+ *   한 건만 든 파일을 썼다(다른 법인 지정이 사라져 '전부 허용' 으로 넓어진다). 읽기 단계는 공용 읽기(30초 간격 재읽기): 읽기 오류는 원본을 두고 ·
+ *   캐시하지 않고 · 표지(_err — NFS 대상 잡 저장은 그대로 거부)를 세우고 · 지정 저장을 409 로 거절한다. parse 실패는 예전과 같다.
+ */
+const _reader = makeJsonFileReader(() => FILE, { parse: (t) => t, preserve: false, tag: 'vm-clone-corp' });
 function load() {
   if (_db) return _db;
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') {
+    const code = String(rr.error?.code || 'read-error').slice(0, 32);
+    if (!_err?.readError) _err = { at: Date.now(), reason: `vm-clone-corp.json 을 읽지 못했습니다(읽기 오류 ${code}) — 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽습니다)`, readError: true };
+    return { corps: {} };   // 캐시하지 않는다 — setMountUse 가 거절한다
+  }
   _err = null;
   try {
-    if (fs.existsSync(FILE)) {
-      const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    if (rr.kind === 'ok') {
+      const p = JSON.parse(rr.value);
       _db = { corps: p?.corps && typeof p.corps === 'object' && !Array.isArray(p.corps) ? p.corps : {} };
       return _db;
     }
@@ -67,6 +79,7 @@ export function mountUseView(corpKey) {
  */
 export function setMountUse(corpKey, mountIds, by = '') {
   const db = load();
+  if (_err?.readError) throw Object.assign(new Error(_err.reason), { status: 409, code: 'settings-unreadable', readError: true });   // 103회차 F17
   const key = keyOf(corpKey);
   if (mountIds == null) delete db.corps[key];
   else {
@@ -86,11 +99,12 @@ export function setMountUse(corpKey, mountIds, by = '') {
  */
 export function mountUseDenied(dest, corpKey) {
   if (dest?.type !== 'nfs') return '';
-  if (corpMountsLoadError()) return '법인별 마운트 지정 파일(vm-clone-corp.json)을 읽지 못해 NFS 대상을 확인할 수 없습니다 — 법인 저장소 화면에서 다시 저장하세요.';
+  // 105회차 A7: 읽기 오류 동안은 지정 저장도 409 라 '다시 저장하세요' 는 따를 수 없는 안내였다 — 그 사유(권한 · 디스크 · 30초 재읽기)를 싣는다.
+  { const le = corpMountsLoadError(); if (le) return le.readError ? `${le.reason} — 그동안 NFS 대상 잡은 저장하지 않습니다.` : '법인별 마운트 지정 파일(vm-clone-corp.json)을 읽지 못해 NFS 대상을 확인할 수 없습니다 — 법인 저장소 화면에서 다시 저장하세요.'; }
   const use = mountUseOf(corpKey);
   if (!use) return '';
   if (!use.has(String(dest.mountId || ''))) return use.size ? '이 법인에서 백업에 쓰기로 지정하지 않은 마운트입니다 — 법인 저장소 화면에서 그 마운트의 ‘사용’ 을 켜세요.' : '이 법인은 엣지 NFS 마운트를 백업에 쓰지 않도록 지정돼 있습니다 — 법인 저장소 화면에서 바꾸세요.';
   return '';
 }
 
-export function _resetCorpMountsForTest() { _db = null; _err = null; }
+export function _resetCorpMountsForTest() { _db = null; _err = null; _reader.reset(); }

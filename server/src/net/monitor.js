@@ -17,6 +17,7 @@ import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js';
 import { createAuthGuard, authStopView } from '../util/authGuard.js';
 import { isSshAuthError } from '../proxy/sshExec.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 92회차 F1: 읽기 오류 ≠ 손상(결정 G2 공용 판정)
 
 /**
  * 연속 모니터의 **SSH 인증 실패 정지**(v2.591 — 감사 F5). 모니터는 주기(최소 1분)마다 캡처 호스트에 SSH 로그인한다 —
@@ -55,18 +56,35 @@ function backupCorrupt(err) {
   } catch { /* 보존 실패가 기동을 막지 않게 */ }
 }
 
+/*
+ * 92회차 F1(중간 — 재현): 예전 catch 하나는 **읽기 오류**(EACCES · EIO · EMFILE · EISDIR)도 손상으로 보고 온전한 capture-monitors.json
+ *   (SSH 비밀번호 · 개인키 포함)을 `.corrupt` 로 옮긴 뒤 빈 목록으로 돌았다 — 다음 저장(모니터 하나 추가)이 그 한 건만 든 파일을 썼다
+ *   (나머지 모니터 정의 · 자격증명은 보존본에만 — 수동 복구 전까지 감시가 멈춘다). 이제 단계로 가른다(공용 판정 util/jsonFileRead.js):
+ *   parse(형식 · 배열 아님 · 복호 실패 — 예전 try 와 같은 범위)만 손상으로 backupCorrupt(예전 문구 그대로), 읽기 오류는 원본을 두고 ·
+ *   빈 목록을 캐시하지 않고(30초마다 다시 읽음) · 저장 · 삭제를 거절한다(monitorsWriteRefusal). 그동안 주기 실행은 없다(목록이 비었다).
+ */
+const parseMonitors = (text) => {
+  const p = JSON.parse(text);
+  if (!Array.isArray(p)) throw new Error('배열이 아님'); // 형식 불일치도 손상으로 취급
+  return openSecretsDeep(p); // v2.296 캡처 호스트 SSH 자격증명 복호(메모리 평문)
+};
+const _reader = makeJsonFileReader(() => FILE, { parse: parseMonitors, preserve: false, tag: 'netmon' });   // 보존은 아래 backupCorrupt(사유 요약 문구 — RV2744F-LOAD-01)
 let cache = null;
+let _readError = false;
 function load() {
-  if (cache) return cache;
-  cache = [];
-  try {
-    if (fs.existsSync(FILE)) {
-      const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-      if (!Array.isArray(p)) throw new Error('배열이 아님'); // 형식 불일치도 손상으로 취급
-      cache = openSecretsDeep(p); // v2.296 캡처 호스트 SSH 자격증명 복호(메모리 평문)
-    }
-  } catch (e) { cache = []; backupCorrupt(e); }
+  if (cache && !_readError) return cache;
+  const r = _reader.read();
+  if (r.kind === 'read-error') { _readError = true; cache = []; return cache; }   // 빈 목록은 자리 표시 — 다음 load() 가 다시 판정한다(간격 30초)
+  _readError = false;
+  if (r.kind === 'ok') cache = r.value;
+  else { cache = []; if (r.kind === 'corrupt') backupCorrupt(r.error); }
   return cache;
+}
+/** 92회차 F1: 모니터 정의 파일 읽기 오류 중이면 쓰기 거절 본문, 아니면 null. */
+export function monitorsWriteRefusal() {
+  load();
+  if (!_readError) return null;
+  return { ok: false, code: 'settings-unreadable', readError: true, reason: `연속 네트워크 모니터 정의 파일(${path.basename(FILE)})을 읽지 못해 저장하지 않았습니다 — 읽기 오류이고 원본(자격증명 포함)은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 다시 열립니다).` };
 }
 // 원자적 쓰기 — 크래시/정전 중 부분기록으로 파일이 깨지면 load가 []를 반환하고 다음 persist가
 // 빈 목록으로 덮어써 전 모니터 정의(자격증명 포함)가 사라진다. tmp+fsync+rename으로 방지.
@@ -81,7 +99,10 @@ function recordRun(m, fields) {
   if (cur && cur !== m) Object.assign(cur, fields);
   if (cur) persist();
 }
-function persist() { try { atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(cache), null, 2), { mode: 0o600 }); } catch { /* */ } } // 암호화 모드면 password/privateKey 봉인
+function persist() {
+  if (_readError) return;   // 92회차 F1: 마지막 방어선 — 읽기 오류 중의 빈 자리 표시로 원본을 덮지 않는다
+  try { atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(cache), null, 2), { mode: 0o600 }); } catch { /* */ }
+} // 암호화 모드면 password/privateKey 봉인
 
 const redact = (m) => ({ useSudo: m.useSudo !== false,
   id: m.id, name: m.name, enabled: m.enabled, mode: m.mode, intervalMin: m.intervalMin,
@@ -101,6 +122,8 @@ function posOr(v, min, max, def) {
 }
 
 export function saveMonitor(body = {}) {
+  // 92회차 F1: 읽기 오류 중에는 저장하지 않는다(라우트는 결과를 그대로 싣고 화면은 requireChanged 로 ok:false 사유를 보인다).
+  const refused = monitorsWriteRefusal(); if (refused) return refused;
   load();
   // v2.783: 새 id 는 시각만으로 만들지 않는다 — 같은 밀리초에 두 개를 만들면 id 가 겹쳐 새 항목이 기존 항목의 '수정' 이 되고 이전 값을 물려받았다
   //   (CI 빠른 러너에서 audit2600e LO2600-0x 가 [1440,…] 을 받은 원인). 시각 + 임의 6자리.
@@ -142,6 +165,7 @@ export function saveMonitor(body = {}) {
 }
 
 export function removeMonitor(id) {
+  if (monitorsWriteRefusal()) return false;   // 92회차 F1: 읽기 오류 중에는 지우지 않는다(목록이 빈 자리 표시라 어차피 찾지 못한다 — 명시)
   load(); const before = cache.length; cache = cache.filter((m) => m.id !== id);
   if (cache.length !== before) {
     persist();
@@ -152,7 +176,7 @@ export function removeMonitor(id) {
 }
 
 /** 테스트 전용 — 모듈 캐시를 비운다(설정 파일을 다시 읽게). */
-export function _resetNetMonitorForTest() { cache = null; runningMon.clear(); }
+export function _resetNetMonitorForTest() { cache = null; _readError = false; _reader.reset(); runningMon.clear(); }
 
 /** 한 쪽의 결과를 정지 기록에 반영한다 — 거부면 기록, 로그인이 통했으면 해제. */
 function noteSide(m, side, { authFailed = false, ok = false, reason = '' } = {}) {

@@ -15,6 +15,7 @@ import { logAudit } from '../../audit.js';
 import {
   publicSettings, publicDirector, saveSettings, addDirector, updateDirector, checkDirectorUpdate, deleteDirector, settingsLoadError, settingsRev,
   directorConn, directorCred, directorById, loadSettings, jobDirectorId, siteMissing, anyDirectorConfigured, LIMITS,
+  directorEndpointPeers,   // 104회차 D1 우회 — 같은 Director(주소 · 포트 · 담당)를 가리키는 다른 등록(화면의 vCenter 묶기 판정)
 } from '../../bareos/settings.js';
 import {
   listJobs, jobDigests, getJob, patchJob, deleteJob, markPending, addRestore, registryLoadError, jobVmIds, MAX_JOBS, restoreOpen, restoreHeld, restoreUnknownHeld, restoreFinishing, clearPending, applyRunRow, applyRestoreRow, registryRev, inBatch, markCancelReq, runUnknownHeld, RUN_UNKNOWN_HOLD_MS,
@@ -538,7 +539,8 @@ api.get('/tools/bareos-backup/settings', adminOnly, fullScopeOnly, (req, res) =>
   res.json({
     demo,
     ...pub,
-    directors: pub.directors.map((d) => ({ ...d, jobs: jobsByDir.get(d.id) || 0, busy: isSetupBusy(d.id) })),
+    // 104회차: sameEndpoint = 같은 Director 를 가리키는 다른 등록 id(서버 directorBindIssue 와 같은 판정 directorEndpointPeers — 화면이 '이미 묶임' 을 같은 규칙으로 막는다)
+    directors: (() => { const peers = directorEndpointPeers(st.directors); return pub.directors.map((d) => ({ ...d, jobs: jobsByDir.get(d.id) || 0, busy: isSetupBusy(d.id), ...(peers.get(d.id)?.length ? { sameEndpoint: peers.get(d.id) } : {}) })); })(),
     rev: revToken(),   // 매핑·기본값 저장 때 돌려보낸다(P4 — 다른 화면의 저장을 덮지 않게)
     agents: (() => { try { return knownAgentNames(); } catch { return []; } })(),   // v2.824 담당 엣지 고르기(중앙이 아는 엣지)
     // v2.824 검토(W11·I3): 대행 작업 인출은 엣지별 개별 토큰 전용 — 토큰이 있는 엣지 이름(화면이 없는 이름을 '대행 불가' 로 표시)

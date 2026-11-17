@@ -58,7 +58,8 @@ export async function pollPhysicalOnce({ manual = false } = {}) {
         const r = await collectVmGpuSsh(vm, creds, { timeoutMs: s.timeoutMs, port: sv.port || 22 });
         setPhysicalGpu(sv.id, {
           id: sv.id, name: sv.name, host: sv.host, vcenterId: sv.vcenterId || '',
-          count: r.count, utilPct: r.utilPct, utilNA: !!r.utilNA, memUsedPct: r.memUsedPct, memUsedMB: r.memUsedMB ?? null, memTotalMB: r.memTotalMB ?? null, tempC: r.tempC ?? null, gpus: r.gpus || [], error: null,
+          count: r.count, utilPct: r.utilNA ? null : r.utilPct, utilNA: !!r.utilNA,   // 95회차: MIG(utilNA)의 파서 0 을 싣지 않는다(게스트 폴러 v2.593 DATA-02 와 같은 규칙 — 0% 가 아니라 모름)
+          memUsedPct: r.memUsedPct, memUsedMB: r.memUsedMB ?? null, memTotalMB: r.memTotalMB ?? null, tempC: r.tempC ?? null, gpus: r.gpus || [], error: null,
           // v2.769(점검 R4-D5-3): 일부 GPU 응답 없음(장수) — 예전에는 버려져 죽은 GPU 가 개수에서 조용히 빠졌다.
           gpuErrors: Number.isFinite(r.gpuErrors) && r.gpuErrors > 0 ? Math.floor(r.gpuErrors) : 0,
         });

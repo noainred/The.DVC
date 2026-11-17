@@ -290,6 +290,9 @@ export function removeServer(id) {
  */
 export function importServers(incoming, mode = 'merge', { replaceScope = null } = {}) {
   if (!Array.isArray(incoming)) return { ok: false, reason: 'servers 배열을 찾을 수 없습니다.' };
+  // 93회차 F2: 등록부 읽기 오류면 먼저 409 결과로 — 예전에는 saveRegistry 의 마지막 방어선(assertWritable)이 던져
+  //   가져오기 · 일괄 등록 · 스캔 등록 · 온보딩이 사유 없는 'bad request'(전역 오류 처리기)나 예외를 받았다(addServer 와 같은 순서).
+  { const refused = registryWriteRefusal(); if (refused) return { ...refused, mode, added: 0, updated: 0, skipped: [] }; }
   const existing = loadRegistry();
   // mode:
   //  - 'replace'            : 레지스트리 전체 교체(기존 모두 삭제 후 incoming만)
@@ -455,6 +458,8 @@ export function registerScanned(found, username, password, mode = 'merge', vcent
  * Returns { ok, updated }.
  */
 export function assignVcenter({ ids = null, vcenterId = '' } = {}) {
+  // 93회차 F2: 읽기 오류면 빈 목록을 읽고 '0대 변경 · 성공' 이라 했다 — 409 거절로.
+  { const refused = registryWriteRefusal(); if (refused) return refused; }
   const vc = String(vcenterId || '').trim();
   const list = loadRegistry();
   const want = Array.isArray(ids) && ids.length ? new Set(ids.map(String)) : null;
@@ -472,6 +477,7 @@ export function assignVcenter({ ids = null, vcenterId = '' } = {}) {
  * (빈 vcenterId는 '미지정' 서버를 삭제). Returns { ok, removed, total }.
  */
 export function deleteServers({ all = false, vcenterId = undefined } = {}) {
+  { const refused = registryWriteRefusal(); if (refused) return refused; }   // 93회차 F2: 던지지 않고 409 결과로(위 importServers 와 같다)
   const list = loadRegistry();
   let next;
   if (all) {
@@ -525,11 +531,18 @@ export function parseCsv(text) {
   return out;
 }
 
+const CARRY_MOVED_REASON = '접속 주소나 계정이 저장값과 달라 저장된 비밀번호를 쓰지 않습니다 — 비밀번호를 입력해 주세요.';   // 91회차 ⓐ — vcenter/registry.js 와 같은 문구
+/** 저장(normalize)과 같은 host 꼴 — 스킴 없으면 https · 끝 / 제거(비교용). 길이를 먼저 자른다(외부 입력 정규식). */
+const testHostKey = (h) => { let t = String(h ?? '').trim().slice(0, 2048); if (!/^https?:\/\//.test(t)) t = `https://${t}`; while (t.endsWith('/')) t = t.slice(0, -1); return t; };
 /** Test connectivity + read current power for a server (uses stored pw if blank). */
 export async function testServer(body) {
   let entry = body;
   if (!entry.password && entry.id) {
     const saved = loadRegistry().find((s) => s.id === entry.id);
+    // 91회차 ⓐ: 저장 경로(normalize — **정규화한** host · username 이 바뀌면 비밀을 버린다, v2.770)와 같은 판정 — 다른 계정명 · 주소로 저장 비밀번호를 보내지 않는다.
+    if (saved && accessMoved(saved, { host: body.host !== undefined ? testHostKey(body.host) : undefined, username: body.username !== undefined ? String(body.username).trim() : undefined }, ['host', 'username'])) {
+      return { ok: false, reason: CARRY_MOVED_REASON };
+    }
     if (saved) entry = { ...saved, ...body, password: saved.password, host: saved.host }; // v2.480(3차 감사 S6): 저장 비밀번호를 물려받는 테스트는 host 도 저장값으로 고정 — body.host 만 공격자 IP 로 바꿔 평문 비밀번호를 받는 경로 차단(PDU S-1 과 같은 규칙)
   }
   if (!entry.host || !entry.username || !entry.password) {

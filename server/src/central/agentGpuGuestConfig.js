@@ -22,6 +22,7 @@ import { getAllGpuGuestDiag } from './gpuGuestDiag.js';
 import { loadCollectors } from '../collector/registry.js';
 import { agentKeyOf } from '../util/agentKey.js';
 import { makeSettingsLoadError } from '../util/settingsLoadError.js'; // v2.727(감사 D-01): 손상 → 설정 pull 503(v2.631 규약)
+import { makeJsonFileReader, READ_RETRY_MS } from '../util/jsonFileRead.js';   // 103회차 F14: 읽기 오류 ≠ 손상
 import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
 
 const FILE = path.join(config.configDir, 'central-agent-gpu-guest.json');
@@ -37,7 +38,7 @@ let byAgent = Object.create(null); // agent -> gpuGuestSettings(전체 병합 �
  */
 const _loadErr = makeSettingsLoadError(() => FILE, { label: 'GPU 게스트 수집 배포(엣지별)', confirm: () => persist() });
 /** 배포 파일을 못 읽었으면 { at, reason }, 읽었으면 null — 라우트가 pull 응답 전에 본다. 파일이 없고 보존본만 있으면 오류다. */
-export function gpuGuestConfigLoadError() { if (!_loadErr.get() && !fs.existsSync(FILE)) _loadErr.missing(); return _loadErr.get(); }
+export function gpuGuestConfigLoadError() { refreshIfReadError(); if (!_loadErr.get() && !fs.existsSync(FILE)) _loadErr.missing(); return _loadErr.get(); }
 /**
  * v2.742(LEFT-01 — 재현): 대소문자만 다른 중복 키를 하나로 합친다(순수). 예전 저장(setAssignedGpuGuest)은 읽기와 달리 **글자 그대로**
  *   키를 써서, 'edge-a' 로 저장된 배포를 'Edge-A' 이름으로 일부만 고쳐 저장하면 비밀번호·다른 VM 계정·enabled 가 빠진 **새 사본**이
@@ -161,9 +162,24 @@ function resolveFoldOf(k) {
 
 // v2.296 배포 사본 계정 복호. ⚠ 손상 시 조용히 빈 객체로 출발하면 다음 persist()가 온전했던
 // 원본(엣지 SSH/게스트 비밀번호 포함)을 덮어써 영구 유실된다 — preserveCorrupt 로 보존 후 빈 값.
+/*
+ * 103회차 F14(재현 — EISDIR): 예전 기동 시 catch 하나는 **읽기 오류**도 손상으로 보고 원본(엣지별 SSH · 게스트 비밀번호)을 `.corrupt.*` 로 옮긴 뒤 빈 배정으로 돌았다 —
+ *   관리자가 엣지 하나를 저장하면(저장이 로드 오류를 푼다) 그 한 건만 든 파일이 되어 다른 엣지의 배포 사본 · 비밀이 보존본에만 남았다(엣지는 503 동안 로컬 값을 유지하다
+ *   다음 pull 에 assigned:false 를 받는다). 읽기 단계는 공용 읽기(util/jsonFileRead.js — 30초 간격 재읽기): 읽기 오류는 원본을 두고 · 표지(readError — pull 503 은 그대로)를
+ *   세우고 · 관리자 저장도 409 로 거절한다 · 읽히면 그 값으로 돌아온다(재시작 없이). parse · 복호 실패는 예전과 같다.
+ */
+const _reader = makeJsonFileReader(() => FILE, { parse: (t) => t, preserve: false, tag: 'gpu-guest-deploy' });
+function refreshIfReadError() { if (_loadErr.get()?.readError) loadFromDisk(); }
+function assertWritable() {
+  if (!_loadErr.get()?.readError) return;
+  throw Object.assign(new Error('GPU 게스트 수집 배포 파일(central-agent-gpu-guest.json)을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류이고 원본(엣지별 비밀번호 포함)은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).'), { status: 409, code: 'settings-unreadable', readError: true });
+}
+function loadFromDisk() {
+const rr = _reader.read();
+if (rr.kind === 'read-error') { _loadErr.readError(rr.error, { retryMs: READ_RETRY_MS }); byAgent = Object.create(null); return; }
 try {
-  if (fs.existsSync(FILE)) {
-    const raw = openSecretsDeep(parseJsonObject(fs.readFileSync(FILE, 'utf8')));
+  if (rr.kind === 'ok') {
+    const raw = openSecretsDeep(parseJsonObject(rr.value));
     // 이름 근거는 대소문자 중복이 있을 때만 읽는다(등록부·토큰 파일을 매 기동 끌어오지 않게).
     const keys = raw && typeof raw === 'object' ? Object.keys(raw) : [];
     const hasDup = new Set(keys.map((k) => k.toLowerCase())).size < keys.length;
@@ -183,8 +199,11 @@ try {
   // v2.744(최종 검토 RG2744-02): 콘솔 사유는 요약이다 — 원문은 게스트 비밀번호 앞부분 같은 파일 조각을 싣고 이 줄은 콘솔 링버퍼로 나간다.
   _loadErr.corrupt(err); preserveCorrupt(FILE, err.message); console.error(`[central] central-agent-gpu-guest.json 파싱 실패: ${safeLoadText(err) || '사유 미상'}`); byAgent = Object.create(null);
 }
+}
+loadFromDisk();
 
 function persist() {
+  assertWritable();   // 103회차 F14: 읽기 오류 중에는 '기본값으로 확정' · 관리자 저장도 원본 자리를 덮지 않는다
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(byAgent)), { mode: 0o600 }); // 암호화 모드면 password 봉인(복제 — byAgent 평문 유지)
   _loadErr.ok(); // v2.727(D-01): 관리자 저장이 로드 오류를 푼다(settingsLoadError 규약)
@@ -194,6 +213,7 @@ const cleanAgent = (a) => String(a || '').trim();
 
 /** 지정된 배포 설정(비밀번호 포함) — 엣지 pull이 사용. 없으면 null. */
 export function getAssignedGpuGuest(agent) {
+  refreshIfReadError();
   const a = cleanAgent(agent);
   const k = a ? agentKeyOf(byAgent, a) : null; // v2.597 L2597-03 — 대소문자만 다른 이름도 같은 엣지
   return k != null && byAgent[k] ? byAgent[k] : null;
@@ -206,6 +226,7 @@ export function getAssignedGpuGuest(agent) {
 export function setAssignedGpuGuest(agent, partial, dropped = []) {
   const a = cleanAgent(agent);
   if (!a) return null;
+  refreshIfReadError(); assertWritable();   // 103회차 F14: 메모리(빈 배정)를 바꾸기 전에 거절
   // 39회차 R2(반증)는 '손상 중 저장이 다른 엣지 배포를 지운다' 를 지적했지만, 전체 점검 18회차 B-3 결정(엣지는 로컬 값을 유지해 파괴적이지 않다 —
   //   관리자 저장이 손상을 푼다)과 충돌해 바꾸지 않았다(사용자 결정 사항 — audits.md 39회차 남긴 것).
   const k = agentKeyOf(byAgent, a) ?? a;
@@ -220,6 +241,7 @@ export function setAssignedGpuGuest(agent, partial, dropped = []) {
 
 /** 배포 설정이 지정된 agent 목록(요약). */
 export function listAssignedGpuGuestAgents() {
+  refreshIfReadError();
   return Object.keys(byAgent).map((agent) => {
     const s = byAgent[agent] || {};
     const vcs = Object.keys(s.vcenters || {});
@@ -238,3 +260,6 @@ export function redactAssignedGpuGuest(agent) {
   if (!s) return { assigned: false, settings: null };
   return { assigned: true, at: s._updatedAt || 0, settings: redactGpuGuestSettings(s) };
 }
+
+/** 테스트 전용(103회차) — 디스크에서 다시 읽는다(재읽기 간격 초기화). */
+export function _reloadGpuGuestConfigForTest() { _reader.reset(); _loadErr.ok(); loadFromDisk(); }

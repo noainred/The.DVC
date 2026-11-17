@@ -8,7 +8,7 @@ import { listAgentConfigs } from '../../central/agentConfig.js';
 import { createBackup, listBackups, backupPath, deleteBackup, readBackupDetailed, readBackupFailure, restoreCentral } from '../../backup/service.js';
 import { stagedRestoreStatus, cancelStagedRestore } from '../../backup/stagedRestore.js'; // v2.768(점검 R3-C5-02): 복원 예약 상태·취소
 import { restartProcess } from '../../upgrade/upgrade.js'; // v2.768: 복원 후 바로 재시작(선택 — upgrade/apply 의 restart 와 같은 종료 경로)
-import { loadBackupSettings, saveBackupSettings, backupStatus } from '../../backup/settings.js';
+import { loadBackupSettings, saveBackupSettings, backupStatus, backupSettingsReadError } from '../../backup/settings.js';
 import { saveLogSettings } from '../../logs/settings.js';
 import { logStatus, rescheduleLogPoller, pollLogsOnce, logPollRunningSince } from '../../logs/poller.js';
 import { resetLogsDb } from '../../logs/db.js';
@@ -17,7 +17,7 @@ import { analyzeLogsForIssuesMemo } from '../../net/logIssues.js';   // v2.742(D
 import { enqueueCapture, getCaptureResult } from '../../central/captureJobs.js';
 import { getAllAgentConfigs } from '../../central/agentConfig.js';
 import { recordCapture, listCaptures, getCapture, deleteCapture } from '../../net/captureHistory.js';
-import { listMonitors, saveMonitor, removeMonitor, runMonitorNow } from '../../net/monitor.js';
+import { listMonitors, saveMonitor, removeMonitor, runMonitorNow, monitorsWriteRefusal } from '../../net/monitor.js';
 import { addUsersToVms } from '../../guest/accountService.js';
 import { onDemandErrorFields } from '../../vcenter/dsBrowse.js';   // v2.742(VC-03 후속): 주문형 로그인 문이 막은 409 의 사유 필드
 import { inUserWriteScope, scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
@@ -166,7 +166,11 @@ export function registerBackupNetSec(adminRouter) {
 adminRouter.get('/backup/status', adminOnly, requireSettingsOwner, (_req, res) => {
   res.json({ ...backupStatus(), backups: listBackups(), edges: listAgentConfigs(), restore: stagedRestoreStatus() });
 });
-adminRouter.put('/backup/settings', adminOnly, requireSettingsOwner, (req, res) => res.json(saveBackupSettings(req.body || {})));
+adminRouter.put('/backup/settings', adminOnly, requireSettingsOwner, (req, res) => {
+  // 103회차 F18: 설정 파일을 읽지 못한 동안(읽기 오류 — 원본 그대로)은 저장하지 않는다 — 사유를 화면까지(전역 오류 처리기는 사유를 싣지 않는다).
+  if (backupSettingsReadError()) return res.status(409).json({ ok: false, code: 'settings-unreadable', readError: true, reason: '백업 설정 파일을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽습니다).' });
+  res.json(saveBackupSettings(req.body || {}));
+});
 adminRouter.post('/backup/now', adminOnly, requireSettingsOwner, async (_req, res) => {
   // v2.620(PERF2620-01): createBackup 은 비동기다(gzip 을 메인 루프 밖에서) — await 해야 실패가 catch 로 온다.
   try { res.json({ ok: true, ...(await createBackup('manual', { retention: loadBackupSettings().retention })) }); }
@@ -320,7 +324,11 @@ adminRouter.get('/net/history/:id', adminOnly, fleetOnly, (req, res) => { const 
 adminRouter.delete('/net/history/:id', adminOnly, fleetOnly, (req, res) => res.json({ ok: deleteCapture(req.params.id) }));
 
 // 연속 모니터링
-adminRouter.get('/net/monitors', adminOnly, fleetOnly, (_req, res) => res.json({ monitors: listMonitors() }));
+// 96회차 ⓑ(92회차 남긴 것 ①): 정의 파일 읽기 오류 중의 빈 목록은 '없음' 이 아니다 — 표지(monitorsWriteRefusal 의 고정 문구)를 싣는다.
+adminRouter.get('/net/monitors', adminOnly, fleetOnly, (_req, res) => {
+  const no = monitorsWriteRefusal();
+  res.json({ monitors: listMonitors(), ...(no ? { loadError: { readError: true, reason: no.reason } } : {}) });
+});
 adminRouter.put('/net/monitors', adminOnly, fleetOnly, (req, res) => res.json(saveMonitor(req.body || {})));
 adminRouter.delete('/net/monitors/:id', adminOnly, fleetOnly, (req, res) => res.json({ ok: removeMonitor(req.params.id) }));
 adminRouter.post('/net/monitors/:id/run', adminOnly, fleetOnly, async (req, res) => { try { res.json(await runMonitorNow(req.params.id)); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); } });
@@ -440,7 +448,7 @@ adminRouter.put('/security/guest-scans', adminOnly, (req, res) => {
   const code = guestScanAccess(req.user, b.vcenterId);
   if (code) return res.status(code).json({ ok: false, reason: code === 403 ? GUEST_SCAN_READONLY : 'vCenter 를 찾을 수 없습니다(범위 제한 계정은 자기 범위 vCenter 를 지정해야 합니다).' });
   // 22회차 반증 D-12: 저장이 던지면(21회차 L-3 — 잠금 · 키 없음 · 디스크) 사유를 그대로(500 'internal error' 로 사유가 사라지던 것)
-  try { res.json(saveGuestScan(b)); } catch (e) { res.status(e?.code === 'SECRETS_KEY_MISSING' || e?.code === 'SECRETS_POLICY_UNAVAILABLE' ? 503 : 500).json({ ok: false, code: e?.code || null, reason: String(e?.message || e).slice(0, 300) }); }
+  try { res.json(saveGuestScan(b)); } catch (e) { res.status(e?.status === 409 ? 409 : e?.code === 'SECRETS_KEY_MISSING' || e?.code === 'SECRETS_POLICY_UNAVAILABLE' ? 503 : 500).json({ ok: false, code: e?.code || null, reason: String(e?.message || e).slice(0, 300) }); }
 });
 function denyGuestScanOutOfScope(req, res) {
   const snap = store.get();
@@ -451,6 +459,6 @@ function denyGuestScanOutOfScope(req, res) {
   res.status(code).json({ ok: false, reason: code === 403 ? GUEST_SCAN_READONLY : '작업을 찾을 수 없습니다.' });
   return true;
 }
-adminRouter.delete('/security/guest-scans/:id', adminOnly, (req, res) => { if (denyGuestScanOutOfScope(req, res)) return; try { res.json({ ok: removeGuestScan(req.params.id) }); } catch (e) { res.status(500).json({ ok: false, code: e?.code || null, reason: String(e?.message || e).slice(0, 300) }); } });   // 22회차 D-12
+adminRouter.delete('/security/guest-scans/:id', adminOnly, (req, res) => { if (denyGuestScanOutOfScope(req, res)) return; try { res.json({ ok: removeGuestScan(req.params.id) }); } catch (e) { res.status(e?.status === 409 ? 409 : 500).json({ ok: false, code: e?.code || null, reason: String(e?.message || e).slice(0, 300) }); } });   // 22회차 D-12
 adminRouter.post('/security/guest-scans/:id/run', adminOnly, async (req, res) => { if (denyGuestScanOutOfScope(req, res)) return; try { res.json(await runGuestScanNow(req.params.id)); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); } });
 }

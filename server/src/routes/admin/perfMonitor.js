@@ -10,7 +10,7 @@
  */
 import { logAudit } from '../../audit.js';
 import { perfSnapshot, measureNow, pruneHangLog } from '../../perf/monitor.js';
-import { loadPerfSettings, savePerfSettings, LIMITS as PERF_LIMITS, DEFAULTS as PERF_DEFAULTS } from '../../perf/settings.js';
+import { loadPerfSettings, savePerfSettings, perfSettingsWriteRefusal, LIMITS as PERF_LIMITS, DEFAULTS as PERF_DEFAULTS } from '../../perf/settings.js';
 import { readHangs, clearHangs, hangLogStatus } from '../../perf/hangLog.js';
 import { adminOnly, fullScopeOnlyWith } from './shared.js';
 
@@ -29,6 +29,7 @@ export function registerPerfMonitor(adminRouter) {
 
   /** 임계·보관 설정 변경. 저장 후 보존일 정리를 한 번 돌린다. */
   adminRouter.put('/perf/settings', adminOnly, fullScopeOnly, (req, res) => {
+    { const no = perfSettingsWriteRefusal(); if (no) return res.status(409).json(no); }   // 96회차 ⓑ: 설정 파일 읽기 오류 — 기본값 위에 쓰지 않는다
     const before = loadPerfSettings();
     const next = savePerfSettings(req.body || {});
     logAudit({

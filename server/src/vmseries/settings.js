@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeJsonFileReader, READ_RETRY_MS } from '../util/jsonFileRead.js';   // 103회차 F21: 읽기 오류 ≠ 손상
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { DEFAULT_THRESHOLDS } from './counters.js';
 import { numOrNull } from '../util/numOrNull.js';
@@ -33,13 +34,24 @@ export function onVmSeriesSettingsChange(cb) { listeners.add(cb); return () => l
 // v2.631(EDGE2631-01): 손상 → 보존 → 기본값(env — 보통 꺼짐)을 /api/central/vmseries-config 가 200 으로 내려보내면 엣지가
 //   그것을 영구 저장해 수집이 꺼진다. 로드 오류를 기억해 배포 라우트가 503(엣지는 직전 사본 유지)으로 답하게 한다.
 const _loadErr = makeSettingsLoadError(() => FILE, { label: '실시간 스파이크 수집 설정', confirm: () => saveVmSeriesSettings({}) });
+/*
+ * 103회차 F21(재현 — EISDIR): 예전 catch 하나는 **읽기 오류**도 손상으로 보고 원본(수집 켜짐 · 범위 · 보존일 · 대상)을 `.corrupt.*` 로 옮겼다 — 이 파일은 호출마다
+ *   읽어 다음 호출부터 env 기본값(보통 꺼짐 · 보존 60일)으로 돌았고, 관리자 저장(거절 없음)이 그 값 위에 썼다. 읽기 단계는 공용 읽기(30초 간격 재읽기):
+ *   읽기 오류는 원본을 두고 · **마지막으로 읽은 값**으로 돌며 · 표지(readError — 배포 503 그대로)를 세우고 · 저장을 409 로 거절한다. parse 실패는 예전과 같다.
+ *   정리(poller runVmSeriesPrune)는 로드 오류(손상 포함) 동안 상한 보존일로만 한다(83 R1 · 97 F14 와 같은 모양).
+ */
+const _reader = makeJsonFileReader(() => FILE, { parse: (t) => t, preserve: false, tag: 'vmseries' });
+let _lastGood = null;
 function readFile() {
-  if (!fs.existsSync(FILE)) { _loadErr.missing(); return {}; }
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') { _loadErr.readError(rr.error, { retryMs: READ_RETRY_MS }); return _lastGood ? { ..._lastGood } : {}; }
+  if (rr.kind === 'missing') { _loadErr.missing(); _lastGood = null; return {}; }
   try {
-    const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    const j = JSON.parse(rr.value);
     if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('객체가 아닌 JSON 값');
     _loadErr.ok();
-    return j;
+    _lastGood = j;
+    return { ...j };
   } catch (e) { _loadErr.corrupt(e); preserveCorrupt(FILE, e.message); return {}; }
 }
 /** v2.631(EDGE2631-01): 설정 파일을 못 읽었으면 사유(배포 라우트가 503 으로 답한다), 읽었으면 null. */
@@ -104,6 +116,7 @@ export function loadVmSeriesSettings() {
 /** 부분 업데이트 저장 후 유효 설정 반환 + 리스너 통지. */
 export function saveVmSeriesSettings(partial = {}) {
   const next = readFile();
+  if (_loadErr.get()?.readError) throw Object.assign(new Error('실시간 스파이크 수집 설정 파일을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).'), { status: 409, code: 'settings-unreadable', readError: true });   // 103회차 F21
   // v2.596(감사 CLAMP2596-02 — 재현): 화면이 빈 칸('')을 보내면 Number('')=0 이 되어 임계가 꺼지고(0) 보존일이 무제한(0)이
   //   됐다. 빈 값은 '미지정' 이다 — 그 필드·그 임계는 이전 값을 유지하고, 명시적 0 만 값으로 받는다(util/numOrNull).
   const cur = loadVmSeriesSettings();
@@ -128,3 +141,6 @@ export function saveVmSeriesSettings(partial = {}) {
 }
 
 export const vmSeriesSettingsFile = () => FILE;
+
+/** 테스트 전용(103회차). */
+export function _resetVmSeriesSettingsForTest() { _lastGood = null; _reader.reset(); _loadErr.ok(); }

@@ -8,6 +8,7 @@ import { fetchJson } from '../../api.js';
 import { Loading } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
 import { tb, gbTb, slotLabel } from './storageTrack.js';
+import { backdropClose } from '../../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만
 
 const DAY_OPTS = [7, 30, 90, 365];
 const pctColor = (p) => (p >= 90 ? 'var(--red)' : p >= 75 ? 'var(--amber)' : 'var(--green)');
@@ -40,7 +41,7 @@ export default function DsTrendModal({ dsId, name, vcenterId, type, onClose }) {
   const delta = first && last ? Math.round(((last.usedGB || 0) - (first.usedGB || 0)) * 10) / 10 : 0;
 
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="modal-overlay" {...backdropClose(() => onClose())}>
       <EscClose onClose={onClose} />
       <div className="modal card" style={{ maxWidth: 900 }}>
         <div className="flex between wrap" style={{ alignItems: 'center' }}>

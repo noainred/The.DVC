@@ -12,18 +12,19 @@
  * 중앙도 스스로 막는다. 구버전·조작된 엣지가 거대 본문을 올릴 수 있다 — v2.548 S2 와 같은 규칙).
  */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js';
 import { redactDeep, redactLogLine } from '../edgelog/redact.js';
-const KEEP = Math.max(2, Number(process.env.EDGELOG_KEEP_PER_AGENT) || 10);
-const LINE_CAP = Math.max(100, Number(process.env.EDGELOG_LINE_CAP) || 1_000);
-const AGENT_CAP = Math.max(10, Number(process.env.EDGELOG_MAX_AGENTS) || 200);
+const KEEP = Math.max(2, envPositive(process.env.EDGELOG_KEEP_PER_AGENT, 10));
+const LINE_CAP = Math.max(100, envPositive(process.env.EDGELOG_LINE_CAP, 1_000));
+const AGENT_CAP = Math.max(10, envPositive(process.env.EDGELOG_MAX_AGENTS, 200));
 
 // v2.602(감사 CEN2602-02): 줄 길이·상태 항목·스냅샷 크기 상한. 줄 길이는 엣지 수집(edgelog/collect.js LINE_MAX)과 같은 값.
 const LINE_MAX = 2_000;
-const STATUS_ITEM_CAP = Math.max(20, Number(process.env.EDGELOG_STATUS_ITEM_CAP) || 200);
-const STATUS_MAX_BYTES = Math.max(64 * 1024, Number(process.env.EDGELOG_STATUS_MAX_BYTES) || 512 * 1024);
-const SNAP_MAX_BYTES = Math.max(256 * 1024, Number(process.env.EDGELOG_SNAP_MAX_BYTES) || 2 * 1024 * 1024);
+const STATUS_ITEM_CAP = Math.max(20, envPositive(process.env.EDGELOG_STATUS_ITEM_CAP, 200));
+const STATUS_MAX_BYTES = Math.max(64 * 1024, envPositive(process.env.EDGELOG_STATUS_MAX_BYTES, 512 * 1024));
+const SNAP_MAX_BYTES = Math.max(256 * 1024, envPositive(process.env.EDGELOG_SNAP_MAX_BYTES, 2 * 1024 * 1024));
 
 // ⚠ `String(v)` 는 toString 이 함수가 아닌 객체에서 던진다 — 글자·숫자만 글자로 받는다.
 const t = (v) => (typeof v === 'string' ? v.trim() : (typeof v === 'number' && Number.isFinite(v) ? String(v) : ''));

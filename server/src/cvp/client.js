@@ -20,6 +20,7 @@
  *   ② 한 종류가 처음 3대에서 연속 실패하면 그 주기의 나머지 장비는 그 종류를 시도하지 않는다(`missing` 이 사유를 말한다)
  *   ③ 성공한 후보를 CVP 별로 기억해 다음 주기 첫 시도로 쓴다(`prefer`).
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { lookupEndpoints } from './endpoint.js';   // v2.935(C-③) EndpointLocation
 import { Agent } from 'undici';
 import { withSsrfLookup } from '../util/ssrfLookup.js';
@@ -39,7 +40,7 @@ import * as P from './parse.js';
 const dispVerify = new Agent({ connect: deviceTlsConnect({ subsystem: 'cvp', mode: 'strict', strictHint: 'CVP 등록의 ‘TLS 인증서 검증’ 을 끄면 승인 지문을 허용합니다', tls: withSsrfLookup({}) }) });
 const dispNoVerify = new Agent({ connect: deviceTlsConnect({ subsystem: 'cvp', mode: 'verify', tls: withSsrfLookup({}) }) });
 const REQ_TIMEOUT_MS = reqTimeoutMs(process.env.CVP_HTTP_TIMEOUT_MS, 30_000);
-export const BODY_MAX_BYTES = Math.max(1_048_576, Number(process.env.CVP_BODY_MAX_BYTES) || 8 * 1_048_576);
+export const BODY_MAX_BYTES = Math.max(1_048_576, envPositive(process.env.CVP_BODY_MAX_BYTES, 8 * 1_048_576));
 const DEVICE_CONCURRENCY = Math.max(1, Math.min(16, Number(process.env.CVP_DEVICE_CONCURRENCY) || 6));
 const FAIL_STREAK_STOP = 3;
 /**
@@ -198,7 +199,7 @@ export function xcvrProbePaths(parts) {
   return out;
 }
 /** v2.641: 이벤트 응답은 앞부분만 읽는다(전량이 수십 MB 일 수 있다 — 1,900건/일 실측 화면). */
-export const EVENTS_BODY_MAX = Math.max(262_144, Number(process.env.CVP_EVENTS_BODY_MAX) || 4 * 1_048_576);
+export const EVENTS_BODY_MAX = Math.max(262_144, envPositive(process.env.CVP_EVENTS_BODY_MAX, 4 * 1_048_576));
 /** 부품 종류 → 표시 kind. */
 export const PART_KINDS = Object.freeze({ power: 'psu', cooling: 'fan', temperature: 'temp', xcvr: 'xcvr' });
 /** v2.643: 부품 이름의 포인터 경로 구분자(부품 이름에 '/' 가 있어 — Fan1/1 — 다른 기호를 쓴다). */

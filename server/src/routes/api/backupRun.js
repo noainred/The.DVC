@@ -21,7 +21,7 @@ import { reauth } from './reauth.js';
 import { veeamMatchFor } from './veeam.js';
 import { runStatusOf, planBackup, portalJobName, veeamHostFor, vmSizeOf } from '../../veeam/run/plan.js';
 import { getRunSettings, saveRunSettings, settingsLoadError, serverRunSettings } from '../../veeam/run/settings.js';
-import { startRun, listRuns, getRun, activeRunFor, closeRun, serverBusy } from '../../veeam/run/runs.js';
+import { startRun, listRuns, getRun, activeRunFor, closeRun, serverBusy, runsLoadError } from '../../veeam/run/runs.js';
 import { dispatchOp, authStopOf } from '../../veeam/run/dispatch.js';
 import { pendingView } from '../../veeam/run/edgeOps.js';
 
@@ -45,14 +45,23 @@ export function vcentersOf(snap) {
  * 한 vCenter 의 VM 별 실행 상태(+ Veeam 이 그 vCenter 를 부르는 이름). 순서: 대조(모니터링 코어) → runStatusOf → hostName.
  * @returns {{ vc, servers, known, hostName:{name,how}, rows:Map<vmId,{vm,run}> }}
  */
+/**
+ * 96회차(94회차 F2 반증 — 화면): 실행 기록 읽기 오류(runs-unreadable)는 '진행 중' 이 아니라 '진행 여부 모름' 이다 — 예전에는 모든 서버에
+ *   '백업 요청 진행 중' 을 달았다. 막힘(409)은 그대로이고 사유는 요청 응답이 말한다.
+ */
+export function busyFlags(busy) {
+  if (busy && busy.kind === 'runs-unreadable') return { active: false, busyUnknown: true };
+  return { active: !!busy };
+}
+
 export function vcRunState(vc, vms, req) {
   const servers = serversForVcenter(vc.id);   // enabled · 등록 순서 · 비밀 없음
   const m = servers.length ? veeamMatchFor(vc, vms, req) : { known: false, match: null };
   const st = getRunSettings();
   const hostName = veeamHostFor(vc, { manual: st.hosts[vc.id] || '', aliasHosts: m.match?.aliasHosts || [] });
   const rows = new Map();
-  for (const vm of vms) rows.set(vm.id, { vm, run: runStatusOf(vm, { servers, known: !!m.known, entry: m.match?.byVm?.[vm.id] }) });
-  return { vc, servers, known: !!m.known, hostName, rows };
+  for (const vm of vms) rows.set(vm.id, { vm, run: runStatusOf(vm, { servers, known: !!m.known, truncated: !!m.truncated, entry: m.match?.byVm?.[vm.id] }) });
+  return { vc, servers, known: !!m.known, ...(m.truncated ? { truncated: true } : {}), hostName, rows };
 }
 
 /**
@@ -92,7 +101,7 @@ export function planFor(req) {
   if (!plan.groups.length) return { plan, vcs, mode, error: '보낼 VM 이 없습니다 — 고른 VM 이 전부 건너뜀입니다(아래 사유).', status: 400 };
   for (const g of plan.groups) {
     const busy = serverBusy(g.serverId);   // 실행 기록 + 관리 작업(빼기·삭제 — v2.819)
-    if (busy) return { plan, vcs, mode, error: `Veeam 서버 '${g.serverName}' 로 진행 중인 요청이 있습니다(${busy.id}) — 끝난 뒤 다시 요청하세요.`, status: 409, runId: busy.id };
+    if (busy) return { plan, vcs, mode, error: busy.reason || `Veeam 서버 '${g.serverName}' 로 진행 중인 요청이 있습니다(${busy.id}) — 끝난 뒤 다시 요청하세요.`, status: 409, ...(busy.id ? { runId: busy.id } : {}) };
     const srv = getServerWithSecret(g.serverId);
     const stop = authStopOf(srv);
     if (stop) return { plan, vcs, mode, error: `Veeam 서버 '${g.serverName}' 은(는) 인증 실패로 정지 중입니다 — 설정 › Veeam 백업 서버에서 계정을 고치세요(틀린 계정으로 반복하면 계정이 잠깁니다).`, status: 409 };
@@ -141,7 +150,7 @@ api.get('/tools/backup-run/vms', toolsPerm, adminOnly, (req, res) => {
   const servers = s.servers.map((d) => {
     const full = getServerWithSecret(d.id);
     const stop = authStopOf(full);
-    return { id: d.id, name: d.name, via: d.agent ? 'edge' : 'central', ...(admin ? { agent: d.agent || '' } : {}), authStopped: !!stop, active: !!serverBusy(d.id),
+    return { id: d.id, name: d.name, via: d.agent ? 'edge' : 'central', ...(admin ? { agent: d.agent || '' } : {}), authStopped: !!stop, ...busyFlags(serverBusy(d.id)),
       repositorySet: !!serverRunSettings(d.id).repositoryId };
   });
   res.json({ ok: true, vcenters: list, vcenter: { id: vcId, name: s.vc.name }, known: s.known, hostName: s.hostName, jobName: portalJobName(getRunSettings().jobPrefix, s.vc),
@@ -171,7 +180,8 @@ api.get('/tools/backup-run/runs', toolsPerm, adminOnly, (req, res) => {
   const all = listRuns();
   const runs = all.filter((r) => runVisible(r, allowed));
   const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 30));
-  res.json({ ok: true, runs: runs.slice(0, limit), total: runs.length, ...(allowed ? { scoped: true, omittedOutOfScope: all.length - runs.length } : {}) });
+  res.json({ ok: true, runs: runs.slice(0, limit), total: runs.length, ...(allowed ? { scoped: true, omittedOutOfScope: all.length - runs.length } : {}),
+    ...(runsLoadError() ? { runsUnreadable: true } : {}) });   // 94회차 F2: 읽기 오류 중의 빈 목록은 '실행 없음' 이 아니다
 });
 
 api.get('/tools/backup-run/runs/:id', toolsPerm, adminOnly, (req, res) => {
@@ -207,7 +217,7 @@ api.get('/tools/backup-run/settings', toolsPerm, adminOnly, fullScopeOnly, (_req
     servers: listServers().map((d) => ({ id: d.id, name: d.name, host: d.host, agent: d.agent || '', enabled: d.enabled !== false, vcenterIds: d.vcenterIds || [], ...serverRunSettings(d.id) })),
     vcenters: [...vcs.values()].map((vc) => ({ id: vc.id, name: vc.name, host: vc.host, manualHost: st.hosts[vc.id] || '', jobName: portalJobName(st.jobPrefix, vc) })),
     pendingEdgeOps: pendingView(),
-    ...(settingsLoadError() ? { settingsUnreadable: true } : {}), ...(registryLoadError() ? { registryUnreadable: true } : {}),
+    ...(settingsLoadError() ? { settingsUnreadable: true, ...(settingsLoadError().readError ? { settingsReadError: true } : {}) } : {}), ...(registryLoadError() ? { registryUnreadable: true } : {}),   // 94회차 F2: 읽기 오류는 저장이 막힌다(손상과 조치가 다르다)
   });
 });
 
@@ -218,7 +228,7 @@ api.put('/tools/backup-run/settings', toolsPerm, adminOnly, fullScopeOnly, reaut
   //   그렇지 않아도 saveRunSettings 가 서버별 값을 **합친다**(입력에 없는 서버 id 는 유지 — 재시작 뒤 '파일 없음' 으로 보이는 경우까지).
   if (registryLoadError()) delete input.servers;
   const r = saveRunSettings(input);
-  if (!r.ok) return res.status(400).json(r);
+  if (!r.ok) return res.status(r.status || 400).json(r);   // 94회차 F2: 설정 파일 읽기 오류 중의 거절은 409
   logAudit({ user: req.user?.username, action: 'Veeam 백업 실행 설정 변경', target: 'backup-run', detail: `잡 접두 '${r.settings.jobPrefix}' · 저장소 지정 서버 ${Object.values(r.settings.servers).filter((x) => x.repositoryId).length} · vCenter 이름 지정 ${Object.keys(r.settings.hosts).length}`, ip: req.ip });
   res.json(r);
 });

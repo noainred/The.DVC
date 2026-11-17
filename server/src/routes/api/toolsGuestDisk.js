@@ -88,7 +88,8 @@ export function registerToolsGuestDisk(api) {
     //   (예전에는 범위 admin 이 보존일을 하한으로 내려 다른 법인 게스트 디스크 이력을 지웠다).
     const allowed = writeMergeScope(req);   // 전체 점검 7회차: 쓰기 범위가 제한된 계정도 '범위 계정'
     const kg = keepScopedFields(req.body || {}, loadSettings(), allowed, []);
-    const next = allowed ? loadSettings() : saveSettings(kg.patch);
+    let next;
+    try { next = allowed ? loadSettings() : saveSettings(kg.patch); } catch (e) { if (e?.status === 409) return res.status(409).json({ ok: false, code: e.code, reason: e.message }); throw e; }   // 97회차 F14: 설정 파일 읽기 오류
     if (!allowed) logAudit({ user: req.user?.username, action: '게스트 디스크 리포트 설정 변경', detail: `enabled=${next.enabled} interval=${next.intervalHours}h`, ip: req.ip || '' });
     res.json({ ok: true, settings: next, ...ignoredGlobalFields(kg.ignoredGlobal) });
   });

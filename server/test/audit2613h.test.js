@@ -188,6 +188,7 @@ test('TESTDOC2613-08: 2줄 정규식 주석 제거기 사본이 server/test 에 
   const needle = 'replace(/' + '\\/\\*[\\s\\S]*?\\*\\/' + '/g';
   const ALLOW = new Map([
     ['audit2575.test.js', 'CSS 파일(줄 주석 없음)에서 블록 주석만 지운다 — 2줄 판본이 아니고 CSS 에는 상태 기계가 맞지 않는다(url(http://…) 의 // 를 주석으로 읽는다)'],
+    ['rebut96.test.js', 'audit2575 와 같은 사유 — .css 파일만 블록 주석을 지우고 .js/.jsx 는 _stripComments.js 를 쓴다(96회차 uppercase 스윕)'],
   ]);
   const hits = [];
   for (const f of fs.readdirSync(HERE)) {

@@ -25,6 +25,7 @@ import { isEdgeNode } from './service.js';
 import { cachedCause } from './notify.js';
 import { issueHint } from './issueHints.js';
 import { healthDigestSection } from './health.js';
+import { bareosVmView, partialPoll } from './vmView.js';
 
 export const MAIL_KIND = 'bareos-digest';
 export const TICK_MS = 60_000;
@@ -54,9 +55,13 @@ export function normDigest(body = {}) {
 }
 export function loadDigest() {
   if (_cfg) return _cfg;
+  // 97회차 F4: 읽기 단계는 등록부 공용 읽기(util/registryCore.js read)다 — 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니라 원본을 옮기지 않고 ·
+  //   캐시하지 않고(30초 간격 재읽기) · 오류(readError)를 세워 쓰기를 거절한다(persist 의 assertWritable). parse · 형식 실패만 아래 catch(예전과 같다 — 보존본).
+  const rr = _loadErr.read(FILE(), (t) => t);
+  if (rr.kind === 'read-error') return { ...DEFAULTS, savedBy: '', savedAt: null };
   try {
-    if (fs.existsSync(FILE())) {
-      const p = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    if (rr.kind === 'ok') {
+      const p = JSON.parse(rr.value);
       if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('형식 오류');
       _cfg = { ...normDigest(p), savedBy: String(p.savedBy || '').slice(0, 64), savedAt: Number.isFinite(p.savedAt) ? p.savedAt : null };
       _loadErr.clear();
@@ -75,6 +80,7 @@ export function digestLoadError() { loadDigest(); return _loadErr.get(); }
 export function saveDigest(body, { by = '', now = Date.now() } = {}) {
   if (digestLoadError()) throw fail('unreadable', '일일 요약 메일 설정 파일을 읽지 못해 저장하지 않습니다 — 손상본을 확인하세요.');
   const next = { ...normDigest(body), savedBy: String(by || '').slice(0, 64), savedAt: now };
+  _loadErr.assertWritable('Bareos 일일 요약 메일 설정(bareos-digest.json)'); // 97회차 F4: 마지막 방어선 — 읽기 오류 중에는 원본을 덮지 않는다(던진다 — status 409)
   atomicWriteFileSync(FILE(), JSON.stringify(next, null, 2), { mode: 0o600 });
   _cfg = next;
   return { ...next };
@@ -132,8 +138,11 @@ export function digestData(jobs, settings, dirStatus = {}, now = Date.now(), { c
   const corps = new Map();
   const fails = [];
   // 반증 F4(재현): 'ok !== false' 는 조회 기록이 없거나(기동 직후 · 접속값 덜 됨 · 엣지 첫 회신 전) ok:null 인 법인을 '안다' 로 셌다 — 조회 성공이 확인된 법인만 안다
-  const knownOf = (id) => dirStatus[id]?.ok === true;
-  const blank = (id, name) => ({ id, name, known: knownOf(id), code: dirStatus[id]?.code || '', targets: 0, ran: 0, ok: 0, warn: 0, fail: 0, cancel: 0, other: 0, stale: 0, restores: 0, restoreFail: 0, nicFail: 0, verifyOk: 0, verifyFail: 0, verifyPending: 0 });
+  // 104회차(101회차 결정 — 사용자 '권장 사항으로 진행'): 상태 조회가 시한에 잘렸어도 읽은 행이 있으면(53회차 N1 partial — 고RTT 법인의 백업 창에서 늘 생긴다)
+  //   법인 전체를 '모름' 으로 빼지 않는다 — 현황판 · Summary(55회차 #9)와 같게 읽은 행의 확정 결과는 세고, **진행 중인 실행이 있는 VM** 만 '모름' 으로 따로 센다
+  //   (판정은 vmView.partialPoll · bareosVmView(…).run 하나 — corpCounts 와 같은 입력으로 시험이 대조). 예전에는 고RTT 법인의 실패 수가 메일 제목 합에서 빠졌다.
+  const knownOf = (id) => dirStatus[id]?.ok === true || partialPoll(dirStatus[id]);
+  const blank = (id, name) => ({ id, name, known: knownOf(id), ...(partialPoll(dirStatus[id]) ? { partial: true } : {}), unknown: 0, code: dirStatus[id]?.code || '', targets: 0, ran: 0, ok: 0, warn: 0, fail: 0, cancel: 0, other: 0, stale: 0, restores: 0, restoreFail: 0, nicFail: 0, verifyOk: 0, verifyFail: 0, verifyPending: 0 });
   for (const d of settings?.directors || []) corps.set(d.id, blank(d.id, d.name || d.id));
   for (const j of Array.isArray(jobs) ? jobs : []) {
     if (j.demo || j.enabled === false) continue;
@@ -142,7 +151,8 @@ export function digestData(jobs, settings, dirStatus = {}, now = Date.now(), { c
     c.targets += 1;
     const lr = j.lastRun;
     const at = Number(lr?.endedAt || lr?.startedAt || 0);
-    if (lr && at >= since) {
+    if (c.partial && bareosVmView(j)?.run) c.unknown += 1;   // 104회차: 잘린 조회의 진행 중 VM — 마지막으로 읽은 상태가 옛 값일 수 있다(결과 · 실행 없음 칸에 넣지 않는다)
+    else if (lr && at >= since) {
       c.ran += 1;
       if (lr.state === 'ok') c.ok += 1;
       else if (lr.state === 'warning') c.warn += 1;
@@ -180,7 +190,7 @@ export function digestData(jobs, settings, dirStatus = {}, now = Date.now(), { c
   const known = rows.filter((c) => c.known);
   return {
     rows, fails,
-    total: { corps: rows.length, unknown: rows.length - known.length, targets: rows.reduce((n, c) => n + c.targets, 0), ok: known.reduce((n, c) => n + c.ok, 0), warn: known.reduce((n, c) => n + c.warn, 0), fail: known.reduce((n, c) => n + c.fail, 0), cancel: known.reduce((n, c) => n + c.cancel, 0), other: known.reduce((n, c) => n + c.other, 0), stale: known.reduce((n, c) => n + c.stale, 0), verifyFail: rows.reduce((n, c) => n + c.verifyFail, 0) },
+    total: { corps: rows.length, unknown: rows.length - known.length, partialCorps: rows.filter((c) => c.partial).length, inflightUnknown: known.reduce((n, c) => n + c.unknown, 0), targets: rows.reduce((n, c) => n + c.targets, 0), ok: known.reduce((n, c) => n + c.ok, 0), warn: known.reduce((n, c) => n + c.warn, 0), fail: known.reduce((n, c) => n + c.fail, 0), cancel: known.reduce((n, c) => n + c.cancel, 0), other: known.reduce((n, c) => n + c.other, 0), stale: known.reduce((n, c) => n + c.stale, 0), verifyFail: rows.reduce((n, c) => n + c.verifyFail, 0) },
   };
 }
 
@@ -191,20 +201,20 @@ export function renderDigest(d, now = Date.now()) {
   // 모든 법인이 모름이면 숫자 0 을 앞세우지 않는다(반증 F4 — '실패 0 · 성공 0' 이 먼저 보였다)
   const head = t.corps && t.unknown === t.corps
     ? `Bareos 일일 요약 — 모든 법인 결과 모름(${t.corps}곳 · Director 조회 실패 또는 조회 전)`
-    : `Bareos 일일 요약 — 실패 ${t.fail} · 경고 ${t.warn} · 성공 ${t.ok}${t.cancel ? ` · 취소 ${t.cancel}` : ''}${t.other ? ` · 진행 · 대기 ${t.other}` : ''}${t.unknown ? ` · 결과 모름 법인 ${t.unknown}` : ''}`;
+    : `Bareos 일일 요약 — 실패 ${t.fail} · 경고 ${t.warn} · 성공 ${t.ok}${t.cancel ? ` · 취소 ${t.cancel}` : ''}${t.other ? ` · 진행 · 대기 ${t.other}` : ''}${t.unknown ? ` · 결과 모름 법인 ${t.unknown}` : ''}${t.partialCorps ? ` · 일부만 읽은 법인 ${t.partialCorps}(진행 중 ${t.inflightUnknown}대 모름)` : ''}`;
   const subject = `[Bareos] ${head}`.slice(0, 200);
   const td = 'style="padding:4px 8px;border-bottom:1px solid #e5e7eb;font-size:12px"';
   const th = 'style="padding:4px 8px;border-bottom:2px solid #9ca3af;font-size:12px;text-align:left"';
   const n = (c, v) => (c.known ? String(v) : '모름');
-  const corpRows = d.rows.map((c) => `<tr><td ${td}>${esc(c.name)}${c.known ? '' : ` (Director 조회 실패 또는 조회 전${c.code ? ` · ${esc(c.code)}` : ''})`}</td><td ${td}>${c.targets}</td><td ${td}>${n(c, c.ok)}</td><td ${td}>${n(c, c.warn)}</td><td ${td}>${n(c, c.fail)}</td><td ${td}>${n(c, c.cancel)}</td><td ${td}>${n(c, c.other)}</td><td ${td}>${n(c, c.stale)}</td><td ${td}>${c.restores}${c.restoreFail ? ` (실패 ${c.restoreFail})` : ''}${c.nicFail ? ` · 네트워크 끊기 실패 ${c.nicFail}` : ''}</td><td ${td}>${c.verifyOk + c.verifyFail ? `성공 ${c.verifyOk} · 실패 ${c.verifyFail}` : '—'}${c.verifyPending ? ` · 진행 중 ${c.verifyPending}` : ''}</td></tr>`).join('');
+  const corpRows = d.rows.map((c) => `<tr><td ${td}>${esc(c.name)}${c.known ? '' : ` (Director 조회 실패 또는 조회 전${c.code ? ` · ${esc(c.code)}` : ''})`}${c.partial ? ` (일부만 읽음 — 상태 조회가 시한에 잘림 · 진행 중 ${c.unknown}대 결과 모름)` : ''}</td><td ${td}>${c.targets}</td><td ${td}>${n(c, c.ok)}</td><td ${td}>${n(c, c.warn)}</td><td ${td}>${n(c, c.fail)}</td><td ${td}>${n(c, c.cancel)}</td><td ${td}>${n(c, c.other)}</td><td ${td}>${n(c, c.stale)}</td><td ${td}>${c.restores}${c.restoreFail ? ` (실패 ${c.restoreFail})` : ''}${c.nicFail ? ` · 네트워크 끊기 실패 ${c.nicFail}` : ''}</td><td ${td}>${c.verifyOk + c.verifyFail ? `성공 ${c.verifyOk} · 실패 ${c.verifyFail}` : '—'}${c.verifyPending ? ` · 진행 중 ${c.verifyPending}` : ''}</td></tr>`).join('');
   // v2.874(점검 B4-06): '모름' 법인의 실패는 제목 합에 없다 — 행에 표지를 단다(마지막으로 읽은 값)
   const failRows = d.fails.map((f) => `<tr><td ${td}>${esc(f.corp)}${f.known === false ? ' (결과 모름 법인 — 마지막으로 읽은 값 · 제목 합에 없음)' : ''}</td><td ${td}>${esc(f.vmName)}</td><td ${td}>${esc(f.jobid ?? '—')}</td><td ${td}>${esc(localStamp(f.at) || '—')}</td><td ${td}>${esc(f.message || '—')}</td></tr>`).join('');
   const html = `<div style="font-family:sans-serif;color:#111827"><h3 style="margin:0 0 6px">${esc(head)}</h3>`
-    + `<p style="margin:0 0 10px;color:#4b5563;font-size:13px">최근 24시간(${esc(localStamp(now - WINDOW_MS))} ~ ${esc(localStamp(now))}) · 법인 ${t.corps}곳 · 백업 대상 ${t.targets}대 · 24시간 안에 실행 없음 ${t.stale}대${t.unknown ? '(결과 모름 법인 제외)' : ''}${t.verifyFail ? ` · 복원 검증 실패 ${t.verifyFail}` : ''}</p>`
+    + `<p style="margin:0 0 10px;color:#4b5563;font-size:13px">최근 24시간(${esc(localStamp(now - WINDOW_MS))} ~ ${esc(localStamp(now))}) · 법인 ${t.corps}곳 · 백업 대상 ${t.targets}대 · 24시간 안에 실행 없음 ${t.stale}대${t.unknown || t.inflightUnknown ? `(${[t.unknown ? '결과 모름 법인' : '', t.inflightUnknown ? '일부만 읽은 법인의 진행 중 VM' : ''].filter(Boolean).join(' · ')} 제외)` : ''}${t.verifyFail ? ` · 복원 검증 실패 ${t.verifyFail}` : ''}</p>`
     + `<table style="border-collapse:collapse"><thead><tr><th ${th}>법인</th><th ${th}>대상</th><th ${th}>성공</th><th ${th}>경고</th><th ${th}>실패</th><th ${th}>취소</th><th ${th}>진행 · 대기</th><th ${th}>실행 없음</th><th ${th}>복원</th><th ${th}>복원 검증</th></tr></thead><tbody>${corpRows}</tbody></table>`
     + (failRows ? `<h4 style="margin:14px 0 6px">실패한 VM</h4><table style="border-collapse:collapse"><thead><tr><th ${th}>법인</th><th ${th}>VM</th><th ${th}>jobid</th><th ${th}>끝난 시각</th><th ${th}>오류</th></tr></thead><tbody>${failRows}</tbody></table>` : '')
-    + `<p style="font-size:11px;color:#6b7280">결과는 포탈 원장(폴러가 Director 카탈로그로 갱신한 마지막 실행) 기준입니다 · Director 조회가 실패 중인 법인은 수를 만들지 않고 '모름' 으로 적습니다 · 포탈 › 서버 › Backup › Bareos 에서 자세히 볼 수 있습니다 · 설정 › 백업 › Bareos 백업 서버 › 공통 기본값 · 수집에서 끄거나 시각을 바꿉니다.</p></div>`;
-  const text = `${head}\n${d.rows.map((c) => `${c.name}\t대상 ${c.targets}\t성공 ${n(c, c.ok)}\t경고 ${n(c, c.warn)}\t실패 ${n(c, c.fail)}`).join('\n')}${d.fails.length ? `\n\n실패한 VM\n${d.fails.map((f) => `${f.corp}\t${f.vmName}\t${f.jobid ?? '—'}`).join('\n')}` : ''}`;
+    + `<p style="font-size:11px;color:#6b7280">결과는 포탈 원장(폴러가 Director 카탈로그로 갱신한 마지막 실행) 기준입니다 · Director 조회가 실패 중인 법인은 수를 만들지 않고 '모름' 으로 적습니다 · 상태 조회가 시한에 잘린 법인은 읽은 결과만 세고 진행 중인 VM 은 '모름' 으로 뺍니다 · 포탈 › 서버 › Backup › Bareos 에서 자세히 볼 수 있습니다 · 설정 › 백업 › Bareos 백업 서버 › 공통 기본값 · 수집에서 끄거나 시각을 바꿉니다.</p></div>`;
+  const text = `${head}\n${d.rows.map((c) => `${c.name}\t대상 ${c.targets}\t성공 ${n(c, c.ok)}\t경고 ${n(c, c.warn)}\t실패 ${n(c, c.fail)}${c.partial ? `\t일부만 읽음(진행 중 ${c.unknown}대 모름)` : ''}`).join('\n')}${d.fails.length ? `\n\n실패한 VM\n${d.fails.map((f) => `${f.corp}\t${f.vmName}\t${f.jobid ?? '—'}`).join('\n')}` : ''}`;
   return { subject, html, text };
 }
 
@@ -215,7 +225,7 @@ function pollerRanOnce() {
 /** 기동 뒤 첫 폴러 조회를 기다리는 중인가(상한 FIRST_POLL_WAIT_MS). */
 export function firstPollPending(now = Date.now()) { return !pollerRanOnce() && now - _bootAt < FIRST_POLL_WAIT_MS; }
 function dirStatusNow() {
-  try { const p = _poller ? _poller() : null; return Object.fromEntries(Object.entries(p?.directors || {}).map(([k, v]) => [k, { ok: v?.ok, code: v?.code || '' }])); } catch { return {}; }
+  try { const p = _poller ? _poller() : null; return Object.fromEntries(Object.entries(p?.directors || {}).map(([k, v]) => [k, { ok: v?.ok, code: v?.code || '', checked: Number(v?.checked) || 0 }])); } catch { return {}; }
 }
 async function computeAndSend({ by = 'system', now = Date.now() } = {}) {
   if (registryLoadError()) return { ok: false, reason: '백업 대상 원장을 읽지 못했습니다 — 요약을 만들지 않았습니다.' };

@@ -428,6 +428,7 @@ authRouter.put('/ad-config', ...adminOnly, adFleetOnly, requireSettingsOwner, (r
   catch (e) {
     // S-03: 새로 저장하는 평문 ldap://·잘못된 CA 등은 400 + 사유(저장하지 않는다).
     if (e?.status === 400) return res.status(400).json({ ok: false, reason: e.message, field: e.field, code: e.code });
+    if (e?.status === 503) return res.status(503).json({ ok: false, reason: e.message, code: e.code });   // 88회차 F3: 설정 파일 읽기 오류 — 저장 거절(사유를 그대로)
     throw e;
   }
   logAudit({ user: req.user?.username, action: 'AD 설정 변경', detail: `사용=${ad.enabled ? '켬' : '끔'}·전송=${adTransportStatus(ad).mode}·정책=${ad.policyEpoch}`, ip: clientIp(req) });

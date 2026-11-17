@@ -38,12 +38,26 @@ const UNIT_MUL = { '': 1, k: 1e3, m: 1e6, g: 1e9, t: 1e12, p: 1e15 };
 const NUM_RE = /^([-+\u2212\u00b1]?)(\d{1,3}(,\d{3})+|\d+)(\.\d+)?\s*(?:(ms|초|분|시간|일|%|대|개|명|행|건|장|포트|코어)|([kKmMgGtTpP])?(i?[bB](?:ps)?|[wW]|Hz))?\s*$/;
 const KO_DATE_RE = /(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})\.(?:\s*(오전|오후)\s*(\d{1,2}):(\d{2})(?::(\d{2}))?)?/;
 const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/;
+/*
+ * 전체 점검 95회차(재현):
+ *  ① 수 판정(NUM_RE · 상대 시각)은 **짧은 글자에만** 돌린다 — NUM_RE 의 앞뒤 `\s*` 가 '1 + 공백 n 칸 + 글자' 에서 O(n²) 로 역추적했다(8,000자 한 칸 63ms ·
+ *     행마다 키를 뽑으니 표 하나가 초 단위로 멈출 수 있다). 수 셀은 짧다. 글 속 날짜(KO_DATE_RE — 앵커 없음)는 앞 256자에서만 찾는다(긴 글자도 선형).
+ *  ② '3분 전' · '2시간 전' 같은 **상대 시각**이 앞 숫자만으로 정렬됐다(Collator 숫자 인식 — '1일 전' < '2시간 전' < '3분 전' < '10초 전' < '45분 전').
+ *     지금 시각에서 뺀 시각(ms)으로 바꿔 날짜 셀과 같은 축(오름차순 = 오래된 것 먼저)에 둔다. '방금' 은 지금.
+ */
+const KEY_RE_MAX = 64;
+const AGO_RE = /^(\d{1,7})\s*(초|분|시간|일)\s*전$/;
+const AGO_SEC = { 초: 1, 분: 60, 시간: 3600, 일: 86400 };
 
 /** 문자열 → 정렬 키 { kind:'empty'|'num'|'str', v }. */
 export function sortKeyOf(raw) {
   const s = String(raw ?? '').trim();
   if (EMPTY_TOKENS.has(s)) return { kind: 'empty', v: null };
-  const n = s.match(NUM_RE);
+  const short = s.length <= KEY_RE_MAX;   // 95회차 ①
+  if (s === '방금' || s === '방금 전') return { kind: 'num', v: Date.now() };   // 95회차 ②
+  const ago = short ? s.match(AGO_RE) : null;
+  if (ago) return { kind: 'num', v: Date.now() - Number(ago[1]) * AGO_SEC[ago[2]] * 1000 };   // 95회차 ②
+  const n = short ? s.match(NUM_RE) : null;
   if (n) {
     const sign = n[1] === '-' || n[1] === '\u2212' ? -1 : 1;
     const base = Number(n[2].replace(/,/g, '') + (n[4] || ''));
@@ -54,7 +68,7 @@ export function sortKeyOf(raw) {
     const v = sign * base * mul * tmul;
     return { kind: 'num', v: v === 0 ? 0 : v };   // -0 은 0 으로(정렬 키 비교·표시 테스트에서 -0 이 섞이지 않게)
   }
-  const ko = s.match(KO_DATE_RE);
+  const ko = (short ? s : s.slice(0, 256)).match(KO_DATE_RE);   // 95회차 ①
   if (ko) {
     let h = Number(ko[5] || 0); if (ko[4] === '오후' && h < 12) h += 12; if (ko[4] === '오전' && h === 12) h = 0;
     return { kind: 'num', v: new Date(Number(ko[1]), Number(ko[2]) - 1, Number(ko[3]), h, Number(ko[6] || 0), Number(ko[7] || 0)).getTime() };

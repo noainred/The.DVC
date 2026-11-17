@@ -3,6 +3,7 @@
  * 중앙의 통합 백업이 이 값을 합쳐 저장한다. 디스크에도 지속(재시작 후 마지막 설정 유지).
  */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
@@ -27,7 +28,7 @@ try { if (fs.existsSync(FILE)) byAgent = Object.assign(Object.create(null), pars
 const writer = createDebouncedWriter(FILE, () => JSON.stringify(byAgent), { delayMs: 3_000, name: 'agentConfig' });
 function persistSoon() { writer.save(); }
 /** 엣지 하나의 설정 사본 합계 상한(파일 200개 × 8MB 가 라우트 상한이라 엣지당 1.6GB 까지 쌓일 수 있었다). */
-export const AGENT_CONFIG_MAX_BYTES = Math.max(1024 * 1024, Number(process.env.CENTRAL_AGENT_CONFIG_MAX_BYTES) || 32 * 1024 * 1024);
+export const AGENT_CONFIG_MAX_BYTES = Math.max(1024 * 1024, envPositive(process.env.CENTRAL_AGENT_CONFIG_MAX_BYTES, 32 * 1024 * 1024));
 
 /** 에이전트가 자기 설정을 push. files: { name: content(utf8) }. */
 /**

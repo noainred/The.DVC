@@ -14,7 +14,8 @@
  */
 
 import os from 'node:os';
-import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
+import { envPositive, envNonNegative } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
+import { clampIntervalMs } from '../config.js';
 
 const PER_WORKER_SOCKET = 62;   // 249/s ÷ 4워커 (소켓 대기형: tcp/http/dns/배너…)
 const PER_WORKER_PROC = 16;     // 64 동시 ÷ 4초 타임아웃 (프로세스 생성형: ping/trace)
@@ -23,24 +24,35 @@ const PROC_TYPES = new Set(['ping', 'trace']);
 // v3.17.6: 지역 사본 → 공용 util/envNumber.js(양수만 · 그 밖 기본값). 반올림 → 내림(개수 env 에 소수를 넣는 경우만 다르다).
 const envInt = (name, dflt) => envPositive(process.env[name], dflt);
 
+/*
+ * 102회차 F7(재현): 워커 수 · 틱 상한을 pool.js · poller.js · 이 파일이 **따로** 읽었다 — 같은 env 가 셋에서 다르게 풀렸다.
+ *   · SVCMON_WORKERS= (빈 값) → pool 은 `Number('') === 0` 으로 인라인, 여기는 기본(3) — 용량 판정이 실제보다 3배 낙관.
+ *   · SVCMON_WORKERS=0.5 → pool 은 워커 0.5 개라 `Array.from({ length: 0.5 })` 가 빈 배열 → **runBatch 가 점검을 하나도 돌리지 않고 [] 를 돌려줬다**.
+ *   · SVCMON_WORKERS=1e6 → 상한이 없어 청크 수만큼 스레드(3,000건이면 12개 · 3만 건이면 120개)를 띄웠다.
+ *   · SVCMON_MAX_PER_TICK= (빈 값) → poller 는 100, 여기는 4000(천장 40배 과대).
+ *   이제 판정은 이 파일 하나다(pool · poller 가 가져다 쓴다). '0' = 인라인(의미)은 지키고, 빈 값 · 숫자 아님 · 음수 · Infinity · 상한 밖은 기본값.
+ */
+/** 워커 스레드 수 상한 — 넘으면 기본값(스레드 하나가 V8 힙 하나다 · 문서 권장 8). */
+export const SVCMON_WORKERS_MAX = 64;
+/** 기본 워커 수 — os.cpus()-1, 1~4. */
+export const defaultWorkerCount = () => Math.max(1, Math.min(4, Math.max(1, os.cpus().length - 1)));
+/** 실제 워커 수(0 = 인라인) — pool.js 가 이 값으로 스레드를 만든다. 호출 시점의 env 를 읽는다(테스트가 바꾼다). */
+export const workersFromEnv = (raw = process.env.SVCMON_WORKERS) => envNonNegative(raw, defaultWorkerCount(), { max: SVCMON_WORKERS_MAX });
+/** 폴러 틱(ms) · 틱당 상한 — poller.js 가 이 값으로 돈다. */
+export const tickMsFromEnv = () => clampIntervalMs(envInt('SVCMON_TICK_MS', 5000), 5000, 1000);
+export const maxPerTickFromEnv = () => Math.max(100, envInt('SVCMON_MAX_PER_TICK', 4000));
+
 /** 워커 수 — poller/pool 과 같은 규칙(0 이면 인라인이라 1로 센다). */
 export function workerCount() {
-  const raw = process.env.SVCMON_WORKERS;
-  if (raw !== undefined && raw !== '') {
-    const n = Number(raw);
-    if (Number.isFinite(n)) return Math.max(1, Math.round(n));   // 0=인라인도 1개 스레드분
-  }
-  // pool.js 와 **같은 식**이어야 한다. 이전에는 os.cpus() 를 보지 않고 4를 가정해
+  // pool.js 와 **같은 식**이어야 한다(102회차부터 같은 함수). 이전에는 os.cpus() 를 보지 않고 4를 가정해
   // 8코어에서 실제 4워커를 3으로(처리량 25% 과소평가), 2코어에서 실제 1워커를 3으로
   // (3배 과대평가) 계산했다 — 과대평가는 '가능하다'고 통과시킨 뒤 실제로는 못 도는 상태다.
-  return Math.max(1, Math.min(4, Math.max(1, os.cpus().length - 1)));
+  return Math.max(1, workersFromEnv());   // 0=인라인도 1개 스레드분
 }
 
 /** 틱 상한이 만드는 절대 천장 — 어떤 튜닝으로도 이보다 많은 만기는 소화할 수 없다. */
 export function tickCeilingPerSec() {
-  const maxPerTick = envInt('SVCMON_MAX_PER_TICK', 4000);
-  const tickMs = envInt('SVCMON_TICK_MS', 5000);
-  return Math.round((maxPerTick / tickMs) * 1000);
+  return Math.round((maxPerTickFromEnv() / tickMsFromEnv()) * 1000);
 }
 
 /**

@@ -13,10 +13,11 @@
  *  - 검증은 순수 함수(`targetIssue`·`mailIssue`)로 분리한다 — 웹 테스트가 node 환경이라
  *    화면 렌더 테스트가 불가하므로 판정을 여기에 고정한다.
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 97회차 F14: 읽기 오류 ≠ 손상
+import { corruptOnlyReason } from '../util/registryCore.js';   // 100회차(97 ③ 결정): 본 파일 없음 + 손상 보존본만 = 아직 못 읽은 설정
 import { TOP_N_MIN, TOP_N_MAX } from './scan.js';
 import { normalizeAddresses } from '../util/smtp.js';
 import { numOrNull } from '../util/numOrNull.js';
@@ -34,6 +35,8 @@ export const MAX_INTERVAL_HOURS = 24 * 30;
 // eslint-disable-next-line no-control-regex
 const PATH_RE = /^\/[^\x00-\x1f\x7f'"`$\\]{0,1023}$/;
 
+/** 보관 일수 상한(저장 판정과 같은 값). 97회차 F14 후속: 설정을 못 읽는 동안의 이력 정리는 이 상한으로 한다(멈춤에도 상한 — 83 R1). */
+export const RETENTION_MAX_DAYS = 3650;
 export const DEFAULTS = Object.freeze({
   enabled: false,
   targets: [],                      // [{ id, label, agent, instance, path, topN, intervalHours, enabled }]
@@ -78,37 +81,57 @@ function clamp(v, lo, hi, def) {
   return Math.max(lo, Math.min(hi, n));
 }
 
+/*
+ * 97회차 F14(재현 — EISDIR): 예전 catch 하나는 **읽기 오류**(EACCES · EIO · EISDIR)도 손상으로 보고 온전한 원본을 `.corrupt.*` 로 옮긴 뒤 기본값을 캐시했다 —
+ *   보관 일수가 기본값(365일)이 되어 다음 정리(prune)가 사용자가 늘려 둔 기간의 이력을 지웠고(되돌릴 수 없다), 다음 저장이 기본값 위에 썼다.
+ *   판정은 공용 읽기(util/jsonFileRead.js): 읽기 오류는 원본을 두고 · 캐시하지 않고(30초 간격 재읽기) · 저장을 거절하고(409) · 정리는 저장 상한(RETENTION_MAX_DAYS)으로만 한다.
+ *   손상은 예전처럼 보존본으로 옮기고 기본값으로 돌되, 표지를 세워 정리를 저장 상한으로만 한다(진짜 보관 일수는 보존본에 있다 — 추측으로 지우지 않는다).
+ *   100회차: 재시작 뒤(본 파일 없음 + 손상 보존본만)에도 같은 표지 — 관리자가 다시 저장하면 풀린다.
+ */
+const _reader = makeJsonFileReader(() => FILE, { parse: parseJsonObject, tag: 'dirusage' });
+let _loadError = null;   // { at, reason, readError? }
 export function load() {
   if (cache) return cache;
   const out = structuredClone(DEFAULTS);
-  try {
-    if (fs.existsSync(FILE)) {
-      const p = parseJsonObject(fs.readFileSync(FILE, 'utf8'));
-      if (typeof p.enabled === 'boolean') out.enabled = p.enabled;
-      if (Array.isArray(p.targets)) out.targets = p.targets.slice(0, MAX_TARGETS).map((t, i) => normTarget(t, i));
-      if (p.mail && typeof p.mail === 'object') {
-        out.mail = {
-          ...out.mail, ...p.mail,
-          to: normalizeAddresses(p.mail.to).ok,
-          cc: normalizeAddresses(p.mail.cc).ok,
-          subject: String(p.mail.subject || DEFAULTS.mail.subject).slice(0, 200),
-          enabled: p.mail.enabled === true,
-          onlyOnChange: p.mail.onlyOnChange === true,
-        };
-      }
-      if (p.retentionDays != null) out.retentionDays = clamp(p.retentionDays, 1, 3650, 365);
+  const r = _reader.read();
+  if (r.kind === 'read-error') {
+    _loadError = { at: _loadError?.readError ? _loadError.at : Date.now(), readError: true, reason: `디렉터리 사용량 설정(dirusage.json) 파일을 읽지 못했습니다(읽기 오류 ${String(r.error?.code || '').slice(0, 32)}) — 원본은 그대로 둡니다 · 저장을 멈추고 이력 정리는 최대 보관 일수(${RETENTION_MAX_DAYS}일)로만 합니다(30초마다 다시 읽음)` };
+    return out;   // 캐시하지 않는다
+  }
+  if (r.kind === 'corrupt') {
+    _loadError = { at: Date.now(), reason: `디렉터리 사용량 설정(dirusage.json) 파일이 손상돼 보존본으로 옮겼습니다 — 기본값으로 돌고 이력 정리는 최대 보관 일수(${RETENTION_MAX_DAYS}일)로만 합니다(저장하면 풀림)` };
+    console.warn(`[dirusage] 설정 로드 실패 — 원본을 .corrupt 로 보존하고 기본값으로 시작합니다(이력 정리는 저장 전까지 최대 보관 일수 ${RETENTION_MAX_DAYS}일로만): ${safeLoadText(r.error) || '사유 미상'}`);
+  } else if (r.kind === 'missing' && corruptOnlyReason(FILE)) {
+    // 100회차(97회차 남긴 것 ③ — 결정 · 재현): 손상으로 보존본만 남긴 뒤 재시작하면 '파일 없음' 이라 표지가 사라져 기본 보관 일수(365일)로 스캔 이력을 지웠다
+    //   (늘려 둔 보관 일수는 보존본에만 있다). 본 파일이 없고 그 보존본이 남아 있으면 관리자가 다시 저장할 때까지 같은 표지를 세운다(저장은 허용 —
+    //   readError 아님 · 저장하면 본 파일이 생겨 풀린다. 보존본을 치워도 풀린다 — veeam/backupMarks marksCorruptKept 와 같은 판정).
+    _loadError = { at: _loadError?.corruptKept ? _loadError.at : Date.now(), corruptKept: true, reason: `디렉터리 사용량 설정(dirusage.json) 파일이 없고 손상 보존본만 남아 있습니다 — 기본값으로 돌고 이력 정리는 최대 보관 일수(${RETENTION_MAX_DAYS}일)로만 합니다(설정을 다시 저장하면 풀림)` };
+  } else _loadError = null;
+  if (r.kind === 'ok') {
+    const p = r.value;
+    if (typeof p.enabled === 'boolean') out.enabled = p.enabled;
+    if (Array.isArray(p.targets)) out.targets = p.targets.slice(0, MAX_TARGETS).map((t, i) => normTarget(t, i));
+    if (p.mail && typeof p.mail === 'object') {
+      out.mail = {
+        ...out.mail, ...p.mail,
+        to: normalizeAddresses(p.mail.to).ok,
+        cc: normalizeAddresses(p.mail.cc).ok,
+        subject: String(p.mail.subject || DEFAULTS.mail.subject).slice(0, 200),
+        enabled: p.mail.enabled === true,
+        onlyOnChange: p.mail.onlyOnChange === true,
+      };
     }
-  } catch (e) {
-    // 손상 파일을 조용히 빈 설정으로 넘기면 다음 저장이 원본(대상 목록·수신자)을 지운다.
-    preserveCorrupt(FILE);
-    console.warn(`[dirusage] 설정 로드 실패 — 원본을 .corrupt 로 보존하고 기본값으로 시작합니다: ${safeLoadText(e) || '사유 미상'}`);
+    if (p.retentionDays != null) out.retentionDays = clamp(p.retentionDays, 1, RETENTION_MAX_DAYS, 365);
   }
   cache = out;
   return cache;
 }
+/** 97회차 F14 · 100회차: 설정을 못 읽었으면(읽기 오류 · 이 프로세스에서 본 손상 · 본 파일 없이 손상 보존본만) `{ at, reason, readError?, corruptKept? }`, 아니면 null — 이력 정리(prune)는 이 값이 있으면 저장 상한(RETENTION_MAX_DAYS)으로만 한다(메인 검토 — 건너뛰면 무한 증식). */
+export function settingsLoadError() { load(); return _loadError; }
 
 /** 저장 — 대상·수신자만 다룬다(SMTP 는 공용 mail.json). */
 export function save(body = {}) {
+  if (settingsLoadError()?.readError) throw Object.assign(new Error(`디렉터리 사용량 설정(dirusage.json) 파일을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽습니다).`), { status: 409, code: 'settings-unreadable' });   // 97회차 F14
   const cur = load();
   const next = structuredClone(cur);
   if (typeof body.enabled === 'boolean') next.enabled = body.enabled;
@@ -130,14 +153,14 @@ export function save(body = {}) {
   // v2.605(감사 RECENT2605-06·WEB2605-01 — 재현): **0 이하도 미지정**이다. 0 은 하한 1일로 클램프돼 스캔 이력이
   //   하루치만 남았다(이 저장소의 다른 설정은 0 = 무제한이 흔해 사용자가 그 뜻으로 넣는다). relaycheck(LEFT2604-02)와 같은 규칙.
   const rd = numOrNull(body.retentionDays);
-  if (rd != null && rd > 0) next.retentionDays = clamp(rd, 1, 3650, cur.retentionDays);
+  if (rd != null && rd > 0) next.retentionDays = clamp(rd, 1, RETENTION_MAX_DAYS, cur.retentionDays);
 
   atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
-  cache = next;
+  cache = next; _loadError = null; _reader.reset();
   return next;
 }
 
-export function invalidate() { cache = null; }
+export function invalidate() { cache = null; _loadError = null; _reader.reset(); }
 
 /** API 응답용. 이 파일에는 비밀 값이 없다(SMTP 는 공용 mail.json 소관). */
 export function redact(cfg = load()) { return cfg; }

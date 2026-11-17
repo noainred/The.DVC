@@ -16,6 +16,7 @@
  *   (타임아웃·연결 실패로 멈추면 일시 장애가 수집을 영구 정지시킨다) 자격증명이 바뀌면 자동 재개한다.
  *   **수동 실행은 막지 않는다** — 고쳤는지 확인할 길을 없애면 안 된다.
  */
+import { envPositive, ENV_INT_MAX } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import fs from 'node:fs';
 import path from 'node:path';
 import { createChangeLogger } from '../util/logThrottle.js'; // v2.604
@@ -60,9 +61,9 @@ import { focusActiveCount, focusQueuedCount, registerFocusPollerHooks, focusHous
  * 걸려 재진입 가드 때문에 실제 주기가 5분이 아니라 20분 이상으로 늘어났다. 32 면 같은 조건에서 약 2.6분. env 로 낮출 수 있다(상한 없음 —
  * 엣지 자원이 작으면 BMUSAGE_CONCURRENCY=8 처럼). 회귀 `test/bmUsageConcurrency2918.test.js`.
  */
-const CONCURRENCY = Math.max(1, Number(process.env.BMUSAGE_CONCURRENCY) || 32);
+const CONCURRENCY = Math.max(1, envPositive(process.env.BMUSAGE_CONCURRENCY, 32));
 configureSlots({ capacity: CONCURRENCY }); // v2.929: 집중 수집과 나눠 쓰는 전역 슬롯 용량 = 이 값(단일 원천)
-const DEVICE_TIMEOUT_MS = Math.max(20_000, Number(process.env.BMUSAGE_DEVICE_TIMEOUT_MS) || 60_000);
+const DEVICE_TIMEOUT_MS = Math.max(20_000, envPositive(process.env.BMUSAGE_DEVICE_TIMEOUT_MS, 60_000, { max: ENV_INT_MAX }));
 /**
  * v2.613 RUNTIME2613-05: '세션 예산 < 장비 시한' 은 v2.550.3·v2.554 가 **기본값 산수**로만 지킨 관계였다 — 세 env
  * (`BMUSAGE_DEVICE_TIMEOUT_MS`·`BMUSAGE_SESSION_BUDGET_MS`·`BMUSAGE_ENT_BUDGET_MS`)가 독립이라 장비 시한 하나를 30초로
@@ -89,7 +90,7 @@ const PRUNE_EVERY = 12;
  *   목록이 없는 장비는 그 주기에 `SystemUsage` 만 읽으므로 **v2.550 과 같은 비용**이고 값도 나온다.
  *   이 예산을 없애면 첫 주기가 주기를 넘겨 재진입 가드가 다음 틱을 계속 건너뛴다.
  */
-const LIST_BUDGET_PER_RUN = Math.max(1, Number(process.env.BMUSAGE_LIST_BUDGET) || 20);
+const LIST_BUDGET_PER_RUN = Math.max(1, envPositive(process.env.BMUSAGE_LIST_BUDGET, 20));
 let _listBudget = 0;
 /**
  * ⚠⚠ **주기당 'Enterprise 대체 수집' 예산**(v2.554). 이 경로는 장비당 센서 GET 4회 +
@@ -99,8 +100,8 @@ let _listBudget = 0;
  *   예산을 넘긴 장비는 **사유를 남기고**(조용한 생략 금지) 다음 주기에 시도한다.
  * ⚠ 센서 경로 **탐색**(Chassis + Sensors 열거)은 더 비싸므로 별도 예산을 둔다.
  */
-const ENT_BUDGET_PER_RUN = Math.max(1, Number(process.env.BMUSAGE_ENT_PER_RUN) || 40);
-const ENT_PROBE_PER_RUN = Math.max(1, Number(process.env.BMUSAGE_ENT_PROBE_PER_RUN) || 10);
+const ENT_BUDGET_PER_RUN = Math.max(1, envPositive(process.env.BMUSAGE_ENT_PER_RUN, 40));
+const ENT_PROBE_PER_RUN = Math.max(1, envPositive(process.env.BMUSAGE_ENT_PROBE_PER_RUN, 10));
 let _entBudget = 0;
 let _entProbeBudget = 0;
 /** 이번 주기에 예산으로 미룬 대수 — 화면이 '왜 아직 안 나오나' 를 말할 수 있게. */

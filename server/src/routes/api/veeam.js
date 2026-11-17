@@ -705,7 +705,9 @@ export function veeamMatchFor(vc, vms, req) {
   const br = r.results.filter((x) => x.server?.src !== 'em' && brIds.has(x.server?.id) && fresh(x));
   const known = br.length >= brCount && Array.isArray(vms) && vms.length > 0;
   const match = known ? matchToVcenter({ id: vc.id, host: r.host }, vms, r.results, { otherHosts: r.otherHosts }) : null;
-  return { known, match, views: r.views, host: r.host, results: br.length };
+  // 96회차(94회차 남긴 것 ①): 신선한 결과 중 하나라도 목록 상한에서 잘렸으면 대조에 없는 VM 은 '미보호' 가 아니라 '모름'(planBackup 이 포탈 잡에 넣지 않는다).
+  const truncated = br.some((x) => Array.isArray(x.result?.truncated) && x.result.truncated.length > 0);
+  return { known, match, views: r.views, host: r.host, results: br.length, ...(truncated ? { truncated: true } : {}) };
 }
 
 async function vcBackup(vc, vms, req, { initial = false, scope = null } = {}) {
@@ -841,7 +843,9 @@ function backupVmRows(vc, b, { now = Date.now(), marks = getMarks(), unreadable 
   const partialPoll = !!dirInfo?.partial;   // 반증 G1(55회차 #9): 잘린 조회 — 진행 중 VM 의 결과는 모름(법인 칩 · 그룹 · CSV 와 같은 판정)
   const ledger = bareosStatesOf(vc.id);   // 반증 F1: 원장 그대로(지난 실패 · 경고 실행 기록은 Director 가 지금 닿지 않아도 사실이다 — 오류 목록 · 멈춤 의심은 이것으로)
   const bareos = dirFail ? null : ledger;   // v2.828 — Bareos 잡(원장) · 못 읽으면 null(Bareos 칸 '모름') · 53회차 S1: Director 조회 실패면 현재 결과는 모름
-  const groupNext = bareosGroupNext(vc.id, now, bareos);   // v2.835 — VM id → 다음 그룹 회차 { at, lv, g } · v2.839 Director 스케줄 { at, lv, s }(못 읽으면 빈 맵 — 칸 '—')
+  // 101회차 I1: Director 스케줄의 다음 실행은 정책 수집본 + 원장의 잡(있음 · 켜짐)으로 정한다 — 조회 결과가 아니다. 53회차 S1 이 bareos 를 null 로 넘겨
+  //   Director 조회 실패 법인의 '다음 예정' 이 포탈 그룹 회차만 남았다(같은 수집본을 쓰는 백업 일정 화면에는 그 회차가 보인다) — 원장(ledger)으로
+  const groupNext = bareosGroupNext(vc.id, now, ledger);   // v2.835 — VM id → 다음 그룹 회차 { at, lv, g } · v2.839 Director 스케줄 { at, lv, s }(못 읽으면 빈 맵 — 칸 '—')
   const vms = b.scopedVms.map((vm) => vmBackupView(vm, b.match?.byVm?.[vm.id], b.ev?.byVm?.[vm.id], { veeamKnown: veeamKnown || !b.linked, snapKnown, absentKnown: !b.row.veeamAbsentUnknown, now, mark: markView(marks[vm.id]),
     clone: withClone ? (clones ? cloneView(clones.get(vm.id)) : null) : undefined })).map((row) => withBareos(row, bareos, unreadable, partialPoll))
     .map((row) => { const nx = groupNext.get(row.id); return { ...row, ...policyFields(row, { marksKnown: !unreadable, bareosKnown: bareos != null, now }), ...(nx ? { nx } : {}) }; });

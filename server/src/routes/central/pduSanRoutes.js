@@ -5,6 +5,7 @@
  *   **글자 그대로** 옮겼다. 등록은 central.js 가 원래 자리에서 `registerPduSanRoutes(centralRouter)` 로 부른다 — 라우트 순서 · 미들웨어 · 응답이 같다
  *   (회귀 `test/centralSplit2954.test.js` 가 등록 순서 · 개수 · 순환 없음을 고정한다 — 분할 때 라우트 본문은 원문 비교로 0 차이). 공용 판정(requireCentral · 503 응답 등)은 central.js 의 것을 그대로 쓴다.
  */
+import { envPositive } from '../../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { numOrNull } from '../../util/numOrNull.js';   // 24회차 #9
 import { logAudit } from '../../audit.js';
 import { REJECT_KIND } from '../../central/ingestReject.js';
@@ -27,7 +28,7 @@ import { edgeDropSummary, onlyDelegated, stampEdgeCollectedAt, withNotOwned } fr
 const credRate = new Map();
 
  // agentLower → { winStart, n }
-const CRED_RATE_PER_MIN = Math.max(10, Number(process.env.RMA_CRED_RATE_PER_MIN) || 120);
+const CRED_RATE_PER_MIN = Math.max(10, envPositive(process.env.RMA_CRED_RATE_PER_MIN, 120));
 
 /** central.js 가 원래 자리에서 부른다(등록 순서 유지). */
 export function registerPduSanRoutes(centralRouter, deps) {

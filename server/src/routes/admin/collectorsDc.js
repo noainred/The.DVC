@@ -230,7 +230,7 @@ adminRouter.post('/collectors', adminOnly, fleetOnly, (req, res) => {
   const t0 = Date.now();
   const result = addCollector(req.body || {}, { managed: true, transport: adminTransport(req) });
   if (result.ok) { ensureCollectorDatacenter(result.collector); pullNow().catch(() => {}); logAudit({ user: req.user?.username, action: '수집 서버 등록', target: result.collector?.id || '', detail: `url=${result.collector?.url || ''} vcenterId=${result.collector?.vcenterId || ''}${httpExceptionAudit(result.collector, t0)}`, ip: req.ip || '' }); }
-  res.status(result.ok ? 201 : 400).json(result);
+  res.status(result.ok ? 201 : (result.status || 400)).json(result);   // 97회차 F3: 등록부 읽기 오류는 409
 });
 
 adminRouter.put('/collectors/:id', adminOnly, fleetOnly, (req, res) => {
@@ -245,7 +245,7 @@ adminRouter.put('/collectors/:id', adminOnly, fleetOnly, (req, res) => {
     pullNow().catch(() => {});
     logAudit({ user: req.user?.username, action: '수집 서버 수정', target: req.params.id, detail: `url=${result.collector?.url || ''} vcenterId=${result.collector?.vcenterId || ''}${httpExceptionAudit(result.collector, t0)}`, ip: req.ip || '' });
   }
-  res.status(result.ok ? 200 : 400).json(result);
+  res.status(result.ok ? 200 : (result.status || 400)).json(result);   // 97회차 F3: 등록부 읽기 오류는 409
 });
 
 // v2.972(사용자 요청 '수집 서버 agent 와 datacenter id 를 사용자가 매칭하는 기능'): 이 수집 서버(Agent)가 수집한 서버의 법인(DataCenter).
@@ -278,7 +278,7 @@ adminRouter.delete('/collectors/:id', adminOnly, fleetOnly, (req, res) => {
     clearCollectorStatus(req.params.id);  // v2.583 #31: 수집 상태도(원격 호스트 0개인 수집기는 정리 루프가 못 만난다)
     logAudit({ user: req.user?.username, action: '수집 서버 삭제', target: req.params.id, ip: req.ip || '' });
   }
-  res.status(result.ok ? 200 : 404).json(result);
+  res.status(result.ok ? 200 : (result.status || 404)).json(result);   // 97회차 F3: 등록부 읽기 오류는 409
 });
 
 /* ── 수집 서버 CSV 일괄 관리(v2.338, 사용자 요구) — 내보내기·샘플·가져오기. ───────────────
@@ -596,6 +596,13 @@ adminRouter.post('/collectors/upgrade', adminOnly, fleetOnly, async (req, res) =
   res.json({ ok: true, version: bundle.version, source: bundle.source, pushed: results.length, succeeded: ok, results });
 });
 
+/** 100회차: 시험 주소 비교 열쇠 — 스킴 기본값(https://) · 앞뒤 공백 · 대소문자 · 끝 슬래시를 같게 본다(정규식 반복 없이 — 외부 입력). */
+function collectorUrlKey(u) {
+  const t = withDefaultScheme(String(u ?? '').trim()).toLowerCase();
+  let end = t.length;
+  while (end > 0 && t.charCodeAt(end - 1) === 47) end -= 1;   // '/'
+  return t.slice(0, end);
+}
 // Test connectivity to one collector (saved by id, or an ad-hoc {url, token}).
 adminRouter.post('/collectors/test', adminOnly, fleetOnly, async (req, res) => {
   const body = req.body || {};
@@ -604,6 +611,11 @@ adminRouter.post('/collectors/test', adminOnly, fleetOnly, async (req, res) => {
     const saved = loadCollectors().find((c) => c.id === body.id);
     // v2.480(3차 감사 S2): 저장 토큰을 물려받으면 URL 도 저장값으로 고정 — 임의 URL 에 저장 토큰을 헤더로 보내던 경로 차단
     // (토큰 열람은 소유자 전용인데 전송은 admin 이었다). 새 URL 을 시험하려면 토큰도 함께 입력해야 한다.
+    // 100회차(98회차 남긴 것 ③ — 결정 · 91ⓐ · 98 F2 와 같은 규칙): 저장 토큰을 쓸 때 본문 주소가 저장 주소와 다르면 예전에는 조용히 저장 주소로 바꿔 시험해
+    //   '입력한 주소' 의 결과처럼 보였다(편집 폼에서 URL 만 고치고 시험 → 옛 주소 성공). 이제 거절하고 토큰 입력 · 저장 뒤 시험을 안내한다(비밀은 보내지 않는다).
+    if (saved && !token && saved.token && url != null && String(url).trim() !== '' && collectorUrlKey(url) !== collectorUrlKey(saved.url)) {
+      return res.json({ ok: false, method: 'carry-refused', code: 'carry-refused', reason: '입력한 URL 이 저장된 주소와 달라 저장된 토큰을 쓰지 않습니다 — 새 주소를 시험하려면 토큰을 함께 입력하거나, 먼저 저장한 뒤 시험하세요.' });
+    }
     if (saved) { if (!token) { token = saved.token; url = saved.url; } else { url = url || saved.url; } }
   }
   if (!url) return res.status(400).json({ ok: false, reason: 'url이 필요합니다.' });

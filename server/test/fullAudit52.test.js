@@ -33,8 +33,9 @@ test('52회차 F1: 중앙 직접 상태 변경은 끝날 때까지 업그레이�
 test('52회차 F4: 재설치 사전 점검은 그 Director 를 쓰는 대상 전부 · 함께 쓰는 vCenter 를 싣는다(소스)', () => {
   const j = rd('bareos/install/job.js');
   // 53회차 N4: 공유 목록 계산을 sharedOfDirector(directorId, vcenterId) 로 옮겼다(시작 · 0단계 다시 하기가 같은 계산을 쓴다) — 판정 jobDirectorId 는 그대로
-  assert.match(j, /listJobs\(\)\.filter\(\(x\) => !x\.demo && jobDirectorId\(x, st\) === directorId\)/);
-  assert.match(j, /sharedOfDirector\(t\.director\.id, vcenterId\)/);
+  // 101회차 F1: 그 Director 하나가 아니라 같은 서버를 가리키는 Director 등록 전부(sameServerDirectorIds) — 판정 jobDirectorId 는 그대로
+  assert.match(j, /listJobs\(\)\.filter\(\(x\) => !x\.demo && dirs\.has\(jobDirectorId\(x, st\)\)\)/);
+  assert.match(j, /sharedOfDirector\(t\.director\.id, vcenterId, \{ sshHost: t\.sshHost, agent: t\.agent, ids: hostIds \}\)/);
   assert.match(j, /ledgerTargets: ledger, sharedVcenters,/);
   const web = fs.readFileSync(new URL('../../web/src/views/tools/BareosInstall.jsx', import.meta.url), 'utf8');
   assert.match(web, /pre\.sharedVcenters/);

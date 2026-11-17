@@ -191,10 +191,8 @@ export function sanitizeSnapTree(v) {
 /** Parse RetrieveProperties response into [{type, ref, props:{path:value}}]. */
 export function parseObjectContent(xml) {
   const out = [];
-  const objRe = /<returnval>([\s\S]*?)<\/returnval>/g;
-  let m;
-  while ((m = objRe.exec(xml))) {
-    const block = m[1];
+  // 89회차 F2: 객체 경계는 선형(exactTagBodies — `/<returnval>([\s\S]*?)<\/returnval>/g` 와 같은 결과). 닫히지 않은 `<returnval>` 반복에 2차였다.
+  for (const block of exactTagBodies(xml, '<returnval>', '</returnval>')) {
     const objM = /<obj type="([^"]+)">([^<]+)<\/obj>/.exec(block);
     if (!objM) continue;
     const props = {};
@@ -427,6 +425,13 @@ const isWordCh = (c) => (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97
  * wordBoundary:true 면 `/<returnval\b[^>]*>…/` 와 같다(태그 이름 바로 뒤가 단어 글자면 다른 태그). max 개에서 멈춘다(첫 하나만 쓰는 호출).
  */
 export function returnvalBodies(xml, { wordBoundary = false, max = Infinity } = {}) {
+  return returnvalBlocks(xml, { wordBoundary, max }).map((b) => b.body);
+}
+/**
+ * 89회차 F2: returnvalBodies 와 같은 경계 판정으로 `{ attrs, body }` 를 준다 — attrs 는 `<returnval` 과 `>` 사이(정규식 `<returnval\b([^>]*)>` 의 1번 묶음).
+ *   parseEventsXml 이 xsi:type 을 속성에서 읽는다.
+ */
+export function returnvalBlocks(xml, { wordBoundary = false, max = Infinity } = {}) {
   const s = typeof xml === 'string' ? xml : String(xml ?? '');
   const out = [];
   const OPEN = '<returnval'; const CLOSE = '</returnval>';
@@ -439,10 +444,55 @@ export function returnvalBodies(xml, { wordBoundary = false, max = Infinity } = 
     if (gt < 0) break;
     const e = s.indexOf(CLOSE, gt + 1);
     if (e < 0) break;
-    out.push(s.slice(gt + 1, e));
+    out.push({ attrs: s.slice(at + OPEN.length, gt), body: s.slice(gt + 1, e) });
     i = e + CLOSE.length;
   }
   return out;
+}
+
+/*
+ * 89회차 F2(75회차 R6 이 남긴 형제 — 측정): soapClient · soapParse 의 다른 게으른 정규식도 닫는 태그가 없는 여는 태그가 반복되면 시작마다 끝까지
+ *   다시 훑었다(실측 200KB: QueryPerf `<returnval…>` 1.2초 · 이벤트 `<key` 2.2초 · 인벤토리 parseObjectContent 1.0초 · `<ipRoute>` 1.4초 ·
+ *   SOAP 오류 `<detail>` 1.1초 · `<about>` 1.4초 / 100KB 의 약 4배 = 2차). 같은 뜻을 indexOf 로 한 번에 훑는다 — 경계 판정은 아래 셋 하나씩.
+ */
+/** 정확한 여는 태그 문자열 `open` 부터 가장 가까운 `close` 까지의 본문들 — `/open([\s\S]*?)close/g` 와 같은 결과(선형). */
+export function exactTagBodies(xml, open, close, max = Infinity) {
+  const s = typeof xml === 'string' ? xml : String(xml ?? '');
+  const out = [];
+  let i = 0;
+  while (out.length < max) {
+    const at = s.indexOf(open, i);
+    if (at < 0) break;
+    const e = s.indexOf(close, at + open.length);
+    if (e < 0) break;   // 이 여는 태그 뒤에 닫는 태그가 없으면 그 뒤 여는 태그에도 없다
+    out.push(s.slice(at + open.length, e));
+    i = e + close.length;
+  }
+  return out;
+}
+/**
+ * 문자열 `open` 이 처음 나온 뒤에서 `re` 의 첫 일치 — `/open[\s\S]*?(re)/.exec(s)` 와 같은 결과(선형). 없으면 null.
+ *   첫 open 뒤에 re 가 없으면 그 뒤 open 뒤에도 없다(일치 위치 집합이 줄기만 한다). re 는 g · y · 뒷보기 없이.
+ */
+export function execAfter(s, open, re) {
+  const str = typeof s === 'string' ? s : String(s ?? '');
+  const at = str.indexOf(open);
+  return at < 0 ? null : re.exec(str.slice(at + open.length));
+}
+/** 첫 `<tag…>본문</tag>` 의 본문 — `new RegExp('<tag\\b[^>]*>([\\s\\S]*?)</tag>').exec(s)?.[1]` 과 같은 결과(선형). 없으면 undefined. */
+export function firstTagInner(s, tag) {
+  const str = typeof s === 'string' ? s : String(s ?? '');
+  const open = `<${tag}`; const close = `</${tag}>`;
+  let i = 0;
+  for (;;) {
+    const at = str.indexOf(open, i);
+    if (at < 0) return undefined;
+    if (isWordCh(str.charCodeAt(at + open.length))) { i = at + 1; continue; }   // `<keyX` 는 다른 태그(\b)
+    const gt = str.indexOf('>', at + open.length);
+    if (gt < 0) return undefined;
+    const e = str.indexOf(close, gt + 1);
+    return e < 0 ? undefined : str.slice(gt + 1, e);
+  }
 }
 /** 본문 안의 `<id>…</id>` 표지들(선형) — `[...blk.matchAll(/<id>([\s\S]*?)<\/id>/g)]` 와 같은 결과. { inner, start(여는 태그 위치), end(닫는 태그 뒤) }. */
 export function perfIdMarks(blk) {

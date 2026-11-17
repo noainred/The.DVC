@@ -30,6 +30,7 @@ import { openSecretsDeep, sealSecretsDeep } from './secretVault.js';
 import { ssrfBlockReason } from '../collector/registry.js';
 import { isMockMode } from '../mock/demo/flags.js';
 import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
+import { makeJsonFileReader } from '../util/jsonFileRead.js'; // 88회차 F4: 읽기 오류 ≠ 손상
 
 const FILE = () => path.join(config.configDir, 'credentials.json');
 const MAX_ITEMS = 500;
@@ -73,23 +74,40 @@ function scheduleUsagePersist() {
 registerExitFlush('security/credentialStore.usage', () => { if (_usageTimer) { clearTimeout(_usageTimer); flushUsage(); } });
 export function _flushUsageForTest() { if (_usageTimer) { clearTimeout(_usageTimer); _usageTimer = null; } flushUsage(); }
 
+/*
+ * 88회차 F4(재현 — EIO 한 번): 예전 load 는 읽기 오류(EACCES · EIO · EISDIR)도 손상과 같은 catch 로 받아 **원본(봉인된 전 계정)을 .corrupt 로 옮기고**
+ *   빈 목록을 캐시했다 — 디스크가 돌아와도 · 재시작해도 원본이 옆으로 치워져 있어 브로커가 전 계정을 '없음' 으로 답했고, 다음 등록 한 건이 그 한 건만의
+ *   파일을 새로 썼다. 이제(결정 78 ① 과 같은 규칙) 읽기 오류는 원본을 그대로 두고 · 빈 목록을 캐시하지 않고(30초마다 다시 읽음) · 그동안 쓰기는 거절한다
+ *   (브로커 · 사전 검사는 '없음' — 닫히는 쪽). 손상(파싱 실패 · 객체 아님)은 예전처럼 보존본으로 옮긴다.
+ */
+const _reader = makeJsonFileReader(() => FILE(), { parse: (t) => JSON.parse(t), tag: 'credentials' });
+let _readErr = null;
+/** credentials.json 을 읽지 못해(ENOENT 아닌 읽기 오류) 쓰기를 거절하는 중이면 { at, code }, 아니면 null. */
+export function credentialsReadError() { return _readErr; }
 function load() {
   if (_db) return _db;
-  try {
-    if (fs.existsSync(FILE())) {
-      const p = openSecretsDeep(JSON.parse(fs.readFileSync(FILE(), 'utf8')));
+  const r = _reader.read();
+  if (r.kind === 'read-error') {
+    _readErr = { at: _readErr?.at || Date.now(), code: String(r.error?.code || 'read-error').slice(0, 32) };
+    return { items: [] };   // 캐시하지 않는다(다음 호출이 30초 뒤 다시 읽는다) — persist 가 이 상태의 쓰기를 거절한다
+  }
+  _readErr = null;
+  if (r.kind === 'ok') {
+    try {
+      const p = openSecretsDeep(r.value);
       const usage = loadUsage();
       _db = { items: (Array.isArray(p.items) ? p.items : []).map((c) => {
         const u = usage[c.id];
         return u ? { ...c, useCount: Math.max(Number(c.useCount) || 0, Number(u.useCount) || 0), lastUsedAt: u.lastUsedAt || c.lastUsedAt || null, lastUsedBy: u.lastUsedBy || c.lastUsedBy || '' } : c;
       }) };
       return _db;
-    }
-  } catch { preserveCorrupt(FILE()); }
-  _db = { items: [] };
+    } catch { preserveCorrupt(FILE()); }   // JSON 은 맞지만 모양이 틀림(null 등) — 예전과 같이 손상으로 보존
+  }
+  _db = { items: [] };   // missing · corrupt(손상본은 readJsonFile 이 보존)
   return _db;
 }
 function persist(items = load().items) {
+  if (_readErr) throw Object.assign(new Error(`통합 계정 파일(credentials.json)을 읽지 못하는 상태(${_readErr.code})라 저장하지 않았습니다 — 원본을 덮지 않습니다. 파일 소유자 · 권한을 고친 뒤 다시 시도하세요.`), { code: 'CREDENTIALS_UNREADABLE', status: 503 });   // 88회차 F4
   atomicWriteFileSync(FILE(), JSON.stringify(sealSecretsDeep({ version: 1, items }), null, 2), { mode: 0o600 });
 }
 const newId = () => `cred_${Date.now().toString(36)}_${(seq++).toString(36)}_${crypto.randomBytes(3).toString('hex')}`;
@@ -253,4 +271,4 @@ export function credentialUsable(id, { agent, host }) {
   return { ok: true, name: c.name, kind: c.kind, username: c.username };
 }
 
-export function _resetCredentials() { _db = null; }
+export function _resetCredentials() { _db = null; _readErr = null; _reader.reset(); }

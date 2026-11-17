@@ -10,6 +10,7 @@
  *   요청은 끝난 뒤 한 번 더) · **0건이어도 상태 push**(v2.517 sendStatusOnly — 위임 0대면 빈 목록으로 중앙을 비운다) ·
  *   중앙 응답의 거절 요약(rejected·dropped)을 상태·콘솔에 남긴다(agent/centralReply.js) · 413 은 로그로 드러낸다.
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import path from 'node:path';
@@ -35,8 +36,8 @@ const gzipAsync = promisify(zlib.gzip);
 //   5분마다 반응한다(형제 sanswitch-perf-push.json 은 v2.590 에 목록으로 등록됐는데 CVP 는 빠졌다). 등록부 + backup 목록 이중.
 const CURSOR_NAME = registerStateFile('cvp-push.json');
 const CURSOR_FILE = () => path.join(config.configDir, CURSOR_NAME);
-export const CHUNK_BYTES = Math.max(64 * 1024, Number(process.env.CVP_PUSH_CHUNK_BYTES) || 700 * 1024);
-const MAX_ROWS = Math.max(1000, Number(process.env.CVP_PUSH_ROWS) || 20_000);
+export const CHUNK_BYTES = Math.max(64 * 1024, envPositive(process.env.CVP_PUSH_CHUNK_BYTES, 700 * 1024));
+const MAX_ROWS = Math.max(1000, envPositive(process.env.CVP_PUSH_ROWS, 20_000));
 const PUSH_GZIP = process.env.CVP_PUSH_GZIP !== 'false';
 export const pushMs = () => clampIntervalMs(Number(process.env.CVP_PUSH_MS) || 5 * 60_000, 5 * 60_000, 60_000);
 const failLog = createChangeLogger({ windowMs: 10 * 60_000 });

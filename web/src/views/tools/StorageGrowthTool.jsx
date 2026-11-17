@@ -115,8 +115,8 @@ export default function StorageGrowthTool() {
       <div className="card" style={{ padding: '18px 20px', borderLeft: '4px solid var(--accent)' }}>
         <div className="flex gap wrap" style={{ alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
           <div style={{ minWidth: 0 }}>
-            <div className="muted" style={{ fontSize: 11.5, letterSpacing: 1.2, textTransform: 'uppercase', fontWeight: 700 }}>
-              Storage Growth Report
+            <div className="muted" style={{ fontSize: 11.5, letterSpacing: 1.2, fontWeight: 700 }}>
+              STORAGE GROWTH REPORT
             </div>
             <h2 style={{ margin: '4px 0 0', fontSize: 23, fontWeight: 800, letterSpacing: -0.3 }}>스토리지 증가량 보고서</h2>
             <div className="muted" style={{ fontSize: 12.5, marginTop: 6, whiteSpace: 'normal', lineHeight: 1.65 }}>

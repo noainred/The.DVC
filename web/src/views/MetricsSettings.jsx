@@ -87,6 +87,8 @@ export default function MetricsSettings() {
       const sec = blankOr(intervalSec);
       const ms = sec == null ? undefined : Math.max(limits.minIntervalMs, Math.min(limits.maxIntervalMs, sec * 1000));
       const r = await putJson('/admin/metrics/settings', { sampleIntervalMs: ms, retentionDays: blankOr(retentionDays), rawRetentionDays: blankOr(rawRetentionDays), gpuUtilEnabled: gpuEnabled, gpuUtilIntervalSec: blankOr(gpuSec) });
+      // 95회차: putJson 은 400 · 409 를 던지지 않는다 — 거절 본문(ok:false)을 사유로 보인다(예전에는 r.settings 를 읽다 TypeError 문구)
+      if (!r || r.ok === false || !r.settings) { setMsg(`저장하지 못했습니다: ${r?.reason || r?.error || '사유 미상'}`); return; }
       setData(r);
       // 저장된 값으로 칸을 되돌린다 — 비운 칸이 빈 채로 남으면 '0 으로 저장됐나' 로 읽힌다.
       setIntervalSec(Math.round(r.settings.sampleIntervalMs / 1000));

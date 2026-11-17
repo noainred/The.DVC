@@ -21,10 +21,10 @@ const numRaw = (v) => { const n = tempNum(v); return n == null ? '—' : String(
 const c1 = (v) => unitText(num1(v), '℃');
 const cRaw = (v) => unitText(numRaw(v), '℃');
 
-/** 모노 라벨(대문자·자간) — 카드·툴바 제목. */
+/** 모노 라벨(자간) — 카드·툴바 제목. 96회차: text-transform uppercase 를 뺐다(루트 규칙 — 대소문자는 문구가 정한다 · 지금 호출은 전부 한글 고정 문구). */
 export function MonoLabel({ children, size = 10.5, spacing = '.14em', color = 'var(--text-dim)', style }) {
   return (
-    <div style={{ ...MONO, fontSize: size, letterSpacing: spacing, textTransform: 'uppercase', color, ...style }}>{children}</div>
+    <div style={{ ...MONO, fontSize: size, letterSpacing: spacing, color, ...style }}>{children}</div>
   );
 }
 

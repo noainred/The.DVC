@@ -20,7 +20,7 @@ import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { publicLink, LINK_KINDS, KIND_KEYS, EDGE_KINDS, MIN_EDGE_VERSION } from '../../linkcheck/links.js';
 import { PHASES, PHASE_LABEL, FAIL_KINDS } from '../../linkcheck/phases.js';
-import { loadLinkCheckSettings, saveLinkCheckSettings, linkCheckEnabled, DEFAULTS } from '../../linkcheck/settings.js';
+import { loadLinkCheckSettings, saveLinkCheckSettings, linkCheckEnabled, linkCheckSettingsWriteRefusal, DEFAULTS } from '../../linkcheck/settings.js';
 import { centralLinks, pollOnce, linkCheckPollerStatus } from '../../linkcheck/poller.js';
 import { latestAll, samplesOf, eventsOf, eventDetail, dailyOf, dbStatus } from '../../linkcheck/db.js';
 import { allEdgeLinkReports, reportStaleLimitMs } from '../../central/linkCheckEdge.js';
@@ -283,6 +283,8 @@ api.get('/tools/link-check/targets', adminOnly, fullScopeOnly, async (req, res) 
 });
 
 api.put('/tools/link-check/settings', adminOnly, fullScopeOnly, (req, res) => {
+  // 105회차 A5: 설정 파일 읽기 오류(원본 그대로) 중에는 저장하지 않는다 — 사유를 화면까지(전역 오류 처리기는 사유를 싣지 않는다).
+  { const ref = linkCheckSettingsWriteRefusal(); if (ref) return res.status(409).json(ref); }
   const next = saveLinkCheckSettings(req.body || {});
   logAudit({
     user: req.user?.username, action: 'link-check.settings', ip: req.ip || '',

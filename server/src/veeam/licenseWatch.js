@@ -41,7 +41,12 @@ export function stageOf(ts, now = Date.now()) {
  * 순수 판정 — 서버별 라이선스 목록 + 이전 상태 → { next, fires }.
  * 처음 보는 키는 '정상' 이면 기록만 하고, 나쁜 단계면 한 번 알린다. 단계가 나빠지면 알리고, 좋아지면(갱신) 한 번 '안내' 로 알린다.
  */
-export function evaluateLicenses(items, prev = {}, now = Date.now()) {
+/**
+ * 94회차 F3(재현): keep = 지금 등록된 B&R 서버 id — 이번 목록에 없는(라이선스를 아직 못 읽은 · 재시작 뒤 첫 수집 전 · 실패 중이며 마지막 성공분이 없는) 서버의
+ *   단계를 **지우지 않고** 그대로 둔다. 예전에는 만료일 null 갈래(못 읽음 — 이전 상태 유지)만 있고 목록에서 빠진 서버는 상태가 사라져, 다시 읽히는 순간
+ *   '처음 보는 나쁜 단계' 로 같은 D-30 · 만료 알림이 다시 나갔다. 등록부에서 지운 서버는 keep 에 없으니 지운다(상태 파일이 끝없이 자라지 않게).
+ */
+export function evaluateLicenses(items, prev = {}, now = Date.now(), { keep = null } = {}) {
   const next = {}; const fires = [];
   for (const it of items) {
     for (const [kind, ts] of [['lic', it.license?.expires], ['sup', it.license?.supportExpires]]) {
@@ -54,6 +59,13 @@ export function evaluateLicenses(items, prev = {}, now = Date.now()) {
       if (before == null && stage === 'ok') continue;   // 처음 보는 정상 — 기록만
       const worse = STAGES.indexOf(stage) > STAGES.indexOf(before || 'ok');
       fires.push({ key, id: it.id, name: it.name, kind, stage, before, ts, daysLeft: licenseExpiryStatus(ts, { now }).daysLeft, improved: !worse });
+    }
+  }
+  if (keep instanceof Set) {
+    for (const [key, v] of Object.entries(prev || {})) {
+      if (key in next) continue;
+      const id = key.slice(0, key.lastIndexOf(':'));
+      if (keep.has(id)) next[key] = v;
     }
   }
   return { next, fires };
@@ -100,7 +112,7 @@ export async function runLicenseWatch({ now = Date.now() } = {}) {
   let recorded = 0;
   for (const it of items) { try { if (await recordLicenseDaily(`vbr:${it.id}`, it.license, it.ts || now)) recorded++; } catch { /* 이력은 최선 */ } }
   if (isMockMode()) return { ok: true, recorded, skipped: 'demo' };
-  const { next, fires } = evaluateLicenses(items, load(), now);
+  const { next, fires } = evaluateLicenses(items, load(), now, { keep: new Set(listServers().map((sv) => sv.id)) });   // 94회차 F3
   save(next);
   const ordered = [...fires].sort((a, b) => STAGES.indexOf(b.stage) - STAGES.indexOf(a.stage));
   const take = ordered.slice(0, MAX_SEND);

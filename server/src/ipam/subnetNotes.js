@@ -13,6 +13,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';   // 60회차 F2
+import { READ_RETRY_MS, nowMs } from '../util/jsonFileRead.js';   // 97회차 F12: 읽기 오류 재읽기 간격 · 시계
 
 const FILE = path.join(config.configDir, 'ipam-subnet-notes.json');
 export const SUBNET_PURPOSE_MAX = 80;
@@ -37,8 +38,11 @@ const _loadErr = makeSettingsLoadError(() => FILE, { label: 'IP 관리 대역 �
 /** 대역 용도 파일을 못 읽었으면 { at, reason }, 아니면 null. */
 export function subnetNotesLoadError() { load(); return _loadErr.get(); }
 
+let readRetryAt = 0;   // 97회차 F12: 읽기 오류 뒤 다시 읽을 시각(0 = 오류 없음)
 function load() {
-  if (cache) return cache;
+  // 97회차 F12(재현 — EISDIR): 읽기 오류 뒤 빈 맵을 캐시해 권한을 고쳐도 재시작 전까지 409 였다 — 오류 중에는 READ_RETRY_MS(30초) 간격으로 다시 읽는다.
+  if (cache && !(readRetryAt && nowMs() >= readRetryAt)) return cache;
+  readRetryAt = 0;
   cache = {};
   try {
     if (fs.existsSync(FILE)) { cache = parseJsonObject(fs.readFileSync(FILE, 'utf8')); _loadErr.ok(); }
@@ -46,7 +50,7 @@ function load() {
   } catch (e) {
     // 62회차(재현 — EISDIR): 읽기 오류(EACCES · EISDIR)는 원본을 옮기지 않는다 · 확정 불가(20회차 반증 F4 규약)
     if (e?.code === 'ENOENT') _loadErr.missing();
-    else if (e?.code) _loadErr.readError(e);
+    else if (e?.code) { _loadErr.readError(e, { retryMs: READ_RETRY_MS }); readRetryAt = nowMs() + READ_RETRY_MS; }   // 97회차 F12
     else { _loadErr.corrupt(e); preserveCorrupt(FILE, e.message); }
     cache = {};
   }
@@ -71,7 +75,10 @@ export function setSubnetNote(base, { purpose, desc } = {}, user = '') {
   const d = String(desc ?? '').trim();
   if (p.length > SUBNET_PURPOSE_MAX) return { ok: false, reason: `용도는 ${SUBNET_PURPOSE_MAX}자까지입니다(${p.length}자).` };
   if (d.length > SUBNET_DESC_MAX) return { ok: false, reason: `설명은 ${SUBNET_DESC_MAX}자까지입니다(${d.length}자).` };
-  if (subnetNotesLoadError()) return { ok: false, code: 'settings-unreadable', reason: '대역 용도 파일(ipam-subnet-notes.json)을 읽지 못한 상태라 저장하지 않았습니다 — 지금 저장하면 그 대역 하나만 든 파일이 됩니다. 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리고 재시작하세요.' };   // 60회차 F2
+  const le = subnetNotesLoadError();
+  if (le) return { ok: false, code: 'settings-unreadable', reason: le.readError   // 97회차 F12: 읽기 오류는 조치가 다르다(원본 그대로 · 30초마다 다시 읽음)
+    ? '대역 용도 파일(ipam-subnet-notes.json)을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).'
+    : '대역 용도 파일(ipam-subnet-notes.json)을 읽지 못한 상태라 저장하지 않았습니다 — 지금 저장하면 그 대역 하나만 든 파일이 됩니다. 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리고 재시작하세요.' };   // 60회차 F2
   const data = { ...load() };
   if (!p && !d) delete data[k];
   else data[k] = { purpose: p, desc: d, updatedAt: new Date().toISOString(), updatedBy: String(user || '') };
@@ -98,4 +105,4 @@ export function subnetNoteWriteDenied(allowed) {
 }
 
 /** 테스트용 — 캐시를 비운다. */
-export function _resetSubnetNotesForTest() { cache = null; }
+export function _resetSubnetNotesForTest() { cache = null; readRetryAt = 0; }

@@ -22,6 +22,7 @@ import { copyText as copyToClipboard } from '../util/copyText.js';   // v3.10.6:
 import { upgradeCell, autoPushLine } from './collectorUpgradeText.js'; // v2.775 업그레이드 결과 이유·시각
 import { autoOptionText, matchNote, matchSortText, selectValue, conflictChoices, assignFailText, saveText as dcSaveText } from './collectors/collectorDcText.js'; // v2.972: 수집 서버 ↔ 법인 매칭
 import { edgeSyncLine, syncRunText } from './upgradeEdgeSyncText.js'; // v2.865: 엣지 자동 업그레이드 한 줄 + '구버전 엣지 밀어 넣기'
+import { backdropClose } from '../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만
 
 // S-09: 새 기본값은 https:// — 평문 http:// 는 사유를 적은 예외로만 등록된다.
 const EMPTY = { id: '', name: '', datacenter: '', url: 'https://', token: '', enabled: true, allowInsecureHttp: false, insecureHttpReason: '' };
@@ -572,7 +573,7 @@ export default function Collectors() {
       </div>
 
       {form && (
-        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
+        <div className="modal-overlay" {...backdropClose(() => close())}>
           <EscClose onClose={close} />
           <div className="modal card">
             <div className="flex between" style={{ marginBottom: 12 }}>
@@ -657,7 +658,7 @@ export default function Collectors() {
       )}
 
       {pwForm && (
-        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget && !pwBusy) setPwForm(null); }}>
+        <div className="modal-overlay" {...backdropClose(() => setPwForm(null), { disabled: pwBusy })}>
           <EscClose onClose={() => { if (!pwBusy) setPwForm(null); }} />
           <div className="modal card" style={{ maxWidth: 640 }}>
             <div className="flex between" style={{ marginBottom: 12 }}>
@@ -750,7 +751,7 @@ function DiagModal({ entry, onClose, onEdit }) {
   const { collector: c, cards } = entry;
   const openTokenCheck = () => { onClose(); window.location.hash = '#/tools/portal-check'; };
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="modal-overlay" {...backdropClose(() => onClose())}>
       <EscClose onClose={onClose} />
       <div className="modal card" style={{ maxWidth: 860 }}>
         <div className="flex between" style={{ marginBottom: 12 }}>
@@ -1015,7 +1016,7 @@ function CollectorsCsvExportModal({ onClose }) {
     finally { setBusy(false); }
   };
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="modal-overlay" {...backdropClose(() => onClose())}>
       <EscClose onClose={onClose} />
       <div className="modal card" style={{ maxWidth: 520 }}>
         <h3 style={{ marginTop: 0 }}>수집 서버 CSV 내보내기</h3>
@@ -1084,7 +1085,7 @@ function CollectorsCsvImportModal({ onClose, onDone }) {
   const verified = check && checkedText === text && checkedKey === curKey; // 검증 후 내용·예외가 바뀌면 재검증 요구
   const actLabel = { add: '추가', overwrite: '덮어쓰기', error: '오류' };
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
+    <div className="modal-overlay" {...backdropClose(() => onClose(), { disabled: busy })}>
       <EscClose onClose={() => { if (!busy) onClose(); }} />
       <div className="modal card" style={{ maxWidth: 780 }}>
         <h3 style={{ marginTop: 0 }}>수집 서버 CSV 가져오기</h3>

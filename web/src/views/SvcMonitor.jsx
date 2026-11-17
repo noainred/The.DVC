@@ -312,11 +312,11 @@ export default function SvcMonitor() {
     try {
       if (modal.kind === 'target') {
         const body = { ...form, kind: mode };
-        if (modal.edit) requireChanged(await putJson(`/svcmon/targets/${modal.edit}`, body)); else await postJson('/svcmon/targets', body);
+        if (modal.edit) requireChanged(await putJson(`/svcmon/targets/${modal.edit}`, body)); else requireChanged(await postJson('/svcmon/targets', body));   // 105회차 A8: 409(감시 대상 파일 읽기 오류)는 본문으로 온다
       } else {
         const body = { ...form, port: form.port || undefined, intervalSec: Number(form.intervalSec) || 60 };
         if (modal.edit) requireChanged(await putJson(`/svcmon/targets/${modal.targetId}/tests/${modal.edit}`, body));
-        else await postJson(`/svcmon/targets/${modal.targetId}/tests`, body);
+        else requireChanged(await postJson(`/svcmon/targets/${modal.targetId}/tests`, body));
       }
       setModal(null); refresh();
     } catch (e) { setErr(e.message || String(e)); } finally { setBusy(false); }
@@ -1033,7 +1033,7 @@ export default function SvcMonitor() {
                   {isAdminFull && (
                     <button type="button" className="pc-btn" onClick={async () => {
                       if (!window.confirm(`'${detail.target.name}' 의 설정 연동을 해제할까요? 대상·점검은 그대로 남고 수동 대상이 됩니다.`)) return;
-                      try { await postJson(`/svcmon/settings-sync/detach/${detail.target.id}`, {}); setDetail(null); refresh(); } catch (e) { window.alert(e.message); }
+                      try { requireChanged(await postJson(`/svcmon/settings-sync/detach/${detail.target.id}`, {})); setDetail(null); refresh(); } catch (e) { window.alert(e.message); }
                     }}>연동 해제(수동 대상으로)</button>
                   )}
                 </div>

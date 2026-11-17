@@ -214,7 +214,13 @@ api.put('/tools/curuser/settings', requireRole('admin'), (req, res) => {
   }
   // v2.607 AUTHZ2607-05: 전역 필드(enabled·주기·보존일 등)는 전 법인 공용 — 범위 계정의 값은 버리고 밝힌다.
   const kg = keepScopedFields(b, before, allowed, ['vcenters']);
-  const next = saveCurUser({ ...before, ...kg.patch, vcenters: vcIn });
+  let next;
+  try { next = saveCurUser({ ...before, ...kg.patch, vcenters: vcIn }); }
+  catch (e) {
+    // 90회차 F3: 설정 파일 읽기 오류 중 저장 거절(원본이 디스크에 그대로 있다 — 기본값 위에 덮지 않는다).
+    if (e?.status === 409) return res.status(409).json({ ok: false, code: e.code || 'settings-unreadable', reason: e.message });
+    throw e;
+  }
   logAudit({
     user: req.user?.username, action: 'curuser.settings', ip: req.ip || '',
     detail: JSON.stringify({

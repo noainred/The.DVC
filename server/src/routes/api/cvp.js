@@ -871,6 +871,8 @@ api.get('/tools/cvp/settings', adminOnly, toolsPerm, fullScopeOnly, (_req, res) 
 });
 api.put('/tools/cvp/settings', adminOnly, toolsPerm, fullScopeOnly, (req, res) => {
   // 25회차 F-2: 손상 중 저장은 받지 않는다 — 기본값(짧은 보존)을 굳히고 표지를 풀어 이력이 정리됐다. 서비스 점검 확정 · 보존본 복구로만.
+  // 103회차 F20: 읽기 오류는 원본이 그대로라 조치가 다르다(권한 · 디스크 — 확정 불가 · 재시작 불필요).
+  if (cvpSettingsLoadError()?.readError) return res.status(409).json({ ok: false, code: 'settings-unreadable', readError: true, reason: `CloudVision 수집 설정 파일을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` });
   if (cvpSettingsLoadError()) return res.status(409).json({ ok: false, code: 'settings-unreadable', reason: 'CloudVision 수집 설정 파일을 읽지 못한 상태라 저장하지 않았습니다 — 지금 저장하면 기본값(짧은 보존)이 굳습니다. 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리고 재시작하세요.' });
   const before = loadSettings();
   const next = saveSettings(req.body && typeof req.body === 'object' ? req.body : {});

@@ -6,7 +6,7 @@ import { requireRole } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
 import { fullScopeOnlyWith } from './shared.js';
 import {
-  listMounts, addMount, deleteMount, mountNow, umountNow, mountLogs, troubleshooting,
+  listMounts, addMount, deleteMount, mountNow, umountNow, mountLogs, troubleshooting, nfsMountsReadError,
 } from '../../system/nfsMounts.js';
 
 const adminOnly = requireRole('admin');
@@ -16,7 +16,10 @@ const fleetOnly = fullScopeOnlyWith('NFS 마운트는 포탈 호스트(엣지 �
 export function registerNfsMounts(adminRouter) {
 
 adminRouter.get('/nfs-mounts', adminOnly, fleetOnly, (_req, res) => {
-  res.json({ mounts: listMounts(), logs: mountLogs().slice(0, 50), tips: troubleshooting(), platform: process.platform });
+  // 96회차 ⓑ(92회차 남긴 것 ①): 정의 파일 읽기 오류 중의 빈 목록은 '없음' 이 아니다 — 고정 문구 표지(파일 조각 없음)를 싣는다.
+  const readError = nfsMountsReadError();
+  res.json({ mounts: listMounts(), logs: mountLogs().slice(0, 50), tips: troubleshooting(), platform: process.platform,
+    ...(readError ? { loadError: { readError: true, reason: 'NFS 마운트 정의 파일을 읽지 못했습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽습니다). 그동안 등록 · 삭제는 거절됩니다.' } } : {}) });
 });
 
 adminRouter.post('/nfs-mounts', adminOnly, fleetOnly, (req, res) => {

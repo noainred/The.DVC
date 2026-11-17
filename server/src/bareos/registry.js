@@ -23,7 +23,6 @@
  *   화면은 vcenterId 가 필요하다. 원장이 손상되면 Director 의 잡은 남고 포탈만 모른다 — 그래서 손상 보존(preserveCorrupt)이
  *   필수다(빈 원장으로 저장하면 되살릴 근거가 사라진다 — vmclone/store.js 와 같은 이유).
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
@@ -65,9 +64,13 @@ const _loadErr = makeLoadError();
 
 function load() {
   if (_db) return _db;
+  // 97회차 F4: 읽기 단계는 등록부 공용 읽기(util/registryCore.js read)다 — 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니라 원본을 옮기지 않고 ·
+  //   캐시하지 않고(30초 간격 재읽기) · 오류(readError)를 세워 쓰기를 거절한다(persist 의 assertWritable). parse · 형식 실패만 아래 catch(예전과 같다 — 보존본).
+  const rr = _loadErr.read(FILE(), (t) => t);
+  if (rr.kind === 'read-error') return { jobs: [], retired: [] };
   try {
-    if (fs.existsSync(FILE())) {
-      const p = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    if (rr.kind === 'ok') {
+      const p = JSON.parse(rr.value);
       if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('형식 오류');
       _db = {
         jobs: (Array.isArray(p.jobs) ? p.jobs : []).filter((j) => j && typeof j === 'object' && typeof j.id === 'string'),
@@ -118,6 +121,7 @@ function persist() {
 function writeNow() {
   const db = load();
   // v2.828: 들여쓰기 없이 쓴다(3,000개에서 크기·직렬화 시간이 약 절반 — 위 MAX_JOBS 실측). 읽기는 예전 들여쓴 파일도 같다.
+  _loadErr.assertWritable('백업 대상 원장(bareos-jobs.json)'); // 97회차 F4: 마지막 방어선 — 읽기 오류 중에는 원본을 덮지 않는다(던진다 — status 409)
   atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, jobs: db.jobs, retired: db.retired }), { mode: 0o600 });
   _dirty = false;
   _loadErr.clear();

@@ -63,12 +63,12 @@ async function postResult(id, result, kind = '') {
   catch (e) { return `결과 회신 실패 — ${String(e?.message || e).slice(0, 200)}`; }
   if (r.ok) {
     // 중앙이 모르는 작업(시한으로 닫았거나 중앙이 재시작)이면 결과가 반영되지 않았다 — Veeam 에 실제로 실행한(상태를 바꾼) 작업이면 조용히 넘기지 않는다(bareos G15 와 같은 규칙)
-    let b = null; try { b = await r.json(); } catch { b = null; }
+    let b = null; try { b = await readJsonCapped(r, 64 * 1024, '회신 응답'); } catch { b = null; }   // 94회차 I1: 85 E3 형제 — 상한 있는 읽기
     if (b?.stale && MUTATING.has(kind) && result?.ok) return `중앙이 ${kind} 결과를 받지 않았습니다(시한이 지났거나 중앙이 재시작) — 이 엣지가 Veeam 에 실행한 작업이 포탈에 반영되지 않았을 수 있습니다(Veeam 콘솔에서 확인)`;
     return null;
   }
   let reason = '';
-  try { const b = await r.json(); reason = String(b?.reason || '').slice(0, 200); } catch { /* 본문 없음 */ }
+  try { const b = await readJsonCapped(r, 64 * 1024, '회신 오류 응답'); reason = String(b?.reason || '').slice(0, 200); } catch { /* 본문 없음 */ }
   return `결과 회신 HTTP ${r.status}${reason ? ` — ${reason}` : ''}`;
 }
 
@@ -103,7 +103,7 @@ export async function runVeeamRunWorkerOnce({ fetchImpl } = {}) {
     receivedAt = Date.now();
     if (!r.ok) {
       let reason = '';
-      try { const b = await r.json(); reason = String(b?.reason || '').slice(0, 200); } catch { /* */ }
+      try { const b = await readJsonCapped(r, 64 * 1024, '인출 오류 응답'); reason = String(b?.reason || '').slice(0, 200); } catch { /* */ }
       const msg = `인출 HTTP ${r.status}${reason ? ` — ${reason}` : ''}`;
       _last = { at: Date.now(), ok: false, error: msg, status: r.status };
       noteError(msg);

@@ -44,7 +44,7 @@ test('D1: 새로 같은 Director 에 둘째 vCenter 를 묶으면 거부 · 이�
   assert.throws(() => S.saveSettings({ sites: [{ vcenterId: 'vc-a', directorId: da }, { vcenterId: 'vc-b', directorId: da }] }), /서비스 하나 = vCenter 하나/);
   // 완전 설치: 사전 점검이 bindIssue 를 싣고 시작은 같은 판정으로 거부한다(소스)
   const job = SRC('bareos/install/job.js');
-  assert.match(job, /const bindIssue = directorBindIssueFor\(t, vcenterId\)/);
+  assert.match(job, /const bindIssue = directorBindIssueFor\(t, vcenterId[,)]/);   // 104회차: 새 설치는 4단계가 등록할 Director(서버 주소)도 넘긴다
   assert.match(job, /if \(pre\.bindIssue\) throw fail\('invalid', pre\.bindIssue\)/);
 });
 

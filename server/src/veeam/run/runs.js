@@ -17,7 +17,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config, clampIntervalMs } from '../../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../../util/atomicWrite.js';
+import { makeJsonFileReader } from '../../util/jsonFileRead.js';   // 94회차 F2: 읽기 오류 ≠ 손상
 import { registerStateFile } from '../../util/stateFiles.js';
 import { getServerWithSecret } from '../registry.js';
 import { dispatchOp } from './dispatch.js';
@@ -40,14 +41,23 @@ let _timer = null;
 let _tracking = false;
 const _trackBusy = new Set();   // 지금 세션을 읽는 서버 id(전체 점검 2회차 V-4 — 서버마다 가드)
 
+/*
+ * 94회차 F2(재현): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전에는 catch 하나로 받아 실행 기록을 `.corrupt.*` 로 옮기고 빈 기록으로 돌았다:
+ *   진행 중 실행이 사라져 서버별 409 가드(serverBusy)가 풀리고(같은 서버로 백업 · 빼기 · 삭제가 다시 열림), 다음 저장이 한 건만 든 파일을 썼다.
+ *   이제 원본을 두고 · 캐시하지 않고(30초 간격 재읽기 — 읽히면 그때 재시작 복구를 한다) · 그동안은 **모든 서버를 바쁨으로** 본다(진행 중 실행을 모른다)
+ *   · 저장하지 않는다. 손상(JSON 파싱 실패)은 예전과 같다(보존본 + 빈 기록).
+ */
+const _reader = makeJsonFileReader(() => FILE(), { parse: (t) => JSON.parse(t), tag: 'veeam-run' });
+let _readErr = null;
+/** 실행 기록 파일 읽기 오류({ code }) 또는 null. */
+export function runsLoadError() { load(); return _readErr; }
 function load() {
   if (_runs) return _runs;
-  _runs = [];
-  if (!fs.existsSync(FILE())) return _runs;
-  try {
-    const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
-    _runs = Array.isArray(raw?.runs) ? raw.runs.filter((r) => r && typeof r === 'object' && typeof r.id === 'string' && Array.isArray(r.vms) && Array.isArray(r.groups)) : [];
-  } catch (e) { preserveCorrupt(FILE(), e?.message); _runs = []; }   // 손상 원본은 보존(감사 근거)하고 빈 기록으로 시작
+  const r = _reader.read();
+  if (r.kind === 'read-error') { _readErr = { code: String(r.error?.code || 'read-error').slice(0, 32) }; return []; }   // 캐시하지 않는다
+  _readErr = null;
+  const raw = r.kind === 'ok' ? r.value : null;   // missing · corrupt(reader 가 보존본으로 옮겼다 — 감사 근거) → 빈 기록
+  _runs = Array.isArray(raw?.runs) ? raw.runs.filter((x) => x && typeof x === 'object' && typeof x.id === 'string' && Array.isArray(x.vms) && Array.isArray(x.groups)) : [];
   // 파일에서 읽은 실행은 **이전 프로세스의 것**이다 — 읽는 이 순간(동기)에만 복구한다. 기동 뒤 타이머에서 복구하면
   // 그 사이 이 프로세스가 시작한 살아 있는 실행까지 '재시작으로 끊김' 으로 닫는다(2차 반증 N1 — 이중 실행 문이 열린다).
   if (recoverRuns(_runs)) persist();
@@ -58,7 +68,8 @@ function trim(runs) {
   for (let i = runs.length - 1; runs.length > MAX_RUNS && i >= 0; i--) if (runs[i].status !== 'running') runs.splice(i, 1);
 }
 function persist() {
-  try { atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, runs: load() }), { mode: 0o600 }); }
+  if (!_runs) { console.warn('[veeam-run] 실행 기록 파일을 읽지 못한 상태라 저장하지 않았습니다(원본을 덮지 않음)'); return; }   // 94회차 F2: 읽기 오류 중(캐시 없음)
+  try { atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, runs: _runs }), { mode: 0o600 }); }
   catch (e) { console.warn(`[veeam-run] 실행 기록 저장 실패: ${e?.message || e}`); }
 }
 
@@ -75,6 +86,8 @@ export function activeRunFor(serverId) { return load().find((r) => r.status === 
 const _manageBusy = new Map();   // serverId → { id, kind, at, user }
 /** 이 서버로 진행 중인 실행 또는 관리 작업 — { id, kind } | null. 백업 실행·복원·빼기·삭제가 모두 이것을 본다. */
 export function serverBusy(serverId) {
+  // 94회차 F2: 실행 기록을 읽지 못하면 진행 중 실행을 모른다 — 바쁨으로 본다(이중 실행 · 진행 중 잡 고치기 방지)
+  if (runsLoadError()) return { id: '', kind: 'runs-unreadable', reason: `백업 실행 기록 파일(${FILE_NAME})을 읽지 못해(읽기 오류 — 원본은 그대로 있습니다) 진행 중인 요청을 확인할 수 없습니다 — 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽습니다).` };
   const run = activeRunFor(serverId);
   if (run) return { id: run.id, kind: run.mode || 'run' };
   return _manageBusy.get(serverId) || null;
@@ -112,6 +125,7 @@ function settle(run) {
  * 반환은 run(즉시 — 실제 요청은 비동기로 이어진다).
  */
 export function startRun(plan, { user = '', vcById = new Map(), mode = 'quick' } = {}) {
+  if (runsLoadError()) throw new Error('백업 실행 기록 파일을 읽지 못해 실행을 시작하지 않았습니다.');   // 94회차 F2: 마지막 방어선(라우트는 serverBusy 로 먼저 막는다)
   const runs = load();
   const prefix = getRunSettings().jobPrefix;
   const run = {
@@ -333,4 +347,4 @@ export function startVeeamRunTracker() {
   _timer.unref?.();
 }
 
-export function _resetForTest() { _runs = null; _tracking = false; _trackBusy.clear(); _manageBusy.clear(); try { fs.rmSync(FILE()); } catch { /* 없음 */ } }
+export function _resetForTest() { _runs = null; _readErr = null; _reader.reset(); _tracking = false; _trackBusy.clear(); _manageBusy.clear(); try { fs.rmSync(FILE()); } catch { /* 없음 */ } }

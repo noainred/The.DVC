@@ -13,7 +13,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const src = fs.readFileSync(path.join(here, '..', 'src', 'bmusage', 'poller.js'), 'utf8');
 
 test('bmusage 폴러 동시성 기본값은 32 이고 env 로 바꿀 수 있다', () => {
-  const m = /const CONCURRENCY = Math\.max\(1, Number\(process\.env\.BMUSAGE_CONCURRENCY\) \|\| (\d+)\);/.exec(src);
+  // 99회차: env 수치는 공용 해석기(envPositive)로 읽는다 — 기본값은 둘째 인자.
+  const m = /const CONCURRENCY = Math\.max\(1, envPositive\(process\.env\.BMUSAGE_CONCURRENCY, (\d+)\)\);/.exec(src);
   assert.ok(m, 'CONCURRENCY 상수 정의를 찾지 못했다');
   assert.equal(Number(m[1]), 32);
 });

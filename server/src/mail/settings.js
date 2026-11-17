@@ -22,6 +22,7 @@ import { KINDS, isKind } from './kinds.js';
 import { ssrfBlockReason } from '../collector/registry.js';   // v2.575 SEC-15
 import { clampSetting } from '../util/clampSetting.js';
 import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
+import { accessMoved } from '../util/secretCarry.js';   // 98회차: 포트 · 계정도 접속 신원(저장 비밀 승계 판정은 하나)
 const FILE = path.join(config.configDir, 'mail.json');
 
 export const DEFAULTS = Object.freeze({
@@ -120,13 +121,21 @@ export function smtpHostIssue(host) {
  * '계정 있음 + 비밀번호 없음' 설정이 저장돼 자동 발송이 빈 비밀번호로 AUTH → 535 → 인증 정지로 이어졌다.
  *   · 빈 값 = 기존 유지. 지우려면 clearPassword 를 명시적으로 보낸다.
  *   · v2.480(3차 감사 S8): host 가 바뀌면 저장 비번 이월 금지(PDU S-1 규칙) — 새 SMTP 로 평문 자격증명 전송 방지.
- * @returns {{ password: string, dropped: 'cleared'|'hostChanged'|null }}
+ *   · 98회차(재현): **포트 · 계정도** 접속 신원이다(util/secretCarry.js accessMoved — 다른 저장소 · 연결 시험과 같은 판정). 예전에는 호스트만 보아
+ *     ① 같은 호스트의 다른 포트(그 호스트에서 일반 사용자가 열 수 있는 1024 이상 포트 — 예 2525)로 바꾸면 저장 비밀번호가 그 리스너로 AUTH 되었고
+ *     ② 계정명만 바꾸면 저장 비밀번호를 다른 계정명으로 보냈다(테스트 발송 · 자동 발송 모두 — 틀린 조합의 반복 AUTH 는 계정 잠금으로 이어진다).
+ *     포트 · 계정은 save 와 같은 정규화(빈 칸 = 이전 값)로 견준다.
+ * @returns {{ password: string, dropped: 'cleared'|'hostChanged'|'accessChanged'|null }}
  */
 export function nextSmtpPassword(s = {}, curSmtp = {}) {
   if (s?.clearPassword === true) return { password: '', dropped: curSmtp?.password ? 'cleared' : null };
   if (s?.password) return { password: String(s.password), dropped: null };
   const hostChanged = String(s?.host ?? curSmtp?.host ?? '').trim() !== String(curSmtp?.host || '').trim();
   if (hostChanged) return { password: '', dropped: curSmtp?.password ? 'hostChanged' : null };
+  const curPort = clamp(curSmtp?.port, 1, 65535, 25);
+  const prevId = { port: curPort, user: String(curSmtp?.user ?? '').trim() };
+  const nextId = { port: clamp(s?.port, 1, 65535, curPort), user: String(s?.user ?? curSmtp?.user ?? '').trim() };
+  if (accessMoved(prevId, nextId, ['port', 'user'])) return { password: '', dropped: curSmtp?.password ? 'accessChanged' : null };
   return { password: curSmtp?.password || '', dropped: null };
 }
 
@@ -209,6 +218,7 @@ export function smtpIssue(smtp, dropped = null) {
   //   통과한다) — 예전 '(이미 저장돼 있다면 비워 두세요)' 는 그 어느 경우에도 맞지 않는 안내였다. 사유별로 말한다.
   if (smtp?.user && !smtp?.password) {
     if (dropped === 'hostChanged') return 'SMTP 서버 주소가 바뀌어 저장된 비밀번호를 새 서버로 넘기지 않습니다 — 새 서버의 비밀번호를 다시 입력하세요(계정 없이 보내려면 계정을 비우세요).';
+    if (dropped === 'accessChanged') return 'SMTP 포트나 계정이 바뀌어 저장된 비밀번호를 넘기지 않습니다 — 비밀번호를 다시 입력하세요(계정 없이 보내려면 계정을 비우세요).';   // 98회차
     if (dropped === 'cleared') return '비밀번호를 지우려면 계정도 비우세요 — 계정을 쓰려면 새 비밀번호를 입력하세요.';
     return '계정을 입력했다면 비밀번호도 필요합니다(저장된 비밀번호가 없습니다).';
   }

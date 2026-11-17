@@ -4,6 +4,7 @@
  * Returns a structured log so the UI can show what happened on the remote host.
  */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { Client as SSHClient } from 'ssh2';
 import crypto from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
@@ -224,7 +225,7 @@ function connect({ host, port = 22, username, password, privateKey, passphrase, 
 // 대신 인라인 타이머로 stream 을 닫고 reject 해, 매달린 채널도 정리한다.
 // 출력 누적 상한(v2.417) — 고장 장비가 타임아웃까지 출력을 흘리면 메모리가 무한히 자란다.
 // 넘치면 채널을 닫고 reject(정직: 절단본을 성공으로 넘기지 않는다). execCapture 는 자체 2MB 캡.
-export const EXEC_MAX_OUTPUT = Math.max(64 * 1024, Number(process.env.SSH_EXEC_MAX_OUTPUT) || 4 * 1024 * 1024);
+export const EXEC_MAX_OUTPUT = Math.max(64 * 1024, envPositive(process.env.SSH_EXEC_MAX_OUTPUT, 4 * 1024 * 1024));
 function exec(conn, command, rawTimeoutMs = SSH_EXEC_TIMEOUT_MS, opts = {}) {
   const timeoutMs = execTimeoutMs(rawTimeoutMs, opts);
   return new Promise((resolve, reject) => {
@@ -380,8 +381,8 @@ const ANSI_RE = /\x1b\[[0-9;?]*[A-Za-z]/g;
  * `rows` 를 크게 두는 것은 페이저가 덜 뜨게 하려는 것이고, 페이저 자동 응답은 그대로 둔다.
  */
 const WIDE_PTY = Object.freeze({
-  rows: Math.max(24, Number(process.env.SSH_PTY_ROWS) || 200),
-  cols: Math.max(80, Number(process.env.SSH_PTY_COLS) || 1000),
+  rows: Math.max(24, envPositive(process.env.SSH_PTY_ROWS, 200)),
+  cols: Math.max(80, envPositive(process.env.SSH_PTY_COLS, 1000)),
   width: 0,
   height: 0,
   term: 'vt100',
@@ -559,7 +560,7 @@ export function stripChoiceLines(text) {
  */
 export function execAnswered(conn, command, {
   timeoutMs: rawTimeoutMs = SSH_EXEC_TIMEOUT_MS,
-  maxAnswers = Math.max(1, Number(process.env.SSH_PAGER_MAX_PAGES) || 400),
+  maxAnswers = Math.max(1, envPositive(process.env.SSH_PAGER_MAX_PAGES, 400)),
   rules = ['pager'],
   pty = true,
 } = {}) {

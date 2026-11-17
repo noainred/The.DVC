@@ -6,7 +6,6 @@
  * 엣지 대행 워커(agent/bareosOpWorker.js)는 **이 사본에 있고 담당 = 나** 인 Director 로만 실행한다(작업에는 비밀번호가 없다).
  * 규칙: 로드 손상 → preserveCorrupt + 빈 사본(원본 보존) · 로드 오류 표지 · 받은 원소는 settings 와 같은 모양·검사만 통과한 것.
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
@@ -24,9 +23,13 @@ const _loadErr = makeLoadError();
 /** 내부 전용(비밀번호 포함). */
 export function loadEdgeDirectors() {
   if (_cache) return _cache;
+  // 97회차 F4: 읽기 단계는 등록부 공용 읽기(util/registryCore.js read)다 — 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니라 원본을 옮기지 않고 ·
+  //   캐시하지 않고(30초 간격 재읽기) · 오류(readError)를 세워 쓰기를 거절한다(persist 의 assertWritable). parse · 형식 실패만 아래 catch(예전과 같다 — 보존본).
+  const rr = _loadErr.read(FILE(), (t) => t);
+  if (rr.kind === 'read-error') return { directors: [] };
   try {
-    if (fs.existsSync(FILE())) {
-      const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    if (rr.kind === 'ok') {
+      const raw = JSON.parse(rr.value);
       if (!raw || typeof raw !== 'object' || !Array.isArray(raw.directors)) throw new Error('형식 오류');
       const p = openSecretsDeep(raw);
       const directors = [];
@@ -61,6 +64,7 @@ const SIG_RE = /^[0-9a-f]{16}$/;
 function withEdgeMeta(rec, src) { return { ...rec, edgeCopy: true, connSig: SIG_RE.test(src?.connSig) ? src.connSig : '' }; }
 
 function persist(directors) {
+  _loadErr.assertWritable('대행 Director 사본(bareos-edge-directors.json)'); // 97회차 F4: 마지막 방어선 — 읽기 오류 중에는 원본을 덮지 않는다(던진다 — status 409)
   atomicWriteFileSync(FILE(), JSON.stringify(sealSecretsDeep({ version: 1, directors }), null, 2), { mode: 0o600 });
   _cache = { directors };
   _loadErr.clear();

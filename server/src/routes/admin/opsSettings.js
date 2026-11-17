@@ -1,13 +1,13 @@
 // 감사·알림·일일리포트·인증서·이상탐지·세션보안·OS스캔·프로비저닝 저장 — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
 import { config } from '../../config.js';
 import { verifyUserOtp, getUser, listUsers } from '../../auth/auth.js';
-import { saveSessionSecurity, loadConfiguredSecurity, managedAdminOwners } from '../../security/securitySettings.js';
+import { saveSessionSecurity, loadConfiguredSecurity, managedAdminOwners, sessionSecurityRecovery } from '../../security/securitySettings.js';
 import { loadSecretsPolicy, saveSecretsPolicy, migrateSecretFiles, SECRET_FILES } from '../../security/secretVault.js';
 import { saveOsScanSettings, runOsScanNow, osScanStatus } from '../../inventory/osScanner.js';
 import { getOsResults, osSummary } from '../../inventory/osStore.js';
 import { listAudit, logAudit } from '../../audit.js';
 import { loginHistorySummary, parseLoginRange } from '../../security/loginHistory.js'; // v2.912: 설정 › 로그 › 최근 로그인 · 로그인 횟수
-import { alertStatus, saveAlertConfig, testAlert, getAnomalySettings, saveAnomalySettings } from '../../alerts.js';
+import { alertStatus, saveAlertConfig, alertConfigWriteRefusal, testAlert, getAnomalySettings, saveAnomalySettings } from '../../alerts.js';
 import { createJob as createProvisionJob } from '../../provision/jobs.js';
 import { updateSaved, removeSaved, getSaved } from '../../provision/saved.js';
 import { store } from '../../store.js';
@@ -128,6 +128,8 @@ adminRouter.put('/alerts', adminOnly, fleetOnly, async (req, res) => {
       if (ssrf) return res.status(400).json({ ok: false, reason: `${key} 웹훅 URL: ${ssrf}` });
     }
   }
+  const unreadable = alertConfigWriteRefusal();   // 103회차 F12: 읽기 오류 중 저장 거절 — 사유를 화면까지
+  if (unreadable) return res.status(409).json(unreadable);
   res.json({ ok: true, config: saveAlertConfig(req.body || {}) });
 });
 adminRouter.post('/alerts/test', adminOnly, fleetOnly, async (req, res) => res.json(await testAlert(req.user?.username)));
@@ -219,7 +221,8 @@ adminRouter.put('/secrets/policy', adminOnly, requireSettingsOwner, (req, res) =
 adminRouter.get('/security/session', adminOnly, requireSettingsOwner, (_req, res) => {
   const cur = loadConfiguredSecurity();
   const ownerWarnings = scopedOwnerWarnings(cur.settingsOwners);
-  res.json({ ...cur, autoOwners: managedAdminOwners(), ...(ownerWarnings.length ? { ownerWarnings } : {}) });
+  const recovery = sessionSecurityRecovery();   // 98회차: 본 파일 대신 직전 값 · 신뢰 사본 · 엄격 값으로 도는 중이면 그 사실(화면의 값이 파일 값이 아니다)
+  res.json({ ...cur, autoOwners: managedAdminOwners(), ...(ownerWarnings.length ? { ownerWarnings } : {}), ...(recovery ? { recovery } : {}) });
 });
 adminRouter.put('/security/session', adminOnly, requireSettingsOwner, (req, res) => {
   const username = req.user?.username || 'unknown';
@@ -239,7 +242,11 @@ adminRouter.put('/security/session', adminOnly, requireSettingsOwner, (req, res)
     after = saveSessionSecurity({ idleLogoutEnabled: req.body?.idleLogoutEnabled, idleLogoutMin: req.body?.idleLogoutMin, settingsOwners: req.body?.settingsOwners, loginPolicy: req.body?.loginPolicy, singleSession: req.body?.singleSession, demoSession: req.body?.demoSession,
       sessionWarnEnabled: req.body?.sessionWarnEnabled, sessionWarnMin: req.body?.sessionWarnMin, sessionExtendMin: req.body?.sessionExtendMin, sessionMaxHours: req.body?.sessionMaxHours,
       bareosSetupOtp: req.body?.bareosSetupOtp });
-  } catch (e) { return res.status(400).json({ ok: false, reason: e.message }); }
+  } catch (e) {
+    // 91회차(88회차 결정 — 권장안): 저장 예외의 상태를 살린다 — 읽기 오류 중 저장 거절(503 settings-unreadable)을 400(입력 오류)으로 바꾸면 화면이 '입력이 틀렸다' 로 읽는다.
+    const st = Number(e?.status);
+    return res.status(st >= 400 && st < 600 ? st : 400).json({ ok: false, reason: e.message, ...(e?.code ? { code: String(e.code).slice(0, 64) } : {}) });
+  }
   const fmt = (s) => (s.idleLogoutEnabled ? `${s.idleLogoutMin}분` : '비활성');
   const polLabel = (p) => ({ otp_only: 'OTP 전용', otp_or_password: 'OTP+비밀번호(혼용)', password_only: '비밀번호 전용' }[p] || '기본(고권한 OTP 전용)');
   // Demo/Guest 중복 접속 모드 라벨(v2.294) — 감사 로그에 사람이 읽는 형태로 남긴다.

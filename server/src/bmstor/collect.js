@@ -7,6 +7,7 @@
  * df 는 없는 마운트가 섞여도 있는 것은 출력하고 exit≠0 — 있는 것은 살리고 없는 것만 오류 표기.
  */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { withSsh, isSshAuthError } from '../proxy/sshExec.js';
 import { reqTimeoutMs } from '../agent/envTimeout.js';
 import { ioSampleSec, ioSampleCommand, ioResultFromExec } from './diskstats.js'; // v2.915: 디스크 I/O 표본(설계 bm-san-compare §4.1)
@@ -145,7 +146,7 @@ export async function collectServer(server) {
 }
 
 /** 소규모 동시성 풀 — 서버 수십 대를 한꺼번에 SSH 하지 않게 제한(기본 4). */
-export async function collectMany(servers, { concurrency = Number(process.env.BMSTOR_CONCURRENCY) || 4 } = {}) {
+export async function collectMany(servers, { concurrency = envPositive(process.env.BMSTOR_CONCURRENCY, 4) } = {}) {
   const list = [...servers];
   const results = new Array(list.length);
   let idx = 0;

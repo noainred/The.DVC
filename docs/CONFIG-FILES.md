@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **331개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **332개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-17)
@@ -27,7 +27,7 @@
 | `alarm-mutes.json` | 설정 | 알람 음소거 규칙 | ✅ | ✅ | ✅ | alarm-mutes.js |
 | `alerts-state.json` | 설정 | Alerting — evaluates threshold/condition rules against the current snapshot on | ✅ | ✅ | ✅ | alerts.js |
 | `alerts.json` | 설정 | Alerting — evaluates threshold/condition rules against the current snapshot on | ✅ | ✅ | ✅ | alerts.js |
-| `api-keys.json` | 설정 | 외부 연동 API 키 저장소 (v2.562) — 다른 포탈이 이 포탈의 조회 API 를 읽을 수 있게 하는 인증. | ✅ | ✅ | ✅ | publicapi/keys.js |
+| `api-keys.json` | 설정 | 외부 연동 API 키 저장소 (v2.562) — 다른 포탈이 이 포탈의 조회 API 를 읽을 수 있게 하는 인증. | ✅ |  | ✅ | publicapi/keys.js |
 | `attach-settings.json` | 설정 | 첨부 전체 상한(v2.889 — maxTotalMB, 기본 2048 · 1~102400. 비밀 없음) | ✅ | ✅ | ✅ | attach/store.js |
 | `attachments` | 디렉터리 | 위키 문서 · 이슈 첨부 파일(v2.889 · 시안 ⑨⑩ '첨부' · C-4). | ✅ | ✅ | ✅ | attach/store.js |
 | `attachments.json` | 설정 | 위키 문서 · 이슈 첨부 목록(v2.889 — 원래 이름 · 주인(W-번호 · ISS-번호) · 크기 · sha256 · 올린 사람. 비밀 없음) | ✅ | ✅ | ✅ | attach/store.js |
@@ -35,8 +35,8 @@
 | `auth-secret` | 디렉터리 | 세션 토큰 서명 키(자동 생성) | ✅ | ✅ | ✅ | auth/auth.js |
 | `auth.json` | 설정 | Active Directory (LDAP) authentication — UPN simple bind + group→role mapping. | ✅ | ✅ | ✅ | auth/ad.js |
 | `backup-marks.json` | 설정 | 백업 세부내용의 사람이 정하는 표시(v2.784 — 사용자 요청 "업무 중요도 아이콘 · 백업 필요 아이콘 · 백업 관련 메모"). | ✅ | ✅ |  | veeam/backupMarks.js |
-| `backup-stale-alert-state.json` | 설정 | '백업 안 된 VM' 일일 메일(v2.838 · 시안 ① '이 조건을 알림으로(메일)' · 사용자 결정 '일일 메일로 구현'). | ✅ | ✅ | ✅ | veeam/staleAlert.js |
-| `backup-stale-alert.json` | 설정 | '백업 안 된 VM' 일일 메일(v2.838 · 시안 ① '이 조건을 알림으로(메일)' · 사용자 결정 '일일 메일로 구현'). | ✅ | ✅ | ✅ | veeam/staleAlert.js |
+| `backup-stale-alert-state.json` | 설정 | '백업 안 된 VM' 일일 메일(v2.838 · 시안 ① '이 조건을 알림으로(메일)' · 사용자 결정 '일일 메일로 구현'). | ✅ |  | ✅ | veeam/staleAlert.js |
+| `backup-stale-alert.json` | 설정 | '백업 안 된 VM' 일일 메일(v2.838 · 시안 ① '이 조건을 알림으로(메일)' · 사용자 결정 '일일 메일로 구현'). | ✅ |  | ✅ | veeam/staleAlert.js |
 | `backup.json` | 설정 | 백업 설정 + 스케줄러 + 변경 감시. | ✅ | ✅ | ✅ | backup/settings.js |
 | `backups` | 디렉터리 | 포탈 백업 코어 — 중앙 포탈의 모든 설정(CONFIG_DIR의 *.json / *.env)과, 엣지 포탈(에이전트)이 | ✅ | ✅ | ✅ | backup/service.js, backup/stagedRestore.js |
 | `bareos-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | bareos/service.js |
@@ -118,7 +118,7 @@
 | `disk-bad.db` | DB | 중앙의 디스크 배드 섹터 이력 저장소(SQLite, v3.8.0). |  |  | ✅ | diskbad/db.js |
 | `diskbad-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | diskbad/scan.js |
 | `download` | 디렉터리 | iDRAC-scan collector agent auto-deploy. The central portal pushes its offline |  |  | ✅ | agent/deploy.js |
-| `emergency-stop.json` | 설정 | 긴급중단(Emergency Stop) — 2인 승인(관리자 2명 OTP)으로만 켜고/끄는 전역 수집 정지 스위치. | ✅ | ✅ | ✅ | security/emergencyStop.js |
+| `emergency-stop.json` | 설정 | 긴급중단(Emergency Stop) — 2인 승인(관리자 2명 OTP)으로만 켜고/끄는 전역 수집 정지 스위치. | ✅ |  | ✅ | security/emergencyStop.js |
 | `finops.json` | 설정 | FinOps — 전력 수집(iDRAC/OME/원격) 데이터를 kWh·전기요금·CO2로 환산해 vCenter/지역별로 | ✅ | ✅ |  | insights/finops.js |
 | `fleet-assign.json` | 설정 | 통합 서버 인벤토리 — 베어메탈/물리 서버의 '소속 법인(vCenter)' 수동 등록 저장. | ✅ |  |  | insights/fleetAssign.js |
 | `fleet-tags.json` | 설정 | 통합 서버 인벤토리 — 수동 분류 예외(override) 저장. | ✅ |  |  | insights/fleetTags.js |
@@ -138,7 +138,7 @@
 | `horizon-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | horizon/sessionPoller.js |
 | `horizon-session-activity.json` | 설정 | 수집 작업 로그(최근 N건 링버퍼 · 재생성 가능한 캐시) — util/activityLog.js | ✅ |  | ✅ | horizon/sessionActivityLog.js |
 | `horizon-sessions.db` | DB | Horizon 실시간 사용자 전용 DB(v2.525). |  |  | ✅ | horizon/sessionDb.js |
-| `horizon-sessions.json` | 설정 | Horizon 실시간 사용자 수집 설정(v2.525). | ✅ | ✅ | ✅ | horizon/sessionSettings.js |
+| `horizon-sessions.json` | 설정 | Horizon 실시간 사용자 수집 설정(v2.525). | ✅ |  | ✅ | horizon/sessionSettings.js |
 | `horizon.json` | 설정 | Horizon Connection Server 연동 — 등록부 · 공용 로그인 세션 · 연결 테스트 · 라이선스 만료일 조회. | ✅ | ✅ | ✅ | horizon/horizon.js |
 | `host-access.json` | 설정 | 호스트 접근 제어 설정(`host-access.json`, v2.485). | ✅ | ✅ | ✅ | hostaccess/settings.js |
 | `host-temp.db` | DB | 지표 시계열(온도·GPU·데이터스토어·포탈 메모리) — 이름과 달리 범용 DB |  |  |  | config.js |
@@ -191,10 +191,10 @@
 | `linkcheck-settings.json` | 설정 | 통신 점검 설정(v2.552). 파일: `CONFIG_DIR/linkcheck-settings.json` | ✅ | ✅ | ✅ | linkcheck/settings.js |
 | `llm.json` | 설정 | Local LLM (Ollama) settings for natural-language search. Stored in | ✅ | ✅ | ✅ | llm/config.js |
 | `log-analysis-stats.json` | 설정 | 이 포탈 로그의 **누적** 집계(v2.583). 설정 › 로그 › 로그 분석의 기본 원천. | ✅ |  |  | loganalysis/live.js |
-| `login-fails.ndjson` | 로그(NDJSON) | 로그인 실패 저장소(분석용) — 포탈 자체 실패 + 게스트 OS 조사 결과를 적재한다. | ✅ | ✅ | ✅ | security/loginStore.js |
-| `login-history.ndjson` | 로그(NDJSON) | 로그인 성공 기록(v2.912) — 설정 › 로그 › 최근 로그인 · 로그인 횟수. | ✅ | ✅ | ✅ | security/loginHistory.js |
+| `login-fails.ndjson` | 로그(NDJSON) | 로그인 실패 저장소(분석용) — 포탈 자체 실패 + 게스트 OS 조사 결과를 적재한다. | ✅ |  | ✅ | security/loginStore.js |
+| `login-history.ndjson` | 로그(NDJSON) | 로그인 성공 기록(v2.912) — 설정 › 로그 › 최근 로그인 · 로그인 횟수. | ✅ |  | ✅ | security/loginHistory.js |
 | `login-monitor.json` | 설정 | 로그인 실패 주기 모니터 — 일정 주기로 로그인 실패를 분석하고, 브루트포스(임계 이상 반복) 의심이 | ✅ |  | ✅ | security/loginMonitor.js |
-| `login-policy-users.txt` | 텍스트 | 세션 보안 설정 — 유휴 자동 로그아웃(분) 등. CONFIG_DIR/security-session.json. | ✅ | ✅ | ✅ | security/securitySettings.js |
+| `login-policy-users.txt` | 텍스트 | 세션 보안 설정 — 유휴 자동 로그아웃(분) 등. CONFIG_DIR/security-session.json. | ✅ |  | ✅ | security/securitySettings.js |
 | `mail-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | mail/service.js |
 | `mail.json` | 설정 | 포탈 공용 메일(SMTP) 설정 (`mail.json`, v2.454). | ✅ |  | ✅ | mail/settings.js |
 | `maintenance-stats.json` | 설정 | 정비 창 판정의 **노드 실행 면**(8a단계): 판정기 만들기 · 억제 계수 · ‘창 끝 뒤 억제’ 점검. | ✅ |  | ✅ | bmusage/maint/runtime.js |
@@ -212,9 +212,9 @@
 | `os-inventory.json` | 설정 | 실제 OS 인벤토리 저장소(별도 DB) — VM별 1행, vmId 키로 upsert. | ✅ |  | ✅ | inventory/osStore.js |
 | `os-scan.json` | 설정 | 실제 OS 인벤토리 스캐너 — 주기적으로 'DB에 없는(또는 오래된) VM'을 찾아 게스트에서 실제 OS를 읽어 저장. | ✅ |  | ✅ | inventory/osScanner.js |
 | `packages` | 디렉터리 | 디렉터리 — 내려받은 설치/업그레이드 패키지 보관(PACKAGE_DIR) |  |  |  | config.js |
-| `packages.json` | 설정 | Web-editable package source settings — lets an admin change the package | ✅ | ✅ | ✅ | upgrade/packageSettings.js |
+| `packages.json` | 설정 | Web-editable package source settings — lets an admin change the package | ✅ |  | ✅ | upgrade/packageSettings.js |
 | `part-faults.db` | DB | 파트 장애 이력 DB(v2.547, 스키마 v2 는 v2.548). 파일 `part-faults.db`. |  |  | ✅ | partfault/db.js |
-| `partfault-settings.json` | 설정 | 파트 장애 기능 스위치(v2.548 F3). | ✅ | ✅ | ✅ | partfault/settings.js |
+| `partfault-settings.json` | 설정 | 파트 장애 기능 스위치(v2.548 F3). | ✅ |  | ✅ | partfault/settings.js |
 | `pdu-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | pdu/poller.js |
 | `pdu-devices.json` | 설정 | PDU(APC Rack PDU 2G) 장비 등록 — `CONFIG_DIR/pdu-devices.json`(0600). | ✅ | ✅ | ✅ | pdu/registry.js |
 | `pdu-intervals.json` | 설정 | PDU 수집 주기(사용자 요구: '수집 시간은 설정에서 지정'). | ✅ |  | ✅ | pdu/intervals.js |
@@ -232,7 +232,7 @@
 | `power-settings.json` | 설정 | 전력 집계 표시 설정 — CONFIG_DIR/power-settings.json. | ✅ | ✅ | ✅ | idrac/powerSettings.js |
 | `provision-runs.json` | 설정 | VM provisioning job engine. Holds deployment jobs in memory and runs them |  |  |  | provision/jobs.js |
 | `provision-saved.json` | 설정 | Saved VM-provisioning jobs — every created job's spec is persisted so it can | ✅ | ✅ | ✅ | provision/saved.js |
-| `relay-topology.json` | 설정 | 중계(HAProxy) 토폴로지 정의 | ✅ | ✅ | ✅ | relaytopo/store.js |
+| `relay-topology.json` | 설정 | 중계(HAProxy) 토폴로지 정의 | ✅ |  | ✅ | relaytopo/store.js |
 | `relaycheck-settings.json` | 설정 | HAProxy 경로 점검 설정(v2.429, 사용자 요구 '특수기능에 haproxy 설정을 주기적으로 점검해서 알람으로 알려주고 | ✅ | ✅ | ✅ | relaycheck/settings.js |
 | `release-notes.json` | 설정 | Release notes: a built-in changelog (server/src/release-notes.json, shipped | ✅ | ✅ | ✅ | release-notes.js |
 | `release-signing-keys.conf` | 기타 | 업그레이드 서명 신뢰 공개키(호스트 관리자가 직접 둔다, 검토 S-10) |  |  |  | (외부/설치 스크립트) |
@@ -264,11 +264,12 @@
 | `secrets-key` | 디렉터리 | 자격증명 봉인 키(암호화 모드) | ✅ | ✅ | ✅ | security/secretVault.js |
 | `secrets-policy.json` | 설정 | 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). | ✅ | ✅ | ✅ | security/secretVault.js |
 | `secrets-policy.trusted.json` | 설정 | 자격증명 저장 방식 정책의 신뢰 사본(S-07) | ✅ | ✅ | ✅ | security/secretVault.js |
-| `security-session.json` | 설정 | 세션 보안 설정 — 유휴 자동 로그아웃(분) 등. CONFIG_DIR/security-session.json. | ✅ | ✅ | ✅ | security/securitySettings.js |
+| `security-session.json` | 설정 | 세션 보안 설정 — 유휴 자동 로그아웃(분) 등. CONFIG_DIR/security-session.json. | ✅ |  | ✅ | security/securitySettings.js |
+| `security-session.trusted.json` | 설정 | 세션 보안 설정의 신뢰 사본(98회차 — S-07 과 같은 모양) | ✅ |  | ✅ | security/securitySettings.js |
 | `service-map-pins.json` | 설정 | 서비스 인벤토리 저장소(v2.887, docs/design/service-map/README.md 시안 A 3차 + 4차 검토). | ✅ | ✅ |  | servicemap/store.js |
 | `service-map.json` | 설정 | 서비스 인벤토리 저장소(v2.887, docs/design/service-map/README.md 시안 A 3차 + 4차 검토). | ✅ | ✅ |  | servicemap/store.js |
 | `session-state.json` | 설정 | 세션 폐기·유휴 상태(로그아웃·폐기 기록, 검토 S-05·S-06) | ✅ | ✅ | ✅ | auth/sessionState.js |
-| `settings-owners.txt` | 텍스트 | 설정 소유자 목록(백업·비밀 CSV 등 최상위 권한) | ✅ | ✅ | ✅ | security/securitySettings.js |
+| `settings-owners.txt` | 텍스트 | 설정 소유자 목록(백업·비밀 CSV 등 최상위 권한) | ✅ |  | ✅ | security/securitySettings.js |
 | `ssh` | 디렉터리 | 아이실론 디렉터리 사용량 SSH 키 디렉터리(ssh/isidu_key — 0700/0600, v2.736) |  |  | ✅ | util/sshKeyStore.js |
 | `ssh-access-installed.json` | 설정 | 서버에서 읽은 `~/.ssh/authorized_keys` 의 **공개키 지문**(v3.9.0 · 설계 docs/design/ssh-access §9). | ✅ | ✅ | ✅ | sshaccess/installed.js |
 | `ssh-access-state.json` | 설정 | SSH 공용 접속의 **상태 파일**(v3.9.0 · 설계 docs/design/ssh-access §8 · §9) — 접속 판정에 쓰는 것만 둔다. | ✅ | ✅ | ✅ | sshaccess/state.js |
@@ -302,10 +303,10 @@
 | `tool-categories.json` | 설정 | 특수 기능 카테고리 설정 (`tool-categories.json`, v2.455). | ✅ | ✅ | ✅ | toolcats/settings.js |
 | `tool-usage.json` | 설정 | 특수 기능 사용 빈도 집계 — "사람들이 자주 쓰는 메뉴"를 자동 추천하기 위한 카운터. | ✅ |  |  | tool-usage.js |
 | `ui.json` | 설정 | Shared UI settings persisted server-side (CONFIG_DIR/ui.json) so layout | ✅ | ✅ | ✅ | ui-settings.js |
-| `upgrade-kept-bundles.json` | 설정 | 중앙이 패키지 폴더에 보관한 업그레이드 번들 기록(상태, v2.859) | ✅ | ✅ | ✅ | upgrade/fleetBundle.js |
+| `upgrade-kept-bundles.json` | 설정 | 중앙이 패키지 폴더에 보관한 업그레이드 번들 기록(상태, v2.859) | ✅ |  | ✅ | upgrade/fleetBundle.js |
 | `upgrade-signature-log.json` | 설정 | 업그레이드 번들 서명 검증 기록(최근 10건, 상태, v2.736.1) | ✅ | ✅ | ✅ | upgrade/signature.js |
 | `upgrade-status.json` | 설정 | 업그레이드 확인·적용·자동 확인·엣지 동기화 기록(상태, v2.736.2 · v2.865 lastEdgeSync) | ✅ | ✅ | ✅ | upgrade/statusStore.js |
-| `upgrade.json` | 설정 | Runtime-editable auto-upgrade settings. Env vars provide the defaults; values | ✅ | ✅ | ✅ | upgrade/settings.js |
+| `upgrade.json` | 설정 | Runtime-editable auto-upgrade settings. Env vars provide the defaults; values | ✅ |  | ✅ | upgrade/settings.js |
 | `usage-settings.json` | 설정 | 기능 사용 추적 설정(v2.913). 파일 `usage-settings.json`(CONFIG_DIR, 비밀 없음). | ✅ | ✅ |  | usage/settings.js |
 | `usage.db` | DB | 기능 사용 일 집계 DB(v2.913). 파일: `<dbDir>/usage.db`. |  |  | ✅ | usage/db.js |
 | `user-menus.json` | 설정 | 계정별 좌측 메뉴(내 메뉴)와 슈퍼 관리자 배포 메뉴 저장소(v2.726, `user-menus.json`). | ✅ | ✅ | ✅ | usermenu/store.js |
@@ -315,20 +316,20 @@
 | `vcenter-logs.db` | DB | vCenter 이벤트/태스크 로그 수집 캐시 | ✅ |  | ✅ | logs/db.js |
 | `vcenter-logs.json` | 설정 | vCenter 로그 보관 설정 — CONFIG_DIR/vcenter-logs.json. 보관 기간(retentionDays)을 여기서 지정. | ✅ | ✅ | ✅ | logs/settings.js |
 | `vcenter-order.json` | 설정 | vCenter display order — a user-defined ordering applied to every "vCenter | ✅ | ✅ | ✅ | vcenter/order.js |
-| `vcenters.json` | 설정 | vCenter 등록(주소·계정·수집 옵션) | ✅ | ✅ | ✅ | config.js, guestdisk/service.js 외 5 |
+| `vcenters.json` | 설정 | vCenter 등록(주소·계정·수집 옵션) | ✅ | ✅ | ✅ | config.js, guestdisk/service.js 외 6 |
 | `veeam-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | veeam/poller.js |
 | `veeam-backup-run.json` | 설정 | 백업 실행 설정(v2.818, `veeam-backup-run.json` — 비밀 없음). | ✅ | ✅ | ✅ | veeam/run/settings.js |
 | `veeam-em-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | veeam/em/poller.js |
 | `veeam-em-latest.json` | 설정 | Enterprise Manager 별 마지막 결과(v2.788). veeam/store.js 와 같은 모양: |  |  |  | veeam/em/store.js |
-| `veeam-em-map.json` | 설정 | EM 백업 서버 매핑(v2.788.1 — 사용자 요청 'EM 에 연결된 백업 서버 매핑하는 기능'). | ✅ | ✅ | ✅ | veeam/em/mapping.js |
-| `veeam-em-vms.json` | 설정 | Enterprise Manager 가 알려 준 VM 별 최신 백업 기록(v2.795 — 'EM 에서 등록되면 vCenter 화면에도 VM 단위로'). | ✅ | ✅ | ✅ | veeam/em/vmStore.js |
+| `veeam-em-map.json` | 설정 | EM 백업 서버 매핑(v2.788.1 — 사용자 요청 'EM 에 연결된 백업 서버 매핑하는 기능'). | ✅ |  | ✅ | veeam/em/mapping.js |
+| `veeam-em-vms.json` | 설정 | Enterprise Manager 가 알려 준 VM 별 최신 백업 기록(v2.795 — 'EM 에서 등록되면 vCenter 화면에도 VM 단위로'). | ✅ |  | ✅ | veeam/em/vmStore.js |
 | `veeam-em.json` | 설정 | Veeam Backup Enterprise Manager(EM) 등록부(v2.788, 사용자 요청 '설정 › Veeam 백업 서버 › Enterprise Manager'). | ✅ | ✅ | ✅ | veeam/em/registry.js |
 | `veeam-history.db` | DB | Veeam 일 단위 이력 DB(v2.788 · veeam-history.db). |  |  | ✅ | config.js, veeam/historyDb.js |
 | `veeam-latest.json` | 설정 | Veeam 서버별 마지막 결과(v2.751). 중앙 직접 수집과 엣지 push 가 같은 표에 들어간다. |  |  |  | veeam/store.js |
 | `veeam-license-alert-state.json` | 설정 | Veeam 라이선스 감시(v2.788, 사용자 채택 '라이선스 만료 알림·추이'). **중앙 전용** · 1시간마다. | ✅ |  | ✅ | veeam/licenseWatch.js |
 | `veeam-servers.json` | 설정 | Veeam Backup & Replication 서버 등록부(v2.751). | ✅ | ✅ | ✅ | veeam/registry.js |
 | `veeam-snap.db` | DB |  |  |  |  | config.js |
-| `veeam-vc-accounts.json` | 설정 | vCenter 이벤트로 본 Veeam 백업 흔적(v2.754). Veeam 연동·VM 메모 없이 쓴다(사용자 지시). | ✅ | ✅ |  | veeam/snapEvents.js |
+| `veeam-vc-accounts.json` | 설정 | vCenter 이벤트로 본 Veeam 백업 흔적(v2.754). Veeam 연동·VM 메모 없이 쓴다(사용자 지시). | ✅ |  |  | veeam/snapEvents.js |
 | `vm-backup-mail-state.json` | 설정 | VM 백업 실패 메일(v2.794, 메일 종류 'vm-backup'). | ✅ | ✅ | ✅ | vmclone/notify.js |
 | `vm-clone-corp.json` | 설정 | 법인(실행 노드)별 '백업에 쓸 NFS 마운트' 지정(v2.794). | ✅ | ✅ | ✅ | vmclone/corpMounts.js |
 | `vm-clone-nfsds.json` | 설정 | 법인 백업 저장소: ESXi NFS 데이터스토어 정의(v2.793, 중앙 전용). | ✅ | ✅ | ✅ | vmclone/nfsDs.js |
@@ -336,7 +337,7 @@
 | `vm-dns-policy.json` | 설정 | VM DNS 승인 정책(`vm-dns-policy.json`, v2.696). 사람이 손으로 정하는 **설정** 파일이다(상태 파일 아님 — | ✅ | ✅ | ✅ | vmdns/policy.js |
 | `vm-dns.db` | DB | VM DNS 서버 설정 **변경 이력** 전용 DB(`vm-dns.db`, v2.696). |  |  | ✅ | vmdns/db.js |
 | `vm-hygiene.json` | 설정 | VM 구성 점검·스냅샷 정책 설정(`vm-hygiene.json`, v2.698). 사람이 정하는 **설정** 파일이다 | ✅ |  |  | vmhygiene/settings.js |
-| `vm-list-prefs.json` | 설정 | VM 목록 내보내기 '내 저장값'(계정별, v2.798 — 사용자 결정 '계정에 저장'). | ✅ | ✅ | ✅ | veeam/vmListPrefs.js |
+| `vm-list-prefs.json` | 설정 | VM 목록 내보내기 '내 저장값'(계정별, v2.798 — 사용자 결정 '계정에 저장'). | ✅ |  | ✅ | veeam/vmListPrefs.js |
 | `vm-track.db` | DB | VM 수량·데이터스토어 사용량 추이(변경분만 저장) |  |  | ✅ | vmtrack/db.js |
 | `vmperf` | 디렉터리 | 디렉터리 — vCenter별 VM 성능 DB(+ _index.json 역산 매핑) | ✅ | ✅ | ✅ | metrics/vmperfDb.js |
 | `vmperf.json` | 설정 | 낭비 리소스(VM 성능) 트래킹 설정 — 보존기간 + 대상 vCenter 선택(v2.376). | ✅ | ✅ | ✅ | metrics/vmperfSettings.js |
@@ -357,6 +358,7 @@
 - **`users.json`** — ⚠ 지우면 관리자 계정이 사라진다. 기동 시 초기 관리자만 재생성
 - **`secrets-key`** — ⚠ 지우면 저장된 모든 비밀번호를 복호할 수 없다(재입력 필요)
 - **`secrets-policy.trusted.json`** — 정책 파일이 손상·유실되면 이 사본으로 복구한다. 둘 다 없는데 암호화 흔적이 있으면 새 비밀 저장을 막는다(평문 저장 금지) — 지우지 말 것
+- **`security-session.trusted.json`** — 정상으로 읽거나 저장할 때 본 파일과 같게 맞춘다. 본 파일이 손상·읽기 오류·유실이면 직전 값 → 이 사본 순으로 쓰고, 둘 다 없는 손상·읽기 오류는 엄격 값(전 계정 OTP 전용 · 단일 세션 · 총 상한 8시간)으로 돈다. 백업 복원 대상이 아니다. 기본값으로 되돌리려면 두 파일을 함께 지운다
 - **`peer-trust.json`** — 종류(ssh/tls)·호스트·포트마다 승인·관찰·거부 지문과 정책(enforce/observe)을 담는다. 손상이면 보존 후 두 종류 모두 enforce 로 닫는다 — 지우면 승인 기록이 사라져 새 설치처럼 엄격 모드로 시작한다(장비마다 다시 승인)
 - **`tls-ca-bundle.pem`** — 비밀이 아니다. 백업 확장자 화이트리스트 밖이라 백업에 들어가지 않는다 — 복원 뒤 다시 둘 것. 개인키를 넣지 말 것(인증서가 아닌 블록은 세어 경고한다)
 - **`release-signing-keys.conf`** — 비밀 없음(공개키). 웹 경로로 쓸 수 없는 확장자다. 회수(revoked)는 저장소 키 파일보다 이긴다. 0600/0640 권장

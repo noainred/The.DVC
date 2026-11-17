@@ -125,6 +125,7 @@ export function removeManager(id) {
   return { ok: true };
 }
 
+const CARRY_MOVED_REASON = '접속 주소나 계정이 저장값과 달라 저장된 비밀번호를 쓰지 않습니다 — 비밀번호를 입력해 주세요.';   // 91회차 ⓐ — vcenter/registry.js 와 같은 문구
 /** Test connectivity to an NSX Manager (login). Uses the stored password when omitted. */
 export async function testConnection(body) {
   let entry = body;
@@ -135,6 +136,8 @@ export async function testConnection(body) {
   let savedEntry = null;
   if (!entry.password && entry.id) {
     const saved = loadRegistry().find((m) => m.id === entry.id);
+    // 91회차 ⓐ: 저장 경로(host · username 이 바뀌면 비밀을 버린다)와 같은 판정 — 다른 계정명 · 주소로 저장 비밀번호를 보내지 않는다.
+    if (saved && accessMoved(saved, body, ['host', 'username'])) return { ok: false, reason: CARRY_MOVED_REASON };
     if (saved) { savedEntry = saved; entry = { ...saved, ...body, password: saved.password, host: saved.host }; } // v2.480(3차 감사 S6): 저장 비밀번호를 물려받는 테스트는 host 도 저장값으로 고정 — body.host 만 공격자 IP 로 바꿔 평문 비밀번호를 받는 경로 차단(PDU S-1 과 같은 규칙)
   }
   const usedSaved = !!savedEntry && String(entry.username || '') === String(savedEntry.username || '');

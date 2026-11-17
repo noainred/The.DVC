@@ -28,7 +28,6 @@
  * 설정 파일 `issue-autocreate.json`(비밀 없음) — 손상은 보존하고 기본값(꺼짐)으로 읽고 화면이 loadError 로 말한다(등록부 공용 판정).
  * 저장은 라우트가 관리자 + 전체 범위 + 쓰기 범위 무제한으로 막는다(전 법인 공용 설정).
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
@@ -158,10 +157,14 @@ const loadErr = makeLoadError();
 export function loadAutoCreate() {
   if (cache) return cache;
   const f = fileOf();
-  loadErr.clear();
+  if (!loadErr.readPending()) loadErr.clear();   // 97회차 F5: 읽기 오류 재시도 중에는 지우지 않는다(30초 간격 · 처음 시각 유지)
+  // 97회차 F5: 읽기 단계는 등록부 공용 읽기(util/registryCore.js read) — 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니라 원본을 옮기지 않고 · 캐시하지 않고 ·
+  //   오류(readError)를 세워 저장을 거절한다(409). parse · 형식 실패만 아래 catch(예전과 같다 — 보존본 + 기본값).
+  const rr = loadErr.read(f, (t) => t);
+  if (rr.kind === 'read-error') return defaultAutoCreate();
   try {
-    if (fs.existsSync(f)) {
-      const { value, dropped } = normalizeAutoCreate(JSON.parse(fs.readFileSync(f, 'utf8')), { strict: false });
+    if (rr.kind === 'ok') {
+      const { value, dropped } = normalizeAutoCreate(JSON.parse(rr.value), { strict: false });
       if (dropped) console.warn(`[issues] issue-autocreate.json 의 형식 밖 항목 ${dropped}개를 읽지 않았습니다`);
       cache = value;
       return cache;
@@ -178,6 +181,7 @@ export function loadAutoCreate() {
 export function autoCreateLoadError() { loadAutoCreate(); return loadErr.get()?.reason || null; }
 export function saveAutoCreate(body) {
   const { value } = normalizeAutoCreate(body, { strict: true });
+  loadAutoCreate(); loadErr.assertWritable('파트 장애 자동 등록 설정(issue-autocreate.json)');   // 97회차 F5: 읽기 오류면 던진다(status 409) — 원본을 덮지 않게
   atomicWriteFileSync(fileOf(), JSON.stringify(value, null, 1), { mode: 0o600 });
   cache = value; loadErr.clear();
   return value;

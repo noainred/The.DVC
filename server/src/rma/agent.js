@@ -45,6 +45,7 @@ import { runCommand, DEFAULT_MAX_OUTPUT } from './exec.js';
 import { pathAllowed } from './testRunner.js';  // 파일 경로 realpath 검사(점검과 같은 판정)
 import { buildTest } from './tests.js';
 import { runTest } from './testRunner.js';
+import { envPositive, ENV_INT_MAX } from '../util/envNumber.js'; // 102회차: 별칭(env 객체) 수치도 공용 해석기로
 import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.629: 헤더로 안전한 이름만(비-ASCII 는 fetch 가 요청째 던진다)
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -192,7 +193,8 @@ export async function handleJob(job, { password = PASSWORD, allowCustom = ALLOW_
 }
 
 // ── 계정 브로커(v2.419) — 중앙 /rma-credential 에서 받아 메모리에만 잠시 보관(파일 저장 금지) ──
-const CRED_CACHE_MS = Math.max(0, Number(env.RMA_CRED_CACHE_MS) || 10 * 60_000);
+// 102회차: 예전 `Math.max(0, Number(…) || 10분)` 은 Infinity 면 **받은 비밀을 메모리에 영원히** 두어 중앙에서 바꾼 · 회수한 계정을 계속 썼다(음수는 캐시 꺼짐).
+const CRED_CACHE_MS = envPositive(env.RMA_CRED_CACHE_MS, 10 * 60_000, { max: ENV_INT_MAX });
 const credCache = new Map(); // `${id}|${host}` → { at, secret, name }
 export async function resolveCreds(credentialId, host) {
   const key = `${credentialId}|${String(host).toLowerCase()}`;
@@ -305,7 +307,7 @@ export async function tickSchedule(now = Date.now()) {
 }
 
 // ── 무연결 알림 명령(HostMonitor 'Alerts' 대응 — 현장 셸 명령, portal.env 에서만 설정) ──
-const OFFLINE_MIN = Math.max(0, Number(env.RMA_OFFLINE_MINUTES) || 0);
+const OFFLINE_MIN = envPositive(env.RMA_OFFLINE_MINUTES, 0, { int: false });   // 0 · 빈 값 = 사용 안 함(의미 — 기본값 0) · 102회차: 음수 · Infinity 도 0
 let lastContact = Date.now();
 let offlineFired = false;
 async function offlineCheck() {

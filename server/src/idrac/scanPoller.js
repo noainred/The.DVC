@@ -17,7 +17,8 @@ import fs from 'node:fs';
 import { saveUnsupportedServers } from '../central/unsupportedServers.js'; // v2.495: 중앙 직접 스캔의 미지원 서버 보관
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js'; // v2.478(감사 B5/S12): 원자적 쓰기 + 손상 시 preserveCorrupt — 크래시 1회로 설정이 소실되고 다음 저장이 빈 값으로 덮어쓰는 사고 방지
+import { atomicWriteFileSync } from '../util/atomicWrite.js'; // v2.478(감사 B5/S12): 원자적 쓰기 + 손상 시 보존(96회차부터 공용 판정 util/jsonFileRead.js 가 preserveCorrupt) — 크래시 1회로 설정이 소실되고 다음 저장이 빈 값으로 덮어쓰는 사고 방지
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 96회차 ⓑ: 읽기 오류 ≠ 손상(공용 판정 — 손상만 preserveCorrupt)
 import { scanForIdracs, scanPartialReasons } from './scan.js';
 import { registerScanned, hasHpeInScanReplaceScope } from './registry.js';
 import { pollNow } from './poller.js';
@@ -48,12 +49,29 @@ let progress = null;    // { vcenterId, done, total, foundSoFar, idx, totalVcent
 // 미설정이면 환경변수/기본값(IDRAC_SCAN_INTERVAL_MS, 6h). 0 = 주기 비활성(수동 스캔만).
 const SETTINGS_FILE = path.join(config.configDir, 'idrac-scan-settings.json');
 let settingsCache;
+/*
+ * 96회차 ⓑ(93회차 남긴 것 — 결정 G2 의 형제): 예전 catch 하나는 **읽기 오류**도 손상으로 보고 원본을 `.corrupt` 로 옮겼다(재시작해도 env 기본 주기).
+ *   이제 손상만 옮기고(공용 판정 — 형식 판정은 예전처럼 JSON.parse 만), 읽기 오류면 원본을 두고 캐시하지 않는다(30초마다 다시 읽음 — 그동안의 주기는
+ *   예전처럼 env 기본값이고, 다음 재무장 때 다시 읽힌 값으로 돌아온다) · 주기 저장은 409(scanSettingsWriteRefusal).
+ */
+const _settingsReader = makeJsonFileReader(() => SETTINGS_FILE, { tag: 'idrac-scan-settings', parse: (t) => JSON.parse(t) });
+let _settingsReadError = false;
 function loadScanSettingsFile() {
   if (settingsCache !== undefined) return settingsCache;
-  try { settingsCache = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); }
-  catch (e) { preserveCorrupt(SETTINGS_FILE, e.message); settingsCache = null; } // 파일 없음(ENOENT)이면 preserveCorrupt 는 no-op
+  const r = _settingsReader.read();
+  if (r.kind === 'read-error') { _settingsReadError = true; return null; }   // 캐시하지 않는다
+  _settingsReadError = false;
+  settingsCache = r.kind === 'ok' ? r.value : null;   // 없음 · 손상(보존본으로 옮김)은 예전처럼 null(env 기본)
   return settingsCache;
 }
+/** 96회차 ⓑ: 스캔 주기 설정 파일 읽기 오류 중의 저장 거절 또는 null. */
+export function scanSettingsWriteRefusal() {
+  loadScanSettingsFile();
+  if (!_settingsReadError) return null;
+  return { ok: false, status: 409, code: 'settings-unreadable', readError: true, reason: `iDRAC 스캔 주기 설정 파일(${path.basename(SETTINGS_FILE)})을 읽지 못해 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽습니다).` };
+}
+/** 테스트 전용. */
+export function _resetScanSettingsForTest() { settingsCache = undefined; _settingsReadError = false; _settingsReader.reset(); }
 /**
  * 스캔 주기 클램프 — 0 = 주기 끔(유지), 그 밖은 [10분, 30일].
  * v2.620(SRV2620-05): 예전에는 저장 경로(setIdracScanIntervalMs)만 잘랐고 **로드 경로는 파일 값을 그대로** 썼다 — 손으로 고친 파일·
@@ -73,6 +91,7 @@ function intervalMs() {
 
 /** 주기 변경(웹 설정) — ms 단위(0=주기 끔). 저장 후 타이머 즉시 재적용. */
 export function setIdracScanIntervalMs(ms) {
+  { const no = scanSettingsWriteRefusal(); if (no) return no; }   // 96회차 ⓑ
   const v = clampScanIntervalMs(ms);
   // v2.733(점검 3회차 C4-04): 캐시는 **디스크 쓰기 성공 뒤에만** — 예전에는 먼저 바꿔, '저장 실패' 응답인데 상태 화면 주기는 새 값이고
   //   타이머는 옛 값(재무장 생략)이었다(재시작하면 옛 값).

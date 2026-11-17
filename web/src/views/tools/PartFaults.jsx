@@ -183,6 +183,8 @@ export function PartFaults() {
   return (
     <div style={{ display: 'grid', gap: 12, minWidth: 0 }}>
       {error && <div className="banner warn">갱신 실패 — {String(error?.message || error)}</div>}
+      {/* 96회차(93회차 F4): 설정 파일 읽기 오류 — 스위치 · 보존일은 저장값이 아니라 기본값(꺼짐)이고 저장은 거절된다. */}
+      {data?.settingsUnreadable && <div className="banner warn" style={{ whiteSpace: 'normal' }}>{`파트 장애 설정을 읽지 못했습니다 — ${String(data.settingsUnreadable.reason || '읽기 오류')} 아래 스위치 · 보존일은 저장된 값이 아니라 기본값(꺼짐)입니다.`}</div>}
 
       {/* ① 이 목록을 믿어도 되는가 — 가장 위. */}
       <div className="card" style={{ padding: 12, borderLeft: `3px solid ${stateColor(isEdge ? (pn?.tone || 'muted') : diag.tone)}` }}>
@@ -192,7 +194,7 @@ export function PartFaults() {
             {!isEdge && <span style={{ color: 'var(--text-faint)', fontSize: 12 }}>{lastRunText(poller)}</span>}
             {settings && !isEdge && (
               <label style={{ fontSize: 12, display: 'flex', gap: 6, alignItems: 'center' }} title="켜면 중앙 점검이 다음 주기부터 돕니다. 엣지는 설정 pull 뒤에 따라옵니다.">
-                <input type="checkbox" checked={!!settings.enabled} disabled={saving} onChange={(e) => toggleEnabled(e.target.checked)} /> 기능 켜기
+                <input type="checkbox" checked={!!settings.enabled} disabled={saving || !!data?.settingsUnreadable} onChange={(e) => toggleEnabled(e.target.checked)} /> 기능 켜기
               </label>
             )}
             <button className="btn" onClick={runScan} disabled={busy}>{busy ? '실행 중…' : (isEdge ? '지금 push' : '지금 점검')}</button>

@@ -189,7 +189,14 @@ export default function PeerTrustSettings({ initialData = null, initialKind = 's
   const nextMode = policy.mode === 'enforce' ? 'observe' : 'enforce';
   const changePolicy = () => {
     if (!window.confirm(policyConfirmText(kind, nextMode))) return;
-    act('policy', () => putJson(`${BASE}/policy`, { kind, mode: nextMode }), `${KIND_LABEL[kind]} 정책을 '${MODE_LABEL[nextMode]}' 으로 바꿨습니다.`);
+    // 91회차: 관찰(observe — 약화)로 바꾸는 것은 본인 OTP 를 묻는다(서버가 강제 — 로그인 정책 약화와 같은 등급). 승인 지문만 허용으로 닫는 것은 묻지 않는다.
+    let otp;
+    if (nextMode === 'observe') {
+      otp = window.prompt('관찰 모드로 바꾸려면 본인 OTP 6자리를 입력하세요.', '');
+      if (otp === null) return;
+      otp = String(otp).replace(/\D/g, '').slice(0, 8);
+    }
+    act('policy', () => putJson(`${BASE}/policy`, { kind, mode: nextMode, ...(otp !== undefined ? { otp } : {}) }), `${KIND_LABEL[kind]} 정책을 '${MODE_LABEL[nextMode]}' 으로 바꿨습니다.`);
   };
   const manualErr = (manual.host || manual.port || manual.fp) ? manualIssue({ kind, ...manual }) : null;
   const manualApprove = () => {
