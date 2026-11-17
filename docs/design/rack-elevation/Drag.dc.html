@@ -25,8 +25,9 @@ button,select,input{font:inherit;color:inherit}
 .edit{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 14px;border:1px solid #3b82f6;background:rgba(59,130,246,.12);border-radius:10px}
 .panel{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
 .racks{display:flex;gap:14px;overflow-x:auto;padding:12px}
-.rack{flex:0 0 228px;min-width:0}
-.rk-h{display:flex;align-items:baseline;gap:6px;padding:0 2px 8px}
+.rack{flex:1 0 160px;min-width:0}
+.rk-h{display:flex;align-items:baseline;gap:6px;padding:0 2px 8px;white-space:nowrap;overflow:hidden}
+.rk-h span{flex:0 0 auto}
 .rk-h .nm{font-weight:800;font-size:14px}
 .rk-b{display:flex;gap:4px;border:2px solid #3a4866;border-radius:6px;background:#0a0e17;padding:4px}
 .us{flex:0 0 18px;display:flex;flex-direction:column}
@@ -87,7 +88,7 @@ button,select,input{font:inherit;color:inherit}
                     <div class="{{m.cls}}" style="bottom:{{m.b}}px;height:{{m.h}}px">{{m.label}}</div>
                   </sc-for>
                   <sc-if value="{{r.ghost}}" hint-placeholder-val="{{false}}">
-                    <div class="ghost" style="bottom:118px">
+                    <div class="ghost" style="bottom:118px;left:14px;right:-14px">
                       <span class="mono" style="flex:1">srv-esx-031</span><strong>2U</strong>
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="#ffffff" stroke="#04101f" stroke-width="1.5" aria-hidden="true" style="position:absolute;right:38px;bottom:-12px"><path d="M5 3l14 8-6 1.5L10 19z"/></svg>
                     </div>

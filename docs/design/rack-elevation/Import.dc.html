@@ -39,6 +39,9 @@ table{border-collapse:collapse;width:100%;font-size:11.5px}
 th{text-align:left;padding:5px 8px;background:#0f1626;color:#aebbd0;font-weight:700;border-bottom:1px solid #243049;white-space:nowrap}
 td{padding:5px 8px;border-bottom:1px solid #1f2a40;white-space:nowrap}
 td.n{text-align:right;font-family:"JetBrains Mono",monospace}
+.sg{display:grid;grid-template-columns:minmax(0,1.5fr) 62px 62px minmax(0,1fr);border-bottom:1px solid #1f2a40}
+.sg>span{padding:5px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sg>span.n{text-align:right}
 .r-ok{color:#bbf7d0}.r-chk{color:#fde68a;font-weight:700}.r-man{color:#c3cee0}.r-err{color:#fecaca;font-weight:700}
 .iss{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:baseline;padding:8px 14px;border-top:1px solid #1f2a40;font-size:12px}
 </style>
@@ -103,14 +106,12 @@ td.n{text-align:right;font-family:"JetBrains Mono",monospace}
               </div>
             </div>
             <div style="border:2px solid #3a4866;border-top:0;border-radius:0 0 6px 6px;overflow-x:auto">
-              <table>
-                <thead><tr><th>합계 대조</th><th style="text-align:right">파일</th><th style="text-align:right">계산</th><th>결과</th></tr></thead>
-                <tbody>
-                  <sc-for list="{{r.sums}}" as="s" hint-placeholder-count="5">
-                    <tr><td>{{s.k}}</td><td class="n">{{s.f}}</td><td class="n">{{s.c}}</td><td class="{{s.cls}}">{{s.r}}</td></tr>
-                  </sc-for>
-                </tbody>
-              </table>
+              <div style="min-width:270px;font-size:11.5px">
+                <div class="sg" style="background:#0f1626;color:#aebbd0;font-weight:700"><span>합계 대조</span><span class="n">파일</span><span class="n">계산</span><span>결과</span></div>
+                <sc-for list="{{r.sums}}" as="s" hint-placeholder-count="5">
+                  <div class="sg"><span>{{s.k}}</span><span class="n mono">{{s.f}}</span><span class="n mono">{{s.c}}</span><span class="{{s.cls}}">{{s.r}}</span></div>
+                </sc-for>
+              </div>
             </div>
           </div>
         </sc-for>
@@ -157,7 +158,7 @@ class Component extends DCLogic {
     const RAW = [
       ['A4', 'DVC SERVER(ESX2)', [sw(42, 'Arista 7010T', 'MGMT#3', 'a4m'), sw(40, 'Arista 7280R', 'Leaf#5', 'a4l5'), sw(38, 'Arista 7280R', 'Leaf#6', 'a4l6'),
         ...srv('A4', '가상화서버', 'R740', 'esx-a4-', 1, 16, { 7: 'chk' }), KVM], { use: '90%', pdu: 4 }],
-      ['A5', 'DVC SERVER(ESX1)', [...srv('A5', '가상화서버', 'R740', 'esx-a4-', 17, 20, { 19: 'chk' }).map((d, i) => { d[0] = 1 + i * 2; return d; }), KVM], { pdu: 4 }],
+      ['A5', 'DVC SERVER(ESX1)', [...srv('A5', '가상화서버', 'R740', 'esx-a5-', 17, 20, { 19: 'chk' }).map((d, i) => { d[0] = 1 + i * 2; return d; }), KVM], { pdu: 4 }],
       ['A6', 'DVC SERVER(SBP1)', [sw(42, 'Arista 7010T', 'MGMT#2', 'a6m'), sw(40, 'Arista 7280R', 'Leaf#1', 'a6l1'), sw(38, 'Arista 7280R', 'Leaf#2', 'a6l2'),
         [36, 1, 'SBP 관리 서버 #2  R640/' + sn('sbpm2') + '/sbp-mgmt-02', '', 'ok', 20, 525, 700], [35, 1, 'SBP 관리 서버 #1  R640 (읽지 못함)', '', 'err', 20, 525, 700],
         ...srv('A6', 'SBP 이동 서버', 'R740xd', 'sbp-a6-', 1, 16), KVM], { pdu: 4 }],

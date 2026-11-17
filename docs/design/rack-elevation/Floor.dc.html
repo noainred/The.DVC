@@ -81,7 +81,7 @@ button,select,input{font:inherit;color:inherit}
     </div>
 
     <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start">
-      <div class="panel" style="flex:1 1 400px;max-width:640px">
+      <div class="panel" style="flex:0 1 638px;min-width:0">
         <div class="ph"><strong>평면도</strong><span class="dim">랙 20 · 2줄 · 위에서 본 모습</span><span class="dim" style="margin-left:auto;font-size:11.5px">랙을 누르면 오른쪽에 그 랙과 양옆 랙의 실장도</span></div>
         <div style="overflow-x:auto">
           <div class="plan">
@@ -165,8 +165,8 @@ class Component extends DCLogic {
         let u = 3;
         while (u < top) {
           const size = kind === 'net' ? 1 : kind === 'st' ? (rnd(2) ? 4 : 2) : (rnd(5) === 0 ? 1 : 2);
-          const q = rnd(60);
-          const s = q === 0 ? 'crit' : q < 4 ? 'warn' : q === 5 ? 'unk' : 'ok';
+          const q = rnd(400);
+          const s = q < 2 ? 'crit' : q < 8 ? 'warn' : q < 10 ? 'unk' : 'ok';
           list.push([u, size, kind, (kind === 'sv' ? 'srv-' : kind === 'st' ? 'stor-' : 'sw-') + row.toLowerCase() + String(i + 1).padStart(2, '0') + '-u' + String(u).padStart(2, '0'), s]);
           u += size + (kind === 'net' ? 1 : 0);
         }
