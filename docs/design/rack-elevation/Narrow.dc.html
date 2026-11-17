@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>랙 실장도 — 400px</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+button,select,input{font:inherit;color:inherit}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.dim{color:#8b9bb4}
+.tb{display:flex;align-items:center;gap:10px;height:44px;padding:0 12px;background:#0f1626;border-bottom:1px solid #1f2a40}
+.logo{display:inline-flex;align-items:center;gap:8px;font-weight:700;white-space:nowrap}
+.logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-weight:800;color:#04101f}
+.sel{height:44px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#0f1626;min-width:0;box-sizing:border-box}
+.btn{height:44px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#141b2d;font-weight:600;font-size:13px;cursor:pointer;white-space:nowrap}
+.btn.pri{background:#3b82f6;border-color:#3b82f6;color:#04101f}
+.lab{font-size:11px;color:#8b9bb4;font-weight:600}
+.chips{display:flex;gap:6px;overflow-x:auto;white-space:nowrap}
+.chip{flex:0 0 auto;height:44px;padding:0 12px;border-radius:999px;border:1px solid #243049;background:#0f1626;color:#aebbd0;font-weight:600;font-size:12px;cursor:pointer}
+.chip.on{border-color:#3b82f6;background:rgba(59,130,246,.2);color:#e6edf6}
+.rk-b{display:flex;gap:4px;border:2px solid #3a4866;border-radius:6px;background:#0a0e17;padding:4px}
+.us{flex:0 0 18px;display:flex;flex-direction:column}
+.us span{height:16px;line-height:16px;font-size:9px;color:#5d6b85;text-align:right;font-family:"JetBrains Mono",monospace}
+.slots{position:relative;flex:1;min-width:0;height:672px;background:repeating-linear-gradient(to bottom,#0f1626 0 15px,#1f2a40 15px 16px)}
+.dev{position:absolute;left:1px;right:1px;box-sizing:border-box;border-radius:3px;display:flex;align-items:center;gap:8px;padding:0 8px;font-size:10.5px;line-height:1;text-align:left;cursor:pointer;overflow:hidden;white-space:nowrap}
+.dev .nm{font-family:"JetBrains Mono",monospace;font-weight:500;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1}
+.dev .vl{font-weight:700;flex:0 0 auto}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:#141b2d;border-top:1px solid #243049;border-radius:14px 14px 0 0;box-shadow:0 -8px 24px rgba(0,0,0,.5);padding:12px 14px 14px;display:flex;flex-direction:column;gap:10px}
+.tag{display:inline-flex;align-items:center;height:18px;padding:0 6px;border-radius:5px;font-size:10px;font-weight:700;white-space:nowrap;border:1px solid #243049;color:#c3cee0;flex:0 0 auto}
+</style>
+</helmet>
+<div style="width:400px;height:1010px;position:relative;overflow:hidden;background:#0a0e17;box-sizing:border-box;display:flex;flex-direction:column">
+  <div class="tb">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8b9bb4" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    <span class="logo"><span class="v">D</span>랙 실장도</span>
+    <span class="dim" style="margin-left:auto;font-size:12px">jhpark</span>
+  </div>
+
+  <div style="padding:10px 12px;display:flex;flex-direction:column;gap:10px;flex:1;min-height:0">
+    <div style="display:flex;gap:8px">
+      <label for="n-corp" style="position:absolute;left:-9999px">법인</label>
+      <select id="n-corp" class="sel" style="flex:1"><option>KR-SEL · 전산실 A</option></select>
+      <label for="n-ov" style="position:absolute;left:-9999px">겹쳐 보기</label>
+      <select id="n-ov" class="sel" style="flex:0 0 110px"><option>상태</option><option>종류</option><option>온도</option><option>전력</option></select>
+    </div>
+    <div class="chips" aria-label="랙">
+      <button type="button" class="chip">A-01</button><button type="button" class="chip">A-02</button><button type="button" class="chip on">A-03</button><button type="button" class="chip">A-04</button><button type="button" class="chip">A-05</button><button type="button" class="chip">A-06</button><button type="button" class="chip">미배치 14</button>
+    </div>
+    <div style="display:flex;align-items:baseline;gap:8px;font-size:12px">
+      <strong class="mono" style="font-size:15px">A-03</strong><span class="dim">31 / 42U</span><span class="dim">전력 9.6 kW (9대 중 8대)</span><span class="dim" style="margin-left:auto">한 번에 랙 하나</span>
+    </div>
+    <div class="rk-b">
+      <div class="us"><sc-for list="{{us}}" as="u" hint-placeholder-count="42"><span>{{u}}</span></sc-for></div>
+      <div class="slots">
+        <sc-for list="{{devs}}" as="d" hint-placeholder-count="9">
+          <button type="button" class="dev" style="bottom:{{d.b}}px;height:{{d.h}}px;background:{{d.bg}};border:1px solid {{d.bd}};color:{{d.fg}};outline:{{d.ol}}"><span class="nm">{{d.name}}</span><span class="vl">{{d.val}}</span></button>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+
+  <div class="sheet" role="dialog" aria-label="장비 상세">
+    <div style="display:flex;align-items:center;gap:8px"><span class="tag">서버</span><strong class="mono" style="font-size:14px">srv-esx-018</strong><span style="margin-left:auto;color:#ffffff;background:#b91c1c;border-radius:5px;padding:2px 8px;font-size:11px;font-weight:700">장애</span></div>
+    <div class="dim" style="font-size:12px">PowerEdge R740 · A-03 · U9–10 (2U) · 흡기 37°C · 412 W</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end">
+      <div style="display:flex;flex-direction:column;gap:4px;flex:1 1 90px;min-width:0"><label class="lab" for="n-rack">랙</label><select id="n-rack" class="sel"><option>A-03</option></select></div>
+      <div style="display:flex;flex-direction:column;gap:4px;flex:1 1 70px;min-width:0"><label class="lab" for="n-u">시작 U</label><input id="n-u" class="sel mono" value="9"></div>
+      <button type="button" class="btn pri">옮기기</button>
+    </div>
+    <div class="dim" style="font-size:11.5px">좁은 화면에서는 끌어 놓기 대신 이 칸으로 옮깁니다(길게 눌러 끌기는 스크롤과 겹쳐 넣지 않음).</div>
+    <a href="#" style="min-height:24px">서버 분석에서 보기 ›</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1010}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const U = 16;
+    const HATCH = 'repeating-linear-gradient(45deg,#1a2236 0 5px,#2b3852 5px 10px)';
+    const C = {
+      ok: ['rgba(34,197,94,.14)', '#22c55e', '#bbf7d0', '정상'],
+      crit: ['rgba(239,68,68,.5)', '#ef4444', '#ffffff', '장애'],
+      unk: [HATCH, '#8b9bb4', '#e6edf6', '못 읽음'],
+      none: ['#141b2d', '#2b3852', '#8b9bb4', '감시 안 함'],
+    };
+    const list = [
+      [3, 2, 'srv-esx-015', 'ok'], [5, 2, 'srv-esx-016', 'ok'], [7, 2, 'srv-esx-017', 'ok'], [9, 2, 'srv-esx-018', 'crit'],
+      [11, 2, 'srv-esx-019', 'ok'], [13, 2, 'srv-esx-020', 'ok'], [17, 6, 'srv-bm-ai-01', 'ok'], [24, 6, 'srv-bm-ai-02', 'unk'],
+      [42, 1, '패치패널 A03-1', 'none'],
+    ];
+    const devs = list.map(([u, size, name, s]) => ({
+      name, val: C[s][3], b: (u - 1) * U, h: size * U - 1, bg: C[s][0], bd: C[s][1], fg: C[s][2],
+      ol: name === 'srv-esx-018' ? '2px solid #ffffff' : 'none',
+    }));
+    return { devs, us: Array.from({ length: 42 }, (_, i) => 42 - i) };
+  }
+}
+</script>
+</body>
+</html>

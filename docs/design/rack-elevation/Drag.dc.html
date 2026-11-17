@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>랙 실장도 — 끌어 놓기 편집</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+button,select,input{font:inherit;color:inherit}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.dim{color:#8b9bb4}
+.tb{display:flex;align-items:center;gap:12px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #1f2a40}
+.logo{display:inline-flex;align-items:center;gap:8px;font-weight:700;white-space:nowrap}
+.logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-weight:800;color:#04101f}
+.sel{height:32px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#0f1626;min-width:0}
+.btn{height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#141b2d;font-weight:600;font-size:12px;cursor:pointer;white-space:nowrap}
+.btn.pri{background:#3b82f6;border-color:#3b82f6;color:#04101f}
+.lab{font-size:11px;color:#8b9bb4;font-weight:600}
+.edit{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 14px;border:1px solid #3b82f6;background:rgba(59,130,246,.12);border-radius:10px}
+.panel{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.racks{display:flex;gap:14px;overflow-x:auto;padding:12px}
+.rack{flex:0 0 228px;min-width:0}
+.rk-h{display:flex;align-items:baseline;gap:6px;padding:0 2px 8px}
+.rk-h .nm{font-weight:800;font-size:14px}
+.rk-b{display:flex;gap:4px;border:2px solid #3a4866;border-radius:6px;background:#0a0e17;padding:4px}
+.us{flex:0 0 18px;display:flex;flex-direction:column}
+.us span{height:16px;line-height:16px;font-size:9px;color:#5d6b85;text-align:right;font-family:"JetBrains Mono",monospace}
+.slots{position:relative;flex:1;min-width:0;height:672px;background:repeating-linear-gradient(to bottom,#0f1626 0 15px,#1f2a40 15px 16px)}
+.dev{position:absolute;left:1px;right:1px;box-sizing:border-box;border-radius:3px;display:flex;align-items:center;gap:6px;padding:0 6px;font-size:10px;line-height:1;text-align:left;cursor:grab;overflow:hidden;white-space:nowrap}
+.dev .nm{font-family:"JetBrains Mono",monospace;font-weight:500;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1}
+.dev .vl{font-weight:700;flex:0 0 auto}
+.mk{position:absolute;left:1px;right:1px;box-sizing:border-box;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;white-space:nowrap;pointer-events:none}
+.mk.old{border:1px dotted #8b9bb4;color:#8b9bb4;background:transparent;font-weight:500}
+.mk.drop{border:2px dashed #22c55e;background:rgba(34,197,94,.2);color:#bbf7d0}
+.mk.bad{border:2px dashed #ef4444;background:rgba(239,68,68,.3);color:#ffffff}
+.ghost{position:absolute;left:26px;right:-30px;height:31px;box-sizing:border-box;border-radius:3px;border:1px solid #3b82f6;background:#1d3a6e;color:#ffffff;display:flex;align-items:center;gap:6px;padding:0 8px;font-size:10.5px;box-shadow:0 8px 24px rgba(0,0,0,.6);z-index:3}
+.un{display:flex;align-items:center;gap:8px;padding:8px 10px;border-top:1px solid #1f2a40;min-width:0;min-height:44px;box-sizing:border-box}
+.un .b{min-width:0;flex:1}
+.un .t{font-family:"JetBrains Mono",monospace;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.un .r{font-size:11px;color:#8b9bb4}
+.grip{flex:0 0 auto;color:#5d6b85;cursor:grab}
+.tag{display:inline-flex;align-items:center;height:18px;padding:0 6px;border-radius:5px;font-size:10px;font-weight:700;white-space:nowrap;border:1px solid #243049;color:#c3cee0;flex:0 0 auto}
+.chg{display:flex;gap:8px;align-items:flex-start;padding:8px 14px;border-top:1px solid #1f2a40;font-size:12px}
+.chg .x{margin-left:auto;background:none;border:0;color:#93c5fd;cursor:pointer;font-size:11px;white-space:nowrap;min-height:24px}
+.lg{display:flex;flex-wrap:wrap;gap:14px;padding:8px 14px;border-top:1px solid #1f2a40;font-size:11.5px;color:#aebbd0}
+.lg .it{display:inline-flex;align-items:center;gap:6px}
+.lg .sw{width:18px;height:12px;border-radius:3px;box-sizing:border-box}
+</style>
+</helmet>
+<div style="min-height:1010px;background:#0a0e17;box-sizing:border-box">
+  <div class="tb">
+    <span class="logo"><span class="v">D</span>THE DAVINCI</span>
+    <span class="dim">특수 기능 › 하드웨어 ›</span><strong>랙 실장도</strong>
+    <span class="dim" style="margin-left:auto;font-size:12px">jhpark</span>
+  </div>
+
+  <div style="padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+    <div class="edit">
+      <strong>배치 편집 중</strong>
+      <span>KR-SEL · 전산실 A</span>
+      <span class="dim">저장하기 전에는 다른 사람 화면에 반영되지 않습니다</span>
+      <span style="margin-left:auto;font-weight:700">변경 3건</span>
+      <button type="button" class="btn">모두 되돌리기</button>
+      <button type="button" class="btn">편집 끝내기</button>
+      <button type="button" class="btn pri">저장</button>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start">
+      <div class="panel" style="flex:999 1 620px">
+        <div class="racks">
+          <sc-for list="{{racks}}" as="r" hint-placeholder-count="6">
+            <div class="rack">
+              <div class="rk-h"><span class="nm mono">{{r.id}}</span><span class="dim" style="font-size:11px">{{r.used}} / 42U</span><span class="dim" style="font-size:11px;margin-left:auto">{{r.role}}</span></div>
+              <div class="rk-b" style="border-color:{{r.bc}}">
+                <div class="us"><sc-for list="{{us}}" as="u" hint-placeholder-count="42"><span>{{u}}</span></sc-for></div>
+                <div class="slots">
+                  <sc-for list="{{r.devs}}" as="d" hint-placeholder-count="8">
+                    <button type="button" class="dev" style="bottom:{{d.b}}px;height:{{d.h}}px;background:{{d.bg}};border:1px solid {{d.bd}};color:{{d.fg}};outline:{{d.ol}}"><span class="nm">{{d.name}}</span><span class="vl">{{d.val}}</span></button>
+                  </sc-for>
+                  <sc-for list="{{r.marks}}" as="m" hint-placeholder-count="1">
+                    <div class="{{m.cls}}" style="bottom:{{m.b}}px;height:{{m.h}}px">{{m.label}}</div>
+                  </sc-for>
+                  <sc-if value="{{r.ghost}}" hint-placeholder-val="{{false}}">
+                    <div class="ghost" style="bottom:118px">
+                      <span class="mono" style="flex:1">srv-esx-031</span><strong>2U</strong>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="#ffffff" stroke="#04101f" stroke-width="1.5" aria-hidden="true" style="position:absolute;right:38px;bottom:-12px"><path d="M5 3l14 8-6 1.5L10 19z"/></svg>
+                    </div>
+                  </sc-if>
+                </div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+        <div class="lg">
+          <span class="it"><span class="sw" style="border:2px dashed #22c55e;background:rgba(34,197,94,.2)"></span>놓을 수 있는 자리</span>
+          <span class="it"><span class="sw" style="border:2px dashed #ef4444;background:rgba(239,68,68,.3)"></span>다른 장비와 겹침 — 놓을 수 없음</span>
+          <span class="it"><span class="sw" style="border:2px dashed #fcd34d"></span>이번 편집에서 옮긴 장비</span>
+          <span class="it"><span class="sw" style="border:1px dotted #8b9bb4"></span>원래 자리</span>
+          <span class="it" style="margin-left:auto">키보드: 장비 선택 후 ↑ ↓ 1U 이동 · ← → 옆 랙 · Enter 놓기 · Esc 취소</span>
+        </div>
+      </div>
+
+      <div style="flex:1 1 300px;min-width:0;display:flex;flex-direction:column;gap:12px">
+        <div class="panel">
+          <div style="display:flex;align-items:center;gap:8px;padding:10px 14px"><strong>미배치 장비</strong><span class="dim">13</span><span class="dim" style="margin-left:auto;font-size:11px">랙으로 끌어 놓기</span></div>
+          <div class="un" style="opacity:.4"><svg class="grip" width="12" height="16" viewBox="0 0 12 16" fill="currentColor" aria-hidden="true"><circle cx="3" cy="3" r="1.5"/><circle cx="9" cy="3" r="1.5"/><circle cx="3" cy="8" r="1.5"/><circle cx="9" cy="8" r="1.5"/><circle cx="3" cy="13" r="1.5"/><circle cx="9" cy="13" r="1.5"/></svg><span class="tag">서버</span><div class="b"><div class="t">srv-esx-031</div><div class="r">R750 · 2U · 끄는 중</div></div></div>
+          <div class="un"><svg class="grip" width="12" height="16" viewBox="0 0 12 16" fill="currentColor" aria-hidden="true"><circle cx="3" cy="3" r="1.5"/><circle cx="9" cy="3" r="1.5"/><circle cx="3" cy="8" r="1.5"/><circle cx="9" cy="8" r="1.5"/><circle cx="3" cy="13" r="1.5"/><circle cx="9" cy="13" r="1.5"/></svg><span class="tag">서버</span><div class="b"><div class="t">srv-esx-032</div><div class="r">R750 · 2U</div></div></div>
+          <div class="un"><svg class="grip" width="12" height="16" viewBox="0 0 12 16" fill="currentColor" aria-hidden="true"><circle cx="3" cy="3" r="1.5"/><circle cx="9" cy="3" r="1.5"/><circle cx="3" cy="8" r="1.5"/><circle cx="9" cy="8" r="1.5"/><circle cx="3" cy="13" r="1.5"/><circle cx="9" cy="13" r="1.5"/></svg><span class="tag">서버</span><div class="b"><div class="t">srv-bm-ai-03</div><div class="r">XE9680 · 6U</div></div></div>
+          <div class="un"><svg class="grip" width="12" height="16" viewBox="0 0 12 16" fill="currentColor" aria-hidden="true"><circle cx="3" cy="3" r="1.5"/><circle cx="9" cy="3" r="1.5"/><circle cx="3" cy="8" r="1.5"/><circle cx="9" cy="8" r="1.5"/><circle cx="3" cy="13" r="1.5"/><circle cx="9" cy="13" r="1.5"/></svg><span class="tag">스토리지</span><div class="b"><div class="t">unity-sel-02</div><div class="r">Unity XT 480 · 높이 모름 — 놓을 때 입력</div></div></div>
+          <div class="un"><button type="button" class="btn" style="flex:1">9대 더 보기</button><button type="button" class="btn">+ 수동 장비 추가</button></div>
+        </div>
+
+        <div class="panel">
+          <div style="padding:10px 14px;display:flex;gap:8px;align-items:center"><strong>이번 편집의 변경</strong><span class="dim">3건 · 저장 전</span></div>
+          <div class="chg"><div><span class="mono">srv-esx-014</span><div class="dim">A-02 U21–22 → A-03 U15–16</div></div><button type="button" class="x">되돌리기</button></div>
+          <div class="chg"><div><span class="mono">srv-bm-010</span><div class="dim">A-05 U23 → A-06 U5</div></div><button type="button" class="x">되돌리기</button></div>
+          <div class="chg"><div><span class="mono">san-b-02</span><div class="dim">미배치 → A-01 U28 (새 배치)</div></div><button type="button" class="x">되돌리기</button></div>
+        </div>
+
+        <div class="panel" style="padding:12px 14px;display:flex;flex-direction:column;gap:8px">
+          <strong>끌지 않고 위치 지정</strong>
+          <span class="dim" style="font-size:11.5px">터치 화면 · 키보드에서 같은 일을 합니다. 선택한 장비: <span class="mono">srv-esx-031</span></span>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end">
+            <div style="display:flex;flex-direction:column;gap:4px;flex:1 1 90px;min-width:0"><label class="lab" for="f-rack">랙</label><select id="f-rack" class="sel"><option>A-06</option></select></div>
+            <div style="display:flex;flex-direction:column;gap:4px;flex:1 1 70px;min-width:0"><label class="lab" for="f-u">시작 U</label><input id="f-u" class="sel mono" value="8"></div>
+            <div style="display:flex;flex-direction:column;gap:4px;flex:1 1 70px;min-width:0"><label class="lab" for="f-h">높이(U)</label><input id="f-h" class="sel mono" value="2"></div>
+            <button type="button" class="btn">놓기</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"showConflict":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":1010}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const bad = !!this.props.showConflict;
+    const U = 16;
+    const KIND = {
+      sv: ['rgba(59,130,246,.24)', '#3b82f6', '#dbeafe'],
+      st: ['rgba(52,224,180,.18)', '#2dd4bf', '#ccfbf1'],
+      san: ['rgba(168,85,247,.26)', '#a855f7', '#ead5ff'],
+      net: ['rgba(34,211,238,.16)', '#22d3ee', '#cffafe'],
+      etc: ['#1a2236', '#3a4866', '#aebbd0'],
+    };
+    const sv2 = (u0, n, pre, i0) => Array.from({ length: n }, (_, i) => [u0 + i * 2, 2, 'sv', pre + String(i0 + i).padStart(3, '0')]);
+    // [시작 U, 높이, 종류, 이름, 옮김 여부]
+    const RAW = [
+      ['A-01', '네트워크 · SAN', [
+        [42, 1, 'etc', '패치패널 A01-1'], [41, 1, 'etc', '패치패널 A01-2'], [39, 1, 'net', 'sw-core-01'], [38, 1, 'net', 'sw-core-02'],
+        [36, 1, 'net', 'sw-leaf-01'], [35, 1, 'net', 'sw-leaf-02'], [33, 1, 'net', 'sw-mgmt-01'],
+        [30, 1, 'san', 'san-a-01'], [29, 1, 'san', 'san-b-01'], [28, 1, 'san', 'san-b-02', 1],
+        [22, 1, 'etc', 'KVM 콘솔'], [1, 4, 'etc', 'UPS 6kVA'],
+      ], []],
+      ['A-02', 'VM 호스트', [
+        ...sv2(3, 9, 'srv-esx-', 5), [25, 1, 'sv', 'srv-mgmt-01'], [26, 1, 'sv', 'srv-mgmt-02'], [42, 1, 'etc', '패치패널 A02-1'],
+      ], [[21, 2, 'old', '원래 자리']]],
+      ['A-03', 'VM 호스트 · GPU', [
+        ...sv2(3, 6, 'srv-esx-', 15), [15, 2, 'sv', 'srv-esx-014', 1], [17, 6, 'sv', 'srv-bm-ai-01'], [24, 6, 'sv', 'srv-bm-ai-02'], [42, 1, 'etc', '패치패널 A03-1'],
+      ], []],
+      ['A-04', '스토리지', [
+        [3, 2, 'st', 'unity-sel-01 DPE'], [5, 2, 'st', 'unity-sel-01 DAE1'], [7, 2, 'st', 'unity-sel-01 DAE2'], [10, 2, 'st', 'pstore-sel-01'],
+        [14, 4, 'st', 'isi-sel-01 n1-4'], [18, 4, 'st', 'isi-sel-01 n5-8'], [30, 2, 'sv', 'srv-bkp-01'], [32, 2, 'sv', 'srv-bkp-02'],
+      ], []],
+      ['A-05', '베어메탈', [
+        ...sv2(5, 7, 'srv-bm-', 1), [21, 1, 'sv', 'srv-bm-008'], [22, 1, 'sv', 'srv-bm-009'],
+      ], [[23, 1, 'old', '원래 자리']]],
+      ['A-06', '예비', [
+        [42, 1, 'etc', '패치패널 A06-1'], [3, 2, 'sv', 'srv-esx-021'], [5, 1, 'sv', 'srv-bm-010', 1],
+      ], bad ? [[4, 2, 'bad', 'U4–5 겹침 — 놓을 수 없음']] : [[8, 2, 'drop', 'U8–9 에 놓기']]],
+    ];
+    const racks = RAW.map(([id, role, list, marks]) => {
+      let used = 0;
+      const devs = list.map(([u, size, kind, name, moved]) => {
+        used += size;
+        const c = KIND[kind];
+        return { name, val: size + 'U', b: (u - 1) * U, h: size * U - 1, bg: c[0], bd: c[1], fg: c[2], ol: moved ? '2px dashed #fcd34d' : 'none' };
+      });
+      return {
+        id, role, used, devs, ghost: id === 'A-06', bc: id === 'A-06' ? (bad ? '#ef4444' : '#22c55e') : '#3a4866',
+        marks: marks.map(([u, size, cls, label]) => ({ cls: 'mk ' + cls, label, b: (u - 1) * U, h: size * U - 1 })),
+      };
+    });
+    return { racks, us: Array.from({ length: 42 }, (_, i) => 42 - i) };
+  }
+}
+</script>
+</body>
+</html>

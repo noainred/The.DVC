@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>랙 실장도 — 조회</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+button,select,input{font:inherit;color:inherit}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.dim{color:#8b9bb4}
+.tb{display:flex;align-items:center;gap:12px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #1f2a40}
+.logo{display:inline-flex;align-items:center;gap:8px;font-weight:700;white-space:nowrap}
+.logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-weight:800;color:#04101f}
+.bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.sel{height:32px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#0f1626}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{height:30px;padding:0 12px;border:0;background:transparent;color:#aebbd0;font-weight:600;font-size:12px;cursor:pointer}
+.seg button.on{background:rgba(59,130,246,.22);color:#e6edf6}
+.btn{height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#141b2d;font-weight:600;font-size:12px;cursor:pointer;white-space:nowrap}
+.btn.pri{background:#3b82f6;border-color:#3b82f6;color:#04101f}
+.lab{font-size:11px;color:#8b9bb4;font-weight:600}
+.tiles{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
+.tile{background:#141b2d;border:1px solid #243049;border-radius:10px;padding:10px 12px;min-width:0}
+.tile .k{font-size:11px;color:#8b9bb4;font-weight:600}
+.tile .n{font-size:20px;font-weight:800;margin-top:2px}
+.tile .s{font-size:11px;color:#8b9bb4}
+.panel{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.racks{display:flex;gap:14px;overflow-x:auto;padding:12px}
+.rack{flex:0 0 228px;min-width:0}
+.rk-h{display:flex;align-items:baseline;gap:6px;padding:0 2px 6px}
+.rk-h .nm{font-weight:800;font-size:14px}
+.rk-m{display:flex;gap:8px;font-size:10.5px;color:#8b9bb4;padding:0 2px 6px;white-space:nowrap}
+.rk-b{display:flex;gap:4px;border:2px solid #3a4866;border-radius:6px;background:#0a0e17;padding:4px}
+.us{flex:0 0 18px;display:flex;flex-direction:column}
+.us span{height:16px;line-height:16px;font-size:9px;color:#5d6b85;text-align:right;font-family:"JetBrains Mono",monospace}
+.slots{position:relative;flex:1;min-width:0;height:672px;background:repeating-linear-gradient(to bottom,#0f1626 0 15px,#1f2a40 15px 16px)}
+.dev{position:absolute;left:1px;right:1px;box-sizing:border-box;border-radius:3px;display:flex;align-items:center;gap:6px;padding:0 6px;font-size:10px;line-height:1;text-align:left;cursor:pointer;overflow:hidden;white-space:nowrap}
+.dev .nm{font-family:"JetBrains Mono",monospace;font-weight:500;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1}
+.dev .vl{font-weight:700;flex:0 0 auto}
+.pdu{flex:0 0 8px;position:relative;background:#141b2d;border:1px solid #2b3852;border-radius:2px}
+.pdu i{position:absolute;left:0;right:0;bottom:0;background:#f59e0b;opacity:.7}
+.lg{display:flex;flex-wrap:wrap;gap:12px;padding:8px 14px;border-top:1px solid #1f2a40;font-size:11.5px;color:#aebbd0}
+.lg .it{display:inline-flex;align-items:center;gap:6px}
+.lg .sw{width:18px;height:12px;border-radius:3px;box-sizing:border-box}
+.dl{display:grid;grid-template-columns:76px minmax(0,1fr);gap:6px 10px;font-size:12px}
+.dl dt{color:#8b9bb4}.dl dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.warn{border:1px solid #f59e0b;background:rgba(245,158,11,.12);border-radius:8px;padding:8px 10px;font-size:12px;color:#fde68a}
+.un{display:flex;align-items:center;gap:8px;padding:8px 10px;border-top:1px solid #1f2a40;min-width:0}
+.un .b{min-width:0;flex:1}
+.un .t{font-family:"JetBrains Mono",monospace;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.un .r{font-size:11px;color:#8b9bb4}
+.tag{display:inline-flex;align-items:center;height:18px;padding:0 6px;border-radius:5px;font-size:10px;font-weight:700;white-space:nowrap;border:1px solid #243049;color:#c3cee0;flex:0 0 auto}
+</style>
+</helmet>
+<div style="min-height:1010px;background:#0a0e17;box-sizing:border-box">
+  <div class="tb">
+    <span class="logo"><span class="v">D</span>THE DAVINCI</span>
+    <span class="dim">특수 기능 › 하드웨어 ›</span><strong>랙 실장도</strong>
+    <span class="dim" style="margin-left:auto;font-size:12px">jhpark</span>
+  </div>
+
+  <div style="padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+    <div class="bar">
+      <label class="lab" for="corp">법인</label>
+      <select id="corp" class="sel"><option>KR-SEL (서울)</option><option>PL-WAW (폴란드)</option><option>US-EST (미국 동부)</option></select>
+      <span class="lab">전산실</span>
+      <div class="seg"><button type="button" class="on">전산실 A · 2층</button><button type="button">전산실 B · 지하 1층</button></div>
+      <span class="lab">겹쳐 보기</span>
+      <div class="seg">
+        <sc-for list="{{modes}}" as="m" hint-placeholder-count="4"><button type="button" class="{{m.cls}}" onClick="{{m.pick}}">{{m.label}}</button></sc-for>
+      </div>
+      <div class="seg"><button type="button" class="on">전면</button><button type="button">후면</button></div>
+      <label for="q" style="position:absolute;left:-9999px">장비 찾기</label>
+      <input id="q" class="sel" placeholder="이름 · 시리얼로 찾기" style="flex:1 1 160px;min-width:120px">
+      <button type="button" class="btn">가져오기</button>
+      <button type="button" class="btn">내보내기</button>
+      <button type="button" class="btn pri">배치 편집</button>
+    </div>
+
+    <div class="tiles">
+      <div class="tile"><div class="k">랙</div><div class="n">6</div><div class="s">전산실 A</div></div>
+      <div class="tile"><div class="k">사용 U</div><div class="n">{{usedU}} <span class="s">/ 252U</span></div><div class="s">빈 자리 {{freeU}}U</div></div>
+      <div class="tile"><div class="k">배치된 장비</div><div class="n">{{placed}}</div><div class="s">감시 안 함 {{noneN}}대 포함</div></div>
+      <div class="tile"><div class="k">미배치</div><div class="n" style="color:#fcd34d">14</div><div class="s">등록됐지만 위치 없음</div></div>
+      <div class="tile"><div class="k">위치 불일치</div><div class="n" style="color:#fcd34d">3</div><div class="s">원장 ≠ iDRAC 값</div></div>
+      <div class="tile"><div class="k">상태 못 읽음</div><div class="n">{{unkN}}</div><div class="s">정상 · 장애 어디에도 넣지 않음</div></div>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start">
+      <div class="panel" style="flex:999 1 620px">
+        <div class="racks">
+          <sc-for list="{{racks}}" as="r" hint-placeholder-count="6">
+            <div class="rack">
+              <div class="rk-h"><span class="nm mono">{{r.id}}</span><span class="dim" style="font-size:11px">{{r.used}} / 42U</span><span class="dim" style="font-size:11px;margin-left:auto">{{r.role}}</span></div>
+              <div class="rk-m"><span>전력 {{r.kw}}</span><span>흡기 최고 {{r.tmax}}</span></div>
+              <div class="rk-b">
+                <div class="us"><sc-for list="{{us}}" as="u" hint-placeholder-count="42"><span>{{u}}</span></sc-for></div>
+                <div class="slots">
+                  <sc-for list="{{r.devs}}" as="d" hint-placeholder-count="8">
+                    <button type="button" class="dev" title="{{d.tip}}" onClick="{{d.pick}}" style="bottom:{{d.b}}px;height:{{d.h}}px;background:{{d.bg}};border:1px solid {{d.bd}};color:{{d.fg}};outline:{{d.ol}}"><span class="nm">{{d.name}}</span><span class="vl">{{d.val}}</span></button>
+                  </sc-for>
+                </div>
+                <div class="pdu" title="PDU A"><i style="height:{{r.pa}}%"></i></div>
+                <div class="pdu" title="PDU B"><i style="height:{{r.pb}}%"></i></div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+        <div class="lg">
+          <sc-for list="{{legend}}" as="l" hint-placeholder-count="5"><span class="it"><span class="sw" style="background:{{l.bg}};border:1px solid {{l.bd}}"></span>{{l.label}}</span></sc-for>
+          <span class="it" style="margin-left:auto"><span class="sw" style="background:#f59e0b;opacity:.7;width:8px"></span>랙 옆 띠 = PDU A · B 부하</span>
+        </div>
+      </div>
+
+      <div style="flex:1 1 300px;min-width:0;display:flex;flex-direction:column;gap:12px">
+        <div class="panel" style="padding:12px 14px;display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;align-items:center;gap:8px"><span class="tag">{{sel.kindL}}</span><strong class="mono" style="font-size:14px;overflow-wrap:anywhere">{{sel.name}}</strong></div>
+          <dl class="dl" style="margin:0">
+            <dt>위치</dt><dd class="mono">{{sel.pos}}</dd>
+            <dt>모델</dt><dd>{{sel.model}}</dd>
+            <dt>시리얼</dt><dd class="mono">{{sel.serial}}</dd>
+            <dt>위치 출처</dt><dd>{{sel.srcL}}</dd>
+            <dt>상태</dt><dd>{{sel.statL}}</dd>
+            <dt>흡기 온도</dt><dd>{{sel.tempL}}</dd>
+            <dt>전력</dt><dd>{{sel.wattL}}</dd>
+          </dl>
+          <sc-if value="{{sel.mis}}" hint-placeholder-val="{{true}}">
+            <div class="warn"><strong>위치 불일치</strong> — 원장은 {{sel.pos}}, iDRAC 에 적힌 값은 A-03 · U17 입니다. 어느 쪽이 맞는지 포탈은 판단하지 않습니다.
+              <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px"><button type="button" class="btn">원장 유지</button><button type="button" class="btn">iDRAC 값으로 옮기기</button></div>
+            </div>
+          </sc-if>
+          <a href="#">{{sel.linkL}}</a>
+        </div>
+
+        <div class="panel">
+          <div style="display:flex;align-items:center;gap:8px;padding:10px 14px"><strong>미배치 장비</strong><span class="dim">14</span><span class="dim" style="margin-left:auto;font-size:11px">편집에서 랙으로 끌어 놓기</span></div>
+          <div class="un"><span class="tag">서버</span><div class="b"><div class="t">srv-esx-031</div><div class="r">R750 · 2U · iDRAC 위치 값 비어 있음</div></div></div>
+          <div class="un"><span class="tag">서버</span><div class="b"><div class="t">srv-esx-032</div><div class="r">R750 · 2U · iDRAC 위치 값 비어 있음</div></div></div>
+          <div class="un"><span class="tag">서버</span><div class="b"><div class="t">srv-bm-ai-03</div><div class="r">XE9680 · 6U · 새로 발견(원장에 없음)</div></div></div>
+          <div class="un"><span class="tag">스토리지</span><div class="b"><div class="t">unity-sel-02</div><div class="r">Unity XT 480 · 높이 모름 — 놓을 때 입력</div></div></div>
+          <div class="un"><span class="tag">SAN</span><div class="b"><div class="t">san-b-02</div><div class="r">G720 · 1U · 원장에 없음</div></div></div>
+          <div class="un"><span class="tag">네트워크</span><div class="b"><div class="t">sw-leaf-07</div><div class="r">DCS-7050SX3 · 1U · 원장에 없음</div></div></div>
+          <div class="un"><button type="button" class="btn" style="width:100%">8대 더 보기</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"overlay":{"editor":"enum","options":["kind","status","temp","power"],"default":"kind"},"$preview":{"width":1440,"height":1010}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const st = this.state || {};
+    const mode = st.mode || this.props.overlay || 'kind';
+    const selId = st.sel || 'srv-esx-014';
+    const U = 16;
+    const HATCH = 'repeating-linear-gradient(45deg,#1a2236 0 5px,#2b3852 5px 10px)';
+    const KIND = {
+      sv: ['rgba(59,130,246,.24)', '#3b82f6', '#dbeafe', '서버'],
+      st: ['rgba(52,224,180,.18)', '#2dd4bf', '#ccfbf1', '스토리지'],
+      san: ['rgba(168,85,247,.26)', '#a855f7', '#ead5ff', 'SAN 스위치'],
+      net: ['rgba(34,211,238,.16)', '#22d3ee', '#cffafe', '네트워크'],
+      etc: ['#1a2236', '#3a4866', '#aebbd0', '기타(수동 등록)'],
+    };
+    const STAT = {
+      ok: ['rgba(34,197,94,.14)', '#22c55e', '#bbf7d0', '정상'],
+      warn: ['rgba(245,158,11,.32)', '#f59e0b', '#fde68a', '경고'],
+      crit: ['rgba(239,68,68,.5)', '#ef4444', '#ffffff', '장애'],
+      unk: [HATCH, '#8b9bb4', '#e6edf6', '못 읽음'],
+      none: ['#141b2d', '#2b3852', '#8b9bb4', '감시 안 함'],
+    };
+    const TEMP = [
+      [24, 'rgba(59,130,246,.22)', '#3b82f6', '24°C 미만'],
+      [28, 'rgba(45,212,191,.2)', '#2dd4bf', '24–27°C'],
+      [32, 'rgba(245,158,11,.32)', '#f59e0b', '28–31°C'],
+      [999, 'rgba(239,68,68,.5)', '#ef4444', '32°C 이상'],
+    ];
+    const PWR = [
+      [200, 'rgba(59,130,246,.10)', '200 W 미만'],
+      [500, 'rgba(59,130,246,.24)', '200–499 W'],
+      [1000, 'rgba(59,130,246,.42)', '500–999 W'],
+      [99999, 'rgba(59,130,246,.66)', '1 kW 이상'],
+    ];
+    const NONE = STAT.none;
+    // [시작 U, 높이, 종류, 이름, 모델, 옵션]
+    const sv2 = (u0, n, pre, i0, model, extra) => Array.from({ length: n }, (_, i) => {
+      const nm = pre + String(i0 + i).padStart(3, '0');
+      return [u0 + i * 2, 2, 'sv', nm, model, (extra && extra[nm]) || {}];
+    });
+    const RAW = [
+      ['A-01', '네트워크 · SAN', [
+        [42, 1, 'etc', '패치패널 A01-1', '48포트 Cat6A'], [41, 1, 'etc', '패치패널 A01-2', '48포트 LC'],
+        [39, 1, 'net', 'sw-core-01', 'DCS-7280SR3'], [38, 1, 'net', 'sw-core-02', 'DCS-7280SR3'],
+        [36, 1, 'net', 'sw-leaf-01', 'DCS-7050SX3'], [35, 1, 'net', 'sw-leaf-02', 'DCS-7050SX3', { s: 'warn' }],
+        [33, 1, 'net', 'sw-mgmt-01', 'DCS-7010TX'],
+        [30, 1, 'san', 'san-a-01', 'G720'], [29, 1, 'san', 'san-b-01', 'G720'],
+        [22, 1, 'etc', 'KVM 콘솔', '수동 등록'], [1, 4, 'etc', 'UPS 6kVA', '수동 등록'],
+      ]],
+      ['A-02', 'VM 호스트', [
+        ...sv2(3, 10, 'srv-esx-', 5, 'PowerEdge R750', { 'srv-esx-014': { mis: 1 }, 'srv-esx-009': { s: 'warn' } }),
+        [25, 1, 'sv', 'srv-mgmt-01', 'PowerEdge R650'], [26, 1, 'sv', 'srv-mgmt-02', 'PowerEdge R650'],
+        [42, 1, 'etc', '패치패널 A02-1', '24포트 Cat6A'],
+      ]],
+      ['A-03', 'VM 호스트 · GPU', [
+        ...sv2(3, 6, 'srv-esx-', 15, 'PowerEdge R740', { 'srv-esx-018': { s: 'crit' } }),
+        [17, 6, 'sv', 'srv-bm-ai-01', 'PowerEdge XE9680'], [24, 6, 'sv', 'srv-bm-ai-02', 'PowerEdge XE9680', { s: 'unk' }],
+        [42, 1, 'etc', '패치패널 A03-1', '24포트 Cat6A'],
+      ]],
+      ['A-04', '스토리지', [
+        [3, 2, 'st', 'unity-sel-01 DPE', 'Unity XT 480'], [5, 2, 'st', 'unity-sel-01 DAE1', 'Unity DAE 25'],
+        [7, 2, 'st', 'unity-sel-01 DAE2', 'Unity DAE 25'], [10, 2, 'st', 'pstore-sel-01', 'PowerStore 1200T'],
+        [14, 4, 'st', 'isi-sel-01 n1-4', 'PowerScale H700'], [18, 4, 'st', 'isi-sel-01 n5-8', 'PowerScale H700', { s: 'warn' }],
+        [30, 2, 'sv', 'srv-bkp-01', 'PowerEdge R750xd'], [32, 2, 'sv', 'srv-bkp-02', 'PowerEdge R750xd'],
+      ]],
+      ['A-05', '베어메탈', [
+        ...sv2(5, 7, 'srv-bm-', 1, 'PowerEdge R760', { 'srv-bm-004': { s: 'unk' } }),
+        [21, 1, 'sv', 'srv-bm-008', 'PowerEdge R660'], [22, 1, 'sv', 'srv-bm-009', 'PowerEdge R660'], [23, 1, 'sv', 'srv-bm-010', 'PowerEdge R660'],
+      ]],
+      ['A-06', '예비', [
+        [42, 1, 'etc', '패치패널 A06-1', '24포트 Cat6A'], [3, 2, 'sv', 'srv-esx-021', 'PowerEdge R750'],
+      ]],
+    ];
+    let seed = 7;
+    const rnd = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+    let usedU = 0, placed = 0, noneN = 0, unkN = 0, sel = null;
+    const racks = RAW.map(([id, role, list]) => {
+      let used = 0, wsum = 0, wn = 0, wtot = 0, tmax = null;
+      const devs = list.map(([u, size, kind, name, model, o]) => {
+        o = o || {};
+        const s = kind === 'etc' ? 'none' : (o.s || 'ok');
+        const read = s !== 'unk' && s !== 'none';
+        const base = kind === 'sv' ? 180 * size + rnd(160) : kind === 'st' ? 220 * size + rnd(90) : 90 + rnd(120);
+        const watt = read ? (name.indexOf('ai-') > 0 ? 3900 + rnd(800) : base) : null;
+        const temp = read && (kind === 'sv' || kind === 'net') ? 21 + rnd(8) + (s === 'crit' ? 9 : s === 'warn' ? 4 : 0) : null;
+        used += size; placed += 1;
+        if (s === 'none') noneN += 1;
+        if (s === 'unk') unkN += 1;
+        if (kind !== 'etc') { wtot += 1; if (watt != null) { wsum += watt; wn += 1; } }
+        if (temp != null && (tmax == null || temp > tmax)) tmax = temp;
+        let c, val;
+        if (mode === 'kind') { c = KIND[kind]; val = size + 'U'; }
+        else if (mode === 'status') { c = STAT[s]; val = STAT[s][3]; }
+        else if (mode === 'temp') {
+          if (temp == null) { c = s === 'unk' ? STAT.unk : NONE; val = '—'; }
+          else { const t = TEMP.find((x) => temp < x[0]); c = [t[1], t[2], '#ffffff']; val = temp + '°C'; }
+        } else {
+          if (watt == null) { c = s === 'unk' ? STAT.unk : NONE; val = '—'; }
+          else { const p = PWR.find((x) => watt < x[0]); c = [p[1], '#3b82f6', '#ffffff']; val = watt >= 1000 ? (watt / 1000).toFixed(1) + ' kW' : watt + ' W'; }
+        }
+        const pos = id + ' · U' + (size > 1 ? u + '–' + (u + size - 1) : u) + ' (' + size + 'U)';
+        const d = {
+          name, val, b: (u - 1) * U, h: size * U - 1, bg: c[0], bd: c[1], fg: c[2],
+          ol: name === selId ? '2px solid #ffffff' : (o.mis ? '2px dashed #fcd34d' : 'none'),
+          tip: name + ' — ' + pos,
+          pick: () => this.setState({ sel: name }),
+        };
+        if (name === selId) {
+          let h = 0; for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) % 1679616;
+          sel = {
+            name, model, pos, mis: !!o.mis, kindL: KIND[kind][3],
+            serial: kind === 'etc' ? '—' : (h.toString(36).toUpperCase() + 'X2K9').slice(0, 7),
+            srcL: o.mis ? '원장(가져오기) · iDRAC 값과 다름' : kind === 'sv' ? 'iDRAC 자동 · 원장과 일치' : kind === 'etc' ? '수동 등록' : '원장(가져오기)',
+            statL: s === 'none' ? '감시 안 함(포탈에 등록되지 않은 장비)' : s === 'unk' ? '못 읽음 — 마지막 수집 실패' : STAT[s][3],
+            tempL: temp == null ? '—' : temp + '°C',
+            wattL: watt == null ? '—' : watt + ' W',
+            linkL: kind === 'sv' ? '서버 분석에서 보기 ›' : kind === 'st' ? '스토리지 모니터링에서 보기 ›' : kind === 'san' ? 'SAN 스위치에서 보기 ›' : kind === 'net' ? 'CVP 에서 보기 ›' : '수동 등록 장비 고치기 ›',
+          };
+        }
+        return d;
+      });
+      usedU += used;
+      const kwTxt = wn === 0 ? '—' : (wsum / 1000).toFixed(1) + ' kW' + (wn < wtot ? ' (' + wtot + '대 중 ' + wn + '대)' : '');
+      return { id, role, used, devs, kw: kwTxt, tmax: tmax == null ? '—' : tmax + '°C', pa: Math.min(95, Math.round(wsum / 2 / 55)), pb: Math.min(95, Math.round(wsum / 2 / 60)) };
+    });
+    const legend = mode === 'kind' ? Object.values(KIND).map((c) => ({ bg: c[0], bd: c[1], label: c[3] }))
+      : mode === 'status' ? Object.values(STAT).map((c) => ({ bg: c[0], bd: c[1], label: c[3] }))
+      : mode === 'temp' ? TEMP.map((t) => ({ bg: t[1], bd: t[2], label: t[3] })).concat([{ bg: HATCH, bd: '#8b9bb4', label: '못 읽음' }, { bg: NONE[0], bd: NONE[1], label: '온도 값 없는 종류' }])
+      : PWR.map((p) => ({ bg: p[1], bd: '#3b82f6', label: p[2] })).concat([{ bg: HATCH, bd: '#8b9bb4', label: '못 읽음' }, { bg: NONE[0], bd: NONE[1], label: '전력 값 없는 종류' }]);
+    const modes = [['kind', '종류'], ['status', '상태'], ['temp', '온도'], ['power', '전력']].map(([k, label]) => ({
+      label, cls: k === mode ? 'on' : '', pick: () => this.setState({ mode: k }),
+    }));
+    const us = Array.from({ length: 42 }, (_, i) => 42 - i);
+    return { racks, legend, modes, us, sel: sel || {}, usedU, freeU: 252 - usedU, placed, noneN, unkN };
+  }
+}
+</script>
+</body>
+</html>

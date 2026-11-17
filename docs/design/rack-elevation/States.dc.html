@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>랙 실장도 — 상태 모음</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+button,select,input{font:inherit;color:inherit}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.dim{color:#8b9bb4}
+.sel{height:32px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#0f1626;min-width:0;box-sizing:border-box}
+.btn{height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#141b2d;font-weight:600;font-size:12px;cursor:pointer;white-space:nowrap}
+.btn.pri{background:#3b82f6;border-color:#3b82f6;color:#04101f}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:14px;min-width:0;display:flex;flex-direction:column;gap:10px}
+.card h2{margin:0;font-size:13px;display:flex;gap:8px;align-items:center}
+.card h2 span{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;border:1px solid #3a4866;color:#aebbd0;font-size:11px;flex:0 0 auto}
+.card p{margin:0;font-size:12px;color:#aebbd0;line-height:1.55}
+.box{border-radius:8px;padding:10px;font-size:12px;line-height:1.5}
+.amber{border:1px solid #f59e0b;background:rgba(245,158,11,.12);color:#fde68a}
+.red{border:1px solid #ef4444;background:rgba(239,68,68,.14);color:#fecaca}
+.gray{border:1px dashed #3a4866;background:#0f1626;color:#aebbd0}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.mini{position:relative;height:96px;border:2px solid #3a4866;border-radius:6px;background:repeating-linear-gradient(to bottom,#0f1626 0 15px,#1f2a40 15px 16px)}
+.mini div{position:absolute;left:3px;right:3px;box-sizing:border-box;border-radius:3px;display:flex;align-items:center;padding:0 6px;font-size:10px;font-family:"JetBrains Mono",monospace;white-space:nowrap;overflow:hidden}
+.lab{font-size:11px;color:#8b9bb4;font-weight:600}
+</style>
+</helmet>
+<div style="min-height:940px;background:#0a0e17;box-sizing:border-box;padding:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;align-content:start">
+
+  <div class="card">
+    <h2><span>a</span>위치 불일치 — 원장 ≠ iDRAC 값</h2>
+    <div class="box amber"><span class="mono">srv-esx-014</span><br>원장: A-02 · U21–22<br>iDRAC: A-03 · U17</div>
+    <p>자동으로 덮어쓰지 않습니다. 사람이 고른 쪽이 원장이 되고, 고르기 전까지 ‘불일치 3’ 으로 따로 셉니다.</p>
+    <div class="row"><button type="button" class="btn">원장 유지</button><button type="button" class="btn">iDRAC 값으로 옮기기</button></div>
+  </div>
+
+  <div class="card">
+    <h2><span>b</span>미배치 — 위치를 모르는 장비</h2>
+    <div class="box gray">서버 9 · 스토리지 2 · SAN 1 · 네트워크 2<br><span class="dim">iDRAC 위치 값 비어 있음 8 · 새로 발견 4 · 높이 모름 2</span></div>
+    <p>위치를 못 읽은 장비는 랙에 그리지 않고 ‘미배치 14’ 로 따로 둡니다. 사용 U · 랙 전력 합에 넣지 않습니다.</p>
+  </div>
+
+  <div class="card">
+    <h2><span>c</span>높이를 모르는 장비</h2>
+    <div class="row"><div style="display:flex;flex-direction:column;gap:4px;flex:1 1 120px;min-width:0"><label class="lab" for="s-h">unity-sel-02 높이(U)</label><input id="s-h" class="sel mono" placeholder="예: 2"></div><button type="button" class="btn pri">놓기</button></div>
+    <p>iDRAC 가 알려 준 높이도, 모델별 높이 표에도 없으면 1U 로 가정하지 않고 놓을 때 묻습니다. 한 번 입력하면 그 모델의 높이로 기억합니다.</p>
+  </div>
+
+  <div class="card">
+    <h2><span>d</span>겹침 · 범위 밖</h2>
+    <div class="mini">
+      <div style="bottom:48px;height:31px;background:rgba(59,130,246,.24);border:1px solid #3b82f6;color:#dbeafe">srv-esx-020</div>
+      <div style="bottom:32px;height:31px;background:rgba(239,68,68,.3);border:2px dashed #ef4444;color:#ffffff;font-family:inherit;font-weight:700">U4–5 겹침 — 놓을 수 없음</div>
+    </div>
+    <p>끄는 동안 빨간 점선으로 보이고, 놓으면 원래 자리로 돌아갑니다. 서버도 같은 검사를 다시 합니다(저장 거절).</p>
+  </div>
+
+  <div class="card">
+    <h2><span>e</span>저장 충돌 — 다른 사람이 먼저 저장</h2>
+    <div class="box red">kimsj 님이 14:02 에 이 전산실 배치를 저장했습니다. 내 변경 3건은 아직 저장되지 않았습니다.</div>
+    <p>조용히 덮어쓰지 않습니다. 최신 배치를 불러와 내 변경을 다시 얹고, 같은 자리를 건드린 것만 골라 묻습니다.</p>
+    <div class="row"><button type="button" class="btn pri">최신 배치에 내 변경 얹기</button><button type="button" class="btn">내 변경 버리기</button></div>
+  </div>
+
+  <div class="card">
+    <h2><span>f</span>범위 계정 · 조회 전용</h2>
+    <div class="box gray">법인 선택에는 내 법인만 나옵니다. 다른 법인 전산실은 주소를 직접 넣어도 ‘없음’ 으로 답합니다.</div>
+    <p>‘배치 편집 · 가져오기’ 버튼은 쓰기 권한이 있을 때만 보입니다. 권한이 없으면 실장도와 겹쳐 보기만 됩니다.</p>
+  </div>
+
+  <div class="card">
+    <h2><span>g</span>빈 전산실</h2>
+    <div class="box gray" style="text-align:center;padding:18px 10px">이 전산실에는 아직 랙이 없습니다.<div class="row" style="justify-content:center;margin-top:10px"><button type="button" class="btn pri">기존 실장도 가져오기</button><button type="button" class="btn">랙 추가</button></div></div>
+    <p>랙 추가: 이름 · 높이(기본 42U) · 줄 순서. iDRAC 에 랙 이름이 적힌 서버가 있으면 ‘iDRAC 값으로 랙 만들기 5개’ 를 제안합니다.</p>
+  </div>
+
+  <div class="card">
+    <h2><span>h</span>상태 · 온도 · 전력을 못 읽음</h2>
+    <div class="mini" style="height:64px">
+      <div style="bottom:16px;height:31px;background:repeating-linear-gradient(45deg,#1a2236 0 5px,#2b3852 5px 10px);border:1px solid #8b9bb4;color:#e6edf6">srv-bm-ai-02 <span style="margin-left:auto;font-family:inherit;font-weight:700">못 읽음</span></div>
+    </div>
+    <p>빗금으로 그리고 값은 ‘—’ 입니다(0 으로 그리지 않음). 랙 전력은 ‘9.6 kW (9대 중 8대)’ 처럼 읽은 대수를 함께 적습니다.</p>
+  </div>
+
+  <div class="card">
+    <h2><span>i</span>감시하지 않는 장비 — 수동 등록</h2>
+    <div class="row">
+      <div style="display:flex;flex-direction:column;gap:4px;flex:2 1 140px;min-width:0"><label class="lab" for="s-n">이름</label><input id="s-n" class="sel" value="패치패널 A02-2"></div>
+      <div style="display:flex;flex-direction:column;gap:4px;flex:1 1 70px;min-width:0"><label class="lab" for="s-u">높이(U)</label><input id="s-u" class="sel mono" value="1"></div>
+    </div>
+    <p>패치패널 · UPS · KVM · 빈 패널처럼 포탈에 등록되지 않는 장비도 자리를 차지하므로 그립니다. 상태 색은 없고 ‘감시 안 함’ 으로 표시합니다.</p>
+  </div>
+
+  <div class="card">
+    <h2><span>j</span>등록에서 사라진 장비</h2>
+    <div class="box amber"><span class="mono">srv-esx-007</span> — 포탈 등록에서 삭제됨 · 자리는 A-02 U7–8 에 남아 있음</div>
+    <p>철거인지 등록 오류인지 포탈은 모릅니다. 자리를 자동으로 비우지 않고 표시만 합니다.</p>
+    <div class="row"><button type="button" class="btn">자리 비우기</button><button type="button" class="btn">수동 장비로 남기기</button></div>
+  </div>
+
+  <div class="card">
+    <h2><span>k</span>후면 보기 · 0U PDU</h2>
+    <p>‘후면’ 은 같은 U 에 뒤쪽에만 달린 장비(후면 스위치 등)를 보여 줍니다. 랙 옆 세로 띠 두 개는 PDU A · B 이고 U 를 차지하지 않습니다. PDU 가 그 랙에 연결돼 있지 않으면 띠를 그리지 않습니다.</p>
+  </div>
+
+  <div class="card">
+    <h2><span>l</span>변경 이력</h2>
+    <div class="box gray"><span class="mono">11-17 14:02</span> kimsj · 이동 2 · 새 배치 1<br><span class="mono">11-15 09:40</span> jhpark · 가져오기 82건<br><span class="mono">11-15 03:10</span> iDRAC 자동 · 새 서버 1대 미배치로</div>
+    <p>누가 · 언제 · 무엇을 옮겼는지 남기고, 이전 판으로 되돌릴 수 있습니다.</p>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":940}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
