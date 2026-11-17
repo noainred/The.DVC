@@ -4,6 +4,8 @@
 // 수집 주체: 중앙 직접(기본) 또는 글로벌 엣지 위임(중앙→엣지 PUSH — 수집 서버(원격) URL 필요).
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson, canCsv, getCurrentUser } from '../../api.js';
+import { unreadMarkOf, registryEmptyText } from '../settingsUnread.js';   // 128회차: 등록부를 못 읽은 동안의 빈 목록을 ‘등록 없음’ 으로 보이지 않는다
+import { RegistryUnreadBanner } from '../SettingsUnreadBanner.jsx';
 import { requireChanged } from '../changeResult.js';   // 112회차: delJson 은 409 · 400 을 던지지 않고 본문을 준다 — 거절(등록부 읽기 오류 · 사용 중)을 삭제 성공으로 읽지 않는다
 import { canManageKeys, authChoiceOf, authBodyOf, HOSTKEY_OBSERVE_NOTE, authChoicesView, authChoicesNote } from './bmOnboardText.js'; // 7b: 인증(키 · 공통 계정) 드롭다운 — 설정 소유자 등급만
 import { Loading, ErrorBox } from '../../components/ui.jsx';
@@ -222,6 +224,7 @@ export default function BmStorageTool() {
           onClose={() => setCsvModal(null)} onDone={() => { setCsvModal(null); refresh(); }} />
       )}
       {msg && <div className="muted" style={{ fontSize: 12.5, marginBottom: 8, color: '#93c5fd' }}>{msg}</div>}
+      <RegistryUnreadBanner le={unreadMarkOf(data)} what="베어메탈 스토리지 서버 등록부" />
       {error && <div className="muted" style={{ fontSize: 12, marginBottom: 8, color: 'var(--amber)' }}>⚠ 일시 조회 오류: {String(error?.message || error)}</div>}
 
       {/* v2.590(감사 F2): 인증 실패로 **주기 수집을 멈춘** 서버 — 조용히 멈추지 않는다(authGuard 규칙 1). */}
@@ -350,7 +353,7 @@ export default function BmStorageTool() {
           </div>
         </div>
         {servers.length === 0
-          ? <div className="muted" style={{ fontSize: 13 }}>등록된 서버가 없습니다. '+ 서버 추가'로 SSH 접속 정보와 측정할 마운트 포인트를 등록하세요.</div>
+          ? <div className="muted" style={{ fontSize: 13 }}>{registryEmptyText(unreadMarkOf(data), '서버 등록부') || "등록된 서버가 없습니다. '+ 서버 추가'로 SSH 접속 정보와 측정할 마운트 포인트를 등록하세요."}</div>
           : <STable minWidth={1100}>
               <thead><tr><th>서버</th><th>그룹</th><th>수집 주체</th><th style={{ textAlign: 'right' }}>마운트</th><th style={{ textAlign: 'right' }}>총 용량</th><th style={{ textAlign: 'right' }}>사용량</th><th style={{ textAlign: 'right' }}>사용 가능</th><th>사용률</th><th>최근 수집</th><th data-nosort>작업</th></tr></thead>
               <tbody>

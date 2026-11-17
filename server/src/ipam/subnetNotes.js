@@ -13,7 +13,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';   // 60회차 F2
-import { READ_RETRY_MS, nowMs } from '../util/jsonFileRead.js';   // 97회차 F12: 읽기 오류 재읽기 간격 · 시계
+import { READ_RETRY_MS, nowMs, inRetryWindow } from '../util/jsonFileRead.js';   // 97회차 F12: 읽기 오류 재읽기 간격 · 시계 · 128회차: 간격 판정은 공용
 
 const FILE = path.join(config.configDir, 'ipam-subnet-notes.json');
 export const SUBNET_PURPOSE_MAX = 80;
@@ -41,7 +41,7 @@ export function subnetNotesLoadError() { load(); return _loadErr.get(); }
 let readRetryAt = 0;   // 97회차 F12: 읽기 오류 뒤 다시 읽을 시각(0 = 오류 없음)
 function load() {
   // 97회차 F12(재현 — EISDIR): 읽기 오류 뒤 빈 맵을 캐시해 권한을 고쳐도 재시작 전까지 409 였다 — 오류 중에는 READ_RETRY_MS(30초) 간격으로 다시 읽는다.
-  if (cache && !(readRetryAt && nowMs() >= readRetryAt)) return cache;
+  if (cache && !(readRetryAt && !inRetryWindow(nowMs(), readRetryAt, READ_RETRY_MS))) return cache;   // 128회차: 시계가 뒤로 갔으면 기다리지 않는다
   readRetryAt = 0;
   cache = {};
   try {

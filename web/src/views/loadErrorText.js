@@ -10,3 +10,16 @@ export function loadErrorText(what, le, effect = '') {
   const fix = le.readError ? '' : ' 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리세요.';
   return `${what} — ${why}.${fix}${effect ? ` ${effect}` : ''} 그동안 저장은 거절합니다.`;
 }
+
+/**
+ * 128회차(123회차가 남긴 ‘손상본 보존’ 문구): 못 읽은 사유별 **조치** 한 줄 — 화면 30여 줄이 사유를 가리지 않고 ‘손상본은 .corrupt 로 보존했습니다 · 보존본을 되돌리세요’ 라고만 말했다.
+ *   읽기 오류(readError — 권한 · 소유자 · 디스크)는 원본이 제자리에 있어 **보존본이 없고** 서비스 점검에서 확정할 수도 없다. 서버가 표지에 readError 를 싣는 화면만 이 함수를 쓴다.
+ * @param {object|null} le  표지 `{ reason, readError }`
+ * @param {{ corrupt?:string }} [o]  손상일 때의 조치 문구(화면마다 있던 문장을 그대로 넘긴다)
+ */
+export function unreadFixText(le, { corrupt = '서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리세요.' } = {}) {
+  if (!le || typeof le !== 'object') return '';
+  return le.readError === true
+    ? '읽기 오류라 손상 보존본은 없습니다 — 원본은 그대로 있으니 파일 권한 · 소유자 · 디스크를 확인하세요(읽히면 풀립니다).'
+    : corrupt;
+}

@@ -453,7 +453,7 @@ function ScanPanel({ data, jobs, corp, canScan, reload, setJobs }) {
       .catch((e) => setMsg(e?.message || String(e))).finally(() => setBusy(false));
   };
   const act = (j, path, body) => postJson(`/tools/disk-bad/jobs/${encodeURIComponent(j.id)}/${path}`, body)
-    .then((r) => setJobs(jobs.map((x) => (x.id === j.id ? r.job : x)))).catch((e) => setMsg(e?.message || String(e)));
+    .then((r) => { requireChanged(r); if (r?.job) setJobs(jobs.map((x) => (x.id === j.id ? r.job : x))); }).catch((e) => setMsg(e?.message || String(e)));   // 128회차: 409 본문에는 job 이 없다 — 목록에 undefined 가 들어가 화면이 깨졌다
   // 112회차: 서버가 설정 파일을 못 읽은 동안 data.settings 는 기본값(담당자 없음)이다 — 이 저장은 늘 법인 담당자(corpTo)를 함께 보내므로(전체 교체),
   //   다시 읽힌 뒤 체크 하나만 바꿔도 저장된 담당자 메일 목록이 빈 값으로 덮였다. 읽기 오류 동안은 저장하지 않는다(서버도 503).
   const unread = unreadMarkOf(data);

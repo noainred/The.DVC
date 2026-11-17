@@ -203,7 +203,7 @@ export default function PduTool() {
         </div>
       )}
       {tab === 'list' && (devices.length === 0 ? (
-        <div className="muted" style={{ fontSize: 13 }}>등록된 PDU 가 없습니다. ‘+ PDU 추가’ 또는 CSV 가져오기로 등록하세요.</div>
+        <div className="muted" style={{ fontSize: 13 }}>{data?.loadErrors?.registry ? 'PDU 등록부를 읽지 못했습니다 — 목록이 비어 보여도 등록이 없는 것이 아닙니다.' : '등록된 PDU 가 없습니다. ‘+ PDU 추가’ 또는 CSV 가져오기로 등록하세요.'}</div>
       ) : (
         <div className="table-wrap">
           {/* v2.447(감사 I5): v2.422 에서 표 181개를 STable 로 바꿀 때 이 표 하나가 raw table 로 남아
@@ -459,7 +459,8 @@ function CsvModal({ onClose }) {
   const [busy, setBusy] = useState(false);
   const doImport = async () => {
     setBusy(true); setResult(null);
-    try { setResult(await postJson('/tools/pdu/csv/import', { csv })); }
+    // 128회차: 등록부 읽기 오류 거절(409)은 failed 없이 사유(reason)만 온다 — 그대로 두면 ‘추가 0 · 수정 0’ 만 보이고 왜 안 됐는지가 사라졌다.
+    try { const r = await postJson('/tools/pdu/csv/import', { csv }); setResult(r?.ok === false && !Array.isArray(r.failed) ? { ...r, failed: [r.reason || '가져오지 못했습니다(사유 미상).'] } : r); }
     catch (e) { setResult({ ok: false, failed: [e.message] }); } finally { setBusy(false); }
   };
   return (
@@ -575,7 +576,7 @@ function ThresholdModal({ data, onClose }) {
   const save = async () => {
     setBusy(true); setMsg(null);
     try {
-      await postJson('/tools/pdu/thresholds', { enabled, ...vals });
+      requireChanged(await postJson('/tools/pdu/thresholds', { enabled, ...vals }));   // 128회차: 임계치 파일 읽기 오류 거절(409)을 ‘저장했습니다.’ 로 읽지 않는다
       setMsg({ ok: true, text: '저장했습니다. 다음 수집 주기부터 적용됩니다.' });
       setTimeout(onClose, 900);
     } catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(false); }

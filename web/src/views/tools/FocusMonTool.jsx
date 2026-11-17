@@ -1158,6 +1158,7 @@ function Targets({ main, reload, picked, setPicked, onWatch, msg, setMsg }) {
   };
   const bulkTest = (ids, what) => run('bulk', async () => {
     const r = await postJson('/tools/focus-mon/targets/test-bulk', { ids });
+    if (r?.ok === false || !r?.job) return { ok: false, reason: r?.reason || '연결 시험을 시작하지 못했습니다.' };   // 128회차: 409 본문에는 job 이 없다(사유가 TypeError 문구에 묻혔다)
     return { ok: true, reason: `${what} ${r.job.total}대의 연결 시험을 시작했습니다${r.job.skipped ? `(10초 안에 시험한 ${r.job.skipped}대는 건너뜀)` : ''} — 진행은 위 띠 · 결과는 키 로그인 칸에 나옵니다.` };
   });
   // v2.982 서버 그룹 — 옮기기 · 만들기 · 이름 바꾸기 · 지우기 · 자동 묶기 제안 적용(모두 응답의 ok 를 본다)

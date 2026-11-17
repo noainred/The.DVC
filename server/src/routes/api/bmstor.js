@@ -2,7 +2,8 @@
 // 서버/그룹/전체 합산(총·사용·가용)을 보여준다. 전부 adminOnly(SSH 자격증명·호스트 구성).
 import { requireRole } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
-import { listBmServers, listBmServersRaw, saveBmServer, removeBmServer, getBmSettings, saveBmSettings, bmServerInputIssue, registryWriteRefusal } from '../../bmstor/registry.js';
+import { listBmServers, listBmServersRaw, saveBmServer, removeBmServer, getBmSettings, saveBmSettings, bmServerInputIssue, registryWriteRefusal, registryLoadError } from '../../bmstor/registry.js';
+import { registryMark } from '../settingsUnreadMark.js';   // 128회차: 등록부를 못 읽은 동안의 빈 목록은 '등록 없음' 이 아니다
 import { getBmLatest, bmCollectNow, bmPollerStatus } from '../../bmstor/poller.js';
 import { isDemoGuest } from '../../auth/demoGuest.js'; // v2.720(감사 R1-03)
 import { aggregate } from '../../bmstor/agg.js';
@@ -141,6 +142,7 @@ export function registerBmStorage(api) {
       settings: getBmSettings(), status: bmPollerStatus(),
       agents: listCollectors().map((c) => c.id), // 위임 가능한 엣지(수집 서버) 이름 목록
       datacenters: (() => { try { return listDatacenters().map((d) => ({ id: d.id, name: d.name || d.id })); } catch { return []; } })(),   // v2.915: 폼 '법인' 선택
+      ...registryMark(registryLoadError()),   // 128회차: 못 읽은 동안의 서버 목록 · 수집 주기는 저장된 값이 아니다
     });
   });
 

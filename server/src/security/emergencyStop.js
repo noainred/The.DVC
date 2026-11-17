@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
-import { readJsonFile, nowMs, READ_RETRY_MS } from '../util/jsonFileRead.js'; // 88회차 F2: 읽기 오류 ≠ 손상(판정은 readJsonFile 하나)
+import { readJsonFile, nowMs, READ_RETRY_MS, inRetryWindow } from '../util/jsonFileRead.js'; // 88회차 F2: 읽기 오류 ≠ 손상(판정은 readJsonFile 하나) · 128회차: 간격 판정은 공용
 import { isAdminTier } from '../auth/roles.js';
 
 const FILE = path.join(config.configDir, 'emergency-stop.json');
@@ -42,7 +42,8 @@ function load() {
   //   파일 권한 하나로 수집 · 상태 변경을 다시 돌리는 것은 이 스위치의 목적(온도 · 재난 · PM 중 장비를 건드리지 않음)에 반한다. 상태에 readError 를 싣고
   //   화면이 '읽지 못해 멈춤' 을 말한다. 해제는 파일을 고치거나(30초 안 다시 읽음) 2인 승인 해제(새 상태가 기준).
   const closedWhileUnreadable = () => ({ active: true, by: [], at: null, failClosed: true });
-  if (_readErr && nowMs() < _retryAt) return closedWhileUnreadable();
+  // 128회차: 시계가 뒤로 갔으면(NTP 보정) 기다리지 않고 다시 읽는다 — 예전에는 그 차만큼 '못 읽음 = 멈춤' 이 이어졌다. 다시 읽어도 못 읽으면 아래가 다시 멈춤으로 돌려준다(안전측 그대로).
+  if (_readErr && inRetryWindow(nowMs(), _retryAt, READ_RETRY_MS)) return closedWhileUnreadable();
   // 98회차: preserve:false — 손상본을 옮기지 않는다(옮기면 다음 기동이 '파일 없음' = 비활성으로 풀린다).
   const r = readJsonFile(FILE, { parse: (t) => JSON.parse(t), preserve: false });
   if (r.kind === 'read-error') {

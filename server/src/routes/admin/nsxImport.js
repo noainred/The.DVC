@@ -6,7 +6,8 @@ import { getDataSource } from '../../runtime-settings.js';
 import { importVcenters } from '../../vcenter/registry.js';
 import { geocode } from '../../vcenter/geocode.js';
 import path from 'node:path';
-import { loadRegistry as loadNsxFull, listRegistry as listNsx, addManager as addNsx, updateManager as updateNsx, removeManager as removeNsx, testConnection as testNsx } from '../../nsx/registry.js';
+import { loadRegistry as loadNsxFull, listRegistry as listNsx, addManager as addNsx, updateManager as updateNsx, removeManager as removeNsx, testConnection as testNsx, registryLoadError as nsxRegistryLoadError } from '../../nsx/registry.js';
+import { registryMark } from '../settingsUnreadMark.js';   // 128회차: 등록부를 못 읽은 동안의 목록은 저장된 목록이 아니다
 import { nsxStore, nsxAuthGuard } from '../../nsx/store.js';
 import { adminOnly, existsFile, fullScopeOnlyWith } from './shared.js';
 import { safeLoadText } from '../../util/atomicWrite.js';
@@ -63,7 +64,7 @@ adminRouter.get('/nsx/managers', adminOnly, (req, res) => {
     const rec = full.has(m.id) ? nsxAuthGuard.authStopFor(full.get(m.id)) : null;
     return rec ? { ...m, authStopped: { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason } } : m;
   });
-  res.json({ dataSource: getDataSource(), ...scopeNsxManagers(managers, scopedVcenterIds(req.user, store.get())) }); // v2.622(감사 SEC-04)
+  res.json({ dataSource: getDataSource(), ...scopeNsxManagers(managers, scopedVcenterIds(req.user, store.get())), ...registryMark(nsxRegistryLoadError()) }); // v2.622(감사 SEC-04) · 128회차: 표지
 });
 adminRouter.post('/nsx/managers', adminOnly, fleetOnly, (req, res) => {
   const result = addNsx(req.body || {});

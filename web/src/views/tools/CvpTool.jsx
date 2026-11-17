@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import BoldText from '../../components/boldText.jsx';
 import { fetchJson, postJson, putJson, delJson, getCurrentUser, downloadFile, canCsv } from '../../api.js';
+import { unreadMarkOf, registryEmptyText } from '../settingsUnread.js';   // 128회차: 등록부를 못 읽은 동안의 빈 목록을 ‘등록 없음’ 으로 보이지 않는다
+import { RegistryUnreadBanner } from '../SettingsUnreadBanner.jsx';
 import { requireChanged } from '../changeResult.js';   // 27회차 반증 D-2: 409(설정 파일 손상 중 거절)를 성공으로 보이지 않게
 import { Loading, ErrorBox, Kpi, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
@@ -294,13 +296,14 @@ export default function CvpTool() {
       {view === 'settings' && (<>
       <div className="card" style={{ minWidth: 0 }}>
         <b>CVP 서버 {servers.length}대</b>
+        <RegistryUnreadBanner le={unreadMarkOf(data)} what="CVP 서버 등록부" style={{ marginTop: 8, marginBottom: 0 }} />
         {stopped.map((s) => (
           <div key={`stop-${s.id}`} className="banner" style={{ marginTop: 8, borderColor: 'var(--red)' }}>
             <BoldText text={authStopText(s.status.authStopped, s.name || s.id)} />
           </div>
         ))}
         {servers.length === 0 ? (
-          <div style={{ ...NOTE, marginTop: 8 }}>등록된 CVP 서버가 없습니다. {isAdmin ? '아래 ‘등록·설정’ 에서 추가하세요.' : ''}</div>
+          <div style={{ ...NOTE, marginTop: 8 }}>{registryEmptyText(unreadMarkOf(data), 'CVP 서버 등록부') || `등록된 CVP 서버가 없습니다. ${isAdmin ? '아래 ‘등록·설정’ 에서 추가하세요.' : ''}`}</div>
         ) : (
           <STable minWidth={920} style={{ marginTop: 8 }}>
             <thead><tr><th>이름</th><th>주소</th><th>수집 위치</th><th>인증</th><th>상태</th><th>장비</th><th>수집 시각</th><th>읽은 경로</th><th>위치 조회(주기)</th></tr></thead>
@@ -1165,7 +1168,8 @@ function AdminPanel({ onChanged }) {
     if (issue) { setFormNote({ ok: false, text: issue }); return; }
     setBusy(true); setFormNote(null);
     try {
-      const r = isNew ? await postJson('/tools/cvp/servers', body) : await putJson(`/tools/cvp/servers/${encodeURIComponent(form.id)}`, body);
+      // 128회차: postJson 은 409 · putJson 은 409 · 400 을 던지지 않고 본문을 준다 — 등록부 읽기 오류 · 입력 거절(엣지 · 법인 값)에 창을 닫고 ‘저장했습니다.’ 라고 했다.
+      const r = requireChanged(isNew ? await postJson('/tools/cvp/servers', body) : await putJson(`/tools/cvp/servers/${encodeURIComponent(form.id)}`, body));
       const dropped = droppedSecretNote(r);
       await loadAll(); onChanged && onChanged();
       if (dropped) { setFormNote({ ok: false, text: dropped }); setForm((f) => ({ ...f, id: (r && (r.id || (r.server && r.server.id))) || f.id })); }

@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import BoldText from '../../components/boldText.jsx';   // v2.447: 서버 문구의 **강조** 별표 노출 방지(감사 I6)
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 import { fetchJson, postJson, delJson, canCsv, hasRole } from '../../api.js';
+import { unreadMarkOf, registryEmptyText } from '../settingsUnread.js';   // 128회차: 등록부를 못 읽은 동안의 빈 목록을 ‘등록 없음’ 으로 보이지 않는다
+import { RegistryUnreadBanner } from '../SettingsUnreadBanner.jsx';
 import { requireChanged } from '../changeResult.js';   // 112회차: delJson 은 409 · 400 을 던지지 않고 본문을 준다 — 거절(등록부 읽기 오류 · 사용 중)을 삭제 성공으로 읽지 않는다
 import { droppedSecretNote } from '../droppedSecretText.js';
 import { agoText } from './relTime.js';
@@ -154,7 +156,8 @@ export default function SanSwitchTool() {
   const save = async () => {
     setBusy(true); setMsg(null);
     try {
-      const r = await postJson('/tools/sanswitch/devices', form);
+      // 128회차: postJson 은 409 를 던지지 않고 본문을 준다 — 등록부 읽기 오류 거절(409)에 창을 닫고 ‘저장되었습니다.’ 라고 했다.
+      const r = requireChanged(await postJson('/tools/sanswitch/devices', form));
       const dropNote = droppedSecretNote(r); // v2.607 WEB2607-03: 접속처 변경으로 저장 비밀번호 폐기 — 폼 유지
       if (dropNote) { setForm((f) => ({ ...f, password: '' })); await load(); setFormNote(dropNote); }
       else { setForm(null); setFormNote(null); await load(); setMsg('저장되었습니다.'); }
@@ -269,6 +272,7 @@ export default function SanSwitchTool() {
       </div>
 
       <FreshNote note={listNote} style={{ marginBottom: 12 }} />
+      <RegistryUnreadBanner le={unreadMarkOf(data)} what="SAN 스위치 등록부" />
 
       {/* 포트 용량 — '용량'은 포트 용량이다. 라이선스 없는 포트는 여유에서 빠진다. */}
       <CapacityCard agg={agg} scopeLabel={dcSel.size ? `선택 ${dcSel.size}개 법인` : '전체'} />
@@ -392,7 +396,7 @@ export default function SanSwitchTool() {
               );
             })}
             {!shown.length && <tr><td colSpan={9} className="muted" style={{ textAlign: 'center', padding: 24 }}>
-              {rows.length ? '검색어/법인 필터에 맞는 스위치가 없습니다 — 검색어를 지우거나 법인 선택을 해제하세요.' : "등록된 SAN 스위치가 없습니다. 오른쪽 위 '+ 스위치 등록'으로 추가하세요."}
+              {rows.length ? '검색어/법인 필터에 맞는 스위치가 없습니다 — 검색어를 지우거나 법인 선택을 해제하세요.' : (registryEmptyText(unreadMarkOf(data), 'SAN 스위치 등록부') || "등록된 SAN 스위치가 없습니다. 오른쪽 위 '+ 스위치 등록'으로 추가하세요.")}
             </td></tr>}
           </tbody>
         </STable>

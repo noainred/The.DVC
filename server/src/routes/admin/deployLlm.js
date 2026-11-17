@@ -89,7 +89,7 @@ adminRouter.get('/packages', adminOnly, async (req, res) => {
   let remote = null;
   try { remote = await fetchRemoteVersions(base); }
   catch (e) { remote = { error: e.message }; }
-  res.json({ dir: s.dir, baseUrl: s.baseUrl, settings: s, local: listLocalPackages(), remote, ...(scoped && asked ? { baseUrlIgnored: true, baseUrlIgnoredReason: '즉석 저장소 주소는 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있어 저장된 주소로 조회했습니다.' } : {}) });
+  res.json({ dir: s.dir, baseUrl: s.baseUrl, settings: s, local: listLocalPackages(), remote, ...unreadMark(packageSettingsWriteRefusal()), ...(scoped && asked ? { baseUrlIgnored: true, baseUrlIgnoredReason: '즉석 저장소 주소는 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있어 저장된 주소로 조회했습니다.' } : {}) });
 });
 // Web-editable package source (repository URL / download dir / token).
 adminRouter.put('/packages/settings', adminOnly, fleetOnly, (req, res) => {

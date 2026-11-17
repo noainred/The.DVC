@@ -18,6 +18,7 @@ import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디�
 import { capStr } from '../util/capStr.js';
 import { makeSettingsLoadError } from '../util/settingsLoadError.js'; // v2.727(감사 D-01): 손상 → 설정 pull 503(v2.631 규약)
 import { makeJsonFileReader, readJsonFile, READ_RETRY_MS } from '../util/jsonFileLoad.js'; // 87회차 ⓐ: 읽기 오류 ≠ 손상(공용 읽기 판정)
+import { inRetryWindow } from '../util/jsonFileRead.js';   // 128회차: 재읽기 간격 판정은 공용(시계가 뒤로 가도 그 차만큼 굳지 않게)
 import { accessMoved } from '../util/secretCarry.js'; // v2.731(점검 A3-01 ②): 접속처가 바뀌면 저장 비밀번호를 승계하지 않는다
 import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
@@ -300,7 +301,7 @@ function loadResultsFileText(text) {
 /** 87회차 ⓐ: 저장해도 되는가 — 읽기 오류였으면 간격마다 다시 읽어 합친다. 아직 못 읽으면 false(이번 저장을 건너뛴다). */
 function resultsWritable() {
   if (!resultsReadBlocked) return true;
-  if (Date.now() < resultsRetryAt) return false;
+  if (inRetryWindow(Date.now(), resultsRetryAt, READ_RETRY_MS)) return false;
   const r = readJsonFile(RESULT_FILE, { parse: parseResultsFile });
   if (r.kind === 'read-error') { resultsRetryAt = Date.now() + READ_RETRY_MS; return false; }
   if (r.kind === 'ok') for (const k of Object.keys(r.value)) if (!(k in results)) results[k] = r.value[k];

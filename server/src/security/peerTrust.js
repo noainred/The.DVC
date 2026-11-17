@@ -47,7 +47,7 @@ import { strictIpv4Num, numToIp } from '../util/ipv4.js';
 import { registerExitFlush } from '../util/exitFlush.js';
 import { pushAll } from '../util/pushAll.js';
 import { logAudit } from '../audit.js';
-import { nowMs, READ_RETRY_MS } from '../util/jsonFileRead.js';   // 119회차: 읽기 오류 뒤 재읽기 간격(공용 시계 — 테스트가 주입한다)
+import { nowMs, READ_RETRY_MS, inRetryWindow } from '../util/jsonFileRead.js';   // 119회차: 읽기 오류 뒤 재읽기 간격(공용 시계 — 테스트가 주입한다) · 128회차: 간격 판정은 공용
 
 export const PEER_KINDS = Object.freeze(['ssh', 'tls']);
 export const PEER_MODES = Object.freeze(['enforce', 'observe']);
@@ -310,7 +310,8 @@ function failUnreadable(detail = '') {
 }
 
 function load() {
-  const retry = !!(_st && _loadError?.readError && nowMs() >= _retryAt);   // 119회차: 읽기 오류 중이면 간격마다 다시 읽는다
+  // 119회차: 읽기 오류 중이면 간격마다 다시 읽는다. 128회차: 시계가 뒤로 갔으면 기다리지 않는다(예전에는 그 차만큼 enforce + 빈 목록으로 닫힌 채 — 다시 읽어도 못 읽으면 failUnreadable 이 닫힌 채 둔다).
+  const retry = !!(_st && _loadError?.readError && !inRetryWindow(nowMs(), _retryAt, READ_RETRY_MS));
   if (_st && !retry) return _st;
   const st = emptyState();
   let raw = null;

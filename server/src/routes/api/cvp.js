@@ -14,7 +14,8 @@ import { isAdminReq, maskPollerStatus, scrubHosts } from '../../auth/addressMask
 import { logAudit } from '../../audit.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
-import { listServers, getServer, getServerWithSecret, saveServer, deleteServer, agentKeyEq, registryWriteRefusal } from '../../cvp/registry.js';
+import { listServers, getServer, getServerWithSecret, saveServer, deleteServer, agentKeyEq, registryWriteRefusal, registryLoadError } from '../../cvp/registry.js';
+import { registryMark } from '../settingsUnreadMark.js';   // 128회차: 등록부를 못 읽은 동안의 빈 목록은 '등록 없음' 이 아니다
 import { loadSettings, saveSettings, cvpSettingsLoadError, LIMITS } from '../../cvp/settings.js';
 import { cvpPollerStatus, pollCvpOnce, isPollerBusy, testServerConnection } from '../../cvp/poller.js';
 import { getStatus, dropStatus } from '../../cvp/store.js';
@@ -293,6 +294,7 @@ api.get('/tools/cvp', toolsPerm, fullScopeOnly, async (req, res) => {
     collectDrops: recentCvpCollectDrops(),
     ...(unavailable ? { dbUnavailable: true } : {}),
     ...(admin ? { db: await cdb.dbStats() } : { addressHidden: true }),
+    ...registryMark(registryLoadError()),   // 128회차
   });
 });
 
@@ -793,7 +795,7 @@ api.post('/tools/cvp/collect', writer, toolsPerm, fullScopeOnly, async (req, res
 
 // ── 등록부(adminOnly — 자격증명) ────────────────────────────────────────────
 api.get('/tools/cvp/servers', adminOnly, toolsPerm, fullScopeOnly, (_req, res) => {
-  res.json({ servers: listServers(), agents: knownAgentNames(), datacenters: dcList() });
+  res.json({ servers: listServers(), agents: knownAgentNames(), datacenters: dcList(), ...registryMark(registryLoadError()) });   // 128회차: 표지
 });
 
 // DataCenter 목록 — 폼 드롭다운과 저장 검증이 같은 목록을 본다(v2.609).

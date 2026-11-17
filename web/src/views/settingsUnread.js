@@ -79,3 +79,28 @@ export function staleSeedLock(openedKind, le, { what = '설정' } = {}) {
   if (openedKind === 'read') return `${what} 파일을 읽지 못한 동안 연 창입니다 — 이 창의 값은 저장된 설정이 아닙니다. 창을 닫고 다시 열면 저장된 값이 보입니다.`;
   return '';
 }
+
+/**
+ * 128회차(112 · 123회차가 남긴 등록부): 장비 **등록부**를 못 읽은 동안의 목록 안내(표지가 없으면 ''). 등록부는 폼이 아니라 목록이다 — 못 읽는 동안 서버는 빈 목록
+ *   (마지막 값을 주는 등록부는 그 값)을 주고, 화면이 ‘등록된 장비가 없습니다 · 추가하세요’ 라고 말하면 운영자가 전부 새로 등록하게 된다(118회차 vCenter 관리 화면의 꼴).
+ *   쓰기(등록 · 수정 · 삭제 · 가져오기)는 서버가 읽기 오류 동안 거절한다 — 이 문구는 잠근다고 하지 않고 ‘저장되지 않는다’ 고만 말한다(버튼을 잠그지 않는 화면도 같은 문구).
+ * @param {object|null} le  표지(unreadMarkOf)
+ * @param {{ what?:string, lastGood?:boolean }} [o]  what = 등록부 이름(‘SAN 스위치 등록부’) · lastGood = 읽기 오류 동안 마지막으로 읽은 목록을 주는 등록부(NSX)
+ */
+export function registryUnreadNote(le, { what = '등록부', lastGood = false } = {}) {
+  const k = unreadKind(le);
+  if (!k) return '';
+  const code = txt(le.code) && /^[A-Za-z0-9_-]{1,32}$/.test(le.code.trim()) ? `(${le.code.trim()})` : '';
+  const why = txt(le.reason) || `등록부 파일을 읽지 못했습니다${code}`;
+  if (k === 'read') {
+    return lastGood
+      ? `${what} — ${why} — 지금 보이는 목록은 마지막으로 읽은 목록입니다(기동 뒤 한 번도 읽지 못했으면 빈 목록 — 등록이 없는 것이 아닙니다). 다시 읽힐 때까지 등록 · 수정 · 삭제는 저장되지 않습니다.`
+      : `${what} — ${why} — 목록이 비어 보여도 등록이 없는 것이 아닙니다. 다시 읽힐 때까지 등록 · 수정 · 삭제는 저장되지 않습니다(새로 등록하지 마세요 — 읽히면 목록이 돌아옵니다).`;
+  }
+  return `${what} — ${why} — 목록이 비어 보여도 등록이 없었던 것이 아닙니다. 보존본을 되돌리면 목록이 돌아오고, 여기서 새로 등록하면 그 목록이 새 등록부가 됩니다.`;
+}
+
+/** 128회차: 빈 목록 자리의 한 줄 — 등록부를 못 읽었으면 ‘등록된 … 없습니다’ 대신 이 문구(표지가 없으면 '' — 평소 문구를 쓴다). */
+export function registryEmptyText(le, what = '등록부') {
+  return unreadKind(le) ? `${what}${objectParticle(what)} 읽지 못했습니다 — 목록이 비어 보여도 등록이 없는 것이 아닙니다.` : '';
+}

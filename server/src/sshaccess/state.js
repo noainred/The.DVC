@@ -21,6 +21,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { makeLoadError } from '../util/registryCore.js';
+import { inRetryWindow } from '../util/jsonFileRead.js';   // 128회차: 재읽기 간격 판정은 공용(시계가 뒤로 가도 그 차만큼 잠기지 않게)
 
 export const STATE_FILE_NAME = 'ssh-access-state.json';
 const FILE = () => path.join(config.configDir, 'ssh-access-state.json');   // = STATE_FILE_NAME(문서 생성기가 글자 그대로 찾는다)
@@ -66,7 +67,7 @@ function norm(j) {
 
 function load() {
   if (cache) return cache;
-  if (readFailAt && Date.now() - readFailAt < READ_RETRY_MS) return null;   // 읽기 실패 뒤 잠시 — 매 호출마다 디스크를 두드리지 않는다
+  if (readFailAt && inRetryWindow(Date.now(), readFailAt + READ_RETRY_MS, READ_RETRY_MS)) return null;   // 읽기 실패 뒤 잠시 — 매 호출마다 디스크를 두드리지 않는다
   let text = null;
   try {
     if (fs.existsSync(FILE())) text = fs.readFileSync(FILE(), 'utf8');

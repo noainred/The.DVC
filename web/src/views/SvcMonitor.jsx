@@ -365,7 +365,7 @@ export default function SvcMonitor() {
     const n = (name || '').trim();
     if (!n) return;
     try {
-      await postJson('/svcmon/folders', { kind: mode, path: folderPath ? `${folderPath}\\${n}` : n });
+      requireChanged(await postJson('/svcmon/folders', { kind: mode, path: folderPath ? `${folderPath}\\${n}` : n }));   // 128회차: 409(저장소 읽기 오류) 본문을 삼키지 않는다
       setExpanded((e) => ({ ...e, [folderPath]: true }));
       refresh();
     } catch (e) { window.alert(e.message); }
@@ -458,7 +458,7 @@ export default function SvcMonitor() {
     if (refPath === dragPath) return;
     const destParent = parentOf(refPath);
     if (parentOf(dragPath) !== destParent) {
-      await postJson('/svcmon/folders/move', { kind: mode, path: dragPath, newParent: destParent });
+      requireChanged(await postJson('/svcmon/folders/move', { kind: mode, path: dragPath, newParent: destParent }));   // 128회차
       refresh();
       return;
     }
@@ -477,7 +477,7 @@ export default function SvcMonitor() {
     try {
       if (item.type === 'folder') {
         if (zone === 'inside') {
-          await postJson('/svcmon/folders/move', { kind: mode, path: item.path, newParent: id });   // id='' → 최상위
+          requireChanged(await postJson('/svcmon/folders/move', { kind: mode, path: item.path, newParent: id }));   // id='' → 최상위 · 128회차: 409 본문을 삼키지 않는다
           if (id) setExpanded((ex) => ({ ...ex, [id]: true }));
           refresh();
         } else {

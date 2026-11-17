@@ -15,7 +15,8 @@ import { isAdminReq, maskDeviceAddress, maskSnapAddress, maskActivityEvents, mas
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { SAN_SWITCH_TYPES, collectMethodsFor } from '../../sanswitch/types.js';
-import { listDevices, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithSecret, normalizeDeviceInput, sanAccessMoved, registryWriteRefusal } from '../../sanswitch/registry.js';
+import { listDevices, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithSecret, normalizeDeviceInput, sanAccessMoved, registryWriteRefusal, registryLoadError } from '../../sanswitch/registry.js';
+import { registryMark } from '../settingsUnreadMark.js';   // 128회차: 등록부를 못 읽은 동안의 빈 목록은 '등록 없음' 이 아니다
 import { localSnapshots, getSnapshot, dropSnapshot } from '../../sanswitch/store.js';
 import { collectDeviceNow, sanSwitchPollerStatus, pollSanSwitchOnce, testDeviceConnection, ensureSanSwitchDemo } from '../../sanswitch/poller.js';
 import { isMockMode, demoOn } from '../../mock/demo/flags.js';   // v2.708 데모(mock)
@@ -209,7 +210,8 @@ api.get('/tools/sanswitch', toolsPerm, fullScopeOnly, async (req, res) => {
   const demo = isMockMode() ? sanDemoStatus() : undefined;
   // v2.731(A6-05): 같은 내용이면 같은 응답 객체를 돌려준다(직렬화·gzip·ETag 를 다시 하지 않는다 — util/compress.js 정체성 기억).
   //   키는 입력 전부의 지문 + 역할(가림 판본이 다르다). 이 라우트는 전체 범위 전용(fullScopeOnly)이라 범위 축은 없다.
-  const key = sanListKeyOf({ local, edge, devices: regDevs, pending, extras: [pollerSt, drops, datacenters, agents, demo], admin });
+  const regMark = registryMark(registryLoadError());   // 128회차: 등록부 읽기 오류 · 손상 표지(응답 기억의 키에도 넣는다 — 풀리면 곧바로 내린다)
+  const key = sanListKeyOf({ local, edge, devices: regDevs, pending, extras: [pollerSt, drops, datacenters, agents, demo, regMark], admin });
   try {
     const payload = await snapMemo('sanswitch-list', key, SAN_LIST_MEMO_MS, () => {
       const byId = new Map();
@@ -239,6 +241,7 @@ api.get('/tools/sanswitch', toolsPerm, fullScopeOnly, async (req, res) => {
         // v2.591: 엣지가 가져갔지만 새 수집 결과가 오지 않아 재인출 뒤 폐기한 '지금 수집' 요청 — 화면이 말한다(조용한 소실 금지).
         collectDrops: recentCollectDrops(),
         ...(isMockMode() ? { demo } : {}),
+        ...regMark,
       };
     });
     sendCached(req, res, key, payload);
