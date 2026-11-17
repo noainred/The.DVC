@@ -573,10 +573,74 @@ class SessionStore:
                 print(f"[auth] {self._revoked_path.name} 에 해석할 수 없는 항목 {bad}개 — 손상으로 봅니다.", flush=True)
                 preserve_corrupt(self._revoked_path)
                 state = "corrupt"
+        if state == "unreadable" and self._resume_failclosed():
+            return
         if state in ("corrupt", "unreadable"):
             self._fail_closed(state)
             return
+        self._drop_failclosed_marker()   # 다시 읽혔다 — 지난 읽기 오류 표지는 끝났다
         self._revoked, self._revoked_user = out, users
+
+    # 반증(결정 G1b ① — 사용자 결정 '권장안대로'): 읽기 오류가 **계속되는** 동안 재기동마다 전 계정 tokenVersion 을 올려 전원이 끊겼다.
+    #   첫 fail-closed 뒤에는 로그아웃이 계정 단위 폐기로 접혀(못 쓰는 폐기 목록 대신 users.json) 다시 끊을 필요가 없다. 그 사실을 작은 표지
+    #   파일(`session-revoked.failclosed.json` — 컷오프 시각 + 못 읽은 파일의 크기 · mtime · inode)에 남기고, 재기동 때 **같은 파일 상태로**
+    #   여전히 못 읽으면 tokenVersion 을 다시 올리지 않고 그 컷오프만 메모리에 되살린다. 파일이 바뀌었거나 표지가 없거나(계정 인상이 실패했던 첫 끊음 포함)
+    #   그 사이 계정 단위 폐기가 실패했으면(표지를 지운다) 예전처럼 다시 끊는다.
+
+    def _failclosed_marker_path(self):
+        return self._revoked_path.with_suffix(".failclosed.json") if self._revoked_path else None
+
+    def _revoked_stat(self):
+        try:
+            st = self._revoked_path.stat()
+            return {"size": int(st.st_size), "mtimeNs": int(st.st_mtime_ns), "ino": int(st.st_ino)}
+        except (OSError, ValueError):
+            return None
+
+    def _resume_failclosed(self) -> bool:
+        marker_path = self._failclosed_marker_path()
+        if not marker_path:
+            return False
+        try:
+            marker = json.loads(marker_path.read_text(encoding="utf-8"))
+            cutoff = float(marker.get("cutoff"))
+        except (OSError, ValueError, TypeError, AttributeError):
+            return False
+        stat = self._revoked_stat()
+        if not stat or not (cutoff > 0) or cutoff != cutoff or cutoff == float("inf") \
+                or any(marker.get(k) != v for k, v in stat.items()):
+            return False
+        self._global_cutoff = max(self._global_cutoff, cutoff)
+        self._revoked, self._revoked_user = {}, {}
+        self._revoked_writable = False
+        reset = marker.get("accountsReset")
+        self._revoked_error = {"file": self._revoked_path.name, "state": "unreadable", "at": cutoff,
+                               "accountsReset": reset if isinstance(reset, int) else None, "resumed": True}
+        print(f"[auth] {self._revoked_path.name} 을(를) 여전히 읽지 못합니다(지난 fail-closed 와 같은 파일 상태) — 그때 이전에 발급된 세션 거부를"
+              " 이어 갑니다(계정 세션을 다시 끊지 않습니다). 권한을 고치고 다시 시작하세요.", flush=True)
+        return True
+
+    def _write_failclosed_marker(self, cutoff: float, reset) -> None:
+        marker_path, stat = self._failclosed_marker_path(), self._revoked_stat()
+        if not marker_path or not stat:
+            return
+        try:
+            write_json(marker_path, {"cutoff": cutoff, "accountsReset": reset, "at": now_iso(), **stat})
+        except OSError as exc:
+            print(f"[auth] fail-closed 표지 저장 실패({exc}) — 다음 기동도 읽지 못하면 다시 전원 세션을 끊습니다.", flush=True)
+
+    def _drop_failclosed_marker(self) -> bool:
+        marker_path = self._failclosed_marker_path()
+        if not marker_path:
+            return True
+        try:
+            marker_path.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            print(f"[auth] fail-closed 표지 삭제 실패({exc}).", flush=True)
+            return False
+        return True
 
     def _fail_closed(self, state: str) -> None:
         """폐기 목록을 믿을 수 없다 — 지금 이전에 발급된 토큰을 모두 거부하고 빈 목록으로 시작한다(원본은 보존)."""
@@ -596,6 +660,10 @@ class SessionStore:
             except (AuthError, OSError) as exc:
                 print(f"[auth] 계정 tokenVersion 인상 실패({exc}) — 이 프로세스의 메모리 컷오프로만 막습니다.", flush=True)
         self._revoked_error = {"file": name, "state": state, "at": cutoff, "accountsReset": reset}
+        if state == "unreadable" and reset is not None:
+            self._write_failclosed_marker(cutoff, reset)   # 같은 파일 상태로 다시 못 읽으면 재기동 때 다시 끊지 않는다(반증 G1b ①)
+        elif state != "unreadable":
+            self._drop_failclosed_marker()
         if self._revoked_writable:
             self._save_revoked()   # 새 파일에 _cutoff 표지 — 재기동 뒤 '손상' 으로 다시 끊지 않고, 그 이전 토큰은 계속 거부
 
@@ -802,6 +870,8 @@ class SessionStore:
                 print(f"[auth] 로그아웃 폐기 목록에 쓸 수 없어 계정 '{uname}' 의 세션을 모두 끊었습니다(계정 단위 폐기).", flush=True)
             except (AuthError, OSError) as exc:
                 print(f"[auth] 계정 단위 폐기도 실패했습니다({exc}) — 이 프로세스에서만 막힙니다.", flush=True)
+                # 반증 G1b ①: 이 로그아웃은 어디에도 남지 않았다 — fail-closed 표지를 지워 다음 기동이 다시 전원 세션을 끊게 한다(이어 가기 금지).
+                self._drop_failclosed_marker()
 
     def destroy_user(self, username) -> None:
         """그 계정의 모든 토큰을 무효화한다.

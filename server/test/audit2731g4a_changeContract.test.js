@@ -17,6 +17,14 @@ import express from 'express';
 const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'a2731g4a-'));
 process.env.CONFIG_DIR = CFG;
 process.env.DATA_SOURCE = 'mock';
+// 반증 G1a(사용자 결정 '권장안대로'): RMA 비밀번호 설정 · 해제는 소유자 등급 + 본인 OTP 가 됐다 — 이 시험의 계정을 소유자 + OTP 등록으로 둔다
+//   (시험 대상인 '거부 본문을 화면이 실패로 읽는가' 는 그대로 — 게이트를 지난 뒤의 400 · 200 본문을 본다).
+const { generateSecret, generateToken } = await import('../src/auth/totp.js');
+const OTP_SECRET = generateSecret();
+fs.writeFileSync(path.join(CFG, 'users.json'), JSON.stringify({ users: [{ username: 'adm', role: 'admin', totpEnabled: true, totpSecret: OTP_SECRET }] }));
+fs.writeFileSync(path.join(CFG, 'security-session.json'), JSON.stringify({ settingsOwners: ['adm'] }));
+let otpLast = -Infinity;
+const otp = () => { otpLast = Math.max(Math.floor(Date.now() / 30_000) - 1, otpLast + 1); return generateToken(OTP_SECRET, { counter: otpLast }); };
 
 const ADMIN = { username: 'adm', role: 'admin', scope: {} };
 const { changeFailText, requireChanged } = await import('../../web/src/views/changeResult.js');
@@ -65,12 +73,12 @@ test('svcmon — 로그 설정 경로 거부 400({error})은 실패, 정상 저�
 
 test('RMA — 비밀번호·원격 관리 400({ok:false,reason})은 실패, 정상 응답({ok:true})은 성공', async () => {
   const { api } = await import('../src/routes/api.js');
-  const pw = await call('/api', api, 'PUT', '/tools/rma/agents/g4a-edge/password', { password: 'a'.repeat(300) });
+  const pw = await call('/api', api, 'PUT', '/tools/rma/agents/g4a-edge/password', { password: 'a'.repeat(300), otp: otp() });
   assert.equal(pw.status, 400, JSON.stringify(pw.body));
   assert.equal(pw.body.hasPassword, undefined, '실패 본문에는 hasPassword 가 없다 — 예전 화면은 이것을 \'해제했습니다\' 로 읽었다');
   assert.equal(changeFailText(pw.body), pw.body.reason);
 
-  const clear = await call('/api', api, 'PUT', '/tools/rma/agents/g4a-edge/password', { password: '' });
+  const clear = await call('/api', api, 'PUT', '/tools/rma/agents/g4a-edge/password', { password: '', otp: otp() });
   assert.equal(clear.status, 200, JSON.stringify(clear.body));
   assert.equal(changeFailText(clear.body), null);
 

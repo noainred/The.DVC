@@ -450,6 +450,12 @@
               <input id="u-password" type="password" minlength="8" maxlength="200" placeholder="8자 이상" required />
               <span class="field-hint">설정 로그인은 비밀번호만 입력하므로 계정마다 서로 다른 값을 사용해야 합니다.</span>
             </label>
+            <!-- 반증(결정 G1b ②): admin 계정을 만들 때는 요청한 본인의 현재 비밀번호를 확인한다 -->
+            <label class="field" id="u-current-field">
+              <span class="field-label">내 현재 비밀번호 <em>*</em></span>
+              <input id="u-current" type="password" maxlength="200" autocomplete="current-password" placeholder="admin 계정을 만들 때 본인 확인" />
+              <span class="field-hint">admin 계정을 만들 때는 요청한 본인의 현재 비밀번호를 확인합니다(로그인과 같은 실패 잠금).</span>
+            </label>
             <div class="form-actions">
               <button class="btn btn-primary" type="submit">사용자 추가</button>
               <span class="form-msg" id="user-form-msg"></span>

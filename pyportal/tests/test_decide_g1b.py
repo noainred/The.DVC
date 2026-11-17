@@ -316,8 +316,10 @@ class BackupNameTest(_Base):
 
 class SelfPasswordChangeTest(ServerCase):
     def _add(self, name, password, role="viewer"):
-        code, payload, _ = request(self.url + "/api/settings/users", "POST",
-                                   {"username": name, "role": role, "password": password}, self.auth())
+        body = {"username": name, "role": role, "password": password}
+        if role == "admin":
+            body["currentPassword"] = self.password   # 반증(결정 G1b ②): admin 생성은 요청자 본인 확인
+        code, payload, _ = request(self.url + "/api/settings/users", "POST", body, self.auth())
         self.assertEqual(code, 201, payload)
 
     def tearDown(self):

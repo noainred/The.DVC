@@ -59,7 +59,7 @@ class AppContext:
         if revoked_error:
             self.audit.write("session.failclosed", actor="-", client="-", result="fail", detail={
                 "file": revoked_error.get("file"), "state": revoked_error.get("state"),
-                "accountsReset": revoked_error.get("accountsReset")})
+                "accountsReset": revoked_error.get("accountsReset"), "resumed": bool(revoked_error.get("resumed"))})
 
         # 계정이 없으면 초기 비밀번호를 만들어 파일로 남긴다(경로만 로그에 찍는다).
         self.bootstrap_password_created = bool(self.users.bootstrap())

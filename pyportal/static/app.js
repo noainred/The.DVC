@@ -1317,7 +1317,8 @@
       ? "⚠ " + (revoked.file || "session-revoked.json") + " 을(를) " +
         (revoked.state === "unreadable" ? "읽지 못해(권한 · 입출력 — 원본은 그대로 둠)" : "손상으로 보고 보존본(.corrupt.*)으로 옮기고") +
         " " + fullStamp(revoked.at) + " 이전에 발급된 세션을 모두 끊었습니다(전원 다시 로그인)" +
-        (revoked.state === "unreadable" ? " — 권한을 고치고 다시 시작할 때까지 로그아웃은 그 계정의 세션을 모두 끊습니다." : ".")
+        (revoked.state === "unreadable" ? " — 권한을 고치고 다시 시작할 때까지 로그아웃은 그 계정의 세션을 모두 끊습니다." : ".") +
+        (revoked.resumed ? " 같은 파일 상태로 여전히 읽지 못해 이번 기동은 세션을 다시 끊지 않았습니다." : "")
       : "";
   }
 
@@ -1325,15 +1326,20 @@
      예전에는 window.prompt 로 새 비밀번호만 받았다(입력이 가려지지 않았고, 세션만 가로채도 비밀번호를 바꿀 수 있었다). */
   function changeUserPassword(user) {
     var isMe = !!(state.session && state.session.username === user.username);
-    state.pwTarget = { username: user.username, isMe: isMe };
+    // 반증(결정 G1b ②): 다른 admin 계정 재설정도 요청한 본인(나)의 현재 비밀번호를 확인한다(서버가 같은 판정 — viewer 재설정은 그대로).
+    var needCurrent = isMe || user.role === "admin";
+    state.pwTarget = { username: user.username, isMe: isMe, needCurrent: needCurrent };
     $("pw-target").textContent = "'" + user.username + "' 계정" +
-      (isMe ? " — 본인 비밀번호는 현재 비밀번호를 확인합니다." : " — admin 재설정(현재 비밀번호 없이)");
-    $("pw-current").hidden = !isMe;
+      (isMe ? " — 본인 비밀번호는 현재 비밀번호를 확인합니다."
+        : needCurrent ? " — 다른 admin 계정 재설정은 요청한 본인(나)의 현재 비밀번호를 확인합니다."
+        : " — admin 재설정(현재 비밀번호 없이)");
+    $("pw-current").placeholder = isMe ? "현재 비밀번호" : "내 현재 비밀번호";
+    $("pw-current").hidden = !needCurrent;
     $("pw-current").value = "";
     $("pw-new").value = "";
     $("pw-msg").textContent = "";
     $("pw-modal").hidden = false;
-    setTimeout(function () { (isMe ? $("pw-current") : $("pw-new")).focus(); }, 30);
+    setTimeout(function () { (needCurrent ? $("pw-current") : $("pw-new")).focus(); }, 30);
   }
 
   function closePasswordModal() {
@@ -1347,8 +1353,8 @@
     var target = state.pwTarget;
     if (!target) return;
     var body = { password: $("pw-new").value };
-    if (target.isMe) {
-      if (!$("pw-current").value) { setMsg("pw-msg", "현재 비밀번호를 입력하세요.", "err"); return; }
+    if (target.needCurrent) {
+      if (!$("pw-current").value) { setMsg("pw-msg", target.isMe ? "현재 비밀번호를 입력하세요." : "내 현재 비밀번호를 입력하세요.", "err"); return; }
       body.currentPassword = $("pw-current").value;
     }
     if (!body.password) { setMsg("pw-msg", "새 비밀번호를 입력하세요.", "err"); return; }
@@ -1386,16 +1392,28 @@
       .catch(function (err) { toast(err.message, "err"); });
   }
 
+  /* 반증(결정 G1b ②): admin 계정을 만들 때만 '내 현재 비밀번호' 칸을 보인다(서버가 같은 판정). */
+  function syncUserFormCurrent() {
+    var needCurrent = $("u-role").value === "admin";
+    $("u-current-field").hidden = !needCurrent;
+    if (!needCurrent) $("u-current").value = "";
+  }
+
   function submitUserForm(event) {
     event.preventDefault();
-    api("/api/settings/users", { method: "POST", body: {
-      username: $("u-name").value, role: $("u-role").value, password: $("u-password").value
-    } }).then(function (data) {
+    var body = { username: $("u-name").value, role: $("u-role").value, password: $("u-password").value };
+    if (body.role === "admin") {
+      if (!$("u-current").value) { setMsg("user-form-msg", "admin 계정을 만들려면 내 현재 비밀번호를 입력하세요.", "err"); return; }
+      body.currentPassword = $("u-current").value;
+    }
+    api("/api/settings/users", { method: "POST", body: body }).then(function (data) {
       state.users = data.users;
       $("user-form").reset();
+      syncUserFormCurrent();
       setMsg("user-form-msg", "추가했습니다.", "ok");
       renderUserSettings();
-    }).catch(function (err) { setMsg("user-form-msg", err.message, "err"); });
+    }).catch(function (err) { setMsg("user-form-msg", err.message, "err"); })
+      .then(function () { $("u-current").value = ""; });   // 비밀번호 칸은 한 번 보내면 비운다
   }
 
   /* ---------------- 설정 4: 백업 ---------------- */
@@ -2211,6 +2229,8 @@
     });
 
     $("user-form").addEventListener("submit", submitUserForm);
+    $("u-role").addEventListener("change", syncUserFormCurrent);
+    syncUserFormCurrent();
     $("b-save").addEventListener("click", saveBackupSettings);
     $("b-now").addEventListener("click", backupNow);
     $("h-save").addEventListener("click", saveHealthSettings);

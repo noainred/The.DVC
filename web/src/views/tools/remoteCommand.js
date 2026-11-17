@@ -97,8 +97,10 @@ export function statusLabel(status) {
  * @param {{settingsOwnerTier?:boolean, name?:string}|null} user  /auth/me
  * @returns {{ need:boolean, otp:boolean, locked:boolean, reason:string }}
  */
-export function ownerOtpGate(item, user) {
-  if (!item || item.ownerOtp !== true) return { need: false, otp: false, locked: false, reason: '' };
+export function ownerOtpGate(item, user, args = null) {
+  // 결정(반증 G1a): 인수에 따라 위험해지는 명령(http-request 의 POST · 본문 — 카탈로그 dangerIf)도 같은 게이트(서버 commands.js presetDanger 와 같은 규칙).
+  const need = !!item && (item.ownerOtp === true || presetArgsDanger(item.dangerIf, args));
+  if (!need) return { need: false, otp: false, locked: false, reason: '' };
   const anonymous = user?.name === 'Anonymous';
   const tier = anonymous || user?.settingsOwnerTier === true;
   return {
@@ -106,6 +108,19 @@ export function ownerOtpGate(item, user) {
     reason: tier ? '' : '이 명령 · 점검은 상태를 바꾸거나 임의로 실행하므로 설정 소유자 등급(소유자 목록 ∧ 전체 범위) 계정만 쓸 수 있습니다(본인 OTP 도 필요합니다).',
   };
 }
+
+/**
+ * 결정(반증 G1a): 카탈로그 dangerIf(서버 rma/commands.js presetDanger 와 같은 규칙 — 서버 시험이 같은 입력으로 대조)로 이 인수가 위험 등급인가.
+ *   methodPost — 메서드가 POST(앞뒤 공백 무시 · 대소문자 무시) · body — 본문이 비어 있지 않음(앞뒤 공백 제거 뒤).
+ */
+export function presetArgsDanger(rule, args) {
+  if (!rule || typeof rule !== 'object') return false;
+  const v = (k) => String(args?.[k] ?? '').trim();
+  return !!((rule.methodPost && /^POST$/i.test(v('method'))) || (rule.body && v('body') !== ''));
+}
+
+/** 설정 소유자 등급 + 본인 OTP 가 늘 필요한 동작(RMA 비밀번호 설정 · 해제 · 원격 배포 — 서버 ownerOtpThen) — ownerOtpGate 에 넘기는 표지. */
+export const OWNER_OTP_ALWAYS = Object.freeze({ ownerOtp: true });
 
 /** OTP 입력값 정리 — 숫자만 6자리까지(빈 값이면 ''). */
 export const otpInput = (v) => String(v ?? '').replace(/\D/g, '').slice(0, 6);

@@ -117,7 +117,8 @@ class BackupService:
 
     # ---------- 생성 ----------
 
-    def create(self, reason: str = "manual") -> dict:
+    def create(self, reason: str = "manual", *, protect=()) -> dict:
+        """protect — 이번 정리에서 지우지 않을 백업 이름(복원 중인 백업 — 결정 · 반증 G1b ③)."""
         with self._lock:
             self._dir.mkdir(parents=True, exist_ok=True)
             now = time.time()
@@ -155,7 +156,7 @@ class BackupService:
                 raise ValueError("같은 시각의 백업 이름이 모두 쓰여 있어 백업을 만들지 않았습니다 — 잠시 뒤 다시 시도하세요.")
             self._last_run = time.time()
             self._last_error = None   # 39회차 R6: 어떤 백업이든 성공하면 지난 자동 백업 실패 경고를 지운다
-            kept, removed = self._prune_locked()
+            kept, removed = self._prune_locked(protect=protect)
             self._last_result = {
                 "name": name,
                 "createdAt": payload["meta"]["createdAt"],
@@ -235,7 +236,9 @@ class BackupService:
                 raise ValueError("백업 파일 형식이 올바르지 않습니다.")
 
             # 복원이 잘못됐을 때 돌아올 지점을 먼저 만든다.
-            self.create(reason="manual")
+            # 반증(결정 G1b ③ — 재현): 보관 수량이 꽉 찬 상태에서 가장 오래된 백업을 복원하면 이 백업의 정리가 **지금 복원하는 백업**을 지웠다
+            #   (두 번째 복원 · 받기가 404 — 데이터 손실). 이번 정리에서는 그 백업을 빼고 지운다(보관 수량을 한 개 넘길 수 있다 — 다음 정리에서 맞춘다).
+            self.create(reason="manual", protect=(Path(str(name)).name,))
 
             restored = []
             for key in MEMBERS:
@@ -257,7 +260,7 @@ class BackupService:
 
     # ---------- 보관 수량 ----------
 
-    def _prune_locked(self):
+    def _prune_locked(self, protect=()):
         # 46회차 H1(재현): 설정을 못 읽는 동안(기본 보관 14개)에는 지우지 않는다 — 관리자가 정한 보관 수량을 모른다.
         load_error = getattr(self._settings, "load_error", None)
         if (callable(load_error) and load_error()) or self.data_load_errors():
@@ -268,13 +271,16 @@ class BackupService:
         keep = max(1, min(MAX_KEEP, keep))
         entries = self.list()
         removed = 0
+        keep_names = {str(n) for n in (protect or ())}
         for entry in entries[keep:]:
+            if entry["name"] in keep_names:
+                continue   # 복원 중인 백업 — 이번에는 지우지 않는다(다음 정리에서 맞춘다)
             try:
                 (self._dir / entry["name"]).unlink()
                 removed += 1
             except OSError:
                 pass
-        return min(len(entries), keep), removed
+        return len(entries) - removed, removed
 
     def data_load_errors(self) -> dict:
         """47회차 #5: 못 읽은 데이터 파일 {이름: 상태} — 없으면 {}."""

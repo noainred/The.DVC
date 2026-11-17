@@ -293,7 +293,7 @@ export function registerPduSanRoutes(centralRouter, deps) {
     try { schSecret = rmaPasswordFor(agent); } catch { schSecret = ''; }
     const signKey = scheduleSignKey(schSecret);
     const assignKey = `${sch.version}:${assign.tests.map((t) => t.id).join(',')}${signKey ? `:k${signKey}` : ''}`;
-    if (String(b.assignKey || '') !== assignKey || Number(b.scheduleVersion) !== sch.version) out.schedule = { version: sch.version, assignKey, tests: signScheduleTests(schSecret, agent, assign.tests) };
+    if (String(b.assignKey || '') !== assignKey || Number(b.scheduleVersion) !== sch.version) out.schedule = { version: sch.version, assignKey, tests: signScheduleTests(schSecret, agent, assign.tests, Date.now(), instance) };   // 반증 G1a: 인스턴스도 서명 대상
     const remote = rmaRemoteFor(agent);
     if (remote.longpollMs || remote.testConcurrency || remote.disabledTests.length) out.config = remote;
     res.json(out);

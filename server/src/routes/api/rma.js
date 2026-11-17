@@ -8,7 +8,7 @@
  */
 import { requireRole } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
-import { catalog, buildCommand, describeCommand, getPreset } from '../../rma/commands.js';
+import { catalog, buildCommand, describeCommand, getPreset, presetDanger } from '../../rma/commands.js';
 import { enqueueJob, getJob, listHistoryAsync, listRmaAgents, DONE_TTL } from '../../rma/jobs.js';
 import { signJob, scheduleSignRequired } from '../../rma/signing.js';
 import { rmaPasswordFor, setRmaPassword, listRmaPasswordMeta } from '../../rma/agentSecrets.js';
@@ -36,9 +36,10 @@ const fullScopeOnly = fullScopeOnlyWith('원격 명령(RMA)은 엣지 단위라 
  */
 const rmaOwnOtp = ownOtpGate('원격 명령의 상태 변경 · 임의 실행');
 const ownerOtpThen = (req, res, next) => requireSettingsOwner(req, res, (err) => (err ? next(err) : rmaOwnOtp(req, res, next)));
-export const rmaRunNeedsOwnerOtp = (cmd) => !!getPreset(cmd)?.danger;
+// 결정(반증 G1a): 인수에 따라 위험해지는 프리셋(http-request 의 POST · 본문)도 같은 판정 하나(commands.js presetDanger).
+export const rmaRunNeedsOwnerOtp = (cmd, args = {}) => presetDanger(getPreset(cmd), args);
 export const rmaScheduleNeedsOwnerOtp = (test) => scheduleSignRequired(test);
-function dangerRunGate(req, res, next) { return rmaRunNeedsOwnerOtp(req.body?.cmd) ? ownerOtpThen(req, res, next) : next(); }
+function dangerRunGate(req, res, next) { return rmaRunNeedsOwnerOtp(req.body?.cmd, req.body?.args) ? ownerOtpThen(req, res, next) : next(); }
 function shellScheduleGate(req, res, next) { return rmaScheduleNeedsOwnerOtp(req.body?.test) ? ownerOtpThen(req, res, next) : next(); }
 const RE_AGENT = /^[^<>"'\s]{1,64}$/;
 const RE_INSTANCE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
@@ -176,7 +177,8 @@ api.get('/tools/rma/history', adminOnly, fullScopeOnly, async (req, res) => {
 });
 
 /** 법인 RMA 비밀번호 등록/해제 — Body { password } ('' = 해제). 값은 응답·감사로그에 싣지 않는다. */
-api.put('/tools/rma/agents/:agent/password', adminOnly, fullScopeOnly, (req, res) => {
+// 결정(반증 G1a — 사용자 '권장안대로'): 법인 RMA 비밀번호 설정 · 해제는 서명(엣지 방어선)을 바꾸는 동작 — 소유자 등급 + 본인 OTP.
+api.put('/tools/rma/agents/:agent/password', adminOnly, fullScopeOnly, ownerOtpThen, (req, res) => {
   const agent = String(req.params.agent || '').trim();
   if (!RE_AGENT.test(agent)) return res.status(400).json({ ok: false, reason: 'agent 형식 오류' });
   try {
@@ -224,7 +226,8 @@ api.post('/tools/rma/deploy/list', adminOnly, fullScopeOnly, async (req, res) =>
 });
 
 /** 배포. Body: { host, port, username, password, instances:[{name,priority}], rmaPassword, allowCustom, agentName, centralUrl, centralToken } */
-api.post('/tools/rma/deploy', adminOnly, fullScopeOnly, async (req, res) => {
+// 결정(반증 G1a): 원격 배포는 대상 서버에 root 로 설치하고 RMA_ALLOW_CUSTOM · 재부팅 허용 · 비밀번호 해제를 심을 수 있다 — 소유자 등급 + 본인 OTP.
+api.post('/tools/rma/deploy', adminOnly, fullScopeOnly, ownerOtpThen, async (req, res) => {
   const b = req.body || {};
   const t = targetOf(b);
   if (t.error) return res.status(400).json({ ok: false, reason: t.error });

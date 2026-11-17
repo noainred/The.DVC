@@ -20,6 +20,7 @@ process.env.CENTRAL_TOKEN = 'shared-token-for-decide-g1a-000000000000';
 process.env.AUTH_ENABLED = 'true';
 process.env.AGENT_NAME = 'edge-g1a';
 process.env.RMA_ALLOW_CUSTOM = 'true';   // 엣지 script 점검이 실제로 돌 수 있는 조건 — 서명 판정이 없으면 실행된다(변이 검증의 근거)
+process.env.RMA_INSTANCE = 'default';    // 반증 G1a: 인스턴스가 서명 대상이 됐다 — 엣지 인스턴스를 서명 기본값('default')과 맞춘다(호스트 이름에 기대지 않게)
 delete process.env.RMA_PASSWORD;
 
 const { generateSecret, generateToken } = await import('../src/auth/totp.js');
@@ -127,7 +128,9 @@ test('64 F7 — rma-poll 이 script 항목에 법인 비밀번호 서명을 붙�
   assert.match(b.schedule.assignKey, /:k[0-9a-f]{12}$/);
   const script = b.schedule.tests.find((x) => x.test === 'script');
   const tcp = b.schedule.tests.find((x) => x.test === 'tcp');
-  assert.equal(SG.verifyScheduleItem('pw-g1a', 'rma-g1a', script).ok, true, '엣지가 같은 비밀번호로 검증된다');
+  assert.equal(SG.verifyScheduleItem('pw-g1a', 'rma-g1a', script, { instance: 'i1' }).ok, true, '엣지가 같은 비밀번호로 검증된다');
+  // 반증 G1a(사용자 결정 '권장안대로'): 인스턴스도 서명 대상 — 같은 법인의 다른 인스턴스로 옮기면 불일치(의도된 변경 — 이 줄 추가)
+  assert.equal(SG.verifyScheduleItem('pw-g1a', 'rma-g1a', script, { instance: 'i2' }).code, 'mismatch');
   assert.equal(tcp.sig, undefined);
   assert.ok(sch.scheduleFor('RMA-G1A').tests.every((x) => !x.sig && !x.sigAt), '중앙 저장본에는 서명을 남기지 않는다');
   assert.ok(!JSON.stringify(b).includes('pw-g1a'), '비밀번호는 선로에 싣지 않는다');

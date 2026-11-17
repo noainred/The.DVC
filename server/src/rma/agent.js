@@ -40,7 +40,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { buildCommand, parseList } from './commands.js';
-import { verifyJob, SKEW_MS, verifyScheduleItem, scheduleSignRequired } from './signing.js';
+import { verifyJob, SKEW_MS, verifyScheduleItem, scheduleSignRequired, scheduleSignInstance } from './signing.js';
 import { runCommand, DEFAULT_MAX_OUTPUT } from './exec.js';
 import { pathAllowed } from './testRunner.js';  // 파일 경로 realpath 검사(점검과 같은 판정)
 import { buildTest } from './tests.js';
@@ -235,10 +235,11 @@ export function testAllowed(id, policy = POLICY) {
  *   받을 때 남긴 판정(sigIssue)은 그대로 이어 간다(창 밖으로 거부된 재전송이 재시작으로 살아나지 않게).
  * @returns {string} 사유('' = 실행 가능)
  */
-export function scheduleSigIssue(t, { fresh = true, now = Date.now(), password = PASSWORD, agent = AGENT } = {}) {
+export function scheduleSigIssue(t, { fresh = true, now = Date.now(), password = PASSWORD, agent = AGENT, instance = INSTANCE } = {}) {
   if (!password || !t || !scheduleSignRequired(t.test)) return '';
   if (!fresh && t.sigIssue) return String(t.sigIssue).slice(0, 300);
-  const v = verifyScheduleItem(password, agent, t, { now, checkWindow: fresh });
+  // 반증 G1a: 서명 대상의 인스턴스는 중앙 rma-poll 이 이 엣지의 instance 를 읽는 규칙과 같게(scheduleSignInstance).
+  const v = verifyScheduleItem(password, agent, t, { now, checkWindow: fresh, instance: scheduleSignInstance(instance) });
   return v.ok ? '' : v.reason;
 }
 
@@ -257,7 +258,7 @@ export function applySchedule(sch, { fresh = true, now = Date.now(), password = 
   // 반증(결정 G1a): 서명 시각 창(±10분) 밖으로만 거부된 항목은 assignKey 가 중앙과 같아 다시 내려오지 않았다 — 시계를 맞춰도 재시작 전까지
   //   그 점검이 영원히 멈췄다(보류에 시한 없음 — 재현). SKEW_MS 뒤 첫 폴에서 한 번 다시 받는다(scheduleAssignKeyForPoll). HMAC 은 맞는 항목만 —
   //   서명 없음 · 불일치는 중앙 비밀번호를 고치면 assignKey(:k 지문)가 바뀌어 다시 내려간다.
-  const windowOnly = fresh && !!password && tests.some((t) => t.sigIssue && verifyScheduleItem(password, AGENT, t, { now, checkWindow: false }).ok);
+  const windowOnly = fresh && !!password && tests.some((t) => t.sigIssue && verifyScheduleItem(password, AGENT, t, { now, checkWindow: false, instance: scheduleSignInstance(INSTANCE) }).ok);
   schedule = { version: Number(sch.version) || 0, assignKey: refetch ? '' : String(sch.assignKey || ''), tests, refetchAt: windowOnly ? now + SKEW_MS : 0 };
   const ids = new Set(tests.map((t) => t.id));
   for (const id of [...nextRun.keys()]) if (!ids.has(id)) nextRun.delete(id);

@@ -5,7 +5,7 @@ import { fetchJson, postJson, putJson, delJson, usePolling, getCurrentUser } fro
 import { requireChanged } from '../changeResult.js';
 import { Loading, ErrorBox, Kpi, Modal } from '../../components/ui.jsx';
 import { rmaLateMark } from './edgeLateText.js'; // v2.631 A6-2631-04: 늦게 도착한 결과 배지
-import { ago, durationText, uptimeText, agentStatus, resultSummary, defaultArgs, argsIssue, groupCatalog, modeLabel, targetHint, statusTone, statusLabel, ownerOtpGate, otpInput } from './remoteCommand.js';
+import { ago, durationText, uptimeText, agentStatus, resultSummary, defaultArgs, argsIssue, groupCatalog, modeLabel, targetHint, statusTone, statusLabel, ownerOtpGate, otpInput, OWNER_OTP_ALWAYS } from './remoteCommand.js';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import DataList from '../../components/DataList.jsx';
@@ -196,7 +196,7 @@ function RunModal({ group, catalog, modes, onClose }) {
   const preset = catalog.find((p) => p.id === cmd);
   const onlineInst = (group?.instances || []).filter((i) => i.online);
   const customBlocked = preset?.shell && !!group && !(instance ? group.instances.find((i) => i.instance === instance)?.allowCustom : group.instances.some((i) => i.online && i.allowCustom));
-  const gate = ownerOtpGate(preset, getCurrentUser());
+  const gate = ownerOtpGate(preset, getCurrentUser(), args);   // 반증 G1a: http-request 는 POST · 본문이면 위험 등급(인수로 판정)
 
   useEffect(() => () => { if (pollRef.current) clearTimeout(pollRef.current); }, []);
 
@@ -211,7 +211,7 @@ function RunModal({ group, catalog, modes, onClose }) {
     if (isSsh && !useStored && (!secret.username || !secret.password)) { setState({ err: '1회 입력 계정의 ID/비밀번호를 입력하세요.' }); return; }
     if (gate.locked) { setState({ err: gate.reason }); return; }
     if (gate.otp && otp.length !== 6) { setState({ err: '이 명령은 본인 OTP(6자리)가 필요합니다.' }); return; }
-    if (preset?.danger && !window.confirm(`'${preset.label}' 은 상태를 바꾸는 명령입니다. ${group.agent}${instance ? `/${instance}` : ''} 에서 실행할까요?`)) return;
+    if ((preset?.danger || gate.need) && !window.confirm(`'${preset.label}' 은 상태를 바꾸는 명령입니다. ${group.agent}${instance ? `/${instance}` : ''} 에서 실행할까요?`)) return;
     setState({ phase: 'submit' });
     try {
       const sentOtp = gate.otp ? otp : '';
@@ -303,6 +303,8 @@ function SettingsModal({ group, modes, defaultMode, onClose }) {
   const [mode, setMode] = useState(group.global ? (defaultMode || 'active-active') : (group.modeExplicit ? group.mode : ''));
   const [primary, setPrimary] = useState(group.primary || '');
   const [pw, setPw] = useState('');
+  const [pwOtp, setPwOtp] = useState('');   // 반증 G1a: 비밀번호 설정 · 해제는 소유자 등급 + 본인 OTP(1회용 — 보낸 뒤 비운다)
+  const pgate = ownerOtpGate(OWNER_OTP_ALWAYS, getCurrentUser());
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
   const [ips, setIps] = useState((group.allowedIps || []).join(', '));
@@ -329,9 +331,13 @@ function SettingsModal({ group, modes, defaultMode, onClose }) {
   };
   const savePw = async (clear) => {
     setErr(''); setMsg('');
+    if (pgate.locked) { setErr(pgate.reason); return; }
+    if (pgate.otp && pwOtp.length !== 6) { setErr('RMA 비밀번호 설정 · 해제는 본인 OTP(6자리)가 필요합니다.'); return; }
+    const sentOtp = pgate.otp ? pwOtp : '';
+    setPwOtp('');
     try {
       // v2.731(A5-01): 400(제어 문자·256자 초과·암호화 정책 잠금)을 성공으로 읽으면 hasPassword 가 없어 '해제했습니다' 라는 반대 방향의 거짓이 됐다.
-      const r = requireChanged(await putJson(`/tools/rma/agents/${encodeURIComponent(group.agent)}/password`, { password: clear ? '' : pw }));
+      const r = requireChanged(await putJson(`/tools/rma/agents/${encodeURIComponent(group.agent)}/password`, { password: clear ? '' : pw, ...(sentOtp ? { otp: sentOtp } : {}) }));
       setMsg(r.hasPassword ? '비밀번호를 등록했습니다 — 이후 명령은 서명되어 전송됩니다(엣지 RMA_PASSWORD 와 같아야 합니다).' : '비밀번호를 해제했습니다(무서명).');
       setPw('');
     } catch (e) { setErr(e.message); }
@@ -362,10 +368,12 @@ function SettingsModal({ group, modes, defaultMode, onClose }) {
         <div className="card" style={{ marginTop: 12 }}>
           <b>RMA 비밀번호(서명)</b> — 현재 {group.hasPassword ? <span style={{ color: TONE.ok }}>등록됨</span> : <span style={{ color: TONE.warn }}>미등록(무서명)</span>}
           <div className="muted">엣지 portal.env 의 <code>RMA_PASSWORD</code> 와 같은 값을 넣습니다. 값은 화면·감사로그에 표시되지 않습니다.</div>
-          <div className="flex gap" style={{ marginTop: 6 }}>
+          {pgate.locked && <div className="muted" style={{ color: TONE.warn, marginTop: 6 }}>🔒 {pgate.reason}</div>}
+          <div className="flex gap" style={{ marginTop: 6, flexWrap: 'wrap' }}>
             <input className="input" type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="비밀번호" />
-            <button className="tab" disabled={!pw} onClick={() => savePw(false)}>등록</button>
-            <button className="tab" disabled={!group.hasPassword} onClick={() => savePw(true)}>해제</button>
+            {pgate.otp && !pgate.locked && <input className="input" style={{ width: 110 }} inputMode="numeric" autoComplete="one-time-code" value={pwOtp} onChange={(e) => setPwOtp(otpInput(e.target.value))} placeholder="본인 OTP" />}
+            <button className="tab" disabled={!pw || pgate.locked} onClick={() => savePw(false)}>등록</button>
+            <button className="tab" disabled={!group.hasPassword || pgate.locked} onClick={() => savePw(true)}>해제</button>
           </div>
         </div>
       )}
@@ -567,6 +575,8 @@ function DeployModal({ preset, groups, onClose }) {
   const [f, setF] = useState({ host: '', port: 22, username: 'root', password: '', agentName: preset.agent || '', centralUrl: '', centralToken: '', rmaPassword: '', registerPassword: true, allowCustom: false,
     serviceUnits: '', allowReboot: false, fileRoots: '', enabledCommands: '', enabledTests: '', remoteManage: false, comment: '' });
   const [instances, setInstances] = useState([{ name: 'default', priority: 100 }]);
+  const [otp, setOtp] = useState('');   // 반증 G1a: 원격 배포는 소유자 등급 + 본인 OTP(1회용 — 보낸 뒤 비운다)
+  const dgate = ownerOtpGate(OWNER_OTP_ALWAYS, getCurrentUser());
   const [busy, setBusy] = useState('');
   const [list, setList] = useState(null);
   const [result, setResult] = useState(null);
@@ -579,9 +589,14 @@ function DeployModal({ preset, groups, onClose }) {
     try { setList(await postJson('/tools/rma/deploy/list', target())); } catch (e) { setErr(e.message); } finally { setBusy(''); }
   };
   const doDeploy = async () => {
-    setBusy('deploy'); setErr(''); setResult(null);
+    setErr(''); setResult(null);
+    if (dgate.locked) { setErr(dgate.reason); return; }
+    if (dgate.otp && otp.length !== 6) { setErr('원격 배포는 본인 OTP(6자리)가 필요합니다.'); return; }
+    const sentOtp = dgate.otp ? otp : '';
+    setOtp('');
+    setBusy('deploy');
     try {
-      const r = await postJson('/tools/rma/deploy', { ...target(), instances, rmaPassword: f.rmaPassword, registerPassword: f.registerPassword, allowCustom: f.allowCustom, agentName: f.agentName, centralUrl: f.centralUrl, centralToken: f.centralToken,
+      const r = await postJson('/tools/rma/deploy', { ...target(), ...(sentOtp ? { otp: sentOtp } : {}), instances, rmaPassword: f.rmaPassword, registerPassword: f.registerPassword, allowCustom: f.allowCustom, agentName: f.agentName, centralUrl: f.centralUrl, centralToken: f.centralToken,
         serviceUnits: f.serviceUnits, allowReboot: f.allowReboot, fileRoots: f.fileRoots, enabledCommands: f.enabledCommands, enabledTests: f.enabledTests, remoteManage: f.remoteManage, comment: f.comment });
       setResult(r);
       if (!r.ok) setErr(r.reason || '배포 실패');
@@ -649,8 +664,10 @@ function DeployModal({ preset, groups, onClose }) {
         <label style={{ alignSelf: 'flex-end' }}><input type="checkbox" checked={f.allowReboot} onChange={(e) => set('allowReboot', e.target.checked)} /> 재부팅 허용(RMA_ALLOW_REBOOT)</label>
         <label style={{ alignSelf: 'flex-end' }}><input type="checkbox" checked={f.remoteManage} onChange={(e) => set('remoteManage', e.target.checked)} /> 원격 관리 수용(RMA_REMOTE_MANAGE)</label>
       </div>
-      <div className="flex gap" style={{ marginTop: 10 }}>
-        <button className="login-btn" disabled={!!busy || !f.host || !f.password} onClick={doDeploy}>{busy === 'deploy' ? '배포 중…' : '배포 / 갱신'}</button>
+      {dgate.locked && <div className="card muted" style={{ borderColor: TONE.warn, marginTop: 10 }}>🔒 {dgate.reason}</div>}
+      <div className="flex gap" style={{ marginTop: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        {dgate.otp && !dgate.locked && <label>본인 OTP <input className="input" style={{ width: 110 }} inputMode="numeric" autoComplete="one-time-code" value={otp} onChange={(e) => setOtp(otpInput(e.target.value))} placeholder="6자리" /></label>}
+        <button className="login-btn" disabled={!!busy || !f.host || !f.password || dgate.locked} onClick={doDeploy}>{busy === 'deploy' ? '배포 중…' : '배포 / 갱신'}</button>
       </div>
       {err && <div className="error-box" style={{ marginTop: 8 }}>{err}</div>}
       {result && (
