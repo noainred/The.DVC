@@ -15,6 +15,7 @@ import { createChangeLogger } from '../util/logThrottle.js';
 import { classifyCentral404 } from '../util/central404.js'; // v2.613 DEPS2613-06·EDGE2613-06: 404 사유(central 꺼짐/거절/엔드포인트 없음) 판정
 import { resilientFetch } from '../util/resilientFetch.js';
 import { applyManagedUsers } from '../auth/auth.js';
+import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // 87회차 ⓓ(85 E3 — 권장안): 중앙 응답은 상한 읽기(형제 pull 과 같게 — 상한 없는 res.json() 금지)
 
 let timer = null;
 let last = null;
@@ -50,7 +51,7 @@ async function _pullUsersConfigNow() {
       return { ok: false, kind: c.kind, reason: c.reason, error: c.reason };
     }
     if (!res.ok) throw new Error(`users-config <- ${res.status}`);
-    const body = await res.json();
+    const body = await readJsonCapped(res, EDGE_RESPONSE_MAX_BYTES, '중앙 응답');
     const users = Array.isArray(body?.users) ? body.users : [];
     const sig = crypto.createHash('sha1').update(JSON.stringify(users)).digest('hex');
     if (sig === lastSig) { last = { at: Date.now(), applied: false, reason: '변경 없음' }; return { ok: true, applied: false, unchanged: true }; }

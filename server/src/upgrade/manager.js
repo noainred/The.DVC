@@ -7,6 +7,7 @@
  * and can be reloaded at runtime. Everything is a no-op unless enabled.
  */
 
+import fs from 'node:fs';
 import path from 'node:path';
 import { currentVersion, config } from '../config.js';
 import { loadSettings, saveSettings, redactSettings, clampPollMs } from './settings.js';
@@ -178,6 +179,34 @@ export function summarizeCollectorPush(results) {
   return { total: list.length, ok: list.filter((r) => r.ok === true).length, items };
 }
 
+/**
+ * 87회차 ⓑ: 자동 적용 고리 판정(순수) — 직전 자동 적용이 이 판(v)을 설치하고 재시작했는데(또는 이미 고리로 멈춘 기록인데) 지금 판이 그보다 낮고,
+ *   받을 판(latest)이 그보다 새롭지 않으면 v, 아니면 null. 버전을 못 읽으면 null(못 읽음 ≠ 고리 — 지어내지 않는다).
+ * @param {object|null} r lastResult  @param {{current:string, latest:(string|null), installDir:string}} o
+ */
+export function stuckApply(r, { current, latest = null, installDir = '' } = {}) {
+  if (!r || typeof r !== 'object' || r.trigger !== 'auto') return null;
+  let v = null;
+  if (r.ok === true && r.restarting === true) v = r.version;
+  else if (r.ok === false && r.code === 'apply-stuck') { if (r.installDir && installDir && r.installDir !== installDir) return null; v = r.target; }
+  if (!v) return null;
+  const c = cmpVersion(v, current);
+  if (c == null || c <= 0) return null;   // 지금 판이 그 판 이상 — 고리가 아니다
+  if (latest) { const l = cmpVersion(latest, v); if (l == null || l > 0) return null; }   // 더 새 판이 나왔다 — 한 번은 시도한다
+  return v;
+}
+
+/**
+ * 87회차 ⓑ: 설치 경로의 실경로가 지금 실행 중인 앱 경로(config.appRoot 실경로)와 다르면 { installDir, appRoot }, 같거나 설치 경로가 없으면 null.
+ *   실경로로 잰다(심볼릭 링크 설치 — /opt/vmware-portal → 판별 폴더 — 는 같은 곳이다). 실경로를 못 읽으면 글자 경로로.
+ */
+export function installDirMismatch(installDir, appRoot = config.appRoot) {
+  if (!installDir || !appRoot) return null;
+  const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+  const a = real(installDir); const b = real(appRoot);
+  return a === b ? null : { installDir: a, appRoot: b };
+}
+
 /** 두 출처(원격 latest · 감시 폴더 버전) 중 큰 버전 — 비교할 수 없는 값은 건너뛴다(v2.740 B-02 ③). */
 function newestVersion(...vs) {
   let best = null;
@@ -271,7 +300,7 @@ export class UpgradeManager {
       auto: autoUpgradeState({
         settings: s, intervalMs: this.timer ? this.armedMs : 0, armedAt: this.timer ? this.armedAt : null,
         lastCheck: sanitizeCheck(this.lastCheck), lastResult: sanitizeResult(this.#lastResult), lastTick: sanitizeTick(this.lastTick),
-        currentVersion: currentVersion(), deferral: this.deferral, now: Date.now(),
+        currentVersion: currentVersion(), deferral: this.deferral, installDirMismatch: installDirMismatch(s.installDir), now: Date.now(),
       }),
       // v2.737: 화면이 수동 적용 전에 '지금 스캔 N개가 끊긴다' 를 경고하고, 대기 중이면 무엇을 기다리는지 말한다.
       // v2.741(TIMING-03): resumable — 재시작 뒤 같은 작업에 다시 붙는 스캔(아이실론 분리 실행 du). 자동 적용은 그 스캔을 기다리지 않는다.
@@ -509,6 +538,27 @@ export class UpgradeManager {
     }
   }
 
+  /**
+   * 87회차 ⓑ(86회차 남긴 것 — 권장안): '이 판을 설치하고 재시작했는데 여전히 옛 판' 이면 자동 적용을 멈춘다(같은 판 재설치 · 재시작 고리 차단).
+   *   설치 경로(installDir)가 실행 중인 앱 경로와 다르면 설치는 성공해도 재시작한 프로세스가 옛 판이라, 기동 직후 확인이 다시 받아 설치 · 재시작했다.
+   *   기록(lastResult)에 사유를 남겨 상태 · 화면('마지막 적용이 실패했습니다' + 사유)에 보인다. 풀림: 지금 판이 그 판 이상 · 더 새 판이 나옴(한 번 시도) ·
+   *   설치 경로 변경 · 수동 적용(기록이 바뀐다). @returns 멈췄는가
+   */
+  #stuckGuard(at, latest) {
+    const s = this.settings;
+    const v = stuckApply(this.#lastResult, { current: currentVersion(), latest, installDir: s.installDir });
+    if (!v) return false;
+    if (this.#lastResult?.code !== 'apply-stuck') {
+      const mm = installDirMismatch(s.installDir);
+      const reason = `v${v} 을(를) 설치하고 재시작했는데 여전히 v${currentVersion()} 로 실행 중이라 자동 적용을 멈췄습니다(같은 판을 다시 설치 · 재시작하는 고리 차단)`
+        + (mm ? ` — 설치 경로 ‘${mm.installDir}’ 가 실행 중인 앱 경로 ‘${mm.appRoot}’ 와 다릅니다. 업그레이드 설정의 설치 경로를 실행 중인 경로로 고치세요.` : ' — 서비스가 새 설치 경로로 재시작했는지(systemd 유닛의 실행 경로) 확인하세요.')
+        + ' 설치 경로를 바꾸거나 ‘업그레이드 적용 + 재시작’ 을 누르면 다시 시도합니다.';
+      console.warn(`[upgrade] ${reason}`);
+      this.lastResult = { at, source: 'auto', trigger: 'auto', ok: false, code: 'apply-stuck', target: v, installDir: s.installDir, reason };
+    }
+    return true;
+  }
+
   #restartTimer() {
     this.#clearDeferral();
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
@@ -560,6 +610,7 @@ export class UpgradeManager {
       else if (checkFailed) rec = { at, outcome: 'check-failed', reason: check.remote.error || null };
       else if (!newer) rec = { at, outcome: 'up-to-date', latest };
       else if (!this.settings.autoApply) rec = { at, outcome: 'available', latest };
+      else if (this.#stuckGuard(at, latest)) rec = { at, outcome: 'apply-failed', latest, reason: this.#lastResult?.reason || null };   // 87회차 ⓑ: 같은 판 재설치 고리
       else if ((dd = this.#deferDecision(latest)).wait) {
         // v2.737: 실행 중 스캔이 끝날 때까지(상한 안에서) 기다린다 — 1분마다 다시 보고 끝나면 곧바로 적용한다(#deferTick).
         const scans = this.deferral?.scans || [];

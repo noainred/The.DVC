@@ -14,6 +14,7 @@ import { config, clampIntervalMs } from '../config.js';
 import { bumpFleetRev } from '../insights/fleetRev.js';
 import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js'; // v2.582 ARCH-3: 상태 파일도 원자 쓰기(절단본 → 로드 실패 → 다음 저장이 빈 값으로 덮어쓰는 왕복 손상 차단)
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
+import { readJsonFile, READ_RETRY_MS } from '../util/jsonFileLoad.js'; // 87회차 ⓐ: 읽기 오류 ≠ 손상(공용 읽기 판정)
 import { capStr, capTrim } from '../util/capStr.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { sanitizeHwSummary, mgmtHostOf } from '../idrac/hwSummary.js'; // v3.3.0 엣지 하드웨어 요약 · iDRAC 주소 정제(엣지 agent/fleetPush.js 와 짝)
@@ -36,19 +37,42 @@ const norm = (s) => String(s || '').trim().toLowerCase();
 
 // null-proto: 에이전트 이름이 '__proto__' 등이어도 프로토타입 오염 없이 일반 키로 저장.
 let cache = Object.create(null); // agent -> { at, generatedAt, baremetal: [...] }
-try {
-  if (fs.existsSync(FILE)) {
-    const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    if (p && typeof p === 'object') cache = Object.assign(Object.create(null), p.fleet || {});
-    // v2.601 CEN2601-03: 상한 이전에 저장된 큰 파일도 에이전트당 상한으로 줄여 올린다(다음 저장이 다시 작아지게).
-    for (const [a, e] of Object.entries(cache)) {
-      if (!e || typeof e !== 'object' || !Array.isArray(e.baremetal)) { delete cache[a]; continue; }
-      if (e.baremetal.length > PER_AGENT_MAX) { e.omitted = (Number(e.omitted) || 0) + (e.baremetal.length - PER_AGENT_MAX); e.baremetal = e.baremetal.slice(0, PER_AGENT_MAX); }
-      // 84회차 F1: 상한 이전에 저장된 긴 generatedAt 도 올릴 때 줄인다(다음 저장이 다시 작아지게)
-      if (typeof e.generatedAt === 'string' && e.generatedAt.length > 40) e.generatedAt = capTrim(e.generatedAt, 40) || null;
-    }
+/** 파일 본문 → 캐시(상한 이전에 저장된 큰 파일도 줄여 올린다). 던지면 손상. */
+function parseFleetFile(text) {
+  const p = JSON.parse(text);
+  const out = p && typeof p === 'object' ? Object.assign(Object.create(null), p.fleet || {}) : Object.create(null);
+  // v2.601 CEN2601-03: 상한 이전에 저장된 큰 파일도 에이전트당 상한으로 줄여 올린다(다음 저장이 다시 작아지게).
+  for (const [a, e] of Object.entries(out)) {
+    if (!e || typeof e !== 'object' || !Array.isArray(e.baremetal)) { delete out[a]; continue; }
+    if (e.baremetal.length > PER_AGENT_MAX) { e.omitted = (Number(e.omitted) || 0) + (e.baremetal.length - PER_AGENT_MAX); e.baremetal = e.baremetal.slice(0, PER_AGENT_MAX); }
+    // 84회차 F1: 상한 이전에 저장된 긴 generatedAt 도 올릴 때 줄인다(다음 저장이 다시 작아지게)
+    if (typeof e.generatedAt === 'string' && e.generatedAt.length > 40) e.generatedAt = capTrim(e.generatedAt, 40) || null;
   }
-} catch (e) { cache = Object.create(null); console.warn(`[central-fleet] ${path.basename(FILE)} 를 읽지 못해 빈 캐시로 시작합니다(엣지의 다음 push 로 채워집니다): ${safeLoadText(e)}`); }
+  return out;
+}
+// 87회차 ⓐ(84회차 남긴 것 ② — 권장안): 공용 읽기 판정(util/jsonFileLoad.js). 예전 catch 하나는 **읽기 오류**(EACCES · EIO)도 '읽지 못해 빈 캐시' 로 보고
+//   다음 저장(5초 디바운스)이 온전한 원본을 그 사이 들어온 몇 엣지분으로 덮었다. 이제 읽기 오류면 원본을 두고 그동안 저장하지 않으며, 저장 시점에
+//   READ_RETRY_MS 간격으로 다시 읽어 읽히면 메모리에 없는 엣지분만 합친다(메모리 쪽이 더 새 push). 손상은 예전과 같다(빈 캐시 — 엣지의 다음 push 로 채워짐).
+let readBlocked = false; let readRetryAt = 0;
+{
+  const r = readJsonFile(FILE, { parse: parseFleetFile, preserve: false });
+  if (r.kind === 'ok') cache = r.value;
+  else if (r.kind === 'read-error') { readBlocked = true; readRetryAt = Date.now() + READ_RETRY_MS; console.warn(`[central-fleet] ${path.basename(FILE)} 읽기 오류(${(capStr(r.error?.code, 32) || 'read-error')}) — 손상이 아니라 원본은 그대로 둡니다 · 읽힐 때까지 저장하지 않습니다(그동안 빈 캐시 — 엣지의 다음 push 로 채워집니다).`); }
+  else if (r.kind === 'corrupt') console.warn(`[central-fleet] ${path.basename(FILE)} 를 읽지 못해 빈 캐시로 시작합니다(엣지의 다음 push 로 채워집니다): ${safeLoadText(r.error)}`);
+}
+/** 87회차 ⓐ: 저장해도 되는가 — 읽기 오류였으면 간격마다 다시 읽어 합친다. 아직 못 읽으면 false. */
+function fleetWritable() {
+  if (!readBlocked) return true;
+  if (Date.now() < readRetryAt) return false;
+  const r = readJsonFile(FILE, { parse: parseFleetFile, preserve: false });
+  if (r.kind === 'read-error') { readRetryAt = Date.now() + READ_RETRY_MS; return false; }
+  if (r.kind === 'ok') { let n = 0; for (const [a, e] of Object.entries(r.value)) if (!(a in cache)) { cache[a] = e; n += 1; } if (n) bumpFleetRev(); }
+  readBlocked = false; readRetryAt = 0;
+  console.warn(`[central-fleet] ${path.basename(FILE)} 다시 읽었습니다(읽기 오류 풀림 — 파일의 엣지분을 합쳤습니다)`);
+  return true;
+}
+/** 87회차 ⓐ: 테스트 · 진단 — 함대 파일을 읽지 못해 저장을 멈춘 상태인가. */
+export function fleetReadBlocked() { return readBlocked; }
 
 let writeTimer = null;
 let writing = false;   // 비동기 원자 쓰기 진행 중
@@ -61,6 +85,7 @@ function persistSoon() {
     // v2.591 L8: 대상 파일에 직접 비동기 쓰기였다(v2.582 ARCH-3 주석은 '원자 쓰기' 라 적었다) — 쓰는 중 종료되면 절단본이
     //   남아 재기동 시 JSON 무효 → 빈 함대로 시작했다(재현: 1MB 시점 exit). 임시 파일에 쓰고 rename 한다(루프를 막지 않게 비동기).
     if (writing) { persistSoon(); return; }
+    if (!fleetWritable()) { persistSoon(); return; }   // 87회차 ⓐ: 읽기 오류 중 — 원본을 덮지 않고 다음 주기에 다시 본다
     writing = true; dirty = false;
     const tmp = `${FILE}.tmp-${process.pid}`;
     (async () => {
@@ -78,6 +103,7 @@ function persistSoon() {
 // 종료(SIGTERM/SIGINT/exit) 시 디바운스 대기 중인 마지막 엣지 보고를 동기로 flush — 재시작 시 ~5초
 // 윈도우 유실 방지. 중앙 역할일 때만 핸들러 등록(테스트/엣지에서 부작용·중복 쓰기 방지).
 export function flushEdgeFleetNow() {
+  if (!fleetWritable()) return;   // 87회차 ⓐ: 읽기 오류 중에는 원본을 덮지 않는다(종료 flush 포함)
   if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; }
   dirty = false;
   try { fs.mkdirSync(path.dirname(FILE), { recursive: true }); atomicWriteFileSync(FILE, JSON.stringify({ fleet: cache }), { mode: 0o600 }); } catch { /* best-effort */ }

@@ -66,6 +66,7 @@ test('G-I1 재발급(회전)의 save 실패 — 옛 항목을 되돌린다(옛 �
 test('G-I1 원자적 쓰기·0600 유지(되돌림 코드가 쓰기 경로를 바꾸지 않았다)', () => {
   const src = fs.readFileSync(new URL('../src/central/agentTokens.js', import.meta.url), 'utf8');
   assert.match(src, /atomicWriteFileSync\(FILE, [^\n]*mode: 0o600/);
-  assert.match(src, /renameSync\(FILE, `\$\{FILE\}\.corrupt\./); // preserveCorrupt — 손상본 보존
+  // 87회차 ⓐ: 손상본 보존은 공용 읽기 판정(makeJsonFileReader preserve:true → preserveCorrupt)이 한다 — 읽기 오류는 옮기지 않는다(그 판정이 가른다).
+  assert.match(src, /makeJsonFileReader\([^\n]*preserve: true/); // preserveCorrupt — 손상본 보존
   if (process.platform !== 'win32') assert.equal(fs.statSync(FILE).mode & 0o777, 0o600);
 });

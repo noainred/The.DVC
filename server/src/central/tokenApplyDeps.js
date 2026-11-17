@@ -77,7 +77,7 @@ export async function upgradeEdgeNow(c, { resolve = resolveBundleBytes, push = p
 export function realTokenApplyDeps(audit) {
   return {
     issue: issueAgentToken, revoke: revokeAgentToken, listTokens: listAgentTokens, tokensLoadError: agentTokensLoadError,
-    findCollector: findCollectorByName, collectorReason: (n) => { const r = resolveCollectorByName(n); return r.issue === 'ambiguous' ? r.reason : ''; }, statusOf: getCollectorStatus, deployTargets: listTargetsRaw, saveTarget,
+    findCollector: findCollectorByName, collectorReason: (n) => { const r = resolveCollectorByName(n); return r.issue === 'ambiguous' ? r.reason : ''; }, statusOf: getCollectorStatus, deployTargets: listTargetsRaw, saveTarget: (b) => saveTarget(b, { auto: true }),   // 87회차 ⓐ: 배포 기록 맞춤은 자동 경로 — 등록부 손상 동안 새 등록부를 만들지 않는다
     pushEdge: (c, token) => pushTokenToEdge(c, token),
     sshApply: forceAgentCentralToken,
     pullStats,   // 반증 F4: '받아들인 요청' 확인

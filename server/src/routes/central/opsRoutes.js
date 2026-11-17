@@ -311,7 +311,7 @@ export function registerOpsRoutes(centralRouter, deps) {
     if (applied.unknown) return res.status(410).json({ ok: false, error: 'unknown-job', reason: '중앙에 이 캡처 잡이 없습니다(만료되었거나 중앙이 재시작됨) — 결과는 반영·이력 기록되지 않았습니다.' });
     if (applied.duplicate) return res.json({ ok: true, duplicate: true });
     // v2.600(CEN2600-09): 엣지 워커가 결과에 싣는 A 호스트(잡 spec.host)를 이력의 hostA 로 — 글자만, 제어문자 제거, 255자.
-    const hostA = typeof b.result?.hostA === 'string' ? b.result.hostA.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 255) : '';
+    const hostA = typeof b.result?.hostA === 'string' ? capStr(b.result.hostA.slice(0, 1024).replace(/[\u0000-\u001f\u007f]/g, '').trim(), 255) : '';   // 87회차: 캡처 이력(최대 300건)에 상주 — capStr 로 평탄화(84 F2 의 형제 · 먼저 자르고 정규식)
     try { if (b.result?.ok) recordCapture(b.result, { source: 'manual', via: 'agent', ...(hostA ? { hostA } : {}) }); } catch { /* */ }
     res.json({ ok: true, ...(applied.late ? { late: true } : {}) });
   });

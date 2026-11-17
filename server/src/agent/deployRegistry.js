@@ -10,6 +10,8 @@ import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { makeJsonFileReader } from '../util/jsonFileLoad.js'; // 85회차 F1: 읽기 오류 ≠ 손상(공용 판정)
+import { corruptOnlyReason } from '../util/registryCore.js'; // 87회차 ⓐ(85 결정): 손상 상태도 등록부 규칙(결정 78 ①)과 같게
+import { capStr } from '../util/capStr.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js';
 import { envPairs, envPairsIssue } from './deploy.js';
@@ -37,16 +39,25 @@ let cache = null;
  */
 const _reader = makeJsonFileReader(() => FILE, { parse: (t) => JSON.parse(t), preserve: false, tag: 'agent-deploy' });
 let _readErr = null;   // { at, code } — 읽기 오류가 서 있는 동안만
+/*
+ * 87회차 ⓐ(85회차 결정 — 권장안: 등록부 결정 78 ① 과 같은 규칙): 손상(파싱 실패)도 **표지**를 세운다 — 예전에는 보존본으로 옮긴 뒤 아무 표지 없이 빈 목록이라
+ *   화면이 '저장된 대상 0개' 였고, 토큰 자동 적용의 '배포 기록 맞춤'(자동 경로)이 그 엣지 하나만 든 새 등록부를 써 손상 사실까지 지웠다.
+ *   규칙: 손상 · 보존본만 남음(재시작 뒤)은 표지 유지 → 관리자 저장(화면 · CSV · 배포 저장)은 새 등록부를 만들며 표지를 푼다(v2.612 규약) ·
+ *   자동 경로(`saveTarget(body, { auto: true })`)는 거절한다(registryCore autoWriteRefusal 과 같은 뜻). 읽기 오류는 위 85 F1 그대로(모든 쓰기 거절).
+ */
+let _corruptErr = null;   // { at, code:'corrupt'|'corrupt-only' } — 관리자 저장이 풀 때까지
 
 function load() {
   if (cache) return cache;
   const r = _reader.read();
   if (r.kind === 'read-error') {
-    _readErr = { at: _readErr?.at || Date.now(), code: String(r.error?.code || 'read-error').slice(0, 32) };
+    _readErr = { at: _readErr?.at || Date.now(), code: capStr(r.error?.code, 32) || 'read-error' };
     return [];   // 캐시하지 않는다 — 이 빈 목록 위의 쓰기는 writeRefusal 이 막는다
   }
   _readErr = null;
   if (r.kind === 'corrupt') preserveCorrupt(FILE, r.error?.message); // v2.322 손상본 보존
+  if (r.kind === 'corrupt') _corruptErr = { at: Date.now(), code: 'corrupt' };   // 87회차 ⓐ: 표지
+  else if (r.kind === 'missing' && !_corruptErr) { let why = null; try { why = corruptOnlyReason(FILE); } catch { why = null; } if (why) _corruptErr = { at: Date.now(), code: 'corrupt-only' }; }
   cache = r.kind === 'ok' ? openSecretsDeep(r.value?.targets || []) : []; // v2.296 배포 SSH/토큰 복호
   if (!Array.isArray(cache)) cache = [];
   return cache;
@@ -58,14 +69,27 @@ function writeRefusal() {
   if (!_readErr) return null;
   return { ok: false, code: 'registry-unreadable', reason: `배포 대상 등록부(agent-deploy-targets.json)를 읽지 못했습니다(${_readErr.code}) — 원본을 그대로 두고 저장하지 않았습니다. 파일 권한 · 디스크를 확인하세요(30초마다 다시 읽습니다)` };
 }
-/** 85회차 F1: 지금 읽기 오류({ at, code }) 또는 null — 화면 · 진단이 '대상 0개' 를 사실대로 말하게. */
-export function deployTargetsLoadError() { load(); return _readErr ? { ..._readErr } : null; }
+/**
+ * 85회차 F1: 지금 읽기 오류({ at, code, readError:true }) 또는 null — 화면 · 진단이 '대상 0개' 를 사실대로 말하게.
+ * 87회차 ⓐ: 손상 · 보존본만 남음도 싣는다({ at, code:'corrupt'|'corrupt-only', corrupt:true } — 관리자 저장이 풀 때까지).
+ */
+export function deployTargetsLoadError() {
+  load();
+  if (_readErr) return { ..._readErr, readError: true };
+  return _corruptErr ? { ..._corruptErr, corrupt: true } : null;
+}
+/** 87회차 ⓐ: 자동 경로의 쓰기 거절(손상 · 보존본만 남음 동안) — 관리자 저장만 새 등록부를 만든다. */
+function autoWriteRefusal() {
+  if (!_corruptErr) return null;
+  return { ok: false, code: 'registry-unreadable', reason: `배포 대상 등록부(agent-deploy-targets.json)가 손상돼 보존본(.corrupt.*)으로 옮겨진 상태라 자동으로 저장하지 않았습니다 — 보존본을 되돌리고 재시작하거나, 설정 › Edge 노드 포탈 설치에서 대상을 다시 저장하세요(관리자 저장이 새 등록부를 만듭니다).` };
+}
 
 function persist() {
   if (_readErr) throw Object.assign(new Error('배포 대상 등록부를 읽지 못한 상태라 저장하지 않습니다(원본 보호)'), { code: 'registry-unreadable' }); // 85회차 F1: 마지막 방어선
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ targets: cache }), null, 2), { mode: 0o600 }); // 암호화 모드면 password/privateKey/토큰 봉인
   try { fs.chmodSync(FILE, 0o600); } catch { /* mode는 신규생성 시에만 적용 — 덮어쓰기에도 0600 보장 */ }
+  _corruptErr = null;   // 87회차 ⓐ: 저장 성공이 손상 표지를 푼다(자동 경로는 위 autoWriteRefusal 이 여기 오기 전에 막는다)
 }
 
 const redact = (t) => {
@@ -96,9 +120,10 @@ export function findTargetByHost(host, port, username) {
     && String(t.username || '') === String(username || '')) || null;
 }
 
-export function saveTarget(body = {}) {
+export function saveTarget(body = {}, { auto = false } = {}) {
   if (!body.host) return { ok: false, reason: 'host는 필수입니다.' };
   const refused = writeRefusal(); if (refused) return refused;   // 85회차 F1
+  if (auto) { const ar = (load(), autoWriteRefusal()); if (ar) return ar; }   // 87회차 ⓐ: 손상 동안 자동 경로(토큰 자동 적용의 배포 기록 맞춤)는 쓰지 않는다
   const list = load();
   const existing = body.id ? list.find((t) => t.id === body.id) : null;
   // 85회차 F2(v2.879 F4 가 '기존 동작' 으로 남긴 것): 캐시 객체를 직접 고치지 않고 사본 위에서 고친다 — 저장이 실패하면(ENOSPC · 봉인 정책 잠금)
@@ -156,7 +181,7 @@ export function saveTarget(body = {}) {
  * @returns {{ ok:true, before:string, target:object } | { ok:false, code:'not-found'|'conflict'|'invalid'|'registry-unreadable', reason:string }}
  */
 export function setTargetAgentName(id, name, { expect } = {}) {
-  const refused = writeRefusal(); if (refused) return refused;   // 85회차 F1(예전에는 빈 목록이라 '찾을 수 없음' 으로 말했다)
+  const refused = writeRefusal() || autoWriteRefusal(); if (refused) return refused;   // 85회차 F1(예전에는 빈 목록이라 '찾을 수 없음' 으로 말했다) · 87회차 ⓐ: 손상 동안도 '찾을 수 없음' 이 아니다
   const list = load();
   const t = list.find((x) => x.id === id);
   if (!t) return { ok: false, code: 'not-found', reason: '배포 대상을 찾을 수 없습니다(그사이 지워졌을 수 있습니다).' };

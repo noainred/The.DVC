@@ -395,6 +395,7 @@ export function keyRows(targets, mainKey, edges) {
  */
 export const EDGE_CALL_TEXT = Object.freeze({
   'not-registered': '메인의 수집 서버 등록부에 이 엣지가 없습니다 — 설정 › 수집 서버(원격)에 엣지 포탈 URL·토큰을 등록하면 바로 보낼 수 있습니다.',
+  ambiguous: '메인의 수집 서버 등록부에 이 표시 이름이 둘 이상이라 어느 엣지인지 정할 수 없습니다 — 설정 › 수집 서버(원격)에서 표시 이름을 겹치지 않게 바꾸세요.',
   'disabled-central': '메인에서 이 수집 서버를 비활성으로 두었습니다 — 설정 › 수집 서버(원격)에서 켜세요.',
   'no-url': '이 수집 서버에 URL 이 없습니다 — 등록부에 엣지 포탈 주소를 넣으세요.',
   timeout: '엣지가 시한 안에 답하지 않았습니다 — 엣지가 바쁘거나 회선이 느립니다.',

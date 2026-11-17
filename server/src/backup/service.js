@@ -494,7 +494,12 @@ export async function restoreCentral(archive, { retention = 30, source = null } 
     // v2.538: 번들의 .env 는 키·토큰이 가려져 있다 — 현재 파일의 값으로 되살리고, 없으면 그 줄을 버린다
     // (빈 값으로 덮어써 AUTH_SECRET 을 지우면 전 세션이 무효가 된다).
     if (path.extname(base).toLowerCase() === '.env') {
-      let cur = ''; try { cur = fs.readFileSync(path.join(CONFIG_DIR, base), 'utf8'); } catch { /* 없음 */ }
+      let cur = ''; let curErr = '';
+      try { cur = fs.readFileSync(path.join(CONFIG_DIR, base), 'utf8'); } catch (e) { if (e?.code !== 'ENOENT') curErr = String(e?.code || 'read-error').slice(0, 32); }
+      // 87회차 R1(재현 — 84 F3 의 형제 경로): 지금 파일의 **읽기 오류**(EACCES · EIO — install.sh 가 안내하는 root 소유 portal.env)를 '없음' 으로 보고 합쳐,
+      //   번들에서 가려진 AUTH_SECRET · CENTRAL_TOKEN 줄을 전부 버리고 호스트에만 있는 보안 스위치 줄도 잃은 파일로 덮었다(failed 0 — 조용히).
+      //   읽기 오류면 이 파일은 복원하지 않는다(지금 파일 그대로 — 79회차 R1 의 SSH 키 저장소와 같은 규칙).
+      if (curErr) { failed.push({ file: base, reason: `지금 ${base} 를 읽지 못해(${curErr}) 복원하지 않았습니다 — 번들에는 키 · 토큰이 가려져 있어 지금 파일과 합쳐야 합니다. 파일 권한 · 소유자를 확인한 뒤 다시 복원하세요(지금 파일은 그대로입니다).` }); continue; }
       const m = mergeRedactedEnv(String(content0), cur);
       content = m.text; envRestored += m.restored; envDropped.push(...m.dropped.map((k) => `${base}:${k}`));
       // 2026-10-09 검토 S-10: 보안 스위치(서명 정책·TLS 예외·인증)는 호스트 값을 유지한다 — 복원이 보호를 약하게 만들지 못하게.

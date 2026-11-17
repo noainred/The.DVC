@@ -23,6 +23,7 @@ import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { readJsonFile } from '../util/jsonFileLoad.js'; // 85회차 F5: 읽기 오류 ≠ 손상(손상이면 readJsonFile 이 preserveCorrupt)
 import { registerStateFile } from '../util/stateFiles.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // 87회차 ⓓ(85 E3 — 권장안): 중앙 응답은 상한 읽기(형제 pull 과 같게 — 상한 없는 res.json() 금지)
 
 let timer = null;
 let last = null;
@@ -155,10 +156,10 @@ export async function runIpScanAgentOnce(...args) {
     if (!aRes.ok) {
       // v2.632(감사 EDGE2632-03): 중앙 스캔 설정 파일 손상은 503 settingsUnreadable — '배정 없음' 이 아니라 사유를 남긴다.
       let why = '';
-      if (aRes.status === 503) { try { const b = await aRes.json(); if (b?.reason === 'settingsUnreadable') why = ` — 중앙 스캔 설정 파일을 읽지 못했습니다(${String(b.detail || '').slice(0, 160)})`; } catch { /* 본문 없음 */ } }
+      if (aRes.status === 503) { try { const b = await readJsonCapped(aRes, 64 * 1024, '중앙 오류 응답'); if (b?.reason === 'settingsUnreadable') why = ` — 중앙 스캔 설정 파일을 읽지 못했습니다(${String(b.detail || '').slice(0, 160)})`; } catch { /* 본문 없음 */ } }
       throw new Error(`assignment ${aRes.status}${why}`);
     }
-    const a = await aRes.json();
+    const a = await readJsonCapped(aRes, EDGE_RESPONSE_MAX_BYTES, '중앙 응답');
     _lastCheckAt = Date.now();
     if (!a?.assigned) { _centralIntervalMs = null; last = { at: Date.now(), assigned: false }; return last; }
     _centralIntervalMs = centralIntervalOf(a.intervalMs);

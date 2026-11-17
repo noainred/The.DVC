@@ -408,7 +408,9 @@ function agentTokensUnreadable(res) {
   let e = null;
   try { e = agentTokensLoadError(); } catch { e = null; }
   if (!e) return false;
-  persistent503(res).json({ ok: false, reason: 'registryUnreadable', detail: `중앙 엣지 개별 토큰 파일(central-agent-tokens.json)을 읽지 못했습니다(${e.text}) — 엣지는 직전 상태를 유지하고 다시 시도합니다. 중앙 설정 디렉터리의 손상 보존본을 되돌리거나 토큰을 다시 발급하세요.`, since: e.at || null });
+  // 87회차 ⓐ: 읽기 오류(권한 · 소유자 — 원본은 그대로)와 손상(보존본으로 옮김)은 조치가 다르다 — 읽기 오류에 '다시 발급' 을 안내하지 않는다(발급은 거절된다).
+  const fix = e.readError ? '중앙 설정 디렉터리의 그 파일 권한 · 소유자(포탈 서비스 계정) · 디스크를 확인하세요(읽히면 재시작 없이 풀립니다).' : '중앙 설정 디렉터리의 손상 보존본을 되돌리거나 토큰을 다시 발급하세요.';
+  persistent503(res).json({ ok: false, reason: 'registryUnreadable', detail: `중앙 엣지 개별 토큰 파일(central-agent-tokens.json)을 읽지 못했습니다(${e.text}) — 엣지는 직전 상태를 유지하고 다시 시도합니다. ${fix}`, since: e.at || null });
   return true;
 }
 
@@ -641,19 +643,20 @@ centralRouter.post('/capacity-report', requireCentral(), async (req, res) => {
     const rawRows = Array.isArray(b.rows) ? b.rows.slice(0, 64) : [];   // 수집기 수 상한(폭주 방어)
     const rows = [];
     for (const r of rawRows) {
-      const metric = typeof r?.metric === 'string' ? r.metric.slice(0, 40) : '';
+      const metric = typeof r?.metric === 'string' ? capStr(r.metric, 40) : '';   // 87회차: 평탄화(메모리 폴백 저장소에 상주 — `.slice` 는 원문을 붙잡는다)
       const v = Number(r?.v);
       if (metric && /^[a-z0-9_]+$/.test(metric) && Number.isFinite(v)) rows.push({ metric, v });
     }
     const meta = b.meta && typeof b.meta === 'object'
       ? {
-        hostname: String(b.meta.hostname || '').slice(0, 100),
-        platform: String(b.meta.platform || '').slice(0, 20),
+        // 87회차: capStr — 메모리 폴백 저장소(capacity/db.js initMemory)는 meta 를 그대로 상주시킨다(84 F2 의 형제 · `.slice` 는 원문을 붙잡는다)
+        hostname: capStr(b.meta.hostname, 100),
+        platform: capStr(b.meta.platform, 20),
         cores: Number(b.meta.cores) || 0,
         totalMemMB: Number(b.meta.totalMemMB) || 0,
-        nodeVersion: String(b.meta.nodeVersion || '').slice(0, 20),
-        portalVersion: String(b.meta.portalVersion || '').slice(0, 20),
-        role: String(b.meta.role || '').slice(0, 10),
+        nodeVersion: capStr(b.meta.nodeVersion, 20),
+        portalVersion: capStr(b.meta.portalVersion, 20),
+        role: capStr(b.meta.role, 10),
         intervalMs: Number(b.meta.intervalMs) || 0,
       }
       : {};
@@ -1664,7 +1667,9 @@ function registryUnreadable(res, errOf, what) {
   // v2.744(리드 후속 RY): 사유는 중앙 등록부 로드 오류 **원문**(JSON.parse 메시지 = 손상된 자격증명 파일 조각)이 아니라 요약이다 —
   //   이 응답은 엣지로 가서 그 엣지의 설정 pull 상태·콘솔(→ 엣지 로그)에 실린다. 원문은 중앙의 보존본 파일에 있다. 문장 모양은 그대로다.
   const why = summarizeRegistryError(e)?.text || '사유 미상';
-  persistent503(res).json({ ok: false, reason: 'registryUnreadable', detail: `중앙 ${what} 등록부를 읽지 못했습니다(${why}) — 엣지는 직전 목록을 유지합니다. 중앙 설정 디렉터리의 손상 보존본을 복구하거나 등록을 다시 저장하세요.`, since: e.at || null });
+  // 87회차 ⓐ: 읽기 오류(readError — 원본은 그대로 · 저장은 거절된다)에 '보존본 복구 · 다시 저장' 을 안내하지 않는다.
+  const fix = e.readError ? '중앙 설정 디렉터리의 그 파일 권한 · 소유자(포탈 서비스 계정) · 디스크를 확인하세요(읽히면 재시작 없이 풀립니다).' : '중앙 설정 디렉터리의 손상 보존본을 복구하거나 등록을 다시 저장하세요.';
+  persistent503(res).json({ ok: false, reason: 'registryUnreadable', detail: `중앙 ${what} 등록부를 읽지 못했습니다(${why}) — 엣지는 직전 목록을 유지합니다. ${fix}`, since: e.at || null });
   return true;
 }
 

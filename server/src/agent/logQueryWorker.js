@@ -9,6 +9,7 @@ import { resilientFetch } from '../util/resilientFetch.js';
 import { createChangeLogger } from '../util/logThrottle.js';
 import { getLogsDb } from '../logs/db.js';
 import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT2620-02)
+import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // 87회차 ⓓ(85 E3 — 권장안): 중앙 응답은 상한 읽기(형제 pull 과 같게 — 상한 없는 res.json() 금지)
 
 let timer = null;
 let running = false; // 재진입 방지
@@ -61,7 +62,7 @@ async function runLogQueryWorkerInner() {
       if (_logChange('인출', _last.error)) console.warn(`[logq-agent] 인출 실패: ${_last.error}`);
       return null;
     }
-    const { queries } = await r.json();
+    const { queries } = await readJsonCapped(r, EDGE_RESPONSE_MAX_BYTES, '중앙 응답');
     if (!queries || !queries.length) { _last = { at: Date.now(), ms: Date.now() - t0, ok: true, queries: 0 }; return null; }
     const db = await getLogsDb();
     let sent = 0; const failures = [];

@@ -110,8 +110,8 @@ function persistEnv(key, val) {
 }
 
 /**
- * v2.776(엣지 개별 토큰 자동 적용): env 파일 한 키를 **엄격하게** 바꾼다 — 읽지 못하면 던진다(위 persistEnv 는 읽기 실패를 빈 파일로 보고
- *   그 한 줄만 남긴 파일을 쓴다 — 토큰 하나 바꾸려다 portal.env 전체를 잃는다). 되돌리기용으로 바꾸기 전 원문을 돌려준다(파일이 없었으면 null).
+ * v2.776(엣지 개별 토큰 자동 적용): env 파일 한 키를 **엄격하게** 바꾼다 — 읽지 못하면 던진다(87회차 정정: 위 persistEnv 도 84회차 F3 부터
+ *   같은 규칙이다 — 예전에는 읽기 실패를 빈 파일로 보고 그 한 줄만 남긴 파일을 썼다). 되돌리기용으로 바꾸기 전 원문을 돌려준다(파일이 없었으면 null).
  * @returns {{ prevText: string|null, file: string }}
  */
 export function upsertEnvKeyStrict(key, val, file = ENV_FILE) {

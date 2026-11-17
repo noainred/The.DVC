@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useHashTab } from '../hooks/useHashTab.js';
 import { fetchJson, postJson, putJson, delJson, canCsv } from '../api.js';
 import { droppedSecretNote } from './droppedSecretText.js';
-import { readFailText, installerState } from './readFailText.js'; // v2.733(C5-02): 조회 실패를 '0개·패키지 없음' 으로 그리지 않는다
+import { readFailText, installerState, deployTargetsUnreadableText } from './readFailText.js'; // v2.733(C5-02): 조회 실패를 '0개·패키지 없음' 으로 그리지 않는다
 import { pkgFormFromResponse, pkgSavePayload, pkgPlaceholder } from './pkgSettingsText.js';
 import { Loading } from '../components/ui.jsx';
 // CSV 일괄 관리(v2.339) — 검증 드라이런 → 덮어쓰기 확인 → 실행. 공용 모달(수집 서버 CSV UX).
@@ -28,6 +28,7 @@ export default function AgentDeploy() {
   // v2.733(C5-02): 조회 실패는 따로 든다 — 예전에는 catch 가 대상을 '(0)·없습니다', 설치 패키지를 '찾을 수 없습니다'(틀린 원인 + 배포 잠금)로 그렸다.
   const [targetsErr, setTargetsErr] = useState(null);
   const [targetsLoaded, setTargetsLoaded] = useState(false); // 한 번이라도 성공했는가(직전 값 유지 판단)
+  const [targetsLoadErr, setTargetsLoadErr] = useState(null); // 87회차 ⓐ: 서버가 등록부를 읽지 못함(읽기 오류 · 손상) — 빈 목록 ≠ 대상 없음
   const [installerErr, setInstallerErr] = useState(null);
   const [pkg, setPkg] = useState(null);
   const [dl, setDl] = useState({ kinds: ['installer_cent9'], version: '', busy: false });
@@ -55,7 +56,7 @@ export default function AgentDeploy() {
   };
   // v2.733(C5-02): 실패면 직전 목록을 지우지 않고(있으면) 사유를 말한다 — 빈 목록 '(0)' 으로 그리지 않는다.
   const loadTargets = () => fetchJson('/admin/agent-deploy/targets')
-    .then((d) => { setTargets(Array.isArray(d?.targets) ? d.targets : []); setTargetsLoaded(true); setTargetsErr(null); })
+    .then((d) => { setTargets(Array.isArray(d?.targets) ? d.targets : []); setTargetsLoadErr(d?.loadError && typeof d.loadError === 'object' ? d.loadError : null); setTargetsLoaded(true); setTargetsErr(null); })
     .catch((e) => setTargetsErr(e || new Error('배포 대상 조회 실패')));
   // 실행 중 서버의 중앙 토큰/기본값을 읽어 폼에 자동 입력.
   const [showCentralToken, setShowCentralToken] = useState(false);   // v2.500: 중앙 토큰 가리기 토글
@@ -395,7 +396,7 @@ export default function AgentDeploy() {
       {subtab === 'status' && (
         <div className="card" style={{ marginBottom: 14 }}>
           <div className="flex between wrap" style={{ alignItems: 'center', marginBottom: 8 }}>
-            <b style={{ fontSize: 14 }}>저장된 대상 ({targetsLoaded ? targets.length : '—'})</b>
+            <b style={{ fontSize: 14 }}>저장된 대상 ({targetsLoaded && !targetsLoadErr ? targets.length : '—'})</b>
             <span className="flex gap" style={{ alignItems: 'center' }}>
               {csvOk && <button className="logout-btn" style={{ flex: 'none', padding: '8px 14px' }} title="저장된 배포 대상을 CSV 로 내려받기(기본 비밀값 제외)" onClick={() => setCsvModal('export')}>⤓ CSV</button>}
               {csvOk && <button className="logout-btn" style={{ flex: 'none', padding: '8px 14px' }} title="CSV 로 배포 대상 일괄 등록/수정 — 검증(드라이런) 후 덮어쓰기 확인" onClick={() => setCsvModal('import')}>⤒ CSV 가져오기</button>}
@@ -425,8 +426,9 @@ export default function AgentDeploy() {
           {targetsFail && (
             <div className="banner warn" style={{ marginBottom: 8 }}>{targetsFail} <button className="tab" style={{ marginLeft: 6, padding: '2px 10px' }} onClick={loadTargets}>다시 읽기</button></div>
           )}
+          {targetsLoadErr && <div className="banner warn" style={{ marginBottom: 8 }}>{deployTargetsUnreadableText(targetsLoadErr)}</div>}
           {targets.length === 0
-            ? (targetsLoaded ? <span className="muted" style={{ fontSize: 13 }}>저장된 대상이 없습니다. '➕ 에이전트 추가' 탭에서 대상을 저장한 뒤 여기서 배포·상태확인·관리하세요.</span> : null)
+            ? (targetsLoaded && !targetsLoadErr ? <span className="muted" style={{ fontSize: 13 }}>저장된 대상이 없습니다. '➕ 에이전트 추가' 탭에서 대상을 저장한 뒤 여기서 배포·상태확인·관리하세요.</span> : null)
             : <div className="table-wrap">
             <STable>
               <thead><tr>
@@ -477,6 +479,7 @@ export default function AgentDeploy() {
             {result.warn && <div style={{ color: 'var(--amber)', marginTop: 4 }}>⚠ {result.warn}</div>}
             {result.glibc && result.kind !== 'test' && result.ok === false && <div style={{ color: 'var(--amber)', marginTop: 4 }}>glibc: {result.glibc}</div>}
             {result.active && <div>서비스 상태: <b style={{ color: result.ok ? 'var(--green)' : 'var(--red)' }}>{result.active}</b>{result.version ? ` · 버전 ${result.version}` : ''}{result.installer ? ` · 설치 패키지 ${result.installer}` : ''}{result.detail ? ` · ${result.detail}` : ''}</div>}
+            {result.kind === 'deploy' && result.targetSaved === false && result.targetSaveReason && <div style={{ color: 'var(--amber)', marginTop: 4 }}>⚠ 배포 대상 저장 안 됨 — {result.targetSaveReason}</div>}
             {result.collector && (result.collector.registered
               ? <div style={{ color: 'var(--green)', marginTop: 4 }}>✅ 중앙 '수집 서버'에 {result.collector.updated ? '갱신' : '자동 등록'}됨 — id <code>{result.collector.id}</code> · <code>{result.collector.url}</code></div>
               : <div style={{ color: 'var(--amber)', marginTop: 4 }}>⚠ 수집 서버 자동 등록 건너뜀{result.collector.reason ? ` — ${result.collector.reason}` : ''}</div>)}

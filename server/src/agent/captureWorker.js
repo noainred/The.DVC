@@ -9,6 +9,7 @@ import { createChangeLogger } from '../util/logThrottle.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { runTrafficCapture, runDualCapture } from '../net/tcpdump.js';
 import { agentHeaders, withAgentQuery } from './agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
+import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // 87회차 ⓓ(85 E3 — 권장안): 중앙 응답은 상한 읽기(형제 pull 과 같게 — 상한 없는 res.json() 금지)
 
 let timer = null;
 let busy = false;
@@ -39,7 +40,7 @@ function headers() {
 const _logChange = createChangeLogger({ windowMs: 10 * 60_000 });
 async function httpFail(stage, r) {
   let reason = '';
-  try { const b = await r.json(); reason = String(b?.reason || b?.error || '').slice(0, 200); } catch { /* 본문 없음 */ }
+  try { const b = await readJsonCapped(r, 64 * 1024, '중앙 오류 응답'); reason = String(b?.reason || b?.error || '').slice(0, 200); } catch { /* 본문 없음 */ }
   const msg = `${stage} HTTP ${r.status}${reason ? ` — ${reason}` : ''}`;
   _last = { at: Date.now(), ok: false, error: msg, status: r.status };
   if (_logChange(stage, msg)) console.warn(`[capture-agent] ${msg}`);
@@ -52,7 +53,7 @@ async function postResult(url, body, timeoutMs) {
   catch (e) { const msg = `결과 회신 실패 — ${String(e?.message || e).slice(0, 200)}`; if (_logChange('회신', msg)) console.warn(`[capture-agent] ${msg}`); return msg; }
   if (r.ok) return null;
   let reason = '';
-  try { const b = await r.json(); reason = String(b?.reason || b?.error || '').slice(0, 200); } catch { /* 본문 없음 */ }
+  try { const b = await readJsonCapped(r, 64 * 1024, '중앙 오류 응답'); reason = String(b?.reason || b?.error || '').slice(0, 200); } catch { /* 본문 없음 */ }
   const msg = `결과 회신 HTTP ${r.status}${reason ? ` — ${reason}` : ''}`;
   if (_logChange('회신', msg)) console.warn(`[capture-agent] ${msg}`);
   return msg;
@@ -65,7 +66,7 @@ export async function runCaptureWorkerOnce() {
     const url = `${config.agent.centralUrl}/api/central/capture-jobs?agent=${encodeURIComponent(config.agent.name)}`;
     const r = await resilientFetch(url, { headers: headers(), timeoutMs: 15_000, retries: 2 });
     if (!r.ok) return await httpFail('인출', r);
-    const { jobs } = await r.json();
+    const { jobs } = await readJsonCapped(r, EDGE_RESPONSE_MAX_BYTES, '중앙 응답');
     // v2.600 EDGE2600-07: 인출이 성공했으면 잡이 0건이어도 상태를 갱신한다 — 예전에는 `return null` 로 끝나
     //   한 번 받은 403 상태가 이후 정상 인출이 계속돼도 화면에 남았다(끈적한 오류).
     if (!jobs || !jobs.length) { _last = { at: Date.now(), ok: true, jobs: 0 }; return null; }

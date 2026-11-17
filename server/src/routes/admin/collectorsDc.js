@@ -215,7 +215,12 @@ adminRouter.get('/collectors', adminOnly, fleetOnly, (_req, res) => {
   // v2.775: 마지막 자동 적용의 수집 서버 push 결과(재시작 전에 파일로 남긴 것)를 상태에 합치고, 요약(autoPush)을 함께 싣는다 — 화면이 '왜 자동 업그레이드가 안 됐는지' 를 말한다.
   const lr = upgradeManager.lastResult;
   const cp = lr?.collectorPush;
-  const autoPush = cp && Number.isFinite(Number(lr.at)) ? { at: lr.at, version: lr.version || null, total: cp.total ?? 0, ok: cp.ok ?? 0, ...(cp.skipped ? { skipped: cp.skipped } : {}) } : null;
+  // 87회차 ⓒ(86회차 남긴 것 — 권장안): '이미 최신'(엣지가 /dl 로 먼저 올라감 — 실패가 아니다 · v2.859) · '설치 대기'(ok 이지만 아직 설치 전 · 51회차 #3) 수를 따로 싣는다 —
+  //   예전 한 줄은 ok 만 세어 이미 최신 엣지를 '실패' 로 셌다(화면 'n/m 성공 — 실패한 서버는…'). 항목은 64개까지라(summarizeCollectorPush) 그 안에서 센다.
+  const cpItems = Array.isArray(cp?.items) ? cp.items : [];
+  const upToDate = cpItems.filter((i) => i && i.ok !== true && i.upToDate === true).length;
+  const deferred = cpItems.filter((i) => i && i.ok === true && i.deferred === true).length;
+  const autoPush = cp && Number.isFinite(Number(lr.at)) ? { at: lr.at, version: lr.version || null, total: cp.total ?? 0, ok: cp.ok ?? 0, ...(upToDate ? { upToDate } : {}), ...(deferred ? { deferred } : {}), ...(cp.skipped ? { skipped: cp.skipped } : {}) } : null;
   // v2.865 C: 엣지 자동 업그레이드 동기화 상태(켜짐·다음·마지막·뒤처진 엣지) — 수집 서버 화면이 한 줄로 말하고 '구버전 엣지 밀어 넣기' 버튼을 연다.
   res.json({ collectors, dcMatch, loadError: registryLoadErrorSummary(), status: mergeAutoPushStatus(allCollectorStatus(), lr), autoPush, identity: agentIdentitySummary(), transport: transportView(collectors), edgeSync: upgradeManager.edgeSync.status() });
 });
