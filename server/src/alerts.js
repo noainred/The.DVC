@@ -269,7 +269,10 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
   //   아니다). 이미 발생 중인 것은 목록에서 빠지지만 위 unreadVc 로 해소가 보류된다(HELD_MAX_MS 규칙 그대로) — 재발송도 없다.
   const reasons = unreadVcenterReasons(snap);
   const staleVc = new Set([...reasons].filter(([, r]) => r === 'stale').map(([id]) => id));
-  const fresh = (x) => !staleVc.has(String(x?.vcenterId ?? ''));
+  // 126회차(재현): v2.768 은 신규 억제를 stale(낡은 위임)에만 걸었다 — **점검중**(직전 캐시를 기한 없이 서빙) · **수집 실패 이월**(LASTGOOD — 최대 6시간)
+  //   vCenter 의 마지막 값(DS 92% · 끊긴 호스트 · 위험 경보)은 목록에 계속 실려 쿨다운마다 '지금 발생 중' 으로 재발송됐다(점검중은 끝없이).
+  //   공용 판정의 세 사유 전부를 '지금 값이 아니다' 로 본다 — 이미 발생 중인 것은 unreadVc 로 해소가 보류되고(HELD_MAX_MS) 다시 읽히면 그때 판정한다.
+  const fresh = (x) => !reasons.has(String(x?.vcenterId ?? ''));
   // v2.720(감사 B1-01): 상한으로 잘린 꼬리는 '발생 중인데 이번 목록에 안 실린 것' 이다 — 순서만 바뀌어 101번째로 밀린
   //   알림을 해소로 기록하고 다시 들어오면 새 알림으로 재발송하던 것. 잘린 항목의 키를 판정 보류로 둔다.
   const holdTail = (list, cap, keyOf) => { for (const x of list.slice(cap)) { const k = keyOf(x); if (k) held.add(k); } return list.slice(0, cap); };
@@ -404,7 +407,17 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
       const k = `${v.vcenterId} ${v.cluster || 'standalone'}`;
       const c = byC.get(k); if (c) { c.vcpu += v.cpuCount || 0; c.ramGB += (v.memMB || 0) / 1024; }
     }
+    // 126회차(재현): 지금 값을 읽지 못한 vCenter(점검중 · 수집 실패 · 낡은 위임 · 첫 수집 중 · 비활성 — unreadVc)의 클러스터는 판정하지 않는다.
+    //   예전에는 ① 그 vCenter 의 마지막 인벤토리로 오버커밋을 새로 내고 쿨다운마다 재발송했고(alarm/host/ds 와 달리 stale 도 거르지 않았다)
+    //   ② 보존 창을 넘겨 인벤토리가 비면 클러스터가 byC 에서 사라져 발생 중이던 알림이 **'해소'** 로 나갔다(45회차 F1 gpualloc 과 같은 꼴 —
+    //   이 키들은 vcenterId 필드가 없어 tick 의 UNREAD_VC_KEY_RE 보류에도 걸리지 않았다). 키가 `<종류>:<vCenter id>:<클러스터>` 라 접두로 보류한다
+    //   (사라진 클러스터까지 덮는다 · 범위 판정 routes/admin/opsSettings.js alertVcenterOf 와 같은 접두 대조).
+    for (const id of unreadVc) {
+      if (R.ramOvercommitPct?.enabled) heldPrefixes.add(`ramoc:${id}:`);
+      if (R.vcpuPerCore?.enabled) heldPrefixes.add(`vcpuoc:${id}:`);
+    }
     for (const c of byC.values()) {
+      if (unreadVc.has(String(c.vc))) continue;   // 126회차: 위 접두 보류 — 새로 내지도 해소하지도 않는다
       // 9회차 보완: 판정을 건너뛴 클러스터는 '해소' 가 아니라 '모름' 이다 — 이미 발생 중인 오버커밋 알림이 호스트 하나가 끊긴 순간
       //   거짓 '해소' 알림을 내지 않게 보류 키로 둔다(HELD_MAX_MS 시한 그대로 — 오래 못 읽으면 알림 없이 끊긴다).
       if (c.capUnknown) {

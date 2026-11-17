@@ -197,7 +197,7 @@ ISO 문자열이 섞여 나오지 않습니다.
     "storageCapacityGB": 1157120, "storageUsedGB": 800543, "storageCapacityAllGB": 1157120, "datastoresUsageUnknown": 0,
     "vmVcpu": 11957, "vmRamMB": 44269568, "vmProvisionedGB": 736552, "vmStorageUnknown": 0
   },
-  "meta": { "scopedToVcenters": null, "collectedAt": 1789727271549 }
+  "meta": { "scopedToVcenters": null, "collectedAt": 1789727271549, "notCurrentVcenters": 0, "notCurrentVcenterIds": [] }
 }
 ```
 
@@ -208,6 +208,9 @@ ISO 문자열이 섞여 나오지 않습니다.
 > ⚠ (v2.732) 다만 스냅샷 안의 **엣지 위임 vCenter 값은 그 엣지가 마지막으로 보낸 값**입니다 — 엣지의 보고가 끊기면 합계에
 > 낡은 값이 섞입니다. 그런 vCenter 수는 `/inventory/collection` 의 `stale`, 어느 vCenter 인지와 실제 수신 시각은
 > `/inventory/vcenters` 의 행 `stale`·`collectedAt` 으로 확인하세요.
+> ⚠ (126회차) 이 응답의 `meta.notCurrentVcenters`(개수)·`meta.notCurrentVcenterIds`(범위 안 vCenter id)가 **수집이 멈춘 vCenter**
+> (점검중 · 접속 실패 · 엣지 보고 끊김)를 바로 밝힙니다 — 그 vCenter 의 값은 마지막으로 읽은 값이고 합계에 그대로 들어 있습니다.
+> 하나라도 있으면 `meta.note` 가 같은 사실을 문장으로 말합니다(없으면 `note` 없음).
 
 ### 7-2. `GET /inventory/vcenters` — vCenter 별 개수·상태
 
@@ -226,7 +229,7 @@ ISO 문자열이 섞여 나오지 않습니다.
   "meta": {
     "scopedToVcenters": null, "count": 11, "truncated": false, "omitted": 0, "limit": 5000,
     "staleCount": 0, "alarmsUnknownCount": 0,
-    "note": "stale:true 인 행은 지금 값이 아닙니다 — collectedAt 이 그 값을 받은 시각입니다. alarms:null 은 경보를 조회하지 않은 vCenter(0 건이 아닙니다)."
+    "note": "stale:true 인 행은 지금 값이 아닙니다 — collectedAt 이 그 값을 받은 시각입니다(점검중이라 그 시각을 모르면 null). alarms:null 은 경보를 조회하지 않은 vCenter(0 건이 아닙니다)."
   }
 }
 ```
@@ -240,6 +243,8 @@ ISO 문자열이 섞여 나오지 않습니다.
 > ⚠⚠ **`stale: true` 인 행은 지금 값이 아닙니다.** 엣지 위임 vCenter 는 엣지의 보고가 끊겨도 `status` 가 **엣지가 마지막으로 보낸
 > 값 그대로**(대개 `connected`)입니다 — `status` 만 보고 '정상' 으로 판정하지 마세요. 접속 실패 이월은 `status: "unreachable"` 이면서
 > `stale: true` 입니다. `meta.staleCount` 가 그 행 수입니다.
+> ⚠ (126회차) **점검중(`status: "maintenance"`) 행도 `stale: true` 입니다** — 포탈은 점검중 vCenter 의 수집을 멈추고 직전 값을 기한 없이
+> 보여 줍니다. 그 값을 받은 시각을 모르면 `collectedAt` 은 `null` 입니다(예전에는 스냅샷 시각 — '방금 수집' 으로 나갔습니다).
 > ⚠ (v2.732) **`alarms: null` 은 경보 0 건이 아닙니다** — 그 vCenter 는 REST 폴백으로 수집돼 경보를 **조회하지 않았습니다.**
 > 개수는 `meta.alarmsUnknownCount` 입니다. 합계를 낼 때 0 으로 더하지 말고 빼고 몇 곳을 뺐는지 밝히세요.
 
@@ -291,6 +296,9 @@ ISO 문자열이 섞여 나오지 않습니다.
 
 > ⚠ `capacityGB` 가 0 이거나 `usedGB` 를 읽지 못하면 **`usedPct` 는 `null`** 입니다
 > (0 으로 나눈 값을 지어내지 않습니다). `freeGB` 도 같은 규칙입니다.
+> ⚠⚠ (126회차) **수집이 멈춘 vCenter 의 행은 마지막으로 읽은 용량입니다** — 행은 그대로 싣고(지우면 '데이터스토어 없음' 이 됩니다)
+> `meta.notCurrentVcenters`(개수)·`meta.notCurrentVcenterIds`(범위 안 vCenter id — 점검중 · 접속 실패 · 엣지 보고 끊김)로 밝힙니다.
+> 용량 경보를 걸 때 그 vCenter 의 행은 '지금 값' 으로 쓰지 마세요. 오래 멈춰 인벤토리가 빈 vCenter 는 행이 없습니다 — 0 개가 아니라 모르는 것입니다.
 
 ### 7-5. `GET /capacity/storage` — 스토리지 장비 용량
 
@@ -392,11 +400,14 @@ ISO 문자열이 섞여 나오지 않습니다.
 > ⚠⚠ (v2.732) **경보를 조회하지 않은 vCenter 가 있습니다** — REST 폴백으로 수집된 vCenter 는 경보를 읽지 않으므로 그 vCenter 의 행이
 > 없는 것은 '경보 0 건' 이 아닙니다. `meta.alarmsUnknownVcenters`(개수)·`meta.alarmsUnknownVcenterIds`(범위 안 vCenter id 목록)가
 > 그 vCenter 를 밝히고, `meta.note` 가 같은 사실을 문장으로 말합니다.
+> ⚠ (126회차) **수집이 멈춘 vCenter 의 경보는 마지막으로 읽은 목록입니다**(새 경보 · 해소를 모릅니다) —
+> `meta.notCurrentVcenters`·`meta.notCurrentVcenterIds` 가 그 vCenter 를 밝힙니다(7-4 와 같은 판정).
 
 ```json
 "meta": {
   "scopedToVcenters": null, "count": 58, "truncated": false, "omitted": 0, "limit": 5000,
   "mutedCount": 0, "alarmsUnknownVcenters": 0, "alarmsUnknownVcenterIds": [],
+  "notCurrentVcenters": 0, "notCurrentVcenterIds": [],
   "note": "음소거된 알람도 포함하고 muted:true 로 표시합니다 — 목록에서 빼지 않습니다."
 }
 ```

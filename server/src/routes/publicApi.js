@@ -30,6 +30,7 @@ import { buildOpenApi } from '../publicapi/openapi.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { clusterCountOf } from '../clustercfg/analyze.js'; // v2.743 LEFT-07 — 내부 /summary 와 같은 클러스터 개수
 import { msOrNull } from '../publicapi/time.js';
+import { unreadVcenterReasons } from '../metrics/unreadVcenters.js';   // 126회차: '지금 값이 아닌 vCenter' 공용 판정(지표 샘플러 · 알림 · /metrics 와 한 벌)
 import { isAdminReq, addressMatcher, extendMatcher, maskedNameLabel } from '../auth/addressMask.js';
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
@@ -106,6 +107,19 @@ async function storageNameMasker() {
     return match(row?.name) ? maskedNameLabel({ type: row?.type, deviceId: row?.deviceId }) : null;
   };
 }
+
+/**
+ * 126회차(공통 스윕 — 수집이 멈춘 vCenter 의 마지막 값): 범위 안에서 **지금 값이 아닌** vCenter 의 표지(meta 조각).
+ *   store 는 수집이 멈춘 vCenter(점검중 · 수집 실패 이월 · 담당 엣지의 보고 끊김)의 마지막 인벤토리를 계속 서빙한다 — 그 데이터스토어 용량 · 경보 · 합계가
+ *   이 응답에 그대로 실린다. 예전에는 그 사실이 `/inventory/vcenters` · `/inventory/collection` 에만 있어 용량 · 경보만 읽는 소비자는 알 길이 없었고,
+ *   점검중 vCenter 는 그 두 경로에도 '낡았다' 는 표지가 없었다. 판정은 공용 `metrics/unreadVcenters.js`(사본 금지). 인벤토리가 비어 행이 없는
+ *   vCenter(장기 장애 · 첫 캐시 없음)도 여기 든다 — 행이 없는 것은 '0 개' 가 아니다.
+ */
+function notCurrentMetaOf(snap, inScope) {
+  const ids = [...unreadVcenterReasons(snap).keys()].filter((id) => inScope(id));
+  return { notCurrentVcenters: ids.length, notCurrentVcenterIds: ids };
+}
+const NOT_CURRENT_NOTE = (n) => (n ? ` 수집이 멈춘 vCenter ${n}곳(점검중 · 접속 실패 · 엣지 보고 끊김 — notCurrentVcenterIds)의 값은 마지막으로 읽은 값이고 지금 값이 아닙니다(행이 없으면 0 이 아니라 모르는 것입니다).` : '');
 
 /** 상한 적용 + 잘린 사실 표기. */
 function capped(rows) {
@@ -263,7 +277,9 @@ v1.get('/inventory/summary', guarded('/inventory/summary', ({ res, snap, inScope
     vmProvisionedGB: sum(vms, (v) => v.storageGB),
     vmStorageUnknown: vms.filter((v) => numOrNull(v.storageGB) == null).length,
   };
-  return envelope(res, apiPath, project(row, fields), { ...scopeMeta, collectedAt: msOrNull(snap.generatedAt) });
+  // 126회차: 합계에는 수집이 멈춘 vCenter 의 마지막 값이 섞여 있다(내부 /summary 와 같은 합 — 값은 그대로 두고 표지만 싣는다).
+  const nc = notCurrentMetaOf(snap, inScope);
+  return envelope(res, apiPath, project(row, fields), { ...scopeMeta, collectedAt: msOrNull(snap.generatedAt), ...nc, ...(nc.notCurrentVcenters ? { note: NOT_CURRENT_NOTE(nc.notCurrentVcenters).trim() } : {}) });
 }));
 
 /**
@@ -275,8 +291,18 @@ v1.get('/inventory/summary', guarded('/inventory/summary', ({ res, snap, inScope
  * 3일 전에 멈춘 vCenter 도 '방금 수집' 으로 나갔다(문서는 'generatedAt 과 collectedAt 의 차이가 데이터의 나이' 라고 안내한다).
  * ⚠ `snap.generatedAt` 은 ISO 문자열이다(`store.js`) — msOrNull 로 epoch ms 로 통일한다.
  */
+/** 126회차: 점검중 vCenter 인가 — 공용 판정(metrics/unreadVcenters.js)의 사유로 본다(상태 비교를 여기 다시 쓰지 않는다). */
+const isMaintenanceVc = (v) => !!v && v.id != null && unreadVcenterReasons({ vcenters: [v] }).get(String(v.id)) === 'maintenance';
 // v2.771(R6-F3-5): export 는 회귀 테스트(audit2771e)가 직접 부르기 위해서다.
 export function vcCollectedAtOf(v, snap) {
+  // 126회차(재현): 점검중 vCenter 는 store 가 직전 캐시를 **기한 없이** 서빙한다 — 그 값을 받은 시각은 스냅샷에 없다(수집 실패 이월 중에 점검중으로
+  //   돌렸으면 staleSince). 예전에는 맨 아래 줄이 스냅샷 시각(지금)을 돌려줘 며칠 묵은 값이 '방금 수집' 으로 나갔다 — 모르면 null(지어내지 않는다).
+  if (isMaintenanceVc(v)) {
+    const since = msOrNull(v.staleSince);
+    if (!(since != null && since > 0)) return null;
+    const rcv = v.collectSource === 'site' ? msOrNull(v.receivedAt) : null;
+    return rcv != null ? Math.min(rcv, since) : since;
+  }
   // v2.771(점검 R6-F3-5): 엣지가 자기 수집 실패로 lastGood 을 이월해 보낸 항목(unreachable + staleSince)은 받은 시각이 아니라
   //   그 값의 시각이다 — receivedAt 만 보면 최대 6시간 묵은 값이 '방금' 으로 나갔다(직접 수집 이월은 staleSince 를 쓰는데 비대칭).
   //   엣지 시각은 수신 시각을 넘지 못한다(min — store 병합이 이미 자르지만 여기서도 자른다).
@@ -302,7 +328,8 @@ v1.get('/inventory/vcenters', guarded('/inventory/vcenters', ({ res, snap, inSco
       collectedAt: vcCollectedAtOf(v, snap),
       // v2.732(B2-01): 이 행의 값이 낡았는가 — 담당 엣지의 push 가 기준 시간을 넘긴 위임 vCenter(status 는 엣지가 마지막으로
       //   보낸 값 그대로) 또는 접속 실패로 마지막 정상 값을 이월 중인 vCenter(status unreachable).
-      stale: v.stale === true,
+      // 126회차: 점검중도 직전 캐시(지금 값이 아니다) — 상태만으로는 소비자가 '값이 얼어 있다' 를 알 수 없었다.
+      stale: v.stale === true || isMaintenanceVc(v),
     };
   });
   const c = capped(rows);
@@ -310,7 +337,7 @@ v1.get('/inventory/vcenters', guarded('/inventory/vcenters', ({ res, snap, inSco
   const alarmsUnknownCount = rows.filter((r) => r.alarms == null).length;
   return envelope(res, apiPath, projectAll(c.rows, fields), {
     ...scopeMeta, ...c.meta, staleCount, alarmsUnknownCount,
-    note: 'stale:true 인 행은 지금 값이 아닙니다 — collectedAt 이 그 값을 받은 시각입니다. alarms:null 은 경보를 조회하지 않은 vCenter(0 건이 아닙니다).',
+    note: 'stale:true 인 행은 지금 값이 아닙니다 — collectedAt 이 그 값을 받은 시각입니다(점검중이라 그 시각을 모르면 null). alarms:null 은 경보를 조회하지 않은 vCenter(0 건이 아닙니다).',
   });
 }));
 
@@ -359,7 +386,8 @@ v1.get('/capacity/datastores', guarded('/capacity/datastores', ({ res, snap, inS
     };
   });
   const c = capped(rows);
-  return envelope(res, apiPath, projectAll(c.rows, fields), { ...scopeMeta, ...c.meta });
+  const nc = notCurrentMetaOf(snap, inScope);   // 126회차: 수집이 멈춘 vCenter 의 용량은 마지막 값이다(행은 그대로 — 표지만)
+  return envelope(res, apiPath, projectAll(c.rows, fields), { ...scopeMeta, ...c.meta, ...nc, ...(nc.notCurrentVcenters ? { note: NOT_CURRENT_NOTE(nc.notCurrentVcenters).trim() } : {}) });
 }));
 
 v1.get('/capacity/storage', guarded('/capacity/storage', async ({ req, res, fields, apiPath }) => {
@@ -545,14 +573,16 @@ v1.get('/faults/alarms', guarded('/faults/alarms', ({ res, snap, inScope, fields
    *   예전에는 meta 가 그 사실을 말하지 않아 외부 포탈이 그 법인을 '경보 없음' 으로 표시했다. 범위 안 vCenter 만 센다.
    */
   const unknownVcIds = (snap.vcenters || []).filter((v) => inScope(v.id) && vcAlarmsUnknown(v)).map((v) => String(v.id));
+  const nc = notCurrentMetaOf(snap, inScope);   // 126회차: 수집이 멈춘 vCenter 의 경보는 마지막으로 읽은 목록이다(새 경보 · 해소를 모른다)
   return envelope(res, apiPath, projectAll(c.rows, fields), {
     ...scopeMeta, ...c.meta, mutedCount: c.rows.filter((r) => r.muted).length,
     alarmsUnknownVcenters: unknownVcIds.length,
     alarmsUnknownVcenterIds: unknownVcIds,
+    ...nc,
     note: '음소거된 알람도 포함하고 muted:true 로 표시합니다 — 목록에서 빼지 않습니다.'
       + (unknownVcIds.length
         ? ` 경보를 조회하지 않은 vCenter ${unknownVcIds.length}곳(REST 폴백 수집)은 목록에 없습니다 — 0 건이 아니라 모르는 것입니다(alarmsUnknownVcenterIds).`
-        : ''),
+        : '') + NOT_CURRENT_NOTE(nc.notCurrentVcenters),
   });
 }));
 

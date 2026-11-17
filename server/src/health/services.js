@@ -7,7 +7,7 @@
  * 모든 점검은 try/catch로 격리되어 하나가 실패해도 전체 패널이 죽지 않는다.
  */
 
-import { store } from '../store.js';
+import { store, siteInventoryStale } from '../store.js';
 import { alertStatus } from '../alerts.js';
 import { metricsSamplerStatus } from '../metrics/sampler.js';
 import { gpuGuestStatus } from '../gpu/poller.js';
@@ -295,11 +295,16 @@ export function getServiceCheck(opts = {}) {
   checks.push(wrap('vcenter', 'vCenter 수집', () => {
     const s = store.get();
     const total = (s.vcenters || []).length;
-    const conn = (s.vcenters || []).filter((v) => v.status === 'connected').length;
+    // 126회차(재현): 위임 vCenter 는 담당 엣지의 보고가 끊겨도 status 가 엣지가 마지막으로 보낸 'connected' 그대로다(store 병합 — stale 표지만 붙는다).
+    //   그것을 연결로 세어 엣지 여러 곳이 멈췄는데 'N/N 연결 · 정상' 이었다. 헤더 · /health 와 같은 판정(store.siteInventoryStale)으로 따로 세고
+    //   주의로 올린다 — 접속 실패(down)가 아니라 확인 불가라 전부 끊겨도 down 으로 단정하지 않는다.
+    const connected = (s.vcenters || []).filter((v) => v.status === 'connected');
+    const edgeSilent = connected.filter(siteInventoryStale).length;
+    const conn = connected.length - edgeSilent;
     const age = ago(Date.parse(s.generatedAt));
     const stale = age != null && age > 5 * MIN;
-    const status = total === 0 ? 'off' : conn === 0 ? 'down' : (conn < total || stale) ? 'warn' : 'ok';
-    return { status, detail: `${conn}/${total} 연결${stale ? ' · 스냅샷 지연' : ''} · ${age != null ? Math.round(age / 1000) + '초 전' : '-'}`, at: Date.parse(s.generatedAt) || Date.now() };
+    const status = total === 0 ? 'off' : (conn === 0 && !edgeSilent) ? 'down' : (conn < total || stale) ? 'warn' : 'ok';
+    return { status, detail: `${conn}/${total} 연결${edgeSilent ? ` · 엣지 보고 끊김 ${edgeSilent}` : ''}${stale ? ' · 스냅샷 지연' : ''} · ${age != null ? Math.round(age / 1000) + '초 전' : '-'}`, at: Date.parse(s.generatedAt) || Date.now() };
   }));
 
   // v2.617: 메인 이벤트 루프 멈춤 감시(perf/stallWatch.js). 이 행은 루프가 **풀린 뒤에** 읽히므로 '지금 멈춤' 이 아니라
