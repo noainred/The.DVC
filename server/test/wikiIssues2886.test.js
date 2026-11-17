@@ -6,7 +6,7 @@
  *    · 그림만 inline · 지우기는 올린 사람/전체 범위 관리자 · 주인을 지우면 첨부도 · 본체 없음 410 · 전체 내려받기(tar.gz) · 관리 화면 문지기.
  * ③ 관리자 템플릿 · 대문 담당/당번 · 인라인 댓글(인용 · 해결).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -15,6 +15,13 @@ import zlib from 'node:zlib';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { cleanName, imageMagicOk } from '../src/attach/store.js';
+
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
@@ -32,7 +39,7 @@ test('① 파일 이름 · 그림 판정', () => {
 });
 
 function run(body, { pre, env = {} } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'c2886-'));
+  const dir = tmpDir('c2886-');
   if (pre) pre(dir);
   const script = `
     const express = (await import('express')).default;

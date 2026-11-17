@@ -5,7 +5,7 @@
  *  SEC2605-01 자연어 검색 ReDoS + 길이 상한 · RECENT2605-05 로그 분석 7일 창 '일부' 오판 · RECENT2605-07 SAN 테스트 sections 사유 절단.
  * 기준 시각: 시간 버킷 테스트는 고정 시각(정시 +20·40분)을 쓴다(루트 CLAUDE.md v2.517). 보존 경계 테스트는 경계에서 3시간 이상 떨어뜨린다.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -13,7 +13,14 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2605f-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const TMP = tmpDir('audit2605f-');
 process.env.CONFIG_DIR = TMP;
 process.env.PING_DB_PATH = path.join(TMP, 'ping.db');
 process.env.CAPACITY_DB_PATH = path.join(TMP, 'capacity.db');
@@ -37,7 +44,7 @@ async function countYields(p) {
 
 function runChild(code, env = {}, args = []) {
   const r = spawnSync(process.execPath, [...args, '--input-type=module', '-e', code], {
-    cwd: SERVER, env: { ...process.env, CONFIG_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'a2605f-c-')), ...env }, encoding: 'utf8', timeout: 90_000,
+    cwd: SERVER, env: { ...process.env, CONFIG_DIR: tmpDir('a2605f-c-'), ...env }, encoding: 'utf8', timeout: 90_000,
   });
   if (r.status !== 0) throw new Error(`child 실패(${r.status}): ${r.stderr}`);
   return JSON.parse(r.stdout.trim().split('\n').pop());

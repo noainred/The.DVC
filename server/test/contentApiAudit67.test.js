@@ -9,7 +9,7 @@
  * F4 Ollama 오프라인 설치가 검증은 zstd(.tar.zst)를 받고 압축 해제는 `tar -xzf`(gzip 강제)라 zstd 파일은 언제나 실패했다.
  * 개선 LLM 설정 저장의 형식 검사(enabled 는 불리언 · 모델 이름) · 받을 모델 이름 정리(앞 '-' 제거 · 받은 이름 = 저장 이름).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -19,13 +19,20 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 const deployMod = await import('../src/llm/ollamaDeploy.js');   // 순수 함수(ollamaExtractCmd)만 쓴다 — 파일을 쓰지 않는다
 
 /** 라우트 묶음(api.js)을 띄우고 body 를 돌린다 — CONFIG_DIR 은 매번 새 임시 폴더(설정 · 위키 · 이슈 파일이 섞이지 않게). */
 function run(body, { env = {} } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'c67-'));
+  const dir = tmpDir('c67-');
   const script = `
     const express = (await import('express')).default;
     const { api } = await import(${JSON.stringify(path.join(SRC, 'routes/api.js'))});
@@ -149,7 +156,7 @@ test('F4 — Ollama 오프라인 압축 해제 명령은 gzip · zstd 둘 다 �
   assert.throws(() => ollamaExtractCmd('relative.tgz'), /형식/);
 
   // 실제 tar 로 푼다 — 같은 내용을 gzip · zstd 로 싸서 '.tgz' 이름으로 둔다(원격 파일 이름이 늘 ollama.tgz 이다).
-  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'c67-tar-'));
+  const work = tmpDir('c67-tar-');
   fs.mkdirSync(path.join(work, 'src/bin'), { recursive: true });
   fs.writeFileSync(path.join(work, 'src/bin/ollama'), 'hello');
   const mk = spawnSync('tar', ['-C', path.join(work, 'src'), '-cf', path.join(work, 'plain.tar'), 'bin']);
@@ -174,7 +181,7 @@ test('F4 — Ollama 오프라인 압축 해제 명령은 gzip · zstd 둘 다 �
 });
 
 test('개선 — LLM 설정 저장은 enabled 불리언 · 모델 이름 형식을 본다 · 받을 모델 이름 정리', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'c67-llm-'));
+  const dir = tmpDir('c67-llm-');
   const script = `
     const m = await import(${JSON.stringify(path.join(SRC, 'llm/config.js'))});
     const d = await import(${JSON.stringify(path.join(SRC, 'llm/ollamaDeploy.js'))});
@@ -206,7 +213,7 @@ test('개선 — LLM 설정 저장은 enabled 불리언 · 모델 이름 형식�
 });
 
 test('개선 — 자연어 검색은 LLM 이 준 음수 limit 로 뒤에서 자르지 않는다(가짜 Ollama 왕복)', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'c67-nl-'));
+  const dir = tmpDir('c67-nl-');
   const script = `
     const http = await import('node:http');
     const fs = await import('node:fs');

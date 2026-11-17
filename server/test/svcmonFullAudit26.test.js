@@ -6,7 +6,7 @@
  *  27: D-2 409 를 성공으로 보이지 않게(웹) · D-6 수정 중복 검사는 키가 바뀔 때만 · D-8 배정 파일 손상 중 대역 이전 보류 · D-9 일 요약 total/used 짝
  *  (F2 콘솔 타일은 web src/console/svcmonTile26.test.js)
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,7 +14,14 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { stripComments } from './_stripComments.js';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'svfa26-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const tmp = tmpDir('svfa26-');
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_DIR = tmp;
 process.env.DATA_SOURCE = 'live';
@@ -26,7 +33,7 @@ const rd = (p) => fs.readFileSync(path.join(SRC, p), 'utf8');
 const J = (p) => JSON.stringify(path.join(SRC, p));
 
 const sub = (setup, code) => {
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'svfa26s-'));
+  const d = tmpDir('svfa26s-');
   try {
     setup(d);
     const r = spawnSync(process.execPath, ['--input-type=module', '-e', code], { env: { ...process.env, CONFIG_DIR: d, DATA_DIR: d }, encoding: 'utf8' });

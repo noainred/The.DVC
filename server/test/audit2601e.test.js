@@ -12,14 +12,21 @@
  *  SEC2601-03 로그 가림이 JSON 인용 키·카멜케이스 비밀 필드를 잡고, deviceKey·partKey 는 두지 않는다
  * 기준 시각은 Date.now() 가 아니라 고정값을 쓴다(CLAUDE.md v2.517).
  */
-import { test, mock } from 'node:test';
+import { test, mock, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2601e-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const TMP = tmpDir('audit2601e-');
 process.env.CONFIG_DIR = TMP;
 process.env.CURUSER_DB_PATH = path.join(TMP, 'curuser.db');
 process.env.PRUNE_CHUNK_ROWS = '500';

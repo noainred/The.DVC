@@ -16,7 +16,7 @@
  *     `POST /board/persist/retry` 는 관리자 + 전체 범위(operator·범위 관리자 403).
  * 자식 프로세스인 이유: config.js 싱글턴이라 CONFIG_DIR 을 다시 못 가리킨다 · 재시작을 실제로 해 본다.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -24,13 +24,20 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 const STORE = path.join(SRC, 'bulletin/store.js');
 
 /** 자식 프로세스에서 본문을 돌리고 `@@` 줄의 JSON 을 돌려준다. dir 을 주면 그 CONFIG_DIR 을 이어 쓴다(재시작). */
 function child(body, { dir } = {}) {
-  const d = dir || fs.mkdtempSync(path.join(os.tmpdir(), 'rvD-bulletin-'));
+  const d = dir || tmpDir('rvD-bulletin-');
   const script = `
     const fs = (await import('node:fs')).default;
     const path = (await import('node:path')).default;

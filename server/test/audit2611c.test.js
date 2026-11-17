@@ -21,7 +21,14 @@ import http from 'node:http';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 
-process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2611c-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+process.env.CONFIG_DIR = tmpDir('audit2611c-');
 process.env.SSRF_ALLOW_LOOPBACK = 'true';
 process.env.CENTRAL_TOKEN = 'ctok-2611';
 process.env.CVP_PUSH_ROWS = '1000';
@@ -102,7 +109,7 @@ function mockCvp(state) {
 async function withUnavailableDb(file, fn, reset) {
   const { config } = await import('../src/config.js');
   const orig = config.dbDir;
-  const bad = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2611c-bad-'));
+  const bad = tmpDir('audit2611c-bad-');
   fs.mkdirSync(path.join(bad, file)); // 디렉터리라 SQLite 가 열 수 없다(잠금이 아닌 오류 → unavailable 래치)
   config.dbDir = bad; reset();
   try { return await fn(); } finally { config.dbDir = orig; reset(); }
@@ -330,7 +337,7 @@ test('DB2611-06 — 일 롤업 오류 합에 표본 수(inErrN) · 구버전 표
   const { db, config } = await mods();
   if (!(await db.available())) return;
   const orig = config.dbDir;
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2611c-legacy-'));
+  const dir = tmpDir('audit2611c-legacy-');
   const { DatabaseSync } = await import('node:sqlite');
   const old = new DatabaseSync(path.join(dir, 'cvp.db'));
   old.exec(`CREATE TABLE port_daily (agent TEXT NOT NULL, cvp_id TEXT NOT NULL, device_key TEXT NOT NULL, port TEXT NOT NULL, day INTEGER NOT NULL,
@@ -379,7 +386,7 @@ test('DB2611-01 — 본체·-wal·-shm 은 0600(기존 0644 잔재도) · DB 디
   if (process.platform === 'win32') return;
   const { openSqlite, chmodDbFiles } = await import('../src/util/sqliteOpen.js');
   const { DatabaseSync } = await import('node:sqlite');
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2611c-perm-'));
+  const dir = tmpDir('audit2611c-perm-');
   const f = path.join(dir, 'x.db');
   const prevMask = process.umask(0o022);
   try {

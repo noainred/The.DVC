@@ -13,7 +13,7 @@
  *  ⑥ 쓰기 실패는 판정을 바꾸지 않고 상태에 사유를 남긴다
  *  ⑦ 상태 파일로 등록(백업 '설정 변경' 감시 제외) · index.js 가 켜고 verifyCli.js 는 켜지 않는다
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -22,8 +22,15 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-log-'));
+const CFG = tmpDir('sig-log-');
 Object.assign(process.env, { CONFIG_DIR: CFG, DATA_SOURCE: 'mock' });
 delete process.env.UPGRADE_SIGNATURE_POLICY;
 
@@ -172,7 +179,7 @@ test('⑤ 읽을 때도 아는 필드만·길이 상한 — 시각이 숫자가 
 
 test('⑥ 쓰기 실패는 판정을 바꾸지 않고 상태에 사유를 남긴다', () => {
   restart();
-  const bad = fs.mkdtempSync(path.join(os.tmpdir(), 'sig-log-bad-'));
+  const bad = tmpDir('sig-log-bad-');
   fs.mkdirSync(path.join(bad, 'upgrade-signature-log.json')); // 같은 이름의 디렉터리 — 읽기도 쓰기도 실패한다
   const r = sig.enableSignatureLog({ configDir: bad });
   assert.match(String(r.error), /읽지 못했습니다/);

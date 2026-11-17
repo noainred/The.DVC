@@ -2,13 +2,20 @@
 //   디스크에는 없고 메모리에만 있는 '유령 토큰' 이 재시작 전까지 남았다(다음 토큰 적용 사전 점검이 '이미 발급됨' 으로 막히고, 그 해시는 인증도 통과).
 // 저장 실패 주입: 대상 파일 경로에 '비어 있지 않은 디렉터리' 를 둔다 — atomicWriteFileSync 의 rename(tmp → 파일)이 root 로도 실패한다
 //   (읽기 전용 디렉터리는 root 실행에서 막히지 않아 쓰지 않았다). 캐시는 이미 올라와 있어 load() 는 파일을 다시 읽지 않는다.
-import { test, before } from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-k5-tok-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const CFG = tmpDir('portal-k5-tok-');
 process.env.CONFIG_DIR = CFG;
 const FILE = path.join(CFG, 'central-agent-tokens.json');
 

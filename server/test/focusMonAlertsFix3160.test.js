@@ -9,14 +9,21 @@
  *  M5 부팅 식별 boot_id · 커널 오류는 첫 확인(버퍼 전체)과 증분을 섞지 않는다 · M6 OOM 은 가장 최근 20건 + 전체 수 · L2 memcg OOM 줄
  *  M10 설정 주기가 하한 · L1 되돌린 뒤 곧 다시 늘면 24시간 잠금 · M11 그룹 이름 바꾸기 · 지우기 · L3 dash 에서도 rc · L4 빈 이름 미리 보기
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'focusmonalertsfix3160-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const DIR = tmpDir('focusmonalertsfix3160-');
 process.env.CONFIG_DIR = DIR;
 process.env.DATA_SOURCE = 'mock';
 process.env.CENTRAL_TOKEN = 'ctok-alertsfix-3160';

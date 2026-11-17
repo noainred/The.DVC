@@ -1,13 +1,20 @@
 // v2.630 감사 그룹 c — 게스트 디스크 부분 합(A2-01) · CVP 포트·BGP 상태 번역(A2-02·A2-03) ·
 // 디스크 트렌드 회수 가능 시계열(DATA2630-01) · vmtrack DS 시작값 메모(PERF2630-01).
 // 기준 시각은 Date.now() 가 아니라 고정값(CLAUDE.md 규약). DB 는 임시 디렉터리.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2630c-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const TMP = tmpDir('audit2630c-');
 process.env.CONFIG_DIR = TMP;
 process.env.GUESTDISK_DB_PATH = path.join(TMP, 'guest-disk.db');
 process.env.VMTRACK_DB_PATH = path.join(TMP, 'vm-track.db');

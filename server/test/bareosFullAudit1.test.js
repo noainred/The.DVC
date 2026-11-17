@@ -5,13 +5,20 @@
  *  ② B-2: 끝난 실행 목록(finishedRuns)에 덜 자세한 행(바이트 빈 칸)으로 먼저 들어간 실행은 뒤에 온 자세한 행으로 빈 칸만 채운다
  *     — 아는 값은 바꾸지 않는다 · 같은 행을 다시 받으면 쓰지 않는다.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'bareosfullaudit1-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+process.env.CONFIG_DIR = tmpDir('bareosfullaudit1-');
 process.env.DATA_SOURCE = 'mock';
 const E = await import('../src/bareos/edgeOps.js');
 const R = await import('../src/bareos/registry.js');

@@ -13,7 +13,7 @@
  *   EDGE2599-01 storage push — 위임 0대면 중앙 목록을 비우고(상태 보고도 보낸다), 위임이 있으면 비우지 않는다
  *   EDGE2599-04 config push — 8MB 초과로 뺀 파일 목록을 파일로 세지 않고 밝힌다
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import zlib from 'node:zlib';
@@ -23,7 +23,14 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import ssh2 from 'ssh2';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-2599d-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const DIR = tmpDir('dvc-2599d-');
 process.env.CONFIG_DIR = DIR;
 process.env.SSRF_ALLOW_LOOPBACK = 'true';
 // 2026-10-09 검토 S-01(그룹 H): 새 설치(빈 CONFIG_DIR)의 SSH 호스트키 정책은 '승인된 키만'(enforce)이다. 이 파일은 호스트키가 주제가

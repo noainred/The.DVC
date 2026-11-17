@@ -7,7 +7,7 @@
  *  F5 SAN 스토리지 성능 알림 · 보고서 메일 · 점검 임계값 · 분류 매핑 설정 손상이 재시작 뒤 **조용히 기본값**(알림 · 발송 꺼짐)이 되고 저장이 열렸다 ·
  *     읽기 오류(디렉터리 · 권한)도 원본을 옮겼다 → 공용 makeSettingsLoadError
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -16,7 +16,14 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import ssh2 from 'ssh2';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sanfa58-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const DIR = tmpDir('sanfa58-');
 process.env.CONFIG_DIR = DIR;
 process.env.DB_DIR = DIR;
 process.env.DATA_DIR = DIR;

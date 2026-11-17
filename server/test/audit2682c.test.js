@@ -7,7 +7,7 @@
  *  R3A-02 등록·사용 중 스위치가 보고를 멈추면 그 시리즈를 '없어진 것' 으로 빼지 않는다(heldSeries) · 응답에 retiredSeries
  *  R3A-07 공개 API storage-growth 행 단위 excludedFromTotals · meta 기준 명시
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -15,7 +15,14 @@ import path from 'node:path';
 import v8 from 'node:v8';
 import vm from 'node:vm';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2682c-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const tmp = tmpDir('audit2682c-');
 process.env.CONFIG_DIR = process.env.CONFIG_DIR || path.join(tmp, 'config');
 fs.mkdirSync(process.env.CONFIG_DIR, { recursive: true });
 

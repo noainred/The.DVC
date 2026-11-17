@@ -18,7 +18,7 @@
  * 순수 판정은 이 프로세스에서, 라우트(probe·quick-connect·mappings)와 WS 게이트웨이 재검사(mappingAccessIssue)는
  * 실제 라우터를 띄운 자식 프로세스에서 본다(config.js 싱글턴이라 CONFIG_DIR 을 다시 가리킬 수 없다).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -27,9 +27,16 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2744fd-'));
+const TMP = tmpDir('audit2744fd-');
 process.env.CONFIG_DIR = TMP;
 
 const { targetHostScopeIssue } = await import('../src/proxy/targetHostScope.js');
@@ -143,7 +150,7 @@ test('⑦ 소스: 호스트 IP 판정은 ipam/ledger.js hostLedgerIp 를 가져�
 });
 
 test('⑧ 실제 라우터: 범위 계정의 probe·quick-connect·WS 재검사가 관리 IP 를 받고 범위 밖·충돌은 거부한다', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2744fd-r-'));
+  const dir = tmpDir('audit2744fd-r-');
   fs.writeFileSync(path.join(dir, 'runtime.json'), JSON.stringify({ dataSource: 'live' }));
   const script = `
     const SRC = ${JSON.stringify(SRC + '/')};

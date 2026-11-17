@@ -12,13 +12,20 @@
  *  4) testDeviceConnection 이 스냅샷을 저장하지 않고(putSnapshot 미호출) 결과만 돌려주는지.
  */
 
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-unity-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+process.env.CONFIG_DIR = tmpDir('ps-unity-');
 // 라우팅 불가 주소(192.0.2.x)는 러너에 따라 패킷이 드롭돼 요청마다 15초를 기다린다(GitHub 러너 실측 — 파일이 120초 타임아웃).
 // 요청 타임아웃을 줄여 테스트가 네트워크 환경과 무관하게 빨리 끝나게 한다.
 process.env.STORAGE_HTTP_TIMEOUT_MS = '1500';

@@ -10,7 +10,7 @@
 //
 // 실제 함수(takeVmSnapshot · vmtrackSeries · vmTrend · pruneVmtrack)를 부른다. 기준 시각은 Date.now() 를 그대로 쓰지 않고 12시간 경계에서
 // 6시간 떨어뜨린다(포탈 슬롯 KST 00·12시 시작에서 3시간 떨어진 자리). 정리 경계 근처의 행은 경계에서 3시간 넘게 떨어뜨린다.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -18,7 +18,14 @@ import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { isDeepStrictEqual } from 'node:util';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2744ra-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const tmp = tmpDir('audit2744ra-');
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_SOURCE = 'live';
 process.env.VMTRACK_DB_PATH = path.join(tmp, 'vm-track.db');

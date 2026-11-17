@@ -8,7 +8,7 @@
  *
  * ⚠ 옛 판본 함수는 아래에 **글자 그대로 복사**했다(캐시 두 줄만 뺐다). 성능 수정은 결과 동일성이 증거다(v2.602 규약).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -17,9 +17,16 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2611e-'));
+const CFG = tmpDir('audit2611e-');
 process.env.CONFIG_DIR = CFG;
 process.env.DATA_SOURCE = 'mock';
 process.env.IPAM_SCAN_WRITE_DEBOUNCE_MS = process.env.IPAM_SCAN_WRITE_DEBOUNCE_MS || '0';
@@ -29,7 +36,7 @@ const src = (p) => strip(fs.readFileSync(path.join(SRC, p), 'utf8'));
 
 function runChild(code, env = {}) {
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', code], {
-    env: { ...process.env, CONFIG_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'audit2611e-c-')), DATA_SOURCE: 'mock', AUTH_ENABLED: 'false', ...env },
+    env: { ...process.env, CONFIG_DIR: tmpDir('audit2611e-c-'), DATA_SOURCE: 'mock', AUTH_ENABLED: 'false', ...env },
     encoding: 'utf8', cwd: path.resolve(SRC, '..'), timeout: 120_000,
   });
   assert.equal(r.status, 0, `자식 프로세스 실패: ${(r.stderr || '').slice(-2000)}`);
@@ -150,7 +157,7 @@ test('AUTHZ2611-05: withRegistryRegion — 등록부 region 이 이기고 표시
 });
 
 test('AUTHZ2611-05: 점검중 vCenter 의 캐시 스냅샷 region 이 등록부와 다르면 등록부 값으로 병합된다', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2611e-m-'));
+  const dir = tmpDir('audit2611e-m-');
   fs.writeFileSync(path.join(dir, 'vcenters.json'), JSON.stringify({ vcenters: [
     { id: 'vc-m', name: 'M', host: 'https://10.0.0.9', maintenance: true, location: { city: 'Warsaw', region: 'EMEA', lat: 52, lon: 21 } },
   ] }));

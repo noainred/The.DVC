@@ -2,7 +2,7 @@
 //   ① 판정 코어(dnsConfirm.js — 묻기 계획 · 답 꼴 · 판정 · 기억) ② 스캔(scanRanges — 남은 예산 · 차단기 · 기억 재사용) ③ 실행기(잡에 기억 싣기)
 //   ④ 중앙 정제 · 저장 · 리비전 · 변화 기록(dns-mismatch — 알던 판정에서 바뀔 때만) ⑤ 요약 정제 · 설정 ⑥ 대장 · 추천 카드 · CSV · 범위 계정(자식 프로세스)
 //   ⑦ 엣지 — 실제 워커가 결과 본문에 dnsFwd 요약을 싣는다(목 중앙).
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -12,8 +12,15 @@ import http from 'node:http';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const TOKEN = 't'.repeat(48);
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-320-'));
+const CFG = tmpDir('dvc-320-');
 process.env.CONFIG_DIR = CFG;
 process.env.CENTRAL_TOKEN = TOKEN;
 process.env.DATA_SOURCE = 'live';
@@ -243,7 +250,7 @@ test('⑤ 요약 정제 — 수치만(못 읽음 null) · 멈춘 사유는 아�
 
 // ── ⑥ 대장 · 추천 카드 · CSV · 범위 계정 · 디스크 로드(자식 프로세스) ──────────────
 test('⑥ /tools/ipam dnsFwd 칸(일치는 판정만 · 어긋남은 이름 · 주소) · 범위 계정에는 없음 · 추천 카드 16 · scan-report.csv dns_forward · 디스크 로드', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-320-route-'));
+  const dir = tmpDir('dvc-320-route-');
   fs.writeFileSync(path.join(dir, 'ipam-scan-results.json'), JSON.stringify({
     '10.250.9.5': { ip: '10.250.9.5', openPorts: [22], services: ['SSH'], lastSeen: Date.now(), agent: '__local__', names: { dns: { v: 'stale.corp', at: 1, miss: 0 } }, dnsFwd: { v: 'other', at: 2, addrs: ['10.250.9.99'] } },
     '10.250.9.6': { ip: '10.250.9.6', openPorts: [22], services: ['SSH'], lastSeen: Date.now(), agent: '__local__', names: { dns: { v: 'ok.corp', at: 1, miss: 0 } }, dnsFwd: { v: 'match', at: 2 } },

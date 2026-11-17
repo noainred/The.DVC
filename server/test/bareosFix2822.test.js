@@ -2,13 +2,20 @@
  * test/bareosFix2822.test.js — v2.822 검토에서 확정한 결함 중 라우트 시험(bareosRoutes ⑩)에 넣기 어려운 것.
  *  I6: Bareos 원장의 실행 상태(pending·복원·Director 대조)는 '설정 변경 시 자동 백업' 지문을 바꾸지 않는다(대상 정의는 바꾼다).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'bareos2822f-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+process.env.CONFIG_DIR = tmpDir('bareos2822f-');
 const backup = await import('../src/backup/service.js');
 
 test('I6: 실행 상태가 바뀌어도 설정 백업 지문은 같다 · 대상 정의가 바뀌면 달라진다', () => {

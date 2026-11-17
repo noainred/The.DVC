@@ -1,11 +1,18 @@
 // v2.698 — VM 구성 점검(A3·A4·A5·A16·A18·A20): 판정·설정·알림.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vmhyg-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const dir = tmpDir('vmhyg-');
 process.env.CONFIG_DIR = dir;
 
 const { analyzeVmHygiene, hygieneFindings, snapshotPolicySummary, HYGIENE_CODES, ALL_CODES, ROWS_MAX } = await import('../src/vmhygiene/analyze.js');

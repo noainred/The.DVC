@@ -19,7 +19,7 @@
  *   ③ scan.js 소스에 자체 `split('/')`·`split('-')` 파서가 남아 있지 않다(주석 제거 후).
  *   ④ rangePolicies·vcRangesCsv·scanRangesCsv 가 rangeSyntax 를 import 한다 · CSV 오류 사유가 checkRangeSpec.reason 을 싣는다.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -32,6 +32,13 @@ import { rangeSize, expandRange, RANGE_CAP } from '../src/ipam/scan.js';
 import { specToRange } from '../src/ipam/rangePolicies.js';
 import { analyzeVcRangesImport } from '../src/ipam/vcRangesCsv.js';
 import { analyzeScanRangesImport } from '../src/ipam/scanRangesCsv.js';
+
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
@@ -137,7 +144,7 @@ test('③ scan.js 에는 자체 대역 파서(split(\'/\')·split(\'-\'))가 없
 
 // ── ② 실제 라우터: PUT /admin/ipam/scan/settings · GET /tools/ipam/vc-ranges ───────────────────────────────
 function runChild(body, { setup = null } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ipms2639-'));
+  const dir = tmpDir('ipms2639-');
   if (setup) setup(dir);
   const script = `
     const SRC = ${JSON.stringify(SRC + '/')};

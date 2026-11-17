@@ -4,7 +4,7 @@
  *  LEFT2605-02 svcmon 로그 설정 빈 칸 · LEFT2605-06 IPAM 스캔 설정 빈 칸 · TIM2605-04(scanStore 디바운스 env).
  *  WEB2605-03(끊긴 호스트 사용률)은 웹 vitest(web/src/views/vcdOverview.test.js)가 판정을, 여기서는 소스 사용처를 고정한다.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -12,7 +12,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2605e-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const TMP = tmpDir('audit2605e-');
 process.env.CONFIG_DIR = TMP;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WEB = path.join(HERE, '..', '..', 'web', 'src');

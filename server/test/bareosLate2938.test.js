@@ -6,16 +6,23 @@
  *  ④ 소스 스윕: 여섯 호출 지점(단건 실행 · 그룹 실행 · 단건 복원 · 묶음 복원 · 재해 복구 · 복원 검증)이 onLate 를 준다
  *  ⑤ 반증 반영: 여러 건은 원장을 한 번만 쓴다(B-1) · 보낸 뒤 다시 묶였거나 Director 가 바뀌면 반영하지 않는다(B-5) · 단건 복원 lateKey(B-2) · 리허설 deleteOnOk(B-3)
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
-process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'bareoslate2938-'));
+process.env.CONFIG_DIR = tmpDir('bareoslate2938-');
 process.env.DATA_SOURCE = 'mock';
 const R = await import('../src/bareos/registry.js');
 const L = await import('../src/bareos/lateReplies.js');

@@ -14,7 +14,7 @@
  *
  * 자식 프로세스인 이유: `config.js` 는 싱글턴이라 이 프로세스에서 CONFIG_DIR 을 다시 못 가리킨다.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -23,12 +23,19 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 
 /** viewer 의 권한을 주고 각 경로의 상태코드를 돌려받는다. */
 function statusesFor(viewerPerms) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'authz2536-'));
+  const dir = tmpDir('authz2536-');
   fs.writeFileSync(path.join(dir, 'permissions.json'), JSON.stringify({
     schemaVersion: 2,
     matrix: { operator: viewerPerms, viewer: viewerPerms, toolsDenied: { operator: [], viewer: [] } },

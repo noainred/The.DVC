@@ -2,13 +2,20 @@
 //   DATA-02: Horizon 합계(combineServers)가 서버당 maxUsers 로 잘린 이름 목록으로 합집합을 낸 주기
 //   DATA-03: 현재 사용자(Windows) 발행기 원문 절단 서버가 섞인 주기 — vc_series 가 NOT NULL 이라 partial 표지로
 //   DATA-06: '전체' 합집합(combineSources)이 출처의 하한(lowerBound)을 전달·표시
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2622d-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const TMP = tmpDir('audit2622d-');
 process.env.CONFIG_DIR = TMP;
 process.env.CURUSER_DB_PATH = path.join(TMP, 'curuser.db');
 // 기준 시각은 경계에서 떨어뜨려 고정한다(CLAUDE.md — Date.now() 금지).

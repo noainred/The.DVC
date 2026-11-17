@@ -15,8 +15,15 @@ import { EventEmitter } from 'node:events';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const TOKEN = 'tok-2991-shared';
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-2991-'));
+const CFG = tmpDir('dvc-2991-');
 process.env.CONFIG_DIR = CFG;
 process.env.CENTRAL_TOKEN = TOKEN;
 process.env.DATA_SOURCE = 'live';
@@ -359,7 +366,7 @@ test('⑦ scanDetailOf — 방식별 이름 · 표시 이름 · 이름 다름 ·
 });
 
 test('⑦ 디스크의 옛 결과 파일 — hostname 은 역DNS 이름으로 옮기고 오염된 새 칸은 정제한다(자식 프로세스)', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-2991-load-'));
+  const dir = tmpDir('dvc-2991-load-');
   fs.writeFileSync(path.join(dir, 'ipam-scan-results.json'), JSON.stringify({
     '10.96.0.1': { ip: '10.96.0.1', openPorts: [22], services: ['SSH'], hostname: 'old.corp', lastSeen: 1_700_000_000_000, agent: 'e1' },
     '10.96.0.2': { ip: '10.96.0.2', hostname: 'x', names: { dns: { v: 'new.corp', at: 5, miss: 99 }, netbios: { v: { o: 1 } }, bad: { v: 'b' } }, tried: ['netbios', 'zz'], mac: 'nope', nbGroup: 'G', lastSeen: 1_700_000_000_000 },
@@ -448,7 +455,7 @@ test('⑧ 엣지 — 배정의 mdns/netbios 를 따르고 결과 본문에 방�
 
 // ── ⑨ 대장 · 이력 · CSV 라우트(목 데이터 · 자식 프로세스) ─────────────────────────
 test('⑨ /tools/ipam 호스트명 칸 · VM 행에도 스캔 이름 · 범위 계정에는 붙이지 않음 · /history 의 scan · scan-report.csv 열', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-2991-route-'));
+  const dir = tmpDir('dvc-2991-route-');
   const script = `
     const SRC = ${JSON.stringify(SRC + '/')};
     const express = (await import('express')).default;

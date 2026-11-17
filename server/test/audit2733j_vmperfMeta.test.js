@@ -2,13 +2,20 @@
 //   (vCenter 상세 사용량 추이를 열 때마다 2회 · 디스크 추이 2회 · 낭비 추이 1회). v2.729 가 metrics/db.js metaKey 에서 고친 것의 형제 누락이다.
 //   이제 단독 MIN · 단독 MAX 두 문장이고 행 수는 vmperfCount 로 따로 센다(화면은 쓰지 않는다).
 //   ⚠ 결과가 예전과 같아야 한다 — 같은 DB 파일을 직접 열어 옛 한 문장의 값과 대조한다(다른 지표·다른 키(구버전 충돌 행) 섞음).
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2733j-vmperf-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const tmp = tmpDir('audit2733j-vmperf-');
 process.env.VMPERF_DB_DIR = path.join(tmp, 'vmperf');
 process.env.CONFIG_DIR = tmp;
 

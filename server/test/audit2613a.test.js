@@ -2,7 +2,7 @@
 //   CATALOG2613-03 CurrentUsers 형제 경로·storage-track 전용 하위경로 매핑 + 선언 문장 정정 + 미매핑 세그먼트 = 허용 목록(사유)
 //   CATALOG2613-12 이름 규약 — 세그먼트≠키 는 LEGACY_SEGMENT_KEYS(옛 항목)뿐이고 늘어나지 않는다.
 // 라우터 스택은 실제 `api` 라우터(routes/api.js)를 import 해 열거한다 — 문서·정규식이 아니라 선언된 경로 그 자체.
-import { test, before } from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -10,7 +10,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2613a-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const tmp = tmpDir('audit2613a-');
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_SOURCE = 'mock';
 const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src');

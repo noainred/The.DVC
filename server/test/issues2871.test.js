@@ -5,7 +5,7 @@
  * 알림은 발송 함수를 바꿔 끼워(_setIssueNotifySendersForTest) **실제로 나간 메일**을 본다(push 진입 함수는 실제로 호출한다 — common.md).
  * 자식 프로세스인 이유: config.js 싱글턴이라 이 프로세스에서 CONFIG_DIR 을 다시 못 가리킨다.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -13,11 +13,18 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 
 function run(body, { pre, env = {} } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'issues2871-'));
+  const dir = tmpDir('issues2871-');
   if (pre) pre(dir);
   const script = `
     const express = (await import('express')).default;
@@ -491,7 +498,7 @@ test('감사 A2-04 — 손상 설정은 재기동 뒤에도 loadError 를 말한
   `, { pre: (dir) => fs.writeFileSync(path.join(dir, 'issue-settings.json'), '{"autoAssign":') });
   assert.ok(out.first);
   // 같은 폴더로 다시 기동 — 원본은 보존본으로 옮겨졌다
-  const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'issues2871-c-'));
+  const dir2 = tmpDir('issues2871-c-');
   fs.writeFileSync(path.join(dir2, 'issue-settings.json.corrupt.1700000000000'), '{"autoAssign":');
   const r2 = run(`out.second = (await call('GET', '/issues/settings')).j.loadError;`, { pre: (dir) => { for (const n of fs.readdirSync(dir2)) fs.copyFileSync(path.join(dir2, n), path.join(dir, n)); } });
   assert.ok(r2.out.second, '재기동 뒤에도 못 읽음을 말한다');

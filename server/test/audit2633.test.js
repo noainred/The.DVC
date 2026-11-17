@@ -1,7 +1,7 @@
 // v2.633 — 손상 보존본만 남은 중앙 설정 파일을 관리자가 **기본값으로 확정**하는 경로(자동 해제 없음).
 //   ① 등록된 설정 모듈 13개 전부가 confirm 을 가진다(소스 스윕) ② 13개 파일 모두 실제로 확정되고 보존본은 남는다
 //   ③ 라우트: admin + 전체 범위만 · 감사 로그 · 모르는 파일 404 · 이미 정상 409 ④ util 실패 코드 ⑤ 서비스 점검 행이 확정 가능 표시를 싣는다.
-import { test, before } from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -9,7 +9,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
 
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2633-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const CFG = tmpDir('audit2633-');
 process.env.CONFIG_DIR = CFG;
 process.env.DATA_SOURCE = 'mock';
 process.env.AUTH_ENABLED = 'true'; // 인증 꺼짐이면 requireRole 이 익명(admin)으로 통과시킨다 — 역할 게이트를 보려면 켠다(req.user 는 테스트가 넣는다)

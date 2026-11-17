@@ -10,8 +10,15 @@ import path from 'node:path';
 import http from 'node:http';
 import zlib from 'node:zlib';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const TOKEN = 'tok-2601c-shared';
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-2601c-'));
+const CFG = tmpDir('dvc-2601c-');
 process.env.CONFIG_DIR = CFG;
 process.env.CENTRAL_TOKEN = TOKEN;
 process.env.DATA_SOURCE = 'live';
@@ -73,7 +80,7 @@ test('CEN2601-01 — ip-scan-result 의 형식이 틀린 원소가 IPAM 대장 �
 });
 
 test('CEN2601-01 — 디스크에 이미 저장된 오염 결과도 로드 시 같은 정제를 거친다', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-2601c-load-'));
+  const dir = tmpDir('dvc-2601c-load-');
   fs.writeFileSync(path.join(dir, 'ipam-scan-results.json'), JSON.stringify({
     '10.1.1.1': { ip: '10.1.1.1', openPorts: 'x', services: { a: 1 }, hostname: 7, lastSeen: 'y', agent: { a: 1 } },
     '__proto__x': { ip: 'bad' },

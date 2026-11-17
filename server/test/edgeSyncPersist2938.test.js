@@ -2,13 +2,20 @@
  * edgeSyncPersist2938.test.js — 엣지 동기화의 연속 실패 수·알린 사실이 재시작을 넘긴다(v2.938 · 제안 3번).
  * 예전에는 메모리뿐이라 재시작하면 같은 장애를 다시 알렸고 백오프도 처음(10분)부터 다시 시작했다.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'edgesyncpersist-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const CFG = tmpDir('edgesyncpersist-');
 Object.assign(process.env, { CONFIG_DIR: CFG, DATA_SOURCE: 'mock' });
 const sync = await import('../src/upgrade/edgeSync.js');
 const store = await import('../src/upgrade/statusStore.js');

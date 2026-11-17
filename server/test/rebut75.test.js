@@ -12,7 +12,7 @@
  *    (닫히지 않은 <id> 100KB 0.3초 · <returnval> 220KB 0.5초) → vcenter/soapParse.js 선형 훑기 한 벌(contention 도 같은 것).
  * 확인 — (73 F2) 로그 분석 크기 기억(WeakMap)이 합치기 · 줄이기 · 직렬화 뒤에도 상한을 넘기거나 일찍 막지 않는다(불변식).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -20,6 +20,13 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
+
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
@@ -30,7 +37,7 @@ let seed = 75;
 const rnd = (n) => { seed = (seed + 0x6D2B79F5) | 0; let t = seed; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return (((t ^ (t >>> 14)) >>> 0) % n); };
 
 function run(body, { router = 'api', prep = '' } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rebut75-'));
+  const dir = tmpDir('rebut75-');
   const mount = router === 'admin'
     ? `const { adminRouter } = await import(${JSON.stringify(path.join(SRC, 'routes/admin.js'))}); app.use('/api/admin', adminRouter);`
     : `const { api } = await import(${JSON.stringify(path.join(SRC, 'routes/api.js'))}); app.use('/api', api);`;

@@ -6,13 +6,20 @@
 //     사실(있음·개수)은 남기고 원문만 가림. lastPrune 삭제 행 수(함대 수치)는 null.
 //   A2-04 SAN 에러 기준선·월간 점검 증분 키를 rates.js rateKey(slot/port)로 — REST 디렉터 '1/10'·'11/0' 이 index 110 으로 합쳐졌다.
 //   A2-05 IPAM 예약 만료일(날짜만)이 UTC 자정으로 저장돼 KST 09:00 에 만료 → 포탈 오프셋 기준 그 날 끝(다음 날 00:00).
-import { test, before } from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2630b-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const tmp = tmpDir('audit2630b-');
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_SOURCE = 'mock';
 process.env.IDRAC_ENABLED = 'false';

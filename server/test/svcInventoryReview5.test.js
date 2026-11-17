@@ -1,13 +1,20 @@
 // 서비스 인벤토리 5차 검토 1차 반영 — docs/design/service-map/README.md §5차 검토(사용자 '권장안대로 전부 가고, 1차부터').
 //   R1 고정 파일은 설정 변경 감시 밖 · R8 '고정 유지' 는 그때의 자동 판정과 같은 드리프트만 가린다 · R2 등록 해제된 vCenter 법인 항목 ·
 //   R3 개명 시 옛 이름 별칭 · R4 별칭 ↔ 서비스명 충돌 · M1 백업은 법인 Director 기준 · M6 후보·CSV 503 · M3/R9 불필요한 고정 법인 필터.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'svcinv-r5-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const tmp = tmpDir('svcinv-r5-');
 process.env.CONFIG_DIR = tmp;
 
 const { buildIndex, resolveMember, autoResolve } = await import('../src/servicemap/resolve.js');

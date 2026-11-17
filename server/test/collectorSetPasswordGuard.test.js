@@ -6,6 +6,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+test.after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 // 확정 버그 회귀 방지(2026-08-30, 6차 재감사) — 중앙→엣지 비밀번호 심기로 보호 계정 탈취.
 //
 // 배경: `POST /api/admin/collectors/set-password` 는 adminOnly 뿐이었고, `username` 이 요청
@@ -18,7 +25,7 @@ import { stripComments } from './_stripComments.js';
 //
 // 수정은 두 겹이다: ① 엣지가 trusted 를 쓰지 않아 보호 계정을 거부(근본), ② 중앙 라우트에
 // requireSettingsOwner(다층). ①이 핵심이라 함수 계약으로 고정한다.
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'collector-setpw-'));
+const tmp = tmpDir('collector-setpw-');
 process.env.CONFIG_DIR = tmp;
 
 const auth = await import('../src/auth/auth.js');

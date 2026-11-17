@@ -12,7 +12,7 @@
  * ⚠ 검증 방식: **실제 라우터를 express 에 마운트하고 역할·범위별 응답으로** 본다(소스 grep 이 아니다 — v2.506 교훈).
  *   자식 프로세스인 이유: config.js 싱글턴이라 이 프로세스에서 CONFIG_DIR 을 다시 못 가리킨다.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -23,6 +23,13 @@ import { latestByDevice } from '../src/storage/latestSnapshots.js';
 import { maskDeviceAddress, maskSnapAddress } from '../src/auth/addressMask.js';
 import { vcenterScopeIssue } from '../src/routes/remote.js';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 const ROOT = path.resolve(SRC, '..');
@@ -30,7 +37,7 @@ const J = (p) => JSON.stringify(path.join(SRC, p));
 
 /** 자식 프로세스에서 목 스냅샷을 채우고 라우터를 띄운다. script 는 { call, v1call, snap, ... } 을 쓴다. */
 function runLive(script) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2599c-'));
+  const dir = tmpDir('a2599c-');
   const boot = `
     const express = (await import('express')).default;
     const { store } = await import(${J('store.js')});

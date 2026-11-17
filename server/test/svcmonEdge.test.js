@@ -3,13 +3,20 @@
  * 두 프로세스 통합 흐름은 별도 수동 검증(중앙 18210 + 엣지 18211)으로 확인했고,
  * 여기서는 그 흐름의 단위 계약을 고정한다.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'svcmon-rma-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+process.env.CONFIG_DIR = tmpDir('svcmon-rma-');
 process.env.SVCMON_WORKERS = '0';
 
 const edge = await import('../src/central/svcmonEdge.js');
@@ -174,7 +181,7 @@ test('SVCMON_ROLE=central 이면 폴러가 실행하지 않는다(자식 프로�
     const r = m.pollerRole();
     console.log(JSON.stringify(r));
   `;
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'svcmon-role-'));
+  const dir = tmpDir('svcmon-role-');
   const { stdout } = await run(process.execPath, ['--input-type=module', '-e', script], {
     cwd: path.resolve('.'), env: { ...process.env, CONFIG_DIR: dir, SVCMON_ROLE: 'central' },
   });

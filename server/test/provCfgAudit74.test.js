@@ -2,7 +2,7 @@
 //   F1 펼치기 전 입력 상한(pad · 패턴 길이 · 추가 NIC · 항목 이름) · F2 연속 IP 가 255.255.255.255 를 넘으면 0.0.0.0 으로 돌던 것 ·
 //   F3 시작 번호 0 이 1 로 바뀌던 것 · F4 contention 응답 파서의 O(n²) 지연 정규식 · F5 고른 호스트 · 데이터스토어를 못 찾으면 조용히 원본 위치 ·
 //   F6 스토리지 프로파일 본문(스키마에 없는 모양) · F7 원본 vcenterId 없을 때 ReferenceError · F9 저장된 작업 파일 읽기 오류를 손상으로.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -10,7 +10,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'prov-cfg-audit74-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const TMP = tmpDir('prov-cfg-audit74-');
 process.env.CONFIG_DIR = TMP;
 process.env.DATA_SOURCE = 'live';
 

@@ -6,13 +6,20 @@
  *    ④ 확인 입력(서버 이름)이 다르면 멈춘다 · ⑤ 볼륨은 Archive Device 경로만 · 시스템 경로 · 심링크는 지우지 않는다
  *    ⑥ 완전 초기화(카탈로그 · 볼륨 · 패키지 · 설정) · 남길 옵션 · 다시 실행하면 '지울 것 없음'
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPT = path.resolve(HERE, '../../packaging/bareos-bundle/bareos-reset.sh');
@@ -44,7 +51,7 @@ exit 0`,
 };
 
 function env0({ device = '/var/lib/bareos/storage' } = {}) {
-  const P = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bareos-reset-')));
+  const P = fs.realpathSync(tmpDir('bareos-reset-'));
   const BIN = path.join(P, '_bin'); const FAKE = path.join(P, '_fake');
   fs.mkdirSync(BIN); fs.mkdirSync(FAKE);
   for (const [n, body] of Object.entries(STUBS)) { fs.writeFileSync(path.join(BIN, n), `${body}\n`); fs.chmodSync(path.join(BIN, n), 0o755); }
@@ -215,7 +222,7 @@ test('⑪ 반증 H — 공백 · 글롭이 든 Archive Device 는 갈라지지 �
 
 test('⑫ 반증 I — 볼륨이 아닌 곳(/var/log · /var/lib/pgsql · 홈 바로 아래 · /tmp 아래)은 지우지 않는다 · 러너와 같은 함수', () => {
   assert.equal(fnOf(SCRIPT, 'safe_voldir'), fnOf(RUNNER, 'safe_voldir'), '스크립트와 설치 러너 0단계의 판정이 같은 글자');
-  const P = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'safevol-')));
+  const P = fs.realpathSync(tmpDir('safevol-'));
   const ok = ['/data/bareos/storage', '/var/lib/bareos/storage', '/home/backup/bareos', '/srv/bareos'];
   const no = ['/var/log', '/var/log/bareos', '/var/lib/pgsql/data', '/var/spool/mail', '/var/tmp/x', '/home/user', '/root/x', '/tmp/vols', '/var/lib/portal-bareos-install/run', '/data/a b', '/data/x*', '/var/lib', '/etc/bareos'];
   for (const d of [...ok, ...no]) fs.mkdirSync(path.join(P, d), { recursive: true });

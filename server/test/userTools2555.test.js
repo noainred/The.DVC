@@ -12,7 +12,7 @@
  *
  * 자식 프로세스인 이유: `config.js` 는 싱글턴이라 한 프로세스에서 CONFIG_DIR 을 다시 못 가리킨다.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -20,12 +20,19 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 
 /** permissions.json 을 그대로 쓰는 임시 CONFIG_DIR 을 만들고 자식 프로세스에서 스크립트를 돈다. */
 function runWith(matrixFile, script) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'usertools2555-'));
+  const dir = tmpDir('usertools2555-');
   fs.writeFileSync(path.join(dir, 'permissions.json'), JSON.stringify(matrixFile));
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
     env: { ...process.env, CONFIG_DIR: dir, DATA_SOURCE: 'mock', AUTH_ENABLED: 'true' },

@@ -6,7 +6,7 @@
  * ③ 연결 — 반대 방향은 읽을 때 계산 · 볼 수 없는 이슈 숨김 · 상대가 만든 연결은 상대의 쓰기 범위 · 막는 이슈가 열려 있으면 완료 전에 묻는다.
  * ④ 주간 메일 — 월요일 09:00(포탈 날짜) 뒤 한 번 · 받는 사람의 범위로 다시 거른다(실제 발송 함수 대체) · 공유를 끄면 남의 구독이 내려간다.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,6 +14,13 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { taskMarkAt as serverMark } from '../src/wiki/store.js';
+
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
@@ -36,7 +43,7 @@ test('① 체크리스트 줄 판정 — 서버 · 웹이 같은 답 · 웹 파�
 });
 
 function run(body, { pre, env = {} } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'c2883-'));
+  const dir = tmpDir('c2883-');
   if (pre) pre(dir);
   const script = `
     const express = (await import('express')).default;

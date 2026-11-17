@@ -26,7 +26,14 @@ import url from 'node:url';
 import express from 'express';
 import { centralSource } from './_centralSource.js';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'psinspect2965-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const TMP = tmpDir('psinspect2965-');
 Object.assign(process.env, { CONFIG_DIR: TMP, DATA_SOURCE: 'live', AUTH_ENABLED: 'false' });
 delete process.env.CENTRAL_URL; delete process.env.CENTRAL_TOKEN;
 after(() => { try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* */ } });

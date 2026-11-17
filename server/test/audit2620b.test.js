@@ -9,7 +9,7 @@
  *
  * 기준 시각은 Date.now() 를 그대로 쓰지 않는다 — 정시 −30분으로 고정해 분·시 경계에서 떨어뜨린다(CLAUDE.md v2.517 규약).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -18,9 +18,15 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2620b-'));
+const DIR = tmpDir('audit2620b-');
 process.env.CONFIG_DIR = DIR;
 process.env.TEMP_DB_PATH = path.join(DIR, 'host-temp.db');
 // SRV2620-05: 손으로 고친(또는 복원된) 설정 파일 — 1초 주기.
@@ -98,7 +104,7 @@ test('02 라우트 — 짧은 창은 recentAvgStep, 1시간 미만 버킷은 his
 });
 
 test('★ 02 라우트 실호출 — /tools/esxi-temp/history?bucket=minute 가 안정 구간을 점으로 채운다', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2620b-route-'));
+  const dir = tmpDir('audit2620b-route-');
   const script = `
     const { getMetricsDb } = await import(${JSON.stringify(path.join(SRC, 'metrics/db.js'))});
     const db = await getMetricsDb();
@@ -130,7 +136,7 @@ test('★ 02 라우트 실호출 — /tools/esxi-temp/history?bucket=minute 가 
 });
 
 test('★ 02 라우트 실호출 — /tools/esxi-temp 의 짧은 창 평균이 안정 호스트에도 값을 낸다(avgCarried·avgMethod)', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2620b-temp-'));
+  const dir = tmpDir('audit2620b-temp-');
   const script = `
     const { store } = await import(${JSON.stringify(path.join(SRC, 'store.js'))});
     await store.refresh({ force: true });
@@ -246,3 +252,7 @@ test('★ 07 로그 버퍼 항목 time 이 빈 값이면 ts 는 null(1970 아님
   assert.equal(fromBufferEntry({ msg: 'x', time: NOW }).ts, NOW);
   assert.equal(fromBufferEntry({ msg: 'x', time: String(NOW) }).ts, NOW);
 });
+
+// v3.18.8: 정리 훅은 파일 끝에서 등록한다 — 시험 사이에 최상위 await 가 있으면 앞 시험이 끝난 시점에 루트 after 가 먼저 돌아
+//   뒤 시험이 쓸 폴더를 지운다(node 22 실측 — audit2590 이 그렇게 깨졌다).
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });

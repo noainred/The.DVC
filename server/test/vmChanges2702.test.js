@@ -1,11 +1,18 @@
 // v2.702 — VM 이동 이력(A7)·구성 변경 diff·권한 변경(A8): 이벤트 상세 파싱 · logs DB 열·부분 인덱스 · 분석 · 라우트 범위.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'vmchg-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const TMP = tmpDir('vmchg-');
 process.env.CONFIG_DIR = TMP;
 const { eventDetail, detailJson, parseDetail, moveKind, TRACKED_TYPES, TRACKED_SQL, MOVE_TYPES, DETAIL_MAX } = await import('../src/vmchanges/eventDetail.js');
 const { analyzeMoves, analyzeChanges, vmHistory, churnThreshold, VM_ROWS_MAX } = await import('../src/vmchanges/analyze.js');
@@ -162,7 +169,7 @@ test('⑦ 수집 경로 — soapClient 가 이벤트 행에 detail 을 싣고, p
 
 test('⑧ 라우트 — 범위 계정은 범위 밖 VM 의 이력이 404(존재 은닉), 목록은 범위 vCenter 만 · CSV 는 data.csv', async () => {
   const { spawnSync } = await import('node:child_process');
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vmchg-rt-'));
+  const dir = tmpDir('vmchg-rt-');
   const script = `
     const express = (await import('express')).default;
     const { store } = await import('./src/store.js');

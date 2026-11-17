@@ -15,7 +15,7 @@
  * ⚠ AUTHZ 는 v2.536·v2.605 하니스와 같다 — **실제 라우터를 express 에 마운트하고 상태코드·파일 상태로** 본다.
  *   자식 프로세스인 이유: config.js 싱글턴이라 이 프로세스에서 CONFIG_DIR 을 다시 못 가리킨다.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -23,11 +23,18 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 
 function runChild(body, { env = {}, setup = null } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2606b-'));
+  const dir = tmpDir('audit2606b-');
   if (setup) setup(dir);
   const script = `
     const SRC = ${JSON.stringify(SRC + '/')};
@@ -310,7 +317,7 @@ test('TIM2606-04: sshGateway 의 readyTimeout 은 sshExec 와 같은 reqTimeoutM
     const { reqTimeoutMs } = await import(${JSON.stringify(SRC + '/agent/envTimeout.js')});
     console.log('@@' + JSON.stringify({ v: m.SSH_GATEWAY_READY_TIMEOUT_MS, want: reqTimeoutMs('3000000000', 60000) }));
     process.exit(0);
-  `], { env: { ...process.env, SSH_READY_TIMEOUT_MS: '3000000000', CONFIG_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'audit2606b-t-')), DATA_SOURCE: 'mock' }, encoding: 'utf8', cwd: path.resolve(SRC, '..'), timeout: 60_000 });
+  `], { env: { ...process.env, SSH_READY_TIMEOUT_MS: '3000000000', CONFIG_DIR: tmpDir('audit2606b-t-'), DATA_SOURCE: 'mock' }, encoding: 'utf8', cwd: path.resolve(SRC, '..'), timeout: 60_000 });
   assert.equal(r.status, 0, r.stderr.slice(-1500));
   const o = JSON.parse(r.stdout.split('\n').find((l) => l.startsWith('@@')).slice(2));
   assert.equal(o.v, o.want);

@@ -10,7 +10,7 @@
  *  ⑦ 실제 api 라우터(자식 프로세스) — admin 200 · operator 403 · 범위 계정 403 · CSV 는 data.csv · 응답에 토큰 없음
  *  ⑧ 웹 문구와 1:1 — 실패 종류 · 상태 · 사유 코드(웹 xferSpeedText.js)
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -19,10 +19,17 @@ import http from 'node:http';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 const WEB = path.resolve(HERE, '../../web/src');
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'xferspeed2735-'));
+const TMP = tmpDir('xferspeed2735-');
 process.env.CONFIG_DIR = TMP;
 process.env.COLLECTOR_TOKEN = 'edge-token-2735';
 process.env.DATA_SOURCE = 'live';
@@ -415,7 +422,7 @@ test('⑥ 폴러 — 대상 선정 · 오래 안 잰 엣지 먼저 · 수동 실
 
 /* ⑦ 실제 api 라우터 ───────────────────────────────────────────────────── */
 test('⑦ 실제 api 라우터 — admin 200 · operator·범위 계정 403 · CSV data.csv · 토큰 미노출', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xferspeed2735-api-'));
+  const dir = tmpDir('xferspeed2735-api-');
   fs.writeFileSync(path.join(dir, 'permissions.json'), JSON.stringify({ schemaVersion: 3, matrix: { operator: ['dashboard', 'tools'], viewer: ['dashboard', 'tools'], toolsDenied: { operator: [], viewer: [] } } }));
   fs.writeFileSync(path.join(dir, 'collectors.json'), JSON.stringify({ collectors: [{ id: 'Edge-Seoul', name: 'Edge Seoul', url: 'https://10.20.0.5:4000/x?token=leak', token: 'SECRET-COLLECTOR-TOKEN', enabled: true, datacenter: 'Seoul' }] }));
   const script = `

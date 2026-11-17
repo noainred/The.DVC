@@ -11,7 +11,7 @@
  *  ⑤ B-08 setFileLoginPolicy 는 같은 줄의 인라인 주석을 보존한다.
  * ①②⑤ 는 자식 프로세스(config.js 싱글턴이라 CONFIG_DIR 을 다시 못 가리킨다) · ③ 은 실제 api 라우터(v2.536 규약) · ④ 는 순수 함수.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -19,13 +19,20 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 const STORE = path.join(SRC, 'bulletin/store.js');
 
 /** 자식 프로세스에서 모듈 코드를 돌리고 `@@` 줄의 JSON 을 돌려준다. */
 function child(body, { env = {}, pre } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2727b-'));
+  const dir = tmpDir('audit2727b-');
   if (pre) pre(dir);
   const script = `
     const fs = (await import('node:fs')).default;
@@ -237,7 +244,7 @@ test('④ B-07 board.json·notices.json — 변경 감시 지문에서 빠지고
   }
   assert.equal(svc.isChangeWatchExcluded('vcenters.json'), false);
   // 번들에는 들어간다 — collectConfigDir 가 두 파일을 싣는다
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2727b-bundle-'));
+  const dir = tmpDir('audit2727b-bundle-');
   fs.writeFileSync(path.join(dir, 'board.json'), '{"posts":[]}');
   fs.writeFileSync(path.join(dir, 'notices.json'), '{"notices":[]}');
   const got = svc.collectConfigDir(dir);

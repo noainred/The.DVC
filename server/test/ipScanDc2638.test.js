@@ -6,7 +6,7 @@
  *      등록되지 않은 DataCenter 저장은 400 · 제안 API.
  *   ④ 웹 문구·대역 판정(ipScanDcText.js).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,6 +14,13 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolveAgentDatacenters, agentVcenterIds, suggestAgentSubnets, ipOfHost, datacenterMapSig } from '../src/ipam/scanDatacenter.js';
+
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
@@ -71,7 +78,7 @@ test('② 제안: /24 로 묶고 IP·출처를 센다 · 이름 등록은 개수
 });
 
 function runChild(body, setup) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ipscandc2638-'));
+  const dir = tmpDir('ipscandc2638-');
   setup(dir);
   const script = `
     const SRC = ${JSON.stringify(SRC + '/')};

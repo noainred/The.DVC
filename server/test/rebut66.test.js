@@ -10,14 +10,21 @@
  *  R4(중간 · 65 F1 형제) commmap/build.js — 통신 지도가 엣지 링크 보고를 표기 그대로(edgeReports[linkFrom] || [id]) 찾아 대소문자만 다르면 reportAt 이 null.
  *  개선: 중계 토폴로지 가져오기 미리보기도 secretsDropped 를 싣는다(적용 뒤에야 알던 것).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'rebut66-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const TMP = tmpDir('rebut66-');
 process.env.CONFIG_DIR = TMP;
 process.env.DATA_SOURCE = 'live';
 process.env.AUTH_ENABLED = 'false';

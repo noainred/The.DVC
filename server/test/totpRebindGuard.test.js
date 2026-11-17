@@ -4,6 +4,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+test.after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 // 확정 버그 회귀 방지(2026-08-30) — OTP '대리 등록'을 통한 권한 상승.
 //
 // 배경: beginTotpEnroll 은 QR 발급을 위해 평문 시크릿을 반환한다. adminOnly 만 걸린 관리자
@@ -12,7 +19,7 @@ import path from 'node:path';
 // passwordHash 까지 지우므로 기존 소유자는 로그인 수단을 잃고, 호출자만 그 계정으로 로그인할 수
 // 있게 된다(= 계정 탈취 → admin→설정소유자 권한 상승). disableTotp 는 u.superuser 를 이미
 // 막고 있었는데 '등록' 경로만 열려 있어 그 보호가 우회됐다.
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'totp-rebind-test-'));
+const TMP = tmpDir('totp-rebind-test-');
 process.env.CONFIG_DIR = TMP;
 delete process.env.OTP_ROLE_ENFORCE;
 

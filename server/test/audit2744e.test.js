@@ -14,7 +14,7 @@
  * ②는 실제 authMiddleware·requireEnrolled 와 실제 api·admin·auth·svcmon 라우터를 띄워 상태코드·응답 본문으로 본다(소스 grep 아님).
  * 임시 파일은 os.tmpdir() 아래에만 만든다(저장소 안에 CONFIG_DIR 를 만들지 않는다).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -23,12 +23,19 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 const J = (p) => JSON.stringify(path.join(SRC, p));
 
 // 순수 모듈·logs DB 도 config.js 를 거친다 — 저장소의 server/config 를 건드리지 않게 먼저 임시 CONFIG_DIR 을 잡는다.
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2744e-'));
+const TMP = tmpDir('audit2744e-');
 process.env.CONFIG_DIR = TMP;
 
 // ── ① 소스 스윕(AUTHZ-01) ────────────────────────────────────────────────
@@ -98,7 +105,7 @@ test('① AUTHZ-01 memo 키 — 역할에 따라 본문이 갈리는 memoJson �
 
 // ── ② 실제 라우터 하니스 ─────────────────────────────────────────────────
 function runHarness() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2744e-h-'));
+  const dir = tmpDir('audit2744e-h-');
   const script = `
     const fs = await import('node:fs');
     const path = await import('node:path');

@@ -10,7 +10,7 @@
  * ⚠ 검증 방식: 라우트는 **실제 api 라우터를 express 에 띄워 역할·범위별 응답으로** 본다. admin 응답에 가릴 값이
  *   실제로 있는지도 확인한다(가릴 것이 없어서 통과하는 공허한 테스트 방지). 기준 시각은 고정값이다(CLAUDE.md v2.517).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -20,6 +20,13 @@ import { fileURLToPath } from 'node:url';
 import { maskSnapAddress, scrubStringsDeep } from '../src/auth/addressMask.js';
 import { splitNsxGroupId } from '../src/routes/api/overviewNsx.js';
 import { testCounts } from '../src/routes/api/storageMon.js';
+
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
@@ -60,7 +67,7 @@ test('AUTHZ-2603-02: maskSnapAddress 가 점검 결과 items[].detail 의 주소
 /* ── 실제 라우터 ─────────────────────────────────────────────────────────── */
 
 function runLive(script) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2603b-'));
+  const dir = tmpDir('a2603b-');
   const boot = `
     const express = (await import('express')).default;
     const { store } = await import(${J('store.js')});

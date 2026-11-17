@@ -6,13 +6,20 @@
  *  S4 — 복구 VM 은 NIC 가 끊긴 채로 태어난다(CloneSpec config 의 deviceChange — 순서: template 뒤·powerOn 앞).
  *  S5 — 뒷정리가 남은 잡은 지우지 않고(deleteJob), 엣지 위임 동기화도 지우지 않는다(applyDelegatedJobs). 스케줄러는 위임 vCenter 를 거른다.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(HERE, '..', 'src');
@@ -26,7 +33,7 @@ const JOB = (extra = {}) => ({
 
 /** vsphere.js 를 가짜로 바꾼 자식 프로세스에서 body 를 돌린다(실제 store·vsOps·scheduler). */
 function run(body, { jobs = [JOB()] } = {}) {
-  const cfg = fs.mkdtempSync(path.join(os.tmpdir(), 'vmc2794-'));
+  const cfg = tmpDir('vmc2794-');
   fs.writeFileSync(path.join(cfg, 'vcenters.json'), JSON.stringify({ vcenters: [{ id: 'vcA', host: 'https://127.0.0.1:1', username: 'u', password: 'p' }] }));
   fs.writeFileSync(path.join(cfg, 'vm-clone.json'), JSON.stringify({ version: 1, jobs, ops: [] }));
   const script = `

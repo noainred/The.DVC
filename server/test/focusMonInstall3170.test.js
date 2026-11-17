@@ -10,14 +10,21 @@
  *  ⑥ 중앙 — 설치 접수 · 엣지 배달(설치 계정을 알려 온 엣지만) · 결과 정제 · 설치 위치 기억 · 후보 밖 위치 거부 · 준비 확인 후보
  *  ⑦ 설정 손상(재시작 뒤 보존본만이어도) · 라우트 문(관리자 · 설정 소유자 등급 · 데모 · OTP) · 503
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'focusmoninstall3170-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const DIR = tmpDir('focusmoninstall3170-');
 process.env.CONFIG_DIR = DIR;
 process.env.DATA_SOURCE = 'mock';
 process.env.AUTH_ENABLED = 'true';

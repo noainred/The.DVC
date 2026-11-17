@@ -6,7 +6,7 @@
  *  I-I2: 라우트는 무거운 조립(buildPortUsage)을 한 번만 — 대상 고르기는 같은 바탕(usageBase)을 재사용한다.
  * 순수 함수는 now 를 주입하므로 고정 시각을 쓴다(docs/rules/common.md — 주입형은 고정 시각 허용).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,7 +14,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
 
-process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2782c-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+process.env.CONFIG_DIR = tmpDir('audit2782c-');
 const pu = await import('../src/sanswitch/portUsage.js');
 const H = 3_600_000, D = 86_400_000, Q = 900_000;
 const KST0 = Date.UTC(2026, 9, 20, 15, 0);   // 2026-10-21 00:00 KST

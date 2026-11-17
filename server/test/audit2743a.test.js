@@ -10,7 +10,7 @@
  *
  * ②는 실제 authMiddleware·requireEnrolled 와 실제 api·admin·auth 라우터를 띄워 상태코드·응답 본문으로 본다(소스 grep 아님).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -18,13 +18,20 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 const REPO = path.resolve(HERE, '../..');
 const J = (p) => JSON.stringify(path.join(SRC, p));
 
 // 순수 모듈들도 config.js 를 거친다 — 저장소의 server/config 를 건드리지 않게 먼저 임시 CONFIG_DIR 을 잡는다.
-process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2743a-pure-'));
+process.env.CONFIG_DIR = tmpDir('audit2743a-pure-');
 
 test('① AUTHZ-01 가림 판정 하나 — 데모 계정은 관리자 판본이 아니다', async () => {
   const { isAdminDetailUser, demoGuestDenial } = await import('../src/auth/demoGuest.js');
@@ -133,7 +140,7 @@ test('④ LEFT-09 Electron 은 정확한 33.x 버전으로 고정', () => {
 });
 
 function runHarness() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2743a-'));
+  const dir = tmpDir('audit2743a-');
   const script = `
     const fs = await import('node:fs');
     const express = (await import('express')).default;

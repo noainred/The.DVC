@@ -1,12 +1,19 @@
 // v2.651: 업그레이드 다운로드 실패 사유 — 404 는 '미러에 파일 없음' 을 말하고, 주소의 자격증명·쿼리는 싣지 않는다.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'upg2651-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+process.env.CONFIG_DIR = tmpDir('upg2651-');
 const { downloadFailReason, safeUrlText, downloadArchive } = await import('../src/upgrade/upgrade.js');
 
 test('사유 문구: 접두 유지 · 404/401·403 구분 · 자격증명 제거', () => {
@@ -24,7 +31,7 @@ test('실제 다운로드 404 → 파일 없음 사유', async () => {
   await new Promise((ok) => srv.listen(0, '127.0.0.1', ok));
   try {
     const url = `http://127.0.0.1:${srv.address().port}/vmware-portal-2.650.0.tar.gz`;
-    const r = await downloadArchive(url, fs.mkdtempSync(path.join(os.tmpdir(), 'dl-')), { sha256: 'x', timeout: 5000 });
+    const r = await downloadArchive(url, tmpDir('dl-'), { sha256: 'x', timeout: 5000 });
     assert.equal(r.ok, false);
     assert.match(r.reason, /패키지 파일이 없습니다/);
     assert.equal(r.status, 404);

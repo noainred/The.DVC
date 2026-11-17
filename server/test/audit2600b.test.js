@@ -15,7 +15,7 @@
  * ⚠ 검증 방식: 순수 함수는 직접, 라우트는 **실제 라우터를 express 에 띄워 역할·범위별 응답으로** 본다.
  *   기준 시각은 Date.now() 가 아니라 고정값(정시 경계에서 떨어뜨린 값)이다(CLAUDE.md v2.517).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -27,6 +27,13 @@ import { sumCapacityBuckets } from '../src/storage/db.js';
 import { maskSerialRow } from '../src/routes/api/serialLookup.js';
 import { maskHostPower } from '../src/routes/api/vmMetrics.js';
 import { maskTargetAddress, publicTarget } from '../src/bmusage/targets.js';
+
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 process.env.COLLECTOR_HTTP_ALLOW = '*'; // 2026-10-09 S-09 이후 원격 http 등록은 예외·허용 목록만 — 이 테스트는 평문 픽스처를 쓴다
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -137,7 +144,7 @@ test('DB2600-01: 전체 합계는 장비별 마지막 값을 이어 붙여 20대
 /* ── 실제 라우터 ─────────────────────────────────────────────────────────── */
 
 function runLive(script) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2600b-'));
+  const dir = tmpDir('a2600b-');
   const boot = `
     const express = (await import('express')).default;
     const { store } = await import(${J('store.js')});

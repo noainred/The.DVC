@@ -6,7 +6,7 @@
  *    · LIVE_GET_DENY 의 경로가 전부 실재하는 GET 라우트인지(목록이 낡지 않게)
  *    · 라우트 소스에서 실제 접속 함수를 부르는 GET 핸들러를 찾아 그 URL 이 전부 거부되는지(새 실접속 GET 누락을 잡는다).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -15,6 +15,13 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { demoGuestDenial, LIVE_GET_DENY, READ_DENY } from '../src/auth/demoGuest.js';
 import { stripComments } from './_stripComments.js';
+
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
@@ -82,7 +89,7 @@ function liveGetDecls() {
 }
 
 function routerGetPaths() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2719b-'));
+  const dir = tmpDir('audit2719b-');
   const script = `
     const R = ${JSON.stringify(path.join(SRC, 'routes') + '/')};
     const list = [['/api','api.js','api'],['/api/admin','admin.js','adminRouter'],['/api/ping','ping.js','pingRouter'],

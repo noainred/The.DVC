@@ -19,7 +19,7 @@
  * 봤고 **`pushPerfNow` 를 한 번도 호출하지 않았다** — 그래서 통과하면서 놓쳤다.
  * 여기서는 **실제 HTTP 로 목 중앙에 올려** 본문이 도착하는 것까지 확인한다.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -29,7 +29,14 @@ import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
 
-process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sansw-push-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+process.env.CONFIG_DIR = tmpDir('sansw-push-');
 process.env.SANSW_PUSH_GZIP = 'true';   // 실제 운영 기본값 그대로 — gzip 경로까지 본다
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
