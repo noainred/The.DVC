@@ -30,11 +30,12 @@ export function runtimeSettingsWriteRefusal() {
   load();
   return _readErr ? { ok: false, status: 503, code: 'settingsUnreadable', readError: true, reason: `런타임 설정(데이터 소스) 파일(${path.basename(FILE)})을 읽지 못해 저장하지 않았습니다 — 읽기 오류(${_readErr})이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` } : null;
 }
+let _unreadWarned = '';
 function load() {
   if (cache) return cache;
   const rr = _reader.read();
   if (rr.kind === 'read-error') { _readErr = String(rr.error?.code || 'read-error').slice(0, 32); return {}; }   // 107회차: 캐시하지 않는다 — 쓰기는 거절한다
-  _readErr = '';
+  _readErr = ''; _unreadWarned = '';
   cache = {};
   try {
     // v3.17.2: 판정은 공용 util/jsonObject.js 하나 — 객체가 아니면 던져 아래 catch 가 원본을 보존한다.
@@ -49,11 +50,31 @@ function save() {
   atomicWriteFileSync(FILE, JSON.stringify(cache, null, 2), { mode: 0o600 });
 }
 
-/** Effective data source: UI override if set, else the env default. */
+/**
+ * Effective data source: UI override if set, else the env default.
+ *
+ * 115회차 D1(재현 — 메인 반영): 파일이 **있는데 읽지 못한 동안**(읽기 오류 — 기동 뒤 한 번도 읽지 못했을 때만 여기로 온다. 한 번 읽으면 cache 가 답한다)
+ *   저장된 선택을 모른다. 예전에는 그때 env 기본값을 줬다 — 설치 예제(portal.env.example)의 기본이 `DATA_SOURCE=mock` 이고 운영자는 화면에서 live 로
+ *   바꿔 쓰므로(그 선택이 이 파일이다), 재시작 직후 읽기 오류 한 번에 **운영 포탈이 데모(mock) 모드**로 돌았다: 수집이 합성 스냅샷으로 바뀌고(store.js),
+ *   데모 계정이 관리자 문맥을 받고(auth.js demoGuestOf), mock 전용 분기(isMockMode — 백업 흉내 등)가 켜졌다. 107회차 전에는 원본을 치워 영구히 그랬다.
+ *   못 읽은 것은 'mock 을 골랐다' 가 아니다 — **env 기본값이 mock 이면 그 값으로 돌지 않고 live 로 판정한다**(가짜 데이터를 실제처럼 보이지 않는 쪽 ·
+ *   등록된 vCenter 가 없으면 빈 화면일 뿐이다). env 가 live · auto 면 그 값 그대로다. 파일이 없는 것(= 화면에서 고른 적 없음)과 손상(보존본으로 옮김 —
+ *   예전 규약대로 기본값)은 예전과 같다. 30초 간격으로 다시 읽고, 읽히면 저장된 선택으로 돌아온다.
+ */
 export function getDataSource() {
   const s = load();
-  return VALID_SOURCES.includes(s.dataSource) ? s.dataSource : config.dataSource;
+  if (VALID_SOURCES.includes(s.dataSource)) return s.dataSource;
+  if (_readErr && config.dataSource === 'mock') {
+    if (_unreadWarned !== _readErr) {
+      _unreadWarned = _readErr;
+      console.warn(`[runtime] 런타임 설정(${path.basename(FILE)})을 읽지 못했습니다(읽기 오류 ${_readErr}) — 저장된 데이터 소스를 모릅니다. env 기본값이 mock 이지만 가짜 데이터로 돌지 않도록 live 로 판정합니다(읽히면 저장된 선택으로 돌아옵니다 · 파일 권한 · 소유자 · 디스크를 확인하세요)`);
+    }
+    return 'live';
+  }
+  return config.dataSource;
 }
+/** 115회차 D1: 저장된 데이터 소스를 읽지 못해 판정이 env 기본값(mock)과 다른 상태인가 — 화면 · 서비스 점검이 사유를 보일 수 있게. */
+export function dataSourceUnread() { load(); return _readErr ? { readError: true, code: _readErr } : null; }
 
 export function setDataSource(value) {
   const v = String(value || '').toLowerCase();
