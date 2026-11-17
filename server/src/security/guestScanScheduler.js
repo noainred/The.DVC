@@ -19,7 +19,7 @@ import { recordNetScan } from './netIssueStore.js';
 import { enqueueNotify as notify } from '../alerts.js'; // v2.742(감사 TIMING-01): 결과를 기다리지 않는 발송은 alerts.js 대기열로 — 동시 발송이 메일 인증 정지 가드를 우회하지 않게 한 번에 하나씩 보낸다.
 import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
 import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 103회차 F7: 읽기 오류 ≠ 손상
-import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // v2.538: 이 파일은 v2.537 까지 봉인 대상 미등록이었다(감사 M4 계열)
+import { openSecretsDeep, sealSecretsDeep, decryptFailureCount } from '../security/secretVault.js'; // v2.538: 이 파일은 v2.537 까지 봉인 대상 미등록이었다(감사 M4 계열)
 import { createAuthGuard, authStopView, createAuthBreaker, runWithBreakerWarmup } from '../util/authGuard.js';
 import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
 import { gpuAuthGuard, isGpuAuthError, guestAccountStopDev } from '../gpu/sshCollect.js';
@@ -52,7 +52,18 @@ const _reader = makeJsonFileReader(() => FILE, { parse: (t) => t, preserve: fals
 let _readErr = null;   // { at, code }
 /** 103회차 F7: guest-scans.json 읽기 오류(원본은 그대로)면 `{ at, code }`, 아니면 null. */
 export function guestScansReadError() { load(); return _readErr ? { ..._readErr } : null; }
+/*
+ * 105회차 A3(103 추정 반증 · 재현): 복호 실패는 손상으로 옮기지 않는다(openSecret 이 던지지 않고 '' 로 연다) — 103 추정은 틀렸다. 실제 결함은 그 반대다:
+ *   키가 **바뀐**(SECRETS_KEY 가 다른 값) 뒤에는 금고의 저장 거절(키 없음 전용)이 걸리지 않아, 이름만 고친 저장 한 번 · 정기 실행 기록(persist) 한 번이
+ *   **전 작업의 게스트 비밀번호 암호문을 '' 로 덮었다**(키를 되돌려도 복구 불가). 이제 연 값 중 복호 실패가 있으면 실행 기록은 쓰지 않고(메모리만) ·
+ *   저장 · 삭제는 409 로 거절한다(bmusage/onboard/keyStore 의 undecryptable 과 같은 판정). 키를 정말 잃었다고 확정한(SECRETS_KEY_LOST=true) 설치는 예전처럼 저장된다.
+ */
+let _undecryptable = 0;
+/** 105회차 A3: 봉인을 풀지 못한 게스트 비밀 수(0 이면 정상). */
+export function guestScansUndecryptable() { load(); return _undecryptable; }
+const keyLostConfirmed = () => process.env.SECRETS_KEY_LOST === 'true';
 function assertWritable() {
+  if (_undecryptable && !keyLostConfirmed()) throw Object.assign(new Error(`봉인을 풀지 못한 게스트 비밀 ${_undecryptable}개가 있어(자격증명 비밀키 불일치 의심) 게스트 조사 작업을 저장하지 않았습니다 — 저장하면 그 암호문이 지워집니다. 원래 비밀키(SECRETS_KEY · secrets-key)로 되돌린 뒤 다시 시도하세요(키를 정말 잃었으면 SECRETS_KEY_LOST=true 로 재시작).`), { status: 409, code: 'secrets-undecryptable' });   // 105회차 A3
   if (!_readErr) return;
   throw Object.assign(new Error(`게스트 조사 작업 파일(guest-scans.json)을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류(${_readErr.code})이고 원본(자격증명 포함)은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽습니다).`), { status: 409, code: 'settings-unreadable', readError: true });
 }
@@ -65,18 +76,21 @@ function load() {
   }
   _readErr = null;
   cache = [];
+  _undecryptable = 0;
   try {
     if (rr.kind === 'ok') {
       const p = JSON.parse(rr.value);
       if (!Array.isArray(p)) throw new Error('배열이 아님'); // 형식 불일치도 손상으로 취급
+      const failBefore = decryptFailureCount();
       cache = openSecretsDeep(p);
+      _undecryptable = Math.max(0, decryptFailureCount() - failBefore);   // 105회차 A3
     }
-  } catch (e) { cache = []; backupCorrupt(e); }
+  } catch (e) { cache = []; _undecryptable = 0; backupCorrupt(e); }
   return cache;
 }
 // 원자적 쓰기(0600) — runJob이 매 실행마다 lastRun/lastErr을 저장하므로 쓰기 빈도가 높고,
 // 그중 한 번이라도 부분기록으로 끊기면 load가 []가 되어 자격증명 포함 작업 정의가 사라진다.
-function persist() { if (!cache) return; try { writeList(cache); } catch { /* 실행 기록(lastRun 등)만 — 다음 저장에 함께 */ } }   // 103회차 F7: 캐시가 없으면(읽기 오류) 쓰지 않는다
+function persist() { if (!cache || (_undecryptable && !keyLostConfirmed())) return; try { writeList(cache); } catch { /* 실행 기록(lastRun 등)만 — 다음 저장에 함께 */ } }   // 103회차 F7: 캐시가 없으면(읽기 오류) 쓰지 않는다 · 105회차 A3: 복호 실패가 있으면 쓰지 않는다(암호문 보존)
 // 21회차 L-3(재현): 사람이 하는 저장 · 삭제는 쓰기 실패를 삼키지 않는다 — 예전에는 응답이 정상인데 메모리만 바뀌어(파일은 그대로)
 //   메모리 작업이 게스트 로그인을 하고 재시작 뒤 사라졌다(삭제 실패면 되살아났다). 쓰기가 성공한 뒤에만 메모리를 바꾼다.
 function writeList(list) { atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(list), null, 2), { mode: 0o600 }); }
@@ -293,4 +307,4 @@ export async function runGuestScanNow(id, { trigger = 'manual' } = {}) {
 }
 
 /** 테스트 전용(103회차). */
-export function _resetGuestScansForTest() { cache = null; _readErr = null; _reader.reset(); }
+export function _resetGuestScansForTest() { cache = null; _readErr = null; _undecryptable = 0; _reader.reset(); }

@@ -11,7 +11,7 @@
  */
 
 import { logAudit } from '../../audit.js';
-import { listTargets, storeRevision, planBulkTargets } from '../../svcmon/store.js';
+import { listTargets, storeRevision, planBulkTargets, svcmonStoreWriteRefusal } from '../../svcmon/store.js';
 import {
   readCatalog, planApply, previewOf, executePlan, detachTarget, getOptions, setOptions, kindMeta, driftRing, dailySummary, syncEvents,
   lastDetection, syncAvailableHere, ackDrift, MAX_ROWS, MAX_APPLY, GONE_ACTIONS, EXCLUDED_KINDS, SYNC_ROOT, detectTiming,
@@ -32,6 +32,9 @@ import { edgeSummary, edgeState, listAgentNames, MAX_ROWS_PER_AGENT } from '../.
 import { listAssignments } from '../../central/svcmonAssign.js';
 import { syncByAgentAssignments } from '../../central/svcmonAssignSync.js';
 import { canEdit, fullScopeOnly, adminOnly } from './shared.js';
+// 105회차 A6(103 F1 덜 고침): 감시 대상 파일 읽기 오류 동안 설정 연동 적용 · 정리 · 해제는 store.save() 가 409 를 던졌지만 이 라우트는 잡지 않아
+//   전역 오류 처리기의 사유 없는 500 이 됐다(형제 tree · transfer · generate 는 사전 검사). 같은 사전 검사로 사유를 화면까지 싣는다.
+const storeUnreadable = (res) => { const r = svcmonStoreWriteRefusal(); if (!r) return false; res.status(409).json({ ok: false, error: r.reason, code: r.code, readError: true }); return true; };
 
 const t = (v) => String(v ?? '').trim();
 
@@ -141,6 +144,7 @@ svcmonRouter.post('/settings-sync/preview', adminOnly, fullScopeOnly, async (req
 /** 적용 — 추가(전부 성공 또는 전부 취소) · 주소 반영 · 사라짐 처리 · (선택) 담당 엣지 배정 동기화. */
 svcmonRouter.post('/settings-sync/apply', adminOnly, fullScopeOnly, async (req, res) => {
   if (!syncAvailableHere()) return edgeOnly(res);
+  if (storeUnreadable(res)) return;   // 105회차 A6
   const r = await planFrom(req.body || {});
   if (r.error) return res.status(400).json({ ok: false, error: r.error });
   const user = req.user?.username || '';
@@ -164,6 +168,7 @@ svcmonRouter.post('/settings-sync/apply', adminOnly, fullScopeOnly, async (req, 
  */
 svcmonRouter.post('/settings-sync/repath', adminOnly, fullScopeOnly, async (req, res) => {
   if (!syncAvailableHere()) return edgeOnly(res);
+  if (storeUnreadable(res)) return;   // 105회차 A6
   const keys = Array.isArray(req.body?.keys) ? req.body.keys.map(t).filter(Boolean) : [];
   if (!keys.length) return res.status(400).json({ ok: false, error: '옮길 항목을 고르세요.' });
   if (keys.length > MAX_APPLY) return res.status(400).json({ ok: false, error: `한 번에 ${MAX_APPLY}건까지 옮길 수 있습니다(요청 ${keys.length}건).` });
@@ -199,6 +204,7 @@ svcmonRouter.post('/settings-sync/ack', adminOnly, fullScopeOnly, (req, res) => 
 
 /** 연동 해제 — 대상은 남기고 출처만 지운다(수동 대상으로 전환). */
 svcmonRouter.post('/settings-sync/detach/:id', adminOnly, fullScopeOnly, (req, res) => {
+  if (storeUnreadable(res)) return;   // 105회차 A6
   const r = detachTarget(String(req.params.id || ''));
   if (!r) return res.status(404).json({ ok: false, error: '대상을 찾을 수 없습니다.' });
   if (r.changed) logAudit({ user: req.user?.username, action: 'svcmon.settings-sync.detach', target: r.target?.id, detail: r.target?.name || '' });

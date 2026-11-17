@@ -208,9 +208,9 @@ describe('스윕 — 반환값을 받아 놓고 ok·requireChanged 를 보지 �
   //   호출부가 100곳이 넘는다 — WEB-03 두 곳은 audit2742l 이 따로 고정한다).
   const ALLOW2 = {
     'views/AnomalyDetection.jsx': 1, 'views/Insights.jsx': 1,   // 95회차: GpuSettings · MetricsSettings 지표 설정 저장은 r.ok 를 본다(409 settings-unreadable) — 목록에서 뺐다
-    'views/LoginFails.jsx': 1, 'views/PortalBackup.jsx': 1, 'views/PowerOffCheckSettings.jsx': 1,
+    'views/LoginFails.jsx': 1, 'views/PowerOffCheckSettings.jsx': 1,
     'views/ToolsReports.jsx': 1, 'views/tools/GuestOsTools.jsx': 1,   // 전체 점검 27회차 D-2: CvpTool 설정 저장은 requireChanged 로 판정 — 목록에서 뺐다 · 38회차: GpuGuestSettings · BmUsage 수집 설정 저장도 r.ok 를 본다(409 settings-unreadable)
-    'views/tools/LinkCheck.jsx': 1,
+    // 105회차 A8: PortalBackup(백업 설정 — 103 F18 이 409 를 낸다) · LinkCheck(통신 점검 설정 — 105 A5 409)는 requireChanged 로 판정 — 목록에서 뺐다
   };
   const walk2 = (d, out = []) => {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {

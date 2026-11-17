@@ -99,7 +99,8 @@ export function setMountUse(corpKey, mountIds, by = '') {
  */
 export function mountUseDenied(dest, corpKey) {
   if (dest?.type !== 'nfs') return '';
-  if (corpMountsLoadError()) return '법인별 마운트 지정 파일(vm-clone-corp.json)을 읽지 못해 NFS 대상을 확인할 수 없습니다 — 법인 저장소 화면에서 다시 저장하세요.';
+  // 105회차 A7: 읽기 오류 동안은 지정 저장도 409 라 '다시 저장하세요' 는 따를 수 없는 안내였다 — 그 사유(권한 · 디스크 · 30초 재읽기)를 싣는다.
+  { const le = corpMountsLoadError(); if (le) return le.readError ? `${le.reason} — 그동안 NFS 대상 잡은 저장하지 않습니다.` : '법인별 마운트 지정 파일(vm-clone-corp.json)을 읽지 못해 NFS 대상을 확인할 수 없습니다 — 법인 저장소 화면에서 다시 저장하세요.'; }
   const use = mountUseOf(corpKey);
   if (!use) return '';
   if (!use.has(String(dest.mountId || ''))) return use.size ? '이 법인에서 백업에 쓰기로 지정하지 않은 마운트입니다 — 법인 저장소 화면에서 그 마운트의 ‘사용’ 을 켜세요.' : '이 법인은 엣지 NFS 마운트를 백업에 쓰지 않도록 지정돼 있습니다 — 법인 저장소 화면에서 바꾸세요.';

@@ -30,7 +30,7 @@ import { enrichAdvice, selectRows, fillBlankFromSaved } from '../../util/bulkImp
 import { startBulkTest, publicRun, passedLines } from '../../util/bulkRun.js';
 import { requestCollect, hasPendingRequest, recentCollectDrops } from '../../storage/collectRequests.js';
 import { INTERVAL_SPEC, loadIntervalConfig, saveIntervalConfig, intervalsForAgent,
-  envIntervals, runtimeIntervalSource, applyOwnIntervals } from '../../storage/intervals.js';
+  envIntervals, runtimeIntervalSource, applyOwnIntervals, storageIntervalsWriteRefusal } from '../../storage/intervals.js';
 
 import { isDemoGuest } from '../../auth/demoGuest.js'; // v2.720(감사 B2-04)
 import { isDemoId } from '../../mock/demo/storage.js';
@@ -320,6 +320,8 @@ api.get('/tools/storage/intervals', adminOnly, fullScopeOnly, (_req, res) => {
  * (전 키를 채워 배포하면 현장 설정을 통째로 덮어쓰기 때문 — intervals.js 계약).
  */
 api.put('/tools/storage/intervals', adminOnly, fullScopeOnly, (req, res) => {
+  // 105회차 A5: 주기 파일 읽기 오류(원본 그대로) 중에는 저장하지 않는다 — 사유를 화면까지.
+  { const ref = storageIntervalsWriteRefusal(); if (ref) return res.status(409).json(ref); }
   try {
     const r = saveIntervalConfig({ global: req.body?.global || {}, agents: req.body?.agents || {} });
     // 중앙 자신은 pull 축이 없으므로 저장 즉시 반영(엣지는 다음 config pull 때 받는다).

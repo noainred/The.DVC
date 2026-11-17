@@ -14,7 +14,7 @@ import { signJob, scheduleSignRequired } from '../../rma/signing.js';
 import { rmaPasswordFor, setRmaPassword, listRmaPasswordMeta } from '../../rma/agentSecrets.js';
 import { getRmaSettings, setAgentMode, setDefaultMode, setAgentAccess, setAgentRemote } from '../../rma/settings.js';
 import { testCatalog, buildTest } from '../../rma/tests.js';
-import { scheduleFor, listSchedules, upsertScheduleItem, removeScheduleItem, scheduleSignNote } from '../../rma/schedules.js';
+import { scheduleFor, listSchedules, upsertScheduleItem, removeScheduleItem, scheduleSignNote, rmaSchedulesLoadError } from '../../rma/schedules.js';
 import { latestResults, testHistory, summarize, evaluateRmaItself, dropResult } from '../../rma/testResults.js';
 import { credentialUsable } from '../../security/credentialStore.js';
 import { deployRma, listRmaInstances, removeRmaInstance, deployInputIssue } from '../../rma/deploy.js';
@@ -83,6 +83,8 @@ api.put('/tools/rma/agents/:agent/schedule', adminOnly, fullScopeOnly, shellSche
 });
 api.delete('/tools/rma/agents/:agent/schedule/:id', adminOnly, fullScopeOnly, (req, res) => {
   const agent = String(req.params.agent || '').trim();
+  // 105회차 A7(103 F16 덜 고침): 읽기 오류 동안 load() 는 빈 스케줄이라 삭제가 '없음' 으로 ok:false(200)를 돌려 사유가 보이지 않았다 — 저장과 같은 409.
+  { const le = rmaSchedulesLoadError(); if (le?.readError) return res.status(409).json({ ok: false, code: 'settings-unreadable', readError: true, reason: String(le.reason || '').slice(0, 300) }); }
   const ok = removeScheduleItem(agent, String(req.params.id || ''));
   if (ok) { dropResult(agent, String(req.params.id)); logAudit({ user: req.user?.username, action: 'RMA 점검 스케줄 삭제', target: `${agent}/${req.params.id}`, ip: req.ip }); }
   res.json({ ok, ...scheduleFor(agent) });

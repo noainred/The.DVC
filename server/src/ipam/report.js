@@ -7,6 +7,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { registerStateFile } from '../util/stateFiles.js';
+import { corruptOnlyReason } from '../util/registryCore.js';   // 105회차 A4: 손상 보존본만 남은 상태의 표지
 import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 103회차 F11: 읽기 오류 ≠ 손상
 import { sendPortalMail } from '../mail/service.js';
 import { load as loadMailCfg } from '../mail/settings.js';
@@ -50,9 +51,16 @@ export function loadReportSettings() {
     if (!_settingsErr?.readError) _settingsErr = { at: Date.now(), reason: `읽기 오류(${code}) — 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽습니다)`, readError: true };
     return null;
   }
-  try { _settingsErr = null; if (rr.kind === 'missing') { const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; } return reportOf(JSON.parse(rr.value)); }
+  if (rr.kind === 'missing') {
+    // 105회차 A4(103 남긴 것 재현): 손상 경로는 원본을 보존본으로 옮긴 뒤 다음 호출이 '없음' → 기본값(꺼짐)이 되고 표지도 사라져(재시작 뒤에도)
+    //   화면은 '꺼져 있음' 만 보였다. 본 파일이 없고 손상 보존본만 남았으면 표지(corruptKept)를 유지한다 — 저장은 허용(저장하면 본 파일이 생겨 풀린다 ·
+    //   guestdisk · dirusage 100회차와 같은 판정 — registryCore.corruptOnlyReason).
+    const why = corruptOnlyReason(SETTINGS_FILE());
+    _settingsErr = why ? { at: _settingsErr?.corruptKept ? _settingsErr.at : Date.now(), corruptKept: true, reason: `설정 파일이 없고 손상 보존본(${why.replace(/^.*손상 보존본\(/, '').replace(/\).*$/, '')})만 남아 있습니다 — 정기 보고는 기본값(꺼짐)으로 멈춰 있습니다. 보존본을 확인한 뒤 설정을 다시 저장하면 풀립니다` } : null;
+    return reportOf(null);
+  }
+  try { _settingsErr = null; return reportOf(JSON.parse(rr.value)); }
   catch (e) {
-    if (e?.code === 'ENOENT') return reportOf(null);
     if (!_settingsErr) { preserveCorrupt(SETTINGS_FILE(), e?.message); console.warn(`[ipam-report] 설정 파일을 읽지 못했습니다: ${safeLoadText(e) || '사유 미상'}`); }
     _settingsErr = { at: Date.now(), reason: safeLoadText(e) || '형식 오류' };
     return null;

@@ -30,6 +30,7 @@ import {
   eventsKeyOf, eventsTagged, eventsAfterFail, eventsView, eventsFailText, // v2.744(감사 WEB-03): 로그는 요청 키별
 } from './linkCheckText.js';
 import Select from '../../components/Select.jsx';
+import { requireChanged } from '../changeResult.js';   // 105회차 A8: 409(설정 파일 읽기 오류)는 던지지 않고 본문으로 온다
 // v2.553: 설정 전수 점검(25종) + 해결책 — 같은 화면의 탭이다(도구를 하나 더 만들지 않는다).
 const SettingsCheckPanel = React.lazy(() => import('./SettingsCheckPanel.jsx'));
 
@@ -190,7 +191,7 @@ export function LinkCheck() {
   };
   const saveSettings = async () => {
     setBusy(true);
-    try { const r = await putJson('/tools/link-check/settings', linkSettingsPayload(form)); setNote('설정을 저장했습니다.'); setData({ ...data, settings: r.settings, enabled: r.settings.enabled }); resetForm(r.settings); }
+    try { const r = requireChanged(await putJson('/tools/link-check/settings', linkSettingsPayload(form))); setNote('설정을 저장했습니다.'); setData({ ...data, settings: r.settings, enabled: r.settings.enabled }); resetForm(r.settings); }
     catch (e) { setNote(`저장 실패: ${e?.message || e}`); }
     finally { setBusy(false); }
   };

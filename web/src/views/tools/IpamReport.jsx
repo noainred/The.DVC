@@ -57,7 +57,8 @@ export function IpamReport() {
     <section className="card" style={{ padding: 14, minWidth: 0 }} aria-label="정기 보고">
       <b style={{ fontSize: 15 }}>정기 보고(IPMS 알람)</b>
       <div className="muted" style={{ fontSize: 12, margin: '2px 0 10px' }}>법인별 IP 사용 변화(새 미등록 IP · MAC 변경 · 충돌 의심 · 대역 사용률 · 가득 찬 대역 · 수집 상태)를 정한 요일 · 시각에 메일로 보냅니다. 전체 종합 한 통 + 받는 사람을 정한 법인마다 한 통. 놓친 회차는 몰아서 보내지 않습니다.</div>
-      {d.settingsError && <div className="banner warn" style={{ marginBottom: 8 }}>설정 파일을 읽지 못했습니다({d.settingsError.reason}) — 보내지 않습니다. 손상본은 옆에 보존했습니다.</div>}
+      {/* 105회차 A4: 읽기 오류는 원본을 옮기지 않았다(‘손상본 보존’ 이라 말하지 않는다) · 손상 보존본만 남은 상태는 사유 그대로(저장하면 풀린다) */}
+      {d.settingsError && <div className="banner warn" style={{ marginBottom: 8 }}>{d.settingsError.corruptKept ? d.settingsError.reason : `설정 파일을 읽지 못했습니다(${d.settingsError.reason}) — 보내지 않습니다.${d.settingsError.readError ? '' : ' 손상본은 옆에 보존했습니다.'}`}</div>}
       {st.edge && <div className="banner warn" style={{ marginBottom: 8 }}>엣지는 정기 보고를 보내지 않습니다(메인만 보냅니다).</div>}
       <div className="ipam-rep-grid">
         <label className="muted">보내기</label>
@@ -105,7 +106,7 @@ export function IpamReport() {
         </tbody>
       </STable>
       <div className="flex gap wrap" style={{ alignItems: 'center', marginTop: 12 }}>
-        <button className="login-btn" style={{ flex: 'none', padding: '7px 16px' }} disabled={!!busy || !!d.settingsError} onClick={save}>{busy === 'save' ? '저장 중…' : '저장'}</button>
+        <button className="login-btn" style={{ flex: 'none', padding: '7px 16px' }} disabled={!!busy || (!!d.settingsError && !d.settingsError.corruptKept)} onClick={save}>{busy === 'save' ? '저장 중…' : '저장'}</button>
         <button className="logout-btn" style={{ padding: '7px 14px' }} disabled={!!busy} onClick={preview}>{busy === 'preview' ? '만드는 중…' : '미리 보기'}</button>
         <button className="logout-btn" style={{ padding: '7px 14px' }} disabled={!!busy || !!d.settingsError} onClick={sendNow}>{busy === 'send' ? '보내는 중…' : '지금 보내기(전체 종합)'}</button>
         {msg && <span style={{ fontSize: 12.5, color: msg.ok ? 'var(--green)' : 'var(--red)' }}>{msg.text}</span>}

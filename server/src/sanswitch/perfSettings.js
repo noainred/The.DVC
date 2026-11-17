@@ -9,12 +9,12 @@
  * 받아쓴다. 주기를 60초 밑으로 내리면 스위치에 상시 세션이 붙어 있는 것과 같아지고, 128포트
  * × 스위치 수만큼 매번 DB 에 쓴다.
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';
+import { makeJsonFileReader, READ_RETRY_MS } from '../util/jsonFileRead.js';   // 105회차 A5: 읽기 오류 ≠ 손상
 
 const FILE = path.join(config.configDir, 'sanswitch-perf-settings.json');
 
@@ -56,12 +56,21 @@ const _loadErr = makeSettingsLoadError(() => FILE, { label: 'SAN 포트 사용�
 /** 설정 파일을 못 읽었으면 { at, reason }, 읽었으면 null. */
 export function perfSettingsLoadError() { loadPerfSettings(); return _loadErr.get(); }
 
+/*
+ * 105회차 A5(103 남긴 것 — cvp/settings F20 과 같은 최소 수정): 예전 catch 하나는 **읽기 오류**(EACCES · EIO · EISDIR)도 손상으로 보고 원본을 `.corrupt.*` 로 옮겨,
+ *   재시작 뒤 '보존본만 있음' 이 되고 확정(최대 보존) · 수동 복구로만 풀렸다. 이제 원본을 두고 · 캐시하지 않고(30초 간격 재읽기 — 읽히면 재시작 · 확정 없이 풀림) ·
+ *   표지 readError(배포에 perf 를 싣지 않음 · 정리 상한 · 저장 409 는 그대로 — 사유만 '읽기 오류'). 엣지의 중앙 값 적용(applyCentralPerfSettings)은 막지 않는다
+ *   (엣지 파일은 중앙 값의 사본이다 — 중앙 값으로 덮어 회복한다). parse 실패는 예전과 같다.
+ */
+const _reader = makeJsonFileReader(() => FILE, { parse: (t) => t, preserve: false, tag: 'sanswitch-perf' });
 export function loadPerfSettings() {
   if (_cache) return { ..._cache };
   let raw = {};
-  if (!fs.existsSync(FILE)) _loadErr.missing();
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') { _loadErr.readError(rr.error, { retryMs: READ_RETRY_MS }); return { ...normalizePerfSettings({}) }; }   // 캐시하지 않는다
+  if (rr.kind === 'missing') _loadErr.missing();
   else {
-    try { raw = JSON.parse(fs.readFileSync(FILE, 'utf8')); _loadErr.ok(); }
+    try { raw = JSON.parse(rr.value); _loadErr.ok(); }
     catch (e) { _loadErr.corrupt(e); preserveCorrupt(FILE); raw = {}; }
   }
   // v2.601(감사 TIM2601-03 — 재현): 파일 내용이 유효한 JSON 값 null·배열·숫자면 JSON.parse 는 성공해 손상 보존을 건너뛰고
@@ -116,4 +125,4 @@ export function applyCentralPerfSettings(remote) {
   return true;
 }
 
-export function _resetForTest() { _cache = null; _loadErr.ok(); }
+export function _resetForTest() { _cache = null; _loadErr.ok(); _reader.reset(); }

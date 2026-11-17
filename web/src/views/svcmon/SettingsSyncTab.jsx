@@ -148,6 +148,8 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
     setBusy(true); setMsg('');
     try {
       const r = await postJson('/svcmon/settings-sync/apply', body());
+      // 105회차 A8: 결과 본문 없는 거절(409 — 감시 대상 파일 읽기 오류)은 사유를 보인다(결과로 그리지 않는다).
+      if (r?.ok === false && !r.result) throw new Error(r.error || r.reason || '적용하지 못했습니다.');
       // 추가가 취소돼도(오류 1건이면 0건) 서버는 200 + ok:false 로 결과를 준다 — 선택을 지우지 않고 결과만 보여 준다.
       setResult(r); setPreview(null);
       if (r.result?.committed !== false) setPicked(new Set());

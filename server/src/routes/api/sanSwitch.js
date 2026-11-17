@@ -443,9 +443,11 @@ api.get('/tools/sanswitch/perf/settings', adminOnly, fullScopeOnly, async (_req,
     status: sanSwitchPerfStatus(), edges: listEdgePerfStatus(), db: await perfDbStats(), ...(le ? { loadError: { reason: String(le.reason || '').slice(0, 200) } } : {}) });
 });
 const PERF_UNREADABLE = '포트 사용량 설정 파일을 읽지 못한 상태라 받지 않습니다 — 지금 저장 · 정리하면 기본값(보관 90일)으로 이력이 지워질 수 있습니다. 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리고 재시작하세요.';
+// 105회차 A5: 읽기 오류(원본 그대로)는 조치가 다르다 — 확정 불가 · 재시작 불필요(권한 · 디스크를 고치면 30초 안에 풀린다).
+const perfUnreadable = (le) => (le?.readError ? { ok: false, code: 'settings-unreadable', readError: true, reason: `포트 사용량 설정 파일을 읽지 못한 상태라 받지 않습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` } : { ok: false, code: 'settings-unreadable', reason: PERF_UNREADABLE });
 
 api.put('/tools/sanswitch/perf/settings', adminOnly, fullScopeOnly, fullRwOnly, async (req, res) => {
-  if (perfSettingsLoadError()) return res.status(409).json({ ok: false, code: 'settings-unreadable', reason: PERF_UNREADABLE });   // 24회차 #4
+  if (perfSettingsLoadError()) return res.status(409).json(perfUnreadable(perfSettingsLoadError()));   // 24회차 #4 · 105회차 A5(읽기 오류 사유)
   try {
     const before = loadPerfSettings();
     const saved = savePerfSettings(req.body || {});
@@ -461,7 +463,7 @@ api.put('/tools/sanswitch/perf/settings', adminOnly, fullScopeOnly, fullRwOnly, 
  * 않고 현재 retentionDays 기준으로 DELETE 1회 — ts 단독 인덱스를 타므로 풀스캔이 아니다.
  */
 api.post('/tools/sanswitch/perf/prune', adminOnly, fullScopeOnly, fullRwOnly, async (req, res) => {
-  if (perfSettingsLoadError()) return res.status(409).json({ ok: false, code: 'settings-unreadable', reason: PERF_UNREADABLE });   // 24회차 #4
+  if (perfSettingsLoadError()) return res.status(409).json(perfUnreadable(perfSettingsLoadError()));   // 24회차 #4 · 105회차 A5(읽기 오류 사유)
   try {
     const st = loadPerfSettings();
     const r = await pruneNow(st.retentionDays);

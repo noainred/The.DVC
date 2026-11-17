@@ -4,6 +4,7 @@ import { Loading, ErrorBox, Modal } from '../components/ui.jsx';
 import { fmtBytes, fmtTime } from '../util/fmt.js';
 import { STable } from '../components/STable.jsx';
 import Select from '../components/Select.jsx';
+import { requireChanged } from './changeResult.js';   // 105회차 A8: 409(설정 파일 읽기 오류)는 던지지 않고 본문으로 온다
 
 /** v2.590 D5: 크기 상한으로 번들에서 뺀 설정 파일 — '백업 완료' 가 전부를 담았다고 말하지 않게 한다. */
 export function skippedText(r) {
@@ -102,7 +103,7 @@ export default function PortalBackup() {
 
   const saveSettings = async () => {
     setBusy('save'); setMsg(null);
-    try { const r = await putJson('/admin/backup/settings', s); setS(r); setMsg('설정 저장됨'); await load(); }
+    try { const r = requireChanged(await putJson('/admin/backup/settings', s)); setS(r); setMsg('설정 저장됨'); await load(); }
     catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(''); }
   };
   const backupNow = async () => {
