@@ -132,7 +132,9 @@ export function normalizeUnity(device, raw) {
   }
   const users = entries(raw.users);
   if (users.length) { snap.accounts = users.slice(0, 200).map((u) => ({ name: u.name || u.id || '', enabled: true })); snap.sections.accounts = 'ok'; }
-  if (raw.alerts) {
+  // 57회차 C1: 응답은 왔는데 entries 목록도 entryCount 도 없으면(모양을 모름) '경보 0 · 정상' 이 아니라 섹션 오류다(못 읽은 값을 0 으로 세지 않는다).
+  if (raw.alerts && !Array.isArray(raw.alerts.entries) && numOrNull(raw.alerts.entryCount) == null) snap.sections.alerts = `오류: 응답 형식 미인식(entries · entryCount 없음 — 받은 키 ${Object.keys(typeof raw.alerts === 'object' ? raw.alerts : {}).slice(0, 6).join(', ') || '없음'})`;
+  else if (raw.alerts) {
     // v2.599(감사 C2599-07): 조회는 per_page=UNITY_ALERT_PER_PAGE 한 페이지뿐이다. 컬렉션이 주는 전체 건수(entryCount)가
     //   있으면 그것을 쓰고, 없는데 한 페이지가 가득 찼으면 '그 이상일 수 있다' 고 밝힌다(조용한 상한 금지).
     const got = entries(raw.alerts).length;

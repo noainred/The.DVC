@@ -247,7 +247,8 @@ function flushRing() {
   if (_ringTimer) { clearTimeout(_ringTimer); _ringTimer = null; }
   if (!_ringDirty) return;
   _ringDirty = false;
-  try { atomicWriteFileSync(RING_FILE(), JSON.stringify({ version: 1, devices: Object.fromEntries(_ring) }), { mode: 0o600 }); } catch (e) { console.warn(`[storage-inspect] 미전송 점검 파일 저장 실패: ${capErr(e)}`); }
+  // 57회차 I2: 실패하면 '저장할 것 있음' 을 되살린다(종료 flush · 다음 저장이 다시 쓴다 — 표지를 먼저 내린 채 두면 미전송 결과가 재시작 때 사라졌다).
+  try { atomicWriteFileSync(RING_FILE(), JSON.stringify({ version: 1, devices: Object.fromEntries(_ring) }), { mode: 0o600 }); } catch (e) { _ringDirty = true; console.warn(`[storage-inspect] 미전송 점검 파일 저장 실패: ${capErr(e)}`); }
 }
 function saveRing() { _ringDirty = true; if (_ringTimer) return; _ringTimer = setTimeout(() => { _ringTimer = null; flushRing(); }, 2_000); _ringTimer.unref?.(); }
 function ringPush(id, run) {

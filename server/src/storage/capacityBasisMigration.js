@@ -16,7 +16,7 @@
  *  - 지운 사실을 장비별로 기록해 화면이 '관측 N일' 이 왜 짧은지 말하게 한다(조용한 삭제 금지).
  *  - 실패해도 기동을 막지 않는다(경고만) — 이력 정리가 포탈을 못 뜨게 하면 안 된다.
  */
-import { listDevices } from './registry.js';
+import { listDevices, registryLoadError } from './registry.js';
 import { resetCapacityHistory } from './db.js';
 
 /** 이 마이그레이션의 식별자. 바꾸면 **다시 지운다** — 새 기준 변경이 있을 때만 올릴 것. */
@@ -35,9 +35,19 @@ export function affectedDeviceIds(devices) {
 
 export async function runCapacityBasisMigration({ devices = null } = {}) {
   let list = devices;
-  if (!list) { try { list = listDevices(); } catch { list = []; } }
+  let readable = true;
+  if (!list) {
+    try { readable = !registryLoadError(); list = listDevices(); } catch { readable = false; list = []; }
+  }
   const ids = affectedDeviceIds(list);
-  if (!ids.length) return { ran: false, devices: 0, rows: 0 };
+  if (!ids.length) {
+    // 57회차 F1(재현): 대상 장비가 없을 때 마커를 남기지 않고 돌아가, v2.534 이후 새로 설치한 포탈(또는 등록부를 아직 pull 하지 않은 새 엣지)에
+    //   나중에 PowerMax/VMAX 를 등록하면 **다음 재시작(자동 업그레이드)이 새 기준으로 쌓인 이력을 통째로 지웠다**(사유 'v2.534 기준 변경' 이라는 거짓 기록까지).
+    //   옛 기준 행은 v2.534 전 판본만 쓴다 — 등록부를 읽었는데 대상이 0대면 지울 것이 없으므로 마커만 남긴다. 등록부를 못 읽었으면 판정을 미룬다(마커 없음).
+    if (!readable) return { ran: false, devices: 0, rows: 0, deferred: 'registry-unreadable' };
+    const r = await resetCapacityHistory([], { reason: '대상 장비 없음 — 마커만', once: MIGRATION_ID });
+    return { ran: false, devices: 0, rows: 0, marked: !!r.ran };
+  }
   return resetCapacityHistory(ids, {
     reason: 'VMAX/PowerMax 사용량 기준 변경(할당 → 데이터 감축 후 실제 기록량, v2.534)',
     once: MIGRATION_ID,

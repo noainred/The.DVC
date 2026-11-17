@@ -23,6 +23,16 @@ const KB = 1024; // XMS 공간 값 단위(KB) → 바이트 환산 계수
 
 /** 목록 응답에서 이름 배열 추출 — v3 는 {clusters:[{name,href}]} 형태(타입별 키가 다름). */
 const namesOf = (resp, key) => (resp?.[key] || []).map((e) => e.name).filter(Boolean);
+/**
+ * 57회차 C1: 목록 응답에서 key 배열을 꺼낸다 — 없으면(응답 모양을 모름) 던져 그 섹션을 오류로 남긴다.
+ * 예전에는 `|| []` 로 빈 목록이 되어 컨트롤러 0 · 계정 0 · **미해결 경보 0** 이 '정상' 으로 보였다(못 읽은 값을 0 으로 — 형제 PowerMax 는
+ * v2.601 에 경보 개수를 못 찾으면 null 로 고쳤다).
+ */
+export function listOrThrow(resp, key) {
+  const a = resp?.[key];
+  if (!Array.isArray(a)) throw new Error(`응답 형식 미인식('${key}' 목록 없음 — 받은 키 ${Object.keys(resp && typeof resp === 'object' ? resp : {}).slice(0, 6).join(', ') || '없음'})`);
+  return a;
+}
 
 /** 시리얼 후보(앞에서부터) — 이름이 확인된 것은 없다(XMS REST 문서 지식). `sys-psnt-part-number` 는 v2.310 부터 쓰던 이름이라 남긴다. */
 export const XTREMIO_SERIAL_KEYS = Object.freeze([
@@ -189,16 +199,16 @@ export async function collect(device, { signal = null } = {}) {
         '/api/json/v3/types/storage-controllers?full=1&prop=name&prop=health-state&prop=node-health-state&prop=mgmt-addr',
         '/api/json/v2/types/storage-controllers?full=1&prop=name&prop=health-state&prop=mgmt-addr',
       ]);
-      return r?.['storage-controllers'] || [];
+      return listOrThrow(r, 'storage-controllers');
     });
     // ④ 관리 계정 · ⑤ 알람 수(목록 길이 — 상세는 XMS 화면에서).
     await step('users', async () => {
       const r = await tryAny(get, ['/api/json/v3/types/user-accounts?full=1&prop=name&prop=role', '/api/json/v2/types/user-accounts']);
-      return r?.['user-accounts'] || [];
+      return listOrThrow(r, 'user-accounts');
     });
     await step('alerts', async () => {
       const r = await tryAny(get, ['/api/json/v3/types/alerts', '/api/json/v2/types/alerts']);
-      return (r?.alerts || []).length;
+      return listOrThrow(r, 'alerts').length;
     });
     raw.alertCount = raw.alerts; delete raw.alerts;
     // v2.667 — 전원(부가 정보 — 실패해도 섹션 오류로 만들지 않는다).
