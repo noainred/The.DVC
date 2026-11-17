@@ -6,12 +6,35 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { listManagedUsers } from '../auth/auth.js';
 import { numOrNull } from '../util/numOrNull.js';
-import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
+import { makeJsonFileReader } from '../util/jsonFileRead.js'; // 88회차 F1: 읽기 오류 ≠ 손상(결정 78 ① 과 같은 판정 — parse 기본값 parseJsonObject)
 
 const FILE = path.join(config.configDir, 'security-session.json');
+/*
+ * 88회차 F1(재현 — EIO 한 번): 예전 load 는 읽기 오류(EACCES · EIO · EISDIR)를 파싱 손상과 같은 catch 로 받아 **원본을 .corrupt 로 옮기고**
+ *   기본값으로 돌았다 — 설정 소유자 목록 · 로그인 정책(otp_only) · 단일 세션 · 세션 총 상한 · 유휴 분이 기본값(소유자 noainred 만 · 레거시 정책 ·
+ *   단일 세션 끔 · 총 상한 무제한)으로 바뀌었고, 디스크가 돌아와도 · 재시작해도 원본이 옆으로 치워져 있어 **영구히** 돌아오지 않았다.
+ *   이제(결정 78 ① · 19회차 A-4 users.json 과 같은 규칙): 읽기 오류는 원본을 그대로 두고 · 이 프로세스가 마지막으로 읽은 값을 쓰고(없으면 기본값 —
+ *   손상과 같은 약해짐은 사용자 결정 대기) · 30초마다 다시 읽고 · 그동안 저장은 거절한다(원본을 기본값 기반 값으로 덮지 않게). 손상은 예전 그대로.
+ */
+const _reader = makeJsonFileReader(() => FILE, { tag: 'security-session' });
+let _lastGood = null;      // 이 프로세스가 마지막으로 읽은 원본 객체(읽기 오류 동안 쓴다)
+let _readErr = null;       // { at, code } — 읽기 오류 중이면
+/** security-session.json 을 읽지 못해(ENOENT 아닌 읽기 오류) 저장을 거절하는 중이면 { at, code }, 아니면 null. */
+export function sessionSecurityReadError() { return _readErr; }
+export function _resetSessionSecurityReadForTest() { _reader.reset(); _lastGood = null; _readErr = null; }
+function readConfiguredRaw() {
+  const r = _reader.read();
+  if (r.kind === 'ok') { _lastGood = r.value; _readErr = null; return r.value; }
+  if (r.kind === 'read-error') {
+    _readErr = { at: _readErr?.at || Date.now(), code: String(r.error?.code || 'read-error').slice(0, 32) };
+    return _lastGood || {};
+  }
+  _lastGood = null; _readErr = null;   // missing · corrupt(손상본은 readJsonFile 이 보존 — 예전과 같다)
+  return {};
+}
 // 설정 소유 계정을 '파일/환경변수'로도 지정할 수 있게 하는 경로(운영자가 직접 편집).
 // portal.env 와 같은 CONFIG_DIR 에 두며, 한 줄에 계정 하나(# 주석 허용).
 const OWNERS_FILE = path.join(config.configDir, 'settings-owners.txt');
@@ -59,12 +82,10 @@ function normOwners(arr) {
 
 /** 파일에 저장된 '설정된' 값만 로드(자동 포함분 미반영). 저장/편집 경로가 기준으로 삼는다. */
 export function loadConfiguredSecurity() {
-  let p = {};
   // 파싱 실패를 조용히 DEFAULTS 로 리셋하면 UI 로 저장한 설정 소유자·완화 정책이 소리 없이
   // 사라지고, 다음 저장이 손상본을 덮어써 복구 기회도 없다 → 손상본을 보존하고 로그를 남긴다
-  // (auth.js·deployRegistry.js 와 같은 패턴. 2026-08-13 감사 잔여 항목).
-  try { if (fs.existsSync(FILE)) p = parseJsonObject(fs.readFileSync(FILE, 'utf8')); }
-  catch (e) { preserveCorrupt(FILE, e.message); p = {}; }
+  // (auth.js·deployRegistry.js 와 같은 패턴. 2026-08-13 감사 잔여 항목). 읽기 오류는 손상이 아니다(88회차 F1 — 위 readConfiguredRaw).
+  const p = readConfiguredRaw();
   const owners = normOwners(p.settingsOwners);
   return {
     idleLogoutEnabled: p.idleLogoutEnabled !== undefined ? !!p.idleLogoutEnabled : DEFAULTS.idleLogoutEnabled,
@@ -346,6 +367,8 @@ export function loadSessionSecurity() {
 
 export function saveSessionSecurity(partial = {}) {
   const cur = loadConfiguredSecurity(); // 저장 기준은 '설정된' 소유 계정만(자동 포함된 managed admin은 파일에 안 남김)
+  // 88회차 F1: 읽기 오류 동안은 쓰지 않는다 — 원자 쓰기(rename)는 읽지 못한 원본도 대체한다(기본값 기반 값으로 소유자 · 정책을 덮는다).
+  if (_readErr) throw Object.assign(new Error(`security-session.json 을 읽지 못하는 상태(${_readErr.code})라 저장하지 않았습니다 — 원본을 덮지 않습니다. 파일 소유자 · 권한(포탈 서비스 계정 · 0600)을 고친 뒤 다시 저장하세요.`), { status: 503, code: 'settings-unreadable' });
   let owners = cur.settingsOwners;
   if (partial.settingsOwners !== undefined) {
     const n = normOwners(partial.settingsOwners);

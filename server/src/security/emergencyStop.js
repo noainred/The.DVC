@@ -11,21 +11,42 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { readJsonFile, nowMs, READ_RETRY_MS } from '../util/jsonFileRead.js'; // 88회차 F2: 읽기 오류 ≠ 손상(판정은 readJsonFile 하나)
 import { isAdminTier } from '../auth/roles.js';
 
 const FILE = path.join(config.configDir, 'emergency-stop.json');
 
 let state = null;
+/*
+ * 88회차 F2(재현 — EIO 한 번): 예전 load 는 읽기 오류(EACCES · EIO · EISDIR)도 손상과 같은 catch 로 받아 **원본을 .corrupt 로 옮기고**
+ *   비활성으로 캐시했다 — 2인 승인으로 켠 긴급중단이 기동 때의 읽기 오류 한 번으로 풀렸고, 디스크가 돌아와도 · 재시작해도 원본이 옆으로
+ *   치워져 있어 **다시 켜지지 않았다**(2인 승인 없이 해제된 셈). 이제(결정 78 ① 과 같은 규칙) 읽기 오류는 원본을 그대로 두고 · 캐시하지 않고
+ *   30초마다 다시 읽는다(읽히는 순간 저장된 상태가 그대로 적용된다). 그동안의 값은 예전과 같은 비활성이고 상태에 readError 를 싣는다
+ *   (읽기 오류 동안 수집을 멈출지(fail-closed)는 가용성과 걸린 사용자 결정 — 88회차 '결정 필요'). 손상은 예전 그대로(보존 + 비활성 + 경고).
+ */
+//   공용 makeJsonFileReader 를 쓰지 않는 이유: 그 경고 문구는 '그동안 저장은 거절' 인데, 긴급중단은 읽기 오류 중에도 2인 승인으로 켜고 끌 수 있어야 한다
+//   (안전 스위치를 파일 권한 때문에 막지 않는다 — 새 2인 결정이 읽지 못한 옛 파일을 덮는 것이 맞다).
+let _readErr = null;
+let _retryAt = 0;
+export function _resetEmergencyStopForTest() { state = null; _readErr = null; _retryAt = 0; }
 
 function load() {
   if (state) return state;
-  try {
-    if (fs.existsSync(FILE)) {
-      const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-      if (p && typeof p === 'object') { state = p; return state; }
-    }
-  } catch (e) { preserveCorrupt(FILE, e.message); console.error('[emergency-stop] 상태 파일 손상 — 기본(비활성)으로 시작합니다. 긴급중단이 필요하면 다시 누르세요.'); } // v2.479: 손상 시 조용한 해제 금지(보존+경고)
+  const inactive = () => ({ active: false, by: [], at: null });
+  if (_readErr && nowMs() < _retryAt) return inactive();
+  const r = readJsonFile(FILE, { parse: (t) => JSON.parse(t) });
+  if (r.kind === 'read-error') {
+    const code = String(r.error?.code || 'read-error').slice(0, 32);
+    if (!_readErr) console.error(`[emergency-stop] 상태 파일을 읽지 못했습니다(${code}) — 손상이 아니라 원본은 그대로 둡니다. 읽힐 때까지 비활성으로 보고 ${Math.round(READ_RETRY_MS / 1000)}초마다 다시 읽습니다(파일 소유자 · 권한 확인).`);
+    _readErr = { at: _readErr?.at || Date.now(), code };
+    _retryAt = nowMs() + READ_RETRY_MS;
+    return inactive();   // 캐시하지 않는다 — 간격 뒤 다시 읽는다
+  }
+  if (_readErr) console.warn('[emergency-stop] 상태 파일을 다시 읽었습니다(읽기 오류 풀림)');
+  _readErr = null;
+  if (r.kind === 'ok' && r.value && typeof r.value === 'object') { state = r.value; return state; }
+  if (r.kind === 'corrupt') console.error('[emergency-stop] 상태 파일 손상 — 기본(비활성)으로 시작합니다. 긴급중단이 필요하면 다시 누르세요.'); // v2.479: 손상 시 조용한 해제 금지(보존+경고) — 보존은 readJsonFile
   state = { active: false, by: [], at: null };
   return state;
 }
@@ -44,7 +65,7 @@ export function isStopped() { return !!load().active; }
 /** 현재 상태(웹/배지용). */
 export function getEmergencyStatus() {
   const s = load();
-  return { active: !!s.active, by: s.by || [], at: s.at || null };
+  return { active: !!s.active, by: s.by || [], at: s.at || null, ...(_readErr ? { readError: { at: _readErr.at, code: _readErr.code } } : {}) };
 }
 
 /**
@@ -53,6 +74,7 @@ export function getEmergencyStatus() {
  */
 export function setEmergencyStop(active, approvers = []) {
   state = { active: !!active, by: active ? approvers.slice(0, 2) : [], at: Date.now(), lastBy: approvers.slice(0, 2), lastAt: Date.now() };
+  _readErr = null; _retryAt = 0;   // 88회차 F2: 2인 승인으로 정한 새 상태가 기준이다(읽지 못한 옛 파일을 덮는 것이 맞다)
   persist();
   console.warn(`[emergency-stop] ${active ? '긴급중단 ON' : '해제'} — 승인: ${approvers.join(' + ')}`);
   return getEmergencyStatus();

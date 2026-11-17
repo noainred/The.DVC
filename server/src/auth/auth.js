@@ -992,7 +992,9 @@ export function confirmTotpEnroll(username, code, { actor = null, actorUser = nu
   if (isAdminTier(u.role || '')) {
     try { fs.rmSync(path.join(CONFIG_DIR, 'initial-admin-password.txt'), { force: true }); } catch { /* 없으면 무시 */ }
   }
-  return { ok: true };
+  // 88회차 F5: 비밀번호를 남겼는지 알린다 — OTP 전용 정책이 아니면(레거시 viewer · 혼용 · 비밀번호 전용) 비밀번호 로그인이 계속 된다.
+  //   관리자 화면이 늘 'OTP 로만 로그인합니다' 라고 말해, 유출된 비밀번호를 OTP 등록으로 막았다고 오인하게 했다(재현: viewer · 기본 정책).
+  return { ok: true, passwordKept: !!u.passwordHash };
 }
 
 /**

@@ -196,6 +196,55 @@ export function reconcileSecretsPolicyText(backupText, currentText) {
   return { text: backupText, keptCurrent: false };
 }
 
+/**
+ * 88회차 F7(재현): 연동 키(api-keys.json)의 **폐기 · 삭제는 복원으로 되돌리지 않는다** — 백업 판본을 그대로 쓰면 백업 이후 폐기(유출 등)하고 지운 키가
+ *   다시 'ok' 로 통과했다(전 함대 조회 자격증명 — 엣지 토큰 reconcileAgentTokensText · users.json tokenVersion 과 같은 종류).
+ *   규칙: 키마다 백업 판본을 쓰되 ① 지금 파일에서 폐기된 키는 폐기 그대로(revokedAt · revokedBy) ② 지금 파일에 없는 키(= 백업 이후 폐기하고 지운 키 —
+ *   산 키는 지울 수 없다, publicapi/keys.js deleteApiKey)는 되살리지 않는다 ③ 백업 이후 발급한 키(지금에만 있음)는 남긴다.
+ *   지금 파일이 없거나 깨졌으면(새 서버 재해 복구) 백업 그대로. 읽기 오류면 reconcileForApply 가 던진다(이 파일만 적용하지 않는다).
+ * @returns {{ text:string, keptRevoked:number, dropped:number, currentUnreadable:boolean }}
+ */
+export function reconcileApiKeysText(backupText, currentText) {
+  const b = parseJson(backupText);
+  if (!b || !Array.isArray(b.keys)) return { text: String(backupText), keptRevoked: 0, dropped: 0, currentUnreadable: false };
+  const cur = parseJson(currentText);
+  const curList = Array.isArray(cur?.keys) ? cur.keys.filter((k) => k && typeof k === 'object' && k.id != null) : null;
+  if (!curList) return { text: String(backupText), keptRevoked: 0, dropped: 0, currentUnreadable: true };
+  const curById = new Map(curList.map((k) => [String(k.id), k]));
+  const seen = new Set();
+  const keys = [];
+  let keptRevoked = 0; let dropped = 0;
+  for (const k of b.keys) {
+    if (!k || typeof k !== 'object' || k.id == null) continue;
+    const id = String(k.id);
+    const now = curById.get(id);
+    if (!now) { dropped += 1; continue; }
+    seen.add(id);
+    if (now.revokedAt && !k.revokedAt) { keys.push({ ...k, revokedAt: now.revokedAt, revokedBy: now.revokedBy || '' }); keptRevoked += 1; }
+    else keys.push(k);
+  }
+  for (const k of curList) if (!seen.has(String(k.id))) keys.push(k);
+  return { text: JSON.stringify({ ...b, keys }, null, 2), keptRevoked, dropped, currentUnreadable: false };
+}
+
+/**
+ * 88회차 F6(재현): AD 설정(auth.json)의 정책 카운터(policyEpoch)도 복원으로 **되돌리지 않는다** — AD 토큰은 발급 당시 `카운터.매핑지문` 을 싣고
+ *   지금 값과 같을 때만 유효하다(auth/ad.js S-08). 백업 판본을 그대로 쓰면 백업 이후 매핑을 바꿔 무효가 된 AD 세션(예: 관리자 그룹에서 빠진 계정의
+ *   admin 토큰)이 만료 전까지 되살아났다(users.json 의 tokenVersion 과 같은 종류 — reconcileUsersText). 카운터 = max(지금, 백업) + 1 — 복원 뒤 AD 세션은
+ *   전부 다시 로그인한다. 지금 파일을 **읽지 못하면**(ENOENT 아님) 던져서 이 파일만 적용하지 않는다(지금 카운터를 모른 채 낮은 값을 쓰지 않게).
+ * @returns {{ text:string, bumped:boolean, epoch?:number }}
+ */
+export function reconcileAdConfigText(backupText, currentText) {
+  let b;
+  try { b = JSON.parse(String(backupText)); } catch { return { text: backupText, bumped: false }; }   // 깨진 판본은 로더가 손상 보존 → env 기본값(카운터 0 — AD 토큰은 'ep' 가 맞지 않아 무효)
+  if (!b || typeof b !== 'object' || Array.isArray(b) || !b.ad || typeof b.ad !== 'object' || Array.isArray(b.ad)) return { text: backupText, bumped: false };
+  let c = null;
+  try { c = JSON.parse(String(currentText)); } catch { c = null; }
+  const ep = (o) => { const n = Math.floor(Number(o?.ad?.policyEpoch)); return Number.isFinite(n) && n > 0 ? n : 0; };
+  const epoch = Math.max(ep(b), ep(c)) + 1;
+  return { text: JSON.stringify({ ...b, ad: { ...b.ad, policyEpoch: epoch } }, null, 2), bumped: true, epoch };
+}
+
 export function reconcileForApply(name, content, configDir) {
   if (name === 'security-session.json') {
     let cur = null;
@@ -208,6 +257,28 @@ export function reconcileForApply(name, content, configDir) {
         warning: { file: name, reason: `백업 판본이 지금보다 약한 보안 설정(${r.kept.join(' · ')})을 담고 있어 그 값은 지금 수준으로 두었습니다 — 복원은 본인 OTP 를 묻지 않으므로 약하게 되돌리지 않습니다(바꾸려면 설정 › 세션 보안에서 소유자 + 본인 OTP).` } };
     }
     return { content: r.text };
+  }
+  if (name === 'api-keys.json') {   // 88회차 F7
+    let cur = null;
+    try { cur = fs.readFileSync(path.join(configDir, name), 'utf8'); } catch (e) {
+      if (e?.code !== 'ENOENT') throw new Error(`지금 연동 키 파일(api-keys.json)을 읽지 못해(${String(e?.code || 'read-error').slice(0, 32)}) 복원하지 않았습니다 — 폐기 기록을 모른 채 되돌리지 않게 지금 파일을 그대로 둡니다`);
+      cur = null;
+    }
+    const r = reconcileApiKeysText(content, cur);
+    const out = { content: r.text, info: { apiKeysKeptRevoked: r.keptRevoked, apiKeysDropped: r.dropped } };
+    if (r.keptRevoked || r.dropped) out.warning = { file: name, reason: `백업 이후 폐기한 연동 키 ${r.keptRevoked}개는 폐기 그대로 두고, 폐기하고 지운 키 ${r.dropped}개는 되살리지 않았습니다 — 복원은 키 폐기를 되돌리지 않습니다(필요하면 새로 발급하세요).` };
+    return out;
+  }
+  if (name === 'auth.json') {   // 88회차 F6
+    let cur = null;
+    try { cur = fs.readFileSync(path.join(configDir, name), 'utf8'); } catch (e) {
+      if (e?.code !== 'ENOENT') throw new Error(`지금 AD 설정(auth.json)을 읽지 못해(${String(e?.code || 'read-error').slice(0, 32)}) 복원하지 않았습니다 — 정책 카운터를 모른 채 되돌리지 않게 지금 파일을 그대로 둡니다`);
+      cur = null;
+    }
+    const r = reconcileAdConfigText(content, cur);
+    return r.bumped
+      ? { content: r.text, info: { adPolicyEpochBumped: r.epoch }, warning: { file: name, reason: 'AD 정책 카운터를 지금보다 올려 적용했습니다 — 백업 이후 매핑을 바꿔 끝난 AD 세션이 되살아나지 않게 AD 계정은 모두 다시 로그인합니다.' } }
+      : { content: r.text };
   }
   if (name === 'secrets-policy.json' || name === 'secrets-policy.trusted.json') {
     let cur = null;
