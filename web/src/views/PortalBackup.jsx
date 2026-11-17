@@ -96,7 +96,9 @@ export function restoreStateText(r) {
     // v2.769(점검 R4-D1-2): 적용 때 남긴 경고(되살린 엣지 토큰·전원 재로그인)도 보여 준다 — 상태 응답에만 두면 사람이 모른다.
     // v2.770(점검 R5-E1-2): 서버 경고는 `{file, reason}` 객체다(stagedRestore — 예전 문자열 필터는 0개를 남기고 배너만 켰다). 문자열도 받는다.
     const warns = Array.isArray(l.warnings) ? l.warnings.map(restoreWarnText).filter(Boolean) : [];
-    if (out.last && warns.length) out.last += ` — 주의: ${warns.slice(0, 5).join(' · ')}`;
+    // 120회차(114 반증): 5건까지만 보여 주면서 잘랐다는 말이 없었다 — 114회차가 경고 종류를 넷 늘려(보관 개수 · 호스트 접근 · 셸 점검 · 통합 계정) 한 번의 복원이 5건을 넘길 수 있고,
+    //   파일 이름 순이라 뒤쪽(장비 신뢰 · 셸 점검 · 세션 보안)이 조용히 빠졌다. 남은 수와 전부를 볼 곳(서버 로그 — stagedRestore 가 경고마다 한 줄 남긴다)을 밝힌다.
+    if (out.last && warns.length) out.last += ` — 주의: ${warns.slice(0, 5).join(' · ')}${warns.length > 5 ? ` 외 ${warns.length - 5}건(전체는 서버 로그의 ‘예약 복원 경고’ 줄)` : ''}`;
   }
   out.warn = !!(out.pending || r.interrupted || (l && (l.ok === false || (Array.isArray(l.warnings) && l.warnings.length))));
   if (r.interrupted) out.interrupted = '예약 복원 적용이 도중에 끊긴 흔적이 있습니다 — 서버 로그를 확인하고 설정 디렉터리의 backups 폴더에 남은 예약 파일을 정리하세요.';

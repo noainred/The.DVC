@@ -482,7 +482,7 @@ export async function setupDirector(b = {}, ctx = null) {
  * 사실이 아니므로 지운다(남기면 수동 조회가 성공할 때까지 주기 조회가 멈춘다).
  */
 function clearStaleAuthStop(directorId) {
-  try { const d = directorById(directorId); if (d) bareosAuthGuard.clearAuthStop(directorCred(d).id); } catch { /* 설정을 못 읽으면 그대로 */ }
+  try { const d = directorById(directorId); if (d) bareosAuthGuard.clearAuthStop(directorCred(d).id, { verified: false }); } catch { /* 설정을 못 읽으면 그대로 */ }
 }
 
 /* ───────────────────────── ② 사이트 FD INI ───────────────────────── */

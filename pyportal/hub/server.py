@@ -458,24 +458,41 @@ class HubHandler(BaseHTTPRequestHandler):
             return self._error(HTTPStatus.UNAUTHORIZED, "로그인되어 있지 않습니다.")
         return self._json({"success": True, "user": user})
 
+    def _begin_auth_attempt(self, client) -> bool:
+        """전체 점검 131회차: 잠금 검사 + 진행 중인 시도 예약(SessionStore.begin_attempt — 잠금 검사와 실패 기록 사이의 동시 요청이 임계를 넘겨 평가되지 않게).
+        거절이면 429 를 쓰고 False. True 면 호출부가 인증 결과를 기록한 뒤 end_attempt 로 돌려준다(finally)."""
+        wait = self.ctx.sessions.begin_attempt(client)
+        if wait == 0:
+            return True
+        if wait > 0:
+            self._error(HTTPStatus.TOO_MANY_REQUESTS,
+                        f"로그인 시도가 많아 잠겼습니다. {wait}초 후 다시 시도하세요.")
+        else:
+            self._error(HTTPStatus.TOO_MANY_REQUESTS,
+                        "같은 출발지에서 확인 중인 로그인 시도가 많습니다. 잠시 후 다시 시도하세요.")
+        return False
+
     def api_session_login(self):
         client = self.client_address[0] if self.client_address else "-"
-        remaining = self.ctx.sessions.lock_remaining(client)
-        if remaining > 0:
-            return self._error(HTTPStatus.TOO_MANY_REQUESTS,
-                               f"로그인 시도가 많아 잠겼습니다. {remaining}초 후 다시 시도하세요.")
-        payload = self._body_dict()
-        username = payload.get("username")
-        password = payload.get("password")
-        user = self.ctx.users.authenticate(username if isinstance(username, str) else "",
-                                           password if isinstance(password, str) else "")
+        if not self._begin_auth_attempt(client):
+            return None
+        try:
+            payload = self._body_dict()
+            username = payload.get("username")
+            password = payload.get("password")
+            user = self.ctx.users.authenticate(username if isinstance(username, str) else "",
+                                               password if isinstance(password, str) else "")
+            if not user:
+                self.ctx.sessions.note_failure(client, username if isinstance(username, str) else "")   # 117회차 F2: 어느 계정을 틀렸는지
+            else:
+                self.ctx.sessions.note_success(client, user["username"])   # 117회차 F2: 이 계정의 실패만 지운다
+        finally:
+            self.ctx.sessions.end_attempt(client)   # 131회차: 결과를 기록한 뒤 · 응답을 쓰기 전에 돌려준다(본문 오류 · 예외에서도)
         if not user:
-            self.ctx.sessions.note_failure(client, username if isinstance(username, str) else "")   # 117회차 F2: 어느 계정을 틀렸는지
             print(f"[auth] 설정 로그인 실패 (from {client})", flush=True)
             self._audit("login", actor="-", result="fail")
             # 사용자명이 틀렸는지 비밀번호가 틀렸는지 구분해서 알리지 않는다(계정 열거 차단).
             return self._error(HTTPStatus.UNAUTHORIZED, "사용자명 또는 비밀번호가 올바르지 않습니다.")
-        self.ctx.sessions.note_success(client, user["username"])   # 117회차 F2: 이 계정의 실패만 지운다
         session = self.ctx.sessions.create(user)
         print(f"[auth] 설정 로그인: {user['username']}", flush=True)
         self._audit("login", actor=user["username"], detail={"role": user.get("role")})
@@ -662,24 +679,29 @@ class HubHandler(BaseHTTPRequestHandler):
         반증(결정 G1b ②): admin 을 늘리는 관리 동작(admin 생성 · 다른 admin 재설정 · admin 으로 올리기 · 중지된 admin 다시 켜기)도 **요청자 본인**의 현재 비밀번호를 이 함수로 본다.
         실패면 응답을 쓰고 False."""
         client = self.client_address[0] if self.client_address else "-"
-        remaining = self.ctx.sessions.lock_remaining(client)
-        if remaining > 0:
-            self._error(HTTPStatus.TOO_MANY_REQUESTS,
-                        f"로그인 시도가 많아 잠겼습니다. {remaining}초 후 다시 시도하세요.")
+        if not self._begin_auth_attempt(client):   # 131회차: 잠금 검사 + 진행 중인 시도 예약(로그인과 같은 규칙)
             return False
-        current = payload.get("currentPassword")
-        if not isinstance(current, str) or not current:
+        verdict = None   # None = 현재 비밀번호 없음(인증하지 않았다) · True · False
+        try:
+            current = payload.get("currentPassword")
+            if isinstance(current, str) and current:
+                verdict = bool(self.ctx.users.authenticate(actor["username"], current))
+                if verdict:
+                    self.ctx.sessions.note_success(client, actor["username"])
+                else:
+                    self.ctx.sessions.note_failure(client, actor["username"])
+        finally:
+            self.ctx.sessions.end_attempt(client)
+        if verdict is None:
             self._error(HTTPStatus.BAD_REQUEST, f"{what} 요청한 본인의 현재 비밀번호를 입력하세요.",
                         code="current_password_required")
             return False
-        if not self.ctx.users.authenticate(actor["username"], current):
-            self.ctx.sessions.note_failure(client, actor["username"])
+        if not verdict:
             print(f"[auth] {action} 거절 — 요청자 현재 비밀번호 불일치 (from {client})", flush=True)
             self._audit(action, actor=actor["username"], result="fail",
                         detail={"target": str(target if target is not None else actor["username"])[:64], "reason": "current_mismatch"})
             self._error(HTTPStatus.FORBIDDEN, "현재 비밀번호가 올바르지 않습니다(요청한 본인의 비밀번호).", code="current_password_invalid")
             return False
-        self.ctx.sessions.note_success(client, actor["username"])
         return True
 
     def api_users_delete(self, username):
@@ -1270,20 +1292,54 @@ class HubServer(ThreadingHTTPServer):
     allow_reuse_address = True
     request_queue_size = 64
 
-    def __init__(self, address, handler, ctx, max_connections: int = 64):
+    def __init__(self, address, handler, ctx, max_connections: int = 64, max_per_client=None):
         super().__init__(address, handler)
         self.ctx = ctx
         self._slots = threading.BoundedSemaphore(max_connections)
+        # 전체 점검 124회차(117회차 결정 D1 — 재현: 헤더를 흘리는 연결 64개가 소켓 시한을 지나서도 전체 상한을 쥐었다): 출발지(IP)당 동시 연결 상한.
+        #   한 출발지가 쥘 수 있는 자리를 전체보다 작게 두어 나머지 자리로 다른 사용자가 붙는다. 여러 출발지에서 나눠 여는 공격은 막지 못한다(앞단 프록시의 일).
+        per = config.max_conn_per_client if max_per_client is None else max_per_client
+        self._per_client_max = max(0, int(per))   # 0 = 끔
+        self._per_client = {}
+        self._per_client_lock = threading.Lock()
+
+    def _enter_client(self, client) -> bool:
+        if not self._per_client_max:
+            return True
+        with self._per_client_lock:
+            count = self._per_client.get(client, 0)
+            if count >= self._per_client_max:
+                return False
+            self._per_client[client] = count + 1
+            return True
+
+    def _leave_client(self, client) -> None:
+        if not self._per_client_max:
+            return
+        with self._per_client_lock:
+            count = self._per_client.get(client, 0) - 1
+            if count > 0:
+                self._per_client[client] = count
+            else:
+                self._per_client.pop(client, None)   # 0 이면 지운다 — 출발지 수만큼 자라지 않게
 
     def process_request_thread(self, request, client_address):
-        if not self._slots.acquire(timeout=5):
-            # 상한을 넘으면 새 연결을 기다리게 하지 않고 즉시 끊는다(큐가 무한정 늘지 않게).
+        client = client_address[0] if client_address else "-"
+        if not self._enter_client(client):
+            # 이 출발지가 이미 상한만큼 연결을 쥐고 있다 — 기다리게 하지 않고 끊는다(자리가 나면 다시 붙는다).
             self.shutdown_request(request)
             return
         try:
-            super().process_request_thread(request, client_address)
+            if not self._slots.acquire(timeout=5):
+                # 상한을 넘으면 새 연결을 기다리게 하지 않고 즉시 끊는다(큐가 무한정 늘지 않게).
+                self.shutdown_request(request)
+                return
+            try:
+                super().process_request_thread(request, client_address)
+            finally:
+                self._slots.release()
         finally:
-            self._slots.release()
+            self._leave_client(client)
 
 
 def create_server(host: str = None, port: int = None, ctx=None) -> HubServer:

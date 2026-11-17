@@ -135,7 +135,7 @@ export function registerVeeam(adminRouter) {
       body.agent = ag.value;
       const d = saveServer(body);
       // v2.761 B4: 접속처가 바뀌면 옛 접속처의 결과(lastOk — 실패해도 승계된다)와 인증 정지를 지운다(다른 서버다 — secretCarry 와 같은 판단).
-      if (d.moved) { dropResult(d.id); authGuard.clearAuthStop(d.id); }
+      if (d.moved) { dropResult(d.id); authGuard.clearAuthStop(d.id, { verified: false }); }
       logAudit({ user: req.user?.username, action: 'Veeam 서버 저장', target: d.name, detail: `${d.host}:${d.port} · vCenter ${d.vcenterIds.join(',')} · 읽는 곳=${d.agent || '중앙'}${d.moved ? ' · 접속처 변경으로 이전 결과·인증 정지 지움' : ''}${d.droppedSecrets ? ' · 접속처 변경으로 저장 비밀번호 폐기' : ''}` });
       res.status(201).json({ ok: true, server: d });
     } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
@@ -149,7 +149,7 @@ export function registerVeeam(adminRouter) {
     if (locked) return res.status(409).json({ ok: false, reason: locked, centralManaged: true });
     if (!d || !deleteServer(req.params.id)) return res.status(404).json({ ok: false, reason: '서버를 찾을 수 없습니다.' });
     dropResult(req.params.id);
-    authGuard.clearAuthStop(req.params.id);
+    authGuard.clearAuthStop(req.params.id, { verified: false });
     logAudit({ user: req.user?.username, action: 'Veeam 서버 삭제', target: d.name, detail: `${d.host}:${d.port || DEFAULT_PORT}` });
     res.json({ ok: true });
   });
@@ -294,7 +294,7 @@ export function registerVeeam(adminRouter) {
       if (issue) { failed.push({ line: row._line, name: row.name || row.host, reason: issue }); continue; }
       try {
         const d = saveServer(vbBulk.cleanInput(input));
-        if (d.moved) { dropResult(d.id); authGuard.clearAuthStop(d.id); } // v2.761 B4: 단건 저장과 같다
+        if (d.moved) { dropResult(d.id); authGuard.clearAuthStop(d.id, { verified: false }); } // v2.761 B4: 단건 저장과 같다
         if (input.id) updated++; else added++;
         if (d.droppedSecrets?.length) dropped.push({ line: row._line, name: row.name || row.host, reason: '접속처가 바뀌어 저장된 비밀번호를 폐기했습니다 — 비밀번호를 다시 등록하세요.' });
       } catch (e) { failed.push({ line: row._line, name: row.name || row.host, reason: String(e?.message || e).slice(0, 300) }); }

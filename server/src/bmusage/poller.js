@@ -26,7 +26,7 @@ import { config } from '../config.js';
 import { store } from '../store.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { withDeadline } from '../proxy/sshExec.js';
-import { createAuthGuard, isAuthFailureText } from '../util/authGuard.js';
+import { createAuthGuard, isAuthFailureText, authStopText } from '../util/authGuard.js';
 import { loadBmUsageSettings, bmUsageEnabled, enterpriseActive, onBmUsageSettingsChange, STORE_DEFAULTS, effectiveRawDays, SNAPSHOT_KEEP_DAYS, bmUsageLocalLoadError, RETENTION_MAX } from './settings.js';
 import { withResolvedAuth, authCredOf } from './onboard/refs.js'; // 7b: OS 등록 항목의 키 · 공통 계정 참조 → 접속 자격
 import { noteKeyUse } from '../sshaccess/usage.js';   // v3.9.0: 키 사용 기록(화면용 — 판정에 쓰지 않는다)
@@ -682,7 +682,7 @@ async function collectOne(target, { trigger = 'auto', intervalMs = null, prevRun
   const allowList = full && _listBudget > 0 && !entStopped;
   if (allowList) _listBudget -= 1;
   jobs.push(!target.paths.includes('idrac') ? Promise.resolve(null)
-    : entStopped ? Promise.resolve({ ok: false, kind: 'auth-stopped', error: `iDRAC 인증 실패로 주기 수집이 정지됐습니다(${entStopped.attempts}회 시도). 비밀번호를 고치면 자동 재개합니다.`, authStopped: entStopped })
+    : entStopped ? Promise.resolve({ ok: false, kind: 'auth-stopped', error: authStopText(entStopped, `iDRAC 인증 실패로 주기 수집이 정지됐습니다(${entStopped.attempts}회 시도). 비밀번호를 고치면 자동 재개합니다.`), authStopped: entStopped })
       : idracTelemetryJob(target.idrac, { full, allowList }));
   // 6단계 수집 건강: OS(SSH) 세션 소요 — 실제로 연 경우만(정지 · 경로 없음은 재지 않는다 — 0 으로 세지 않는다).
   let osMs = null;
@@ -693,7 +693,7 @@ async function collectOne(target, { trigger = 'auto', intervalMs = null, prevRun
       // 1회차 점검 D6: 자격 해석이 막아(authErrorCode — 키 사용 중지 · 폴더 · 기능 · 퇴역 · 바꿔치기) 또는 주소가 없어 **접속하지 않은** 결과는 소요에 넣지 않는다
       //   (예전: 0~1ms 로 들어가 p50 을 끌어내렸다 — 법인 키 사용 중지면 한 법인 전체). 정지 · 경로 없음과 같은 원칙(bmPerfStage6Health ②).
       .then((r) => { osMs = (r?.authErrorCode || r?.notConnected) ? null : Date.now() - osT0; return r; })
-    : Promise.resolve(stopped ? { ok: false, error: `인증 실패로 주기 수집이 정지됐습니다(${stopped.attempts}회 시도). 비밀번호를 고치면 자동 재개합니다.`, authStopped: stopped } : null));
+    : Promise.resolve(stopped ? { ok: false, error: authStopText(stopped, `인증 실패로 주기 수집이 정지됐습니다(${stopped.attempts}회 시도). 비밀번호를 고치면 자동 재개합니다.`), authStopped: stopped } : null));
   const [idrac, os] = await Promise.all(jobs);
   // 자격 해석이 막아 접속하지 않은 키(사용 중지 · 폴더 · 기능 · 바꿔치기)는 ‘사용’ 이 아니다 — 주기마다 실패로 쌓지 않는다(반증 D3).
   if (os && target.osHost?.keyFingerprint && !target.osHost.authErrorCode && !os.authErrorCode) {
@@ -752,7 +752,7 @@ async function collectOne(target, { trigger = 'auto', intervalMs = null, prevRun
       telemetryKind: idrac?.ok ? (boardRead ? '' : 'board-missing') : (idrac?.kind || ''),
     });
     if (entStopped) {
-      ent = { ok: false, kind: 'auth-stopped', error: `iDRAC 인증 실패로 주기 대체 수집이 정지됐습니다(${entStopped.attempts}회 시도). 비밀번호를 고치면 자동 재개합니다.`, authStopped: entStopped };
+      ent = { ok: false, kind: 'auth-stopped', error: authStopText(entStopped, `iDRAC 인증 실패로 주기 대체 수집이 정지됐습니다(${entStopped.attempts}회 시도). 비밀번호를 고치면 자동 재개합니다.`), authStopped: entStopped };
     } else if (!el.eligible) {
       ent = { ok: false, kind: `not-eligible:${el.why}`, skipped: true };
     } else if (_entBudget <= 0) {

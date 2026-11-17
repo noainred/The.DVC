@@ -19,7 +19,7 @@ import { load as loadMail } from './settings.js';
 import { resolveRecipients, withinRateLimit, kindLabel } from './kinds.js';
 import { sendMail, headerSafeText, normalizeAddresses, formatDisplayName } from '../util/smtp.js';
 import { logAudit } from '../audit.js';
-import { createAuthGuard, authStopView } from '../util/authGuard.js';
+import { createAuthGuard, authStopView, isUnreadStop } from '../util/authGuard.js';
 
 /**
  * SMTP 인증 실패 정지(v2.591 — 감사 F4). 자동 발송(알림·일일 보고·폴더 사용량)은 사건마다 메일을 보낸다 —
@@ -106,7 +106,10 @@ async function sendPortalMailNow({ kind, subject: rawSubject, html = '', text = 
   const manual = isManualSend(kind, by);
   const stop = cfg.smtp?.user ? mailAuthGuard.authStopFor(smtpDev(cfg.smtp)) : null;
   if (stop && !manual) {
-    const note = `SMTP 인증 실패로 자동 발송을 멈춘 상태라 보내지 않았습니다(${stop.attempts}회 거부) — 설정 › 메일 발송에서 계정·비밀번호를 고치면 자동 재개되고, 테스트 발송이 성공해도 풀립니다.`;
+    // 124회차(119 반증 — 재현): 정지 기록 파일을 못 읽어 건너뛴 것은 인증 실패가 아니다 — 예전 문장은 'SMTP 인증 실패 … (0회 거부) … 비밀번호를 고치면 자동 재개' 였다(둘 다 사실이 아니다).
+    const note = isUnreadStop(stop)
+      ? `자동 발송을 건너뛰었습니다(SMTP 인증 실패가 확인된 것이 아닙니다) — ${stop.reason} 테스트 발송이 성공하면 자동 발송이 다시 시작됩니다.`
+      : `SMTP 인증 실패로 자동 발송을 멈춘 상태라 보내지 않았습니다(${stop.attempts}회 거부) — 설정 › 메일 발송에서 계정·비밀번호를 고치면 자동 재개되고, 테스트 발송이 성공해도 풀립니다.`;
     remember({ at, kind, subject: String(subject || '').slice(0, 200), state: 'skipped', note });
     return { ok: false, skipped: true, authStopped: authStopView(stop), reason: note, trace: null };
   }

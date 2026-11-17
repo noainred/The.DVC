@@ -9,7 +9,7 @@ import { useHashTab } from '../../hooks/useHashTab.js';
 import { facetState, toggleIn, groupBy } from './deviceFacets.js';
 import DeviceFacetBar from './DeviceFacetBar.jsx';
 import { addressHiddenNote } from './addressHiddenText.js';
-import { unreadMarkOf, saveLockedByUnread } from '../settingsUnread.js';   // 112회차: 못 읽은 동안의 기본값 폼으로 저장하지 않는다
+import { unreadMarkOf, unreadKind, saveLockedByUnread } from '../settingsUnread.js';   // 112회차: 못 읽은 동안의 기본값 폼으로 저장하지 않는다
 import { SettingsUnreadBanner } from '../SettingsUnreadBanner.jsx';
 import {
   UNITS, bytesText, deltaText, pctText, pctTone, aggregateCells, groupSummary, inexactNote, partialNote,
@@ -694,7 +694,9 @@ function MailView({ offsetMin }) {
     try {
       // postJson 은 409(보내지 못함)를 던지지 않는다 — 결과 상태를 본다.
       const r = await postJson('/tools/storage-usage/mail/send-now', {});
-      if (r?.status) setData((x) => ({ ...x, status: r.status }));
+      // 123회차(112회차 반증): 이 응답의 status 만 갈아 끼우면, 못 읽은 동안 연 화면에서 표지(status.loadError)만 사라지고 폼 · data.mail 은 기본값 그대로라
+      //   ‘저장’ 잠금이 풀린 채 그 기본값 폼의 저장(전체 교체)이 받는 사람 · 요일 · 시각을 덮었다. 설정 파일 상태가 바뀌었으면 설정을 통째로 다시 받는다(폼을 다시 채운다).
+      if (r?.status) { if (unreadKind(unreadMarkOf(r.status)) !== unreadKind(unreadMarkOf(data.status))) await load(); else setData((x) => ({ ...x, status: r.status })); }
       if (!r?.ok) { setMsg({ ok: false, text: `보내지 않았습니다 — ${SKIP_TEXT[r?.code] || r?.reason || '사유 미상'}` }); return; }
       setMsg({ ok: true, text: r.to == null ? '보냈습니다.' : `보냈습니다(받는 사람 ${r.to}명).` });
     } catch (e) { setMsg({ ok: false, text: e.message }); load(); } finally { setBusy(''); }

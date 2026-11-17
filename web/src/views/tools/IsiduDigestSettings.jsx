@@ -25,6 +25,7 @@ import {
 } from './isiduDigestText.js';
 import './isiduDigestTop.css';
 import { adminToForCount } from './storageUsageText.js';   // 반증 후속 ①: 가린 통합 관리자 주소는 개수만
+import { unreadFixText } from '../loadErrorText.js';   // 128회차: 읽기 오류면 보존본이 없다 — 사유별 조치 문구는 한 벌
 
 /** 순위 개수 칸 하나(숫자 + 빠른 선택 + 설명). 입력은 글자 그대로 들고 판정은 isiduDigestText.countField 가 한다. */
 function CountBox({ k, title, unit, presets, form, saved, set, issue, serverBad }) {
@@ -177,7 +178,7 @@ export default function IsiduDigestSettings({ locked: lockedOuter = false, rows 
 
   return (
     <div className="isd-digest">
-      {srv.loadError ? <div className="result bad">저장된 설정 파일을 읽지 못했습니다 — 편집을 잠갔습니다. 설정 › 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 복구하세요.</div> : null}
+      {srv.loadError ? <div className="result bad">저장된 설정 파일을 읽지 못했습니다 — 편집을 잠갔습니다. {unreadFixText(srv.loadError, { corrupt: '설정 › 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 복구하세요.' })}</div> : null}
       {st.edge ? <div className="result warn">이 포탈은 엣지입니다 — 종합 메일은 메인(중앙) 포탈만 보냅니다. 여기서 저장해도 이 포탈은 보내지 않습니다.</div> : null}
       {ready ? <div className="result warn">{ready}</div> : null}
 

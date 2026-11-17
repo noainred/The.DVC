@@ -18,6 +18,7 @@
  *    보내면 정지 기록이 생기기 전에 실패 로그인이 6회 나간다. 자격증명이 맞으면 첫 시도 뒤 예전처럼 동시에 돈다.
  */
 import { vcAuthGuard, isVcAuthError } from './restClient.js';
+import { authStopView as guardStopView, authStopText } from '../util/authGuard.js';   // 127회차: 못 읽음 정지의 표지 · 사유를 떨구지 않는다(판정 · 문구는 공용 하나)
 import { directCollectSkipReason } from './collectTarget.js';
 
 /*
@@ -47,12 +48,13 @@ export function vcSkipOf(vc) {
 export const authStoppedReason = (attempts) =>
   `vCenter 인증 실패로 멈춰 있어 조회하지 않았습니다(실패 ${attempts}회). 비밀번호를 고치거나 설정 › vCenter 연결 테스트가 성공하면 다시 조회합니다.`;
 
-const view = (rec, reason) => ({ authStopped: true, since: rec.since, at: rec.at, attempts: rec.attempts, reason });
+const view = (rec, reason) => ({ authStopped: true, ...guardStopView(rec), reason });
 
 /** 이 vCenter 가 인증 정지 상태인가(읽기 전용). 정지면 표지 `{authStopped, since, at, attempts, reason}`, 아니면 null. */
 export function vcAuthStopOf(vc) {
   const st = vc ? vcAuthGuard.peekAuthStop(vc) : null;
-  return st ? view(st, authStoppedReason(st.attempts)) : null;
+  // 127회차(124회차 범위 밖에서 본 것 — 재현): 정지 기록 파일을 못 읽어 건너뛴 것을 'vCenter 인증 실패로 멈춰 있어 …(실패 0회). 비밀번호를 고치거나 …' 로 다시 쓰지 않는다.
+  return st ? view(st, authStopText(st, authStoppedReason(st.attempts))) : null;
 }
 
 /** 오류가 vCenter 자격증명 거부면 주 폴러와 같은 기록에 올리고 표지를, 아니면 null 을 돌려준다. */
@@ -63,7 +65,7 @@ export function noteVcAuthFailure(vc, err) {
 }
 
 /** 표지 → 응답 필드(부분 결과의 vCenter 별 `authStopped` 값과 같은 모양 — `{since, at, attempts, reason}`). */
-export const authStopView = (info) => (info ? { since: info.since, at: info.at, attempts: info.attempts, reason: info.reason } : null);
+export const authStopView = (info) => guardStopView(info);
 
 /** 응답 본문용 — `{ok:false, ...표지}`. */
 export const authStopBody = (info) => ({ ok: false, ...info });

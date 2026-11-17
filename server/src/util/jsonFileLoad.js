@@ -30,7 +30,7 @@
  */
 import path from 'node:path';
 import { makeSettingsLoadError } from './settingsLoadError.js';
-import { READ_RETRY_MS, makeJsonFileReader, nowMs as _now } from './jsonFileRead.js';
+import { READ_RETRY_MS, makeJsonFileReader, inRetryWindow, nowMs as _now } from './jsonFileRead.js';
 
 // 읽기 판정(READ_RETRY_MS · readJsonFile · makeJsonFileReader · 시계)은 util/jsonFileRead.js 하나다 — 등록부 공용 판정(registryCore)이 순환 없이 쓰게 떼어 냈다.
 export { READ_RETRY_MS, readJsonFile, makeJsonFileReader, _setJsonFileLoadClockForTest } from './jsonFileRead.js';
@@ -66,7 +66,7 @@ export function makeJsonFileLoader(fileOf, opts = {}) {
   const probe = () => {
     if (held) return false;
     const before = err.get();
-    if (!before || _now() < recheckAt) return false;
+    if (!before || inRetryWindow(_now(), recheckAt, retryMs)) return false;   // 125회차 F2: 시계가 뒤로 갔으면 기다리지 않는다
     judge();
     if (err.get()) return false;
     held = before;
@@ -88,7 +88,7 @@ export function makeJsonFileLoader(fileOf, opts = {}) {
       if (held) return true;   // 서비스 점검이 회복을 봤다 — 모듈이 곧바로 다시 읽어 캐시를 바꾸게
       if (!err.get()) return false;
       const t = _now();
-      if (t < recheckAt) return false;
+      if (inRetryWindow(t, recheckAt, retryMs)) return false;   // 125회차 F2: 시계가 뒤로 갔으면 기다리지 않는다(간격이 그 차만큼 늘어났다)
       recheckAt = t + retryMs;
       return true;
     },

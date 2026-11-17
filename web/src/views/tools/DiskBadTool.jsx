@@ -453,7 +453,7 @@ function ScanPanel({ data, jobs, corp, canScan, reload, setJobs }) {
       .catch((e) => setMsg(e?.message || String(e))).finally(() => setBusy(false));
   };
   const act = (j, path, body) => postJson(`/tools/disk-bad/jobs/${encodeURIComponent(j.id)}/${path}`, body)
-    .then((r) => setJobs(jobs.map((x) => (x.id === j.id ? r.job : x)))).catch((e) => setMsg(e?.message || String(e)));
+    .then((r) => { requireChanged(r); if (r?.job) setJobs(jobs.map((x) => (x.id === j.id ? r.job : x))); }).catch((e) => setMsg(e?.message || String(e)));   // 128회차: 409 본문에는 job 이 없다 — 목록에 undefined 가 들어가 화면이 깨졌다
   // 112회차: 서버가 설정 파일을 못 읽은 동안 data.settings 는 기본값(담당자 없음)이다 — 이 저장은 늘 법인 담당자(corpTo)를 함께 보내므로(전체 교체),
   //   다시 읽힌 뒤 체크 하나만 바꿔도 저장된 담당자 메일 목록이 빈 값으로 덮였다. 읽기 오류 동안은 저장하지 않는다(서버도 503).
   const unread = unreadMarkOf(data);
@@ -528,7 +528,8 @@ function ScanPanel({ data, jobs, corp, canScan, reload, setJobs }) {
           <label htmlFor="dbad-corpto" className="muted">법인 담당자 — 한 줄에 ‘vCenter id=메일,메일’</label>
           <textarea id="dbad-corpto" className="input" rows={4} value={corpToText} onChange={(e) => setCorpToText(e.target.value)} style={{ fontFamily: 'var(--mono)', fontSize: 12, width: '100%', boxSizing: 'border-box' }} placeholder={data.corps.slice(0, 2).map((c) => `${c.id}=it-admin@example.com`).join('\n')} />
           <div><button className="tab" style={{ flex: 'none' }} disabled={saveLocked} onClick={() => saveSettings({})}>담당자 저장</button></div>
-          <SettingsUnreadBanner le={unread} what="디스크 배드 섹터 점검 설정" save="자동 점검 · 메일 · 담당자 저장" style={{ marginBottom: 0 }} />
+          {/* 123회차(112회차 반증): 이 화면은 주기 조회가 없다 — ‘다시 확인’ 이 없으면 다시 읽힌 뒤에도 페이지를 새로 열 때까지 잠긴 채였다(다시 읽으면 key 가 바뀌어 설정 칸을 저장된 값으로 다시 만든다). */}
+          <SettingsUnreadBanner le={unread} what="디스크 배드 섹터 점검 설정" save="자동 점검 · 메일 · 담당자 저장" onRecheck={reload} style={{ marginBottom: 0 }} />
         </div>
       )}
     </div>

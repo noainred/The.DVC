@@ -13,6 +13,7 @@ import { perfSnapshot, measureNow, pruneHangLog } from '../../perf/monitor.js';
 import { loadPerfSettings, savePerfSettings, perfSettingsWriteRefusal, LIMITS as PERF_LIMITS, DEFAULTS as PERF_DEFAULTS } from '../../perf/settings.js';
 import { readHangs, clearHangs, hangLogStatus } from '../../perf/hangLog.js';
 import { adminOnly, fullScopeOnlyWith } from './shared.js';
+import { unreadMark } from '../settingsUnreadMark.js';   // 128회차: 조회 응답의 읽기 오류 표지(112회차 규약)
 
 // v2.612 AUTHZ2612-05: hang 로그에는 다른 사용자의 계정·IP·UA·경로가 담긴다 — 범위 제한 admin 도 403(/admin/audit 와 같은 기준).
 const fullScopeOnly = fullScopeOnlyWith('서버 성능 측정에는 포탈 전체 사용자의 요청 기록이 섞여 있어 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다.');
@@ -24,6 +25,7 @@ export function registerPerfMonitor(adminRouter) {
     res.json({
       ...perfSnapshot({ routeLimit: lim('routes', 60, 400), slowLimit: lim('slow', 100, 500), hangLimit: lim('hangs', 100, 500) }),
       limits: PERF_LIMITS, defaults: PERF_DEFAULTS,
+      ...unreadMark(perfSettingsWriteRefusal()),   // 128회차: 못 읽은 동안의 settings 는 기본값(보존일은 최장)이다 — 화면이 저장을 잠그고 폼을 다시 채운다
     });
   });
 

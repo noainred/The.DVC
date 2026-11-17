@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
-import { READ_RETRY_MS, nowMs } from '../util/jsonFileRead.js';   // 97회차 F9: 읽기 오류 재읽기 간격 · 시계(테스트가 바꾼다) // v2.582 ARCH-3: 상태 파일도 원자 쓰기(절단본 → 로드 실패 → 다음 저장이 빈 값으로 덮어쓰는 왕복 손상 차단)
+import { READ_RETRY_MS, nowMs, inRetryWindow } from '../util/jsonFileRead.js';   // 97회차 F9: 읽기 오류 재읽기 간격 · 시계(테스트가 바꾼다) // v2.582 ARCH-3: 상태 파일도 원자 쓰기(절단본 → 로드 실패 → 다음 저장이 빈 값으로 덮어쓰는 왕복 손상 차단)
 import { pushAll } from '../util/pushAll.js';   // 97회차 F9: 읽기 오류 동안 쌓인 기록 이어 붙이기 — 원소 수 무관(audit2603a 스윕)
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
 
@@ -30,7 +30,7 @@ let _readErr = null;      // 읽기 오류 코드(원본 그대로 — 쓰지 �
 let _readRetryAt = 0;
 function load() {
   if (rows && !_readErr) return rows;
-  if (rows && _readErr && nowMs() < _readRetryAt) return rows;
+  if (rows && _readErr && inRetryWindow(nowMs(), _readRetryAt, READ_RETRY_MS)) return rows;   // 128회차: 시계가 뒤로 갔으면 기다리지 않는다(간격 판정은 공용)
   const pending = _readErr && rows ? rows : [];   // 읽기 오류 동안 메모리에만 쌓인 기록
   let text = null;
   try { text = fs.readFileSync(FILE, 'utf8'); } catch (e) {

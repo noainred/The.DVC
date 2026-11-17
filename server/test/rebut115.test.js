@@ -365,10 +365,11 @@ test('R10 Ping 설정: 읽기 오류 뒤 그 파일을 치우고 새로 저장�
 }));
 
 /* ── R9 ───────────────────────────────────────────────────────────────────── */
-test('R9 분류표: 남은 left(ipam/vcRangeMigrate)의 사유가 코드와 맞다 — 읽기 단계는 105회차 A2 에서 이미 갈랐다', () => {
+test('R9 분류표: ipam/vcRangeMigrate 의 분류 · 사유가 코드와 맞다 — 읽기 단계는 105회차 A2 에서 이미 갈랐다', () => {
   const t = realRead.call(fs, path.join(SRC, '..', 'test', 'readErrorSweep97.test.js'), 'utf8');
   const row = t.split('\n').find((l) => l.includes("'ipam/vcRangeMigrate.js'")) || '';
-  assert.match(row, /\['left'/);
+  // 119회차가 이 줄을 'left'(사유만 정정 — 이 회차) → 'own'(자체 분리 · 확인함 — left 0)으로 올렸다. 둘 다 같은 사실을 말한다 — 낡은 사유로 돌아가지 않는지만 고정한다.
+  assert.match(row, /\['(?:left|own)'/);
   assert.doesNotMatch(row, /이전 안 함으로 읽음/, '낡은 사유 — 지금 코드는 읽기 오류를 표지로 세우고 이전을 건너뛴다');
   assert.match(row, /105회차/);
   const s = realRead.call(fs, path.join(SRC, 'ipam/vcRangeMigrate.js'), 'utf8');

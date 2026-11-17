@@ -29,6 +29,13 @@ function writeAll(fd, data) {
 let _tmpSeq = 0;
 
 export function atomicWriteFileSync(file, data, { mode = 0o600 } = {}) {
+  // 125회차 F1: 본문은 문자열 · Buffer(TypedArray · DataView)만 받는다. v3.10.3 이 '그 밖의 값' 을 String(data ?? '') 로 바꿔 쓰게 하면서
+  //   `JSON.stringify(undefined)`(= undefined) · null 이 **0바이트 파일로 원본을 대신**했고 객체는 '[object Object]' 가 됐다(재현 — 그 전에는
+  //   fs.writeSync 가 ERR_INVALID_ARG_TYPE 로 던져 원본이 남았다). 임시 파일을 만들기 전에 던진다 — 원본도 폴더도 건드리지 않는다.
+  if (typeof data !== 'string' && !ArrayBuffer.isView(data)) {
+    const got = data === null ? 'null' : Array.isArray(data) ? 'array' : typeof data;
+    throw Object.assign(new TypeError(`atomicWrite: 본문은 문자열 · Buffer 여야 합니다(받은 것: ${got}) — ${path.basename(String(file))} 을 쓰지 않았습니다`), { code: 'ERR_INVALID_ARG_TYPE' });
+  }
   const dir = path.dirname(file);
   fs.mkdirSync(dir, { recursive: true });
   // v3.10.3: 순번을 붙인다 — 같은 프로세스의 워커 스레드(같은 pid)가 같은 ms 에 같은 파일을 쓰면 임시 이름이 겹쳐 서로의 내용을 덮었다.
@@ -138,6 +145,7 @@ export function safeLoadText(reason, max = 200) {
  *   찍어 그 조각이 엣지 로그로 중앙에 당겨졌다. '파싱 실패' 문구와 파일 이름·보존본 이름은 그대로다(로그 분석 규칙·테스트가 그 문구를 본다).
  * @returns 보존에 성공하면 백업 경로, 아니면 null.
  */
+const _preserveFailLogged = new Set();   // 옮기기 실패를 이미 콘솔에 남긴 파일(125회차 F5 — 파일마다 한 번)
 export function preserveCorrupt(file, reason = '') {
   try {
     if (!fs.existsSync(file)) return null;
@@ -146,5 +154,19 @@ export function preserveCorrupt(file, reason = '') {
     const why = summarizeLoadReason(reason);
     console.error(`[atomicWrite] ${path.basename(file)} 파싱 실패${why ? `(${why})` : ''} — 손상본을 ${path.basename(bak)}로 보존하고 빈 값으로 시작합니다. 자동 재저장이 덮어쓰기 전 수동 복구하세요.`);
     return bak;
-  } catch { return null; }
+  } catch (e) {
+    // 125회차 F5: 옮기기 실패(못 쓰는 폴더 · EBUSY · EPERM)가 무음이었다 — 손상본은 **그 자리에 그대로** 있는데 콘솔 · 화면 어디에도 없어
+    //   운영자는 없는 보존본(.corrupt.*)을 찾았다(재현: 서비스 계정이 못 쓰는 폴더 — 원본 남음 · 보존본 0개 · 콘솔 0줄). 파일마다 한 번만 남긴다
+    //   (로드할 때마다 다시 시도하는 호출부가 콘솔을 채우지 않게). 반환값(null)은 그대로다.
+    try {
+      const key = String(file);
+      if (!_preserveFailLogged.has(key)) {
+        if (_preserveFailLogged.size >= 200) _preserveFailLogged.clear();
+        _preserveFailLogged.add(key);
+        const code = typeof e?.code === 'string' && /^E[A-Z0-9_]{2,31}$/.test(e.code) ? e.code : '사유 미상';
+        console.error(`[atomicWrite] ${path.basename(key)} 파싱 실패 — 손상본을 보존본(.corrupt.*)으로 옮기지 못했습니다(${code}). 손상본은 그 자리에 그대로 있습니다 — 저장하면 보존본 없이 덮어쓰니 먼저 수동으로 복사해 두세요.`);
+      }
+    } catch { /* 콘솔 실패는 무시 */ }
+    return null;
+  }
 }

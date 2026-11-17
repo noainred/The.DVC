@@ -4,6 +4,8 @@
 // 수집 주체: 중앙 직접(기본) 또는 글로벌 엣지 위임(중앙→엣지 PUSH — 수집 서버(원격) URL 필요).
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson, canCsv, getCurrentUser } from '../../api.js';
+import { unreadMarkOf, registryEmptyText } from '../settingsUnread.js';   // 128회차: 등록부를 못 읽은 동안의 빈 목록을 ‘등록 없음’ 으로 보이지 않는다
+import { RegistryUnreadBanner } from '../SettingsUnreadBanner.jsx';
 import { requireChanged } from '../changeResult.js';   // 112회차: delJson 은 409 · 400 을 던지지 않고 본문을 준다 — 거절(등록부 읽기 오류 · 사용 중)을 삭제 성공으로 읽지 않는다
 import { canManageKeys, authChoiceOf, authBodyOf, HOSTKEY_OBSERVE_NOTE, authChoicesView, authChoicesNote } from './bmOnboardText.js'; // 7b: 인증(키 · 공통 계정) 드롭다운 — 설정 소유자 등급만
 import { Loading, ErrorBox } from '../../components/ui.jsx';
@@ -12,7 +14,7 @@ import { CsvExportModal, CsvImportModal } from '../../components/CsvBulkModals.j
 import { fmtAgo } from '../../util/fmt.js';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
-import { authStopSummary } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
+import { authStopSummary, authStopSummaryUnreadOnly, authStopShort, isUnreadStop } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 import { droppedSecretNote } from '../droppedSecretText.js';
 import { missingChoice } from '../idrac/scanRangeFormText.js'; // v2.630 WEB2630-03: 목록에 없는 저장값을 그대로 보인다
 import BmStorHistoryPanel from './BmStorHistoryPanel.jsx'; // v2.635: 디스크 사용량 12시간 이력 차트(v2.688: 세 보기)
@@ -222,11 +224,12 @@ export default function BmStorageTool() {
           onClose={() => setCsvModal(null)} onDone={() => { setCsvModal(null); refresh(); }} />
       )}
       {msg && <div className="muted" style={{ fontSize: 12.5, marginBottom: 8, color: '#93c5fd' }}>{msg}</div>}
+      <RegistryUnreadBanner le={unreadMarkOf(data)} what="베어메탈 스토리지 서버 등록부" />
       {error && <div className="muted" style={{ fontSize: 12, marginBottom: 8, color: 'var(--amber)' }}>⚠ 일시 조회 오류: {String(error?.message || error)}</div>}
 
       {/* v2.590(감사 F2): 인증 실패로 **주기 수집을 멈춘** 서버 — 조용히 멈추지 않는다(authGuard 규칙 1). */}
       {authNote && (
-        <div className="card" style={{ padding: 10, marginBottom: 12, fontSize: 13, borderColor: 'var(--red)' }}>
+        <div className="card" data-auth-stop-summary style={{ padding: 10, marginBottom: 12, fontSize: 13, borderColor: authStopSummaryUnreadOnly(servers.filter((s) => s.authStopped)) ? 'var(--amber)' : 'var(--red)' }}>
           <BoldText text={authNote} />
           <span className="muted"> 위의 지금 수집 버튼은 정지와 무관하게 1회 시도하고, 성공하면 정지가 풀립니다.</span>
         </div>
@@ -350,7 +353,7 @@ export default function BmStorageTool() {
           </div>
         </div>
         {servers.length === 0
-          ? <div className="muted" style={{ fontSize: 13 }}>등록된 서버가 없습니다. '+ 서버 추가'로 SSH 접속 정보와 측정할 마운트 포인트를 등록하세요.</div>
+          ? <div className="muted" style={{ fontSize: 13 }}>{registryEmptyText(unreadMarkOf(data), '서버 등록부') || "등록된 서버가 없습니다. '+ 서버 추가'로 SSH 접속 정보와 측정할 마운트 포인트를 등록하세요."}</div>
           : <STable minWidth={1100}>
               <thead><tr><th>서버</th><th>그룹</th><th>수집 주체</th><th style={{ textAlign: 'right' }}>마운트</th><th style={{ textAlign: 'right' }}>총 용량</th><th style={{ textAlign: 'right' }}>사용량</th><th style={{ textAlign: 'right' }}>사용 가능</th><th>사용률</th><th>최근 수집</th><th data-nosort>작업</th></tr></thead>
               <tbody>
@@ -374,7 +377,7 @@ export default function BmStorageTool() {
                       <td style={{ textAlign: 'right' }} data-sort={s.ok ? s.usedBytes : ''}>{s.ok ? fmtBytes(s.usedBytes) : '—'}</td>
                       <td style={{ textAlign: 'right', fontWeight: 600 }} data-sort={s.ok ? s.availBytes : ''}>{s.ok ? fmtBytes(s.availBytes) : '—'}</td>
                       <td data-sort={p ?? ''}>{s.ok ? pctCell(s.usedPct)
-                        : s.authStopped ? <span className="badge red" style={{ fontSize: 11 }} title={s.error || ''}>인증 실패 정지{s.authStopped.attempts != null ? ` · ${s.authStopped.attempts}회` : ''}</span>
+                        : s.authStopped ? <span className="badge red" style={{ fontSize: 11 }} title={s.error || ''}>{authStopShort(s.authStopped)}{s.authStopped.attempts != null && !isUnreadStop(s.authStopped) ? ` · ${s.authStopped.attempts}회` : ''}</span>
                         : s.error ? <span style={{ color: 'var(--red)', fontSize: 11.5 }} title={s.error}>⚠ {s.error.slice(0, 40)}{s.error.length > 40 ? '…' : ''}</span>
                           : <span className="muted" style={{ fontSize: 12 }}>수집 대기</span>}</td>
                       <td className="muted" style={{ fontSize: 11.5 }} data-sort={s.at || ''}>{s.at ? fmtAgo(s.at) : '—'}</td>

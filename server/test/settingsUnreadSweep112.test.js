@@ -234,6 +234,8 @@ test('B FinOps 단가 · 스토리지 사용량 메일 · Bareos 번들 받는 �
  *   own   : 112회차 전에 자체 표지 · 화면 처리가 있던 곳(검사 식을 적는다)
  *   left  : 조회 표지 · 화면 잠금을 넣지 않고 남긴 곳(사유) — 고치면 form 으로 옮긴다
  *   out   : 112회차가 대조하지 않은 곳(97 · 103회차의 등록부 · 자체 표지 모듈 — 사유를 적는다). 대조하면 form · own · left 중 하나로 옮긴다
+ *   list  : 128회차 — 장비 **등록부**(항목 단위 쓰기라 기본값 폼이 덮는 꼴은 아니다). 조회 라우트가 등록부 표지(routes/settingsUnreadMark.js registryMark)를 싣고
+ *           화면이 못 읽은 동안의 빈 목록을 ‘등록 없음 · 추가하세요’ 라고 말하지 않는다(route · screen 둘 다 검사 — 118회차 vCenter 관리 화면의 꼴)
  * 새 모듈이 `…WriteRefusal` 을 내보내면 여기에 한 줄을 더해야 한다(없으면 실패) — 그때 '조회가 표지를 싣는가 · 화면이 그 표지를 보는가' 를 정한다.
  */
 const lock = (name = 'saveLocked') => new RegExp(`disabled=\\{[^}]*\\b${name}\\b`);
@@ -261,21 +263,39 @@ const TABLE = {
   'usermenu/store.js': { cls: 'left', why: '내 메뉴 편집 — 못 읽은 동안 기본 메뉴로 편집 · 저장하면 내 메뉴가 바뀌지만 직전 메뉴(prev)가 남아 ‘이전 메뉴로 되돌리기’ 로 되살린다(낮음). 조회가 App 기동 경로라 표지 · 편집기 잠금은 따로 본다' },
   'runtime-settings.js': { cls: 'left', why: '데이터 소스 — 값 하나를 사용자가 명시로 고르는 선택(숨은 칸이 없다 — 기본값 폼이 덮는 꼴 아님). 못 읽은 동안 현재 소스 표시만 env 기본값(표시 문제 · 낮음)' },
   'ui-settings.js': { cls: 'left', why: '화면 표시 설정(지도 높이 등) — 못 읽은 동안 마지막으로 읽은 값을 준다(107회차). 기동 뒤 한 번도 못 읽었을 때만 기본값 · 표시 설정이라 낮음' },
-  'attach/store.js': { cls: 'left', why: '첨부 상한 설정 — 조회에 표지가 이미 있다고 107회차가 적었으나 화면 대조를 하지 못했다(낮음 — 상한 숫자 둘)' },
+  'attach/store.js': { cls: 'form', route: ['routes/api/attach.js', /\.\.\.unreadMark\(attachSettingsWriteRefusal\(\), 'settingsLoadError'\)/], screen: ['views/attach/AttachAdmin.jsx', /disabled=\{busy \|\| !cap \|\| saveLocked\}/], lose: '첨부 전체 상한(기본 상한 칸의 저장 — 123회차 대조: 읽기 오류에 ‘손상본은 옆에 보존’ 이라던 문구도)' },
   'wiki/userState.js': { cls: 'left', why: '즐겨찾기 · 조회 수 — 폼이 아니다(항목 단위 토글). 못 읽은 동안 빈 즐겨찾기로 보이는 표시 문제만' },
   'sshaccess/installed.js': { cls: 'left', why: 'SSH 키 설치 기록 — 사용자가 편집하는 폼이 아니다(작업이 쓰는 원장)' },
-  // ── out: 112회차가 대조하지 않은 곳(97 · 103회차 모듈 — 등록부 · 자체 표지 · 자체 화면 처리). 대조하면 옮긴다
-  ...Object.fromEntries([
-    'auth/permissions.js', 'bmstor/registry.js', 'cvp/registry.js', 'gpu/physicalRegistry.js',
-    'idrac/powerSettings.js', 'idrac/registry.js', 'idrac/scanPoller.js', 'idrac/scanRanges.js', 'net/monitor.js', 'partfault/settings.js', 'pdu/registry.js',
-    'perf/settings.js', 'sanswitch/registry.js', 'storage/registry.js', 'svcmon/store.js', 'upgrade/packageSettings.js', 'upgrade/settings.js', 'veeam/em/registry.js', 'veeam/registry.js',
-    'util/registryCore.js',
-  ].map((f) => [f, { cls: 'out', why: '97 · 103회차의 등록부 · 설정(자체 loadError · registryLoadError 흐름) — 112회차는 화면까지 대조하지 않았다' }])),
+  // ── 128회차: 112 · 123회차가 'out' 으로 남긴 나머지 16개를 화면까지 대조해 옮겼다(확정 6 → list 4 · form 2 / 이미 처리 7 → own / 기각 3 → left). 'out' 은 이제 없다.
+  //    list: 조회에 표지가 없어 못 읽는 동안 화면이 ‘등록된 … 없습니다 · 추가하세요’ 라고 말하던 등록부
+  'sanswitch/registry.js': { cls: 'list', route: ['routes/api/sanSwitch.js', /const regMark = registryMark\(registryLoadError\(\)\);[\s\S]{0,400}extras: \[pollerSt, drops, datacenters, agents, demo, regMark\][\s\S]{0,4000}\.\.\.regMark,/], screen: ['views/tools/SanSwitchTool.jsx', /registryEmptyText\(unreadMarkOf\(data\), 'SAN 스위치 등록부'\) \|\|/], why: '응답 기억(snapMemo)의 키에도 표지를 넣는다 — 풀리면 곧바로 내린다' },
+  'cvp/registry.js': { cls: 'list', route: ['routes/api/cvp.js', /\.\.\.\(admin \? \{ db: await cdb\.dbStats\(\) \} : \{ addressHidden: true \}\),\s*\.\.\.registryMark\(registryLoadError\(\)\),/], screen: ['views/tools/CvpTool.jsx', /registryEmptyText\(unreadMarkOf\(data\), 'CVP 서버 등록부'\) \|\|/], why: '현황(GET /tools/cvp) · 등록 목록(GET /tools/cvp/servers) 둘 다 표지' },
+  'bmstor/registry.js': { cls: 'list', route: ['routes/api/bmstor.js', /\.\.\.registryMark\(registryLoadError\(\)\),/], screen: ['views/tools/BmStorageTool.jsx', /registryEmptyText\(unreadMarkOf\(data\), '서버 등록부'\) \|\|/], why: '같은 파일의 수집 주기(값 하나 · 명시 저장)도 못 읽은 동안은 기본값 — 표지 하나가 함께 말한다' },
+  'nsx/registry.js': { cls: 'list', route: ['routes/admin/nsxImport.js', /scopeNsxManagers\(managers, scopedVcenterIds\(req\.user, store\.get\(\)\)\), \.\.\.registryMark\(nsxRegistryLoadError\(\)\)/], screen: ['views/NsxAdmin.jsx', /registryEmptyText\(unreadMarkOf\(data\), 'NSX Manager 등록부'\) \|\|/], why: '116회차 등록부 — 못 읽는 동안 마지막으로 읽은 목록(기동 뒤 한 번도 못 읽었으면 빈 목록)' },
+  //    form: 폼 전체를 한 번에 저장하는데 조회에 표지가 없던 설정
+  'perf/settings.js': { cls: 'form', route: ['routes/admin/perfMonitor.js', /\.\.\.unreadMark\(perfSettingsWriteRefusal\(\)\)/], screen: ['views/PerfMonitor.jsx', lock()], lose: '계측 사용 여부 · 임계 · 보관(폼을 처음 한 번만 채우던 화면 — 못 읽은 동안의 기본값 · 보존일 최장 자리 표시가 다시 읽힌 뒤 저장됐다)' },
+  'upgrade/packageSettings.js': { cls: 'form', route: ['routes/admin/deployLlm.js', /\.\.\.unreadMark\(packageSettingsWriteRefusal\(\)\)/], screen: ['views/AgentDeploy.jsx', /disabled=\{pkgSaveLocked\} onClick=\{savePkgCfg\}/], lose: '웹에서 지정한 저장소 주소(사내 미러) · 저장 경로 — 두 칸을 함께 보내는 폼이라(빈 칸 = 지정 해제) 못 읽은 동안의 빈 폼이 지정을 지웠다' },
+  //    own: 128회차 대조 — 자체 표지 · 화면 처리가 이미 있다(항목 단위 쓰기). 그대로인지 고정한다
+  'veeam/registry.js': { cls: 'own', route: ['routes/admin/veeam.js', /\.\.\.\(le \? \{ registryError: summarizeRegistryError\(le\)\?\.text \|\| '등록부 읽기 오류' \} : \{\}\)/], screen: ['views/VeeamSettings.jsx', /d && servers\.length === 0 && !d\.registryError &&/], why: '78회차 자체 표지(registryError) — 배너 + 빈 목록 문구 가드' },
+  'veeam/em/registry.js': { cls: 'own', route: ['routes/admin/veeamEm.js', /\.\.\.\(le \? \{ registryError: summarizeRegistryError\(le\)\?\.text \|\| '등록부 읽기 오류' \} : \{\}\)/], screen: ['views/VeeamEmSettings.jsx', /d\?\.registryError \? 'Enterprise Manager 등록부를 읽지 못했습니다/], why: '78회차 자체 표지 — 128회차: 배너 아래 ‘등록된 … 없습니다 — 추가하세요’ 가 남아 있던 것만 고쳤다' },
+  'pdu/registry.js': { cls: 'own', route: ['routes/api/pdu.js', /\.\.\.\(loadErrors \? \{ loadErrors \} : \{\}\)/], screen: ['views/tools/PduTool.jsx', /data\?\.loadErrors\?\.registry \? 'PDU 등록부를 읽지 못했습니다/], why: '78회차 자체 표지(loadErrors.registry) — 128회차: 빈 목록 문구만 고쳤다' },
+  'gpu/physicalRegistry.js': { cls: 'own', route: ['routes/admin/gpuGuest.js', /loadError: physicalRegistryLoadErrorSummary\(\)/], screen: ['views/gpu-guest/PhysicalGpuManager.jsx', /\{d\?\.loadError && <div className="banner warn"[^>]*>\{physicalLoadErrorText\(d\.loadError\)\}<\/div>\}/], why: '95회차 F1 — 읽기 오류 · 손상을 가르는 배너' },
+  'idrac/scanRanges.js': { cls: 'own', route: ['routes/admin/idracScan.js', /le\?\.readError \? \{ loadError: \{ code: 'registry-unreadable', readError: true/], screen: ['views/idrac/IdracScanRanges.jsx', /list\.length === 0 && !loadError &&/], why: '93회차 F3 · 96회차 R2' },
+  'net/monitor.js': { cls: 'own', route: ['routes/admin/backupNetSec.js', /\.\.\.\(no \? \{ loadError: \{ readError: true, reason: no\.reason \} \} : \{\}\)/], screen: ['views/NetTrafficAnalysis.jsx', /loadErr \? <ErrorBox error=\{loadErr\} \/> : d\.length === 0 \?/], why: '96회차 ⓑ — 못 읽은 동안은 목록 대신 사유를 그린다(항목 단위 쓰기)' },
+  'partfault/settings.js': { cls: 'own', route: ['routes/api/partFaults.js', /settingsUnreadable: \{ reason: String\(partFaultSettingsWriteRefusal\(\)\.reason/], screen: ['views/tools/PartFaults.jsx', /disabled=\{saving \|\| !!data\?\.settingsUnreadable\}/], why: '96회차 — 칸 단위 저장(켜기 · 보존일 따로)이고 못 읽은 동안 스위치를 잠근다' },
+  //    left: 기각
+  'idrac/powerSettings.js': { cls: 'left', why: '128회차 대조 — 이 설정을 쓰는 화면이 없다(web/src 에 power-settings 호출 0곳 — API 만 있다). 화면이 생기면 form 으로 옮긴다' },
+  'idrac/scanPoller.js': { cls: 'left', why: '128회차 대조 — 스캔 주기 값 하나를 사용자가 명시로 넣는 저장(PUT /idrac/scan-ranges/interval { hours })이라 숨은 칸이 없다(runtime-settings 와 같은 분류). 못 읽은 동안 주기 표시만 env 기본값 — 화면의 주기 칸이 무엇으로 채워지는지는 열어 보지 않았다' },
+  'util/registryCore.js': { cls: 'left', why: '공용 판정 유틸(autoWriteRefusal · manualRemoteWriteRefusal 을 내보낸다) — 설정 파일도 화면도 없다' },
+  // ── 123회차(반증): 'out' 가운데 위험한 다섯을 화면까지 대조해 옮겼다(확정 2 → form · 기각 3 → left).
+  'upgrade/settings.js': { cls: 'form', route: ['routes/upgrade.js', /\.\.\.unreadMark\(upgradeSettingsWriteRefusal\(\)\)/], screen: ['views/Upgrade.jsx', /disabled=\{busy \|\| saveLocked\} onClick=\{saveSettings\}/], lose: '원격 소스 주소 · 자동 적용 · 감시 폴더(env 기본값 폼의 저장) + 주소가 바뀌어 저장된 토큰 폐기 — 매니저도 기동 때 읽기 오류면 다시 읽힌 뒤까지 env 기본값으로 돌았다(123회차 U1)' },
+  'auth/permissions.js': { cls: 'form', route: ['routes/admin/users.js', /const r = permissionsWriteRefusal\(\); return r \? \{ loadError: \{ code: r\.body\.code, reason: r\.body\.reason \} \} : \{\};/], screen: ['views/UserAdmin.jsx', /disabled=\{!permDirty \|\| permLocked\} onClick=\{savePerms\}/], lose: '역할별 권한 행 · 도구 거부 목록(재시작 뒤 열려 있던 화면의 최소 권한 행 저장 — 123회차 P1 · 표지는 20회차 것이라 readError 가 없다: 화면이 손상도 잠근다)' },
+  'svcmon/store.js': { cls: 'left', why: '123회차 대조 — 감시 대상은 항목 단위 쓰기(대상 · 점검 · 폴더 · 순서)이고 엣지 배정은 서버가 지금 목록에서 잘라 굳힌다(화면 값으로 전체를 바꾸는 저장이 없다 — routes/svcmon 쓰기 라우트 전수). 못 읽은 동안 빈 목록이 보이는 표시 문제만(조회 표지는 대조하지 않았다)' },
+  'storage/registry.js': { cls: 'left', why: '123회차 대조 — 장비 등록부는 항목 단위 쓰기(등록 · 삭제 · CSV 가져오기)라 기본값 폼이 덮는 꼴이 아니다. 못 읽은 동안에는 고칠 행이 없고 쓰기는 409(78회차). 빈 목록 안내는 등록부 표지(registryLoadError) 흐름' },
+  'idrac/registry.js': { cls: 'left', why: '123회차 대조 — iDRAC 등록부도 항목 단위 쓰기(등록 · 수정 · 삭제 · 일괄 등록 · CSV)라 기본값 폼이 덮는 꼴이 아니다. 화면은 등록부 표지(loadError.readError)를 이미 본다(96회차 R2)' },
   // 118회차가 읽기 단계를 가른 vCenter 등록부 · 표시 순서(조회 표지 + VCenterAdmin 배너 · 쓰기 버튼 잠금 — 메인이 등재).
   'vcenter/registry.js': { cls: 'form', route: ['routes/admin/vcenters.js', /vcenters: all\.map\(withStop\), \.\.\.registryMark\(\) \}/], screen: ['views/VCenterAdmin.jsx', /const locked = saveLockedByUnread\(unread\);/], lose: '전 vCenter 접속 계정(읽기 오류 한 번에 원본이 옮겨지고 다음 등록이 한 건짜리 파일을 썼다 — 118회차 F1)' },
   'vcenter/order.js': { cls: 'form', route: ['routes/admin/vcenters.js', /unreadMark\(orderWriteRefusal\(\) \|\| registryWriteRefusal\(\)\)/], screen: ['views/VCenterAdmin.jsx', /setLoadErr\(r\?\.loadError\?\.readError === true \?/], lose: 'vCenter 표시 순서(118회차 F4)' },
-  // 116회차가 읽기 단계를 가른 NSX 등록부(112회차 뒤에 들어왔다 — 메인이 등재). 조회 표지 · NsxAdmin 화면의 저장 잠금은 아직 대조하지 않았다.
-  'nsx/registry.js': { cls: 'out', why: '116회차의 NSX 등록부(registryLoadError · registryWriteRefusal — 못 읽는 동안 마지막으로 읽은 목록을 준다) — 조회 표지와 NSX 관리 화면의 잠금은 대조하지 않았다(다음 반증 회차 후보)' },
 };
 
 test('분류표: 쓰기 거절(…WriteRefusal)을 내보내는 모듈은 전부 표에 있다 — 새 설정 모듈은 조회 표지 · 화면 잠금을 정해야 한다', () => {
@@ -295,20 +315,21 @@ test('분류표: 쓰기 거절(…WriteRefusal)을 내보내는 모듈은 전부
   const stale = Object.keys(TABLE).filter((f) => !found.includes(f)).sort();
   assert.deepEqual(stale, [], `표에만 있고 소스에 없는 줄(파일 이동 · 삭제): ${stale.join(', ')}`);
   for (const [f, row] of Object.entries(TABLE)) {
-    assert.ok(['form', 'own', 'left', 'out'].includes(row.cls), f);
+    assert.ok(['form', 'own', 'left', 'out', 'list'].includes(row.cls), f);
     if (row.cls === 'left' || row.cls === 'out') assert.ok(String(row.why || '').length >= 10, `${f}: 남긴 사유를 적는다`);
   }
 });
 
 test('분류표 form · own: 조회 라우트가 표지를 싣고 화면이 그 표지로 저장을 잠근다(소스 배선)', () => {
   for (const [f, row] of Object.entries(TABLE)) {
-    if (row.cls !== 'form' && row.cls !== 'own') continue;
+    if (row.cls !== 'form' && row.cls !== 'own' && row.cls !== 'list') continue;
     const [routeFile, routeRe] = row.route;
     assert.match(srcOf(routeFile), routeRe, `${f}: 조회 라우트(${routeFile})가 읽기 오류 표지를 싣는다`);
     const [screenFile, screenRe] = row.screen;
     const web = webOf(screenFile);
     assert.match(web, screenRe, `${f}: 화면(${screenFile})이 표지로 저장을 잠근다`);
     if (row.cls === 'form') assert.match(web, /from '\.{1,2}\/settingsUnread\.js'|src\.readError === true/, `${f}: 판정은 공용 도우미(views/settingsUnread.js) 하나`);
+    if (row.cls === 'list') assert.match(web, /<RegistryUnreadBanner le=\{unreadMarkOf\(data\)\}/, `${f}: 등록부 배너(문구는 views/settingsUnread.js registryUnreadNote 하나)`);
   }
 });
 

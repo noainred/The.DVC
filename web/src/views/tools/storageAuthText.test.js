@@ -5,7 +5,7 @@
  * **배포가 상했는지 / 장비 비밀번호가 다른지** 가릴 수 없었다.
  */
 import { describe, it, expect } from 'vitest';
-import { authFailInfo, credFpText, agoText, authStopInfo, authStopSummary } from './storageAuthText.js';
+import { authFailInfo, credFpText, agoText, authStopInfo, authStopSummary, authStopSummaryUnreadOnly } from './storageAuthText.js';
 
 const FP = { user: 'admin', len: 13, hash: 'b12b', space: false, empty: false, userSpace: false };
 const snapOf = (over = {}) => ({
@@ -171,6 +171,39 @@ describe('authStopSummary(v2.590)', () => {
     expect(t).toMatch(/a · b · c · d 외 1대/);
     expect(t).toMatch(/비밀번호를 고치면 자동으로 다시 시작/);
     expect(authStopSummary([{ id: 'x' }], { unit: '곳', what: 'vCenter' })).toMatch(/vCenter 1곳은/);
+  });
+  // 릴리스 전 Chromium 검증(119~131회차 묶음): 정지 기록 파일을 못 읽는 동안의 건너뜀(unread)까지 '인증 실패로 … 멈췄습니다 · 계정만 잠급니다' 라고 말했다.
+  const UNREAD = { since: 1, at: 1, attempts: 0, unread: true, reason: '정지 기록 파일을 읽지 못해 …' };
+  const REAL = { since: 1, at: 2, attempts: 3, reason: '401' };
+  it('못 읽음 건너뜀만 있으면 인증 실패라고 말하지 않는다 — 화면마다 다른 자리(행 · snapshot · snap.extra · 항목 자신)에서 기록을 찾는다', () => {
+    const shapes = [
+      [{ name: 'a', authStopped: UNREAD }],                       // vCenter 관리 · 베어메탈 스토리지
+      [{ name: 'a', snapshot: { authStopped: UNREAD } }],         // PDU
+      [{ name: 'a', snap: { extra: { authStopped: UNREAD } } }],  // SAN 스위치
+      [{ name: 'a', ...UNREAD }],                                 // iDRAC 정지 목록(항목 자신)
+    ];
+    for (const list of shapes) {
+      const t = authStopSummary(list, { unit: '대', what: 'SAN 스위치' });
+      expect(t, JSON.stringify(list)).not.toMatch(/인증 실패로/);
+      expect(t).not.toMatch(/계정만 잠급니다|비밀번호를 고치면/);
+      expect(t).toMatch(/\*\*SAN 스위치 1대는 정지 기록 파일을 읽지 못해 주기 수집을 잠시 건너뛰고 있습니다\*\*\(a\)/);
+      expect(t).toMatch(/\*\*인증 실패가 확인된 것이 아닙니다\*\*/);
+      expect(t).not.toMatch(/`/);
+      expect(authStopSummaryUnreadOnly(list)).toBe(true);
+    }
+  });
+  it('섞여 있으면 둘을 나눠 말하고(개수도 따로) 배너는 장애 색을 유지한다', () => {
+    const list = [{ name: 'r1', authStopped: REAL }, { name: 'u1', authStopped: UNREAD }, { name: 'u2', authStopped: UNREAD }];
+    const t = authStopSummary(list, { unit: '대', what: 'PDU' });
+    expect(t).toMatch(/\*\*PDU 1대는 인증 실패로 주기 수집을 멈췄습니다\*\*\(r1\)/);
+    expect(t).toMatch(/\*\*PDU 2대는 정지 기록 파일을 읽지 못해 주기 수집을 잠시 건너뛰고 있습니다\*\*\(u1 · u2\)/);
+    expect(authStopSummaryUnreadOnly(list)).toBe(false);
+    expect(authStopSummaryUnreadOnly([])).toBe(false);
+    expect(authStopSummaryUnreadOnly([{ name: 'r1', authStopped: REAL }])).toBe(false);
+  });
+  it('기록 모양을 모르는 행(이름만)은 예전처럼 실제 정지로 센다 — 못 읽음으로 오인하지 않는다', () => {
+    expect(authStopSummary([{ name: 'x' }], { unit: '대', what: 'PDU' })).toMatch(/인증 실패로/);
+    expect(authStopSummaryUnreadOnly([{ name: 'x' }])).toBe(false);
   });
 });
 

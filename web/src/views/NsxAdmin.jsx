@@ -4,11 +4,13 @@ import { droppedSecretNote } from './droppedSecretText.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
-import { authStopInfo } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
+import { authStopInfo, authStopShort, isUnreadStop } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 
 import { REGIONS } from '../regions.js'; // v2.575 IMP-10 — 단일 소스
 const EMPTY = { id: '', name: '', host: 'https://', username: '', password: '', vcenterId: '', proxyId: '', enabled: true, pollIntervalSec: '', timeoutMs: '', location: { region: '아시아' } };
 import ScopeOmitBanner from './ScopeOmitBanner.jsx'; // v2.631 A6-2631-06: 범위 제외 문구 단일 소스
+import { unreadMarkOf, registryEmptyText } from './settingsUnread.js';   // 128회차: 등록부를 못 읽은 동안의 빈 목록을 ‘등록 없음’ 으로 보이지 않는다
+import { RegistryUnreadBanner } from './SettingsUnreadBanner.jsx';
 
 /** 설정 → NSX 관리: NSX Manager 등록/수정/연결테스트/삭제. (vCenter와 별개 수집기) */
 export default function NsxAdmin() {
@@ -90,17 +92,18 @@ export default function NsxAdmin() {
       {/* v2.628(감사 LEFT2628-03): 범위 계정에는 서버가 범위 밖·법인 미지정 매니저를 빼고 준다(scopeNsxManagers) — 뺀 개수를 밝힌다. */}
       {/* v2.631 A6-2631-06: scoped·omittedOutOfScope 판정·문구는 scopeOmitText.js 하나가 소유한다 */}
       <ScopeOmitBanner data={data} unit="NSX Manager" counter="개" why="내 조회 범위 밖(또는 법인이 지정되지 않은)" />
+      <RegistryUnreadBanner le={unreadMarkOf(data)} what="NSX Manager 등록부" lastGood onRecheck={load} />
 
       <div className="table-wrap">
         <STable>
           <thead><tr><th>ID</th><th>이름</th><th>호스트</th><th>계정</th><th>리전</th><th>연결 vCenter</th><th>자격증명</th><th>수집</th><th className="right">작업</th></tr></thead>
           <tbody>
-            {list.length === 0 && <tr><td colSpan={9} className="center muted" style={{ padding: 28 }}>등록된 NSX Manager가 없습니다. “+ NSX Manager 추가”로 등록하세요.</td></tr>}
+            {list.length === 0 && <tr><td colSpan={9} className="center muted" style={{ padding: 28 }}>{registryEmptyText(unreadMarkOf(data), 'NSX Manager 등록부') || '등록된 NSX Manager가 없습니다. “+ NSX Manager 추가”로 등록하세요.'}</td></tr>}
             {list.map((m) => (
               <tr key={m.id}>
                 <td><b>{m.id}</b></td>
                 <td>{m.name}
-                  {m.authStopped && <span className="badge red" style={{ marginLeft: 6, fontSize: 10, whiteSpace: 'nowrap' }} title={`${authStopInfo(m.authStopped, { what: '이 NSX Manager' })?.detail || ''} — 비밀번호를 고치면 자동 재개합니다. 저장된 비밀번호로 한 연결 테스트가 성공해도 풀립니다.`}>인증 실패 정지</span>}
+                  {m.authStopped && <span className="badge red" style={{ marginLeft: 6, fontSize: 10, whiteSpace: 'nowrap' }} title={isUnreadStop(m.authStopped) ? (authStopInfo(m.authStopped, { what: '이 NSX Manager' })?.detail || '') : `${authStopInfo(m.authStopped, { what: '이 NSX Manager' })?.detail || ''} — 비밀번호를 고치면 자동 재개합니다. 저장된 비밀번호로 한 연결 테스트가 성공해도 풀립니다.`}>{authStopShort(m.authStopped)}</span>}
                 </td>
                 <td className="muted">{m.host}{m.proxyId && <span className="badge amber" style={{ marginLeft: 6, fontSize: 10 }} title={`중계 서버(HAProxy) 경유: ${proxies.find((p) => p.id === m.proxyId)?.name || m.proxyId}`}>프록시 경유</span>}</td>
                 <td className="muted">{m.username}</td>

@@ -23,7 +23,7 @@ import { resilientFetch } from '../util/resilientFetch.js';
 import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // v2.604: 엣지 응답 크기 상한
 import { strOf } from '../util/coercionTrap.js';
 import { withOutboundTag } from '../util/outboundStats.js'; // v2.601 WEB2601-02: 같은 주소 엣지를 기록에서 나눈다
-import { createAuthGuard } from '../util/authGuard.js';
+import { createAuthGuard, authStopView, authStopText } from '../util/authGuard.js';
 import { isSshAuthError } from '../proxy/sshExec.js';
 import { numOrNull } from '../util/numOrNull.js';
 // v2.708 데모(mock): 접속 없이 df 결과를 만든다. live 에서는 mock- 서버(데모 시드 잔재)를 수집하지 않는다.
@@ -41,7 +41,7 @@ import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 �
  * 로그인하지 않는다(엣지 쪽 코드를 바꾸지 않고 막힌다). 수동 '지금 수집' 은 막지 않는다(authGuard 규칙 3).
  */
 const authGuard = createAuthGuard({ file: 'bmstor-auth-stops.json' });
-const stopView = (rec) => (rec ? { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason } : null);
+const stopView = authStopView;   // 127회차: 사본 대신 공용(못 읽음 표지 unread 를 떨구지 않는다)
 /** 결과가 SSH 자격증명 거부인가 — 직접 수집은 플래그, 엣지 회신은 ssh2 정식 문구(플래그가 빠져 온다). */
 const isAuthResult = (r) => !!(r && r.ok === false && (r.authFailed === true || isSshAuthError({ message: r.error || '' })));
 
@@ -244,7 +244,7 @@ export async function bmCollectNow(trigger = 'manual', { demoOnly = false } = {}
       if (!stop) return true;
       authStopped++;
       const prev = latest.get(s.id);
-      latest.set(s.id, { ...(prev || { mounts: [] }), ok: false, mounts: [], error: `인증 실패로 주기 수집 정지(${stop.attempts}회) — 비밀번호를 고치면 자동 재개합니다`, authStopped: stopView(stop), at: prev?.at || stop.at, agent: s.agent || '' });
+      latest.set(s.id, { ...(prev || { mounts: [] }), ok: false, mounts: [], error: authStopText(stop, `인증 실패로 주기 수집 정지(${stop.attempts}회) — 비밀번호를 고치면 자동 재개합니다`), authStopped: stopView(stop), at: prev?.at || stop.at, agent: s.agent || '' });
       return false;
     });
     // v2.708: 데모는 데모 서버를 중앙에서 합성한다(엣지 PUSH·잡 큐를 타지 않는다 — 접속처가 없다).

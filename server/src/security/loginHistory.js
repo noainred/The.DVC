@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
-import { READ_RETRY_MS, nowMs } from '../util/jsonFileRead.js';   // 97회차 F10: 읽기 오류 재읽기 간격 · 시계
+import { READ_RETRY_MS, nowMs, inRetryWindow } from '../util/jsonFileRead.js';   // 97회차 F10: 읽기 오류 재읽기 간격 · 시계 · 128회차: 간격 판정은 공용
 import { auditEntriesWithAction } from '../audit.js';
 
 const FILE = path.join(config.configDir, 'login-history.ndjson');
@@ -90,7 +90,7 @@ function writeAll(list) {
 /** @param {object|null} current 지금 기록하려는 로그인(recordLoginSuccessEvent — 첫 기동 backfill 에서 같은 줄을 뺀다, C1-03) */
 let _readRetryAt = 0;      // 97회차 F10: 읽기 오류 뒤 다시 읽을 시각
 function load(current = null) {
-  if (rows && !(meta.readError && nowMs() >= _readRetryAt)) return rows;
+  if (rows && !(meta.readError && !inRetryWindow(nowMs(), _readRetryAt, READ_RETRY_MS))) return rows;   // 128회차: 시계가 뒤로 갔으면 기다리지 않는다
   const pending = rows || [];   // 97회차 F10: 읽기 오류 동안 메모리에 쌓인 기록 — 다시 읽히면 파일이 진실이다(덧붙임이 된 줄은 파일에 있고, 실패한 줄은 디스크에 닿지 못했다)
   const wasReadError = !!meta.readError;
   rows = [];

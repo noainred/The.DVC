@@ -72,6 +72,7 @@ python3 app.py                  # http://<서버>:8095
 | `HUB_HEALTH_TLS_VERIFY` | `true` | 점검 시 TLS 검증(자체서명 때문에 끄려면 `false` — 그 요청에만 적용) |
 | `HUB_HEALTH_ALLOW_PRIVATE` | `true` | 사설 대역(10/172.16/192.168) 점검 허용 |
 | `HUB_MAX_BODY` | `1048576` | 요청 본문 상한(바이트) |
+| `HUB_MAX_CONN_PER_CLIENT` | `48` | 출발지(IP) 하나가 쥘 수 있는 동시 연결 수(전체 64 중) — NAT · 리버스 프록시 뒤라 부족하면 올리고, `0` 이면 끔 |
 | `HUB_PORTAL_URL` | (없음) | 메인 모니터링 포탈 주소. 설정하면 헤더에 **[모니터링 포탈 ↗]** 링크가 나타납니다(`http://`/`https://` 만 인정) |
 
 ---

@@ -252,6 +252,8 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
   // v3.8.1: 키 앞부분으로 보류(이번 회차에 그 종류 전체를 판정하지 못했다 — 어떤 키가 발생 중인지 평가 쪽은 모른다).
   const heldPrefixes = new Set();
   Object.defineProperty(out, 'heldPrefixes', { value: heldPrefixes, enumerable: false });
+  const heldPrefixExempt = new Set();   // 130회차: 접두 보류에서 빼는 더 긴 접두(읽힌 vCenter 의 것 — 아래 오버커밋 절)
+  Object.defineProperty(out, 'heldPrefixExempt', { value: heldPrefixExempt, enumerable: false });
   // 결정(56~75 남긴 것) 62: 중복 IP 묶음 회차에 보류한 IP 별 키(held 의 부분집합) — 보류 시한을 넘기면 '해소' 가 아니라 '묶음으로 대체' 로 정리 기록한다.
   const bundled = new Set();
   Object.defineProperty(out, 'bundled', { value: bundled, enumerable: false });
@@ -269,7 +271,10 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
   //   아니다). 이미 발생 중인 것은 목록에서 빠지지만 위 unreadVc 로 해소가 보류된다(HELD_MAX_MS 규칙 그대로) — 재발송도 없다.
   const reasons = unreadVcenterReasons(snap);
   const staleVc = new Set([...reasons].filter(([, r]) => r === 'stale').map(([id]) => id));
-  const fresh = (x) => !staleVc.has(String(x?.vcenterId ?? ''));
+  // 126회차(재현): v2.768 은 신규 억제를 stale(낡은 위임)에만 걸었다 — **점검중**(직전 캐시를 기한 없이 서빙) · **수집 실패 이월**(LASTGOOD — 최대 6시간)
+  //   vCenter 의 마지막 값(DS 92% · 끊긴 호스트 · 위험 경보)은 목록에 계속 실려 쿨다운마다 '지금 발생 중' 으로 재발송됐다(점검중은 끝없이).
+  //   공용 판정의 세 사유 전부를 '지금 값이 아니다' 로 본다 — 이미 발생 중인 것은 unreadVc 로 해소가 보류되고(HELD_MAX_MS) 다시 읽히면 그때 판정한다.
+  const fresh = (x) => !reasons.has(String(x?.vcenterId ?? ''));
   // v2.720(감사 B1-01): 상한으로 잘린 꼬리는 '발생 중인데 이번 목록에 안 실린 것' 이다 — 순서만 바뀌어 101번째로 밀린
   //   알림을 해소로 기록하고 다시 들어오면 새 알림으로 재발송하던 것. 잘린 항목의 키를 판정 보류로 둔다.
   const holdTail = (list, cap, keyOf) => { for (const x of list.slice(cap)) { const k = keyOf(x); if (k) held.add(k); } return list.slice(0, cap); };
@@ -404,7 +409,25 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
       const k = `${v.vcenterId} ${v.cluster || 'standalone'}`;
       const c = byC.get(k); if (c) { c.vcpu += v.cpuCount || 0; c.ramGB += (v.memMB || 0) / 1024; }
     }
+    // 126회차(재현): 지금 값을 읽지 못한 vCenter(점검중 · 수집 실패 · 낡은 위임 · 첫 수집 중 · 비활성 — unreadVc)의 클러스터는 판정하지 않는다.
+    //   예전에는 ① 그 vCenter 의 마지막 인벤토리로 오버커밋을 새로 내고 쿨다운마다 재발송했고(alarm/host/ds 와 달리 stale 도 거르지 않았다)
+    //   ② 보존 창을 넘겨 인벤토리가 비면 클러스터가 byC 에서 사라져 발생 중이던 알림이 **'해소'** 로 나갔다(45회차 F1 gpualloc 과 같은 꼴 —
+    //   이 키들은 vcenterId 필드가 없어 tick 의 UNREAD_VC_KEY_RE 보류에도 걸리지 않았다). 키가 `<종류>:<vCenter id>:<클러스터>` 라 접두로 보류한다
+    //   (사라진 클러스터까지 덮는다 · 범위 판정 routes/admin/opsSettings.js alertVcenterOf 와 같은 접두 대조).
+    for (const id of unreadVc) {
+      if (R.ramOvercommitPct?.enabled) heldPrefixes.add(`ramoc:${id}:`);
+      if (R.vcpuPerCore?.enabled) heldPrefixes.add(`vcpuoc:${id}:`);
+    }
+    // 130회차(126 반증 — 재현): vCenter id 에는 콜론이 올 수 있다(v2.598 규약 — routes/admin/opsSettings.js alertVcenterOf · GPU 오버레이의 최장 접두 대조).
+    //   못 읽은 vCenter 'a' 의 접두 `ramoc:a:` 가 **읽힌** vCenter 'a:b' 의 키 `ramoc:a:b:<클러스터>` 까지 덮어, 'a:b' 에서 실제로 해소된 오버커밋이
+    //   'a' 를 못 읽는 동안 발생 중으로 남고 시한(HELD_MAX_MS) 뒤 해소 알림 없이 끊겼다. 읽힌 vCenter 의 접두를 따로 실어 **더 긴 접두가 이기게** 한다(tick).
+    for (const v of snap.vcenters || []) {
+      const id2 = v && v.id != null ? String(v.id) : '';
+      if (!id2 || unreadVc.has(id2) || ![...unreadVc].some((id) => id2.startsWith(`${id}:`))) continue;
+      heldPrefixExempt.add(`ramoc:${id2}:`); heldPrefixExempt.add(`vcpuoc:${id2}:`);
+    }
     for (const c of byC.values()) {
+      if (unreadVc.has(String(c.vc))) continue;   // 126회차: 위 접두 보류 — 새로 내지도 해소하지도 않는다
       // 9회차 보완: 판정을 건너뛴 클러스터는 '해소' 가 아니라 '모름' 이다 — 이미 발생 중인 오버커밋 알림이 호스트 하나가 끊긴 순간
       //   거짓 '해소' 알림을 내지 않게 보류 키로 둔다(HELD_MAX_MS 시한 그대로 — 오래 못 읽으면 알림 없이 끊긴다).
       if (c.capUnknown) {
@@ -903,6 +926,10 @@ async function refreshState(cfg, sendEnabled) {
   // 판정 보류 키는 아래 concat(새 배열) 전에 잡아 둔다 — 숨은 속성은 concat 으로 옮겨지지 않는다.
   const held = active.held instanceof Set ? active.held : new Set();
   const heldPrefixes = active.heldPrefixes instanceof Set ? [...active.heldPrefixes] : [];   // v3.8.1
+  // 130회차: 접두 보류는 **가장 긴 접두**가 정한다 — 못 읽은 vCenter 'a' 의 접두가 읽힌 vCenter 'a:b' 의 키를 덮지 않게(evaluate 의 heldPrefixExempt).
+  const heldExempt = active.heldPrefixExempt instanceof Set ? [...active.heldPrefixExempt] : [];
+  const longest = (list, key) => list.reduce((n, p) => (p.length > n && key.startsWith(p) ? p.length : n), -1);
+  const prefixHeld = (key) => { const h = longest(heldPrefixes, key); return h >= 0 && h > longest(heldExempt, key); };
   const bundled = active.bundled instanceof Set ? active.bundled : new Set();   // 결정 62: 중복 IP 묶음으로 보류한 IP 별 키
   const alarmsHeldVc = active.alarmsHeldVcenters instanceof Set ? active.alarmsHeldVcenters : new Set(); // v2.607 LEFT2607-04
   const unreadVc = active.unreadVcenters instanceof Set ? active.unreadVcenters : new Set(); // v2.720(감사 B1-01)
@@ -960,7 +987,7 @@ async function refreshState(cfg, sendEnabled) {
     // 끊는다(복구가 아니라 **모르는 것**이다 — '해소' 알림을 내지 않는다).
     const alarmHeld = key.startsWith('alarm:') && alarmsHeldVc.has(String(st.alert?.vcenterId ?? ''));
     const vcUnread = UNREAD_VC_KEY_RE.test(key) && unreadVc.has(String(st.alert?.vcenterId ?? '')); // v2.720(감사 B1-01)
-    if (held.has(key) || heldPrefixes.some((p) => key.startsWith(p)) || alarmHeld || vcUnread) {
+    if (held.has(key) || prefixHeld(key) || alarmHeld || vcUnread) {
       if (!st.heldSince) { st.heldSince = now; changed = true; }
       if (now - st.heldSince < HELD_MAX_MS) continue;
       firing.delete(key); rememberEnded(restored, key, st, now, cooldownMs); changed = true;

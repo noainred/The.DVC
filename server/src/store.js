@@ -334,6 +334,9 @@ class Store {
       //   읽히면 다음 주기부터 그대로 이어 간다. 마지막으로 읽은 목록이 있으면 loadVcenterConfig 가 그 목록을 준다(이 분기로 오지 않는다).
       if (vcCfg.readError && !vcCfg.file) {
         if (!this._vcRegUnreadWarned) { this._vcRegUnreadWarned = true; console.warn(`[collect] vCenter 등록부(vcenters.json)를 읽지 못해(${vcCfg.readError}) 수집 주기를 건너뜁니다 — 등록 0개로 보지 않습니다(캐시 · 위임 인벤토리를 지우지 않음). 파일 권한 · 소유자 · 디스크를 확인하세요`); }
+        // 121회차(118회차 반증 R6 — 재현): 건너뛴 사실이 콘솔 한 줄뿐이었다 — 기동 때부터 못 읽으면 스냅샷이 비어 있어 storeStatus(중앙의 '빈 인벤토리' 진단)가
+        //   `registered: 0 · lastError: null` 로 '이 엣지에 등록된 vCenter 가 없습니다'(등록하라는 틀린 조치)라고만 말했다. 사유를 lastError 에 남긴다(다음 병합이 지운다).
+        this.lastError = `vCenter 등록부(vcenters.json)를 읽지 못해(읽기 오류 ${vcCfg.readError}) 수집 주기를 건너뛰고 있습니다 — 등록된 vCenter 가 없는 것이 아닙니다(파일 권한 · 소유자 · 디스크 확인)`;
         return;
       }
       this._vcRegUnreadWarned = false;

@@ -19,7 +19,7 @@ import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 107회차: �
 import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
 import { splitDirectCollectTargets, skippedCountsOf } from '../vcenter/collectTarget.js'; // v2.732(B4-01): 직접 수집 대상 판정(store.js 주 폴러와 같은 조건)
 import { gpuAuthGuard, isGpuAuthError, guestAccountStopDev } from '../gpu/sshCollect.js';
-import { authStopView, createAuthBreaker, runWithBreakerWarmup } from '../util/authGuard.js';
+import { authStopView, authStopText, createAuthBreaker, runWithBreakerWarmup } from '../util/authGuard.js';
 import { demoOn, isMockMode } from '../mock/demo/flags.js';
 import { demoRealOs } from '../mock/demo/users.js'; // v2.708 데모(mock 에서만)
 
@@ -143,7 +143,7 @@ async function scanVcenter(vc, targets, settings, { manual = false } = {}) {
   //   해제는 주 폴러·연결 테스트만). 수동 실행은 막지 않는다.
   if (!manual) {
     const st = vcAuthGuard.peekAuthStop(vc);
-    if (st) { auth.vcStopped = authStopView(st); errs.push(`로그인:vCenter 인증 실패로 주기 스캔 정지(${st.attempts}회)`); return { found, errs, auth }; }
+    if (st) { auth.vcStopped = authStopView(st); errs.push(`로그인:${authStopText(st, `vCenter 인증 실패로 주기 스캔 정지(${st.attempts}회)`)}`); return { found, errs, auth }; }
   }
   // v2.591(감사 F2): 한 실행 안의 회로 차단기 — 같은 게스트 계정의 거부가 연속 3회면 그 계정의 남은 VM 을 시작하지
   //   않는다(공용 도메인 계정이면 한 번에 수백 회 실패 로그온이 난다). 첫 로그인 성공 전까지는 하나씩 돈다.

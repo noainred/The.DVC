@@ -14,7 +14,7 @@
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from './atomicWrite.js';
-import { readJsonFile, nowMs, READ_RETRY_MS } from './jsonFileRead.js';   // 113회차 R4: 읽기 오류 ≠ 손상
+import { readJsonFile, nowMs, READ_RETRY_MS, inRetryWindow } from './jsonFileRead.js';   // 113회차 R4: 읽기 오류 ≠ 손상 · 128회차: 간격 판정은 공용
 
 export const SLOT_COUNT = 5;
 export const MAX_USERS = 2000;
@@ -45,7 +45,7 @@ export function createExportPrefs({ fileName, resolveCols, knownKeys, normalizeO
    *   30초 뒤 다시 읽어 풀리면 원본 값으로 돌아온다(97 · 103 · 107회차와 같은 판정 — util/jsonFileRead.js). 손상(JSON · 모양)은 예전 그대로다.
    */
   function load() {
-    if (cache && !(readErr && nowMs() >= retryAt)) return cache;
+    if (cache && !(readErr && !inRetryWindow(nowMs(), retryAt, READ_RETRY_MS))) return cache;   // 128회차: 시계가 뒤로 갔으면 기다리지 않는다(그 차만큼 못 읽음이 굳었다)
     const r = readJsonFile(FILE(), { parse: (text) => { const d = JSON.parse(text); if (!isObj(d) || !isObj(d.users)) throw new Error('형식 오류'); return d.users; } });
     if (r.kind === 'read-error') {
       readErr = String(r.error?.code || 'read-error').slice(0, 32); retryAt = nowMs() + READ_RETRY_MS;

@@ -7,7 +7,7 @@
  * 모든 점검은 try/catch로 격리되어 하나가 실패해도 전체 패널이 죽지 않는다.
  */
 
-import { store } from '../store.js';
+import { store, siteInventoryStale } from '../store.js';
 import { alertStatus } from '../alerts.js';
 import { metricsSamplerStatus } from '../metrics/sampler.js';
 import { gpuGuestStatus } from '../gpu/poller.js';
@@ -83,6 +83,7 @@ import { bigJsonStats } from '../util/bigJsonGate.js';
 import { listSettingsLoadErrors, recheckSettingsFiles } from '../util/settingsLoadError.js';
 import { bulletinHealth } from '../bulletin/store.js'; // 2026-10-09 검토 I-05
 import { runtimeServiceRow } from '../util/runtimeCheck.js'; // 2026-10-09 검토 I-06
+import { authGuardHealthRow } from '../util/authGuard.js'; // 127회차: 인증 정지 기록 파일을 못 읽는 도구(전 가드 한 행)
 
 /** spec `mod` 경로 → 모듈. 표에 새 모듈이 생기면 여기에 한 줄 더한다(테스트가 빠진 것을 잡는다). */
 const MODS = Object.freeze({
@@ -148,7 +149,7 @@ export const CENTRAL_ONLY_SPEC = Object.freeze([
 ]);
 
 /** 고정 항목이 이미 다루는 spec 키 — 같은 폴러를 두 줄로 그리지 않는다(고정 항목 쪽에 `specKey` 를 단다). */
-const FIXED_SPEC_KEY = Object.freeze({ vcenter: 'collect.inventory', metrics: 'collect.metrics', 'gpu-guest': 'collect.gpuGuest', ipscan: 'collect.ipamScan' });
+const FIXED_SPEC_KEY = Object.freeze({ vcenter: 'collect.inventory', metrics: 'collect.metrics', 'gpu-guest': 'collect.gpuGuest', ipscan: 'collect.ipamScan', 'auth-stops': 'service.authStops' });
 
 const MIN = 60_000;
 const ago = (ts) => (ts ? Date.now() - ts : null);
@@ -295,11 +296,16 @@ export function getServiceCheck(opts = {}) {
   checks.push(wrap('vcenter', 'vCenter 수집', () => {
     const s = store.get();
     const total = (s.vcenters || []).length;
-    const conn = (s.vcenters || []).filter((v) => v.status === 'connected').length;
+    // 126회차(재현): 위임 vCenter 는 담당 엣지의 보고가 끊겨도 status 가 엣지가 마지막으로 보낸 'connected' 그대로다(store 병합 — stale 표지만 붙는다).
+    //   그것을 연결로 세어 엣지 여러 곳이 멈췄는데 'N/N 연결 · 정상' 이었다. 헤더 · /health 와 같은 판정(store.siteInventoryStale)으로 따로 세고
+    //   주의로 올린다 — 접속 실패(down)가 아니라 확인 불가라 전부 끊겨도 down 으로 단정하지 않는다.
+    const connected = (s.vcenters || []).filter((v) => v.status === 'connected');
+    const edgeSilent = connected.filter(siteInventoryStale).length;
+    const conn = connected.length - edgeSilent;
     const age = ago(Date.parse(s.generatedAt));
     const stale = age != null && age > 5 * MIN;
-    const status = total === 0 ? 'off' : conn === 0 ? 'down' : (conn < total || stale) ? 'warn' : 'ok';
-    return { status, detail: `${conn}/${total} 연결${stale ? ' · 스냅샷 지연' : ''} · ${age != null ? Math.round(age / 1000) + '초 전' : '-'}`, at: Date.parse(s.generatedAt) || Date.now() };
+    const status = total === 0 ? 'off' : (conn === 0 && !edgeSilent) ? 'down' : (conn < total || stale) ? 'warn' : 'ok';
+    return { status, detail: `${conn}/${total} 연결${edgeSilent ? ` · 엣지 보고 끊김 ${edgeSilent}` : ''}${stale ? ' · 스냅샷 지연' : ''} · ${age != null ? Math.round(age / 1000) + '초 전' : '-'}`, at: Date.parse(s.generatedAt) || Date.now() };
   }));
 
   // v2.617: 메인 이벤트 루프 멈춤 감시(perf/stallWatch.js). 이 행은 루프가 **풀린 뒤에** 읽히므로 '지금 멈춤' 이 아니라
@@ -356,6 +362,10 @@ export function getServiceCheck(opts = {}) {
       detail: `읽지 못한 설정 파일 ${errs.length}개(${names}${errs.length > 6 ? ` 외 ${errs.length - 6}개` : ''}) — 해당 설정 pull 은 503 으로 답하고 엣지는 직전 설정을 유지합니다. 손상 보존본을 복구하거나, 그 설정 화면에서 다시 저장하거나, 관리자가 이 행의 [기본값으로 확정] 으로 지금 기본값을 저장하세요(그 기본값이 전 엣지에 배포됩니다).`,
       at: Math.min(...errs.map((e) => e.at || Date.now())), files: errs };
   }));
+
+  // 127회차(124회차 결정 D-A · 남긴 것): 인증 정지 기록 파일(<도구>-auth-stops.json)을 못 읽는 도구 — 예전에는 콘솔 한 줄뿐이었다(unreadable() 소비처 0곳).
+  //   그동안은 자격 지문마다 한 대상으로 먼저 확인하며 수집한다(util/authGuard.js 머리말). 가드마다 한 줄이 아니라 한 행 — 파일 이름은 기본 이름만.
+  checks.push(wrap('auth-stops', '인증 정지 기록 파일', () => authGuardHealthRow()));
 
   // 2026-10-09 검토 I-05: 게시판·공지 — 메모리에 받은 변경이 디스크에 저장되지 않고 있으면 warn(재시작하면 사라질 수 있다).
   //   pending 60초 경계는 화면(10초)보다 넉넉하게 — 묶음 저장 창마다 이 행이 깜빡이지 않게.
@@ -476,7 +486,7 @@ export function getServiceCheck(opts = {}) {
     if (spec.centralOnly && isEdge) { skippedOnEdge.push(spec.key); continue; }
     checks.push({ ...specRow(spec, opts), specKey: spec.key });
   }
-  const notCovered = STATUS_SPEC.filter((x) => x.group !== 'collect').map((x) => x.key);
+  const notCovered = STATUS_SPEC.filter((x) => x.group !== 'collect' && !covered.has(x.key)).map((x) => x.key);   // 127회차: 고정 행이 다루는 service.* (인증 정지 기록 파일)는 '대상 밖' 이 아니다
   const coverage = {
     fixed: fixedCount,
     pollers: specs.length - skippedOnEdge.length,

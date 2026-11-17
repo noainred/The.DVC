@@ -60,6 +60,7 @@ export function CsvPanel({ main, busy, run, onClose }) {   // 29회차 F8: 내�
     if (!autoTest || !r.ids?.length) return { ok: true, reason: head };
     try {
       const b = await postJson('/tools/focus-mon/targets/test-bulk', { ids: r.ids });
+      if (b?.ok === false || !b?.job) return { ok: false, reason: `${head} 연결 시험은 시작하지 못했습니다(${b?.reason || '사유 미상'}).` };   // 128회차: 409 본문에는 job 이 없다
       return { ok: true, reason: `${head} 넣은 ${b.job.total}대의 연결 시험을 시작했습니다 — 진행은 위 띠에 나옵니다.` };
     } catch (e) { return { ok: false, reason: `${head} 연결 시험은 시작하지 못했습니다(${e?.body?.reason || e?.message}).` }; }
   });

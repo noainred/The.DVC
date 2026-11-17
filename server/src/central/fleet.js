@@ -15,6 +15,7 @@ import { bumpFleetRev } from '../insights/fleetRev.js';
 import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js'; // v2.582 ARCH-3: 상태 파일도 원자 쓰기(절단본 → 로드 실패 → 다음 저장이 빈 값으로 덮어쓰는 왕복 손상 차단)
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
 import { readJsonFile, READ_RETRY_MS } from '../util/jsonFileLoad.js'; // 87회차 ⓐ: 읽기 오류 ≠ 손상(공용 읽기 판정)
+import { inRetryWindow } from '../util/jsonFileRead.js';   // 128회차: 재읽기 간격 판정은 공용(시계가 뒤로 가도 그 차만큼 굳지 않게)
 import { capStr, capTrim } from '../util/capStr.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { sanitizeHwSummary, mgmtHostOf } from '../idrac/hwSummary.js'; // v3.3.0 엣지 하드웨어 요약 · iDRAC 주소 정제(엣지 agent/fleetPush.js 와 짝)
@@ -63,7 +64,7 @@ let readBlocked = false; let readRetryAt = 0;
 /** 87회차 ⓐ: 저장해도 되는가 — 읽기 오류였으면 간격마다 다시 읽어 합친다. 아직 못 읽으면 false. */
 function fleetWritable() {
   if (!readBlocked) return true;
-  if (Date.now() < readRetryAt) return false;
+  if (inRetryWindow(Date.now(), readRetryAt, READ_RETRY_MS)) return false;
   const r = readJsonFile(FILE, { parse: parseFleetFile, preserve: false });
   if (r.kind === 'read-error') { readRetryAt = Date.now() + READ_RETRY_MS; return false; }
   if (r.kind === 'ok') { let n = 0; for (const [a, e] of Object.entries(r.value)) if (!(a in cache)) { cache[a] = e; n += 1; } if (n) bumpFleetRev(); }

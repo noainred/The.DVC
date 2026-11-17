@@ -78,7 +78,7 @@ async function runSetupOne(kind, dir, args, secretArgs, signal) {
           if (!updateEdgeDirectorConn(dir.id, conn)) throw Object.assign(new Error('엣지 사본을 갱신하지 못했습니다.'), { code: 'save' });
           return { director: null, droppedSecrets: [] };
         },
-        clearAuthStop: () => { try { bareosAuthGuard.clearAuthStop(directorCred(dir).id); } catch { /* */ } },
+        clearAuthStop: () => { try { bareosAuthGuard.clearAuthStop(directorCred(dir).id, { verified: false }); } catch { /* */ } },
       });
     }
     default: throw Object.assign(new Error(`알 수 없는 자동 설정 단계(${kind})`), { code: 'invalid' });

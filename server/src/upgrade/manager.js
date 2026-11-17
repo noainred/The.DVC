@@ -10,7 +10,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { currentVersion, config } from '../config.js';
-import { loadSettings, saveSettings, redactSettings, clampPollMs } from './settings.js';
+import { loadSettings, saveSettings, redactSettings, clampPollMs, upgradeSettingsWriteRefusal } from './settings.js';
+import { READ_RETRY_MS } from '../util/jsonFileRead.js';   // 123회차: 읽기 오류 뒤 다시 읽기 간격(설정 파일 공용 읽기와 같은 값)
 import { checkpointConfigDbs } from './dbCheckpoint.js';
 import {
   findNewerArchive, upgradeFromArchive, checkRemote, upgradeFromRemote,
@@ -237,6 +238,10 @@ export function withWatchFailure(watch, remote) {
 export class UpgradeManager {
   constructor() {
     this.settings = loadSettings();
+    // 123회차(103회차 F5 반증 — 재현): 기동 때 upgrade.json 이 **읽기 오류**면 위 값은 env 기본값이다(마지막으로 읽은 값이 없다). settings.js 는 30초마다 다시 읽지만
+    //   이 객체는 생성 때 한 번만 읽어, 다시 읽힌 뒤에도 재시작 · 저장까지 env 기본값(다른 원격 소스 · 토큰 없음 · env 의 자동 적용 여부)으로 돌았고 화면(status)도 그 값을 보였다 —
+    //   그 폼의 저장이 원격 소스 주소를 env 값으로 되돌리고 저장된 토큰을 폐기했다. 못 읽은 채 시작했음을 기억해 두고, 읽히면 한 번 다시 읽는다(syncSettingsAfterUnread).
+    this.settingsUnread = !!upgradeSettingsWriteRefusal();
     this.lastCheck = null;
     this.#lastResult = null;
     this.lastTick = null;       // v2.736.2: 백그라운드 확인 한 번의 결과(언제·무엇을 했나)
@@ -321,9 +326,32 @@ export class UpgradeManager {
     };
   }
 
+  /**
+   * 123회차: 기동 때 설정 파일을 읽지 못했으면(settingsUnread) 다시 읽혔는지 보고, 읽혔으면 저장된 설정으로 한 번 바꾼다(타이머 · 엣지 동기화도 그 설정으로 다시 건다).
+   *   아직 못 읽으면 읽힐 때까지 같은 간격으로 다시 본다(start() 한 프로세스만 · 타이머 하나 · unref). 운영 중에 생긴 읽기 오류는 해당 없음 — 그때 this.settings 는 읽은 값 그대로다.
+   * @returns {boolean} 지금도 못 읽은 채(env 기본값으로 도는 중)인가
+   */
+  syncSettingsAfterUnread() {
+    if (!this.settingsUnread) return false;
+    if (upgradeSettingsWriteRefusal()) { this.#armUnreadRetry(); return true; }
+    this.settingsUnread = false;
+    this.settings = loadSettings();
+    console.log('[upgrade] 설정 파일(upgrade.json)이 다시 읽혀 저장된 설정으로 돌아갑니다(기동 때는 읽기 오류라 환경 변수 기본값으로 돌았습니다).');
+    if (this.#started) { this.#restartTimer(); this.edgeSync.arm(); }
+    return false;
+  }
+  #started = false;
+  #unreadTimer = null;
+  #armUnreadRetry() {
+    if (this.#unreadTimer || !this.#started) return;
+    this.#unreadTimer = setTimeout(() => { this.#unreadTimer = null; try { this.syncSettingsAfterUnread(); } catch (e) { console.warn(`[upgrade] 설정 다시 읽기 실패: ${String(e?.message || e).slice(0, 160)}`); } }, READ_RETRY_MS + 1_000);
+    this.#unreadTimer.unref?.();
+  }
+
   /** Persist edited settings and restart the background poller. */
   updateSettings(partial) {
     this.settings = saveSettings(partial);
+    this.settingsUnread = false;   // 123회차: 저장이 받아들여졌다 = 파일이 읽힌다(읽기 오류 중 저장은 saveSettings 가 던진다)
     this.#restartTimer();
     this.edgeSync.arm(); // v2.859: edgeAutoUpgrade·enabled 변경을 바로 반영
     return this.status();
@@ -576,6 +604,8 @@ export class UpgradeManager {
 
   start() {
     this.enablePersistence();
+    this.#started = true;
+    if (this.settingsUnread) this.#armUnreadRetry();   // 123회차: 못 읽은 채 시작했다 — 읽힐 때까지 다시 본다
     const s = this.settings;
     if (s.enabled) {
       console.log(`  ▸ auto-upgrade: enabled (watch=${s.watchDir || '-'}, remote=${s.remoteBase ? 'yes' : 'no'}, autoApply=${s.autoApply})`);

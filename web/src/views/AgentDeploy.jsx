@@ -5,6 +5,8 @@ import { requireChanged } from './changeResult.js';   // 112회차: delJson 은 
 import { droppedSecretNote } from './droppedSecretText.js';
 import { readFailText, installerState, deployTargetsUnreadableText } from './readFailText.js'; // v2.733(C5-02): 조회 실패를 '0개·패키지 없음' 으로 그리지 않는다
 import { pkgFormFromResponse, pkgSavePayload, pkgPlaceholder } from './pkgSettingsText.js';
+import { unreadMarkOf, saveLockedByUnread } from './settingsUnread.js';   // 128회차: 못 읽은 동안의 빈 폼(지정 없음)으로 저장하지 않는다(112회차 규약)
+import { SettingsUnreadBanner } from './SettingsUnreadBanner.jsx';
 import { Loading } from '../components/ui.jsx';
 // CSV 일괄 관리(v2.339) — 검증 드라이런 → 덮어쓰기 확인 → 실행. 공용 모달(수집 서버 CSV UX).
 import { CsvExportModal, CsvImportModal } from '../components/CsvBulkModals.jsx';
@@ -50,7 +52,12 @@ export default function AgentDeploy() {
   //   바꿔도 환경변수 기본 URL 이 웹 지정값으로 굳었다. 판정은 pkgSettingsText.js 하나.
   // v2.736.3: 서버가 저장소 versions.json 을 최대 60초(UPGRADE_CHECK_TIMEOUT_MS) 기다린다 — 기본 GET 시한 20초 × 재시도면 그 사이 같은 조회가 3번 겹친다.
   const loadPkg = () => fetchJson('/admin/packages', {}, undefined, { timeoutMs: 130_000, retries: 0 }).then((p) => { setPkg(p); setPkgCfg(pkgFormFromResponse(p)); }).catch(() => setPkg(null));
+  // 128회차: 패키지 저장소 설정 파일을 못 읽은 동안 조회는 ‘웹 지정 없음’(빈 칸 둘)을 준다 — 이 폼은 두 칸을 함께 보내므로(빈 칸 = 지정 해제), 다시 읽힌 뒤
+  //   저장 경로만 적어 저장해도 저장돼 있던 사내 미러 주소가 지워졌다. 폼을 채운 조회가 읽기 오류였으면 저장을 잠근다(‘다시 확인’ 이 폼을 다시 채운다).
+  const pkgUnread = unreadMarkOf(pkg);
+  const pkgSaveLocked = saveLockedByUnread(pkgUnread);
   const savePkgCfg = async () => {
+    if (pkgSaveLocked) return;
     const r = await putJson('/admin/packages/settings', pkgSavePayload(pkgCfg)).catch((e) => ({ ok: false, reason: e.message }));
     setResult({ kind: 'pkgcfg', ok: !!r.ok, reason: r.reason });
     await loadPkg();
@@ -220,6 +227,7 @@ export default function AgentDeploy() {
         </div>
         {pkgCfg && (
           <div className="card" style={{ margin: '0 0 10px', padding: '10px 12px', background: 'rgba(255,255,255,.02)' }}>
+            <SettingsUnreadBanner le={pkgUnread} what="패키지 저장소 설정" save="저장" onRecheck={loadPkg} />
             <div className="flex gap wrap" style={{ alignItems: 'flex-end' }}>
               <label style={{ flex: 2, minWidth: 320, fontSize: 12 }}>저장소 URL (versions.json 위치)
                 <input className="input" value={pkgCfg.baseUrl} onChange={(e) => setPkgCfg({ ...pkgCfg, baseUrl: e.target.value })} placeholder={pkgPlaceholder(pkg, 'baseUrl', 'https://mirror.corp/vmware-portal/download')} />
@@ -227,7 +235,7 @@ export default function AgentDeploy() {
               <label style={{ flex: 1, minWidth: 220, fontSize: 12 }}>저장 경로
                 <input className="input" value={pkgCfg.dir} onChange={(e) => setPkgCfg({ ...pkgCfg, dir: e.target.value })} placeholder={pkgPlaceholder(pkg, 'dir', '/etc/vmware-portal/packages')} />
               </label>
-              <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={savePkgCfg}>저장</button>
+              <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={pkgSaveLocked} onClick={savePkgCfg}>저장</button>
               <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={loadPkg}>새로고침</button>
             </div>
             <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>

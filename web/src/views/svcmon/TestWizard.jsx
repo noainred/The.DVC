@@ -57,7 +57,7 @@ export function TestWizard({ targetId, targetName, test = null, onClose, onSaved
       for (const k of Object.keys(body)) if (body[k] === '') delete body[k];
       // v2.731(A5-01): putJson 은 400(검증 실패)을 던지지 않고 본문을 돌려준다 — 그대로 onSaved 하면 거부된 수정에 창이 닫혔다.
       if (wiz.editId) requireChanged(await putJson(`/svcmon/targets/${wiz.targetId}/tests/${wiz.editId}`, body));
-      else await postJson(`/svcmon/targets/${wiz.targetId}/tests`, body);
+      else requireChanged(await postJson(`/svcmon/targets/${wiz.targetId}/tests`, body));   // 128회차: postJson 은 409(저장소 읽기 오류)를 던지지 않는다 — 거절에 창이 닫혔다
       onSaved();
     } catch (e) { setErr(e.message || String(e)); } finally { setBusy(false); }
   };

@@ -6,31 +6,44 @@
  * vCenter 하나짜리(호스트·클러스터 추이)는 `authStopped: info`. info = `{ since, at, attempts, reason }`.
  * 여기서 '—'(이력 없음)와 구분해 말한다 — 둘을 같은 모양으로 두면 사용자가 vCenter 에 이력이 없다고 오해한다.
  * 문구 규칙: `**강조**` 만(BoldText), 백틱 금지, 값 인용은 ‘ ’.
+ *
+ * 127회차(124회차가 범위 밖으로 남긴 것): 서버가 **정지 기록 파일을 못 읽어** 조회하지 않은 vCenter(info.unread · 시도 0회)는 인증 실패가 아니다 — 같은 판정(isUnreadStop) 하나로 갈라
+ *   'vCenter 인증 실패로 멈춰 있어 … 비밀번호를 고치거나 …' 대신 서버가 준 사유를 말한다.
  */
+import { isUnreadStop } from './tools/storageAuthText.js';
 
 /** 맵 → 정렬된 목록 `[{ vcenterId, attempts }]`(시도 수가 없거나 읽지 못한 값이면 attempts null). */
 export function authStoppedList(map) {
   if (!map || typeof map !== 'object' || Array.isArray(map)) return [];
   return Object.keys(map).sort().map((vcenterId) => {
     const n = Number(map[vcenterId]?.attempts);
-    return { vcenterId, attempts: Number.isFinite(n) && n > 0 ? n : null };
+    return { vcenterId, attempts: Number.isFinite(n) && n > 0 ? n : null, ...(isUnreadStop(map[vcenterId]) ? { unread: true } : {}) };
   });
 }
 
 const triesText = (n) => (n == null ? '' : ` 실패 ${n}회`);
 const HOW = '비밀번호를 고치거나 설정 › vCenter 연결 테스트가 성공하면 다시 조회합니다.';
+const UNREAD_WHY = '인증 실패가 확인된 것이 아닙니다. 같은 자격증명을 쓰는 vCenter 하나로 먼저 로그인을 확인하는 동안 잠시 건너뜁니다(서비스 점검의 ‘인증 정지 기록 파일’ 행 참고).';
+const reasonTail = (info) => { const r = String(info?.reason || '').trim(); return r ? ` 사유: ${r}` : ''; };
 
 /** 여러 vCenter 응답의 각주 한 줄. 정지가 없으면 빈 문자열. 이름은 5곳까지 적고 나머지는 개수로 밝힌다. */
 export function authStopNote(map) {
-  const list = authStoppedList(map);
-  if (!list.length) return '';
+  const all = authStoppedList(map);
+  if (!all.length) return '';
+  const list = all.filter((x) => !x.unread);
+  const unread = all.filter((x) => x.unread);
+  const unreadNote = unread.length
+    ? `**정지 기록 파일을 읽지 못해** vCenter ${unread.length}곳(${unread.slice(0, 5).map((x) => `‘${x.vcenterId}’`).join(' · ')}${unread.length > 5 ? ` 외 ${unread.length - 5}곳` : ''})은 조회하지 않았습니다 — ${UNREAD_WHY}`
+    : '';
+  if (!list.length) return unreadNote;
   const names = list.slice(0, 5).map((x) => `‘${x.vcenterId}’${triesText(x.attempts)}`).join(' · ');
   const more = list.length > 5 ? ` 외 ${list.length - 5}곳` : '';
-  return `**인증 실패로 멈춘 vCenter** ${list.length}곳(${names}${more})은 조회하지 않았습니다 — 계정 잠금을 막으려고 로그인하지 않습니다. ${HOW}`;
+  return `**인증 실패로 멈춘 vCenter** ${list.length}곳(${names}${more})은 조회하지 않았습니다 — 계정 잠금을 막으려고 로그인하지 않습니다. ${HOW}${unreadNote ? ` ${unreadNote}` : ''}`;
 }
 
 /** 표의 한 칸(정지된 vCenter 의 행). 이력이 없는 '—' 와 구분되는 짧은 글자 + 툴팁. */
 export function authStopCell(info) {
+  if (isUnreadStop(info)) return { text: '정지 기록 읽기 오류', title: `정지 기록 파일을 읽지 못해 조회하지 않았습니다 — ${UNREAD_WHY}${reasonTail(info)}` };
   const n = Number(info?.attempts);
   const tries = Number.isFinite(n) && n > 0 ? `(실패 ${n}회)` : '';
   return { text: '인증 정지', title: `vCenter 인증 실패로 멈춰 있어 조회하지 않았습니다${tries}. ${HOW}` };
@@ -39,6 +52,7 @@ export function authStopCell(info) {
 /** vCenter 하나짜리 응답(호스트·클러스터 추이)의 안내 한 줄. 정지가 아니면 빈 문자열. */
 export function authStopSingleText(info) {
   if (!info || typeof info !== 'object') return '';
+  if (isUnreadStop(info)) return `**정지 기록 파일을 읽지 못해 조회하지 않았습니다** — ${UNREAD_WHY}${reasonTail(info)}`;
   const n = Number(info.attempts);
   const tries = Number.isFinite(n) && n > 0 ? `(실패 ${n}회)` : '';
   return `**vCenter 인증 실패로 조회를 멈췄습니다**${tries} — 계정 잠금을 막으려고 로그인하지 않습니다. ${HOW}`;

@@ -79,6 +79,10 @@ export const RESTORE_EXCLUDE = new Map([
  *     ipam-vcrange-migration.json(1회 이전 기록 ↔ 스캔 대역) · bm-onboard-applied.json(엣지 적용 원장 ↔ 등록부) · central-svcmon-assign.json).
  *     여기 넣는 것은 시각 · 바깥 세계(보낸 메일 · Director · 복원되지 않는 DB · 이 호스트)에 묶인 기록뿐이다.
  *   ⚠ 새 상태 파일을 만들면 여기(또는 RESTORE_EXCLUDE · reconcileForApply)에 넣을지 정한다 — `test/restoreSweep114.test.js` 분류표가 빠진 이름을 잡는다.
+ *   ⚠ 120회차 정직 기록(실측 — 빈 설정 디렉터리 · DATA_SOURCE=live 로 19분 기동): **'새 서버 = 지금 파일 없음' 이 아니다.** 새 설치는 기동 11분 안에(넷은 4분 안에) 이 표의
+ *     bareos-mail-state · vm-backup-mail-state · focusmon-alert-state · storage-inspect-state · veeam-license-alert-state 다섯을 스스로 만든다(빈 원장 · since = 설치 시각).
+ *     복원은 사람이 로그인한 뒤에야 하므로 재해 복구에서 그 다섯은 백업 원장이 아니라 **새 설치의 빈 원장**으로 남는다 — 발송 이력 표시가 비고 진행 중이던 알림은
+ *     한 번 다시 나갈 수 있다(since 기반 메일 원장은 새 since 가 오히려 지난 실패를 쏟지 않는다). 백업 원장이 필요하면 그 파일을 치운 뒤 다시 복원한다.
  */
 const KEEP_LEDGER = '보낸 회차 · 알린 사건 기록 — 되돌리면 이미 보낸 알림을 다시 보낸다';
 const KEEP_RUN = '실행 회차 · 실행 기록 — 되돌리면 이미 돈 작업을 다시 돌리거나 진행 중인 실행의 추적을 잃는다';
@@ -399,6 +403,24 @@ export function reconcileCredentialsText(backupText, currentText) {
   return { text: JSON.stringify({ ...b, items }, null, 2), dropped, narrowed };
 }
 
+/**
+ * 120회차(114 가 '남긴 것' 으로 둔 OPEN — 재현): Bareos 복원 검증 정책(bareos-rehearsal.json) — 저장은 본인 OTP 다(routes/api/bareosBackup.js PUT …/rehearsal).
+ *   백업 판본을 그대로 쓰면 OTP 로 꺼 둔 검증이 복원으로 다시 켜져 매주 법인마다 검증용 VM 을 만들었고(재현: 지금 끔 · 백업 켬 → 로더가 켬 · 법인마다 10대),
+ *   줄여 둔 대수(perCorp)도 옛 값으로 늘었다. 복원으로는 **켜지 않고 · 대수를 늘리지 않는다**(끄기 · 줄이기 · 요일 · 시각 · 데이터스토어 지정은 백업 그대로).
+ *   지금 파일이 없거나 정책 객체로 읽히지 않으면(새 서버 재해 복구 · 손상) 백업 그대로. 읽기 오류는 reconcileForApply 가 던진다.
+ * @returns {{ text:string, heldOff:boolean, heldPerCorp:boolean }}
+ */
+export function reconcileRehearsalText(backupText, currentText) {
+  const b = parseJson(backupText);
+  const c = parseJson(currentText);
+  const none = { text: String(backupText), heldOff: false, heldPerCorp: false };
+  if (!isObj(b) || !isObj(c) || b.enabled !== true) return none;
+  if (c.enabled !== true) return { text: JSON.stringify({ ...b, enabled: false }, null, 2), heldOff: true, heldPerCorp: false };
+  const bn = Number(b.perCorp); const cn = Number(c.perCorp);
+  if (Number.isInteger(bn) && Number.isInteger(cn) && cn >= 1 && bn > cn) return { text: JSON.stringify({ ...b, perCorp: cn }, null, 2), heldOff: false, heldPerCorp: true };
+  return none;
+}
+
 /** 적용할 내용을 현재 파일과 맞춘다 — 대상이 아니면 그대로. @returns {{ content:string, warning?:{file,reason}, info?:object }} */
 /**
  * v2.842(반증 F1 — 재현): security-session.json 의 `bareosSetupOtp`(Bareos 자동 설정 쓰기 단계 본인 OTP 재확인)는 복원으로 **켜기만** 한다(순수).
@@ -608,7 +630,12 @@ export function reconcilePeerTrustText(backupText, currentText) {
   });
   for (const [key, e] of cur) if (!seen.has(key)) entries.push(e);   // 백업 이후 생긴 항목(승인 · 거부 기록)
   out.entries = entries;
-  return { text: JSON.stringify(out, null, 1), keptPolicy, keptRevoked, keptReplaced, keptApproved };
+  // 120회차(재현): 정책을 enforce 로 지킨 종류에서 **관찰만 된(승인 전) 지문뿐인 장비** 수 — 그 장비는 복원 뒤 승인 전까지 접속이 거부된다('not-approved').
+  //   새 설치는 기동 1초 안에 enforce(origin new-install) 파일을 스스로 만들므로, 관찰 정책 현장의 백업을 새 서버에 복원하면(재해 복구) 승인한 적 없는 장비가 전부 여기에 든다 —
+  //   경고가 그 결과와 조치를 말하게 수를 돌려준다(정책 자체는 91회차 규칙대로 지금 값).
+  const observedOnly = entries.filter((e) => e && typeof e === 'object' && keptPolicy.includes(e.kind)
+    && peerTrustedListR(e).length > 0 && !peerTrustedListR(e).some((t) => t.state === 'approved')).length;
+  return { text: JSON.stringify(out, null, 1), keptPolicy, keptRevoked, keptReplaced, keptApproved, observedOnly };
 }
 
 /** 91회차: 지금 파일을 읽는다 — 없으면 null, 그 밖의 읽기 오류(EACCES · EIO · EISDIR)는 던져서 **이 파일만 적용하지 않는다**(지금 값을 모른 채 약한 백업으로 덮지 않게). */
@@ -653,10 +680,12 @@ export function reconcileForApply(name, content, configDir) {
     if (!r.keptPolicy.length && !r.keptRevoked && !r.keptReplaced && !r.keptApproved) return { content: r.text };
     const parts = [];
     if (r.keptPolicy.length) parts.push(`정책은 지금 값(승인된 지문만 허용 — ${r.keptPolicy.join(' · ')})을 유지했습니다`);
+    // 120회차(재현 — 새 설치 위 재해 복구): 결과와 조치를 말한다 — 예전 문구는 '유지했습니다' 뿐이라 복원 뒤 승인한 적 없는 장비의 접속이 거부되는 까닭을 알 수 없었다
+    if (r.observedOnly) parts.push(`그래서 관찰만 된(승인 전) 지문의 장비 ${r.observedOnly}대는 승인 전까지 접속이 거부됩니다(설정 › 장비 신뢰에서 지문을 확인한 뒤 ‘관찰 지문 일괄 승인’ 을 하거나, 정책을 관찰로 바꾸려면 소유자 + 본인 OTP)`);
     if (r.keptRevoked) parts.push(`백업 이후 거부(회수)한 지문 ${r.keptRevoked}개는 신뢰 목록으로 되살리지 않았습니다`);
     if (r.keptReplaced) parts.push(`백업 이후 교체 승인으로 뺀 지문 ${r.keptReplaced}개는 되살리지 않았습니다`);   // 110회차
     if (r.keptApproved) parts.push(`백업 이후 승인 · 관찰한 지문 ${r.keptApproved}개는 그대로 두었습니다`);
-    return { content: r.text, info: { peerTrustKeptPolicy: r.keptPolicy, peerTrustKeptRevoked: r.keptRevoked, peerTrustKeptReplaced: r.keptReplaced, peerTrustKeptApproved: r.keptApproved },
+    return { content: r.text, info: { peerTrustKeptPolicy: r.keptPolicy, peerTrustKeptRevoked: r.keptRevoked, peerTrustKeptReplaced: r.keptReplaced, peerTrustKeptApproved: r.keptApproved, peerTrustObservedOnly: r.observedOnly },
       warning: { file: name, reason: `${parts.join(' · ')} — 복원은 본인 OTP 를 묻지 않으므로 장비 신뢰를 약하게 되돌리지 않습니다.` } };
   }
   if (name === 'api-keys.json') {   // 88회차 F7
@@ -739,7 +768,16 @@ export function reconcileForApply(name, content, configDir) {
   if (name === 'credentials.json') {   // 110 결정 ②
     const r = reconcileCredentialsText(content, readCurrentOrThrow(configDir, name, '통합 계정'));
     const out = { content: r.text, info: { credentialsDropped: r.dropped, credentialsNarrowed: r.narrowed } };
-    if (r.dropped || r.narrowed) out.warning = { file: name, reason: `백업 이후 지운 통합 계정 ${r.dropped}개는 되살리지 않았고, 사용 범위(법인 · 대상)가 지금보다 넓은 계정 ${r.narrowed}개는 좁은 쪽 범위로 두었습니다 — 계정 등록 · 범위 변경은 본인 OTP 라 복원으로 넓히지 않습니다(필요하면 통합 계정 관리에서 다시 등록 · 수정하세요. 새 서버로 옮기는 중이라 백업의 계정이 전부 필요하면 설정 디렉터리의 지금 credentials.json 을 치운 뒤 다시 복원하면 백업 그대로 들어갑니다).` };
+    // 120회차(반증): 빠져나갈 길을 '새 서버로 옮기는 중' 에만 적어, 실수로 지운 계정(비밀을 다시 알 수 없는 경우)을 되살리려는 운영자가 길이 없다고 읽었다 —
+    //   같은 방법(지금 파일을 치우고 다시 복원)이 그 경우에도 통하고, 그때 잃는 것(백업 뒤에 등록 · 고친 계정)을 함께 밝힌다.
+    if (r.dropped || r.narrowed) out.warning = { file: name, reason: `백업 이후 지운 통합 계정 ${r.dropped}개는 되살리지 않았고, 사용 범위(법인 · 대상)가 지금보다 넓은 계정 ${r.narrowed}개는 좁은 쪽 범위로 두었습니다 — 계정 등록 · 범위 변경은 본인 OTP 라 복원으로 넓히지 않습니다(필요하면 통합 계정 관리에서 다시 등록 · 수정하세요. 실수로 지운 계정을 되살려야 하거나 새 서버로 옮기는 중이라 백업의 계정이 전부 필요하면 설정 디렉터리의 지금 credentials.json 을 치운 뒤 다시 복원하면 백업 그대로 들어갑니다 — 이때 백업 뒤에 등록 · 고친 계정은 백업 판본으로 바뀝니다).` };
+    return out;
+  }
+  if (name === 'bareos-rehearsal.json') {   // 120회차(114 OPEN — 재현)
+    const r = reconcileRehearsalText(content, readCurrentOrThrow(configDir, name, 'Bareos 복원 검증 정책'));
+    const out = { content: r.text, info: { rehearsalHeldOff: r.heldOff, rehearsalHeldPerCorp: r.heldPerCorp } };
+    if (r.heldOff) out.warning = { file: name, reason: '백업에는 복원 검증이 켜져 있었지만 지금은 꺼져 있어 꺼진 채로 복원했습니다 — 정책 저장은 본인 OTP 라 복원으로 다시 켜지 않습니다(Backup 현황 · Bareos 의 복원 검증 정책에서 본인 OTP 로 켜세요).' };
+    else if (r.heldPerCorp) out.warning = { file: name, reason: '백업 판본의 복원 검증 대수(법인마다)가 지금보다 많아 지금 값으로 두었습니다 — 정책 저장은 본인 OTP 라 복원으로 늘리지 않습니다(Backup 현황 · Bareos 의 복원 검증 정책에서 본인 OTP 로 바꾸세요).' };
     return out;
   }
   // v3.9.0(반증 D5): SSH 키 저장소는 **적용 시점의 지금 파일**과 다시 합친다 — 예약 때 합친 값으로 쓰면 예약 뒤 본인 OTP 로 좁힌 폴더 · 기능 · 퇴역이

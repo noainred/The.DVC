@@ -752,7 +752,7 @@ async function runSetup(d, kind, b, local) {
   try { value = await relayToEdge(d, kind, args, { secretArgs }); }
   catch (e) {
     // 엣지가 되돌렸다(새 콘솔 접속 실패·저장 실패) — 그사이 주기 조회가 남긴 인증 정지는 사실이 아니다(직접 경로 P2-12 와 같다 · C10)
-    if (kind === 'setup.director' && (e?.code === 'console-login' || e?.code === 'save')) bareosAuthGuard.clearAuthStop(directorCred(d).id);
+    if (kind === 'setup.director' && (e?.code === 'console-login' || e?.code === 'save')) bareosAuthGuard.clearAuthStop(directorCred(d).id, { verified: false });
     throw e;
   }
   if (kind === 'setup.director') {

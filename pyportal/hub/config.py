@@ -116,6 +116,10 @@ class Config:
 
         # 요청 본문 상한(바이트) — 대용량 POST 로 메모리를 밀어 넣지 못하게.
         self.max_body_bytes = _env_int("HUB_MAX_BODY", 1_048_576, low=4096, high=16_777_216)
+        # 124회차(117회차 결정 D1): 출발지(IP) 하나가 쥘 수 있는 동시 연결 수 — 전체 상한(64) 가운데 한 출발지가 다 쥐지 못하게.
+        #   헤더를 조금씩 흘리는 연결(slowloris)은 소켓 시한(20초)으로 정리되지 않는다 — 한 출발지에서 64개를 열면 다른 사용자가 못 붙었다.
+        #   NAT · 리버스 프록시 뒤에서는 여러 사용자가 한 출발지로 보이므로 넉넉히 둔다(기본 48). 0 = 끔(예전 동작).
+        self.max_conn_per_client = _env_int("HUB_MAX_CONN_PER_CLIENT", 48, low=0, high=64)
 
         # 설정 화면 로그인 세션 유지 시간(분) + 실패 잠금
         self.session_ttl_min = _env_int("HUB_SESSION_TTL_MIN", 480, low=5, high=10080)

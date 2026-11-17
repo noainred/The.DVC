@@ -21,7 +21,7 @@ import { config } from '../../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js';
 import { makeSettingsLoadError } from '../../util/settingsLoadError.js';
 import { readJsonFile, READ_RETRY_MS } from '../../util/jsonFileLoad.js';
-import { nowMs } from '../../util/jsonFileRead.js';   // 97회차 F13: 읽기 오류 재읽기 시계(테스트가 바꾼다)
+import { nowMs, inRetryWindow } from '../../util/jsonFileRead.js';   // 97회차 F13: 읽기 오류 재읽기 시계(테스트가 바꾼다) · 128회차: 간격 판정은 공용
 import { SCHED_KINDS, ONCE_MAX_MIN, RECUR_MAX_MIN, parseLocal, parseTime, localToUtc, validTz, DEFAULT_TZ, MIN, DAY, tzTransitions } from './schedule.js';
 import { SCOPES, TARGET_KINDS, TAG_RE, windowStatus, expiresAt, effectiveOccurrences, matchTarget } from './judge.js';
 
@@ -328,7 +328,7 @@ function loadAll() {
   if (st && _cache && _cache.m === st.mtimeMs && _cache.s === st.size) return _cache.data;
   // 97회차 F13: 읽기 오류 뒤 READ_RETRY_MS(30초) 안에는 디스크를 다시 읽지 않는다 — 예전에는 판정 입력(windowsForJudge — 서버 · 주기마다)이 부를 때마다
   //   죽어 가는 디스크(EIO)를 다시 읽었다(읽기마다 수 초 · 이벤트 루프 블로킹 — 공용 로더의 간격 규칙과 같게).
-  if (_readFailUntil && nowMs() < _readFailUntil) throw fail(503, 'settingsUnreadable', '정비 창 파일을 읽지 못했습니다(읽기 오류 — 원본은 그대로 있습니다).');
+  if (_readFailUntil && inRetryWindow(nowMs(), _readFailUntil, READ_RETRY_MS)) throw fail(503, 'settingsUnreadable', '정비 창 파일을 읽지 못했습니다(읽기 오류 — 원본은 그대로 있습니다).');
   _readFailUntil = 0;
   _cache = null;
   let raw;

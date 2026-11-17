@@ -122,7 +122,7 @@ export function createRunner({ keys, sink, connect } = {}) {
       if ((lastRetry.get(id) || 0) + RETRY_MIN_MS > now) return { ok: false, code: 'too-soon', reason: '같은 대상은 60초에 한 번만 다시 연결합니다.' };
       lastRetry.set(id, now);
       if (!x) {
-        if (target) { focusAuthGuard.clearAuthStop(authIdOf(target)); return { ok: true, running: false }; } // 수집 중이 아니면 정지만 푼다(다음 시험 · 시작이 한 번 시도)
+        if (target) { focusAuthGuard.clearAuthStop(authIdOf(target), { verified: false }); return { ok: true, running: false }; } // 수집 중이 아니면 정지만 푼다(다음 시험 · 시작이 한 번 시도)
         return { ok: false, code: 'not-running', reason: '지금 수집 중인 대상이 아닙니다.' };
       }
       x.col.retry();

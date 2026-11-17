@@ -46,7 +46,8 @@ export function createLockRetry(retryMs = 30_000) {
   let retryAt = 0;
   let lastLock = null;
   return {
-    blocked: (now = Date.now()) => retryAt > 0 && now < retryAt,
+    // 125회차 F2: 벽시계가 잠금을 본 시각보다 앞으로 돌아갔으면(NTP 보정) 막지 않는다 — `now < retryAt` 만 보면 그 차만큼(예: 9시간) 다시 열지 않았다.
+    blocked: (now = Date.now()) => retryAt > 0 && now < retryAt && now >= retryAt - retryMs,
     onFail(e, now = Date.now()) {
       if (!isSqliteLockError(e)) return false;
       lastLock = e; retryAt = now + retryMs;

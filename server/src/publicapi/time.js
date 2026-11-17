@@ -18,6 +18,8 @@
  *   로 해석돼 `epoch 3.2e14`(서기 12345년)가 된다. 그래서 숫자 꼴을 **먼저** 본다.
  */
 
+import { unreadVcenterReasons } from '../metrics/unreadVcenters.js';   // 130회차: '지금 값이 아닌 vCenter' 공용 판정(순수 leaf — import 0)
+
 /**
  * 시각을 epoch ms 로 되돌린다. 읽을 수 없으면 `null`(0 으로 채우지 않는다).
  * @param {*} v epoch ms 숫자 · 숫자 문자열 · ISO 8601 문자열 · Date
@@ -35,6 +37,33 @@ export function msOrNull(v) {
   // ② ISO 8601 등 날짜 문자열
   const t = Date.parse(s);
   return Number.isFinite(t) ? t : null;
+}
+
+/** 126회차: 점검중 vCenter 인가 — 공용 판정(metrics/unreadVcenters.js)의 사유로 본다(상태 비교를 여기 다시 쓰지 않는다). */
+export const isMaintenanceVc = (v) => !!v && v.id != null && unreadVcenterReasons({ vcenters: [v] }).get(String(v.id)) === 'maintenance';
+/**
+ * vCenter 항목의 값을 **실제로 읽은 시각**(epoch ms · 모르면 null — 지어내지 않는다). 130회차: routes/publicApi.js 에서 옮겼다(본문 그대로) —
+ *   공개 API(`/inventory/vcenters` collectedAt)와 VM 내보내기(vcenter/vmExport.js ‘인벤토리 기준’)가 같은 판정을 쓴다.
+ */
+export function vcCollectedAtOf(v, snap) {
+  // 126회차(재현): 점검중 vCenter 는 store 가 직전 캐시를 **기한 없이** 서빙한다 — 그 값을 받은 시각은 스냅샷에 없다(수집 실패 이월 중에 점검중으로
+  //   돌렸으면 staleSince). 예전에는 맨 아래 줄이 스냅샷 시각(지금)을 돌려줘 며칠 묵은 값이 '방금 수집' 으로 나갔다 — 모르면 null(지어내지 않는다).
+  if (isMaintenanceVc(v)) {
+    const since = msOrNull(v.staleSince);
+    if (!(since != null && since > 0)) return null;
+    const rcv = v.collectSource === 'site' ? msOrNull(v.receivedAt) : null;
+    return rcv != null ? Math.min(rcv, since) : since;
+  }
+  // v2.771(점검 R6-F3-5): 엣지가 자기 수집 실패로 lastGood 을 이월해 보낸 항목(unreachable + staleSince)은 받은 시각이 아니라
+  //   그 값의 시각이다 — receivedAt 만 보면 최대 6시간 묵은 값이 '방금' 으로 나갔다(직접 수집 이월은 staleSince 를 쓰는데 비대칭).
+  //   엣지 시각은 수신 시각을 넘지 못한다(min — store 병합이 이미 자르지만 여기서도 자른다).
+  if (v?.collectSource === 'site') {
+    const rcv = msOrNull(v.receivedAt);
+    const since = v.status === 'unreachable' ? msOrNull(v.staleSince) : null;
+    return rcv != null && since != null && since > 0 ? Math.min(rcv, since) : rcv;
+  }
+  if (v?.stale === true && v.staleSince != null) return msOrNull(v.staleSince);
+  return msOrNull(v?.collectedAt ?? snap.generatedAt);
 }
 
 export default msOrNull;

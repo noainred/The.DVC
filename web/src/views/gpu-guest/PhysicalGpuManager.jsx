@@ -6,6 +6,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, putJson, postJson, delJson } from '../../api.js';
 import { droppedSecretNote } from '../droppedSecretText.js';
+import { authStopShort } from '../tools/storageAuthText.js'; // 127회차: 배지 글자(못 읽음 정지는 인증 실패가 아니다)
 import { Field } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
 import { ErrorBox } from '../../components/ui.jsx';
@@ -210,7 +211,7 @@ export function PhysicalGpuManager({ vcs }) {
                   <td className="muted">{s.vcenterId || '—'}</td>
                   <td className="tabular">{r && r.count != null ? <span>{r.utilNA ? 'N/A(MIG)' : `${r.utilPct}%`} · {r.count}GPU{r.memUsedPct != null ? ` · mem ${r.memUsedPct}%` : ''}{ge.text && <span className="badge amber" style={{ marginLeft: 6 }} title={PGPU_GPU_ERR_TITLE}>{ge.text}</span>}</span> : <span className="muted">—</span>}</td>
                   <td>{!s.enabled ? <span className="badge gray">중지</span>
-                    : r && r.error ? <span className={`badge ${PGPU_ERR_COLOR[r.errorCode] || 'red'}`} title={r.error}>{r.authStopped ? '인증 실패 정지' : (r.errorLabel || '오류')}</span>
+                    : r && r.error ? <span className={`badge ${PGPU_ERR_COLOR[r.errorCode] || 'red'}`} title={r.error}>{r.authStopped ? authStopShort(r.authStopped) : (r.errorLabel || '오류')}</span>
                       : r && r.count != null ? <span className={`badge ${ge.tone}`} title={ge.text ? `${ge.text} — ${PGPU_GPU_ERR_TITLE}` : undefined}>수집</span>
                         : <span className="badge gray">대기</span>}</td>
                   <td className="right nowrap">

@@ -79,6 +79,12 @@ describe('스위치 목록 정렬 — 모르는 값은 뒤로', () => {
   });
   it('머리 상태 줄 — 실패가 있으면 초록 점이 아니다', () => {
     expect(headStatus([], 0).text).toContain('없습니다');
+    // 등록부를 못 읽은 동안의 빈 목록 — '등록된 SAN 스위치가 없습니다' 대신 넘겨받은 문구 · 주의 톤(Chromium 검증). 표지가 없으면('') 평소 문구.
+    const un = headStatus([], 0, 'SAN 스위치 등록부를 읽지 못했습니다 — 목록이 비어 보여도 등록이 없는 것이 아닙니다.');
+    expect(un.tone).toBe('warn');
+    expect(un.text).not.toContain('등록된 SAN 스위치가 없습니다');
+    expect(un.text).toContain('읽지 못했습니다');
+    expect(headStatus([], 0, '').text).toContain('등록된 SAN 스위치가 없습니다');
     const h = headStatus(rows, 3);
     expect(h.tone).toBe('warn');
     expect(h.text).toBe('3대 수집 정상 · 실패·미수집 1대 · 3개 법인');

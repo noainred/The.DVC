@@ -20,6 +20,7 @@ import {
   measuredText, bmBasisText, sanBasisText, compareRows, chipMeta, statusLine, latestCapAt, bytesText, pctText,
 } from './bmSanCompareText.js';
 import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
+import { authStopShort } from './storageAuthText.js'; // 130회차(127 C4 의 남은 형제): 배지 글자 — 못 읽음 정지(정지 기록 파일 읽기 오류)는 인증 실패가 아니다
 
 const HOURS = [{ h: 1, label: '최근 1시간' }, { h: 24, label: '24시간' }, { h: 168, label: '7일' }];
 const toneColor = (p) => { const t = pctTone(p); return t === 'red' ? 'var(--red)' : t === 'amber' ? 'var(--amber)' : t === 'green' ? 'var(--green)' : 'var(--text-dim)'; };
@@ -281,7 +282,7 @@ export default function BmSanCompare() {
                     <td data-sort={io?.busyPct ?? ''}>{io && io.busyPct != null ? <><PctCell p={io.busyPct} /> <span className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)' }}>{io.busiestDev}</span></> : <span className="muted">—</span>}</td>
                     <td className="muted" style={{ fontSize: 11.5 }} data-sort={s.at || ''}>{s.at ? fmtAgo(s.at) : '—'}{io?.sampleMs ? ` · ${(io.sampleMs / 1000).toFixed(1)}초` : ''}</td>
                     <td>
-                      {!s.ok ? <span className="badge red" style={{ fontSize: 11 }} title={s.error || ''}>{s.authStopped ? '인증 실패 정지' : s.error ? '수집 오류' : '수집 대기'}</span>
+                      {!s.ok ? <span className="badge red" style={{ fontSize: 11 }} title={s.error || ''}>{s.authStopped ? authStopShort(s.authStopped) : s.error ? '수집 오류' : '수집 대기'}</span>
                         : io ? <span className="badge green" style={{ fontSize: 11 }}>측정 완료</span>
                           : <span className="badge amber" style={{ fontSize: 11 }} title={reasonText(s.ioError)}>측정 불가</span>}
                       {s.ok && !io && s.ioError ? <div className="muted" style={{ fontSize: 11, maxWidth: 280, whiteSpace: 'normal' }}>{reasonText(s.ioError)}</div> : null}

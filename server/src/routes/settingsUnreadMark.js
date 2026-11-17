@@ -9,6 +9,7 @@
  *   쓰기 거절 본문(`<모듈>WriteRefusal()` — 107회차)을 그대로 받아 만든다(판정은 그 함수 하나 — 조회와 쓰기가 같은 상태를 본다).
  */
 import { READ_RETRY_MS } from '../util/jsonFileRead.js';
+import { summarizeRegistryError } from '../util/registryCore.js';
 
 // 쓰기 거절 사유의 '읽기 오류(EISDIR)' 에서 코드만 꺼낸다(우리 모듈이 만든 글 · 길이를 먼저 자른다 · 반복은 상한 32).
 const CODE_RE = /읽기 오류\(([A-Za-z0-9_-]{1,32})\)/;
@@ -28,4 +29,19 @@ export function unreadMark(refusal, key = 'loadError') {
       reason: `설정 파일을 읽지 못했습니다${code ? `(${code})` : ''} — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(${Math.round(READ_RETRY_MS / 1000)}초마다 다시 읽습니다)`,
     },
   };
+}
+
+/**
+ * 128회차(112 · 123회차가 'out' 으로 남긴 등록부): **장비 등록부** 조회(GET)의 표지. 등록부를 못 읽는 동안 목록은 빈 채로(마지막 값을 주는 등록부는 그 값으로) 나가는데
+ *   표지가 없으면 화면이 '등록된 장비가 없습니다 · 추가하세요' 라고 말한다 — 운영자가 전부 새로 등록하게 만든다(118회차 vCenter 관리 화면의 꼴).
+ *   읽기 오류면 unreadMark 와 같은 모양(`readError:true` — 다시 읽히면 풀린다), 손상(보존본으로 옮김 · 보존본만 남음)이면 사유 요약만 싣는다
+ *   (요약은 summarizeRegistryError — 파일 조각 · 경로 · 파일 이름 없음).
+ * @param {null|{reason?:string, readError?:boolean}} le  그 등록부의 `registryLoadError()`
+ * @returns {{}|{ loadError:{ readError?:true, code?:string, reason:string } }}
+ */
+export function registryMark(le) {
+  if (!le || typeof le !== 'object') return {};
+  if (le.readError === true) return unreadMark({ readError: true, reason: le.reason });
+  const why = summarizeRegistryError(le)?.text || '손상';
+  return { loadError: { reason: `등록부 파일을 읽지 못했습니다(${why}) — 손상본은 설정 폴더에 보존돼 있습니다` } };
 }

@@ -80,7 +80,9 @@ test('C5-03 ① 낡은 위임 vCenter 의 마지막 값으로 경보·호스트�
   assert.deepEqual(both.map((a) => a.key), ['vc:vc-pl']);
   // 점검중 표지도 stale 보다 우선 — 알림 없음(보류만)
   const mt = alerts.evaluate({ vcenters: [staleVc({ maintenance: true })], hosts: [], alarms: [], datastores: [dsPl(95)] }, CFG);
-  assert.deepEqual(mt.map((a) => a.key), ['ds:ds-pl-1'], '점검중은 기존과 같다(값은 직전 캐시 — 보류 대상이지만 신규 억제는 stale 만)');
+  // 126회차: 점검중도 직전 캐시(기한 없이 서빙)라 그 값으로 새로 내지 않는다 — v2.768 은 신규 억제를 stale 에만 걸어 점검 내내 쿨다운마다 재발송됐다
+  //   (공용 판정의 세 사유 전부 · 회귀 staleSnapshotSweep126). 해소 보류(unreadVcenters)는 그대로다.
+  assert.deepEqual(mt.map((a) => a.key), [], '점검중 vCenter 의 직전 캐시 값을 지금 발생으로 내면 안 된다');
   assert.ok(mt.unreadVcenters.has('vc-pl'));
   // 규칙(vcenterDown)이 꺼져 있으면 보고 끊김 알림도 없다 — 하지만 stale 값으로 신규 발생은 여전히 내지 않는다
   const off = alerts.evaluate({ vcenters: [staleVc()], hosts: [], alarms: [], datastores: [dsPl(92)] }, { ...CFG, rules: { ...CFG.rules, vcenterDown: { enabled: false } } });

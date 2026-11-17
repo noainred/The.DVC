@@ -11,6 +11,7 @@ import {
 } from './featureUsageText.js';
 import './featureUsage.css';
 import { backdropClose } from '../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만
+import { unreadFixText } from './loadErrorText.js';   // 128회차: 읽기 오류면 보존본이 없다 — 사유별 조치 문구는 한 벌
 
 /**
  * 설정 › 사용자 › 기능 사용 현황(v2.913 · 설계 docs/design/feature-usage · 사용자 요청 "사용자별로 어떤 기능을 사용하는지 트래킹 — UI 개선을 위해").
@@ -571,7 +572,7 @@ function UsageSettings() {
     <div className="fu-sgrid">
       <div className="card fu-panel">
         <div className="fu-ph"><b>수집</b><span className="muted">저장은 설정 소유자 · 감사 로그에 무엇이 어떻게 바뀌었는지 남습니다</span></div>
-        {data.loadError && <div className="fu-band crit">설정 파일을 읽지 못했습니다({data.loadError.reason}) — 지금은 꺼짐으로 동작합니다. 손상본은 .corrupt.&lt;시각&gt; 으로 보존했습니다. 저장하면 이 값으로 다시 시작합니다.</div>}
+        {data.loadError && <div className="fu-band crit">설정 파일을 읽지 못했습니다({data.loadError.reason}) — 지금은 꺼짐으로 동작합니다. {unreadFixText(data.loadError, { corrupt: '손상본은 .corrupt.<시각> 으로 보존했습니다. 저장하면 이 값으로 다시 시작합니다.' })}</div>}
         <div className="fu-row">
           <div className="l">기능 사용 기록<small>끄면 그 순간부터 신호를 받지 않습니다. 켜고 끈 시각과 계정을 남깁니다.</small></div>
           <div className="c">

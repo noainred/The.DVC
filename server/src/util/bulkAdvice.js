@@ -193,7 +193,13 @@ export function preflightHints(rows, fields = [], { hostForm = 'address' } = {})
       if (hostForm === 'url' && !/^https?:\/\//i.test(host)) push(r._line, 'host', `${r._line}줄 host 는 **https://커넥션서버** 형식이어야 합니다 — 앞에 https:// 를 붙이세요.`);
       continue;   // 포트·끝 슬래시는 URL 형식에서 정상이다(끝 슬래시는 저장 시 자동으로 지워진다)
     }
-    if (/^https?:\/\//i.test(host)) push(r._line, 'host', `${r._line}줄 host 에 URL 이 들어갔습니다 — ${host.replace(/^https?:\/\//i, '').replace(/\/.*$/, '')} 처럼 주소만 남기세요.`);
+    if (/^https?:\/\//i.test(host)) {
+      // 125회차 F3: 예전의 `.replace(/\/.*$/, '')` 는 값에 줄바꿈(따옴표 친 CSV 칸) · U+2028 이 있으면 '/' 마다 끝까지 갔다 돌아와 O(n²) 이었다
+      //   (셀 상한 8,192자 한 칸 약 45ms × 행 상한 2,000 — 재현). 첫 '/' 앞까지만 선형으로 자른다.
+      const rest = host.replace(/^https?:\/\//i, '');
+      const cut = rest.indexOf('/');
+      push(r._line, 'host', `${r._line}줄 host 에 URL 이 들어갔습니다 — ${cut < 0 ? rest : rest.slice(0, cut)} 처럼 주소만 남기세요.`);
+    }
     else if (/^[^:]+:\d+$/.test(host)) push(r._line, 'host', `${r._line}줄 host 에 포트가 붙어 있습니다 — 주소는 ${host.split(':')[0]}, 포트는 sshPort/httpsPort 열에 따로 적으세요.`);
     if (/\/$/.test(host)) push(r._line, 'host', `${r._line}줄 host 끝에 / 가 있습니다 — 지우세요.`);
   }

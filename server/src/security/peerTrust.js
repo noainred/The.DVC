@@ -23,6 +23,8 @@
  * 그 사이 공격자 키가 '관찰' 로 들어온다). 상태의 `loadError` 가 그 사실을 말한다.
  * v2.732(B4-03): **읽기 실패(EACCES 등)도 같은 규칙**이고 닫힌 정책을 곧바로 파일에 남긴다(재시작이 observe 로 내려가지 않게 —
  *   failClosed). 원본을 옮기지 못하면 쓰기를 막는다(`loadError.writeBlocked`).
+ * 119회차(결정 — v2.732 의 '읽기 실패 = 손상과 같은 규칙' 을 고침): **읽기 실패는 손상이 아니다** — 원본을 옮기지 않는다. 그 자리에 두고 쓰기를 막은 채
+ *   (`loadError.writeBlocked` + `readError`) enforce 로 닫고, 30초마다 다시 읽어 읽히면 승인 목록이 재시작 없이 돌아온다(failUnreadable). 손상은 예전 그대로다.
  *
  * 다중 지문(v2.731 A1-01): 같은 주소(host:port) 뒤에 서버가 여럿인 장비(로드밸런서·DNS 라운드로빈 — 서버마다 자체서명 인증서·
  * 호스트키)는 정상적으로 여러 지문을 낸다. 그래서 항목은 신뢰 지문 **목록**(상한 TRUSTED_MAX)을 갖고 승인은 **추가**다(교체는 명시 옵션
@@ -45,6 +47,7 @@ import { strictIpv4Num, numToIp } from '../util/ipv4.js';
 import { registerExitFlush } from '../util/exitFlush.js';
 import { pushAll } from '../util/pushAll.js';
 import { logAudit } from '../audit.js';
+import { nowMs, READ_RETRY_MS, inRetryWindow } from '../util/jsonFileRead.js';   // 119회차: 읽기 오류 뒤 재읽기 간격(공용 시계 — 테스트가 주입한다) · 128회차: 간격 판정은 공용
 
 export const PEER_KINDS = Object.freeze(['ssh', 'tls']);
 export const PEER_MODES = Object.freeze(['enforce', 'observe']);
@@ -70,6 +73,7 @@ const FILE = () => path.join(config.configDir, 'peer-trust.json');
 
 let _st = null;          // { v, policy:{ssh,tls}, origin:{ssh,tls}, entries: Map<key, entry> }
 let _loadError = null;
+let _retryAt = 0;        // 119회차: 읽기 오류 뒤 다시 읽을 시각(nowMs 기준)
 let _dirty = false;
 let _saveTimer = null;   // 처음 보는 장비 기록의 디바운스 저장(A6-06)
 /** 처음 보는 장비(관찰·승인 대기) 기록을 묶어 쓰는 지연(ms). 관리자 동작·바뀐 지문은 즉시 쓴다. */
@@ -187,7 +191,13 @@ function sanitizeTrustedList(kind, e) {
  */
 function assertWritable() {
   if (!_loadError?.writeBlocked) return;
-  const e = new Error('peer-trust.json 을 읽지 못했고 원본을 옆으로 옮기지 못해 저장하지 않습니다 — 파일 권한·소유자를 확인한 뒤 포탈을 재시작하세요');
+  // 124회차(119 반증 — 재현): 읽기 오류 중에 파일이 없어지면(지움 · 옮김) 이 프로세스는 닫힌 채 남는데, 문구는 '원본은 그대로 있습니다 · 읽히면 돌아옵니다' 였다(사실이 아니다 —
+  //   파일을 되돌리거나 재시작해야 풀린다). 그 갈래(gone)는 따로 말한다.
+  const e = new Error(_loadError.gone
+    ? 'peer-trust.json 이 없어져(읽지 못하던 중에 지워졌거나 옮겨졌습니다) 저장하지 않습니다 — 실행 중에는 승인 지문만 허용으로 닫아 둡니다. 파일을 되돌리면 30초 안에 다시 읽고, 새로 시작하려면 포탈을 재시작하세요'
+    : _loadError.readError
+    ? 'peer-trust.json 을 읽지 못해(읽기 오류 — 원본은 그대로 있습니다) 저장하지 않습니다 — 파일 권한·소유자·디스크를 확인하세요(30초마다 다시 읽고, 읽히면 승인 목록이 돌아옵니다)'
+    : 'peer-trust.json 을 읽지 못했고 원본을 옆으로 옮기지 못해 저장하지 않습니다 — 파일 권한·소유자를 확인한 뒤 포탈을 재시작하세요');
   e.status = 409; e.code = 'peer-trust-unwritable';
   throw e;
 }
@@ -255,6 +265,7 @@ function decideDefaults(st) {
  * 판정해 **observe(upgrade-migration)** 로 열었다 — 승인 목록을 잃은 채 관찰로 여는 것이 머리말이 막으려던 바로 그 상황이다.
  * 손상 갈래도 보존 뒤 재시작하면 '파일 없음' 이라 같은 하향이 있었다 → 즉시 기록 + decideDefaults 의 흔적 판정.
  * 원본을 옮기지 못했으면(rename 실패 — 파일이 그 자리에 남음) 쓰기를 막는다(`writeBlocked`) — 원본을 덮지 않는다.
+ * ⚠ 119회차: 이제 이 함수는 **손상**(parse 실패 · 형식 불일치)에만 쓴다 — 읽기 실패는 원본을 옮기지 않는 failUnreadable 로 간다(위 '읽기 실패' 설명은 v2.732 당시 기록).
  */
 function failClosed(st, code, detail = '') {
   let bak = null;
@@ -273,12 +284,45 @@ function failClosed(st, code, detail = '') {
   return st;
 }
 
+/**
+ * 119회차(결정 → 권장안 구현 · 재현 — EIO 한 번): 읽기 실패(EACCES · EIO · EISDIR)는 손상이 아니다. v2.732 는 손상과 같이 원본을 `.corrupt.*` 로 옮기고 빈 승인 목록 +
+ * enforce 를 그 자리에 썼다 — 닫는 쪽이지만 **일시 오류 한 번**에도 승인 목록이 재시작해도 돌아오지 않아(보존본을 손으로 되돌려야 한다) 모든 장비 접속이 '승인되지 않은 지문' 으로
+ * 거부된 채 남았다. 이제 원본을 그 자리에 두고(쓰기 차단 — 예전 '옮기지 못함' 갈래와 같은 `writeBlocked`) 메모리에서만 enforce + 빈 목록으로 닫고, 30초마다 다시 읽는다.
+ *   · 그동안: 승인 지문만 허용(목록이 없으니 전부 거부) · 대기 기록은 메모리에만 · 관리 동작 409. observe 로 내려가지 않는다(재시작해도 같은 판정 — 파일이 그대로 못 읽힌다).
+ *   · 읽히면: 그 파일의 정책 · 승인 목록으로 돌아온다(그동안의 메모리 기록은 버린다 — 다음 접속이 다시 기록한다).
+ *   · 다시 읽을 때 파일이 사라졌으면(ENOENT) 이 프로세스는 닫힌 채로 둔다 — 실행 중에 '없음 = 기존 현장 observe' 로 열지 않는다(재시작이 판정한다).
+ */
+function failUnreadable(detail = '') {
+  _retryAt = nowMs() + READ_RETRY_MS;
+  if (_st && _loadError?.readError) {   // 계속 못 읽는 중 — 메모리 상태 유지
+    const { gone: _was, ...rest } = _loadError;
+    _loadError = { ...rest, ...(detail ? { detail } : {}), ...(detail === 'ENOENT' ? { gone: true } : {}) };   // 124회차: 다시 읽을 때 파일이 없어졌으면 표지(gone)
+    return _st;
+  }
+  const st = emptyState();
+  _loadError = { code: 'unreadable', ...(detail ? { detail } : {}), writeBlocked: true, readError: true };
+  const now = Date.now();
+  for (const kind of PEER_KINDS) { st.policy[kind] = 'enforce'; st.origin[kind] = { origin: 'load-error', at: now }; }
+  _st = st;
+  console.warn(`[peerTrust] peer-trust.json 을 읽지(${detail || 'unreadable'}) 못했습니다 — 손상이 아니라 원본은 그대로 두고 이 파일에 쓰지 않습니다. `
+    + '승인 목록을 모르므로 SSH·TLS 모두 승인 지문만 허용(enforce)으로 닫고 30초마다 다시 읽습니다(파일 권한·소유자·디스크 확인).');
+  return st;
+}
+
 function load() {
-  if (_st) return _st;
+  // 119회차: 읽기 오류 중이면 간격마다 다시 읽는다. 128회차: 시계가 뒤로 갔으면 기다리지 않는다(예전에는 그 차만큼 enforce + 빈 목록으로 닫힌 채 — 다시 읽어도 못 읽으면 failUnreadable 이 닫힌 채 둔다).
+  const retry = !!(_st && _loadError?.readError && !inRetryWindow(nowMs(), _retryAt, READ_RETRY_MS));
+  if (_st && !retry) return _st;
   const st = emptyState();
   let raw = null;
   try { raw = fs.readFileSync(FILE(), 'utf8'); } catch (e) {
-    if (e?.code !== 'ENOENT') return failClosed(st, 'unreadable', String(e?.code || e?.message || e).slice(0, 120));
+    if (e?.code !== 'ENOENT' || retry) return failUnreadable(String(e?.code || e?.message || e).slice(0, 120));
+  }
+  if (retry) {
+    // 읽혔다 — 읽기 오류 동안의 메모리 상태(빈 승인 목록 · 대기 기록)를 버리고 파일의 상태로 돌아간다.
+    if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
+    _st = null; _loadError = null; _dirty = false; _retryAt = 0;
+    console.warn('[peerTrust] peer-trust.json 을 다시 읽었습니다(읽기 오류 풀림) — 파일의 정책 · 승인 목록으로 돌아갑니다.');
   }
   if (raw != null) {
     let obj = null;
@@ -654,5 +698,5 @@ export function peerApproveWhere() {
 /** 테스트 전용 — 메모리 상태를 버린다(다음 호출이 파일을 다시 읽는다). */
 export function _resetPeerTrustForTest() {
   if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
-  _st = null; _loadError = null; _dirty = false;
+  _st = null; _loadError = null; _dirty = false; _retryAt = 0;
 }

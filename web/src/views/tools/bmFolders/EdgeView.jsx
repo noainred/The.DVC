@@ -5,6 +5,7 @@
  */
 import React, { useMemo, useState } from 'react';
 import { postJson, canCsv, downloadFile } from '../../../api.js';
+import { requireChanged } from '../../changeResult.js';   // 128회차: 409 본문을 ‘사본을 받았습니다’ 로 읽지 않는다
 import { STable } from '../../../components/STable.jsx';
 import { UsagePair, StatusDot } from './parts.jsx';
 import { ageText, wattsText, csvNameOf, opErrorText } from '../bmFoldersText.js';
@@ -21,7 +22,7 @@ export default function EdgeView({ d, reload }) {
   const copyNote = edgeCopyNote(d, now);
   const pullNow = async () => {
     setBusy(true); setMsg(null);
-    try { const r = await postJson('/tools/bm-folders/edge/pull', {}); setMsg({ ok: true, text: `사본을 받았습니다 — 법인 ${r.corps ?? 0} · 배치 ${r.place ?? 0}` }); reload(); }
+    try { const r = requireChanged(await postJson('/tools/bm-folders/edge/pull', {})); setMsg({ ok: true, text: `사본을 받았습니다 — 법인 ${r.corps ?? 0} · 배치 ${r.place ?? 0}` }); reload(); }
     catch (e) { setMsg({ ok: false, text: `받지 못했습니다 — 지난 사본은 그대로입니다(${opErrorText(e)})` }); } finally { setBusy(false); }
   };
   return (

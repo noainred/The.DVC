@@ -37,6 +37,9 @@ import {
 } from './vmExportCatalog.js';
 import { ynDaysOf } from '../veeam/backupStatus.js';
 import { vmExportSummary } from './vmExportSummary.js';   // v2.801 엑셀 '요약' 시트
+import { unreadVcenterReasons } from '../metrics/unreadVcenters.js';   // 130회차: '지금 값이 아닌 vCenter' 공용 판정(사본 금지)
+import { vcCollectedAtOf } from '../publicapi/time.js';                // 그 값을 실제로 읽은 시각(공개 API 와 같은 판정 · 모르면 null)
+import { notReadWhyText } from '../corelicense/analyze.js';            // 사유 한글(점검중 · 연결 실패 · 보고 낡음) — 문구 한 벌
 
 export { guestKnownSum };
 /** 예전 열 목록(v2.278 — '예전 CSV 그대로' 조합과 같다). get(vm, d, ctx) 모양을 테스트·호환이 쓴다. */
@@ -244,6 +247,7 @@ export async function buildVmExportTable(vcenterId, sel) {
   const snap = store.get();
   const vc = (snap.vcenters || []).find((v) => v.id === vcenterId) || { id: vcenterId };
   const vcName = vc.name || vcenterId;
+  const invNc = inventoryNotCurrent(vc, snap);
   const all = (snap.vms || []).filter((v) => v.vcenterId === vcenterId);
   const ids = Array.isArray(sel.ids) ? new Set(sel.ids.filter((x) => typeof x === 'string')) : null;
   let list = all.filter((vm) => (sel.tmpl === false ? vm.template !== true : true)
@@ -303,8 +307,19 @@ export async function buildVmExportTable(vcenterId, sel) {
       vcenterId, vcenterName: vcName, total: all.length, matched, rows: list.length, live, at: now, offsetMin: DAY_OFFSET_MIN,
       tags: need.has('tags') ? tagState : null, parts: need.has('parts') ? (partsDb ? 'ok' : 'unreadable') : null,
       veeam: views === undefined ? null : views ? (views.linked ? 'ok' : 'unlinked') : 'unreadable', ynDays,
+      ...(invNc ? { invNotCurrent: invNc } : {}),   // 130회차: 수집이 멈춘 vCenter — 엑셀 ‘기준’ 줄 · 읽는 법 시트가 말한다
     },
   };
+}
+/**
+ * 130회차(126회차 분류표의 unverified — 재현): 이 vCenter 의 인벤토리가 **지금 값이 아닌가**. store 는 수집이 멈춘 vCenter(점검중 · 수집 실패 이월 · 담당 엣지의 보고 끊김)의
+ *   마지막 인벤토리를 계속 서빙한다(점검중 · 위임은 기한 없이). 예전에는 화면이 ‘인벤토리 … 마지막 N초 전’(스냅샷 시각 = 지금)이라 말했고 엑셀은 ‘기준 <지금>’ 한 줄뿐이라,
+ *   며칠 전 전원 상태 · 사양 · 용량이 방금 읽은 값으로 내려갔다. 행은 그대로 두고(지우면 '없음' 이 된다) 사실만 싣는다 — 판정은 공용(metrics/unreadVcenters.js) · 시각은 공개 API 와 같은 함수.
+ * @returns {null | { reason:'maintenance'|'unreachable'|'stale', why:string, at:(number|null) }} at = 그 값을 읽은 시각(모르면 null)
+ */
+export function inventoryNotCurrent(vc, snap) {
+  const reason = vc && vc.id != null ? unreadVcenterReasons({ vcenters: [vc] }).get(String(vc.id)) : null;
+  return reason ? { reason, why: notReadWhyText(reason), at: vcCollectedAtOf(vc, snap) } : null;
 }
 const liveStateOf = (av) => (av.state === 'ok' ? { can: true } : { can: false, reason: av.reason, ...(av.skipReason ? { skipReason: av.skipReason } : {}), ...(av.authStopped ? { authStopped: av.authStopped } : {}) });
 
@@ -317,6 +332,7 @@ export async function vmExportStatus(vcenterId) {
   const vc = (snap.vcenters || []).find((v) => v.id === vcenterId) || {};
   const vms = (snap.vms || []).filter((v) => v.vcenterId === vcenterId);
   const av = liveAvailability(vcenterId, snap);
+  const invNc = inventoryNotCurrent(vc, snap);
   let partsOn = null;
   try { partsOn = loadGuestDiskSettings()?.enabled === true; } catch { partsOn = null; }
   const pdb = await partsFromDb(vcenterId);
@@ -326,7 +342,9 @@ export async function vmExportStatus(vcenterId) {
   return {
     vcenterId, vcenterName: vc.name || vcenterId,
     vmTotal: vms.length, vmOn: vms.filter((v) => v.powerState === 'POWERED_ON').length, templates: vms.filter((v) => v.template === true).length,
-    invAt: snap.generatedAt || null,
+    // 130회차: 수집이 멈춘 vCenter 면 스냅샷 시각(지금)이 아니라 그 값을 읽은 시각(모르면 null) + 사유. 정상이면 예전 그대로.
+    invAt: invNc ? invNc.at : (snap.generatedAt || null),
+    ...(invNc ? { invNotCurrent: { reason: invNc.reason, why: invNc.why } } : {}),
     cfgVms: vms.filter((v) => v.cfg).length, devVms: vms.filter((v) => v.dev).length,
     live: { state: av.state, ...(av.reason ? { reason: av.reason } : {}), ...(av.skipReason ? { skipReason: av.skipReason } : {}), ...(av.authStopped ? { authStopped: av.authStopped } : {}) },
     parts: { on: partsOn, vms: partVms, at: partAt },

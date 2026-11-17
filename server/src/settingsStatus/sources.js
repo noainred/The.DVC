@@ -21,34 +21,36 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { store } from '../store.js';
 import { corruptOnlyReason } from '../util/registryCore.js';
-import { listDatacenters } from '../datacenter/store.js';
+import { listDatacenters, datacentersLoadError } from '../datacenter/store.js';
 import { listRegistry as listVcenters, registryLoadError as vcRegistryLoadError } from '../vcenter/registry.js';
 import { listRegistry as listNsx, registryLoadError as nsxRegistryLoadError } from '../nsx/registry.js';
 import { listHorizon, horizonLoadError } from '../horizon/horizon.js';
 import { registryLoadError as idracLoadError } from '../idrac/registry.js';
 import { listServers as listVeeam, registryLoadError as veeamLoadError } from '../veeam/registry.js';
 import { loadSettings as loadBareos, settingsLoadError as bareosLoadError } from '../bareos/settings.js';
-import { loadBackupSettings } from '../backup/settings.js';
+import { loadBackupSettings, backupSettingsReadError } from '../backup/settings.js';
 import { storageIntervalsLoadError } from '../storage/intervals.js';
 import { loadVmSeriesSettings, vmSeriesSettingsLoadError } from '../vmseries/settings.js';
 import { loadPerfSettings, perfSettingsLoadError } from '../sanswitch/perfSettings.js';
 import { loadSettings as loadIsidu, isiduSettingsLoadError } from '../isidu/settings.js';
-import { load as loadDirUsage } from '../dirusage/settings.js';
+import { load as loadDirUsage, settingsLoadError as dirUsageLoadError } from '../dirusage/settings.js';
 import { settingsLoadError as guestPartLoadError } from '../guestpart/settings.js';
-import { load as loadGuestDisk } from '../guestdisk/settings.js';
+import { load as loadGuestDisk, settingsLoadError as guestDiskLoadError } from '../guestdisk/settings.js';
 import { gpuGuestEnabledLight } from '../gpu/settings.js';
 import { listCollectors, registryLoadErrorSummary } from '../collector/registry.js';
 import { getConfigSafe as proxyConfig, listProxiesSafe, registryReadError as proxyReadError } from '../proxy/registry.js';
-import { adTransportStatus } from '../auth/ad.js';
+import { adTransportStatus, adConfigReadError } from '../auth/ad.js';
 import { loadSecretsPolicy } from '../security/secretVault.js';
-import { loadHostAccess } from '../hostaccess/settings.js';
+import { loadHostAccess, hostAccessWriteRefusal } from '../hostaccess/settings.js';
 import { peerTrustStatus } from '../security/peerTrust.js';
 import { collectSelfCheck } from '../security/selfCheck.js';
 import { listUsers } from '../auth/auth.js';
-import { loadAlertConfig } from '../alerts.js';
+import { loadAlertConfig, alertConfigWriteRefusal } from '../alerts.js';
 import { mailStatus } from '../mail/service.js';
-import { loadLlmConfig } from '../llm/config.js';
+import { mailSettingsLoadError } from '../mail/settings.js';
+import { loadLlmConfig, llmConfigWriteRefusal } from '../llm/config.js';
 import { upgradeManager } from '../upgrade/manager.js';
+import { upgradeSettingsWriteRefusal } from '../upgrade/settings.js';
 
 const len = (a) => { if (!Array.isArray(a)) throw new Error('not-a-list'); return a.length; };
 /**
@@ -60,7 +62,13 @@ export const damaged = (name) => { const f = path.join(config.configDir, name); 
 /** 키 → 사실 함수. grade.js RULES 와 같은 키. */
 export function settingsStatusSources({ now = Date.now() } = {}) {
   return {
-    'datacenter-admin': () => ({ count: len(listDatacenters()), loadError: damaged('datacenters.json') }),
+    /*
+     * 123회차(메인 수정 반증 — 형제 전수 · 재현: 파일 자리에 폴더 = EISDIR): vCenter · NSX 만 고쳐져 있었다 — 아래 항목들은 설정 파일 **읽기 오류** 동안
+     *   로더가 주는 기본값 · 빈 목록(또는 마지막으로 읽은 값)을 그대로 실어 '등록된 법인 없음 · 정기 백업 꺼짐 · 리포트 대상 없음 · 꺼짐 · 사용 안 함 · 알림 채널 없음 ·
+     *   SMTP 미설정' 이라고 말했다(damaged() 는 '파일 없음 + 손상 보존본' 만 본다 — 읽기 오류는 파일이 그대로 있다). 각 모듈의 읽기 오류 표지를 연결한다:
+     *   읽기 오류면 readError(판정은 grade.js 공통 규칙 — '읽기 오류 · 원본은 그대로')와 loadError 를 싣고, 건수 · 켜짐 값은 싣지 않는다(null). 로더를 먼저 부른다(72회차 F2).
+     */
+    'datacenter-admin': () => { const le = datacentersLoadError(); const loadError = damaged('datacenters.json') || !!le; return { count: loadError ? null : len(listDatacenters()), loadError, readError: le?.readError === true }; },
     'vcenter-admin': () => {
       const errs = store.get()?.collectionErrors;
       // 118회차 메인(Chromium 판독): 등록부를 **읽지 못한 동안**(읽기 오류 — 원본은 그대로)에도 건수 0 으로 '등록된 vCenter 없음 · 미설정' 배지가 붙어,
@@ -76,27 +84,28 @@ export function settingsStatusSources({ now = Date.now() } = {}) {
     'idrac-admin': () => ({ loadError: !!idracLoadError() }),
     veeam: () => { const loadError = !!veeamLoadError(); return { loadError, count: loadError ? null : len(listVeeam()) }; },
     bareos: () => { const loadError = !!bareosLoadError(); return { loadError, directors: loadError ? null : len(loadBareos().directors) }; },
-    backup: () => ({ scheduleEnabled: loadBackupSettings().scheduleEnabled, loadError: damaged('backup.json') }),
+    backup: () => { const re = !!backupSettingsReadError(); return { scheduleEnabled: re ? null : loadBackupSettings().scheduleEnabled, loadError: damaged('backup.json') || re, readError: re }; },
     'storage-intervals': () => ({ loadError: !!storageIntervalsLoadError() }),
     vmseries: () => ({ loadError: !!vmSeriesSettingsLoadError(), enabled: loadVmSeriesSettings().enabled === true }),
     'sansw-perf': () => ({ loadError: !!perfSettingsLoadError(), enabled: loadPerfSettings().enabled === true }),
     'isilon-dirusage': () => { const loadError = !!isiduSettingsLoadError(); return { loadError, targets: loadError ? null : len(loadIsidu().targets) }; },
-    'dir-usage': () => ({ targets: len(loadDirUsage().targets), loadError: damaged('dirusage.json') }),
-    'guest-partition': () => { const enabled = loadGuestDisk().enabled === true; return { loadError: !!guestPartLoadError() || damaged('guest-disk.json'), enabled }; },
+    'dir-usage': () => { const le = dirUsageLoadError(); const loadError = damaged('dirusage.json') || !!le; return { targets: loadError ? null : len(loadDirUsage().targets), loadError, readError: le?.readError === true }; },
+    'guest-partition': () => { const enabled = loadGuestDisk().enabled === true; const gd = guestDiskLoadError(); const gp = guestPartLoadError(); return { loadError: !!gp || !!gd || damaged('guest-disk.json'), readError: gp?.readError === true || gd?.readError === true, enabled }; },
     'gpu-guest': () => ({ enabled: gpuGuestEnabledLight(), loadError: damaged('gpu-guest.json') }),
     collectors: () => { const loadError = !!registryLoadErrorSummary(); return { loadError, count: loadError ? null : len(listCollectors()) }; },
     // listProxies() 는 기본 프록시를 늘 첫 줄에 넣는다(proxy/registry.js) — 추가로 등록한 프록시만 센다(반증 D3).
     // 72회차 F2: remote-access.json 이 손상돼 보존본만 남으면 로더가 기본값(중계 서버 없음)을 돌려준다 — '꺼짐' 이 아니라 주의다.
     // 79회차 반증: 읽기 오류(76 F5 — 원본 그대로 · 빈 설정으로 돈다)도 주의 — 예전 판정(손상 보존본만)으로는 '중계 서버 0 · 꺼짐' 으로 보였다.
     //   ⚠ 로드(proxyReadError)를 damaged 보다 먼저 — 첫 계산에서 손상본을 보존본으로 옮긴 뒤에 '보존본만 남음' 을 본다(portalMiscAudit72 F2).
-    proxy: () => { const rre = !!proxyReadError(); const loadError = damaged('remote-access.json') || rre; return { proxyHost: loadError ? '' : String(proxyConfig().proxyHost || '').trim(), proxies: loadError ? null : len(listProxiesSafe()), loadError }; },
-    'auth-ad': () => { const t = adTransportStatus(); return { enabled: !!t.enabled, warnings: t.enabled ? len(t.warnings) : 0, loadError: damaged('auth.json') }; },
+    proxy: () => { const rre = !!proxyReadError(); const loadError = damaged('remote-access.json') || rre; return { proxyHost: loadError ? '' : String(proxyConfig().proxyHost || '').trim(), proxies: loadError ? null : len(listProxiesSafe()), loadError, readError: rre }; },   // 123회차: 읽기 오류에 '손상 보존본 확인' 이라고 말하지 않는다(보존본이 없다)
+    'auth-ad': () => { const t = adTransportStatus(); const re = !!adConfigReadError(); return { enabled: !!t.enabled, warnings: t.enabled ? len(t.warnings) : 0, loadError: damaged('auth.json') || re, readError: re }; },   // 123회차: 읽기 오류 동안은 마지막으로 읽은 값(없으면 env 기본값 — 보통 꺼짐)이다
     secrets: () => { const p = loadSecretsPolicy(); return { mode: p.mode, locked: !!p.locked, recovered: !!p.recovered }; },
     'host-access': () => {
       const p = loadHostAccess().pending;
       const dl = p ? Number(p.deadline) : NaN;
       // 72회차 F2: 손상 보존본만 남으면 로더가 기본값(적용 대기 없음)을 돌려준다 — 표시 없음(정상)으로 숨기지 않는다.
-      return { pendingOverdue: !!p && Number.isFinite(dl) && dl < now, loadError: damaged('host-access.json') };
+      const re = !!hostAccessWriteRefusal();   // 123회차: 읽기 오류 동안 pending 은 null 이다 — '적용 대기 없음(표시 없음)' 이 아니다(115회차 R1)
+      return { pendingOverdue: !!p && Number.isFinite(dl) && dl < now, loadError: damaged('host-access.json') || re, readError: re };
     },
     'peer-trust': () => {
       const st = peerTrustStatus();
@@ -114,10 +123,11 @@ export function settingsStatusSources({ now = Date.now() } = {}) {
     },
     alerts: () => {
       const ch = loadAlertConfig().channels || {};
-      return { loadError: damaged('alerts.json'), channels: Object.values(ch).filter((c) => c && c.enabled === true).length };
+      const re = !!alertConfigWriteRefusal();   // 123회차: 읽기 오류 동안 설정은 기본값(채널 꺼짐)이다 — '알림 채널 없음' 이 아니다
+      return { loadError: damaged('alerts.json') || re, readError: re, channels: re ? null : Object.values(ch).filter((c) => c && c.enabled === true).length };
     },
-    mail: () => { const s = mailStatus(); return { loadError: damaged('mail.json'), configured: s.configured, authStopped: !!s.authStopped }; },
-    'ai-search': () => ({ enabled: loadLlmConfig().enabled === true, loadError: damaged('llm.json') }),
+    mail: () => { const s = mailStatus(); const le = mailSettingsLoadError(); return { loadError: damaged('mail.json') || !!le, readError: le?.readError === true, configured: le ? null : s.configured, authStopped: !!s.authStopped }; },   // 123회차: 못 읽은 설정은 'SMTP 미설정' 이 아니다
+    'ai-search': () => { const enabled = loadLlmConfig().enabled === true; const re = !!llmConfigWriteRefusal(); return { enabled, loadError: damaged('llm.json') || re, readError: re }; },   // 123회차: 읽기 오류 동안은 마지막으로 읽은 값(없으면 env 기본값)이다
     diagnostics: () => { const e = store.get()?.collectionErrors; return { collectionErrors: len(e) }; },
     upgrade: () => {
       const s = upgradeManager.status();
@@ -129,7 +139,8 @@ export function settingsStatusSources({ now = Date.now() } = {}) {
         remoteConfigured: !!s.remoteConfigured,
         watchDir: !!String(s.watchDir || '').trim(),
         // 72회차 F2: upgrade.json 이 손상돼 보존본만 남으면 로더가 환경 변수 기본값으로 돌아간다 — '업그레이드 소스 없음(미설정)' 이 아니라 주의다.
-        loadError: damaged('upgrade.json'),
+        loadError: damaged('upgrade.json') || !!upgradeSettingsWriteRefusal(),
+        readError: !!upgradeSettingsWriteRefusal(),   // 123회차: 읽기 오류 동안은 마지막으로 읽은 값(없으면 env 기본값)이다 — '업그레이드 소스 없음' 이 아니다
       };
     },
   };

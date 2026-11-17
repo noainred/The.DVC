@@ -269,6 +269,9 @@ describe('v2.598 WEBUI-2598-07 — 스위치 0대·라이선스 0', () => {
   });
   it('스위치 0대에서 "전부 수집 정상" 이라 말하지 않는다', () => {
     expect(switchesMeta(aggregate([]))).toBe('등록된 스위치 없음');
+    // 등록부를 못 읽은 동안의 0 은 '등록 없음' 이 아니다(Chromium 검증 — 128회차의 남은 자리). 스위치가 있으면 표지는 문구를 바꾸지 않는다.
+    expect(switchesMeta(aggregate([]), { unread: true })).toBe('등록부를 읽지 못함');
+    expect(switchesMeta({ switches: 2, failed: 0 }, { unread: true })).toBe('전부 수집 정상');
     expect(switchesMeta({ switches: 2, failed: 1 })).toBe('수집 실패 1대');
     expect(switchesMeta({ switches: 2, failed: 0 })).toBe('전부 수집 정상');
   });

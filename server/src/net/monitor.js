@@ -170,7 +170,7 @@ export function removeMonitor(id) {
   if (cache.length !== before) {
     persist();
     // v2.591: 지운 모니터의 정지 기록도 지운다 — 같은 id 가 다시 쓰일 일은 거의 없지만 유령 기록을 남기지 않는다.
-    netmonAuthGuard.clearAuthStop(`mon|${id}|A`); netmonAuthGuard.clearAuthStop(`mon|${id}|B`);
+    netmonAuthGuard.clearAuthStop(`mon|${id}|A`, { verified: false }); netmonAuthGuard.clearAuthStop(`mon|${id}|B`, { verified: false });
   }
   return before !== cache.length;
 }

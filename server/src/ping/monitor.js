@@ -330,10 +330,15 @@ export function startPingMonitor() {
   if (!config.ping.enabled) { console.log('[ping] 모니터 비활성(PING_MON_ENABLED=false)'); return; }
   // 기동 시 자동 시드/동기화: vCenter(기존 Ping 모니터링), 엣지 노드(네트워크 체크), vCenter 포트.
   try {
-    const { vcenters } = loadVcenterConfig();
-    const rv = seedVcenterTargets(vcenters); if (rv.added) console.log(`[ping] vCenter ${rv.added}개 자동 대상 등록`);
+    const vcCfg = loadVcenterConfig();
+    const { vcenters } = vcCfg;
+    // 121회차(118회차 반증 R3 — 재현): 기동 때 vcenters.json 을 **못 읽었으면**(readError · 마지막으로 읽은 목록도 없다) 빈 목록은 '등록 0개' 가 아니다 —
+    //   그 목록으로 동기화하면 vCenter×포트 대상 전부(사용자가 고친 기준값 · 켬/끔 포함)를 지웠고, 등록부가 다시 읽혀도 다음 재시작까지 돌아오지 않았다.
+    const vcUnknown = !!(vcCfg.readError && !vcCfg.file);
+    if (vcUnknown) console.warn(`[ping] vCenter 등록부(vcenters.json)를 읽지 못해(${vcCfg.readError}) vCenter 포트 대상을 맞추지 않았습니다(지우지 않음 — 읽힌 뒤 재시작하거나 vCenter 포트 화면의 ‘vCenter 동기화’ 를 누르세요)`);
+    const rv = seedVcenterTargets(vcenters); if (rv.added) console.log(`[ping] vCenter ${rv.added}개 자동 대상 등록`);   // 빈 목록의 시드는 아무것도 바꾸지 않는다(추가만 한다)
     const re = seedEdgeTargets(listCollectors()); if (re.added) console.log(`[ping] 엣지 노드 ${re.added}개 자동 대상 등록`);
-    syncVcPortTargets(vcenters.map((v) => ({ id: v.id, name: v.name, host: v.host }))); // vcPorts가 있으면 vCenter×포트 재구성
+    if (!vcUnknown) syncVcPortTargets(vcenters.map((v) => ({ id: v.id, name: v.name, host: v.host }))); // vcPorts가 있으면 vCenter×포트 재구성
   } catch (e) { console.warn('[ping] 자동 시드 실패:', e.message); }
   const s = loadPingSettings();
   if (isMockMode()) {

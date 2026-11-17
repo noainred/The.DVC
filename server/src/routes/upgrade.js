@@ -12,6 +12,7 @@ import { checkpointConfigDbs } from '../upgrade/dbCheckpoint.js';   // 86회차 
 import { upgradeFromBundleBytes, restartProcess } from '../upgrade/upgrade.js';
 import { decodeManifestHeader, MANIFEST_HEADER } from '../upgrade/signature.js'; // v2.730(검토 S-10): push 의 서명 manifest
 import { loadSettings as loadUpgradeSettings, upgradeTokenDropped, upgradeSettingsWriteRefusal } from '../upgrade/settings.js'; // v2.731(A3-01 ①)
+import { unreadMark } from './settingsUnreadMark.js';   // 123회차: 조회 응답의 읽기 오류 표지
 import { ssrfBlockReason } from '../collector/registry.js';
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
@@ -149,8 +150,14 @@ export function detectInstallState(dir) {
 const adminOnly = [requireRole('admin'), fullScopeOnlyWith('업그레이드 제어는 포탈 전체에 적용되므로 전체 범위(vCenter 제한 없는) 관리자만 할 수 있습니다.')];
 
 // Current upgrade status (version, config summary, last check/result).
+/*
+ * 123회차(112회차 분류표 'out' 대조 — 재현): 설정 파일(upgrade.json)을 읽지 못한 동안 아래 값은 저장된 설정이 아니라 마지막으로 읽은 값(기동 뒤 한 번도 못 읽었으면 env 기본값)이다 —
+ *   표지가 없어 화면이 그 값으로 편집 폼을 채웠고, 다시 읽힌 뒤의 저장이 원격 소스 주소 · 자동 적용을 그 값으로 덮고 저장된 토큰을 폐기했다(주소가 바뀌면 토큰을 승계하지 않는다).
+ *   조회가 표지(loadError.readError — routes/settingsUnreadMark.js)를 싣고 화면이 저장을 잠근다. 다시 읽혔으면 매니저도 저장된 설정으로 돌아온다(syncSettingsAfterUnread).
+ */
+const statusView = () => { upgradeManager.syncSettingsAfterUnread(); return { ...upgradeManager.status(), ...unreadMark(upgradeSettingsWriteRefusal()) }; };
 upgradeRouter.get('/status', adminOnly, (_req, res) => {
-  res.json(upgradeManager.status());
+  res.json(statusView());
 });
 
 // Check both sources for a newer version (no install).
@@ -175,7 +182,7 @@ upgradeRouter.post('/restart', adminOnly, (_req, res) => {
 
 // Read the editable upgrade settings (token redacted).
 upgradeRouter.get('/settings', adminOnly, (_req, res) => {
-  res.json(upgradeManager.status());
+  res.json(statusView());
 });
 
 // 현재 서버 상태를 분석해 설치 경로(installDir) 자동 감지값과 점검 근거를 돌려준다(읽기 전용).

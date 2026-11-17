@@ -28,6 +28,7 @@ const TOOL_ROWS = roleToolRows(SPECIAL_TOOLS);
 // vitest 로 고정(userAdmin/permMatrixOps.test.js). 이 파일은 setState 래퍼만 유지.
 import { hasMatrixKey, toggleMatrixKey, isToolAllowed, toggleToolDenied, setAllToolsDenied } from './userAdmin/permMatrixOps.js';
 import { mergeReloadedPerms } from './userAdmin/permReload.js'; // v2.743(감사 WEB-02): 다시 읽기가 저장 안 한 매트릭스 편집을 덮지 않게
+import { unreadMarkOf, unreadKind, saveLockedByUnread, shouldReseed } from './settingsUnread.js';   // 123회차: 못 읽은 동안의 최소 권한 행으로 저장하지 않는다
 import { STable } from '../components/STable.jsx';
 
 import { REGIONS } from '../regions.js'; // v2.575 IMP-10 — 단일 소스
@@ -75,6 +76,12 @@ export default function UserAdmin() {
   // v2.743(감사 WEB-02): load() 는 행 동작(추가·역할·삭제·범위·비밀번호·OTP) 뒤에도 불린다 — 그때 '저장 안 한 편집이 있는가' 를
   //   렌더 시점 값(클로저)이 아니라 지금 값으로 봐야 한다(요청이 도는 사이 사용자가 매트릭스를 고칠 수 있다). 그래서 ref 를 함께 둔다.
   const permDirtyRef = useRef(false);
+  // 123회차(112회차 분류표 'out' 대조): 권한 파일을 못 읽은 동안 매트릭스는 저장된 설정이 아니라 **최소 권한 행**(operator · viewer 대시보드만 · 도구 거부 목록 빔)이다.
+  //   저장은 그동안 서버가 거절하지만(503 · 409 — '파일 권한을 고치고 재시작'), 재시작 뒤 열려 있던 이 화면의 ‘저장’ 은 그 최소 권한 행(+ 그 위의 편집)을 역할 행 전체로 보내
+  //   저장돼 있던 역할별 권한 · 도구 거부 목록을 덮었다(다시 읽기는 편집 중인 역할 칸을 화면 값으로 지킨다 — v2.743). 표지가 있는 동안 저장을 잠그고,
+  //   못 읽은 값 위의 편집은 상태가 바뀐 조회(다시 확인 · 행 동작 뒤 다시 읽기)에서 버린다.
+  const permsRef = useRef(null);
+  permsRef.current = perms;
   const setPermDirty = (v) => { permDirtyRef.current = Boolean(v); setPermDirtyState(Boolean(v)); };
   const [vcx, setVcx] = useState([]);         // 범위 지정용 vCenter 목록 [{id,name,region}]
   // 점검 A5-10: vCenter 목록 조회 실패를 '표시할 vCenter가 없습니다'(= 0개)로 말하지 않는다. 실패는 따로 들고
@@ -103,7 +110,10 @@ export default function UserAdmin() {
       setData(u);
       // v2.743(WEB-02): 저장하지 않은 매트릭스 편집이 있으면 역할별 편집 칸은 화면 값을 지킨다(users 재정의 등 나머지는 서버 값).
       //   예전에는 조건 없이 덮고 permDirty 를 내려, 행 동작 하나가 편집과 '저장되지 않았습니다' 경고를 말없이 지웠다.
-      if (p) setPerms((cur) => mergeReloadedPerms(cur, p, permDirtyRef.current).perms);
+      if (p) {
+        if (shouldReseed(unreadKind(unreadMarkOf(permsRef.current)), unreadMarkOf(p))) setPermDirty(false);   // 123회차: 최소 권한 행 위의 편집은 지키지 않는다
+        setPerms((cur) => mergeReloadedPerms(cur, p, permDirtyRef.current).perms);
+      }
       applyVcList(vc);
       setError(null);
     } catch (e) { setError(e.message); }
@@ -178,7 +188,10 @@ export default function UserAdmin() {
     setPerms((p) => ({ ...p, matrix: toggleAdminDenied(p.matrix, key) }));
     setPermDirty(true);
   };
+  // 123회차: 손상(보존본)도 서버가 부분 저장을 거절한다(409) — 표지가 있으면 둘 다 잠근다. ‘기본값’(초기화)은 서버가 손상일 때 받는 해제 길이라 잠그지 않는다.
+  const permLocked = saveLockedByUnread(unreadMarkOf(perms), { corruptLocks: true });
   const savePerms = async () => {
+    if (permLocked) return;
     const r = await putJson('/admin/permissions', {
       operator: perms.matrix.operator, viewer: perms.matrix.viewer, toolsDenied: perms.matrix.toolsDenied,
       ...(perms.canEditAdminRow ? { adminDenied: perms.matrix.adminDenied || [] } : {}),
@@ -202,7 +215,9 @@ export default function UserAdmin() {
   const resetPerms = async () => {
     if (!window.confirm('권한 매트릭스를 기본값으로 되돌릴까요?')) return;
     const r = await postJson('/admin/permissions/reset', {}).catch((e) => ({ ok: false, reason: e.message }));
-    if (r.ok) { setPerms((p) => ({ ...p, matrix: r.matrix })); setPermDirty(false); flash(true, '기본값으로 초기화했습니다.'); }
+    // 131회차(123회차 P1 반증): 손상(보존본) 상태의 초기화는 서버가 받는 해제 길이다 — 성공하면 서버의 표지는 사라지는데, 여기서 matrix 만 갈아 끼워
+    //   옛 표지(loadError)가 화면에 남았다: 123회차가 넣은 저장 잠금이 ‘다시 확인’ 을 누를 때까지 풀리지 않고 '권한 파일 못 읽음' 안내도 그대로였다. 초기화 뒤 다시 읽는다.
+    if (r.ok) { setPerms((p) => ({ ...p, matrix: r.matrix })); setPermDirty(false); flash(true, '기본값으로 초기화했습니다.'); await load(); }
     else flash(false, r.reason);
   };
 
@@ -394,13 +409,13 @@ export default function UserAdmin() {
           <div className="flex between wrap gap" style={{ marginBottom: 8 }}>
             <div className="section-title" style={{ margin: '4px 0' }}>기능 권한 (역할별)</div>
             <div className="flex gap">
-              <button className="login-btn" style={{ flex: 'none', padding: '7px 14px', opacity: permDirty ? 1 : 0.55 }} disabled={!permDirty} onClick={savePerms}>저장</button>
+              <button className="login-btn" style={{ flex: 'none', padding: '7px 14px', opacity: permDirty ? 1 : 0.55 }} disabled={!permDirty || permLocked} onClick={savePerms}>저장</button>
               <button className="logout-btn" style={{ padding: '7px 12px' }} onClick={resetPerms}>기본값</button>
             </div>
           </div>
           {/* 전체 점검 22회차 반증 D-11: 권한 파일을 못 읽어 최소 권한으로 동작 중이면 밝힌다 — 아래 행은 저장된 설정이 아니라 잠금 값이다 */}
           {perms.loadError ? (
-            <div style={{ marginBottom: 8, minWidth: 0, overflowWrap: 'anywhere' }}><span className="badge amber">권한 파일 못 읽음</span> <span className="muted" style={{ fontSize: 12 }}>{perms.loadError.reason}</span></div>
+            <div data-perm-unread="" style={{ marginBottom: 8, minWidth: 0, overflowWrap: 'anywhere' }}><span className="badge amber">권한 파일 못 읽음</span> <span className="muted" style={{ fontSize: 12 }}>{perms.loadError.reason} 아래 행은 저장된 설정이 아니라 최소 권한이라 ‘저장’ 을 잠급니다 — 풀린 뒤 ‘다시 확인’ 을 누르면 저장된 값으로 다시 채웁니다.</span> <button type="button" className="tab" style={{ flex: 'none', padding: '2px 10px', marginLeft: 6 }} onClick={load}>다시 확인</button></div>
           ) : null}
           <div className="muted" style={{ fontSize: 12, marginBottom: 10, lineHeight: 1.7 }}>
             <BoldText text={MATRIX_NOTE} />

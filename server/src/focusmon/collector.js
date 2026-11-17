@@ -15,7 +15,7 @@
  *  · 구성 구획(30초)은 마지막 값을 들고 다음 프레임에 쓴다. 프로세스 상위 30 은 PROC 구획 둘의 차이.
  */
 import { withSsh, isSshAuthError, isSshHostKeyError } from '../proxy/sshExec.js';
-import { createAuthGuard } from '../util/authGuard.js';
+import { createAuthGuard, isUnreadStop } from '../util/authGuard.js';
 import { scriptFor, normInterval, normProcEvery } from './script.js';
 import { loadWindow, nodeCounters } from './load.js';
 import { createFrameParser, frameToRaw, LINE_MAX } from './parse.js';
@@ -232,7 +232,7 @@ export function createCollector(target, { interval, procEvery, keys, onSample, o
     procEvery: () => pe,
     /** 사람이 ‘다시 연결’ — 인증 정지를 지우고 지금 다시 시도한다. */
     retry() {
-      focusAuthGuard.clearAuthStop(authIdOf(t));
+      focusAuthGuard.clearAuthStop(authIdOf(t), { verified: false });
       fails = 0;
       if (busy && ctl && !ctl.signal.aborted) ctl.abort(); else schedule(0);
     },
@@ -269,7 +269,8 @@ export async function testTarget(target, { keys, connect = withSsh, timeoutMs = 
   const dev = authDevOf(target, info.fingerprint);
   // 정지된 계정이면 시험도 하지 않는다(누를 때마다 로그인 1회 = 잠금 경로 — v2.929 반증 F11 과 같은 판단). ‘다시 연결’ 이 정지를 지운다.
   const stopRec = focusAuthGuard.peekAuthStop(dev);
-  if (stopRec) return { ok: false, kind: 'auth-stopped', error: `키 로그인 거부로 멈춰 있습니다(${stopRec.reason}) — 공개키를 넣은 뒤 ‘다시 연결’ 을 누르세요.`, ms: 0 };
+  // 127회차: 정지 기록 파일을 못 읽어 모르는 대상은 키 로그인이 거부된 것이 아니다 — 사람이 누른 시험은 한 번 시도한다(거부되면 아래에서 실제 정지로 기록)
+  if (stopRec && !isUnreadStop(stopRec)) return { ok: false, kind: 'auth-stopped', error: `키 로그인 거부로 멈춰 있습니다(${stopRec.reason}) — 공개키를 넣은 뒤 ‘다시 연결’ 을 누르세요.`, ms: 0 };
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeoutMs); timer.unref?.();
   let hello = null;

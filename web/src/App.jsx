@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
-import { usePolling, fetchJson, postJson, getToken, setToken, setUnauthorizedHandler, fetchAuthConfig, fetchMe, broadcastLogout, LOGOUT_BROADCAST_KEY, setCurrentUser, toolAllowed, can, getCurrentUser } from './api.js';
+import { usePolling, fetchJson, postJson, getToken, setToken, setUnauthorizedHandler, fetchAuthConfig, fetchMe, broadcastLogout, LOGOUT_BROADCAST_KEY, TOKEN_KEY, setCurrentUser, toolAllowed, can, getCurrentUser } from './api.js';
+import { accountKeyOf, noteAccount, tokenChangeAction } from './accountReset.js'; // 전체 점검 129회차 A2 · A4 — 로그아웃 · 계정 전환 때 이전 계정의 창 상태를 비운다
 import { SearchBox, Modal, StateBadge, Loading, ErrorBox } from './components/ui.jsx';
 import { RemoteConsoleWindow } from './remote/RemoteConsoleWindow.jsx';
 import Login from './views/Login.jsx';
@@ -219,15 +220,36 @@ export default function App() {
   // 로그아웃(S-05): 서버에 이 세션의 폐기를 먼저 알린다(복사해 둔 토큰도 무효가 된다). 실패해도 화면 로그아웃은 그대로 진행한다.
   const logout = () => { serverLogout(getToken()); setToken(null); broadcastLogout(); setUser(null); };
 
+  // 전체 점검 129회차 A2: 로그아웃 · 계정 전환이면 이전 계정이 이 창에 남긴 것(원격 콘솔 세션 — 대상 서버 비밀번호를 든다)을 비운다.
+  //   모듈 변수는 Portal 이 언마운트돼도 남는다 — 같은 창에서 다음 사람이 로그인하면 이전 사람의 콘솔 탭 · 비밀번호(Dup)가 그대로였다.
+  useEffect(() => { if (user !== 'loading') noteAccount(accountKeyOf(user)); }, [user]);
+
   // 크로스탭 로그아웃 — 한 탭에서 로그아웃하면 다른 탭도 즉시 세션 종료(sessionStorage 토큰
   // 탭 포함). 이전에는 리스너가 없어 복제 탭이 무기한 인증 상태로 남았다.
+  const userRef = useRef(user);
+  userRef.current = user;
   useEffect(() => {
+    let seq = 0;
     const onStorage = (e) => {
       // 다른 탭의 로그아웃 — 이 탭이 따로 들고 있던 토큰(sessionStorage)도 서버에서 폐기한다(같은 토큰이면 이미 폐기돼 401 — 무해).
-      if (e.key === LOGOUT_BROADCAST_KEY) { serverLogout(getToken()); setToken(null); setUser(null); }
+      if (e.key === LOGOUT_BROADCAST_KEY) { serverLogout(getToken()); setToken(null); setUser(null); seq += 1; return; }
+      // 전체 점검 129회차 A4: 다른 탭이 토큰을 바꿨다(로그인 · 연장). 이 탭은 저장소 토큰을 그때그때 읽으므로 요청은 이미 새 토큰으로 나간다 —
+      //   새 토큰의 주인이 지금 화면의 계정과 다르면 화면(이름 · 역할 · 메뉴 · 버튼 게이팅)을 그 계정으로 바꾼다(Portal 은 key 로 새로 마운트).
+      //   예전에는 로그아웃 방송 없이 계정이 바뀌면(세션 만료 401 뒤 다른 계정 로그인 · ‘이 탭만’ 로그인 탭 옆에서 유지 로그인) 이전 계정 화면이
+      //   새 계정의 토큰으로 계속 돌았다. 못 읽었거나 같은 계정이면 그대로 둔다(무효 토큰이면 다음 요청의 401 이 로그아웃시킨다).
+      if (e.key === TOKEN_KEY && e.newValue && e.newValue !== e.oldValue) {
+        const cur = userRef.current;
+        if (!cur || cur === 'loading' || !getToken()) return;
+        const my = ++seq;
+        fetchMe().then((me) => {
+          if (my !== seq || tokenChangeAction(userRef.current, me) !== 'switch') return;   // 그사이 또 바뀌었으면 마지막 것만
+          noteAccount(accountKeyOf(me));
+          setLoginNotice(''); setUser(me);
+        }).catch(() => { /* 못 읽음 — 판정하지 않는다 */ });
+      }
     };
     window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
+    return () => { seq += 1; window.removeEventListener('storage', onStorage); };
   }, []);
 
   // 전역 권한 접근자(api.can/toolAllowed)에 현재 사용자를 반영 — 버튼/도구 게이팅이 참조한다.
@@ -255,7 +277,7 @@ export default function App() {
         <button className="login-btn" style={{ flex: 'none', padding: '9px 18px' }} onClick={() => window.location.reload()}>새로고침</button>
       </div></div>
     }>
-      <Portal user={user} onLogout={logout} />
+      <Portal key={accountKeyOf(user) || 'anon'} user={user} onLogout={logout} />
       {/* 접속 공지 팝업(v2.722) — 로그인 뒤에만(무인증 면을 늘리지 않는다). 기본 화면·콘솔 모두 위에 뜬다. */}
       <Suspense fallback={null}><NoticePopup username={user.username || ''} /></Suspense>
       {/* 세션 수명 만료 경고·연장(v2.428) — 유휴 로그아웃과는 별개 축이다.

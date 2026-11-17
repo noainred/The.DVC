@@ -116,7 +116,7 @@ describe('안내 문구 — 기본값임을 말하고 · 읽기 오류면 잠근
     expect(t).toMatch(/‘설정 저장’ 을 누르면 이 화면의 값이 새 설정/);
     expect(t).not.toMatch(/잠급니다/);
     const t2 = settingsUnreadNote(CORRUPT, { what: 'SAN 포트 사용량 수집 설정', save: '저장 · 지금 정리', corruptLocks: true });
-    expect(t2).toMatch(/‘저장 · 지금 정리’ 을 잠급니다/);
+    expect(t2).toMatch(/‘저장 · 지금 정리’ 를 잠급니다/);   // 123회차: 받침 없는 이름은 ‘를’(예전 기대값이 틀린 조사를 고정했다)
     expect(t2).toMatch(/확정하거나 보존본을 되돌리세요/);
     expect(t2).not.toMatch(/`/);
   });

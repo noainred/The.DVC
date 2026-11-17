@@ -17,6 +17,7 @@ import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
 import { registerExitFlush } from '../util/exitFlush.js';
 import { capStr } from '../util/capStr.js';
 import { readJsonFile, READ_RETRY_MS } from '../util/jsonFileLoad.js'; // 87회차 ⓐ: 읽기 오류 ≠ 손상(공용 읽기 판정)
+import { inRetryWindow } from '../util/jsonFileRead.js';   // 128회차: 재읽기 간격 판정은 공용(시계가 뒤로 가도 그 차만큼 굳지 않게)
 import { envPositive } from '../util/envNumber.js';   // 55회차: 양수 env 는 하나로
 
 const FILE = path.join(config.configDir, 'central-inventory.json');
@@ -51,7 +52,7 @@ let readBlocked = false; let readRetryAt = 0;
 /** 87회차 ⓐ: 저장해도 되는가 — 읽기 오류였으면 간격마다 다시 읽어 합친다(위 규칙). 아직 못 읽으면 false. */
 function inventoryWritable() {
   if (!readBlocked) return true;
-  if (Date.now() < readRetryAt) return false;
+  if (inRetryWindow(Date.now(), readRetryAt, READ_RETRY_MS)) return false;
   const r = readJsonFile(FILE, { parse: parseInventoryFile, preserve: false });
   if (r.kind === 'read-error') { readRetryAt = Date.now() + READ_RETRY_MS; return false; }
   if (r.kind === 'ok') {

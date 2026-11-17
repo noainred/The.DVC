@@ -98,6 +98,8 @@ const NL_OP_ALIAS = new Map([['=', 'eq'], ['==', 'eq'], ['!=', 'ne'], ['<>', 'ne
 /** 값이 아니라 판정으로 푸는 필드(testFilter) — 크기 비교는 뜻이 없다. */
 const NL_VIRTUAL = new Set(['region', 'ip', 'tag']);
 const NL_VIRTUAL_OPS = new Set(['eq', 'ne', 'contains', 'in']);
+/** 조건 결합(match) — 없으면 all. 대소문자 · 흔한 별칭(and · or · every · some)은 받아 준다(122회차). */
+const NL_MATCH_ALIAS = new Map([['', 'all'], ['all', 'all'], ['and', 'all'], ['every', 'all'], ['any', 'any'], ['or', 'any'], ['some', 'any']]);
 
 export function normalizeLlmQuery(raw) {
   const bad = (m) => { const e = new Error(`LLM 응답 형식 오류 — ${m}`); e.code = 'llm-bad-query'; return e; };
@@ -107,7 +109,10 @@ export function normalizeLlmQuery(raw) {
   if (!Object.hasOwn(SCHEMA, entity) && entity.endsWith('s') && Object.hasOwn(SCHEMA, entity.slice(0, -1))) entity = entity.slice(0, -1);
   if (!Object.hasOwn(SCHEMA, entity)) throw bad(`모르는 검색 대상(${short(raw.entity)})`);
   const fields = SCHEMA[entity].fields;
-  let list = raw.filters == null ? [] : raw.filters;
+  // 122회차(116 F3 반증 — 재현): 조건을 **다른 열쇠**로 준 응답(`filter` · `conditions` · `where`)은 filters 가 없는 것으로 읽혀 조건 없이 전량을
+  //   'LLM 해석' 으로 줬다(F3 ① 과 같은 결과 — 열쇠만 다르다). filters 가 없을 때만, 그리고 조건 모양(목록 · field 가 있는 객체)일 때만 같은 것으로 읽는다.
+  const condShaped = (v) => Array.isArray(v) || (!!v && typeof v === 'object' && typeof v.field === 'string');
+  let list = raw.filters ?? [raw.filter, raw.conditions, raw.where].find(condShaped) ?? [];
   if (!Array.isArray(list)) {
     if (list && typeof list === 'object' && typeof list.field === 'string') list = [list];
     else throw bad('filters 가 목록이 아닙니다');
@@ -118,7 +123,11 @@ export function normalizeLlmQuery(raw) {
     if (!f || typeof f !== 'object' || Array.isArray(f)) throw bad('조건이 객체가 아닙니다');
     const field = typeof f.field === 'string' ? f.field.trim() : '';
     if (!Object.hasOwn(fields, field)) throw bad(`스키마에 없는 필드(${short(f.field)})`);
-    const opRaw = f.op == null ? 'eq' : String(f.op).trim().toLowerCase().slice(0, 20);
+    // 122회차(116 F3 반증 — 재현): 연산자를 `operator` 열쇠로 준 조건은 op 가 없는 것으로 읽혀 eq 가 됐다(> 90 이 = 90 — F3 ③ 과 같은 결과).
+    //   부정 표지(not · negate · negated)는 말없이 버려져 **반대 결과**가 나왔다 — 뜻을 옮길 수 없으니 던진다(규칙 기반 폴백 + 사유).
+    if (f.not === true || f.negate === true || f.negated === true) throw bad(`${field} 조건의 부정 표지(not)는 지원하지 않습니다 — ne 로 써야 합니다`);
+    const opSrc = f.op ?? f.operator;
+    const opRaw = opSrc == null ? 'eq' : String(opSrc).trim().toLowerCase().slice(0, 20);
     const op = NL_OPS.has(opRaw) ? opRaw : NL_OP_ALIAS.get(opRaw);
     if (!op) throw bad(`모르는 연산자(${opRaw})`);
     if (NL_VIRTUAL.has(field) && !NL_VIRTUAL_OPS.has(op)) throw bad(`${field} 에는 쓸 수 없는 연산자(${op})`);
@@ -135,7 +144,12 @@ export function normalizeLlmQuery(raw) {
     if (!Object.hasOwn(fields, sf) || NL_VIRTUAL.has(sf)) throw bad(`정렬할 수 없는 필드(${short(raw.sort.field)})`);
     sort = { field: sf, dir: String(raw.sort.dir).trim().toLowerCase() === 'desc' ? 'desc' : 'asc' };
   }
-  return { entity, filters, match: raw.match === 'any' ? 'any' : 'all', sort, limit: raw.limit };
+  // 122회차(116 F3 반증 — 재현): `match` 는 글자 그대로 'any' 일 때만 OR 였다 — 'ANY' · 'or' 는 말없이 AND 가 됐다(엔티티 · 연산자는 대소문자 · 별칭을
+  //   받아 주는데 여기만 빠졌다). 대소문자 · 흔한 별칭은 받아 주고, 모르는 값은 던진다(AND 로 바꿔 결과처럼 주지 않는다).
+  const matchRaw = raw.match == null ? '' : String(raw.match).trim().toLowerCase().slice(0, 20);
+  const match = NL_MATCH_ALIAS.get(matchRaw);
+  if (!match) throw bad(`모르는 조건 결합(${matchRaw})`);
+  return { entity, filters, match, sort, limit: raw.limit };
 }
 
 const num = (v) => (v == null || v === '' ? NaN : Number(v));
@@ -144,20 +158,40 @@ const num = (v) => (v == null || v === '' ? NaN : Number(v));
  * 116회차 F4(재현): 가상 필드(region · ip · tag)는 연산자를 **보지 않았다** — '북미가 아닌 호스트'(region ne 북미)가 북미 호스트만 줬고,
  * `in`(['아시아','유럽'])은 배열을 글자로 바꿔 아무것도 맞지 않았다. eq · contains = 맞음 · ne = 맞지 않음 · in = 값 중 하나라도 맞음.
  */
-function virtualHit(item, field, value, regionIds) {
-  if (field === 'region') return regionIds(value).has(item.vcenterId);
-  if (field === 'ip') {
-    const ips = item.ipAddresses?.length ? item.ipAddresses : (item.ipAddress ? [item.ipAddress] : []);
-    return ips.some((ip) => String(ip).includes(value));
+/*
+ * 122회차(116 F3 · F4 반증 — 실측): 조건은 **질의당 한 번** 풀어 둔다(prepareFilter) — region 은 vCenter 집합(in 은 합집합), ip · tag 는 값 목록,
+ * 일반 필드의 in 은 글자 집합. 예전에는 항목마다 · 값마다 지역 집합을 새로 만들었다. F4 가 가상 필드의 in 을 '값 중 하나' 로 풀면서 값 수만큼
+ * 곱해져, F3 의 상한(조건 20 · in 50) 안에서 VM 6,000 · vCenter 30 에 21초 동안 이벤트 루프가 멈췄다 — 상한이 비용을 묶지 못했다. 판정은 예전과 같다.
+ */
+function prepareFilter(f, regionIds) {
+  const { field, op = 'eq', value } = f || {};
+  if (field === 'region' || field === 'ip' || field === 'tag') {
+    const values = op === 'in' ? (Array.isArray(value) ? value : []) : [value];
+    let hit;
+    if (field === 'region') {
+      const ids = new Set();
+      for (const x of values) for (const id of regionIds(x)) ids.add(id);
+      hit = (item) => ids.has(item.vcenterId);
+    } else if (field === 'ip') {
+      const needles = values.map(String);
+      hit = (item) => {
+        const ips = item.ipAddresses?.length ? item.ipAddresses : (item.ipAddress ? [item.ipAddress] : []);
+        return ips.some((ip) => { const s = String(ip); return needles.some((n) => s.includes(n)); });
+      };
+    } else {
+      const needles = values.map((x) => String(x).toLowerCase());
+      hit = (item) => (item.tags || []).some((t) => { const s = String(t).toLowerCase(); return needles.some((n) => s.includes(n)); });
+    }
+    return { field, op, value, hit };
   }
-  return (item.tags || []).some((t) => String(t).toLowerCase().includes(String(value).toLowerCase()));
+  if (op === 'in' && Array.isArray(value)) return { field, op, value, inSet: new Set(value.map(String)) };
+  return f;
 }
 
 function testFilter(item, f, regionIds) {
   const { field, op = 'eq', value } = f || {};
   if (field === 'region' || field === 'ip' || field === 'tag') {
-    if (op === 'in') return Array.isArray(value) && value.some((x) => virtualHit(item, field, x, regionIds));
-    const hit = virtualHit(item, field, value, regionIds);
+    const hit = (typeof f.hit === 'function' ? f : prepareFilter(f, regionIds)).hit(item);
     return op === 'ne' ? !hit : hit;
   }
   const v = item[field];
@@ -168,7 +202,7 @@ function testFilter(item, f, regionIds) {
     case 'lte': return num(v) <= num(value);
     case 'ne': return String(v).toLowerCase() !== String(value).toLowerCase();
     case 'contains': return String(v ?? '').toLowerCase().includes(String(value).toLowerCase());
-    case 'in': return Array.isArray(value) && value.map(String).includes(String(v));
+    case 'in': return f.inSet ? f.inSet.has(String(v)) : Array.isArray(value) && value.map(String).includes(String(v));
     case 'eq':
     default:
       if (typeof v === 'number' || !Number.isNaN(num(value))) return num(v) === num(value);
@@ -206,7 +240,8 @@ function runQuery(q, allowed = null) {
   // vm/host/datastore/network 모두 vcenterId 를 가진다. allowed=null(무제한)이면 통과.
   if (allowed) items = items.filter((it) => allowed.has(it.vcenterId));
   const regionIds = (region) => new Set((snap.vcenters || []).filter((v) => (v.location?.region || '').toLowerCase() === String(region).toLowerCase()).map((v) => v.id));
-  const filters = Array.isArray(q.filters) ? q.filters : [];
+  // 122회차: 조건을 항목 루프 밖에서 한 번 푼다(prepareFilter — 응답에 싣는 q.filters 는 그대로 둔다).
+  const filters = (Array.isArray(q.filters) ? q.filters : []).map((f) => { try { return prepareFilter(f, regionIds); } catch { return f; } });
   const matchFn = q.match === 'any' ? 'some' : 'every';
   items = items.filter((it) => filters[matchFn]((f) => { try { return testFilter(it, f, regionIds); } catch { return false; } }));
 

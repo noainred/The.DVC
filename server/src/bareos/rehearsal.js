@@ -36,6 +36,8 @@ import { noteRestoreBatchStart, noteRestoreBatchEnd } from './inflight.js';
 import { drActiveVcenterIds } from './drRunner.js';
 import { RESTORES_DEADLINE_MS } from './edgeOps.js';
 import { logAudit } from '../audit.js';
+import { unreadVcenterReasons } from '../metrics/unreadVcenters.js';   // 126회차: '지금 값이 아닌 vCenter' 공용 판정(사본 금지)
+import { notReadWhyText } from '../corelicense/analyze.js';            // 사유 한글(점검중 · 연결 실패 · 보고 낡음) — 문구 한 벌
 
 export const TICK_MS = 60_000;
 export const PER_CORP_MAX = 10;
@@ -271,10 +273,17 @@ export async function runRehearsal(dirId, { trigger = 'timer', by = 'rehearsal',
   const dsUse = new Map();
   const GIB = 1024 ** 3;
   const chosen = [];
+  // 126회차(재현): 수집이 멈춘 vCenter(점검중 · 수집 실패 이월 · 담당 엣지의 보고 끊김 — 공용 판정)의 데이터스토어 여유 · VM 목록은 **마지막으로 읽은 값**이다
+  //   (store 가 수집 실패는 최대 6시간, 위임 보고 끊김 · 점검중은 기한 없이 이어 서빙한다). 그 여유로 '넉넉하다' 고 판정해 복원을 보내면 그사이 찬
+  //   데이터스토어를 채우고(그 위의 VM 이 멈춘다), 이름 겹침 검사도 옛 목록으로 통과한다. 끝맺음 검사(finishBlock)는 중앙 직접의 점검중 · 위임만 막아
+  //   수집 실패 이월과 엣지 실행(보고 끊김)은 그대로 보냈다. 사람이 보지 않는 정기 작업은 모르면 보내지 않는다(위 F5 와 같은 쪽).
+  const unreadVc = unreadVcenterReasons(snap);
   for (const j of cands) {
     if (chosen.length >= policy.perCorp) break;
     const fb = finishBlock(j.vcenterId);
     if (fb) { skip(j, fb); continue; }
+    const ur = unreadVc.get(String(j.vcenterId));
+    if (ur) { skip(j, `이 vCenter 의 수집이 멈춰 있어(${notReadWhyText(ur)}) 데이터스토어 여유 · VM 목록이 지금 값이 아닙니다 — 건너뛰었습니다(수집이 돌아오면 다음 회차에 다시 봅니다)`); continue; }
     let homeKey = ''; let homeNeed = 0;
     if (!policy.datastores[j.vcenterId]) {
       const vm = vmById.get(j.vmId);

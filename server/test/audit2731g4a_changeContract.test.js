@@ -31,7 +31,9 @@ const OTP_SECRET = generateSecret();
 fs.writeFileSync(path.join(CFG, 'users.json'), JSON.stringify({ users: [{ username: 'adm', role: 'admin', totpEnabled: true, totpSecret: OTP_SECRET }] }));
 fs.writeFileSync(path.join(CFG, 'security-session.json'), JSON.stringify({ settingsOwners: ['adm'] }));
 let otpLast = -Infinity;
-const otp = () => { otpLast = Math.max(Math.floor(Date.now() / 30_000) - 1, otpLast + 1); return generateToken(OTP_SECRET, { counter: otpLast }); };
+// 전량 verify(119~131회차 묶음)에서 간헐 실패(403 'OTP 코드가 일치하지 않습니다'): 첫 코드를 '이전 단계(지금 − 1)' 로 만들면 발급과 검증 사이에
+//   30초 경계를 넘는 순간(부하) 검증 창(±1 단계) 밖이 된다. 이 파일은 코드를 2개만 쓰므로 지금 단계에서 시작한다(경계를 한 번 넘어도 유효 · 둘째는 + 1).
+const otp = () => { otpLast = Math.max(Math.floor(Date.now() / 30_000), otpLast + 1); return generateToken(OTP_SECRET, { counter: otpLast }); };
 
 const ADMIN = { username: 'adm', role: 'admin', scope: {} };
 const { changeFailText, requireChanged } = await import('../../web/src/views/changeResult.js');

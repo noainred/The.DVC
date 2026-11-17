@@ -7,6 +7,7 @@
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { usePolling, postJson } from '../../api.js';
+import { requireChanged } from '../changeResult.js';   // 128회차: 409(취소할 실행 없음 · 이미 보냄 · 돌고 있지 않음) 본문을 ‘취소를 보냈습니다’ 로 읽지 않는다
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
@@ -222,7 +223,7 @@ function CorpView({ corps, c, onPick, limits = null, waitMs = null, onChanged = 
   const sendCancel = async () => {
     const r = cancelRow; setSending(true); setSendErr('');
     try {
-      const out = await postJson(`/tools/bareos-backup/jobs/${encodeURIComponent(r.id)}/cancel`, { jobid: r.jobid }, withRelayWait({}, relayDir, limits, 'cancel'));
+      const out = requireChanged(await postJson(`/tools/bareos-backup/jobs/${encodeURIComponent(r.id)}/cancel`, { jobid: r.jobid }, withRelayWait({}, relayDir, limits, 'cancel')));
       setCancelRow(null);
       setNote({ ok: true, text: out?.note || `‘${r.vmName}’ 실행(jobid ${r.jobid})에 취소를 보냈습니다 — Director 가 멈추면 결과가 ‘취소’ 로 남습니다(수 초~수 분).` });
       onChanged();
@@ -234,7 +235,7 @@ function CorpView({ corps, c, onPick, limits = null, waitMs = null, onChanged = 
   const sendStop = async (body) => {
     const g = stopGroup; setSending(true); setSendErr('');
     try {
-      const out = await postJson(`/tools/bareos-backup/groups/${encodeURIComponent(g.id)}/cancel`, body);
+      const out = requireChanged(await postJson(`/tools/bareos-backup/groups/${encodeURIComponent(g.id)}/cancel`, body));
       setStopGroup(null); setNote({ ok: true, text: cancelAcceptedText(out, g.name) }); onChanged();
     } catch (e) { setSendErr(e?.body?.reason || e.message); } finally { setSending(false); }
   };
