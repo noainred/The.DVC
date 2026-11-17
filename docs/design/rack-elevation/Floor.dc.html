@@ -48,7 +48,8 @@ button,select,input{font:inherit;color:inherit}
 .dev .nm{font-family:"JetBrains Mono",monospace;font-weight:500;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1}
 .dev .vl{font-weight:700;flex:0 0 auto}
 .pg{display:flex;gap:2px;flex:0 0 auto}
-.pdu{flex:0 0 8px;position:relative;border:1px solid #2b3852;border-radius:2px}
+.pdu{flex:0 0 10px;position:relative;box-sizing:border-box;border-radius:2px}
+.pdu b{position:absolute;top:1px;left:0;right:0;text-align:center;font-size:7px;line-height:8px;font-weight:800;color:#ffffff}
 .pdu i{position:absolute;left:0;right:0;bottom:0;opacity:.8}
 .lg{display:flex;flex-wrap:wrap;gap:12px;padding:8px 14px;border-top:1px solid #1f2a40;font-size:11.5px;color:#aebbd0}
 .lg .it{display:inline-flex;align-items:center;gap:6px}
@@ -110,16 +111,16 @@ button,select,input{font:inherit;color:inherit}
           <sc-for list="{{racks}}" as="r" hint-placeholder-count="3">
             <div class="rack">
               <button type="button" class="rk-h" onClick="{{r.pick}}"><span class="nm mono" style="color:{{r.nc}}">{{r.id}}</span><span class="dim" style="font-size:11px">{{r.used}} / 42U</span></button>
-              <div class="rk-m"><span>전력 {{r.kw}}</span><span>흡기 최고 {{r.tmax}}</span><span>세로 PDU {{r.pn}}개</span></div>
+              <div class="rk-m"><span>전력 {{r.kw}}</span><span>흡기 최고 {{r.tmax}}</span><span>세로 PDU {{r.pn}}개(액티브 {{r.ph}} · 스탠바이 {{r.ph}})</span></div>
               <div class="rk-b" style="border:2px solid {{r.bc}}">
-                <div class="pg"><sc-for list="{{r.pl}}" as="p" hint-placeholder-count="2"><div class="pdu" title="{{p.tip}}" style="background:{{p.bg}}"><i style="height:{{p.pct}}%;background:{{p.fill}}"></i></div></sc-for></div>
+                <div class="pg"><sc-for list="{{r.pl}}" as="p" hint-placeholder-count="2"><div class="pdu" title="{{p.tip}}" style="background:{{p.bg}};border:{{p.bd}}"><i style="height:{{p.pct}}%;background:{{p.fill}}"></i><b>{{p.ch}}</b></div></sc-for></div>
                 <div class="us"><sc-for list="{{us}}" as="u" hint-placeholder-count="42"><span>{{u}}</span></sc-for></div>
                 <div class="slots">
                   <sc-for list="{{r.devs}}" as="d" hint-placeholder-count="8">
                     <button type="button" class="dev" title="{{d.tip}}" style="bottom:{{d.b}}px;height:{{d.h}}px;background:{{d.bg}};border:1px solid {{d.bd}};color:{{d.fg}}"><span class="nm">{{d.name}}</span><span class="vl">{{d.val}}</span></button>
                   </sc-for>
                 </div>
-                <div class="pg"><sc-for list="{{r.pr}}" as="p" hint-placeholder-count="2"><div class="pdu" title="{{p.tip}}" style="background:{{p.bg}}"><i style="height:{{p.pct}}%;background:{{p.fill}}"></i></div></sc-for></div>
+                <div class="pg"><sc-for list="{{r.pr}}" as="p" hint-placeholder-count="2"><div class="pdu" title="{{p.tip}}" style="background:{{p.bg}};border:{{p.bd}}"><i style="height:{{p.pct}}%;background:{{p.fill}}"></i><b>{{p.ch}}</b></div></sc-for></div>
               </div>
             </div>
           </sc-for>
@@ -188,16 +189,29 @@ class Component extends DCLogic {
           return { name, val, b: (du - 1) * U, h: size * U - 1, bg: c[0], bd: c[1], fg: c[2], tip: name + ' — ' + id + ' · U' + du + ' (' + size + 'U)' };
         });
         const pn = [2, 4, 6][rnd(3)];
-        const mk = (feed, j) => {
-          const w = Math.round((wsum / pn) * (0.75 + rnd(50) / 100));
-          const pct = Math.max(3, Math.min(100, Math.round((w / 7400) * 100)));
-          return { pct, fill: pct >= 80 ? '#ef4444' : '#f59e0b', bg: '#141b2d', tip: 'PDU ' + feed + (j + 1) + ' — ' + (w / 1000).toFixed(1) + ' kW · 부하 ' + pct + '%' };
+        const half = pn / 2; let pRead = 0, pSum = 0;
+        const mk = (role, i) => {
+        const act = role === 'A';
+        const nm = (act ? '액티브 ' : '스탠바이 ') + (i + 1);
+        const unread = false, down = false, took = false;
+        const share = Math.round((wsum / half) * (0.85 + rnd(30) / 100));
+        const w = unread ? null : act ? (down ? 0 : share) : (took ? share : 0);
+        if (w != null) { pRead += 1; pSum += w; }
+        const pct = w == null || w === 0 ? 0 : Math.max(3, Math.min(100, Math.round((w / 7400) * 100)));
+        const kwT = w == null ? '' : (w / 1000).toFixed(1) + ' kW';
+        return {
+          pct, ch: act ? 'A' : 'S',
+          fill: took || pct >= 80 ? '#ef4444' : act ? '#f59e0b' : '#8b9bb4',
+          bg: unread ? 'repeating-linear-gradient(45deg,#1a2236 0 3px,#3a4866 3px 6px)' : '#141b2d',
+          bd: down || took ? '2px solid #ef4444' : act ? '1px solid #c3cee0' : '1px dashed #5d6b85',
+          tip: 'PDU ' + nm + ' — ' + (w == null ? '못 읽음' : down ? '꺼짐 · 0 kW (스탠바이가 넘겨받음)' : took ? '절체됨 · ' + kwT + ' 를 넘겨받는 중' : act ? kwT + ' · 부하 ' + pct + '%' : '대기 · 0 kW'),
         };
-        const pl = Array.from({ length: pn / 2 }, (_, j) => mk('A', j));
-        const pr = Array.from({ length: pn / 2 }, (_, j) => mk('B', j));
+      };
+      const pl = Array.from({ length: half }, (_, i) => mk('A', i));
+      const pr = Array.from({ length: half }, (_, i) => mk('S', i));
         const kw = wsum / 1000;
         all.push({
-          id, row, i, ri, devs, used, pn, pl, pr, nC, nW, nU, tmaxN: tmax, kwN: wn ? kw : null,
+          id, row, i, ri, devs, used, pn, ph: half, pl, pr, nC, nW, nU, tmaxN: tmax, kwN: wn ? kw : null,
           kw: wn === 0 ? '—' : kw.toFixed(1) + ' kW' + (wn < devs.length ? ' (' + devs.length + '대 중 ' + wn + '대)' : ''),
           tmax: tmax == null ? '—' : tmax + '°C',
         });

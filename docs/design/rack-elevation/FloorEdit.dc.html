@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>랙 실장도 — 평면도 그리기 · 수정</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+button,select,input{font:inherit;color:inherit}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.dim{color:#8b9bb4}
+.tb{display:flex;align-items:center;gap:12px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #1f2a40}
+.logo{display:inline-flex;align-items:center;gap:8px;font-weight:700;white-space:nowrap}
+.logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-weight:800;color:#04101f}
+.sel{height:32px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#0f1626;min-width:0;box-sizing:border-box;width:100%}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{height:30px;min-width:34px;padding:0 10px;border:0;background:transparent;color:#aebbd0;font-weight:600;font-size:12px;cursor:pointer}
+.seg button.on{background:rgba(59,130,246,.22);color:#e6edf6}
+.btn{height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#141b2d;font-weight:600;font-size:12px;cursor:pointer;white-space:nowrap}
+.btn.pri{background:#3b82f6;border-color:#3b82f6;color:#04101f}
+.lab{font-size:11px;color:#8b9bb4;font-weight:600}
+.edit{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 14px;border:1px solid #3b82f6;background:rgba(59,130,246,.12);border-radius:10px}
+.panel{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.tool{display:flex;align-items:center;gap:8px;height:36px;padding:0 10px;border-radius:8px;border:1px solid transparent;background:transparent;font-weight:600;font-size:12px;cursor:pointer;text-align:left;width:100%;box-sizing:border-box;color:#c3cee0}
+.tool.on{border-color:#3b82f6;background:rgba(59,130,246,.2);color:#ffffff}
+.tool i{flex:0 0 18px;height:14px;box-sizing:border-box;border:1px solid #8b9bb4;border-radius:2px;display:inline-block}
+.plan{position:relative;width:840px;height:600px;margin:12px;border:3px solid #5d6b85;background:#0a0e17;background-image:linear-gradient(#1a2236 1px,transparent 1px),linear-gradient(90deg,#1a2236 1px,transparent 1px);background-size:40px 40px}
+.plan .t{position:absolute;font-size:10.5px;color:#8b9bb4;white-space:nowrap}
+.fx{position:absolute;box-sizing:border-box;border:1px solid #5d6b85;background:#1a2236;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:10.5px;color:#c3cee0;text-align:center;line-height:1.2}
+.cold{position:absolute;box-sizing:border-box;background:rgba(59,130,246,.10);border:1px dashed #3b82f6;display:flex;align-items:center;justify-content:center;font-size:11px;color:#93c5fd}
+.pr{position:absolute;width:40px;height:80px;box-sizing:border-box;border:1px solid #3b82f6;background:rgba(59,130,246,.2);color:#dbeafe;display:flex;align-items:center;justify-content:center;padding:0;cursor:grab;font-family:"JetBrains Mono",monospace;font-size:9px}
+.hd{position:absolute;width:8px;height:8px;box-sizing:border-box;background:#ffffff;border:1px solid #04101f}
+.dl{display:grid;grid-template-columns:86px minmax(0,1fr);gap:8px 10px;align-items:center;font-size:12px}
+.dl dt{color:#8b9bb4}.dl dd{margin:0;min-width:0}
+.un{display:flex;align-items:center;gap:8px;padding:8px 14px;border-top:1px solid #1f2a40;min-height:44px;box-sizing:border-box;font-size:12px}
+</style>
+</helmet>
+<div style="min-height:1010px;background:#0a0e17;box-sizing:border-box">
+  <div class="tb">
+    <span class="logo"><span class="v">D</span>THE DAVINCI</span>
+    <span class="dim">특수 기능 › 하드웨어 ›</span><strong>랙 실장도</strong>
+    <span class="dim" style="margin-left:auto;font-size:12px">jhpark</span>
+  </div>
+
+  <div style="padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+    <div class="edit">
+      <strong>평면도 편집 중</strong>
+      <span>KR-SEL · 전산실 A</span>
+      <span class="dim">랙을 옮겨도 그 안의 장비 배치는 바뀌지 않습니다</span>
+      <span style="margin-left:auto;font-weight:700">변경 2건</span>
+      <button type="button" class="btn">모두 되돌리기</button>
+      <button type="button" class="btn">편집 끝내기</button>
+      <button type="button" class="btn pri">저장</button>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start">
+      <div class="panel" style="flex:0 0 150px;padding:8px;display:flex;flex-direction:column;gap:2px">
+        <span class="lab" style="padding:4px 6px">그리기 도구</span>
+        <button type="button" class="tool"><i style="border-style:dashed"></i>선택 · 이동</button>
+        <button type="button" class="tool"><i style="background:rgba(59,130,246,.3);border-color:#3b82f6;flex-basis:9px"></i>랙 1개</button>
+        <button type="button" class="tool on"><i style="background:rgba(59,130,246,.3);border-color:#3b82f6"></i>랙 줄</button>
+        <button type="button" class="tool"><i style="background:rgba(59,130,246,.12);border:1px dashed #3b82f6"></i>냉기 통로</button>
+        <button type="button" class="tool"><i style="background:#1a2236"></i>항온항습기</button>
+        <button type="button" class="tool"><i style="background:#1a2236"></i>분전반</button>
+        <button type="button" class="tool"><i style="background:#1a2236"></i>기둥</button>
+        <button type="button" class="tool"><i style="border-width:0 0 3px 0;border-radius:0"></i>출입문</button>
+        <button type="button" class="tool"><i style="border:0;font-style:normal;font-weight:800;line-height:14px;text-align:center">가</i>글자</button>
+        <button type="button" class="tool"><i style="border-width:3px"></i>방 크기</button>
+        <span class="lab" style="padding:10px 6px 4px">보기</span>
+        <label class="tool" style="cursor:pointer"><input type="checkbox" checked>격자에 맞춤</label>
+        <label class="tool" style="cursor:pointer"><input type="checkbox">배경 도면</label>
+        <div style="display:flex;gap:6px;padding:4px 6px"><button type="button" class="btn" aria-label="축소" style="flex:1">−</button><button type="button" class="btn" aria-label="확대" style="flex:1">+</button></div>
+      </div>
+
+      <div class="panel" style="flex:999 1 560px">
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid #1f2a40;font-size:12px">
+          <strong>전산실 A</strong><span class="dim">12.6 m × 9.0 m · 격자 1칸 = 600 mm(바닥 타일) · 랙 1개 = 1칸 × 2칸</span>
+          <span class="dim" style="margin-left:auto">끌어서 줄 길이 정하기 · 방향키 1칸 이동 · R 회전 · Delete 빼기 · Esc 취소</span>
+        </div>
+        <div style="overflow-x:auto">
+          <div class="plan">
+            <div class="t" style="left:6px;top:4px">12.6 m</div>
+            <div class="t" style="left:6px;top:582px">9.0 m ↑</div>
+            <div class="fx" style="left:680px;top:80px;width:80px;height:120px">항온<br>항습기 1</div>
+            <div class="fx" style="left:680px;top:280px;width:80px;height:120px">항온<br>항습기 2</div>
+            <div class="fx" style="left:0;top:400px;width:40px;height:120px;border-style:dashed">분<br>전<br>반</div>
+            <div class="fx" style="left:600px;top:440px;width:40px;height:40px">기둥</div>
+            <div class="fx" style="left:640px;top:572px;width:120px;height:26px;border-color:#c3cee0">출입문</div>
+            <div class="t" style="left:84px;top:108px;font-weight:700;color:#c3cee0">A 줄</div>
+            <div class="cold" style="left:120px;top:160px;width:400px;height:80px">냉기 통로 · 전면이 마주 봄</div>
+            <div class="t" style="left:84px;top:270px;font-weight:700;color:#c3cee0">B 줄</div>
+
+            <sc-for list="{{racks}}" as="k" hint-placeholder-count="19">
+              <button type="button" class="pr" style="left:{{k.x}}px;top:{{k.y}}px;{{k.fe}}">{{k.id}}</button>
+            </sc-for>
+
+            <!-- 옮기는 중: A-10 -->
+            <div style="position:absolute;left:480px;top:80px;width:40px;height:80px;box-sizing:border-box;border:1px dotted #8b9bb4"></div>
+            <div style="position:absolute;left:560px;top:80px;width:40px;height:80px;box-sizing:border-box;border:2px dashed #22c55e;background:rgba(34,197,94,.2)"></div>
+            <div class="pr" style="left:548px;top:92px;background:#1d3a6e;border-bottom:4px solid #e6edf6;box-shadow:0 8px 24px rgba(0,0,0,.6);z-index:3">A-10</div>
+            <div class="t" style="left:606px;top:84px;color:#bbf7d0">A-10 → 2칸 오른쪽</div>
+
+            <!-- 선택: B-04 -->
+            <div style="position:absolute;left:238px;top:238px;width:44px;height:84px;box-sizing:border-box;border:2px solid #ffffff;pointer-events:none"></div>
+            <div class="hd" style="left:234px;top:234px"></div><div class="hd" style="left:278px;top:234px"></div><div class="hd" style="left:234px;top:318px"></div><div class="hd" style="left:278px;top:318px"></div>
+            <div class="hd" style="left:256px;top:330px;border-radius:50%" title="회전"></div>
+
+            <!-- 그리는 중: 새 랙 줄 C -->
+            <sc-for list="{{ghost}}" as="g" hint-placeholder-count="6">
+              <div style="position:absolute;left:{{g.x}}px;top:440px;width:40px;height:80px;box-sizing:border-box;border:2px dashed #22c55e;border-bottom-width:4px;background:rgba(34,197,94,.14);color:#bbf7d0;display:flex;align-items:center;justify-content:center;font-size:9px;font-family:'JetBrains Mono',monospace">{{g.id}}</div>
+            </sc-for>
+            <div class="t" style="left:120px;top:524px;color:#bbf7d0;font-size:11px">새 랙 줄 C — 6랙 · 3.6 m · 전면 아래쪽 · 놓으면 C-01 … C-06 이 만들어집니다</div>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="#ffffff" stroke="#04101f" stroke-width="1.5" aria-hidden="true" style="position:absolute;left:358px;top:496px"><path d="M5 3l14 8-6 1.5L10 19z"/></svg>
+          </div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:14px;padding:8px 14px;border-top:1px solid #1f2a40;font-size:11.5px;color:#aebbd0">
+          <span>굵은 변 = 랙 전면</span><span>초록 점선 = 놓을 자리</span><span>회색 점선 = 원래 자리</span><span>흰 테두리 = 선택한 랙</span>
+          <span style="margin-left:auto">다른 랙 · 설비와 겹치면 빨간 점선으로 보이고 놓이지 않습니다</span>
+        </div>
+      </div>
+
+      <div style="flex:1 1 270px;min-width:0;display:flex;flex-direction:column;gap:12px">
+        <div class="panel" style="padding:12px 14px;display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;align-items:center;gap:8px"><strong>선택한 랙</strong><span class="mono">B-04</span></div>
+          <dl class="dl" style="margin:0">
+            <dt><label for="p-n">이름</label></dt><dd><input id="p-n" class="sel mono" value="B-04"></dd>
+            <dt><label for="p-r">용도</label></dt><dd><input id="p-r" class="sel" value="스토리지"></dd>
+            <dt><label for="p-h">높이(U)</label></dt><dd><input id="p-h" class="sel mono" value="42"></dd>
+            <dt>전면 방향</dt><dd><div class="seg"><button type="button" class="on" aria-label="위">↑</button><button type="button" aria-label="아래">↓</button><button type="button" aria-label="왼쪽">←</button><button type="button" aria-label="오른쪽">→</button></div></dd>
+            <dt><label for="p-a">액티브 PDU</label></dt><dd><input id="p-a" class="sel mono" value="2"></dd>
+            <dt><label for="p-s">스탠바이 PDU</label></dt><dd><input id="p-s" class="sel mono" value="2"></dd>
+            <dt>위치</dt><dd class="mono">가로 7칸 · 세로 7칸</dd>
+          </dl>
+          <div style="display:flex;flex-wrap:wrap;gap:8px"><button type="button" class="btn">실장도 열기</button><button type="button" class="btn">평면도에서 빼기</button></div>
+          <span class="dim" style="font-size:11.5px">‘빼기’ 는 평면도 위치만 지웁니다. 랙과 그 안의 장비 배치는 남습니다. 랙 삭제는 장비가 없는 랙만 됩니다.</span>
+        </div>
+
+        <div class="panel">
+          <div style="display:flex;align-items:center;gap:8px;padding:10px 14px"><strong>평면도에 없는 랙</strong><span class="dim">2</span><span class="dim" style="margin-left:auto;font-size:11px">평면도로 끌어 놓기</span></div>
+          <div class="un"><span class="mono">A6</span><span class="dim">엑셀 가져오기로 생김 · 22대</span></div>
+          <div class="un"><span class="mono">B-11</span><span class="dim">실장도에서 추가 · 0대</span></div>
+        </div>
+
+        <div class="panel" style="padding:12px 14px;display:flex;flex-direction:column;gap:8px">
+          <strong>배경 도면(선택)</strong>
+          <span class="dim" style="font-size:12px">기존 도면 그림을 밑에 깔고 그 위에 랙을 놓을 수 있습니다. 그림은 따라 그리기용이고 포탈이 그림에서 랙을 읽지는 않습니다.</span>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><button type="button" class="btn">도면 그림 올리기</button><label for="p-o" class="lab">투명도</label><input id="p-o" type="range" min="0" max="100" value="40" style="flex:1 1 80px;min-width:60px"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1010}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const racks = [];
+    ['A', 'B'].forEach((row, ri) => {
+      for (let i = 0; i < 10; i += 1) {
+        if (row === 'A' && i === 9) continue;            // A-10 은 옮기는 중이라 따로 그린다
+        racks.push({
+          id: row + '-' + String(i + 1).padStart(2, '0'), x: 120 + i * 40, y: ri === 0 ? 80 : 240,
+          fe: ri === 0 ? 'border-bottom:4px solid #e6edf6' : 'border-top:4px solid #e6edf6',
+        });
+      }
+    });
+    const ghost = Array.from({ length: 6 }, (_, i) => ({ id: 'C-0' + (i + 1), x: 120 + i * 40 }));
+    return { racks, ghost };
+  }
+}
+</script>
+</body>
+</html>

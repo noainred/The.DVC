@@ -45,7 +45,8 @@ button,select,input{font:inherit;color:inherit}
 .dev{position:absolute;left:1px;right:1px;box-sizing:border-box;border-radius:3px;display:flex;align-items:center;gap:6px;padding:0 6px;font-size:10px;line-height:1;text-align:left;cursor:pointer;overflow:hidden;white-space:nowrap}
 .dev .nm{font-family:"JetBrains Mono",monospace;font-weight:500;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1}
 .dev .vl{font-weight:700;flex:0 0 auto}
-.pdu{flex:0 0 8px;position:relative;background:#141b2d;border:1px solid #2b3852;border-radius:2px}
+.pdu{flex:0 0 10px;position:relative;box-sizing:border-box;border-radius:2px}
+.pdu b{position:absolute;top:1px;left:0;right:0;text-align:center;font-size:7px;line-height:8px;font-weight:800;color:#ffffff}
 .pdu i{position:absolute;left:0;right:0;bottom:0;opacity:.8}
 .lg{display:flex;flex-wrap:wrap;gap:12px;padding:8px 14px;border-top:1px solid #1f2a40;font-size:11.5px;color:#aebbd0}
 .lg .it{display:inline-flex;align-items:center;gap:6px}
@@ -104,23 +105,23 @@ button,select,input{font:inherit;color:inherit}
           <sc-for list="{{racks}}" as="r" hint-placeholder-count="6">
             <div class="rack">
               <div class="rk-h"><span class="nm mono">{{r.id}}</span><span class="dim" style="font-size:11px">{{r.used}} / 42U · {{r.pct}}%</span><span class="dim" style="font-size:11px;margin-left:auto">{{r.role}}</span></div>
-              <div class="rk-m"><span>전력 {{r.kw}}</span><span>흡기 최고 {{r.tmax}}</span><span>세로 PDU {{r.pn}}개 · {{r.pkw}}</span></div>
+              <div class="rk-m"><span>전력 {{r.kw}}</span><span>흡기 최고 {{r.tmax}}</span><span>세로 PDU {{r.pn}}개(액티브 {{r.ph}} · 스탠바이 {{r.ph}}) · {{r.pkw}}</span></div>
               <div class="rk-b">
-                <div class="pg"><sc-for list="{{r.pl}}" as="p" hint-placeholder-count="2"><div class="pdu" title="{{p.tip}}" style="background:{{p.bg}}"><i style="height:{{p.pct}}%;background:{{p.fill}}"></i></div></sc-for></div>
+                <div class="pg"><sc-for list="{{r.pl}}" as="p" hint-placeholder-count="2"><div class="pdu" title="{{p.tip}}" style="background:{{p.bg}};border:{{p.bd}}"><i style="height:{{p.pct}}%;background:{{p.fill}}"></i><b>{{p.ch}}</b></div></sc-for></div>
                 <div class="us"><sc-for list="{{us}}" as="u" hint-placeholder-count="42"><span>{{u}}</span></sc-for></div>
                 <div class="slots">
                   <sc-for list="{{r.devs}}" as="d" hint-placeholder-count="8">
                     <button type="button" class="dev" title="{{d.tip}}" onClick="{{d.pick}}" style="bottom:{{d.b}}px;height:{{d.h}}px;background:{{d.bg}};border:1px solid {{d.bd}};color:{{d.fg}};outline:{{d.ol}}"><span class="nm">{{d.name}}</span><span class="vl">{{d.val}}</span></button>
                   </sc-for>
                 </div>
-                <div class="pg"><sc-for list="{{r.pr}}" as="p" hint-placeholder-count="2"><div class="pdu" title="{{p.tip}}" style="background:{{p.bg}}"><i style="height:{{p.pct}}%;background:{{p.fill}}"></i></div></sc-for></div>
+                <div class="pg"><sc-for list="{{r.pr}}" as="p" hint-placeholder-count="2"><div class="pdu" title="{{p.tip}}" style="background:{{p.bg}};border:{{p.bd}}"><i style="height:{{p.pct}}%;background:{{p.fill}}"></i><b>{{p.ch}}</b></div></sc-for></div>
               </div>
             </div>
           </sc-for>
         </div>
         <div class="lg">
           <sc-for list="{{legend}}" as="l" hint-placeholder-count="5"><span class="it"><span class="sw" style="background:{{l.bg}};border:1px solid {{l.bd}}"></span>{{l.label}}</span></sc-for>
-          <span class="it" style="margin-left:auto"><span class="sw" style="background:#f59e0b;opacity:.8;width:8px"></span>랙 옆 세로 띠 = PDU(랙마다 2 · 4 · 6개 · 왼쪽 A 계통 · 오른쪽 B 계통) · 채움 높이 = 부하</span><span class="it"><span class="sw" style="background:#ef4444;width:8px"></span>80% 이상</span><span class="it"><span class="sw" style="background:repeating-linear-gradient(45deg,#1a2236 0 3px,#3a4866 3px 6px);border:1px solid #8b9bb4;width:8px"></span>PDU 못 읽음</span>
+          <span class="it" style="margin-left:auto"><span class="sw" style="background:#f59e0b;width:8px;border:1px solid #c3cee0"></span>A = 액티브 PDU(실선 · 채움 높이 = 부하)</span><span class="it"><span class="sw" style="width:8px;border:1px dashed #5d6b85"></span>S = 스탠바이 PDU(점선 · 대기)</span><span class="it"><span class="sw" style="background:#ef4444;width:8px;border:2px solid #ef4444"></span>절체 — 액티브 꺼짐 · 스탠바이가 넘겨받음</span><span class="it"><span class="sw" style="background:repeating-linear-gradient(45deg,#1a2236 0 3px,#3a4866 3px 6px);border:1px solid #8b9bb4;width:8px"></span>PDU 못 읽음</span>
         </div>
       </div>
 
@@ -324,22 +325,29 @@ class Component extends DCLogic {
       // 세로(0U) PDU — 랙마다 2 · 4 · 6개. 절반은 왼쪽(A 계통), 절반은 오른쪽(B 계통). 용량 7.4 kW 는 그림용 가정.
       const pn = PDUN[id] || 2, half = pn / 2, CAP = 7400;
       let pRead = 0, pSum = 0;
-      const mk = (feed, i) => {
-        const nm = feed + (i + 1);
-        const unread = id === 'A-05' && nm === 'B2';
-        const w = unread ? null : Math.round((wsum / pn) * (0.75 + rnd(50) / 100));
+      const mk = (role, i) => {
+        const act = role === 'A';
+        const nm = (act ? '액티브 ' : '스탠바이 ') + (i + 1);
+        const unread = id === 'A-05' && !act && i === 1;
+        const down = id === 'A-03' && act && i === 2;   // 액티브가 꺼져 스탠바이가 넘겨받은 예
+        const took = id === 'A-03' && !act && i === 2;
+        const share = Math.round((wsum / half) * (0.85 + rnd(30) / 100));
+        const w = unread ? null : act ? (down ? 0 : share) : (took ? share : 0);
         if (w != null) { pRead += 1; pSum += w; }
-        const pct = w == null ? 0 : Math.max(3, Math.min(100, Math.round((w / CAP) * 100)));
+        const pct = w == null || w === 0 ? 0 : Math.max(3, Math.min(100, Math.round((w / 7400) * 100)));
+        const kwT = w == null ? '' : (w / 1000).toFixed(1) + ' kW';
         return {
-          pct, fill: pct >= 80 ? '#ef4444' : '#f59e0b',
+          pct, ch: act ? 'A' : 'S',
+          fill: took || pct >= 80 ? '#ef4444' : act ? '#f59e0b' : '#8b9bb4',
           bg: unread ? 'repeating-linear-gradient(45deg,#1a2236 0 3px,#3a4866 3px 6px)' : '#141b2d',
-          tip: 'PDU ' + nm + ' — ' + (w == null ? '못 읽음' : (w / 1000).toFixed(1) + ' kW · 부하 ' + pct + '%'),
+          bd: down || took ? '2px solid #ef4444' : act ? '1px solid #c3cee0' : '1px dashed #5d6b85',
+          tip: 'PDU ' + nm + ' — ' + (w == null ? '못 읽음' : down ? '꺼짐 · 0 kW (스탠바이가 넘겨받음)' : took ? '절체됨 · ' + kwT + ' 를 넘겨받는 중' : act ? kwT + ' · 부하 ' + pct + '%' : '대기 · 0 kW'),
         };
       };
       const pl = Array.from({ length: half }, (_, i) => mk('A', i));
-      const pr = Array.from({ length: half }, (_, i) => mk('B', i));
+      const pr = Array.from({ length: half }, (_, i) => mk('S', i));
       const pkw = pRead === 0 ? '—' : (pSum / 1000).toFixed(1) + ' kW' + (pRead < pn ? ' (' + pn + '개 중 ' + pRead + '개)' : '');
-      return { id, role, used, pct: Math.round((used / 42) * 100), devs, kw: kwTxt, tmax: tmax == null ? '—' : tmax + '°C', pn, pl, pr, pkw };
+      return { id, role, used, pct: Math.round((used / 42) * 100), devs, kw: kwTxt, tmax: tmax == null ? '—' : tmax + '°C', pn, ph: half, pl, pr, pkw };
     });
     const legend = mode === 'kind' ? Object.values(KIND).map((c) => ({ bg: c[0], bd: c[1], label: c[3] }))
       : mode === 'status' ? Object.values(STAT).map((c) => ({ bg: c[0], bd: c[1], label: c[3] }))
