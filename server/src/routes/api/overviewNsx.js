@@ -7,7 +7,7 @@ import { store, scopedRollups, siteInventoryStale } from '../../store.js';
 import { currentVersion, config } from '../../config.js';
 import { upgradeManager } from '../../upgrade/manager.js';
 import { getGuestGpuHost } from '../../gpu/store.js';
-import { nsxStore } from '../../nsx/store.js';
+import { nsxStore, nsxAuthGuard } from '../../nsx/store.js';
 import { loadRegistry as loadNsxRegistry } from '../../nsx/registry.js';
 import { fetchGroupMembers } from '../../nsx/client.js';
 import { memoJson, hash, scopeKey } from './shared.js';
@@ -125,6 +125,26 @@ export function splitNsxGroupId(groupId, managerId, registryIds = []) {
     .sort((a, b) => b.length - a.length)[0];
   if (hit) return { managerId: hit, rawId: full.slice(hit.length + 1) };
   return { managerId: sep > 0 ? full.slice(0, sep) : '', rawId: sep > 0 ? full.slice(sep + 1) : full };
+}
+
+/**
+ * 116회차 F7: 라이브 조회(보안그룹 멤버)가 **이 포탈이 로그인하지 않기로 한 매니저**에 저장 계정으로 로그인하지 않게 하는 판정(순수).
+ *  · 비활성(enabled:false) — 주기 수집은 건너뛰는데(nsx/store.js) 이 경로는 조회 권한(inv.nsx)만 있으면 누구나 그 주소로 Basic 자격증명을 보냈다
+ *    (v2.741 VC-05 '비활성 vCenter 에는 로그인하지 않는다' 의 NSX 형제). 화면은 비활성 매니저의 그룹을 보여 주지 않아 API 직접 호출로만 닿는다.
+ *  · 인증 실패 정지(authStop) — 계정 잠금을 막으려 주기 수집을 멈춘 매니저에 호출마다 로그인 2회(VM · IP 멤버)를 다시 보냈다. 사람의 확인 경로는
+ *    관리자 연결 테스트(설정 › NSX)다 — 성공하면 정지가 풀린다(authGuard 규칙 3 의 '수동 실행' 은 그 경로).
+ * @returns {null|{error:string, reason:string, code:string, authStopped?:object}} 건너뛸 사유(409 본문) 또는 null
+ */
+export function nsxLiveSkip(mgr, authStop = null) {
+  if (mgr?.enabled === false) {
+    const reason = '비활성 NSX Manager 입니다 — 이 포탈이 로그인하지 않으므로 라이브 멤버 조회를 하지 않았습니다.';
+    return { error: reason, reason, code: 'nsx-disabled' };
+  }
+  if (authStop) {
+    const reason = '인증 실패로 수집이 멈춘 NSX Manager 입니다 — 계정 잠금을 막으려고 같은 계정으로 다시 로그인하지 않습니다. 설정 › NSX 에서 비밀번호를 고치거나 연결 테스트로 확인하세요.';
+    return { error: reason, reason, code: 'nsx-auth-stopped', authStopped: { since: authStop.since, at: authStop.at, attempts: authStop.attempts } };
+  }
+  return null;
 }
 
 export function registerOverviewNsx(api) {
@@ -285,6 +305,9 @@ api.get('/nsx/group-members', invNsx, async (req, res) => {
   if (!managerInScope(mgr, store.get().vcenters, scopedVcenterIds(req.user, store.get()))) {
     return res.status(404).json({ error: `NSX Manager를 찾을 수 없습니다: ${managerId}` });
   }
+  // 116회차 F7: 비활성 · 인증 정지 매니저에는 로그인하지 않는다(범위 판정 뒤 — 범위 밖은 위에서 이미 404). 정지 기록은 읽기만 한다(peek — 해제는 주 폴러).
+  const skip = nsxLiveSkip(mgr, nsxAuthGuard.peekAuthStop(mgr));
+  if (skip) return res.status(409).json(skip);
   try {
     const data = await fetchGroupMembers(mgr, rawId);
     res.json({ mock: false, ...data });

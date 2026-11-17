@@ -22,7 +22,7 @@ import { addUsersToVms } from '../../guest/accountService.js';
 import { onDemandErrorFields } from '../../vcenter/dsBrowse.js';   // v2.742(VC-03 후속): 주문형 로그인 문이 막은 409 의 사유 필드
 import { inUserWriteScope, scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
 import { denyScopedRun, denyFleetWrite } from '../../auth/scopeMerge.js';   // v2.607 AUTHZ2607-06
-import { snapshotFilter, slimVm, guestProbe } from '../../search/deepSearch.js';
+import { snapshotFilter, slimVm, guestProbe, probeMaxVms } from '../../search/deepSearch.js';
 import { analyzeLoginFails, clampLoginFailParams } from '../../security/loginFails.js';
 import { snapMemo, snapCacheClear } from '../../util/snapCache.js';
 import { loadLoginMonitor, saveLoginMonitor, loginMonitorStatus, runLoginAnalysisNow, loginMonitorWriteRefusal } from '../../security/loginMonitor.js';
@@ -391,7 +391,7 @@ adminRouter.post('/deep-search/probe', adminOnly, async (req, res) => {
   }
   try {
     const candidates = snapshotFilter(store.get(), { vcenterIds, f: b.filters || {} }).map(slimVm);
-    const maxVms = Math.min(500, Number(b.maxVms) || 100);
+    const maxVms = probeMaxVms(b.maxVms);   // 116회차 F8: 1~500 정수(음수가 slice(0, -n) 으로 상한을 넘기지 않게 — 판정은 search/deepSearch.js 하나)
     // v2.689(B7): 게스트 OS 에 명령을 실행하는 경로다 — 유형·대상 수를 남긴다(패턴·게스트 비밀번호는 싣지 않는다).
     logAudit({ user: req.user?.username, action: '심층 검색 게스트 탐침', target: vcenterIds.length ? vcenterIds.slice(0, 20).join(',') : '(전체)', detail: `유형 ${String(b.probe.type).slice(0, 40)} · 후보 ${candidates.length}대 · 상한 ${maxVms}대` });
     const r = await guestProbe(candidates, b.probe, { guestUser: b.guestUser || '', guestPass: b.guestPass || '', maxVms });

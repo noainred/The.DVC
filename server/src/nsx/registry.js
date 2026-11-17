@@ -8,7 +8,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { ssrfBlockReason } from '../collector/registry.js'; // v2.537: 등록 시 SSRF 정적 가드
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { makeLoadError } from '../util/registryCore.js'; // 116회차 F1: 읽기 오류 ≠ 손상(공용 판정 — 결정 78 남긴 것 ①)
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { NsxClient, nsxAuthGuard } from './client.js';
 import { ensureNsxDial } from './proxy.js';
@@ -20,24 +21,46 @@ const FILE = path.join(config.configDir, 'nsx.json');
 import { normRequestTimeoutMs } from '../vcenter/soapParse.js'; // v2.598 T2598-03: 요청 시한 [1초, 10분] (0 = 기본값)
 import { REGIONS } from '../util/regions.js'; // v2.575 IMP-10 — 단일 소스
 
+/*
+ * 116회차 F1(재현 — 결정 G2 · 78 ① 의 형제. 97회차 스윕이 '다른 점검 범위' 로 남긴 등록부): 예전에는 읽기와 JSON.parse 를 catch 하나로 받아
+ *   **읽기 오류**(EMFILE · EACCES · EIO)도 손상으로 보고 온전한 nsx.json(매니저 계정 · 비밀번호)을 `.corrupt.*` 로 옮긴 뒤 빈 목록으로 돌았다.
+ *   이 등록부는 캐시 없이 주기 수집(30초)마다 읽으므로 한 번의 일시 오류로 매니저 전부가 화면에서 사라졌고, 다음 등록이 한 건짜리 파일을 썼다.
+ *   판정은 공용(util/registryCore.js makeLoadError.read — 읽기 단계 실패 = read-error · parse 실패 = corrupt):
+ *    - read-error: 원본을 옮기지 않는다 · **마지막으로 읽은 목록**을 돌려준다(주기 수집이 이어진다 — 한 번도 못 읽었으면 빈 목록) ·
+ *      쓰기(등록 · 수정 · 삭제)는 거절한다(`registry-unreadable`) · 30초 간격으로 다시 읽고, 읽히면 풀린다.
+ *    - corrupt: 예전과 같다(보존본으로 옮기고 빈 목록 — 관리자 저장이 새 등록부를 만든다).
+ */
+const loadErr = makeLoadError();
+const WHAT = 'NSX 등록부(nsx.json)';
+let _lastGood = null;   // 마지막으로 읽은 목록(복호된 값 — 호출부가 고치지 못하게 사본으로 들고 사본으로 준다)
+const parseDb = (text) => {
+  const parsed = JSON.parse(text);
+  return openSecretsDeep(Array.isArray(parsed?.managers) ? parsed.managers : []); // v2.296 자격증명 복호(메모리 평문)
+};
+
 export function loadRegistry() {
-  if (!fs.existsSync(FILE)) return [];
-  try {
-    const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    return openSecretsDeep(Array.isArray(parsed?.managers) ? parsed.managers : []); // v2.296 자격증명 복호(메모리 평문)
-  } catch (e) {
-    // save() 주석대로 손상 시 다음 저장이 빈 목록으로 덮어써 전 NSX 매니저가 유실된다 →
-    // 손상본을 .corrupt로 보존해 로드/저장 비대칭(쓰기만 원자적, 로드는 무보존)을 해소.
-    preserveCorrupt(FILE, e.message);
-    return [];
-  }
+  const r = loadErr.read(FILE, parseDb);
+  if (r.kind === 'ok') { _lastGood = structuredClone(r.value); return r.value; }
+  if (r.kind === 'read-error') return _lastGood ? structuredClone(_lastGood) : [];
+  // 파일 없음 · 손상(보존본으로 옮김 — save() 주석대로 조용히 빈 목록으로 넘기면 다음 저장이 원본을 덮는다): 예전과 같이 빈 목록.
+  _lastGood = null;
+  return [];
 }
+/**
+ * @returns {null|{at:number, reason:string, readError?:boolean}} 등록부를 못 읽었으면(읽기 오류 · 손상 · 재시작 뒤 보존본만 남음) 그 사유.
+ * 보존본 판정(설정 폴더 목록)은 여기서만 한다 — loadRegistry 는 주기 수집 · 요청마다 불리고, NSX 를 쓰지 않는 포탈은 파일이 없는 것이 정상이다(idrac/registry.js 와 같은 판단).
+ */
+export function registryLoadError() { loadRegistry(); loadErr.checkCorruptOnly(FILE); return loadErr.get(); }
+/** 읽기 오류 중의 쓰기 거절(`{ok:false, code:'registry-unreadable', reason}`) 또는 null — 로드를 먼저 한다(첫 호출이 쓰기여도 상태가 서게). */
+export function registryWriteRefusal() { loadRegistry(); return loadErr.writeRefusal(WHAT); }
 
 function saveRegistry(list) {
+  loadErr.assertWritable(WHAT); // 마지막 방어선 — 어느 경로도 읽기 오류 중에 원본을 덮지 않는다(던진다)
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   // 원자적 쓰기 — 자격증명(NSX 매니저 계정/비번) 파일이 부분기록으로 손상되면 로드가 []를
   // 반환하고 다음 저장이 빈 목록으로 덮어써 전 매니저가 영구 유실된다.
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ managers: list }), null, 2), { mode: 0o600 }); // 암호화 모드면 password 봉인
+  loadErr.clear();   // 손상 뒤의 관리자 저장이 새 등록부를 만들었다(v2.612 규약)
 }
 
 export function redact(m) {
@@ -98,6 +121,7 @@ function normalize(body, existing = null) {
 
 export function addManager(body) {
   const list = loadRegistry();
+  { const ref = loadErr.writeRefusal(WHAT); if (ref) return ref; }   // 116회차 F1: 읽기 오류 중에는 저장하지 않는다(원본을 한 건짜리로 덮지 않게)
   const [entry, err] = normalize(body);
   if (err) return { ok: false, reason: err };
   if (list.some((m) => m.id === entry.id)) return { ok: false, reason: `이미 존재하는 id: ${entry.id}` };
@@ -108,6 +132,7 @@ export function addManager(body) {
 
 export function updateManager(id, body) {
   const list = loadRegistry();
+  { const ref = loadErr.writeRefusal(WHAT); if (ref) return ref; }   // 116회차 F1
   const idx = list.findIndex((m) => m.id === id);
   if (idx === -1) return { ok: false, reason: `없는 NSX Manager: ${id}` };
   const [entry, err, droppedSecrets] = normalize({ ...body, id }, list[idx]);
@@ -119,6 +144,7 @@ export function updateManager(id, body) {
 
 export function removeManager(id) {
   const list = loadRegistry();
+  { const ref = loadErr.writeRefusal(WHAT); if (ref) return ref; }   // 116회차 F1
   const next = list.filter((m) => m.id !== id);
   if (next.length === list.length) return { ok: false, reason: `없는 NSX Manager: ${id}` };
   saveRegistry(next);
