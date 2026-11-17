@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { saveBlob } from './util/saveBlob.js';
 
 const BASE = '/api';
-const TOKEN_KEY = 'vmportal.token';
+export const TOKEN_KEY = 'vmportal.token';
 // 크로스탭 로그아웃 브로드캐스트 키 — sessionStorage 토큰 탭은 자기 sessionStorage 변경으로는
 // 다른 탭의 storage 이벤트를 못 받으므로, localStorage에 마커를 써서 모든 탭이 수신하게 한다.
 export const LOGOUT_BROADCAST_KEY = 'vmportal.logout';
@@ -211,9 +211,26 @@ function ridHeader(perfId, extra = {}) {
   return rid ? { ...extra, 'X-Request-Id': rid } : extra;
 }
 
-function authHeaders(extra = {}) {
+function authHeaders(extra = {}, sent = null) {
   const token = getToken();
+  if (sent) sent.token = token || null;   // 이 요청이 실어 보낸 토큰(401 판정용 — expireSession)
   return token ? { ...extra, Authorization: `Bearer ${token}` } : extra;
+}
+
+/**
+ * 401 공통 처리(전체 점검 129회차 A1) — **그 요청이 실어 보낸 토큰이 지금 토큰과 같을 때만** 세션을 끝낸다.
+ *
+ * 왜: 예전에는 어느 401 이든 `setToken(null); onUnauthorized()` 였다. 그런데 401 은 '그 요청의 토큰' 이 무효라는 뜻이지
+ *   '지금 세션' 이 무효라는 뜻이 아니다 — 로그아웃 뒤(또는 로그인 화면의 알림 폴링처럼 토큰 없이) 나간 요청의 401 이
+ *   **다시 로그인한 뒤에** 도착하면 새 토큰을 지우고 방금 로그인한 사용자를 내쫓았다(localStorage 토큰이면 다른 탭까지).
+ *   세션 연장으로 토큰이 바뀐 직후 옛 토큰 요청의 401 도 같다. 던지는 오류(계약)는 그대로다.
+ * @param {{token?: string|null}} sent authHeaders 가 채운 기록(없으면 '토큰 없이 보냄' 으로 본다)
+ * @returns {boolean} 세션을 끝냈으면 true
+ */
+function expireSession(sent) {
+  if ((getToken() || null) !== ((sent && sent.token) || null)) return false;
+  setToken(null); onUnauthorized();
+  return true;
 }
 
 // 고RTT/반열림 연결에서 무한 스피너를 막기 위한 클라이언트 타임아웃.
@@ -233,7 +250,8 @@ const isTransientFront = (err, status) => {
 function timeoutSignal(ms) {
   if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') return AbortSignal.timeout(ms);
   const c = new AbortController();
-  setTimeout(() => c.abort(new DOMException('timeout', 'TimeoutError')), ms);
+  // 문구는 Chrome 의 AbortSignal.timeout 과 같게('signal timed out') — 화면의 시한 초과 판정(serviceDownText)이 문장으로 알아본다(129회차 A5).
+  setTimeout(() => c.abort(new DOMException('signal timed out', 'TimeoutError')), ms);
   return c.signal;
 }
 // 호출자 signal(언마운트 취소)과 타임아웃을 결합. AbortSignal.any(Chrome 116+)가 없으면
@@ -275,15 +293,16 @@ export async function fetchJson(path, params = {}, signal, opts = {}) {
   let lastErr;
   for (let attempt = 0; attempt <= retries; attempt++) {
     let res;
+    const sent = {};
     try {
-      res = await fetch(url, { headers: authHeaders(ridHeader(perfId)), signal: withTimeout(signal, timeoutMs) });
+      res = await fetch(url, { headers: authHeaders(ridHeader(perfId), sent), signal: withTimeout(signal, timeoutMs) });
     } catch (err) {
       lastErr = err;
       if (signal?.aborted) throw err;                 // 사용자가 취소(언마운트) → 재시도 안 함
       if (attempt < retries && isTransientFront(err)) { await sleep(300 * 2 ** attempt); continue; }
       throw err;
     }
-    if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다. 다시 로그인하세요.'); }
+    if (res.status === 401) { expireSession(sent); throw new Error('세션이 만료되었습니다. 다시 로그인하세요.'); }
     if (!res.ok) {
       if (attempt < retries && isTransientFront(null, res.status)) { await sleep(300 * 2 ** attempt); continue; }
       // 서버가 준 사유(reason/error)를 우선 노출 — 불투명한 'path -> 404' 대신 원인을 보여준다.
@@ -306,14 +325,15 @@ const mutTimeout = (opts) => (opts?.timeoutMs > 0 ? opts.timeoutMs : MUT_TIMEOUT
 
 export async function postJson(path, body = {}, opts = {}) {
   const perfId = startReq(path, 'POST');
+  const sent = {};
   try {
     const res = await fetch(`${BASE}${path}`, {
       method: 'POST',
-      headers: authHeaders(ridHeader(perfId, { 'Content-Type': 'application/json' })),
+      headers: authHeaders(ridHeader(perfId, { 'Content-Type': 'application/json' }), sent),
       body: JSON.stringify(body),
       signal: timeoutSignal(mutTimeout(opts)),
     });
-    if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다.'); }
+    if (res.status === 401) { expireSession(sent); throw new Error('세션이 만료되었습니다.'); }
     const data = await res.json().catch(() => ({}));
     if (!res.ok && res.status !== 409) throw httpFail(path, res, data);
     return data;
@@ -322,14 +342,15 @@ export async function postJson(path, body = {}, opts = {}) {
 
 export async function sendJson(path, method, body = {}, opts = {}) {
   const perfId = startReq(path, method);
+  const sent = {};
   try {
     const res = await fetch(`${BASE}${path}`, {
       method,
-      headers: authHeaders(ridHeader(perfId, { 'Content-Type': 'application/json' })),
+      headers: authHeaders(ridHeader(perfId, { 'Content-Type': 'application/json' }), sent),
       body: method === 'DELETE' && !Object.keys(body).length ? undefined : JSON.stringify(body),
       signal: timeoutSignal(mutTimeout(opts)),
     });
-    if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다.'); }
+    if (res.status === 401) { expireSession(sent); throw new Error('세션이 만료되었습니다.'); }
     const data = await res.json().catch(() => ({}));
     if (!res.ok && res.status !== 409 && res.status !== 400) throw httpFail(path, res, data);
     return data;
@@ -351,16 +372,18 @@ export const delJson = (path, opts) => sendJson(path, 'DELETE', {}, opts);
  * v2.889 파일 본문 올리기(첨부) — application/octet-stream. 실패도 서버 사유를 담은 객체로 돌려준다(400 · 403 · 404 · 409 · 413 — 화면이 사유를 보인다).
  */
 export async function postBinary(path, blob) {
-  const res = await fetch(`${BASE}${path}`, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/octet-stream' }), body: blob });
-  if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다.'); }
+  const sent = {};
+  const res = await fetch(`${BASE}${path}`, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/octet-stream' }, sent), body: blob });
+  if (res.status === 401) { expireSession(sent); throw new Error('세션이 만료되었습니다.'); }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return { ok: false, status: res.status, reason: data?.reason || data?.error || `HTTP ${res.status}`, ...data };
   return data;
 }
 /** v2.889 인증을 붙여 파일을 받아 Blob 으로(첨부 그림 · 링크 — <img src> 는 인증 머리말을 싣지 못한다). */
 export async function fetchBlob(path) {
-  const res = await fetch(`${BASE}${path}`, { headers: authHeaders() });
-  if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다.'); }
+  const sent = {};
+  const res = await fetch(`${BASE}${path}`, { headers: authHeaders({}, sent) });
+  if (res.status === 401) { expireSession(sent); throw new Error('세션이 만료되었습니다.'); }
   if (!res.ok) { const data = await res.json().catch(() => ({})); throw httpFail(path, res, data || {}); }
   return res.blob();
 }
@@ -377,8 +400,9 @@ export function dispositionName(cd) {
   return '';
 }
 export async function downloadFile(path, filename = '') {
-  const res = await fetch(`${BASE}${path}`, { headers: authHeaders() });
-  if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다.'); }
+  const sent = {};
+  const res = await fetch(`${BASE}${path}`, { headers: authHeaders({}, sent) });
+  if (res.status === 401) { expireSession(sent); throw new Error('세션이 만료되었습니다.'); }
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     // 403 이면 권한 정보를 보존한다 — 다운로드 버튼도 '권한 없음' 안내로 이어져야 한다.
@@ -394,13 +418,14 @@ export async function downloadFile(path, filename = '') {
  * 표를 CSV 로 내보내기). GET downloadFile 과 동작은 같고 method/body 만 다르다.
  */
 export async function postDownload(path, body = {}, filename = '') {
+  const sent = {};
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    headers: authHeaders({ 'Content-Type': 'application/json' }, sent),
     body: JSON.stringify(body),
     signal: timeoutSignal(MUT_TIMEOUT_MS),
   });
-  if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다.'); }
+  if (res.status === 401) { expireSession(sent); throw new Error('세션이 만료되었습니다.'); }
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     // 403 이면 권한 정보를 보존한다 — 다운로드 버튼도 '권한 없음' 안내로 이어져야 한다.
@@ -475,9 +500,10 @@ async function pollFetch(path, params, signal, etag, opts = {}) {
   let lastErr;
   for (let attempt = 0; attempt <= retries; attempt++) {
     let res;
+    const sent = {};
     try {
       res = await fetch(url, {
-        headers: authHeaders(ridHeader(perfId, etag ? { 'If-None-Match': etag } : {})),
+        headers: authHeaders(ridHeader(perfId, etag ? { 'If-None-Match': etag } : {}), sent),
         signal: withTimeout(signal, timeoutMs),
         cache: 'no-store', // 브라우저 캐시 대신 우리가 ETag/304를 직접 구동(결정적)
       });
@@ -487,7 +513,7 @@ async function pollFetch(path, params, signal, etag, opts = {}) {
       if (attempt < retries && isTransientFront(err)) { await sleep(300 * 2 ** attempt); continue; }
       throw err;
     }
-    if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다. 다시 로그인하세요.'); }
+    if (res.status === 401) { expireSession(sent); throw new Error('세션이 만료되었습니다. 다시 로그인하세요.'); }
     if (res.status === 304) return { notModified: true, etag: res.headers.get('ETag') || etag };
     if (!res.ok) {
       if (attempt < retries && isTransientFront(null, res.status)) { await sleep(300 * 2 ** attempt); continue; }

@@ -73,3 +73,5 @@ export function closeRemoteSession(id) {
 export function activateSession(id) { state.activeId = id; state.win = { ...state.win, minimized: false }; emit(); }
 export function setWin(patch) { state.win = { ...state.win, ...patch }; emit(); }
 export function closeAllSessions() { state.sessions = []; state.activeId = null; emit(); }
+/** 테스트 · 진단용 — 지금 저장소(세션 목록). 화면은 useRemoteWindow 를 쓴다. */
+export const _remoteStateForTest = () => state;

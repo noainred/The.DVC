@@ -4,7 +4,7 @@
  * 띄운다. 알림 권한은 사용자 제스처(인사이트 › 인시던트의 "알림 켜기")로 요청한다.
  */
 
-import { fetchJson } from './api.js';
+import { fetchJson, getCurrentUser } from './api.js';
 
 export function registerPwa() {
   if (!('serviceWorker' in navigator)) return;
@@ -43,7 +43,11 @@ export function startAlertNotifications(intervalMs = 60_000) {
   if (timer) return;
   const tick = async () => {
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
-    // v2.596(감사 SECWEB-02): 로그아웃·권한 없음(401/403)이면 60초마다 거부 요청을 쌓지 않게 10분 쉰다
+    // 전체 점검 129회차 A3: 로그인하지 않은 동안(로그인 화면 · 부팅 중)에는 묻지 않는다. 아래 401 쉼은 한 번도 걸리지 않았다 —
+    //   fetchJson 의 401 오류에는 status 가 없다. 그래서 로그인 화면이 60초마다 401 을 만들었고, 그 401 이 로그인 직후에 도착하면
+    //   새 토큰을 지웠다(그 경합은 api.js expireSession 이 따로 막는다). 인증을 끈 포탈은 App 이 Anonymous 사용자를 넣으므로 그대로 돈다.
+    if (!getCurrentUser()) return;
+    // v2.596(감사 SECWEB-02): 권한 없음(403)이면 60초마다 거부 요청을 쌓지 않게 10분 쉰다
     //   (셸 수명과 무관하게 한 번 시작되는 타이머라 멈추기만 하면 재로그인 뒤 다시 켤 길이 없다).
     if (Date.now() < pausedUntil) return;
     try {
