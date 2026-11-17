@@ -5,6 +5,8 @@
 // 재시작하면 비고 매시 다시 찬다 — 화면은 표본 수를 함께 말한다(0 이 아니라 '표본 N개').
 // 메모리: 호스트 × HIST_MAX × 타깃(≤64). 658대 × 26 × 평균 8 ≈ 14만 항목.
 
+import { numOrNull } from '../util/numOrNull.js';
+
 export const HIST_MAX = 26;          // 호스트당 표본 수 상한(매시 1개면 약 하루 + 여유)
 export const SWEEP_MS = 5 * 60_000;  // 스냅샷을 훑는 주기
 
@@ -22,8 +24,10 @@ export function recordHosts(hosts = []) {
     const id = String(h.id);
     live.add(id);
     const sp = h.spath;
-    const at = Number(sp?.at);
-    if (!sp || !Number.isFinite(at) || !Array.isArray(sp.targets)) continue;
+    // 68회차 F1: 시각을 모르는 표본(엣지 정제가 at:null 로 둔다)은 넣지 않는다 — Number(null) 은 0 이라 1970년 표본이 되어
+    //   기간을 모를 때(since 없음) 가중치에 섞이고 firstAt 이 0 이 됐다('못 읽은 값은 0 이 아니다').
+    const at = numOrNull(sp?.at);
+    if (!sp || at == null || !(at > 0) || !Array.isArray(sp.targets)) continue;
     let arr = _byHost.get(id);
     if (!arr) { arr = []; _byHost.set(id, arr); }
     if (arr.some((x) => x.at === at)) continue;
