@@ -35,23 +35,60 @@ export const HOST_DS_MAX = 64;
  * 다중 엔티티 QueryPerf 응답 → Map<ref, Map<counterId, Map<instance, number[]>>>(결측 -1 은 버린다).
  * 계열 경계는 `<id>` 블록이다(표본도 `<value>` 라 컨테이너와 태그가 같다 — perfBatch.js 의 같은 함정).
  */
+/*
+ * 74회차 F4(32회차가 남긴 '<id> 지연 정규식' — 측정): `/<returnval\b[^>]*>([\s\S]*?)<\/returnval>/g` 와 `/<id>([\s\S]*?)<\/id>/g` 는
+ *   닫는 태그가 없는 여는 태그가 많으면 시작 위치마다 끝까지 다시 훑어 O(n²) 였다(160KB 응답 — 닫히지 않은 <id> 0.96초 · <returnval> 2.0초,
+ *   정상 응답 같은 크기 9ms). 같은 뜻(여는 태그 다음의 '가장 가까운' 닫는 태그 · 짝 없는 여는 태그부터는 더 찾지 않는다)을 indexOf 로 한 번에 훑는다.
+ */
+const isWordCh = (c) => (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95;   // \w
+/** `<returnval …>본문</returnval>` 의 본문들(선형). 정규식 `\b` 와 같게 태그 이름 바로 뒤가 단어 글자면 다른 태그다. */
+function returnvalBodies(xml) {
+  const out = [];
+  const OPEN = '<returnval'; const CLOSE = '</returnval>';
+  let i = 0;
+  for (;;) {
+    const s = xml.indexOf(OPEN, i);
+    if (s < 0) break;
+    if (isWordCh(xml.charCodeAt(s + OPEN.length))) { i = s + 1; continue; }
+    const gt = xml.indexOf('>', s + OPEN.length);
+    if (gt < 0) break;
+    const e = xml.indexOf(CLOSE, gt + 1);
+    if (e < 0) break;   // 짝 없는 여는 태그 — 뒤에도 닫는 태그가 없으니 더 볼 것이 없다
+    out.push(xml.slice(gt + 1, e));
+    i = e + CLOSE.length;
+  }
+  return out;
+}
+/** 본문 안의 `<id>…</id>` 표지들(선형) — { inner, start(여는 태그 위치), end(닫는 태그 뒤) }. */
+function idMarks(blk) {
+  const out = [];
+  let i = 0;
+  for (;;) {
+    const s = blk.indexOf('<id>', i);
+    if (s < 0) break;
+    const e = blk.indexOf('</id>', s + 4);
+    if (e < 0) break;
+    out.push({ inner: blk.slice(s + 4, e), start: s, end: e + 5 });
+    i = e + 5;
+  }
+  return out;
+}
+
 export function parsePerfInstances(xml, entityType) {
   const out = new Map();
   if (typeof xml !== 'string') return out;
-  const re = /<returnval\b[^>]*>([\s\S]*?)<\/returnval>/g;
-  let m;
-  while ((m = re.exec(xml))) {
-    const blk = m[1];
-    const ent = new RegExp(`<entity type="${entityType}">([^<]+)</entity>`).exec(blk)?.[1];
+  const entRe = new RegExp(`<entity type="${entityType}">([^<]+)</entity>`);
+  for (const blk of returnvalBodies(xml)) {
+    const ent = entRe.exec(blk)?.[1];
     if (!ent) continue;
     const byCounter = new Map();
-    const marks = [...blk.matchAll(/<id>([\s\S]*?)<\/id>/g)];
+    const marks = idMarks(blk);
     for (let i = 0; i < marks.length; i++) {
-      const cid = /<counterId>(\d+)<\/counterId>/.exec(marks[i][1])?.[1];
+      const cid = /<counterId>(\d+)<\/counterId>/.exec(marks[i].inner)?.[1];
       if (!cid) continue;
-      const inst = xmlUnescape(/<instance>([^<]*)<\/instance>/.exec(marks[i][1])?.[1] || '');
-      const from = marks[i].index + marks[i][0].length;
-      const to = i + 1 < marks.length ? marks[i + 1].index : blk.length;
+      const inst = xmlUnescape(/<instance>([^<]*)<\/instance>/.exec(marks[i].inner)?.[1] || '');
+      const from = marks[i].end;
+      const to = i + 1 < marks.length ? marks[i + 1].start : blk.length;
       const vals = [...blk.slice(from, to).matchAll(/<value>(-?\d+)<\/value>/g)].map((x) => Number(x[1])).filter((v) => Number.isFinite(v) && v >= 0);
       if (!byCounter.has(cid)) byCounter.set(cid, new Map());
       byCounter.get(cid).set(inst, vals);

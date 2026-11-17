@@ -14,9 +14,9 @@ import { store } from '../store.js';
 import { getDataSource } from '../runtime-settings.js';
 import { loadVcenterConfig } from '../config.js';
 import { expandSpec } from './spec.js';
-import { cleanPlacement } from './placement.js';
+import { cleanPlacement, placementNotApplied } from './placement.js';
 import { addSaved } from './saved.js';
-import { createProvisioner } from './vsphere.js';
+import { createProvisioner, findHostRef, findDatastoreRef } from './vsphere.js';
 import { onDemandVcBlock } from '../vcenter/dsBrowse.js';   // v2.743(감사 VC-03): 주문형 vCenter 로그인 문(판정은 collectTarget·authStopGate 하나)
 import { describeError } from '../util/errors.js';
 import { isAdminDetailUser } from '../auth/demoGuest.js';   // v2.744(감사 AUTHZ-01): '남의 작업도 본다' 판정 하나
@@ -83,7 +83,7 @@ export function getJob(id, user, allowed = null) {
 const redact = (j) => ({
   id: j.id, createdAt: j.createdAt, createdBy: j.createdBy, vcenterId: j.vcenterId,
   sourceId: j.sourceId, sourceName: j.sourceName, powerOn: j.powerOn, live: j.live,
-  placement: j.placement,
+  placement: j.placement, placementNotApplied: j.placementNotApplied || [],
   status: j.status, total: j.vms.length,
   done: j.vms.filter((v) => v.status === 'done').length,
   failed: j.vms.filter((v) => v.status === 'error').length,
@@ -118,6 +118,10 @@ export function createJob(spec, { user, expectVcenterId = null } = {}) {
   }
   const guest = spec.guest || {};
   const placement = cleanPlacement(spec.placement);
+  // 74회차 F5: 고른 호스트 · 데이터스토어가 원본 vCenter 의 현재 인벤토리에 없으면 작업을 만들지 않는다 — 예전에는 조용히 빼고
+  //   원본 위치에 만들었다(오타 · 다른 vCenter 의 이름 · 그 사이 빠진 호스트). 데모(mock)도 같은 스냅샷으로 판정한다.
+  if (placement.host && !findHostRef(source.vcenterId, placement.host)) return { ok: false, reason: `선택한 호스트 '${placement.host}' 를 원본 VM 의 vCenter 에서 찾을 수 없습니다.` };
+  if (placement.datastore && !findDatastoreRef(source.vcenterId, placement.datastore)) return { ok: false, reason: `선택한 데이터스토어 '${placement.datastore}' 를 원본 VM 의 vCenter 에서 찾을 수 없습니다.` };
   const job = {
     id: randomUUID(),
     createdAt: new Date().toISOString(),
@@ -128,6 +132,7 @@ export function createJob(spec, { user, expectVcenterId = null } = {}) {
     sourceGuestOS: source.guestOS || '',
     powerOn: Boolean(spec.powerOn),
     placement,
+    placementNotApplied: placementNotApplied(placement),   // 74회차 F5 · F6: 받았지만 적용하지 않는 배치 항목(화면이 밝힌다)
     live,
     status: 'running',
     vms: vms.map((v) => ({ ...v, guest, placement, status: 'queued', error: null, task: null })),
