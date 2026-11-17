@@ -55,7 +55,29 @@ const JOBS_FILE = path.join(config.configDir, 'provision-runs.json');   // ⚠ �
 const VM_KEEP = ['name', 'hostname', 'ip', 'status', 'error', 'task', 'submittedAt'];
 const slimJob = (j) => ({ ...j, vms: j.vms.map((v) => Object.fromEntries(VM_KEEP.filter((k) => v[k] !== undefined).map((k) => [k, v[k]]))) });
 let _persistBlocked = false;
-const _writer = createDebouncedWriter(JOBS_FILE, () => JSON.stringify({ jobs: jobs.map(slimJob) }), { delayMs: 3_000, name: 'provision-runs.json' });
+/*
+ * 반증(G2 · G3) 개선: 3초마다 50작업 × 500대(2만 5천 VM)를 통째로 다시 직렬화하면 한 번에 약 40ms(이름 · 사유가 긴 최악 75~136ms) 이벤트 루프를 막았다(실측).
+ *   끝난 작업(status ≠ running)은 더 바뀌지 않으므로(제출 · 추적 · sweepStale 은 진행 중 작업의 VM 만 바꾼다) 직렬화 결과를 상태별로 기억한다 — 결과 바이트는 같다.
+ */
+const _slimJsonOf = new WeakMap();   // job -> { key, json }
+/** 기억 키 — 작업 상태 + VM 상태별 수(끝난 작업이 예외 경로로 바뀌어도 옛 직렬화를 쓰지 않게 — VM 순회 한 번은 직렬화보다 훨씬 싸다). */
+function slimKeyOf(j) {
+  const n = {};
+  for (const v of j.vms) n[v.status] = (n[v.status] || 0) + 1;
+  return `${j.status}|${j.vms.length}|${Object.entries(n).map(([k, c]) => `${k}:${c}`).join(',')}`;
+}
+function slimJobJson(j) {
+  if (j.status === 'running') return JSON.stringify(slimJob(j));
+  const key = slimKeyOf(j);
+  const hit = _slimJsonOf.get(j);
+  if (hit && hit.key === key) return hit.json;
+  const json = JSON.stringify(slimJob(j));
+  _slimJsonOf.set(j, { key, json });
+  return json;
+}
+/** provision-runs.json 본문(JSON.stringify({ jobs: jobs.map(slimJob) }) 과 같은 바이트). */
+export function serializeJobs() { return `{"jobs":[${jobs.map(slimJobJson).join(',')}]}`; }
+const _writer = createDebouncedWriter(JOBS_FILE, serializeJobs, { delayMs: 3_000, name: 'provision-runs.json' });
 const persist = () => { if (!_persistBlocked) _writer.save(); };
 export const RESTART_UNKNOWN = '재기동으로 추적 중단 — vCenter 에서 계속될 수 있습니다(최근 작업에서 확인하세요).';
 /** 읽어 온 작업 하나를 재기동 뒤 상태로(순수 — 시험이 같이 쓴다). */
@@ -243,7 +265,7 @@ async function runJob(job, source) {
   if (!job.live) { await runMock(job); return; }
 
   const vc = loadVcenterConfig().vcenters.find((v) => v.id === job.vcenterId);
-  if (!vc) { job.vms.forEach((v) => { v.status = 'error'; v.error = 'vCenter 설정을 찾을 수 없습니다.'; }); job.status = 'error'; return; }
+  if (!vc) { job.vms.forEach((v) => { v.status = 'error'; v.error = 'vCenter 설정을 찾을 수 없습니다.'; }); job.status = 'error'; persist(); return; }   // 반증: 여기만 저장이 빠져(다른 작업의 저장이 없으면) 재기동 뒤 '재기동으로 중단 — 제출하지 않음' 으로 바뀌어 보였다
 
   const prov = createProvisioner(vc);
   try {

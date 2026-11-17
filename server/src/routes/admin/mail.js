@@ -45,13 +45,25 @@ export function scopeMailSettings(s, full) {
   return { ...s, smtp: { ...(s.smtp || {}), user: '', hasUser: !!s.smtp?.user }, defaultTo: [], defaultToCount: cnt(s.defaultTo), kinds, scopedMasked: true };
 }
 
+/**
+ * G2 · G3 반증 R1(재현 — 73 ③ 덜 고침): 같은 GET 응답의 발송 이력(status.history[].to)은 실제로 보낸 **수신자 주소**다 — settings 를 가린 범위 관리자 중
+ *   쓰기 범위만 제한된 계정(조회는 전체)은 scopeMailStatus(조회 범위 축)를 지나 그 주소를 그대로 받았다. 가림 기준을 settings 와 같게(isFullReadWriteScope) 두고
+ *   주소 대신 개수(toCount)만 싣는다. 제목 · 상태 · 비고는 그대로(법인 축 가림은 scopeMailStatus 몫이다).
+ * @param {object} st scopeMailStatus 결과 · @param {boolean} full 전체 범위 관리자인가
+ */
+export function maskMailHistoryRecipients(st, full) {
+  if (full || !st || !Array.isArray(st.history)) return st;
+  return { ...st, history: st.history.map(({ to, ...h }) => (Array.isArray(to) ? { ...h, toCount: to.length } : h)), historyMasked: true };
+}
+
 export function registerMail(adminRouter) {
 
   adminRouter.get('/mail', adminOnly, (req, res) => {
     const snap = store.get();
     // 73 ①: 설정 파일을 못 읽었으면 표지(사유 요약 · 읽기 오류 여부) — 그동안 발송은 기본값(꺼짐)이고 저장은 409.
     const le = mailSettingsLoadError();
-    res.json({ settings: scopeMailSettings(redact(), isFullReadWriteScope(req.user, snap)), status: scopeMailStatus(mailStatus(), scopedVcenterIds(req.user, snap)), kinds: KINDS, ...(le ? { loadError: le } : {}) });
+    const full = isFullReadWriteScope(req.user, snap);
+    res.json({ settings: scopeMailSettings(redact(), full), status: maskMailHistoryRecipients(scopeMailStatus(mailStatus(), scopedVcenterIds(req.user, snap)), full), kinds: KINDS, ...(le ? { loadError: le } : {}) });   // 반증 R1: 이력 수신자도 같은 기준으로
   });
 
   adminRouter.put('/mail', adminOnly, requireSettingsOwner, (req, res) => {

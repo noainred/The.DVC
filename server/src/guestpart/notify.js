@@ -30,7 +30,7 @@ import { onGuestDiskRunDone } from '../guestdisk/poller.js';
 import { load as loadSettings, settingsLoadError, digestOf } from './settings.js';
 import { overview, overCsv, unknownVmsNote } from './report.js';
 import { renderOverMail, renderFailMail } from './mailHtml.js';
-import { CRIT_PCT, rulesOf, ignoreReason } from './rules.js';
+import { CRIT_PCT, rulesOf, ignoreReason, pctOf } from './rules.js';
 import { todayStamp } from '../util/dayKey.js';
 
 export const MAIL_KIND = 'guestpart';
@@ -101,7 +101,9 @@ async function prunedKeys(prev, keysNow, vcenterIds) {
   //   그 VM 을 판정하지 않으므로(부분 합 금지) 초과가 아니어도 회복이 아니다. 무시 규칙에 걸린 값 모름 파티션은 판정에 쓰지 않으므로 세지 않는다.
   const rules = rulesOf(loadSettings().rules);
   for (const p of rows) {
-    if (p.unknown) { if (!ignoreReason(p, rules)) unknownVm.add(p.vmId); continue; }
+    // 반증 R2(재현): '값 모름' 은 evaluate 와 같은 기준 — p.unknown 만이 아니라 사용률을 만들 수 없는 파티션(용량 0 등 — 작은 파티션 무시를 끈 설정)도다.
+    //   p.unknown 만 보면 evaluate 가 판정하지 않은 VM 을 회복으로 빼서, 다음 초과가 다시 '새로 넘음' 메일이 됐다.
+    if (p.unknown || pctOf(p.usedGB, p.capGB) == null) { if (!ignoreReason(p, rules)) unknownVm.add(p.vmId); continue; }
     knownPart.add(`${p.vmId}\u0000${p.path}`); knownVm.add(p.vmId);
   }
   return prev.filter((k) => keysNow.has(k) || !(k.includes('\u0000') ? knownPart.has(k) : (knownVm.has(k) && !unknownVm.has(k))));
