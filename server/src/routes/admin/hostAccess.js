@@ -4,9 +4,8 @@
  * · 되돌림 admin+전체 범위+설정 소유자(전체 범위는 v2.743 LEFT-09)
  * (서버 접근 경로를 바꾸는 작업이라 세션 탈취만으로는 못 하게 한다). 모든 변경은 감사 로그.
  */
-import { config } from '../../config.js';
 import { logAudit } from '../../audit.js';
-import { verifyUserOtp, getUser } from '../../auth/auth.js';
+import { ownOtpGate } from '../api/reauth.js';
 import { clientIp } from '../../util/rateLimit.js';
 import { adminOnly, requireSettingsOwner, fullScopeOnlyWith } from './shared.js';
 
@@ -26,15 +25,8 @@ const requesterIpOf = (req) => normalizeRequesterIp(clientIp(req));
 // 64회차 F5: 방화벽이 실제로 보는 TCP 상대 주소(TRUST_PROXY 뒤에서는 프록시) — 자기 잠금 검사에 함께 넘긴다.
 const peerIpOf = (req) => normalizeRequesterIp(String(req.socket?.remoteAddress || ''));
 
-function requireOwnOtp(req, res, next) {
-  if (!config.auth.enabled) return next();
-  const name = req.user?.username || '';
-  const u = getUser(name);
-  if (!u?.totpEnabled) return res.status(403).json({ ok: false, reason: '이 작업은 OTP 가 등록된 계정만 실행할 수 있습니다(서버 접근 경로 변경). 사용자 관리에서 OTP 를 등록하세요.', needEnroll: true });
-  const v = verifyUserOtp(name, req.body?.otp);
-  if (!v.ok) return res.status(403).json({ ok: false, reason: `OTP 인증 실패 — ${v.reason}` });
-  return next();
-}
+// 본인 OTP 게이트는 routes/api/reauth.js ownOtpGate 하나(원격 명령 상태 변경과 같은 판정 — 결정(56~75 남긴 것)).
+const requireOwnOtp = ownOtpGate('서버 접근 경로 변경');
 
 export function registerHostAccess(adminRouter) {
   adminRouter.get('/host-access', adminOnly, fleetReadOnly, requireSettingsOwner, async (req, res) => {

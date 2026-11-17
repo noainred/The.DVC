@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useHashTab } from '../../hooks/useHashTab.js';
-import { fetchJson, postJson, putJson, delJson, usePolling } from '../../api.js';
+import { fetchJson, postJson, putJson, delJson, usePolling, getCurrentUser } from '../../api.js';
 // v2.731(A5-01): putJson·delJson 은 400·409 를 던지지 않고 본문을 돌려준다 — 성공 문구 전에 판정한다.
 import { requireChanged } from '../changeResult.js';
 import { Loading, ErrorBox, Kpi, Modal } from '../../components/ui.jsx';
 import { rmaLateMark } from './edgeLateText.js'; // v2.631 A6-2631-04: 늦게 도착한 결과 배지
-import { ago, durationText, uptimeText, agentStatus, resultSummary, defaultArgs, argsIssue, groupCatalog, modeLabel, targetHint, statusTone, statusLabel } from './remoteCommand.js';
+import { ago, durationText, uptimeText, agentStatus, resultSummary, defaultArgs, argsIssue, groupCatalog, modeLabel, targetHint, statusTone, statusLabel, ownerOtpGate, otpInput } from './remoteCommand.js';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import DataList from '../../components/DataList.jsx';
@@ -104,7 +104,9 @@ export default function RemoteCommand() {
                   </td>
                   <td>{(g.instances || []).length ? modeLabel(g.mode, data?.settings?.modes) : '—'}{g.primary ? <span className="muted"> · 주 {g.primary}</span> : null}</td>
                   <td>{g.pending || 0}</td>
-                  <td>{g.hasPassword ? <span style={{ color: TONE.ok }}>서명</span> : <span style={{ color: TONE.warn }} title="법인 비밀번호 미등록 — 토큰만으로 명령이 실행됩니다">무서명</span>}</td>
+                  <td style={{ whiteSpace: 'normal', minWidth: 0 }}>{g.hasPassword ? <span style={{ color: TONE.ok }}>서명</span> : <span style={{ color: TONE.warn }} title="법인 비밀번호 미등록 — 토큰만으로 명령이 실행됩니다">무서명</span>}
+                    {/* 결정(56~75) 64 F7: 스케줄의 외부 스크립트 · SSH 점검이 서명 문제로 멈췄으면 그 사실(문구는 서버 scheduleSignNote) */}
+                    {g.scheduleSignNote && <div style={{ color: TONE.warn, fontSize: 12, maxWidth: 280 }}>⚠ {g.scheduleSignNote}</div>}</td>
                   <td className="muted">{ago(g.lastSeen)}</td>
                   <td>
                     <div className="flex gap" style={{ flexWrap: 'wrap' }}>
@@ -188,15 +190,17 @@ function RunModal({ group, catalog, modes, onClose }) {
   const creds = useCredentials(group?.agent);
   const [instance, setInstance] = useState('');
   const [timeoutS, setTimeoutS] = useState('');
+  const [otp, setOtp] = useState('');          // 결정(56~75): 상태 변경 · 임의 실행 명령의 본인 OTP(1회용 — 보낸 뒤 비운다)
   const [state, setState] = useState(null);   // { reqId, phase, job, err }
   const pollRef = useRef(null);
   const preset = catalog.find((p) => p.id === cmd);
   const onlineInst = (group?.instances || []).filter((i) => i.online);
   const customBlocked = preset?.shell && !!group && !(instance ? group.instances.find((i) => i.instance === instance)?.allowCustom : group.instances.some((i) => i.online && i.allowCustom));
+  const gate = ownerOtpGate(preset, getCurrentUser());
 
   useEffect(() => () => { if (pollRef.current) clearTimeout(pollRef.current); }, []);
 
-  const pick = (id) => { setCmd(id); setArgs(defaultArgs(catalog.find((p) => p.id === id))); setState(null); };
+  const pick = (id) => { setCmd(id); setArgs(defaultArgs(catalog.find((p) => p.id === id))); setState(null); setOtp(''); };
 
   const submit = async () => {
     const isSsh = preset?.id === 'ssh-exec';
@@ -205,10 +209,14 @@ function RunModal({ group, catalog, modes, onClose }) {
     if (issue) { setState({ err: issue }); return; }
     if (isSsh && useStored && !sendArgs.credentialId) { setState({ err: '저장된 계정을 고르세요(통합 계정 관리에서 등록).' }); return; }
     if (isSsh && !useStored && (!secret.username || !secret.password)) { setState({ err: '1회 입력 계정의 ID/비밀번호를 입력하세요.' }); return; }
+    if (gate.locked) { setState({ err: gate.reason }); return; }
+    if (gate.otp && otp.length !== 6) { setState({ err: '이 명령은 본인 OTP(6자리)가 필요합니다.' }); return; }
     if (preset?.danger && !window.confirm(`'${preset.label}' 은 상태를 바꾸는 명령입니다. ${group.agent}${instance ? `/${instance}` : ''} 에서 실행할까요?`)) return;
     setState({ phase: 'submit' });
     try {
-      const r = await postJson('/tools/rma/run', { agent: group.agent, instance, cmd, args: sendArgs, timeoutMs: timeoutS ? Number(timeoutS) * 1000 : undefined, ...(isSsh && !useStored ? { secret } : {}) });
+      const sentOtp = gate.otp ? otp : '';
+      setOtp('');
+      const r = await postJson('/tools/rma/run', { agent: group.agent, instance, cmd, args: sendArgs, timeoutMs: timeoutS ? Number(timeoutS) * 1000 : undefined, ...(isSsh && !useStored ? { secret } : {}), ...(sentOtp ? { otp: sentOtp } : {}) });
       setState({ phase: 'wait', reqId: r.reqId, target: r.target, signed: r.signed });
       const started = Date.now();
       const poll = async () => {
@@ -273,8 +281,15 @@ function RunModal({ group, catalog, modes, onClose }) {
       ))}
       {preset?.shell && <div className="card muted" style={{ borderColor: TONE.warn }}>자유 명령은 엣지 portal.env 의 <code>RMA_ALLOW_CUSTOM=true</code> 인 인스턴스에서만 실행됩니다.{customBlocked ? ' 현재 선택 범위의 온라인 인스턴스 중 허용된 곳이 없습니다 — 엣지가 거부 사유를 회신합니다.' : ''}</div>}
       {preset?.sudo && <div className="muted">sudo 규칙(install.sh 가 설치한 /etc/sudoers.d/vmware-portal-rma)이 필요합니다.</div>}
-      <div className="flex gap" style={{ marginTop: 8 }}>
-        <button className="login-btn" disabled={state?.phase === 'submit' || state?.phase === 'wait' || state?.phase === 'pending' || state?.phase === 'running'} onClick={submit}>실행</button>
+      {gate.locked && <div className="card muted" style={{ borderColor: TONE.warn, marginTop: 6 }}>🔒 {gate.reason}</div>}
+      {gate.need && !gate.locked && gate.otp && (
+        <div className="flex gap wrap" style={{ alignItems: 'center', marginTop: 6 }}>
+          <label>본인 OTP <input className="input" style={{ width: 110 }} inputMode="numeric" autoComplete="one-time-code" value={otp} onChange={(e) => setOtp(otpInput(e.target.value))} placeholder="6자리" /></label>
+          <span className="muted" style={{ fontSize: 12 }}>상태를 바꾸거나 임의로 실행하는 명령이라 설정 소유자 등급 + 본인 OTP 로만 보냅니다.</span>
+        </div>
+      )}
+      <div className="flex gap" style={{ marginTop: 8, flexWrap: 'wrap' }}>
+        <button className="login-btn" disabled={gate.locked || state?.phase === 'submit' || state?.phase === 'wait' || state?.phase === 'pending' || state?.phase === 'running'} onClick={submit}>실행</button>
         {state?.phase && state.phase !== 'done' && <span className="muted">{state.phase === 'pending' || state.phase === 'wait' ? `인출 대기 중${state.target ? ` (배정: ${state.target})` : ''}…` : state.phase === 'running' ? `실행 중 (${state.job?.instance || ''})…` : '요청 중…'}</span>}
         {state?.signed === false && state?.phase && <span style={{ color: TONE.warn }}>무서명 요청</span>}
       </div>
@@ -392,6 +407,7 @@ function ScheduleTab({ groups, tests, schedules }) {
   const [sch, setSch] = useState(null);
   const [err, setErr] = useState('');
   const [form, setForm] = useState(null); // { id?, test, args, intervalSec, instance, name, enabled }
+  const [otp, setOtp] = useState('');      // 결정(56~75): 셸 점검(script · ssh) 저장의 본인 OTP
   const [tick, setTick] = useState(0);
   const group = groups.find((g) => g.agent === agent);
   const grouped = useMemo(() => groupCatalog(tests), [tests]);
@@ -409,7 +425,12 @@ function ScheduleTab({ groups, tests, schedules }) {
     const t = testOf(form.test);
     const issue = argsIssue(t, form.args);
     if (issue) { setErr(issue); return; }
-    try { requireChanged(await putJson(`/tools/rma/agents/${encodeURIComponent(agent)}/schedule`, { ...form, intervalSec: Number(form.intervalSec) })); setForm(null); setTick((x) => x + 1); }
+    const g = ownerOtpGate(t, getCurrentUser());
+    if (g.locked) { setErr(g.reason); return; }
+    if (g.otp && otp.length !== 6) { setErr('이 점검(외부 스크립트 · SSH)은 저장할 때 본인 OTP(6자리)가 필요합니다.'); return; }
+    const sentOtp = g.otp ? otp : '';
+    setOtp('');
+    try { requireChanged(await putJson(`/tools/rma/agents/${encodeURIComponent(agent)}/schedule`, { ...form, intervalSec: Number(form.intervalSec), ...(sentOtp ? { otp: sentOtp } : {}) })); setForm(null); setTick((x) => x + 1); }
     catch (e) { setErr(e.message); }
   };
   const remove = async (row) => {
@@ -418,6 +439,7 @@ function ScheduleTab({ groups, tests, schedules }) {
     catch (e) { setErr(e.message); setTick((x) => x + 1); }
   };
   const tform = form ? testOf(form.test) : null;
+  const sgate = ownerOtpGate(tform, getCurrentUser());
   const creds = useCredentials(agent);
   return (
     <div>
@@ -480,7 +502,14 @@ function ScheduleTab({ groups, tests, schedules }) {
               </label>
             </div>
           ))}
-          <div className="flex gap" style={{ marginTop: 10 }}><button className="login-btn" onClick={save}>저장</button></div>
+          {sgate.locked && <div className="card muted" style={{ borderColor: TONE.warn, marginTop: 8 }}>🔒 {sgate.reason}</div>}
+          {sgate.need && !sgate.locked && sgate.otp && (
+            <div className="flex gap wrap" style={{ alignItems: 'center', marginTop: 8 }}>
+              <label>본인 OTP <input className="input" style={{ width: 110 }} inputMode="numeric" autoComplete="one-time-code" value={otp} onChange={(e) => setOtp(otpInput(e.target.value))} placeholder="6자리" /></label>
+              <span className="muted" style={{ fontSize: 12 }}>셸을 주기 실행하는 점검이라 설정 소유자 등급 + 본인 OTP 로만 저장합니다.</span>
+            </div>
+          )}
+          <div className="flex gap" style={{ marginTop: 10 }}><button className="login-btn" disabled={sgate.locked} onClick={save}>저장</button></div>
           {err && <div className="error-box" style={{ marginTop: 8 }}>{err}</div>}
         </Modal>
       )}

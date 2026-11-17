@@ -105,20 +105,25 @@ export function canonicalAgentRef(remoteCollectors, agent) {
 export function canonicalAgentOf(remoteCollectors, agent) { return canonicalAgentRef(remoteCollectors, agent).name; }
 /**
  * 재확인 R1 — 보이는 이름(name)으로 당기기 · 중앙에서 켜기 · 엣지 표 · 누락 점검의 봉투 찾기를 하면 **다른 수집 서버로 가는가**(순수).
- *   그 경로들은 이름을 collector/registry.js findCollectorByName(목록 앞 항목 · 항목마다 id 또는 name)으로 푼다 — 이 서버의 수집 서버(id)가 아닌 항목이 그 이름을 먼저 가지면 참.
- *   모르면(색인 없음 · id 없음) 거짓(판정할 근거가 없다 — 이름은 그대로 보인다).
+ *   그 경로들은 이름을 collector/registry.js findCollectorByName 으로 푼다. 결정(56~75 남긴 것) 66 ①: 그 함수의 순서가 바뀌었다 —
+ *   **전 항목 id 정확 일치 먼저**, 없으면 표시 이름은 **유일할 때만** 그 항목(둘 이상이면 이름으로는 정할 수 없다 — null). 여기서도 같은 순서로
+ *   이 서버의 수집 서버(id)가 아닌 항목으로 가거나(id 일치 · 유일 이름) 이름이 겹쳐 정할 수 없으면 참.
+ *   모르면(색인 없음 · id 없음 · 등록부에 없는 이름) 거짓(판정할 근거가 없다 — 이름은 그대로 보인다).
  */
 export function agentNameClash(remoteCollectors, name, id) {
   const rc = remoteCollectors;
-  const n = t(name).toLowerCase(); const i = t(id);
-  if (!n || !i || !rc || rc.readable !== true || !(rc.firstAlias instanceof Map)) return false;
-  const owner = rc.firstAlias.get(n);
-  if (owner == null || t(owner).toLowerCase() === i.toLowerCase()) return false;
+  const n = t(name).toLowerCase(); const i = t(id).toLowerCase();
+  if (!n || !i || !rc || rc.readable !== true || !(rc.byId instanceof Map) || !(rc.names instanceof Map)) return false;
   // 2차 재확인: 그 이름이 가는 항목이 **같은 엣지(정규화 URL 이 같다 — collector/registry.js normalizeCollectorUrl)** 를 가리키면 겹침이 아니다
   //   (같은 엣지의 옛 수동 등록 + 자기등록 — 당기기 · 엣지 표는 같은 엣지로 간다). URL 이 빈 항목은 같은 엣지라고 단정하지 않는다(겹침 유지).
   const u = rc.urlById instanceof Map ? rc.urlById : null;
-  const a = u ? t(u.get(t(owner).toLowerCase())) : ''; const b = u ? t(u.get(i.toLowerCase())) : '';
-  return !(a && b && a === b);
+  const mine = u ? t(u.get(i)) : '';
+  const otherEdge = (o) => { if (o === i) return false; const a = u ? t(u.get(o)) : ''; return !(a && mine && a === mine); };
+  const hit = rc.byId.get(n);
+  if (hit) return otherEdge(t(hit.id).toLowerCase());
+  const owners = new Set();
+  for (const [k, v] of rc.names) if (t(v).toLowerCase() === n) owners.add(t(k).toLowerCase());
+  return [...owners].some(otherEdge);
 }
 /** 위임 행에 붙일 엣지 이름 필드(중앙 — 정규화 이름 + 겹침 표지). */
 function delegatedAgentFields(remoteCollectors, agent) {

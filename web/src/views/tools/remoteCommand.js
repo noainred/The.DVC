@@ -88,3 +88,24 @@ export function statusTone(status, TONE = { ok: '#22c55e', warn: '#f59e0b', bad:
 export function statusLabel(status) {
   return { ok: '정상', warn: '경고', bad: '실패', unknown: '불명' }[status] || status || '—';
 }
+
+/**
+ * 결정(56~75 남긴 것) — 상태를 바꾸거나 임의 실행인 명령(서버 카탈로그 ownerOtp — danger) · 셸 점검(script · ssh) 저장은
+ *   설정 소유자 등급 + 본인 OTP 다. 판정은 서버(routes/api/rma.js)가 하고 화면은 그 표지로 OTP 칸을 열고 등급이 아니면 잠근다.
+ *   인증이 꺼진 설치(Anonymous)는 서버도 통과시키므로 잠그지 않고 OTP 칸도 열지 않는다.
+ * @param {{ownerOtp?:boolean}|null} item  카탈로그 항목(명령 또는 점검)
+ * @param {{settingsOwnerTier?:boolean, name?:string}|null} user  /auth/me
+ * @returns {{ need:boolean, otp:boolean, locked:boolean, reason:string }}
+ */
+export function ownerOtpGate(item, user) {
+  if (!item || item.ownerOtp !== true) return { need: false, otp: false, locked: false, reason: '' };
+  const anonymous = user?.name === 'Anonymous';
+  const tier = anonymous || user?.settingsOwnerTier === true;
+  return {
+    need: true, otp: !anonymous, locked: !tier,
+    reason: tier ? '' : '이 명령 · 점검은 상태를 바꾸거나 임의로 실행하므로 설정 소유자 등급(소유자 목록 ∧ 전체 범위) 계정만 쓸 수 있습니다(본인 OTP 도 필요합니다).',
+  };
+}
+
+/** OTP 입력값 정리 — 숫자만 6자리까지(빈 값이면 ''). */
+export const otpInput = (v) => String(v ?? '').replace(/\D/g, '').slice(0, 6);

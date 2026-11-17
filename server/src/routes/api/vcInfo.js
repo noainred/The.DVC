@@ -3,7 +3,8 @@
 // 규칙(server/CLAUDE.md): 조회 범위 밖 vCenter 는 404(존재 은닉) → 권한 목록은 관리자 판본(isAdminDetailUser)만, 아니면 403.
 //   작업을 시작한 사용자 · 알람 확인자 이름도 관리자 판본에서만 싣는다(그 밖에는 null + userMasked).
 import { requirePerm } from '../../auth/auth.js';
-import { scopedVcenterIds } from '../../auth/scope.js';
+import { scopedVcenterIds, isFullReadWriteScope } from '../../auth/scope.js';
+import { ERROR_HIDDEN_TEXT } from './vmTags.js';   // 결정(56~75) 69 ③: 오류 원문을 가릴 때의 고정 문구는 tags(v2.720 B2-02)와 같은 하나
 import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { store } from '../../store.js';
 import { config, loadVcenterConfig } from '../../config.js';
@@ -78,27 +79,41 @@ const KIND_LIMITS = Object.freeze({
 });
 
 /** 응답 본문(순수 — 테스트 고정). entry 는 캐시의 그 종류 값(없으면 null), admin 은 관리자 판본 여부. */
-export function vcInfoBody(kind, vcenterId, entry, { admin = false, source = null } = {}) {
-  const base = { ok: true, kind, vcenterId, refreshMs: VCINFO_REFRESH_MS[kind], source, ...(KIND_LIMITS[kind] ? { limits: KIND_LIMITS[kind] } : {}) };
+/*
+ * 결정(56~75 남긴 것) 69 ③: 수집 오류 원문(error · 'not-collected' 문장 · lagError · dvsError · replError · pendingError · vLCM 클러스터 error)은
+ *   **전체 범위 관리자**(isAdminDetailUser ∧ isFullReadWriteScope — 라우트가 rawErrors 로 넘긴다)에게만 원문, 그 밖에는 고정 요약 문구다
+ *   (tags v2.720 B2-02 와 같은 규칙 · ERROR_HIDDEN_TEXT). 오류가 **있었다는 사실**은 그대로 보인다(null 이면 null — 없음을 지어내지 않는다).
+ *   거부 기본값 — rawErrors 를 넘기지 않으면 가린다. 작업(tasks) 행의 error 는 수집 오류가 아니라 vCenter 작업 결과라 그대로 둔다.
+ */
+const hideErr = (v) => (v == null || v === '' ? (v ?? null) : ERROR_HIDDEN_TEXT);
+export function vcInfoBody(kind, vcenterId, entry, { admin = false, source = null, rawErrors = false } = {}) {
+  const errOut = rawErrors ? (v) => v ?? null : hideErr;
+  const base = { ok: true, kind, vcenterId, refreshMs: VCINFO_REFRESH_MS[kind], source, ...(rawErrors ? {} : { errorHidden: true }), ...(KIND_LIMITS[kind] ? { limits: KIND_LIMITS[kind] } : {}) };
   // 한 번도 읽지 못했으면(at 없음 — 첫 시도 실패 · 시한으로 건너뜀 · REST 로그인 거부) '0건 · 없음' 이 아니라 '아직 읽지 않음' 이다(반증 중-2).
   if (!entry || entry.at == null) {
-    const err = entry?.error ?? null;
+    const err = errOut(entry?.error ?? null);
     return { ...base, at: null, items: [], notCollected: err ? `아직 한 번도 읽지 못했습니다 — ${err}` : NOT_YET_TEXT, error: err };
   }
   // ④ REST 3종은 모양이 달라 값을 그대로 싣는다(정제된 캐시 · 사람 이름 없음). retryAt 은 내부 값이라 뺀다.
   if (kind === 'linked' || kind === 'updates' || kind === 'vlcm') {
     const { retryAt, ...rest } = entry; void retryAt;
-    return { ...base, items: [], ...rest, at: entry.at ?? null, error: entry.error ?? null };
+    const masked = rawErrors ? rest : {
+      ...rest,
+      ...('replError' in rest ? { replError: hideErr(rest.replError) } : {}),
+      ...('pendingError' in rest ? { pendingError: hideErr(rest.pendingError) } : {}),
+      ...(kind === 'vlcm' && Array.isArray(rest.items) ? { items: rest.items.map((r) => (r && r.error ? { ...r, error: ERROR_HIDDEN_TEXT } : r)) } : {}),
+    };
+    return { ...base, items: [], ...masked, at: entry.at ?? null, error: errOut(entry.error ?? null) };
   }
   let items = Array.isArray(entry.items) ? entry.items : [];
   let userMasked = false;
   if (!admin && kind === 'tasks') { userMasked = items.some((t) => t.user); items = items.map((t) => ({ ...t, user: null })); }
   if (!admin && kind === 'alarms') { userMasked = items.some((a) => a.ackBy); items = items.map((a) => ({ ...a, ackBy: null })); }
   return {
-    ...base, at: entry.at ?? null, items, error: entry.error ?? null,
+    ...base, at: entry.at ?? null, items, error: errOut(entry.error ?? null),
     ...(entry.omitted ? { omitted: entry.omitted } : {}),
     ...(entry.unreadable ? { unreadable: entry.unreadable } : {}),   // v2.901(점검 E1): 못 읽은 알람 원소 수
-    ...(kind === 'dvpg' ? { lagError: entry.lagError ?? null, dvsError: entry.dvsError ?? null } : {}),   // v2.906: LAG · vDS 이름을 못 읽은 사유
+    ...(kind === 'dvpg' ? { lagError: errOut(entry.lagError ?? null), dvsError: errOut(entry.dvsError ?? null) } : {}),   // v2.906: LAG · vDS 이름을 못 읽은 사유
     ...(kind === 'perms' ? { roles: Array.isArray(entry.roles) ? entry.roles : [] } : {}),
     ...(userMasked ? { userMasked: true } : {}),
   };
@@ -125,7 +140,10 @@ export function registerVcInfo(api) {
     if (edgeAge != null && edgeAge > EDGE_EXPIRE_MS) cached = null;
     const mock = vc.mock === true || config.dataSource === 'mock';
     const entry = cached?.[kind] || (mock ? mockVcInfo(kind, vcenterId, snap, Date.now(), allowed) : null);
-    const body = vcInfoBody(kind, vcenterId, entry, { admin, source: cached?.[kind] ? cached.source : mock ? 'mock' : null });
+    // 결정(56~75) 69 ③: 오류 원문은 전체 범위 관리자만(조회 ∧ 쓰기 무제한 — 판정이 던지면 거부 기본값).
+    let rawErrors = false;
+    try { rawErrors = admin && isFullReadWriteScope(req.user, snap); } catch { rawErrors = false; }
+    const body = vcInfoBody(kind, vcenterId, entry, { admin, rawErrors, source: cached?.[kind] ? cached.source : mock ? 'mock' : null });
     if (cached?.[kind] && edgeAge != null && edgeAge > EDGE_STALE_MS) { body.stale = true; body.staleMin = Math.round(edgeAge / 60_000); }
     if (kind === 'linked' && entry) {
       body.nodes = linkedPortalMap(entry.nodes, registryHosts(), snap.vcenters, allowed, { mock: body.source === 'mock' });

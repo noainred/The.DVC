@@ -170,12 +170,27 @@ export function listCollectors() {
  * 둘 다 이 함수를 재수출한다. ⚠ 원본(`loadCollectors`, 토큰 포함)을 돌려준다 — `listCollectors()` 는 토큰을 가리므로
  * 그것으로 찾으면 엣지 호출이 X-Collector-Token 없이 나가 403 이 된다. 없으면 null. 등록부를 못 읽으면 loadCollectors 가
  * 돌려주는 대로(빈 목록 → null)다.
+ * 결정(56~75 남긴 것) 66 ①: 찾는 순서는 **전 항목 id 정확 일치 먼저**, 그다음 표시 이름(대소문자 무시)은 **유일할 때만**이다(둘 이상이면 null —
+ *   사유는 resolveCollectorByName). 예전에는 id · 이름을 한 번에 목록 순서로 찾아, 다른 항목의 표시 이름이 이 id 와 같고 그 항목이 앞에 있으면
+ *   토큰 점검 · 엣지 로그 인출 · 엣지 당기기가 **남의 엣지**에서 당겼다(재현). 같은 순서 규칙을 bmusage/targets.js agentNameClash 가 따른다.
  */
-export function findCollectorByName(agent) {
+export function resolveCollectorByName(agent) {
   const key = String(agent ?? '').trim().toLowerCase();
-  if (!key) return null;
+  if (!key) return { collector: null, issue: 'empty', reason: '수집 서버 이름이 비어 있습니다.' };
   const norm = (v) => String(v ?? '').trim().toLowerCase();
-  return loadCollectors().find((c) => norm(c.id) === key || norm(c.name) === key) || null;
+  const list = loadCollectors();
+  const byId = list.find((c) => norm(c.id) === key);
+  if (byId) return { collector: byId, issue: '', reason: '' };
+  const byName = list.filter((c) => norm(c.name) === key);
+  if (byName.length === 1) return { collector: byName[0], issue: '', reason: '' };
+  if (byName.length > 1) {
+    return { collector: null, issue: 'ambiguous', count: byName.length,
+      reason: `표시 이름 '${String(agent).trim().slice(0, 64)}' 인 수집 서버가 ${byName.length}개라 어느 엣지인지 정할 수 없습니다 — 등록 id 로 지정하거나 설정 › 엣지·원격 › 수집 서버(원격)에서 표시 이름을 겹치지 않게 바꾸세요.` };
+  }
+  return { collector: null, issue: 'not-found', reason: '수집 서버 등록부에 없는 이름입니다(설정 › 엣지·원격 › 수집 서버(원격)에서 등록하세요).' };
+}
+export function findCollectorByName(agent) {
+  return resolveCollectorByName(agent).collector;
 }
 
 // ── SSRF 가드 ────────────────────────────────────────────────────────────────

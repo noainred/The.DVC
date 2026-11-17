@@ -13,7 +13,7 @@ import { reqTimeoutMs } from '../agent/envTimeout.js';
 import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // v2.604: 엣지 응답 크기 상한
 import { strOf } from '../util/coercionTrap.js';
 import { withOutboundTag } from '../util/outboundStats.js'; // v2.601 WEB2601-02: 같은 주소 엣지를 기록에서 나눈다
-import { findCollectorByName } from '../collector/registry.js'; // v2.613 EDGE2613-08: 이름 조회 코어는 등록부 하나
+import { findCollectorByName, resolveCollectorByName } from '../collector/registry.js'; // v2.613 EDGE2613-08: 이름 조회 코어는 등록부 하나
 import { pullCollectorByAgent } from '../collector/puller.js';
 import { createPushScanJob, setIdracScanResult } from './idracScanJobs.js';
 import { allCollectorStatus } from '../collector/state.js';
@@ -77,6 +77,11 @@ const PUSH_TIMEOUT_MS = reqTimeoutMs(process.env.IDRAC_PUSH_TIMEOUT_MS, 15 * 60_
  */
 export function pushIdracScan(agent, { ips, username, password, ilo = null, vcenterId = '', datacenterId = '', noRegister = false, mode = 'merge', service = '', trigger = 'manual', rangeId = '' } = {}) {
   const col = findCollectorByName(agent);
+  if (!col) {
+    // 결정(56~75 남긴 것) 66 ①: 표시 이름이 겹쳐 정할 수 없으면 그 사유를 그대로(등록 안내로 덮지 않는다).
+    const why = resolveCollectorByName(agent);
+    if (why.issue === 'ambiguous') return { ok: false, reason: why.reason };
+  }
   if (!col || !col.url) {
     return { ok: false, reason: `에이전트 '${agent}'에 매칭되는 '수집 서버(원격)' URL이 없습니다. 설정 → 수집 서버(원격)에 이 에이전트를 URL과 함께 등록하면 중앙이 직접 스캔을 전송할 수 있습니다.` };
   }

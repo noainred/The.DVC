@@ -12,6 +12,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { scheduleItemIssue, buildTest } from './tests.js';
+import { scheduleSignRequired } from './signing.js';
 
 const FILE = path.join(config.configDir, 'rma-schedules.json');
 const MAX_PER_AGENT = 500;
@@ -106,5 +107,22 @@ export function assignForInstance(schedule, instance, onlineInstances = []) {
   return { version: schedule.version, tests, poolSize: pool.length };
 }
 const getCentral = (test) => { const b = buildTest(test, {}); return b.ok ? b.central : String(test) === 'rma-itself'; };
+
+/**
+ * 결정(56~75 남긴 것) 64 F7 — 스케줄 서명 상태 한 줄(순수, 중앙 화면). 서명이 필요한 항목(script · ssh, 켜진 것)이 있고
+ *   ① 이 법인 인스턴스 중 RMA_PASSWORD 가 있는(signed) 곳이 있는데 중앙에 비밀번호가 없으면 → 그 점검이 멈춘다는 사실
+ *   ② 엣지가 서명 없음/불일치로 실행하지 않은 항목 수를 보고하면 → 그 수. 해당 없으면 ''.
+ * @param {{ tests?:object[], hasPassword?:boolean, instances?:object[] }} p
+ */
+export function scheduleSignNote({ tests = [], hasPassword = false, instances = [] } = {}) {
+  const need = (Array.isArray(tests) ? tests : []).filter((t) => t && t.enabled !== false && scheduleSignRequired(t.test)).length;
+  if (!need) return '';
+  const inst = Array.isArray(instances) ? instances : [];
+  const edgeSigned = inst.some((i) => i && i.signed === true);
+  const rejected = inst.reduce((n, i) => n + (Math.max(0, Number(i?.scheduleSigRejected) || 0)), 0);
+  if (edgeSigned && !hasPassword) return `중앙에 이 법인의 RMA 비밀번호가 없어 외부 스크립트 · SSH 점검 ${need}개가 서명 없이 내려갑니다 — RMA_PASSWORD 가 있는 엣지는 그 점검을 실행하지 않습니다(설정에서 엣지와 같은 비밀번호를 등록하세요).`;
+  if (rejected) return `엣지가 서명 없음/불일치로 외부 스크립트 · SSH 점검 ${rejected}개를 실행하지 않고 있습니다 — 점검 상태의 사유를 보세요.`;
+  return '';
+}
 
 export function _resetSchedules() { _db = null; }

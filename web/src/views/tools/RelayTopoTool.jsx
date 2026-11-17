@@ -144,7 +144,7 @@ export default function RelayTopoTool() {
 
       {data?.addressHidden && (
         <div className="card" style={{ marginBottom: 12, fontSize: 13, borderColor: 'var(--amber)' }}>
-          관리자 계정이 아니라서 <b>주소·SSH 계정명을 가렸습니다</b>(사설·공인 IP · vCenter IP). 구성·서비스 목록만 보입니다.
+          관리자 계정이 아니라서 <b>주소·SSH 계정명·사이트 비고를 가렸습니다</b>(사설·공인 IP · vCenter IP · 비고 자유 문구). 구성·서비스 목록만 보입니다.
           표 점검 결과는 문구에 주소가 들어 있어 개수만 알립니다 — {data.issueCount || 0}건. 저장·가져오기·적용은 관리자만 할 수 있습니다.
         </div>
       )}
@@ -233,7 +233,8 @@ export default function RelayTopoTool() {
                     <td>{s.irs?.privateIp || '—'}</td><td>{s.irs?.publicIp || '—'}</td><td>{s.irs?.vcenterIp || '—'}</td>
                     <td>{sshSummary(s.irs?.ssh)}</td>
                     <td className="muted" style={{ fontSize: 11 }}>{acc ? <>Edge {acc.edge.host}:{acc.edge.port}{acc.edge.error ? <span className="badge amber" style={{ marginLeft: 4 }} title={acc.edge.error}>자격증명 없음</span> : ''}<br />IRS {acc.irs.host ? `${acc.irs.host}:${acc.irs.port}` : '—'}{acc.irs.via ? ` (${acc.irs.via})` : ''}</> : '(저장 후 표시)'}</td>
-                    <td className="muted">{s.note || ''}</td>
+                    {/* 결정(56~75) 63 ②: 가린 판본은 비고도 비운다(noteHidden — 있었다는 사실만). */}
+                    <td className="muted">{s.note || (s.noteHidden ? '(관리자만)' : '—')}</td>
                     <td style={{ whiteSpace: 'nowrap' }}>
                       <button className="tab" onClick={() => setEdit({ site: structuredClone({ ...EMPTY_SITE, ...s, edge: { ...EMPTY_NODE, ...s.edge, ssh: { ...EMPTY_SSH, ...s.edge?.ssh } }, irs: { ...EMPTY_NODE, ...s.irs, ssh: { ...EMPTY_SSH, ...s.irs?.ssh } } }), index: i })}>편집</button>
                       <button className="tab" onClick={() => testSsh(s.dc, 'edge')} disabled={busy || !acc}>Edge SSH</button>

@@ -9,6 +9,20 @@ import Select from '../components/Select.jsx';
  * 엔진은 firewalld. 적용은 런타임 → N분 안에 확정하지 않으면 자동 되돌림(commit-confirm). 적용/확정에 본인 OTP.
  */
 const when = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR') : '—');
+
+/**
+ * 되돌림 실패 배너 문구(순수 — 결정(56~75 남긴 것) 64 F2 시한). 서버가 처음 실패부터 시한(revertRetryWindowMs) 안에서만 자동으로 다시 되돌리고,
+ *   지나면 revertGaveUp 을 세운다(pending 은 남는다). 시한 숫자는 API 값으로만 말한다(모르면 말하지 않는다).
+ */
+export function revertBannerText(pend, windowMs) {
+  if (!pend || !pend.revertError) return '';
+  const why = String(pend.revertError).slice(0, 200);
+  const hours = Number(windowMs) > 0 ? Math.round((Number(windowMs) / 3_600_000) * 10) / 10 : null;
+  if (pend.revertGaveUp === true) {
+    return `되돌림 실패 — 수동 조치 필요: firewall-cmd --reload 가 ${hours != null ? `처음 실패부터 ${hours}시간` : '자동 재시도 시한'} 동안 계속 실패해 자동 재시도를 멈췄습니다(${why}). 확정하지 않은 런타임 규칙이 아직 남아 있습니다 — firewalld 상태를 확인한 뒤 되돌리기 버튼으로 다시 시도하세요.`;
+  }
+  return `되돌림(firewall-cmd --reload)이 실패해 런타임 규칙이 아직 남아 있습니다 — ${why}. 자동으로 다시 시도합니다${hours != null ? `(처음 실패부터 ${hours}시간까지)` : ''} — 되돌리기 버튼으로 바로 다시 시도할 수 있습니다.`;
+}
 const listToText = (a) => (a || []).join('\n');
 const textToList = (t) => String(t || '').split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
 
@@ -119,7 +133,8 @@ export default function HostAccessSettings() {
           <b>⏳ 확정 대기 중</b> — {when(pend.at)} 에 {pend.by || '?'} 가 런타임에 적용. <b>{Math.floor(remain / 60)}분 {remain % 60}초</b> 안에 확정하지 않으면 자동으로 되돌립니다.
           {' '}SSH 가 필요하면 다른 창에서 접속을 먼저 확인하세요.
           {/* 64회차 F2: 되돌림(--reload)이 실패하면 서버가 pending 을 남기고 다시 시도한다 — '0분 0초 안에' 만 보이면 이미 되돌린 것처럼 읽힌다. */}
-          {pend.revertError && <div style={{ color: 'var(--red)', marginTop: 6 }}>되돌림(firewall-cmd --reload)이 실패해 런타임 규칙이 아직 남아 있습니다 — {String(pend.revertError).slice(0, 200)}. 자동으로 다시 시도합니다(되돌리기 버튼으로 바로 다시 시도할 수 있습니다).</div>}
+          {/* 결정(56~75) 64 F2 시한: 처음 실패부터 서버 시한(revertRetryWindowMs)이 지나면 자동 재시도를 멈춘다(revertGaveUp) — 수동 조치 필요. */}
+          {pend.revertError && <div style={{ color: 'var(--red)', marginTop: 6 }}>{revertBannerText(pend, data.revertRetryWindowMs)}</div>}
           <div className="flex gap" style={{ marginTop: 8 }}>
             <button className="login-btn" disabled={busy !== ''} onClick={() => setOtpFor('confirm')}>✅ 확정(영구 반영, OTP)</button>
             <button className="tab" disabled={busy !== ''} onClick={() => run('revert')}>↩ 되돌리기</button>

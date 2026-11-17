@@ -37,6 +37,14 @@ const toolsPerm = requirePerm('tools');
 const isAdmin = (req) => isAdminDetailUser(req.user);
 const RE_DC = /^[^\u0000-\u001f\u007f\u2028\u2029]{1,40}$/; // eslint-disable-line no-control-regex -- 63회차 F4: 저장(store.js str — 제어 문자만 거른다)이 받는 사이트 이름을 그대로 받는다(공백 · '/' 가 든 이름이 가져오기 · 적용 · SSH 테스트에서 400 이었다)
 
+/** 비-admin 응답용 — 노드의 주소·SSH 계정명을 비운다(구조·서비스 구성·DC 이름은 남긴다). */
+// v2.594(감사 R2594-06): 주소를 비우면 화면이 'IRS 있음' 을 판정할 수 없다 — 존재 여부만 불리언으로 남긴다.
+const maskNode = (n) => (n ? { ...n, privateIp: '', publicIp: '', vcenterIp: '', present: !!(n.privateIp || n.publicIp), ssh: { ...(n.ssh || {}), username: '' } } : n);
+// 결정(56~75 남긴 것) 63 ②: 사이트 비고(note — 자유 문구 200자)도 가린다 — 주소 · 계정을 적어 두면 가린 판본에 그대로 보였다. 있었다는 사실만 남긴다(noteHidden).
+export function maskTopology(t) {
+  return { ...t, main: maskNode(t.main), sites: (t.sites || []).map((s) => ({ ...s, edge: maskNode(s.edge), irs: maskNode(s.irs), sshTargetId: '', note: '', ...(s.note ? { noteHidden: true } : {}) })) };
+}
+
 export function registerRelayTopo(api) {
 api.get('/tools/relaytopo', toolsPerm, (req, res) => {
   const admin = isAdmin(req);
@@ -65,12 +73,6 @@ api.get('/tools/relaytopo', toolsPerm, (req, res) => {
     kinds: topo.services.map((s) => ({ key: s.key, kind: kindForService(s, topo.main) })),
   });
 });
-/** 비-admin 응답용 — 노드의 주소·SSH 계정명을 비운다(구조·서비스 구성·DC 이름은 남긴다). */
-// v2.594(감사 R2594-06): 주소를 비우면 화면이 'IRS 있음' 을 판정할 수 없다 — 존재 여부만 불리언으로 남긴다.
-const maskNode = (n) => (n ? { ...n, privateIp: '', publicIp: '', vcenterIp: '', present: !!(n.privateIp || n.publicIp), ssh: { ...(n.ssh || {}), username: '' } } : n);
-function maskTopology(t) {
-  return { ...t, main: maskNode(t.main), sites: (t.sites || []).map((s) => ({ ...s, edge: maskNode(s.edge), irs: maskNode(s.irs), sshTargetId: '' })) };
-}
 function accessView(raw, site, role) { const a = resolveNodeAccess(raw, site, role); return { host: a.host || '', port: a.port || 0, via: a.via || '', source: a.source || '', error: a.error || '' }; }
 
 api.put('/tools/relaytopo', adminOnly, fullScopeOnly, (req, res) => {

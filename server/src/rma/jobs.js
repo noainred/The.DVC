@@ -461,6 +461,7 @@ export function noteHeartbeat(agent, instance, info = {}, { ip = '' } = {}) {
       serviceUnits: arr('serviceUnits', 100), allowReboot: !!info.policy.allowReboot, fileRoots: arr('fileRoots', 20),
     } : null,
     scheduleVersion: Number(info.scheduleVersion) || 0, scheduledTests: Number(info.scheduledTests) || 0, outbox: Number(info.outbox) || 0,
+    scheduleSigRejected: Math.max(0, Number(info.scheduleSigRejected) || 0),   // 결정(56~75) 64 F7: 서명 없음/불일치로 멈춘 script · ssh 점검 수(옛 엣지 0)
     ip,
   };
   if (safe.policy && invalid.length) safe.policy.policyInvalid = invalid;

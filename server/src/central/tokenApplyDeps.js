@@ -3,7 +3,7 @@
  * 작업 본문은 순수하게 두고(테스트가 가짜를 주입) 여기서 실제 모듈을 잇는다.
  */
 import { listAgentTokens, issueAgentToken, revokeAgentToken, agentTokensLoadError } from './agentTokens.js';
-import { findCollectorByName } from '../collector/registry.js';
+import { findCollectorByName, resolveCollectorByName } from '../collector/registry.js';
 import { getCollectorStatus } from '../collector/state.js';
 import { listTargetsRaw, saveTarget } from '../agent/deployRegistry.js';
 import { forceAgentCentralToken } from '../agent/deploy.js';
@@ -76,7 +76,7 @@ export async function upgradeEdgeNow(c, { resolve = resolveBundleBytes, push = p
 export function realTokenApplyDeps(audit) {
   return {
     issue: issueAgentToken, revoke: revokeAgentToken, listTokens: listAgentTokens, tokensLoadError: agentTokensLoadError,
-    findCollector: findCollectorByName, statusOf: getCollectorStatus, deployTargets: listTargetsRaw, saveTarget,
+    findCollector: findCollectorByName, collectorReason: (n) => { const r = resolveCollectorByName(n); return r.issue === 'ambiguous' ? r.reason : ''; }, statusOf: getCollectorStatus, deployTargets: listTargetsRaw, saveTarget,
     pushEdge: (c, token) => pushTokenToEdge(c, token),
     sshApply: forceAgentCentralToken,
     pullStats,   // 반증 F4: '받아들인 요청' 확인

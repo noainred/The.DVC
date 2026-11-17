@@ -40,7 +40,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { buildCommand, parseList } from './commands.js';
-import { verifyJob, SKEW_MS } from './signing.js';
+import { verifyJob, SKEW_MS, verifyScheduleItem, scheduleSignRequired } from './signing.js';
 import { runCommand, DEFAULT_MAX_OUTPUT } from './exec.js';
 import { pathAllowed } from './testRunner.js';  // 파일 경로 realpath 검사(점검과 같은 판정)
 import { buildTest } from './tests.js';
@@ -103,6 +103,7 @@ function info() {
     comment: COMMENT, remoteManage: REMOTE_MANAGE, stats: { ...stats },
     policy: { enabled: POLICY.enabled, disabled: POLICY.disabled, enabledTests: POLICY.enabledTests, disabledTests: POLICY.disabledTests, serviceUnits: POLICY.serviceUnits, allowReboot: POLICY.allowReboot, fileRoots: POLICY.fileRoots, allowSsh: POLICY.allowSsh, sshTargets: POLICY.sshTargets },
     scheduleVersion: schedule.version, scheduledTests: schedule.tests.length, outbox: outbox.length,
+    scheduleSigRejected: schedule.tests.filter((t) => t && t.sigIssue).length,   // 결정(56~75) 64 F7: 서명 없음/불일치로 멈춘 script · ssh 점검 수(중앙 화면)
     runtime: { longpollMs: runtime.longpollMs, testConcurrency: runtime.testConcurrency },
   };
 }
@@ -227,16 +228,39 @@ export function testAllowed(id, policy = POLICY) {
   return !en.length || en.includes('*') || en.includes(id);
 }
 
+/**
+ * 결정(56~75 남긴 것) 64 F7 — 점검 스케줄 항목의 서명 판정(script · ssh 만). 이 엣지에 RMA_PASSWORD 가 있으면 서명이 없거나 틀린 항목은
+ *   실행하지 않는다(runOne 이 unknown 으로 회신 — 사유가 중앙 점검 상태에 그대로 보인다). 비밀번호가 없으면 예전처럼(판정 없음).
+ *   fresh — 중앙에서 막 받은 스케줄(서명 시각 창 ±10분도 본다). 파일 보관본(기동)은 창을 다시 보지 않고 HMAC 만 다시 보며,
+ *   받을 때 남긴 판정(sigIssue)은 그대로 이어 간다(창 밖으로 거부된 재전송이 재시작으로 살아나지 않게).
+ * @returns {string} 사유('' = 실행 가능)
+ */
+export function scheduleSigIssue(t, { fresh = true, now = Date.now(), password = PASSWORD, agent = AGENT } = {}) {
+  if (!password || !t || !scheduleSignRequired(t.test)) return '';
+  if (!fresh && t.sigIssue) return String(t.sigIssue).slice(0, 300);
+  const v = verifyScheduleItem(password, agent, t, { now, checkWindow: fresh });
+  return v.ok ? '' : v.reason;
+}
+
 /** 중앙 스케줄 적용(버전이 다를 때만 호출됨). 지터: 첫 실행을 주기 안에 분산해 동시 폭주 방지. */
-export function applySchedule(sch) {
+export function applySchedule(sch, { fresh = true, now = Date.now(), password = PASSWORD } = {}) {
   if (!sch || typeof sch !== 'object') return;
-  const tests = (Array.isArray(sch.tests) ? sch.tests : []).filter((t) => t && t.id && t.test).slice(0, 500);
-  schedule = { version: Number(sch.version) || 0, assignKey: String(sch.assignKey || ''), tests };
+  // 64 F7: 받은 항목의 sigIssue 는 믿지 않는다(fresh 면 다시 판정) — 판정 결과만 항목에 붙여 보관한다.
+  const tests = (Array.isArray(sch.tests) ? sch.tests : []).filter((t) => t && t.id && t.test).slice(0, 500).map((t) => {
+    const { sigIssue: prevIssue, ...rest } = t;
+    const issue = scheduleSigIssue(fresh ? rest : { ...rest, sigIssue: prevIssue }, { fresh, now, password });
+    return issue ? { ...rest, sigIssue: issue } : rest;
+  });
+  // 64 F7: 파일 보관본에 서명이 필요한 항목이 있으면 assignKey 를 비워 첫 폴에서 중앙 사본을 한 번 다시 받는다(그때 시각 창까지 다시 본다 —
+  //   비밀번호를 바꾼 뒤 재시작했거나 받을 때 거부된 항목도 새 서명으로 다시 판정된다).
+  const refetch = !fresh && !!password && tests.some((t) => scheduleSignRequired(t.test));
+  schedule = { version: Number(sch.version) || 0, assignKey: refetch ? '' : String(sch.assignKey || ''), tests };
   const ids = new Set(tests.map((t) => t.id));
   for (const id of [...nextRun.keys()]) if (!ids.has(id)) nextRun.delete(id);
   for (const t of tests) if (!nextRun.has(t.id)) nextRun.set(t.id, Date.now() + Math.floor(Math.random() * Math.min(30_000, (Number(t.intervalSec) || 300) * 1000)));
-  saveJson(SCHEDULE_FILE, schedule);
-  log(`점검 스케줄 적용 v${schedule.version} — ${tests.length}개`);
+  saveJson(SCHEDULE_FILE, { ...schedule, assignKey: String(sch.assignKey || '') });
+  const rejected = tests.filter((t) => t.sigIssue).length;
+  log(`점검 스케줄 적용 v${schedule.version} — ${tests.length}개${rejected ? ` (서명 없음/불일치로 실행하지 않는 외부 스크립트 · SSH 점검 ${rejected}개)` : ''}`);
 }
 
 function pushOutbox(r) {
@@ -251,6 +275,8 @@ async function runOne(t) {
   try {
     let r;
     if (!testAllowed(t.test)) r = { status: 'unknown', reply: `이 엣지에서 허용되지 않은 점검(${t.test}) — RMA_ENABLED_TESTS/RMA_DISABLED_TESTS`, durationMs: 0 };
+    // 결정(56~75) 64 F7: 서명 없음/불일치(applySchedule 판정) — 실행하지 않고 사유를 회신한다.
+    else if (t.sigIssue) { r = { status: 'unknown', reply: String(t.sigIssue), durationMs: 0 }; auditFail({ kind: 'test', id: t.id, test: t.test, reason: 'schedule-signature' }); }
     else {
       const b = buildTest(t.test, t.args || {});
       r = b.ok ? await runTest(b, { fileRoots: POLICY.fileRoots, allowCustom: ALLOW_CUSTOM, resolveCreds, allowSsh: POLICY.allowSsh, sshTargets: POLICY.sshTargets }) : { status: 'unknown', reply: b.issue, durationMs: 0 };
@@ -310,6 +336,9 @@ let lastRefused = null; // v2.607 RECENT2607-05: 중앙이 인스턴스 상한�
 
 /** 테스트·진단용 — 연락·거절 상태. */
 export function rmaContactState() { return { lastContact, offlineFired, lastRefused }; }
+/** 테스트용 — 적용된 스케줄 · 미전송 결과(64 F7 서명 판정 확인). */
+export const _scheduleForTest = () => schedule;
+export const _outboxForTest = () => outbox.slice();
 
 export async function pollOnce() {
   const batch = outbox.slice(0, 500);
@@ -373,7 +402,7 @@ async function main() {
   if (!PASSWORD) log('⚠ RMA_PASSWORD 미설정 — 서명 없는 명령을 실행합니다. 중앙 토큰만이 방어선이므로 비밀번호 설정을 권장합니다.');
   // 재시작 후에도 스케줄·미전송 결과를 이어간다(Active RMA 의 결과 보관).
   const savedSch = loadJson(SCHEDULE_FILE, null);
-  if (savedSch?.tests) { applySchedule(savedSch); }
+  if (savedSch?.tests) { applySchedule(savedSch, { fresh: false }); }
   outbox = (loadJson(OUTBOX_FILE, []) || []).slice(-OUTBOX_MAX);
   if (outbox.length) log(`미전송 점검 결과 ${outbox.length}건 복원`);
   // 점검 틱(5초) — 폴 루프와 독립(중앙 불통이어도 점검은 계속 돌고 결과는 outbox 에 쌓인다)

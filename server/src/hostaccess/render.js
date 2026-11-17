@@ -247,11 +247,13 @@ export function planCommands(s, cur, { prevRich = [], requesterIp = '', peerIp =
   } else {
     if (!requesterIp) errors.push('요청자 IP 를 판별할 수 없어 웹 허용목록을 적용하지 않습니다(자기 잠금 방지).');
     else if (!s.web.allow.some((c) => ipInCidr(requesterIp, c))) errors.push(`요청자 IP ${requesterIp} 가 웹 허용목록에 없습니다 — 적용 직후 이 세션이 끊깁니다. 허용목록에 추가한 뒤 적용하세요.`);
+    // 결정(56~75 남긴 것) 66 ②: 같은 호스트의 비루프백 프록시(예: 도커 브리지)도 이 오류에 걸린다(그 인터페이스가 다른 존이면 오탐) — 판정은 그대로 두고
+    //   문구만 '허용목록에 그 주소를 넣으면 진행' 으로 알린다(호스트 자기 주소 제외는 보안 경계 변경이라 하지 않았다).
     // 64회차 F5(재현): TRUST_PROXY 뒤에서는 요청자 IP(clientIp)가 X-Forwarded-For 의 사람 주소다 — 방화벽이 보는 것은 TCP 상대(프록시)다.
     //   사람 주소만 대조하면 프록시가 허용목록 밖인 채 통과해 적용 즉시 프록시를 거친 접속이 전부 끊겼다(확정 기한까지). 상대 주소도 본다
     //   (루프백은 방화벽이 거르지 않는다 — 같은 호스트의 프록시).
     if (peerIp && net.isIP(peerIp) && peerIp !== requesterIp && !isLoopback(peerIp)) {
-      if (!s.web.allow.some((c) => ipInCidr(peerIp, c))) errors.push(`포탈 앞 프록시(방화벽이 보는 접속 주소 ${peerIp})가 웹 허용목록에 없습니다 — 적용하면 프록시를 거친 접속이 전부 끊깁니다. 프록시 주소를 허용목록에 넣으세요.`);
+      if (!s.web.allow.some((c) => ipInCidr(peerIp, c))) errors.push(`포탈 앞 프록시(방화벽이 보는 접속 주소 ${peerIp})가 웹 허용목록에 없습니다 — 적용하면 프록시를 거친 접속이 전부 끊깁니다. 허용목록에 그 주소를 넣으면 진행됩니다(포탈과 같은 서버의 프록시가 루프백이 아닌 자기 주소로 붙는 경우도 같습니다).`);
       else warnings.push(`포탈 앞에 프록시(${peerIp})가 있습니다 — 방화벽은 프록시 주소만 보므로 웹 허용목록은 프록시를 거친 접속을 사람 주소로 거르지 못합니다(프록시에서 거르세요).`);
     }
     for (const p of s.web.ports) {
