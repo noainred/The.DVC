@@ -6,6 +6,8 @@ import { STable } from '../components/STable.jsx';
 import BoldText from '../components/boldText.jsx';
 import { authStopInfo, authStopSummary } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 import { droppedSecretNote } from './droppedSecretText.js'; // v2.607 WEB2607-03
+import { unreadMarkOf, saveLockedByUnread, unreadKind } from './settingsUnread.js'; // 118회차: 등록부를 못 읽은 동안의 조회 표지(112회차 규약)
+import { SettingsUnreadBanner } from './SettingsUnreadBanner.jsx';
 
 import { REGIONS } from '../regions.js'; // v2.575 IMP-10 — 단일 소스
 const EMPTY = {
@@ -135,6 +137,11 @@ export default function VCenterAdmin() {
   };
 
   const list = data.vcenters || [];
+  // 118회차: 서버가 vcenters.json 을 읽지 못한 동안 목록은 마지막으로 읽은 것(기동 뒤 한 번도 못 읽었으면 빈 목록)이다 — 빈 목록 위에 새로 등록해 원본을 덮지 않게
+  //   읽기 오류면 쓰기(등록 · 수정 · 삭제 · 점검중 · 가져오기)를 잠근다(서버도 503 으로 거절한다). 손상(보존본)은 예전처럼 등록이 새 등록부를 만든다 — 안내만.
+  const unread = unreadMarkOf(data);
+  const locked = saveLockedByUnread(unread);
+  const lockTitle = locked ? 'vCenter 등록부를 읽지 못한 상태라 잠겼습니다 — 다시 읽히면 풀립니다' : undefined;
 
   const changeSource = async (e) => {
     const ds = e.target.value;
@@ -153,11 +160,12 @@ export default function VCenterAdmin() {
               <input type="checkbox" checked={replaceMode} onChange={(e) => setReplaceMode(e.target.checked)} /> 전체 교체
             </label>
             <input ref={fileRef} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={onImportFile} />
-            <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={() => fileRef.current?.click()}>파일 업로드</button>
+            <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={locked} title={lockTitle} onClick={() => fileRef.current?.click()}>파일 업로드</button>
           </>}
-          <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} onClick={openAdd}>+ vCenter 추가</button>
+          <button className="login-btn" style={{ flex: 'none', padding: '9px 16px' }} disabled={locked} title={lockTitle} onClick={openAdd}>+ vCenter 추가</button>
         </div>
       </div>
+      <SettingsUnreadBanner le={unread} what="vCenter 등록부" save="등록 · 수정 · 삭제" lastGood onRecheck={load} />
 
       {authStopSummary(list.filter((v) => v.authStopped), { unit: '곳', what: 'vCenter' }) && (
         <div className="card" style={{ marginBottom: 12, padding: '10px 14px', borderColor: 'var(--red)', fontSize: 13 }}>
@@ -171,7 +179,7 @@ export default function VCenterAdmin() {
             <th>ID</th><th>이름</th><th>호스트</th><th>계정</th><th>리전</th><th>위치</th><th>자격증명</th><th className="right">작업</th>
           </tr></thead>
           <tbody>
-            {list.length === 0 && <tr><td colSpan={8} className="center muted" style={{ padding: 28 }}>등록된 vCenter가 없습니다. “+ vCenter 추가”로 등록하세요.</td></tr>}
+            {list.length === 0 && <tr><td colSpan={8} className="center muted" style={{ padding: 28 }}>{unreadKind(unread) ? 'vCenter 등록부를 읽지 못했습니다 — 목록이 비어 보여도 등록된 vCenter 가 없는 것이 아닙니다.' : '등록된 vCenter가 없습니다. “+ vCenter 추가”로 등록하세요.'}</td></tr>}
             {list.map((vc) => (
               <tr key={vc.id}>
                 <td><b>{vc.id}</b></td>
@@ -186,9 +194,9 @@ export default function VCenterAdmin() {
                 <td className="muted">{[vc.location?.city, vc.location?.country].filter(Boolean).join(', ') || '-'}</td>
                 <td>{vc.hasPassword ? <span className="badge green">설정됨</span> : <span className="badge gray">없음</span>}</td>
                 <td className="right nowrap">
-                  <button className="tab" onClick={() => toggleMaintenance(vc)} title="점검중 표시 전환(수집 일시중단/재개)">{vc.maintenance ? '점검해제' : '점검중'}</button>
+                  <button className="tab" disabled={locked} onClick={() => toggleMaintenance(vc)} title={lockTitle || '점검중 표시 전환(수집 일시중단/재개)'}>{vc.maintenance ? '점검해제' : '점검중'}</button>
                   <button className="tab" onClick={() => openEdit(vc)}>수정</button>
-                  <button className="tab" style={{ color: 'var(--red)' }} onClick={() => remove(vc)}>삭제</button>
+                  <button className="tab" style={{ color: 'var(--red)' }} disabled={locked} title={lockTitle} onClick={() => remove(vc)}>삭제</button>
                 </td>
               </tr>
             ))}
@@ -215,7 +223,7 @@ export default function VCenterAdmin() {
           <span className="muted" style={{ fontSize: 12, fontWeight: 600 }}>서버 파일에서 불러오기</span>
           <input className="input" style={{ flex: 1, minWidth: 280 }} value={serverPath}
             onChange={(e) => setServerPath(e.target.value)} placeholder="/etc/vmware-portal/vcenters.json" />
-          <button className="logout-btn" style={{ padding: '9px 14px' }} onClick={importFromServer}>서버 파일 불러오기</button>
+          <button className="logout-btn" style={{ padding: '9px 14px' }} disabled={locked} title={lockTitle} onClick={importFromServer}>서버 파일 불러오기</button>
         </div>
         <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
           서버에 이미 있는 vcenters.json 경로를 지정하거나, 위 “파일 업로드”로 PC의 파일을 올릴 수 있습니다. “전체 교체” 체크 시 기존 목록을 덮어씁니다.
@@ -302,7 +310,7 @@ export default function VCenterAdmin() {
             )}
 
             <div className="flex gap" style={{ marginTop: 16 }}>
-              <button className="login-btn" style={{ flex: 'none', padding: '10px 18px' }} disabled={busy} onClick={save}>
+              <button className="login-btn" style={{ flex: 'none', padding: '10px 18px' }} disabled={busy || locked} title={lockTitle} onClick={save}>
                 {busy ? '저장 중…' : (editing ? '저장' : '등록')}
               </button>
               <button className="logout-btn" style={{ padding: '10px 18px' }} disabled={busy} onClick={test}>연결 테스트</button>
@@ -326,7 +334,7 @@ function VcenterOrderCard() {
   //   누르면 빈 순서가 저장돼 **전 포탈의 vCenter 순서가 지워졌다**. 실패는 따로 들고 있고 저장을 막는다.
   const [loadErr, setLoadErr] = useState('');
   const load = () => fetchJson('/admin/vcenter-order')
-    .then((r) => { setLoadErr(''); setList(Array.isArray(r?.vcenters) ? r.vcenters : []); })
+    .then((r) => { setLoadErr(r?.loadError?.readError === true ? String(r.loadError.reason || '서버가 순서 · 등록부 파일을 읽지 못했습니다') : ''); setList(Array.isArray(r?.vcenters) ? r.vcenters : []); })   // 118회차: 서버가 못 읽은 동안의 순서는 저장된 순서가 아니다 — 저장을 잠근다
     .catch((e) => { setLoadErr(e?.message || '조회 실패'); setList((cur) => cur || []); });
   useEffect(() => { load(); }, []);
   if (!list) return null;

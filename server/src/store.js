@@ -328,7 +328,16 @@ class Store {
         return;
       }
 
-      const { vcenters } = loadVcenterConfig();
+      const vcCfg = loadVcenterConfig();
+      // 118회차: 등록부를 **못 읽었고 마지막으로 읽은 목록도 없으면**(기동 때부터 읽기 오류 — EACCES · EIO) 'vCenter 0개' 가 아니라 모른다 — 이 주기를 건너뛴다.
+      //   빈 목록으로 돌면 아래가 구성 캐시 · 수집 캐시(lastGood) · 위임 인벤토리(디스크 — pruneInventory)를 지우고 빈 스냅샷으로 원장 · 알림을 다시 쓴다.
+      //   읽히면 다음 주기부터 그대로 이어 간다. 마지막으로 읽은 목록이 있으면 loadVcenterConfig 가 그 목록을 준다(이 분기로 오지 않는다).
+      if (vcCfg.readError && !vcCfg.file) {
+        if (!this._vcRegUnreadWarned) { this._vcRegUnreadWarned = true; console.warn(`[collect] vCenter 등록부(vcenters.json)를 읽지 못해(${vcCfg.readError}) 수집 주기를 건너뜁니다 — 등록 0개로 보지 않습니다(캐시 · 위임 인벤토리를 지우지 않음). 파일 권한 · 소유자 · 디스크를 확인하세요`); }
+        return;
+      }
+      this._vcRegUnreadWarned = false;
+      const { vcenters } = vcCfg;
       // v2.721(감사 S1-01·R1-04): 구성 캐시 6종 정리는 수집 '전' 에 한다. 수집 뒤에 하면 접속처(host)를 바꾼 첫 주기에
       //   soapClient 가 아직 남은 옛 vCenter 의 같은 moref 구성·태그·경합 값을 새 스냅샷에 싣고, 그 값이 다음 수집까지(실패면
       //   lastGood 으로 더 오래) 지금 값처럼 서빙된다(오류 없이 틀린 값). 삭제된 vCenter 의 항목 정리도 여기서 함께 한다.

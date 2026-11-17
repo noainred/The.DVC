@@ -477,7 +477,32 @@ export const secretsReady = import('./security/secretVault.js').then((m) => { op
 const EXAMPLE_FALLBACK = process.env.VCENTERS_EXAMPLE_FALLBACK === 'true';
 let warnedExample = false;
 
+/*
+ * 118회차(재현): 이 함수는 vcenter/registry.js 와 **따로** vcenters.json 을 읽는 수집 경로다(store · 폴러 · 엣지 워커 약 90곳). 예전에는 읽기 오류
+ *   (EMFILE · EIO · EACCES — 파일은 그대로 있다)도 parse 실패와 같은 catch 로 받아 다음 후보로 넘어가 **빈 목록**을 줬다 — store 는 그 한 주기에
+ *   'vCenter 0개' 로 돌며 수집 캐시(lastGood) · 구성 캐시 · 위임 인벤토리(디스크)를 지웠다. 이제 읽기 단계 실패는 그 파일의 **마지막으로 읽은 원문**
+ *   (봉인본 그대로 — 호출마다 다시 풀어 객체를 나누지 않는다)으로 답하고 `readError`(오류 코드)를 싣는다. 마지막 원문이 없으면(기동 때부터 못 읽음)
+ *   예전처럼 다음 후보 · 빈 목록이되 `readError` 가 실린다 — `readError && !file` 은 '등록 0개' 가 아니라 **모른다** 이다(store · fleetPush 가 본다).
+ *   parse 실패(손상) · 파일 없음은 예전과 같다(마지막 원문도 버린다).
+ */
+let _vcLastGood = null;      // { file(절대 경로), text }
+let _vcReadErrLogged = '';   // 같은 읽기 오류는 콘솔 한 줄(수집 주기마다 불린다)
+/**
+ * 118회차: vcenters.json 의 마지막으로 읽은 원문은 **한 곳**이다 — 이 파일과 vcenter/registry.js(같은 파일의 다른 로더)가 읽거나 저장할 때마다 여기에 맞춘다
+ *   (두 벌로 들면 저장 직후의 읽기 오류에 한쪽이 저장 전 목록 — 지운 vCenter · 옛 비밀번호 — 을 준다). text 가 null 이면 버린다(파일 없음 · 손상).
+ */
+export function noteVcenterConfigText(file, text) {
+  const f = path.resolve(String(file || ''));
+  if (text == null) { if (_vcLastGood?.file === f) _vcLastGood = null; return; }
+  _vcLastGood = { file: f, text: String(text) };
+}
+/** 그 파일의 마지막으로 읽은 원문(없으면 null). */
+export function lastVcenterConfigText(file) {
+  return _vcLastGood && _vcLastGood.file === path.resolve(String(file || '')) ? _vcLastGood.text : null;
+}
+
 export function loadVcenterConfig() {
+  let readError = null;
   const candidates = [
     path.join(process.env.CONFIG_DIR || path.resolve(ROOT, 'config'), 'vcenters.json'),
     path.resolve(ROOT, 'config', 'vcenters.json'),           // legacy in-app location
@@ -486,9 +511,23 @@ export function loadVcenterConfig() {
   ];
   for (const file of candidates) {
     if (fs.existsSync(file)) {
+      let text;
+      try { text = fs.readFileSync(file, 'utf8'); if (_vcReadErrLogged.startsWith(`${file}|`)) _vcReadErrLogged = ''; } catch (err) {
+        // 118회차: 읽기 단계 실패 ≠ 손상 · 등록 없음 — 원문 · 경로 밖의 것은 싣지 않는다(오류 코드만).
+        const code = typeof err?.code === 'string' && /^E[A-Z]{2,15}$/.test(err.code) ? err.code : 'EIO';
+        readError = readError || code;
+        const last = lastVcenterConfigText(file);
+        if (_vcReadErrLogged !== `${file}|${code}`) {
+          _vcReadErrLogged = `${file}|${code}`;
+          console.error(`[config] ${file} 읽기 오류(${code}) — 손상이 아니라 원본은 그대로 둡니다 · ${last != null ? '마지막으로 읽은 vCenter 목록으로 계속합니다' : '마지막으로 읽은 목록이 없습니다(등록 0개가 아니라 모름)'}`);
+        }
+        if (last == null) continue;
+        text = last;
+      }
       try {
-        const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+        const parsed = JSON.parse(text);
         if (Array.isArray(parsed?.vcenters)) {
+          if (!readError) noteVcenterConfigText(file, text);
           // host에 스킴(http/https)이 없으면 https:// 보강 — fetch 'unknown scheme' 방지.
           const vcenters = parsed.vcenters.map((v) => (v && v.host && !/^https?:\/\//i.test(String(v.host))
             ? { ...v, host: `https://${String(v.host).trim()}` } : v));
@@ -500,13 +539,15 @@ export function loadVcenterConfig() {
             warnedExample = true;
             console.warn('[config] ⚠ vCenter 가 등록되지 않아 **예제 템플릿**(vcenters.example.json)을 읽었습니다 — vc-us-east 같은 가짜 vCenter 를 수집 시도하고 중앙에 빈 인벤토리를 보냅니다. 설정 › 인프라 등록 › vCenter 등록·관리에서 실제 vCenter 를 등록하세요(이 폴백은 VCENTERS_EXAMPLE_FALLBACK=true 로 켜져 있습니다).');
           }
-          return { file, vcenters: openSecretsDeepRef ? openSecretsDeepRef(vcenters) : vcenters };
+          return { file, vcenters: openSecretsDeepRef ? openSecretsDeepRef(vcenters) : vcenters, ...(readError ? { readError } : {}) };
         }
+        noteVcenterConfigText(file, null);   // 형식이 달라졌다(vcenters 배열 없음) — 예전과 같이 다음 후보로
       } catch (err) {
         // v2.744(적대적 검토 VC 후속): 원문이면 vcenters.json 의 비밀번호 앞부분(V8 이 보여 주는 조각)이 매 수집 주기 콘솔·엣지 로그로 나갔다.
         console.error(`[config] Failed to parse ${file}: ${safeLoadText(err)}`);
+        noteVcenterConfigText(file, null);   // 손상 — 마지막 원문으로 덮어 가리지 않는다(예전과 같이 빈 목록)
       }
-    }
+    } else noteVcenterConfigText(file, null);   // 파일이 없어졌다(삭제 · 손상 보존으로 옮김) — 옛 목록을 되살리지 않는다
   }
-  return { file: null, vcenters: [] };
+  return { file: null, vcenters: [], ...(readError ? { readError } : {}) };
 }

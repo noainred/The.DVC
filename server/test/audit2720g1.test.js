@@ -155,7 +155,8 @@ test('S1-01 삭제된 vCenter·접속처가 바뀐 vCenter 의 구성 캐시를 
   const fs = await import('node:fs');
   const src = stripComments(fs.readFileSync(new URL('../src/store.js', import.meta.url), 'utf8'));
   // v2.721(감사 S1-01): 정리는 수집 '전'(loadVcenterConfig 직후) 한 번이다.
-  assert.match(src, /const \{ vcenters \} = loadVcenterConfig\(\);\s*syncVcConfigCaches\(vcenters\);/);
+  //   118회차: 그 사이에 '등록부를 못 읽음(마지막 목록도 없음)' 건너뛰기 하나만 들어갔다 — 못 읽은 빈 목록으로 구성 캐시를 지우지 않게(정리는 여전히 수집 전 한 번).
+  assert.match(src, /const vcCfg = loadVcenterConfig\(\);\s*if \(vcCfg\.readError && !vcCfg\.file\) \{[\s\S]{0,700}?return;\s*\}\s*this\._vcRegUnreadWarned = false;\s*const \{ vcenters \} = vcCfg;\s*syncVcConfigCaches\(vcenters\);/);
   assert.equal((src.match(/syncVcConfigCaches\(vcenters\)/g) || []).length, 1, '호출은 한 곳뿐');
 });
 

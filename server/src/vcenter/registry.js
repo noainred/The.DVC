@@ -8,15 +8,15 @@
  * written 0600 because it holds credentials.
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { makeLoadError } from '../util/registryCore.js'; // 118회차: 읽기 오류 ≠ 손상(공용 판정 — 결정 78 남긴 것 ① · 116회차 nsx/registry.js 와 같은 규칙)
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { VCenterClient, vcAuthGuard } from './restClient.js';
 import { describeError } from '../util/errors.js';
 import { geocode } from './geocode.js';
 import { normRequestTimeoutMs } from './soapParse.js'; // v2.598 T2598-03: 요청 시한 [1초, 10분] (0 = 기본값)
-import { config } from '../config.js';
+import { config, noteVcenterConfigText, lastVcenterConfigText } from '../config.js';
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.503: 접속처 변경 시 저장 비밀 폐기(공용 판정)
 
 // User registry lives in CONFIG_DIR (default app/server/config) so it can be
@@ -25,21 +25,58 @@ const FILE = path.join(config.configDir, 'vcenters.json');
 
 import { REGIONS } from '../util/regions.js'; // v2.575 IMP-10 — 단일 소스
 
+/*
+ * 118회차(재현 — 97회차 스윕이 '다른 점검 범위' 로 남긴 등록부 · 116회차 F1 의 형제): 예전에는 읽기와 JSON.parse 를 catch 하나로 받아 **읽기 오류**
+ *   (EMFILE · EIO · EACCES · EISDIR)도 손상으로 보고 온전한 vcenters.json(전 vCenter 접속 계정 · 비밀번호)을 `.corrupt.*` 로 옮긴 뒤 빈 목록으로 돌았다.
+ *   이 등록부는 캐시 없이 화면 조회 · 점검 폴러마다 읽으므로 일시 오류 **한 번**에 원본이 사라졌고, 수집 경로(config.js loadVcenterConfig — 같은 파일을
+ *   따로 읽는다)는 그 뒤로 '파일 없음 = vCenter 0개' 로 돌았다(수집 캐시 · 위임 인벤토리 삭제). 다음 등록은 한 건짜리 파일을 썼다.
+ *   판정은 공용(util/registryCore.js makeLoadError.read — 읽기 단계 실패 = read-error · parse 실패 = corrupt):
+ *    - read-error: 원본을 옮기지 않는다 · **마지막으로 읽은 목록**을 돌려준다(한 번도 못 읽었으면 빈 목록 — 그 사실은 `registryLoadError()` 가 말한다) ·
+ *      쓰기(등록 · 수정 · 삭제 · 가져오기)는 거절한다(`registry-unreadable`) · 30초 간격으로 다시 읽고, 읽히면 풀린다.
+ *    - corrupt(JSON 형식): 예전과 같다(보존본으로 옮기고 빈 목록 — 관리자 저장이 새 등록부를 만든다). 이제 그 사실도 `registryLoadError()` 에 남는다.
+ *    - 파일 없음 · `vcenters` 가 배열이 아님: 예전과 같다(빈 목록 · 오류 아님).
+ *   봉인 해제(openSecretsDeep)는 던지지 않는다 — 키를 못 쓰면 그 칸이 '' 로 열리고(secretVault 계약) 파일은 그대로이며, 저장은 sealSecretsDeep 가 거절한다(SECRETS_KEY_MISSING).
+ *   ⚠ 캐시는 두지 않는다(매 호출 디스크 읽기 그대로) — 호출부가 받은 목록을 고쳐 쓰고(add · update · import), 외부 편집 · 복원 · 정책 전환(migrateSecretFiles)이
+ *     파일을 직접 바꾼다. 마지막 목록은 **원문**(봉인본 그대로)으로 들고 읽기 오류 때만 다시 푼다(호출부와 객체를 나누지 않는다 · 평소 경로에 복제 비용 없음).
+ *     그 원문은 config.js 한 곳에 둔다(noteVcenterConfigText — 수집 경로 loadVcenterConfig 와 같은 값. 두 벌이면 저장 직후에 서로 다른 목록을 준다).
+ */
+const loadErr = makeLoadError();
+const WHAT = 'vCenter 등록부(vcenters.json)';
+let _parsedText = null;
+const parseDb = (text) => {
+  const parsed = JSON.parse(text);
+  const list = openSecretsDeep(Array.isArray(parsed?.vcenters) ? parsed.vcenters : []); // 메모리는 항상 평문(소비 코드 무변경)
+  _parsedText = text;
+  return list;
+};
+
 export function loadRegistry() {
-  if (!fs.existsSync(FILE)) return [];
-  try {
-    const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    return openSecretsDeep(Array.isArray(parsed?.vcenters) ? parsed.vcenters : []); // 메모리는 항상 평문(소비 코드 무변경)
-  } catch (e) {
-    // 손상본을 조용히 []로 반환하면 다음 addVcenter/saveRegistry가 빈 목록으로 덮어써
-    // 등록된 모든 vCenter와 자격증명이 영구 유실된다 → 손상본을 .corrupt로 보존 후 시작.
-    preserveCorrupt(FILE, e.message);
-    return [];
+  const r = loadErr.read(FILE, parseDb);
+  if (r.kind === 'ok') { noteVcenterConfigText(FILE, _parsedText); return r.value; }
+  if (r.kind === 'read-error') {
+    const last = lastVcenterConfigText(FILE);   // 마지막으로 읽은 원문(이 로더 · 수집 경로 · 저장 중 가장 최근)
+    if (last == null) return [];
+    try { return parseDb(last); } catch { return []; }
   }
+  // 파일 없음 · 손상(보존본으로 옮김 — 조용히 []로 넘기면 다음 addVcenter/saveRegistry 가 빈 목록으로 덮어써 등록된 모든 vCenter 와 자격증명이 유실된다): 예전과 같이 빈 목록.
+  noteVcenterConfigText(FILE, null);
+  return [];
 }
+/**
+ * @returns {null|{at:number, reason:string, readError?:boolean, code?:string}} 등록부를 못 읽었으면(읽기 오류 · 손상 · 재시작 뒤 보존본만 남음) 그 사유.
+ *   읽기 오류(`readError:true`)면 loadRegistry() 는 마지막으로 읽은 목록(없으면 빈 목록)이다 — '등록 0개' 로 읽지 말 것.
+ *   보존본 판정(설정 폴더 목록)은 여기서만 한다 — loadRegistry 는 화면 · 폴러마다 불리고, 등록 전 포탈은 파일이 없는 것이 정상이다.
+ */
+export function registryLoadError() { loadRegistry(); loadErr.checkCorruptOnly(FILE); return loadErr.get(); }
+/** 읽기 오류 중의 쓰기 거절(`{ok:false, code:'registry-unreadable', readError:true, reason}`) 또는 null — 로드를 먼저 한다(첫 호출이 쓰기여도 상태가 서게). */
+export function registryWriteRefusal() { loadRegistry(); return loadErr.writeRefusal(WHAT); }
 
 function saveRegistry(list) {
-  atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ vcenters: list }), null, 2), { mode: 0o600 }); // 암호화 모드면 password 봉인(깊은 복제 — 메모리 불변)
+  loadErr.assertWritable(WHAT); // 118회차: 마지막 방어선 — 어느 경로도 읽기 오류 중에 원본을 덮지 않는다(던진다)
+  const text = JSON.stringify(sealSecretsDeep({ vcenters: list }), null, 2); // 암호화 모드면 password 봉인(깊은 복제 — 메모리 불변)
+  atomicWriteFileSync(FILE, text, { mode: 0o600 });
+  noteVcenterConfigText(FILE, text);   // 쓰기 성공 뒤에 — 바로 뒤의 읽기 오류가 저장 전 목록(지운 vCenter · 옛 비밀번호)을 되살리지 않게
+  loadErr.clear();        // 손상 뒤의 관리자 저장이 새 등록부를 만들었다(v2.612 규약)
 }
 
 /** Strip secrets before sending an entry to the client. */
@@ -117,6 +154,7 @@ function normalize(body, existing = null) {
 
 export function addVcenter(body) {
   const list = loadRegistry();
+  { const ref = loadErr.writeRefusal(WHAT); if (ref) return ref; }   // 118회차: 읽기 오류 중에는 저장하지 않는다(원본을 한 건짜리로 덮지 않게)
   const [entry, err] = normalize(body);
   if (err) return { ok: false, reason: err };
   if (list.some((v) => v.id === entry.id)) return { ok: false, reason: `이미 존재하는 id: ${entry.id}` };
@@ -127,6 +165,7 @@ export function addVcenter(body) {
 
 export function updateVcenter(id, body) {
   const list = loadRegistry();
+  { const ref = loadErr.writeRefusal(WHAT); if (ref) return ref; }   // 118회차
   const idx = list.findIndex((v) => v.id === id);
   if (idx === -1) return { ok: false, reason: `없는 vCenter: ${id}` };
   const [entry, err, droppedSecrets] = normalize({ ...body, id }, list[idx]);
@@ -138,6 +177,7 @@ export function updateVcenter(id, body) {
 
 export function removeVcenter(id) {
   const list = loadRegistry();
+  { const ref = loadErr.writeRefusal(WHAT); if (ref) return ref; }   // 118회차
   const next = list.filter((v) => v.id !== id);
   if (next.length === list.length) return { ok: false, reason: `없는 vCenter: ${id}` };
   saveRegistry(next);
@@ -153,6 +193,7 @@ export function removeVcenter(id) {
 export function importVcenters(incoming, mode = 'merge') {
   if (!Array.isArray(incoming)) return { ok: false, reason: 'vcenters 배열을 찾을 수 없습니다 ({ "vcenters": [...] } 형식 필요).' };
   const existing = loadRegistry();
+  { const ref = loadErr.writeRefusal(WHAT); if (ref) return ref; }   // 118회차: 전체 교체도 — 읽히지 않는 원본을 보존본 없이 덮지 않는다
   const result = mode === 'replace' ? [] : [...existing];
   let added = 0, updated = 0;
   const skipped = [];
