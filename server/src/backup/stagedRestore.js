@@ -329,7 +329,12 @@ export function reconcileForApply(name, content, configDir) {
     // 91회차(88 F6 · F7 반증 — 형제): 지금 파일의 **읽기 오류**를 '없음' 으로 보면 기본값과 견줘 백업의 약한 값(예: 지금 otp_only · 백업 레거시)이 그대로 들어갔다
     //   (원자 쓰기는 읽지 못한 원본도 대체한다). 없음(ENOENT)만 기본값과 견주고, 읽기 오류면 이 파일만 적용하지 않는다.
     const cur = readCurrentOrThrow(configDir, name, '세션 보안 설정');
-    const r = reconcileSecuritySessionText(content, cur);
+    // 100회차(98회차 반증 — 재현): 본 파일이 없거나 객체로 읽히지 않으면 돌고 있는 값은 **신뢰 사본**(security-session.trusted.json — 98회차)이다.
+    //   예전에는 이때 기본값과 견줘, 사본의 otp_only · 단일 세션 · 총 상한 8시간 · 소유자 목록을 백업의 약한 값(레거시 · 끔 · 무제한 · 소유자 추가)으로
+    //   OTP 없이 내렸다. 사본과 견준다(사본을 못 읽으면 이 파일만 적용하지 않는다 — 지금 값을 모른 채 덮지 않는 91회차 규칙). 둘 다 없으면 예전과 같다(기본값과 견줌).
+    const objText = (t) => { try { const j = JSON.parse(String(t)); return j && typeof j === 'object' && !Array.isArray(j) ? t : null; } catch { return null; } };
+    const effective = objText(cur) ?? objText(readCurrentOrThrow(configDir, 'security-session.trusted.json', '세션 보안 신뢰 사본')) ?? cur;
+    const r = reconcileSecuritySessionText(content, effective);
     const others = r.kept.filter((k) => k !== 'bareosSetupOtp');
     if (r.forcedOn && !others.length) return { content: r.text, info: { bareosSetupOtpKeptOn: true }, warning: { file: name, reason: '백업에는 Bareos 자동 설정 본인 OTP 재확인이 꺼져 있었지만 복원으로는 끄지 않습니다(켬으로 적용) — 끄려면 설정 › 보안 › 세션 보안에서 본인 OTP 로 저장하세요.' } }
     if (r.kept.length) {

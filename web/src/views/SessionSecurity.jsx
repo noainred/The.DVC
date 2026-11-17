@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson, putJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
-import { sessionSecurityBody } from './sessionSecurityBody.js';
+import { sessionSecurityBody, sessionRecoveryText } from './sessionSecurityBody.js';
 
 /**
  * v2.744(감사 후속 FB-3): 소유자 목록에 **범위가 지정된 계정**이 있으면 그 사실을 말한다(서버 GET·PUT 응답의 ownerWarnings).
@@ -57,6 +57,12 @@ export default function SessionSecurity() {
         이 설정 변경에는 <b>본인 OTP 재인증</b>이 필요하며, 변경 내역(누가·이전→이후)은 <b>설정 › 감사 로그</b>에 남습니다.
       </p>
 
+      {/* 100회차(98회차 남긴 것 ③): 본 파일 대신 직전 값 · 신뢰 사본 · 엄격 값으로 도는 중이면 한 줄(서버 응답 recovery) */}
+      {sessionRecoveryText(s.recovery) && (
+        <div role="status" style={{ margin: '0 0 10px', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--amber,#f59e0b)', fontSize: 12, lineHeight: 1.6, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
+          ⚠ {sessionRecoveryText(s.recovery)}
+        </div>
+      )}
       <div className="card" style={{ padding: 16 }}>
         <label className="flex gap" style={{ alignItems: 'center', cursor: 'pointer', marginBottom: 12 }}>
           <input type="checkbox" checked={s.idleLogoutEnabled} onChange={(e) => setS({ ...s, idleLogoutEnabled: e.target.checked })} /> <b>유휴 자동 로그아웃 사용</b>

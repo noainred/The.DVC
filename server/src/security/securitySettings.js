@@ -80,7 +80,10 @@ function readConfiguredRaw() {
   if (_lastGood) return recoverFrom(problem, 'last-good', _lastGood);
   const t = readJsonFile(TRUSTED_FILE, { preserve: false });
   if (t.kind === 'ok') { _lastGood = t.value; _trustedSig = t.text; return recoverFrom(problem, 'trusted-copy', t.value); }
-  if (problem === 'missing') { _recovery = null; return {}; }   // 신규 설치 — 예전과 같다(기본값)
+  // 100회차(98회차 반증 — 재현): 기본값은 **두 파일 모두 없을 때만**(신규 설치). 예전 조건은 본 파일만 보아, 본 파일이 없고(손상 보존 뒤 재시작 · 지움)
+  //   신뢰 사본이 **있는데 깨졌거나 읽기 오류**(EACCES · EISDIR)면 조용히 기본값(레거시 정책 · 단일 세션 끔 · 총 상한 무제한)으로 내려갔고 recovery 도 없었다
+  //   (머리말 ④ '그 밖은 엄격 값' 위반 — secrets-policy S-07 ③ 과 같은 규칙: 흔적이 있으면 신규 설치가 아니다).
+  if (problem === 'missing' && t.kind === 'missing') { _recovery = null; return {}; }   // 신규 설치 — 예전과 같다(기본값)
   return recoverFrom(problem, 'strict', { ...STRICT });
 }
 // 설정 소유 계정을 '파일/환경변수'로도 지정할 수 있게 하는 경로(운영자가 직접 편집).

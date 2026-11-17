@@ -38,6 +38,7 @@ const strList = (v, max) => (Array.isArray(v) ? [...new Set(v.map((x) => t(x, 30
 
 let cache = null;
 let readFailAt = 0;
+let readFailed = false;   // 100회차: 지금 세워 둔 오류가 '읽기 실패'(손상 아님)에서 온 것인가 — 다음 읽기가 되면(파일 없음 포함) 그 오류를 거둔다
 const loadErr = makeLoadError();
 
 class ShapeError extends Error {}
@@ -71,9 +72,13 @@ function load() {
     if (fs.existsSync(FILE())) text = fs.readFileSync(FILE(), 'utf8');
   } catch (e) {
     // 읽기 자체가 실패(EMFILE · 권한 등 — 내용 손상이 아니다): 원본을 옮기지 않고 잠근 채 다시 읽는다.
-    loadErr.set(`읽기 실패(${String(e?.code || e?.message || e).slice(0, 40)})`); readFailAt = Date.now(); return null;
+    loadErr.set(`읽기 실패(${String(e?.code || e?.message || e).slice(0, 40)})`); readFailAt = Date.now(); readFailed = true; return null;
   }
   readFailAt = 0;
+  // 100회차(97회차 추정 — 재현): 읽기 실패 뒤 파일이 **없어지면**(사람이 치움) 아래 checkCorruptOnly 가 '이미 오류가 있다' 로 그냥 돌아가 읽기 실패 표지가
+  //   남았다 — 파일이 없는데도 키 접속 정지 · 쓰기 거절이 '상태 파일 다시 읽기'(OTP) · 재시작 전까지 풀리지 않았다. 읽기 자체가 된 지금은 그 오류를 거두고
+  //   지금 파일 상태(없음 → 손상 보존본만이면 다시 잠금 · 아니면 빈 상태 — 재시작과 같다 · 있음 → 아래 파싱)로 다시 정한다. 손상에서 온 오류는 거두지 않는다.
+  if (readFailed) { readFailed = false; loadErr.clear(); }
   if (text == null) {
     loadErr.checkCorruptOnly(FILE());
     if (loadErr.get()) return null;
@@ -84,12 +89,12 @@ function load() {
   catch (e) { preserveCorrupt(FILE(), e?.message); loadErr.set(e); cache = null; return null; }
   return cache;
 }
-export function _resetSshAccessStateForTest() { cache = null; readFailAt = 0; loadErr.clear(); }
+export function _resetSshAccessStateForTest() { cache = null; readFailAt = 0; readFailed = false; loadErr.clear(); }
 /** 로드 오류(손상 · 모양 틀림 · 손상 보존본만 · 읽기 실패) — 있으면 키 접속을 멈추고 쓰기를 거절한다. */
 export function stateLoadError() { load(); return loadErr.get(); }
 /** 사람이 파일을 고친 뒤 재시작 없이 다시 읽는다(설정 소유자 + OTP 라우트). 그래도 못 읽으면 오류를 그대로 돌려준다. */
 export function reloadSshAccessState({ by = '' } = {}) {
-  cache = null; readFailAt = 0; loadErr.clear();
+  cache = null; readFailAt = 0; readFailed = false; loadErr.clear();
   load();
   const e = loadErr.get();
   if (e) return { ok: false, code: 'state-unreadable', status: 503, reason: `상태 파일을 아직 읽지 못합니다 — ${t(e.reason, 160)}` };

@@ -596,6 +596,13 @@ adminRouter.post('/collectors/upgrade', adminOnly, fleetOnly, async (req, res) =
   res.json({ ok: true, version: bundle.version, source: bundle.source, pushed: results.length, succeeded: ok, results });
 });
 
+/** 100회차: 시험 주소 비교 열쇠 — 스킴 기본값(https://) · 앞뒤 공백 · 대소문자 · 끝 슬래시를 같게 본다(정규식 반복 없이 — 외부 입력). */
+function collectorUrlKey(u) {
+  const t = withDefaultScheme(String(u ?? '').trim()).toLowerCase();
+  let end = t.length;
+  while (end > 0 && t.charCodeAt(end - 1) === 47) end -= 1;   // '/'
+  return t.slice(0, end);
+}
 // Test connectivity to one collector (saved by id, or an ad-hoc {url, token}).
 adminRouter.post('/collectors/test', adminOnly, fleetOnly, async (req, res) => {
   const body = req.body || {};
@@ -604,6 +611,11 @@ adminRouter.post('/collectors/test', adminOnly, fleetOnly, async (req, res) => {
     const saved = loadCollectors().find((c) => c.id === body.id);
     // v2.480(3차 감사 S2): 저장 토큰을 물려받으면 URL 도 저장값으로 고정 — 임의 URL 에 저장 토큰을 헤더로 보내던 경로 차단
     // (토큰 열람은 소유자 전용인데 전송은 admin 이었다). 새 URL 을 시험하려면 토큰도 함께 입력해야 한다.
+    // 100회차(98회차 남긴 것 ③ — 결정 · 91ⓐ · 98 F2 와 같은 규칙): 저장 토큰을 쓸 때 본문 주소가 저장 주소와 다르면 예전에는 조용히 저장 주소로 바꿔 시험해
+    //   '입력한 주소' 의 결과처럼 보였다(편집 폼에서 URL 만 고치고 시험 → 옛 주소 성공). 이제 거절하고 토큰 입력 · 저장 뒤 시험을 안내한다(비밀은 보내지 않는다).
+    if (saved && !token && saved.token && url != null && String(url).trim() !== '' && collectorUrlKey(url) !== collectorUrlKey(saved.url)) {
+      return res.json({ ok: false, method: 'carry-refused', code: 'carry-refused', reason: '입력한 URL 이 저장된 주소와 달라 저장된 토큰을 쓰지 않습니다 — 새 주소를 시험하려면 토큰을 함께 입력하거나, 먼저 저장한 뒤 시험하세요.' });
+    }
     if (saved) { if (!token) { token = saved.token; url = saved.url; } else { url = url || saved.url; } }
   }
   if (!url) return res.status(400).json({ ok: false, reason: 'url이 필요합니다.' });

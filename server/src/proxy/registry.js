@@ -18,6 +18,7 @@ import { makeJsonFileReader } from '../util/jsonFileLoad.js';   // 76회차 F5: 
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { envPort } from '../util/envNumber.js';   // 100회차(99회차 남긴 것): 포트 env 는 1~65535 정수만(−1 · 70000 · Infinity → 기본값 — 결정 57)
 import { normalizeGuacdFlags } from './guacdFlags.js';   // 48회차 F2
 import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
 
@@ -48,7 +49,7 @@ const DEFAULTS = {
   deploy: {
     enabled: false,
     host: process.env.PROXY_SSH_HOST || '',
-    port: Number(process.env.PROXY_SSH_PORT) || 22,
+    port: envPort(process.env.PROXY_SSH_PORT, 22),
     username: process.env.PROXY_SSH_USER || '',
     password: process.env.PROXY_SSH_PASS || '',
     privateKey: '', // optional PEM; takes precedence over password when set
@@ -57,8 +58,8 @@ const DEFAULTS = {
     reloadCmd: process.env.PROXY_RELOAD_CMD || 'systemctl reload haproxy',
   },
   proxyHost: process.env.PROXY_PUBLIC_HOST || '', // what users connect to (and the SSH gateway dials)
-  publicPortBase: Number(process.env.PROXY_PUBLIC_PORT_BASE) || 20000,
-  guacd: { host: process.env.GUACD_HOST || '', port: Number(process.env.GUACD_PORT) || 4822, tls: false, verifyRdpCert: false },   // 48회차 F2: tls · verifyRdpCert(guacdTransport.js)
+  publicPortBase: envPort(process.env.PROXY_PUBLIC_PORT_BASE, 20000),
+  guacd: { host: process.env.GUACD_HOST || '', port: envPort(process.env.GUACD_PORT, 4822), tls: false, verifyRdpCert: false },   // 48회차 F2: tls · verifyRdpCert(guacdTransport.js)
   // Additional per-vCenter proxies. Each: { id, name, vcenterIds:[], proxyHost,
   // publicPortBase, dataplane, deploy, guacd }. A VM's vCenter selects its proxy;
   // when none matches, the top-level ("기본") proxy above is used.

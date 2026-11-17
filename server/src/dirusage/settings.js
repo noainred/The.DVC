@@ -17,6 +17,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
 import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 97회차 F14: 읽기 오류 ≠ 손상
+import { corruptOnlyReason } from '../util/registryCore.js';   // 100회차(97 ③ 결정): 본 파일 없음 + 손상 보존본만 = 아직 못 읽은 설정
 import { TOP_N_MIN, TOP_N_MAX } from './scan.js';
 import { normalizeAddresses } from '../util/smtp.js';
 import { numOrNull } from '../util/numOrNull.js';
@@ -83,8 +84,9 @@ function clamp(v, lo, hi, def) {
 /*
  * 97회차 F14(재현 — EISDIR): 예전 catch 하나는 **읽기 오류**(EACCES · EIO · EISDIR)도 손상으로 보고 온전한 원본을 `.corrupt.*` 로 옮긴 뒤 기본값을 캐시했다 —
  *   보관 일수가 기본값(365일)이 되어 다음 정리(prune)가 사용자가 늘려 둔 기간의 이력을 지웠고(되돌릴 수 없다), 다음 저장이 기본값 위에 썼다.
- *   판정은 공용 읽기(util/jsonFileRead.js): 읽기 오류는 원본을 두고 · 캐시하지 않고(30초 간격 재읽기) · 저장을 거절하고(409) · 정리를 건너뛴다.
- *   손상은 예전처럼 보존본으로 옮기고 기본값으로 돌되, 이 프로세스에서는 표지를 세워 정리를 건너뛴다(진짜 보관 일수는 보존본에 있다 — 추측으로 지우지 않는다).
+ *   판정은 공용 읽기(util/jsonFileRead.js): 읽기 오류는 원본을 두고 · 캐시하지 않고(30초 간격 재읽기) · 저장을 거절하고(409) · 정리는 저장 상한(RETENTION_MAX_DAYS)으로만 한다.
+ *   손상은 예전처럼 보존본으로 옮기고 기본값으로 돌되, 표지를 세워 정리를 저장 상한으로만 한다(진짜 보관 일수는 보존본에 있다 — 추측으로 지우지 않는다).
+ *   100회차: 재시작 뒤(본 파일 없음 + 손상 보존본만)에도 같은 표지 — 관리자가 다시 저장하면 풀린다.
  */
 const _reader = makeJsonFileReader(() => FILE, { parse: parseJsonObject, tag: 'dirusage' });
 let _loadError = null;   // { at, reason, readError? }
@@ -93,12 +95,17 @@ export function load() {
   const out = structuredClone(DEFAULTS);
   const r = _reader.read();
   if (r.kind === 'read-error') {
-    _loadError = { at: _loadError?.readError ? _loadError.at : Date.now(), readError: true, reason: `디렉터리 사용량 설정(dirusage.json) 파일을 읽지 못했습니다(읽기 오류 ${String(r.error?.code || '').slice(0, 32)}) — 원본은 그대로 둡니다 · 저장과 이력 정리를 멈춥니다(30초마다 다시 읽음)` };
+    _loadError = { at: _loadError?.readError ? _loadError.at : Date.now(), readError: true, reason: `디렉터리 사용량 설정(dirusage.json) 파일을 읽지 못했습니다(읽기 오류 ${String(r.error?.code || '').slice(0, 32)}) — 원본은 그대로 둡니다 · 저장을 멈추고 이력 정리는 최대 보관 일수(${RETENTION_MAX_DAYS}일)로만 합니다(30초마다 다시 읽음)` };
     return out;   // 캐시하지 않는다
   }
   if (r.kind === 'corrupt') {
-    _loadError = { at: Date.now(), reason: `디렉터리 사용량 설정(dirusage.json) 파일이 손상돼 보존본으로 옮겼습니다 — 기본값으로 돌고 이력 정리는 멈춥니다(저장하면 풀림)` };
-    console.warn(`[dirusage] 설정 로드 실패 — 원본을 .corrupt 로 보존하고 기본값으로 시작합니다(이력 정리는 저장 전까지 멈춤): ${safeLoadText(r.error) || '사유 미상'}`);
+    _loadError = { at: Date.now(), reason: `디렉터리 사용량 설정(dirusage.json) 파일이 손상돼 보존본으로 옮겼습니다 — 기본값으로 돌고 이력 정리는 최대 보관 일수(${RETENTION_MAX_DAYS}일)로만 합니다(저장하면 풀림)` };
+    console.warn(`[dirusage] 설정 로드 실패 — 원본을 .corrupt 로 보존하고 기본값으로 시작합니다(이력 정리는 저장 전까지 최대 보관 일수 ${RETENTION_MAX_DAYS}일로만): ${safeLoadText(r.error) || '사유 미상'}`);
+  } else if (r.kind === 'missing' && corruptOnlyReason(FILE)) {
+    // 100회차(97회차 남긴 것 ③ — 결정 · 재현): 손상으로 보존본만 남긴 뒤 재시작하면 '파일 없음' 이라 표지가 사라져 기본 보관 일수(365일)로 스캔 이력을 지웠다
+    //   (늘려 둔 보관 일수는 보존본에만 있다). 본 파일이 없고 그 보존본이 남아 있으면 관리자가 다시 저장할 때까지 같은 표지를 세운다(저장은 허용 —
+    //   readError 아님 · 저장하면 본 파일이 생겨 풀린다. 보존본을 치워도 풀린다 — veeam/backupMarks marksCorruptKept 와 같은 판정).
+    _loadError = { at: _loadError?.corruptKept ? _loadError.at : Date.now(), corruptKept: true, reason: `디렉터리 사용량 설정(dirusage.json) 파일이 없고 손상 보존본만 남아 있습니다 — 기본값으로 돌고 이력 정리는 최대 보관 일수(${RETENTION_MAX_DAYS}일)로만 합니다(설정을 다시 저장하면 풀림)` };
   } else _loadError = null;
   if (r.kind === 'ok') {
     const p = r.value;
@@ -119,7 +126,7 @@ export function load() {
   cache = out;
   return cache;
 }
-/** 97회차 F14: 설정을 못 읽었으면(읽기 오류 · 이 프로세스에서 본 손상) `{ at, reason, readError? }`, 아니면 null — 이력 정리(prune)는 이 값이 있으면 건너뛴다. */
+/** 97회차 F14 · 100회차: 설정을 못 읽었으면(읽기 오류 · 이 프로세스에서 본 손상 · 본 파일 없이 손상 보존본만) `{ at, reason, readError?, corruptKept? }`, 아니면 null — 이력 정리(prune)는 이 값이 있으면 저장 상한(RETENTION_MAX_DAYS)으로만 한다(메인 검토 — 건너뛰면 무한 증식). */
 export function settingsLoadError() { load(); return _loadError; }
 
 /** 저장 — 대상·수신자만 다룬다(SMTP 는 공용 mail.json). */

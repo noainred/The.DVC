@@ -16,6 +16,7 @@ import { bumpFleetRev } from '../insights/fleetRev.js';
 import { readJsonCapped } from '../util/readCapped.js'; // v2.604 CEN2604-01: 자기등록 검증 ping 응답 크기 상한
 import { resilientFetch } from '../util/resilientFetch.js'; // v2.613 DEPS2613-03: 동적 import 에서 정적으로(순환 없음)
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.503: url 변경 시 저장 토큰 폐기
+import { envPositive } from '../util/envNumber.js';   // 100회차(99회차 남긴 것): env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 // 2026-10-09 검토 S-09(그룹 J): 원격 URL 은 HTTPS 가 기본 — 평문 HTTP 는 승인된 예외만(판정은 transportPolicy.js 하나).
 import { withDefaultScheme, evaluateCollectorUrl, transportOf, recordRejectedHttpRegistration, clearRejectedHttpRegistration, INSECURE_HTTP_CODE } from './transportPolicy.js';
 import { resolvePickedDc } from './datacenterMatch.js'; // v2.985 반증 D2: 사용자 매칭 법인 id 고르기 규칙 하나(순수 · 의존 없음)
@@ -438,8 +439,8 @@ export function upsertCollectorFromAgent({ name, url, token, datacenter = '', un
 }
 
 /** 자기등록 개수 상한(v2.604 CEN2604-04) — 공유 토큰의 새 이름 생성에만 적용한다. */
-export const SELF_REG_MAX = Math.max(8, Number(process.env.CENTRAL_SELF_REGISTER_MAX) || 256);
-export const SELF_REG_UNVERIFIED_MAX = Math.max(1, Number(process.env.CENTRAL_SELF_REGISTER_UNVERIFIED_MAX) || 16);
+export const SELF_REG_MAX = Math.max(8, envPositive(process.env.CENTRAL_SELF_REGISTER_MAX, 256));
+export const SELF_REG_UNVERIFIED_MAX = Math.max(1, envPositive(process.env.CENTRAL_SELF_REGISTER_UNVERIFIED_MAX, 16));
 
 /**
  * 자기등록 검증 결과를 항목에 남긴다(v2.604 CEN2604-04). `selfRegUnverified` 가 있는 항목은 중앙이 '아는 엣지' 로 세지 않는다
