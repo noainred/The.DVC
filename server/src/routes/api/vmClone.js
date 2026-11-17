@@ -223,6 +223,9 @@ api.post('/tools/vm-clone/jobs', adminOnly, (req, res) => {
   }
   // v2.793: 법인 NFS 데이터스토어를 골랐으면 그 정의가 같은 vCenter 의 것이어야 한다(데이터스토어 이름은 정의에서 가져온다).
   const body = { ...(req.body || {}) };
+  // 65회차 F3: 데모 표지는 데모 시드(store.saveJob 직접)만 세운다 — 본문의 demo:true 를 받으면 화면에는 켜진 잡인데
+  //   실행기는 'demo-job' 으로 건너뛰고 위임 동기화 · RPO 판정에서도 빠지는 잡이 API 한 번으로 생긴다.
+  delete body.demo;
   if (body.dest && typeof body.dest === 'object' && typeof body.dest.nfsDsId === 'string' && body.dest.nfsDsId) {
     const d = getNfsDs(body.dest.nfsDsId);
     if (!d || String(d.vcenterId) !== vcenterId) return res.status(400).json({ ok: false, reason: '고른 NFS 데이터스토어가 이 vCenter 의 법인 저장소가 아닙니다.' });

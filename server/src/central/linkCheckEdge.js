@@ -124,6 +124,9 @@ export async function putEdgeLinkReport(agent, body = {}) {
   const list = raw.slice(0, REPORT_LINK_MAX);
 
   const toSave = [];
+  // 65회차 F2: 한 보고 안의 같은 링크 id 는 한 번만 받는다 — 엣지 워커는 링크마다 한 번만 싣는다. ts 만 다른 같은 id 가
+  //   INSERT OR IGNORE 를 지나 표본 · 일 롤업(n · 실패 수)을 그만큼 부풀렸다. 두 번째부터는 rejected 로 센다(조용히 버리지 않는다).
+  const seenIds = new Set();
   let rejected = 0; let skipped = 0;
   for (const r of list) {
     if (!r || typeof r !== 'object') { rejected += 1; continue; }
@@ -153,6 +156,8 @@ export async function putEdgeLinkReport(agent, body = {}) {
     if (assigned && !assigned.has(id.toLowerCase())) { rejected += 1; notAssigned += 1; continue; } // v2.607 LEFT2607-01
     const v = (r.verdict && typeof r.verdict === 'object') ? r.verdict : null;
     if (!v) { rejected += 1; continue; }
+    if (seenIds.has(id.toLowerCase())) { rejected += 1; continue; }
+    seenIds.add(id.toLowerCase());
     const steps = sanitizeSteps(r.steps);
     const safeLink = {
       id: capTrim(id, LINK_ID_MAX), kind, by: 'edge', from: ag, to: capTrim(to, LINK_TO_MAX),
