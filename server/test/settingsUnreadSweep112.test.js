@@ -271,6 +271,8 @@ const TABLE = {
     'perf/settings.js', 'sanswitch/registry.js', 'storage/registry.js', 'svcmon/store.js', 'upgrade/packageSettings.js', 'upgrade/settings.js', 'veeam/em/registry.js', 'veeam/registry.js',
     'util/registryCore.js',
   ].map((f) => [f, { cls: 'out', why: '97 · 103회차의 등록부 · 설정(자체 loadError · registryLoadError 흐름) — 112회차는 화면까지 대조하지 않았다' }])),
+  // 116회차가 읽기 단계를 가른 NSX 등록부(112회차 뒤에 들어왔다 — 메인이 등재). 조회 표지 · NsxAdmin 화면의 저장 잠금은 아직 대조하지 않았다.
+  'nsx/registry.js': { cls: 'out', why: '116회차의 NSX 등록부(registryLoadError · registryWriteRefusal — 못 읽는 동안 마지막으로 읽은 목록을 준다) — 조회 표지와 NSX 관리 화면의 잠금은 대조하지 않았다(다음 반증 회차 후보)' },
 };
 
 test('분류표: 쓰기 거절(…WriteRefusal)을 내보내는 모듈은 전부 표에 있다 — 새 설정 모듈은 조회 표지 · 화면 잠금을 정해야 한다', () => {
