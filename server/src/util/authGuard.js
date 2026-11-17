@@ -27,7 +27,7 @@ import { registerStateFile } from './stateFiles.js'; // v2.613 PERSIST2613-08
 import { credFingerprintParts } from './credFingerprint.js';
 import { poolRun } from './pool.js';
 import { parseJsonObject } from './jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
-import { makeJsonFileReader } from './jsonFileRead.js'; // 119회차: 읽기 오류 ≠ 없음 · 손상(공용 읽기 — 30초 간격 재읽기)
+import { makeJsonFileReader, nowMs } from './jsonFileRead.js'; // 119회차: 읽기 오류 ≠ 없음 · 손상(공용 읽기 — 30초 간격 재읽기) · 127회차: 탐침 시한도 같은 시계(테스트 시계 포함)
 
 /**
  * 문구가 '인증 실패' 인가(순수).
@@ -91,12 +91,74 @@ export function credHashOf(dev) {
   return `${p.user}:${p.len}:${p.hash}`;
 }
 
+/*
+ * ── 127회차(124회차 결정 D-A → 권장안 구현): 정지 기록 파일을 못 읽는 동안은 **자격 지문(credHash)마다 한 대상만** 먼저 시도한다 ──
+ * 119회차는 못 읽는 동안 '모르는 대상 = 정지' 로 닫았다(정지돼 있던 대상에 같은 틀린 자격으로 자동 재로그인하지 않게). 그 대가가 124회차 실측이다 —
+ *   기동 때 못 읽으면(권한 · 소유자) 스스로 낫지 않고, 그 도구의 주기 수집 전부(vCenter 면 전 vCenter + 보조 수집 9곳 · 메일이면 자동 메일 전체)가 **시한 없이** 멈춘다
+ *   (CLAUDE.md '보류에는 반드시 시한'). 둘을 함께 지킨다 — ① 틀린 자격증명으로의 자동 재로그인은 지문마다 한 대상을 넘지 않는다 ② 파일을 못 읽는다는 이유만으로 전부가 멈추지 않는다.
+ * 못 읽는 창(_unread) 안에서 이 창이 아직 모르는 대상(기록도 해제도 없는 대상)을 물으면:
+ *   1. 그 지문이 이 창에서 **거부**됐으면(같은 지문의 대상이 markAuthStopped) → 정지.
+ *   2. 그 지문이 이 창에서 **통과**했으면(탐침 대상의 성공 신호 clearAuthStop) → 정지 아님(대상마다 평소처럼 — 거부되면 그 대상만 기록).
+ *   3. 같은 지문을 다른 대상이 탐침 중이면 → 이번에는 정지(판정이 나면 1 · 2 로 간다).
+ *   4. 탐침이 없으면 → **이 대상이 탐침**이다(정지 아님 — 평소의 '기록 없는 대상' 과 똑같이 다룬다. 그 대상을 여러 수집기가 함께 쓰면 평소의 첫 거부처럼 수집기 수만큼 나갈 수 있다).
+ *   5. 탐침이 UNREAD_PROBE_TTL_MS 동안 결과 없이(인증 거부도 성공 신호도 없이 — 시한 · 통신 오류 · 수집하지 않는 대상) 지나면 **다른** 대상에 새 탐침을 준다
+ *      (닿지 않는 한 대상이 같은 지문 전체를 붙잡지 않게 — 기다리는 대상이 없으면 같은 대상이 이어서 한다. 한 바퀴 돌면 처음부터).
+ *   · peekAuthStop 은 **보기만** 한다 — 탐침을 주지 않는다(주인의 판정을 지문으로 따라간다: 탐침 대상 · 통과 = 정지 아님, 그 밖 = 정지).
+ *   · 지문을 만들 수 없는 대상(계정 · 비밀번호가 둘 다 빈 값) · 상한을 넘은 지문은 119회차 그대로 정지다.
+ *   · 창이 끝나면(파일이 읽힘) 탐침 상태는 버리고 119 · 124회차의 합치기 규칙대로다.
+ *
+ * UNREAD_PROBE_TTL_MS = 10분의 근거(env 로 굳히지 않는다 — 테스트는 createAuthGuard 의 probeTtlMs 로 주입):
+ *   · 장비 시한: 주기 수집의 장비당 시한 기본값은 60~180초다(bmusage 60 · PDU 90 · SAN 120 · 스토리지 180). 그보다 짧으면 첫 탐침이 아직 로그인 중인데 둘째 탐침이 나간다.
+ *   · 주기: 주 폴러 기본 30초~5분 — 10분이면 탐침 대상이 적어도 두 주기는 시도할 기회를 갖는다(주기가 더 긴 수집기는 주기마다 한 대상씩 옮겨 간다).
+ *   · 계정 잠금: 결과 없는 탐침이 실제로는 실패 로그온으로 세어지는 최악(거부를 인증 실패로 분류하지 못한 수집기)에도 새 대상은 10분에 하나 —
+ *     AD 의 흔한 관찰 창 30분에 3회(흔한 임계 5~10회 미만) · vCenter SSO 기본(180초 5회)보다 훨씬 드물다. 더 길게 잡으면 닿지 않는 대상 하나가 같은 지문을 그만큼 붙잡는다.
+ */
+export const UNREAD_PROBE_TTL_MS = 10 * 60_000;
+const UNREAD_FPS_MAX = 4_096;      // 한 창에서 따라가는 지문 수 상한(넘으면 그 지문은 119회차 그대로 정지)
+const UNREAD_TRIED_MAX = 2_048;    // 한 지문에서 '결과 없이 끝난 탐침 대상' 기억 상한(iDRAC 대역 2,048 IP — 넘으면 한 바퀴 돈 것으로 본다)
+const UNREAD_IDS_MAX = 16_384;     // 창 안의 대상 id 기억 상한(해제 · 정지로 답한 대상 · 탐침을 받은 대상 — 124회차 E3: 예전에는 상한이 없었다)
+
+/** 127회차: 만든 가드의 등록부(파일 이름 → 못 읽는 중인가) — 서비스 점검 · 엣지 로그가 한곳에서 본다(가드마다 unreadable() 을 부르는 소비처는 0곳이었다 — 무음). */
+const _guards = new Map();
+/**
+ * 정지 기록 파일을 못 읽는 중인 가드 목록(없으면 빈 배열). 파일 이름은 CONFIG_DIR 아래 기본 이름뿐이다(경로 · 내용 · 대상 id 없음).
+ * @returns {Array<{file:string, since:number, code:string, probing:number, passed:number, rejected:number}>}
+ */
+export function unreadableAuthGuards() {
+  const out = [];
+  for (const [file, fn] of _guards) { let u = null; try { u = fn(); } catch { u = null; } if (u) out.push({ file, ...u }); }
+  return out;
+}
+/** 엣지 로그 표(edgelog/spec.js service.authStops)용 상태 — 값에 비밀 · 대상 id 없음. */
+export function authGuardFilesStatus() {
+  const unreadable = unreadableAuthGuards();
+  return { ok: unreadable.length === 0, guards: _guards.size, unreadable };
+}
+/**
+ * 서비스 점검(health/services.js)의 한 행 — 가드마다 한 줄이 아니라 '정지 기록 파일을 못 읽는 도구 N개' 하나다(CLAUDE.md '무음 실패 금지').
+ * @returns {{status:'ok'|'warn', detail:string, at:number, files?:Array<object>}}
+ */
+export function authGuardHealthRow(now = Date.now()) {
+  const bad = unreadableAuthGuards();
+  if (!bad.length) return { status: 'ok', detail: `인증 정지 기록 파일 읽기 정상(도구 ${_guards.size}개)`, at: now };
+  const names = bad.slice(0, 6).map((x) => `${x.file}(${x.code})`).join(', ');
+  const sum = (k) => bad.reduce((n, x) => n + (x[k] || 0), 0);
+  return {
+    status: 'warn',
+    detail: `정지 기록 파일을 읽지 못하는 도구 ${bad.length}개(${names}${bad.length > 6 ? ` 외 ${bad.length - 6}개` : ''}) — 인증 실패가 확인된 것이 아닙니다. `
+      + `그동안 같은 자격증명을 쓰는 대상은 하나로 먼저 로그인을 확인한 뒤 수집합니다(자격 지문 기준 — 확인 중 ${sum('probing')} · 통과 ${sum('passed')} · 거부 ${sum('rejected')}). `
+      + '원본은 그대로 두고 30초마다 다시 읽습니다 — 설정 폴더(CONFIG_DIR)에서 그 파일의 권한 · 소유자를 확인하세요.',
+    at: Math.min(...bad.map((x) => x.since || now)),
+    files: bad,
+  };
+}
+
 /**
  * 도구 하나의 정지 저장소를 만든다.
- * @param {{file:string}} opts file — CONFIG_DIR 아래 파일명(도구마다 달라야 한다. 한 파일에
- *   섞으면 도구 A 의 id 와 도구 B 의 id 가 충돌해 엉뚱한 대상이 멈춘다)
+ * @param {{file:string, probeTtlMs?:number}} opts file — CONFIG_DIR 아래 파일명(도구마다 달라야 한다. 한 파일에
+ *   섞으면 도구 A 의 id 와 도구 B 의 id 가 충돌해 엉뚱한 대상이 멈춘다) · probeTtlMs — 테스트 주입(운영은 기본값)
  */
-export function createAuthGuard({ file }) {
+export function createAuthGuard({ file, probeTtlMs = UNREAD_PROBE_TTL_MS }) {
   if (!file) throw new Error('authGuard: file 이 필요합니다.');
   registerStateFile(file); // v2.613 PERSIST2613-08: 인증 정지 기록 — 폴러가 스스로 쓰는 상태 파일(이름 규약 -stops 와 이중)
   const FILE = () => path.join(config.configDir, file);
@@ -111,6 +173,8 @@ export function createAuthGuard({ file }) {
    *     · 원본을 두고 **쓰지 않는다**. 그동안의 기록 · 해제는 메모리(_over · _cleared)에만 두고 읽히면 파일의 기록에 합쳐 한 번 쓴다.
    *     · 그동안 '정지였는지 모르는' 대상은 **정지로 답한다**(authStopFor · peekAuthStop — 주기 수집을 건너뛴다. 사유에 읽기 오류를 밝힌다 — 규칙 1).
    *       이 창 안에서 기록된 대상은 그 기록대로, 해제된 대상(수동 실행 성공 · 자격증명 변경 뒤 재개)은 정지 아님으로 답한다. 수동 실행은 막지 않는다(규칙 3).
+   *       ⚠ 127회차: '모르는 대상 = 전부 정지' 는 **자격 지문마다 한 대상을 먼저 시도** 로 바뀌었다(createAuthGuard 위 머리말 — 전부 정지는 시한이 없었다). 나머지는 그대로다.
+   *       해제 · 정지로 답한 대상의 기억은 UNREAD_IDS_MAX 까지다(넘친 해제는 읽힌 뒤 파일의 기록에서 지워지지 않는다 — 그 대상은 다음 성공 때 풀린다).
    *     · 없음(ENOENT) · 손상(parse 실패)은 예전과 같다 — 빈 기록으로 시작하고 보존하지 않는다(캐시 성격).
    *   반환 꼴은 그대로다({ since, at, attempts, reason }).
    */
@@ -121,6 +185,13 @@ export function createAuthGuard({ file }) {
   const _rekeys = [];          // 그동안 요청된 신원 모양 이관([id, fromHash, toHash])
   const _purges = [];          // 124회차: 그동안 요청된 일괄 정리 조건(purgeWhere) — 읽히면 파일의 기록에 적용한다(상한 PURGES_MAX)
   const PURGES_MAX = 8;
+  // 127회차 탐침 상태(창이 끝나면 버린다): 지문 → { st: 'probing'|'ok'|'rejected', id(탐침 · 거부 대상 — probing 에서 null 이면 빈 자리), at, waiting, tried, vacantAt }
+  const _probes = new Map();
+  const _probeOf = new Map();  // 대상 id → 그 대상이 탐침을 받은 지문(늦게 온 성공 신호를 그 지문에 잇는다)
+  const _denied = new Set();   // 이 창에서 '정지' 로 답한 모르는 대상(clearAuthStop 의 '풀었는가' 판정 — 124회차 A2)
+  const K = (id) => String(id);
+  const TTL = Math.max(1, Number(probeTtlMs) || UNREAD_PROBE_TTL_MS);
+  const resetUnread = () => { _unread = null; _over = {}; _cleared.clear(); _rekeys.length = 0; _purges.length = 0; _probes.clear(); _probeOf.clear(); _denied.clear(); };
   const load = () => {
     if (_mem) return _mem;
     const r = _reader.read();
@@ -141,7 +212,7 @@ export function createAuthGuard({ file }) {
         _mem[id] = old && old.credHash === rec.credHash ? { ...rec, since: old.since, attempts: (old.attempts || 0) + (rec.attempts || 0) } : rec;
       }
       const changed = _rekeys.length || _cleared.size || Object.keys(_over).length || purged;
-      _unread = null; _over = {}; _cleared.clear(); _rekeys.length = 0; _purges.length = 0;
+      resetUnread();   // 127회차: 탐침 상태도 버린다 — 읽힌 뒤에는 파일의 기록이 판정한다
       if (changed) persist();
     }
     return _mem;
@@ -161,12 +232,93 @@ export function createAuthGuard({ file }) {
     since: _unread.since, at: _unread.since, attempts: 0, unread: true,
     reason: `정지 기록 파일(${file})을 읽지 못해 주기 수집을 건너뜁니다 — 읽기 오류(${_unread.code})이고 원본은 그대로 있습니다. 정지돼 있던 대상에 자동으로 다시 로그인하지 않으려는 것입니다(30초마다 다시 읽습니다 · 연결 시험이나 수동 수집이 성공하면 그 대상은 풀립니다).`,   // 124회차: '수동 실행은 막지 않습니다' 는 사실이 아니었다 — Veeam 실행 대행 · vCenter 주문형 조회는 정지면 사람이 누른 것도 보내지 않는다(실측)
   });
+  /*
+   * 127회차: 탐침 규칙의 두 정지(둘 다 인증 실패가 **이 대상에서** 확인된 것이 아니다 — 표지 unread · 시도 0회 그대로).
+   *   ⚠ 사유에 다른 대상의 id · 주소 · 거부 문구를 싣지 않는다 — 이 문장은 이 대상을 볼 수 있는 계정이면 누구에게나 나간다(범위 밖 대상이 새지 않게).
+   *     거부된 대상은 목록에서 실제 정지(시도 1회 이상)로 보인다.
+   */
+  const waitingStop = () => ({
+    since: _unread.since, at: _unread.since, attempts: 0, unread: true,
+    reason: `정지 기록 파일(${file})을 읽지 못해 이 대상의 주기 수집을 잠시 건너뜁니다 — 읽기 오류(${_unread.code})이고 원본은 그대로 있습니다. 같은 자격증명을 쓰는 대상 하나로 먼저 로그인을 확인하고, 통하면 이 대상도 다시 수집합니다(정지돼 있던 대상들에 한꺼번에 다시 로그인하지 않으려는 것입니다 · 30초마다 파일을 다시 읽습니다 · 연결 시험이나 수동 수집이 성공하면 이 대상은 바로 풀립니다).`,
+  });
+  const rejectedStop = (p) => ({
+    since: p.at, at: p.at, attempts: 0, unread: true,
+    reason: `정지 기록 파일(${file})을 읽지 못해 확인할 수 없는 동안 같은 자격증명이 다른 대상에서 거부돼, 이 대상의 주기 수집도 건너뜁니다 — 읽기 오류(${_unread.code})이고 원본은 그대로 있습니다. 같은 계정으로 대상 수만큼 다시 로그인하지 않으려는 것입니다(자격증명을 고치면 한 대상으로 다시 확인합니다 · 30초마다 파일을 다시 읽습니다 · 연결 시험이나 수동 수집이 성공하면 이 대상은 풀립니다).`,
+  });
+  /** 지문 — 계정 · 비밀번호가 둘 다 비면 '같은 자격증명' 을 말할 수 없다(null → 119회차 그대로 정지). */
+  const fingerprintOf = (dev) => ((String(dev?.username ?? '') || String(dev?.password ?? '')) ? credHashOf(dev) : null);
+  const deny = (id, stop) => { if (_denied.size < UNREAD_IDS_MAX) _denied.add(K(id)); return stop; };
+  const pass = (id) => { _denied.delete(K(id)); return null; };
+  /** 이 대상을 지문 h 의 탐침 대상으로 세운다. 다른 지문의 탐침을 쥐고 있었으면(자격증명이 바뀜) 그 자리는 비운다. */
+  const hold = (p, h, k, now) => {
+    const old = _probeOf.get(k);
+    if (old && old !== h) { const q = _probes.get(old); if (q?.st === 'probing' && q.id === k) { q.id = null; q.vacantAt = now; } }
+    if (_probeOf.has(k) || _probeOf.size < UNREAD_IDS_MAX) _probeOf.set(k, h);
+    p.id = k; p.at = now;
+  };
+  /** 결과 없이 끝난 탐침 대상을 기억한다(다음 탐침은 다른 대상에 — 상한을 넘으면 한 바퀴 돈 것으로 본다). */
+  const tried = (p, k) => { if (!p.tried) p.tried = new Set(); if (p.tried.size >= UNREAD_TRIED_MAX) p.tried.clear(); p.tried.add(k); };
+  /**
+   * 못 읽는 창에서 '모르는 대상' 의 판정(머리말 1~5). grant = false 면 보기만(peekAuthStop) — 탐침을 주지도 옮기지도 않는다.
+   * @returns {null | object} null = 정지 아님
+   */
+  const unreadVerdict = (dev, grant) => {
+    const k = K(dev.id);
+    const h = fingerprintOf(dev);
+    if (!h) return deny(k, unreadStop());
+    const now = nowMs();
+    let p = _probes.get(h);
+    if (p?.st === 'ok') return pass(k);                                   // 2. 통과한 지문
+    if (p?.st === 'rejected') return deny(k, rejectedStop(p));            // 1. 거부된 지문
+    if (!p) {                                                             // 4. 탐침이 없다
+      if (!grant) return deny(k, waitingStop());
+      if (_probes.size >= UNREAD_FPS_MAX) return deny(k, unreadStop());
+      p = { st: 'probing', id: null, at: now, waiting: false, tried: null, vacantAt: 0 };
+      _probes.set(h, p); hold(p, h, k, now);
+      return pass(k);
+    }
+    const live = now - p.at < TTL;
+    if (p.id === k) {                                                     // 탐침 대상 자신
+      if (live) return pass(k);
+      if (!p.waiting) { if (grant) p.at = now; return pass(k); }          // 5. 기다리는 대상이 없다 — 같은 대상이 이어서
+      if (!grant) return deny(k, waitingStop());
+      tried(p, k); p.id = null; p.vacantAt = now;                         // 5. 결과 없이 시한이 지났다 — 다른 대상에 넘긴다
+    } else if (p.id != null) {                                            // 3. 다른 대상이 탐침 중
+      if (live || !grant) { if (grant) p.waiting = true; return deny(k, waitingStop()); }
+      tried(p, p.id); p.id = null; p.vacantAt = now;                      // 5.
+    }
+    if (!grant) return deny(k, waitingStop());                            // 빈 자리 — 보기만 하는 조회는 채우지 않는다
+    if (p.tried?.has(k)) {
+      if (now - p.vacantAt < TTL) return deny(k, waitingStop());          // 방금 결과 없이 끝난 대상 — 다른 대상이 먼저
+      p.tried.clear();                                                    // 시한 동안 아무도 맡지 않았다(한 바퀴) — 처음부터
+    }
+    p.waiting = true;                                                     // 넘겨받은 탐침 — 앞 대상이 기다린다
+    hold(p, h, k, now);
+    return pass(k);
+  };
+  /** 이 창에서 지문 h 가 거부됐다(통과가 확인된 지문은 뒤집지 않는다 — 그 대상만의 사정이다). */
+  const noteRejected = (h, id) => {
+    const p = _probes.get(h);
+    if (p?.st === 'ok' || p?.st === 'rejected') return;
+    if (!p && _probes.size >= UNREAD_FPS_MAX) return;
+    _probes.set(h, { st: 'rejected', id: K(id), at: nowMs() });
+  };
 
   // v2.591: 한 번의 실행에서 기록이 수백~수천 건 바뀌는 호출자(iDRAC 대역 스캔 — 대역당 최대 2,048 IP)를 위한
   //   **지연 기록**. 건마다 persist 하면 파일 전체를 매번 다시 쓴다(N건 × 파일 크기 — 2,048건이면 수백 MB·
   //   fsync 2,048회). `{ defer: true }` 로 메모리만 바꾸고 실행 끝에 `flush()` 를 한 번 부른다.
   let _dirty = false;
   const save = (defer) => { if (defer) { _dirty = true; return; } _dirty = false; persist(); };
+
+  // 127회차: 등록부 — 한 번 못 읽은 가드만 다시 본다(읽히지 않은 가드의 파일을 서비스 점검이 열지 않게 · 간격 안에서는 디스크를 보지 않는다).
+  _guards.set(file, () => {
+    if (!_unread) return null;
+    load();
+    if (!_unread) return null;
+    let probing = 0; let passed = 0; let rejected = 0;
+    for (const p of _probes.values()) { if (p.st === 'ok') passed += 1; else if (p.st === 'rejected') rejected += 1; else probing += 1; }
+    return { since: _unread.since, code: _unread.code, probing, passed, rejected };
+  });
 
   return {
     /** 정지 기록. 같은 자격증명으로 반복 실패해도 `since` 는 **처음 시각**을 유지한다. */
@@ -181,16 +333,44 @@ export function createAuthGuard({ file }) {
         attempts: (prev && prev.credHash === credHash ? prev.attempts || 0 : 0) + 1,
         reason: String(reason || '인증 실패').slice(0, 200),
       };
-      if (db === _over) { _cleared.delete(id); return db[id]; }
+      if (db === _over) {
+        const k = K(id);
+        _cleared.delete(k); _denied.delete(k);
+        // 127회차: 같은 지문의 다른 대상은 이 거부를 따라 멈춘다(지문당 한 번). 이 대상이 그 지문의 탐침 대상이었으면 탐침은 끝났다.
+        if (fingerprintOf(dev)) noteRejected(credHash, k);
+        if (_probeOf.get(k) === credHash) _probeOf.delete(k);
+        return db[id];
+      }
       _mem = db; save(defer);
       return db[id];
     },
-    /** 성공했거나 사용자가 해제 — 기록 제거. */
-    clearAuthStop(id, { defer = false } = {}) {
+    /**
+     * 성공했거나 사용자가 해제 — 기록 제거.
+     * 127회차: **로그인이 통했다는 신호**이기도 하다(못 읽는 창에서 탐침 대상의 성공이 같은 지문을 연다). 성공이 아닌 정리 — 대상 삭제 · 접속처 변경 ·
+     *   시도 없이 사람이 누른 해제 · 낡은 기록 정리 — 는 `{ verified: false }` 를 준다(그 대상만 풀고 지문은 열지 않는다 — 탐침은 다음 대상이 이어받는다).
+     *   새 호출부는 `test/authGuardProbe127.test.js` 의 분류표에 올린다(성공인가 · 정리인가).
+     */
+    clearAuthStop(id, { defer = false, verified = true } = {}) {
       const db = load();
-      // 119회차: 읽히면 파일의 기록에서도 지운다. 124회차: '풀렸는가' 는 이 호출 전에 정지로 답하고 있었는가다(그동안의 기록이 있었거나 · 모르는 대상이었거나) —
-      //   예전에는 모르는 대상을 풀고도 false 를 돌려줘 연결 시험이 '정지를 풀었다' 고 말하지 않았다.
-      if (!db) { const had = !!_over[id] || !_cleared.has(id); delete _over[id]; _cleared.add(id); return had; }
+      // 119회차: 읽히면 파일의 기록에서도 지운다. 124회차: '풀렸는가' 는 이 호출 전에 정지로 답하고 있었는가다(그동안의 기록이 있었거나 · 정지로 답한 모르는 대상이었거나) —
+      //   예전에는 모르는 대상을 풀고도 false 를 돌려줘 연결 시험이 '정지를 풀었다' 고 말하지 않았다. 127회차: 탐침 대상 · 통과한 지문의 대상은 정지로 답한 적이 없다(false).
+      if (!db) {
+        const k = K(id);
+        const rec = _over[id];
+        const had = !!rec || _denied.has(k);
+        delete _over[id]; _denied.delete(k);
+        if (_cleared.size < UNREAD_IDS_MAX) _cleared.add(k);
+        // 이 대상의 거부로 닫혀 있던 지문은 다시 '모름' 으로 — 다음 묻는 대상 하나가 확인한다(이 성공이 어느 자격증명으로 된 것인지 이 호출은 모른다 — 바로 열지 않는다).
+        if (rec) { const q = _probes.get(rec.credHash); if (q?.st === 'rejected' && q.id === k) _probes.delete(rec.credHash); }
+        const h = _probeOf.get(k);
+        if (h) {
+          _probeOf.delete(k);
+          const p = _probes.get(h);
+          if (verified) { if (p && p.st !== 'ok') _probes.set(h, { st: 'ok', id: k, at: nowMs() }); }   // 탐침을 받은 대상의 성공 — 그 지문은 통한다(늦게 와도 · 그사이 다른 대상이 거부됐어도)
+          else if (p?.st === 'probing' && p.id === k) { p.id = null; p.vacantAt = nowMs(); }              // 성공이 아닌 정리 — 탐침 자리만 비운다
+        }
+        return had;
+      }
       if (!db[id]) return false;
       delete db[id];
       _mem = db; save(defer);
@@ -206,9 +386,15 @@ export function createAuthGuard({ file }) {
       if (!dev?.id) return null;
       const db = load();
       const rec = (db || _over)[dev.id];
-      if (!rec) return db || _cleared.has(dev.id) ? null : unreadStop();   // 119회차: 못 읽은 동안 모르는 대상은 정지로(해제된 대상은 아님)
+      // 119회차: 못 읽은 동안 모르는 대상은 정지로(해제된 대상은 아님) → 127회차: 지문마다 한 대상을 먼저 시도한다(unreadVerdict — 머리말 1~5).
+      if (!rec) return db || _cleared.has(K(dev.id)) ? null : unreadVerdict(dev, true);
       // 자격증명이 바뀌었으면 자동 재개(규칙 2) — 기록을 지우고 이번 주기부터 다시 시도한다.
-      if (rec.credHash !== credHashOf(dev)) { this.clearAuthStop(dev.id); return null; }
+      if (rec.credHash !== credHashOf(dev)) {
+        if (db) { this.clearAuthStop(dev.id); return null; }
+        // 127회차: 못 읽는 창 — 그 기록은 옛 자격증명의 것이다. 새 자격증명은 이 창이 모르는 것이므로 탐침 규칙으로 본다(고친 값이 여러 대상에 한꺼번에 나가지 않게).
+        delete _over[dev.id];
+        return unreadVerdict(dev, true);
+      }
       return { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason };
     },
     /**
@@ -235,7 +421,8 @@ export function createAuthGuard({ file }) {
       if (!dev?.id) return null;
       const db = load();
       const rec = (db || _over)[dev.id];
-      if (!rec && !db && !_cleared.has(dev.id)) return unreadStop();   // 119회차: 못 읽은 동안 모르는 대상은 정지로
+      // 119회차: 못 읽은 동안 모르는 대상은 정지로 → 127회차: 주인의 판정을 지문으로 따라간다(보기만 — 탐침을 주지 않는다). 창 안의 기록이 다른 자격증명의 것이어도 같다.
+      if (!db && (rec ? rec.credHash !== credHashOf(dev) : !_cleared.has(K(dev.id)))) return unreadVerdict(dev, false);
       if (!rec || rec.credHash !== credHashOf(dev)) return null;
       return { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason };
     },
@@ -254,7 +441,7 @@ export function createAuthGuard({ file }) {
     },
     /** 119회차: 정지 기록 파일을 못 읽어(읽기 오류 — 원본 그대로) 모르는 대상을 정지로 답하는 중이면 { since, code }, 아니면 null. */
     unreadable() { load(); return _unread ? { ..._unread } : null; },
-    _resetForTest() { _mem = null; _dirty = false; _reader.reset(); _unread = null; _over = {}; _cleared.clear(); _rekeys.length = 0; _purges.length = 0; try { fs.rmSync(FILE()); } catch { /* 없음 */ } },
+    _resetForTest() { _mem = null; _dirty = false; _reader.reset(); resetUnread(); try { fs.rmSync(FILE()); } catch { /* 없음 */ } },
     _fileForTest() { return FILE(); },
   };
 }
@@ -263,6 +450,13 @@ export function createAuthGuard({ file }) {
 export const authStopView = (rec) => (rec ? { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason, ...(rec.unread === true ? { unread: true } : {}) } : null);
 /** 124회차: 이 정지가 '정지 기록 파일을 못 읽어 건너뜀'(인증 실패 아님)인가 — 소비처가 자기 문장을 만들 때 가른다. */
 export const isUnreadStop = (rec) => !!rec && (rec.unread === true || rec.attempts === 0);
+/**
+ * 127회차(124회차 A1 의 남은 소비처): 정지 사유 문구 — 못 읽음 정지(인증 실패가 이 대상에서 확인된 것이 아니다)면 가드가 준 사유를 **그대로**, 실제 인증 정지면 호출부 문장을 쓴다.
+ *   소비처가 '인증 실패로 … 정지(N회) — 비밀번호를 고치면 자동 재개' 를 직접 만들면 못 읽음 정지에도 그 말이 나갔다(0회 · 사실이 아닌 조치). 판정은 isUnreadStop 하나 — 복제하지 말 것.
+ * @param {null|object} stop  authStopFor · peekAuthStop 의 반환
+ * @param {string|((stop:object) => string)} real  실제 인증 정지일 때의 문장(함수면 그때만 부른다)
+ */
+export const authStopText = (stop, real) => (isUnreadStop(stop) ? String(stop.reason || '') : (typeof real === 'function' ? String(real(stop) ?? '') : String(real ?? '')));
 
 /**
  * **한 실행 안의 회로 차단기**(v2.591 — 감사 F2). 대상마다 멈추는 정지 기록(`createAuthGuard`)만으로는

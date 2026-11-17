@@ -17,7 +17,7 @@ import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import * as fosSsh from './collectors/fosSsh.js';
 import * as fosRest from './collectors/fosRest.js';
 import { withDeadline, isSshAuthError } from '../proxy/sshExec.js';
-import { createAuthGuard } from '../util/authGuard.js';
+import { createAuthGuard, authStopView } from '../util/authGuard.js';
 import { credFingerprintParts } from '../util/credFingerprint.js';
 import { classifyFailure, makeTracer } from './testDiag.js';
 import { precheckTarget } from './precheck.js';
@@ -61,7 +61,7 @@ export function isSanAuthError(err) {
   return isSshAuthError(err) || /인증 실패\(401\)/.test(String(err.message || ''));
 }
 
-const stopView = (rec) => (rec ? { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason } : null);
+const stopView = authStopView;   // 127회차: 사본 대신 공용(못 읽음 표지 unread 를 떨구지 않는다)
 
 /** 정지 사실을 스냅샷 `extra` 에 싣는다(평문이 아닌 자격증명 지문 포함 — 엣지 위임 장비의 배포 대조용). */
 function withAuthStopExtra(snap, full, rec) {

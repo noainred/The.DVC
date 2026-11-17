@@ -90,7 +90,7 @@ export function registerVeeamEm(adminRouter) {
     try {
       const d = saveEm({ ...(req.body || {}) });
       // 접속처가 바뀌면 옛 접속처의 결과와 인증 정지를 지운다(다른 EM 이다 — secretCarry 와 같은 판단).
-      if (d.moved) { dropEmResult(d.id); dropEmVms(d.id); emAuthGuard.clearAuthStop(d.id); }
+      if (d.moved) { dropEmResult(d.id); dropEmVms(d.id); emAuthGuard.clearAuthStop(d.id, { verified: false }); }
       logAudit({ user: req.user?.username, action: 'Veeam EM 저장', target: d.name, detail: `${d.host}:${d.port}${d.enabled === false ? ' · 수집 끔' : ''}${d.moved ? ' · 접속처 변경으로 이전 결과·인증 정지 지움' : ''}${d.droppedSecrets ? ' · 접속처 변경으로 저장 비밀번호 폐기' : ''}` });
       res.status(201).json({ ok: true, em: d });
     } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
@@ -103,7 +103,7 @@ export function registerVeeamEm(adminRouter) {
     if (!d || !deleteEm(req.params.id)) return res.status(404).json({ ok: false, reason: 'Enterprise Manager 를 찾을 수 없습니다.' });
     dropEmResult(req.params.id);
     dropEmVms(req.params.id);   // v2.795 VM 단위 기록도
-    emAuthGuard.clearAuthStop(req.params.id);
+    emAuthGuard.clearAuthStop(req.params.id, { verified: false });
     dropEmMapFor(req.params.id);   // v2.788.1 그 EM 의 매핑도(유령 매핑 방지)
     logAudit({ user: req.user?.username, action: 'Veeam EM 삭제', target: d.name, detail: `${d.host}:${d.port || DEFAULT_EM_PORT}` });
     res.json({ ok: true });

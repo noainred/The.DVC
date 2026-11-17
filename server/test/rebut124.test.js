@@ -46,6 +46,9 @@ test('A1 authGuard: 못 읽는 동안의 정지는 표지(unread · 시도 0회)
   put(name, { d1: { credHash: AG.credHashOf(d1), since: 1, at: 2, attempts: 3, reason: '인증 실패(401)' } });
   const g = AG.createAuthGuard({ file: name });
   bad.set(name, 'EACCES');
+  // 127회차(결정 D-A → 권장안 구현 — 기대값이 바뀐 이유): 못 읽는 동안 '모르는 대상 = 전부 정지' 가 아니라 자격 지문마다 한 대상(처음 묻는 대상)이 먼저 시도한다.
+  //   표지(unread · 시도 0회)는 그 판정을 기다리는 같은 지문의 다른 대상에 싣는다.
+  assert.equal(g.authStopFor({ id: 'probe', username: 'a', password: 'b' }), null);
   const u = g.authStopFor({ id: 'unknown', username: 'a', password: 'b' });
   assert.equal(u.unread, true);
   assert.equal(u.attempts, 0);
@@ -72,7 +75,10 @@ test('A2 authGuard: 못 읽는 동안 모르는 대상을 수동 성공으로 �
   const g = AG.createAuthGuard({ file: name });
   bad.set(name, 'EIO');
   const dev = { id: 't1', username: 'u', password: 'p' };
-  assert.ok(g.authStopFor(dev), '모르는 대상은 정지로 답한다');
+  // 127회차(기대값이 바뀐 이유 — 위 A1 주석): 같은 지문의 첫 대상(t0)이 탐침이고, 다음 대상(t1)이 정지로 답한다.
+  assert.equal(g.authStopFor({ ...dev, id: 't0' }), null);
+  assert.ok(g.authStopFor(dev), '탐침을 기다리는 대상은 정지로 답한다');
+  assert.equal(g.clearAuthStop('t9'), false, '127회차: 정지로 답한 적이 없는 대상(묻지 않았다)은 false');
   assert.equal(g.clearAuthStop('t1'), true, '정지로 답하던 대상을 풀었다');
   assert.equal(g.authStopFor(dev), null);
   assert.equal(g.clearAuthStop('t1'), false, '이미 풀린 대상');
@@ -98,21 +104,24 @@ test('A3 authGuard: 못 읽는 동안의 purgeWhere 는 읽힌 뒤 파일의 기
   g._resetForTest();
 }));
 
-test('A1 mail: 정지 기록 파일을 못 읽어 건너뛴 자동 발송을 SMTP 인증 실패(0회 거부)라고 적지 않는다', () => quiet(async () => {
+test('A1 mail: 정지 기록 파일을 못 읽는 동안의 자동 발송을 SMTP 인증 실패(0회 거부)라고 적지 않는다 — 127회차: 건너뛰지 않고 한 번 시도한다', () => quiet(async () => {
   put('mail.json', { enabled: true, smtp: { host: '127.0.0.1', port: 1, user: 'alert@corp.example', password: 'pw', secure: 'none' }, from: 'a@corp.example', defaultTo: ['ops@corp.example'] });
   put('mail-auth-stops.json', {});
   bad.set('mail-auth-stops.json', 'EACCES');
   const M = await import('../src/mail/service.js');
   M.mailAuthGuard._resetForTest(); put('mail-auth-stops.json', {});
+  assert.equal(M.mailStatus().authStopped?.unread, true, '첫 발송 전 상태 조회 — 아직 확인 전이라고 말한다(표지 unread — 인증 실패 정지가 아니다)');
   const r = await M.sendPortalMail({ kind: 'alert', subject: '장애 알림', text: 'x' });
-  assert.equal(r.ok, false); assert.equal(r.skipped, true);
-  assert.equal(r.authStopped?.unread, true, JSON.stringify(r.authStopped));
+  // 127회차(결정 D-A → 권장안 구현 — 기대값이 바뀐 이유): 124 까지는 못 읽는 동안 자동 메일 전체를 건너뛰었다(skipped — 이 테스트는 그 사유 문구를 고정했다). 메일 계정은 대상 1 · 지문 1 이라
+  //   이제 그 지문의 탐침이다 — 한 번 시도한다. 여기서는 SMTP 가 없는 주소(127.0.0.1:1)라 연결 실패로 끝나고, 인증 거부가 아니므로 정지도 아니다. 거부 · 성공 갈래는 authGuardProbe127 ⑧(가짜 SMTP).
+  assert.equal(r.ok, false);
+  assert.notEqual(r.skipped, true, r.reason);
+  assert.equal(r.authStopped, undefined);
   assert.doesNotMatch(r.reason, /SMTP 인증 실패로 자동 발송을 멈춘|0회 거부|비밀번호를 고치면 자동 재개/, r.reason);
-  assert.match(r.reason, /인증 실패가 확인된 것이 아닙니다/);
-  assert.match(r.reason, /mail-auth-stops\.json/);
   const st = M.mailStatus();
-  assert.equal(st.authStopped?.unread, true);
-  assert.equal(st.history[0].note, r.reason, '이력에도 같은 사유');
+  assert.equal(st.authStopped, null, '탐침 대상은 정지로 보이지 않는다');
+  assert.equal(st.history[0].state, 'failed', '시도했고 실패했다(건너뜀이 아니다)');
+  assert.equal(st.history[0].note, r.reason.slice(0, 300), '이력에도 같은 사유');
   bad.delete('mail-auth-stops.json'); pass();
   assert.equal(M.mailStatus().authStopped, null, '읽히면 정지 아님');
   M.mailAuthGuard._resetForTest();

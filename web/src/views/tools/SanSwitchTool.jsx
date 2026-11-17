@@ -23,7 +23,7 @@ import CollectActivity from './CollectActivity.jsx';
 import { perfDiagText, diagBorder, perfCollectSummary } from './sanPerfDiagText.js';
 import { portsScopeNote } from './sanPortsScopeText.js';
 import { DeviceHealthPanel, AllHealthCheck } from './SanHealthCheck.jsx';
-import { authStopInfo, authStopSummary, credFpText } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
+import { authStopInfo, authStopSummary, authStopShort, credFpText } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 import { collectDropNote } from './collectDropText.js'; // v2.591: 결과 없이 폐기된 위임 '지금 수집' 요청
 import { hostText, addressHiddenNote } from './addressHiddenText.js'; // v2.599 AUTHZ-2599-03
 import { powerText } from './sanPowerText.js';
@@ -361,9 +361,9 @@ export default function SanSwitchTool() {
                         // v2.516: 실패 배지는 버튼이다(툴팁에만 사유를 두지 않는다) — 상세 창이 수집 오류 원문·섹션별 사유를 보여준다.
                         <button type="button" className="badge" style={{ background: TONE.bad, color: '#fff', cursor: 'pointer', border: 0, whiteSpace: 'nowrap' }}
                           title={s?.extra?.authStopped
-                            ? `인증 실패로 주기 수집을 멈췄습니다 — ${authStopInfo(s.extra.authStopped, { what: '이 스위치' })?.detail || ''}\n\n(클릭하면 상세 창에서 사유와 자격증명 지문을 봅니다)`
+                            ? `${authStopInfo(s.extra.authStopped, { what: '이 스위치' })?.title || ''} — ${authStopInfo(s.extra.authStopped, { what: '이 스위치' })?.detail || ''}\n\n(클릭하면 상세 창에서 사유와 자격증명 지문을 봅니다)`
                             : `실패 사유: ${failReason(s)}\n\n(클릭하면 상세 창에서 전문을 봅니다)`}
-                          onClick={() => openDetail(r)}>{s?.extra?.authStopped ? '인증 실패 정지 ⓘ' : '실패 ⓘ'}</button>
+                          onClick={() => openDetail(r)}>{s?.extra?.authStopped ? `${authStopShort(s.extra.authStopped)} ⓘ` : '실패 ⓘ'}</button>
                       )}
                   </td>
                   <td data-sort={s?.ok && lvl !== 'unknown' ? p.usedPct : ''}>

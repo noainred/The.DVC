@@ -13,7 +13,7 @@
 import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { config } from '../config.js';
 import { withDeadline, isSshAuthError } from '../proxy/sshExec.js';
-import { createAuthGuard } from '../util/authGuard.js';
+import { createAuthGuard, authStopView } from '../util/authGuard.js';
 import * as apcSsh from './collectors/apcSsh.js';
 import { devicesForThisNode, getDeviceWithSecret } from './registry.js';
 import { recordSnapshot } from './db.js';
@@ -43,7 +43,7 @@ const _snapshots = new Map();         // deviceId → 최근 스냅샷(중앙/�
  * `authStopped` 로 화면이 말한다(엣지 스냅샷은 그대로 중앙에 push 된다).
  */
 const authGuard = createAuthGuard({ file: 'pdu-auth-stops.json' });
-const stopView = (rec) => (rec ? { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason } : null);
+const stopView = authStopView;   // 127회차: 사본 대신 공용(못 읽음 표지 unread 를 떨구지 않는다)
 
 /** 한 대 수집 + 시계열 적재. 실패해도 스냅샷(ok:false)을 남겨 화면이 원인을 보여준다. */
 const _inFlight = new Set();          // v2.479(감사 도메인 B-3): 같은 장비 동시 수집 금지(수동 '지금 수집' × 폴러 — SSH 2세션·늦은 결과가 최신을 덮음)

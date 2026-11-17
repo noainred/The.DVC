@@ -165,22 +165,27 @@ test('D1 authGuard: 읽기 오류면 원본 유지 · 모르는 대상은 정지
   g._resetForTest(); put(name, orig);
 
   eio.add(name); reads.delete(name);
-  const stop = g.authStopFor(d1);
-  assert.ok(stop, '정지돼 있던 대상을 "정지 아님" 으로 답하면 다음 주기가 같은 틀린 자격으로 다시 로그인한다');
+  // 127회차(124회차 결정 D-A → 권장안 구현 — 기대값이 바뀐 이유): 119 는 못 읽는 동안 '모르는 대상 = 전부 정지' 였다. 그 대가가 124회차 실측이다 — 기동 때 못 읽으면 스스로 낫지 않고
+  //   그 도구의 주기 수집 전부가 시한 없이 멈춘다. 이제 **자격 지문마다 한 대상**(처음 묻는 대상)이 먼저 시도하고 같은 지문의 나머지는 그 판정을 기다린다.
+  //   119 가 지키려던 것(정지돼 있던 대상들에 같은 틀린 자격으로 자동 재로그인하지 않는다)은 '대상 수만큼' 이 아니라 '지문당 한 대상' 으로 남는다(모의 실험 authGuardProbe127).
+  assert.equal(g.authStopFor(d1), null, '처음 묻는 대상 = 이 지문(svc)의 탐침 — 한 번 시도한다');
+  const stop = g.authStopFor(d2);
+  assert.ok(stop, '같은 지문의 다른 대상을 "정지 아님" 으로 답하면 다음 주기가 같은 틀린 자격으로 대상 수만큼 다시 로그인한다');
   assert.deepEqual(Object.keys(stop).sort(), ['at', 'attempts', 'reason', 'since', 'unread'], '반환 꼴은 그대로 + 124회차 표지 unread(인증 실패가 아니라는 표시 — rebut124)');
   assert.equal(stop.attempts, 0);
   assert.match(stop.reason, /읽지 못해.*읽기 오류\(EIO\).*원본은 그대로/);
-  assert.ok(g.peekAuthStop(d1), '읽기 전용 조회(다른 수집기)도 같은 판정 — 같은 계정으로 따로 로그인하지 않게');
-  assert.ok(g.authStopFor(d3), '기록이 있었는지 모르는 대상도 정지로');
+  assert.ok(g.peekAuthStop(d2), '읽기 전용 조회(다른 수집기)도 같은 판정 — 같은 계정으로 따로 로그인하지 않게');
+  assert.equal(g.peekAuthStop(d1), null, '탐침 대상은 보조 수집기에도 정지 아님(평소의 기록 없는 대상과 같다)');
+  assert.equal(g.authStopFor(d3), null, '127회차: 다른 지문(ok)은 따로 한 대상이 탐침(예전: 기록이 있었는지 모르는 대상도 정지)');
   assert.equal(g.unreadable()?.code, 'EIO');
   // 그동안의 기록 · 해제는 메모리에만
   assert.equal(g.markAuthStopped('d2', d2, '인증 실패(403)').attempts, 1);
   assert.equal(g.authStopFor(d2)?.reason, '인증 실패(403)', '이 창 안에서 기록된 대상은 그 기록대로');
   assert.equal(g.markAuthStopped('d1', d1, '인증 실패(401)').attempts, 1);
-  assert.equal(g.clearAuthStop('d3'), true);   // 수동 실행이 성공했다 — 124회차: 정지로 답하던 대상을 풀었으면 true(예전 false — '풀지 않았다' 로 읽혔다)
+  assert.equal(g.clearAuthStop('d3'), false);   // 탐침이 성공했다 — 127회차: d3 은 탐침 대상이라 정지로 답한 적이 없다(false). 정지로 답하던 대상을 푼 경우의 true(124회차 A2)는 rebut124 A2 가 고정한다
   assert.equal(g.authStopFor(d3), null, '이 창 안에서 해제된 대상(수동 실행 성공)은 다시 수집한다');
   assert.equal(g.peekAuthStop(d3), null);
-  assert.equal(g.clearAuthStop('d4'), true);
+  assert.equal(g.clearAuthStop('d4'), false);   // 127회차: 이 창에서 한 번도 정지로 답하지 않은 대상(묻지 않았다) — 해제는 기억해 두고 읽히면 파일의 기록에서 지운다(아래)
   g.flush();
   assert.equal(raw(name), orig, '못 읽은 원본 위에 쓰지 않는다(예전: 한 건짜리 파일로 덮음)');
   assert.deepEqual(corruptOf(name), []);
@@ -217,7 +222,9 @@ test('D1 authGuard: 못 읽은 동안의 신원 모양 이관(rekeyAuthStop)은 
   put(name, { dir1: { credHash: credHashOf(from), since: 5, at: 6, attempts: 2, reason: '인증 실패' } });
   eio.add(name);
   assert.equal(g.rekeyAuthStop(from, to), false);
-  assert.ok(g.authStopFor(to), '그동안은 모름 = 정지');
+  // 127회차(기대값이 바뀐 이유 — 위 D1 주석): 그동안 이 대상은 그 지문의 탐침이라 한 번 시도한다(예전: 모름 = 정지). 같은 지문의 다른 대상은 기다린다. 이관은 읽힌 뒤에 적용된다(아래).
+  assert.equal(g.authStopFor(to), null);
+  assert.ok(g.authStopFor({ ...to, id: 'dir2' }), '같은 지문의 다른 대상은 정지');
   eio.delete(name); pass();
   assert.equal(g.authStopFor(to)?.attempts, 2, '읽힌 뒤 새 신원으로 옮겨져 정지가 유지된다(한 번 더 로그인하지 않는다)');
   g._resetForTest();

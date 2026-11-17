@@ -13,6 +13,7 @@
  */
 import { withSsh, isSshAuthError, isSshHostKeyError } from '../../proxy/sshExec.js';
 import { focusAuthGuard, authDevOf, READY_TIMEOUT_MS } from '../collector.js';
+import { isUnreadStop } from '../../util/authGuard.js';
 import { AUDIT_DEADLINE_MS, READY_EXEC_MS, programSha, wrapperSha, pathsFor, dirIssue, dirsToCheck, readyCommandFor, runCommandFor } from './bundle.js';
 import { parseReady, readyState, sectionOf, firstLineOf, markOf, LINE_MAX } from './parse.js';
 import { demoAuditOutput } from './mock.js';
@@ -118,7 +119,8 @@ export async function auditOnce(t, { mode = 'run', keys, connect = withSsh, onPh
   if (!pem) return { ...base, kind: 'no-key', error: info?.error || '이 노드에 SSH 키가 없습니다.' };
   const dev = authDevOf(t, info.fingerprint);
   const stopRec = focusAuthGuard.peekAuthStop(dev);
-  if (stopRec) return { ...base, kind: 'auth-stopped', error: `키 로그인 거부로 멈춰 있습니다(${stopRec.reason}) — 공개키를 넣은 뒤 ‘다시 연결’ 을 누르세요.` };
+  // 127회차: 정지 기록 파일을 못 읽어 모르는 대상은 키 로그인이 거부된 것이 아니다(collector.js testTarget 과 같다 — 거부되면 아래에서 실제 정지로 기록)
+  if (stopRec && !isUnreadStop(stopRec)) return { ...base, kind: 'auth-stopped', error: `키 로그인 거부로 멈춰 있습니다(${stopRec.reason}) — 공개키를 넣은 뒤 ‘다시 연결’ 을 누르세요.` };
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), deadlineMs); timer.unref?.();
   const keep = createOutputKeeper();

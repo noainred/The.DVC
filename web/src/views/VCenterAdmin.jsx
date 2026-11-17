@@ -4,7 +4,7 @@ import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
 import BoldText from '../components/boldText.jsx';
-import { authStopInfo, authStopSummary } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
+import { authStopInfo, authStopSummary, authStopShort } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 import { droppedSecretNote } from './droppedSecretText.js'; // v2.607 WEB2607-03
 import { unreadMarkOf, saveLockedByUnread, unreadKind } from './settingsUnread.js'; // 118회차: 등록부를 못 읽은 동안의 조회 표지(112회차 규약)
 import { SettingsUnreadBanner } from './SettingsUnreadBanner.jsx';
@@ -195,7 +195,7 @@ export default function VCenterAdmin() {
                 <td>{vc.name}
                   {vc.collectMode === 'site' && <span className="badge amber" style={{ marginLeft: 6, fontSize: 10 }} title="사이트 위임 수집 — 현장 서버가 수집해 중앙으로 push">사이트 위임</span>}
                   {vc.maintenance && <span className="badge amber" style={{ marginLeft: 6, fontSize: 10 }} title="점검중 — 수집 일시중단, 연결불가/알림 제외">🛠 점검중</span>}
-                  {vc.authStopped && <span className="badge red" style={{ marginLeft: 6, fontSize: 10, whiteSpace: 'nowrap' }} title={authStopInfo(vc.authStopped, { what: '이 vCenter' })?.detail || ''}>인증 실패 정지</span>}
+                  {vc.authStopped && <span className="badge red" style={{ marginLeft: 6, fontSize: 10, whiteSpace: 'nowrap' }} title={authStopInfo(vc.authStopped, { what: '이 vCenter' })?.detail || ''}>{authStopShort(vc.authStopped)}</span>}
                 </td>
                 <td className="muted">{vc.host}</td>
                 <td className="muted">{vc.username}</td>

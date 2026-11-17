@@ -83,6 +83,7 @@ import { bigJsonStats } from '../util/bigJsonGate.js';
 import { listSettingsLoadErrors, recheckSettingsFiles } from '../util/settingsLoadError.js';
 import { bulletinHealth } from '../bulletin/store.js'; // 2026-10-09 검토 I-05
 import { runtimeServiceRow } from '../util/runtimeCheck.js'; // 2026-10-09 검토 I-06
+import { authGuardHealthRow } from '../util/authGuard.js'; // 127회차: 인증 정지 기록 파일을 못 읽는 도구(전 가드 한 행)
 
 /** spec `mod` 경로 → 모듈. 표에 새 모듈이 생기면 여기에 한 줄 더한다(테스트가 빠진 것을 잡는다). */
 const MODS = Object.freeze({
@@ -148,7 +149,7 @@ export const CENTRAL_ONLY_SPEC = Object.freeze([
 ]);
 
 /** 고정 항목이 이미 다루는 spec 키 — 같은 폴러를 두 줄로 그리지 않는다(고정 항목 쪽에 `specKey` 를 단다). */
-const FIXED_SPEC_KEY = Object.freeze({ vcenter: 'collect.inventory', metrics: 'collect.metrics', 'gpu-guest': 'collect.gpuGuest', ipscan: 'collect.ipamScan' });
+const FIXED_SPEC_KEY = Object.freeze({ vcenter: 'collect.inventory', metrics: 'collect.metrics', 'gpu-guest': 'collect.gpuGuest', ipscan: 'collect.ipamScan', 'auth-stops': 'service.authStops' });
 
 const MIN = 60_000;
 const ago = (ts) => (ts ? Date.now() - ts : null);
@@ -362,6 +363,10 @@ export function getServiceCheck(opts = {}) {
       at: Math.min(...errs.map((e) => e.at || Date.now())), files: errs };
   }));
 
+  // 127회차(124회차 결정 D-A · 남긴 것): 인증 정지 기록 파일(<도구>-auth-stops.json)을 못 읽는 도구 — 예전에는 콘솔 한 줄뿐이었다(unreadable() 소비처 0곳).
+  //   그동안은 자격 지문마다 한 대상으로 먼저 확인하며 수집한다(util/authGuard.js 머리말). 가드마다 한 줄이 아니라 한 행 — 파일 이름은 기본 이름만.
+  checks.push(wrap('auth-stops', '인증 정지 기록 파일', () => authGuardHealthRow()));
+
   // 2026-10-09 검토 I-05: 게시판·공지 — 메모리에 받은 변경이 디스크에 저장되지 않고 있으면 warn(재시작하면 사라질 수 있다).
   //   pending 60초 경계는 화면(10초)보다 넉넉하게 — 묶음 저장 창마다 이 행이 깜빡이지 않게.
   checks.push(wrap('bulletin-store', '게시판·공지 저장', () => {
@@ -481,7 +486,7 @@ export function getServiceCheck(opts = {}) {
     if (spec.centralOnly && isEdge) { skippedOnEdge.push(spec.key); continue; }
     checks.push({ ...specRow(spec, opts), specKey: spec.key });
   }
-  const notCovered = STATUS_SPEC.filter((x) => x.group !== 'collect').map((x) => x.key);
+  const notCovered = STATUS_SPEC.filter((x) => x.group !== 'collect' && !covered.has(x.key)).map((x) => x.key);   // 127회차: 고정 행이 다루는 service.* (인증 정지 기록 파일)는 '대상 밖' 이 아니다
   const coverage = {
     fixed: fixedCount,
     pollers: specs.length - skippedOnEdge.length,

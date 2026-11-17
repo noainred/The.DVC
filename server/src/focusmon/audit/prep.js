@@ -307,7 +307,7 @@ export async function prepOnce(t, { keys, connect = withSsh, expect = {}, credOf
     differs: !!parsed?.differs, partial: !!parsed?.partial, warn: parsed?.warn || [], from: wantFrom && !!parsed?.added, ...who };
   if (!parsed?.ok) return res(parsed?.fail ? 'script' : 'script-other', prep);
   // 반증 D3: 사람이(OTP) 누른 준비로 키가 들어갔다 — 그 대상 · 이 노드 키의 인증 정지를 한 번 푼다('다시 연결' 과 같은 판단 · 시험은 한 번만)
-  try { focusAuthGuard.clearAuthStop(authDevOf(t, info.fingerprint).id); } catch { /* 정지 기록을 못 지워도 시험이 'auth-stopped' 로 알린다 */ }
+  try { focusAuthGuard.clearAuthStop(authDevOf(t, info.fingerprint).id, { verified: false }); } catch { /* 정지 기록을 못 지워도 시험이 'auth-stopped' 로 알린다 */ }
   return after(prep, cred);
 }
 

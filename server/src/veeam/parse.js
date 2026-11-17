@@ -490,7 +490,7 @@ export function sanitizeServerResult(r, now = Date.now(), { maxVms = 20_000, max
     ...(typeof r.target === 'string' && /^[0-9a-f]{16}$/.test(r.target) ? { target: r.target } : {}),
     notes: (Array.isArray(r.notes) ? r.notes : []).filter((x) => typeof x === 'string').slice(0, 10).map((x) => s(x, 300)),
     // 전체 점검 4회차 V-9: 보정이 0 이어도 엣지 시각은 수신 시각으로 자른다(ts 와 같은 규칙 — 미래 시각이 진행 상태에 보이던 것)
-    authStop: isObj(r.authStop) ? { since: shift(numOrNull(r.authStop.since)), attempts: numOrNull(r.authStop.attempts), reason: s(r.authStop.reason, 200) } : null,
+    authStop: isObj(r.authStop) ? { since: shift(numOrNull(r.authStop.since)), attempts: numOrNull(r.authStop.attempts), reason: s(r.authStop.reason, 200), ...(r.authStop.unread === true ? { unread: true } : {}) } : null,   // 127회차: 엣지의 '못 읽음 정지' 표지(인증 실패 아님)를 떨구지 않는다
     jobs, vms, counts, backups,
     ...(truncated.length ? { truncated } : {}),
     ...(isObj(r.license) && sanitizeLicense(r.license) ? { license: sanitizeLicense(r.license) } : {}),   // v2.788 — 화이트리스트(빠뜨리면 엣지 서버의 라이선스가 조용히 사라진다)

@@ -197,7 +197,7 @@ export async function runHzSessionsNow(trigger = 'manual', { demoOnly = false } 
         let stop = periodic && !mock ? authGuard.authStopFor(srv) : null;
         // v2.686 HZ2686-R1: v2.685 까지는 로그인 뒤 403(역할 권한)도 'auth' 로 세어 정지를 남겼다. 그 정지는 로그인 단계
         //   실패가 아니므로 풀고 다시 시도한다(이유 문구가 '세션 조회 실패' 로 시작한다 — 로그인 실패는 'Horizon 로그인 실패').
-        if (stop && /^세션 조회 실패/.test(String(stop.reason || ''))) { authGuard.clearAuthStop(srv.id); stop = null; }
+        if (stop && /^세션 조회 실패/.test(String(stop.reason || ''))) { authGuard.clearAuthStop(srv.id, { verified: false }); stop = null; }
         if (stop) {
           // ⚠ **조용히 멈추지 않는다**(규칙 1) — 정지 사실·시각·시도 횟수를 그대로 실어 화면이 말한다.
           //   말없이 건너뛰면 사용자는 '수집이 되는 줄' 안다.

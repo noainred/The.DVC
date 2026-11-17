@@ -7,6 +7,7 @@
 import { loadGpuGuestSettings } from './settings.js';
 import { loadPhysical, updatePhysical, physicalHostIssue } from './physicalRegistry.js';
 import { collectVmGpuSsh, detectPhysicalGpu, gpuAuthGuard, gpuStopView, isGpuAuthError } from './sshCollect.js';
+import { authStopText } from '../util/authGuard.js';
 import { setPhysicalGpu, prunePhysicalGpu, physicalGpuCounts } from './physicalStore.js';
 import { isStopped } from '../security/emergencyStop.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스(util/pool.js) — 손으로 쓴 사본 제거
@@ -50,7 +51,7 @@ export async function pollPhysicalOnce({ manual = false } = {}) {
       const stop = manual ? null : gpuAuthGuard.authStopFor(authDev);
       if (stop) {
         // 정지 사실을 결과에 싣는다 — 조용히 건너뛰면 화면이 '마지막 값' 을 지금 값처럼 보여준다.
-        setPhysicalGpu(sv.id, { id: sv.id, name: sv.name, host: sv.host, vcenterId: sv.vcenterId || '', error: `인증 실패로 주기 수집 정지(${stop.attempts}회) — 비밀번호를 고치면 자동 재개합니다`, errorCode: 'login', errorLabel: '로그인 안됨', authStopped: gpuStopView(stop) });
+        setPhysicalGpu(sv.id, { id: sv.id, name: sv.name, host: sv.host, vcenterId: sv.vcenterId || '', error: authStopText(stop, `인증 실패로 주기 수집 정지(${stop.attempts}회) — 비밀번호를 고치면 자동 재개합니다`), errorCode: 'login', errorLabel: '로그인 안됨', authStopped: gpuStopView(stop) });
         authStopped++;
         return;
       }

@@ -179,6 +179,9 @@ export const STATUS_SPEC = Object.freeze([
    */
   { key: 'service.mail', label: '메일 발송(알림)', group: 'service', mod: '../mail/service.js', fn: 'mailStatus' },
   { key: 'service.runtime', label: 'Node 런타임 호환성', group: 'service', mod: '../util/runtimeCheck.js', fn: 'runtimeStatus' }, // 2026-10-09 검토 I-06
+  // 127회차: 인증 정지 기록 파일을 못 읽는 도구 — 수집은 법인 엣지가 하므로 중앙이 엣지의 이 상태를 볼 수 있어야 한다(값: 파일 기본 이름 · 오류 코드 · 지문 수 — 비밀 · 대상 id 없음).
+  //   util/authGuard.js 는 store.js 등이 부팅에 import 한다(캐시 적중 — 새 타이머 없음).
+  { key: 'service.authStops', label: '인증 정지 기록 파일', group: 'service', mod: '../util/authGuard.js', fn: 'authGuardFilesStatus' },
   // v2.871: 이슈 알림 — 묶음 발송 수·실패·주소 없는 사람 수·대기 인원(계정명·주소 없음). 엣지 포탈도 자기 이슈 알림을 보낸다.
   { key: 'service.issueNotify', label: '이슈 알림(메일·팀 채팅)', group: 'service', mod: '../issues/notify.js', fn: 'issueNotifyStatus' },
   // v2.908: 이슈 자동화 규칙(위키 체크 · 상위 검토 · P0 채팅 실행 수 · 실패) · 다른 알람/백업 실패 → 이슈 자동 등록(만든 수 · 상한 · 실패). 계정명 · 주소 없음.

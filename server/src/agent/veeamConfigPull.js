@@ -61,10 +61,10 @@ async function _pull() {
         console.warn(`[veeam-config] ${_registryRecovered.note}`);
       }
       _lastSig = sig;
-      for (const id of applied.removed) { dropResult(id); authGuard.clearAuthStop(id, { defer: true }); }
+      for (const id of applied.removed) { dropResult(id); authGuard.clearAuthStop(id, { defer: true, verified: false }); }
       // v2.761 B4: 같은 id 의 접속처(host·port·username)가 바뀌면 옛 접속처의 결과(lastOk)를 새 서버 것으로 보내지 않고, 옛 접속처의 인증 정지도 푼다.
       const moved = applied.moved || [];
-      for (const id of moved) { dropResult(id); authGuard.clearAuthStop(id, { defer: true }); }
+      for (const id of moved) { dropResult(id); authGuard.clearAuthStop(id, { defer: true, verified: false }); }
       authGuard.flush();
       console.log(`[veeam-config] 중앙 배정 Veeam 서버 적용: ${applied.count}대${applied.removed.length ? ` · 빠짐 ${applied.removed.length}` : ''}${moved.length ? ` · 접속처 변경 ${moved.length}` : ''}${applied.rejected ? ` · 형식 오류로 버림 ${applied.rejected}` : ''}`);
       if (applied.count) pollVeeamOnce().catch(() => {});

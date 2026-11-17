@@ -20,7 +20,7 @@ import { enqueueNotify as notify } from '../alerts.js'; // v2.742(감사 TIMING-
 import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
 import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 103회차 F7: 읽기 오류 ≠ 손상
 import { openSecretsDeep, sealSecretsDeep, decryptFailureCount } from '../security/secretVault.js'; // v2.538: 이 파일은 v2.537 까지 봉인 대상 미등록이었다(감사 M4 계열)
-import { createAuthGuard, authStopView, createAuthBreaker, runWithBreakerWarmup } from '../util/authGuard.js';
+import { createAuthGuard, authStopView, authStopText, createAuthBreaker, runWithBreakerWarmup } from '../util/authGuard.js';
 import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
 import { gpuAuthGuard, isGpuAuthError, guestAccountStopDev } from '../gpu/sshCollect.js';
 import { numOrNull } from '../util/numOrNull.js';
@@ -181,11 +181,11 @@ async function runJob(j, { manual = false } = {}) {
   //   해제는 주 폴러·연결 테스트만). 수동 '지금 실행' 은 막지 않는다.
   if (!manual) {
     const st = vcAuthGuard.peekAuthStop(vc);
-    if (st) { lastAuth.vcStopped = authStopView(st); finish(null, [`vCenter 인증 실패로 주기 실행 정지(${st.attempts}회) — 비밀번호를 고치거나 설정 › vCenter 연결 테스트가 성공하면 재개`]); return; }
+    if (st) { lastAuth.vcStopped = authStopView(st); finish(null, [authStopText(st, `vCenter 인증 실패로 주기 실행 정지(${st.attempts}회) — 비밀번호를 고치거나 설정 › vCenter 연결 테스트가 성공하면 재개`)]); return; }
     // 작업 계정이 인증 실패로 멈춰 있으면(회로 차단기가 기록) 주기 실행은 시작하지 않는다. 계정을 고치면 credHash 가
     // 바뀌어 authStopFor 가 기록을 지우고 이번 주기부터 다시 돈다(자동 재개).
     const js = jobCreds ? guestScanAuthGuard.authStopFor(jobDevOf(j)) : null;
-    if (js) { lastAuth.jobStopped = authStopView(js); finish(null, [`작업 계정 ${j.guestUser} 인증 실패로 주기 실행 정지(${js.attempts}회) — 계정을 고치면 자동 재개`]); return; }
+    if (js) { lastAuth.jobStopped = authStopView(js); finish(null, [authStopText(js, `작업 계정 ${j.guestUser} 인증 실패로 주기 실행 정지(${js.attempts}회) — 계정을 고치면 자동 재개`)]); return; }
   }
   const snap = store.get();
   const hostByName = new Map(); for (const h of snap.hosts || []) if (h.vcenterId === j.vcenterId) hostByName.set(h.name, h);

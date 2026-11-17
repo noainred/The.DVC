@@ -10,7 +10,7 @@
  *    (그 폴더 크기는 실제보다 작을 수 있다). 해석된 것이 하나도 없으면 실패다(빈 결과를 '사용자 0명' 으로 만들지 않는다).
  */
 import { withSsh, withDeadline, isSshAuthError, isSshHostKeyError } from '../proxy/sshExec.js';
-import { createAuthGuard, isAuthFailureText } from '../util/authGuard.js';
+import { createAuthGuard, isAuthFailureText, authStopText } from '../util/authGuard.js';
 import { parseDuOutput, duCommand, totalsOf } from './parse.js';
 import { privateKeyForConnect, keyInfo, ensureKey } from './sshKey.js';
 import { isMockMode } from '../mock/demo/flags.js';
@@ -122,7 +122,7 @@ export async function collectTarget(t, { trigger = 'schedule', manual = false, a
     if (c.error) return fail(c.kind, c.error);
     if (!manual) {
       const stop = authGuard.authStopFor(c.credId);
-      if (stop) return fail('auth', `인증 거부로 주기 수집을 멈췄습니다(${new Date(stop.since).toISOString()} 이후 ${stop.attempts}회) — 키·계정이 바뀌면 자동으로 다시 시도합니다. '지금 수집' 은 막지 않습니다`, { authStopped: true });
+      if (stop) return fail('auth', authStopText(stop, `인증 거부로 주기 수집을 멈췄습니다(${new Date(stop.since).toISOString()} 이후 ${stop.attempts}회) — 키·계정이 바뀌면 자동으로 다시 시도합니다. '지금 수집' 은 막지 않습니다`), { authStopped: true });
     }
     const plan = sessionPlanOf(t);
     const detach = t.detach !== false;

@@ -134,6 +134,18 @@ function objectOf(word) {
  * @returns {null | {title:string, short:string, text:string, detail:string, attempts:number|null}}
  *   `text` 는 BoldText 로 그린다(강조는 별표 두 개). ⚠ 백틱 금지(BoldText 는 강조만 해석한다).
  */
+/**
+ * 127회차: 이 정지가 '정지 기록 파일을 못 읽어 건너뜀'(이 대상에서 인증 실패가 확인된 것이 아니다)인가 — 서버 util/authGuard.js isUnreadStop 과 같은 판정(표지 unread · 시도 0회는 그 정지에만 쓴다).
+ * 화면이 '인증 실패 정지' 라고 직접 적던 배지 · 문구가 이 판정 하나를 쓴다(사본 금지). ⚠ Number(null) === 0 — 빈 값은 0 으로 보지 않는다.
+ */
+export function isUnreadStop(stop) {
+  if (!stop || typeof stop !== 'object' || Array.isArray(stop)) return false;
+  if (stop.unread === true) return true;
+  return stop.attempts != null && stop.attempts !== '' && Number(stop.attempts) === 0;
+}
+/** 배지 글자 — 실제 인증 정지는 ‘인증 실패 정지’, 못 읽음 정지는 ‘정지 기록 읽기 오류’. */
+export const authStopShort = (stop) => (isUnreadStop(stop) ? '정지 기록 읽기 오류' : '인증 실패 정지');
+
 export function authStopInfo(stop, { what = '이 대상', manual = '', now = Date.now(), activity = '주기 수집' } = {}) {
   if (!stop || typeof stop !== 'object' || Array.isArray(stop)) return null;
   const since = agoText(stop.since, now);
@@ -148,11 +160,12 @@ export function authStopInfo(stop, { what = '이 대상', manual = '', now = Dat
   // 124회차(119 반증 — 재현): 서버가 **정지 기록 파일을 못 읽는 동안** 모르는 대상에 돌려주는 정지는 인증 실패가 아니다(util/authGuard.js unreadStop — 표지 unread,
   //   시도 수 0 은 그 정지에만 쓴다 — 표지를 떨구는 옛 응답 모양도 가린다). 예전에는 '인증 실패로 … 멈췄습니다(실패 0회) · 비밀번호를 고치면 자동으로 다시 시작' 이라고 말했다
   //   (둘 다 사실이 아니다 — 모르는 대상은 비밀번호를 고쳐도 건너뛴다. 풀리는 길은 파일이 다시 읽히거나 수동 실행이 성공하는 것이다).
-  if (stop.unread === true || attempts === 0) {
+  if (isUnreadStop(stop)) {
     const sinceNote = since ? `(${since}부터)` : '';
     const manualUnread = manual ? ` '${manual}'${topicOf(manual)} 막지 않습니다 — 성공하면 이 대상은 다시 시작합니다.` : '';
     const textUnread = `**정지 기록 파일을 읽지 못해 ${what}의 ${activity}${objectOf(activity)} 건너뛰고 있습니다**${sinceNote}. **인증 실패가 확인된 것이 아닙니다** —`
-      + ' 정지돼 있던 대상에 자동으로 다시 로그인하지 않으려는 것이고, 파일이 다시 읽히면 이어 갑니다(비밀번호를 고쳐도 그때까지는 건너뜁니다).'
+      // 127회차: 서버가 못 읽는 동안 '전부 정지' 대신 같은 자격증명마다 한 대상으로 먼저 확인한다 — '비밀번호를 고쳐도 그때까지는 건너뜁니다' 는 이제 사실이 아니다(고치면 한 대상으로 다시 확인한다).
+      + ' 정지돼 있던 대상들에 한꺼번에 다시 로그인하지 않으려고 같은 자격증명을 쓰는 대상 하나로 먼저 로그인을 확인합니다 — 통하면 이 대상도 다시 시작하고, 파일이 다시 읽히면 그 기록대로 이어 갑니다.'
       + manualUnread
       + (reason ? ` 사유: ${reason}` : '');
     return { title: '정지 기록 읽기 오류 — 주기 수집 건너뜀', short: '정지 기록 읽기 오류', text: textUnread, detail: since ? `${since}부터 건너뜀` : '', attempts: null, unread: true };

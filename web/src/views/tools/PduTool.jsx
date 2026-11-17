@@ -9,7 +9,7 @@ import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
 import PduCharts from './PduCharts.jsx';
 import BoldText from '../../components/boldText.jsx';
-import { authStopInfo, authStopSummary } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
+import { authStopInfo, authStopSummary, authStopShort } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 import { collectDropNote } from './collectDropText.js'; // v2.591: 결과 없이 폐기된 위임 '지금 수집' 요청
 import { agoText } from './relTime.js';
 import { edgeClockAheadMark, edgeClockFootnote } from './edgeLateText.js'; // v2.631 A6-2631-04: 엣지 시계 빠름 표지
@@ -230,7 +230,7 @@ export default function PduTool() {
                         </b>
                         {d.enabled === false && <span className="badge" style={{ marginLeft: 6 }}>중지</span>}
                         {s && !s.ok && (s.authStopped
-                          ? <span className="badge red" style={{ marginLeft: 6, whiteSpace: 'nowrap' }} title={`${authStopInfo(s.authStopped, { what: '이 PDU' })?.detail || ''} — 펼치면 사유를 봅니다`}>인증 실패 정지</span>
+                          ? <span className="badge red" style={{ marginLeft: 6, whiteSpace: 'nowrap' }} title={`${authStopInfo(s.authStopped, { what: '이 PDU' })?.detail || ''} — 펼치면 사유를 봅니다`}>{authStopShort(s.authStopped)}</span>
                           : <span className="badge red" style={{ marginLeft: 6 }} title={s.error}>오류</span>)}
                         {(s?.violations || []).length > 0 && (
                           <span className="badge" style={{ marginLeft: 6, background: s.violations.some((v) => v.severity === 'critical') ? 'rgba(239,68,68,.2)' : 'rgba(245,158,11,.2)', color: s.violations.some((v) => v.severity === 'critical') ? '#ef4444' : '#f59e0b' }}

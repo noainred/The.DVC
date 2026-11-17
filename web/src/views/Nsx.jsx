@@ -4,7 +4,7 @@ import { usePolling, fetchJson, toolAllowed } from '../api.js';
 import { Kpi, DataTable, Modal, Loading, ErrorBox, SearchBox, VmLink } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import BoldText from '../components/boldText.jsx';
-import { authStopInfo } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
+import { authStopInfo, authStopShort } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 import { nsxLimitNotes, dfwRulesCell, nsxCount, nsxAdd, nsxFailedShort } from './nsxLimitText.js'; // v2.599 C2599-05: 목록 절단·부분 집계 안내
 
 // v2.602(COL-2602-01): 'unknown' = 매니저는 응답했지만 클러스터 상태 조회가 실패 — 정상도 저하도 아니다(판정 보류).
@@ -89,7 +89,7 @@ export default function Nsx() {
               <tr key={m.id} style={{ cursor: 'pointer', background: mgr === m.id ? 'rgba(99,102,241,.08)' : undefined }} onClick={() => setMgr(mgr === m.id ? '' : m.id)}>
                 <td><b>{m.name}</b><span className="muted" style={{ fontSize: 11 }}> · {m.id}</span></td>
                 <td><span className={`badge ${MGR_BADGE[m.status] || 'gray'}`} title={m.status === 'unknown' ? `클러스터 상태 조회 실패: ${m.listFailReasons?.clusterStatus || '사유 미상'}` : undefined}>{MGR_LABEL[m.status] || m.status}</span>
-                  {m.authStopped && <span className="badge red" style={{ marginLeft: 4, fontSize: 10, whiteSpace: 'nowrap' }} title={authStopInfo(m.authStopped, { what: '이 NSX Manager' })?.detail || ''}>인증 실패 정지</span>}</td>
+                  {m.authStopped && <span className="badge red" style={{ marginLeft: 4, fontSize: 10, whiteSpace: 'nowrap' }} title={authStopInfo(m.authStopped, { what: '이 NSX Manager' })?.detail || ''}>{authStopShort(m.authStopped)}</span>}</td>
                 <td className="muted">{m.version || '—'}</td>
                 <td><span className="badge blue">{m.region || '—'}</span></td>
                 <td className="muted">{m.vcenterId || '—'}</td>
