@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>서버 접속 공용 모듈 — 계층 관리</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./sa.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#60a5fa}a:hover{color:#93c5fd}
+</style>
+</helmet>
+<div class="pg" style="min-height: 1700px; padding: 28px 32px 44px; display: flex; flex-direction: column; gap: 18px">
+
+  <div style="display: flex; flex-direction: column; gap: 6px; max-width: 1100px">
+    <div class="crumb">작동 방식 · 새로 만드는 부분</div>
+    <h1>계층 관리 — 법인 › OS 종류 › 서버</h1>
+    <p class="soft" style="font-size: 14px">계정을 서버마다 붙이지 않고, 법인이나 OS 종류 단계에 한 번 정하면 그 아래 서버가 물려받습니다. 서버에서 따로 정하면 그 서버만 다르게 씁니다. 비밀번호와 키는 지금처럼 계정 쪽에 있고, 단계에는 ‘어느 계정을 쓰는가’ 만 적습니다.</p>
+  </div>
+
+  <div class="sec">
+    <h2>물려받는 모습 — 예</h2>
+    <div class="tw" style="padding: 20px 24px">
+      <div style="position: relative; width: 1320px; height: 440px">
+
+<svg aria-hidden="true" width="8" height="40" viewBox="0 0 8 40" preserveAspectRatio="none" style="position: absolute; left: 696px; top: 88px; width: 8px; height: 40px; overflow: visible; fill: none; stroke: #8b9bb4; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><path d="M 4 0 L 4 40"></path></svg>
+<svg aria-hidden="true" width="640" height="8" viewBox="0 0 640 8" preserveAspectRatio="none" style="position: absolute; left: 380px; top: 124px; width: 640px; height: 8px; overflow: visible; fill: none; stroke: #8b9bb4; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><path d="M 0 4 L 640 4"></path></svg>
+<svg role="img" aria-label="KR-본사 에서 Linux 로, Linux 는 법인에 정한 계정을 물려받음" width="8" height="39" viewBox="0 0 8 39" preserveAspectRatio="none" style="position: absolute; left: 376px; top: 128px; width: 8px; height: 39px; overflow: visible; fill: none; stroke: #8b9bb4; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-1" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#8b9bb4" stroke="none" style="stroke: none; fill: #8b9bb4; fill: context-stroke"/></marker></defs><path d="M 4 0 L 4 35" marker-end="url(#dc-arrow-head-filled-1)"></path></svg>
+<svg role="img" aria-label="KR-본사 에서 Windows 로, Windows 는 여기서 따로 정함" width="8" height="39" viewBox="0 0 8 39" preserveAspectRatio="none" style="position: absolute; left: 1016px; top: 128px; width: 8px; height: 39px; overflow: visible; fill: none; stroke: #8b9bb4; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-2" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#8b9bb4" stroke="none" style="stroke: none; fill: #8b9bb4; fill: context-stroke"/></marker></defs><path d="M 4 0 L 4 35" marker-end="url(#dc-arrow-head-filled-2)"></path></svg>
+
+<svg aria-hidden="true" width="8" height="48" viewBox="0 0 8 48" preserveAspectRatio="none" style="position: absolute; left: 376px; top: 240px; width: 8px; height: 48px; overflow: visible; fill: none; stroke: #8b9bb4; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><path d="M 4 0 L 4 48"></path></svg>
+<svg aria-hidden="true" width="280" height="8" viewBox="0 0 280 8" preserveAspectRatio="none" style="position: absolute; left: 240px; top: 284px; width: 280px; height: 8px; overflow: visible; fill: none; stroke: #8b9bb4; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><path d="M 0 4 L 280 4"></path></svg>
+<svg role="img" aria-label="Linux 에서 kr-db-01 로, 물려받음" width="8" height="47" viewBox="0 0 8 47" preserveAspectRatio="none" style="position: absolute; left: 236px; top: 288px; width: 8px; height: 47px; overflow: visible; fill: none; stroke: #8b9bb4; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-3" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#8b9bb4" stroke="none" style="stroke: none; fill: #8b9bb4; fill: context-stroke"/></marker></defs><path d="M 4 0 L 4 43" marker-end="url(#dc-arrow-head-filled-3)"></path></svg>
+<svg role="img" aria-label="Linux 에서 kr-app-07 로, 이 서버는 따로 정함" width="8" height="47" viewBox="0 0 8 47" preserveAspectRatio="none" style="position: absolute; left: 516px; top: 288px; width: 8px; height: 47px; overflow: visible; fill: none; stroke: #8b9bb4; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-4" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#8b9bb4" stroke="none" style="stroke: none; fill: #8b9bb4; fill: context-stroke"/></marker></defs><path d="M 4 0 L 4 43" marker-end="url(#dc-arrow-head-filled-4)"></path></svg>
+
+<svg aria-hidden="true" width="8" height="48" viewBox="0 0 8 48" preserveAspectRatio="none" style="position: absolute; left: 1016px; top: 240px; width: 8px; height: 48px; overflow: visible; fill: none; stroke: #8b9bb4; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><path d="M 4 0 L 4 48"></path></svg>
+<svg aria-hidden="true" width="280" height="8" viewBox="0 0 280 8" preserveAspectRatio="none" style="position: absolute; left: 880px; top: 284px; width: 280px; height: 8px; overflow: visible; fill: none; stroke: #8b9bb4; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><path d="M 0 4 L 280 4"></path></svg>
+<svg role="img" aria-label="Windows 에서 kr-file-02 로, 물려받음" width="8" height="47" viewBox="0 0 8 47" preserveAspectRatio="none" style="position: absolute; left: 876px; top: 288px; width: 8px; height: 47px; overflow: visible; fill: none; stroke: #8b9bb4; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-5" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#8b9bb4" stroke="none" style="stroke: none; fill: #8b9bb4; fill: context-stroke"/></marker></defs><path d="M 4 0 L 4 43" marker-end="url(#dc-arrow-head-filled-5)"></path></svg>
+<svg role="img" aria-label="Windows 에서 kr-win-03 으로, 이 서버는 따로 정함" width="8" height="47" viewBox="0 0 8 47" preserveAspectRatio="none" style="position: absolute; left: 1156px; top: 288px; width: 8px; height: 47px; overflow: visible; fill: none; stroke: #8b9bb4; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-6" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#8b9bb4" stroke="none" style="stroke: none; fill: #8b9bb4; fill: context-stroke"/></marker></defs><path d="M 4 0 L 4 43" marker-end="url(#dc-arrow-head-filled-6)"></path></svg>
+
+<div style="position: absolute; left: 540px; top: 16px; width: 320px; height: 72px; box-sizing: border-box; padding: 8px 12px; display: flex; align-items: center; justify-content: center; text-align: center; background: #141b2d; border: 1px solid #3b82f6; border-radius: 10px; font-size: 14px"><span><b>KR-본사</b> <span class="chip c-new">여기서 정함</span><br><span style="font-size: 12px; color: #8b9bb4">svc-portal · 키 로그인</span></span></div>
+
+<div style="position: absolute; left: 220px; top: 168px; width: 320px; height: 72px; box-sizing: border-box; padding: 8px 12px; display: flex; align-items: center; justify-content: center; text-align: center; background: #141b2d; border: 1px solid #243049; border-radius: 10px; font-size: 14px"><span><b>Linux</b> · 71대 <span class="chip c-mut">물려받음</span><br><span style="font-size: 12px; color: #8b9bb4">법인의 svc-portal · 키 로그인</span></span></div>
+<div style="position: absolute; left: 860px; top: 168px; width: 320px; height: 72px; box-sizing: border-box; padding: 8px 12px; display: flex; align-items: center; justify-content: center; text-align: center; background: #141b2d; border: 1px solid #3b82f6; border-radius: 10px; font-size: 14px"><span><b>Windows</b> · 25대 <span class="chip c-new">여기서 정함</span><br><span style="font-size: 12px; color: #8b9bb4">CORP\svc-portal · AD · WinRM</span></span></div>
+
+<div style="position: absolute; left: 124px; top: 336px; width: 232px; height: 88px; box-sizing: border-box; padding: 8px 12px; display: flex; align-items: center; justify-content: center; text-align: center; background: #141b2d; border: 1px solid #243049; border-radius: 10px; font-size: 14px"><span><b>kr-db-01</b> <span class="chip c-mut">물려받음</span><br><span style="font-size: 12px; color: #8b9bb4">법인에서 옴<br>svc-portal · 키 로그인</span></span></div>
+<div style="position: absolute; left: 404px; top: 336px; width: 232px; height: 88px; box-sizing: border-box; padding: 8px 12px; display: flex; align-items: center; justify-content: center; text-align: center; background: #141b2d; border: 1px solid #8a6d1c; border-radius: 10px; font-size: 14px"><span><b>kr-app-07</b> <span class="chip c-part">따로 정함</span><br><span style="font-size: 12px; color: #8b9bb4">이 서버만의 계정<br>monitor · 비밀번호</span></span></div>
+<div style="position: absolute; left: 764px; top: 336px; width: 232px; height: 88px; box-sizing: border-box; padding: 8px 12px; display: flex; align-items: center; justify-content: center; text-align: center; background: #141b2d; border: 1px solid #243049; border-radius: 10px; font-size: 14px"><span><b>kr-file-02</b> <span class="chip c-mut">물려받음</span><br><span style="font-size: 12px; color: #8b9bb4">Windows 에서 옴<br>CORP\svc-portal · 비밀번호</span></span></div>
+<div style="position: absolute; left: 1044px; top: 336px; width: 232px; height: 88px; box-sizing: border-box; padding: 8px 12px; display: flex; align-items: center; justify-content: center; text-align: center; background: #141b2d; border: 1px solid #8a6d1c; border-radius: 10px; font-size: 14px"><span><b>kr-win-03</b> <span class="chip c-part">따로 정함</span><br><span style="font-size: 12px; color: #8b9bb4">다른 공통 계정<br>로컬 svc-portal · SSH</span></span></div>
+
+<div style="position: absolute; left: 0px; top: 44px; width: 96px; font-size: 12.5px; font-weight: 600; color: #aebbd0">법인</div>
+<div style="position: absolute; left: 0px; top: 196px; width: 96px; font-size: 12.5px; font-weight: 600; color: #aebbd0">OS 종류</div>
+<div style="position: absolute; left: 0px; top: 372px; width: 96px; font-size: 12.5px; font-weight: 600; color: #aebbd0">서버</div>
+
+      </div>
+    </div>
+    <p class="dim">서버는 가장 가까운 단계에 정해 둔 것 하나를 씁니다. Linux 는 따로 정하지 않아 법인 것을 물려받고, Windows 는 따로 정했으므로 법인 것이 닿지 않습니다. 그림의 법인 · 서버 · 계정은 가상값입니다.</p>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start">
+    <div class="sec">
+      <h2>단계마다 정할 수 있는 것</h2>
+      <div class="tw">
+        <table class="t">
+          <thead><tr><th>정하는 것</th><th>법인</th><th>OS 종류</th><th>서버</th></tr></thead>
+          <tbody>
+            <tr><td>쓸 계정 — 저장된 공통 계정에서 고르기</td><td class="k">됨</td><td class="k">됨</td><td class="k">됨</td></tr>
+            <tr><td>이 서버만의 계정 · 비밀번호 직접 넣기</td><td class="dim">—</td><td class="dim">—</td><td class="k">됨</td></tr>
+            <tr><td>로그인 방식(키 · 비밀번호)</td><td class="k">됨</td><td class="k">됨</td><td class="k">됨</td></tr>
+            <tr><td>접속 방식 · 포트(SSH 22 · WinRM 5986)</td><td class="dim">—</td><td class="k">됨</td><td class="k">됨</td></tr>
+            <tr><td>긴급 사용 중지</td><td class="k">됨 <span class="chip c-ok">있음</span></td><td class="k">됨 <span class="chip c-new">새로</span></td><td class="dim">수집 끄기</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="dim">OS 종류는 Linux · Windows 두 가지와 ‘미지정’ 입니다. OS 마다 계정이 다르면 법인 단계는 비워 두고 OS 종류 단계에 정합니다. 법인 단계에 정한 것은 OS 를 가리지 않고 아래 전부에 닿기 때문입니다.</p>
+    </div>
+    <div class="sec">
+      <h2>지금과 달라지는 점</h2>
+      <div class="tw">
+        <table class="t">
+          <thead><tr><th>항목</th><th>지금</th><th>바뀐 뒤</th></tr></thead>
+          <tbody>
+            <tr><td class="k">계정을 붙이는 곳</td><td>서버마다 공통 계정을 골라 붙인다. 위에서 저절로 물려받지 않는다</td><td>법인 · OS 종류 단계에 한 번 정하면 아래 서버가 물려받는다</td></tr>
+            <tr><td class="k">서버의 OS 종류</td><td>서버 등록부에 칸이 없다. 수집 때 알아낸 값은 메모리에만 있다</td><td>서버 등록 값(Linux · Windows · 미지정)</td></tr>
+            <tr><td class="k">서버 여러 대의 계정 바꾸기</td><td>서버마다 고치거나 공통 계정 자체를 고친다</td><td>단계 한 곳을 고친다</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="dim">처음 켤 때 지금 서버들의 계정은 그대로 ‘따로 정함’ 으로 남습니다. OS 종류는 수집으로 확인된 값을 제안으로 보여 주고 관리자가 한꺼번에 승인합니다. 저절로 바꾸지 않습니다.</p>
+    </div>
+  </div>
+
+  <div class="sec">
+    <h2>물려받는 규칙 일곱 가지</h2>
+    <div class="tw">
+      <table class="t" style="min-width: 1100px">
+        <thead><tr><th>규칙</th><th>내용</th><th>지금</th></tr></thead>
+        <tbody>
+          <tr><td class="k">가까운 단계 하나가 이긴다</td><td>서버에 정한 것 → 법인 › OS 종류에 정한 것 → 법인에 정한 것 순으로 처음 나오는 하나를 쓴다. 어디에도 없으면 ‘미설정’ 이고 붙지 않는다. 단계끼리 섞지 않는다</td><td><span class="chip c-new">새로</span></td></tr>
+          <tr><td class="k">위를 바꾸면 물려받는 서버가 함께 바뀐다</td><td>저장하기 전에 영향받는 서버 수를 보여 주고, 한 대에서 먼저 확인한 뒤에 적용한다</td><td><span class="chip c-new">새로</span></td></tr>
+          <tr><td class="k">따로 정한 서버는 그대로다</td><td>위 단계를 바꿔도 영향받지 않는다. ‘물려받기로 되돌리기’ 로 푼다</td><td><span class="chip c-new">새로</span></td></tr>
+          <tr><td class="k">물려받기도 비밀을 주소에 묶는 일이다</td><td>위 단계에 계정을 정하는 일과, 물려받는 자리에 서버를 더하는 일은 설정 소유자 등급과 본인 OTP 가 필요하다. 그 권한이 없는 관리자가 더한 서버는 ‘승인 대기’ 로 두고 물려받지 않는다</td><td><span class="chip c-part">넓힘</span> <span class="dim">지금의 묶음 규칙과 같은 판정</span></td></tr>
+          <tr><td class="k">OS 종류는 등록한 값으로 정한다</td><td>추측해서 Linux 계정과 Windows 계정을 차례로 대 보지 않는다. 수집에서 알아낸 OS 가 등록과 다르면 ‘등록과 다름’ 으로 알리기만 한다</td><td><span class="chip c-new">새로</span></td></tr>
+          <tr><td class="k">법인 경계를 넘지 않는다</td><td>다른 법인의 계정 · 키는 고를 수 없다</td><td><span class="chip c-ok">있음</span></td></tr>
+          <tr><td class="k">정지는 계정을 따라간다</td><td>계정이 로그인 거부로 정지되면 그 계정을 물려받는 서버 전부가 ‘계정 정지로 대기’ 가 된다</td><td><span class="chip c-new">새로</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start">
+    <div class="sec">
+      <h2>저장 모양(안)</h2>
+      <pre class="code">// 단계의 지정 — 비밀은 여기에 없다(계정 id 만)
+assign: {
+  'KR-본사':         { account: 'a_3f21', auth: 'key' },
+  'KR-본사/windows': { account: 'a_9c07', auth: 'password',
+                       transport: 'winrm', port: 5986 },
+}
+
+// 서버 — 지금 등록부에 os 칸을 더한다
+{ id, host, port, vcenterId: 'KR-본사',
+  os: 'linux' | 'windows' | '',
+  credRef, keyRef, osAuth }   // 값이 있으면 이 서버만의 지정</pre>
+      <p class="dim">칸 이름은 안입니다. 서버의 <span class="mono">credRef</span> · <span class="mono">keyRef</span> · <span class="mono">osAuth</span> 는 지금 있는 칸이고, 비어 있을 때 위 단계를 찾아 올라가는 것이 새 동작입니다.</p>
+    </div>
+    <div class="sec">
+      <h2>계정을 고르는 순서(코어)</h2>
+      <div class="tw">
+        <table class="t">
+          <thead><tr><th>순서</th><th>보는 곳</th><th>있으면</th></tr></thead>
+          <tbody>
+            <tr><td class="k">1</td><td>서버에 정한 것</td><td>그것을 쓴다(따로 정함)</td></tr>
+            <tr><td class="k">2</td><td>법인 › OS 종류에 정한 것</td><td>그것을 쓴다. OS 미지정 서버는 건너뛴다</td></tr>
+            <tr><td class="k">3</td><td>법인에 정한 것</td><td>그것을 쓴다</td></tr>
+            <tr><td class="k">4</td><td>없음</td><td>‘미설정’ — 붙지 않는다</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="dim">고른 뒤의 검사(사용 중지 · 로그인 실패 정지 · 허용 기능 · 상대 확인)는 ③ 과 같습니다. 화면과 수집이 같은 함수 하나로 고릅니다.</p>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1700}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
