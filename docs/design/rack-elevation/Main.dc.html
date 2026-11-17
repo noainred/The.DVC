@@ -121,7 +121,8 @@ button,select,input{font:inherit;color:inherit}
         </div>
         <div class="lg">
           <sc-for list="{{legend}}" as="l" hint-placeholder-count="5"><span class="it"><span class="sw" style="background:{{l.bg}};border:1px solid {{l.bd}}"></span>{{l.label}}</span></sc-for>
-          <span class="it" style="margin-left:auto"><span class="sw" style="background:#f59e0b;width:8px;border:1px solid #c3cee0"></span>A = 액티브 PDU(실선 · 채움 높이 = 부하)</span><span class="it"><span class="sw" style="width:8px;border:1px dashed #5d6b85"></span>S = 스탠바이 PDU(점선 · 대기)</span><span class="it"><span class="sw" style="background:#ef4444;width:8px;border:2px solid #ef4444"></span>절체 — 액티브 꺼짐 · 스탠바이가 넘겨받음</span><span class="it"><span class="sw" style="background:repeating-linear-gradient(45deg,#1a2236 0 3px,#3a4866 3px 6px);border:1px solid #8b9bb4;width:8px"></span>PDU 못 읽음</span>
+          </div>
+        <div class="lg"><span class="it" style="font-weight:700;color:#e6edf6">세로 PDU · 색 = 소비전력(APC 측정값)</span><span class="it"><span class="sw" style="background:#3b82f6;width:10px"></span>1 kW 미만</span><span class="it"><span class="sw" style="background:#2dd4bf;width:10px"></span>1–2 kW</span><span class="it"><span class="sw" style="background:#f59e0b;width:10px"></span>2–3 kW</span><span class="it"><span class="sw" style="background:#ef4444;width:10px"></span>3 kW 이상</span><span class="it">채움 높이 = 정격 대비 부하</span><span class="it"><span class="sw" style="width:10px;border:1px solid #c3cee0"></span>A 실선 = 액티브</span><span class="it"><span class="sw" style="width:10px;border:1px dashed #5d6b85"></span>S 점선 = 스탠바이(대기 0 kW)</span><span class="it"><span class="sw" style="width:10px;border:2px solid #ef4444"></span>빨간 테두리 = 절체</span><span class="it"><span class="sw" style="background:repeating-linear-gradient(45deg,#1a2236 0 3px,#3a4866 3px 6px);border:1px solid #8b9bb4;width:10px"></span>못 읽음</span>
         </div>
       </div>
 
@@ -338,7 +339,7 @@ class Component extends DCLogic {
         const kwT = w == null ? '' : (w / 1000).toFixed(1) + ' kW';
         return {
           pct, ch: act ? 'A' : 'S',
-          fill: took || pct >= 80 ? '#ef4444' : act ? '#f59e0b' : '#8b9bb4',
+          fill: w == null ? 'transparent' : w < 1000 ? '#3b82f6' : w < 2000 ? '#2dd4bf' : w < 3000 ? '#f59e0b' : '#ef4444',   // 색 = 소비전력(APC 측정값)
           bg: unread ? 'repeating-linear-gradient(45deg,#1a2236 0 3px,#3a4866 3px 6px)' : '#141b2d',
           bd: down || took ? '2px solid #ef4444' : act ? '1px solid #c3cee0' : '1px dashed #5d6b85',
           tip: 'PDU ' + nm + ' — ' + (w == null ? '못 읽음' : down ? '꺼짐 · 0 kW (스탠바이가 넘겨받음)' : took ? '절체됨 · ' + kwT + ' 를 넘겨받는 중' : act ? kwT + ' · 부하 ' + pct + '%' : '대기 · 0 kW'),
