@@ -95,13 +95,15 @@ export function topShell({ off = false, forceProc = false } = {}) {
   return [
     '{ _tk=$(getconf CLK_TCK 2>/dev/null); _tpg=$(getconf PAGESIZE 2>/dev/null); _tsrc=proc; _tc=\'\';',
     "_tu0=$(cut -d' ' -f1 /proc/uptime 2>/dev/null);",
-    `_tio=$(timeout ${TOP_READ_TIMEOUT_S} grep -H -E '^(read|write)_bytes:' /proc/[0-9]*/io 2>/dev/null | head -n 40000);`,
+    // 80회차 F3(재현): --line-buffered — 블록 버퍼 그대로 timeout 이 grep 을 끊으면 마지막 줄이 숫자 중간에서 잘려(4KB 경계) 첫 읽기 값이 작아지고
+    //   후보면 (둘째 − 첫째) ÷ 경과가 부풀어 가짜 I/O 상위가 됐다(1단계 D1 과 같은 유형). 줄마다 내보내면 끊겨도 온전한 줄만 남는다.
+    `_tio=$(timeout ${TOP_READ_TIMEOUT_S} grep -H --line-buffered -E '^(read|write)_bytes:' /proc/[0-9]*/io 2>/dev/null | head -n 40000);`,
     `if ${hasTop}; then _tc=$(HOME=/nonexistent XDG_CONFIG_HOME=/nonexistent timeout ${TOP_TIMEOUT_S} top -b -n 2 -d ${TOP_WAIT_S} -w 512 -o %CPU 2>/dev/null | ${TOP_AWK}); case "$_tc" in *"K "[0-9]*) _tsrc=top;; esac; fi;`,
     `if [ "$_tsrc" = proc ]; then _tpa=$(cut -d' ' -f1 /proc/uptime 2>/dev/null); _ts0=$(timeout ${TOP_READ_TIMEOUT_S} grep -H '' /proc/[0-9]*/stat 2>/dev/null | head -n 40000);`,
     `_tc=$({ echo "U $_tpa"; printf '%s\\n' "$_ts0" | sed 's/^/A /'; sleep ${TOP_WAIT_S}; echo "V $(cut -d' ' -f1 /proc/uptime 2>/dev/null)"; timeout ${TOP_READ_TIMEOUT_S} grep -H '' /proc/[0-9]*/stat 2>/dev/null | head -n 40000 | sed 's/^/B /'; } | ${PROC_AWK}); fi;`,
     "_tp=$(printf '%s\\n' \"$_tc\" | awk '$1==\"C\" && $2 ~ /^[0-9]+$/ {print $2}' | head -n 20);",
     `{ printf '%s\\n' "$_tio" | sed 's/^/I /'; printf '%s\\n' "$_tc";`,
-    `if [ -n "$_tp" ]; then timeout ${TOP_PICK_TIMEOUT_S} grep -H -E '^(read|write)_bytes:' $(for _p in $_tp; do printf '/proc/%s/io ' "$_p"; done) 2>/dev/null | sed 's/^/J /'; fi;`,
+    `if [ -n "$_tp" ]; then timeout ${TOP_PICK_TIMEOUT_S} grep -H --line-buffered -E '^(read|write)_bytes:' $(for _p in $_tp; do printf '/proc/%s/io ' "$_p"; done) 2>/dev/null | sed 's/^/J /'; fi;`,
     'echo "T $(cut -d\' \' -f1 /proc/uptime 2>/dev/null)";',
     // 후보의 stat · status — 파일마다 프로세스를 띄우지 않고 grep 한 번씩(시한 하나) · stat 은 comm 안 개행으로 여러 줄이 될 수 있어 파일 이름으로 다시 잇는다(S 줄 하나).
     `if [ -n "$_tp" ]; then timeout ${TOP_PICK_TIMEOUT_S} grep -H '' $(for _p in $_tp; do printf '/proc/%s/stat ' "$_p"; done) 2>/dev/null | ${JOIN_AWK};`,

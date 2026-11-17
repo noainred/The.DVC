@@ -50,6 +50,7 @@ export const TUNING_REASON = Object.freeze([
   'policyNotRead',    // 켜져 있지만 허용 구성인지(SELinux 정책 · 방화벽 규칙) 읽지 않는다
   'notExplicit',      // 명시 설정이 없다(배포판 기본값은 확인하지 않았다)
   'systemMount',      // 시스템 마운트라 판정에서 뺐다(데이터 볼륨 구분 불가 — 추정)
+  'noSched',          // 80회차 F1: 고를 수 있는 스케줄러가 없는 장치(dm-* · md* 등 bio 기반 — 아래 물리 디스크의 스케줄러를 탄다)
 ]);
 
 const SYS = (k) => (tu) => (tu?.sysctl && Object.hasOwn(tu.sysctl, k) ? tu.sysctl[k] : undefined);
@@ -185,14 +186,14 @@ export const TUNING_ITEMS = Object.freeze([
   // ── ④ 스토리지 I/O ───────────────────────────────────────────────────────
   {
     id: 'disk.nvmeSched', cat: 4, title: 'NVMe scheduler', reads: '/sys/block/nvme*/queue/scheduler', section: 'blkq', valueKind: 'devices', overridable: true,
-    devices: (d) => /^nvme/.test(String(d.name || '')), devValue: (d) => d.scheduler,
+    devices: (d) => /^nvme/.test(String(d.name || '')), devValue: (d) => d.scheduler, sched: true,   // sched — 80회차 F1: 고를 수 없는 장치의 권고는 참고(judge.js noSchedChoice)
     rec: { all: { kind: 'oneOf', values: ['none', 'kyber'], text: 'none(바꾸지 않음 · 대안 kyber)' } },
     evidence: 'NVMe 는 기본이 none 이고 Red Hat 은 바꾸지 말 것을 권고. 표: 고성능 SSD·빠른 스토리지의 CPU 바운드 → none(대안 kyber).',
     sources: ['H2'], grade: '◐',
   },
   {
     id: 'disk.hddSched', cat: 4, title: 'HDD(SCSI) scheduler', reads: '/sys/block/*/queue/scheduler (rotational=1)', section: 'blkq', valueKind: 'devices', overridable: true,
-    devices: (d) => d.rotational === true, devValue: (d) => d.scheduler,
+    devices: (d) => d.rotational === true, devValue: (d) => d.scheduler, sched: true,   // 80회차 F1: HDD 위 LVM(dm-*) · md 는 rotational=1 · 'none' 만 — 권고하지 않는다
     rec: { all: { kind: 'oneOf', values: ['mq-deadline', 'bfq'], text: 'mq-deadline 또는 bfq' } },
     evidence: '“Traditional HDD with a SCSI interface — Use mq-deadline or bfq.” 가상 게스트는 mq-deadline, 멀티큐 HBA 면 none. 영구 설정은 udev 규칙 또는 TuneD 로(Red Hat 권고).',
     sources: ['H2'], grade: '◐',

@@ -55,7 +55,14 @@ const IO_AWK = "awk -F'[/:]' '"
   + `for (i = 1; i <= ${SNAPSHOT_IO_MAX}; i++) { best = ""; bv = 0; for (x in s) if (!(x in done) && r[x] + w[x] > bv) { bv = r[x] + w[x]; best = x } `
   + 'if (best == "") break; done[best] = 1; nm = "?"; f = "/proc/" best "/comm"; if ((getline nm < f) <= 0) nm = "?"; close(f); '
   + 'print "io " best " " r[best] " " w[best] " " substr(nm, 1, 32) } }\'';
-const IO_SAMPLE = "grep -s -H -E '^(read_bytes|write_bytes):' /proc/[0-9]*/io";
+/*
+ * 80회차 F2(재현 — 8b 반증 S1 의 형제): /proc/<pid>/io 읽기는 대상 프로세스의 exec 잠금을 기다릴 수 있다 — 예전에는 시한이 없어 한 프로세스가 붙잡으면
+ *   진단 스냅샷 명령 전체가 exec 시한(30초)에 걸려 **전 구획**(ps 상위 · ss · 커널 로그)을 잃었다(집중 모니터링 경량 스냅샷은 그 분 12초를 잃었다).
+ *   이제 표본마다 timeout 이고 끊기면 I/O 칸만 줄어든다. ⚠ `--line-buffered`: 블록 버퍼(4KB) 그대로 timeout 이 grep 을 끊으면 마지막 줄이 숫자 중간에서 잘려
+ *   (이 컨테이너 재현) 첫 표본 값이 작게 읽히고 둘째 표본과의 차이가 부풀어 가짜 I/O 1위가 된다(1단계 D1 과 같은 유형) — 줄마다 내보내 온전한 줄만 남긴다.
+ */
+export const SNAPSHOT_IO_TIMEOUT_S = 2;
+const IO_SAMPLE = `timeout ${SNAPSHOT_IO_TIMEOUT_S} grep -s -H --line-buffered -E '^(read_bytes|write_bytes):' /proc/[0-9]*/io`;
 const UPTIME = "awk '{print \"t=\" $1}' /proc/uptime";
 
 /**

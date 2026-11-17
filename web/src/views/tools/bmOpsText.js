@@ -42,6 +42,7 @@ export const TUNING_REASON_TEXT = Object.freeze({
   policyNotRead: '켜져 있지만 허용 구성인지(정책 · 방화벽 규칙)는 읽지 않습니다.',
   notExplicit: '명시 설정이 없습니다 — 배포판 기본값은 확인하지 않았습니다.',
   systemMount: '시스템 마운트라 판정에서 뺐습니다(데이터 볼륨을 구분하지 못함 — 추정).',
+  noSched: '이 장치(LVM · 소프트웨어 RAID 같은 논리 장치)는 고를 수 있는 스케줄러가 없습니다 — 아래 물리 디스크의 스케줄러를 봅니다.',
 });
 /** 근거 등급(서버 GRADES). */
 export const GRADE_TEXT = Object.freeze({
