@@ -458,24 +458,41 @@ class HubHandler(BaseHTTPRequestHandler):
             return self._error(HTTPStatus.UNAUTHORIZED, "로그인되어 있지 않습니다.")
         return self._json({"success": True, "user": user})
 
+    def _begin_auth_attempt(self, client) -> bool:
+        """전체 점검 131회차: 잠금 검사 + 진행 중인 시도 예약(SessionStore.begin_attempt — 잠금 검사와 실패 기록 사이의 동시 요청이 임계를 넘겨 평가되지 않게).
+        거절이면 429 를 쓰고 False. True 면 호출부가 인증 결과를 기록한 뒤 end_attempt 로 돌려준다(finally)."""
+        wait = self.ctx.sessions.begin_attempt(client)
+        if wait == 0:
+            return True
+        if wait > 0:
+            self._error(HTTPStatus.TOO_MANY_REQUESTS,
+                        f"로그인 시도가 많아 잠겼습니다. {wait}초 후 다시 시도하세요.")
+        else:
+            self._error(HTTPStatus.TOO_MANY_REQUESTS,
+                        "같은 출발지에서 확인 중인 로그인 시도가 많습니다. 잠시 후 다시 시도하세요.")
+        return False
+
     def api_session_login(self):
         client = self.client_address[0] if self.client_address else "-"
-        remaining = self.ctx.sessions.lock_remaining(client)
-        if remaining > 0:
-            return self._error(HTTPStatus.TOO_MANY_REQUESTS,
-                               f"로그인 시도가 많아 잠겼습니다. {remaining}초 후 다시 시도하세요.")
-        payload = self._body_dict()
-        username = payload.get("username")
-        password = payload.get("password")
-        user = self.ctx.users.authenticate(username if isinstance(username, str) else "",
-                                           password if isinstance(password, str) else "")
+        if not self._begin_auth_attempt(client):
+            return None
+        try:
+            payload = self._body_dict()
+            username = payload.get("username")
+            password = payload.get("password")
+            user = self.ctx.users.authenticate(username if isinstance(username, str) else "",
+                                               password if isinstance(password, str) else "")
+            if not user:
+                self.ctx.sessions.note_failure(client, username if isinstance(username, str) else "")   # 117회차 F2: 어느 계정을 틀렸는지
+            else:
+                self.ctx.sessions.note_success(client, user["username"])   # 117회차 F2: 이 계정의 실패만 지운다
+        finally:
+            self.ctx.sessions.end_attempt(client)   # 131회차: 결과를 기록한 뒤 · 응답을 쓰기 전에 돌려준다(본문 오류 · 예외에서도)
         if not user:
-            self.ctx.sessions.note_failure(client, username if isinstance(username, str) else "")   # 117회차 F2: 어느 계정을 틀렸는지
             print(f"[auth] 설정 로그인 실패 (from {client})", flush=True)
             self._audit("login", actor="-", result="fail")
             # 사용자명이 틀렸는지 비밀번호가 틀렸는지 구분해서 알리지 않는다(계정 열거 차단).
             return self._error(HTTPStatus.UNAUTHORIZED, "사용자명 또는 비밀번호가 올바르지 않습니다.")
-        self.ctx.sessions.note_success(client, user["username"])   # 117회차 F2: 이 계정의 실패만 지운다
         session = self.ctx.sessions.create(user)
         print(f"[auth] 설정 로그인: {user['username']}", flush=True)
         self._audit("login", actor=user["username"], detail={"role": user.get("role")})
@@ -662,24 +679,29 @@ class HubHandler(BaseHTTPRequestHandler):
         반증(결정 G1b ②): admin 을 늘리는 관리 동작(admin 생성 · 다른 admin 재설정 · admin 으로 올리기 · 중지된 admin 다시 켜기)도 **요청자 본인**의 현재 비밀번호를 이 함수로 본다.
         실패면 응답을 쓰고 False."""
         client = self.client_address[0] if self.client_address else "-"
-        remaining = self.ctx.sessions.lock_remaining(client)
-        if remaining > 0:
-            self._error(HTTPStatus.TOO_MANY_REQUESTS,
-                        f"로그인 시도가 많아 잠겼습니다. {remaining}초 후 다시 시도하세요.")
+        if not self._begin_auth_attempt(client):   # 131회차: 잠금 검사 + 진행 중인 시도 예약(로그인과 같은 규칙)
             return False
-        current = payload.get("currentPassword")
-        if not isinstance(current, str) or not current:
+        verdict = None   # None = 현재 비밀번호 없음(인증하지 않았다) · True · False
+        try:
+            current = payload.get("currentPassword")
+            if isinstance(current, str) and current:
+                verdict = bool(self.ctx.users.authenticate(actor["username"], current))
+                if verdict:
+                    self.ctx.sessions.note_success(client, actor["username"])
+                else:
+                    self.ctx.sessions.note_failure(client, actor["username"])
+        finally:
+            self.ctx.sessions.end_attempt(client)
+        if verdict is None:
             self._error(HTTPStatus.BAD_REQUEST, f"{what} 요청한 본인의 현재 비밀번호를 입력하세요.",
                         code="current_password_required")
             return False
-        if not self.ctx.users.authenticate(actor["username"], current):
-            self.ctx.sessions.note_failure(client, actor["username"])
+        if not verdict:
             print(f"[auth] {action} 거절 — 요청자 현재 비밀번호 불일치 (from {client})", flush=True)
             self._audit(action, actor=actor["username"], result="fail",
                         detail={"target": str(target if target is not None else actor["username"])[:64], "reason": "current_mismatch"})
             self._error(HTTPStatus.FORBIDDEN, "현재 비밀번호가 올바르지 않습니다(요청한 본인의 비밀번호).", code="current_password_invalid")
             return False
-        self.ctx.sessions.note_success(client, actor["username"])
         return True
 
     def api_users_delete(self, username):

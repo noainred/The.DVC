@@ -123,11 +123,15 @@ class LateSuccessHttpTest(ServerCase):
             t.start()
             self.assertTrue(entered.wait(10))
             wrong = [request(self.url + "/api/settings/session", "POST", {"username": "admin", "password": f"wrong-{i}"})[0] for i in range(3)]
-            self.assertEqual(wrong, [401, 401, 401])
+            # 131회차: 진행 중인 자기 계정 로그인도 한 자리를 쥔다(잠금 검사와 실패 기록 사이의 동시 요청은 임계까지만 받는다) —
+            #   세 번째 오답은 평가되지 않고(429 · 실패로 세지 않는다), 자기 계정 성공 뒤의 오답이 3회째가 되어 잠근다. 성공은 admin 오답 2회를 지우지 못했다.
+            self.assertEqual(wrong, [401, 401, 429])
             gate.set()
             t.join(10)
             self.assertEqual(codes.get("own"), 200)
             code, payload, _ = request(self.url + "/api/settings/session", "POST", {"username": "admin", "password": "wrong-3"})
+            self.assertEqual(code, 401, payload)
+            code, payload, _ = request(self.url + "/api/settings/session", "POST", {"username": "admin", "password": "wrong-4"})
             self.assertEqual(code, 429, payload)
 
 

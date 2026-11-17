@@ -510,6 +510,7 @@ class SessionStore:
         self._fail_names = {}    # client -> {계정 이름(소문자): 이 창의 실패수} — 117회차 F2: 성공은 그 계정의 실패만 지운다
         self._global_fails = deque()   # 창 안 실패 시각들(31회차 F6 — 예전에는 성공 전까지 기간 없이 쌓였다)
         self._global_until = 0.0
+        self._pending = {}       # client -> 지금 인증(PBKDF2) 중인 시도 수 — 131회차: 잠금 검사와 실패 기록 사이에 들어온 동시 요청을 센다(begin_attempt)
         self._lock = threading.RLock()
 
     # ---------- 서명 키 ----------
@@ -716,6 +717,35 @@ class SessionStore:
             remaining = max(0, int(entry[1] - time.time())) if entry else 0
             return max(remaining, max(0, int(self._global_until - time.time())))
 
+    def begin_attempt(self, client: str = "-") -> int:
+        """전체 점검 131회차(124회차 R1 반증 — 재현): 잠금 검사는 인증(PBKDF2 약 0.1초) **앞**에 있고 실패는 인증 **뒤**에 기록된다 — 그 사이에 들어온 동시 요청은
+        전부 검사를 지났다(실측: 임계 8 · 한 출발지의 동시 오답 40건 → 33~38건이 평가됨 = 잠금 한 번에 임계의 4배 넘게 대입. 최악은 출발지당 연결 상한 48건 전부라
+        두 번(96건)이면 그 출발지 혼자 전역 임계 80 을 넘겨 모든 출발지를 잠근다 · 임계 3 이면 한 번(40건 ≥ 30)). 124회차 R1 은 '늦게 끝난 성공이 잠금을 푸는 것' 만 막았다.
+        잠금 검사와 함께 **진행 중인 시도를 예약**한다: 이 출발지의 (창 안 실패 수 + 진행 중인 시도 수)가 임계에 닿으면 더 받지 않는다 —
+        평가되는 오답은 잠금 한 번에 임계를 넘지 못한다. 받은 시도(0)는 호출부가 end_attempt 로 **반드시** 돌려준다(finally).
+        반환: 0 = 진행 · 양수 = 잠금이 남은 초 · -1 = 진행 중인 시도가 끝나야 한다(잠금은 아니다 — 실패로 세지 않는다)."""
+        with self._lock:
+            remaining = self.lock_remaining(client)
+            if remaining > 0:
+                return remaining
+            now = time.time()
+            entry = self._fails.get(client)
+            fails = entry[0] if entry is not None and now - entry[2] <= self._fail_window() else 0
+            pending = self._pending.get(client, 0)
+            if fails + pending >= self._max_fails:
+                return -1
+            self._pending[client] = pending + 1
+            return 0
+
+    def end_attempt(self, client: str = "-") -> None:
+        """begin_attempt 가 0 을 돌려준 시도를 끝낸다(성공 · 실패 · 예외 어느 쪽이든). 0 이 되면 항목을 지운다(출발지 수만큼 자라지 않게)."""
+        with self._lock:
+            left = self._pending.get(client, 0) - 1
+            if left > 0:
+                self._pending[client] = left
+            else:
+                self._pending.pop(client, None)
+
     @staticmethod
     def _fail_key(username) -> str:
         return str(username or "").strip().lower()[:64]
@@ -785,7 +815,19 @@ class SessionStore:
     def _purge_fails(self) -> None:
         now = time.time()
         window = self._fail_window()
+        # 전체 점검 131회차(124회차 반증 — 재현): 벽시계가 뒤로 가면(NTP 보정 · RTC 가 로컬 시각이던 장비의 첫 동기화 = KST 면 9시간) 잠금 끝 · 창 시작이 그 차만큼
+        #   미래에 남는다 — 잠금 300초가 9시간 5분이 됐고(전역 잠금이면 모든 출발지), 그동안의 실패도 창에서 빠지지 않아 오타 한 번에 다시 잠겼다.
+        #   잠금 끝은 '지금 + 잠금 시간' 보다 멀 수 없다: 멀면 지금부터 잠금 시간만큼으로 다시 잡는다(풀지는 않는다 — 닫는 쪽 · 상한이 생긴다).
+        #   미래의 실패 시각 · 창 시작은 지금으로 당긴다(창 길이만큼만 남는다).
+        if self._global_until - now > self._lockout:
+            self._global_until = now + self._lockout
+        if any(item[0] > now for item in self._global_fails):
+            self._global_fails = deque((min(item[0], now), item[1]) for item in self._global_fails)
         for client, entry in list(self._fails.items()):
+            if entry[1] - now > self._lockout:
+                entry[1] = now + self._lockout
+            if entry[2] > now:
+                entry[2] = now
             # 잠금이 끝났고 남은 실패가 없거나 창 밖이면 지운다(31회차 F6 — 1~7회 항목이 영구히 남아 메모리가 자랐다).
             if entry[1] < now and (entry[0] == 0 or now - entry[2] > window):
                 self._fails.pop(client, None)

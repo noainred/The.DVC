@@ -215,7 +215,9 @@ export default function UserAdmin() {
   const resetPerms = async () => {
     if (!window.confirm('권한 매트릭스를 기본값으로 되돌릴까요?')) return;
     const r = await postJson('/admin/permissions/reset', {}).catch((e) => ({ ok: false, reason: e.message }));
-    if (r.ok) { setPerms((p) => ({ ...p, matrix: r.matrix })); setPermDirty(false); flash(true, '기본값으로 초기화했습니다.'); }
+    // 131회차(123회차 P1 반증): 손상(보존본) 상태의 초기화는 서버가 받는 해제 길이다 — 성공하면 서버의 표지는 사라지는데, 여기서 matrix 만 갈아 끼워
+    //   옛 표지(loadError)가 화면에 남았다: 123회차가 넣은 저장 잠금이 ‘다시 확인’ 을 누를 때까지 풀리지 않고 '권한 파일 못 읽음' 안내도 그대로였다. 초기화 뒤 다시 읽는다.
+    if (r.ok) { setPerms((p) => ({ ...p, matrix: r.matrix })); setPermDirty(false); flash(true, '기본값으로 초기화했습니다.'); await load(); }
     else flash(false, r.reason);
   };
 
