@@ -28,7 +28,7 @@ import { consumeRdpTicket } from './rdpTicket.js';
 import { config } from '../config.js';
 // WS 매핑 소유·scope 재검사 공용(v2.322) + 사용자 판정·열린 세션 재검증 공용(2026-10-09 S-04 — SSH 게이트웨이와 **같은 함수**).
 //   remoteUserIssue = 토큰 무효는 401, OTP 등록 전 세션·데모 계정·원격 접속 권한 없음은 403(판정 본문은 sshGateway.js 에 하나만 둔다).
-import { mappingAccessIssue, remoteUserIssue, trackRemoteSession, safeWsClose, authDisabledRemoteUser, MAX_SESSIONS, MAX_SESSIONS_PER_USER } from './sshGateway.js';
+import { mappingAccessIssue, remoteUserIssue, remoteUpgradeAuth, trackRemoteSession, safeWsClose, authDisabledRemoteUser, MAX_SESSIONS, MAX_SESSIONS_PER_USER } from './sshGateway.js';
 
 /*
  * 79회차(76회차 '남긴 것' 결정 — 권장안): RDP 동시 세션 상한. guacd 는 연결마다 RDP 프로세스(수십~수백 MB)를 띄우는데 상한이 없었다 —
@@ -190,11 +190,13 @@ export function attachRdpGateway(server) {
     if (url.pathname !== '/api/remote/rdp') return;
     // 역할 검사(감사/SECURITY-AUDIT H3): RDP 터널 개통은 admin/operator만(viewer 차단).
     // ⚠ user 는 블록 '밖'에서 선언 — 아래 handleUpgrade 가 쓴다(sshGateway 와 동일 규칙·동일 결함).
-    const token = config.auth.enabled ? url.searchParams.get('token') : null;
+    // 132회차: 세션 토큰은 주소에 싣지 않는다 — 1회용 WS 티켓(`wst=` · rdp-ticket 응답에 함께 온다)에서 꺼낸다. 옛 화면의 `token=` 은 이번 판까지만
+    //   (판정은 SSH 와 같은 함수 — sshGateway.js remoteUpgradeAuth). RDP 자격증명 티켓(`ticket=`)은 예전 그대로 아래 handle 이 발급자 대조 뒤 소비한다.
+    let token = null;
     let user = null;
     if (config.auth.enabled) {
       // resolveTokenUser = 서명/만료 + 토큰 폐기(tokenVersion) + 최신 역할 — HTTP와 동일 검증.
-      user = rdpDeps.resolveTokenUser(token);
+      ({ token, user } = remoteUpgradeAuth(url.searchParams, { resolveTokenUser: rdpDeps.resolveTokenUser }));
     } else {
       user = authDisabledRemoteUser(); // v2.770(점검 R5-E5-6): 인증 off 도 HTTP 와 같은 익명 역할로 같은 판정(예전 user=null → 전부 mapping-denied)
     }

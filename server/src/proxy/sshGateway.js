@@ -4,6 +4,9 @@
  * THROUGH the proxy (proxyHost:publicPort of the mapping), since the portal can
  * only reach targets via the global proxy.
  *
+ * 인증(132회차): 주소에는 1회용 WS 티켓만 싣는다 — `/api/remote/ssh?wst=<티켓>`(POST /api/remote/ws-ticket 로 발급 · proxy/wsTicket.js).
+ *   세션 토큰을 주소 쿼리에 싣지 않는다(상위 프록시 액세스 로그 · 브라우저 기록에 남는다). 판정은 아래 remoteUpgradeAuth 하나.
+ *
  * Protocol (text frames, JSON for control):
  *   client → {type:'auth', mappingId, username, password}
  *   client → {type:'data', data}         keystrokes
@@ -41,6 +44,7 @@ import { mappingTargetScopeIssue } from './targetHostScope.js'; // v2.579: 도�
 import { reqTimeoutMs } from '../agent/envTimeout.js';
 import { makeSshHostVerifier, sshHostKeyError } from './sshExec.js';
 import { onSessionRevoked, revocationMatches } from '../auth/sessionRevocation.js';
+import { consumeWsTicket, WS_TICKET_PARAM } from './wsTicket.js';   // 132회차: WS 주소에 세션 토큰 대신 1회용 티켓
 import { numOrNull } from '../util/numOrNull.js';
 // v2.606 TIM2606-04: sshExec.js 와 **같은 env 를 같은 함수로** 해석한다 — 예전 'Number(env) || 60000' 은 2^31 초과를
 //   통과시켜 ssh2 readyTimeout 이 setTimeout 1ms 가 되고 모든 웹 터미널이 배너 직후 'handshake 시한 초과' 로 끊겼다.
@@ -84,6 +88,39 @@ export function authDisabledRemoteUser() {
 // 업그레이드 때 받은 토큰 — 열린 연결의 재검증·만료 타이머가 쓴다(S-04). ws 객체가 사라지면 함께 사라진다.
 const _wsToken = new WeakMap();
 
+/**
+ * 업그레이드 요청의 세션 토큰과 사용자(전체 점검 132회차) — **SSH · RDP 게이트웨이가 같은 함수를 쓴다**.
+ *   ① `wst=<1회용 WS 티켓>`(proxy/wsTicket.js): 티켓을 소비해 발급 때 묶어 둔 토큰을 꺼낸다 — 토큰은 주소에 실리지 않는다.
+ *   ② `token=<JWT>`: **옛 화면(업그레이드 뒤 새로고침하지 않은 탭) 호환 — 다음 판에서 제거한다.** 새 화면은 보내지 않는다(소스 스윕 `test/wsTicket132.test.js`).
+ * 어느 길이든 그 뒤는 예전과 같다 — resolveTokenUser(서명 · 만료 · tokenVersion · sid · 최신 역할) → remoteUserIssue → 매핑 재검사 → trackRemoteSession.
+ * 티켓은 권한을 보관하지 않는다(소비 시점의 토큰으로 다시 판정 — 발급 뒤 로그아웃 · 강등 · 삭제면 거부).
+ *   · wst 가 있으면 **그것만** 본다(무효 티켓이면 token= 으로 넘어가지 않는다 — fail-closed).
+ *   · 티켓의 발급 계정과 토큰의 계정이 다르면 거부한다(심층 방어 — 정상 흐름에서는 같은 요청에서 나온 값이다).
+ *   · 인증이 꺼진 설치(AUTH_ENABLED=false)는 티켓 · 토큰을 보지 않는다(예전과 같다 — HTTP 와 같은 익명 역할).
+ * @returns {{token: string|null, user: object|null, via: 'ticket'|'legacy-query'|'none'|'auth-disabled'}}
+ */
+const _upgradeVia = { ticket: 0, 'legacy-query': 0, none: 0 };
+export function remoteUpgradeAuth(searchParams, { resolveTokenUser: resolve } = {}) {
+  if (!config.auth.enabled) return { token: null, user: authDisabledRemoteUser(), via: 'auth-disabled' };
+  let token = null;
+  let owner = '';
+  let via = 'none';
+  const wst = searchParams.get(WS_TICKET_PARAM);
+  if (wst != null) {
+    const t = consumeWsTicket(wst);
+    token = t?.token || null;
+    owner = t?.owner || '';
+    via = 'ticket';
+  } else {
+    const legacy = searchParams.get('token');   // 옛 화면 호환 — 다음 판에서 제거
+    if (legacy) { token = legacy; via = 'legacy-query'; }
+  }
+  let user = (resolve || remoteDeps.resolveTokenUser)(token);
+  if (user && via === 'ticket' && lc(user.username) !== lc(owner)) user = null;
+  _upgradeVia[via] += 1;
+  return { token, user, via };
+}
+
 export function attachSshGateway(server) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: SSH_WS_MAX_PAYLOAD });
 
@@ -95,7 +132,7 @@ export function attachSshGateway(server) {
     let url;
     try { url = new URL(req.url, 'http://localhost'); } catch { return; }
     if (url.pathname !== '/api/remote/ssh') return; // let other upgrade handlers run
-    // Auth via token query param (browsers can't set WS headers).
+    // 인증 — 1회용 WS 티켓(wst)에서 꺼낸 토큰(브라우저는 WS 머리말을 못 싣는다). 옛 화면의 `?token=` 은 이번 판까지만 받는다(remoteUpgradeAuth).
     // 역할 검사(감사/SECURITY-AUDIT H3): 원격 SSH 터널 개통은 admin/operator만 — viewer 토큰으로
     // 내부 서버 SSH 접속이 열리던 문제 차단. (operator 역할의 실효 권한이기도 하다.)
     // ⚠ user 는 반드시 블록 '밖'에서 선언한다 — 아래 handleUpgrade 가 이 값을 쓰므로 if 안에서
@@ -103,12 +140,12 @@ export function attachSshGateway(server) {
     // 모든 경로' = 인증 off + 인증 on 이면서 검사를 전부 통과한 **정상 세션** — 즉 권한 있는
     // 사용자의 원격 접속이 전부 실패한다(거부 경로는 그 전에 return 하므로 영향 없음).
     // 회귀 테스트: test/securityFix2026-09-01.test.js.
-    const token = config.auth.enabled ? url.searchParams.get('token') : null;
+    let token = null;
     let user = null;
     if (config.auth.enabled) {
       // resolveTokenUser = 서명/만료 + 토큰 폐기(tokenVersion) + 최신 역할 — HTTP와 동일 검증.
       // (payload.role 직접 신뢰 금지: 강등/삭제된 계정의 구토큰이 TTL까지 터널을 열 수 있었다.)
-      user = remoteDeps.resolveTokenUser(token);
+      ({ token, user } = remoteUpgradeAuth(url.searchParams));
     } else {
       user = authDisabledRemoteUser(); // v2.770(점검 R5-E5-6): HTTP 와 같은 익명 역할로 같은 판정을 탄다
     }
@@ -339,6 +376,7 @@ export function remoteSessionStatus() {
     live: _live.size, byKind, revalidateMs: REMOTE_REVALIDATE_MS,
     watching: { revalidateTimer: !!_revalTimer, revocationSubscribed: !!_unsubRevoke },
     closedBy: Object.fromEntries(_closedBy),
+    upgradeVia: { ..._upgradeVia },   // 132회차: 'legacy-query' 가 0 으로 머물면 옛 `?token=` 호환을 지워도 된다
   };
 }
 

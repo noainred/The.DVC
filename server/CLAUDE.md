@@ -104,6 +104,7 @@
     뒤 세 가지는 `security-session.json`에 기록하지 않아 **UI 저장이 지울 수 없다** — 전원이 설정에서
     잠기는 사고의 복구 경로이므로 `fileSettingsOwners()` 합산을 제거하지 말 것.
 - **RDP 자격증명은 티켓으로**: RDP WS 게이트웨이는 username/password/domain을 URL 쿼리스트링에 싣지 않는다 — `proxy/rdpTicket.js`의 1회용 단기 티켓(`POST /api/remote/rdp-ticket`)으로 발급받아 쿼리엔 티켓 ID만 싣고 게이트웨이가 인메모리에서 조회한다(쿼리스트링은 상위 프록시 액세스 로그·브라우저 히스토리에 남음).
+- **WS 주소에 세션 토큰을 싣지 않는다**(132회차): 원격 콘솔 WS 는 1회용 단명 티켓 `wst=`(`proxy/wsTicket.js` · `POST /api/remote/ws-ticket` · rdp-ticket 응답)만 싣고, 게이트웨이가 꺼낸 토큰으로 예전과 같은 판정을 한다(`remoteUpgradeAuth`). 옛 `?token=` 수신은 다음 판에서 제거. 회귀 `wsTicket132`.
 - **서명 확인 화면 끄기(v2.809)는 env warn 과 같은 판정·시한부·소유자+OTP·root 확인 제외**(`upgrade/signatureOverride.js` · `signaturePolicy`) —
   `!runningAsRoot()`·`!t.fatal`·env 우선·`where:'offline'` 제외·상태 파일 등록·인증 꺼짐 409·복원 제외(RESTORE_EXCLUDE)·'지금' 기준 상한 중
   하나라도 빼면 회귀(`test/upgradeSigOverride2809.test.js` 변이 16건 · 반증 1인 M-1·M-2·L-1·L-3 반영).
