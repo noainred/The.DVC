@@ -105,7 +105,8 @@ test('F1: 재설치 — 같은 서버를 가리키는 다른 Director 등록의 
   const R = fake();
   const dA = S.addDirector({ name: '법인1 Bareos', host: HOST_ADDR, port: 9101, consoleName: 'portal', password: 'x'.repeat(24), agent: 'edge1' }).director;
   const dB = S.addDirector({ name: '법인1 둘째 서비스', host: HOST_ADDR, port: 9101, consoleName: 'portal-b', password: 'y'.repeat(24), agent: 'edge1' }).director;
-  S.saveSettings({ sites: [{ vcenterId: 'vc1', directorId: dA.id }, { vcenterId: 'vc-b', directorId: dB.id }] });   // D1 은 Director id 가 달라 막지 않는다
+  // 104회차: 같은 주소:포트에 콘솔 이름만 다른 등록으로 둘째 vCenter 를 묶는 저장은 이제 D1 이 거부한다 — 그 전에 저장된 짝(grandfather)으로 놓는다
+  S._seedLegacySitesForTest([{ vcenterId: 'vc1', directorId: dA.id }, { vcenterId: 'vc-b', directorId: dB.id }]);
   writeJobs([{ id: 'bj1', directorId: dA.id, vcenterId: 'vc1', vmName: 'a1', bareosJob: 'portal-a1' },
     { id: 'bj2', directorId: dB.id, vcenterId: 'vc-b', vmName: 'b1', bareosJob: 'portal-b1' }, { id: 'bj3', directorId: dB.id, vcenterId: 'vc-b', vmName: 'b2', bareosJob: 'portal-b2' }]);
   const t = target({ mode: 'reinstall', director: { id: dA.id, name: dA.name, host: dA.host, agent: 'edge1' } });

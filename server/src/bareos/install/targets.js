@@ -12,7 +12,7 @@
 import { store } from '../../store.js';
 import { listInventory } from '../../central/inventory.js';
 import { listTargetsRaw } from '../../agent/deployRegistry.js';
-import { loadSettings, siteFor, directorById } from '../settings.js';
+import { loadSettings, siteFor, directorById, hostMatch, sameServerDirector } from '../settings.js';
 import { agentLastContact } from '../../central/agentContact.js';
 import { registryHosts, vcHostOf } from '../vcHost.js';
 
@@ -84,11 +84,8 @@ export function sshCredsFor(targetId) {
   return { host: t.host, port: Number(t.port) || 22, username: t.username, password: t.password || undefined, privateKey: t.privateKey || undefined, passphrase: t.passphrase || undefined };
 }
 
-const lcHost = (s) => String(s ?? '').trim().toLowerCase().replace(/\.$/, '');
-const ipLike = (s) => /^[0-9.]+$/.test(s) || s.includes(':');
-const shortName = (s) => (ipLike(s) ? s : s.split('.')[0]);
-// 루프백 이름 · 주소는 '어느 서버' 인지 말하지 않는다(설치 직후 Rocky 의 호스트 이름 localhost.localdomain) — 대조에서 빼고, 루프백으로 등록된 Director 는 담당 엣지로 대조한다
-const loopback = (s) => s === 'localhost' || s.startsWith('localhost.') || /^127\./.test(s) || s === '::1';
+// 104회차: 주소 대조 글자는 bareos/settings.js 하나(같은 서버 · 같은 Director 판정 — D1 우회 거부가 설정 저장에서 같은 판정을 쓴다)
+const { lcHost, shortName, loopback } = hostMatch;
 /**
  * v2.876(2026-11-04 사용자 화면 — 사전 점검 '이미 설치된 Bareos ✗' 에서 막다른 길): 포탈에 Director 가 등록되지 않은 법인의 엣지 노드에 Bareos 가 이미 있으면
  *   (사람이 직접 설치 · 이전 설치가 남김) 대상 표는 '새 설치' 이고 사전 점검이 막는데, 조치 문구가 가리키는 '초기화 후 재설치' 는 Director 가 있어야 열렸다.
@@ -115,28 +112,5 @@ export function resetTarget(t, body, settings, { ids = [], jobs = [] } = {}) {
   return { ...t, mode: 'reinstall', resetUnregistered: true };
 }
 
-/**
- * 101회차 F1(재현): 재설치의 0단계(초기화)와 전부 되돌리기는 **그 서버의 Bareos 전체**(설정 · 카탈로그 · 패키지)를 지운다 — 같은 서버를 가리키는
- *   Director 등록이 둘 이상이면(같은 주소 · 다른 콘솔 이름 — 52회차 D1 '같은 Director 에 둘째 vCenter 거부' 뒤 둘째 서비스를 같은 서버의 새 등록으로 묶은 경우)
- *   다른 등록에 묶인 vCenter 의 잡 설정 · 실행 기록도 함께 지워진다. 예전에는 함께 쓰는 vCenter 확인(53회차 N4) · 대상 수 · M4 가 **그 Director id 하나**만 세어
- *   확인 없이 지웠다. 이 판정으로 같은 서버의 Director 를 모두 센다.
- *   주소는 정확히 같을 때(대소문자 · 끝 점 무시) · 한쪽이 점 없는 짧은 이름이면 다른 쪽의 첫 마디와 같을 때만 — resetTarget 의 거부 쪽 대조(짧은 이름끼리 늘 비교)보다 좁다
- *   (다른 법인의 'bareos.pl.corp' 를 'bareos.kr.corp' 와 같은 서버로 보면 되돌리기가 남의 대상 때문에 막힌다). 루프백으로 등록된 Director 는 담당 엣지가 같을 때.
- * @param {{ sshHost?: string, agent?: string, ids?: string[] }} server ids = 러너 · 사전 점검이 읽은 서버 주소 · 이름 · 모든 주소
- * @returns {(d: object) => boolean}
- */
-export function sameServerDirector({ sshHost = '', agent = '', ids = [] } = {}) {
-  const names = [sshHost, ...(Array.isArray(ids) ? ids : [])].map(lcHost).filter((x) => x && !loopback(x));
-  const full = new Set(names);
-  const words = names.filter((x) => !ipLike(x));
-  const shortOf = new Set(words.map(shortName));
-  const bare = new Set(words.filter((x) => !x.includes('.')));
-  return (d) => {
-    const h = lcHost(d?.host);
-    if (!h) return false;
-    if (loopback(h)) return !!agent && !!d?.agent && lcHost(d.agent) === lcHost(agent);
-    if (full.has(h)) return true;
-    if (ipLike(h)) return false;
-    return h.includes('.') ? bare.has(shortName(h)) : shortOf.has(h);
-  };
-}
+/** 101회차 F1 · 104회차: 같은 서버 판정은 bareos/settings.js sameServerDirector 하나(여기서 다시 내보낸다 — 완전 설치 쪽 호출부 · 시험이 이 경로를 쓴다). */
+export { sameServerDirector };

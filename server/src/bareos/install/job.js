@@ -187,7 +187,7 @@ export async function runPrecheck({ vcenterId, body = {} }) {
   const hostIds = [facts.hostAddr, facts.hostname, ...(facts.addrs || [])].filter(Boolean);
   if (t.resetUnregistered) resetChecked(t0r, body, hostIds);   // 러너가 읽은 서버 주소 · 이름 · 모든 주소로 한 번 더(등록된 Director · 다른 법인 작업이면 던진다)
   const { ledger, sharedVcenters } = t.director ? sharedOfDirector(t.director.id, vcenterId, { sshHost: t.sshHost, agent: t.agent, ids: hostIds }) : { ledger: 0, sharedVcenters: [] };
-  const bindIssue = directorBindIssueFor(t, vcenterId);   // 52회차 D1 — 화면이 시작 전에 보인다(시작도 같은 판정으로 거부)
+  const bindIssue = directorBindIssueFor(t, vcenterId, { hostAddr: facts.hostAddr, name: plan?.directorName });   // 52회차 D1 — 화면이 시작 전에 보인다(시작도 같은 판정으로 거부)
   return { at: Date.now(), ms: Date.now() - t0, target: t, mode: t.mode, ...(t.resetUnregistered ? { resetUnregistered: true, hostIds } : {}), serverIds: hostIds.slice(0, 34), ...judged, ledgerTargets: ledger, sharedVcenters, ...(bindIssue ? { bindIssue } : {}), bundle: bundle ? { version: bundle.version, contents: bundle.contents, size: bundle.size } : null };
 }
 
@@ -198,15 +198,17 @@ export async function runPrecheck({ vcenterId, body = {} }) {
  * @returns {{ ledger:number, sharedVcenters:{vcenterId:string, targets:number}[] }}
  */
 function sharedOfDirector(directorId, vcenterId, server = null) {
-  let st = null; try { st = loadSettings(); } catch { st = null; }
+  // 104회차(반증 — 재현): loadSettings 는 던지지 않는다(읽기 오류 · 손상 = 빈 설정) — 예전 'st = null' 분기는 닿지 않고 빈 설정으로 세어,
+  //   0단계 다시 하기의 N4 대조(그사이 늘어난 함께 쓰는 vCenter)가 늘 '없음' 으로 통과해 확인받지 않은 vCenter 의 잡 설정을 지웠다 — 못 읽으면 판정하지 않는다(97회차 '읽기 오류 ≠ 빈 목록')
+  if (settingsLoadError()) throw fail('unavailable', 'Bareos 설정(Director 등록 · 매핑)을 읽지 못해 이 서버의 Bareos 를 함께 쓰는 vCenter 를 판정할 수 없습니다 — 초기화하지 않습니다(서비스 점검에서 설정 파일을 확인한 뒤 다시 하세요).');
+  if (registryLoadError()) throw fail('unavailable', '백업 대상 원장을 읽지 못해 이 서버 Bareos 의 백업 대상 수를 판정할 수 없습니다 — 초기화하지 않습니다(대상 수를 0 으로 보지 않습니다 · v2.846 D-7 과 같은 규칙).');
+  const st = loadSettings();
   // 101회차 F1(재현): 초기화는 그 서버의 Bareos 전체를 지운다 — 같은 서버를 가리키는 다른 Director 등록(같은 주소 · 다른 콘솔)의 대상 · vCenter 도 센다
   const dirs = sameServerDirectorIds(directorId, server, st);
-  const mineDir = st ? listJobs().filter((x) => !x.demo && dirs.has(jobDirectorId(x, st))) : listJobs().filter((x) => !x.demo && x.vcenterId === vcenterId);
+  const mineDir = listJobs().filter((x) => !x.demo && dirs.has(jobDirectorId(x, st)));
   const others = new Map();
-  if (st) {
-    for (const s of st.sites || []) if (dirs.has(s.directorId) && s.vcenterId !== vcenterId) others.set(s.vcenterId, 0);
-    for (const x of mineDir) if (x.vcenterId !== vcenterId) others.set(x.vcenterId, (others.get(x.vcenterId) || 0) + 1);
-  }
+  for (const s of st.sites || []) if (dirs.has(s.directorId) && s.vcenterId !== vcenterId) others.set(s.vcenterId, 0);
+  for (const x of mineDir) if (x.vcenterId !== vcenterId) others.set(x.vcenterId, (others.get(x.vcenterId) || 0) + 1);
   return { ledger: mineDir.length, sharedVcenters: [...others.entries()].map(([id, n]) => ({ vcenterId: id, targets: n })).slice(0, 50) };
 }
 
@@ -220,11 +222,15 @@ function sameServerDirectorIds(directorId, server, st) {
 const serverOfJob = (j) => ({ sshHost: j.sshHost, agent: j.agent, ids: [j.hostAddr, ...(Array.isArray(j.hostIds) ? j.hostIds : []), ...(Array.isArray(j.serverIds) ? j.serverIds : [])].filter(Boolean) });
 
 /** 52회차 D1: 이 설치가 7단계에서 저장할 매핑(이 vCenter → 그 Director)이 'Director 하나에 vCenter 하나' 를 새로 어기는가 — 설정 저장과 같은 판정. */
-function directorBindIssueFor(t, vcenterId) {
-  if (!t?.director?.id) return '';
+function directorBindIssueFor(t, vcenterId, { hostAddr = '', name = '' } = {}) {
   let st = null; try { st = loadSettings(); } catch { return ''; }
-  const next = [...st.sites.filter((x) => x.vcenterId !== vcenterId), { vcenterId, directorId: t.director.id }];
-  return directorBindIssue(next, st.sites, st.directors);
+  // 104회차 D1: 새 설치는 4단계가 Director 를 새로 등록한다(주소 = 러너가 읽은 서버 주소 · 9101 · 담당 = 그 엣지 — 아래 4단계와 같은 값) —
+  //   같은 Director 를 가리키는 다른 등록에 이미 vCenter 가 묶여 있으면 7단계 매핑 저장에서야 거부됐다(0~6단계를 다 돈 뒤). 사전 점검에서 같은 판정으로 미리 본다.
+  const dir = t?.director?.id ? null : (hostAddr ? { id: 'dir_pending_install', name: name || '새 Director', host: hostAddr, port: 9101, agent: t?.agent || '' } : null);
+  const dirId = t?.director?.id || dir?.id;
+  if (!dirId) return '';
+  const next = [...st.sites.filter((x) => x.vcenterId !== vcenterId), { vcenterId, directorId: dirId }];
+  return directorBindIssue(next, st.sites, dir ? [...st.directors, dir] : st.directors);
 }
 
 /**
@@ -278,7 +284,8 @@ async function startInner(t, vcenterId, body, by) {
     install: bundle.contents.install,
     directorId: t.director?.id || '', existingDirector: !!t.director, createdDirector: false, createdSite: false,
     ...(plan.mode === 'reinstall' && sharedIds.length ? { sharedAck: [...new Set(sharedIds.map(String))].sort().slice(0, 50) } : {}),   // 53회차 N4: 확인받은 목록(0단계 다시 하기가 대조)
-    ...(plan.mode === 'reinstall' ? { serverIds: (pre.serverIds || []).slice(0, 34) } : {}),   // 101회차 F1: 같은 서버 판정(0단계 다시 하기 · 전부 되돌리기 M4)이 쓰는 서버 주소 · 이름
+    // 101회차 F1: 같은 서버 판정(0단계 다시 하기 · 전부 되돌리기 M4)이 쓰는 서버 주소 · 이름 · 104회차(반증): 새 설치도 — 전부 되돌리기는 새 설치에서도 /etc/bareos · 패키지 · 카탈로그를 지운다
+    serverIds: (pre.serverIds || []).slice(0, 34),
     ...(t.resetUnregistered ? { resetUnregistered: true, hostIds: (pre.hostIds || []).slice(0, 34) } : {}),   // v2.876 포탈 미등록 Bareos 를 지우고 설치(4단계가 Director 를 새로 등록)
     by, createdAt: Date.now(), updatedAt: Date.now(), status: 'running', phase: 'upload',
     steps: Object.fromEntries(STEPS.filter((s) => s.n >= firstStep).map((s) => [s.n, { status: 'pending' }])),

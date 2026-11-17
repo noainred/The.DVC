@@ -10,7 +10,7 @@ import { store } from '../../store.js';
 import { listInventory } from '../../central/inventory.js';
 import { listTargetsRaw } from '../../agent/deployRegistry.js';
 import { ipBlockReason } from '../../util/ssrfBlock.js';
-import { directorById, jobDirectorId, settingsRev } from '../settings.js';
+import { directorById, jobDirectorId, settingsRev, directorEndpointPeers } from '../settings.js';
 import { onDirector, relayToEdge, isDemoActive, effectiveSettings, eligibility, orphanCleanup } from '../service.js';
 
 /** 다시 등록 한 번에 보내는 대상 수(엣지 회신 정제의 addJobs 상한 500 보다 작게 — v2.846 E-1). */
@@ -138,8 +138,12 @@ export function knownFor(d, cfg, settings = effectiveSettings(), groups = groups
     portalConsole: d.consoleName || '',
     address: prefer?.address || '',
     mappedStorages: (() => {
-      const vcs = new Set((settings.sites || []).filter((s) => s.directorId === d.id).map((s) => s.vcenterId));
-      return [...new Set([...(settings.sites || []).filter((s) => s.directorId === d.id).map((s) => s.storage), ...groups.filter((g) => vcs.has(g.vcenterId)).map((g) => g.storage)].filter(Boolean))];
+      // 104회차: 같은 Director(주소 · 포트 · 담당)를 가리키는 다른 등록(옛 짝 — D1 이 새로는 막는다)의 매핑 · 그룹 스토리지도 같은 Director 의 리소스다 —
+      //   이 등록만 보면 다른 등록의 vCenter 백업 그룹이 쓰는 스토리지(잡 설정에 없는 run 지정이라 원격 'Storage =' 대조에도 안 걸린다)를 지울 수 있었다
+      const ids = new Set([d.id, ...(directorEndpointPeers(settings.directors || []).get(d.id) || [])]);
+      const mine = (settings.sites || []).filter((s) => ids.has(s.directorId));
+      const vcs = new Set(mine.map((s) => s.vcenterId));
+      return [...new Set([...mine.map((s) => s.storage), ...groups.filter((g) => vcs.has(g.vcenterId)).map((g) => g.storage)].filter(Boolean))];
     })(),
   };
 }
