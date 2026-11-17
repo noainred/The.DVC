@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { fileMissing } from '../util/fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만 — existsSync 는 stat 실패도 false)
 import { authenticateAD, loadAdConfig, adPolicyState } from './ad.js';
 import { capStr } from '../util/capStr.js';
 import * as totp from './totp.js';
@@ -66,13 +67,19 @@ export function verifyPassword(password, stored) {
 function resolveAuthSecret() {
   if (config.auth.secret) return config.auth.secret;                  // env 우선(명시 운영)
   const file = path.join(config.configDir, 'auth-secret');
-  try {
-    if (fs.existsSync(file)) {
-      const s = fs.readFileSync(file, 'utf8').trim();
-      if (s.length >= 32) return s;                                   // 기존 영속 시크릿 재사용
-    }
-  } catch { /* 읽기 실패 → 아래에서 재생성 시도 */ }
   const gen = crypto.randomBytes(32).toString('hex');
+  try {
+    const s = fs.readFileSync(file, 'utf8').trim();
+    if (s.length >= 32) return s;                                     // 기존 영속 시크릿 재사용
+  } catch (e) {
+    // 134회차: 파일이 **있는데 못 읽었으면**(EACCES · EIO · ESTALE — ENOENT 가 아닌 실패) 새 시크릿으로 덮지 않는다. 예전에는 `fs.existsSync`(stat 실패 = false) ·
+    //   읽기 실패 둘 다 '재생성' 으로 가서, 일시 오류 한 번에 영속 시크릿을 새 값으로 **덮어썼다**(오류가 풀려도 예전 토큰 전부 무효 · 되돌릴 수 없음).
+    //   이 프로세스만 임의 시크릿으로 돈다(전원 재로그인 — 닫는 쪽). 원본은 그대로라 권한을 고치고 재시작하면 예전 세션이 살아난다.
+    if (e?.code !== 'ENOENT') {
+      if (config.auth.enabled) console.warn(`[auth] ⚠ 시크릿 파일(${file})을 읽지 못했습니다(${String(e?.code || '읽기 오류')}) — 원본을 덮지 않고 이 프로세스만 임의 시크릿으로 동작합니다(전원 재로그인). 파일 · 설정 폴더 권한을 고치고 재시작하세요.`);
+      return gen;
+    }
+  }
   try {
     atomicWriteFileSync(file, gen, { mode: 0o600 });                  // 재시작에도 세션 유지되도록 영속
     if (config.auth.enabled) console.warn(`[auth] AUTH_SECRET 미설정 — ${file} 에 시크릿을 생성·영속했습니다(재시작 시 세션 유지). 멀티노드/명시 운영이면 AUTH_SECRET env 를 설정하세요.`);
@@ -189,15 +196,20 @@ export function loadUsers() {
   if (users) return users;
   _usersReadError = null;
   const file = path.join(CONFIG_DIR, 'users.json');
-  if (fs.existsSync(file)) {
-    let text;
-    try { text = fs.readFileSync(file, 'utf8'); }
-    catch (err) {
+  // 134회차(재현): 파일 유무를 `fs.existsSync` 로 갈랐다 — stat 이 실패하는 **폴더 수준 읽기 오류**(설정 폴더 탐색 권한 · EIO · ESTALE · ELOOP)가 '파일 없음' 으로 읽혀
+  //   아래 시드로 떨어졌다: 기본 admin(DEFAULT_ADMIN_PASSWORD 가 있으면 그 비밀번호)이 생기고 실계정은 전부 사라진 채 열리며, 미인증 /auth/config 가 초기 구축 중이라 했고,
+  //   오류가 풀린 뒤의 첫 저장이 실사용자 전부를 시드 한 건으로 덮었다(19회차 A-4 가 막은 사고 그대로 — 가드가 그 갈래 앞에 있었다). 이제 곧바로 읽어 ENOENT 만 없음이다.
+  let text = null;
+  try { text = fs.readFileSync(file, 'utf8'); }
+  catch (err) {
+    if (err?.code !== 'ENOENT') {
       _usersReadError = { at: Date.now(), code: String(err?.code || 'read-error').slice(0, 32) };
       console.error(`[auth] users.json 을 읽지 못했습니다(${_usersReadError.code}) — 원본을 그대로 두고 계정을 만들지 않습니다(로그인 불가). 파일 소유자 · 권한(포탈 서비스 계정 · 0600)을 확인하고 포탈을 재시작하세요.`);
       users = [];
       return users;
     }
+  }
+  if (text != null) {
     try {
       const parsed = JSON.parse(text);
       if (Array.isArray(parsed?.users) && parsed.users.length) {
@@ -252,7 +264,7 @@ export function loadUsers() {
 export function reloadUsersFromDisk() {
   // 파일이 아직 없으면(첫 설치 — 시드한 관리자가 메모리에만 있다) 비우지 않는다: 비우면 다시 시드하면서
   // 임의 비밀번호를 새로 만들어 initial-admin-password.txt 를 다른 값으로 덮어쓴다(v2.723 자체 검증에서 발견).
-  if (fs.existsSync(path.join(CONFIG_DIR, 'users.json'))) users = null;
+  if (!fileMissing(path.join(CONFIG_DIR, 'users.json'))) users = null;   // 134회차: 확인하지 못한 것(stat 실패)은 없음이 아니다 — 다시 읽어 읽기 오류로 가른다(메모리의 옛 목록으로 덮지 않게)
   return loadUsers();
 }
 

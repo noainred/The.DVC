@@ -10,6 +10,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { ipBlockReason, ssrfBlockReason, ssrfBlockReasonResolved } from '../util/ssrfBlock.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { fileMissing } from '../util/fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만 — existsSync 는 stat 실패도 false)
 import { makeLoadError, corruptOnlyReason, autoWriteRefusal, summarizeRegistryError } from '../util/registryCore.js'; // v2.771(점검 R6-F4-2): 형제 등록부와 같은 '읽지 못함' 판정
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { bumpFleetRev } from '../insights/fleetRev.js';
@@ -104,9 +105,9 @@ export function setCollectorDatacenterId(id, dcId, validIds = null) {
 export function registryLoadError({ skipLoad = false } = {}) {
   // 결정 G2 · G3 반증 후속 ⑤: 바로 앞에서 loadCollectors() 를 부른 호출부는 skipLoad 로 다시 읽기(파일 읽기 + JSON + 토큰 복호)를 건너뛴다 — 상태는 그 읽기가 세웠다.
   if (!skipLoad) loadCollectors();
-  let exists = false;
-  try { exists = fs.existsSync(FILE); } catch { exists = false; }
-  if (!exists) {
+  // 134회차(재현): `fs.existsSync` 는 stat 실패(폴더 수준 EACCES · EIO · ESTALE)도 false 다 — 바로 앞의 loadCollectors() 가 세운 **읽기 오류 표지를 아래 clear() 가 지워**
+  //   '등록 0개 · 오류 없음' 이 됐다(자동 저장 거절 · clearStaleRemote 건너뜀 · 링크 설정 503 이 전부 풀린다). 정말 없을 때(ENOENT)만 판정한다.
+  if (fileMissing(FILE)) {
     // 첫 설치(파일·보존본 둘 다 없음)는 오류가 아니다 — 자기등록이 막히면 안 된다. 보존본만 남았으면 재시작 뒤에도 '못 읽음'.
     if (corruptOnlyReason(FILE)) loadErr.checkCorruptOnly(FILE); else loadErr.clear();
   }

@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { corruptOnlyReason } from './registryCore.js';
 import { safeLoadText } from './atomicWrite.js'; // v2.744(회귀 검토 리드): 손상 사유의 원문 조각 요약
+import { fileMissing } from './fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만 — existsSync 는 stat 실패도 false)
 
 /**
  * v2.632(감사 AX1-2632-02): 만든 로드 오류 상태를 모듈 안에 등록해 둔다 — 예전에는 *LoadError() 의 소비처가 설정 pull 라우트뿐이라
@@ -154,7 +155,7 @@ export function confirmSettingsDefault(fileName, { by = '' } = {}) {
   //   손상되면 원본은 preserveCorrupt 로 옮겨지므로, 오류 중 파일이 있다는 것은 사람이 놓았다는 뜻이다 — 재시작이 그 파일을 읽는다.
   try {
     const full = fullPathOf(ent);
-    if (full && fs.existsSync(full)) return { ok: false, code: 'file-present', file: want, detail: secs ? `설정 파일이 다시 있습니다(되돌린 보존본으로 보입니다) — 기본값으로 덮지 않았습니다. ${secs}초 안에 그 파일을 다시 읽습니다(재시작 불필요).` : '설정 파일이 다시 있습니다(되돌린 보존본으로 보입니다) — 기본값으로 덮지 않았습니다. 포탈을 재시작하면 그 파일을 읽습니다.' };
+    if (full && !fileMissing(full)) return { ok: false, code: 'file-present', file: want, detail: secs ? `설정 파일이 다시 있습니다(되돌린 보존본으로 보입니다) — 기본값으로 덮지 않았습니다. ${secs}초 안에 그 파일을 다시 읽습니다(재시작 불필요).` : '설정 파일이 다시 있습니다(되돌린 보존본으로 보입니다) — 기본값으로 덮지 않았습니다. 포탈을 재시작하면 그 파일을 읽습니다.' };
   } catch { /* 판정 실패는 예전 동작(확정 진행) */ }
   try { ent.confirm({ by: String(by || '').slice(0, 64) }); } catch (e) { return { ok: false, code: 'confirm-failed', file: want, detail: String(e?.message || e).slice(0, 200) }; }
   if (currentError(ent)) return { ok: false, code: 'still-error', file: want };

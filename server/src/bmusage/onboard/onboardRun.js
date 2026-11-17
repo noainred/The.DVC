@@ -15,6 +15,7 @@ import crypto from 'node:crypto';
 import { config } from '../../config.js';
 import { analyzeOnboardRows, analysisSig, edgeRowFromPlan, osWriteOf } from './importAnalyze.js';
 import { atomicWriteFileSync } from '../../util/atomicWrite.js';
+import { fileMissing } from '../../util/fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만 — existsSync 는 stat 실패도 false)
 import { parseOnboardFile } from './importParse.js';
 import { keyShape, effectiveKeyOf } from './placement.js';
 
@@ -122,7 +123,7 @@ export function snapshotRegistries({ files = ['bm-storage.json', 'idrac.json', '
     const src = path.join(config.configDir, f);
     const dst = path.join(dir, f);
     // 감사 L-4 · Q5: 원자적 쓰기(반쪽 스냅샷 없음) · 0600. bm-storage · idrac 사본은 SECRET_FILES(onboard-prev/…)로 봉인 이전 · 평문 점검 대상.
-    if (fs.existsSync(src)) { atomicWriteFileSync(dst, fs.readFileSync(src), { mode: 0o600 }); saved.push(f); }
+    if (!fileMissing(src)) { atomicWriteFileSync(dst, fs.readFileSync(src), { mode: 0o600 }); saved.push(f); }   // 134회차: 확인하지 못한 원본(stat 실패)을 '그때 없던 파일' 로 보고 직전 스냅샷을 지우지 않는다 — 읽기가 던져 적용 전에 멈춘다
     else if (fs.existsSync(dst)) fs.rmSync(dst);   // 그때 없던 파일은 스냅샷에도 없다(되돌리면 없는 것이 맞다)
   }
   const metaFile = `${dir}${path.sep}meta.json`;

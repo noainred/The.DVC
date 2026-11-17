@@ -96,10 +96,9 @@ function persistEnv(key, val) {
   const enc = isWin ? 'latin1' : 'utf8';
   // 84회차 F3(재현): 파일이 **있는데 읽지 못하면**(EACCES · EIO 등) 던진다 — 예전에는 빈 파일로 보고 그 한 줄만 남긴 portal.env 를 원자적으로
   //   써서 AUTH_SECRET · DATA_SOURCE 등 나머지 설정이 다음 재시작에 사라졌다(upsertEnvKeyStrict 와 같은 규칙 — 없음 ≠ 읽지 못함).
-  if (fs.existsSync(ENV_FILE)) {
-    try { text = fs.readFileSync(ENV_FILE, enc); }
-    catch (e) { throw new Error(`${path.basename(ENV_FILE)} 를 읽지 못해 저장하지 않았습니다(${e?.code || '읽기 오류'}) — 파일 권한 · 소유자를 확인하세요(지금 값은 바뀌지 않았습니다).`); }
-  }
+  // 134회차: 유무를 `fs.existsSync` 로 가르면 stat 실패(EIO · ESTALE · 폴더 권한)가 '없음' 이 되어 위 규칙을 건너뛴다(그 한 줄만 든 파일로 덮는다) — ENOENT 만 없음.
+  try { text = fs.readFileSync(ENV_FILE, enc); }
+  catch (e) { if (e?.code !== 'ENOENT') throw new Error(`${path.basename(ENV_FILE)} 를 읽지 못해 저장하지 않았습니다(${e?.code || '읽기 오류'}) — 파일 권한 · 소유자를 확인하세요(지금 값은 바뀌지 않았습니다).`); }
   // 기존 같은 키 라인(있다면) 교체, 없으면 추가. Windows 는 CRLF(cmd 가 LF 만 있는 배치 파일의 줄을 잘못 읽는 경우가 있다 —
   //   portal.env.example.bat 머리말의 'CRLF 로 저장' 과 같은 이유).
   const out = renderEnvFile(text, key, val);
@@ -120,7 +119,7 @@ export function upsertEnvKeyStrict(key, val, file = ENV_FILE) {
   if (issue) throw new Error(issue);
   const enc = isWin ? 'latin1' : 'utf8';
   let prevText = null;
-  if (fs.existsSync(file)) prevText = fs.readFileSync(file, enc);   // 읽기 실패(EACCES 등)는 그대로 던진다
+  try { prevText = fs.readFileSync(file, enc); } catch (e) { if (e?.code !== 'ENOENT') throw e; }   // 읽기 실패(EACCES 등)는 그대로 던진다 · 134회차: 없음은 ENOENT 뿐(existsSync 는 stat 실패도 false)
   const out = renderEnvFile(prevText || '', key, String(val));
   atomicWriteFileSync(file, isWin ? Buffer.from(out, 'latin1') : out, { mode: 0o600 });
   return { prevText, file };

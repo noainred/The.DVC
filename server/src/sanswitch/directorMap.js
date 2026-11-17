@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { fileMissing } from '../util/fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만 — existsSync 는 stat 실패도 false)
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';   // 58회차 F5
 
 const FILE = () => path.join(config.configDir, 'san-storage-map.json');
@@ -43,11 +44,12 @@ export function loadDirectorMap() {
   if (_cache) return _cache;
   const file = FILE();
   let raw = null;
-  if (fs.existsSync(file)) {
+  if (!fileMissing(file)) {   // 134회차: 없음은 ENOENT 뿐 — stat 실패(폴더 수준 EACCES · EIO · ESTALE)는 아래 읽기가 읽기 오류로 가른다
     try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); _loadErr.ok(); }
     catch (e) {
       raw = null;
       if (e instanceof SyntaxError) { _loadErr.corrupt(e); preserveCorrupt(file, String(e?.message || e)); }
+      else if (e?.code === 'ENOENT') _loadErr.missing();   // 134회차: stat 뒤에 없어졌다 — 없음
       else _loadErr.readError(e);   // 권한 · 디렉터리 — 원본을 옮기지 않는다
     }
     if (raw != null && (typeof raw !== 'object' || Array.isArray(raw))) { _loadErr.corrupt('객체가 아닌 JSON 값'); preserveCorrupt(file, '객체가 아닌 JSON 값'); raw = null; }

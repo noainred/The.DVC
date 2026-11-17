@@ -34,7 +34,7 @@ const parseMap = (text) => {
 const _reader = makeJsonFileReader(FILE, { tag: 'bmusage', parse: parseMap });
 function load() {
   if (_cache) return _cache;
-  if (!fs.existsSync(FILE())) { _cache = { v: 1, entries: [] }; _loadError = null; return _cache; }
+  // 134회차: 앞에 있던 `fs.existsSync` 가드를 뺐다 — stat 실패(폴더 수준 EACCES · EIO · ESTALE)를 '없음' 으로 읽어 빈 매핑을 표지 없이 재시작까지 캐시했다(저장이 원본을 덮는다). 없음은 아래 공용 읽기(missing)가 가른다.
   const r = _reader.read();
   if (r.kind === 'read-error') {
     _loadError = { at: _loadError?.readError ? _loadError.at : Date.now(), reason: `매핑 파일을 읽지 못했습니다(${String(r.error?.code || 'read-error').slice(0, 32)} — 원본은 그대로 · 권한 · 디스크를 확인하세요. 30초마다 다시 읽습니다)`, readError: true };

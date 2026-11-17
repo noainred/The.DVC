@@ -251,6 +251,7 @@
   읽기 오류 중에는 AD 로그인 · 계정 생성 · 중앙 배포 적용도 막는다 · 확정 게이트 ≥ 쓰기 게이트(`ownerOnly` · `superOnly`).
 - **전체 점검 21 · 22회차(비밀 보관)**: 봉인된 값이 있으면 **키를 새로 만들지 않고 비밀 파일 저장을 거절**(env 누락 재시작 → 저장 한 번이 전 비밀 소거 · 탈출은 `SECRETS_KEY_LOST=true`) ·
   `openSecretsDeep` 는 비밀 칸만 연다(복호 오라클) · 저장은 쓰기 성공 뒤에 메모리 반영 · SSH 키 KDF rounds 상한(`util/sshKeyKdf.js`).
+- **134회차**: 설정 · 비밀 · 등록부 파일 유무를 `fs.existsSync` 로 가르지 말 것(stat 실패도 false — 권한 · 계정 · 폐기 목록 · 키가 '없음' 으로 열렸다). 곧바로 읽어 ENOENT 만 없음 · `util/fileMissing.js` · 분류표 `existsSyncSweep134`.
 
 ## 옮긴 절 (2026-10-20 — 이 파일을 짧게 유지하려고)
 

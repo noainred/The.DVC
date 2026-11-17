@@ -376,7 +376,9 @@ test('스윕: 수집 로더는 existsSync 로 후보 유무를 가르지 않는�
   assert.match(body, /if \(!vcFileMissing\(file\)\) \{/);
   assert.match(body, /if \(last == null\) break;/, '마지막 원문이 없는 읽기 오류에서 다음 후보로 넘어가지 말 것(continue 금지)');
   assert.match(body, /if \(readError\) break;/);
-  assert.match(cfg, /function vcFileMissing\(file\) \{\s*try \{ fs\.statSync\(file\); return false; \} catch \(e\) \{ return e\?\.code === 'ENOENT'; \}/);
+  // 134회차: 판정을 공용(util/fileMissing.js)으로 올렸다 — config.js 는 그것을 쓴다(판정 사본 금지). 판정 내용(ENOENT 만 없음)은 그대로다.
+  assert.match(cfg, /const vcFileMissing = fileMissing;/);
+  assert.match(stripComments(fs.readFileSync(path.join(SRC, 'util', 'fileMissing.js'), 'utf8')), /export function fileMissing\(file\) \{\s*try \{ fs\.statSync\(file\); return false; \} catch \(e\) \{ return e\?\.code === 'ENOENT'; \}/);
   const nsx = stripComments(fs.readFileSync(path.join(SRC, 'nsx', 'registry.js'), 'utf8'));
   const sv = nsx.slice(nsx.indexOf('function saveRegistry(list)'), nsx.indexOf('export function redact'));
   assert.ok(sv.indexOf('atomicWriteFileSync(') >= 0 && sv.indexOf('_lastGood = structuredClone(list)') > sv.indexOf('atomicWriteFileSync('), '쓰기 성공 뒤에 마지막 목록을 맞춘다');

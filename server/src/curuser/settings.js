@@ -24,6 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { fileMissing } from '../util/fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만 — existsSync 는 stat 실패도 false)
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { clampSetting } from '../util/clampSetting.js'; // v2.613 DEPS2613-12 · RUNTIME2613-08: 숫자 설정 정규화는 하나(빈 칸 = 미지정)
@@ -109,7 +110,7 @@ export function load() {
   let raw = {};
   // v2.631(EDGE2631-01): 손상 → 보존 → 기본값(꺼짐·vcenters {})을 /api/central/curuser-config 가 내려보내면 엣지 applyCentral 이
   //   폴더 범위 사본까지 지운다(중앙 원본은 이미 .corrupt 로 치워져 유일한 정상 사본이 사라진다) — 로드 오류를 기억해 503 으로 답한다.
-  if (!fs.existsSync(FILE())) _loadErr.missing();
+  if (fileMissing(FILE())) _loadErr.missing();   // 134회차: 없음은 ENOENT 뿐 — stat 실패(폴더 수준 EACCES · EIO · ESTALE)는 아래 읽기가 읽기 오류로 가른다
   else {
     // 90회차 F3(재현): 읽기 단계 실패(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전 catch 하나는 그것도 손상으로 보고 온전한 원본을
     //   `.corrupt` 로 옮겼다(결정 G2 의 같은 꼴). 원본을 두고 기본값(꺼짐)으로 돌되 **캐시하지 않는다**(다음 읽기가 다시 본다) · 저장은 거절(save).

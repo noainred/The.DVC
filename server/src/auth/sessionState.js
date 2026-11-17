@@ -67,8 +67,10 @@ function load() {
   const st = emptyState();
   const file = FILE();
   let raw = null;
-  try { if (fs.existsSync(file)) raw = fs.readFileSync(file, 'utf8'); }
-  catch (e) { console.warn(`[sessionState] ${FILE_NAME} 읽기 실패(${e?.code || e?.message}) — 이 프로세스는 기존 세션을 전부 무효로 본다.`); st.notBefore = nowSec(); }
+  // 134회차(재현): `fs.existsSync` 가드는 stat 실패(폴더 수준 EACCES · EIO · ESTALE · ELOOP)를 '파일 없음' 으로 읽어 아래 읽기 실패 갈래(notBefore = 지금)를 건너뛰었다 —
+  //   폐기 목록이 빈 채 열려 로그아웃 · 강제 종료한 토큰이 되살아났다. 곧바로 읽어 ENOENT 만 없음(첫 기동)으로 본다.
+  try { raw = fs.readFileSync(file, 'utf8'); }
+  catch (e) { if (e?.code !== 'ENOENT') { console.warn(`[sessionState] ${FILE_NAME} 읽기 실패(${e?.code || e?.message}) — 이 프로세스는 기존 세션을 전부 무효로 본다.`); st.notBefore = nowSec(); } }
   if (raw != null) {
     let obj = null; let parsed = false;
     try { obj = JSON.parse(raw); parsed = true; } catch (e) { obj = null; preserveCorrupt(file, e?.message || 'JSON'); }

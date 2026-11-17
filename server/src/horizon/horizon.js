@@ -62,9 +62,9 @@ export function horizonLoadError() { loadHorizon(); return _loadErr.get(); }
 const UNREADABLE = { ok: false, code: 'settings-unreadable', status: 409, reason: 'Horizon 등록부(horizon.json)를 읽지 못한 상태라 저장하지 않았습니다 — 서비스 점검에서 확정하거나 손상 보존본을 되돌리고 재시작하세요(지금 저장하면 등록부가 이 한 건만 남습니다).' };
 
 export function loadHorizon() {
-  if (!fs.existsSync(FILE)) { _loadErr.missing(); return []; }
+  // 134회차: `fs.existsSync` 가드는 stat 실패(폴더 수준 EACCES · EIO · ESTALE)를 '없음' 으로 읽어 빈 등록부를 표지 없이 줬다(저장 거절이 풀려 첫 등록이 원본을 덮는다) — ENOENT 만 없음.
   let text;
-  try { text = fs.readFileSync(FILE, 'utf8'); } catch (e) { _loadErr.readError(e); return []; }
+  try { text = fs.readFileSync(FILE, 'utf8'); } catch (e) { if (e?.code === 'ENOENT') _loadErr.missing(); else _loadErr.readError(e); return []; }
   try {
     const parsed = JSON.parse(text);
     const out = openSecretsDeep(Array.isArray(parsed?.servers) ? parsed.servers : []); // v2.296 자격증명 복호

@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { store } from '../store.js';
 import { config, loadVcenterConfig } from '../config.js';
+import { fileMissing } from '../util/fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만 — existsSync 는 stat 실패도 false)
 import { collectDetails } from '../vcenter/vmExport.js';
 import { parseGuestDisks } from '../vcenter/soapParse.js';
 import { vmSummary, rankReclaim, usageTrend, reclaimAdvice, normUsageFactor, sanitizeGuestDiskVms, vmOwnerByPrefix } from './analyze.js';
@@ -126,7 +127,7 @@ function knownOf(snap) {
   try {
     reg = loadVcenterConfig();
     const primary = path.join(config.configDir, 'vcenters.json');
-    if (fs.existsSync(primary) && reg.file !== primary) return { ids: null, why: 'registry-unreadable' };
+    if (!fileMissing(primary) && reg.file !== primary) return { ids: null, why: 'registry-unreadable' };   // 134회차: 확인하지 못한 것(stat 실패 — existsSync 는 false)도 '있는데 못 읽음' 이다
   } catch { return { ids: null, why: 'registry-unreadable' }; }
   const out = new Set();
   for (const v of reg?.vcenters || []) if (v && v.id != null && v.id !== '') out.add(String(v.id));

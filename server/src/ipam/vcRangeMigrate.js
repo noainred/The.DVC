@@ -24,6 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config, loadVcenterConfig } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { fileMissing } from '../util/fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만 — existsSync 는 stat 실패도 false)
 import { registerStateFile } from '../util/stateFiles.js';
 import { listVcRanges, removeVcRanges, vcRangesLoadError } from './rangeStore.js';
 import { loadScanSettings, saveScanSettings, listScanAgents, LOCAL, scanSettingsLoadError } from './scanStore.js';
@@ -160,7 +161,7 @@ export function runVcRangeMigration({ now = Date.now(), force = false } = {}) {
   let backup = null;
   try {
     const src = VC_FILE();
-    if (fs.existsSync(src)) {
+    if (!fileMissing(src)) {   // 134회차: 확인하지 못한 원본(stat 실패)을 '없음' 으로 보고 백업 없이 옮기지 않는다 — 복사가 던져 아래 '백업하지 못해' 로 멈춘다
       backup = `ipam-vcenter-ranges.json.pre-v2.691-${now}.bak`;
       fs.copyFileSync(src, path.join(config.configDir, backup));
       try { fs.chmodSync(path.join(config.configDir, backup), 0o600); } catch { /* */ }

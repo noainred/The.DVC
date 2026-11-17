@@ -51,7 +51,12 @@ def read_json_state(path: Path, *, expect=None, quiet: bool = False):
     잃던 것(46회차 H1 · H2)을 막는다. 관리자가 복구(백업 복원 · 보존본 되살리기)하거나 보존본을 지우면 풀린다.
     """
     path = Path(path)
-    existed = path.exists()
+    # 134회차(재현): Path.exists() 는 폴더 수준 읽기 오류(데이터 폴더 탐색 권한 — PermissionError)를 **올린다**(os.path.exists 와 다르다).
+    #   이 줄이 try 밖이라 '읽기 오류' 상태 대신 예외가 호출부(저장소 로드)로 나갔다 — 같은 원인의 파일 수준 오류와 결과가 갈렸다.
+    try:
+        existed = path.exists()
+    except OSError:
+        return None, "unreadable"
     try:
         data = read_json(path, _ABSENT, expect=expect, strict_io=True, quiet=quiet)
     except OSError:

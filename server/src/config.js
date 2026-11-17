@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { reqTimeoutMs } from './util/envTimeout.js';   // v2.605 TIM2605-04: 요청 시한 env 정규화(무의존 leaf 모듈 — v2.613 DEPS2613-01 에 util/ 로 이동)
 import { tlsModeFromEnv } from './security/tlsMode.js';
+import { fileMissing } from './util/fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만) — fs 만 쓰는 leaf
 import { safeLoadText } from './util/atomicWrite.js';   // v2.744(적대적 검토 VC 후속): 로드 오류 원문(JSON.parse 조각 = 파일 내용)을 콘솔에 찍지 않는다(무의존 leaf)   // 2026-10-09 S-02: 장비 TLS 검증 모드(무의존 leaf 모듈)
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -508,10 +509,9 @@ export function lastVcenterConfigText(file) {
  *   마지막 원문을 버리고 `readError` 없는 빈 목록을 줬다(118회차 F2 가 고친 증상 그대로 — store 가 'vCenter 0개' 로 돌며 캐시 · 위임 인벤토리를 지운다).
  *   같은 순간 등록부 로더(registry.js — readFileSync 의 오류 코드로 가른다)는 '읽기 오류' 라 했고, 이 함수가 버린 마지막 원문 때문에 그쪽도 빈 목록이 됐다.
  *   판정은 util/jsonFileRead.js readJsonFile 과 같다(ENOENT = 없음 · 그 밖 = 읽기 오류).
+ *   134회차: 같은 꼴이 다른 로더 20여 곳에 남아 있어 판정을 공용(util/fileMissing.js)으로 올렸다 — 여기는 그것을 쓴다(판정 사본 금지).
  */
-function vcFileMissing(file) {
-  try { fs.statSync(file); return false; } catch (e) { return e?.code === 'ENOENT'; }
-}
+const vcFileMissing = fileMissing;
 
 export function loadVcenterConfig() {
   let readError = null;

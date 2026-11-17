@@ -39,9 +39,9 @@ const DEFAULTS = {
 const _loadErr = makeSettingsLoadError(() => FILE, { label: 'GPU 게스트 수집 설정(게스트 계정) — 확정하면 빈 설정으로 시작합니다(손상 보존본은 그대로 · 계정은 다시 입력)', confirm: () => { fs.mkdirSync(path.dirname(FILE), { recursive: true }); atomicWriteFileSync(FILE, JSON.stringify({}, null, 2), { mode: 0o600 }); _loadErr.ok(); } });
 export function gpuGuestSettingsLoadError() { readFile(); return _loadErr.get(); }
 function readFile() {
-  if (!fs.existsSync(FILE)) { _loadErr.missing(); return {}; }
+  // 134회차: `fs.existsSync` 가드는 stat 실패(폴더 수준 EACCES · EIO · ESTALE)를 '없음' 으로 읽어 빈 설정을 표지 없이 줬다(저장 거절이 풀려 첫 PUT 이 원본을 덮는다) — ENOENT 만 없음.
   let text;
-  try { text = fs.readFileSync(FILE, 'utf8'); } catch (e) { _loadErr.readError(e); return {}; }
+  try { text = fs.readFileSync(FILE, 'utf8'); } catch (e) { if (e?.code === 'ENOENT') _loadErr.missing(); else _loadErr.readError(e); return {}; }
   // v2.322 보안 감사(자격증명 파일 규칙): 파싱 실패 시 손상본을 보존한 뒤 빈 값 반환 —
   // 그냥 {} 를 넘기면 다음 저장이 온전했던 원본을 빈 목록으로 덮어써 게스트 OS 계정이 영구 유실된다.
   try { const v = openSecretsDeep(parseJsonObject(text)); _loadErr.ok(); return v; }

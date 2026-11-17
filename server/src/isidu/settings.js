@@ -134,10 +134,12 @@ export function migrateTimeoutDefault(raw) {
 }
 
 function load() {
-  let st = null;
-  try { st = fs.statSync(FILE()); } catch { st = null; }
-  if (!st) { loadErr.missing(); _cache = { mtime: 0, size: -1, value: emptyValue() }; return _cache.value; }
-  if (_cache && _cache.mtime === st.mtimeMs && _cache.size === st.size) return _cache.value;
+  let st = null; let gone = false;
+  // 134회차(`fs.existsSync` 가드와 같은 꼴): stat 실패를 전부 '파일 없음' 으로 읽었다 — 폴더 수준 읽기 오류(EACCES · EIO · ESTALE)에 표지 없는 빈 설정이 나가
+  //   설정 pull 503 · 저장 409 가 풀렸다. 없음은 ENOENT 뿐이고, 그 밖의 stat 실패는 아래 읽기가 읽기 오류로 가른다(idrac/registry.js 와 같다).
+  try { st = fs.statSync(FILE()); } catch (e) { st = null; gone = e?.code === 'ENOENT'; }
+  if (gone) { loadErr.missing(); _cache = { mtime: 0, size: -1, value: emptyValue() }; return _cache.value; }
+  if (st && _cache && _cache.mtime === st.mtimeMs && _cache.size === st.size) return _cache.value;
   let raw;
   // 90회차 F3(재현): 읽기 단계 실패(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전 catch 하나는 그것도 손상으로 보고 온전한 원본(대상 · 메일 설정)을
   //   `.corrupt` 로 옮겨, 지나가는 읽기 오류 하나가 사람이 보존본을 되돌려야 하는 사고가 됐다(결정 G2 의 같은 꼴). 원본을 두고 빈 값으로 돌되
