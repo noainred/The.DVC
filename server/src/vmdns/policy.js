@@ -104,7 +104,7 @@ const _file = makeJsonFileLoader(FILE, { label: 'VM DNS 승인 정책(vm-dns-pol
 
 /** 정책 읽기 — `{ corps, publicUnapproved, rev, invalid, updatedAt, updatedBy, loadError? }`. 손상이면 보존하고 기본값(+ 표지). */
 export function loadVmDnsPolicy() {
-  if (cache) return cache;
+  if (cache && !_file.recheckDue()) return cache;   // 결정 G2 반증 후속 ③: 오류 중에는 캐시를 믿지 않고 30초마다 다시 판정(보존본을 되돌리면 재시작 없이 풀린다)
   const base = { corps: {}, publicUnapproved: DOC_DEFAULTS.publicUnapproved, updatedAt: null, updatedBy: null };
   let invalid = [];
   const r = _file.load();

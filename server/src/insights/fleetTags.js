@@ -49,11 +49,12 @@ let _unread = false;
 
 export function loadFleetTags() {
   const mtime = fileMtimeMs();
-  if (cache && mtime === cacheMtimeMs) return cache;
+  if (cache && mtime === cacheMtimeMs && !_file.recheckDue()) return cache;   // 결정 G2 반증 후속 ③: 오류 중에는 캐시를 믿지 않고 30초마다 다시 판정(보존본을 되돌리면 재시작 없이 풀린다)
+  const hadErr = !!_file.loadError();
   const r = _file.load();
   // 읽기 오류: 원본을 두고 빈 값을 **캐시하지 않는다**(다음 호출이 간격 뒤 다시 읽는다). purposesCache 도 비운다(쓰기는 refused 로 막힌다).
   if (r.kind === 'read-error') { cache = null; purposesCache = {}; if (!_unread) { _unread = true; bumpFleetRev(); } return {}; }
-  if (_unread) { _unread = false; bumpFleetRev(); }   // 70 ①: 읽기 오류 구간에 들어가고 나올 때 플릿 캐시(fleetRev)를 버린다 — 빈 분류로 만든 결과를 회복 뒤에 붙잡지 않게
+  if (_unread) { _unread = false; bumpFleetRev(); } else if (hadErr && r.kind === 'ok') bumpFleetRev();   // 후속 ③: 손상 → 되돌림도 플릿 캐시를 버린다   // 70 ①: 읽기 오류 구간에 들어가고 나올 때 플릿 캐시(fleetRev)를 버린다 — 빈 분류로 만든 결과를 회복 뒤에 붙잡지 않게
   const p = r.kind === 'ok' ? r.value : null;
   cache = p && typeof p.tags === 'object' && p.tags && !Array.isArray(p.tags) ? p.tags : {};
   purposesCache = p && p.purposes && typeof p.purposes === 'object' && !Array.isArray(p.purposes) ? p.purposes : {};

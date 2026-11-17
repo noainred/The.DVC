@@ -73,7 +73,7 @@ export function mailSettingsLoadError() { load(); return _file.marker(); }
 export function mailSaveRefusal() { load(); return _file.refusal('메일 발송 설정'); }
 
 export function load() {
-  if (cache) return cache;
+  if (cache && !_file.recheckDue()) return cache;   // 결정 G2 반증 후속 ③: 오류 중에는 캐시를 믿지 않고 30초마다 다시 판정(보존본을 되돌리면 재시작 없이 풀린다)
   const out = defaultsOut();
   const r = _file.load();
   if (r.kind === 'read-error') return out;   // 73 ①: 기본값(발송 꺼짐)을 캐시하지 않는다 — 간격 뒤 다시 읽는다
@@ -170,6 +170,21 @@ export function save(body = {}) {
 }
 
 export function invalidate() { cache = null; _file.resetRetry(); }
+
+/**
+ * 결정 G2 · G3 반증 후속 ①: 메일 주소 목록 가림 — GET /admin/mail(73 ③)과 같은 기준. 전체 범위 관리자(조회 ∧ 쓰기 무제한 — auth/scope.js isFullReadWriteScope)가
+ *   아니면 주소 대신 개수만 싣는다(통합 관리자 수신자를 보여 주는 도구 화면 — 스토리지 사용량 · 아이실론 종합 메일). 판정 결과(full)는 라우트가 넘긴다.
+ * @returns {{ list:string[], count:number, masked:boolean }}
+ */
+export function maskedMailList(list, full) {
+  const a = Array.isArray(list) ? list : [];
+  return full ? { list: a, count: a.length, masked: false } : { list: [], count: a.length, masked: true };
+}
+/** 후속 ①: SMTP 계정 이름 가림 — 전체 범위가 아니면 '' + 있음 표지(통신 점검 설정 링크의 facts.user 등). */
+export function maskedSmtpUser(user, full) {
+  const u = typeof user === 'string' ? user : '';
+  return full ? { user: u } : { user: '', hasUser: !!u, userMasked: true };
+}
 
 /** API 응답용 — 비밀 값을 제거하고 존재 여부만 남긴다. */
 export function redact(cfg = load()) {

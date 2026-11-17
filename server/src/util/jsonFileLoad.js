@@ -17,6 +17,9 @@
  *  - `makeJsonFileLoader(fileOf, { label, confirm, … })` — 위에 `makeSettingsLoadError` 상태를 묶은 것(서비스 점검 등재 · '기본값으로 확정' ·
  *    `refusal(what)` 쓰기 거절 응답). 로드 오류가 서 있는 동안 저장은 409 `settings-unreadable` 이 규약이다(rangeStore · annotations 와 같다).
  *
+ * 결정 G2 반증 후속 ③: 오류가 서 있는 동안 모듈은 캐시를 믿지 않고 `recheckDue()` 가 참일 때(30초 간격) 다시 load() 한다 — 보존본을 되돌리거나
+ *   보존본을 지우면(파일 없음 = 기본값이 곧 관리자 값) 재시작 없이 풀린다. 쓰는 모듈은 `if (cache && !L.recheckDue()) return cache` 꼴이다.
+ *
  * ⚠ util/ 규약(arch2579): 도메인 모듈을 import 하지 않는다.
  */
 import fs from 'node:fs';
@@ -88,8 +91,10 @@ export function makeJsonFileReader(fileOf, { parse = parseJsonObject, preserve =
  */
 export function makeJsonFileLoader(fileOf, opts = {}) {
   const { label = '', confirm = null, ownerOnly = false, superOnly = false, retryMs = READ_RETRY_MS } = opts;
-  const err = makeSettingsLoadError(fileOf, { label, confirm, ownerOnly, superOnly });
+  // 결정 G2 반증 후속 ③: 다시 판정하는 로더라는 사실(recheckMs)을 등록부에 남긴다 — 확정 · 읽기 오류 안내 문구가 '재시작' 대신 '간격 안에 다시 읽음' 을 말한다.
+  const err = makeSettingsLoadError(fileOf, { label, confirm, ownerOnly, superOnly, recheckMs: retryMs });
   const reader = makeJsonFileReader(fileOf, opts);
+  let recheckAt = 0;   // 오류 상태에서 다음 재판정 시각(캐시를 쓰는 모듈이 recheckDue() 로 본다)
   return {
     /** 읽기 + 로드 오류 상태 갱신. 결과 모양은 makeJsonFileReader.read() 와 같다. */
     load() {
@@ -98,14 +103,27 @@ export function makeJsonFileLoader(fileOf, opts = {}) {
       else if (r.kind === 'missing') err.missing();
       else if (r.kind === 'corrupt') err.corrupt(r.error);
       else if (!r.deferred) err.readError(r.error, { retryMs });
+      recheckAt = err.get() ? _now() + retryMs : 0;
       return r;
+    },
+    /**
+     * 결정 G2 반증 후속 ③: 오류(손상 · 보존본만 남음 · 읽기 오류)가 서 있는 동안 캐시를 믿지 말고 **다시 load() 할 때인가**(간격 retryMs — 30초).
+     *   예전에는 손상 상태의 기본값을 캐시해 보존본을 되돌려도 재시작 전까지 409 였다. 오류가 없으면 늘 false(정상 경로는 그대로 캐시).
+     *   다시 판정은 파일 읽기 한 번(없으면 보존본 판정 readdir 한 번)이다 — 간격이 상한을 정한다.
+     */
+    recheckDue() {
+      if (!err.get()) return false;
+      const t = _now();
+      if (t < recheckAt) return false;
+      recheckAt = t + retryMs;
+      return true;
     },
     /** 지금 로드 오류({ at, reason, readError? }) 또는 null. 읽지 않는다 — 호출부가 먼저 load() 한다. */
     loadError: () => err.get(),
     /** 저장 성공 — 오류 해제 · 재읽기 간격 초기화. */
-    saved() { err.ok(); reader.reset(); },
+    saved() { err.ok(); reader.reset(); recheckAt = 0; },
     /** 테스트 전용 — 재읽기 간격만 초기화(오류 상태는 다음 load() 가 다시 판정한다). */
-    resetRetry() { reader.reset(); },
+    resetRetry() { reader.reset(); recheckAt = 0; },
     /**
      * 로드 오류가 서 있으면 쓰기 거절 응답(라우트 409), 아니면 null. 사유는 읽기 오류 · 손상을 가른다(조치가 다르다).
      * @param {string} what  사람이 읽는 이름(예 'IP 관리 메모')
@@ -116,7 +134,7 @@ export function makeJsonFileLoader(fileOf, opts = {}) {
       const base = path.basename(String(fileOf() || ''));
       const reason = e.readError
         ? `${what} 파일(${base})을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(${Math.round(retryMs / 1000)}초마다 다시 읽고, 읽히면 저장이 다시 열립니다).`
-        : `${what} 파일(${base})을 읽지 못한 상태라 저장하지 않았습니다 — 손상돼 보존본으로 옮겼습니다. 지금 저장하면 그 한 건만 든 파일이 됩니다. 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리세요.`;
+        : `${what} 파일(${base})을 읽지 못한 상태라 저장하지 않았습니다 — 손상돼 보존본으로 옮겼습니다. 지금 저장하면 그 한 건만 든 파일이 됩니다. 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리세요(되돌린 파일은 ${Math.round(retryMs / 1000)}초 안에 다시 읽어 재시작 없이 풀립니다).`;
       return { ok: false, code: 'settings-unreadable', reason, ...(e.readError ? { readError: true } : {}) };
     },
     /** 응답 표지 — `{ reason, at, readError }` 또는 null(사유는 settingsLoadError 의 요약 — 파일 조각 없음). */

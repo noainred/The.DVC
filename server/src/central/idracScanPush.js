@@ -18,6 +18,7 @@ import { pullCollectorByAgent } from '../collector/puller.js';
 import { createPushScanJob, setIdracScanResult } from './idracScanJobs.js';
 import { allCollectorStatus } from '../collector/state.js';
 import { cmpVersion } from '../util/cmpVersion.js';
+import { capStr } from '../util/capStr.js'; // 반증(결정 G1a) 사유 절단도 TIM2607-01 규약(.slice 는 원문을 붙잡는다)
 
 /**
  * v2.611(감사 EDGE2611-01·03 = RECENT2611-03): iLO 스캔을 이해하는 엣지 최소 버전.
@@ -55,7 +56,7 @@ export function iloEdgeGate({ hasDell = false, hasIlo = false, version = '', unk
   if (c != null && c >= 0) return { delegate: true };
   const known = c != null;
   // 반증(결정 G1a 66 ①): 표시 이름이 겹쳐 담당 엣지를 정할 수 없어 버전을 모르는 것이면 그 사유를 그대로(재시작 직후 · 미등록 추측으로 덮지 않는다).
-  const verText = known ? `엣지 버전 ${version}` : unknownWhy ? `엣지 버전 미상 — ${String(unknownWhy).slice(0, 240)}` : '엣지 버전 미상(수집 서버 상태에 버전이 없음 — 중앙 재시작 직후이거나 수집 서버(원격)로 등록되지 않은 엣지)';
+  const verText = known ? `엣지 버전 ${version}` : unknownWhy ? `엣지 버전 미상 — ${capStr(unknownWhy, 240)}` : '엣지 버전 미상(수집 서버 상태에 버전이 없음 — 중앙 재시작 직후이거나 수집 서버(원격)로 등록되지 않은 엣지)';
   if (!hasDell) {
     return {
       delegate: false, held: true, edgeVersion: version || '',

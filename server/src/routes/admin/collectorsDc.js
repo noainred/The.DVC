@@ -8,7 +8,7 @@ import { forceCollectorToken } from '../../agent/deploy.js';
 import { listTargets, getTargetRaw, pickSshTarget } from '../../agent/deployRegistry.js';
 import { logAudit } from '../../audit.js';
 import { loadVcenterConfig } from '../../config.js';
-import { getVmHardware, reconfigVm, tryLockVmReconfig } from '../../provision/reconfig.js';
+import { getVmHardware, reconfigVm, tryLockVmReconfig, reconfigBusyBody } from '../../provision/reconfig.js';
 import { onDemandErrorFields } from '../../vcenter/dsBrowse.js';   // v2.743(VC-03): 주문형 로그인 문이 막은 409 의 사유 필드
 import { setCollectorDatacenterId } from '../../collector/registry.js'; // v2.972: 수집 서버 ↔ 법인 매칭(사용자 지정)
 import { matchDatacenterId, resolvePickedDc } from '../../collector/datacenterMatch.js';
@@ -551,9 +551,10 @@ adminRouter.post('/vm/:id/reconfig', requirePerm('vm.reconfig'), async (req, res
   // 결정(56~75 남긴 것) 74 ④: 같은 VM 의 사양 변경이 진행 중이면 두 번째 요청은 409 — 화면 잠금만으로는 두 탭 · 두 사람이 디스크 · NIC 추가를 겹쳐 보냈다.
   //   잠금은 끝나면(성공 · 실패 · 예외) 풀리고, 멈춘 요청의 잠금은 시한(reconfig.js RECONFIG_LOCK_TTL_MS) 뒤 새 요청이 가져간다.
   const unlock = tryLockVmReconfig(t.vm.id);
-  if (!unlock) return res.status(409).json({ ok: false, busy: true, reason: '이 VM 의 사양 변경이 이미 진행 중입니다 — 끝난 뒤 다시 시도하세요(vCenter 최근 작업에서 진행을 볼 수 있습니다).' });
+  if (!unlock) return res.status(409).json(reconfigBusyBody(t.vm.id));   // 반증 후속 ②: 앞 작업이 시간 초과 뒤 확인 중이면 그 사실을 말한다
   try {
-    const r = await reconfigVm(t.vc, t.moref, plan);
+    // 반증 후속 ②: 결과 대기가 시간 초과면 잠금을 풀지 않고 같은 세션으로 그 작업을 잠금 시한까지 확인한다(finally 의 unlock 은 그동안 무시된다).
+    const r = await reconfigVm(t.vc, t.moref, plan, { onTimeout: (p) => unlock.holdUntil(p), extraWaitMs: unlock.remainingMs() });
     logAudit({
       user: req.user?.username, action: 'VM 사양 변경',
       target: t.vm.name,

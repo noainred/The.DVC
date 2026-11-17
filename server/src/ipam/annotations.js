@@ -5,7 +5,7 @@
  * keyed by IP address.
  */
 
-import { makeJsonFileLoader } from '../util/jsonFileLoad.js';   // 25회차 F-4 · 결정(56~75 남긴 것) 62
+import { makeJsonFileLoader, READ_RETRY_MS } from '../util/jsonFileLoad.js';   // 25회차 F-4 · 결정(56~75 남긴 것) 62
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
@@ -28,12 +28,26 @@ export function annotationsLoadMarker() { load(); return _file.marker(); }
 const refusal = () => _file.refusal('IP 관리 메모');
 let _unread = false;   // 62: 읽기 오류 구간에 들어가고 나올 때 rev 를 올린다 — 원장 캐시(ipamRevKey)가 빈 메모로 만든 결과를 회복 뒤에도 붙잡지 않게
 function load() {
-  if (cache) return cache;
+  if (cache && !_file.recheckDue()) return cache;   // 결정 G2 반증 후속 ③: 오류 중에는 캐시를 믿지 않고 30초마다 다시 판정(보존본을 되돌리면 재시작 없이 풀린다)
+  const hadErr = !!_file.loadError();
   const r = _file.load();
-  if (r.kind === 'read-error') { if (!_unread) { _unread = true; rev++; } return {}; }   // 62: 원본을 두고 빈 값을 캐시하지 않는다(쓰기는 refusal 로 막힌다)
-  if (_unread) { _unread = false; rev++; }
+  if (r.kind === 'read-error') { if (!_unread) { _unread = true; rev++; } armRecheck(); return {}; }   // 62: 원본을 두고 빈 값을 캐시하지 않는다(쓰기는 refusal 로 막힌다)
+  const recovered = r.kind === 'ok' && (_unread || hadErr);
+  if (_unread) { _unread = false; rev++; } else if (recovered) rev++;   // 손상 → 되돌림도 원장 캐시를 버린다
   cache = r.kind === 'ok' ? r.value : {};
+  armRecheck();
   return cache;
+}
+/*
+ * 결정 G2 반증 후속 ④: 오류(읽기 오류 · 손상) 동안에는 30초 뒤 스스로 한 번 다시 판정한다(오류가 풀릴 때까지 이어서). 예전에는 누군가 load() 를
+ *   부를 때까지(화면을 안 열면 원장 전량 확인 10분) 회복을 몰랐다 — 회복하면 위에서 rev 가 올라 다음 갱신 주기의 원장 입력 지문(ipamRevKey)이 바뀌고
+ *   ipam.db 가 다시 만들어진다. 오류가 없으면 타이머를 걸지 않는다(unref — 프로세스 종료를 막지 않는다).
+ */
+let _recheckTimer = null;
+function armRecheck() {
+  if (_recheckTimer || !_file.loadError()) return;
+  _recheckTimer = setTimeout(() => { _recheckTimer = null; try { load(); } catch { /* 다음 접근이 다시 판정한다 */ } }, READ_RETRY_MS + 1_000);
+  _recheckTimer.unref?.();
 }
 
 /** Whole map { ip: { memo, tags[], updatedAt, updatedBy } }. */

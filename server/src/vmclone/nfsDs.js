@@ -31,7 +31,7 @@ const _file = makeJsonFileLoader(() => FILE, { label: 'VM 백업 — NFS 데이�
 /** 정의 파일을 못 읽었으면 { reason, at, readError }, 아니면 null(목록 응답 표지). */
 export function nfsDsLoadError() { load(); return _file.marker(); }
 function load() {
-  if (_db) return _db;
+  if (_db && !_file.recheckDue()) return _db;   // 결정 G2 반증 후속 ③: 오류 중에는 캐시를 믿지 않고 30초마다 다시 판정(보존본을 되돌리면 재시작 없이 풀린다)
   const r = _file.load();
   if (r.kind === 'read-error') return { items: [] };   // 65 ②: 캐시하지 않는다 — 이 빈 목록은 쓰기에 쓰이지 않는다(createNfsDs 거절 · 나머지는 대상 없음)
   _db = { items: r.kind === 'ok' && Array.isArray(r.value?.items) ? r.value.items : [] };

@@ -197,7 +197,7 @@ function load(file, key) {
   const kind = kindOfKey(key);
   const L = LOADERS[kind];
   const hit = caches.get(file);
-  if (hit && !L.loadError()) return hit.list;   // 73 ①: 오류 중에는 캐시를 믿지 않는다(보존본 복구 · 권한 수정이 재시작 없이 보이게)
+  if (hit && (!L.loadError() || !L.recheckDue())) return hit.list;   // 73 ①: 오류 중에는 캐시를 믿지 않는다(보존본 복구 · 권한 수정이 재시작 없이 보이게) · 후속 ③: 다시 판정은 30초 간격(요청마다 readdir 하지 않게)
   const w = writerOf(file, key);
   const r = L.load();
   if (r.kind === 'read-error') return hit ? hit.list : [];   // 73 ①: 원본을 두고 빈 목록을 캐시하지 않는다(쓰기는 loadForWrite 가 409)

@@ -102,14 +102,15 @@ function sanitizeSteps(raw) {
  *   바꾸면 임의 id 가 그대로 통과해 link_latest 에 행이 쌓였다. 등록부를 읽지 못하면 null(판정할 수 없음 — 결정(56~75) 65 ①:
  *   예전에는 null 이면 검사 없이 받았다. 이제 등록부 로드 오류의 null 은 putEdgeLinkReport 가 503 으로 보류한다). enabled 는 보지 않는다(끈 직후 도착한 보고).
  */
-export function assignedEdgeLinkIds(agent) {
+export function assignedEdgeLinkIds(agent, ctx = null) {
   const ag = String(agent || '').toLowerCase();
   try {
     const st = loadLinkCheckSettings();
-    const cols = loadCollectors();
+    // 결정 G2 · G3 반증 후속 ⑤: 보고 1건에 등록부를 세 번 읽고 복호했다(여기 · 여기의 registryLoadError · 호출부의 registryLoadError) — 호출부가 한 번 읽은 것(ctx)을 쓴다.
+    const cols = ctx ? ctx.cols : loadCollectors();
     // 결정(56~75 남긴 것) 65 ①(65회차 남긴 것): 등록부가 손상 · 못 읽음이면 loadCollectors 는 빈 목록이다 — 그것으로 계산하면 '배정 0'(전부 notAssigned 거절)이 된다.
     //   주석대로 null(판정할 수 없음)을 돌려주고, 호출부가 503 으로 보류시킨다(엣지는 다음 주기에 다시 보낸다).
-    if (registryLoadError()) return null;
+    if (ctx ? ctx.regErr : registryLoadError({ skipLoad: true })) return null;
     const inp = demoLinkInputs({ vcenters: listVcenters(), pairs: st.pairs, collectors: cols }); // v2.708: mock 아니면 입력 그대로
     const { links } = buildLinks({ collectors: cols, vcenters: inp.vcenters, pairs: inp.pairs, settings: st });
     return new Set(links.filter((l) => EDGE_KINDS.includes(l.kind) && String(l.from || '').toLowerCase() === ag).map((l) => String(l.id).toLowerCase()));
@@ -119,9 +120,12 @@ export function assignedEdgeLinkIds(agent) {
 export async function putEdgeLinkReport(agent, body = {}) {
   const ag = t(agent);
   if (!ag) return { ok: false, reason: 'agent 를 확인할 수 없습니다.' };
-  const assigned = assignedEdgeLinkIds(ag);
+  // 후속 ⑤: 등록부는 이 보고 처리에서 한 번만 읽는다(읽기 · 판정 · 배정 계산이 같은 값을 본다).
+  let reg;
+  try { const cols = loadCollectors(); reg = { cols, regErr: registryLoadError({ skipLoad: true }) }; } catch (e) { reg = { cols: [], regErr: e || true }; }
+  const assigned = assignedEdgeLinkIds(ag, reg);
   // 65 ①: 등록부를 못 읽어 배정을 판정할 수 없으면 받지 않는다(503 — 빈 배정으로 전부 거절하거나 검사 없이 받지 않는다). 엣지는 다음 주기에 다시 보낸다.
-  if (assigned == null && registryLoadError()) {
+  if (assigned == null && reg.regErr) {
     return { ok: false, registryUnreadable: true, stored: 0, reason: 'registryUnreadable', detail: '중앙 수집 서버 등록부를 읽지 못해 이 엣지에 배정된 링크를 확인할 수 없습니다 — 보고를 받지 않았습니다(등록부를 고치면 다음 주기에 다시 받습니다).' };
   }
   let notAssigned = 0;

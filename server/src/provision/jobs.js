@@ -21,7 +21,8 @@ import path from 'node:path';
 import { store } from '../store.js';
 import { getDataSource } from '../runtime-settings.js';
 import { config, loadVcenterConfig } from '../config.js';
-import { preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileReader, READ_RETRY_MS } from '../util/jsonFileLoad.js';   // 반증 후속 ⑥: 읽기 오류 ≠ 손상 · 30초 재읽기
 import { createDebouncedWriter } from '../central/edgeRecord.js';   // 디바운스 + tmp→rename + 종료 시 동기 flush(상태 파일 등록 포함)
 import { runLiveVms } from './taskTracker.js';   // 결정 74 ②: 제출 풀과 분리된 결과 추적
 import { expandSpec } from './spec.js';
@@ -89,27 +90,51 @@ export function settleAfterRestart(j) {
   if (j.status === 'running') j.status = jobStatusOf(j.vms);
   return j;
 }
+/*
+ * 결정 G2 · G3 반증 후속 ⑥: 기동 때 작업 목록 파일을 **읽지 못하면**(EACCES · EIO — 손상 아님) 예전에는 프로세스 수명 동안 저장을 멈췄다(재시도 없음).
+ *   이제 원본은 덮지 않고(저장 보류) 30초 간격으로 다시 읽어, 읽히면 그동안 메모리에 만든 새 작업과 **합쳐** 저장을 다시 연다. 그동안 목록 응답은
+ *   storeError 표지를 싣는다('작업 기록 파일을 못 읽음 — 새 작업은 메모리에만'). 손상은 예전처럼 보존본으로 옮기고 빈 목록에서 시작한다.
+ */
+const _jobsReader = makeJsonFileReader(() => JOBS_FILE, { parse: (t) => { const p = JSON.parse(t); if (!Array.isArray(p?.jobs)) throw new Error('형식 오류'); return p; }, tag: 'provision' });
+let _readError = null;   // { at, code } — 읽기 오류로 저장을 보류하는 동안
+let _retryTimer = null;
+function armJobsRetry() {
+  if (_retryTimer) return;
+  _retryTimer = setTimeout(() => { _retryTimer = null; if (_readError) loadJobs(); }, READ_RETRY_MS + 1_000);
+  _retryTimer.unref?.();
+}
 function loadJobs() {
-  let raw;
-  try { raw = fs.readFileSync(JOBS_FILE, 'utf8'); }
-  catch (e) {
-    if (e?.code !== 'ENOENT') { _persistBlocked = true; console.warn(`[provision] 작업 목록 파일을 읽지 못했습니다 — 덮어쓰지 않게 저장을 멈춥니다: ${safeLoadText(e) || e?.code || '사유 미상'}`); }
+  const r = _jobsReader.read();
+  if (r.kind === 'read-error') {
+    if (!_readError) {
+      _readError = { at: Date.now(), code: String(r.error?.code || 'read-error').slice(0, 32) };
+      console.warn(`[provision] 작업 목록 파일을 읽지 못했습니다(${_readError.code}) — 손상이 아니라 원본은 그대로 두고 저장을 보류합니다(새 작업은 메모리에만 · ${Math.round(READ_RETRY_MS / 1000)}초마다 다시 읽음)`);
+    }
+    _persistBlocked = true;
+    armJobsRetry();
     return;
   }
-  try {
-    const p = JSON.parse(raw);
-    const list = Array.isArray(p?.jobs) ? p.jobs : null;
-    if (!list) throw new Error('형식 오류');
-    for (const j of list.slice(0, MAX_JOBS)) {
-      if (!j || typeof j !== 'object' || typeof j.id !== 'string' || !Array.isArray(j.vms)) continue;
+  const wasBlocked = _persistBlocked;
+  _persistBlocked = false; _readError = null;
+  if (r.kind === 'ok') {
+    const have = new Set(jobs.map((j) => j.id));   // 보류 중 메모리에 만든 새 작업 — 더 새것이라 앞에 두고, 파일의 작업은 뒤에 잇는다
+    for (const j of r.value.jobs.slice(0, MAX_JOBS)) {
+      if (!j || typeof j !== 'object' || typeof j.id !== 'string' || !Array.isArray(j.vms) || have.has(j.id)) continue;
       j.vms = j.vms.filter((v) => v && typeof v === 'object');
       jobs.push(settleAfterRestart(j));
     }
+    while (jobs.length > MAX_JOBS) jobs.pop();
     if (jobs.length) persist();
-  } catch (e) {
-    preserveCorrupt(JOBS_FILE, e?.message);
-    console.warn(`[provision] 작업 목록 파일이 손상돼 보존본으로 옮기고 빈 목록으로 시작합니다: ${safeLoadText(e) || '사유 미상'}`);
-  }
+  } else if (r.kind === 'corrupt') {
+    console.warn(`[provision] 작업 목록 파일이 손상돼 보존본으로 옮기고 빈 목록으로 시작합니다: ${safeLoadText(r.error) || '사유 미상'}`);
+    if (jobs.length) persist();
+  } else if (wasBlocked && jobs.length) persist();
+  if (wasBlocked) console.warn('[provision] 작업 목록 파일을 다시 읽었습니다 — 그동안의 새 작업과 합쳐 저장을 다시 엽니다');
+}
+/** 작업 기록 파일을 못 읽어 저장을 보류하는 중이면 표지(목록 응답 — 화면 배너), 아니면 null. 부를 때 간격이 지났으면 다시 읽는다. */
+export function jobsStoreError() {
+  if (_readError) loadJobs();
+  return _readError ? { readError: true, at: _readError.at, code: _readError.code, reason: `작업 기록 파일(provision-runs.json)을 읽지 못했습니다(${_readError.code}) — 원본은 그대로 두고 새 작업은 메모리에만 둡니다(그 사이 재시작하면 새 작업 기록은 사라집니다). ${Math.round(READ_RETRY_MS / 1000)}초마다 다시 읽고, 읽히면 합쳐 저장을 다시 엽니다.` } : null;
 }
 loadJobs();
 

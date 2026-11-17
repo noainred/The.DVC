@@ -410,10 +410,13 @@ function JobProgress({ jobId }) {
 function RecentJobs({ onOpen, activeId }) {
   const { data } = usePolling('/provision/jobs', {}, 5000);
   const jobs = (data?.jobs || []).filter((j) => j.id !== activeId);
-  if (!jobs.length) return null;
+  // 반증 후속 ⑥: 작업 기록 파일을 못 읽어 저장을 보류하는 중이면 사유를 보인다(목록이 비어도 — '작업 없음' 으로 읽히지 않게).
+  const storeNote = data?.storeError?.reason ? <div className="muted" style={{ fontSize: 12.5, color: '#fb0', margin: '6px 0' }}>{data.storeError.reason}</div> : null;
+  if (!jobs.length) return storeNote;
   return (
     <>
       <div className="section-title">최근 작업</div>
+      {storeNote}
       <div className="table-wrap">
         <STable>
           <thead><tr><th>시작</th><th>원본</th><th>대수</th><th>상태</th><th></th></tr></thead>

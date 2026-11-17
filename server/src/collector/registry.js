@@ -100,8 +100,9 @@ export function setCollectorDatacenterId(id, dcId, validIds = null) {
 }
 
 /** @returns {null|{at:number, reason:string}} 못 읽었으면 사유(원문 — 밖으로 낼 때는 summarizeRegistryError). */
-export function registryLoadError() {
-  loadCollectors();
+export function registryLoadError({ skipLoad = false } = {}) {
+  // 결정 G2 · G3 반증 후속 ⑤: 바로 앞에서 loadCollectors() 를 부른 호출부는 skipLoad 로 다시 읽기(파일 읽기 + JSON + 토큰 복호)를 건너뛴다 — 상태는 그 읽기가 세웠다.
+  if (!skipLoad) loadCollectors();
   let exists = false;
   try { exists = fs.existsSync(FILE); } catch { exists = false; }
   if (!exists) {

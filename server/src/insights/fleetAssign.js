@@ -41,10 +41,11 @@ export function fleetAssignRefusal() { loadFleetAssign(); return refused(); }
 
 export function loadFleetAssign() {
   const mtime = fileMtimeMs();
-  if (cache && mtime === cacheMtimeMs) return cache;
+  if (cache && mtime === cacheMtimeMs && !_file.recheckDue()) return cache;   // 결정 G2 반증 후속 ③: 오류 중에는 캐시를 믿지 않고 30초마다 다시 판정(보존본을 되돌리면 재시작 없이 풀린다)
+  const hadErr = !!_file.loadError();
   const r = _file.load();
   if (r.kind === 'read-error') { cache = null; if (!_unread) { _unread = true; bumpFleetRev(); } return {}; }   // 70 ①: 캐시하지 않는다
-  if (_unread) { _unread = false; bumpFleetRev(); }   // 70 ①: 읽기 오류 구간 경계에서 플릿 캐시를 버린다(fleetTags.js 와 같다)
+  if (_unread) { _unread = false; bumpFleetRev(); } else if (hadErr && r.kind === 'ok') bumpFleetRev();   // 후속 ③: 손상 → 되돌림도 플릿 캐시를 버린다   // 70 ①: 읽기 오류 구간 경계에서 플릿 캐시를 버린다(fleetTags.js 와 같다)
   const p = r.kind === 'ok' ? r.value : null;
   cache = p && typeof p.assign === 'object' && p.assign && !Array.isArray(p.assign) ? p.assign : {};
   cacheMtimeMs = mtime;

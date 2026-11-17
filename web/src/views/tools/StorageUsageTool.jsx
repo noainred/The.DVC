@@ -12,7 +12,7 @@ import { addressHiddenNote } from './addressHiddenText.js';
 import {
   UNITS, bytesText, deltaText, pctText, pctTone, aggregateCells, groupSummary, inexactNote, partialNote,
   probeLine, chartSeries, wideCsv, longCsv, csvFileName, SKIP_TEXT, MISSED_TEXT, DAY_LABELS, mailDirty, parseMailList,
-  recipientCount, daysText, deltaOf, legendText, periodText, deviceSub, mailBodyText, ATTACH_TEXT,
+  recipientCount, adminToForCount, daysText, deltaOf, legendText, periodText, deviceSub, mailBodyText, ATTACH_TEXT,
 } from './storageUsageText.js';
 import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
 
@@ -667,7 +667,7 @@ function MailView({ offsetMin }) {
   const parsed = parseMailList(toText);
   const formFull = { ...form, to: parsed.list };
   const dirty = mailDirty(formFull, data.mail);
-  const rc = recipientCount(form.includeAdmin, data.adminTo, parsed.list);
+  const rc = recipientCount(form.includeAdmin, adminToForCount(data), parsed.list);   // 반증 후속 ①: 가린 주소는 개수만
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const toggleDay = (i) => set('days', form.days.includes(i) ? form.days.filter((x) => x !== i) : [...form.days, i].sort((a, b) => a - b));
   const st = data.status || {};
@@ -720,7 +720,7 @@ function MailView({ offsetMin }) {
         </div>
         <label className="flex" style={{ gap: 8, alignItems: 'center', marginBottom: 6 }}>
           <input type="checkbox" checked={form.includeAdmin} onChange={(e) => set('includeAdmin', e.target.checked)} />
-          통합 관리자(설정 › 메일 발송의 기본 받는 사람 {data.adminTo?.length || 0}명) 포함
+          통합 관리자(설정 › 메일 발송의 기본 받는 사람 {adminToForCount(data).length}명{data.adminToMasked ? ' — 주소는 전체 범위 관리자만 봅니다' : ''}) 포함
         </label>
         <div className="muted" style={{ fontSize: 12, margin: '6px 0 4px' }}>추가 받는 사람(줄바꿈·쉼표 구분, 최대 {data.limits?.listMax}명)</div>
         <textarea className="input" rows={4} value={toText} onChange={(e) => setToText(e.target.value)} style={{ width: '100%', resize: 'vertical' }} placeholder="ops@example.com" />

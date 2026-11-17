@@ -100,11 +100,11 @@ function writeCfg(next) { atomicWriteFileSync(FILE(), JSON.stringify(next, null,
  * 결정(56~75 남긴 것) 57(57회차 남긴 것): 손상이면 보존본으로 옮긴 뒤 **재시작하면** 파일 없음 = 기본값(enabled:true)으로 돌아 사용자가 꺼 둔 주간 점검이
  *   켜졌고, 읽기 오류(EACCES · EIO)도 손상과 같이 원본을 옮겼다. 이제 공용 로더 — 읽기 오류는 원본을 두고 캐시하지 않으며(30초 간격 재읽기) · 손상은 보존 +
  *   서비스 점검 등재(보존본만 남은 재시작 뒤에도 '못 읽음') · 그동안 주간 회차는 보류(inspectTick 'unreadable') · 다음 회차 시각을 지어내지 않는다 ·
- *   저장은 409(settings-unreadable). 풀림: 권한을 고치면 다음 재읽기 · 손상은 서비스 점검 '기본값으로 확정'(켜짐으로 돌아감을 확인받는다) 또는 보존본 복구 뒤 재시작.
+ *   저장은 409(settings-unreadable). 풀림: 권한을 고치면 다음 재읽기 · 손상은 서비스 점검 '기본값으로 확정'(켜짐으로 돌아감을 확인받는다) 또는 보존본 복구(반증 후속 ③ — 30초 안에 다시 읽어 재시작 없이 풀린다).
  */
 const _file = makeJsonFileLoader(FILE, { label: 'PowerScale 점검 설정(storage-inspect.json) — 확정하면 기본값(주간 점검 켜짐 · 월요일 09:00 · 메일 꺼짐)으로 저장되고 주간 점검이 다시 돕니다', confirm: () => { writeCfg({ ...defaultCfg(), updatedAt: Date.now(), updatedBy: 'confirm-default' }); _cfg = null; _file.saved(); }, parse: (t) => { const raw = parseJsonObject(t); const r = normalizeSettings(raw, SETTINGS_DEFAULTS); if (r.issue) throw new Error(r.issue); return raw; }, tag: 'storage-inspect' });
 export function loadSettings() {
-  if (_cfg) return _cfg;
+  if (_cfg && !_file.recheckDue()) return _cfg;   // 결정 G2 반증 후속 ③: 오류 중에는 캐시를 믿지 않고 30초마다 다시 판정(보존본을 되돌리면 재시작 없이 풀린다)
   const r = _file.load();
   if (r.kind === 'read-error') return defaultCfg();   // 57: 캐시하지 않는다(틱은 settingsLoadError 로 보류)
   if (r.kind === 'ok') {

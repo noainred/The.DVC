@@ -41,7 +41,7 @@ const refused = () => _file.refusal('DataCenter(법인) 목록 · 할당');
 
 function loadRaw() {
   const t = fileTok();
-  if (cache && t === cacheTok) return cache;
+  if (cache && t === cacheTok && !_file.recheckDue()) return cache;   // 결정 G2 반증 후속 ③: 오류 중에는 캐시를 믿지 않고 30초마다 다시 판정(보존본을 되돌리면 재시작 없이 풀린다)
   const r = _file.load();
   if (r.kind === 'read-error') { cache = null; return EMPTY(); }   // 73 ①: 캐시하지 않는다
   if (r.kind !== 'ok') { cache = EMPTY(); cacheTok = t; return cache; }

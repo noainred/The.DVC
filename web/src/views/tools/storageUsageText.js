@@ -304,6 +304,16 @@ export function parseMailList(text) {
   const parts = String(text || '').split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean);
   return { list: parts.filter(isEmail), invalid: parts.filter((s) => !isEmail(s)) };
 }
+/**
+ * 결정 G2 · G3 반증 후속 ①: 서버가 통합 관리자 주소를 가렸으면(adminToMasked — 쓰기 범위가 제한된 관리자) 개수만 온다. 받는 사람 수를 세는 함수가
+ *   그대로 쓰게 겹치지 않는 자리 표시 주소를 그 수만큼 만든다(추가 주소와의 겹침은 알 수 없어 최대치로 센다). 가리지 않았으면 원래 목록.
+ * @param {{adminTo?:string[], adminToCount?:number, adminToMasked?:boolean}|null} srv
+ */
+export function adminToForCount(srv) {
+  if (!srv?.adminToMasked) return Array.isArray(srv?.adminTo) ? srv.adminTo : [];
+  const n = Number.isFinite(srv.adminToCount) && srv.adminToCount > 0 ? Math.min(Math.floor(srv.adminToCount), 1000) : 0;
+  return Array.from({ length: n }, (_, i) => `masked-${i}@masked.invalid`);
+}
 export function recipientCount(includeAdmin, adminTo, extra) {
   const seen = new Set();
   for (const a of [...(includeAdmin ? adminTo || [] : []), ...(extra || [])]) {
