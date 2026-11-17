@@ -11,8 +11,27 @@ export const SSH_KDF_ROUNDS_MAX = 128;
 const BEGIN = '-----BEGIN OPENSSH PRIVATE KEY-----';
 const END = '-----END OPENSSH PRIVATE KEY-----';
 const MAGIC = 'openssh-key-v1\0';
-/** 머리(매직 · cipher · kdf · kdf 옵션)를 읽는 데 푸는 본문 앞부분 글자 수 — 정상 키의 머리는 100바이트 남짓이다. */
+/** 머리(매직 · cipher · kdf · kdf 옵션)를 읽는 데 푸는 본문 앞부분 **base64 글자** 수 — 정상 키의 머리는 100바이트 남짓이다. */
 const HEAD_CHARS = 64 * 1024;
+
+/*
+ * 113회차 R1(재현 — 실제 ssh2 · 108회차 A6 수정이 만든 회귀): 앞부분을 **글자 수**로 자르면, 디코더가 건너뛰는 글자(공백 · 줄바꿈 · '!' …)를
+ *   본문 앞에 6만 5천 자 넘게 채운 키가 '빈 머리 = 새 형식이 아님' 으로 통과했다 — ssh2 는 그 글자를 건너뛰고 뒤의 진짜 머리를 읽어 rounds 만큼 돈다
+ *   (rounds 256 · 채움 7만 자: 사전 검사 null · parseKey 3.4초. 108회차 전 판본은 글자를 지우고 풀어 이 입력을 거절했다).
+ *   통합 계정 '키 검사'(POST /tools/credentials/inspect-key)는 길이 상한 없이 이 검사만 믿는다.
+ *   자르는 자리를 **디코더가 글자로 세는 것** HEAD_CHARS 개째로 잡는다. Node 디코더는 앞에서부터 차례로 풀므로(받지 않는 글자는 건너뛰고 '=' 에서 멈춘다)
+ *   그렇게 자른 앞부분을 푼 결과는 전체를 푼 결과의 앞부분과 같다.
+ *   ⚠ 이 표는 Node 가 글자로 받는 것(A–Z a–z 0–9 + / 와 base64url 의 - _)의 **부분집합**이어야 한다 — 디코더가 건너뛰는 글자를 여기서 세면
+ *     같은 우회가 다시 열린다(모자라게 세는 쪽은 더 길게 풀 뿐이라 안전하다). rebut113 이 채움 글자 0~255 · 그 밖 표본으로 대조한다.
+ */
+const isB64Char = (c) => (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c === 43 || c === 47 || c === 45 || c === 95;
+/** [from, to) 안에서 base64 글자 HEAD_CHARS 개가 들어가는 구간의 끝(그만큼 없으면 to). */
+function headEnd(s, from, to) {
+  if (to - from <= HEAD_CHARS) return to;
+  let n = 0;
+  for (let i = from; i < to; i++) if (isB64Char(s.charCodeAt(i)) && ++n >= HEAD_CHARS) return i + 1;
+  return to;
+}
 
 /*
  * 108회차 A6(재현 — 실제 ssh2): 이 사전 검사가 ssh2 와 **다른 바이트**를 읽어 상한을 비켜 갈 수 있었다.
@@ -32,7 +51,7 @@ function probeKdf(pem) {
   const b = s.lastIndexOf(END);
   if (b < from) return { kind: 'none' };
   let buf;
-  try { buf = Buffer.from(s.slice(from, Math.min(b, from + HEAD_CHARS)), 'base64'); } catch { return { kind: 'none' }; }
+  try { buf = Buffer.from(s.slice(from, headEnd(s, from, b)), 'base64'); } catch { return { kind: 'none' }; }   // 113회차 R1: 글자 수가 아니라 base64 글자 수로 자른다
   if (buf.length < MAGIC.length || buf.toString('latin1', 0, MAGIC.length) !== MAGIC) return { kind: 'none' };
   let off = MAGIC.length;
   const str = () => { if (off + 4 > buf.length) return null; const n = buf.readUInt32BE(off); off += 4; if (off + n > buf.length) return null; const v = buf.subarray(off, off + n); off += n; return v; };

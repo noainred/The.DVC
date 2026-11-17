@@ -589,6 +589,13 @@ fi
 vp_stage_tree() {
   local src="$1" dst="$2" label="$3"
   rm -rf -- "$dst"
+  # 113회차 R3(재현): 지난 설치의 찌꺼기를 지우지 못했는데(이 함수는 `||` · `if !` 안에서 불려 set -e 가 rm 실패를 보지 않는다) 그대로 복사하면
+  #   cp -a 가 남은 폴더 **안으로** 들어가($dst/node/…) 그 폴더가 런타임 자리에 놓였다 — bin/node 가 없는 런타임으로 설치가 0 으로 끝나고 서비스를 재시작했다.
+  if [[ -e "$dst" || -L "$dst" ]]; then
+    echo "✖ 지난 설치가 남긴 임시 폴더($dst)를 지우지 못했습니다 — 기존 런타임·앱은 바꾸지 않았고 서비스도 건드리지 않았습니다." >&2
+    echo "  그 폴더를 직접 지운 뒤(변경 불가 속성 lsattr · 마운트 여부 확인) install.sh 를 다시 실행하세요." >&2
+    return 1
+  fi
   if ! cp -a "$src" "$dst"; then
     rm -rf -- "$dst"
     echo "✖ $label 복사에 실패했습니다($dst) — 기존 런타임·앱은 바꾸지 않았고 서비스도 건드리지 않았습니다." >&2
@@ -665,7 +672,8 @@ vp_cfg_settings_owners "$CONFIG_DIR"
 for f in vcenters.json users.json upgrade.json; do
   MIG_ST=0; vp_cfg_state "$CONFIG_DIR/$f" || MIG_ST=$?
   if [[ $MIG_ST -eq 1 ]]; then
-    for src in "$BAK/server/config/$f" "$APP_DST/server/config/$f"; do
+    # 113회차 R5: 첫 설치(BAK 가 비어 있다)에서는 첫 후보가 '/server/config/<파일>' — 파일시스템 루트의 남의 파일이었다(있으면 root 가 설정으로 가져온다). 백업이 있을 때만 본다.
+    for src in ${BAK:+"$BAK/server/config/$f"} "$APP_DST/server/config/$f"; do
       if [[ -n "$src" && -f "$src" && ! -L "$src" ]]; then
         if vp_cfg_copy_new "$src" "$CONFIG_DIR/$f"; then echo "==> 기존 설정 이전: $f -> $CONFIG_DIR/"; fi
         break
@@ -834,16 +842,19 @@ if declare -F vp_install_root_tools >/dev/null; then
     echo "⚠ root 소유 콘솔 도구 폴더를 만들지 못했습니다($TOOLS_DIR) — 콘솔 도구 바로가기를 걸지 않습니다."
   fi
 fi
-# vp_link <링크 이름> <root 래퍼 이름> <앱 트리 도구(있을 때만)> <설명>
+# vp_link <링크 이름> <root 래퍼 이름> <설명>
+#   113회차 R2(통째 실행으로 재현): 설명을 `$4` 로 읽었는데 부르는 세 곳은 인자를 셋만 준다 — set -u 라 첫 링크(vmware-portal-otp)를 건 직후
+#   'install.sh: $4: unbound variable' 로 **설치가 1 로 끝났다**. 서비스는 이미 재시작된 뒤라 포탈은 돌지만 vmware-portal-verify · vmware-portal-users
+#   링크, 7) firewalld 포트 허용, '설치 완료' · 최초 로그인 안내가 전부 빠졌다(구간 실행 테스트는 이 함수를 부르지 않았다).
 vp_link() {
-  local link="/usr/local/bin/$1" target="$TOOLS_DIR/$2" cur
+  local link="/usr/local/bin/$1" target="$TOOLS_DIR/$2" label="${3:-콘솔 도구}" cur
   # 이 설치본의 예전 링크(앱 트리를 가리킴)는 어떤 경우에도 남기지 않는다 — 그것이 root 상승 경로다.
   if [[ -L "$link" ]]; then
     cur="$(readlink "$link")"
     if [[ "$cur" == "$APP_DST/"* ]]; then rm -f -- "$link"; fi
   fi
   if [[ -n "$TOOLS_DIR" && -f "$target" && -x "$target" ]]; then
-    ln -sfn "$target" "$link" 2>/dev/null && echo "==> $4: $1 (→ $target · root 소유 사본)"
+    ln -sfn "$target" "$link" 2>/dev/null && echo "==> $label: $1 (→ $target · root 소유 사본)"
   fi
   return 0   # best-effort — 링크 실패로 설치를 멈추지 않는다(set -e)
 }
