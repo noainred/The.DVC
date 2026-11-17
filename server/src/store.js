@@ -500,6 +500,9 @@ class Store {
             pushAll(merged.networks, s.networks);
             pushAll(merged.alarms, s.alarms);
           } else if (isAuto && pushSite(merged, getMock(), vc.id, { mock: true })) {
+            // 91회차(89 F1 반증 — 형제 분기): 목으로 채운 항목도 등록부 region 이 이긴다(목 데이터의 지역으로 지역 범위 판정이 갈렸다).
+            const li = merged.vcenters.length - 1;
+            if (merged.vcenters[li]?.id === vc.id) merged.vcenters[li] = withRegistryVcenter(merged.vcenters[li], vc);
             // auto 폴백: 목 데이터에 이 vc.id가 있으면 그걸로 채운다.
             // v2.443: 채운 vCenter 에 mock 표시를 남긴다 — 이 데이터는 가짜라서 중앙에 push 하면
             // 안 되는데, DATA_SOURCE 는 'auto' 라 기존 차단(source==='mock')을 그냥 통과했다.

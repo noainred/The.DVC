@@ -245,10 +245,84 @@ export function reconcileAdConfigText(backupText, currentText) {
   return { text: JSON.stringify({ ...b, ad: { ...b.ad, policyEpoch: epoch } }, null, 2), bumped: true, epoch };
 }
 
+/**
+ * 91회차(88회차 남긴 것 ① · 결정 — 권장안): 장비 신뢰(peer-trust.json)도 복원으로 **약해지지 않게** 맞춘다 — 복원 라우트는 OTP 를 묻지 않는데(정책을 observe 로
+ *   바꾸는 것은 소유자 + 본인 OTP — 91회차) 백업 판본을 그대로 쓰면 ① 백업 뒤 enforce 로 닫은 정책이 observe 로 돌아가고 ② 백업 뒤 회수(거부)한 지문이 다시
+ *   신뢰 지문으로 통과했다(가로챈 장비 · 유출된 키 — F7 연동 키 폐기와 같은 종류, v2.842 '켜기만' 규칙).
+ *   규칙: ⓐ 정책은 지금이 enforce 면 enforce(켜기만) ⓑ 지금 파일에서 거부된 지문은 백업 판본의 신뢰 · 대기 지문에서 빼고 거부 목록에 남긴다 ⓒ 백업 이후 생긴 항목(지금에만 있음)은 남긴다.
+ *   지금 파일이 없거나 깨졌으면(재해 복구 · 손상 — 로더가 enforce 로 닫는다) 백업 그대로. 읽기 오류면 reconcileForApply 가 던진다(이 파일만 적용하지 않는다).
+ *   ⚠ 이 모듈은 기동 때 다른 모듈보다 먼저 돈다(stagedRestoreBoot) — security/peerTrust.js 를 import 하지 않는다(config · audit 를 먼저 싣는다). 키 · 지문은 파일에 쓰인
+ *   정규형(peerTrust 가 쓸 때 정규화한다)을 가볍게 맞춰 비교한다.
+ */
+const PEER_KINDS_R = ['ssh', 'tls'];
+const peerKeyR = (e) => `${e.kind}|${String(e.host ?? '').trim().toLowerCase()}|${Math.floor(Number(e.port))}`;
+const peerFpR = (kind, fp) => {
+  const t = String(fp ?? '').slice(0, 200).trim();   // 지문은 200자 안(peerTrust normalizeFingerprint 상한) — 정규식 전에 자른다
+  if (kind === 'ssh') return t.replace(/^sha256:/i, '').replace(/=+$/, '');
+  return t.replace(/^sha256:/i, '').replace(/[\s:]/g, '').toUpperCase();
+};
+const peerTrustedListR = (e) => {
+  const out = [];
+  if (Array.isArray(e?.trusted)) for (const t of e.trusted) out.push(t); else if (e?.trusted && typeof e.trusted === 'object') out.push(e.trusted);
+  if (Array.isArray(e?.trustedMore)) for (const t of e.trustedMore) out.push(t);
+  return out.filter((t) => t && typeof t === 'object');
+};
+export function reconcilePeerTrustText(backupText, currentText) {
+  const b = parseJson(backupText);
+  if (!b || typeof b !== 'object' || !Array.isArray(b.entries)) return { text: String(backupText), keptPolicy: [], keptRevoked: 0 };
+  const c = parseJson(currentText);
+  if (!c || typeof c !== 'object' || !Array.isArray(c.entries)) return { text: String(backupText), keptPolicy: [], keptRevoked: 0 };
+  const bPolicy = b.policy && typeof b.policy === 'object' && !Array.isArray(b.policy) ? b.policy : {};
+  const out = { ...b, policy: { ...bPolicy } };
+  const keptPolicy = [];
+  for (const kind of PEER_KINDS_R) {
+    if (c.policy?.[kind] === 'enforce' && out.policy[kind] !== 'enforce') {
+      out.policy[kind] = 'enforce'; keptPolicy.push(kind);
+      if (c.origin?.[kind] && typeof c.origin[kind] === 'object') out.origin = { ...(b.origin && typeof b.origin === 'object' ? b.origin : {}), [kind]: c.origin[kind] };
+    }
+  }
+  const cur = new Map();
+  for (const e of c.entries) if (e && typeof e === 'object' && PEER_KINDS_R.includes(e.kind)) cur.set(peerKeyR(e), e);
+  const seen = new Set();
+  let keptRevoked = 0;
+  const entries = b.entries.map((e) => {
+    if (!e || typeof e !== 'object' || !PEER_KINDS_R.includes(e.kind)) return e;
+    const key = peerKeyR(e); seen.add(key);
+    const now = cur.get(key);
+    const nowRej = Array.isArray(now?.rejected) ? now.rejected.filter((r) => r && typeof r === 'object') : [];
+    if (!nowRej.length) return e;
+    const rev = new Set(nowRej.map((r) => peerFpR(e.kind, r.fp)).filter(Boolean));
+    const list = peerTrustedListR(e);
+    const kept = list.filter((t) => !rev.has(peerFpR(e.kind, t.fp)));
+    const bRej = Array.isArray(e.rejected) ? e.rejected.filter((r) => r && typeof r === 'object') : [];
+    const bRejFps = new Set(bRej.map((r) => peerFpR(e.kind, r.fp)));
+    const addRej = nowRej.filter((r) => !bRejFps.has(peerFpR(e.kind, r.fp)));
+    const pendRevoked = !!(e.pending && typeof e.pending === 'object' && rev.has(peerFpR(e.kind, e.pending.fp)));
+    if (kept.length === list.length && !addRej.length && !pendRevoked) return e;
+    keptRevoked += (list.length - kept.length) + (pendRevoked ? 1 : 0);
+    const ne = { ...e, trusted: kept[0] || null, rejected: [...bRej, ...addRej] };
+    if (kept.length > 1) ne.trustedMore = kept.slice(1); else delete ne.trustedMore;
+    if (pendRevoked) ne.pending = null;
+    return ne;
+  });
+  for (const [key, e] of cur) if (!seen.has(key)) entries.push(e);   // 백업 이후 생긴 항목(승인 · 거부 기록)
+  out.entries = entries;
+  return { text: JSON.stringify(out, null, 1), keptPolicy, keptRevoked };
+}
+
+/** 91회차: 지금 파일을 읽는다 — 없으면 null, 그 밖의 읽기 오류(EACCES · EIO · EISDIR)는 던져서 **이 파일만 적용하지 않는다**(지금 값을 모른 채 약한 백업으로 덮지 않게). */
+function readCurrentOrThrow(configDir, name, what) {
+  try { return fs.readFileSync(path.join(configDir, name), 'utf8'); } catch (e) {
+    if (e?.code === 'ENOENT') return null;
+    throw new Error(`지금 ${what}(${name})을 읽지 못해(${String(e?.code || 'read-error').slice(0, 32)}) 복원하지 않았습니다 — 지금 값을 모른 채 백업 판본으로 덮지 않게 지금 파일을 그대로 둡니다`);
+  }
+}
+
 export function reconcileForApply(name, content, configDir) {
   if (name === 'security-session.json') {
-    let cur = null;
-    try { cur = fs.readFileSync(path.join(configDir, name), 'utf8'); } catch { cur = null; }
+    // 91회차(88 F6 · F7 반증 — 형제): 지금 파일의 **읽기 오류**를 '없음' 으로 보면 기본값과 견줘 백업의 약한 값(예: 지금 otp_only · 백업 레거시)이 그대로 들어갔다
+    //   (원자 쓰기는 읽지 못한 원본도 대체한다). 없음(ENOENT)만 기본값과 견주고, 읽기 오류면 이 파일만 적용하지 않는다.
+    const cur = readCurrentOrThrow(configDir, name, '세션 보안 설정');
     const r = reconcileSecuritySessionText(content, cur);
     const others = r.kept.filter((k) => k !== 'bareosSetupOtp');
     if (r.forcedOn && !others.length) return { content: r.text, info: { bareosSetupOtpKeptOn: true }, warning: { file: name, reason: '백업에는 Bareos 자동 설정 본인 OTP 재확인이 꺼져 있었지만 복원으로는 끄지 않습니다(켬으로 적용) — 끄려면 설정 › 보안 › 세션 보안에서 본인 OTP 로 저장하세요.' } }
@@ -257,6 +331,16 @@ export function reconcileForApply(name, content, configDir) {
         warning: { file: name, reason: `백업 판본이 지금보다 약한 보안 설정(${r.kept.join(' · ')})을 담고 있어 그 값은 지금 수준으로 두었습니다 — 복원은 본인 OTP 를 묻지 않으므로 약하게 되돌리지 않습니다(바꾸려면 설정 › 세션 보안에서 소유자 + 본인 OTP).` } };
     }
     return { content: r.text };
+  }
+  if (name === 'peer-trust.json') {   // 91회차(88회차 남긴 것 ①)
+    const cur = readCurrentOrThrow(configDir, name, '장비 신뢰 목록');
+    const r = reconcilePeerTrustText(content, cur);
+    if (!r.keptPolicy.length && !r.keptRevoked) return { content: r.text };
+    const parts = [];
+    if (r.keptPolicy.length) parts.push(`정책은 지금 값(승인된 지문만 허용 — ${r.keptPolicy.join(' · ')})을 유지했습니다`);
+    if (r.keptRevoked) parts.push(`백업 이후 거부(회수)한 지문 ${r.keptRevoked}개는 신뢰 목록으로 되살리지 않았습니다`);
+    return { content: r.text, info: { peerTrustKeptPolicy: r.keptPolicy, peerTrustKeptRevoked: r.keptRevoked },
+      warning: { file: name, reason: `${parts.join(' · ')} — 복원은 본인 OTP 를 묻지 않으므로 장비 신뢰를 약하게 되돌리지 않습니다.` } };
   }
   if (name === 'api-keys.json') {   // 88회차 F7
     let cur = null;
@@ -281,8 +365,9 @@ export function reconcileForApply(name, content, configDir) {
       : { content: r.text };
   }
   if (name === 'secrets-policy.json' || name === 'secrets-policy.trusted.json') {
-    let cur = null;
-    try { cur = fs.readFileSync(path.join(configDir, name), 'utf8'); } catch { cur = null; }
+    // 91회차: 읽기 오류를 '없음' 으로 보면 지금 암호화인 정책 파일(읽지 못함)을 평문 백업으로 덮었다 — 복원 뒤 로더는 읽히는 평문 정책을 쓴다(S-07 의 직전 · 신뢰 값 복구가
+    //   닿지 않는다). 없음(재해 복구)만 백업 그대로, 읽기 오류면 이 파일만 적용하지 않는다.
+    const cur = readCurrentOrThrow(configDir, name, '자격증명 저장 방식 정책');
     const r = reconcileSecretsPolicyText(content, cur);
     return r.keptCurrent
       ? { content: r.text, info: { secretsPolicyKept: true }, warning: { file: name, reason: '백업은 자격증명 평문 저장이지만 지금은 암호화라 지금 방식을 유지했습니다 — 복원은 본인 OTP 를 묻지 않으므로 약하게 되돌리지 않습니다.' } }

@@ -43,6 +43,7 @@ import { latestRecords as curUserLatest } from '../../curuser/db.js';
 import { load as loadCurUser, staleAfterMs } from '../../curuser/settings.js';
 import { buildReport as buildCurUserReport } from '../../curuser/report.js';
 import { combineSources } from '../../curuser/combine.js';
+import { NOT_TARGET_KINDS as CU_NOT_TARGET } from '../../curuser/aggregate.js';   // 91회차(90 F4 반증): 하한 사유에는 대상 아님 종류를 섞지 않는다
 import { KIND_LABEL as CU_KIND_LABEL } from '../../curuser/guestinfoSource.js';
 import { demoOn, isMockMode } from '../../mock/demo/flags.js'; // v2.708 데모(mock)는 켜진 것처럼
 
@@ -357,9 +358,13 @@ api.get('/tools/current-users/combined', requirePerm('tools'), async (req, res) 
     //   이 이름 목록도 **부분**이다 — VDI 쪽(serversFailed > 0)과 같은 규칙으로 하한을 넘긴다. 예전에는 원문 절단만 보아 40대 중 30대를 못 읽어도
     //   합집합 카드가 'Windows ∪ VDI'(전체)라고 말했다.
     const unread = Number(rep.total.vmsTransient) || 0;
+    // 91회차(90 F4 반증): 'N대는 빠졌습니다' 의 사유 목록에 대상 아님(발행기 없음 · VM 없음 — N 에 들지 않는다)을 섞으면 수가 맞지 않았다(3대 — 값 오래됨 2대 · 발행기 없음 5대).
+    const unreadKindText = Object.entries(rep.kinds || {})
+      .filter(([k]) => k !== 'ok' && !CU_NOT_TARGET.includes(k))
+      .map(([k, n2]) => `${CU_KIND_LABEL[k] || k} ${n2}대`).join(' · ');
     windows = recs.length && usable > 0
       // v2.622(감사 DATA-06): 원문 절단 서버가 섞였으면 이 이름 목록은 하한이다 — 합집합에 전달한다.
-      ? { state: 'ok', names: rep.total.names, lowerBound: !!rep.total.usersLowerBound || unread > 0, reason: unread > 0 ? `지금 값을 읽지 못한 서버 ${unread}대는 빠졌습니다 — ${kindText || '사유 미상'}.` : '', detail: { users: rep.total.users, sessions: rep.total.sessions, kinds: rep.kinds, lastReadAt: rep.lastReadAt, unread } }
+      ? { state: 'ok', names: rep.total.names, lowerBound: !!rep.total.usersLowerBound || unread > 0, reason: unread > 0 ? `지금 값을 읽지 못한 서버 ${unread}대는 빠졌습니다 — ${unreadKindText || '사유 미상'}.` : '', detail: { users: rep.total.users, sessions: rep.total.sessions, kinds: rep.kinds, lastReadAt: rep.lastReadAt, unread } }
       : recs.length
         ? { state: 'failed', names: [], reason: `수집된 서버 ${recs.length}대 중 **지금 값이 유효한 서버가 없습니다** — ${kindText || '사유 미상'}.`,
           detail: { users: null, sessions: null, kinds: rep.kinds, lastReadAt: rep.lastReadAt } }

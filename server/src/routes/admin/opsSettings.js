@@ -239,7 +239,11 @@ adminRouter.put('/security/session', adminOnly, requireSettingsOwner, (req, res)
     after = saveSessionSecurity({ idleLogoutEnabled: req.body?.idleLogoutEnabled, idleLogoutMin: req.body?.idleLogoutMin, settingsOwners: req.body?.settingsOwners, loginPolicy: req.body?.loginPolicy, singleSession: req.body?.singleSession, demoSession: req.body?.demoSession,
       sessionWarnEnabled: req.body?.sessionWarnEnabled, sessionWarnMin: req.body?.sessionWarnMin, sessionExtendMin: req.body?.sessionExtendMin, sessionMaxHours: req.body?.sessionMaxHours,
       bareosSetupOtp: req.body?.bareosSetupOtp });
-  } catch (e) { return res.status(400).json({ ok: false, reason: e.message }); }
+  } catch (e) {
+    // 91회차(88회차 결정 — 권장안): 저장 예외의 상태를 살린다 — 읽기 오류 중 저장 거절(503 settings-unreadable)을 400(입력 오류)으로 바꾸면 화면이 '입력이 틀렸다' 로 읽는다.
+    const st = Number(e?.status);
+    return res.status(st >= 400 && st < 600 ? st : 400).json({ ok: false, reason: e.message, ...(e?.code ? { code: String(e.code).slice(0, 64) } : {}) });
+  }
   const fmt = (s) => (s.idleLogoutEnabled ? `${s.idleLogoutMin}분` : '비활성');
   const polLabel = (p) => ({ otp_only: 'OTP 전용', otp_or_password: 'OTP+비밀번호(혼용)', password_only: '비밀번호 전용' }[p] || '기본(고권한 OTP 전용)');
   // Demo/Guest 중복 접속 모드 라벨(v2.294) — 감사 로그에 사람이 읽는 형태로 남긴다.

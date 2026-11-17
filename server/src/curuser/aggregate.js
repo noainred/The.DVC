@@ -63,12 +63,15 @@ export const PERSISTENT_FAIL_CYCLES = 3;
 const failKeyOf = (r) => `${String(r?.vcenterId || '')}|${String(r?.vmId || r?.name || '')}`;
 const isTransientFail = (r) => r && r.ok === false && !NOT_TARGET_KINDS.includes(r.kind);
 
-/** 한 주기를 진행한다 — 실패 VM 의 연속 횟수(같은 사유일 때만 +1). 새 상태 Map 을 돌려준다(입력 불변). 순수. */
-export function advanceFailState(records, prev = new Map()) {
+/**
+ * 한 주기를 진행한다 — 실패 VM 의 연속 횟수(같은 사유일 때만 +1). 새 상태 Map 을 돌려준다(입력 불변). 순수.
+ * 91회차: keyOf · isFail 을 받아 Horizon 실시간 사용자(서버 단위 — horizon/sessionPoller.js)도 같은 규칙 한 벌을 쓴다(판정을 복제하지 않는다).
+ */
+export function advanceFailState(records, prev = new Map(), { keyOf = failKeyOf, isFail = isTransientFail } = {}) {
   const next = new Map();
   for (const r of records || []) {
-    if (!isTransientFail(r)) continue;
-    const k = failKeyOf(r);
+    if (!isFail(r)) continue;
+    const k = keyOf(r);
     const kind = String(r.kind || '');
     const p = prev instanceof Map ? prev.get(k) : null;
     next.set(k, { kind, count: p && p.kind === kind ? p.count + 1 : 1 });
@@ -76,13 +79,13 @@ export function advanceFailState(records, prev = new Map()) {
   return next;
 }
 /** 상태에서 '영구 실패' 키 집합 — 지금 레코드가 같은 사유로 실패 중이고 연속 cycles 회 이상일 때만. 순수. */
-export function persistentFailKeys(records, state, { cycles = PERSISTENT_FAIL_CYCLES } = {}) {
+export function persistentFailKeys(records, state, { cycles = PERSISTENT_FAIL_CYCLES, keyOf = failKeyOf, isFail = isTransientFail } = {}) {
   const out = new Set();
   if (!(state instanceof Map) || !state.size) return out;
   for (const r of records || []) {
-    if (!isTransientFail(r)) continue;
-    const st = state.get(failKeyOf(r));
-    if (st && st.kind === String(r.kind || '') && st.count >= cycles) out.add(failKeyOf(r));
+    if (!isFail(r)) continue;
+    const st = state.get(keyOf(r));
+    if (st && st.kind === String(r.kind || '') && st.count >= cycles) out.add(keyOf(r));
   }
   return out;
 }

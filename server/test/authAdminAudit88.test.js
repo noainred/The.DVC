@@ -102,7 +102,7 @@ test('F2 emergency-stop.json 읽기 오류 — 2인 승인 긴급중단이 영�
   const undo = eioOn(file);
   try {
     clock += 1;
-    assert.equal(es.isStopped(), false);   // 읽기 오류 동안의 값은 예전과 같은 비활성(fail-closed 는 결정 필요)
+    assert.equal(es.isStopped(), true);   // 91회차(88 결정 ③ 권장안): 한 번도 못 읽은 읽기 오류 동안은 멈춤 쪽(fail-closed) — 예전 기대값 false 는 결정 전 동작
     assert.equal(es.getEmergencyStatus().readError?.code, 'EIO', '읽기 오류를 상태에 밝힌다');
   } finally { undo(); }
   assert.ok(fs.existsSync(file));

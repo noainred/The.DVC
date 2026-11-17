@@ -33,6 +33,7 @@ import { demoOn, isMockMode } from '../mock/demo/flags.js';
 import { ensureDemoHorizonSeed, isDemoEntryId, demoHorizonBackfillRows, demoHorizonCatalogRaw } from '../mock/demo/users.js'; // v2.708 데모(mock 에서만)
 import { normalizeCatalog, usageFromSessions } from './appUsage.js';
 import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
+import { advanceFailState, persistentFailKeys, PERSISTENT_FAIL_CYCLES } from '../curuser/aggregate.js';   // 91회차: 영구 실패 판정 한 벌(현재 사용자와 같은 규칙)
 
 const CONCURRENCY_CAP = 8;
 const PRUNE_EVERY_RUNS = 12;                        // 5분 × 12 = 1시간에 1회
@@ -117,6 +118,29 @@ export function targetServers(settings = loadHzSettings()) {
  * v2.708 데모(mock) — 추이가 거의 비어 있으면 지난 7일 추이 + 30일 누적을 한 번 채운다(데모 등록 서버만).
  * 프로세스당 1회 · 이미 있는 행은 건드리지 않는다(sessionDb.backfillHzDemo 가 INSERT OR IGNORE).
  */
+/*
+ * 91회차(90회차 결정 ⓐ — 권장안): 서버별 연속 실패 상태 — 같은 사유로 PERSISTENT_FAIL_CYCLES 주기 연속 실패한 서버(인증 정지 · 같은 오류가 이어짐)는
+ *   전체('') 추이의 부분 합 판정에서 뺀다(현재 사용자 v2.682 R3A-03 과 같은 규칙 · curuser/aggregate.js 의 판정 한 벌). 예전에는 그런 서버가 한 대만 있어도
+ *   전체 추이가 그동안 **계속 NULL** 이었다(정직하나 영구). 막 실패한 서버(N주기 미만)는 예전처럼 부분 합으로 적재하지 않는다. 뺀 서버 수는 lastResult ·
+ *   상태에 밝힌다(조용히 빼지 않는다). 지금 값(표 · KPI)의 '최소' 표시는 그대로다(그 서버 사용자는 빠져 있다). 인메모리 — 재시작 직후 N주기는 예전처럼 보류.
+ *   쉬는 주기(경로 없음 backoff)는 최신값에 쓰지 않아 원래 합계에 들지 않는다(대상 아님과 같다).
+ */
+const HZ_FAIL_OPTS = { keyOf: (r) => String(r?.serverId || ''), isFail: (r) => !!r && r.ok === false && !!r.serverId };
+let _hzFailState = new Map();
+export function _resetHzFailStateForTest() { _hzFailState = new Map(); }
+/**
+ * 전체('') 추이 행(순수) — 이번 주기 합계(total) · 이번 주기 서버 레코드(fresh) · 연속 실패 상태(state). advance 면 상태를 한 칸 진행한다.
+ * @returns {{ row: object, state: Map, persistentIds: Set<string> }}
+ */
+export function hzTrendTotal(total, fresh, state, { advance = false } = {}) {
+  const next = advance ? advanceFailState(fresh, state, HZ_FAIL_OPTS) : state;
+  const persistentIds = persistentFailKeys(fresh, next, HZ_FAIL_OPTS);
+  const transientFailed = Math.max(0, (Number(total?.serversFailed) || 0) - persistentIds.size);
+  // 판정(seriesRow)은 일시 실패만 보고, 적재하는 serversFailed 도 영구 실패를 뺀 수(이 행의 값이 그 서버 없이 '전체' 임을 말한다 — 뺀 수는 lastResult).
+  const row = { serverId: '', ...seriesRow({ ...total, serversFailed: transientFailed }), serversOk: total?.serversOk, serversFailed: transientFailed };
+  return { row, state: next, persistentIds };
+}
+
 let _demoBackfilled = false;
 async function demoBackfillOnce(servers, s, now) {
   if (_demoBackfilled || !isMockMode()) return;
@@ -245,17 +269,21 @@ export async function runHzSessionsNow(trigger = 'manual', { demoOnly = false } 
     for (const row of await hzLatestRecords()) if (!live.has(row.serverId)) await dropHzLatest(row.serverId);
 
     let total = null;
+    let persistentIds = new Set();
     if (commit.ok) {
       const all = await hzLatestRecords();
       // ⚠ 이번 주기의 결과만 합친다 — 직전 주기 값을 섞으면 '지금 몇 명' 이 거짓이 된다.
       const fresh = all.filter((r) => Number(r.ts) === ts);
       total = combineServers(fresh);
+      // 91회차: 영구 실패 서버는 '' 추이의 부분 합 판정에서 뺀다(위 머리말). 주기 수집(걸러내지 않은 실행)만 한 칸 진행한다.
+      const trend = filtered ? null : hzTrendTotal(total, fresh, _hzFailState, { advance: periodic });
+      if (trend) { _hzFailState = trend.state; persistentIds = trend.persistentIds; }
       await commitHzSessions({
         ts,
         records: [],
         series: [
           // v2.721(감사 S1-02): 걸러낸 실행의 합계는 일부 서버만의 부분 합이다 — '전체' 추이('')에 적재하지 않는다.
-          ...(filtered ? [] : [{ serverId: '', ...seriesRow(total), serversOk: total.serversOk, serversFailed: total.serversFailed }]),
+          ...(trend ? [trend.row] : []),
           ...fresh.filter((r) => r.ok).map((r) => ({ serverId: r.serverId, ...seriesRow(r), serversOk: 1, serversFailed: 0 })),
         ],
       });
@@ -276,6 +304,8 @@ export async function runHzSessionsNow(trigger = 'manual', { demoOnly = false } 
       usersLowerBound: !!total?.usersLowerBound, connectedLowerBound: !!total?.connectedLowerBound,
       serversTruncated: total?.serversTruncated ?? 0,
       serversFailed: total?.serversFailed ?? null,
+      // 91회차: 같은 사유로 연속 실패해 전체 추이 판정에서 뺀 서버(조용히 빼지 않는다).
+      serversPersistent: persistentIds.size, ...(persistentIds.size ? { persistentServerIds: [...persistentIds].slice(0, 50) } : {}), persistentCycles: PERSISTENT_FAIL_CYCLES,
       errors, mock, ms: Date.now() - started, commit, ...(demoOnly ? { skippedNonDemo } : {}),
     };
     return { ok: errors.length === 0, ...lastResult };

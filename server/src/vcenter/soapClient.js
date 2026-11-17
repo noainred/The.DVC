@@ -1902,6 +1902,24 @@ export function eventFilterXml(sinceTs, { userNames = null, eventTypeIds = null 
 // XML 특수문자 이스케이프(collector moref가 &<> 포함 가능).
 function escXml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
+/**
+ * 데이터스토어 용량 · 여유 · 사용량(SOAP summary.*) — 순수.
+ * 91회차 ⓒ(89회차 결정 — 권장안): 용량을 못 읽으면 0 이 아니라 null(REST 폴백 v2.733 C2-06 과 같은 규칙 — 루트 '못 읽은 값은 0 이 아니다').
+ *   예전 `num()` 은 '0 GB 데이터스토어' 를 만들어 사용량 미상(store.dsUsageUnknownOf — capacityGB === null 또는 > 0)에서도 빠졌다.
+ *   용량을 모르면 여유 · 사용량도 판정하지 않는다(REST 와 같이).
+ * v2.598 VC2598-07: freeSpace 가 없으면(접근 불가 DS 등) 예전엔 여유 0 → 사용량 = 전체 = **100% · critical 알람**이 됐다.
+ *   못 읽은 여유는 null 이고 사용량·사용률도 null 이다(REST 폴백 v2.597 C2597-08 과 같은 규칙).
+ */
+export function soapDatastoreSpace(p) {
+  const capBytes = numOrNull(p?.['summary.capacity']);
+  const capacityGB = capBytes == null ? null : Math.round(capBytes / 1024 ** 3);
+  const freeRaw = p?.['summary.freeSpace'];
+  const freeKnown = capacityGB != null && freeRaw != null && freeRaw !== '' && Number.isFinite(Number(freeRaw));
+  const freeGB = freeKnown ? Math.round(Number(freeRaw) / 1024 ** 3) : null;
+  const usedGB = freeKnown ? Math.max(0, capacityGB - freeGB) : null;
+  return { capacityGB, freeGB, usedGB, usagePct: usedGB == null || !(capacityGB > 0) ? null : pct(usedGB, capacityGB) };
+}
+
 /** ReadNextEvents 응답의 <returnval> 블록들을 파싱. */
 export function parseEventsXml(xml) {
   const out = [];
@@ -2400,22 +2418,12 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
 
     const datastores = objs.filter((x) => x.type === 'Datastore').map((o) => {
       const p = o.props;
-      const capacityGB = Math.round(num(p['summary.capacity']) / 1024 ** 3);
-      // v2.598 VC2598-07: freeSpace 가 없으면(접근 불가 DS 등) 예전엔 여유 0 → 사용량 = 전체 = **100% · critical
-      // 알람**이 됐다. 못 읽은 여유는 null 이고 사용량·사용률도 null 이다(REST 폴백 v2.597 C2597-08 과 같은 규칙).
-      const freeRaw = p['summary.freeSpace'];
-      const freeKnown = freeRaw != null && freeRaw !== '' && Number.isFinite(Number(freeRaw));
-      const freeGB = freeKnown ? Math.round(Number(freeRaw) / 1024 ** 3) : null;
-      const usedGB = freeKnown ? Math.max(0, capacityGB - freeGB) : null;
       return {
         id: `${vc.id}:${o.ref}`,
         vcenterId: vc.id,
         name: p.name,
         type: p['summary.type'],
-        capacityGB,
-        freeGB,
-        usedGB,
-        usagePct: usedGB == null || !(capacityGB > 0) ? null : pct(usedGB, capacityGB),
+        ...soapDatastoreSpace(p),   // 91회차 ⓒ: capacityGB · freeGB · usedGB · usagePct(못 읽은 용량은 null)
         accessible: p['summary.accessible'] !== 'false',
         ...parseDatastoreStorage(p['info'], p['summary.type']),
         // v2.700(A17): VMFS 주 버전 — 이미 받는 info 에서(왕복 0). VMFS 가 아니면 키가 없다.

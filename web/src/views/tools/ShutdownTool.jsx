@@ -32,6 +32,12 @@ export function Shutdown() {
           <div style={{ fontSize: 18, fontWeight: 800, margin: '10px 0', color: !known ? 'var(--text-dim)' : active ? 'var(--red)' : 'var(--green)' }}>
             {!known ? (loadErr ? '긴급중단 상태를 확인하지 못했습니다' : '긴급중단 상태를 확인하는 중…') : active ? '긴급중단 상태 — 모든 수집 정지됨' : '정상 — 수집 동작 중'}
           </div>
+          {/* 91회차: 상태 파일을 읽지 못하는 동안 서버는 멈춤 쪽(fail-closed)이다 — 2인 승인이 아니라 파일 읽기 오류 때문에 멈췄음을 밝힌다. */}
+          {known && status?.readError && (
+            <div style={{ fontSize: 12, color: 'var(--amber)', margin: '0 auto 6px', maxWidth: 600, whiteSpace: 'normal' }}>
+              긴급중단 상태 파일을 읽지 못했습니다{status.readError.code ? `(${status.readError.code})` : ''}{status.readError.failClosed ? ' — 안전을 위해 멈춤으로 봅니다. 파일 소유자 · 권한을 고치면 다음 읽기 때 저장된 상태로 돌아갑니다(2인 승인으로 해제할 수도 있습니다).' : ' — 마지막으로 읽은 상태를 유지합니다.'}
+            </div>
+          )}
           {known && loadErr && (
             <div className="muted" style={{ fontSize: 12, color: 'var(--amber)' }}>최근 조회가 실패해 위 상태는 마지막으로 읽은 값입니다.</div>
           )}

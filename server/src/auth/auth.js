@@ -7,7 +7,7 @@ import { authenticateAD, loadAdConfig, adPolicyState } from './ad.js';
 import { capStr } from '../util/capStr.js';
 import * as totp from './totp.js';
 import { checkOtpAllowed, recordOtpFailure, recordOtpSuccess } from '../security/loginRateLimit.js';
-import { userHasPermission } from './permissions.js';
+import { userHasPermission, setUserTools, userToolOverrides } from './permissions.js';
 import { VALID_ROLES, SUPER_ADMIN, isAdminTier, authzRole } from './roles.js';
 import { effectiveLoginPolicy, userLoginPolicy, singleSessionRequired, loadSessionSecurity, sessionPolicySettings } from '../security/securitySettings.js';
 import { isActiveSession } from './sessions.js';
@@ -697,7 +697,16 @@ export function deleteUser(username, { actor = null, actorUser = null, trusted =
   queueUserRevocation(username, 'account-deleted');
   persistUsers();
   try { forgetUserActivity(username); } catch { /* 정리 실패는 삭제 결과와 무관 */ }
-  return { ok: true };
+  // 91회차(88회차 결정 ⑤ — 권장안): 그 계정의 사용자별 도구 재정의(permissions.json users[이름])도 지운다 — 남기면 같은 이름으로 다시 만든 계정 ·
+  //   같은 이름의 AD 세션이 지운 계정의 제한(allow 목록 · deny)을 물려받았다. 정리 실패(권한 파일 읽기 오류 등)는 삭제 결과와 무관 — 경고만.
+  let toolOverrideCleared = false;
+  try {
+    if (Object.hasOwn(userToolOverrides(), username)) {
+      const r = setUserTools(username, { mode: 'off', by: String(actor || '').slice(0, 64) });
+      if (r?.ok) toolOverrideCleared = true; else console.warn(`[auth] ${username} 삭제 — 사용자별 도구 재정의를 지우지 못했습니다(${r?.reason || r?.code || '알 수 없음'}) · 설정 › 권한에서 지우세요.`);
+    }
+  } catch (e) { console.warn(`[auth] ${username} 삭제 — 사용자별 도구 재정의 정리 실패: ${e?.message || e}`); }
+  return { ok: true, ...(toolOverrideCleared ? { toolOverrideCleared: true } : {}) };
 }
 
 /**
