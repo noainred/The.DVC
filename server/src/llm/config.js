@@ -66,8 +66,16 @@ export function saveLlmConfig(partial = {}) {
     const why = llmUrlIssue(partial.url);
     if (why) { const e = new Error(why); e.status = 400; throw e; }
   }
+  // 67회차 개선: 형식을 본다 — 예전에는 아무 값이나 그대로 저장했다. 'enabled' 가 문자열 "false" 면 자연어 검색 · ChatOps · 상태 점검(참/거짓으로 읽는다)은
+  //   켜짐으로, 설정 현황(settingsStatus — === true)은 꺼짐으로 읽어 두 판정이 갈렸다.
+  const bad = (msg) => { const e = new Error(msg); e.status = 400; return e; };
+  if (partial.enabled !== undefined && typeof partial.enabled !== 'boolean') throw bad('사용 여부(enabled)는 true 또는 false 여야 합니다.');
+  if (partial.provider !== undefined && typeof partial.provider !== 'string') throw bad('LLM 제공자는 글자여야 합니다.');
+  // eslint-disable-next-line no-control-regex
+  if (partial.model !== undefined && (typeof partial.model !== 'string' || !/^[^\s\u0000-\u001f\u007f]{1,200}$/.test(partial.model.trim()))) throw bad('모델 이름은 공백 없는 200자 이하 글자여야 합니다(예: llama3.1:8b).');
+  if (partial.url !== undefined && typeof partial.url !== 'string') throw bad('LLM 주소는 글자여야 합니다.');
   const next = { ...cur };
-  for (const k of ['enabled', 'provider', 'url', 'model']) if (partial[k] !== undefined) next[k] = partial[k];
+  for (const k of ['enabled', 'provider', 'url', 'model']) if (partial[k] !== undefined) next[k] = typeof partial[k] === 'string' ? partial[k].trim() : partial[k];
   // v2.606 TIM2606-01: 빈 칸·잘못된 값은 미지정 → 이전 값 유지(명시적인 양수만 값이다).
   if (partial.timeoutMs !== undefined) next.timeoutMs = normTimeoutMs(partial.timeoutMs) ?? cur.timeoutMs;
   fs.mkdirSync(path.dirname(FILE), { recursive: true });

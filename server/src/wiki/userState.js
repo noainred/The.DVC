@@ -43,10 +43,16 @@ function cleanDays(m, minDay) {
   for (const [d, n] of Object.entries(m)) { const di = Number(d); if (Number.isInteger(di) && di >= minDay && Number.isInteger(n) && n > 0) out[d] = n; }
   return out;
 }
+/*
+ * 67회차 F1(재현): 사용자 표는 **프로토타입 없는 객체**다. 로컬 계정 ID 규칙(`[A-Za-z0-9._@-]{2,64}`)은 `constructor` · `toString` ·
+ *   `valueOf` · `__proto__` 같은 이름을 받는데, 예전 `{}` 는 `users['constructor']` 가 Object 함수를 돌려줘 그 계정의 문서 열기 · 대문 ·
+ *   즐겨찾기가 `u.recent.filter` TypeError(500)였다. 조회는 자기 칸(Object.hasOwn)만 본다.
+ */
+const ownUser = (users, name) => (Object.hasOwn(users, name) ? users[name] : null);
 function load(now = Date.now()) {
   if (cache) return cache;
   const file = wikiUserFile();
-  const users = {}; const views = {};
+  const users = Object.create(null); const views = Object.create(null);
   try {
     if (fs.existsSync(file)) {
       const j = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -66,7 +72,8 @@ function load(now = Date.now()) {
 }
 function userOf(c, name, { create = false } = {}) {
   if (typeof name !== 'string' || !USER_RE.test(name)) return null;
-  if (c.users[name]) return c.users[name];
+  const have = ownUser(c.users, name);
+  if (have) return have;
   if (!create || Object.keys(c.users).length >= USER_LIMITS.users) return null;
   c.users[name] = { fav: [], recent: [] };
   return c.users[name];
