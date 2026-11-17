@@ -110,6 +110,8 @@ function persist() {
 }
 
 export function getConfig() { return load(); }
+/** 79회차 반증: 읽기 오류 중인가(76 F5 — 그동안 load() 는 빈 설정을 준다). 화면 · 설정 상태가 빈 목록을 '없음' 으로 말하지 않게 표지로 쓴다. */
+export function registryReadError() { load(); return _readError ? { readError: true, reason: REGISTRY_READ_ERROR_TEXT } : null; }
 
 const REDACT = '********';
 
@@ -349,11 +351,26 @@ export function saveProxy(body = {}) {
   return { ok: true, proxy: redactProxy(normalizeProxy(next)) };
 }
 
+/**
+ * 79회차(76회차 '남긴 것' 결정 — 권장안: 막는 쪽): 그 중계를 쓰는 매핑이 하나라도 있으면 삭제를 **거절**한다(409 · 매핑 목록).
+ *   예전에는 지워졌고 매핑은 남아 — 게이트웨이가 기본 프록시 + 같은 공개 포트(= 다른 매핑의 대상)로 접속하거나(76 F3 이전) 접속을 거부했다(76 F3 뒤).
+ *   매핑을 함께 지우는 쪽은 택하지 않았다(사람의 매핑 · HAProxy 설정을 조용히 지운다). 매핑을 먼저 지우거나 다른 중계로 옮긴 뒤 지운다.
+ *   `using` 은 라우트가 요청자에게 보이는 이름만 고르도록 넘기는 원본(id · name — 응답에 그대로 싣지 말 것).
+ */
+export function proxyInUseReason(names = [], total = 0, { nsx = 0 } = {}) {
+  const shown = names.slice(0, 10).map((n) => `‘${mappingNameText(n, 60)}’`).join(', ');
+  const rest = total - Math.min(names.length, 10);
+  // NSX 매핑은 NSX 수집(nsx/proxy.js ensureNsxDial)이 매니저의 중계 설정으로 다시 만든다 — 매니저 설정을 먼저 바꾸라고 말한다(지워도 되살아난다).
+  const nsxNote = nsx > 0 ? ` NSX 매핑 ${nsx}개는 NSX 수집이 다시 만들므로 NSX 매니저 설정에서 이 중계를 먼저 빼세요.` : '';
+  return `이 중계 서버를 쓰는 접속 매핑 ${total}개가 있어 삭제하지 않았습니다${shown ? ` — ${shown}${rest > 0 ? ` 외 ${rest}개` : ''}` : ''}. 매핑을 먼저 지운 뒤 다시 삭제하세요(지우지 않고 중계만 지우면 그 매핑으로 접속할 수 없습니다).${nsxNote}`;
+}
 export function removeProxy(id) {
   const c = load();
-  const before = c.proxies.length;
+  if (!c.proxies.some((p) => p.id === id)) return { ok: false, reason: '프록시를 찾을 수 없습니다.' };
+  const using = c.mappings.filter((m) => m && m.proxyId === id);
+  const nsx = using.filter((m) => m.protocol === 'nsx').length;
+  if (using.length) return { ok: false, code: 'proxy-in-use', status: 409, inUse: using.length, nsx, using: using.map((m) => ({ id: m.id, name: m.name })), reason: proxyInUseReason(using.map((m) => m.name), using.length, { nsx }) };
   c.proxies = c.proxies.filter((p) => p.id !== id);
-  if (c.proxies.length === before) return { ok: false, reason: '프록시를 찾을 수 없습니다.' };
   persist();
   return { ok: true };
 }

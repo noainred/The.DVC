@@ -211,7 +211,7 @@ test('F5 억제 계수 — 읽기 오류는 옮기지도 0 으로 덮지도 않�
   assert.equal(realRead(file, 'utf8'), body, '못 읽은 동안 저장이 원본을 덮지 않는다');
   clock += JFL.READ_RETRY_MS + 1;
   const s2 = RT.maintStats();
-  assert.ok(!s2.readError); assert.equal(s2.byWindow['mw-abcdef12'].alerts, 7, '파일 값으로 돌아간다');
+  assert.ok(!s2.readError); assert.equal(s2.byWindow['mw-abcdef12'].alerts, 8, '파일 값 7 + 못 읽은 동안 메모리에 센 1 — 79회차: 합친다(예전 기대 7 은 그 1 을 버렸다)');
   // 손상은 예전과 같다(보존 + 0 부터 · unreadable 표지)
   fs.writeFileSync(file, '{"byWindow":'); RT._resetMaintRuntimeForTest({ unlink: false });
   const s3 = RT.maintStats();

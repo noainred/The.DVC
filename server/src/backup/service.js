@@ -505,7 +505,11 @@ export async function restoreCentral(archive, { retention = 30, source = null } 
     }
     // 7b: 번들의 SSH 키 저장소는 개인키 · 비밀번호가 가려져 있다 — 지금 파일의 같은 키(지문) · 같은 계정(id)으로 되살리고, 못 살리는 키는 뺀다.
     if (base === KEY_FILE_NAME) {
-      let cur = ''; try { cur = fs.readFileSync(path.join(CONFIG_DIR, base), 'utf8'); } catch { /* 없음 */ }
+      let cur = ''; let curErr = '';
+      try { cur = fs.readFileSync(path.join(CONFIG_DIR, base), 'utf8'); } catch (e) { if (e?.code !== 'ENOENT') curErr = String(e?.code || 'read-error').slice(0, 32); }
+      // 79회차 반증(재현): 지금 파일의 **읽기 오류**(EACCES · EIO)를 '없음' 으로 보고 합쳐, 번들의 키(개인키가 가려진)를 전부 빼고 지금 봉인본(유일한 사본) 자리에 빈 저장소를 예약했다.
+      //   읽기 오류면 이 파일은 복원하지 않는다(지금 파일 그대로) — 권한 · 디스크를 바로잡은 뒤 다시 복원하면 된다.
+      if (curErr) { failed.push({ file: base, reason: `지금 SSH 키 저장소를 읽지 못해(${curErr}) 복원하지 않았습니다 — 번들에는 개인키가 없어 지금 파일(봉인본 — 유일한 사본)과 합쳐야 합니다. 파일 권한 · 소유자 · 디스크를 확인한 뒤 다시 복원하세요.` }); continue; }
       const m = mergeRedactedKeyStore(String(content0), cur);   // 저장된 값(봉인 그대로)을 옮겨 붙인다 — 복호 · 재봉인 없음
       content = m.text;
       envDropped.push(...m.dropped.slice(0, 64).map((d) => `${base}:${d}`));   // 되살리지 못한 키 · 계정 비밀(.env 키를 못 살렸을 때와 같은 칸)

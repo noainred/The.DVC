@@ -360,7 +360,11 @@ export function pduSummary(pdu) {
     if (s.ok === false) { out.failed += 1; continue; }
     out.ok += 1;
     const w = num(s.summary?.powerW);
-    if (w != null) { out.powerRead += 1; out.powerW = (out.powerW ?? 0) + w; }
+    if (w != null) {
+      out.powerRead += 1; out.powerW = (out.powerW ?? 0) + w;
+      // 79회차 반증(78 F4 의 형제): 장비 합 자체가 부분 합(데이지체인 유닛 일부를 못 읽음)인 PDU 도 센다 — PDU 정보 화면(pduTotals)과 같은 판정.
+      if (s.summary?.unitsIncomplete || s.summary?.powerPartial) out.powerPartial = (out.powerPartial || 0) + 1;
+    }
     out.sensors += s.summary?.sensors ?? 0;
     const t = num(s.summary?.tempMaxC);
     if (t != null) out.tempMaxC = out.tempMaxC == null ? t : Math.max(out.tempMaxC, t);

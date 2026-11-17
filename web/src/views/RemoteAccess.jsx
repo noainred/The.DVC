@@ -188,11 +188,12 @@ export default function RemoteAccess() {
       )}
 
       <div className="section-title" style={{ marginTop: 0 }}>접속 대상</div>
+      {data.registryReadError && <div className="error-box" style={{ marginBottom: 10 }}>{data.registryReadError}</div>}
       <div className="table-wrap">
         <STable minWidth={820} wrap={false}>
           <thead><tr><th>이름</th><th>프로토콜</th><th>대상</th><th>프록시</th><th>공개 포트</th><th>상태</th><th style={{ textAlign: 'right' }}>접속</th></tr></thead>
           <tbody>
-            {data.mappings.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 26 }}>등록된 대상이 없습니다.</td></tr>}
+            {data.mappings.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 26 }}>{data.registryReadError ? '설정 파일을 읽지 못해 목록을 알 수 없습니다.' : '등록된 대상이 없습니다.'}</td></tr>}
             {data.mappings.map((m) => (
               <tr key={m.id}>
                 <td><b>{m.name}</b>{m.vcenterId && <span className="muted" style={{ fontSize: 11 }}> · {m.vcenterId}</span>}

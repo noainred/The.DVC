@@ -110,8 +110,8 @@ function parseStats(text) {
 }
 /**
  * 77회차 F5(재현): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전에는 catch 하나로 받아 원본을 보존본으로 옮기고 0 부터 세어 다음 저장이 0 으로 덮었다.
- *   판정은 공용 util/jsonFileLoad.js: 읽기 오류면 원본을 옮기지도 **덮지도 않고**(saveStats 건너뜀) 메모리 계수로 돌며 30초 간격으로 다시 읽는다 — 읽히면 파일 값으로 돌아간다
- *   (그동안 메모리에 센 것은 버린다 — 계수 · 점검 결과일 뿐이고, 원본을 0 으로 덮는 것보다 낫다). 손상은 예전과 같다(보존 + 0 부터 · unreadable 표지).
+ *   판정은 공용 util/jsonFileLoad.js: 읽기 오류면 원본을 옮기지도 **덮지도 않고**(saveStats 건너뜀) 메모리 계수로 돌며 30초 간격으로 다시 읽는다 — 읽히면 파일 값에
+ *   그동안 메모리에 센 것을 합친다(79회차 — 예전에는 버렸다 · mergeStats). 손상은 예전과 같다(보존 + 0 부터 · unreadable 표지 — 메모리 증분은 그 위에 합친다).
  */
 const _statsReader = makeJsonFileReader(STATS_FILE, { tag: 'maintenance-stats', parse: parseStats });
 let _statsReadErr = false;
@@ -123,11 +123,32 @@ function loadStats() {
     _statsReadErr = true;
     return _stats;
   }
+  // 79회차 반증(재현): 읽기 오류 동안 메모리에 센 계수 · 점검 결과를 회복 때 파일 값으로 **덮어** 버렸다 — 그동안 찾은 ‘창 끝 뒤 억제’(leak > 0)가
+  //   옛 파일 값(0 · 정상)으로 돌아갔다(안전장치 신호 유실). 이제 회복하면 파일 값에 메모리 증분을 **합친다**(계수는 더하고 · 점검 결과는 더 새 것).
+  const mem = _statsReadErr && _stats ? _stats : null;
   _statsReadErr = false;
   if (r.kind === 'ok') _stats = r.value;
   else if (r.kind === 'missing') _stats = { v: 1, byWindow: {}, leak: { n: null, last: 0, at: 0 } };
   else _stats = { v: 1, byWindow: {}, leak: { n: null, last: 0, at: 0 }, unreadable: Date.now() };
+  if (mem) _stats = mergeStats(_stats, mem);
   return _stats;
+}
+/** 79회차: 파일 값(base) + 읽기 오류 동안의 메모리 값(mem) — 창별 계수는 더하고(at 은 늦은 쪽) · 점검 결과(leak · leakBy)는 at 이 늦은 쪽. 표지(unreadable)는 base 것. */
+export function mergeStats(base, mem) {
+  const out = { ...base, byWindow: { ...(base.byWindow || {}) } };
+  for (const [id, c] of Object.entries(mem?.byWindow || {})) {
+    const b = out.byWindow[id];
+    if (!b) { out.byWindow[id] = { ...c }; continue; }
+    const m = { ...b };
+    for (const k of ['alerts', 'after', 'hold', 'focus', 'collect', 'collectFail']) m[k] = (Number(b[k]) || 0) + (Number(c[k]) || 0);
+    m.at = Math.max(Number(b.at) || 0, Number(c.at) || 0);
+    out.byWindow[id] = m;
+  }
+  const by = { ...(base.leakBy || {}) };
+  for (const [g, x] of Object.entries(mem?.leakBy || {})) if (!by[g] || (Number(x?.at) || 0) > (Number(by[g].at) || 0)) by[g] = x;
+  if (Object.keys(by).length) out.leakBy = by;
+  if ((Number(mem?.leak?.at) || 0) > (Number(base.leak?.at) || 0)) out.leak = { ...mem.leak };
+  return out;
 }
 /** 억제 한 건을 센다(창마다). kind: alerts(발송 막음) · after(창 뒤 1회 발송) · hold(전이 보류) · focus(자동 집중 막음) · collect(수집 건너뜀) · collectFail(창 안 수집 실패). */
 export function countSuppression(kind, windowIds = [], { now = Date.now() } = {}) {

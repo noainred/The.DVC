@@ -53,6 +53,9 @@ const REMOTE_CLOSE_REASON_TEXT = new Map([
   ['mapping-not-found', '이 원격 접속 매핑을 찾을 수 없어 서버가 연결을 닫았습니다(삭제되었거나 바뀌었습니다).'],
   // 76회차 F3: 매핑의 중계 서버가 지워졌다 — 서버는 다른 중계로 바꿔 접속하지 않는다(server/src/proxy/registry.js mappingProxyOf).
   ['mapping-proxy-gone', '이 원격 접속 매핑의 중계 서버(프록시)가 삭제되어 서버가 접속하지 않고 연결을 닫았습니다. 매핑을 지우고 다시 접속하면 지금 배정된 중계로 만들어집니다.'],
+  // 79회차: 동시 세션 상한(RDP — SSH 와 같은 값 · server/src/proxy/guacdTunnel.js rdpSessionCapIssue). 티켓은 쓰지 않았다.
+  ['too-many-sessions', '포탈의 동시 원격 세션 수가 한도에 이르러 서버가 연결을 닫았습니다. 사용하지 않는 원격 콘솔을 닫고 잠시 뒤 다시 접속하세요.'],
+  ['too-many-sessions-user', '이 계정이 동시에 열 수 있는 원격 세션 수를 넘어 서버가 연결을 닫았습니다. 이 계정의 다른 원격 콘솔을 닫고 다시 접속하세요.'],
   ['no-remote-access', '이 계정에 원격 접속 권한(remote.access)이 없어 서버가 연결을 닫았습니다.'],
   ['otp-enroll', 'OTP 등록을 마쳐야 원격 접속을 쓸 수 있어 서버가 연결을 닫았습니다.'],
   ['demo-guest', '데모 계정은 원격 접속을 쓸 수 없어 서버가 연결을 닫았습니다.'],
@@ -68,6 +71,8 @@ const CLOSE_REASON_ALIAS = new Map([
   ['forbidden', 'mapping-denied'],
   ['mapping not found', 'mapping-not-found'],
   ['rdp mapping not found', 'mapping-not-found'],
+  ['too many sessions', 'too-many-sessions'],                 // SSH 게이트웨이(closeAll 4429)의 사유
+  ['too many sessions for user', 'too-many-sessions-user'],
 ]);
 
 /** 서버가 보낸 닫힘 사유 → 문구. 모르는 사유·빈 값이면 null(호출부가 코드 문구로 떨어진다). */

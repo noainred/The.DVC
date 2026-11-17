@@ -28,7 +28,39 @@ import { consumeRdpTicket } from './rdpTicket.js';
 import { config } from '../config.js';
 // WS 매핑 소유·scope 재검사 공용(v2.322) + 사용자 판정·열린 세션 재검증 공용(2026-10-09 S-04 — SSH 게이트웨이와 **같은 함수**).
 //   remoteUserIssue = 토큰 무효는 401, OTP 등록 전 세션·데모 계정·원격 접속 권한 없음은 403(판정 본문은 sshGateway.js 에 하나만 둔다).
-import { mappingAccessIssue, remoteUserIssue, trackRemoteSession, safeWsClose, authDisabledRemoteUser } from './sshGateway.js';
+import { mappingAccessIssue, remoteUserIssue, trackRemoteSession, safeWsClose, authDisabledRemoteUser, MAX_SESSIONS, MAX_SESSIONS_PER_USER } from './sshGateway.js';
+
+/*
+ * 79회차(76회차 '남긴 것' 결정 — 권장안): RDP 동시 세션 상한. guacd 는 연결마다 RDP 프로세스(수십~수백 MB)를 띄우는데 상한이 없었다 —
+ *   SSH 게이트웨이와 **같은 방식 · 같은 값**(전체 MAX_SESSIONS · 계정당 MAX_SESSIONS_PER_USER — 같은 env, 0 = 계정당 끔)으로 따로 센다.
+ *   넘치면 **티켓을 소비하기 전에** 4429 + 사유('too-many-sessions' · 'too-many-sessions-user' — 웹 remote/sshSend.js 표와 1:1)로 닫는다.
+ *   세는 시점은 티켓이 확인된 뒤(티켓 없음으로 닫힌 연결은 세지 않는다) · 푸는 곳은 ws close · error · guacd close(한 번만).
+ */
+let _rdpActive = 0;
+const _rdpPerUser = new Map();   // username(소문자) → 열린 RDP 세션 수
+const lcUser = (u) => String(u?.username || 'anonymous').toLowerCase();
+/** 넘치면 사유 코드(닫힘 사유), 아니면 null. */
+export function rdpSessionCapIssue(user) {
+  if (_rdpActive >= MAX_SESSIONS) return 'too-many-sessions';
+  if (MAX_SESSIONS_PER_USER > 0 && (_rdpPerUser.get(lcUser(user)) || 0) >= MAX_SESSIONS_PER_USER) return 'too-many-sessions-user';
+  return null;
+}
+/** 현재 RDP 세션 수(상태 · 진단 · 시험). */
+export function rdpSessionCounts() { return { active: _rdpActive, users: _rdpPerUser.size, max: MAX_SESSIONS, perUserCap: MAX_SESSIONS_PER_USER }; }
+function takeRdpSlot(user) {
+  const k = lcUser(user);
+  _rdpActive += 1; _rdpPerUser.set(k, (_rdpPerUser.get(k) || 0) + 1);
+  let held = true;
+  return () => {
+    if (!held) return;
+    held = false;
+    _rdpActive = Math.max(0, _rdpActive - 1);
+    const n = (_rdpPerUser.get(k) || 1) - 1;
+    if (n > 0) _rdpPerUser.set(k, n); else _rdpPerUser.delete(k);
+  };
+}
+/** 시험 전용 — 세는 값을 비운다. */
+export function _resetRdpSessionsForTest() { _rdpActive = 0; _rdpPerUser.clear(); }
 
 /** 테스트 주입 — 운영에서는 실제 resolveTokenUser·getMapping 이다. */
 const rdpDeps = { resolveTokenUser, getMapping, connect: (port, host) => net.connect(port, host), tlsConnect: (opts) => tls.connect(opts) };
@@ -186,6 +218,8 @@ function handle(ws, params, user, token = null) {
   // 76회차 F3: 매핑의 중계가 지워졌으면 열지 않는다 — 기본 프록시 + 같은 공개 포트는 다른 매핑의 대상이다(티켓 자격증명을 보내기 전 · 소비하기 전에 닫는다).
   const proxy = mappingProxyOf(m);
   if (!proxy) { safeWsClose(ws, 1011, 'mapping-proxy-gone'); return; }
+  // 79회차: 동시 세션 상한(전체 · 계정당 — SSH 와 같은 값) — 티켓을 소비하기 전에 닫는다(사용자가 티켓을 다시 받지 않아도 되게).
+  { const cap = rdpSessionCapIssue(user); if (cap) { safeWsClose(ws, 4429, cap); return; } }
   touchMapping(m.id); // reset the 1-day ephemeral expiry clock on use
   if (!proxy.guacd?.host) { safeWsClose(ws, 1011, 'guacd not configured'); return; }
 
@@ -198,6 +232,7 @@ function handle(ws, params, user, token = null) {
   // ⚠ WS close 사유는 UTF-8 123바이트 상한 — 예전 한글 문구(약 140바이트)는 ws.close 가 RangeError 를 던져
   //   연결이 닫히지 않은 채 남았다. safeWsClose 가 글자 경계에서 자른다(2026-10-09 S-04 작업 중 확인).
   if (!tk) { safeWsClose(ws, 1011, 'RDP 접속 티켓이 필요합니다(POST /api/remote/rdp-ticket)'); return; }
+  const releaseSlot = takeRdpSlot(user);   // 79회차: 여기부터 센다(아래 close · error 셋이 한 번 푼다)
   const cred = (k) => (tk[k] != null ? String(tk[k]) : '');
   const settings = {
     hostname: host, port: String(port),
@@ -272,7 +307,7 @@ function handle(ws, params, user, token = null) {
   });
 
   guacd.on('error', (err) => { safeWsClose(ws, 1011, `guacd: ${err.message}`); });
-  guacd.on('close', () => { session.release(); try { ws.close(); } catch { /* */ } });
+  guacd.on('close', () => { releaseSlot(); session.release(); try { ws.close(); } catch { /* */ } });
 
   ws.on('message', (msg) => {
     if (closed) return; // 폐기 뒤 도착한 입력은 대상에 보내지 않는다(S-04)
@@ -294,8 +329,8 @@ function handle(ws, params, user, token = null) {
     if (RDP_INPUT_RE.test(text)) session.touch();
     try { guacd.write(text); } catch { /* */ }
   });
-  ws.on('close', () => { closed = true; session.release(); try { guacd.end(); } catch { /* */ } });
-  ws.on('error', () => { closed = true; session.release(); try { guacd.destroy(); } catch { /* */ } }); // ws 오류에도 소켓 정리
+  ws.on('close', () => { closed = true; releaseSlot(); session.release(); try { guacd.end(); } catch { /* */ } });
+  ws.on('error', () => { closed = true; releaseSlot(); session.release(); try { guacd.destroy(); } catch { /* */ } }); // ws 오류에도 소켓 정리
   return { session, isClosed: () => closed };
 }
 

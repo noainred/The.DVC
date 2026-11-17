@@ -364,7 +364,8 @@ export function safeWsClose(ws, code, reason = '') {
 
 // 동시 원격 SSH 세션 상한 + 유휴 타임아웃 — 무제한 세션이 포탈 서버 메모리/FD를 고갈시켜
 // 리붓되는 것을 막는다. 환경변수로 조정.
-const MAX_SESSIONS = envPositive(process.env.REMOTE_MAX_SESSIONS, 80);
+// 79회차: RDP 게이트웨이(guacdTunnel.js)도 같은 값을 쓴다(따로 센다 — 전체 · 계정당).
+export const MAX_SESSIONS = envPositive(process.env.REMOTE_MAX_SESSIONS, 80);
 /**
  * 계정당 동시 SSH 세션 상한(2026-10-09 I-07 검토) — 전체 상한(80)을 한 계정이 다 쓰면 다른 사람이 열 수 없다.
  * 기본 20, 0 = 끔(예전처럼 전체 상한만). 빈 값은 미지정(기본).

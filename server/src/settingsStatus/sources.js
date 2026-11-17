@@ -38,7 +38,7 @@ import { settingsLoadError as guestPartLoadError } from '../guestpart/settings.j
 import { load as loadGuestDisk } from '../guestdisk/settings.js';
 import { gpuGuestEnabledLight } from '../gpu/settings.js';
 import { listCollectors, registryLoadErrorSummary } from '../collector/registry.js';
-import { getConfigSafe as proxyConfig, listProxiesSafe } from '../proxy/registry.js';
+import { getConfigSafe as proxyConfig, listProxiesSafe, registryReadError as proxyReadError } from '../proxy/registry.js';
 import { adTransportStatus } from '../auth/ad.js';
 import { loadSecretsPolicy } from '../security/secretVault.js';
 import { loadHostAccess } from '../hostaccess/settings.js';
@@ -82,7 +82,9 @@ export function settingsStatusSources({ now = Date.now() } = {}) {
     collectors: () => { const loadError = !!registryLoadErrorSummary(); return { loadError, count: loadError ? null : len(listCollectors()) }; },
     // listProxies() 는 기본 프록시를 늘 첫 줄에 넣는다(proxy/registry.js) — 추가로 등록한 프록시만 센다(반증 D3).
     // 72회차 F2: remote-access.json 이 손상돼 보존본만 남으면 로더가 기본값(중계 서버 없음)을 돌려준다 — '꺼짐' 이 아니라 주의다.
-    proxy: () => ({ proxyHost: String(proxyConfig().proxyHost || '').trim(), proxies: len(listProxiesSafe()), loadError: damaged('remote-access.json') }),
+    // 79회차 반증: 읽기 오류(76 F5 — 원본 그대로 · 빈 설정으로 돈다)도 주의 — 예전 판정(손상 보존본만)으로는 '중계 서버 0 · 꺼짐' 으로 보였다.
+    //   ⚠ 로드(proxyReadError)를 damaged 보다 먼저 — 첫 계산에서 손상본을 보존본으로 옮긴 뒤에 '보존본만 남음' 을 본다(portalMiscAudit72 F2).
+    proxy: () => { const rre = !!proxyReadError(); const loadError = damaged('remote-access.json') || rre; return { proxyHost: loadError ? '' : String(proxyConfig().proxyHost || '').trim(), proxies: loadError ? null : len(listProxiesSafe()), loadError }; },
     'auth-ad': () => { const t = adTransportStatus(); return { enabled: !!t.enabled, warnings: t.enabled ? len(t.warnings) : 0, loadError: damaged('auth.json') }; },
     secrets: () => { const p = loadSecretsPolicy(); return { mode: p.mode, locked: !!p.locked, recovered: !!p.recovered }; },
     'host-access': () => {

@@ -64,7 +64,10 @@ export function listAccountsView({ visible = null, scoped = false } = {}) {
 }
 
 /** 키 삭제 — 쓰는 서버 · 계정이 0 일 때만. 사용처를 모르면 거절. */
+// 79회차 반증(재현): 저장소를 못 읽은 동안(빈 캐시) 회전 · 삭제가 '키를 찾을 수 없습니다'(404)로 답했다 — 본인 OTP 를 쓰고 틀린 조치를 안내했다. 못 읽음을 먼저 본다.
+const storeUnreadable = (what) => (KS.keyStoreLoadError() ? { ok: false, code: 'registry-unreadable', status: 503, reason: KS.keyStoreUnreadableReason(undefined, what) } : null);
 export function deleteKeyIfUnused(id) {
+  const u0 = storeUnreadable('지우지 않았습니다'); if (u0) return u0;
   const k = KS.keyById(id);
   if (!k) return { ok: false, code: 'not-found', status: 404, reason: '키를 찾을 수 없습니다.' };
   const u = refUsage().key(k.id);
@@ -74,6 +77,7 @@ export function deleteKeyIfUnused(id) {
 }
 
 export function deleteAccountIfUnused(id) {
+  const u0 = storeUnreadable('지우지 않았습니다'); if (u0) return u0;
   const a = KS.accountById(id);
   if (!a) return { ok: false, code: 'not-found', status: 404, reason: '공통 계정을 찾을 수 없습니다.' };
   const u = refUsage().account(a.id);
@@ -88,6 +92,7 @@ export function deleteAccountIfUnused(id) {
  * @returns {{ok:true, servers:string[], accounts:number, warnings?:{code:'key-feature', features:string[], text:string}[]} | {ok:false, ...}}
  */
 export function rotateKey(fromId, toId, { now = Date.now() } = {}) {
+  const u0 = storeUnreadable('회전하지 않았습니다'); if (u0) return u0;
   const from = KS.keyById(fromId); const to = KS.keyById(toId);
   if (!from || !to) return { ok: false, code: 'not-found', status: 404, reason: '옛 키 또는 새 키를 찾을 수 없습니다.' };
   if (from.id === to.id) return { ok: false, code: 'same-key', reason: '같은 키로는 회전할 수 없습니다.' };

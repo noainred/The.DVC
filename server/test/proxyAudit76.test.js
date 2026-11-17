@@ -185,7 +185,10 @@ function setupRemovedProxy(owner) {
   const b = reg.addMapping({ protocol: 'ssh', targetHost: '10.9.9.9', targetPort: 22, publicPort: base + 1, owner: 'someone-else' });
   assert.ok(a.ok && ar.ok && b.ok, `${a.reason} ${ar.reason} ${b.reason}`);
   assert.equal(reg.mappingProxyOf(a.mapping)?.id, p2);
-  assert.equal(reg.removeProxy(p2).ok, true);
+  // 79회차(결정 — 권장안): 매핑이 쓰는 중계는 이제 removeProxy 가 409 로 거절한다. 이 시험은 그 전 판본에서 지워졌거나(업그레이드 전 상태)
+  //   파일을 손으로 고쳐 매핑만 남은 상태를 본다 — 메모리 설정에서 직접 뺀다(게이트웨이 판정 mappingProxyOf 는 그 상태에서도 null 이어야 한다).
+  assert.equal(reg.removeProxy(p2).code, 'proxy-in-use');
+  const cfg = reg.getConfig(); cfg.proxies = cfg.proxies.filter((x) => x.id !== p2);
   return { ssh: reg.getMapping(a.mapping.id), rdp: reg.getMapping(ar.mapping.id) };
 }
 
