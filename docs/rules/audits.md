@@ -3884,3 +3884,270 @@ high 0 · 반증 1(A3-01 — 경로 오독, 데모 계정은 READ_DENY 하위라
 - **결정 권장안 G2 · G3 반증(적대적 재검토 · 커밋 7b76f6c4 · `server/test/rebutDecideG23.test.js`)**: 확정 4(중간 1 · 낮음 3) · 추정 3 — 고친 것 R1(중간 · 73 ③ 덜 고침 — 재현) GET /admin/mail 이 settings 의 수신자 목록은 가렸지만 **같은 응답의 status.history[].to**(실제 보낸 수신자 주소)를 쓰기 범위만 제한된 관리자(조회 전체)에게 그대로 실었다 — scopeMailStatus 가 조회 범위 축만 봄 → `routes/admin/mail.js maskMailHistoryRecipients`(가림 기준 = settings 와 같은 isFullReadWriteScope · 주소 대신 toCount · historyMasked — 화면은 to 를 그리지 않아 웹 변경 없음) · R2(낮음 · 68 D1 형제 — 재현) `guestpart/notify.js prunedKeys` 가 값 모름을 p.unknown 하나로 봐서, evaluate 가 판정하지 않은 VM(용량 0 파티션 — 작은 파티션 무시 끈 설정)을 회복으로 빼 다음 초과가 다시 '새로 넘음' 메일이 됐다 → evaluate 와 같은 기준(`p.unknown || pctOf(...) == null`) · R3(낮음 · 74 ② 성능 — 실측) provision-runs.json 3초 디바운스 직렬화가 50작업 × 500대에서 매번 약 40ms(이름 · 사유가 긴 최악 75~136ms) 이벤트 루프를 막음 → 끝난 작업의 직렬화 결과를 기억(키 = 작업 상태 + VM 상태별 수 · 같은 바이트 확인 · 실사용 규모 약 40 → 4ms) · R3' `runJob` 의 vCenter 설정 없음 경로만 저장(persist)이 빠져 다른 저장이 없으면 재기동 뒤 '재기동으로 중단 — 제출하지 않음' 으로 바뀌어 보이던 것(코드 읽기 · 한 줄). 변이 3/4(R1 · R2 · R3 잡힘 — R3b '끝난 작업이 바뀌면 기억을 버림' 은 지금 끝난 작업을 바꾸는 경로가 없어 시험으로 만들 수 없는 방어 분기). **반증 실패(정상 확인)**: 읽기 오류 뒤 30초 재읽기 회복(공용 로더 · fleet · 게시판 · 메일 — 기존 시험) · 회복 전 409 / 회복 뒤 쓰기는 동기 경로라 경합 없음 · 읽기 오류 ↔ 손상 번갈아: 읽기 오류는 옮기지 않고 손상만 옮김 · 서비스 점검 확정은 읽기 오류에 not-confirmable · 400 → 409 바뀐 웹 호출부(DatacenterAdmin · Collectors · FleetInventory · BmProfileTab · Board · 공지)는 postJson · sendJson 이 409 본문을 돌려주고 모두 r.ok 를 본다 · 통신 점검 503 은 정상 등록부(파일 없음 포함)에서 null(오탐 없음) · LLM 자리는 finally 해제 + Ollama 호출이 AbortSignal.timeout(본문 포함)이라 누수 없음 · 사양 변경 잠금 try/finally · env 상한은 0 → 기본값이 예전과 같음(0 이 의미 있는 env 없음) · 69 막대 8칸 — CSV 는 이벤트 행이라 칸 수와 무관 · 추적 고리는 제출 끝 + 대기 없음이면 끝나고 VM 마다 제출 시각 + 시한. **남긴 것**: ① 손상 409 사유 '손상 보존본을 되돌리세요' 에 '재시작' 이 빠졌다(재현 — G2 전 문구는 '되돌리고 재시작하세요') — annotations · overrides · 메일 · NFS 정의 · VM DNS 정책 · PowerScale 점검은 손상 상태를 캐시해 되돌려도 재시작 전까지 409 이고 확정은 file-present('재시작') — 문구는 util/jsonFileLoad.js refusal(범위 밖 — 제안(메인): 옵션으로 '되돌린 뒤 재시작' 을 붙이거나 오류 중에는 캐시를 믿지 않게) · 같은 파일 confirmSettingsDefault 의 읽기 오류 detail '재시작하세요' 도 30초 재읽기와 어긋남 ② 73 ③ 가림 기준과 다른 경로(추정 — 코드 읽기): `/tools/link-check/targets` 의 set:smtp facts.user(SMTP 계정) · `/tools/storage-usage/mail` adminTo(기본 수신자 주소)는 fullScopeOnly(GET 은 조회 범위만)라 쓰기 범위만 제한된 관리자에게 보인다 — 같은 기준을 걸지 결정 필요 ③ 사양 변경 잠금은 3분 시간 초과에서도 풀린다 — vCenter 작업이 계속 돌 수 있어 두 번째 요청이 디스크 · NIC 추가를 겹쳐 보낼 수 있다(설계 — 결정 필요) ④ IPAM 예약 · 메모 읽기 오류 회복의 ipam.db 반영은 누군가 load() 를 부를 때까지 — 화면을 안 열면 원장 전량 확인(LEDGER_FULL_CHECK_MS 10분)이 부를 때(추정 — 코드 읽기) ⑤ 통신 점검 보고 1건에 등록부를 세 번 읽고 복호(assignedEdgeLinkIds · registryLoadError ×2 — 개선 제안) ⑥ provision-runs.json 읽기 오류면 프로세스 수명 동안 저장을 멈춘다(재시도 없음). 깊이 보지 못한 곳: vmdns/policy.js · storage/inspect/schedule.js 의 rev · 틱 회복 경로를 실행으로 확인하지 않음(코드 읽기만) · fetchTaskStates 의 SOAP 시한(soapClient) 값 · bulletin 쓰기 예약(writer)과 로드 오류의 경합 · 웹 화면 Chromium 미실행(화면 변경 없음).
 - **결정 G2 · G3 반증 후속(권장안 구현 · `server/test/rebutDecideG23.test.js` 후속 ①~⑥ · web `storageUsageText.test.js`)**: ① 가림 기준 통일 — `/tools/link-check/targets` 의 set:smtp facts.user · `/tools/storage-usage/mail` · `/tools/isilon-dirusage/digest` 의 adminTo 를 GET /admin/mail 과 같은 isFullReadWriteScope 로(쓰기 범위만 제한된 관리자에게 user '' + hasUser · adminTo [] + adminToCount · adminToMasked — `mail/settings.js maskedMailList · maskedSmtpUser`) · 웹 받는 사람 수는 `storageUsageText.adminToForCount`(가린 주소는 개수만 — 겹침은 최대치) · grep 결과 그 밖의 메일 계정 · 수신자 원문 GET 없음(guestpart · IPAM 보고 · Bareos 는 개수만) ② VM 사양 변경 — 결과 대기 3분 시간 초과면 잠금을 풀지 않고 **같은 세션**으로 그 작업을 잠금 시한(15분)까지 확인(`reconfig.js tryLockVmReconfig().holdUntil · remainingMs · continueWaitOnTimeout` — 새 로그인 없음 · 확인 뒤 로그아웃) · 두 번째 요청 409 `reconfigBusyBody`(pendingTask — '앞 사양 변경 작업이 vCenter 에서 아직 진행 중일 수 있습니다') ③ 공용 로더 오류 상태 캐시 — `jsonFileLoad.js recheckDue()`(오류 동안 30초 간격 재판정 — 정상 경로는 그대로 캐시) 를 9 모듈(annotations · overrides · 메일 · NFS 정의 · VM DNS 정책 · PowerScale 점검 · 게시판 · DataCenter · fleet 2)에 적용 → 보존본을 되돌리면 재시작 없이 풀림(DataCenter · fleet 은 mtime 으로 곧바로) · 손상 409 사유 '되돌린 파일은 30초 안에 다시 읽어 재시작 없이 풀립니다' · 확정의 읽기 오류 · file-present 안내도 다시 판정하는 로더면 '재시작 불필요'(`settingsLoadError.js recheckMs`) · 게시판은 오류 중 요청마다 readdir 하던 것이 30초 간격으로 ④ IPAM 예약 · 메모 — 오류 동안 30초 뒤 스스로 재판정하는 타이머(unref · 오류 없으면 없음) · 회복(읽기 오류 · 손상 → 정상)이면 rev++ → 다음 갱신 주기의 원장 입력 지문이 바뀌어 ipam.db 재생성(store.js 는 바꾸지 않음) ⑤ 통신 점검 보고 1건의 등록부 읽기 · 복호 3번 → 1번(`registryLoadError({ skipLoad })` · assignedEdgeLinkIds ctx) ⑥ provision-runs.json 기동 읽기 오류 — 공용 reader(손상과 구분 · 30초 간격) · 원본을 덮지 않고(저장 보류) 스스로 재시도 · 회복하면 그동안의 새 작업과 합쳐 저장 재개 · GET /provision/jobs `storeError` · 화면 최근 작업 위 사유. 변이 12/12(M6b '보류 해제' 는 첫 판에서 생존 → 보류 중 변경을 일으키는 시험으로 보강 뒤 잡힘). **남긴 것**: 서비스 점검 목록은 보존본을 되돌린 뒤 그 모듈이 한 번 불려야(30초 간격) 오류가 지워진다 · ⑥ 의 '새 작업과 합치기' 는 코드 읽기로만 확인(새 작업을 만드는 createJob 은 스냅샷 원본이 필요해 시험하지 않음) · ② 의 실제 vCenter 경로(reconfigVm 이 시간 초과 뒤 세션을 넘김)는 소스 대조 + continueWaitOnTimeout 단위 시험까지(가짜 vCenter 없음).
 
+
+## 전체 점검 이어서 — 76~87회차(2026-11-17 · 사용자 '버그 및 개선 가능한 기능 계속 진행해줘, 버그나 개선 가능한 기능이 나오지 않을때 까지 계속 진행, 최대 30번 진행' · 표준 검증 · 반증마다 남긴 결정은 권장안대로 · v3.18.9)
+
+- 진행: 영역 3 + 반증 1 을 겹쳐 돌렸다(proxy · bmusage 4분할 · PDU/중계 점검 · central 코어 · 엣지 워커 · 업그레이드). 반증 회차가 그 회차들이 남긴 '결정 필요' 를 권장안대로 함께 구현했다(사용자 '결정 필요한 것은 권장 사항으로 진행해줘').
+  함께 실은 것: 남은 결정 3건(허브 중지 admin 다시 켜기 재인증 · RMA 원격 제거 소유자+OTP · 서비스 점검 목록 즉시 회복 — 단순안은 게시판 덮어쓰기 데이터 손실이라 구조 변경) · 등록부 9개 읽기 오류 ≠ 손상 · CSV 빈 칸 = 유지 · 시험 561개 임시 폴더 정리.
+- **12회 모두 결함이 나왔다**(조기 종료 조건 미충족). 데이터 손실 계열이 가장 많았다: SSH 키 봉인본(77 F1 · 79 R1 복원) · portal.env(84 F3 · 87 R1 복원) · 보존 정리(82 F2 → 83 R1 덜 고침) · 배포 대상 등록부(85 F1) · 프록시 등록부(76 F5) · 월 마이그레이션(81 F1).
+- **작업 방식 교훈**: ① 같은 파일을 쓰는 **다른 경로**(백업 복원 · 엣지 pull · 자동 경로)가 반증마다 나왔다 — '읽기 오류를 없음/손상으로' 는 그 파일을 읽는 모든 경로를 grep 할 것(79 R1 · 87 R1 은 백업 복원).
+  ② '멈춤' 으로 고치면 그 멈춤에도 시한 · 상한이 필요하다(82 F2 정리 멈춤 → 83 R1 DB 무상한 · 상한 보존으로 정리). ③ 동시 에이전트가 같은 파일을 변이 검증으로 되돌리는 사고(79 → routes/api/pdu.js) — 변이는 격리 사본에서.
+  ④ 생성 문서(ARCHITECTURE.md)는 src 를 바꾼 모든 커밋 뒤 다시 만들 것(v3.18.8 verify 실패 원인 — 메인 실수).
+- **원격 접속 게이트웨이(76회차 · `proxyAudit76`)**: 확정 5(중간 4 · 낮음 1) · 추정 0 · 개선 1 — 고친 것 F1(중간) **RDP 중계가 guacd TCP 조각을 그대로 WS 메시지로 보냈다** — 브라우저 guacamole-common-js 1.5.0 WebSocketTunnel 은
+  메시지마다 따로 파싱해 명령 중간에서 잘린 메시지의 그 명령(img · blob · sync)이 버려지고 다음 메시지 앞머리도 버려졌다(실제 라이브러리로 재현 — 실 guacd 의 조각 경계는 미측정 · TCP 의미 근거) →
+  `guacdTunnel.js guacCompleteEnd · makeGuacRelay` 완전한 명령 단위로만 보냄 · 길이는 유니코드 글자 수 · StringDecoder 로 UTF-8 조각 경계 · 형식 오류 · 4MiB 넘는 명령은 사유를 말하고 닫음 ·
+  F2(중간 — 포탈 쪽 재현 · HAProxy 거부는 2.8.0 cfgparse.c 원문 근거) 매핑 이름이 \r\n\t 만 지워 quick-connect(remote.access)의 NUL 이 SSH 배포 블록 주석에 들어갔다 — 'Stray NUL character' 치명 오류로
+  그 프록시의 **전 매핑 배포**가 실패(R5-E5-4 와 같은 모양 · relaytopo INJ-02 의 형제) → `registry.mappingNameText`(제어 문자 전부 · 저장과 블록 생성 둘 다) ·
+  F3(중간) **지워진 중계 프록시의 매핑이 기본 프록시 + 같은 공개 포트로 접속**(getProxyById 폴백 — 공개 포트는 프록시마다 따로 매겨 다른 매핑의 대상) — 전체 범위 계정의 SSH 비밀번호 · RDP 티켓이 다른 장비로 갔다
+  (호스트키 관찰 모드면 못 막음 · 범위 계정은 중계 대조가 이미 막음) → `registry.mappingProxyOf`(없으면 null) · SSH 4404 / RDP 1011 'mapping-proxy-gone'(티켓 소비 전) · `.rdp` 409 · 매핑 목록은 주소를 숨김(`proxyGone`) · 웹 사유 문구 ·
+  F5(중간 · 데이터 손실) `remote-access.json` 읽기 오류(EIO · EACCES)를 손상으로 보고 원본을 보존본으로 옮긴 뒤 다음 매핑 저장이 중계 · 배포 자격증명 · 남의 매핑이 빠진 파일을 썼다(재현) →
+  공용 `makeJsonFileReader`(읽기 오류는 원본 유지 · 캐시 안 함 · 저장 409 `settings-unreadable` · 30초 뒤 다시 읽음 — 손상은 예전처럼 보존본) ·
+  F4(낮음) guacd 호스트 '[fd00::5]' 대괄호째 접속해 ENOTFOUND(경고 판정은 대괄호를 벗겨 '[::1]' 을 같은 호스트로 봄) → 벗겨서 접속. 개선: `touchMapping` 쓰기 실패(디스크 가득 등)는 던지지 않음(WS 처리기 안 — 처리기 밖 '[fatal]' 방지).
+  기존 시험 기대값 변경 1: `securityAudit2026-08-17` 의 자격증명 스토어 스윕에서 proxy/registry 는 공용 읽기(손상 보존은 reader 가 함)를 보게 — 동작은 proxyAudit76 이 실제 파일로 고정. 변이 12/12.
+  **남긴 것**: RDP 동시 세션 상한 없음(guacd 는 연결마다 RDP 프로세스 — SSH 의 80 · 계정당 20 같은 상한을 RDP 에도 둘지 결정 필요 · v2.770 이후 계속 남음) · 중계 프록시 삭제가 그 프록시의 매핑을 남긴다(삭제 거부 또는 함께 정리 — 결정) ·
+  임시 매핑 만료가 열린 세션(24시간 넘게 쓰는 중)도 지운다(touchMapping 은 접속 시점만 — 판독, 미재현) · Data Plane `applyMapping` 이 이미 있는 backend 를 다시 만들려 해 재적용이 동작 중인 매핑을 error 로 표시할 수 있다(추정 — Data Plane 미실행) · registry 를 서비스 점검(makeJsonFileLoader)에 등재할지.
+  깊이 보지 못한 곳: `sshExec.js`(794줄 — 호스트키 · connect · exec 만, execAnswered · SFTP 는 훑음) · 실 guacd · 실 HAProxy 실행(둘 다 미설치 — 원문 근거) · 화면 변경(매핑 목록 두 칸 · 중계 삭제 매핑만) Chromium 미실행.
+
+- **베어메탈 사용률 2차 ① — 온보딩 · SSH 키 · 정비 창 · 로그(77회차 · `bmusageAudit77`)**: 확정 6(중간 1 · 낮음 5) · 추정 0 — 전부 고침(34회차 '남긴 것' 중 이 범위분).
+  F1(중간) `ssh-keys.json` **읽기 오류(EACCES · EIO · EISDIR)를 손상으로 보고** 봉인본(백업에 개인키가 없어 유일한 사본)을 `.corrupt.*` 로 옮김 — 권한을 바로잡아도 저장소가 빈 채
+  (보존본만 남아 재시작 뒤에도 오류) 키 인증 수집이 전부 끊김(재현: readFileSync EACCES) → 공용 `util/jsonFileLoad.js`(makeJsonFileReader) — 원본 그대로 · 쓰기 거절(`readError` 문구 따로) ·
+  30초 간격 재읽기로 스스로 풀림 · 점검용 읽기(diskDrift · plainStoredKeyIds)는 `preserve:false` · F2 `bm-onboard-edge.json`(중앙 엣지 배포 목록) 같은 꼴 → 같은 수정(객체 아닌 JSON 은 손상) ·
+  F3 `bm-onboard-applied.json`(엣지 적용 상태) 읽기 오류에 원본을 옮기고 그 자리에 lost 파일을 써 ‘만든 항목’ 목록을 잃고 7일 lost 보류 → 옮기지도 쓰지도 않고 `readError` · 그 판은 적용하지 않음
+  (적용하면 끝에 빈 created 로 원본을 덮는다 — 등록부를 건드리기 전에 멈춤) · F4 `maintenance-windows-deployed.json` 읽기 오류에 원본을 옮김 → readJsonFile(못 읽음은 어느 쪽이든 억제하지 않는 쪽) ·
+  F5 `maintenance-stats.json` 읽기 오류에 원본을 옮기고 0 부터 세어 다음 저장이 0 으로 덮음 → 읽기 오류 중 저장 건너뜀 · 재읽기 · F6 키 저장소 손상 사유가 V8 JSON.parse 원문(파일 조각 약 20자 — 따옴표)
+  그대로 ‘키 저장소 다시 읽기’ 응답에 실림(재현) → `safeLoadText` 요약. 개선: 정비 창 파일 읽기 오류도 로드 오류 상태(서비스 점검 · 중앙 배포 503 표지 — 확정 불가)에 올림 ·
+  키 점검(sshaccess/check.js) · 라우트 503 문구가 읽기 오류와 손상을 가름. 로그 정규식 ReDoS 측정(규칙 58 + 파서 · 분류 34 · 길이 2배 비율 · 적대 입력 25종 × 꼬리 3종) — 최악 0.04ms/2,000자 · 비율 ≈2(선형) — 결함 아님.
+  변이 9/9. **남긴 것**: 정비 창 파일(`maintenance-windows.json`) 읽기 오류는 재읽기 간격이 없다(요청 · 주기마다 다시 읽는다 — 죽어 가는 디스크의 EIO 면 매번 블로킹 가능 · 추정 · 71회차와 같은 꼴) ·
+  `sanitizeLogView` 의 `to`(엣지 시각)는 수신 시각으로 자르지 않는다(화면이 쓰지 않아 영향 없음 — 낮음) · 같은 읽기 오류 꼴이 범위 밖 bmusage 파일(monthStore 등 — 다음 회차 몫)에 남았는지는 보지 않았다.
+  깊이 보지 못한 곳: 정비 창 합 규칙(coverNeedsOwner)과 라우트 승인 등급 · 온보딩 분석(importAnalyze 556줄)의 묶음 판정 · 로그 view/command 의 범위 · 웹 화면(Chromium 안 봄 — 화면 변경 없음).
+
+- **PDU · 전력 · 중계 점검(78회차 · `pduPowerAudit78`)**: 확정 8(높음 0 · 중간 6 · 낮음 2) · 추정 2 — 고친 것
+  F1(중간) PDU 연결 테스트가 저장 비밀번호를 물려받는 판정이 host 만이라 계정 · SSH 포트만 바꾼 테스트에 저장 비밀번호가 나갔다(스토리지 23회차 S-1 · SAN v2.770 의 형제 누락) → `pdu/registry.js pduAccessMoved`(저장 · 테스트 같은 판정) ·
+  F2(중간) HAProxy 경로 점검(`relaycheck/checks.js runCheck`)이 IP 리터럴에 `ipBlockReason` 없이 접속 — `ssrfLookup` 은 이름일 때만 불려 수동 호스트 127.0.0.1 · 169.254.169.254 로 TCP · SSH 배너(첫 40바이트를 화면에) · /api/health 가 나갔다(vCenter 종류 · relaytopo/ops 는 이미 막음) ·
+  F3(중간) HQ 포탈 점검이 인스턴스 값 없는 200 응답(포탈 아닌 웹 서버 · 다른 포탈)을 '구버전 — 대조 불가' 정상으로 셌다 — 이 중앙은 v2.429 부터 늘 instance 를 싣는다 → 'hq' 실패 ·
+  F4(낮음) PDU 요약 순시 전력 합이 유닛 일부(모르는 단위 · 엣지 숫자 아님)를 못 읽은 부분 합인데 표지 없음(누적 전력량 COL2607-07 의 형제) → `powerPartial` · `powerUnitsRead` + 웹 `pduTotals` · `pduPowerMark` ·
+  F5(중간) PDU CSV 가져오기가 수정 행의 빈 계정 · 포트 칸을 'apc' · 22 로 덮어 접속처 변경으로 판정 → 저장 비밀번호를 **조용히** 폐기('비워 두면 기존 값 유지' 안내와 반대) → 수정 행은 저장값 유지 · 폐기는 응답 `droppedSecrets` + 화면(horizonAssign · veeam CSV 규약) ·
+  F6(중간) PDU 임계치 · 수집 주기 파일의 읽기 오류(EISDIR 재현 — EACCES · EIO 같은 갈래)를 손상으로 보고 원본을 옮기고 저장이 기본값 위에 썼다(결정 G2 꼴) → 공용 로더(`makeJsonFileLoader`) · 읽기 오류 중 저장 409 · 손상 저장이 푸는 예전 규약 유지 · null 은 예전처럼 손상(`parseStrictObject`) ·
+  F7(낮음) 엣지 PDU 스냅샷 최상위 `ok` · `authStopped` · 버전 칸 미정제(`ok:'false'` 가 참) → `sanitizePduSnapshot` 에서 좁힘 ·
+  F8(중간) HAProxy 경로 점검 설정 손상 · 읽기 오류가 **아무 표지 없이** 기본값(점검 · 알림 켜짐 · 수동 호스트 없음)으로 돌고 읽기 오류도 원본을 사유 없이 옮김 → 공용 로더 등재(서비스 점검 · GET `loadError` · 화면 배너 · 읽기 오류 저장 409 — 등록 수 49 → 50).
+  개선: `/tools/pdu` 에 등록부 · 임계치 · 주기 로드 오류 표지(`loadErrors` — 요약만) + 화면 배너(예전에는 빈 목록 · 기본값이 정상처럼 보였다). 변이 13/13.
+  **남긴 것**: ① PDU 등록부(pdu-devices.json — 자격증명)의 읽기 오류도 손상처럼 원본을 옮긴다 — `util/registryCore.js` 공용(storage · san · cvp · bmstor 같은 꼴)이라 범위 밖(추정 · 코드 판독) ·
+  ② `central/pduEdge.js` 보관 파일 읽기 오류 → 옮김(캐시 성격 — 다음 push 가 재구축 · 낮음) · ③ CSV 의 빈 agent · enabled · note 칸이 기존 값을 덮는다(빈 agent = 위임 장비가 중앙 직접으로 · 스토리지 CSV 와 같은 계약 — 결정 필요) ·
+  ④ 엣지 PDU 스냅샷의 모르는 최상위 키는 여전히 담긴다(장비 1MB · 엣지 16MB 상한 안 — '아는 필드만' 전환은 소비처 확인 뒤) · ⑤ 임계치 저장에 범위 검사 없음(API 로 ' ' → 0 · 위험 < 경고 허용 — 화면 경로는 숫자만, 추정).
+  깊이 보지 못한 곳: power/total.js · PowerTotal · BmPowerFleet · PowerMap 화면(판독만) · pdu/db.js 시계열 SQL · apcSsh 예산 산수 · relaycheck remedy 문구 · 데모(mock) 경로 · 화면 Chromium 확인(메인).
+
+- **76 · 77 · 78회차 수정 반증(79회차 · `rebut79`)**: 확정 6(중간 1 · 낮음 5) · 추정 0 · 결정 구현 2(76 남긴 것 — 권장안) — 고친 것
+  R1(중간 · 데이터 손실 — 77 F1 의 형제 경로) 백업 복원이 지금 `ssh-keys.json` 의 **읽기 오류**(EACCES · EIO)를 '없음' 으로 보고 번들(개인키 가림)과 합쳐, 되살릴 수 없는 키를 전부 뺀 저장소를
+  봉인본(유일한 사본) 자리에 예약 · 적용했다(재현: reconcileForApply 결과 keys 0) → `backup/service.js restoreCentral` 은 그 파일을 예약하지 않고 failed(사유) · `stagedRestore.js reconcileForApply` 는 던져서
+  그 파일만 적용하지 않음(failed — 지금 파일 그대로) · ENOENT 는 예전과 같다 ·
+  R2(낮음 — 77 F5 덜 고침) 정비 창 계수가 읽기 오류에서 회복할 때 그동안 메모리에 센 계수와 ‘창 끝 뒤 억제’ 점검 결과를 파일 값으로 **덮었다**(leak 1 → 옛 값 0 · 재현) → `maint/runtime.js mergeStats`
+  (계수는 더하고 · 점검 결과 leak · leakBy 는 at 이 늦은 쪽) — 기존 `bmusageAudit77` F5 기대값 7 → 8(의도 변경: 버리던 1 을 합침) ·
+  R3(낮음) 키 저장소를 못 읽은 동안 회전 · 키 삭제 · 계정 삭제가 '키를 찾을 수 없습니다'(404 — 본인 OTP 소모 뒤 틀린 안내) → `onboard/refs.js` 가 못 읽음(503 · 읽기 오류/손상 문구)을 먼저 ·
+  P3(낮음 — 76 F5 의 표시) `remote-access.json` 읽기 오류 동안 매핑 목록이 '등록된 대상이 없습니다', 설정 상태가 '중계 서버 없음(꺼짐)' 이었다 → `registry.registryReadError` · GET /remote/mappings `registryReadError` + 화면 배너 ·
+  `settingsStatus/sources.js` proxy loadError(로드를 damaged 보다 먼저 — 72회차 F2 '첫 계산' 순서 유지) ·
+  Q1(낮음 — 78 F1 덜 고침 · 재현) PDU 연결 테스트가 판정(pduAccessMoved)과 **접속값**이 달랐다 — 요청에 없는 SSH 포트를 판정은 '저장값 유지', 접속은 22 로 해 저장 비밀번호가 저장 포트가 아닌 22 번으로 나갔다
+  → 수정 장비는 저장 경로(normalize)와 같은 `??` 규칙으로 접속값을 먼저 정하고 그 값으로 판정 · 접속 · Q2(낮음 — 78 F4 의 형제) PDU 부분 합 표지가 관제 콘솔 설비 KPI(`console/consoleData.js pduSummary`)에는 없었다 → 부분 합 장비 수 · 행 '(부분 합)'.
+  결정 구현(76 남긴 것 — 권장안): ⓐ RDP 동시 세션 상한 — SSH 와 **같은 상수**(`sshGateway.MAX_SESSIONS` · `MAX_SESSIONS_PER_USER` — 같은 env · 따로 셈) · 넘치면 **티켓 소비 전** 4429 + 사유('too-many-sessions' · '-user' — 웹 `sshSend.js` 표 · SSH 사유 별칭) ·
+  티켓 확인 뒤에만 셈 · ws close · error · guacd close 셋 중 한 번만 푼다 · ⓑ 중계 프록시 삭제 — 그 중계를 쓰는 매핑이 있으면 409 `proxy-in-use`(이름은 요청자에게 보이는 매핑만 · 개수는 전체 · NSX 매핑은 '매니저 설정을 먼저' 안내 — 수집이 다시 만든다) ·
+  화면은 기존 삭제 실패 문구가 사유를 그대로 보인다. `proxyAudit76` F3 준비는 '예전 판본에서 지워진 중계' 를 메모리에서 직접 빼는 것으로 바꿈(의도 변경 — 게이트웨이 판정은 그대로 고정). 변이 13/13(77 5 · 76 6 · 78 2 · 결정 포함).
+  반증으로 확인한 것(결함 아님): 77 — 키 저장소 읽기 오류 중 keyRef · credRef 서버 모두 `store-unreadable`(비밀번호로 넘어가지 않음 · 인증 실패 문구가 아니라 authGuard 정지 없음) · diskDrift/다시 읽기 503 · 30초 회복 뒤 오류 해제 ·
+  읽기 오류→손상 교대는 손상 오류 + 보존본 · 캐시 뒤 디스크 읽기 오류는 쓰기 409(store-changed-outside) · 온보딩 · bmstor 고르기 · installCred 는 로드 오류를 먼저 본다 · 엣지 배포 목록 읽기 오류 중 중앙 인출은 503(빈 배포 아님).
+  76 — F1 중계는 완전한 명령이 오면 같은 data 이벤트에서 바로 보낸다(지연 없음) · 브라우저→guacd 는 WS 메시지 = 완전한 명령 · TCP 스트림이라 같은 문제 없음 · 기존 RDP 세션 시험 통과 · F3 프록시에는 '일시 비활성' 상태가 없다(dataplane · deploy 의 enabled 만 —
+  mappingProxyOf 와 무관) · 읽기 오류 중에는 매핑이 안 보여 mapping-not-found(proxyGone 아님) · F5 읽기 오류 중 배포 · Data Plane 은 DEFAULTS(꺼짐)라 빈 설정을 밀지 않고 만료 타이머는 빈 목록을 돈다.
+  78 — F2 RFC1918 · 100.64/10 은 통과, 루프백 · 링크로컬 · 메타데이터 · 우회 표기는 막힘 · 이름은 tcp · 배너 · fetch 모두 ssrfLookup(리바인딩 차단) · F3 /api/health 는 늘 instance(모듈 로드 때 UUID · 인증 없는 경로)라 정상 중앙 오탐 없음 ·
+  F5 droppedSecrets 는 saveDevice 의 실제 폐기(normalize host 변경 + pduAccessMoved)와 같은 근원 · F6/F8 409 는 화면이 reason 을 그대로 보인다(postJson · putJson 예외 문구).
+  **남긴 것**: 77 F3 엣지 적용 상태 읽기 오류 중에는 중앙 화면이 '대기' 로만 보인다(사유 모름 — 인출 쿼리에 표지 한 칸을 싣는 것은 엣지 계약 변경이라 제안) · 시한은 둘 수 없다(적용해야 서명을 보고하는데 적용은 created 를 읽어야 한다 — 설계 판단) ·
+  `bm-onboard-edge.json` 손상 사유는 V8 원문으로 loadErr 에 남는다(응답은 loadWhy 요약 · edge-rows 는 사유를 싣지 않음 — 노출 경로 없음, 77 F6 와 모양만 다름) · 76 NSX `ensureNsxDial` 은 등록부 읽기 오류 · 손상 중 기본 프록시로 떨어져 직접 접속하거나 저장 409 로 수집 실패(예전부터 · 낮음) ·
+  설정 상태 공통 문구 '설정 파일을 읽지 못함(손상 보존본 확인)' 이 읽기 오류에도 '손상 보존본' 을 말한다(grade.js 공용 — 메인) · 78 F2 가 IPv6 ULA(fc00::/7)도 막는다 — 수집 서버 등록부와 같은 정책이지만 ULA 수동 중계 호스트는 이제 점검 불가(결정 필요 · 낮음) ·
+  PDU normalize 는 '********' 를 새 비밀번호로 저장한다(화면은 쓰지 않음 · API 전용 · 예전부터 · 낮음).
+  깊이 보지 못한 곳: 실 guacd · 브라우저 RDP(4429 문구) · 화면 두 곳(원격 접속 배너 · 관제 콘솔 설비 KPI) Chromium 미실행 · 78 '남긴 것' 결정 작업(pdu csv · registry · registryCore — 다른 작업이 동시에 고치는 중이라 보지 않음 — 그 작업 중 `audit2613f` PERSIST2613-04 실패 1건은 그쪽 변경).
+
+- **베어메탈 사용률 2차 ② — 파서 · 수집기 · 튜닝 · 집중 · 프로파일 · 스냅샷(80회차 · `bmusageAudit80`)**: 확정 3(높음 0 · 중간 1 · 낮음 2) · 추정 2 — 고친 것
+  F1(중간 · 재현) 튜닝 탭 'HDD(SCSI) scheduler' · gpdb 요구값 'HDD scheduler' 가 HDD 위 LVM(dm-*) · 소프트웨어 RAID(md*)를 **권고**로 판정했다 — 그 장치는 rotational=1 이고
+  `queue/scheduler` 가 'none' 하나뿐(bio 기반 큐 — 바꿀 수 없다)이라 흔한 구성(HDD RAID 가상 디스크 + LVM)이면 항목 · gpdb 프로파일이 늘 권고(warn)였다 →
+  스케줄러 항목(`sched` 표지 — 카탈로그 둘 · gpdb 셋)에서 선택지가 'none' 하나뿐인 장치의 권고는 참고(`noSched` · 웹 문구 1:1) · 선택지 목록이 없는 옛 행은 예전 판정 그대로 ·
+  F2(낮음 · 가짜 PATH 재현 — 8b 반증 S1 의 형제) 진단 스냅샷 · 집중 경량 스냅샷의 /proc/<pid>/io 읽기에 시한이 없어 한 프로세스가 붙잡으면 진단 스냅샷은 명령 전체가
+  exec 시한(30초)에 걸려 **전 구획**(ps 상위 · ss · 커널 로그)을 잃었다(집중은 그 분 12초) → 표본마다 `timeout 2`(진단 6초 · 집중 6초 + 여유 ≤ 시한 — 산수 시험) ·
+  F3(낮음 · 실제 GNU grep 재현) timeout 이 끊은 grep 은 블록 버퍼(4KB) 경계에서 마지막 줄을 숫자 중간에서 자른다 — Top-N(8b) 첫 io 읽기 · 스냅샷 첫 표본이 작게 읽혀
+  (둘째 − 첫째) ÷ 경과가 부풀어 가짜 I/O 상위가 됐다(스냅샷 awk 에 잘린 줄을 먹이면 2초에 4MB 1위 — 1단계 D1 과 같은 유형) → 세 io 읽기에 `--line-buffered`(온전한 줄만).
+  개선: ##NETINFO 속도 4294967295(옛 커널의 부호 없는 SPEED_UNKNOWN) · 65535(u16 -1)는 모르는 속도(null — 사용률 0% 근처 '부하 없음' 방지 · 근거는 커널 소스 기억 — 실장비 미확인).
+  변이 4/4(F1 판정 · F2 timeout · F3 Top-N · 스냅샷 줄 단위).
+  **남긴 것**: E1(추정) 스냅샷 IO awk 가 `getline < /proc/<pid>/comm` 으로 이름을 읽는다(8b '/proc 을 awk getline 으로 읽지 않는다' 의 형제) — 열린 뒤 프로세스가 끝나면 읽기가 ESRCH 라
+  mawk(Debian/Ubuntu 기본)면 IO 구획이 중단될 수 있다. Rocky 는 gawk(읽기 오류 = -1)이고 경합 창이 짧아 재현하지 못했다 ·
+  E2(추정 · 낮음) Top-N 후보 io 둘째 읽기(시한 1초)가 끊기거나 막히면 후보가 'p'(권한)로 보인다 — 원인이 시한인데 문구는 권한 ·
+  결정 필요: `mem.minFree` 판정은 '물리 메모리 2% 이하' 만 본다 — 권장 문구의 '수백 MB 이하' 는 판정하지 않아 512GB 서버의 10GB 도 적합(문서 수치가 모호해 상한을 정하지 않았다) ·
+  정직 기록: `--line-buffered` 는 GNU grep 옵션이다(busybox grep 서버면 io 칸이 비어 '권한' 으로 보인다 — 대상 Rocky · RHEL · Ubuntu 는 GNU grep).
+  깊이 보지 못한 곳: 라우트(bmPerfOps · bmUsage 1,589줄 · collector.js 대행) · 엣지 워커 경로 · 웹 화면(BmTuningTab · BmProfileTab 렌더) · 집중 대기열 동시성 · overrides 저장 경로 ·
+  winPerf · racadm · idracTelemetry 실장비 형식(원래 미확인).
+
+- **베어메탈 사용률 2차 ③ — 최상위 모듈 a~m(81회차 · `bmusageAudit81`)**: 확정 4(중간 1 · 낮음 3) · 추정 1 — 고친 것 F1(중간 · 재현) 시간 단위 파일 마이그레이션이 **삭제 단계에서** 실패하면
+  (phase failed · failedPhase delete) `db.readRule` 이 반쯤 지운 예전 표를 그 구간의 원본으로 보고 대조를 통과한 시간 단위 파일을 건너뛰었다 — 재현 원시 72행 중 52행만 보임(usage_daily 삭제 중
+  실패면 원시 구간 전체가 빈다) · 재시도까지 1시간(3회 뒤 6시간) → 삭제 단계 실패는 '삭제 중' 과 같은 규칙(파일이 원본) · `pruneUsage` 보존 멈춤도 같은 판정(`rule.legacyRaw`) · 콘솔 문구
+  '아무것도 지우지 않았습니다' 가 삭제 단계 실패에서 사실과 달라 고침. F2(낮음 · 재현 — 34회차 F4 '남긴 것' 의 형제) `idle.js loadIdle` 이 읽기와 JSON.parse 를 catch 하나로 받아 **읽기 오류**
+  (EISDIR · EACCES · EIO)에도 원본을 `.corrupt.<시각>` 으로 옮기고 다음 계산이 이력(62일) · 후보 시작일 · 첫 계산일을 새로 썼다 → 공용 `util/jsonFileLoad makeJsonFileReader`(읽기 오류는 옮기지 않고
+  캐시하지 않으며 30초 간격) · `readError` 표지 · 그동안 다시 계산(수동 포함)은 덮지 않는다(`skipped:'read-error'`) · 라우트 sources · 화면 문구(손상 문구와 구분). F3(낮음 · 재현) `capacity.js loadCapacity` 같은 꼴 — 같은 수정.
+  확정 미수정 P1(낮음 · 범위 밖) `hwFacts.shapeHwFacts selCritical` — iDRAC 인벤토리가 SEL · LC 로그를 둘 다 못 읽으면(또는 매니저 id 없음) `inv.events=[]` 라 'SEL Critical 0건 · ok' 로 보인다
+  (idrac/redfish.js 가 `collections.events` 표지를 남기지 않는다 — 고치려면 redfish 가 'ok'|'failed' 를 남기고 hwFacts 가 failed 면 null). 추정 P2(낮음) 저활용 · 용량 예측 하루 계산이
+  `monthStore.readDailyRange` 를 직접 읽어 마이그레이션 중(예전 표가 원본인 동안) 업그레이드 전 일 롤업을 못 본다 — 업그레이드 직후 계산이 '데이터 부족' 으로 하루 남는다(일시적).
+  반증 기록(결함 아님): 대조 실패 재시작 때 `copied` 수가 이어져 `rawDup` 이 두 배가 되고 1시간 대조 허용치가 느슨해지지만, 보존 안 1시간 버킷은 원시에서 다시 집계하고 원시 대조가 따로 있어 효과가 없다 ·
+  a~m 의 다른 파일 스토어(annotations · compareSets · keyDecisions)는 이미 읽기 오류와 손상을 가른다(확인) · `usage_latest` 시드의 GROUP BY + MAX(ts) 는 빈 최신 표에 한 번만 도는 기동 이관(기존 기록).
+  변이 검증 4/4(F1 읽기 규칙 · F2 로드 · F2 다시 계산 가드 · F3 다시 계산 가드).
+  **남긴 것**: P1(idrac 담당) · P2 · 엣지 봉투의 저활용 · 용량 예측에는 `readError` 를 싣지 않아 중앙 화면은 엣지의 읽기 오류도 '손상본 보존' 문구다(중앙 정제 화이트리스트 `central/bmUsageEdgePull.js` 와 함께 바꿔야 한다) ·
+  저활용 계산이 `readDailyRange` 의 `missingPeriods`(못 연 1d 연 파일)를 버려 부분 창으로 점수를 낸다(표지 없음) · **결정 필요** 주 조회 `db` 상태(rawRows · dailyRows · 파일별 행 수 · 마이그레이션 수)가 전 법인 합으로 범위 계정에도 나간다(행 수로 함대 규모를 추정할 수 있다 — 진단 값을 범위 계정에 둘지 정책).
+  깊이 보지 못한 곳: `routes/api/bmUsage.js`(1,589줄) 대부분 · bmPerfOps · bmKeyOverlaps 라우트 · baseline `slotBands` 캐시(부분 읽기를 한 시간 붙든다 — 추정) · multiCompare 계열 산수.
+
+- **베어메탈 사용률 2차 ④ — 최상위 모듈 n~z(82회차 · `bmusageAudit82` · web `views/bmUsageAudit82.test.js`)**: 확정 3(중간 2 · 낮음 1) · 추정 0 — 전부 고침(변이 5/5).
+  F1(낮음) 임계 초과 알림(`bmusage/notify.js`)이 주기 상한(`MAX_SEND`)을 넘긴 발화도 `evaluateRows` 가 찍은 notifiedAt 그대로 저장해, **한 번도 보내지 않은 초과가 ‘알림’ 으로 기록**돼
+  재알림 간격(기본 6시간) 동안 억제됐고 잘린 해제는 상태가 지워져 영영 나가지 않았다(재현: 상한 1 · 두 서버 초과 → 다음 주기 0건) — 형제 perfAlerts(8b 반증 F6 deferred)와 같은 규칙으로
+  잘린 초과는 notifiedAt · retries 를 직전 값으로(지속 구간은 그대로 · 정비 창 뒤 표지도 들고 간다) · 잘린 해제는 직전 상태를 들고 간다 ·
+  F2(중간 — 데이터 손실) 보존 정리(`poller.pruneTick`)가 보존 기간을 정하는 설정 파일(`bmusage-settings.json` · `bm-perf-rules.json`)을 못 읽은 동안(손상 · 보존본만 남음 · 읽기 오류)
+  **기본값으로 지웠다** — 관리자가 더 길게 둔 보존(일 롤업 10년 · 시간 730일 · 변경 이벤트 400일 · 집중 90일 · 로그 90일 · Top-N 시간 365일)을 되돌릴 수 없게 삭제(재현: 규칙 파일 손상 → 100일 전 변경 이벤트 삭제)
+  → 그 파일이 정하는 정리만 멈춘다(`settings.bmUsageLocalLoadError` 새 export · `lastPrune.held` · 콘솔 10분 1줄 · 고정 보관 스냅샷 7일 · 수집 주기 30일은 그대로) · 웹 `lastPruneNote` 가 ‘보존 정리 멈춤’ 을 밝힌다(허브 46회차 H1 과 같은 꼴) ·
+  F3(중간) `bm-perf-rules.json` · `bm-perf-slo.json` · `bmusage-portmap.json` 이 **읽기 오류(EACCES · EIO · EISDIR)를 손상으로 보고 원본을 `.corrupt.*` 로 옮겼다**(34회차 ‘남긴 것’ 꼴 — 재현 3/3:
+  포트 매핑은 재시작하면 ‘매핑 없음 · 오류 없음’ 으로 굳고, 규칙은 기본값(전부 꺼짐 · 랙 배치 없음)) → 공용 `util/jsonFileLoad.js makeJsonFileReader` 로 가른다(원본 유지 · 캐시하지 않음 · 30초 간격 재읽기로 풀림 ·
+  저장 409 `settings-unreadable` — 라우트 `bmPerfOps rulesWrite` · `bmPlaybookSlo sloWrite` 가 409 를 낸다 · 화면은 `ok:false` 본문을 이미 보인다) · 객체가 아닌 JSON(null)은 예전처럼 손상 · 손상은 예전처럼 보존 ·
+  SLO 로드 오류 문구가 읽기 오류일 때 ‘저장하면 새 파일’ 이라 하지 않는다. 기존 시험 audit2613c(정적 + 동적 이중 import)에 맞춰 poller 의 settings 는 정적 import.
+  **남긴 것**: ① 알림 상태 파일 둘(`bmusage-alert-state.json` — 읽기 실패면 빈 상태로 시작해 다음 저장이 덮는다 · `bm-perf-alert-state.json` — 읽기 오류도 보존본으로 옮기고 한 주기 기준만 잡는다)은
+  재생성 가능한 상태라 두었다(낮음 — 진행 중 초과가 지속 뒤 다시 나갈 수 있다) · ② F1 의 잘린 ‘정비 창 뒤 첫 발화’ 는 억제 계수 after 를 이번 · 다음 주기 두 번 센다(통계만) · ③ 포트 매핑 손상 상태는 재시작까지 풀리지 않는다(예전 그대로).
+  **결정 필요**: 사용률 설정 파일이 손상된 동안 **범위 관리자의 법인 칸 저장**(PUT `/tools/bm-usage/settings` — 전역 필드는 버린다)이 기본값 전역 필드(보존 · 주기 · Enterprise 동의 꺼짐)로 파일을 쓰고 손상 표지를 지운다 —
+  F2 의 정리 멈춤도 그 저장으로 풀린다(코드 판독 — `saveBmUsageSettings` 가 손상이면 기본값 위에 패치). 손상 중 저장을 전체 범위(또는 서비스 점검 확정)로 좁힐지는 사용자 결정 ·
+  폴러 주기 전체 상한(perf-db ‘끝나지 않는 주기’ — `pullCycleMaxMs` 꼴)은 없다(장비 단위 시한은 있음 · 추정 위험 — 재현 없음).
+  깊이 보지 못한 곳: `perfAlerts.js`(708줄 — 보류 시한 · 거짓 해소는 20회 넘게 고쳐진 곳이라 표본만) · `powerAgg.gatherPower` · `targets.resolveTargets` 세부(훑기만) · `usage.js` 집계 · `trendQuery` · `topStore` SQL ·
+  `routes/api/bmUsage.js`(1.6천 줄 — 설정 · 지금 수집 · 포트 매핑 핸들러만) · 화면 Chromium(문구 헬퍼 한 줄만 바뀜 — 실행 안 함).
+
+- **베어메탈 사용률 2차 반증 — 80 · 81 · 82회차 수정 적대적 재검토 + 남긴 결정(83회차 · `rebut83`)**: 확정 4(중간 2 · 낮음 2) · 추정 2 — 고친 것
+  R1(중간 · 재현 — 82회차 F2 의 덜 고침) 보존 정리 '멈춤' 에 끝이 없었다 — 설정 파일을 고칠 때까지 원시 5분 · 장치 · Top-N 날 파일 · 변경 이벤트 · 로그 · 집중 정리가 통째로 서서
+  DB 가 무상한으로 자랐다(루트 규약 '보류에는 시한') → 못 읽은 동안은 **설정이 허용하는 가장 긴 보존**(`settings.RETENTION_MAX` — 원시 365 · 시간 730 · 일 3650 · 장치 60/365일 ·
+  perfRules `LIMITS` 상한 — Top-N 14/365 · 집중 90 · 변경 이벤트 400 · 로그 90일)으로만 지운다(관리자가 둘 수 있는 어떤 값보다 길어 되돌릴 수 없는 삭제 없음 · 크기는 상한에서 멈춤 ·
+  `lastPrune.heldMax` · 화면 문구) · 사람이 아는 경로는 서비스 점검(두 파일 모두 `makeSettingsLoadError` 등재) · 콘솔 10분 1줄 · 화면 `lastPruneNote`(확인).
+  R2(중간 · 재현 — 80회차 F2 의 형제 · 8b 반증 S1 'ps 는 전부 timeout') 진단 · 집중 스냅샷의 `ps -e` 에 시한이 없어 ps 가 멈추면(가짜 PATH 재현) 진단 스냅샷은 exec 시한(30초)에
+  전 구획을 잃었다 → `timeout 2`(SNAPSHOT_PS_TIMEOUT_S) · 집중 경량 스냅샷 exec 시한 12 → 15초(안 시한 합 9초 + 여유 5초 — 산수 시험).
+  R3(낮음 · 재현 — 80회차 F1 의 덜 고침) `noSchedChoice` 가 물리 디스크(sd* · vd*)의 '[none]' 하나(스케줄러 모듈이 안 올라온 커널)도 '고를 수 없는 논리 장치' 로 보고 HDD 권고를
+  참고로 숨겼고 화면 문구('LVM · 소프트웨어 RAID 같은 논리 장치')가 사실과 달랐다 → 늘 blk-mq 인 이름(sd · vd · xvd · hd)은 빼낸다(NVMe 다중 경로 머리는 bio 기반이라 그대로 참고 ·
+  파서가 대괄호를 버려 '[none]' 과 'none' 을 가를 수 없어 이름으로 가른다 — 정직 기록) · 옛 행(선택지 목록 없음)은 예전 그대로.
+  R4(낮음 · 재현 — 82회차 '남긴 것' ②) 주기 상한에 잘린 '정비 창 뒤 첫 발화' 가 억제 계수 after 를 이번 · 다음 주기 두 번 셌다(두 서버 → 3) → 보낸 것(take)만 센다.
+  80회차가 남긴 것: E1 스냅샷 IO awk 의 `getline < /proc/<pid>/comm`(8b 규칙 위반 — mawk 중단 위험) → awk 는 자리표 '?' 만 내고 셸이 고른 pid 의 comm 을 `timeout 1 grep -s -H --line-buffered`
+  한 번으로 읽어 붙이기 awk 가 바꾼다(개행 든 comm 은 첫 줄 · 출력 가능한 ASCII 밖 '?' · 못 읽으면 '?' · 이 컨테이너 awk = mawk 로 시험 · gawk 미설치) · E2 Top-N 후보 io 둘째 읽기가 시한(124)에 끊기면
+  '권한(p)' 이 아니라 '모름(-)'(끝 상태 `JX` 를 함께 넘김 · 기존 `ioUnknown` 으로 세고 화면 안내 줄 — 저장 열 추가 없음).
+  결정 구현(권장안): 81-ⓐ 주 조회 `db` 진단(행 수 · 파일별 행 · 바이트 · 마이그레이션 센 수)은 조회 ∧ 쓰기 전체 범위(`isFullReadWriteScope`)만 — 범위 계정은 `dbStateOnly`(쓸 수 있는가 ·
+  오류 · 일부 못 읽음 표지 · 마이그레이션 단계 · `redacted:['path','counts']`) · 81-ⓑ 엣지 봉투 저활용 · 용량 예측에 상태 파일 `readError` → 중앙 정제(`bmIdleSanitize` · `bmMaintCapSanitize` — 불리언만) →
+  라우트 출처 줄 → 화면 '읽기 오류'(손상본 보존 아님) · 81-ⓒ 저활용 계산이 못 연 1일 연 파일(missingPeriods 중 'none' 아닌 것) · 조회 실패를 `unreadPeriods` 로 세고(엣지 필드 · 중앙 정제 양의 정수 ≤ 100)
+  화면 상태 칸 '기간 일부 못 읽음(n)' · 82-ⓐ 사용률 설정 손상 · 보존본만인 동안 저장은 명시 확정(서비스 점검 '기본값으로 확정' 또는 전체 범위 관리자의 `confirmDefaults:true`)일 때만 —
+  그 밖(범위 관리자의 법인 칸 저장 포함) 409 `settings-unreadable`(corrupt) · 82-ⓑ 폴러 주기 상한 `bmCycleMaxMs`(기본 max(주기 × 3, 15분) · env `BMUSAGE_CYCLE_MAX_MS` 하한 60초) —
+  넘긴 주기는 경고 · 횟수(`stuckReleases`)를 남기고 가드를 풀어 새 주기 · 가드는 주기 번호라 늦게 끝난 옛 주기가 새 가드를 풀지 않는다 · 상태에 `runningForMs` · `cycleMaxMs`.
+  반증 기록(결함 아님 — 근거): 81 F1 — 일 롤업(usage_daily) 삭제 중 실패 · 시도 소진(3회) · 재시도 모두 읽기는 파일(원시 72 · 일 30 그대로 — 이중 계산 · 누락 없음) · 보존 정리 안 멈춤 ·
+  재시도가 끝까지 지움(시험) · `hourlyPending` 은 rawCopied 라 거짓 · 대조 기록 없는 삭제 진입은 failedPhase 'verify'(아무것도 지우기 전) · 81 F2/F3 — 읽기 오류 동안 화면 행 0 + 출처 '읽기 오류' ·
+  용량 예측 소비처(poller capByKey)는 unreadable 이면 건너뜀 · 메모 캐시 열쇠가 at=0 으로 바뀜 · 회복 뒤 다음 계산이 원본의 이력(history · firstDay · candSince)을 이어 씀(코드 판독) ·
+  80 F3 — `--line-buffered` 는 GNU grep 옵션이라 busybox grep 서버면 io 읽기가 '알 수 없는 옵션' 으로 빈다 → 진단 IO 칸 'perm'(readable=0) · Top-N 전 후보 '권한' — 대상(Rocky · RHEL · Ubuntu)은 GNU grep(80회차 정직 기록 그대로).
+  변이 검증 11/11(82-ⓐ 손상 저장 · R1 상한 정리 · 82-ⓑ 상한 · 주기 번호 · R4 · R3 · E2 · 81-ⓐ · 81-ⓑ · 81-ⓒ + 시험 안 변이 2 — 시한 없는 ps · JX 없는 Top-N).
+  기존 시험 기대값 변경(의도된 동작 변경): bmusageAudit82 F2(설정 손상이면 pruneUsage 를 부르지 않는다 → 상한 보존으로 부른다 · heldMax) · bmusageAudit80 F2(스냅샷 grep -s -H 2 → 3 — comm 읽기) ·
+  bmPerf2923Snapshot ②(이름 읽기가 awk getline → 셸 printf '/proc/%s/comm').
+  **남긴 것**: 추정(낮음) `readMeta` 가 어떤 오류든 null → `readRule` 'none' 이라 메타 읽기가 순간 실패하면 그 호출의 읽기는 파일만 · 보존 정리는 멈추지 않는다(단일 연결이라 SQLITE_BUSY 가
+  드물다 — 재현 없음) · 추정(낮음) `dbStatus.rawRows` 는 마이그레이션 중 예전 표 + 파일 사본을 더해 두 번 센다(진단 값만) · 집중 경량 스냅샷 시한을 15초로 늘려 피크 창 계획이 쓸 남은 예산이 최악 3초 줄 수 있다(planWindow 가 줄이고 사유를 남긴다) ·
+  82-ⓐ 화면에 '기본값으로 확정 후 저장' 버튼은 없다(409 사유가 서비스 점검으로 안내 — confirmDefaults 를 보내는 화면은 만들지 않았다) · 82-ⓑ 버린 옛 주기를 끊는 신호는 없다(장비 단계는 장비 시한이 끊는다).
+  깊이 보지 못한 곳: `perfAlerts.js` 보류 시한 · 폴러 주기 안 장비 밖 단계(어디서 끝나지 않을 수 있는지 — 재현 없음) · 화면 Chromium(문구 헬퍼만 바뀜 — 실행 안 함) · busybox 실장비 · gawk(Rocky 기본)는 이 컨테이너에 없어 mawk 로만 시험.
+
+- **중앙 ↔ 엣지 수신 코어(84회차 · `centralCoreAudit84`)**: 확정 3(높음 0 · 중간 1 · 낮음 2) · 추정 1 · 개선 1 — 범위: `central/` 공통 코어(agentConfig · agentContact · agentIdentity · agentTokens · agentUsers · assignments · captureJobs · edgeLogJobs · edgeLogPull · edgePull · edgeRecord · fleet · gpuGuestDiag · idracScanJobs(진행 · 결과) · ingestReject · inventory · knownAgents · logQueries · pingJobs · pullStats · scanRemedy 일부 · token · tokenApplyDeps · tokenCheckPull · unsupportedServers · vcenterTop · featureMinEdgeVersion) · `routes/central.js`(바인딩 미들웨어 · /inventory · /fleet · /gpu-guest-* · /register-collector · /result · /vmseries · /curuser) · `routes/central/opsRoutes.js` 일부. 고친 것
+  **F1(낮음)** `central/fleet.js setEdgeFleet` 의 `generatedAt` 을 글자 길이 제한 없이 받아 수 MB 글자가 캐시 · `central-fleet.json` · 관리 화면 응답에 그대로 남았다(재현: 3MB 글자가 `listEdgeFleet` 에 그대로 — /inventory 14회차 C-3 · 17회차 R-1 의 형제 경로 누락) → 유한수 또는 `capTrim` 40자(빈 글자 · 객체는 null) · 옛 파일도 올릴 때 줄임 ·
+  **F2(낮음)** `routes/central.js narrowGpuRow`(gpu-guest-data 행 — gpu/store.js byHost · byVm 의 키 · host · vcenterId 로 상주) · `sanitizeVcLocation`(위임 인벤토리 캐시) · register-collector `datacenter` · `version` 이 `.slice` 로 잘라 원문을 붙잡았다(TIM2607-01 규약의 누락 — 2MB 글자 행 8개로 잔존 힙 50.3MB → 수정 후 6.3MB 실측) → `capStr` ·
+  **F3(중간 · 데이터 손실)** `central/token.js persistEnv` 가 portal.env 가 **있는데 읽지 못하면**(EACCES · EIO) 빈 파일로 보고 `CENTRAL_TOKEN` 한 줄만 남긴 파일을 원자적으로 써 AUTH_SECRET · DATA_SOURCE 등 나머지가 다음 재시작에 사라졌다(재현: fs.readFileSync 가 EACCES 를 던지게 하고 setCentralToken → 파일이 한 줄 · install.sh 735행이 portal.env 를 root 소유로 바꾸라고 안내하는 경로에서 현실적) → 있으면서 못 읽으면 던진다(upsertEnvKeyStrict 와 같은 규칙) · `setCentralToken` 은 파일을 먼저 쓰고 성공한 뒤에만 실행 중 토큰을 바꾼다(실패 시 메모리 · 파일 갈라짐 방지).
+  개선: `central/tokenApplyDeps.js pushTokenToEdge` 의 끝 슬래시 정규식(금지 꼴)을 `trimTrailingSlashes` 로. 변이 8/8(F1 2 · F3 2 · F2 3 · 개선 1).
+  **남긴 것**: ① `central/edgePull.js` 가 kind `ambiguous`(결정 66 ①)를 내는데 열거 `EDGE_PULL_KINDS` · 웹 `edgeLogText.FETCH_KIND_TEXT` 에 없다(화면은 reason 폴백으로 문장은 보인다 — 열거 1:1 계약 위반 · `audit2613d` 기대값과 웹 문구를 함께 바꿔야 해 제안만) ·
+  ② central 의 등록부 로더(agentTokens · agentUsers · assignments · inventory · fleet 등)는 **읽기 오류도 손상으로 보존**(preserveCorrupt)한다 — G2 공용 로더(`util/jsonFileLoad.js`)를 central 에 넓힐지는 G2 범위 결정(추정 — root 컨테이너에서 EACCES 재현 불가) ·
+  ③ `ingestReject` 의 이름 상한 퇴출은 검증된 행을 보호하지 않는다(pullStats · gpuGuestDiag 규약과 다름 — 진단 전용 · 공유 토큰 필요) · ④ 공유 토큰은 `/edge-log-jobs` · `/capture-jobs` 에서 남의 이름의 작업을 인출할 수 있다(레거시 공유 신뢰 — 캡처 작업은 SSH 자격증명 포함, 완전 봉인은 CENTRAL_REQUIRE_AGENT_TOKEN) ·
+  ⑤ `POST /api/admin/central-token/generate` 는 try/catch 가 없어 F3 의 거절이 500(전역 오류 처리)으로 나간다(PUT 은 400 사유 — routes/admin 범위 밖).
+  관찰: 관련 테스트 125파일 중 `archCheck2614` ② · ⑤-b 실패는 다른 에이전트의 `util/registryCore.js` 작업이 만든 새 import 순환(util/jsonFileLoad ↔ registryCore ↔ settingsLoadError — 상한 4 초과) · `audit2613h` TESTDOC2613-11 은 이전부터의 생성 절 낡음.
+  깊이 보지 못한 곳: idracScanJobs(769줄) 의 gc · 로그 조립 · tokenApplyJob 단계 · scanRemedy 조립 · storageRoutes/pduSanRoutes/cvpIsiduRoutes(도메인 회차 몫) · /vmseries · /curuser 정제 세부.
+
+- **엣지 워커 공통 골격(85회차 · `edgeWorkerAudit85`)**: 확정 6(높음 0 · 중간 1 · 낮음 5) · 추정 3 — 고친 것 F1 배포 대상 등록부(`agent/deployRegistry.js`)가 **읽기 오류**(EACCES · EIO · EISDIR)를 손상으로 보고
+  온전한 원본(SSH root 비밀번호 · CENTRAL_TOKEN · COLLECTOR_TOKEN)을 `.corrupt.*` 로 옮긴 뒤 빈 목록으로 돌았다 — 화면은 대상 0개, 다음 저장(대상 추가 · 대량 배포 저장 · 토큰 자동 적용의 배포 기록 맞춤)이
+  한 건만 든 파일을 썼다(재현: 2건 → 1건, 나머지는 보존본에만). 이제 공용 `util/jsonFileLoad.js makeJsonFileReader`(쓰기만) — 읽기 오류는 원본 유지 · 캐시 안 함(30초 간격 재읽기) ·
+  저장 · 삭제 · 이름 변경을 `registry-unreadable` 로 거절 · persist 마지막 방어선 · `deployTargetsLoadError()` 노출. 손상(파싱 실패)은 v2.322 그대로 보존본 + 빈 목록 ·
+  F2 같은 파일 saveTarget · removeTarget 이 캐시 객체를 고친 뒤 저장해 쓰기 실패(ENOSPC · 봉인 정책 잠금) 뒤에도 메모리만 새 값(v2.879 F4 가 '기존 동작' 으로 남긴 것) — 사본 위에서 고치고 실패면 되돌림 ·
+  F3 ping · capture · bmstor · 로그 연합 조회 워커의 catch 경로(연결 실패)와 로그 조회의 HTTP 거부가 4~10초마다 같은 경고를 찍었다(하루 2만 줄대) — 같은 사유 10분에 한 줄(v2.591 PR-5 형제 누락 · 상태는 매번 갱신) ·
+  F4 `svcmonConfigPull` 배정 대상 상한 초과 갈래가 ack 만 하고 `last` · 콘솔을 남기지 않았다(직전 '정의 적용' 이 그대로 보임) — `rejectKeep` 으로 ·
+  F5 `ipScanWorker` 마지막 스캔 시각 파일의 읽기 오류도 preserveCorrupt 로 옮겼다 — `readJsonFile` 로 가름 ·
+  F6 `cvpConfigPull runEndpointRequests` — 대기열을 비운 뒤 결과 push(고RTT 수 초)를 기다리는 동안 온 'EndpointLocation 지금 조회' 요청이 '실행 중' 에 붙기만 하고 처리되지 않았다
+  (중앙은 내려보낼 때 지우므로 다시 오지 않는다 — 모듈 목 재현). push 뒤 대기열 재확인 · 확인과 비우기 사이 await 없음(storage '지금 수집' 과 같은 규칙) ·
+  개선 I1 `linkCheckWorker` 가 중앙이 내린 주기 · 동시성을 엣지에서도 자른다(중앙 저장 범위 1분~6시간 · 1~32). 변이 13/13.
+  **남긴 것**: ① `fleetPush` — vcenters.json 이 손상 · 읽기 오류면 `loadVcenterConfig` 가 빈 목록이라 '호스트 못 읽은 vCenter' 보류가 빈 목록으로 통과 → ESXi 를 받치는 iDRAC 이
+  베어메탈로 둔갑해 중앙에 올라갈 수 있다(추정 — config.js 가 읽기 오류를 구분하지 않음 · 범위 밖 공용) ② `veeam/registry.js applyPulledServers` 가 `db.servers` 를 persist 전에 바꾼다 — 저장 실패 뒤
+  다음 pull 의 removed · moved 가 비어 빠진 서버의 결과 · 인증 정지가 남을 수 있다(추정 · veeam 도메인) ③ 옛 워커 · pull 약 15곳이 중앙 응답을 상한 없는 `res.json()` 으로 읽는다(형제는 `readJsonCapped`) ·
+  결정 필요: 배포 대상 등록부 **손상**(파싱 실패) 때도 쓰기를 거절할지(registryCore 결정 78 ① 과 맞출지) · `GET /agent-deploy/targets` 가 `deployTargetsLoadError()` 를 실어 화면이 '읽기 오류' 를 말하게(routes/admin/deployLlm.js — 제안).
+  깊이 보지 못한 곳: focusMonWorker · bareosOpWorker · veeamRunWorker(도메인 회차가 본 곳 — 가볍게) · deploy.js SSH 명령 조립(검증 존재만 확인) · deployCsv · deployText 파서 · svcmon · curUser · vmSeries · gpuGuest push 세부 · pduConfigPull 세부.
+
+- **업그레이드 · 자동 업그레이드 · 서명 · 엣지 push(86회차 · `upgradeAudit86`)**: 확정 4(높음 0 · 중간 2 · 낮음 2) · 추정 3 — 고친 것
+  F1(중간 · 재현 — 실제 원격 소스 + 실제 매니저 적용) 기본 downloadDir(`<앱>/server/.upgrade-cache`)은 설치 디렉터리 **안**이라 스왑이 받은 번들을 백업(`<설치>.bak.<ts>`)으로 옮기는데
+  `upgradeFromArchive` 가 옮기기 전 경로를 `appliedArchive` 로 돌려줘 적용 직후 보관(`keepBundle`) · 옛 방식 엣지 push · 수집 서버 push 가 전부 ENOENT(수집 서버 화면 빨간
+  '번들을 다시 확인하지 못해 수집 서버에 보내지 않았습니다' 가 다음 자동 적용까지 남고, 엣지는 재시작 뒤 동기화가 원격에서 번들을 **다시 받아** 밀 때까지 늦었다) →
+  스왑 전에 설치 디렉터리 기준 상대 경로를 재고(실경로 · 심볼릭 링크 설치 포함 `archiveRelInInstall`) 스왑 뒤 옮겨진 경로를 돌려준다(`movedArchivePath` — 옆 manifest 도 함께 옮겨졌다) ·
+  F2(중간 · 재현) 적용 기록 정제 `autoState.sanitizeCollectorPush` 가 항목의 `upToDate` · `deferred` 를 버려(51회차 반증 A2 의 형제 칸) 자동 적용 직후 재시작한 중앙(파일에서 되살린 기록)의
+  수집 서버 표가 설치를 미룬 엣지를 '적용'(초록), pull 전 '이미 최신' 엣지를 '업그레이드 실패'(빨강)로 보였다 → true 일 때만 싣는다 ·
+  F3(낮음 · 재현) 옛 방식 엣지 push 수신 `/api/upgrade/bundle` 만 설치 전 WAL 체크포인트가 없었다(형제 수집기 라우트 · 자동 적용 · 보류 해제는 한다 — 설정 디렉터리가 앱 안인 비표준 배치에서만 뜻이 있다) ·
+  F4(낮음 · 재현 — ENOSPC 주입) 원격 번들(`downloadArchive`) · 패키지 받기(`downloadPackage` — 최대 1.5GB, /dl 이 내준다)가 `writeFileSync` 라 디스크가 차면 반쯤 쓴 파일을 정식 이름으로 남겼다 → `atomicWriteFileSync`(실패하면 임시 파일 삭제).
+  개선: 엣지 보류 시한 `holdUntil` 을 `edgeSyncState` 로 재시작을 넘긴다(51회차 반증 A6 의 일부 — 중앙이 재시작하면 settle 30분 뒤 보류 중인 엣지에 번들을 다시 올렸다 · 되살릴 때 보류 성공 기록 · 기록 뒤 12시간 안만).
+  변이 7/7(F1 · F2 · F3 · 보류 저장 · 보류 상한 · F4 두 곳). **남긴 것**: (추정 · 결정 필요) 설치 경로(installDir)가 실행 중인 앱 경로와 다르면 설치는 성공해도 재시작한 프로세스가 옛 버전이라
+  기동 직후 확인(`#restartTimer` → `tick`)이 다시 받아 설치 · 재시작한다 — 고리를 끊는 판정('이 버전을 설치하고 재시작했는데 여전히 옛 버전이면 자동 적용을 멈춘다' 또는 installDir 실경로 ≠ appRoot 경고)은 자동 적용 동작을 바꾸므로 고치지 않았다(코드 경로 확인 · 실행 재현 안 함) ·
+  (추정) 같은 프로세스 안에서 설치 뒤 재시작 전에 다른 경로(엣지 자체 원격 적용의 늦은 다운로드 · 중앙 push)가 더 낮은 판을 설치하면 디스크가 되돌아간다(`currentVersion()` 은 실행 중인 판 — 수동 되돌림 용도와 겹쳐 막지 않았다) ·
+  (추정) `preserveUserConfig` 는 설정 복사 실패를 삼키고 스왑을 진행한다 — 설정 디렉터리가 앱 안인 배치에서 ENOSPC 면 일부 설정만 가진 새 설치로 재시작하고 온전한 설정은 백업에만 남는다(백업 2개 보관 — 두 번 더 업그레이드하면 지워진다) · 표준 설치(CONFIG_DIR=/etc/vmware-portal)는 해당 없음 ·
+  (낮음) 수집 서버 화면 '마지막 자동 업그레이드: n/m 성공 — 실패한 서버는…' 이 '이미 최신' 응답을 실패로 센다(`routes/admin/collectorsDc.js autoPush` 에 이미 최신 수가 없다 — 범위 밖 파일) ·
+  (정보) 패키지 저장소 토큰(`packageSettings.getPackageToken`)은 저장만 되고 어디서도 쓰지 않는다(화면에도 칸 없음).
+  깊이 보지 못한 곳: packaging/ · scripts/ 설치 스크립트(install.sh · release-verify-lib.sh) · PAX 형식 긴 경로(`archive.js` 는 'x' 헤더를 건너뛴다 — GNU 형식 'L' 만 처리) · 웹 업그레이드 화면 Chromium 확인(화면 코드 변경 없음).
+
+- **84 · 85 · 86회차 수정 반증 + 남긴 결정의 권장안(87회차 · `rebut87`)**: 확정 4(높음 0 · 중간 1 · 낮음 3) · 추정 0 · 결정 구현 8 — 반증
+  **R1(중간 · 데이터 손실 · 재현 — 84 F3 의 형제 경로)** 백업 복원(`backup/service.js restoreCentral`)이 지금 `portal.env` 의 **읽기 오류**(EACCES — install.sh 735행이 안내하는 root 소유)를 '없음' 으로 보고 번들과 합쳐,
+  번들에서 가려진 AUTH_SECRET · CENTRAL_TOKEN 과 호스트에만 있던 보안 스위치 줄(WAN_TLS_INSECURE 등)을 잃은 파일로 덮었다(failed 0 — 조용히 · 재현: `PORT=4000\nDATA_SOURCE=live` 두 줄만 남음) →
+  읽기 오류면 그 .env 는 복원하지 않고 failed 에 사유(79회차 R1 SSH 키 저장소와 같은 규칙) ·
+  **R2(낮음)** 84 F2 의 형제 — `/capture-result` hostA(캡처 이력 300건 상주 · `.replace().trim().slice` 는 일치가 없으면 원문 그대로라 SlicedString)와 `/capacity` meta · metric(메모리 폴백 저장소 상주)의 `.slice` → capStr ·
+  **R3(낮음 · 재현 — 86 F2 반증)** 86 F2 가 '설치 대기'(deferred) 표지를 파일에서도 되살리게 되어, 엣지가 대기 작업을 끝내고 대상 판을 설치해 보고한 뒤에도 수집 서버 표의 노란 '설치 대기' 가 다음 자동 적용까지 남았다
+  (`collector/upgradePush.js mergeAutoPushStatus` — 실패 갈래만 pull 버전을 대조했다) → pull 버전 ≥ 대상 판이면 내린다(못 읽은 버전은 그대로 — 못 읽음 ≠ 설치됨) ·
+  **R4(낮음 · 재현 — 85 F1 반증)** `POST /agent-deploy` 가 대상 저장 결과를 버리고 늘 `targetSaved:true` 라, 85 F1 의 등록부 거절(읽기 오류) · env 주입 거절에도 '저장됨' 이었다 → 결과를 보고 `targetSaveReason` · 화면 노란 줄.
+  결정(권장안) 구현: **84 ⓐ** central 등록부 로더 6곳(agentTokens · agentUsers · assignments + agent-results · inventory · fleet)에 공용 읽기 판정(`util/jsonFileLoad.js` 쓰기만) — 읽기 오류는 원본을 옮기지 않고(예전 agentTokens · agentUsers · assignments · inventory 는 `.corrupt.*` 로 옮겼다) ·
+  캐시를 믿지 않고 30초 간격 재읽기(읽히면 재시작 없이 풀림) · 쓰기 거절(발급 · 회수 409 · 배정 저장은 '바꾸기' 가져오기까지 · 상태 캐시 inventory · fleet · results 는 저장을 미루고 읽히면 합친다 — inventory 는 소유 엣지가 다르면 파일 쪽(TOFU 가로채기 되돌림)) ·
+  503 · 화면 문구가 읽기 오류와 손상의 조치를 가른다(`routes/central.js registryUnreadable` · 개별 토큰 503 · 웹 `fileUnreadableText`) · 손상은 예전과 같다 ·
+  **84 ⓑ** edgePull kind `ambiguous` 를 `EDGE_PULL_KINDS` · 웹 문구 맵 넷(edgeLog · isidu · focusMon · EmptyInvModal)에(`audit2613d` 기대값 갱신 — 의도된 열거 변경) · **84 ⓒ** `POST /admin/central-token/generate` 의 portal.env 저장 거절 400 + 사유(예전 500 'internal error') ·
+  **85 ⓐ** `GET /agent-deploy/targets` 에 `loadError`(읽기 오류 · 손상 · 보존본만 남음) · 화면 배너와 '저장된 대상 (—)' · 배포 대상 등록부 손상도 결정 78 ① 규칙(표지 유지 · 관리자 저장이 풀고 · 자동 경로 = 토큰 자동 적용의 배포 기록 맞춤 · 이름 연결은 거절) ·
+  **86 ⓑ** '이 판을 설치하고 재시작했는데 여전히 옛 판' 이면 자동 적용을 멈춘다(`upgrade/manager.js stuckApply` · 기록 code `apply-stuck` 이 재시작을 넘고 사유가 상태 · 화면 '마지막 적용이 실패했습니다' 에 · 더 새 판 · 설치 경로 변경 · 수동 적용이 푼다) ·
+  설치 경로 실경로 ≠ 실행 중 appRoot 이면 사유 `install-dir-mismatch`(AUTO_CODES · 웹 AUTO_TEXT 1:1) · **86 ⓒ** 수집 서버 화면 '마지막 자동 업그레이드' 가 '이미 최신' 을 실패로 세던 것 → 성공 쪽으로 세고 '이미 최신 n · 설치 대기 m' 을 밝힌다 ·
+  **85 ⓓ(E3)** 옛 워커 · pull 15파일 26곳의 중앙 응답 `res.json()` → `readJsonCapped`(본문 16MB · 오류 본문 64KB). 개선: token.js upsertEnvKeyStrict 머리말의 낡은 '위 persistEnv 는 빈 파일로…' 정정. 변이 21/21(84 쪽 11 · 85 · 86 쪽 10).
+  기존 테스트 기대값 변경 2: `audit2613d`(열거에 ambiguous — 결정) · `audit2782e` G-I1(손상 보존을 `renameSync` 소스 대신 공용 reader `preserve: true` 로 확인 — 메커니즘 이동).
+  반증 결과 문제없음: 86 F1 옮겨진 번들 경로 — 심볼릭 링크 설치 · 심볼릭 링크 캐시 · 일반 세 배치에서 실제 `applyPackage` 로 확인(`movedArchivePath` 가 백업 쪽 번들을 찾는다). '다른 파일 시스템(rename 실패 → 복사)' 갈래는 코드에 없다 — 스왑은 같은 부모 폴더의 rename 이고 실패하면 던진다(번들 보관은 rename 이 아니라 바이트 복사).
+  **남긴 것**: ① inventory · fleet 의 읽기 오류 창 동안은 위임 인벤토리 소유가 비어 TOFU 가 열린다(합칠 때 파일 소유로 되돌리지만 그 창의 쓰기는 받는다 — 손상 때와 같은 기존 동작 · 막으면 위임 push 가 전부 멈춘다 — 결정 필요) ·
+  ② `net/captureHistory.js str` 가 `.slice` 로 자른다(캡처 이력 300건 상주 — 범위 밖 · 제안) · ③ `routes/central/storageRoutes.js` 의 쿼리 · 헤더 `.slice(0, 64)` 상주(헤더 크기 16KB 상한이라 영향 작음 — 제안) ·
+  ④ 심볼릭 링크 설치에서 `applyPackage` 는 링크 자체를 백업 이름으로 옮기고 그 자리에 실제 폴더를 만들며, `pruneOldBackups` 는 링크만 지워 옛 실제 폴더가 쌓인다(관찰 — 86 범위 밖 · 재현은 위 F1 확인 중 부수 관찰) ·
+  ⑤ 공유 토큰의 `/capture-jobs`(SSH 자격증명 포함) · `/edge-log-jobs` 인출(현행 유지 확인): 수집 서버 화면 문구는 '공유 토큰이면 ?agent= 로 다른 사이트의 iDRAC 비밀번호 · 게스트 계정 · 사용자 해시를 인출' 을 말하지만 캡처 작업(SSH 자격증명)은 이름이 없고, 봉인 방법(`CENTRAL_REQUIRE_AGENT_TOKEN=true`)은 켜졌을 때의 상태 줄 · ENV.md · SETTINGS.md 표에만 있다 ·
+  ⑥ 85 E3 중 남은 상한 없는 읽기 — linkCheckWorker · edgeLogWorker · selfRegister · centralStatusOnly · capacityPush · svcmonPush · focusMonWorker · veeamRunWorker · bareosOpWorker(오류 본문).
+  깊이 보지 못한 곳: 86 F2 의 `failureMoot` 과 새 `apply-stuck` 기록의 화면 문구 세부(Chromium 미확인 — 화면 문구는 웹 단위 테스트만) · 85 F3 로그 스로틀 · F6 CVP 대기열 재확인 반증 · agent-results 합치기의 상한(RESULT_AGENTS_MAX) 초과 가능성(최대 2배 — 다음 setResult 가 줄인다).
+  관찰(내 변경 아님): 관련 테스트 재실행에서 `audit2633` ①(등록 수 50 → 51 — 다른 에이전트의 미커밋 `horizon/sessionSettings.js` 공용 로더 등재) · `isiduDigest2742` ⑥(미커밋 `isidu/digest.js` 변경) · `audit2727d` F-01(동시 실행 중 시간 비율 흔들림) · `audit2613h` TESTDOC2613-11(ARCHITECTURE.md 생성 절 낡음 — 이전부터) 실패.
+
+- **결정 권장안 — 반증이 남긴 3건(사용자 '결정 필요한 것은 권장 사항으로 진행해줘' · `pyportal/tests/test_rebut_decide.py` D3' · `server/test/rebutDecide.test.js` R7 · `server/test/rebutDecideG23.test.js` 후속 ③')** — 변이 10/10(허브 3 · RMA 2 · 공용 로더 5).
+  · 허브 D3 확장 → 중지된 **admin** 을 다시 켜는 것(enabled false → true · 역할 admin 그대로)도 요청자 본인의 현재 비밀번호(`_verify_current_password` — 같은 출발지 카운터 · 잠금 · 감사 user.update fail) · viewer 다시 켜기 · 중지 · 'viewer 로 낮추며 켜기'(결과가 admin 이 아님) · 이미 켜진 admin 에 enabled true 는 그대로(`hub/server.py api_users_update`) ·
+    화면: 사용자 표의 [사용] 이 중지된 admin 이면 비밀번호 창을 '다시 켜기' 모드로(새 비밀번호 칸 없이 내 현재 비밀번호만 — `app.js enableAdminUser · submitEnableAdmin` · `index.html pw-title`) · viewer 는 예전처럼 바로 보낸다.
+    남은 것: README(`pyportal/README.md` 98~100행 · API 표 284행)에 '중지된 admin 다시 켜기' 가 빠져 있다(범위 밖 — 제안(메인)).
+  · RMA `/tools/rma/deploy/remove` → 배포와 같은 `ownerOtpThen`(소유자 등급 먼저 — 권한 없는 요청이 OTP 를 쓰지 않게) · `/deploy/list`(조회) 그대로 · 웹 배포 창: 인스턴스 목록 아래 '제거용 본인 OTP' 칸(배포 칸과 따로 — 1회용) · 등급이 아니면 제거 버튼 잠금 + 사유 한 줄 ·
+    게이트 용어집(`scripts/api-doc.mjs GUARD_NOTE.ownerOtpThen`)에 '원격 인스턴스 제거' 를 더하고 docs/API.md · ARCHITECTURE.md · INDEX.md 재생성(새 게이트 이름 없음).
+  · 서비스 점검 목록 회복 지연 → 서비스 점검 조회(`health/services.js` 'settings-files')가 `settingsLoadError.recheckSettingsFiles()` 로 **오류가 선** 공용 로더만 다시 판정(30초 간격 — `recheckDue` 와 같은 recheckAt · 판정은 load() 와 같은 `judge` 하나 · `jsonFileLoad.js probe`) → 되돌린 보존본의 줄이 그 모듈을 부르지 않아도 지워진다(간격 안이면 다음 조회) ·
+    **모듈 쪽은 그 모듈이 다시 load() 할 때까지 이전 오류를 유지**(`held` — loadError · refusal · marker) · 그동안 recheckDue() 는 늘 참(다음 접근에 곧바로 다시 읽음) — 등록부 오류만 지우면 '오류가 없으면 캐시를 믿는' 게시판이 오류 중 캐시한 빈 목록 위에 새 글을 써 **되돌린 board.json 을 덮었다**(스크래치 재현: 되돌린 글 1 + 새 글 → 파일에 새 글 1건만) · IPAM · fleet 의 회복 전이(rev++)도 놓쳤다.
+    남은 것: 없음(9 모듈 쓰기 경로가 모두 getter → refusal 순서임을 코드로 확인 — getter 가 recheckDue 로 다시 읽은 뒤 거절을 본다).
+
+- **결정(78 남긴 것) 권장안 — 공용 등록부 읽기 오류 · CSV 빈 칸 · 엣지 PDU 스냅샷 정제 (기록 초안)**
+
+- ① 등록부 읽기 오류(EACCES · EIO · EISDIR) → `util/registryCore.js makeLoadError` 에 `read(file, parse)` · `readPending()` · `writeRefusal(what)`(409 · code registry-unreadable · readError) · `assertWritable(what)` 추가. 판정은 공용 읽기 하나(`util/jsonFileRead.js` — jsonFileLoad 에서 순환을 피해 떼어 냄, jsonFileLoad 는 다시 내보냄). 등록부 9개(pdu · storage · sanswitch · cvp · bmstor · veeam · veeam/em · focusmon · idrac)의 load 를 `loadErr.read` 로 · persist/save 에 `assertWritable`(마지막 방어선 — 엣지 pull · 시드 포함) · 사람 쓰기(저장 · 삭제 · CSV)는 먼저 409. 동작 변화: 읽기 오류면 원본을 옮기지 않고 · 빈 목록을 캐시하지 않고(30초마다 다시 읽어 저절로 풀림) · 쓰기 거절. 손상은 예전 그대로(보존본 · 관리자 저장이 푼다 — focusmon 은 예전처럼 손상도 거절 · 503). 테스트 `decideRegistry3189` ①. 남은 것: collector/registry · central/agentTokens · bareos/registry · sshaccess/state 와 설정형 makeLoadError 사용처(issues/* · usage/settings · bareos/* · veeam/run/settings · veeam/staleAlert · focusmon/alerts · focusmon/audit/settings · bmusage/onboard/edgeDeploy)는 예전 판정 그대로.
+- ③ CSV 빈 칸 계약 → PDU(`pdu/csv.js` `_blank` + `-` 인식) · 스토리지(`storage/csv.js KEEP_ON_BLANK`) · SAN(`sanswitch/bulk.js KEEP_ON_BLANK`) 파서가 빈 칸 필드를 표시하고, 라우트가 검증 · 드라이런 · 연결 테스트 · 저장 전에 `util/bulkImport.js fillBlankFromSaved` 로 수정 행을 저장값으로 채운다. `-` = 명시적 비움(새 장비는 빈 칸 · `-` 모두 기본값 — 예전 그대로). 샘플 · 자유텍스트 머리말 · 화면 안내(PduTool · BulkDeviceIo blankKeeps — 스토리지 · SAN) 갱신. 테스트 ③. 남은 것: CVP · Veeam 가져오기(열은 있는데 빈 칸 = 비움 — 다른 계약으로 문서화) · bmstor CSV(덮어쓰기 모델) 는 그대로.
+- 발견(③ 작업 중 재현): 스토리지 CSV · 자유텍스트 가져오기의 **수정 행이 전부 실패**하던 결함 — v2.545 가 map 값을 장비 객체로 바꾼 뒤 저장 루프만 `.id` 를 빠뜨려 객체를 id 로 넘겼다('같은 host 의 같은 타입 장비가 이미 등록돼 있습니다'). `routes/api/storageMon.js` 수정.
+- ④ 엣지 PDU 스냅샷 최상위 키 → `central/pduEdge.js PDU_SNAPSHOT_KEYS`(emptySnapshot · apcSsh · poller · 데모 · 중앙 수신 스탬프) 밖의 키는 버리고 `unknownKeys` 로 센다(saveEdgePdu 응답 · edgePduStatus · 콘솔 한 줄). `demo` 불리언 · `edgeClockAheadMs` 수치로 좁힘. 테스트 ④(수집기 소스의 `snap.X =` 대입과 대조).
+- 바꾼 기존 테스트: audit2613f(preserveCorrupt 소스 판정 → loadErr.read 사용 판정) · sanSwitchBulk2513(빈 칸 vs `-` 는 이제 뜻이 다름 — `_blank` 만 다르고 필드는 같다) · decideG2(읽기 판정 파일 jsonFileLoad → jsonFileRead) · securityAudit2026-08-17(idrac 은 공용 등록부 읽기 — 76회차 proxy 와 같은 처리).
+- 변이 11/11(격리 사본에서).
+
+- **tmpCleanup3188 — 시험 임시 폴더 누수 정리 기록 초안**
+
+기록 한 줄 초안:
+- v3.18.8 시험 임시 폴더 누수: 서버 시험 561개가 mkdtempSync(os.tmpdir()) 폴더를 지우지 않아 /tmp 에 12.4GB·25,171개(그중 이 561개 출처 9.9GB·17,632개)가 쌓였다 → 공용 꼴(TMP_DIRS·tmpDir·rmTmpDirs + after 에서 지우고 exit 에서 한 번 더)로 정리 · node 22 는 시험 사이 최상위 await 동안 루트 after 를 먼저 돌린다(audit2590 실측 — 11개 파일은 훅을 파일 끝에) · 모듈 종료 flush(util/exitFlush.js)가 지운 폴더를 다시 만든다(dvc-2600a 8.8MB 실측 — exit 재삭제) · server/test/tmpCleanup3188.test.js 가 목록 562개를 고정.
+
+세부:
+- 꼴: 파일 머리 `const TMP_DIRS = []; const tmpDir = (prefix) => {...}; const rmTmpDirs = () => {...}; after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch {} }); });`
+- 훅을 파일 끝에 둔 파일(늦은 최상위 await): audit2590 audit2620b cvpFaults2640 audit2630d isidu2736 audit2769c audit2604a veeam2751 audit2601d audit2621a audit2742c
+- 못 고친 것(작음): bm* 9개(process.env.TMPDIR || os.tmpdir() 꼴 — 이미 after 에서 지움, 잔여는 늦은 쓰기 재생성 수 KB) · mockBlock2443(정적 fs/os/path import 없음 — 50개·300KB) · audit2583 · bmPerfStage6Health · '/tmp' 직접 꼴(rma · audit2760a · bmPerf2921Plan) · 지시로 제외한 decide*/rebutDecide*(decideG3 49+47+24개)
+- 기존 위험(손대지 않음): audit2742f 는 자체 TMP_DIRS after 가 파일 머리에 있고 최상위 await 가 시험 사이에 5곳 — 같은 '루트 after 조기 실행' 위험(현재 시험은 통과)
+- audit2613h TESTDOC2613-11 실패는 HEAD 원본도 같다 — 다른 에이전트의 server/src 변경으로 docs/ARCHITECTURE.md 생성 절이 낡음(내 변경 무관)
+
