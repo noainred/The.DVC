@@ -394,6 +394,8 @@
     { id: "healthy", label: "🟢 정상" },
     { id: "warning", label: "🟠 주의" },
     { id: "unreachable", label: "🔴 응답 없음" },
+    // 56회차 개선: 차단됨(SSRF 가드 — 루프백 · 링크로컬 주소)도 칩으로 — 없으면 그 링크는 '전체 상태' 에만 잡혀 칩 합이 전체와 맞지 않았다
+    { id: "blocked", label: "⛔ 차단됨" },
     { id: "unchecked", label: "⚪ 미점검" },
   ];
 
@@ -924,8 +926,17 @@
       state.backupStatus = data.backup;
       state.choices = data.choices;
       state.initialPasswordFile = data.initialPasswordFile;
-      state.backups = (data.backup && data.backup.count) ? state.backups : state.backups;
-      return api("/api/settings/backups");
+      // 56회차 F1(재현 — Chromium): 백업 목록은 admin 전용이다(v2.500 L2). viewer 도 이 줄을 불러 403 으로 체인이 끊겨 분류 · 센터 '전체' 목록을
+      //   받지 못했고(수정 폼의 센터 선택지가 표시 개수만큼만), 표시 개수 밖 센터에 연결된 바로가기를 수정 · 저장하면 연결이 '전체 공통' 으로
+      //   바뀌었다. 설정을 열 때마다 'admin 계정만 …' 오류 토스트도 떴다. viewer 는 건너뛰고, admin 도 실패하면 빈 목록으로 이어 간다.
+      if (!(state.session && state.session.role === "admin")) {
+        return { backups: [], status: data.backup };
+      }
+      return api("/api/settings/backups").catch(function (err) {
+        if (err.message.indexOf("로그인") !== -1) throw err;   // 세션 만료는 그대로(로그인 창)
+        toast(err.message, "err");
+        return { backups: [], status: data.backup };
+      });
     }).then(function (data) {
       state.backups = data.backups || [];
       state.backupStatus = data.status || state.backupStatus;
@@ -976,7 +987,7 @@
     dcPool().forEach(function (dc) {
       dcSelect.appendChild(el("option", { value: dc.id, text: dc.code + " · " + dc.city }));
     });
-    dcSelect.value = keepDc || "all";
+    selectKeeping(dcSelect, keepDc || "all");
 
     var regionSelect = $("d-region");
     if (regionSelect && !regionSelect.options.length) {
@@ -984,6 +995,18 @@
         regionSelect.appendChild(el("option", { value: r, text: r }));
       });
     }
+  }
+
+  /* 56회차 F1: 선택지에 없는 저장값을 '선택 없음' 으로 떨어뜨리지 않는다 — select.value 에 없는 값을 넣으면 '' 가 되고, 그대로 저장하면
+     서버가 '전체 공통' 으로 바꿔 굳힌다(센터 목록을 다 받지 못했을 때). 원값을 그대로 보낼 수 있게 그 값의 선택지를 덧붙인다. */
+  function selectKeeping(select, value) {
+    if (!value) return;
+    var found = false;
+    for (var i = 0; i < select.options.length; i += 1) {
+      if (select.options[i].value === value) { found = true; break; }
+    }
+    if (!found) select.appendChild(el("option", { value: value, text: value + " (현재 연결 — 목록 밖)" }));
+    select.value = value;
   }
 
   function resetForm() {
@@ -1009,7 +1032,7 @@
     $("f-icon").value = sc.icon || "";
     $("f-description").value = sc.description || "";
     $("f-tags").value = (sc.tags || []).join(", ");
-    $("f-datacenter").value = sc.datacenterId || "all";
+    selectKeeping($("f-datacenter"), sc.datacenterId || "all");   // 56회차 F1
     $("f-favorite").checked = !!sc.isFavorite;
     $("form-title").textContent = "바로가기 수정";
     $("form-submit").textContent = "수정 저장";
@@ -1310,7 +1333,11 @@
   function deleteUser(user) {
     if (!window.confirm("'" + user.username + "' 계정을 삭제할까요?")) return;
     api("/api/settings/users/" + encodeURIComponent(user.username), { method: "DELETE" })
-      .then(function (data) { state.users = data.users; renderUserSettings(); toast("삭제했습니다.", "ok"); })
+      .then(function (data) {
+        state.users = data.users; renderUserSettings(); toast("삭제했습니다.", "ok");
+        // 56회차 F4: 초기 계정(admin)을 지우면 서버가 초기 비밀번호 파일도 지운다 — 안내 문구를 다시 받아 온다
+        if (state.initialPasswordFile) return loadSettings();
+      })
       .catch(function (err) { toast(err.message, "err"); });
   }
 
@@ -1355,8 +1382,9 @@
     $("h-interval").value = String(state.settings.health.intervalMinutes);
     $("h-method").value = state.settings.health.method || "port";
 
-    $("backup-count").textContent = "(" + state.backups.length + "개)";
     var status = state.backupStatus || {};
+    // 56회차 F1: 비-admin 은 목록을 받지 않는다 — '0개 · 백업이 없습니다' 로 읽히지 않게 가린 사실을 밝힌다
+    $("backup-count").textContent = status.redacted ? "(—)" : "(" + state.backups.length + "개)";
     // 31회차 F4: 비-admin 에게는 서버가 백업 현황을 가린다(redacted) — '백업 없음' 으로 읽히지 않게 따로 말한다.
     $("backup-status").textContent = status.redacted
       ? "백업 현황(저장 위치 · 파일)은 admin 계정만 볼 수 있습니다."
@@ -1375,7 +1403,8 @@
     var body = $("backup-tbody");
     clear(body);
     if (!state.backups.length) {
-      body.appendChild(el("tr", {}, [el("td", { className: "muted", text: "백업이 없습니다.",
+      body.appendChild(el("tr", {}, [el("td", { className: "muted",
+                                               text: status.redacted ? "백업 목록은 admin 계정만 볼 수 있습니다." : "백업이 없습니다.",
                                                attrs: { colspan: "4" } })]));
       return;
     }
@@ -1540,6 +1569,11 @@
     var cfg = state.settings.notify;
     $("n-enabled").checked = !!cfg.enabled;
     $("n-url").value = cfg.webhookUrl || "";
+    // 56회차 F1: 비-admin 에게 서버는 웹훅 URL(값이 곧 자격증명)을 비워 보낸다 — 빈 칸을 '웹훅 없음' 으로 읽지 않게 저장 여부를 밝힌다
+    if (!$("n-url").getAttribute("data-placeholder")) $("n-url").setAttribute("data-placeholder", $("n-url").placeholder || "");
+    $("n-url").placeholder = cfg.redacted
+      ? (cfg.hasWebhookUrl ? "저장된 웹훅 URL 있음 — admin 계정만 볼 수 있습니다" : "저장된 웹훅 URL 없음")
+      : $("n-url").getAttribute("data-placeholder");
     $("n-threshold").value = cfg.failThreshold;
     $("n-interval").value = cfg.minIntervalMinutes;
     renderAuditTable();
@@ -1659,14 +1693,32 @@
         { method: "POST", body: {} })
       .then(function (data) {
         state.shortcuts = data.shortcuts || state.shortcuts;
-        state.datacenters = data.datacenters || state.datacenters;
+        // 56회차 개선: data.datacenters 는 등록된 '전체' 다 — 공개 화면 목록(표시 개수 적용)은 아래 refreshDatacenters 가 채운다
         state.users = data.users || state.users;
         state.settings = data.settings || state.settings;
-        toast("복원했습니다: " + (data.restored || []).join(", "), "ok");
-        return loadSettings();
+        var restored = data.restored || [];
+        // 56회차 개선: 계정 파일을 복원하면 서버가 모든 계정의 세션을 끊는다(31회차 F2 — tokenVersion 인상, 의도). 예전에는 곧바로 부른
+        //   loadSettings 가 401 로 로그인 창만 띄워(이유 안내 없음) 설정 화면 위에 남았고, 복원된 분류는 다시 로그인할 때까지 대시보드에 반영되지 않았다.
+        var relogin = restored.indexOf("users") !== -1;
+        toast("복원했습니다: " + restored.join(", ") +
+              (relogin ? " — 모든 계정이 다시 로그인해야 합니다." : ""), "ok");
+        if (relogin) clearSession();
+        return Promise.all([
+          api("/api/meta", { quiet: true }).then(function (meta) {
+            state.meta = meta;
+            state.categories = meta.categories || state.categories;
+          }).catch(function () {}),
+          refreshDatacenters()
+        ]).then(function () { return relogin ? null : loadSettings(); })
+          .then(function () {
+            applyShortcuts(state.shortcuts);
+            fillFormSelects();
+            if (relogin) {
+              if (state.tab === "settings") navigate("dashboard");
+              openLogin("backup");
+            }
+          });
       })
-      .then(function () { return refreshDatacenters(); })
-      .then(function () { applyShortcuts(state.shortcuts); })
       .catch(function (err) { toast(err.message, "err"); });
   }
 

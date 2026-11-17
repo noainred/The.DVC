@@ -249,22 +249,24 @@ class UserStore:
         name = str(username or "").strip()
         if not name or not isinstance(password, str) or not password:
             return None
+        # 56회차 F2(재현): PBKDF2(21만 회)는 잠금 **밖에서** 돌린다 — 예전에는 계정 저장소 잠금을 쥔 채 해시를 계산해, 로그인 시도가
+        #   겹치면 로그인한 모든 요청(세션 판정의 token_version · role_of 가 같은 잠금)이 시도 수 × 해시 시간만큼 줄을 섰다
+        #   (실측: 실패 로그인 8건 동시 → 세션 판정 0.23초, 해시가 느린 서버에서는 그 몇 배). 잠금 안에서는 계정 사본만 고른다.
         with self._lock:
-            for user in self._load():
-                if user["username"].lower() != name.lower():
-                    continue
-                if not user["enabled"] or not user["password"]:
-                    # v2.500(감사 M1): 중지·비번없는 계정도 **같은 비용**을 태운다. 아래 주석 참조.
-                    _burn_password_work(password)
-                    return None
-                if verify_password(user["password"], password):
-                    return {"username": user["username"], "role": user["role"],
-                            "tokenVersion": user["tokenVersion"]}
-                return None
-        # v2.500(감사 M1): 없는 계정은 PBKDF2 를 돌리지 않아 응답이 훨씬 빨랐다(로컬 실측:
-        # 존재 계정 오답 ~128ms vs 없는 계정 ~1.5ms, 약 100배). 문구는 같아도 **타이밍으로**
-        # 계정 열거가 됐다 — 이 함수의 문서화된 의도가 우회된 것이다. 더미 해시로 비용을 맞춘다.
-        _burn_password_work(password)
+            match = next((dict(u) for u in self._load() if u["username"].lower() == name.lower()), None)
+        if match is None:
+            # v2.500(감사 M1): 없는 계정은 PBKDF2 를 돌리지 않아 응답이 훨씬 빨랐다(로컬 실측:
+            # 존재 계정 오답 ~128ms vs 없는 계정 ~1.5ms, 약 100배). 문구는 같아도 **타이밍으로**
+            # 계정 열거가 됐다 — 이 함수의 문서화된 의도가 우회된 것이다. 더미 해시로 비용을 맞춘다.
+            _burn_password_work(password)
+            return None
+        if not match["enabled"] or not match["password"]:
+            # v2.500(감사 M1): 중지·비번없는 계정도 **같은 비용**을 태운다. 위 주석 참조.
+            _burn_password_work(password)
+            return None
+        if verify_password(match["password"], password):
+            return {"username": match["username"], "role": match["role"],
+                    "tokenVersion": match["tokenVersion"]}
         return None
 
     def token_version(self, username: str):
@@ -304,6 +306,9 @@ class UserStore:
         if username in (".", "..") or "/" in username:
             # 35회차 R5: 브라우저가 URL 경로의 점 조각을 정규화해 이 이름의 계정은 화면에서 관리(중지 · 삭제 · 비밀번호)할 수 없다.
             raise AuthError("사용자명으로 '.' · '..' 과 '/' 는 쓸 수 없습니다.")
+        if any(ord(ch) < 0x20 or ord(ch) == 0x7f for ch in username):
+            # 56회차 개선: 제어문자(개행 · ESC)는 받지 않는다 — 로그인 로그('[auth] 설정 로그인: <이름>')에 가짜 줄을 끼워 넣을 수 있다.
+            raise AuthError("사용자명에 제어문자(개행 · 탭 등)는 쓸 수 없습니다.")
         if role not in ROLES:
             raise AuthError("역할은 admin 또는 viewer 여야 합니다.")
         with self._lock:
@@ -321,6 +326,9 @@ class UserStore:
             return self.public_list()
 
     def update(self, username: str, *, role=None, enabled=None):
+        if enabled is not None and not isinstance(enabled, bool):
+            # 56회차 F7(재현): bool("false") 는 True 다 — 자동화 · 스크립트가 문자열로 '중지' 를 보내면 계정이 오히려 켜졌다(중지 계정 재활성).
+            raise AuthError("enabled 는 true 또는 false 여야 합니다.")
         with self._lock:
             users = self._load()
             self._refuse_if_unreadable()   # 35회차 R6
@@ -405,6 +413,10 @@ class UserStore:
             self._assert_admin_remains(remaining)
             self._users = remaining
             self._save()
+            if username == BOOTSTRAP_USERNAME:
+                # 56회차 F4(재현): 초기 계정을 지우면 그 비밀번호가 적힌 파일도 지운다 — 예전에는 남아 화면이 '비밀번호를 변경하면 자동 삭제' 라고
+                #   계속 안내했지만 바꿀 계정이 없어 영영 지워지지 않았다(지운 계정의 평문 비밀번호가 데이터 폴더에 남음).
+                self.drop_initial_password_file()
             return self.public_list()
 
     @staticmethod
