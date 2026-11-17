@@ -4344,9 +4344,14 @@ high 0 · 반증 1(A3-01 — 경로 오독, 데모 계정은 READ_DENY 하위라
   ⑥ 동시 진행 다른 담당의 작업 트리 변경으로 authAdminAudit88 · bmusageAudit77 · audit2603a(loginStore push 스윕) · audit2613h(ARCHITECTURE 생성 절)가 실패 — 이 회차 파일 무관.
   깊이 보지 못한 곳: 화면 변경(로그 배너 · 스캔 대역 · 파트 장애 · NFS · 모니터 · 백업 · 대문자 · 모달 26곳)을 Chromium 1440 · 400 으로 보지 않았다 · Palette(누름 즉시 닫기)는 그대로 · 엣지 partfault 실제 엣지 판 혼재 실측 없음.
 
-# 97회차 — 공통 스윕: 읽기 오류 ≠ 손상(남은 모듈)
+## 88~105회차 — 회차 기록 원문(97~105회차 — 회차 초안을 통째로 붙인 것 · 2026-11-17 정리: 제목 단계만 내리고 내용은 그대로)
 
-## audits.md 단락 초안
+- 아래는 이전 세션이 회차 초안 파일을 그대로 붙인 것이다(바꾼 파일 · 돌린 테스트 · 분류표 포함). 문서 한가운데 `#` · `## audits.md 단락 초안` 제목이 목차를 깨뜨려 제목 단계만 내렸다.
+  분류표의 현재 값은 테스트가 원본이다(`server/test/readErrorSweep97.test.js` · `envNumberSweep99.test.js`) — 아래 표는 그 회차 시점의 기록이다.
+
+### 97회차 — 공통 스윕: 읽기 오류 ≠ 손상(남은 모듈)
+
+#### audits.md 단락 초안
 
 **공통 스윕 — 읽기 오류 ≠ 손상(97회차 · `readErrorSweep97`)**: 확정 14(높음 6 · 중간 6 · 낮음 2) · 추정 1 — `preserveCorrupt` 직접 호출 149개 파일을 전수 분류(공용 판정 41 · 자체 분리 14 · 관리자 초기화 2 · 캐시 22 · 다른 점검 범위 12 · 남긴 것 56).
 고친 것 F1 `publicapi/keys`(읽기 오류에 연동 키 해시 원본을 보존본으로 옮기고 빈 목록을 **캐시** — 표지 없이 전 키 401 · 다음 발급이 한 건만 든 파일; 높음) ·
@@ -4365,9 +4370,9 @@ F14 `guestdisk/settings` · `dirusage/settings`(읽기 오류 · 손상 → 기�
 `sshaccess/state` 의 '읽기 오류 뒤 파일 없음' 이 오류를 지우지 않는 경계(추정 — 재시작 · 재읽기 라우트로 풀림) · 손상 뒤 재시작(보존본만 남음)한 guestdisk · dirusage 는 여전히 기본 보관 일수로 prune(결정 필요).
 깊이 보지 못한 곳: 다른 점검 범위(veeam · gpu · auth · horizon · curuser · isidu · vcenter · net · metrics · logs · system · idrac · partfault · perf/settings · nsx · backup/stagedRestore) · web 화면의 loadError 표시(서버 응답만 늘렸다 — api-keys GET loadError).
 
-## 1번 표 — preserveCorrupt / backupCorrupt 직접 호출 파일(util/ 제외, 2026-11-17 작업 트리 · 149개)
+#### 1번 표 — preserveCorrupt / backupCorrupt 직접 호출 파일(util/ 제외, 2026-11-17 작업 트리 · 149개)
 
-### 고친 것(97회차)
+##### 고친 것(97회차)
 
 | 파일 | 담는 것 | 읽기 오류 때 예전 동작 | 위험 | 지금 |
 |---|---|---|---|---|
@@ -4389,24 +4394,24 @@ F14 `guestdisk/settings` · `dirusage/settings`(읽기 오류 · 손상 → 기�
 | bmusage/maint/store.js | 정비 창 | 원본 유지 · 간격 없이 매번 재읽기 | EIO 블로킹 | F13 |
 | guestdisk/settings.js · dirusage/settings.js | 보관 일수 · 대상 | 원본 → .corrupt · 기본값 캐시 | **prune 이 기본 보관 일수로 이력 삭제** · 다음 저장이 덮음 | F14 |
 
-### 이미 공용 판정 · 자체 분리(손댈 것 없음)
+##### 이미 공용 판정 · 자체 분리(손댈 것 없음)
 
 - 공용 판정(split — 스윕이 표지 확인): agent/deployRegistry · auth/permissions · bmusage/{onboard/edgeApply,perfRules,portMap,settings,slo} · curuser/settings · gpu/settings · horizon/horizon · isidu/settings · logs/poller · net/monitor ·
   sanswitch/{directorMap,storageCheckSettings,storagePerfNotifyStore,storagePerfReportMail} · security/credentialStore · storage/inspect/schedule · svcmon/{alertSettings,logsettings} · cvp · pdu · sanswitch registry(직접 호출 없음).
 - 자체 분리(own): bmusage/{annotations,compareSets,keyDecisions} · provision/saved · sshaccess/state · security/secretVault · upgrade/{signature,statusStore,signatureOverride} · xferspeed/{settings,poller} · vmhygiene/notifier · focusmon/{alerts,audit/settings}.
 - 관리자 명시 초기화(admin): bmfolders/store · servicemap/store.
 
-### 캐시 성격(잃어도 다시 만들어짐 — 허용)
+##### 캐시 성격(잃어도 다시 만들어짐 — 허용)
 
 bareos/notify · bareos/install/job · bmfolders/edgeCopy · bmusage/perfAlerts · central/{pduEdge,tokenApplyJob,unsupportedServers} · diskbad/cursors · guestpart/notify · insights/portalDb · ipam/scanLog · issues/notify ·
 release-notes · sanswitch/{errBaseline,flowJobs} · sshaccess/usage · storage/inspect/runner · storage/nodeLoadPoller · svcmon/{settingsSync,trial} · vmclone/notify · vmseries/db.
 (위험: 발송 상태는 읽기 오류 뒤 같은 메일 1회 중복 가능 — 낮음)
 
-### 다른 점검 범위(97회차 제외)
+##### 다른 점검 범위(97회차 제외)
 
 auth/{auth,sessionState,ad} · backup/stagedRestore · security/peerTrust · isidu/{digest,notify} · metrics/vmperfDb · nsx/registry · vcenter/{order,registry} · veeam/snapDb (+ 직접 호출 없는 veeam · gpu · idrac 등록부).
 
-### 남긴 것(다음 점검 후보 — 읽기 오류에 원본을 옮기고 기본값 · 빈 값으로 돈다)
+##### 남긴 것(다음 점검 후보 — 읽기 오류에 원본을 옮기고 기본값 · 빈 값으로 돈다)
 
 | 파일 | 담는 것 | 위험 |
 |---|---|---|
@@ -4444,13 +4449,13 @@ auth/{auth,sessionState,ad} · backup/stagedRestore · security/peerTrust · isi
   ⑤ docs/CONFIG-FILES.md 재생성은 하지 않음(생성기 --check 가 이 회차 전부터 다른 파일 표지로 어긋나 있다 — 릴리스 때) · ⑥ 화면 변경 1곳(ShutdownTool 손상 문구) Chromium 미확인.
   · 깊이 보지 못한 곳: svcmon 대상(저장 비밀 없음 확인만) · focusmon 키 인증 경로 · 엣지 쪽 시험 대행(isidu-test 외).
 
-# 99회차 기록 초안 — 공통 스윕: 환경 변수 수치 해석
+### 99회차 기록 초안 — 공통 스윕: 환경 변수 수치 해석
 
-## audits.md 단락(초안)
+#### audits.md 단락(초안)
 
 **공통 스윕 — env 수치 해석(99회차 · `envNumberSweep99`)**: 확정 9(중간 5 · 낮음 4) · 추정 0 — `Number(process.env.X) || 기본값` 꼴(하한 `Math.max` 만 있는 것 포함)이 Infinity · '1e400' · 음수 · 2^31 초과를 통과시키던 **67개 파일 110곳**을 공용 해석기 `util/envNumber.js envPositive`(시한은 `{ max: ENV_INT_MAX }`, 합으로 setTimeout 에 들어가는 SAN 테스트 둘은 `ENV_INT_MAX / 2`)로 바꿨다(정상 값 · 기본값 · 0/빈 값 → 기본값 의미는 그대로, 범위 밖은 잘라 쓰지 않고 기본값 — 57회차 규칙). 고친 것 F1 `ROOMTEMP_STALE_MS` 음수 → 신선도 검사가 꺼져 죽은 서버의 마지막 온도를 '현재' 로 집계(roomTemp `maxAgeMs > 0` 분기 — 재현) · F2 `CENTRAL_PDU_TTL_MS` 음수 → 경계가 미래라 엣지 PDU 보고 전량 즉시 만료, Infinity → 영구 · F3 `AGENT_FLEET_WITHHOLD_MAX_MS` · `AGENT_GPU_GUEST_WITHHOLD_MAX_MS` · `PDU_PUSH_WITHHOLD_MAX_MS` Infinity → 보류 시한 소멸(루트 규칙 '보류에는 반드시 시한') · F4 `VC_KEEPALIVE_MS` −1 · Infinity → undici 'invalid keepAliveTimeout' 로 vCenter REST 요청 전부 실패(Client 생성 재현) · F5 `SANSW_TEST_PICKUP_MS`/`RESULT_MS` 3e9 · Infinity → `setTimeout(합)` 이 1ms 가 되어 SAN 연결 테스트가 즉시 '엣지 응답 없음'(Node 동작 재현) · F6 `SVCMON_XLSX_MAX_UNCOMPRESSED_BYTES` Infinity → xlsx 압축 폭탄 상한 꺼짐 · F7 `NSX_LIST_MAX_PAGES` Infinity → 페이지 반복 상한 꺼짐 · F8 `RMA_TEST_ALERT_STREAK` Infinity → 연속 실패 알림이 영영 안 뜸 · `RMA_MAX_OUTPUT` 음수 → 출력 상한 음수 · F9 그 밖 상한(바이트 · 행 · 에이전트 수 · 캐시) · 보존일(RMA · PDU)이 Infinity 로 무한 · 무보존이 되던 것. 실제 모듈 21개 상수를 자식 프로세스로 불러 '위험한 값 = 기본값 · 정상 값(기본×2) = 그대로' 를 대조(수정 전 사본에서 실패 — 변이 3/3). 재발 방지: 서버 소스의 `Number/parseInt/parseFloat(process.env…)` · `+process.env` 중 `clampIntervalMs(` 안이거나 같은 줄 `Math.max`+`Math.min` 이 아닌 것은 허용 목록(사유 — 검사됨 · 의미 0 · 담당 밖 · 정책) 밖이면 실패. 개선: `scripts/env-doc.mjs` 가 헬퍼 둘째 인자의 숫자 곱(`10 * 60_000`)을 계산해 적는다(예전 `|| 10 * 60_000` 은 첫 숫자 '10' 만 적혀 `POWER_CURRENT_STALE_MS` 기본이 '2' 로 보였다 — docs/ENV.md 재생성). 기존 테스트 3개(`bmUsageConcurrency2918` · `bmUsagePerf2550` · `bmUsageEnterprise2554`)는 소스 정규식이 옛 꼴을 읽어 새 꼴로 바꿨다(의도된 소스 형태 변경 — 기대 기본값 32 · 60000 그대로). **남긴 것**: 공용 · 담당 밖 파일 — `util/resilientFetch.js WAN_CONNECT_TIMEOUT_MS`(−1 · Infinity → undici 'invalid connectTimeout' 로 중앙↔엣지 요청 전부 실패 — 재현, 제안 높음) · `util/rateLimit.js API_RATE_LIMIT`(Infinity → 속도 제한 꺼짐) · `util/readCapped.js EDGE_*_MAX_BYTES` · `util/activityLog.js` 내부 `Math.max(50, …)`(Infinity 면 무한 — 호출부 4곳은 고쳤다) · `util/soapParsePool.js SOAP_PARSE_MIN_CHARS`(`Number(env || d)` — 숫자 아님 → NaN) · `store.js COLLECT_CONCURRENCY` · `proxy/registry.js` 포트 셋(envPort) · partfault · collector/registry · gpu · checksLogs · hardwareGpu · partFaults(다른 회차 진행 중) · `rma/agent.js` 의 `env.` 별칭 4곳(`RMA_CRED_CACHE_MS` · `RMA_OFFLINE_MINUTES` 하한만 — 스윕 정규식 밖) · `svcmon/pool.js` 워커 · 동시성 상한 없음(1e6 이면 그만큼 — 0 = 인프로세스 의미 때문에 손대지 않음) · `ipam/db.js IPAM_WRITE_MIN_ROWS`('0' = 항상 오프로드 의미 · 숫자 아님 → NaN). 결정 필요: `config.js PORT`(범위 밖이면 지금은 listen 이 던져 기동이 멈춘다 — envPort 로 바꾸면 조용히 4000). 깊이 보지 못한 곳: 값마다 소비처 전부를 따라가 실제 증상을 재현한 것은 F1~F8 뿐이고, 나머지 상한 · TTL 은 'Infinity 면 상한이 꺼진다' 는 식 수준의 판정이다 · `clampIntervalMs` 로 감싼 47곳은 범위 밖을 기본값이 아니라 상 · 하한으로 **잘라** 쓴다(57회차 규칙과 다름 — 의미 변경이라 유지).
 
-## 1. 전수 목록(수정 전 기준 · 주석 줄 제외 261곳)
+#### 1. 전수 목록(수정 전 기준 · 주석 줄 제외 261곳)
 
 분류: 공용(clampIntervalMs · offOrIntervalMs · reqTimeoutMs · envPositive) 47 · 닫힌 범위(Math.max+Math.min) 48 · Number.isFinite 검사 10 · 하한만 112 · 무검사 44. 고친 곳 110(67개 파일).
 
@@ -4718,9 +4723,9 @@ auth/{auth,sessionState,ad} · backup/stagedRestore · security/peerTrust · isi
 | config.js:346 | AGENT_INVENTORY_INTERVAL_MS | 주기·대기 | clampIntervalMs 등 공용(비유한→기본, 상·하한) | 없음(범위 닫힘) | 유지 |
 | config.js:356 | AGENT_GUESTDISK_INTERVAL_MS | 주기·대기 | clampIntervalMs 등 공용(비유한→기본, 상·하한) | 없음(범위 닫힘) | 유지 |
 
-# 100회차 — 97 · 98 · 99회차 반증 + 남긴 결정 구현
+### 100회차 — 97 · 98 · 99회차 반증 + 남긴 결정 구현
 
-## audits.md 단락 초안
+#### audits.md 단락 초안
 
 **97 · 98 · 99회차 반증 + 결정 구현(100회차 · `rebut100`)**: 확정 4(중간 2 · 낮음 2) · 결정 구현 5 · 추정 0 —
 고친 것 **F1**(중간 · 재현) `security/securitySettings.js`: 98회차 신뢰 사본의 '신규 설치 = 기본값' 판정이 본 파일만 보아, 본 파일이 없고(손상 보존 뒤 재시작 · 지움) 신뢰 사본이 **있는데 깨졌거나 읽기 오류**(EACCES · EISDIR)면
@@ -4742,7 +4747,7 @@ auth/{auth,sessionState,ad} · backup/stagedRestore · security/peerTrust · isi
 ④ guestdisk · dirusage 의 settingsLoadError 사유는 화면에 실리지 않는다(설정 상태는 damaged() 로 손상 보존본만 표시).
 깊이 보지 못한 곳: bareos 8종(101회차 진행 중 — 읽기만) · 97 의 ipam rangeStore · bmusage/maint 는 diff 대조만 · 화면 변경 1곳(SessionSecurity 한 줄) Chromium 미확인.
 
-## 바꾼 파일
+#### 바꾼 파일
 - server/src/guestdisk/settings.js · server/src/dirusage/settings.js — 결정 97 ③ · F4 문구
 - server/src/sshaccess/state.js — F3
 - server/src/security/securitySettings.js — F1
@@ -4754,7 +4759,7 @@ auth/{auth,sessionState,ad} · backup/stagedRestore · security/peerTrust · isi
 - server/test/envNumberSweep99.test.js — 허용 목록 두 줄 삭제(collector/registry · proxy/registry)
 - server/test/rebut100.test.js — 새 회귀 11
 
-## 돌린 테스트
+#### 돌린 테스트
 - rebut100 11/11 · 관련 서버 테스트 138개 파일 1213/1213 · securitySettings · stagedRestore · security-session 참조 46개 파일 413/413 · envNumberSweep99 6/6 · 웹 vitest(sessionSecurityBody · audit2744l) 6/6 · eslint 2파일 통과
 - 변이 11/11: guestdisk · dirusage corruptKept · sshaccess readFailed · selfCheck warn · collectors carry-refused · gpu-physical carry-refused · proxy envPort · collector envPositive · 문구 스윕 · securitySettings 사본 있음 → 엄격 · stagedRestore 사본 비교
 
@@ -4777,13 +4782,13 @@ auth/{auth,sessionState,ad} · backup/stagedRestore · security/peerTrust · isi
   Director 를 서로 다른 이름(IP 와 별칭 DNS)으로 등록하면 같은 서버로 보지 못한다(이름 해석 없음).
   깊이 보지 못한 곳: `manage/apply.js` 원격 셸 본문 · `autoSetup.js` 되돌리기 · `groupRunner` · `drRunner` · 엣지 대행 회신 정제(`edgeResult.js`)의 새 종류 · 웹 BareosSettings 매핑 표 화면(Chromium 미실시).
 
-# 102회차 기록 초안 — env 수치 스윕 잔여(99회차가 공용 · 담당 밖으로 남긴 것) + 100회차 반증 제안(envPositive 기본 max)
+### 102회차 기록 초안 — env 수치 스윕 잔여(99회차가 공용 · 담당 밖으로 남긴 것) + 100회차 반증 제안(envPositive 기본 max)
 
-## audits.md 단락(초안)
+#### audits.md 단락(초안)
 
 **공통 스윕 2 — env 수치 잔여(102회차 · `envSweep102` · `envNumberSweep99`)**: 확정 11(중간 6 · 낮음 5) · 추정 0 — 99회차가 공용 · 담당 밖으로 남긴 꼴을 고쳤다. 고친 것 F1 `util/resilientFetch.js` `WAN_CONNECT_TIMEOUT_MS`=−1 → undici Agent 가 검사 없이 연결 시한 fast timer(약 0.5초 눈금)에 넣어 연결 수립이 1초를 넘는 법인(RTT 800ms — TCP + TLS)의 중앙↔엣지 요청이 전부 'Connect Timeout Error'(lookup 1.5초 지연으로 재현 · 20000 은 성공), Infinity → 연결 시한 소멸, `WAN_MAX_CONNECTIONS`=−1 → 첫 요청 'invalid connections'(재현) — **정정**: 99회차 기록의 "'invalid connectTimeout'" 은 Client 를 직접 만들 때의 문구이고 Agent 경로에서는 위처럼 짧은 시한으로 실패한다(결과 — 중앙↔엣지 실패 — 는 같다) · F2 `util/rateLimit.js` `API_RATE_WINDOW_MS`=Infinity → 창이 영영 안 바뀌어 한도에 한 번 닿은 IP 가 재시작 전까지 429(`Retry-After: Infinity` — 하루 뒤도 429 재현), `API_RATE_LIMIT`=Infinity → 제한 꺼짐 · F3 `util/readCapped.js` `EDGE_EXPORT/RESPONSE_MAX_BYTES`=Infinity → 이 모듈이 막던 gzip 폭탄 상한이 꺼짐 · F4 `util/soapParsePool.js` `SOAP_PARSE_MIN_CHARS` 숫자 아님 → NaN(작은 XML 까지 전부 워커) · Infinity → 큰 XML 도 인라인('0' = 항상 오프로드 의미는 유지) · F5 같은 파일 `SOAP_PARSE_WORKERS`=Infinity → `for (i < Infinity) new Worker()` 로 **첫 큰 SOAP 응답에서 메인 스레드가 멈춤**(4초 뒤 강제 종료 재현 — 정상 6 은 7ms) · 1e4 → 스레드 1만 · 숫자 아님 · 음수 · 공백 → 0(오프로딩 꺼짐)으로 읽던 것(99 스윕이 `const env = process.env.X; Number(env)` 꼴을 못 봐 남았다 — 상한 64, 그 밖 기본값) · F6 `store.js` `COLLECT_CONCURRENCY`=Infinity → `util/pool.js` 가 유한하지 않은 limit 을 1 로 읽어 vCenter 28곳 수집이 **하나씩 차례로**(동시성 최고 1 재현) · F7 svcmon 워커 · 틱을 pool · poller · capacity 가 따로 읽었다 — `SVCMON_WORKERS=0.5` → `Array.from({ length: 0.5 })` 가 빈 배열이라 **runBatch 가 점검을 하나도 돌리지 않고 []**(재현), 빈 값 → pool 인라인 · capacity 기본 3, 1e6 → 청크 수만큼 스레드(3,000건 12개 · RSS 175→360MB 재현), `SVCMON_CONCURRENCY=`/`SVCMON_PROC_CONCURRENCY=` → 동시성 1, `SVCMON_MAX_PER_TICK=` → 폴러 100 · 용량 천장 4000 기준(재현) → 판정을 `svcmon/capacity.js`(`workersFromEnv` · `tickMsFromEnv` · `maxPerTickFromEnv`) 하나로, '0' = 인라인 의미는 유지, 상한 워커 64 · 소켓 1만 · 프로세스 1천 · 배치 10만 · F8 `ipam/db.js` `IPAM_DB_LOCK_RETRY_MS`=Infinity → `> 0` 검사를 통과해 잠금 오류 한 번에 **재시작 전까지 IP 관리 DB 를 다시 열지 않음**(30일 뒤 blocked 재현), `IPAM_WRITE_MIN_ROWS` 숫자 아님 → NaN('0' = 항상 오프로드 의미 유지) · F9 `rma/agent.js` 별칭 `env.RMA_CRED_CACHE_MS`=Infinity → 받은 계정 비밀을 메모리에 영원히(중앙에서 바꾼 · 회수한 계정을 계속 씀) · `RMA_OFFLINE_MINUTES` 같은 정리 · F10 상한 env Infinity → 상한 꺼짐: `PARTFAULT_EDGE_MAX_DEVICES/DEVICE_PART_MAX/REPORT_PART_MAX`(엣지 수신 계약) · `PARTFAULT_PUSH_MAX_DEVICES` · `GPU_GUEST_FILE_MAX_BYTES` · `VCLOGS_EXPORT_MAX_ROWS` · `GPU_EXPORT_MAX_ROWS` · `PARTFAULT_INCIDENT_EVENT_MAX` · `LOOP_LAG_WARN_MS` · `util/activityLog.js` 내부 `Math.max(50, …)`(마지막 방어) · F11 `partfault/scan.js` 가 `PARTFAULT_INV_MAX_AGE_MS` 를 `idrac/serverParts.js INV_STALE_MS` 와 다른 식으로 읽어 Infinity 면 스캔은 영원히 '신선' · 상세 화면은 상한으로 잘린 값 → 같은 `clampIntervalMs(…, 90분, 1분)`. 공용 해석기 추가: `util/envNumber.js envNonNegative`(0 이 의미인 키 — 빈 값은 미지정). **100회차 반증 제안 반영**: `envPositive` · `envNonNegative` 기본 max 를 Infinity → `Number.MAX_SAFE_INTEGER`(`ENV_DEFAULT_MAX`) — '1e300' 같은 유한 거대값이 통과해 개수 · 상한 · 동시성이 사실상 꺼지던 것(ENV_INT_MAX 를 기본으로 하지 않은 이유: 2GB 넘는 정당한 바이트 상한이 기본값으로 떨어진다 — 시한은 호출부 `{ max: ENV_INT_MAX }` 그대로). 스윕 넓힘(`envNumberSweep99`): 별칭(`const env = process.env` · `fn(env = process.env)`) · 지역 변수(`const raw = process.env.X` 뒤 8줄 안의 `Number(raw)`) · 구조 분해 · `Number.parseInt/parseFloat` 도 잡는다(넓힌 정규식 자체 시험 포함) — 새로 드러난 5곳(exportBusy · idracTrend · bmstor/history 둘 · routes/central · rma RMA_PRIORITY)은 전부 바로 뒤 검사가 있어 사유와 함께 허용, 고친 줄 22개는 허용 목록에서 지웠다. 반증(결함 아님): `veeam/em/client.js VEEAM_EM_VM_BUDGET_MS` 는 `Math.min(n, 600_000)` 으로 닫혀 큰 유한값도 10분 · `mock/demo/bareos.js` 두 키는 유한 + 닫힌 범위(데모) — 손대지 않음. 변이 12/12(격리 사본 — 고친 줄을 하나씩 되돌리면 새 테스트 또는 넓힌 스윕이 실패). docs/ENV.md 재생성(부수 효과로 기본값 오기 4곳 정정: `EDGE_EXPORT_MAX_BYTES` '64' → 67108864 · `EDGE_RESPONSE_MAX_BYTES` '16' → 16777216 · `GPU_GUEST_FILE_MAX_BYTES` '8' → 8388608 · `RMA_CRED_CACHE_MS` '10' → 600000 · `IPAM_DB_LOCK_RETRY_MS` 빈칸 → 30000). **남긴 것**: `scripts/env-doc.mjs` 가 `|| 10 * 60_000` 꼴(헬퍼 아닌 `||` 뒤의 곱)을 아직 첫 숫자만 읽어 ENV.md 기본값 22곳이 틀리다(`VEEAM_RUN_DEADLINE_MS` '24' 등 — 99 · 100회차 파일이라 제안) · env-doc 가 주석 속 `process.env.X` 를 키 `X` 로 싣는다(보안 분류의 가짜 행 — 같은 파일) · pyportal `hub/config.py _env_float` 는 'nan' · 'inf' 를 상한(30초 등)으로 잘라 쓴다(닫힌 범위라 위험 없음 — 57회차 '기본값' 규칙과만 다름, pyportal 릴리스 비용으로 보고만) · 웹 `import.meta.env` 수치 해석 0건. 깊이 보지 못한 곳: `numOrNull(process.env…)` 꼴 약 30곳은 스윕 밖(Infinity 는 거르지만 음수 · 거대값은 각 줄의 검사에 기댄다 — 표본 10곳은 검사가 있었다) · 상한 F10 은 'Infinity 면 상한이 꺼진다' 수준의 판정(소비처 증상 재현은 F1 · F2 · F5 · F6 · F7 · F8).
 
-## 재현 메모
+#### 재현 메모
 
 - F1: `scratchpad/r102_undici2.mjs` — undici 6.28.1 Agent, lookup 1.5초 지연: connectTimeout −1 · −1000 → UND_ERR_CONNECT_TIMEOUT, Infinity · 20000 → 200. connections −1 → UND_ERR_INVALID_ARG 'invalid connections'.
 - F2: `scratchpad/r102_rate.mjs` — API_RATE_LIMIT=2, WINDOW=Infinity: [통과, 통과, 429, 하루 뒤 429(Retry-After Infinity)] / WINDOW=60000: 하루 뒤 통과.
@@ -4792,13 +4797,13 @@ auth/{auth,sessionState,ad} · backup/stagedRestore · security/peerTrust · isi
 - F7: `scratchpad/r102_svcpool.mjs` — 0.5 → results 0 · '' → pool 0 · capacity 3 · 1e6 → 스레드 12 · RSS 360MB(4 → 175MB). 수정 전 사본: `SVCMON_CONCURRENCY=` → sockLimit 1 · procLimit 1 · maxPerTick 100 · capCeiling 800 · WARM 60000.
 - F8: createLockRetry(Infinity).onFail(lock) → 30일 뒤 blocked true.
 
-## 변이(격리 사본 `scratchpad/r102_iso2`)
+#### 변이(격리 사본 `scratchpad/r102_iso2`)
 
 M1 WAN_CONNECT_TIMEOUT_MS · M2 API_RATE_WINDOW_MS · M3 SOAP_PARSE_WORKERS · M4 SVCMON_WORKERS(pool) · M5 EDGE_EXPORT_MAX_BYTES · M6 SOAP_PARSE_MIN_CHARS · M7 COLLECT_CONCURRENCY · M8 IPAM_DB_LOCK_RETRY_MS · M9 RMA_CRED_CACHE_MS(별칭 — 넓힌 스윕) · M10 PARTFAULT_EDGE_MAX_DEVICES · M11 SVCMON_MAX_PER_TICK(poller 별도 판정) · M12 ENV_DEFAULT_MAX=Infinity → 전부 실패(잡힘) 12/12. 수정 전 HEAD 사본(`r102_iso`)에서 envSweep102 7/9 실패.
 
-# 103회차 — 읽기 오류 ≠ 손상 스윕 잔여(97회차가 남긴 56개 중 21개)
+### 103회차 — 읽기 오류 ≠ 손상 스윕 잔여(97회차가 남긴 56개 중 21개)
 
-## audits.md 단락 초안
+#### audits.md 단락 초안
 
 **공통 스윕 잔여 — 읽기 오류 ≠ 손상(103회차 · `readErrorSweep103`)**: 확정 21(높음 9 · 중간 9 · 낮음 3) · 추정 4 — 97회차 '남긴 것' 56개 중 위험 순 21개를 공용 판정(util/jsonFileRead.js `makeJsonFileReader` · `readJsonFile` · settingsLoadError `readError`)으로 옮겼다. 꼴은 같다: 읽기 오류(EISDIR 재현)에 원본을 `.corrupt.*` 로 옮기고 빈 값 · 기본값을 캐시 → 다음 저장이 원본 자리를 한 건짜리 · 기본값 파일로 채움. 이제 원본 유지 · 캐시 안 함(30초 간격 재읽기 — 재시작 · 확정 없이 풀림) · 쓰기 길목 409(사유를 화면까지 — 전역 오류 처리기는 사유를 싣지 않아 라우트 사전 검사 · `e.status === 409` 분기) · 손상은 예전과 같음.
 고친 것 F1 `svcmon/store`(감시 대상 원장 — 빈 목록을 엣지 배정 PUT · 설정 연동 동기화가 0건 스냅샷으로 굳혀 엣지가 중앙 배포 점검을 전부 지움 · save 409 · `svcmonStoreWriteRefusal` 을 배정 · 가져오기 · 자동 생성 라우트가 먼저 봄; 높음) · F2 `central/svcmonAssign`(관리자 저장이 한 엣지 파일로 덮음 · 표지 readError — pull 503 그대로; 높음) ·
@@ -4834,9 +4839,9 @@ F21 `vmseries/settings`(env 기본값(꺼짐 · 보존 60일)으로 뒤집힘 ·
   재설치 사전 점검은 원장을 못 읽으면 이제 503(예전엔 대상 0 으로 표시).
   깊이 보지 못한 곳: `manage/apply.js` 원격 셸 본문 · `autoSetup.js` 되돌리기 · `groupRunner` · `drRunner`(엣지 회신 정제 `edgeResult.js` 는 VALUE 표가 ops 작업 종류를 모두 덮는지만 대조) · 웹 BareosSettings 묶기 화면(Chromium 미실시) · `bareosPolicy2839` ReDoS 비율 시험이 동시 4 실행에서 1회 흔들림(단독 3/3 통과 — 이 회차 무관).
 
-# 105회차(최종 반증 A) — 102 · 103회차 반증 + 103 남긴 추정 · 제안
+### 105회차(최종 반증 A) — 102 · 103회차 반증 + 103 남긴 추정 · 제안
 
-## audits.md 단락 초안
+#### audits.md 단락 초안
 
 **최종 반증 A — 102 · 103회차(105회차 · `rebut105a`)**: 확정 9(중간 4 · 낮음 5) · 추정 0 · 정정 1 — 102(env 수치)는 결함 없음(기본 max = MAX_SAFE_INTEGER 는 바이트 · 보존 호출부를 기본값으로 떨어뜨리지 않는다 — 큰 정당값 64GB · 10년 ms 도 9e15 아래 · envNonNegative 빈 값 = 미지정 · '0' 의미 유지 확인). 103(읽기 오류 ≠ 손상)의 읽기 소비처는 빈 목록으로 지우거나 굳히지 않았다(svcmon 폴러는 저장소 세대가 바뀔 때만 색인 · 엣지 pull 은 save 409 를 catch 해 ack 하지 않음 · ping 시드 · rma 실행 · 배정 동기화 · vmclone NFS 판정 모두 거절 쪽).
 고친 것 A1 `backup/settings`(103 추정 재현 — 기동 때 읽기 오류면 정기 백업이 기본값(꺼짐)으로 판정되고 다시 읽혀도 reschedule 을 부르는 길이 없어 저장 · 재시작 전까지 멈춤 → 읽기 오류 동안 재읽기 간격 + 1초마다 재판정; 중간) · A2 `ipam/vcRangeMigrate`(재현 — 이전 기록 읽기 오류를 '아직 안 함' 으로 봐 기동 1분 뒤 이전을 다시 돌려 옮긴 기록(netmap items)을 남은 대역만의 기록으로 덮고 수동 옮김 · 지움도 한 건짜리로 덮음 → 이번 이전 · 수동 409 건너뜀; 낮음) ·
@@ -4850,14 +4855,14 @@ A8 웹(103 회귀 — api.js 의 putJson · postJson 은 409 를 던지지 않�
 **남긴 것**: `storage/intervals` 읽기 오류 · 손상 동안 기동 applyOwnIntervals 가 빈 지정({})을 적용하고 다시 읽혀도 재적용하지 않는다(중앙 자신의 주기 — 저장 · 재시작 때 회복, 손상 경로와 같은 기존 동작) · 103 의 다른 409 라우트 웹 호출부 전수 대조(GuestScanJobs · VmClone · RelayTopo · TemplateTab 은 ok · error 를 본다 — 확인함, 나머지 alerts · alarm-mutes · upgrade · ping · cvp · vmseries 화면은 보지 못함) · svcmon `setEnabledMany` 등 읽기 오류 동안 '없음 N' 으로 답하는 쓰기(파괴 없음) · `ipam/scanStore` 결과 · 이력(103 결정대로 다음으로) · 생성 문서(arch-doc · api-doc — 줄 수 · 줄 번호) 재생성 필요.
 깊이 보지 못한 곳: 102 의 svcmon 상한 외 호출부 표본(capacity · pool · poller · resilientFetch · rateLimit · readCapped · store · ipam/db 만 대조) · 103 의 upgrade/settings · fleetBundle · alerts · alarm-mutes · agentGpuGuestConfig 의 읽기 소비처(자동 적용 · 알림 경로는 diff 만 읽음).
 
-## 재현 메모
+#### 재현 메모
 - A3: `scratchpad/r105a/gscan_repro.mjs mismatch` — 키 A 봉인 → 키 B 로 열면 목록 2 · 보존본 0 · 이름만 고친 저장 성공 · 파일의 guestPass 둘 다 '' (수정 뒤: 409 secrets-undecryptable · 암호문 그대로). `missing` — 금고가 SECRETS_KEY_MISSING 으로 저장 거절(암호문 그대로 — 103 이전부터 안전).
 - A1: rebut105a A1 — 수정 전에는 retryPending 없음(M1 변이로 확인).
 - 변이 스크립트: `scratchpad/r105a/mutate.py` · `mutate2.py`(격리 사본 `scratchpad/r105a/iso`).
 
-# 105회차(마지막 회차) — 최종 반증 B: 100 · 104회차
+### 105회차(마지막 회차) — 최종 반증 B: 100 · 104회차
 
-## audits.md 단락 초안
+#### audits.md 단락 초안
 
 **100 · 104회차 반증(105회차 B · `rebut105b`)**: 확정 3(낮음 3) · 추정 0 · 남긴 것 처리 1(100 ①) —
 고친 것 **M1**(낮음 · 재현 — 104 D1 덜 고침) `bareos/settings.js`: 104 D1 은 매핑 저장(saveSettings)에서만 같은 Director 묶음을 봐, vCenter 가 묶인 등록 B 의 주소(· 포트 · 담당)를
@@ -4882,7 +4887,7 @@ manage/apply.js 되돌리기(지운 파일은 옛 내용 복원 · 새 파일만
 guestdisk · dirusage corruptKept 는 load 캐시 뒤 보존본을 치워도 재시작 · invalidate 전까지 남는다(저장하면 풀림 — 낮음).
 깊이 보지 못한 곳: drRunner · groupRunner 의 엣지 대행 회신 경로 전체 · 웹 BareosSettings 의 Director 편집 저장 순서(주소 변경 + vCenter 묶기를 한 번에 할 때 화면 문구) Chromium 미실시 · ShutdownTool 문구 Chromium 미실시.
 
-## 바꾼 파일
+#### 바꾼 파일
 - server/src/bareos/settings.js — M1 directorMoveBindIssue · updateDirector/prepareDirectorUpdate bindCheck
 - server/src/bareos/autoSetup.js — M1 planDirector(중앙 직접) 미리 판정
 - server/src/bareos/install/job.js — M1 4단계 재등록 bindCheck:false
@@ -4892,7 +4897,7 @@ guestdisk · dirusage corruptKept 는 load 캐시 뒤 보존본을 치워도 재
 - web/src/views/tools/ShutdownTool.jsx — 100 ① 문구
 - server/test/rebut105b.test.js — 새 회귀 6
 
-## 돌린 테스트
+#### 돌린 테스트
 - rebut105b 6/6 · 관련 39개 파일(bareos 35 · leftoverB56 · readErrorSweep97 · emergencyStop · securityResidual98 · rebut100 · rebut105b) 385/385 · rebut100 11/11
 - 웹 vitest audit2613b 20/20 · eslint ShutdownTool.jsx 통과
 - 변이 10/10(격리 사본)
