@@ -14,7 +14,7 @@ import { config, clampIntervalMs } from '../config.js';
 import { bumpFleetRev } from '../insights/fleetRev.js';
 import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js'; // v2.582 ARCH-3: 상태 파일도 원자 쓰기(절단본 → 로드 실패 → 다음 저장이 빈 값으로 덮어쓰는 왕복 손상 차단)
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
-import { capStr } from '../util/capStr.js';
+import { capStr, capTrim } from '../util/capStr.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { sanitizeHwSummary, mgmtHostOf } from '../idrac/hwSummary.js'; // v3.3.0 엣지 하드웨어 요약 · iDRAC 주소 정제(엣지 agent/fleetPush.js 와 짝)
 import { summarizeRegistryError, REGISTRY_ERROR_LABEL } from '../util/registryCore.js'; // v2.744(회귀 검토 GD-R1)
@@ -44,6 +44,8 @@ try {
     for (const [a, e] of Object.entries(cache)) {
       if (!e || typeof e !== 'object' || !Array.isArray(e.baremetal)) { delete cache[a]; continue; }
       if (e.baremetal.length > PER_AGENT_MAX) { e.omitted = (Number(e.omitted) || 0) + (e.baremetal.length - PER_AGENT_MAX); e.baremetal = e.baremetal.slice(0, PER_AGENT_MAX); }
+      // 84회차 F1: 상한 이전에 저장된 긴 generatedAt 도 올릴 때 줄인다(다음 저장이 다시 작아지게)
+      if (typeof e.generatedAt === 'string' && e.generatedAt.length > 40) e.generatedAt = capTrim(e.generatedAt, 40) || null;
     }
   }
 } catch (e) { cache = Object.create(null); console.warn(`[central-fleet] ${path.basename(FILE)} 를 읽지 못해 빈 캐시로 시작합니다(엣지의 다음 push 로 채워집니다): ${safeLoadText(e)}`); }
@@ -172,7 +174,10 @@ export function setEdgeFleet(agent, baremetal, generatedAt, { verified = true, v
   const sig = hashList(list);
   const prev = cache[a];
   const part = sanitizeFleetPartial(partial);
-  cache[a] = { at: Date.now(), generatedAt: typeof generatedAt === 'string' || typeof generatedAt === 'number' ? generatedAt : null, baremetal: list, sig, verified: !!verified, ...(omitted ? { omitted } : {}), ...(vcenterBlanked ? { vcenterBlanked } : {}), ...(part ? { partial: part } : {}) };
+  // 84회차 F1: generatedAt 은 시각 표시로만 쓴다 — 유한수 또는 짧은 글자만(/inventory 14회차 C-3 · 17회차 R-1 과 같은 규칙). 예전에는 글자를
+  //   길이 제한 없이 받아 수 MB 글자가 캐시 · central-fleet.json · 관리 화면 응답에 그대로 남았다(재현: 3MB 글자가 listEdgeFleet 에 그대로).
+  const gen = typeof generatedAt === 'number' && Number.isFinite(generatedAt) ? generatedAt : (typeof generatedAt === 'string' ? (capTrim(generatedAt, 40) || null) : null);
+  cache[a] = { at: Date.now(), generatedAt: gen, baremetal: list, sig, verified: !!verified, ...(omitted ? { omitted } : {}), ...(vcenterBlanked ? { vcenterBlanked } : {}), ...(part ? { partial: part } : {}) };
   if (!prev || prev.sig !== sig) bumpFleetRev(); // 내용이 바뀐 경우에만 캐시 무효화
   persistSoon();
   return { accepted: list.length, omitted, vcenterBlanked, ...(part ? { partial: part } : {}) };

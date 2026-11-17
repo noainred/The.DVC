@@ -72,10 +72,12 @@ export function setCentralToken(token) {
   const val = String(token || '').trim();
   const issue = tokenValueIssue(val);
   if (issue) throw new Error(issue);
+  // 84회차 F3: 파일에 먼저 쓴다 — 쓰지 못하면(읽기 오류 포함) 던지고 실행 중 값도 바꾸지 않는다. 예전에는 메모리를 먼저 바꿔
+  //   저장 실패 시 지금 프로세스는 새 토큰 · 파일은 옛 토큰으로 갈라졌다(재시작하면 조용히 옛 토큰으로 돌아간다).
+  persistEnv('CENTRAL_TOKEN', val);      // 리붓 후에도 유지
   process.env.CENTRAL_TOKEN = val;
   if (!config.central) config.central = {};
   config.central.token = val;            // 즉시 적용(재시작 불필요)
-  persistEnv('CENTRAL_TOKEN', val);      // 리붓 후에도 유지
   return val;
 }
 
@@ -92,7 +94,12 @@ function persistEnv(key, val) {
   let text = '';
   // Windows 배치 파일은 ANSI 일 수 있다 — latin1 로 읽고 써서 바이트를 그대로 둔다(utf8 로 다시 쓰면 주석의 비-ASCII 가 깨진다).
   const enc = isWin ? 'latin1' : 'utf8';
-  try { if (fs.existsSync(ENV_FILE)) text = fs.readFileSync(ENV_FILE, enc); } catch { /* */ }
+  // 84회차 F3(재현): 파일이 **있는데 읽지 못하면**(EACCES · EIO 등) 던진다 — 예전에는 빈 파일로 보고 그 한 줄만 남긴 portal.env 를 원자적으로
+  //   써서 AUTH_SECRET · DATA_SOURCE 등 나머지 설정이 다음 재시작에 사라졌다(upsertEnvKeyStrict 와 같은 규칙 — 없음 ≠ 읽지 못함).
+  if (fs.existsSync(ENV_FILE)) {
+    try { text = fs.readFileSync(ENV_FILE, enc); }
+    catch (e) { throw new Error(`${path.basename(ENV_FILE)} 를 읽지 못해 저장하지 않았습니다(${e?.code || '읽기 오류'}) — 파일 권한 · 소유자를 확인하세요(지금 값은 바뀌지 않았습니다).`); }
+  }
   // 기존 같은 키 라인(있다면) 교체, 없으면 추가. Windows 는 CRLF(cmd 가 LF 만 있는 배치 파일의 줄을 잘못 읽는 경우가 있다 —
   //   portal.env.example.bat 머리말의 'CRLF 로 저장' 과 같은 이유).
   const out = renderEnvFile(text, key, val);

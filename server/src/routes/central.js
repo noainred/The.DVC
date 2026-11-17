@@ -504,8 +504,8 @@ centralRouter.post('/register-collector', requireCentral({ notFound: { ok: false
   if (typeof b.collectorToken !== 'string' || b.collectorToken.length > REGISTER_TOKEN_MAX) return res.status(400).json({ ok: false, reason: `collectorToken은 ${REGISTER_TOKEN_MAX}자 이하 문자열이어야 합니다.` });
   // URL: 엣지가 명시(urlHint)하지 않으면 요청 peer IP + 알린 포트로 유도(NAT 없는 사내망 가정).
   let url = trimTrailingSlashes(String(b.urlHint || '').trim());
-  const regDc = typeof b.datacenter === 'string' ? b.datacenter.slice(0, 128) : '';
-  const regVer = typeof b.version === 'string' ? b.version.slice(0, 32) : '';
+  const regDc = typeof b.datacenter === 'string' ? capStr(b.datacenter, 128) : '';   // 84회차 F2: 등록부 · 상태에 상주 — 평탄화
+  const regVer = typeof b.version === 'string' ? capStr(b.version, 32) : '';
   if (!url) {
     const port = Number(b.port);
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -755,7 +755,7 @@ export function sanitizeVcLocation(v) {
   const out = {}; let coerced = 0;
   for (const k of ['city', 'country', 'region', 'name', 'site', 'datacenter']) {
     if (!Object.hasOwn(v, k) || v[k] == null) continue;
-    if (typeof v[k] === 'string' || (typeof v[k] === 'number' && Number.isFinite(v[k]))) out[k] = String(v[k]).slice(0, 128);
+    if (typeof v[k] === 'string' || (typeof v[k] === 'number' && Number.isFinite(v[k]))) out[k] = capStr(String(v[k]), 128);   // 84회차 F2: 위임 인벤토리 캐시에 상주 — 평탄화
     else coerced += 1;
   }
   for (const k of ['lat', 'lon', 'lng']) {
@@ -1517,7 +1517,9 @@ centralRouter.post('/idrac-scan-result', requireCentral(), (req, res) => {
  * 식별자가 없으면 버린다(null). 사용률이 이상값이면 null 로 두고 `dropped.badPct` 를 센다.
  */
 export function narrowGpuRow(x, dropped = { badPct: 0 }) {
-  const idOf = (v) => (typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v)) ? String(v).slice(0, 256) : '');
+  // 84회차 F2(재현 — 잔존 힙): 저장(gpu/store.js byHost · byVm 키 · host · vcenterId)되는 글자는 capStr 로 잘라 평탄화한다 — `.slice` 는
+  //   SlicedString 이라 256자가 본문 원문(최대 16MB)을 붙잡았다(TIM2607-01 규약의 누락 — 2MB 글자 행 8개로 약 50MB 잔존 실측).
+  const idOf = (v) => (typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v)) ? capStr(String(v), 256) : '');
   const pctOf = (v) => {
     if (v == null) return null;
     const n = numOrNull(v);
@@ -1538,7 +1540,7 @@ export function narrowGpuRow(x, dropped = { badPct: 0 }) {
   // v2.769(점검 R4-D5-3): 응답 없는 GPU 장수 — gpus 와 같은 범위 규칙(밖이면 null = 모름). 구버전 엣지는 필드가 없다.
   if (Object.hasOwn(x, 'gpuErrors')) { const n = numOrNull(x.gpuErrors); out.gpuErrors = n != null && n >= 0 && n <= 64 ? Math.floor(n) : null; }
   if (x.utilNA === true) out.utilNA = true;
-  for (const k of ['host', 'vcenterId', 'name']) if (x[k] != null) out[k] = typeof x[k] === 'string' ? x[k].slice(0, 256) : (typeof x[k] === 'number' && Number.isFinite(x[k]) ? String(x[k]) : null);
+  for (const k of ['host', 'vcenterId', 'name']) if (x[k] != null) out[k] = typeof x[k] === 'string' ? capStr(x[k], 256) : (typeof x[k] === 'number' && Number.isFinite(x[k]) ? String(x[k]) : null);   // 84회차 F2
   return out;
 }
 
