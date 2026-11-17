@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>서버 접속 공용 모듈 — 접속 한 번의 흐름</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./sa.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#60a5fa}a:hover{color:#93c5fd}
+</style>
+</helmet>
+<div class="pg" style="min-height: 1500px; padding: 28px 32px 44px; display: flex; flex-direction: column; gap: 18px">
+
+  <div style="display: flex; flex-direction: column; gap: 6px; max-width: 1100px">
+    <div class="crumb">작동 방식</div>
+    <h1>접속 한 번에 일어나는 일</h1>
+    <p class="soft" style="font-size: 14px">기능은 ‘어느 법인의 어느 서버에서 무엇을 읽을지’ 만 말합니다. 계정과 비밀번호는 기능이 만지지 않고, 아래 여덟 단계를 코어가 순서대로 합니다.</p>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px">
+    <div class="card" style="display: flex; flex-direction: column; gap: 6px">
+      <div style="display: flex; align-items: center; gap: 8px"><span class="num">1</span><h2>요청</h2></div>
+      <p class="soft">기능이 법인 · 서버 · 기능 이름 · 읽기 묶음을 넘깁니다. 계정 · 비밀번호는 넘기지 않습니다.</p>
+    </div>
+    <div class="card" style="display: flex; flex-direction: column; gap: 6px">
+      <div style="display: flex; align-items: center; gap: 8px"><span class="num">2</span><h2>계정 고르기</h2></div>
+      <p class="soft">서버에 단독 계정이 있으면 그것을, 없으면 그 법인의 공통 계정(Linux · Windows 로컬 · Windows AD)을 씁니다.</p>
+    </div>
+    <div class="card" style="display: flex; flex-direction: column; gap: 6px">
+      <div style="display: flex; align-items: center; gap: 8px"><span class="num">3</span><h2>로그인 방식 고르기</h2></div>
+      <p class="soft">키가 있으면 키, 없으면 비밀번호입니다. 둘 다 없으면 ‘미설정’ 으로 끝내고 붙지 않습니다.</p>
+    </div>
+    <div class="card" style="display: flex; flex-direction: column; gap: 6px">
+      <div style="display: flex; align-items: center; gap: 8px"><span class="num">4</span><h2>붙어도 되는지 검사</h2></div>
+      <p class="soft">법인 사용 중지, 로그인 실패 정지, 이 기능에 허용된 계정인지, 저장소를 읽을 수 있는지를 봅니다.</p>
+    </div>
+    <div class="card" style="display: flex; flex-direction: column; gap: 6px">
+      <div style="display: flex; align-items: center; gap: 8px"><span class="num">5</span><h2>상대 확인</h2></div>
+      <p class="soft">SSH 는 호스트 키 지문, WinRM 은 인증서 지문이 승인된 것과 같은지 봅니다. 다르면 비밀번호를 보내지 않습니다.</p>
+    </div>
+    <div class="card" style="display: flex; flex-direction: column; gap: 6px">
+      <div style="display: flex; align-items: center; gap: 8px"><span class="num">6</span><h2>로그인</h2></div>
+      <p class="soft">한 번만 시도합니다. 거부되면 다시 시도하지 않고 정지 기록을 남깁니다(계정 잠금 방지).</p>
+    </div>
+    <div class="card" style="display: flex; flex-direction: column; gap: 6px">
+      <div style="display: flex; align-items: center; gap: 8px"><span class="num">7</span><h2>읽기 묶음 실행</h2></div>
+      <p class="soft">기능이 미리 등록한 고정 명령만 돌립니다. 시한과 출력 상한이 있고, 서버를 바꾸는 명령은 없습니다.</p>
+    </div>
+    <div class="card" style="display: flex; flex-direction: column; gap: 6px">
+      <div style="display: flex; align-items: center; gap: 8px"><span class="num">8</span><h2>결과 · 기록</h2></div>
+      <p class="soft">구획별 값과 실패 사유를 돌려주고 사용 기록을 남깁니다. 못 읽은 구획은 0 이 아니라 값 없음입니다.</p>
+    </div>
+  </div>
+
+  <div class="sec">
+    <h2>계정과 로그인 방식을 고르는 순서 — 위에서부터 먼저 맞는 것 하나</h2>
+    <div class="tw">
+      <table class="t" style="min-width: 1000px">
+        <thead>
+          <tr><th>순서</th><th>쓰는 것</th><th>언제</th><th>지금</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="k">1</td><td>서버에 고정한 키</td><td>그 서버에 쓸 키를 이름으로 지정했을 때(SSH 방식)</td><td><span class="chip c-ok">있음</span></td></tr>
+          <tr><td class="k">2</td><td>공통 계정의 기본 키</td><td>서버가 법인 공통 계정을 쓰고 그 계정에 기본 키가 있을 때</td><td><span class="chip c-ok">있음</span></td></tr>
+          <tr><td class="k">3</td><td>공통 계정의 비밀번호</td><td>키가 없거나, 그 서버를 ‘비밀번호로 고정’ 했을 때</td><td><span class="chip c-ok">있음</span></td></tr>
+          <tr><td class="k">4</td><td>서버 단독 비밀번호</td><td>공통 계정을 쓰지 않는 서버</td><td><span class="chip c-ok">있음</span></td></tr>
+          <tr><td class="k">5</td><td>없음 — 붙지 않는다</td><td>위가 전부 비었을 때. 화면에는 ‘미설정’</td><td><span class="chip c-ok">있음</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <ul class="ul">
+      <li><i></i><span>키가 거부되면 비밀번호로 몰래 넘어가지 않습니다. 로그인 방식은 한 번에 하나입니다.</span></li>
+      <li><i></i><span>공통 계정을 쓰는 서버는 계정명도 공통 계정의 것을 씁니다. 서버 칸의 기본 계정명으로 공통 비밀번호를 보내지 않기 위해서입니다.</span></li>
+      <li><i></i><span>Windows 를 WinRM 으로 붙을 때는 비밀번호만 씁니다. 키 로그인은 SSH 방식에서만 됩니다 <span class="chip c-new">새로</span></span></li>
+    </ul>
+  </div>
+
+  <div class="sec">
+    <h2>붙지 않는 경우 — 4 · 5단계에서 막힘</h2>
+    <div class="tw">
+      <table class="t" style="min-width: 1100px">
+        <thead>
+          <tr><th>사유</th><th>뜻</th><th>푸는 방법</th><th>지금</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="k">저장소를 읽지 못함</td><td>키 · 계정 파일이 손상됐거나 암호를 풀지 못했다</td><td>설정 소유자가 OTP 로 ‘다시 읽기’</td><td><span class="chip c-ok">있음</span></td></tr>
+          <tr><td class="k">법인 사용 중지</td><td>관리자가 그 법인의 저장 계정 · 키 사용을 긴급히 멈췄다</td><td>사용 재개</td><td><span class="chip c-ok">있음</span></td></tr>
+          <tr><td class="k">포탈 밖에서 바뀜</td><td>계정 · 키 파일이 화면을 거치지 않고 고쳐졌다</td><td>확인한 뒤 받아들이기</td><td><span class="chip c-ok">있음</span></td></tr>
+          <tr><td class="k">허용 기능이 아님</td><td>이 계정 · 키를 이 기능에 쓰도록 허락하지 않았다</td><td>허용 기능 수정</td><td><span class="chip c-part">넓힘</span> <span class="dim">키에만 있다 → 비밀번호 계정에도</span></td></tr>
+          <tr><td class="k">서버 로그인 실패 정지</td><td>직전에 이 서버가 로그인을 거부했다</td><td>계정을 고치거나 ‘다시 확인’</td><td><span class="chip c-ok">있음</span></td></tr>
+          <tr><td class="k">계정 로그인 실패 정지</td><td>같은 공통 계정이 거부됐다. 다른 서버에도 같은 비밀번호를 보내면 AD 계정이 잠긴다</td><td>비밀번호를 확인한 뒤 한 대로 다시 확인</td><td><span class="chip c-new">새로</span></td></tr>
+          <tr><td class="k">상대가 다름</td><td>호스트 키 · 인증서 지문이 승인된 것과 다르다</td><td>설정 › 장비 신뢰에서 확인 · 승인</td><td><span class="chip c-part">넓힘</span> <span class="dim">SSH 는 있다 → WinRM 인증서도</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start">
+    <div class="sec">
+      <h2>실패했을 때</h2>
+      <div class="tw">
+        <table class="t">
+          <thead>
+            <tr><th>실패</th><th>코어가 하는 일</th><th>기능이 받는 것</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="k">로그인 거부</td><td>다시 시도하지 않는다. 서버와 계정에 정지 기록</td><td>사유 ‘인증 거부’ · 값 없음</td></tr>
+            <tr><td class="k">연결 불가</td><td>로그인 실패로 세지 않는다(정지하지 않는다)</td><td>사유 ‘연결 불가’ · 값 없음</td></tr>
+            <tr><td class="k">시한 초과</td><td>세션을 실제로 끊는다. 잘린 출력은 쓰지 않는다</td><td>사유 ‘시한’ · 값 없음</td></tr>
+            <tr><td class="k">명령 없음 · 권한 부족</td><td>그 구획만 ‘없음’ 또는 ‘못 읽음’ 으로 표시</td><td>나머지 구획은 정상 값</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="sec">
+      <h2>어디서 접속하나</h2>
+      <div class="tw">
+        <table class="t">
+          <thead>
+            <tr><th>법인</th><th>접속하는 곳</th><th>비밀이 있는 곳</th><th>중앙이 받는 것</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="k">엣지가 있는 법인</td><td>그 법인의 엣지</td><td>엣지의 설정 폴더</td><td>결과 · 상태 · 지문(비밀 없음)</td></tr>
+            <tr><td class="k">엣지가 없는 법인</td><td>중앙</td><td>중앙의 설정 폴더</td><td class="dim">해당 없음</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="dim">일부 법인은 왕복 지연이 800ms 를 넘습니다. 서버 수만큼 중앙에서 왕복하지 않도록 작업 하나를 엣지에 보내 그 안에서 묶어 돌리고 요약만 올립니다. 비밀번호도 법인 밖으로 나가지 않습니다.</p>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1500}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

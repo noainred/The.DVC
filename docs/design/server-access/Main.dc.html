@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>서버 접속 공용 모듈 — 배치 검토</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="./sa.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#60a5fa}a:hover{color:#93c5fd}
+</style>
+</helmet>
+<div class="pg" style="min-height: 1700px; padding: 28px 32px 44px; display: flex; flex-direction: column; gap: 18px">
+
+  <div style="display: flex; flex-direction: column; gap: 6px; max-width: 1100px">
+    <div class="crumb">검토 · 2026-11-17 main 기준 · 값과 이름은 코드에서 확인한 것</div>
+    <h1>서버 접속 기능 — 공통 모듈에 넣을까, 별도 기능으로 뺄까</h1>
+    <p class="soft" style="font-size: 14px">결론: 한 덩어리로 넣지 않고 <b>셋으로 나눕니다</b>. 로그인에 필요한 것(접속 · 계정 · 비밀)만 공통 모듈에 두고, 무엇을 읽어 어떻게 보여 줄지는 별도 기능으로 둡니다. 요청하신 것의 절반가량은 v3.9.0 ‘SSH 공용 접속’ 에 이미 있어 새로 만들지 않고 넓힙니다.</p>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px">
+    <div class="card hi" style="display: flex; flex-direction: column; gap: 6px">
+      <div style="display: flex; align-items: center; gap: 8px"><span class="num">1</span><h2>공통 모듈 — 접속 · 계정 · 비밀</h2></div>
+      <p class="soft">어느 계정으로, 어떤 방식으로, 붙어도 되는지를 정하고 실제로 로그인합니다. 모든 기능이 이 한 곳을 지납니다.</p>
+      <p class="dim">SSH 계정 · 비밀번호 / 키 로그인 · Windows 로컬 / AD · 법인 공통 계정 · 비밀번호 보관 · 로그인 실패 정지</p>
+    </div>
+    <div class="card" style="display: flex; flex-direction: column; gap: 6px">
+      <div style="display: flex; align-items: center; gap: 8px"><span class="num">2</span><h2>별도 기능 — 서버 정보 읽기</h2></div>
+      <p class="soft">무엇을 읽고(구성 · 디스크), 어떻게 해석하고, 얼마나 보관하고, 어디에 보여 줄지는 그 기능의 지식입니다.</p>
+      <p class="dim">읽기 묶음(명령) · 해석 · 저장 · 화면 — 공통 모듈을 불러서 씁니다</p>
+    </div>
+    <div class="card" style="display: flex; flex-direction: column; gap: 6px">
+      <div style="display: flex; align-items: center; gap: 8px"><span class="num">3</span><h2>설정 화면 — 서버 접속</h2></div>
+      <p class="soft">지금의 설정 › 보안 › ‘SSH 공용 접속’ 을 ‘서버 접속(SSH · Windows)’ 으로 넓힙니다. 새 메뉴를 만들지 않습니다.</p>
+      <p class="dim">법인 공통 계정 · 서버별 계정 · 비밀번호 관리 · 접속 확인</p>
+    </div>
+  </div>
+
+  <div class="sec">
+    <h2>요청하신 것과 지금 코드</h2>
+    <div class="tw">
+      <table class="t" style="min-width: 1100px">
+        <thead>
+          <tr><th>요청</th><th>지금</th><th>코드에 있는 것</th><th>이번에 할 일</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="k">다른 기능이 서버에 로그인해<br>정보를 읽는 공용 창구</td>
+            <td><span class="chip c-part">부분</span></td>
+            <td>Linux 계정 고르기는 공용 함수 하나다(<span class="mono">resolveOsAuth</span>). 베어메탈 사용률 · 스토리지 · 디스크 점검 · 집중 모니터링이 함께 쓴다. 로그인과 명령 실행은 기능마다 따로 한다.</td>
+            <td>계정 고르기 + 로그인 + 실행을 한 번에 해 주는 창구를 공통에 둔다</td>
+          </tr>
+          <tr>
+            <td class="k">SSH 계정 · 비밀번호 로그인</td>
+            <td><span class="chip c-ok">있음</span></td>
+            <td><span class="mono">proxy/sshExec.js withSsh</span> · 계정 고르기의 비밀번호 방식</td>
+            <td>그대로 쓴다</td>
+          </tr>
+          <tr>
+            <td class="k">SSH 비밀번호 없는 로그인(키)</td>
+            <td><span class="chip c-ok">있음</span></td>
+            <td>키 저장소 · 키 폴더(법인 › 공통 / 서버별) · 키 로그인 설정 · 키 점검(v3.9.0 SSH 공용 접속)</td>
+            <td>그대로 쓴다</td>
+          </tr>
+          <tr>
+            <td class="k">법인마다 공통 계정 · 공통 비밀번호</td>
+            <td><span class="chip c-ok">있음</span> <span class="dim">Linux · iDRAC</span></td>
+            <td>공통 계정 저장(<span class="mono">keyStore.saveAccount</span>) — 종류 OS · iDRAC, 법인 칸, 기본 키 또는 비밀번호</td>
+            <td>종류에 Windows 로컬 · Windows AD 를 더한다</td>
+          </tr>
+          <tr>
+            <td class="k">Windows 로컬 계정 로그인</td>
+            <td><span class="chip c-part">부분</span></td>
+            <td>SSH 로 PowerShell 을 부르는 길만 있다(<span class="mono">bmusage/collectors/osSsh.js</span> — 실제 Windows 출력을 본 적이 없다고 주석에 적혀 있다). VM 은 VMware Tools 게스트 작업으로 읽는다.</td>
+            <td>새로 만든다 — ④</td>
+          </tr>
+          <tr>
+            <td class="k">Windows AD 계정 로그인</td>
+            <td><span class="chip c-no">없음</span></td>
+            <td>포탈 로그인용 AD 연동(<span class="mono">ldapjs</span>)은 서버 접속과 별개다. WinRM · NTLM · Kerberos 코드는 없다.</td>
+            <td>새로 만든다 — ④</td>
+          </tr>
+          <tr>
+            <td class="k">서버 구성 · 디스크 상세 읽기</td>
+            <td><span class="chip c-part">부분</span></td>
+            <td>Linux 사용률 구획(베어메탈 사용률) · 디스크 오류 이력 점검 · iDRAC 하드웨어가 각각 자기 것을 읽는다</td>
+            <td>별도 기능 ‘서버 정보’ 로 묶는다 — ⑦</td>
+          </tr>
+          <tr>
+            <td class="k">비밀번호 특별 관리</td>
+            <td><span class="chip c-part">부분</span></td>
+            <td>봉인 저장(정책: 평문 / 암호화) · 화면 가림 · 본인 OTP · 접속처가 바뀌면 승계 금지 · 로그인 실패 정지. 로그인 키는 암호화 정책에서만 받지만 비밀번호는 아직 그렇지 않다.</td>
+            <td>비밀번호도 키와 같은 수준으로 올리고 장치를 더한다 — ⑥</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="sec">
+    <h2>세 가지 안 비교</h2>
+    <div class="tw">
+      <table class="t" style="min-width: 1100px">
+        <thead>
+          <tr><th>따져 볼 것</th><th>안 A — 전부 공통 모듈에</th><th>안 B — 전부 별도 기능으로</th><th class="rec">안 C — 나눠 넣기(권장)</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="k">접속 · 계정 · 비밀</td><td>공통</td><td>그 기능 안(자기 저장소)</td><td class="rec">공통 — 지금 있는 것을 넓힌다</td></tr>
+          <tr><td class="k">읽는 명령 · 해석 · 보관 · 화면</td><td>공통</td><td>그 기능 안</td><td class="rec">별도 기능 ‘서버 정보’</td></tr>
+          <tr><td class="k">계정을 두는 곳</td><td>한 곳</td><td>하나 더 늘어난다(지금도 기능별 등록부가 여럿이다)</td><td class="rec">한 곳</td></tr>
+          <tr><td class="k">로그인 실패 정지를 함께 보는가</td><td>본다</td><td>못 본다 — 기능마다 따로 시도해 계정이 잠길 수 있다</td><td class="rec">본다</td></tr>
+          <tr><td class="k">공용 규칙과 맞는가</td><td>어긋난다 — 공용 모듈은 도메인을 모른다(<span class="mono">docs/rules/common.md</span>)</td><td>맞는다</td><td class="rec">맞는다</td></tr>
+          <tr><td class="k">읽을 항목을 늘릴 때 바뀌는 곳</td><td>공통 모듈 — 쓰는 기능 전부가 영향을 받는다</td><td>그 기능</td><td class="rec">그 기능</td></tr>
+          <tr><td class="k">비밀을 만지는 코드의 크기</td><td>크다(읽기 · 해석과 한 덩어리)</td><td>기능마다 한 벌씩</td><td class="rec">작다(접속 코어만)</td></tr>
+          <tr><td class="k">지금의 SSH 공용 접속과의 관계</td><td>흡수해 다시 짠다</td><td>겹친다(두 벌)</td><td class="rec">그대로 두고 넓힌다</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px">
+    <div class="card" style="display: flex; flex-direction: column; gap: 6px">
+      <h2>접속은 한 벌이어야 한다</h2>
+      <p class="soft">비밀번호가 한 곳에만 있고, 한 기능에서 로그인이 거부되면 다른 기능도 그 서버에 다시 시도하지 않습니다. 같은 판정이 두 벌이면 한쪽만 고쳐지는 일이 되풀이됐습니다.</p>
+    </div>
+    <div class="card" style="display: flex; flex-direction: column; gap: 6px">
+      <h2>읽기는 기능마다 다르다</h2>
+      <p class="soft">디스크 점검이 읽는 것과 사용률 수집이 읽는 것은 다릅니다. 이것을 공통에 넣으면 항목이 늘 때마다 공통 모듈이 바뀌고, 쓰는 기능 전부를 다시 확인해야 합니다.</p>
+    </div>
+    <div class="card" style="display: flex; flex-direction: column; gap: 6px">
+      <h2>이미 절반은 있다</h2>
+      <p class="soft">SSH 계정 · 키 · 법인 공통 계정 · 키 보안은 v3.9.0 에 들어갔습니다. 새 모듈을 따로 만들면 저장소와 판정이 두 벌이 됩니다. 새로 만들 것은 Windows 로그인과 비밀번호 관리 장치입니다.</p>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>이 캔버스 읽는 순서</b> — ② 구조(누가 무엇을 맡나) → ③ 접속 한 번의 흐름 → ④ Windows 로그인 → ⑤ 설정 화면 → ⑥ 비밀번호 특별 관리 → ⑦ 읽는 정보와 다른 기능이 쓰는 법.
+    <span class="dim">화면 시안의 법인 · 서버 · 주소 · 지문 · 날짜는 전부 그림용 가상값입니다.</span>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1700}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
