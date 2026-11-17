@@ -25,6 +25,7 @@ import {
   digestOf, normalizeDigest, planDigestTick, nextDigestSlots, digestRecipients, buildDigestModel, scanMarkOf, slotLabel, DIGEST_HISTORY_MAX, digestPoolOf,
 } from './digestRules.js';
 import { renderDigestMail } from './mailHtml.js';
+import { effectiveSince, CLOCK_TOL_MS } from '../xferspeed/schedule.js';   // 90회차 F5: 시계가 뒤로 가 미래가 된 since 보정(대상별 정기 발송 SCHED-03 과 같은 규칙)
 
 registerStateFile('isidu-digest-state.json');
 const FILE = () => path.join(config.configDir, 'isidu-digest-state.json');   // ⚠ 리터럴 형태 유지 — scripts/config-doc.mjs 가 이 모양으로 찾는다
@@ -48,6 +49,7 @@ function state() {
     const num = (v) => (Number.isFinite(Number(v)) && v !== null && v !== '' ? Number(v) : null);
     _state = {
       lastSlot: num(raw.lastSlot), lastSentAt: num(raw.lastSentAt), lastScanMark: num(raw.lastScanMark),
+      ...(num(raw.sinceFrom) != null && num(raw.sinceCap) != null ? { sinceFrom: num(raw.sinceFrom), sinceCap: num(raw.sinceCap) } : {}),
       history: (Array.isArray(raw.history) ? raw.history : []).filter((h) => h && typeof h === 'object').slice(0, DIGEST_HISTORY_MAX),
     };
   } catch (e) {
@@ -91,6 +93,22 @@ async function buildModel(digest, { excludeDemo, now }) {
   const ovById = new Map((Array.isArray(ov) ? ov : []).filter((x) => x && x.id).map((x) => [x.id, x]));
   const model = buildDigestModel(rows, ovById, { now, topN: digest.topN, corpTopM: digest.corpTopM, excludeDemo });
   return { model, buildMs: Date.now() - t0 };
+}
+
+/**
+ * 90회차 F5(재현): 실효 종합 메일 설정 — since 가 지금보다 한참 뒤면(저장할 때 서버 시계가 앞서 있었다 · NTP 보정으로 뒤로 감) 그 시각까지
+ *   회차가 한 번도 서지 않아 종합 메일이 **기록도 없이** 멈췄다(대상별 정기 발송은 v2.745 SCHED-03 이 이미 보정한다 — 같은 꼴). 설정 파일은 고치지 않고
+ *   상태에 sinceFrom · sinceCap 을 남겨 지금으로 잡는다(그 since 값일 때만 쓴다 — 일정을 다시 정의하면 since 가 바뀌어 저절로 빠진다).
+ *   rebase 가 참이면 상태를 쓴다(틱만 — 화면 조회는 읽기만 한다).
+ */
+function effectiveDigest(d, now, { rebase = false } = {}) {
+  const st = state();
+  if (rebase && d.since != null && d.since > now + CLOCK_TOL_MS && st.sinceFrom !== d.since) {
+    st.sinceFrom = d.since; st.sinceCap = now; save();
+    console.warn(`[isidu-digest] 서버 시계가 뒤로 가 종합 메일 보내는 때를 저장한 시각(${slotLabel(d.since)})이 지금보다 뒤였습니다 — 지금으로 다시 잡았습니다(소급해 보내지 않습니다).`);
+  }
+  const since = effectiveSince({ since: d.since }, st);
+  return since > 0 && since !== d.since ? { ...d, since } : d;
 }
 
 const recipientsOf = (d) => {
@@ -154,7 +172,7 @@ export async function digestTick(now = Date.now()) {
   if (_busy) return { action: 'busy' };
   _busy = true;
   try {
-    const d = digestOf(loadSettings().mail?.digest);
+    const d = effectiveDigest(digestOf(loadSettings().mail?.digest), now, { rebase: true });
     const st = state();
     const plan = planDigestTick({ digest: d, state: st, now, bootAt: BOOT_AT });
     _lastTick = { at: now, action: plan.action };
@@ -207,7 +225,8 @@ export function isiduDigestStatus(now = Date.now()) {
   const st = state();
   const rc = recipientsOf(d);
   return {
-    enabled: d.enabled, next: nextDigestSlots(d, now, 3), lastSlot: st.lastSlot, lastSentAt: st.lastSentAt,
+    // 90회차 F5: 다음 회차는 틱과 같은 실효 since 로 계산한다.
+    enabled: d.enabled, next: nextDigestSlots(effectiveDigest(d, now), now, 3), lastSlot: st.lastSlot, lastSentAt: st.lastSentAt,
     history: st.history.map((h) => ({ ...h })), busy: _busy, lastTick: _lastTick, lastError: _lastError, edge: isEdge(),
     recipients: { total: rc.to.length, fromAdmin: rc.fromAdmin, fromExtra: rc.fromExtra, dupes: rc.dupes },
   };

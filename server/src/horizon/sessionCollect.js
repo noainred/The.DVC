@@ -152,7 +152,11 @@ export async function collectServerSessions(s, { pageSize = 500, maxPages = 20, 
         try {
           const c = await fetchCatalog(get);
           const got = Object.keys(c.usedPaths).length > 0;
-          if (got || !prev) {
+          if (!got && !prev) {
+            // 90회차 F2(재현): 첫 조회가 전부 실패했다 — 예전에는 `at: now` 인 성공처럼 남겨 6시간(TTL) 동안 다시 읽지 않았다(그동안 앱 이름이 ID 로
+            //   남아 그날 누적이 서비스 둘로 갈라진다). 예외 경로와 같이 실패로 적어 30분 뒤 다시 시도한다.
+            _catalogs.set(sid, { at: 0, failedAt: now, raw: null, catalog: normalizeCatalog({}), counts: { apps: 0, desktops: 0, farms: 0 }, usedPaths: {}, errors: c.errors, truncated: c.truncated });
+          } else if (got) {
             // 일부 종류만 읽었으면 못 읽은 종류는 직전 값을 이어 쓴다(지우지 않는다).
             const merged = { apps: c.raw.apps, desktops: c.raw.desktops, farms: c.raw.farms };
             if (prev?.raw) for (const [k, f] of [['app', 'apps'], ['desktop', 'desktops'], ['farm', 'farms']]) if (!c.usedPaths[k]) merged[f] = prev.raw[f] || [];

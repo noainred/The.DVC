@@ -246,7 +246,8 @@ export function combinedNote(c) {
   const parts = [`전체 고유 사용자 **${lb ? '최소 ' : ''}${c.union}명** = Windows 서버 ∪ Horizon(VDI)`];
   if (lb) {
     const src = (c.lowerBoundSources || []).map((x) => x?.label).filter(Boolean).join(' · ');
-    parts.push(`⚠ ${src || '일부 출처'} 의 계정 목록이 상한으로 잘려 합집합·겹친 인원은 **최소값**입니다`);
+    // 90회차 F4: 하한의 이유는 계정 목록 상한만이 아니다(읽지 못한 서버 · 세션 페이지 절단도) — 이유를 하나로 단정하지 않는다.
+    parts.push(`⚠ ${src || '일부 출처'} 는 일부만 읽어(계정 목록 상한 · 읽지 못한 서버 · 원문 절단) 합집합·겹친 인원은 **최소값**입니다`);
   }
   if (c.both > 0) parts.push(`양쪽에 동시에 있는 사람 **${c.both}명**(단순 합 ${c.sum}명에서 중복을 뺐습니다)`);
   else if (c.sum !== c.union) parts.push(`단순 합 ${c.sum}명`);

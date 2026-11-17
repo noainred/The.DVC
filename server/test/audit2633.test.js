@@ -88,7 +88,9 @@ test('① 설정 로드 오류를 만드는 모든 모듈이 label + confirm 을
   // 결정 G2(49개): 공용 로더로 옮긴 IP 관리 예약 · 메모(2 — 등록 수 그대로) + 새로 등재한 fleet-tags · fleet-assign · 게시판 · 공지 · 메일 · DataCenter ·
   //   VM DNS 정책 · VM 백업 NFS 정의 · PowerScale 점검 설정(9).
   // 78회차 F8(50개): HAProxy 경로 점검 설정(relaycheck/settings.js)을 공용 로더로 옮기며 새로 등재 — 예전에는 손상 · 읽기 오류가 아무 표지 없이 기본값이었다.
-  assert.equal(calls.length, 50, `등록 수가 바뀌었다 — 테스트의 FILES 목록도 갱신할 것: ${calls.map((c) => c.f).join(', ')}`);
+  // 90회차 F3(51개): Horizon 실시간 사용자 수집 설정(horizon/sessionSettings.js)을 공용 로더로 옮기며 새로 등재 — 예전에는 읽기 오류도 손상으로 보고
+  //   원본을 옮겼고 손상 · 읽기 오류가 아무 표지 없이 기본값(꺼짐)이었다. 엣지에 배포하는 설정이 아니라 아래 FILES(⑤) 에는 넣지 않는다.
+  assert.equal(calls.length, 51, `등록 수가 바뀌었다 — 테스트의 FILES 목록도 갱신할 것: ${calls.map((c) => c.f).join(', ')}`);
   for (const c of calls) assert.ok(/label:\s*'[^']+'/.test(c.line) && /confirm:/.test(c.line), `${c.f}: label·confirm 이 없다 — ${c.line}`);
 });
 

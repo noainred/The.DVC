@@ -23,6 +23,8 @@ const SCANS_PER_POST = 50;
 // 상주 저장소에 들어가는 문자열은 capStr(자르고 평탄화 — v2.607 TIM2607-01: slice 는 원문을 붙잡는다). 문자열만 받는다.
 const str = (v, max) => (typeof v === 'string' ? capStr(v, max) : '');
 const num = numOrNull; // 숫자·숫자 문자열만, 그 밖은 null(util/numOrNull — 사본을 두지 않는다)
+/** 90회차 F6: 크기 · 소요 · 개수는 음수가 뜻을 갖지 않는다 — 폴더 행(entries)처럼 음수는 못 읽은 값(null)으로 둔다(합계 · 변화 판정에 음수가 들어가지 않게). */
+const nonNeg = (v) => { const n = num(v); return n != null && n >= 0 ? n : null; };
 
 /**
  * 본문 → 정제된 스캔 목록. owned: 이 엣지에 배정된 대상 id 집합.
@@ -57,12 +59,12 @@ export function sanitizeIsiduScans(body, owned, now = Date.now()) {
         entries.push({ name, bytes: Math.round(bytes), res: Math.max(1, Math.round(res ?? 1)) });
       }
     }
-    const total = raw.total && typeof raw.total === 'object' && num(raw.total.bytes) != null ? { bytes: num(raw.total.bytes), res: num(raw.total.res) ?? 1 } : null;
+    const total = raw.total && typeof raw.total === 'object' && nonNeg(raw.total.bytes) != null ? { bytes: nonNeg(raw.total.bytes), res: Math.max(1, nonNeg(raw.total.res) ?? 1) } : null;
     scans.push({
       targetId, ts: Math.round(ts), srcTs, ...(edgeTs != null ? { edgeTs } : {}), ok,
       path: str(raw.path, 1024), host: str(raw.host, 256), sizeMode: raw.sizeMode === 'k' ? 'k' : 'h',
-      durationMs: num(raw.durationMs), total, sumBytes: num(raw.sumBytes), sumRes: num(raw.sumRes), count: ok ? entries.length : null,
-      skipped: num(raw.skipped), errLines: num(raw.errLines),
+      durationMs: nonNeg(raw.durationMs), total, sumBytes: nonNeg(raw.sumBytes), sumRes: nonNeg(raw.sumRes), count: ok ? entries.length : null,
+      skipped: nonNeg(raw.skipped), errLines: nonNeg(raw.errLines),
       errSample: Array.isArray(raw.errSample) ? raw.errSample.filter((x) => typeof x === 'string').slice(0, 5).map((x) => capStr(x, 200)) : [],
       truncated: raw.truncated === true, kind: str(raw.kind, 32), error: str(raw.error, 600), trig: str(raw.trig, 16),
       edgeScanId: num(raw.id ?? raw.edgeScanId), entries,
