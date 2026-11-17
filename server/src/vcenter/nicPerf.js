@@ -7,6 +7,8 @@
 //   ⚠ vCenter 는 그 시각 값을 모르면 -1 을 준다(수집 공백) — 0 으로 세지 않고 결측으로 따로 센다(entityMetricPoints 와 같은 규약).
 //   ⚠ 합은 값이 있는 표본만 더한다. 결측이 섞이면 partial 로 밝힌다(부분 합 — 화면이 '표본 N/M' 을 붙인다).
 
+import { returnvalBodies, perfIdMarks } from './soapParse.js';   // 75회차: 선형 태그 훑기(한 벌)
+
 /** 카운터 키('group.name.rollup') — 전부 summation(20초 구간당 개수). 처리량(KBps)은 호스트 성능 화면·CVP 포트 bps 가 이미 보여 준다. */
 export const HOST_NIC_COUNTERS = {
   droppedRx: 'net.droppedRx.summation', droppedTx: 'net.droppedTx.summation',
@@ -32,23 +34,23 @@ export function parsePerfInstancesXml(xml, counterIds = [], { maxInstances = NIC
   const series = new Map(ids.map((id) => [id, new Map()]));
   const out = { times: [], series, truncated: false };
   if (!ids.length) return out;
-  const rv = /<returnval[^>]*>([\s\S]*?)<\/returnval>/.exec(String(xml || ''))?.[1] || '';
+  const rv = returnvalBodies(String(xml || ''), { max: 1 })[0] || '';   // 75회차: 선형(soapParse.js)
   if (!rv) return out;
   out.times = [...rv.matchAll(/<timestamp>([^<]{1,40})<\/timestamp>/g)].map((m) => m[1]).slice(0, VALUES_MAX);
-  const marks = [...rv.matchAll(/<id>([\s\S]*?)<\/id>/g)];
+  const marks = perfIdMarks(rv);
   const seen = new Set();
   for (let i = 0; i < marks.length; i++) {
-    const cid = /<counterId>(\d+)<\/counterId>/.exec(marks[i][1])?.[1];
+    const cid = /<counterId>(\d+)<\/counterId>/.exec(marks[i].inner)?.[1];
     if (!cid || !series.has(cid)) continue;
-    const instance = /<instance>([^<]*)<\/instance>/.exec(marks[i][1])?.[1] ?? '';
+    const instance = /<instance>([^<]*)<\/instance>/.exec(marks[i].inner)?.[1] ?? '';
     if (!instance || !INSTANCE_RE.test(instance)) continue;   // 집계('') · 이상한 이름
     if (!seen.has(instance)) {
       if (seen.size >= maxInstances) { out.truncated = true; continue; }
       seen.add(instance);
     }
     if (series.get(cid).has(instance)) continue;   // 같은 계열이 두 번 오면 첫 것
-    const from = marks[i].index + marks[i][0].length;
-    const to = i + 1 < marks.length ? marks[i + 1].index : rv.length;
+    const from = marks[i].end;
+    const to = i + 1 < marks.length ? marks[i + 1].start : rv.length;
     const vals = [];
     for (const m of rv.slice(from, to).matchAll(/<value>(-?\d{1,18})<\/value>/g)) {
       vals.push(Number(m[1]));

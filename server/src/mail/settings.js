@@ -213,8 +213,12 @@ export function validate(cfg, dropped = null) {
  * @returns {{ field: string, bad: string[] } | null}
  */
 export function recipientIssue(body = {}) {
+  // 75회차(73회차 F4 반증 — 재현): 글자 · 수 · 그 배열만 주소로 읽는다 — `{toString:1}` 같은 객체는 normalizeAddresses 의 String() 이 던져
+  //   400 대신 500 이었다(72회차 F4 toolcats 와 같은 함정). 그런 값은 형식 오류(400)로 돌려준다.
+  const scalar = (x) => x == null || typeof x === 'string' || typeof x === 'number';
   const check = (v, field) => {
     if (v == null) return null;
+    if (!(Array.isArray(v) ? v.every(scalar) : scalar(v))) return { field, bad: ['(주소가 아닌 값)'] };
     const { bad } = normalizeAddresses(v);
     return bad.length ? { field, bad: bad.slice(0, 10) } : null;
   };

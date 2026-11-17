@@ -5,7 +5,7 @@ import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
 import { queryKey, keepRowsOnError } from './queryKeyText.js'; // v2.612 RECENT2612-06
 import { readFailText } from './readFailText.js'; // v2.733(C5-02): 원본 목록 조회 실패를 '0개 일치' 로 그리지 않는다
-import { PLACEMENT_HINT, notAppliedText, jobStatusLabel, vmStatusLabel, doneCountLabel, liveSubmitNote } from './provisionText.js'; // 74회차 F5 · F6 · F8
+import { PLACEMENT_HINT, notAppliedText, jobStatusLabel, vmStatusLabel, doneCountLabel, liveSubmitNote, startIndexOut } from './provisionText.js'; // 74회차 F5 · F6 · F8 · 75회차(시작 번호 0)
 
 const chipStyle = { cursor: 'pointer', padding: '5px 12px', fontSize: 12, userSelect: 'none' };
 const chipActive = { border: '1px solid var(--accent,#6366f1)', color: '#c7d2fe', background: 'rgba(99,102,241,.15)' };
@@ -78,7 +78,7 @@ export default function VmProvision() {
 
   const specBody = useMemo(() => ({
     sourceId: form.sourceId,
-    namePattern: form.namePattern, count: Number(form.count) || 0, startIndex: Number(form.startIndex) || 1, pad: Number(form.pad) || 0,
+    namePattern: form.namePattern, count: Number(form.count) || 0, startIndex: startIndexOut(form.startIndex), pad: Number(form.pad) || 0,
     powerOn: form.powerOn,
     placement: form.placement,
     guest: {
@@ -130,7 +130,7 @@ export default function VmProvision() {
       sourceId: sp.sourceId || entry.sourceId || '',
       namePattern: sp.namePattern || 'vm-{n}',
       count: sp.count || 0,
-      startIndex: sp.startIndex || 1,
+      startIndex: startIndexOut(sp.startIndex) ?? 1,
       pad: sp.pad || 0,
       powerOn: sp.powerOn !== false,
       placement: { ...EMPTY.placement, ...(sp.placement || {}) },

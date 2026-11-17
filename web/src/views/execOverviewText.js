@@ -212,6 +212,9 @@ export function trendNote(kind, t) {
   if (t.reason === 'not-requested') return '이 화면은 이 추이를 요청하지 않았습니다';
   if (t.reason) return '전체 범위 계정만 추이를 봅니다';
   if (t.error) return `추이를 읽지 못했습니다: ${t.error}`;
+  // 75회차(73회차 F3 반증 — 재현): 서버가 원천 오류 원문을 admin + 전체 범위에게만 주고 나머지에는 errorHidden 만 싣는다 — 이 줄이 없으면
+  //   계열이 비어 '이 기간에 쌓인 추이가 없습니다' 로 읽기 실패를 '기록 없음' 이라 단정했다.
+  if (t.errorHidden) return '추이를 읽지 못했습니다(사유는 전체 범위 관리자에게만 표시합니다)';
   const valid = (t.series || []).filter((p) => p && p.v != null).length;
   if (!valid) return '이 기간에 쌓인 추이가 없습니다';
   const bits = [];

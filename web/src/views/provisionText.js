@@ -46,3 +46,15 @@ export const doneCountLabel = (live) => (live ? '제출' : '완료');
 export const liveSubmitNote = (live) => (live
   ? '제출됨 = vCenter 가 복제 작업을 받았다는 뜻입니다 — 복제 · 게스트 설정(hostname · IP)의 성공 여부는 vCenter 최근 작업에서 확인하세요.'
   : null);
+
+/**
+ * 75회차(74회차 F3 반증 — 재현): 시작 번호 칸 → 요청 본문 값. 서버는 0 을 0 으로 받게 고쳤지만 화면이 `Number(x) || 1` 로 0 을 1 로 바꿔
+ *   보냈다(미리보기 · 생성 모두 1 부터 — 서버 수정이 화면에서 닿지 않았다). 저장된 작업을 열 때도 `sp.startIndex || 1` 이 0 을 1 로 바꿨다.
+ *   0 은 0 그대로, 비었거나 숫자가 아니면 null(서버 기본 1). 음수는 그대로 보내 서버가 사유를 돌려준다.
+ */
+export function startIndexOut(v) {
+  const s = String(v ?? '').trim();
+  if (!s) return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}

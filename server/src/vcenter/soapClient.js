@@ -15,7 +15,7 @@ import tls from 'node:tls';
 import { config } from '../config.js';
 import { loadMetricsSettings } from '../metrics/settings.js';
 import { refreshVcInfo, refreshVcRest, VCINFO_BUDGET_MS, VCREST_BUDGET_MS } from '../vcinfo/collect.js';   // v2.898 vCenter 알람·작업·권한
-import { parseObjectContent, xmlUnescape, snapshotInfo, effectiveRequestTimeoutMs, retrieveResultToObjectXml } from './soapParse.js';
+import { parseObjectContent, xmlUnescape, snapshotInfo, effectiveRequestTimeoutMs, retrieveResultToObjectXml, returnvalBodies, perfIdMarks } from './soapParse.js';
 import { vcDispatcher, vcRequestSignal } from './restClient.js';
 import { parseObjectContentAsync } from '../util/soapParsePool.js';
 import { splitHostPort } from '../util/hostPort.js';   // v2.603(LEFT2603-02): IPv6 host:port 분리
@@ -1256,20 +1256,20 @@ export function parsePerfMultiXml(xml, counterIds = []) {
   const ids = [...new Set((counterIds || []).filter(Boolean).map(String))];
   const out = new Map(ids.map((id) => [id, []]));
   if (!ids.length) return out;
-  const rv = /<returnval[^>]*>([\s\S]*?)<\/returnval>/.exec(xml || '')?.[1] || '';
+  const rv = returnvalBodies(xml || '', { max: 1 })[0] || '';   // 75회차: 선형(soapParse.js — 게으른 정규식은 닫히지 않은 태그 반복에 O(n²))
   if (!rv) return out;
   // sampleInfo 는 계열이 아니라 엔티티 단위로 한 번(공통 타임스탬프).
   const times = [...rv.matchAll(/<timestamp>([^<]+)<\/timestamp>/g)].map((m) => m[1]);
-  const marks = [...rv.matchAll(/<id>([\s\S]*?)<\/id>/g)];
+  const marks = perfIdMarks(rv);
   const picked = new Map(); // cid -> 채택한 instance
   for (let i = 0; i < marks.length; i++) {
-    const cid = /<counterId>(\d+)<\/counterId>/.exec(marks[i][1])?.[1];
+    const cid = /<counterId>(\d+)<\/counterId>/.exec(marks[i].inner)?.[1];
     if (!cid || !out.has(cid)) continue;
-    const instance = /<instance>([^<]*)<\/instance>/.exec(marks[i][1])?.[1] || '';
+    const instance = /<instance>([^<]*)<\/instance>/.exec(marks[i].inner)?.[1] || '';
     // 이미 담았으면 건너뛴다 — 단 '인스턴스 계열 → 집계 계열' 로의 승격만 허용.
     if (picked.has(cid) && !(picked.get(cid) !== '' && instance === '')) continue;
-    const from = marks[i].index + marks[i][0].length;
-    const to = i + 1 < marks.length ? marks[i + 1].index : rv.length;
+    const from = marks[i].end;
+    const to = i + 1 < marks.length ? marks[i + 1].start : rv.length;
     const vals = [...rv.slice(from, to).matchAll(/<value>(-?\d+)<\/value>/g)].map((m) => Number(m[1]));
     if (!vals.length) continue;
     const n = Math.min(times.length, vals.length);

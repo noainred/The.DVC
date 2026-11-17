@@ -228,7 +228,10 @@ export function registerOverviewCards(api) {
       // 73회차 F3: 원천 오류 원문은 admin + 전체 범위에게만(형제 /overview/cards 의 v2.682 R3S-07 규칙) — 캐시는 역할과 무관하게 공유하므로 내보낼 때 가린다.
       res.json(trendErrorsFor(await p, allowed == null && isAdminReq(req)));
     } catch (e) {
-      if (!res.headersSent) res.status(500).json({ ok: false, reason: isAdminReq(req) ? (e?.message || String(e)) : '추이를 만들지 못했습니다.' });
+      // 75회차(73회차 F3 반증): 500 사유도 200 경로와 같은 판정(admin + 전체 범위) — 범위 관리자에게는 원문이 실렸다.
+      let full = false;
+      try { full = isAdminReq(req) && !scopedVcenterIds(req.user, store.get() || {}); } catch { full = false; }
+      if (!res.headersSent) res.status(500).json({ ok: false, reason: full ? (e?.message || String(e)) : '추이를 만들지 못했습니다.' });
     }
   });
 
