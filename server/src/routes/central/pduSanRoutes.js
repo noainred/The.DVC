@@ -11,7 +11,7 @@ import { logAudit } from '../../audit.js';
 import { REJECT_KIND } from '../../central/ingestReject.js';
 import { getJob as getRmaJob, jobAgentOf as rmaJobAgentOf, noteHeartbeat as noteRmaHeartbeat, onlineInstances as rmaOnlineInstances, setJobResult as setRmaJobResult, takeJobsWait as takeRmaJobsWait } from '../../rma/jobs.js';
 import { assignForInstance as rmaAssign, rmaSchedulesLoadError, scheduleFor as rmaScheduleFor } from '../../rma/schedules.js';
-import { accessFor as rmaAccessFor, ipAllowed as rmaIpAllowed, remoteFor as rmaRemoteFor } from '../../rma/settings.js';
+import { accessFor as rmaAccessFor, ipAllowed as rmaIpAllowed, remoteFor as rmaRemoteFor, rmaSettingsWriteRefusal } from '../../rma/settings.js';
 import { ingestResult as rmaIngestResult } from '../../rma/testResults.js';
 import { rmaPasswordFor } from '../../rma/agentSecrets.js';
 import { signScheduleTests, scheduleSignKey } from '../../rma/signing.js';   // 결정(56~75 남긴 것) 64 F7: 점검 스케줄 script · ssh 항목 서명
@@ -230,6 +230,10 @@ export function registerPduSanRoutes(centralRouter, deps) {
    */
   /** 64회차 F3: RMA 접속 허용 IP — rma-poll · rma-credential · rma-result 가 같은 판정 하나(거부면 403 을 보내고 true). */
   const rmaSourceDenied = (req, res, agent, what) => {
+    // 107회차 D2(재현): 접속 허용 설정 파일(rma-settings.json)을 못 읽는 동안 accessFor 는 빈 목록을 준다 — 빈 목록은 '전부 허용' 이라
+    //   목록으로 막아 둔 법인의 출처 제한이 그동안 풀렸다(rma-credential 은 평문 계정을 내준다). 못 읽은 것은 '제한 없음' 이 아니다 —
+    //   판정하지 않고 503(엣지는 백오프 · 작업 큐는 중앙에 남는다 — 아래 스케줄 못 읽음과 같은 규약). 파일이 없는 것(= 제한 없음)은 그대로 통과한다.
+    if (settingsUnreadable(res, () => { const no = rmaSettingsWriteRefusal(); return no ? { at: Date.now(), reason: no.reason } : null; }, 'RMA 분배 · 접속 허용')) return true;
     const ip = String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
     if (rmaIpAllowed(ip, rmaAccessFor(agent).allowedIps)) return false;
     console.warn(`[central] ${what}: ${agent} 허용되지 않은 출처 IP ${ip} 거부`);
