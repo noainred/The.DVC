@@ -34,6 +34,7 @@ const BASE = '/admin/security/peer-trust';
  * 예전 문구는 언제나 '손상 원본은 보존했습니다' 였다 — 그런데 ① 'unreadable'(EACCES 등)은 손상이 아니라 권한·소유자 문제일 수 있고
  * ② 원본을 옮기지 못하면(writeBlocked) 보존한 것이 아니라 **저장을 멈춘 것**이다(관리 동작이 409 로 거절된다). 둘을 나눠 말하고,
  * 보존본 이름을 받았을 때만 '보존했다' 고 말한다(받지 못했으면 단정하지 않는다). 앞부분 '…읽지 못했습니다(code · detail)' 는 그대로다.
+ * 119회차: 서버가 읽기 오류에 원본을 옮기지 않게 되면서 `readError: true` 를 싣는다 — 그때는 '옮기지 못해' · '재시작' 이 아니라 '그대로 두고' · '다시 읽는다' 로 말한다.
  */
 export function peerLoadErrorText(le) {
   if (!le || typeof le !== 'object') return '';
@@ -46,7 +47,10 @@ export function peerLoadErrorText(le) {
   const closed = ' 승인 목록이 없으므로 SSH·TLS 모두 **승인된 지문만 허용**으로 닫았습니다.';
   const preserved = typeof le.preserved === 'string' && le.preserved.trim() ? le.preserved.trim() : '';
   let tail;
-  if (le.writeBlocked === true) {
+  if (le.readError === true) {
+    // 119회차: 읽기 오류는 손상이 아니라 서버가 원본을 옮기지 않는다 — 그 자리에 두고 저장을 멈춘 채 30초마다 다시 읽는다(재시작이 필요 없다).
+    tail = ' **원본은 그대로 두고 저장을 멈췄습니다** — 원본을 덮지 않으려고 승인·거부·삭제·정책 변경을 거절합니다. 파일 권한·소유자·디스크를 확인하세요(30초마다 다시 읽고, 읽히면 승인 목록이 돌아옵니다).';
+  } else if (le.writeBlocked === true) {
     tail = ' **원본을 옮기지 못해 저장을 멈췄습니다** — 원본을 덮지 않으려고 승인·거부·삭제·정책 변경을 거절합니다. 파일 권한·소유자를 확인한 뒤 포탈을 재시작하세요.';
   } else if (preserved) {
     tail = ` ${code === 'corrupt' ? '손상 원본' : '읽지 못한 원본'}은 ‘${preserved}’ 로 보존했습니다(같은 설정 폴더).`;
