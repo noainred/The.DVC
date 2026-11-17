@@ -76,7 +76,8 @@ function BundleCard({ ov, onReload, say, writable }) {
         <div style={{ ...ROW, flex: '0 1 auto', minWidth: 0 }}>
           <button type="button" className="login-btn" style={BTN} disabled={busy || !writable || (f && !f.doneAt)} onClick={() => act(async () => okOrThrow(await postJson(`${P}/bundle/fetch`, {})), '번들 받기를 시작했습니다 — 아래에 진행이 보입니다.')}>번들 받기(최신)</button>
           <button type="button" className="logout-btn" style={BTN} disabled={busy || !writable} onClick={() => act(async () => okOrThrow(await postJson(`${P}/bundle/rescan`, {})), '번들 폴더를 다시 확인했습니다(서명·해시).')}>다시 확인</button>
-          {src && <button type="button" className="logout-btn" style={BTN} disabled={busy || !writable} onClick={() => setEdit((e) => (e ? null : { baseUrl: src.savedUrl || '', importDir: src.importDir || '' }))}>{edit ? '받는 곳 닫기' : '받는 곳 · 디렉터리 바꾸기'}</button>}
+          {/* 112회차: 설정 파일 읽기 오류 동안 savedUrl · importDir 은 저장된 값이 아니라 빈 값이다 — 그 값으로 편집 칸을 열지 않는다(다시 읽힌 뒤의 저장이 받는 곳을 지운다). */}
+          {src && <button type="button" className="logout-btn" style={BTN} disabled={busy || !writable || (src.readError === true && !edit)} onClick={() => setEdit((e) => (e ? null : { baseUrl: src.savedUrl || '', importDir: src.importDir || '' }))}>{edit ? '받는 곳 닫기' : '받는 곳 · 디렉터리 바꾸기'}</button>}
         </div>
       </div>
       {edit && src && (
@@ -93,7 +94,7 @@ function BundleCard({ ov, onReload, say, writable }) {
             <BoldText text={bundleSourceHelp(src)} />
           </div>
           <div style={{ ...ROW, marginTop: 8 }}>
-            <button type="button" className="login-btn" style={BTN} disabled={busy || !writable} onClick={() => act(async () => { okOrThrow(await putJson(`${P}/bundle/source`, { baseUrl: edit.baseUrl.trim(), importDir: edit.importDir.trim() }), '저장하지 못했습니다.'); setEdit(null); }, '번들 받는 곳 · 서버 디렉터리를 저장했습니다.')}>저장</button>
+            <button type="button" className="login-btn" style={BTN} disabled={busy || !writable || src.readError === true} onClick={() => act(async () => { okOrThrow(await putJson(`${P}/bundle/source`, { baseUrl: edit.baseUrl.trim(), importDir: edit.importDir.trim() }), '저장하지 못했습니다.'); setEdit(null); }, '번들 받는 곳 · 서버 디렉터리를 저장했습니다.')}>저장</button>
             <button type="button" className="logout-btn" style={BTN} disabled={busy} onClick={() => setEdit(null)}>취소</button>
           </div>
         </div>

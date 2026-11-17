@@ -61,6 +61,16 @@ function ipv4Reason(v4) {
   return null; // RFC1918 포함 나머지는 허용(사내 장비 대상)
 }
 
+/**
+ * IPv6 문자열 → 정규형(소문자 · 0 축약 · 끝의 IPv4 점표기는 16진 두 조각). IPv6 가 아니면 null.
+ * WHATWG URL 의 호스트 직렬화가 그 정규형이다(Node 내장 — 외부 의존성 없음). zone(%eth0)은 판정과 무관해 뗀다.
+ */
+export function canonIpv6(raw) {
+  const bare = String(raw || '').trim().toLowerCase().split('%')[0];
+  if (!bare || bare.length > 45 || !/^[0-9a-f:.]+$/.test(bare)) return null;
+  try { return new URL(`http://[${bare}]/`).hostname.slice(1, -1); } catch { return null; }
+}
+
 /** 등록 불가 사유(한국어) 또는 null(허용). host 는 IP 또는 호스트네임(스킴/괄호 없이). */
 export function hostBlockReason(raw) {
   let host = String(raw || '').trim().toLowerCase();
@@ -71,6 +81,12 @@ export function hostBlockReason(raw) {
 
   // IPv6
   if (host.includes(':')) {
+    // 109회차 D-1: 표기를 **정규형으로 바꾼 뒤** 판정한다. 예전에는 입력 문자열 그대로 '::1'·'::ffff:…' 와 비교해 같은 주소의 다른 표기
+    //   (0:0:0:0:0:0:0:1 · 0::1 · 0:0:0:0:0:ffff:127.0.0.1 · 0:0:0:0:0:ffff:a9fe:a9fe)가 루프백·링크로컬(메타데이터) 판정을 비켜 갔다 —
+    //   기본 설정에서는 '공개 IPv6' 로 막혔지만 UAGMON_ALLOW_PUBLIC=true 에서는 통과했다('옵트인과 무관하게 항상 차단' 이 깨졌다).
+    //   IPv6 로 읽을 수 없는 값(abc:def 등)은 거부한다(예전에는 ALLOW_PUBLIC 에서 통과해 연결 단계까지 갔다).
+    host = canonIpv6(host);
+    if (host == null) return 'IPv6 주소 형식이 올바르지 않습니다.';
     if (host === '::' ) return '미지정 주소(::)는 등록할 수 없습니다.';
     if (host === '::1') return '루프백(::1)은 등록할 수 없습니다.';
     if (/^fe[89ab]/i.test(host)) return '링크로컬(fe80::/10)은 등록할 수 없습니다.';

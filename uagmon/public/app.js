@@ -15,6 +15,9 @@ function el(tag, attrs = {}, ...children) {
   for (const [k, v] of Object.entries(attrs)) {
     if (k === 'class') n.className = v;
     else if (k === 'text') n.textContent = v;
+    // 109회차 D-4: 인라인 style **속성**(setAttribute)은 이 서버의 CSP(style-src 'self')가 막는다 — 숨겨 둔 오류 배너
+    //   (display:none)가 빈 상자로 보이고 버튼 줄 간격이 빠졌다(Chromium 재현). CSSOM 대입은 CSP 대상이 아니다.
+    else if (k === 'style') n.style.cssText = v;
     else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
     else n.setAttribute(k, v);
   }

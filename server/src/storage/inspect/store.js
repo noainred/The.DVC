@@ -6,10 +6,10 @@
  *  · 쓰기는 2초 디바운스 + 종료 시 동기 flush · 원자적 쓰기. 손상이면 원본을 `.corrupt.*` 로 보존하고 빈 이력으로 간다(무음 금지 — 콘솔 · 상태).
  *  · 같은 (장비, at) 실행은 한 번만(엣지 재전송 — duplicate).
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../../util/atomicWrite.js';
+import { makeJsonFileReader } from '../../util/jsonFileRead.js';   // 107회차: 읽기 오류 ≠ 손상(공용 읽기 — 30초 간격 재읽기)
 import { registerExitFlush } from '../../util/exitFlush.js';
 import { registerStateFile } from '../../util/stateFiles.js';
 import { numOrNull } from '../../util/numOrNull.js';
@@ -40,15 +40,29 @@ export function sanitizeRun(raw, { maxTs = Date.now() + 60_000 } = {}) {
     ...(str(raw.agent, 64) ? { agent: str(raw.agent, 64) } : {}), ...(raw.partial === true ? { partial: true } : {}) };
 }
 
+/*
+ * 107회차(재현 — EISDIR): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전 catch 하나는 온전한 원본을 .corrupt 로 옮기고 빈 값을 캐시해 다음 쓰기가 원본 자리를 덮었다.
+ *   읽기 단계는 공용 읽기(30초 간격 재읽기): 원본을 두고 · 캐시하지 않고 · 그동안 쓰지 않는다. parse 실패(손상)는 예전과 같다.
+ *   그동안 받은 실행 기록은 뺀 것(dropped)으로 답한다 — 엣지는 ack 받지 못한 실행을 다음 push 에 다시 보낸다.
+ */
+const _reader = makeJsonFileReader(() => FILE(), { parse: (t) => t, preserve: false, tag: 'storage-inspect' });
+let _readErr = '';
 function load() {
   if (_map) return _map;
-  _map = new Map();
   const file = FILE();
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') {
+    _readErr = String(rr.error?.code || 'read-error').slice(0, 32);
+    _loadErr = `읽기 오류(${_readErr}) — 원본은 그대로 두었습니다(30초마다 다시 읽습니다)`;
+    return new Map();
+  }
+  if (_readErr) { _readErr = ''; _loadErr = null; }
+  _map = new Map();
   registerStateFile(file);
   registerExitFlush('storage-inspect-runs', flushSync);
   try {
-    if (!fs.existsSync(file)) return _map;
-    const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (rr.kind !== 'ok') return _map;
+    const j = JSON.parse(rr.value);
     if (!isObj(j) || !isObj(j.devices)) throw new Error('점검 이력 파일 모양이 아닙니다');
     for (const [id, arr] of Object.entries(j.devices).slice(0, DEVICES_MAX)) {
       if (!Array.isArray(arr)) continue;
@@ -66,6 +80,7 @@ function load() {
 function flushSync() {
   if (_timer) { clearTimeout(_timer); _timer = null; }
   if (!_dirty) return;
+  if (!_map) { load(); if (!_map) return; }   // 107회차: 이력을 못 읽은 동안에는 쓰지 않는다(빈 이력으로 원본을 덮지 않게 — '저장할 것 있음' 은 남긴다)
   _dirty = false;
   try {
     atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, at: Date.now(), devices: Object.fromEntries(load()) }), { mode: 0o600 });
@@ -90,6 +105,7 @@ export function recordRun(deviceId, raw, { maxTs } = {}) {
   const run = sanitizeRun(raw, { maxTs });
   if (!id || !run) return { saved: false, dropped: true };
   const m = load();
+  if (_readErr) return { saved: false, dropped: true, unreadable: true };   // 107회차: 못 읽은 이력 위에 쌓지 않는다
   const arr = m.get(id) || [];
   // 반증 F7: 시계가 빠른 엣지의 at 은 수신 시각으로 잘려 재전송마다 달라진다 — 엣지 원본 시각(edgeAt)이 있으면 그것으로 같은 실행을 알아본다.
   if (arr.some((r) => r.at === run.at || (run.edgeAt != null && r.edgeAt === run.edgeAt))) return { saved: false, duplicate: true };
@@ -111,13 +127,14 @@ export function pruneRuns(liveIds) {
   return removed;
 }
 export function inspectStoreStatus() {
-  load();
-  let runs = 0; for (const a of _map.values()) runs += a.length;
-  return { devices: _map.size, runs, max: RUNS_MAX, loadError: _loadErr, persist: { ..._persist } };
+  const m = load();   // 107회차: 읽기 오류 중에는 _map 이 없다
+  let runs = 0; for (const a of m.values()) runs += a.length;
+  return { devices: m.size, runs, max: RUNS_MAX, loadError: _loadErr, persist: { ..._persist } };
 }
 export const inspectStoreLoadError = () => { load(); return _loadErr; };
 export function _resetStoreForTest({ reload = false } = {}) {
   if (_timer) { clearTimeout(_timer); _timer = null; }
+  _reader.reset(); _readErr = '';
   if (reload) { _map = null; _loadErr = null; _dirty = false; return; }
   _map = new Map(); _loadErr = null; _dirty = false; _persist.saved = 0; _persist.error = null;
 }

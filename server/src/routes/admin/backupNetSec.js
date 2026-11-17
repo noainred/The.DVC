@@ -22,10 +22,11 @@ import { addUsersToVms } from '../../guest/accountService.js';
 import { onDemandErrorFields } from '../../vcenter/dsBrowse.js';   // v2.742(VC-03 후속): 주문형 로그인 문이 막은 409 의 사유 필드
 import { inUserWriteScope, scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
 import { denyScopedRun, denyFleetWrite } from '../../auth/scopeMerge.js';   // v2.607 AUTHZ2607-06
-import { snapshotFilter, slimVm, guestProbe } from '../../search/deepSearch.js';
+import { snapshotFilter, slimVm, guestProbe, probeMaxVms } from '../../search/deepSearch.js';
 import { analyzeLoginFails, clampLoginFailParams } from '../../security/loginFails.js';
 import { snapMemo, snapCacheClear } from '../../util/snapCache.js';
-import { loadLoginMonitor, saveLoginMonitor, loginMonitorStatus, runLoginAnalysisNow } from '../../security/loginMonitor.js';
+import { loadLoginMonitor, saveLoginMonitor, loginMonitorStatus, runLoginAnalysisNow, loginMonitorWriteRefusal } from '../../security/loginMonitor.js';
+import { unreadMark } from '../settingsUnreadMark.js';   // 112회차: 조회 응답의 읽기 오류 표지
 import { listGuestScans, saveGuestScan, removeGuestScan, runGuestScanNow } from '../../security/guestScanScheduler.js';
 import { analyzeNetIssues } from '../../security/netIssueStore.js';
 import path from 'node:path';
@@ -390,7 +391,7 @@ adminRouter.post('/deep-search/probe', adminOnly, async (req, res) => {
   }
   try {
     const candidates = snapshotFilter(store.get(), { vcenterIds, f: b.filters || {} }).map(slimVm);
-    const maxVms = Math.min(500, Number(b.maxVms) || 100);
+    const maxVms = probeMaxVms(b.maxVms);   // 116회차 F8: 1~500 정수(음수가 slice(0, -n) 으로 상한을 넘기지 않게 — 판정은 search/deepSearch.js 하나)
     // v2.689(B7): 게스트 OS 에 명령을 실행하는 경로다 — 유형·대상 수를 남긴다(패턴·게스트 비밀번호는 싣지 않는다).
     logAudit({ user: req.user?.username, action: '심층 검색 게스트 탐침', target: vcenterIds.length ? vcenterIds.slice(0, 20).join(',') : '(전체)', detail: `유형 ${String(b.probe.type).slice(0, 40)} · 후보 ${candidates.length}대 · 상한 ${maxVms}대` });
     const r = await guestProbe(candidates, b.probe, { guestUser: b.guestUser || '', guestPass: b.guestPass || '', maxVms });
@@ -415,8 +416,8 @@ adminRouter.get('/security/login-fails', adminOnly, async (req, res) => {
   }
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
-adminRouter.get('/security/login-fails/status', adminOnly, fleetOnly, (_req, res) => res.json(loginMonitorStatus()));
-adminRouter.put('/security/login-fails/settings', adminOnly, (req, res) => { if (denyFleetWrite(req, res, '로그인 실패 감시 설정은 전 법인 공용이라 전체 범위 계정만 바꿀 수 있습니다.')) return; res.json(saveLoginMonitor(req.body || {})); });   // 전체 점검 2회차 V-1
+adminRouter.get('/security/login-fails/status', adminOnly, fleetOnly, (_req, res) => res.json({ ...loginMonitorStatus(), ...unreadMark(loginMonitorWriteRefusal()) }));   // 112회차: 못 읽은 동안 settings 는 기본값 — 화면이 저장을 잠근다
+adminRouter.put('/security/login-fails/settings', adminOnly, (req, res) => { if (denyFleetWrite(req, res, '로그인 실패 감시 설정은 전 법인 공용이라 전체 범위 계정만 바꿀 수 있습니다.')) return; { const no = loginMonitorWriteRefusal(); if (no) return res.status(503).json(no); } res.json(saveLoginMonitor(req.body || {})); });   // 전체 점검 2회차 V-1
 adminRouter.post('/security/login-fails/run', adminOnly, async (req, res) => { if (denyScopedRun(req, res, '로그인 실패 수동 분석')) return; try { await runLoginAnalysisNow(); snapCacheClear('loginFails'); res.json({ ok: true, ...loginMonitorStatus() }); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); } });
 
 // 게스트 네트워크 이슈(패킷드랍/에러) 분석.

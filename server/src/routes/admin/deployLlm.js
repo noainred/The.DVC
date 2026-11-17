@@ -1,9 +1,10 @@
 // 오프라인 패키지·에이전트 배포·LLM/Ollama·릴리스 노트 — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
 import { config } from '../../config.js';
 import { saveNote, deleteNote } from '../../release-notes.js';
-import { loadLlmConfig, llmUrlIssue, saveLlmConfig, normTimeoutMs } from '../../llm/config.js';
+import { loadLlmConfig, llmUrlIssue, saveLlmConfig, normTimeoutMs, llmConfigWriteRefusal } from '../../llm/config.js';
+import { unreadMark } from '../settingsUnreadMark.js';   // 112회차: 조회 응답의 읽기 오류 표지
 import { ollamaTest } from '../../llm/ollama.js';
-import { installOllama } from '../../llm/ollamaDeploy.js';
+import { installOllama, normOllamaPort, ollamaModelName } from '../../llm/ollamaDeploy.js';
 import { deployAgent, testTarget, installerInfo, checkAgentStatus, envPairs, envPairsIssue } from '../../agent/deploy.js';
 import { fetchRemoteVersions, listLocalPackages, downloadPackage } from '../../upgrade/fetchPackage.js';
 import { getPackageSettings, savePackageSettings, packageSettingsWriteRefusal } from '../../upgrade/packageSettings.js';
@@ -35,6 +36,23 @@ const fleetOnly = fullScopeOnlyWith('엣지 배포·패키지·LLM 설정·릴�
 
 
 // 배포 성공 후의 수집 서버 자동 등록은 agent/autoRegister.js 로 이관(v2.432) — 단건·대량 배포가 같은 규칙을 쓴다.
+
+/**
+ * 116회차 F6: Ollama 원격 설치의 감사 문구(순수). 대상(계정@주소:SSH 포트) · 방식 · Ollama 포트 · 모델 · 포탈 반영 요청 여부 · 실패 사유만 —
+ * 비밀번호 · 개인키 · 오프라인 파일 경로 원문은 싣지 않는다. 줄바꿈 · 탭은 공백으로(감사 줄이 갈라지지 않게), 칸마다 길이 상한.
+ */
+export function ollamaDeployAuditDetail({ target = {}, mode, model, ollamaPort, applyToPortal, result } = {}) {
+  const s = (v, n = 80) => String(v ?? '').slice(0, n).replace(/[\r\n\t]/g, ' ');
+  const applied = applyToPortal === undefined ? true : !!applyToPortal;
+  return [
+    `대상 ${s(target?.username, 40) || '?'}@${s(target?.host, 120) || '?'}:${s(target?.port || 22, 6)}`,
+    `방식 ${mode === 'offline' ? '오프라인(파일 전송)' : '온라인'}`,
+    `Ollama 포트 ${normOllamaPort(ollamaPort) ?? '형식 오류'}`,
+    model ? `모델 ${ollamaModelName(model).slice(0, 60) || '(이름 형식 오류)'}` : '',
+    `포탈 LLM 설정 반영 ${applied ? '요청함' : '요청 안 함'}`,   // 요청값이다 — 실제 반영은 설치가 끝까지 성공했을 때만(installOllama)
+    result?.ok ? '' : `사유 ${s(result?.reason, 160)}`,
+  ].filter(Boolean).join(' · ');
+}
 
 export function registerDeployLlm(adminRouter) {
 
@@ -531,8 +549,9 @@ adminRouter.get('/agent-deploy/targets/sample.txt', csvPerm, adminOnly, fleetOnl
 });
 
 // --- Local LLM (Ollama) config for natural-language search ---
-adminRouter.get('/llm-config', adminOnly, (_req, res) => res.json({ config: loadLlmConfig() }));
+adminRouter.get('/llm-config', adminOnly, (_req, res) => res.json({ config: loadLlmConfig(), ...unreadMark(llmConfigWriteRefusal()) }));   // 112회차: 기동 뒤 한 번도 못 읽었으면 config 는 env 기본값 — 화면이 저장을 잠근다
 adminRouter.put('/llm-config', adminOnly, fleetOnly, (req, res) => {
+  { const no = llmConfigWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
   try { res.json({ ok: true, config: saveLlmConfig(req.body || {}) }); }
   catch (e) { res.status(e.status || 500).json({ ok: false, reason: e.message }); }
 });
@@ -558,6 +577,12 @@ adminRouter.post('/ollama-deploy', adminOnly, fleetOnly, requireSettingsOwner, a
   //   Ollama 가 들을 포트는 별도 키 `ollamaPort`(비우면 11434).
   const { mode, binaryPath, model, ollamaPort, applyToPortal, ...target } = req.body || {};
   const r = await installOllama(target, { mode, binaryPath, model, ollamaPort, applyToPortal });
+  // 116회차 F6: 요청자가 고른 서버에 root 로 명령을 실행하고(오프라인이면 이 서버의 파일을 보낸다) 포탈 LLM 주소를 바꾸는 경로인데,
+  //   자동 감사(auditMiddleware)는 2xx 만 · 대상 없이 남겼다 — **실패한 설치**(계정 생성 · 파일 전송 · 설치 스크립트가 이미 돌았을 수 있다)는
+  //   기록이 없었다. 대상 · 방식을 싣는다(비밀번호 · 개인키 · 파일 경로 원문은 싣지 않는다 — 형제 '심층 검색 게스트 탐침' v2.689 B7 과 같은 판단).
+  const auditDetail = ollamaDeployAuditDetail({ target, mode, model, ollamaPort, applyToPortal, result: r });
+  if (r.ok) { if (res.locals) res.locals.auditDetail = auditDetail; }   // 성공은 자동 감사 줄에 함께(두 줄을 만들지 않는다 — v2.913)
+  else logAudit({ user: req.user?.username, action: 'Ollama 원격 설치 실패', target: String(target?.host ?? '').slice(0, 120), detail: auditDetail, ip: req.ip || '' });
   res.status(r.ok ? 200 : 400).json(r);
 });
 

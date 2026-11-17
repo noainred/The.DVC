@@ -205,7 +205,17 @@ export async function pushFleetNow() {
     if (regErr) return await reportRegistryUnreadable(regErr);
     const snap = store.get();
     let registered = [];
-    try { registered = loadVcenterConfig()?.vcenters || []; } catch { registered = []; }
+    let vcCfg = null;
+    try { vcCfg = loadVcenterConfig(); registered = vcCfg?.vcenters || []; } catch { registered = []; }
+    // 118회차(84회차 남긴 것 ①): vCenter 등록부를 **못 읽었고 마지막으로 읽은 목록도 없으면** 아래 '호스트 못 읽은 vCenter' 보류가 빈 목록으로 통과한다 —
+    //   수집도 그 주기를 건너뛰어(store) 스냅샷에 호스트가 없으므로 ESXi 를 받치는 iDRAC 이 전부 베어메탈로 올라간다. 보내지 않는다(상태 · 콘솔에 사유).
+    //   시한: 따로 붙잡지 않는다 — 중앙은 마지막 수신부터 TTL(기본 30분) 뒤 이 엣지 목록을 '보고 없음' 으로 내린다(빈 목록 · 틀린 목록 교체가 아니다).
+    if (vcCfg?.readError && !vcCfg.file) {
+      const note = `vCenter 등록부(vcenters.json)를 읽지 못해(${vcCfg.readError}) 어느 iDRAC 이 ESXi 호스트인지 판정할 수 없습니다 — 베어메탈 목록을 보내지 않았습니다(파일 권한 · 소유자 · 디스크를 확인하세요 · 읽히면 다음 주기에 보냅니다)`;
+      last = { at: Date.now(), sent: 0, error: note, skipped: true, vcRegistryUnreadable: { code: vcCfg.readError }, note };
+      if (_regLog('vc-registry', String(vcCfg.readError))) console.warn(`[fleet-push] ${note}`);
+      return { ok: false, skipped: true, vcRegistryUnreadable: true, reason: note };
+    }
     const unread = unreadHostVcenters(snap, registered);
     const maxMs = fleetWithholdMaxMs(config.agent.inventoryIntervalMs || 300_000);
     const dec = fleetWithholdDecision(unread, withholdSince, Date.now(), maxMs, lastFullOkAt);

@@ -22,6 +22,8 @@ let rev = 0;
 let unreadable = false;
 export function emMapRev() { return rev; }
 export function emMapUnreadable() { load(); return unreadable; }
+/** 113회차 메인: 못 읽은 까닭이 읽기 오류인가(손상이 아니다 — 원본이 그대로 있고 보존본은 없다). 화면 문구가 가른다. */
+export function emMapReadError() { load(); return unreadable && readErr; }
 
 const parseMap = (t) => {
   const d = JSON.parse(t);

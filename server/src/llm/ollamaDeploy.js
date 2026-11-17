@@ -102,6 +102,14 @@ export function ollamaModelName(v) {
   return v.replace(/[^\w.:/-]/g, '').replace(/^-+/, '').slice(0, 200);
 }
 
+/**
+ * 116회차 F5(재현 — 실패하는 가짜 curl): 온라인 설치 명령. 예전 `curl -fsSL … | sh` 는 파이프라인의 종료값이 **마지막 명령(sh)** 것이라
+ * curl 이 실패해도(대상 서버에 인터넷이 없을 때 — 머리말의 폐쇄망 배포) sh 가 빈 입력으로 0 을 냈다 — 아래 '설치 스크립트 실패(인터넷 필요?)' 판정이
+ * 받기 실패에는 걸리지 않았고, 설치되지 않은 서버에 override.conf 를 쓰고 API 확인(최대 10초)을 기다린 뒤 'Ollama API 가 응답하지 않습니다. 서비스 로그를
+ * 확인하세요' 라는 다른 사유를 냈다. 스크립트를 먼저 받아(받기 실패 = 그 종료값 · stderr) 받은 것만 sh 로 넘긴다(POSIX — pipefail 에 기대지 않는다).
+ */
+export const OLLAMA_ONLINE_INSTALL_CMD = 's=$(curl -fsSL https://ollama.com/install.sh) && printf \'%s\\n\' "$s" | sh';
+
 export async function installOllama(target, { mode = 'online', binaryPath, model, ollamaPort, applyToPortal = true } = {}) {
   if (!target?.host || !target?.username) return { ok: false, reason: 'host/username을 입력하세요.' };
   const port = normOllamaPort(ollamaPort);
@@ -135,7 +143,7 @@ export async function installOllama(target, { mode = 'online', binaryPath, model
         const up = await exec('systemctl daemon-reload && systemctl enable --now ollama');
         if (up.code !== 0) return { ok: false, reason: `서비스 시작 실패: ${up.stderr || up.stdout}` };
       } else {
-        const inst = await exec('curl -fsSL https://ollama.com/install.sh | sh');
+        const inst = await exec(OLLAMA_ONLINE_INSTALL_CMD);
         if (inst.code !== 0) return { ok: false, reason: `설치 스크립트 실패(인터넷 필요?): ${(inst.stderr || inst.stdout).slice(-400)}` };
         // expose on all interfaces so the portal can connect
         await exec('mkdir -p /etc/systemd/system/ollama.service.d');

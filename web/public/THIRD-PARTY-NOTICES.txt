@@ -219,7 +219,7 @@ big-integer@1.6.52  —  Unlicense  [server]
 binary@0.3.0  —  MIT  [server]
 bl@4.1.0  —  MIT  [server]
 bluebird@3.4.7  —  MIT  [server]
-body-parser@1.20.8  —  MIT  [server]
+body-parser@1.20.9  —  MIT  [server]
 brace-expansion@1.1.21  —  MIT  [server]
 buffer@5.7.1  —  MIT  [server]
 buffer-crc32@0.2.13  —  MIT  [server]
@@ -396,7 +396,7 @@ process-warning@2.3.2  —  MIT  [server]
 prop-types@15.8.1  —  MIT  [web]
 proxy-addr@2.0.8  —  MIT  [server]
 qrcode@1.5.4  —  MIT  [web]
-qs@6.16.0  —  BSD-3-Clause  [server]
+qs@6.17.1  —  BSD-3-Clause  [server]
 raf@3.4.1  —  MIT  [web]
 range-parser@1.2.1  —  MIT  [server]
 raw-body@2.5.3  —  MIT  [server]
@@ -448,7 +448,7 @@ topojson-client@3.1.0  —  ISC  [web]
 traverse@0.3.9  —  MIT/X11  [server]
 tweetnacl@0.14.5  —  Unlicense  [server]
 type-is@1.6.18  —  MIT  [server]
-undici@6.28.1  —  MIT  [server]
+undici@6.29.1  —  MIT  [server]
 unpipe@1.0.0  —  MIT  [server]
 unzipper@0.10.14  —  MIT  [server]
 util-deprecate@1.0.2  —  MIT  [server]
@@ -1042,7 +1042,7 @@ OTHER DEALINGS IN THE SOFTWARE.
 For more information, please refer to <http://unlicense.org>
 
 ==============================================================================
-적용 패키지 (2): body-parser@1.20.8, type-is@1.6.18
+적용 패키지 (2): body-parser@1.20.9, type-is@1.6.18
 ==============================================================================
 
 (The MIT License)
@@ -6231,7 +6231,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
-적용 패키지 (1): qs@6.16.0
+적용 패키지 (1): qs@6.17.1
 ==============================================================================
 
 BSD 3-Clause License
@@ -7195,7 +7195,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ==============================================================================
-적용 패키지 (1): undici@6.28.1
+적용 패키지 (1): undici@6.29.1
 ==============================================================================
 
 MIT License

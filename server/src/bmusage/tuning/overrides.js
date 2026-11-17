@@ -64,7 +64,9 @@ const _reader = makeJsonFileReader(FILE, { parse: (t) => t, preserve: false, tag
 function load() {
   const mt = mtimeOf();
   if (_cache && mt === _mtime) return _cache;
-  if (!mt) { _mtime = mt; _err.missing(); _cache = { v: 1, all: bare(), corps: bare(), by: '', at: 0 }; return _cache; }
+  // 106회차(105회차 A5 회귀 — 재현): 파일이 없으면 직전 읽기 오류는 끝난 일이다 — 읽기 상태를 비운다. 안 비우면 읽기 오류(EISDIR) → 그 자리를 치움 → 재읽기 간격 안의 저장
+  //   (없음 = 저장 허용) 직후 load 가 미뤄 둔 옛 읽기 오류를 다시 세워, 방금 저장한 온전한 파일을 '읽기 오류' 라 하고 판정을 거부했다(최대 30초).
+  if (!mt) { _mtime = mt; _reader.reset(); _err.missing(); _cache = { v: 1, all: bare(), corps: bare(), by: '', at: 0 }; return _cache; }
   const rr = _reader.read();
   if (rr.kind === 'read-error') {
     _err.readError(rr.error, { retryMs: READ_RETRY_MS });

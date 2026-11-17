@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 import time
 from contextlib import ExitStack
 
@@ -66,6 +67,7 @@ class AppContext:
 
         # 자동 점검과 수동 점검이 같은 가드를 공유한다 — 동시에 두 번 돌지 않는다.
         self.run_health_check = GuardedJob(self._run_health_check)
+        self._history_error = None   # 117회차 F7: 마지막 이력 적재 실패 사유(같은 사유를 주기마다 찍지 않게)
         self._last_auto_check = 0.0
         # 미인증 '지금 점검'의 최소 간격(초). 로그인 없이 무한히 재점검을 돌려
         # 대상 서버에 부하를 주거나 서버 자원을 소모하지 못하게 한다(6차 감사).
@@ -132,7 +134,16 @@ class AppContext:
             # id 가 있는 항목만 이력으로 남긴다(임시 URL 점검은 차트에 섞이면 안 된다).
             keep = [row for row in results if row.get("id")]
             if keep:
-                self.history.record(keep)
+                # 전체 점검 117회차 F7(재현): 이력 적재 실패(디스크 가득 · 잠김 · 손상)가 알림 판정과 점검 응답까지 막지 않게 — 예전에는 예외가 그대로
+                #   올라가 그 주기의 전환 알림이 나가지 않았고 [지금 점검] 은 점검을 다 하고도 500 이었다. 사유가 바뀔 때만 한 줄 남긴다.
+                try:
+                    self.history.record(keep)
+                    self._history_error = None
+                except (sqlite3.Error, OSError) as exc:
+                    reason = f"{type(exc).__name__}: {exc}"[:200]
+                    if reason != self._history_error:
+                        print(f"[health] 점검 이력 적재 실패({reason}) — 알림 · 점검 응답은 계속합니다(차트에는 이 주기가 빠집니다).", flush=True)
+                    self._history_error = reason
                 # 상태가 '바뀐' 링크만 알린다 — 매 주기 알림은 곧 무시된다.
                 names = {item["id"]: item["name"] for item in self.shortcuts.all()}
                 self.notifier.notify_transitions(keep, names)

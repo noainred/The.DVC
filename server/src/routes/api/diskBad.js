@@ -26,7 +26,7 @@ import { corpIdentityOf } from '../../vcenter/hostCorp.js';
 import { loadAll, loadServer, diskBadDbStatus, diskBadGeneration } from '../../diskbad/db.js';
 import { buildFleet, serverView, labelsPayload } from '../../diskbad/summary.js';
 import { createJob, listJobs, stopJob, retryUnit, unitsForAll, autoInfo, setCorpResolver, getJob, isAgentBusy } from '../../diskbad/jobs.js';
-import { loadDiskBadSettings, saveDiskBadSettings, diskBadSettingsLoadError } from '../../diskbad/settings.js';
+import { loadDiskBadSettings, saveDiskBadSettings, diskBadSettingsLoadError, diskBadWriteRefusal } from '../../diskbad/settings.js';
 import { diskBadMailInfo } from '../../diskbad/notify.js';
 import { diskBadEdgeStatus } from '../../diskbad/edge.js';
 import { config } from '../../config.js';
@@ -303,6 +303,7 @@ export function registerDiskBad(api) {
     const b = req.body && typeof req.body === 'object' ? req.body : {};
     const patch = {};
     for (const k of ['autoEnabled', 'intervalHours', 'mailEnabled', 'corpTo']) if (k in b) patch[k] = b[k];
+    { const no = diskBadWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
     let next;
     try { next = saveDiskBadSettings(patch); } catch (e) { return res.status(500).json({ ok: false, reason: `저장 실패: ${String(e?.message || e).slice(0, 200)}` }); }
     logAudit({ user: req.user?.username || '', action: '디스크 배드 섹터 설정 저장', target: 'disk-bad-settings', detail: `자동 ${next.autoEnabled ? `켜짐(${next.intervalHours}시간)` : '꺼짐'} · 메일 ${next.mailEnabled ? '켜짐' : '꺼짐'} · 법인 담당자 ${Object.keys(next.corpTo).length}곳`, ip: req.ip });

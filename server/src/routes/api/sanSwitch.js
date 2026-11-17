@@ -440,7 +440,7 @@ api.get('/tools/sanswitch/perf/settings', adminOnly, fullScopeOnly, async (_req,
   //   `edges` 가 엣지들이 보고한 상태이고, 화면은 둘을 **나눠서** 표시해야 한다(v2.517).
   const le = perfSettingsLoadError();   // 24회차 #4: 손상이면 밝힌다(화면의 값은 저장된 설정이 아니라 기본값이다)
   res.json({ ok: true, settings: loadPerfSettings(), limits: PERF_LIMITS,
-    status: sanSwitchPerfStatus(), edges: listEdgePerfStatus(), db: await perfDbStats(), ...(le ? { loadError: { reason: String(le.reason || '').slice(0, 200) } } : {}) });
+    status: sanSwitchPerfStatus(), edges: listEdgePerfStatus(), db: await perfDbStats(), ...(le ? { loadError: { reason: String(le.reason || '').slice(0, 200), readError: le.readError === true } } : {}) });   // 112회차: readError — 화면이 읽기 오류(다시 읽히면 풀림)와 손상(확정 · 복구)을 가른다
 });
 const PERF_UNREADABLE = '포트 사용량 설정 파일을 읽지 못한 상태라 받지 않습니다 — 지금 저장 · 정리하면 기본값(보관 90일)으로 이력이 지워질 수 있습니다. 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리고 재시작하세요.';
 // 105회차 A5: 읽기 오류(원본 그대로)는 조치가 다르다 — 확정 불가 · 재시작 불필요(권한 · 디스크를 고치면 30초 안에 풀린다).

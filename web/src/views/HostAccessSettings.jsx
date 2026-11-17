@@ -3,6 +3,8 @@ import { fetchJson, putJson, postJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import Select from '../components/Select.jsx';
+import { unreadMarkOf, unreadKind, saveLockedByUnread, shouldReseed } from './settingsUnread.js';   // 112회차: 못 읽은 동안의 기본값 초안으로 저장 · 적용하지 않는다
+import { SettingsUnreadBanner } from './SettingsUnreadBanner.jsx';
 
 /**
  * 호스트 접근 제어(v2.485) — 이 서버(포탈 호스트)의 SSH·웹(80/443/포탈 포트) 클라이언트 제어와 OS 방화벽 추가 규칙.
@@ -84,13 +86,16 @@ export default function HostAccessSettings() {
   const [otpFor, setOtpFor] = useState(null); // 'apply' | 'confirm'
   const [now, setNow] = useState(Date.now());
   const inited = useRef(false);
+  // 112회차: 초안 폼을 채운 조회의 상태('' 읽음 · 'read' 읽기 오류) — 못 읽은 값(기본값)으로 채운 폼은 다시 읽힌 조회에서 편집 중이어도 서버값으로 다시 채운다.
+  const seedKind = useRef('');
 
   const load = useCallback(async (resetDraft = false) => {
     try {
       const d = await fetchJson('/admin/host-access');
       setData(d); setError(null);
       // 편집 폼은 최초 1회(또는 명시 리셋)만 서버값으로 채운다 — 15초 폴링이 편집 중인 값을 되돌리지 않게.
-      if (!inited.current || resetDraft) { inited.current = true; setDraft(fromServer(d.draft)); }
+      const le = unreadMarkOf(d);
+      if (!inited.current || resetDraft || shouldReseed(seedKind.current, le)) { inited.current = true; seedKind.current = unreadKind(le); setDraft(fromServer(d.draft)); }
     } catch (e) { setError(e.message); }
   }, []);
   useEffect(() => {
@@ -124,10 +129,14 @@ export default function HostAccessSettings() {
   const eng = data.engine; const cur = eng?.current;
   const pend = data.pending; const remain = pend ? Math.max(0, Math.round((pend.deadline - now) / 1000)) : 0;
   const upd = (k, v) => setDraft({ ...draft, [k]: v });
+  // 112회차: 설정 파일 읽기 오류 동안은 초안 저장 · 적용을 잠근다(서버도 503) — 지금 초안은 기본값이다. 되돌리기는 막지 않는다(안전한 방향).
+  const unread = unreadMarkOf(data);
+  const saveLocked = saveLockedByUnread(unread);
   const updExtra = (i, k, v) => upd('extra', draft.extra.map((r, j) => (j === i ? { ...r, [k]: v } : r)));
 
   return (
     <div>
+      <SettingsUnreadBanner le={unread} what="호스트 접근 제어 설정" save="초안 저장 · 적용" />
       {pend && (
         <div className="card" style={{ marginBottom: 12, borderLeft: '4px solid var(--amber)' }}>
           <b>⏳ 확정 대기 중</b> — {when(pend.at)} 에 {pend.by || '?'} 가 런타임에 적용. <b>{Math.floor(remain / 60)}분 {remain % 60}초</b> 안에 확정하지 않으면 자동으로 되돌립니다.
@@ -230,9 +239,9 @@ export default function HostAccessSettings() {
       <div className="card">
         <div className="flex gap wrap" style={{ alignItems: 'center', gap: 10 }}>
           <label className="flex gap" style={{ alignItems: 'center', gap: 6, fontSize: 13 }}>확정 대기(분) <input className="input" type="number" min={1} max={30} style={{ width: 70 }} value={draft.confirmMinutes} onChange={(e) => upd('confirmMinutes', e.target.value)} /></label>
-          <button className="tab" disabled={busy !== ''} onClick={() => run('draft')}>초안 저장</button>
+          <button className="tab" disabled={busy !== '' || saveLocked} onClick={() => run('draft')}>초안 저장</button>
           <button className="tab" disabled={busy !== '' || !eng?.ok} onClick={() => run('plan')}>🔍 계획 보기(실행 안 함)</button>
-          <button className="login-btn" disabled={busy !== '' || !eng?.ok || !!pend} onClick={() => setOtpFor('apply')}>▶ 적용(런타임, {draft.confirmMinutes || 5}분 내 확정, OTP)</button>
+          <button className="login-btn" disabled={busy !== '' || !eng?.ok || !!pend || saveLocked} onClick={() => setOtpFor('apply')}>▶ 적용(런타임, {draft.confirmMinutes || 5}분 내 확정, OTP)</button>
         </div>
         <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>적용은 런타임에만 반영됩니다. 새 창에서 SSH/포탈 접속을 확인한 뒤 '확정' 을 눌러야 영구 설정이 됩니다. 확정하지 않으면 자동으로 되돌리며, 포탈이 재시작돼도 기한은 이어집니다.</div>
         {msg && <div style={{ marginTop: 8, fontSize: 13, color: msg.ok ? 'var(--green)' : 'var(--red)' }}>{msg.text}</div>}

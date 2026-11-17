@@ -15,6 +15,7 @@ import {
   SLOT_COUNT, NAME_MAX, SAVE_WHAT, TONE, badgeOf, sourceTiles, dropCol, moveCol, toggleCol, addCols, dropCols, initialState, valueToSave, applyValue,
   slotLabel, defaultLine, savedText, exportBody, targetCount, liveMissCount, footerText, cellKind,
 } from './vmExportText.js';
+import { unreadableNote } from '../vmListExportText.js';   // 113회차 메인: 읽기 오류 ≠ 손상 — 못 읽음 안내는 한 벌
 import './vmExport.css';
 
 const fmtN = (v) => (typeof v === 'number' && Number.isFinite(v) ? v.toLocaleString() : '—');
@@ -210,7 +211,7 @@ export function VmExport({ scope, embedded = false }) {
             <button type="button" className={`vmx-btn${save ? ' primary' : ''}`} disabled={!st.cols.length || prefs?.unreadable} onClick={() => (save ? setSave(null) : openSave())}>지금 설정 저장하기…</button>
           </span>
         </div>
-        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>{prefs?.unreadable ? '저장값 파일을 읽지 못해 저장할 수 없습니다(손상 사본은 설정 폴더에 남았습니다).' : defaultLine(prefs)}</div>
+        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>{prefs?.unreadable ? unreadableNote(prefs, '저장값 파일을 읽지 못해 저장할 수 없습니다') : defaultLine(prefs)}</div>
         {save && (
           <div className="vmx-save">
             <div className="col">

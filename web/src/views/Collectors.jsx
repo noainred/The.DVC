@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 // 진단 모달이 같은 기준을 써야 '배지는 뜨는데 모달은 다른 원인을 말한다' 가 되지 않는다.
 import { agoText } from './tools/relTime.js'; // v2.618 ARCH-5
 import { fetchJson, postJson, putJson, delJson, downloadFile, canCsv } from '../api.js';
+import { requireChanged } from './changeResult.js';   // 112회차: delJson 은 409 · 400 을 던지지 않고 본문을 준다 — 거절(등록부 읽기 오류 · 사용 중)을 삭제 성공으로 읽지 않는다
 import { droppedSecretNote } from './droppedSecretText.js';
 import { readFailText, agentTokSummary, fileUnreadableText } from './readFailText.js'; // v2.733(C5-02): 조회 실패를 'push 없음'·'0개 발급' 으로 그리지 않는다
 import { Loading, ErrorBox } from '../components/ui.jsx';
@@ -100,7 +101,7 @@ export default function Collectors() {
   };
   const revokeTok = async (agent) => {
     if (!window.confirm(`'${agent}' 개별 토큰을 회수할까요? 그 엣지는 공유 CENTRAL_TOKEN으로만 접속할 수 있게 됩니다.`)) return;
-    try { await delJson(`/admin/central/agent-tokens/${encodeURIComponent(agent)}`); await loadAgentTok(); }
+    try { requireChanged(await delJson(`/admin/central/agent-tokens/${encodeURIComponent(agent)}`)); await loadAgentTok(); }
     catch (e) { setBanner({ ok: false, text: e.message }); }
   };
   const resetIngest = async () => {
@@ -235,7 +236,7 @@ export default function Collectors() {
 
   const remove = async (c) => {
     if (!window.confirm(`'${c.name}' (${c.id}) 수집 서버를 삭제할까요?`)) return;
-    try { await delJson(`/admin/collectors/${encodeURIComponent(c.id)}`); await load(); }
+    try { requireChanged(await delJson(`/admin/collectors/${encodeURIComponent(c.id)}`)); await load(); }
     catch (e) { setError(e.message); }
   };
 
@@ -264,7 +265,7 @@ export default function Collectors() {
     if (!ids.length) { setBanner({ ok: false, text: '오류 상태인 수집 서버가 없습니다.' }); return; }
     if (!window.confirm(`오류 상태 수집 서버 ${ids.length}대를 일괄 삭제할까요?\n${ids.join(', ')}`)) return;
     setBusy(true);
-    try { let n = 0; for (const id of ids) { try { await delJson(`/admin/collectors/${encodeURIComponent(id)}`); n++; } catch { /* */ } } await load(); setBanner({ ok: true, text: `오류 수집 서버 ${n}대 삭제 완료` }); }
+    try { let n = 0; for (const id of ids) { try { requireChanged(await delJson(`/admin/collectors/${encodeURIComponent(id)}`)); n++; } catch { /* 거절(409 등록부 읽기 오류) · 실패는 세지 않는다 */ } } await load(); setBanner({ ok: true, text: `오류 수집 서버 ${n}대 삭제 완료` }); }
     catch (e) { setError(e.message); }
     finally { setBusy(false); }
   };

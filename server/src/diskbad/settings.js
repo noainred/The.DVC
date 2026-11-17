@@ -10,10 +10,10 @@
  *
  * ⚠ 비밀을 담지 않는다. 손상되면 `preserveCorrupt` 로 보존하고 기본값(꺼짐)으로 시작하며 그 사실을 상태에 싣는다(무음 금지).
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 107회차: 읽기 오류 ≠ 손상(공용 읽기 — 30초 간격 재읽기)
 
 const FILE = () => path.join(config.configDir, 'disk-bad-settings.json');
 export const DEFAULTS = Object.freeze({ autoEnabled: false, intervalHours: 6, mailEnabled: true, corpTo: {} });
@@ -45,11 +45,29 @@ export function normalizeSettings(raw = {}) {
   };
 }
 
+/*
+ * 107회차(재현 — EISDIR): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전 catch 하나는 온전한 원본을 .corrupt 로 옮기고 빈 값 · 기본값을 캐시해
+ *   다음 저장이 원본 자리를 덮었다. 읽기 단계는 공용 읽기: 원본을 두고 · 캐시하지 않고(30초 간격 재읽기) · 저장을 거절한다(503 settingsUnreadable). parse 실패는 예전과 같다.
+ */
+const _reader = makeJsonFileReader(() => FILE(), { parse: (t) => t, preserve: false, tag: 'disk-bad-settings' });
+let _readErr = '';
+/** 107회차: 읽기 오류 중의 저장 거절 본문(503) 또는 null. */
+export function diskBadWriteRefusal() {
+  loadDiskBadSettings();
+  return _readErr ? { ok: false, status: 503, code: 'settingsUnreadable', readError: true, reason: `디스크 배드 섹터 점검 설정 파일(${path.basename(FILE())})을 읽지 못해 저장하지 않았습니다 — 읽기 오류(${_readErr})이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` } : null;
+}
 export function loadDiskBadSettings() {
   if (_mem) return _mem;
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') {   // 107회차: 기본값(자동 점검 꺼짐)으로 돌되 캐시하지 않는다 — 상태에 싣고(무음 금지) 쓰기는 거절한다
+    _readErr = String(rr.error?.code || 'read-error').slice(0, 32);
+    _loadError = { at: _loadError?.readError ? _loadError.at : Date.now(), reason: `읽기 오류(${_readErr}) — 원본은 그대로 두었습니다(30초마다 다시 읽습니다)`, readError: true };
+    return { ...DEFAULTS, corpTo: {} };
+  }
+  _readErr = '';
   try {
-    if (!fs.existsSync(FILE())) { _mem = { ...DEFAULTS, corpTo: {} }; _loadError = null; return _mem; }
-    _mem = normalizeSettings(JSON.parse(fs.readFileSync(FILE(), 'utf8')));
+    if (rr.kind === 'missing') { _mem = { ...DEFAULTS, corpTo: {} }; _loadError = null; return _mem; }
+    _mem = normalizeSettings(JSON.parse(rr.value));
     _loadError = null;
   } catch (e) {
     try { preserveCorrupt(FILE(), String(e?.message || e)); } catch { /* best effort */ }
@@ -63,10 +81,11 @@ export function loadDiskBadSettings() {
 export function diskBadSettingsLoadError() { loadDiskBadSettings(); return _loadError; }
 
 export function saveDiskBadSettings(patch = {}) {
+  { const no = diskBadWriteRefusal(); if (no) throw Object.assign(new Error(no.reason), no, { extra: { code: no.code, readError: true } }); }   // 107회차: 읽기 오류 중에는 빈 값 · 기본값 위에 쓰지 않는다
   const next = normalizeSettings({ ...loadDiskBadSettings(), ...(patch && typeof patch === 'object' ? patch : {}) });
   atomicWriteFileSync(FILE(), JSON.stringify(next, null, 2));
   _mem = next; _loadError = null;
   return next;
 }
 
-export function _resetDiskBadSettingsForTest() { _mem = null; _loadError = null; }
+export function _resetDiskBadSettingsForTest() { _mem = null; _loadError = null; _reader.reset(); _readErr = ''; }

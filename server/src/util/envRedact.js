@@ -23,7 +23,26 @@
  */
 export const REDACTED = '<redacted-by-portal-backup>';
 const SECRET_KEY_RE = /(SECRET|TOKEN|PASSWORD|PASSWD|PASSPHRASE|PRIVATE_KEY|API_KEY|_KEY|_PASS|_PWD?|_CREDS?|_CREDENTIALS?)$/i;
-const LINE_RE = /^(\s*(?:export\s+)?)([A-Za-z_][A-Za-z0-9_]*)(\s*=\s*)(.*)$/;
+// 108회차 A3: `s` 플래그 — 줄은 아래 splitLines 가 \n · \r\n · \r 로 이미 나눴고, 남는 U+2028/2029 가 든 값도 한 줄로 읽는다(`.` 가 멈추면 그 줄이 통째로 빠진다).
+const LINE_RE = /^(\s*(?:export\s+)?)([A-Za-z_][A-Za-z0-9_]*)(\s*=\s*)(.*)$/s;
+
+/*
+ * 108회차 A3(재현): 줄 끝이 CRLF 인 .env 는 **한 줄도 가려지지 않았다** — `split('\n')` 뒤 줄 끝에 '\r' 이 남고, `.` 는 '\r' 을 건너지 못해
+ *   LINE_RE 가 모든 줄에서 빗나갔다. systemd EnvironmentFile 은 '\r' 도 줄 끝으로 읽으므로 그런 portal.env 로도 포탈은 정상 기동한다 —
+ *   백업 번들 · 엣지→중앙 설정 사본에 AUTH_SECRET · SECRETS_KEY · CENTRAL_TOKEN 이 평문으로 실렸다. 복원 쪽도 같았다: CRLF 번들의 표식 줄이
+ *   그대로 지나가 키 값이 표식 글자가 되고, 현재 파일이 CRLF 면 살아 있는 키를 '없음' 으로 보고 버렸고, 호스트 고정 키(S-10)도 비켜 갔다.
+ *   줄 끝(\n · \r\n · \r)을 따로 떼어 판정하고 **그 줄 끝 그대로** 다시 잇는다(LF 파일의 결과 글자는 예전과 같다).
+ */
+const EOL_SPLIT = /(\r\n|\n|\r)/;
+/** 줄과 그 줄 끝을 나눈다 — [[줄, 끝], …](마지막 줄의 끝은 ''). */
+function splitLines(text) {
+  const parts = String(text ?? '').split(EOL_SPLIT);
+  const out = [];
+  for (let i = 0; i < parts.length; i += 2) out.push([parts[i], parts[i + 1] ?? '']);
+  return out;
+}
+/** 남긴 줄을 다시 잇는다 — 사이 구분은 그 줄이 원래 갖고 있던 끝(없으면 defEol). LF 파일이면 예전 `join('\n')` 과 같은 글자다. */
+const joinLines = (kept, defEol = '\n') => kept.map(([l, eol], i) => (i < kept.length - 1 ? l + (eol || defEol) : l)).join('');
 
 /** 키 이름이 비밀인가(순수). */
 export const isSecretEnvKey = (k) => SECRET_KEY_RE.test(String(k || '').trim());
@@ -34,15 +53,15 @@ export const isSecretEnvKey = (k) => SECRET_KEY_RE.test(String(k || '').trim());
  */
 export function redactEnvSecrets(text) {
   const keys = [];
-  const out = String(text ?? '').split('\n').map((line) => {
+  const out = splitLines(text).map(([line, eol]) => {
     const m = LINE_RE.exec(line);
-    if (!m) return line;
+    if (!m) return line + eol;
     const [, pre, key, eq, val] = m;
-    if (!isSecretEnvKey(key)) return line;
-    if (val.trim() === '' || val.trim() === REDACTED) return line; // 빈 값·이미 가린 값은 셈하지 않는다
+    if (!isSecretEnvKey(key)) return line + eol;
+    if (val.trim() === '' || val.trim() === REDACTED) return line + eol; // 빈 값·이미 가린 값은 셈하지 않는다
     keys.push(key);
-    return `${pre}${key}${eq}${REDACTED}`;
-  }).join('\n');
+    return `${pre}${key}${eq}${REDACTED}${eol}`;
+  }).join('');
   return { text: out, redacted: keys.length, keys };
 }
 
@@ -52,21 +71,21 @@ export function redactEnvSecrets(text) {
  */
 export function mergeRedactedEnv(incoming, current) {
   const cur = new Map();
-  for (const line of String(current ?? '').split('\n')) {
+  for (const [line] of splitLines(current)) {
     const m = LINE_RE.exec(line);
     if (m) cur.set(m[2], m[4]);
   }
   const dropped = [];
   let restored = 0;
   const lines = [];
-  for (const line of String(incoming ?? '').split('\n')) {
+  for (const [line, eol] of splitLines(incoming)) {
     const m = LINE_RE.exec(line);
-    if (!m || m[4].trim() !== REDACTED) { lines.push(line); continue; }
+    if (!m || m[4].trim() !== REDACTED) { lines.push([line, eol]); continue; }
     const [, pre, key, eq] = m;
-    if (cur.has(key) && cur.get(key).trim() !== '') { lines.push(`${pre}${key}${eq}${cur.get(key)}`); restored++; }
+    if (cur.has(key) && cur.get(key).trim() !== '') { lines.push([`${pre}${key}${eq}${cur.get(key)}`, eol]); restored++; }
     else dropped.push(key);
   }
-  return { text: lines.join('\n'), restored, dropped };
+  return { text: joinLines(lines), restored, dropped };
 }
 
 /**
@@ -85,25 +104,27 @@ const PINNED_SET = new Set(HOST_PINNED_ENV);
 /** @returns {{ text:string, pinned:string[] }} — pinned: 번들 값 대신 현재 값(또는 생략)으로 둔 키 */
 export function pinHostSecurityEnv(incoming, current) {
   const cur = new Map();
-  for (const line of String(current ?? '').split('\n')) {
+  for (const [line] of splitLines(current)) {
     const m = LINE_RE.exec(line);
     if (m) cur.set(m[2], line);
   }
   const pinned = [];
   const seen = new Set();
   const lines = [];
-  for (const line of String(incoming ?? '').split('\n')) {
+  const inLines = splitLines(incoming);
+  const defEol = (inLines.find(([, eol]) => eol) || [])[1] || '\n';   // 이어 붙이는 줄은 번들의 줄 끝을 따른다
+  for (const [line, eol] of inLines) {
     const m = LINE_RE.exec(line);
-    if (!m || !PINNED_SET.has(m[2])) { lines.push(line); continue; }
+    if (!m || !PINNED_SET.has(m[2])) { lines.push([line, eol]); continue; }
     const key = m[2];
     if (seen.has(key)) continue;
     seen.add(key);
-    if (cur.has(key)) { if (cur.get(key) !== line) pinned.push(key); lines.push(cur.get(key)); }
+    if (cur.has(key)) { if (cur.get(key) !== line) pinned.push(key); lines.push([cur.get(key), eol]); }
     else pinned.push(key);
   }
   // 현재 파일에만 있는 보안 키는 그대로 이어 붙인다(복원이 호스트가 켠 보호를 지우지 않게).
   for (const [key, line] of cur) {
-    if (PINNED_SET.has(key) && !seen.has(key)) { lines.push(line); }
+    if (PINNED_SET.has(key) && !seen.has(key)) { lines.push([line, '']); }
   }
-  return { text: lines.join('\n'), pinned };
+  return { text: joinLines(lines, defEol), pinned };
 }

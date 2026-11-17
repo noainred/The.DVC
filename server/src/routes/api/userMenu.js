@@ -36,7 +36,7 @@ const localUsernames = () => listUsers().map((u) => u.username);
 
 /** 저장소 오류(status 가 붙은 것)를 응답으로 — 그 밖은 전역 처리기로(bulletin.js 와 같은 모양). */
 function fail(res, e, next) {
-  if (e && Number.isInteger(e.status)) return res.status(e.status).json({ ok: false, reason: e.message, ...(e.field ? { field: e.field } : {}) });
+  if (e && Number.isInteger(e.status)) return res.status(e.status).json({ ok: false, reason: e.message, ...(e.field ? { field: e.field } : {}), ...(e.readError === true && e.code ? { code: e.code, readError: true } : {}) });   // 107회차: 읽기 오류 503 은 code 를 싣는다
   return next(e);
 }
 

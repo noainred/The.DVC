@@ -15,11 +15,11 @@
  *  · 쓰기는 디바운스(WRITE_DELAY_MS) + 원자적 쓰기. 손상은 보존하고 빈 알림함으로 읽는다(상태라 잃어도 기능은 돈다).
  *  · 본문은 문구(lineOf)만 — 메일 주소 · 비밀은 싣지 않는다.
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 107회차: 읽기 오류 ≠ 손상(공용 읽기 — 30초 간격 재읽기)
 import { registerStateFile } from '../util/stateFiles.js';
 import { capStr } from '../util/capStr.js';
 
@@ -36,13 +36,22 @@ let timer = null;
 const counters = { dropped: 0, usersFull: 0, pruned: 0, evicted: 0, writeFail: 0, lastError: null };
 const keepMs = () => INBOX_LIMITS.keepDays * 86_400_000;
 
+/*
+ * 107회차(재현 — EISDIR): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전 catch 하나는 온전한 원본을 .corrupt 로 옮기고 빈 값 · 기본값을 캐시해
+ *   다음 저장이 원본 자리를 덮었다. 읽기 단계는 공용 읽기: 원본을 두고 · 캐시하지 않고(30초 간격 재읽기) · 저장을 거절한다(503 settingsUnreadable). parse 실패는 예전과 같다.
+ */
+const _reader = makeJsonFileReader(() => fileOf(), { parse: (t) => t, preserve: false, tag: 'issue-inbox' });
+let _readErr = '';
 function load() {
   if (cache) return cache;
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') { _readErr = String(rr.error?.code || 'read-error').slice(0, 32); return { users: new Map(), seen: new Map() }; }   // 107회차: 캐시하지 않는다 — 쓰기는 거절한다
+  _readErr = '';
   cache = { users: new Map(), seen: new Map() };
   const f = fileOf();
   try {
-    if (fs.existsSync(f)) {
-      const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+    if (rr.kind === 'ok') {
+      const j = JSON.parse(rr.value);
       const u = j && typeof j.users === 'object' && !Array.isArray(j.users) ? j.users : {};
       const cut = Date.now() - keepMs();
       for (const [name, list] of Object.entries(u).slice(0, INBOX_LIMITS.users)) {
@@ -94,6 +103,7 @@ export function addInbox(username, item, { now = Date.now() } = {}) {
   const u = String(username || '').trim();
   if (!u || u.length > 64 || !item || typeof item.text !== 'string' || !item.text.trim()) return false;
   const c = load();
+  if (_readErr) { counters.dropped += 1; return false; }   // 107회차: 못 읽은 동안은 쌓지 않는다(빈 알림함 위에 쓰지 않는다 — 쌓지 못한 수는 dropped)
   let list = c.users.get(u);
   if (!list) {
     if (c.users.size >= INBOX_LIMITS.users) makeRoom(c, now);
@@ -150,7 +160,7 @@ export function inboxStatus() {
   const c = load();
   let items = 0; let unread = 0;
   for (const l of c.users.values()) { items += l.length; unread += l.filter((x) => !x.read).length; }
-  return { users: c.users.size, items, unread, ...counters, limits: INBOX_LIMITS };
+  return { users: c.users.size, items, unread, ...counters, limits: INBOX_LIMITS, ...(_readErr ? { readError: _readErr } : {}) };
 }
 /** 테스트 전용. */
-export function _resetInboxForTest() { if (timer) { clearTimeout(timer); timer = null; } cache = null; Object.assign(counters, { dropped: 0, usersFull: 0, writeFail: 0, lastError: null }); }
+export function _resetInboxForTest() { if (timer) { clearTimeout(timer); timer = null; } cache = null; _reader.reset(); _readErr = ''; Object.assign(counters, { dropped: 0, usersFull: 0, writeFail: 0, lastError: null }); }

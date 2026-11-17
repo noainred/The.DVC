@@ -184,8 +184,14 @@ v1.get('/', (req, res) => {
   envelope(res, '/', {
     key: { name: req.apiKey?.name || '', groups: [...mine], fp: req.apiKey?.fp || '', expiresAt: req.apiKey?.expiresAt ?? null },
     groups: GROUPS.map((g) => ({ ...g, allowed: mine.has(g.key) })),
-    endpoints: ENDPOINTS.map((e) => ({ path: e.path, method: e.method, group: e.group, summary: e.summary, fields: e.fields, allowed: mine.has(e.group) })),
-  }, { note: 'allowed:false 인 항목은 이 키로 403 입니다 — 설정 › 연동 키에서 분류를 켜야 합니다.' });
+    // 114회차(110 추정 4 — 재현): 경로의 allowed 는 실제 게이트와 **같은 판정 하나**(endpointAllowed)로 낸다. 예전에는 분류만 봐서(mine.has) 범위를 지정한 키에
+    //   전체 범위 전용 경로(requiresFullScope — 스토리지 · 부품 장애 · SAN)가 allowed:true 로 나갔다 — 실제 호출은 403 needs-full-scope 인데 아래 문구는
+    //   'allowed:false 가 403' 이라고 했다(자기점검이 틀린 답). 안 되는 까닭은 deniedBy 에 싣는다(조치가 다르다 — 분류 켜기 / 범위 없는 키).
+    endpoints: ENDPOINTS.map((e) => {
+      const gate = endpointAllowed(req.apiKey, e.path);
+      return { path: e.path, method: e.method, group: e.group, summary: e.summary, fields: e.fields, allowed: gate.ok, ...(gate.ok ? {} : { deniedBy: gate.code }) };
+    }),
+  }, { note: 'allowed:false 인 항목은 이 키로 403 입니다 — deniedBy 가 까닭입니다(group-denied · no-groups = 설정 › 연동 키에서 분류를 켜야 합니다 · needs-full-scope = vCenter 범위를 지정한 키로는 조회할 수 없는 자원입니다 — 범위 없는 키가 필요합니다).' });
 });
 
 /** OpenAPI 3.1 — 이 키가 쓸 수 있는 것만 담는다(없는 경로를 문서로 알려주지 않는다). */

@@ -15,6 +15,7 @@ import { loadGpuGuestSettings, resolveVmCreds } from '../gpu/settings.js';
 import { detectGuestOs } from './osDetect.js';
 import { upsertOs, getScanInfo, osSummary, pruneMissing } from './osStore.js';
 import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 107회차: 읽기 오류 ≠ 손상(공용 읽기 — 30초 간격 재읽기)
 import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
 import { splitDirectCollectTargets, skippedCountsOf } from '../vcenter/collectTarget.js'; // v2.732(B4-01): 직접 수집 대상 판정(store.js 주 폴러와 같은 조건)
 import { gpuAuthGuard, isGpuAuthError, guestAccountStopDev } from '../gpu/sshCollect.js';
@@ -40,16 +41,30 @@ function backupCorrupt(err) {
 }
 
 let cache = null;
+/*
+ * 107회차(재현 — EISDIR): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전 catch 하나는 온전한 원본을 .corrupt 로 옮기고 빈 값 · 기본값을 캐시해
+ *   다음 저장이 원본 자리를 덮었다. 읽기 단계는 공용 읽기: 원본을 두고 · 캐시하지 않고(30초 간격 재읽기) · 저장을 거절한다(503 settingsUnreadable). parse 실패는 예전과 같다.
+ */
+const _reader = makeJsonFileReader(() => FILE, { parse: (t) => t, preserve: false, tag: 'os-scan' });
+let _readErr = '';
+/** 107회차: 읽기 오류 중의 저장 거절 본문(503) 또는 null. */
+export function osScanWriteRefusal() {
+  loadOsScanSettings();
+  return _readErr ? { ok: false, status: 503, code: 'settingsUnreadable', readError: true, reason: `OS 스캔 설정 파일(${path.basename(FILE)})을 읽지 못해 저장하지 않았습니다 — 읽기 오류(${_readErr})이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` } : null;
+}
 export function loadOsScanSettings() {
   if (cache) return cache;
+  const rr = _reader.read();
+  const unread = rr.kind === 'read-error';   // 107회차: 기본값(꺼짐)으로 돌되 캐시하지 않는다 — 쓰기는 거절한다
+  _readErr = unread ? String(rr.error?.code || 'read-error').slice(0, 32) : '';
   let p = {};
   try {
-    if (fs.existsSync(FILE)) {
-      p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    if (rr.kind === 'ok') {
+      p = JSON.parse(rr.value);
       if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('객체가 아님'); // 형식 불일치도 손상
     }
   } catch (e) { p = {}; backupCorrupt(e); }
-  cache = {
+  const out = {
     enabled: !!p.enabled,
     intervalMin: clamp(p.intervalMin, 5, 100000, DEFAULTS.intervalMin),
     scope: p.scope || 'all',
@@ -60,7 +75,8 @@ export function loadOsScanSettings() {
     lastAuth: (p.lastAuth && typeof p.lastAuth === 'object' && !Array.isArray(p.lastAuth)) ? p.lastAuth : null,
     lastSkipped: Array.isArray(p.lastSkipped) ? p.lastSkipped : null,   // v2.732(B4-01): 직접 수집 대상이 아니라 스캔하지 않은 vCenter
   };
-  return cache;
+  if (!unread) cache = out;
+  return out;
 }
 // v2.595(감사 DEPS2595-01): 빈 칸('')은 0 이 아니라 미지정 — 이전 값을 유지한다(util/clampSetting.js).
 function clamp(v, mn, mx, d) { return clampSetting(v, { min: mn, max: mx, def: d }); }
@@ -81,7 +97,7 @@ export function saveOsScanSettings(body = {}) {
 }
 // 원자적 쓰기 — 스캔 1회마다 lastRun/lastFound를 저장하므로(주기 기본 12시간, 수동 실행 포함)
 // 부분기록 시 설정이 기본값으로 리셋되어 스캐너가 조용히 꺼진다. tmp+fsync+rename으로 방지.
-function write(obj) { try { atomicWriteFileSync(FILE, JSON.stringify(obj, null, 2), { mode: 0o600 }); } catch { /* */ } cache = null; }
+function write(obj) { if (osScanWriteRefusal()) return;   /* 107회차: 읽기 오류 중에는 기본값 위에 쓰지 않는다(스캔 결과 기록 포함) */ try { atomicWriteFileSync(FILE, JSON.stringify(obj, null, 2), { mode: 0o600 }); } catch { /* */ } cache = null; }
 
 
 /**

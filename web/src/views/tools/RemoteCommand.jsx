@@ -3,6 +3,8 @@ import { useHashTab } from '../../hooks/useHashTab.js';
 import { fetchJson, postJson, putJson, delJson, usePolling, getCurrentUser } from '../../api.js';
 // v2.731(A5-01): putJson·delJson 은 400·409 를 던지지 않고 본문을 돌려준다 — 성공 문구 전에 판정한다.
 import { requireChanged } from '../changeResult.js';
+import { unreadMarkOf, unreadKind, staleSeedLock } from '../settingsUnread.js';   // 112회차: 못 읽은 동안의 빈 설정 폼으로 저장하지 않는다
+import { SettingsUnreadBanner } from '../SettingsUnreadBanner.jsx';
 import { Loading, ErrorBox, Kpi, Modal } from '../../components/ui.jsx';
 import { rmaLateMark } from './edgeLateText.js'; // v2.631 A6-2631-04: 늦게 도착한 결과 배지
 import { ago, durationText, uptimeText, agentStatus, resultSummary, defaultArgs, argsIssue, groupCatalog, modeLabel, targetHint, statusTone, statusLabel, ownerOtpGate, otpInput, OWNER_OTP_ALWAYS } from './remoteCommand.js';
@@ -55,6 +57,7 @@ export default function RemoteCommand() {
   return (
     <div>
       <div className="section-title">🖥️ 원격 명령 실행 (RMA — Remote Management Agent)</div>
+      <SettingsUnreadBanner le={unreadMarkOf(data)} what="RMA 분배 · 접속 허용 설정" save="설정(⚙️)의 저장" />
       <p className="muted" style={{ marginTop: 4 }}>
         엣지 서버의 별도 프로세스(<code>vmware-portal-rma@인스턴스</code>)가 중앙을 롱폴해 프리셋 명령을 실행하고 결과만 회신합니다(아웃바운드 전용).
         한 법인에 인스턴스를 여러 개 두면 분배 방식(Active-Active · 부하 분산 · Active-Backup)을 법인별로 고릅니다. 모든 실행은 감사로그에 남습니다.
@@ -149,7 +152,7 @@ export default function RemoteCommand() {
       </>}
 
       {run && <RunModal group={groups.find((g) => g.agent === run.agent)} catalog={data?.catalog || []} modes={data?.settings?.modes || []} onClose={() => { setRun(null); setRefreshTick((t) => t + 1); }} />}
-      {cfg && <SettingsModal group={cfg} modes={data?.settings?.modes || []} defaultMode={data?.settings?.defaultMode} onClose={() => setCfg(null)} />}
+      {cfg && <SettingsModal group={cfg} modes={data?.settings?.modes || []} defaultMode={data?.settings?.defaultMode} unread={unreadMarkOf(data)} onClose={() => setCfg(null)} />}
       {deploy && <DeployModal preset={deploy} groups={groups} onClose={() => setDeploy(null)} />}
       {view && (
         <Modal title={`${view.agent} · ${view.label || view.cmd}`} onClose={() => setView(null)} width={860}>
@@ -299,7 +302,11 @@ function RunModal({ group, catalog, modes, onClose }) {
   );
 }
 
-function SettingsModal({ group, modes, defaultMode, onClose }) {
+function SettingsModal({ group, modes, defaultMode, unread = null, onClose }) {
+  // 112회차: 서버가 분배 · 접속 허용 설정을 못 읽은 동안 연 창은 빈 값(분배 ‘전역 기본’ · 접속 허용 IP 없음 · 원격 관리 없음)으로 채워진다 — 이 창은 폼을 다시 채우지 않으므로
+  //   다시 읽힌 뒤에도 그 창의 저장은 잠근다(빈 ‘접속 허용 IP’ 저장 = 허용 목록이 ‘제한 없음’ 이 된다). 닫고 다시 열면 저장된 값이 보인다. 비밀번호(다른 파일)는 그대로.
+  const [openedKind] = useState(() => unreadKind(unread));
+  const lockWhy = staleSeedLock(openedKind, unread, { what: 'RMA 분배 · 접속 허용 설정' });
   const [mode, setMode] = useState(group.global ? (defaultMode || 'active-active') : (group.modeExplicit ? group.mode : ''));
   const [primary, setPrimary] = useState(group.primary || '');
   const [pw, setPw] = useState('');
@@ -363,7 +370,8 @@ function SettingsModal({ group, modes, defaultMode, onClose }) {
           </label>
         </div>
       )}
-      <button className="login-btn" onClick={save}>저장</button>
+      {lockWhy && <div className="banner warn" data-settings-unread-lock="1" style={{ whiteSpace: 'normal', marginBottom: 8, fontSize: 12.5 }}>🔒 {lockWhy}</div>}
+      <button className="login-btn" disabled={!!lockWhy} onClick={save}>저장</button>
       {!group.global && (
         <div className="card" style={{ marginTop: 12 }}>
           <b>RMA 비밀번호(서명)</b> — 현재 {group.hasPassword ? <span style={{ color: TONE.ok }}>등록됨</span> : <span style={{ color: TONE.warn }}>미등록(무서명)</span>}
@@ -384,7 +392,7 @@ function SettingsModal({ group, modes, defaultMode, onClose }) {
           <div className="flex gap wrap" style={{ marginTop: 6 }}>
             <input className="input" style={{ minWidth: 300 }} value={ips} onChange={(e) => setIps(e.target.value)} placeholder="10.0.0.0/8, 203.0.113.5" />
             <input className="input" value={comment} onChange={(e) => setComment(e.target.value)} placeholder="코멘트(중앙 표시용)" />
-            <button className="tab" onClick={saveAccess}>저장</button>
+            <button className="tab" disabled={!!lockWhy} onClick={saveAccess}>저장</button>
           </div>
         </div>
       )}
@@ -395,7 +403,7 @@ function SettingsModal({ group, modes, defaultMode, onClose }) {
             <label>롱폴(ms) <input className="input" style={{ width: 90 }} value={remote.longpollMs} onChange={(e) => setRemote({ ...remote, longpollMs: e.target.value.replace(/\D/g, '') })} placeholder="20000" /></label>
             <label>동시 점검 <input className="input" style={{ width: 60 }} value={remote.testConcurrency} onChange={(e) => setRemote({ ...remote, testConcurrency: e.target.value.replace(/\D/g, '') })} placeholder="4" /></label>
             <label>점검 차단 목록 <input className="input" style={{ minWidth: 200 }} value={remote.disabledTests} onChange={(e) => setRemote({ ...remote, disabledTests: e.target.value })} placeholder="script,text-log" /></label>
-            <button className="tab" onClick={saveRemote}>저장</button>
+            <button className="tab" disabled={!!lockWhy} onClick={saveRemote}>저장</button>
           </div>
           {pol && (
             <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>

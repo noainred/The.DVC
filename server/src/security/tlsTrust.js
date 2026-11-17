@@ -162,7 +162,10 @@ export function loadCaBundle({ force = false } = {}) {
   }
   let text;
   try { text = fs.readFileSync(file, 'utf8'); } catch (e) {
-    _bundle = { key, certs: [], info: { present: true, file, error: `읽지 못했습니다(${String(e?.code || e?.message || e).slice(0, 80)})` } };
+    // 110회차(재현): 읽기 오류를 **stat 열쇠로 기억하지 않는다** — 그 열쇠(mtime · size · inode)는 권한을 고쳐도(chmod 는 mtime 을 바꾸지 않는다) · 일시 오류(EIO)가
+    //   지나가도 그대로라, 번들이 다시 읽히는데도 재시작 전까지 '읽지 못했습니다' 로 남아 사설 CA 로 서명한 장비가 계속 거부됐다. 오류 전용 열쇠로 두면 다음 확인(1초 뒤)이 다시 읽는다.
+    const code = String(e?.code || e?.message || e).slice(0, 80);
+    _bundle = { key: `err-read|${code}`, certs: [], info: { present: true, file, error: `읽지 못했습니다(${code})` } };
     return _bundle;
   }
   const p = parseBundle(text);

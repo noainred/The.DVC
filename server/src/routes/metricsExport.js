@@ -86,9 +86,13 @@ metricsExportRouter.get('/', async (req, res) => {
   H('vmware_datastore_free_bytes', '데이터스토어 여유(byte)');
   for (const d of snap.datastores || []) {
     const labels = { vcenter: d.vcenterId, datastore: d.name, type: d.type };
-    out += line('vmware_datastore_usage_percent', labels, d.usagePct);
-    out += line('vmware_datastore_capacity_bytes', labels, (d.capacityGB || 0) * 1073741824);
-    out += line('vmware_datastore_free_bytes', labels, (d.freeGB || 0) * 1073741824);
+    // 116회차 F2(재현): 용량 · 여유를 **못 읽은** 데이터스토어(capacityGB · freeGB null — v2.598 SOAP freeSpace 없음 · v2.733 REST 폴백)를
+    //   `(null || 0) * 1GiB` = 0 byte 로 내보냈다 — 외부 경보가 '여유 0' 으로 읽는다(실제로 가득 찬 DS 와 구분되지 않았다). 호스트 사용률(v2.743 VC-04)처럼
+    //   결측은 그 시계열을 내지 않는다(line 이 null 을 건너뛴다). 보고된 0 은 값이다(numOrNull).
+    const capGB = numOrNull(d.capacityGB); const freeGB = numOrNull(d.freeGB);
+    out += line('vmware_datastore_usage_percent', labels, numOrNull(d.usagePct));
+    out += line('vmware_datastore_capacity_bytes', labels, capGB == null ? null : capGB * 1073741824);
+    out += line('vmware_datastore_free_bytes', labels, freeGB == null ? null : freeGB * 1073741824);
   }
 
   // 집계(per-vCenter VM 카운트)

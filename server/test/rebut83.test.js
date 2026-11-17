@@ -210,9 +210,12 @@ test('80 E1 — 스냅샷 IO 이름: awk getline 없음 · 셸이 고른 pid 의
   const out = execFileSync(DASH, ['-c', SNAP.FOCUS_SNAPSHOT_COMMAND], { encoding: 'utf8', timeout: 20_000, maxBuffer: 8 << 20 });
   const r = SNAP.parseSnapshot(out, { topN: 5 });
   assert.equal(r.truncated, false);
+  // 커널 워커(kworker/…)의 comm 은 맡은 일에 따라 꼬리('-writeback' · '+iou_exit')가 바뀐다 — 스냅샷이 읽은 뒤 여기서 다시 읽는 사이에 바뀌어
+  //   전량 실행(부하)에서 간헐 실패했다(v3.18.11 verify 실측: 'kworker/u16:9-writeback ≠ kworker/u16:9+iou_exit' · 단독 3회는 통과). 꼬리 앞까지만 대조한다.
+  const stable = (n) => (/^kworker\//.test(n) ? n.replace(/[-+].*$/, '') : n);
   for (const x of r.ioTop) {
     let comm = null; try { comm = fs.readFileSync(`/proc/${x.pid}/comm`, 'utf8').split('\n')[0]; } catch { continue; }
-    assert.ok(x.name === '?' || x.name === comm.replace(/[^ -~]/g, '?').slice(0, 32), `pid ${x.pid}: ${x.name} ≠ ${comm}`);
+    assert.ok(x.name === '?' || stable(x.name) === stable(comm.replace(/[^ -~]/g, '?').slice(0, 32)), `pid ${x.pid}: ${x.name} ≠ ${comm}`);
   }
 });
 

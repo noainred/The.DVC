@@ -61,7 +61,7 @@ test('#4 — 포트 사용량 설정 손상: 정리 보류(held) · PUT · 정�
   } finally { fs.rmSync(d, { recursive: true, force: true }); }
   const src = rd('routes/api/sanSwitch.js');
   assert.equal((src.match(/if \(perfSettingsLoadError\(\)\) return res\.status\(409\)/g) || []).length, 2, 'PUT · 정리');
-  assert.match(src, /loadError: \{ reason: String\(le\.reason \|\| ''\)\.slice\(0, 200\) \}/);
+  assert.match(src, /loadError: \{ reason: String\(le\.reason \|\| ''\)\.slice\(0, 200\), readError: le\.readError === true \}/);   // 112회차: readError 를 함께 싣는다(화면이 읽기 오류 · 손상을 가른다)
 });
 
 test('#1 · #2 · #7 · #9 — 대량 테스트 승계 판정 · 버린 비밀번호 보고 · 0% 막대 · 빈 글자 수', () => {

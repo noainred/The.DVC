@@ -76,7 +76,7 @@ function viewValue(v) {
 export function getPrefs(username) {
   const e = load()[ukey(username)] || null;
   const slots = Array.from({ length: SLOT_COUNT }, (_, i) => viewValue(e?.slots?.[i]));
-  return { def: viewValue(e?.def), slots, at: e?.at || null, unreadable: unreadable || undefined };
+  return { def: viewValue(e?.def), slots, at: e?.at || null, unreadable: unreadable || undefined, readError: (unreadable && readErr) || undefined };   // 113회차 메인: 읽기 오류 표지(손상과 구분)
 }
 
 function write(next) {
@@ -96,7 +96,7 @@ export function setPref(username, slot, value, { alsoDefault = false, now = Date
   const nv = normalizeValue(value, { slotNo: isDef ? null : n });
   if (!nv.ok) return { ok: false, status: 400, reason: nv.reason };
   load();
-  if (unreadable) return { ok: false, status: 503, code: 'prefsUnreadable', reason: '저장값 파일을 읽지 못해 저장하지 않습니다(손상 사본은 설정 폴더에 남았습니다).' };
+  if (unreadable) return { ok: false, status: 503, code: 'prefsUnreadable', reason: readErr ? '저장값 파일을 읽지 못해 저장하지 않습니다(읽기 오류 — 원본은 그대로 있습니다. 파일 소유자 · 권한을 확인하세요).' : '저장값 파일을 읽지 못해 저장하지 않습니다(손상 사본은 설정 폴더에 남았습니다).' };
   const k = ukey(username);
   const next = { ...cache };
   if (!next[k] && Object.keys(next).length >= MAX_USERS) return { ok: false, status: 400, reason: `저장값을 가진 계정이 ${MAX_USERS}개를 넘었습니다.` };
@@ -121,7 +121,7 @@ export function clearPref(username, slot) {
   const n = Number(slot);
   if (!isDef && !(Number.isInteger(n) && n >= 1 && n <= SLOT_COUNT)) return { ok: false, status: 400, reason: `저장 칸은 1~${SLOT_COUNT} 또는 기본값입니다.` };
   load();
-  if (unreadable) return { ok: false, status: 503, code: 'prefsUnreadable', reason: '저장값 파일을 읽지 못해 바꾸지 않습니다(손상 사본은 설정 폴더에 남았습니다).' };
+  if (unreadable) return { ok: false, status: 503, code: 'prefsUnreadable', reason: readErr ? '저장값 파일을 읽지 못해 바꾸지 않습니다(읽기 오류 — 원본은 그대로 있습니다. 파일 소유자 · 권한을 확인하세요).' : '저장값 파일을 읽지 못해 바꾸지 않습니다(손상 사본은 설정 폴더에 남았습니다).' };
   const k = ukey(username);
   if (!cache[k]) return { ok: true, prefs: getPrefs(username) };
   const next = { ...cache };

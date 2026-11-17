@@ -22,8 +22,8 @@ import { config } from '../config.js';
 import { store } from '../store.js';
 import { corruptOnlyReason } from '../util/registryCore.js';
 import { listDatacenters } from '../datacenter/store.js';
-import { listRegistry as listVcenters } from '../vcenter/registry.js';
-import { listRegistry as listNsx } from '../nsx/registry.js';
+import { listRegistry as listVcenters, registryLoadError as vcRegistryLoadError } from '../vcenter/registry.js';
+import { listRegistry as listNsx, registryLoadError as nsxRegistryLoadError } from '../nsx/registry.js';
 import { listHorizon, horizonLoadError } from '../horizon/horizon.js';
 import { registryLoadError as idracLoadError } from '../idrac/registry.js';
 import { listServers as listVeeam, registryLoadError as veeamLoadError } from '../veeam/registry.js';
@@ -63,10 +63,15 @@ export function settingsStatusSources({ now = Date.now() } = {}) {
     'datacenter-admin': () => ({ count: len(listDatacenters()), loadError: damaged('datacenters.json') }),
     'vcenter-admin': () => {
       const errs = store.get()?.collectionErrors;
-      const count = len(listVcenters());
-      return { loadError: damaged('vcenters.json'), count, authStopped: Array.isArray(errs) ? errs.filter((e) => e && e.authStopped).length : null };
+      // 118회차 메인(Chromium 판독): 등록부를 **읽지 못한 동안**(읽기 오류 — 원본은 그대로)에도 건수 0 으로 '등록된 vCenter 없음 · 미설정' 배지가 붙어,
+      //   같은 화면의 '읽지 못했습니다 — 등록된 vCenter 가 없는 것이 아닙니다' 배너와 반대로 말했다. 못 읽은 것은 0건이 아니다 — 건수를 싣지 않는다(읽기 오류 · 손상 · 보존본만 남음).
+      //   읽기 오류(readError — 보존본이 없다)와 손상(보존본 확인 — v2.916 반증 D2 문구)은 가른다.
+      const le = vcRegistryLoadError();
+      const unread = damaged('vcenters.json') || !!le;
+      const count = unread ? null : len(listVcenters());
+      return { loadError: unread, readError: le?.readError === true, count, authStopped: Array.isArray(errs) ? errs.filter((e) => e && e.authStopped).length : null };
     },
-    'nsx-admin': () => ({ count: len(listNsx()), loadError: damaged('nsx.json') }),
+    'nsx-admin': () => { const le = nsxRegistryLoadError(); const loadError = damaged('nsx.json') || !!le; return { count: loadError ? null : len(listNsx()), loadError, readError: le?.readError === true }; },   // 116회차 등록부 — 같은 규칙
     'horizon-admin': () => { const loadError = damaged('horizon.json') || !!horizonLoadError(); return { loadError, count: loadError ? null : len(listHorizon()) }; },   // 38회차 R3: 읽기 오류 · 손상 기억도
     'idrac-admin': () => ({ loadError: !!idracLoadError() }),
     veeam: () => { const loadError = !!veeamLoadError(); return { loadError, count: loadError ? null : len(listVeeam()) }; },

@@ -12,6 +12,8 @@ import { dayStamp } from '../../dayStamp.js';
 import BoldText from '../../components/boldText.jsx';
 import { guestAuthLines } from '../authSkipText.js'; // v2.591(감사 F2): 게스트 계정 인증 실패 정지·차단기
 import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나(즉시 revoke · 문서 밖 click 금지)
+import { unreadMarkOf, unreadKind, saveLockedByUnread, shouldReseed } from '../settingsUnread.js';   // 112회차: 못 읽은 동안의 기본값 폼으로 저장하지 않는다
+import { SettingsUnreadBanner } from '../SettingsUnreadBanner.jsx';
 
 // v3.13.7 설정 칸 한 묶음(이름 · 칸 · 단위) — 줄이 바뀌어도 함께 움직인다
 const FIELD = { alignItems: 'center', gap: 6, whiteSpace: 'nowrap' };
@@ -196,7 +198,16 @@ export function RealOs({ scope }) {
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState(null);
 
-  const loadStatus = () => fetchJson('/admin/os-scan').then((r) => { setSt((cur) => ({ ...(cur || {}), ...r, settings: cur?.dirty ? cur.settings : r.settings })); setErr(null); }).catch((e) => setErr(e.message));
+  // 112회차: 서버가 스캔 설정 파일을 못 읽은 동안 settings 는 기본값이다 — 못 읽은 값으로 채운 폼(그 위의 편집 포함)은 상태가 바뀐 조회에서 서버값으로 다시 채운다.
+  //   표지(loadError)는 조회마다 새로 둔다(펼침 병합이라 예전 표지가 남지 않게).
+  const loadStatus = () => fetchJson('/admin/os-scan').then((r) => {
+    setSt((cur) => {
+      const le = unreadMarkOf(r);
+      const keep = !!cur?.dirty && !shouldReseed(unreadKind(unreadMarkOf(cur)), le);
+      return { ...(cur || {}), ...r, loadError: le, dirty: keep, settings: keep ? cur.settings : r.settings };
+    });
+    setErr(null);
+  }).catch((e) => setErr(e.message));
   // v2.611 WEB2611-07·08: 세대 가드(범위·필터를 바꾼 뒤 늦게 온 이전 응답은 버린다) +
   // 조회 실패를 '스캔 결과가 없습니다' 로 칠하지 않는다(직전 결과는 그대로 두고 배너로 말한다).
   const resGen = useRef(0);
@@ -223,7 +234,9 @@ export function RealOs({ scope }) {
   const s = st.settings || {};
   const setS = (patch) => setSt((cur) => ({ ...cur, dirty: true, settings: { ...cur.settings, ...patch } }));
 
-  const saveSettings = async () => { setBusy('save'); setMsg(null); try { const r = await putJson('/admin/os-scan/settings', s); setSt((c) => ({ ...c, ...r, dirty: false })); setMsg('저장됨'); } catch (e) { setMsg(e.message); } finally { setBusy(''); } };
+  const unread = unreadMarkOf(st);
+  const saveLocked = saveLockedByUnread(unread);   // 112회차: 설정 파일 읽기 오류 동안 저장 잠금(서버도 503)
+  const saveSettings = async () => { if (saveLocked) return; setBusy('save'); setMsg(null); try { const r = await putJson('/admin/os-scan/settings', s); setSt((c) => ({ ...c, ...r, loadError: null, dirty: false })); setMsg('저장됨'); } catch (e) { setMsg(e.message); } finally { setBusy(''); } };
   const runNow = async () => { setBusy('run'); setMsg(null); try { const r = await postJson('/admin/os-scan/run', scope ? { vcenterId: scope } : {}); setMsg(r.ok ? `스캔 완료 — 탐지 ${r.found ?? 0}건` : `오류: ${r.reason || '실패'}`); await loadStatus(); await loadResults(); } catch (e) { setMsg(e.message); } finally { setBusy(''); } };
   const exportCsv = async () => {
     const qs = new URLSearchParams({ ...(scope ? { vcenterId: scope } : {}), ...(mm ? { mismatch: '1' } : {}) }).toString();
@@ -258,6 +271,7 @@ export function RealOs({ scope }) {
       </div>
 
       <div className="card" style={{ padding: 14, marginBottom: 12 }}>
+        <SettingsUnreadBanner le={unread} what="실제 OS 스캔 설정" save="설정 저장" onRecheck={loadStatus} />
         <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>게스트 OS에서 <code>/etc/os-release</code>·<code>/etc/redhat-release</code>(Linux)·<code>Win32_OperatingSystem</code>(Windows)를 직접 읽어 <b>실제 설치 OS</b>를 확인합니다(ESXi 보고값과 별개). 계정은 <b>설정 › GPU 게스트 수집</b>의 OS별 계정을 사용합니다. 상단 <b>vCenter 선택</b>이 스캔 범위입니다.</p>
         <div className="flex gap wrap" style={{ alignItems: 'center', gap: 14 }}>
           <label className="flex gap" style={{ alignItems: 'center', cursor: 'pointer' }}><input type="checkbox" checked={!!s.enabled} onChange={(e) => setS({ enabled: e.target.checked })} /> <b>주기 스캔</b></label>
@@ -269,7 +283,7 @@ export function RealOs({ scope }) {
           <label className="flex" style={FIELD}><span className="muted">동시</span><input className="input" type="number" min={1} max={16} style={{ width: 56, minWidth: 0 }} value={s.concurrency} onChange={(e) => setS({ concurrency: e.target.value })} /></label>
         </div>
         <div className="flex gap" style={{ marginTop: 12, alignItems: 'center', flexWrap: 'wrap', rowGap: 8 }}>{/* v3.13.7 버튼 여러 개 행은 flexWrap — 400px 에서 '지금 스캔(전체 vCenter)' 이 세 줄로 접히고 오류 문구가 짓눌렸다 */}
-          <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy === 'save'} onClick={saveSettings}>설정 저장</button>
+          <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy === 'save' || saveLocked} onClick={saveSettings}>설정 저장</button>
           <button className="logout-btn" style={{ padding: '8px 16px', flex: 'none', whiteSpace: 'nowrap' }} disabled={busy === 'run'} onClick={runNow}>{busy === 'run' ? '스캔 중…' : `지금 스캔 (${scope || '전체 vCenter'})`}</button>
           {st.fleetRunHidden ? <span className="muted" style={{ fontSize: 12 }}>마지막 실행 결과(탐지 수·오류·인증 정지)는 전 vCenter 기준이라 범위가 제한된 계정에는 표시하지 않습니다.</span> : null}
           {st.lastErr ? <span className="muted" style={{ fontSize: 12, color: 'var(--amber)' }}>최근 오류: {st.lastErr.slice(0, 60)}</span> : null}

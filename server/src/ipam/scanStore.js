@@ -15,7 +15,7 @@ import { DEFAULT_PORTS, isIpv4 } from './scan.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { makeJsonFileReader, READ_RETRY_MS } from '../util/jsonFileRead.js';   // 103회차 F19: 읽기 오류 ≠ 손상(스캔 설정)
 import { getOverrides, overridesLoadError } from './overrides.js';
-import { getPolicies, isCoveredByAnyPolicy, findPolicy, specToRange } from './rangePolicies.js';
+import { getPolicies, isCoveredByAnyPolicy, findPolicy, specToRange, rangePoliciesWriteRefusal } from './rangePolicies.js';
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
 import { ipToNum, canonIp } from '../util/ipv4.js';
 import { numOrNull } from '../util/numOrNull.js';
@@ -48,6 +48,9 @@ const _ipNum = ipToNum;
 function managedChecker() {
   // 25회차 F-4 ③: override 파일을 못 읽었으면 '관리 IP' 를 알 수 없다 — 모두 관리로 본다(관리 IP 의 스캔 결과 · 1년 이력이 정리되지 않게)
   if (overridesLoadError()) return () => true;
+  // 115회차(107 반증 — 재현): 대역 정책 파일도 같다 — 읽기 오류 동안 getPolicies 는 빈 목록이라(107: 캐시하지 않음) 정책으로만 관리하는 IP 가
+  //   '미관리' 로 판정돼 스캔 결과(보존 기간) · 1년 이력이 정리됐다. 못 읽은 정책은 '정책 없음' 이 아니다 — 모두 관리로 본다(다시 읽히면 예전 판정).
+  if (rangePoliciesWriteRefusal()) return () => true;
   const ovMap = getOverrides();
   const hasPolicies = getPolicies().some((p) => p.enabled !== false);
   // ⚠ 회귀 방지(v2.287, 확정 버그 #11): 여기서 findPolicy(ip, '') 를 쓰면 claimedVcenterId 가

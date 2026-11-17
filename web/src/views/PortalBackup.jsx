@@ -14,6 +14,21 @@ export function skippedText(r) {
   return ` ⚠ 파일당 상한(${fmtBytes(r.sizeCapBytes)})을 넘어 ${list.length}개를 뺐습니다: ${names}${list.length > 5 ? ' 외' : ''} — 이 백업으로 복원하면 그 파일은 되살아나지 않습니다.`;
 }
 
+/**
+ * 106회차(103 F18 · 105 A8 덜 고침): 서버가 백업 설정 파일을 읽지 못한 동안(읽기 오류) 상태 응답의 settings 는 저장된 정책이 아니라
+ *   임시 기본값(정기 백업 꺼짐 · 보관 상한) + loadError 다. 예전에는 그 값으로 채운 편집 폼을 끝까지 들고 있어, 파일이 다시 읽힌 뒤 ‘정책 저장’ 한 번이
+ *   저장된 정책(정기 백업 켜짐 · 보관 개수)을 그 기본값으로 덮었다. 못 읽은 값으로 채운 폼은 다음 조회의 값으로 바꾼다(읽은 값으로 채운 폼은 편집 중이니 그대로).
+ */
+export function adoptBackupSettings(cur, fresh) {
+  return cur && !cur.loadError ? cur : fresh;
+}
+/** 106회차: 읽기 오류 동안 정책 칸 위에 보일 안내(없으면 ''). 그동안 ‘정책 저장’ 은 잠근다. */
+export function backupSettingsUnreadText(s) {
+  if (!s?.loadError) return '';
+  const code = typeof s.loadError.code === 'string' && s.loadError.code ? `(${s.loadError.code})` : '';
+  return `백업 설정 파일을 읽지 못했습니다${code} — 아래 값은 저장된 정책이 아니라 임시 기본값입니다(원본은 그대로 있습니다). 파일 권한 · 소유자 · 디스크를 확인하세요. 다시 읽히면 저장된 정책으로 바뀌고, 그때까지 정책 저장은 잠급니다.`;
+}
+
 // fmtBytes/fmtTime 은 util/fmt.js 로 통합(v2.319 — 동일 구현 복붙 제거)
 /**
  * v2.622(감사 LEFT-05): 엣지 설정 수신 배지(순수). 413 로 일부 파일을 보내지 못해 중앙이 직전 사본을 유지한(retained)
@@ -75,6 +90,9 @@ export function restoreStateText(r) {
     if (l.reason === 'interrupted') out.last = `${fmtTime(l.at)} 기동 때: 이전 적용이 중단된 흔적이 있어 예약 복원을 적용하지 않았습니다.`;
     else if (l.reason) out.last = `${fmtTime(l.at)} 기동 때: 예약 복원을 적용하지 못했습니다 — ${l.reason}`;
     else out.last = `${fmtTime(l.at)} 기동 때 예약 복원 적용${l.source ? `(${l.source})` : ''}: ${applied}개${failed.length ? ` · 실패 ${failed.length}개(${failed.slice(0, 5).map((f) => f.file).join(', ')})` : ''}${rejected ? ` · 거부 ${rejected}개` : ''}`;
+    // 114회차: 지금 파일을 그대로 둔 실행 기록(보낸 회차 · 실행 원장 — 서버 stagedRestore 의 kept) 수 — 적용 수가 예약 수보다 적은 까닭을 밝힌다.
+    const kept = Array.isArray(l.kept) ? l.kept.length : 0;
+    if (out.last && kept && !l.reason) out.last += ` · 실행 기록 ${kept}개는 지금 것 유지`;
     // v2.769(점검 R4-D1-2): 적용 때 남긴 경고(되살린 엣지 토큰·전원 재로그인)도 보여 준다 — 상태 응답에만 두면 사람이 모른다.
     // v2.770(점검 R5-E1-2): 서버 경고는 `{file, reason}` 객체다(stagedRestore — 예전 문자열 필터는 0개를 남기고 배너만 켰다). 문자열도 받는다.
     const warns = Array.isArray(l.warnings) ? l.warnings.map(restoreWarnText).filter(Boolean) : [];
@@ -96,7 +114,7 @@ export default function PortalBackup() {
   const [msg, setMsg] = useState(null);
   const [view, setView] = useState(null); // 상세 모달
 
-  const load = () => fetchJson('/admin/backup/status').then((r) => { setD(r); setS((cur) => cur || r.settings); setError(null); }).catch((e) => setError(e.message));
+  const load = () => fetchJson('/admin/backup/status').then((r) => { setD(r); setS((cur) => adoptBackupSettings(cur, r.settings)); setError(null); }).catch((e) => setError(e.message));
   useEffect(() => { load(); const t = setInterval(load, 20_000); return () => clearInterval(t); }, []);
   if (error && !d && !s) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류로 화면 전체를 갈아치우지 않음(CLAUDE.md)
   if (!d || !s) return <Loading />;
@@ -161,6 +179,7 @@ export default function PortalBackup() {
       {/* 설정 */}
       <div className="card" style={{ padding: 16, marginBottom: 14 }}>
         <div className="section-title" style={{ marginTop: 0, fontSize: 15 }}>백업 정책</div>
+        {s.loadError && <div className="banner warn" style={{ marginBottom: 10, fontSize: 12.5 }}>{backupSettingsUnreadText(s)}</div>}
         <div className="flex gap wrap" style={{ alignItems: 'center', gap: 18 }}>
           <label className="flex gap" style={{ alignItems: 'center', cursor: 'pointer' }}>
             <input type="checkbox" checked={s.scheduleEnabled} onChange={(e) => setS({ ...s, scheduleEnabled: e.target.checked })} /> <b>정기 백업</b>
@@ -179,7 +198,7 @@ export default function PortalBackup() {
           <input className="input" type="number" min="1" style={{ width: 80 }} value={s.retention} onChange={(e) => setS({ ...s, retention: e.target.value })} />
         </div>
         <div className="flex gap wrap" style={{ marginTop: 12 }}>
-          <button className="login-btn" style={{ padding: '8px 16px' }} disabled={busy === 'save'} onClick={saveSettings}>{busy === 'save' ? '저장 중…' : '정책 저장'}</button>
+          <button className="login-btn" style={{ padding: '8px 16px' }} disabled={busy === 'save' || !!s.loadError} onClick={saveSettings}>{busy === 'save' ? '저장 중…' : '정책 저장'}</button>
           <button className="logout-btn" style={{ padding: '8px 16px' }} disabled={busy === 'now'} onClick={backupNow}>{busy === 'now' ? '백업 중…' : '⬇ 지금 백업'}</button>
           <span className="muted" style={{ alignSelf: 'center', fontSize: 12 }}>
             {d.scheduleActive ? '정기 백업 동작 중' : '정기 백업 꺼짐'} · {d.watching ? '변경 감시 켜짐' : '변경 감시 꺼짐'}

@@ -7,6 +7,8 @@ import { policySpecSize } from './ipmsRangeText.js';
 import { Card } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
+import { unreadMarkOf } from '../settingsUnread.js';   // 112회차: 정책 파일을 못 읽은 동안의 0건 목록을 '정책 없음' 으로 보이지 않는다
+import { SettingsUnreadBanner } from '../SettingsUnreadBanner.jsx';
 
 
 // v2.691: 'vCenter별 IP 대역 저장 + 주기 스캔' 페이지(IpamRanges)는 지웠다 — 스캔 대역·설정(IpScanSettings)으로 합쳐졌다.
@@ -226,6 +228,8 @@ export function RangePolicies({ scope, canManage, vcenters = [], onChanged }) {
         <Card label="상태 분포" value={Object.keys(sm.byStatus || {}).length} meta={Object.entries(sm.byStatus || {}).map(([k, v]) => `${MGMT[k]?.[0] || k} ${v}`).join(' · ') || '—'} />
       </div>
       {err && <div className="login-error" style={{ marginBottom: 8 }}>{err}</div>}
+      {/* 112회차: 정책 파일을 못 읽은 동안 목록은 0건이다 — '정책 없음' 이 아니다(추가 · 변경은 서버가 503 으로 거절한다). */}
+      <SettingsUnreadBanner le={unreadMarkOf(data)} what="IP 대역 정책" save="정책 추가 · 변경" onRecheck={load} />
       <div className="flex between" style={{ marginBottom: 10, alignItems: 'center' }}>
         <div className="muted" style={{ fontSize: 12 }}>우선순위: <b>IP 수동(override)</b> &gt; <b>대역 정책</b> &gt; 자동발견. 좁은 대역·높은 priority가 겹침 시 우선.</div>
         {canManage && <button className="login-btn" style={{ flex: 'none', padding: '8px 14px' }} onClick={() => setEdit({ __new: true, priority: 100, enabled: true })}>＋ 새 정책</button>}

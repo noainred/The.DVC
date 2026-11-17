@@ -11,10 +11,10 @@
  *  · 비밀은 없다(항목 key·폴더 경로뿐).
  * 도메인을 모른다(util 의존 방향 — docs/rules/common.md): 항목 검증(resolveCols·knownKeys)·선택값 검증(normalizeOpts)은 부르는 쪽이 준다.
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from './atomicWrite.js';
+import { atomicWriteFileSync } from './atomicWrite.js';
+import { readJsonFile, nowMs, READ_RETRY_MS } from './jsonFileRead.js';   // 113회차 R4: 읽기 오류 ≠ 손상
 
 export const SLOT_COUNT = 5;
 export const MAX_USERS = 2000;
@@ -35,18 +35,26 @@ export function createExportPrefs({ fileName, resolveCols, knownKeys, normalizeO
   const FILE = () => path.join(config.configDir, fileName);
   let cache = null;
   let unreadable = false;
+  let readErr = '';     // 읽기 오류 코드(EACCES · EIO · EMFILE …) — 손상과 다르다: 원본은 그대로이고 간격을 두고 다시 읽는다
+  let retryAt = 0;
 
+  /*
+   * 113회차 R4(재현 — 108회차가 남긴 것 E5): **읽기 오류**(권한 · 디스크 · fd 고갈 — 파일은 멀쩡하다)도 손상과 같은 catch 로 받아
+   *   preserveCorrupt 가 온전한 원본을 `.corrupt.<시각>` 으로 **옮겼다** → 그 기동 동안은 쓰기 503, 재시작하면 '파일 없음' 이라 전 계정 저장값이 빈 채로
+   *   시작했다(되살리려면 관리자가 보존본 이름을 손으로 되돌려야 했다). 이제 읽기 오류는 원본을 두고(옮기지 않는다) 그동안 '못 읽음' + 쓰기 503,
+   *   30초 뒤 다시 읽어 풀리면 원본 값으로 돌아온다(97 · 103 · 107회차와 같은 판정 — util/jsonFileRead.js). 손상(JSON · 모양)은 예전 그대로다.
+   */
   function load() {
-    if (cache) return cache;
-    cache = {};
-    const f = FILE();
-    try {
-      if (fs.existsSync(f)) {
-        const d = JSON.parse(fs.readFileSync(f, 'utf8'));
-        if (!isObj(d) || !isObj(d.users)) throw new Error('형식 오류');
-        cache = d.users;
-      }
-    } catch (e) { preserveCorrupt(f, e.message); cache = {}; unreadable = true; }
+    if (cache && !(readErr && nowMs() >= retryAt)) return cache;
+    const r = readJsonFile(FILE(), { parse: (text) => { const d = JSON.parse(text); if (!isObj(d) || !isObj(d.users)) throw new Error('형식 오류'); return d.users; } });
+    if (r.kind === 'read-error') {
+      readErr = String(r.error?.code || 'read-error').slice(0, 32); retryAt = nowMs() + READ_RETRY_MS;
+      cache = {}; unreadable = true;
+      return cache;
+    }
+    readErr = ''; retryAt = 0;
+    cache = r.kind === 'ok' ? r.value : {};
+    unreadable = r.kind === 'corrupt';   // 손상본은 readJsonFile 이 옆에 보존했다(예전과 같다 — 이 기동 동안 쓰기 거절)
     return cache;
   }
 
@@ -71,7 +79,8 @@ export function createExportPrefs({ fileName, resolveCols, knownKeys, normalizeO
   function getPrefs(username) {
     const e = load()[ukey(username)] || null;
     const slots = Array.from({ length: SLOT_COUNT }, (_, i) => viewValue(e?.slots?.[i]));
-    return { def: viewValue(e?.def), slots, at: e?.at || null, ...(unreadable ? { unreadable: true } : {}) };
+    // 113회차 메인: 읽기 오류면 readError 를 함께 싣는다 — 화면이 '손상 사본이 남았다' 고 말하지 않게(읽기 오류는 보존본이 없고 원본이 그대로다).
+    return { def: viewValue(e?.def), slots, at: e?.at || null, ...(unreadable ? { unreadable: true, ...(readErr ? { readError: true } : {}) } : {}) };
   }
 
   function write(next) {
@@ -83,7 +92,11 @@ export function createExportPrefs({ fileName, resolveCols, knownKeys, normalizeO
     const n = Number(slot);
     return slot === 'default' || (Number.isInteger(n) && n >= 1 && n <= SLOT_COUNT) ? null : `저장 칸은 1~${SLOT_COUNT} 또는 기본값입니다.`;
   };
-  const UNREADABLE = { ok: false, status: 503, code: 'prefsUnreadable', reason: '저장값 파일을 읽지 못해 바꾸지 않습니다(손상 사본은 설정 폴더에 남았습니다).' };
+  const UNREADABLE_CORRUPT = { ok: false, status: 503, code: 'prefsUnreadable', reason: '저장값 파일을 읽지 못해 바꾸지 않습니다(손상 사본은 설정 폴더에 남았습니다).' };
+  // 113회차 R4: 읽기 오류는 보존본이 없다 — 같은 꼴(503 · prefsUnreadable)에 사유만 사실대로.
+  const unreadableReply = () => (readErr
+    ? { ok: false, status: 503, code: 'prefsUnreadable', reason: `저장값 파일을 읽지 못해 바꾸지 않습니다(읽기 오류 ${readErr} — 원본은 그대로 두었습니다. 파일 소유자 · 권한을 확인하세요).` }
+    : UNREADABLE_CORRUPT);
 
   /**
    * 저장 — slot: 1~5 또는 'default'. alsoDefault(칸에 저장할 때 기본값으로도) · 칸 값의 이름은 비면 '이름N'.
@@ -98,7 +111,7 @@ export function createExportPrefs({ fileName, resolveCols, knownKeys, normalizeO
     const nv = normalizeValue(value, { slotNo: isDef ? null : n });
     if (!nv.ok) return { ok: false, status: 400, reason: nv.reason };
     load();
-    if (unreadable) return UNREADABLE;
+    if (unreadable) return unreadableReply();
     const k = ukey(username);
     const next = { ...cache };
     if (!next[k] && Object.keys(next).length >= MAX_USERS) return { ok: false, status: 400, reason: `저장값을 가진 계정이 ${MAX_USERS}개를 넘었습니다.` };
@@ -122,7 +135,7 @@ export function createExportPrefs({ fileName, resolveCols, knownKeys, normalizeO
     const si = slotIssue(slot);
     if (si) return { ok: false, status: 400, reason: si };
     load();
-    if (unreadable) return UNREADABLE;
+    if (unreadable) return unreadableReply();
     const k = ukey(username);
     if (!cache[k]) return { ok: true, prefs: getPrefs(username) };
     const next = { ...cache };
@@ -141,6 +154,6 @@ export function createExportPrefs({ fileName, resolveCols, knownKeys, normalizeO
   return {
     getPrefs, setPref, clearPref, normalizeValue,
     prefsUnreadable: () => { load(); return unreadable; },
-    _resetForTest: () => { cache = null; unreadable = false; },
+    _resetForTest: () => { cache = null; unreadable = false; readErr = ''; retryAt = 0; },
   };
 }

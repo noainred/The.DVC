@@ -4,7 +4,7 @@ import { auditMiddleware } from '../../audit.js';
 import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { loadVcenterConfig } from '../../config.js';
-import { loadUiSettings, saveUiSettings } from '../../ui-settings.js';
+import { loadUiSettings, saveUiSettings, uiSettingsWriteRefusal } from '../../ui-settings.js';
 import { upgradeVmTools } from '../../vcenter/soapClient.js';
 import { onDemandLogin, onDemandErrorFields } from '../../vcenter/dsBrowse.js'; // v2.743(VC-03): 주문형 vCenter 로그인 문(판정은 collectTarget·authStopGate 하나)
 import { morefOf } from '../../vcenter/registry.js'; // v2.598 VC2598-06: 콜론 포함 vCenter id 안전한 분해
@@ -351,5 +351,8 @@ api.post('/vms/upgrade-tools', requireRole('admin', 'operator'), requirePerm('to
 // Shared UI settings (e.g. dashboard map height) — same for all users.
 api.get('/ui-settings', (_req, res) => res.json(loadUiSettings()));
 // 전 사용자 공유 설정 쓰기 — viewer가 전역 UI 설정을 덮어쓰지 못하게 역할 제한(감사 C2 잔여).
-api.put('/ui-settings', requireRole('admin', 'operator'), (req, res) => res.json(saveUiSettings(req.body || {})));
+api.put('/ui-settings', requireRole('admin', 'operator'), (req, res) => {
+  { const no = uiSettingsWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
+  res.json(saveUiSettings(req.body || {}));
+});
 }

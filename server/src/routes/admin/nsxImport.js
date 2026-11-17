@@ -97,7 +97,7 @@ adminRouter.post('/vcenters/import', csvPerm, adminOnly, fleetOnly, (req, res) =
   const list = Array.isArray(body) ? body : body.vcenters;
   const result = importVcenters(list, body.mode === 'replace' ? 'replace' : 'merge');
   if (result.ok) store.refresh().catch(() => {});
-  res.status(result.ok ? 200 : 400).json(result);
+  res.status(result.ok ? 200 : (result.code === 'registry-unreadable' ? 503 : 400)).json(result);   // 118회차: 등록부 읽기 오류 중의 거절은 503
 });
 
 // Default server-side path suggestions for the "server file" import.
@@ -121,7 +121,7 @@ adminRouter.post('/vcenters/import-file', csvPerm, adminOnly, fleetOnly, (req, r
     const list = Array.isArray(json) ? json : json.vcenters;
     const result = importVcenters(list, mode === 'replace' ? 'replace' : 'merge');
     if (result.ok) store.refresh().catch(() => {});
-    res.status(result.ok ? 200 : 400).json({ ...result, file: filePath });
+    res.status(result.ok ? 200 : (result.code === 'registry-unreadable' ? 503 : 400)).json({ ...result, file: filePath });   // 118회차
   } catch (err) {
     // 72회차(범위 밖 확정 — 메인 처리): JSON.parse 오류 원문은 파일 앞부분(자격증명 조각)을 싣는다 → safeLoadText 규약(v2.744)
     res.status(400).json({ ok: false, reason: `파일 읽기 실패: ${safeLoadText(err)}` });

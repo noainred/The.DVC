@@ -10,6 +10,8 @@ import { countsAtNote, rowsText, rollupStatusText } from './sanPerfDbText.js';
 import { trackFetch, freshState, freshNote } from './tools/sanFreshText.js'; // 검토 I-04: 상태 갱신 실패를 숨기지 않는다
 import { FreshNote } from './tools/SanFreshNote.jsx';
 import { requireChanged } from './changeResult.js'; // v2.732 B5-03: 400 본문을 '저장되었습니다' 로 읽지 않는다
+import { unreadMarkOf, unreadKind, saveLockedByUnread, shouldReseed } from './settingsUnread.js';   // 112회차: 못 읽은 동안의 기본값 폼으로 저장하지 않는다
+import { SettingsUnreadBanner } from './SettingsUnreadBanner.jsx';
 
 const POLL_MS = 20_000;   // 상태(보관 현황·수집 상태) 갱신 주기
 
@@ -27,8 +29,17 @@ export default function SanSwitchPerf() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
 
+  // 112회차(106회차가 남긴 것): 서버가 설정 파일을 못 읽은 동안 조회의 settings 는 기본값(꺼짐 · 보관 90일)이고 loadError 가 붙는다 — 예전에는 화면이 표지를 보지 않고
+  //   처음 받은 값을 끝까지 폼에 들고 있어, 다시 읽힌 뒤 ‘저장’ 이 보관일을 기본값으로 줄였다(그 뒤의 정리가 긴 이력을 지운다).
+  //   폼을 채울 때의 상태(seedKind)를 기억해 두고, 못 읽은 값으로 채운 폼은 상태가 바뀐 조회의 값으로 다시 채운다(읽은 값 위의 편집은 그대로).
+  const seedKind = useRef(null);   // null = 아직 폼을 채우지 않음
   const load = async () => {
-    try { const d = await fetchJson('/tools/sanswitch/perf/settings'); setData(d); setForm((f) => f || d.settings); setError(null); }
+    try {
+      const d = await fetchJson('/tools/sanswitch/perf/settings'); setData(d);
+      const le = unreadMarkOf(d);
+      if (seedKind.current === null || shouldReseed(seedKind.current, le)) { seedKind.current = unreadKind(le); setForm(d.settings); }
+      setError(null);
+    }
     catch (e) { setError(e.message); }
   };
   useEffect(() => { load(); const t = setInterval(load, POLL_MS); return () => clearInterval(t); }, []);
@@ -43,11 +54,15 @@ export default function SanSwitchPerf() {
 
   const L = data.limits;
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+  // 112회차: 이 설정은 손상(보존본)도 서버가 저장 · 정리를 거절한다(확정 · 복구로만 풀림) — 표지가 있으면 둘 다 잠근다.
+  const unread = unreadMarkOf(data);
+  const saveLocked = saveLockedByUnread(unread, { corruptLocks: true });
   const save = async () => {
+    if (saveLocked) return;
     setBusy(true); setMsg(null);
     // v2.732(점검 2회차 B5-03): 저장 실패(400 {ok:false, reason})를 그대로 setData 하면 settings 가 없어 폼이 Loading 으로
     //   사라졌다가 다음 폴링 뒤 '저장되었습니다.' 가 남았다. 판정한 뒤에만 화면 상태를 바꾼다.
-    try { const r = requireChanged(await putJson('/tools/sanswitch/perf/settings', form)); setData(r); setForm(r.settings); setMsg('저장되었습니다.'); }
+    try { const r = requireChanged(await putJson('/tools/sanswitch/perf/settings', form)); setData(r); seedKind.current = ''; setForm(r.settings); setMsg('저장되었습니다.'); }
     catch (e) { setMsg(`저장 실패: ${e.message}`); }
     finally { setBusy(false); }
   };
@@ -90,6 +105,7 @@ export default function SanSwitchPerf() {
     <>
       <div className="section-title" style={{ marginTop: 0 }}>📊 SAN 스위치 포트 사용량 수집</div>
       <FreshNote note={note} style={{ marginBottom: 10 }} />
+      <SettingsUnreadBanner le={unread} what="SAN 포트 사용량 수집 설정" save="저장 · 지금 정리" corruptLocks />
 
       <div className="card" style={{ marginBottom: 12, fontSize: 13, lineHeight: 1.7 }}>
         등록된 Brocade 스위치에 주기적으로 접속해 <code>portperfshow</code> 를 실행하고, 포트별 처리량을
@@ -166,10 +182,10 @@ export default function SanSwitchPerf() {
           ) : <div style={{ marginTop: 4 }}>크기 추정은 최근 24시간에 적재된 표본이 있어야 계산됩니다(지금은 표본이 없습니다).</div>}
         </div>
         <div className="flex gap" style={{ marginTop: 12, alignItems: 'center' }}>
-          <button className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy} onClick={save}>저장</button>
+          <button className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy || saveLocked} onClick={save}>저장</button>
           <button className="tab" style={{ flex: 'none', padding: '8px 14px' }} disabled={busy} onClick={runNow}
             title="설정이 꺼져 있어도 한 번 수집해 동작을 확인합니다.">지금 1회 수집</button>
-          <button className="tab" style={{ flex: 'none', padding: '8px 14px' }} disabled={busy || db.available === false} onClick={pruneNow}
+          <button className="tab" style={{ flex: 'none', padding: '8px 14px' }} disabled={busy || saveLocked || db.available === false} onClick={pruneNow}
             title="저장된 보관 기간보다 오래된 표본을 지금 삭제합니다(폴러의 자동 정리를 기다리지 않음). 되돌릴 수 없습니다.">🧹 지금 정리</button>
           {msg && <span className="muted" style={{ fontSize: 12 }}>{msg}</span>}
         </div>

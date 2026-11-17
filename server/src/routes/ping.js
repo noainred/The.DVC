@@ -224,7 +224,7 @@ pingRouter.put('/settings', adminOnly, (req, res) => {
   const b = req.body && typeof req.body === 'object' ? req.body : {};
   const patch = b.reset === true ? { reset: true } : Object.fromEntries(['probeIntervalMs', 'summaryIntervalMs', 'timeoutMs'].filter((k) => k in b).map((k) => [k, b[k]]));
   const r = savePingSettings(patch, { actor: req.user?.username || '' });
-  if (!r.ok) return res.status(r.field ? 400 : (loadPingSettings().loadError ? 503 : 500)).json({ ok: false, field: r.field, reason: r.reason });
+  if (!r.ok) return res.status(r.field ? 400 : (loadPingSettings().loadError ? 503 : 500)).json({ ok: false, field: r.field, reason: r.reason, ...(!r.field && loadPingSettings().loadError ? { code: 'settingsUnreadable' } : {}) });   // 107회차: 화면이 503 을 '일시 장애' 로 바꾸지 않게 code 를 싣는다
   res.json(settingsBody(req, r.settings));
 });
 

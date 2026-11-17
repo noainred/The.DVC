@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 107회차: 읽기 오류 ≠ 손상(공용 읽기 — 30초 간격 재읽기)
 import { ssrfBlockReason } from '../util/ssrfBlock.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { reqTimeoutMs } from '../agent/envTimeout.js';
@@ -44,9 +45,27 @@ export function normLlmEnabled(v) {
   return typeof v === 'string' && v.trim().toLowerCase() === 'true';
 }
 
+/*
+ * 107회차(재현 — EISDIR): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전 catch 하나는 온전한 원본을 .corrupt 로 옮기고 빈 값 · 기본값을 캐시해
+ *   다음 저장이 원본 자리를 덮었다. 읽기 단계는 공용 읽기: 원본을 두고 · 캐시하지 않고(30초 간격 재읽기) · 저장을 거절한다(503 settingsUnreadable). parse 실패는 예전과 같다.
+ */
+const _reader = makeJsonFileReader(() => FILE, { parse: (t) => t, preserve: false, tag: 'llm' });
+let _readErr = '';
+/** 107회차: 읽기 오류 중의 저장 거절 본문(503) 또는 null. */
+export function llmConfigWriteRefusal() {
+  loadLlmConfig();
+  return _readErr ? { ok: false, status: 503, code: 'settingsUnreadable', readError: true, reason: `AI 검색(LLM) 설정 파일(${path.basename(FILE)})을 읽지 못해 저장하지 않았습니다 — 읽기 오류(${_readErr})이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` } : null;
+}
+let _lastSaved = null;   // 107회차: 마지막으로 읽은 값 — 읽기 오류 동안 env 기본값(꺼짐 · localhost)으로 뒤집히지 않게
 export function loadLlmConfig() {
   let saved = {};
-  try { if (fs.existsSync(FILE)) saved = parseJsonObject(fs.readFileSync(FILE, 'utf8')); } catch (e) { preserveCorrupt(FILE, e.message); saved = {}; } // v2.479(감사 S-9)
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') { _readErr = String(rr.error?.code || 'read-error').slice(0, 32); saved = _lastSaved || {}; }
+  else {
+    _readErr = '';
+    try { if (rr.kind === 'ok') saved = parseJsonObject(rr.value); } catch (e) { preserveCorrupt(FILE, e.message); saved = {}; } // v2.479(감사 S-9)
+    _lastSaved = saved;
+  }
   const merged = { ...DEFAULTS, ...saved };
   // 이미 저장된 문자열·범위 밖 값도 로드에서 복구한다(저장 경로만 고치면 옛 파일이 계속 검색을 막는다).
   merged.timeoutMs = normTimeoutMs(merged.timeoutMs) ?? DEFAULTS.timeoutMs;
@@ -72,6 +91,8 @@ export function llmUrlIssue(url) {
 
 export function saveLlmConfig(partial = {}) {
   const cur = loadLlmConfig();
+  { const no = llmConfigWriteRefusal(); if (no) throw Object.assign(new Error(no.reason), no, { extra: { code: no.code, readError: true } }); }   // 107회차: 읽기 오류 중에는 빈 값 · 기본값 위에 쓰지 않는다
+
   // 주소를 **바꿀 때만** 검증한다 — 이미 저장된 주소로 다른 항목(사용 여부·모델)을 바꾸는 저장까지 막지 않는다.
   if (partial.url !== undefined && String(partial.url).trim() !== String(cur.url || '').trim()) {
     const why = llmUrlIssue(partial.url);

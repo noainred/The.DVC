@@ -12,7 +12,8 @@ import { catalog, buildCommand, describeCommand, getPreset, presetDanger } from 
 import { enqueueJob, getJob, listHistoryAsync, listRmaAgents, DONE_TTL } from '../../rma/jobs.js';
 import { signJob, scheduleSignRequired } from '../../rma/signing.js';
 import { rmaPasswordFor, setRmaPassword, listRmaPasswordMeta } from '../../rma/agentSecrets.js';
-import { getRmaSettings, setAgentMode, setDefaultMode, setAgentAccess, setAgentRemote } from '../../rma/settings.js';
+import { getRmaSettings, setAgentMode, setDefaultMode, setAgentAccess, setAgentRemote, rmaSettingsWriteRefusal } from '../../rma/settings.js';
+import { unreadMark } from '../settingsUnreadMark.js';   // 112회차: 조회 응답의 읽기 오류 표지
 import { testCatalog, buildTest } from '../../rma/tests.js';
 import { scheduleFor, listSchedules, upsertScheduleItem, removeScheduleItem, scheduleSignNote, rmaSchedulesLoadError } from '../../rma/schedules.js';
 import { latestResults, testHistory, summarize, evaluateRmaItself, dropResult } from '../../rma/testResults.js';
@@ -61,7 +62,10 @@ api.get('/tools/rma', adminOnly, fullScopeOnly, (_req, res) => {
   const known = knownAgentNames().filter((n) => !seen.has(String(n).toLowerCase())).map((n) => ({ agent: n, instances: [], onlineCount: 0, pending: 0, lastSeen: null, ...extra(n), hasPassword: !!pwMeta[String(n).toLowerCase()]?.hasPassword, hasToken: tokens.has(String(n).toLowerCase()), notDeployed: true }));
   // 결정(56~75): ownerOtp — 이 명령 · 점검은 설정 소유자 등급 + 본인 OTP(화면이 OTP 칸을 열고 소유자 등급이 아니면 잠근다 — 판정은 서버 하나).
   res.json({ agents: [...agents, ...known], catalog: catalog().map((p) => ({ ...p, ownerOtp: rmaRunNeedsOwnerOtp(p.id) })),
-    tests: testCatalog().map((t) => ({ ...t, ownerOtp: rmaScheduleNeedsOwnerOtp(t.id) })), settings: st, schedules: listSchedules(), doneTtlMs: DONE_TTL });
+    tests: testCatalog().map((t) => ({ ...t, ownerOtp: rmaScheduleNeedsOwnerOtp(t.id) })), settings: st, schedules: listSchedules(), doneTtlMs: DONE_TTL,
+    // 112회차: 분배 · 접속 허용 설정을 못 읽은 동안 위 settings · 법인별 allowedIps · remote 는 저장된 값이 아니라 빈 값이다 — 화면이 그 빈 폼의 저장을 잠근다
+    //   (다시 읽힌 뒤 빈 ‘접속 허용 IP’ 저장 = 그 법인의 허용 목록이 ‘제한 없음’ 으로 바뀐다).
+    ...unreadMark(rmaSettingsWriteRefusal(), 'settingsLoadError') });
 });
 
 // ── 점검 스케줄(v2.418, HostMonitor 'Test by agent') ──
@@ -115,6 +119,7 @@ api.put('/tools/rma/agents/:agent/access', adminOnly, fullScopeOnly, (req, res) 
   const agent = String(req.params.agent || '').trim();
   if (!RE_AGENT.test(agent)) return res.status(400).json({ ok: false, reason: 'agent 형식 오류' });
   try {
+    { const no = rmaSettingsWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
     const r = setAgentAccess(agent, { allowedIps: req.body?.allowedIps ?? [], comment: req.body?.comment ?? '' });
     logAudit({ user: req.user?.username, action: 'RMA 접속 허용 IP 설정', target: agent, detail: r.allowedIps.join(',') || '(제한 없음)', ip: req.ip });
     res.json({ ok: true, ...r });
@@ -124,6 +129,7 @@ api.put('/tools/rma/agents/:agent/remote', adminOnly, fullScopeOnly, (req, res) 
   const agent = String(req.params.agent || '').trim();
   if (!RE_AGENT.test(agent)) return res.status(400).json({ ok: false, reason: 'agent 형식 오류' });
   try {
+    { const no = rmaSettingsWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
     const r = setAgentRemote(agent, req.body || {});
     logAudit({ user: req.user?.username, action: 'RMA 원격 관리 설정', target: agent, detail: JSON.stringify(r), ip: req.ip });
     res.json({ ok: true, ...r });
@@ -195,6 +201,7 @@ api.put('/tools/rma/agents/:agent/mode', adminOnly, fullScopeOnly, (req, res) =>
   const agent = String(req.params.agent || '').trim();
   if (!RE_AGENT.test(agent)) return res.status(400).json({ ok: false, reason: 'agent 형식 오류' });
   try {
+    { const no = rmaSettingsWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
     const r = setAgentMode(agent, { mode: String(req.body?.mode || ''), primary: String(req.body?.primary || '') });
     logAudit({ user: req.user?.username, action: 'RMA 분배 설정', target: agent, detail: `${r.mode}${r.primary ? ` primary=${r.primary}` : ''}${r.explicit ? '' : ' (전역 기본)'}`, ip: req.ip });
     res.json({ ok: true, ...r });
@@ -202,6 +209,7 @@ api.put('/tools/rma/agents/:agent/mode', adminOnly, fullScopeOnly, (req, res) =>
 });
 api.put('/tools/rma/settings', adminOnly, fullScopeOnly, (req, res) => {
   try {
+    { const no = rmaSettingsWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
     const m = setDefaultMode(String(req.body?.defaultMode || ''));
     logAudit({ user: req.user?.username, action: 'RMA 전역 분배 설정', detail: m, ip: req.ip });
     res.json({ ok: true, defaultMode: m });

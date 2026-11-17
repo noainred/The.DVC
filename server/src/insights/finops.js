@@ -11,6 +11,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { buildHostIndex, resolveServerVcenter } from '../idrac/attribution.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 107회차: 읽기 오류 ≠ 손상(공용 읽기 — 30초 간격 재읽기)
 import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = path.join(config.configDir, 'finops.json');
@@ -23,11 +24,25 @@ const DEFAULTS = {
 };
 
 let cache = null;
+/*
+ * 107회차(재현 — EISDIR): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전 catch 하나는 온전한 원본을 .corrupt 로 옮기고 빈 값 · 기본값을 캐시해
+ *   다음 저장이 원본 자리를 덮었다. 읽기 단계는 공용 읽기: 원본을 두고 · 캐시하지 않고(30초 간격 재읽기) · 저장을 거절한다(503 settingsUnreadable). parse 실패는 예전과 같다.
+ */
+const _reader = makeJsonFileReader(() => FILE, { parse: (t) => t, preserve: false, tag: 'finops' });
+let _readErr = '';
+/** 107회차: 읽기 오류 중의 저장 거절 본문(503) 또는 null. */
+export function finopsWriteRefusal() {
+  loadFinopsConfig();
+  return _readErr ? { ok: false, status: 503, code: 'settingsUnreadable', readError: true, reason: `FinOps 단가 설정 파일(${path.basename(FILE)})을 읽지 못해 저장하지 않았습니다 — 읽기 오류(${_readErr})이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` } : null;
+}
 export function loadFinopsConfig() {
   if (cache) return cache;
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') { _readErr = String(rr.error?.code || 'read-error').slice(0, 32); return { ...DEFAULTS }; }   // 107회차: 캐시하지 않는다 — 쓰기는 거절한다
+  _readErr = '';
   cache = { ...DEFAULTS };
   try {
-    if (fs.existsSync(FILE)) cache = { ...DEFAULTS, ...JSON.parse(fs.readFileSync(FILE, 'utf8')) };
+    if (rr.kind === 'ok') cache = { ...DEFAULTS, ...JSON.parse(rr.value) };
   } catch (e) {
     // v2.595(감사 FS-4): 손상을 조용히 기본값으로 넘기면 다음 저장이 원본을 덮는다 — 원본을 보존하고 알린다.
     preserveCorrupt(FILE, e?.message);
@@ -37,6 +52,8 @@ export function loadFinopsConfig() {
 }
 export function saveFinopsConfig(body = {}) {
   const cur = loadFinopsConfig();
+  { const no = finopsWriteRefusal(); if (no) throw Object.assign(new Error(no.reason), no, { extra: { code: no.code, readError: true } }); }   // 107회차: 읽기 오류 중에는 빈 값 · 기본값 위에 쓰지 않는다
+
   // v2.611 LEFT2611-05: 세 숫자 칸의 규칙을 하나로 — 빈 값·null·숫자 아님은 **미지정**(이전 값 유지), 명시적 0 은 값이다
   //   (v2.583·v2.596 규약). 예전엔 요금·PUE 가 `Number(x) || cur` 라 0 을 저장할 수 없었고, CO2 는 `Number('') === 0` 이라
   //   빈 칸이 **0(무탄소)** 으로 저장됐다. 음수는 0 으로 자른다(요금·CO2), PUE 는 [1,5].

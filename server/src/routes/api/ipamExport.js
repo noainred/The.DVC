@@ -23,7 +23,8 @@ import { makeVcResolver } from '../../ipam/vcResolve.js';
 import { getAnnotation, setAnnotation, getAnnotations, setAnnotationsMany, annotationsLoadError, annotationsLoadMarker } from '../../ipam/annotations.js';
 import { getOverride, setOverride, clearOverride, setOverrideBatch, splitBatchIps, invalidBatchResult, overridesSummary, STATUSES, DEVICE_TYPES, reservedUntilDay, getOverrides, setOverridesMany, overridesLoadError, overridesLoadMarker } from '../../ipam/overrides.js';
 import { manageToCsv, manageSampleCsv, parseManageCsv, analyzeManageImport, MANAGE_CHUNK_MAX } from '../../ipam/manageCsv.js';
-import { getPolicies, getPolicy, setPolicy, deletePolicy, policiesSummary, findPolicy, specToRange, POLICY_STATUSES } from '../../ipam/rangePolicies.js';
+import { getPolicies, getPolicy, setPolicy, deletePolicy, policiesSummary, findPolicy, specToRange, POLICY_STATUSES, rangePoliciesWriteRefusal } from '../../ipam/rangePolicies.js';
+import { unreadMark } from '../settingsUnreadMark.js';   // 112회차: 조회 응답의 읽기 오류 표지
 import { ipToNum } from '../../ipam/ledger.js';
 import { logAudit } from '../../audit.js';
 import { setSubnetNote, withSubnetNotes, getSubnetNotes, subnetNoteWriteDenied } from '../../ipam/subnetNotes.js'; // v3.5.0 대역 용도 · 설명
@@ -424,7 +425,7 @@ api.get('/tools/ipam/policies', requirePerm('tools'), (req, res) => {
   let policies = getPolicies();
   if (allowed) policies = policies.filter((p) => p.claimedVcenterId && allowed.has(p.claimedVcenterId));
   // summary 도 스코프된 목록으로 재계산 — 전체로 계산하면 byVcenter 로 타 vCenter id·전역 정책 수가 샌다.
-  res.json({ policies, summary: policiesSummary(allowed ? policies : null), statuses: POLICY_STATUSES });
+  res.json({ policies, summary: policiesSummary(allowed ? policies : null), statuses: POLICY_STATUSES, ...unreadMark(rangePoliciesWriteRefusal()) });   // 112회차: 못 읽은 동안 목록은 0건 — '정책 없음' 이 아니다
 });
 // 특정 IP에 무엇이 적용되는지 미리보기(정책 + override). 대역 입력 시 size 미리보기 겸용.
 api.get('/tools/ipam/policies/ip/:ip', requirePerm('tools'), (req, res) => {
@@ -465,6 +466,7 @@ api.post('/tools/ipam/policies', canWrite, requirePerm('tools'), (req, res) => {
     const bad = scopedPolicySpecIssue(req.body?.spec, allowedP || allowedWc);
     if (bad) return res.status(400).json({ ok: false, reason: bad });
   }
+  { const no = rangePoliciesWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
   const r = setPolicy(req.body || {}, req.user);
   if (r.ok) { logAudit({ user: req.user?.username, action: '대역정책 저장', target: `정책 ${r.policy.spec}`, detail: JSON.stringify(r.policy).slice(0, 800) }); try { store.syncLedger(); } catch { /* */ } }
   res.status(r.ok ? 200 : 400).json(r);
@@ -498,6 +500,7 @@ api.put('/tools/ipam/policies/:id', canWrite, requirePerm('tools'), (req, res) =
     const bad = scopedPolicySpecIssue(req.body.spec, scopedVcenterIds(req.user, st) || writeScopedVcenterIds(req.user, st));
     if (bad) return res.status(400).json({ ok: false, reason: bad });
   }
+  { const no = rangePoliciesWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
   const r = setPolicy({ ...(req.body || {}), id: req.params.id }, req.user);
   if (r.ok) { logAudit({ user: req.user?.username, action: '대역정책 수정', target: `정책 ${r.policy.spec}`, detail: JSON.stringify(r.policy).slice(0, 800) }); try { store.syncLedger(); } catch { /* */ } }
   res.status(r.ok ? 200 : 400).json(r);
@@ -514,6 +517,7 @@ api.delete('/tools/ipam/policies/:id', canWrite, requirePerm('tools'), (req, res
   if (allowedWc && pol && !allowedWc.has(pol.claimedVcenterId || '')) {
     return res.status(403).json({ ok: false, reason: WRITE_DENIED_MSG });
   }
+  { const no = rangePoliciesWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
   const r = deletePolicy(req.params.id);
   if (r.ok) { logAudit({ user: req.user?.username, action: '대역정책 삭제', target: `정책 ${pol?.spec || req.params.id}`, detail: pol ? JSON.stringify(pol).slice(0, 800) : '' }); try { store.syncLedger(); } catch { /* */ } }
   res.status(r.ok ? 200 : 400).json(r);
