@@ -80,6 +80,18 @@ export function deviceInputIssue(input = {}) {
   return null;
 }
 
+/**
+ * 78회차 F1: 접속처(host · 계정 · SSH 포트)가 저장분과 달라졌는가 — 저장(saveDevice)과 연결 테스트(routes/api/pdu.js)가 **같은 판정**을 쓴다
+ * (스토리지 storageAccessMoved · SAN sanAccessMoved 와 같은 모양). 요청에 없는 칸은 저장값 유지로 본다(accessMoved 규약) — 포트는 저장 경로처럼 숫자로 맞춘다.
+ */
+export function pduAccessMoved(saved, body = {}) {
+  if (!saved) return false;
+  const b = body && typeof body === 'object' ? body : {};
+  const port = (v) => Number(v) || 22;
+  return accessMoved({ host: saved.host, username: saved.username || '', port: port(saved.sshPort) },
+    { host: b.host, username: b.username, port: b.sshPort === undefined ? undefined : port(b.sshPort) }, ['host', 'username', 'port']);
+}
+
 function normalize(input, existing = null) {
   const e = existing || {};
   return {
@@ -115,9 +127,7 @@ export function saveDevice(input = {}) {
   let droppedSecrets = [];
   if (idx >= 0 && !secretProvided(input.password)) {
     const e = list[idx];
-    const moved = accessMoved({ host: e.host, username: e.username || '', port: Number(e.sshPort) || 22 },
-      { host: entry.host, username: entry.username, port: entry.sshPort }, ['host', 'username', 'port']);
-    if (moved) { if (e.password) droppedSecrets = ['password']; entry.password = ''; }
+    if (pduAccessMoved(e, entry)) { if (e.password) droppedSecrets = ['password']; entry.password = ''; }
   }
   // 같은 host 중복 등록 방지(다른 id 로 같은 장비를 두 번 폴링하면 부하만 는다).
   const dup = list.find((d) => d.id !== entry.id && d.host.toLowerCase() === entry.host.toLowerCase());

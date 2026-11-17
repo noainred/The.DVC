@@ -93,11 +93,17 @@ export function csvToDevices(text, dcIdOf = (x) => x) {
     if (!host && !name) continue;
     if (!host) { errors.push(`${i + 1}행: host 가 비어 있습니다.`); continue; }
     const portRaw = at(r, 'sshport');
+    const userRaw = at(r, 'username');
     rows.push({
       name: name || host,
       host,
-      username: at(r, 'username') || 'apc',
+      username: userRaw || 'apc',
       sshPort: portRaw ? Number(portRaw) : 22,
+      // 78회차 F5: 빈 칸(또는 열 없음)이었다는 표지 — 기본값('apc' · 22)은 **새 장비**에만 쓴다. 이미 있는 host 의 수정 행에서 기본값으로 덮으면
+      //   계정 · 포트가 바뀐 것으로 판정돼(saveDevice pduAccessMoved) 저장 비밀번호가 조용히 버려졌다('비워 두면 기존 값 유지' 안내와 반대).
+      //   라우트(routes/api/pdu.js csv/import)가 수정 행이면 저장값으로 채운다. 저장 경로(normalize)는 아는 필드만 읽으므로 이 표지는 저장되지 않는다.
+      ...(userRaw ? {} : { _usernameBlank: true }),
+      ...(portRaw ? {} : { _portBlank: true }),
       datacenterId: dcIdOf(at(r, 'datacenter')) || '',
       agent: at(r, 'agent'),
       enabled: bool(at(r, 'enabled')),

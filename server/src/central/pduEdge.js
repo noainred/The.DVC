@@ -61,6 +61,15 @@ export function sanitizePduSnapshot(snap) {
     ? { powerW: numOrNull(snap.totals.powerW), energyKwh: numOrNull(snap.totals.energyKwh), units: numOrNull(snap.totals.units), sensors: numOrNull(snap.totals.sensors) }
     : null;
   for (const k of ['unitsIncomplete', 'sensorsIncomplete']) if (Object.hasOwn(o, k)) o[k] = o[k] === true;
+  // 78회차 F7: 최상위의 판정 · 표시 필드도 좁힌다 — 예전에는 펼친 그대로라 `ok:'false'`(글자)가 참으로 읽혀 실패 장비가 정상 행으로 그려졌고,
+  //   authStopped · 버전 칸에 임의 객체 · 긴 글자가 실렸다(엣지가 보낸 것은 정제한다 — 아는 모양만 · 글자 상한 · 수치는 수로).
+  if (Object.hasOwn(o, 'ok')) o.ok = o.ok === true;
+  if (snap.authStopped != null) {
+    const a = snap.authStopped;
+    o.authStopped = isPlainObj(a) ? { since: numOrNull(a.since), at: numOrNull(a.at), attempts: numOrNull(a.attempts), reason: capStr(a.reason, 300) } : null;
+  }
+  for (const k of ['nmcModel', 'aosVersion', 'appVersion']) if (Object.hasOwn(o, k)) o[k] = typeof o[k] === 'string' ? capStr(o[k], 128) : '';
+  for (const k of ['cliSkipped', 'cliBudgetMs']) if (Object.hasOwn(o, k)) o[k] = numOrNull(o[k]);
   return { snap: o, narrowed: cnt.n };
 }
 

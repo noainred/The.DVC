@@ -17,13 +17,14 @@ import { scopeDbStatus } from '../../auth/scopeStatus.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import {
-  listDevices, listDevicesWithSecrets, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithSecret,
+  listDevices, listDevicesWithSecrets, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithSecret, pduAccessMoved, registryLoadError,
 } from '../../pdu/registry.js';
+import { summarizeRegistryError } from '../../util/registryCore.js';
 import { collectDeviceNow, testDeviceConnection, pollOnce, pduPollerStatus, localSnapshots, getLocalSnapshot } from '../../pdu/poller.js';
 import { edgePduSnapshots, edgePduStatus } from '../../central/pduEdge.js';
 import { requestCollect, hasPendingRequest, recentCollectDrops } from '../../pdu/collectRequests.js';
-import { INTERVAL_SPEC, saveIntervals, runtimeIntervals, intervalsForEdge } from '../../pdu/intervals.js';
-import { THRESHOLD_SPEC, loadThresholds, saveThresholds, evaluateSnapshot, activeViolations } from '../../pdu/thresholds.js';
+import { INTERVAL_SPEC, saveIntervals, runtimeIntervals, intervalsForEdge, pduIntervalsLoadError } from '../../pdu/intervals.js';
+import { THRESHOLD_SPEC, loadThresholds, saveThresholds, evaluateSnapshot, activeViolations, pduThresholdsLoadError } from '../../pdu/thresholds.js';
 import { powerSeries, envSeries, dbStats } from '../../pdu/db.js';
 import { devicesToCsv, csvToDevices, sampleCsv } from '../../pdu/csv.js';
 import { summarize } from '../../pdu/types.js';
@@ -43,6 +44,21 @@ const toolsPerm = requirePerm('tools');
 // v2.612 AUTHZ2612-01·02: PDU 장비 등록·삭제·내보내기·수집·주기/임계 설정도 전 법인 공용이라 adminOnly 에 이 게이트를 함께 건다
 //   (조회만 막혀 있어 범위 제한 admin 이 다른 법인 장비를 내보내고 지울 수 있었다).
 const fullScopeOnly = fullScopeOnlyWith('PDU 정보는 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다.');
+
+/**
+ * 78회차 개선: 등록부 · 임계치 · 주기 파일을 못 읽었으면 그 사실을 목록 응답에 싣는다 — 예전 화면은 빈 장비 목록 · 기본 임계치를
+ * 정상처럼 보였다(엣지 pull 은 503 · 서비스 점검에만 보였다). 사유는 요약만(등록부는 summarizeRegistryError — 파일 조각 없음). 없으면 null.
+ */
+export function pduLoadErrors() {
+  const out = {};
+  const rg = registryLoadError();
+  if (rg) out.registry = summarizeRegistryError(rg)?.text || '사유 미상';
+  const th = pduThresholdsLoadError();
+  if (th) out.thresholds = String(th.reason || '사유 미상').slice(0, 300);
+  const iv = pduIntervalsLoadError();
+  if (iv) out.intervals = String(iv.reason || '사유 미상').slice(0, 300);
+  return Object.keys(out).length ? out : null;
+}
 
 /** 중앙 직접 수집분 + 엣지 push 분을 합친다(같은 id 는 최신 것 우선). */
 function allSnapshots() {
@@ -99,9 +115,11 @@ export function registerPdu(api) {
     }
     // v2.599(AUTHZ-2599-03): 비-admin 에는 관리 IP·계정명을 가리고 밝힌다(v2.593 relaytopo 와 같은 기준).
     const admin = isAdminReq(req);
+    const loadErrors = pduLoadErrors();
     res.json({
       ok: true,
       ...(pduDemoActive(listDevices()) ? { demo: true } : {}),
+      ...(loadErrors ? { loadErrors } : {}),   // 78회차 개선
       devices: admin ? devices : devices.map(maskDeviceAddress),
       ...(admin ? {} : { addressHidden: true }),
       datacenters: listDatacenters(),
@@ -121,7 +139,11 @@ export function registerPdu(api) {
   });
 
   api.post('/tools/pdu/thresholds', adminOnly, fullScopeOnly, (req, res) => {
-    const next = saveThresholds(req.body || {});
+    let next;
+    try { next = saveThresholds(req.body || {}); } catch (e) {   // 78회차 F6: 읽기 오류 중에는 409(원본을 기본값으로 덮지 않는다)
+      if (e?.status === 409) return res.status(409).json({ ok: false, code: e.code, reason: e.message });
+      throw e;
+    }
     logAudit({ user: req.user?.username, action: 'PDU 임계치 변경', target: JSON.stringify(next) });
     res.json({ ok: true, thresholds: next });
   });
@@ -220,15 +242,19 @@ export function registerPdu(api) {
     const existing = listDevices();
     let added = 0, updated = 0;
     const failed = [...errors];
+    const droppedSecrets = [];   // 78회차 F5: 접속처가 바뀌어 저장 비밀번호를 버린 행(조용히 버리지 않는다 — horizonAssign · veeam CSV 와 같은 규약)
     for (const r of rows) {
       // 멱등 키 = host. 있으면 그 id 로 수정, 없으면 신규.
       const prev = existing.find((d) => d.host.toLowerCase() === r.host.toLowerCase());
-      const out = saveDevice(prev ? { ...r, id: prev.id } : r);
+      // 78회차 F5: 수정 행의 빈 계정 · 포트 칸은 저장값 유지(기본값 'apc' · 22 는 새 장비에만 — pdu/csv.js 표지).
+      const input = prev ? { ...r, id: prev.id, ...(r._usernameBlank ? { username: prev.username } : {}), ...(r._portBlank ? { sshPort: prev.sshPort } : {}) } : r;
+      const out = saveDevice(input);
       if (!out.ok) { failed.push(`${r._line}행(${r.host}): ${out.reason}`); continue; }
       if (prev) updated++; else added++;
+      if (out.droppedSecrets?.length) droppedSecrets.push({ line: r._line, host: r.host, reason: '접속처(host · 계정 · SSH 포트)가 바뀌어 저장된 비밀번호를 폐기했습니다 — 비밀번호를 다시 입력하세요.' });
     }
-    logAudit({ user: req.user?.username, action: 'PDU CSV 가져오기', target: `추가 ${added} · 수정 ${updated}`, detail: failed.length ? `실패 ${failed.length}건` : '' });
-    res.json({ ok: true, added, updated, failed, total: rows.length });
+    logAudit({ user: req.user?.username, action: 'PDU CSV 가져오기', target: `추가 ${added} · 수정 ${updated}`, detail: [failed.length ? `실패 ${failed.length}건` : '', droppedSecrets.length ? `비밀번호 폐기 ${droppedSecrets.length}건` : ''].filter(Boolean).join(' · ') });
+    res.json({ ok: true, added, updated, failed, total: rows.length, ...(droppedSecrets.length ? { droppedSecrets } : {}) });
   });
 
   api.post('/tools/pdu/test', adminOnly, fullScopeOnly, async (req, res) => {
@@ -236,12 +262,20 @@ export function registerPdu(api) {
     const issue = deviceInputIssue(b);
     if (issue) return res.status(400).json({ ok: false, reason: issue });
     // 비밀번호를 안 보내면 저장된 값 사용(재입력 없이 재테스트) — vCenter/스토리지와 동일 규약.
+    // 78회차 F1: host 만 보던 것을 저장 경로(saveDevice)와 **같은 판정**(host · 계정 · SSH 포트 — pduAccessMoved)으로 —
+    //   스토리지(23회차 S-1) · SAN(v2.770 R5-E3-4) 의 형제 누락. 계정 · 포트만 바꿔 테스트하면 저장 비밀번호가 바뀐 계정 · 포트로 나갔다.
     let password = String(b.password ?? '');
+    let moved = false;
     if (!password && b.id) {
       const saved = getDeviceWithSecret(b.id);
-      if (saved && saved.host === String(b.host || '').trim()) password = saved.password || '';
+      moved = !!saved && pduAccessMoved(saved, b);
+      if (saved && !moved) password = saved.password || '';
     }
-    if (!password) return res.status(400).json({ ok: false, reason: '비밀번호가 필요합니다.' });
+    if (!password) {
+      return res.status(400).json({ ok: false, reason: moved
+        ? '접속처(host · 계정 · SSH 포트)를 바꿨으므로 비밀번호를 다시 입력해야 테스트할 수 있습니다(저장된 비밀번호는 바뀐 접속처로 보내지 않습니다).'
+        : '비밀번호가 필요합니다.' });
+    }
     const device = { ...b, password, sshPort: Number(b.sshPort) || 22, id: b.id || `test-${Date.now()}` };
     logAudit({ user: req.user?.username, action: 'PDU 연결 테스트', target: `${b.name || ''}(${b.host})` });
     const r = await testDeviceConnection(device, { timeoutMs: 60_000 });
@@ -249,7 +283,11 @@ export function registerPdu(api) {
   });
 
   api.post('/tools/pdu/intervals', adminOnly, fullScopeOnly, (req, res) => {
-    const next = saveIntervals(req.body || {});
+    let next;
+    try { next = saveIntervals(req.body || {}); } catch (e) {   // 78회차 F6: 읽기 오류 중에는 409
+      if (e?.status === 409) return res.status(409).json({ ok: false, code: e.code, reason: e.message });
+      throw e;
+    }
     logAudit({ user: req.user?.username, action: 'PDU 수집 주기 변경', target: JSON.stringify(next) });
     res.json({ ok: true, intervals: runtimeIntervals(), saved: next, forEdge: intervalsForEdge() });
   });
