@@ -72,7 +72,7 @@ test('gpu/settings: atomicWriteFileSync 사용 + 로드 catch preserveCorrupt', 
 
 /* ── [LOW] 자격증명 스토어 6종 preserveCorrupt ── */
 test('자격증명 스토어 6종: 로드 catch 에 preserveCorrupt(FILE) 존재', () => {
-  for (const f of ['gpu/physicalRegistry.js', 'horizon/horizon.js', 'agent/deployRegistry.js']) {
+  for (const f of ['horizon/horizon.js', 'agent/deployRegistry.js']) {
     const s = read(f);
     assert.match(s, /preserveCorrupt/, `${f}: preserveCorrupt import/호출`);
     assert.match(s, /import \{ atomicWriteFileSync, preserveCorrupt \}/, `${f}: import`);
@@ -83,6 +83,12 @@ test('자격증명 스토어 6종: 로드 catch 에 preserveCorrupt(FILE) 존재
     const s = read('idrac/registry.js');
     assert.match(s, /import \{ atomicWriteFileSync \} from '\.\.\/util\/atomicWrite\.js'/, 'idrac/registry.js: 원자적 쓰기');
     assert.match(s, /loadErr\.read\(FILE, parseServers\)/, 'idrac/registry.js: 공용 등록부 읽기(손상 보존)');
+  }
+  // 95회차 F1: gpu/physicalRegistry 도 공용 등록부 읽기(makeLoadError.read — 손상이면 preserveCorrupt, 읽기 오류는 원본 유지 · 쓰기 409)로 옮겼다(gpuAudit95 가 실제 파일로 고정).
+  {
+    const s = read('gpu/physicalRegistry.js');
+    assert.match(s, /import \{ atomicWriteFileSync \} from '\.\.\/util\/atomicWrite\.js'/, 'gpu/physicalRegistry.js: 원자적 쓰기');
+    assert.match(s, /loadErr\.read\(FILE, parsePhysical\)/, 'gpu/physicalRegistry.js: 공용 등록부 읽기(손상 보존)');
   }
   // 93회차 F3: idrac/scanRanges 도 공용 등록부 읽기(makeLoadError.read — 손상이면 preserveCorrupt, 읽기 오류는 원본 유지)로 옮겼다(idracPartAudit93 F3 가 실제 파일로 고정).
   {

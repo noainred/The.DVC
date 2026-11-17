@@ -211,10 +211,13 @@ export function DataTable({
 
 /** Standard "총 N개 …" result count, with an indicator when a filter is active. */
 export function ResultCount({ total = 0, shown, label, filtered }) {
+  // 95회차: total 이 null · 글자면 toLocaleString 이 던져(null) 화면 전체가 죽거나 글자 그대로였다 — 수로 읽고, 못 읽으면 '—'(0 이 아니다)
+  const t = numOrNull(total);
+  const sh = numOrNull(shown);
   return (
     <div className="muted result-count" style={{ marginBottom: 10 }}>
-      총 <b style={{ color: 'var(--text)' }}>{total.toLocaleString()}</b>개 {label}
-      {shown != null && shown < total && <span> (상위 {shown.toLocaleString()}개 표시)</span>}
+      총 <b style={{ color: 'var(--text)' }}>{t == null ? '—' : t.toLocaleString()}</b>개 {label}
+      {sh != null && t != null && sh < t && <span> (상위 {sh.toLocaleString()}개 표시)</span>}
       {filtered && <span className="badge blue" style={{ marginLeft: 8 }}>필터 적용 중</span>}
     </div>
   );

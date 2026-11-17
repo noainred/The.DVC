@@ -135,7 +135,8 @@ describe('스윕 — await delJson/putJson/patchJson/sendJson 의 반환값을 �
     'views/AgentDeploy.jsx': 1, 'views/AgentScans.jsx': 1, 'views/Collectors.jsx': 3,
     'views/NsxAdmin.jsx': 1, 'views/PortalBackup.jsx': 1, 'views/ProxySettings.jsx': 1,
     'views/RemoteAccess.jsx': 2, 'views/VCenterAdmin.jsx': 2, 'views/VmProvision.jsx': 1, 'views/VmSeriesSettings.jsx': 1,
-    'views/gpu-guest/PhysicalGpuManager.jsx': 1, 'views/sidebar/MenuEditor.jsx': 2, 
+    'views/sidebar/MenuEditor.jsx': 2,   // 95회차: PhysicalGpuManager 삭제는 반환값(ok:false)을 판정한다 — 목록에서 뺐다
+   
     'views/tools/BmStorageTool.jsx': 1, 'views/tools/CvpTool.jsx': 1, 
     'views/tools/PduTool.jsx': 1, 'views/tools/SanHealthCheck.jsx': 1,
     'views/tools/SanSwitchTool.jsx': 1, 'views/tools/StorageMonTool.jsx': 1, 
@@ -206,8 +207,8 @@ describe('스윕 — 반환값을 받아 놓고 ok·requireChanged 를 보지 �
   //   한계: 검사 창은 그 줄부터 25줄 · 같은 이름 재선언 · 다음 async 처리기 시작 전까지다. postJson 은 보지 않는다(409 만 던지지 않고
   //   호출부가 100곳이 넘는다 — WEB-03 두 곳은 audit2742l 이 따로 고정한다).
   const ALLOW2 = {
-    'views/AnomalyDetection.jsx': 1, 'views/GpuSettings.jsx': 1, 'views/Insights.jsx': 1,
-    'views/LoginFails.jsx': 1, 'views/MetricsSettings.jsx': 1, 'views/PortalBackup.jsx': 1, 'views/PowerOffCheckSettings.jsx': 1,
+    'views/AnomalyDetection.jsx': 1, 'views/Insights.jsx': 1,   // 95회차: GpuSettings · MetricsSettings 지표 설정 저장은 r.ok 를 본다(409 settings-unreadable) — 목록에서 뺐다
+    'views/LoginFails.jsx': 1, 'views/PortalBackup.jsx': 1, 'views/PowerOffCheckSettings.jsx': 1,
     'views/ToolsReports.jsx': 1, 'views/tools/GuestOsTools.jsx': 1,   // 전체 점검 27회차 D-2: CvpTool 설정 저장은 requireChanged 로 판정 — 목록에서 뺐다 · 38회차: GpuGuestSettings · BmUsage 수집 설정 저장도 r.ok 를 본다(409 settings-unreadable)
     'views/tools/LinkCheck.jsx': 1,
   };

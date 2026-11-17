@@ -8,6 +8,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import EscClose from './EscClose.jsx';
+import { backdropClose } from './backdropClose.js'; // 95회차
 import { STable } from './STable.jsx';
 import { ErrorBox } from './primitives.jsx';
 import { cellTone, cellText, folderGroups, matchRows, bandsOf, folderLine } from '../views/tools/exportPreviewText.js';
@@ -66,7 +67,7 @@ export default function ExportPreviewModal({ title, sub = '', load, groupName, o
 
   // body 로 옮겨 그린다 — VM 목록 내보내기 창(Modal) 안에서 열려도 그 창의 overflow·쌓임 순서에 갇히지 않게.
   return createPortal((
-    <div className="modal-overlay" style={{ zIndex: 260, padding: 16, placeItems: 'stretch' }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} data-export-preview="">
+    <div className="modal-overlay" style={{ zIndex: 260, padding: 16, placeItems: 'stretch' }} {...backdropClose(onClose)} data-export-preview="">
       <EscClose onClose={onClose} />
       <div role="dialog" aria-modal="true" aria-label={title} className="card"
         style={{ display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, width: '100%', height: '100%', padding: 0, overflow: 'hidden', background: 'var(--panel-deep)' }}>

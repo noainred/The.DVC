@@ -10,8 +10,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
+import { makeLoadError, filterObjectElements, summarizeRegistryError } from '../util/registryCore.js'; // 95회차 F1: 공용 등록부 읽기(손상 · 읽기 오류 구분)
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.503: 접속처 변경 시 저장 비밀 폐기
 import { usableIp } from './sshCollect.js';
 
@@ -19,17 +20,53 @@ const FILE = path.join(config.configDir, 'gpu-physical.json');
 
 let cache = null;
 
+/*
+ * 전체 점검 95회차 F1(재현 — 36회차 '남긴 것'): 예전 로더는 읽기 · 파싱 · 복호를 catch 하나로 받아 **읽기 오류**(EISDIR · EACCES · EIO)도 손상으로 보고
+ *   온전한 원본(SSH 계정 파일)을 `.corrupt.*` 로 옮긴 뒤 빈 목록으로 돌았다 — 다음 등록 한 번이 그 한 건만 든 파일을 썼다(다른 서버 계정은 보존본에만).
+ *   손상도 화면 · API 어디에도 표지가 없었고(재시작 뒤에는 보존본만 남아 '등록 없음'), 원소 null 하나에 목록 · 등록 · 폴러가 매번 TypeError 였다.
+ *   이제 판정은 공용 등록부 읽기(util/registryCore.js makeLoadError.read — bmstor · idrac 등록부와 같다): 손상 = 보존 + 표지(관리자 저장이 새 등록부를 만든다 — v2.612),
+ *   읽기 오류 = 원본 유지 · 캐시하지 않음 · 쓰기 거절(409), 객체 원소만.
+ */
+const loadErr = makeLoadError();
+const WHAT = '물리 GPU 서버 등록부(gpu-physical.json)';
+const parsePhysical = (text) => {
+  const j = JSON.parse(text);
+  if (j == null || typeof j !== 'object' || Array.isArray(j)) throw new Error('등록부가 객체가 아닙니다');
+  return filterObjectElements(openSecretsDeep(Array.isArray(j.servers) ? j.servers : [])).list;   // v2.296 SSH 계정 복호
+};
+
 export function loadPhysical() {
-  if (cache) return cache;
-  try { if (fs.existsSync(FILE)) cache = openSecretsDeep(JSON.parse(fs.readFileSync(FILE, 'utf8'))?.servers || []); } catch { preserveCorrupt(FILE); cache = []; } // v2.296 SSH 계정 복호 · v2.322 손상본 보존
-  if (!Array.isArray(cache)) cache = [];
+  if (cache && !loadErr.readPending()) return cache;
+  const r = loadErr.read(FILE, parsePhysical);   // 손상이면 preserveCorrupt(사유 포함) — v2.322 손상본 보존 규칙 그대로
+  cache = r.kind === 'ok' ? r.value : null;
+  if (!cache) { loadErr.checkCorruptOnly(FILE); cache = []; }
   return cache;
 }
+/** 95회차 F1: 로드 오류(손상 · 읽기 오류 · 보존본만 있음) 또는 null — 로드를 먼저 한다. */
+export function physicalRegistryLoadError() { loadPhysical(); return loadErr.get(); }
+/**
+ * 95회차 F1: 다른 등록부와 같은 이름의 표지 — 설정 연동(linkcheck/settingsLinks.js noteLoadError)이 이 이름을 찾는다. 없으면 파일 판정(손상 보존본)만 보아
+ *   **읽기 오류**(원본 그대로 · 빈 목록) 동안 연동 대상이 '설정에서 사라짐' 으로 판정됐다.
+ */
+export const registryLoadError = physicalRegistryLoadError;
+/** 95회차 F1: 화면용 요약(원문 조각 없음 — summarizeRegistryError) 또는 null. */
+export function physicalRegistryLoadErrorSummary() {
+  const e = physicalRegistryLoadError();
+  if (!e) return null;
+  const s = summarizeRegistryError(e);
+  return { at: Number.isFinite(e.at) ? e.at : null, code: s?.code || null, text: s?.text || '사유 미상', readError: e.readError === true };
+}
+/** 95회차 F1: 읽기 오류 중의 쓰기 거절(409 본문) 또는 null. */
+export function physicalWriteRefusal() { loadPhysical(); return loadErr.writeRefusal(WHAT); }
 
-function persist() {
+function persist(next) {
+  loadErr.assertWritable(WHAT);   // 95회차 F1: 마지막 방어선 — 어느 경로도 읽기 오류 중에 원본을 덮지 않는다(던진다)
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
-  atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ servers: cache }), null, 2), { mode: 0o600 }); // 암호화 모드면 password 봉인
+  atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ servers: next }), null, 2), { mode: 0o600 }); // 암호화 모드면 password 봉인
   try { fs.chmodSync(FILE, 0o600); } catch { /* best effort */ }
+  // 95회차 F1: 메모리는 쓰기 성공 뒤에만 바꾼다(봉인 거절 · 디스크 오류면 화면 · 폴러가 저장되지 않은 항목을 쓰지 않게 — 21 · 22회차 규약)
+  cache = next;
+  loadErr.clear();   // v2.612 LEFT2612-01 과 같은 규칙 — 관리자 저장이 손상 표지를 푼다
 }
 
 /** 비밀번호를 가린 목록(클라이언트용). */
@@ -61,22 +98,24 @@ export function addPhysical(body = {}) {
   { const why = physicalHostIssue(host); if (why) return { ok: false, reason: why }; }
   if (!body.username) return { ok: false, reason: '계정이 필요합니다.' };
   const list = loadPhysical();
+  { const ref = loadErr.writeRefusal(WHAT); if (ref) return ref; }   // 95회차 F1
   const id = String(body.id || `pgpu-${crypto.randomBytes(3).toString('hex')}`).trim();
   if (list.find((s) => s.id === id)) return { ok: false, reason: '이미 존재하는 ID입니다.' };
-  list.push({
+  persist([...list, {
     id, name: String(body.name || host).trim(), host, port: Number(body.port) || 22,
     username: String(body.username).trim(), password: String(body.password || ''),
     os: ['linux', 'windows'].includes(body.os) ? body.os : 'linux',
     vcenterId: String(body.vcenterId || '').trim(), enabled: body.enabled !== false,
     gpuModels: Array.isArray(body.gpuModels) ? body.gpuModels.slice(0, 32) : [],
-  });
-  cache = list; persist();
+  }]);
   return { ok: true, id };
 }
 
 export function updatePhysical(id, body = {}) {
-  const s = getPhysicalRaw(id);
-  if (!s) return { ok: false, reason: '서버를 찾을 수 없습니다.' };
+  const cur = getPhysicalRaw(id);
+  { const ref = loadErr.writeRefusal(WHAT); if (ref) return ref; }   // 95회차 F1
+  if (!cur) return { ok: false, reason: '서버를 찾을 수 없습니다.' };
+  const s = { ...cur };   // 95회차 F1: 사본을 고친다 — 캐시는 쓰기 성공 뒤에만 바뀐다(persist)
   // 38회차 R4(반증 — 재현): 접속처 판정은 **어떤 칸도 바꾸기 전에** — s 는 캐시 객체라, 이름을 먼저 바꾼 뒤 거부하면 400 인데도 이름이 메모리에 남아 다음 저장에 굳었다.
   if (body.host !== undefined) { const h = String(body.host || '').trim(); if (h !== s.host) { const why = physicalHostIssue(h); if (why) return { ok: false, reason: why }; } }
   const before = { host: s.host, port: s.port, username: s.username };   // 접속처 변경 판정용(아래)
@@ -96,14 +135,15 @@ export function updatePhysical(id, body = {}) {
   if (body.vcenterId !== undefined) s.vcenterId = String(body.vcenterId || '').trim();
   if (body.enabled !== undefined) s.enabled = !!body.enabled;
   if (Array.isArray(body.gpuModels)) s.gpuModels = body.gpuModels.slice(0, 32);
-  persist();
+  persist(loadPhysical().map((x) => (x === cur ? s : x)));
   return { ok: true, droppedSecrets };
 }
 
 export function removePhysical(id) {
   const list = loadPhysical();
+  { const ref = loadErr.writeRefusal(WHAT); if (ref) return ref; }   // 95회차 F1
   const next = list.filter((s) => s.id !== id);
   if (next.length === list.length) return { ok: false, reason: '서버를 찾을 수 없습니다.' };
-  cache = next; persist();
+  persist(next);
   return { ok: true };
 }

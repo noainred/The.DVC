@@ -36,6 +36,8 @@ export default function GpuSettings() {
     setBusy(true); setMsg(null);
     try {
       const r = await putJson('/admin/metrics/settings', { gpuUtilEnabled: enabled, gpuUtilIntervalSec: blankOr(sec) }); // v2.598: 빈 칸은 보내지 않는다(60 으로 둔갑 금지)
+      // 95회차: putJson 은 400 · 409 를 던지지 않는다 — 거절 본문(ok:false)을 사유로 보인다(예전에는 r.settings 를 읽다 TypeError 문구)
+      if (!r || r.ok === false || !r.settings) { setMsg(`저장하지 못했습니다: ${r?.reason || r?.error || '사유 미상'}`); return; }
       setData(r); setSec(r.settings.gpuUtilIntervalSec ?? 60);
       setMsg(scopeSavedText(r, '저장되었습니다.', ' 새 주기가 즉시 적용됩니다.').text); // v2.733(C5-03)
     } catch (e) { setMsg(`오류: ${e.message}`); } finally { setBusy(false); }
