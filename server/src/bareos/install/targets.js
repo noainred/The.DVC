@@ -114,3 +114,29 @@ export function resetTarget(t, body, settings, { ids = [], jobs = [] } = {}) {
   if (job) throw Object.assign(new Error(`같은 서버에 다른 법인 ‘${job.vcenterName || job.vcenterId}’ 의 완전 설치 작업(${job.id} · ${job.status})이 있습니다 — 그 법인에서 전부 되돌린 뒤에 하세요.`), { code: 'invalid' });
   return { ...t, mode: 'reinstall', resetUnregistered: true };
 }
+
+/**
+ * 101회차 F1(재현): 재설치의 0단계(초기화)와 전부 되돌리기는 **그 서버의 Bareos 전체**(설정 · 카탈로그 · 패키지)를 지운다 — 같은 서버를 가리키는
+ *   Director 등록이 둘 이상이면(같은 주소 · 다른 콘솔 이름 — 52회차 D1 '같은 Director 에 둘째 vCenter 거부' 뒤 둘째 서비스를 같은 서버의 새 등록으로 묶은 경우)
+ *   다른 등록에 묶인 vCenter 의 잡 설정 · 실행 기록도 함께 지워진다. 예전에는 함께 쓰는 vCenter 확인(53회차 N4) · 대상 수 · M4 가 **그 Director id 하나**만 세어
+ *   확인 없이 지웠다. 이 판정으로 같은 서버의 Director 를 모두 센다.
+ *   주소는 정확히 같을 때(대소문자 · 끝 점 무시) · 한쪽이 점 없는 짧은 이름이면 다른 쪽의 첫 마디와 같을 때만 — resetTarget 의 거부 쪽 대조(짧은 이름끼리 늘 비교)보다 좁다
+ *   (다른 법인의 'bareos.pl.corp' 를 'bareos.kr.corp' 와 같은 서버로 보면 되돌리기가 남의 대상 때문에 막힌다). 루프백으로 등록된 Director 는 담당 엣지가 같을 때.
+ * @param {{ sshHost?: string, agent?: string, ids?: string[] }} server ids = 러너 · 사전 점검이 읽은 서버 주소 · 이름 · 모든 주소
+ * @returns {(d: object) => boolean}
+ */
+export function sameServerDirector({ sshHost = '', agent = '', ids = [] } = {}) {
+  const names = [sshHost, ...(Array.isArray(ids) ? ids : [])].map(lcHost).filter((x) => x && !loopback(x));
+  const full = new Set(names);
+  const words = names.filter((x) => !ipLike(x));
+  const shortOf = new Set(words.map(shortName));
+  const bare = new Set(words.filter((x) => !x.includes('.')));
+  return (d) => {
+    const h = lcHost(d?.host);
+    if (!h) return false;
+    if (loopback(h)) return !!agent && !!d?.agent && lcHost(d.agent) === lcHost(agent);
+    if (full.has(h)) return true;
+    if (ipLike(h)) return false;
+    return h.includes('.') ? bare.has(shortName(h)) : shortOf.has(h);
+  };
+}

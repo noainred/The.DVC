@@ -33,7 +33,7 @@ import { pickBundle } from './bundle.js';
 import { normPlan, planEnv, planSummary, STEPS, REMOTE_ROOT, RUN_DIR, BUNDLES_DIR, UNIT, FD_CLIENT, DIR_STORAGE, LAST_REMOTE_STEP, LAST_STEP } from './plan.js';
 import { precheckScript, parsePrecheck, judgePrecheck } from './precheck.js';
 import { parseErrFile, classifyFailure, scrubOutput } from './causes.js';
-import { listInstallTargets, sshCredsFor, resetTarget } from './targets.js';
+import { listInstallTargets, sshCredsFor, resetTarget, sameServerDirector } from './targets.js';
 import { tarName } from './bundleDoc.js';
 import { registryHosts } from '../vcHost.js';
 
@@ -186,9 +186,9 @@ export async function runPrecheck({ vcenterId, body = {} }) {
   const judged = judgePrecheck(facts, { mode: t.mode, bundle: bundle?.contents || null, plan });
   const hostIds = [facts.hostAddr, facts.hostname, ...(facts.addrs || [])].filter(Boolean);
   if (t.resetUnregistered) resetChecked(t0r, body, hostIds);   // 러너가 읽은 서버 주소 · 이름 · 모든 주소로 한 번 더(등록된 Director · 다른 법인 작업이면 던진다)
-  const { ledger, sharedVcenters } = t.director ? sharedOfDirector(t.director.id, vcenterId) : { ledger: 0, sharedVcenters: [] };
+  const { ledger, sharedVcenters } = t.director ? sharedOfDirector(t.director.id, vcenterId, { sshHost: t.sshHost, agent: t.agent, ids: hostIds }) : { ledger: 0, sharedVcenters: [] };
   const bindIssue = directorBindIssueFor(t, vcenterId);   // 52회차 D1 — 화면이 시작 전에 보인다(시작도 같은 판정으로 거부)
-  return { at: Date.now(), ms: Date.now() - t0, target: t, mode: t.mode, ...(t.resetUnregistered ? { resetUnregistered: true, hostIds } : {}), ...judged, ledgerTargets: ledger, sharedVcenters, ...(bindIssue ? { bindIssue } : {}), bundle: bundle ? { version: bundle.version, contents: bundle.contents, size: bundle.size } : null };
+  return { at: Date.now(), ms: Date.now() - t0, target: t, mode: t.mode, ...(t.resetUnregistered ? { resetUnregistered: true, hostIds } : {}), serverIds: hostIds.slice(0, 34), ...judged, ledgerTargets: ledger, sharedVcenters, ...(bindIssue ? { bindIssue } : {}), bundle: bundle ? { version: bundle.version, contents: bundle.contents, size: bundle.size } : null };
 }
 
 /**
@@ -197,16 +197,27 @@ export async function runPrecheck({ vcenterId, body = {} }) {
  *   53회차 N4(사용자 결정): 시작 · 0단계 다시 하기도 이 목록으로 '함께 지워짐' 확인을 대조한다(sharedAckIssue).
  * @returns {{ ledger:number, sharedVcenters:{vcenterId:string, targets:number}[] }}
  */
-function sharedOfDirector(directorId, vcenterId) {
+function sharedOfDirector(directorId, vcenterId, server = null) {
   let st = null; try { st = loadSettings(); } catch { st = null; }
-  const mineDir = st ? listJobs().filter((x) => !x.demo && jobDirectorId(x, st) === directorId) : listJobs().filter((x) => !x.demo && x.vcenterId === vcenterId);
+  // 101회차 F1(재현): 초기화는 그 서버의 Bareos 전체를 지운다 — 같은 서버를 가리키는 다른 Director 등록(같은 주소 · 다른 콘솔)의 대상 · vCenter 도 센다
+  const dirs = sameServerDirectorIds(directorId, server, st);
+  const mineDir = st ? listJobs().filter((x) => !x.demo && dirs.has(jobDirectorId(x, st))) : listJobs().filter((x) => !x.demo && x.vcenterId === vcenterId);
   const others = new Map();
   if (st) {
-    for (const s of st.sites || []) if (s.directorId === directorId && s.vcenterId !== vcenterId) others.set(s.vcenterId, 0);
+    for (const s of st.sites || []) if (dirs.has(s.directorId) && s.vcenterId !== vcenterId) others.set(s.vcenterId, 0);
     for (const x of mineDir) if (x.vcenterId !== vcenterId) others.set(x.vcenterId, (others.get(x.vcenterId) || 0) + 1);
   }
   return { ledger: mineDir.length, sharedVcenters: [...others.entries()].map(([id, n]) => ({ vcenterId: id, targets: n })).slice(0, 50) };
 }
+
+/** 101회차 F1: 이 Director + 같은 서버를 가리키는 다른 Director 등록(install/targets.js sameServerDirector — 판정 하나). */
+function sameServerDirectorIds(directorId, server, st) {
+  const out = new Set(directorId ? [directorId] : []);
+  if (server && st) { const mine = sameServerDirector(server); for (const d of st.directors || []) if (mine(d)) out.add(d.id); }
+  return out;
+}
+/** 101회차 F1: 작업 기록의 서버(SSH 주소 · 러너가 읽은 서버 주소 · 포탈 미등록 초기화면 읽은 모든 주소 · 담당 엣지). */
+const serverOfJob = (j) => ({ sshHost: j.sshHost, agent: j.agent, ids: [j.hostAddr, ...(Array.isArray(j.hostIds) ? j.hostIds : []), ...(Array.isArray(j.serverIds) ? j.serverIds : [])].filter(Boolean) });
 
 /** 52회차 D1: 이 설치가 7단계에서 저장할 매핑(이 vCenter → 그 Director)이 'Director 하나에 vCenter 하나' 를 새로 어기는가 — 설정 저장과 같은 판정. */
 function directorBindIssueFor(t, vcenterId) {
@@ -226,7 +237,7 @@ export function sharedAckIssue(sharedIds, ack, { volumes = false } = {}) {
   if (!now.length) return '';
   const got = Array.isArray(ack) ? [...new Set(ack.map(String))].sort() : null;
   if (got && got.length === now.length && got.every((x, i) => x === now[i])) return '';
-  return `이 Director 를 함께 쓰는 다른 vCenter ${now.length}곳(${now.slice(0, 5).join(', ')}${now.length > 5 ? ' …' : ''})의 잡 설정 · 실행 기록${volumes ? ' · 백업 볼륨' : ''}도 함께 지워집니다 — 초기화 확인 화면에서 그 vCenter 들을 확인한 뒤 다시 시작하세요(확인한 목록과 지금 목록이 다르면 시작하지 않습니다).`;
+  return `이 서버의 Bareos 를 함께 쓰는 다른 vCenter ${now.length}곳(${now.slice(0, 5).join(', ')}${now.length > 5 ? ' …' : ''})의 잡 설정 · 실행 기록${volumes ? ' · 백업 볼륨' : ''}도 함께 지워집니다 — 초기화 확인 화면에서 그 vCenter 들을 확인한 뒤 다시 시작하세요(확인한 목록과 지금 목록이 다르면 시작하지 않습니다).`;
 }
 
 /* ───────── 시작 ───────── */
@@ -267,6 +278,7 @@ async function startInner(t, vcenterId, body, by) {
     install: bundle.contents.install,
     directorId: t.director?.id || '', existingDirector: !!t.director, createdDirector: false, createdSite: false,
     ...(plan.mode === 'reinstall' && sharedIds.length ? { sharedAck: [...new Set(sharedIds.map(String))].sort().slice(0, 50) } : {}),   // 53회차 N4: 확인받은 목록(0단계 다시 하기가 대조)
+    ...(plan.mode === 'reinstall' ? { serverIds: (pre.serverIds || []).slice(0, 34) } : {}),   // 101회차 F1: 같은 서버 판정(0단계 다시 하기 · 전부 되돌리기 M4)이 쓰는 서버 주소 · 이름
     ...(t.resetUnregistered ? { resetUnregistered: true, hostIds: (pre.hostIds || []).slice(0, 34) } : {}),   // v2.876 포탈 미등록 Bareos 를 지우고 설치(4단계가 Director 를 새로 등록)
     by, createdAt: Date.now(), updatedAt: Date.now(), status: 'running', phase: 'upload',
     steps: Object.fromEntries(STEPS.filter((s) => s.n >= firstStep).map((s) => [s.n, { status: 'pending' }])),
@@ -626,7 +638,7 @@ export async function retryInstall(id, { body = {}, by = '' } = {}) {
   if (!Number.isInteger(fromStep) || fromStep < j.startStep || fromStep > LAST_STEP) throw fail('invalid', '다시 시작할 단계를 알 수 없습니다 — 전부 되돌린 뒤 새로 하세요.');
   if (fromStep === 0) guardResetJob(j);   // v2.876 반증 B: 0단계를 다시 띄우기 전에 같은 판정(그사이 이 서버가 Director 로 등록됐을 수 있다)
   if (fromStep === 0 && j.mode === 'reinstall' && j.directorId) {   // 53회차 N4: 그사이 이 Director 에 다른 vCenter 가 더 묶였으면 확인받은 목록과 다르다 — 다시 지우지 않는다
-    const nowIds = sharedOfDirector(j.directorId, j.vcenterId).sharedVcenters.map((x) => x.vcenterId);
+    const nowIds = sharedOfDirector(j.directorId, j.vcenterId, serverOfJob(j)).sharedVcenters.map((x) => x.vcenterId);   // 101회차 F1: 같은 서버의 다른 등록도
     const extra = nowIds.filter((x) => !(j.sharedAck || []).includes(String(x)));
     if (extra.length) throw fail('precheck', sharedAckIssue(nowIds, j.sharedAck || [], { volumes: !!j.plan?.reset?.volumes }));
   }
@@ -684,15 +696,28 @@ export function rollbackAllInstall(id, { ack = false, by = '', sshFixed = false 
   // v2.846 D-7: 원장을 못 읽으면 대상 수를 0 으로 보지 않는다(M4 가 통과하고 포탈 쪽 정리가 빈 원장으로 판정했다) — 503
   if (registryLoadError()) throw fail('unavailable', '백업 대상 원장을 읽지 못한 상태라 전부 되돌리지 않습니다(대상 수를 0 으로 보지 않습니다 · 손상본 보존 — 서비스 점검에서 확인).');
   // M4 · v2.846 D-4(재현): 재설치(기존 Director 를 다시 등록해 쓰는 작업)도 본다 — 예전에는 이 설치로 새로 만든 Director 만 봐서, 다시 등록해 쓰던 대상의 카탈로그 · 설정을 지웠다
-  if (j.directorId && (j.createdDirector || j.existingDirector)) {
-    // v2.847 D2-5(2회차 점검 — 재현): v2.823 이전 대상(directorId 칸 없음 — 매핑 · dir_default 로 이 Director)도 센다 — Director 삭제 라우트와 같은 판정(jobDirectorId) 하나
-    let st = null; try { st = loadSettings(); } catch { st = null; }
-    if (!st) throw fail('unavailable', 'Bareos 설정을 읽지 못해 이 Director 의 백업 대상 수를 판정할 수 없습니다 — 되돌리지 않습니다.');
-    const n = listJobs().filter((x) => !x.demo && jobDirectorId(x, st) === j.directorId).length;
+  // v2.847 D2-5(2회차 점검 — 재현): v2.823 이전 대상(directorId 칸 없음 — 매핑 · dir_default 로 이 Director)도 센다 — Director 삭제 라우트와 같은 판정(jobDirectorId) 하나
+  // 101회차 F1: 설정을 못 읽으면 매핑으로 푸는 옛 대상 · 같은 서버의 다른 등록을 셀 수 없다 — 예전 'st = null' 분기는 loadSettings 가 던지지 않아(빈 설정) 닿지 않았다
+  if (settingsLoadError()) throw fail('unavailable', 'Bareos 설정을 읽지 못해 이 Director 의 백업 대상 수를 판정할 수 없습니다 — 되돌리지 않습니다.');
+  const st = loadSettings();
+  const own = j.directorId && (j.createdDirector || j.existingDirector) ? j.directorId : '';
+  // 101회차 F1(재현): 전부 되돌리기는 이 서버의 Bareos(패키지 · 카탈로그 · 설정)를 지운다 — 같은 서버를 가리키는 다른 Director 등록(같은 주소 · 다른 콘솔)의 대상도 센다
+  const sameDirs = sameServerDirectorIds('', serverOfJob(j), st);
+  const countOn = (ids) => listJobs().filter((x) => !x.demo && ids.has(jobDirectorId(x, st))).length;
+  if (own) {
+    const n = countOn(new Set([own]));
     if (n > 0) {
       throw fail('conflict', j.createdDirector
         ? `이 설치로 등록한 Director 에 백업 대상이 ${n}개 있습니다 — 백업 대상을 먼저 지운 뒤 되돌리세요(원격만 지우고 포탈 등록이 남는 상태를 만들지 않습니다).`
         : `이 재설치의 Director(기존 등록 — 다시 등록해 씀)에 백업 대상이 ${n}개 있습니다 — 되돌리면 재설치 뒤의 카탈로그 · 설정 · 패키지가 지워져 그 대상의 백업이 멈춥니다. 백업 대상을 먼저 지운 뒤 되돌리세요.`);
+    }
+  }
+  sameDirs.delete(own);
+  if (sameDirs.size) {
+    const n = countOn(sameDirs);
+    if (n > 0) {
+      const names = st.directors.filter((d) => sameDirs.has(d.id)).map((d) => `‘${d.name}’`).slice(0, 3).join(', ');
+      throw fail('conflict', `같은 서버를 가리키는 다른 Director 등록(${names})에 백업 대상이 ${n}개 있습니다 — 되돌리면 이 서버의 Bareos(카탈로그 · 설정 · 패키지)가 지워져 그 대상의 백업이 멈춥니다. 그 백업 대상을 먼저 지운 뒤 되돌리세요.`);
     }
   }
   _stopReq.delete(j.id);

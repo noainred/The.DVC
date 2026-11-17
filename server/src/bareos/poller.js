@@ -236,6 +236,11 @@ export async function pollOnce({ trigger = 'timer', reconcile = null, directorId
     const only = directorId ? new Set([directorId]) : (Array.isArray(directorIds) ? new Set(directorIds) : null);   // 범위 계정의 수동 조회(S1)
     const targets = only ? ready.filter((d) => only.has(d.id)) : ready;
     const recOnly = reconcileOnly ? new Set(reconcileOnly) : null;   // 52회차 D2
+    // 101회차 F2(재현): 수동 조회도 _tick 을 센다 — 범위 계정 · 조회 전용 계정의 수동 조회가 주기 대조 차례(_tick % RECONCILE_EVERY === 1)를 차지하면
+    //   이번에 조회하지 않거나(범위 밖) 대조에서 뺀(D2) Director 는 다음 차례(10틱 뒤)까지 대조가 밀렸다 — 다음 틱에 대조하게 둔다
+    if (trigger !== 'timer' && reconcile == null && _tick % RECONCILE_EVERY === 1) {
+      for (const d of ready) if ((only && !only.has(d.id)) || (recOnly && !recOnly.has(d.id))) _reconcileDue.add(d.id);
+    }
     const results = await poolSettled(targets, DIRECTOR_CONCURRENCY, (d) => pollDirector(d, {
       work: work.filter((w) => (w.directorId || dirOfJob(w)) === d.id),
       mine: jobs.filter((j) => dirOfJob(j) === d.id),
