@@ -39,7 +39,8 @@ const fleetOnly = fullScopeOnlyWith('엣지 배포·패키지·LLM 설정·릴�
 
 /**
  * 116회차 F6: Ollama 원격 설치의 감사 문구(순수). 대상(계정@주소:SSH 포트) · 방식 · Ollama 포트 · 모델 · 포탈 반영 요청 여부 · 실패 사유만 —
- * 비밀번호 · 개인키 · 오프라인 파일 경로 원문은 싣지 않는다. 줄바꿈 · 탭은 공백으로(감사 줄이 갈라지지 않게), 칸마다 길이 상한.
+ * 비밀번호 · 개인키는 싣지 않는다. 오프라인 파일 경로는 칸으로 싣지 않는다 — 다만 122회차 정정: 검증이 거절한 경로는 **실패 사유 문구에 들어 있다**
+ * ('설치 파일을 찾을 수 없습니다: <요청자가 넣은 경로>' — 비밀이 아니고 무엇을 보내려 했는지의 기록이다). 줄바꿈 · 탭은 공백으로(감사 줄이 갈라지지 않게), 칸마다 길이 상한.
  */
 export function ollamaDeployAuditDetail({ target = {}, mode, model, ollamaPort, applyToPortal, result } = {}) {
   const s = (v, n = 80) => String(v ?? '').slice(0, n).replace(/[\r\n\t]/g, ' ');
@@ -52,6 +53,26 @@ export function ollamaDeployAuditDetail({ target = {}, mode, model, ollamaPort, 
     `포탈 LLM 설정 반영 ${applied ? '요청함' : '요청 안 함'}`,   // 요청값이다 — 실제 반영은 설치가 끝까지 성공했을 때만(installOllama)
     result?.ok ? '' : `사유 ${s(result?.reason, 160)}`,
   ].filter(Boolean).join(' · ');
+}
+
+/**
+ * 122회차(116 F6 의 형제 — 116 이 '같은 꼴 · 손대지 않음' 으로 남긴 것): 엣지 노드 배포의 감사 문구(순수). 대상(계정@주소:SSH 포트) · 엣지 이름 · 포탈 포트 ·
+ * 실패 사유만 — 비밀번호 · 개인키 · 토큰(CENTRAL_TOKEN · COLLECTOR_TOKEN)은 싣지 않는다. 줄바꿈 · 탭은 공백으로, 칸마다 길이 상한.
+ */
+export function agentDeployAuditDetail({ target = {}, portalPort, result } = {}) {
+  const s = (v, n = 80) => String(v ?? '').slice(0, n).replace(/[\r\n\t]/g, ' ');
+  return [
+    `대상 ${s(target?.username, 40) || '?'}@${s(target?.host, 120) || '?'}:${s(target?.port || 22, 6)}`,
+    target?.agentName ? `엣지 ${s(target.agentName, 60)}` : '',
+    `포탈 포트 ${s(Number(portalPort) || 4000, 6)}`,
+    result?.ok ? '' : `사유 ${s(result?.reason, 160)}`,
+  ].filter(Boolean).join(' · ');
+}
+/** 배포 결과를 감사에 남긴다 — 성공은 자동 감사 줄에 함께(두 줄을 만들지 않는다 — v2.913), 실패(4xx 라 자동 감사가 건너뛴다)는 따로 한 줄. */
+function auditAgentDeploy(req, res, target, portalPort, r) {
+  const detail = agentDeployAuditDetail({ target, portalPort, result: r });
+  if (r?.ok) { if (res.locals) res.locals.auditDetail = detail; }
+  else logAudit({ user: req.user?.username, action: '엣지 노드 배포 실패', target: String(target?.host ?? '').slice(0, 120), detail, ip: req.ip || '' });
 }
 
 export function registerDeployLlm(adminRouter) {
@@ -117,6 +138,9 @@ adminRouter.post('/agent-deploy', adminOnly, fleetOnly, async (req, res) => {
       if (!r.targetSaved) r.targetSaveReason = String(sv?.reason || '배포 대상을 저장하지 못했습니다.').slice(0, 300);
     }
   } catch (e) { r.targetSaved = false; r.targetSaveReason = String(e?.message || e).slice(0, 300); /* 저장 실패는 배포 결과에 영향 주지 않음 */ }
+  // 122회차(116 F6 의 형제): 요청자가 고른 서버에 root 로 설치 스크립트를 돌리고 portal.env(토큰)를 쓰는 경로인데 감사는 자동(2xx 만 · 대상 없음)뿐이었다 —
+  //   실패한 배포(패키지 전송 · install.sh 가 이미 돌았을 수 있다)는 기록이 없었다.
+  auditAgentDeploy(req, res, target, portalPort, r);
   res.status(r.ok ? 200 : 400).json(r);
 });
 
@@ -240,6 +264,7 @@ adminRouter.post('/agent-deploy/targets/:id/deploy', adminOnly, fleetOnly, async
   const r = await deployAgent(t, { installerPath: t.installerPath, port: t.portalPort });
   if (r.ok) r.collector = autoRegisterCollector(t, t.portalPort); // 설치 성공 시 중앙에 수집 서버로 자동 등록
   recordResult(t.id, r);
+  auditAgentDeploy(req, res, t, t.portalPort, r);   // 122회차: 대상 · 실패도 감사에(위 단건 배포와 같은 규칙)
   res.status(r.ok ? 200 : 400).json(r);
 });
 
@@ -261,6 +286,9 @@ adminRouter.post('/agent-deploy/deploy-all', adminOnly, fleetOnly, async (_req, 
     recordResult(t.id, r);
     results.push({ id: t.id, host: t.host, agentName: t.agentName, ok: r.ok, active: r.active, reason: r.reason });
   }
+  // 122회차: 전체 배포는 언제나 200 이라 자동 감사 줄이 남는다 — 그 줄에 대상 수 · 실패한 주소(앞 10개)를 싣는다.
+  const failed = results.filter((r) => !r.ok);
+  if (res.locals) res.locals.auditDetail = `대상 ${results.length} · 성공 ${results.length - failed.length} · 실패 ${failed.length}${failed.length ? `(${failed.slice(0, 10).map((r) => String(r.host ?? '').slice(0, 60).replace(/[\r\n\t]/g, ' ')).join(', ')}${failed.length > 10 ? ' …' : ''})` : ''}`;
   res.json({ ok: true, deployed: results.filter((r) => r.ok).length, total: results.length, results });
 });
 
@@ -579,7 +607,7 @@ adminRouter.post('/ollama-deploy', adminOnly, fleetOnly, requireSettingsOwner, a
   const r = await installOllama(target, { mode, binaryPath, model, ollamaPort, applyToPortal });
   // 116회차 F6: 요청자가 고른 서버에 root 로 명령을 실행하고(오프라인이면 이 서버의 파일을 보낸다) 포탈 LLM 주소를 바꾸는 경로인데,
   //   자동 감사(auditMiddleware)는 2xx 만 · 대상 없이 남겼다 — **실패한 설치**(계정 생성 · 파일 전송 · 설치 스크립트가 이미 돌았을 수 있다)는
-  //   기록이 없었다. 대상 · 방식을 싣는다(비밀번호 · 개인키 · 파일 경로 원문은 싣지 않는다 — 형제 '심층 검색 게스트 탐침' v2.689 B7 과 같은 판단).
+  //   기록이 없었다. 대상 · 방식을 싣는다(비밀번호 · 개인키는 싣지 않는다 · 파일 경로는 실패 사유 문구에만 — 형제 '심층 검색 게스트 탐침' v2.689 B7 과 같은 판단).
   const auditDetail = ollamaDeployAuditDetail({ target, mode, model, ollamaPort, applyToPortal, result: r });
   if (r.ok) { if (res.locals) res.locals.auditDetail = auditDetail; }   // 성공은 자동 감사 줄에 함께(두 줄을 만들지 않는다 — v2.913)
   else logAudit({ user: req.user?.username, action: 'Ollama 원격 설치 실패', target: String(target?.host ?? '').slice(0, 120), detail: auditDetail, ip: req.ip || '' });

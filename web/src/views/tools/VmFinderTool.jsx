@@ -6,6 +6,7 @@ import { Card } from './shared.jsx';
 import Select from '../../components/Select.jsx';
 import { pressable } from '../../components/pressable.js';   // v3.13.5 필터 칩(vCenter · 클러스터 …) 키보드 — Tab · Enter/Space · aria-pressed
 import BoldText from '../../components/boldText.jsx';
+import { idleCardOf } from './vmFinderText.js';
 import { authStopNote, authStopCell, skipNote, skipCell } from '../vcAuthStopText.js'; // v2.733(C3-01): 인증 정지로 평균을 조회하지 않은 vCenter · v2.744(감사 후속 FA-②): 직접 수집 대상 아님
 
 
@@ -99,7 +100,8 @@ export function VmFinder() {
       {data?.error && <ErrorBox message={data.error} />}
       <div className="kpis" style={{ marginBottom: 12 }}>
         <Card label="검색 결과" value={items.length.toLocaleString()} meta="조건 일치 VM" />
-        {withAvg && <Card label="유휴 VM" value={data.idleCount ?? 0} accent={(data.idleCount ?? 0) ? 'var(--red)' : 'var(--green)'} meta={`평균 CPU ≤ ${data.idleThreshold}%`} />}
+        {/* 122회차: 평균을 못 읽어 판정하지 않은 VM(idleUnknown)을 카드가 말한다 — 전부 못 읽었으면 초록 0 이 아니라 '—'(판정은 vmFinderText.js) */}
+        {withAvg && <Card label="유휴 VM" {...idleCardOf(data, items.length)} />}
         {withAvg && data.avgTruncated && <Card label="평균 분석 범위" value={`상위 ${data.avgCap}`} meta="성능부하 방지 상한" />}
       </div>
       {withAvg && authStopNote(data.authStopped) && <div className="muted" style={{ fontSize: 12, marginBottom: 8, color: 'var(--amber)' }}>※ <BoldText text={authStopNote(data.authStopped)} /></div>}
