@@ -1270,20 +1270,54 @@ class HubServer(ThreadingHTTPServer):
     allow_reuse_address = True
     request_queue_size = 64
 
-    def __init__(self, address, handler, ctx, max_connections: int = 64):
+    def __init__(self, address, handler, ctx, max_connections: int = 64, max_per_client=None):
         super().__init__(address, handler)
         self.ctx = ctx
         self._slots = threading.BoundedSemaphore(max_connections)
+        # 전체 점검 124회차(117회차 결정 D1 — 재현: 헤더를 흘리는 연결 64개가 소켓 시한을 지나서도 전체 상한을 쥐었다): 출발지(IP)당 동시 연결 상한.
+        #   한 출발지가 쥘 수 있는 자리를 전체보다 작게 두어 나머지 자리로 다른 사용자가 붙는다. 여러 출발지에서 나눠 여는 공격은 막지 못한다(앞단 프록시의 일).
+        per = config.max_conn_per_client if max_per_client is None else max_per_client
+        self._per_client_max = max(0, int(per))   # 0 = 끔
+        self._per_client = {}
+        self._per_client_lock = threading.Lock()
+
+    def _enter_client(self, client) -> bool:
+        if not self._per_client_max:
+            return True
+        with self._per_client_lock:
+            count = self._per_client.get(client, 0)
+            if count >= self._per_client_max:
+                return False
+            self._per_client[client] = count + 1
+            return True
+
+    def _leave_client(self, client) -> None:
+        if not self._per_client_max:
+            return
+        with self._per_client_lock:
+            count = self._per_client.get(client, 0) - 1
+            if count > 0:
+                self._per_client[client] = count
+            else:
+                self._per_client.pop(client, None)   # 0 이면 지운다 — 출발지 수만큼 자라지 않게
 
     def process_request_thread(self, request, client_address):
-        if not self._slots.acquire(timeout=5):
-            # 상한을 넘으면 새 연결을 기다리게 하지 않고 즉시 끊는다(큐가 무한정 늘지 않게).
+        client = client_address[0] if client_address else "-"
+        if not self._enter_client(client):
+            # 이 출발지가 이미 상한만큼 연결을 쥐고 있다 — 기다리게 하지 않고 끊는다(자리가 나면 다시 붙는다).
             self.shutdown_request(request)
             return
         try:
-            super().process_request_thread(request, client_address)
+            if not self._slots.acquire(timeout=5):
+                # 상한을 넘으면 새 연결을 기다리게 하지 않고 즉시 끊는다(큐가 무한정 늘지 않게).
+                self.shutdown_request(request)
+                return
+            try:
+                super().process_request_thread(request, client_address)
+            finally:
+                self._slots.release()
         finally:
-            self._slots.release()
+            self._leave_client(client)
 
 
 def create_server(host: str = None, port: int = None, ctx=None) -> HubServer:

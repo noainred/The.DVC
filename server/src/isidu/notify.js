@@ -121,6 +121,9 @@ export function isiduMailReady() {
 /** 대상별 마지막 메일 결과(화면용 — 주소 없음). */
 export function isiduMailStateOf(id) {
   const r = state().targets[String(id || '')];
+  // 124회차(119 반증 — 재현): 기록 파일을 못 읽는 동안 자동 발송(조사 결과 · 실패 알림 · 정기 회차)이 멈추는데 화면에는 '마지막 메일 기록 없음' 만 보였다(콘솔 한 줄뿐 — 무음 정지).
+  //   그 사실을 대상의 마지막 메일 상태로 말한다(화면 mailStateText 가 '보내지 않음 — 사유' 로 그린다). 기록이 아니라 지금 상태라 저장하지 않는다.
+  if (_stReadErr) return { at: Date.now(), kind: 'result', state: 'skipped', code: 'state-unreadable', readError: true, reason: `메일 기록 파일(${path.basename(FILE())})을 읽지 못해 자동 발송을 멈췄습니다 — 읽기 오류(${_stReadErr})이고 원본은 그대로 있습니다(30초마다 다시 읽고, 읽히면 이어 갑니다 · 밀린 메일을 몰아 보내지는 않습니다 · ‘지금 보내기’ 는 됩니다).` };
   return r?.last ? { ...r.last } : null;
 }
 

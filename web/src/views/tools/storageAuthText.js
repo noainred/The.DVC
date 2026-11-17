@@ -145,6 +145,18 @@ export function authStopInfo(stop, { what = '이 대상', manual = '', now = Dat
   if (since) facts.push(`${since}부터 정지`);
   if (attempts != null) facts.push(`실패 ${attempts}회`);
   if (last && last !== since) facts.push(`마지막 시도 ${last}`);
+  // 124회차(119 반증 — 재현): 서버가 **정지 기록 파일을 못 읽는 동안** 모르는 대상에 돌려주는 정지는 인증 실패가 아니다(util/authGuard.js unreadStop — 표지 unread,
+  //   시도 수 0 은 그 정지에만 쓴다 — 표지를 떨구는 옛 응답 모양도 가린다). 예전에는 '인증 실패로 … 멈췄습니다(실패 0회) · 비밀번호를 고치면 자동으로 다시 시작' 이라고 말했다
+  //   (둘 다 사실이 아니다 — 모르는 대상은 비밀번호를 고쳐도 건너뛴다. 풀리는 길은 파일이 다시 읽히거나 수동 실행이 성공하는 것이다).
+  if (stop.unread === true || attempts === 0) {
+    const sinceNote = since ? `(${since}부터)` : '';
+    const manualUnread = manual ? ` '${manual}'${topicOf(manual)} 막지 않습니다 — 성공하면 이 대상은 다시 시작합니다.` : '';
+    const textUnread = `**정지 기록 파일을 읽지 못해 ${what}의 ${activity}${objectOf(activity)} 건너뛰고 있습니다**${sinceNote}. **인증 실패가 확인된 것이 아닙니다** —`
+      + ' 정지돼 있던 대상에 자동으로 다시 로그인하지 않으려는 것이고, 파일이 다시 읽히면 이어 갑니다(비밀번호를 고쳐도 그때까지는 건너뜁니다).'
+      + manualUnread
+      + (reason ? ` 사유: ${reason}` : '');
+    return { title: '정지 기록 읽기 오류 — 주기 수집 건너뜀', short: '정지 기록 읽기 오류', text: textUnread, detail: since ? `${since}부터 건너뜀` : '', attempts: null, unread: true };
+  }
   const detail = facts.join(' · ');
   // 수동 실행은 막지 않는다 — 그리고 그 실행이 저장된 자격증명으로 성공하면 정지가 풀린다(서버가 기록을 지운다).
   const manualNote = manual ? ` '${manual}'${topicOf(manual)} 막지 않습니다(1회만 시도) — 고친 뒤 눌러 확인하세요. 성공하면 정지가 풀립니다.` : '';

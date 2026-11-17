@@ -119,6 +119,8 @@ export function createAuthGuard({ file }) {
   let _over = {};              // 그동안 메모리에만 둔 기록(id → rec)
   const _cleared = new Set();  // 그동안 해제된 id(이 창 안에서 '정지 아님' 이 확인된 대상)
   const _rekeys = [];          // 그동안 요청된 신원 모양 이관([id, fromHash, toHash])
+  const _purges = [];          // 124회차: 그동안 요청된 일괄 정리 조건(purgeWhere) — 읽히면 파일의 기록에 적용한다(상한 PURGES_MAX)
+  const PURGES_MAX = 8;
   const load = () => {
     if (_mem) return _mem;
     const r = _reader.read();
@@ -131,13 +133,15 @@ export function createAuthGuard({ file }) {
     if (_unread) {
       // 읽혔다 — 못 읽은 동안의 이관 · 해제 · 기록을 파일의 기록에 합친다(같은 자격의 기록이면 처음 시각을 지키고 시도 수를 더한다).
       for (const [id, from, to] of _rekeys) if (_mem[id]?.credHash === from) _mem[id].credHash = to;
+      let purged = 0;
+      for (const pred of _purges) for (const id of Object.keys(_mem)) { let hit = false; try { hit = !!pred(id); } catch { hit = false; } if (hit) { delete _mem[id]; purged++; } }
       for (const id of _cleared) delete _mem[id];
       for (const [id, rec] of Object.entries(_over)) {
         const old = _mem[id];
         _mem[id] = old && old.credHash === rec.credHash ? { ...rec, since: old.since, attempts: (old.attempts || 0) + (rec.attempts || 0) } : rec;
       }
-      const changed = _rekeys.length || _cleared.size || Object.keys(_over).length;
-      _unread = null; _over = {}; _cleared.clear(); _rekeys.length = 0;
+      const changed = _rekeys.length || _cleared.size || Object.keys(_over).length || purged;
+      _unread = null; _over = {}; _cleared.clear(); _rekeys.length = 0; _purges.length = 0;
       if (changed) persist();
     }
     return _mem;
@@ -147,10 +151,15 @@ export function createAuthGuard({ file }) {
     try { atomicWriteFileSync(FILE(), JSON.stringify(_mem || {}, null, 2), { mode: 0o600 }); }
     catch { /* 정지 상태를 못 써도 수집은 계속돼야 한다 */ }
   };
-  /** 못 읽은 동안 '모르는 대상' 에 돌려주는 정지(반환 꼴은 정지 기록과 같다). */
+  /**
+   * 못 읽은 동안 '모르는 대상' 에 돌려주는 정지(반환 꼴은 정지 기록과 같다).
+   * 124회차(119 반증 — 재현): 이 정지는 **인증 실패가 아니다**. 소비처 다수가 사유(reason) 대신 자기 문장('인증 실패로 … 정지(N회) — 비밀번호를 고치면 자동 재개')을
+   *   만들어, 화면 · 메일 이력이 '인증 실패(0회)' 와 '비밀번호를 고치면 재개' 를 말했다(둘 다 사실이 아니다 — 모르는 대상은 자격증명을 고쳐도 정지로 답한다).
+   *   그래서 표지 `unread: true` 를 싣는다. **`attempts: 0` 은 이 정지에만 쓴다**(실제 정지 기록은 1 이상) — 표지를 떨구는 옛 view 함수를 지나도 화면이 가릴 수 있다.
+   */
   const unreadStop = () => ({
-    since: _unread.since, at: _unread.since, attempts: 0,
-    reason: `정지 기록 파일(${file})을 읽지 못해 주기 수집을 건너뜁니다 — 읽기 오류(${_unread.code})이고 원본은 그대로 있습니다. 정지돼 있던 대상에 자동으로 다시 로그인하지 않으려는 것입니다(30초마다 다시 읽습니다 · 수동 실행은 막지 않습니다).`,
+    since: _unread.since, at: _unread.since, attempts: 0, unread: true,
+    reason: `정지 기록 파일(${file})을 읽지 못해 주기 수집을 건너뜁니다 — 읽기 오류(${_unread.code})이고 원본은 그대로 있습니다. 정지돼 있던 대상에 자동으로 다시 로그인하지 않으려는 것입니다(30초마다 다시 읽습니다 · 연결 시험이나 수동 수집이 성공하면 그 대상은 풀립니다).`,   // 124회차: '수동 실행은 막지 않습니다' 는 사실이 아니었다 — Veeam 실행 대행 · vCenter 주문형 조회는 정지면 사람이 누른 것도 보내지 않는다(실측)
   });
 
   // v2.591: 한 번의 실행에서 기록이 수백~수천 건 바뀌는 호출자(iDRAC 대역 스캔 — 대역당 최대 2,048 IP)를 위한
@@ -179,7 +188,9 @@ export function createAuthGuard({ file }) {
     /** 성공했거나 사용자가 해제 — 기록 제거. */
     clearAuthStop(id, { defer = false } = {}) {
       const db = load();
-      if (!db) { const had = !!_over[id]; delete _over[id]; _cleared.add(id); return had; }   // 119회차: 읽히면 파일의 기록에서도 지운다
+      // 119회차: 읽히면 파일의 기록에서도 지운다. 124회차: '풀렸는가' 는 이 호출 전에 정지로 답하고 있었는가다(그동안의 기록이 있었거나 · 모르는 대상이었거나) —
+      //   예전에는 모르는 대상을 풀고도 false 를 돌려줘 연결 시험이 '정지를 풀었다' 고 말하지 않았다.
+      if (!db) { const had = !!_over[id] || !_cleared.has(id); delete _over[id]; _cleared.add(id); return had; }
       if (!db[id]) return false;
       delete db[id];
       _mem = db; save(defer);
@@ -233,7 +244,9 @@ export function createAuthGuard({ file }) {
      *   건마다 clearAuthStop 을 부르면 파일 전체를 건수만큼 다시 쓴다.
      */
     purgeWhere(pred) {
-      const db = load() || _over;   // 119회차: 못 읽은 동안은 메모리 기록만(파일의 옛 기록은 다음 호출이 지운다)
+      const db = load() || _over;   // 119회차: 못 읽은 동안은 메모리 기록만
+      // 124회차(재현): 호출부(iDRAC 스캔 정리)는 프로세스당 한 번만 부른다 — '다음 호출이 지운다' 는 없었고 파일의 옛 기록이 재시작까지 남았다. 조건을 기억했다가 읽히면 적용한다.
+      if (db === _over && typeof pred === 'function' && _purges.length < PURGES_MAX) _purges.push(pred);
       let n = 0;
       for (const id of Object.keys(db)) { if (pred(id)) { delete db[id]; n++; } }
       if (n && db !== _over) { _mem = db; save(false); }
@@ -241,13 +254,15 @@ export function createAuthGuard({ file }) {
     },
     /** 119회차: 정지 기록 파일을 못 읽어(읽기 오류 — 원본 그대로) 모르는 대상을 정지로 답하는 중이면 { since, code }, 아니면 null. */
     unreadable() { load(); return _unread ? { ..._unread } : null; },
-    _resetForTest() { _mem = null; _dirty = false; _reader.reset(); _unread = null; _over = {}; _cleared.clear(); _rekeys.length = 0; try { fs.rmSync(FILE()); } catch { /* 없음 */ } },
+    _resetForTest() { _mem = null; _dirty = false; _reader.reset(); _unread = null; _over = {}; _cleared.clear(); _rekeys.length = 0; _purges.length = 0; try { fs.rmSync(FILE()); } catch { /* 없음 */ } },
     _fileForTest() { return FILE(); },
   };
 }
 
 /** 정지 기록 → 화면·API 용(자격증명 해시 제외). */
-export const authStopView = (rec) => (rec ? { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason } : null);
+export const authStopView = (rec) => (rec ? { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason, ...(rec.unread === true ? { unread: true } : {}) } : null);
+/** 124회차: 이 정지가 '정지 기록 파일을 못 읽어 건너뜀'(인증 실패 아님)인가 — 소비처가 자기 문장을 만들 때 가른다. */
+export const isUnreadStop = (rec) => !!rec && (rec.unread === true || rec.attempts === 0);
 
 /**
  * **한 실행 안의 회로 차단기**(v2.591 — 감사 F2). 대상마다 멈추는 정지 기록(`createAuthGuard`)만으로는

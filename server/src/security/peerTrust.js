@@ -191,7 +191,11 @@ function sanitizeTrustedList(kind, e) {
  */
 function assertWritable() {
   if (!_loadError?.writeBlocked) return;
-  const e = new Error(_loadError.readError
+  // 124회차(119 반증 — 재현): 읽기 오류 중에 파일이 없어지면(지움 · 옮김) 이 프로세스는 닫힌 채 남는데, 문구는 '원본은 그대로 있습니다 · 읽히면 돌아옵니다' 였다(사실이 아니다 —
+  //   파일을 되돌리거나 재시작해야 풀린다). 그 갈래(gone)는 따로 말한다.
+  const e = new Error(_loadError.gone
+    ? 'peer-trust.json 이 없어져(읽지 못하던 중에 지워졌거나 옮겨졌습니다) 저장하지 않습니다 — 실행 중에는 승인 지문만 허용으로 닫아 둡니다. 파일을 되돌리면 30초 안에 다시 읽고, 새로 시작하려면 포탈을 재시작하세요'
+    : _loadError.readError
     ? 'peer-trust.json 을 읽지 못해(읽기 오류 — 원본은 그대로 있습니다) 저장하지 않습니다 — 파일 권한·소유자·디스크를 확인하세요(30초마다 다시 읽고, 읽히면 승인 목록이 돌아옵니다)'
     : 'peer-trust.json 을 읽지 못했고 원본을 옆으로 옮기지 못해 저장하지 않습니다 — 파일 권한·소유자를 확인한 뒤 포탈을 재시작하세요');
   e.status = 409; e.code = 'peer-trust-unwritable';
@@ -290,7 +294,11 @@ function failClosed(st, code, detail = '') {
  */
 function failUnreadable(detail = '') {
   _retryAt = nowMs() + READ_RETRY_MS;
-  if (_st && _loadError?.readError) { _loadError = { ..._loadError, ...(detail ? { detail } : {}) }; return _st; }   // 계속 못 읽는 중 — 메모리 상태 유지
+  if (_st && _loadError?.readError) {   // 계속 못 읽는 중 — 메모리 상태 유지
+    const { gone: _was, ...rest } = _loadError;
+    _loadError = { ...rest, ...(detail ? { detail } : {}), ...(detail === 'ENOENT' ? { gone: true } : {}) };   // 124회차: 다시 읽을 때 파일이 없어졌으면 표지(gone)
+    return _st;
+  }
   const st = emptyState();
   _loadError = { code: 'unreadable', ...(detail ? { detail } : {}), writeBlocked: true, readError: true };
   const now = Date.now();

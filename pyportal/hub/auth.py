@@ -741,8 +741,9 @@ class SessionStore:
                 entry[1] = now + self._lockout
                 entry[0] = 0
                 self._fail_names.pop(client, None)
-            self._global_fails.append(now)
-            while self._global_fails and now - self._global_fails[0] > window:
+            # 124회차 R2: 전역 창도 (시각, 계정 이름)으로 센다 — 성공이 그 계정의 실패만 뺄 수 있게(아래 note_success).
+            self._global_fails.append((now, self._fail_key(username)))
+            while self._global_fails and now - self._global_fails[0][0] > window:
                 self._global_fails.popleft()
             if len(self._global_fails) >= self._max_fails * self.GLOBAL_FACTOR:
                 self._global_until = now + self._lockout
@@ -751,20 +752,35 @@ class SessionStore:
     def note_success(self, client: str = "-", username=None) -> None:
         """전체 점검 117회차 F2(재현): 성공은 **그 계정의 실패만** 지운다. 예전에는 어느 계정이든 성공하면 그 출발지의 실패를 통째로 지워,
         viewer 계정 하나로 'admin 오답 7회 → 자기 계정 로그인' 을 되풀이하면 잠금 없이 admin 비밀번호를 무한정 대입할 수 있었다
-        (오답 21회 · 잠금 0회). username 을 주지 않는 예전 호출은 그 출발지 전부를 지운다(계정을 모르는 호출부 — 지금 서버는 항상 준다)."""
+        (오답 21회 · 잠금 0회). username 을 주지 않는 예전 호출은 그 출발지 전부를 지운다(계정을 모르는 호출부 — 지금 서버는 항상 준다).
+
+        전체 점검 124회차(117회차 반증 — 재현):
+          R1 **걸려 있는 잠금은 성공으로 풀리지 않는다** — 잠금 검사는 인증(PBKDF2 약 0.1초) 앞에 있어, 오답들과 함께 보낸 자기 계정 로그인이
+             잠금이 걸린 **뒤에** 끝나면 그 성공이 잠금 항목을 통째로 지웠다(오답 3회로 잠김 → 늦게 끝난 성공 1회 → 남은 잠금 299초가 0초).
+             F2 가 막으려던 '자기 계정 하나로 잠금 없이 대입' 이 동시 요청으로 그대로 됐다. 실패 수만 빼고 잠금 시각은 둔다.
+          R2 **전역 창도 그 계정의 실패만 뺀다** — 예전에는 어느 성공이든 전역 창을 통째로 비워, 출발지를 바꿔 가며 틀리는 사이에 유효 계정 하나가
+             주기적으로 로그인하면 전역 잠금이 영영 걸리지 않았다(실패 400회 · 임계 80 · 잠금 0회 — 평소의 정상 로그인도 같은 효과였다)."""
         with self._lock:
+            now = time.time()
+            entry = self._fails.get(client)
             if username is None:
-                self._fails.pop(client, None)
+                if entry is not None and entry[1] > now:
+                    entry[0] = 0                       # 잠금은 남긴다(R1)
+                else:
+                    self._fails.pop(client, None)
                 self._fail_names.pop(client, None)
+                self._global_fails.clear()             # 계정을 모르는 예전 호출 — 예전 동작
             else:
-                entry = self._fails.get(client)
-                mine = (self._fail_names.get(client) or {}).pop(self._fail_key(username), 0)
+                key = self._fail_key(username)
+                mine = (self._fail_names.get(client) or {}).pop(key, 0)
                 if entry is not None:
                     entry[0] = max(0, entry[0] - mine)
                     if entry[0] == 0:
-                        self._fails.pop(client, None)
                         self._fail_names.pop(client, None)
-            self._global_fails.clear()
+                        if entry[1] <= now:            # 걸려 있는 잠금은 남긴다(R1)
+                            self._fails.pop(client, None)
+                if any(item[1] == key for item in self._global_fails):
+                    self._global_fails = deque(item for item in self._global_fails if item[1] != key)
 
     def _purge_fails(self) -> None:
         now = time.time()

@@ -101,7 +101,7 @@ test('F2 isidu/notify: 대상별 기록 읽기 오류 — 원본 유지 · 자�
   assert.equal(N.isiduMailStateOf('tscan')?.state, 'sent');
   N._resetForTest();
   eio.add(name);
-  assert.equal(N.isiduMailStateOf('tscan'), null);
+  assert.equal(N.isiduMailStateOf('tscan')?.code, 'state-unreadable', '124회차: 멈춘 사실을 대상의 메일 상태로 말한다(예전에는 null — 기록 없음으로 보였다)');
   assert.equal(N.isiduMailStateReadError(), 'EIO');
   // 실패한 조사 — 예전에는 실패 알림 간격(lastFailAlertAt)을 잃은 채 판정하고 기록을 새 파일로 썼다.
   assert.deepEqual(await N.notifyScanStored({ targetId: 'tscan', scanId: 99, ok: false, ts: NOW }), { state: 'state-unreadable' });
@@ -167,7 +167,7 @@ test('D1 authGuard: 읽기 오류면 원본 유지 · 모르는 대상은 정지
   eio.add(name); reads.delete(name);
   const stop = g.authStopFor(d1);
   assert.ok(stop, '정지돼 있던 대상을 "정지 아님" 으로 답하면 다음 주기가 같은 틀린 자격으로 다시 로그인한다');
-  assert.deepEqual(Object.keys(stop).sort(), ['at', 'attempts', 'reason', 'since'], '반환 꼴은 그대로');
+  assert.deepEqual(Object.keys(stop).sort(), ['at', 'attempts', 'reason', 'since', 'unread'], '반환 꼴은 그대로 + 124회차 표지 unread(인증 실패가 아니라는 표시 — rebut124)');
   assert.equal(stop.attempts, 0);
   assert.match(stop.reason, /읽지 못해.*읽기 오류\(EIO\).*원본은 그대로/);
   assert.ok(g.peekAuthStop(d1), '읽기 전용 조회(다른 수집기)도 같은 판정 — 같은 계정으로 따로 로그인하지 않게');
@@ -177,10 +177,10 @@ test('D1 authGuard: 읽기 오류면 원본 유지 · 모르는 대상은 정지
   assert.equal(g.markAuthStopped('d2', d2, '인증 실패(403)').attempts, 1);
   assert.equal(g.authStopFor(d2)?.reason, '인증 실패(403)', '이 창 안에서 기록된 대상은 그 기록대로');
   assert.equal(g.markAuthStopped('d1', d1, '인증 실패(401)').attempts, 1);
-  assert.equal(g.clearAuthStop('d3'), false);   // 수동 실행이 성공했다
+  assert.equal(g.clearAuthStop('d3'), true);   // 수동 실행이 성공했다 — 124회차: 정지로 답하던 대상을 풀었으면 true(예전 false — '풀지 않았다' 로 읽혔다)
   assert.equal(g.authStopFor(d3), null, '이 창 안에서 해제된 대상(수동 실행 성공)은 다시 수집한다');
   assert.equal(g.peekAuthStop(d3), null);
-  assert.equal(g.clearAuthStop('d4'), false);
+  assert.equal(g.clearAuthStop('d4'), true);
   g.flush();
   assert.equal(raw(name), orig, '못 읽은 원본 위에 쓰지 않는다(예전: 한 건짜리 파일로 덮음)');
   assert.deepEqual(corruptOf(name), []);
