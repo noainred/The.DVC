@@ -418,8 +418,8 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | POST | `/collectors/set-password` | 역할 `admin` · `fleetOnly` · `requireSettingsOwner` | [server/src/routes/admin/collectorsDc.js:384](../server/src/routes/admin/collectorsDc.js#L384) |
 | POST | `/collectors/test` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:607](../server/src/routes/admin/collectorsDc.js#L607) |
 | POST | `/collectors/upgrade` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:586](../server/src/routes/admin/collectorsDc.js#L586) |
-| GET | `/data-source` | 역할 `admin` | [server/src/routes/admin/vcenters.js:58](../server/src/routes/admin/vcenters.js#L58) |
-| PUT | `/data-source` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/vcenters.js:63](../server/src/routes/admin/vcenters.js#L63) |
+| GET | `/data-source` | 역할 `admin` | [server/src/routes/admin/vcenters.js:59](../server/src/routes/admin/vcenters.js#L59) |
+| PUT | `/data-source` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/vcenters.js:64](../server/src/routes/admin/vcenters.js#L64) |
 | GET | `/datacenter-order` | 역할 `admin` | [server/src/routes/admin/collectorsDc.js:482](../server/src/routes/admin/collectorsDc.js#L482) |
 | PUT | `/datacenter-order` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/collectorsDc.js:492](../server/src/routes/admin/collectorsDc.js#L492) |
 | GET | `/datacenters` | 역할 `admin` | [server/src/routes/admin/collectorsDc.js:443](../server/src/routes/admin/collectorsDc.js#L443) |
@@ -441,7 +441,7 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/edge-users/agents` | 역할 `admin` · `fleetReadOnly` | [server/src/routes/admin/gpuGuest.js:306](../server/src/routes/admin/gpuGuest.js#L306) |
 | GET | `/emergency-stop` | 역할 `admin` | [server/src/routes/admin/statusTools.js:50](../server/src/routes/admin/statusTools.js#L50) |
 | POST | `/emergency-stop` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/statusTools.js:59](../server/src/routes/admin/statusTools.js#L59) |
-| GET | `/geocode` | 역할 `admin` | [server/src/routes/admin/nsxImport.js:89](../server/src/routes/admin/nsxImport.js#L89) |
+| GET | `/geocode` | 역할 `admin` | [server/src/routes/admin/nsxImport.js:91](../server/src/routes/admin/nsxImport.js#L91) |
 | GET | `/gpu-guest/deploy/:agent` | 역할 `admin` · `fleetReadOnly` | [server/src/routes/admin/gpuGuest.js:288](../server/src/routes/admin/gpuGuest.js#L288) |
 | PUT | `/gpu-guest/deploy/:agent` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/gpuGuest.js:292](../server/src/routes/admin/gpuGuest.js#L292) |
 | GET | `/gpu-guest/deploy/agents` | 역할 `admin` · `fleetReadOnly` | [server/src/routes/admin/gpuGuest.js:270](../server/src/routes/admin/gpuGuest.js#L270) |
@@ -600,11 +600,11 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | DELETE | `/nfs-mounts/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/nfsMounts.js:33](../server/src/routes/admin/nfsMounts.js#L33) |
 | POST | `/nfs-mounts/:id/mount` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/nfsMounts.js:41](../server/src/routes/admin/nfsMounts.js#L41) |
 | POST | `/nfs-mounts/:id/umount` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/nfsMounts.js:49](../server/src/routes/admin/nfsMounts.js#L49) |
-| GET | `/nsx/managers` | 역할 `admin` | [server/src/routes/admin/nsxImport.js:59](../server/src/routes/admin/nsxImport.js#L59) |
-| POST | `/nsx/managers` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/nsxImport.js:69](../server/src/routes/admin/nsxImport.js#L69) |
-| DELETE | `/nsx/managers/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/nsxImport.js:79](../server/src/routes/admin/nsxImport.js#L79) |
-| PUT | `/nsx/managers/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/nsxImport.js:74](../server/src/routes/admin/nsxImport.js#L74) |
-| POST | `/nsx/managers/test` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/nsxImport.js:84](../server/src/routes/admin/nsxImport.js#L84) |
+| GET | `/nsx/managers` | 역할 `admin` | [server/src/routes/admin/nsxImport.js:60](../server/src/routes/admin/nsxImport.js#L60) |
+| POST | `/nsx/managers` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/nsxImport.js:71](../server/src/routes/admin/nsxImport.js#L71) |
+| DELETE | `/nsx/managers/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/nsxImport.js:81](../server/src/routes/admin/nsxImport.js#L81) |
+| PUT | `/nsx/managers/:id` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/nsxImport.js:76](../server/src/routes/admin/nsxImport.js#L76) |
+| POST | `/nsx/managers/test` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/nsxImport.js:86](../server/src/routes/admin/nsxImport.js#L86) |
 | POST | `/ollama-deploy` | 역할 `admin` · `fleetOnly` · `requireSettingsOwner` | [server/src/routes/admin/deployLlm.js:602](../server/src/routes/admin/deployLlm.js#L602) |
 | POST | `/ollama-deploy/test` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/deployLlm.js:599](../server/src/routes/admin/deployLlm.js#L599) |
 | GET | `/os-scan` | 역할 `admin` | [server/src/routes/admin/opsSettings.js:285](../server/src/routes/admin/opsSettings.js#L285) |
@@ -681,18 +681,18 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | POST | `/users/:username/totp/begin` | 역할 `admin` | [server/src/routes/admin/users.js:288](../server/src/routes/admin/users.js#L288) |
 | POST | `/users/:username/totp/confirm` | 역할 `admin` | [server/src/routes/admin/users.js:295](../server/src/routes/admin/users.js#L295) |
 | POST | `/users/:username/totp/disable` | 역할 `admin` | [server/src/routes/admin/users.js:305](../server/src/routes/admin/users.js#L305) |
-| GET | `/vcenter-order` | 역할 `admin` | [server/src/routes/admin/vcenters.js:154](../server/src/routes/admin/vcenters.js#L154) |
-| PUT | `/vcenter-order` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/vcenters.js:163](../server/src/routes/admin/vcenters.js#L163) |
+| GET | `/vcenter-order` | 역할 `admin` | [server/src/routes/admin/vcenters.js:158](../server/src/routes/admin/vcenters.js#L158) |
+| PUT | `/vcenter-order` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/vcenters.js:167](../server/src/routes/admin/vcenters.js#L167) |
 | GET | `/vcenter/relay-test` | 역할 `admin` | [server/src/routes/admin/statusTools.js:93](../server/src/routes/admin/statusTools.js#L93) |
-| GET | `/vcenters` | 역할 `admin` | [server/src/routes/admin/vcenters.js:71](../server/src/routes/admin/vcenters.js#L71) |
-| POST | `/vcenters` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/vcenters.js:89](../server/src/routes/admin/vcenters.js#L89) |
-| DELETE | `/vcenters/:id` | 역할 `admin` | [server/src/routes/admin/vcenters.js:106](../server/src/routes/admin/vcenters.js#L106) |
-| PUT | `/vcenters/:id` | 역할 `admin` | [server/src/routes/admin/vcenters.js:97](../server/src/routes/admin/vcenters.js#L97) |
-| POST | `/vcenters/import` | 역할 `admin` · `csvPerm` · `fleetOnly` | [server/src/routes/admin/nsxImport.js:96](../server/src/routes/admin/nsxImport.js#L96) |
-| POST | `/vcenters/import-file` | 역할 `admin` · `csvPerm` · `fleetOnly` | [server/src/routes/admin/nsxImport.js:113](../server/src/routes/admin/nsxImport.js#L113) |
-| GET | `/vcenters/import-suggestions` | 역할 `admin` · `csvPerm` | [server/src/routes/admin/nsxImport.js:105](../server/src/routes/admin/nsxImport.js#L105) |
-| POST | `/vcenters/test` | 역할 `admin` | [server/src/routes/admin/vcenters.js:115](../server/src/routes/admin/vcenters.js#L115) |
-| POST | `/vcenters/test-all` | 역할 `admin` | [server/src/routes/admin/vcenters.js:132](../server/src/routes/admin/vcenters.js#L132) |
+| GET | `/vcenters` | 역할 `admin` | [server/src/routes/admin/vcenters.js:72](../server/src/routes/admin/vcenters.js#L72) |
+| POST | `/vcenters` | 역할 `admin` · `fleetWideOnly` | [server/src/routes/admin/vcenters.js:93](../server/src/routes/admin/vcenters.js#L93) |
+| DELETE | `/vcenters/:id` | 역할 `admin` | [server/src/routes/admin/vcenters.js:110](../server/src/routes/admin/vcenters.js#L110) |
+| PUT | `/vcenters/:id` | 역할 `admin` | [server/src/routes/admin/vcenters.js:101](../server/src/routes/admin/vcenters.js#L101) |
+| POST | `/vcenters/import` | 역할 `admin` · `csvPerm` · `fleetOnly` | [server/src/routes/admin/nsxImport.js:98](../server/src/routes/admin/nsxImport.js#L98) |
+| POST | `/vcenters/import-file` | 역할 `admin` · `csvPerm` · `fleetOnly` | [server/src/routes/admin/nsxImport.js:115](../server/src/routes/admin/nsxImport.js#L115) |
+| GET | `/vcenters/import-suggestions` | 역할 `admin` · `csvPerm` | [server/src/routes/admin/nsxImport.js:107](../server/src/routes/admin/nsxImport.js#L107) |
+| POST | `/vcenters/test` | 역할 `admin` | [server/src/routes/admin/vcenters.js:119](../server/src/routes/admin/vcenters.js#L119) |
+| POST | `/vcenters/test-all` | 역할 `admin` | [server/src/routes/admin/vcenters.js:136](../server/src/routes/admin/vcenters.js#L136) |
 | POST | `/vclogs/collect` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:266](../server/src/routes/admin/backupNetSec.js#L266) |
 | PUT | `/vclogs/settings` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:246](../server/src/routes/admin/backupNetSec.js#L246) |
 | GET | `/vclogs/status` | 역할 `admin` | [server/src/routes/admin/backupNetSec.js:243](../server/src/routes/admin/backupNetSec.js#L243) |
@@ -777,17 +777,17 @@ Prometheus/OTel 익스포터(선택 토큰).
 | 메서드 | 경로 | 게이트(공통 제외) | 소스 |
 |---|---|---|---|
 | GET | `/` | — | [server/src/routes/publicApi.js:207](../server/src/routes/publicApi.js#L207) |
-| GET | `/capacity/datastores` | `guarded` | [server/src/routes/publicApi.js:377](../server/src/routes/publicApi.js#L377) |
-| GET | `/capacity/storage` | `guarded` | [server/src/routes/publicApi.js:393](../server/src/routes/publicApi.js#L393) |
-| GET | `/capacity/storage-growth` | `guarded` | [server/src/routes/publicApi.js:515](../server/src/routes/publicApi.js#L515) |
-| GET | `/faults/alarms` | `guarded` | [server/src/routes/publicApi.js:562](../server/src/routes/publicApi.js#L562) |
-| GET | `/faults/parts` | `guarded` | [server/src/routes/publicApi.js:589](../server/src/routes/publicApi.js#L589) |
-| GET | `/inventory/collection` | `guarded` | [server/src/routes/publicApi.js:344](../server/src/routes/publicApi.js#L344) |
+| GET | `/capacity/datastores` | `guarded` | [server/src/routes/publicApi.js:357](../server/src/routes/publicApi.js#L357) |
+| GET | `/capacity/storage` | `guarded` | [server/src/routes/publicApi.js:373](../server/src/routes/publicApi.js#L373) |
+| GET | `/capacity/storage-growth` | `guarded` | [server/src/routes/publicApi.js:495](../server/src/routes/publicApi.js#L495) |
+| GET | `/faults/alarms` | `guarded` | [server/src/routes/publicApi.js:542](../server/src/routes/publicApi.js#L542) |
+| GET | `/faults/parts` | `guarded` | [server/src/routes/publicApi.js:569](../server/src/routes/publicApi.js#L569) |
+| GET | `/inventory/collection` | `guarded` | [server/src/routes/publicApi.js:324](../server/src/routes/publicApi.js#L324) |
 | GET | `/inventory/summary` | `guarded` | [server/src/routes/publicApi.js:236](../server/src/routes/publicApi.js#L236) |
-| GET | `/inventory/vcenters` | `guarded` | [server/src/routes/publicApi.js:318](../server/src/routes/publicApi.js#L318) |
+| GET | `/inventory/vcenters` | `guarded` | [server/src/routes/publicApi.js:298](../server/src/routes/publicApi.js#L298) |
 | GET | `/openapi.json` | — | [server/src/routes/publicApi.js:229](../server/src/routes/publicApi.js#L229) |
-| GET | `/san-storage/arrays` | `guarded` | [server/src/routes/publicApi.js:630](../server/src/routes/publicApi.js#L630) |
-| GET | `/san-storage/check` | `guarded` | [server/src/routes/publicApi.js:646](../server/src/routes/publicApi.js#L646) |
+| GET | `/san-storage/arrays` | `guarded` | [server/src/routes/publicApi.js:610](../server/src/routes/publicApi.js#L610) |
+| GET | `/san-storage/check` | `guarded` | [server/src/routes/publicApi.js:626](../server/src/routes/publicApi.js#L626) |
 
 ## `/api`
 
