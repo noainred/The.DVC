@@ -89,7 +89,8 @@ async function runPingWorkerInner() {
   } catch (e) {
     const msg = String(e?.message || e).slice(0, 300);
     _last = { at: Date.now(), ok: false, error: msg };
-    console.warn('[ping-agent] 실패: ' + msg);
+    // 85회차 F3: 중앙이 닿지 않는 동안(연결 거부 · 시한) 4초마다 같은 줄이 저널에 쌓였다 — HTTP 실패(v2.591 PR-5)와 같게 같은 사유는 10분에 한 줄.
+    if (_logChange('실패', msg)) console.warn('[ping-agent] 실패: ' + msg);
     return null;
   }
 }

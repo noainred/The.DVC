@@ -169,10 +169,9 @@ export async function pullSvcmonConfigNow() {
 
     const targets = Array.isArray(d.targets) ? d.targets : [];
     if (targets.length > LIMITS.maxTargets) {
-      const reason = `배정 대상이 상한을 넘습니다(${targets.length} > ${LIMITS.maxTargets}).`;
-      await ack(d.sig, { added: 0, newTests: 0 }, 0, [reason, '이전 배포분을 그대로 유지합니다.']);
-      rememberFailure(d.sig, [reason]);
-      return { ok: false, reason };
+      // 85회차 F4: 예전에는 ack · 실패 기억만 하고 상태(last)도 콘솔도 남기지 않았다 — 엣지 로그 화면은 직전 성공('정의 적용')을 그대로
+      //   보여 줬다(무음 실패). 같은 거부 경로(rejectKeep — 상태 · 콘솔 · ack · 실패 기억)를 탄다.
+      return await rejectKeep(d, [`배정 대상이 상한을 넘습니다(${targets.length} > ${LIMITS.maxTargets}).`], 0);
     }
 
     // ① 이전 배포분 삭제 — 멱등 교체(v2.279 회귀 수정). 과거에는 d.prevTag(직전 세대) 하나만

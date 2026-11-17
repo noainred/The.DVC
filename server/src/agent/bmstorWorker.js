@@ -119,7 +119,7 @@ export async function runBmstorWorkerOnce() {
   } catch (e) {
     const msg = String(e?.message || e).slice(0, 300);
     _last = { at: Date.now(), ok: false, error: msg };
-    console.warn('[bmstor-agent] 실패: ' + msg);
+    if (_logChange('실패', msg)) console.warn('[bmstor-agent] 실패: ' + msg);   // 85회차 F3: 같은 사유는 10분에 한 줄(10초 폴 — 저널 폭주 방지)
     return null;
   }
   finally { busy = false; }

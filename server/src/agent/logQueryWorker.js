@@ -6,6 +6,7 @@
 
 import { config, clampIntervalMs, loadVcenterConfig } from '../config.js';
 import { resilientFetch } from '../util/resilientFetch.js';
+import { createChangeLogger } from '../util/logThrottle.js';
 import { getLogsDb } from '../logs/db.js';
 import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT2620-02)
 
@@ -31,6 +32,9 @@ const POLL_MS = clampIntervalMs(Number(process.env.AGENT_LOGQ_POLL_MS) || 4_000,
  * 만들 때 그 표에 함께 넣을 것(v2.554 규약).
  */
 let _last = null;
+// 85회차 F3: 인출 실패(403 · 5xx · 연결 실패)는 4초마다 반복된다 — 형제 워커(ping · capture · bmstor — v2.591 PR-5)처럼 같은 사유는 10분에 한 줄.
+//   예전에는 거부가 계속되는 동안 하루 2만 줄 넘게 같은 경고가 저널을 채웠다. 상태(_last)는 매번 갱신한다(엣지 로그 화면은 그대로).
+const _logChange = createChangeLogger({ windowMs: 10 * 60_000 });
 
 function headers() {
   return { 'Content-Type': 'application/json', ...agentNameHeader(config.agent.name), ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
@@ -54,7 +58,7 @@ async function runLogQueryWorkerInner() {
     if (!r.ok) {
       _last = { at: Date.now(), ms: Date.now() - t0, ok: false, httpStatus: r.status, phase: 'poll',
         error: r.status === 403 ? '중앙이 토큰을 거부했습니다(403) — CENTRAL_TOKEN 을 확인하세요.' : `중앙 응답 HTTP ${r.status}` };
-      console.warn(`[logq-agent] 인출 실패: ${_last.error}`);
+      if (_logChange('인출', _last.error)) console.warn(`[logq-agent] 인출 실패: ${_last.error}`);
       return null;
     }
     const { queries } = await r.json();
@@ -99,7 +103,7 @@ async function runLogQueryWorkerInner() {
     return { at: Date.now() };
   } catch (e) {
     _last = { at: Date.now(), ms: Date.now() - t0, ok: false, phase: 'run', error: String(e?.message || e).slice(0, 300) };
-    console.warn(`[logq-agent] 실패: ${_last.error}`);   // 무음 실패 금지
+    if (_logChange('실패', _last.error)) console.warn(`[logq-agent] 실패: ${_last.error}`);   // 무음 실패 금지 · 85회차 F3: 같은 사유는 10분에 한 줄
     return null;
   }
 }

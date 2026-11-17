@@ -19,7 +19,8 @@ import { centralStatusOnlySupport } from './centralStatusOnly.js'; // v2.733: �
 import { scanStarted as journalScanStarted, scanFinished as journalScanFinished, registerScanResumer, journalFor, isResumePending } from '../util/scanJournal.js';
 import fs from 'node:fs';
 import path from 'node:path';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { readJsonFile } from '../util/jsonFileLoad.js'; // 85회차 F5: 읽기 오류 ≠ 손상(손상이면 readJsonFile 이 preserveCorrupt)
 import { registerStateFile } from '../util/stateFiles.js';
 import { numOrNull } from '../util/numOrNull.js';
 
@@ -58,16 +59,16 @@ const STATE_FILE = () => path.join(config.configDir, 'ipscan-agent-state.json');
 let _stateWarned = false;
 let _lastScanRestored = null;   // 기동 때 되살린 마지막 스캔 시각(상태 화면용 — 없으면 null)
 function loadLastScanAt(now = Date.now()) {
-  try {
-    const j = JSON.parse(fs.readFileSync(STATE_FILE(), 'utf8'));
-    const at = numOrNull(j?.lastScanAt);
-    if (at == null || at <= 0 || at > now + 60_000) return null;
-    return at;
-  } catch (e) {
-    // 없음 — 처음 기동(예전처럼 첫 확인에서 스캔한다). 손상 — 원본을 옆에 남기고(arch2582 규약) 같은 동작으로 간다.
-    if (e?.code !== 'ENOENT') { try { preserveCorrupt(STATE_FILE(), e?.message); } catch { /* 보존 실패가 기동을 막지 않게 */ } }
-    return null;
-  }
+  // 없음 — 처음 기동(예전처럼 첫 확인에서 스캔한다). 손상 — 원본을 옆에 남기고(arch2582 규약) 같은 동작으로 간다.
+  // 85회차 F5: 읽기 오류(EACCES · EIO)는 손상이 아니다 — 예전에는 code 가 ENOENT 가 아니면 다 preserveCorrupt 로 원본을 옮겼다.
+  //   공용 판정(util/jsonFileLoad.js readJsonFile)으로 가르고, 읽기 오류면 원본을 두고 '모름'(null — 첫 확인에서 스캔)으로 간다.
+  let r;
+  try { r = readJsonFile(STATE_FILE(), { parse: (t) => JSON.parse(t) }); } catch { return null; }
+  if (r.kind === 'read-error') { console.warn(`[ipscan-agent] 마지막 스캔 시각 파일을 읽지 못했습니다(${String(r.error?.code || r.error?.message || r.error).slice(0, 40)}) — 원본은 그대로 두고 첫 확인에서 스캔합니다`); return null; }
+  if (r.kind !== 'ok') return null;
+  const at = numOrNull(r.value?.lastScanAt);
+  if (at == null || at <= 0 || at > now + 60_000) return null;
+  return at;
 }
 function saveLastScanAt(at) {
   try {
