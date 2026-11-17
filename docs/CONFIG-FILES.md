@@ -207,7 +207,7 @@
 | `nfs-mounts.json` | 설정 | Edge 노드 NFS 마운트 관리(v2.299). | ✅ | ✅ | ✅ | system/nfsMounts.js |
 | `notices.json` | 설정 | 접속 공지(팝업)와 게시판 글 저장소(v2.722). | ✅ |  | ✅ | bulletin/store.js |
 | `nsx-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | nsx/client.js |
-| `nsx.json` | 설정 | NSX Manager registry — read/write the managed list in CONFIG_DIR/nsx.json, | ✅ | ✅ | ✅ | nsx/registry.js |
+| `nsx.json` | 설정 | NSX Manager registry — read/write the managed list in CONFIG_DIR/nsx.json, | ✅ |  | ✅ | nsx/registry.js |
 | `onboard-prev` | 디렉터리 | 서버 등록(온보딩) 분석 → 적용(7b단계 · 설계 PROFILES §18 '연결 시험 → 적용 → 엣지 배포'). | ✅ |  | ✅ | bmusage/onboard/onboardRun.js |
 | `os-inventory.json` | 설정 | 실제 OS 인벤토리 저장소(별도 DB) — VM별 1행, vmId 키로 upsert. | ✅ |  | ✅ | inventory/osStore.js |
 | `os-scan.json` | 설정 | 실제 OS 인벤토리 스캐너 — 주기적으로 'DB에 없는(또는 오래된) VM'을 찾아 게스트에서 실제 OS를 읽어 저장. | ✅ |  | ✅ | inventory/osScanner.js |
@@ -315,7 +315,7 @@
 | `vcenter-logs-cursor.json` | 설정 | vCenter 이벤트 수집 커서(상태, v2.765 — 읽은 마지막 시각·온전한 시각·연속 상한 수) | ✅ | ✅ | ✅ | logs/poller.js |
 | `vcenter-logs.db` | DB | vCenter 이벤트/태스크 로그 수집 캐시 | ✅ |  | ✅ | logs/db.js |
 | `vcenter-logs.json` | 설정 | vCenter 로그 보관 설정 — CONFIG_DIR/vcenter-logs.json. 보관 기간(retentionDays)을 여기서 지정. | ✅ | ✅ | ✅ | logs/settings.js |
-| `vcenter-order.json` | 설정 | vCenter display order — a user-defined ordering applied to every "vCenter | ✅ | ✅ | ✅ | vcenter/order.js |
+| `vcenter-order.json` | 설정 | vCenter display order — a user-defined ordering applied to every "vCenter | ✅ |  | ✅ | vcenter/order.js |
 | `vcenters.json` | 설정 | vCenter 등록(주소·계정·수집 옵션) | ✅ | ✅ | ✅ | config.js, guestdisk/service.js 외 6 |
 | `veeam-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | veeam/poller.js |
 | `veeam-backup-run.json` | 설정 | 백업 실행 설정(v2.818, `veeam-backup-run.json` — 비밀 없음). | ✅ | ✅ | ✅ | veeam/run/settings.js |
