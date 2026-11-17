@@ -34,12 +34,23 @@ export function normTimeoutMs(v) {
   return Math.min(600_000, Math.max(1000, Math.round(n)));
 }
 
+/**
+ * 71회차(67회차 반증 — 재현): 이미 저장된 사용 여부도 로드에서 불리언으로. 67회차는 **저장** 만 불리언으로 좁혀 옛 파일(손으로 고친
+ * `"enabled": "false"` 등)은 그대로 남았다 — 자연어 검색 · ChatOps · 상태 점검(참/거짓)은 켜짐, 설정 현황 · 링크 점검(=== true)은 꺼짐으로
+ * 여전히 갈렸고, 화면은 불러온 값을 그대로 다시 보내 **어떤 저장도 400** 이 됐다. 글자 'true'(대소문자 · 앞뒤 공백 무시)만 켜짐, 그 밖은 꺼짐.
+ */
+export function normLlmEnabled(v) {
+  if (typeof v === 'boolean') return v;
+  return typeof v === 'string' && v.trim().toLowerCase() === 'true';
+}
+
 export function loadLlmConfig() {
   let saved = {};
   try { if (fs.existsSync(FILE)) saved = parseJsonObject(fs.readFileSync(FILE, 'utf8')); } catch (e) { preserveCorrupt(FILE, e.message); saved = {}; } // v2.479(감사 S-9)
   const merged = { ...DEFAULTS, ...saved };
   // 이미 저장된 문자열·범위 밖 값도 로드에서 복구한다(저장 경로만 고치면 옛 파일이 계속 검색을 막는다).
   merged.timeoutMs = normTimeoutMs(merged.timeoutMs) ?? DEFAULTS.timeoutMs;
+  merged.enabled = normLlmEnabled(merged.enabled);
   return merged;
 }
 

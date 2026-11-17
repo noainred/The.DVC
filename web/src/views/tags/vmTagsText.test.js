@@ -24,6 +24,12 @@ describe('vmTagsText', () => {
     expect(vmTagLine({ tags: [{ category: 'Env', tag: 'Prod' }], partial: true })).toBe('Env: Prod · 이 vCenter 의 태그 연결을 일부만 읽었습니다');
     expect(vmTagLine({ tags: [], partial: false })).toBe('붙은 태그 없음');
   });
+  it('71회차: 태그 정책 파일을 읽지 못했으면 정하지 않음 · 빠짐 없음으로 말하지 않는다(서버 policyUnreadable)', () => {
+    expect(policyNote({ requiredCategories: [] }, { unreadable: true })).toContain('읽지 못해');
+    expect(policyNote({ requiredCategories: [] }, { unreadable: true })).not.toContain('정하세요');
+    expect(vmTagLine({ tags: [{ category: 'Env', tag: 'Prod' }], missing: null, policyUnreadable: true })).toBe('Env: Prod · 태그 정책 파일을 읽지 못해 필수 태그는 판정하지 않았습니다');
+    expect(vmTagLine({ tags: [], partial: true, missing: null, policyUnreadable: true })).toBe('읽은 연결에는 붙은 태그 없음 · 이 vCenter 의 태그 연결을 일부만 읽었습니다 · 태그 정책 파일을 읽지 못해 필수 태그는 판정하지 않았습니다');
+  });
   it('문구·화면에 백틱 없음', () => {
     for (const f of ['src/views/tags/vmTagsText.js', 'src/views/tools/VmTagsTool.jsx']) {
       const s = fs.readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');

@@ -138,3 +138,6 @@ export function settingsPatch(form) {
   if (form?.notify) out.notify = { enabled: !!form.notify.enabled, hour: Number(form.notify.hour) };
   return out;
 }
+
+/** 71회차(69회차 F4 반증): 설정 파일을 읽지 못했으면(서버 settingsUnreadable) 판정은 기본 기준 · 예외 없음으로 한 것이다 — 그 사실을 배너로. */
+export const SETTINGS_UNREADABLE_NOTE = '설정 파일(vm-hygiene.json)을 읽지 못해 기본 기준 · 예외 없음으로 판정했습니다 — 설정한 기준과 다를 수 있습니다(파일은 그대로 두었고 저장 · 알림은 멈춰 있습니다).';

@@ -58,6 +58,12 @@ export function vmTagsOfBody(vm, inv, pol) {
   const notSeen = tags ? required.filter((c) => !present.has(String(c).toLowerCase())) : null;
   const template = !!vm.template;
   const partial = !!tags && tagsPartialOf(inv);
+  // 71회차(69회차 F4 반증 — 재현): 태그 정책 파일을 읽지 못했으면(unreadable — 필수 카테고리 [] 기본값) 빠진 필수 태그를 판정하지 않는다.
+  //   예전에는 notSeen 이 [] 라 missing:[](= '빠진 필수 태그 없음')을 단정했다 — 판정 안 함(null) + policyUnreadable 로 밝힌다.
+  if (pol?.unreadable === true) {
+    return { ok: true, state: tagStateOf(inv), tagsAt: inv?.tagsAt ?? null, customAt: inv?.customAt ?? null, tags, custom,
+      fields: Array.isArray(inv?.fields) ? inv.fields.length : null, missing: null, policyUnreadable: true, ...(partial ? { partial: true } : {}), template };
+  }
   return { ok: true, state: tagStateOf(inv), tagsAt: inv?.tagsAt ?? null, customAt: inv?.customAt ?? null, tags, custom,
     fields: Array.isArray(inv?.fields) ? inv.fields.length : null,
     missing: template || (partial && notSeen?.length) ? null : notSeen,
@@ -76,7 +82,7 @@ export function registerVmTags(api) {
       //   형제(contention·host-hygiene)와 같은 규칙. 나머지에게는 '오류가 있다' 는 사실만 고정 문구로 준다.
       const full = isFullAdmin(req, snap);
       const vcRows = full ? r.vcenters : maskVcErrors(r.vcenters);
-      return { ...r, vcenters: vcRows, ...(full ? {} : { errorsHidden: true }), policyRev: pol.rev, policyDemo: pol.demo === true, policyUpdatedAt: pol.updatedAt, scan: { enabled: config.tagScan, refreshMs: config.tagRefreshMs }, initial: snap.initial === true,
+      return { ...r, vcenters: vcRows, ...(full ? {} : { errorsHidden: true }), policyRev: pol.rev, policyDemo: pol.demo === true, policyUnreadable: pol.unreadable === true, policyUpdatedAt: pol.updatedAt, scan: { enabled: config.tagScan, refreshMs: config.tagRefreshMs }, initial: snap.initial === true,
         status: full ? tagInvStatus() : null };
       // v2.720(감사 B2-02): 캐시 키에 역할 — scopeKey 는 범위만이라 전체 범위 admin 의 판본(오류 원문·status)이 operator 에게 나갔다.
     }, { ttlMs: 12_000, extraKey: `${scopeKey(req.user, store.get())}|${pol.rev}|${isAdminDetailUser(req.user) ? 'a' : 'u'}` });   // v2.744(AUTHZ-01): 판정 결과로 — 데모와 관리자가 같은 칸을 쓰지 않게
@@ -112,6 +118,8 @@ export function registerVmTags(api) {
     const lines = [CSV_BOM + csvLine(['vCenter', 'VM', '전원', '빠진 필수 카테고리', ...(pol.corpCategory ? [`법인 태그(${pol.corpCategory})`] : [])])];
     for (const row of r.rows) lines.push(csvLine([row.vcenterName, row.vm, row.powerState || '', row.missing.join(' / '), ...(pol.corpCategory ? [row.corpTag || ''] : [])]));
     if (r.omitted) lines.push(csvLine([`(상한으로 ${r.omitted}행 생략)`]));
+    // 71회차(69회차 F4 반증): 정책 파일을 읽지 못했으면 빈 파일이 '빠진 VM 없음' 으로 읽히지 않게 밝힌다.
+    if (pol.unreadable === true) lines.push(csvLine(['(태그 정책 파일을 읽지 못해 필수 태그 누락을 판정하지 않았습니다 — 빈 목록은 빠진 VM 이 없다는 뜻이 아닙니다)']));
     logAudit({ user: req.user?.username, action: 'vm-tags.csv', target: 'missing', detail: `${r.rows.length} rows`, ip: req.ip });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="vm-tags-missing-${fileStamp()}.csv"`);

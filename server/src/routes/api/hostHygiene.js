@@ -18,6 +18,7 @@ import { hostCfgStatus } from '../../hostcfg/cache.js';
 import { config } from '../../config.js';
 import { analyzeReboots } from '../../hostcfg/reboots.js';
 import { HOSTOPS_TYPES } from '../../vmchanges/eventDetail.js';
+import { eventLastTsOf } from '../../vmchanges/analyze.js';   // 71회차: 마지막 이벤트 시각(지금 + 여유 이하 MAX — 69회차 F2 한 벌)
 import { getLogsDb } from '../../logs/db.js';
 import { eventNotCollectedMap } from '../../logs/coverage.js'; // v2.733(C1-01): 이 포탈이 지금 이벤트를 수집하지 않는 vCenter(사유)
 import { loadLogSettings } from '../../logs/settings.js';
@@ -75,7 +76,7 @@ export function registerHostHygiene(api) {
     // v2.733(C1-01): 지금 이벤트를 수집하지 않는 vCenter(위임·비활성·점검중)는 '이벤트 없음' 행에 사유를 싣는다(reboots.js) —
     //   옛 이벤트가 남아 있어도 지금 상태를 그것으로 판정하지 않는다.
     const ncMap = eventNotCollectedMap();
-    const cov = new Map(ids.map((id) => [id, { firstTs: db.firstTs(id) || null, lastTs: db.lastTs(id) || null, why: ncMap.get(id) || null }]));
+    const cov = new Map(ids.map((id) => [id, { firstTs: db.firstTs(id) || null, lastTs: eventLastTsOf(db, id), why: ncMap.get(id) || null }]));   // 71회차(69회차 남긴 것 ②): 미래 행 경계 — 이력 화면과 같은 함수
     const s = loadLogSettings();
     return {
       ...analyzeReboots(scoped.hosts, events, { days, vcName, coverageOf: (id) => cov.get(id) || null, readFrom }),

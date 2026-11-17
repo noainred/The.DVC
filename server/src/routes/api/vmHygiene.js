@@ -32,7 +32,8 @@ const qStr = (v, n) => (typeof v === 'string' ? capStr(v.trim(), n) : '');
 function run(snap, req) {
   const scoped = scopeSlice(snap, req.user, qStr(req.query.vcenterId, 128) || undefined);
   const vcName = new Map((scoped.vcenters || []).map((v) => [v.id, v.name || v.id]));
-  const r = analyzeVmHygiene(scoped.vms, loadVmHygieneSettings(), {
+  const hs = loadVmHygieneSettings();
+  const r = analyzeVmHygiene(scoped.vms, hs, {
     vcName,
     code: qStr(req.query.code, 32) || undefined,
     sev: qStr(req.query.sev, 8) || undefined,
@@ -44,6 +45,9 @@ function run(snap, req) {
   const notReadVcenters = notReadVcentersOf(scoped);
   r.notReadVcenters = notReadVcenters;
   r.partial = notReadPartialOf(notReadVcenters);
+  // 71회차(69회차 F4 반증): 설정 파일을 읽지 못했으면(unreadable) 판정은 기본값(예외 없음 · 기본 기준)으로 한 것이다 — 응답에 밝혀 화면이
+  //   기본 기준의 '정상' 을 설정한 기준의 정상으로 말하지 않게 한다(r.settings 는 기준 다섯 칸만 싣는다).
+  r.settingsUnreadable = hs.unreadable === true;
   return r;
 }
 
