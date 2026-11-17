@@ -110,12 +110,11 @@ let running = '';
  */
 function collectorAlias() {
   const m = new Map();
-  for (const c of safe(() => loadCollectors(), [])) {
-    const id = t(c.id || c.name);
-    if (!id) continue;
-    m.set(norm(id), id);
-    if (c.name) m.set(norm(c.name), id);
-  }
+  const list = safe(() => loadCollectors(), []);
+  for (const c of list) { const id = t(c.id || c.name); if (id) m.set(norm(id), id); }
+  // 66회차(63회차 F5 의 형제): **id 가 표시 이름보다 먼저**다 — 한 루프에서 이름을 덮어쓰면, 다른 엣지의 표시 이름이 이 엣지 id 와 같을 때
+  //   이 엣지의 등록부 · 토큰 · 보고 출처가 그 엣지로 접혔다(통신 지도 aliasMap 과 같은 규칙).
+  for (const c of list) { const id = t(c.id || c.name); const n = norm(c.name); if (id && n && !m.has(n)) m.set(n, id); }
   return m;
 }
 
@@ -167,8 +166,11 @@ function localScan() {
   // v2.767(점검 R2-B4-5): 비활성 수집 서버 표시 — 프로브 토큰 조회(tokenLookup)가 비활성 항목을 건너뛰어 예전에는
   //   '중앙 등록부에 토큰이 저장돼 있지 않습니다'(지문 칸에는 토큰이 보이는데) 라는 거짓 안내가 나갔다. 같은 키에 활성 항목이 하나라도 있으면 활성.
   const enabledKeys = new Set(); const disabledKeys = new Set();
+  // 66회차: 표시 이름 키는 **다른 항목의 id 가 아닐 때만** — 예전에는 켜진 'seoul-2'(표시 이름 'seoul')가 꺼진 'seoul' 을 '활성' 으로 만들어
+  //   그 행이 프로브 대상이 됐다(아래 tokenLookup 과 함께 남의 토큰이 꺼진 엣지 주소로 나갔다 — 재현).
+  const idKeys = new Set(collectors.map((c) => norm(c?.id || c?.name)).filter(Boolean));
   for (const c of collectors) {
-    const ks = [norm(c?.id || c?.name), norm(c?.name)].filter(Boolean);
+    const ks = [norm(c?.id || c?.name), norm(c?.name)].filter((k, i) => k && (i === 0 || !idKeys.has(k)));
     for (const k of ks) (c?.enabled === false ? disabledKeys : enabledKeys).add(k);
   }
   scan.rows = scan.rows.map((r) => {
@@ -201,12 +203,16 @@ function fullScan() {
 /** 등록부에서 이 행의 수집 토큰 평문을 꺼낸다 — **응답에는 절대 나가지 않는다**(프로브 헤더 전용). */
 function tokenLookup() {
   const by = new Map();
-  for (const c of safe(() => loadCollectors(), [])) {
-    if (c.enabled === false) continue;
-    const tok = String(c.token ?? '');
+  const list = safe(() => loadCollectors(), []);
+  // 66회차(재현): **꺼진 항목의 id 도 자리를 잡는다**(토큰은 빈 값) — 예전에는 꺼진 항목을 건너뛰어, 다른 켜진 항목의 표시 이름이
+  //   그 id 와 같으면 그 이름 칸에 **남의 수집 토큰**이 들어가 꺼진 엣지의 주소로 프로브 헤더에 실려 나갔다(v2.480 '저장 비밀은 그 접속처에만').
+  for (const c of list) {
     const k = norm(c.id || c.name); // #29: 행 키(id)와 같은 값
-    if (k) by.set(k, tok);
-    if (c.name && !by.has(norm(c.name))) by.set(norm(c.name), tok); // 표시 이름으로 들어온 행도 찾는다
+    if (k && (!by.has(k) || c.enabled !== false)) by.set(k, c.enabled === false ? '' : String(c.token ?? ''));
+  }
+  for (const c of list) {
+    if (c.enabled === false) continue;
+    if (c.name && !by.has(norm(c.name))) by.set(norm(c.name), String(c.token ?? '')); // 표시 이름으로 들어온 행도 찾는다(id 가 먼저)
   }
   return (row) => by.get(norm(row?.agent)) || '';
 }

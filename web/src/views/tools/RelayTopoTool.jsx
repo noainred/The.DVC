@@ -6,7 +6,7 @@ import { Loading, ErrorBox, Kpi, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { buildGraph, frame3d, COLORS } from './relayTopoLayout.js';
 import { topologyPayload, servicesDroppedText } from './relayTopoForm.js'; // v2.606 WEB2606-10: 빈 포트 칸 · 버린 서비스 행
-import { relaySecretsDroppedText } from '../droppedSecretText.js'; // v2.607 WEB2607-03
+import { relaySecretsDroppedText, relaySecretsWillDropText } from '../droppedSecretText.js'; // v2.607 WEB2607-03 · 66회차 미리보기
 
 /**
  * 중계 토폴로지(HAProxy 구성) 도구(v2.431, 사용자 요구 '첨부한 표처럼 Main-Edge1-Edge2 구조의 접속이 필요한 서비스(ssh/vcsa/portal 등)를
@@ -277,6 +277,7 @@ export default function RelayTopoTool() {
                     <tbody>{preview.preview.sites.map((s) => <tr key={s.dc}><td>{s.dc}</td><td>{s.edge.privateIp || '—'}</td><td>{s.edge.publicIp || '—'}</td><td>{s.irs.privateIp || '—'}</td><td>{s.irs.publicIp || '—'}</td></tr>)}</tbody>
                   </STable>
                   {preview.skipped.length > 0 && <pre className="muted" style={{ fontSize: 11, maxHeight: 100, overflow: 'auto' }}>{'건너뜀:\n' + preview.skipped.join('\n')}</pre>}
+                  {relaySecretsWillDropText(preview) && <div style={{ color: 'var(--amber)', marginTop: 4 }}>⚠ {relaySecretsWillDropText(preview)}</div>}
                 </div>
               )}
             </div>

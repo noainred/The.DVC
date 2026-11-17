@@ -92,8 +92,10 @@ api.post('/tools/relaytopo/import', csvPerm, adminOnly, fullScopeOnly, (req, res
     else { if (String(text).length > 2_000_000) throw new Error('입력이 2MB 를 넘습니다.'); parsed = parseTopologyTable(text); }
     if (!parsed.sites.length && !(parsed.main?.privateIp || parsed.main?.publicIp)) return res.status(400).json({ ok: false, reason: '인식된 행이 없습니다. 열 순서(Datacenter, Server(Main/Edge/IRS), private IP, public IP …) 또는 내보낸 CSV/JSON 을 확인하세요.', skipped: parsed.skipped });
     const merged = mergeImport(loadTopologyRaw(), parsed, { replace: !!replace });
-    const preview = redactTopology(normalizeTopology(merged, loadTopologyRaw()));
-    if (!apply) return res.json({ ok: true, preview, format, parsedSites: parsed.sites.length, skipped: parsed.skipped.slice(0, 50), issues: validateTopology(preview, loadCollectors()) });
+    const pn = normalizeTopology(merged, loadTopologyRaw());
+    const preview = redactTopology(pn);
+    // 66회차 개선: 미리보기도 '적용하면 버려질 저장 비밀' 을 말한다 — 예전에는 적용 응답에서야 알았다(같은 정규화 결과의 비열거 필드).
+    if (!apply) return res.json({ ok: true, preview, format, parsedSites: parsed.sites.length, skipped: parsed.skipped.slice(0, 50), secretsDropped: pn.secretsDropped || [], issues: validateTopology(preview, loadCollectors()) });
     const saved = saveTopology(merged);
     logAudit({ user: req.user?.username, action: '중계 토폴로지 가져오기', detail: `format=${format} sites=${parsed.sites.length} replace=${!!replace} skipped=${parsed.skipped.length}`, ip: req.ip });
     res.json({ ok: true, topology: saved, format, parsedSites: parsed.sites.length, skipped: parsed.skipped.slice(0, 50), servicesDropped: saved.servicesDropped || [], servicesReset: !!saved.servicesReset, secretsDropped: saved.secretsDropped || [], issues: validateTopology(saved, loadCollectors()) });

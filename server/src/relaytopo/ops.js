@@ -9,7 +9,7 @@
 import { withSsh, withDeadline } from '../proxy/sshExec.js';
 import { getTargetRaw, listTargetsRaw } from '../agent/deployRegistry.js';
 import { ipBlockReason } from '../collector/registry.js';
-import { loadTopologyRaw } from './store.js';
+import { loadTopologyRaw, irsRelayService } from './store.js';
 import { renderManagedBlock, mergeManagedBlock, parseConfig, diffConfig } from './haproxy.js';
 import { demoInspectNode } from '../mock/demo/edge.js'; // v2.708: 데모(mock) 사이트는 SSH 없이 합성
 import { isMockMode } from '../mock/demo/flags.js';
@@ -30,7 +30,7 @@ export function resolveNodeAccess(topo, site, role) {
   if (!node) return { error: '노드가 없습니다.' };
   let host = node.publicIp || node.privateIp; let port = node.ssh?.port || 22; let via = '';
   if (role === 'irs' && site) {
-    const relay = (topo.services || []).find((s) => s.enabled !== false && s.target === 'irs' && s.targetPort === (node.ssh?.port || 22));
+    const relay = irsRelayService(topo.services, node);   // 66회차: 저장 이월 판정(store.js irsAccessHost)과 같은 함수
     const edgeHost = site.edge?.publicIp || site.edge?.privateIp;
     if (relay && edgeHost) { host = edgeHost; port = relay.listenPort; via = `중계 엣지 ${edgeHost}:${relay.listenPort} 경유(${relay.key})`; }
   }
