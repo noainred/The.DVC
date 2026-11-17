@@ -760,7 +760,8 @@ export const usageReadable = (h) => h.connectionState !== 'DISCONNECTED' && h.co
  * v2.733(점검 3회차 C2-06): 호스트 용량(코어·CPU 총량·메모리 총량)을 읽었는가. REST 폴백 vCenter(vcenter/restClient.js — 목록 API 에
  *   하드웨어 요약이 없다)의 호스트는 세 필드가 **없다**. 예전에는 `|| 0` 으로 더해져 그 법인 코어 0 · vCPU:코어 0 · 오버커밋 0% 라는
  *   거짓이 됐다. 용량 합계·과할당 비율은 이것이 참인 호스트만 쓰고, 거짓인 호스트는 개수로 밝힌다(hostsCapacityUnknown·capacityUnknown).
- *   SOAP 경로는 세 필드를 항상 수로 싣는다(soapClient num() — 0 일 수는 있다) — 동작 변화는 '못 읽은' 호스트에만 있다.
+ *   54회차 F5(정정): 예전 이 자리의 'SOAP 경로는 세 필드를 항상 수로 싣는다(0 일 수는 있다)' 가 결함이었다 — 못 읽은 용량이 0 으로 실려 이 판정을 통과했다.
+ *   이제 SOAP 도 못 읽음 · 0 이하를 null 로 싣는다(soapClient hostCapacityOf). 웹 판정은 `web/src/hostCapacity.js` — 같은 입력에 같은 답(test/leftoverC56 대조).
  */
 /**
  * v2.771(점검 R6-F3-3): VM GPU 장치 조회가 실패한 스냅샷(`vcenter.vmGpuUnknown` — soapClient)에 직전 스냅샷의 vm.gpu 를 이월한다.
@@ -785,7 +786,8 @@ export function carryVmGpu(snap, prevSnap) {
   snap.vcenter.vmGpuCarried = n;
   return n;
 }
-export const hostCapacityKnown = (h) => !!h && [h.cpuCores, h.cpuTotalMhz, h.memTotalMB].every((v) => typeof v === 'number' && Number.isFinite(v));
+// 반증 K1(54회차 F5): 0 이하도 못 읽음 — 예전 판 엣지는 못 읽은 용량을 0 으로 올리고 중앙 정제(INV_NUM_KEYS)를 그대로 지난다(0 코어 · 0 MHz · 0 MB 호스트는 실재하지 않는다)
+export const hostCapacityKnown = (h) => !!h && [h.cpuCores, h.cpuTotalMhz, h.memTotalMB].every((v) => typeof v === 'number' && Number.isFinite(v) && v > 0);
 
 /**
  * v2.599 RECENT2599-03: 데이터스토어 사용량을 읽었는가 — usedGB·freeGB 가 둘 다 null 이면 못 읽은 것이다

@@ -157,7 +157,8 @@ export function siteNote(r) {
   const out = [];
   if (r?.veeamState === 'unlinked') out.push('Veeam 연동 없음');
   else if (r?.veeamState && r.veeamState !== 'ok') out.push('Veeam 일부·모름');
-  if (r?.bareosUnknown) out.push('Bareos 원장 못 읽음');
+  if (r?.bareosDirFail) out.push('Bareos Director 조회 실패 — 결과 모름');   // 53회차 S1: 원장은 읽었지만 Director 조회가 인증 정지 · 실패(결과가 옛 값)
+  else if (r?.bareosUnknown) out.push('Bareos 원장 못 읽음');
   if (r?.pa && !r.pa.pol) out.push('정책 모름');
   return out.join(' · ');
 }

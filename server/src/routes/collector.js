@@ -12,6 +12,7 @@ import { buildExport } from '../collector/agent.js';
 import { registryLoadError as idracRegistryLoadError } from '../idrac/registry.js'; // v2.743(감사 EDGE-01)
 import { summarizeRegistryError } from '../util/registryCore.js'; // v2.744(리드 후속 RY): 503 사유는 요약(원문 없음)
 import { upgradeManager } from '../upgrade/manager.js';
+import { holdPushIfBusy, clearPushHold } from '../upgrade/pushHold.js';   // 51회차 #3
 import { tokenMatches } from '../util/secureCompare.js';
 import { upgradeFromBundleBytes, restartProcess, bundleShaIssue } from '../upgrade/upgrade.js';
 import { decodeManifestHeader, MANIFEST_HEADER } from '../upgrade/signature.js'; // v2.730(검토 S-10): push 의 서명 manifest
@@ -555,6 +556,12 @@ collectorRouter.post('/upgrade',
     // without configuring UPGRADE_INSTALL_DIR explicitly.
     const installDir = upgradeManager.settings.installDir || config.appRoot;
     const force = String(req.query.force) === 'true';
+    // 51회차 #3(사용자 결정): 재시작 요청 push 는 자동 적용과 같은 진행 중 작업을 같은 상한까지 기다린다 — 설치 자체를 미룬다(upgrade/pushHold.js).
+    if (String(req.query.restart) === 'true') {
+      const held = holdPushIfBusy({ bytes: req.body, installDir, pkgName: upgradeManager.settings.packageName, allowSame: force,
+        manifestText: decodeManifestHeader(req.get(MANIFEST_HEADER)), where: 'push-collector', source: 'collector-push' });
+      if (held) { upgradeManager.lastResult = { at: Date.now(), source: 'collector-push', ...held }; return res.json(held); }
+    } else clearPushHold();
     // v2.730(검토 S-10): 배포자 서명 — 이 수집기가 가진 신뢰 공개키로 설치 전에 검증한다(force 재설치도 같다).
     const result = upgradeFromBundleBytes(req.body, installDir, currentVersion(), upgradeManager.settings.packageName,
       { allowSame: force, manifestText: decodeManifestHeader(req.get(MANIFEST_HEADER)), where: 'push-collector' });

@@ -18,6 +18,7 @@ import {
   VMWARE_POOL_FULL, VMWARE_SCHEDULE, WEEKDAYS, WEEKDAY_LABEL, MAPPING_FIELDS, newMappingRow, vcSlug,
   fillResultText, directorPlanFiles, directorConflicts, freeConsoleName, consoleTaken, conflictText, ownFromPaths, catalogErrorText,
   directorAgentAdvice, directorAgentAdviceText, defaultsPatch, mergeDefaultsOnReload,
+  bindAllowed, BIND_ONE_TEXT, SHARED_DIRECTOR_TEXT,   // 52회차 D1
 } from './bareosText.js';
 import { copyText as copyToClipboard } from '../../util/copyText.js';   // v3.10.6: HTTP 포탈에서도 복사(Clipboard API → execCommand 폴백 · 실패는 false)
 
@@ -198,7 +199,7 @@ export default function SettingsTab({ onSaved, writable = true, hashBase = SETTI
                     <td data-sort={d.host || ''} style={{ fontSize: 12.5 }}><span style={{ fontFamily: 'var(--font-mono)' }}>{d.host ? `${d.host}:${d.port}` : '—'}</span><div className="muted" style={{ fontSize: 11.5 }}>콘솔 {d.consoleName || '—'} · {d.tlsMax || '—'}</div></td>
                     <td data-sort={d.agent || ''} style={{ fontSize: 12.5 }}>{d.agent ? <span className="badge blue">엣지 {d.agent}</span> : <span className="muted">중앙 직접</span>}</td>
                     <td>{d.hasPassword ? <span className="badge green">저장됨</span> : <span className="badge gray">없음</span>}</td>
-                    <td data-sort={vcs.length} style={{ fontSize: 12.5 }}><div style={{ maxWidth: 320, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{vcs.length ? `${vcs.length} · ${vcs.join(' · ')}` : '—'}</div></td>
+                    <td data-sort={vcs.length} style={{ fontSize: 12.5 }}><div style={{ maxWidth: 320, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{vcs.length ? `${vcs.length} · ${vcs.join(' · ')}` : '—'}</div>{vcs.length > 1 && !s.demo && <span className="badge amber" title={SHARED_DIRECTOR_TEXT}>vCenter 둘 이상</span>}</td>
                     <td className="right" data-sort={d.jobs ?? 0}>{d.jobs ?? 0}</td>
                     <td><button type="button" className="logout-btn" style={BTN} onClick={() => setSel(sel === d.id ? '' : d.id)}>{sel === d.id ? '닫기' : '편집'}</button></td>
                   </tr>
@@ -458,6 +459,7 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
 
   // vCenter 묶기 — 표의 행이 곧 매핑이다(체크하면 빈 매핑 행을 만든다 · 저장은 아래 '매핑 저장')
   const bound = new Set(rows.map((x) => x.vcenterId));
+  const savedHere = new Set(mine.map((x) => x.vcenterId));   // 52회차 D1: 저장된 짝은 그대로 둔다
   // W2·W17: 새로 묶으면 vcserver(등록부 주소)·INI 경로를 미리 채우고, 저장된 vCenter 를 껐다 켜면 저장본을 되살린다
   const toggleVc = (vc, on) => {
     if (on) {
@@ -561,15 +563,17 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
               const otherName = other ? s.directors.find((d) => d.id === other.directorId)?.name || other.directorId : '';
               const on = bound.has(v.id);
               const lockedVc = on && lockedRow(v.id);
+              const oneOnly = !other && !bindAllowed(v.id, bound, savedHere);   // 52회차 D1: Director 하나에 vCenter 하나
               return (
                 <label key={v.id} style={{ ...ROW, justifyContent: 'space-between', padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel)', opacity: other ? 0.6 : 1, cursor: other || lockedVc ? 'default' : 'pointer' }}>
-                  <span style={{ ...ROW, gap: 8 }}><input type="checkbox" checked={on} disabled={!!other || lockedVc || busy === 'suggest'} onChange={(e) => toggleVc(v.id, e.target.checked)} /><span>{v.name}</span></span>
-                  <span className="muted" style={{ fontSize: 11.5 }}>{other ? `${otherName} 에 묶임` : lockedVc ? `백업 대상 ${jobsOn(v.id)} — 대상을 지워야 뺄 수 있습니다` : on ? (mine.some((x) => x.vcenterId === v.id) ? '묶임' : '저장 전') : '—'}</span>
+                  <span style={{ ...ROW, gap: 8 }}><input type="checkbox" checked={on} disabled={!!other || lockedVc || oneOnly || busy === 'suggest'} title={oneOnly ? BIND_ONE_TEXT : undefined} onChange={(e) => toggleVc(v.id, e.target.checked)} /><span>{v.name}</span></span>
+                  <span className="muted" style={{ fontSize: 11.5 }}>{other ? `${otherName} 에 묶임` : oneOnly ? '다른 vCenter 가 묶여 있음' : lockedVc ? `백업 대상 ${jobsOn(v.id)} — 대상을 지워야 뺄 수 있습니다` : on ? (mine.some((x) => x.vcenterId === v.id) ? '묶임' : '저장 전') : '—'}</span>
                 </label>
               );
             })}
           </div>
-          <div className="muted" style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.6 }}>vCenter 하나는 Director 하나에만 묶습니다. 백업 대상이 있는 vCenter 는 다른 Director 로 옮길 수 없습니다(잡은 지금 Director 의 설정에 있습니다).</div>
+          <div className="muted" style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.6 }}>vCenter 하나는 Director 하나에만, Director 하나에는 vCenter 하나만 묶습니다(서비스 하나 = vCenter 하나 + Bareos 하나). 백업 대상이 있는 vCenter 는 다른 Director 로 옮길 수 없습니다(잡은 지금 Director 의 설정에 있습니다).</div>
+          {savedHere.size > 1 && !s.demo && <div style={{ fontSize: 11.5, marginTop: 6, color: 'var(--amber)', lineHeight: 1.6 }}>⚠ {SHARED_DIRECTOR_TEXT}</div>}
         </div>
       </div>
 

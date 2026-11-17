@@ -106,7 +106,7 @@ export function buildOverviewRows({ site = {}, hosts = [], vms = [], metrics = {
         hostCount: 1, vmCount: vmCountByHost ? vmCountByHost.get(h.name) || 0 : Number(h.vmCount) || 0,
         cpuPct: hostUsagePct(h, 'cpuUsagePct'), memPct: hostUsagePct(h, 'memUsagePct'),
         cpuRatio: ratioText(alloc, h.cpuCores), vcpuAlloc: alloc, cpuCores: typeof h.cpuCores === 'number' && Number.isFinite(h.cpuCores) ? h.cpuCores : null,   // 55회차 #5: 모르는 코어는 0 이 아니다
-        cpuThreads: Number(h.cpuThreads) || 0,
+        cpuThreads: typeof h.cpuThreads === 'number' && Number.isFinite(h.cpuThreads) && h.cpuThreads > 0 ? h.cpuThreads : null,   // 반증 K3: 모르는 스레드는 0 이 아니다
         memRatio: ratioText(memAlloc, h.memTotalMB), memAllocGB: toGb(memAlloc), memPhysGB: toGb(typeof h.memTotalMB === 'number' && Number.isFinite(h.memTotalMB) ? h.memTotalMB : null),
         version: h.version || '', vendor: h.vendor || '', model: h.model || '',
         powerW: num(h.powerWatts), powerHosts: null, tempC: num(h.tempC),

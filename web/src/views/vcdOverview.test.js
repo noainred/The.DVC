@@ -8,12 +8,13 @@ import { countByHost } from './vcdVirt.js';
 
 const SITE = { id: 'oc2', name: 'OC2' };
 const METRICS = { cpuUsagePct: 29, memUsagePct: 63 };
+// 54회차 F5: 호스트 용량 판정은 서버와 같은 세 칸(코어 · MHz · 메모리 — web/src/hostCapacity.js) — 픽스처에 cpuTotalMhz 를 싣는다.
 const HOSTS = [
   // HQ-Admin: 2호스트(코어 32/32, RAM 128GB/128GB)
-  { name: 'esx02', cluster: 'HQ-Admin', connectionState: 'CONNECTED', cpuCores: 32, cpuThreads: 64, memTotalMB: 131072, cpuUsagePct: 32, memUsagePct: 65, vmCount: 97, version: '8.0.3', vendor: 'Dell', model: 'R750', powerWatts: 400, tempC: 24.5 },
-  { name: 'esx01', cluster: 'HQ-Admin', connectionState: 'CONNECTED', cpuCores: 32, cpuThreads: 64, memTotalMB: 131072, cpuUsagePct: 43, memUsagePct: 62, vmCount: 76, version: '8.0.3', vendor: 'Dell', model: 'R750', powerWatts: 420, tempC: 25.5 },
+  { name: 'esx02', cluster: 'HQ-Admin', connectionState: 'CONNECTED', cpuCores: 32, cpuTotalMhz: 83200, cpuThreads: 64, memTotalMB: 131072, cpuUsagePct: 32, memUsagePct: 65, vmCount: 97, version: '8.0.3', vendor: 'Dell', model: 'R750', powerWatts: 400, tempC: 24.5 },
+  { name: 'esx01', cluster: 'HQ-Admin', connectionState: 'CONNECTED', cpuCores: 32, cpuTotalMhz: 83200, cpuThreads: 64, memTotalMB: 131072, cpuUsagePct: 43, memUsagePct: 62, vmCount: 76, version: '8.0.3', vendor: 'Dell', model: 'R750', powerWatts: 420, tempC: 25.5 },
   // 클러스터 미소속 → standalone
-  { name: 'esx99', cluster: '', connectionState: 'MAINTENANCE', cpuCores: 16, cpuThreads: 32, memTotalMB: 65536, cpuUsagePct: 1, memUsagePct: 10, vmCount: 3, version: '7.0.3', vendor: 'HPE', model: 'DL380', powerWatts: 200, tempC: 22 },
+  { name: 'esx99', cluster: '', connectionState: 'MAINTENANCE', cpuCores: 16, cpuTotalMhz: 41600, cpuThreads: 32, memTotalMB: 65536, cpuUsagePct: 1, memUsagePct: 10, vmCount: 3, version: '7.0.3', vendor: 'HPE', model: 'DL380', powerWatts: 200, tempC: 22 },
 ];
 const VMS = [
   { name: 'a', host: 'esx01', cpuCount: 64, memMB: 65536, powerState: 'POWERED_ON' },

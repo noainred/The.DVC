@@ -707,4 +707,8 @@
 - **RDP 게이트웨이는 guacd 핸드셰이크(ready) 전 브라우저 프레임을 버린다**(전체 점검 48회차 F1 — `proxy/guacdTunnel.js`): 그 전 프레임을 guacd 로 쓰면 브라우저가 첫 `select` · `connect` 를 바꿔
   매핑 대상 · 범위 · 프로토콜을 건너뛴다. 세션 연장(`dvc-token`)만 서버가 소비한다. 쿼리의 화면 크기는 `rdpDim`(정수 · 범위로 자름).
   Guacamole 명령 파서의 길이 칸은 **숫자 1~10자리만**(49회차 F49-1 — 음수 길이로 무한 루프 · 이벤트 루프 정지). 동기 무한 루프 회귀 시험은 자식 프로세스 + 시한으로. 회귀 `test/rvH_remoteSession.test.js` 48회차 · `fullAudit48`.
+- **guacd 연결 방식은 프록시 설정 `guacd.tls` · `guacd.verifyRdpCert`**(48회차 F2 사용자 결정 — 2026-11-17 '권장 사항으로 진행' · `proxy/guacdFlags.js` 판정 · `guacdTransport.js` 소켓):
+  `tls` 면 포탈 → guacd 를 TLS 로 열고 **인증서 검증을 끄지 않는다**(WAN_TLS_INSECURE 와 무관 — connect 명령에 RDP 비밀번호가 실린다 · 사설 CA 는 WAN_TLS_CA_FILE) · 첫 `select` 는 `secureConnect` 뒤 ·
+  `verifyRdpCert` 면 `ignore-cert=false`. 기본은 둘 다 꺼짐(예전 동작 — 켜면 기존 환경이 붙지 않을 수 있다). guacd 가 루프백이 아닌데 TLS 가 꺼져 있으면 설정 화면이 경고한다
+  (웹 `proxyGuacdText.js` — 서버와 같은 판정 · `leftoverA56` 이 대조). 불리언 칸은 true/'true' 만 켬. 회귀 `rvH_remoteSession` '48회차 F2'(변이 4/4).
 - **경로 기반 skip · 게이트는 소문자로 판정**(48회차 F3 — 전역 레이트리밋): express 라우팅은 대소문자를 가리지 않는다(v2.506 toolGate 와 같은 갈래).

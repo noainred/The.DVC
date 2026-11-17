@@ -89,7 +89,7 @@ export default function BareosDetailTool() {
   useEffect(() => { setSel(null); setOpen(null); }, [vcId]);
   const pickVc = (id) => { setVcId(id); try { localStorage.setItem(BAREOS_DETAIL_VC_KEY, id); } catch { /* 이 브라우저에만 */ } };
   const known = data?.director?.resultsKnown !== false;
-  const fopts = useMemo(() => ({ rpoDays, now: data?.at || Date.now(), resultsKnown: known, marksKnown: !data?.marksUnreadable, registryKnown: !data?.registryUnreadable }), [rpoDays, data, known]);
+  const fopts = useMemo(() => ({ rpoDays, now: data?.at || Date.now(), resultsKnown: known, partial: data?.director?.partial === true, marksKnown: !data?.marksUnreadable, registryKnown: !data?.registryUnreadable }), [rpoDays, data, known]);   // 55회차 #9 partial
   const rows = useMemo(() => (Array.isArray(data?.rows) ? data.rows : []), [data]);
   const counts = useMemo(() => detailFilterCounts(rows, fopts), [rows, fopts]);
   const tree = useMemo(() => buildBareosTree(rows, { filter, q, ...fopts }), [rows, filter, q, fopts]);

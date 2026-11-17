@@ -5,6 +5,7 @@
  */
 
 import { bundleSha } from '../util/bundleSha.js';
+import { deferredOf } from '../upgrade/pushDeferred.js';   // 51회차 #3
 import { readJsonCapped } from '../util/readCapped.js'; // v2.604: 엣지 응답 크기 상한
 import { strOf } from '../util/coercionTrap.js';
 import { reqTimeoutMs } from '../agent/envTimeout.js'; // v2.607 TIM2607-02: push 시한 정규화
@@ -78,7 +79,7 @@ export async function pushBundleToCollector(c, bytes, { restart = true, force = 
     const ok = res.ok && body.ok !== false;
     const serverMsg = strOf(body.reason, 500) || strOf(body.error, 500);
     recordOutbound(url, { status: ok ? res.status : (res.status < 400 ? 500 : res.status), bytes: bytes?.length || 0, method: 'POST', error: ok ? '' : serverMsg, tag: c.id || c.name || '' }); // v2.601: 수집 서버 태그
-    if (ok) return { id: c.id, name: c.name, ok: true, status: res.status, version: strOf(body.version, 32) || undefined };
+    if (ok) return { id: c.id, name: c.name, ok: true, status: res.status, version: strOf(body.version, 32) || undefined, ...deferredOf(body) };   // 51회차 #3: 엣지가 진행 중 작업을 기다리며 설치를 미뤘다
     // 실패: 상태코드 + 서버 사유 + 점검 힌트를 하나의 reason으로 합쳐 UI/로그에서 바로 원인 파악.
     const hint = httpFailHint(res.status);
     const reason = `HTTP ${res.status}${serverMsg ? ` — ${serverMsg}` : ''}${hint ? ` · ${hint}` : ''}`;
@@ -117,7 +118,7 @@ export function mergeAutoPushStatus(status, lastResult) {
       const c = cmpVersion(cur?.version, it.version || lastResult.version);
       if (c != null && c >= 0) continue;
     }
-    out[id] = { ...(cur || {}), upgrade: { at, ok: it.ok === true, version: it.version || lastResult.version || undefined, reason: it.reason || '', ...(Number.isFinite(it.status) ? { status: it.status } : {}), ...(it.upToDate ? { upToDate: true } : {}), auto: true } }; // v2.859: 엣지의 '이미 최신' 응답은 실패가 아니다
+    out[id] = { ...(cur || {}), upgrade: { at, ok: it.ok === true, version: it.version || lastResult.version || undefined, reason: it.reason || '', ...(Number.isFinite(it.status) ? { status: it.status } : {}), ...(it.upToDate ? { upToDate: true } : {}), ...(it.deferred ? { deferred: true } : {}), auto: true } }; // v2.859: 엣지의 '이미 최신' 응답은 실패가 아니다
   }
   return out;
 }
@@ -132,7 +133,7 @@ export async function pushUpgradeToCollectors(bytes, { ids = null, force = false
   const settled = await poolSettled(list, concurrency, async (c) => {
     const r = await pushBundleToCollector(c, bytes, { force, manifest });
     const prev = getCollectorStatus(c.id) || {};
-    setCollectorStatus(c.id, { ...prev, upgrade: { at: Date.now(), ok: r.ok, version: r.version, reason: r.reason || r.error, ...(Number.isFinite(r.status) ? { status: r.status } : {}), ...(auto ? { auto: true } : {}), ...(r.upToDate ? { upToDate: true } : {}) } }); // v2.775: 상태코드·자동 여부 · v2.859: 이미 최신
+    setCollectorStatus(c.id, { ...prev, upgrade: { at: Date.now(), ok: r.ok, version: r.version, reason: r.reason || r.error, ...(Number.isFinite(r.status) ? { status: r.status } : {}), ...(auto ? { auto: true } : {}), ...(r.upToDate ? { upToDate: true } : {}), ...(r.deferred ? { deferred: true } : {}) } });   // 51회차 #3: 설치 보류(reason 에 대기 사유) // v2.775: 상태코드·자동 여부 · v2.859: 이미 최신
     return r;
   });
   return settled.map((s, i) => (s.status === 'fulfilled' ? s.value

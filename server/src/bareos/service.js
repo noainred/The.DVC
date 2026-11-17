@@ -335,6 +335,12 @@ export const SETTLE_WAIT_MS = 60_000;
  * @param {{ i, prep }[]} items @returns {Promise<Map<number, string>>} i → 사유
  */
 async function settleMidCommandAdds(directorId, items, demo) {
+  // 53회차 N8: `.jobs` 확인 창(최대 SETTLE_WAIT_MS — 읽기라 onDirector 가 대기 목록에 넣지 않는다) 동안 재시작하면 원장 밖 잡이 켜진 채 남는다
+  //   (확인 · 끄기를 잇는 경로가 없다) — 확인 · 끄기가 끝날 때까지 이 묶음을 자동 업그레이드 대기 목록에 둔다.
+  const noteId = noteDirectOpStart('addJobs-settle', directorId);
+  try { return await settleMidCommandAddsInner(directorId, items, demo); } finally { noteDirectOpEnd(noteId); }
+}
+async function settleMidCommandAddsInner(directorId, items, demo) {
   const out = new Map();
   let have = null;
   // 등록 응답을 오래 붙잡지 않게 상한(엣지 대행이면 인출 대기가 길다) — 넘으면 예전처럼 결과 모름

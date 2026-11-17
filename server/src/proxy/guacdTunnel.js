@@ -12,7 +12,9 @@
  */
 
 import net from 'node:net';
+import tls from 'node:tls';
 import { WebSocketServer } from 'ws';
+import { openGuacdSocket, rdpIgnoreCertArg } from './guacdTransport.js';
 /*
  * v2.631(AX3-01): 프레임 상한. ws 기본 maxPayload 는 100MiB 라 인증된 operator(remote.access 기본 보유)가 프레임당 100MB 를 보내
  *   문자열화·파싱(동시 세션 × 100MB)으로 이벤트 루프·힙을 누를 수 있었다. 넘는 프레임은 ws 가 1009 로 닫는다.
@@ -28,7 +30,7 @@ import { config } from '../config.js';
 import { mappingAccessIssue, remoteUserIssue, trackRemoteSession, safeWsClose, authDisabledRemoteUser } from './sshGateway.js';
 
 /** 테스트 주입 — 운영에서는 실제 resolveTokenUser·getMapping 이다. */
-const rdpDeps = { resolveTokenUser, getMapping, connect: (port, host) => net.connect(port, host) };
+const rdpDeps = { resolveTokenUser, getMapping, connect: (port, host) => net.connect(port, host), tlsConnect: (opts) => tls.connect(opts) };
 const RDP_DEPS_DEFAULT = { ...rdpDeps };
 export function _setRdpDepsForTest(o = null) { Object.assign(rdpDeps, o ? o : RDP_DEPS_DEFAULT); }
 
@@ -123,10 +125,12 @@ function handle(ws, params, user, token = null) {
     username: cred('username'), password: cred('password'), domain: cred('domain'),
     // width/height 는 비민감 렌더 파라미터라 쿼리에서 받는다(자격증명 아님). 48회차: 정수 · 범위만(guacd 인자로 그대로 간다).
     width: rdpDim(params.get('width'), '1024'), height: rdpDim(params.get('height'), '768'), dpi: '96',
-    security: cred('security') || 'any', 'ignore-cert': 'true', 'resize-method': 'display-update',
+    // 48회차 F2(사용자 결정): RDP 대상 인증서 검증은 프록시 설정(guacd.verifyRdpCert)으로 — 기본은 예전처럼 끔.
+    security: cred('security') || 'any', 'ignore-cert': rdpIgnoreCertArg(proxy.guacd), 'resize-method': 'display-update',
   };
 
-  const guacd = rdpDeps.connect(proxy.guacd.port || 4822, proxy.guacd.host);
+  // 48회차 F2(사용자 결정): guacd.tls 면 TLS(인증서 검증 — 이 구간 connect 명령에 RDP 비밀번호가 실린다), 아니면 예전처럼 평문 TCP.
+  const { socket: guacd, readyEvent } = openGuacdSocket(proxy.guacd, { netConnect: (p, h) => rdpDeps.connect(p, h), tlsConnect: (o) => rdpDeps.tlsConnect(o) });
   let closed = false;
   // 원격 세션 레지스트리(S-04): 계정 삭제·강등·비밀번호 변경·sid 교체·토큰 만료·범위 축소·매핑 삭제면
   //   **guacd 소켓을 먼저 끊어** 키보드·마우스 입력이 RDP 대상에 닿지 않게 하고 WS 를 닫는다.
@@ -142,7 +146,7 @@ function handle(ws, params, user, token = null) {
   let buf = '';
   const MAX_HANDSHAKE_BUF = 256 * 1024; // 핸드셰이크 중 파싱 불가 데이터가 무한 누적되는 것 차단
 
-  guacd.on('connect', () => guacd.write(enc('select', 'rdp')));
+  guacd.on(readyEvent, () => guacd.write(enc('select', 'rdp')));   // TLS 면 'secureConnect'(검증 통과 뒤) — 검증 실패는 'error' 로 닫힌다
 
   guacd.on('data', (data) => {
     if (ready) { if (ws.readyState === ws.OPEN) ws.send(data.toString('utf8')); return; }

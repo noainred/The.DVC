@@ -3,6 +3,24 @@ import { fetchJson, postJson, putJson, delJson } from '../api.js';
 import { Loading, ErrorBox, Modal } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import { blankOr } from './blankOr.js';
+import { guacdFlag, guacdPlaintextRemote, GUACD_TEXT } from './proxyGuacdText.js';
+
+/** 48회차 F2(사용자 결정): guacd TLS · RDP 대상 인증서 검증 옵션 + 평문 원격 경고 — 기본 프록시 · 추가 프록시 공용. */
+function GuacdOptions({ g, onFlag }) {
+  return (
+    <div style={{ gridColumn: '1 / -1', minWidth: 0 }}>
+      <div className="flex gap" style={{ flexWrap: 'wrap', alignItems: 'center', fontSize: 13 }}>
+        <label className="flex gap" style={{ alignItems: 'center' }} title={GUACD_TEXT.tlsHint}>
+          <input type="checkbox" checked={guacdFlag(g?.tls)} onChange={(e) => onFlag('tls', e.target.checked)} /> {GUACD_TEXT.tls}
+        </label>
+        <label className="flex gap" style={{ alignItems: 'center' }} title={GUACD_TEXT.verifyHint}>
+          <input type="checkbox" checked={guacdFlag(g?.verifyRdpCert)} onChange={(e) => onFlag('verifyRdpCert', e.target.checked)} /> {GUACD_TEXT.verify}
+        </label>
+      </div>
+      {guacdPlaintextRemote(g) ? <div style={{ marginTop: 6, fontSize: 12, color: 'var(--amber)' }}>⚠ {GUACD_TEXT.plaintextWarn}</div> : null}
+    </div>
+  );
+}
 
 // v2.606(감사 WEB2606-04): 포트 칸은 원문 문자열 상태로 두고, 보낼 때 빈 칸은 빼서(undefined — JSON 에서 빠진다) 서버가
 // 이전 값을 유지하게 한다. 예전 `Number('')` 는 0 을, 추가 프록시 칸은 '' 를 저장했고 화면은 `|| 22` 로 22 를 보였다.
@@ -103,6 +121,7 @@ export default function ProxySettings() {
           <label>공개 포트 시작<input className="input" type="number" value={cfg.publicPortBase ?? ''} onChange={(e) => setCfg({ ...cfg, publicPortBase: e.target.value })} /></label>
           <label>guacd 호스트(RDP 웹콘솔, 선택)<input className="input" value={cfg.guacd.host} onChange={(e) => setCfg({ ...cfg, guacd: { ...cfg.guacd, host: e.target.value } })} placeholder="(없으면 .rdp 다운로드)" /></label>
           <label>guacd 포트<input className="input" type="number" value={cfg.guacd.port ?? ''} onChange={(e) => setCfg({ ...cfg, guacd: { ...cfg.guacd, port: e.target.value } })} /></label>
+          <GuacdOptions g={cfg.guacd} onFlag={(k, v) => setCfg({ ...cfg, guacd: { ...cfg.guacd, [k]: v } })} />
         </div>
         <div className="flex gap" style={{ marginTop: 10 }}>
           <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={saveCfg}>저장</button>
@@ -259,6 +278,7 @@ export function ProxyEditor({ initial, onSave, onClose }) {
         <div className="spec-grid" style={{ marginTop: 6 }}>
           <label>guacd 호스트<input className="input" value={p.guacd?.host || ''} onChange={setSub('guacd', 'host')} /></label>
           <label>포트<input className="input" type="number" value={p.guacd?.port ?? ''} onChange={setSub('guacd', 'port')} /></label>
+          <GuacdOptions g={p.guacd} onFlag={(k, v) => setP((s) => ({ ...s, guacd: { ...s.guacd, [k]: v } }))} />
         </div>
       </div>
       <div className="flex gap" style={{ marginTop: 14 }}>

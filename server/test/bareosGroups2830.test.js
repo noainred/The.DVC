@@ -90,6 +90,10 @@ before(async () => {
   let r = await call('admin', 'POST', '/settings/directors', { name: '한국', host: '127.0.0.1', port: fd.port, consoleName: 'portal', password: 'pw-1', timeoutMs: 5000 });
   assert.equal(r.s, 201, r.t);
   const dir = r.j.director.id;
+  (await import('../src/bareos/settings.js'))._seedLegacySitesForTest([
+      { vcenterId: 'vc-a', directorId: dir, vcserver: 'vc-a.corp', client: 'kr-fd', storage: 'kr-sd', pool: 'VMwareKR', schedule: 'VMwareNightly', configFile: '/etc/bareos/vmware/vc-a.ini' },
+      { vcenterId: 'vc-b', directorId: dir, vcserver: 'vc-b.corp', client: 'kr-fd', storage: 'kr-sd', pool: 'VMwareKR', configFile: '/etc/bareos/vmware/vc-b.ini' },
+    ]);   // 52회차 D1: 옛 설정(Director 하나에 vCenter 여럿 — 업그레이드 전 파일)으로 준비 · 이 시험은 한 Director 로 여러 vCenter 흐름을 본다
   r = await call('admin', 'PUT', '/settings', {
     sites: [
       { vcenterId: 'vc-a', directorId: dir, vcserver: 'vc-a.corp', client: 'kr-fd', storage: 'kr-sd', pool: 'VMwareKR', schedule: 'VMwareNightly', configFile: '/etc/bareos/vmware/vc-a.ini' },

@@ -983,3 +983,9 @@
   보정 창 밖(차이 2분 미만 · 30일 초과)이면 결과 ts 만 미래를 잘랐고 두 값은 미래 시각 그대로 저장돼 진행 상태에 보였다. 새 엣지 시각 칸도 `shift`(보정 + `Math.min(now)`)를 지날 것.
   **남긴 것(4회차 V-8 — 추정)**: Veeam EM VM 기록(`veeam/em/vmStore.js keyOf`)은 '백업 서버 + VM 이름' 키라 같은 서버의 동명 VM 두 대(moref 다름)의 마지막 작업 · 복원 지점이 한 기록에 섞인다.
   moref 키로 바꾸면 저장 형식이 바뀌고(옛 이름 키 기록과 겹침) 실제 EM 응답에 moref 가 늘 있는지 실측하지 않아 이번에 고치지 않았다 — 실 EM 응답 확인 뒤 다룰 것.
+- **중앙이 민 번들도 진행 중 작업을 기다린다**(51회차 #3 사용자 결정 — 2026-11-17 · `upgrade/pushHold.js` · `pushDeferred.js`): 수집기 `/api/collector/upgrade` · 엣지 `/api/upgrade/bundle` 의
+  재시작 요청 push 는 `manager.restartBlockers()`(자동 적용과 **같은 목록 하나**)가 비어 있지 않으면 서명 · 번들 · 버전을 **미리 확인**(`upgrade.js preverifyBundleBytes` — 설치와 같은 판정 `newerIssue`)한 뒤
+  **설치하지 않고** 메모리에 든다(재시작만 미루면 옛 프로세스가 새 파일을 읽는다) · 1분마다 다시 보고 작업이 끝나거나 상한(UPGRADE_SCAN_DEFER_MAX_MS)이면 설치 · 재시작 · 같은 버전 재전송은 상한을 늘리지 않는다 ·
+  재시작 없는 push · 지금 설치하는 push 는 보류를 지운다 · 자동 적용이 설치 중이면 그 틱은 건너뛴다. 응답 `{ ok, deferred, waitMs, reason }` — 중앙(`deferredOf` — 아는 필드만 · 12시간 상한)은
+  `edgeSync` 의 `holdUntil` 로 그 동안 + settle 까지 다시 밀지 않고, 보류 성공은 '효과 없음' 으로 세지 않는다. 재시작 함수는 설치한 그 시점의 것을 쓴다(시험이 주입을 되돌린 뒤 진짜 재시작이 돌았다 — 작성 중 실측).
+  회귀 `leftoverA56`(실제 수집기 라우트 + 중앙 push · 변이 5/5).

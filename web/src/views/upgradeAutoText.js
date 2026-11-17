@@ -159,7 +159,9 @@ export function resultSummary(r) {
   const who = triggerText(r.trigger);
   const src = sourceText(r.source) ? ` · ${sourceText(r.source)}` : '';
   const tail = `${who ? ` · ${who}` : ''}${src}${r.restored ? ' · 재시작 전 기록' : ''}`;
-  if (r.ok) return { text: `${when} · 성공 — v${r.from || '?'} → v${r.version || '?'}${r.restarting ? ' · 재시작' : ''}${tail}`, tone: 'ok' };
+  // 반증 A2(51회차 #3): 중앙이 민 번들을 진행 중 작업이 끝날 때까지 들고 있다 — 아직 설치 전이다(성공으로 그리지 않는다)
+  if (r.ok && r.deferred) return { text: `${when} · 설치 대기 — v${r.version || '?'} 를 받아 두었습니다 · ${r.reason || '진행 중 작업이 끝나면 설치하고 재시작합니다'}${tail}`, tone: 'warn' };
+  if (r.ok) return { text: `${when} · 성공 — v${r.from || '?'} → v${r.version || '?'}${r.restarting ? ' · 재시작' : ''}${r.note ? ` · ${r.note}` : ''}${tail}`, tone: 'ok' };
   if (r.upToDate) return { text: `${when} · 이미 최신${tail}`, tone: 'muted' };
   return { text: `${when} · 실패 — ${r.reason || '사유 없음'}${tail}`, tone: 'bad' };
 }

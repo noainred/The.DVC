@@ -6,6 +6,7 @@ import path from 'node:path';
 import { currentVersion, config } from '../config.js';
 import { requireRole } from '../auth/auth.js';
 import { upgradeManager } from '../upgrade/manager.js';
+import { holdPushIfBusy, clearPushHold } from '../upgrade/pushHold.js';   // 51회차 #3
 import { bundleShaIssue } from '../upgrade/upgrade.js'; // v2.480(3차 감사): 엣지 수신 번들 sha256 검증
 import { upgradeFromBundleBytes, restartProcess } from '../upgrade/upgrade.js';
 import { decodeManifestHeader, MANIFEST_HEADER } from '../upgrade/signature.js'; // v2.730(검토 S-10): push 의 서명 manifest
@@ -266,6 +267,12 @@ upgradeRouter.post('/bundle', adminOnly, express.raw({ type: ['application/gzip'
     const shaIssue = bundleShaIssue(req.get('x-bundle-sha256'), req.body);
     if (shaIssue) return res.status(400).json({ ok: false, reason: shaIssue });
 
+    // 51회차 #3(사용자 결정): 재시작 요청 push 는 자동 적용과 같은 진행 중 작업을 같은 상한까지 기다린다 — 설치 자체를 미룬다(upgrade/pushHold.js).
+    if (String(req.query.restart) === 'true') {
+      const held = holdPushIfBusy({ bytes: req.body, installDir: s.installDir, pkgName: s.packageName,
+        manifestText: decodeManifestHeader(req.get(MANIFEST_HEADER)), where: 'push-edge', source: 'edge-push' });
+      if (held) { upgradeManager.lastResult = { at: Date.now(), source: 'edge-push', ...held }; return res.json(held); }
+    } else clearPushHold();
     // v2.730(검토 S-10): 배포자 서명 — 이 엣지가 가진 신뢰 공개키로 설치 전에 검증한다(정책 require 이면 manifest 없이는 설치하지 않는다).
     const result = upgradeFromBundleBytes(req.body, s.installDir, currentVersion(), s.packageName,
       { manifestText: decodeManifestHeader(req.get(MANIFEST_HEADER)), where: 'push-edge' });

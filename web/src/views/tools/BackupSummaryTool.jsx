@@ -188,7 +188,8 @@ export default function BackupSummaryTool() {
             {t.stuck == null ? <Chip tone="muted" title="Bareos › 진행 현황 화면이 열려 최근 조회한 값이 있을 때만 셉니다">멈춤 의심 —</Chip> : <Chip tone={t.stuck ? 'warn' : 'muted'}>멈춤 의심 {fmtNum(t.stuck)}</Chip>}
             <Chip tone={pa?.mmBy?.bareos || pa?.bmis ? 'warn' : 'muted'} title="미등록 = 정책 Bareos 인데 잡 없음 · 방식 불일치 = Bareos 잡이 있는데 정책이 Bareos 가 아님">미등록 {fmtNum(pa?.mmBy?.bareos)} · 방식 불일치 {fmtNum(pa?.bmis)}</Chip>
             {dirs && <Chip tone={dirs.failed ? 'bad' : 'muted'}>Director 조회 실패 {fmtNum(dirs.failed)}</Chip>}
-            {t.bareosUnknownSites > 0 && <Chip tone="bad">원장 못 읽은 법인 {fmtNum(t.bareosUnknownSites)}</Chip>}
+            {t.bareosUnknownSites - (t.bareosDirFailSites || 0) > 0 && <Chip tone="bad">원장 못 읽은 법인 {fmtNum(t.bareosUnknownSites - (t.bareosDirFailSites || 0))}</Chip>}
+            {t.bareosDirFailSites > 0 && <Chip tone="bad">Director 조회 실패 법인 {fmtNum(t.bareosDirFailSites)} — 결과 모름</Chip>}
           </div>
         </section>
       </div>

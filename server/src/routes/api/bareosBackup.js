@@ -17,7 +17,7 @@ import {
   directorConn, directorCred, directorById, loadSettings, jobDirectorId, siteMissing, anyDirectorConfigured, LIMITS,
 } from '../../bareos/settings.js';
 import {
-  listJobs, getJob, patchJob, deleteJob, markPending, addRestore, registryLoadError, jobVmIds, MAX_JOBS, restoreOpen, restoreHeld, restoreUnknownHeld, restoreFinishing, clearPending, applyRunRow, applyRestoreRow, registryRev, inBatch, markCancelReq, runUnknownHeld, RUN_UNKNOWN_HOLD_MS,
+  listJobs, jobDigests, getJob, patchJob, deleteJob, markPending, addRestore, registryLoadError, jobVmIds, MAX_JOBS, restoreOpen, restoreHeld, restoreUnknownHeld, restoreFinishing, clearPending, applyRunRow, applyRestoreRow, registryRev, inBatch, markCancelReq, runUnknownHeld, RUN_UNKNOWN_HOLD_MS,
 } from '../../bareos/registry.js';
 import { cancelInfo, cancelGate, CANCEL_WAIT_MS } from '../../bareos/cancelState.js';
 import { parseBanner } from '../../bareos/director.js';
@@ -251,6 +251,21 @@ function visibleDirectorIds(user, settings) {
   const ids = new Set(settings.sites.filter((x) => read.has(x.vcenterId)).map((x) => x.directorId));
   for (const j of listJobs()) if (read.has(j.vcenterId)) ids.add(jobDirectorId(j, settings));
   return ids;
+}
+
+/**
+ * 52회차 D2: 수동 대조를 해도 되는 Director — 그 Director 의 vCenter(매핑 + 대상)가 모두 쓰기 범위 안. 쓰기 무제한이면 null(전부).
+ * 판정이 던지면 빈 집합(대조 없음 — 거부 기본값). vCenter 가 하나도 없는 Director 는 쓰기 범위 계정에 밖이다.
+ */
+function reconcileDirectorIds(user, settings) {
+  let w = null;
+  try { w = writeScopedVcenterIds(user, store.get()); } catch { return new Set(); }
+  if (!w) return null;
+  const vcsOf = new Map();
+  const add = (dir, vc) => { const a = vcsOf.get(dir) || new Set(); a.add(String(vc)); vcsOf.set(dir, a); };
+  for (const s of settings.sites || []) add(s.directorId, s.vcenterId);
+  for (const j of jobDigests()) add(jobDirectorId(j, settings), j.vcenterId);   // 반증 D1b: 얕은 요약으로(깊은 복사 listJobs 는 3,000건 약 100ms)
+  return new Set([...vcsOf.entries()].filter(([, vcs]) => vcs.size > 0 && [...vcs].every((v) => w.has(v))).map(([id]) => id));
 }
 
 /** 범위 필터(조회 범위) — 뺀 개수는 밝힌다. */
@@ -1745,12 +1760,16 @@ api.post('/tools/bareos-backup/digest/send', adminOnly, fullScopeOnly, fullWrite
 /** 지금 상태 조회(폴러와 같은 가드 — 모든 Director). */
 api.post('/tools/bareos-backup/poll', adminOnly, async (req, res) => {
   // v2.823 검토(S1): 범위 계정의 '지금 조회' 는 자기 법인 Director 만 조회한다(다른 법인 Director 에 접속·대조를 일으키지 않는다)
-  const vis = visibleDirectorIds(req.user, effectiveSettings());
+  const eff = effectiveSettings();
+  const vis = visibleDirectorIds(req.user, eff);
+  // 52회차 D2(사용자 결정 — 2026-11-17): 수동 조회의 대조(Director 잡 끄기 · 켜기 — 상태 변경)는 그 Director 의 vCenter 가 **모두 쓰기 범위 안**인 계정만.
+  //   조회 전용 범위 계정(writeVcenters 로 좁힌 계정 포함)은 상태만 새로 읽는다 — 예전에는 조회만 되는 계정의 POST 가 Director 잡을 다시 disable 했다.
+  const recOnly = reconcileDirectorIds(req.user, eff);
   if (vis) {
-    const p = vis.size ? await pollOnce({ trigger: 'manual', directorIds: [...vis] }) : pollerStatus();
+    const p = vis.size ? await pollOnce({ trigger: 'manual', directorIds: [...vis], ...(recOnly ? { reconcileOnly: recOnly } : {}) }) : pollerStatus();
     return res.json({ ok: true, poller: scopedPoller(p, vis) });
   }
-  const p = await pollOnce({ trigger: 'manual' });
+  const p = await pollOnce({ trigger: 'manual', ...(recOnly ? { reconcileOnly: recOnly } : {}) });
   res.json({ ok: true, poller: addrVisible(req) ? p : maskedPoller(p) });
 });
 
@@ -1765,3 +1784,6 @@ api.get('/tools/bareos-backup/badges', requirePerm('tools'), (req, res) => {
 });
 
 }
+
+/** 시험 전용(52회차 D2) — 수동 대조를 해도 되는 Director 판정. */
+export const _reconcileDirectorIdsForTest = reconcileDirectorIds;

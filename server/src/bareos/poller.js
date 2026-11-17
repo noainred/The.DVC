@@ -69,12 +69,12 @@ export function pollerStatus() {
 }
 
 /** Director 하나 조회(시한 안). 원장 반영까지. 던지지 않는다 — 결과 객체. */
-async function pollDirector(d, { work, mine, retired, doReconcile, trigger, at, demo, dirOfJob, modeOk }) {
+async function pollDirector(d, { work, mine, retired, doReconcile, reconcileAllowed = true, trigger, at, demo, dirOfJob, modeOk }) {
   const base = { at, name: d.name, trigger };
   const rot = _rot.get(d.id) || 0;
   const off = work.length ? rot % work.length : 0;
   const slice = [...work.slice(off), ...work.slice(0, off)].slice(0, MAX_PENDING_PER_TICK);
-  const due = doReconcile || _reconcileDue.has(d.id);
+  const due = reconcileAllowed && (doReconcile || _reconcileDue.has(d.id));   // 반증 D1: 밀린 대조(_reconcileDue)도 조회 전용 계정의 수동 조회에서는 하지 않는다(다음 주기 조회가 한다)
   const seq = _dueSeq.get(d.id) || 0;
   // v2.824 검토(W7): 엣지가 아직 회신하지 않은 poll 이 있으면 할 일이 없는 틱이어도 '대행 중' 을 유지한다(덮으면 칩이 '조회 전' 으로 깜빡였다)
   if (relayed(d, demo) && hasPending(d.id, 'poll')) {
@@ -200,7 +200,11 @@ function compensateRedisabled(d, names, { dirOfJob, modeOk }) {
 /**
  * 한 번 조회. @param {{ trigger?: 'timer'|'manual', reconcile?: boolean, directorId?: string, directorIds?: string[] }} o
  */
-export async function pollOnce({ trigger = 'timer', reconcile = null, directorId = '', directorIds = null } = {}) {
+/**
+ * @param {object} o
+ * @param {Set<string>|string[]|null} [o.reconcileOnly] 52회차 D2(사용자 결정): 대조(잡 끄기 · 켜기 — 상태 변경)를 이 Director 들에만. 나머지는 상태만 읽는다(조회 전용 범위 계정의 '지금 조회').
+ */
+export async function pollOnce({ trigger = 'timer', reconcile = null, directorId = '', directorIds = null, reconcileOnly = null } = {}) {
   if (_busy) return { ...pollerStatus(), skipped: 'busy' };
   _busy = true;
   const at = Date.now();
@@ -231,11 +235,12 @@ export async function pollOnce({ trigger = 'timer', reconcile = null, directorId
     const retired = retiredNames().filter(modeOk);
     const only = directorId ? new Set([directorId]) : (Array.isArray(directorIds) ? new Set(directorIds) : null);   // 범위 계정의 수동 조회(S1)
     const targets = only ? ready.filter((d) => only.has(d.id)) : ready;
+    const recOnly = reconcileOnly ? new Set(reconcileOnly) : null;   // 52회차 D2
     const results = await poolSettled(targets, DIRECTOR_CONCURRENCY, (d) => pollDirector(d, {
       work: work.filter((w) => (w.directorId || dirOfJob(w)) === d.id),
       mine: jobs.filter((j) => dirOfJob(j) === d.id),
       retired: retired.filter((r) => r.directorId === d.id),
-      doReconcile, trigger, at, demo, dirOfJob, modeOk,
+      doReconcile: doReconcile && (!recOnly || recOnly.has(d.id)), reconcileAllowed: !recOnly || recOnly.has(d.id), trigger, at, demo, dirOfJob, modeOk,
     }));
     const per = results.map((x, i) => (x.status === 'fulfilled' ? x.value : { at, name: targets[i].name, ok: false, error: String(x.reason?.message || x.reason).slice(0, 300), checked: 0, updated: 0 }));
     // v2.823 검토(W4): 할 일이 없어 접속하지 않은 틱(idle)은 마지막으로 실제 접속한 결과를 그대로 둔다 — 덮으면 접속 실패 뒤

@@ -17,6 +17,8 @@ export function upgradeCell(u) {
   if (!u || typeof u !== 'object') return null;
   const when = fmt(u.at);
   const tail = `${when ? ` · ${when}` : ''}${u.auto ? ' (자동)' : ''}`;
+  // 반증 A2(51회차 #3): 엣지가 진행 중 작업을 기다리며 설치를 미뤘다 — '적용' 이 아니다(사유에 기다리는 작업 · 늦어도 시각)
+  if (u.ok === true && u.deferred === true) return { text: `업그레이드${u.version ? ` v${u.version}` : ''} 설치 대기${tail}`, reason: typeof u.reason === 'string' ? u.reason : '', tone: 'warn' };
   if (u.ok === true) return { text: `업그레이드${u.version ? ` v${u.version}` : ''} 적용${tail}`, reason: '', tone: 'ok' };
   // v2.859: 엣지가 '이미 최신(not newer)' 으로 답한 push 는 실패가 아니다 — 엣지가 중앙 /dl 로 먼저 올라간 경우(엣지 자동 업그레이드).
   if (u.upToDate === true) return { text: `이미 최신${u.version ? ` (v${u.version})` : ''}${tail}`, reason: '', tone: 'ok' };

@@ -1969,6 +1969,22 @@ export function vmUsagePctOrNull(rawUsed, total, readable = true) {
 }
 // v2.719(감사 B1-09): 바이트 → GB, 못 읽은 값은 null(0 이면 '디스크 0GB' 라는 거짓이 되고 비용 배분의 '용량 모름' 경로가 막힌다).
 const gbOrNull = (v) => { const n = numOrNull(v); return n == null ? null : Math.round(n / 1024 ** 3); };
+/**
+ * 54회차 F5: 호스트 용량(summary.hardware 의 코어 · 코어당 MHz · 메모리 바이트) — 못 읽었거나(속성 없음 · 빈 값 · 수 아님) 0 이하면 **null**.
+ *   예전에는 `num()` 이 그 셋을 0 으로 실어 `store.hostCapacityKnown`(셋 다 수인가)을 통과했다 — 용량을 모르는 호스트가 '코어 0 · 메모리 0' 으로
+ *   용량 합 · 가상화율 · 오버커밋 알림의 분모에 섞였다(REST 폴백 C2-06 이 고친 것과 같은 모양). 0 코어 · 0MHz · 0MB 호스트는 실재하지 않아 '비정상 = 못 읽음' 이다.
+ *   ⚠ 실 vCenter 가 끊긴 호스트에 무엇을 주는지는 이 환경에서 확인하지 못했다 — 이 함수는 '없음 · 비정상' 입력의 처리만 정한다.
+ * @param {Record<string, unknown>} p  HostSystem 속성(parseObjectContent 결과)
+ * @returns {{cores:number|null, mhz:number|null, cpuTotalMhz:number|null, memTotalMB:number|null}}
+ */
+export function hostCapacityOf(p = {}) {
+  const pos = (v) => { const n = numOrNull(v); return n != null && n > 0 ? n : null; };
+  const cores = pos(p['summary.hardware.numCpuCores']);
+  const mhz = pos(p['summary.hardware.cpuMhz']);
+  const memBytes = pos(p['summary.hardware.memorySize']);
+  const memMB = memBytes == null ? null : Math.round(memBytes / 1048576);
+  return { cores, mhz, cpuTotalMhz: cores != null && mhz != null ? cores * mhz : null, memTotalMB: memMB > 0 ? memMB : null };
+}
 
 // v2.719(감사 S1-01): 부가 갱신(구성·호스트·경합·DS·클러스터·태그)은 vCenter 수집 데드라인 안에서만 돈다.
 //   각 갱신의 자체 예산 합(약 115초)이 데드라인(최소 90초)보다 커서, 고RTT vCenter 에서 부가 갱신이 본 인벤토리까지
@@ -2103,11 +2119,10 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
     const hosts = [];
     for (const o of objs.filter((x) => x.type === 'HostSystem')) {
       const p = o.props;
-      const cores = num(p['summary.hardware.numCpuCores']);
-      const mhz = num(p['summary.hardware.cpuMhz']);
-      const cpuTotalMhz = cores * mhz;
+      // 54회차 F5: 못 읽은 용량은 null(hostCapacityOf) — store.hostCapacityKnown 이 거짓이 되어 용량 합 · 비율에서 빠지고 '미상 N대' 로 센다.
+      //   사용률은 분모(총량)를 모르면 null 이다(예전 pct(x, 0) = 0% 라는 거짓). 사용량(quickStats)의 처리는 예전 그대로.
+      const { cores, mhz, cpuTotalMhz, memTotalMB } = hostCapacityOf(p);
       const cpuUsageMhz = num(p['summary.quickStats.overallCpuUsage']);
-      const memTotalMB = Math.round(num(p['summary.hardware.memorySize']) / 1048576);
       const memUsageMB = num(p['summary.quickStats.overallMemoryUsage']);
       const maint = p['runtime.inMaintenanceMode'] === 'true';
       const conn = p['runtime.connectionState'];
@@ -2126,11 +2141,11 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
         cpuCores: cores,
         cpuTotalMhz,
         cpuUsageMhz,
-        cpuUsagePct: pct(cpuUsageMhz, cpuTotalMhz),
+        cpuUsagePct: cpuTotalMhz == null ? null : pct(cpuUsageMhz, cpuTotalMhz),
         memTotalMB,
         memUsageMB,
-        memUsagePct: pct(memUsageMB, memTotalMB),
-        cpuThreads: num(p['summary.hardware.numCpuThreads']) || cores,
+        memUsagePct: memTotalMB == null ? null : pct(memUsageMB, memTotalMB),
+        cpuThreads: num(p['summary.hardware.numCpuThreads']) || cores,   // 54회차 F5: 스레드 · 코어 둘 다 못 읽으면 null(예전 0)
         // v2.703(A13): 소켓 수 — 코어 라이선스(소켓당 최소 16코어) 산정. 못 읽으면 null(1 소켓으로 지어내지 않는다).
         cpuSockets: Number(p['summary.hardware.numCpuPkgs']) > 0 ? Number(p['summary.hardware.numCpuPkgs']) : null,
         // CPU 모델명(예: 'Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz'). 못 받으면 빈 문자열 —

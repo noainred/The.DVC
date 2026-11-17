@@ -1,15 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { fetchJson, postJson, can } from '../api.js';
 import { Modal } from './Modal.jsx'; // v2.295: ui.jsx(셸) 역참조 순환 절단 — 구현 파일 직접 import
+// 54회차 F4: 계획 · 확인 문구 · 못 읽은 현재 값 판정은 순수 모듈 하나(vitest 고정) — 못 읽은 vCPU · RAM · 디스크 용량은 '—' 로 보이고 잠근다.
+import { cps0, cpuKnown, memKnown, diskCapKnown, ramGB0, curText, reconfigPlan, reconfigSummary, lockedItems } from './vmReconfigText.js';
 
 /**
  * VM 사양 변경 버튼/모달 — vCPU·RAM 증설, 디스크 증설/추가, NIC 추가/삭제.
  * 접근 권한은 기능 권한 'vm.reconfig'로 통제(기본 admin 전용, 권한 매트릭스에서 부여 가능).
  * 안전: 증설만(감소·축소 차단은 서버에서도 강제), 변경 전 확인창, 감사로그.
  */
-/** 원래 코어/소켓 — 못 읽었으면 1(입력 칸의 시작 값과 같게). */
-const cps0 = (hw) => (Number.isInteger(hw?.coresPerSocket) && hw.coresPerSocket >= 1 ? hw.coresPerSocket : 1);
-
 export function VmReconfigButton({ vm }) {
   const [open, setOpen] = useState(false);
   if (!can('vm.reconfig')) return null; // 서버 라우트도 requirePerm('vm.reconfig')로 강제
@@ -21,7 +20,6 @@ export function VmReconfigButton({ vm }) {
   );
 }
 
-const numOr = (v, d) => { const n = Number(v); return Number.isFinite(n) ? n : d; };
 // 용량 표기: 1000GB 이상은 TB로(소수 1자리, 정수면 소수 생략). 예: 11517GB→11.5TB, 1000GB→1TB.
 const fmtCap = (gb) => {
   if (gb == null || !Number.isFinite(Number(gb))) return '?';
@@ -50,7 +48,7 @@ function VmReconfigModal({ vm, onClose }) {
 
   const load = () => fetchJson(`/admin/vm/${encodeURIComponent(vm.id)}/hardware`).then((r) => {
     setHw(r.hw); setNetworks(r.networks || []); setDatastores(r.datastores || []); setPowerState(r.powerState || '');
-    setCpu(r.hw.cpu); setCps(r.hw.coresPerSocket || 1); setRamGB(Math.round((r.hw.memMB || 0) / 1024)); setErr(null);
+    setCpu(cpuKnown(r.hw) ? r.hw.cpu : ''); setCps(r.hw.coresPerSocket || 1); setRamGB(ramGB0(r.hw) ?? ''); setErr(null);   // 54회차 F4: 못 읽은 값은 빈 칸(잠금)
     setNicConn(Object.fromEntries((r.hw.nics || []).map((n) => [n.key, n.connected])));
   }).catch((e) => setErr(e.message));
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -59,43 +57,11 @@ function VmReconfigModal({ vm, onClose }) {
   const cpuBlocked = poweredOn && hw && !hw.cpuHotAdd;
   const memBlocked = poweredOn && hw && !hw.memHotAdd;
 
-  const buildPlan = () => {
-    const plan = {};
-    if (hw && numOr(cpu, hw.cpu) !== hw.cpu) plan.numCPUs = numOr(cpu, hw.cpu);
-    // 2차 공통 기능 점검 8회차: 원래 코어/소켓을 못 읽었으면(입력 칸은 1 로 시작) 1 을 원래 값으로 본다 — 예전엔 `|| 0` 과 비교해 손대지 않아도 '코어/소켓 →1' 을 보냈다.
-    if (hw && numOr(cps, cps0(hw)) !== cps0(hw) && numOr(cps, 0) >= 1) plan.coresPerSocket = numOr(cps, 0);
-    // v2.480(3차 감사 WB-1): memMB 가 1024 배수가 아닌 VM(1.5GB·2.5GB…)은 초기값(반올림 GB)과 원본 MB 가 달라 아무것도
-    // 안 바꿔도 memoryMB 가 전송됐다(반올림이 내려가면 감소 요청 → 서버 차단). 표시 GB 기준으로 '바뀌었을 때만' 전송.
-    const ramGB0 = Math.round((hw?.memMB || 0) / 1024);
-    if (hw && numOr(ramGB, ramGB0) !== ramGB0) plan.memoryMB = numOr(ramGB, ramGB0) * 1024;
-    const diskGrows = Object.entries(grows)
-      .map(([key, gb]) => ({ key: Number(key), newGB: numOr(gb, 0) }))
-      .filter((g) => { const d = hw.disks.find((x) => x.key === g.key); return d && g.newGB > d.capacityGB; });
-    if (diskGrows.length) plan.diskGrows = diskGrows;
-    const diskAdds = adds.map((a) => ({ sizeGB: numOr(a.gb, 0), controllerKey: a.ctrl ? Number(a.ctrl) : undefined, datastore: a.ds || undefined })).filter((a) => a.sizeGB > 0);
-    if (diskAdds.length) plan.diskAdds = diskAdds;
-    const nicAddList = nicAdds.map((id) => networks.find((n) => n.id === id)).filter(Boolean)
-      .map((n) => (n.type === 'DISTRIBUTED_PORTGROUP' ? { type: n.type, networkMoref: n.moref } : { type: n.type, networkName: n.name }));
-    if (nicAddList.length) plan.nicAdds = nicAddList;
-    if (nicRemoves.size) plan.nicRemoves = [...nicRemoves];
-    const nicConnects = (hw.nics || []).filter((n) => !nicRemoves.has(n.key) && nicConn[n.key] !== n.connected).map((n) => ({ key: n.key, connected: !!nicConn[n.key] }));
-    if (nicConnects.length) plan.nicConnects = nicConnects;
-    return plan;
-  };
-
-  const summary = () => {
-    const s = [];
-    if (hw && numOr(cpu, hw.cpu) !== hw.cpu) s.push(`vCPU ${hw.cpu}→${numOr(cpu, hw.cpu)}`);
-    if (hw && numOr(cps, cps0(hw)) !== cps0(hw) && numOr(cps, 0) >= 1) s.push(`코어/소켓 →${numOr(cps, 0)}`);
-    // 2차 공통 기능 점검 8회차: 계획(buildPlan)과 같은 기준값 — 예전엔 memMB 가 없으면 NaN 과 비교해 늘 'RAM NaN→0GB' 를 확인 창에 띄웠다.
-    { const r0 = Math.round((hw?.memMB || 0) / 1024); if (hw && numOr(ramGB, r0) !== r0) s.push(`RAM ${r0}→${numOr(ramGB, 0)}GB`); }
-    Object.entries(grows).forEach(([key, gb]) => { const d = hw?.disks.find((x) => x.key === Number(key)); if (d && numOr(gb, 0) > d.capacityGB) s.push(`${d.label} ${d.capacityGB}→${numOr(gb, 0)}GB`); });
-    adds.forEach((a) => { if (numOr(a.gb, 0) > 0) s.push(`디스크 추가 +${numOr(a.gb, 0)}GB${a.ds ? ` (${a.ds})` : ''}`); });
-    nicAdds.forEach((id) => { const n = networks.find((x) => x.id === id); if (n) s.push(`NIC 추가(${n.name})`); });
-    [...nicRemoves].forEach((k) => { const n = hw?.nics.find((x) => x.key === k); if (n) s.push(`NIC 삭제(${n.network || n.macAddress || k})`); });
-    (hw?.nics || []).forEach((n) => { if (!nicRemoves.has(n.key) && nicConn[n.key] !== n.connected) s.push(`NIC ${nicConn[n.key] ? '연결' : '연결해제'}(${n.network || n.key})`); });
-    return s;
-  };
+  const form = { cpu, cps, ramGB, grows, adds, nicAdds, nicRemoves, nicConn };
+  const buildPlan = () => reconfigPlan(hw, form, networks);
+  const summary = () => reconfigSummary(hw, form, networks);
+  const cpuOk = cpuKnown(hw); const memOk = memKnown(hw);
+  const locked = lockedItems(hw);
 
   const submit = async () => {
     const plan = buildPlan();
@@ -121,29 +87,30 @@ function VmReconfigModal({ vm, onClose }) {
           <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
             전원 <b>{powerState || '?'}</b> · 증설만 가능합니다(감소·축소 차단). 디스크 증설/추가·NIC 추가/삭제는 온라인 가능.
             {(cpuBlocked || memBlocked) && <span style={{ color: 'var(--amber)' }}> · {cpuBlocked ? 'CPU' : ''}{cpuBlocked && memBlocked ? '/' : ''}{memBlocked ? '메모리' : ''} hot-add 꺼짐 → 전원 ON 상태에선 증설 불가(전원 OFF 후).</span>}
+            {locked.length > 0 && <span style={{ color: 'var(--amber)' }}> · 현재 값을 읽지 못한 항목({locked.join(' · ')})은 증설 여부를 판정할 수 없어 잠갔습니다 — 창을 다시 열어 조회하세요.</span>}
           </div>
 
           {/* 2차 공통 기능 점검 8회차(Chromium 400px 판독): 두 열 고정이라 '코어/소켓' 라벨이 한 글자씩 세로로 쪼개지고 입력 칸이 잘렸다 — 좁으면 한 열. */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '0 24px' }}>
             <label className="flex between" style={{ padding: '6px 0', gap: 12 }}>
-              <span className="muted" style={{ minWidth: 0 }}>vCPU (현재 {hw.cpu})</span>
-              <input className="input" type="number" min={hw.cpu} value={cpu} disabled={cpuBlocked} onChange={(e) => setCpu(e.target.value)} style={{ width: 100, flex: '0 0 100px' }} />
+              <span className="muted" style={{ minWidth: 0 }}>vCPU (현재 {curText(cpuOk ? hw.cpu : null)})</span>
+              <input className="input" type="number" min={cpuOk ? hw.cpu : undefined} value={cpu} disabled={cpuBlocked || !cpuOk} title={cpuOk ? undefined : '현재 vCPU 수를 읽지 못해 변경을 잠갔습니다'} onChange={(e) => setCpu(e.target.value)} style={{ width: 100, flex: '0 0 100px' }} />
             </label>
             <label className="flex between" style={{ padding: '6px 0', gap: 12 }}>
               <span className="muted" style={{ minWidth: 0 }}>코어/소켓 (현재 {cps0(hw)})</span>
-              <input className="input" type="number" min={1} value={cps} disabled={cpuBlocked} onChange={(e) => setCps(e.target.value)} style={{ width: 100, flex: '0 0 100px' }} title="총 vCPU의 약수여야 합니다" />
+              <input className="input" type="number" min={1} value={cps} disabled={cpuBlocked || !cpuOk} onChange={(e) => setCps(e.target.value)} style={{ width: 100, flex: '0 0 100px' }} title={cpuOk ? '총 vCPU의 약수여야 합니다' : '현재 vCPU 수를 읽지 못해 변경을 잠갔습니다'} />
             </label>
             <label className="flex between" style={{ padding: '6px 0', gap: 12 }}>
-              <span className="muted" style={{ minWidth: 0 }}>RAM GB (현재 {Number.isFinite(hw.memMB) ? Math.round(hw.memMB / 1024) : '—'})</span>
-              <input className="input" type="number" min={Math.round(hw.memMB / 1024)} value={ramGB} disabled={memBlocked} onChange={(e) => setRamGB(e.target.value)} style={{ width: 100, flex: '0 0 100px' }} />
+              <span className="muted" style={{ minWidth: 0 }}>RAM GB (현재 {curText(ramGB0(hw))})</span>
+              <input className="input" type="number" min={memOk ? ramGB0(hw) : undefined} value={ramGB} disabled={memBlocked || !memOk} title={memOk ? undefined : '현재 RAM 을 읽지 못해 변경을 잠갔습니다'} onChange={(e) => setRamGB(e.target.value)} style={{ width: 100, flex: '0 0 100px' }} />
             </label>
           </div>
 
           <div className="muted" style={{ fontSize: 12, margin: '12px 0 4px' }}>디스크 (증설만)</div>
           {hw.disks.map((d) => (
             <div key={d.key} className="flex between" style={{ padding: '5px 0', gap: 12, alignItems: 'center' }}>
-              <span style={{ fontSize: 13 }}>{d.label} <span className="muted">· 현재 {d.capacityGB}GB</span></span>
-              <input className="input" type="number" min={d.capacityGB} placeholder={`${d.capacityGB}`} value={grows[d.key] ?? ''} onChange={(e) => setGrows((g) => ({ ...g, [d.key]: e.target.value }))} style={{ width: 110 }} />
+              <span style={{ fontSize: 13 }}>{d.label} <span className="muted">· 현재 {curText(diskCapKnown(d) ? d.capacityGB : null, 'GB')}</span></span>
+              <input className="input" type="number" min={diskCapKnown(d) ? d.capacityGB : undefined} placeholder={diskCapKnown(d) ? `${d.capacityGB}` : '—'} value={grows[d.key] ?? ''} disabled={!diskCapKnown(d)} title={diskCapKnown(d) ? undefined : '현재 용량을 읽지 못해 증설을 잠갔습니다'} onChange={(e) => setGrows((g) => ({ ...g, [d.key]: e.target.value }))} style={{ width: 110 }} />
             </div>
           ))}
           <div className="flex gap" style={{ marginTop: 6, flexWrap: 'wrap', alignItems: 'center' }}>
