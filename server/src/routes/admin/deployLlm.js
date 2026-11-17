@@ -7,7 +7,7 @@ import { ollamaTest } from '../../llm/ollama.js';
 import { installOllama, normOllamaPort, ollamaModelName } from '../../llm/ollamaDeploy.js';
 import { deployAgent, testTarget, installerInfo, checkAgentStatus, envPairs, envPairsIssue } from '../../agent/deploy.js';
 import { fetchRemoteVersions, listLocalPackages, downloadPackage } from '../../upgrade/fetchPackage.js';
-import { getPackageSettings, savePackageSettings, packageSettingsWriteRefusal } from '../../upgrade/packageSettings.js';
+import { getPackageSettings, savePackageSettings, packageSettingsWriteRefusal, packageTokenDropped } from '../../upgrade/packageSettings.js';
 import { listTargets, getTargetRaw, saveTarget, removeTarget, recordResult, findTargetByHost, listTargetsRaw, deployTargetsLoadError } from '../../agent/deployRegistry.js';
 import { targetsToCsv, sampleCsv as deploySampleCsv, parseTargetsCsv, analyzeTargetsImport } from '../../agent/deployCsv.js';
 import { parseTargetsText, analyzeBulkDeploy, targetsToText, targetsToTextCsv, sampleText, sampleTextCsv, fillAutoTokens, COLUMN_PRESETS, DEFAULT_PRESET } from '../../agent/deployText.js';   // 대량 배포 텍스트/CSV(v2.432)
@@ -95,7 +95,12 @@ adminRouter.get('/packages', adminOnly, async (req, res) => {
 adminRouter.put('/packages/settings', adminOnly, fleetOnly, (req, res) => {
   const unreadable = packageSettingsWriteRefusal();   // 103회차 F6: 읽기 오류 중 저장 거절 — 사유를 화면까지
   if (unreadable) return res.status(409).json(unreadable);
-  res.json({ ok: true, settings: savePackageSettings(req.body || {}) });
+  // 133회차: 저장소 주소가 바뀌어 저장된 토큰을 버렸으면 그 사실을 응답에 싣는다(v2.607 droppedSecrets 규약 — routes/upgrade.js 와 같은 모양).
+  const dropped = packageTokenDropped(req.body || {});
+  res.json({
+    ok: true, settings: savePackageSettings(req.body || {}),
+    ...(dropped ? { droppedSecrets: ['token'], skipped: [{ field: 'token', reason: '패키지 저장소 주소가 바뀌어 저장된 토큰을 폐기했습니다 — 새 저장소에 쓸 토큰이 있으면 다시 등록하세요.' }] } : {}),
+  });
 });
 adminRouter.post('/packages/download', adminOnly, fleetOnly, async (req, res) => {
   try { const r = await downloadPackage(req.body || {}); res.status(r.ok ? 200 : 400).json(r); }

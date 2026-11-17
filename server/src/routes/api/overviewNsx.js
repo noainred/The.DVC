@@ -8,7 +8,8 @@ import { currentVersion, config } from '../../config.js';
 import { upgradeManager } from '../../upgrade/manager.js';
 import { getGuestGpuHost } from '../../gpu/store.js';
 import { nsxStore, nsxAuthGuard } from '../../nsx/store.js';
-import { loadRegistry as loadNsxRegistry } from '../../nsx/registry.js';
+import { loadRegistry as loadNsxRegistry, registryLoadError as nsxRegistryLoadError } from '../../nsx/registry.js';
+import { registryMark } from '../settingsUnreadMark.js';   // 133회차: NSX 등록부를 못 읽은 동안의 빈 목록은 '등록 없음' 이 아니다(128회차 F3 의 형제 화면)
 import { fetchGroupMembers } from '../../nsx/client.js';
 import { memoJson, hash, scopeKey } from './shared.js';
 import { visibleNsxManagers, managerInScope, scopedNsxRollup } from '../../nsx/scope.js';
@@ -285,6 +286,8 @@ api.get('/nsx', invNsx, (req, res) => {
     securityGroups: scoped ? (snap.securityGroups || []).filter((g) => mIds.has(g.managerId)) : (snap.securityGroups || []),
     // 수집 오류에는 매니저 이름/호스트가 실린다 — 범위 계정에는 보이는 매니저 것만.
     collectionErrors: allowed ? (snap.collectionErrors || []).filter((e) => mIds.has(e.managerId)) : snap.collectionErrors,
+    // 133회차: 목록이 비었을 때만 등록부 표지를 본다(화면이 ‘등록된 NSX Manager가 없습니다 · 추가하세요’ 라고 말하는 그 경우 — 목록이 있으면 이 폴링 경로에서 등록부를 다시 읽지 않는다).
+    ...(managers.length === 0 ? registryMark(nsxRegistryLoadError()) : {}),
   });
 });
 

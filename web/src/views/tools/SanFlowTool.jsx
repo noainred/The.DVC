@@ -8,6 +8,7 @@ import { ErrorBox, Loading } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import { deviceRows, flowRows, flowKpis, jobTitle, jobTone, traceLines, isJobActive, hbaOptions, targetOptions, timeText, existingPairs, cycleText, deadlineText, CONFIRM } from './sanFlowText.js';
+import { unreadMarkOf, registryEmptyText } from '../settingsUnread.js';   // 133회차: 등록부를 못 읽은 동안의 빈 목록을 ‘등록 없음’ 으로 말하지 않는다
 import useSearchHandoff from '../../hooks/useSearchHandoff.js';   // v2.955 어레이 포트 WWN 인계(SAN 스토리지 성능 상세 → 타깃 미리 고르기)
 
 const OTP_IN = { width: 120 };
@@ -307,7 +308,7 @@ export default function SanFlowTool() {
           </STable>
         </div>
         {swRows.length > SW_LIMIT ? <button type="button" className="btn" style={{ marginTop: 8 }} onClick={() => setShowAll((v) => !v)}>{showAll ? `처음 ${SW_LIMIT}대만` : `${swRows.length}대 모두 보기`}</button> : null}
-        {!devs.length ? <div className="muted" style={{ padding: 8 }}>등록된 SAN 스위치가 없습니다(SAN 스위치 모니터링에서 등록).</div> : null}
+        {!devs.length ? <div className="muted" style={{ padding: 8 }}>{registryEmptyText(unreadMarkOf(d), 'SAN 스위치 등록부') || '등록된 SAN 스위치가 없습니다(SAN 스위치 모니터링에서 등록).'}</div> : null}
       </div>
 
     </div>

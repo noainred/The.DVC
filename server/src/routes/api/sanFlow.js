@@ -7,7 +7,8 @@ import { fullReadWriteScopeOnlyWith } from '../admin/shared.js';
 import { reauth } from './reauth.js';
 import { maskErrText } from './cvp.js';
 import { store } from '../../store.js';
-import { listDevices as listSanDevices, getDeviceWithSecret } from '../../sanswitch/registry.js';
+import { listDevices as listSanDevices, getDeviceWithSecret, registryLoadError as sanRegistryLoadError } from '../../sanswitch/registry.js';
+import { registryMark } from '../settingsUnreadMark.js';   // 133회차: SAN 스위치 등록부를 못 읽은 동안의 빈 목록은 '등록 없음' 이 아니다(128회차 F3 의 형제 화면)
 import { localSnapshots as sanLocalSnaps } from '../../sanswitch/store.js';
 import { edgeSanSwitchSnapshots, edgeSanSwitchSnapshotFor } from '../../central/sanSwitchEdge.js';
 import { edgeVersionOf } from '../../central/idracScanPush.js';
@@ -171,7 +172,7 @@ export function registerSanFlow(api) {
         esxiBps: esxiBpsOf(t), esxiAt: t ? (sp.at ?? null) : null };
     });
     res.set('Cache-Control', 'no-store').json({ ok: true, devices, flows: out, jobs: recentFlowJobs(10).map((j) => maskJob(j, mask)), showEveryMs: SHOW_EVERY_MS,
-      edgeDeadlineMs: EDGE_DEADLINE_MS, showCycle: lastShowCycle() });
+      edgeDeadlineMs: EDGE_DEADLINE_MS, showCycle: lastShowCycle(), ...registryMark(sanRegistryLoadError()) });   // 133회차: 등록부 표지
   });
 
   /** 만들기 폼 ① — 이 스위치에 HBA 가 로그인한 호스트(스냅샷 포트의 연결 WWN 기준 · 최대 300). */

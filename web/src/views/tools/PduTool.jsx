@@ -17,6 +17,7 @@ import { hostText, addressHiddenNote } from './addressHiddenText.js'; // v2.599 
 import { missingChoice } from '../idrac/scanRangeFormText.js'; // v2.630 WEB2630-03
 import { changedIntervalBody } from '../settingsFormDiff.js'; // v2.630 WEB2630-02
 import { requireChanged } from '../changeResult.js'; // v2.742(WEB-03): 200 {ok:false} 를 성공으로 읽지 않는다
+import { unreadKind, staleSeedLock } from '../settingsUnread.js';   // 133회차: 임계치 파일을 못 읽은 동안 연 창(기본값으로 채움)의 저장을 잠근다(112회차 규약)
 import useSearchHandoff, { useFocusHandoff } from '../../hooks/useSearchHandoff.js'; // v2.911 ⌘K 통합 장비 검색 — 검색어 · 고른 장비
 
 /**
@@ -573,7 +574,14 @@ function ThresholdModal({ data, onClose }) {
   const [enabled, setEnabled] = useState(cur.enabled !== false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
+  // 133회차(128회차 추정 E2 — 재현): 이 창은 열 때의 임계치로 칸을 한 번 채우고 **늘 전 키**를 저장한다. 임계치 파일을 읽기 오류로 못 읽은 동안 열면 칸이 기본값이고,
+  //   파일이 다시 읽힌 뒤의 ‘저장’ 이 저장돼 있던 임계치 · 감시 사용 여부를 그 기본값으로 덮었다(서버의 409 는 읽기 오류가 이어지는 동안만 막는다 — 덮인 전 키가
+  //   엣지 배포 대상이 된다). 열 때 못 읽은 상태였으면 다시 읽힌 뒤에도 잠근다(닫고 다시 열어야 저장된 값이 보인다).
+  const thLe = data.thresholdsLoadError || null;
+  const [openedKind] = useState(() => unreadKind(thLe));
+  const lockWhy = staleSeedLock(openedKind, thLe, { what: 'PDU 임계치' });
   const save = async () => {
+    if (lockWhy) return;
     setBusy(true); setMsg(null);
     try {
       requireChanged(await postJson('/tools/pdu/thresholds', { enabled, ...vals }));   // 128회차: 임계치 파일 읽기 오류 거절(409)을 ‘저장했습니다.’ 로 읽지 않는다
@@ -609,9 +617,10 @@ function ThresholdModal({ data, onClose }) {
             </div>
           ))}
         </div>
-        <button className="login-btn" style={{ flex: 'none', padding: '8px 18px', marginTop: 14 }} disabled={busy} onClick={save}>
+        <button className="login-btn" style={{ flex: 'none', padding: '8px 18px', marginTop: 14 }} disabled={busy || !!lockWhy} onClick={save}>
           {busy ? '저장 중…' : '저장'}
         </button>
+        {lockWhy && <div className="card error-box" role="alert" style={{ marginTop: 10, padding: 10, fontSize: 13, textAlign: 'left', whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{lockWhy}</div>}
         {msg && <div className={msg.ok ? 'card' : 'card error-box'} style={{ marginTop: 10, padding: 10, fontSize: 13 }}>{msg.text}</div>}
       </div>
     </>
