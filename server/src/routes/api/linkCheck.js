@@ -20,7 +20,7 @@ import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { publicLink, LINK_KINDS, KIND_KEYS, EDGE_KINDS, MIN_EDGE_VERSION } from '../../linkcheck/links.js';
 import { PHASES, PHASE_LABEL, FAIL_KINDS } from '../../linkcheck/phases.js';
-import { loadLinkCheckSettings, saveLinkCheckSettings, linkCheckEnabled, linkCheckSettingsWriteRefusal, DEFAULTS } from '../../linkcheck/settings.js';
+import { loadLinkCheckSettings, saveLinkCheckSettings, linkCheckEnabled, linkCheckSettingsWriteRefusal, linkCheckSettingsLoadError, DEFAULTS } from '../../linkcheck/settings.js';
 import { centralLinks, pollOnce, linkCheckPollerStatus } from '../../linkcheck/poller.js';
 import { latestAll, samplesOf, eventsOf, eventDetail, dailyOf, dbStatus } from '../../linkcheck/db.js';
 import { allEdgeLinkReports, reportStaleLimitMs } from '../../central/linkCheckEdge.js';
@@ -54,6 +54,9 @@ export function registerLinkCheck(api) {
  */
 api.get('/tools/link-check', adminOnly, fullScopeOnly, async (_req, res) => {
   const s = loadLinkCheckSettings();
+  // 106회차(105회차 A5 덜 고침): 설정 파일을 못 읽은 동안 아래 settings 는 저장된 값이 아니라 기본값이다 — 그 사실을 싣지 않아 화면이 기본값으로 폼을 채웠고,
+  //   다시 읽힌 뒤의 저장이 저장된 설정(켜짐 · 짝 · 종류)을 그 기본값으로 덮었다(409 는 읽기 오류가 이어지는 동안만 막는다). 화면이 저장을 잠그고 폼을 다시 채운다.
+  const settingsLe = linkCheckSettingsLoadError();
   const { all, counts, problems, collectors } = centralLinks();
   const latest = await latestAll();
   const byId = new Map(latest.map((r) => [r.link_id, r]));
@@ -120,6 +123,7 @@ api.get('/tools/link-check', adminOnly, fullScopeOnly, async (_req, res) => {
       dnsTimeoutMs: s.dnsTimeoutMs, tcpTimeoutMs: s.tcpTimeoutMs, tlsTimeoutMs: s.tlsTimeoutMs, httpTimeoutMs: s.httpTimeoutMs,
       sampleRetentionDays: s.sampleRetentionDays, eventRetentionDays: s.eventRetentionDays, dailyRetentionDays: s.dailyRetentionDays,
     },
+    ...(settingsLe ? { settingsLoadError: { reason: String(settingsLe.reason || '').slice(0, 300), readError: settingsLe.readError === true } } : {}),   // 106회차
     links: rows, counts, problems,
     minEdgeVersion: MIN_EDGE_VERSION, // v2.613 CONTRACT2613-05: 구버전 판정 기준은 서버가 준다(웹 기본값에 기대지 않는다)
     /*

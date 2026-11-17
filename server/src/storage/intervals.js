@@ -231,9 +231,13 @@ export function saveIntervalConfig({ global = {}, agents = {} } = {}) {
  */
 export function intervalsForAgent(agent) {
   const d = load();
-  return { ...d.global, ...(agentValueOf(d.agents, agent) || {}) };
+  // 106회차(재현 — v2.597 회귀): 빈 이름('' = 중앙 자신 — 위 저장 계약)은 공용 조회(agentValueOf)가 '이름 없음' 으로 보아 값을 주지 않는다 —
+  //   화면의 ‘중앙(직접 수집)’ 칸에 적은 주기가 저장만 되고 중앙 자신에게 한 번도 적용되지 않았다(전역 칸만 먹었다). '' 키는 글자 그대로 찾는다.
+  const own = String(agent ?? '').trim() === '' ? (Object.hasOwn(d.agents, '') ? d.agents[''] : undefined) : agentValueOf(d.agents, agent);
+  return { ...d.global, ...(own || {}) };
 }
 
+let _ownRetry = null;   // 106회차: 읽기 오류로 미룬 자기 주기 재적용 타이머
 /**
  * 중앙 노드가 **자기 자신**(직접 수집 장비 = registry 의 agent '')에 지정한 주기를 적용한다.
  * 엣지는 이 경로를 타지 않는다 — 엣지 값은 config pull 로 온다(파일이 엣지엔 없다).
@@ -243,7 +247,18 @@ export function applyOwnIntervals() {
   if (config.agent.centralUrl && config.agent.centralToken) {
     return { applied: false, reason: '엣지 노드 — 주기는 중앙 설정 pull 로 적용된다' };
   }
+  // 106회차(105회차 A5 남긴 것 — 재현): 기동 때 주기 파일이 읽기 오류면 빈 지정({})을 적용했고, 파일이 다시 읽혀도(표지는 풀리고 화면은 저장된 주기를 보인다)
+  //   이 함수를 다시 부르는 길이 없어 중앙 자신은 저장 · 재시작 전까지 env · 기본 주기로 돌았다(backup/settings 105회차 A1 과 같은 꼴).
+  //   읽기 오류 동안은 적용하지 않고(못 읽은 값은 '지정 없음' 이 아니다) 재읽기 간격마다 다시 본다 — 읽히면 그 지정으로 적용한다.
+  if (_ownRetry) { clearTimeout(_ownRetry); _ownRetry = null; }
+  if (storageIntervalsLoadError()?.readError) {
+    _ownRetry = setTimeout(() => { _ownRetry = null; try { applyOwnIntervals(); } catch { /* 다음 저장 · 재시작이 적용한다 */ } }, READ_RETRY_MS + 1_000);
+    _ownRetry.unref?.();
+    return { applied: false, held: true, reason: '수집 주기 파일을 읽지 못했습니다(읽기 오류) — 다시 읽히면 적용합니다' };
+  }
   return applyCentralIntervals(intervalsForAgent(''));
 }
+/** 테스트 전용(106회차) — 읽기 오류로 미룬 자기 주기 재적용이 걸려 있는가. */
+export function _ownRetryPendingForTest() { return !!_ownRetry; }
 
-export function _resetForTest() { _db = null; _override = {}; _overrideAt = 0; _loadErr.ok(); _reader.reset(); }
+export function _resetForTest() { _db = null; _override = {}; _overrideAt = 0; _loadErr.ok(); _reader.reset(); if (_ownRetry) { clearTimeout(_ownRetry); _ownRetry = null; } }
