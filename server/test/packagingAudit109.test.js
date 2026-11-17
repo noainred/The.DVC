@@ -223,3 +223,60 @@ test('A-3 OFFLINE-INSTALL.md: 설정 파일 위치는 install.sh 가 정한 CONF
   const tree = doc.slice(doc.indexOf('## 패키지 구성'), doc.indexOf('## 패키지 만들기'));
   for (const n of names) assert.ok(tree.includes(`── ${n}`), `패키지 구성 목록에 ${n} 가 없다`);
 });
+
+// ── C-1(메인 반영 — 109회차 보고 전용 확정): scripts/release.sh 가 jq 실패를 삼켰다 ─────────────────────────────
+//   'jq … > f.tmp && mv f.tmp f' 는 '&&' 목록의 마지막이 아닌 명령(jq)의 실패를 set -e 가 잡지 않는다 — 깨진 JSON 하나가 있어도
+//   나머지 파일만 버전이 오른 채 '✅ 준비 완료' · exit 0 이었다. 이제 전부 .tmp 로 만든 뒤 한꺼번에 바꾼다(실패하면 무변경).
+function releaseSandbox({ brokenWeb = false } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rel109-'));
+  cleanup.push(dir);
+  for (const d of ['scripts', 'server/src', 'web', 'pyportal']) fs.mkdirSync(path.join(dir, d), { recursive: true });
+  fs.copyFileSync(path.join(ROOT, 'scripts/release.sh'), path.join(dir, 'scripts/release.sh'));
+  fs.writeFileSync(path.join(dir, 'package.json'), '{"name":"r","version":"1.0.0"}\n');
+  fs.writeFileSync(path.join(dir, 'server/package.json'), '{"name":"s","version":"1.0.0"}\n');
+  fs.writeFileSync(path.join(dir, 'web/package.json'), brokenWeb ? '{"name":"w","version":"1.0.0",,}\n' : '{"name":"w","version":"1.0.0"}\n');
+  fs.writeFileSync(path.join(dir, 'server/src/release-notes.json'), '{"notes":[{"version":"1.0.0","date":"2026-01-01","title":"t","notes":["n"]}]}\n');
+  fs.writeFileSync(path.join(dir, 'pyportal/ver.txt'), '1.0.0 (2026-01-01) 처음\n');
+  spawnSync('git', ['init', '-q'], { cwd: dir });
+  return dir;
+}
+const hasJq = spawnSync('jq', ['--version']).status === 0;
+const runRelease = (dir, args) => spawnSync('bash', ['scripts/release.sh', ...args], { cwd: dir, encoding: 'utf8' });
+const tmpLeft = (dir) => ['package.json.tmp', 'server/package.json.tmp', 'web/package.json.tmp', 'server/src/release-notes.json.tmp', 'pyportal/ver.txt.tmp']
+  .filter((f) => fs.existsSync(path.join(dir, f)));
+const verOf = (dir, f) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')).version;
+
+test('C-1 release.sh — jq 가 한 파일에서 실패하면 0 이 아니고 어떤 파일도 바뀌지 않는다(.tmp 도 남지 않는다)', { skip: !hasJq && 'jq 없음' }, () => {
+  const dir = releaseSandbox({ brokenWeb: true });
+  const before = fs.readFileSync(path.join(dir, 'server/src/release-notes.json'), 'utf8');
+  const r = runRelease(dir, ['9.9.9', '제목']);
+  assert.notEqual(r.status, 0, `깨진 web/package.json 인데 성공으로 끝났다: ${r.stdout}`);
+  assert.ok(!/준비 완료/.test(r.stdout), '실패했는데 준비 완료를 찍었다');
+  assert.equal(verOf(dir, 'package.json'), '1.0.0', '루트 package.json 만 버전이 올랐다(일부만 바뀜)');
+  assert.equal(verOf(dir, 'server/package.json'), '1.0.0');
+  assert.equal(fs.readFileSync(path.join(dir, 'server/src/release-notes.json'), 'utf8'), before, '릴리스 노트가 바뀌었다');
+  assert.deepEqual(tmpLeft(dir), [], '.tmp 가 남았다');
+});
+
+test('C-1 release.sh — 정상이면 세 파일 버전 · 릴리스 노트 맨 앞 · ver.txt 맨 위가 함께 바뀐다', { skip: !hasJq && 'jq 없음' }, () => {
+  const dir = releaseSandbox();
+  const r = runRelease(dir, ['9.9.9', '제목', '세부 1', '--pyportal', '허브 요약']);
+  assert.equal(r.status, 0, r.stderr);
+  for (const f of ['package.json', 'server/package.json', 'web/package.json']) assert.equal(verOf(dir, f), '9.9.9', f);
+  const rn = JSON.parse(fs.readFileSync(path.join(dir, 'server/src/release-notes.json'), 'utf8'));
+  assert.equal(rn.notes[0].version, '9.9.9');
+  assert.deepEqual(rn.notes[0].notes, ['세부 1']);
+  assert.equal(rn.notes[1].version, '1.0.0', '옛 항목이 사라졌다');
+  const ver = fs.readFileSync(path.join(dir, 'pyportal/ver.txt'), 'utf8').split('\n');
+  assert.match(ver[0], /^9\.9\.9 \(\d{4}-\d{2}-\d{2}\) 허브 요약$/);
+  assert.equal(ver[1], '1.0.0 (2026-01-01) 처음');
+  assert.deepEqual(tmpLeft(dir), []);
+});
+
+test('C-1 release.sh — --pyportal 뒤에 값이 없으면 이유를 말하고 끝난다(파일 무변경)', { skip: !hasJq && 'jq 없음' }, () => {
+  const dir = releaseSandbox();
+  const r = runRelease(dir, ['9.9.9', '제목', '--pyportal']);
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /--pyportal 뒤에 요약 문구가 필요합니다/);
+  assert.equal(verOf(dir, 'package.json'), '1.0.0');
+});
