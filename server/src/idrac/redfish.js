@@ -838,12 +838,16 @@ export async function fetchInventory(entry) {
   } catch { inv.collections.memoryDimms = 'failed'; /* memory optional */ }
 
   // --- 최근 하드웨어 이벤트(Critical/Warning) — SEL 또는 Dell LC 로그 ---
+  // 93회차 F1(81회차 남긴 것 P1): SEL · LC 로그를 둘 다 못 읽거나 매니저 id 가 없으면 `events` 는 빈 배열이지만
+  //   '이벤트 0건' 이 아니다 — `collections.events` 에 'ok'(로그 GET 하나라도 성공) | 'failed' 를 남긴다.
+  //   소비처(bmusage/hwFacts selCritical · 스냅샷)는 'failed' 면 null(못 읽음). 파트 장애 COLLECTION_KINDS 의 종류가 아니다.
   inv.events = [];
+  inv.collections.events = 'failed';
   try {
     if (mgrId) {
       let log = null;
       for (const p of [`${mgrId}/LogServices/Sel/Entries`, `${mgrId}/LogServices/Lclog/Entries`]) {
-        try { log = await G(p); if (log?.Members?.length) break; } catch { /* try next */ }
+        try { log = await G(p); inv.collections.events = 'ok'; if (log?.Members?.length) break; } catch { /* try next */ }
       }
       for (const e of (log?.Members || []).slice(-40).reverse()) {
         const sev = e.Severity || '';
@@ -1017,7 +1021,8 @@ export async function fetchInventory(entry) {
   try { inv.firmware = await fetchFirmwareInventory(entry); } catch { inv.firmware = []; }
 
   // Systems 는 실패했어도 Chassis(psus) 처럼 sysId 없이 도는 컬렉션이 응답했으면 장비는 닿은 것이다.
-  if (Object.values(inv.collections).includes('ok')) inv.reachable = true;
+  //   93회차 F1: `events`(매니저 로그)는 이 판정에 넣지 않는다 — 예전 판정(부품 컬렉션 · Systems)을 그대로 둔다.
+  if (Object.entries(inv.collections).some(([k, v]) => k !== 'events' && v === 'ok')) inv.reachable = true;
 
   return inv;
 }

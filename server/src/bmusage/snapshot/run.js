@@ -68,7 +68,8 @@ export async function idracSnapshotFacts(target, deps = {}) {
   try { inv = await D.getInventory(id); } catch { inv = null; }
   try { sensor = (await D.getSensorSeries(id))?.latest || null; } catch { sensor = null; }
   try { power = await D.powerLatest(id); } catch { power = null; }
-  const events = Array.isArray(inv?.events) ? inv.events.slice(0, 5).map((e) => ({ severity: String(e?.severity || '').slice(0, 16), at: String(e?.created || '').slice(0, 40), message: String(e?.message || '').slice(0, 200) })) : null;
+  // 93회차 F1: 매니저 로그(SEL · LC)를 못 읽은 인벤토리는 '이벤트 없음' 이 아니다 — null(못 읽음 · hwFacts selCritical 과 같은 판정).
+  const events = Array.isArray(inv?.events) && inv?.collections?.events !== 'failed' ? inv.events.slice(0, 5).map((e) => ({ severity: String(e?.severity || '').slice(0, 16), at: String(e?.created || '').slice(0, 40), message: String(e?.message || '').slice(0, 200) })) : null;
   const temps = sensor?.temps && typeof sensor.temps === 'object' ? Object.entries(sensor.temps).slice(0, 12).map(([name, c]) => ({ name: String(name).slice(0, 48), c: typeof c === 'number' ? c : null })) : null;
   return {
     events, eventsAt: typeof inv?.collectedAt === 'number' ? inv.collectedAt : null,

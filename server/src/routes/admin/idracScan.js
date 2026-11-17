@@ -12,7 +12,7 @@ import { listTargets } from '../../agent/deployRegistry.js';
 import { enqueueIdracScan, enqueueIdracRegister, getIdracScanResult, listIdracScanJobs, getIdracScanJobLog, cancelIdracScanJob, recentPollingAgents, agentOfReq } from '../../central/idracScanJobs.js';
 import { pushIdracScan } from '../../central/idracScanPush.js';
 import { getPollerStatus, pollNow } from '../../idrac/poller.js';
-import { listScanRanges, saveScanRanges, removeScanRanges, getScanRangeRaw } from '../../idrac/scanRanges.js';
+import { listScanRanges, saveScanRanges, removeScanRanges, getScanRangeRaw, scanRangesWriteRefusal, scanRangesLoadError } from '../../idrac/scanRanges.js';
 import { scanRangesToCsv, sampleCsv as scanRangesSampleCsv, parseScanRangesCsv, analyzeScanRangesImport } from '../../idrac/scanRangesCsv.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { startIdracScanNow, idracScanStatus, stopIdracScanNow, setIdracScanIntervalMs, tryAcquireScan, releaseScan } from '../../idrac/scanPoller.js';
@@ -262,7 +262,7 @@ adminRouter.post('/idrac/import', csvPerm, adminOnly, fleetOnly, (req, res) => {
   else list = Array.isArray(body) ? body : body.servers;
   const result = importServers(list, body.mode === 'replace' ? 'replace' : 'merge');
   if (result.ok) pollNow().catch(() => {});
-  res.status(result.ok ? 200 : 400).json(result);
+  res.status(result.ok ? 200 : (result.status || 400)).json(result);   // 93회차 F2: 등록부 읽기 오류는 409
 });
 
 // Preview how an IP list expands (count + sample + parse errors) — no writes.
@@ -276,7 +276,7 @@ adminRouter.post('/idrac/expand-ips', adminOnly, (req, res) => {
 adminRouter.post('/idrac/bulk-add', adminOnly, fleetOnly, (req, res) => {
   const result = bulkAddByIps(req.body || {});
   if (result.ok) pollNow().catch(() => {});
-  res.status(result.ok ? 200 : 400).json(result);
+  res.status(result.ok ? 200 : (result.status || 400)).json(result);   // 93회차 F2
 });
 
 // Scan an IP range and return only the IPs that are real Dell iDRACs (with
@@ -355,14 +355,17 @@ adminRouter.post('/idrac/register-scanned', adminOnly, fleetOnly, (req, res) => 
   }
   const result = registerScanned(found, username, password, normIdracMode(mode), vcenterId || '');
   if (result.ok) pollNow().catch(() => {});
-  res.status(result.ok ? 200 : 400).json(result);
+  res.status(result.ok ? 200 : (result.status || 400)).json(result);   // 93회차 F2
 });
 
 // ---- vCenter별 iDRAC 스캔 대역 + 주기 자동 발견(IPMS의 'vCenter별 스캔 대역'과 동일 흐름) ----
 // 각 vCenter에 iDRAC IP 대역 + 계정을 저장하면, 주기 스캐너가 그 대역을 돌며 Dell iDRAC을
 // 발견해 해당 vCenter로 자동 등록한다. 비밀번호는 응답에서 마스킹된다.
 adminRouter.get('/idrac/scan-ranges', adminOnly, fleetOnly, (_req, res) => {
-  res.json({ ok: true, ranges: listScanRanges(), status: idracScanStatus(), centralEnabled: Boolean(config.central.token) });
+  // 93회차 F3: 스캔 대역 파일 읽기 오류면 빈 목록이 '대역 없음' 이 아니다 — 고정 문구 사유만 싣는다(파일 조각 없음 · 손상은 예전처럼 보존본).
+  const le = scanRangesLoadError();
+  res.json({ ok: true, ranges: listScanRanges(), status: idracScanStatus(), centralEnabled: Boolean(config.central.token),
+    ...(le?.readError ? { loadError: { code: 'registry-unreadable', readError: true, reason: String(le.reason || '').slice(0, 200) } } : {}) });
 });
 // 저장/수정. Body: { id?, datacenterId, service?, ranges?, username?, password?, agent?, enabled?, mode? }
 // id가 있으면 그 엔트리 수정, 없으면 새 엔트리 생성(한 법인에 여러 서비스 엔트리 허용).
@@ -372,14 +375,14 @@ adminRouter.put('/idrac/scan-ranges', adminOnly, fleetOnly, (req, res) => {
   const dcId = b.datacenterId || b.vcenterId;
   const r = saveScanRanges({ ...b, datacenterId: dcId });
   if (r.ok) logAudit({ user: req.user?.username, action: 'iDRAC 스캔 대역 저장', target: `${dcId}${r.service ? `/${r.service}` : ''} (대역 ${(r.ranges || []).length}개${r.enabled ? '' : ', 비활성'}${r.droppedSecrets?.length ? ', 대역·엣지·계정 변경으로 저장 비밀번호 폐기' : ''})` }); // v2.606 LEFT2606-02
-  res.status(r.ok ? 200 : 400).json(r);
+  res.status(r.ok ? 200 : (r.status || 400)).json(r);   // 93회차 F3: 스캔 대역 파일 읽기 오류는 409
 });
 // 삭제. :id = 엔트리 고유키(구버전 마이그레이션분은 id=datacenterId).
 adminRouter.delete('/idrac/scan-ranges/:id', adminOnly, fleetOnly, (req, res) => {
   const r = removeScanRanges(req.params.id);
   if (r.ok) logAudit({ user: req.user?.username, action: 'iDRAC 스캔 대역 삭제', target: req.params.id });
   // v2.583: '없는 항목' 만 404 — 디스크 쓰기 실패는 500(서버 쪽 문제다. 404 로 두면 사용자가 목록이 낡은 줄 안다)
-  res.status(r.ok ? 200 : r.reason === '없는 항목' ? 404 : 500).json(r);
+  res.status(r.ok ? 200 : r.status ? r.status : r.reason === '없는 항목' ? 404 : 500).json(r);   // 93회차 F3: 읽기 오류는 409
 });
 /* ── 스캔 대역 CSV 일괄 관리(v2.339, 사용자 요구) — 수집 서버 CSV(v2.338)와 동일 골격. ──────
  * 내보내기 기본은 비밀번호 제외, ?secrets=1 은 requireSettingsOwner + 감사로그.
@@ -411,6 +414,8 @@ adminRouter.post('/idrac/scan-ranges/import', csvPerm, adminOnly, fleetOnly, (re
   const { rows, error } = parseScanRangesCsv(String(req.body?.csv || ''));
   if (error) return res.status(400).json({ ok: false, reason: error });
   if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });
+  // 93회차 F3: 스캔 대역 파일을 읽지 못했으면 기존 엔트리와 대조할 수 없다(전부 '새 항목' 으로 보인다 — 드라이런 포함) — 409.
+  { const refused = scanRangesWriteRefusal(); if (refused) return res.status(refused.status).json(refused); }
 
   // 법인 이름/ID → ID(대소문자 무시). 못 찾으면 null → 오류 판정(오타로 유령 법인 생성 방지).
   let dcs = [];
@@ -545,7 +550,7 @@ adminRouter.post('/idrac/delete', adminOnly, fleetOnly, (req, res) => {
       ? deleteServers({ vcenterId: b.vcenterId })
       : { ok: false, reason: 'all=true 또는 vcenterId가 필요합니다.' });
   if (result.ok) pollNow().catch(() => {});
-  res.status(result.ok ? 200 : 400).json(result);
+  res.status(result.ok ? 200 : (result.status || 400)).json(result);   // 93회차 F2
 });
 
 // 다수 iDRAC 서버의 소속 vCenter 일괄 지정/해제. Body: { ids?:[], vcenterId, all? }
@@ -556,7 +561,7 @@ adminRouter.post('/idrac/assign-vcenter', adminOnly, fleetOnly, (req, res) => {
   if (!b.all && (!ids || !ids.length)) return res.status(400).json({ ok: false, reason: '대상(ids) 또는 all=true가 필요합니다.' });
   const result = assignVcenter({ ids, vcenterId: b.vcenterId || '' });
   if (result.ok) pollNow().catch(() => {});
-  res.json(result);
+  res.status(result.ok ? 200 : (result.status || 400)).json(result);   // 93회차 F2: 등록부 읽기 오류는 409(예전: 200 · 0대 변경)
 });
 
 // 파라미터 라우트는 반드시 위의 모든 리터럴 '/idrac/...' 라우트 뒤에 둔다. 그렇지 않으면

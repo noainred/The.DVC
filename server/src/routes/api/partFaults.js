@@ -31,7 +31,7 @@ import { buildIncidentsAsync, summarizeKindsAsync } from '../../partfault/incide
 import { createYielder } from '../../util/timeSlice.js';
 import { runPartFaultsNow, partFaultStatus } from '../../partfault/poller.js';
 import { partFaultPushStatus, pushPartFaultsNow } from '../../partfault/push.js';
-import { loadPartFaultSettings, savePartFaultSettings, partFaultEnabled, settingsForAgent } from '../../partfault/settings.js';
+import { loadPartFaultSettings, savePartFaultSettings, partFaultEnabled, settingsForAgent, partFaultSettingsWriteRefusal } from '../../partfault/settings.js';
 import { hookStatus } from '../../partfault/hooks.js';
 import { mergeEdgeReports } from '../../central/partFaultEdge.js';
 import { listCollectors } from '../../collector/registry.js';
@@ -439,6 +439,8 @@ api.get('/tools/part-faults/status', toolsPerm, fullScopeOnly, async (req, res) 
  */
 api.put('/tools/part-faults/settings', adminOnly, fullScopeOnly, (req, res) => {
   if (config.agent.centralUrl) return res.status(409).json({ ok: false, reason: '엣지에서는 스위치를 저장할 수 없습니다 — 중앙 설정이 내려옵니다.' });
+  // 93회차 F4: 설정 파일 읽기 오류면 기본값(꺼짐) 위에 저장하지 않는다 — 사유를 실은 409(예전: 원본을 손상으로 옮긴 뒤 새 파일).
+  { const no = partFaultSettingsWriteRefusal(); if (no) return res.status(409).json(no); }
   const before = loadPartFaultSettings();
   const s = savePartFaultSettings(req.body || {});
   logAudit({ user: req.user?.username, action: '파트 장애 스위치 저장', detail: `enabled ${before.enabled}→${s.enabled} · 엣지별 ${Object.keys(s.edges).length}곳` });

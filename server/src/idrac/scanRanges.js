@@ -24,14 +24,36 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.606 LEFT2606-02: 대역·엣지·계정이 바뀌면 저장 비밀번호 폐기
+import { makeLoadError } from '../util/registryCore.js'; // 93회차 F3: 등록부 9개와 같은 읽기 판정(읽기 오류 ≠ 손상)
 
 const FILE = path.join(config.configDir, 'idrac-scan-ranges.json');
 
 let cache = null;
 let cacheMtime = -1;
+/**
+ * 93회차 F3(재현 — 34회차 F4 · 결정 78 ① 의 형제): 예전 read() 는 읽기와 JSON.parse 를 catch 하나로 받아 **읽기 오류**(EACCES — root 가
+ *   손으로 고친 0600 파일 · EIO · EISDIR)에도 원본(스캔 계정 · iLO 계정)을 `.corrupt.<시각>` 으로 옮겼고, 화면은 대역 0개 · 주기 스캔은 멈췄으며
+ *   다음 저장이 새 파일을 만들었다. 이제 공용 판정(registryCore makeLoadError.read): 손상만 보존본으로 옮기고, 읽기 오류는 원본을 두고
+ *   30초마다 다시 읽으며 그동안 사람 저장 · 삭제 · 라벨은 409 로 거절한다(실행 이력 lastRun 은 메모리 목록이 비어 쓰지 않는다).
+ */
+const loadErr = makeLoadError();
+const WHAT = 'iDRAC 스캔 대역(idrac-scan-ranges.json)';
+const parseRanges = (text) => {
+  const j = JSON.parse(text);
+  let entries;
+  if (j && typeof j.entries === 'object' && j.entries) entries = j.entries; // 현행 포맷
+  else if (j && typeof j.datacenters === 'object' && j.datacenters) entries = migrateLegacyMap(j.datacenters); // 구: 법인 키
+  else if (j && typeof j.vcenters === 'object' && j.vcenters) entries = migrateLegacyMap(j.vcenters); // 구: vCenter 키
+  else entries = {};
+  return { entries: openSecretsDeep(entries) }; // v2.296 스캔 계정 복호(메모리 평문)
+};
+/** 93회차 F3: 읽기 오류 중의 쓰기 거절(409 결과) 또는 null — 로드를 먼저 한다. */
+export function scanRangesWriteRefusal() { read(); return loadErr.writeRefusal(WHAT); }
+/** 93회차 F3: 로드 오류(읽기 오류 · 손상) — 화면 · 진단용. 없으면 null. */
+export function scanRangesLoadError() { read(); return loadErr.get(); }
 
 // 구버전(법인/‌vCenter 키) 저장을 엔트리(id) 저장으로 승계. id는 기존 키(datacenterId)를 그대로 써
 // 안정적으로 유지한다(기존 lastRun/설정 보존).
@@ -58,16 +80,11 @@ function migrateLegacyMap(map) {
 function read() {
   let mtime = -1;
   try { mtime = fs.statSync(FILE).mtimeMs; } catch { mtime = 0; }
-  if (cache && mtime === cacheMtime) return cache;
-  try {
-    const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    let entries;
-    if (j && typeof j.entries === 'object' && j.entries) entries = j.entries; // 현행 포맷
-    else if (j && typeof j.datacenters === 'object' && j.datacenters) entries = migrateLegacyMap(j.datacenters); // 구: 법인 키
-    else if (j && typeof j.vcenters === 'object' && j.vcenters) entries = migrateLegacyMap(j.vcenters); // 구: vCenter 키
-    else entries = {};
-    cache = { entries: openSecretsDeep(entries) }; // v2.296 스캔 계정 복호(메모리 평문)
-  } catch { preserveCorrupt(FILE); cache = { entries: {} }; } // v2.322: 손상본 보존(스캔 계정 유실 방지)
+  if (cache && mtime === cacheMtime && !loadErr.readPending()) return cache;
+  // v2.322: 손상본 보존(스캔 계정 유실 방지 — loadErr.read 가 손상일 때만 preserveCorrupt) · 93회차 F3: 읽기 오류는 원본을 그대로 둔다.
+  const r = loadErr.read(FILE, parseRanges);
+  if (r.kind === 'ok') { cache = r.value; loadErr.clear(); }
+  else cache = { entries: {} };   // missing · corrupt(보존본으로 옮김) · read-error(원본 그대로 — readPending 이라 다음 read() 가 다시 판정한다)
   cacheMtime = mtime;
   return cache;
 }
@@ -79,8 +96,11 @@ function read() {
  *   clearHangs 와 같은 정직성 유형). 이제 디스크에 쓴 뒤에만 캐시를 바꾸고, 사용자 저장 경로는 실패를 400 으로 돌려준다.
  */
 function write(data) {
+  // 93회차 F3: 마지막 방어선 — 읽기 오류 중에는 원본(보존본도 없다)을 덮지 않는다(실행 이력 갱신 경로 포함).
+  { const ref = loadErr.writeRefusal(WHAT); if (ref) return ref.reason; }
   try {
     atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(data), null, 2), { mode: 0o600 }); // 암호화 모드면 password 봉인(복제 — cache 평문 유지)
+    loadErr.clear();   // 93회차 F3: 저장이 성공했다 — 손상 표지(보존본으로 옮긴 뒤 관리자가 새로 만든 목록)를 내린다
     cache = data;
     try { cacheMtime = fs.statSync(FILE).mtimeMs; } catch { cacheMtime = -1; }
     return null;
@@ -204,6 +224,7 @@ export function setScanRangeLabel(id, label, { datacenterId = '' } = {}) {
   if (!svc) return { ok: false, status: 400, reason: '라벨이 비어 있습니다.' };
   if (svc.length > 128 || [...svc].some((c) => c.charCodeAt(0) < 32)) return { ok: false, status: 400, reason: '라벨은 128자 이하이고 제어 문자를 쓸 수 없습니다.' };
   const cur = read();
+  { const ref = loadErr.writeRefusal(WHAT); if (ref) return ref; }   // 93회차 F3: 읽기 오류면 404 보다 먼저 409
   const e = (cur.entries || {})[key];
   if (!e) return { ok: false, status: 404, reason: '스캔 엔트리를 찾지 못했습니다.' };
   if (String(e.datacenterId || '').trim() !== String(datacenterId || '').trim()) return { ok: false, status: 403, reason: '이 엔트리는 다른 DataCenter 소속입니다.' };
@@ -226,6 +247,8 @@ export function saveScanRanges(body = {}) {
   const service = String(body.service || '').trim();
   if (service.length > 128 || [...service].some((c) => c.charCodeAt(0) < 32)) return { ok: false, reason: '서비스명에 사용할 수 없는 문자가 있습니다.' };
   const data = read();
+  // 93회차 F3: 읽기 오류면 빈 목록 위에 '새 엔트리' 를 만들지 않는다(id 를 준 수정도 새 UUID 로 둔갑했다) — 409.
+  { const ref = loadErr.writeRefusal(WHAT); if (ref) return ref; }
   const id = String(body.id || '').trim() && data.entries[String(body.id).trim()] ? String(body.id).trim() : crypto.randomUUID();
   const cur = data.entries[id] || { datacenterId: dcId, service: '', ranges: [], username: '', password: '', agent: '', dispatch: 'poll', enabled: true, mode: 'merge' };
   const next = {
@@ -306,6 +329,7 @@ export function scanHoldText(e) {
 export function removeScanRanges(id) {
   const key = String(id || '').trim();
   const data = read();
+  { const ref = loadErr.writeRefusal(WHAT); if (ref) return ref; }   // 93회차 F3: 읽기 오류면 '없는 항목' 404 보다 먼저 409
   if (!data.entries[key]) return { ok: false, reason: '없는 항목' };
   const rest = { ...data.entries };
   delete rest[key];

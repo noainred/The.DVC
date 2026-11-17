@@ -94,7 +94,7 @@ export function SnapshotResult({ snap }) {
             {r.idrac ? (
               <>
                 <div style={{ fontSize: 12 }}>전력 {r.idrac.powerW == null ? '—' : `${r.idrac.powerW}W`} · CPU {r.idrac.cpuPct == null ? '—' : `${r.idrac.cpuPct}%`} · {(r.idrac.temps || []).map((x) => `${x.name} ${x.c == null ? '—' : `${x.c}℃`}`).join(' · ') || '온도 —'}</div>
-                <pre className="bmo-pre">{(r.idrac.events || []).map((e) => `[${e.at || '—'}] ${e.severity} ${e.message}`).join('\n') || '최근 이벤트 없음(인벤토리 기준)'}</pre>
+                <pre className="bmo-pre">{r.idrac.events == null ? '—(이벤트 로그를 읽지 못했습니다 — 인벤토리 없음 또는 SEL · LC 로그 조회 실패)' : (r.idrac.events.map((e) => `[${e.at || '—'}] ${e.severity} ${e.message}`).join('\n') || '최근 이벤트 없음(인벤토리 기준)')}</pre>
               </>
             ) : <p className="bmo-note">iDRAC 경로 없음 — 이 서버는 iDRAC 등록이 없거나 이 노드가 그 값을 갖고 있지 않습니다.</p>}
           </section>

@@ -90,7 +90,8 @@ export function shapeHwFacts(raw = {}, { now = Date.now(), freshMs = 15 * 60_000
   const dimmBad = dimmsRead ? inv.memoryDimms.filter((d) => BAD_HEALTH.test(t(d?.health))).map((d) => t(d.locator).slice(0, 64)) : null;
   const dimmWarn = dimmsRead ? inv.memoryDimms.filter((d) => WARN_HEALTH.test(t(d?.health))).map((d) => t(d.locator).slice(0, 64)) : null;
   const diskPredicted = disksRead ? inv.disks.filter((d) => d?.predictiveFailure === true).map((d) => t(d.name || d.id || d.serial).slice(0, 64)) : null;
-  const events = Array.isArray(inv?.events) ? inv.events : null;
+  // 93회차 F1(81회차 P1): SEL · LC 로그를 못 읽은 인벤토리(collections.events 'failed')의 빈 events 는 '0건' 이 아니다 — null(못 읽음).
+  const events = Array.isArray(inv?.events) && coll.events !== 'failed' ? inv.events : null;
   const selCritical = events ? events.filter((e) => /critical/i.test(t(e?.severity))).length : null;
   const faults = Array.isArray(raw.faults) ? raw.faults : null;
   const byKind = (k) => (faults ? faults.filter((f) => f.kind === k) : null);
