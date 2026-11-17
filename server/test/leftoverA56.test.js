@@ -185,3 +185,12 @@ test('반증 A2: 보류 응답은 성공(적용)으로 보이지 않는다 — �
   const c = col.upgradeCell({ at: NOW, ok: true, deferred: true, version: '3.18.6', reason: '진행 중 작업 …' });
   assert.match(c.text, /설치 대기/); assert.doesNotMatch(c.text, /적용/); assert.match(c.reason, /진행 중 작업/);
 });
+
+test('F2 화면: guacd 체크박스는 글자와 한 줄(.spec-grid label 의 column 방향을 덮는다 — v3.18.6 스크린샷 재판독)', async () => {
+  const { stripComments } = await import('./_stripComments.js');
+  const src = stripComments(fs.readFileSync(new URL('../../web/src/views/ProxySettings.jsx', import.meta.url), 'utf8'));
+  const fn = src.slice(src.indexOf('function GuacdOptions'), src.indexOf('const withPorts'));
+  const labels = fn.match(/<label [^>]*>/g) || [];
+  assert.equal(labels.length, 2);
+  for (const l of labels) assert.match(l, /flexDirection: 'row'/);
+});
