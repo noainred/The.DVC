@@ -15,7 +15,7 @@ import tls from 'node:tls';
 import { config } from '../config.js';
 import { loadMetricsSettings } from '../metrics/settings.js';
 import { refreshVcInfo, refreshVcRest, VCINFO_BUDGET_MS, VCREST_BUDGET_MS } from '../vcinfo/collect.js';   // v2.898 vCenter 알람·작업·권한
-import { parseObjectContent, xmlUnescape, snapshotInfo, effectiveRequestTimeoutMs, retrieveResultToObjectXml, returnvalBodies, perfIdMarks } from './soapParse.js';
+import { parseObjectContent, xmlUnescape, snapshotInfo, effectiveRequestTimeoutMs, retrieveResultToObjectXml, returnvalBodies, returnvalBlocks, exactTagBodies, execAfter, firstTagInner, perfIdMarks } from './soapParse.js';
 import { vcDispatcher, vcRequestSignal } from './restClient.js';
 import { parseObjectContentAsync } from '../util/soapParsePool.js';
 import { splitHostPort } from '../util/hostPort.js';   // v2.603(LEFT2603-02): IPv6 host:port 분리
@@ -231,7 +231,8 @@ export class VimSoapClient {
       if (invalidLogin) { err.authFailed = true; err.status = res.status; }
       // v2.591: fault 상세 타입을 싣는다(`<detail><XxxFault xsi:type="Xxx">`). 게스트 계정 거부(`InvalidGuestLogin`)를
       //   문구(faultstring)가 아니라 **타입으로** 가르기 위해서다 — gpu/guestops.js 가 이 값을 본다.
-      const ft = /<detail>[\s\S]*?xsi:type="(?:[\w-]+:)?([\w]+)"/.exec(text)?.[1] || /<detail>\s*<(?:[\w-]+:)?([\w]+?)(?:Fault)?[\s>]/.exec(text)?.[1] || '';
+      // 89회차 F2: 첫 `<detail>` 뒤의 xsi:type 은 선형(execAfter — 오류 본문에 닫히지 않은 `<detail>` 이 반복되면 2차였다).
+      const ft = execAfter(text, '<detail>', /xsi:type="(?:[\w-]+:)?([\w]+)"/)?.[1] || /<detail>\s*<(?:[\w-]+:)?([\w]+?)(?:Fault)?[\s>]/.exec(text)?.[1] || '';
       if (ft) err.fault = ft;
       throw err;
     }
@@ -244,7 +245,7 @@ export class VimSoapClient {
     );
     const pick = (tag) => new RegExp(`<${tag}[^>]*>([^<]+)</${tag}>`).exec(xml)?.[1];
     // Friendly vCenter version/build/name live in <about>.
-    const about = /<about>([\s\S]*?)<\/about>/.exec(xml)?.[1] || '';
+    const about = exactTagBodies(xml, '<about>', '</about>', 1)[0] || '';   // 89회차 F2: 선형
     const aboutPick = (tag) => new RegExp(`<${tag}[^>]*>([^<]+)</${tag}>`).exec(about)?.[1];
     this.sc = {
       propertyCollector: pick('propertyCollector'),
@@ -398,10 +399,8 @@ export class VimSoapClient {
     const xml = await this.#call(
       `<QueryPerf xmlns="urn:vim25"><_this type="PerformanceManager">${this.sc.perfManager}</_this>${specs}</QueryPerf>`
     );
-    const re = /<returnval[^>]*>([\s\S]*?)<\/returnval>/g;
-    let m;
-    while ((m = re.exec(xml))) {
-      const blk = m[1];
+    // 89회차 F2: returnval 경계는 선형(returnvalBodies — 같은 결과).
+    for (const blk of returnvalBodies(xml)) {
       const ent = /<entity type="HostSystem">([^<]+)<\/entity>/.exec(blk)?.[1];
       // 샘플값 <value>N</value> 하나를 뽑는다(형제 파서 queryHostGpuUtil/queryEntityPerf와 동일).
       // 이전의 이중 <value> 정규식은 계열 래퍼가 <value xsi:type="PerfMetricIntSeries">처럼 속성을
@@ -431,10 +430,8 @@ export class VimSoapClient {
     const xml = await this.#call(
       `<QueryPerf xmlns="urn:vim25"><_this type="PerformanceManager">${this.sc.perfManager}</_this>${specs}</QueryPerf>`
     );
-    const re = /<returnval[^>]*>([\s\S]*?)<\/returnval>/g;
-    let m;
-    while ((m = re.exec(xml))) {
-      const blk = m[1];
+    // 89회차 F2: returnval 경계는 선형(returnvalBodies — 같은 결과).
+    for (const blk of returnvalBodies(xml)) {
       const ent = /<entity type="HostSystem">([^<]+)<\/entity>/.exec(blk)?.[1];
       if (!ent) continue;
       const vals = [...blk.matchAll(/<value>(\d+)<\/value>/g)].map((x) => Number(x[1]));
@@ -502,8 +499,8 @@ export class VimSoapClient {
     const levels = new Map();
     for (const blk of xml.split('<PerfCounterInfo').slice(1)) {
       const key = /<key>(\d+)<\/key>/.exec(blk)?.[1];
-      const name = /<nameInfo>[\s\S]*?<key>(\w+)<\/key>/.exec(blk)?.[1];
-      const group = /<groupInfo>[\s\S]*?<key>(\w+)<\/key>/.exec(blk)?.[1];
+      const name = execAfter(blk, '<nameInfo>', /<key>(\w+)<\/key>/)?.[1];   // 89회차 F2: 선형
+      const group = execAfter(blk, '<groupInfo>', /<key>(\w+)<\/key>/)?.[1];
       const rollup = /<rollupType>(\w+)<\/rollupType>/.exec(blk)?.[1];
       if (key && name && group && rollup) {
         const full = `${group}.${name}.${rollup}`;
@@ -559,7 +556,7 @@ export class VimSoapClient {
     const xml = await this.#call(
       `<QueryPerf xmlns="urn:vim25"><_this type="PerformanceManager">${this.sc.perfManager}</_this>${spec}</QueryPerf>`
     );
-    const rv = /<returnval[^>]*>([\s\S]*?)<\/returnval>/.exec(xml)?.[1] || '';
+    const rv = returnvalBodies(xml, { max: 1 })[0] || '';   // 89회차 F2: 선형(첫 블록)
     const times = [...rv.matchAll(/<timestamp>([^<]+)<\/timestamp>/g)].map((m) => m[1]);
     const vals = [...rv.matchAll(/<value>(-?\d+)<\/value>/g)].map((m) => Number(m[1]));
     const n = Math.min(times.length, vals.length);
@@ -876,14 +873,12 @@ function vmGateways(ipStackXml) {
   if (!ipStackXml) return [];
   const out = new Set();
   // 각 <ipRoute> 블록에서 network=0.0.0.0 & prefixLength=0 이면 <gateway><ipAddress>를 채택.
-  const routeRe = /<ipRoute>([\s\S]*?)<\/ipRoute>/g;
-  let m;
-  while ((m = routeRe.exec(ipStackXml))) {
-    const blk = m[1];
+  // 89회차 F2: 블록 경계 · 게이트웨이 찾기는 선형(exactTagBodies · execAfter — 같은 결과).
+  for (const blk of exactTagBodies(ipStackXml, '<ipRoute>', '</ipRoute>')) {
     const net = /<network>([^<]*)<\/network>/.exec(blk)?.[1] || '';
     const prefix = /<prefixLength>(\d+)<\/prefixLength>/.exec(blk)?.[1] || '';
     if ((net === '0.0.0.0' || net === '::') && (prefix === '0' || prefix === '')) {
-      const gw = /<gateway>[\s\S]*?<ipAddress[^>]*>([^<]+)<\/ipAddress>/.exec(blk)?.[1];
+      const gw = execAfter(blk, '<gateway>', /<ipAddress[^>]*>([^<]+)<\/ipAddress>/)?.[1];
       if (gw && isIPv4(gw)) out.add(gw);
     }
   }
@@ -1096,7 +1091,7 @@ export function parseTemps(xml) {
      * v2.605(COL2605-05, 가능성): 판독 0 + healthState unknown 은 BMC 미준비·센서 미장착의 '못 읽음' 이다 —
      *   그대로 두면 흡기 0℃(급냉)로 채택·적재된다. 이 조합만 건너뛴다(정상 판독 0℃ 는 healthState 가 있다).
      */
-    const hkey = /<healthState>[\s\S]*?<key>([^<]*)<\/key>/.exec(blk)?.[1] || '';
+    const hkey = execAfter(blk, '<healthState>', /<key>([^<]*)<\/key>/)?.[1] || '';   // 89회차 F2: 선형
     if (reading === 0 && /^unknown$/i.test(hkey.trim())) continue;
     const c = Math.round(reading * (10 ** mod) * 10) / 10;
     if (c > -50 && c < 200) temps.push({ name: name.trim(), c });
@@ -1910,12 +1905,11 @@ function escXml(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;
 /** ReadNextEvents 응답의 <returnval> 블록들을 파싱. */
 export function parseEventsXml(xml) {
   const out = [];
-  const re = /<returnval\b([^>]*)>([\s\S]*?)<\/returnval>/g;
-  let m;
-  while ((m = re.exec(xml))) {
-    const attrs = m[1] || '', body = m[2] || '';
+  // 89회차 F2: returnval 경계 · 태그 본문 찾기는 선형(returnvalBlocks · firstTagInner — 예전 정규식과 같은 결과). 닫히지 않은 태그 반복에 2차였다
+  //   (실측 200KB: 블록 0.33초 · 한 블록 안 `<key` 반복 2.2초).
+  for (const { attrs, body } of returnvalBlocks(xml, { wordBoundary: true })) {
     const type = /xsi:type="([^"]+)"/.exec(attrs)?.[1] || /(?:^|\s)type="([^"]+)"/.exec(attrs)?.[1] || 'Event';
-    const pick = (tag) => new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)</${tag}>`).exec(body)?.[1];
+    const pick = (tag) => firstTagInner(body, tag);
     const key = pick('key');
     const createdTime = pick('createdTime');
     const userName = (pick('userName') || '').trim();
@@ -2569,10 +2563,8 @@ export async function collectFoldersAndPools(vc) {
  */
 export function parseHostGpuPerf(xml, keyOf) {
   const out = new Map();
-  const re = /<returnval[^>]*>([\s\S]*?)<\/returnval>/g;
-  let m;
-  while ((m = re.exec(String(xml || '')))) {
-    const blk = m[1];
+  // 89회차 F2: returnval 경계는 선형(returnvalBodies — 같은 결과).
+  for (const blk of returnvalBodies(String(xml || ''))) {
     const ent = /<entity type="HostSystem">([^<]+)<\/entity>/.exec(blk)?.[1];
     if (!ent) continue;
     const series = {};

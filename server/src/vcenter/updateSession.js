@@ -95,9 +95,15 @@ async function destroy(st) {
   try { await st.client.logout(); } catch { /* best effort */ }
 }
 
+/**
+ * 쓰지 않은 세션 정리. 89회차 F3: 정리(DestroyPropertyCollector · Logout)를 **기다리지 않는다** — sweep 은 어느 vCenter 의 수집 안에서 불리는데,
+ *   예전 `await destroy(st)` 는 **다른** vCenter(점검중 · 위임 전환 · 인증 정지로 수집이 멈춘 곳 — 응답이 느리거나 없을 수 있다)의 정리 왕복
+ *   (그 vCenter 의 건별 시한 × 2, 최대 20분)을 이 vCenter 의 수집 데드라인 안에서 기다렸다(느린 1곳이 다른 곳 수집을 막는다 — 운영 환경 규약).
+ *   맵에서는 먼저 지우므로 같은 세션을 두 번 정리하지 않는다.
+ */
 async function sweep(now) {
   for (const [id, st] of sessions) {
-    if (!st.busy && st.client && now - st.lastUsed > IDLE_MS) { sessions.delete(id); await destroy(st); }
+    if (!st.busy && st.client && now - st.lastUsed > IDLE_MS) { sessions.delete(id); destroy(st).catch(() => {}); }
   }
 }
 

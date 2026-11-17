@@ -266,6 +266,12 @@ export function withRegistryRegion(loc, vc) {
   if (!loc || typeof loc !== 'object' || Array.isArray(loc) || regRegion == null || regRegion === '') return loc;
   return loc.region === regRegion ? loc : { ...loc, region: regRegion };
 }
+/** 89회차 F1: 캐시된 vCenter 항목(직접 수집 정상 · lastGood)에 등록부 region 을 입힌다 — 같으면 그 객체 그대로(캐시 객체는 바꾸지 않는다). */
+export function withRegistryVcenter(cachedVc, vc) {
+  if (!cachedVc || typeof cachedVc !== 'object') return cachedVc;
+  const loc = withRegistryRegion(cachedVc.location ?? vc?.location, vc);
+  return loc === cachedVc.location ? cachedVc : { ...cachedVc, location: loc };
+}
 
 class Store {
   constructor() {
@@ -473,7 +479,9 @@ class Store {
         const authStop = c?.ok ? null : authStopView(vcAuthGuard.authStopFor(vc));
         if (c?.ok) {
           const s = c.data;
-          merged.vcenters.push(s.vcenter);
+          // 89회차 F1: 정상 분기 · lastGood 분기도 등록부 region 이 이긴다(v2.611 AUTHZ2611-05 — 점검중 · 위임 분기만 고쳤다). 캐시의 location 은
+          //   수집 시각의 등록부 값이라, 관리자가 region 을 바꾸면 다음 수집까지(실패 중 lastGood 이면 보존 창 6시간까지) 지역 범위 판정이 옛 region 을 봤다.
+          merged.vcenters.push(withRegistryVcenter(s.vcenter, vc));
           pushAll(merged.hosts, s.hosts);
           pushAll(merged.vms, s.vms);
           pushAll(merged.datastores, s.datastores);
@@ -485,7 +493,7 @@ class Store {
             // 마지막 정상 수집을 이월(보존 창 안) — 상태는 unreachable + stale 로 표시해 낡은
             // 데이터임을 알리되, 인벤토리·알람은 유지해 소실 플랩·ipam.db 재기록·알람 재발송을 막는다.
             const s = c.lastGood;
-            merged.vcenters.push({ ...s.vcenter, status: 'unreachable', stale: true, staleSince: c.lastGoodAt, error: c.err.message, hint: c.err.hint, code: c.err.code, ...(authStop ? { authStopped: authStop } : {}) });
+            merged.vcenters.push({ ...withRegistryVcenter(s.vcenter, vc), status: 'unreachable', stale: true, staleSince: c.lastGoodAt, error: c.err.message, hint: c.err.hint, code: c.err.code, ...(authStop ? { authStopped: authStop } : {}) });
             pushAll(merged.hosts, s.hosts);
             pushAll(merged.vms, s.vms);
             pushAll(merged.datastores, s.datastores);
