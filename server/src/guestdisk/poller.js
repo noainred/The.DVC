@@ -6,8 +6,9 @@
  *
  * 게스트 파티션은 천천히 변하므로 주기는 시간 단위(기본 12h). 60초 틱으로 '주기 경과'만 확인한다.
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { store } from '../store.js';
-import { load as loadSettings } from './settings.js';
+import { load as loadSettings, settingsLoadError, RETENTION_MAX_DAYS } from './settings.js';
 import { collectAndStore, pruneOrphanGuestDisk } from './service.js';
 import { prune, getDb, lastCollectTs } from './db.js';
 import { poolSettled } from '../util/pool.js'; // v2.579: 동시성 풀 단일 소스
@@ -18,7 +19,7 @@ import { authStopView } from '../util/authGuard.js';
 import { demoOn, isMockMode } from '../mock/demo/flags.js'; // v2.708
 
 const TICK_MS = 60_000;
-const CONCURRENCY = Math.max(1, Number(process.env.GUESTDISK_CONCURRENCY) || 4);
+const CONCURRENCY = Math.max(1, envPositive(process.env.GUESTDISK_CONCURRENCY, 4));
 
 let running = false;       // 재진입 가드(폴러 + 수동 실행 공유)
 let lastResult = null;     // { at, trigger, vcenters, vms, vmSeriesRows, partSeriesRows, ms, errors }
@@ -134,7 +135,8 @@ export async function runGuestDiskNow(trigger = 'manual') {
       partialShown += Number(r.commit?.partialShown) || 0;
       partialStale += Number(r.commit?.partialStale) || 0;
     }
-    await prune(s.retentionDays);
+    // 97회차 F14: 못 읽은 설정(기본 보관 일수)으로 지우지 않는다 — 그동안은 저장 판정의 상한으로 정리(멈춤에도 상한 — 83 R1 · 메인 검토)
+    await prune(settingsLoadError() ? RETENTION_MAX_DAYS : s.retentionDays);
     await runOrphanPrune();
     lastRunTs = Date.now();
     lastResult = { at: lastRunTs, trigger, vcenters: vcs.length, siteDelegated, vms, vmSeriesRows, partSeriesRows, ...(partsUnknown ? { partsUnknown } : {}),
@@ -169,7 +171,9 @@ export function startGuestDiskPoller() {
       // 적재하므로 여기서 스로틀(6h) prune 을 걸지 않으면 보존기간이 영구 미적용돼 무한 증식한다.
       if (Date.now() - lastPruneTs >= PRUNE_EVERY_MS) {
         lastPruneTs = Date.now();
-        try { await prune(s.retentionDays); } catch (e) { console.warn(`[guestdisk] prune 실패: ${e.message}`); }
+        // 97회차 F14: 설정을 못 읽었으면(읽기 오류 · 손상) 보관 일수가 기본값이다 — 그 값으로 지우면 늘려 둔 기간의 이력을 잃는다.
+        //   메인 검토: 건너뛰기만 하면 이력이 무한히 쌓인다 → 저장 판정의 상한(RETENTION_MAX_DAYS)으로 정리한다(83 R1).
+        try { await prune(settingsLoadError() ? RETENTION_MAX_DAYS : s.retentionDays); } catch (e) { console.warn(`[guestdisk] prune 실패: ${e.message}`); }
         await runOrphanPrune();
       }
       if (!demoOn(s.enabled)) return;                 // opt-in(데모는 켜진 것처럼 — v2.708) — 주기 수집은 꺼져 있으면 안 한다(prune 은 위에서 이미 수행)

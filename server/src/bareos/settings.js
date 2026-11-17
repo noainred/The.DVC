@@ -24,7 +24,6 @@
  *  - 응답에는 비밀번호를 싣지 않는다(hasPassword 만) · vCenter 자격증명은 여기에 없다(사이트 FD 의 INI 가 갖는다).
  *  - 백업 대상이 있는 vCenter 의 Director 를 바꾸거나 매핑을 지우지 않는다(잡은 옛 Director 의 conf 에 있다) · 매핑·대상이 있는 Director 는 지우지 않는다.
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
@@ -100,9 +99,13 @@ export function readDirectorRecord(d, id) {
 /** 내부 전용(비밀번호 포함). 화면·응답에는 publicSettings 를 쓴다. */
 export function loadSettings() {
   if (_cache) return _cache;
+  // 97회차 F4: 읽기 단계는 등록부 공용 읽기(util/registryCore.js read)다 — 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니라 원본을 옮기지 않고 ·
+  //   캐시하지 않고(30초 간격 재읽기) · 오류(readError)를 세워 쓰기를 거절한다(persist 의 assertWritable). parse · 형식 실패만 아래 catch(예전과 같다 — 보존본).
+  const rr = _loadErr.read(FILE(), (t) => t);
+  if (rr.kind === 'read-error') return emptySettings();
   try {
-    if (fs.existsSync(FILE())) {
-      const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    if (rr.kind === 'ok') {
+      const raw = JSON.parse(rr.value);
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류');
       const p = openSecretsDeep(raw);
       const base = emptySettings();
@@ -237,6 +240,7 @@ function clashIssue(list, d) {
 function persist(next) {
   const first = next.directors[0];
   const mirror = first ? (({ id, name, ...rest }) => rest)(first) : undefined;   // 구버전 호환 사본(이름·id 없이 접속값만)
+  _loadErr.assertWritable('Bareos 설정(bareos.json)'); // 97회차 F4: 마지막 방어선 — 읽기 오류 중에는 원본을 덮지 않는다(던진다 — status 409)
   atomicWriteFileSync(FILE(), JSON.stringify(sealSecretsDeep({ ...next, version: 2, ...(mirror ? { director: mirror } : {}) }), null, 2), { mode: 0o600 });
   _cache = next;
   _rev += 1;

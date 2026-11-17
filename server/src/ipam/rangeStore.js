@@ -12,6 +12,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';   // 60회차 F1
+import { READ_RETRY_MS, nowMs } from '../util/jsonFileRead.js';   // 97회차 F11: 읽기 오류 재읽기 간격 · 시계
 
 const FILE = path.join(config.configDir, 'ipam-vcenter-ranges.json');
 
@@ -30,11 +31,16 @@ export function vcRangesLoadError() { read(); return _loadErr.get(); }
 const VC_RANGES_REFUSAL = { ok: false, code: 'settings-unreadable', reason: 'vCenter 별 스캔 대역 파일(ipam-vcenter-ranges.json)을 읽지 못한 상태라 저장하지 않았습니다 — 지금 저장하면 그 vCenter 만 든 파일이 됩니다. 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리세요.' };
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 
+let readRetryAt = 0;   // 97회차 F11: 읽기 오류 뒤 다시 읽을 시각(0 = 오류 없음)
 function read() {
   // 파일 mtime이 캐시 적재 이후 변했으면(외부 편집·백업 복원·다른 프로세스) 재파싱한다.
   let mtime = -1;
   try { mtime = fs.statSync(FILE).mtimeMs; } catch { mtime = 0; /* 파일 없음 */ }
   if (cache && mtime === cacheMtime) return cache;
+  // 97회차 F11(재현 — EISDIR): 읽기 오류는 mtime 이 바뀌어야 다시 읽었다 — 권한(chmod · chown)을 고쳐도 mtime 은 그대로라 재시작 전까지 409 였다.
+  //   이제 READ_RETRY_MS(30초) 간격으로 다시 읽는다(간격 안은 디스크를 보지 않는다 — 요청마다 불리는 경로).
+  if (cache && readRetryAt && nowMs() < readRetryAt) return cache;
+  readRetryAt = 0;
   if (!fs.existsSync(FILE)) { cache = { vcenters: {} }; _loadErr.missing(); }   // 60회차 F1: 보존본만 남았으면(재시작 뒤 포함) 여전히 못 읽은 것
   else {
     try {
@@ -45,12 +51,12 @@ function read() {
       // 62회차(재현 — EISDIR): 읽기 오류(EACCES · EISDIR)는 손상이 아니다 — 원본을 옮기지 않고 확정할 수 없게(20회차 반증 F4 규약 · svcmon logsettings 와 같다).
       //   예전에는 권한만 틀린 원본을 보존본으로 치우고 '확정(빈 맵)' 을 열었다.
       if (e?.code === 'ENOENT') _loadErr.missing();
-      else if (e?.code) _loadErr.readError(e);
+      else if (e?.code) { _loadErr.readError(e, { retryMs: READ_RETRY_MS }); readRetryAt = nowMs() + READ_RETRY_MS; }   // 97회차 F11: 간격 재읽기
       else { _loadErr.corrupt(e); preserveCorrupt(FILE, e.message); }
       cache = { vcenters: {} };
     }
   }
-  cacheMtime = mtime;
+  cacheMtime = readRetryAt ? NaN : mtime;   // 97회차 F11: 읽기 오류면 mtime 캐시로 굳히지 않는다(NaN 은 어떤 mtime 과도 같지 않다)
   return cache;
 }
 

@@ -14,10 +14,11 @@
  *  - du 는 최대 15분이 걸릴 수 있어 결과를 **다음 틱들에서 수거**한다(한 틱을 붙잡지 않는다).
  *    잡 결과 보존은 RMA 의 DONE_TTL(30분)이므로 그 안에 반드시 가져와야 한다.
  */
+import { envPositive, ENV_INT_MAX } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { enqueueJob, getJob, onlineInstances, DONE_TTL } from '../rma/jobs.js';
 import { signJob } from '../rma/signing.js';
 import { rmaPasswordFor } from '../rma/agentSecrets.js';
-import { load as loadSettings } from './settings.js';
+import { load as loadSettings, settingsLoadError, RETENTION_MAX_DAYS } from './settings.js';
 import { buildScanRecord, judgeDuResult, comparableBase } from './scan.js';
 import { renderReport, renderSubject } from './report.js';
 import { getDb } from './db.js';
@@ -28,7 +29,7 @@ import { sendPortalMail } from '../mail/service.js';   // 공용 메일 발송(�
 // v2.606 LEFT2606-04: 2^31 초과면 setInterval 이 1ms 루프가 됐다 — clampIntervalMs 로 [30초, MAX_TIMER_MS].
 const TICK_MS = clampIntervalMs(Number(process.env.DIRUSAGE_TICK_MS) || 60_000, 60_000, 30_000);
 /** 잡 타임아웃(엣지가 이 안에 회신해야 한다). du 는 대용량에서 느리다. */
-const JOB_TIMEOUT_MS = Math.max(60_000, Number(process.env.DIRUSAGE_JOB_TIMEOUT_MS) || 900_000);
+const JOB_TIMEOUT_MS = Math.max(60_000, envPositive(process.env.DIRUSAGE_JOB_TIMEOUT_MS, 900_000, { max: ENV_INT_MAX }));
 
 let timer = null;
 let running = false;                 // ★ 재진입 가드 — 수동 실행과 공유한다
@@ -212,8 +213,11 @@ async function tickOnce() {
   if (cfg.enabled) await dispatchDue(cfg, now);
   // 이력 prune(설정 보존일). 청크 삭제라 이벤트 루프를 막지 않는다.
   if (pruneDue()) {
+    // 97회차 F14: 설정을 못 읽었으면(읽기 오류 · 손상) 보관 일수가 기본값(365일)이다 — 그 값으로 지우면 늘려 둔 기간의 스캔 이력을 잃는다.
+    //   메인 검토: 건너뛰기만 하면 못 읽는 동안 이력이 무한히 쌓인다(멈춤에도 상한 — 83 R1) → 저장 판정의 상한(RETENTION_MAX_DAYS)으로 정리한다.
+    const days = settingsLoadError() ? RETENTION_MAX_DAYS : Math.max(1, cfg.retentionDays || 365);
     const db = await getDb();
-    if (db) await db.prune(now - Math.max(1, cfg.retentionDays || 365) * 86_400_000).catch(() => {});
+    if (db) await db.prune(now - days * 86_400_000).catch(() => {});
   }
 }
 

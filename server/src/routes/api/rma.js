@@ -185,7 +185,7 @@ api.put('/tools/rma/agents/:agent/password', adminOnly, fullScopeOnly, ownerOtpT
     const r = setRmaPassword(agent, req.body?.password ?? '');
     logAudit({ user: req.user?.username, action: r.hasPassword ? 'RMA 비밀번호 설정' : 'RMA 비밀번호 해제', target: agent, ip: req.ip });
     res.json({ ok: true, ...r });
-  } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
+  } catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ ok: false, reason: e.message, ...(e?.code ? { code: e.code } : {}) }); }   // 97회차 F2: 읽기 오류 409
 });
 
 /** 분배 설정 — Body { mode, primary } (법인) / PUT /settings { defaultMode } (전역). */

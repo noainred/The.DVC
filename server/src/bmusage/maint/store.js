@@ -20,7 +20,8 @@ import crypto from 'node:crypto';
 import { config } from '../../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js';
 import { makeSettingsLoadError } from '../../util/settingsLoadError.js';
-import { readJsonFile } from '../../util/jsonFileLoad.js';
+import { readJsonFile, READ_RETRY_MS } from '../../util/jsonFileLoad.js';
+import { nowMs } from '../../util/jsonFileRead.js';   // 97회차 F13: 읽기 오류 재읽기 시계(테스트가 바꾼다)
 import { SCHED_KINDS, ONCE_MAX_MIN, RECUR_MAX_MIN, parseLocal, parseTime, localToUtc, validTz, DEFAULT_TZ, MIN, DAY, tzTransitions } from './schedule.js';
 import { SCOPES, TARGET_KINDS, TAG_RE, windowStatus, expiresAt, effectiveOccurrences, matchTarget } from './judge.js';
 
@@ -314,6 +315,7 @@ export function normalizeWindow(raw, { strict = false, now = Date.now(), fresh =
 
 /* ── 파일(이 노드의 창) ─────────────────────────────────────────────── */
 let _cache = null;   // { m, s, data }
+let _readFailUntil = 0;   // 97회차 F13: 읽기 오류 뒤 다시 읽을 시각(0 = 오류 없음)
 function writeAll(obj) {
   fs.mkdirSync(path.dirname(FILE()), { recursive: true });
   try { atomicWriteFileSync(FILE(), JSON.stringify(obj), { mode: 0o600 }); } catch (e) { _cache = null; throw e; }
@@ -324,12 +326,16 @@ function loadAll() {
   let st = null;
   try { st = fs.statSync(FILE()); } catch { st = null; }
   if (st && _cache && _cache.m === st.mtimeMs && _cache.s === st.size) return _cache.data;
+  // 97회차 F13: 읽기 오류 뒤 READ_RETRY_MS(30초) 안에는 디스크를 다시 읽지 않는다 — 예전에는 판정 입력(windowsForJudge — 서버 · 주기마다)이 부를 때마다
+  //   죽어 가는 디스크(EIO)를 다시 읽었다(읽기마다 수 초 · 이벤트 루프 블로킹 — 공용 로더의 간격 규칙과 같게).
+  if (_readFailUntil && nowMs() < _readFailUntil) throw fail(503, 'settingsUnreadable', '정비 창 파일을 읽지 못했습니다(읽기 오류 — 원본은 그대로 있습니다).');
+  _readFailUntil = 0;
   _cache = null;
   let raw;
   try { raw = fs.readFileSync(FILE(), 'utf8'); }
   catch (e) {
     // 77회차 개선: 읽기 오류도 로드 오류 상태(서비스 점검 · 중앙 배포 503 표지)에 올린다 — 원본은 옮기지 않는다(예전과 같다).
-    if (e?.code !== 'ENOENT') { _err.readError(e); throw fail(503, 'settingsUnreadable', '정비 창 파일을 읽지 못했습니다(읽기 오류 — 원본은 그대로 있습니다).'); }
+    if (e?.code !== 'ENOENT') { _err.readError(e, { retryMs: READ_RETRY_MS }); _readFailUntil = nowMs() + READ_RETRY_MS; throw fail(503, 'settingsUnreadable', '정비 창 파일을 읽지 못했습니다(읽기 오류 — 원본은 그대로 있습니다).'); }
     _err.missing();
     if (_err.get()) throw fail(503, 'settingsUnreadable', _err.get().reason);
     return { v: 1, seq: 0, items: [] };
@@ -646,4 +652,4 @@ export function windowFactsNoCache() {
   }
   return { ok, byId };
 }
-export function _resetMaintStoreForTest() { _cache = null; _dep = null; _chain = Promise.resolve(); _err.ok(); _endMemo.clear(); }
+export function _resetMaintStoreForTest() { _cache = null; _readFailUntil = 0; _dep = null; _chain = Promise.resolve(); _err.ok(); _endMemo.clear(); }

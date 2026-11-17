@@ -7,15 +7,17 @@
  * 기본은 **꺼짐(opt-in)** 이다 — 5,850 VM 규모에서 게스트 디스크 벌크 조회는 부하가 있으므로,
  * 업그레이드만으로 주기 수집이 켜지면 안 된다. 관리자가 설정에서 켜야 폴러가 돈다.
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 97회차 F14: 읽기 오류 ≠ 손상
 import { numOrNull } from '../util/numOrNull.js';
 import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
 
 const FILE = path.join(config.configDir, 'guest-disk.json');
 
+/** 보관 일수 상한(저장 판정과 같은 값). 97회차 F14 후속: 설정을 못 읽는 동안의 이력 정리는 이 상한으로 한다(멈춤에도 상한 — 83 R1). */
+export const RETENTION_MAX_DAYS = 3650;
 export const DEFAULTS = Object.freeze({
   enabled: false,          // 주기 수집(폴러) 켜기 — 기본 꺼짐(opt-in)
   intervalHours: 12,       // 수집 주기(시간). 게스트 파티션은 천천히 변하므로 자주 볼 필요가 없다.
@@ -33,37 +35,52 @@ const clampNum = (v, lo, hi, dflt) => {
 
 let cache = null;
 
+/*
+ * 97회차 F14(재현 — EISDIR): 예전 catch 하나는 **읽기 오류**(EACCES · EIO · EISDIR)도 손상으로 보고 온전한 원본을 `.corrupt.*` 로 옮긴 뒤 기본값을 캐시했다 —
+ *   보관 일수가 기본값(180일)이 되어 다음 정리(prune)가 사용자가 늘려 둔 기간의 이력을 지웠고(되돌릴 수 없다), 다음 저장이 기본값 위에 썼다.
+ *   판정은 공용 읽기(util/jsonFileRead.js): 읽기 오류는 원본을 두고 · 캐시하지 않고(30초 간격 재읽기) · 저장을 거절하고(409) · 정리를 건너뛴다.
+ *   손상은 예전처럼 보존본으로 옮기고 기본값으로 돌되, 이 프로세스에서는 표지를 세워 정리를 건너뛴다(진짜 보관 일수는 보존본에 있다 — 추측으로 지우지 않는다).
+ */
+const _reader = makeJsonFileReader(() => FILE, { parse: parseJsonObject, tag: 'guestdisk' });
+let _loadError = null;   // { at, reason, readError? }
 export function load() {
   if (cache) return cache;
   const out = structuredClone(DEFAULTS);
-  try {
-    if (fs.existsSync(FILE)) {
-      const p = parseJsonObject(fs.readFileSync(FILE, 'utf8'));
-      if (typeof p.enabled === 'boolean') out.enabled = p.enabled;
-      if (p.intervalHours != null) out.intervalHours = clampNum(p.intervalHours, 1, 168, DEFAULTS.intervalHours);
-      if (p.changeThresholdGB != null) out.changeThresholdGB = clampNum(p.changeThresholdGB, 0.1, 100, DEFAULTS.changeThresholdGB);
-      if (p.retentionDays != null) out.retentionDays = clampNum(p.retentionDays, 7, 3650, DEFAULTS.retentionDays);
-      if (p.minReclaimGB != null) out.minReclaimGB = clampNum(p.minReclaimGB, 0, 10000, DEFAULTS.minReclaimGB);
-    }
-  } catch (e) {
-    preserveCorrupt(FILE);
-    console.warn(`[guestdisk] 설정 로드 실패 — 원본을 .corrupt 로 보존하고 기본값으로 시작합니다: ${safeLoadText(e) || '사유 미상'}`);
+  const r = _reader.read();
+  if (r.kind === 'read-error') {
+    _loadError = { at: _loadError?.readError ? _loadError.at : Date.now(), readError: true, reason: `게스트 디스크 설정(guest-disk.json) 파일을 읽지 못했습니다(읽기 오류 ${String(r.error?.code || '').slice(0, 32)}) — 원본은 그대로 둡니다 · 저장과 이력 정리를 멈춥니다(30초마다 다시 읽음)` };
+    return out;   // 캐시하지 않는다
+  }
+  if (r.kind === 'corrupt') {
+    _loadError = { at: Date.now(), reason: `게스트 디스크 설정(guest-disk.json) 파일이 손상돼 보존본으로 옮겼습니다 — 기본값으로 돌고 이력 정리는 멈춥니다(저장하면 풀림)` };
+    console.warn(`[guestdisk] 설정 로드 실패 — 원본을 .corrupt 로 보존하고 기본값으로 시작합니다(이력 정리는 저장 전까지 멈춤): ${safeLoadText(r.error) || '사유 미상'}`);
+  } else _loadError = null;
+  if (r.kind === 'ok') {
+    const p = r.value;
+    if (typeof p.enabled === 'boolean') out.enabled = p.enabled;
+    if (p.intervalHours != null) out.intervalHours = clampNum(p.intervalHours, 1, 168, DEFAULTS.intervalHours);
+    if (p.changeThresholdGB != null) out.changeThresholdGB = clampNum(p.changeThresholdGB, 0.1, 100, DEFAULTS.changeThresholdGB);
+    if (p.retentionDays != null) out.retentionDays = clampNum(p.retentionDays, 7, RETENTION_MAX_DAYS, DEFAULTS.retentionDays);
+    if (p.minReclaimGB != null) out.minReclaimGB = clampNum(p.minReclaimGB, 0, 10000, DEFAULTS.minReclaimGB);
   }
   cache = out;
   return cache;
 }
+/** 97회차 F14: 설정을 못 읽었으면(읽기 오류 · 이 프로세스에서 본 손상) `{ at, reason, readError? }`, 아니면 null — 이력 정리(prune)는 이 값이 있으면 건너뛴다. */
+export function settingsLoadError() { load(); return _loadError; }
 
 export function save(body = {}) {
+  if (settingsLoadError()?.readError) throw Object.assign(new Error(`게스트 디스크 설정(guest-disk.json) 파일을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽습니다).`), { status: 409, code: 'settings-unreadable' });   // 97회차 F14
   const next = structuredClone(load());
   if (typeof body.enabled === 'boolean') next.enabled = body.enabled;
   if (body.intervalHours != null) next.intervalHours = clampNum(body.intervalHours, 1, 168, next.intervalHours);
   if (body.changeThresholdGB != null) next.changeThresholdGB = clampNum(body.changeThresholdGB, 0.1, 100, next.changeThresholdGB);
-  if (body.retentionDays != null) next.retentionDays = clampNum(body.retentionDays, 7, 3650, next.retentionDays);
+  if (body.retentionDays != null) next.retentionDays = clampNum(body.retentionDays, 7, RETENTION_MAX_DAYS, next.retentionDays);
   if (body.minReclaimGB != null) next.minReclaimGB = clampNum(body.minReclaimGB, 0, 10000, next.minReclaimGB);
   atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
-  cache = next;
+  cache = next; _loadError = null; _reader.reset();
   return next;
 }
 
-export function invalidate() { cache = null; }
+export function invalidate() { cache = null; _loadError = null; _reader.reset(); }
 export const _FILE = FILE;

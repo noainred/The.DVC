@@ -19,7 +19,6 @@
  *   · 하루(포탈 날짜) 상한 dailyMax — 넘으면 만들지 않고 센다(status.capped · 콘솔 하루 한 줄).
  * 법인: 알람의 vcenterId(없으면 공용 — 지어내지 않는다). 저장은 라우트가 관리자 + 전체 범위 + 쓰기 범위 무제한으로 막는다.
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
@@ -98,10 +97,14 @@ const loadErr = makeLoadError();
 export function loadAlertAuto() {
   if (cache) return cache;
   const f = fileOf();
-  loadErr.clear();
+  if (!loadErr.readPending()) loadErr.clear();   // 97회차 F5: 읽기 오류 재시도 중에는 지우지 않는다(30초 간격 · 처음 시각 유지)
+  // 97회차 F5: 읽기 단계는 등록부 공용 읽기(util/registryCore.js read) — 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니라 원본을 옮기지 않고 · 캐시하지 않고 ·
+  //   오류(readError)를 세워 저장을 거절한다(409). parse · 형식 실패만 아래 catch(예전과 같다 — 보존본 + 기본값).
+  const rr = loadErr.read(f, (t) => t);
+  if (rr.kind === 'read-error') return defaultAlertAuto();
   try {
-    if (fs.existsSync(f)) {
-      const { value, dropped } = normalizeAlertAuto(JSON.parse(fs.readFileSync(f, 'utf8')), { strict: false });
+    if (rr.kind === 'ok') {
+      const { value, dropped } = normalizeAlertAuto(JSON.parse(rr.value), { strict: false });
       if (dropped) console.warn(`[issues] issue-alert-auto.json 의 형식 밖 항목 ${dropped}개를 읽지 않았습니다`);
       cache = value;
       return cache;
@@ -118,6 +121,7 @@ export function loadAlertAuto() {
 export function alertAutoLoadError() { loadAlertAuto(); return loadErr.get()?.reason || null; }
 export function saveAlertAuto(body) {
   const { value } = normalizeAlertAuto(body, { strict: true });
+  loadAlertAuto(); loadErr.assertWritable('다른 알람 자동 등록 설정(issue-alert-auto.json)');   // 97회차 F5: 읽기 오류면 던진다(status 409) — 원본을 덮지 않게
   atomicWriteFileSync(fileOf(), JSON.stringify(value, null, 1), { mode: 0o600 });
   cache = value; loadErr.clear();
   return value;

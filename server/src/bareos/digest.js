@@ -54,9 +54,13 @@ export function normDigest(body = {}) {
 }
 export function loadDigest() {
   if (_cfg) return _cfg;
+  // 97회차 F4: 읽기 단계는 등록부 공용 읽기(util/registryCore.js read)다 — 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니라 원본을 옮기지 않고 ·
+  //   캐시하지 않고(30초 간격 재읽기) · 오류(readError)를 세워 쓰기를 거절한다(persist 의 assertWritable). parse · 형식 실패만 아래 catch(예전과 같다 — 보존본).
+  const rr = _loadErr.read(FILE(), (t) => t);
+  if (rr.kind === 'read-error') return { ...DEFAULTS, savedBy: '', savedAt: null };
   try {
-    if (fs.existsSync(FILE())) {
-      const p = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    if (rr.kind === 'ok') {
+      const p = JSON.parse(rr.value);
       if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('형식 오류');
       _cfg = { ...normDigest(p), savedBy: String(p.savedBy || '').slice(0, 64), savedAt: Number.isFinite(p.savedAt) ? p.savedAt : null };
       _loadErr.clear();
@@ -75,6 +79,7 @@ export function digestLoadError() { loadDigest(); return _loadErr.get(); }
 export function saveDigest(body, { by = '', now = Date.now() } = {}) {
   if (digestLoadError()) throw fail('unreadable', '일일 요약 메일 설정 파일을 읽지 못해 저장하지 않습니다 — 손상본을 확인하세요.');
   const next = { ...normDigest(body), savedBy: String(by || '').slice(0, 64), savedAt: now };
+  _loadErr.assertWritable('Bareos 일일 요약 메일 설정(bareos-digest.json)'); // 97회차 F4: 마지막 방어선 — 읽기 오류 중에는 원본을 덮지 않는다(던진다 — status 409)
   atomicWriteFileSync(FILE(), JSON.stringify(next, null, 2), { mode: 0o600 });
   _cfg = next;
   return { ...next };

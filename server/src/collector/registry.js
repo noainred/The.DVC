@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { ipBlockReason, ssrfBlockReason, ssrfBlockReasonResolved } from '../util/ssrfBlock.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { makeLoadError, corruptOnlyReason, autoWriteRefusal, summarizeRegistryError } from '../util/registryCore.js'; // v2.771(점검 R6-F4-2): 형제 등록부와 같은 '읽지 못함' 판정
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { bumpFleetRev } from '../insights/fleetRev.js';
@@ -119,23 +119,27 @@ export function registryLoadErrorSummary() {
   return { at: Number.isFinite(e.at) ? e.at : null, code: s?.code || null, text: s?.text || '사유 미상' };
 }
 
+// 97회차 F3: parse 단계(JSON.parse + 토큰 복호 — 예전 try 블록과 같은 범위)만 손상이다.
+const parseCollectors = (text) => {
+  const parsed = JSON.parse(text);
+  return openSecretsDeep(Array.isArray(parsed?.collectors) ? parsed.collectors : []); // v2.296 토큰 복호(메모리 평문)
+};
+const WHAT = '수집 서버 등록부(collectors.json)';
 export function loadCollectors() {
-  if (!fs.existsSync(FILE)) return [];
-  try {
-    const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    const arr = openSecretsDeep(Array.isArray(parsed?.collectors) ? parsed.collectors : []); // v2.296 토큰 복호(메모리 평문)
-    loadErr.clear(); // v2.771(R6-F4-2): 정상으로 읽었다(사람이 보존본을 되돌린 경우 포함)
-    // 대소문자 중복을 로드 시 자동 정리(최초 1회 병합·영속화, 이후엔 중복이 없어 재저장 안 함).
-    const { list, changed } = dedupeByIdCase(arr);
-    if (changed) { try { save(list); } catch { /* best effort — 다음 로드에서 재시도 */ } }
-    return list;
-  } catch (e) {
-    // save() 주석대로 손상 시 다음 저장이 빈 목록으로 덮어써 전 수집서버·토큰이 유실된다 →
-    // 손상본을 .corrupt로 보존(자기등록으로 쓰기 빈도가 높아 노출 창이 큰 파일).
-    preserveCorrupt(FILE, e.message);
-    loadErr.set(e); // v2.771(R6-F4-2): 조용한 빈 목록 금지 — 자동 저장 거절·clearStaleRemote 건너뜀·링크 설정 503 의 근거
-    return [];
-  }
+  /*
+   * 97회차 F3(재현 — EISDIR): 예전 catch 하나는 **읽기 오류**(EACCES · EIO · EISDIR)도 손상으로 보고 온전한 원본(전 수집 서버 · 토큰)을 `.corrupt.*` 로
+   *   옮겼다 — 권한을 바로잡아도 원본은 보존본에만 남았고(재시작 뒤에도 '못 읽음'), 다음 관리자 저장이 빈 목록 위에 한 건만 든 파일을 썼다.
+   *   판정은 등록부 공용 읽기(util/registryCore.js read — 형제 등록부와 같다): 손상만 보존본으로 옮기고(예전과 같다), 읽기 오류는 원본을 두고
+   *   오류(readError)를 세운다 — 자동 저장 거절 · clearStaleRemote 건너뜀 · 링크 설정 503 은 예전 표지 그대로이고, 사람 저장도 save() 가 거절한다(409).
+   *   다시 읽기는 30초 간격(이 등록부는 요청 · 폴러마다 불린다 — 죽어 가는 디스크를 매번 두드리지 않게).
+   */
+  const r = loadErr.read(FILE, parseCollectors);
+  if (r.kind !== 'ok') return [];   // missing(보존본 판정은 registryLoadError) · corrupt(보존 + 오류) · read-error(원본 그대로 + 오류)
+  loadErr.clear(); // v2.771(R6-F4-2): 정상으로 읽었다(사람이 보존본을 되돌린 경우 포함)
+  // 대소문자 중복을 로드 시 자동 정리(최초 1회 병합·영속화, 이후엔 중복이 없어 재저장 안 함).
+  const { list, changed } = dedupeByIdCase(r.value);
+  if (changed) { try { save(list); } catch { /* best effort — 다음 로드에서 재시도 */ } }
+  return list;
 }
 
 /** v2.771(R6-F4-2): 사람이 아닌 경로(엣지 자기등록·배포 후 자동 등록·데모 시드)의 저장 거절. 읽을 수 있으면 null. */
@@ -144,6 +148,7 @@ function collectorsAutoWriteRefusal() {
 }
 
 function save(list) {
+  loadErr.assertWritable(WHAT); // 97회차 F3: 마지막 방어선 — 읽기 오류 중에는 어느 경로(관리자 저장 포함)도 원본을 덮지 않는다(던진다 — status 409)
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   // 원자적 쓰기 — 크래시/정전 시 부분기록으로 collectors.json이 손상되면 loadCollectors가
   // []를 반환하고 다음 저장이 빈 목록으로 덮어써 전 수집서버·토큰이 영구 유실된다(자기등록으로
@@ -363,6 +368,7 @@ export function addCollector(body, { managed = false, transport = null } = {}) {
   //   읽지 못한 동안 저장하지 않는다 — 손상된 빈 목록 위에 한 항목만 저장하면 표지가 지워지고 나머지 등록은 보존본에만 남는다.
   if (!managed) { const refusal = collectorsAutoWriteRefusal(); if (refusal) return refusal; }
   const list = loadCollectors();
+  const unreadable = loadErr.writeRefusal(WHAT); if (unreadable) return unreadable;   // 97회차 F3: 읽기 오류 — 빈 목록 위에 한 건만 쓰지 않는다
   const [entry, err, , code] = normalize(body, null, transport);
   if (err) return rejectResult(err, code, body, transport);
   // 대소문자 무시 중복 방지 — 'GM1'이 있으면 'gm1' 추가를 막는다(같은 엣지 이중 등록 방지).
@@ -377,6 +383,7 @@ export function addCollector(body, { managed = false, transport = null } = {}) {
 
 export function updateCollector(id, body, { managed, transport = null } = {}) {
   const list = loadCollectors();
+  const unreadable = loadErr.writeRefusal(WHAT); if (unreadable) return unreadable;   // 97회차 F3: '없는 수집 서버' 보다 먼저
   const idx = list.findIndex((c) => c.id === id);
   if (idx === -1) return { ok: false, reason: `없는 수집 서버: ${id}` };
   const [entry, err, droppedSecrets, code] = normalize({ ...body, id }, list[idx], transport);
@@ -452,6 +459,7 @@ function markSelfRegVerification(id, unverified) {
 
 export function removeCollector(id) {
   const list = loadCollectors();
+  const unreadable = loadErr.writeRefusal(WHAT); if (unreadable) return unreadable;   // 97회차 F3
   const next = list.filter((c) => c.id !== id);
   if (next.length === list.length) return { ok: false, reason: `없는 수집 서버: ${id}` };
   save(next);

@@ -20,11 +20,11 @@
  *  · 되돌리기는 새 판이다(메모 'vN 로 되돌림').
  *  · 본문 · 댓글의 이슈 키(ISS-12)는 저장 때 색인한다(issueKeys) — 이슈 상세가 '관련 문서' 로 거꾸로 찾는다(backrefs).
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 97회차 F7: 읽기 오류 ≠ 손상
 import { capStr } from '../util/capStr.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { createUserDocWriter } from '../util/userDocWriter.js';
@@ -71,13 +71,28 @@ const writer = createUserDocWriter({
   serialize: () => (cache ? JSON.stringify({ v: 1, nextNum: cache.nextNum, spaces: cache.spaces, pages: cache.pages, trash: cache.trash }) : null),
 });
 
+/*
+ * 97회차 F7(재현 — EISDIR · 이슈 저장소 F6 의 형제): 예전 catch 하나는 **읽기 오류**(EACCES · EIO · EISDIR)도 손상으로 보고 온전한 원본(전 문서 · 판 · 휴지통)을
+ *   `.corrupt.*` 로 옮긴 뒤 빈 위키를 캐시했다 — 다음 문서 저장 한 번이 그 한 건만 든 wiki.json 을 썼다. 읽기 단계는 공용 읽기(30초 간격 재읽기):
+ *   읽기 오류는 원본을 두고 · 캐시하지 않고 · commit(쓰기 길목)이 409 로 거절한다. parse · 형식 실패는 아래 catch(예전과 같다).
+ */
+const _reader = makeJsonFileReader(wikiFile, { parse: (t) => t, preserve: false, tag: 'wiki' });
+let _readErr = null;
+/** 97회차 F7: wiki.json 읽기 오류(원본은 그대로)면 `{ at, code }`, 아니면 null. */
+export function wikiReadError() { load(); return _readErr ? { ..._readErr } : null; }
 function load() {
   if (cache) return cache;
   const file = wikiFile();
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') {
+    if (!_readErr) _readErr = { at: Date.now(), code: String(rr.error?.code || 'read-error').slice(0, 32) };
+    return { spaces: {}, pages: [], nextNum: 1, sizes: new Map(), bytes: 0, trash: [] };   // 캐시하지 않는다 — 쓰기는 commit 이 거절한다
+  }
+  _readErr = null;
   let spaces = {}; let pages = []; let nextNum = 1; let trash = [];
   try {
-    if (fs.existsSync(file)) {
-      const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (rr.kind === 'ok') {
+      const j = JSON.parse(rr.value);
       if (!j || typeof j !== 'object' || !Array.isArray(j.pages)) throw new Error('pages 배열이 없습니다');
       pages = j.pages.filter((p) => p && typeof p === 'object' && typeof p.id === 'string' && typeof p.spaceId === 'string');
       // v2.907 휴지통 — 지운 문서는 TRASH_DAYS 동안 따로 둔다(판 · 댓글 · 첨부 그대로). 같은 id 가 살아 있는 문서와 겹치면 휴지통 쪽을 버린다.
@@ -99,6 +114,8 @@ function load() {
 }
 function commit({ changed = null, removedId = null, spacesChanged = false } = {}) {
   const c = load();
+  // 97회차 F7: 읽기 오류 중에는 어떤 쓰기도 받지 않는다(라우트 409) — 빈 위키 위의 변경이 원본을 덮지 않게.
+  if (_readErr) throw Object.assign(new Error(`위키 파일(wiki.json)을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류(${_readErr.code})이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽습니다).`), { status: 409, code: 'settings-unreadable' });
   if (removedId) { c.bytes -= c.sizes.get(removedId) || 0; c.sizes.delete(removedId); }
   if (changed) { const b = jsonBytes(changed); c.bytes += b - (c.sizes.get(changed.id) || 0); c.sizes.set(changed.id, b); }
   if (spacesChanged) c.bytes = [...c.sizes.values()].reduce((a, b) => a + b, 0) + jsonBytes(c.spaces);
@@ -116,7 +133,7 @@ export const wikiIdle = (o) => writer.idle(o);
 export const wikiSeq = () => writer.seq();
 export const waitWikiPersist = (seq, o) => writer.waitPersist(seq, o);
 export function wikiPersist({ admin = false } = {}) { return writer.persist({ admin, extra: admin ? { bytes: cache?.bytes ?? null, maxBytes: wikiMaxBytes() } : {} }); }
-export function _resetWikiCache() { writer.reset(); cache = null; }
+export function _resetWikiCache() { writer.reset(); cache = null; _readErr = null; _reader.reset(); }
 export const _setWikiIoForTest = (over, retry) => writer.setIoForTest(over, retry);
 
 /* ───── 이벤트(알림) ───── */

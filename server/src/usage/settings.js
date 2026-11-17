@@ -11,7 +11,6 @@
  *    조회 라우트는 503 `settingsUnreadable` 로 답한다(빈 설정을 내려보내지 않는다 — 루트 CLAUDE.md '설정을 못 읽었으면 503').
  *  · 저장은 라우트가 설정 소유자(소유자 ∧ 전체 범위)로 막는다. 상한은 거부다(제외 계정 200 · 이름 64자 · 고지 문구 600자).
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
@@ -109,9 +108,13 @@ const loadErr = makeLoadError();
 export function loadUsageSettings() {
   if (cache) return cache;
   const f = fileOf();
-  loadErr.clear();
+  if (!loadErr.readPending()) loadErr.clear();   // 97회차 F5: 읽기 오류 재시도 중에는 지우지 않는다(30초 간격 · 처음 시각 유지)
+  // 97회차 F5: 읽기 단계는 등록부 공용 읽기(util/registryCore.js read) — 읽기 오류는 원본을 옮기지 않고 · 캐시하지 않고 · 오류를 세운다(꺼짐 · 정리 안 함 ·
+  //   저장 거절 409). 예전에는 catch 하나라 권한만 틀린 원본(보관 일수 · 제외 목록 · 켜기/끄기 이력)을 보존본으로 옮겼다. parse 실패는 아래 catch(예전과 같다).
+  const rr = loadErr.read(f, (t) => t);
+  if (rr.kind === 'read-error') return { ...defaultUsageSettings(), enabled: false };
   try {
-    if (fs.existsSync(f)) cache = normalizeUsageSettings(JSON.parse(fs.readFileSync(f, 'utf8')), { strict: false, fromFile: true });
+    if (rr.kind === 'ok') cache = normalizeUsageSettings(JSON.parse(rr.value), { strict: false, fromFile: true });
     else cache = defaultUsageSettings();
   } catch (e) {
     preserveCorrupt(f, e?.message);
@@ -148,6 +151,7 @@ export function saveUsageSettings(body, by, now = Date.now()) {
   const who = typeof by === 'string' ? by.slice(0, 64) : '';
   if (next.enabled !== cur.enabled) next.toggles = [...(cur.toggles || []), { at: now, on: next.enabled, by: who }].slice(-USAGE_LIMITS.toggles);
   next.updatedAt = now; next.updatedBy = who;
+  loadErr.assertWritable('사용 기록 설정(usage-settings.json)');   // 97회차 F5: 읽기 오류면 던진다(status 409) — cur 는 기본값이라 원본을 덮지 않게
   atomicWriteFileSync(fileOf(), JSON.stringify(next, null, 2));
   cache = next;
   loadErr.clear();

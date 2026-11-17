@@ -230,7 +230,7 @@ adminRouter.post('/collectors', adminOnly, fleetOnly, (req, res) => {
   const t0 = Date.now();
   const result = addCollector(req.body || {}, { managed: true, transport: adminTransport(req) });
   if (result.ok) { ensureCollectorDatacenter(result.collector); pullNow().catch(() => {}); logAudit({ user: req.user?.username, action: '수집 서버 등록', target: result.collector?.id || '', detail: `url=${result.collector?.url || ''} vcenterId=${result.collector?.vcenterId || ''}${httpExceptionAudit(result.collector, t0)}`, ip: req.ip || '' }); }
-  res.status(result.ok ? 201 : 400).json(result);
+  res.status(result.ok ? 201 : (result.status || 400)).json(result);   // 97회차 F3: 등록부 읽기 오류는 409
 });
 
 adminRouter.put('/collectors/:id', adminOnly, fleetOnly, (req, res) => {
@@ -245,7 +245,7 @@ adminRouter.put('/collectors/:id', adminOnly, fleetOnly, (req, res) => {
     pullNow().catch(() => {});
     logAudit({ user: req.user?.username, action: '수집 서버 수정', target: req.params.id, detail: `url=${result.collector?.url || ''} vcenterId=${result.collector?.vcenterId || ''}${httpExceptionAudit(result.collector, t0)}`, ip: req.ip || '' });
   }
-  res.status(result.ok ? 200 : 400).json(result);
+  res.status(result.ok ? 200 : (result.status || 400)).json(result);   // 97회차 F3: 등록부 읽기 오류는 409
 });
 
 // v2.972(사용자 요청 '수집 서버 agent 와 datacenter id 를 사용자가 매칭하는 기능'): 이 수집 서버(Agent)가 수집한 서버의 법인(DataCenter).
@@ -278,7 +278,7 @@ adminRouter.delete('/collectors/:id', adminOnly, fleetOnly, (req, res) => {
     clearCollectorStatus(req.params.id);  // v2.583 #31: 수집 상태도(원격 호스트 0개인 수집기는 정리 루프가 못 만난다)
     logAudit({ user: req.user?.username, action: '수집 서버 삭제', target: req.params.id, ip: req.ip || '' });
   }
-  res.status(result.ok ? 200 : 404).json(result);
+  res.status(result.ok ? 200 : (result.status || 404)).json(result);   // 97회차 F3: 등록부 읽기 오류는 409
 });
 
 /* ── 수집 서버 CSV 일괄 관리(v2.338, 사용자 요구) — 내보내기·샘플·가져오기. ───────────────

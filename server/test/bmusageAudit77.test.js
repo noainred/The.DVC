@@ -191,6 +191,9 @@ test('개선 — 정비 창 파일 읽기 오류도 로드 오류 상태에 올�
   // (다음 load 전) 서비스 점검 줄은 확정할 수 없다 — 기본값으로 확정하면 못 읽었을 뿐인 원본을 빈 목록으로 덮는다
   const row = listSettingsLoadErrors().find((x) => x.file === 'maintenance-windows.json');
   assert.ok(row && row.confirmable === false && row.readError === true);
+  // 97회차 F13: 읽기 오류 뒤 30초(READ_RETRY_MS) 안에는 디스크를 다시 읽지 않는다(판정 입력마다 EIO 를 두드리지 않게) — 간격 안은 같은 오류, 지나면 다시 읽어 풀린다.
+  assert.ok(ST.maintLoadError()?.readError, '간격 안에는 다시 읽지 않는다');
+  clock += JFL.READ_RETRY_MS + 1;   // 이 파일의 시계(위 JFL 훅)
   assert.equal(ST.maintLoadError(), null, '다시 읽히면 풀린다');
   assert.equal(realRead(file, 'utf8'), body);
 });
