@@ -22,6 +22,13 @@ export function _setJsonFileLoadClockForTest(fn = null) { _now = typeof fn === '
 /** 재읽기 간격 판정의 지금 시각(테스트 시계 포함) — jsonFileLoad 의 재판정 간격도 이 시계를 쓴다. */
 export function nowMs() { return _now(); }
 
+/**
+ * 125회차 F2: 재읽기 간격 **안**인가. `now < retryAt` 만 보면 벽시계가 뒤로 갔을 때(NTP 보정 · RTC 가 로컬 시각이던 장비의 첫 동기화) 간격이
+ *   그 차만큼 늘어난다 — 9시간 뒤로 가면 파일을 바로잡아도 9시간 동안 디스크를 다시 보지 않고 쓰기를 거절했다(재현). 간격을 건 시각
+ *   (`retryAt - retryMs`)보다 앞이면 시계가 돌아간 것이니 기다리지 않는다(= 곧바로 다시 읽는다 — 안전측).
+ */
+export function inRetryWindow(now, retryAt, retryMs) { return now < retryAt && now >= retryAt - retryMs; }
+
 const codeOf = (e) => String((e && typeof e === 'object' ? e.code : '') || 'read-error').slice(0, 32);
 
 /**
@@ -53,7 +60,7 @@ export function makeJsonFileReader(fileOf, { parse = parseJsonObject, preserve =
   return {
     /** @returns 위 readJsonFile 결과 + read-error 이면 `deferred`(간격 안 — 디스크를 보지 않았다) · `retryAt` */
     read() {
-      if (lastError && _now() < retryAt) return { kind: 'read-error', error: lastError, deferred: true, retryAt };
+      if (lastError && inRetryWindow(_now(), retryAt, retryMs)) return { kind: 'read-error', error: lastError, deferred: true, retryAt };
       const r = readJsonFile(fileOf(), { parse, preserve });
       if (r.kind === 'read-error') {
         if (!lastError) console.warn(`${head()} 읽기 오류(${codeOf(r.error)}) — 손상이 아니라 원본은 그대로 둡니다 · 그동안 저장은 거절하고 ${Math.round(retryMs / 1000)}초마다 다시 읽습니다`);
