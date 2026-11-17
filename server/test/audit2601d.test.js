@@ -17,7 +17,13 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2601d-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+
+const TMP = tmpDir('audit2601d-');
 process.env.CONFIG_DIR = TMP;
 // 2026-10-09 검토 S-01(그룹 H): 새 설치(빈 CONFIG_DIR)의 SSH 호스트키 정책은 '승인된 키만'(enforce)이다. 이 파일은 호스트키가 주제가
 // 아니라 관찰 모드로 둔다 — 서버마다 새 키를 만들면 포트가 재사용될 때 '키가 바뀜' 으로 거부되므로 파일당 키 하나를 같이 쓴다.
@@ -269,3 +275,7 @@ test('COL-2601-06: fosSsh 스냅샷 health 에 powerPartial 이 실린다', () =
   assert.equal(snap.health.powerWatts, 240);
   assert.deepEqual(snap.health.powerPartial, { read: 1, total: 2 });
 });
+
+// v3.18.8: 정리 훅은 파일 끝에서 등록한다 — 시험 사이에 최상위 await 가 있으면 앞 시험이 끝난 시점에 루트 after 가 먼저 돌아
+//   뒤 시험이 쓸 폴더를 지운다(node 22 실측 — audit2590 이 그렇게 깨졌다).
+test.after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });

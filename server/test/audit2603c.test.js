@@ -4,13 +4,20 @@
  * 기준 시각에 Date.now() 를 쓰지 않는다 — 보존 경계와 한참 떨어진 고정 시각(2001년)이나 '지금 − N일' 대신
  * 경계를 몇 년 넘긴 과거 값만 쓴다(경계 근처에 표본을 두지 않는다).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2603c-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const DIR = tmpDir('audit2603c-');
 process.env.CONFIG_DIR = DIR;
 process.env.PRUNE_CHUNK_ROWS = '500';             // 청크를 작게 — 여러 청크로 나뉘는지(양보하는지) 본다
 process.env.PING_DB_PATH = path.join(DIR, 'ping.db');

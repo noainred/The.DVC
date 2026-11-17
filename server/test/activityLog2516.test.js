@@ -13,13 +13,20 @@
  *    대상이 아니다. 여기서 원본을 보존하면 쓸모없는 파일만 쌓인다).
  *  · 스토리지·SAN 두 도메인이 **같은 팩토리**를 쓴다(복제 금지 — 로그 포맷이 갈라지지 않게).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'actlog-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const dir = tmpDir('actlog-');
 process.env.CONFIG_DIR = dir;
 
 const { createActivityLog } = await import('../src/util/activityLog.js');

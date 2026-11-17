@@ -5,7 +5,7 @@
  *  F4 읽기 오류는 확정 불가 · 사유 정확 · F5 권한 파일 오류 중 부분 저장 거절 · F6 진행 중 묶음 키는 AD 표기 변형을 하나로
  *  F7 로그인 429 는 서버 문구 · F8 확정 게이트 ≥ 쓰기 게이트(소유자 · super_admin) · F9 읽기 오류 중 계정 생성 · 중앙 배포 적용 금지
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -13,7 +13,14 @@ import net from 'node:net';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'secfa20-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const tmp = tmpDir('secfa20-');
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_DIR = tmp;
 process.env.AUTH_ENABLED = 'true';
@@ -21,7 +28,7 @@ test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 const HERE = path.dirname(new URL(import.meta.url).pathname);
 const SRC = path.join(HERE, '../src');
 const sub = (setup, code) => {
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'sec20sub-'));
+  const d = tmpDir('sec20sub-');
   try {
     setup(d);
     const r = spawnSync(process.execPath, ['--input-type=module', '-e', code], { env: { ...process.env, CONFIG_DIR: d, DATA_DIR: d, AUTH_ENABLED: 'true' }, encoding: 'utf8' });

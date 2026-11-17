@@ -26,7 +26,7 @@ import { store } from '../store.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { withDeadline } from '../proxy/sshExec.js';
 import { createAuthGuard, isAuthFailureText } from '../util/authGuard.js';
-import { loadBmUsageSettings, bmUsageEnabled, enterpriseActive, onBmUsageSettingsChange, STORE_DEFAULTS, effectiveRawDays, SNAPSHOT_KEEP_DAYS } from './settings.js';
+import { loadBmUsageSettings, bmUsageEnabled, enterpriseActive, onBmUsageSettingsChange, STORE_DEFAULTS, effectiveRawDays, SNAPSHOT_KEEP_DAYS, bmUsageLocalLoadError, RETENTION_MAX } from './settings.js';
 import { withResolvedAuth, authCredOf } from './onboard/refs.js'; // 7b: OS 등록 항목의 키 · 공통 계정 참조 → 접속 자격
 import { noteKeyUse } from '../sshaccess/usage.js';   // v3.9.0: 키 사용 기록(화면용 — 판정에 쓰지 않는다)
 import { resolveTargets } from './targets.js';
@@ -109,6 +109,22 @@ let _entDeferred = 0;
 const guard = createAuthGuard({ file: 'bmusage-auth-stops.json' });
 
 let _running = false;
+/*
+ * 83회차(82회차 결정 — 권장안 · 루트 규약 '폴러 재진입 가드에 주기 상한'): 가드는 **주기 번호**로 들고 시작 시각을 둔다. 장비마다 시한(withDeadline)은 있지만
+ *   주기 전체에는 상한이 없어, 장비 밖 단계(대상 해석 · 적재 · 알림 대기열)가 끝나지 않으면 가드가 영원히 서고 이후 모든 틱 · 수동 실행이
+ *   '이전 수집이 진행 중' 으로 조용히 건너뛰어졌다. 이제 상한(bmCycleMaxMs — 기본 max(주기 × 3, 15분))을 넘긴 주기를 만나면 경고 · 횟수를 남기고 가드를 풀어
+ *   새 주기를 시작한다(collector/puller.js pullCycleMaxMs 와 같은 꼴). 늦게 끝난 옛 주기는 번호가 달라 새 주기의 가드를 풀지 않는다
+ *   (⚠ 정직 기록: 옛 주기를 끊을 신호는 없다 — 장비 단계는 장비 시한이 끊고, 끝내 마친 옛 주기의 결과는 _last 에 남을 수 있다 · 그것은 실제로 끝난 주기의 결과다).
+ */
+let _runSeq = 0;
+let _runSince = 0;
+const _stuck = { releases: 0, lastAt: null, lastAgeMs: null };
+/** 주기 상한(ms) — env BMUSAGE_CYCLE_MAX_MS(빈 값 · 0 은 기본 · 하한 60초) · 기본 max(주기 × 3, 15분). */
+export function bmCycleMaxMs(intervalMs, env = process.env.BMUSAGE_CYCLE_MAX_MS) {
+  const v = Number(env);
+  if (env != null && String(env).trim() !== '' && Number.isFinite(v) && v > 0) return Math.max(60_000, Math.floor(v));
+  return Math.max(15 * 60_000, (Number(intervalMs) > 0 ? Number(intervalMs) : 300_000) * 3);
+}
 let _last = null;
 let _timer = null;
 /** 이전 주기의 누적 카운터(인메모리 — 재시작하면 첫 주기가 다시 `null` 이다. 그것이 정직하다). */
@@ -228,6 +244,9 @@ export function bmUsageStatus({ detail = false } = {}) {
   const s = loadBmUsageSettings();
   const st = {
     enabled: bmUsageEnabled(), running: _running, intervalMs: s.intervalMs, ...(isMockMode() ? { demo: true } : {}),
+    // 83회차: 주기 상한 — 진행 중 주기의 나이 · 상한 · 버린 주기 수(끝나지 않는 주기를 사람이 볼 수 있게).
+    ...(_running ? { runningForMs: Date.now() - _runSince } : {}), cycleMaxMs: bmCycleMaxMs(s.intervalMs),
+    ...(_stuck.releases ? { stuckReleases: _stuck.releases, lastStuckAt: _stuck.lastAt, lastStuckAgeMs: _stuck.lastAgeMs } : {}),
     concurrency: CONCURRENCY, deviceTimeoutMs: DEVICE_TIMEOUT_MS,
     // v2.613 RUNTIME2613-05: 실제로 쓰는 예산(장비 시한과 묶인 값)과 잘랐는지.
     osBudgetMs: OS_BUDGET.effective, osBudgetClamped: OS_BUDGET.clamped, entBudgetEffectiveMs: ENT_BUDGET.effective, entBudgetClamped: ENT_BUDGET.clamped, budgetMarginMs: BUDGET_MARGIN_MS,
@@ -847,14 +866,36 @@ export async function pruneTick({ every = PRUNE_EVERY } = {}) {
   let exists = false;
   try { exists = fs.existsSync(BMUSAGE_DB_FILE()); } catch { /* */ }
   if (!exists && !bmUsageEnabled()) return { ok: true, skipped: true, reason: 'no-db' };
+  /*
+   * 82회차 F2(재현): 보존 기간을 정하는 설정 파일을 못 읽은 동안(손상 · 손상 보존본만 남음 · 읽기 오류)은 그 파일이 정하는 보존 정리를 **멈춘다**.
+   *   예전에는 못 읽은 값 = 기본값(원시 90일 · 일 5년 · 시간 365일 · 변경 이벤트 30일 · Top-N 시간 90일 · 로그 30일)으로 정리해, 관리자가 더 길게 둔 보존
+   *   (예: 일 롤업 10년 · 변경 이벤트 400일)을 한 번의 손상 · 권한 오류로 되돌릴 수 없게 지웠다(허브 46회차 H1 과 같은 꼴 — 그동안 정리 중지).
+   *   설정 파일 오류는 서비스 점검이 밝히고, 기본값으로 확정하거나 파일을 되돌리면 다음 정리 틱부터 다시 돈다. 고정 보관(스냅샷 7일 · 수집 주기 기록 30일)은 그대로 정리한다.
+   */
+  let settingsErr = null; try { settingsErr = bmUsageLocalLoadError(); } catch { settingsErr = { reason: 'settings-read' }; }
+  let rulesErr = null; try { rulesErr = (await import('./perfRules.js')).perfRulesLoadError(); } catch { rulesErr = { reason: 'rules-module' }; }
+  const held = [...(settingsErr ? ['settings'] : []), ...(rulesErr ? ['perf-rules'] : [])];
+  if (held.length && _srcErrLog('prune-held', held.join(','))) console.warn(`[bmusage] 보존 기간 설정 파일을 읽지 못해(${held.join(' · ')}) 그 설정이 정하는 보존으로는 지우지 않습니다 — 설정이 허용하는 가장 긴 보존으로만 정리합니다(서비스 점검에서 확정하거나 파일을 되돌리면 설정값으로 돌아갑니다)`);
+  /*
+   * 83회차(82회차 F2 반증 — 재현): '멈춤' 에는 끝이 없었다 — 파일을 고칠 때까지 원시 5분 · 장치 · Top-N 날 파일 · 변경 이벤트 정리가 통째로 서서
+   *   DB 가 무상한으로 자랐다(보류에는 시한 — 루트 규약). 이제 못 읽은 동안은 **설정이 허용하는 가장 긴 보존**(RETENTION_MAX · perfRules LIMITS 상한)으로만 지운다 —
+   *   관리자가 둘 수 있는 어떤 값보다 길어 되돌릴 수 없는 삭제는 없고, 크기는 그 상한에서 멈춘다(heldMax — 화면이 말한다).
+   */
+  const LIM = rulesErr ? (await import('./perfRules.js').catch(() => null))?.LIMITS : null;
+  const maxOf = (pair, def) => (Array.isArray(pair) && Number.isFinite(pair[1]) ? pair[1] : def);
   const s = loadBmUsageSettings();
   // v2.922: 시간 단위 파일 보존(파일 삭제 + 경계 기간 청크) — 단계마다 보존일. 예전 표(마이그레이션 전 잔여)는 예전 규칙 그대로.
   const st = s.store || STORE_DEFAULTS;
-  // 8b단계: Top-N 보존(이 노드 설정 bm-perf-rules.json top — 기본 7일 · 90일). 설정을 못 읽으면 기본값.
-  let topKeep = { keepDays: 7, hourlyDays: 90 };
-  try { const tr = (await import('./perfRules.js')).loadPerfRules().top; if (tr) topKeep = tr; } catch { /* 기본값 */ }
-  const keep = { raw: effectiveRawDays(s), h1: st.hourlyDays, d1: s.dailyRetentionDays, dev: st.devRawDays, dev1h: st.devHourlyDays, top: topKeep.keepDays, toph: topKeep.hourlyDays };
-  const r = await pruneUsage({ rawDays: s.rawRetentionDays, dailyDays: s.dailyRetentionDays, force: true, keep }).catch((e) => ({ ok: false, error: errText(e) }));
+  // 8b단계: Top-N 보존(이 노드 설정 bm-perf-rules.json top — 기본 7일 · 90일). 규칙 파일을 못 읽으면 규칙이 허용하는 가장 긴 보존(83회차).
+  let topKeep = { keepDays: null, hourlyDays: null };
+  if (!rulesErr) { try { const tr = (await import('./perfRules.js')).loadPerfRules().top; if (tr) topKeep = tr; } catch { /* 건너뜀 */ } }
+  else topKeep = { keepDays: maxOf(LIM?.top?.keepDays, null), hourlyDays: maxOf(LIM?.top?.hourlyDays, null) };
+  const keep = settingsErr
+    ? { raw: RETENTION_MAX.raw, h1: RETENTION_MAX.h1, d1: RETENTION_MAX.d1, dev: RETENTION_MAX.dev, dev1h: RETENTION_MAX.dev1h, top: topKeep.keepDays, toph: topKeep.hourlyDays }
+    : { raw: effectiveRawDays(s), h1: st.hourlyDays, d1: s.dailyRetentionDays, dev: st.devRawDays, dev1h: st.devHourlyDays, top: topKeep.keepDays, toph: topKeep.hourlyDays };
+  const r = await pruneUsage({ rawDays: settingsErr ? RETENTION_MAX.legacyRaw : s.rawRetentionDays, dailyDays: settingsErr ? RETENTION_MAX.d1 : s.dailyRetentionDays, force: true, keep })
+    .catch((e) => ({ ok: false, error: errText(e) }));
+  if (held.length && r && typeof r === 'object') { r.held = held; r.heldMax = true; }
   // v2.923(반증 R3): 진단 스냅샷 7일 보관 — 예전에는 ‘실행할 때만’ 지워져 아무도 누르지 않으면 프로세스 이름 · 커널 로그가 영구 보관됐다. 같은 스로틀 틱에 정리한다.
   if (exists) {
     try { const n = await snapshotPrune({ before: Date.now() - SNAPSHOT_KEEP_DAYS * 86_400_000 }); if (r && typeof r === 'object') r.snapshotsPruned = n; }
@@ -863,15 +904,22 @@ export async function pruneTick({ every = PRUNE_EVERY } = {}) {
     try {
       const rules = (await import('./perfRules.js')).loadPerfRules();
       const O = await import('./opsDb.js');
-      const fp = await focusHousekeeping({ keepDays: rules.focus?.keepDays ?? 30 });
-      const cp = await O.changePrune({ before: Date.now() - (rules.changes?.keepDays ?? 30) * 86_400_000 });
+      // 82회차 F2: 규칙 파일을 못 읽은 동안은 그 파일이 정하는 보관(집중 · 변경 이벤트 · 로그)을 기본값으로 지우지 않는다 —
+      //   83회차: 대신 규칙이 허용하는 가장 긴 보관(LIMITS 상한)으로만 지운다(멈춤에 끝이 없으면 무상한 증가).
+      const fp = await focusHousekeeping({ keepDays: rulesErr ? maxOf(LIM?.focus?.keepDays, 90) : (rules.focus?.keepDays ?? 30) });
+      const cp = await O.changePrune({ before: Date.now() - (rulesErr ? maxOf(LIM?.changes?.keepDays, 400) : (rules.changes?.keepDays ?? 30)) * 86_400_000 });
       const cyc = await O.cyclePrune({ before: Date.now() - 30 * 86_400_000 }).catch(() => 0);   // 6단계 수집 건강 주기 기록 30일
       // 대상 목록은 마지막 성공 주기의 것(이 틱에서 대상 해석을 다시 하지 않는다 — 등록부 · 분류를 정리 틱마다 읽지 않게). 모르면 지우지 않는다.
       let gone = 0;
       if (_lastLiveKeys) { try { gone = await O.changeLatestKeep({ agent: config.agent?.name || '', keys: [..._lastLiveKeys] }); } catch { /* 다음 틱 */ } }
       if (r && typeof r === 'object') r.opsPruned = { focusSessions: fp?.sessions ?? 0, focusSamples: fp?.samples ?? 0, changeEvents: cp || 0, changeLatestGone: gone, collectCycles: cyc || 0 };
       // 7a단계 로그 분석 보관(설정 keepDays) + 대상에서 사라진 서버의 읽기 위치 — 같은 스로틀 틱 · 청크 DELETE.
-      try { const lp = await (await import('./logs/run.js')).logPruneTick({ agent: config.agent?.name || '', keys: _lastLiveKeys ? [..._lastLiveKeys] : null }); if (r && typeof r === 'object') r.logsPruned = lp; }
+      try {
+        const lp = rulesErr
+          ? await (await import('./logs/store.js')).logPrune({ before: Date.now() - maxOf(LIM?.logs?.keepDays, 90) * 86_400_000, agent: config.agent?.name || '', keys: _lastLiveKeys ? [..._lastLiveKeys] : null })   // 83회차: 상한 보관
+          : await (await import('./logs/run.js')).logPruneTick({ agent: config.agent?.name || '', keys: _lastLiveKeys ? [..._lastLiveKeys] : null });
+        if (r && typeof r === 'object') r.logsPruned = lp;
+      }
       catch (e) { if (_srcErrLog('log-prune', errText(e))) console.warn(`[bmusage] 로그 분석 보관 정리 실패: ${errText(e)}`); }
     } catch (e) { if (_srcErrLog('ops-prune', errText(e))) console.warn(`[bmusage] 집중 · 변경 이벤트 보관 정리 실패: ${errText(e)}`); }
   }
@@ -935,9 +983,16 @@ async function pool(items, limit, fn) {
  *   ⚠ 대상 목록(live)은 그대로 둔다 — 뺀 서버의 누적 카운터를 지우면 다음 주기 실수집이 '첫 표본' 이 된다. */
 export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {}) {
   if (!bmUsageEnabled()) return { ok: false, reason: '베어메탈 사용률 수집이 꺼져 있습니다(설정에서 켜세요).' };
-  if (_running) return { ok: false, reason: '이전 수집이 진행 중입니다.' };
-  _running = true;
-  const t0 = Date.now();
+  if (_running) {
+    const age = Date.now() - _runSince;
+    const max = bmCycleMaxMs((() => { try { return loadBmUsageSettings().intervalMs; } catch { return null; } })());
+    if (age <= max) return { ok: false, reason: '이전 수집이 진행 중입니다.' };
+    _stuck.releases += 1; _stuck.lastAt = Date.now(); _stuck.lastAgeMs = age;
+    console.warn(`[bmusage] 수집 주기가 ${Math.round(age / 1000)}초째 끝나지 않아(상한 ${Math.round(max / 1000)}초) 그 주기를 버리고 새 주기를 시작합니다(장비별 시한은 그대로 · 누적 ${_stuck.releases}회)`);
+  }
+  const mySeq = ++_runSeq;
+  _running = true; _runSince = Date.now();
+  const t0 = _runSince;
   slotPeakReset();   // 6단계 수집 건강 — 이 주기의 동시성 사용 최대를 0(지금 사용 중)부터
   // v2.732(B1-01): 직전 주기 실행 소요 — 이번 주기에서 _last 를 덮기 전에 읽는다(간격 한계의 여유 — spanArgsFor).
   const prevRunMs = numOrNull(_last?.ms) ?? 0;
@@ -1145,7 +1200,7 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
     await runNodeCollectAlert({ cycleStartAt: t0 });
     return { ok: false, reason: _last.error };
   } finally {
-    _running = false;
+    if (_runSeq === mySeq) _running = false;   // 83회차: 상한으로 버려진 옛 주기는 새 주기의 가드를 풀지 않는다
     // 2차 M1 ②: 주기 끝(판정이 있었던 주기만 — perfAlerts 가 가린다). 자동 틱은 롤업 보정 · 정리까지 끝난 뒤 bmUsageTimerTick 이 적는다.
     if (trigger !== 'auto') await notePerfEnd(t0);
   }
@@ -1283,7 +1338,9 @@ export function startBmUsagePoller() {
 }
 
 export function stopBmUsagePoller() { _timer?.stop?.(); _timer = null; }
-export function _resetForTest() { _lastLiveKeys = null; _lastRepair = null; _cycleSamples = []; _peakPlan = null; _prev.clear(); _authStopped.clear(); _detail.clear(); _last = null; _running = false; _pruneTick = 0; _lastPrune = null; _fleetOverride = null; _health = null; _healthSince = new Map(); guard._resetForTest(); }
+/** 테스트 전용 — 진행 중 주기의 시작을 과거로(상한 경과 재현). */
+export function _ageCycleForTest(ms) { _runSince -= ms; }
+export function _resetForTest() { _runSeq = 0; _runSince = 0; _stuck.releases = 0; _stuck.lastAt = null; _stuck.lastAgeMs = null; _lastLiveKeys = null; _lastRepair = null; _cycleSamples = []; _peakPlan = null; _prev.clear(); _authStopped.clear(); _detail.clear(); _last = null; _running = false; _pruneTick = 0; _lastPrune = null; _fleetOverride = null; _health = null; _healthSince = new Map(); guard._resetForTest(); }
 /** 테스트 전용 — 분류 함수 대체(EDGE2628-03) · 인메모리 상태 주입(EDGE2628-02). */
 export function _setFleetForTest(fn) { _fleetOverride = typeof fn === 'function' ? fn : null; }
 /** 시험 이음매(8b) — OS 수집기를 바꾼다(실제 폴러 주기 · 적재 배선을 SSH 없이 시험). 운영 경로는 늘 collectOsUsage. */

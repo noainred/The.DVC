@@ -12,10 +12,9 @@
  *  - 외부 입력 host 를 네트워크로 찌르므로 ssrfBlockReason 통과 필수.
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { makeLoadError, filterObjectElements, devicesForThisNode as coreDevicesForThisNode, devicesForAgent as coreDevicesForAgent } from '../util/registryCore.js'; // v2.613 PERSIST2613-04
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { ssrfBlockReason } from '../collector/registry.js';
@@ -34,24 +33,30 @@ let _cache = null;
 const loadErr = makeLoadError();
 export function registryLoadError() { load(); return loadErr.get(); }
 
+// 결정(78 남긴 것 ①): parse 실패(형식 · 복호 포함 — 예전 try 블록과 같은 범위)만 손상이다.
+const parseDb = (text) => {
+  const parsed = JSON.parse(text);
+  return { devices: filterObjectElements(openSecretsDeep(Array.isArray(parsed?.devices) ? parsed.devices : [])).list }; // v2.613 PERSIST2613-04: 객체 원소만
+};
+const WHAT = 'PDU 등록부(pdu-devices.json)';
 function load() {
-  if (_cache) return _cache;
-  if (!fs.existsSync(FILE)) { loadErr.checkCorruptOnly(FILE); _cache = { devices: [] }; return _cache; }
-  try {
-    const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    _cache = { devices: filterObjectElements(openSecretsDeep(Array.isArray(parsed?.devices) ? parsed.devices : [])).list }; // v2.613 PERSIST2613-04: 객체 원소만
-  } catch (e) {
-    // 손상본을 조용히 []로 넘기면 다음 저장이 원본을 덮어써 자격증명이 영구 유실된다.
-    preserveCorrupt(FILE, e.message);
-    loadErr.set(e);
-    _cache = { devices: [] };
-  }
+  if (_cache && !loadErr.readPending()) return _cache;
+  // 손상본을 조용히 []로 넘기면 다음 저장이 원본을 덮어써 자격증명이 영구 유실된다 — 손상은 보존본으로 옮기고(사유 포함) 오류를 세운다(loadErr.read).
+  // 결정(78 남긴 것 ①): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 원본을 그대로 두고 · 이 빈 값을 캐시로 믿지 않고(30초마다 다시 읽음) · 쓰기를 거절한다.
+  const r = loadErr.read(FILE, parseDb);
+  if (r.kind === 'ok') { _cache = r.value; return _cache; }
+  loadErr.checkCorruptOnly(FILE);
+  _cache = { devices: [] };
   return _cache;
 }
+/** 결정(78 남긴 것 ①): 읽기 오류 중의 쓰기 거절(409) 또는 null — 로드를 먼저 한다(첫 호출이 쓰기여도 상태가 서게). */
+export function registryWriteRefusal() { load(); return loadErr.writeRefusal(WHAT); }
+const writeRefusal = registryWriteRefusal;
 
 // v2.733(점검 3회차 C4-04): 캐시는 **디스크 쓰기 성공 뒤에만** 바꾼다 — 예전에는 먼저 바꿔, 등록 쓰기가 실패해 오류 응답이 나간 뒤에도
 //   메모리에는 장비가 있어 /pdu-config 로 엣지가 받아 비밀번호로 수집을 시작했고 재시작하면 사라졌다(삭제 실패면 반대로 되살아났다).
 function save(devices) {
+  loadErr.assertWritable(WHAT); // 결정(78 남긴 것 ①): 마지막 방어선 — 어느 경로(엣지 pull · 시드)도 읽기 오류 중에 원본을 덮지 않는다(던진다)
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ devices }), null, 2), { mode: 0o600 });
   _cache = { devices };
   loadErr.clear(); // v2.612 LEFT2612-01
@@ -80,6 +85,18 @@ export function deviceInputIssue(input = {}) {
   return null;
 }
 
+/**
+ * 78회차 F1: 접속처(host · 계정 · SSH 포트)가 저장분과 달라졌는가 — 저장(saveDevice)과 연결 테스트(routes/api/pdu.js)가 **같은 판정**을 쓴다
+ * (스토리지 storageAccessMoved · SAN sanAccessMoved 와 같은 모양). 요청에 없는 칸은 저장값 유지로 본다(accessMoved 규약) — 포트는 저장 경로처럼 숫자로 맞춘다.
+ */
+export function pduAccessMoved(saved, body = {}) {
+  if (!saved) return false;
+  const b = body && typeof body === 'object' ? body : {};
+  const port = (v) => Number(v) || 22;
+  return accessMoved({ host: saved.host, username: saved.username || '', port: port(saved.sshPort) },
+    { host: b.host, username: b.username, port: b.sshPort === undefined ? undefined : port(b.sshPort) }, ['host', 'username', 'port']);
+}
+
 function normalize(input, existing = null) {
   const e = existing || {};
   return {
@@ -104,6 +121,7 @@ function normalize(input, existing = null) {
 
 /** 등록/수정. id 가 있으면 수정, 없으면 신규. */
 export function saveDevice(input = {}) {
+  const refused = writeRefusal(); if (refused) return refused;   // 결정(78 남긴 것 ①)
   const issue = deviceInputIssue(input);
   if (issue) return { ok: false, reason: issue };
   const list = load().devices.slice();
@@ -115,9 +133,7 @@ export function saveDevice(input = {}) {
   let droppedSecrets = [];
   if (idx >= 0 && !secretProvided(input.password)) {
     const e = list[idx];
-    const moved = accessMoved({ host: e.host, username: e.username || '', port: Number(e.sshPort) || 22 },
-      { host: entry.host, username: entry.username, port: entry.sshPort }, ['host', 'username', 'port']);
-    if (moved) { if (e.password) droppedSecrets = ['password']; entry.password = ''; }
+    if (pduAccessMoved(e, entry)) { if (e.password) droppedSecrets = ['password']; entry.password = ''; }
   }
   // 같은 host 중복 등록 방지(다른 id 로 같은 장비를 두 번 폴링하면 부하만 는다).
   const dup = list.find((d) => d.id !== entry.id && d.host.toLowerCase() === entry.host.toLowerCase());
@@ -128,6 +144,7 @@ export function saveDevice(input = {}) {
 }
 
 export function deleteDevice(id) {
+  const refused = writeRefusal(); if (refused) return refused;   // 결정(78 남긴 것 ①): '없는 장비입니다' 404 보다 먼저(읽지 못한 빈 목록으로 판정하지 않는다)
   const list = load().devices;
   const next = list.filter((d) => d.id !== id);
   if (next.length === list.length) return { ok: false, reason: '없는 장비입니다.' };

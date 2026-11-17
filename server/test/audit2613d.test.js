@@ -42,7 +42,8 @@ async function registerEdge(id) {
 
 test('CONTRACT2613-01: pull kind 열거는 서버 EDGE_PULL_KINDS 하나이고 웹 FETCH_KIND_TEXT 와 1:1 이다', async () => {
   const { EDGE_PULL_KINDS } = await import('../src/central/edgePull.js');
-  assert.deepEqual([...EDGE_PULL_KINDS].sort(), ['auth', 'bad-body', 'disabled', 'disabled-central', 'http', 'no-url', 'not-registered', 'old-version', 'timeout', 'unreachable']);
+  // 87회차 ⓑ(84회차 남긴 것 ① — 권장안): edgePull 이 내는 ambiguous(결정 66 ① — 표시 이름이 둘 이상)를 열거에 넣었다(1:1 계약 — 예전에는 열거 밖 kind 였다).
+  assert.deepEqual([...EDGE_PULL_KINDS].sort(), ['ambiguous', 'auth', 'bad-body', 'disabled', 'disabled-central', 'http', 'no-url', 'not-registered', 'old-version', 'timeout', 'unreachable']);
   const web = readWeb('views/tools/edgeLogText.js');
   const m = web.match(/export const FETCH_KIND_TEXT = Object\.freeze\(\{([\s\S]*?)\n\}\);/);
   assert.ok(m, 'edgeLogText.FETCH_KIND_TEXT 를 찾지 못했다');

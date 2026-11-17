@@ -4,9 +4,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 // v2.416 RMA central 라우트(HTTP) 회귀 — 개별 토큰 전용·agent 바인딩·소유권·하트비트·롱폴.
 // 원격 명령은 자격증명보다 큰 권한이라 공유 CENTRAL_TOKEN 으로는 어떤 잡도 내주지 않는다.
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-rma-central-'));
+const CFG = tmpDir('portal-rma-central-');
 process.env.CONFIG_DIR = CFG;
 process.env.CENTRAL_TOKEN = 'shared-token-for-rma-test-1234567890';
 

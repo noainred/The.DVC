@@ -1,13 +1,20 @@
 /**
  * v2.618 — 전면 점검(버그·보안·메모리·튜닝·아키텍처·웹) 확정분 회귀. 상세는 docs/AUDIT-2026-09-26.md.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { stripComments } from './_stripComments.js';
+
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 
 const SRC = new URL('../src/', import.meta.url);
 const read = (p) => fs.readFileSync(new URL(p, SRC), 'utf8');
@@ -24,7 +31,7 @@ test('BUG-1: 빈 env 값(KEY=)은 미지정 — pull·스캔이 꺼지거나 iDR
 });
 
 test('BUG-2: 엣지가 등록부를 못 읽은 상태(registered:null)를 0(위임 0대 — 정상)으로 저장하지 않는다', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2618-'));
+  const dir = tmpDir('audit2618-');
   const code = `
     const st = await import('${new URL('central/storageEdge.js', SRC).href}');
     const sw = await import('${new URL('central/sanSwitchEdge.js', SRC).href}');

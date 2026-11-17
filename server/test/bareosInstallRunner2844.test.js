@@ -8,7 +8,7 @@
  *  ⑤ 남의 파일이 자리에 있으면 3단계가 멈추고 그 파일은 그대로
  *  ⑥ 전부 되돌리기(rollback-all): 새로 넣은 패키지·/etc/bareos(설치 전 없었음)·로컬 저장소·초기화한 PG 데이터 제거
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -16,6 +16,13 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const RUNNER = path.join(HERE, '../src/bareos/install/runner.sh');
@@ -88,7 +95,7 @@ exit 0`,
 };
 
 function env(opts = {}) {
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'bi2844-'));
+  const base = tmpDir('bi2844-');
   const P = path.join(base, 'root'); const FAKE = path.join(base, 'fake'); const BIN = path.join(base, 'bin');
   for (const d of [P, FAKE, BIN]) fs.mkdirSync(d, { recursive: true });
   for (const [n, s] of Object.entries(SHIMS)) { fs.writeFileSync(path.join(BIN, n), s, { mode: 0o755 }); }

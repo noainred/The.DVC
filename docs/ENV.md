@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **755개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **756개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-17)
@@ -55,7 +55,7 @@
 | `WAN_TLS_CA_FILE` | `''` | ✅ | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (234)
+## 공통 (235)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -79,6 +79,7 @@
 | `BMUSAGE_CMD_TIMEOUT_MS` | `34000` |  | bmusage/collectors/osSsh.js |
 | `BMUSAGE_CONCURRENCY` | `32` |  | bmusage/poller.js |
 | `BMUSAGE_COUNT_CACHE_MS` | `60000` |  | bmusage/db.js |
+| `BMUSAGE_CYCLE_MAX_MS` |  |  | bmusage/poller.js |
 | `BMUSAGE_DEVICE_TIMEOUT_MS` | `60000` |  | bmusage/poller.js |
 | `BMUSAGE_ENABLED` | `''` |  | bmusage/settings.js |
 | `BMUSAGE_ENT_API_MS` | `20000` |  | bmusage/collectors/idracEnterprise.js |
@@ -944,4 +945,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 755
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 756

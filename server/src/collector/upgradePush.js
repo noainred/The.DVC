@@ -118,7 +118,11 @@ export function mergeAutoPushStatus(status, lastResult) {
       const c = cmpVersion(cur?.version, it.version || lastResult.version);
       if (c != null && c >= 0) continue;
     }
-    out[id] = { ...(cur || {}), upgrade: { at, ok: it.ok === true, version: it.version || lastResult.version || undefined, reason: it.reason || '', ...(Number.isFinite(it.status) ? { status: it.status } : {}), ...(it.upToDate ? { upToDate: true } : {}), ...(it.deferred ? { deferred: true } : {}), auto: true } }; // v2.859: 엣지의 '이미 최신' 응답은 실패가 아니다
+    // 87회차 R3(86 F2 반증 — 재현): '설치 대기'(deferred) 표지는 그 엣지가 그 판(또는 더 새 판)을 이미 보고하면 내린다 — 86 F2 가 표지를 파일에서도 되살리게 되어
+    //   엣지가 대기 작업을 끝내고 설치한 뒤에도(pull 상태 version = 대상 판) 다음 자동 적용까지 노란 '설치 대기' 가 남았다. 못 읽은 버전(null)은 그대로 둔다(못 읽음 ≠ 설치됨).
+    let deferredNow = it.deferred === true;
+    if (deferredNow && it.ok === true) { const c = cmpVersion(cur?.version, it.version || lastResult.version); if (c != null && c >= 0) deferredNow = false; }
+    out[id] = { ...(cur || {}), upgrade: { at, ok: it.ok === true, version: it.version || lastResult.version || undefined, reason: deferredNow ? (it.reason || '') : (it.deferred ? '' : (it.reason || '')), ...(Number.isFinite(it.status) ? { status: it.status } : {}), ...(it.upToDate ? { upToDate: true } : {}), ...(deferredNow ? { deferred: true } : {}), auto: true } }; // v2.859: 엣지의 '이미 최신' 응답은 실패가 아니다
   }
   return out;
 }

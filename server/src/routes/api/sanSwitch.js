@@ -14,7 +14,7 @@ import { isAdminReq, maskDeviceAddress, maskSnapAddress, maskActivityEvents, mas
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { SAN_SWITCH_TYPES, collectMethodsFor } from '../../sanswitch/types.js';
-import { listDevices, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithSecret, normalizeDeviceInput, sanAccessMoved } from '../../sanswitch/registry.js';
+import { listDevices, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithSecret, normalizeDeviceInput, sanAccessMoved, registryWriteRefusal } from '../../sanswitch/registry.js';
 import { localSnapshots, getSnapshot, dropSnapshot } from '../../sanswitch/store.js';
 import { collectDeviceNow, sanSwitchPollerStatus, pollSanSwitchOnce, testDeviceConnection, ensureSanSwitchDemo } from '../../sanswitch/poller.js';
 import { isMockMode, demoOn } from '../../mock/demo/flags.js';   // v2.708 데모(mock)
@@ -41,7 +41,7 @@ import { portSeries, storageSeries, storageSeriesMulti, arraySerialOf, endpointK
 import * as pu from '../../sanswitch/portUsage.js';   // v2.748 포트 사용량 화면(순수 조립)
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import * as swBulk from '../../sanswitch/bulk.js';
-import { enrichAdvice, selectRows } from '../../util/bulkImport.js';
+import { enrichAdvice, selectRows, fillBlankFromSaved } from '../../util/bulkImport.js';
 import { startBulkTest, publicRun, passedLines } from '../../util/bulkRun.js';
 import { fullScopeOnlyWith, fullReadWriteScopeOnlyWith } from '../admin/shared.js';
 import { isDemoGuest, DEMO_ONLY_REASON } from '../../auth/demoGuest.js'; // v2.720(감사 R1-03·B2-01·R1-06)
@@ -349,10 +349,12 @@ api.post('/tools/sanswitch/devices', adminOnly, fullScopeOnly, fullRwOnly, (req,
     const saved = saveDevice(req.body || {});
     logAudit({ user: req.user?.username, action: 'SAN 스위치 등록/수정', target: `${saved.name}(${saved.host})`, detail: `${saved.type}/${saved.collectMethod}${saved.agent ? ` 엣지 ${saved.agent}` : ' 중앙 직접'}` });
     res.json({ ok: true, device: saved });
-  } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
+  } catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ ok: false, reason: e.message, ...(e?.readError ? { code: e.code, readError: true } : {}) }); }   // 결정(78 남긴 것 ①): 등록부 읽기 오류는 409
 });
 
 api.delete('/tools/sanswitch/devices/:id', adminOnly, fullScopeOnly, fullRwOnly, (req, res) => {
+  const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①): 읽기 오류 중에는 409(읽지 못한 빈 목록으로 '없음' 을 답하지 않는다)
+  if (refused) return res.status(409).json(refused);
   const dev = listDevices().find((d) => d.id === req.params.id);
   const ok = deleteDevice(req.params.id);
   if (ok) {
@@ -1138,15 +1140,25 @@ const swDcName = () => {
 };
 
 /** 입력 본문 → 파싱 결과 + 형식 구분. `text` 가 있으면 자유텍스트, 아니면 CSV. */
+/** 결정(78 남긴 것 ③): 행 필드 ← 저장 스위치(비밀 없음). 수정 행의 빈 칸만 이것으로 채운다(sanswitch/bulk.js KEEP_ON_BLANK). */
+const SW_FROM_SAVED = {
+  name: (d) => d.name || '', username: (d) => d.username || '', collectMethod: (d) => String(d.collectMethod || '').toLowerCase(),
+  sshPort: (d) => (d.sshPort == null ? '' : String(d.sshPort)), httpsPort: (d) => (d.httpsPort == null ? '' : String(d.httpsPort)),
+  vfId: (d) => (d.vfId == null ? '' : String(d.vfId)), datacenter: (d) => d.datacenterId || '', agent: (d) => d.agent || '',
+  enabled: (d) => d.enabled !== false, note: (d) => d.note || '',
+};
 function swParseBody(body = {}) {
   const raw = String(body.text ?? body.csv ?? '');
   const format = body.format === 'text' || (body.text != null && body.csv == null) ? 'text' : 'csv';
-  if (format === 'text') {
-    const r = swBulk.parseDevicesText(raw, { defaults: body.defaults || {} });
-    return { ...r, format, raw };
+  const r = format === 'text'
+    ? { ...swBulk.parseDevicesText(raw, { defaults: body.defaults || {} }), format, raw }
+    : (() => { const c = swBulk.parseDevicesCsv(raw); return { ...c, warnings: [], headerUsed: null, order: c.order || swBulk.COLUMNS, format, raw }; })();
+  // 결정(78 남긴 것 ③): 수정 행(같은 host)의 빈 칸은 저장값 유지 — 드라이런 · 연결 테스트 · 저장이 모두 이 채운 행을 본다(드라이런 통과 = 저장 성공).
+  if (Array.isArray(r.rows) && r.rows.length) {
+    const byHost = new Map(listDevices().map((d) => [String(d.host).toLowerCase(), d]));
+    r.rows = fillBlankFromSaved(r.rows, (row) => byHost.get(String(row.host || '').toLowerCase()), SW_FROM_SAVED);
   }
-  const r = swBulk.parseDevicesCsv(raw);
-  return { ...r, warnings: [], headerUsed: null, order: r.order || swBulk.COLUMNS, format, raw };
+  return r;
 }
 
 api.get('/tools/sanswitch/devices/export.csv', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
@@ -1186,6 +1198,8 @@ api.get('/tools/sanswitch/devices/sample.txt', csvPerm, adminOnly, fullScopeOnly
  * ⚠ 자동 재시도 없음(잘못된 비밀번호 반복 = 계정 잠금). bulkRun 이 강제한다.
  */
 api.post('/tools/sanswitch/devices/import/test', csvPerm, adminOnly, fullScopeOnly, fullRwOnly, (req, res) => {
+  const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①): 읽지 못한 빈 목록과 대조하지 않는다(저장 비밀번호 판정도 못 한다)
+  if (refused) return res.status(409).json(refused);
   const p = swParseBody(req.body || {});
   if (p.error) return res.status(400).json({ ok: false, reason: p.error });
   const resolveDc = swDcResolver();
@@ -1244,6 +1258,8 @@ api.get('/tools/sanswitch/devices/import/test/:id', csvPerm, adminOnly, fullScop
  * 걸러낸 행은 버리지 않고 `skipped` 로 사유와 함께 돌려준다.
  */
 api.post('/tools/sanswitch/devices/import', csvPerm, adminOnly, fullScopeOnly, fullRwOnly, (req, res) => {
+  const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①): 읽기 오류 중에는 409 — 빈 목록과 대조하면 전부 '추가' 로 보인다(드라이런 포함)
+  if (refused) return res.status(409).json(refused);
   const p = swParseBody(req.body || {});
   if (p.error) return res.status(400).json({ ok: false, reason: p.error });
 

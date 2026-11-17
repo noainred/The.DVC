@@ -20,6 +20,7 @@
  *    그대로 두면 이미 설치한 버전이 '새 버전' 으로 보인다. 설치는 언제나 방금 새로 받은 메타데이터로만 한다(적용 경로가 다시 확인한다).
  */
 import { cmpVersion } from '../util/cmpVersion.js';
+import { PUSH_HOLD_MAX_MS } from './pushDeferred.js';   // 86회차: 엣지 보류 시한 상한(중앙 응답 읽기와 같은 값)
 
 /** 판정 코드 — 웹 `AUTO_TEXT` 의 키와 1:1. */
 export const AUTO_CODES = Object.freeze([
@@ -31,6 +32,7 @@ export const AUTO_CODES = Object.freeze([
   'check-failed',    // 마지막 확인이 실패했다(사유 동봉)
   'apply-failed',    // 마지막 적용이 실패했다(사유 동봉)
   'deferred-scans',  // v2.737: 새 버전을 찾았지만 실행 중인 스캔이 끝나기를 기다리는 중(상한 UPGRADE_SCAN_DEFER_MAX_MS — 넘으면 적용)
+  'install-dir-mismatch', // 87회차 ⓑ: 설치 경로(installDir)의 실경로가 지금 실행 중인 앱 경로와 다르다 — 설치해도 재시작한 프로세스가 옛 판일 수 있다
 ]);
 export const AUTO_STATES = Object.freeze(['on', 'check-only', 'manual', 'off', 'blocked']);
 /** 백그라운드 확인 한 번의 결과 — 웹 `TICK_TEXT` 의 키와 1:1. */
@@ -104,7 +106,10 @@ function sanitizeEdgePush(e) {
 function sanitizeCollectorPush(e) {
   if (!e || typeof e !== 'object') return null;
   const items = Array.isArray(e.items) ? e.items.filter((f) => f && typeof f === 'object').slice(0, 64)
-    .map((f) => ({ id: txt(f.id, 128) || '', name: txt(f.name, 128) || '', ok: f.ok === true, status: num(f.status), version: ver(f.version) || '', reason: txt(f.reason, 300) || '' })) : [];
+    .map((f) => ({ id: txt(f.id, 128) || '', name: txt(f.name, 128) || '', ok: f.ok === true, status: num(f.status), version: ver(f.version) || '', reason: txt(f.reason, 300) || '',
+      // 86회차 F2(재현): '이미 최신'(v2.859) · '설치 대기'(51회차 #3) 표지를 버리지 않는다 — 버리면 자동 적용 직후 재시작한 중앙(파일에서 되살린 기록)의
+      //   수집 서버 표가 보류한 엣지를 '적용'(초록)으로, 이미 최신인 엣지를 '업그레이드 실패'(빨강)로 보였다(manager.summarizeCollectorPush 와 같은 칸).
+      ...(f.upToDate === true ? { upToDate: true } : {}), ...(f.deferred === true ? { deferred: true } : {}) })) : [];
   const out = { total: num(e.total) ?? 0, ok: num(e.ok) ?? 0, items };
   const sk = txt(e.skipped, 300);
   if (sk) out.skipped = sk;
@@ -119,7 +124,7 @@ export function sanitizeResult(r) {
   const out = {
     at, source: txt(r.source, 40), trigger: trig(r.trigger), ok: bool(r.ok), reason: txt(r.reason, 800),
     code: txt(r.code, 60), version: ver(r.version), target: ver(r.target), from: ver(r.from), backup: txt(r.backup, 400),
-    appliedArchive: txt(r.appliedArchive, 400), restarting: bool(r.restarting) || undefined,
+    appliedArchive: txt(r.appliedArchive, 400), restarting: bool(r.restarting) || undefined, installDir: txt(r.installDir, 400),   // 87회차 ⓑ: 자동 적용 고리 판정(설치 경로가 바뀌면 다시 시도)
     downloaded: num(r.downloaded), upToDate: bool(r.upToDate) || undefined,
     // 반증 A2: 중앙 push 보류(51회차 #3) — 성공(설치) 으로 보이지 않게 표지 · 남은 시간을 남긴다
     deferred: bool(r.deferred) || undefined, waitMs: num(r.waitMs), heldMs: num(r.heldMs), forced: bool(r.forced) || undefined, note: txt(r.note, 400),
@@ -190,7 +195,10 @@ export function sanitizeEdgeSyncState(d) {
     if (!id || !a || typeof a !== 'object') continue;
     const at = ts(a.at); const target = ver(a.target); const n = num(a.attempts);
     if (at == null || !target || n == null || n < 0) continue;
-    attempts.push([id, { at, ok: bool(a.ok), target, attempts: Math.min(1000, Math.floor(n)), reason: txt(a.reason, 300) }]);
+    // 86회차 개선: 엣지 보류 시한 — 보류 성공(ok) 기록에만 · 기록 시각 이후 PUSH_HOLD_MAX_MS(12시간) 안일 때만 되살린다.
+    const hu = ts(a.holdUntil);
+    const hold = bool(a.ok) && hu != null && hu >= at && hu - at <= PUSH_HOLD_MAX_MS ? { holdUntil: hu } : {};
+    attempts.push([id, { at, ok: bool(a.ok), target, attempts: Math.min(1000, Math.floor(n)), reason: txt(a.reason, 300), ...hold }]);
   }
   const alerted = (Array.isArray(d.alerted) ? d.alerted.slice(0, 500) : []).map((x) => txt(x, 240)).filter((x) => x && x.includes('|'));
   return attempts.length || alerted.length ? { attempts, alerted } : null;
@@ -249,7 +257,7 @@ export function failureMoot(lastResult, lastTick, currentVersion) {
  * @param {number} o.now
  * @returns {{state:string, issues:{code:string, reason?:string, at?:number, version?:string}[], intervalMs:number, nextCheckAt:number|null, armed:boolean}}
  */
-export function autoUpgradeState({ settings = {}, intervalMs = 0, armedAt = null, lastCheck = null, lastResult = null, lastTick = null, currentVersion = null, deferral = null, now = Date.now() } = {}) {
+export function autoUpgradeState({ settings = {}, intervalMs = 0, armedAt = null, lastCheck = null, lastResult = null, lastTick = null, currentVersion = null, deferral = null, installDirMismatch = null, now = Date.now() } = {}) {
   const s = settings || {};
   const ms = num(intervalMs) ?? 0;
   const issues = [];
@@ -260,6 +268,11 @@ export function autoUpgradeState({ settings = {}, intervalMs = 0, armedAt = null
   if (ms <= 0) issues.push({ code: 'no-interval' });
   if (!s.autoApply) issues.push({ code: 'no-auto-apply' });
   if (!s.installDir) issues.push({ code: 'no-install-dir' });
+  // 87회차 ⓑ(86회차 남긴 것 — 권장안): 설치 경로 실경로 ≠ 실행 중 앱 경로 — 호출부(manager.status)가 실경로로 잰 값을 준다(순수 판정은 글자만).
+  if (s.installDir && installDirMismatch && typeof installDirMismatch === 'object') {
+    const a = txt(installDirMismatch.installDir, 300); const b = txt(installDirMismatch.appRoot, 300);
+    if (a && b) issues.push({ code: 'install-dir-mismatch', reason: `설치 경로 ‘${a}’ · 실행 중 ‘${b}’` });
+  }
 
   // 마지막 확인 실패 — 백그라운드든 수동이든 가장 최근 확인 기준(원격 오류만 사유가 있다).
   const remoteErr = lastCheck?.remote && lastCheck.remote.ok === false ? lastCheck.remote.error : null;

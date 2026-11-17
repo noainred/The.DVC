@@ -48,7 +48,11 @@ adminRouter.post('/central/ingest-stats/reset', adminOnly, fleetOnly, (req, res)
 // 생성·저장도 소유자 전용 — 둘 다 응답에 토큰 평문을 실으므로 조회와 같은 노출이고,
 // 저장은 엣지 인증 비밀을 임의 값으로 바꾸는 권능이다.
 adminRouter.post('/central-token/generate', adminOnly, requireSettingsOwner, (req, res) => {
-  const r = generateCentralToken({ force: !!(req.body && req.body.force) });
+  // 87회차 ⓒ(84회차 남긴 것 ⑤ — 권장안): portal.env 저장 거절(84 F3 — 읽지 못한 파일을 덮지 않는다)은 PUT 과 같게 400 + 사유로 답한다.
+  //   예전에는 try 가 없어 전역 오류 처리의 500 'internal error' 로 나가 화면이 사유를 보여 주지 못했다(실행 중 토큰은 바뀌지 않는다).
+  let r;
+  try { r = generateCentralToken({ force: !!(req.body && req.body.force) }); }
+  catch (e) { return res.status(400).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
   logAudit({ user: req.user?.username, action: '중앙 토큰 생성', target: 'central-token', ip: req.ip || '' });
   res.json({ ok: true, ...r });
 });
@@ -73,7 +77,7 @@ adminRouter.post('/central/agent-tokens', adminOnly, fleetOnly, requireSettingsO
   const r = issueAgentToken(req.body?.agent, { note: req.body?.note });
   if (r.ok) logAudit({ user: req.user?.username, action: '엣지 개별 central 토큰 발급', target: r.agent, detail: '기존 토큰이 있으면 회전(교체)', ip: req.ip || '' });
   // 평문 토큰은 이 응답에서만 확인 가능(서버는 해시만 저장) — 화면에서 복사해 엣지에 설정.
-  res.status(r.ok ? 200 : 400).json(r);
+  res.status(r.ok ? 200 : (r.status === 409 ? 409 : 400)).json(r);   // 87회차 ⓐ: 토큰 파일 읽기 오류 중의 거절은 409(registry-unreadable)
 });
 // v2.776(사용자 요청 '이걸 자동으로 수정하는 기능 · 세부 진행 화면 · 로그 저장'): 공유 토큰 엣지에 개별 토큰을 **발급하고 엣지에 적용**한다.
 //   발급과 같은 경계(소유자 등급) — 작업은 백그라운드로 돌고 즉시 작업 기록을 돌려준다. 진행·기록은 아래 GET 으로(토큰 평문은 어디에도 없다).
@@ -99,7 +103,7 @@ adminRouter.get('/central/token-apply/jobs/:id', adminOnly, fleetOnly, (req, res
 adminRouter.delete('/central/agent-tokens/:agent', adminOnly, fleetOnly, requireSettingsOwner, (req, res) => {
   const r = revokeAgentToken(req.params.agent);
   if (r.ok) logAudit({ user: req.user?.username, action: '엣지 개별 central 토큰 회수', target: req.params.agent, ip: req.ip || '' });
-  res.status(r.ok ? 200 : 400).json(r);
+  res.status(r.ok ? 200 : (r.status === 409 ? 409 : 400)).json(r);   // 87회차 ⓐ
 });
 
 }

@@ -15,9 +15,16 @@ import net from 'node:net';
 import http from 'node:http';
 import { installFakePing } from './_fakePing.js';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const TOKEN = 'tok-2733b-shared';
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-2733b-'));
-const BIN = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-2733b-bin-'));
+const CFG = tmpDir('dvc-2733b-');
+const BIN = tmpDir('dvc-2733b-bin-');
 // 가짜 ping: 자기 PID 를 남기고 sleep 으로 바뀐다 — 2단계(ping)에서 스캔을 시한까지 묶는다(1단계 TCP 생존은 이미 찾은 뒤). test/_fakePing.js(v3.8.1)
 const { killOwned } = installFakePing(BIN);
 process.env.PATH = `${BIN}:${process.env.PATH}`;

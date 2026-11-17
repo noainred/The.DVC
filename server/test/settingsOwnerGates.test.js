@@ -5,6 +5,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+test.after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 // 확정 버그 회귀 방지(2026-08-30, 4~5차 재감사) — 설정 소유 경계.
 //
 // 이 파일은 두 종류의 검증을 한다:
@@ -16,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 //      '보안 회귀'가 아니라 '검사식을 코드에 맞춰 갱신'이 필요한지 먼저 판단할 것. 반대로 음성
 //      단정(doesNotMatch)은 변수명만 바꿔도 무력화돼 방어력이 없으므로 쓰지 않는다 — 그 역할은
 //      (A) 동작 검증이 담당한다.
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'owner-gates-'));
+const tmp = tmpDir('owner-gates-');
 process.env.CONFIG_DIR = tmp;
 
 const { requireSettingsOwner } = await import('../src/routes/admin/shared.js');

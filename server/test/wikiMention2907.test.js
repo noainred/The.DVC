@@ -5,7 +5,7 @@
  * ② 라우트 — 후보 API 범위(A3-02 그대로 + 참여자) · 댓글 + 이슈 한 요청 · 400 이면 댓글도 저장하지 않음 · 중복 방지 · 뒤늦은 등록 · 요청 권한 계정 ·
  *    메일 한 통(언급 + 할당) · 이슈 댓글의 관찰자 추가 · 색인('관련 이슈').
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -15,11 +15,18 @@ import { fileURLToPath } from 'node:url';
 import { mentionCandidates, mentionText } from '../src/issues/mentionables.js';
 import { planCommentIssue, defaultIssueTitle } from '../src/issues/fromComment.js';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 
 function run(body, { env = {} } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'c2903-'));
+  const dir = tmpDir('c2903-');
   const script = `
     const express = (await import('express')).default;
     const { api } = await import(${JSON.stringify(path.join(SRC, 'routes/api.js'))});

@@ -4,6 +4,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+test.after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 // 확정 버그 회귀 방지(2026-08-30) — 구성도 그래프의 NSX 매니저 누수 + 인시던트 scope 누락.
 //
 // (1) buildGraph 의 NSX 노드는 scope 로 좁힌 스냅샷이 아니라 listNsxRegistry()(전 등록 매니저)
@@ -12,7 +19,7 @@ import path from 'node:path';
 //     — 같은 계정이 /api/nsx 에서는 차단되는 정보(v2.320 NSX scope 불변조건 우회).
 // (2) /insights/incidents 는 insights 라우터에서 유일하게 scope 처리가 없어, 범위 제한 계정이
 //     전 사이트 알람 상세와 vCenter 수집 실패(이름·오류)를 볼 수 있었다.
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'graph-scope-'));
+const tmp = tmpDir('graph-scope-');
 process.env.CONFIG_DIR = tmp;
 
 const nsxReg = await import('../src/nsx/registry.js');

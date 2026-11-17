@@ -981,6 +981,21 @@ export const trendKey = (req) => `${scopeKey(req.user, store.get())}|${isAdminRe
 export const cvpBit = async (req) => { try { return (await import('../../auth/toolAccess.js')).issueFor(req.user, 'cvp') ? 'c0' : 'c1'; } catch { return 'c0'; } };
 export const portsKey = async (req) => `${trendKey(req)}|${await cvpBit(req)}`;
 
+/**
+ * 83회차(81회차 결정): 범위 계정용 저장소 상태 — 개수 없는 상태만(쓸 수 있는가 · 오류 · 일부 파일 못 읽음 표지 · 마이그레이션 단계). 순수.
+ *   행 수(rawRows · dailyRows · legacyRows) · 파일별 행 · 바이트 · 첫/마지막 시각 · 마이그레이션 센 수는 전 법인 합이라 뺀다(redacted 로 밝힌다).
+ */
+export function dbStateOnly(db) {
+  const d = db && typeof db === 'object' ? db : {};
+  const m = d.migration && typeof d.migration === 'object' ? d.migration : null;
+  return {
+    available: d.available === true, ...(typeof d.error === 'string' && d.error ? { error: d.error.slice(0, 200) } : {}),
+    ...(d.rawRowsPartial ? { rawRowsPartial: true } : {}), ...(d.dailyRowsPartial ? { dailyRowsPartial: true } : {}),
+    ...(typeof d.migrateError === 'string' && d.migrateError ? { migrateError: d.migrateError.slice(0, 200) } : {}),
+    migration: m ? { phase: m.phase ?? null, failedPhase: m.failedPhase ?? null } : null,
+    redacted: ['path', 'counts'],
+  };
+}
 export function registerBmUsage(api) {
 
 /** 주 조회 — 대상·최신값·설정·상태. 장비에 접속하지 않는다. */
@@ -1054,7 +1069,10 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
       // 재확인 R1: 배포 관리 표(쓰기 버튼 포함)는 조회 ∧ 쓰기 전체 범위 관리자만 — 저장 게이트(fleetOnly)와 같은 함수.
       distribution: isAdmin && isFullReadWriteScope(req.user, store.get()) && !tg.isEdge ? distStatusNow() : null,
       // ⚠ DB 파일 경로는 admin 에게만(operator 는 tools 를 기본 보유 — '거부 기본값' 규칙).
-      db: isAdmin ? db : (({ path: _p, ...rest }) => ({ ...rest, redacted: ['path'] }))(db),
+      // 83회차(81회차 결정 — 권장안): 행 수 · 파일별 행 · 바이트 · 마이그레이션 센 수는 **전 법인 합**이라 범위 계정에는 싣지 않는다(함대 규모 추정 차단) —
+      //   전체 범위(조회 ∧ 쓰기 — isFullReadWriteScope) 계정만. 범위 계정은 개수 없는 상태(dbStateOnly)만.
+      db: !isFullReadWriteScope(req.user, store.get()) ? dbStateOnly(db)
+        : isAdmin ? db : (({ path: _p, ...rest }) => ({ ...rest, redacted: ['path'] }))(db),
       // v2.744(최종 검토 FB — RD-R1·RG2744-03): 등록부 로드 오류 사유(last.sourceErrors)의 위치(줄·칸)는 관리자에게만 — 그 밖의 계정은 분류 문구만.
       //   원문 조각은 폴러가 처음부터 싣지 않는다(registrySourceError). fleetPartials(아래)와 같은 규칙이다.
       status: scopeBmStatus(isAdmin ? bmUsageStatus({ detail: true }) : maskPollerStatus(stripAckBy(bmUsageStatus({ detail: false }), isAdmin), hosts), allowed),
@@ -1563,9 +1581,13 @@ api.put('/tools/bm-usage/settings', adminOnly, (req, res) => {
     ignoredOutOfScope = m.ignored.filter((id) => allowed && !allowed.has(id));   // 조회 전용 법인을 같은 값으로 되돌려 보낸 것은 ‘무시’ 가 아니다
   }
   delete body.corpsScoped;
+  // 83회차(82 결정): 설정 파일이 손상 · 보존본만 남은 동안의 저장은 **전체 범위 관리자 + 명시 확정(confirmDefaults)** 일 때만 — 범위 관리자의 법인 칸 저장이
+  //   전역 필드를 기본값으로 다시 쓰고 손상 표지를 지우던 경로를 막는다(그 밖은 409 — saveBmUsageSettings 가 판정).
+  const confirmLoadError = fullRw && req.body?.confirmDefaults === true;
+  delete body.confirmDefaults;
   let next;
-  try { next = saveBmUsageSettings(body); } catch (e) {   // 34회차 F4: 읽지 못한 설정 파일은 덮지 않는다
-    if (e?.code === 'settings-unreadable') return res.status(409).json({ ok: false, code: e.code, reason: e.message });
+  try { next = saveBmUsageSettings(body, { confirmLoadError }); } catch (e) {   // 34회차 F4: 읽지 못한 설정 파일은 덮지 않는다
+    if (e?.code === 'settings-unreadable') return res.status(409).json({ ok: false, code: e.code, reason: e.message, ...(e.corrupt ? { corrupt: true } : {}) });
     throw e;
   }
   logAudit({

@@ -15,7 +15,14 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'cvpep2933-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const DIR = tmpDir('cvpep2933-');
 Object.assign(process.env, { CONFIG_DIR: DIR, DATA_SOURCE: 'live', AUTH_ENABLED: 'true', CENTRAL_TOKEN: 'ctok-2929', SSRF_ALLOW_LOOPBACK: 'true' });   // 직접 CVP 는 127.0.0.1:9(즉시 거부) — 이 테스트 전용
 fs.writeFileSync(path.join(DIR, 'runtime.json'), JSON.stringify({ dataSource: 'live' }));
 // viewer 도 도구(tools) · 인벤토리 권한이 있어야 '역할' 게이트(admin · operator)까지 간다 — 도구 키 403 과 역할 403 을 가른다.

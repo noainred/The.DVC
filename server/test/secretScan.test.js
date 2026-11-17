@@ -4,12 +4,19 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+test.after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 // v2.297 회귀 방지 — 평문 자격증명 점검(secretScan).
 // 고정하는 의미론: ① 설정 필드 확정 분류(평문/암호화/빈값 — secretVault 포맷 판정과 일치)
 // ② **응답 직렬화에 원문 비밀이 절대 없음**(마스킹 보증 — 점검 도구가 유출 통로가 되면 본말전도)
 // ③ portal.env 민감 키 탐지(키 이름·길이만) ④ 로그 패턴 탐지(password=/URL 자격증명, 값 마스킹)
 // ⑤ 소스 휴리스틱(하드코딩 리터럴 탐지, 플레이스홀더 제외).
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'secret-scan-test-'));
+const TMP = tmpDir('secret-scan-test-');
 process.env.CONFIG_DIR = TMP;
 delete process.env.SECRETS_KEY;
 
@@ -32,7 +39,7 @@ fs.writeFileSync(path.join(TMP, 'vcenters.json'), JSON.stringify({
 fs.writeFileSync(path.join(TMP, 'users.json'), JSON.stringify({ users: [{ username: 'u', passwordHash: 'HASH-노출금지-abc' }] }));
 fs.writeFileSync(path.join(TMP, 'portal.env'), 'AUTH_SECRET=env-secret-value\nCENTRAL_TOKEN=tok123456\nPORT=4000\n');
 fs.writeFileSync(path.join(TMP, 'audit.ndjson'), `{"msg":"login ok"}\n{"msg":"curl https://root:${LOG_PW}@10.0.0.1/api"}\n{"detail":"password=${LOG_PW} used"}\n`);
-const SRCDIR = fs.mkdtempSync(path.join(os.tmpdir(), 'secret-scan-src-'));
+const SRCDIR = tmpDir('secret-scan-src-');
 fs.writeFileSync(path.join(SRCDIR, 'bad.js'), `const conn = { user: 'root', password: '${SRC_PW}' };\nconst ok = { password: '' };\nconst ph = { password: 'example-placeholder' };\n`);
 
 const result = await runSecretScan({ fresh: true, sourceDirs: [SRCDIR] });
@@ -97,7 +104,7 @@ test('v2.313 마스킹 회귀 — 콤마/특수문자 비밀번호·동일 라�
   const SRC_TOKEN = 'Tok,en-with-comma-999';
   fs.writeFileSync(path.join(TMP, 'app.log'),
     `login user=root password=${COMMA_PW} then pwd=${SECOND_PW} done\n`);
-  const SRCDIR2 = fs.mkdtempSync(path.join(os.tmpdir(), 'secret-scan-src2-'));
+  const SRCDIR2 = tmpDir('secret-scan-src2-');
   fs.writeFileSync(path.join(SRCDIR2, 'cfg.js'), `const token = '${SRC_TOKEN}';\n`);
 
   const r = await runSecretScan({ fresh: true, sourceDirs: [SRCDIR2] });

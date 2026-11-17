@@ -10,7 +10,7 @@
  *    '이벤트 없음(수집 범위 밖)' 재부팅을 '원인 모름(이벤트를 받았는데 정비 기록 없음)' 으로 분류했다 → eventLastTsOf 한 벌.
  * I1(68 P3 개선) dirusage 이력 정리 스로틀을 벽시계 모듈로에서 저장소 규약 (++tick % N) === 0 으로.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -18,6 +18,13 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
+
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
@@ -27,7 +34,7 @@ const NOW = Math.floor(Date.now() / 3_600_000) * 3_600_000;
 const DAY = 86_400_000;
 
 function child(script, env = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rebut71-'));
+  const dir = tmpDir('rebut71-');
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
     env: { ...process.env, CONFIG_DIR: dir, LLM_ENABLED: '', ...env }, encoding: 'utf8', cwd: path.resolve(SRC, '..'), timeout: 120_000, maxBuffer: 32 * 1024 * 1024,
   });
@@ -125,7 +132,7 @@ test('R2 — 비용 · VM 구성 점검 본 응답이 설정을 읽지 못한 �
 });
 
 test('R3 — 호스트 재부팅 분류의 수집 범위는 미래 행 경계 안의 MAX(실 SQLite) · 세 라우트가 같은 함수', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rebut71-logs-'));
+  const dir = tmpDir('rebut71-logs-');
   process.env.CONFIG_DIR = dir;
   const { getLogsDb } = await import('../src/logs/db.js');
   const { eventLastTsOf } = await import('../src/vmchanges/analyze.js');

@@ -5,14 +5,21 @@
 //   ④ 관리 주소 글자 ⑤ compactInv ↔ 중앙 INV_SHAPE 짝(osName) ⑥ 중앙 fleet: 요약 · 주소 정제, 요약만 바뀌면 fleet rev 그대로
 //   ⑦ fetchInventory OS 이름($select · 4xx 한 번 다시 · 404 다시 묻지 않음 · HPE HostOS) ⑧ 목록 · 상세 응답 — 판본별 가림 · 범위 404 · 수집 서버 · 엣지 요약
 //   픽스처 식별자는 전부 합성(SYNTH · 192.0.2.x — 공개 저장소 규약).
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createServer } from 'node:http';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bmhw330-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const tmp = tmpDir('bmhw330-');
 process.env.CONFIG_DIR = tmp;
 process.env.IDRAC_TIMEOUT_MS = '1500';
 

@@ -16,7 +16,14 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'vmclone2793-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+test.after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const TMP = tmpDir('vmclone2793-');
 process.env.CONFIG_DIR = TMP;
 process.env.DATA_SOURCE = 'mock';   // 실행기는 vCenter 에 접속하지 않고 시뮬레이션한다(워커 왕복 테스트용)
 
@@ -125,7 +132,7 @@ test('위임 잡 동기화 — 담당 확인된 vCenter 만 지운다 · 원장�
 });
 
 test('잡 파일 손상 → 로드 오류(위임 동기화가 503 으로 답할 근거) · 관리자 저장이 푼다', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vmclone2793-corrupt-'));
+  const dir = tmpDir('vmclone2793-corrupt-');
   fs.writeFileSync(path.join(dir, 'vm-clone.json'), '{ broken');
   const { execFileSync } = await import('node:child_process');
   const out = execFileSync(process.execPath, ['--input-type=module', '-e', `
@@ -366,7 +373,7 @@ test('F1 — 점검중·꺼진 위임 vCenter 도 위임이다(중앙 스케줄�
 });
 
 test('F2 — 잡 파일 로드 오류 중에는 실행·작업 기록이 빈 목록을 파일에 쓰지 않는다(관리자 저장만 쓴다)', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vmclone2793-f2-'));
+  const dir = tmpDir('vmclone2793-f2-');
   fs.writeFileSync(path.join(dir, 'vm-clone.json.corrupt.2026-10-26T00-00-00'), 'x');   // 재시작 뒤: 보존본만 남음
   const { execFileSync } = await import('node:child_process');
   const out = execFileSync(process.execPath, ['--input-type=module', '-e', `

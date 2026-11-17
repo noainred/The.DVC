@@ -84,6 +84,14 @@ export default function RelayCheckTool() {
         <div className="muted" style={{ marginTop: 4 }}>정직한 한계: 중앙에서 보이는 결과만 판정합니다(중계 엣지 내부의 haproxy 로그는 읽지 않음). '무응답'은 방화벽·경로·호스트 다운을 구분하지 못하므로 조치 목록의 순서대로 확인하세요.</div>
       </div>
 
+      {/* 78회차 F8: 설정 파일을 못 읽어 기본값(점검 · 알림 켜짐 · 수동 호스트 없음)으로 도는 중이면 밝힌다 — 예전에는 아무 표지 없이 기본값이었다. */}
+      {data.loadError && (
+        <div className="card error-box" style={{ padding: 10, marginBottom: 12, fontSize: 13, textAlign: 'left' }}>
+          점검 설정을 읽지 못해 기본값으로 돌고 있습니다 — {data.loadError.reason}
+          {data.loadError.readError ? ' (읽기 오류라 저장은 거절됩니다 — 파일 권한 · 디스크를 고치면 저절로 풀립니다)' : ' (손상 원본은 보존본으로 옮겼습니다 — 아래 설정을 다시 저장하거나 서비스 점검에서 확정 · 보존본을 되돌리면 풀립니다)'}
+        </div>
+      )}
+
       <div className="kpis" style={{ marginBottom: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))' }}>
         <Kpi label="점검 대상" value={(data.targets || []).length} meta={`호스트 ${new Set((data.targets || []).map((t) => t.host)).size} × 프로파일 ${form.profile.length}`} />
         <Kpi label="정상" value={results.filter((r) => r.ok).length} accent="var(--green)" />

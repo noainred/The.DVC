@@ -633,10 +633,10 @@
     </div>
   </div>
 
-  <!-- 비밀번호 변경 — 본인 변경은 현재 비밀번호를 확인한다(결정 · 31회차 E3) -->
+  <!-- 비밀번호 변경 — 본인 변경은 현재 비밀번호를 확인한다(결정 · 31회차 E3). 중지된 admin 다시 켜기도 이 창(새 비밀번호 칸 없이 — 결정 · 반증 G1b 남긴 것) -->
   <div class="modal" id="pw-modal" hidden>
     <div class="modal-box">
-      <h3>비밀번호 변경</h3>
+      <h3 id="pw-title">비밀번호 변경</h3>
       <p class="muted pw-target" id="pw-target"></p>
       <input type="password" id="pw-current" placeholder="현재 비밀번호" autocomplete="current-password" maxlength="200" hidden />
       <input type="password" id="pw-new" placeholder="새 비밀번호 (8자 이상)" autocomplete="new-password" minlength="8" maxlength="200" />

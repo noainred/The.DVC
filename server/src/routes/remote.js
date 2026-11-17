@@ -12,7 +12,7 @@ import { mergeScopedList, denyFleetWrite } from '../auth/scopeMerge.js';   // v2
 import {
   getConfig, getConfigSafe, saveConfig,
   listMappings, listMappingsForUser, getMapping, addMapping, removeMapping, setMappingStatus, touchMapping, mappingPortOf,
-  listProxies, listProxiesSafe, getProxyById, resolveProxy, saveProxy, removeProxy,
+  listProxies, listProxiesSafe, getProxyById, resolveProxy, saveProxy, removeProxy, mappingProxyOf, MAPPING_PROXY_GONE_TEXT, proxyInUseReason, registryReadError,
 } from '../proxy/registry.js';
 import { testDataplane, applyMapping } from '../proxy/dataplane.js';
 import { previewConfig, testDeploy, deployToProxy } from '../proxy/deploy.js';
@@ -53,10 +53,14 @@ remoteRouter.get('/mappings', requirePerm('remote.access'), (req, res) => {
   // v2.606 AUTHZ2606-03: 범위 제한 admin 에게는 **범위 안 대상**의 매핑만(전체 범위 admin 은 예전처럼 전부).
   const all = listMappingsForUser(req.user);
   const mine = all.filter((m) => !scopedAdminMappingIssue(req.user, m));
+  const rre = registryReadError();   // 79회차: 읽기 오류 중의 빈 목록을 '등록된 대상 없음' 으로 보이지 않게
   res.json({
+    ...(rre ? { registryReadError: rre.reason } : {}),
     ...(mine.length !== all.length ? { omittedOutOfScope: all.length - mine.length, scoped: true } : {}),
     mappings: mine.map(({ error, ...m }) => {
-      const p = mappingProxy(m);
+      // 76회차 F3: 중계가 지워진 매핑에 기본 프록시 주소를 보이지 않는다 — 기본 프록시:같은 공개 포트는 다른 매핑의 대상이다(수동 접속이 그리로 간다).
+      const p = mappingProxyOf(m);
+      if (!p) return { ...m, proxyName: '', proxyHost: '', proxyGone: true, guacdConfigured: false };
       return { ...m, proxyName: p.name, proxyHost: p.proxyHost, guacdConfigured: !!p.guacd?.host };
     }),
   });
@@ -287,6 +291,12 @@ remoteRouter.delete('/proxies/:id', adminOnly, (req, res) => {
     if (prev && outScope.length) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: SHARED_PROXY_REASON });
   }
   const r = removeProxy(req.params.id);
+  if (!r.ok && r.code === 'proxy-in-use') {
+    // 79회차: 그 중계를 쓰는 매핑이 있으면 409 — 이름은 이 요청자에게 보이는 매핑만(범위 제한 admin 은 범위 밖 매핑 이름을 받지 않는다 · 개수는 전체)
+    const ids = new Set((r.using || []).map((m) => m.id));
+    const visible = listMappingsForUser(req.user).filter((m) => ids.has(m.id) && !scopedAdminMappingIssue(req.user, m));
+    return res.status(409).json({ ok: false, code: 'proxy-in-use', inUse: r.inUse, mappings: visible.map((m) => ({ id: m.id, name: m.name })), reason: proxyInUseReason(visible.map((m) => m.name), r.inUse, { nsx: r.nsx }) });
+  }
   res.status(r.ok ? 200 : 400).json(r);
 });
 
@@ -512,7 +522,10 @@ remoteRouter.get('/rdp/:id', requirePerm('remote.access'), (req, res) => {
     // v2.770(점검 R5-E5-1): (vcenterId, targetHost) 쌍 + 매핑의 중계 — WS mappingAccessIssue 와 같은 판정.
     if (mappingTargetScopeIssue(store.get(), scopedVcenterIds(req.user, store.get()), m, { proxyIdOf })) return res.status(404).end();
   }
-  const proxyHost = mappingProxy(m).proxyHost;
+  // 76회차 F3: 매핑의 중계가 지워졌으면 .rdp 를 만들지 않는다 — 기본 프록시 + 같은 공개 포트는 다른 매핑의 대상이다(게이트웨이와 같은 판정).
+  const via = mappingProxyOf(m);
+  if (!via) return res.status(409).json({ ok: false, reason: MAPPING_PROXY_GONE_TEXT });
+  const proxyHost = via.proxyHost;
   const host = proxyHost || m.targetHost;
   const port = proxyHost ? m.publicPort : m.targetPort;
   const rdp = [

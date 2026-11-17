@@ -364,7 +364,9 @@ export async function mainDb() { return getDb(); }
  */
 export function readRule(m) {
   const phase = m?.phase || 'none';
-  const legacyAuth = ['copy-raw', 'copy-daily', 'verify', 'failed'].includes(phase);
+  // 81회차 F1(재현): 삭제 단계에서 실패하면(failedPhase 'delete') 예전 표는 이미 일부를 지운 뒤다 — 그것을 원본으로 읽으면 대조를 통과한
+  //   시간 단위 파일을 건너뛰어 이력에 구멍이 났다(72행 중 52행). 삭제 단계 실패는 '삭제 중' 과 같은 규칙(파일이 원본)이다.
+  const legacyAuth = ['copy-raw', 'copy-daily', 'verify'].includes(phase) || (phase === 'failed' && m?.failedPhase !== 'delete');
   return {
     phase,
     legacyRaw: legacyAuth,
@@ -557,7 +559,8 @@ export async function pruneUsage({ rawDays = 90, dailyDays = 365 * 5, every = 12
        *   예전 표를 지우면 대조(예전 행 수 = 사본 · 1시간 표본 합)가 어긋나고, 사본 파일을 지우면 재시도 대조가 다시 실패한다.
        */
       const rule = readRule(readMeta(db, MIGRATE_KEY));
-      const migHold = ['copy-raw', 'copy-daily', 'verify', 'failed'].includes(rule.phase);
+      // 81회차 F1: 멈추는 조건은 읽기 규칙과 같다(예전 표가 원본인 동안) — 삭제 단계 실패는 대조가 끝났으므로 파일 보존을 멈추지 않는다.
+      const migHold = rule.legacyRaw;
       const a = migHold ? { deleted: 0, done: true } : await chunkedDelete(db.prepare('DELETE FROM usage_history WHERE rowid IN (SELECT rowid FROM usage_history WHERE ts < ? LIMIT ?)'), [rawCut], { label: 'bmusage.usage_history' });
       const b = migHold ? { deleted: 0, done: true } : await chunkedDelete(db.prepare('DELETE FROM usage_daily WHERE rowid IN (SELECT rowid FROM usage_daily WHERE day < ? LIMIT ?)'), [dayCut], { label: 'bmusage.usage_daily' });
       if (a.deleted || b.deleted) _counts = null;

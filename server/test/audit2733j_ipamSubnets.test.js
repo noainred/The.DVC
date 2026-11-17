@@ -11,12 +11,19 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
+
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 // v3.5.0(재설계 묶음 나): 대역 목록에 예약 · DHCP 수(rsv · dhcp)와 대역 용도(purpose · desc …)가 **덧붙었다** — 옛 판본과의 동일성은
 //   예전 세 값(subnet · base · used)으로 본다(덧붙은 칸은 test/ipamRedesign350.test.js 가 따로 고정한다).
 const core3 = (l) => (Array.isArray(l) ? l.map((x) => ({ subnet: x.subnet, base: x.base, used: x.used })) : l);
 const same = (a, b) => isDeepStrictEqual(core3(a), core3(b));
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2733j-subnets-'));
+const tmp = tmpDir('audit2733j-subnets-');
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_SOURCE = 'mock';
 process.env.AUTH_ENABLED = 'false';

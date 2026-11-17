@@ -4,9 +4,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+test.after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 // v2.599 감사 그룹 f — WEB2599-05: 평문 자격증명 점검의 소스 휴리스틱이 코드 상수·화면 라벨·자기 파일을
 // '의심' 으로 세던 것(이 저장소 전수 9건 전부 오탐). 진짜 하드코딩은 계속 잡아야 한다.
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2599f-'));
+const TMP = tmpDir('audit2599f-');
 process.env.CONFIG_DIR = path.join(TMP, 'cfg');
 fs.mkdirSync(process.env.CONFIG_DIR);
 delete process.env.SECRETS_KEY;

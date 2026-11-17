@@ -494,7 +494,12 @@ export async function restoreCentral(archive, { retention = 30, source = null } 
     // v2.538: 번들의 .env 는 키·토큰이 가려져 있다 — 현재 파일의 값으로 되살리고, 없으면 그 줄을 버린다
     // (빈 값으로 덮어써 AUTH_SECRET 을 지우면 전 세션이 무효가 된다).
     if (path.extname(base).toLowerCase() === '.env') {
-      let cur = ''; try { cur = fs.readFileSync(path.join(CONFIG_DIR, base), 'utf8'); } catch { /* 없음 */ }
+      let cur = ''; let curErr = '';
+      try { cur = fs.readFileSync(path.join(CONFIG_DIR, base), 'utf8'); } catch (e) { if (e?.code !== 'ENOENT') curErr = String(e?.code || 'read-error').slice(0, 32); }
+      // 87회차 R1(재현 — 84 F3 의 형제 경로): 지금 파일의 **읽기 오류**(EACCES · EIO — install.sh 가 안내하는 root 소유 portal.env)를 '없음' 으로 보고 합쳐,
+      //   번들에서 가려진 AUTH_SECRET · CENTRAL_TOKEN 줄을 전부 버리고 호스트에만 있는 보안 스위치 줄도 잃은 파일로 덮었다(failed 0 — 조용히).
+      //   읽기 오류면 이 파일은 복원하지 않는다(지금 파일 그대로 — 79회차 R1 의 SSH 키 저장소와 같은 규칙).
+      if (curErr) { failed.push({ file: base, reason: `지금 ${base} 를 읽지 못해(${curErr}) 복원하지 않았습니다 — 번들에는 키 · 토큰이 가려져 있어 지금 파일과 합쳐야 합니다. 파일 권한 · 소유자를 확인한 뒤 다시 복원하세요(지금 파일은 그대로입니다).` }); continue; }
       const m = mergeRedactedEnv(String(content0), cur);
       content = m.text; envRestored += m.restored; envDropped.push(...m.dropped.map((k) => `${base}:${k}`));
       // 2026-10-09 검토 S-10: 보안 스위치(서명 정책·TLS 예외·인증)는 호스트 값을 유지한다 — 복원이 보호를 약하게 만들지 못하게.
@@ -505,7 +510,11 @@ export async function restoreCentral(archive, { retention = 30, source = null } 
     }
     // 7b: 번들의 SSH 키 저장소는 개인키 · 비밀번호가 가려져 있다 — 지금 파일의 같은 키(지문) · 같은 계정(id)으로 되살리고, 못 살리는 키는 뺀다.
     if (base === KEY_FILE_NAME) {
-      let cur = ''; try { cur = fs.readFileSync(path.join(CONFIG_DIR, base), 'utf8'); } catch { /* 없음 */ }
+      let cur = ''; let curErr = '';
+      try { cur = fs.readFileSync(path.join(CONFIG_DIR, base), 'utf8'); } catch (e) { if (e?.code !== 'ENOENT') curErr = String(e?.code || 'read-error').slice(0, 32); }
+      // 79회차 반증(재현): 지금 파일의 **읽기 오류**(EACCES · EIO)를 '없음' 으로 보고 합쳐, 번들의 키(개인키가 가려진)를 전부 빼고 지금 봉인본(유일한 사본) 자리에 빈 저장소를 예약했다.
+      //   읽기 오류면 이 파일은 복원하지 않는다(지금 파일 그대로) — 권한 · 디스크를 바로잡은 뒤 다시 복원하면 된다.
+      if (curErr) { failed.push({ file: base, reason: `지금 SSH 키 저장소를 읽지 못해(${curErr}) 복원하지 않았습니다 — 번들에는 개인키가 없어 지금 파일(봉인본 — 유일한 사본)과 합쳐야 합니다. 파일 권한 · 소유자 · 디스크를 확인한 뒤 다시 복원하세요.` }); continue; }
       const m = mergeRedactedKeyStore(String(content0), cur);   // 저장된 값(봉인 그대로)을 옮겨 붙인다 — 복호 · 재봉인 없음
       content = m.text;
       envDropped.push(...m.dropped.slice(0, 64).map((d) => `${base}:${d}`));   // 되살리지 못한 키 · 계정 비밀(.env 키를 못 살렸을 때와 같은 칸)

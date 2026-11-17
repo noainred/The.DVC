@@ -161,6 +161,14 @@ export default function PduTool() {
 
       {msg && <div className={msg.ok ? 'card' : 'card error-box'} style={{ padding: 10, marginBottom: 12, fontSize: 13 }}>{msg.text}</div>}
       {error && data && <div className="card error-box" style={{ padding: 10, marginBottom: 12, fontSize: 13 }}>폴링 오류: {error}</div>}
+      {/* 78회차 개선: 등록부 · 임계치 · 주기 파일을 못 읽었으면 빈 목록 · 기본값이 정상처럼 보이지 않게 밝힌다(서버 pduLoadErrors). */}
+      {data?.loadErrors && (
+        <div className="card error-box" style={{ padding: 10, marginBottom: 12, fontSize: 13, textAlign: 'left' }}>
+          {data.loadErrors.registry && <div>PDU 등록부를 읽지 못했습니다 — {data.loadErrors.registry}. 아래 목록은 실제 등록 상태가 아닐 수 있습니다(서비스 점검 참고).</div>}
+          {data.loadErrors.thresholds && <div>임계치 설정을 읽지 못해 기본값으로 판정합니다 — {data.loadErrors.thresholds}</div>}
+          {data.loadErrors.intervals && <div>수집 주기 설정을 읽지 못해 env · 기본 주기로 돕니다 — {data.loadErrors.intervals}</div>}
+        </div>
+      )}
 
       {/* v2.590(감사 F2): 인증 실패로 **주기 수집을 멈춘** PDU — 조용히 멈추지 않는다(authGuard 규칙 1). */}
       {authStopSummary(devices.filter((d) => d.snapshot?.authStopped), { unit: '대', what: 'PDU' }) && (
@@ -465,6 +473,7 @@ function CsvModal({ onClose }) {
         <div className="muted" style={{ fontSize: 12.5, marginBottom: 10, lineHeight: 1.6 }}>
           열: <code>name, host, username, sshPort, datacenter, agent, enabled, note, password</code><br />
           같은 <b>host</b> 가 이미 있으면 <b>수정</b>, 없으면 추가됩니다(내보내기 → 편집 → 가져오기 왕복 안전).{' '}
+          수정 행의 <b>빈 칸은 기존 값을 유지</b>합니다(agent 를 비워도 중앙 직접으로 바뀌지 않습니다) — 값을 지우려면 그 칸에 ‘-’ 하나를 적으세요. 새 장비의 빈 칸은 기본값입니다.{' '}
           <b>비밀번호는 내보내지 않습니다</b>(가져오기에서 비워 두면 기존 값 유지).
           센서/PDU 수량 열이 없는 것은 의도입니다 — 자동 탐지합니다.
         </div>
@@ -487,6 +496,13 @@ function CsvModal({ onClose }) {
               <div className="error-box" style={{ padding: 8, marginTop: 8, textAlign: 'left' }}>
                 실패 {result.failed.length}건<br />
                 {result.failed.slice(0, 20).map((f, i) => <div key={i}>{f}</div>)}
+              </div>
+            )}
+            {/* 78회차 F5: 접속처가 바뀌어 저장 비밀번호를 버린 행 — 수정은 됐지만 비밀번호를 다시 넣어야 수집된다(조용히 버리지 않는다). */}
+            {(result.droppedSecrets || []).length > 0 && (
+              <div className="error-box" style={{ padding: 8, marginTop: 8, textAlign: 'left' }}>
+                비밀번호 폐기 {result.droppedSecrets.length}건 — 비밀번호를 다시 입력해야 수집됩니다<br />
+                {result.droppedSecrets.slice(0, 20).map((f, i) => <div key={i}>{f.line}행({f.host}): {f.reason}</div>)}
               </div>
             )}
           </div>

@@ -13,6 +13,7 @@
 
 import net from 'node:net';
 import tls from 'node:tls';
+import { StringDecoder } from 'node:string_decoder';
 import { WebSocketServer } from 'ws';
 import { openGuacdSocket, rdpIgnoreCertArg } from './guacdTransport.js';
 /*
@@ -22,12 +23,44 @@ import { openGuacdSocket, rdpIgnoreCertArg } from './guacdTransport.js';
  */
 export const GUAC_WS_MAX_PAYLOAD = 4 * 1024 * 1024;
 import { resolveTokenUser } from '../auth/auth.js';
-import { getMapping, getProxyById, touchMapping } from './registry.js';
+import { getMapping, touchMapping, mappingProxyOf } from './registry.js';
 import { consumeRdpTicket } from './rdpTicket.js';
 import { config } from '../config.js';
 // WS 매핑 소유·scope 재검사 공용(v2.322) + 사용자 판정·열린 세션 재검증 공용(2026-10-09 S-04 — SSH 게이트웨이와 **같은 함수**).
 //   remoteUserIssue = 토큰 무효는 401, OTP 등록 전 세션·데모 계정·원격 접속 권한 없음은 403(판정 본문은 sshGateway.js 에 하나만 둔다).
-import { mappingAccessIssue, remoteUserIssue, trackRemoteSession, safeWsClose, authDisabledRemoteUser } from './sshGateway.js';
+import { mappingAccessIssue, remoteUserIssue, trackRemoteSession, safeWsClose, authDisabledRemoteUser, MAX_SESSIONS, MAX_SESSIONS_PER_USER } from './sshGateway.js';
+
+/*
+ * 79회차(76회차 '남긴 것' 결정 — 권장안): RDP 동시 세션 상한. guacd 는 연결마다 RDP 프로세스(수십~수백 MB)를 띄우는데 상한이 없었다 —
+ *   SSH 게이트웨이와 **같은 방식 · 같은 값**(전체 MAX_SESSIONS · 계정당 MAX_SESSIONS_PER_USER — 같은 env, 0 = 계정당 끔)으로 따로 센다.
+ *   넘치면 **티켓을 소비하기 전에** 4429 + 사유('too-many-sessions' · 'too-many-sessions-user' — 웹 remote/sshSend.js 표와 1:1)로 닫는다.
+ *   세는 시점은 티켓이 확인된 뒤(티켓 없음으로 닫힌 연결은 세지 않는다) · 푸는 곳은 ws close · error · guacd close(한 번만).
+ */
+let _rdpActive = 0;
+const _rdpPerUser = new Map();   // username(소문자) → 열린 RDP 세션 수
+const lcUser = (u) => String(u?.username || 'anonymous').toLowerCase();
+/** 넘치면 사유 코드(닫힘 사유), 아니면 null. */
+export function rdpSessionCapIssue(user) {
+  if (_rdpActive >= MAX_SESSIONS) return 'too-many-sessions';
+  if (MAX_SESSIONS_PER_USER > 0 && (_rdpPerUser.get(lcUser(user)) || 0) >= MAX_SESSIONS_PER_USER) return 'too-many-sessions-user';
+  return null;
+}
+/** 현재 RDP 세션 수(상태 · 진단 · 시험). */
+export function rdpSessionCounts() { return { active: _rdpActive, users: _rdpPerUser.size, max: MAX_SESSIONS, perUserCap: MAX_SESSIONS_PER_USER }; }
+function takeRdpSlot(user) {
+  const k = lcUser(user);
+  _rdpActive += 1; _rdpPerUser.set(k, (_rdpPerUser.get(k) || 0) + 1);
+  let held = true;
+  return () => {
+    if (!held) return;
+    held = false;
+    _rdpActive = Math.max(0, _rdpActive - 1);
+    const n = (_rdpPerUser.get(k) || 1) - 1;
+    if (n > 0) _rdpPerUser.set(k, n); else _rdpPerUser.delete(k);
+  };
+}
+/** 시험 전용 — 세는 값을 비운다. */
+export function _resetRdpSessionsForTest() { _rdpActive = 0; _rdpPerUser.clear(); }
 
 /** 테스트 주입 — 운영에서는 실제 resolveTokenUser·getMapping 이다. */
 const rdpDeps = { resolveTokenUser, getMapping, connect: (port, host) => net.connect(port, host), tlsConnect: (opts) => tls.connect(opts) };
@@ -71,6 +104,82 @@ function parseInstruction(str, start) {
   return null;
 }
 
+/*
+ * 76회차 F1(재현 — 중간): guacd → 브라우저 중계는 **완전한 명령 단위**로 보낸다. 예전에는 guacd TCP 조각('data')을 받은 그대로 WS 메시지 하나로
+ *   보냈는데, 브라우저의 guacamole-common-js 1.5.0 WebSocketTunnel 은 **메시지마다 따로** 파싱한다 — 명령 중간에서 잘린 메시지의 그 명령은
+ *   버려지고, 다음 메시지 앞머리(잘린 나머지)는 길이를 못 읽어 그 메시지 전체가 버려졌다(실제 라이브러리로 재현: img 명령이 사라진다).
+ *   TCP 조각 경계는 명령 경계와 무관하다(guacd 는 출력 버퍼가 차면 명령 중간에서도 내보낸다). Java 터널(GuacamoleWebSocketTunnelEndpoint)도
+ *   완전한 명령만 보낸다. 바이트 → 글자는 StringDecoder 로 잇는다(조각 경계에서 잘린 UTF-8 글자가 깨지지 않게 — SSH 게이트웨이와 같은 방식).
+ */
+/** 한 명령이 이보다 길게 끝나지 않으면 스트림 이상으로 보고 닫는다(guacd 명령은 blob 조각 수 KB — 브라우저 → guacd 프레임 상한과 같은 값). */
+export const GUAC_RELAY_MAX_PENDING = GUAC_WS_MAX_PAYLOAD;
+const HIGH_SURROGATE_RE = /[\uD800-\uDBFF]/;
+
+/**
+ * str 앞에서부터 **완전한** Guacamole 명령들이 끝나는 위치 — 0 이면 아직 완전한 명령이 없다, -1 이면 형식이 깨졌다.
+ * 길이 칸은 숫자 1~10자리(49회차 F49-1 과 같은 규칙), 값의 길이는 **유니코드 글자 수**다(guacd 는 UTF-8 글자로 센다 — 이 서버의 enc 와 같다).
+ * 선형: 원소마다 길이만큼 건너뛴다(4바이트 글자가 있을 때만 글자를 센다). astral 을 넘기면 그 판정을 다시 하지 않는다.
+ */
+export function guacCompleteEnd(str, astral = HIGH_SURROGATE_RE.test(str)) {
+  const n = str.length;
+  let i = 0;
+  let last = 0;
+  while (i < n) {
+    let j = i;
+    let len = 0;
+    while (j < n) {
+      const c = str.charCodeAt(j);
+      if (c < 48 || c > 57) break;
+      len = len * 10 + (c - 48);
+      j++;
+      if (j - i > 10) return -1;
+    }
+    if (j >= n) return last;                       // 길이 칸이 아직 다 오지 않았다
+    if (j === i || str.charCodeAt(j) !== 46) return -1;   // 숫자 없음 · '.' 아님
+    let k = j + 1;
+    if (!astral) k += len;
+    else {
+      for (let c = 0; c < len && k < n; c++) {
+        const u = str.charCodeAt(k);
+        k += (u >= 0xD800 && u <= 0xDBFF) ? 2 : 1;
+      }
+    }
+    if (k >= n) return last;                       // 값 또는 구분자가 아직 다 오지 않았다
+    const sep = str.charCodeAt(k);
+    if (sep === 59) { last = k + 1; i = k + 1; continue; }   // ';' 명령 끝
+    if (sep === 44) { i = k + 1; continue; }                 // ',' 다음 원소
+    return -1;
+  }
+  return last;
+}
+
+/**
+ * guacd 출력 → 브라우저 WS 중계기(76회차 F1). push(Buffer) 는 완전한 명령까지만 send 로 넘기고 나머지는 다음 조각과 잇는다.
+ * 형식이 깨졌거나 한 명령이 상한을 넘으면 fail(사유) 를 한 번 부르고 더 보내지 않는다.
+ */
+export function makeGuacRelay(send, fail, { maxPending = GUAC_RELAY_MAX_PENDING } = {}) {
+  const dec = new StringDecoder('utf8');
+  let pending = '';
+  let astral = false;
+  let dead = false;
+  const feed = (text) => {
+    if (dead || !text) return;
+    pending += text;
+    astral = astral || HIGH_SURROGATE_RE.test(text);
+    const end = guacCompleteEnd(pending, astral);
+    if (end < 0) { dead = true; pending = ''; fail('guacd 출력 형식 오류'); return; }
+    if (end > 0) {
+      const out = end === pending.length ? pending : pending.slice(0, end);
+      pending = end === pending.length ? '' : pending.slice(end);
+      if (!pending) astral = false;
+      send(out);
+    }
+    if (pending.length > maxPending) { dead = true; pending = ''; fail('guacd 명령이 너무 깁니다'); }
+  };
+  // decode 는 핸드셰이크 단계도 **같은 디코더**로 글자를 만들게 내준다(ready 직전 조각 끝의 잘린 글자를 잃지 않게).
+  return { push: (buf) => feed(dec.write(buf)), decode: (buf) => dec.write(buf), text: feed, pendingLength: () => pending.length };
+}
+
 export function attachRdpGateway(server) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: GUAC_WS_MAX_PAYLOAD });
   server.on('upgrade', (req, socket, head) => {
@@ -106,8 +215,12 @@ function handle(ws, params, user, token = null) {
   const issue = mappingAccessIssue(user, m);
   // v2.731(A5-02·A1-03): SSH 게이트웨이와 같은 사유 코드 — 브라우저 Guacamole 터널은 닫힘 사유를 상태 메시지로 넘기고 화면이 그것으로 문구를 고른다.
   if (issue) { safeWsClose(ws, 1011, 'mapping-denied'); return; }
+  // 76회차 F3: 매핑의 중계가 지워졌으면 열지 않는다 — 기본 프록시 + 같은 공개 포트는 다른 매핑의 대상이다(티켓 자격증명을 보내기 전 · 소비하기 전에 닫는다).
+  const proxy = mappingProxyOf(m);
+  if (!proxy) { safeWsClose(ws, 1011, 'mapping-proxy-gone'); return; }
+  // 79회차: 동시 세션 상한(전체 · 계정당 — SSH 와 같은 값) — 티켓을 소비하기 전에 닫는다(사용자가 티켓을 다시 받지 않아도 되게).
+  { const cap = rdpSessionCapIssue(user); if (cap) { safeWsClose(ws, 4429, cap); return; } }
   touchMapping(m.id); // reset the 1-day ephemeral expiry clock on use
-  const proxy = getProxyById(m.proxyId);
   if (!proxy.guacd?.host) { safeWsClose(ws, 1011, 'guacd not configured'); return; }
 
   const host = proxy.proxyHost || m.targetHost;
@@ -119,6 +232,7 @@ function handle(ws, params, user, token = null) {
   // ⚠ WS close 사유는 UTF-8 123바이트 상한 — 예전 한글 문구(약 140바이트)는 ws.close 가 RangeError 를 던져
   //   연결이 닫히지 않은 채 남았다. safeWsClose 가 글자 경계에서 자른다(2026-10-09 S-04 작업 중 확인).
   if (!tk) { safeWsClose(ws, 1011, 'RDP 접속 티켓이 필요합니다(POST /api/remote/rdp-ticket)'); return; }
+  const releaseSlot = takeRdpSlot(user);   // 79회차: 여기부터 센다(아래 close · error 셋이 한 번 푼다)
   const cred = (k) => (tk[k] != null ? String(tk[k]) : '');
   const settings = {
     hostname: host, port: String(port),
@@ -145,12 +259,17 @@ function handle(ws, params, user, token = null) {
   let ready = false;
   let buf = '';
   const MAX_HANDSHAKE_BUF = 256 * 1024; // 핸드셰이크 중 파싱 불가 데이터가 무한 누적되는 것 차단
+  // 76회차 F1: ready 뒤 guacd 출력은 완전한 명령 단위로만 브라우저에 보낸다(위 makeGuacRelay).
+  const relay = makeGuacRelay(
+    (text) => { if (ws.readyState === ws.OPEN) ws.send(text); },
+    (why) => { closed = true; try { guacd.destroy(); } catch { /* */ } safeWsClose(ws, 1011, why); },
+  );
 
   guacd.on(readyEvent, () => guacd.write(enc('select', 'rdp')));   // TLS 면 'secureConnect'(검증 통과 뒤) — 검증 실패는 'error' 로 닫힌다
 
   guacd.on('data', (data) => {
-    if (ready) { if (ws.readyState === ws.OPEN) ws.send(data.toString('utf8')); return; }
-    buf += data.toString('utf8');
+    if (ready) { relay.push(data); return; }
+    buf += relay.decode(data);
     let inst;
     while ((inst = parseInstruction(buf, 0))) {
       if (inst.opcode === 'args') {
@@ -165,9 +284,10 @@ function handle(ws, params, user, token = null) {
       } else if (inst.opcode === 'ready') {
         ready = true;
         guacd.setTimeout(0); // 핸드셰이크 완료 — 연결 타임아웃 해제(정상 세션은 오래 유휴 가능)
-        // forward 'ready' + anything buffered after it to the browser client
-        if (ws.readyState === ws.OPEN) ws.send(buf);
+        // forward 'ready' + anything buffered after it to the browser client — 76회차 F1: 뒤에 붙은 잘린 명령은 다음 조각과 이어 보낸다
+        const rest = buf;
         buf = '';
+        relay.text(rest);
         break;
       } else if (inst.opcode === 'error') {
         // guacd가 핸드셰이크 중 error를 보내면(연결 실패 등) 조용히 무시하면 ws가 영영 hang한다.
@@ -187,7 +307,7 @@ function handle(ws, params, user, token = null) {
   });
 
   guacd.on('error', (err) => { safeWsClose(ws, 1011, `guacd: ${err.message}`); });
-  guacd.on('close', () => { session.release(); try { ws.close(); } catch { /* */ } });
+  guacd.on('close', () => { releaseSlot(); session.release(); try { ws.close(); } catch { /* */ } });
 
   ws.on('message', (msg) => {
     if (closed) return; // 폐기 뒤 도착한 입력은 대상에 보내지 않는다(S-04)
@@ -209,8 +329,8 @@ function handle(ws, params, user, token = null) {
     if (RDP_INPUT_RE.test(text)) session.touch();
     try { guacd.write(text); } catch { /* */ }
   });
-  ws.on('close', () => { closed = true; session.release(); try { guacd.end(); } catch { /* */ } });
-  ws.on('error', () => { closed = true; session.release(); try { guacd.destroy(); } catch { /* */ } }); // ws 오류에도 소켓 정리
+  ws.on('close', () => { closed = true; releaseSlot(); session.release(); try { guacd.end(); } catch { /* */ } });
+  ws.on('error', () => { closed = true; releaseSlot(); session.release(); try { guacd.destroy(); } catch { /* */ } }); // ws 오류에도 소켓 정리
   return { session, isClosed: () => closed };
 }
 

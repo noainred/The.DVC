@@ -91,6 +91,7 @@ export function edgeHint(row = {}, { minVersion = '' } = {}) {
 /** pull 실패 `kind` → 사람이 할 일. ⚠ 한 문구로 덮지 말 것(조치가 정반대다). */
 export const FETCH_KIND_TEXT = Object.freeze({
   'not-registered': '수집 서버 등록부에 없는 이름입니다 — 설정 › 엣지·원격 › 수집 서버(원격)에서 등록하세요.',
+  ambiguous: '같은 표시 이름의 수집 서버가 **둘 이상**이라 어느 엣지인지 정할 수 없습니다 — 설정 › 엣지·원격 › 수집 서버(원격)에서 표시 이름을 겹치지 않게 바꾸세요.',
   'disabled-central': '중앙에서 이 수집 서버를 **비활성**으로 두었습니다.',
   'no-url': '이 수집 서버에 **URL 이 없습니다**.',
   auth: '수집 서버 **토큰 불일치** 입니다 — 중앙 등록값과 그 엣지의 **COLLECTOR_TOKEN** 을 대조하세요. 다시 눌러도 결과는 같습니다.',

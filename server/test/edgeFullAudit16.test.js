@@ -13,6 +13,8 @@ import path from 'node:path';
 
 process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'edgefa16-'));
 process.env.DATA_SOURCE = 'mock';
+// 78회차 F2: 중계 점검(runCheck)이 IP 리터럴에 ipBlockReason 을 건다 — 이 파일의 ①·A-3 은 127.0.0.1 시험 서버에 붙으므로 루프백 예외를 켠다(운영 기본은 차단).
+process.env.SSRF_ALLOW_LOOPBACK = 'true';
 test.after(() => { try { fs.rmSync(process.env.CONFIG_DIR, { recursive: true, force: true }); } catch { /* */ } });
 
 test('① T-1 — https 로 등록된 엣지에 토큰을 평문 http 로 보내지 않는다(첫 바이트가 TLS)', async () => {

@@ -36,6 +36,11 @@ export function autoPushLine(a) {
   if (a.skipped) return { text: `${head}: 수집 서버에 보내지 않았습니다 — ${a.skipped}`, tone: 'bad' };
   const total = Number(a.total) || 0; const ok = Number(a.ok) || 0;
   if (!total) return null;
-  if (ok < total) return { text: `${head}: 수집 서버 ${ok}/${total} 성공 — 실패한 서버는 표의 버전 칸에 이유가 있습니다.`, tone: ok ? 'warn' : 'bad' };
-  return { text: `${head}: 수집 서버 ${ok}/${total} 모두 받았습니다.`, tone: 'ok' };
+  // 87회차 ⓒ(86회차 남긴 것): '이미 최신'(upToDate — 실패가 아니다)은 성공 쪽으로 세고 따로 밝힌다 · '설치 대기'(deferred — ok 안의 수)는 덧붙인다.
+  const up = Math.max(0, Number(a.upToDate) || 0); const def = Math.max(0, Number(a.deferred) || 0);
+  const good = Math.min(total, ok + up);
+  const notes = [up ? `이미 최신 ${up}` : '', def ? `설치 대기 ${def}` : ''].filter(Boolean).join(' · ');
+  const tail = notes ? `(${notes})` : '';
+  if (good < total) return { text: `${head}: 수집 서버 ${good}/${total} 성공${tail} — 실패한 서버는 표의 버전 칸에 이유가 있습니다.`, tone: good ? 'warn' : 'bad' };
+  return { text: `${head}: 수집 서버 ${good}/${total} 모두 받았습니다${tail}.`, tone: def ? 'warn' : 'ok' };
 }

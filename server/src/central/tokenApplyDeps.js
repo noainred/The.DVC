@@ -12,6 +12,7 @@ import { readJsonCapped } from '../util/readCapped.js';
 import { recordOutbound } from '../util/outboundStats.js';
 import { pullStats } from './pullStats.js';
 import { capStr } from '../util/capStr.js';
+import { trimTrailingSlashes } from '../util/trimSlashes.js';
 import { pullCollectorByAgent } from '../collector/puller.js';   // v2.826: 사전 점검이 엣지 판을 다시 당긴다
 import { pushUpgradeToCollectors } from '../collector/upgradePush.js';   // v2.826: '엣지 업그레이드 뒤 적용'
 import { resolveBundleBytes, lastBundleReject } from '../upgrade/bundleSource.js';
@@ -26,7 +27,7 @@ const RESP_MAX = 64 * 1024;
  * @returns {Promise<{ ok:boolean, status:number|null, body:object|null, error?:string }>}
  */
 export async function pushTokenToEdge(c, token, { fetchImpl = fetch } = {}) {
-  const url = `${String(c.url || '').replace(/\/+$/, '')}/api/collector/central-token`;
+  const url = `${trimTrailingSlashes(String(c.url || ''))}/api/collector/central-token`;   // 84회차 개선: 끝 '/' 는 선형 루프 하나(정규식 반복 금지 규약 — edgePull 과 같은 함수)
   try {
     const res = await fetchImpl(url, {
       method: 'POST',
@@ -76,7 +77,7 @@ export async function upgradeEdgeNow(c, { resolve = resolveBundleBytes, push = p
 export function realTokenApplyDeps(audit) {
   return {
     issue: issueAgentToken, revoke: revokeAgentToken, listTokens: listAgentTokens, tokensLoadError: agentTokensLoadError,
-    findCollector: findCollectorByName, collectorReason: (n) => { const r = resolveCollectorByName(n); return r.issue === 'ambiguous' ? r.reason : ''; }, statusOf: getCollectorStatus, deployTargets: listTargetsRaw, saveTarget,
+    findCollector: findCollectorByName, collectorReason: (n) => { const r = resolveCollectorByName(n); return r.issue === 'ambiguous' ? r.reason : ''; }, statusOf: getCollectorStatus, deployTargets: listTargetsRaw, saveTarget: (b) => saveTarget(b, { auto: true }),   // 87회차 ⓐ: 배포 기록 맞춤은 자동 경로 — 등록부 손상 동안 새 등록부를 만들지 않는다
     pushEdge: (c, token) => pushTokenToEdge(c, token),
     sshApply: forceAgentCentralToken,
     pullStats,   // 반증 F4: '받아들인 요청' 확인

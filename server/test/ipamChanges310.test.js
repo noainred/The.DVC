@@ -2,7 +2,7 @@
 // 실제 모듈을 호출해 값으로 본다: ARP 연속 횟수 · 변화 감지(기준선 · 부분 결과 · 새 IP · 예약 IP · 이름 · MAC · 되돌아감) ·
 //   알림 묶음(거르기 · 기록만 사유 · 상한 요약 · 줄 상한) · 변화 기록 · 충돌 의심 판정(모름 사유 · 이중화 · 대리 ARP · 연속) ·
 //   알림 엔진 평가(보류 · 규칙 끔) · 발생/해소 기록 · 관리상태 macAlertOff · 알리지 않을 에이전트 · 대장 · 라우트(자식 프로세스 — 목 데이터).
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -10,7 +10,14 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-ipchg-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const CFG = tmpDir('dvc-ipchg-');
 process.env.CONFIG_DIR = CFG;
 process.env.DATA_SOURCE = 'live';
 process.env.IPAM_WRITE_DEBOUNCE_MS = '60000';
@@ -276,7 +283,7 @@ test('⑤ 관리상태 macAlertOff — 불리언 참만 · 그 칸만 있어도 
 
 // ── ⑥ 대장 · 라우트(자식 프로세스 — 목 데이터) ─────────────────────────────────────
 test('⑥ 대장 — VM 행 macConflict · 최근 MAC 변경(macChangedAt · macPrev) · 범위 계정 없음 · /admin/ipam/changes 는 전 법인 관리자만', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-ipchg-route-'));
+  const dir = tmpDir('dvc-ipchg-route-');
   const script = `
     const SRC = ${JSON.stringify(SRC + '/')};
     const express = (await import('express')).default;

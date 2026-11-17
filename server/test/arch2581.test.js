@@ -7,15 +7,22 @@
  *  ② 중앙 storageEdge 는 상태 전용 보고로 장비 목록을 **지우지 않는다**(빈 목록으로 덮으면 엣지 재시작
  *     직후 한 주기 동안 중앙 화면이 빈다).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 test('BUG-D — storage push: 스냅샷 0대면 statusOnly 본문이 중앙에 도착한다(조용한 조기 반환 금지)', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-push2581-'));
+  const dir = tmpDir('dvc-push2581-');
   process.env.CONFIG_DIR = dir;
   const { config } = await import('../src/config.js');
   config.configDir = dir;
@@ -54,7 +61,7 @@ test('BUG-D — storage push: 스냅샷 0대면 statusOnly 본문이 중앙에 �
 });
 
 test('BUG-D — 중앙 storageEdge: 상태 전용 보고는 장비 목록을 지우지 않고 status 만 기록한다', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-edge2581-'));
+  const dir = tmpDir('dvc-edge2581-');
   process.env.CONFIG_DIR = dir;
   const { config } = await import('../src/config.js');
   config.configDir = dir;

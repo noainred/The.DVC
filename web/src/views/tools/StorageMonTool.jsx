@@ -817,7 +817,7 @@ export default function StorageMonTool() {
            것이 원인) 그 host 로 좁힌 뒤 등록 폼을 닫는다. 'devices' 뷰로 되돌려야 표에 나온다. */
         onShowConflict={(c) => { clearFacets(); setDcQuery(c.host || ''); setView('devices'); setForm(null); }} />}
       {canCsv() && importOpen && (
-        <BulkDeviceIo base="/tools/storage" title="스토리지 장비 대량 등록 — CSV · 자유텍스트" keyLabel="host+type"
+        <BulkDeviceIo base="/tools/storage" title="스토리지 장비 대량 등록 — CSV · 자유텍스트" keyLabel="host+type" blankKeeps
           onClose={() => setImportOpen(false)} onDone={() => { setImportOpen(false); load(); }} />
       )}
       {canCsv() && exportOpen && <CsvExport onClose={() => setExportOpen(false)} />}

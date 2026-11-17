@@ -4,8 +4,15 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+test.after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 // v2.322 전체 소스 보안 감사 — 확정 12건 조치 회귀 방지(순수 판정·소스 계약 검사).
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'secaudit-2026-test-'));
+const TMP = tmpDir('secaudit-2026-test-');
 process.env.CONFIG_DIR = TMP;
 
 const SRC = new URL('../src/', import.meta.url);
@@ -65,10 +72,25 @@ test('gpu/settings: atomicWriteFileSync 사용 + 로드 catch preserveCorrupt', 
 
 /* ── [LOW] 자격증명 스토어 6종 preserveCorrupt ── */
 test('자격증명 스토어 6종: 로드 catch 에 preserveCorrupt(FILE) 존재', () => {
-  for (const f of ['idrac/registry.js', 'idrac/scanRanges.js', 'gpu/physicalRegistry.js', 'horizon/horizon.js', 'proxy/registry.js', 'agent/deployRegistry.js']) {
+  for (const f of ['idrac/scanRanges.js', 'gpu/physicalRegistry.js', 'horizon/horizon.js', 'agent/deployRegistry.js']) {
     const s = read(f);
     assert.match(s, /preserveCorrupt/, `${f}: preserveCorrupt import/호출`);
     assert.match(s, /import \{ atomicWriteFileSync, preserveCorrupt \}/, `${f}: import`);
+  }
+  // 결정(78 남긴 것 ①): idrac/registry 는 공용 등록부 읽기(util/registryCore.js makeLoadError.read — 손상이면 preserveCorrupt(사유 포함), 읽기 오류는 원본 유지)로 옮겼다.
+  //   손상 → 보존본 · 읽기 오류 → 원본 유지 · 저장 거절은 decideRegistry3189 가 실제 파일로 고정한다.
+  {
+    const s = read('idrac/registry.js');
+    assert.match(s, /import \{ atomicWriteFileSync \} from '\.\.\/util\/atomicWrite\.js'/, 'idrac/registry.js: 원자적 쓰기');
+    assert.match(s, /loadErr\.read\(FILE, parseServers\)/, 'idrac/registry.js: 공용 등록부 읽기(손상 보존)');
+  }
+  // 76회차 F5: proxy/registry 는 공용 읽기(util/jsonFileLoad makeJsonFileReader — 손상이면 preserveCorrupt, 읽기 오류는 원본 유지)로 옮겼다.
+  //   손상 → 보존본 · 읽기 오류 → 원본 유지는 proxyAudit76 이 실제 파일로 고정한다.
+  {
+    const s = read('proxy/registry.js');
+    assert.match(s, /import \{ atomicWriteFileSync \} from '\.\.\/util\/atomicWrite\.js'/, 'proxy/registry.js: 원자적 쓰기');
+    assert.match(s, /import \{ makeJsonFileReader \} from '\.\.\/util\/jsonFileLoad\.js'/, 'proxy/registry.js: 공용 읽기(손상 보존)');
+    assert.match(s, /makeJsonFileReader\(\(\) => FILE,/, 'proxy/registry.js: 그 파일을 공용 읽기로');
   }
 });
 

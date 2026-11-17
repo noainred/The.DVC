@@ -245,6 +245,8 @@ async function rulesWrite(req, res) {
     res.json({ ok: true, rules: { ...out.value, power: { ...(out.value.power || {}), racksText: R.racksToText(out.value.power?.racks || []) } } });
   } catch (e) {
     if (e?.status === 400) return res.status(400).json({ ok: false, field: e.field || null, reason: String(e.message || e).slice(0, 300) });
+    // 82회차 F3: 규칙 파일 읽기 오류 중 저장 거절(원본을 덮지 않게).
+    if (e?.status === 409) return res.status(409).json({ ok: false, code: e.code || 'settings-unreadable', reason: String(e.message || e).slice(0, 300) });
     res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) });
   }
 }

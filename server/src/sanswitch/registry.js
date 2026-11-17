@@ -14,10 +14,9 @@
  *    공격자 서버로 선제 전송되는 경로 차단.
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { makeLoadError, filterObjectElements, devicesForThisNode as coreDevicesForThisNode, devicesForAgent as coreDevicesForAgent } from '../util/registryCore.js'; // v2.613 PERSIST2613-04
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { ssrfBlockReason } from '../collector/registry.js';
@@ -42,23 +41,31 @@ let _db = null;
 const loadErr = makeLoadError();
 export function registryLoadError() { load(); return loadErr.get(); }
 
+// 결정(78 남긴 것 ①): parse 실패(형식 · 복호 포함 — 예전 try 블록과 같은 범위)만 손상이다.
+const parseDb = (text) => {
+  const raw = JSON.parse(text);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류'); // JSON null·배열은 손상(v2.601 규약 — cvp 와 같게)
+  const p = openSecretsDeep(raw);
+  return { devices: filterObjectElements(p.devices).list }; // v2.613 PERSIST2613-04: 객체 원소만(null 원소가 listDevices 의 구조분해를 죽였다)
+};
+const WHAT = 'SAN 스위치 등록부(sanswitch-devices.json)';
 function load() {
-  if (_db) return _db;
-  try {
-    if (fs.existsSync(FILE)) {
-      const raw = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류'); // JSON null·배열은 손상(v2.601 규약 — cvp 와 같게)
-      const p = openSecretsDeep(raw);
-      _db = { devices: filterObjectElements(p.devices).list }; // v2.613 PERSIST2613-04: 객체 원소만(null 원소가 listDevices 의 구조분해를 죽였다)
-      return _db;
-    }
-  } catch (e) { preserveCorrupt(FILE, e?.message); loadErr.set(e); } // 손상 원본 보존(사유 포함) — 빈 목록 저장이 전 장비 자격증명을 지우는 사고 방지
+  if (_db && !loadErr.readPending()) return _db;
+  // 손상 원본 보존(사유 포함) — 빈 목록 저장이 전 장비 자격증명을 지우는 사고 방지(loadErr.read 가 preserveCorrupt 한다).
+  // 결정(78 남긴 것 ①): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 원본을 그대로 두고 · 이 빈 값을 캐시로 믿지 않고(30초마다 다시 읽음) · 쓰기를 거절한다.
+  const r = loadErr.read(FILE, parseDb);
+  if (r.kind === 'ok') { _db = r.value; return _db; }
   loadErr.checkCorruptOnly(FILE);
   _db = { devices: [] };
   return _db;
 }
+/** 결정(78 남긴 것 ①): 읽기 오류 중의 쓰기 거절(409) 또는 null — 로드를 먼저 한다. */
+export function registryWriteRefusal() { load(); return loadErr.writeRefusal(WHAT); }
+/** 결정(78 남긴 것 ①): 거절이면 던진다(status 409 · code 'registry-unreadable') — 던지는 저장 함수(saveDevice)의 규약에 맞춘다. */
+function assertWritable() { load(); loadErr.assertWritable(WHAT); }
 
 function persist(devices = load().devices) {
+  loadErr.assertWritable(WHAT); // 결정(78 남긴 것 ①): 마지막 방어선 — 어느 경로(엣지 pull · 시드)도 읽기 오류 중에 원본을 덮지 않는다(던진다)
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ version: 1, devices }), null, 2), { mode: 0o600 });
   loadErr.clear(); // v2.612 LEFT2612-01
 }
@@ -128,6 +135,7 @@ export function sanAccessMoved(existing, input = {}) {
 }
 
 export function saveDevice(input = {}) {
+  assertWritable();   // 결정(78 남긴 것 ①): 읽지 못한 빈 목록과 견주지 않는다(중복 · 상한 판정보다 먼저)
   const db = load();
   const issue = deviceInputIssue(input);
   if (issue) throw new Error(issue);
@@ -172,6 +180,7 @@ export function saveDevice(input = {}) {
 }
 
 export function deleteDevice(id) {
+  assertWritable();   // 결정(78 남긴 것 ①): '없는 스위치' 404 보다 먼저
   const db = load();
   const i = db.devices.findIndex((d) => d.id === id);
   if (i < 0) return false;

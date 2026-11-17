@@ -9,7 +9,7 @@
  *
  * ①은 실제 라우터(express) + 실제 denyDemoGuest 를 자식 프로세스에서 띄워 응답 본문으로 본다(소스 grep 아님).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -17,18 +17,25 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 const J = (p) => JSON.stringify(path.join(SRC, p));
 
-process.env.CONFIG_DIR ||= fs.mkdtempSync(path.join(os.tmpdir(), 'audit2768c-pure-'));
+process.env.CONFIG_DIR ||= tmpDir('audit2768c-pure-');
 
 /* ───────────────────────── ① R3-C2-2 데모 가림 ───────────────────────── */
 
 const LEAKS = ['10.77.1.20', 'corp-edge-pl', 'Warsaw', 'vcsa-pl01.corp.example', 'PL-Unity-01', '10.77.3.44', 'ABC1234', 'EDGEREAL-SVR', 'TAGREAL9', 'REALTOKEN', 'tok=abc'];
 
 function runFlowHarness() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2768c-'));
+  const dir = tmpDir('audit2768c-');
   fs.writeFileSync(path.join(dir, 'collectors.json'), JSON.stringify({ collectors: [
     { id: 'corp-edge-pl', name: 'corp-edge-pl', url: 'https://10.77.1.20:4000/sec/path?tok=abc', token: 'REALTOKEN-xyz', datacenter: 'Warsaw' },
     { id: 'mock-Edge-Seoul', name: 'mock-Edge-Seoul', url: 'https://edge-seoul.demo.invalid:4000', token: 'demo-tok-seoul-0001', datacenter: 'Seoul' },
@@ -172,7 +179,7 @@ test('① R3-C2-2 순수 가림 — 입력 키가 없으면 건드리지 않고,
 
 /* ───────────────────────── 자식 프로세스 실행 도우미 ───────────────────────── */
 function runChild(script, extraEnv = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2768c-c-'));
+  const dir = tmpDir('audit2768c-c-');
   const r = spawnSync(process.execPath, ['--experimental-sqlite', '--input-type=module', '-e', script], {
     env: { ...process.env, CONFIG_DIR: dir, DATA_SOURCE: 'live', DB_DIR: '', ...extraEnv(dir) },
     encoding: 'utf8', cwd: path.resolve(SRC, '..'), timeout: 120_000, maxBuffer: 16 * 1024 * 1024,

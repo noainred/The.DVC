@@ -2,7 +2,7 @@
 //   COL-2604-01 Isilon SSH 반올림 용량 · COL-2604-02 PowerMax 부분 SRP · COL-2604-03 PowerMax 어레이 상한/원격 필터 순서 ·
 //   COL-2604-04 FOS PSU 0W · COL-2604-05 bmstor 마운트 지점 아닌 디렉터리 · EDGE2604-03 워커 '완료' 로그와 회신 실패.
 //   ⚠ 픽스처는 전부 합성값이다(공개 저장소 — v2.513 규약). 기준 시각에 Date.now() 를 쓰지 않는다.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -11,7 +11,14 @@ import http from 'node:http';
 import https from 'node:https';
 import { execFileSync, spawnSync } from 'node:child_process';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2604c-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const TMP = tmpDir('audit2604c-');
 process.env.CONFIG_DIR = TMP;
 // 2026-10-09 S-02: 가짜 HTTPS 장비는 openssl 자체서명이다 — 장비 인증서 지문 정책을 observe(처음 본 장비는 기록 후 통과)로 둔다
 // (새 설치 기본은 enforce 라 승인 전에는 자격증명을 보내지 않는다 — security/tlsTrust.js). 이 테스트가 보는 것은 TLS 가 아니다.
@@ -239,7 +246,7 @@ test('COL-2604-01 후속: 실제 라우터 — 내부 증가량·공개 API 응�
   const HERE = path.dirname(new URL(import.meta.url).pathname);
   const SRC = path.resolve(HERE, '../src');
   const J = (rel) => JSON.stringify(path.join(SRC, rel));
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2604c-route-'));
+  const dir = tmpDir('a2604c-route-');
   // ⚠ 증가량 라우트는 '오늘' 을 dayIndex(Date.now()) 로 잡는다 — 표본 시각은 그 일 인덱스의 정오로 둔다
   //   (날 경계에서 12시간 떨어뜨림 — v2.517 규약: 경계에서 떨어뜨려 고정).
   const boot = `

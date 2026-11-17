@@ -2,13 +2,20 @@
 //   1 태그 없는 호스트의 지금 키 = 같은 이름 태그 있는 호스트의 옛 키 → 거짓 불일치 행 · 그 '고정 지우기' 가 쓰이는 고정을 지웠다(onlyIfUnused 로 서버도 막는다)
 //   2 instanceUuid 를 일부 VM 만 못 읽는 법인의 iu: 고정은 판정 보류(uuid-partial) · 3 고정 유지·불필요한 고정 지우기가 충돌 옛 키 고정을 묻지 않고 지웠다
 //   4 법인을 모르는 구성원의 직접 키 불일치 행 · 5 없는 서비스를 가리키는 고정(dangling)이 안 보였다 · 6 수정 연산 감사에 되돌릴 근거
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'svcinv-r7-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const tmp = tmpDir('svcinv-r7-');
 process.env.CONFIG_DIR = tmp;
 
 const { buildInventory } = await import('../src/servicemap/build.js');

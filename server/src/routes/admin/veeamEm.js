@@ -3,7 +3,7 @@
 // 연결 시험은 **저장된 EM 만**(id 로) — 요청 본문의 host 로 저장 비밀번호를 보내지 않는다(server/CLAUDE.md v2.480 규칙).
 import { adminOnly, fullScopeOnlyWith } from './shared.js';
 import { logAudit } from '../../audit.js';
-import { listEms, saveEm, deleteEm, getEmWithSecret, emRegistryLoadError, DEFAULT_EM_PORT } from '../../veeam/em/registry.js';
+import { listEms, saveEm, deleteEm, getEmWithSecret, emRegistryLoadError, DEFAULT_EM_PORT, emRegistryWriteRefusal } from '../../veeam/em/registry.js';
 import { getEmRecord, dropEmResult } from '../../veeam/em/store.js';
 import { dropEmVms, emVmCountsByServer, getEmVms } from '../../veeam/em/vmStore.js';
 import { brHealthy } from '../api/veeam.js';
@@ -85,6 +85,8 @@ export function registerVeeamEm(adminRouter) {
   });
 
   adminRouter.post('/veeam/em', adminOnly, fleetWideOnly, (req, res) => {
+    const refused = emRegistryWriteRefusal();   // 결정(78 남긴 것 ①): 등록부 읽기 오류 중에는 409
+    if (refused) return res.status(409).json(refused);
     try {
       const d = saveEm({ ...(req.body || {}) });
       // 접속처가 바뀌면 옛 접속처의 결과와 인증 정지를 지운다(다른 EM 이다 — secretCarry 와 같은 판단).
@@ -95,6 +97,8 @@ export function registerVeeamEm(adminRouter) {
   });
 
   adminRouter.delete('/veeam/em/:id', adminOnly, fleetWideOnly, (req, res) => {
+    const refused = emRegistryWriteRefusal();   // 결정(78 남긴 것 ①): '찾을 수 없습니다' 404 보다 먼저
+    if (refused) return res.status(409).json(refused);
     const d = getEmWithSecret(req.params.id);
     if (!d || !deleteEm(req.params.id)) return res.status(404).json({ ok: false, reason: 'Enterprise Manager 를 찾을 수 없습니다.' });
     dropEmResult(req.params.id);

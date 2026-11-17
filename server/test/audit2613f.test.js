@@ -149,7 +149,9 @@ test('PERSIST2613-04/DEPS2613-04 — 등록부 5벌은 util/registryCore.js 를 
     const s = code(f);
     assert.match(s, /from '\.\.\/util\/registryCore\.js'/, `${f}: registryCore import`);
     assert.match(s, /filterObjectElements\(/, `${f}: 원소 필터`);
-    assert.match(s, /preserveCorrupt\((?:FILE(?:\(\))?), e(?:\?\.| ?\.)message\)/, `${f}: preserveCorrupt 에 사유를 넘긴다`);
+    // 결정(78 남긴 것 ①): 손상 보존(사유 포함)은 공용 읽기(registryCore makeLoadError.read → jsonFileLoad preserveCorrupt(file, e.message))가 한다 —
+    //   등록부는 그 읽기를 쓴다(읽기 오류를 손상으로 옮기지 않게). 예전 판정(모듈 안 preserveCorrupt(FILE, e.message))은 이 한 줄로 옮겨졌다.
+    assert.match(s, /loadErr\.read\(FILE(?:\(\))?, parseDb\)/, `${f}: 공용 등록부 읽기(손상 보존 · 사유 포함)를 쓴다`);
     assert.ok(!/let _loadError/.test(s), `${f}: 로드 오류 상태 사본`);
   }
   // 코어 판정 단위.

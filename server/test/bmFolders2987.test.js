@@ -2,13 +2,20 @@
 //   ① 잔여 위험 완화: 자동 규칙은 '가린 뒤 이름'(태그 걷어 냄 · 주소 이름 제외)으로만 판정 — 규칙 값으로 가린 태그 · 주소를 맞혀 보는 길 차단
 //   ② 서비스 인벤토리 연결: 물리서버 폴더 규칙(경로 → 서비스) — 판정 2b 순위(고정 다음 · 스캔 라벨 · 이름 규칙 앞) · 겹침 검토 큐 · 미리보기 · 이름 바꾸기 동기화
 //   ③ 화면 지원: 24시간 추이 라우트(범위 · 숫자만) · 입력 다시 읽기(쓰기 계정 · 상한) · 관리 주소(관리자 판본만 · 주소 찾기도 관리자만) · 서비스 연결 표시
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bmfolders86-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const tmp = tmpDir('bmfolders86-');
 process.env.CONFIG_DIR = tmp;
 
 const bs = await import('../src/bmfolders/store.js');

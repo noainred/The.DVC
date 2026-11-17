@@ -34,7 +34,7 @@ export const SSH_WS_MAX_PAYLOAD = 256 * 1024;
 import { Client as SSHClient } from 'ssh2';
 import { resolveTokenUser, sessionInfoOf, touchSessionActivity, authDisabledRole } from '../auth/auth.js';
 import { userHasPermission } from '../auth/permissions.js';
-import { getMapping, getProxyById, touchMapping, resolveProxy } from './registry.js';
+import { getMapping, touchMapping, resolveProxy, mappingProxyOf, MAPPING_PROXY_GONE_TEXT } from './registry.js';
 import { scopedVcenterIds } from '../auth/scope.js';
 import { store } from '../store.js';
 import { mappingTargetScopeIssue } from './targetHostScope.js'; // v2.579: 도메인은 routes 를 import 하지 않는다(ARCH-05)
@@ -364,7 +364,8 @@ export function safeWsClose(ws, code, reason = '') {
 
 // 동시 원격 SSH 세션 상한 + 유휴 타임아웃 — 무제한 세션이 포탈 서버 메모리/FD를 고갈시켜
 // 리붓되는 것을 막는다. 환경변수로 조정.
-const MAX_SESSIONS = envPositive(process.env.REMOTE_MAX_SESSIONS, 80);
+// 79회차: RDP 게이트웨이(guacdTunnel.js)도 같은 값을 쓴다(따로 센다 — 전체 · 계정당).
+export const MAX_SESSIONS = envPositive(process.env.REMOTE_MAX_SESSIONS, 80);
 /**
  * 계정당 동시 SSH 세션 상한(2026-10-09 I-07 검토) — 전체 상한(80)을 한 계정이 다 쓰면 다른 사람이 열 수 없다.
  * 기본 20, 0 = 끔(예전처럼 전체 상한만). 빈 값은 미지정(기본).
@@ -510,6 +511,9 @@ function handleConnection(ws, user, opts = {}) {
       const issue = mappingAccessIssue(user, m);
       // v2.731(A5-02·A1-03): 닫힘 사유는 원인을 가르는 코드다 — 'forbidden' 하나로는 웹이 권한·매핑·호스트키를 구분하지 못했다.
       if (issue) { send({ type: 'status', text: issue }); return closeAll(4403, 'mapping-denied'); }
+      // 76회차 F3: 매핑의 중계가 지워졌으면 접속하지 않는다 — 기본 프록시 + 같은 공개 포트는 다른 매핑의 대상이다(비밀번호를 보내기 전에 닫는다).
+      const viaProxy = mappingProxyOf(m);
+      if (!viaProxy) { send({ type: 'status', text: MAPPING_PROXY_GONE_TEXT }); return closeAll(4404, 'mapping-proxy-gone'); }
       // v2.740(감사 F-10): 빈 비밀번호(또는 문자열 아님)는 대상에 접속하지 않는다 — ssh2 는 문자열이면 '' 도 password 인증을 시도해
       //   대상 계정의 로그인 실패(잠금 카운터)에 쌓인다. 웹은 v2.732 canConnect 로 막지만 구버전 탭·직접 WS 클라이언트는 서버만 막을 수 있다.
       //   SSH 클라이언트를 만들기 전·세션을 세기 전에 닫는다. 닫힘 사유는 웹 remote/sshSend.js remoteCloseReasonText 표와 1:1.
@@ -529,7 +533,7 @@ function handleConnection(ws, user, opts = {}) {
       if (!counted) { activeSessions++; counted = true; countedUser = ukey; _perUser.set(ukey, (_perUser.get(ukey) || 0) + 1); }
       touchMapping(m.id); // reset the 1-day ephemeral expiry clock on use
       session.setMapping(m.id, { host: m.targetHost, port: m.targetPort });
-      const proxyHost = getProxyById(m.proxyId).proxyHost;
+      const proxyHost = viaProxy.proxyHost;
       const host = proxyHost || m.targetHost;     // dial through the assigned proxy frontend
       const port = proxyHost ? m.publicPort : m.targetPort;
       // 보안상 프록시 주소는 노출하지 않고 '대상'만 표시한다.

@@ -14,8 +14,15 @@ import zlib from 'node:zlib';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const TOKEN = 'tok-2999-shared';
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-2999-'));
+const CFG = tmpDir('dvc-2999-');
 process.env.CONFIG_DIR = CFG;
 process.env.CENTRAL_TOKEN = TOKEN;
 process.env.DATA_SOURCE = 'live';
@@ -345,7 +352,7 @@ test('⑤ 엣지 — 실제 워커가 결과 본문에 arpTried · nameStats.mac
 
 // ── ⑥ 대장 · 이력 · CSV · 범위 계정(목 데이터 · 자식 프로세스) · 디스크 로드 ─────────────────
 test('⑥ /tools/ipam 제조사 · MAC 칸(스캔 행 · VM 행) · 범위 계정에는 없음 · /history 의 hw · scan-report.csv mac · mac_src · mac_vendor', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-2999-route-'));
+  const dir = tmpDir('dvc-2999-route-');
   const script = `
     const SRC = ${JSON.stringify(SRC + '/')};
     const express = (await import('express')).default;
@@ -409,7 +416,7 @@ test('⑥ /tools/ipam 제조사 · MAC 칸(스캔 행 · VM 행) · 범위 계�
 });
 
 test('⑥ 디스크의 결과 파일 — 저장된 arp 를 정제해 읽고(꼴이 틀리면 버림 · miss 상한) 같은 MAC 색인을 다시 만든다(자식 프로세스)', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dvc-2999-load-'));
+  const dir = tmpDir('dvc-2999-load-');
   fs.writeFileSync(path.join(dir, 'ipam-scan-results.json'), JSON.stringify({
     '10.1.0.1': { ip: '10.1.0.1', openPorts: [22], services: ['SSH'], lastSeen: 100, agent: 'e', arp: { v: 'aa:00:00:00:00:01', at: 90, miss: 99 } },
     '10.1.0.2': { ip: '10.1.0.2', openPorts: [22], services: ['SSH'], lastSeen: 100, agent: 'e', arp: { v: 'AA:00:00:00:00:01', at: 'x' } },

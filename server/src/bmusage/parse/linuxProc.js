@@ -217,8 +217,11 @@ export function parseNetInfo(lines = []) {
      *   `virtual` 로 밝힌다(처리량은 그대로 낸다). 넷째 필드가 없는 옛 출력은 예전처럼 속도를 믿는다(판정 근거 없음).
      */
     const virtual = f[3] === '0';
+    // 80회차 개선(추정 근거 — 실장비 미확인): 'SPEED_UNKNOWN' 을 부호 없이 낸 값(4294967295 — 옛 커널의 %u 출력) · u16 -1(65535)은 링크 속도가 아니다
+    //   (4.29 Pbit/s · 65.5 Gbit/s 인 이더넷 등급은 없다). 그대로 쓰면 사용률이 늘 0% 근처('부하 없음')가 된다 → 모르는 속도(null — 처리량만).
+    const unknownSpeed = mbit != null && (mbit >= 4_294_967_295 || mbit === 65_535);
     map[f[0]] = {
-      bitsPerSec: !virtual && mbit != null && mbit > 0 ? mbit * 1e6 : null,
+      bitsPerSec: !virtual && !unknownSpeed && mbit != null && mbit > 0 ? mbit * 1e6 : null,
       state: f[2] && f[2] !== '-' ? f[2] : '',
       ...(virtual ? { virtual: true } : {}),
     };

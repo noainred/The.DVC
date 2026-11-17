@@ -7,13 +7,20 @@
  *  ⑤ 표본 이력 — 같은 at 은 한 번 · 기간 창 · 상한 · 스냅샷에서 사라진 호스트 정리
  *  ⑥ 수집기 — FC 호스트만 · 묶음 · 캐시 · 카운터 없음 · 실패 격리(실제 refreshStorPath 호출)
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'storpath2933-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+process.env.CONFIG_DIR = tmpDir('storpath2933-');
 const P = await import('../src/storpath/parse.js');
 const I = await import('../src/sanswitch/ipf.js');
 const A = await import('../src/sanswitch/attribution.js');

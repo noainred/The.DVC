@@ -4,13 +4,20 @@
 //   고친 곳: 물리서버 폴더 메인 servers · missing · mismatch · CSV · ghost.prune 미리보기 / 서비스 인벤토리 members · candidates · CSV ·
 //           queues(묶음 표본 · 키 · 유령) · ghosts.prune 미리보기. 비교는 `svcInventory.js visibleOrder` 하나(찾기 `/search` 와 같은 것).
 //   바뀌지 않는 것: 전체 범위 관리자 판본(수집 순서 그대로) · 판정(resolved · 집계 — 판본마다 달라지지 않는다).
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'maskedorder90-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const tmp = tmpDir('maskedorder90-');
 process.env.CONFIG_DIR = tmp;
 
 const bs = await import('../src/bmfolders/store.js');

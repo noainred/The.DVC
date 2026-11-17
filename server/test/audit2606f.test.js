@@ -6,7 +6,7 @@
  *  DB2606-03 RMA 점검·실행 이력·SAN 점검 이력 DB 잠금 래치 금지 · DB2606-05 RMA NOCASE 인덱스 + testHistory hours 상한.
  * 기준 시각: 보존 경계 테스트는 경계에서 수십 일 떨어뜨린다(루트 CLAUDE.md v2.517).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -17,7 +17,14 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2606f-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const TMP = tmpDir('audit2606f-');
 process.env.CONFIG_DIR = TMP;
 process.env.PRUNE_CHUNK_ROWS = '500';            // 청크 사이 양보를 작은 표본으로 관찰한다
 process.env.SSRF_ALLOW_LOOPBACK = 'true';        // 목 LLM 서버(127.0.0.1)
@@ -39,7 +46,7 @@ async function countYields(p) {
 
 function runChild(code, env = {}) {
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', code], {
-    cwd: SERVER, env: { ...process.env, CONFIG_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'a2606f-c-')), ...env }, encoding: 'utf8', timeout: 90_000,
+    cwd: SERVER, env: { ...process.env, CONFIG_DIR: tmpDir('a2606f-c-'), ...env }, encoding: 'utf8', timeout: 90_000,
   });
   if (r.status !== 0) throw new Error(`child 실패(${r.status}): ${r.stderr}`);
   return JSON.parse(r.stdout.trim().split('\n').pop());

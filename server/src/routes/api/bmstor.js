@@ -2,7 +2,7 @@
 // 서버/그룹/전체 합산(총·사용·가용)을 보여준다. 전부 adminOnly(SSH 자격증명·호스트 구성).
 import { requireRole } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
-import { listBmServers, listBmServersRaw, saveBmServer, removeBmServer, getBmSettings, saveBmSettings, bmServerInputIssue } from '../../bmstor/registry.js';
+import { listBmServers, listBmServersRaw, saveBmServer, removeBmServer, getBmSettings, saveBmSettings, bmServerInputIssue, registryWriteRefusal } from '../../bmstor/registry.js';
 import { getBmLatest, bmCollectNow, bmPollerStatus } from '../../bmstor/poller.js';
 import { isDemoGuest } from '../../auth/demoGuest.js'; // v2.720(감사 R1-03)
 import { aggregate } from '../../bmstor/agg.js';
@@ -561,7 +561,7 @@ export function registerBmStorage(api) {
     const r = saveBmServer(bind.binds ? { ...rest, bindApproved: true } : rest);
     if (r.ok && bind.binds) logAudit({ user: req.user?.username, action: '베어메탈 서버 인증 참조 묶음', target: r.server?.host || '', detail: JSON.stringify({ keyRef: rest.keyRef || '', credRef: rest.credRef || '', osAuth: rest.osAuth || '' }).slice(0, 200), ip: req.ip || '' });
     if (r.ok) logAudit({ user: req.user?.username, action: '베어메탈 스토리지 서버 저장', target: r.server?.host || '', detail: `mounts ${(r.server?.mounts || []).length}개${r.server?.agent ? ` · 엣지 ${r.server.agent}` : ''}`, ip: req.ip || '' });
-    res.status(r.ok ? 200 : 400).json(r);
+    res.status(r.ok ? 200 : (r.status || 400)).json(r);   // 결정(78 남긴 것 ①): 등록부 읽기 오류는 409
   });
 
   /*
@@ -594,14 +594,14 @@ export function registerBmStorage(api) {
   api.delete('/tools/bm-storage/servers/:id', adminOnly, fullScopeOnly, (req, res) => {
     const r = removeBmServer(req.params.id);
     if (r.ok) logAudit({ user: req.user?.username, action: '베어메탈 스토리지 서버 삭제', target: req.params.id, ip: req.ip || '' });
-    res.status(r.ok ? 200 : 404).json(r);
+    res.status(r.ok ? 200 : (r.status || 404)).json(r);   // 결정(78 남긴 것 ①): 등록부 읽기 오류는 409
   });
 
   // 수집 주기 저장(분) — 폴러가 30초 틱마다 설정을 다시 읽으므로 재기동 없이 반영된다.
   api.put('/tools/bm-storage/settings', adminOnly, fullScopeOnly, (req, res) => {
     const r = saveBmSettings(req.body || {});
     if (r.ok) logAudit({ user: req.user?.username, action: '베어메탈 스토리지 주기 변경', target: `${r.settings.intervalMinutes}분`, ip: req.ip || '' });
-    res.status(r.ok ? 200 : 400).json(r);
+    res.status(r.ok ? 200 : (r.status || 400)).json(r);   // 결정(78 남긴 것 ①): 등록부 읽기 오류는 409
   });
 
   /* ── 서버 CSV 일괄 관리(v2.341, 사용자 요구 — 다수 서버 등록). 수집 서버 CSV(v2.338)와 동일 골격:
@@ -628,6 +628,8 @@ export function registerBmStorage(api) {
   });
 
   api.post('/tools/bm-storage/import', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
+    const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①): 읽기 오류 중에는 409 — 빈 목록과 대조하면 전부 '추가' 로 보인다(드라이런 포함)
+    if (refused) return res.status(409).json(refused);
     const { rows, error } = parseBmServersCsv(String(req.body?.csv || ''));
     if (error) return res.status(400).json({ ok: false, reason: error });
     if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });

@@ -20,6 +20,7 @@ import crypto from 'node:crypto';
 import { config } from '../../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js';
 import { makeSettingsLoadError } from '../../util/settingsLoadError.js';
+import { readJsonFile } from '../../util/jsonFileLoad.js';
 import { SCHED_KINDS, ONCE_MAX_MIN, RECUR_MAX_MIN, parseLocal, parseTime, localToUtc, validTz, DEFAULT_TZ, MIN, DAY, tzTransitions } from './schedule.js';
 import { SCOPES, TARGET_KINDS, TAG_RE, windowStatus, expiresAt, effectiveOccurrences, matchTarget } from './judge.js';
 
@@ -327,7 +328,8 @@ function loadAll() {
   let raw;
   try { raw = fs.readFileSync(FILE(), 'utf8'); }
   catch (e) {
-    if (e?.code !== 'ENOENT') throw fail(503, 'settingsUnreadable', '정비 창 파일을 읽지 못했습니다.');
+    // 77회차 개선: 읽기 오류도 로드 오류 상태(서비스 점검 · 중앙 배포 503 표지)에 올린다 — 원본은 옮기지 않는다(예전과 같다).
+    if (e?.code !== 'ENOENT') { _err.readError(e); throw fail(503, 'settingsUnreadable', '정비 창 파일을 읽지 못했습니다(읽기 오류 — 원본은 그대로 있습니다).'); }
     _err.missing();
     if (_err.get()) throw fail(503, 'settingsUnreadable', _err.get().reason);
     return { v: 1, seq: 0, items: [] };
@@ -575,9 +577,13 @@ export function loadDeployed(now = Date.now()) {
   let st = null;
   try { st = fs.statSync(DEPLOYED_FILE()); } catch { return null; }
   if (_dep && _dep.m === st.mtimeMs && _dep.s === st.size && !(_dep.data.at > now + DEPLOY_FUTURE_SKEW_MS)) return _dep.data;
+  // 77회차 F4(재현): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전에는 catch 하나로 받아 원본을 보존본으로 옮겼다(다음 저장의 history 이어 쓰기도 잃음).
+  //   판정은 공용 readJsonFile(읽기 단계 실패 = read-error · parse/형식 실패 = corrupt → 보존). 못 읽음은 어느 쪽이든 억제하지 않는 쪽(unreadable)이다.
+  const rr = readJsonFile(DEPLOYED_FILE(), { parse: (text) => { const x = JSON.parse(text); if (!x || typeof x !== 'object' || !Array.isArray(x.items)) throw new Error('형식이 다릅니다'); return x; } });
+  if (rr.kind === 'missing') { _dep = null; return null; }
+  if (rr.kind !== 'ok') { _dep = null; return { at: 0, sig: '', items: [], history: [], unreadable: true, ...(rr.kind === 'read-error' ? { readError: true } : {}) }; }
   try {
-    const o = JSON.parse(fs.readFileSync(DEPLOYED_FILE(), 'utf8'));
-    if (!o || typeof o !== 'object' || !Array.isArray(o.items)) throw new Error('형식이 다릅니다');
+    const o = rr.value;
     const items = o.items.map((x) => normalizeWindow(x)).filter(Boolean).map((w) => ({ ...w, origin: 'central' }));
     // history(3회차 D2) — 같은 정규화 · 지난 구간 전용 표지(history: true — judge.activeOccurrence 가 지금 판정에서 뺀다) · 상한 다시 · 없거나 형식 밖이면 [](옛 배포본)
     const ids = new Set(items.map((w) => w.id));

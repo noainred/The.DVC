@@ -7,6 +7,7 @@
 //  R4  스케줄 서명 대상에 인스턴스(v2) — 같은 법인의 다른 인스턴스로 옮기면 불일치 · 옛(v1) 서명은 배정 지문(v2)이 바뀌어 곧바로 다시 내려간다.
 //  R5  원격 명령 위험 등급 넓힘 — tcp-send · udp-send · http-request(POST · 본문)도 소유자 등급 + 본인 OTP(서버 · 웹 판정 대조).
 //  R6  RMA 비밀번호 설정 · 해제 · 원격 배포도 소유자 등급 + 본인 OTP.
+//  R7  (R6 이 남긴 것 — '권장안대로') 원격 인스턴스 제거(/tools/rma/deploy/remove)도 같은 게이트 · 조회(/deploy/list)는 그대로 · 웹 제거 버튼도 OTP · 잠금.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -23,12 +24,13 @@ process.env.AUTH_ENABLED = 'true';
 delete process.env.RMA_PASSWORD;
 
 const { generateSecret, generateToken } = await import('../src/auth/totp.js');
-const OTP_SECRETS = { own: generateSecret(), adm: generateSecret() };
+const OTP_SECRETS = { own: generateSecret(), adm: generateSecret(), rm: generateSecret() };
 fs.writeFileSync(path.join(CFG, 'users.json'), JSON.stringify({ users: [
   { username: 'own', role: 'admin', totpEnabled: true, totpSecret: OTP_SECRETS.own },
   { username: 'adm', role: 'admin', totpEnabled: true, totpSecret: OTP_SECRETS.adm },
+  { username: 'rm', role: 'admin', totpEnabled: true, totpSecret: OTP_SECRETS.rm },   // R7 전용 소유자(계정당 OTP 3번 — own 은 R5 · R6 이 다 쓴다)
 ] }));
-fs.writeFileSync(path.join(CFG, 'security-session.json'), JSON.stringify({ settingsOwners: ['own'] }));
+fs.writeFileSync(path.join(CFG, 'security-session.json'), JSON.stringify({ settingsOwners: ['own', 'rm'] }));
 // 같은 카운터의 코드는 한 번만 통과한다(minCounter · 창 ±1) — 쓸 때마다 다음 카운터(지금-1 부터 지금+1 까지 — 계정당 3번)를 쓴다.
 const otpLast = {};
 const otpOf = (u) => {
@@ -162,7 +164,7 @@ before(async () => {
   const { registerRma } = await import('../src/routes/api/rma.js');
   const app = express();
   app.use(express.json());
-  const USERS = { own: { username: 'own', role: 'admin' }, adm: { username: 'adm', role: 'admin' } };
+  const USERS = { own: { username: 'own', role: 'admin' }, adm: { username: 'adm', role: 'admin' }, rm: { username: 'rm', role: 'admin' } };
   app.use((req, _res, next) => { if (req.headers['x-u']) req.user = USERS[req.headers['x-u']] || null; next(); });
   const api = express.Router();
   registerRma(api);
@@ -231,4 +233,26 @@ test('R6 RMA 비밀번호 설정 · 해제 · 원격 배포는 소유자 등급 
   // 게이트를 지나면 배포 입력 검증으로 간다(접속 전 400 — 빈 인스턴스)
   const depOk = await call('own', '/tools/rma/deploy', { host: '10.0.0.8', username: 'root', password: 'x', instances: [], otp: otpOf('own') });
   assert.notEqual(depOk.s, 403, depOk.t);
+});
+
+test('R7 원격 인스턴스 제거는 배포와 같은 소유자 등급 + 본인 OTP · 조회는 그대로 · 웹 제거 버튼도 같은 게이트', async () => {
+  const body = { host: '10.0.0.9', username: 'root', password: 'x', name: 'default' };
+  const adm = await call('adm', '/tools/rma/deploy/remove', { ...body, otp: otpOf('adm') });
+  assert.equal(adm.s, 403, adm.t); assert.equal(adm.j.requiredOwner, true, '소유자가 아닌 admin 이 대상 서버의 RMA 를 지울 수 있다');
+  const noOtp = await call('rm', '/tools/rma/deploy/remove', body);
+  assert.equal(noOtp.s, 403, noOtp.t); assert.equal(noOtp.j.needOtp, true);
+  // 게이트를 지나면 제거 입력 검증으로 간다(형식 밖 인스턴스 이름 — SSH 접속 전에 끝난다)
+  const ok = await call('rm', '/tools/rma/deploy/remove', { ...body, name: '../x', otp: otpOf('rm') });
+  assert.equal(ok.s, 200, ok.t); assert.equal(ok.j.ok, false); assert.match(ok.j.reason, /인스턴스 이름 형식/);
+  // 조회(상태를 바꾸지 않음)는 예전처럼 admin + 전체 범위 — OTP 없이 입력 검증까지 간다(계정 빈 값 → 접속 전 400)
+  const list = await call('adm', '/tools/rma/deploy/list', { host: '10.0.0.9', username: '', password: 'x' });
+  assert.equal(list.s, 400, list.t); assert.equal(list.j.requiredOwner, undefined);
+  // 웹: 배포 창의 제거 버튼도 같은 게이트(잠금 · OTP 칸 · 보낼 때 otp)
+  const { stripComments } = await import('./_stripComments.js');
+  const src = stripComments(fs.readFileSync(new URL('../../web/src/views/tools/RemoteCommand.jsx', import.meta.url), 'utf8'));
+  const start = src.indexOf('const doRemove = async');
+  const fn = src.slice(start, src.indexOf('return (', start));
+  assert.ok(start > 0 && /dgate\.locked/.test(fn) && /rmOtp\.length !== 6/.test(fn) && /otp: sentOtp/.test(fn), '웹 제거 요청이 OTP · 잠금을 보지 않는다');
+  assert.match(src, /onClick=\{\(\) => doRemove\(i\.name\)\}/);
+  assert.match(src, /disabled=\{!!busy \|\| dgate\.locked\} onClick=\{\(\) => doRemove/, '잠긴 계정에게 제거 버튼이 열려 있다');
 });

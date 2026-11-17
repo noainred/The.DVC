@@ -2,8 +2,8 @@
  * 원격 명령(RMA) 라우트(v2.416) — 특수기능 '원격 명령 실행(RMA)' 화면용.
  *
  * 접근 규약: 전부 admin 전용(원격 서버에서 명령을 실행하는 기능 — 조회도 admin) · 상태 변경 · 임의 실행 명령과 셸 점검 저장은
- * 설정 소유자 등급 + 본인 OTP(결정(56~75 남긴 것) — 아래 dangerRunGate · shellScheduleGate). 상태변경
- * (실행·비밀번호·분배 설정·배포)은 감사로그. 실행 요청은 프리셋 id + 파라미터만 받아
+ * 설정 소유자 등급 + 본인 OTP(결정(56~75 남긴 것) — 아래 dangerRunGate · shellScheduleGate · 비밀번호 · 배포 · 인스턴스 제거). 상태변경
+ * (실행·비밀번호·분배 설정·배포·제거)은 감사로그. 실행 요청은 프리셋 id + 파라미터만 받아
  * 카탈로그로 검증하고(commands.js), 엣지가 다시 검증한다.
  */
 import { requireRole } from '../../auth/auth.js';
@@ -244,7 +244,9 @@ api.post('/tools/rma/deploy', adminOnly, fullScopeOnly, ownerOtpThen, async (req
   res.json(r);
 });
 
-api.post('/tools/rma/deploy/remove', adminOnly, fullScopeOnly, async (req, res) => {
+/** 인스턴스 제거(SSH root — 유닛 중지 · 비활성 · env 삭제). Body: { host, port, username, password, name } */
+// 결정(반증 G1a 남긴 것 — 사용자 '권장안대로'): 대상 서버에서 RMA 를 지우는 상태 변경이라 배포와 같은 소유자 등급 + 본인 OTP(조회 /deploy/list 는 그대로).
+api.post('/tools/rma/deploy/remove', adminOnly, fullScopeOnly, ownerOtpThen, async (req, res) => {
   const b = req.body || {};
   const t = targetOf(b);
   if (t.error) return res.status(400).json({ ok: false, reason: t.error });

@@ -16,7 +16,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../../util/atomicWrite.js';
+import { makeJsonFileReader } from '../../util/jsonFileLoad.js';
+import { parseJsonObject } from '../../util/jsonObject.js';
 import { maintStateFor, coverIntervals, scopeOccOf, activeOccurrence, SCOPES, RECUR_CONFIRM_DAYS } from './judge.js';
 import { windowsForJudge, windowFactsNoCache, DEPLOY_TTL_MS } from './store.js';
 import { maxMinOf, MIN, DAY } from './schedule.js';
@@ -88,31 +90,65 @@ export function exclusionFor(judge, targetOf = () => null) {
 /* ── 억제 계수 · 점검 ─────────────────────────────────────────────── */
 let _stats = null;   // { v, byWindow: { id: { alerts, after, hold, focus, collect, collectFail, at } }, leak: { n, last, at } , unreadable? }
 let _cycle = [];     // 이번 주기에 적용한 억제 [{ scope, key, until, since, at, windowIds }]
-function loadStats() {
-  if (_stats) return _stats;
-  try {
-    if (!fs.existsSync(STATS_FILE())) { _stats = { v: 1, byWindow: {}, leak: { n: null, last: 0, at: 0 } }; return _stats; }
-    const o = JSON.parse(fs.readFileSync(STATS_FILE(), 'utf8'));
-    if (!o || typeof o !== 'object' || Array.isArray(o)) throw new Error('객체가 아닙니다');
-    const bw = {};
-    for (const [id, x] of Object.entries(o.byWindow && typeof o.byWindow === 'object' ? o.byWindow : {}).slice(0, STATS_MAX)) {
-      if (!/^mw-[a-z0-9]{6,32}$/.test(id) || !x || typeof x !== 'object') continue;
-      bw[id] = Object.fromEntries(['alerts', 'after', 'hold', 'focus', 'collect', 'collectFail', 'at'].map((k) => [k, Number.isFinite(Number(x[k])) ? Number(x[k]) : 0]));
-    }
-    const lk = o.leak && typeof o.leak === 'object' ? o.leak : {};
-    // 점검 묶음별 결과(7회차 C1 — leakBy: 'cycle' · 'hold'). 없으면(옛 파일) 합친 값 하나만 있는 것으로 본다.
-    const by = {};
-    for (const [g, x] of Object.entries(o.leakBy && typeof o.leakBy === 'object' ? o.leakBy : {}).slice(0, 8)) {
-      if (!AUDIT_GROUPS.includes(g) || !x || typeof x !== 'object' || !Number(x.at)) continue;
-      by[g] = { n: Number(x.n) || 0, last: Number(x.last) || 0, at: Number(x.at) || 0 };
-    }
-    // 점검한 적이 없으면 n 은 null(‘0 = 정상’ 이 아니다 — 화면은 ‘아직 점검한 주기가 없습니다’)
-    _stats = { v: 1, byWindow: bw, leakBy: by, leak: { n: Number(lk.at) ? (Number(lk.n) || 0) : null, last: Number(lk.last) || 0, at: Number(lk.at) || 0 } };
-  } catch (e) {
-    preserveCorrupt(STATS_FILE(), String(e?.message || e));
-    _stats = { v: 1, byWindow: {}, leak: { n: null, last: 0, at: 0 }, unreadable: Date.now() };
+/** 파일 글 → 계수 상태(형식 검사 포함 — 던지면 손상: jsonFileLoad 가 보존본으로 옮긴다). */
+function parseStats(text) {
+  const o = parseJsonObject(text);
+  const bw = {};
+  for (const [id, x] of Object.entries(o.byWindow && typeof o.byWindow === 'object' ? o.byWindow : {}).slice(0, STATS_MAX)) {
+    if (!/^mw-[a-z0-9]{6,32}$/.test(id) || !x || typeof x !== 'object') continue;
+    bw[id] = Object.fromEntries(['alerts', 'after', 'hold', 'focus', 'collect', 'collectFail', 'at'].map((k) => [k, Number.isFinite(Number(x[k])) ? Number(x[k]) : 0]));
   }
+  const lk = o.leak && typeof o.leak === 'object' ? o.leak : {};
+  // 점검 묶음별 결과(7회차 C1 — leakBy: 'cycle' · 'hold'). 없으면(옛 파일) 합친 값 하나만 있는 것으로 본다.
+  const by = {};
+  for (const [g, x] of Object.entries(o.leakBy && typeof o.leakBy === 'object' ? o.leakBy : {}).slice(0, 8)) {
+    if (!AUDIT_GROUPS.includes(g) || !x || typeof x !== 'object' || !Number(x.at)) continue;
+    by[g] = { n: Number(x.n) || 0, last: Number(x.last) || 0, at: Number(x.at) || 0 };
+  }
+  // 점검한 적이 없으면 n 은 null(‘0 = 정상’ 이 아니다 — 화면은 ‘아직 점검한 주기가 없습니다’)
+  return { v: 1, byWindow: bw, leakBy: by, leak: { n: Number(lk.at) ? (Number(lk.n) || 0) : null, last: Number(lk.last) || 0, at: Number(lk.at) || 0 } };
+}
+/**
+ * 77회차 F5(재현): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전에는 catch 하나로 받아 원본을 보존본으로 옮기고 0 부터 세어 다음 저장이 0 으로 덮었다.
+ *   판정은 공용 util/jsonFileLoad.js: 읽기 오류면 원본을 옮기지도 **덮지도 않고**(saveStats 건너뜀) 메모리 계수로 돌며 30초 간격으로 다시 읽는다 — 읽히면 파일 값에
+ *   그동안 메모리에 센 것을 합친다(79회차 — 예전에는 버렸다 · mergeStats). 손상은 예전과 같다(보존 + 0 부터 · unreadable 표지 — 메모리 증분은 그 위에 합친다).
+ */
+const _statsReader = makeJsonFileReader(STATS_FILE, { tag: 'maintenance-stats', parse: parseStats });
+let _statsReadErr = false;
+function loadStats() {
+  if (_stats && !_statsReadErr) return _stats;
+  const r = _statsReader.read();
+  if (r.kind === 'read-error') {
+    if (!_stats) _stats = { v: 1, byWindow: {}, leak: { n: null, last: 0, at: 0 }, unreadable: Date.now(), readError: true };
+    _statsReadErr = true;
+    return _stats;
+  }
+  // 79회차 반증(재현): 읽기 오류 동안 메모리에 센 계수 · 점검 결과를 회복 때 파일 값으로 **덮어** 버렸다 — 그동안 찾은 ‘창 끝 뒤 억제’(leak > 0)가
+  //   옛 파일 값(0 · 정상)으로 돌아갔다(안전장치 신호 유실). 이제 회복하면 파일 값에 메모리 증분을 **합친다**(계수는 더하고 · 점검 결과는 더 새 것).
+  const mem = _statsReadErr && _stats ? _stats : null;
+  _statsReadErr = false;
+  if (r.kind === 'ok') _stats = r.value;
+  else if (r.kind === 'missing') _stats = { v: 1, byWindow: {}, leak: { n: null, last: 0, at: 0 } };
+  else _stats = { v: 1, byWindow: {}, leak: { n: null, last: 0, at: 0 }, unreadable: Date.now() };
+  if (mem) _stats = mergeStats(_stats, mem);
   return _stats;
+}
+/** 79회차: 파일 값(base) + 읽기 오류 동안의 메모리 값(mem) — 창별 계수는 더하고(at 은 늦은 쪽) · 점검 결과(leak · leakBy)는 at 이 늦은 쪽. 표지(unreadable)는 base 것. */
+export function mergeStats(base, mem) {
+  const out = { ...base, byWindow: { ...(base.byWindow || {}) } };
+  for (const [id, c] of Object.entries(mem?.byWindow || {})) {
+    const b = out.byWindow[id];
+    if (!b) { out.byWindow[id] = { ...c }; continue; }
+    const m = { ...b };
+    for (const k of ['alerts', 'after', 'hold', 'focus', 'collect', 'collectFail']) m[k] = (Number(b[k]) || 0) + (Number(c[k]) || 0);
+    m.at = Math.max(Number(b.at) || 0, Number(c.at) || 0);
+    out.byWindow[id] = m;
+  }
+  const by = { ...(base.leakBy || {}) };
+  for (const [g, x] of Object.entries(mem?.leakBy || {})) if (!by[g] || (Number(x?.at) || 0) > (Number(by[g].at) || 0)) by[g] = x;
+  if (Object.keys(by).length) out.leakBy = by;
+  if ((Number(mem?.leak?.at) || 0) > (Number(base.leak?.at) || 0)) out.leak = { ...mem.leak };
+  return out;
 }
 /** 억제 한 건을 센다(창마다). kind: alerts(발송 막음) · after(창 뒤 1회 발송) · hold(전이 보류) · focus(자동 집중 막음) · collect(수집 건너뜀) · collectFail(창 안 수집 실패). */
 export function countSuppression(kind, windowIds = [], { now = Date.now() } = {}) {
@@ -205,6 +241,7 @@ export async function auditCycle({ now = Date.now(), factsOf = windowFactsNoCach
 }
 function saveStats() {
   const st = loadStats();
+  if (_statsReadErr) return;   // 77회차 F5: 읽기 오류 중에는 원본(못 읽었을 뿐 온전할 수 있다)을 메모리 계수로 덮지 않는다
   const ids = Object.keys(st.byWindow);
   if (ids.length > STATS_MAX) for (const id of ids.sort((a, b) => (st.byWindow[a].at || 0) - (st.byWindow[b].at || 0)).slice(0, ids.length - STATS_MAX)) delete st.byWindow[id];
   try { atomicWriteFileSync(STATS_FILE(), JSON.stringify({ v: 1, byWindow: st.byWindow, leak: st.leak, ...(st.leakBy && Object.keys(st.leakBy).length ? { leakBy: st.leakBy } : {}), at: Date.now() }), { mode: 0o600 }); } catch { /* 다음 주기에 다시 */ }
@@ -212,8 +249,8 @@ function saveStats() {
 /** 화면 · 봉투용 사본. */
 export function maintStats() {
   const st = loadStats();
-  return { byWindow: JSON.parse(JSON.stringify(st.byWindow)), leak: { ...st.leak }, ...(st.unreadable ? { unreadable: st.unreadable } : {}) };
+  return { byWindow: JSON.parse(JSON.stringify(st.byWindow)), leak: { ...st.leak }, ...(st.unreadable ? { unreadable: st.unreadable } : {}), ...(st.readError ? { readError: true } : {}) };
 }
 export function flushMaintStats() { saveStats(); }
-export function _resetMaintRuntimeForTest({ unlink = true } = {}) { _stats = null; _cycle = []; if (unlink) { try { fs.unlinkSync(STATS_FILE()); } catch { /* */ } } }
+export function _resetMaintRuntimeForTest({ unlink = true } = {}) { _stats = null; _cycle = []; _statsReadErr = false; _statsReader.reset(); if (unlink) { try { fs.unlinkSync(STATS_FILE()); } catch { /* */ } } }
 export { SCOPES };

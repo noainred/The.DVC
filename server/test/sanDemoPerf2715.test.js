@@ -3,13 +3,20 @@
  *           실제 집계와 같은 응답 모양이어야 화면·trafficTotal 이 그대로 동작한다.
  *          ② 사용량 조회가 감시 시한(SANSW_PERF_QUERY_MAX_MS)을 넘으면 조회 엔진만 재시작하고, 뒤에 줄 선 조회는 이어서 돈다.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sandemo2715-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+process.env.CONFIG_DIR = tmpDir('sandemo2715-');
 process.env.SANSW_PERF_QUERY_TTL_MS = '0';
 process.env.SANSW_PERF_QUERY_MAX_MS = '10000';   // 하한 10초
 

@@ -18,8 +18,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js';
+import { atomicWriteFileSync, safeLoadText } from '../../util/atomicWrite.js';
 import { makeLoadError, filterObjectElements } from '../../util/registryCore.js';
+import { makeJsonFileReader, readJsonFile } from '../../util/jsonFileLoad.js';
 import { openSecretsDeep, sealSecretsDeep, decryptFailureCount, loadSecretsPolicy } from '../../security/secretVault.js';
 import { parsePrivateKey, PASSPHRASE_MAX } from './keyParse.js';
 import { sshHostKeyFingerprint } from '../../proxy/sshExec.js';
@@ -70,6 +71,12 @@ const loadErr = makeLoadError();
 //   봉인본이 '' 로 덮인다. 이 파일은 백업 · 엣지 push 에 개인키를 싣지 않으므로 봉인본이 **유일한 사본**이다 → 복호 실패가 하나라도 있으면 쓰기를 거절한다.
 let undecryptable = 0;
 export function keyStoreLoadError() { load(); return loadErr.get(); }
+/** 못 읽은 사유 문구(읽기 오류 · 손상은 조치가 다르다 — 77회차 F1). 라우트 503 과 쓰기 거절이 같은 문구. */
+export function keyStoreUnreadableReason(e = loadErr.get(), what = '읽지 못했습니다') {
+  return e?.readError
+    ? `SSH 키 저장소(${KEY_FILE_NAME})를 읽지 못해(읽기 오류 — 손상이 아니라 원본은 그대로 있습니다) ${what} — 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저절로 풀립니다).`
+    : `SSH 키 저장소(${KEY_FILE_NAME})를 읽지 못해 ${what} — 손상 보존본(${KEY_FILE_NAME}.corrupt.*)을 확인해 되돌린 뒤 다시 시도하세요.`;
+}
 
 function normKey(k) {
   const id = t(k.id, 32);
@@ -103,33 +110,56 @@ function normAccount(a) {
   };
 }
 
+/**
+ * 77회차 F1(재현): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전에는 catch 하나로 받아 preserveCorrupt 가 온전한 원본(봉인본 — 백업에 개인키가 없어 **유일한 사본**)을
+ *   `.corrupt.*` 로 옮겼고, 권한을 바로잡아도 저장소가 빈 채(보존본만 남음 → 재시작 뒤에도 오류) 키 인증 수집이 전부 끊겼다 — 사람이 보존본을 되돌리고 ‘다시 읽기’ 를 해야 풀렸다.
+ *   이제 판정은 공용 `util/jsonFileLoad.js`(읽기 단계 실패 = read-error · parse 실패 = corrupt): 읽기 오류면 원본을 그대로 두고 · 쓰기를 거절하고(loadErr.readError) ·
+ *   READ_RETRY_MS(30초) 간격으로 다시 읽어 읽히면 스스로 풀린다(간격 안의 호출은 디스크를 건드리지 않는다 — 접속마다 부르는 경로).
+ */
+const _reader = makeJsonFileReader(() => FILE, { tag: 'ssh-keys' });
+let _readPending = false;   // 마지막 읽기가 읽기 오류 — 캐시(빈 값)를 믿지 않고 간격마다 다시 읽는다
 function load() {
-  if (cache) return cache;
-  try {
-    if (fs.existsSync(FILE)) {
-      const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-      const failBefore = decryptFailureCount();
-      const opened = openSecretsDeep({ keys: Array.isArray(j?.keys) ? j.keys : [], accounts: Array.isArray(j?.accounts) ? j.accounts : [] });
-      undecryptable = Math.max(0, decryptFailureCount() - failBefore);
-      cache = {
-        keys: filterObjectElements(opened.keys).list.map(normKey).filter(Boolean),
-        accounts: filterObjectElements(opened.accounts).list.map(normAccount).filter(Boolean),
-      };
+  if (cache && !_readPending) return cache;
+  const r = _reader.read();
+  if (r.kind === 'read-error') {
+    if (!_readPending || !loadErr.get()) {
+      const code = String(r.error?.code || 'read-error').slice(0, 32);
+      const e = loadErr.set(`읽기 오류(${code}) — 손상이 아니라 원본은 그대로 둡니다`);
+      e.readError = true;
     }
-  } catch (e) { preserveCorrupt(FILE, e?.message); loadErr.set(e); cache = null; }
+    _readPending = true;
+    cache = { keys: [], accounts: [] };
+    return cache;
+  }
+  if (_readPending) { _readPending = false; loadErr.clear(); }
+  cache = null;
+  if (r.kind === 'ok') {
+    const j = r.value;
+    const failBefore = decryptFailureCount();
+    const opened = openSecretsDeep({ keys: Array.isArray(j?.keys) ? j.keys : [], accounts: Array.isArray(j?.accounts) ? j.accounts : [] });
+    undecryptable = Math.max(0, decryptFailureCount() - failBefore);
+    cache = {
+      keys: filterObjectElements(opened.keys).list.map(normKey).filter(Boolean),
+      accounts: filterObjectElements(opened.accounts).list.map(normAccount).filter(Boolean),
+    };
+  } else if (r.kind === 'corrupt') {
+    // 원본은 jsonFileLoad 가 보존본으로 옮겼다(예전과 같다). 77회차 F6(재현): 사유는 V8 원문이 아니라 요약 — 원문은 파일 조각(‘…"jEAAAA"}, SECRET…’)을 따옴표로 싣고,
+    //   그 사유가 ‘키 저장소 다시 읽기’ 응답(reloadKeyStoreFromDisk)으로 나갔다(규약: 로드 오류 원문은 응답 · 콘솔에 싣지 않는다 — safeLoadText).
+    loadErr.set(safeLoadText(r.error?.message ?? r.error, 200) || '손상');
+  }
   if (!cache) { loadErr.checkCorruptOnly(FILE); cache = { keys: [], accounts: [] }; }
   return cache;
 }
 
 /** 테스트 전용 — 메모리 캐시를 비워 다음 호출이 파일을 다시 읽게 한다. */
-export function _resetKeyStoreForTest() { cache = null; loadErr.clear(); undecryptable = 0; _tampered.clear(); _tamperedAcc.clear(); }
+export function _resetKeyStoreForTest() { cache = null; loadErr.clear(); undecryptable = 0; _tampered.clear(); _tamperedAcc.clear(); _reader.reset(); _readPending = false; }
 /** 봉인을 못 푼 값 수(0 이면 정상) — 화면 · 라우트가 '쓰기 거절' 사유를 말한다. */
 export function keyStoreUndecryptable() { load(); return undecryptable; }
 
 const unreadable = () => {
   load();   // ⚠ 로드를 먼저 — 첫 호출이 쓰기면 오류 상태가 아직 없다(손상 파일을 빈 저장소로 덮어쓰던 결함 · ⑦ 이 잡았다)
   const e = loadErr.get();
-  if (e) return { ok: false, code: 'registry-unreadable', status: 503, reason: `SSH 키 저장소(${KEY_FILE_NAME})를 읽지 못해 바꾸지 않았습니다 — 손상 보존본(${KEY_FILE_NAME}.corrupt.*)을 확인해 되돌린 뒤 다시 시도하세요.` };
+  if (e) return { ok: false, code: 'registry-unreadable', status: 503, ...(e.readError ? { readError: true } : {}), reason: keyStoreUnreadableReason(e, '바꾸지 않았습니다') };
   if (undecryptable) return { ok: false, code: 'secrets-undecryptable', status: 503, reason: `봉인을 풀지 못한 비밀 ${undecryptable}개가 있어(자격증명 비밀키 불일치 의심) 키 저장소를 바꾸지 않았습니다 — 봉인본을 지우지 않기 위해서입니다(이 파일은 백업에 개인키가 없습니다). 원래 비밀키로 되돌린 뒤 다시 시도하세요.` };
   return null;
 };
@@ -220,8 +250,11 @@ export function accountByName(kind, name) {
 /** 파일에 **평문으로** 남아 있는 개인키 · passphrase 의 키 id(봉인 표지가 없는 값). 파일을 못 읽으면 null(모름). 원문은 돌려주지 않는다. */
 export function plainStoredKeyIds() {
   try {
-    if (!fs.existsSync(FILE)) return [];
-    const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    // 77회차 F1: 점검용 읽기는 보존본으로 옮기지 않는다(preserve:false — 손상 판정 · 옮기기는 load() 하나)
+    const r = readJsonFile(FILE, { preserve: false });
+    if (r.kind === 'missing') return [];
+    if (r.kind !== 'ok') return null;
+    const j = r.value;
     return (Array.isArray(j?.keys) ? j.keys : []).filter((k) => k && typeof k === 'object'
       && ((typeof k.privateKey === 'string' && k.privateKey !== '' && !k.privateKey.startsWith('enc$1$'))
         || (typeof k.passphrase === 'string' && k.passphrase !== '' && !k.passphrase.startsWith('enc$1$')))).map((k) => t(k.id, 32));
@@ -261,10 +294,11 @@ export function diskDrift() {
   const out = { ok: true, changed: [], added: [], removed: [], accountsChanged: [] };
   if (keyStoreLoadError()) return { ...out, ok: false, reason: 'store-unreadable' };
   let disk;
-  try {
-    if (!fs.existsSync(FILE)) disk = { keys: [], accounts: [] };
-    else { const j = JSON.parse(fs.readFileSync(FILE, 'utf8')); disk = openSecretsDeep({ keys: Array.isArray(j?.keys) ? j.keys : [], accounts: Array.isArray(j?.accounts) ? j.accounts : [] }); }
-  } catch (e) { return { ...out, ok: false, reason: `read-failed:${String(e?.code || e?.message || e).slice(0, 40)}` }; }
+  // 77회차 F1: 대조용 읽기는 보존본으로 옮기지 않는다(preserve:false) — 못 읽으면 '모름'(ok:false)
+  const r = readJsonFile(FILE, { preserve: false });
+  if (r.kind === 'missing') disk = { keys: [], accounts: [] };
+  else if (r.kind === 'ok') { const j = r.value; disk = openSecretsDeep({ keys: Array.isArray(j?.keys) ? j.keys : [], accounts: Array.isArray(j?.accounts) ? j.accounts : [] }); }
+  else { const e = r.error; return { ...out, ok: false, reason: `read-failed:${String(e?.code || e?.message || e).slice(0, 40)}` }; }
   const d = load();
   const mem = d.keys;
   const diskKeys = filterObjectElements(disk.keys).list.map(normKey).filter(Boolean);
@@ -292,7 +326,7 @@ export function diskDrift() {
 }
 /** 설정 소유자 + OTP — 디스크 파일을 새 기준으로 다시 읽는다(포탈 밖에서 바뀐 것을 사람이 확인한 뒤). 바꿔치기 표지도 푼다. */
 export function reloadKeyStoreFromDisk() {
-  cache = null; loadErr.clear(); undecryptable = 0; _tampered.clear(); _tamperedAcc.clear();
+  cache = null; loadErr.clear(); undecryptable = 0; _tampered.clear(); _tamperedAcc.clear(); _reader.reset(); _readPending = false;
   load();
   const e = loadErr.get();
   return e ? { ok: false, code: 'registry-unreadable', status: 503, reason: `SSH 키 저장소를 읽지 못했습니다 — ${String(e.reason || '').slice(0, 120)}` } : { ok: true, keys: load().keys.length };

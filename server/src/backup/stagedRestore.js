@@ -227,7 +227,12 @@ export function reconcileForApply(name, content, configDir) {
   //   되돌아가고, 예약 뒤 등록한 키(번들에 없음)는 개인키째 사라졌다. 합치는 규칙은 mergeRedactedKeyStore 하나(지금 키의 폴더 · 기능 · 상태 유지 · 번들에 없는 지금 키 남김).
   if (name === KEY_FILE_NAME) {
     let cur = '';
-    try { cur = fs.readFileSync(path.join(configDir, name), 'utf8'); } catch { cur = ''; }
+    try { cur = fs.readFileSync(path.join(configDir, name), 'utf8'); } catch (e) {
+      // 79회차 반증(재현): 읽기 오류(EACCES · EIO)를 '없음' 으로 보고 합치면 번들의 키가 전부 빠진 파일이 지금 봉인본(유일한 사본)을 덮는다 —
+      //   던져서 이 파일만 적용하지 않는다(applyStagedRestore 가 failed 로 남긴다 · 지금 파일 그대로).
+      if (e?.code !== 'ENOENT') throw new Error(`지금 SSH 키 저장소를 읽지 못해(${String(e?.code || 'read-error').slice(0, 32)}) 복원하지 않았습니다 — 지금 파일(봉인본 — 유일한 사본)을 그대로 둡니다`);
+      cur = '';
+    }
     const m = mergeRedactedKeyStore(String(content), cur);
     return { content: m.text, info: { sshKeysKept: (m.kept || []).length, sshKeysDropped: (m.dropped || []).length } };
   }

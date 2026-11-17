@@ -37,7 +37,7 @@ import { STATUS_SPEC } from '../edgelog/spec.js';
 
 /** 실패 종류 열거 — 세 pull 모듈이 낼 수 있는 kind 의 **전부**(웹 라벨 맵과 1:1). */
 export const EDGE_PULL_KINDS = Object.freeze([
-  'not-registered', 'disabled-central', 'no-url', // 등록부 단계(네트워크 왕복 없음)
+  'not-registered', 'ambiguous', 'disabled-central', 'no-url', // 등록부 단계(네트워크 왕복 없음) — 87회차 ⓑ: ambiguous(결정 66 ① — 표시 이름이 둘 이상)도 열거에(웹 문구 맵과 1:1)
   'timeout', 'unreachable',                       // 연결 단계
   'auth', 'disabled', 'old-version', 'http', 'bad-body', // 응답 단계
 ]);

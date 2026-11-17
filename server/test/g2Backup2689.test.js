@@ -7,14 +7,21 @@
  * ⚠ 이 컨테이너는 root 라 읽기 전용 디렉터리로는 쓰기 실패를 만들 수 없다 — ② 는 fs.renameSync 를 가로채고,
  *   ③ 은 대상 이름에 '비어 있지 않은 디렉터리' 를 두어 rename 이 실제로 실패하게 한다.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'g2backup2689-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const DIR = tmpDir('g2backup2689-');
 process.env.CONFIG_DIR = DIR;
 fs.writeFileSync(path.join(DIR, 'g2-a.json'), JSON.stringify({ a: 1 }));
 fs.writeFileSync(path.join(DIR, 'g2-b.json'), JSON.stringify({ b: [1, 2, 3] }));

@@ -28,6 +28,7 @@ import { resilientFetch } from '../util/resilientFetch.js';
 import { classifyCentral404 } from './central404.js';
 import { bulkAddTargets, planBulkTargets, deleteTargetsByBatch, batchCounts, listTargetsCopy, LIMITS } from '../svcmon/store.js';
 import { agentHeaders, withAgentQuery } from './agentNameCarry.js'; // v2.629 A6-01: 원문 이름 헤더는 한글 이름에서 fetch 가 던진다
+import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // 87회차 ⓓ(85 E3 — 권장안): 중앙 응답은 상한 읽기(형제 pull 과 같게 — 상한 없는 res.json() 금지)
 
 // 중앙 배포 배치 태그 접두사 — central/svcmonAssign.js TAG_PREFIX 와 같은 프로토콜 계약이다.
 // (엣지가 central 모듈을 import 하지 않도록 상수만 복제. 값이 바뀌면 양쪽을 함께 고칠 것.)
@@ -143,13 +144,13 @@ export async function pullSvcmonConfigNow() {
     if (!res.ok) {
       // v2.591(PR-7): 예전엔 상태(last)에도 안 남았다 — svcmon-config 는 개별 토큰 전용이라 공유 토큰 엣지는 **영구 403** 인데 흔적이 없었다.
       let why = '';
-      try { const b = await res.json(); why = String(b?.reason || '').slice(0, 200); } catch { /* 본문 없음 */ }
+      try { const b = await readJsonCapped(res, 64 * 1024, '중앙 오류 응답'); why = String(b?.reason || '').slice(0, 200); } catch { /* 본문 없음 */ }
       const reason = `pull → ${res.status}${why ? ` — ${why}` : ''}`;
       last = { at: Date.now(), error: reason };
       if (_logChange('pull', reason)) console.warn(`[svcmon-pull] 중앙 정의 pull 실패: ${reason}`);
       return { ok: false, reason };
     }
-    const d = await res.json();
+    const d = await readJsonCapped(res, EDGE_RESPONSE_MAX_BYTES, '중앙 응답');
     if (!d?.assigned) {
       // v2.596(감사 EF-2 — 재현): 중앙이 배정을 지우면(명시적 200 + assigned:false) 중앙이 배포한 central:* 배치를 지운다 —
       //   예전엔 상태만 적고 끝나 엣지가 지워진 배정의 점검을 계속 돌렸다. 404·5xx 는 여기 오지 않는다(위에서 실패로 반환).
@@ -169,10 +170,9 @@ export async function pullSvcmonConfigNow() {
 
     const targets = Array.isArray(d.targets) ? d.targets : [];
     if (targets.length > LIMITS.maxTargets) {
-      const reason = `배정 대상이 상한을 넘습니다(${targets.length} > ${LIMITS.maxTargets}).`;
-      await ack(d.sig, { added: 0, newTests: 0 }, 0, [reason, '이전 배포분을 그대로 유지합니다.']);
-      rememberFailure(d.sig, [reason]);
-      return { ok: false, reason };
+      // 85회차 F4: 예전에는 ack · 실패 기억만 하고 상태(last)도 콘솔도 남기지 않았다 — 엣지 로그 화면은 직전 성공('정의 적용')을 그대로
+      //   보여 줬다(무음 실패). 같은 거부 경로(rejectKeep — 상태 · 콘솔 · ack · 실패 기억)를 탄다.
+      return await rejectKeep(d, [`배정 대상이 상한을 넘습니다(${targets.length} > ${LIMITS.maxTargets}).`], 0);
     }
 
     // ① 이전 배포분 삭제 — 멱등 교체(v2.279 회귀 수정). 과거에는 d.prevTag(직전 세대) 하나만

@@ -1328,7 +1328,10 @@
     var isMe = !!(state.session && state.session.username === user.username);
     // 반증(결정 G1b ②): 다른 admin 계정 재설정도 요청한 본인(나)의 현재 비밀번호를 확인한다(서버가 같은 판정 — viewer 재설정은 그대로).
     var needCurrent = isMe || user.role === "admin";
-    state.pwTarget = { username: user.username, isMe: isMe, needCurrent: needCurrent };
+    state.pwTarget = { username: user.username, isMe: isMe, needCurrent: needCurrent, mode: "password" };
+    $("pw-title").textContent = "비밀번호 변경";
+    $("pw-submit").textContent = "변경";
+    $("pw-new").hidden = false;
     $("pw-target").textContent = "'" + user.username + "' 계정" +
       (isMe ? " — 본인 비밀번호는 현재 비밀번호를 확인합니다."
         : needCurrent ? " — 다른 admin 계정 재설정은 요청한 본인(나)의 현재 비밀번호를 확인합니다."
@@ -1349,9 +1352,42 @@
     state.pwTarget = null;
   }
 
+  /* 결정(반증 G1b 남긴 것): 중지된 admin 을 다시 켜는 것도 admin 을 늘리는 동작 — 같은 창에서 내 현재 비밀번호만 받는다(서버가 같은 판정).
+     viewer 다시 켜기 · 중지는 그대로 바로 보낸다. */
+  function enableAdminUser(user) {
+    state.pwTarget = { username: user.username, isMe: false, needCurrent: true, mode: "enable" };
+    $("pw-title").textContent = "admin 계정 다시 켜기";
+    $("pw-submit").textContent = "사용";
+    $("pw-target").textContent = "'" + user.username + "' 계정 — 중지된 admin 계정을 다시 켜려면 요청한 본인(나)의 현재 비밀번호를 확인합니다.";
+    $("pw-current").placeholder = "내 현재 비밀번호";
+    $("pw-current").hidden = false;
+    $("pw-current").value = "";
+    $("pw-new").hidden = true;
+    $("pw-new").value = "";
+    $("pw-msg").textContent = "";
+    $("pw-modal").hidden = false;
+    setTimeout(function () { $("pw-current").focus(); }, 30);
+  }
+
+  function submitEnableAdmin(target) {
+    if (!$("pw-current").value) { setMsg("pw-msg", "내 현재 비밀번호를 입력하세요.", "err"); return; }
+    $("pw-submit").disabled = true;
+    api("/api/settings/users/" + encodeURIComponent(target.username),
+        { method: "PUT", body: { enabled: true, currentPassword: $("pw-current").value } })
+      .then(function (data) {
+        closePasswordModal();
+        state.users = data.users;
+        renderUserSettings();
+        toast("다시 켰습니다.", "ok");
+      })
+      .catch(function (err) { setMsg("pw-msg", err.message, "err"); $("pw-current").value = ""; })
+      .then(function () { $("pw-submit").disabled = false; });
+  }
+
   function submitPasswordChange() {
     var target = state.pwTarget;
     if (!target) return;
+    if (target.mode === "enable") { submitEnableAdmin(target); return; }
     var body = { password: $("pw-new").value };
     if (target.needCurrent) {
       if (!$("pw-current").value) { setMsg("pw-msg", target.isMe ? "현재 비밀번호를 입력하세요." : "내 현재 비밀번호를 입력하세요.", "err"); return; }
@@ -1375,6 +1411,7 @@
   }
 
   function toggleUser(user) {
+    if (!user.enabled && user.role === "admin") { enableAdminUser(user); return; }
     api("/api/settings/users/" + encodeURIComponent(user.username),
         { method: "PUT", body: { enabled: !user.enabled } })
       .then(function (data) { state.users = data.users; renderUserSettings(); })

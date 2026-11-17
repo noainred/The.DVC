@@ -80,7 +80,7 @@ import * as m_partFaultPoller from '../partfault/poller.js';
 import { stallWatchStatus } from '../perf/stallWatch.js';
 import { scanJournalStatus } from '../util/scanJournal.js';   // v2.737: 재시작으로 중단된 스캔 기록·재개
 import { bigJsonStats } from '../util/bigJsonGate.js';
-import { listSettingsLoadErrors } from '../util/settingsLoadError.js';
+import { listSettingsLoadErrors, recheckSettingsFiles } from '../util/settingsLoadError.js';
 import { bulletinHealth } from '../bulletin/store.js'; // 2026-10-09 검토 I-05
 import { runtimeServiceRow } from '../util/runtimeCheck.js'; // 2026-10-09 검토 I-06
 
@@ -324,6 +324,8 @@ export function getServiceCheck(opts = {}) {
   // v2.632(감사 AX1-2632-02): 엣지에 배포되는 중앙 설정 파일을 못 읽으면 설정 pull 이 503 으로 답한다(엣지는 직전 설정 유지).
   //   예전에는 그 사실이 화면·로그 어디에도 없어 '엣지가 조용히 멈췄다' 로만 보였다. 파일 이름과 사유를 싣는다(값은 싣지 않는다).
   checks.push(wrap('settings-files', '중앙 설정 파일', () => {
+    // 결정(반증 G2 · G3 남긴 것): 조회 때 다시 판정하는 로더들의 재판정을 한 번(30초 간격 · 오류가 선 것만) — 보존본을 되돌린 줄이 그 모듈이 불릴 때까지 남지 않게.
+    recheckSettingsFiles();
     const errs = listSettingsLoadErrors();
     if (!errs.length) return { status: 'ok', detail: '엣지 배포 설정 파일 읽기 정상', at: Date.now() };
     const names = errs.slice(0, 6).map((e) => (e.label ? `${e.label}(${e.file})` : e.file)).join(', ');

@@ -14,7 +14,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-audit0913-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const CFG = tmpDir('portal-audit0913-');
 process.env.CONFIG_DIR = CFG;
 process.env.CENTRAL_TOKEN = 'shared-token-for-0913-test-1234567890';
 // v2.613 TESTDOC2613-07: 자기등록 검증 ping(`verifyDerivedCollectorUrl`)이 응답 없는 사설 주소(10.20.30.40)로 나가 8초 시한을
@@ -370,7 +377,7 @@ test('자가진단: 확인하지 못한 것은 unknown 이고, 점수를 만들�
 
 test('자가진단: 실제 조회가 사실만 담고 비밀을 싣지 않는다', async () => {
   const sc = await import('../src/security/selfCheck.js');
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'selfcheck-'));
+  const dir = tmpDir('selfcheck-');
   fs.writeFileSync(path.join(dir, 'vcenters.json'), '{}', { mode: 0o644 });   // 일부러 잘못된 권한
   fs.writeFileSync(path.join(dir, 'initial-admin-password.txt'), 'secret-pw');
   fs.writeFileSync(path.join(dir, 'users.json.corrupt.123'), 'x');

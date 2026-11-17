@@ -99,6 +99,21 @@ export const CUSTOM_RULES = Object.freeze({
   },
 });
 
+/**
+ * 80회차 F1 — 스케줄러를 고를 수 없는 장치인가(순수). `/sys/block/<dev>/queue/scheduler` 의 선택지가 'none' 하나뿐(bio 기반 큐: dm-* · md* · NVMe 다중 경로 머리 —
+ *   커널이 대괄호 없이 'none' 만 낸다. 등록된 스케줄러가 없는 mq 큐의 '[none]' 도 같다 — 어느 쪽이든 바꿀 수 없다)이면 참.
+ *   선택지 목록(schedulers)을 못 받은 옛 행([] · 없음)은 거짓 — 예전 판정 그대로.
+ */
+export function noSchedChoice(d) {
+  const l = Array.isArray(d?.schedulers) ? d.schedulers : [];
+  // 83회차(80회차 F1 반증 — 재현): 늘 blk-mq 인 물리 디스크(sd* SCSI · vd* virtio · xvd* Xen · hd*)는 빼낸다 — 그 장치의 '[none]' 하나는 '고를 수 없는 장치' 가
+  //   아니라 스케줄러 모듈이 올라오지 않은 것(mq-deadline 이 모듈인 커널)이라 권고(mq-deadline — modprobe · udev)가 맞고, 화면 문구('LVM · 소프트웨어 RAID 같은
+  //   논리 장치 — 아래 물리 디스크의 스케줄러를 봅니다')도 물리 디스크에는 사실이 아니다. nvme* 는 남긴다 — 다중 경로 머리(nvme0n1)는 bio 기반이라 정말 고를 수 없다.
+  //   (파서가 대괄호를 버려 '[none]' 과 'none' 을 가를 수 없다 — 이름으로 가른다 · 정직 기록)
+  if (/^(sd|vd|xvd|hd)[a-z]/.test(String(d?.name || ''))) return false;
+  return l.length === 1 && l[0] === 'none';
+}
+
 /** 장치 · NIC 단위 규칙 하나(oneOf · eqNum · txqueuelen · channels). */
 function evalUnit(rule, v, { tu }) {
   if (rule.kind === 'oneOf') return v == null ? { status: 'unknown', reason: 'notRead' } : (rule.values.includes(String(v)) ? { status: 'ok' } : { status: 'advise' });
@@ -136,7 +151,13 @@ export function evalRule(rule, value, { tu = null, detail = null, item = null } 
     if (!Array.isArray(tu?.blkq)) return { status: 'unknown', reason: 'notRead', devices: [] };
     const devs = tu.blkq.filter((d) => d && item.devices(d));
     if (!devs.length) return { status: 'info', reason: 'noDevice', devices: [] };
-    const per = devs.slice(0, 32).map((d) => ({ name: String(d.name), value: str(item.devValue(d)), ...evalUnit(rule, item.devValue(d), { tu }) }));
+    const per = devs.slice(0, 32).map((d) => {
+      const r = evalUnit(rule, item.devValue(d), { tu });
+      // 80회차 F1(재현): 고를 수 있는 스케줄러가 'none' 하나뿐인 장치(bio 기반 dm-* · md* — LVM · 소프트웨어 RAID)는 스케줄러를 바꿀 수 없다
+      //   (I/O 는 아래 물리 디스크 큐의 스케줄러를 탄다). 예전에는 HDD 위 LVM 서버마다 dm-0 'none' 이 ‘권고’(mq-deadline · bfq)가 되어 그 항목 · gpdb 프로파일이 늘 권고였다.
+      //   스케줄러 항목(sched)의 권고만 참고로 바꾼다 — 적합 · 확인 불가는 그대로.
+      return { name: String(d.name), value: str(item.devValue(d)), ...(item.sched && r.status === 'advise' && noSchedChoice(d) ? { status: 'info', reason: 'noSched' } : r) };
+    });
     return { status: worst(per.map((x) => x.status)), reason: null, devices: per };
   }
   if (item?.valueKind === 'nics') {

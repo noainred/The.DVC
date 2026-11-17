@@ -287,7 +287,8 @@ export class EdgeSyncRunner {
    *   같은 장애를 한 번 더 알렸고, 백오프도 처음부터 다시 시작했다(6시간 상한에 닿은 엣지에 재시작 직후 10분마다 다시 밀었다).
    */
   persistState() {
-    const attempts = [...this.attempts.entries()].slice(-500).map(([id, a]) => [id, { at: a.at, ok: !!a.ok, target: a.target, attempts: a.attempts || 0, reason: a.reason || null }]);
+    // 86회차 개선: 엣지 보류 시한(holdUntil — 51회차 #3)도 남긴다 — 빠지면 중앙이 재시작한 뒤 settle(30분)만 지나 보류 중인 엣지에 번들을 다시 올렸다(51회차 반증 A6 의 일부).
+    const attempts = [...this.attempts.entries()].slice(-500).map(([id, a]) => [id, { at: a.at, ok: !!a.ok, target: a.target, attempts: a.attempts || 0, reason: a.reason || null, ...(Number.isFinite(a.holdUntil) ? { holdUntil: a.holdUntil } : {}) }]);
     return { attempts, alerted: [...this.alerted].slice(-500) };
   }
   /** 재시작 전 상태를 되살린다(이 프로세스가 이미 기록을 가졌으면 그 키는 덮지 않는다). */

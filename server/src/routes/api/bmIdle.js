@@ -75,13 +75,13 @@ export async function bmIdleFleet(req, snap, deps = {}) {
   const local = I.loadIdle();
   const tg = await D.currentTargets().catch(() => ({ targets: [] }));
   const localBy = new Map((tg.targets || []).map((x) => [x.key, x]));
-  sources.push({ node: config.agent?.name || '', via: 'local', at: local?.at ?? null, day: local?.day ?? null, firstDay: local?.firstDay ?? null, ...(local?.unreadable ? { unreadable: true } : {}), ...(local ? {} : { none: true }) });
+  sources.push({ node: config.agent?.name || '', via: 'local', at: local?.at ?? null, day: local?.day ?? null, firstDay: local?.firstDay ?? null, ...(local?.unreadable ? { unreadable: true } : {}), ...(local?.readError ? { readError: true } : {}), ...(local ? {} : { none: true }) });   // 81회차 F2: 읽기 오류 ≠ 손상
   for (const r of local?.rows || []) rows.push({ ...r, via: 'local', node: config.agent?.name || '', name: r.name || localBy.get(r.key)?.name || r.key, vcenterId: r.vcenterId || localBy.get(r.key)?.vcenterId || '' });
   for (const rec of await D.listEdgeBmUsage().catch(() => [])) {
     const sn = rec?.snap; if (!sn) continue;
     const byKey = new Map((sn.targets || []).map((x) => [t(x.key), x]));
     const id = sn.idle || null;
-    sources.push({ node: rec.agent, via: 'edge', at: id?.at ?? null, day: id?.day ?? null, firstDay: id?.firstDay ?? null, ...(sn.idleVer == null ? { old: true } : {}), ...(id ? {} : { none: true }), ...(id?.unreadable ? { unreadable: true } : {}), ...(id?.truncated ? { truncated: id.truncated } : {}) });
+    sources.push({ node: rec.agent, via: 'edge', at: id?.at ?? null, day: id?.day ?? null, firstDay: id?.firstDay ?? null, ...(sn.idleVer == null ? { old: true } : {}), ...(id ? {} : { none: true }), ...(id?.unreadable ? { unreadable: true } : {}), ...(id?.readError ? { readError: true } : {}), ...(id?.truncated ? { truncated: id.truncated } : {}) });
     for (const r of id?.rows || []) { const tgt = byKey.get(r.key); rows.push({ ...r, via: 'edge', node: rec.agent, name: String(tgt?.name || r.key), vcenterId: t(tgt?.vcenterId) }); }
   }
   const visible0 = rows.filter((r) => !allowed || (r.vcenterId && allowed.has(r.vcenterId)));

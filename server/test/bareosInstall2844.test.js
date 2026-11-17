@@ -7,7 +7,7 @@
  *  ⑤ 대상 표: 엣지 없음 · 배포 등록부 없음 · 비밀번호 없음 · 엣지 응답 없음 · Director 가 엣지 아닌 서버 · 재설치 가능
  *  ⑥ 상태 파싱 · 라우트 문지기(소스): 쓰기 라우트 전부 fullScopeOnly + fullWriteOnly + (데모가 아니면) installGate · 감사 '[OTP 없이 실행]' · 비밀이 감사에 없음
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -16,7 +16,14 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bi2844u-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const tmp = tmpDir('bi2844u-');
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_SOURCE = 'mock';
 const HERE = path.dirname(fileURLToPath(import.meta.url));

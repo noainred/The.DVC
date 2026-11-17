@@ -1,10 +1,16 @@
 /**
  * v2.583 — 폴러 상태의 범위 유출(감사 확정 — v2.574 SEC-05·SEC-07 의 형제 누락) + inv.* 우회 2경로.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { scopePollerStatus, scopeDbStatus } from '../src/auth/scopeStatus.js';
+
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 
 const st = {
   running: false,
@@ -52,6 +58,7 @@ test('/top — inv.vms 가 없는 역할은 VM 목록이 비고 withheld 로 밝
   const os = await import('node:os');
   const path = await import('node:path');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'top2583-'));
+  TMP_DIRS.push(dir);
   fs.writeFileSync(path.join(dir, 'permissions.json'), JSON.stringify({ schemaVersion: 2, matrix: { operator: ['dashboard', 'tools', 'inv.vms', 'inv.hosts', 'inv.datastores'], viewer: ['dashboard', 'tools'], toolsDenied: { operator: [], viewer: [] } } }));
   const apiPath = new URL('../src/routes/api.js', import.meta.url).pathname;
   const storePath = new URL('../src/store.js', import.meta.url).pathname;

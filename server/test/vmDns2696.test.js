@@ -9,7 +9,7 @@
 //  ⑧ 도달성 점검 — 로컬 가짜 DNS 서버(UDP·TCP): 응답(rcode 무관) · 무응답 시한 · 닫힌 포트 · ID 불일치 무시 · 동시 실행 busy
 //  ⑨ 변경 이력 — 첫 관측(변경 행 없음) · 변경 · 모름/미수집 건너뜀 · 첫 병합 전 건너뜀 · 범위 필터
 //  ⑩ 실제 api 라우터 — 상태코드(viewer PUT/probe 403 · 범위 admin PUT 403 · CSV 권한) · 범위 계정 가림 · 400 형식 오류
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -19,7 +19,14 @@ import net from 'node:net';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'vmdns2696-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const TMP = tmpDir('vmdns2696-');
 process.env.CONFIG_DIR = TMP;
 process.env.DATA_SOURCE = 'mock';
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');
@@ -374,7 +381,7 @@ test('⑨ 변경 이력 — 첫 관측(변경 없음) · 변경 · 모름/미수
 });
 
 test('⑩ 실제 api 라우터 — 상태코드 · 범위 가림 · 형식 오류 · CSV', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vmdns2696r-'));
+  const dir = tmpDir('vmdns2696r-');
   // viewer 에게 tools 는 주되 data.csv 는 줄 수 없다(관리 그룹 키).
   fs.writeFileSync(path.join(dir, 'permissions.json'), JSON.stringify({ schemaVersion: 3, matrix: {
     operator: ['dashboard', 'tools'], viewer: ['dashboard', 'tools'], toolsDenied: { operator: [], viewer: [] } } }));

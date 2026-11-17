@@ -225,7 +225,7 @@ adminRouter.get('/idrac', adminOnly, async (req, res) => {
 adminRouter.post('/idrac', adminOnly, fleetOnly, async (req, res) => {
   const result = addServer(req.body || {});
   if (result.ok) pollNow().catch(() => {});
-  res.status(result.ok ? 201 : 400).json(result);
+  res.status(result.ok ? 201 : (result.status || 400)).json(result);   // 결정(78 남긴 것 ①): 등록부 읽기 오류는 409
 });
 
 // NOTE: 파라미터 라우트 PUT/DELETE '/idrac/:id'는 '/idrac/scan-ranges'·'/idrac/power-settings'

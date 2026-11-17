@@ -565,11 +565,11 @@ adminRouter.post('/idrac/assign-vcenter', adminOnly, fleetOnly, (req, res) => {
 adminRouter.put('/idrac/:id', adminOnly, fleetOnly, async (req, res) => {
   const result = updateServer(req.params.id, req.body || {});
   if (result.ok) pollNow().catch(() => {});
-  res.status(result.ok ? 200 : 400).json(result);
+  res.status(result.ok ? 200 : (result.status || 400)).json(result);   // 결정(78 남긴 것 ①): 등록부 읽기 오류는 409
 });
 
 adminRouter.delete('/idrac/:id', adminOnly, fleetOnly, async (req, res) => {
   const result = removeServer(req.params.id);
-  res.status(result.ok ? 200 : 404).json(result);
+  res.status(result.ok ? 200 : (result.status || 404)).json(result);   // 결정(78 남긴 것 ①): 등록부 읽기 오류는 409
 });
 }

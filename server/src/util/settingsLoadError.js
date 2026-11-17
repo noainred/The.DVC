@@ -34,10 +34,11 @@ const _registry = [];
  *   저장 함수 — 저장 성공이 곧 `ok()` 다). 관리자가 '기본값으로 확정' 을 눌렀을 때만 부른다(`confirmSettingsDefault`).
  *   ⚠ 보존본의 나이로 자동 해제하지 않는다 — 해제는 곧 기본값(대개 꺼짐)을 전 엣지에 배포하는 것이라 v2.631 EDGE2631-01 사고를
  *   시간차로 되살린다. 사람이 '이 기본값을 배포해도 된다' 고 정할 때만 풀린다.
- * @returns {{ get:() => (null|{at:number, reason:string}), ok:() => void, corrupt:(e:any) => void, missing:() => void }}
+ * @returns {{ get:() => (null|{at:number, reason:string}), ok:() => void, corrupt:(e:any) => void, missing:() => void, readError:(e:any, o?:object) => void, recheckWith:(fn:Function) => void }}
  */
 export function makeSettingsLoadError(fileOf, opts = {}) {
   let err = null;
+  const ent = { fileOf, api: null, label: String(opts.label || ''), confirm: typeof opts.confirm === 'function' ? opts.confirm : null, ownerOnly: opts.ownerOnly === true, superOnly: opts.superOnly === true, recheckMs: Number.isFinite(opts.recheckMs) && opts.recheckMs > 0 ? opts.recheckMs : 0, recheck: null };
   const set = (reason) => { err = { at: Date.now(), reason: String(reason ?? '').slice(0, 200) }; };
   const api = {
     get: () => err,
@@ -67,9 +68,27 @@ export function makeSettingsLoadError(fileOf, opts = {}) {
       // 37회차 R3: 읽기 오류 표지는 덮는다 — 파일을 지웠고 예전 손상 보존본이 남았으면 이제 '손상 보존본만 있음'(확정 가능)이다. 그 밖의 이미 세운 오류는 시각(since)을 유지한다.
       if (!err || err.readError) set(why.replace('등록부 파일', '설정 파일'));
     },
+    /** 결정(반증 G2 · G3 남긴 것): 다시 판정하는 로더(util/jsonFileLoad.js)가 서비스 점검 조회 때 돌릴 재판정을 건다(recheckSettingsFiles). */
+    recheckWith(fn) { ent.recheck = typeof fn === 'function' ? fn : null; },
   };
-  _registry.push({ fileOf, api, label: String(opts.label || ''), confirm: typeof opts.confirm === 'function' ? opts.confirm : null, ownerOnly: opts.ownerOnly === true, superOnly: opts.superOnly === true, recheckMs: Number.isFinite(opts.recheckMs) && opts.recheckMs > 0 ? opts.recheckMs : 0 });
+  ent.api = api;
+  _registry.push(ent);
   return api;
+}
+
+/**
+ * 결정(반증 G2 · G3 남긴 것 — 사용자 '권장안대로'): 서비스 점검 조회 때 한 번 — 재판정을 건 로더 중 **지금 오류가 서 있는 것**만 다시 판정한다.
+ *   예전에는 그 모듈이 한 번 불려야(30초 간격) 줄이 지워져, 보존본을 되돌려도 그 설정 화면을 열기 전까지 서비스 점검에 남았다.
+ *   간격(30초) · 판정 · 모듈 캐시와의 관계는 로더 쪽(util/jsonFileLoad.js probe) 하나다 — 여기서는 부르기만 한다(실패는 삼킨다 — 목록이 다시 보인다).
+ * @returns {number} 이번에 회복을 본 파일 수
+ */
+export function recheckSettingsFiles() {
+  let n = 0;
+  for (const ent of _registry) {
+    if (!ent.recheck || !ent.api.get()) continue;
+    try { if (ent.recheck()) n += 1; } catch { /* 다음 조회 · 그 모듈의 다음 접근이 다시 판정한다 */ }
+  }
+  return n;
 }
 
 /**

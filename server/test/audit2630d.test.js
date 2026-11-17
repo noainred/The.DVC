@@ -11,14 +11,20 @@
  *
  * 기준 시각은 Date.now() 를 쓰지 않고 고정한다(CLAUDE.md v2.517 규약).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { centralSource } from './_centralSource.js'; // v2.954: central.js 가 영역별 파일로 나뉘었다(소스 스윕은 합친 소스로)
 
-process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2630d-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+
+process.env.CONFIG_DIR = tmpDir('audit2630d-');
 process.env.SVCMON_WORKERS = '0';
 process.env.SVCMON_SILENCE_ALERT = 'false';
 
@@ -241,3 +247,7 @@ test('UI2630-03 — 배정만 있고 보고 없는 엣지가 카드 요약에 no
   assert.equal(tl.assignedNoReport, 1, '유예가 끝난 무보고는 보고 없음');
   assert.equal(tl.awaitingFirstReport, 0);
 });
+
+// v3.18.8: 정리 훅은 파일 끝에서 등록한다 — 시험 사이에 최상위 await 가 있으면 앞 시험이 끝난 시점에 루트 after 가 먼저 돌아
+//   뒤 시험이 쓸 폴더를 지운다(node 22 실측 — audit2590 이 그렇게 깨졌다).
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });

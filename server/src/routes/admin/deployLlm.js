@@ -7,7 +7,7 @@ import { installOllama } from '../../llm/ollamaDeploy.js';
 import { deployAgent, testTarget, installerInfo, checkAgentStatus, envPairs, envPairsIssue } from '../../agent/deploy.js';
 import { fetchRemoteVersions, listLocalPackages, downloadPackage } from '../../upgrade/fetchPackage.js';
 import { getPackageSettings, savePackageSettings } from '../../upgrade/packageSettings.js';
-import { listTargets, getTargetRaw, saveTarget, removeTarget, recordResult, findTargetByHost, listTargetsRaw } from '../../agent/deployRegistry.js';
+import { listTargets, getTargetRaw, saveTarget, removeTarget, recordResult, findTargetByHost, listTargetsRaw, deployTargetsLoadError } from '../../agent/deployRegistry.js';
 import { targetsToCsv, sampleCsv as deploySampleCsv, parseTargetsCsv, analyzeTargetsImport } from '../../agent/deployCsv.js';
 import { parseTargetsText, analyzeBulkDeploy, targetsToText, targetsToTextCsv, sampleText, sampleTextCsv, fillAutoTokens, COLUMN_PRESETS, DEFAULT_PRESET } from '../../agent/deployText.js';   // 대량 배포 텍스트/CSV(v2.432)
 import { startBulkDeploy, getRun, listRuns, cancelRun, activeRunId } from '../../agent/bulkDeploy.js';        // 대량 배포 실행기(v2.432)
@@ -90,15 +90,19 @@ adminRouter.post('/agent-deploy', adminOnly, fleetOnly, async (req, res) => {
     const b = req.body || {};
     if (b.host) {
       const id = b.id || findTargetByHost(b.host, b.port, b.username)?.id;
-      saveTarget({ ...b, id });
-      r.targetSaved = true;
+      // 87회차(85 F1 반증 — 재현): 저장 결과를 본다. 예전에는 반환값을 버리고 늘 targetSaved:true 라, 등록부 읽기 오류(85 F1 — 저장 거절) ·
+      //   env 주입 거절 때도 '저장됨' 이었다. 거절 사유는 targetSaveReason 으로 싣는다(배포 결과에는 영향 없음 — 예전과 같다).
+      const sv = saveTarget({ ...b, id });
+      r.targetSaved = sv?.ok === true;
+      if (!r.targetSaved) r.targetSaveReason = String(sv?.reason || '배포 대상을 저장하지 못했습니다.').slice(0, 300);
     }
-  } catch { /* 저장 실패는 배포 결과에 영향 주지 않음 */ }
+  } catch (e) { r.targetSaved = false; r.targetSaveReason = String(e?.message || e).slice(0, 300); /* 저장 실패는 배포 결과에 영향 주지 않음 */ }
   res.status(r.ok ? 200 : 400).json(r);
 });
 
 // Saved targets + bulk deploy.
-adminRouter.get('/agent-deploy/targets', adminOnly, fleetOnly, (_req, res) => res.json({ targets: listTargets() }));
+// 87회차 ⓐ(85회차 결정 — 권장안): 등록부를 읽지 못했으면(읽기 오류 · 손상 · 보존본만 남음) 표지를 함께 싣는다 — 빈 targets 가 '저장된 대상 0개' 로 보이지 않게.
+adminRouter.get('/agent-deploy/targets', adminOnly, fleetOnly, (_req, res) => res.json({ targets: listTargets(), loadError: deployTargetsLoadError() }));
 
 /**
  * 대상 저장 — v2.434 부터 **저장만 해도 수집 서버로 자동 등록**한다(사용자 요구 '에이전트를 등록하면

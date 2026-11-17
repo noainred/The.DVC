@@ -3,13 +3,20 @@
 // 재계산된다. 과거에는 (a) snaps upsert 가 added/removed 를 excluded(=0) 로 덮어쓰고
 // (b) changes/ds_changes 를 무조건 DELETE 해서, 최초 실행이 남긴 '어떤 VM/DS 가 변했는지'가
 // 영구 소실됐다. 수정: upsert 는 MAX 로 보존, DELETE 는 신규 적재분이 1건 이상일 때만.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vmtrack-rerun-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const tmp = tmpDir('vmtrack-rerun-');
 process.env.VMTRACK_DB_PATH = path.join(tmp, 'vm-track.db');
 
 const sqliteOk = await import('node:sqlite').then(() => true).catch(() => false);

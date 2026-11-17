@@ -12,7 +12,7 @@
  * ⚠ 검증 방식: 실제 라우터를 express 에 띄워(자식 프로세스 — config 싱글턴) 역할·키별 응답으로 본다.
  *   in-flight 는 **실제 수집을 매달아** 만든다(응답하지 않는 로컬 TLS 포트 — 시간에 기대지 않고 상태를 폴링한다).
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -21,13 +21,20 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { alertVcenterOf, scopeAlertStatus } from '../src/routes/admin/opsSettings.js';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 const ROOT = path.resolve(SRC, '..');
 const J = (rel) => JSON.stringify(path.join(SRC, rel));
 
 function runChild(boot, env) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'a2604b-'));
+  const dir = tmpDir('a2604b-');
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', boot], {
     env: { ...process.env, CONFIG_DIR: dir, AUTH_ENABLED: 'false', ...env },
     encoding: 'utf8', cwd: ROOT, timeout: 180_000,

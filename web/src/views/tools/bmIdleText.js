@@ -29,6 +29,12 @@ export function actText(m) {
 }
 /** 상태 칸 문장 — 제외 사유 · 주기 사용 · 데이터 부족 일수. */
 export function statusText(r) {
+  const base = statusBase(r);
+  // 83회차(81회차 결정 — 부분 합): 창의 일부 기간 파일을 못 읽어 남은 기간만으로 낸 결과면 그 사실을 붙인다(데이터 부족 · 저활용으로 단정해 보이지 않게).
+  const u = num(r?.unreadPeriods);
+  return u != null && u > 0 ? `${base} · 기간 일부 못 읽음(${u})` : base;
+}
+function statusBase(r) {
   const s = STATUS_TEXT[r?.status]?.label || r?.status || '—';
   if (r?.status === 'excluded') return `${s} · ${EXCLUDE_TEXT[r.reason] || r.reason || ''}${r.reason === 'insufficient' && num(r.days) != null ? `(${r.days}일)` : ''}`;
   if (r?.status === 'periodic') return `${s}(높은 날 ${r.periodic?.highDays ?? '—'}일${r.periodic?.sameWeekday ? ' · 같은 요일' : ''})`;
@@ -61,6 +67,8 @@ export function monthText(sum = {}) {
 export function sourceText(s, minEdge) {
   const when = s.at ? new Date(s.at).toLocaleString() : '';
   if (s.old) return `${s.node} — 엣지가 구버전입니다(저활용 계산 없음 · 엣지 v${minEdge || '?'} 이상 필요)`;
+  // 81회차 F2: 읽기 오류는 손상이 아니다 — 원본을 옮기지 않고 읽힐 때까지 다시 계산하지 않는다(서버 idle.js · 같은 표지 readError).
+  if (s.unreadable && s.readError) return `${s.node || '이 노드'} — 결과 파일을 읽지 못했습니다(읽기 오류 — 손상이 아니라 원본은 그대로 · 읽힐 때까지 다시 계산하지 않습니다)`;
   if (s.unreadable) return `${s.node || '이 노드'} — 결과 파일을 읽지 못했습니다(손상본 보존 · 다음 계산이 새로 만듭니다)`;
   if (s.none) return `${s.node || '이 노드'} — 아직 계산 전입니다(하루 1회 · 01:20 뒤 첫 수집 틱)`;
   return `${s.node || '이 노드'}(${s.via === 'edge' ? '엣지' : '이 노드'}) — ${s.day || ''} 계산 · ${when}${s.truncated ? ' · 봉투 상한으로 ‘사용 중’ 행은 수만' : ''}`;

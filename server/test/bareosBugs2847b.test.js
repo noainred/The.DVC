@@ -4,7 +4,7 @@
  *  D2-5 전부 되돌리기 M4 는 directorId 칸이 없는 옛 대상도 센다(jobDirectorId — Director 삭제 라우트와 같은 판정)
  *  C2-2 기동 때(HTTP 전) 이어 읽을 작업의 잠금을 선점 · 이어 읽기가 넘겨받는다 · 잠금을 못 잡으면 failed 로 적지 않고 다시 잡는다
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -13,8 +13,15 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bi2847-'));
+const tmp = tmpDir('bi2847-');
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_SOURCE = 'mock';
 

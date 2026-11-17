@@ -6,7 +6,7 @@
  *  A-4 users.json 읽기 오류는 원본을 옮기지 않고 계정을 만들지 않는다(fail-closed) · 형태가 다른 파일도 보존
  *  A-5 로그인 성공은 그 계정이 낸 실패만큼만 출발지 카운터에서 뺀다 · A-11 RDP 티켓은 발급자만 · A-12 IPv6 정규식 길이 먼저
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,7 +14,14 @@ import net from 'node:net';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'secfa19-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+const tmp = tmpDir('secfa19-');
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_DIR = tmp;
 process.env.AUTH_ENABLED = 'true';
@@ -52,7 +59,7 @@ test('A-2 — 등록된 계정의 본인 재등록: 현재 코드 없으면 403 
 
 test('A-3 — 권한 파일 손상 · 재시작 뒤 보존본만 · 읽기 오류: 최소 권한(넓어지지 않음) · 저장이 푼다', () => {
   const run = (setup) => {
-    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'perm19-'));
+    const d = tmpDir('perm19-');
     try {
       setup(d);
       const code = `const m = await import(${JSON.stringify(path.join(SRC, 'auth/permissions.js'))});
@@ -76,7 +83,7 @@ test('A-3 — 권한 파일 손상 · 재시작 뒤 보존본만 · 읽기 오�
 
 test('A-4 — users.json 이 디렉터리(읽기 오류): 원본 유지 · 계정 생성 없음 · 로그인 불가 · 형태 불일치는 보존', () => {
   const run = (setup) => {
-    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'users19-'));
+    const d = tmpDir('users19-');
     try {
       setup(d);
       const code = `const a = await import(${JSON.stringify(path.join(SRC, 'auth/auth.js'))});

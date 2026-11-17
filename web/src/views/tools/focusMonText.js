@@ -730,6 +730,7 @@ export const WAKE_TEXT = Object.freeze({
   auth: { label: '토큰 불일치', tone: 'crit', hint: '중앙에 등록한 수집 서버 토큰과 엣지의 COLLECTOR_TOKEN 이 다릅니다.' },
   disabled: { label: '엣지에서 꺼짐', tone: 'warn', hint: '엣지가 이 기능을 끈 상태로 답했습니다.' },
   'not-registered': { label: '수집 서버 미등록', tone: 'crit', hint: '설정 › 엣지 · 원격 › 수집 서버(원격)에 이 이름이 없습니다.' },
+  ambiguous: { label: '이름 겹침', tone: 'crit', hint: '같은 표시 이름의 수집 서버가 둘 이상이라 어느 엣지인지 정할 수 없습니다 — 수집 서버(원격)에서 이름을 겹치지 않게 바꾸세요.' },
   'disabled-central': { label: '중앙에서 꺼 둠', tone: 'warn', hint: '중앙의 수집 서버 등록에서 비활성입니다.' },
   'no-url': { label: 'URL 없음', tone: 'crit', hint: '수집 서버 등록에 URL 이 없습니다.' },
   http: { label: 'HTTP 오류', tone: 'warn' },

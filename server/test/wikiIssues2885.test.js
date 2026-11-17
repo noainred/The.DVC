@@ -9,7 +9,7 @@
  * ⑤ 작업 기록 · 예상 · 버전 · 검색식(fixversion · sla).
  * ⑥ SLA 알림 — 단계마다 한 번 · 보낸 뒤 기록 · 완료하면 기록을 지운다 · 꺼져 있으면 보내지 않는다.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -19,6 +19,13 @@ import { fileURLToPath } from 'node:url';
 import { slaOf, normalizeSla, defaultSla, usedMin } from '../src/issues/sla.js';
 import { parseQuery } from '../src/issues/query.js';
 import { issuesCsv } from '../src/issues/exportCsv.js';
+
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
@@ -88,7 +95,7 @@ test('① CSV — 수식 주입 가드 · BOM · 빈 값은 빈 칸', () => {
 });
 
 function run(body, { pre, env = {} } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'c2885-'));
+  const dir = tmpDir('c2885-');
   if (pre) pre(dir);
   const script = `
     const express = (await import('express')).default;

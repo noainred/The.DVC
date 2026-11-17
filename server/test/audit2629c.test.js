@@ -6,7 +6,7 @@
  * EDGE2629-01: 새 정의가 검증에서 거부되면 이전 central:* 배포분이 **남아 있어야** 하고, 같은 sig 는 백오프 동안 다시 받지 않는다.
  * EDGE2629-02: 중앙 기동 뒤 한 번도 보고하지 않은 배정 엣지를 유예 뒤 한 번 알린다.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -16,7 +16,14 @@ import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
 
-process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2629c-'));
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
+process.env.CONFIG_DIR = tmpDir('audit2629c-');
 process.env.SVCMON_WORKERS = '0';
 process.env.SVCMON_CONFIG_PULL_MS = '3000000000';
 

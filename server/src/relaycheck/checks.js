@@ -4,7 +4,7 @@
  */
 import net from 'node:net';
 import { probeRelayPath } from '../vcenter/relayProbe.js';
-import { identityIssue } from '../collector/registry.js';
+import { identityIssue, ipBlockReason } from '../collector/registry.js';
 import { instanceId } from '../instanceId.js';
 // v2.506(적대적 검증): 전역 fetch 는 lookup 이 없어 수집 토큰이 리바인딩된 주소로 나갈 수 있었다.
 import { resilientFetch } from '../util/resilientFetch.js';
@@ -121,6 +121,11 @@ async function portalPing(host, port, { token, expectAgent, otherIds = [], timeo
 /** 한 대상 점검. target: { host, port, kind, token?, expectAgent?, relayAgent?, otherIds? } */
 export async function runCheck(target, { timeoutMs = 8_000 } = {}) {
   const { host, port, kind } = target;
+  // 78회차 F2: IP 리터럴은 ssrfLookup 을 타지 않는다(lookup 은 이름일 때만 불린다 — util/ssrfLookup.js 머리말 '리터럴 검사를 없애면 안 된다').
+  //   수동 호스트(settings.hosts — 형식 정규식만)에 127.0.0.1 · 169.254.169.254 를 넣으면 TCP · SSH 배너 · /api/health 가 그대로 나갔다
+  //   (배너 실패 문구가 그 포트의 첫 40바이트를 화면에 싣는다). vCenter 종류(probeRelayPath)와 중계 토폴로지 SSH(relaytopo/ops.js)는 이미 막는다 — 같은 판정.
+  const blocked = ipBlockReason(host);
+  if (blocked) return { ok: false, phase: 'unknown', error: `접속하지 않았습니다 — ${blocked}`, ms: 0 };
   if (kind === 'irs-ssh') return sshBanner(host, port, timeoutMs);
   if (kind === 'edge-vcenter' || kind === 'irs-vcenter') {
     const p = await probeRelayPath(`${host}:${port}`, { timeoutMs });
@@ -135,7 +140,10 @@ export async function runCheck(target, { timeoutMs = 8_000 } = {}) {
     if (!r.ok) return r;
     if (r.got?.instanceBad) return { ok: false, phase: 'hq', error: '응답 포탈의 인스턴스 값을 읽지 못함(문자열이 아님) — 이 중앙인지 확인할 수 없습니다', got: r.got, ms: r.ms };
     if (r.got?.instance && r.got.instance !== instanceId()) return { ok: false, phase: 'hq', error: `응답 포탈 인스턴스가 이 중앙이 아님(${r.got.agent || r.got.instance.slice(0, 8)})`, got: r.got, ms: r.ms };
-    if (!r.got?.instance) return { ok: true, detail: `${r.detail} (구버전 응답 — 인스턴스 대조 불가)`, ms: r.ms };
+    // 78회차 F3: 인스턴스 값이 없는 응답은 **이 중앙이 아니다** — 이 중앙의 /api/health 는 v2.429(이 점검과 같은 판)부터 늘 instance 를 싣는다.
+    //   예전에는 '구버전 응답 — 대조 불가' 로 정상(초록)이라, 포트가 다른 웹 서버(200 아무 페이지 — 본문을 못 읽어도 {})나 옛 포탈로 잘못
+    //   전달돼도 HQ 경로가 정상으로 보였다(확인 불가 ≠ 정상). instanceBad(v2.743)와 같은 'hq' 단계 실패로 낸다.
+    if (!r.got?.instance) return { ok: false, phase: 'hq', error: '응답에 인스턴스 값이 없음 — 이 중앙의 응답이 아닙니다(포탈이 아닌 웹 서버이거나 다른 포탈로 전달됨)', got: r.got, ms: r.ms };
     return { ok: true, detail: '중앙 자신에게 도달', ms: r.ms };
   }
   // edge-portal / irs-portal

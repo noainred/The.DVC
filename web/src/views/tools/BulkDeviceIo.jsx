@@ -56,6 +56,8 @@ export default function BulkDeviceIo({
   unitLabel = '장비',    // 표 머리글·안내 문구의 단위 이름
   typeCol = '타입',      // 타입 열 머리글. **null 이면 열 자체를 숨긴다**(Horizon 은 타입이 없다 —
                          // 항상 '—' 인 열을 남기면 사용자가 '무엇을 적어야 하나' 를 찾는다)
+  // 결정(78 남긴 것 ③): 수정 행의 빈 칸 = 기존 값 유지 · '-' = 비움 계약을 쓰는 화면(스토리지 · SAN)만 켠다 — CVP · Veeam · Horizon 은 계약이 달라 기본 꺼짐
+  blankKeeps = false,
   onClose,
   onDone,               // 등록 후 목록 새로고침
 }) {
@@ -197,6 +199,7 @@ export default function BulkDeviceIo({
       <div className="muted" style={{ fontSize: 11.5, marginBottom: 8, lineHeight: 1.6 }}>
         {fmt.hint}. <b>{keyLabel}</b> 가 같은 {unitLabel}는 <b>수정</b>, 없으면 <b>추가</b>입니다.
         비밀번호 칸은 값이 있으면 저장하고 비우면 기존 값을 유지합니다.
+        {blankKeeps && <> <b>수정</b> 행의 빈 칸(또는 적지 않은 항목)도 기존 값을 유지합니다 — agent 를 비워도 중앙 직접으로 바뀌지 않습니다. 값을 지우려면 그 칸에 ‘-’ 하나를 적으세요.</>}
       </div>
 
       <textarea className="input" style={{ width: '100%', minHeight: 120, ...S.mono }}

@@ -8,7 +8,7 @@
  *   ③ 소스의 라우트 선언 수 == 실제 centralRouter 라우트 수(선언이 빠지거나 두 번 등록되지 않았다) · 영역 파일의 경로가 실제로 등록돼 있다
  *   ④ 경로 문자열로 동적 import 하는 공용 함수(onlyDelegated)는 routes/ 기준으로 푼다(분할 때 실제로 깨졌던 것 — 미위임 필터가 500)
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -16,8 +16,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CENTRAL_PARTS, centralSource } from './_centralSource.js';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');
-process.env.CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'csplit2954-'));
+process.env.CONFIG_DIR = tmpDir('csplit2954-');
 const read = (p) => fs.readFileSync(path.join(SRC, p), 'utf8');
 
 test('① 영역 파일은 central.js 를 import 하지 않는다(순환 금지) · 공용 판정은 인자로', () => {

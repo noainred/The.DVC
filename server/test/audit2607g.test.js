@@ -2,7 +2,7 @@
 //  · WEB2607-05  롤업 vCenter 별 전력: 측정 서버 0대면 powerKw 는 0 이 아니라 null(+ powerServers)
 //  · LEFT2607-04 엣지 위임 병합이 collectSource:'rest' 표지를 collectMethod 로 보존
 //  · RECENT2607-08 storeStatus.collectMode 는 site/direct 축만, REST 여부는 collectSource 로 따로
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -10,11 +10,18 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from './_stripComments.js';
 
+// v3.18.8: 이 파일이 만든 임시 폴더는 시험이 끝나면 지운다(지우지 않아 전량 실행마다 /tmp 에 쌓였다 — tmpCleanup3188 이 고정).
+//   exit 에서 한 번 더 지운다 — 모듈의 종료 flush(util/exitFlush.js)가 뒤늦게 다시 만든 폴더(수 MB 실측)까지.
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 const read = (p) => stripComments(fs.readFileSync(path.join(SRC, p), 'utf8'));
 
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'a2607g-'));
+const CFG = tmpDir('a2607g-');
 process.env.CONFIG_DIR = CFG;
 process.env.DATA_SOURCE = 'mock';
 
