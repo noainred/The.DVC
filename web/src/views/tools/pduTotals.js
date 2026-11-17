@@ -7,6 +7,8 @@
  * 장비는 개수 없이 합계에서 빠졌다. 합계는 그대로 내되 **무엇이 빠졌는지 개수로** 함께 낸다.
  */
 
+import { unitText } from '../unitText.js'; // 79회차 반증(v3.18.9 verify): '—'대 는 0대처럼 읽힌다(BUG-20 규약)
+
 /** 장비 목록 → { powerW, units, sensors, tempMaxC, powerPartial, powerMissing, sensorsPartial }. */
 export function pduTotals(devices) {
   let powerW = null; let units = 0; let sensors = 0; const temps = [];
@@ -49,7 +51,7 @@ export function pduPowerMark(summary) {
     const read = Number.isFinite(summary.powerUnitsRead) ? summary.powerUnitsRead : null;
     return {
       label: '부분 합',
-      title: `유닛 ${summary.units ?? '—'}대 중 ${read ?? '일부'}${read != null ? '대' : ''}의 전력만 읽었습니다 — 이 값은 읽은 유닛만의 합입니다(상세에서 값이 '—' 인 유닛).`,
+      title: `유닛 ${unitText(summary.units, '대')} 중 ${read != null ? unitText(read, '대') : '일부'}의 전력만 읽었습니다 — 이 값은 읽은 유닛만의 합입니다(상세에서 값이 '—' 인 유닛).`,
     };
   }
   return null;
