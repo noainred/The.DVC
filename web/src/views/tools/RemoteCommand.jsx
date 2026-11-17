@@ -104,7 +104,7 @@ export default function RemoteCommand() {
                   </td>
                   <td>{(g.instances || []).length ? modeLabel(g.mode, data?.settings?.modes) : '—'}{g.primary ? <span className="muted"> · 주 {g.primary}</span> : null}</td>
                   <td>{g.pending || 0}</td>
-                  <td style={{ whiteSpace: 'normal', minWidth: 0 }}>{g.hasPassword ? <span style={{ color: TONE.ok }}>서명</span> : <span style={{ color: TONE.warn }} title="법인 비밀번호 미등록 — 토큰만으로 명령이 실행됩니다">무서명</span>}
+                  <td style={{ whiteSpace: 'normal', minWidth: 0 }}>{g.hasPassword ? <span style={{ color: TONE.ok, whiteSpace: 'nowrap' }}>서명</span> : <span style={{ color: TONE.warn, whiteSpace: 'nowrap' }} title="법인 비밀번호 미등록 — 토큰만으로 명령이 실행됩니다">무서명</span>}
                     {/* 결정(56~75) 64 F7: 스케줄의 외부 스크립트 · SSH 점검이 서명 문제로 멈췄으면 그 사실(문구는 서버 scheduleSignNote) */}
                     {g.scheduleSignNote && <div style={{ color: TONE.warn, fontSize: 12, maxWidth: 280 }}>⚠ {g.scheduleSignNote}</div>}</td>
                   <td className="muted">{ago(g.lastSeen)}</td>
