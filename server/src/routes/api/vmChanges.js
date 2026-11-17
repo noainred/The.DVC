@@ -16,7 +16,7 @@ import { fileStamp } from '../../util/dayKey.js';
 import { getLogsDb } from '../../logs/db.js';
 import { loadLogSettings } from '../../logs/settings.js';
 import { eventNotCollectedMap, notCollectedList, eventLagForView, eventCoverageIsMock } from '../../logs/coverage.js'; // v2.733(C1-01): 지금 이벤트를 수집하지 않는 vCenter
-import { createMovesAcc, createChangesAcc, vmHistory } from '../../vmchanges/analyze.js';
+import { createMovesAcc, createChangesAcc, vmHistory, eventCoverageRows, eventLastTsOf } from '../../vmchanges/analyze.js';
 import { MOVE_TYPES, RECONFIG_TYPES, PERM_TYPES } from '../../vmchanges/eventDetail.js';
 
 const toolsPerm = requirePerm('tools');
@@ -56,7 +56,8 @@ async function load(req, snap, { stream = null } = {}) {
   // v2.733(점검 3회차 C1-01): 이 포탈이 지금 이벤트를 수집하지 않는 vCenter(엣지 위임·비활성·점검중)는 항목에 notCollected(사유)를 싣는다 —
   //   lastTs 가 남아 있어도(수집을 멈추기 전 이벤트) '없음' 이 아니라 '지금 수집하지 않는다' 다. 목록(notCollected)은 범위로 이미 거른 ids 기준.
   const nc = eventNotCollectedMap();
-  const coverage = ids.slice(0, 200).map((id) => ({ vcenterId: id, name: vcName.get(id) || id, lastTs: db.lastTs(id) || null, ...(nc.has(id) ? { notCollected: nc.get(id) } : {}) }));
+  // 69회차 F2: 마지막 이벤트 시각은 미래 행 경계 안의 MAX(vmchanges/analyze.js eventCoverageRows — 형제 vm-lifecycle 과 한 벌).
+  const coverage = eventCoverageRows(db, ids, { vcName, nc });
   const notCollected = notCollectedList(nc, { only: ids, names: vcName });
   return { rows, truncated, coveredSince, scanned, days, since, vcName, ids, coverage, notCollected, settings: { enabled: s.enabled, retentionDays: s.retentionDays, pollIntervalMin: s.pollIntervalMin, minSeverity: s.minSeverity } };
 }
@@ -97,7 +98,7 @@ export function registerVmChanges(api) {
       //   수집하지 않는 vCenter 는 notCollected 가 말한다(웹이 그것을 먼저 본다).
       const lagList = notCollected ? [] : await eventLagForView({ db, now: Date.now(), only: [String(vm.vcenterId)] });
       const lagging = Array.isArray(lagList) ? (lagList[0] ?? (eventCoverageIsMock() ? null : false)) : null;
-      res.json({ ok: true, days, items: vmHistory(rows, 20), more: Math.max(0, rows.length - 20), logs: { enabled: loadLogSettings().enabled }, lastTs: db.lastTs(vm.vcenterId) || null, notCollected, lagging });
+      res.json({ ok: true, days, items: vmHistory(rows, 20), more: Math.max(0, rows.length - 20), logs: { enabled: loadLogSettings().enabled }, lastTs: eventLastTsOf(db, vm.vcenterId), notCollected, lagging });   // 69회차 F2: 미래 행 경계
     } catch (e) {
       if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) });
     }
@@ -125,6 +126,8 @@ export function registerVmChanges(api) {
           lines.push(csvLine([fmt(r.ts), L.vcName.get(r.vcenterId) || r.vcenterId, r.entity, r.type, r.user || '', what, r.message || '']));
         }
       }
+      // 69회차 I1: 읽기 상한으로 잘렸으면 파일에도 밝힌다(X-Truncated 헤더만으로는 파일만 받은 사람이 '그 기간 전부' 로 읽는다).
+      if (L.truncated) lines.push(csvLine([`(이벤트가 많아 최신 ${READ_MAX}건까지만 실음${Number.isFinite(L.coveredSince) ? ` — ${fmt(L.coveredSince)} 이후만 빠짐없음` : ''} · 기간이나 vCenter 를 좁혀 다시 받으세요)`]));
       logAudit({ user: req.user?.username, action: 'vm-changes.csv', target: kind, detail: `${lines.length - 1} rows · ${L.days}d${L.truncated ? ' (truncated)' : ''}`, ip: req.ip });
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="vm-${kind}-${fileStamp()}.csv"`);

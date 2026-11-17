@@ -42,6 +42,8 @@ export async function vmHygieneNotifyOnce({ now = Date.now(), force = false, sen
   _busy = true;
   try {
     const s = loadVmHygieneSettings();
+    // 69회차 F4: 설정 파일을 읽지 못했으면(기본값 = 알림 꺼짐 · 예외 없음) 'off' 로 말하지 않고 보내지도 않는다 — 다음 확인에서 다시 읽는다.
+    if (s.unreadable) return (_last = { at: now, ok: false, sent: false, reason: 'settings-unreadable' });
     if (!force && !s.notify?.enabled) return (_last = { at: now, ok: true, sent: false, reason: 'off' });
     if (config.agent?.centralUrl && !force) return (_last = { at: now, ok: true, sent: false, reason: 'edge' });
     const today = dayKey(now);

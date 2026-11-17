@@ -13,7 +13,7 @@ import { capStr } from '../../util/capStr.js';
 import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp } from '../../util/dayKey.js';
-import { analyzeTags, vmTagsOf, vmRefOf, tagStateOf } from '../../tags/analyze.js';
+import { analyzeTags, vmTagsOf, vmRefOf, tagStateOf, tagsPartialOf } from '../../tags/analyze.js';
 import { loadTagPolicy, saveTagPolicy } from '../../tags/policy.js';
 import { tagInvStatus } from '../../tags/collect.js';
 import { config } from '../../config.js';
@@ -44,6 +44,27 @@ export function maskVcErrors(rows) {
     : v));
 }
 
+/**
+ * VM 상세 '태그 · 사용자 지정 속성' 한 VM 의 응답 본문(순수 — 테스트 고정).
+ * 69회차 F3(재현 — v2.719 B1-04 의 형제 경로): 목록(analyzeTags)은 태그 연결을 일부만 읽은 vCenter 의 '필수 카테고리 없음' 을 단정하지 않고
+ *   '확인 안 됨(부분)' 으로 세는데, 이 경로는 같은 VM 에 '<카테고리> 없음' 을 그대로 냈다(목록과 상세가 반대로 말함). 템플릿도 목록은 점검 밖인데
+ *   이 경로는 빠진 필수 태그를 냈다(화면이 '점검 대상이 아닙니다' 와 '없음' 배지를 함께 보였다). 둘 다 missing 을 null(판정 안 함)로 두고
+ *   부분 읽기는 missingUnsure(읽은 연결에서 안 보인 카테고리)와 partial 로 밝힌다.
+ */
+export function vmTagsOfBody(vm, inv, pol) {
+  const { tags, custom } = vmTagsOf(inv, vmRefOf(vm.vcenterId, vm.id));
+  const present = new Set((tags || []).map((t) => String(t.category || '').toLowerCase()));
+  const required = Array.isArray(pol?.requiredCategories) ? pol.requiredCategories : [];
+  const notSeen = tags ? required.filter((c) => !present.has(String(c).toLowerCase())) : null;
+  const template = !!vm.template;
+  const partial = !!tags && tagsPartialOf(inv);
+  return { ok: true, state: tagStateOf(inv), tagsAt: inv?.tagsAt ?? null, customAt: inv?.customAt ?? null, tags, custom,
+    fields: Array.isArray(inv?.fields) ? inv.fields.length : null,
+    missing: template || (partial && notSeen?.length) ? null : notSeen,
+    ...(partial ? { partial: true, ...(!template && notSeen?.length ? { missingUnsure: notSeen } : {}) } : {}),
+    template };
+}
+
 export function registerVmTags(api) {
   api.get('/tools/vm-tags', toolsPerm, (req, res) => {
     const pol = loadTagPolicy();
@@ -67,14 +88,7 @@ export function registerVmTags(api) {
     const vm = (snap.vms || []).find((v) => v.id === vmId);
     if (!vm || !inUserScope(req.user, snap, vm.vcenterId)) return res.status(404).json({ ok: false, reason: 'not-found' });
     const vc = (snap.vcenters || []).find((v) => v.id === vm.vcenterId);
-    const inv = vc?.tagInv || null;
-    const ref = vmRefOf(vm.vcenterId, vm.id);
-    const { tags, custom } = vmTagsOf(inv, ref);
-    const pol = loadTagPolicy();
-    const present = new Set((tags || []).map((t) => t.category.toLowerCase()));
-    res.json({ ok: true, state: tagStateOf(inv), tagsAt: inv?.tagsAt ?? null, customAt: inv?.customAt ?? null, tags, custom,
-      fields: Array.isArray(inv?.fields) ? inv.fields.length : null,
-      missing: tags ? pol.requiredCategories.filter((c) => !present.has(c.toLowerCase())) : null, template: !!vm.template });
+    res.json(vmTagsOfBody(vm, vc?.tagInv || null, loadTagPolicy()));
   });
 
   // v2.732(점검 2회차 B3-07): updatedBy 는 계정명이다 — 범위 계정에는 null(형제 vm-hygiene v2.721 B2-02 와 같은 규칙). 전체 범위는 그대로.
@@ -84,7 +98,7 @@ export function registerVmTags(api) {
   });
   api.put('/tools/vm-tags/policy', adminOnly, fleetOnly, (req, res) => {
     const r = saveTagPolicy(req.body || {}, req.user?.username || '');
-    if (!r.ok) return res.status(r.code === 'stale' ? 409 : 400).json(r);
+    if (!r.ok) return res.status(r.code === 'stale' ? 409 : r.code === 'unreadable' ? 503 : 400).json(r);   // 69회차 F4: 읽지 못한 정책 위에 저장하지 않는다
     logAudit({ user: req.user?.username, action: 'vm-tags.policy', target: 'tag-policy.json', detail: `필수 ${r.policy.requiredCategories.join(',') || '(없음)'} · 법인 ${r.policy.corpCategory || '(없음)'}`, ip: req.ip });
     res.json(r);
   });

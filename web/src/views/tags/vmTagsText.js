@@ -30,6 +30,10 @@ export function policyNote(policy) {
 export function vmTagLine(d) {
   if (!d) return '—';
   if (d.tags == null) return d.state === 'unsupported' ? '이 vCenter 에는 태그 API 가 없습니다' : d.state === 'error' ? '태그를 읽지 못했습니다' : '태그를 아직 읽지 않았습니다';
-  if (!d.tags.length) return '붙은 태그 없음';
-  return d.tags.map((t) => (t.category ? `${t.category}: ${t.tag}` : t.tag)).join(' · ');
+  // 69회차 F3: 태그 연결을 일부만 읽은 vCenter(서버 /tools/vm-tags/of partial)는 '없음' 을 단정하지 않는다 — 서버는 missing 을 null 로 두고
+  //   읽은 연결에서 안 보인 필수 카테고리를 missingUnsure 로 준다(목록 화면의 '확인 안 됨(부분)' 과 같은 뜻).
+  const line = !d.tags.length ? (d.partial === true ? '읽은 연결에는 붙은 태그 없음' : '붙은 태그 없음') : d.tags.map((t) => (t.category ? `${t.category}: ${t.tag}` : t.tag)).join(' · ');
+  if (d.partial !== true) return line;
+  const unsure = Array.isArray(d.missingUnsure) && d.missingUnsure.length ? ` — 필수 ${d.missingUnsure.join(', ')} 는 확인 안 됨(없다는 뜻이 아님)` : '';
+  return `${line} · 이 vCenter 의 태그 연결을 일부만 읽었습니다${unsure}`;
 }

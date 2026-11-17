@@ -103,6 +103,8 @@ export function registerVmHygiene(api) {
     // v2.744(회귀 검토 GF-R2 형제): 읽지 못한 것과 비활성을 나눠 한글 사유로 적는다 — 판정·문구는 corelicense/analyze.js notReadCsvLines 한 벌.
     // v2.744(최종 검토 RV-3·RX-CSV-01): 이 파일은 판정 목록이라 합계가 없다 — mode 'judge'(화면 notReadJudgeNote 와 같은 뜻 · 같은 명사).
     for (const t of notReadCsvLines(r.notReadVcenters, { mode: 'judge', noun: 'VM' })) lines.push(csvLine([t]));
+    // 69회차 I1: 상한으로 잘렸으면 파일에도 밝힌다(헤더 X-Omitted-Rows 만으로는 파일만 받은 사람이 모른다 — 32회차 F4 형제와 같은 모양).
+    if (r.omitted) lines.push(csvLine([`(상한으로 ${r.omitted}행 생략 — 전체 ${r.matched}대)`]));
     logAudit({ user: req.user?.username, action: 'vm-hygiene.csv', target: 'vm-hygiene', detail: `${r.rows.length} rows${r.omitted ? ` (+${r.omitted} omitted)` : ''}`, ip: req.ip });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="vm-hygiene-${fileStamp()}.csv"`);

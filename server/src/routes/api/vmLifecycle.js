@@ -17,6 +17,7 @@ import { loadLogSettings } from '../../logs/settings.js';
 import { eventNotCollectedMap, notCollectedList } from '../../logs/coverage.js'; // v2.733(C1-01): 지금 이벤트를 수집하지 않는 vCenter
 import { analyzeLifecycle, kindOfLife } from '../../vmlife/analyze.js';
 import { LIFE_TYPES, parseDetail } from '../../vmchanges/eventDetail.js';
+import { eventCoverageRows } from '../../vmchanges/analyze.js'; // 69회차 F2: 수집 범위 행(미래 행 경계) — vm-changes 와 한 벌
 import { inventoryUnreadReason } from '../../vmtrack/diff.js'; // v2.743(VC-01): '이 vCenter 의 VM 목록을 지금 읽었는가' 판정 한 벌(VM 수량 추이와 같다)
 
 const toolsPerm = requirePerm('tools');
@@ -43,7 +44,7 @@ async function load(req, snap) {
   // v2.733(점검 3회차 C1-01): 이 포탈이 지금 이벤트를 수집하지 않는 vCenter(엣지 위임·비활성·점검중)는 항목에 notCollected(사유)를 싣는다 —
   //   lastTs 가 남아 있어도(수집을 멈추기 전 이벤트) '없음' 이 아니라 '지금 수집하지 않는다' 다. 목록(notCollected)은 범위로 이미 거른 ids 기준.
   const nc = eventNotCollectedMap();
-  const coverage = ids.slice(0, 200).map((id) => ({ vcenterId: id, name: vcName.get(id) || id, lastTs: db.lastTs(id) || null, ...(nc.has(id) ? { notCollected: nc.get(id) } : {}) }));
+  const coverage = eventCoverageRows(db, ids, { vcName, nc });
   const notCollected = notCollectedList(nc, { only: ids, names: vcName });
   const s = loadLogSettings();
   return { rows, truncated, days, since, vcName, ids, coverage, notCollected, settings: { enabled: s.enabled, retentionDays: s.retentionDays, pollIntervalMin: s.pollIntervalMin, minSeverity: s.minSeverity } };
@@ -94,6 +95,8 @@ export function registerVmLifecycle(api) {
         lines.push(csvLine([fmt(r.ts), L.vcName.get(r.vcenterId) || r.vcenterId, r.entity, kindOfLife(r.type, d) || r.type, r.user || '',
           d?.host || '', d?.ds || '', d?.source || '', d?.oldName || '', d?.newName || '', r.message || '']));
       }
+      // 69회차 I1: 읽기 상한으로 잘렸으면 파일에도 밝힌다(X-Truncated 헤더만으로는 파일만 받은 사람이 '그 기간 전부' 로 읽는다).
+      if (L.truncated) { const oldest = L.rows[L.rows.length - 1]?.ts; lines.push(csvLine([`(이벤트가 많아 최신 ${LIFE_READ_MAX}건까지만 실음${Number.isFinite(oldest) ? ` — ${fmt(oldest)} 이후만 빠짐없음` : ''} · 기간이나 vCenter 를 좁혀 다시 받으세요)`])); }
       logAudit({ user: req.user?.username, action: 'vm-lifecycle.csv', target: 'vm-lifecycle', detail: `${lines.length - 1} rows · ${L.days}d${L.truncated ? ' (truncated)' : ''}`, ip: req.ip });
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="vm-lifecycle-${fileStamp()}.csv"`);

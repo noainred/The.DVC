@@ -19,6 +19,11 @@ describe('vmTagsText', () => {
     expect(vmTagLine({ tags: [] })).toBe('붙은 태그 없음');
     expect(vmTagLine({ tags: [{ category: 'Env', tag: 'Prod' }] })).toBe('Env: Prod');
   });
+  it('69회차 F3: 태그 연결을 일부만 읽었으면 없음을 단정하지 않는다(서버 missingUnsure)', () => {
+    expect(vmTagLine({ tags: [], partial: true, missingUnsure: ['Owner'] })).toBe('읽은 연결에는 붙은 태그 없음 · 이 vCenter 의 태그 연결을 일부만 읽었습니다 — 필수 Owner 는 확인 안 됨(없다는 뜻이 아님)');
+    expect(vmTagLine({ tags: [{ category: 'Env', tag: 'Prod' }], partial: true })).toBe('Env: Prod · 이 vCenter 의 태그 연결을 일부만 읽었습니다');
+    expect(vmTagLine({ tags: [], partial: false })).toBe('붙은 태그 없음');
+  });
   it('문구·화면에 백틱 없음', () => {
     for (const f of ['src/views/tags/vmTagsText.js', 'src/views/tools/VmTagsTool.jsx']) {
       const s = fs.readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');

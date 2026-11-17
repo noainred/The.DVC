@@ -44,6 +44,8 @@ export function registerStoragePaths(api) {
     const head = ['vCenter', '데이터스토어', '유형', '용량GB', '사용GB', '미할당 약정GB', 'VM 수', '가장 높은 심각도', '판정 코드'];
     const lines = [CSV_BOM + csvLine(head)];
     for (const x of r.rows) lines.push(csvLine([x.vcenterName, x.name, x.type, x.capacityGB ?? '', x.usedGB ?? '', x.uncommittedGB ?? '', x.vmCount ?? '', x.sev, x.findings.map((f) => f.code).join(' ')]));
+    // 69회차 I1: 상한으로 잘렸으면 파일에도 밝힌다(32회차 F4 형제와 같은 모양 — 헤더만으로는 파일만 받은 사람이 모른다).
+    if (r.omitted) lines.push(csvLine([`(상한으로 ${r.omitted}행 생략 — 전체 ${r.matched}개)`]));
     logAudit({ user: req.user?.username, action: 'storage-paths.csv', target: 'storage-paths', detail: `${r.rows.length} rows`, ip: req.ip });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="storage-paths-${fileStamp()}.csv"`);
