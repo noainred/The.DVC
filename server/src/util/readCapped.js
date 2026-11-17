@@ -1,3 +1,5 @@
+import { envPositive } from './envNumber.js'; // 102회차: 상한 env 는 유한 양수만
+
 /**
  * util/readCapped.js — 응답 본문을 **상한까지만** 읽어 JSON 으로(v2.583 — 감사 확정).
  *
@@ -44,5 +46,7 @@ export async function readTextCapped(res, maxBytes, what = '응답') {
 }
 
 /** 엣지 응답 상한 — 인벤토리 export 는 수 MB 라 넉넉히, 나머지는 16MB(중앙 수신 한도와 같은 축). */
-export const EDGE_EXPORT_MAX_BYTES = Math.max(1_048_576, Number(process.env.EDGE_EXPORT_MAX_BYTES) || 64 * 1048576);
-export const EDGE_RESPONSE_MAX_BYTES = Math.max(1_048_576, Number(process.env.EDGE_RESPONSE_MAX_BYTES) || 16 * 1048576);
+// 102회차 F3: `Math.max(1MB, Number(env) || 기본값)` 은 Infinity 를 통과시켜 **이 모듈이 막으려던 gzip 폭탄 상한이 꺼졌다**(readTextCapped 의
+//   `Math.max(1024, Infinity)`). 유한 양수만(그 밖 기본값) — 1MB 하한은 그대로.
+export const EDGE_EXPORT_MAX_BYTES = Math.max(1_048_576, envPositive(process.env.EDGE_EXPORT_MAX_BYTES, 64 * 1048576));
+export const EDGE_RESPONSE_MAX_BYTES = Math.max(1_048_576, envPositive(process.env.EDGE_RESPONSE_MAX_BYTES, 16 * 1048576));

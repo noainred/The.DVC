@@ -37,6 +37,7 @@ import { mergeEdgeReports } from '../../central/partFaultEdge.js';
 import { listCollectors } from '../../collector/registry.js';
 import { allCollectorStatus } from '../../collector/state.js';
 import { config, currentVersion } from '../../config.js';
+import { envPositive } from '../../util/envNumber.js';
 import { isAdminReq, addressMatcher, maskedIdToken, maskedAddressName, scrubberFor } from '../../auth/addressMask.js';
 import { summarizeRegistryError, REGISTRY_ERROR_LABEL } from '../../util/registryCore.js';
 
@@ -263,7 +264,7 @@ export function parseDays(v, def = 30) {
 /** 장애별 목록 상한 — 종류별 집계는 상한 **전** 전체로 낸다(잘린 목록으로 세면 부분 합이다). */
 export const INCIDENT_LIST_MAX = 2_000;
 /** 기간 이벤트 읽기 상한 — 넘으면 오래된 쪽이 빠지고 응답 scan.coveredSince 가 실제로 읽은 시작을 말한다. */
-export const INCIDENT_EVENT_READ_MAX = Math.max(1_000, Math.trunc(Number(process.env.PARTFAULT_INCIDENT_EVENT_MAX) || 100_000));
+export const INCIDENT_EVENT_READ_MAX = Math.max(1_000, envPositive(process.env.PARTFAULT_INCIDENT_EVENT_MAX, 100_000));   // 102회차: Infinity → 기본값(예전엔 읽기 상한이 꺼졌다)
 const INCIDENT_MEMO_MS = 30_000;
 const _incMemo = new Map();   // days → { key, at, value } | { key, promise }
 

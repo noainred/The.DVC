@@ -25,6 +25,7 @@
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
 import { config, currentVersion, clampIntervalMs } from '../config.js';
+import { envPositive } from '../util/envNumber.js';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { dropSummaryOf, warnDrop } from '../agent/centralReply.js';
 import { runScan } from './scan.js';
@@ -35,7 +36,7 @@ import { agentHeaders, withAgentQuery } from '../agent/agentNameCarry.js'; // v2
 const gzipAsync = promisify(zlib.gzip);
 const PUSH_GZIP = process.env.PARTFAULT_PUSH_GZIP !== 'false';
 /** 한 번에 올릴 장비 상한 — 넘치면 **버리지 않고 밝힌다**(조용한 상한 금지). */
-const MAX_DEVICES = Math.max(100, Number(process.env.PARTFAULT_PUSH_MAX_DEVICES) || 5_000);
+const MAX_DEVICES = Math.max(100, envPositive(process.env.PARTFAULT_PUSH_MAX_DEVICES, 5_000));   // 102회차: Infinity → 기본값(상한이 꺼지지 않게)
 const intervalMs = () => clampIntervalMs(Number(process.env.PARTFAULT_PUSH_MS) || 10 * 60_000, 10 * 60_000, 60_000); // v2.600 LO2600-04: 상한(2^31 초과 → setInterval 1ms 루프)
 
 let _timer = null;

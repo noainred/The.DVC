@@ -180,8 +180,10 @@ export async function runScan() {
   // SAN 추출기는 v2.548 에 추가됐다 — 없으면(부분 배포) 'no-extractor' 로 밝히고 멈추지 않는다.
   let extractSan = null;
   try { ({ extractSanSwitchParts: extractSan } = await import('./extract/sanswitch.js')); } catch { extractSan = null; }
-  // 인벤토리 신선도 기준 — iDRAC 인벤토리는 30분 주기라(poller.js) 그 두 배까지는 유효로 본다.
-  const MAX_AGE = Math.max(60_000, Number(process.env.PARTFAULT_INV_MAX_AGE_MS) || 90 * 60_000);
+  // 인벤토리 신선도 기준 — iDRAC 인벤토리는 30분 주기라(poller.js) 그 세 배(90분)까지는 유효로 본다.
+  // 102회차: 같은 env 를 idrac/serverParts.js INV_STALE_MS 가 clampIntervalMs 로 읽는데 여기는 `Math.max(1분, Number(env) || 90분)` 이라
+  //   Infinity 면 스캔은 영원히 '신선' · 상세 화면은 상한으로 잘린 값 — 같은 인벤토리를 두 판정이 다르게 봤다. 같은 헬퍼 · 같은 인자로.
+  const MAX_AGE = cfg.clampIntervalMs(process.env.PARTFAULT_INV_MAX_AGE_MS, 90 * 60_000, 60_000);
   const servers = (() => { try { return idracReg.loadRegistry(); } catch { return []; } })();
   const snaps = new Map();
   try { for (const s of stStore.localSnapshots()) snaps.set(s.deviceId, s); } catch { /* 스냅샷 없음 */ }

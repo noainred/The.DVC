@@ -47,16 +47,10 @@ const ALLOW = {
   'central/svcmonEdge.js': { '[dyn]': '검사됨 — envNum: 유한 양수만' },
   'central/svcmonSilence.js': { '[dyn]': '검사됨 — envNum: 유한 양수만' },
   'svcmon/trial.js': { '[dyn]': '검사됨 — envNum: 유한 양수만' },
-  'svcmon/pool.js': { '[dyn]': '검사됨 — envNum: 유한 수 + 호출부 Math.max 하한(SVCMON_WORKERS 0 = 인프로세스가 의미). 상한 없음은 제안' },
-  'svcmon/poller.js': { '[dyn]': '검사됨 — envNum: 유한 수 + clampIntervalMs · Math.max 하한' },
   'storage/intervals.js': { '[dyn]': '검사됨 — 유한 양수 + 키별 min · max' },
   'pdu/intervals.js': { '[dyn]': '검사됨 — 다음 줄 Math.min(MAX_MS, Math.max(min, …))' },
   'collector/state.js': { POWER_CURRENT_STALE_MS: '검사됨 — Number.isFinite && > 0(비교 전용 경계)' },
   'idrac/roomTemp.js': { ROOMTEMP_STALE_CAP_MS: '검사됨 — Number.isFinite && > 0 + 24시간 상한' },
-  'ipam/db.js': {
-    IPAM_DB_LOCK_RETRY_MS: '검사됨 — > 0 일 때만(Infinity 는 제안)',
-    IPAM_WRITE_MIN_ROWS: "의미 0 — '0' 이면 항상 오프로드(행 수 비교 문턱). 숫자 아님 → NaN 은 제안",
-  },
   'upgrade/fetchPackage.js': { UPGRADE_PACKAGE_MAX_BYTES: '검사됨 — Number.isFinite && > 0(2GB 넘는 번들 상한이 정당해 ENV_INT_MAX 를 걸지 않는다)' },
   'veeam/em/client.js': { VEEAM_EM_VM_BUDGET_MS: '검사됨 — Number.isFinite && ≥ 10초 + 10분 상한' },
   'vmtrack/db.js': { VMTRACK_RETENTION_DAYS: '검사됨 — pruneVmtrack 첫 줄이 numOrNull · > 0 아니면 정리를 건너뛴다' },
@@ -73,22 +67,13 @@ const ALLOW = {
     RIGHTSIZE_MIN_DAYS: '표시/정책', RIGHTSIZE_MIN_COVERAGE_PCT: '표시/정책',
     RIGHTSIZE_CAP_REDUCTION_PCT: '표시/정책', RIGHTSIZE_READY_WARN_PCT: '표시/정책',
   },
-  // ── 담당 밖(99회차에 다른 회차가 고치던 파일 · 공용 파일) — 고치면 줄을 지운다 ──
-  'central/partFaultEdge.js': { PARTFAULT_EDGE_MAX_DEVICES: '담당 밖', PARTFAULT_EDGE_DEVICE_PART_MAX: '담당 밖', PARTFAULT_EDGE_REPORT_PART_MAX: '담당 밖' },
-  'partfault/push.js': { PARTFAULT_PUSH_MAX_DEVICES: '담당 밖' },
-  'partfault/scan.js': { PARTFAULT_INV_MAX_AGE_MS: '담당 밖' },
-  'collector/registry.js': { CENTRAL_SELF_REGISTER_MAX: '담당 밖', CENTRAL_SELF_REGISTER_UNVERIFIED_MAX: '담당 밖' },
-  'gpu/guestops.js': { GPU_GUEST_FILE_MAX_BYTES: '담당 밖' },
-  'proxy/registry.js': { PROXY_SSH_PORT: '담당 밖(포트 — envPort 제안)', PROXY_PUBLIC_PORT_BASE: '담당 밖', GUACD_PORT: '담당 밖(포트 — envPort 제안)' },
-  'routes/api/checksLogs.js': { VCLOGS_EXPORT_MAX_ROWS: '담당 밖' },
-  'routes/api/hardwareGpu.js': { GPU_EXPORT_MAX_ROWS: '담당 밖' },
-  'routes/api/partFaults.js': { PARTFAULT_INCIDENT_EVENT_MAX: '담당 밖' },
-  'store.js': { COLLECT_CONCURRENCY: '담당 밖(공용) — Infinity 동시성 제안' },
-  'util/loopLag.js': { LOOP_LAG_WARN_MS: '담당 밖(공용) — 로그 문턱' },
-  'util/rateLimit.js': { API_RATE_LIMIT: '담당 밖(공용) — Infinity 면 속도 제한이 꺼진다(제안)', API_RATE_WINDOW_MS: '담당 밖(공용)' },
-  'util/readCapped.js': { EDGE_EXPORT_MAX_BYTES: '담당 밖(공용) — Infinity 면 상한이 꺼진다(제안)', EDGE_RESPONSE_MAX_BYTES: '담당 밖(공용)' },
-  'util/resilientFetch.js': { WAN_CONNECT_TIMEOUT_MS: "담당 밖(공용) — −1 · Infinity 면 undici 'invalid connectTimeout'(제안)", WAN_MAX_CONNECTIONS: '담당 밖(공용)' },
-  'util/soapParsePool.js': { SOAP_PARSE_MIN_CHARS: '담당 밖(공용) — 숫자 아님 → NaN(제안)' },
+  // ── 102회차: 별칭(`env.X`) · 지역 변수(`const raw = process.env.X`) 꼴 — 스윕을 넓히며 드러난 것(전부 바로 뒤에 검사가 있다) ──
+  'rma/agent.js': { RMA_PRIORITY: '검사됨 — Number.isFinite + 빈 값 제외(우선순위는 음수도 값)' },
+  'util/exportBusy.js': { EXPORT_LOCK_MAX_MS: '검사됨 — Number.isFinite && > 0 + 상 · 하한' },
+  'routes/admin/idracTrend.js': { IDRAC_TREND_RETENTION_DAYS: '검사됨 — Number.isFinite && ≥ 1 + 3650 상한' },
+  'bmstor/history.js': { BMSTOR_HISTORY_INTERVAL_HOURS: '검사됨 — 빈 값 제외 + Number.isFinite + 1~24', BMSTOR_HISTORY_RETENTION_DAYS: '검사됨 — Number.isFinite && ≥ 0(0 = 전부 보관이 의미)' },
+  'routes/central.js': { CENTRAL_INVENTORY_OWNER_HANDOVER_HOURS: '검사됨 — 빈 값 제외 + Number.isFinite && > 0(0 · 음수 = 인계 안 함이 의미)' },
+  // (담당 밖 줄은 100 · 102회차에 모두 고쳐 지웠다 — 새로 담당 밖으로 넘길 때는 사유와 함께 다시 쓴다)
 };
 
 const walk = (d, out = []) => {
@@ -98,25 +83,75 @@ const walk = (d, out = []) => {
   }
   return out;
 };
-const RE = /(?:Number|parseInt|parseFloat)\(\s*process\.env(?:\.([A-Z0-9_]+)|\[)|\+\s*process\.env\.([A-Z0-9_]+)/g;
+/*
+ * 102회차: 스윕을 넓혔다 — 예전 정규식은 `process.env` 를 글자 그대로 쓴 꼴만 봐서 다음을 놓쳤다(실제로 남아 있던 결함 포함).
+ *   · 별칭: `const env = process.env; Number(env.X)`(rma/agent.js RMA_CRED_CACHE_MS — Infinity 면 받은 비밀을 영원히 캐시) ·
+ *     `function f(env = process.env) { Number(env.X) }`.
+ *   · 지역 변수: `const raw = process.env.X; … Number(raw)`(util/soapParsePool.js SOAP_PARSE_WORKERS — Infinity 면 워커를 끝없이 만들며 멈췄다).
+ *     선언 뒤 LOCAL_SPAN 줄 안의 `Number(raw)` 만 본다(같은 파일의 무관한 `Number(v)` 를 잡지 않게).
+ *   · 구조 분해: `const { X, Y: y } = process.env` 뒤의 `Number(X)` · `Number(y)`.
+ *   · `Number.parseInt` · `Number.parseFloat`.
+ */
+const NUM_FN = String.raw`(?:Number(?:\.parse(?:Int|Float))?|parseInt|parseFloat)\(\s*`;
+const LOCAL_SPAN = 8;
+const esc = (x) => x.replace(/[$]/g, '\\$&');
+
+/** 파일 본문(주석 제거 뒤) → [{ key, line, text }] — 범위가 닫힌 것(clampIntervalMs 안 · 같은 줄 Math.max + Math.min)은 뺀다. */
+export function envNumberSitesOf(text) {
+  const aliases = ['process\\.env'];
+  for (const m of text.matchAll(/\b([A-Za-z_$][\w$]*)\s*=\s*process\.env(?!\s*[.[\w$])/g)) if (m[1] !== 'process') aliases.push(esc(m[1]));
+  const alias = aliases.join('|');
+  const re = new RegExp(`${NUM_FN}(?:${alias})(?:\\.([A-Z0-9_]+)|\\[)|\\+\\s*(?:${alias})\\.([A-Z0-9_]+)`, 'g');
+  const lines = text.split('\n');
+  const locals = [];   // { name, key, from, to } — 지역 이름이 env 값을 담은 줄 범위
+  lines.forEach((ln, i) => {
+    for (const m of ln.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*process\.env\.([A-Z0-9_]+)\s*(?:;|$)/g)) locals.push({ name: m[1], key: m[2], from: i, to: i + LOCAL_SPAN });
+    for (const m of ln.matchAll(/\b(?:const|let|var)\s*\{([^}]*)\}\s*=\s*process\.env\b/g)) {
+      for (const part of m[1].split(',')) {
+        const [k, v] = part.split(':').map((x) => x.trim().replace(/\s*=.*$/, ''));
+        if (/^[A-Z][A-Z0-9_]*$/.test(k)) locals.push({ name: v || k, key: k, from: i, to: lines.length });
+      }
+    }
+  });
+  const out = [];
+  lines.forEach((ln, i) => {
+    const hits = [...ln.matchAll(re)].map((m) => ({ key: m[1] || m[2] || '[dyn]', at: m.index }));
+    for (const l of locals) {
+      if (i < l.from || i > l.to) continue;
+      for (const m of ln.matchAll(new RegExp(`${NUM_FN}${esc(l.name)}\\s*[,)]`, 'g'))) hits.push({ key: l.key, at: m.index });
+    }
+    for (const { key, at } of hits) {
+      const before = ln.slice(0, at);
+      if (/(?:clampIntervalMs|offOrIntervalMs)\(\s*$/.test(before)) continue;     // 상 · 하한 + 비유한 → 기본값
+      if (/Math\.max\(/.test(ln) && /Math\.min\(/.test(ln)) continue;             // 같은 줄에서 범위가 닫혔다
+      out.push({ key, line: i + 1, text: ln.trim().slice(0, 160) });
+    }
+  });
+  return out;
+}
 
 function rawEnvNumberSites() {
   const out = [];
   for (const f of walk(SRC)) {
     const rel = path.relative(SRC, f).replace(/\\/g, '/');
-    const lines = stripComments(fs.readFileSync(f, 'utf8')).split('\n');
-    lines.forEach((ln, i) => {
-      for (const m of ln.matchAll(RE)) {
-        const key = m[1] || m[2] || '[dyn]';
-        const before = ln.slice(0, m.index);
-        if (/(?:clampIntervalMs|offOrIntervalMs)\(\s*$/.test(before)) continue;     // 상 · 하한 + 비유한 → 기본값
-        if (/Math\.max\(/.test(ln) && /Math\.min\(/.test(ln)) continue;             // 같은 줄에서 범위가 닫혔다
-        out.push({ rel, key, line: i + 1, text: ln.trim().slice(0, 160) });
-      }
-    });
+    if (rel.startsWith('intro/vendor/')) continue;   // 번들된 외부 라이브러리(우리 코드 아님)
+    for (const site of envNumberSitesOf(stripComments(fs.readFileSync(f, 'utf8')))) out.push({ rel, ...site });
   }
   return out;
 }
+
+test('102 ① 스윕이 별칭 · 지역 변수 · 구조 분해 · Number.parseInt 꼴도 잡는다(넓힌 정규식 자체 시험)', () => {
+  const keys = (t) => envNumberSitesOf(t).map((x) => x.key);
+  assert.deepEqual(keys('const env = process.env;\nconst A = Math.max(0, Number(env.RMA_X) || 5);'), ['RMA_X']);
+  assert.deepEqual(keys('export function f(env = process.env) {\n  const n = Number(env.EXP_Y);\n}'), ['EXP_Y']);
+  assert.deepEqual(keys('const W = (() => {\n  const env = process.env.SOAP_W;\n  if (env) return Math.max(0, Number(env) || 0);\n})();'), ['SOAP_W']);
+  assert.deepEqual(keys('const { PORT_A, B_MS: b } = process.env;\nconst p = parseInt(PORT_A, 10);\nconst q = Number(b);'), ['PORT_A', 'B_MS']);
+  assert.deepEqual(keys('const z = Number.parseInt(process.env.Z_N, 10);'), ['Z_N']);
+  assert.deepEqual(keys('const v = process.env.FAR;\n' + '\n'.repeat(LOCAL_SPAN + 2) + 'const k = Number(v);'), [], '선언에서 멀리 떨어진 같은 이름은 env 가 아니다');
+  assert.deepEqual(keys('const k = Math.min(9, Math.max(1, Number(process.env.CLOSED) || 4));'), [], '같은 줄에서 범위가 닫힌 것은 통과');
+  assert.deepEqual(keys('const k = clampIntervalMs(Number(process.env.IV_MS) || 1000, 1000);'), [], 'clampIntervalMs 안은 통과');
+  assert.deepEqual(keys('const k = envPositive(process.env.OK_N, 5);'), [], '공용 해석기는 통과');
+});
 
 test('99 ① 스윕 — 범위가 닫히지 않은 env 수치 해석은 허용 목록(사유)에 있어야 한다', () => {
   const sites = rawEnvNumberSites();

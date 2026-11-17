@@ -47,7 +47,9 @@ const ledgerWarnLog = createChangeLogger({ windowMs: 3_600_000, maxKeys: 4 }); /
 const LASTGOOD_HOLD_MS = envPositive(process.env.LASTGOOD_HOLD_MS, 21_600_000); // 기본 6시간 · 54회차: 식 기본값도 envPositive
 
 // 매 폴링 주기의 동시 vCenter 수집 개수 상한(고RTT·다수 vCenter에서 CPU 스파이크 완화).
-const COLLECT_CONCURRENCY = Math.max(1, Number(process.env.COLLECT_CONCURRENCY) || 8);
+// 102회차 F6(재현): 예전 `Math.max(1, Number(env) || 8)` 은 Infinity 를 통과시켰고, util/pool.js workerCount 는 유한하지 않은 limit 을 1 로 읽어
+//   COLLECT_CONCURRENCY=Infinity 면 vCenter 28곳을 **하나씩 차례로** 수집했다(동시성 최고 1 — 고RTT 법인이 주기를 그만큼 늘린다). 유한 양수만.
+const COLLECT_CONCURRENCY = envPositive(process.env.COLLECT_CONCURRENCY, 8);
 
 /**
  * Promise.allSettled과 같은 결과 배열([{status,value|reason}])을 돌려주되, 동시 실행을

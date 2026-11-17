@@ -5,6 +5,7 @@ import { scopedVcenterIds, inUserScope } from '../../auth/scope.js';
 import { guardCell } from '../../util/csv.js';
 import { store } from '../../store.js';
 import { config, loadVcenterConfig } from '../../config.js';
+import { envPositive } from '../../util/envNumber.js';
 import { scanResultList, getIpHistoryMap } from '../../ipam/scanStore.js';
 import { snapshotFilter, slimVm, filterScanResults } from '../../search/deepSearch.js';
 import { getServiceCheck } from '../../health/services.js';
@@ -429,7 +430,7 @@ api.get('/tools/vclogs/export.csv', csvPerm, requirePerm('tools'), async (req, r
     // 과거: 10만 행 1회 조회 + 전체 join → 수십 MB 문자열을 만드는 동안 이벤트 루프 정지.
     // gpuSeriesExport 패턴: 청크 조회 + res.write 스트리밍 + 청크 사이 setImmediate 양보 +
     // 행 상한(초과 시 잘림을 CSV 안에 명시 — 잘린 결과를 완전한 것처럼 주지 않는다).
-    const MAX = Math.max(1000, Number(process.env.VCLOGS_EXPORT_MAX_ROWS) || 100_000);
+    const MAX = Math.max(1000, envPositive(process.env.VCLOGS_EXPORT_MAX_ROWS, 100_000));   // 102회차: Infinity → 기본값(행 상한이 꺼지지 않게)
     const CHUNK = 20_000;
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="vcenter-logs-${todayStamp()}.csv"`);

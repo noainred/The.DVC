@@ -29,10 +29,12 @@ import { capStr } from '../util/capStr.js';
 import { safeLoadText } from '../util/atomicWrite.js';
 import { REGISTRY_ERROR_CODES } from '../util/registryCore.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { envPositive } from '../util/envNumber.js';
 
 const t = (v) => String(v ?? '').trim();
 const s = (v, n) => capStr(t(v), n); // v2.607(TIM2607-01): 평탄화 — `.slice` 는 본문 원문을 붙잡는다
-const MAX_DEVICES = Math.max(100, Number(process.env.PARTFAULT_EDGE_MAX_DEVICES) || 5_000);
+// 102회차: 엣지 수신 상한 셋은 유한 양수만(예전 `Math.max(하한, Number(env) || 기본)` 은 Infinity 를 통과시켜 엣지 본문 상한이 꺼졌다).
+const MAX_DEVICES = Math.max(100, envPositive(process.env.PARTFAULT_EDGE_MAX_DEVICES, 5_000));
 /**
  * 파트 배열 상한(v2.548 보안 리뷰 S2). 수신부가 장비 **수**만 제한하면 장비 1개에 키 꼬리 120만 개를 실은
  * 16MB 본문(BIG_JSON 한도 이내)이 파트 객체 120만 개로 펼쳐져 agent 당 ~450MB 가 상주한다(리뷰 실측 RSS 556MB).
@@ -40,8 +42,8 @@ const MAX_DEVICES = Math.max(100, Number(process.env.PARTFAULT_EDGE_MAX_DEVICES)
  * ⚠ 넘친 파트는 **조용히 버리지 않는다** — 그 장비를 `ok:false`(reason `parts-capped`)로 바꿔 전이가
  *   아무것도 닫지 못하게 하고(거짓 복구 방지 — v2.547 `unknownTruncated` 와 같은 방향) 개수를 밝힌다.
  */
-const DEVICE_PART_MAX = Math.max(100, Number(process.env.PARTFAULT_EDGE_DEVICE_PART_MAX) || 2_000);
-const REPORT_PART_MAX = Math.max(1_000, Number(process.env.PARTFAULT_EDGE_REPORT_PART_MAX) || 50_000);
+const DEVICE_PART_MAX = Math.max(100, envPositive(process.env.PARTFAULT_EDGE_DEVICE_PART_MAX, 2_000));
+const REPORT_PART_MAX = Math.max(1_000, envPositive(process.env.PARTFAULT_EDGE_REPORT_PART_MAX, 50_000));
 const SCANNED_MAX_BYTES = 32 * 1024;   // scanned 요약(실측 ~1KB)의 상한 — 임의 객체를 그대로 상주시키지 않는다
 const LIST_MAX = 64;                   // failedKinds·notCollected 같은 소형 배열
 /**

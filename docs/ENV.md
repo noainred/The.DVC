@@ -26,8 +26,8 @@
 | `BIG_JSON_SESSION_MAX_CONCURRENT` | `2` |  | util/bigJsonGate.js |
 | `BIG_JSON_SESSION_READ_DEADLINE_MS` | `120000` |  | util/bigJsonGate.js |
 | `BMUSAGE_TZ_OFFSET_MIN` |  |  | util/dayKey.js |
-| `EDGE_EXPORT_MAX_BYTES` | `64` |  | util/readCapped.js |
-| `EDGE_RESPONSE_MAX_BYTES` | `16` |  | util/readCapped.js |
+| `EDGE_EXPORT_MAX_BYTES` | `67108864` |  | util/readCapped.js |
+| `EDGE_RESPONSE_MAX_BYTES` | `16777216` |  | util/readCapped.js |
 | `EXPORT_LOCK_MAX_MS` | `1800000(30분 — 1분~6시간)` |  | util/exportBusy.js |
 | `GZIP_MIN_BYTES` | `1024` |  | util/compress.js |
 | `LINKCHECK_TZ_OFFSET_MIN` |  |  | util/dayKey.js |
@@ -391,12 +391,12 @@
 | `SVCMON_BATCH` | `250` |  | svcmon/pool.js |
 | `SVCMON_CONCURRENCY` | `256` |  | svcmon/pool.js |
 | `SVCMON_ENABLED` | `기본 적용('false' 로 끄기)` |  | svcmon/poller.js |
-| `SVCMON_MAX_PER_TICK` | `4000` |  | svcmon/capacity.js, svcmon/poller.js |
+| `SVCMON_MAX_PER_TICK` | `4000` |  | svcmon/capacity.js |
 | `SVCMON_PROC_CONCURRENCY` | `64` |  | svcmon/pool.js |
-| `SVCMON_TICK_MS` | `5000` |  | svcmon/capacity.js, svcmon/poller.js |
+| `SVCMON_TICK_MS` | `5000` |  | svcmon/capacity.js |
 | `SVCMON_TRIAL_EDGE_MS` | `900000` |  | svcmon/trial.js |
 | `SVCMON_WARM_MAX_MS` | `900000` |  | svcmon/poller.js |
-| `SVCMON_WORKERS` |  |  | svcmon/capacity.js, svcmon/pool.js |
+| `SVCMON_WORKERS` |  |  | svcmon/capacity.js |
 | `SVCMON_XLSX_MAX_UNCOMPRESSED_BYTES` | `67108864` |  | svcmon/formats.js |
 
 ## 수집 서버 (9)
@@ -547,7 +547,7 @@
 | `RMA_ALLOW_SSH` | `기본 아님('true' 일 때만 적용)` | ✅ | rma/agent.js |
 | `RMA_AUDIT_LOG` |  | ✅ | rma/agent.js |
 | `RMA_COMMENT` | `''` | ✅ | rma/agent.js |
-| `RMA_CRED_CACHE_MS` | `10` |  | rma/agent.js |
+| `RMA_CRED_CACHE_MS` | `600000` |  | rma/agent.js |
 | `RMA_DISABLED_COMMANDS` |  |  | rma/agent.js |
 | `RMA_DISABLED_TESTS` |  |  | rma/agent.js |
 | `RMA_ENABLED_COMMANDS` |  | ✅ | rma/agent.js |
@@ -785,7 +785,7 @@
 |---|---|---|---|
 | `GPU_ALLOC_XLSX_TIMEOUT_MS` | `300000` |  | gpu/allocTreeXlsx.js |
 | `GPU_ALLOC_XLSX_WORKER` | `'1'` |  | gpu/allocTreeXlsx.js |
-| `GPU_GUEST_FILE_MAX_BYTES` | `8` |  | gpu/guestops.js |
+| `GPU_GUEST_FILE_MAX_BYTES` | `8388608` |  | gpu/guestops.js |
 | `GUEST_GPU_MAX_HOSTS` | `10000` |  | gpu/store.js |
 | `GUEST_GPU_MAX_HOSTS_PER_AGENT` | `4000` |  | gpu/store.js |
 | `GUEST_GPU_MAX_VMS` | `50000` |  | gpu/store.js |
@@ -829,7 +829,7 @@
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
-| `IPAM_DB_LOCK_RETRY_MS` |  |  | ipam/db.js |
+| `IPAM_DB_LOCK_RETRY_MS` | `30000` |  | ipam/db.js |
 | `IPAM_FPING` | `기본 아님('0' 일 때만 적용)` |  | ipam/scan.js |
 | `IPAM_PING_CONCURRENCY` | `8` |  | ipam/scan.js |
 | `IPAM_SCAN_DEADLINE_MS` |  |  | ipam/scanRunner.js |

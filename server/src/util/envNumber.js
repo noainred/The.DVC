@@ -16,14 +16,33 @@ export const ENV_INT_MAX = 2 ** 31 - 1;
 export const TCP_PORT_MAX = 65_535;
 
 /**
- * 양수 설정값 — 못 쓰는 값이면 def.
- * max(선택): 이보다 크면 **기본값**(잘라 쓰지 않는다 — 포트 70000 · 시한 3e9ms 는 단위 착오일 가능성이 커서 가장 가까운 값이 맞지 않다).
+ * 기본 상한(102회차 — 100회차 반증 제안) = Number.MAX_SAFE_INTEGER. 예전 기본 max 는 Infinity 라 '1e300' 같은 **유한 거대값**이 그대로 통과해
+ * 개수 · 상한 · 동시성이 사실상 꺼졌다(Infinity 만 막혔다). 2^53−1 을 넘는 값은 정수로도 정확하지 않아 설정값일 수 없다.
+ * ENV_INT_MAX(2^31−1)를 기본으로 하지 않는 이유: 2GB 를 넘는 정당한 바이트 상한(업그레이드 번들 등)이 기본값으로 떨어진다 — 시한은 호출부가 `{ max: ENV_INT_MAX }`.
  */
-export function envPositive(raw, def, { int = true, max = Infinity } = {}) {
+export const ENV_DEFAULT_MAX = Number.MAX_SAFE_INTEGER;
+
+/**
+ * 양수 설정값 — 못 쓰는 값이면 def.
+ * max(선택, 기본 ENV_DEFAULT_MAX): 이보다 크면 **기본값**(잘라 쓰지 않는다 — 포트 70000 · 시한 3e9ms 는 단위 착오일 가능성이 커서 가장 가까운 값이 맞지 않다).
+ */
+export function envPositive(raw, def, { int = true, max = ENV_DEFAULT_MAX } = {}) {
   const v = typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : typeof raw === 'number' ? raw : NaN;
   if (!Number.isFinite(v) || v <= 0) return def;
   const n = int ? Math.floor(v) : v;   // 지역 사본들(agentIdentity · gpu/store)과 같은 내림
   return n > 0 && n <= max ? n : def;
+}
+
+/**
+ * 0 도 값인 설정(102회차) — '0' 이 의미(문턱 0 = 항상 오프로드 · 워커 0 = 인프로세스)인 키. 유한한 0 이상만 값이고
+ * 그 밖(빈 값 · 음수 · 숫자 아님 · Infinity)은 기본값. 빈 값(`KEY=`)은 0 이 아니라 **미지정**이다(`Number('') === 0` 함정 —
+ * config.js numEnv 와 같은 규칙). max(기본 ENV_DEFAULT_MAX)를 넘으면 기본값(잘라 쓰지 않는다 — envPositive 와 같다).
+ */
+export function envNonNegative(raw, def, { int = true, max = ENV_DEFAULT_MAX } = {}) {
+  const v = typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : typeof raw === 'number' ? raw : NaN;
+  if (!Number.isFinite(v) || v < 0) return def;
+  const n = int ? Math.floor(v) : v;
+  return n <= max ? (n || 0) : def;   // `|| 0`: '-0' 을 0 으로
 }
 
 /** 포트 env — 1~65535 정수만, 아니면 def(결정 57). */

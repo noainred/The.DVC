@@ -13,29 +13,32 @@
  * 폴백: 워커 생성/전송 실패·사망 시 항상 인라인 실행(모니터링이 통째로 멈추는 게 최악).
  */
 
-import os from 'node:os';
 import { pingProbeMode as inlinePingMode } from '../util/ping.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { runCheck } from './checker.js';
+import { workersFromEnv } from './capacity.js';   // 102회차: 워커 수 판정은 capacity.js 하나(용량 판정과 같은 값)
+import { envPositive } from '../util/envNumber.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WORKER_FILE = path.join(HERE, 'worker.js');
 
-const envNum = (k, dflt) => { const n = Number(process.env[k]); return Number.isFinite(n) ? n : dflt; };
+// 102회차: 빈 값 · 0 · 음수 · 숫자 아님 · Infinity · 상한 밖은 기본값(예전엔 `Number('') === 0` 이라 `SVCMON_CONCURRENCY=` 한 줄이 동시성을 1로 만들었고
+//   상한이 없었다). 상한은 워커 하나 기준 — 소켓 1만 · 프로세스 1천(그 위는 파일 기술자 · 프로세스 수 한도에 먼저 닿는다).
+const envNum = (k, dflt, max) => envPositive(process.env[k], dflt, { max });
 
-const WORKER_COUNT = Math.max(0, envNum('SVCMON_WORKERS', Math.min(4, Math.max(1, os.cpus().length - 1))));
+const WORKER_COUNT = workersFromEnv();   // 0 = 인라인(의미) · 정수 1~64
 // 소켓 대기형 동시성 — 처리량을 직접 결정한다(죽은 호스트가 많을수록 중요).
-const SOCK_LIMIT = Math.max(1, envNum('SVCMON_CONCURRENCY', 256));
+const SOCK_LIMIT = envNum('SVCMON_CONCURRENCY', 256, 10_000);
 /**
  * 워커가 보고한 ping 판정 방식 — 'icmp' | 'tcp-fallback' | 'unknown'.
  * 워커 스레드 안에서만 관측되는 값이라 결과 메시지에 실려 온다(메인에서 읽으면 항상 unknown).
  */
 let lastPingMode = 'unknown';
 // CLI 프로세스를 띄우는 ping/trace 전용 — 너무 크면 프로세스 폭주로 시스템이 먼저 죽는다.
-const PROC_LIMIT = Math.max(1, envNum('SVCMON_PROC_CONCURRENCY', 64));
-const BATCH = Math.max(50, envNum('SVCMON_BATCH', 250));
+const PROC_LIMIT = envNum('SVCMON_PROC_CONCURRENCY', 64, 1_024);
+const BATCH = Math.max(50, envNum('SVCMON_BATCH', 250, 100_000));
 
 const workers = [];
 let seq = 0;
