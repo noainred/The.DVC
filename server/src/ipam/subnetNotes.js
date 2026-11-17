@@ -12,6 +12,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
+import { makeSettingsLoadError } from '../util/settingsLoadError.js';   // 60회차 F2
 
 const FILE = path.join(config.configDir, 'ipam-subnet-notes.json');
 export const SUBNET_PURPOSE_MAX = 80;
@@ -28,10 +29,21 @@ export function subnetKey(v) {
   return p3.join('.');
 }
 
+/*
+ * 전체 점검 60회차 F2(재현 — 25회차 F-4 메모 · 예약 파일의 형제): 손상되면 표지 없이 빈 맵이 되고, 다음 저장 한 번이 그 대역 하나만 든 파일을 만들었다
+ *   (나머지 대역 용도는 손상 보존본에만 — 서비스 점검에도 없었다). 이제 로드 오류를 세우고 오류 중 저장은 거절한다(라우트 409). 해제는 확정 · 보존본 복구.
+ */
+const _loadErr = makeSettingsLoadError(() => FILE, { label: 'IP 관리 대역 용도 · 설명', confirm: () => { atomicWriteFileSync(FILE, JSON.stringify({ ...load() }, null, 2), { mode: 0o600 }); _loadErr.ok(); } });
+/** 대역 용도 파일을 못 읽었으면 { at, reason }, 아니면 null. */
+export function subnetNotesLoadError() { load(); return _loadErr.get(); }
+
 function load() {
   if (cache) return cache;
   cache = {};
-  try { if (fs.existsSync(FILE)) cache = parseJsonObject(fs.readFileSync(FILE, 'utf8')); } catch (e) { preserveCorrupt(FILE, e.message); cache = {}; }
+  try {
+    if (fs.existsSync(FILE)) { cache = parseJsonObject(fs.readFileSync(FILE, 'utf8')); _loadErr.ok(); }
+    else _loadErr.missing();
+  } catch (e) { _loadErr.corrupt(e); preserveCorrupt(FILE, e.message); cache = {}; }
   if (!cache || typeof cache !== 'object' || Array.isArray(cache)) cache = {};
   return cache;
 }
@@ -53,11 +65,12 @@ export function setSubnetNote(base, { purpose, desc } = {}, user = '') {
   const d = String(desc ?? '').trim();
   if (p.length > SUBNET_PURPOSE_MAX) return { ok: false, reason: `용도는 ${SUBNET_PURPOSE_MAX}자까지입니다(${p.length}자).` };
   if (d.length > SUBNET_DESC_MAX) return { ok: false, reason: `설명은 ${SUBNET_DESC_MAX}자까지입니다(${d.length}자).` };
+  if (subnetNotesLoadError()) return { ok: false, code: 'settings-unreadable', reason: '대역 용도 파일(ipam-subnet-notes.json)을 읽지 못한 상태라 저장하지 않았습니다 — 지금 저장하면 그 대역 하나만 든 파일이 됩니다. 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리고 재시작하세요.' };   // 60회차 F2
   const data = { ...load() };
   if (!p && !d) delete data[k];
   else data[k] = { purpose: p, desc: d, updatedAt: new Date().toISOString(), updatedBy: String(user || '') };
   atomicWriteFileSync(FILE, JSON.stringify(data, null, 2), { mode: 0o600 }); // 실패면 던진다 — 캐시는 성공 뒤에만 바꾼다
-  cache = data;
+  cache = data; _loadErr.ok();
   return { ok: true, note: data[k] || null };
 }
 

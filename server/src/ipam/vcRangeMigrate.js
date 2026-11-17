@@ -25,7 +25,7 @@ import path from 'node:path';
 import { config, loadVcenterConfig } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { registerStateFile } from '../util/stateFiles.js';
-import { listVcRanges, removeVcRanges } from './rangeStore.js';
+import { listVcRanges, removeVcRanges, vcRangesLoadError } from './rangeStore.js';
 import { loadScanSettings, saveScanSettings, listScanAgents, LOCAL, scanSettingsLoadError } from './scanStore.js';
 import { checkRangeList } from './rangeSyntax.js';
 import { RANGE_CAP } from './scan.js';
@@ -130,6 +130,8 @@ export function runVcRangeMigration({ now = Date.now(), force = false } = {}) {
   // 27회차 반증 D-8: 배정 파일(ipam-scan.json)을 못 읽는 동안은 시작하지 않는다 — 옮기기가 전부 settings-unreadable 로 실패한 채
   //   'done' 으로 기록되어 확정 · 복구 뒤에도 다시 돌지 않았다. 다른 보류 분기와 같이 reason 만 돌려 다음 실행에서 다시 본다.
   if (scanSettingsLoadError()) return { ran: false, state: prev, reason: 'IP 스캔 배정 파일을 읽지 못해 옮기지 않았습니다(설정 파일 점검에서 확정 · 복구 뒤 다시 시도합니다).' };
+  // 60회차 F1: 옮길 원본(vCenter 별 대역 파일)을 못 읽으면 빈 목록으로 보고 'done' 을 굳혔다(복구 뒤에도 다시 돌지 않았다) — 같은 보류.
+  if (vcRangesLoadError()) return { ran: false, state: prev, reason: 'vCenter 별 스캔 대역 파일을 읽지 못해 옮기지 않았습니다(설정 파일 점검에서 확정 · 보존본 복구 뒤 다시 시도합니다).' };
   const vcRanges = listVcRanges();
   if (!vcRanges.length) {
     const st = { version: 1, done: true, at: now, items: [], backup: null, dismissedAt: now };
@@ -171,7 +173,9 @@ export function runVcRangeMigration({ now = Date.now(), force = false } = {}) {
 }
 
 /** 사용자가 고른 에이전트로 남은 vCenter 대역을 옮긴다. */
+const UNREADABLE_MANUAL = { ok: false, status: 409, code: 'settings-unreadable', reason: 'vCenter 별 스캔 대역 파일을 읽지 못한 상태입니다 — 서비스 점검에서 확정하거나 손상 보존본을 되돌린 뒤 다시 하세요.' };
 export function moveVcRangeManually(vcenterId, agent, { user = '', now = Date.now() } = {}) {
+  if (vcRangesLoadError()) return { ...UNREADABLE_MANUAL };   // 60회차 F1: 빈 목록을 보고 '옮길 대역이 없습니다(404)' 라 하지 않는다
   const id = t(vcenterId); const a = t(agent) || LOCAL;
   const e = listVcRanges().find((x) => x.vcenterId === id);
   if (!e) return { ok: false, status: 404, reason: '옮길 대역이 없습니다(이미 옮겼거나 지웠습니다).' };
@@ -186,6 +190,7 @@ export function moveVcRangeManually(vcenterId, agent, { user = '', now = Date.no
 
 /** 남은 vCenter 대역을 지운다. */
 export function removeVcRangeManually(vcenterId, { user = '', now = Date.now() } = {}) {
+  if (vcRangesLoadError()) return { ...UNREADABLE_MANUAL };   // 60회차 F1
   const id = t(vcenterId);
   const r = removeVcRanges(id);
   if (!r.ok) return { ok: false, status: 404, reason: '지울 대역이 없습니다.' };
