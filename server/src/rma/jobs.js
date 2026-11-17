@@ -59,8 +59,8 @@ export const HEARTBEAT_STALE_MS = envPositive(process.env.RMA_HEARTBEAT_STALE_MS
  * 항목은 정리한다.
  */
 export const HEARTBEAT_ELEM_MAX = 200;
-export const HEARTBEAT_MAX_INSTANCES = Math.max(2, Number(process.env.RMA_MAX_INSTANCES_PER_AGENT) || 32);
-export const HEARTBEAT_PURGE_MS = Math.max(HEARTBEAT_STALE_MS * 2, Number(process.env.RMA_HEARTBEAT_PURGE_MS) || 7 * 86_400_000);
+export const HEARTBEAT_MAX_INSTANCES = Math.max(2, envPositive(process.env.RMA_MAX_INSTANCES_PER_AGENT, 32));
+export const HEARTBEAT_PURGE_MS = Math.max(HEARTBEAT_STALE_MS * 2, envPositive(process.env.RMA_HEARTBEAT_PURGE_MS, 7 * 86_400_000));
 let _hbSweptAt = 0;
 const _hbRefuseLogAt = new Map();
 /**
@@ -346,7 +346,7 @@ export function releaseAllWaiters() {
 //   **조용히** 실패했다(saveHistoryRow 가 false 만 돌려준다). 개별 토큰 엣지가 자기 잡에만 할 수 있는 일이지만,
 //   화면을 죽이는 값은 수신 지점에서 막는다(v2.598 CENTRAL 규약 — 정제는 저장 함수 안에).
 //   글자 상한은 엣지 출력 상한(RMA_MAX_OUTPUT 기본 256KB)보다 넉넉히 두고, 잘랐으면 truncated 로 밝힌다.
-const RESULT_TEXT_MAX = Math.max(256 * 1024, Number(process.env.RMA_MAX_OUTPUT) || 0) * 2;
+const RESULT_TEXT_MAX = Math.max(256 * 1024, envPositive(process.env.RMA_MAX_OUTPUT, 0)) * 2;
 const REASON_MAX = 2000;
 const ARGV_MAX = 64; const ARGV_ITEM_MAX = 1000;
 // v2.607(TIM2607-01·LEFT2607-05): capStr — `.slice` 는 결과 본문(최대 수 MB) 원문을 붙잡는다.

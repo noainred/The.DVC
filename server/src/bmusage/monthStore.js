@@ -35,6 +35,7 @@
  *  · **1초 샘플은 여기 들어오지 않는다**(설계 §4.4 — 피크 창의 1초 표본은 집계 뒤 버린다. 이 모듈에는 1초 해상도 표가 없다).
  * node:sqlite 가 없으면 전부 no-op(수집·화면은 살고 이력만 없다 — db.js 와 같은 관행).
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import fs from 'node:fs';
 import path from 'node:path';
 import { config, clampIntervalMs } from '../config.js';
@@ -53,7 +54,7 @@ const OFF_MS = DAY_OFFSET_MIN * 60_000;
 /** 조회 한 번에 여는 파일 상한 — SQLite ATTACH 기본 상한(SQLITE_MAX_ATTACHED 10)과 같은 값(설계 ‘상한 10 안’). */
 export const MONTH_FILES_PER_QUERY = 10;
 /** 동시에 열어 두는 핸들 상한(LRU). 쓰는 파일 5종(이번 달) + 조회 10 + 여유. 쓰는 중(pin)인 핸들은 닫지 않는다. */
-export const MONTH_MAX_OPEN = Math.max(8, Number(process.env.BMUSAGE_MONTH_MAX_OPEN) || 24);
+export const MONTH_MAX_OPEN = Math.max(8, envPositive(process.env.BMUSAGE_MONTH_MAX_OPEN, 24));
 
 /* ── 기존 다섯 지표 열(+ HBA·I/O) — db.js METRICS 와 같은 9개. 롤업 이름은 예전 일 롤업 규약(cpu_sum·net_max …)을 따른다. ── */
 export const BASE_COLS = Object.freeze(['cpu_pct', 'mem_pct', 'disk_busy_pct', 'disk_used_pct', 'net_pct', 'net_bps', 'hba_pct', 'hba_bps', 'io_pct']);
@@ -945,7 +946,7 @@ export function mergeDailyRows(a, b) {
 let _counts = null;
 let _countsRunning = null;
 /** v2.922(반증 D11): 파일별 행 수는 비싸다(장치 5분 월 파일 수천만 행 — 추정) → 10분 캐시 · 계산은 뒤에서(화면 로드가 기다리지 않는다). */
-const COUNT_CACHE_MS = Math.max(0, Number(process.env.BMUSAGE_MONTH_COUNT_CACHE_MS) || 10 * 60_000);
+const COUNT_CACHE_MS = Math.max(0, envPositive(process.env.BMUSAGE_MONTH_COUNT_CACHE_MS, 10 * 60_000));
 /**
  * 가족별 파일 수·행 수·바이트. COUNT 는 파일마다 **집계 하나짜리 문장**.
  *  · v2.922(반증 D11): 캐시 10분 · 낡았으면 **지난 값을 바로 돌려주고** 뒤에서 다시 센다(stale-while-revalidate — 첫 호출만 기다린다) ·

@@ -14,6 +14,7 @@
  * v2.613(CONTRACT2613-01 · EDGE2613-02): 사다리(등록부 → fetch → 401/403 → 404 → http → bad-body)는 `central/edgePull.js
  *   pullFromEdge` **하나**다 — 여기는 시한 env·저장(`putEdgeBmUsage`)·정제만 갖는다. kind 문자열·응답 모양은 그대로.
  */
+import { envPositive, ENV_INT_MAX } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { pullFromEdge } from './edgePull.js'; // v2.613 CONTRACT2613-01·EDGE2613-02: 당김 사다리는 하나(등록부 → fetch → 상태코드 → 본문)
 import { strOf } from '../util/coercionTrap.js'; // v2.604 CEN2604-03: 엣지 본문의 글자 필드는 타입부터 좁힌다
 import { numOrNull } from '../util/numOrNull.js';
@@ -44,9 +45,9 @@ const PEAK_SRC_SET = new Set([...PEAK_SRC, 'mixed']);
 
 /** 이 엔드포인트를 내주기 시작한 최소 엣지 버전 — 그 아래는 경로가 없다. */
 export const MIN_EDGE_VERSION = '2.554.0';
-const TIMEOUT_MS = Math.max(5_000, Number(process.env.BMUSAGE_PULL_TIMEOUT_MS) || 20_000);
+const TIMEOUT_MS = Math.max(5_000, envPositive(process.env.BMUSAGE_PULL_TIMEOUT_MS, 20_000, { max: ENV_INT_MAX }));
 /** 보관분이 이보다 오래되면 화면이 '낡았다' 고 말한다(값을 지우지는 않는다). */
-export const STALE_MS = Math.max(60_000, Number(process.env.BMUSAGE_PULL_STALE_MS) || 30 * 60_000);
+export const STALE_MS = Math.max(60_000, envPositive(process.env.BMUSAGE_PULL_STALE_MS, 30 * 60_000));
 
 const t = (v) => String(v ?? '').trim();
 /** agent(소문자) → { at, ok, ms, snap|null, kind, reason } */

@@ -117,7 +117,8 @@ test('⚠⚠ 세션 예산은 폴러의 장비 시한보다 작아야 한다', (
   const src = fs.readFileSync(new URL('../src/bmusage/poller.js', import.meta.url), 'utf8');
   // ⚠ 숫자 구분자(`60_000`)를 놓치지 말 것 — `\d+` 만 쓰면 **60** 으로 읽혀 통과해야 할 단언이
   //   거짓이 된다(v2.554 에 실제로 겪었다. v2.535 '정규식 오판' 과 같은 계열).
-  const m = /BMUSAGE_DEVICE_TIMEOUT_MS\) \|\| ([\d_]+)/.exec(src);
+  // 99회차: env 수치는 공용 해석기(envPositive)로 읽는다 — 기본값은 둘째 인자.
+  const m = /envPositive\(process\.env\.BMUSAGE_DEVICE_TIMEOUT_MS, ([\d_]+)/.exec(src);
   assert.ok(m, '장비 시한 기본값을 찾지 못했습니다');
   const deviceMs = Number(m[1].replace(/_/g, ''));
   assert.ok(ent.SESSION_BUDGET_MS < deviceMs,

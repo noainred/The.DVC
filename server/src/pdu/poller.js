@@ -10,6 +10,7 @@
  *  - **startAdaptiveTimer**: setInterval 은 생성 시 간격에 묶여 중앙 주기 변경이 안 먹는다.
  */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { config } from '../config.js';
 import { withDeadline, isSshAuthError } from '../proxy/sshExec.js';
 import { createAuthGuard } from '../util/authGuard.js';
@@ -24,7 +25,7 @@ import { poolRun } from '../util/pool.js'; // v2.575 IMP-08 — 동시성 풀 �
 import { isMockMode } from '../mock/demo/flags.js';
 import { demoPduSnapshot, ensurePduDemo, isDemoId, pduDemoActive } from '../mock/demo/pdu.js'; // v2.708 데모(mock 전용)
 
-const CONCURRENCY = Math.max(1, Number(process.env.PDU_CONCURRENCY) || 4);
+const CONCURRENCY = Math.max(1, envPositive(process.env.PDU_CONCURRENCY, 4));
 // v2.742(감사 DEV-05): 장비 시한은 수집기가 소유한다 — 세션 예산(PDU_SESSION_BUDGET_MS)을 그보다 작게 묶으려면 같은 값을 봐야 한다
 //   (식을 두 곳에 두면 한쪽만 바뀐 날 예산이 시한을 넘어 이미 읽은 값이 다시 버려진다). 결과는 예전 식과 같다(무한대만 기본값 90초).
 const DEVICE_TIMEOUT_MS = apcSsh.PDU_DEVICE_TIMEOUT_MS;

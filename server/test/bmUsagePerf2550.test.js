@@ -161,7 +161,8 @@ test('⚠⚠ 세션 예산 < 장비 시한 — 두 번 시도해도 결과가 �
    */
   const os = await import('../src/bmusage/collectors/osSsh.js');
   const poller = bare('bmusage/poller.js');
-  const m = /DEVICE_TIMEOUT_MS = Math\.max\(20_000, Number\(process\.env\.BMUSAGE_DEVICE_TIMEOUT_MS\) \|\| (\d+)_?(\d*)\)/.exec(poller);
+  // 99회차: env 수치는 공용 해석기(envPositive — 시한이라 2^31−1 상한)로 읽는다 — 기본값은 둘째 인자.
+  const m = /DEVICE_TIMEOUT_MS = Math\.max\(20_000, envPositive\(process\.env\.BMUSAGE_DEVICE_TIMEOUT_MS, (\d+)_?(\d*), \{ max: ENV_INT_MAX \}\)\)/.exec(poller);
   assert.ok(m, '장비 시한 상수를 찾지 못했다');
   const deviceMs = Number(`${m[1]}${m[2]}`);
   assert.equal(deviceMs, 60000);

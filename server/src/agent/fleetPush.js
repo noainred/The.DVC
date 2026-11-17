@@ -11,6 +11,7 @@
  * CENTRAL_URL 설정 시 동작(=에이전트). AGENT_PUSH_FLEET=false 로 끌 수 있다.
  */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
 import { config, loadVcenterConfig, clampIntervalMs } from '../config.js';
@@ -61,7 +62,7 @@ export function unreadHostVcenters(snap, registered = []) {
  * 귀속 없는 항목만 빼고** 보낸다(그 둘이 ESXi 를 받치는 iDRAC 이 베어메탈로 둔갑할 수 있는 항목이다). 뺀 개수와
  * 못 읽은 vCenter 는 본문·상태·콘솔에 밝힌다(조용한 축약 금지). ⚠ 뺀 항목은 중앙에서 그 동안 보이지 않는다(정직 기록).
  */
-export const FLEET_WITHHOLD_MAX_MS = Math.max(60_000, Number(process.env.AGENT_FLEET_WITHHOLD_MAX_MS) || 20 * 60_000);
+export const FLEET_WITHHOLD_MAX_MS = Math.max(60_000, envPositive(process.env.AGENT_FLEET_WITHHOLD_MAX_MS, 20 * 60_000));
 let withholdSince = null;
 
 /**

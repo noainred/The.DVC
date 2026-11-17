@@ -18,6 +18,7 @@
  *   historyRollup 의 ‘원본 폴백’(롤업 대신 원시를 읽는 것)과 다른 일이고 정상 경로다. 한 시간 뒤 다시 시도하고(최대 3회) 그 뒤에는 멈춰 상태로 밝힌다.
  *   대조 실패면 커서를 0 으로 돌려 처음부터 다시 옮긴다(IGNORE · 커서라 중복은 생기지 않는다).
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { mainDbForMigration, readMeta, writeMeta, MIGRATE_KEY } from './db.js';
 import * as month from './monthStore.js';
 import { createYielder } from '../util/timeSlice.js';
@@ -26,7 +27,7 @@ import { loadBmUsageSettings, effectiveRawDays, STORE_DEFAULTS } from './setting
 import { dayKey } from '../util/dayKey.js';
 
 // v2.922(반증 D11): 2,000행 청크가 한 번에 최대 92ms 멈췄다(1,000대 실측 — v2.693 기준 50ms 초과) → 500.
-export const MIGRATE_CHUNK_ROWS = Math.max(100, Number(process.env.BMUSAGE_MIGRATE_CHUNK_ROWS) || 500);
+export const MIGRATE_CHUNK_ROWS = Math.max(100, envPositive(process.env.BMUSAGE_MIGRATE_CHUNK_ROWS, 500));
 export const MIGRATE_RETRY_MS = 60 * 60_000;
 export const MIGRATE_MAX_ATTEMPTS = 3;
 /** v2.922(반증 D6): 시도를 다 쓴 뒤에도 영구 정지하지 않는다 — 이만큼 지나면 횟수를 0 으로 돌리고 다시 시도한다(재시작해도 0 부터). */

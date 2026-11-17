@@ -105,7 +105,7 @@ export const BUDGET_SKIP_REASON = '수집 시간 예산 초과로 이번 주기�
  * ⚠ root 계정은 raw 셸을 받지만 admin 계정의 로그인 셸은 FOS CLI 라, **계정에 따라 쓸 수 있는
  *   명령이 다르다**. 그래서 캐시 키에 계정을 포함한다.
  */
-const CAPS_TTL_MS = Math.max(60_000, Number(process.env.SANSW_CAPS_TTL_MS) || 6 * 3600_000);
+const CAPS_TTL_MS = Math.max(60_000, envPositive(process.env.SANSW_CAPS_TTL_MS, 6 * 3600_000));
 const _caps = new Map(); // `${host}|${user}` → { at, has:Set<string>, path:string[] }
 /** 명령 조사 캐시 키 — probeCommands 호출부와 pruneCaps 가 같은 규칙을 쓴다. */
 export function capsKeyOf(device) { return `${device?.host}|${device?.username}`; }

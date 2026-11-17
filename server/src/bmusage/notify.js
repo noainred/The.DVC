@@ -11,6 +11,7 @@
  *   그 상태의 notifiedAt 을 앞당겨 다음 주기 판정이 다시 보내게 한다(예전: 채널 실패도 ‘발송’ 으로 세고 재알림 간격(기본 6시간)까지 다시 보내지 않았다).
  *   상태 고치기(주기 판정 · 결과 반영)는 직렬 큐 하나(withState — 결과가 주기 판정 사이에 끼어 앞 쓰기를 덮지 않게). 발송 결과 수는 alertStateInfo().delivery(화면 · 전체 범위만).
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
@@ -21,7 +22,7 @@ import { isMockMode } from '../mock/demo/flags.js';
 import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = () => path.join(config.configDir, 'bmusage-alert-state.json');
-export const MAX_SEND = Math.max(1, Number(process.env.BMUSAGE_ALERT_MAX) || 40);   // v2.929: 성능 알림 규칙(perfAlerts)도 주기당 이 상한을 쓴다(반증 F6)
+export const MAX_SEND = Math.max(1, envPositive(process.env.BMUSAGE_ALERT_MAX, 40));   // v2.929: 성능 알림 규칙(perfAlerts)도 주기당 이 상한을 쓴다(반증 F6)
 
 let _state = null;
 /** 상태 고치기 직렬 큐(5회차 D2 — 주기 판정과 발송 결과 반영이 서로 덮지 않게). */

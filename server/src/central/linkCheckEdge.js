@@ -12,6 +12,7 @@
  * ⚠ 본문의 null·문자열 원소를 그대로 순회하면 TypeError 가 나고, **express 4 는 async 핸들러의
  *   throw 를 잡지 않아 요청이 응답 없이 매달린다**(v2.548 S1) — 원소마다 형을 확인한다.
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { demoLinkInputs } from '../mock/demo/edge.js'; // v2.708 데모(mock) 링크 입력 보강
 import { insertResults } from '../linkcheck/db.js';
 import { PHASES } from '../linkcheck/phases.js';
@@ -22,12 +23,12 @@ import { loadLinkCheckSettings } from '../linkcheck/settings.js';
 import { capTrim, capStr } from '../util/capStr.js';
 
 /** 보고 1건당 링크 상한. 링크 140개 규모를 넉넉히 덮고 폭주는 막는다. */
-export const REPORT_LINK_MAX = Math.max(50, Number(process.env.LINKCHECK_REPORT_LINK_MAX) || 500);
+export const REPORT_LINK_MAX = Math.max(50, envPositive(process.env.LINKCHECK_REPORT_LINK_MAX, 500));
 /** 링크 id·대상 길이 상한(v2.606 CEN2606-01). 중앙이 계산하는 id 는 종류 + 엣지 이름 + vCenter id 라 이 안에 든다. */
 export const LINK_ID_MAX = 256;
 export const LINK_TO_MAX = 128;
 /** 오래된 보고는 '지금 상태' 가 아니다(기본 3시간 — v2.548 규약과 같은 값). */
-export const REPORT_STALE_MS = Math.max(600_000, Number(process.env.LINKCHECK_REPORT_STALE_MS) || 3 * 3_600_000);
+export const REPORT_STALE_MS = Math.max(600_000, envPositive(process.env.LINKCHECK_REPORT_STALE_MS, 3 * 3_600_000));
 /** 주기 기반 낡음 경계의 여유(엣지 한 주기의 점검 소요·전송 지연을 덮는다). */
 export const REPORT_STALE_SLACK_MS = 10 * 60_000;
 /**

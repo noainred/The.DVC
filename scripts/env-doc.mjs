@@ -90,8 +90,9 @@ function defaultOf(line, key, ref) {
   let m = after.match(/^[\s)]*(?:\|\||\?\?)\s*(-?\d+(?:_\d+)*|'[^']{0,40}'|"[^"]{0,40}"|true|false)/);
   if (m) return m[1].replace(/_/g, '');
   // v3.17.6: 헬퍼의 둘째 인자 — `envPositive(process.env.X, 300)` · `reqTimeoutMs(process.env.X, 30_000)`(util/envNumber.js · envTimeout.js).
-  m = after.match(/^\s*,\s*(\d+(?:_\d+)*(?:\.\d+)?)\s*[,)]/);
-  if (m) return m[1].replace(/_/g, '');
+  //   99회차: 둘째 인자가 숫자 곱(`10 * 60_000`)이면 계산해 적는다 — `|| 10 * 60_000` 은 첫 숫자(10)만 적혀 단위를 잘못 읽게 했다.
+  m = after.match(/^\s*,\s*(\d+(?:_\d+)*(?:\.\d+)?(?:\s*\*\s*\d+(?:_\d+)*)*)\s*[,)]/);
+  if (m) return String(m[1].split('*').reduce((acc, x) => acc * Number(x.trim().replace(/_/g, '')), 1));
   m = after.match(/^\s*(===|!==)\s*('[^']*'|"[^"]*")/);
   if (m) return m[1] === '===' ? `기본 아님(${m[2]} 일 때만 적용)` : `기본 적용(${m[2]} 로 끄기)`;
   return '';

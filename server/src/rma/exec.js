@@ -9,12 +9,13 @@
  *  - stdin 은 닫는다(입력 대기로 매달리지 않게).
  *  - 환경: PATH 최소 + LANG=C(출력 파싱·표시 안정).
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { spawn } from 'node:child_process';
 import net from 'node:net';
 import dgram from 'node:dgram';
 import os from 'node:os';
 
-export const DEFAULT_MAX_OUTPUT = Number(process.env.RMA_MAX_OUTPUT) || 256 * 1024;
+export const DEFAULT_MAX_OUTPUT = envPositive(process.env.RMA_MAX_OUTPUT, 256 * 1024);
 
 const SAFE_ENV = { PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', LANG: 'C', LC_ALL: 'C', HOME: process.env.HOME || '/tmp' };
 

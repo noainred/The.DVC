@@ -8,6 +8,7 @@
  * 자격증명은 담기지 않는다(스냅샷은 측정값만 — 엣지가 이미 로그인해서 읽은 결과).
  */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
@@ -94,7 +95,7 @@ export function sanitizePduSnapshot(snap) {
 
 const FILE = path.join(config.configDir, 'central-pdu.json');
 // 엣지가 오래 조용하면 낡은 값을 '현재'처럼 보여주지 않도록 만료시킨다(정직 표기).
-const TTL_MS = Number(process.env.CENTRAL_PDU_TTL_MS) || 6 * 60 * 60_000; // 6시간
+const TTL_MS = envPositive(process.env.CENTRAL_PDU_TTL_MS, 6 * 60 * 60_000); // 6시간
 
 let _map = null; // agentLower → { agent, at, snapshots: [] }
 

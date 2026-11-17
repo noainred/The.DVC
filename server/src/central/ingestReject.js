@@ -40,7 +40,7 @@ import { envPositive } from '../util/envNumber.js'; // v3.17.6: 양수 env 는 �
 
 const MAX_AGENTS = envPositive(process.env.INGEST_REJECT_MAX_AGENTS, 500);
 const MAX_ENDPOINTS = 32; // v2.583: 에이전트당 경로 종류 상한(인증 전 기록 — 위조 경로 폭주 방지)
-const KEEP = Math.max(10, Number(process.env.INGEST_REJECT_KEEP) || 50); // 최근 원문 보관 수
+const KEEP = Math.max(10, envPositive(process.env.INGEST_REJECT_KEEP, 50)); // 최근 원문 보관 수
 const REASON_MAX = 300; // SSH 추적·스택이 통째로 들어오는 것을 막는다(activityLog 와 같은 상한)
 
 const byAgent = new Map(); // agent -> { agent, total, firstAt, lastAt, byKind: Map, byEndpoint: Map, lastReason, lastVcenterId }

@@ -48,6 +48,7 @@
 
 /* ────────────────────────── 파싱 ────────────────────────── */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 const WWN_RE = /^[0-9a-f]{2}(:[0-9a-f]{2}){7}$/i;
 const DP_RE = /^\d{1,3},\d{1,3}$/;              // Domain,Port 멤버
 const NAME_RE = /^[A-Za-z0-9_$^\-.]{1,64}$/;    // FOS 오브젝트 이름 허용 문자
@@ -445,8 +446,8 @@ export function zoneFindings(zones, graph, ctx = {}) {
  * (조용히 줄이면 '왜 일부만 보이지' 가 된다 — CLAUDE.md '조용한 상한 금지').
  */
 export const ZONE_LIMITS = {
-  zones: Math.max(50, Number(process.env.SANSW_ZONE_MAX) || 4000),
-  aliases: Math.max(50, Number(process.env.SANSW_ALIAS_MAX) || 8000),
+  zones: Math.max(50, envPositive(process.env.SANSW_ZONE_MAX, 4000)),
+  aliases: Math.max(50, envPositive(process.env.SANSW_ALIAS_MAX, 8000)),
   membersPerZone: 64,
 };
 

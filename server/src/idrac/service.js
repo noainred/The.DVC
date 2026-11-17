@@ -4,6 +4,7 @@
  * snapshot overlay.
  */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { loadRegistry, matchKeys } from './registry.js';
 import { getDb } from './db.js';
 import { allOmeDevices, dbKey, clearOmeExcept } from './omeCache.js';
@@ -185,7 +186,7 @@ export async function allMeasuredPower({ hosts = [], vcenterFirst = false, unrea
   // enabled!==false 만 폴링하므로 비활성 서버의 마지막 샘플은 retention prune(기본 90일)까지
   // latest 에 남아 '현재값'으로 계속 합산됐다. 비활성 서버를 제외하고, 활성이라도 오래된(예: 폴
   // 주기 수십 배) 샘플은 '현재'가 아니므로 뺀다. 기본 2시간(POWER_CURRENT_STALE_MS 로 조정).
-  const POWER_STALE_MS = Number(process.env.POWER_CURRENT_STALE_MS) || 2 * 3_600_000;
+  const POWER_STALE_MS = envPositive(process.env.POWER_CURRENT_STALE_MS, 2 * 3_600_000);
   const nowTs = Date.now();
   // 물리 실측 소스(iDRAC 직접 + OME 장비 + 원격 수집기).
   const addPhysical = () => {

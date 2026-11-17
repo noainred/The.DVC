@@ -10,6 +10,7 @@
  * 자격증명을 싣지 않는 probe 라 판정하지 않는다.
  */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { inferGpuMemGB } from '../gpu/gpuModelMem.js';
 import tls from 'node:tls';
 import { config } from '../config.js';
@@ -177,7 +178,7 @@ const PERF_COUNTER_CACHE = new Map();
  */
 const PERF_RETENTION_CACHE = new Map();
 export const PERF_RETENTION_DEFAULT = Object.freeze({ realtime: 3600, day: 86400, week: 604800, month: 2592000, year: 31536000 });
-const PERF_COUNTER_TTL_MS = Math.max(60_000, Number(process.env.PERF_COUNTER_TTL_MS) || 6 * 3_600_000);
+const PERF_COUNTER_TTL_MS = Math.max(60_000, envPositive(process.env.PERF_COUNTER_TTL_MS, 6 * 3_600_000));
 
 export class VimSoapClient {
   /**

@@ -4,6 +4,7 @@
  * 출력은 없었다. 성능 규약(CLAUDE.md): WAL + synchronous=NORMAL + busy_timeout, prune 은 N회마다 1회 +
  * ts 단독 인덱스, node:sqlite 미지원 환경은 no-op(호출자가 메모리 링으로 폴백).
  */
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
@@ -12,7 +13,7 @@ import { openSqlite, withOpenCleanup, createLockRetry } from '../util/sqliteOpen
 import { pageArgs } from '../util/pageArgs.js'; // v2.605 LEFT2605-07: 소수 limit 은 SQLite 바인드 datatype mismatch(500)
 
 const FILE = () => path.join(config.dbDir || config.configDir, 'rma-history.db');
-const RETENTION_DAYS = Math.max(1, Number(process.env.RMA_HISTORY_DAYS) || 90);
+const RETENTION_DAYS = Math.max(1, envPositive(process.env.RMA_HISTORY_DAYS, 90));
 const PRUNE_EVERY = 20;
 const OUTPUT_MAX = 64 * 1024; // 행당 stdout/stderr 저장 상한(64KB × 수천 행 ≈ 수백 MB 상한선)
 let _db = null;

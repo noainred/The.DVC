@@ -6,6 +6,7 @@
  *    노출하지 않는다('vCenter 귀속 없는 데이터는 범위 계정에 노출 금지' — server/CLAUDE.md).
  *  - 변경(등록/수정/삭제/테스트/수집): adminOnly + 감사로그.
  */
+import { envPositive } from '../../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { scopeDbStatus } from '../../auth/scopeStatus.js';
 import crypto from 'node:crypto';
 import { snapMemo, sendCached } from '../../util/snapCache.js';   // v2.731(A6-05): 목록 응답 기억 — 내용 지문 키
@@ -531,7 +532,7 @@ function snapshotFor(id) {
 
 /** 장비 1대 점검. 기준선이 있으면 '당월 신규 에러' 까지 판정한다. */
 /** 불량 포트 상세의 상한 — 넘으면 개수를 밝힌다(조용한 상한 금지). */
-const PROBLEM_PORT_MAX = Math.max(5, Number(process.env.SANSW_PROBLEM_PORT_MAX) || 40);
+const PROBLEM_PORT_MAX = Math.max(5, envPositive(process.env.SANSW_PROBLEM_PORT_MAX, 40));
 
 /**
  * 점검이 지목한 포트에 대해서만 조닝 상대를 붙인다(v2.521).

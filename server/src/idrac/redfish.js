@@ -12,6 +12,7 @@
  * permissive undici dispatcher (independent of import order).
  */
 
+import { envPositive } from '../util/envNumber.js';   // 99회차: env 수치는 공용 해석기로(Infinity · 음수 · 숫자 아님 → 기본값)
 import { Agent } from 'undici';
 import { classifyBmcVendor } from './vendorMatch.js'; // v2.495: 비-Dell BMC 판별(추가 HTTP 0회)
 import { constants as cryptoConstants } from 'node:crypto';
@@ -126,7 +127,7 @@ const AUTH_TTL_MS = 20 * 60_000;
 // 만료(기본 30분)까지 남아 iDRAC 세션 상한에 닿으면 로그인 실패가 된다(⚠ 상한 수치·이 현장 Basic 비활성 여부는 미확인).
 // 이제 ① **LRU**(조회 성공·갱신 때 뒤로 옮긴다) ② 상한은 등록 규모보다 넉넉히(`IDRAC_AUTH_CACHE_MAX`, 기본 4096)
 // ③ 세션 항목이 밀려나거나 새 토큰으로 바뀌면 **옛 세션을 DELETE** 한다(best-effort — 실패해도 idle 만료로 사라진다).
-const AUTH_CACHE_MAX = Math.max(64, Number(process.env.IDRAC_AUTH_CACHE_MAX) || 4096);
+const AUTH_CACHE_MAX = Math.max(64, envPositive(process.env.IDRAC_AUTH_CACHE_MAX, 4096));
 /** v2.593: 키별 진행 중인 세션 생성(single-flight). */
 const SESSION_INFLIGHT = new Map();
 const SESSION_PATH_RE = /^\/redfish\/v1\/SessionService\/Sessions\/[^/?#\s]+$/;
@@ -1263,7 +1264,7 @@ export async function fetchSensors(entry) {
  * ⚠ 404 는 '이 장비에 Sensors 컬렉션이 없다'(구펌웨어·다른 벤더) — 실패가 아니라 `absent` 로 센다.
  * ⚠ 인증 거부는 삼키지 않고 던진다(계정 잠금 — v2.535 규약).
  */
-export const SENSOR_MEMBER_MAX = Math.max(20, Number(process.env.IDRAC_SENSOR_MEMBER_MAX) || 250);
+export const SENSOR_MEMBER_MAX = Math.max(20, envPositive(process.env.IDRAC_SENSOR_MEMBER_MAX, 250));
 export const SENSOR_COLLECT_BUDGET_MS = reqTimeoutMs(process.env.IDRAC_SENSOR_BUDGET_MS, 45_000, { min: 5_000, max: 300_000 }); // 2^31 초과·빈 값·음수 정규화(v2.605 TIM2605-04)
 export async function fetchSensorCollection(entry, { signal = null, now = Date.now } = {}) {
   const base = trimTrailingSlashes(String(entry.host || ''));
@@ -1341,8 +1342,8 @@ export async function fetchSensorCollection(entry, { signal = null, now = Date.n
  *   목록을 열거해 **이름 패턴이 맞는 것만** 읽으며, 장비가 가진 전체 목록(`seenReports`)과 실제로
  *   읽은 것(`usedReports`)을 응답에 실어 화면이 장비별로 밝힌다(사용자 선택).
  */
-const REPORT_TTL_MS = Math.max(60_000, Number(process.env.BMUSAGE_REPORT_TTL_MS) || 6 * 3_600_000);
-const MAX_REPORTS_PER_DEVICE = Math.max(1, Number(process.env.BMUSAGE_MAX_REPORTS) || 6);
+const REPORT_TTL_MS = Math.max(60_000, envPositive(process.env.BMUSAGE_REPORT_TTL_MS, 6 * 3_600_000));
+const MAX_REPORTS_PER_DEVICE = Math.max(1, envPositive(process.env.BMUSAGE_MAX_REPORTS, 6));
 const REPORT_FETCH_CONCURRENCY = 3;   // 한 장비에 동시 GET — iDRAC(BMC)은 약하므로 보수적으로
 /** hostKey → { ids: string[], at: number } */
 const _reportList = new Map();
@@ -1571,7 +1572,7 @@ export { USAGE_IDS };
  *   정상 상태는 **캐시된 URL 4개 이하의 GET** 뿐이다(동시 3). 탐색 결과를 캐시하지 않으면
  *   200대 × 3회가 매 주기에 더해져 주기를 넘긴다.
  */
-const SENSOR_TTL_MS = Math.max(60_000, Number(process.env.BMUSAGE_SENSOR_TTL_MS) || 6 * 3_600_000);
+const SENSOR_TTL_MS = Math.max(60_000, envPositive(process.env.BMUSAGE_SENSOR_TTL_MS, 6 * 3_600_000));
 /** 이름 패턴 → 우리 필드. `USAGE_IDS` 와 **같은 후보 문자열**을 쓴다(두 벌을 만들지 않는다). */
 const SENSOR_PATTERNS = Object.freeze([
   ['cpuPct', /cpu.*usage|usage.*cpu/i],
