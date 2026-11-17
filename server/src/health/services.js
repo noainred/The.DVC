@@ -263,6 +263,29 @@ export function asyncStatusRow(s, opts = {}, now = Date.now()) {
   return pollerCheck(s.value, opts);
 }
 
+/**
+ * 고정 항목 '지표 샘플러' 행(순수 — now · uptimeMs 주입). 본문은 예전 그대로이고 한 가지만 더했다.
+ * 111회차: 실행 기록이 없는데(lastRun 없음) 기동 후 정체 경계를 넘겼으면 warn — 예전에는 `age == null` 이 'ok' 로 떨어져, 기동 뒤 첫 주기를
+ *   끝내지 못한 샘플러(첫 주기가 DB 열기 · 적재 대기에 매달림 · lastRun 을 세우기 전에 매번 던짐)가 끝까지 '정상 · 활성' 이었다. 주기를 한 번이라도
+ *   끝낸 뒤 멈춘 경우는 예전에도 '오래됨' 으로 잡혔다 — 빠져 있던 것은 '한 번도' 쪽이다. pollerCheck 의 같은 규칙(v2.590 W1)과 같은 경계.
+ *   샘플러는 기동 12초 뒤 첫 샘플을 돌고, 적재(insert) 실패는 삼키고 lastRun 을 세운다(metrics/sampler.js) — 그 경우는 이 행이 아니라 콘솔 경고다.
+ */
+export function metricsSamplerRow(m, { now = Date.now(), uptimeMs = process.uptime() * 1000 } = {}) {
+  const last = atOf(m?.lastRun);
+  const age = last == null ? null : (last ? now - last : null);
+  // v2.591(3차 감사 R-H1): 정체 경계는 **설정된 샘플 주기의 2배**(최소 30분). 30분 고정이면 주기를 60분으로 둔 현장에서
+  // 멀쩡한 샘플러가 매번 '주의' 가 된다(v2.590 atOf 수정 전에는 NaN 이라 경고 자체가 안 났다 — 수정이 새 거짓을 만들었다).
+  const iv = Number(m?.intervalMs);
+  const staleMs = Math.max(30 * MIN, Number.isFinite(iv) && iv > 0 ? iv * 2 : 0);
+  const off = m?.enabled === false;
+  const never = !off && last == null && uptimeMs > staleMs;
+  return {
+    status: off ? 'off' : ((age != null && age > staleMs) || never) ? 'warn' : 'ok',
+    detail: `${off ? '비활성' : '활성'}${last != null ? ` · 최근 ${Math.round(age / MIN)}분 전` : ''}${never ? ` · 실행 기록 없음(기동 ${Math.round(uptimeMs / MIN)}분) — 경계를 넘겼는데 한 번도 돌지 않았습니다` : ''}`,
+    at: last ?? now,
+  };
+}
+
 export function getServiceCheck(opts = {}) {
   const checks = [];
 
@@ -385,16 +408,7 @@ export function getServiceCheck(opts = {}) {
     return { status: slow ? 'warn' : 'ok', detail: parts.join(' · '), at: Number(last?.finishedAt) || Number(last?.at) || Date.now() };
   }));
 
-  checks.push(wrap('metrics', '지표 샘플러', () => {
-    const m = metricsSamplerStatus();
-    const last = atOf(m.lastRun);
-    const age = last == null ? null : ago(last);
-    // v2.591(3차 감사 R-H1): 정체 경계는 **설정된 샘플 주기의 2배**(최소 30분). 30분 고정이면 주기를 60분으로 둔 현장에서
-    // 멀쩡한 샘플러가 매번 '주의' 가 된다(v2.590 atOf 수정 전에는 NaN 이라 경고 자체가 안 났다 — 수정이 새 거짓을 만들었다).
-    const iv = Number(m.intervalMs);
-    const staleMs = Math.max(30 * MIN, Number.isFinite(iv) && iv > 0 ? iv * 2 : 0);
-    return { status: m.enabled === false ? 'off' : (age != null && age > staleMs) ? 'warn' : 'ok', detail: `${m.enabled === false ? '비활성' : '활성'}${last != null ? ` · 최근 ${Math.round(age / MIN)}분 전` : ''}`, at: last ?? Date.now() };
-  }));
+  checks.push(wrap('metrics', '지표 샘플러', () => metricsSamplerRow(metricsSamplerStatus())));
 
   checks.push(wrap('gpu-guest', 'GPU 게스트 수집', () => {
     const g = gpuGuestStatus();

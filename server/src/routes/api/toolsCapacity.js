@@ -66,6 +66,26 @@ export function diskHistoryPoint(e) {
   };
 }
 
+/**
+ * 111회차: 'VM 정밀 검색' 유휴 판정(순수). avg = 1주 평균(없으면 1일 평균) CPU %.
+ * 평균을 못 읽었으면(null) **사유와 무관하게** null(판정 불가) — false('사용')로 접지 않는다. 읽었으면 '켜져 있고 기준 이하' 일 때만 유휴.
+ */
+export function vmFinderIdle(vm, avg, threshold) {
+  if (avg == null) return null;
+  return vm?.powerState === 'POWERED_ON' && avg <= threshold;
+}
+
+/**
+ * 111회차: 고아 VMDK 보류 창(시간) 해석(순수). 0 은 '보류 판정 끔' 이라 **명시적으로 0 을 보낸 경우만** 0 이다 —
+ * 못 읽은 값(글자 · 빈 값 · 음수)은 예전처럼 0(안전장치 끔)이 아니라 기본 24시간. 상한 720시간.
+ */
+export const ORPHAN_RECENT_HOURS_DEFAULT = 24;
+export function orphanRecentHours(raw) {
+  const n = numOrNull(raw);
+  if (n == null || n < 0) return ORPHAN_RECENT_HOURS_DEFAULT;
+  return Math.min(720, n);
+}
+
 export function registerToolsCapacity(api) {
 
 // Capacity report — per-cluster compute capacity, allocation, overcommit, headroom.
@@ -1361,9 +1381,12 @@ api.post('/tools/vm-finder', requirePerm('tools'), async (req, res) => {
       const a = it.avgWeekCpu ?? it.avgDayCpu;
       // v2.733(C3-01): 인증 정지로 평균을 못 읽은 VM 은 '유휴 아님(false)' 이 아니라 판정 불가(null)다.
       // v2.744(VC-04): 직접 수집 대상이 아니라 조회하지 않은 VM 도 같다(판정 불가).
-      it.idle = (it.authStopped || it.skipReason) && a == null ? null : (it.powerState === 'POWERED_ON' && a != null && a <= threshold);
+      // 111회차: 평균을 못 읽은 사유를 가리지 않는다 — 성능 조회 실패(시한 · 통신 오류) · vCenter 설정 없음 · 표본 0 인 VM 도 판정 불가(null)다.
+      //   예전에는 그 VM 이 false 라 화면이 평균 '—' 옆에 '사용' 배지를 그렸다(못 읽은 값을 정상으로). 판정은 vmFinderIdle 하나.
+      it.idle = vmFinderIdle(it, a, threshold);
     }
     result.idleCount = targets.filter((x) => x.idle).length;
+    result.idleUnknown = targets.filter((x) => x.idle == null).length;   // 111회차: 평균을 못 읽어 판정하지 않은 VM 수(유휴에도 사용에도 넣지 않는다)
     result.idleThreshold = threshold;
   }
   res.json(result);
@@ -1873,8 +1896,8 @@ api.get('/tools/orphan-vmdk', requirePerm('tools'), async (req, res) => {
     return res.status(404).json({ ok: false, reason: '데이터스토어를 찾을 수 없습니다.' });
   }
   // 보류 창(시간) — 화면이 조절한다. 0 은 '보류 판정 끔'(명시적 선택).
-  const recentHours = req.query.recentHours === undefined ? 24
-    : Math.max(0, Math.min(720, Number(req.query.recentHours) || 0));
+  // 111회차: `Number(x) || 0` 은 못 읽은 값(?recentHours=abc · 빈 값)을 0 = '보류 끔' 으로 만들었다 — 판정은 orphanRecentHours.
+  const recentHours = orphanRecentHours(req.query.recentHours);
   try {
     res.json({ ok: true, ...(await scanOrphanDisks(dsId, { recentHours })) });
   } catch (e) {
