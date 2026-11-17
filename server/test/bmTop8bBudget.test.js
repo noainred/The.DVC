@@ -178,19 +178,26 @@ const CHILD = `
 import { mock } from 'node:test';
 import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
-const FAKE = process.env.BUD_FAKEBIN; const execs = [];
+const FAKE = process.env.BUD_FAKEBIN; const execs = []; let dropped = 0;
 class FakeClient extends EventEmitter {
   connect() { setImmediate(() => this.emit('ready')); }
   exec(cmd, a, b) {
     const cb = typeof a === 'function' ? a : b;
     execs.push(cmd.includes('_tsrc=proc') ? 'top' : cmd.includes("echo '##STAT'") ? 'main' : cmd.includes('##PSCPU') ? 'snap' : 'other');
     if (process.env.BUD_FAIL_TOP === '1' && cmd.includes('_tsrc=proc')) { setImmediate(() => cb(new Error('channel open failure'))); return; }
-    const ch = spawn('/bin/dash', ['-c', cmd], { env: { ...process.env, PATH: FAKE + ':' + process.env.PATH }, detached: true });
-    const st = new EventEmitter(); st.stderr = new EventEmitter();
-    ch.stdout.on('data', (d) => st.emit('data', d)); ch.stderr.on('data', (d) => st.stderr.emit('data', d));
-    ch.on('close', (code) => st.emit('close', code));
-    st.close = () => { try { process.kill(-ch.pid, 'SIGKILL'); } catch {} }; st.destroy = st.close; st.signal = () => {};
-    setImmediate(() => cb(null, st));
+    // ⚠ spawn · 배선 · cb 를 **한 차례**(같은 setImmediate)에서 한다 — 출력은 리스너가 붙은 뒤에만 흐른다. 예전에는 spawn 을 먼저 하고 cb 를 다음 차례로 미뤄,
+    //   그 사이 이벤트 루프가 I/O 를 한 번 돌면 첫 출력 묶음(head -c 의 4KB — STAT · MEM 구획)이 리스너 없는 EventEmitter 로 버려졌다
+    //   (CI 간헐 실패: ok 인데 CPU · 메모리 없음 — DF 앞 출력이 4KB 를 넘는 러너 + 부하로 부모가 밀릴 때). 진짜 ssh2 채널은 스트림이라 버퍼에 둔다 — 이 가짜만의 결함.
+    //   BUD_STALL_MS: spawn 직후 부모가 밀려나는 상황을 흉내 낸다(시험 ④).
+    setImmediate(() => {
+      const ch = spawn('/bin/dash', ['-c', cmd], { env: { ...process.env, PATH: FAKE + ':' + process.env.PATH }, detached: true });
+      if (Number(process.env.BUD_STALL_MS) > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(process.env.BUD_STALL_MS));
+      const st = new EventEmitter(); st.stderr = new EventEmitter();
+      ch.stdout.on('data', (d) => { if (!st.listenerCount('data')) dropped += d.length; st.emit('data', d); }); ch.stderr.on('data', (d) => st.stderr.emit('data', d));
+      ch.on('close', (code) => st.emit('close', code));
+      st.close = () => { try { process.kill(-ch.pid, 'SIGKILL'); } catch {} }; st.destroy = st.close; st.signal = () => {};
+      cb(null, st);
+    });
   }
   end() { setImmediate(() => this.emit('close')); }
 }
@@ -202,7 +209,7 @@ const r = await OS.collectOsUsage({ host: '10.9.9.9', username: 'u', password: '
 const top = r.perf?.top || null;
 process.stdout.write('@@' + JSON.stringify({ ms: Date.now() - t0, ok: r.ok, error: r.error || null, cpu: !!r.counters?.cpu, mem: !!r.mem?.totalBytes, changes: !!r.perf?.changes?.value,
   missing: r.missing || null, read: r.read || null, dfi: r.perf?.dfi ? { missing: !!r.perf.dfi.missing, absent: !!r.perf.dfi.absent } : null, disks: (r.counters?.disks || []).length, nets: (r.counters?.nets || []).length,
-  top: top ? { missing: !!top.missing, off: !!top.value?.off, src: top.value?.src || null, cands: top.value?.candidates ?? null, error: top.error || null, skipped: top.skipped || null } : null, execs }) + '\\n');
+  dropped, top: top ? { missing: !!top.missing, off: !!top.value?.off, src: top.value?.src || null, cands: top.value?.candidates ?? null, error: top.error || null, skipped: top.skipped || null } : null, execs }) + '\\n');
 process.exit(0);
 `;
 function runChild(env, timeoutMs = 120_000) {
@@ -225,7 +232,8 @@ test('③ 실제 collectOsUsage — 멈추는 명령이 다 시한까지 가도 
   t.after(() => fs.rmSync(bin, { recursive: true, force: true }));
   const r = runChild({ BUD_FAKEBIN: bin, BUD_OPTS: JSON.stringify({ top: true }) });
   assert.equal(r.ok, true, `주 표본이 살아남는다(예전: ok:false · 전 구획 유실) — ${r.error}`);
-  assert.ok(r.cpu && r.mem && r.changes, 'CPU · 메모리 · 변경 사실 구획이 있다');
+  assert.ok(r.cpu && r.mem && r.changes, `CPU · 메모리 · 변경 사실 구획이 있다(read ${r.read} · missing ${r.missing} · 버린 출력 ${r.dropped}B)`);
+  assert.equal(r.dropped, 0, '가짜 스트림이 리스너 없이 흘린 출력이 없다');
   // 1회차 점검 D2: df 가 멈추면 그 구획(디스크 사용 공간)만 못 읽음 — 나머지(디스크 I/O · 네트워크)는 산다 · inode 구획도 값 없음(0 이 아니다)
   assert.ok(r.missing.includes('diskspace'), `디스크 사용 공간만 missing(${r.missing})`);
   assert.ok(r.read.includes('cpu') && r.read.includes('mem') && r.read.includes('diskio') && r.read.includes('net'), `나머지 구획은 읽었다(${r.read})`);
@@ -247,4 +255,20 @@ test('③ 실제 collectOsUsage — 멈추는 명령이 다 시한까지 가도 
   const fo = runChild({ BUD_FAKEBIN: bin2, BUD_OPTS: JSON.stringify({ budgetMs: FOCUS.FOCUS_BUDGET_MS, partitionIo: false, peakWindowS: 0, top: false,
     extraCommands: [{ name: 'snap', cmd: SNAP.FOCUS_SNAPSHOT_COMMAND, timeoutMs: 12_000, maxBytes: 16 * 1024 }] }) });
   assert.equal(fo.ok, true); assert.deepEqual(fo.execs, ['main', 'snap'], '집중 경로: 주 명령 + 스냅샷만'); assert.equal(fo.top.off, true);
+});
+
+/*
+ * ④ 가짜 SSH 스트림의 출력 유실 — ③ 이 CI 에서 간헐 실패한 원인(2026-11-17 재현: release run 1149 · 1153 · ci main 10:39Z).
+ *   예전 하네스는 spawn 을 먼저 하고 cb(리스너 부착)를 다음 setImmediate 로 미뤘다 — 그 사이 이벤트 루프가 I/O 를 돌면 출력이 리스너 없는 EventEmitter 로 사라졌다.
+ *   ③ 에서는 DF 앞 출력이 4KB(head -c 의 첫 묶음)를 넘는 러너에서만 첫 묶음(STAT · MEM)이 버려져 'ok 인데 CPU · 메모리 없음' 이 됐다(이 컨테이너는 3.7KB 라 재현되지 않았다).
+ *   여기서는 멈춤 없는 빠른 PATH 로 출력 전체가 지연 안에 끝나게 해 같은 결함을 매번 드러낸다(예전 하네스: ok:false · 약 9KB 유실).
+ */
+test('④ 가짜 SSH 스트림 — spawn 직후 부모가 밀려나도 출력을 잃지 않는다(③ CI 간헐 실패의 원인)', { timeout: 60_000 }, (t) => {
+  if (!fs.existsSync('/bin/dash')) return t.skip('dash 없음');
+  const bin = fakeBin({ systemctl: 'exit 1', chronyc: 'exit 1', dmesg: 'exit 1' });
+  t.after(() => fs.rmSync(bin, { recursive: true, force: true }));
+  const r = runChild({ BUD_FAKEBIN: bin, BUD_STALL_MS: '300', BUD_OPTS: JSON.stringify({}) });
+  assert.equal(r.dropped, 0, `리스너 없이 버린 출력 ${r.dropped}B`);
+  assert.equal(r.ok, true, r.error);
+  assert.ok(r.cpu && r.mem && r.changes, `read ${r.read} · missing ${r.missing}`);
 });
