@@ -579,13 +579,35 @@ if ! id "$SERVICE_USER" &>/dev/null; then
 fi
 
 # 2) Runtime -----------------------------------------------------------------
+# 109회차 A-2: 런타임·앱은 **옆에 다 복사한 뒤에** 바꾼다. 예전에는 런타임을 먼저 지우고(rm -rf) 복사했고 앱은 백업으로 옮긴 뒤 복사했다 —
+#   복사가 중간에 실패하면(디스크 부족 — 이 스크립트는 app.bak.* 를 정리하지 않아 재설치할수록 찬다) 런타임이 없거나 앱이 반쪽인 채 set -e 로
+#   끝났고, 되돌리는 단계가 없어 돌고 있던 서비스는 다음 재시작에서 기동하지 못했다(재현). 이제 복사가 실패하면 기존 런타임·앱은 그대로다.
+#   임시 이름은 고정이다(node.new · app.new.install) — 중간에 끊긴 설치의 찌꺼기는 다음 install.sh 실행이 지운다(vp_stage_tree 첫 줄).
+#   앱 내 업그레이드의 정리(upgrade.js pruneOldBackups)는 숫자 꼬리(app.new.<ms>)만 지우므로 이 이름을 건드리지 않는다(복사 중에 지워지지 않는다).
+#   복사본은 root 로 실행하지 않는다(위 VP_CFG_NODE 규칙 그대로).
+# vp_stage_tree <원본 폴더> <새 폴더> <이름> — 원본을 새 폴더로 통째로 복사한다. 실패하면 새 폴더를 지우고 1.
+vp_stage_tree() {
+  local src="$1" dst="$2" label="$3"
+  rm -rf -- "$dst"
+  if ! cp -a "$src" "$dst"; then
+    rm -rf -- "$dst"
+    echo "✖ $label 복사에 실패했습니다($dst) — 기존 런타임·앱은 바꾸지 않았고 서비스도 건드리지 않았습니다." >&2
+    echo "  디스크 여유 공간을 확인하세요(df -h $PREFIX · 지난 백업 $PREFIX/app.bak.* 는 정상 동작을 확인했다면 지워도 됩니다). 고친 뒤 install.sh 를 다시 실행하세요." >&2
+    return 1
+  fi
+  return 0
+}
 echo "==> Node.js 런타임 설치: $PREFIX/runtime/node"
 mkdir -p "$PREFIX/runtime"
-rm -rf "$PREFIX/runtime/node"
-cp -a "$SCRIPT_DIR/runtime/node" "$PREFIX/runtime/node"
-
-# 3) App (atomic swap with backup; aligns with the in-app auto-upgrade) ------
 APP_DST="$PREFIX/app"
+RT_NEW="$PREFIX/runtime/node.new"
+APP_NEW="$APP_DST.new.install"
+vp_stage_tree "$SCRIPT_DIR/runtime/node" "$RT_NEW" "Node.js 런타임" || exit 1
+if ! vp_stage_tree "$SCRIPT_DIR/app" "$APP_NEW" "앱"; then rm -rf -- "$RT_NEW"; exit 1; fi
+rm -rf "$PREFIX/runtime/node"
+mv -T -- "$RT_NEW" "$PREFIX/runtime/node"   # -T: 그사이 같은 이름의 폴더가 생겨도 그 안으로 들어가지 않는다(빈 폴더면 바꿔 놓고 내용이 있으면 실패)
+
+# 3) App (swap with backup; aligns with the in-app auto-upgrade) -------------
 BAK=""
 if [[ -d "$APP_DST" ]]; then
   BAK="$APP_DST.bak.$(date +%s)"
@@ -593,7 +615,11 @@ if [[ -d "$APP_DST" ]]; then
   mv "$APP_DST" "$BAK"
 fi
 echo "==> 앱 설치: $APP_DST"
-cp -a "$SCRIPT_DIR/app" "$APP_DST"
+if ! mv -T -- "$APP_NEW" "$APP_DST"; then
+  echo "✖ 새 앱을 제자리($APP_DST)에 놓지 못했습니다." >&2
+  if [[ -n "$BAK" ]] && mv -T -- "$BAK" "$APP_DST"; then echo "  기존 앱을 되돌렸습니다($APP_DST) — 서비스는 건드리지 않았습니다." >&2; fi
+  exit 1
+fi
 
 # 4) Config — lives in $CONFIG_DIR (OUTSIDE the app), so upgrades never touch it
 mkdir -p "$CONFIG_DIR"
