@@ -8,7 +8,8 @@
 import { requireRole } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
 import { requireSettingsOwner } from './shared.js';
-import { load as loadMail, save as saveMail, redact, validate, smtpIssue, unknownKinds, nextSmtpPassword } from '../../mail/settings.js';
+import { load as loadMail, save as saveMail, redact, validate, smtpIssue, unknownKinds, nextSmtpPassword, recipientIssue, normalizeKinds } from '../../mail/settings.js';
+import { normalizeAddresses } from '../../util/smtp.js';
 import { sendPortalMail, mailStatus } from '../../mail/service.js';
 import { KINDS } from '../../mail/kinds.js';
 import { store } from '../../store.js';
@@ -39,6 +40,9 @@ export function registerMail(adminRouter) {
     const body = req.body || {};
     const bad = unknownKinds(body.kinds);
     if (bad.length) return res.status(400).json({ ok: false, reason: `알 수 없는 발송 종류: ${bad.join(', ')}` });
+    // 73회차 F4: 형식이 틀린 받는 사람 주소는 조용히 버리지 않고 거부한다(save 는 맞는 주소만 남긴다 — 예전에는 200 으로 사라졌다).
+    const ri = recipientIssue(body);
+    if (ri) return res.status(400).json({ ok: false, field: ri.field, bad: ri.bad, reason: `받는 사람 주소 형식이 올바르지 않습니다(${ri.bad.join(', ')}) — 주소는 쉼표(,)나 세미콜론(;)으로 나눠 이름@도메인 형식으로 입력하세요.` });
     // 검증은 '저장 후 상태' 기준이어야 한다 — 비밀번호를 비워 보낸 경우(기존 유지)를 오탐하지 않게.
     // v2.768(점검 R3-C5-04): 비밀번호는 save 와 **같은 승계식**(nextSmtpPassword — 호스트 변경·clearPassword 면 빈 값)으로 채운다.
     //   예전 `body.password || cur.password` 는 save 가 버릴 비밀번호로 검증해 '계정 있음 + 비밀번호 없음' 을 200 으로 저장했다.
@@ -48,6 +52,9 @@ export function registerMail(adminRouter) {
     const merged = {
       ...cur, ...body,
       smtp: { ...cur.smtp, ...(hasSmtp ? body.smtp : {}), password: pw.password },
+      // 73회차 F4: 받는 사람 검증은 **저장될 값**으로(save 와 같은 정규화) — 글자 하나('a')나 구분자만 있는 값이 '수신자 있음' 으로 통과하지 않게.
+      defaultTo: body.defaultTo != null ? normalizeAddresses(body.defaultTo).ok : cur.defaultTo,
+      kinds: body.kinds && typeof body.kinds === 'object' ? normalizeKinds(body.kinds) : cur.kinds,
     };
     const errs = validate(merged, pw.dropped);
     if (errs.length) return res.status(400).json({ ok: false, reason: errs[0], errors: errs });

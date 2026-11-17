@@ -26,12 +26,12 @@
  *    전 법인 공용 저장소에 대한 운영 동작이라 범위 관리자는 403(공지 쓰기와 같은 기준). 데모 계정은 authMiddleware 가 막는다.
  */
 import { requireRole } from '../../auth/auth.js';
-import { isDemoGuest } from '../../auth/demoGuest.js';
+import { isDemoGuest, isAdminDetailUser } from '../../auth/demoGuest.js';
 import { logAudit } from '../../audit.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { pageArgs } from '../../util/pageArgs.js';
 import { clientIp } from '../../util/rateLimit.js';
-import { scopedVcenterIds } from '../../auth/scope.js';
+import { isFullReadWriteScope } from '../../auth/scope.js'; // 73회차 F1: '전체 범위 관리자' 판정 하나(v2.904 규칙)
 import { store } from '../../store.js';
 import {
   activeNotices, listNotices, createNotice, updateNotice, deleteNotice,
@@ -50,18 +50,24 @@ const userOf = (req) => req.user?.username || 'anonymous';
  * 그 계정에 `isAdmin:true`·`canWrite:true`·`canEdit:true` 를 주면 화면이 글쓰기·공지 편집·고정 버튼을 보이고 누르면 403 이 된다
  * (화면이 거짓말한다). 표시 플래그와 서버 판정(createPost 의 pinned·canModify)을 같은 함수로 계산한다.
  */
-const isAdmin = (req) => req.user?.role === 'admin' && !isDemoGuest(req.user);
+const isAdmin = (req) => isAdminDetailUser(req.user);   // 73회차: 관리자 판본 판정 하나(role 직접 비교 사본 제거 — 같은 식)
 const canWrite = (req) => ['admin', 'operator'].includes(req.user?.role) && !isDemoGuest(req.user);
 const ID_RE = /^[a-f0-9]{16}$/;
-/** '지금 다시 저장' 을 누를 수 있는가 — 관리자(데모 계정 제외) + 전체 범위(라우트 게이트와 같은 판정). */
-const canRetryPersist = (req) => isAdmin(req) && !scopedVcenterIds(req.user, store.get());
+/**
+ * '지금 다시 저장' 을 누를 수 있는가 — 관리자(데모 계정 제외) + 전체 범위(라우트 게이트와 같은 판정).
+ * 73회차 F1: 라우트 게이트(fullScopeOnlyWith)는 POST 를 조회 ∧ 쓰기 전체 범위로 본다(6회차 A1) — 표시 플래그도 같은 판정이어야
+ *   쓰기 범위(writeVcenters)만 줄인 관리자에게 누르면 403 이 되는 버튼을 열지 않는다.
+ */
+const canRetryPersist = (req) => isAdmin(req) && isFullReadWriteScope(req.user, store.get());
 /**
  * v2.732(점검 2회차 B3-06): 게시판·공지의 관리자 권한(남의 글 수정·삭제·상단 고정 · 공지 편집 표시) — 관리자(데모 계정 제외) + 전체 범위.
  * 범위 관리자의 판정만 바뀐다(자기 글은 작성자 규칙으로 그대로). 저장 상태 상세(persist.error 등)는 예전대로 isAdmin 이다
  * (포탈 공용 저장소 하나의 상태 — 법인 축 데이터·계정명이 없다, 리뷰 I-05).
  */
-const isBoardModerator = (req) => isAdmin(req) && !scopedVcenterIds(req.user, store.get());
-const SCOPED_MOD_NOTE = '범위 관리자는 게시판 관리 권한(다른 사람의 글·댓글 수정·삭제·상단 고정)이 없습니다 — 전체 범위(vCenter 제한 없는) 관리자만 할 수 있습니다';
+// 73회차 F1(재현): `!scopedVcenterIds(...)` 만 보면 조회는 전체 · 쓰기 범위(writeVcenters)만 줄인 관리자가 남의 글 수정 · 삭제 · 고정과
+//   공지 편집 표시(canEdit)를 받았다 — v2.904 위키 · 이슈 isMod 와 같은 함정. '전체 범위 관리자' 는 auth/scope.js isFullReadWriteScope 하나.
+const isBoardModerator = (req) => isAdmin(req) && isFullReadWriteScope(req.user, store.get());
+const SCOPED_MOD_NOTE = '범위 관리자(조회 또는 쓰기 범위가 제한된 관리자)는 게시판 관리 권한(다른 사람의 글·댓글 수정·삭제·상단 고정)이 없습니다 — 조회 · 쓰기 모두 전체 범위(vCenter 제한 없는)인 관리자만 할 수 있습니다';
 /** 범위 관리자가 관리자 권한을 기대하고 403 을 받으면 왜인지 함께 말한다(작성자 본인 규칙 문구만으로는 '나는 관리자인데' 가 된다). */
 const scopedAdminReject = (req) => isAdmin(req) && !isBoardModerator(req);
 

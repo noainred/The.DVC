@@ -42,7 +42,6 @@ const ALLOW = {
   // 저장 역할 비교 — req.user 가 아니라 대상 계정의 저장 레코드(target.role)다(관리자 계정에 기능 제한을 걸지 않는다).
   'routes/admin/users.js': { n: 1, why: 'stored-role' },
   // 같은 줄에서 isDemoGuest 로 데모 계정을 함께 뺀다 — isAdminDetailUser 와 같은 판정(③ 이 줄 내용을 확인).
-  'routes/api/bulletin.js': { n: 1, why: 'demo-excluded' },
   'routes/api/userMenu.js': { n: 1, why: 'demo-excluded' },
   // 원격 접속: HTTP 는 READ_DENY '/api/remote'(모든 메서드)가 데모 계정을 라우트 앞에서 막고, WS 게이트웨이는 remoteUserIssue 가
   //   매핑 판정(mappingAccessIssue) 전에 demoGuest 를 403 으로 막는다 — 데모 계정은 이 비교에 닿지 않는다(③ 이 두 근거를 확인).
@@ -80,7 +79,8 @@ test('① AUTHZ-01 routes·provision·proxy·util 의 role 직접 비교는 허�
   // 직접 비교를 고친 파일들은 판정 함수를 쓴다(되돌리면 ① 이 먼저 실패하지만, import 만 남고 호출이 빠진 경우도 막는다)
   for (const f of ['routes/api/relaytopo.js', 'routes/api/relaycheck.js', 'routes/svcmon/overview.js', 'routes/svcmon/edge.js', 'routes/svcmon/logs.js',
     'routes/ping.js', 'routes/api/checksLogs.js', 'routes/api/perfClient.js', 'provision/jobs.js', 'routes/api/hostHygiene.js', 'routes/api/clusterCheck.js',
-    'routes/api/vmHygiene.js', 'routes/api/vmTags.js', 'routes/api/contention.js', 'routes/api/vmSeries.js', 'routes/api/overviewNsx.js']) {
+    'routes/api/vmHygiene.js', 'routes/api/vmTags.js', 'routes/api/contention.js', 'routes/api/vmSeries.js', 'routes/api/overviewNsx.js',
+    'routes/api/bulletin.js']) {   // 73회차: bulletin.js 의 같은 식 사본(role === 'admin' && !isDemoGuest)을 isAdminDetailUser 로 바꿨다 — 허용 목록에서 뺐다
     const s = stripComments(fs.readFileSync(path.join(SRC, f), 'utf8'));
     assert.match(s, /isAdminDetailUser\(/, `${f}: isAdminDetailUser 호출`);
   }
