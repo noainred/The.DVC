@@ -21,7 +21,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const TMP_DIRS = [];
 const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
-const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* */ } } };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* */ } } };
 after(() => { rmTmpDirs(); process.once('exit', rmTmpDirs); });   // 종료 flush(peer-trust)가 뒤늦게 다시 만든 폴더까지
 
 const DIR = tmpDir('secdeep110-');

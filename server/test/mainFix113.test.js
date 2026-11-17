@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 const TMP_DIRS = [];
-const rmTmpDirs = () => { for (const d of TMP_DIRS) fs.rmSync(d, { recursive: true, force: true }); };
+const rmTmpDirs = () => { for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다(늦게 flush 되는 기록기와의 경합 — exit 에서 한 번 더) */ } } };
 after(() => { rmTmpDirs(); process.once('exit', () => { try { rmTmpDirs(); } catch { /* 종료 중 */ } }); });
 const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'main-fix-113-')); TMP_DIRS.push(CFG);
 process.env.CONFIG_DIR = CFG;

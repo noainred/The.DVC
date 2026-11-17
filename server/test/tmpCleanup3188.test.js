@@ -186,6 +186,20 @@ test('② 공용 꼴(TMP_DIRS)을 쓰는 파일은 정리 훅이 after 에 걸�
   assert.deepEqual(bad, [], `TMP_DIRS 를 모으고 after 에서 지우지 않는다: ${bad.join(', ')}`);
 });
 
+// v3.18.13 CI 실측(audit2681a — 로컬에서도 부하 16병렬 중 1회 재현): 정리 훅의 rmSync 가 늦게 flush 되는 기록기(idrac-sensor-cache.json 의 지연 쓰기 등)와
+//   겹쳐 ENOTEMPTY 를 던졌고, 던진 after 훅은 **뒤의 after 훅(LDAP 흉내 서버 닫기 등)을 건너뛰게** 해 파일 전체가 120초 시한까지 멈췄다(node 22 실측).
+//   공용 꼴의 정리는 던지지 않고(try) ENOTEMPTY 를 재시도한다(maxRetries) — 정리 실패는 시험 결과가 아니다(exit 에서 한 번 더 지운다).
+test('④ 공용 정리(rmTmpDirs)는 던지지 않고 ENOTEMPTY 를 재시도한다 — 던지면 뒤 after 훅이 건너뛰어져 파일이 시한까지 멈춘다', () => {
+  const bad = [];
+  for (const f of fs.readdirSync(HERE).filter((x) => x.endsWith('.test.js'))) {
+    const s = code(f);
+    const m = s.match(/^const rmTmpDirs = \(\) => \{([^\n]*)\};$/m);
+    if (!m) continue;
+    if (!/try \{/.test(m[1]) || !/maxRetries/.test(m[1])) bad.push(f);
+  }
+  assert.deepEqual(bad, [], `정리가 던질 수 있다(try · maxRetries 없음): ${bad.join(', ')}`);
+});
+
 test('③ 시험 사이에 최상위 await 가 있으면 정리 훅은 그 await 뒤에서 등록한다', () => {
   const bad = [];
   for (const f of FIXED) {

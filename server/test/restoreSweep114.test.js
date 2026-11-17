@@ -29,7 +29,7 @@ const { keepOtpReasons } = await import('../src/bareos/groupRetention.js');
 
 const TMP = [];
 const mk = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'rs114-')); fs.mkdirSync(path.join(d, 'backups'), { recursive: true }); TMP.push(d); return d; };
-const rmTmp = () => { for (const d of TMP) fs.rmSync(d, { recursive: true, force: true }); };
+const rmTmp = () => { for (const d of TMP) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } catch { /* 정리 실패는 시험 결과가 아니다 */ } } };
 after(() => { rmTmp(); process.once('exit', () => { try { rmTmp(); } catch { /* 종료 중 */ } }); });
 const w = (dir, name, v) => fs.writeFileSync(path.join(dir, name), typeof v === 'string' ? v : JSON.stringify(v, null, 2));
 const r = (dir, name) => JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8'));
