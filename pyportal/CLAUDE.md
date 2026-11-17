@@ -122,4 +122,10 @@
 - 핀 연결 opener 는 `ProxyHandler({})` — 환경 프록시가 끼면 '대상 IP : 프록시 포트' 로 붙는다. 센터 id `all` 은 예약어.
 - 35회차 반증: 폐기 목록에는 **서명 · 만료가 유효한 토큰만**(미인증 로그아웃으로 파일이 자라지 않게 · 상한) · 백업도 users.json 을 strict 로 읽는다 · 못 읽음 상태 쓰기는 **바꾸기 전에** 거절 · 비-admin 에게 경로(초기 비밀번호 파일 포함) 금지 · 사용자명 `.`·`..`·`/` 거부.
 - 46회차: settings · categories · datacenters 도 **손상 · 읽기 오류 ≠ 첫 기동**(`jsonfile.read_json_state` — 보존본이 남아 있으면 재기동 뒤에도 'corrupt') — seed · 기본값을 파일에 굳히지 않고 쓰기 거절 · 바로가기는 분류 · 센터 원값 유지(`StoreUnavailable`) · 설정을 못 읽는 동안 백업 정리 중지 · CSV '교체' 는 같은 URL 의 id 를 이어받는다(`tests/test_audit_full46.py`).
+- 117회차(`tests/test_audit_full117.py`): **로그인 성공은 그 계정의 실패만 지운다**(`SessionStore.note_failure/note_success(client, username)` — 통째로 지우면 viewer 계정 하나로 admin 비밀번호를 잠금 없이 대입) ·
+  **비밀번호 → KDF 바이트는 `auth._pw_bytes`(surrogatepass) 하나로**(해시 · 검증 · 더미가 같은 입력 — strict 인코딩이면 짝 없는 서로게이트 비밀번호가 있는 계정만 400 이라 계정 열거) ·
+  **요청 본문 · 서버 파일 JSON 은 `_reject_lone_surrogates` 를 지난다**(저장소는 메모리를 먼저 바꾸고 파일에 쓴다 — UTF-8 로 못 쓰는 글자가 들어오면 저장은 실패하고 메모리에만 남아 공개 목록이 깨진다) ·
+  **마지막 admin 보호는 사본에 적용해 검사한 뒤 원본에**(`UserStore.update` — 거절한 강등 · 중지가 메모리에 남으면 재기동 전까지 admin 0명) ·
+  **이력 DB 는 부가 자료**: 손상(`DatabaseError`)은 `.corrupt.<ts>` 로 옮기고 새로 시작 · 열기 실패(`OperationalError`)는 옮기지 않는다 · 적재 실패가 알림 판정 · 점검 응답을 막지 않는다(`app._run_health_check`).
+  ⚠ 위 '소켓 타임아웃' 항목의 `timeout = 20` 은 **유휴 연결만** 정리한다 — 헤더를 조금씩 흘리는 연결(고전 slowloris)은 막지 못한다(재현 · 미수정 — 출발지별 연결 상한 또는 앞단 프록시가 본 처방).
 - v3.18.8 결정(`tests/test_decide_g1b.py`): 폐기 목록을 못 읽으면 **fail-closed**(그 시점 이전 토큰 거부 · 기록 못 한 로그아웃은 계정 단위 폐기로 접음) · 백업 이름은 밀리초 + 순번으로 **덮어쓰지 않음**(정렬은 시각 키) · 복원은 저장소 잠금 5개를 고정 순서로 · **본인 비밀번호 변경은 현재 비밀번호 확인**(로그인과 같은 실패 카운터).

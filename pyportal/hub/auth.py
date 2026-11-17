@@ -36,13 +36,21 @@ class AuthError(Exception):
     """사용자에게 그대로 보여줄 수 있는 인증/검증 실패."""
 
 
+def _pw_bytes(password) -> bytes:
+    """비밀번호 → KDF 입력 바이트. 전체 점검 117회차 F1(재현): JSON 은 짝 없는 서로게이트("\\ud800")를 그대로 str 로 읽는데 strict UTF-8
+    인코딩은 그 글자에서 UnicodeEncodeError(ValueError)다 — 있는 · 사용 중인 계정만 verify_password 까지 가서 400(인코딩 오류 원문 · 실패 미집계 ·
+    해시 없음 2ms)을, 없는 · 중지 계정은 더미 해시가 예외를 삼켜 401 을 받아 **요청 한 번으로 계정이 열거**됐다(잠금 카운터도 오르지 않았다).
+    surrogatepass 로 인코딩해 세 경로(해시 · 검증 · 더미)가 같은 입력 · 같은 비용을 쓴다. 정상 문자열의 바이트는 예전과 같다(저장된 해시 호환)."""
+    return str(password or "").encode("utf-8", "surrogatepass")
+
+
 def hash_password(password: str) -> dict:
     if not isinstance(password, str) or len(password) < 8:
         raise AuthError("비밀번호는 8자 이상이어야 합니다.")
     if len(password) > 200:
         raise AuthError("비밀번호가 너무 깁니다(200자 이하).")
     salt = secrets.token_bytes(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PBKDF2_ROUNDS)
+    digest = hashlib.pbkdf2_hmac("sha256", _pw_bytes(password), salt, PBKDF2_ROUNDS)
     return {
         "algo": "pbkdf2_sha256",
         "rounds": PBKDF2_ROUNDS,
@@ -61,7 +69,7 @@ def _burn_password_work(password: str) -> None:
     못하게 한다(v2.500 감사 M1 — 실측 100배 차이였다). 결과는 쓰지 않는다.
     """
     try:
-        hashlib.pbkdf2_hmac("sha256", str(password or "").encode("utf-8"), _DUMMY_SALT, PBKDF2_ROUNDS)
+        hashlib.pbkdf2_hmac("sha256", _pw_bytes(password), _DUMMY_SALT, PBKDF2_ROUNDS)
     except Exception:
         pass
 
@@ -77,7 +85,7 @@ def verify_password(record, password: str) -> bool:
         return False
     if not salt or not expected:
         return False
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, rounds)
+    digest = hashlib.pbkdf2_hmac("sha256", _pw_bytes(password), salt, rounds)
     return hmac.compare_digest(digest, expected)
 
 
@@ -159,7 +167,7 @@ class UserStore:
         role = entry.get("role")
         try:
             version = int(entry.get("tokenVersion", 1))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):   # 117회차 F8: 1e999 · Infinity(float inf) 한 칸으로 계정 파일 전체를 못 읽지 않게
             version = 1
         return {
             "username": username,
@@ -360,6 +368,11 @@ class UserStore:
                     break
             if not target:
                 raise AuthError("사용자를 찾을 수 없습니다.")
+            # 전체 점검 117회차 F5(재현): 마지막 admin 보호(_assert_admin_remains)는 **바꾸기 전에** 본다 — 예전에는 메모리 기록을 먼저 고친 뒤 거절해,
+            #   하나뿐인 admin 이 자기 역할을 viewer 로(또는 중지로) 보내면 응답은 400 '활성 admin … 있어야 합니다' 인데 메모리에서는 강등 · 세션 폐기가
+            #   효력을 가졌다(다시 로그인하면 viewer — 재기동 전까지 admin 0명). 그 상태에서 누가 자기 비밀번호를 바꾸면 그 목록이 파일에 굳었다
+            #   (35회차 R6 과 같은 꼴 — 거절한 변경이 메모리에 남음). 사본에 적용해 검사를 지난 뒤에만 원본에 옮긴다.
+            live, target = target, dict(target)
             if role is not None:
                 if role not in ROLES:
                     raise AuthError("역할은 admin 또는 viewer 여야 합니다.")
@@ -373,8 +386,9 @@ class UserStore:
                 if bool(enabled) is False and target["enabled"]:
                     target["tokenVersion"] = int(target["tokenVersion"]) + 1
                 target["enabled"] = bool(enabled)
-            self._assert_admin_remains(users)
+            self._assert_admin_remains([target if user is live else user for user in users])
             target["updatedAt"] = now_iso()
+            live.update(target)
             self._save()
             return self.public_list()
 
@@ -469,6 +483,7 @@ class SessionStore:
     """
 
     GLOBAL_FACTOR = 10          # 전역 임계값 = max_fails × 이 배수
+    FAIL_NAMES_MAX = 16         # 출발지당 따로 세는 계정 이름 수(117회차 F2) — 넘치면 한 칸(None)에 모은다(성공으로 지워지지 않는다)
     CUTOFF_KEY = "_cutoff"      # 폐기 목록 파일의 fail-closed 표지(이 시각 이전 발급 토큰 거부) — 64자 토큰 해시 키와 겹치지 않는다
 
     def __init__(self, ttl_seconds: int, max_fails: int, lockout_seconds: int,
@@ -492,6 +507,7 @@ class SessionStore:
         # fail-closed 컷오프보다도 크게 시작한다(시계가 뒤로 가도 새 로그인은 컷오프에 걸리지 않게).
         self._last_issued = self._global_cutoff
         self._fails = {}         # client -> [실패수, 잠금해제시각, 창 시작(첫 실패) 시각]
+        self._fail_names = {}    # client -> {계정 이름(소문자): 이 창의 실패수} — 117회차 F2: 성공은 그 계정의 실패만 지운다
         self._global_fails = deque()   # 창 안 실패 시각들(31회차 F6 — 예전에는 성공 전까지 기간 없이 쌓였다)
         self._global_until = 0.0
         self._lock = threading.RLock()
@@ -700,7 +716,11 @@ class SessionStore:
             remaining = max(0, int(entry[1] - time.time())) if entry else 0
             return max(remaining, max(0, int(self._global_until - time.time())))
 
-    def note_failure(self, client: str = "-") -> None:
+    @staticmethod
+    def _fail_key(username) -> str:
+        return str(username or "").strip().lower()[:64]
+
+    def note_failure(self, client: str = "-", username=None) -> None:
         with self._lock:
             now = time.time()
             window = self._fail_window()
@@ -710,10 +730,17 @@ class SessionStore:
                 entry[0] = 0
             if entry[0] == 0:
                 entry[2] = now
+                self._fail_names.pop(client, None)   # 새 창 — 계정별 집계도 새로
             entry[0] += 1
+            names = self._fail_names.setdefault(client, {})
+            key = self._fail_key(username)
+            if key not in names and len(names) >= self.FAIL_NAMES_MAX:
+                key = None   # 이름을 바꿔 가며 틀리는 출발지 — 한 칸에 모은다(어떤 성공으로도 지워지지 않는다)
+            names[key] = names.get(key, 0) + 1
             if entry[0] >= self._max_fails:
                 entry[1] = now + self._lockout
                 entry[0] = 0
+                self._fail_names.pop(client, None)
             self._global_fails.append(now)
             while self._global_fails and now - self._global_fails[0] > window:
                 self._global_fails.popleft()
@@ -721,9 +748,22 @@ class SessionStore:
                 self._global_until = now + self._lockout
                 self._global_fails.clear()
 
-    def note_success(self, client: str = "-") -> None:
+    def note_success(self, client: str = "-", username=None) -> None:
+        """전체 점검 117회차 F2(재현): 성공은 **그 계정의 실패만** 지운다. 예전에는 어느 계정이든 성공하면 그 출발지의 실패를 통째로 지워,
+        viewer 계정 하나로 'admin 오답 7회 → 자기 계정 로그인' 을 되풀이하면 잠금 없이 admin 비밀번호를 무한정 대입할 수 있었다
+        (오답 21회 · 잠금 0회). username 을 주지 않는 예전 호출은 그 출발지 전부를 지운다(계정을 모르는 호출부 — 지금 서버는 항상 준다)."""
         with self._lock:
-            self._fails.pop(client, None)
+            if username is None:
+                self._fails.pop(client, None)
+                self._fail_names.pop(client, None)
+            else:
+                entry = self._fails.get(client)
+                mine = (self._fail_names.get(client) or {}).pop(self._fail_key(username), 0)
+                if entry is not None:
+                    entry[0] = max(0, entry[0] - mine)
+                    if entry[0] == 0:
+                        self._fails.pop(client, None)
+                        self._fail_names.pop(client, None)
             self._global_fails.clear()
 
     def _purge_fails(self) -> None:
@@ -733,6 +773,7 @@ class SessionStore:
             # 잠금이 끝났고 남은 실패가 없거나 창 밖이면 지운다(31회차 F6 — 1~7회 항목이 영구히 남아 메모리가 자랐다).
             if entry[1] < now and (entry[0] == 0 or now - entry[2] > window):
                 self._fails.pop(client, None)
+                self._fail_names.pop(client, None)
 
     # ---------- 토큰 ----------
 

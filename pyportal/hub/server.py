@@ -18,6 +18,7 @@ import json
 import mimetypes
 import posixpath
 import re
+import sqlite3
 import time
 import traceback
 from http import HTTPStatus
@@ -62,6 +63,19 @@ USER_PATTERN = r"([^/]{1,800})"
 
 def _route(pattern: str):
     return re.compile("^" + pattern + "$")
+
+
+def _reject_lone_surrogates(value) -> None:
+    """전체 점검 117회차 F3(재현): JSON 은 짝 없는 서로게이트("\\ud800" — 잘린 이모지 등)를 그대로 str 로 읽지만 UTF-8 로는 쓸 수 없다.
+    저장소는 메모리 목록을 먼저 바꾼 뒤 파일에 쓰므로, viewer 가 그런 이름의 바로가기를 하나 만들면 저장은 400 으로 실패하고 **메모리에만 남아**
+    공개 GET /api/shortcuts · 내보내기가 전부 400(대시보드 빈 화면), 그 뒤의 모든 바로가기 저장도 400 이었다(재기동 전까지 — 임시 파일도 남음).
+    들어오는 경계에서 막는다 — 요청 본문과 서버 파일 가져오기(JSON)가 이 함수를 지난다."""
+    try:
+        json.dumps(value, ensure_ascii=False).encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValidationError("저장할 수 없는 문자가 들어 있습니다(짝이 맞지 않는 서로게이트 — 잘린 이모지 등). 그 글자를 지우고 다시 시도하세요.") from None
+    except (ValueError, RecursionError):
+        pass   # NaN · 순환 등은 이 검사의 대상이 아니다(각 저장소의 정규화가 다룬다)
 
 
 class HubHandler(BaseHTTPRequestHandler):
@@ -138,9 +152,16 @@ class HubHandler(BaseHTTPRequestHandler):
         if not raw:
             return {}
         try:
-            return json.loads(raw.decode("utf-8"))
+            payload = json.loads(raw.decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
             raise ValidationError("JSON 형식이 올바르지 않습니다.")
+        except RecursionError:
+            # 전체 점검 117회차 F4(재현): 깊게 중첩된 본문('[' 20만 개)은 RecursionError(ValueError 아님)라 미인증 요청 한 번마다
+            #   500 + traceback 이 콘솔에 쌓였다(POST /api/health/check 는 로그인 없이 본문을 읽는다) — 형식 오류 400 으로.
+            raise ValidationError("JSON 형식이 올바르지 않습니다(중첩이 너무 깊습니다).") from None
+        if b"\\u" in raw:
+            _reject_lone_surrogates(payload)
+        return payload
 
     def _body_dict(self):
         payload = self._read_json()
@@ -449,12 +470,12 @@ class HubHandler(BaseHTTPRequestHandler):
         user = self.ctx.users.authenticate(username if isinstance(username, str) else "",
                                            password if isinstance(password, str) else "")
         if not user:
-            self.ctx.sessions.note_failure(client)
+            self.ctx.sessions.note_failure(client, username if isinstance(username, str) else "")   # 117회차 F2: 어느 계정을 틀렸는지
             print(f"[auth] 설정 로그인 실패 (from {client})", flush=True)
             self._audit("login", actor="-", result="fail")
             # 사용자명이 틀렸는지 비밀번호가 틀렸는지 구분해서 알리지 않는다(계정 열거 차단).
             return self._error(HTTPStatus.UNAUTHORIZED, "사용자명 또는 비밀번호가 올바르지 않습니다.")
-        self.ctx.sessions.note_success(client)
+        self.ctx.sessions.note_success(client, user["username"])   # 117회차 F2: 이 계정의 실패만 지운다
         session = self.ctx.sessions.create(user)
         print(f"[auth] 설정 로그인: {user['username']}", flush=True)
         self._audit("login", actor=user["username"], detail={"role": user.get("role")})
@@ -488,6 +509,12 @@ class HubHandler(BaseHTTPRequestHandler):
             notify["webhookUrl"] = ""
             notify["redacted"] = True
             settings = {**settings, "notify": notify}
+        # 117회차 F7: 이력 DB 를 못 읽어도(잠김 · 손상 · 디스크) 설정 화면은 열린다 — 예전에는 이 한 칸으로 응답 전체가 500 이라
+        #   백업 · 복원 · 계정 관리에 들어갈 수 없었다. 못 읽으면 null(화면은 이 값을 쓰지 않는다).
+        try:
+            history_stats = self.ctx.history.stats()
+        except sqlite3.Error:
+            history_stats = None
         return self._json({
             "success": True,
             "settings": settings,
@@ -497,7 +524,7 @@ class HubHandler(BaseHTTPRequestHandler):
             },
             "users": self.ctx.users.public_list(),
             "backup": backup,
-            "history": self.ctx.history.stats(),
+            "history": history_stats,
             # 35회차 R4: 초기 비밀번호 파일 경로도 데이터 폴더 절대경로다 — 비-admin 에게는 있음 여부만.
             "initialPasswordFile": ((str(config.initial_password_file) if is_admin else True)
                                     if self.ctx.users.initial_password_present() else None),
@@ -646,13 +673,13 @@ class HubHandler(BaseHTTPRequestHandler):
                         code="current_password_required")
             return False
         if not self.ctx.users.authenticate(actor["username"], current):
-            self.ctx.sessions.note_failure(client)
+            self.ctx.sessions.note_failure(client, actor["username"])
             print(f"[auth] {action} 거절 — 요청자 현재 비밀번호 불일치 (from {client})", flush=True)
             self._audit(action, actor=actor["username"], result="fail",
                         detail={"target": str(target if target is not None else actor["username"])[:64], "reason": "current_mismatch"})
             self._error(HTTPStatus.FORBIDDEN, "현재 비밀번호가 올바르지 않습니다(요청한 본인의 비밀번호).", code="current_password_invalid")
             return False
-        self.ctx.sessions.note_success(client)
+        self.ctx.sessions.note_success(client, actor["username"])
         return True
 
     def api_users_delete(self, username):
@@ -1101,6 +1128,9 @@ class HubHandler(BaseHTTPRequestHandler):
                 parsed = json.loads(text)
             except ValueError as exc:
                 return self._error(HTTPStatus.BAD_REQUEST, f"JSON 해석 실패: {exc}")
+            except RecursionError:
+                return self._error(HTTPStatus.BAD_REQUEST, "JSON 해석 실패: 중첩이 너무 깊습니다.")
+            _reject_lone_surrogates(parsed)   # 117회차 F3: 요청 본문과 같은 경계
             entries = parsed.get("shortcuts") if isinstance(parsed, dict) else parsed
         if not isinstance(entries, list) or not entries:
             return self._error(HTTPStatus.BAD_REQUEST,

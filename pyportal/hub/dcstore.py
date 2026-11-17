@@ -29,7 +29,8 @@ def _text(value, limit, default=""):
 def _number(value, low, high, default):
     try:
         num = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # 117회차 F8(재현): 310자리가 넘는 정수는 float() 가 OverflowError 다 — 예전에는 racks 한 칸으로 500 + traceback(설정 v2.762 H5 와 같은 꼴)
         return default
     if num != num:                       # NaN
         return default
