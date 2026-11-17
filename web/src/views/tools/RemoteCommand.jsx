@@ -576,6 +576,7 @@ function DeployModal({ preset, groups, onClose }) {
     serviceUnits: '', allowReboot: false, fileRoots: '', enabledCommands: '', enabledTests: '', remoteManage: false, comment: '' });
   const [instances, setInstances] = useState([{ name: 'default', priority: 100 }]);
   const [otp, setOtp] = useState('');   // 반증 G1a: 원격 배포는 소유자 등급 + 본인 OTP(1회용 — 보낸 뒤 비운다)
+  const [rmOtp, setRmOtp] = useState('');   // 결정(반증 G1a 남긴 것): 인스턴스 제거도 같은 게이트 — 배포 칸과 따로(1회용이라 한쪽에 쓰면 다른 쪽은 새 코드)
   const dgate = ownerOtpGate(OWNER_OTP_ALWAYS, getCurrentUser());
   const [busy, setBusy] = useState('');
   const [list, setList] = useState(null);
@@ -603,9 +604,14 @@ function DeployModal({ preset, groups, onClose }) {
     } catch (e) { setErr(e.message); } finally { setBusy(''); }
   };
   const doRemove = async (name) => {
+    setErr('');
+    if (dgate.locked) { setErr(dgate.reason); return; }
+    if (dgate.otp && rmOtp.length !== 6) { setErr('인스턴스 제거는 본인 OTP(6자리)가 필요합니다.'); return; }
     if (!window.confirm(`인스턴스 '${name}' 을 이 서버에서 제거할까요?`)) return;
-    setBusy('remove'); setErr('');
-    try { const r = await postJson('/tools/rma/deploy/remove', { ...target(), name }); if (!r.ok) setErr(r.reason); else await doList(); } catch (e) { setErr(e.message); } finally { setBusy(''); }
+    const sentOtp = dgate.otp ? rmOtp : '';
+    setRmOtp('');
+    setBusy('remove');
+    try { const r = await postJson('/tools/rma/deploy/remove', { ...target(), name, ...(sentOtp ? { otp: sentOtp } : {}) }); if (!r.ok) setErr(r.reason); else await doList(); } catch (e) { setErr(e.message); } finally { setBusy(''); }
   };
 
   return (
@@ -627,8 +633,16 @@ function DeployModal({ preset, groups, onClose }) {
             <>
               <div>템플릿 유닛: {list.unitInstalled ? '설치됨' : '없음'}{list.install ? <span className="muted"> · 설치 경로 {list.install.prefix} · 계정 {list.install.user}</span> : <span style={{ color: TONE.warn }}> · 포탈 설치 경로를 찾지 못함</span>}</div>
               {(list.instances || []).length ? list.instances.map((i) => (
-                <div key={i.name}><code>vmware-portal-rma@{i.name}</code> — {i.active}/{i.sub} <button className="tab" disabled={!!busy} onClick={() => doRemove(i.name)}>제거</button></div>
+                <div key={i.name}><code>vmware-portal-rma@{i.name}</code> — {i.active}/{i.sub} <button className="tab" disabled={!!busy || dgate.locked} onClick={() => doRemove(i.name)}>제거</button></div>
               )) : <div className="muted">인스턴스 없음</div>}
+              {(list.instances || []).length > 0 && (dgate.locked
+                ? <div className="muted" style={{ marginTop: 4 }}>🔒 제거도 배포와 같은 등급입니다 — {dgate.reason}</div>
+                : dgate.otp && (
+                  <div className="flex gap" style={{ marginTop: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <label>제거용 본인 OTP <input className="input" style={{ width: 110 }} inputMode="numeric" autoComplete="one-time-code" value={rmOtp} onChange={(e) => setRmOtp(otpInput(e.target.value))} placeholder="6자리" /></label>
+                    <span className="muted" style={{ fontSize: 12 }}>대상 서버에서 RMA 를 지우는 동작이라 설정 소유자 등급 + 본인 OTP 로만 보냅니다.</span>
+                  </div>
+                ))}
             </>
           ) : <div className="error-box">{list.reason}</div>}
         </div>

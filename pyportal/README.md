@@ -97,7 +97,7 @@ python3 app.py                  # http://<서버>:8095
   (`session-revoked.failclosed.json` 표지 — 파일이 바뀌거나 다시 읽히면 표지는 지워지고 예전 규칙대로).
 - **본인 비밀번호를 바꿀 때는 현재 비밀번호를 함께 입력**합니다(틀리면 로그인 실패와 같은 출발지별 카운터 · 잠금).
   admin 이 **viewer** 계정의 비밀번호를 재설정할 때는 묻지 않습니다. admin 을 늘리는 동작(admin 계정 만들기 · 다른 admin 의 비밀번호 재설정 ·
-  다른 계정을 admin 으로 올리기)은 **요청한 본인의 현재 비밀번호**(`currentPassword`)를 확인합니다(같은 카운터 · 잠금).
+  다른 계정을 admin 으로 올리기 · 중지된 admin 다시 켜기)은 **요청한 본인의 현재 비밀번호**(`currentPassword`)를 확인합니다(같은 카운터 · 잠금).
 
 | 하위 메뉴 | 할 수 있는 일 |
 |---|---|
@@ -281,7 +281,7 @@ sudo cat /etc/dc-service-hub/initial-settings-password.txt
 | POST/PUT/DELETE | `/api/settings/categories…` | admin | 카테고리 추가·수정·삭제(+`/move`, `/reset`) |
 | GET | `/api/export/csv` | 세션 | 바로가기 CSV 내보내기 |
 | POST | `/api/import/csv` | 세션 | CSV 가져오기(`{"csv": "...", "mode": "append"\|"replace"}`) |
-| GET/POST/PUT/DELETE | `/api/settings/users…` | 세션(변경은 admin) | 계정 관리 — admin 만들기 · admin 으로 올리기는 `currentPassword`(요청자 본인) 필요 |
+| GET/POST/PUT/DELETE | `/api/settings/users…` | 세션(변경은 admin) | 계정 관리 — admin 만들기 · admin 으로 올리기 · 중지된 admin 다시 켜기는 `currentPassword`(요청자 본인) 필요 |
 | POST | `/api/settings/users/<name>/password` | 세션(남의 계정은 admin) | 비밀번호 변경 — 본인 · 다른 admin 대상은 `{"password", "currentPassword"}`(요청자 본인 비밀번호 — 없으면 400 · 틀리면 403 · 잠금 429) |
 | POST/PUT/DELETE | `/api/settings/datacenters…` | admin | 데이터센터 구성 |
 | GET/POST/DELETE | `/api/settings/backups…` | admin | 백업 목록·생성·받기·삭제 |

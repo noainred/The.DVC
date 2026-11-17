@@ -5,6 +5,8 @@
  *     status.history[].to**(실제로 보낸 수신자 주소)는 그대로 실었다 — scopeMailStatus 가 조회 범위(scopedVcenterIds)만 보기 때문.
  *  R2 68 D1 형제: notify.js prunedKeys(메일 '새로 넘음' 기억의 회복 판정)가 값 모름을 p.unknown 하나로만 봤다 — evaluate 는
  *     pct 를 만들 수 없는 파티션(용량 0 등 — 작은 파티션 무시를 끈 설정)도 값 모름으로 세어 VM 을 판정하지 않는데, 회복 판정은 그 VM 을 '읽음' 으로 보고 기억에서 뺐다.
+ *  후속 ③' (결정 — '권장안대로'): 서비스 점검 조회가 오류가 선 공용 로더를 다시 판정한다(그 모듈이 불리지 않아도 되돌린 보존본의 줄이 지워진다 ·
+ *     모듈 쪽은 다시 읽을 때까지 이전 오류 — 오류 중 캐시한 값으로 되돌린 파일을 덮지 않게).
  */
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -233,6 +235,67 @@ test('후속 ③: 거절 · 확정 안내가 다시 판정 동작을 사실대�
     assert.match(c.detail, /30초 안에 그 파일을 다시 읽습니다\(재시작 불필요\)/);
     tick3(); N.listNfsDs();
     assert.equal(N.nfsDsLoadError(), null);
+  } finally { J3._setJsonFileLoadClockForTest(); }
+});
+
+/* ── 결정(후속이 남긴 것 — '권장안대로'): 서비스 점검 조회가 다시 판정한다 — 그 모듈이 불리지 않아도 되돌린 보존본의 줄이 지워진다 ─────── */
+test('후속 ③\': 서비스 점검 조회가 오류가 선 로더를 다시 판정(30초 간격) — 모듈을 부르지 않아도 줄이 지워지고, 모듈은 다음 접근에 다시 읽어 되돌린 파일 위에 쓴다', async () => {
+  const U = await import('../src/util/settingsLoadError.js');
+  const { getServiceCheck } = await import('../src/health/services.js');
+  const B = await import('../src/bulletin/store.js');
+  const FT = await import('../src/insights/fleetTags.js');
+  const FR = await import('../src/insights/fleetRev.js');
+  const rows = () => U.listSettingsLoadErrors().map((e) => e.file);
+  const row = () => getServiceCheck({ isAdmin: true }).checks.find((c) => c.key === 'settings-files');
+  J3._setJsonFileLoadClockForTest(() => clock3);
+  try {
+    // ① 공용 로더 단위 — 등록부(서비스 점검)는 지우고, 모듈 쪽에는 그 모듈이 다시 load() 할 때까지 이전 오류(held)
+    const UNIT = F3('decide-rest-unit.json');
+    const L = J3.makeJsonFileLoader(() => UNIT, { label: '시험 설정', confirm: () => {}, tag: 'test' });
+    fs.writeFileSync(UNIT, '{ broken');
+    L.load();
+    assert.ok(L.loadError() && rows().includes('decide-rest-unit.json'));
+    fs.writeFileSync(UNIT, JSON.stringify({ a: 1 }));
+    assert.equal(U.recheckSettingsFiles(), 0, '간격 안에서는 다시 판정하지 않는다(조회마다 디스크를 보지 않게)');
+    assert.ok(rows().includes('decide-rest-unit.json'));
+    tick3();
+    assert.equal(U.recheckSettingsFiles(), 1);
+    assert.ok(!rows().includes('decide-rest-unit.json'), '되돌린 파일의 줄이 그 모듈을 부르지 않아도 지워진다');
+    assert.ok(L.loadError(), '모듈 쪽 오류는 그 모듈이 다시 읽을 때까지 유지(캐시는 모듈이 들고 있다)');
+    assert.ok(L.refusal('시험'), '모듈이 다시 읽기 전 쓰기는 여전히 거절');
+    assert.equal(L.recheckDue(), true, '모듈의 다음 접근은 곧바로 다시 읽는다');
+    assert.equal(L.recheckDue(), true, '다시 읽을 때까지 계속 참');
+    assert.equal(L.load().kind, 'ok');
+    assert.equal(L.loadError(), null); assert.equal(L.refusal('시험'), null); assert.equal(L.recheckDue(), false);
+
+    // ② 게시판(오류가 없으면 캐시를 믿는 모듈) — 서비스 점검 화면 조회로 줄이 지워진 뒤 글을 쓰면 되돌린 글 위에 붙는다(오류 중 캐시한 빈 목록으로 덮지 않음)
+    B._resetBulletinCache();
+    fs.writeFileSync(F3('board.json'), '{ broken');
+    B.listPosts({});
+    assert.ok(rows().includes('board.json'));
+    const restored = { posts: [{ id: 'p-keep', title: '되돌린 글', body: 'b', author: 'a', createdAt: clock3, updatedAt: clock3, comments: [], likes: [] }] };
+    fs.writeFileSync(F3('board.json'), JSON.stringify(restored));
+    assert.equal(row().files?.some((e) => e.file === 'board.json'), true, '간격 안의 조회는 아직 그대로');
+    tick3();
+    const r1 = row();
+    assert.ok(!(r1.files || []).some((e) => e.file === 'board.json'), `서비스 점검 조회 한 번으로 지워진다: ${r1.detail}`);
+    B.createPost({ title: '새 글', body: 'n' }, 'u1');
+    B.flushBulletinNow();
+    const ids = JSON.parse(fs.readFileSync(F3('board.json'), 'utf8')).posts.map((x) => x.id);
+    assert.ok(ids.includes('p-keep'), `되돌린 글이 덮였다: ${JSON.stringify(ids)}`);
+    assert.equal(ids.length, 2);
+
+    // ③ 회복 전이로 캐시를 버리는 모듈(fleet) — 서비스 점검이 먼저 회복을 봐도 모듈의 회복 전이(rev)는 그대로 일어난다
+    fs.writeFileSync(F3('fleet-tags.json'), '{ broken');
+    FT.loadFleetTags();
+    assert.ok(rows().includes('fleet-tags.json'));
+    fs.writeFileSync(F3('fleet-tags.json'), JSON.stringify({ tags: { SVC9: 'exclude' } }));
+    tick3();
+    U.recheckSettingsFiles();
+    assert.ok(!rows().includes('fleet-tags.json'));
+    const rev0 = FR.fleetRev();
+    assert.equal(FT.loadFleetTags().SVC9, 'exclude');
+    assert.ok(FR.fleetRev() > rev0, '모듈이 회복 전이를 놓치지 않는다(플릿 캐시를 버린다)');
   } finally { J3._setJsonFileLoadClockForTest(); }
 });
 

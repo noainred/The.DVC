@@ -589,6 +589,12 @@ class HubHandler(BaseHTTPRequestHandler):
         if payload.get("role") == "admin" and current is not None and current.get("role") != "admin" \
                 and not self._verify_current_password(actor, payload, what="admin 권한을 주려면", action="user.update", target=username):
             return None
+        # 결정(반증 G1b 남긴 것): 중지된 admin 을 다시 켜는 것(enabled false → true · 역할은 admin 그대로)도 admin 을 늘리는 동작 —
+        #   같은 확인(요청자 본인 · 같은 카운터 · 잠금). viewer 다시 켜기 · 중지 · 'viewer 로 낮추며 켜기'(결과가 admin 이 아님)는 그대로.
+        if current is not None and current.get("role") == "admin" and not current.get("enabled", True) \
+                and payload.get("enabled") is True and payload.get("role") in (None, "admin") \
+                and not self._verify_current_password(actor, payload, what="중지된 admin 계정을 다시 켜려면", action="user.update", target=username):
+            return None
         users = self.ctx.users.update(username, role=payload.get("role"),
                                       enabled=payload.get("enabled"))
         if payload.get("enabled") is False:
@@ -626,7 +632,7 @@ class HubHandler(BaseHTTPRequestHandler):
         """결정(56~75 남긴 것 · 31회차 E3): 본인 비밀번호 변경은 현재 비밀번호를 확인한다 — 예전에는 세션 토큰(브라우저 저장소 · 8시간)만
         가로채도 비밀번호를 바꿔 계정을 영구히 가져갈 수 있었다. 확인 · 실패 카운터 · 잠금은 로그인과 같은 함수
         (authenticate · 출발지별 lock_remaining · note_failure · note_success)를 쓴다.
-        반증(결정 G1b ②): admin 을 늘리는 관리 동작(admin 생성 · 다른 admin 재설정 · admin 으로 올리기)도 **요청자 본인**의 현재 비밀번호를 이 함수로 본다.
+        반증(결정 G1b ②): admin 을 늘리는 관리 동작(admin 생성 · 다른 admin 재설정 · admin 으로 올리기 · 중지된 admin 다시 켜기)도 **요청자 본인**의 현재 비밀번호를 이 함수로 본다.
         실패면 응답을 쓰고 False."""
         client = self.client_address[0] if self.client_address else "-"
         remaining = self.ctx.sessions.lock_remaining(client)

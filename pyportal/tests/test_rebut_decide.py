@@ -9,6 +9,8 @@ D1 보관 수량이 꽉 찬 상태에서 가장 오래된 백업을 복원해도
 D2 폐기 목록 읽기 오류가 **같은 파일 상태로 계속되면** 재기동마다 전원을 다시 끊지 않는다(표지 파일) — 파일이 바뀌었거나 표지가 없거나
    그 사이 계정 단위 폐기가 실패했으면 예전처럼 다시 끊는다 · 다시 읽히면 표지를 지운다.
 D3 admin 을 늘리는 관리 동작(admin 생성 · 다른 admin 재설정 · admin 으로 올리기)은 요청자 본인의 현재 비밀번호(같은 실패 카운터) — viewer 대상 · 중지 · 삭제는 그대로.
+D3' (D3 이 남긴 것 — 결정 '권장안대로') 중지된 admin 을 다시 켜는 것도 같은 확인(같은 카운터 · 잠금) — viewer 다시 켜기 · 중지 · 'viewer 로 낮추며 켜기' 는 그대로 ·
+   화면은 그 경우에만 비밀번호 창(새 비밀번호 칸 없이 현재 비밀번호만).
 """
 
 import random
@@ -387,6 +389,73 @@ class AdminGrantNeedsRequesterPasswordTest(ServerCase):
                                                             "currentPassword": self.password})
             self.assertEqual(code, 429, "로그인과 같은 출발지 잠금")
         self.assertIsNone(self.ctx.users.get("d3l"))
+
+
+# ---------------------------------------------------------------- D3' 중지된 admin 다시 켜기
+
+STATIC = Path(__file__).resolve().parents[1] / "static"
+
+
+class ReenableAdminNeedsRequesterPasswordTest(ServerCase):
+    tearDown = AdminGrantNeedsRequesterPasswordTest.tearDown
+    _post = AdminGrantNeedsRequesterPasswordTest._post
+
+    def _disabled_admin(self, name):
+        code, _, _ = self._post("/api/settings/users", {"username": name, "role": "admin", "password": name + "-pass-111",
+                                                        "currentPassword": self.password})
+        self.assertEqual(code, 201)
+        self.assertEqual(self._post("/api/settings/users/" + name, {"enabled": False}, "PUT")[0], 200, "중지는 그대로(확인 없음)")
+        self.assertFalse(self.ctx.users.get(name)["enabled"])
+
+    def test_reenable_disabled_admin_requires_requester_password(self):
+        self._disabled_admin("d3e")
+        code, payload, _ = self._post("/api/settings/users/d3e", {"enabled": True}, "PUT")
+        self.assertEqual((code, payload.get("code")), (400, "current_password_required"))
+        self.assertFalse(self.ctx.users.get("d3e")["enabled"], "확인 없이 중지된 admin 이 다시 켜졌다")
+        code, payload, _ = self._post("/api/settings/users/d3e", {"enabled": True, "role": "admin"}, "PUT")
+        self.assertEqual((code, payload.get("code")), (400, "current_password_required"), "역할을 admin 그대로 함께 보내도 같은 확인")
+        code, payload, _ = self._post("/api/settings/users/d3e", {"enabled": True, "currentPassword": "wrong-pass-0"}, "PUT")
+        self.assertEqual((code, payload.get("code")), (403, "current_password_invalid"))
+        self.assertFalse(self.ctx.users.get("d3e")["enabled"])
+        fails = [e for e in self.ctx.audit.tail(20) if e.get("action") == "user.update" and e.get("result") == "fail"]
+        self.assertTrue(fails and fails[0].get("detail", {}).get("target") == "d3e", "감사에 대상 계정과 실패가 남는다(tail 은 최신순)")
+        code, _, _ = self._post("/api/settings/users/d3e", {"enabled": True, "currentPassword": self.password}, "PUT")
+        self.assertEqual(code, 200)
+        self.assertTrue(self.ctx.users.get("d3e")["enabled"])
+        self.assertEqual(self._post("/api/settings/users/d3e", {"enabled": True}, "PUT")[0], 200,
+                         "이미 켜진 admin 에 enabled true 를 다시 보내는 것은 늘리는 동작이 아니다")
+
+    def test_reenable_viewer_and_demote_while_enabling_unchanged(self):
+        self._post("/api/settings/users", {"username": "d3f", "role": "viewer", "password": "d3f-pass-111"})
+        self.assertEqual(self._post("/api/settings/users/d3f", {"enabled": False}, "PUT")[0], 200)
+        self.assertEqual(self._post("/api/settings/users/d3f", {"enabled": True}, "PUT")[0], 200, "viewer 다시 켜기는 그대로")
+        self._disabled_admin("d3g")
+        code, _, _ = self._post("/api/settings/users/d3g", {"enabled": True, "role": "viewer"}, "PUT")
+        self.assertEqual(code, 200, "viewer 로 낮추며 켜기는 admin 을 늘리지 않는다")
+        user = self.ctx.users.get("d3g")
+        self.assertEqual((user["role"], user["enabled"]), ("viewer", True))
+
+    def test_reenable_check_shares_login_lockout(self):
+        self._disabled_admin("d3h")
+        with mock.patch.object(self.ctx.sessions, "_max_fails", 2):
+            for _ in range(2):
+                self.assertEqual(self._post("/api/settings/users/d3h", {"enabled": True, "currentPassword": "nope-nope"}, "PUT")[0], 403)
+            code, _, _ = self._post("/api/settings/users/d3h", {"enabled": True, "currentPassword": self.password}, "PUT")
+            self.assertEqual(code, 429, "로그인과 같은 출발지 잠금")
+        self.assertFalse(self.ctx.users.get("d3h")["enabled"])
+
+    def test_screen_asks_current_password_only_for_disabled_admin(self):
+        js = (STATIC / "app.js").read_text(encoding="utf-8")
+        start = js.index("function toggleUser(user)")
+        body = js[start:js.index("function deleteUser(", start)]
+        self.assertRegex(body, r'!user\.enabled\s*&&\s*user\.role\s*===\s*"admin"', "중지된 admin 만 확인 창으로")
+        self.assertIn("enableAdminUser(user)", body)
+        start = js.index("function submitEnableAdmin(")
+        body = js[start:js.index("function submitPasswordChange(", start)]
+        self.assertIn("currentPassword", body)
+        self.assertIn("enabled: true", body)
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        self.assertIn('id="pw-title"', html)
 
 
 if __name__ == "__main__":
