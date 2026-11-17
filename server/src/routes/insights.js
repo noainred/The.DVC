@@ -114,6 +114,26 @@ function vcPowerSkippedReport(slice, vcSkip) {
   return loadPowerSettings().includeVcenterPower === false ? null : vcPowerSkippedOf(slice.hosts, vcSkip);
 }
 
+/**
+ * 70회차 F1(범위 누수 · 재현): 범위 조각(scoped — 범위 계정 또는 고른 vCenter)의 측정 전력 목록 — /finops · /power-breakdown 한 함수.
+ *   ① 수동 소속(fleet-assign)은 **전 vCenter** 로 검사한다. 예전에는 조각의 vCenter 집합(validIds)으로 검사해, 관리자가 vc-b 로 옮긴 원격 베어메탈의
+ *      수동 소속이 무시되고 원격 수집기 귀속(vc-a)이 남아 vc-a 범위 계정 · ?vcenterId=vc-a 합계 · topHosts 에 그 서버 이름 · 전력이 실렸다
+ *      (전체 보기와 통합 서버 인벤토리는 vc-b — classifyFleet 은 수동 소속이 원격 귀속을 이긴다). 그 유효성 검사는 '없는 법인으로의 귀속 차단' 이다.
+ *   ② limit(범위 계정 · vCenter 를 고른 보기): 명시 귀속이 조각 밖의 **실제** vCenter 면 이름 · 서비스태그 맞춤으로 조각 안에 끌어오지 않는다 —
+ *      resolveServerVcenter 는 명시 귀속이 조각에 없으면 이름 맞춤으로 넘어가 다른 법인 서버를 조각 vCenter 로 셌다(전체 보기는 그 서버를 명시 vCenter 에 센다).
+ *      중앙 목록에 없는 vCenter(엣지 보고 · 지워진 vCenter)는 예전처럼 이름 · 태그 맞춤에 맡긴다.
+ */
+export function measuredForSlice(raw, snap, scoped, { limit = false } = {}) {
+  const allIds = new Set((snap?.vcenters || []).map((v) => v.id));
+  let measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(raw, allIds)), scoped);
+  if (limit && Array.isArray(measured)) {
+    const inSlice = new Set((scoped?.vcenters || []).map((v) => v.id));
+    const elsewhere = (m) => { const vc = String(m?.vcenterId || '').trim(); return !!vc && allIds.has(vc) && !inSlice.has(vc); };
+    measured = keepMappedMeasured(measured.filter((m) => !elsewhere(m)), scoped);
+  }
+  return measured;
+}
+
 // --- FinOps: 전력 → kWh·비용·CO2 ---
 insightsRouter.get('/finops', async (req, res) => {
   try {
@@ -125,14 +145,13 @@ insightsRouter.get('/finops', async (req, res) => {
     const scopeLimited = scopedVcenterIds(req.user, snap) != null;
     // v2.583(감사 확정): ?vcenterId= 가 키에 없어 다른 vCenter(또는 전체)의 결과가 60초 동안 그대로 나갔다(형제 /power-breakdown 은 넣는다).
     const key = `${snap.generatedAt}|${JSON.stringify(loadPowerSettings())}|${JSON.stringify(loadFinopsConfig())}|${fleetRev()}|${scopeKey(req.user, snap)}|vc:${String(req.query.vcenterId || '')}`;
-    const validIds = new Set((scoped.vcenters || []).map((v) => v.id));
     const payload = await snapMemo('finops', key, 60_000, async () => {
       // v2.733(C2-02): 읽지 못한 vCenter·끊긴 호스트의 vCenter 추정 전력은 '지금 값' 이 아니다 — 합산에서 빼고 개수로 밝힌다.
       const vcSkip = vcPowerSkipOf(scoped);
-      let measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(await allMeasuredPower({ hosts: scoped.hosts, vcenterFirst: true, ...vcSkip }), validIds)), scoped);
       // v2.785(GV P-B4): vCenter 를 고르면(전체 범위 계정 포함) 그 vCenter 에 귀속된 서버만 — 예전에는 범위 계정만 걸러, 전체 범위 계정의
       //   ?vcenterId=X 가 다른 vCenter 서버 전력을 '(미매핑)' 으로 더한 전 함대 값이 됐다(형제 /power-breakdown 은 vcFilter 로 뺀다).
-      if (scopeLimited || String(req.query.vcenterId || '')) measured = keepMappedMeasured(measured, scoped);
+      // 70회차 F1: 수동 소속은 전 vCenter 로 검사 · 조각 밖 실제 vCenter 귀속은 끌어오지 않는다(measuredForSlice).
+      const measured = measuredForSlice(await allMeasuredPower({ hosts: scoped.hosts, vcenterFirst: true, ...vcSkip }), snap, scoped, { limit: scopeLimited || !!String(req.query.vcenterId || '') });
       return { ...computeFinOps(scoped, measured), vcPowerSkipped: vcPowerSkippedReport(scoped, vcSkip) };
     });
     if (isAdminReq(req)) sendCached(req, res, key, payload);
@@ -155,11 +174,10 @@ insightsRouter.get('/power-breakdown', async (req, res) => {
     // 서비스태그·모델·와트를 그대로 내려주므로 누수 영향이 더 크다.
     const scopeLimited = scopedVcenterIds(req.user, snap) != null;
     const key = `${snap.generatedAt}|${vc}|${JSON.stringify(loadPowerSettings())}|${fleetRev()}|${dcKey}|${scopeKey(req.user, snap)}`;
-    const validIds = new Set((scoped.vcenters || []).map((v) => v.id));
     const payload = await snapMemo('power-breakdown', key, 60_000, async () => {
       const vcSkip = vcPowerSkipOf(scoped); // v2.733(C2-02) — /finops 와 같은 판정
-      let measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(await allMeasuredPower({ hosts: scoped.hosts, vcenterFirst: true, ...vcSkip }), validIds)), scoped);
-      if (scopeLimited) measured = keepMappedMeasured(measured, scoped);
+      // 70회차 F1: /finops 와 같은 함수(수동 소속은 전 vCenter 로 검사 · 조각 밖 실제 vCenter 귀속은 끌어오지 않는다).
+      const measured = measuredForSlice(await allMeasuredPower({ hosts: scoped.hosts, vcenterFirst: true, ...vcSkip }), snap, scoped, { limit: scopeLimited || !!vc });
       let collectorDc = null; let collectorDcManual = null;
       try { ({ map: collectorDc, manual: collectorDcManual } = collectorDcMaps()); } catch { collectorDc = null; collectorDcManual = null; }   // v2.972: 수집 서버 ↔ 법인 매칭(사용자 지정 → 이름 맞춤)
       return { ...computePowerBreakdown(scoped, measured, { vcenterId: vc, assign, datacenters, collectorDc, collectorDcManual }), vcPowerSkipped: vcPowerSkippedReport(scoped, vcSkip) };
@@ -592,13 +610,20 @@ insightsRouter.get('/forecast', async (req, res) => {
 // --- 보안 자세(CVE/EOL) --- 범위 제한 계정은 자기 vCenter 호스트만(전 사이트 ESXi/CVE 노출 방지).
 insightsRouter.get('/security', (req, res) => res.json(computeSecurityPosture(scopeSlice(store.get(), req.user, req.query.vcenterId))));
 
+/** 70회차 F3: 토폴로지 · 구성도의 vCenter 고르기 목록 — 사용자 범위 안 vCenter 전부(요청의 ?vcenterId 로 줄이지 않는다). */
+export function vcPickList(snap, user) {
+  return (scopeSlice(snap, user, null).vcenters || []).map((v) => ({ id: v.id, name: v.name || v.id }));
+}
+
 // --- 토폴로지·의존성 ---
 insightsRouter.get('/topology', async (req, res) => {
   const snap = store.get();
   const vc = req.query.vcenterId || null; const host = req.query.host || null;
   const scoped = scopeSlice(snap, req.user, vc); // 범위 제한 계정은 자기 vCenter 구성만
   const key = `${snap.generatedAt}|${vc || ''}|${host || ''}|${scopeKey(req.user, snap)}`;
-  const payload = await snapMemo('topology', key, 60_000, async () => buildTopology(scoped, { vcenterId: vc, host }));
+  // 70회차 F3: 고르기 목록(vcenters)은 범위 안 vCenter 전부 — 조각(scoped)은 고른 vCenter 하나로 줄어 있어, 하나를 고르면 목록이 그 하나만 남아
+  //   다른 vCenter 로 바로 옮길 수 없었다(트리는 그대로 고른 것만). 범위 밖 vCenter 는 여전히 싣지 않는다(scopeSlice 범위만).
+  const payload = await snapMemo('topology', key, 60_000, async () => ({ ...buildTopology(scoped, { vcenterId: vc, host }), vcenters: vcPickList(snap, req.user) }));
   sendCached(req, res, key, payload);
 });
 
@@ -612,7 +637,7 @@ insightsRouter.get('/graph', async (req, res) => {
   // 명시 전달해야 한다(전 사이트 NSX 매니저 노출 차단 — graph.js allowedVcIds 주석 참고).
   const allowedVcIds = scopedVcenterIds(req.user, snap);
   const key = `${snap.generatedAt}|${vms ? 1 : 0}|${vc || ''}|${host || ''}|${scopeKey(req.user, snap)}`;
-  const payload = await snapMemo('graph', key, 60_000, async () => buildGraph(scoped, { vms, vcenterId: vc, host, allowedVcIds }));
+  const payload = await snapMemo('graph', key, 60_000, async () => ({ ...buildGraph(scoped, { vms, vcenterId: vc, host, allowedVcIds }), vcenters: vcPickList(snap, req.user) })); // 70회차 F3 — /topology 와 같은 목록
   sendCached(req, res, key, payload);
 });
 

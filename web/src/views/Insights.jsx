@@ -59,7 +59,7 @@ function FinOps() {
   if (err && !d) return <ErrorBox message={err} />; // 데이터 보유 중 일시 폴링 오류로 화면 전체를 갈아치우지 않음(CLAUDE.md)
   if (!d) return <Loading />;
   const cur = d.config.currency;
-  const c = (v) => `${cur}${num(v)}`;
+  const c = (v) => { const t = num(v); return t === '—' ? t : `${cur}${t}`; }; // 70회차 F2: 측정 0대면 서버가 null — '₩—' 가 아니라 '—'
   const saveCfg = async () => {
     setBusy(true); setMsg(null);
     // v2.611 LEFT2611-05: 빈 숫자 칸은 보내지 않는다(blankOr) — Number('') === 0 이 CO₂ 계수 0 으로 저장됐다.

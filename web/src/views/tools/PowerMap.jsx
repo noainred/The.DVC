@@ -8,6 +8,8 @@ import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 �
 import { STable } from '../../components/STable.jsx';
 import { dayStamp } from '../../dayStamp.js';
 import { vcPowerSkippedNote } from '../readGapText.js'; // v2.733(C2-02)
+import { numOrNull } from '../../numOrNull.js';
+import { fmtKg } from '../../util/fmt.js';
 import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나(즉시 revoke · 문서 밖 click 금지)
 
 
@@ -31,7 +33,8 @@ export function PowerMap({ scope }) {
   if (!data) return null;
   const vcName = new Map((vcList || []).map((v) => [v.id, v.name || v.id]));
   const cur = data.config?.currency || '₩';
-  const won = (v) => `${cur}${Number(v || 0).toLocaleString()}`;
+  // 70회차 F2: 측정 0대면 서버 합계가 null(모름) — '₩0' · '0 kg' 으로 그리지 않는다.
+  const won = (v) => { const n = numOrNull(v); return n == null ? '—' : `${cur}${n.toLocaleString()}`; };
   const maxW = Math.max(1, ...(data.byVcenter || []).map((r) => r.watts), ...(data.byModel || []).map((r) => r.watts));
 
   const csv = () => {
@@ -54,7 +57,7 @@ export function PowerMap({ scope }) {
       <div className="kpis" style={{ marginBottom: 14 }}>
         <Card label="총 측정 전력" value={fmtWatts(data.totals.watts)} accent="var(--amber)" meta={`서버 ${data.totalServers}대 측정`} />
         <Card label="월 에너지 / 요금" value={fmtKwh(data.totals.kwhMonth)} meta={`월 ${won(data.totals.costMonth)} · PUE ${data.config.pue}`} />
-        <Card label="연 전기요금(추정)" value={won(data.totals.costYear)} accent="#fbbf24" meta={`연 CO₂ ${Number(data.totals.co2YearKg || 0).toLocaleString()} kg`} />
+        <Card label="연 전기요금(추정)" value={won(data.totals.costYear)} accent="#fbbf24" meta={`연 CO₂ ${fmtKg(data.totals.co2YearKg)}`} />
         <Card label="법인 매핑" value={`${data.mappedServers} / ${data.totalServers}`} accent={data.unmappedServers ? 'var(--red)' : 'var(--green)'}
           meta={data.unmappedServers ? `미매핑 ${data.unmappedServers}대(${fmtWatts(data.unmappedWatts)})` : '전부 vCenter 매핑됨'} />
       </div>
