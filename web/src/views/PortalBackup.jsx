@@ -90,6 +90,9 @@ export function restoreStateText(r) {
     if (l.reason === 'interrupted') out.last = `${fmtTime(l.at)} 기동 때: 이전 적용이 중단된 흔적이 있어 예약 복원을 적용하지 않았습니다.`;
     else if (l.reason) out.last = `${fmtTime(l.at)} 기동 때: 예약 복원을 적용하지 못했습니다 — ${l.reason}`;
     else out.last = `${fmtTime(l.at)} 기동 때 예약 복원 적용${l.source ? `(${l.source})` : ''}: ${applied}개${failed.length ? ` · 실패 ${failed.length}개(${failed.slice(0, 5).map((f) => f.file).join(', ')})` : ''}${rejected ? ` · 거부 ${rejected}개` : ''}`;
+    // 114회차: 지금 파일을 그대로 둔 실행 기록(보낸 회차 · 실행 원장 — 서버 stagedRestore 의 kept) 수 — 적용 수가 예약 수보다 적은 까닭을 밝힌다.
+    const kept = Array.isArray(l.kept) ? l.kept.length : 0;
+    if (out.last && kept && !l.reason) out.last += ` · 실행 기록 ${kept}개는 지금 것 유지`;
     // v2.769(점검 R4-D1-2): 적용 때 남긴 경고(되살린 엣지 토큰·전원 재로그인)도 보여 준다 — 상태 응답에만 두면 사람이 모른다.
     // v2.770(점검 R5-E1-2): 서버 경고는 `{file, reason}` 객체다(stagedRestore — 예전 문자열 필터는 0개를 남기고 배너만 켰다). 문자열도 받는다.
     const warns = Array.isArray(l.warnings) ? l.warnings.map(restoreWarnText).filter(Boolean) : [];

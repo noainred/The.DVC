@@ -24,12 +24,18 @@
  *     users.json 은 계정별 tokenVersion = max(현재, 백업)+1(백업 이후 폐기한 세션 부활 방지 — 전원 재로그인),
  *     central-agent-tokens.json 은 현재 파일 우선 병합(백업에만 있는 항목은 되살리되 개수를 경고). 제외 목록에 넣지 않는 이유:
  *     새 서버 재해 복구에서 전 엣지 토큰·계정이 유실된다.
+ *   - 114회차(복원 대상 전수): 파일마다 복원 동작이 정해져 있다 — 합침(reconcileForApply) · 제외(RESTORE_EXCLUDE) · 지금 파일이 있으면 그대로
+ *     (RESTORE_KEEP_CURRENT — 보낸 회차 · 실행 원장 · 커서) · 그대로. 분류표는 `test/restoreSweep114.test.js` 에 있고, 새 `*.json` 이름이 표에 없으면 그 시험이 실패한다.
+ *     어느 경우든 **지금 파일이 없으면(새 서버 재해 복구) 백업 그대로**다(제외만 빼고).
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { KEY_FILE_NAME, mergeRedactedKeyStore } from '../bmusage/onboard/keyBundle.js';   // v3.9.0 반증 D5: 적용 시점 다시 합치기
+// 114회차: 판정 코어는 하나 — 두 모듈 다 무의존 leaf 다(signing.js 는 node:crypto 만 · groupRetention.js 는 names.js 만 — config.js 를 싣지 않는다 · 시험이 고정).
+import { scheduleSignRequired } from '../rma/signing.js';           // 서명이 필요한(셸을 주기 실행하는) 점검인가
+import { keepOtpReasons } from '../bareos/groupRetention.js';      // 보관 개수 저장이 본인 OTP 를 받는 저장인가(지워질 범위가 넓어지는가)
 
 const SERVER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 /** config.js 의 configDir 과 같은 식(테스트가 대조한다) — config.js 를 import 하지 않으려고 따로 둔다. */
@@ -59,7 +65,48 @@ export const RESTORE_EXCLUDE = new Map([
   // 98회차: 세션 보안 신뢰 사본은 복원하지 않는다 — 복원한 security-session.json(약화 금지로 맞춘 값)을 기동 때 정상으로 읽으면 사본이 그 값으로 다시 맞춰진다.
   //   백업 판본(옛 · 약한 값)을 그대로 쓰면 본 파일을 못 읽는 기동에서 그 옛 값으로 돌았다.
   ['security-session.trusted.json', '세션 보안 설정의 신뢰 사본 — 복원한 본 파일을 정상으로 읽을 때 다시 맞춰진다(옛 판본으로 되돌리지 않는다)'],
+  // 114회차(재현): 실행 중 스캔 기록 — 백업은 스캔이 도는 중에도 만들어진다(정기 · 변경 감시 · 복원 전). 그 판본을 되살리면 이미 끝난 스캔이
+  //   '재시작으로 중단됨' 이 되어 기동 2분 뒤 다시 돌고(iDRAC 대역 · IP 스캔 · 아이실론 du — 시작 48시간 안), 이번 재시작이 실제로 끊은 스캔의 기록은 사라졌다.
+  ['scan-journal.json', '실행 중 스캔 기록 — 되돌리면 이미 끝난 스캔을 재시작으로 끊긴 것으로 보고 다시 돌린다'],
 ]);
+/**
+ * 114회차(복원 대상 전수 — 재현): **지금 파일이 있으면 복원하지 않는** 실행 기록 — 폴러 · 예약 틱이 스스로 쓰는 '이미 한 일' 의 원장(보낸 회차 · 알린 사건 ·
+ *   읽은 위치 · 실행 기록)이다. 백업 판본(더 옛 기록)으로 덮으면 이미 보낸 메일 · 이미 돈 회차 · 이미 알린 사건을 다시 하고(재현: Bareos 복원 검증이 같은 날 다시 돈다 ·
+ *   VM 구성 점검 메일이 같은 날 다시 나간다), 백업 뒤에 생긴 기록(진행 중인 실행 추적 포함)은 사라졌다. 이 파일들은 사람이 되돌리려는 설정이 아니다.
+ *   지금 파일이 **없을 때만**(ENOENT — 새 서버 재해 복구) 백업 판본을 쓴다. 있으면 읽히든 아니든 그대로 둔다(손상 · 읽기 오류의 처리는 그 모듈 로더가 한다 —
+ *   로더가 '오늘은 멈춘다' 로 닫아 둔 손상본을 옛 기록으로 덮지 않는다).
+ *   ⚠ **함께 복원되는 설정 파일과 같은 시점이어야 맞는 상태**는 넣지 않는다(백업 판본끼리가 한 벌이다 — svcmon-trial.json(시험 점검 대기 ↔ svcmon.json) ·
+ *     ipam-vcrange-migration.json(1회 이전 기록 ↔ 스캔 대역) · bm-onboard-applied.json(엣지 적용 원장 ↔ 등록부) · central-svcmon-assign.json).
+ *     여기 넣는 것은 시각 · 바깥 세계(보낸 메일 · Director · 복원되지 않는 DB · 이 호스트)에 묶인 기록뿐이다.
+ *   ⚠ 새 상태 파일을 만들면 여기(또는 RESTORE_EXCLUDE · reconcileForApply)에 넣을지 정한다 — `test/restoreSweep114.test.js` 분류표가 빠진 이름을 잡는다.
+ */
+const KEEP_LEDGER = '보낸 회차 · 알린 사건 기록 — 되돌리면 이미 보낸 알림을 다시 보낸다';
+const KEEP_RUN = '실행 회차 · 실행 기록 — 되돌리면 이미 돈 작업을 다시 돌리거나 진행 중인 실행의 추적을 잃는다';
+const KEEP_CURSOR = '읽은 위치 · 기준선 — 되돌리면 이미 처리한 구간을 다시 처리한다';
+export const RESTORE_KEEP_CURRENT = new Map([
+  // 메일 · 알림 발송 기록
+  ...['alerts-state.json', 'backup-stale-alert-state.json', 'bareos-digest-state.json', 'bareos-health-state.json', 'bareos-mail-state.json',
+    'bm-perf-alert-state.json', 'bmusage-alert-state.json', 'focusmon-alert-state.json', 'guestpart-mail-state.json', 'ipam-report-state.json',
+    'isidu-digest-state.json', 'isidu-mail-state.json', 'issue-filter-mail-state.json', 'issue-notify-state.json', 'san-storage-notify-state.json',
+    'san-storage-report-state.json', 'storage-usage-mail-state.json', 'veeam-license-alert-state.json', 'vm-backup-mail-state.json', 'vm-hygiene-state.json',
+  ].map((n) => [n, KEEP_LEDGER]),
+  // 예약 실행 회차 · 실행 기록(작업 원장)
+  ...['bareos-rehearsal-state.json', 'storage-inspect-state.json', 'xfer-speed-schedule-state.json', 'ipscan-agent-state.json',
+    'bareos-install-jobs.json', 'provision-runs.json', 'veeam-backup-runs.json', 'storage-inspect-runs.json', 'ipam-scan-runs.json', 'focusmon-audit.json',
+    'upgrade-status.json', 'upgrade-kept-bundles.json', 'upgrade-signature-log.json', 'edge-token-apply-log.json',
+  ].map((n) => [n, KEEP_RUN]),
+  // 수집 커서 · 증분 기준선
+  ...['diskbad-cursors.json', 'vcenter-logs-cursor.json', 'cvp-push.json', 'isidu-push.json', 'sanswitch-perf-push.json', 'net-issues-state.json', 'ipam-change-baseline.json',
+  ].map((n) => [n, KEEP_CURSOR]),
+]);
+/** 114회차: 인증 실패 정지 기록(util/authGuard.js createAuthGuard 의 파일 — 도구마다 `<도구>-auth-stops.json`). reconcileAuthStopsText 가 합친다. */
+export const AUTH_STOPS_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,80}-auth-stops\.json$/;
+/**
+ * 114회차(재현): 설정과 실행 결과가 한 파일에 섞인 스토어(backup/service.js MIXED_STATE_FILES) 가운데 **마지막 실행 시각으로 다음 실행을 정하는** 것 —
+ *   백업 판본의 옛 `last*` 를 그대로 쓰면 재시작 직후 '아직 안 돌았다' 로 보고 다시 돌린다(게스트 조사 = 도메인 계정으로 게스트 재로그인 · OS 스캔 = 전 VM 재스캔 ·
+ *   일일 보고 = 같은 날 다시 발송 · 연속 캡처 · iDRAC 대역). 정의(설정)는 백업 것, 실행 필드(`last*` · useCount — service.js RUN_FIELD_RE 와 같은 규칙)는 지금 것.
+ */
+export const RESTORE_RUN_FIELDS_CURRENT = new Set(['capture-monitors.json', 'os-scan.json', 'guest-scans.json', 'daily-report.json', 'idrac-scan-ranges.json']);
 /** 예약 파일 읽기 상한 — 번들 해제 상한(64MB)의 JSON 이스케이프 팽창까지 감안한 여유. 넘으면 적용하지 않는다. */
 export const STAGED_MAX_BYTES = 512 * 1024 * 1024;
 const NAME_RE = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,199}$/;
@@ -124,21 +171,232 @@ export function reconcileAgentTokensText(backupText, currentText) {
  * 복원본의 보내는 중 표지(sending)는 비운다(그때 보내던 실행은 지금 것이 아니다 — 거짓 '재시작' 경고).
  * @returns {{ text:string, kept:number }}
  */
+/*
+ * 114회차 F1(재현 — 데이터 삭제): 그룹 정의를 백업 것으로 쓰면서 **보관 개수(keep)** 도 그대로 되돌렸다. 보관 개수를 정하거나 줄이는 저장은 본인 OTP 다
+ *   (routes/api/bareosGroups.js keepOtpGate — '지운 회차는 복원할 수 없다'). 복원은 OTP 를 묻지 않으므로 백업(최근 3회) → 지금(최근 30회 · 제한 없음)인 그룹이
+ *   복원 뒤 최근 3회가 되어 다음 그룹 실행 뒤 정리가 그보다 오래된 백업을 카탈로그에서 지웠다. 지금 원장이 있으면 **지워질 범위가 넓어지지 않게** 맞춘다:
+ *   판정은 저장 라우트와 같은 keepOtpReasons(prev = 지금 그룹) — OTP 를 받았을 저장이면 지금 값(지금 그룹이 없거나 제한 없음이면 제한 없음)으로 두고,
+ *   그래도 OTP 사유가 남으면(기록이 있을 수 있는 VM 을 더함 — 잡 유무는 기동 때 알 수 없어 있다고 본다) 제한 없음으로 둔다. 줄이려면 화면에서 본인 OTP 로.
+ *   지금 원장이 없거나 읽히지 않으면(새 서버 재해 복구) 백업 그대로다(읽기 오류는 reconcileForApply 가 던진다).
+ */
+const keepNum = (v) => (Number.isInteger(v) && v > 0 ? v : null);
+function keepForRestore(g, prev) {
+  const want = keepNum(g.keep);
+  if (want == null) return null;
+  const vmIds = Array.isArray(g.vmIds) ? g.vmIds : [];
+  const prevN = prev ? { ...prev, keep: keepNum(prev.keep) } : null;
+  if (!keepOtpReasons(prevN, { keep: want, vmIds }).length) return want;
+  const now = prevN ? prevN.keep : null;                       // 지금 그룹이 없거나 제한 없음 → 제한 없음
+  const safe = now == null ? null : Math.max(want, now);       // 줄이지 않는다
+  return safe != null && !keepOtpReasons(prevN, { keep: safe, vmIds }).length ? safe : null;
+}
 export function reconcileBareosGroupsText(backupText, currentText) {
   const b = parseJson(backupText);
-  if (!b || !Array.isArray(b.groups)) return { text: String(backupText), kept: 0 };
+  if (!b || !Array.isArray(b.groups)) return { text: String(backupText), kept: 0, keepHeld: [] };
   const cur = parseJson(currentText);
-  const curKey = new Map((Array.isArray(cur?.groups) ? cur.groups : []).filter((g) => g && typeof g.id === 'string').map((g) => [g.id, typeof g.lastKey === 'string' ? g.lastKey : '']));
-  let kept = 0;
+  const curList = Array.isArray(cur?.groups) ? cur.groups.filter((g) => g && typeof g === 'object' && typeof g.id === 'string') : null;
+  const curKey = new Map((curList || []).map((g) => [g.id, typeof g.lastKey === 'string' ? g.lastKey : '']));
+  const curById = curList ? new Map(curList.map((g) => [g.id, g])) : null;
+  let kept = 0; const keepHeld = [];
   const groups = b.groups.map((g) => {
     if (!g || typeof g !== 'object') return g;
     const mine = typeof g.lastKey === 'string' ? g.lastKey : '';
     const now = curKey.get(g.id) || '';
     const next = { ...g, sending: null };
     if (now > mine) { next.lastKey = now; kept += 1; }
+    if (curById) {   // 114회차 F1
+      const k = keepForRestore(g, curById.get(g.id) || null);
+      if (k !== keepNum(g.keep)) { next.keep = k; keepHeld.push(String(g.name || g.id || '').slice(0, 60)); }
+    }
     return next;
   });
-  return { text: JSON.stringify({ ...b, groups }), kept };
+  return { text: JSON.stringify({ ...b, groups }), kept, keepHeld };
+}
+
+const isObj = (o) => !!o && typeof o === 'object' && !Array.isArray(o);
+
+/**
+ * 114회차(재현): 인증 실패 정지 기록(`<도구>-auth-stops.json` — util/authGuard.js)은 백업 판본으로 **풀지 않는다**. 백업에 없는 지금의 정지(백업 뒤에 거부된
+ *   자격증명)가 사라지면 다음 주기에 그 장비 전부가 같은 틀린 계정으로 한 번씩 다시 로그인한다 — 한 계정을 여러 장비가 쓰면 그 한 주기가 계정 잠금 임계를 넘는다
+ *   (자동 재시도 금지 — v2.535 · v2.847). 규칙(장비 id 마다): 지금에만 있으면 지금 기록 · 백업에만 있으면 백업 기록(더 닫는 쪽) ·
+ *   둘 다 있고 자격 지문(credHash)이 같으면 지금 기록(더 늦은 시도 수 · 시각) · 다르면 백업 기록(함께 복원되는 등록부의 자격증명에 맞는 쪽 —
+ *   정지는 기록의 지문과 지금 자격이 같을 때만 걸리고, 다르면 수집기가 스스로 지우고 한 번 시도한다).
+ *   지금 파일이 없거나 객체로 읽히지 않으면 백업 그대로. 읽기 오류는 reconcileForApply 가 던진다.
+ * @returns {{ text:string, keptStops:number }}
+ */
+export function reconcileAuthStopsText(backupText, currentText) {
+  const b = parseJson(backupText);
+  const c = parseJson(currentText);
+  if (!isObj(b) || !isObj(c)) return { text: String(backupText), keptStops: 0 };
+  const out = { ...b }; let keptStops = 0;
+  for (const [id, rec] of Object.entries(c)) {
+    if (!isObj(rec) || id === '__proto__') continue;
+    const bak = Object.hasOwn(b, id) && isObj(b[id]) ? b[id] : null;
+    if (bak && bak.credHash !== rec.credHash) continue;
+    if (!bak) keptStops += 1;
+    out[id] = rec;
+  }
+  return { text: JSON.stringify(out, null, 2), keptStops };
+}
+
+/**
+ * 114회차(재현): 실행 필드(`last*` · useCount)를 지금 파일에서 가져온다(순수 · 재귀). 객체는 같은 키끼리, 배열은 원소가 `id` 를 가진 객체일 때 같은 id 끼리 맞춘다
+ *   (맞출 수 없는 배열은 백업 그대로). 지금 쪽에 그 실행 필드가 없으면 백업 값을 둔다. 깊이 상한 12(설정 파일은 얕다).
+ */
+const RUN_FIELD_R = /^(last[A-Z]|useCount$)/;   // backup/service.js RUN_FIELD_RE 와 같은 규칙(시험이 대조)
+const idOfItem = (x) => (isObj(x) && (typeof x.id === 'string' || typeof x.id === 'number') ? String(x.id) : null);
+function carryRunFields(b, c, depth = 0) {
+  if (depth > 12) return b;
+  if (Array.isArray(b)) {
+    if (!Array.isArray(c)) return b;
+    const byId = new Map();
+    for (const x of c) { const k = idOfItem(x); if (k != null && !byId.has(k)) byId.set(k, x); }
+    return b.map((x) => { const k = idOfItem(x); return k != null && byId.has(k) ? carryRunFields(x, byId.get(k), depth + 1) : x; });
+  }
+  if (!isObj(b) || !isObj(c)) return b;
+  const out = {};
+  for (const [k, v] of Object.entries(b)) {
+    if (k === '__proto__') continue;
+    if (!Object.hasOwn(c, k)) out[k] = v;
+    else out[k] = RUN_FIELD_R.test(k) ? c[k] : carryRunFields(v, c[k], depth + 1);
+  }
+  for (const [k, v] of Object.entries(c)) if (RUN_FIELD_R.test(k) && !Object.hasOwn(b, k)) out[k] = v;   // 백업 뒤 처음 돈 기록
+  return out;
+}
+/** @returns {{ text:string, changed:boolean }} 지금 파일이 없거나 읽히지 않으면 백업 그대로. */
+export function reconcileRunFieldsText(backupText, currentText) {
+  const b = parseJson(backupText);
+  const c = parseJson(currentText);
+  if (b == null || typeof b !== 'object' || c == null || typeof c !== 'object') return { text: String(backupText), changed: false };
+  const text = JSON.stringify(carryRunFields(b, c), null, 2);
+  const changed = text !== JSON.stringify(b, null, 2);
+  return { text: changed ? text : String(backupText), changed };   // 바뀐 것이 없으면 글자 그대로
+}
+
+/**
+ * 114회차(재현): VM 백업 잡(vm-clone.json) — 잡 정의는 백업 것, **실행 원장은 지금 것**. 백업 판본을 그대로 쓰면
+ *   ① 옛 lastRun 때문에 재시작 직후 오늘 백업이 한 번 더 돌고(vmclone/store.js isDue — 매일 HH:MM · N시간 간격) ② 클론 원장(clones — 보존정책이 지울 수 있는
+ *   유일한 목록)이 백업 시점으로 돌아가 그 뒤에 만든 사본이 원장에서 빠지고(고아 — 스토리지가 샌다) 이미 지운 사본이 다시 목록에 오르며
+ *   ③ 백업 때 돌던 실행 표지(running)가 되살아나 '재시작으로 중단' 으로 보고 스냅샷 정리 · 재실행을 한다.
+ *   규칙: 두 파일에 다 있는 잡(id)은 clones · lastRun · history · running 을 지금 것으로 · 작업 기록(ops)도 지금 것 · 백업에만 있는 잡은 running 만 비운다
+ *   (그때 돌던 실행은 지금 것이 아니다 — 지금 파일이 없는 재해 복구에서도). 지금 파일이 읽히지 않으면 그 밖은 백업 그대로.
+ * @returns {{ text:string, keptRuns:number }}
+ */
+const VMCLONE_RUN_KEYS = ['clones', 'lastRun', 'history', 'running'];
+export function reconcileVmCloneText(backupText, currentText) {
+  const b = parseJson(backupText);
+  if (!isObj(b) || !Array.isArray(b.jobs)) return { text: String(backupText), keptRuns: 0 };
+  const c = parseJson(currentText);
+  const cur = isObj(c) && Array.isArray(c.jobs) ? new Map(c.jobs.filter((j) => idOfItem(j) != null).map((j) => [String(j.id), j])) : null;
+  let keptRuns = 0; let touched = false;
+  const jobs = b.jobs.map((j) => {
+    if (!isObj(j)) return j;
+    const now = cur && idOfItem(j) != null ? cur.get(String(j.id)) : null;
+    if (!now) { if (!Object.hasOwn(j, 'running') || j.running == null) return j; touched = true; const n = { ...j }; delete n.running; return n; }
+    const n = { ...j };
+    for (const k of VMCLONE_RUN_KEYS) { if (Object.hasOwn(now, k)) n[k] = now[k]; else delete n[k]; }
+    keptRuns += 1; touched = true;
+    return n;
+  });
+  const out = { ...b, jobs };
+  if (cur && Array.isArray(c.ops)) { out.ops = c.ops; touched = true; }
+  return { text: touched ? JSON.stringify(out, null, 2) : String(backupText), keptRuns };
+}
+
+/**
+ * 114회차(재현): 호스트 접근 제어(host-access.json) — 초안(draft)은 백업 것, **이 호스트의 방화벽 적용 기록**(applied · pending · revertedAt/By)은 지금 것.
+ *   복원은 방화벽 명령을 돌리지 않는다 — 그런데 적용 기록까지 백업 판본으로 바꾸면 화면의 '적용됨' 이 실제 방화벽(백업 뒤 본인 OTP 로 확정한 규칙)과 달라지고,
+ *   직전 적용분(applied.rich — 다음 적용이 지울 관리 대상) · 포탈이 내린 sshd 표지(sshdStopped)가 틀려진다. 또 변경 감시 백업은 적용 10초 뒤에 만들어져
+ *   **확정 대기(pending)** 를 담는다 — 그 판본을 되살리면 기동이 기한 지난 대기를 보고 방화벽을 다시 읽어 들인다(--reload).
+ *   지금 파일이 없거나 읽히지 않으면 백업 그대로이되 확정 대기만 비운다(그때의 대기는 지금 것이 아니다).
+ * @returns {{ text:string, keptState:boolean, droppedPending:boolean }}
+ */
+const HOST_STATE_KEYS = ['applied', 'pending', 'revertedAt', 'revertedBy'];
+export function reconcileHostAccessText(backupText, currentText) {
+  const b = parseJson(backupText);
+  if (!isObj(b)) return { text: String(backupText), keptState: false, droppedPending: false };
+  const c = parseJson(currentText);
+  const out = { ...b };
+  if (!isObj(c)) {
+    if (b.pending == null) return { text: String(backupText), keptState: false, droppedPending: false };
+    out.pending = null;
+    return { text: JSON.stringify(out, null, 2), keptState: false, droppedPending: true };
+  }
+  for (const k of HOST_STATE_KEYS) { if (Object.hasOwn(c, k)) out[k] = c[k]; else delete out[k]; }
+  const keptState = HOST_STATE_KEYS.some((k) => JSON.stringify(out[k] ?? null) !== JSON.stringify(b[k] ?? null));
+  return { text: keptState ? JSON.stringify(out, null, 2) : String(backupText), keptState, droppedPending: b.pending != null && out.pending == null };
+}
+
+/**
+ * 114회차(110 결정 ① — 재현 · 권장안): 원격 명령 점검 스케줄(rma-schedules.json) — **셸을 주기 실행하는 점검**(script · ssh — rma/signing.js scheduleSignRequired)을
+ *   넣거나 고치는 저장은 설정 소유자 등급 + 본인 OTP 다(routes/api/rma.js shellScheduleGate). 지우는 것은 OTP 가 없고, 복원은 OTP 를 묻지 않는다 — 백업 판본을
+ *   그대로 쓰면 백업 뒤에 지우거나 끄거나 고친 그 점검이 되살아나 엣지가 다시 주기 실행했다. 그런 점검은 **지금도 같은 내용(점검 · 인수 · 인스턴스 · 주기)으로
+ *   켜져 있을 때만** 켜진 채 복원하고, 아니면 꺼서(enabled:false) 복원한다(정의는 남긴다 — 화면에서 본인 OTP 로 다시 켠다). 고친 법인은 버전을 올려 엣지가 다시 받는다.
+ *   지금 파일이 없거나 읽히지 않으면(재해 복구) 백업 그대로. 읽기 오류는 reconcileForApply 가 던진다.
+ * @returns {{ text:string, disabled:number }}
+ */
+const sortedJson = (v) => JSON.stringify(v, (_k, x) => (isObj(x) ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, x[k]])) : x)) ?? 'null';
+const sameShellTest = (a, b) => String(a.test) === String(b.test) && sortedJson(a.args ?? {}) === sortedJson(b.args ?? {})
+  && String(a.instance || '').trim().toLowerCase() === String(b.instance || '').trim().toLowerCase() && Number(a.intervalSec) === Number(b.intervalSec);
+export function reconcileRmaSchedulesText(backupText, currentText) {
+  const b = parseJson(backupText);
+  const c = parseJson(currentText);
+  if (!isObj(b) || !isObj(b.agents) || !isObj(c) || !isObj(c.agents)) return { text: String(backupText), disabled: 0 };
+  const lcName = (k) => String(k || '').trim().toLowerCase();
+  const curAgents = new Map(Object.entries(c.agents).map(([k, a]) => [lcName(k), a]));
+  const verOf = (a) => { const n = Math.floor(Number(a?.version)); return Number.isFinite(n) && n > 0 ? n : 0; };
+  let disabled = 0; const agents = {};
+  for (const [name, a] of Object.entries(b.agents)) {
+    if (name === '__proto__') continue;
+    if (!isObj(a) || !Array.isArray(a.tests)) { agents[name] = a; continue; }
+    const now = curAgents.get(lcName(name));
+    const nowTests = new Map((isObj(now) && Array.isArray(now.tests) ? now.tests : []).filter((t) => isObj(t) && t.id != null).map((t) => [String(t.id), t]));
+    let n = 0;
+    const tests = a.tests.map((t) => {
+      if (!isObj(t) || !scheduleSignRequired(t.test) || t.enabled === false) return t;
+      const cur = nowTests.get(String(t.id));
+      if (cur && cur.enabled !== false && sameShellTest(cur, t)) return t;
+      n += 1;
+      return { ...t, enabled: false };
+    });
+    agents[name] = n ? { ...a, tests, version: Math.max(verOf(a), verOf(now)) + 1 } : a;
+    disabled += n;
+  }
+  return { text: disabled ? JSON.stringify({ ...b, agents }, null, 2) : String(backupText), disabled };
+}
+
+/**
+ * 114회차(110 결정 ② — 재현 · 권장안): 통합 계정(credentials.json) — 등록 · 수정 · 삭제는 본인 OTP 재인증이다(routes/api/credentials.js reauth). 백업 판본을
+ *   그대로 쓰면 ① 백업 뒤에 지운 계정이 되살아나고 ② 좁힌 사용 범위(agents · hosts)가 넓은 옛 범위로 돌아가 브로커(/api/central/rma-credential)가 다시 내줬다.
+ *   규칙: 지금 파일에 없는 계정(id)은 되살리지 않는다 · 두 파일에 다 있는 계정은 백업 내용(이름 · 비밀)에 **범위는 좁은 쪽** — 지금이 '*' 면 백업 목록,
+ *   백업이 '*' 면 지금 목록, 그 밖은 두 목록에 **글자 그대로** 다 있는 항목만(CIDR · *.접미사의 포함 관계는 따지지 않는다 — 더 좁아질 뿐 넓어지지 않는다).
+ *   지금 파일이 없거나 읽히지 않으면(재해 복구 · 손상) 백업 그대로. 읽기 오류는 reconcileForApply 가 던진다. 비밀 칸(봉인 값)은 건드리지 않는다.
+ * @returns {{ text:string, dropped:number, narrowed:number }}
+ */
+const scopeList = (v) => (Array.isArray(v) ? v : []).map((x) => String(x ?? '').trim()).filter(Boolean);
+function narrowScope(bak, now) {
+  const b = scopeList(bak); const n = scopeList(now);
+  const ns = new Set(n.map((x) => x.toLowerCase())); const bs = new Set(b.map((x) => x.toLowerCase()));
+  if (ns.has('*')) return { list: b, changed: false };
+  if (bs.has('*')) return { list: n, changed: true };
+  const list = b.filter((x) => ns.has(x.toLowerCase()));
+  return { list, changed: list.length !== b.length };
+}
+export function reconcileCredentialsText(backupText, currentText) {
+  const b = parseJson(backupText);
+  const c = parseJson(currentText);
+  if (!isObj(b) || !Array.isArray(b.items) || !isObj(c) || !Array.isArray(c.items)) return { text: String(backupText), dropped: 0, narrowed: 0 };
+  const cur = new Map(c.items.filter((x) => isObj(x) && x.id != null).map((x) => [String(x.id), x]));
+  let dropped = 0; let narrowed = 0; const items = [];
+  for (const it of b.items) {
+    if (!isObj(it) || it.id == null) continue;   // id 없는 항목은 브로커가 찾지 못한다 — 싣지 않는다
+    const now = cur.get(String(it.id));
+    if (!now) { dropped += 1; continue; }
+    const hosts = narrowScope(it.hosts, now.hosts); const agents = narrowScope(it.agents, now.agents);
+    if (hosts.changed || agents.changed) { narrowed += 1; items.push({ ...it, hosts: hosts.list, agents: agents.list }); } else items.push(it);
+  }
+  if (!dropped && !narrowed && items.length === b.items.length) return { text: String(backupText), dropped: 0, narrowed: 0 };
+  return { text: JSON.stringify({ ...b, items }, null, 2), dropped, narrowed };
 }
 
 /** 적용할 내용을 현재 파일과 맞춘다 — 대상이 아니면 그대로. @returns {{ content:string, warning?:{file,reason}, info?:object }} */
@@ -361,7 +619,16 @@ function readCurrentOrThrow(configDir, name, what) {
   }
 }
 
+/** 114회차: 지금 파일이 있으면 복원하지 않는 실행 기록인가 — 있으면(읽히든 아니든) 사유, 없음(ENOENT)이거나 대상이 아니면 null. */
+function keepCurrentReason(configDir, name) {
+  const why = RESTORE_KEEP_CURRENT.get(name);
+  if (!why) return null;
+  try { fs.lstatSync(path.join(configDir, name)); return why; } catch (e) { return e?.code === 'ENOENT' ? null : why; }
+}
+
+/** @returns {{ content?:string, keep?:string, warning?:{file,reason}, info?:object }}  keep = 쓰지 않고 지금 파일을 그대로 둔다(사유) */
 export function reconcileForApply(name, content, configDir) {
+  { const keep = keepCurrentReason(configDir, name); if (keep) return { keep }; }   // 114회차: 실행 기록 — 지금 파일이 있으면 그대로
   if (name === 'security-session.json') {
     // 91회차(88 F6 · F7 반증 — 형제): 지금 파일의 **읽기 오류**를 '없음' 으로 보면 기본값과 견줘 백업의 약한 값(예: 지금 otp_only · 백업 레거시)이 그대로 들어갔다
     //   (원자 쓰기는 읽지 못한 원본도 대체한다). 없음(ENOENT)만 기본값과 견주고, 읽기 오류면 이 파일만 적용하지 않는다.
@@ -434,7 +701,46 @@ export function reconcileForApply(name, content, configDir) {
     // 110회차(91회차 R2 의 형제 — 재현): 읽기 오류를 '없음' 으로 보면 지금 회차 기록(lastKey)을 모른 채 백업의 묵은 기록으로 덮는다(이미 돈 회차를 다시 보낸다 — v2.830 S7).
     const cur = readCurrentOrThrow(configDir, name, 'Bareos 백업 그룹');
     const r = reconcileBareosGroupsText(content, cur);
-    return { content: r.text, info: { bareosGroupSlotsKept: r.kept } };
+    const out = { content: r.text, info: { bareosGroupSlotsKept: r.kept, bareosGroupKeepHeld: r.keepHeld.length } };
+    // 114회차 F1: 보관 개수를 정하거나 줄이는 저장은 본인 OTP — 복원으로는 지워질 범위를 넓히지 않는다
+    if (r.keepHeld.length) out.warning = { file: name, reason: `백업 판본의 보관 개수가 지금보다 오래된 백업을 더 지우게 되는 그룹 ${r.keepHeld.length}개(${r.keepHeld.slice(0, 5).join(', ')}${r.keepHeld.length > 5 ? ' …' : ''})는 보관 개수를 지금 값(없으면 제한 없음)으로 두었습니다 — 복원은 본인 OTP 를 묻지 않으므로 백업을 지우는 쪽으로 되돌리지 않습니다(줄이려면 백업 그룹 화면에서 본인 OTP 로 저장하세요).` };
+    return out;
+  }
+  // ── 114회차(복원 대상 전수) ────────────────────────────────────────────────────────────────
+  if (AUTH_STOPS_RE.test(name)) {
+    const r = reconcileAuthStopsText(content, readCurrentOrThrow(configDir, name, '인증 실패 정지 기록'));
+    return { content: r.text, info: { authStopsKept: r.keptStops } };
+  }
+  if (RESTORE_RUN_FIELDS_CURRENT.has(name)) {
+    const r = reconcileRunFieldsText(content, readCurrentOrThrow(configDir, name, '설정(마지막 실행 기록 포함)'));
+    return { content: r.text, info: { runFieldsKept: r.changed } };
+  }
+  if (name === 'vm-clone.json') {
+    const r = reconcileVmCloneText(content, readCurrentOrThrow(configDir, name, 'VM 백업 잡'));
+    return { content: r.text, info: { vmCloneRunsKept: r.keptRuns } };
+  }
+  if (name === 'host-access.json') {
+    const r = reconcileHostAccessText(content, readCurrentOrThrow(configDir, name, '호스트 접근 제어 설정'));
+    const out = { content: r.text, info: { hostAccessStateKept: r.keptState, hostAccessPendingDropped: r.droppedPending } };
+    if (r.keptState || r.droppedPending) {
+      const parts = [];
+      if (r.keptState) parts.push('초안만 백업 판본으로 되돌리고 이 호스트의 방화벽 적용 기록(적용됨 · 확정 대기)은 지금 것을 그대로 두었습니다');
+      if (r.droppedPending) parts.push('백업에 들어 있던 확정 대기는 되살리지 않았습니다');
+      out.warning = { file: name, reason: `${parts.join(' · ')} — 복원은 방화벽을 바꾸지 않습니다(초안을 적용하려면 설정 › 호스트 접근 제어에서 본인 OTP 로 적용 · 확정하세요).` };
+    }
+    return out;
+  }
+  if (name === 'rma-schedules.json') {   // 110 결정 ①
+    const r = reconcileRmaSchedulesText(content, readCurrentOrThrow(configDir, name, '원격 명령 점검 스케줄'));
+    const out = { content: r.text, info: { rmaShellTestsDisabled: r.disabled } };
+    if (r.disabled) out.warning = { file: name, reason: `외부 스크립트 · SSH 점검 ${r.disabled}개는 지금 같은 내용으로 켜져 있지 않아 꺼진 채로 복원했습니다 — 이 점검을 넣거나 고치는 것은 설정 소유자 + 본인 OTP 라 복원으로 다시 돌리지 않습니다(특수 기능 › 원격 명령에서 본인 OTP 로 다시 켜세요).` };
+    return out;
+  }
+  if (name === 'credentials.json') {   // 110 결정 ②
+    const r = reconcileCredentialsText(content, readCurrentOrThrow(configDir, name, '통합 계정'));
+    const out = { content: r.text, info: { credentialsDropped: r.dropped, credentialsNarrowed: r.narrowed } };
+    if (r.dropped || r.narrowed) out.warning = { file: name, reason: `백업 이후 지운 통합 계정 ${r.dropped}개는 되살리지 않았고, 사용 범위(법인 · 대상)가 지금보다 넓은 계정 ${r.narrowed}개는 좁은 쪽 범위로 두었습니다 — 계정 등록 · 범위 변경은 본인 OTP 라 복원으로 넓히지 않습니다(필요하면 통합 계정 관리에서 다시 등록 · 수정하세요. 새 서버로 옮기는 중이라 백업의 계정이 전부 필요하면 설정 디렉터리의 지금 credentials.json 을 치운 뒤 다시 복원하면 백업 그대로 들어갑니다).` };
+    return out;
   }
   // v3.9.0(반증 D5): SSH 키 저장소는 **적용 시점의 지금 파일**과 다시 합친다 — 예약 때 합친 값으로 쓰면 예약 뒤 본인 OTP 로 좁힌 폴더 · 기능 · 퇴역이
   //   되돌아가고, 예약 뒤 등록한 키(번들에 없음)는 개인키째 사라졌다. 합치는 규칙은 mergeRedactedKeyStore 하나(지금 키의 폴더 · 기능 · 상태 유지 · 번들에 없는 지금 키 남김).
@@ -566,6 +872,7 @@ export function applyStagedRestore({ configDir = resolveConfigDir() } = {}) {
     return record(configDir, { at: Date.now(), ok: false, source: null, stagedAt: null, applied: [], failed: [], rejected: [], reason });
   }
   const applied = []; const failed = []; const rejected = []; const warnings = [];
+  const kept = [];   // 114회차: 지금 파일을 그대로 둔 실행 기록 [{file, reason}] — 조용히 빼지 않는다(적용 수가 예약 수보다 적은 까닭)
   let tokenVersionBumped = 0; let agentTokensRevived = [];
   for (const [name, content] of Object.entries(doc.files)) {
     const issue = stagedNameIssue(name);
@@ -573,6 +880,7 @@ export function applyStagedRestore({ configDir = resolveConfigDir() } = {}) {
     try {
       // v2.769(점검 R4-D1-2): 폐기 상태 파일은 현재 파일과 맞춘 내용을 쓴다(위 reconcileForApply).
       const rc = reconcileForApply(name, content, configDir);
+      if (rc.keep) { kept.push({ file: name, reason: rc.keep }); continue; }
       atomicWriteFileSync(path.join(configDir, name), rc.content); applied.push(name);
       if (rc.warning) warnings.push(rc.warning);
       if (rc.info?.tokenVersionBumped) tokenVersionBumped = rc.info.tokenVersionBumped;
@@ -583,11 +891,11 @@ export function applyStagedRestore({ configDir = resolveConfigDir() } = {}) {
   const source = typeof doc.source === 'string' ? doc.source.slice(0, 200) : null;
   const stagedAt = Number.isFinite(doc.stagedAt) ? doc.stagedAt : null;
   const ok = failed.length === 0 && rejected.length === 0;
-  const line = `[backup] 예약된 복원 적용${source ? `(${source})` : ''}: ${applied.length}개 파일${failed.length ? ` · 실패 ${failed.length}개(${failed.map((f) => `${f.file}: ${f.reason}`).join(', ').slice(0, 400)})` : ''}${rejected.length ? ` · 거부 ${rejected.length}개` : ''}`;
+  const line = `[backup] 예약된 복원 적용${source ? `(${source})` : ''}: ${applied.length}개 파일${failed.length ? ` · 실패 ${failed.length}개(${failed.map((f) => `${f.file}: ${f.reason}`).join(', ').slice(0, 400)})` : ''}${rejected.length ? ` · 거부 ${rejected.length}개` : ''}${kept.length ? ` · 실행 기록 ${kept.length}개는 지금 파일 유지` : ''}`;
   if (ok) console.log(line); else console.warn(line);
   if (tokenVersionBumped) console.log(`[backup] 예약 복원: 계정 ${tokenVersionBumped}개의 세션 버전을 올렸습니다 — 백업 이후 폐기한 세션이 되살아나지 않게 모든 사용자가 다시 로그인해야 합니다.`);
   for (const w of warnings) console.warn(`[backup] 예약 복원 경고 — ${w.file}: ${w.reason}`);
-  return record(configDir, { at: Date.now(), ok, source, stagedAt, applied, failed, rejected, warnings, tokenVersionBumped, agentTokensRevived: agentTokensRevived.length });
+  return record(configDir, { at: Date.now(), ok, source, stagedAt, applied, failed, rejected, warnings, kept, tokenVersionBumped, agentTokensRevived: agentTokensRevived.length });
 }
 
 /** 테스트 전용 — 모듈 메모리 초기화. */
