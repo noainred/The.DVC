@@ -25,11 +25,12 @@ export const RULES = Object.freeze({
   // --- 인프라 등록 ---
   'datacenter-admin': (f) => (f.count === 0 ? { grade: 'unset', text: '등록된 법인 없음' } : null),
   'vcenter-admin': (f) => {
+    if (f.readError) return { grade: 'warn', text: '등록부를 읽지 못함(읽기 오류 — 원본은 그대로)' };   // 118회차 메인: 못 읽음을 '등록된 vCenter 없음' 으로 보이지 않는다(손상은 아래 공통 문구 — 보존본 확인)
     if (f.count === 0) return { grade: 'unset', text: '등록된 vCenter 없음' };
     if (n(f.authStopped) > 0) return { grade: 'warn', text: `인증 실패로 수집 정지 ${f.authStopped}대`, count: f.authStopped };
     return null;
   },
-  'nsx-admin': (f) => (f.count === 0 ? { grade: 'off', text: '사용 안 함(등록 없음)' } : null),
+  'nsx-admin': (f) => (f.readError ? { grade: 'warn', text: '등록부를 읽지 못함(읽기 오류 — 원본은 그대로)' } : f.count === 0 ? { grade: 'off', text: '사용 안 함(등록 없음)' } : null),   // 118회차 메인: 못 읽음 ≠ 등록 없음(손상은 공통 문구)
   'horizon-admin': (f) => (f.loadError ? { grade: 'warn', text: '등록부를 읽지 못함' } : f.count === 0 ? { grade: 'off', text: '사용 안 함(등록 없음)' } : null),   // 38회차 R3: 못 읽음을 '등록 없음' 으로 보이지 않게
   'idrac-admin': (f) => (f.loadError ? { grade: 'warn', text: '등록부를 읽지 못함' } : null),
   // --- 백업 ---

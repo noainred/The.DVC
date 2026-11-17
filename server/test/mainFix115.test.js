@@ -79,3 +79,28 @@ test('D1: 손상(JSON)은 예전 규약 그대로 — 보존본으로 옮기고 
   assert.equal(r.unread, null);
   assert.ok(fs.readdirSync(d).some((n) => n.startsWith('runtime.json.corrupt')), '손상본을 보존하지 않았다');
 });
+
+// ── 118회차 메인(Chromium 2차 판독): 설정 상태 배지 — 등록부를 읽지 못한 동안 '등록된 vCenter 없음 · 미설정' 이라고 말했다 ─────────────
+test('설정 상태: vCenter · NSX 등록부 읽기 오류는 0건(미설정 · 사용 안 함)이 아니라 주의 — 손상은 보존본 확인 문구 그대로', async () => {
+  const { RULES, buildSettingsStatus } = await import('../src/settingsStatus/grade.js');
+  const one = (k, facts) => buildSettingsStatus({ [k]: () => facts }).items[k] ?? null;
+  // 읽기 오류: 건수를 모른다(null) — '등록된 vCenter 없음' 이 나오면 안 된다
+  const vc = one('vcenter-admin', { loadError: true, readError: true, count: null, authStopped: 0 });
+  assert.equal(vc.grade, 'warn');
+  assert.match(vc.text, /읽지 못함\(읽기 오류/);
+  assert.doesNotMatch(vc.text, /없음|손상 보존본/);
+  const nsx = one('nsx-admin', { loadError: true, readError: true, count: null });
+  assert.equal(nsx.grade, 'warn');
+  assert.match(nsx.text, /읽지 못함\(읽기 오류/);
+  // 손상(보존본만 남음)은 예전 문구 그대로(v2.916 반증 D2 — 보존본을 되돌리게)
+  assert.equal(one('vcenter-admin', { loadError: true, count: null, authStopped: 0 }).text, '설정 파일을 읽지 못함(손상 보존본 확인)');
+  assert.equal(one('nsx-admin', { loadError: true, count: null }).text, '설정 파일을 읽지 못함(손상 보존본 확인)');
+  // 정상 판정은 그대로
+  assert.equal(one('vcenter-admin', { count: 0, authStopped: 0 }).grade, 'unset');
+  assert.equal(one('nsx-admin', { count: 0 }).grade, 'off');
+  assert.equal(one('vcenter-admin', { count: 3, authStopped: 0 }), null);
+  // 사실 함수가 읽기 오류 때 건수를 싣지 않는다(소스 배선)
+  const src = fs.readFileSync(path.join(HERE, '..', 'src', 'settingsStatus', 'sources.js'), 'utf8');
+  assert.match(src, /const count = unread \? null : len\(listVcenters\(\)\);/);
+  assert.match(src, /readError: le\?\.readError === true/);
+});
