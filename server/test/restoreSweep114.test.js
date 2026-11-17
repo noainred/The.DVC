@@ -88,6 +88,7 @@ const MERGE = {
   'host-access.json': '호스트 접근 제어 — 이 호스트의 적용 기록 · 확정 대기는 지금 것(114회차 F6)',
   'rma-schedules.json': '원격 명령 점검 스케줄 — 셸 점검은 지금 같은 내용으로 켜져 있을 때만 켠 채(114회차 · 110 결정 ①)',
   'credentials.json': '통합 계정 — 지운 계정은 되살리지 않고 범위는 좁은 쪽(114회차 · 110 결정 ②)',
+  'bareos-rehearsal.json': 'Bareos 복원 검증 정책 — 복원으로 켜지 않고 대수를 늘리지 않는다(120회차 — 114 가 남긴 OPEN 을 재현해 닫음)',
   // 마지막 실행 시각으로 다음 실행을 정하는 스토어 — 실행 필드(last* · useCount)는 지금 것(114회차 F4)
   'capture-monitors.json': '연속 캡처 — lastRun 은 지금 것',
   'os-scan.json': 'OS 스캔 — lastRun 은 지금 것',
@@ -144,7 +145,6 @@ const ASIS = {
 const OPEN = {
   'bm-storage.json': '저장 비밀(SSH 키 · 공통 계정)을 주소에 묶는 쓰기는 소유자 등급 + 본인 OTP(bindRule) — 복원이 푼 묶음 · 옛 주소의 묶음을 되살린다',
   'bm-onboard-edge.json': '엣지 배포 목록의 묶음 승인(bindOk) — 위와 같은 종류',
-  'bareos-rehearsal.json': '복원 검증 정책 저장은 본인 OTP — 꺼 둔 검증을 복원이 다시 켠다(매주 검증용 VM 을 만든다)',
   'veeam-backup-run.json': '백업 실행 설정 저장은 본인 OTP 재인증 — 잡 접두 · 저장소 지정이 옛 값으로',
   'focusmon-audit-settings.json': '디스크 점검 도구 설치 경로 저장은 소유자 + 본인 OTP 재인증 — 옛 경로로',
 };

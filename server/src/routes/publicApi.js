@@ -121,6 +121,17 @@ function capped(rows) {
 /** 결정(56~75 남긴 것) 67 ①: 공개 API 500 의 외부 문구(원문 없음 — 요청 id 로 서버 로그와 대조). */
 export const publicInternalReason = (rid) => `내부 오류 — 요청 id ${String(rid || '').slice(0, 64) || '—'}(포탈 관리자에게 이 id 와 시각을 알려 주세요).`;
 
+/**
+ * 120회차(114 F7 반증 — 재현): 범위 키의 vCenter 가 **전부** 등록돼 있지 않은가(scope-empty) — 게이트(guarded)와 자기점검(GET /)이 같은 판정을 쓴다.
+ *   114회차는 자기점검의 allowed 를 endpointAllowed 하나로 맞췄지만 게이트에는 403 이 하나 더 있었다(scope-empty) — 그 키의 자기점검은 여전히
+ *   allowed:true 인데 실제 호출은 전부 403 이었다. 존재 여부를 모르면(unknown == null) 비었다고 하지 않는다(게이트와 같게).
+ * @param {Set<string>} allowed  범위 vCenter id(null 이 아닌 것만 넘긴다)
+ */
+function scopeUnknownOf(allowed, snap) {
+  const unknown = unknownScopeVcenters([...allowed], knownVcenterIdsNow(snap));
+  return { unknown, empty: !!(unknown && allowed.size > 0 && unknown.length === allowed.size) };
+}
+
 function guarded(apiPath, handler) {
   return (req, res) => {
     const gate = endpointAllowed(req.apiKey, apiPath);
@@ -145,8 +156,8 @@ function guarded(apiPath, handler) {
      *   개수를 밝힌다. 존재 여부를 **모르면**(등록부·스냅샷 둘 다 못 읽음) 거절하지 않는다.
      */
     if (allowed != null) {
-      const unknown = unknownScopeVcenters([...allowed], knownVcenterIdsNow(snap));
-      if (unknown && allowed.size > 0 && unknown.length === allowed.size) {
+      const { unknown, empty } = scopeUnknownOf(allowed, snap);   // 120회차: 자기점검(GET /)과 같은 판정 하나
+      if (empty) {
         return res.status(403).json({ ok: false, error: 'scope-empty', code: 'scope-empty', endpoint: apiPath,
           reason: `이 키의 범위 vCenter ${unknown.length}곳이 전부 등록돼 있지 않습니다(삭제됐거나 id 가 틀렸습니다) — 설정 › 연동 키에서 범위를 고쳐야 합니다.` });
       }
@@ -181,6 +192,11 @@ v1.use(apiKeyAuth());
 /** 이 키로 무엇을 쓸 수 있는지 — 상대 포탈이 스스로 확인하는 자기점검 경로. */
 v1.get('/', (req, res) => {
   const mine = new Set(req.apiKey?.groups || []);
+  // 120회차(재현): 범위의 vCenter 가 전부 등록돼 있지 않은 키는 게이트가 모든 경로를 403 scope-empty 로 거절한다 — 자기점검도 그렇게 말한다.
+  //   첫 수집 전(snap 없음 — 게이트는 503 not-collected)에는 판정하지 않는다.
+  const snap = store.get();
+  const scope = snap ? scopedVcenterIds(req.user, snap) : null;
+  const scopeEmpty = scope != null && scopeUnknownOf(scope, snap).empty;
   envelope(res, '/', {
     key: { name: req.apiKey?.name || '', groups: [...mine], fp: req.apiKey?.fp || '', expiresAt: req.apiKey?.expiresAt ?? null },
     groups: GROUPS.map((g) => ({ ...g, allowed: mine.has(g.key) })),
@@ -189,9 +205,10 @@ v1.get('/', (req, res) => {
     //   'allowed:false 가 403' 이라고 했다(자기점검이 틀린 답). 안 되는 까닭은 deniedBy 에 싣는다(조치가 다르다 — 분류 켜기 / 범위 없는 키).
     endpoints: ENDPOINTS.map((e) => {
       const gate = endpointAllowed(req.apiKey, e.path);
-      return { path: e.path, method: e.method, group: e.group, summary: e.summary, fields: e.fields, allowed: gate.ok, ...(gate.ok ? {} : { deniedBy: gate.code }) };
+      const code = gate.ok ? (scopeEmpty ? 'scope-empty' : null) : gate.code;   // 게이트의 순서 그대로(분류 · 전체 범위 전용 → 범위가 빔)
+      return { path: e.path, method: e.method, group: e.group, summary: e.summary, fields: e.fields, allowed: !code, ...(code ? { deniedBy: code } : {}) };
     }),
-  }, { note: 'allowed:false 인 항목은 이 키로 403 입니다 — deniedBy 가 까닭입니다(group-denied · no-groups = 설정 › 연동 키에서 분류를 켜야 합니다 · needs-full-scope = vCenter 범위를 지정한 키로는 조회할 수 없는 자원입니다 — 범위 없는 키가 필요합니다).' });
+  }, { note: 'allowed:false 인 항목은 이 키로 403 입니다 — deniedBy 가 까닭입니다(group-denied · no-groups = 설정 › 연동 키에서 분류를 켜야 합니다 · needs-full-scope = vCenter 범위를 지정한 키로는 조회할 수 없는 자원입니다 — 범위 없는 키가 필요합니다 · scope-empty = 이 키의 범위 vCenter 가 전부 등록돼 있지 않습니다 — 설정 › 연동 키에서 범위를 고쳐야 합니다).' });
 });
 
 /** OpenAPI 3.1 — 이 키가 쓸 수 있는 것만 담는다(없는 경로를 문서로 알려주지 않는다). */
