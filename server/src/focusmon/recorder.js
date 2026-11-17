@@ -23,7 +23,11 @@ const st = { lastWriteAt: 0, lastWriteRows: 0, lastWriteMs: null, maxWriteMs: 0,
 /** 한 줄의 기록 바이트(본문 — 색인 · 쪽 머리는 빠진다: 아래쪽 추정). v2.983 수집 부하의 'DB 쓰기'. */
 const rowBytes = (r) => (r?.data == null ? 0 : typeof r.data === 'string' ? r.data.length : (r.data.byteLength ?? r.data.length ?? 0)) + String(r?.target ?? '').length + 16;
 
+let freeSpaceOverride = null; // 시험 전용 — 실행 환경의 디스크 여유(컨테이너 5% 경계)에 시험 결과가 흔들리지 않게
+/** @internal 시험 전용: 여유 공간 판정을 고정한다(null 이면 실제 판정). */
+export function _setFreeSpaceForTest(fn) { freeSpaceOverride = typeof fn === 'function' ? fn : null; }
 function freeSpace() {
+  if (freeSpaceOverride) return freeSpaceOverride();
   try {
     const dir = path.dirname(db.dbPath());
     fs.mkdirSync(dir, { recursive: true });
