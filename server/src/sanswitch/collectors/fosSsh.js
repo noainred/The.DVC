@@ -61,8 +61,8 @@ export const CMD_TIMEOUT_MS = reqTimeoutMs(process.env.SANSW_CLI_TIMEOUT_MS, 45_
  *    그래서 장비 시한 env 를 함께 읽어 `min(예산, 장비 시한 − 여유)` 로 묶는다(`test/audit2741f.test.js` 가 산수를 고정한다).
  */
 /**
- * 폴러의 장비 시한 — `sanswitch/poller.js` 와 **같은 env·같은 결과**(빈 값·0·숫자 아님 → 120초, 그 밖은 하한 30초)여야 한다.
- * 예산을 그보다 작게 묶는 데만 쓴다. 폴러를 import 하면 순환이라(폴러가 이 파일을 import 한다) 식을 옮겨 둔다.
+ * 장비 시한 — **여기가 하나뿐인 원천**이다(58회차 F3: 폴러 `sanswitch/poller.js` · 재수집 큐 `collectRequests.js` 가 이 값을 가져다 쓴다).
+ * 빈 값·0·숫자 아님·무한대 → 120초, 그 밖은 하한 30초. 예전에는 폴러가 식을 따로 들고 있어 'Infinity' · '-Infinity' 에서 갈렸다.
  */
 const envMsOrNull = (v) => { const n = Number(v); return Number.isFinite(n) && n !== 0 ? n : null; };
 export const DEVICE_TIMEOUT_MS = Math.max(30_000, envMsOrNull(process.env.SANSW_DEVICE_TIMEOUT_MS) ?? 120_000);

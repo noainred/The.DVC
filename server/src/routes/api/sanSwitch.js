@@ -20,7 +20,7 @@ import { collectDeviceNow, sanSwitchPollerStatus, pollSanSwitchOnce, testDeviceC
 import { isMockMode, demoOn } from '../../mock/demo/flags.js';   // v2.708 데모(mock)
 import { sanDemoStatus } from '../../mock/demo/sanswitch.js';
 import { startTestRun, getTestRun } from '../../sanswitch/testRuns.js';
-import { edgeSanSwitchSnapshots, ORPHAN_TTL_MS } from '../../central/sanSwitchEdge.js';
+import { edgeSanSwitchSnapshots, edgeSanSwitchSnapshotFor, ORPHAN_TTL_MS } from '../../central/sanSwitchEdge.js'; // 58회차 F1: 단건은 가장 늦은 수집 사본
 import { listActivity as listSwActivity } from '../../sanswitch/activityLog.js';
 // v2.511: 조닝 그림 — 순수 분석(스위치 왕복 없음).
 import { zonesFromCompact, buildZoneGraph, buildZoneMatrix, zoneFindings, zoneSummary, portZoneDetail, classifyEndpoints } from '../../sanswitch/zoning.js';
@@ -254,7 +254,7 @@ api.get('/tools/sanswitch', toolsPerm, fullScopeOnly, async (req, res) => {
  */
 api.get('/tools/sanswitch/devices/:id/ports', toolsPerm, fullScopeOnly, (req, res) => {
   const local = getSnapshot(req.params.id);
-  const edge = edgeSanSwitchSnapshots().find((s) => s.deviceId === req.params.id);
+  const edge = edgeSanSwitchSnapshotFor(req.params.id);
   const snap = (!local || (edge && (edge.collectedAt || 0) > (local.collectedAt || 0))) ? edge : local;
   if (!snap) return res.status(404).json({ ok: false, reason: '수집된 스냅샷이 없습니다.' });
   // 장비 일반 정보(v2.411, 사용자 요구 '장비 일반 정보 표시')를 함께 내려준다 — 예전에는
@@ -292,7 +292,7 @@ api.get('/tools/sanswitch/devices/:id/ports', toolsPerm, fullScopeOnly, (req, re
  */
 api.get('/tools/sanswitch/devices/:id/zoning', toolsPerm, fullScopeOnly, (req, res) => {
   const local = getSnapshot(req.params.id);
-  const edge = edgeSanSwitchSnapshots().find((s) => s.deviceId === req.params.id);
+  const edge = edgeSanSwitchSnapshotFor(req.params.id);
   const snap = (!local || (edge && (edge.collectedAt || 0) > (local.collectedAt || 0))) ? edge : local;
   if (!snap) return res.status(404).json({ ok: false, reason: '수집된 스냅샷이 없습니다.' });
   const z = snap.zoning || null;
@@ -523,7 +523,7 @@ api.post('/tools/sanswitch/perf/collect', adminOnly, fullScopeOnly, fullRwOnly, 
  */
 function snapshotFor(id) {
   const local = getSnapshot(id);
-  const edge = edgeSanSwitchSnapshots().find((s) => s.deviceId === id);
+  const edge = edgeSanSwitchSnapshotFor(id);
   return (!local || (edge && (edge.collectedAt || 0) > (local.collectedAt || 0))) ? edge : local;
 }
 

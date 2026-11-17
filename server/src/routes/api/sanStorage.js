@@ -26,7 +26,7 @@ import { islCluesFor } from '../../sanswitch/islClue.js';              // v2.952
 import { foldBaseline, compareToBaseline, baselineSummary, BASELINE_WEEKS_DEF } from '../../sanswitch/storageBaseline.js';   // v2.950(§12.2-7) 자기 기준선
 import { loadNotifySettings, saveNotifySettings, notifyLoadError, loadNotifyState, MIN_LEVELS } from '../../sanswitch/storagePerfNotifyStore.js';   // v2.950(§12.2-6) 알림 설정 · 상태(러너는 동적 import — 순환 방지)
 import { loadCheckSettings, saveCheckSettings, publicCheckSettings } from '../../sanswitch/storageCheckSettings.js';
-import { loadDirectorMap, saveDirectorMap, directorMapKey, MAP_LIMITS } from '../../sanswitch/directorMap.js';
+import { loadDirectorMap, saveDirectorMap, directorMapKey, MAP_LIMITS, directorMapLoadError } from '../../sanswitch/directorMap.js';
 import { directorOf, VENDOR_LABEL, UNPARSED_GROUP, groupLabel } from '../../sanswitch/directorOf.js';
 import { IMBALANCE_MIN_BPS, IMBALANCE_RATIO } from '../../sanswitch/portUsage.js';
 import { rangeParams, NONE_DC, capacityIndexFor, perfAbortSignal, abandoned } from './sanSwitch.js';
@@ -318,7 +318,8 @@ export function registerSanStorage(api) {
     // v2.977(전체 점검 — audits.md v2.954 '남긴 것'): 비관리자 판본은 설정한 관리자 계정명(updatedBy · 재정의의 by)을 싣지 않는다(A-3 과 같은 부류).
     const admin = b.ctx.admin;
     const mapView = (m) => (admin ? m : Object.fromEntries(Object.entries(m || {}).map(([k, v]) => [k, byView(v, false)])));
-    res.json({ ok: true, ...commonMeta(b), counts: b.counts, map: { kinds: mapView(b.map.kinds), directors: mapView(b.map.directors), updatedAt: b.map.updatedAt, ...(admin ? { updatedBy: b.map.updatedBy } : {}) }, limits: MAP_LIMITS,
+    const mapErr = directorMapLoadError();   // 58회차 F5: 못 읽은 동안 빈 표는 '재정의 없음' 이 아니다 — 밝힌다(저장은 400)
+    res.json({ ok: true, ...commonMeta(b), counts: b.counts, map: { kinds: mapView(b.map.kinds), directors: mapView(b.map.directors), updatedAt: b.map.updatedAt, ...(admin ? { updatedBy: b.map.updatedBy } : {}), ...(mapErr ? { loadError: { reason: mapErr.reason } } : {}) }, limits: MAP_LIMITS,
       targets: targets.slice(0, 2000), targetsOmitted: Math.max(0, targets.length - 2000), ports: ports.slice(0, 4000), portsOmitted: Math.max(0, ports.length - 4000),
       unparsedGroup: UNPARSED_GROUP });
   });

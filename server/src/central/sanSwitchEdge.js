@@ -252,6 +252,22 @@ export function edgeSanSwitchSnapshots() {
   for (const [agent, v] of load()) for (const d of v.devices || []) out.push({ ...d, agent, pushedAt: v.at, staleMs: v.at ? now - v.at : null });
   return out;
 }
+/**
+ * 58회차 F1(재현): 한 장비의 엣지 보관분 중 **수집 시각이 가장 늦은 것**(목록 라우트 · storagePerfCore · hostSan 과 같은 규칙). 없으면 null.
+ *   예전 단건 경로(포트 상세 · 조닝 · 점검 · 기준선 · 플로우 인증 정지)는 `edgeSanSwitchSnapshots().find(...)` — **먼저 보관된 엣지**의 사본을 골랐다.
+ *   위임을 옛 엣지(철거 · 오프라인)에서 새 엣지로 옮기면 옛 엣지의 사본이 중앙에 남아, 목록은 새 엣지 값인데 상세 · 월간 점검은 한 달 전 값을 판정했다.
+ */
+export function edgeSanSwitchSnapshotFor(deviceId) {
+  const id = String(deviceId ?? '');
+  let hit = null; let hitAgent = ''; let hitAt = null;
+  for (const [agent, v] of load()) {
+    for (const d of v?.devices || []) {
+      if (String(d?.deviceId) !== id) continue;
+      if (!hit || (d.collectedAt || 0) > (hit.collectedAt || 0)) { hit = d; hitAgent = agent; hitAt = v.at; }
+    }
+  }
+  return hit ? { ...hit, agent: hitAgent, pushedAt: hitAt, staleMs: hitAt ? Date.now() - hitAt : null } : null;
+}
 /** 등록부에서 빠진 장비(orphan)의 엣지 보관분을 목록에서 내리는 기준 — 기본 7일(보고가 끊긴 엣지의 유령 스위치). */
 export const ORPHAN_TTL_MS = Math.max(3_600_000, Number(process.env.CENTRAL_SANSW_ORPHAN_TTL_MS) || 7 * 86_400_000);
 export function _resetForTest() { _map = null; _lastRec.clear(); }

@@ -14,6 +14,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { makeSettingsLoadError } from '../util/settingsLoadError.js';   // 58회차 F5
 
 const FILE = () => path.join(config.configDir, 'san-storage-notify.json');
 const STATE_FILE = () => path.join(config.configDir, 'san-storage-notify-state.json');
@@ -24,7 +25,14 @@ export const NOTIFY_DEFAULTS = Object.freeze({ enabled: false, minLevel: 'warn',
 const strMax = (v, n) => String(v ?? '').slice(0, n);
 
 /* ── 설정 ─────────────────────────────────────────────────────────────── */
-let _cfg = null; let _loadErr = null;
+let _cfg = null;
+/*
+ * 58회차 F5(재현): 로드 오류는 공용 `makeSettingsLoadError` 로 — 예전 지역 `_loadErr` 는 ① 재시작하면 사라져(원본은 이미 .corrupt 로 옮겨짐)
+ *   알림이 **조용히 꺼진 채**(기본값 enabled:false) 저장까지 열렸고 ② 읽기 오류(권한 · 디렉터리)도 손상으로 보고 원본을 옮겼다.
+ *   이제 손상 보존본만 남은 동안은 재시작 뒤에도 '못 읽음'(알림 중지 · 저장 거절)이고, 서비스 점검이 목록에 싣고 '기본값으로 확정'(알림 꺼짐)을 연다.
+ */
+const _loadErr = makeSettingsLoadError(FILE, { label: 'SAN 스토리지 성능 알림 설정 — 확정하면 알림 꺼짐(기본값)으로 저장 · 화면에서 다시 켜세요', confirm: ({ by = '' } = {}) => writeNotifySettings({ ...NOTIFY_DEFAULTS }, by) });
+const notifyDefaults = () => ({ ...NOTIFY_DEFAULTS, updatedAt: null, updatedBy: '' });
 export function normalizeNotifySettings(input, prev = NOTIFY_DEFAULTS) {
   const src = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
   const out = { ...NOTIFY_DEFAULTS, ...(prev || {}) };
@@ -40,27 +48,40 @@ export function normalizeNotifySettings(input, prev = NOTIFY_DEFAULTS) {
 }
 export function loadNotifySettings() {
   if (_cfg) return _cfg;
-  try {
-    const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
-    const r = normalizeNotifySettings(raw, NOTIFY_DEFAULTS);
-    if (r.issue) throw new Error(r.issue);
-    _cfg = { ...r.settings, updatedAt: numOrNull(raw.updatedAt), updatedBy: strMax(raw.updatedBy, 64) }; _loadErr = null;
-  } catch (e) {
-    if (e?.code !== 'ENOENT') { preserveCorrupt(FILE(), e?.message); _loadErr = { at: Date.now(), reason: strMax(e?.message, 200) }; console.warn(`[san-storage-notify] 설정 파일을 읽지 못했습니다(손상본 보존 · 알림 중지): ${_loadErr.reason}`); }
-    _cfg = { ...NOTIFY_DEFAULTS, updatedAt: null, updatedBy: '' };
+  let raw;
+  try { raw = JSON.parse(fs.readFileSync(FILE(), 'utf8')); }
+  catch (e) {
+    if (e?.code === 'ENOENT') _loadErr.missing();   // 손상 보존본만 남았으면 여전히 못 읽음(재시작 뒤에도)
+    else if (e instanceof SyntaxError) { _loadErr.corrupt(e); preserveCorrupt(FILE(), e?.message); }
+    else _loadErr.readError(e);                       // 권한 · 디렉터리 — 원본을 옮기지 않는다
+    if (_loadErr.get()) console.warn(`[san-storage-notify] 설정 파일을 읽지 못했습니다(알림 중지): ${_loadErr.get().reason}`);
+    _cfg = notifyDefaults();
+    return _cfg;
   }
+  const r = raw && typeof raw === 'object' && !Array.isArray(raw) ? normalizeNotifySettings(raw, NOTIFY_DEFAULTS) : { issue: '객체가 아닌 JSON 값' };
+  if (r.issue) {
+    _loadErr.corrupt(r.issue); preserveCorrupt(FILE(), r.issue);
+    console.warn(`[san-storage-notify] 설정 파일을 읽지 못했습니다(손상본 보존 · 알림 중지): ${_loadErr.get()?.reason || ''}`);
+    _cfg = notifyDefaults();
+    return _cfg;
+  }
+  _cfg = { ...r.settings, updatedAt: numOrNull(raw.updatedAt), updatedBy: strMax(raw.updatedBy, 64) };
+  _loadErr.ok();
   return _cfg;
 }
-export const notifyLoadError = () => { loadNotifySettings(); return _loadErr; };
+export const notifyLoadError = () => { loadNotifySettings(); return _loadErr.get(); };
+function writeNotifySettings(settings, by) {
+  const next = { ...settings, updatedAt: Date.now(), updatedBy: strMax(by, 64) };
+  atomicWriteFileSync(FILE(), JSON.stringify(next, null, 2), { mode: 0o600 });   // 쓰기 성공 뒤에만 메모리 · 오류 해제
+  _cfg = next; _loadErr.ok();
+  return next;
+}
 export function saveNotifySettings(input, { by = '' } = {}) {
   loadNotifySettings();
-  if (_loadErr) return { issue: '설정 파일을 읽지 못해 저장하지 않았습니다 — 손상본(san-storage-notify.json.corrupt.*)을 확인하세요.' };
+  if (_loadErr.get()) return { issue: '설정 파일을 읽지 못해 저장하지 않았습니다 — 손상 보존본(san-storage-notify.json.corrupt.*)을 되돌리고 재시작하거나, 서비스 점검에서 기본값(알림 꺼짐)으로 확정하세요.' };
   const r = normalizeNotifySettings(input, _cfg);
   if (r.issue) return r;
-  const next = { ...r.settings, updatedAt: Date.now(), updatedBy: strMax(by, 64) };
-  atomicWriteFileSync(FILE(), JSON.stringify(next, null, 2), { mode: 0o600 });
-  _cfg = next;
-  return { settings: next };
+  return { settings: writeNotifySettings(r.settings, by) };
 }
 
 /* ── 상태(마지막 판정 · 발송 기록) ──────────────────────────────────────── */
@@ -89,7 +110,7 @@ export function recordNotify(entry) {
   saveNotifyState(st);
   return e;
 }
-export function _resetNotifyForTest() { _cfg = null; _loadErr = null; _state = null; }
+export function _resetNotifyForTest() { _cfg = null; _loadErr.ok(); _state = null; }
 
 /* ── 전이 판정(순수) ─────────────────────────────────────────────────── */
 /** 점검 결과 → 상태 스냅샷 { `${dc}|${key}`: { name, dc, dcName, overall, items:{k:status}, texts:{k:text} } }. */

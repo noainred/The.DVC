@@ -13,6 +13,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { makeSettingsLoadError } from '../util/settingsLoadError.js';   // 58회차 F5
 
 const FILE = () => path.join(config.configDir, 'storage-perf-check.json');
 
@@ -41,6 +42,13 @@ export const THRESHOLDS = Object.freeze([
 const BY_KEY = new Map(THRESHOLDS.map((t) => [t.k, t]));
 
 let _cache = null;
+/*
+ * 58회차 F5(같은 모양): 손상 → preserveCorrupt → 기본 임계값으로 **조용히** 판정했고(화면 · 알림 · 보고서가 사용자 임계값으로 보이는 값),
+ *   다음 저장이 기본값 위에 덮였다. 이제 손상 · 읽기 오류는 표지가 서고(재시작 뒤에도 — 보존본만 남았으면) 저장은 거절, 서비스 점검이 '기본값으로 확정' 을 연다.
+ *   판정은 그동안에도 기본 임계값으로 돈다(값이 없어 멈추는 것보다 낫다 — 표지가 그 사실을 밝힌다).
+ */
+const _loadErr = makeSettingsLoadError(FILE, { label: 'SAN 스토리지 성능 점검 임계값 — 확정하면 기본(벤더 문서) 값으로 저장', confirm: ({ by = '' } = {}) => writeCheckSettings(defaultThresholds(), by, Date.now()) });
+export const checkSettingsLoadError = () => { loadCheckSettings(); return _loadErr.get(); };
 
 export function defaultThresholds() {
   const out = {};
@@ -53,10 +61,15 @@ export function loadCheckSettings() {
   const file = FILE();
   let raw = null;
   if (fs.existsSync(file)) {
-    try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); }
-    catch (e) { preserveCorrupt(file, String(e?.message || e)); raw = null; }
-    if (raw && (typeof raw !== 'object' || Array.isArray(raw))) { preserveCorrupt(file, '객체가 아닌 JSON 값'); raw = null; }
-  }
+    try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); _loadErr.ok(); }
+    catch (e) {
+      raw = null;
+      if (e instanceof SyntaxError) { _loadErr.corrupt(e); preserveCorrupt(file, String(e?.message || e)); }
+      else _loadErr.readError(e);   // 권한 · 디렉터리 — 원본을 옮기지 않는다
+    }
+    if (raw != null && (typeof raw !== 'object' || Array.isArray(raw))) { _loadErr.corrupt('객체가 아닌 JSON 값'); preserveCorrupt(file, '객체가 아닌 JSON 값'); raw = null; }
+  } else _loadErr.missing();   // 손상 보존본만 남았으면 여전히 못 읽음
+  if (_loadErr.get()) console.warn(`[san-storage-check] 임계값 설정을 읽지 못해 기본 임계값으로 판정합니다(저장 거절 — 서비스 점검에서 확정): ${_loadErr.get().reason}`);
   _cache = normalizeCheckSettings(raw || {});
   return _cache;
 }
@@ -103,10 +116,15 @@ export function saveCheckSettings(input = {}, { by = '', now = Date.now() } = {}
     const w = values[t.k]; const b = values[t.pair];
     if (w != null && b != null && w > b) return { issue: `${t.label} 가 이상 기준보다 큽니다(주의 ≤ 이상)` };
   }
+  loadCheckSettings();
+  if (_loadErr.get()) return { issue: '임계값 설정 파일을 읽지 못해 저장하지 않았습니다 — 손상 보존본(storage-perf-check.json.corrupt.*)을 되돌리고 재시작하거나, 서비스 점검에서 기본값으로 확정하세요.' };
+  return { settings: writeCheckSettings(values, by, now) };
+}
+function writeCheckSettings(values, by, now) {
   const next = normalizeCheckSettings({ values, updatedAt: now, updatedBy: by });
   atomicWriteFileSync(FILE(), JSON.stringify({ v: 1, values, updatedAt: now, updatedBy: String(by || '').slice(0, 64) }, null, 2));
-  _cache = next;
-  return { settings: next };
+  _cache = next; _loadErr.ok();   // 쓰기 성공 뒤에만
+  return next;
 }
 
 /** 화면 · 라우트가 쓰는 공개 모양 — 항목 정의 + 현재 값 + 출처. */
@@ -114,8 +132,9 @@ export function publicCheckSettings() {
   const s = loadCheckSettings();
   return {
     values: { ...s.values }, userSet: [...s.userSet], updatedAt: s.updatedAt, updatedBy: s.updatedBy,
+    ...(_loadErr.get() ? { loadError: { reason: _loadErr.get().reason } } : {}),   // 58회차 F5: 기본값으로 판정 중임을 밝힌다
     items: THRESHOLDS.map((t) => ({ k: t.k, label: t.label, def: t.def, min: t.min, max: t.max, unit: t.unit, source: t.source, group: t.group, pair: t.pair || null })),
   };
 }
 
-export function _resetForTest() { _cache = null; }
+export function _resetForTest() { _cache = null; _loadErr.ok(); }

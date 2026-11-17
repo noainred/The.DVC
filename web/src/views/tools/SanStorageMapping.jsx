@@ -69,6 +69,7 @@ export default function SanStorageMapping({ dc, isAdmin }) {
         </div>
       </div>
       {!canEdit && <div className="sst-info">관리자만 분류 · 매핑을 바꿀 수 있습니다 — 지금은 보기만 됩니다.</div>}
+      {got?.map?.loadError && <div className="sst-info">분류 재정의 · 디렉터 매핑 파일을 읽지 못해 지금은 재정의 없이 계산하고 저장도 받지 않습니다 — {String(got.map.loadError.reason || '사유 미상')}. 손상 보존본을 되돌리고 재시작하거나, 서비스 점검에서 기본값(빈 매핑)으로 확정하세요.</div>}
       {msg && <div className="sst-note">{msg}</div>}
       {/* v2.954(점검 E-4): 비율은 클래스(sst-two map)로 — 인라인 gridTemplateColumns 가 1100px 이하 한 칼럼 미디어 쿼리를 이겨 400px 에서도 두 칼럼이었다. */}
       <div className="sst-two map">

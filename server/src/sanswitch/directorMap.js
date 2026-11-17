@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeSettingsLoadError } from '../util/settingsLoadError.js';   // 58회차 F5
 
 const FILE = () => path.join(config.configDir, 'san-storage-map.json');
 
@@ -26,16 +27,32 @@ const KIND_VALUES = new Set(['array', 'host']);
 let _cache = null;
 
 const empty = () => ({ v: 1, kinds: {}, directors: {}, updatedAt: null, updatedBy: '' });
+/*
+ * 58회차 F5(같은 모양): 손상 → 빈 매핑으로 **조용히** 돌아 분류 재정의 · 디렉터 매핑이 사라진 합계를 냈고, 화면이 빈 표를 받아 한 칸만 고쳐 저장(전체 교체)하면
+ *   나머지가 그대로 덮였다(원본은 .corrupt 에만). 이제 표지가 서고(재시작 뒤에도) 저장은 거절, 서비스 점검이 '기본값으로 확정'(빈 매핑)을 연다.
+ */
+const _loadErr = makeSettingsLoadError(FILE, { label: 'SAN 스토리지 분류 재정의 · 디렉터 매핑 — 확정하면 빈 매핑으로 저장', confirm: ({ by = '' } = {}) => writeDirectorMap({ ...empty(), updatedAt: Date.now(), updatedBy: String(by || '').slice(0, 64) }) });
+export const directorMapLoadError = () => { loadDirectorMap(); return _loadErr.get(); };
+function writeDirectorMap(next) {
+  atomicWriteFileSync(FILE(), JSON.stringify(next, null, 2));
+  _cache = next; _loadErr.ok();   // 쓰기 성공 뒤에만
+  return next;
+}
 
 export function loadDirectorMap() {
   if (_cache) return _cache;
   const file = FILE();
   let raw = null;
   if (fs.existsSync(file)) {
-    try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); }
-    catch (e) { preserveCorrupt(file, String(e?.message || e)); raw = null; }
-    if (raw && (typeof raw !== 'object' || Array.isArray(raw))) { preserveCorrupt(file, '객체가 아닌 JSON 값'); raw = null; }
-  }
+    try { raw = JSON.parse(fs.readFileSync(file, 'utf8')); _loadErr.ok(); }
+    catch (e) {
+      raw = null;
+      if (e instanceof SyntaxError) { _loadErr.corrupt(e); preserveCorrupt(file, String(e?.message || e)); }
+      else _loadErr.readError(e);   // 권한 · 디렉터리 — 원본을 옮기지 않는다
+    }
+    if (raw != null && (typeof raw !== 'object' || Array.isArray(raw))) { _loadErr.corrupt('객체가 아닌 JSON 값'); preserveCorrupt(file, '객체가 아닌 JSON 값'); raw = null; }
+  } else _loadErr.missing();   // 손상 보존본만 남았으면 여전히 못 읽음
+  if (_loadErr.get()) console.warn(`[san-storage-map] 분류 재정의 · 디렉터 매핑을 읽지 못해 빈 매핑으로 계산합니다(저장 거절 — 서비스 점검에서 확정): ${_loadErr.get().reason}`);
   _cache = normalizeMap(raw || {});
   return _cache;
 }
@@ -88,6 +105,7 @@ export function saveDirectorMap(input = {}, { by = '', now = Date.now() } = {}) 
     if (v?.note != null && String(v.note).length > MAP_LIMITS.noteMax) return { issue: `메모는 ${MAP_LIMITS.noteMax}자까지입니다` };
   }
   const prev = loadDirectorMap();
+  if (_loadErr.get()) return { issue: '분류 재정의 · 디렉터 매핑 파일을 읽지 못해 저장하지 않았습니다(전체 교체라 비어 보이는 목록으로 덮게 됩니다) — 손상 보존본(san-storage-map.json.corrupt.*)을 되돌리고 재시작하거나, 서비스 점검에서 기본값(빈 매핑)으로 확정하세요.' };
   const next = normalizeMap({ kinds, directors: dirs, updatedAt: now, updatedBy: by });
   // 변경자 · 시각 — 값이 바뀐 항목만 새로 찍는다(바뀌지 않은 항목은 예전 기록을 지킨다).
   for (const [k, v] of Object.entries(next.kinds)) {
@@ -98,9 +116,7 @@ export function saveDirectorMap(input = {}, { by = '', now = Date.now() } = {}) 
     const p = prev.directors[k];
     if (p && p.group === v.group && p.note === v.note && p.name === v.name) { v.by = p.by; v.at = p.at; } else { v.by = str(by, 64); v.at = now; }
   }
-  atomicWriteFileSync(FILE(), JSON.stringify(next, null, 2));
-  _cache = next;
-  return { map: next };
+  return { map: writeDirectorMap(next) };
 }
 
 /** 연결 대상 분류 재정의 — 없으면 null. */
@@ -120,4 +136,4 @@ export function directorMapStatus() {
   return { kinds: Object.keys(m.kinds).length, directors: Object.keys(m.directors).length, updatedAt: m.updatedAt, updatedBy: m.updatedBy };
 }
 
-export function _resetForTest() { _cache = null; }
+export function _resetForTest() { _cache = null; _loadErr.ok(); }

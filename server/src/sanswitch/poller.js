@@ -28,7 +28,9 @@ import { setRateCadence, lastRateResult } from './rates.js';   // v2.742 DEV-06:
 import { poolRun as pool } from '../util/pool.js'; // v2.579(ARCH-01): 동시성 풀 단일 소스 — 손으로 쓴 사본 제거(첫 rejection 전파 = 예전과 같은 의미)
 
 const CONCURRENCY = Math.max(1, Math.min(16, Number(process.env.SANSW_CONCURRENCY) || 4));
-const DEVICE_TIMEOUT_MS = Math.max(30_000, Number(process.env.SANSW_DEVICE_TIMEOUT_MS) || 120_000);
+// 58회차 F3(재현): 장비 시한은 fosSsh 의 값 **하나**를 쓴다 — 식을 두 벌 두어 'Infinity' · '-Infinity' 에서 갈렸다(여기는 Infinity → withDeadline 기본 60초 ·
+//   -Infinity → 30초, fosSsh 는 120초로 보고 세션 예산 100초를 잡아 예산 가드보다 시한이 먼저 세션을 끊었다 — 받은 출력 전부 소실).
+const DEVICE_TIMEOUT_MS = fosSsh.DEVICE_TIMEOUT_MS;
 
 /** 주기(ms) — 포트 상태는 스토리지 용량보다 자주 봐야 해 기본 5분. 하한 60초. */
 // v2.599 T2599-02: 상한도 둔다(2^31 초과 → setTimeout 1ms 루프).
