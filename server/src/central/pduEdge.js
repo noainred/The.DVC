@@ -87,9 +87,17 @@ function load() {
 }
 
 // v2.591: '지금 수집' 요청 큐의 기준선 — 보관 중인 엣지 스냅샷의 수집 시각(엣지 시계 값).
+// 59회차(SAN · 스토리지 R2 와 같은 꼴): 여러 엣지가 같은 PDU 사본을 들고 있으면(위임을 옮김) **수집 시각이 가장 늦은 사본** — 목록(routes/api/pdu.js
+//   allSnapshots)과 같은 고르기. 첫 일치는 옛 엣지의 낡은 시각을 기준선으로 잡아 새 엣지의 같은 스냅샷 재전송을 '지금 수집' 완료로 지웠다.
 setCollectBaseResolver((id) => {
-  for (const e of load().values()) for (const s of e?.snapshots || []) if (String(s?.id) === String(id)) return Number(s.edgeCollectedAt ?? s.collectedAt) || null; // v2.630 A4-02
-  return null;
+  let hit = null;
+  for (const e of load().values()) {
+    for (const s of e?.snapshots || []) {
+      if (String(s?.id) !== String(id)) continue;
+      if (!hit || (Number(s.collectedAt) || 0) > (Number(hit.collectedAt) || 0)) hit = s;
+    }
+  }
+  return hit ? (Number(hit.edgeCollectedAt ?? hit.collectedAt) || null) : null; // v2.630 A4-02: 값은 그 사본의 엣지 시계 원본
 });
 
 // v2.599(CEN-2599-04): push 마다 전체를 동기로 쓰던 것 → 디바운스 비동기 + 종료 시 동기 flush.

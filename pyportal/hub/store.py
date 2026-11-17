@@ -43,6 +43,23 @@ def _clean_text(value, *, limit: int, default: str = "") -> str:
     return text[:limit] if text else default
 
 
+_FLAG_WORDS = {"true": True, "1": True, "false": False, "0": False}
+
+
+def _parse_flag(value):
+    """사용/즐겨찾기 플래그 해석 — (해석함, 값). 59회차(56회차 F7 의 바로가기판 · 재현): 예전에는 `bool(value)` 라 문자열 "false" 가
+    True 였다(중지한 링크가 켜짐 · 즐겨찾기가 붙음). 불리언 · 0/1 · 'true'/'false'(대소문자 · 앞뒤 공백 무시)만 그 뜻으로 읽는다."""
+    if isinstance(value, bool):
+        return True, value
+    if isinstance(value, (int, float)) and value in (0, 1):
+        return True, bool(value)
+    if isinstance(value, str):
+        key = value.strip().lower()
+        if key in _FLAG_WORDS:
+            return True, _FLAG_WORDS[key]
+    return False, None
+
+
 def _clean_tags(value) -> list:
     if isinstance(value, str):
         raw = value.split(",")
@@ -187,6 +204,20 @@ class ShortcutStore:
                 return None
             raise
 
+        def flag(key, default):
+            # 59회차: 불리언 · 0/1 · 'true'/'false' 는 그 뜻대로. 그 밖의 값은 — 화면 · API 저장(추가 · 수정)이면 400(조용히 켜지 않는다),
+            #   가져오기 · 저장 파일 · 기본 목록(keep_id)이면 예전 규칙 bool(값) 그대로(행을 버리지 않는다 — 다른 도구가 만든 파일의 링크를 잃지 않게).
+            if key not in data:
+                return bool(base.get(key, default))
+            ok, value = _parse_flag(data[key])
+            if ok:
+                return value
+            if keep_id:
+                return bool(data[key])
+            if data[key] is None:
+                return bool(base.get(key, default))
+            raise ValidationError(f"{key} 는 true 또는 false 여야 합니다.")
+
         given_id = str(data.get("id") or base.get("id") or "") if keep_id else base.get("id", "")
         if keep_id and not ID_RE.fullmatch(given_id):
             given_id = ""   # 아래에서 새 id 를 발급한다(R2-B5-4)
@@ -201,10 +232,10 @@ class ShortcutStore:
             "tags": _clean_tags(data.get("tags", base.get("tags", []))),
             "datacenterId": self._clean_datacenter_id(
                 data.get("datacenterId", base.get("datacenterId"))),
-            "isFavorite": bool(data.get("isFavorite", base.get("isFavorite", False))),
+            "isFavorite": flag("isFavorite", False),
             # 사용/중지(v2.227) — 등록만 해 두고 화면·상태점검에서 빼는 상태. 기존 데이터/가져오기
             # 파일에 필드가 없으면 '사용'(True) — 업그레이드 직후 전 링크가 사라지는 사고 방지.
-            "enabled": bool(data.get("enabled", base.get("enabled", True))),
+            "enabled": flag("enabled", True),
             "createdViaSettings": bool(
                 data.get("createdViaSettings", base.get("createdViaSettings", False))),
             "createdAt": base.get("createdAt") or _clean_text(data.get("createdAt", ""), limit=32)

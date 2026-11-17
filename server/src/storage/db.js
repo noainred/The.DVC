@@ -1063,6 +1063,21 @@ export async function purgeZeroCapacityRows({ once = null, reason = '0 바이트
   return { ran: true, devices, rows };
 }
 
+/**
+ * 1회 정리 마커(`migration:<id>`)의 값 — 없거나 못 읽으면 null. `resetCapacityHistory` · `purgeZeroCapacityRows` 의 `once` 마커는
+ *   **처음 한 번만** 쓰인다(이미 있으면 그대로 돌아간다) — 그래서 `at` 은 그 정리가 처음 돈 기동 시각이다.
+ */
+export async function migrationMarker(id) {
+  const db = await open();
+  if (!db) return null;
+  try {
+    const row = db.metaGet.get(`migration:${String(id || '')}`);
+    if (!row || row.v == null) return null;
+    const v = JSON.parse(row.v);
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : null;
+  } catch { return null; }
+}
+
 export async function capacityResets() {
   const db = await open();
   if (!db) return {};

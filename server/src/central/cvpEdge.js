@@ -122,8 +122,16 @@ function load() {
 
 setCvpCollectBaseResolver((id) => {
   // v2.631 A6-2631-01: 기준선은 **엣지 시계 원본**(edgeCollectedAt) — ack 와 같은 시계여야 한다(v2.630 A4-02 의 CVP 판).
-  for (const rec of load().values()) for (const s of rec?.servers || []) if (s?.cvpId === String(id)) return numOrNull(s.edgeCollectedAt ?? s.collectedAt);
-  return null;
+  // 59회차(SAN · 스토리지 R2 와 같은 꼴): 여러 엣지가 같은 CVP 사본을 들고 있으면(위임을 옮김) **수집 시각(수신 시각으로 자른 값)이 가장 늦은 사본** —
+  //   첫 일치는 옛 엣지의 낡은 시각을 기준선으로 잡아 새 엣지의 같은 스냅샷 재전송을 '지금 수집' 완료로 지웠다.
+  let hit = null;
+  for (const rec of load().values()) {
+    for (const s of rec?.servers || []) {
+      if (s?.cvpId !== String(id)) continue;
+      if (!hit || (numOrNull(s.collectedAt) ?? 0) > (numOrNull(hit.collectedAt) ?? 0)) hit = s;
+    }
+  }
+  return hit ? numOrNull(hit.edgeCollectedAt ?? hit.collectedAt) : null;
 });
 
 const s = (v, n) => capStr(v, n);
