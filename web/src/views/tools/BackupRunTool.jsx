@@ -253,7 +253,7 @@ function RunsPanel() {
         <b>실행 현황 · 이력</b>
         <span className="muted" style={{ fontSize: 12 }}>10초마다 새로 읽습니다{d.omittedOutOfScope ? ` · 범위 밖 VM 이 든 요청 ${d.omittedOutOfScope}건은 표시하지 않습니다` : ''}.</span>
       </div>
-      {!runs.length ? <div className="muted">아직 실행한 요청이 없습니다.</div> : (
+      {!runs.length ? <div className={d.runsUnreadable ? '' : 'muted'} style={d.runsUnreadable ? { color: 'var(--red)', fontSize: 12 } : undefined}>{d.runsUnreadable ? '실행 기록 파일을 읽지 못했습니다(읽기 오류 — 원본은 그대로 있습니다) — 진행 중인 요청을 확인할 수 없어 새 백업 · 복원 · 빼기 · 삭제를 막습니다. 파일 권한 · 디스크를 확인하세요.' : '아직 실행한 요청이 없습니다.'}</div> : (
         <STable className="table" minWidth={820}>
           <thead><tr><th>요청 시각</th><th>요청자</th><th>방식</th><th>VM</th><th>상태</th><th>결과</th><th data-nosort>상세</th></tr></thead>
           <tbody>
@@ -445,7 +445,9 @@ function SettingsPanel() {
       <summary style={{ cursor: 'pointer', fontWeight: 600 }}>백업 실행 설정 — 포탈 전용 잡 저장소·보존 · vCenter 이름(전체 범위 관리자)</summary>
       {!open ? null : err && !d ? <div style={{ marginTop: 10 }}><ErrorBox error={err} /></div> : !d || !form ? <Loading label="설정" /> : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12, minWidth: 0 }}>
-          {d.settingsUnreadable ? <div style={{ color: 'var(--red)', fontSize: 12 }}>설정 파일을 읽지 못했습니다 — 저장하면 새 설정으로 씁니다(손상 원본은 보존돼 있습니다).</div> : null}
+          {d.settingsUnreadable ? <div style={{ color: 'var(--red)', fontSize: 12 }}>{d.settingsReadError
+            ? '설정 파일을 읽지 못했습니다(읽기 오류 — 원본은 그대로 있습니다) — 읽힐 때까지 저장하지 않습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽습니다).'
+            : '설정 파일을 읽지 못했습니다 — 저장하면 새 설정으로 씁니다(손상 원본은 보존돼 있습니다).'}</div> : null}
           {d.registryUnreadable ? <div style={{ color: 'var(--red)', fontSize: 12 }}>Veeam 서버 등록부를 읽지 못해 서버 목록이 비어 있습니다 — 지금 저장하면 잡 접두·vCenter 이름만 저장되고 서버별 저장소·보존은 그대로 둡니다. 설정 › Veeam 백업 서버에서 먼저 확인하세요.</div> : null}
           <div className="muted" style={{ fontSize: 12 }}>Veeam 서버(주소·계정·담당 엣지·연결 vCenter)는 설정 › Veeam 백업 서버에서 등록합니다. 여기서는 백업 실행에만 쓰는 값을 정합니다.</div>
           <label className="muted" style={{ ...field, maxWidth: 260 }}>포탈 전용 잡 이름 접두

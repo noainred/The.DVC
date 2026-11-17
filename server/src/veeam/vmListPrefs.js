@@ -9,10 +9,10 @@
  *  · 원자적 쓰기(0600) · 로드 손상은 옆에 보존하고 쓰기를 거부한다(503 — 빈 값 위에 덮어 전 계정 저장값을 잃지 않게) · 상한(계정 2,000 · 이름 30자).
  *  · 비밀은 없다(열 이름·폴더 경로뿐).
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 94회차 F2: 읽기 오류 ≠ 손상
 import { resolveCols, knownKeys } from './vmListCatalog.js';
 import { YN_DAYS } from './backupStatus.js';
 
@@ -25,17 +25,21 @@ const FMTS = ['csv', 'xlsx'];
 let cache = null;
 let unreadable = false;
 
+const parsePrefs = (t) => {
+  const d = JSON.parse(t);
+  if (!d || typeof d !== 'object' || Array.isArray(d) || !d.users || typeof d.users !== 'object' || Array.isArray(d.users)) throw new Error('형식 오류');
+  return d.users;
+};
+// 94회차 F2(backupMarks.js 와 같은 규칙): 읽기 오류는 원본을 옮기지 않고 · 캐시하지 않고(30초 간격 재읽기) · 그동안 unreadable(저장 거절). 손상은 예전과 같다.
+const _reader = makeJsonFileReader(() => FILE(), { parse: parsePrefs, tag: 'vm-list-prefs' });
+let readErr = false;
 function load() {
   if (cache) return cache;
-  cache = {};
-  const f = FILE();
-  try {
-    if (fs.existsSync(f)) {
-      const d = JSON.parse(fs.readFileSync(f, 'utf8'));
-      if (!d || typeof d !== 'object' || Array.isArray(d) || !d.users || typeof d.users !== 'object' || Array.isArray(d.users)) throw new Error('형식 오류');
-      cache = d.users;
-    }
-  } catch (e) { preserveCorrupt(f, e.message); cache = {}; unreadable = true; }
+  const r = _reader.read();
+  if (r.kind === 'read-error') { readErr = true; unreadable = true; return {}; }
+  if (readErr) { readErr = false; unreadable = false; }
+  if (r.kind === 'ok') cache = r.value;
+  else { cache = {}; if (r.kind === 'corrupt') unreadable = true; }
   return cache;
 }
 export function prefsUnreadable() { load(); return unreadable; }
@@ -77,7 +81,7 @@ export function getPrefs(username) {
 
 function write(next) {
   atomicWriteFileSync(FILE(), JSON.stringify({ v: 1, users: next }, null, 2), { mode: 0o600 });
-  cache = next;
+  cache = next; _reader.reset();
 }
 
 /**
@@ -129,4 +133,4 @@ export function clearPref(username, slot) {
   return { ok: true, prefs: getPrefs(username) };
 }
 
-export function _resetVmListPrefsForTest() { cache = null; unreadable = false; }
+export function _resetVmListPrefsForTest() { cache = null; unreadable = false; readErr = false; _reader.reset(); }

@@ -10,11 +10,11 @@
  * 메일 종류 'backup-stale'(mail/kinds.js) — 수신자는 설정 › 메일 발송에서 이 종류의 수신자(비우면 기본 수신자).
  * 엣지에서는 돌지 않는다(중앙 전용 — 전 법인 자료).
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
 import { makeLoadError } from '../util/registryCore.js';
+import { readJsonFile } from '../util/jsonFileRead.js';
 import { registerStateFile } from '../util/stateFiles.js';
 import { localClock, localStamp } from '../util/dayKey.js';
 import { staleQueryOf } from './backupSummaryAgg.js';
@@ -50,23 +50,25 @@ export function normAlert(body = {}) {
   return { enabled: b.enabled === true, time, q: { n: q.n, unit: q.unit, src: q.src, excludeNone: q.excludeNone, onlyOn: q.onlyOn, includeNever: q.includeNever, vc: q.vc } };
 }
 
+/** 파일 글 → 설정(형식 · 값 오류는 던진다 — 손상. 예전 try 블록과 같은 범위). */
+function parseAlert(text) {
+  const p = JSON.parse(text);
+  if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('형식 오류');
+  const n = normAlert(p);
+  return { ...n, savedBy: String(p.savedBy || '').slice(0, 64), savedAt: Number.isFinite(p.savedAt) ? p.savedAt : null };
+}
+/*
+ * 94회차 F2: 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전에는 catch 하나로 받아 온전한 설정을 `.corrupt.*` 로 옮겼다(재시작 뒤에도 보존본만 남아 저장 거절).
+ *   이제 원본을 두고 · 캐시하지 않고(30초 간격 재읽기 — 읽히면 풀림) · 그동안은 보내지 않고 저장을 막는다(alertLoadError — 예전과 같은 효과). 손상은 예전과 같다.
+ */
 export function loadAlert() {
-  if (_cfg) return _cfg;
-  try {
-    if (fs.existsSync(FILE())) {
-      const p = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
-      if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('형식 오류');
-      const n = normAlert(p);
-      _cfg = { ...n, savedBy: String(p.savedBy || '').slice(0, 64), savedAt: Number.isFinite(p.savedAt) ? p.savedAt : null };
-      _loadErr.clear();
-      return _cfg;
-    }
-  } catch (e) {
-    preserveCorrupt(FILE(), e?.message);
-    _loadErr.set(e);
-    console.warn(`[backup] 백업 안 된 VM 메일 설정을 읽지 못했습니다(${safeLoadText(e) || '사유 미상'}) — 손상본을 보존했습니다(보내지 않고 저장을 막습니다).`);
-  }
-  _cfg = { ...DEFAULTS, q: { ...DEFAULTS.q } };
+  if (_cfg && !_loadErr.readPending()) return _cfg;
+  const r = _loadErr.read(FILE(), parseAlert);
+  if (r.kind === 'ok') { _cfg = r.value; _loadErr.clear(); return _cfg; }
+  const d = { ...DEFAULTS, q: { ...DEFAULTS.q } };
+  if (r.kind === 'read-error') { _cfg = null; return d; }   // 캐시하지 않는다
+  if (r.kind === 'corrupt') console.warn(`[backup] 백업 안 된 VM 메일 설정을 읽지 못했습니다(${safeLoadText(_loadErr.get()?.reason || '') || '사유 미상'}) — 손상본을 보존했습니다(보내지 않고 저장을 막습니다).`);
+  _cfg = d;
   _loadErr.checkCorruptOnly(FILE());
   return _cfg;
 }
@@ -85,8 +87,9 @@ export function saveAlert(body, { by = '', now = Date.now() } = {}) {
 
 function state() {
   if (_state) return _state;
-  try { _state = fs.existsSync(STATE_FILE()) ? JSON.parse(fs.readFileSync(STATE_FILE(), 'utf8')) : {}; } catch { _state = {}; }
-  if (!_state || typeof _state !== 'object' || Array.isArray(_state)) _state = {};
+  // 94회차: 상태 파일도 공용 판정으로 읽는다 — 손상은 보존본으로 옮기고 새 상태(예전엔 조용히 버림 · 잃으면 그날 메일이 한 번 더 갈 수 있다), 읽기 오류 · 없음은 새 상태
+  const r = readJsonFile(STATE_FILE());
+  _state = r.kind === 'ok' ? r.value : {};
   return _state;
 }
 function saveState() {

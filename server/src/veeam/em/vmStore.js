@@ -9,10 +9,10 @@
  *  · 정리: 마지막 근거가 400일보다 오래된 기록 · EM 당 상한 30,000(오래된 것부터 버린다).
  *  · 쓰기는 수집 1회당 1회(원자적 · 0600). 손상 파일은 옆에 보존하고 빈 기록으로 시작한다(EM 에서 다시 받는 값 — 다음 수집이 8일 창으로 채운다).
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../../util/atomicWrite.js';
+import { makeJsonFileReader } from '../../util/jsonFileRead.js';   // 94회차 F2: 읽기 오류 ≠ 손상
 
 const FILE = () => path.join(config.configDir, 'veeam-em-vms.json');
 export const OVERLAP_MS = 30 * 60_000;
@@ -25,21 +25,24 @@ let _map = null;
 let _rev = 0;
 export function emVmRev() { return _rev; }
 
+const parseEms = (t) => {
+  const d = JSON.parse(t);
+  if (!d || typeof d !== 'object' || Array.isArray(d) || !d.ems || typeof d.ems !== 'object' || Array.isArray(d.ems)) throw new Error('형식 오류');
+  return d.ems;
+};
+// 94회차 F2: 읽기 오류는 원본을 옮기지 않고 · 캐시하지 않고(30초 간격 재읽기) · 그동안 저장하지 않는다(그 회차의 VM 기록은 버린다 — 다음 수집이 다시 읽는다).
+const _reader = makeJsonFileReader(() => FILE(), { parse: parseEms, tag: 'veeam-em-vms' });
 function load() {
   if (_map) return _map;
+  const r = _reader.read();
+  if (r.kind === 'read-error') return new Map();   // 캐시하지 않는다
   _map = new Map();
-  const f = FILE();
-  try {
-    if (fs.existsSync(f)) {
-      const d = JSON.parse(fs.readFileSync(f, 'utf8'));
-      if (!d || typeof d !== 'object' || Array.isArray(d) || !d.ems || typeof d.ems !== 'object' || Array.isArray(d.ems)) throw new Error('형식 오류');
-      for (const [k, v] of Object.entries(d.ems)) if (v && typeof v === 'object' && v.vms && typeof v.vms === 'object' && !Array.isArray(v.vms)) _map.set(k, v);
-    }
-  } catch (e) { preserveCorrupt(f, e.message); _map = new Map(); }
+  if (r.kind === 'ok') for (const [k, v] of Object.entries(r.value)) if (v && typeof v === 'object' && v.vms && typeof v.vms === 'object' && !Array.isArray(v.vms)) _map.set(k, v);
   return _map;
 }
 function save() {
-  atomicWriteFileSync(FILE(), JSON.stringify({ v: 1, ems: Object.fromEntries(load()) }), { mode: 0o600 });
+  if (!_map) { console.warn('[veeam-em] VM 기록 파일을 읽지 못한 상태라 저장하지 않았습니다(원본을 덮지 않음)'); return; }   // 94회차 F2
+  atomicWriteFileSync(FILE(), JSON.stringify({ v: 1, ems: Object.fromEntries(_map) }), { mode: 0o600 });
 }
 
 const keyOf = (server, vm) => `${String(server || '').trim().toLowerCase()}|${String(vm || '').trim().toLowerCase()}`;
@@ -62,6 +65,8 @@ export function emVmSince(emId, target) {
  */
 export function mergeEmVms(emId, target, rows, { startedAt = Date.now(), soleServer = '' } = {}) {
   const m = load();
+  // 94회차 F2: 읽기 오류 중(캐시 없음)에는 합치지 않는다 — 던지면 폴러가 결과에 storeError 를 단다(임시 빈 기록의 수를 '저장됨' 으로 보이지 않게)
+  if (m !== _map) throw new Error('EM VM 기록 파일을 읽지 못한 상태(읽기 오류 — 원본은 그대로)라 이번 회차 기록을 합치지 않았습니다');
   let e = m.get(emId);
   if (!e || (target && e.target && e.target !== target)) e = { target: target || '', since: null, at: 0, vms: {} };
   const vms = { ...e.vms };
@@ -128,4 +133,4 @@ export function pruneEmVmsExcept(ids) {
   if (n) { save(); _rev++; }
   return n;
 }
-export function _resetEmVmsForTest() { _map = null; _rev++; }
+export function _resetEmVmsForTest() { _map = null; _reader.reset(); _rev++; }

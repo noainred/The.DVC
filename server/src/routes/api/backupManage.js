@@ -71,7 +71,7 @@ function serverOf(ctx, wanted) {
 function busyIssue(server) {
   if (!server) return { error: '이 vCenter 를 맡는 Veeam B&R 서버가 등록돼 있지 않습니다.', status: 400 };
   const busy = serverBusy(server.id);
-  if (busy) return { error: `Veeam 서버 '${server.name}' 로 진행 중인 요청이 있습니다(${busy.id}) — 끝난 뒤 다시 하세요.`, status: 409 };
+  if (busy) return { error: busy.reason || `Veeam 서버 '${server.name}' 로 진행 중인 요청이 있습니다(${busy.id}) — 끝난 뒤 다시 하세요.`, status: 409 };
   if (authStopOf(server)) return { error: `Veeam 서버 '${server.name}' 은(는) 인증 실패로 정지 중입니다 — 설정 › Veeam 백업 서버에서 계정을 고치세요.`, status: 409 };
   return null;
 }
