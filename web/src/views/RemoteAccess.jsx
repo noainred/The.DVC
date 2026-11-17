@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { openRemoteSession } from '../remote/sessions.js';
 import { fetchJson, postJson, delJson, usePolling, downloadFile } from '../api.js';
+import { requireChanged } from './changeResult.js';   // 112회차: delJson 은 409 · 400 을 던지지 않고 본문을 준다 — 거절(등록부 읽기 오류 · 사용 중)을 삭제 성공으로 읽지 않는다
 import { downloadFailText } from './downloadFailText.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { ProxyEditor, HealthDot } from './ProxySettings.jsx';
@@ -49,7 +50,7 @@ export default function RemoteAccess() {
   const removeProxy = async (p) => {
     if (!window.confirm(`중계 서버 '${p.name}'을(를) 삭제할까요?`)) return;
     // v2.611 WEB2611-08: 삭제 실패를 삼키지 않는다(목록이 그대로 남은 이유를 말한다).
-    try { await delJson(`/remote/proxies/${p.id}`); } catch (e) { flash(false, `중계 서버 삭제 실패: ${e?.message || e}`); }
+    try { requireChanged(await delJson(`/remote/proxies/${p.id}`)); } catch (e) { flash(false, `중계 서버 삭제 실패: ${e?.message || e}`); }
     await load();
   };
 

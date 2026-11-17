@@ -24,6 +24,7 @@ import { getAnnotation, setAnnotation, getAnnotations, setAnnotationsMany, annot
 import { getOverride, setOverride, clearOverride, setOverrideBatch, splitBatchIps, invalidBatchResult, overridesSummary, STATUSES, DEVICE_TYPES, reservedUntilDay, getOverrides, setOverridesMany, overridesLoadError, overridesLoadMarker } from '../../ipam/overrides.js';
 import { manageToCsv, manageSampleCsv, parseManageCsv, analyzeManageImport, MANAGE_CHUNK_MAX } from '../../ipam/manageCsv.js';
 import { getPolicies, getPolicy, setPolicy, deletePolicy, policiesSummary, findPolicy, specToRange, POLICY_STATUSES, rangePoliciesWriteRefusal } from '../../ipam/rangePolicies.js';
+import { unreadMark } from '../settingsUnreadMark.js';   // 112회차: 조회 응답의 읽기 오류 표지
 import { ipToNum } from '../../ipam/ledger.js';
 import { logAudit } from '../../audit.js';
 import { setSubnetNote, withSubnetNotes, getSubnetNotes, subnetNoteWriteDenied } from '../../ipam/subnetNotes.js'; // v3.5.0 대역 용도 · 설명
@@ -424,7 +425,7 @@ api.get('/tools/ipam/policies', requirePerm('tools'), (req, res) => {
   let policies = getPolicies();
   if (allowed) policies = policies.filter((p) => p.claimedVcenterId && allowed.has(p.claimedVcenterId));
   // summary 도 스코프된 목록으로 재계산 — 전체로 계산하면 byVcenter 로 타 vCenter id·전역 정책 수가 샌다.
-  res.json({ policies, summary: policiesSummary(allowed ? policies : null), statuses: POLICY_STATUSES });
+  res.json({ policies, summary: policiesSummary(allowed ? policies : null), statuses: POLICY_STATUSES, ...unreadMark(rangePoliciesWriteRefusal()) });   // 112회차: 못 읽은 동안 목록은 0건 — '정책 없음' 이 아니다
 });
 // 특정 IP에 무엇이 적용되는지 미리보기(정책 + override). 대역 입력 시 size 미리보기 겸용.
 api.get('/tools/ipam/policies/ip/:ip', requirePerm('tools'), (req, res) => {

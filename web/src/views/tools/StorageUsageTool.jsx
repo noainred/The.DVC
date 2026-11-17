@@ -9,6 +9,8 @@ import { useHashTab } from '../../hooks/useHashTab.js';
 import { facetState, toggleIn, groupBy } from './deviceFacets.js';
 import DeviceFacetBar from './DeviceFacetBar.jsx';
 import { addressHiddenNote } from './addressHiddenText.js';
+import { unreadMarkOf, saveLockedByUnread } from '../settingsUnread.js';   // 112회차: 못 읽은 동안의 기본값 폼으로 저장하지 않는다
+import { SettingsUnreadBanner } from '../SettingsUnreadBanner.jsx';
 import {
   UNITS, bytesText, deltaText, pctText, pctTone, aggregateCells, groupSummary, inexactNote, partialNote,
   probeLine, chartSeries, wideCsv, longCsv, csvFileName, SKIP_TEXT, MISSED_TEXT, DAY_LABELS, mailDirty, parseMailList,
@@ -671,8 +673,13 @@ function MailView({ offsetMin }) {
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const toggleDay = (i) => set('days', form.days.includes(i) ? form.days.filter((x) => x !== i) : [...form.days, i].sort((a, b) => a - b));
   const st = data.status || {};
+  // 112회차: 서버가 메일 설정 파일을 못 읽은 동안(status.loadError) mail 은 저장된 값이 아니라 기본값(꺼짐 · 받는 사람 없음)이다 — 화면이 표지를 보지 않아
+  //   그 폼을 끝까지 들고 있었고, 다시 읽힌 뒤 ‘저장’(전체 교체)이 받는 사람 · 요일 · 시각을 덮었다. 이 설정은 손상(보존본)도 서버가 저장을 거절하므로 둘 다 잠근다.
+  const unread = unreadMarkOf(st);
+  const saveLocked = saveLockedByUnread(unread, { corruptLocks: true });
 
   const save = async () => {
+    if (saveLocked) return;
     setBusy('save'); setMsg(null);
     try {
       // ⚠ putJson(sendJson)은 400·409 를 던지지 않고 본문을 돌려준다 — ok 를 보지 않으면 거절을 '저장했습니다' 로 읽는다(v2.742 WEB-02).
@@ -705,6 +712,7 @@ function MailView({ offsetMin }) {
     <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 420px), 1fr))', gap: 14, minWidth: 0 }}>
       <div className="card" style={{ minWidth: 0 }}>
         <div style={{ fontWeight: 700, marginBottom: 10 }}>예약 메일 — 정한 요일·시각에 전체 사용량을 보냅니다</div>
+        <SettingsUnreadBanner le={unread} what="스토리지 사용량 예약 메일 설정" save="저장" corruptLocks onRecheck={load} busy={!!busy} />
         <label className="flex" style={{ gap: 8, alignItems: 'center', marginBottom: 10 }}>
           <input type="checkbox" checked={form.enabled} onChange={(e) => set('enabled', e.target.checked)} /> 예약 발송 켜기
         </label>
@@ -739,7 +747,7 @@ function MailView({ offsetMin }) {
           켜거나 요일·시각을 바꾸면 오늘 이미 지난 시각은 보내지 않습니다. 메일 서버는 설정 › 메일 발송에서 정합니다.
         </div>
         <div className="flex gap wrap" style={{ gap: 8, marginTop: 12 }}>
-          <button className="tab active" type="button" onClick={save} disabled={!!busy || parsed.invalid.length > 0}>{busy === 'save' ? '저장 중…' : '저장'}</button>
+          <button className="tab active" type="button" onClick={save} disabled={!!busy || saveLocked || parsed.invalid.length > 0}>{busy === 'save' ? '저장 중…' : '저장'}</button>
           <button className="tab" type="button" onClick={doPreview} disabled={!!busy}>{busy === 'preview' ? '만드는 중…' : '미리보기'}</button>
           <button className="tab" type="button" onClick={sendNow} disabled={!!busy || dirty} title={dirty ? '바뀐 칸을 먼저 저장하세요(저장된 설정으로 보냅니다).' : '저장된 설정으로 지금 한 통 보냅니다(예약 회차 기록은 바꾸지 않습니다).'}>
             {busy === 'send' ? '보내는 중…' : '지금 한 번 보내기'}

@@ -9,6 +9,7 @@ import { fullScopeOnlyWith } from './shared.js'; // v2.614: 특수 기능 카테
 const fleetOnly = fullScopeOnlyWith('특수 기능 카테고리 배치는 전 사용자 공통 설정이라 전체 범위(vCenter 제한 없는) 관리자만 바꿀 수 있습니다.');
 import { logAudit } from '../../audit.js';
 import { load as loadCfg, save as saveCfg, presetCategories, defaultStages, toolCatsWriteRefusal } from '../../toolcats/settings.js';
+import { unreadMark } from '../settingsUnreadMark.js';   // 112회차: 조회 응답의 읽기 오류 표지
 import { validate, validateStages, PRESET, STAGE_COLORS, MAX_STAGES, MAX_DESC, MAX_LABEL } from '../../toolcats/catalog.js';
 
 const adminOnly = requireRole('admin');
@@ -22,6 +23,7 @@ export function registerToolCategories(adminRouter) {
       settings: loadCfg(), presetCount: PRESET.length,
       limits: { maxStages: MAX_STAGES, maxDesc: MAX_DESC, maxLabel: MAX_LABEL, stageColors: STAGE_COLORS },
       defaultStages: defaultStages(),
+      ...unreadMark(toolCatsWriteRefusal()),   // 112회차: 못 읽은 동안 settings 는 기본값(분류 없음) — 화면이 저장(전체 교체)을 잠근다
     });
   });
 

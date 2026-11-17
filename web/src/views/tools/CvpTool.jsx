@@ -1176,7 +1176,7 @@ function AdminPanel({ onChanged }) {
 
   const remove = async (s) => {
     if (!window.confirm(`${s.name || s.id} 을(를) 삭제할까요? 수집된 이력은 보존 기간에 따라 정리됩니다.`)) return;
-    try { await delJson(`/tools/cvp/servers/${encodeURIComponent(s.id)}`); await loadAll(); onChanged && onChanged(); }
+    try { requireChanged(await delJson(`/tools/cvp/servers/${encodeURIComponent(s.id)}`)); await loadAll(); onChanged && onChanged(); }   // 112회차: 409(등록부 읽기 오류) 본문을 삼키지 않는다
     catch (e) { setSmsg({ ok: false, text: `삭제 실패: ${e.message || e}` }); }
   };
 

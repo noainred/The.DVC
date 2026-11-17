@@ -18,6 +18,7 @@ const fleetOnly = fullScopeOnlyWith('호스트 접근 제어(포탈 서버 OS �
 import { hostAccessStatus, saveDraft, planHostAccess, applyHostAccess, confirmHostAccess, revertHostAccess, SUDOERS_HINT } from '../../hostaccess/service.js';
 import { normalizeRequesterIp } from '../../hostaccess/render.js';
 import { hostAccessWriteRefusal } from '../../hostaccess/settings.js';   // 107회차
+import { unreadMark } from '../settingsUnreadMark.js';   // 112회차: 조회 응답의 읽기 오류 표지
 
 // v2.771(점검 R6-F5-2): 요청자 IP 는 이 기능 경로에서만 '::ffff:a.b.c.d' → IPv4 로 정규화한다(듀얼스택 '::' listen 의 IPv4 peer).
 //   상태 응답(화면 '내 IP'·'내 IP 추가' 가 이 값을 그대로 쓴다)·계획·적용이 같은 값을 본다. 전역 clientIp 는 바꾸지 않는다
@@ -31,7 +32,9 @@ const requireOwnOtp = ownOtpGate('서버 접근 경로 변경');
 
 export function registerHostAccess(adminRouter) {
   adminRouter.get('/host-access', adminOnly, fleetReadOnly, requireSettingsOwner, async (req, res) => {
-    res.json({ ...(await hostAccessStatus({ requesterIp: requesterIpOf(req) })), sudoersHint: SUDOERS_HINT() });
+    // 112회차: 설정 파일을 못 읽은 동안 draft 는 저장된 초안이 아니라 기본값이고 applied · pending 은 null 이다 — 화면이 그 기본값 초안의 저장 · 적용을 잠근다
+    //   (다시 읽힌 뒤 ‘초안 저장’ 이 허용 목록 · 추가 규칙을 덮고, ‘적용’ 은 기본값을 방화벽에 건다).
+    res.json({ ...(await hostAccessStatus({ requesterIp: requesterIpOf(req) })), sudoersHint: SUDOERS_HINT(), ...unreadMark(hostAccessWriteRefusal()) });
   });
   adminRouter.put('/host-access/draft', adminOnly, fleetOnly, requireSettingsOwner, (req, res) => {
     { const no = hostAccessWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)

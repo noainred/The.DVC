@@ -13,6 +13,7 @@ import { enqueueJob, getJob, listHistoryAsync, listRmaAgents, DONE_TTL } from '.
 import { signJob, scheduleSignRequired } from '../../rma/signing.js';
 import { rmaPasswordFor, setRmaPassword, listRmaPasswordMeta } from '../../rma/agentSecrets.js';
 import { getRmaSettings, setAgentMode, setDefaultMode, setAgentAccess, setAgentRemote, rmaSettingsWriteRefusal } from '../../rma/settings.js';
+import { unreadMark } from '../settingsUnreadMark.js';   // 112회차: 조회 응답의 읽기 오류 표지
 import { testCatalog, buildTest } from '../../rma/tests.js';
 import { scheduleFor, listSchedules, upsertScheduleItem, removeScheduleItem, scheduleSignNote, rmaSchedulesLoadError } from '../../rma/schedules.js';
 import { latestResults, testHistory, summarize, evaluateRmaItself, dropResult } from '../../rma/testResults.js';
@@ -61,7 +62,10 @@ api.get('/tools/rma', adminOnly, fullScopeOnly, (_req, res) => {
   const known = knownAgentNames().filter((n) => !seen.has(String(n).toLowerCase())).map((n) => ({ agent: n, instances: [], onlineCount: 0, pending: 0, lastSeen: null, ...extra(n), hasPassword: !!pwMeta[String(n).toLowerCase()]?.hasPassword, hasToken: tokens.has(String(n).toLowerCase()), notDeployed: true }));
   // 결정(56~75): ownerOtp — 이 명령 · 점검은 설정 소유자 등급 + 본인 OTP(화면이 OTP 칸을 열고 소유자 등급이 아니면 잠근다 — 판정은 서버 하나).
   res.json({ agents: [...agents, ...known], catalog: catalog().map((p) => ({ ...p, ownerOtp: rmaRunNeedsOwnerOtp(p.id) })),
-    tests: testCatalog().map((t) => ({ ...t, ownerOtp: rmaScheduleNeedsOwnerOtp(t.id) })), settings: st, schedules: listSchedules(), doneTtlMs: DONE_TTL });
+    tests: testCatalog().map((t) => ({ ...t, ownerOtp: rmaScheduleNeedsOwnerOtp(t.id) })), settings: st, schedules: listSchedules(), doneTtlMs: DONE_TTL,
+    // 112회차: 분배 · 접속 허용 설정을 못 읽은 동안 위 settings · 법인별 allowedIps · remote 는 저장된 값이 아니라 빈 값이다 — 화면이 그 빈 폼의 저장을 잠근다
+    //   (다시 읽힌 뒤 빈 ‘접속 허용 IP’ 저장 = 그 법인의 허용 목록이 ‘제한 없음’ 으로 바뀐다).
+    ...unreadMark(rmaSettingsWriteRefusal(), 'settingsLoadError') });
 });
 
 // ── 점검 스케줄(v2.418, HostMonitor 'Test by agent') ──

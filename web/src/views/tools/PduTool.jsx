@@ -103,7 +103,7 @@ export default function PduTool() {
   };
   const remove = async (d) => {
     if (!window.confirm(`'${d.name}' (${d.host}) PDU 를 삭제할까요?\n※ 수집된 시계열은 남습니다.`)) return;
-    try { await delJson(`/tools/pdu/devices/${encodeURIComponent(d.id)}`); await load(); } catch (e) { setError(e.message); }
+    try { requireChanged(await delJson(`/tools/pdu/devices/${encodeURIComponent(d.id)}`)); await load(); } catch (e) { setError(e.message); }   // 112회차: 409(등록부 읽기 오류) 본문을 삼키지 않는다
   };
   const collect = async (d) => {
     setBusy(true);

@@ -3,6 +3,7 @@
 import { config, loadVcenterConfig } from '../../config.js';
 import { ledgerInfo } from '../../ipam/db.js';
 import { loadSettings as loadIpamSettings, saveSettings as saveIpamSettings, savedInvalidEntries, invalidEntries, ignoreRanges, getClassifier, ipamSettingsWriteRefusal } from '../../ipam/settings.js';
+import { unreadMark } from '../settingsUnreadMark.js';   // 112회차: 조회 응답의 읽기 오류 표지
 import { makeVcResolver } from '../../ipam/vcResolve.js'; // v2.639: vCenter 이름 해석기 한 벌(모호하면 null — 예전엔 첫 항목을 택했다)
 import { checkRangeList } from '../../ipam/rangeSyntax.js';
 import { listTargets } from '../../agent/deployRegistry.js';
@@ -101,7 +102,9 @@ const ipamSettingsInvalid = (body, opt) => invalidEntries(body, opt);
 const invalidReply = (res, invalid) => res.status(400).json({ ok: false, reason: `형식이 올바르지 않은 줄 ${invalid.length}개가 있어 저장하지 않았습니다.`, invalid: invalid.slice(0, 200), invalidCount: invalid.length });
 adminRouter.get('/ipam/settings', adminOnly, (req, res) => {
   const snap = store.get();
-  res.json(ipamSettingsView(loadIpamSettings(), scopedVcenterIds(req.user, snap), snap));
+  // 112회차: 설정 파일을 못 읽은 동안 settings 는 저장된 값이 아니라 빈 목록이다 — 표지를 실어 화면이 편집 폼을 열지 않게 한다
+  //   (저장은 전체 교체 — 다시 읽힌 뒤 빈 폼의 저장이 전 vCenter 의 무시 대역 · 공인/사설 분류를 보존본 없이 지운다).
+  res.json({ ...ipamSettingsView(loadIpamSettings(), scopedVcenterIds(req.user, snap), snap), ...unreadMark(ipamSettingsWriteRefusal()) });
 });
 adminRouter.put('/ipam/settings', adminOnly, (req, res) => {
   const snap = store.get();

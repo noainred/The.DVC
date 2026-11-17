@@ -4,6 +4,7 @@
 // 수집 주체: 중앙 직접(기본) 또는 글로벌 엣지 위임(중앙→엣지 PUSH — 수집 서버(원격) URL 필요).
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson, canCsv, getCurrentUser } from '../../api.js';
+import { requireChanged } from '../changeResult.js';   // 112회차: delJson 은 409 · 400 을 던지지 않고 본문을 준다 — 거절(등록부 읽기 오류 · 사용 중)을 삭제 성공으로 읽지 않는다
 import { canManageKeys, authChoiceOf, authBodyOf, HOSTKEY_OBSERVE_NOTE, authChoicesView, authChoicesNote } from './bmOnboardText.js'; // 7b: 인증(키 · 공통 계정) 드롭다운 — 설정 소유자 등급만
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
@@ -114,7 +115,7 @@ export default function BmStorageTool() {
   };
   const del = async (s) => {
     if (!window.confirm(`'${s.name}' (${s.host}) 서버를 목록에서 삭제할까요?`)) return;
-    try { await delJson(`/tools/bm-storage/servers/${encodeURIComponent(s.id)}`); refresh(); }
+    try { requireChanged(await delJson(`/tools/bm-storage/servers/${encodeURIComponent(s.id)}`)); refresh(); }
     catch (e) { setMsg(e.message); }
   };
   const collectNow = async () => {

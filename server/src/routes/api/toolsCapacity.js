@@ -20,6 +20,7 @@ import { zipManyAsync } from '../../util/zip.js'; // v2.742(LEFT-05·DB-05): 내
 import { withJob, withJobSync } from '../../perf/monitor.js'; // v2.498: 루프 정체가 관측되면 '그때 이 작업이 돌았다' 를 남긴다
 import { poweredOffSinceFor } from '../../tools/powerOff.js'; // v2.483: 전원 꺼진 VM 의 꺼진 시각
 import { loadPowerOffSettings, savePowerOffSettings, powerOffWriteRefusal, LIMITS as POWEROFF_LIMITS } from '../../tools/powerOffSettings.js'; // v2.484
+import { unreadMark } from '../settingsUnreadMark.js';   // 112회차: 조회 응답의 읽기 오류 표지
 import { powerOffPollerStatus, runPowerOffCheckNow } from '../../tools/powerOffPoller.js';
 import { diskBreakdown, analyzeDiskTrend, diskTrendPolicyFromEnv } from '../../tools/diskTrend.js';
 import { getMetricsDb } from '../../metrics/db.js';
@@ -685,7 +686,7 @@ api.get('/tools/waste/off-check', requirePerm('tools'), (req, res) => {
   // v2.583(감사 검증 지적 — v2.574 SEC-05 형제 누락): lastResult 의 vcenters·offVms·newStreaks·cleared 는
   //   전 법인 합계다. 범위 계정에는 시각·소요만 남긴다(scopePollerStatus).
   const allowed = scopedVcenterIds(req.user, store.get());
-  res.json({ ok: true, ...scopePollerStatus(powerOffPollerStatus(), allowed), limits: POWEROFF_LIMITS });
+  res.json({ ok: true, ...scopePollerStatus(powerOffPollerStatus(), allowed), limits: POWEROFF_LIMITS, ...unreadMark(powerOffWriteRefusal()) });   // 112회차: 못 읽은 동안 settings 는 기본값 — 화면이 저장을 잠근다
 });
 api.put('/tools/waste/off-check/settings', requireRole('admin'), (req, res) => {
   // v2.607 AUTHZ2607-05: 이 설정은 전부 전 법인 공용(사용 여부·주기) — 범위 계정의 값은 적용하지 않고 밝힌다.

@@ -14,7 +14,8 @@ import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { overview, vcenterDetail, overCsv, vmPartitions } from '../../guestpart/report.js';
-import { load as loadSettings, save as saveSettings, publicSettings, settingsLoadError } from '../../guestpart/settings.js';
+import { load as loadSettings, save as saveSettings, publicSettings, settingsLoadError, guestPartWriteRefusal } from '../../guestpart/settings.js';
+import { unreadMark } from '../settingsUnreadMark.js';   // 112회차: 조회 응답의 읽기 오류 표지
 import { thresholdOk, MODES, RANGES, IGNORE_TEXT, CRIT_PCT, WIN_ISO_MAX_GB } from '../../guestpart/rules.js';
 import { mailStatus, previewMail, sendDigest, sendVcenter, sendTest } from '../../guestpart/notify.js';
 import { load as loadGuestDiskSettings } from '../../guestdisk/settings.js';
@@ -89,7 +90,9 @@ export function registerToolsGuestPart(api) {
     const full = isAdminDetailUser(req.user) && !allowed;
     const gd = loadGuestDiskSettings();
     res.json({ ok: true, settings: full ? loadSettings() : publicSettings(undefined, allowed), full, collect: { enabled: gd.enabled, intervalHours: gd.intervalHours }, meta: meta(),
-      loadError: settingsLoadError() ? '설정 파일을 읽지 못해 기본값으로 보여 줍니다 — 원본은 .corrupt 로 보존했습니다.' : null });
+      // 112회차: 읽기 오류(107회차 — 원본을 옮기지 않는다)인데도 '.corrupt 로 보존했습니다' 라고 말했다 — 문구를 가르고, 화면이 저장을 잠그게 표지(settingsLoadError.readError)를 싣는다.
+      loadError: settingsLoadError() ? (guestPartWriteRefusal() ? '설정 파일을 읽지 못해 기본값으로 보여 줍니다 — 읽기 오류이고 원본은 그대로 있습니다.' : '설정 파일을 읽지 못해 기본값으로 보여 줍니다 — 원본은 .corrupt 로 보존했습니다.') : null,
+      ...unreadMark(guestPartWriteRefusal(), 'settingsLoadError') });
   });
 
   api.put('/tools/guest-partition/settings', adminOnly, fullScopeOnly, (req, res) => {

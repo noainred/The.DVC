@@ -224,11 +224,13 @@ export default function SpecialTools({ defaultScope = '' } = {}) {
     fetchJson('/admin/tool-categories')
       .then((r) => {
         if (!alive) return;
-        const ok = !!(r && r.settings && typeof r.settings === 'object');
+        // 112회차: 서버가 분류 설정 파일을 못 읽은 동안의 조회(기본값 + loadError)는 '읽지 못함' 으로 본다 — 그 기본값으로 이름 · 단계 편집기를 열어 저장하면 기존 설정이 지워진다.
+        const unreadLe = r && r.loadError && r.loadError.readError === true ? r.loadError : null;
+        const ok = !!(r && r.settings && typeof r.settings === 'object') && !unreadLe;
         setCats(ok ? r.settings : null);
         setCatMeta({ limits: r?.limits || {}, defaultStages: r?.defaultStages || [] });
         setCatsState(ok ? 'ok' : 'error');
-        setCatsErr(ok ? '' : (r?.reason || '설정 응답에 settings 가 없습니다'));
+        setCatsErr(ok ? '' : ((unreadLe && unreadLe.reason) || r?.reason || '설정 응답에 settings 가 없습니다'));
       })
       .catch((e) => {
         // 카테고리는 편의 기능이다 — 못 읽어도 화면은 동작해야 한다. 단 편집기는 열지 않는다(D-01).

@@ -2,6 +2,7 @@
 import { config } from '../../config.js';
 import { saveNote, deleteNote } from '../../release-notes.js';
 import { loadLlmConfig, llmUrlIssue, saveLlmConfig, normTimeoutMs, llmConfigWriteRefusal } from '../../llm/config.js';
+import { unreadMark } from '../settingsUnreadMark.js';   // 112회차: 조회 응답의 읽기 오류 표지
 import { ollamaTest } from '../../llm/ollama.js';
 import { installOllama } from '../../llm/ollamaDeploy.js';
 import { deployAgent, testTarget, installerInfo, checkAgentStatus, envPairs, envPairsIssue } from '../../agent/deploy.js';
@@ -531,7 +532,7 @@ adminRouter.get('/agent-deploy/targets/sample.txt', csvPerm, adminOnly, fleetOnl
 });
 
 // --- Local LLM (Ollama) config for natural-language search ---
-adminRouter.get('/llm-config', adminOnly, (_req, res) => res.json({ config: loadLlmConfig() }));
+adminRouter.get('/llm-config', adminOnly, (_req, res) => res.json({ config: loadLlmConfig(), ...unreadMark(llmConfigWriteRefusal()) }));   // 112회차: 기동 뒤 한 번도 못 읽었으면 config 는 env 기본값 — 화면이 저장을 잠근다
 adminRouter.put('/llm-config', adminOnly, fleetOnly, (req, res) => {
   { const no = llmConfigWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
   try { res.json({ ok: true, config: saveLlmConfig(req.body || {}) }); }

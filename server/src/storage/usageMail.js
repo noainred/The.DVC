@@ -272,7 +272,7 @@ export function storageUsageMailStatus(now = Date.now()) {
   return {
     enabled: m.enabled, next: nextDigestSlots(m, now, 3), lastSlot: st.lastSlot, lastSentAt: st.lastSentAt,
     history: st.history.map((h) => ({ ...h })), busy: _busy, lastTick: _lastTick, lastError: _lastError, edge: isEdge(),
-    loadError: _loadErr ? { at: _loadErr.at } : null,
+    loadError: _loadErr ? { at: _loadErr.at, readError: _loadErr.readError === true } : null,   // 112회차: readError — 화면이 못 읽은 동안의 기본값 폼 저장을 잠그고 안내를 가른다
     recipients: { total: rc.to.length, fromAdmin: rc.fromAdmin, fromExtra: rc.fromExtra, dupes: rc.dupes },
   };
 }

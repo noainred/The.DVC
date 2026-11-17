@@ -77,7 +77,8 @@ const vcName = (id) => (store.get()?.vcenters || []).find((v) => v.id === id)?.n
 function bundleSourceView() {
   const info = bundleSourceInfo();
   const src = getBundleSource();
-  return { url: info.url, from: info.from, savedUrl: src.baseUrl, envUrl: String(process.env.BAREOS_BUNDLE_BASE_URL || '').trim(), importDir: src.importDir, importDirState: importDirState(src.importDir), bundleDir: bundleDir(), loadError: src.loadError || '' };
+  return { url: info.url, from: info.from, savedUrl: src.baseUrl, envUrl: String(process.env.BAREOS_BUNDLE_BASE_URL || '').trim(), importDir: src.importDir, importDirState: importDirState(src.importDir), bundleDir: bundleDir(), loadError: src.loadError || '',
+    ...(bundleSourceWriteRefusal() ? { readError: true } : {}) }   // 112회차: 읽기 오류(원본 그대로) — 화면이 기본값(빈 주소)으로 채운 편집 칸의 저장을 잠근다;
 }
 
 export function registerBareosInstall(api) {

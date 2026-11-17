@@ -131,15 +131,15 @@ describe('스윕 — await delJson/putJson/patchJson/sendJson 의 반환값을 �
   //   한계: `.then(() => putJson(...))`·`act(() => delJson(...))`(await 없음)·`return delJson(...)` 은 보지 않는다 — 좁게 잡아 오탐을 없앴다.
   // v2.731(점검 1회차 G4a·G4b): SvcMonitor·TestWizard·CredentialManager·RemoteCommand·GuestScanJobs 는 반환값을 판정한다 — 목록에서 뺐다.
   // v2.732(점검 2회차 i1): Alarms·NetTrafficAnalysis·PerfMonitor·svcmon/BulkTab·FleetInventory·VmCloneTool 도 판정한다 — 목록에서 뺐다.
+  // 112회차(이 목록을 서버 라우트와 대조 — 105회차가 남긴 것): 삭제 라우트가 409(등록부 읽기 오류 · 사용 중) · 400 본문을 주는 12곳은 판정(requireChanged)하게 고치고 뺐다 —
+  //   AgentDeploy · AgentScans · Collectors 3 · ProxySettings · RemoteAccess(중계 서버) · BmStorageTool · CvpTool · PduTool · SanSwitchTool · StorageMonTool.
+  //   남은 것은 대조 결과 '409 · 400 본문이 오지 않는다'(404 · 403 · 503 은 던진다): NsxAdmin · VCenterAdmin 삭제 · VmProvision · VmSeriesSettings(vcenterId 를 늘 보낸다) ·
+  //   MenuEditor 2 · SanHealthCheck · RemoteAccess 매핑 삭제 — 그리고 PortalBackup 삭제(200 {ok:false} — 없는 백업) · VCenterAdmin 데이터 소스(400 은 화면이 보내지 않는 값일 때만)는 그대로 둔다.
   const ALLOW = {
-    'views/AgentDeploy.jsx': 1, 'views/AgentScans.jsx': 1, 'views/Collectors.jsx': 3,
-    'views/NsxAdmin.jsx': 1, 'views/PortalBackup.jsx': 1, 'views/ProxySettings.jsx': 1,
-    'views/RemoteAccess.jsx': 2, 'views/VCenterAdmin.jsx': 2, 'views/VmProvision.jsx': 1, 'views/VmSeriesSettings.jsx': 1,
+    'views/NsxAdmin.jsx': 1, 'views/PortalBackup.jsx': 1,
+    'views/RemoteAccess.jsx': 1, 'views/VCenterAdmin.jsx': 2, 'views/VmProvision.jsx': 1, 'views/VmSeriesSettings.jsx': 1,
     'views/sidebar/MenuEditor.jsx': 2,   // 95회차: PhysicalGpuManager 삭제는 반환값(ok:false)을 판정한다 — 목록에서 뺐다
-   
-    'views/tools/BmStorageTool.jsx': 1, 'views/tools/CvpTool.jsx': 1, 
-    'views/tools/PduTool.jsx': 1, 'views/tools/SanHealthCheck.jsx': 1,
-    'views/tools/SanSwitchTool.jsx': 1, 'views/tools/StorageMonTool.jsx': 1, 
+    'views/tools/SanHealthCheck.jsx': 1,
   };
   const USED_TAIL = /(=|return|\?|:|\(|\|\||&&|,|\[|\?\?|=>\s*\{?)\s*$/;
   const walk = (d, out = []) => {

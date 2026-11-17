@@ -20,6 +20,7 @@ import { filterMeasuredByMapping, loadPowerSettings } from '../idrac/powerSettin
 import { keepMappedMeasured } from '../idrac/attribution.js';
 import { snapMemo, sendCached } from '../util/snapCache.js';
 import { computeFinOps, loadFinopsConfig, saveFinopsConfig, finopsWriteRefusal } from '../insights/finops.js';
+import { unreadMark } from './settingsUnreadMark.js';   // 112회차: 조회 응답의 읽기 오류 표지
 import { computePowerBreakdown } from '../insights/powerBreakdown.js';
 import { getDatacenterAssign, listDatacenters, datacenterOfVcenter } from '../datacenter/store.js';
 import { getFleetInventory, fleetGhostReport } from '../insights/fleetInventory.js'; // v2.783(점검 Q2 P-B3): prune 은 화면과 같은 유령 판정
@@ -158,7 +159,7 @@ insightsRouter.get('/finops', async (req, res) => {
     else sendCached(req, res, `${key}|masked`, maskFinopsPayload(payload, insightsMatcher(snap)));
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
-insightsRouter.get('/finops/config', (_req, res) => res.json(loadFinopsConfig()));
+insightsRouter.get('/finops/config', (_req, res) => res.json({ ...loadFinopsConfig(), ...unreadMark(finopsWriteRefusal()) }));   // 112회차: 못 읽은 동안 단가는 기본값 — 화면이 저장을 잠근다
 
 // --- 전력 분석: 법인(vCenter)·모델·지역별 소비전력 분해 ---
 insightsRouter.get('/power-breakdown', async (req, res) => {

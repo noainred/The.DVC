@@ -3,6 +3,8 @@ import { fetchJson, putJson, postJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { blankOr } from './blankOr.js';
 import Select from '../components/Select.jsx';
+import { unreadMarkOf, saveLockedByUnread } from './settingsUnread.js';   // 112회차: 못 읽은 동안의 기본값 폼으로 저장하지 않는다
+import { SettingsUnreadBanner } from './SettingsUnreadBanner.jsx';
 
 /** 설정 → AI 검색: 자연어 검색용 로컬 LLM(Ollama) 구성 + 연결 테스트. */
 export default function LlmSettings() {
@@ -13,7 +15,11 @@ export default function LlmSettings() {
   const [dep, setDep] = useState({ host: '', port: 22, username: 'root', password: '', privateKey: '', mode: 'online', binaryPath: '', model: 'llama3.1', applyToPortal: true });
   const [depResult, setDepResult] = useState(null);
 
-  useEffect(() => { fetchJson('/admin/llm-config').then((d) => setCfg(d.config)).catch((e) => setError(e.message)); }, []);
+  // 112회차: 서버가 LLM 설정 파일을 못 읽는 동안 config 는 마지막으로 읽은 값이고, 기동 뒤 한 번도 못 읽었으면 env 기본값(꺼짐 · localhost)이다 —
+  //   그 기본값 폼의 저장이 다시 읽힌 뒤 저장된 주소 · 모델을 덮는다. 표지를 받아 저장을 잠근다(서버도 503). ‘다시 확인’ 이 config 를 다시 받는다.
+  const [unread, setUnread] = useState(null);
+  const loadCfg = () => fetchJson('/admin/llm-config').then((d) => { setUnread(unreadMarkOf(d)); setCfg(d.config); }).catch((e) => setError(e.message));
+  useEffect(() => { loadCfg(); }, []);
   if (error) return <ErrorBox message={error} />;
   if (!cfg) return <Loading />;
 
@@ -22,7 +28,9 @@ export default function LlmSettings() {
   const body = () => ({ ...cfg, timeoutMs: blankOr(cfg.timeoutMs) });
   const flash = (ok, text) => { setMsg({ ok, text }); setTimeout(() => setMsg(null), 5000); };
 
+  const saveLocked = saveLockedByUnread(unread);
   const save = async () => {
+    if (saveLocked) return;
     setBusy(true);
     const r = await putJson('/admin/llm-config', body()).catch((e) => ({ ok: false, reason: e.message }));
     if (r.config) setCfg(r.config);
@@ -46,7 +54,7 @@ export default function LlmSettings() {
     setBusy(true); setDepResult(null);
     const r = await postJson('/admin/ollama-deploy', dep).catch((e) => ({ ok: false, reason: e.message }));
     setDepResult({ kind: 'install', ...r });
-    if (r.ok) fetchJson('/admin/llm-config').then((d) => setCfg(d.config)).catch(() => {});
+    if (r.ok) fetchJson('/admin/llm-config').then((d) => { setUnread(unreadMarkOf(d)); setCfg(d.config); }).catch(() => {});
     setBusy(false);
   };
 
@@ -58,6 +66,7 @@ export default function LlmSettings() {
           <input type="checkbox" checked={!!cfg.enabled} onChange={(e) => setCfg({ ...cfg, enabled: e.target.checked })} /> 사용
         </label>
       </div>
+      <SettingsUnreadBanner le={unread} what="AI 검색(LLM) 설정" save="저장" lastGood onRecheck={loadCfg} busy={busy} />
 
       {msg && <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 8, fontSize: 13, background: msg.ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)', color: msg.ok ? '#4ade80' : '#f87171' }}>{msg.text}</div>}
 
@@ -68,7 +77,7 @@ export default function LlmSettings() {
           <label>타임아웃(ms)<input className="input" type="number" value={cfg.timeoutMs} onChange={set('timeoutMs')} /></label>
         </div>
         <div className="flex gap" style={{ marginTop: 10 }}>
-          <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy} onClick={save}>저장</button>
+          <button className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy || saveLocked} onClick={save}>저장</button>
           <button className="logout-btn" style={{ padding: '8px 14px' }} disabled={busy} onClick={test}>연결 테스트</button>
         </div>
       </div>

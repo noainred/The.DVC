@@ -5,6 +5,8 @@ import { presetsFor, msLabel, effectiveFor, sourceOf, lagText, toBody } from './
 import { STable } from '../components/STable.jsx';
 import Select from '../components/Select.jsx';
 import { requireChanged } from './changeResult.js'; // v2.732 B5-03: 400 본문을 '저장되었습니다' 로 읽지 않는다
+import { unreadMarkOf, saveLockedByUnread } from './settingsUnread.js';   // 112회차: 못 읽은 동안의 조회(빈 폼)로 저장하지 않는다
+import { SettingsUnreadBanner } from './SettingsUnreadBanner.jsx';
 
 /**
  * 스토리지 수집 주기(중앙 → 엣지 배포, v2.409 — 사용자 요구
@@ -84,13 +86,18 @@ export default function StorageIntervals() {
     else setAgentForms((p) => ({ ...p, [target]: { ...(p[target] || {}), [key]: v } }));
   };
 
+  // 112회차(106회차가 남긴 것): 서버가 주기 파일을 못 읽은 동안의 조회는 빈 지정이다 — 그 빈 폼의 저장(전체 교체)이 다시 읽힌 뒤 엣지별 주기를 전부 지웠다.
+  //   읽기 오류면 저장을 잠근다(서버도 409). 조회(load)는 늘 폼을 다시 채우므로 ‘다시 확인’ 으로 읽힌 뒤에는 저장된 값이 보인다.
+  const unread = unreadMarkOf(data);
+  const saveLocked = saveLockedByUnread(unread);
   const save = async () => {
+    if (saveLocked) return;
     setBusy(true); setMsg(null);
     try {
       // v2.732(점검 2회차 B5-03): 400 {ok:false, reason}(디스크 쓰기 실패)을 성공으로 읽으면 '저장되었습니다' 와 함께
       //   fill 이 옛 config 로 폼을 되돌렸다(입력이 사라진다). 판정한 뒤에만 폼을 바꾼다 — 실패면 입력을 그대로 둔다.
       const r = requireChanged(await putJson('/tools/storage/intervals', toBody(globalForm, agentForms)));
-      setData((p) => ({ ...p, ...r }));
+      setData((p) => ({ ...p, ...r, loadError: null }));   // 112회차: 저장 성공 = 표지 해제(손상 뒤의 저장)
       fill({ ...data, ...r });
       setMsg((r.issues?.length ? `저장됨(보정 ${r.issues.length}건: ${r.issues.join(' / ')}). ` : '저장되었습니다. ') + (r.note || ''));
     } catch (e) { setMsg(`저장 실패: ${e.message}`); }
@@ -101,6 +108,7 @@ export default function StorageIntervals() {
   return (
     <>
       <div className="section-title" style={{ marginTop: 0 }}>⏱ 스토리지 수집 주기</div>
+      <SettingsUnreadBanner le={unread} what="스토리지 수집 주기" save="저장" onRecheck={load} busy={busy} />
 
       <div className="card" style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 13, lineHeight: 1.7 }}>
@@ -155,7 +163,7 @@ export default function StorageIntervals() {
       </div>
 
       <div className="flex gap" style={{ marginTop: 12, alignItems: 'center' }}>
-        <button className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy} onClick={save}>
+        <button className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy || saveLocked} onClick={save}>
           {busy ? '저장 중…' : '저장'}
         </button>
         <button className="tab" style={{ flex: 'none', padding: '8px 14px' }} disabled={busy} onClick={load}>되돌리기</button>

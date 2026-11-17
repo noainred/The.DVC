@@ -30,7 +30,7 @@ import { enrichAdvice, selectRows, fillBlankFromSaved } from '../../util/bulkImp
 import { startBulkTest, publicRun, passedLines } from '../../util/bulkRun.js';
 import { requestCollect, hasPendingRequest, recentCollectDrops } from '../../storage/collectRequests.js';
 import { INTERVAL_SPEC, loadIntervalConfig, saveIntervalConfig, intervalsForAgent,
-  envIntervals, runtimeIntervalSource, applyOwnIntervals, storageIntervalsWriteRefusal } from '../../storage/intervals.js';
+  envIntervals, runtimeIntervalSource, applyOwnIntervals, storageIntervalsWriteRefusal, storageIntervalsLoadError } from '../../storage/intervals.js';
 
 import { isDemoGuest } from '../../auth/demoGuest.js'; // v2.720(감사 B2-04)
 import { isDemoId } from '../../mock/demo/storage.js';
@@ -302,10 +302,14 @@ api.post('/tools/storage/devices/:id/collect', adminOnly, fullScopeOnly, async (
 
 /** 현재 설정 + 이 노드(중앙)의 실효 주기 + 항목 사양(하한/기본/설명 — UI 폼의 단일 소스). */
 api.get('/tools/storage/intervals', adminOnly, fullScopeOnly, (_req, res) => {
+  // 112회차(106회차가 남긴 것 — 재현): 주기 파일을 못 읽은 동안 아래 config 는 저장된 값이 아니라 빈 지정이다 — 그 사실을 싣지 않아 화면이 빈 폼을 그렸고,
+  //   다시 읽힌 뒤의 저장(전체 교체)이 엣지별 주기를 보존본 없이 전부 지웠다(409 는 읽기 오류가 이어지는 동안만 막는다). 화면이 저장을 잠그고 폼을 다시 채운다.
+  const le = storageIntervalsLoadError();
   res.json({
     ok: true,
     spec: INTERVAL_SPEC,
     config: loadIntervalConfig(),
+    ...(le ? { loadError: { reason: String(le.reason || '').slice(0, 300), readError: le.readError === true } } : {}),   // 112회차
     // 중앙 자신(직접 수집 장비 = agent '')이 지금 쓰는 값과 그 출처(central/env/default).
     central: { effective: runtimeIntervalSource(), env: envIntervals() },
     agents: knownAgentNames(),

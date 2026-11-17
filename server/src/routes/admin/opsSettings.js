@@ -14,6 +14,7 @@ import { store } from '../../store.js';
 import { inUserWriteScope, inUserScope, scopedVcenterIds } from '../../auth/scope.js';
 import { ssrfBlockReasonResolved } from '../../collector/registry.js';
 import { dailyReportStatus, saveDailyReportSettings, runDailyReportNow, dailyReportWriteRefusal } from '../../reports/dailyReport.js';
+import { unreadMark } from '../settingsUnreadMark.js';   // 112회차: 조회 응답의 읽기 오류 표지
 import { refreshCerts } from '../../security/certMonitor.js';
 import { adminOnly, requireSettingsOwner, fullScopeOnlyWith, SETTINGS_OWNER_FULL_SCOPE_REASON } from './shared.js';
 import { mergeScopedMap, filterScopedMap, denyScopedRun, denyFleetWrite, writeMergeScope } from '../../auth/scopeMerge.js'; // v2.606 AUTHZ2606-07
@@ -117,7 +118,9 @@ adminRouter.get('/login-history', adminOnly, loginHistoryFullScope, (req, res) =
 });
 
 // Alerting: config + current firing/recent, save config, send a test notification.
-adminRouter.get('/alerts', adminOnly, (req, res) => res.json(scopeAlertStatus(alertStatus(), scopedVcenterIds(req.user, store.get()))));
+// 112회차: 알림 설정 파일을 못 읽은 동안 config 는 저장된 값이 아니라 기본값(채널 꺼짐 · 웹훅 주소 없음)이다 — 표지를 실어 화면이 그 기본값 폼의 저장을 잠그게 한다
+//   (다시 읽힌 뒤의 저장이 웹훅 주소 · 임계를 보존본 없이 덮는다 — 409 는 읽기 오류가 이어지는 동안만 막는다).
+adminRouter.get('/alerts', adminOnly, (req, res) => res.json({ ...scopeAlertStatus(alertStatus(), scopedVcenterIds(req.user, store.get())), ...unreadMark(alertConfigWriteRefusal()) }));
 adminRouter.put('/alerts', adminOnly, fleetOnly, async (req, res) => {
   // 웹훅 URL은 서버가 대신 POST하는 주소 — SSRF resolved 가드(DNS 해석 결과까지)로 검증.
   // 루프백/링크로컬로 해석되는 이름을 저장해 두고 알림이 내부를 찌르는 우회를 차단한다.
@@ -135,7 +138,7 @@ adminRouter.put('/alerts', adminOnly, fleetOnly, async (req, res) => {
 adminRouter.post('/alerts/test', adminOnly, fleetOnly, async (req, res) => res.json(await testAlert(req.user?.username)));
 
 // 일일 헬스체크 리포트 — 스케줄 설정 + 즉시 발송(테스트).
-adminRouter.get('/report/daily', adminOnly, (_req, res) => res.json(dailyReportStatus()));
+adminRouter.get('/report/daily', adminOnly, (_req, res) => res.json({ ...dailyReportStatus(), ...unreadMark(dailyReportWriteRefusal()) }));   // 112회차: 못 읽은 동안 설정은 기본값(꺼짐) — 화면이 저장을 잠근다
 adminRouter.put('/report/daily', adminOnly, fleetOnly, (req, res) => {
   { const no = dailyReportWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
   const s = saveDailyReportSettings(req.body || {});
@@ -279,7 +282,7 @@ function scopedOsScanStatus(req) {
   if (!allowed) return st;
   return { ...st, summary: osSummary((r) => allowed.has(String(r.vcenterId))), lastFound: null, lastErr: null, lastAuth: null, lastSkipped: null, scoped: true, fleetRunHidden: true }; // v2.732: lastSkipped 는 전 vCenter 목록
 }
-adminRouter.get('/os-scan', adminOnly, (req, res) => res.json(scopedOsScanStatus(req)));
+adminRouter.get('/os-scan', adminOnly, (req, res) => res.json({ ...scopedOsScanStatus(req), ...unreadMark(osScanWriteRefusal()) }));   // 112회차: 못 읽은 동안 settings 는 기본값 — 화면이 저장을 잠근다
 // v2.606 AUTHZ2606-06: 스캔 설정은 전역이다 — 범위 admin 이 켠 주기 스캔은 전 vCenter 게스트에 로그인한다(v2.599 가 수동
 //   실행에서 막은 것을 설정으로 우회). 범위 계정의 변경은 403(Horizon settings PUT v2.605 와 같은 판단).
 adminRouter.put('/os-scan/settings', adminOnly, (req, res) => {

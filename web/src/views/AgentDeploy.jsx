@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useHashTab } from '../hooks/useHashTab.js';
 import { fetchJson, postJson, putJson, delJson, canCsv } from '../api.js';
+import { requireChanged } from './changeResult.js';   // 112회차: delJson 은 409 · 400 을 던지지 않고 본문을 준다 — 거절(등록부 읽기 오류 · 사용 중)을 삭제 성공으로 읽지 않는다
 import { droppedSecretNote } from './droppedSecretText.js';
 import { readFailText, installerState, deployTargetsUnreadableText } from './readFailText.js'; // v2.733(C5-02): 조회 실패를 '0개·패키지 없음' 으로 그리지 않는다
 import { pkgFormFromResponse, pkgSavePayload, pkgPlaceholder } from './pkgSettingsText.js';
@@ -160,7 +161,7 @@ export default function AgentDeploy() {
   const removeTarget = async (t) => {
     if (!window.confirm(`'${t.host}' 대상을 삭제할까요?`)) return;
     // v2.611 WEB2611-08: 삭제 실패를 삼키지 않는다.
-    try { await delJson(`/admin/agent-deploy/targets/${t.id}`); } catch (e) { setResult({ kind: 'remove', ok: false, reason: `대상 삭제 실패(${t.host}): ${e?.message || e}` }); }
+    try { requireChanged(await delJson(`/admin/agent-deploy/targets/${t.id}`)); } catch (e) { setResult({ kind: 'remove', ok: false, reason: `대상 삭제 실패(${t.host}): ${e?.message || e}` }); }
     await loadTargets();
   };
   const deployTarget = async (t) => {

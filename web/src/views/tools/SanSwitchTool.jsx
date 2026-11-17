@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import BoldText from '../../components/boldText.jsx';   // v2.447: 서버 문구의 **강조** 별표 노출 방지(감사 I6)
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from 'recharts';
 import { fetchJson, postJson, delJson, canCsv, hasRole } from '../../api.js';
+import { requireChanged } from '../changeResult.js';   // 112회차: delJson 은 409 · 400 을 던지지 않고 본문을 준다 — 거절(등록부 읽기 오류 · 사용 중)을 삭제 성공으로 읽지 않는다
 import { droppedSecretNote } from '../droppedSecretText.js';
 import { agoText } from './relTime.js';
 import { edgeClockAheadMark, edgeClockFootnote } from './edgeLateText.js'; // v2.631 A6-2631-04: 엣지 시계 빠름 표지
@@ -164,7 +165,7 @@ export default function SanSwitchTool() {
   const remove = async (r) => {
     if (!window.confirm(`'${r.name}' 스위치 등록을 삭제할까요? 수집된 스냅샷도 함께 지워집니다.`)) return;
     setBusy(true);
-    try { await delJson(`/tools/sanswitch/devices/${r.id}`); await load(); setMsg('삭제되었습니다.'); }
+    try { requireChanged(await delJson(`/tools/sanswitch/devices/${r.id}`)); await load(); setMsg('삭제되었습니다.'); }
     catch (e) { setMsg(`삭제 실패: ${e.message}`); }
     finally { setBusy(false); }
   };

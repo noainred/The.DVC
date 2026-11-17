@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson, canCsv } from '../api.js';
+import { requireChanged } from './changeResult.js';   // 112회차: delJson 은 409 · 400 을 던지지 않고 본문을 준다 — 거절(등록부 읽기 오류 · 사용 중)을 삭제 성공으로 읽지 않는다
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
@@ -94,7 +95,7 @@ export default function AgentScans() {
 
   const remove = async (a) => {
     if (!window.confirm(`'${a.agent}' 작업 할당을 삭제할까요?`)) return;
-    try { await delJson(`/admin/assignments/${encodeURIComponent(a.agent)}`); await load(); }
+    try { requireChanged(await delJson(`/admin/assignments/${encodeURIComponent(a.agent)}`)); await load(); }
     catch (e) { setError(e.message); }
   };
 

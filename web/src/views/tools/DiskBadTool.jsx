@@ -18,6 +18,9 @@ import { Loading, ErrorBox, Kpi, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import { DiskBadServerPanel } from './DiskBadServerPanel.jsx';
+import { requireChanged } from '../changeResult.js';   // 112회차: 409(엣지 노드) 본문을 '저장했습니다' 로 읽지 않는다
+import { unreadMarkOf, unreadKind, saveLockedByUnread } from '../settingsUnread.js';   // 112회차: 못 읽은 동안의 기본값 폼으로 저장하지 않는다
+import { SettingsUnreadBanner } from '../SettingsUnreadBanner.jsx';
 import { fmtDate, fmtDateTime, rateText, pctText, num, clsTone, verdictTone, confidenceTone, noteOf, clsOfCode, JOB_STATE_LABEL, jobStateTone, unitProgress, scopeLabel, shortLogNote, spanText, scanSent, pastCoverageText, traceTone, valCell } from './diskBadText.js';
 
 const TABS = [
@@ -122,7 +125,8 @@ export function DiskBadTool() {
       {tab === 'trend' && <Trend fleet={fleet} />}
       {tab === 'servers' && <Servers fleet={fleet} labels={labels} openServer={openServer} />}
       {tab === 'basis' && <Basis refs={refs} labels={labels} />}
-      {tab === 'scan' && <ScanPanel data={data} jobs={jobs || []} corp={corp} canScan={canScan} reload={load} setJobs={setJobs} />}
+      {/* 112회차: 설정 칸은 열 때의 값으로 채운다 — 설정 파일 상태(읽음 · 읽기 오류 · 손상)가 바뀌면 다시 만들어 저장된 값으로 채운다(key). */}
+      {tab === 'scan' && <ScanPanel key={unreadKind(unreadMarkOf(data)) || 'ok'} data={data} jobs={jobs || []} corp={corp} canScan={canScan} reload={load} setJobs={setJobs} />}
 
       {detail && (
         <Modal title={`${detail.name} — 디스크 이력`} onClose={() => setDetail(null)} width={980}>
@@ -450,10 +454,16 @@ function ScanPanel({ data, jobs, corp, canScan, reload, setJobs }) {
   };
   const act = (j, path, body) => postJson(`/tools/disk-bad/jobs/${encodeURIComponent(j.id)}/${path}`, body)
     .then((r) => setJobs(jobs.map((x) => (x.id === j.id ? r.job : x)))).catch((e) => setMsg(e?.message || String(e)));
+  // 112회차: 서버가 설정 파일을 못 읽은 동안 data.settings 는 기본값(담당자 없음)이다 — 이 저장은 늘 법인 담당자(corpTo)를 함께 보내므로(전체 교체),
+  //   다시 읽힌 뒤 체크 하나만 바꿔도 저장된 담당자 메일 목록이 빈 값으로 덮였다. 읽기 오류 동안은 저장하지 않는다(서버도 503).
+  const unread = unreadMarkOf(data);
+  const saveLocked = saveLockedByUnread(unread);
   const saveSettings = (patch) => {
+    if (saveLocked) { setMsg('설정 파일을 읽지 못한 상태라 저장하지 않았습니다.'); return Promise.resolve(); }
     const corpTo = {};
     for (const line of corpToText.split('\n')) { const i = line.indexOf('='); if (i > 0) corpTo[line.slice(0, i).trim()] = line.slice(i + 1).split(/[\s,;]+/).filter(Boolean); }
-    return putJson('/tools/disk-bad/settings', { ...patch, corpTo }).then((r) => { setSt(r.settings); setMsg('저장했습니다.'); reload(); }).catch((e) => setMsg(e?.message || String(e)));
+    // 112회차(재현 — 엣지 노드 409): putJson 은 409 · 400 을 던지지 않고 본문을 준다 — 판정 없이 setSt(r.settings) 하면 설정 칸이 사라지고 '저장했습니다.' 가 남았다.
+    return putJson('/tools/disk-bad/settings', { ...patch, corpTo }).then((r) => { requireChanged(r); setSt(r.settings); setMsg('저장했습니다.'); reload(); }).catch((e) => setMsg(e?.message || String(e)));
   };
   const selCount = scope === 'all' ? null : (data.corps.find((c) => c.id === corpId)?.servers ?? 0);
   return (
@@ -517,8 +527,8 @@ function ScanPanel({ data, jobs, corp, canScan, reload, setJobs }) {
           <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}><input type="checkbox" checked={st.mailEnabled} onChange={(e) => saveSettings({ mailEnabled: e.target.checked })} /> 새 기록이 나오면 법인별 한 통 메일(받는 사람: 설정 › 메일 발송의 ‘디스크 배드 섹터 새 기록’ 수신자 + 아래 법인 담당자)</label>
           <label htmlFor="dbad-corpto" className="muted">법인 담당자 — 한 줄에 ‘vCenter id=메일,메일’</label>
           <textarea id="dbad-corpto" className="input" rows={4} value={corpToText} onChange={(e) => setCorpToText(e.target.value)} style={{ fontFamily: 'var(--mono)', fontSize: 12, width: '100%', boxSizing: 'border-box' }} placeholder={data.corps.slice(0, 2).map((c) => `${c.id}=it-admin@example.com`).join('\n')} />
-          <div><button className="tab" style={{ flex: 'none' }} onClick={() => saveSettings({})}>담당자 저장</button></div>
-          {data.settingsLoadError && <div style={{ color: 'var(--red)' }}>설정 파일을 읽지 못해 기본값으로 시작했습니다 — {data.settingsLoadError.reason}</div>}
+          <div><button className="tab" style={{ flex: 'none' }} disabled={saveLocked} onClick={() => saveSettings({})}>담당자 저장</button></div>
+          <SettingsUnreadBanner le={unread} what="디스크 배드 섹터 점검 설정" save="자동 점검 · 메일 · 담당자 저장" style={{ marginBottom: 0 }} />
         </div>
       )}
     </div>
