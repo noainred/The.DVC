@@ -363,7 +363,7 @@
 | `OTP_LOCKOUT_MS` | `600000` |  | security/loginRateLimit.js |
 | `OTP_MAX_FAILS` | `5` |  | security/loginRateLimit.js |
 | `OTP_RATELIMIT_DISABLED` | `기본 아님('true' 일 때만 적용)` |  | security/loginRateLimit.js |
-| `SECRETS_KEY_LOST` | `기본 적용('true' 로 끄기)` |  | security/secretVault.js |
+| `SECRETS_KEY_LOST` | `기본 아님('true' 일 때만 적용)` |  | security/guestScanScheduler.js, security/secretVault.js |
 | `SETTINGS_OWNERS` | `''` | ✅ | security/securitySettings.js |
 | `SSH_HOSTKEY_POLICY` | `미지정 — peer-trust.json 정책(새 설치 enforce · 기존 현장 observe)` |  | security/peerTrust.js |
 | `TLS_PEER_POLICY` | `미지정 — peer-trust.json 정책(새 설치 enforce · 기존 현장 observe)` |  | security/peerTrust.js |
