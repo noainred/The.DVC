@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **756개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **755개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-17)
@@ -89,7 +89,7 @@
 | `BMUSAGE_ENT_PROBE_PER_RUN` | `10` |  | bmusage/poller.js |
 | `BMUSAGE_ENT_SSH_READY_MS` | `12000` |  | bmusage/collectors/idracEnterprise.js |
 | `BMUSAGE_ENTERPRISE` | `''` |  | bmusage/settings.js |
-| `BMUSAGE_ENVELOPE_MAX_BYTES` | `8` |  | bmusage/edgePull.js |
+| `BMUSAGE_ENVELOPE_MAX_BYTES` | `8388608` |  | bmusage/edgePull.js |
 | `BMUSAGE_INSERT_CHUNK_ROWS` | `256` |  | bmusage/db.js |
 | `BMUSAGE_LIST_BUDGET` | `20` |  | bmusage/poller.js |
 | `BMUSAGE_MIGRATE_CHUNK_ROWS` | `500` |  | bmusage/monthMigrate.js |
@@ -139,10 +139,10 @@
 | `CVP_PUSH_CHUNK_BYTES` | `716800` |  | cvp/push.js |
 | `CVP_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | cvp/push.js |
 | `CVP_PUSH_MAX_ROUNDS` | `10` |  | cvp/push.js |
-| `CVP_PUSH_MS` | `5` |  | cvp/push.js |
+| `CVP_PUSH_MS` | `300000` |  | cvp/push.js |
 | `CVP_PUSH_ROWS` | `20000` |  | cvp/push.js |
 | `CVP_SETTINGS_LOCAL` | `''` |  | cvp/settings.js |
-| `CVP_ZERO_PRUNE_HOLD_MS` | `60` |  | cvp/poller.js |
+| `CVP_ZERO_PRUNE_HOLD_MS` | `3600000` |  | cvp/poller.js |
 | `DATA_SOURCE` |  | ✅ | config.js |
 | `DATACENTER` | `''` |  | config.js |
 | `DIRUSAGE_DB_PATH` |  |  | dirusage/db.js |
@@ -192,12 +192,12 @@
 | `PARTFAULT_DB_PATH` |  |  | partfault/db.js |
 | `PARTFAULT_ENABLED` |  |  | partfault/settings.js |
 | `PARTFAULT_HOOK_DEBOUNCE_MS` |  |  | partfault/hooks.js |
-| `PARTFAULT_POLL_MS` | `10` |  | partfault/poller.js |
+| `PARTFAULT_POLL_MS` | `600000` |  | partfault/poller.js |
 | `PARTFAULT_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | partfault/push.js |
 | `PARTFAULT_PUSH_MAX_DEVICES` | `5000` |  | partfault/push.js |
-| `PARTFAULT_PUSH_MS` | `10` |  | partfault/push.js |
+| `PARTFAULT_PUSH_MS` | `600000` |  | partfault/push.js |
 | `PARTFAULT_RETENTION_DAYS` |  |  | partfault/settings.js |
-| `PERF_HANG_LOG_MAX_BYTES` | `8` |  | perf/hangLog.js |
+| `PERF_HANG_LOG_MAX_BYTES` | `8388608` |  | perf/hangLog.js |
 | `PERF_HANG_LOG_MAX_LINES` | `20000` |  | perf/hangLog.js |
 | `PERF_HANG_LOG_MAX_PER_MIN` | `60` |  | perf/hangLog.js |
 | `PERF_INFLIGHT_MAX_AGE_MS` | `600000` |  | perf/monitor.js |
@@ -263,9 +263,9 @@
 | `VEEAM_EM_VM_BUDGET_MS` |  |  | veeam/em/client.js |
 | `VEEAM_HTTP_TIMEOUT_MS` | `60000` |  | veeam/client.js, veeam/em/client.js |
 | `VEEAM_POLL_MS` | `600000` |  | veeam/poller.js |
-| `VEEAM_RUN_DEADLINE_MS` | `24` |  | veeam/run/runs.js |
+| `VEEAM_RUN_DEADLINE_MS` | `86400000` |  | veeam/run/runs.js |
 | `VEEAM_RUN_HTTP_TIMEOUT_MS` | `60000` |  | veeam/run/client.js |
-| `VEEAM_RUN_PICKUP_MS` | `2` |  | veeam/run/edgeOps.js |
+| `VEEAM_RUN_PICKUP_MS` | `120000` |  | veeam/run/edgeOps.js |
 | `VEEAM_RUN_TRACK_MS` | `20000` |  | veeam/run/runs.js |
 | `VEEAM_SERVER_DEADLINE_MS` | `240000` |  | veeam/poller.js |
 | `VEEAM_SNAP_CONCURRENCY` | `6` |  | veeam/snapCollector.js |
@@ -346,7 +346,7 @@
 | `BMSTOR_PUSH_TIMEOUT_MS` | `180000` |  | bmstor/poller.js |
 | `BMSTOR_SSH_TIMEOUT_MS` | `15000` |  | bmstor/collect.js |
 
-## 보안 (18)
+## 보안 (17)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -367,7 +367,6 @@
 | `SETTINGS_OWNERS` | `''` | ✅ | security/securitySettings.js |
 | `SSH_HOSTKEY_POLICY` | `미지정 — peer-trust.json 정책(새 설치 enforce · 기존 현장 observe)` |  | security/peerTrust.js |
 | `TLS_PEER_POLICY` | `미지정 — peer-trust.json 정책(새 설치 enforce · 기존 현장 observe)` |  | security/peerTrust.js |
-| `X` |  |  | security/tlsTrust.js, util/dayKey.js 외 2 |
 
 ## 분석 도구 (10)
 
@@ -479,16 +478,16 @@
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `AGENT_BAREOS_OP_POLL_MS` | `5000` |  | agent/bareosOpWorker.js |
-| `AGENT_BM_FOLDERS_PULL_MS` | `10` |  | agent/bmFoldersPull.js |
-| `AGENT_BM_MAINT_PULL_MS` | `10` |  | agent/bmMaintPull.js |
-| `AGENT_BM_ONBOARD_PULL_MS` | `10` |  | agent/bmOnboardPull.js |
+| `AGENT_BM_FOLDERS_PULL_MS` | `600000` |  | agent/bmFoldersPull.js |
+| `AGENT_BM_MAINT_PULL_MS` | `600000` |  | agent/bmMaintPull.js |
+| `AGENT_BM_ONBOARD_PULL_MS` | `600000` |  | agent/bmOnboardPull.js |
 | `AGENT_BMSTOR_POLL_MS` | `10000` |  | agent/bmstorWorker.js |
-| `AGENT_BMUSAGE_CONFIG_PULL_MS` | `10` |  | agent/bmUsageConfigPull.js |
+| `AGENT_BMUSAGE_CONFIG_PULL_MS` | `600000` |  | agent/bmUsageConfigPull.js |
 | `AGENT_CAPTURE_POLL_MS` | `4000` |  | agent/captureWorker.js |
 | `AGENT_CONFIG_PUSH_MS` | `1800000` |  | agent/configPush.js |
 | `AGENT_CONFIG_PUSH_TARGET_BYTES` | `15728640` |  | agent/configPush.js |
 | `AGENT_CURUSER_CHUNK_BYTES` | `700000` |  | agent/curUserPush.js |
-| `AGENT_CURUSER_CONFIG_PULL_MS` | `10` |  | agent/curUserConfigPull.js |
+| `AGENT_CURUSER_CONFIG_PULL_MS` | `600000` |  | agent/curUserConfigPull.js |
 | `AGENT_CURUSER_PUSH_TIMEOUT_MS` | `60000` |  | agent/curUserPush.js |
 | `AGENT_DEPLOY_CONCURRENCY` | `2` | ✅ | agent/bulkDeploy.js |
 | `AGENT_DEPLOY_TIMEOUT_MS` | `900000` | ✅ | agent/bulkDeploy.js |
@@ -500,22 +499,22 @@
 | `AGENT_IDRAC_SCAN_POLL_MS` | `5000` |  | agent/idracScanWorker.js |
 | `AGENT_LINKCHECK` | `''` |  | agent/linkCheckWorker.js |
 | `AGENT_LOGQ_POLL_MS` | `4000` |  | agent/logQueryWorker.js |
-| `AGENT_PARTFAULT_CONFIG_PULL_MS` | `10` |  | agent/partFaultConfigPull.js |
+| `AGENT_PARTFAULT_CONFIG_PULL_MS` | `600000` |  | agent/partFaultConfigPull.js |
 | `AGENT_PING_POLL_MS` | `4000` |  | agent/pingWorker.js |
 | `AGENT_PUSH_FLEET` | `기본 적용('false' 로 끄기)` |  | agent/fleetPush.js |
 | `AGENT_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | agent/curUserPush.js, agent/fleetPush.js 외 4 |
 | `AGENT_PUSH_TIMEOUT_MS` | `60000` |  | agent/fleetPush.js, agent/inventoryPush.js |
 | `AGENT_VEEAM_RUN_POLL_MS` | `5000` |  | agent/veeamRunWorker.js |
 | `AGENT_VMSERIES_CHUNK_BYTES` | `700000` |  | agent/vmSeriesPush.js |
-| `AGENT_VMSERIES_CONFIG_PULL_MS` | `10` |  | agent/vmSeriesConfigPull.js |
+| `AGENT_VMSERIES_CONFIG_PULL_MS` | `600000` |  | agent/vmSeriesConfigPull.js |
 | `AGENT_VMSERIES_PUSH_TIMEOUT_MS` | `120000` |  | agent/vmSeriesPush.js |
 | `BAREOS_CONFIG_PULL_MS` | `300000` |  | agent/bareosConfigPull.js |
 | `CURUSER_LOCAL` | `''` |  | agent/curUserConfigPull.js, curuser/settings.js |
-| `CVP_CONFIG_PULL_MS` | `5` |  | agent/cvpConfigPull.js |
+| `CVP_CONFIG_PULL_MS` | `300000` |  | agent/cvpConfigPull.js |
 | `EDGE_ADVERTISE_URL` | `''` | ✅ | agent/selfRegister.js |
 | `ISIDU_CONFIG_PULL_MS` | `300000` |  | agent/isiduConfigPull.js |
 | `LASTGOOD_HOLD_MS` | `21600000` |  | agent/inventoryPush.js, central/inventory.js 외 2 |
-| `SANSW_CONFIG_PULL_MS` | `5` |  | agent/sanSwitchConfigPull.js |
+| `SANSW_CONFIG_PULL_MS` | `300000` |  | agent/sanSwitchConfigPull.js |
 | `SVCMON_CONFIG_FAIL_BACKOFF_MS` | `1800000` |  | agent/svcmonConfigPull.js |
 | `SVCMON_CONFIG_PULL` | `기본 적용('false' 로 끄기)` |  | agent/svcmonConfigPull.js |
 | `SVCMON_CONFIG_PULL_MS` | `300000` |  | agent/svcmonConfigPull.js |
@@ -622,7 +621,7 @@
 | `HW_EXPORT_XLSX_TIMEOUT_MS` | `300000` |  | insights/hwExport/render.js |
 | `HW_EXPORT_XLSX_WORKER` | `'1'` |  | insights/hwExport/render.js |
 | `PORTAL_DB_MIN_FORECAST_MS` | `3600000` |  | insights/portalDb.js |
-| `PORTAL_DB_SAMPLE_MS` | `10` |  | insights/portalDb.js |
+| `PORTAL_DB_SAMPLE_MS` | `600000` |  | insights/portalDb.js |
 | `SERIAL_INDEX_CACHE_MS` | `30000` |  | insights/serialLookup.js |
 
 ## 인증·권한 (17)
@@ -880,7 +879,7 @@
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
-| `SAN_FLOW_SHOW_MS` | `15` |  | sanswitch/flowJobs.js |
+| `SAN_FLOW_SHOW_MS` | `900000` |  | sanswitch/flowJobs.js |
 | `SANHEALTH_DB_PATH` |  |  | sanswitch/healthHistory.js |
 | `SANHEALTH_MAX_RUNS` | `24` |  | sanswitch/healthHistory.js |
 | `SANSTORAGE_CHECK_DB_PATH` |  |  | sanswitch/storageCheckHistory.js |
@@ -905,11 +904,11 @@
 | `SANSW_PERF_ROLLUP_15M_DAYS` | `31` |  | sanswitch/perfDb.js |
 | `SANSW_PERF_ROLLUP_BACKFILL` | `''` |  | sanswitch/perfDb.js |
 | `SANSW_PERF_ROLLUP_BACKFILL_DELAY_MS` | `120000` |  | sanswitch/perfDb.js |
-| `SANSW_POLL_MS` | `5` |  | sanswitch/poller.js |
+| `SANSW_POLL_MS` | `300000` |  | sanswitch/poller.js |
 | `SANSW_PUSH_CHUNK_BYTES` | `716800` |  | sanswitch/push.js |
 | `SANSW_PUSH_DEVICE_MAX_BYTES` | `921600` |  | sanswitch/push.js |
 | `SANSW_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | sanswitch/perfPush.js, sanswitch/push.js |
-| `SANSW_PUSH_MS` | `5` |  | sanswitch/push.js |
+| `SANSW_PUSH_MS` | `300000` |  | sanswitch/push.js |
 | `SANSW_PUSH_PORT_LIMIT` | `64` |  | sanswitch/push.js |
 | `SANSW_PUSH_PORTS` | `''` |  | sanswitch/push.js |
 | `SANSW_TEST_PICKUP_MS` | `600000` | ✅ | sanswitch/testRuns.js |
@@ -945,4 +944,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 756
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 755

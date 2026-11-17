@@ -223,3 +223,12 @@ test('102(100회차 반증 제안) — 기본 max 는 Number.MAX_SAFE_INTEGER: �
   assert.equal(envPositive('3000000000', 77, { max: ENV_INT_MAX }), 77, '시한은 호출부의 { max: ENV_INT_MAX } 가 그대로 이긴다');
   assert.equal(envPositive('70000', 443, { max: 65_535 }), 443, '명시 max(포트)는 그대로');
 });
+
+test('102 남김(메인): docs/ENV.md — `|| 10 * 60_000` 꼴 곱 기본값은 계산해 적고, 주석 속 `process.env.X` 예시는 키가 아니다', () => {
+  const md = fs.readFileSync(new URL('../../docs/ENV.md', import.meta.url), 'utf8');
+  const def = (k) => (md.match(new RegExp('^\\| `' + k + '` \\| `([^`]*)`', 'm')) || [])[1];
+  assert.equal(def('VEEAM_RUN_DEADLINE_MS'), '86400000', '24 * 60 * 60_000 — 첫 숫자(24)만 적던 것');
+  assert.equal(def('SANSW_POLL_MS'), '300000', '5 * 60_000');
+  assert.equal(def('BMUSAGE_ENVELOPE_MAX_BYTES'), '8388608', '8 * 1024 * 1024');
+  assert.doesNotMatch(md, /^\| `X` \|/m, '주석 속 예시 키(X)가 실리면 안 된다');
+});

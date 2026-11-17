@@ -19,6 +19,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stripComments } from '../server/test/_stripComments.js';   // 102회차 남김: 주석 속 `process.env.X` 예시가 가짜 키 'X' 로 실리던 것(common-doc.mjs 와 같은 코어)
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = path.join(ROOT, 'server', 'src');
@@ -87,8 +88,10 @@ function defaultOf(line, key, ref) {
   const after = at < 0 ? '' : line.slice(at + ref.length);
   // `Number(process.env.X) || 300` · `Math.max(1, Number(process.env.X) || 8)` 처럼 괄호로 감싼
   // 형태가 흔하므로 닫는 괄호를 건너뛰고 기본값을 찾는다.
-  let m = after.match(/^[\s)]*(?:\|\||\?\?)\s*(-?\d+(?:_\d+)*|'[^']{0,40}'|"[^"]{0,40}"|true|false)/);
-  if (m) return m[1].replace(/_/g, '');
+  //   102회차 남김(메인): `|| 10 * 60_000` 처럼 헬퍼가 아닌 자리의 숫자 곱도 계산한다 — 예전에는 첫 숫자(10)만 적혀 ENV.md 기본값 22곳이 틀렸다
+  //   (VEEAM_RUN_DEADLINE_MS 가 '24'). `(Number(env.X) || 10) * 60_000` 처럼 괄호 밖의 곱은 env 단위(분)의 기본값이라 계산하지 않는다.
+  let m = after.match(/^[\s)]*(?:\|\||\?\?)\s*(-?\d+(?:_\d+)*(?:\.\d+)?(?:\s*\*\s*\d+(?:_\d+)*(?:\.\d+)?)*|'[^']{0,40}'|"[^"]{0,40}"|true|false)/);
+  if (m) return /\*/.test(m[1]) ? String(m[1].split('*').reduce((acc, x) => acc * Number(x.trim().replace(/_/g, '')), 1)) : m[1].replace(/_/g, '');
   // v3.17.6: 헬퍼의 둘째 인자 — `envPositive(process.env.X, 300)` · `reqTimeoutMs(process.env.X, 30_000)`(util/envNumber.js · envTimeout.js).
   //   99회차: 둘째 인자가 숫자 곱(`10 * 60_000`)이면 계산해 적는다 — `|| 10 * 60_000` 은 첫 숫자(10)만 적혀 단위를 잘못 읽게 했다.
   m = after.match(/^\s*,\s*(\d+(?:_\d+)*(?:\.\d+)?(?:\s*\*\s*\d+(?:_\d+)*)*)\s*[,)]/);
@@ -114,7 +117,7 @@ function envAliases(text) {
 const rows = new Map();  // KEY -> { area, files:Set, def }
 for (const file of walk(SRC)) {
   let text;
-  try { text = fs.readFileSync(file, 'utf8'); } catch { continue; }
+  try { text = stripComments(fs.readFileSync(file, 'utf8')); } catch { continue; }   // 102회차 남김: 주석 속 예시는 키가 아니다
   const rel = path.relative(SRC, file).replace(/\\/g, '/');
   const area = AREA[rel.split('/')[0]] || '공통';
   // `process.env.KEY` + 이 파일이 쓰는 별칭의 `alias.KEY` 를 한 정규식으로 훑는다.
