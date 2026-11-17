@@ -86,23 +86,23 @@ export function saveDraft(input) {
 }
 
 /** 계획(dry-run): 현재 존 상태와 초안을 비교 — 실행하지 않는다. */
-export async function planHostAccess(input, { requesterIp = '' } = {}) {
+export async function planHostAccess(input, { requesterIp = '', peerIp = '' } = {}) {
   const { settings, errors } = normalizeSettings(input, { portalPorts: portalPorts() });
   const engine = await readEngine();
   if (!engine.ok) return { ok: false, errors: [...errors, `방화벽 엔진 사용 불가: ${engine.detail || engine.reason}`], engine, settings };
   const prevRich = loadHostAccess().applied?.rich || [];
-  const plan = planCommands(settings, engine.current, { prevRich, requesterIp });
+  const plan = planCommands(settings, engine.current, { prevRich, requesterIp, peerIp });
   return { ok: !errors.length && !plan.errors.length, settings, engine, ...plan, errors: [...errors, ...plan.errors] };
 }
 
 /** 적용(런타임) → pending. 오류가 하나라도 있으면 아무것도 실행하지 않는다. */
-export async function applyHostAccess(input, { requesterIp = '', by = '' } = {}) {
+export async function applyHostAccess(input, { requesterIp = '', peerIp = '', by = '' } = {}) {
   if (busy) return { ok: false, errors: ['다른 적용/되돌림이 진행 중입니다.'] };
   busy = true;
   try {
     const st = loadHostAccess();
     if (st.pending) return { ok: false, errors: ['확정 대기 중인 적용이 있습니다 — 먼저 확정하거나 되돌리세요.'] };
-    const p = await planHostAccess(input, { requesterIp });
+    const p = await planHostAccess(input, { requesterIp, peerIp });
     if (!p.ok) return { ok: false, errors: p.errors, warnings: p.warnings || [], commands: p.commands || [] };
     const executed = [];
     for (const args of p.commands) {
@@ -122,6 +122,19 @@ export async function applyHostAccess(input, { requesterIp = '', by = '' } = {})
   } finally { busy = false; }
 }
 
+/**
+ * 64회차 F2(재현): 되돌림의 --reload 가 실패하면 예전에는 pending 을 먼저 지워 **다시 시도하지 않았다** — 잠금 사고를 막으려고
+ *   적용한 런타임 규칙(SSH 차단 등)이 확정 없이 다음 reload · 재부팅까지 남았다(commit-confirm 의 뜻이 깨진다). 이제 reload 가
+ *   성공해야 pending 을 지우고, 실패하면 pending 을 남겨(사유 revertError) 자동 되돌림이 늘어나는 간격으로 다시 시도한다.
+ */
+const REVERT_RETRY_MIN_MS = 15_000;
+const REVERT_RETRY_MAX_MS = 5 * 60_000;
+let revertRetryMinMs = REVERT_RETRY_MIN_MS;
+let revertFailStreak = 0;
+function revertRetryDelay() { return Math.min(REVERT_RETRY_MAX_MS, revertRetryMinMs * 2 ** Math.max(0, revertFailStreak - 1)); }
+/** 테스트용 — 재시도 첫 간격(ms). 인자 없으면 기본값. */
+export function _setRevertRetryMinMs(ms) { revertRetryMinMs = Number(ms) > 0 ? Number(ms) : REVERT_RETRY_MIN_MS; revertFailStreak = 0; }
+
 function armRevertTimer(deadline) {
   if (revertTimer) clearTimeout(revertTimer);
   revertTimer = setTimeout(async () => {
@@ -133,9 +146,12 @@ function armRevertTimer(deadline) {
       // v2.591 L6: revert 는 busy 면 throw 가 아니라 `{ok:false}` 를 **반환**한다 — 예전에는 그 값을 보지 않아 기한 직전 확정이
       //   진행 중이면 자동 되돌림이 조용히 버려지고, 그 확정이 실패하면 기한 뒤에도 런타임 규칙이 남았다(재현: --reload 0회).
       //   진행 중인 작업이 끝난 뒤 다시 본다.
-      if (r && r.ok === false && loadHostAccess().pending) {
+      if (r && r.ok === false && r.busy && loadHostAccess().pending) {
         console.warn(`[host-access] 자동 되돌림 보류 — ${(r.errors || []).join(' ') || '진행 중인 작업'} · 2초 뒤 다시 시도합니다`);
         armRevertTimer(Date.now() + 2000);
+      } else if (r && r.ok === false) {
+        // 64회차 F2: --reload 자체가 실패했다 — revertHostAccess 가 pending 을 남기고 늘어나는 간격(15초 → 최대 5분)으로 이미 다시 걸었다.
+        console.warn(`[host-access] 자동 되돌림 실패 — ${(r.errors || []).join(' ')}`);
       }
     } catch (e) { console.error('[host-access] 자동 되돌림 실패:', e.message); }
   }, Math.max(0, deadline - Date.now()));
@@ -173,15 +189,26 @@ export async function confirmHostAccess({ by = '' } = {}) {
 
 /** 되돌림(수동/자동): --reload 로 영구 설정 복원, pending 제거. */
 export async function revertHostAccess({ by = '' } = {}) {
-  if (busy) return { ok: false, errors: ['다른 적용/되돌림이 진행 중입니다.'] };
+  if (busy) return { ok: false, busy: true, errors: ['다른 적용/되돌림이 진행 중입니다.'] };
   busy = true;
   try {
     const st = loadHostAccess();
     if (revertTimer) { clearTimeout(revertTimer); revertTimer = null; }
     const r = await deps.fw(['--reload']);
     const had = !!st.pending;
+    if (!r.ok) {
+      // 64회차 F2: 되돌리지 못했다 — 확정되지 않은 런타임 규칙이 그대로다. pending 을 지우지 않는다(자동 되돌림 · 화면 · 재적용 거부가 계속 본다).
+      const why = String(r.stderr || r.stdout || `exit ${r.code}`).trim().slice(0, 300);
+      revertFailStreak += 1;
+      if (had) {
+        saveHostAccess({ pending: { ...st.pending, revertError: why, revertFailedAt: Date.now(), revertFailures: (Number(st.pending.revertFailures) || 0) + 1 } });
+        // 위에서 타이머를 지웠다 — 기한 전이면 기한에, 지났으면 늘어나는 간격 뒤에 다시 되돌린다(수동 되돌림 실패도 자동 되돌림을 잃지 않게).
+        armRevertTimer(Math.max(Number(st.pending.deadline) || 0, Date.now() + revertRetryDelay()));
+      }
+      return { ok: false, errors: [`--reload 실패: ${why}`, ...(had ? ['확정 대기(pending)를 남겼습니다 — 되돌림을 다시 시도합니다.'] : [])], hadPending: had };
+    }
+    revertFailStreak = 0;
     saveHostAccess({ pending: null, revertedAt: Date.now(), revertedBy: by });
-    if (!r.ok) return { ok: false, errors: [`--reload 실패: ${(r.stderr || r.stdout).trim()}`], hadPending: had };
     console.warn(`[host-access] 런타임 방화벽을 영구 설정으로 되돌림(by=${by}, pending=${had})`);
     return { ok: true, hadPending: had };
   } finally { busy = false; }
@@ -192,7 +219,12 @@ export async function resumeHostAccessPending() {
   try {
     const st = loadHostAccess();
     if (!st.pending) return;
-    if (Date.now() >= st.pending.deadline) { await revertHostAccess({ by: 'auto-restart' }); return; }
+    if (Date.now() >= st.pending.deadline) {
+      const r = await revertHostAccess({ by: 'auto-restart' });
+      // 64회차 F2: 기동 때 되돌림이 실패하면 다시 시도하지 않았다 — 실패는 revertHostAccess 가 재시도를 걸고, busy 면 여기서 건다.
+      if (r && r.ok === false && r.busy && loadHostAccess().pending) armRevertTimer(Date.now() + 2000);
+      return;
+    }
     armRevertTimer(st.pending.deadline);
   } catch (e) { console.error('[host-access] 대기 상태 복구 실패:', e.message); }
 }

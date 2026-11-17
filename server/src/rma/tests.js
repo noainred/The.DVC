@@ -59,8 +59,9 @@ export const TESTS = [
     { name: 'minFreePct', label: '최소 여유(%, 선택)', type: 'int', min: 0, max: 100 }] },
   { id: 'load', group: '시스템', label: '부하 평균(1분)', params: [
     { name: 'maxLoadPerCore', label: '코어당 허용 부하(×0.1)', type: 'int', min: 1, max: 1000, def: 20 }] },
+  // 64회차 F4: name 은 argv(`pgrep -c -f <name>`)로 간다 — 명령 프리셋(buildCommand)과 같이 선행 '-' 를 막는다(noLeadingDash).
   { id: 'process', group: '시스템', label: '프로세스 존재', params: [
-    { name: 'name', label: '프로세스명/패턴', type: 'text', required: true },
+    { name: 'name', label: '프로세스명/패턴', type: 'text', required: true, noLeadingDash: true },
     { name: 'min', label: '최소 개수', type: 'int', min: 0, max: 10000, def: 1 },
     { name: 'max', label: '최대 개수(선택)', type: 'int', min: 0, max: 10000 }] },
   { id: 'service', group: '시스템', label: 'systemd 서비스 상태', params: [
@@ -129,6 +130,7 @@ export function buildTest(id, rawArgs = {}) {
       args[p.name] = v; continue;
     }
     if (!ty.re.test(v)) return { ok: false, issue: `'${p.label}' 형식 오류 — ${ty.hint}` };
+    if (p.noLeadingDash && v.startsWith('-')) return { ok: false, issue: `'${p.label}' 값은 -로 시작할 수 없습니다(명령 옵션으로 읽힌다).` };
     if (p.type === 'int') {
       const n = Number(v);
       if (p.min != null && n < p.min) return { ok: false, issue: `'${p.label}'은 ${p.min} 이상이어야 합니다.` };

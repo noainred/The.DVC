@@ -23,6 +23,8 @@ import { normalizeRequesterIp } from '../../hostaccess/render.js';
 //   상태 응답(화면 '내 IP'·'내 IP 추가' 가 이 값을 그대로 쓴다)·계획·적용이 같은 값을 본다. 전역 clientIp 는 바꾸지 않는다
 //   (레이트리밋·로그인 잠금 키·감사 ip 형식이 바뀐다).
 const requesterIpOf = (req) => normalizeRequesterIp(clientIp(req));
+// 64회차 F5: 방화벽이 실제로 보는 TCP 상대 주소(TRUST_PROXY 뒤에서는 프록시) — 자기 잠금 검사에 함께 넘긴다.
+const peerIpOf = (req) => normalizeRequesterIp(String(req.socket?.remoteAddress || ''));
 
 function requireOwnOtp(req, res, next) {
   if (!config.auth.enabled) return next();
@@ -45,10 +47,10 @@ export function registerHostAccess(adminRouter) {
     res.json(r);
   });
   adminRouter.post('/host-access/plan', adminOnly, fleetOnly, requireSettingsOwner, async (req, res) => {
-    res.json(await planHostAccess(req.body?.settings || {}, { requesterIp: requesterIpOf(req) }));
+    res.json(await planHostAccess(req.body?.settings || {}, { requesterIp: requesterIpOf(req), peerIp: peerIpOf(req) }));
   });
   adminRouter.post('/host-access/apply', adminOnly, fleetOnly, requireSettingsOwner, requireOwnOtp, async (req, res) => {
-    const r = await applyHostAccess(req.body?.settings || {}, { requesterIp: requesterIpOf(req), by: req.user?.username || '' });
+    const r = await applyHostAccess(req.body?.settings || {}, { requesterIp: requesterIpOf(req), peerIp: peerIpOf(req), by: req.user?.username || '' });
     logAudit({ user: req.user?.username, action: r.ok ? '호스트 접근 제어 적용(런타임, 확정 대기)' : '호스트 접근 제어 적용 실패', target: 'host-access', detail: r.ok ? `명령 ${r.commands.length}개 · 확정 기한 ${new Date(r.pending.deadline).toISOString()}` : (r.errors || []).join(' / ').slice(0, 300), ip: req.ip || '' });
     res.status(r.ok ? 200 : 400).json(r);
   });

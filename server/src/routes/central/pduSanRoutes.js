@@ -225,6 +225,14 @@ export function registerPduSanRoutes(centralRouter, deps) {
    * Body: { agent, instance, info:{hostname,version,os,pid,uptimeSec,priority,allowCustom,signed,busy}, wait }
    * instance = 같은 법인의 여러 RMA 프로세스 구별자(분배는 rma/jobs.js). 형식 검증 후 그대로 키로 쓴다.
    */
+  /** 64회차 F3: RMA 접속 허용 IP — rma-poll · rma-credential · rma-result 가 같은 판정 하나(거부면 403 을 보내고 true). */
+  const rmaSourceDenied = (req, res, agent, what) => {
+    const ip = String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
+    if (rmaIpAllowed(ip, rmaAccessFor(agent).allowedIps)) return false;
+    console.warn(`[central] ${what}: ${agent} 허용되지 않은 출처 IP ${ip} 거부`);
+    res.status(403).json({ ok: false, reason: `이 법인의 RMA 접속 허용 IP 목록에 없는 출처(${ip})입니다 — 설정 › 원격 명령 › 접속 허용 IP 를 확인하세요.` });
+    return true;
+  };
   centralRouter.post('/rma-poll', requireCentral(), async (req, res) => {
     res.locals.perfExpectSlow = true; // v2.498: 롱폴(최대 55초 대기)은 정상이다 — '느린 요청' 목록을 이걸로 채우지 않는다
     if (req.centralAuth.mode !== 'agent') {
@@ -234,11 +242,7 @@ export function registerPduSanRoutes(centralRouter, deps) {
     const b = req.body || {};
     const ip = String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
     // 접속 허용 IP(v2.418, HostMonitor 'Accept connections from…' 대응) — 법인별 목록이 있으면 그 밖의 출처는 거부.
-    const access = rmaAccessFor(agent);
-    if (!rmaIpAllowed(ip, access.allowedIps)) {
-      console.warn(`[central] rma-poll: ${agent} 허용되지 않은 출처 IP ${ip} 거부`);
-      return res.status(403).json({ ok: false, reason: `이 법인의 RMA 접속 허용 IP 목록에 없는 출처(${ip})입니다 — 설정 › 원격 명령 › 접속 허용 IP 를 확인하세요.` });
-    }
+    if (rmaSourceDenied(req, res, agent, 'rma-poll')) return;
     const instance = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(String(b.instance || '')) ? String(b.instance) : 'default';
     // v2.606(감사 RECENT2606-06): 인스턴스 수 상한으로 거절되면 **작업을 배달하지 않고 사유를 돌려준다**. 예전에는 반환값을
     //   버려 거절된 인스턴스가 온라인 목록·스케줄 배정에는 없으면서 롱폴 작업만 받았고, 엣지는 왜인지 알 길이 없었다.
@@ -287,6 +291,9 @@ export function registerPduSanRoutes(centralRouter, deps) {
   centralRouter.post('/rma-credential', requireCentral(), (req, res) => {
     if (req.centralAuth.mode !== 'agent') return res.status(403).json({ ok: false, reason: '계정 브로커는 엣지별 개별 토큰만 허용합니다.' });
     const agent = req.centralAuth.agent;
+    // 64회차 F3(재현): 법인 'RMA 접속 허용 IP' 는 rma-poll 만 보고 있었다 — 토큰을 가진 쪽이 목록 밖에서 이 브로커로 **평문 계정**을 받아 갔다.
+    //   부르는 곳은 RMA 프로세스(rma/agent.js resolveCreds) 하나라 폴과 같은 출처다. 같은 판정을 건다.
+    if (rmaSourceDenied(req, res, agent, 'rma-credential')) return;
     const b = req.body || {};
     const id = String(b.credentialId || ''), host = String(b.host || '').trim();
     if (!/^cred_[A-Za-z0-9_]{1,64}$/.test(id) || !/^[A-Za-z0-9][A-Za-z0-9.:-]{0,253}$/.test(host)) return res.status(400).json({ ok: false, reason: 'credentialId/host 형식 오류' });
@@ -306,6 +313,7 @@ export function registerPduSanRoutes(centralRouter, deps) {
   // Body: { reqId, result }
   centralRouter.post('/rma-result', requireCentral({ notFound: { ok: false } }), (req, res) => {
     if (req.centralAuth.mode !== 'agent') return res.status(403).json({ ok: false, reason: '원격 명령(RMA)은 엣지별 개별 토큰만 허용합니다.' });
+    if (rmaSourceDenied(req, res, req.centralAuth.agent, 'rma-result')) return; // 64회차 F3: 결과 위조도 같은 출처 경계
     const b = req.body || {};
     if (!b.reqId) return res.status(400).json({ ok: false, reason: 'reqId가 필요합니다.' });
     const owner = rmaJobAgentOf(String(b.reqId));
