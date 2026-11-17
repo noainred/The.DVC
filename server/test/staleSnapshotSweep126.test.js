@@ -316,7 +316,7 @@ const TABLE = {
   'gpu/poller.js': ['own', 'inventoryUnreadReason(v2.606) — 상태가 connected 가 아니거나 호스트 0 이면 unread(빈 결과를 push 하지 않는다)'],
   'guestdisk/service.js': ['own', '게스트 수집 시각 기준 stale 행 표지'],
   'guestpart/notify.js': ['own', '게스트 파티션은 별도 수집(guestpart DB) — 스냅샷은 vCenter 이름 · 모드만'],
-  'guestpart/report.js': ['unverified', '스냅샷은 인벤토리 분모(게스트 수 · 전원) — 멈춘 vCenter 의 분모 표지는 보지 못했다'],
+  'guestpart/report.js': ['own', '130 확인 — 파티션 표본 시각(lastTs) 기준 stale 을 vCenter · VM 행에 싣는다(수집이 멈추면 표본이 낡아 표지가 선다) · 스냅샷은 분모(게스트 수 · 전원)'],
   'insights/fleetInventory.js': ['shared', ''],
   'insights/forecast.js': ['display', '추이는 지표 샘플러(공용 판정으로 결측) — 현재 용량 · 사용은 스냅샷 값 그대로(화면)'],
   'insights/graph.js': ['display', '끊긴 호스트는 usageReadable — vCenter 단위 표지는 화면 몫'],
@@ -332,7 +332,7 @@ const TABLE = {
   'routes/api/hardwareGpu.js': ['display', ''],
   'routes/api/inventory.js': ['display', '인벤토리 · 요약 화면 — vcentersStale · stale 표지를 함께 싣는다'],
   'routes/api/overviewNsx.js': ['display', ''],
-  'routes/api/reports.js': ['unverified', '용량 예측 · 리포트 라우트(CSV 포함) — 126회차가 깊이 보지 못함'],
+  'routes/api/reports.js': ['own', '130 확인 — 위임 라우트: 용량 예측은 insights/forecast(추이는 샘플러가 공용 판정으로 결측) · 변경 이력은 notCollected 표지 · 이 파일은 스냅샷을 범위 · 이름으로만 읽는다'],
   'routes/api/storagePaths.js': ['unverified', '데이터스토어 경로 점검 CSV — 126회차가 깊이 보지 못함'],
   'routes/api/svcInventory.js': ['shared', ''],
   'routes/api/toolsAnalytics.js': ['unverified', 'N+1 · 낭비 · 위협 분석 화면 — 멈춘 vCenter 표지 유무를 보지 못했다'],
@@ -344,8 +344,8 @@ const TABLE = {
   'search/deepSearch.js': ['display', ''],
   'search/inventoryIndex.js': ['display', ''],
   'store.js': ['shared', '롤업 · 전력 적재(vcSkip)'],
-  'vcenter/vmExport.js': ['unverified', 'VM 목록 내보내기 — 멈춘 vCenter 의 행 표지 유무를 보지 못했다'],
-  'vcenter/vmExportXlsx.js': ['unverified', '위와 같다'],
+  'vcenter/vmExport.js': ['shared', '130 R5 — inventoryNotCurrent: 상태 invAt(읽은 시각 · 모르면 null) · invNotCurrent · 내보내기 메타'],
+  'vcenter/vmExportXlsx.js': ['own', '130 R5 — 메타 invNotCurrent 를 요약 · 폴더 트리의 ‘기준’ 줄과 읽는 법 시트에 적는다(CSV 는 머리말이 없어 화면 타일이 말한다)'],
   'vmtrack/service.js': ['own', 'inventoryUnreadReason(v2.743) — 값이 남은 vCenter 는 변화 0 으로 diff, 빈 vCenter 는 건너뜀'],
 };
 const SHARED_RE = /\b(?:unreadVcenterReasons|unreadVcenterIds|notReadVcentersOf)\b/;

@@ -4,7 +4,7 @@ import { droppedSecretNote } from './droppedSecretText.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
-import { authStopInfo } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
+import { authStopInfo, authStopShort, isUnreadStop } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 
 import { REGIONS } from '../regions.js'; // v2.575 IMP-10 — 단일 소스
 const EMPTY = { id: '', name: '', host: 'https://', username: '', password: '', vcenterId: '', proxyId: '', enabled: true, pollIntervalSec: '', timeoutMs: '', location: { region: '아시아' } };
@@ -103,7 +103,7 @@ export default function NsxAdmin() {
               <tr key={m.id}>
                 <td><b>{m.id}</b></td>
                 <td>{m.name}
-                  {m.authStopped && <span className="badge red" style={{ marginLeft: 6, fontSize: 10, whiteSpace: 'nowrap' }} title={`${authStopInfo(m.authStopped, { what: '이 NSX Manager' })?.detail || ''} — 비밀번호를 고치면 자동 재개합니다. 저장된 비밀번호로 한 연결 테스트가 성공해도 풀립니다.`}>인증 실패 정지</span>}
+                  {m.authStopped && <span className="badge red" style={{ marginLeft: 6, fontSize: 10, whiteSpace: 'nowrap' }} title={isUnreadStop(m.authStopped) ? (authStopInfo(m.authStopped, { what: '이 NSX Manager' })?.detail || '') : `${authStopInfo(m.authStopped, { what: '이 NSX Manager' })?.detail || ''} — 비밀번호를 고치면 자동 재개합니다. 저장된 비밀번호로 한 연결 테스트가 성공해도 풀립니다.`}>{authStopShort(m.authStopped)}</span>}
                 </td>
                 <td className="muted">{m.host}{m.proxyId && <span className="badge amber" style={{ marginLeft: 6, fontSize: 10 }} title={`중계 서버(HAProxy) 경유: ${proxies.find((p) => p.id === m.proxyId)?.name || m.proxyId}`}>프록시 경유</span>}</td>
                 <td className="muted">{m.username}</td>

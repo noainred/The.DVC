@@ -73,7 +73,9 @@ export function idracAuthStops(registry = null) {
   if (!list) { try { list = loadRegistry(); } catch { list = []; } }
   for (const s of list || []) {
     if (!s?.id) continue;
-    const rec = authGuard.authStopFor(s);
+    // 130회차(127 반증): 보기만 한다(peekAuthStop) — 이 함수는 폴러 상태 · 목록 조회가 등록부 **전체**에 부른다. authStopFor 면 못 읽는 창에서 이번 주기에
+    //   수집하지 않는 서버가 자격 지문의 탐침을 받아 가 결과가 오지 않았다(시한 10분씩 지연). 주기 수집의 문(pollOnce)은 그대로 authStopFor 다.
+    const rec = authGuard.peekAuthStop(s);
     if (rec) out.set(String(s.id), stopView(rec));
   }
   return out;

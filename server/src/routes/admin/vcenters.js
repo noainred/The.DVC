@@ -1,6 +1,7 @@
 // 데이터 소스·vCenter CRUD/테스트/순서 — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
 import { config, loadVcenterConfig } from '../../config.js';
 import { vcAuthGuard } from '../../vcenter/restClient.js';
+import { authStopView } from '../../util/authGuard.js';   // 130회차: 못 읽음 표지(unread)를 떨구지 않는 공용 view(127 C1 의 남은 사본)
 import { store } from '../../store.js';
 import { getDataSource, setDataSource, isDataSourceOverridden } from '../../runtime-settings.js';
 import { listRegistry, addVcenter, updateVcenter, removeVcenter, testConnection, registryLoadError, registryWriteRefusal } from '../../vcenter/registry.js';
@@ -75,8 +76,11 @@ adminRouter.get('/vcenters', adminOnly, (req, res) => {
   let full = new Map();
   try { full = new Map((loadVcenterConfig().vcenters || []).map((v) => [v.id, v])); } catch { /* 목록은 그대로 */ }
   const withStop = (v) => {
-    const rec = full.has(v.id) ? vcAuthGuard.authStopFor(full.get(v.id)) : null;
-    return rec ? { ...v, authStopped: { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason } } : v;
+    // 130회차(127 반증 — 재현): 목록은 **보기만** 한다(peekAuthStop). authStopFor 로 물으면 정지 기록 파일을 못 읽는 창에서 이 조회가 자격 지문의 탐침을 받아 간다 —
+    //   이 목록은 비활성 · 점검중 · 엣지 위임 vCenter(이 포탈이 수집하지 않는다)까지 표시 순서대로 묻기 때문에, 탐침이 수집하지 않는 vCenter 로 가면 결과가 오지 않아
+    //   직접 수집 vCenter 가 시한(10분)씩 기다렸다. 자격증명을 고친 경우의 표시는 같다(peek 도 기록과 자격이 다르면 null — 기록 정리는 주 폴러가 한다).
+    const rec = full.has(v.id) ? vcAuthGuard.peekAuthStop(full.get(v.id)) : null;
+    return rec ? { ...v, authStopped: authStopView(rec) } : v;
   };
   const all = sortByOrder(listRegistry());
   const allowed = scopedVcenterIds(req.user, store.get());

@@ -13,6 +13,7 @@ import { numOrNull } from '../../numOrNull.js';
 import { unitText } from '../unitText.js';
 import { blankOr } from '../blankOr.js';
 import { collectDropNote } from './collectDropText.js';
+import { authStopShort } from './storageAuthText.js'; // 130회차(127 C4 의 남은 형제): 배지 글자 — 못 읽음 정지(정지 기록 파일 읽기 오류)는 인증 실패가 아니다
 import { agoText } from './relTime.js'; // v2.640 ①: 상대시각 사본(9벌 중 하나 — v2.613 WEB2613-15)을 공용 코어로
 
 export const SECRET_MASK = '********';
@@ -220,7 +221,7 @@ export const CVP_EDGE_KINDS = Object.freeze(Object.keys(EDGE_NO_REPORT_TEXT));
 export function serverState(server, { enabled = true } = {}) {
   const st = server && server.status && typeof server.status === 'object' ? server.status : null;
   if (server && server.enabled === false) return { tone: 'muted', label: '비활성', detail: '등록은 되어 있지만 수집하지 않습니다.' };
-  if (isAuthStopped(st && st.authStopped)) return { tone: 'bad', label: '인증 실패 정지', detail: '' };
+  if (isAuthStopped(st && st.authStopped)) return { tone: 'bad', label: authStopShort(st.authStopped), detail: '' };
   if (!st || (st.ok == null && !st.collectedAt && !st.error)) {
     if (!enabled) return { tone: 'muted', label: '수집 기록 없음', detail: '수집이 꺼져 있습니다(설정).' };
     // v2.613 CONTRACT2613-04: 엣지 위임인데 보고가 없으면 서버가 이유(kind)를 나눠 준다 — 구버전은 기다려도 안 된다.

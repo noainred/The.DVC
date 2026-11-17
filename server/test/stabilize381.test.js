@@ -117,7 +117,9 @@ test('④ 알림 평가 — 원장이 캐시에 없으면 다시 만들지 않�
   assert.deepEqual(warm.filter((a) => String(a.key).startsWith('ipdup:')).map((a) => a.key), ['ipdup:10.71.0.5']);
   assert.equal(warm.heldPrefixes.size, 0);
   const src = stripComments(fs.readFileSync(new URL('../src/alerts.js', import.meta.url), 'utf8'));
-  assert.match(src, /if \(held\.has\(key\) \|\| heldPrefixes\.some\(\(p\) => key\.startsWith\(p\)\)/, '해소 단계가 앞부분 보류를 본다');
+  // 130회차(기대값이 바뀐 이유): 접두 보류는 '가장 긴 접두' 가 정한다(prefixHeld — 못 읽은 vCenter 'a' 의 접두가 읽힌 vCenter 'a:b' 의 키를 덮지 않게 · rebut130 R4). 해소 단계가 앞부분 보류를 보는 것은 그대로다.
+  assert.match(src, /if \(held\.has\(key\) \|\| prefixHeld\(key\)/, '해소 단계가 앞부분 보류를 본다');
+  assert.match(src, /const prefixHeld = \(key\) => \{ const h = longest\(heldPrefixes, key\); return h >= 0 && h > longest\(heldExempt, key\); \};/);
   assert.doesNotMatch(src, /buildIpamRows\(/, '알림 평가는 원장을 만들지 않는다');
 });
 

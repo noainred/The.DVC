@@ -29,7 +29,7 @@ import { endpointAllowed, project, projectAll, ENDPOINTS, GROUPS } from '../publ
 import { buildOpenApi } from '../publicapi/openapi.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { clusterCountOf } from '../clustercfg/analyze.js'; // v2.743 LEFT-07 — 내부 /summary 와 같은 클러스터 개수
-import { msOrNull } from '../publicapi/time.js';
+import { msOrNull, vcCollectedAtOf, isMaintenanceVc } from '../publicapi/time.js';
 import { unreadVcenterReasons } from '../metrics/unreadVcenters.js';   // 126회차: '지금 값이 아닌 vCenter' 공용 판정(지표 샘플러 · 알림 · /metrics 와 한 벌)
 import { isAdminReq, addressMatcher, extendMatcher, maskedNameLabel } from '../auth/addressMask.js';
 
@@ -291,29 +291,9 @@ v1.get('/inventory/summary', guarded('/inventory/summary', ({ res, snap, inScope
  * 3일 전에 멈춘 vCenter 도 '방금 수집' 으로 나갔다(문서는 'generatedAt 과 collectedAt 의 차이가 데이터의 나이' 라고 안내한다).
  * ⚠ `snap.generatedAt` 은 ISO 문자열이다(`store.js`) — msOrNull 로 epoch ms 로 통일한다.
  */
-/** 126회차: 점검중 vCenter 인가 — 공용 판정(metrics/unreadVcenters.js)의 사유로 본다(상태 비교를 여기 다시 쓰지 않는다). */
-const isMaintenanceVc = (v) => !!v && v.id != null && unreadVcenterReasons({ vcenters: [v] }).get(String(v.id)) === 'maintenance';
-// v2.771(R6-F3-5): export 는 회귀 테스트(audit2771e)가 직접 부르기 위해서다.
-export function vcCollectedAtOf(v, snap) {
-  // 126회차(재현): 점검중 vCenter 는 store 가 직전 캐시를 **기한 없이** 서빙한다 — 그 값을 받은 시각은 스냅샷에 없다(수집 실패 이월 중에 점검중으로
-  //   돌렸으면 staleSince). 예전에는 맨 아래 줄이 스냅샷 시각(지금)을 돌려줘 며칠 묵은 값이 '방금 수집' 으로 나갔다 — 모르면 null(지어내지 않는다).
-  if (isMaintenanceVc(v)) {
-    const since = msOrNull(v.staleSince);
-    if (!(since != null && since > 0)) return null;
-    const rcv = v.collectSource === 'site' ? msOrNull(v.receivedAt) : null;
-    return rcv != null ? Math.min(rcv, since) : since;
-  }
-  // v2.771(점검 R6-F3-5): 엣지가 자기 수집 실패로 lastGood 을 이월해 보낸 항목(unreachable + staleSince)은 받은 시각이 아니라
-  //   그 값의 시각이다 — receivedAt 만 보면 최대 6시간 묵은 값이 '방금' 으로 나갔다(직접 수집 이월은 staleSince 를 쓰는데 비대칭).
-  //   엣지 시각은 수신 시각을 넘지 못한다(min — store 병합이 이미 자르지만 여기서도 자른다).
-  if (v?.collectSource === 'site') {
-    const rcv = msOrNull(v.receivedAt);
-    const since = v.status === 'unreachable' ? msOrNull(v.staleSince) : null;
-    return rcv != null && since != null && since > 0 ? Math.min(rcv, since) : rcv;
-  }
-  if (v?.stale === true && v.staleSince != null) return msOrNull(v.staleSince);
-  return msOrNull(v?.collectedAt ?? snap.generatedAt);
-}
+// v2.771(R6-F3-5): export 는 회귀 테스트(audit2771e)가 직접 부르기 위해서다. 130회차: 본체는 publicapi/time.js 로 옮겼다 — VM 내보내기(vcenter/vmExport.js)가
+//   같은 판정으로 '인벤토리를 읽은 시각' 을 말해야 하는데 도메인은 routes/ 를 import 할 수 없다(arch2579 ①). 판정은 그 파일 하나다(사본 금지).
+export { vcCollectedAtOf };
 
 v1.get('/inventory/vcenters', guarded('/inventory/vcenters', ({ res, snap, inScope, fields, scopeMeta, apiPath }) => {
   const rows = (snap.vcenters || []).filter((v) => inScope(v.id)).map((v) => {

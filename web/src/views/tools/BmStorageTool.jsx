@@ -14,7 +14,7 @@ import { CsvExportModal, CsvImportModal } from '../../components/CsvBulkModals.j
 import { fmtAgo } from '../../util/fmt.js';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
-import { authStopSummary } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
+import { authStopSummary, authStopShort, isUnreadStop } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 import { droppedSecretNote } from '../droppedSecretText.js';
 import { missingChoice } from '../idrac/scanRangeFormText.js'; // v2.630 WEB2630-03: 목록에 없는 저장값을 그대로 보인다
 import BmStorHistoryPanel from './BmStorHistoryPanel.jsx'; // v2.635: 디스크 사용량 12시간 이력 차트(v2.688: 세 보기)
@@ -377,7 +377,7 @@ export default function BmStorageTool() {
                       <td style={{ textAlign: 'right' }} data-sort={s.ok ? s.usedBytes : ''}>{s.ok ? fmtBytes(s.usedBytes) : '—'}</td>
                       <td style={{ textAlign: 'right', fontWeight: 600 }} data-sort={s.ok ? s.availBytes : ''}>{s.ok ? fmtBytes(s.availBytes) : '—'}</td>
                       <td data-sort={p ?? ''}>{s.ok ? pctCell(s.usedPct)
-                        : s.authStopped ? <span className="badge red" style={{ fontSize: 11 }} title={s.error || ''}>인증 실패 정지{s.authStopped.attempts != null ? ` · ${s.authStopped.attempts}회` : ''}</span>
+                        : s.authStopped ? <span className="badge red" style={{ fontSize: 11 }} title={s.error || ''}>{authStopShort(s.authStopped)}{s.authStopped.attempts != null && !isUnreadStop(s.authStopped) ? ` · ${s.authStopped.attempts}회` : ''}</span>
                         : s.error ? <span style={{ color: 'var(--red)', fontSize: 11.5 }} title={s.error}>⚠ {s.error.slice(0, 40)}{s.error.length > 40 ? '…' : ''}</span>
                           : <span className="muted" style={{ fontSize: 12 }}>수집 대기</span>}</td>
                       <td className="muted" style={{ fontSize: 11.5 }} data-sort={s.at || ''}>{s.at ? fmtAgo(s.at) : '—'}</td>
