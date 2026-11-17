@@ -81,7 +81,7 @@
 | `auth/` | 16 | 4,433 | `auth/scope.js` (105) | 사용자 데이터 범위(scope) 해석 — "이 사용자가 볼 수 있는 vCenter"를 계산한다. |
 | `availability/` | 1 | 205 | `availability/analyze.js` (2) | availability/analyze.js — 특수 기능 'VM 가용성(SLA)'(도구 키 `vm-availability`, v2.707 — C6) 판정(순수). |
 | `backup/` | 5 | 1,774 | `backup/settings.js` (4) | 백업 설정 + 스케줄러 + 변경 감시. |
-| `bareos/` | 56 | 15,315 | `bareos/settings.js` (14) | bareos/settings.js — Bareos 연동 설정(v2.820 · v2.823 법인별 Director). 파일: CONFIG_DIR/bareos.json (0600 · 원자적 쓰기 · 비밀 봉인). |
+| `bareos/` | 56 | 15,324 | `bareos/settings.js` (14) | bareos/settings.js — Bareos 연동 설정(v2.820 · v2.823 법인별 Director). 파일: CONFIG_DIR/bareos.json (0600 · 원자적 쓰기 · 비밀 봉인). |
 | `bmfolders/` | 7 | 1,021 | `bmfolders/build.js` (2) | bmfolders/build.js — 물리서버 폴더 판정 · 집계(순수 — DB · 네트워크 · 저장소를 읽지 않는다. v2.984). |
 | `bmstor/` | 16 | 2,966 | `bmstor/registry.js` (11) | bmstor/registry.js — 베어메탈 스토리지 서버 목록 + 설정(v2.340). |
 | `bmusage/` | 109 | 25,302 | `bmusage/poller.js` (19) | bmusage/poller.js — 베어메탈 사용률 주기 수집(v2.550). |
@@ -92,7 +92,7 @@
 | `collector/` | 11 | 2,526 | `collector/registry.js` (81) | Collector registry — the list of remote collector agents (one per datacenter) |
 | `commmap/` | 2 | 461 | `commmap/demoMask.js` (3) | commmap/demoMask.js — 통신 지도·데이터 흐름 지도·3단 지도의 **데모 계정 판본** 입력 가림(v2.768 점검 R3-C2-2). |
 | `contention/` | 4 | 477 | `contention/cache.js` (4) | CPU 경합·디스크 지연 캐시(v2.706 C2·C3) — vCenter 별 · moref 별 최근 5분 창 요약. 인메모리다. |
-| `corelicense/` | 1 | 252 | `corelicense/analyze.js` (8) | corelicense/analyze.js — 특수 기능 '코어 라이선스 산정'(도구 키 `core-license`, v2.703 — A13) 판정(순수). |
+| `corelicense/` | 1 | 252 | `corelicense/analyze.js` (9) | corelicense/analyze.js — 특수 기능 '코어 라이선스 산정'(도구 키 `core-license`, v2.703 — A13) 판정(순수). |
 | `corpusage/` | 1 | 332 | `corpusage/build.js` (3) | corpusage/build.js — 법인별 서버 CPU·메모리 사용량 합계(순수, v2.625). |
 | `cost/` | 2 | 234 | `cost/analyze.js` (1) | cost/analyze.js — 특수 기능 '비용 배분(쇼백)'(도구 키 `cost-showback`, v2.707 — C11) 계산(순수). |
 | `curuser/` | 12 | 1,950 | `curuser/aggregate.js` (4) | curuser/aggregate.js — '현재 사용자' 집계(v2.520, 순수 모듈). |
@@ -110,7 +110,7 @@
 | `guest/` | 1 | 69 | `guest/accountService.js` (1) | 게스트 계정 추가 오케스트레이션 — vCenter에 로그인해 선택된 VM들의 게스트 OS에 sudo 계정을 |
 | `guestdisk/` | 5 | 1,441 | `guestdisk/settings.js` (6) | guestdisk/settings.js — 게스트 디스크 회수 리포트 설정 (`guest-disk.json`, v2.459). |
 | `guestpart/` | 5 | 1,364 | `guestpart/notify.js` (2) | guestpart/notify.js — 게스트 파티션 사용률 메일 발송·일정·기록(v2.749). 규칙은 아이실론 디렉터리 사용량과 같은 코어를 쓴다 |
-| `health/` | 2 | 572 | `health/network.js` (1) | 글로벌 네트워크 점검 — 전세계 제어플레인 엔드포인트(vCenter·NSX 매니저)의 중앙에서의 |
+| `health/` | 2 | 577 | `health/network.js` (1) | 글로벌 네트워크 점검 — 전세계 제어플레인 엔드포인트(vCenter·NSX 매니저)의 중앙에서의 |
 | `horizon/` | 11 | 2,696 | `horizon/horizon.js` (4) | Horizon Connection Server 연동 — 등록부 · 공용 로그인 세션 · 연결 테스트 · 라이선스 만료일 조회. |
 | `hostaccess/` | 4 | 657 | `hostaccess/service.js` (2) | hostaccess/service.js — 호스트 접근 제어 실행 계층(v2.485): 상태 조회 · 계획 · 적용(런타임) · 확정 · 되돌림. |
 | `hostcfg/` | 6 | 1,113 | `hostcfg/parse.js` (4) | 호스트 구성·보안(v2.699 — A1 보안 하드닝 · A9 구성 드리프트 · A11 재부팅 필요·빌드 불일치 · A12 호스트 인증서 만료). |
@@ -145,7 +145,7 @@
 | `relaytopo/` | 4 | 757 | `relaytopo/store.js` (4) | relaytopo/store.js — 중계 토폴로지(Main – Edge DVC – IRS) 저장(v2.431, 사용자 요구 '첨부한 표처럼 Main-Edge1-Edge2 구조의 |
 | `reports/` | 8 | 1,050 | `reports/compliance.js` (4) | 버전/패치 준수 리포트 — VMware Tools 상태·VM 하드웨어 버전·ESXi 버전 분포를 스냅샷만으로 |
 | `rma/` | 14 | 2,911 | `rma/jobs.js` (8) | RMA 원격 명령 잡 큐(중앙, 인메모리) — claim→ack 2단계 확인응답(captureJobs.js 패턴 이식) |
-| `routes/` | 171 | 53,658 | `routes/capacity.js` (1) | Capacity Advisor API — 포탈/엣지 호스트 리소스 실측·평가·권고 조회. |
+| `routes/` | 171 | 53,688 | `routes/capacity.js` (1) | Capacity Advisor API — 포탈/엣지 호스트 리소스 실측·평가·권고 조회. |
 | `sanswitch/` | 51 | 11,616 | `sanswitch/registry.js` (11) | sanswitch/registry.js — SAN 스위치 등록부(v2.410). |
 | `search/` | 4 | 944 | `search/deepSearch.js` (3) | 심층 검색 — 다조건으로 VM을 검색한다. 1차는 스냅샷 기반(즉시): 게이트웨이·IP/서브넷·OS·전원· |
 | `security/` | 20 | 5,213 | `security/secretVault.js` (36) | secretVault.js — 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). |
@@ -177,7 +177,7 @@
 | `wiki/` | 4 | 1,276 | `wiki/store.js` (6) | wiki/store.js — 위키(컨플루언스 같은 문서 공간) 저장소(v2.881 · 시안 docs/design/wiki-issues ①~⑤ · ⑫). |
 | `xferspeed/` | 7 | 1,994 | `xferspeed/schedule.js` (5) | xferspeed/schedule.js — 전송 속도 측정의 **실행 일정**(순수 — 파일·타이머 없음, v2.735). |
 
-디렉터리 100개 · 파일 1493개 · 345,875줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
+디렉터리 100개 · 파일 1493개 · 345,919줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
 <!-- arch-doc:modules:end -->
 
 ### 3-3. 라우트 그룹 → 게이트

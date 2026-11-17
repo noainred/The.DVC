@@ -5,7 +5,7 @@
 
 - 생성: `node scripts/common-doc.mjs` · 최신 여부: `node scripts/common-doc.mjs --check`
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다. 설명을 고치려면 그 모듈의 **머리 주석 첫 단락**을 고친다.
-- 훑은 소스 4357개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
+- 훑은 소스 4358개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
 
 ## 읽는 법 · 한계
 
@@ -239,11 +239,11 @@
 | 모듈 | 하는 일 | 사용처 | 다른 영역 | 테스트 |
 |---|---|---|---|---|
 | `server/src/config.js` | (머리 주석 없음) | 512 | 86 | 184 |
-| `server/src/store.js` | (머리 주석 없음) | 208 | 43 | 331 |
+| `server/src/store.js` | (머리 주석 없음) | 208 | 43 | 332 |
 | `server/src/collector/registry.js` | Collector registry — the list of remote collector agents (one per datacenter) the central portal pulls power from. Stored in CONFIG_DIR/collectors.jso… | 83 | 32 | 54 |
 | `server/src/security/secretVault.js` | 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). | 40 | 28 | 30 |
 | `server/src/mock/demo/flags.js` | 데모(DATA_SOURCE=mock) 모드 공용 판정(v2.708). | 85 | 26 | 3 |
-| `server/src/alerts.js` | Alerting — evaluates threshold/condition rules against the current snapshot on an interval and pushes notifications to Slack(incoming webhook) and/or… | 31 | 23 | 36 |
+| `server/src/alerts.js` | Alerting — evaluates threshold/condition rules against the current snapshot on an interval and pushes notifications to Slack(incoming webhook) and/or… | 31 | 23 | 37 |
 | `server/src/proxy/sshExec.js` | Small SSH helper built on ssh2: connect, run commands, and upload files via SFTP. Shared by the proxy auto-deploy and the agent auto-deploy features.… | 49 | 17 | 31 |
 | `server/src/datacenter/store.js` | DataCenter(법인) 레지스트리 — vCenter의 '상위 개념'. | 47 | 16 | 14 |
 | `server/src/vcenter/registry.js` | vCenter registry — read/write the managed list of vCenters in config/vcenters.json (the same file the live collector polls), with validation, password… | 31 | 15 | 12 |
@@ -269,6 +269,7 @@
 | `server/src/collector/state.js` | In-memory state for distributed collection on the CENTRAL portal: the merged host→power map pulled from remote collector agents, plus per-collector st… | 22 | 7 | 33 |
 | `server/src/central/inventory.js` | 사이트 위임 수집 — 중앙(OC2) 측 인벤토리 캐시. | 20 | 7 | 23 |
 | `server/src/insights/analysisServers.js` | 서버 분석 공용 — iDRAC 등록부(중앙) + 위임 법인의 원격 인벤토리 병합·법인 귀속·필터(v2.579 에 `routes/admin/shared.js` 에서 분리, ARCH-04). | 17 | 7 | 6 |
+| `server/src/metrics/unreadVcenters.js` | '지금 값' 으로 쓰지 않는 vCenter 와 그 사유(순수 leaf — import 0). | 13 | 7 | 6 |
 | `server/src/clustercfg/analyze.js` | 특수 기능 '클러스터 HA·DRS 점검'(도구 키 `cluster-check`, v2.701) 판정(순수). 입력은 스냅샷 vCenter 배열(vc.clusterCfg = clustercfg 캐시)과 호스트 배열. vCenter 왕복 0. | 12 | 7 | 7 |
 | `server/src/idrac/poller.js` | Portal-embedded iDRAC power poller. On an interval it reads current power from every enabled registered Dell server (Redfish) and appends a sample to… | 12 | 7 | 11 |
 | `server/src/vcenter/collectTarget.js` | '이 포탈이 직접 로그인해 수집하는 vCenter 인가' 판정(순수 · import 0) — v2.732(점검 2회차 B4-01). | 9 | 7 | 2 |
@@ -281,7 +282,6 @@
 | `server/src/storage/store.js` | 이 노드가 수집한 최신 스냅샷 보관(v2.302). deviceId → NormalizedSnapshot. 재시작 후에도 마지막 뷰가 비지 않게 파일로 영속 (자격증명 없음 — 정규화 스냅샷만. 그래도 계정 목록이 있어 0600 + gitignore). 시계열(용량 추… | 15 | 6 | 15 |
 | `server/src/central/edgeRecord.js` | 엣지가 push 한 **장비 스냅샷 원소**의 수신 정리와, 그 보관 파일의 쓰기(v2.599). | 14 | 6 | 9 |
 | `server/src/upgrade/signature.js` | 업그레이드 번들 배포자 서명 검증의 **런타임 판정 하나**(검토 S-10, v2.730). | 13 | 6 | 11 |
-| `server/src/metrics/unreadVcenters.js` | '지금 값' 으로 쓰지 않는 vCenter 와 그 사유(순수 leaf — import 0). | 11 | 6 | 5 |
 | `server/src/security/emergencyStop.js` | 긴급중단(Emergency Stop) — 2인 승인(관리자 2명 OTP)으로만 켜고/끄는 전역 수집 정지 스위치. | 8 | 6 | 7 |
 | `server/src/security/certMonitor.js` | TLS 인증서 만료 감시 — 등록된 vCenter·NSX Manager의 443 인증서를 주기적으로 프로브해 만료일(D-90 경고 / D-30 위험)을 추적한다. 28개 vCenter 규모에서 수동 추적이 불가능한 항목(커뮤니티 단골 장애: vCenter STS/머신… | 7 | 6 | 8 |
 | `server/src/auth/addressMask.js` | 비-admin 응답에서 장비 관리 주소·계정명을 가린다(v2.599 AUTHZ-2599-03). | 44 | 5 | 17 |
