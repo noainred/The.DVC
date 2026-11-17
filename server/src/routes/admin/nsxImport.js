@@ -9,6 +9,7 @@ import path from 'node:path';
 import { loadRegistry as loadNsxFull, listRegistry as listNsx, addManager as addNsx, updateManager as updateNsx, removeManager as removeNsx, testConnection as testNsx } from '../../nsx/registry.js';
 import { nsxStore, nsxAuthGuard } from '../../nsx/store.js';
 import { adminOnly, existsFile, fullScopeOnlyWith } from './shared.js';
+import { safeLoadText } from '../../util/atomicWrite.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { requirePerm as requireCsvPerm } from '../../auth/auth.js';
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
@@ -122,7 +123,8 @@ adminRouter.post('/vcenters/import-file', csvPerm, adminOnly, fleetOnly, (req, r
     if (result.ok) store.refresh().catch(() => {});
     res.status(result.ok ? 200 : 400).json({ ...result, file: filePath });
   } catch (err) {
-    res.status(400).json({ ok: false, reason: `파일 읽기 실패: ${err.message}` });
+    // 72회차(범위 밖 확정 — 메인 처리): JSON.parse 오류 원문은 파일 앞부분(자격증명 조각)을 싣는다 → safeLoadText 규약(v2.744)
+    res.status(400).json({ ok: false, reason: `파일 읽기 실패: ${safeLoadText(err)}` });
   }
 });
 }

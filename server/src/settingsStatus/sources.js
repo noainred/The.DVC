@@ -12,6 +12,8 @@
  *     만들 수 있다(util/authGuard.js). vCenter 는 스냅샷 collectionErrors 의 authStopped 를 세고, SMTP 는 mailStatus(내부 peek)를 쓴다.
  *   - 값을 못 읽었으면 던진다(→ 그 항목만 unknown). 0 으로 바꿔 넘기지 않는다. 로더가 손상 파일을 보존본으로 옮기고 **기본값을 돌려주는**
  *     모듈(로드 오류 표지가 없는 것)은 damaged(파일) 로 따로 본다 — 기본값의 '0개' 를 미설정으로 보이게 하지 않는다(반증 D2).
+ *     72회차 F2: damaged() 는 **로더를 부른 뒤에** 본다 — 캐시 없는 로더(nsx 등)는 손상 파일을 그 호출에서 보존본으로 옮기므로, 먼저 보면
+ *     손상 직후 첫 계산이 '파일 있음(손상 아님) + 0개' 로 꺼짐 · 미설정을 냈다.
  *   - 읽기가 새 파일을 만들지 않게 한다 — 인증이 꺼진 설치에서 listUsers() 는 초기 관리자 비밀번호 파일을 시드한다(반증 D4).
  */
 import fs from 'node:fs';
@@ -58,33 +60,36 @@ export const damaged = (name) => { const f = path.join(config.configDir, name); 
 /** 키 → 사실 함수. grade.js RULES 와 같은 키. */
 export function settingsStatusSources({ now = Date.now() } = {}) {
   return {
-    'datacenter-admin': () => ({ loadError: damaged('datacenters.json'), count: len(listDatacenters()) }),
+    'datacenter-admin': () => ({ count: len(listDatacenters()), loadError: damaged('datacenters.json') }),
     'vcenter-admin': () => {
       const errs = store.get()?.collectionErrors;
-      return { loadError: damaged('vcenters.json'), count: len(listVcenters()), authStopped: Array.isArray(errs) ? errs.filter((e) => e && e.authStopped).length : null };
+      const count = len(listVcenters());
+      return { loadError: damaged('vcenters.json'), count, authStopped: Array.isArray(errs) ? errs.filter((e) => e && e.authStopped).length : null };
     },
-    'nsx-admin': () => ({ loadError: damaged('nsx.json'), count: len(listNsx()) }),
+    'nsx-admin': () => ({ count: len(listNsx()), loadError: damaged('nsx.json') }),
     'horizon-admin': () => { const loadError = damaged('horizon.json') || !!horizonLoadError(); return { loadError, count: loadError ? null : len(listHorizon()) }; },   // 38회차 R3: 읽기 오류 · 손상 기억도
     'idrac-admin': () => ({ loadError: !!idracLoadError() }),
     veeam: () => { const loadError = !!veeamLoadError(); return { loadError, count: loadError ? null : len(listVeeam()) }; },
     bareos: () => { const loadError = !!bareosLoadError(); return { loadError, directors: loadError ? null : len(loadBareos().directors) }; },
-    backup: () => ({ loadError: damaged('backup.json'), scheduleEnabled: loadBackupSettings().scheduleEnabled }),
+    backup: () => ({ scheduleEnabled: loadBackupSettings().scheduleEnabled, loadError: damaged('backup.json') }),
     'storage-intervals': () => ({ loadError: !!storageIntervalsLoadError() }),
     vmseries: () => ({ loadError: !!vmSeriesSettingsLoadError(), enabled: loadVmSeriesSettings().enabled === true }),
     'sansw-perf': () => ({ loadError: !!perfSettingsLoadError(), enabled: loadPerfSettings().enabled === true }),
     'isilon-dirusage': () => { const loadError = !!isiduSettingsLoadError(); return { loadError, targets: loadError ? null : len(loadIsidu().targets) }; },
-    'dir-usage': () => ({ loadError: damaged('dirusage.json'), targets: len(loadDirUsage().targets) }),
-    'guest-partition': () => ({ loadError: !!guestPartLoadError() || damaged('guest-disk.json'), enabled: loadGuestDisk().enabled === true }),
-    'gpu-guest': () => ({ loadError: damaged('gpu-guest.json'), enabled: gpuGuestEnabledLight() }),
+    'dir-usage': () => ({ targets: len(loadDirUsage().targets), loadError: damaged('dirusage.json') }),
+    'guest-partition': () => { const enabled = loadGuestDisk().enabled === true; return { loadError: !!guestPartLoadError() || damaged('guest-disk.json'), enabled }; },
+    'gpu-guest': () => ({ enabled: gpuGuestEnabledLight(), loadError: damaged('gpu-guest.json') }),
     collectors: () => { const loadError = !!registryLoadErrorSummary(); return { loadError, count: loadError ? null : len(listCollectors()) }; },
     // listProxies() 는 기본 프록시를 늘 첫 줄에 넣는다(proxy/registry.js) — 추가로 등록한 프록시만 센다(반증 D3).
-    proxy: () => ({ proxyHost: String(proxyConfig().proxyHost || '').trim(), proxies: len(listProxiesSafe()) }),
-    'auth-ad': () => { const t = adTransportStatus(); return { loadError: damaged('auth.json'), enabled: !!t.enabled, warnings: t.enabled ? len(t.warnings) : 0 }; },
+    // 72회차 F2: remote-access.json 이 손상돼 보존본만 남으면 로더가 기본값(중계 서버 없음)을 돌려준다 — '꺼짐' 이 아니라 주의다.
+    proxy: () => ({ proxyHost: String(proxyConfig().proxyHost || '').trim(), proxies: len(listProxiesSafe()), loadError: damaged('remote-access.json') }),
+    'auth-ad': () => { const t = adTransportStatus(); return { enabled: !!t.enabled, warnings: t.enabled ? len(t.warnings) : 0, loadError: damaged('auth.json') }; },
     secrets: () => { const p = loadSecretsPolicy(); return { mode: p.mode, locked: !!p.locked, recovered: !!p.recovered }; },
     'host-access': () => {
       const p = loadHostAccess().pending;
       const dl = p ? Number(p.deadline) : NaN;
-      return { pendingOverdue: !!p && Number.isFinite(dl) && dl < now };
+      // 72회차 F2: 손상 보존본만 남으면 로더가 기본값(적용 대기 없음)을 돌려준다 — 표시 없음(정상)으로 숨기지 않는다.
+      return { pendingOverdue: !!p && Number.isFinite(dl) && dl < now, loadError: damaged('host-access.json') };
     },
     'peer-trust': () => {
       const st = peerTrustStatus();
@@ -105,7 +110,7 @@ export function settingsStatusSources({ now = Date.now() } = {}) {
       return { loadError: damaged('alerts.json'), channels: Object.values(ch).filter((c) => c && c.enabled === true).length };
     },
     mail: () => { const s = mailStatus(); return { loadError: damaged('mail.json'), configured: s.configured, authStopped: !!s.authStopped }; },
-    'ai-search': () => ({ loadError: damaged('llm.json'), enabled: loadLlmConfig().enabled === true }),
+    'ai-search': () => ({ enabled: loadLlmConfig().enabled === true, loadError: damaged('llm.json') }),
     diagnostics: () => { const e = store.get()?.collectionErrors; return { collectionErrors: len(e) }; },
     upgrade: () => {
       const s = upgradeManager.status();
@@ -116,6 +121,8 @@ export function settingsStatusSources({ now = Date.now() } = {}) {
         latest: remote ? c.remote.latest : (watch ? c.watch.version : null),
         remoteConfigured: !!s.remoteConfigured,
         watchDir: !!String(s.watchDir || '').trim(),
+        // 72회차 F2: upgrade.json 이 손상돼 보존본만 남으면 로더가 환경 변수 기본값으로 돌아간다 — '업그레이드 소스 없음(미설정)' 이 아니라 주의다.
+        loadError: damaged('upgrade.json'),
       };
     },
   };

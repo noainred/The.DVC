@@ -14,6 +14,7 @@
 
 import { numOrNull } from '../util/numOrNull.js';
 import { capStr } from '../util/capStr.js';
+import { redactDeep, redactLogLine } from '../edgelog/redact.js';
 const KEEP = Math.max(2, Number(process.env.EDGELOG_KEEP_PER_AGENT) || 10);
 const LINE_CAP = Math.max(100, Number(process.env.EDGELOG_LINE_CAP) || 1_000);
 const AGENT_CAP = Math.max(10, Number(process.env.EDGELOG_MAX_AGENTS) || 200);
@@ -38,28 +39,39 @@ function sanitizeNode(n) {
     datacenter: s(n.datacenter, 128), pid: numOrNull(n.pid), uptimeMs: numOrNull(n.uptimeMs), startedAt: numOrNull(n.startedAt),
   };
 }
+/*
+ * 72회차 F3(개선 — 심층 방어): 엣지가 가린 뒤 보내지만 **중앙도 같은 가림을 한 번 더** 한다. 가림 규칙은 판마다 넓어졌다
+ *   (v2.599 URL 사용자정보 · v2.601 JSON 꼴 · v2.604 홑따옴표 · 72회차 진행상태 글자 값) — 업그레이드가 밀린 엣지(최소 2.549)는 옛 규칙으로 가린
+ *   줄 · 값을 보낸다. 가림은 같은 함수(edgelog/redact.js)이고 이미 가린 값은 그대로라(멱등) 개수가 두 번 늘지 않는다.
+ *   줄은 collect.js 와 같은 순서 — 가린 뒤 자른다(먼저 자르면 끝 표지가 잘린 비밀 앞부분이 남는다 — 18회차 A-1).
+ */
+const SCAN_MAX = 16_384;
 /** 로그 줄 — 평범한 객체만, msg 는 글자 LINE_MAX 자. */
 function sanitizeLine(e) {
   if (!isObj(e)) return null;
   const msg = typeof e.msg === 'string' ? e.msg : '';
-  return { id: numOrNull(e.id), time: typeof e.time === 'string' || typeof e.time === 'number' ? s(e.time, 40) : '', level: s(e.level, 16), msg: capStr(msg, LINE_MAX) };
+  return { id: numOrNull(e.id), time: typeof e.time === 'string' || typeof e.time === 'number' ? s(e.time, 40) : '', level: s(e.level, 16), msg: capStr(redactLogLine(msg.slice(0, SCAN_MAX)), LINE_MAX) };
 }
 /** 상태 항목 — 알려진 키만. value 는 크기 합계 상한 안에서만 남기고 넘치면 null + 개수. */
 function sanitizeStatus(list) {
-  if (!Array.isArray(list)) return { status: null, dropped: 0, valuesDropped: 0 };
+  if (!Array.isArray(list)) return { status: null, dropped: 0, valuesDropped: 0, masked: 0 };
   const out = [];
-  let dropped = 0, valuesDropped = 0, total = 0;
+  let dropped = 0, valuesDropped = 0, total = 0, masked = 0;
   for (const x of list) {
     if (!isObj(x)) { dropped += 1; continue; }
     if (out.length >= STATUS_ITEM_CAP) { dropped += 1; continue; }
-    const item = { key: s(x.key, 80), label: s(x.label, 120), group: s(x.group, 80), ok: x.ok === true, error: x.error == null ? null : s(x.error, 300), value: null, ...(x.truncated === true ? { truncated: true } : {}) };
+    const item = { key: s(x.key, 80), label: s(x.label, 120), group: s(x.group, 80), ok: x.ok === true, error: x.error == null ? null : capStr(redactLogLine(s(x.error, 1_000)), 300), value: null, ...(x.truncated === true ? { truncated: true } : {}) };
     if (x.value != null) {
       const b = bytesOf(x.value);
-      if (total + b <= STATUS_MAX_BYTES) { item.value = x.value; total += b; } else { valuesDropped += 1; item.valueDropped = true; }
+      if (total + b <= STATUS_MAX_BYTES) {
+        const r = redactDeep(x.value);   // 72회차 F3: 중앙도 가린다(옛 엣지 · 값 속 비밀)
+        item.value = r.value; total += b; masked += r.masked;
+        if (r.truncated) item.truncated = true;
+      } else { valuesDropped += 1; item.valueDropped = true; }
     }
     out.push(item);
   }
-  return { status: out, dropped, valuesDropped };
+  return { status: out, dropped, valuesDropped, masked };
 }
 let _map = new Map();       // agentLower -> { agent, snaps: [최신이 뒤] }
 let _sinceAt = Date.now();  // 이 저장소가 시작된 시각(재시작 감지)
@@ -106,7 +118,8 @@ export function putEdgeLog(agent, snap = {}) {
     //   `null`** 을 주는데 여기서 0 이 되어 화면이 **"상태 점검 실패 0건"**(= 점검을 안 한 것을
     //   '전부 정상' 으로)이라 말했다. v2.561 이 스토리지 적재에서 겪은 것과 같은 유형이다.
     statusFailed: numOrNull(snap.statusFailed),
-    maskedFields: numOrNull(snap.maskedFields) ?? 0,
+    // 72회차 F3: 중앙이 더 가린 개수를 더한다(엣지가 이미 가린 값은 다시 세지 않는다 — redactDeep 멱등).
+    maskedFields: (numOrNull(snap.maskedFields) ?? 0) + st.masked,
   };
   const cur = _map.get(key) || { agent: t(agent), snaps: [] };
   cur.agent = t(agent) || cur.agent;

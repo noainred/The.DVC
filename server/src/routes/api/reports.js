@@ -119,7 +119,9 @@ api.get('/tools/report/certs', requirePerm('tools'), (req, res) => {
 // ⑤ VM 라이트사이징 — 관측 평균/피크(vmStats 누적) 기반 축소 추천.
 api.get('/tools/report/rightsizing', requirePerm('tools'), (req, res) => memoJson(req, res, 'report-rightsizing', (snap) => {
   const scoped = scopeSlice(snap, req.user, req.query.vcenterId);
-  return { ...computeRightsizing(scoped.vms, vmStatsFor), stats: vmStatsMeta() };
+  // 72회차 F1: 범위 계정 · vCenter 를 고른 조회의 누적 메타는 그 VM 들만(함대 전체 추적 수를 싣지 않는다).
+  const narrowed = !!scopedVcenterIds(req.user, snap) || !!req.query.vcenterId;
+  return { ...computeRightsizing(scoped.vms, vmStatsFor), stats: vmStatsMeta(narrowed ? (scoped.vms || []).map((v) => v.id) : undefined) };
 }, { extraKey: scopeKey(req.user, store.get()), ttlMs: 30_000 }));
 
 // ⑥ 용량 고갈 예측 — 기존 forecastCapacity(선형회귀) 재사용(특수기능 진입점).
