@@ -137,9 +137,14 @@ test('H2: 프록시 Data Plane URL·SSH host 를 바꾸면 저장 비밀이 승�
   let c = reg.getConfigSafe();
   assert.equal(c.dataplane.password, '********', '저장 확인');
 
+  reg.saveConfig({ dataplane: { url: 'http://proxy.corp:5555', username: 'admin', bindAddress: '0.0.0.0', password: '********' } });
+  c = reg.getConfigSafe();
+  assert.equal(c.dataplane.password, '********', 'URL · 계정이 같으면 비밀 유지(편집 UX)');
+  // 98회차(의도 변경 — securityResidual98): 계정도 신원이다(DP_ID_KEYS 머리말의 '계정 등' 기준). 예전 기대값(계정만 바꾸면 유지)은 저장 비밀번호를 다른 계정명으로 Basic 전송하던 동작이다.
   reg.saveConfig({ dataplane: { url: 'http://proxy.corp:5555', username: 'admin2', password: '********' } });
   c = reg.getConfigSafe();
-  assert.equal(c.dataplane.password, '********', 'URL 이 같으면 비밀 유지(편집 UX)');
+  assert.equal(c.dataplane.password, '', '계정이 바뀌면 저장 비밀을 버린다');
+  reg.saveConfig({ dataplane: { url: 'http://proxy.corp:5555', username: 'admin2', password: 'dp-pw' } });
 
   reg.saveConfig({ dataplane: { url: 'http://attacker:5555', password: '********' } });
   c = reg.getConfigSafe();

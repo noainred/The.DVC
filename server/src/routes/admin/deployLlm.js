@@ -381,7 +381,11 @@ adminRouter.post('/agent-deploy/collector-sync/probe', adminOnly, fleetOnly, asy
     if (!t) { results.push({ id, ok: false, reason: '대상을 찾을 수 없습니다.' }); return; }
     const url = targetUrl(t);
     const col = cols.find((c) => String(c.url || '').replace(/\/+$/, '') === url) || cols.find((c) => c.id === collectorIdOf(t));
-    const central = await hit(url, col?.token, col?.id || id);
+    // 98회차(재현 — v2.480 S2 와 같은 꼴): 수집 서버(중앙) 토큰은 **그 수집 서버의 저장 URL 로만** 보낸다. 예전에는 URL 이 달라도 id(collectorDatacenter ·
+    //   agentName · host)로 짝지어 중앙 토큰을 배포 대상 주소(advertiseUrl · host — 관리자가 저장으로 바꿀 수 있다)로 보냈다 — 토큰 열람은 소유자 전용인데
+    //   관리자가 대상의 이름만 맞추고 주소를 자기 서버로 두면 그 수집 서버 토큰을 받아 낼 수 있었다. 대상 토큰은 예전처럼 대상 주소로(자기 것).
+    const colUrl = col ? String(col.url || '').trim().replace(/\/+$/, '') : '';
+    const central = colUrl ? await hit(colUrl, col.token, col.id || id) : { tried: false, ok: false, reason: col ? '수집 서버 URL 없음' : '토큰 없음' };
     const target = await hit(url, t.collectorToken, col?.id || id);
     let recommend = 'none'; let why = '';
     if (central.ok && !target.ok) { recommend = 'central-to-target'; why = '엣지가 중앙(수집 서버) 토큰을 받습니다 — 배포 대상 기록만 낡았습니다. 재배포 전에 맞춰 두세요.'; }
@@ -389,7 +393,7 @@ adminRouter.post('/agent-deploy/collector-sync/probe', adminOnly, fleetOnly, asy
     else if (central.ok && target.ok) { recommend = 'central-to-target'; why = '두 토큰이 모두 통합니다(엣지가 최근 교체 중이거나 값이 같음). 중앙 값 기준으로 통일하세요.'; }
     else { recommend = 'target-to-edge'; why = `어느 토큰도 통하지 않습니다(중앙: ${central.reason || '실패'} · 대상: ${target.reason || '실패'}). 엣지가 꺼져 있거나 주소가 틀렸을 수 있으니 먼저 확인하고, 맞다면 '대상 → 엣지' 로 밀어넣으세요.`; }
     results.push({
-      id, host: t.host, agentName: t.agentName || '', url, collectorId: col?.id || '',
+      id, host: t.host, agentName: t.agentName || '', url, collectorId: col?.id || '', ...(colUrl && colUrl !== url ? { centralUrl: colUrl } : {}),
       central: { tried: central.tried, ok: central.ok, reason: central.reason },
       target: { tried: target.tried, ok: target.ok, reason: target.reason },
       recommend, why, ok: true,

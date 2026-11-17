@@ -13,7 +13,9 @@ import {
   getConfig, getConfigSafe, saveConfig,
   listMappings, listMappingsForUser, getMapping, addMapping, removeMapping, setMappingStatus, touchMapping, mappingPortOf,
   listProxies, listProxiesSafe, getProxyById, resolveProxy, saveProxy, removeProxy, mappingProxyOf, MAPPING_PROXY_GONE_TEXT, proxyInUseReason, registryReadError,
+  DEPLOY_ID_KEYS, DP_ID_KEYS, portOrPrev,
 } from '../proxy/registry.js';
+import { accessMoved } from '../util/secretCarry.js';   // 98회차: 연결 시험의 비밀 승계 판정 — 저장 경로와 같은 판정 하나
 import { testDataplane, applyMapping } from '../proxy/dataplane.js';
 import { previewConfig, testDeploy, deployToProxy } from '../proxy/deploy.js';
 import { provision, deprovision, markDeployed } from '../proxy/provision.js';
@@ -333,6 +335,10 @@ remoteRouter.post('/test', adminOnly, async (req, res) => {
   const dp = { ...proxy.dataplane, ...body };
   const reuseSecret = body.password === REDACT || body.password === undefined;
   if (body.password === REDACT) dp.password = proxy.dataplane.password;
+  // 98회차: 저장 경로(DP_ID_KEYS — url · basePath · 계정)와 같은 판정 — 다른 계정명으로 저장 비밀번호를 Basic 전송하지 않는다(주소가 다르면 몰래 저장 주소로 바꿔 시험하지 않는다).
+  if (reuseSecret && proxy.dataplane.password && accessMoved(proxy.dataplane, body, DP_ID_KEYS)) {
+    return res.json({ ok: false, method: 'carry-refused', reason: '접속 주소나 계정이 저장값과 달라 저장된 비밀번호를 쓰지 않습니다 — 비밀번호를 입력해 주세요.' });
+  }
   if (reuseSecret) { dp.url = proxy.dataplane.url; dp.basePath = proxy.dataplane.basePath; }
   const block = await ssrfBlockReasonResolved(dp.url);
   if (block) return res.json({ ok: false, reason: `대상 주소가 차단되었습니다: ${block}`, method: 'blocked' });
@@ -351,7 +357,16 @@ remoteRouter.post('/deploy/test', adminOnly, async (req, res) => {
   const reuseKey = body.privateKey === REDACT || body.privateKey === undefined;
   if (body.password === REDACT) dep.password = proxy.deploy.password;
   if (body.privateKey === REDACT) dep.privateKey = proxy.deploy.privateKey;
-  if ((reusePw && proxy.deploy.password) || (reuseKey && proxy.deploy.privateKey)) { dep.host = proxy.deploy.host; dep.port = proxy.deploy.port; }
+  if ((reusePw && proxy.deploy.password) || (reuseKey && proxy.deploy.privateKey)) {
+    // 98회차(재현): 저장 경로(proxy/registry.js — host · port · username 이 바뀌면 저장 비밀을 버린다)와 같은 판정. 예전에는 host · port 만 저장값으로 고정하고
+    //   username 은 요청값이라 **다른 계정명으로 저장된 root 비밀번호 · 개인키를 보냈고**, 주소가 다르면 몰래 저장 주소로 바꿔 시험해 입력한 주소의 결과처럼 보였다.
+    const prevPort = Number(proxy.deploy.port) || 22;
+    const probe = { ...body, port: portOrPrev(body.port, prevPort) };
+    if (accessMoved({ ...proxy.deploy, port: prevPort }, probe, DEPLOY_ID_KEYS)) {
+      return res.json({ ok: false, method: 'carry-refused', reason: '접속 주소 · 포트 · 계정이 저장값과 달라 저장된 비밀번호 · 개인키를 쓰지 않습니다 — 비밀번호(또는 개인키)를 입력해 주세요.' });
+    }
+    dep.host = proxy.deploy.host; dep.port = proxy.deploy.port;
+  }
   const block = ipBlockReason(dep.host);
   if (block) return res.json({ ok: false, reason: `대상 호스트가 차단되었습니다: ${block}`, method: 'blocked' });
   res.json(await testDeploy(dep));

@@ -150,8 +150,9 @@ export function getConfigSafe() {
  * 새 스토어를 만들 때도 같은 기준으로 idKeys 를 고를 것: 호스트만이 아니라 **경로 조각·포트·계정 등
  * 요청 대상을 바꿀 수 있는 모든 필드**가 들어간다.
  */
-const DP_ID_KEYS = ['url', 'basePath'];              // Data Plane 접속처 = url + basePath(조립 URL 전부)
-const DEPLOY_ID_KEYS = ['host', 'port', 'username']; // SSH 배포는 호스트·포트·계정
+// 98회차: 계정(username)도 신원이다 — 위 머리말의 '계정 등' 기준인데 빠져 있어, 계정명만 바꾼 저장 · 연결 시험이 저장 비밀번호를 다른 계정명으로 Basic 전송했다.
+export const DP_ID_KEYS = ['url', 'basePath', 'username'];   // Data Plane 접속처 = url + basePath(조립 URL 전부) + 계정
+export const DEPLOY_ID_KEYS = ['host', 'port', 'username']; // SSH 배포는 호스트·포트·계정(98회차: 연결 시험 routes/remote.js 도 같은 키 — export)
 
 /**
  * Data Plane `basePath` 형식 검증(v2.503). 경로 조각이어야 하며 권한부(authority)를 열 수 없다.

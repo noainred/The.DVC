@@ -9,7 +9,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { listManagedUsers } from '../auth/auth.js';
 import { numOrNull } from '../util/numOrNull.js';
-import { makeJsonFileReader } from '../util/jsonFileRead.js'; // 88회차 F1: 읽기 오류 ≠ 손상(결정 78 ① 과 같은 판정 — parse 기본값 parseJsonObject)
+import { makeJsonFileReader, readJsonFile } from '../util/jsonFileRead.js'; // 88회차 F1: 읽기 오류 ≠ 손상(결정 78 ① 과 같은 판정 — parse 기본값 parseJsonObject)
 
 const FILE = path.join(config.configDir, 'security-session.json');
 /*
@@ -20,20 +20,68 @@ const FILE = path.join(config.configDir, 'security-session.json');
  *   손상과 같은 약해짐은 사용자 결정 대기) · 30초마다 다시 읽고 · 그동안 저장은 거절한다(원본을 기본값 기반 값으로 덮지 않게). 손상은 예전 그대로.
  */
 const _reader = makeJsonFileReader(() => FILE, { tag: 'security-session' });
-let _lastGood = null;      // 이 프로세스가 마지막으로 읽은 원본 객체(읽기 오류 동안 쓴다)
+/*
+ * 98회차(91회차 남긴 것 ① — 권장안 · secrets-policy S-07 과 같은 모양): **신뢰 사본**(security-session.trusted.json — 정상으로 읽거나 저장할 때 같은 내용으로 맞춘다).
+ *   예전에는 기동 때부터 못 읽으면(읽기 오류 · 손상) 기본값(단일 세션 끔 · 총 상한 무제한 · otp_only → 레거시 · 화면 소유자 사라짐)으로 약해졌고, 손상은 보존본으로
+ *   옮겨져 다음 읽기가 '파일 없음' 이 되어 **한 번 읽은 프로세스도** 기본값으로 내려갔다(S-07 이 고친 것과 같은 꼴 — 재현).
+ *   이제 못 읽으면(읽기 오류 · 손상 · 손상 뒤 없음) ① 이 프로세스가 마지막으로 읽은 값 → ② 신뢰 사본 → ③ 둘 다 없고 '파일 없음' 이면 기본값(신규 설치 —
+ *   예전과 같다) → ④ 그 밖(읽기 오류 · 손상인데 사본도 없음)은 **엄격 값**(STRICT — 약하게 읽지 않는다). 읽기 오류 동안 저장 거절(88 F1)은 그대로다.
+ *   ⚠ 파일을 지워 기본값으로 되돌리던 길은 이제 사본이 막는다 — 정말 기본값으로 돌리려면 두 파일을 함께 지운다(잠금 복구는 settings-owners.txt ·
+ *     OTP_ROLE_ENFORCE=false · otp-enroll.sh 가 맡는다 — 이 파일 삭제가 아니다).
+ */
+const TRUSTED_FILE = path.join(config.configDir, 'security-session.trusted.json');
+/** ④ 엄격 값 — 본 파일 · 신뢰 사본을 모두 못 읽은 손상 · 읽기 오류. 지정하지 않은 칸은 기본값(이미 켬 · 30분 · 소유자 noainred + 파일 · 배포 소유자). */
+const STRICT = Object.freeze({ loginPolicy: 'otp_only', singleSession: true, sessionMaxHours: 8, idleLogoutEnabled: true, bareosSetupOtp: true });
+let _lastGood = null;      // 이 프로세스가 마지막으로 읽은 원본 객체(읽기 오류 · 손상 동안 쓴다)
 let _readErr = null;       // { at, code } — 읽기 오류 중이면
+let _recovery = null;      // 98회차: { source:'last-good'|'trusted-copy'|'strict', problem:'read-error'|'corrupt'|'missing', at } — 본 파일 대신 다른 값으로 도는 중이면
+let _trustedSig = null;    // 신뢰 사본에 마지막으로 맞춘 글(같으면 다시 읽거나 쓰지 않는다 — 핫패스 3초 캐시마다 오는 경로)
+let _warnKey = '';
 /** security-session.json 을 읽지 못해(ENOENT 아닌 읽기 오류) 저장을 거절하는 중이면 { at, code }, 아니면 null. */
 export function sessionSecurityReadError() { return _readErr; }
-export function _resetSessionSecurityReadForTest() { _reader.reset(); _lastGood = null; _readErr = null; }
+/** 98회차: 본 파일 대신 직전 값 · 신뢰 사본 · 엄격 값으로 도는 중이면 { source, problem, at }, 아니면 null(설정 화면 · 자가 점검용). */
+export function sessionSecurityRecovery() { return _recovery; }
+export function _resetSessionSecurityReadForTest() { _reader.reset(); _lastGood = null; _readErr = null; _recovery = null; _trustedSig = null; _warnKey = ''; }
+function syncTrustedCopy(text) {
+  try {
+    if (_trustedSig === text) return;
+    let cur = null;
+    try { cur = fs.readFileSync(TRUSTED_FILE, 'utf8'); } catch { cur = null; }
+    if (cur !== text) atomicWriteFileSync(TRUSTED_FILE, text, { mode: 0o600 });
+    _trustedSig = text;
+  } catch (e) {
+    const k = `trusted-write|${e?.code || ''}`;
+    if (_warnKey !== k) console.error(`[security-session] 신뢰 사본(${path.basename(TRUSTED_FILE)})을 쓰지 못했습니다(${String(e?.code || e?.message || e).slice(0, 60)}) — 본 파일이 손상되면 재시작 뒤 복구할 사본이 없습니다. CONFIG_DIR 권한을 확인하세요.`);
+    _warnKey = k;
+  }
+}
+const PROBLEM_TEXT = { 'read-error': '읽기 오류', corrupt: '손상', missing: '없음' };
+function recoverFrom(problem, source, value) {
+  _recovery = { source, problem, at: _recovery?.source === source && _recovery?.problem === problem ? _recovery.at : Date.now() };
+  const k = `${problem}|${source}`;
+  if (_warnKey !== k) {
+    const what = source === 'last-good' ? '이 프로세스가 마지막으로 읽은 값' : source === 'trusted-copy' ? `신뢰 사본(${path.basename(TRUSTED_FILE)})의 값` : '엄격 값(전 계정 OTP 전용 · 단일 세션 · 총 상한 8시간)';
+    console.error(`[security-session] ${path.basename(FILE)} ${PROBLEM_TEXT[problem] || problem} — 기본값으로 약해지지 않도록 ${what}으로 계속합니다. 설정 › 세션 보안에서 다시 저장하거나 파일을 복구하세요.`);
+  }
+  _warnKey = k;
+  return value;
+}
 function readConfiguredRaw() {
   const r = _reader.read();
-  if (r.kind === 'ok') { _lastGood = r.value; _readErr = null; return r.value; }
-  if (r.kind === 'read-error') {
-    _readErr = { at: _readErr?.at || Date.now(), code: String(r.error?.code || 'read-error').slice(0, 32) };
-    return _lastGood || {};
+  if (r.kind === 'ok') {
+    _lastGood = r.value; _readErr = null; _recovery = null;
+    if (_warnKey && !_warnKey.startsWith('trusted-write|')) _warnKey = '';
+    if (typeof r.text === 'string') syncTrustedCopy(r.text);
+    return r.value;
   }
-  _lastGood = null; _readErr = null;   // missing · corrupt(손상본은 readJsonFile 이 보존 — 예전과 같다)
-  return {};
+  if (r.kind === 'read-error') _readErr = { at: _readErr?.at || Date.now(), code: String(r.error?.code || 'read-error').slice(0, 32) };
+  else _readErr = null;   // missing · corrupt(손상본은 readJsonFile 이 보존 — 예전과 같다)
+  const problem = r.kind === 'read-error' ? 'read-error' : r.kind === 'corrupt' ? 'corrupt' : 'missing';
+  if (_lastGood) return recoverFrom(problem, 'last-good', _lastGood);
+  const t = readJsonFile(TRUSTED_FILE, { preserve: false });
+  if (t.kind === 'ok') { _lastGood = t.value; _trustedSig = t.text; return recoverFrom(problem, 'trusted-copy', t.value); }
+  if (problem === 'missing') { _recovery = null; return {}; }   // 신규 설치 — 예전과 같다(기본값)
+  return recoverFrom(problem, 'strict', { ...STRICT });
 }
 // 설정 소유 계정을 '파일/환경변수'로도 지정할 수 있게 하는 경로(운영자가 직접 편집).
 // portal.env 와 같은 CONFIG_DIR 에 두며, 한 줄에 계정 하나(# 주석 허용).
@@ -400,7 +448,10 @@ export function saveSessionSecurity(partial = {}) {
   };
   // 원자적 쓰기 — settingsOwners(설정 편집 권한)를 담는 권한 config. 부분기록으로 손상되면
   // 로드가 DEFAULTS로 조용히 리셋돼 소유자 경계가 무너진다.
-  atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
+  const text = JSON.stringify(next, null, 2);
+  atomicWriteFileSync(FILE, text, { mode: 0o600 });
+  _lastGood = next; _recovery = null;
+  syncTrustedCopy(text);   // 98회차: 저장한 값이 곧 신뢰 사본(S-07 과 같게 — 저장 · 정상 읽기 때 맞춘다)
   _polAt = 0; _ssAt = 0; _dsAt = 0; _spAt = 0; // 로그인 정책·단일세션·데모모드·세션 수명 정책 캐시 즉시 무효화
   return next;
 }

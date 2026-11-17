@@ -235,6 +235,7 @@ export const KNOWN_CONFIG_FILES = Object.freeze({
   'portal.env': '설치 스크립트가 만드는 env 파일(config.js 가 읽는다)',
   'secrets-policy.json': '자격증명 저장 방식(평문/암호화) 정책(security/secretVault.js — 비밀 없음, 소유자 + OTP 로만 바꾼다)',
   'secrets-policy.trusted.json': '자격증명 저장 방식 정책의 신뢰 사본(security/secretVault.js — 정책 파일 손상·유실 시 복구용, S-07 2026-10-09)',
+  'security-session.trusted.json': '세션 보안 설정의 신뢰 사본(security/securitySettings.js — 본 파일 손상·읽기 오류·유실 시 복구용, 98회차 · S-07 과 같은 모양)',
   'peer-trust.json': '장비 지문 신뢰(SSH 호스트키·TLS 인증서 승인 · 정책 enforce/observe — security/peerTrust.js, S-01·S-02 2026-10-09)',
   'release-signing-keys.conf': '릴리스 서명 신뢰 공개키(호스트 관리자가 직접 두는 파일 — 비밀 없음, 0600/0640 · upgrade/signature.js, S-10 2026-10-09)',
   'tls-ca-bundle.pem': '사설 CA 번들(PEM, 비밀 아님 — 관리자가 직접 둔다 · security/tlsTrust.js, S-02 2026-10-09)',

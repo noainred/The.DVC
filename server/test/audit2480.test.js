@@ -45,8 +45,12 @@ test('코어2 S5: OTP 등록 확정 코드 재사용(replay) 거부', () => {
 test('S8: SMTP host 변경 시 비밀번호 이월 금지', () => {
   mail.save({ smtp: { host: 'smtp-a.corp', port: 587, user: 'u', password: 'mail-pw-1' } });
   assert.equal(mail.load().smtp.password, 'mail-pw-1');
+  mail.save({ smtp: { host: 'smtp-a.corp', port: 587, user: 'u', fromName: '포탈' } });
+  assert.equal(mail.load().smtp.password, 'mail-pw-1', '접속 신원(host · 포트 · 계정) 불변 편집은 기존 비밀번호 유지');
+  // 98회차(의도 변경): 계정 · 포트도 신원이다 — 예전 기대값(계정만 바꾸면 유지)은 저장 비밀번호를 다른 계정명으로 보내던 동작이다(securityResidual98).
   mail.save({ smtp: { host: 'smtp-a.corp', port: 587, user: 'u2' } });
-  assert.equal(mail.load().smtp.password, 'mail-pw-1', 'host 불변 편집은 기존 비밀번호 유지');
+  assert.equal(mail.load().smtp.password, '', '계정 변경 시 비밀번호를 이월하지 않는다');
+  mail.save({ smtp: { host: 'smtp-a.corp', port: 587, user: 'u2', password: 'mail-pw-1' } });
   mail.save({ smtp: { host: 'smtp-b.corp' } });
   assert.equal(mail.load().smtp.password, '', 'host 변경 시 비밀번호가 새 host 로 이월되면 안 된다');
 });

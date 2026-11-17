@@ -23,13 +23,17 @@ let state = null;
  *   비활성으로 캐시했다 — 2인 승인으로 켠 긴급중단이 기동 때의 읽기 오류 한 번으로 풀렸고, 디스크가 돌아와도 · 재시작해도 원본이 옆으로
  *   치워져 있어 **다시 켜지지 않았다**(2인 승인 없이 해제된 셈). 이제(결정 78 ① 과 같은 규칙) 읽기 오류는 원본을 그대로 두고 · 캐시하지 않고
  *   30초마다 다시 읽는다(읽히는 순간 저장된 상태가 그대로 적용된다). 그동안의 값은 **멈춤**(91회차 fail-closed — 아래)이고 상태에 readError 를 싣는다.
- *   손상은 예전 그대로(보존 + 비활성 + 경고).
+ * 98회차(91회차 남긴 것 ③ — 권장안): **손상**(JSON 아님 · 객체 아님)도 읽기 오류와 같은 쪽 — 예전에는 보존본으로 옮기고 비활성으로 시작해, 2인 승인으로 켠
+ *   긴급중단이 파일 한 번 깨짐으로 풀렸고(재현), 원본이 옆으로 치워져 재시작해도 다시 켜지지 않았다. 이제 마지막으로 읽은 값은 캐시(state)가 지키고(이 갈래는
+ *   한 번도 못 읽었을 때만 온다) · **멈춤으로 캐시**하고(다시 읽지 않는다 — 풀림은 2인 승인 해제 setEmergencyStop 으로만) · 원본을 옮기지 않는다(재시작해도 다시 멈춤 ·
+ *   손상본이 곧 증거) · 상태에 corrupt 를 싣는다(화면이 사유를 말한다).
  */
 //   공용 makeJsonFileReader 를 쓰지 않는 이유: 그 경고 문구는 '그동안 저장은 거절' 인데, 긴급중단은 읽기 오류 중에도 2인 승인으로 켜고 끌 수 있어야 한다
 //   (안전 스위치를 파일 권한 때문에 막지 않는다 — 새 2인 결정이 읽지 못한 옛 파일을 덮는 것이 맞다).
 let _readErr = null;
 let _retryAt = 0;
-export function _resetEmergencyStopForTest() { state = null; _readErr = null; _retryAt = 0; }
+let _corrupt = null;   // 98회차: { at } — 기동 때 상태 파일이 손상이어서 멈춤으로 시작했으면(2인 승인 해제 전까지)
+export function _resetEmergencyStopForTest() { state = null; _readErr = null; _retryAt = 0; _corrupt = null; }
 
 function load() {
   if (state) return state;
@@ -39,7 +43,8 @@ function load() {
   //   화면이 '읽지 못해 멈춤' 을 말한다. 해제는 파일을 고치거나(30초 안 다시 읽음) 2인 승인 해제(새 상태가 기준).
   const closedWhileUnreadable = () => ({ active: true, by: [], at: null, failClosed: true });
   if (_readErr && nowMs() < _retryAt) return closedWhileUnreadable();
-  const r = readJsonFile(FILE, { parse: (t) => JSON.parse(t) });
+  // 98회차: preserve:false — 손상본을 옮기지 않는다(옮기면 다음 기동이 '파일 없음' = 비활성으로 풀린다).
+  const r = readJsonFile(FILE, { parse: (t) => JSON.parse(t), preserve: false });
   if (r.kind === 'read-error') {
     const code = String(r.error?.code || 'read-error').slice(0, 32);
     if (!_readErr) console.error(`[emergency-stop] 상태 파일을 읽지 못했습니다(${code}) — 손상이 아니라 원본은 그대로 둡니다. 읽힐 때까지 **긴급중단(멈춤)으로 보고** ${Math.round(READ_RETRY_MS / 1000)}초마다 다시 읽습니다(파일 소유자 · 권한 확인 — 91회차 fail-closed).`);
@@ -49,9 +54,12 @@ function load() {
   }
   if (_readErr) console.warn('[emergency-stop] 상태 파일을 다시 읽었습니다(읽기 오류 풀림)');
   _readErr = null;
-  if (r.kind === 'ok' && r.value && typeof r.value === 'object') { state = r.value; return state; }
-  if (r.kind === 'corrupt') console.error('[emergency-stop] 상태 파일 손상 — 기본(비활성)으로 시작합니다. 긴급중단이 필요하면 다시 누르세요.'); // v2.479: 손상 시 조용한 해제 금지(보존+경고) — 보존은 readJsonFile
-  state = { active: false, by: [], at: null };
+  if (r.kind === 'ok' && r.value && typeof r.value === 'object' && !Array.isArray(r.value)) { state = r.value; return state; }
+  if (r.kind === 'missing') { state = { active: false, by: [], at: null }; return state; }   // 파일 없음 = 한 번도 켠 적 없음(신규 설치)
+  // 98회차: 손상(JSON 아님 · 객체 아님 — null · 배열 · 글자) = 멈춤으로 캐시. 2인 승인 해제가 새 상태를 쓰면 풀린다.
+  _corrupt = { at: Date.now() };
+  console.error(`[emergency-stop] 상태 파일 손상(${path.basename(FILE)}) — 2인 승인으로 켠 긴급중단이 깨짐으로 풀리지 않게 **긴급중단(멈춤)으로 시작**합니다. 원본은 그대로 둡니다(증거). 해제는 2인 승인(관리자 2명 OTP)으로 하면 새 상태로 다시 저장됩니다.`);
+  state = { active: true, by: [], at: null, failClosed: true };
   return state;
 }
 
@@ -69,7 +77,8 @@ export function isStopped() { return !!load().active; }
 /** 현재 상태(웹/배지용). */
 export function getEmergencyStatus() {
   const s = load();
-  return { active: !!s.active, by: s.by || [], at: s.at || null, ...(_readErr ? { readError: { at: _readErr.at, code: _readErr.code, failClosed: !!s.failClosed } } : {}) };
+  return { active: !!s.active, by: s.by || [], at: s.at || null, ...(_readErr ? { readError: { at: _readErr.at, code: _readErr.code, failClosed: !!s.failClosed } } : {}),
+    ...(_corrupt ? { corrupt: { at: _corrupt.at, failClosed: true } } : {}) };
 }
 
 /**
@@ -78,7 +87,7 @@ export function getEmergencyStatus() {
  */
 export function setEmergencyStop(active, approvers = []) {
   state = { active: !!active, by: active ? approvers.slice(0, 2) : [], at: Date.now(), lastBy: approvers.slice(0, 2), lastAt: Date.now() };
-  _readErr = null; _retryAt = 0;   // 88회차 F2: 2인 승인으로 정한 새 상태가 기준이다(읽지 못한 옛 파일을 덮는 것이 맞다)
+  _readErr = null; _retryAt = 0; _corrupt = null;   // 88회차 F2 · 98회차: 2인 승인으로 정한 새 상태가 기준이다(읽지 못한 · 깨진 옛 파일을 덮는 것이 맞다)
   persist();
   console.warn(`[emergency-stop] ${active ? '긴급중단 ON' : '해제'} — 승인: ${approvers.join(' + ')}`);
   return getEmergencyStatus();

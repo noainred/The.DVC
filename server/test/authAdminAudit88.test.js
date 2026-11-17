@@ -72,22 +72,24 @@ test('F1 security-session.json 읽기 오류 — 원본을 옮기지 않고 · �
   clock += 31_000;   // 재읽기 간격이 지나면 다시 읽는다
   assert.deepEqual(sec.loadConfiguredSecurity().settingsOwners, ['alice', 'bob']);
   assert.equal(sec.sessionSecurityReadError(), null);
-  // 손상은 예전 그대로 — 보존본으로 옮기고 기본값(손상 시 약해짐은 사용자 결정 대기)
+  // 손상 — 보존본으로 옮기는 것은 예전 그대로. 98회차(91회차 남긴 것 ① 권장안 — 의도 변경): 값은 기본값이 아니라 직전 값(→ 신뢰 사본)이다(securityResidual98).
   fs.writeFileSync(file, '{not json');
   clock += 1;
-  assert.deepEqual(sec.loadConfiguredSecurity().settingsOwners, ['noainred']);
+  assert.deepEqual(sec.loadConfiguredSecurity().settingsOwners, ['alice', 'bob']);
   assert.equal(corruptCopies('security-session.json').length, 1);
   assert.equal(sec.sessionSecurityReadError(), null);
 });
 
-test('F1 처음부터 읽기 오류(마지막 값 없음)면 기본값이지만 원본은 옮기지 않고 저장도 거절', () => {
+test('F1 처음부터 읽기 오류(마지막 값 · 신뢰 사본 없음)면 엄격 값이고 원본은 옮기지 않고 저장도 거절', () => {
   const file = path.join(DIR, 'security-session.json');
   fs.writeFileSync(file, JSON.stringify({ settingsOwners: ['carol'], loginPolicy: 'otp_only' }));
+  fs.rmSync(path.join(DIR, 'security-session.trusted.json'), { force: true });   // 98회차: 신뢰 사본이 있으면 그 값을 쓴다(securityResidual98)
   sec._resetSessionSecurityReadForTest();
   const undo = eioOn(file);
   try {
     clock += 1;
     assert.deepEqual(sec.loadConfiguredSecurity().settingsOwners, ['noainred']);
+    assert.equal(sec.loadConfiguredSecurity().loginPolicy, 'otp_only', '98회차(의도 변경): 기본값(레거시)이 아니라 엄격 값');
     assert.throws(() => sec.saveSessionSecurity({ settingsOwners: ['mallory'] }), (e) => e.status === 503);
   } finally { undo(); }
   assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')).settingsOwners, ['carol']);
@@ -117,13 +119,15 @@ test('F2 emergency-stop.json 읽기 오류 — 2인 승인 긴급중단이 영�
   assert.equal(es.isStopped(), false);
 });
 
-test('F2 손상은 예전 그대로 — 보존본 + 비활성', () => {
+test('F2 손상 — 98회차(91회차 남긴 것 ③ 권장안 — 의도 변경): 멈춤 · 원본을 옮기지 않음(예전: 보존본 + 비활성)', () => {
   const file = path.join(DIR, 'emergency-stop.json');
   fs.writeFileSync(file, '{broken');
   es._resetEmergencyStopForTest();
   clock += 1;
+  assert.equal(es.isStopped(), true);
+  assert.equal(corruptCopies('emergency-stop.json').length, 0);
+  es.setEmergencyStop(false, ['a1', 'a2']);   // 2인 승인 해제로만 풀린다
   assert.equal(es.isStopped(), false);
-  assert.equal(corruptCopies('emergency-stop.json').length, 1);
 });
 
 test('F3 auth.json 읽기 오류 — AD 설정 · 정책 카운터를 옮기지 않고 저장 거절', () => {

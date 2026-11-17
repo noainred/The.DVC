@@ -25,6 +25,7 @@ import { mergeScopedMap, filterScopedMap, keepScopedFields, ignoredGlobalFields,
 import { poolRun } from '../../util/pool.js'; // v2.575 IMP-08 — 동시성 풀 단일 소스
 import { strictIpv4Num } from '../../util/ipv4.js';
 import { ipBlockReason } from '../../util/ssrfBlock.js';
+import { accessMoved } from '../../util/secretCarry.js';   // 98회차: 연결 시험의 비밀 승계 판정 — 저장 경로(gpu/settings.js carriedPw)와 같은 판정
 
 // v2.611 AUTHZ2611: 전 법인 등록부·동작은 전체 범위 계정만(v2.607 fleetWideOnly 의 형제 등록부).
 const fleetOnly = fullScopeOnlyWith('물리 GPU 서버·엣지 배포 설정·엣지 사용자는 전 법인에 걸친 등록부라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.');
@@ -502,7 +503,16 @@ adminRouter.post('/gpu-guest/test', adminOnly, async (req, res) => {
         let creds;
         if (it.useShared) creds = sharedForOs;
         // passwordless = 비번 없는 계정 → 빈 비번으로 인증(저장값으로 폴백하지 않음).
-        else if (it.username) creds = { username: it.username, password: it.passwordless ? '' : (it.password || (vcShared.vms?.[it.vmId]?.password || '')), passwordless: !!it.passwordless };
+        else if (it.username) {
+          // 98회차(재현): 저장 경로(gpu/settings.js carriedPw — v2.611 계정명이 바뀌면 저장 비밀번호를 승계하지 않는다)와 같은 판정. 예전에는 입력한 계정명이
+          //   저장된 VM 별 계정과 달라도 그 VM 의 저장 비밀번호를 새 계정명으로 보냈다(틀린 조합의 로그인 — 계정 잠금 위험 · 다른 계정에 저장 비밀번호 노출).
+          const storedVm = vcShared.vms?.[it.vmId];
+          if (!it.passwordless && !it.password && storedVm?.password && accessMoved(storedVm, { username: it.username }, ['username'])) {
+            results[i] = { vmId: it.vmId, login: false, read: false, error: '계정명이 저장값과 달라 저장된 비밀번호를 쓰지 않습니다 — 비밀번호를 입력해 주세요.', trace: [{ t: Date.now(), msg: '✗ 건너뜀 — 입력한 계정명이 저장된 VM 계정과 달라 저장 비밀번호를 보내지 않음' }] };
+            continue;
+          }
+          creds = { username: it.username, password: it.passwordless ? '' : (it.password || (storedVm?.password || '')), passwordless: !!it.passwordless };
+        }
         else creds = resolveVmCreds(s, vcenterId, it.vmId, isWindows);
         if (!creds || !creds.username) { results[i] = { vmId: it.vmId, login: false, read: false, error: '계정 없음', trace: [{ t: Date.now(), msg: '✗ 건너뜀 — 사용할 계정 없음(공용/별도 계정 미설정)' }] }; continue; }
         const moref = morefOf(v.id, v.vcenterId || vcenterId);

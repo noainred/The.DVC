@@ -1,7 +1,7 @@
 // 감사·알림·일일리포트·인증서·이상탐지·세션보안·OS스캔·프로비저닝 저장 — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
 import { config } from '../../config.js';
 import { verifyUserOtp, getUser, listUsers } from '../../auth/auth.js';
-import { saveSessionSecurity, loadConfiguredSecurity, managedAdminOwners } from '../../security/securitySettings.js';
+import { saveSessionSecurity, loadConfiguredSecurity, managedAdminOwners, sessionSecurityRecovery } from '../../security/securitySettings.js';
 import { loadSecretsPolicy, saveSecretsPolicy, migrateSecretFiles, SECRET_FILES } from '../../security/secretVault.js';
 import { saveOsScanSettings, runOsScanNow, osScanStatus } from '../../inventory/osScanner.js';
 import { getOsResults, osSummary } from '../../inventory/osStore.js';
@@ -219,7 +219,8 @@ adminRouter.put('/secrets/policy', adminOnly, requireSettingsOwner, (req, res) =
 adminRouter.get('/security/session', adminOnly, requireSettingsOwner, (_req, res) => {
   const cur = loadConfiguredSecurity();
   const ownerWarnings = scopedOwnerWarnings(cur.settingsOwners);
-  res.json({ ...cur, autoOwners: managedAdminOwners(), ...(ownerWarnings.length ? { ownerWarnings } : {}) });
+  const recovery = sessionSecurityRecovery();   // 98회차: 본 파일 대신 직전 값 · 신뢰 사본 · 엄격 값으로 도는 중이면 그 사실(화면의 값이 파일 값이 아니다)
+  res.json({ ...cur, autoOwners: managedAdminOwners(), ...(ownerWarnings.length ? { ownerWarnings } : {}), ...(recovery ? { recovery } : {}) });
 });
 adminRouter.put('/security/session', adminOnly, requireSettingsOwner, (req, res) => {
   const username = req.user?.username || 'unknown';
