@@ -10,7 +10,8 @@
  * exec 는 주입 가능(테스트에서 가짜 실행기).
  */
 import { config } from '../config.js';
-import { loadHostAccess, saveHostAccess } from './settings.js';
+import { loadHostAccess, saveHostAccess, hostAccessWriteRefusal } from './settings.js';
+import { READ_RETRY_MS } from '../util/jsonFileRead.js';   // 115회차: 읽기 오류 뒤 다시 읽기 간격(설정 파일 공용 읽기와 같은 값)
 import { normalizeSettings, parseListAll, planCommands, fingerprint, normalizeRequesterIp } from './render.js';
 import * as realExec from './exec.js';
 import { listeningPortalPorts } from '../util/httpsServer.js';
@@ -239,9 +240,26 @@ export async function revertHostAccess({ by = '', now = Date.now() } = {}) {
   } finally { busy = false; }
 }
 
+/*
+ * 115회차(107 추정 E1 — 재현): 기동 때 설정 파일이 **읽기 오류**면 loadHostAccess 는 pending 을 null 로 준다(107: 캐시하지 않고 30초 간격 재읽기).
+ *   예전에는 '확정 대기 없음' 으로 그냥 끝나, 파일이 다시 읽혀도 자동 되돌림 타이머가 걸리지 않았다 — 적용만 하고 확정하지 않은 런타임 규칙이
+ *   재시작 · 수동 되돌림까지 남는다(commit-confirm 의 뜻이 깨진다 · 화면은 '곧 되돌립니다' 라고 말한다). 못 읽은 것은 '확정 대기 없음' 이 아니다 —
+ *   읽힐 때까지 같은 간격으로 다시 본다(타이머는 하나 · unref).
+ */
+let resumeRetryTimer = null;
+let resumeRetryMs = READ_RETRY_MS + 1_000;
+/** 테스트용 — 읽기 오류 뒤 다시 보기 간격(ms). 인자 없으면 기본값 · 걸린 타이머를 지운다. */
+export function _setResumeRetryMs(ms) { resumeRetryMs = Number(ms) > 0 ? Number(ms) : READ_RETRY_MS + 1_000; if (resumeRetryTimer) { clearTimeout(resumeRetryTimer); resumeRetryTimer = null; } }
+function armResumeRetry() {
+  if (resumeRetryTimer) return;
+  resumeRetryTimer = setTimeout(() => { resumeRetryTimer = null; resumeHostAccessPending(); }, resumeRetryMs);
+  resumeRetryTimer.unref?.();
+}
+
 /** 기동 시: 확정 대기가 남아 있으면 기한을 이어받아 타이머 재무장(기한 경과면 즉시 되돌림). */
 export async function resumeHostAccessPending() {
   try {
+    if (hostAccessWriteRefusal()) { armResumeRetry(); return; }   // 115회차: 못 읽었다 — 판정하지 않고 읽힐 때까지 다시 본다
     const st = loadHostAccess();
     if (!st.pending) return;
     // 결정(56~75) 64 F2 시한: 자동 재시도를 포기한 상태(revertGaveUp)는 재시작으로 다시 자동 시도하지 않는다 — 수동 조치(되돌리기 버튼)를 기다린다.

@@ -19,7 +19,9 @@ let matcherCache = null; // compiled matcher
 
 let classifierCache = null;
 let rev = 0; // 설정 변경 리비전(대장 캐시 무효화 키)
-export function settingsRev() { return rev; }
+// 115회차(107 F4 반증 — 재현): 읽기 오류 중 만든 빈 매처 · 분류기는 load() 가 다시 불려야 풀리는데, 대장 경로는 이 리비전과 캐시된 매처 · 분류기만 본다 —
+//   설정 화면을 열기 전까지 다시 읽힌 뒤에도 무시 대역 · 공인 대역 없이 판정했다. 읽기 오류 중에는 셋 다 load() 를 거친다(디스크는 30초 간격).
+export function settingsRev() { if (_readErr) load(); return rev; }
 
 /*
  * 107회차(재현 — EISDIR): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전 catch 하나는 온전한 원본을 .corrupt 로 옮기고 빈 값 · 기본값을 캐시해
@@ -95,6 +97,7 @@ const inAny = (n, ranges) => ranges.some((r) => n >= r.lo && n <= r.hi);
 
 /** Returns ip → 'public' | 'private'. Explicit rules win; else RFC1918 = private. */
 export function getClassifier() {
+  if (_readErr) load();   // 115회차: 읽기 오류 중 만든 빈 분류기에 머물지 않는다
   if (classifierCache) return classifierCache;
   const s = load();
   const pub = (s.publicRanges || []).map(parseRange).filter(Boolean);
@@ -123,6 +126,7 @@ function parseRange(s) { return parseRangeSpec(s); }
 
 /** Returns (ip, vcenterId) → true if the IP should be hidden. */
 export function getIgnoreMatcher() {
+  if (_readErr) load();   // 115회차: 읽기 오류 중 만든 빈 매처에 머물지 않는다
   if (matcherCache) return matcherCache;
   const s = load();
   const global = (s.global || []).map(parseRange).filter(Boolean);

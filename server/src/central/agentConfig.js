@@ -36,9 +36,38 @@ function ensureLoaded() {
   _loaded = true;
   if (rr.kind !== 'ok') return true;
   const held = Object.keys(byAgent).length;
-  try { byAgent = Object.assign(Object.create(null), parseJsonObject(rr.value), byAgent); } catch (e) { preserveCorrupt(FILE, e.message); }
+  let saved = null;
+  try { saved = parseJsonObject(rr.value); } catch (e) { preserveCorrupt(FILE, e.message); }
+  if (saved) {
+    // 115회차: 합치기 전에 채운다 — 아래에서 그 엣지의 파일 사본이 통째로 바뀐다(채우다 난 예외를 '손상' 으로 읽어 원본을 옮기지 않게 parse 와 가른다)
+    try { for (const [agent, names] of _retainWanted) fillRetained(byAgent[agent], saved[agent], names); } catch (e) { console.warn(`[central] agent-config: 유지할 직전 사본을 채우지 못했습니다: ${String(e?.message || e).slice(0, 160)}`); }
+    byAgent = Object.assign(Object.create(null), saved, byAgent);
+  }
+  _retainWanted.clear();
   if (held) persistSoon();   // 못 읽은 동안 받은 사본을 이제 쓴다
   return true;
+}
+/*
+ * 115회차(107 F13 반증 — 재현): 못 읽은 동안 온 push 의 retain(엣지가 413 으로 보내지 못한 파일 — 직전 사본 유지 · v2.621)은 직전 사본을 몰라 유지하지 못한다.
+ *   다시 읽혀 합칠 때 '그동안 받은 것이 이긴다' 로 그 엣지의 파일 사본을 통째로 바꾸면, 직전까지 보관하던 큰 설정(보통 등록부)이 중앙 통합 백업에서 사라졌다.
+ *   그동안 청한 이름을 적어 두었다가 합칠 때 파일의 사본에서 채운다(크기 상한 · 낡음 표지 retained 는 setAgentConfig 와 같다). 직전 사본에도 없으면 유지할 것이 없다.
+ */
+const _retainWanted = new Map();   // agent → 못 읽은 동안 retain 으로 청했지만 직전 사본을 몰라 유지하지 못한 이름
+const sizeOf = (val) => (typeof val === 'string' ? val.length : (() => { try { return JSON.stringify(val).length; } catch { return Infinity; } })());
+function fillRetained(cur, old, names) {
+  if (!cur?.files || !old?.files || typeof old.files !== 'object') return;
+  let total = 0;
+  for (const v of Object.values(cur.files)) total += sizeOf(v);
+  const retained = Array.isArray(cur.retained) ? cur.retained.slice() : [];
+  for (const name of names) {
+    if (Object.hasOwn(cur.files, name) || !Object.hasOwn(old.files, name)) continue;
+    const size = sizeOf(old.files[name]);
+    if (total + size > AGENT_CONFIG_MAX_BYTES) { cur.omitted = (Number(cur.omitted) || 0) + 1; continue; }
+    total += size;
+    cur.files[name] = old.files[name];
+    retained.push({ name, since: (Array.isArray(old.retained) ? old.retained.find((r) => r?.name === name)?.since : null) ?? old.at ?? null });
+  }
+  if (retained.length) cur.retained = retained;
 }
 /** 107회차: 사본 파일을 아직 못 읽은 상태인가(읽기 오류 — 통합 백업 · 목록에는 그동안 받은 사본만 있다). */
 export function agentConfigUnread() { return !ensureLoaded(); }
@@ -57,7 +86,8 @@ export const AGENT_CONFIG_MAX_BYTES = Math.max(1024 * 1024, envPositive(process.
  */
 export function setAgentConfig(agent, files, { retain = [] } = {}) {
   if (!agent || !files || typeof files !== 'object') return { ok: false };
-  ensureLoaded();   // 107회차: 읽기 오류였으면 30초 간격으로 다시 읽는다
+  const unread = !ensureLoaded();   // 107회차: 읽기 오류였으면 30초 간격으로 다시 읽는다
+  const wanted = [];   // 115회차: 못 읽은 동안 직전 사본을 몰라 유지하지 못한 retain 이름
   // 엣지 수 상한 — 모두 최근이면 새 이름을 거절한다(공유 토큰 발신자가 이름을 바꿔 가며 실제 엣지 사본을 밀어내지 못하게).
   const map = new Map(Object.entries(byAgent));
   const adm = admitAgent(map, agent);
@@ -87,7 +117,7 @@ export function setAgentConfig(agent, files, { retain = [] } = {}) {
   let retainMissing = 0;
   for (const name of Array.isArray(retain) ? retain : []) {
     if (typeof name !== 'string' || !name || Object.hasOwn(cleaned, name)) continue;
-    if (!prev?.files || !Object.hasOwn(prev.files, name)) { retainMissing += 1; continue; }
+    if (!prev?.files || !Object.hasOwn(prev.files, name)) { retainMissing += 1; if (unread && wanted.length < 200) wanted.push(name); continue; }
     const val = prev.files[name];
     const size = typeof val === 'string' ? val.length : (() => { try { return JSON.stringify(val).length; } catch { return Infinity; } })();
     if (total + size > AGENT_CONFIG_MAX_BYTES) { omitted += 1; continue; }
@@ -99,6 +129,7 @@ export function setAgentConfig(agent, files, { retain = [] } = {}) {
   if (omitted) console.warn(`[central] agent-config: '${String(agent).slice(0, 64)}' 사본 합계 상한 — 파일 ${omitted}개를 저장하지 않았다`);
   if (retained.length) console.warn(`[central] agent-config: '${String(agent).slice(0, 64)}' 이 본문 한도(413)로 보내지 못한 설정 ${retained.length}개는 직전 사본을 유지합니다(낡은 값): ${retained.map((r) => r.name).join(', ').slice(0, 300)}`);
   byAgent[agent] = { at: Date.now(), files: cleaned, ...(omitted ? { omitted } : {}), ...(retained.length ? { retained } : {}) };
+  if (unread) { if (wanted.length) _retainWanted.set(agent, wanted); else _retainWanted.delete(agent); }   // 115회차: 마지막 push 가 기준(retain 없는 전체 push 는 통째로 바꾼다)
   persistSoon();
   return { ok: true, stored: Object.keys(cleaned).length, omitted, retained: retained.length, retainMissing, ...(adm.evicted ? { evicted: adm.evicted } : {}) };
 }

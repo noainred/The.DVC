@@ -492,7 +492,7 @@ const ALLOW = {
   'ipam/changeLog.js': ['split', '107회차 — 공용 읽기 · 읽기 단계 분리(그동안의 변화는 기록되지 않음)'],
   'ipam/rangePolicies.js': ['split', '107회차 — 공용 읽기 · 읽기 단계 분리(읽히면 리비전을 올림)'],
   'ipam/settings.js': ['split', '107회차 — 공용 읽기 · 읽기 단계 분리(읽히면 리비전을 올림)'],
-  'ipam/vcRangeMigrate.js': ['left', '이전 상태(읽기 오류 = 이전 안 함으로 읽음)'],
+  'ipam/vcRangeMigrate.js': ['left', '105회차 A2 에서 읽기 단계를 손으로 갈랐다(읽기 오류는 표지 migrationStateReadError 만 세우고 이전 · 수동 옮김 · 지움을 건너뛴다) — 공용 읽기 표지가 없어 split 이 아니다(115회차 정정: 예전 사유 "읽기 오류를 아직 안 함으로 읽음" 은 낡았다)'],
   'issues/inbox.js': ['split', '107회차 — 공용 읽기 · 읽기 단계 분리(그동안의 알림은 쌓지 않음 — dropped)'],
   'linkcheck/settings.js': ['split', '105회차 — 공용 판정 · 읽기 단계 분리'],
   'llm/config.js': ['split', '107회차 — 공용 읽기 · 읽기 단계 분리(매번 읽음 — 마지막 값 유지)'],

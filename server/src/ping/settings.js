@@ -56,7 +56,9 @@ function loadSaved() {
   const tok = fileTok();
   if (_cache && tok === _tok) return _cache;
   _tok = tok;
-  if (!tok) { _cache = {}; _loadError = null; return _cache; }
+  // 115회차(107 반증 — 재현): 파일이 없어지면 앞선 읽기 오류는 끝난 일이다 — reader 의 재읽기 대기를 지우지 않으면, 그 뒤 새로 저장한 파일을 간격(30초) 안에서는
+  //   디스크를 보지 않고 옛 읽기 오류로 답해 방금 저장한 값이 적용되지 않고 표지가 다시 섰다(106회차 R2 와 같은 꼴).
+  if (!tok) { _cache = {}; _loadError = null; _reader.reset(); return _cache; }
   // 107회차(재현 — EISDIR): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전에는 원본을 .corrupt 로 옮겨 재시작 뒤 '파일 없음'(env 기본값 · 표지 없음)이 됐다.
   //   이제 원본을 두고 · 마지막으로 읽은 값으로 돌고(없으면 env 기본값) · 표지(loadError.readError — 저장 거절은 예전과 같다) · 30초 간격으로 다시 읽는다.
   const rr = _reader.read();

@@ -122,12 +122,32 @@ function load() {
     items = [];
   }
   cache = { items };
+  if (_ownerGone.size) applyOwnerGone();
   return cache;
+}
+/*
+ * 115회차(107 추정 E3 — 재현): 목록을 못 읽은 동안(읽기 오류) 문서 · 이슈가 지워지면 removeOwner 는 빈 목록을 보고 0건으로 끝났고, 다시 읽힌 뒤에도
+ *   그 첨부(목록 줄 + 본체)가 남았다 — 주인이 없어 화면에서 지울 길이 없고, 전체 상한을 차지하고, 관리자 '목록 · 본체' 점검(missing · orphan)에도 보이지 않는다.
+ *   그동안 지워진 주인을 메모리에 적어 두었다가 목록이 다시 읽힌 때 지운다(문서 · 이슈 번호는 다시 쓰이지 않는다). 재시작하면 이 기억은 사라진다(남는 쪽 — 안전한 방향).
+ */
+const _ownerGone = new Set();   // 'wiki:W12' · 'issue:ISS-3'
+const OWNER_GONE_MAX = 2000;
+function applyOwnerGone() {
+  const keys = new Set(_ownerGone);
+  _ownerGone.clear();   // 한 번만 시도한다 — 저장이 안 되면 남긴다(요청마다 다시 쓰지 않는다)
+  const hit = (x) => keys.has(`${x.kind}:${x.owner}`);
+  const gone = cache.items.filter(hit);
+  if (!gone.length) return;
+  const before = cache.items;
+  cache.items = cache.items.filter((x) => !hit(x));
+  try { save(); } catch (e) { cache.items = before; console.warn(`[attach] 지워진 문서 · 이슈의 첨부 ${gone.length}개 정리를 저장하지 못해 남겼습니다: ${String(e?.message || e).slice(0, 160)}`); return; }
+  for (const x of gone) { try { fs.unlinkSync(blobPath(x.id)); } catch { /* 이미 없다 */ } }
+  console.warn(`[attach] 목록을 못 읽은 동안 지워진 문서 · 이슈의 첨부 ${gone.length}개를 지웠습니다.`);
 }
 function save() {
   { const no = attachIndexWriteRefusal(); if (no) throw err(503, no.reason, { code: no.code, readError: true }); }   // 107회차: 읽기 오류 중에는 빈 목록 위에 쓰지 않는다
   atomicWriteFileSync(attachIndexFile(), JSON.stringify({ v: 1, items: cache.items }), { mode: 0o600 }); }
-export function _resetAttachCache() { cache = null; settingsCache = null; settingsError = null; _reader.reset(); _readErr = ''; _setReader.reset(); _setReadErr = ''; }
+export function _resetAttachCache() { cache = null; settingsCache = null; settingsError = null; _reader.reset(); _readErr = ''; _setReader.reset(); _setReadErr = ''; _ownerGone.clear(); }
 
 /** 사용자가 준 파일 이름 → 표시 이름(제어 문자 · 경로 구분자 제거 · 120자) + 확장자(소문자). 받지 않는 확장자면 400. */
 export function cleanName(raw) {
@@ -176,6 +196,9 @@ export function addAttachment(kind, owner, rawName, buf, user, { now = Date.now(
   { const no = attachIndexWriteRefusal(); if (no) throw err(503, no.reason, { code: no.code, readError: true }); }   // 107회차: 본체를 쓰기 전에 거절
   if (c.items.filter((x) => x.kind === kind && x.owner === owner).length >= ATTACH_LIMITS.perOwner) throw err(409, `첨부는 ${kind === 'wiki' ? '문서' : '이슈'}마다 ${ATTACH_LIMITS.perOwner}개까지입니다 — 필요 없는 첨부를 지우고 다시 하세요`, { code: 'too-many' });
   const maxBytes = loadAttachSettings().maxTotalMB * 1024 * 1024;
+  // 115회차(결정 — 권장안): 상한 설정을 못 읽는 동안 loadAttachSettings 는 기본 상한을 준다 — 관리자가 올린 상한이면 '전체 상한을 넘습니다' 로 거짓 거절하고,
+  //   내린 상한이면 그 위로 받았다. 못 읽은 상한은 기본값이 아니다 — 판정하지 않고 본체를 쓰기 전에 거절한다(읽히면 다시 열린다).
+  if (_setReadErr) throw err(503, `첨부 전체 상한 설정 파일(${path.basename(attachSettingsFile())})을 읽지 못해 올리지 않았습니다 — 읽기 오류(${_setReadErr})이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 올리기가 다시 열립니다).`, { code: 'settingsUnreadable', readError: true });
   const used = totalBytes();
   if (used + buf.length > maxBytes) throw err(409, `포탈 첨부 전체 상한(${loadAttachSettings().maxTotalMB}MB)을 넘습니다 — 관리자에게 정리나 상한 조정을 요청하세요`, { code: 'attach-full', used, max: maxBytes });
   const id = crypto.randomBytes(16).toString('hex');
@@ -210,6 +233,10 @@ export function removeAttachment(id) {
 /** 주인이 지워지면 그 첨부를 모두 지운다(문서 · 이슈 삭제 라우트가 부른다). */
 export function removeOwner(kind, owner) {
   const c = load();
+  if (_readErr) {   // 115회차: 못 읽는 동안에는 지울 것을 모른다 — 적어 두고 다시 읽힌 때 지운다
+    if (KINDS.includes(kind) && OWNER_RE[kind].test(String(owner)) && _ownerGone.size < OWNER_GONE_MAX) _ownerGone.add(`${kind}:${owner}`);
+    return 0;
+  }
   const gone = c.items.filter((x) => x.kind === kind && x.owner === owner);
   if (!gone.length) return 0;
   c.items = c.items.filter((x) => !(x.kind === kind && x.owner === owner));

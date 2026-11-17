@@ -283,19 +283,24 @@ function loadSessions() {
   const late = !!_sessReadErr;
   _sessReadErr = '';
   sessLoaded = true;
-  const busy = new Set(); for (const s of S.values()) for (const t of s.targets) busy.add(t);   // late: 못 읽은 동안 시작한 수집의 서버
+  // late: 못 읽은 동안 시작한 **계속 수집**의 서버(서버는 수집 하나에만). 115회차(107 F10 반증 — 재현): 잠깐 보기까지 넣으면 저장된 계속 수집에서 그 서버가 빠지고
+  //   그 줄어든 정의를 파일에 써서, 잠깐 보기가 끝나면 그 서버의 계속 수집이 말없이 사라졌다 — 평소 규칙(planJoin: 계속 수집이 잠깐 보기를 넘겨받는다)의 반대였다.
+  const busy = new Set(); for (const s of S.values()) if (s.mode === 'record') for (const t of s.targets) busy.add(t);
+  const took = [];   // 다시 읽힌 계속 수집이 넘겨받을, 잠깐 보기에 있던 서버
   try {
     const j = rr.kind === 'ok' ? JSON.parse(rr.value) : null;
     for (const x of Array.isArray(j?.sessions) ? j.sessions : []) {
       if (!x || typeof x !== 'object' || x.mode !== 'record' || !/^fs-[a-f0-9]{8,16}$/.test(String(x.id))) continue;
       const targets = (Array.isArray(x.targets) ? x.targets : []).map(String).filter((t) => /^fm-[a-z0-9]{6,20}$/.test(t) && !busy.has(t)).slice(0, MAX_PER_SESSION);
       if (!targets.length || S.has(x.id)) continue;
+      if (late) for (const t of targets) for (const w of S.values()) if (w.mode === 'watch' && w.targets.includes(t)) { took.push(t); break; }
       S.set(x.id, { id: x.id, mode: 'record', by: String(x.by || '').slice(0, 64), targets, interval: normInterval(x.interval), startedAt: Number(x.startedAt) || Date.now(), until: null, lastViewAt: 0, resumed: true });
     }
   } catch (e) {
     // 없음은 조용히 · 손상은 옆으로 보존한 뒤 새로 시작한다(다음 저장이 온전했던 원본을 빈 목록으로 덮어쓰지 않게 — ARCH-1).
     if (e?.code !== 'ENOENT') preserveCorrupt(sessFile(), String(e?.message || e));
   }
+  if (took.length) applyMoves(took, Date.now());   // 115회차: 잠깐 보기는 그 서버를 넘겨주고(비면 끝난다) 계속 수집이 맡는다
   dedupeLoadedSessions(Date.now());
   if (late) persistSessions();   // 107회차: 못 읽은 동안 시작한 수집 + 파일의 계속 수집을 함께 쓴다
 }

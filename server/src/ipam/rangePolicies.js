@@ -41,7 +41,12 @@ export function specToRange(spec) {
 
 let cache = null;
 let rev = 0;
-export function policiesRev() { return rev; }
+/*
+ * 115회차(107 F3 반증 — 재현): '다시 읽히면 리비전을 올려 캐시를 버린다' 는 load() 가 불려야 일어난다. 대장 재구성은 이 리비전(캐시 키)과
+ *   매칭 인덱스(compileIndex — 캐시가 있으면 load 를 부르지 않는다)만 보므로, 정책 화면을 열거나 IP 스캔이 돌기 전까지 다시 읽힌 뒤에도 빈 정책으로
+ *   계속 판정했다. 읽기 오류 중에는 리비전 조회 · 인덱스 조회도 load() 를 거친다(디스크는 30초 간격 — reader).
+ */
+export function policiesRev() { if (_readErr) load(); return rev; }
 /*
  * 107회차(재현 — EISDIR): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전 catch 하나는 온전한 원본을 .corrupt 로 옮기고 빈 값 · 기본값을 캐시해
  *   다음 저장이 원본 자리를 덮었다. 읽기 단계는 공용 읽기: 원본을 두고 · 캐시하지 않고(30초 간격 재읽기) · 저장을 거절한다(503 settingsUnreadable). parse 실패는 예전과 같다.
@@ -160,6 +165,7 @@ export function deletePolicy(id) {
 let _idx = null;
 let _idxRev = -1;
 function compileIndex() {
+  if (_readErr) load();   // 115회차: 읽기 오류 중 만든 빈 인덱스에 머물지 않는다(다시 읽히면 load 가 rev 를 올리고 인덱스를 버린다)
   if (_idx && _idxRev === rev) return _idx;
   _idx = load().policies.filter((p) => p.enabled !== false && Number.isInteger(p.specLo))
     .map((p) => ({ lo: p.specLo, hi: p.specHi, size: p.specSize, priority: p.priority ?? 100, policy: p }))

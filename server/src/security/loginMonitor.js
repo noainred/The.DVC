@@ -56,6 +56,7 @@ export function loadLoginMonitor() {
   if (cache) return cache;
   const rr = _reader.read();
   if (rr.kind === 'read-error') { _readErr = String(rr.error?.code || 'read-error').slice(0, 32); return { ...DEFAULTS }; }   // 107회차: 캐시하지 않는다 — 쓰기는 거절한다
+  const was = _readErr;
   _readErr = '';
   cache = { ...DEFAULTS };
   try {
@@ -67,6 +68,9 @@ export function loadLoginMonitor() {
       cache = { ...DEFAULTS, ...p, ...clampNumbers(p) };
     }
   } catch (e) { cache = { ...DEFAULTS }; backupCorrupt(e); }
+  // 115회차(107 추정 E2 — 재현): 기동 때 읽기 오류면 기본값(켜짐 · 15분)으로 타이머를 걸었고, 다시 읽혀도 그 주기가 다음 저장 · 재시작까지 그대로였다
+  //   (꺼 둔 감시도 15분 타이머가 남았다). 읽기 오류가 풀린 첫 읽기에서, 이미 시작한 감시면 읽힌 설정으로 다시 건다(캐시를 세운 뒤라 재귀하지 않는다).
+  if (was && started) reschedule();
   return cache;
 }
 export function saveLoginMonitor(body = {}) {
@@ -89,6 +93,7 @@ export function saveLoginMonitor(body = {}) {
 }
 
 let timer = null;
+let started = false;   // 115회차: startLoginMonitor 가 불렸는가(읽기 오류가 풀렸을 때 타이머를 다시 걸지 판정)
 let lastRun = null;
 let lastSummary = null;
 let lastIncomplete = null;   // v2.682 R3E-02 — 마지막 주기가 일부 조각을 못 읽었으면 그 사실
@@ -176,6 +181,7 @@ function reschedule() {
 }
 
 export function startLoginMonitor() {
+  started = true;
   reschedule();
   setTimeout(() => runOnce().catch(() => {}), 40_000).unref?.();
   console.log('[loginmon] 로그인 실패 모니터 시작');

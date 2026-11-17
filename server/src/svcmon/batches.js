@@ -193,7 +193,7 @@ function load() {
  * @returns {boolean} 파일에 실제로 썼는지.
  */
 function save() {
-  if (_readErr || !cache) { console.warn('[svcmon] 배치 원장을 읽지 못한 상태라 쓰지 않았습니다(원본 유지 — 읽히면 다시 기록됩니다).'); return false; }   // 107회차
+  if (_readErr || !cache) { console.warn('[svcmon] 배치 원장을 읽지 못한 상태라 쓰지 않았습니다(원본 유지 — 이번 등록은 원장에 남지 않고, 다시 읽혀도 기록되지 않습니다).'); return false; }   // 107회차 · 115회차: '읽히면 다시 기록됩니다' 는 사실이 아니었다(다시 기록하지 않는다)
   try {
     atomicWriteFileSync(FILE(), JSON.stringify({ batches: cache || [] }, null, 2));
     return true;

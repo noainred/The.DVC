@@ -109,7 +109,12 @@ function load() {
 }
 function writeState() {
   load();
-  if (_readErr) { _memChanged = true; return; }   // 107회차: 못 읽은 상태 파일 위에 쓰지 않는다(메모리로 계속 — 재시작 때 파일을 읽는다)
+  if (_readErr) {   // 107회차: 못 읽은 상태 파일 위에 쓰지 않는다(메모리로 계속 — 재시작 때 파일을 읽는다)
+    _memChanged = true;
+    // 115회차: 여기서부터 load 는 파일을 다시 읽지 않는다 — '30초마다 다시 읽습니다' 는 더는 사실이 아니다(화면 · 점검이 이 글을 그대로 보인다).
+    loadErr = `읽기 오류(${_readErr}) — 원본은 그대로 두었습니다 · 그동안 점검 상태가 바뀌어 이 프로세스는 메모리 상태로 계속 돌고 상태 파일을 쓰지 않습니다(포탈을 다시 시작하면 파일을 다시 읽습니다)`;
+    return;
+  }
   try { atomicWriteFileSync(file(), JSON.stringify({ v: 1, ready: load().ready, jobs: load().jobs, lost: load().lost })); } catch (e) { console.warn('[focusmon-audit] 상태 파일을 쓰지 못했습니다:', String(e?.message || e).slice(0, 160)); } }
 /*
  * 51회차 #2: 엣지 동기화 한 번(handleEdgeAudit)이 받은 설치 · 준비 · 확인 결과(최대 RESULTS_PER_SYNC 8건)를 ingestResult 마다 원자 쓰기(fsync 둘)해
