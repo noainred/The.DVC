@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **752개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **755개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-17)
@@ -841,11 +841,12 @@
 | `IPAM_XLSX_TIMEOUT_MS` | `600000` |  | ipam/excel.js |
 | `IPAM_XLSX_WORKER` | `'1'` |  | ipam/excel.js |
 
-## LLM (4)
+## LLM (5)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `LLM_ENABLED` | `기본 아님('true' 일 때만 적용)` |  | llm/config.js |
+| `LLM_MAX_CONCURRENT` | `2` |  | llm/limit.js |
 | `LLM_TIMEOUT_MS` | `30000` |  | llm/config.js |
 | `OLLAMA_MODEL` | `'llama3.1'` |  | llm/config.js |
 | `OLLAMA_URL` | `'http://localhost:11434'` |  | llm/config.js |
@@ -933,12 +934,14 @@
 |---|---|---|---|
 | `VMCLONE_VERIFY_TIMEOUT_MIN` | `10` |  | vmclone/vsOps.js |
 
-## VM 프로비저닝 (1)
+## VM 프로비저닝 (3)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `PROVISION_CONCURRENCY` | `4` |  | provision/jobs.js |
+| `PROVISION_TASK_TIMEOUT_MS` |  |  | provision/jobs.js |
+| `PROVISION_TRACK_POLL_MS` | `15000` |  | provision/jobs.js |
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 752
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 755
