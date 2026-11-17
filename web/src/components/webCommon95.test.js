@@ -26,6 +26,7 @@ describe('backdropClose — 누름과 뗌이 모두 배경일 때만 닫는다(C
   it('배경을 누르고 배경에서 뗀 click 은 닫는다 · 다음 click 은 다시 누름을 본다', () => {
     let n = 0; const p = backdropClose(() => { n += 1; }); const ov = overlay();
     p.onMouseDown({ currentTarget: ov, target: ov });
+    p.onMouseUp({ currentTarget: ov, target: ov });   // 96회차: 뗌도 배경이어야 한다(브라우저는 click 전에 늘 mouseup 을 보낸다)
     p.onClick({ currentTarget: ov, target: ov });
     expect(n).toBe(1);
     p.onClick({ currentTarget: ov, target: ov });   // 누름 없이 온 click(합성) — 닫지 않는다
@@ -37,9 +38,9 @@ describe('backdropClose — 누름과 뗌이 모두 배경일 때만 닫는다(C
     p.onMouseDown({ currentTarget: ov, target: { inner: true } });
     p.onClick({ currentTarget: ov, target: { inner: true } });
     const q = backdropClose(() => { n += 1; }, { disabled: true });
-    q.onMouseDown({ currentTarget: ov, target: ov }); q.onClick({ currentTarget: ov, target: ov });
+    q.onMouseDown({ currentTarget: ov, target: ov }); q.onMouseUp({ currentTarget: ov, target: ov }); q.onClick({ currentTarget: ov, target: ov });
     const r = backdropClose(() => { n += 1; }, { disabled: () => true });
-    r.onMouseDown({ currentTarget: ov, target: ov }); r.onClick({ currentTarget: ov, target: ov });
+    r.onMouseDown({ currentTarget: ov, target: ov }); r.onMouseUp({ currentTarget: ov, target: ov }); r.onClick({ currentTarget: ov, target: ov });
     expect(n).toBe(0);
   });
   it('공용 모달(components/*)은 배경 click 판정을 직접 쓰지 않고 backdropClose 를 쓴다 · Modal 은 대화상자 표지', () => {

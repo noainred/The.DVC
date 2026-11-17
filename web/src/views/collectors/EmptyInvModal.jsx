@@ -25,6 +25,7 @@ import {
   statusValue, relevantLogs,
   collectModeText,
 } from './emptyInvText.js';
+import { backdropClose } from '../../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만
 
 // v2.613 DEPS2613-11: 상대시각은 공용 코어 relTime.agoText 하나다(로컬 ago 사본 제거).
 
@@ -83,7 +84,7 @@ export default function EmptyInvModal({ agent, push, onClose }) {
   };
 
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="modal-overlay" {...backdropClose(() => onClose())}>
       <EscClose onClose={onClose} />
       <div className="modal" style={{ maxWidth: 820, width: '100%', maxHeight: '86vh', overflow: 'auto', minWidth: 0 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8 }}>

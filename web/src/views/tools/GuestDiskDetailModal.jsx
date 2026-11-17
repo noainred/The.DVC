@@ -15,6 +15,7 @@ import { fetchJson } from '../../api.js';
 import EscClose from '../../components/EscClose.jsx';
 import { STable } from '../../components/STable.jsx';
 import { safeFileName, saveElementAsJpg, saveDocAsPdf } from './reportExport.js';
+import { backdropClose } from '../../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만
 
 const DAYS = [[7, '7일'], [30, '30일'], [90, '90일'], [180, '180일'], [365, '365일'], [0, '전체']];
 const UNIT_OPTS = [['auto', '자동'], ['GB', 'GB'], ['TB', 'TB'], ['PB', 'PB']];
@@ -175,7 +176,7 @@ export default function GuestDiskDetailModal({ vm, initUnit = 'auto', usageFacto
   const vt = d?.vmTrend;
 
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="modal-overlay" {...backdropClose(() => onClose())}>
       <EscClose onClose={onClose} />
       <div ref={sheetRef} className="modal card" style={{ maxWidth: 1120, width: '96vw', maxHeight: '92vh', overflow: 'auto' }}>
         <div className="flex between" style={{ marginBottom: 8, alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>

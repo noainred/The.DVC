@@ -22,7 +22,7 @@
  * ⚠ **보고가 없는 엣지를 '장애 없음' 이라 말하지 말 것** — '모른다' 다. `at`(마지막 보고 시각)과
  *   `version`(엣지 포탈 버전)을 보관해 화면이 '구버전 / 무보고 / 오래됨' 을 **각각** 말하게 한다.
  */
-import { makePart, partKeyFromTail, PUSH_PROTOCOL, COLLECTION_KINDS } from '../partfault/types.js';
+import { makePart, partKeyFromTail, PUSH_PROTOCOL, PART_IDENTS_VERSION, COLLECTION_KINDS } from '../partfault/types.js';
 import { devKeyOf, REGISTRY_SCOPES } from '../partfault/scan.js';
 import { admitAgent } from './edgeRecord.js';
 import { capStr } from '../util/capStr.js';
@@ -112,6 +112,9 @@ export async function putEdgeReport(agent, body = {}) {
   let totalParts = 0;     // 보고 전체 파트 수(REPORT_PART_MAX)
   let partsOmitted = 0;   // 상한으로 버린 파트 수(화면이 밝힌다)
 
+  // 96회차 ⓐ: 엣지가 시리얼 키 파트 이름을 싣는 판인가(PART_IDENTS_VERSION 이상의 양의 정수만 — 문자열 · 거짓 값은 옛 판).
+  const identsV = numOrNull(body.partIdents);
+  const idents = protocol === PUSH_PROTOCOL && identsV != null && Number.isInteger(identsV) && identsV >= PART_IDENTS_VERSION;
   if (protocol === PUSH_PROTOCOL) {
     for (const d of (Array.isArray(body.devices) ? body.devices : []).slice(0, MAX_DEVICES)) {
       if (!isObj(d)) continue;   // null·문자열 원소는 건너뛴다(S1 — 던지면 라우트가 응답 없이 매달린다)
@@ -134,6 +137,9 @@ export async function putEdgeReport(agent, body = {}) {
         parts.push(part); openN += 1;
       }
       const states = isObj(d.states) ? d.states : {};
+      // 96회차 ⓐ(93회차 F5): 시리얼 키 파트 이름 — 표지(partIdents)가 있는 판의 보고에서만 쓴다. 아는 모양만(객체 · 자기 키 · 글자 · 200자) —
+      //   그 밖은 예전처럼 keyKind 'name' · label = partId(교체 규칙이 맞지 않는 쪽 — 닫지 않는다).
+      const serialLabels = idents && isObj(d.serialLabels) ? d.serialLabels : null;
       for (const st of ['ok', 'unknown', 'absent']) {
         for (const tail of Array.isArray(states[st]) ? states[st] : []) {
           if (typeof tail !== 'string') continue;
@@ -141,7 +147,8 @@ export async function putEdgeReport(agent, body = {}) {
           const [kind, ...rest] = tail.split(':');
           const partId = rest.join(':');
           if (!kind || !partId) continue;
-          parts.push({ ...base, kind, partId, keyKind: 'name', state: st, rawState: '', label: partId, detail: '', partKey: partKeyFromTail({ scope, deviceKey, tail }) });
+          const sl = serialLabels && Object.hasOwn(serialLabels, tail) && typeof serialLabels[tail] === 'string' ? s(serialLabels[tail], 200) : '';
+          parts.push({ ...base, kind, partId, keyKind: sl ? 'serial' : 'name', state: st, rawState: '', label: sl || partId, detail: '', partKey: partKeyFromTail({ scope, deviceKey, tail }) });
         }
       }
       totalParts += parts.length;
@@ -178,7 +185,7 @@ export async function putEdgeReport(agent, body = {}) {
   }
   _map.set(key, {
     at: Date.now(), reportedAt: Number(body.at) || null,
-    version: s(body.version, 32), protocol,
+    version: s(body.version, 32), protocol, idents,
     devices, rejected, omitted: cnt(body.omitted) ?? 0, partsOmitted, scannedDropped,
     scanned,
     // v2.744(감사 EDGE-01): 엣지가 장비군 등록부를 읽지 못했다는 표지 — 아는 장비군(scope)만, 사유 글자 200자(아는 필드만).
@@ -288,7 +295,7 @@ export function mergeEdgeReports({ staleMs = 3 * 3_600_000, now = Date.now() } =
       }
     }
     agents.push({
-      agent: r.agent, at: r.at, reportedAt: r.reportedAt, ageMs: age, stale, legacy, version: r.version, protocol: r.protocol,
+      agent: r.agent, at: r.at, reportedAt: r.reportedAt, ageMs: age, stale, legacy, version: r.version, protocol: r.protocol, idents: r.idents === true,
       devices: (r.devices || []).length, devicesFailed: (r.devices || []).filter((d) => !d.ok).length,
       open, rejected: r.rejected || 0, omitted: r.omitted || 0, partsOmitted: r.partsOmitted || 0, scannedDropped: !!r.scannedDropped, scanned: r.scanned,
       ...(r.registryUnreadable ? { registryUnreadable: r.registryUnreadable } : {}),   // v2.744(EDGE-01)

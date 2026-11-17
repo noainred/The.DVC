@@ -14,13 +14,16 @@
  *   쓰지 않는다(모르면 0 — 명목을 지어내지 않는다 · 보고값이 분모). 웹 gpuAllocText.modelHasFamily 와 같은 낱말 규칙이다.
  *   ⚠ 이 현장 vCenter 가 GPU 이름을 어느 꼴로 주는지는 확인하지 못했다(정직 기록) — 두 꼴 모두 맞게 읽는다.
  */
+// 96회차(95회차 F2 반증 — 재현): `\b` 는 밑줄을 낱말 글자로 봐 'NVIDIA_A10' · 'grid_a40-24q' 꼴(밑줄로 이은 이름)을 놓쳤다(예전 판은 48 · 지금 0).
+//   지금 호출부(호스트 GPU 장치 이름)에는 그 꼴이 없지만 경계는 '영숫자가 아닌 것' 으로 둔다 — 'A4000' · 'GA107' 안의 모델 글자는 여전히 맞추지 않는다.
+const W = (x) => new RegExp(`(?<![A-Z0-9])${x}(?![A-Z0-9])`);
 const MODEL_GB = [
-  [/\bH200\b/, 141], [/\bH100\b/, 80],
-  [/\bA100\b/, 80],                      // 40/80 혼재 가능 — 명시 없으면 80 가정
-  [/\bA40\b/, 48], [/\bL40S?\b/, 48],
-  [/\bA30\b/, 24], [/\bA10\b/, 24], [/\bL4\b/, 24],
-  [/\bA16\b/, 16], [/\bT4\b/, 16],
-  [/\bV100\b/, 32],
+  [W('H200'), 141], [W('H100'), 80],
+  [W('A100'), 80],                      // 40/80 혼재 가능 — 명시 없으면 80 가정
+  [W('A40'), 48], [W('L40S?'), 48],
+  [W('A30'), 24], [W('A10'), 24], [W('L4'), 24],
+  [W('A16'), 16], [W('T4'), 16],
+  [W('V100'), 32],
 ];
 export function inferGpuMemGB(model) {
   const s = String(model || '').slice(0, 256);   // 외부 입력(장치 이름) — 길이를 먼저 자른다
@@ -30,8 +33,8 @@ export function inferGpuMemGB(model) {
   for (const [re, gb] of MODEL_GB) if (re.test(m)) return gb;
   // 칩 이름만 있고 괄호 모델이 없을 때 — 그 칩을 쓰는 데이터센터 모델이 하나인 것만(TU104GL = T4 · AD104GL = L4. 괄호에 다른 모델이 있으면 위에서 못 맞춘 것이라 0).
   if (!/\[/.test(m)) {
-    if (/\bAD104(?:GL)?\b/.test(m)) return 24;
-    if (/\bTU104(?:GL)?\b/.test(m)) return 16;
+    if (W('AD104(?:GL)?').test(m)) return 24;
+    if (W('TU104(?:GL)?').test(m)) return 16;
   }
   return 0;
 }

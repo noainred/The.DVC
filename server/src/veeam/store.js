@@ -15,7 +15,8 @@ const FILE = () => path.join(config.configDir, 'veeam-latest.json');
 const MAX_SERVERS = 400;
 let _map = null;
 let _writer = null;
-const okPart = (r) => ({ ts: r.ts, jobs: r.jobs, vms: r.vms, counts: r.counts, notes: r.notes, backups: r.backups, ...(r.target ? { target: r.target } : {}), ...(r.license ? { license: r.license } : {}) });   // v2.788 license — 실패 주기에도 마지막 값을 보인다
+const okPart = (r) => ({ ts: r.ts, jobs: r.jobs, vms: r.vms, counts: r.counts, notes: r.notes, backups: r.backups, ...(r.target ? { target: r.target } : {}), ...(r.license ? { license: r.license } : {}),   // v2.788 license — 실패 주기에도 마지막 값을 보인다
+  ...(Array.isArray(r.truncated) && r.truncated.length ? { truncated: r.truncated } : {}) });   // 96회차: 잘림 표지도 마지막 성공분과 함께(빠지면 잘린 결과가 완전한 것처럼 대조된다)
 
 function load() {
   if (_map) return _map;

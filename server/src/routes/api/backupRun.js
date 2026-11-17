@@ -45,14 +45,23 @@ export function vcentersOf(snap) {
  * 한 vCenter 의 VM 별 실행 상태(+ Veeam 이 그 vCenter 를 부르는 이름). 순서: 대조(모니터링 코어) → runStatusOf → hostName.
  * @returns {{ vc, servers, known, hostName:{name,how}, rows:Map<vmId,{vm,run}> }}
  */
+/**
+ * 96회차(94회차 F2 반증 — 화면): 실행 기록 읽기 오류(runs-unreadable)는 '진행 중' 이 아니라 '진행 여부 모름' 이다 — 예전에는 모든 서버에
+ *   '백업 요청 진행 중' 을 달았다. 막힘(409)은 그대로이고 사유는 요청 응답이 말한다.
+ */
+export function busyFlags(busy) {
+  if (busy && busy.kind === 'runs-unreadable') return { active: false, busyUnknown: true };
+  return { active: !!busy };
+}
+
 export function vcRunState(vc, vms, req) {
   const servers = serversForVcenter(vc.id);   // enabled · 등록 순서 · 비밀 없음
   const m = servers.length ? veeamMatchFor(vc, vms, req) : { known: false, match: null };
   const st = getRunSettings();
   const hostName = veeamHostFor(vc, { manual: st.hosts[vc.id] || '', aliasHosts: m.match?.aliasHosts || [] });
   const rows = new Map();
-  for (const vm of vms) rows.set(vm.id, { vm, run: runStatusOf(vm, { servers, known: !!m.known, entry: m.match?.byVm?.[vm.id] }) });
-  return { vc, servers, known: !!m.known, hostName, rows };
+  for (const vm of vms) rows.set(vm.id, { vm, run: runStatusOf(vm, { servers, known: !!m.known, truncated: !!m.truncated, entry: m.match?.byVm?.[vm.id] }) });
+  return { vc, servers, known: !!m.known, ...(m.truncated ? { truncated: true } : {}), hostName, rows };
 }
 
 /**
@@ -141,7 +150,7 @@ api.get('/tools/backup-run/vms', toolsPerm, adminOnly, (req, res) => {
   const servers = s.servers.map((d) => {
     const full = getServerWithSecret(d.id);
     const stop = authStopOf(full);
-    return { id: d.id, name: d.name, via: d.agent ? 'edge' : 'central', ...(admin ? { agent: d.agent || '' } : {}), authStopped: !!stop, active: !!serverBusy(d.id),
+    return { id: d.id, name: d.name, via: d.agent ? 'edge' : 'central', ...(admin ? { agent: d.agent || '' } : {}), authStopped: !!stop, ...busyFlags(serverBusy(d.id)),
       repositorySet: !!serverRunSettings(d.id).repositoryId };
   });
   res.json({ ok: true, vcenters: list, vcenter: { id: vcId, name: s.vc.name }, known: s.known, hostName: s.hostName, jobName: portalJobName(getRunSettings().jobPrefix, s.vc),

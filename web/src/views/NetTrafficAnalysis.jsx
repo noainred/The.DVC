@@ -77,7 +77,7 @@ function Monitors() {
   const [loadErr, setLoadErr] = useState(null); // v2.620(WEB2620-09): 조회 실패를 '없습니다' 로 보이지 않는다 — 권한·시한 실패는 사유와 함께.
   // v2.621(감사 WEB-01): 403(관리자·전체 범위 전용)이면 30초 폴링이 같은 거부를 반복하지 않게 멈춘다 — 수동 새로고침(⟳ 없음 → 탭 재진입)은 막지 않는다.
   const denied = useRef(false);
-  const load = () => { if (denied.current) return; fetchJson('/admin/net/monitors').then((r) => { setLoadErr(null); setD(r.monitors || []); }).catch((e) => { if (e?.status === 403) denied.current = true; setLoadErr(e); setD([]); }); };
+  const load = () => { if (denied.current) return; fetchJson('/admin/net/monitors').then((r) => { setLoadErr(r?.loadError?.readError ? String(r.loadError.reason || '정의 파일을 읽지 못했습니다.') : null); setD(r.monitors || []); }).catch((e) => { if (e?.status === 403) denied.current = true; setLoadErr(e); setD([]); }); };
   useEffect(() => { load(); const t = setInterval(load, 30_000); return () => clearInterval(t); }, []);
   const blank = { name: '', mode: 'dual', intervalMin: 10, seconds: 10, maxPackets: 1000, iface: 'any', useSudo: true, enabled: true, hostA: { host: '', port: 22, username: 'root', password: '' }, hostB: { host: '', port: 22, username: 'root', password: '' }, peer: '' };
   // v2.732(점검 2회차 B5-04): 네 동작의 catch 가 전부 비어 있어 실패가 화면에 남지 않았다 — 저장은 실패해도 창을 닫아

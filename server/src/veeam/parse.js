@@ -412,6 +412,17 @@ export function licenseOf(raw) {
 /** 엣지가 보낸 license 정제 — 정규화 모양만 다시 만든다(아는 필드만 · 문자열 상한 · 수는 수로). */
 export const sanitizeLicense = (v) => (isObj(v) ? licenseOf(v) : null);
 
+/**
+ * 96회차(94회차 남긴 것 ① — 결정 권장안): 수집 목록이 상한에서 잘렸다는 표지 — 증거 목록(작업 · 백업 객체 · 복원 지점)과 VM 목록(buildServerResult maxVms ·
+ *   중앙 정제 maxVms). 잘린 결과의 '대조에 없음' 은 '미보호' 가 아니라 '모름' 이다 — 백업 실행 계획(veeam/run/plan.js runStatusOf)이 그 VM 을 포탈 전용 잡에 넣지 않는다.
+ */
+export const RESULT_TRUNCATED_KEYS = Object.freeze(['jobs', 'backupObjects', 'restorePoints', 'vms']);
+/** 표지 정제(순수) — 아는 키만 · 중복 없이. 없으면 빈 배열. */
+export function truncatedKeysOf(v) {
+  if (!Array.isArray(v)) return [];
+  return [...new Set(v.filter((k) => typeof k === 'string' && RESULT_TRUNCATED_KEYS.includes(k)))];
+}
+
 /* ── 중앙 수신 정제(엣지가 보낸 결과) ───────────────────────────────────────── */
 
 const FUTURE_SKEW_MS = 5 * 60_000;
@@ -468,6 +479,10 @@ export function sanitizeServerResult(r, now = Date.now(), { maxVms = 20_000, max
   const c = isObj(r.counts) ? r.counts : {};
   const counts = {};
   for (const k of ['jobs', 'vmJobs', 'containers', 'backupObjects', 'agentObjects', 'sessions', 'running', 'pending', 'skipped', 'lastTasks', 'restorePoints', 'backups']) counts[k] = numOrNull(c[k]);
+  // 96회차: 잘림 표지(엣지 수집의 상한 · 이 정제의 VM 상한) — 화이트리스트. 빠뜨리면 엣지 서버의 잘린 결과가 '완전한 결과' 로 대조된다.
+  const truncated = truncatedKeysOf(r.truncated);
+  if (Array.isArray(r.vms) && r.vms.length > maxVms && !truncated.includes('vms')) truncated.push('vms');
+  if (Array.isArray(r.jobs) && r.jobs.length > maxJobs && !truncated.includes('jobs')) truncated.push('jobs');
   return {
     ok: r.ok === true, ts: Math.round(ts), ...(edgeTs != null ? { edgeTs } : {}), ms: numOrNull(r.ms),
     error: s(r.error, 600), kind: s(r.kind, 32), apiVersion: s(r.apiVersion, 32),
@@ -477,6 +492,7 @@ export function sanitizeServerResult(r, now = Date.now(), { maxVms = 20_000, max
     // 전체 점검 4회차 V-9: 보정이 0 이어도 엣지 시각은 수신 시각으로 자른다(ts 와 같은 규칙 — 미래 시각이 진행 상태에 보이던 것)
     authStop: isObj(r.authStop) ? { since: shift(numOrNull(r.authStop.since)), attempts: numOrNull(r.authStop.attempts), reason: s(r.authStop.reason, 200) } : null,
     jobs, vms, counts, backups,
+    ...(truncated.length ? { truncated } : {}),
     ...(isObj(r.license) && sanitizeLicense(r.license) ? { license: sanitizeLicense(r.license) } : {}),   // v2.788 — 화이트리스트(빠뜨리면 엣지 서버의 라이선스가 조용히 사라진다)
   };
 }

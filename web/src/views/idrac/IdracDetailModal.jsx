@@ -28,6 +28,7 @@ import { partStatusBadge, linkBadge, portSpeedText, partsHeadline, failedKindsNo
 import BoldText from '../../components/boldText.jsx';
 import { holdText } from '../tools/partFaultText.js';
 import { DiskBadServerPanel } from '../tools/DiskBadServerPanel.jsx'; // v3.8.0 디스크 이력 탭
+import { backdropClose } from '../../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만
 
 const LINE_COLORS = ['#60a5fa', '#f87171', '#34d399', '#fbbf24', '#a78bfa', '#f472b6', '#22d3ee', '#fb923c', '#4ade80', '#e879f9', '#94a3b8', '#fca5a5'];
 const FW_TYPE_ORDER = ['iDRAC', 'BIOS', 'NIC', 'Storage', 'GPU', 'PSU', 'Disk', 'CPLD', 'Driver', '기타'];
@@ -250,7 +251,7 @@ export function IdracDetailModal({ server, onClose }) {
   const orderedTypes = Object.keys(fwByType).sort((a, b) => (FW_TYPE_ORDER.indexOf(a) + 1 || 99) - (FW_TYPE_ORDER.indexOf(b) + 1 || 99));
 
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="modal-overlay" {...backdropClose(() => onClose())}>
       <EscClose onClose={onClose} />
       <div className="modal card" style={{ maxWidth: 980, width: '94vw' }}>
         <div className="flex between" style={{ marginBottom: 10, alignItems: 'center' }}>

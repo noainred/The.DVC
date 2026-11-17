@@ -14,7 +14,7 @@ import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { serversForVcenter, getServerWithSecret, registryLoadError } from '../../veeam/registry.js';
 import { reauth } from './reauth.js';
-import { vcentersOf, vcRunState, runVisible } from './backupRun.js';
+import { vcentersOf, vcRunState, runVisible, busyFlags } from './backupRun.js';
 import { portalJobName, morefOf, vmSizeOf } from '../../veeam/run/plan.js';
 import { getRunSettings } from '../../veeam/run/settings.js';
 import { startRun, listRuns, getRun, serverBusy, claimServer, releaseServer } from '../../veeam/run/runs.js';
@@ -119,7 +119,7 @@ api.get('/tools/backup-run/vm/:vmId', toolsPerm, adminOnly, (req, res) => {
   const names = takenNames(ctx);
   res.json({
     ok: true, vm: vmView(ctx), record: ctx.record, jobName: ctx.record?.jobName || ctx.jobName, hostName: { name: ctx.hostName, how: ctx.hostHow }, canRestore: !!ctx.dest,
-    servers: ctx.servers.map((d) => { const full = getServerWithSecret(d.id); return { id: d.id, name: d.name, authStopped: !!authStopOf(full), active: !!serverBusy(d.id) }; }),
+    servers: ctx.servers.map((d) => { const full = getServerWithSecret(d.id); return { id: d.id, name: d.name, authStopped: !!authStopOf(full), ...busyFlags(serverBusy(d.id)) }; }),   // 96회차: 실행 기록 읽기 오류는 '진행 중' 이 아니라 '모름'
     serverId: serverOf(ctx, '')?.id || '', writable: inUserWriteScope(req.user, ctx.snap, ctx.vm.vcenterId), runs,
     suggestName: suggestName(ctx.vm.name, names),
   });

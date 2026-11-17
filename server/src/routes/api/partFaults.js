@@ -104,6 +104,8 @@ export function classifyEdges({ collectors = [], status = {}, reports = [], minV
       agent: name, enabled: c.enabled !== false, version: version || null, kind,
       ...(kind === 'off' ? { offSource: sw.source || null } : {}),
       at: r?.at || null, ageMs: r?.ageMs ?? null, protocol: r?.protocol || null,
+      // 96회차 ⓐ(93회차 F5): 이 엣지 보고가 시리얼 키 파트 이름을 싣는가 — 아니면(옛 판) 교체 뒤 옛 장애가 '누락' 보류로 남는다(화면이 밝힌다). 보고 없음은 null.
+      replaceRule: r ? r.idents === true : null,
       devices: r?.devices ?? null, devicesFailed: r?.devicesFailed ?? null, open: r?.open ?? null,
       rejected: r?.rejected || 0, omitted: r?.omitted || 0, partsOmitted: r?.partsOmitted || 0, scannedDropped: !!r?.scannedDropped,
     });
@@ -113,7 +115,7 @@ export function classifyEdges({ collectors = [], status = {}, reports = [], minV
     const key = t(r.agent).toLowerCase();
     if (seen.has(key)) continue;
     rows.push({ agent: r.agent, enabled: null, version: r.version || null, kind: r.legacy ? 'legacy' : (r.stale ? 'stale' : 'fresh'), unregistered: true,
-      at: r.at, ageMs: r.ageMs, protocol: r.protocol, devices: r.devices, devicesFailed: r.devicesFailed, open: r.open, rejected: r.rejected || 0, omitted: r.omitted || 0, partsOmitted: r.partsOmitted || 0, scannedDropped: !!r.scannedDropped });
+      replaceRule: r.idents === true, at: r.at, ageMs: r.ageMs, protocol: r.protocol, devices: r.devices, devicesFailed: r.devicesFailed, open: r.open, rejected: r.rejected || 0, omitted: r.omitted || 0, partsOmitted: r.partsOmitted || 0, scannedDropped: !!r.scannedDropped });
   }
   const counts = {};
   for (const x of rows) counts[x.kind] = (counts[x.kind] || 0) + 1;
@@ -346,6 +348,8 @@ api.get('/tools/part-faults', toolsPerm, fullScopeOnly, async (req, res) => {
     push: role === 'edge' ? pushView(partFaultPushStatus(), isAdmin) : null,
     hook: hookStatus(),
     settings: isAdmin ? loadPartFaultSettings() : null,
+    // 96회차(93회차 F4 화면): 설정 파일 읽기 오류면 위 settings 는 기본값(꺼짐)이다 — 관리자가 끈 것이 아니다. 고정 문구 사유만(파일 조각 없음).
+    ...(isAdmin && partFaultSettingsWriteRefusal() ? { settingsUnreadable: { reason: String(partFaultSettingsWriteRefusal().reason || '').slice(0, 300) } } : {}),
   });
 });
 

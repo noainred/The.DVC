@@ -500,7 +500,7 @@ adminRouter.put('/idrac/scan-ranges/interval', adminOnly, fleetOnly, (req, res) 
   if (hours == null || hours < 0 || hours > 720) return res.status(400).json({ ok: false, reason: '주기는 0~720 시간이어야 합니다(0=주기 끔).' });
   const r = setIdracScanIntervalMs(Math.round(hours * 3_600_000));
   if (r.ok) logAudit({ user: req.user?.username, action: 'iDRAC 스캔 주기 변경', target: `${hours}시간` });
-  res.status(r.ok ? 200 : 500).json({ ...r, status: idracScanStatus() });
+  res.status(r.ok ? 200 : (r.status || 500)).json({ ...r, status: idracScanStatus() });   // 96회차 ⓑ: 설정 파일 읽기 오류는 409
 });
 
 // 스캔 현황 — 주기 스캐너 상태 + 진행 중·최근 위임 스캔/등록 잡 목록(어디서든 진행 확인용).

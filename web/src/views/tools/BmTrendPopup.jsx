@@ -25,6 +25,7 @@ import {
 } from './bmTrendText.js';
 import './bmTrend.css';
 import { saveBlob } from '../../util/saveBlob.js';   // v3.17.5: 내려받기는 공용 헬퍼 하나
+import { backdropClose } from '../../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만
 
 function downloadText(text, name) {
   if (typeof document === 'undefined' || typeof URL === 'undefined' || typeof Blob === 'undefined') return;
@@ -121,7 +122,7 @@ export default function BmTrendPopup({ itemKey, vc = '', name = '', init = {}, d
   const srcText = peakSrcText(d?.peakSrc || [], peakWindowS, peakWindowCapS);
 
   return (
-    <div className="bmt-pop-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="bmt-pop-overlay" {...backdropClose(() => onClose())}>
       <EscClose onClose={onClose} />
       <div className={`bmt-pop${isFull ? ' full' : ''}`} role="dialog" aria-modal="true" aria-label={`${title} 확대`}>
         {/* ── 머리 ── */}

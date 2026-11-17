@@ -57,11 +57,14 @@ export function veeamHostFor(vc, { manual = '', aliasHosts = [] } = {}) {
  * @param {boolean} ctx.known      이 vCenter 의 대조 결과를 읽었는가(match 가 있다)
  * @param {object|undefined} ctx.entry  match.byVm[vm.id]
  */
-export function runStatusOf(vm, { servers = [], known = false, entry } = {}) {
+/** 96회차: 잘린 결과에서 '대조에 없음 · 복원 지점 없음' 의 사유(미보호로 단정하지 않는다). */
+export const TRUNCATED_UNKNOWN_REASON = 'Veeam 수집 목록(작업 · 백업 객체 · 복원 지점 · VM)이 상한에서 잘려 이 VM 의 백업 근거를 끝까지 읽지 못했습니다 — 미보호로 단정하지 않고 포탈 전용 잡에 넣지 않습니다(Veeam 콘솔에서 확인하세요).';
+export function runStatusOf(vm, { servers = [], known = false, truncated = false, entry } = {}) {
   const objectId = morefOf(vm);
   if (!servers.length) return { status: 'unmapped', objectId, reason: '이 vCenter 를 맡는 Veeam B&R 서버가 등록돼 있지 않습니다(Veeam 서버 설정의 연결 vCenter).' };
   if (!known) return { status: 'unknown', objectId, reason: '이 vCenter 의 Veeam 결과를 아직 읽지 못했습니다 — 미보호로 단정하지 않습니다.' };
-  if (!entry) return { status: 'unprotected', objectId, serverId: servers[0].id, serverName: servers[0].name };
+  // 96회차(94회차 남긴 것 ① — 결정 권장안): 결과가 상한에서 잘렸으면 '대조에 없음' 은 잘린 쪽에 있던 보호 VM 일 수 있다 — 모름(두 번째 잡 방지).
+  if (!entry) return truncated ? { status: 'unknown', objectId, reason: TRUNCATED_UNKNOWN_REASON } : { status: 'unprotected', objectId, serverId: servers[0].id, serverName: servers[0].name };
   const rp = typeof entry.rp === 'number' && Number.isFinite(entry.rp) ? entry.rp : null;
   const lb = typeof entry.lb === 'number' && Number.isFinite(entry.lb) ? entry.lb : null;
   const jobs = Array.isArray(entry.jobs) ? entry.jobs.slice(0, 10) : [];
@@ -85,6 +88,8 @@ export function runStatusOf(vm, { servers = [], known = false, entry } = {}) {
     return { status: 'protected', ...base, serverId: owner.id, serverName: owner.name };
   }
   const tgt = owner || servers[0];
+  // 96회차: 잘린 결과의 '복원 지점 없음' 도 단정이 아니다(복원 지점 목록이 잘렸을 수 있다) — 모름.
+  if (truncated) return { status: 'unknown', ...base, reason: TRUNCATED_UNKNOWN_REASON };
   if (jobs.length) return { status: 'in-job', ...base, serverId: tgt.id, serverName: tgt.name, reason: '잡에는 있지만 복원 지점이 없습니다(첫 실행 전이거나 실패) — Quick Backup 은 전체 복원 지점이 있어야 합니다.' };
   return { status: 'unprotected', ...base, serverId: tgt.id, serverName: tgt.name };
 }

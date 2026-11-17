@@ -705,7 +705,9 @@ export function veeamMatchFor(vc, vms, req) {
   const br = r.results.filter((x) => x.server?.src !== 'em' && brIds.has(x.server?.id) && fresh(x));
   const known = br.length >= brCount && Array.isArray(vms) && vms.length > 0;
   const match = known ? matchToVcenter({ id: vc.id, host: r.host }, vms, r.results, { otherHosts: r.otherHosts }) : null;
-  return { known, match, views: r.views, host: r.host, results: br.length };
+  // 96회차(94회차 남긴 것 ①): 신선한 결과 중 하나라도 목록 상한에서 잘렸으면 대조에 없는 VM 은 '미보호' 가 아니라 '모름'(planBackup 이 포탈 잡에 넣지 않는다).
+  const truncated = br.some((x) => Array.isArray(x.result?.truncated) && x.result.truncated.length > 0);
+  return { known, match, views: r.views, host: r.host, results: br.length, ...(truncated ? { truncated: true } : {}) };
 }
 
 async function vcBackup(vc, vms, req, { initial = false, scope = null } = {}) {

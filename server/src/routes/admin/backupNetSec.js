@@ -17,7 +17,7 @@ import { analyzeLogsForIssuesMemo } from '../../net/logIssues.js';   // v2.742(D
 import { enqueueCapture, getCaptureResult } from '../../central/captureJobs.js';
 import { getAllAgentConfigs } from '../../central/agentConfig.js';
 import { recordCapture, listCaptures, getCapture, deleteCapture } from '../../net/captureHistory.js';
-import { listMonitors, saveMonitor, removeMonitor, runMonitorNow } from '../../net/monitor.js';
+import { listMonitors, saveMonitor, removeMonitor, runMonitorNow, monitorsWriteRefusal } from '../../net/monitor.js';
 import { addUsersToVms } from '../../guest/accountService.js';
 import { onDemandErrorFields } from '../../vcenter/dsBrowse.js';   // v2.742(VC-03 후속): 주문형 로그인 문이 막은 409 의 사유 필드
 import { inUserWriteScope, scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
@@ -320,7 +320,11 @@ adminRouter.get('/net/history/:id', adminOnly, fleetOnly, (req, res) => { const 
 adminRouter.delete('/net/history/:id', adminOnly, fleetOnly, (req, res) => res.json({ ok: deleteCapture(req.params.id) }));
 
 // 연속 모니터링
-adminRouter.get('/net/monitors', adminOnly, fleetOnly, (_req, res) => res.json({ monitors: listMonitors() }));
+// 96회차 ⓑ(92회차 남긴 것 ①): 정의 파일 읽기 오류 중의 빈 목록은 '없음' 이 아니다 — 표지(monitorsWriteRefusal 의 고정 문구)를 싣는다.
+adminRouter.get('/net/monitors', adminOnly, fleetOnly, (_req, res) => {
+  const no = monitorsWriteRefusal();
+  res.json({ monitors: listMonitors(), ...(no ? { loadError: { readError: true, reason: no.reason } } : {}) });
+});
 adminRouter.put('/net/monitors', adminOnly, fleetOnly, (req, res) => res.json(saveMonitor(req.body || {})));
 adminRouter.delete('/net/monitors/:id', adminOnly, fleetOnly, (req, res) => res.json({ ok: removeMonitor(req.params.id) }));
 adminRouter.post('/net/monitors/:id/run', adminOnly, fleetOnly, async (req, res) => { try { res.json(await runMonitorNow(req.params.id)); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); } });

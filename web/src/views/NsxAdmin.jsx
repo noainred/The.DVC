@@ -119,7 +119,7 @@ export default function NsxAdmin() {
       </div>
 
       {form && (
-        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
+        <div className="modal-overlay" {...backdropClose(() => close())}>
           <EscClose onClose={close} />
           <div className="modal card">
             <div className="flex between" style={{ marginBottom: 12 }}>
@@ -174,3 +174,4 @@ export default function NsxAdmin() {
 }
 
 import Select from '../components/Select.jsx';
+import { backdropClose } from '../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만

@@ -9,19 +9,27 @@
  * 쓰는 법: `<div className="modal-overlay" {...backdropClose(onClose)}>` · 진행 중에 막으려면 `backdropClose(onClose, { disabled: busy })`.
  * @param {(e?: any) => void} onClose
  * @param {{ disabled?: boolean | (() => boolean) }} [opt]
- * @returns {{ onMouseDown: (e: any) => void, onClick: (e: any) => void }}
+ * @returns {{ onMouseDown: (e: any) => void, onMouseUp: (e: any) => void, onClick: (e: any) => void }}
  */
 export function backdropClose(onClose, { disabled = false } = {}) {
   return {
     onMouseDown: (e) => {
       const el = e?.currentTarget;
-      if (el && el.dataset) el.dataset.downOnBackdrop = e.target === el ? '1' : '';
+      if (el && el.dataset) { el.dataset.downOnBackdrop = e.target === el ? '1' : ''; el.dataset.upOnBackdrop = ''; }
+    },
+    // 96회차(95회차 W1 반증 — 덜 고침): 반대 방향(배경에서 누르고 창 안에서 뗌)도 click 은 공통 조상인 배경으로 온다 — 누름만 보면 닫혔다(머리말의
+    //   '누름과 뗌이 모두 배경' 과 달랐다). 뗌의 대상도 기록해 둘 다 배경일 때만 닫는다. 터치 탭은 호환 mousedown · mouseup 이 같은 대상으로 와 그대로 닫힌다 ·
+    //   Esc 는 EscClose 가 따로 닫는다(이 함수와 무관).
+    onMouseUp: (e) => {
+      const el = e?.currentTarget;
+      if (el && el.dataset) el.dataset.upOnBackdrop = e.target === el ? '1' : '';
     },
     onClick: (e) => {
       const el = e?.currentTarget;
       const down = !!(el && el.dataset && el.dataset.downOnBackdrop === '1');
-      if (el && el.dataset) el.dataset.downOnBackdrop = '';
-      if (!el || e.target !== el || !down) return;
+      const up = !!(el && el.dataset && el.dataset.upOnBackdrop === '1');
+      if (el && el.dataset) { el.dataset.downOnBackdrop = ''; el.dataset.upOnBackdrop = ''; }
+      if (!el || e.target !== el || !down || !up) return;
       const off = typeof disabled === 'function' ? disabled() : disabled;
       if (!off && typeof onClose === 'function') onClose(e);
     },

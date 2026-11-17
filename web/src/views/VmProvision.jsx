@@ -556,7 +556,7 @@ function IpGuideModal({ onClose }) {
   const H = ({ children }) => <div style={{ fontWeight: 800, fontSize: 13, margin: '12px 0 4px', color: '#c7d2fe' }}>{children}</div>;
   const code = { fontFamily: 'monospace', background: 'rgba(255,255,255,.06)', padding: '1px 5px', borderRadius: 4 };
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="modal-overlay" {...backdropClose(() => onClose())}>
       <EscClose onClose={onClose} />
       <div className="modal card" style={{ maxWidth: 640, maxHeight: '88vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div className="flex between" style={{ marginBottom: 8, flex: '0 0 auto' }}>
@@ -584,3 +584,4 @@ function IpGuideModal({ onClose }) {
 }
 
 import Select from '../components/Select.jsx';
+import { backdropClose } from '../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만

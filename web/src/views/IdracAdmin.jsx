@@ -19,7 +19,7 @@ import { fetchJson, postJson, putJson, delJson } from '../api.js';
 import { droppedSecretNote } from './droppedSecretText.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { IdracScanJobs } from './idrac/IdracScanJobs.jsx';
-import { IdracScanRanges } from './idrac/IdracScanRanges.jsx';
+import { IdracScanRanges, scanRangesLoadErrorText } from './idrac/IdracScanRanges.jsx';
 import BoldText from '../components/boldText.jsx';
 import { authStopInfo, authStopSummary } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 import { manualPollMessage } from './idrac/manualPollText.js'; // v2.591(감사 P1): 진행 중·긴급중단을 '성공' 으로 말하지 않는다
@@ -63,7 +63,8 @@ export default function IdracAdmin() {
   const srDenied = useRef(false); // v2.621(감사 RECENT-08): 403(전체 범위 계정 전용)이면 30초 폴링이 같은 거부를 반복하지 않게 멈춘다
   const srFailText = (e) => { if (e?.status === 403) srDenied.current = true; return e?.message || String(e); };
   const loadScanRanges = () => (srDenied.current ? Promise.resolve() : fetchJson('/admin/idrac/scan-ranges')
-    .then((d) => { setScanRanges({ ranges: d.ranges || [], status: d.status || null, centralEnabled: !!d.centralEnabled, loaded: true }); setSrLoadErr(null); })
+    // 96회차 R2(93회차 F3 덜 고침): 서버는 스캔 대역 파일 읽기 오류를 200 + loadError 로 싣는다 — 버리면 빈 목록이 '저장된 스캔 대역이 없습니다' 로 보였다.
+    .then((d) => { setScanRanges({ ranges: d.ranges || [], status: d.status || null, centralEnabled: !!d.centralEnabled, loaded: true }); setSrLoadErr(scanRangesLoadErrorText(d)); })
     .catch((e) => setSrLoadErr(srFailText(e))));   // 문자열 — ErrorBox 의 403·일시 미가용 판정이 메시지 키로 찾는다
   // v2.621(감사 RECENT-08): scan-jobs 는 v2.620 부터 전체 범위 계정 전용(fleetOnly)이다. 403 을 삼키면 초기 빈 값으로
   //   '진행 중인 스캔이 없습니다' 라고 말하므로 실패를 따로 들고, 403 이면 30초·5초 폴링을 멈춘다(다시 불러도 같은 거부).

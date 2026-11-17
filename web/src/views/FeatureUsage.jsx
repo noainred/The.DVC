@@ -10,6 +10,7 @@ import {
   keyMeta, allUsageKeys, fmtInt, fmtDur, fmtBytes, FEATURE_LIMIT, avgPerView, pctText, trendOf, fmtWhen, bucketShares, perDay, usageHints, filterUsers, filterFeatures,
 } from './featureUsageText.js';
 import './featureUsage.css';
+import { backdropClose } from '../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만
 
 /**
  * 설정 › 사용자 › 기능 사용 현황(v2.913 · 설계 docs/design/feature-usage · 사용자 요청 "사용자별로 어떤 기능을 사용하는지 트래킹 — UI 개선을 위해").
@@ -454,7 +455,7 @@ function UserDrawer({ user, days, ctx, overall, onClose }) {
   const mine = d ? bucketShares(d.byKey, ctx) : null;
   const all = overall ? bucketShares(overall.byKey, ctx) : null;
   return (
-    <div className="fu-overlay" role="presentation" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="fu-overlay" role="presentation" {...backdropClose(() => onClose())}>
       <aside className="fu-drawer" role="dialog" aria-label={`${user} 상세`}>
         <div className="fu-dh">
           <div style={{ minWidth: 0 }}>

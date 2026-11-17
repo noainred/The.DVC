@@ -126,7 +126,7 @@ function VmPanel({ vcId, initialIds, onHandoffUsed }) {
           <span key={s.id} style={{ display: 'inline-flex', gap: 6, alignItems: 'center', minWidth: 0, flexWrap: 'wrap' }}>
             <b>{s.name}</b>
             <Badge cls={s.authStopped ? 'red' : 'green'}>{s.authStopped ? '인증 정지' : '연결 등록됨'}</Badge>
-            <span className="muted">{s.via === 'edge' ? `엣지${s.agent ? ` ${s.agent}` : ''} 경유` : '중앙 직접'}{s.active ? ' · 백업 요청 진행 중' : ''}{s.repositorySet ? '' : ' · 포탈 전용 잡 저장소 미지정'}</span>
+            <span className="muted">{s.via === 'edge' ? `엣지${s.agent ? ` ${s.agent}` : ''} 경유` : '중앙 직접'}{s.active ? ' · 백업 요청 진행 중' : ''}{s.busyUnknown ? ' · 진행 여부 모름(실행 기록 읽기 오류 — 새 요청은 막힘)' : ''}{s.repositorySet ? '' : ' · 포탈 전용 잡 저장소 미지정'}</span>
           </span>
         )) : <span className="muted">이 vCenter 를 맡는 Veeam B&amp;R 서버가 없습니다 — 설정 › Veeam 백업 서버에서 연결 vCenter 를 지정하세요.</span>}
         <span className="muted" style={{ flexBasis: '100%', fontSize: 12, overflowWrap: 'anywhere' }}>

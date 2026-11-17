@@ -27,6 +27,7 @@ const SEARCH_DEBOUNCE_MS = 300;
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import { KPI_HANDOFF, takeKpiVcenter, regionsOf, vcInRegion } from '../platform/platformText.js'; // v2.959: 가상화 플랫폼 KPI 카드가 넘긴 법인 · v3.10.15: 리전
+import { backdropClose } from '../../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만
 const slotLabel = (slot) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(00|12)$/.exec(String(slot || ''));
   return m ? `${Number(m[2])}/${Number(m[3])} ${m[4]}시` : String(slot || '');
@@ -785,7 +786,7 @@ function DsDetail({ title, snapId = null, slot = null, region = '', onClose }) {
   const sumDelta = (items || []).reduce((a, r) => a + (r.deltaGB || 0), 0);
 
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="modal-overlay" {...backdropClose(() => onClose())}>
       <EscClose onClose={onClose} />
       <div className="modal card" style={{ maxWidth: 1000 }}>
         <h3 style={{ marginTop: 0 }}>{title}</h3>
