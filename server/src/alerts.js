@@ -28,7 +28,7 @@ import { registerExitFlush } from './util/exitFlush.js';
 import { unreadVcenterReasons } from './metrics/unreadVcenters.js';
 import { getScanResults, macIpCount, getAgentReports, listScanAgents, loadScanSettings, LOCAL } from './ipam/scanStore.js';   // v3.1.0: IP 충돌 의심 규칙(스캔이 본 ARP MAC)
 import { findConflicts } from './ipam/conflict.js';
-import { duplicateAlerts, subnetFullAlerts, scanStaleAlerts } from './ipam/instantAlerts.js'; // v3.7.0 바로 알림 3가지
+import { duplicateAlerts, subnetFullAlerts, scanStaleAlerts, DUP_MANY_KEY, dupBundleEndTitle, dupBundledExpiredTitle, DUP_BUNDLED_EXPIRED_DETAIL } from './ipam/instantAlerts.js'; // v3.7.0 바로 알림 3가지 · 결정 62 묶음 문구
 import { peekIpamRows, listSubnets } from './ipam/ledger.js';
 import { withSubnetNotes } from './ipam/subnetNotes.js';
 import { setConflictSuspects } from './ipam/conflictState.js';
@@ -229,6 +229,9 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
   // v3.8.1: 키 앞부분으로 보류(이번 회차에 그 종류 전체를 판정하지 못했다 — 어떤 키가 발생 중인지 평가 쪽은 모른다).
   const heldPrefixes = new Set();
   Object.defineProperty(out, 'heldPrefixes', { value: heldPrefixes, enumerable: false });
+  // 결정(56~75 남긴 것) 62: 중복 IP 묶음 회차에 보류한 IP 별 키(held 의 부분집합) — 보류 시한을 넘기면 '해소' 가 아니라 '묶음으로 대체' 로 정리 기록한다.
+  const bundled = new Set();
+  Object.defineProperty(out, 'bundled', { value: bundled, enumerable: false });
   // v2.607 LEFT2607-04: REST 폴백으로 수집된 vCenter 는 경보를 **조회하지 않았다**(restClient.js alarmsUnknown:true —
   //   alarms:[] 는 '경보 0건' 이 아니다). 예전엔 그 vCenter 의 발생 중 위험 알람이 목록에서 빠졌다는 이유로 '해소' 알림이
   //   나갔다. 그 vCenter 의 경보 해소 판정을 보류한다(tick 이 st.alert.vcenterId 로 본다 — 키에는 vCenter 축이 없다).
@@ -340,6 +343,7 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
         if (R.ipamDuplicate?.enabled) {
           const d = duplicateAlerts(led.rows, { unreadVc: new Set([...unreadVc, ...staleVc]) });
           for (const k of d.held) held.add(k);
+          for (const k of d.bundled || []) bundled.add(k);
           for (const x of d.alerts.slice(0, 300)) out.push(x);
         }
         // 62회차(60회차 F3 의 형제 — 재현): 상한 300 을 넘은 꼬리는 '발생 중인데 이번 목록에 안 실린 것' 이다 — slice 로 버리면 순서가 밀린
@@ -868,6 +872,7 @@ async function refreshState(cfg, sendEnabled) {
   // 판정 보류 키는 아래 concat(새 배열) 전에 잡아 둔다 — 숨은 속성은 concat 으로 옮겨지지 않는다.
   const held = active.held instanceof Set ? active.held : new Set();
   const heldPrefixes = active.heldPrefixes instanceof Set ? [...active.heldPrefixes] : [];   // v3.8.1
+  const bundled = active.bundled instanceof Set ? active.bundled : new Set();   // 결정 62: 중복 IP 묶음으로 보류한 IP 별 키
   const alarmsHeldVc = active.alarmsHeldVcenters instanceof Set ? active.alarmsHeldVcenters : new Set(); // v2.607 LEFT2607-04
   const unreadVc = active.unreadVcenters instanceof Set ? active.unreadVcenters : new Set(); // v2.720(감사 B1-01)
   // 동시 다운 감지: 직전 스냅샷과 비교(전이). 규칙 켜져 있을 때만 알림에 포함하되,
@@ -917,6 +922,7 @@ async function refreshState(cfg, sendEnabled) {
   }
   // resolve
   const resolvedNow = []; // v2.908 이슈 자동 등록 구독자에게
+  const dupLeft = active.reduce((n, a) => n + (typeof a?.key === 'string' && a.key.startsWith('ipdup:') && a.key !== DUP_MANY_KEY ? 1 : 0), 0);   // 결정 62
   for (const [key, st] of [...firing.entries()]) {
     if (seen.has(key)) { if (st.heldSince) { st.heldSince = 0; changed = true; } continue; }
     // v2.598 RECENT2598-03: 값을 못 읽은 항목은 해소가 아니다 — 발생 상태를 유지한다. 오래(HELD_MAX_MS) 못 읽으면 알림 없이
@@ -926,11 +932,20 @@ async function refreshState(cfg, sendEnabled) {
     if (held.has(key) || heldPrefixes.some((p) => key.startsWith(p)) || alarmHeld || vcUnread) {
       if (!st.heldSince) { st.heldSince = now; changed = true; }
       if (now - st.heldSince < HELD_MAX_MS) continue;
-      firing.delete(key); rememberEnded(restored, key, st, now, cooldownMs); changed = true; continue;
+      firing.delete(key); rememberEnded(restored, key, st, now, cooldownMs); changed = true;
+      // 결정(56~75 남긴 것) 62: 중복 IP 묶음으로 보류된 IP 별 알림은 시한을 넘겨도 '해소' 가 아니다(중복은 묶음 알림이 계속 알린다) —
+      //   알림 없이 조용히 사라지지 않게 '묶음으로 대체 — 개별 상태 모름' 으로 기록만 한다(resolved 구독자에게는 보내지 않는다).
+      if (bundled.has(key)) {
+        pushRecent({ at: new Date().toISOString(), key, title: dupBundledExpiredTitle(st.alert?.title), detail: DUP_BUNDLED_EXPIRED_DETAIL, severity: 'info',
+          ...(st.alert?.vcenterId ? { vcenterId: st.alert.vcenterId } : {}) });
+      }
+      continue;
     }
     firing.delete(key); rememberEnded(restored, key, st, now, cooldownMs); changed = true;
-    pushRecent({ at: new Date().toISOString(), key, title: `해소: ${st.alert.title}`, severity: 'resolved' });
-    resolvedNow.push({ key, alert: st.alert });
+    // 결정(56~75 남긴 것) 62: 중복 IP 묶음 키가 빠진 것은 '상한 아래로 내려옴' 일 수 있다 — 남은 중복이 있으면 그 수를 사실대로 말한다(개별 알림으로 계속).
+    const endTitle = key === DUP_MANY_KEY ? dupBundleEndTitle(dupLeft) : null;
+    pushRecent({ at: new Date().toISOString(), key, title: endTitle || `해소: ${st.alert.title}`, severity: 'resolved' });
+    resolvedNow.push({ key, alert: endTitle ? { ...st.alert, title: endTitle } : st.alert });
   }
   emitAlertState({ now, firing: [...firing.entries()].map(([key, st]) => ({ key, alert: st.alert, since: st.since })), resolved: resolvedNow });
   // 복원 목록은 **쿨다운이 남은 동안만** 들고 있는다 — 기동 직후에는 스냅샷이 아직 비어(첫 수집 중) 활성 목록이 0 이라

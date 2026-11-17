@@ -26,6 +26,7 @@ import { NAME_METHODS, NAME_MISS_MAX, displayName, nameMismatch } from './hostNa
 import { macInfo, entryMac } from './macVendor.js'; // v2.999: MAC → 제조사 · 종류(IP 상세 창) · 표시 MAC(ARP > NetBIOS)
 import { confirmHoursOf, DNS_CONFIRM_HOURS_MIN, DNS_CONFIRM_HOURS_MAX, DNS_FWD_STATES, DNS_OTHER_MAX } from './dnsConfirm.js'; // v3.2.0: DNS 정합성
 import { cleanQuiet } from './scanQuiet.js'; // v3.7.0: 주기 스캔 쉬는 시간
+import { admitAgent, EDGE_MAX_AGENTS } from '../central/edgeRecord.js'; // 결정(56~75 남긴 것) 60: 에이전트별 보고 기록 상한(cvp-data 와 같은 판정)
 
 const MAX_MERGE = 20_000; // 한 보고당 병합 상한(악의/오작동 에이전트의 대량 주입 방지)
 // v2.603(감사 CEN2603-02): **전체** 상한. MAX_MERGE 는 한 호출에만 걸려, 배정 범위가 없는 토큰이 보고를 반복하면 results·history 가
@@ -1227,6 +1228,37 @@ export function scanInfo() {
 let reports = readJson(REP, {}) || {};
 registerStore(REP, () => reports);
 
+/*
+ * 결정(56~75 남긴 것) 60: 보고 기록(reports)은 이름마다 항목이 생기고 상한이 없었다 — 공유(중앙) 토큰의 `/ip-scan-result` 는 본문의 agent 이름을
+ *   그대로 쓰므로(개별 토큰은 배정 범위로 막힌다) 이름만 바꿔 보내면 항목이 끝없이 늘었다. 스캔 설정에 등록된 에이전트와 이 포탈(LOCAL)은
+ *   언제나 받는다. 그 밖의 이름은 cvp-data 와 같은 판정(central/edgeRecord.js admitAgent — 자리가 없으면 가장 오래 조용한 이름을 내리고,
+ *   모두 최근이면 새 이름을 받지 않는다)이고, 넘친 사실은 콘솔 · agentReportsCapStatus() 에 남긴다(조용히 버리지 않는다).
+ */
+export const AGENT_REPORTS_MAX = EDGE_MAX_AGENTS;
+const _reportsCap = { refused: 0, evicted: 0, lastAt: null, lastName: '', lastAction: '' };
+export function agentReportsCapStatus() { return { max: AGENT_REPORTS_MAX, ..._reportsCap }; }
+const reportAt = (r) => Math.max(numOrNull(r?.at) ?? 0, numOrNull(r?.incomplete?.at) ?? 0);
+/** 이 이름의 보고 항목을 새로 둘 수 있는가(이미 있으면 언제나 참). 반환 { ok, evicted? }. */
+function admitReport(name, now = Date.now()) {
+  if (name === LOCAL || Object.prototype.hasOwnProperty.call(reports, name)) return { ok: true };
+  const lo = (k) => String(k).trim().toLowerCase();
+  let configured;
+  try { configured = new Set(Object.keys(loadAll().agents || {}).map(lo)); } catch { configured = new Set(); }
+  if (configured.has(lo(name))) return { ok: true };
+  // 상한은 설정에 없는 이름끼리만 센다 — 등록된 엣지 · LOCAL 의 기록은 내리지 않는다(끊김 알림이 기록을 잃지 않게).
+  const view = new Map(Object.entries(reports).filter(([k]) => k !== LOCAL && !configured.has(lo(k))));
+  const adm = admitAgent(view, name, { atOf: reportAt, now, maxAgents: AGENT_REPORTS_MAX });
+  if (adm.evicted) {
+    delete reports[adm.evicted];
+    Object.assign(_reportsCap, { evicted: _reportsCap.evicted + 1, lastAt: now, lastName: capStr(adm.evicted, 64), lastAction: 'evicted' });
+    console.warn(`[ipam] 스캔 보고 기록 상한(${AGENT_REPORTS_MAX}) — 오래 조용한 '${capStr(adm.evicted, 64)}' 기록을 내리고 '${capStr(name, 64)}' 를 받았습니다`);
+  } else if (!adm.ok) {
+    Object.assign(_reportsCap, { refused: _reportsCap.refused + 1, lastAt: now, lastName: capStr(name, 64), lastAction: 'refused' });
+    console.warn(`[ipam] 스캔 보고 기록 상한(${AGENT_REPORTS_MAX}) — 새 이름 '${capStr(name, 64)}' 의 보고 기록을 남기지 않았습니다(설정에 없는 이름이 모두 최근 보고)`);
+  }
+  return adm;
+}
+
 /**
  * v2.991: 스캔 한 번의 호스트명 확인 요약 { tried:{dns,mdns,netbios}, found:{…}, named, alive } — 엣지 본문에서도 오므로 수치만 좁힌다.
  *   못 읽은 칸은 null(0 이 아니다). 객체가 아니면 null = '방식 보고 없음'(이전 버전 엣지).
@@ -1262,7 +1294,9 @@ export function cleanMacStats(v) {
 
 export function recordAgentReport(agent, { scanned = 0, alive = 0, durationMs = null, nameStats = null } = {}) {
   const name = agent || LOCAL;
-  if (name === '__proto__') return;   // 25회차 F-10: 형제 recordAgentIncomplete 와 같은 가드(평범한 객체 맵의 프로토타입을 바꾸지 않게)
+  if (name === '__proto__') return { ok: false };   // 25회차 F-10: 형제 recordAgentIncomplete 와 같은 가드(평범한 객체 맵의 프로토타입을 바꾸지 않게)
+  const adm = admitReport(name);   // 결정 60: 이름별 항목 상한 — 넘치면 기록하지 않는다(사실은 남긴다)
+  if (!adm.ok) return { ok: false, refused: true };
   // v2.601 CEN2601-01: 엣지 본문의 수치를 그대로 저장하지 않는다(객체·문자열이 화면·이력으로 새지 않게).
   scanned = numOrNull(scanned); alive = numOrNull(alive); durationMs = numOrNull(durationMs);
   const ns = cleanNameStats(nameStats);
@@ -1272,6 +1306,7 @@ export function recordAgentReport(agent, { scanned = 0, alive = 0, durationMs = 
   const added = markBaseline(name);
   if (added.length) emitScanChanges({ agent: name, ts: Date.now(), changes: added.map((spec) => ({ type: 'baseline', spec })) });
   recordRun({ agent: name, scanned, alive, durationMs, nameStats: ns }); // 완료된 스캔 이력에 추가
+  return { ok: true, ...(adm.evicted ? { evicted: adm.evicted } : {}) };
 }
 
 /**
@@ -1283,6 +1318,7 @@ export function recordAgentReport(agent, { scanned = 0, alive = 0, durationMs = 
 export function recordAgentIncomplete(agent, { code = 'error', reason = '', durationMs = null, partial = null, done = null, total = null, at = null } = {}) {
   const name = String(agent || LOCAL);
   if (name === '__proto__') return null; // 평범한 객체 맵 — 프로토타입을 바꾸지 않게
+  if (!admitReport(name).ok) return null;   // 결정 60: 이름별 항목 상한(recordAgentReport 와 같은 판정)
   const prev = Object.prototype.hasOwnProperty.call(reports, name) && reports[name] && typeof reports[name] === 'object' ? reports[name] : null;
   const prevInc = prev?.incomplete && typeof prev.incomplete === 'object' ? prev.incomplete : null;
   const t = numOrNull(at) ?? Date.now();

@@ -23,6 +23,7 @@
 import { emptySnapshot } from '../types.js';
 import { healthWord } from '../healthWord.js'; // v2.615(SF-R1-04) — 비정상 계수는 공용 판정 하나(healthWord)
 import { makeGetter, tryAny, isCredReject, credRejectError } from './restCommon.js';
+import { envPort } from '../../util/envNumber.js'; // 결정(56~75 남긴 것) 57: 포트 env 는 1~65535 정수만(예전 `Number(env) || 443` 은 −1 · 70000 · 1.5 를 그대로 썼다)
 
 /** v1 컨텍스트의 attributes:[{name,value}] → 평탄 객체(순수 — 테스트 고정). */
 export const attrsToObj = (ctx) => Object.fromEntries((ctx?.attributes || []).map((a) => [a.name, a.value]));
@@ -76,7 +77,7 @@ export async function collect(device, { signal = null } = {}) {
     const { collectViaSsh } = await import('./vplexSsh.js');
     return collectViaSsh(device);
   }
-  const port = Number(process.env.STORAGE_VPLEX_PORT) || 443;
+  const port = envPort(process.env.STORAGE_VPLEX_PORT, 443);
   const getV2 = makeGetter(device, { port, signal });
   // v1 인증은 Username/Password 커스텀 헤더(이 API 세대의 공식 방식 — Basic 은 무시된다).
   // makeGetter 가 헤더 값을 사전 검증(제어문자 차단·값 미포함 오류)한다 — restCommon 참조.

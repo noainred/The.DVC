@@ -21,7 +21,7 @@ import { withSsh, isSshAuthError } from '../../proxy/sshExec.js';
 import { reqTimeoutMs } from '../../agent/envTimeout.js';
 import { emptySnapshot } from '../types.js';
 import { recStart } from './uemcliParse.js'; // v2.770(R5-E2-03) — 레코드 시작 줄 선형 판정 한 벌
-import { envPositive } from '../../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
+import { envPositive, ENV_INT_MAX } from '../../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 /** 캡처할 원문 상한(문자) — 응답/로그가 비대해지지 않게. */
 const RAW_LIMIT = envPositive(process.env.STORAGE_CLI_RAW_LIMIT, 4000);
@@ -41,7 +41,7 @@ const CMD_TIMEOUT_MS = reqTimeoutMs(process.env.STORAGE_CLI_TIMEOUT_MS, 45_000, 
  *
  * 기본값은 장비 시한보다 **작아야** 한다 — 같거나 크면 이 가드가 발동하기 전에 폴러가 먼저 던진다.
  */
-const SESSION_BUDGET_MS = Math.max(20_000, Number(process.env.STORAGE_CLI_SESSION_BUDGET_MS) || 150_000);
+const SESSION_BUDGET_MS = Math.max(20_000, envPositive(process.env.STORAGE_CLI_SESSION_BUDGET_MS, 150_000, { max: ENV_INT_MAX }));   // 결정(56~75 남긴 것) 57 · 58: 시한 · 개수 env 의 Infinity · 2^31 초과 · 음수는 기본값(예전 `Math.max(하한, Number(env) || 기본)` 은 Infinity · 3e9 를 통과시켜 setTimeout 이 1ms 로 바꿨다 · 개수는 무제한)
 /** 남은 예산이 이보다 적으면 새 명령을 시작하지 않는다(시작해 놓고 잘리면 결과가 버려진다). */
 const MIN_SLICE_MS = 5_000;
 

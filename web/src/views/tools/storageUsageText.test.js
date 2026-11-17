@@ -168,3 +168,16 @@ describe('메일 폼', () => {
     expect(mailDirty({ ...saved, days: [1, 3] }, saved)).toBe(true);
   });
 });
+
+describe('결정 G2 · G3 반증 후속 ①: 가린 통합 관리자 주소는 개수만', async () => {
+  const { adminToForCount, recipientCount } = await import('./storageUsageText.js');
+  it('가리지 않았으면 원래 목록 · 가렸으면 그 수만큼 겹치지 않는 자리 표시(받는 사람 수가 0 이 되지 않게)', () => {
+    expect(adminToForCount({ adminTo: ['a@x.com'] })).toEqual(['a@x.com']);
+    expect(adminToForCount(null)).toEqual([]);
+    const m = adminToForCount({ adminTo: [], adminToCount: 2, adminToMasked: true });
+    expect(m.length).toBe(2);
+    expect(recipientCount(true, m, ['c@x.com'])).toBe(3);
+    expect(recipientCount(false, m, ['c@x.com'])).toBe(1);
+    expect(adminToForCount({ adminToMasked: true, adminToCount: Number.NaN })).toEqual([]);
+  });
+});

@@ -8,12 +8,12 @@
 import { requireRole } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
 import { requireSettingsOwner } from './shared.js';
-import { load as loadMail, save as saveMail, redact, validate, smtpIssue, unknownKinds, nextSmtpPassword, recipientIssue, normalizeKinds } from '../../mail/settings.js';
+import { load as loadMail, save as saveMail, redact, validate, smtpIssue, unknownKinds, nextSmtpPassword, recipientIssue, normalizeKinds, mailSettingsLoadError, mailSaveRefusal } from '../../mail/settings.js';
 import { normalizeAddresses } from '../../util/smtp.js';
 import { sendPortalMail, mailStatus } from '../../mail/service.js';
 import { KINDS } from '../../mail/kinds.js';
 import { store } from '../../store.js';
-import { scopedVcenterIds } from '../../auth/scope.js';
+import { scopedVcenterIds, isFullReadWriteScope } from '../../auth/scope.js';
 
 const adminOnly = requireRole('admin');
 
@@ -30,13 +30,45 @@ export function scopeMailStatus(st, allowed) {
   return { ...st, history: [], lastError: null, scoped: true, omittedOutOfScope: { history: n, lastError: !!st.lastError } };
 }
 
+/**
+ * 결정(56~75 남긴 것) 73 ③(73회차 남긴 것): SMTP 계정 이름과 전 종류 수신자 목록은 포탈 공용 설정이고 법인 축이 없다 — **전체 범위 관리자**
+ *   (조회 ∧ 쓰기 무제한 — auth/scope.js isFullReadWriteScope)만 원문을 본다. 범위 관리자(조회 또는 쓰기 범위가 제한된 admin)에게는 값을 빼고
+ *   개수 · 있음 여부만 싣는다(scopedMasked — 화면이 '가림' 을 '없음' 과 구분한다). 저장은 원래 설정 소유자(= 전체 범위) 전용이라 바뀌지 않는다.
+ *   SMTP 서버 주소 · 보내는 사람 · 켜짐 여부 · 한도는 그대로 둔다(발송 경로 확인용 — 계정 · 받는 사람 목록이 아니다).
+ * @param {object} s redact() 결과 · @param {boolean} full 전체 범위 관리자인가
+ */
+export function scopeMailSettings(s, full) {
+  if (full || !s || typeof s !== 'object') return s;
+  const cnt = (a) => (Array.isArray(a) ? a.length : 0);
+  const kinds = {};
+  for (const [id, k] of Object.entries(s.kinds || {})) kinds[id] = { enabled: k?.enabled !== false, to: [], cc: [], toCount: cnt(k?.to), ccCount: cnt(k?.cc) };
+  return { ...s, smtp: { ...(s.smtp || {}), user: '', hasUser: !!s.smtp?.user }, defaultTo: [], defaultToCount: cnt(s.defaultTo), kinds, scopedMasked: true };
+}
+
+/**
+ * G2 · G3 반증 R1(재현 — 73 ③ 덜 고침): 같은 GET 응답의 발송 이력(status.history[].to)은 실제로 보낸 **수신자 주소**다 — settings 를 가린 범위 관리자 중
+ *   쓰기 범위만 제한된 계정(조회는 전체)은 scopeMailStatus(조회 범위 축)를 지나 그 주소를 그대로 받았다. 가림 기준을 settings 와 같게(isFullReadWriteScope) 두고
+ *   주소 대신 개수(toCount)만 싣는다. 제목 · 상태 · 비고는 그대로(법인 축 가림은 scopeMailStatus 몫이다).
+ * @param {object} st scopeMailStatus 결과 · @param {boolean} full 전체 범위 관리자인가
+ */
+export function maskMailHistoryRecipients(st, full) {
+  if (full || !st || !Array.isArray(st.history)) return st;
+  return { ...st, history: st.history.map(({ to, ...h }) => (Array.isArray(to) ? { ...h, toCount: to.length } : h)), historyMasked: true };
+}
+
 export function registerMail(adminRouter) {
 
   adminRouter.get('/mail', adminOnly, (req, res) => {
-    res.json({ settings: redact(), status: scopeMailStatus(mailStatus(), scopedVcenterIds(req.user, store.get())), kinds: KINDS });
+    const snap = store.get();
+    // 73 ①: 설정 파일을 못 읽었으면 표지(사유 요약 · 읽기 오류 여부) — 그동안 발송은 기본값(꺼짐)이고 저장은 409.
+    const le = mailSettingsLoadError();
+    const full = isFullReadWriteScope(req.user, snap);
+    res.json({ settings: scopeMailSettings(redact(), full), status: maskMailHistoryRecipients(scopeMailStatus(mailStatus(), scopedVcenterIds(req.user, snap)), full), kinds: KINDS, ...(le ? { loadError: le } : {}) });   // 반증 R1: 이력 수신자도 같은 기준으로
   });
 
   adminRouter.put('/mail', adminOnly, requireSettingsOwner, (req, res) => {
+    // 73 ①: 파일을 못 읽은 동안은 저장하지 않는다(기본값 위에 덮으면 SMTP 계정 · 수신자 원본이 사라진다) — 검증보다 먼저 409.
+    { const no = mailSaveRefusal(); if (no) return res.status(409).json(no); }
     const body = req.body || {};
     const bad = unknownKinds(body.kinds);
     if (bad.length) return res.status(400).json({ ok: false, reason: `알 수 없는 발송 종류: ${bad.join(', ')}` });

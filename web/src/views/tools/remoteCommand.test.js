@@ -2,7 +2,7 @@
  * remoteCommand 회귀 테스트(v2.416) — 원격 명령(RMA) 화면의 판정·문구.
  */
 import { describe, it, expect } from 'vitest';
-import { ago, durationText, uptimeText, agentStatus, resultSummary, defaultArgs, argsIssue, groupCatalog, modeLabel, targetHint, statusTone, statusLabel } from './remoteCommand.js';
+import { ago, durationText, uptimeText, agentStatus, resultSummary, defaultArgs, argsIssue, groupCatalog, modeLabel, targetHint, statusTone, statusLabel, ownerOtpGate, otpInput } from './remoteCommand.js';
 
 describe('agentStatus', () => {
   it('미배포(하트비트 없음)·오프라인·온라인을 구분한다', () => {
@@ -74,5 +74,27 @@ describe('v2.418 점검 상태 헬퍼', () => {
     const T = { ok: 'g', warn: 'y', bad: 'r', muted: 'm' };
     expect(statusTone('ok', T)).toBe('g'); expect(statusTone('warn', T)).toBe('y'); expect(statusTone('bad', T)).toBe('r'); expect(statusTone('unknown', T)).toBe('m');
     expect(statusLabel('ok')).toBe('정상'); expect(statusLabel('bad')).toBe('실패'); expect(statusLabel(undefined)).toBe('—');
+  });
+});
+
+describe('ownerOtpGate — 결정(56~75): 상태 변경 · 임의 실행은 설정 소유자 등급 + 본인 OTP', () => {
+  it('서버 표지(ownerOtp)가 없으면 잠그지도 OTP 를 묻지도 않는다', () => {
+    expect(ownerOtpGate({ id: 'uptime' }, { settingsOwnerTier: false })).toEqual({ need: false, otp: false, locked: false, reason: '' });
+    expect(ownerOtpGate(null, null).need).toBe(false);
+  });
+  it('표지가 있으면 소유자 등급만 열고(OTP 칸) 아니면 잠그고 사유를 준다', () => {
+    const owner = ownerOtpGate({ id: 'custom', ownerOtp: true }, { name: 'own', settingsOwnerTier: true });
+    expect([owner.need, owner.otp, owner.locked, owner.reason]).toEqual([true, true, false, '']);
+    const adm = ownerOtpGate({ id: 'custom', ownerOtp: true }, { name: 'adm', isSettingsOwner: true, settingsOwnerTier: false });
+    expect([adm.need, adm.locked]).toEqual([true, true]);
+    expect(adm.reason).toMatch(/설정 소유자 등급/);
+    expect(adm.reason).not.toMatch(/`/);
+  });
+  it('인증이 꺼진 설치(Anonymous)는 서버도 통과 — 잠그지 않고 OTP 칸도 열지 않는다', () => {
+    expect(ownerOtpGate({ ownerOtp: true }, { name: 'Anonymous' })).toMatchObject({ need: true, otp: false, locked: false });
+  });
+  it('otpInput 은 숫자 6자리까지만', () => {
+    expect(otpInput(' 12a34567 ')).toBe('123456');
+    expect(otpInput(null)).toBe('');
   });
 });

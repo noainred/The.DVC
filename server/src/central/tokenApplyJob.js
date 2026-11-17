@@ -167,7 +167,11 @@ async function runJob(job, deps, { upgradeFirst = false } = {}) {
   if (deps.tokensLoadError && deps.tokensLoadError()) { stepEnd(s, 'bad', '중앙 개별 토큰 파일을 읽지 못했습니다 — 발급하지 않습니다.', deps); return finish(job, 'failed', '중앙 개별 토큰 파일을 읽지 못했습니다.', deps); }
   const found = deps.findCollector(name);   // 수집 서버 이름 조회는 registry.findCollectorByName 하나(audit2613c EDGE2613-08)
   const col = found && found.enabled !== false ? found : null;
-  if (!col || !col.url) { stepEnd(s, 'bad', `수집 서버 등록부에 켜진 '${name}' 이 없습니다.`, deps); return finish(job, 'failed', '수집 서버 등록이 없습니다.', deps); }
+  if (!col || !col.url) {
+    // 결정(56~75 남긴 것) 66 ①: 표시 이름이 둘 이상이라 못 찾은 것이면 그 사유를 함께(deps.collectorReason — 등록부 resolveCollectorByName).
+    const why = !found && typeof deps.collectorReason === 'function' ? String(deps.collectorReason(name) || '') : '';
+    stepEnd(s, 'bad', `수집 서버 등록부에 켜진 '${name}' 이 없습니다.${why ? ` ${why}` : ''}`, deps); return finish(job, 'failed', '수집 서버 등록이 없습니다.', deps);
+  }
   const existing = tokenOf(deps, name);
   if (existing) {
     const unused = !(Number(existing.lastUsedAt) > 0);

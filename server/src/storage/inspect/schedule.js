@@ -12,6 +12,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../../util/atomicWrite.js';
+import { makeJsonFileLoader } from '../../util/jsonFileLoad.js';   // 결정(56~75 남긴 것) 57
+import { parseJsonObject } from '../../util/jsonObject.js';
 import { registerStateFile } from '../../util/stateFiles.js';
 import { numOrNull } from '../../util/numOrNull.js';
 import { DAY_OFFSET_MIN } from '../../util/dayKey.js';
@@ -91,29 +93,40 @@ export function planWeekly({ enabled, slot, last, now = Date.now(), bootAt = 0 }
   return { action: 'go', slot };
 }
 
-let _cfg = null; let _loadErr = null;
+let _cfg = null;
+const defaultCfg = () => ({ ...SETTINGS_DEFAULTS, thresholds: { ...THRESHOLD_DEFAULTS }, updatedAt: null, updatedBy: '' });
+function writeCfg(next) { atomicWriteFileSync(FILE(), JSON.stringify(next, null, 2), { mode: 0o600 }); }
+/*
+ * 결정(56~75 남긴 것) 57(57회차 남긴 것): 손상이면 보존본으로 옮긴 뒤 **재시작하면** 파일 없음 = 기본값(enabled:true)으로 돌아 사용자가 꺼 둔 주간 점검이
+ *   켜졌고, 읽기 오류(EACCES · EIO)도 손상과 같이 원본을 옮겼다. 이제 공용 로더 — 읽기 오류는 원본을 두고 캐시하지 않으며(30초 간격 재읽기) · 손상은 보존 +
+ *   서비스 점검 등재(보존본만 남은 재시작 뒤에도 '못 읽음') · 그동안 주간 회차는 보류(inspectTick 'unreadable') · 다음 회차 시각을 지어내지 않는다 ·
+ *   저장은 409(settings-unreadable). 풀림: 권한을 고치면 다음 재읽기 · 손상은 서비스 점검 '기본값으로 확정'(켜짐으로 돌아감을 확인받는다) 또는 보존본 복구(반증 후속 ③ — 30초 안에 다시 읽어 재시작 없이 풀린다).
+ */
+const _file = makeJsonFileLoader(FILE, { label: 'PowerScale 점검 설정(storage-inspect.json) — 확정하면 기본값(주간 점검 켜짐 · 월요일 09:00 · 메일 꺼짐)으로 저장되고 주간 점검이 다시 돕니다', confirm: () => { writeCfg({ ...defaultCfg(), updatedAt: Date.now(), updatedBy: 'confirm-default' }); _cfg = null; _file.saved(); }, parse: (t) => { const raw = parseJsonObject(t); const r = normalizeSettings(raw, SETTINGS_DEFAULTS); if (r.issue) throw new Error(r.issue); return raw; }, tag: 'storage-inspect' });
 export function loadSettings() {
-  if (_cfg) return _cfg;
-  try {
-    const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
-    const r = normalizeSettings(raw, SETTINGS_DEFAULTS);
-    if (r.issue) throw new Error(r.issue);
-    _cfg = { ...r.settings, updatedAt: numOrNull(raw.updatedAt), updatedBy: strMax(raw.updatedBy, 64) }; _loadErr = null;
-  } catch (e) {
-    if (e?.code !== 'ENOENT') { preserveCorrupt(FILE(), e?.message); _loadErr = { at: Date.now(), reason: safeLoadText(e) }; console.warn(`[storage-inspect] 설정 파일을 읽지 못했습니다(기본값으로 돌고 저장은 거절): ${_loadErr.reason}`); }
-    _cfg = { ...SETTINGS_DEFAULTS, thresholds: { ...THRESHOLD_DEFAULTS }, updatedAt: null, updatedBy: '' };
+  if (_cfg && !_file.recheckDue()) return _cfg;   // 결정 G2 반증 후속 ③: 오류 중에는 캐시를 믿지 않고 30초마다 다시 판정(보존본을 되돌리면 재시작 없이 풀린다)
+  const r = _file.load();
+  if (r.kind === 'read-error') return defaultCfg();   // 57: 캐시하지 않는다(틱은 settingsLoadError 로 보류)
+  if (r.kind === 'ok') {
+    const raw = r.value;
+    _cfg = { ...normalizeSettings(raw, SETTINGS_DEFAULTS).settings, updatedAt: numOrNull(raw.updatedAt), updatedBy: strMax(raw.updatedBy, 64) };
+  } else {
+    if (r.kind === 'corrupt') console.warn(`[storage-inspect] 설정 파일을 읽지 못했습니다(손상 보존본으로 옮김 — 주간 점검 보류 · 저장 거절): ${safeLoadText(r.error)}`);
+    _cfg = defaultCfg();
   }
   return _cfg;
 }
-export const settingsLoadError = () => { loadSettings(); return _loadErr; };
+/** 설정 파일을 못 읽었으면 { at, reason, readError? }, 아니면 null(틱 보류 · 화면 표지). */
+export const settingsLoadError = () => { loadSettings(); return _file.loadError(); };
 export function saveSettings(input, { by = '' } = {}) {
-  loadSettings();
-  if (_loadErr) return { issue: '설정 파일을 읽지 못해 저장하지 않았습니다 — 손상본(storage-inspect.json.corrupt.*)을 확인하세요.' };
-  const r = normalizeSettings(input, _cfg);
+  const cur = loadSettings();
+  { const no = _file.refusal('PowerScale 점검 설정'); if (no) return { issue: no.reason, code: no.code }; }   // 57: 라우트 409
+  const r = normalizeSettings(input, cur);
   if (r.issue) return r;
   const next = { ...r.settings, updatedAt: Date.now(), updatedBy: strMax(by, 64) };
-  atomicWriteFileSync(FILE(), JSON.stringify(next, null, 2), { mode: 0o600 });
+  writeCfg(next);
   _cfg = next;
+  _file.saved();
   return { settings: next };
 }
 
@@ -247,8 +260,10 @@ export function startInspectScheduler() {
 export function inspectScheduleStatus(now = Date.now()) {
   const cfg = loadSettings();
   const st = state();
-  const next = cfg.enabled ? weeklySlot(cfg, now) + 7 * 86_400_000 : null;
-  return { settings: cfg, loadError: _loadErr, lastRunSlot: st.lastRunSlot, lastMailSlot: st.lastMailSlot, history: st.history, lastTick: _lastTick, edge: isEdge(),
+  const le = _file.marker();
+  // 57: 설정을 못 읽은 동안은 회차를 돌리지 않는다(inspectTick 'unreadable') — 기본값(켜짐)으로 다음 회차 시각을 지어내지 않는다.
+  const next = cfg.enabled && !le ? weeklySlot(cfg, now) + 7 * 86_400_000 : null;
+  return { settings: cfg, loadError: le, lastRunSlot: st.lastRunSlot, lastMailSlot: st.lastMailSlot, history: st.history, lastTick: _lastTick, edge: isEdge(),
     nextRunAt: next, nextMailAt: cfg.enabled && cfg.mailEnabled && next ? next + (cfg.mailDelayMin || 30) * 60_000 : null };
 }
-export function _resetScheduleForTest() { _cfg = null; _loadErr = null; _state = null; if (_timer) clearInterval(_timer); _timer = null; _busy = false; _lastTick = null; _chain = Promise.resolve(); }
+export function _resetScheduleForTest() { _cfg = null; _file.resetRetry(); _state = null; if (_timer) clearInterval(_timer); _timer = null; _busy = false; _lastTick = null; _chain = Promise.resolve(); }

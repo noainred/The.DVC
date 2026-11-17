@@ -22,6 +22,7 @@ const etaText = (d) => (d == null ? '—' : d < 1 ? '1일 안' : d < 365 ? `${Ma
  *  kind: 'digest'|'vcenter'|'crit'|'test' · scopeLabel: '전체 법인' 또는 vCenter 이름 · thr · mode · collectedAt
  *  rows: 초과 행(사용률 내림차순) · total: 전체 초과 수 · topN · newKeys: Set(새로 넘은 키) · newOnly · kpi: { overVms, crit, notReported, newCount }
  *  vcSummary: [{name, overVms, maxPct}] (통합 메일만) · staleNote · csvName · demo
+ *  unknownNote: 68 D1 — 'vm' 단위에서 값 모름 파티션 때문에 판정하지 않은 VM 안내(report.unknownVmsNote — 없으면 '')
  */
 export function renderOverMail(m) {
   const title = m.kind === 'crit'
@@ -63,6 +64,7 @@ ${kpis}
 <th style="padding:7px 8px">게스트</th><th style="padding:7px 8px">vCenter</th><th style="padding:7px 8px">OS</th><th style="padding:7px 8px">파티션</th><th style="padding:7px 8px;text-align:right">사용 / 할당</th><th style="padding:7px 8px;text-align:right">사용률</th><th style="padding:7px 8px;text-align:right">가득 참 예상</th></tr>
 ${tr || '<tr><td colspan="7" style="padding:14px;text-align:center;color:#475569">해당 게스트가 없습니다.</td></tr>'}</table>
 <div style="font-size:12px;color:#475569;margin-top:6px">${more}</div>
+${m.unknownNote ? `<div style="font-size:12px;color:#9a3412;margin-top:4px">${esc(m.unknownNote)}</div>` : ''}
 ${vcTable}
 <div style="font-size:11.5px;color:#475569;border-top:1px solid #e2e8f0;padding-top:10px;margin-top:14px;line-height:1.6">
 사용률은 VMware Tools 가 보고한 게스트 파일시스템 기준입니다. Tools 가 돌지 않거나 전원이 꺼진 게스트${m.kpi.notReported ? ` ${esc(m.kpi.notReported)}대` : ''}는 확인할 수 없어 이 목록에 없습니다.
@@ -75,6 +77,7 @@ ${vcTable}
     '',
     ...rows.map((r) => `${r.vmName} | ${r.vcenterName} | ${r.path ?? `파티션 ${r.partCount ?? ''}개 합계`} | ${gb(r.usedGB)} / ${gb(r.capGB)} | ${pct(r.pct)} | ${etaText(r.etaDays)}`),
     '', more.replace(/<[^>]{0,200}>/g, ''),
+    ...(m.unknownNote ? [m.unknownNote] : []),
   ].join('\n');
   return { subject, html, text };
 }

@@ -36,7 +36,7 @@ import { store } from '../../store.js';
 import {
   activeNotices, listNotices, createNotice, updateNotice, deleteNotice,
   listPosts, getPost, createPost, updatePost, deletePost, addComment, deleteComment, setLike, LIMITS, NOTICE_LEVELS,
-  bulletinSeq, bulletinPersistOf, waitBulletinPersist, bulletinHealth, retryBulletinWrites, PERSIST_WAIT_MS,
+  bulletinSeq, bulletinPersistOf, waitBulletinPersist, bulletinHealth, retryBulletinWrites, PERSIST_WAIT_MS, bulletinLoadError,
 } from '../../bulletin/store.js';
 
 const adminOnly = requireRole('admin');
@@ -108,7 +108,9 @@ export function registerBulletin(api) {
   });
   api.get('/notices', (req, res) => {
     const admin = isAdmin(req);
-    res.json({ ok: true, notices: listNotices({ by: admin }), limits: LIMITS, levels: NOTICE_LEVELS, canEdit: isBoardModerator(req), persist: bulletinHealth({ admin }).notices });
+    // 결정(56~75 남긴 것) 73 ①: 공지 파일을 못 읽었으면 표지(loadError — 사유 요약 · 읽기 오류 여부). 그동안 쓰기는 409.
+    const le = bulletinLoadError('notices');
+    res.json({ ok: true, notices: listNotices({ by: admin }), limits: LIMITS, levels: NOTICE_LEVELS, canEdit: isBoardModerator(req), persist: bulletinHealth({ admin }).notices, ...(le ? { loadError: le } : {}) });
   });
   api.post('/notices', adminOnly, noticeFleetOnly, async (req, res, next) => {
     try {
@@ -138,7 +140,8 @@ export function registerBulletin(api) {
   api.get('/board/posts', (req, res) => {
     const { offset, limit } = pageArgs(req.query, { def: 50, max: 200 });
     const q = typeof req.query.q === 'string' ? req.query.q : '';
-    res.json({ ok: true, ...listPosts({ q, offset, limit }), limits: LIMITS, canWrite: canWrite(req), isAdmin: isBoardModerator(req), me: userOf(req), persist: bulletinHealth({ admin: isAdmin(req) }).board });
+    const le = bulletinLoadError('board');   // 73 ①
+    res.json({ ok: true, ...listPosts({ q, offset, limit }), limits: LIMITS, canWrite: canWrite(req), isAdmin: isBoardModerator(req), me: userOf(req), persist: bulletinHealth({ admin: isAdmin(req) }).board, ...(le ? { loadError: le } : {}) });
   });
   api.get('/board/posts/:id', (req, res, next) => {
     if (!ID_RE.test(req.params.id)) return badId(res);

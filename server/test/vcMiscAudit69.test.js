@@ -121,9 +121,19 @@ function withReadError(file, fn) {
   return r;
 }
 const corruptOf = (file) => fs.readdirSync(TMP).filter((n) => n.startsWith(`${file}.corrupt.`));
+// 결정(56~75 남긴 것) 71: 읽기 오류 뒤 다시 읽기는 '다음 호출' 이 아니라 '재읽기 간격(30초)이 지난 다음 호출' 이다(죽어 가는 디스크의 EIO 를
+//   요청마다 다시 읽어 이벤트 루프를 거듭 막지 않게 — 71회차 추정 · decideG2). 그래서 아래 세 시험은 시계를 간격만큼 밀고 다시 읽는다.
+let clockAt = NOW;
+async function advancePastRetry() {
+  const J = await import('../src/util/jsonFileLoad.js');
+  J._setJsonFileLoadClockForTest(() => clockAt);
+  clockAt += J.READ_RETRY_MS + 1_000;
+}
+async function useClock() { const J = await import('../src/util/jsonFileLoad.js'); J._setJsonFileLoadClockForTest(() => clockAt); }
 
 test('F4: 비용 단가 — 일시적 읽기 오류가 단가 파일을 .corrupt 로 옮기지 않고, 오류가 지나면 단가가 돌아온다 · 그동안 저장 거절', async () => {
   const { loadCostSettings, saveCostSettings, _resetCostSettings } = await import('../src/cost/settings.js');
+  await useClock();
   const file = path.join(TMP, 'cost-rates.json');
   fs.writeFileSync(file, JSON.stringify({ currency: 'KRW', vcpu: 10000, ramGB: 5000, storageGB: 100 }));
   _resetCostSettings();
@@ -137,7 +147,10 @@ test('F4: 비용 단가 — 일시적 읽기 오류가 단가 파일을 .corrupt
   });
   assert.deepEqual(corruptOf('cost-rates.json'), [], '읽기 오류로 원본을 옮겼다');
   assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).vcpu, 10000, '원본이 그대로');
-  assert.equal(loadCostSettings().vcpu, 10000, '읽지 못한 값을 캐시하지 않아 다음 호출에서 다시 읽는다');
+  // 71: 간격 안의 다음 호출은 디스크를 다시 보지 않는다(읽지 못함 그대로) — 간격이 지나면 다시 읽어 단가가 돌아온다(읽지 못한 값을 캐시하지 않았다).
+  assert.equal(loadCostSettings().unreadable, true, '재읽기 간격 안에서는 다시 읽지 않는다');
+  await advancePastRetry();
+  assert.equal(loadCostSettings().vcpu, 10000, '읽지 못한 값을 캐시하지 않아 간격이 지난 다음 호출에서 다시 읽는다');
   // 파싱 실패(진짜 손상)는 예전처럼 보존한다
   fs.writeFileSync(file, '{ broken');
   _resetCostSettings();
@@ -148,6 +161,7 @@ test('F4: 비용 단가 — 일시적 읽기 오류가 단가 파일을 .corrupt
 test('F4: VM 구성 점검 설정 — 읽기 오류 중 원본 유지 · 저장 거절 · 알림은 off 가 아니라 settings-unreadable', async () => {
   const { loadVmHygieneSettings, saveVmHygieneSettings, _resetVmHygieneSettings } = await import('../src/vmhygiene/settings.js');
   const { vmHygieneNotifyOnce } = await import('../src/vmhygiene/notifier.js');
+  await useClock();
   const file = path.join(TMP, 'vm-hygiene.json');
   fs.writeFileSync(file, JSON.stringify({ snapAgeDays: 3, exceptions: ['keep-me'], notify: { enabled: true, hour: 9 } }));
   _resetVmHygieneSettings();
@@ -163,6 +177,7 @@ test('F4: VM 구성 점검 설정 — 읽기 오류 중 원본 유지 · 저장 
     assert.equal(sent, 0);
   });
   assert.deepEqual(corruptOf('vm-hygiene.json'), []);
+  await advancePastRetry();   // 71: 간격이 지난 다음 호출에서 다시 읽는다
   const s2 = loadVmHygieneSettings();
   assert.equal(s2.snapAgeDays, 3);
   assert.deepEqual(s2.exceptions, ['keep-me']);
@@ -171,6 +186,7 @@ test('F4: VM 구성 점검 설정 — 읽기 오류 중 원본 유지 · 저장 
 
 test('F4: 태그 정책 — 읽기 오류 중 원본 유지 · 저장은 unreadable(라우트 503)', async () => {
   const { loadTagPolicy, saveTagPolicy, _resetTagPolicy } = await import('../src/tags/policy.js');
+  await useClock();
   const file = path.join(TMP, 'tag-policy.json');
   fs.writeFileSync(file, JSON.stringify({ requiredCategories: ['Owner'], corpCategory: 'Corp' }));
   _resetTagPolicy();
@@ -185,6 +201,7 @@ test('F4: 태그 정책 — 읽기 오류 중 원본 유지 · 저장은 unreada
     assert.equal(r.code, 'unreadable');
   });
   assert.deepEqual(corruptOf('tag-policy.json'), []);
+  await advancePastRetry();   // 71: 간격이 지난 다음 호출에서 다시 읽는다
   assert.deepEqual(loadTagPolicy().requiredCategories, ['Owner']);
   assert.match(read('routes/api/vmTags.js'), /r\.code === 'unreadable' \? 503/);
 });

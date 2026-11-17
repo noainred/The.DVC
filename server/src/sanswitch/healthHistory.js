@@ -24,11 +24,12 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { openSqlite, withOpenCleanup, createLockRetry } from '../util/sqliteOpen.js';
 import { pageArgs } from '../util/pageArgs.js'; // v2.605 LEFT2605-07: 소수 limit 은 SQLite 바인드 datatype mismatch(500)
+import { envPositive, ENV_INT_MAX } from '../util/envNumber.js'; // 결정(56~75 남긴 것) 57 · 58: 시한 · 개수 env 의 Infinity · 2^31 초과 · 음수는 기본값(예전 `Math.max(하한, Number(env) || 기본)` 은 Infinity · 3e9 를 통과시켜 setTimeout 이 1ms 로 바꿨다 · 개수는 무제한)
 
 const DB_PATH = () => process.env.SANHEALTH_DB_PATH
   || path.join(config.dbDir || config.configDir, 'san-health.db');
 /** 장비당 보관 건수 — '최근 10회 비교' 를 늘 채우고 여유를 둔다. */
-export const MAX_RUNS = Math.max(10, Number(process.env.SANHEALTH_MAX_RUNS) || 24);
+export const MAX_RUNS = Math.max(10, envPositive(process.env.SANHEALTH_MAX_RUNS, 24, { max: ENV_INT_MAX }));
 
 let x = null; let ready = null; let initError = null;
 // v2.606(DB2606-03): 첫 open 이 잠금이면 initError 로 래치하지 않고 30초 뒤 다시 연다(util/sqliteOpen.js 규약).

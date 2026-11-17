@@ -33,6 +33,8 @@ import { configFindings, resultFindings, mergeFindings, hostCountsOf, HOST_FORM,
 import { ipBlockReason } from '../../collector/registry.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { pageArgs } from '../../util/pageArgs.js';
+import { isFullReadWriteScope } from '../../auth/scope.js';   // 반증 후속 ①: SMTP 계정 가림 기준(GET /admin/mail 과 같다)
+import { maskedSmtpUser } from '../../mail/settings.js';
 
 const adminOnly = requireRole('admin');
 // v2.583: 같은 6줄이 라우트 파일 8곳에 복사돼 있었다 — 공용 팩토리 하나로(사유 문구는 그대로).
@@ -225,8 +227,11 @@ api.get('/tools/link-check/settings', adminOnly, fullScopeOnly, (_req, res) => {
  * ⚠ **측정값이 없는 것을 '정상' 으로 칠하지 않는다**(v2.552 규약) — 화면이 `latest === null` 을
  *   '측정 없음' 으로 다룬다.
  */
-api.get('/tools/link-check/targets', adminOnly, fullScopeOnly, async (_req, res) => {
+api.get('/tools/link-check/targets', adminOnly, fullScopeOnly, async (req, res) => {
   const built = await buildSettingsTargets();
+  // 반증 후속 ①: 메일 발송 설정의 SMTP 계정 이름은 전체 범위 관리자(조회 ∧ 쓰기 무제한)만 원문 — 쓰기 범위만 제한된 관리자(fullScopeOnly 통과)에게는 있음 표지만.
+  const fullRw = isFullReadWriteScope(req.user, store.get());
+  const smtpFacts = (p) => (p.kind === 'set:smtp' && p.facts && typeof p.facts === 'object' ? { ...p, facts: { ...p.facts, ...maskedSmtpUser(p.facts.user, fullRw) } } : p);
   const latest = await latestAll();
   const byId = new Map(latest.map((r) => [r.link_id, r]));
   const hostCounts = hostCountsOf(built.targets);
@@ -248,7 +253,7 @@ api.get('/tools/link-check/targets', adminOnly, fullScopeOnly, async (_req, res)
       r ? resultFindings(x, { ok: !!r.ok, phase: r.phase, failKind: r.fail_kind, reached: r.reached }, pseudoSteps) : [],
     );
     return {
-      ...publicTarget(x),
+      ...smtpFacts(publicTarget(x)),
       ...(x.bad ? { bad: x.bad } : {}),
       latest: r ? {
         ts: r.ts, ok: !!r.ok, phase: r.phase, failKind: r.fail_kind, reached: r.reached,

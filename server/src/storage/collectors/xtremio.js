@@ -18,6 +18,7 @@ import { emptySnapshot } from '../types.js';
 import { healthWord } from '../healthWord.js'; // v2.615(SF-R1-04) — 비정상 계수는 공용 판정 하나(healthWord)
 import { makeGetter, tryAny, isCredReject } from './restCommon.js';
 import { numOrNull } from '../../util/numOrNull.js';
+import { envPort } from '../../util/envNumber.js'; // 결정(56~75 남긴 것) 57: 포트 env 는 1~65535 정수만(예전 `Number(env) || 443` 은 −1 · 70000 · 1.5 를 그대로 썼다)
 
 const KB = 1024; // XMS 공간 값 단위(KB) → 바이트 환산 계수
 
@@ -156,7 +157,7 @@ export async function collect(device, { signal = null } = {}) {
   }
   // v2.605(TIM2605-02): 장비 시한 signal 을 요청까지 넘긴다 — 예전에는 받지 않아 withDeadline(180초)이 집행되지 않고
   //   느린 XMS 에서 요청 24개 × 15초가 끝날 때까지 동시성 슬롯을 붙잡았다(형제 unity·powermax 는 넘긴다).
-  const get = makeGetter(device, { port: Number(process.env.STORAGE_XMS_PORT) || 443, signal: signal || device._signal || null });
+  const get = makeGetter(device, { port: envPort(process.env.STORAGE_XMS_PORT, 443), signal: signal || device._signal || null });
   const raw = {};
   const snap = emptySnapshot(device); // 섹션 오류 임시 기록용(정규화 후 병합)
   const sect = { clusters: 'config', controllers: 'nodes', users: 'accounts', alerts: 'alerts' };

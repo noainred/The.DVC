@@ -66,7 +66,9 @@
     editingDcId: null,
     editingCatId: null,
     busy: false,
-    pendingPane: null
+    pendingPane: null,
+    pwTarget: null,             // 비밀번호 변경 창의 대상 { username, isMe }
+    sessionRevokedError: null   // 결정(56~75 남긴 것): 로그아웃 폐기 목록 fail-closed 사유(서버 /api/settings)
   };
 
   /* ---------------- DOM 헬퍼 ---------------- */
@@ -926,6 +928,7 @@
       state.backupStatus = data.backup;
       state.choices = data.choices;
       state.initialPasswordFile = data.initialPasswordFile;
+      state.sessionRevokedError = data.sessionRevokedError || null;   // 결정(56~75 남긴 것): 폐기 목록 fail-closed 사유
       // 56회차 F1(재현 — Chromium): 백업 목록은 admin 전용이다(v2.500 L2). viewer 도 이 줄을 불러 403 으로 체인이 끊겨 분류 · 센터 '전체' 목록을
       //   받지 못했고(수정 폼의 센터 선택지가 표시 개수만큼만), 표시 개수 밖 센터에 연결된 바로가기를 수정 · 저장하면 연결이 '전체 공통' 으로
       //   바뀌었다. 설정을 열 때마다 'admin 계정만 …' 오류 토스트도 떴다. viewer 는 건너뛰고, admin 도 실패하면 빈 목록으로 이어 간다.
@@ -1305,22 +1308,70 @@
         (typeof state.initialPasswordFile === "string" ? ": " + state.initialPasswordFile : "(경로는 admin 계정만 볼 수 있습니다)") +
         " — 비밀번호를 변경하면 자동 삭제됩니다."
       : "초기 비밀번호 파일은 삭제된 상태입니다.";
+
+    // 결정(56~75 남긴 것): 로그아웃 폐기 목록(session-revoked.json)을 못 믿어 기동 때 모든 세션을 끊었으면 그 사유
+    var revoked = state.sessionRevokedError;
+    var note = $("session-revoked-note");
+    note.hidden = !revoked;
+    note.textContent = revoked
+      ? "⚠ " + (revoked.file || "session-revoked.json") + " 을(를) " +
+        (revoked.state === "unreadable" ? "읽지 못해(권한 · 입출력 — 원본은 그대로 둠)" : "손상으로 보고 보존본(.corrupt.*)으로 옮기고") +
+        " " + fullStamp(revoked.at) + " 이전에 발급된 세션을 모두 끊었습니다(전원 다시 로그인)" +
+        (revoked.state === "unreadable" ? " — 권한을 고치고 다시 시작할 때까지 로그아웃은 그 계정의 세션을 모두 끊습니다." : ".") +
+        (revoked.resumed ? " 같은 파일 상태로 여전히 읽지 못해 이번 기동은 세션을 다시 끊지 않았습니다." : "")
+      : "";
   }
 
+  /* 결정(56~75 남긴 것 · 31회차 E3): 비밀번호 변경은 창(모달)으로 — 본인 변경은 현재 비밀번호를 함께 보낸다(서버가 확인).
+     예전에는 window.prompt 로 새 비밀번호만 받았다(입력이 가려지지 않았고, 세션만 가로채도 비밀번호를 바꿀 수 있었다). */
   function changeUserPassword(user) {
-    var password = window.prompt("'" + user.username + "' 계정의 새 비밀번호 (8자 이상)");
-    if (password == null) return;
-    api("/api/settings/users/" + encodeURIComponent(user.username) + "/password",
-        { method: "POST", body: { password: password } })
+    var isMe = !!(state.session && state.session.username === user.username);
+    // 반증(결정 G1b ②): 다른 admin 계정 재설정도 요청한 본인(나)의 현재 비밀번호를 확인한다(서버가 같은 판정 — viewer 재설정은 그대로).
+    var needCurrent = isMe || user.role === "admin";
+    state.pwTarget = { username: user.username, isMe: isMe, needCurrent: needCurrent };
+    $("pw-target").textContent = "'" + user.username + "' 계정" +
+      (isMe ? " — 본인 비밀번호는 현재 비밀번호를 확인합니다."
+        : needCurrent ? " — 다른 admin 계정 재설정은 요청한 본인(나)의 현재 비밀번호를 확인합니다."
+        : " — admin 재설정(현재 비밀번호 없이)");
+    $("pw-current").placeholder = isMe ? "현재 비밀번호" : "내 현재 비밀번호";
+    $("pw-current").hidden = !needCurrent;
+    $("pw-current").value = "";
+    $("pw-new").value = "";
+    $("pw-msg").textContent = "";
+    $("pw-modal").hidden = false;
+    setTimeout(function () { (needCurrent ? $("pw-current") : $("pw-new")).focus(); }, 30);
+  }
+
+  function closePasswordModal() {
+    $("pw-modal").hidden = true;
+    $("pw-current").value = "";
+    $("pw-new").value = "";
+    state.pwTarget = null;
+  }
+
+  function submitPasswordChange() {
+    var target = state.pwTarget;
+    if (!target) return;
+    var body = { password: $("pw-new").value };
+    if (target.needCurrent) {
+      if (!$("pw-current").value) { setMsg("pw-msg", target.isMe ? "현재 비밀번호를 입력하세요." : "내 현재 비밀번호를 입력하세요.", "err"); return; }
+      body.currentPassword = $("pw-current").value;
+    }
+    if (!body.password) { setMsg("pw-msg", "새 비밀번호를 입력하세요.", "err"); return; }
+    $("pw-submit").disabled = true;
+    api("/api/settings/users/" + encodeURIComponent(target.username) + "/password",
+        { method: "POST", body: body })
       .then(function () {
+        closePasswordModal();
         toast("비밀번호를 변경했습니다. 해당 계정은 다시 로그인해야 합니다.", "ok");
-        if (state.session && state.session.username === user.username) {
+        if (target.isMe) {
           clearSession();
           navigate("dashboard");
         }
         return loadSettings();
       })
-      .catch(function (err) { toast(err.message, "err"); });
+      .catch(function (err) { setMsg("pw-msg", err.message, "err"); })
+      .then(function () { $("pw-submit").disabled = false; });
   }
 
   function toggleUser(user) {
@@ -1341,16 +1392,28 @@
       .catch(function (err) { toast(err.message, "err"); });
   }
 
+  /* 반증(결정 G1b ②): admin 계정을 만들 때만 '내 현재 비밀번호' 칸을 보인다(서버가 같은 판정). */
+  function syncUserFormCurrent() {
+    var needCurrent = $("u-role").value === "admin";
+    $("u-current-field").hidden = !needCurrent;
+    if (!needCurrent) $("u-current").value = "";
+  }
+
   function submitUserForm(event) {
     event.preventDefault();
-    api("/api/settings/users", { method: "POST", body: {
-      username: $("u-name").value, role: $("u-role").value, password: $("u-password").value
-    } }).then(function (data) {
+    var body = { username: $("u-name").value, role: $("u-role").value, password: $("u-password").value };
+    if (body.role === "admin") {
+      if (!$("u-current").value) { setMsg("user-form-msg", "admin 계정을 만들려면 내 현재 비밀번호를 입력하세요.", "err"); return; }
+      body.currentPassword = $("u-current").value;
+    }
+    api("/api/settings/users", { method: "POST", body: body }).then(function (data) {
       state.users = data.users;
       $("user-form").reset();
+      syncUserFormCurrent();
       setMsg("user-form-msg", "추가했습니다.", "ok");
       renderUserSettings();
-    }).catch(function (err) { setMsg("user-form-msg", err.message, "err"); });
+    }).catch(function (err) { setMsg("user-form-msg", err.message, "err"); })
+      .then(function () { $("u-current").value = ""; });   // 비밀번호 칸은 한 번 보내면 비운다
   }
 
   /* ---------------- 설정 4: 백업 ---------------- */
@@ -2074,6 +2137,16 @@
       if (event.key === "Enter") submitLogin();
     });
 
+    // 비밀번호 변경 모달(결정 · 31회차 E3)
+    $("pw-submit").addEventListener("click", submitPasswordChange);
+    $("pw-cancel").addEventListener("click", closePasswordModal);
+    ["pw-current", "pw-new"].forEach(function (id) {
+      $(id).addEventListener("keydown", function (event) {
+        if (event.key === "Enter") submitPasswordChange();
+        if (event.key === "Escape") closePasswordModal();
+      });
+    });
+
     // 링크 점검
     $("btn-check-now").addEventListener("click", runHealthCheck);
     $("history-target").addEventListener("change", function (event) {
@@ -2156,6 +2229,8 @@
     });
 
     $("user-form").addEventListener("submit", submitUserForm);
+    $("u-role").addEventListener("change", syncUserFormCurrent);
+    syncUserFormCurrent();
     $("b-save").addEventListener("click", saveBackupSettings);
     $("b-now").addEventListener("click", backupNow);
     $("h-save").addEventListener("click", saveHealthSettings);

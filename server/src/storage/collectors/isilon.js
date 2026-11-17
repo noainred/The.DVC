@@ -32,13 +32,13 @@ import { reqTimeoutMs } from '../../agent/envTimeout.js';
 import { NO_REDIRECT, refuseRedirect } from '../../util/noRedirect.js';
 import { isiNodeHwFromRest } from './isilonHw.js';
 import { ISI_NODE_LOAD_REST_KEYS, restNodeLoadFields, nodeLoadProbeOf, ISI_REST_LOAD_SOURCE } from './isilonNodeLoad.js'; // v2.926 노드 디스크·CPU
-import { envPositive } from '../../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
+import { envPort } from '../../util/envNumber.js'; // v3.17.6: 양수 env 는 하나로(음수 · Infinity 를 통과시키지 않는다)
 
 // Isilon 전용 로컬 TLS 디스패처(다른 fetch 에 주입 금지). 2026-10-09 S-02: 인증서는 deviceTlsConnect 가 판정한다 —
 // 미설정 = CA 체인 또는 장비별 승인 지문 · STORAGE_TLS_VERIFY=true 엄격 · =false 명시적 예외(restCommon.js 와 같은 env).
 // v2.537: DNS 리바인딩(TOCTOU) 차단 — util/ssrfLookup.js 머리말. v2.506 배선(11곳)에서 빠져 있던 dispatcher.
 const isilonDispatcher = new Agent({ connect: deviceTlsConnect({ subsystem: 'storage', envKey: 'STORAGE_TLS_VERIFY', envRaw: process.env.STORAGE_TLS_VERIFY, tls: withSsrfLookup({}) }) });
-const PORT = envPositive(process.env.STORAGE_ISILON_PORT, 8080);
+const PORT = envPort(process.env.STORAGE_ISILON_PORT, 8080);   // 결정(56~75 남긴 것) 57: 포트 env 는 1~65535 정수만(예전 `Number(env) || 443` 은 −1 · 70000 · 1.5 를 그대로 썼다)(형제 — 65535 초과도 기본값)
 // v2.605(TIM2605-04): 음수·2^31 초과 env 는 AbortSignal.timeout 의 RangeError·즉시 중단이 된다 → [1초, 10분].
 const TIMEOUT_MS = reqTimeoutMs(process.env.STORAGE_HTTP_TIMEOUT_MS, 15_000);
 

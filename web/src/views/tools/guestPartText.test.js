@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   levelOf, gbText, pctText, growthText, etaText, osLabel, timeText, daysLabel, splitEmails, isWinPattern, isLnxPattern,
-  overviewParams, sortRows, historyLine, collectNote, agoText, vmPartNote,
+  overviewParams, sortRows, historyLine, collectNote, agoText, vmPartNote, vmSumText, unknownVmsText,
 } from './guestPartText.js';
 
 // v2.749 — 게스트 파티션 사용률 화면 판정(순수). 패턴 검사는 서버 guestpart/rules.js 와 같은 입력·같은 결과(서버 테스트가 같은 표를 쓴다).
@@ -100,5 +100,22 @@ describe('v2.750 VM 상세 파티션 안내', () => {
     expect(vmPartNote({ ...base, collectedAt: NOW - 10 * 3_600_000 }, NOW)).toEqual({ empty: '', stale: '' });
     expect(vmPartNote({ ...base, collectedAt: NOW - 25 * 3_600_000 }, NOW).stale).toMatch(/12시간/);
     expect(vmPartNote({ ...base, collect: { enabled: false }, collectedAt: NOW }, NOW).stale).toMatch(/마지막/);
+  });
+});
+
+// 결정(56~75 남긴 것) 68 D1 — 판정 단위 'vm' 에서 값 모름 파티션이 있는 VM 은 합계로 판정하지 않는다(서버 pct null · unknownParts).
+describe('68 D1 — VM 합계 판정 보류 문구', () => {
+  it("'vm' 단위: 값 모름이 있으면 '판정 안 함' · 없으면 합계 · 'part' 단위는 최고", () => {
+    expect(vmSumText({ pct: null, unknownParts: 1 }, 'vm')).toBe('값 모름 1개 — 판정 안 함');
+    expect(vmSumText({ pct: 85.2, unknownParts: 0 }, 'vm')).toBe('합계 85.2%');
+    expect(vmSumText({ pct: null }, 'vm')).toBe('합계 —');
+    expect(vmSumText({ maxPct: 91, unknownParts: 3 }, 'part')).toBe('최고 91.0%');
+  });
+  it("KPI 보조 줄: 'vm' 이고 1 이상일 때만 · 파티션 단위(null) · 0 은 빈 글자", () => {
+    expect(unknownVmsText({ unknownVms: 2 }, 'vm')).toContain('값 모름으로 판정 안 한 게스트 2');
+    expect(unknownVmsText({ unknownVms: 0 }, 'vm')).toBe('');
+    expect(unknownVmsText({ unknownVms: null }, 'part')).toBe('');
+    expect(unknownVmsText({ unknownVms: 5 }, 'part')).toBe('');
+    expect(vmSumText({ unknownParts: 2 }, 'vm')).not.toContain('`');
   });
 });

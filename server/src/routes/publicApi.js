@@ -33,6 +33,7 @@ import { msOrNull } from '../publicapi/time.js';
 import { isAdminReq, addressMatcher, extendMatcher, maskedNameLabel } from '../auth/addressMask.js';
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
+import { newRid } from '../perf/requestId.js';   // 결정(56~75) 67 ①: 500 응답의 요청 id(index.js 가 붙이지 않은 경로 — 시험 mount 등)
 import { deviceContextOf, buildListCore, runCheck } from '../sanswitch/storagePerfCore.js';   // v2.953 — SAN 스토리지 성능 판정 코어(화면 · 알림 · 보고서와 같은 함수)
 export const API_VERSION = 'v1';
 /** 목록 응답 상한 — 넘치면 `meta.truncated`·`meta.omitted` 로 **밝힌다**. */
@@ -117,6 +118,9 @@ function capped(rows) {
  * 허용 목록 게이트 + 스냅샷·범위 준비.
  * ⚠ 게이트를 핸들러마다 손으로 쓰면 한 곳을 빠뜨린다 — 이 래퍼를 반드시 쓸 것.
  */
+/** 결정(56~75 남긴 것) 67 ①: 공개 API 500 의 외부 문구(원문 없음 — 요청 id 로 서버 로그와 대조). */
+export const publicInternalReason = (rid) => `내부 오류 — 요청 id ${String(rid || '').slice(0, 64) || '—'}(포탈 관리자에게 이 id 와 시각을 알려 주세요).`;
+
 function guarded(apiPath, handler) {
   return (req, res) => {
     const gate = endpointAllowed(req.apiKey, apiPath);
@@ -157,9 +161,15 @@ function guarded(apiPath, handler) {
     Promise.resolve()
       .then(() => handler({ req, res, snap, inScope, fields, scopeMeta, apiPath }))
       .catch((e) => {
+        /*
+         * 결정(56~75 남긴 것) 67 ①: 외부 포탈로 나가는 reason 에 내부 예외 원문(SQLite · TypeError 문구 — 최대 200자)을 싣지 않는다.
+         *   일반 문구 + 요청 id(응답 requestId · X-Request-Id 헤더 — index.js 가 /api 요청마다 붙인다)만 주고, 원문은 서버 로그에만 남겨 요청 id 로 대조한다.
+         */
+        const rid = String(req.reqId || '') || newRid();
+        try { console.error(`[public-api] 500 ${apiPath} 요청 id ${rid} 키 ${String(req.apiKey?.fp || '').slice(0, 16) || '—'}: ${e?.stack || e}`); } catch { /* 로깅 실패가 응답을 막지 않게 */ }
         if (res.headersSent) return;   // 이미 보낸 뒤의 오류는 덮어쓰지 않는다
-        res.status(500).json({ ok: false, error: 'internal', code: 'internal',
-          reason: String(e?.message || e).slice(0, 200) });
+        res.status(500).json({ ok: false, error: 'internal', code: 'internal', requestId: rid,
+          reason: publicInternalReason(rid) });
       });
   };
 }

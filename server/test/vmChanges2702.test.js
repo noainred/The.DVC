@@ -121,7 +121,8 @@ test('⑤ 이동 분석 — 종류별 개수·VM 별 묶음·과다 이동 기�
   assert.equal(r.vms[0].hosts, 11); assert.equal(r.vms[0].lastTo, 'h1', '마지막 이동은 가장 늦은 행');
   assert.equal(r.vms[0].vcenterName, 'VC-One');
   assert.equal(r.vms[1].storage, 1);
-  assert.equal(r.series.length, 7);
+  // 결정(56~75 남긴 것) 69 ① — 기대값 갱신: 막대는 since(now − 7일)가 걸친 날부터라 7일 기간이 8칸이다(첫 칸은 그 시각부터의 일부 — partialFrom).
+  assert.equal(r.series.length, 8);
   assert.equal(r.series.reduce((a, s) => a + s.moves, 0), 12, '기간 칸의 합 = 이동 수');
   assert.equal(analyzeMoves(rows, { days: 7, now: NOW, q: 'COLD' }).matched, 1, '검색은 대소문자 무시');
   assert.equal(analyzeMoves(rows, { days: 7, now: NOW, q: 'cold' }).churnVms, 1, '과다 이동 수는 검색과 무관한 전체 기준');

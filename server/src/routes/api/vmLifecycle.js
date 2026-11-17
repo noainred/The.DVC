@@ -80,7 +80,8 @@ export function registerVmLifecycle(api) {
     return {
       days: L.days, since: L.since, truncated: L.truncated, readMax: LIFE_READ_MAX,
       vcenters: L.coverage, notCollected: L.notCollected, logs: L.settings,
-      life: analyzeLifecycle(L.rows, { days: L.days, vcName: L.vcName, q: qStr(req.query.q, 128), kind: qStr(req.query.kind, 16), liveNames: liveNamesOf(snap, L.ids) }),
+      // 결정(56~75 남긴 것) 69 ①: since 를 넘겨 하루 막대가 since 가 걸친 날부터 시작한다(KPI 합 = 막대 합)
+      life: analyzeLifecycle(L.rows, { days: L.days, since: L.since, vcName: L.vcName, q: qStr(req.query.q, 128), kind: qStr(req.query.kind, 16), liveNames: liveNamesOf(snap, L.ids) }),
       initial: snap.initial === true,
     };
   }, { ttlMs: 30_000, extraKey: `${scopeKey(req.user, store.get())}` }));

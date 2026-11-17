@@ -502,6 +502,8 @@ class HubHandler(BaseHTTPRequestHandler):
             "initialPasswordFile": ((str(config.initial_password_file) if is_admin else True)
                                     if self.ctx.users.initial_password_present() else None),
             "dataDir": str(self.ctx.data_dir) if is_admin else None,
+            # 결정(56~75 남긴 것): 로그아웃 폐기 목록을 못 믿어 기동 때 전원 세션을 끊었으면 그 사유(파일 이름 · 상태 · 시각 — 경로 없음)
+            "sessionRevokedError": self.ctx.sessions.revoked_load_error(),
         })
 
     def api_settings_section(self, section):
@@ -556,6 +558,11 @@ class HubHandler(BaseHTTPRequestHandler):
         if not actor:
             return None
         payload = self._body_dict()
+        # 반증(결정 G1b ② — 사용자 결정 '권장안대로'): admin 계정을 새로 만들 때도 요청자 본인의 현재 비밀번호를 확인한다
+        #   (세션 토큰만 가로채서는 관리자를 늘릴 수 없게 — 같은 실패 카운터 · 잠금). viewer 생성은 그대로.
+        if payload.get("role") == "admin" and not self._verify_current_password(
+                actor, payload, what="admin 계정을 만들려면", action="user.create", target=payload.get("username")):
+            return None
         users = self.ctx.users.add(payload.get("username"), payload.get("role", "viewer"),
                                    payload.get("password", ""))
         self._audit("user.create", actor=actor["username"],
@@ -577,6 +584,11 @@ class HubHandler(BaseHTTPRequestHandler):
         if username is None:
             return self._error(HTTPStatus.NOT_FOUND, "사용자를 찾을 수 없습니다.")
         payload = self._body_dict()
+        # 반증(결정 G1b ②): 다른 계정을 admin 으로 올릴 때도 요청자 본인의 현재 비밀번호(중지 · viewer 로 낮추기 · 삭제는 그대로).
+        current = self.ctx.users.get(username)
+        if payload.get("role") == "admin" and current is not None and current.get("role") != "admin" \
+                and not self._verify_current_password(actor, payload, what="admin 권한을 주려면", action="user.update", target=username):
+            return None
         users = self.ctx.users.update(username, role=payload.get("role"),
                                       enabled=payload.get("enabled"))
         if payload.get("enabled") is False:
@@ -597,11 +609,45 @@ class HubHandler(BaseHTTPRequestHandler):
         if actor["username"] != username and actor.get("role") != "admin":
             return self._error(HTTPStatus.FORBIDDEN, "본인 비밀번호만 변경할 수 있습니다.")
         payload = self._body_dict()
+        if actor["username"] == username and not self._verify_current_password(actor, payload):
+            return None
+        # 반증(결정 G1b ②): 다른 admin 의 비밀번호 재설정도 요청자 본인의 현재 비밀번호(viewer 재설정은 그대로).
+        target = self.ctx.users.get(username) if actor["username"] != username else None
+        if target is not None and target.get("role") == "admin" and not self._verify_current_password(
+                actor, payload, what="다른 admin 계정의 비밀번호를 재설정하려면", target=username):
+            return None
         self.ctx.users.set_password(username, payload.get("password", ""))
         # 비밀번호가 바뀐 계정의 기존 세션은 끊는다.
         self.ctx.sessions.destroy_user(username)
         self._audit("user.password", actor=actor["username"], detail={"target": username})
         return self._json({"success": True, "users": self.ctx.users.public_list()})
+
+    def _verify_current_password(self, actor, payload, *, what="본인 비밀번호를 바꾸려면", action="user.password", target=None) -> bool:
+        """결정(56~75 남긴 것 · 31회차 E3): 본인 비밀번호 변경은 현재 비밀번호를 확인한다 — 예전에는 세션 토큰(브라우저 저장소 · 8시간)만
+        가로채도 비밀번호를 바꿔 계정을 영구히 가져갈 수 있었다. 확인 · 실패 카운터 · 잠금은 로그인과 같은 함수
+        (authenticate · 출발지별 lock_remaining · note_failure · note_success)를 쓴다.
+        반증(결정 G1b ②): admin 을 늘리는 관리 동작(admin 생성 · 다른 admin 재설정 · admin 으로 올리기)도 **요청자 본인**의 현재 비밀번호를 이 함수로 본다.
+        실패면 응답을 쓰고 False."""
+        client = self.client_address[0] if self.client_address else "-"
+        remaining = self.ctx.sessions.lock_remaining(client)
+        if remaining > 0:
+            self._error(HTTPStatus.TOO_MANY_REQUESTS,
+                        f"로그인 시도가 많아 잠겼습니다. {remaining}초 후 다시 시도하세요.")
+            return False
+        current = payload.get("currentPassword")
+        if not isinstance(current, str) or not current:
+            self._error(HTTPStatus.BAD_REQUEST, f"{what} 요청한 본인의 현재 비밀번호를 입력하세요.",
+                        code="current_password_required")
+            return False
+        if not self.ctx.users.authenticate(actor["username"], current):
+            self.ctx.sessions.note_failure(client)
+            print(f"[auth] {action} 거절 — 요청자 현재 비밀번호 불일치 (from {client})", flush=True)
+            self._audit(action, actor=actor["username"], result="fail",
+                        detail={"target": str(target if target is not None else actor["username"])[:64], "reason": "current_mismatch"})
+            self._error(HTTPStatus.FORBIDDEN, "현재 비밀번호가 올바르지 않습니다(요청한 본인의 비밀번호).", code="current_password_invalid")
+            return False
+        self.ctx.sessions.note_success(client)
+        return True
 
     def api_users_delete(self, username):
         actor = self._require_admin()

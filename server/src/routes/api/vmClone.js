@@ -15,7 +15,7 @@ import { enqueueRun } from '../../vmclone/runner.js';
 import { schedulerStatus } from '../../vmclone/scheduler.js';
 import { listMounts } from '../../system/nfsMounts.js';
 import { isAdminReq } from '../../auth/addressMask.js';
-import { listNfsDs, getNfsDs, createNfsDs, deleteNfsDs } from '../../vmclone/nfsDs.js';
+import { listNfsDs, getNfsDs, createNfsDs, deleteNfsDs, nfsDsLoadError } from '../../vmclone/nfsDs.js';
 import { targetsNow, dispatchVmOp } from '../../vmclone/opDispatch.js';
 import { mountUseView, mountUseDenied, setMountUse, corpMountsLoadError } from '../../vmclone/corpMounts.js';
 import { rpoOf } from '../../vmclone/rpo.js';
@@ -179,6 +179,7 @@ api.get('/tools/vm-clone', adminOnly, (req, res) => {
     corps,
     vcenterNames: Object.fromEntries(visibleVcs.map((v) => [String(v.id), vcName.get(String(v.id)) || v.name || v.id])),
     nfsDatastores,
+    ...(nfsDsLoadError() ? { nfsDsLoadError: nfsDsLoadError() } : {}),   // 결정(56~75 남긴 것) 65 ②: 정의 파일을 못 읽었으면 빈 목록이 '정의 없음' 으로 보이지 않게
     ops: listOpsView({ allowed }),
     ...(corpMountsLoadError() ? { corpMountsError: corpMountsLoadError().reason } : {}),
     // v2.797 historyMax: 화면의 14일 실행 격자가 '잡당 최근 N회만 남은 이력' 으로 잘린 날을 0 이 아니라 '일부' 로 표시한다(숫자를 화면에 박지 않는다).
@@ -333,7 +334,7 @@ api.post('/tools/vm-clone/nfs-datastores', adminOnly, (req, res) => {
   const tg = targetsNow().targets.get(vcenterId);
   if (!tg || tg.where === 'conflict' || tg.where === 'none') return res.status(409).json({ ok: false, reason: tg?.reason || '이 vCenter 의 실행 위치를 정할 수 없습니다.' });
   let item;
-  try { item = createNfsDs({ vcenterId, ...(req.body || {}) }, req.user?.username); } catch (e) { return res.status(400).json({ ok: false, reason: e.message }); }
+  try { item = createNfsDs({ vcenterId, ...(req.body || {}) }, req.user?.username); } catch (e) { return res.status(e?.code === 'settings-unreadable' ? 409 : 400).json({ ok: false, reason: e.message, ...(e?.code ? { code: e.code } : {}) }); }   // 65 ②: 파일을 못 읽은 동안은 409
   const op = dispatchOp(res, { kind: 'nfsds-attach', vcenterId, spec: { nfsDsId: item.id, name: item.name, server: item.server, exportPath: item.exportPath, nfsVersion: item.nfsVersion, hostIds }, by: req.user?.username });
   if (!op) return;
   logAudit({ user: req.user?.username, action: 'NFS 데이터스토어 추가', target: `${vcenterId}/${item.name}`, detail: `${item.server}:${item.exportPath} · NFS ${item.nfsVersion} · 호스트 ${hostIds.length}대${op.where === 'edge' ? ` · 담당 엣지 ${op.agent}` : ''}` });

@@ -73,6 +73,7 @@ export async function hostAccessStatus({ requesterIp = '' } = {}) {
     ok: true, draft: st.draft, applied: st.applied, pending: st.pending, engine, sshdActive, requesterIp: normalizeRequesterIp(requesterIp),
     // portalPort(하나)는 예전 화면 호환 — 광고 포트(TLS 면 TLS_PORT). 관리 대상은 portalPorts 전부다.
     portalPort: ports[0], portalPorts: ports, busy,
+    revertRetryWindowMs,   // 결정(56~75) 64 F2: 되돌림 자동 재시도 시한(화면 배너가 숫자를 박지 않게)
     dirty: st.applied ? fingerprint(st.draft) !== st.applied.fingerprint : true,
   };
 }
@@ -101,7 +102,8 @@ export async function applyHostAccess(input, { requesterIp = '', peerIp = '', by
   busy = true;
   try {
     const st = loadHostAccess();
-    if (st.pending) return { ok: false, errors: ['확정 대기 중인 적용이 있습니다 — 먼저 확정하거나 되돌리세요.'] };
+    // 반증(결정 G1a): 자동 되돌림을 포기한 상태(revertGaveUp)는 기한이 지나 확정할 수 없다 — '확정하거나' 는 사실이 아니다.
+    if (st.pending) return { ok: false, errors: [st.pending.revertGaveUp === true && Date.now() > Number(st.pending.deadline) ? GAVE_UP_TEXT : '확정 대기 중인 적용이 있습니다 — 먼저 확정하거나 되돌리세요.'] };
     const p = await planHostAccess(input, { requesterIp, peerIp });
     if (!p.ok) return { ok: false, errors: p.errors, warnings: p.warnings || [], commands: p.commands || [] };
     const executed = [];
@@ -129,11 +131,25 @@ export async function applyHostAccess(input, { requesterIp = '', peerIp = '', by
  */
 const REVERT_RETRY_MIN_MS = 15_000;
 const REVERT_RETRY_MAX_MS = 5 * 60_000;
+/*
+ * 결정(56~75 남긴 것) 64 F2 시한: 자동 재시도는 **처음 실패한 시각부터 최대 6시간**이다(간격 상한 5분은 그대로). 시한이 지나면 자동 재시도를
+ *   멈추고 pending 은 남긴 채 `revertGaveUp` 으로 '되돌림 실패 — 수동 조치 필요' 를 밝힌다(화면 배너 · 되돌리기 버튼으로 다시 시도 — 수동 시도는
+ *   실패해도 자동 재시도를 다시 걸지 않는다). 처음 실패 시각(revertFirstFailedAt)은 pending 파일에 남아 재시작해도 시한이 이어진다.
+ *   되돌림 성공 · 확정 때 실패 연속 수를 0 으로 돌린다(예전에는 확정으로 끝나도 남아 다음 첫 재시도 간격이 길었다 — 66회차 ③).
+ */
+export const REVERT_RETRY_WINDOW_MS = 6 * 3_600_000;
+/** 자동 되돌림을 포기한 뒤(revertGaveUp) 적용 · 확정을 거절할 때의 문구 — 확정 기한은 이미 지났고 자동 재시도도 멈췄다. */
+const GAVE_UP_TEXT = '되돌림 실패 — 수동 조치 필요: 확정 기한이 지났고 자동 되돌림 재시도 시한도 지나 더 시도하지 않습니다. firewalld 를 살핀 뒤 되돌리기를 다시 시도하세요(되돌림이 성공해야 새로 적용할 수 있습니다).';
 let revertRetryMinMs = REVERT_RETRY_MIN_MS;
+let revertRetryWindowMs = REVERT_RETRY_WINDOW_MS;
 let revertFailStreak = 0;
 function revertRetryDelay() { return Math.min(REVERT_RETRY_MAX_MS, revertRetryMinMs * 2 ** Math.max(0, revertFailStreak - 1)); }
 /** 테스트용 — 재시도 첫 간격(ms). 인자 없으면 기본값. */
 export function _setRevertRetryMinMs(ms) { revertRetryMinMs = Number(ms) > 0 ? Number(ms) : REVERT_RETRY_MIN_MS; revertFailStreak = 0; }
+/** 테스트용 — 자동 재시도 시한(ms). 인자 없으면 기본값. */
+export function _setRevertRetryWindowMs(ms) { revertRetryWindowMs = Number(ms) > 0 ? Number(ms) : REVERT_RETRY_WINDOW_MS; }
+/** 테스트 · 진단용 — 지금 실패 연속 수. */
+export function _revertFailStreak() { return revertFailStreak; }
 
 function armRevertTimer(deadline) {
   if (revertTimer) clearTimeout(revertTimer);
@@ -150,8 +166,9 @@ function armRevertTimer(deadline) {
         console.warn(`[host-access] 자동 되돌림 보류 — ${(r.errors || []).join(' ') || '진행 중인 작업'} · 2초 뒤 다시 시도합니다`);
         armRevertTimer(Date.now() + 2000);
       } else if (r && r.ok === false) {
-        // 64회차 F2: --reload 자체가 실패했다 — revertHostAccess 가 pending 을 남기고 늘어나는 간격(15초 → 최대 5분)으로 이미 다시 걸었다.
-        console.warn(`[host-access] 자동 되돌림 실패 — ${(r.errors || []).join(' ')}`);
+        // 64회차 F2: --reload 자체가 실패했다 — revertHostAccess 가 pending 을 남기고 늘어나는 간격(15초 → 최대 5분)으로 이미 다시 걸었다
+        //   (결정(56~75): 처음 실패부터 시한이 지났으면 걸지 않고 gaveUp — 수동 조치 필요).
+        console.warn(`[host-access] 자동 되돌림 실패${r.gaveUp ? '(자동 재시도 시한 지남 — 수동 조치 필요)' : ''} — ${(r.errors || []).join(' ')}`);
       }
     } catch (e) { console.error('[host-access] 자동 되돌림 실패:', e.message); }
   }, Math.max(0, deadline - Date.now()));
@@ -165,10 +182,12 @@ export async function confirmHostAccess({ by = '' } = {}) {
   try {
     const st = loadHostAccess();
     if (!st.pending) return { ok: false, errors: ['확정 대기 중인 적용이 없습니다.'] };
-    if (Date.now() > st.pending.deadline) return { ok: false, errors: ['확정 기한이 지났습니다 — 자동으로 되돌렸거나 곧 되돌립니다. 다시 적용하세요.'] };
+    // 반증(결정 G1a): 자동 재시도를 포기했으면(revertGaveUp) '곧 되돌립니다' 는 거짓이다 — 수동 조치 안내로.
+    if (Date.now() > st.pending.deadline) return { ok: false, errors: [st.pending.revertGaveUp === true ? GAVE_UP_TEXT : '확정 기한이 지났습니다 — 자동으로 되돌렸거나 곧 되돌립니다. 다시 적용하세요.'] };
     const r = await deps.fw(['--runtime-to-permanent']);
     if (!r.ok) return { ok: false, errors: [`--runtime-to-permanent 실패: ${(r.stderr || r.stdout).trim()}`] };
     if (revertTimer) { clearTimeout(revertTimer); revertTimer = null; }
+    revertFailStreak = 0;   // 결정(56~75) 64 F2: 확정으로 끝났다 — 다음 적용의 첫 재시도 간격이 앞선 실패에 끌려 길어지지 않게
     const s = st.pending.settings || st.draft;
     const notes = [];
     let sshdStopped = !!st.applied?.sshdStopped;
@@ -188,7 +207,7 @@ export async function confirmHostAccess({ by = '' } = {}) {
 }
 
 /** 되돌림(수동/자동): --reload 로 영구 설정 복원, pending 제거. */
-export async function revertHostAccess({ by = '' } = {}) {
+export async function revertHostAccess({ by = '', now = Date.now() } = {}) {
   if (busy) return { ok: false, busy: true, errors: ['다른 적용/되돌림이 진행 중입니다.'] };
   busy = true;
   try {
@@ -201,11 +220,17 @@ export async function revertHostAccess({ by = '' } = {}) {
       const why = String(r.stderr || r.stdout || `exit ${r.code}`).trim().slice(0, 300);
       revertFailStreak += 1;
       if (had) {
-        saveHostAccess({ pending: { ...st.pending, revertError: why, revertFailedAt: Date.now(), revertFailures: (Number(st.pending.revertFailures) || 0) + 1 } });
-        // 위에서 타이머를 지웠다 — 기한 전이면 기한에, 지났으면 늘어나는 간격 뒤에 다시 되돌린다(수동 되돌림 실패도 자동 되돌림을 잃지 않게).
-        armRevertTimer(Math.max(Number(st.pending.deadline) || 0, Date.now() + revertRetryDelay()));
+        // 결정(56~75) 64 F2 시한: 처음 실패 시각부터 revertRetryWindowMs 안에서만 자동으로 다시 건다. 지났거나 이미 포기한 상태면 걸지 않는다.
+        const firstFailedAt = Number(st.pending.revertFirstFailedAt) > 0 ? Number(st.pending.revertFirstFailedAt) : now;
+        const gaveUp = st.pending.revertGaveUp === true || now - firstFailedAt >= revertRetryWindowMs;
+        saveHostAccess({ pending: { ...st.pending, revertError: why, revertFailedAt: now, revertFirstFailedAt: firstFailedAt, revertFailures: (Number(st.pending.revertFailures) || 0) + 1,
+          ...(gaveUp ? { revertGaveUp: true, revertGaveUpAt: Number(st.pending.revertGaveUpAt) > 0 ? Number(st.pending.revertGaveUpAt) : now } : {}) } });
+        // 위에서 타이머를 지웠다 — 기한 전이면 기한에, 지났으면 늘어나는 간격 뒤에 다시 되돌린다(수동 되돌림 실패도 자동 되돌림을 잃지 않게 — 시한 안에서만).
+        if (!gaveUp) armRevertTimer(Math.max(Number(st.pending.deadline) || 0, Date.now() + revertRetryDelay()));
+        else console.warn(`[host-access] 되돌림 실패가 ${Math.round((now - firstFailedAt) / 60_000)}분째 — 자동 재시도를 멈췄습니다(수동 조치 필요 · pending 유지): ${why}`);
+        return { ok: false, gaveUp, errors: [`--reload 실패: ${why}`, gaveUp ? '되돌림 실패 — 수동 조치 필요: 자동 재시도 시한이 지나 더 시도하지 않습니다(확정 대기는 남겨 두었습니다 — firewalld 를 살핀 뒤 되돌리기 버튼으로 다시 시도하세요).' : '확정 대기(pending)를 남겼습니다 — 되돌림을 다시 시도합니다.'], hadPending: had };
       }
-      return { ok: false, errors: [`--reload 실패: ${why}`, ...(had ? ['확정 대기(pending)를 남겼습니다 — 되돌림을 다시 시도합니다.'] : [])], hadPending: had };
+      return { ok: false, errors: [`--reload 실패: ${why}`], hadPending: had };
     }
     revertFailStreak = 0;
     saveHostAccess({ pending: null, revertedAt: Date.now(), revertedBy: by });
@@ -219,6 +244,8 @@ export async function resumeHostAccessPending() {
   try {
     const st = loadHostAccess();
     if (!st.pending) return;
+    // 결정(56~75) 64 F2 시한: 자동 재시도를 포기한 상태(revertGaveUp)는 재시작으로 다시 자동 시도하지 않는다 — 수동 조치(되돌리기 버튼)를 기다린다.
+    if (st.pending.revertGaveUp === true) { console.warn('[host-access] 되돌림 실패 — 수동 조치 필요(자동 재시도 시한 지남 · 확정 대기 유지). 설정 › 호스트 접근 제어에서 되돌리기를 다시 시도하세요.'); return; }
     if (Date.now() >= st.pending.deadline) {
       const r = await revertHostAccess({ by: 'auto-restart' });
       // 64회차 F2: 기동 때 되돌림이 실패하면 다시 시도하지 않았다 — 실패는 revertHostAccess 가 재시도를 걸고, busy 면 여기서 건다.

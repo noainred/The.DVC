@@ -153,6 +153,8 @@ test('② 백필 — 요약 없는 원본 분만 · 못 읽은 묶음은 빈 요
 
 test('② 기록기 — 쓴 1분 요약의 시간을 할 일로 적는다(끝난 시간이면 다음 1시간 요약 틱에 쓴다)', async () => {
   store._resetForTest(); rollup._resetForTest(); recorder._resetForTest();
+  // v3.18.8: 실행 환경의 디스크 여유가 5% 아래면 기록기가 멈춰(정상 동작) 이 시험이 실패했다 — 여유는 고정하고 그 판정은 따로 시험한다
+  recorder._setFreeSpaceForTest(() => ({ free: 100 * 2 ** 30, total: 200 * 2 ** 30 }));
   const id = 'fm-hist-r';
   const t0 = HOUR - 2 * 3_600_000 + 5 * 60_000;
   store.ingestSample(id, t0, { cpu: { pct: 33, usr: 33, sys: 0, iow: 0, stl: 0 } }, null, t0 + 500);
@@ -162,6 +164,7 @@ test('② 기록기 — 쓴 1분 요약의 시간을 할 일로 적는다(끝난
   assert.ok(rollup.dirtyCount() >= 1, '기록기가 쓴 1분 요약의 시간 → 할 일');
   assert.ok((await rollup.rollupTick(NOW)) >= 1);
   assert.equal(SUM.sumCol(SUM.decodeSum((await db.readSum60(id, Math.floor(t0 / 3_600_000), Math.floor(t0 / 3_600_000)))[0].data), 'c.pct').a, 33);
+  recorder._setFreeSpaceForTest(null);
 });
 
 test('② 정리 — 보관 기간 밖 요약 · 사건도 지운다 · 종료 쓰기는 모르는 kind 를 원본 표에 넣지 않는다', async () => {

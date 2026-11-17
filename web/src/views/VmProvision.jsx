@@ -5,13 +5,13 @@ import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
 import { queryKey, keepRowsOnError } from './queryKeyText.js'; // v2.612 RECENT2612-06
 import { readFailText } from './readFailText.js'; // v2.733(C5-02): 원본 목록 조회 실패를 '0개 일치' 로 그리지 않는다
-import { PLACEMENT_HINT, notAppliedText, jobStatusLabel, vmStatusLabel, doneCountLabel, liveSubmitNote, startIndexOut } from './provisionText.js'; // 74회차 F5 · F6 · F8 · 75회차(시작 번호 0)
+import { PLACEMENT_HINT, notAppliedText, jobStatusLabel, vmStatusLabel, doneCountLabel, liveSubmitNote, startIndexOut, LOCKED_PLACEMENT_NOTE, lockedPlacementText, jobProgressPct } from './provisionText.js'; // 74회차 F5 · F6 · F8 · 75회차(시작 번호 0) · 결정 74 ① ②
 
 const chipStyle = { cursor: 'pointer', padding: '5px 12px', fontSize: 12, userSelect: 'none' };
 const chipActive = { border: '1px solid var(--accent,#6366f1)', color: '#c7d2fe', background: 'rgba(99,102,241,.15)' };
 
-const JOB_BADGE = { running: 'amber', completed: 'green', completed_with_errors: 'amber', error: 'red' };
-const VM_BADGE = { queued: 'gray', running: 'amber', done: 'green', error: 'red' };
+const JOB_BADGE = { running: 'amber', completed: 'green', completed_with_errors: 'amber', completed_with_unknown: 'amber', error: 'red' };
+const VM_BADGE = { queued: 'gray', running: 'amber', submitted: 'amber', done: 'green', error: 'red', unknown: 'amber' };
 
 const EMPTY = {
   vcenterId: '', sourceId: '',
@@ -223,20 +223,22 @@ export default function VmProvision() {
               {(placement?.datastores || []).map((d) => <option key={d.id} value={d.name}>{d.name}{d.freeGB != null ? ` · 여유 ${d.freeGB >= 1024 ? `${(d.freeGB / 1024).toFixed(1)}TB` : `${d.freeGB}GB`}` : ''}</option>)}
             </Select>
           </label>
+          {/* 결정(56~75 남긴 것) 74 ①: 폴더 · 리소스 풀 · 스토리지 프로파일은 생성에 쓰지 않으므로 칸을 잠근다(불러온 값은 보이되 쓰지 않음을 밝힌다). */}
           <label>폴더(VM Folder)
-            <input className="input" list="prov-folders" value={form.placement.folder} onChange={setP('folder')} placeholder="예: Production" />
-            <DataList id="prov-folders">{(placement?.folders || []).map((x) => <option key={x} value={x} />)}</DataList>
+            <input className="input" value={form.placement.folder} disabled readOnly placeholder="원본 VM 의 폴더" title={LOCKED_PLACEMENT_NOTE} />
+            <span className="muted" style={{ fontSize: 11 }}>{LOCKED_PLACEMENT_NOTE}</span>
           </label>
           <label>리소스 풀(Resource Pool)
-            <input className="input" list="prov-pools" value={form.placement.resourcePool} onChange={setP('resourcePool')} placeholder="예: Prod" />
-            <DataList id="prov-pools">{(placement?.resourcePools || []).map((x) => <option key={x} value={x} />)}</DataList>
+            <input className="input" value={form.placement.resourcePool} disabled readOnly placeholder="원본 VM 의 리소스 풀" title={LOCKED_PLACEMENT_NOTE} />
+            <span className="muted" style={{ fontSize: 11 }}>{LOCKED_PLACEMENT_NOTE}</span>
           </label>
           <label>스토리지 프로파일(정책)
-            <input className="input" list="prov-profiles" value={form.placement.storageProfile} onChange={setP('storageProfile')} placeholder="예: vSAN Default Storage Policy" />
-            <DataList id="prov-profiles">{(placement?.profiles || []).map((x) => <option key={x} value={x} />)}</DataList>
+            <input className="input" value={form.placement.storageProfile} disabled readOnly placeholder="데이터스토어 기본 정책" title={LOCKED_PLACEMENT_NOTE} />
+            <span className="muted" style={{ fontSize: 11 }}>{LOCKED_PLACEMENT_NOTE}</span>
           </label>
         </div>
         <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>{PLACEMENT_HINT}</div>
+        {lockedPlacementText(form.placement) && <div style={{ fontSize: 12, marginTop: 4, color: 'var(--amber)' }}>{lockedPlacementText(form.placement)}</div>}
       </div>
 
       <div className="card" style={{ marginBottom: 14 }}>
@@ -367,7 +369,7 @@ export default function VmProvision() {
 function JobProgress({ jobId }) {
   const { data: job } = usePolling(jobId ? `/provision/jobs/${jobId}` : null, {}, 2000);
   if (!jobId || !job) return null;
-  const pct = job.total ? Math.round(((job.done + job.failed) / job.total) * 100) : 0;
+  const pct = jobProgressPct(job);   // 74 ②: 결과 모름도 끝난 것으로 센다
   return (
     <div className="card" style={{ marginBottom: 14 }}>
       <div className="flex between" style={{ alignItems: 'center', marginBottom: 8 }}>
@@ -375,9 +377,9 @@ function JobProgress({ jobId }) {
         <span className={`badge ${JOB_BADGE[job.status] || 'gray'}`}>{jobStatusLabel(job.status, job.live)}</span>
       </div>
       <div style={{ height: 8, borderRadius: 6, background: 'rgba(255,255,255,.08)', overflow: 'hidden', marginBottom: 8 }}>
-        <div style={{ width: `${pct}%`, height: '100%', background: job.failed ? 'var(--amber)' : 'var(--green)', transition: 'width .3s' }} />
+        <div style={{ width: `${pct}%`, height: '100%', background: job.failed || job.unknown ? 'var(--amber)' : 'var(--green)', transition: 'width .3s' }} />
       </div>
-      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{doneCountLabel(job.live)} {job.done} · 실패 {job.failed} · 전체 {job.total} {job.live ? '· LIVE (실제 vCenter)' : '· MOCK (데모)'}</div>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{doneCountLabel(job.live)} {job.done} · 실패 {job.failed}{job.unknown ? ` · 결과 모름 ${job.unknown}` : ''} · 전체 {job.total} {job.live ? '· LIVE (실제 vCenter)' : '· MOCK (데모)'}</div>
       {liveSubmitNote(job.live) && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{liveSubmitNote(job.live)}</div>}
       {notAppliedText(job.placementNotApplied, job.placement) && <div style={{ fontSize: 12, marginBottom: 8, color: 'var(--amber)' }}>{notAppliedText(job.placementNotApplied, job.placement)}</div>}
       {job.placement && (job.placement.cluster || job.placement.host || job.placement.datastore || job.placement.folder || job.placement.resourcePool || job.placement.storageProfile) && (
@@ -408,10 +410,13 @@ function JobProgress({ jobId }) {
 function RecentJobs({ onOpen, activeId }) {
   const { data } = usePolling('/provision/jobs', {}, 5000);
   const jobs = (data?.jobs || []).filter((j) => j.id !== activeId);
-  if (!jobs.length) return null;
+  // 반증 후속 ⑥: 작업 기록 파일을 못 읽어 저장을 보류하는 중이면 사유를 보인다(목록이 비어도 — '작업 없음' 으로 읽히지 않게).
+  const storeNote = data?.storeError?.reason ? <div className="muted" style={{ fontSize: 12.5, color: '#fb0', margin: '6px 0' }}>{data.storeError.reason}</div> : null;
+  if (!jobs.length) return storeNote;
   return (
     <>
       <div className="section-title">최근 작업</div>
+      {storeNote}
       <div className="table-wrap">
         <STable>
           <thead><tr><th>시작</th><th>원본</th><th>대수</th><th>상태</th><th></th></tr></thead>
@@ -420,7 +425,7 @@ function RecentJobs({ onOpen, activeId }) {
               <tr key={j.id}>
                 <td className="muted">{new Date(j.createdAt).toLocaleString()}</td>
                 <td>{j.sourceName}</td>
-                <td>{j.done}/{j.total}{j.failed ? ` · 실패 ${j.failed}` : ''}</td>
+                <td>{j.done}/{j.total}{j.failed ? ` · 실패 ${j.failed}` : ''}{j.unknown ? ` · 결과 모름 ${j.unknown}` : ''}</td>
                 <td><span className={`badge ${JOB_BADGE[j.status] || 'gray'}`}>{jobStatusLabel(j.status, j.live)}</span></td>
                 <td className="right"><button className="tab" onClick={() => onOpen(j.id)}>보기</button></td>
               </tr>
@@ -579,4 +584,3 @@ function IpGuideModal({ onClose }) {
 }
 
 import Select from '../components/Select.jsx';
-import DataList from '../components/DataList.jsx';

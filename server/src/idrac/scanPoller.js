@@ -24,7 +24,7 @@ import { pollNow } from './poller.js';
 import { enabledScanRanges, recordScanRangeRun, getScanRangeRaw, scanRangesForDatacenter, lastScanCycleAt, scanEntryRuntime, scanEntryReady } from './scanRanges.js';
 import { appendIdracScanLog } from './scanLog.js';
 import { enqueueIdracScan, cancelPendingIdracScanJobs } from '../central/idracScanJobs.js';
-import { pushIdracScan, iloEdgeGate, edgeVersionOf } from '../central/idracScanPush.js';
+import { pushIdracScan, iloEdgeGate, edgeVersionOf, collectorAmbiguityReason } from '../central/idracScanPush.js';
 import { isStopped } from '../security/emergencyStop.js';
 import { makeScanAuthPolicy } from './scanAuth.js';
 import { scanStarted, scanFinished, registerScanResumer, journalFor } from '../util/scanJournal.js';
@@ -108,7 +108,7 @@ async function scanOneDatacenter(e, onProgress, trigger = 'periodic') {
     //   않는다는 사실을 lastRun 에 남긴다. push 경로는 pushIdracScan 이 같은 판정을 한 번 더 한다(수동 PUSH 대비).
     const hasIlo = Boolean(e.ilo && e.ilo.username && e.ilo.password);
     const hasDell = Boolean(String(e.username || '').trim() && e.password);
-    const gate = iloEdgeGate({ hasDell, hasIlo, version: edgeVersionOf(e.agent) });
+    const gate = iloEdgeGate({ hasDell, hasIlo, version: edgeVersionOf(e.agent), unknownWhy: collectorAmbiguityReason(e.agent) });   // 반증(G1a 66 ①): 이름 겹침이면 그 사유
     if (!gate.delegate) {
       console.warn(`[idrac-scan] ${e.datacenterId}: ${gate.reason}`);
       return { datacenterId: e.datacenterId, delegated: false, held: true, agent: e.agent, heldReason: gate.reason, edgeVersion: gate.edgeVersion || '', error: null };

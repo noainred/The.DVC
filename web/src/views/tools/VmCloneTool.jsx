@@ -141,6 +141,8 @@ export default function VmCloneTool() {
 
       {msg && <div className="vbk-note info" role="status">{msg}</div>}
       {showMountsMaskedNote(d) && <div className="muted" style={{ fontSize: 12 }}>{MOUNTS_MASKED_NOTE}</div>}
+      {/* 결정(56~75 남긴 것) 65 ②: NFS 데이터스토어 정의 파일을 못 읽은 동안 — 빈 목록이 '정의 없음' 이 아니다 · 새 정의 추가는 거절된다 */}
+      {d.nfsDsLoadError && <div className="vbk-note" role="status">NFS 데이터스토어 정의 파일을 읽지 못했습니다 — {d.nfsDsLoadError.reason || '사유 미상'}. 그동안 정의 목록은 비어 보이고 새 정의 추가는 거절합니다.</div>}
       {/* v2.599(AUTHZ-2599-05): 범위 제한 계정에는 범위 밖 vCenter 의 잡을 빼고 그 개수를 밝힌다 */}
       {/* v2.631 A6-2631-06: scoped·omittedOutOfScope 판정·문구는 scopeOmitText.js 하나가 소유한다 */}
       <ScopeOmitBanner data={d} unit="복제 잡" counter="개" why="조회 범위 밖 vCenter 의" />

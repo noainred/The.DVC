@@ -32,13 +32,14 @@ class UserRouteNamesTest(ServerCase):
     def test_manage_users_with_names_outside_id_pattern(self):
         for name in ("hong.gildong", "kim@corp", "홍길동"):
             code, payload, _ = request(self.url + "/api/settings/users", "POST",
-                                       {"username": name, "role": "admin", "password": "pass-word-123"}, self.auth())
+                                       {"username": name, "role": "admin", "password": "pass-word-123",
+                                        "currentPassword": self.password}, self.auth())   # 결정 G1b ②: admin 생성은 요청자 확인
             self.assertEqual(code, 201, payload)
             q = urllib.parse.quote(name, safe="")
             code, payload, _ = request(self.url + "/api/settings/users/" + q, "PUT", {"enabled": False}, self.auth())
             self.assertEqual(code, 200, (name, payload))
             code, payload, _ = request(self.url + "/api/settings/users/" + q + "/password", "POST",
-                                       {"password": "another-pass-456"}, self.auth())
+                                       {"password": "another-pass-456", "currentPassword": self.password}, self.auth())   # 다른 admin 재설정
             self.assertEqual(code, 200, (name, payload))
             code, payload, _ = request(self.url + "/api/settings/users/" + q, "DELETE", None, self.auth())
             self.assertEqual(code, 200, (name, payload))

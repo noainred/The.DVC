@@ -12,6 +12,8 @@ import { getJob as getRmaJob, jobAgentOf as rmaJobAgentOf, noteHeartbeat as note
 import { assignForInstance as rmaAssign, rmaSchedulesLoadError, scheduleFor as rmaScheduleFor } from '../../rma/schedules.js';
 import { accessFor as rmaAccessFor, ipAllowed as rmaIpAllowed, remoteFor as rmaRemoteFor } from '../../rma/settings.js';
 import { ingestResult as rmaIngestResult } from '../../rma/testResults.js';
+import { rmaPasswordFor } from '../../rma/agentSecrets.js';
+import { signScheduleTests, scheduleSignKey } from '../../rma/signing.js';   // 결정(56~75 남긴 것) 64 F7: 점검 스케줄 script · ssh 항목 서명
 import { brokerFetch as credentialBrokerFetch } from '../../security/credentialStore.js';
 // central.js 의 공용 판정 — 등록 때 인자로 받는다(import 하면 central.js ↔ 이 파일 순환이 생긴다 — archScan IMPORT_CYCLE_MAX)
 let intervalsPartOrUnreadable, loadWhy, persistent503, receiveRegistryUnreadable, registryUnreadable, requireCentral, settingsUnreadable, settingsUnreadableLog, strAgent;
@@ -281,8 +283,17 @@ export function registerPduSanRoutes(centralRouter, deps) {
     // 결정적이라, 인스턴스가 늘거나 줄면 다음 폴에서 다시 내려간다(버전은 같아도 배정이 달라질 수 있어
     // 배정 서명(assignKey)을 함께 비교).
     const assign = rmaAssign(sch, instance, rmaOnlineInstances(agent));
-    const assignKey = `${sch.version}:${assign.tests.map((t) => t.id).join(',')}`;
-    if (String(b.assignKey || '') !== assignKey || Number(b.scheduleVersion) !== sch.version) out.schedule = { version: sch.version, assignKey, tests: assign.tests };
+    /*
+     * 결정(56~75 남긴 것) 64 F7: script · ssh 항목에 법인 RMA 비밀번호 HMAC 을 붙인다(signing.js signScheduleTests — 사본에만, 저장본은 그대로).
+     *   비밀번호 지문을 assignKey 에 넣는다 — 비밀번호를 등록 · 변경 · 해제하면 스케줄이 다시 내려가 엣지가 새 서명으로 다시 판정한다
+     *   (버전만 보면 비밀번호를 고친 뒤에도 엣지가 '서명 없음' 판정을 계속 들고 있다). 비밀번호가 없으면 assignKey 는 예전 모양 그대로다.
+     *   비밀번호를 못 읽으면(파일 손상) 서명하지 않는다 — 비밀번호가 있는 엣지는 그 두 점검을 unknown 으로 남긴다(닫힌 쪽).
+     */
+    let schSecret = '';
+    try { schSecret = rmaPasswordFor(agent); } catch { schSecret = ''; }
+    const signKey = scheduleSignKey(schSecret);
+    const assignKey = `${sch.version}:${assign.tests.map((t) => t.id).join(',')}${signKey ? `:k${signKey}` : ''}`;
+    if (String(b.assignKey || '') !== assignKey || Number(b.scheduleVersion) !== sch.version) out.schedule = { version: sch.version, assignKey, tests: signScheduleTests(schSecret, agent, assign.tests, Date.now(), instance) };   // 반증 G1a: 인스턴스도 서명 대상
     const remote = rmaRemoteFor(agent);
     if (remote.longpollMs || remote.testConcurrency || remote.disabledTests.length) out.config = remote;
     res.json(out);

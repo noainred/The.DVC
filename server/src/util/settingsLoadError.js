@@ -52,9 +52,13 @@ export function makeSettingsLoadError(fileOf, opts = {}) {
      * 20회차 반증 F4: **읽기 오류**(EACCES · EISDIR — 원본을 옮기지 않았다). 사유가 '보존본으로 옮겼습니다' 가 아니고, '기본값으로 확정' 할 수 없다
      *   (파일이 그대로 있어 확정은 file-present 로 막히고, 재시작해도 같은 오류다 — 사람이 권한 · 소유자를 고쳐야 한다).
      */
-    readError(e) {
+    readError(e, { retryMs = 0 } = {}) {
       const code = String((e && typeof e === 'object' ? e.code : '') || 'read-error').slice(0, 32);
-      err = { at: Date.now(), reason: `설정 파일을 읽지 못했습니다(${code}) — 원본은 그대로 두었습니다. 파일 권한 · 소유자(포탈 서비스 계정)를 고치고 재시작하세요`, readError: true };
+      // 결정(56~75 남긴 것) G2: 다시 읽는 로더(util/jsonFileLoad.js — retryMs)는 재시작 없이 풀린다 — 그 사실을 말한다 · 이어지는 읽기 오류는 처음 시각(at)을 유지한다.
+      const tail = retryMs > 0
+        ? `파일 권한 · 소유자(포탈 서비스 계정) · 디스크를 확인하세요 — ${Math.round(retryMs / 1000)}초마다 다시 읽고, 읽히면 재시작 없이 풀립니다`
+        : '파일 권한 · 소유자(포탈 서비스 계정)를 고치고 재시작하세요';
+      err = { at: err?.readError && Number.isFinite(err.at) ? err.at : Date.now(), reason: `설정 파일을 읽지 못했습니다(${code}) — 원본은 그대로 두었습니다. ${tail}`, readError: true };
     },
     missing() {
       let why = null;
@@ -64,7 +68,7 @@ export function makeSettingsLoadError(fileOf, opts = {}) {
       if (!err || err.readError) set(why.replace('등록부 파일', '설정 파일'));
     },
   };
-  _registry.push({ fileOf, api, label: String(opts.label || ''), confirm: typeof opts.confirm === 'function' ? opts.confirm : null, ownerOnly: opts.ownerOnly === true, superOnly: opts.superOnly === true });
+  _registry.push({ fileOf, api, label: String(opts.label || ''), confirm: typeof opts.confirm === 'function' ? opts.confirm : null, ownerOnly: opts.ownerOnly === true, superOnly: opts.superOnly === true, recheckMs: Number.isFinite(opts.recheckMs) && opts.recheckMs > 0 ? opts.recheckMs : 0 });
   return api;
 }
 
@@ -123,13 +127,15 @@ export function confirmSettingsDefault(fileName, { by = '' } = {}) {
   if (!ent) return { ok: false, code: 'unknown-file', file: want };
   if (!currentError(ent)) return { ok: false, code: 'not-in-error', file: want };
   if (!ent.confirm) return { ok: false, code: 'not-confirmable', file: want };
-  if (currentError(ent)?.readError) return { ok: false, code: 'not-confirmable', file: want, detail: '읽기 오류(권한 · 소유자)라 확정으로 풀 수 없습니다 — 파일 권한을 고치고 재시작하세요.' };   // 20회차 F4
+  // 결정 G2 반증 후속 ③: 다시 판정하는 로더(recheckMs — util/jsonFileLoad.js)는 재시작 없이 풀린다 — 안내를 그 동작대로.
+  const secs = ent.recheckMs > 0 ? Math.round(ent.recheckMs / 1000) : 0;
+  if (currentError(ent)?.readError) return { ok: false, code: 'not-confirmable', file: want, detail: secs ? `읽기 오류(권한 · 소유자)라 확정으로 풀 수 없습니다 — 파일 권한 · 디스크를 고치면 ${secs}초 안에 다시 읽어 재시작 없이 풀립니다.` : '읽기 오류(권한 · 소유자)라 확정으로 풀 수 없습니다 — 파일 권한을 고치고 재시작하세요.' };   // 20회차 F4
   // 전체 점검 18회차 반증 B-1(재현): 오류가 서 있는데 **파일이 다시 있으면**(운영자가 보존본을 되돌림) 기본값으로 덮지 않는다 — 로드는 기동 때 한 번이라
   //   메모리는 여전히 빈 기본값이고, 확정이 되돌린 파일을 그 값으로 덮어 복구본을 잃고 기본값(빈 배포 목록 등)을 전 엣지에 내렸다.
   //   손상되면 원본은 preserveCorrupt 로 옮겨지므로, 오류 중 파일이 있다는 것은 사람이 놓았다는 뜻이다 — 재시작이 그 파일을 읽는다.
   try {
     const full = fullPathOf(ent);
-    if (full && fs.existsSync(full)) return { ok: false, code: 'file-present', file: want, detail: '설정 파일이 다시 있습니다(되돌린 보존본으로 보입니다) — 기본값으로 덮지 않았습니다. 포탈을 재시작하면 그 파일을 읽습니다.' };
+    if (full && fs.existsSync(full)) return { ok: false, code: 'file-present', file: want, detail: secs ? `설정 파일이 다시 있습니다(되돌린 보존본으로 보입니다) — 기본값으로 덮지 않았습니다. ${secs}초 안에 그 파일을 다시 읽습니다(재시작 불필요).` : '설정 파일이 다시 있습니다(되돌린 보존본으로 보입니다) — 기본값으로 덮지 않았습니다. 포탈을 재시작하면 그 파일을 읽습니다.' };
   } catch { /* 판정 실패는 예전 동작(확정 진행) */ }
   try { ent.confirm({ by: String(by || '').slice(0, 64) }); } catch (e) { return { ok: false, code: 'confirm-failed', file: want, detail: String(e?.message || e).slice(0, 200) }; }
   if (currentError(ent)) return { ok: false, code: 'still-error', file: want };

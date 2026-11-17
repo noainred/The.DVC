@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **330개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **331개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-17)
@@ -81,7 +81,7 @@
 | `bmusage-portmap.json` | 설정 | 서버 NIC ↔ 스위치·포트 **수동 매핑 파일**(v2.922 · 3a · 설계 PROFILES §10 ①). 파일: `<configDir>/bmusage-portmap.json`. | ✅ | ✅ | ✅ | bmusage/portMap.js |
 | `bmusage-settings.json` | 설정 | 베어메탈 사용률 수집 설정(v2.550). | ✅ | ✅ | ✅ | bmusage/settings.js |
 | `bmusage-tuning.json` | 설정 | 역할별 권장값의 **관리자 덮어쓰기**(v2.923 예정 · 리눅스 성능 4단계 · 설계 §4.3 ‘권장 프로파일을 관리자가 설정에서 정한다’). | ✅ | ✅ | ✅ | bmusage/tuning/overrides.js |
-| `board.json` | 설정 | 접속 공지(팝업)와 게시판 글 저장소(v2.722). | ✅ | ✅ | ✅ | bulletin/store.js |
+| `board.json` | 설정 | 접속 공지(팝업)와 게시판 글 저장소(v2.722). | ✅ |  | ✅ | bulletin/store.js |
 | `capacity.db` | DB | 리소스 적정성(용량) 샘플 시계열 |  |  |  | config.js |
 | `capture-history.json` | 설정 | 네트워크 캡처 이력 저장소 — 캡처 결과의 메타·요약·진단을 CONFIG_DIR/capture-history.json에 | ✅ |  | ✅ | net/captureHistory.js |
 | `capture-monitors.json` | 설정 | 연속 네트워크 모니터링 — 두 서버 간 캡처를 주기적으로 자동 실행해 이력에 기록하고, 경로 | ✅ |  | ✅ | net/monitor.js |
@@ -99,7 +99,7 @@
 | `central-svcmon-assign.json` | 설정 | 성능점검 배정 — 중앙이 관리하는 '어느 엣지가 어느 대상을 점검하는가'. | ✅ | ✅ |  | central/svcmonAssign.js |
 | `central-unsupported-servers.json` | 설정 | iDRAC 스캔이 발견한 **비-Dell(미지원) 서버**의 중앙 보관소(v2.495). | ✅ | ✅ | ✅ | central/unsupportedServers.js |
 | `collectors.json` | 설정 | 원격 수집 서버(엣지) 목록과 토큰 | ✅ | ✅ | ✅ | collector/registry.js |
-| `cost-rates.json` | 설정 | 비용 배분(쇼백) 단가 설정(`cost-rates.json`, v2.707 — C11). 사람이 정하는 **설정** 파일이다 | ✅ | ✅ |  | cost/settings.js |
+| `cost-rates.json` | 설정 | 비용 배분(쇼백) 단가 설정(`cost-rates.json`, v2.707 — C11). 사람이 정하는 **설정** 파일이다 | ✅ |  |  | cost/settings.js |
 | `credentials-usage.json` | 설정 | 통합 계정 관리 저장소(v2.419) — RMA 가 엣지 망 안의 서버에 SSH 로 점검·명령을 실행할 때 쓰는 | ✅ | ✅ | ✅ | security/credentialStore.js |
 | `credentials.json` | 설정 | 통합 계정(장비 SSH/API 자격증명) | ✅ | ✅ | ✅ | security/credentialStore.js |
 | `curuser-activity.json` | 설정 | 수집 작업 로그(최근 N건 링버퍼 · 재생성 가능한 캐시) — util/activityLog.js | ✅ |  | ✅ | curuser/activityLog.js |
@@ -110,7 +110,7 @@
 | `cvp-settings.json` | 설정 | CloudVision(CVP) 수집 설정(v2.608). 파일: CONFIG_DIR/cvp-settings.json(비밀 없음). | ✅ | ✅ | ✅ | cvp/settings.js |
 | `cvp.db` | DB | CloudVision(CVP) 수집 전용 DB(v2.608, 사용자 요청 "데이터 용량이 많으니까 별도의 DB 로"). |  |  | ✅ | cvp/db.js |
 | `daily-report.json` | 설정 | 일일 헬스체크 리포트 발송 스케줄러 — 매일 지정 시각(HH:MM)에 computeHealthReport 결과를 | ✅ | ✅ | ✅ | reports/dailyReport.js |
-| `datacenters.json` | 설정 | DataCenter(법인) 레지스트리 — vCenter의 '상위 개념'. | ✅ | ✅ |  | datacenter/store.js |
+| `datacenters.json` | 설정 | DataCenter(법인) 레지스트리 — vCenter의 '상위 개념'. | ✅ |  |  | datacenter/store.js |
 | `db-location.json` | 설정 | 시계열 DB 저장 경로(dbDir) |  |  |  | insights/dbLocation.js |
 | `dirusage.db` | DB | 폴더 사용량 스캔 이력 DB (`dirusage.db`, v2.454). |  |  | ✅ | dirusage/db.js |
 | `dirusage.json` | 설정 | 폴더 사용량 리포트 설정 (`dirusage.json`, v2.454). | ✅ | ✅ | ✅ | dirusage/settings.js |
@@ -120,8 +120,8 @@
 | `download` | 디렉터리 | iDRAC-scan collector agent auto-deploy. The central portal pushes its offline |  |  | ✅ | agent/deploy.js |
 | `emergency-stop.json` | 설정 | 긴급중단(Emergency Stop) — 2인 승인(관리자 2명 OTP)으로만 켜고/끄는 전역 수집 정지 스위치. | ✅ | ✅ | ✅ | security/emergencyStop.js |
 | `finops.json` | 설정 | FinOps — 전력 수집(iDRAC/OME/원격) 데이터를 kWh·전기요금·CO2로 환산해 vCenter/지역별로 | ✅ | ✅ |  | insights/finops.js |
-| `fleet-assign.json` | 설정 | 통합 서버 인벤토리 — 베어메탈/물리 서버의 '소속 법인(vCenter)' 수동 등록 저장. | ✅ | ✅ |  | insights/fleetAssign.js |
-| `fleet-tags.json` | 설정 | 통합 서버 인벤토리 — 수동 분류 예외(override) 저장. | ✅ | ✅ |  | insights/fleetTags.js |
+| `fleet-assign.json` | 설정 | 통합 서버 인벤토리 — 베어메탈/물리 서버의 '소속 법인(vCenter)' 수동 등록 저장. | ✅ |  |  | insights/fleetAssign.js |
+| `fleet-tags.json` | 설정 | 통합 서버 인벤토리 — 수동 분류 예외(override) 저장. | ✅ |  |  | insights/fleetTags.js |
 | `focusmon-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | focusmon/collector.js |
 | `focusmon-targets.json` | 설정 | 집중 모니터링 **대상 서버 등록부 + 설정**(v2.976). 파일 `CONFIG_DIR/focusmon-targets.json`. | ✅ | ✅ | ✅ | focusmon/registry.js |
 | `focusmon.db` | DB | 집중 모니터링 기록 DB(`focusmon.db` — 30일 보관 · v2.976 · 사용자 결정 2026-11-11 ‘뒤로 30일 · DB 에 저장 · 프로세스 목록도’). |  |  | ✅ | focusmon/db.js |
@@ -152,10 +152,10 @@
 | `idrac-sensor-cache.json` | 설정 | iDRAC 센서 상세 캐시(v2.659) — 서버별 ① Thermal 상세(매 폴 주기, 인메모리) ② Sensors 컬렉션(인벤토리 주기, 파일 보관). | ✅ |  | ✅ | idrac/sensorDetailCache.js |
 | `idrac.json` | 설정 | iDRAC 등록부 — 전력·온도·인벤토리를 수집하는 Dell·HPE 서버 목록(v2.628 에 bmusage/poller.js 가 손상 여부만 확인하도록 읽는다) | ✅ | ✅ | ✅ | bmusage/poller.js, idrac/registry.js |
 | `initial-admin-password.txt` | 텍스트 | 최초 기동 시 생성된 관리자 임시 비밀번호 | ✅ | ✅ | ✅ | auth/auth.js, security/selfCheck.js |
-| `ipam-annotations.json` | 설정 | Per-IP user annotations (custom memo + tags) for the IP ledger. These are | ✅ | ✅ |  | ipam/annotations.js |
+| `ipam-annotations.json` | 설정 | Per-IP user annotations (custom memo + tags) for the IP ledger. These are | ✅ |  |  | ipam/annotations.js |
 | `ipam-change-baseline.json` | 설정 | IP 스캔 설정(에이전트별) + 결과 저장소. | ✅ | ✅ | ✅ | ipam/scanStore.js |
 | `ipam-changes.json` | 설정 | IP 변화 기록(v3.1.0 — 설계 docs/design/ipam-alerts-mac-dns ① ② · IP관리 › IP 변화 페이지). | ✅ | ✅ | ✅ | ipam/changeLog.js |
-| `ipam-overrides.json` | 설정 | Per-IP 수동 관리(override) 저장소 — vCenter/스캔으로 자동 발견되는 정보와 별개로, | ✅ | ✅ | ✅ | ipam/overrides.js |
+| `ipam-overrides.json` | 설정 | Per-IP 수동 관리(override) 저장소 — vCenter/스캔으로 자동 발견되는 정보와 별개로, | ✅ |  | ✅ | ipam/overrides.js |
 | `ipam-range-policies.json` | 설정 | 대역(subnet/range) 단위 IP 정책 저장소 — IP 단위 override(overrides.js)와 '평행'한 | ✅ | ✅ | ✅ | ipam/rangePolicies.js |
 | `ipam-report-state.json` | 설정 | IP 관리 정기 보고(IPMS 알람) 설정 · 상태 · 틱 · 발송 · 미리 보기(v3.7.0 재설계 묶음 라 — 설계 docs/design/ipam-redesign ⑫ ⑬). | ✅ | ✅ | ✅ | ipam/report.js |
 | `ipam-report.json` | 설정 | IP 관리 정기 보고(IPMS 알람) 설정 · 상태 · 틱 · 발송 · 미리 보기(v3.7.0 재설계 묶음 라 — 설계 docs/design/ipam-redesign ⑫ ⑬). | ✅ | ✅ | ✅ | ipam/report.js |
@@ -196,7 +196,7 @@
 | `login-monitor.json` | 설정 | 로그인 실패 주기 모니터 — 일정 주기로 로그인 실패를 분석하고, 브루트포스(임계 이상 반복) 의심이 | ✅ |  | ✅ | security/loginMonitor.js |
 | `login-policy-users.txt` | 텍스트 | 세션 보안 설정 — 유휴 자동 로그아웃(분) 등. CONFIG_DIR/security-session.json. | ✅ | ✅ | ✅ | security/securitySettings.js |
 | `mail-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | mail/service.js |
-| `mail.json` | 설정 | 포탈 공용 메일(SMTP) 설정 (`mail.json`, v2.454). | ✅ | ✅ | ✅ | mail/settings.js |
+| `mail.json` | 설정 | 포탈 공용 메일(SMTP) 설정 (`mail.json`, v2.454). | ✅ |  | ✅ | mail/settings.js |
 | `maintenance-stats.json` | 설정 | 정비 창 판정의 **노드 실행 면**(8a단계): 판정기 만들기 · 억제 계수 · ‘창 끝 뒤 억제’ 점검. | ✅ | ✅ | ✅ | bmusage/maint/runtime.js |
 | `maintenance-windows-deployed.json` | 설정 | 리눅스 성능 8a단계 **정비 창 저장소**(`maintenance-windows.json` · 엣지 배포본 `maintenance-windows-deployed.json`). | ✅ | ✅ | ✅ | bmusage/maint/store.js |
 | `maintenance-windows.json` | 설정 | 리눅스 성능 8a단계 **정비 창 저장소**(`maintenance-windows.json` · 엣지 배포본 `maintenance-windows-deployed.json`). | ✅ | ✅ | ✅ | bmusage/maint/store.js |
@@ -205,7 +205,7 @@
 | `net-issues.ndjson` | 로그(NDJSON) | 게스트 네트워크 이슈 저장소 — 스캔마다 직전 카운터와 비교해 '증가분(델타)'을 산출하고, | ✅ |  | ✅ | security/netIssueStore.js |
 | `netmon-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | net/monitor.js |
 | `nfs-mounts.json` | 설정 | Edge 노드 NFS 마운트 관리(v2.299). | ✅ | ✅ | ✅ | system/nfsMounts.js |
-| `notices.json` | 설정 | 접속 공지(팝업)와 게시판 글 저장소(v2.722). | ✅ | ✅ | ✅ | bulletin/store.js |
+| `notices.json` | 설정 | 접속 공지(팝업)와 게시판 글 저장소(v2.722). | ✅ |  | ✅ | bulletin/store.js |
 | `nsx-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | nsx/client.js |
 | `nsx.json` | 설정 | NSX Manager registry — read/write the managed list in CONFIG_DIR/nsx.json, | ✅ | ✅ | ✅ | nsx/registry.js |
 | `onboard-prev` | 디렉터리 | 서버 등록(온보딩) 분석 → 적용(7b단계 · 설계 PROFILES §18 '연결 시험 → 적용 → 엣지 배포'). | ✅ |  | ✅ | bmusage/onboard/onboardRun.js |
@@ -230,6 +230,7 @@
 | `portal.env` | 기타 | 환경변수(설치본이 읽는 유일한 설정 파일) |  |  |  | security/secretScan.js, security/selfCheck.js |
 | `power-off-check.json` | 설정 | 전원 꺼짐 점검 설정(`power-off-check.json`, v2.484, 사용자 요청 "몇 시간마다 점검하는지 설정"). | ✅ | ✅ | ✅ | tools/powerOffSettings.js |
 | `power-settings.json` | 설정 | 전력 집계 표시 설정 — CONFIG_DIR/power-settings.json. | ✅ | ✅ | ✅ | idrac/powerSettings.js |
+| `provision-runs.json` | 설정 | VM provisioning job engine. Holds deployment jobs in memory and runs them |  |  |  | provision/jobs.js |
 | `provision-saved.json` | 설정 | Saved VM-provisioning jobs — every created job's spec is persisted so it can | ✅ | ✅ | ✅ | provision/saved.js |
 | `relay-topology.json` | 설정 | 중계(HAProxy) 토폴로지 정의 | ✅ | ✅ | ✅ | relaytopo/store.js |
 | `relaycheck-settings.json` | 설정 | HAProxy 경로 점검 설정(v2.429, 사용자 요구 '특수기능에 haproxy 설정을 주기적으로 점검해서 알람으로 알려주고 | ✅ | ✅ | ✅ | relaycheck/settings.js |
@@ -334,7 +335,7 @@
 | `vm-clone.json` | 설정 | VM 복제(백업식) 잡 저장소(v2.299). | ✅ | ✅ | ✅ | vmclone/store.js |
 | `vm-dns-policy.json` | 설정 | VM DNS 승인 정책(`vm-dns-policy.json`, v2.696). 사람이 손으로 정하는 **설정** 파일이다(상태 파일 아님 — | ✅ | ✅ | ✅ | vmdns/policy.js |
 | `vm-dns.db` | DB | VM DNS 서버 설정 **변경 이력** 전용 DB(`vm-dns.db`, v2.696). |  |  | ✅ | vmdns/db.js |
-| `vm-hygiene.json` | 설정 | VM 구성 점검·스냅샷 정책 설정(`vm-hygiene.json`, v2.698). 사람이 정하는 **설정** 파일이다 | ✅ | ✅ |  | vmhygiene/settings.js |
+| `vm-hygiene.json` | 설정 | VM 구성 점검·스냅샷 정책 설정(`vm-hygiene.json`, v2.698). 사람이 정하는 **설정** 파일이다 | ✅ |  |  | vmhygiene/settings.js |
 | `vm-list-prefs.json` | 설정 | VM 목록 내보내기 '내 저장값'(계정별, v2.798 — 사용자 결정 '계정에 저장'). | ✅ | ✅ | ✅ | veeam/vmListPrefs.js |
 | `vm-track.db` | DB | VM 수량·데이터스토어 사용량 추이(변경분만 저장) |  |  | ✅ | vmtrack/db.js |
 | `vmperf` | 디렉터리 | 디렉터리 — vCenter별 VM 성능 DB(+ _index.json 역산 매핑) | ✅ | ✅ | ✅ | metrics/vmperfDb.js |

@@ -10,7 +10,7 @@ import { numOrNull } from '../util/numOrNull.js';
 export const HIST_MAX = 26;          // 호스트당 표본 수 상한(매시 1개면 약 하루 + 여유)
 export const SWEEP_MS = 5 * 60_000;  // 스냅샷을 훑는 주기
 
-const _byHost = new Map();   // hostId -> [{ at, samples, sampleSec, t: Map(`${adapter}|${wwn}` -> kb) }] (오래된 것 먼저)
+const _byHost = new Map();   // hostId -> [{ at, samples, sampleSec, t: Map(`${adapter}|${wwn}` -> kb), x: Map(adapter -> 뺀 partial 타깃 수) }] (오래된 것 먼저)
 let _timer = null;
 
 const keyOf = (t) => `${t?.adapter || t?.init || '?'}|${t?.wwn}`;
@@ -31,15 +31,26 @@ export function recordHosts(hosts = []) {
     let arr = _byHost.get(id);
     if (!arr) { arr = []; _byHost.set(id, arr); }
     if (arr.some((x) => x.at === at)) continue;
+    // 결정(56~75 남긴 것) 68 P2: partial(창 안 표본이 빠진 경로가 있는) 타깃의 KB 합은 실제보다 작다 — 그 값을 가중치에 넣으면
+    //   같은 어댑터의 다른 타깃 몫이 부풀어 sanswitch/attribution.js 가 거짓 비율을 낸다. 그 타깃만 빼면 몫이 0 이 되어 더 틀리므로
+    //   (분배는 '경로가 없는 후보는 0') **그 표본의 그 어댑터 전체**를 가중치에서 빼고 뺀 partial 타깃 수를 x 에 센다(weightsFor 가 excluded 로 밝힌다).
+    //   평균 속도 × 창으로 다시 만드는 재설계는 하지 않는다.
+    const partialAd = new Map();
+    for (const x of sp.targets) {
+      if (!x || typeof x.wwn !== 'string' || x.partial !== true) continue;
+      const ad = x?.adapter || x?.init || '?';
+      partialAd.set(ad, (partialAd.get(ad) || 0) + 1);
+    }
     const t = new Map();
     for (const x of sp.targets) {
       if (!x || typeof x.wwn !== 'string') continue;
+      if (partialAd.has(x?.adapter || x?.init || '?')) continue;   // 68 P2: 표본이 빠진 경로가 있는 어댑터 — 이 표본은 쓰지 않는다
       const kb = (Number.isFinite(x.readKB) ? x.readKB : 0) + (Number.isFinite(x.writeKB) ? x.writeKB : 0);
       const has = Number.isFinite(x.readKB) || Number.isFinite(x.writeKB);
       if (!has) continue;   // 값이 하나도 없는 타깃은 0 이 아니라 '모름' — 넣지 않는다
       t.set(keyOf(x), (t.get(keyOf(x)) || 0) + kb);
     }
-    arr.push({ at, samples: Number(sp.samples) || 0, sampleSec: Number(sp.sampleSec) || 20, t });
+    arr.push({ at, samples: Number(sp.samples) || 0, sampleSec: Number(sp.sampleSec) || 20, t, x: partialAd });
     arr.sort((a, b) => a.at - b.at);
     while (arr.length > HIST_MAX) arr.shift();
     added += 1;
@@ -49,14 +60,16 @@ export function recordHosts(hosts = []) {
 }
 
 /**
- * 기간 [since, until] 안 표본의 타깃별 전송량 합 → { kb: Map(`${adapter}|${wwn}` -> KB), samples, firstAt, lastAt } · 표본이 없으면 null.
- * since·until 은 ms(없으면 제한 없음).
+ * 기간 [since, until] 안 표본의 타깃별 전송량 합 → { kb: Map(`${adapter}|${wwn}` -> KB), samples, firstAt, lastAt, excluded, excludedOf } · 표본이 없으면 null.
+ * since·until 은 ms(없으면 제한 없음). 68 P2: excluded = 표본이 빠진 경로(partial)가 있어 가중치에서 뺀 타깃 수(기간 합),
+ *   excludedOf = Map(adapter -> 그 수) — 분배(attribution)가 어댑터마다 '제외 n개' 를 밝힌다.
  */
 export function weightsFor(hostId, { since = null, until = null } = {}) {
   const arr = _byHost.get(String(hostId));
   if (!arr || !arr.length) return null;
   const kb = new Map();
-  let n = 0; let firstAt = null; let lastAt = null;
+  const excludedOf = new Map();
+  let n = 0; let firstAt = null; let lastAt = null; let excluded = 0;
   for (const s of arr) {
     if (since != null && s.at < since) continue;
     if (until != null && s.at > until) continue;
@@ -64,8 +77,9 @@ export function weightsFor(hostId, { since = null, until = null } = {}) {
     firstAt = firstAt == null ? s.at : Math.min(firstAt, s.at);
     lastAt = lastAt == null ? s.at : Math.max(lastAt, s.at);
     for (const [k, v] of s.t) kb.set(k, (kb.get(k) || 0) + v);
+    for (const [ad, c] of s.x || []) { excludedOf.set(ad, (excludedOf.get(ad) || 0) + c); excluded += c; }
   }
-  return n ? { kb, samples: n, firstAt, lastAt } : null;
+  return n ? { kb, samples: n, firstAt, lastAt, excluded, excludedOf } : null;
 }
 
 /** 상태(서비스 점검) — 이력을 가진 호스트 수 · 표본 합. */

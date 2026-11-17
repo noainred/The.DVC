@@ -24,6 +24,7 @@ import {
   TOPN_PRESETS, CORP_TOPM_PRESETS, countField, countHint, keptHint, presetLabel, corpGroupsOf, rowsPlan, rowsPlanText, formDirty, mailOrder,
 } from './isiduDigestText.js';
 import './isiduDigestTop.css';
+import { adminToForCount } from './storageUsageText.js';   // 반증 후속 ①: 가린 통합 관리자 주소는 개수만
 
 /** 순위 개수 칸 하나(숫자 + 빠른 선택 + 설명). 입력은 글자 그대로 들고 판정은 isiduDigestText.countField 가 한다. */
 function CountBox({ k, title, unit, presets, form, saved, set, issue, serverBad }) {
@@ -119,7 +120,7 @@ export default function IsiduDigestSettings({ locked: lockedOuter = false, rows 
   useEffect(() => load(), [load]);
 
   const off = srv?.offsetMin ?? 540;
-  const adminTo = useMemo(() => srv?.adminTo || [], [srv]);
+  const adminTo = useMemo(() => adminToForCount(srv), [srv]);   // 반증 후속 ①: 서버가 주소를 가렸으면 개수만(겹침은 최대치)
   // 법인 수 — 상위 화면이 받은 대상 목록(메인 목록 응답의 행). 받지 못했으면 null('—').
   const groups = useMemo(() => corpGroupsOf(rows), [rows]);
   const locked = lockedOuter || !srv || !!srv.loadError;

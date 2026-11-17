@@ -391,7 +391,10 @@ function migrationView() {
   for (const v of store.get().vcenters || []) vcName[v.id] = v.name || v.id;
   const remaining = listVcRanges().map((e) => ({ vcenterId: e.vcenterId, vcenterName: vcName[e.vcenterId] || e.vcenterId, ranges: e.ranges || [], enabled: e.enabled !== false }));
   const agents = [...new Set([LOCAL, ...listScanAgents().map((a) => a.name)])];
-  return { ok: true, state: st, remaining, agents, ...(held ? { held } : {}) };
+  // 결정(56~75 남긴 것) 62: 손상 · 읽기 오류 중 '남은 대역' 빈 목록이 '다 옮김' 으로 보이지 않게 표지(사유 요약 · 읽기 오류 여부).
+  const le = vcRangesLoadError();
+  const remainingLoadError = le ? { reason: String(le.reason || '').slice(0, 300), at: Number.isFinite(le.at) ? le.at : null, readError: !!le.readError } : null;
+  return { ok: true, state: st, remaining, agents, ...(held ? { held } : {}), ...(remainingLoadError ? { remainingLoadError } : {}) };
 }
 adminRouter.get('/ipam/scan/migration', adminOnly, fleetOnly, (_req, res) => { res.json(migrationView()); });
 adminRouter.post('/ipam/scan/migration/move', adminOnly, fleetOnly, (req, res) => {

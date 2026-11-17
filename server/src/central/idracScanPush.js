@@ -13,11 +13,12 @@ import { reqTimeoutMs } from '../agent/envTimeout.js';
 import { readJsonCapped, EDGE_RESPONSE_MAX_BYTES } from '../util/readCapped.js'; // v2.604: 엣지 응답 크기 상한
 import { strOf } from '../util/coercionTrap.js';
 import { withOutboundTag } from '../util/outboundStats.js'; // v2.601 WEB2601-02: 같은 주소 엣지를 기록에서 나눈다
-import { findCollectorByName } from '../collector/registry.js'; // v2.613 EDGE2613-08: 이름 조회 코어는 등록부 하나
+import { findCollectorByName, resolveCollectorByName } from '../collector/registry.js'; // v2.613 EDGE2613-08: 이름 조회 코어는 등록부 하나
 import { pullCollectorByAgent } from '../collector/puller.js';
 import { createPushScanJob, setIdracScanResult } from './idracScanJobs.js';
 import { allCollectorStatus } from '../collector/state.js';
 import { cmpVersion } from '../util/cmpVersion.js';
+import { capStr } from '../util/capStr.js'; // 반증(결정 G1a) 사유 절단도 TIM2607-01 규약(.slice 는 원문을 붙잡는다)
 
 /**
  * v2.611(감사 EDGE2611-01·03 = RECENT2611-03): iLO 스캔을 이해하는 엣지 최소 버전.
@@ -29,6 +30,11 @@ import { cmpVersion } from '../util/cmpVersion.js';
 export const MIN_ILO_EDGE_VERSION = '2.610.0';
 
 /** 담당 엣지의 버전(수집 서버 상태 기준). 모르면 ''. 인메모리라 중앙 재시작 직후(첫 pull 전)에는 모른다. */
+/** 반증(결정 G1a 66 ①): 이 이름이 표시 이름 겹침으로 수집 서버를 정할 수 없으면 그 사유, 아니면 '' — 위임 보류 사유에 싣는다. */
+export function collectorAmbiguityReason(agent) {
+  try { const r = resolveCollectorByName(agent); return r.issue === 'ambiguous' ? r.reason : ''; } catch { return ''; }
+}
+
 export function edgeVersionOf(agent) {
   const col = findCollectorByName(agent);
   if (!col) return '';
@@ -44,12 +50,13 @@ export function edgeVersionOf(agent) {
  *    미상이면 note 를 달지 않는다 — 실제 적용 여부는 회신의 iloEnabled 유무로 가린다(idracScanJobs iloIgnoredByEdge).
  * ⚠ 이 문구는 lastRun·이벤트·로그로 흐른다 — `**`·백틱 금지.
  */
-export function iloEdgeGate({ hasDell = false, hasIlo = false, version = '' } = {}) {
+export function iloEdgeGate({ hasDell = false, hasIlo = false, version = '', unknownWhy = '' } = {}) {
   if (!hasIlo) return { delegate: true };
   const c = cmpVersion(version, MIN_ILO_EDGE_VERSION);
   if (c != null && c >= 0) return { delegate: true };
   const known = c != null;
-  const verText = known ? `엣지 버전 ${version}` : '엣지 버전 미상(수집 서버 상태에 버전이 없음 — 중앙 재시작 직후이거나 수집 서버(원격)로 등록되지 않은 엣지)';
+  // 반증(결정 G1a 66 ①): 표시 이름이 겹쳐 담당 엣지를 정할 수 없어 버전을 모르는 것이면 그 사유를 그대로(재시작 직후 · 미등록 추측으로 덮지 않는다).
+  const verText = known ? `엣지 버전 ${version}` : unknownWhy ? `엣지 버전 미상 — ${capStr(unknownWhy, 240)}` : '엣지 버전 미상(수집 서버 상태에 버전이 없음 — 중앙 재시작 직후이거나 수집 서버(원격)로 등록되지 않은 엣지)';
   if (!hasDell) {
     return {
       delegate: false, held: true, edgeVersion: version || '',
@@ -77,6 +84,11 @@ const PUSH_TIMEOUT_MS = reqTimeoutMs(process.env.IDRAC_PUSH_TIMEOUT_MS, 15 * 60_
  */
 export function pushIdracScan(agent, { ips, username, password, ilo = null, vcenterId = '', datacenterId = '', noRegister = false, mode = 'merge', service = '', trigger = 'manual', rangeId = '' } = {}) {
   const col = findCollectorByName(agent);
+  if (!col) {
+    // 결정(56~75 남긴 것) 66 ①: 표시 이름이 겹쳐 정할 수 없으면 그 사유를 그대로(등록 안내로 덮지 않는다).
+    const why = resolveCollectorByName(agent);
+    if (why.issue === 'ambiguous') return { ok: false, reason: why.reason };
+  }
   if (!col || !col.url) {
     return { ok: false, reason: `에이전트 '${agent}'에 매칭되는 '수집 서버(원격)' URL이 없습니다. 설정 → 수집 서버(원격)에 이 에이전트를 URL과 함께 등록하면 중앙이 직접 스캔을 전송할 수 있습니다.` };
   }

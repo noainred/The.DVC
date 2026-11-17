@@ -230,6 +230,7 @@
     프로비저닝 저장 · SAN 오류 **기준선** · 알림·전력·로그·업그레이드·파트장애·bmusage 설정). 사용자가 손으로 등록한
     값이면 비밀이 아니어도 대상이다. 스윕 테스트가 `JSON.parse(fs.readFileSync` + `atomicWriteFileSync` 를 둘 다
     쓰는 모듈 전부를 검사한다 — **캐시 성격이면 allowlist 에 사유와 함께** 적는다(조용한 예외 금지).
+    정정(결정 56~75 G2): **읽기 오류(EACCES · EIO · EISDIR · EMFILE)는 손상이 아니다** — 원본을 옮기지 않는다. 새 저장소는 공용 로더 `util/jsonFileLoad.js`(넷 판정 · 30초 재읽기 · 오류 중 쓰기 409)로 읽는다(회귀 `decideG2`).
   - **디바운스 저장은 `util/exitFlush.js` 에 동기 flush 를 등록한다**(`registerExitFlush(name, fn)`). v2.447 이
     fleet·scanStore 두 곳에 각자 exit 훅을 넣은 뒤 디바운스 저장이 9곳으로 늘었는데 훅은 그 둘뿐이었다 — 업그레이드
     재시작마다 마지막 3~10초 창(로그인 실패 이력 포함)을 잃었다. **자체 `process.on('exit'|'SIGTERM')` 을 만들지

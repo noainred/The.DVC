@@ -9,6 +9,7 @@ import { store } from '../store.js';
 import { REGIONS } from '../util/regions.js'; // v2.575 IMP-10 — 단일 소스
 import { loadLlmConfig } from './config.js';
 import { ollamaGenerate } from './ollama.js';
+import { acquireLlmSlot, llmBusyError } from './limit.js'; // 결정(56~75 남긴 것) 67: LLM 동시 실행 상한
 
 const PLURAL = { vm: 'vms', host: 'hosts', datastore: 'datastores', network: 'networks' };
 
@@ -191,20 +192,28 @@ function fallbackParse(query) {
  */
 export const NL_ENTITY_PERM = Object.freeze({ vm: 'inv.vms', host: 'inv.hosts', datastore: 'inv.datastores', network: 'inv.networks' });
 
-export async function nlSearch(query, allowed = null) {
+/**
+ * @param {string} query
+ * @param {Set<string>|null} allowed
+ * @param {{slotHeld?:boolean}} [opt] slotHeld = 부르는 쪽(ChatOps)이 이미 LLM 자리를 잡았다(같은 요청이 두 자리를 잡지 않게)
+ */
+export async function nlSearch(query, allowed = null, { slotHeld = false } = {}) {
   if (String(query ?? '').length > NL_QUERY_MAX) {
     const e = new Error(`질의가 너무 깁니다(최대 ${NL_QUERY_MAX}자).`); e.status = 400; e.code = 'query-too-long'; throw e;
   }
   const cfg = loadLlmConfig();
   let q, source;
   if (cfg.enabled) {
+    // 67: 자리가 없으면 폴백으로 조용히 바꾸지 않고 거절한다(429) — 폴백은 LLM 오류(응답 실패) 때만이다.
+    const release = slotHeld ? null : acquireLlmSlot();
+    if (!slotHeld && !release) throw llmBusyError();
     try {
       const text = await ollamaGenerate(cfg, buildPrompt(query), { format: 'json' });
       q = extractJson(text);
       source = 'llm';
     } catch (err) {
       q = fallbackParse(query); source = 'fallback'; q._llmError = err.message;
-    }
+    } finally { release?.(); }
   } else {
     q = fallbackParse(query); source = 'fallback';
   }

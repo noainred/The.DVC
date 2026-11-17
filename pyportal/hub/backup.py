@@ -10,15 +10,55 @@ JSON 스냅샷으로 묶는다. 점검 이력 DB(수십만 행)는 대상이 아
 
 from __future__ import annotations
 
+import os
 import re
 import threading
 import time
+from contextlib import ExitStack
 from pathlib import Path
 
 from .jsonfile import read_json, write_json
 
-NAME_RE = re.compile(r"^backup-[0-9]{8}-[0-9]{6}(-[a-z]+)?\.json$")
+# 결정(56~75 남긴 것): 이름은 backup-<YYYYMMDD>-<HHMMSS>-<밀리초 3자리>-<auto|manual>[-<순번>].json — 예전 이름(밀리초 · 순번 없음 ·
+#   backup-<날짜>-<시각>[-<사유>].json)도 그대로 읽는다(목록 · 받기 · 복원 · 삭제 · 정리). 같은 초에 만든 백업이 같은 이름으로 덮이던 것
+#   (복원 직전 자동 백업이 방금 만든 수동 백업을 덮음)을 막는다.
+NAME_RE = re.compile(r"^backup-([0-9]{8}-[0-9]{6})(?:-([0-9]{3}))?(?:-([a-z]+))?(?:-([0-9]{1,4}))?\.json$")
 MAX_KEEP = 200
+MAX_SEQ = 9999
+
+
+def _name_key(name: str):
+    """정렬 키(최신이 큼) — (날짜 · 시각, 밀리초(예전 이름은 -1), 순번(없으면 1), 이름). 문자열 정렬은 '-2' 를 순번 없는 이름보다,
+    '-10' 을 '-2' 보다 오래된 것으로 놓고 예전 이름을 같은 초의 새 이름보다 최신으로 놓아 정리(보관 수량)가 엉뚱한 파일을 지울 수 있다."""
+    m = NAME_RE.match(name)
+    if not m:
+        return ("", -2, 0, name)
+    return (m.group(1), int(m.group(2)) if m.group(2) else -1, int(m.group(4)) if m.group(4) else 1, name)
+
+
+def _write_json_new(path: Path, data) -> bool:
+    """path 가 없을 때만 만든다(있으면 False — **덮어쓰지 않는다**). 임시 파일을 다 쓴 뒤 하드 링크로 붙여 '없을 때만' 을 원자적으로 한다."""
+    if path.exists():
+        return False
+    tmp = path.with_name(path.name + f".part.{os.getpid()}")
+    write_json(tmp, data)   # 0600 · fsync
+    try:
+        try:
+            os.link(tmp, path)
+            return True
+        except FileExistsError:
+            return False
+        except OSError:
+            # 하드 링크를 못 거는 파일 시스템 — 백업 잠금 안에서 다시 확인하고 옮긴다(이 프로세스 안에서는 겹치지 않는다).
+            if path.exists():
+                return False
+            os.replace(tmp, path)
+            return True
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
 
 # 백업에 담는 파일과 그 안에서 쓰는 키. app.py 가 넘기는 files dict 와 반드시 일치해야 한다 —
 # 여기 빠진 키(과거 categories 누락)는 스냅샷에 담기지도, 복원되지도 않아 시점 복원이 불완전해진다.
@@ -58,13 +98,17 @@ def _bump_token_versions(restored, current):
 
 
 class BackupService:
-    def __init__(self, backup_dir: Path, files: dict, settings_store, load_errors=None):
+    def __init__(self, backup_dir: Path, files: dict, settings_store, load_errors=None,
+                 store_locks=None, on_restored=None):
         """files: {"shortcuts": Path, "datacenters": Path, "users": Path, "settings": Path}
-        load_errors: 47회차 #5 — () -> {파일 이름: 'corrupt'|'unreadable'} 데이터 파일을 못 읽는 동안 정리를 멈춘다."""
+        load_errors: 47회차 #5 — () -> {파일 이름: 'corrupt'|'unreadable'} 데이터 파일을 못 읽는 동안 정리를 멈춘다.
+        store_locks: 결정(31회차 E2) — () -> [저장소 잠금 …](잡는 순서대로). 복원은 이 잠금을 모두 쥔 채 파일을 쓰고 on_restored(캐시 비우기)를 부른다."""
         self._dir = Path(backup_dir)
         self._files = {key: Path(value) for key, value in files.items()}
         self._settings = settings_store
         self._load_errors = load_errors
+        self._store_locks = store_locks
+        self._on_restored = on_restored
         self._lock = threading.RLock()
         self._last_run = 0.0
         self._last_result = None
@@ -73,13 +117,14 @@ class BackupService:
 
     # ---------- 생성 ----------
 
-    def create(self, reason: str = "manual") -> dict:
+    def create(self, reason: str = "manual", *, protect=()) -> dict:
+        """protect — 이번 정리에서 지우지 않을 백업 이름(복원 중인 백업 — 결정 · 반증 G1b ③)."""
         with self._lock:
             self._dir.mkdir(parents=True, exist_ok=True)
-            stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime())
-            suffix = "auto" if reason == "auto" else "manual"
-            name = f"backup-{stamp}-{suffix}.json"
-            path = self._dir / name
+            now = time.time()
+            # 결정(56~75 남긴 것): 밀리초까지 넣고, 그래도 같은 이름이 있으면 순번(-2, -3 …) — 기존 백업을 절대 덮어쓰지 않는다.
+            base = "backup-{}-{:03d}-{}".format(time.strftime("%Y%m%d-%H%M%S", time.localtime(now)),
+                                                int((now % 1) * 1000), "auto" if reason == "auto" else "manual")
 
             payload = {
                 "meta": {
@@ -102,10 +147,16 @@ class BackupService:
                 except OSError as exc:
                     raise ValueError(f"{source.name} 을(를) 읽지 못해 백업을 만들지 않았습니다({exc.strerror or exc}) — 파일 소유자 · 권한을 확인하세요.") from exc
 
-            write_json(path, payload)
+            for seq in range(1, MAX_SEQ + 1):
+                name = base + (f"-{seq}" if seq > 1 else "") + ".json"
+                path = self._dir / name
+                if _write_json_new(path, payload):
+                    break
+            else:
+                raise ValueError("같은 시각의 백업 이름이 모두 쓰여 있어 백업을 만들지 않았습니다 — 잠시 뒤 다시 시도하세요.")
             self._last_run = time.time()
             self._last_error = None   # 39회차 R6: 어떤 백업이든 성공하면 지난 자동 백업 실패 경고를 지운다
-            kept, removed = self._prune_locked()
+            kept, removed = self._prune_locked(protect=protect)
             self._last_result = {
                 "name": name,
                 "createdAt": payload["meta"]["createdAt"],
@@ -122,8 +173,9 @@ class BackupService:
         if not self._dir.exists():
             return []
         entries = []
-        for path in sorted(self._dir.glob("backup-*.json"), reverse=True):
-            if not NAME_RE.match(path.name):
+        for path in sorted(self._dir.glob("backup-*.json"), key=lambda p: _name_key(p.name), reverse=True):
+            match = NAME_RE.match(path.name)
+            if not match:
                 continue
             try:
                 stat = path.stat()
@@ -133,7 +185,7 @@ class BackupService:
                 "name": path.name,
                 "sizeBytes": stat.st_size,
                 "modifiedTs": int(stat.st_mtime),
-                "reason": "auto" if path.name.endswith("-auto.json") else "manual",
+                "reason": "auto" if match.group(3) == "auto" else "manual",   # '-auto-2.json' 도 자동
             })
         return entries
 
@@ -170,14 +222,23 @@ class BackupService:
             return True
 
     def restore(self, name: str) -> dict:
-        """스냅샷을 설정 파일로 되돌린다. 되돌리기 직전 상태도 백업해 둔다."""
-        with self._lock:
+        """스냅샷을 설정 파일로 되돌린다. 되돌리기 직전 상태도 백업해 둔다.
+
+        결정(56~75 남긴 것 · 31회차 E2): 저장소 잠금(store_locks — 정해진 순서)을 모두 쥔 채 직전 백업 · 파일 쓰기 · 캐시 비우기까지 한다.
+        예전에는 잠금 없이 파일을 쓴 뒤 라우트가 캐시를 비워, 그 사이 다른 요청이 옛 메모리 목록으로 저장하면 복원 내용이 덮였다
+        (응답은 restored 로 성공). 이제 그 저장은 복원이 끝날 때까지 기다렸다가 복원된 파일을 다시 읽고 그 위에 쓴다.
+        """
+        with self._lock, ExitStack() as held:
+            for lock in (self._store_locks() if callable(self._store_locks) else []):
+                held.enter_context(lock)
             snapshot = self.read(name)
             if not isinstance(snapshot, dict) or not isinstance(snapshot.get("data"), dict):
                 raise ValueError("백업 파일 형식이 올바르지 않습니다.")
 
             # 복원이 잘못됐을 때 돌아올 지점을 먼저 만든다.
-            self.create(reason="manual")
+            # 반증(결정 G1b ③ — 재현): 보관 수량이 꽉 찬 상태에서 가장 오래된 백업을 복원하면 이 백업의 정리가 **지금 복원하는 백업**을 지웠다
+            #   (두 번째 복원 · 받기가 404 — 데이터 손실). 이번 정리에서는 그 백업을 빼고 지운다(보관 수량을 한 개 넘길 수 있다 — 다음 정리에서 맞춘다).
+            self.create(reason="manual", protect=(Path(str(name)).name,))
 
             restored = []
             for key in MEMBERS:
@@ -193,11 +254,13 @@ class BackupService:
                     value = _bump_token_versions(value, current)
                 write_json(target, value)
                 restored.append(key)
+            if callable(self._on_restored):
+                self._on_restored()   # 잠금을 쥔 채 캐시를 비운다 — 풀리자마자 들어오는 저장이 복원된 파일을 읽게
             return {"restored": restored, "name": Path(str(name)).name}
 
     # ---------- 보관 수량 ----------
 
-    def _prune_locked(self):
+    def _prune_locked(self, protect=()):
         # 46회차 H1(재현): 설정을 못 읽는 동안(기본 보관 14개)에는 지우지 않는다 — 관리자가 정한 보관 수량을 모른다.
         load_error = getattr(self._settings, "load_error", None)
         if (callable(load_error) and load_error()) or self.data_load_errors():
@@ -208,13 +271,16 @@ class BackupService:
         keep = max(1, min(MAX_KEEP, keep))
         entries = self.list()
         removed = 0
+        keep_names = {str(n) for n in (protect or ())}
         for entry in entries[keep:]:
+            if entry["name"] in keep_names:
+                continue   # 복원 중인 백업 — 이번에는 지우지 않는다(다음 정리에서 맞춘다)
             try:
                 (self._dir / entry["name"]).unlink()
                 removed += 1
             except OSError:
                 pass
-        return min(len(entries), keep), removed
+        return len(entries) - removed, removed
 
     def data_load_errors(self) -> dict:
         """47회차 #5: 못 읽은 데이터 파일 {이름: 상태} — 없으면 {}."""
