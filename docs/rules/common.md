@@ -350,3 +350,8 @@
   `DVC_FAKE_PING=<mkdtemp 디렉터리>` 표지를 `/proc/<pid>/environ` 에서 확인한 뒤에만 SIGKILL). cmdline(`sleep 30`)은 파일 간 공통이라 표지가 못 된다.
   남는 틈: 확인과 kill 사이(마이크로초)의 재사용은 막지 못한다(Node 에 pidfd 없음).
 
+- **가짜 ssh2 `Client` 의 exec 는 spawn · 배선 · cb 를 한 차례(같은 `setImmediate`)에서 한다**(2026-11-17 — `bmTop8bBudget` ③ 이 CI 에서만 간헐 실패한 원인):
+  `spawn` 을 먼저 하고 `cb(null, st)` 를 다음 `setImmediate` 로 미루면, 그 사이 이벤트 루프가 I/O 를 한 번 돌 때 도착한 출력이 **리스너 없는 `EventEmitter` 로 사라진다**
+  (진짜 ssh2 채널은 스트림이라 버퍼에 둔다 — 가짜만의 결함). 주 명령 출력은 `head -c` 를 지나 4KB 묶음으로 나오므로 DF 앞 출력이 4KB 를 넘는 러너(디스크 · NIC 가 많은 CI)에서
+  부하로 부모가 밀리면 첫 묶음(STAT · MEM)만 버려져 'ok 인데 CPU · 메모리 없음' 이 됐다 — 이 컨테이너는 3.7KB 라 재현되지 않았다. 재현 · 회귀는 `bmTop8bBudget` ④
+  (`BUD_STALL_MS` 로 spawn 직후 부모를 멈춘다 — 예전 하네스는 약 9KB 유실). 같은 형태의 `bmUsageLoop1` 도 고쳤다. 새 가짜 스트림은 이 형태를 따르거나 `PassThrough` 를 쓸 것.
