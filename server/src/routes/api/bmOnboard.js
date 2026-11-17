@@ -54,7 +54,8 @@ function send(res, r, okStatus = 200) {
 function unreadable503(res) {
   const e = KS.keyStoreLoadError();
   if (!e) return false;
-  res.status(503).json({ ok: false, code: 'registry-unreadable', registryUnreadable: true, reason: `SSH 키 저장소(${KS.KEY_FILE_NAME})를 읽지 못했습니다 — 손상 보존본(${KS.KEY_FILE_NAME}.corrupt.*)을 확인하세요.` });
+  // 77회차 F1: 읽기 오류(원본 그대로 · 30초마다 다시 읽음)와 손상(보존본)은 조치가 다르다 — 문구는 keyStore 의 판정 하나
+  res.status(503).json({ ok: false, code: 'registry-unreadable', registryUnreadable: true, ...(e.readError ? { readError: true } : {}), reason: KS.keyStoreUnreadableReason(e) });
   return true;
 }
 

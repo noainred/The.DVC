@@ -34,7 +34,10 @@ export function buildKeyCheck({ now = Date.now(), policyMode = '', inbox = null,
   const add = (level, code, title, detail, extra = {}) => items.push({ level, code, title, detail, ...extra });
   const storeErr = KS.keyStoreLoadError();
   if (storeErr) {
-    add('unknown', 'store-unreadable', 'SSH 키 저장소를 읽지 못함', '손상 보존본을 확인하세요 — 그동안 키로 접속하지 않습니다.');
+    // 77회차 F1: 읽기 오류는 원본을 옮기지 않는다(보존본이 없다) — 조치가 다르다
+    add('unknown', 'store-unreadable', 'SSH 키 저장소를 읽지 못함', storeErr.readError
+      ? '읽기 오류 — 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 풀립니다) — 그동안 키로 접속하지 않습니다.'
+      : '손상 보존본을 확인하세요 — 그동안 키로 접속하지 않습니다.');
     return { at: now, items, summary: summarize(items) };
   }
   const keys = KS.listKeysRaw().filter((k) => k.status === 'active');
