@@ -18,7 +18,7 @@ import { registerStateFile } from '../util/stateFiles.js';
 import { getLogsDb } from './db.js';
 import { FUTURE_CLOCK_TOLERANCE_MS } from './clockTolerance.js';   // v2.783(점검 Q3 L-B1): coverage·가용성과 같은 값 한 벌(import 0 모듈)
 import { ingestSnapRows } from '../veeam/snapDb.js';   // v2.759: 스냅샷 행은 Veeam 전용 DB 에도(카드 백업 수량을 바로 계산)
-import { loadLogSettings } from './settings.js';
+import { loadLogSettings, logSettingsUnknown } from './settings.js';
 import { demoLoginFailEvents } from '../mock/demo/users.js'; // v2.708 로그인 실패 분석 데모(mock 에서만)
 import { demoBackupEvents } from '../mock/demo/backup.js'; // v2.711 미보호 VM 데모(mock 에서만)
 
@@ -575,6 +575,9 @@ export async function pollLogsOnce({ manual = false, budgetMs: budgetOverride = 
   // v2.743(감사 WEB-04): 진행 중이면 **직전 결과(lastRun)를 돌려주지 않는다** — '지금 수집' 이 그 값을 이번 결과로 읽어
   //   '수집 완료: N건' 이라고 말했다(첫 실행 중이면 null 이라 0건). 이번 요청은 새로 수집하지 않았다는 사실을 busy 로 밝힌다.
   if (running) { _busySkips++; _busySkipAt = Date.now(); return { busy: true, runningSince }; }
+  // 92회차 F3: 설정 파일 읽기 오류 동안은 보관 기간 · 용량 · 저장 위치를 모른다 — 기본값으로 수집(기본 위치에 새 DB)하거나 정리(기본 365일 · 1,024MB 로
+  //   긴 이력 삭제)하지 않고 이번 주기를 건너뛴다(30초마다 다시 읽음 — 읽히면 다음 주기부터 예전대로 · 커서가 그동안을 따라잡는다).
+  if (logSettingsUnknown()) { lastRun = { at: Date.now(), collected: 0, skipped: true, settingsUnreadable: true }; return lastRun; }
   const s = loadLogSettings();
   // 꺼져 있으면 skipped:true(수집하지 않음) — '0건 수집' 과 다르다(화면이 구분한다).
   if (!s.enabled) { lastRun = { at: Date.now(), collected: 0, skipped: true }; return lastRun; }

@@ -15,20 +15,41 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js'; // v2.478(감사 B5/S12): 원자적 쓰기 + 손상 시 preserveCorrupt — 크래시 1회로 설정이 소실되고 다음 저장이 빈 값으로 덮어쓰는 사고 방지
+import { atomicWriteFileSync } from '../util/atomicWrite.js'; // v2.478(감사 B5/S12): 원자적 쓰기 + 손상 시 보존(92회차부터 공용 판정 util/jsonFileRead.js 가 preserveCorrupt) — 크래시 1회로 설정이 소실되고 다음 저장이 빈 값으로 덮어쓰는 사고 방지
 
 const FILE = path.join(config.configDir, 'vmperf.json');
 import { numOrNull } from '../util/numOrNull.js';
-import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
+import { makeJsonFileReader } from '../util/jsonFileRead.js'; // 92회차 F2: 읽기 오류 ≠ 손상(결정 G2 공용 판정) — 객체가 아닌 JSON 은 기본 parse(parseJsonObject)가 손상으로
 const FIELDS = ['enabled', 'retentionDays', 'vcenterIds', 'trackTotal'];
 
 // 가드레일: 보존기간은 0(무제한)~5년. UI 오입력·손상 파일이 그대로 prune 에 흘러가지 않게 한다.
 const MAX_RETENTION_DAYS = 1830;
 
+/*
+ * 92회차 F2(중간 — 재현): metrics/settings.js 와 같은 꼴 — 읽기 오류를 손상으로 보고 vmperf.json 을 옮기면 보존일이 env 기본(90일)으로
+ *   바뀌어 다음 prune 이 길게 잡아 둔 VM 성능 이력을 지웠다(복구 불가). 이제 읽기 오류면 원본을 두고 마지막으로 읽은 값으로 돌며(30초마다 다시 읽음),
+ *   한 번도 못 읽었으면 prune 을 건너뛰고(vmperfRetentionUnknown) 저장을 거절한다(vmperfSettingsRefusal · 409).
+ */
+const _reader = makeJsonFileReader(() => FILE, { tag: 'vmperf-settings' });
+let _lastGood = null;    // 마지막으로 읽은 저장값({} = 파일 없음 · 손상 보존 뒤)
+let _readError = false;
 function readFile() {
-  if (!fs.existsSync(FILE)) return {};
-  try { return parseJsonObject(fs.readFileSync(FILE, 'utf8')); } catch (e) { preserveCorrupt(FILE, e.message); return {}; }
+  const r = _reader.read();
+  if (r.kind === 'read-error') { _readError = true; return _lastGood ? { ..._lastGood } : {}; }
+  _readError = false;
+  _lastGood = r.kind === 'ok' ? r.value : {};
+  return { ..._lastGood };
 }
+/** 92회차 F2: 설정 파일을 읽지 못했고 그 전에 읽은 값도 없다 — 보존일을 모른다. */
+export function vmperfRetentionUnknown() { readFile(); return _readError && !_lastGood; }
+/** 92회차 F2: 읽기 오류 중의 저장 거절 사유(라우트 409) 또는 null. */
+export function vmperfSettingsRefusal() {
+  readFile();
+  if (!_readError) return null;
+  return { ok: false, code: 'settings-unreadable', readError: true, reason: `VM 성능 이력 설정 파일(${path.basename(FILE)})을 읽지 못해 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` };
+}
+/** 테스트 전용 — 읽기 상태를 비운다. */
+export function _resetVmperfSettingsForTest() { _reader.reset(); _lastGood = null; _readError = false; }
 
 function coerce(field, v) {
   if (field === 'enabled') return v !== false;
@@ -70,6 +91,8 @@ export function loadVmperfSettings() {
 
 /** 부분 업데이트 저장 후 유효 설정 반환. */
 export function saveVmperfSettings(partial = {}) {
+  const refused = vmperfSettingsRefusal();
+  if (refused) throw Object.assign(new Error(refused.reason), { status: 409, code: refused.code });   // 92회차 F2: 마지막 방어선(라우트가 먼저 409)
   const next = readFile();
   for (const f of FIELDS) {
     if (partial[f] === undefined) continue;
@@ -81,6 +104,7 @@ export function saveVmperfSettings(partial = {}) {
   }
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   atomicWriteFileSync(FILE, JSON.stringify(next, null, 2), { mode: 0o600 });
+  _lastGood = next; _readError = false; _reader.reset();
   return loadVmperfSettings();
 }
 
