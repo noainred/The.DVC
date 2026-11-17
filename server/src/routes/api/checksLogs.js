@@ -226,7 +226,9 @@ api.get('/tools/service-check', requirePerm('tools'), (req, res) => {
     // v2.744(감사 AUTHZ-01): admin 판정은 isAdminDetailUser — 데모 계정에는 멈춘 지점(절대 경로·소스 줄)을 주지 않는다.
     const r = getServiceCheck({ isAdmin: isAdminDetailUser(req.user) });
     if (!scopedVcenterIds(req.user, store.get())) return res.json(r);
-    res.json({ ...r, scoped: true, checks: (r.checks || []).map((c) => ({ ...c, detail: '범위 제한 계정 — 함대 수준 세부 수치는 표시하지 않습니다' })) });
+    // 130회차 결정 D-c(권장안): 문구(detail)만 비우고 `files` 배열은 그대로 실었다 — 범위 계정이 중앙 설정 파일 · 인증 정지 기록 파일의 기본 이름 · 오류 코드 · 자격 지문 수를 봤다
+    //   (비밀 · 대상 id · 경로는 없었지만 함대 수준 세부다). 범위 계정 응답에서는 뺀다(그 목록으로 하는 '기본값 확정' 은 어차피 전체 범위 관리자 전용).
+    res.json({ ...r, scoped: true, checks: (r.checks || []).map(({ files: _files, ...c }) => ({ ...c, detail: '범위 제한 계정 — 함대 수준 세부 수치는 표시하지 않습니다' })) });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
