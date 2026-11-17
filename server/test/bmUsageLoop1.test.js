@@ -327,12 +327,15 @@ class FakeClient extends EventEmitter {
       const st = new EventEmitter(); st.stderr = new EventEmitter(); st.close = () => {}; st.destroy = () => {}; st.signal = () => {};
       setImmediate(() => { cb(null, st); setImmediate(() => { st.emit('data', Buffer.from('% Unknown command\\n')); st.emit('close', 0); }); }); return;
     }
-    const ch = spawn('/bin/dash', ['-c', cmd], { env: { ...process.env, PATH: FAKE + ':' + process.env.PATH }, detached: true });
-    const st = new EventEmitter(); st.stderr = new EventEmitter();
-    ch.stdout.on('data', (d) => st.emit('data', d)); ch.stderr.on('data', (d) => st.stderr.emit('data', d));
-    ch.on('close', (code) => st.emit('close', code));
-    st.close = () => { try { process.kill(-ch.pid, 'SIGKILL'); } catch {} }; st.destroy = st.close; st.signal = () => {};
-    setImmediate(() => cb(null, st));
+    // ⚠ spawn · 배선 · cb 를 한 차례(같은 setImmediate)에서 — 사이에 이벤트 루프가 돌면 첫 출력이 리스너 없는 EventEmitter 로 버려진다(bmTop8bBudget ④ 와 같은 결함).
+    setImmediate(() => {
+      const ch = spawn('/bin/dash', ['-c', cmd], { env: { ...process.env, PATH: FAKE + ':' + process.env.PATH }, detached: true });
+      const st = new EventEmitter(); st.stderr = new EventEmitter();
+      ch.stdout.on('data', (d) => st.emit('data', d)); ch.stderr.on('data', (d) => st.stderr.emit('data', d));
+      ch.on('close', (code) => st.emit('close', code));
+      st.close = () => { try { process.kill(-ch.pid, 'SIGKILL'); } catch {} }; st.destroy = st.close; st.signal = () => {};
+      cb(null, st);
+    });
   }
   end() { setImmediate(() => this.emit('close')); }
 }
