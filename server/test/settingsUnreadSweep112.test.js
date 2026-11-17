@@ -261,16 +261,22 @@ const TABLE = {
   'usermenu/store.js': { cls: 'left', why: '내 메뉴 편집 — 못 읽은 동안 기본 메뉴로 편집 · 저장하면 내 메뉴가 바뀌지만 직전 메뉴(prev)가 남아 ‘이전 메뉴로 되돌리기’ 로 되살린다(낮음). 조회가 App 기동 경로라 표지 · 편집기 잠금은 따로 본다' },
   'runtime-settings.js': { cls: 'left', why: '데이터 소스 — 값 하나를 사용자가 명시로 고르는 선택(숨은 칸이 없다 — 기본값 폼이 덮는 꼴 아님). 못 읽은 동안 현재 소스 표시만 env 기본값(표시 문제 · 낮음)' },
   'ui-settings.js': { cls: 'left', why: '화면 표시 설정(지도 높이 등) — 못 읽은 동안 마지막으로 읽은 값을 준다(107회차). 기동 뒤 한 번도 못 읽었을 때만 기본값 · 표시 설정이라 낮음' },
-  'attach/store.js': { cls: 'left', why: '첨부 상한 설정 — 조회에 표지가 이미 있다고 107회차가 적었으나 화면 대조를 하지 못했다(낮음 — 상한 숫자 둘)' },
+  'attach/store.js': { cls: 'form', route: ['routes/api/attach.js', /\.\.\.unreadMark\(attachSettingsWriteRefusal\(\), 'settingsLoadError'\)/], screen: ['views/attach/AttachAdmin.jsx', /disabled=\{busy \|\| !cap \|\| saveLocked\}/], lose: '첨부 전체 상한(기본 상한 칸의 저장 — 123회차 대조: 읽기 오류에 ‘손상본은 옆에 보존’ 이라던 문구도)' },
   'wiki/userState.js': { cls: 'left', why: '즐겨찾기 · 조회 수 — 폼이 아니다(항목 단위 토글). 못 읽은 동안 빈 즐겨찾기로 보이는 표시 문제만' },
   'sshaccess/installed.js': { cls: 'left', why: 'SSH 키 설치 기록 — 사용자가 편집하는 폼이 아니다(작업이 쓰는 원장)' },
   // ── out: 112회차가 대조하지 않은 곳(97 · 103회차 모듈 — 등록부 · 자체 표지 · 자체 화면 처리). 대조하면 옮긴다
   ...Object.fromEntries([
-    'auth/permissions.js', 'bmstor/registry.js', 'cvp/registry.js', 'gpu/physicalRegistry.js',
-    'idrac/powerSettings.js', 'idrac/registry.js', 'idrac/scanPoller.js', 'idrac/scanRanges.js', 'net/monitor.js', 'partfault/settings.js', 'pdu/registry.js',
-    'perf/settings.js', 'sanswitch/registry.js', 'storage/registry.js', 'svcmon/store.js', 'upgrade/packageSettings.js', 'upgrade/settings.js', 'veeam/em/registry.js', 'veeam/registry.js',
+    'bmstor/registry.js', 'cvp/registry.js', 'gpu/physicalRegistry.js',
+    'idrac/powerSettings.js', 'idrac/scanPoller.js', 'idrac/scanRanges.js', 'net/monitor.js', 'partfault/settings.js', 'pdu/registry.js',
+    'perf/settings.js', 'sanswitch/registry.js', 'upgrade/packageSettings.js', 'veeam/em/registry.js', 'veeam/registry.js',
     'util/registryCore.js',
   ].map((f) => [f, { cls: 'out', why: '97 · 103회차의 등록부 · 설정(자체 loadError · registryLoadError 흐름) — 112회차는 화면까지 대조하지 않았다' }])),
+  // ── 123회차(반증): 'out' 가운데 위험한 다섯을 화면까지 대조해 옮겼다(확정 2 → form · 기각 3 → left).
+  'upgrade/settings.js': { cls: 'form', route: ['routes/upgrade.js', /\.\.\.unreadMark\(upgradeSettingsWriteRefusal\(\)\)/], screen: ['views/Upgrade.jsx', /disabled=\{busy \|\| saveLocked\} onClick=\{saveSettings\}/], lose: '원격 소스 주소 · 자동 적용 · 감시 폴더(env 기본값 폼의 저장) + 주소가 바뀌어 저장된 토큰 폐기 — 매니저도 기동 때 읽기 오류면 다시 읽힌 뒤까지 env 기본값으로 돌았다(123회차 U1)' },
+  'auth/permissions.js': { cls: 'form', route: ['routes/admin/users.js', /const r = permissionsWriteRefusal\(\); return r \? \{ loadError: \{ code: r\.body\.code, reason: r\.body\.reason \} \} : \{\};/], screen: ['views/UserAdmin.jsx', /disabled=\{!permDirty \|\| permLocked\} onClick=\{savePerms\}/], lose: '역할별 권한 행 · 도구 거부 목록(재시작 뒤 열려 있던 화면의 최소 권한 행 저장 — 123회차 P1 · 표지는 20회차 것이라 readError 가 없다: 화면이 손상도 잠근다)' },
+  'svcmon/store.js': { cls: 'left', why: '123회차 대조 — 감시 대상은 항목 단위 쓰기(대상 · 점검 · 폴더 · 순서)이고 엣지 배정은 서버가 지금 목록에서 잘라 굳힌다(화면 값으로 전체를 바꾸는 저장이 없다 — routes/svcmon 쓰기 라우트 전수). 못 읽은 동안 빈 목록이 보이는 표시 문제만(조회 표지는 대조하지 않았다)' },
+  'storage/registry.js': { cls: 'left', why: '123회차 대조 — 장비 등록부는 항목 단위 쓰기(등록 · 삭제 · CSV 가져오기)라 기본값 폼이 덮는 꼴이 아니다. 못 읽은 동안에는 고칠 행이 없고 쓰기는 409(78회차). 빈 목록 안내는 등록부 표지(registryLoadError) 흐름' },
+  'idrac/registry.js': { cls: 'left', why: '123회차 대조 — iDRAC 등록부도 항목 단위 쓰기(등록 · 수정 · 삭제 · 일괄 등록 · CSV)라 기본값 폼이 덮는 꼴이 아니다. 화면은 등록부 표지(loadError.readError)를 이미 본다(96회차 R2)' },
   // 118회차가 읽기 단계를 가른 vCenter 등록부 · 표시 순서(조회 표지 + VCenterAdmin 배너 · 쓰기 버튼 잠금 — 메인이 등재).
   'vcenter/registry.js': { cls: 'form', route: ['routes/admin/vcenters.js', /vcenters: all\.map\(withStop\), \.\.\.registryMark\(\) \}/], screen: ['views/VCenterAdmin.jsx', /const locked = saveLockedByUnread\(unread\);/], lose: '전 vCenter 접속 계정(읽기 오류 한 번에 원본이 옮겨지고 다음 등록이 한 건짜리 파일을 썼다 — 118회차 F1)' },
   'vcenter/order.js': { cls: 'form', route: ['routes/admin/vcenters.js', /unreadMark\(orderWriteRefusal\(\) \|\| registryWriteRefusal\(\)\)/], screen: ['views/VCenterAdmin.jsx', /setLoadErr\(r\?\.loadError\?\.readError === true \?/], lose: 'vCenter 표시 순서(118회차 F4)' },

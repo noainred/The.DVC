@@ -1,9 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson } from '../api.js';
 import { Loading, ErrorBox, StateBadge } from '../components/ui.jsx';
 import { pollMinutesOf, pollIsOff, pollIntervalPatch } from './settingsFormDiff.js'; // v2.630 WEB2630-01
 import { policyText, trustText, lastVerifyText, recentVerifyList, logIssueText, countsText, remoteLastGoodText, watchManifestWarn, overrideView, OVERRIDE_HOURS, overrideHoursLabel, TONE_COLOR } from './upgradeSignatureText.js'; // v2.730 S-10 · v2.736.1 기록
 import { droppedSecretNote } from './droppedSecretText.js'; // v2.731(A3-01 ①): 주소가 바뀌어 저장 토큰을 폐기한 사실
+import { unreadMarkOf, unreadKind, saveLockedByUnread, shouldReseed } from './settingsUnread.js';   // 123회차: 못 읽은 동안의 값(env 기본값)으로 채운 폼으로 저장하지 않는다
+import { SettingsUnreadBanner } from './SettingsUnreadBanner.jsx';
 // v2.736.2: 자동 업그레이드가 지금 동작하는가 · 왜 안 하는가 · 다음 확인은 언제인가(판정은 서버 autoState.js, 문장은 여기).
 import { autoSummary, autoApplyRowText, noTickText, resultSummary, actionMsg, restoredNote, triggerText, remoteSourceLabel, runningScanWarning } from './upgradeAutoText.js';
 import { readFailText } from './readFailText.js'; // v2.741(WEB-04): 재조회 실패는 화면을 지우지 않고 한 줄로 말한다
@@ -248,12 +250,16 @@ export default function Upgrade() {
   const [detect, setDetect] = useState(null);
   const [pollInit, setPollInit] = useState(null); // 처음 채운 확인 주기(분) — 바뀌었을 때만 보낸다
 
+  // 123회차(112회차 분류표 'out' 대조 — 재현): 서버가 upgrade.json 을 읽지 못한 동안 status 의 설정은 마지막으로 읽은 값(기동 뒤 한 번도 못 읽었으면 env 기본값)이다 —
+  //   예전에는 처음 받은 값을 끝까지 폼에 들고 있어, 다시 읽힌 뒤 ‘설정 저장’ 이 원격 소스 주소 · 자동 적용을 그 값으로 덮고 저장된 토큰을 폐기했다.
+  //   폼을 채운 조회의 상태(seedKind)를 기억해 두고, 못 읽은 값으로 채운 폼은 상태가 바뀐 조회의 값으로 다시 채운다(읽은 값 위의 편집은 그대로). 읽기 오류 동안은 저장을 잠근다.
+  const seedKind = useRef(null);   // null = 아직 폼을 채우지 않음
   const load = async () => {
     try {
       const s = await fetchJson('/upgrade/status');
       setStatus(s);
-      setForm((f) => f || blankForm(s));
-      setPollInit((p) => (p == null ? pollMinutesOf(s.pollIntervalMs) : p));
+      const le = unreadMarkOf(s);
+      if (seedKind.current === null || shouldReseed(seedKind.current, le)) { seedKind.current = unreadKind(le); setForm(blankForm(s)); setPollInit(pollMinutesOf(s.pollIntervalMs)); }
       setError(null);
     } catch (e) { setError(e); } // 객체 그대로 — 403 은 권한 안내로(ErrorBox·readFailText 가 같은 정규화를 쓴다)
   };
@@ -279,6 +285,7 @@ export default function Upgrade() {
   };
 
   const saveSettings = async () => {
+    if (saveLockedByUnread(unreadMarkOf(status))) return;   // 123회차: 읽기 오류 동안 저장 잠금(서버도 409)
     setBusy('save'); setMsg(null);
     try {
       const body = {
@@ -313,6 +320,8 @@ export default function Upgrade() {
   const setF = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const setChk = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.checked }));
 
+  const unread = unreadMarkOf(status);
+  const saveLocked = saveLockedByUnread(unread);
   const check = status.lastCheck;
   // v2.731(A3-01 ①): 저장 토큰이 있는데 주소를 바꿨고 새 토큰을 넣지 않았다 → 저장하면 서버가 그 토큰을 폐기한다(미리 말한다).
   const tokenWillDrop = !!status.hasToken && !form.token && baseKey(form.remoteBase) !== baseKey(status.remoteBase);
@@ -327,6 +336,7 @@ export default function Upgrade() {
     <>
       <div className="section-title">시스템 자동 업그레이드 (관리자)</div>
       {reload.banner && <div className="card" data-reload-fail="" style={{ marginBottom: 10, padding: '8px 12px', color: 'var(--amber)', fontSize: 12, whiteSpace: 'normal' }}>{reload.banner}</div>}
+      <SettingsUnreadBanner le={unread} what="업그레이드 설정" save="설정 저장" lastGood onRecheck={load} busy={!!busy} />
 
       {/* v2.808: 자동 적용 체크와 저장·확인·적용·재시작 버튼을 화면 맨 위로 — 설정 카드 끝까지 한참 내려가야 했다(사용자 요청).
           '설정 저장' 은 아래 '업그레이드 설정' 카드의 값도 함께 저장한다(폼은 하나). */}
@@ -345,7 +355,7 @@ export default function Upgrade() {
 
         {/* v2.580: 버튼 4개가 한 줄에 고정돼 400px 에서 83px 가로 넘침(Chromium A/B 실측 — 기존 결함). 줄바꿈 허용. */}
         <div className="flex gap" style={{ marginTop: 14, flexWrap: 'wrap' }}>
-          <button className="login-btn" style={{ flex: 'none', padding: '10px 18px' }} disabled={busy} onClick={saveSettings}>
+          <button className="login-btn" style={{ flex: 'none', padding: '10px 18px' }} disabled={busy || saveLocked} onClick={saveSettings}>
             {busy === 'save' ? '저장 중…' : '설정 저장'}
           </button>
           {/* v2.736.2(리뷰 UPG-UI-05): 잠금은 **저장된** 설정 기준이다 — 서버는 저장값으로 판정한다(체크만 하고 누르면 409). */}

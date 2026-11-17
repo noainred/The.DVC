@@ -9,6 +9,15 @@
  *   손상(보존본으로 옮김 — readError 아님)은 예전대로 저장이 해제 길이다(잠그지 않는다 — 지금 값이 기본값이라는 사실만 말한다).
  */
 const txt = (v) => (typeof v === 'string' && v.trim() ? v.trim() : '');
+/**
+ * 123회차: 목적격 조사 — 마지막 한글 글자에 받침이 있으면 ‘을’, 없으면 ‘를’(‘저장’ 을 · ‘지금 정리’ 를). 한글로 끝나지 않으면 ‘을’.
+ *   버튼 이름이 화면마다 달라(‘저장 · 지금 정리’) 한 가지로 박아 두면 틀린다.
+ */
+export function objectParticle(word) {
+  const t = txt(word);
+  const c = t ? t.charCodeAt(t.length - 1) : 0;
+  return c >= 0xac00 && c <= 0xd7a3 && (c - 0xac00) % 28 === 0 ? '를' : '을';
+}
 
 /** 조회 응답에서 표지를 꺼낸다(없으면 null). 서버마다 이름이 둘이다 — `loadError`(대부분) · `settingsLoadError`(통신 점검 · 디스크 점검). */
 export function unreadMarkOf(d) {
@@ -49,14 +58,15 @@ export function shouldReseed(seedKind, le) {
 export function settingsUnreadNote(le, { what = '설정', save = '저장', corruptLocks = false, formHidden = false, lastGood = false } = {}) {
   const k = unreadKind(le);
   if (!k) return '';
+  const obj = objectParticle(save);   // 123회차: ‘저장 · 지금 정리’ 을 → 를
   const code = txt(le.code) && /^[A-Za-z0-9_-]{1,32}$/.test(le.code.trim()) ? `(${le.code.trim()})` : '';
   const why = txt(le.reason) || `설정 파일을 읽지 못했습니다${code}`;
   if (k === 'read' && formHidden) return `${what} — ${why} — 저장된 값을 읽지 못해 편집 칸을 열지 않습니다(빈 값으로 저장하면 저장된 설정이 지워집니다). 읽히면 저장된 값으로 엽니다.`;
-  if (k === 'read' && lastGood) return `${what} — ${why} — 지금 보이는 값은 마지막으로 읽은 값(기동 뒤 한 번도 읽지 못했으면 기본값)이라 저장된 설정과 다를 수 있습니다. 다시 읽힐 때까지 ‘${save}’ 을 잠급니다.`;
-  if (k === 'read') return `${what} — ${why} — 지금 보이는 값은 저장된 설정이 아니라 기본값(빈 값)입니다. 다시 읽힐 때까지 ‘${save}’ 을 잠급니다(읽히면 저장된 값으로 다시 채웁니다).`;
+  if (k === 'read' && lastGood) return `${what} — ${why} — 지금 보이는 값은 마지막으로 읽은 값(기동 뒤 한 번도 읽지 못했으면 기본값)이라 저장된 설정과 다를 수 있습니다. 다시 읽힐 때까지 ‘${save}’ ${obj} 잠급니다.`;
+  if (k === 'read') return `${what} — ${why} — 지금 보이는 값은 저장된 설정이 아니라 기본값(빈 값)입니다. 다시 읽힐 때까지 ‘${save}’ ${obj} 잠급니다(읽히면 저장된 값으로 다시 채웁니다).`;
   return corruptLocks
-    ? `${what} — ${why} — 지금 보이는 값은 저장된 설정이 아니라 기본값입니다. 풀릴 때까지 ‘${save}’ 을 잠급니다(서비스 점검에서 확정하거나 보존본을 되돌리세요).`
-    : `${what} — ${why} — 지금 보이는 값은 기본값입니다. ‘${save}’ 을 누르면 이 화면의 값이 새 설정이 됩니다(손상 보존본은 그대로 남습니다).`;
+    ? `${what} — ${why} — 지금 보이는 값은 저장된 설정이 아니라 기본값입니다. 풀릴 때까지 ‘${save}’ ${obj} 잠급니다(서비스 점검에서 확정하거나 보존본을 되돌리세요).`
+    : `${what} — ${why} — 지금 보이는 값은 기본값입니다. ‘${save}’ ${obj} 누르면 이 화면의 값이 새 설정이 됩니다(손상 보존본은 그대로 남습니다).`;
 }
 
 /**
