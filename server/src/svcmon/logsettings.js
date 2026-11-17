@@ -149,10 +149,14 @@ function normalize(v) {
 
 /** 로그 디렉터리 절대경로(없으면 생성). 절대 경로 설정이 있으면 그것을 우선한다. */
 export function logDir() {
-  const cfg = getLogSettings();
-  const dir = cfg.dirPath || path.join(config.configDir, cfg.dirName);
+  const dir = logDirPath();
   fs.mkdirSync(dir, { recursive: true });
   return dir;
+}
+/** 62회차: 로그 디렉터리 경로만(만들지 않는다) — 만들 수 없을 때(부모 권한 · 경로 중간이 파일) 현황 화면이 경로를 보여 주며 '못 읽음' 으로 열리게. */
+export function logDirPath() {
+  const cfg = getLogSettings();
+  return cfg.dirPath || path.join(config.configDir, cfg.dirName);
 }
 
 export function _resetLogSettingsCache() { cache = null; _loadErr.ok(); }

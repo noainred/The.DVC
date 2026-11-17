@@ -19,7 +19,7 @@ import { guardCell } from '../util/csv.js';
 import { portalParts } from '../util/dayKey.js';
 import fs from 'node:fs';
 import path from 'node:path';
-import { getLogSettings, logDir, ROTATE_UNITS, ROTATE_LABEL, logSettingsLoadError, LOG_LIMITS } from './logsettings.js';
+import { getLogSettings, logDir, logDirPath, ROTATE_UNITS, ROTATE_LABEL, logSettingsLoadError, LOG_LIMITS } from './logsettings.js';
 
 const HEADER = ['시각', '경로', '대상', '호스트', '점검명', '유형', '상태', '응답', 'ms', '연속횟수'];
 const BOM = '﻿';
@@ -261,10 +261,13 @@ export function closeCsvLogAsync(timeoutMs = 3000) {
 /** 설정 화면용 현황. */
 export function logStatus() {
   const cfg = getLogSettings();
-  const dir = logDir();
   let files = [];
   let filesUnreadable = false;
-  try {
+  // 62회차(61회차 F2 의 형제 — 재현): 로그 디렉터리를 만들 수 없으면(부모 권한 · 떨어진 마운트 · 경로 중간이 파일) logDir() 이 던져 GET /svcmon/log 가 500 이었고,
+  //   설정 화면 두 곳이 오류 상자만 그려 그 경로를 고칠 화면이 열리지 않았다 — 경로는 보이고 목록은 '못 읽음'.
+  let dir;
+  try { dir = logDir(); } catch { dir = logDirPath(); filesUnreadable = true; }
+  if (!filesUnreadable) try {
     files = fs.readdirSync(dir).filter((f) => /^results-.*\.csv$/.test(f)).sort().reverse()
       // 61회차 F2(재현): 한 파일의 stat 실패(끊긴 링크 · 권한)가 목록 전체를 비워 화면이 '파일 0개 · 0 B' 라고 했다 — 정리(pruneOld) ·
       //   보유 범위(listLogWindows)처럼 그 파일만 뺀다.

@@ -33,7 +33,7 @@ export function subnetKey(v) {
  * 전체 점검 60회차 F2(재현 — 25회차 F-4 메모 · 예약 파일의 형제): 손상되면 표지 없이 빈 맵이 되고, 다음 저장 한 번이 그 대역 하나만 든 파일을 만들었다
  *   (나머지 대역 용도는 손상 보존본에만 — 서비스 점검에도 없었다). 이제 로드 오류를 세우고 오류 중 저장은 거절한다(라우트 409). 해제는 확정 · 보존본 복구.
  */
-const _loadErr = makeSettingsLoadError(() => FILE, { label: 'IP 관리 대역 용도 · 설명', confirm: () => { atomicWriteFileSync(FILE, JSON.stringify({ ...load() }, null, 2), { mode: 0o600 }); _loadErr.ok(); } });
+const _loadErr = makeSettingsLoadError(() => FILE, { label: 'IP 관리 대역 용도 · 설명 — 확정하면 모든 대역의 용도 · 설명이 비워집니다', confirm: () => { atomicWriteFileSync(FILE, JSON.stringify({ ...load() }, null, 2), { mode: 0o600 }); _loadErr.ok(); } });
 /** 대역 용도 파일을 못 읽었으면 { at, reason }, 아니면 null. */
 export function subnetNotesLoadError() { load(); return _loadErr.get(); }
 
@@ -43,7 +43,13 @@ function load() {
   try {
     if (fs.existsSync(FILE)) { cache = parseJsonObject(fs.readFileSync(FILE, 'utf8')); _loadErr.ok(); }
     else _loadErr.missing();
-  } catch (e) { _loadErr.corrupt(e); preserveCorrupt(FILE, e.message); cache = {}; }
+  } catch (e) {
+    // 62회차(재현 — EISDIR): 읽기 오류(EACCES · EISDIR)는 원본을 옮기지 않는다 · 확정 불가(20회차 반증 F4 규약)
+    if (e?.code === 'ENOENT') _loadErr.missing();
+    else if (e?.code) _loadErr.readError(e);
+    else { _loadErr.corrupt(e); preserveCorrupt(FILE, e.message); }
+    cache = {};
+  }
   if (!cache || typeof cache !== 'object' || Array.isArray(cache)) cache = {};
   return cache;
 }

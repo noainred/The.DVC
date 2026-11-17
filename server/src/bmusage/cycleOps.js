@@ -16,8 +16,8 @@ import { diffChangeFacts, healthSince, firmwareFactsOf, cvpFactsOf } from './cha
 /** 인증서 원천(svcmon) — 한 바퀴에 한 번. 못 읽으면 null(그 칸은 ‘못 읽음’). */
 export async function certSource() {
   try {
-    const [{ listTargets }, { getResults }, { certDaysOf }] = await Promise.all([import('../svcmon/store.js'), import('../svcmon/poller.js'), import('../svcmon/dash.js')]);
-    return { targets: listTargets(), results: getResults(), certDaysOf };
+    const [{ listTargets }, { getResults }, { certDaysOf }, { testState }] = await Promise.all([import('../svcmon/store.js'), import('../svcmon/poller.js'), import('../svcmon/dash.js'), import('../svcmon/status.js')]);
+    return { targets: listTargets(), results: getResults(), certDaysOf, testState };   // 62회차: 낡은 · 꺼진 점검의 옛 D-n 을 지금 값으로 쓰지 않게(판정 코어 testState)
   } catch { return null; }
 }
 
@@ -50,7 +50,7 @@ export async function prepareCycleOps(okResults = [], { agent = '', rules = {}, 
     const detail = parseJsonCol(row.detail_json);
     if (detail && detail.osKind === 'linux' && detail.hfacts) {
       const tuning = parseJsonCol(row.tuning_json);
-      const c = cert ? certForServer(tg, cert) : { error: true };
+      const c = cert ? certForServer(tg, cert, now) : { error: true };
       // needs-restarting 은 하루 몇 번 · 바뀔 때만 실행한다(반증 L1 — parse/linuxHealth.js) — 건너뛴 주기는 직전에 읽은 값을 이어 쓴다(지어내지 않는다: 직전 값이 없으면 확인 불가).
       if (detail.hfacts.needsRestart == null && detail.hfacts.nrSkipped && typeof prev?.needsRestart === 'boolean') detail.hfacts = { ...detail.hfacts, needsRestart: prev.needsRestart, nrCarried: true };
       const h = judgeHealth({ hfacts: detail.hfacts, tuning, row, cert: c, th: rules.health, now });

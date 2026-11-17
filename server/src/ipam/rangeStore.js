@@ -24,7 +24,7 @@ let cacheMtime = -1;
  *   오류 중 저장 · 삭제는 거절한다(code 'settings-unreadable' — 라우트 409). 해제는 보존본을 되돌리거나(mtime 이 바뀌면 다시 읽는다) 서비스 점검 확정.
  *   객체가 아닌 JSON · vcenters 가 객체가 아닌 값도 손상이다(예전에는 `{"vcenters":null}` 이 그대로 캐시가 되어 저장이 TypeError 로 죽었다).
  */
-const _loadErr = makeSettingsLoadError(() => FILE, { label: 'IP 스캔 — vCenter 별 대역(에이전트로 옮기지 못한 것)', confirm: () => write({ vcenters: {} }) });
+const _loadErr = makeSettingsLoadError(() => FILE, { label: 'IP 스캔 — vCenter 별 대역(에이전트로 옮기지 못한 것) — 확정하면 남은 vCenter 별 대역이 모두 비워집니다(그 대역은 스캔하지 않음)', confirm: () => write({ vcenters: {} }) });
 /** vCenter 별 대역 파일을 못 읽었으면 { at, reason }, 아니면 null. */
 export function vcRangesLoadError() { read(); return _loadErr.get(); }
 const VC_RANGES_REFUSAL = { ok: false, code: 'settings-unreadable', reason: 'vCenter 별 스캔 대역 파일(ipam-vcenter-ranges.json)을 읽지 못한 상태라 저장하지 않았습니다 — 지금 저장하면 그 vCenter 만 든 파일이 됩니다. 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리세요.' };
@@ -41,7 +41,14 @@ function read() {
       const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));
       if (!isObj(j) || !isObj(j.vcenters)) throw new Error('형식 오류 — vcenters 객체가 없습니다');
       cache = j; _loadErr.ok();
-    } catch (e) { _loadErr.corrupt(e); preserveCorrupt(FILE, e.message); cache = { vcenters: {} }; }
+    } catch (e) {
+      // 62회차(재현 — EISDIR): 읽기 오류(EACCES · EISDIR)는 손상이 아니다 — 원본을 옮기지 않고 확정할 수 없게(20회차 반증 F4 규약 · svcmon logsettings 와 같다).
+      //   예전에는 권한만 틀린 원본을 보존본으로 치우고 '확정(빈 맵)' 을 열었다.
+      if (e?.code === 'ENOENT') _loadErr.missing();
+      else if (e?.code) _loadErr.readError(e);
+      else { _loadErr.corrupt(e); preserveCorrupt(FILE, e.message); }
+      cache = { vcenters: {} };
+    }
   }
   cacheMtime = mtime;
   return cache;

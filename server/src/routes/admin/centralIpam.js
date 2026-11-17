@@ -621,6 +621,9 @@ adminRouter.post('/ipam/vc-ranges/import', csvPerm, adminOnly, (req, res) => {
   //   manage CSV 의 해석기는 이미 모호하면 null 이었다 — 두 규칙을 하나로).
   const rv = makeVcResolver(vcs);
   const resolveVc = (v) => { const r = rv(v); return r.id && vcRangeWritable(req.user, r.id) ? r.id : null; };
+  // 60회차 F1: 파일을 못 읽은 동안은 적용하지 않는다(행마다 같은 거절이 '실패' 로 쌓이지 않게 — 한 번에 409)
+  // 62회차: 미리보기(dryRun)도 — 빈 맵을 기준으로 있는 항목을 전부 '추가' 로 보고했다(덮어쓰기 판정이 사라진 미리보기)
+  { const le = vcRangesLoadError(); if (le) return res.status(409).json({ ok: false, code: 'settings-unreadable', reason: 'vCenter 별 스캔 대역 파일(ipam-vcenter-ranges.json)을 읽지 못한 상태라 가져오지 않았습니다 — 서비스 점검에서 확정하거나 손상 보존본을 되돌리세요.' }); }
   const existing = new Set(listVcRanges().map((e) => e.vcenterId));
   const { report, summary } = analyzeVcRangesImport(rows, { resolveVc, hasExisting: (id) => existing.has(id) });
   if (req.body?.dryRun) {
@@ -628,8 +631,6 @@ adminRouter.post('/ipam/vc-ranges/import', csvPerm, adminOnly, (req, res) => {
     return res.json({ ok: true, dryRun: true, report, summary, total: rows.length });
   }
 
-  // 60회차 F1: 파일을 못 읽은 동안은 적용하지 않는다(행마다 같은 거절이 '실패' 로 쌓이지 않게 — 한 번에 409)
-  { const le = vcRangesLoadError(); if (le) return res.status(409).json({ ok: false, code: 'settings-unreadable', reason: 'vCenter 별 스캔 대역 파일(ipam-vcenter-ranges.json)을 읽지 못한 상태라 가져오지 않았습니다 — 서비스 점검에서 확정하거나 손상 보존본을 되돌리세요.' }); }
   const allowOverwrite = req.body?.overwrite === true;
   let added = 0, overwritten = 0, outOfScope = 0; const failed = []; const skipped = [];
   const verdictByLine = new Map(report.map((r) => [r.line, r]));
