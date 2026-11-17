@@ -21,6 +21,7 @@ import { previewConfig, testDeploy, deployToProxy } from '../proxy/deploy.js';
 import { provision, deprovision, markDeployed } from '../proxy/provision.js';
 import { withSsh } from '../proxy/sshExec.js';
 import { issueRdpTicket, rdpCredsIssue } from '../proxy/rdpTicket.js';
+import { issueWsTicket } from '../proxy/wsTicket.js';   // 132회차: WS 주소에 세션 토큰 대신 1회용 티켓
 import { ssrfBlockReasonResolved, ipBlockReason } from '../collector/registry.js';
 
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
@@ -43,7 +44,24 @@ remoteRouter.post('/rdp-ticket', requirePerm('remote.access'), (req, res) => {
   const bad = rdpCredsIssue(creds); // v2.632 AX3-03: 필드 길이 상한(자르지 않고 거부)
   if (bad) return res.status(400).json({ ok: false, reason: bad });
   const ticket = issueRdpTicket(creds, { owner: req.user?.username || '' });
-  res.json({ ok: true, ticket });
+  // 132회차: 같은 응답에 WS 티켓도 싣는다 — RDP 연결 쿼리의 `token=` 을 `wst=` 로 바꾼다(요청 한 번으로 끝난다).
+  res.json({ ok: true, ticket, wst: issueWsTicketFor(req) });
+});
+
+/**
+ * 원격 콘솔 WS 용 1회용 티켓(전체 점검 132회차 — proxy/wsTicket.js). 브라우저는 WebSocket 에 Authorization 머리말을 실을 수 없어
+ * 예전에는 세션 토큰을 주소 쿼리에 실었다(상위 프록시 액세스 로그 · 브라우저 기록에 남는다). 이제 **이 요청이 머리말로 실어 보낸 토큰**을
+ * 티켓에 묶고 주소에는 티켓 ID 만 싣는다. 게이트는 rdp-ticket 과 같다(마운트의 authMiddleware · requireEnrolled + remote.access) —
+ * 게이트웨이는 upgrade 에서 그 토큰으로 예전과 같은 판정을 다시 한다(티켓은 권한을 보관하지 않는다).
+ * 응답 · 감사 · 로그에 토큰을 싣지 않는다. 인증이 꺼진 포탈은 토큰 없이 발급한다(게이트웨이가 익명 역할로 판정).
+ */
+function issueWsTicketFor(req) {
+  const header = typeof req.headers?.authorization === 'string' ? req.headers.authorization : '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : null;   // authMiddleware 가 방금 검증한 그 토큰
+  return issueWsTicket({ token, owner: req.user?.username || '' });
+}
+remoteRouter.post('/ws-ticket', requirePerm('remote.access'), (req, res) => {
+  res.json({ ok: true, wst: issueWsTicketFor(req) });
 });
 
 // Connection info for a mapping resolves through the mapping's assigned proxy.

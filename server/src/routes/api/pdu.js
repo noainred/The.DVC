@@ -24,7 +24,8 @@ import { collectDeviceNow, testDeviceConnection, pollOnce, pduPollerStatus, loca
 import { edgePduSnapshots, edgePduStatus } from '../../central/pduEdge.js';
 import { requestCollect, hasPendingRequest, recentCollectDrops } from '../../pdu/collectRequests.js';
 import { INTERVAL_SPEC, saveIntervals, runtimeIntervals, intervalsForEdge, pduIntervalsLoadError } from '../../pdu/intervals.js';
-import { THRESHOLD_SPEC, loadThresholds, saveThresholds, evaluateSnapshot, activeViolations, pduThresholdsLoadError } from '../../pdu/thresholds.js';
+import { THRESHOLD_SPEC, loadThresholds, saveThresholds, evaluateSnapshot, activeViolations, pduThresholdsLoadError, pduThresholdsWriteRefusal } from '../../pdu/thresholds.js';
+import { unreadMark } from '../settingsUnreadMark.js';   // 133회차: 임계치 파일 읽기 오류 표지(112회차 규약 — 화면이 기본값으로 채운 창의 저장을 잠근다)
 import { powerSeries, envSeries, dbStats } from '../../pdu/db.js';
 import { devicesToCsv, csvToDevices, sampleCsv } from '../../pdu/csv.js';
 import { fillBlankFromSaved } from '../../util/bulkImport.js';
@@ -117,6 +118,7 @@ export function registerPdu(api) {
     // v2.599(AUTHZ-2599-03): 비-admin 에는 관리 IP·계정명을 가리고 밝힌다(v2.593 relaytopo 와 같은 기준).
     const admin = isAdminReq(req);
     const loadErrors = pduLoadErrors();
+    const thUnread = unreadMark(pduThresholdsWriteRefusal()).loadError;
     res.json({
       ok: true,
       ...(pduDemoActive(listDevices()) ? { demo: true } : {}),
@@ -134,6 +136,8 @@ export function registerPdu(api) {
       intervalsForEdge: intervalsForEdge(),
       intervalSpec: INTERVAL_SPEC,
       thresholds: th,
+      // 133회차: 임계치 파일을 읽기 오류로 못 읽은 동안의 thresholds 는 기본값이다 — 임계치 창은 늘 전 키를 저장하므로 화면이 그 창의 저장을 잠근다(다시 읽힌 뒤에도).
+      ...(thUnread ? { thresholdsLoadError: thUnread } : {}),
       thresholdSpec: THRESHOLD_SPEC,
       activeViolations: activeViolations(),
     });

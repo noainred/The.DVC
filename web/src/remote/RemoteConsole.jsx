@@ -3,9 +3,10 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import Guacamole from 'guacamole-common-js';
 import '@xterm/xterm/css/xterm.css';
-import { getToken, postJson } from '../api.js';
+import { postJson } from '../api.js';
 import { sshDataFrames, sshCloseReasonText, remoteCloseReasonText } from './sshSend.js';
 import { onTokenRenewed, tokenAckText } from './tokenRenew.js';
+import { WS_TICKET_PARAM, requestWsTicket, wsTicketOf, sshWsUrl, rdpWsUrl, wsTicketFailText } from './wsTicket.js'; // 132회차: WS 주소에 세션 토큰을 싣지 않는다
 import { isSshAuthFailText, canConnect, retryAction, RETRY_NEEDS_PASSWORD, holdsPhaseOnClose, releaseConsole } from './sshConsoleState.js'; // v2.732 B5-07
 
 const SPIN = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -60,15 +61,26 @@ export function SshConsole({ mapping, initialCreds, onCreds, onHostname }) {
     setPhase('connecting'); setStatus('프록시에 WebSocket 연결 중…'); setTicks(0);
     stopTimer(); const t0 = Date.now();
     timerRef.current = setInterval(() => setTicks(Math.floor((Date.now() - t0) / 200)), 200);
-    setTimeout(() => {
+    setTimeout(async () => {
       if (attempt !== attemptRef.current || !elRef.current) return; // 그사이 새 시도가 시작됐거나 창이 닫혔다
       const term = new Terminal({ fontSize: 13, cursorBlink: true, theme: { background: '#0b1020' } });
       const fit = new FitAddon(); term.loadAddon(fit);
       term.open(elRef.current); fit.fit(); term.focus(); termRef.current = term; fitRef.current = fit;
       try { roRef.current = new ResizeObserver(() => refit()); roRef.current.observe(elRef.current); } catch { /* */ }
       term.write('\x1b[90m연결을 준비하는 중입니다…\x1b[0m\r\n');
-      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      const ws = new WebSocket(`${proto}://${location.host}/api/remote/ssh?token=${encodeURIComponent(getToken() || '')}`);
+      // 132회차: 세션 토큰을 WS 주소에 싣지 않는다(상위 프록시 액세스 로그 · 브라우저 기록에 남는다) — 접속(재시도 · 복제 포함)마다
+      //   1회용 티켓을 새로 받아 주소에는 그 ID 만 싣는다. 못 받으면 접속하지 않고 사유를 보인다(토큰을 싣는 폴백은 없다).
+      let wst = '';
+      try { wst = await requestWsTicket(postJson); }
+      catch (e) {
+        if (attempt !== attemptRef.current) return;
+        const why = wsTicketFailText(e);
+        term.write(`\r\n\x1b[31m${why}\x1b[0m\r\n`);
+        setPhase('error'); setStatus(why); stopTimer();
+        return;
+      }
+      if (attempt !== attemptRef.current || !elRef.current) return; // 티켓을 기다리는 사이 새 시도가 시작됐거나 창이 닫혔다
+      const ws = new WebSocket(sshWsUrl(location, wst));
       wsRef.current = ws;
       // 고RTT/반열림 연결에서 브라우저가 무한 '연결 중'으로 멈추는 것 방지 — 일정 시간 내
       // 라이브 전환이 없으면 명확한 타임아웃 오류로 종료(SSH 협상+프록시 지연 고려해 45s 기본).
@@ -207,14 +219,16 @@ export function RdpConsole({ mapping, active, initialCreds, onCreds }) {
     // 쿼리엔 티켓 ID만 싣는다. 게이트웨이가 티켓으로만 자격증명을 조회하므로(쿼리 폴백 제거),
     // 티켓 발급이 실패하면 **접속을 중단**한다 — 쿼리에 비번을 싣던 폴백은 상위 프록시 로그·
     // 브라우저 히스토리에 자격증명을 남기는 경로라 제거했다(감사 M16).
+    // 132회차: 같은 응답의 WS 티켓(wst)이 세션 토큰을 대신한다 — 연결 쿼리에 토큰을 싣지 않는다. 접속할 때마다 새로 받는다.
     let ticket = '';
-    try { const r = await postJson('/remote/rdp-ticket', { username: creds.username, password: creds.password, domain: creds.domain }); ticket = r?.ticket || ''; }
+    let wst = '';
+    try { const r = await postJson('/remote/rdp-ticket', { username: creds.username, password: creds.password, domain: creds.domain }); ticket = r?.ticket || ''; wst = wsTicketOf(r); }
     catch (e) { setStatus(`티켓 발급 실패: ${e?.message || e} — 다시 시도하세요.`); return; }
     if (!ticket) { setStatus('접속 티켓을 발급받지 못했습니다 — 다시 시도하세요.'); return; }
+    if (!wst) { setStatus('접속 티켓을 발급받지 못했습니다 — 화면을 새로고침한 뒤 다시 시도하세요.'); return; }
     setStatus('');
     setConnected(true);
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const tunnel = new Guacamole.WebSocketTunnel(`${proto}://${location.host}/api/remote/rdp`);
+    const tunnel = new Guacamole.WebSocketTunnel(rdpWsUrl(location));
     const client = new Guacamole.Client(tunnel);
     clientRef.current = client;
     tunnelRef.current = tunnel;
@@ -228,7 +242,7 @@ export function RdpConsole({ mapping, active, initialCreds, onCreds }) {
       const w = Math.max(800, elRef.current.clientWidth || 1024);
       const h = Math.max(600, elRef.current.clientHeight || 768);
       // 자격증명은 쿼리에서 제외 — 게이트웨이가 티켓으로 조회한다(쿼리 폴백 제거, 감사 M16).
-      const q = new URLSearchParams({ token: getToken() || '', mappingId: mapping.id, width: String(w), height: String(h), ticket }).toString();
+      const q = new URLSearchParams({ [WS_TICKET_PARAM]: wst, mappingId: mapping.id, width: String(w), height: String(h), ticket }).toString();
       client.connect(q);
       const display = client.getDisplay().getElement();
       const mouse = new Guacamole.Mouse(display);

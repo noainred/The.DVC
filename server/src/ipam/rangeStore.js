@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { fileMissing } from '../util/fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만 — existsSync 는 stat 실패도 false)
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';   // 60회차 F1
 import { READ_RETRY_MS, nowMs, inRetryWindow } from '../util/jsonFileRead.js';   // 97회차 F11: 읽기 오류 재읽기 간격 · 시계 · 128회차: 간격 판정은 공용
 
@@ -41,7 +42,8 @@ function read() {
   //   이제 READ_RETRY_MS(30초) 간격으로 다시 읽는다(간격 안은 디스크를 보지 않는다 — 요청마다 불리는 경로).
   if (cache && readRetryAt && inRetryWindow(nowMs(), readRetryAt, READ_RETRY_MS)) return cache;   // 128회차: 시계가 뒤로 갔으면 기다리지 않는다
   readRetryAt = 0;
-  if (!fs.existsSync(FILE)) { cache = { vcenters: {} }; _loadErr.missing(); }   // 60회차 F1: 보존본만 남았으면(재시작 뒤 포함) 여전히 못 읽은 것
+  // 134회차: `fs.existsSync` 는 stat 실패(폴더 수준 EACCES · EIO · ESTALE)도 false 라 못 읽은 파일이 '없음'(빈 맵 · 표지 없음)이 됐다 — 정말 없을 때(ENOENT)만.
+  if (fileMissing(FILE)) { cache = { vcenters: {} }; _loadErr.missing(); }   // 60회차 F1: 보존본만 남았으면(재시작 뒤 포함) 여전히 못 읽은 것
   else {
     try {
       const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));

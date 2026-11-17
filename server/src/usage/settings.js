@@ -128,6 +128,12 @@ export function loadUsageSettings() {
 
 /** 못 읽음 표지 — null 이면 정상. */
 export function usageSettingsLoadError() { loadUsageSettings(); return loadErr.get(); }
+/**
+ * 133회차(128회차 추정 E1 — 재현): 설정 파일 **읽기 오류** 중의 쓰기 거절(없으면 null — 손상은 저장이 푸는 규약이라 거절이 아니다).
+ *   저장(saveUsageSettings)의 assertWritable 과 같은 상태다. 이 이름(…WriteRefusal)으로 내보내야 설정 화면 분류표(test/settingsUnreadSweep112)가 이 모듈을 잡는다 —
+ *   수집 설정 폼은 전 칸을 함께 보내므로, 못 읽은 동안의 기본값 폼(꺼짐 · 180일 · 제외 1명)을 다시 읽힌 뒤 저장하면 보관 일수 · 제외 계정 · 고지 문구가 덮였다.
+ */
+export function usageSettingsWriteRefusal() { loadUsageSettings(); return loadErr.writeRefusal('사용 기록 설정(usage-settings.json)'); }
 
 /** 고지 문구(기본 문구면 보관 일수를 넣어서). */
 export function noticeText(s = loadUsageSettings()) { return s.notice || defaultNotice(s.keepDays); }

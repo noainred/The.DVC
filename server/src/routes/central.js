@@ -35,6 +35,7 @@ import fs from 'node:fs';   // v2.793: VM 백업 위임 — 등록부 파일 존
 import path from 'node:path';
 import { getDataSource as getDataSourceForVmClone } from '../runtime-settings.js';
 import { config, loadVcenterConfig, currentVersion, clampIntervalMs } from '../config.js';
+import { fileMissing } from '../util/fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만 — existsSync 는 stat 실패도 false)
 import { instanceId } from '../instanceId.js';
 import { getAssignment, setResult, listAssignments as listScanAssignments, assignmentsLoadError } from '../central/assignments.js'; // v2.727(D-01): 손상 판정
 import { tokenMatches } from '../util/secureCompare.js';
@@ -453,7 +454,7 @@ function vcCollectModes() {
     //   아니라 **빈 Map** 이라 '판정하지 않음' 이 아니라 모든 id 가 등록 밖(거부)이 된다. 수신 거부 자체는 안전측이지만 사유가 '등록되지 않은 vCenter' 로
     //   틀리게 남는다 — 그 사실을 따로 기록한다(gpu-guest-data 는 503 registryUnreadable 로 답한다). 반환 모양은 그대로(다른 수신은 예전처럼 거부).
     const f = path.join(config.configDir, 'vcenters.json');
-    if (!cfg.file && fs.existsSync(f)) {
+    if (!cfg.file && !fileMissing(f)) {   // 134회차: 확인하지 못한 것(stat 실패 — existsSync 는 false)도 '있는데 못 읽음' 이다
       // 읽기 단계 실패(EACCES · EIO · EISDIR)인지 형식 · 복호 실패인지만 가른다(원문 · 파일 조각은 싣지 않는다 — 조치가 다르다).
       let sysCode = null;
       try { fs.readFileSync(f); } catch (e) { sysCode = typeof e?.code === 'string' && /^E[A-Z]{2,15}$/.test(e.code) ? e.code : 'EIO'; }

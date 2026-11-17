@@ -101,6 +101,12 @@ export function loadThresholds() {
 
 /** 중앙 임계치 파일을 못 읽었으면 { at, reason }, 아니면 null(pdu-config 가 thresholds 대신 thresholdsUnreadable 을 싣는다). */
 export function pduThresholdsLoadError() { loadFileThresholds(); return _file.loadError(); }
+/**
+ * 133회차(128회차 추정 E2 — 재현): 임계치 파일 **읽기 오류** 중의 쓰기 거절(없으면 null — 손상은 저장이 푸는 규약이라 거절이 아니다).
+ *   조회(GET /tools/pdu)가 이 거절로 표지(`thresholdsLoadError`)를 싣는다 — 임계치 창은 늘 전 키를 보내므로, 못 읽은 동안의 기본값으로 채운 창을
+ *   다시 읽힌 뒤 저장하면 저장돼 있던 임계치가 기본값으로 덮이고 그 전 키가 `_assigned`(엣지 배포)에 올랐다. 화면이 그 창의 저장을 잠근다.
+ */
+export function pduThresholdsWriteRefusal() { loadFileThresholds(); return _file.loadError()?.readError ? _file.refusal('PDU 임계치') : null; }
 
 /*
  * v2.770(점검 R5-E1-1): **관리자가 실제로 바꾼 키만** 엣지에 내려보낸다. v2.769 는 기본값을 채운 전체 객체(loadFileThresholds)를 보내,

@@ -212,7 +212,8 @@ test('30 A · G — 파일을 못 읽음 503 은 서버 사유로 보인다(웹)
   const api = fs.readFileSync(path.join(WEB, 'api.js'), 'utf8');
   assert.match(api, /const msg = \(unreadable \? data\.detail : ''\) \|\| data\?\.reason/);
   const sd = fs.readFileSync(path.join(WEB, 'components/serviceDownText.js'), 'utf8');
-  assert.match(sd, /if \(status === 503 && b && typeof b === 'object' && \[b\.reason, b\.code\]\.some/);
+  // 132~135회차 묶음: 표지를 error 칸에 싣는 응답(사용 기록 집계 등)도 같은 판정을 타게 error 칸을 더했다(Chromium 검증 — '5분 후 재시도' 로 원인이 가려졌다).
+  assert.match(sd, /if \(status === 503 && b && typeof b === 'object' && \[b\.reason, b\.code, b\.error\]\.some/);
   const ck = fs.readFileSync(path.join(SRC, 'svcmon/checker.js'), 'utf8');
   assert.match(ck, /sock\.once\('timeout', \(\) => done\(resolved \? false : \{ why: '이름 해석 시간 초과' \}\)\);/);
 });

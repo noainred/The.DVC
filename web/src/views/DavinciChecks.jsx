@@ -79,7 +79,9 @@ export function NetworkCheck() {
   const [d, setD] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
-  const load = () => { setLoading(true); fetchJson('/tools/network-check').then((r) => { setD(r); setError(null); }).catch((e) => setError(e.message)).finally(() => setLoading(false)); };
+  // 132회차: 이 GET 은 서버가 등록된 vCenter · NSX 주소 전부에 TCP 를 두드린다(12개씩 · 대상마다 시한 5초) — 대상 다수가 무응답이면 20초를 넘는다.
+  //   기본 20초 시한 · 재시도 2회를 타면 같은 점검이 세 번 겹쳐 시작됐다 — 넉넉히 한 번만 기다린다.
+  const load = () => { setLoading(true); fetchJson('/tools/network-check', {}, undefined, { timeoutMs: 60_000, retries: 0 }).then((r) => { setD(r); setError(null); }).catch((e) => setError(e.message)).finally(() => setLoading(false)); };
   useEffect(() => { load(); }, []);
   if (error) return <ErrorBox message={error} />;
   if (loading && !d) return <Loading />;

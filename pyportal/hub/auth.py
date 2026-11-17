@@ -522,13 +522,21 @@ class SessionStore:
             return secrets.token_bytes(32)
         path = Path(secret_path)
         try:
-            if path.exists():
-                raw = path.read_text(encoding="utf-8").strip()
-                if len(raw) >= 32:
-                    return bytes.fromhex(raw) if all(c in "0123456789abcdef" for c in raw) \
-                        else raw.encode("utf-8")
-        except (OSError, ValueError):
-            pass
+            raw = path.read_text(encoding="utf-8").strip()
+            if len(raw) >= 32:
+                return bytes.fromhex(raw) if all(c in "0123456789abcdef" for c in raw) \
+                    else raw.encode("utf-8")
+        except FileNotFoundError:
+            pass   # 첫 기동 — 아래에서 만든다
+        except ValueError:
+            pass   # 깨진 바이트 · 형식 — 예전처럼 새로 만든다
+        except OSError as exc:
+            # 134회차(재현): 키 파일이 **있는데 못 읽으면**(권한 · 입출력) 새 키로 덮지 않는다. 예전에는 읽기 오류도 '없음' 으로 보고
+            #   새 키를 써서, 일시 오류 한 번(또는 root 로 콘솔 복구를 돌려 파일만 root 소유가 된 뒤)에 원래 키를 잃었다 — 오류가 풀려도
+            #   그전 세션이 돌아오지 않는다. 이 프로세스만 임의 키로 돈다(전원 다시 로그인 — 닫는 쪽). 소유자 · 권한을 고치고 재시작하면 원래 키를 읽는다.
+            print(f"[auth] 세션 서명 키({path.name})를 읽지 못했습니다({exc.__class__.__name__}) — 원본을 덮지 않고 이 프로세스만 임의 키로 동작합니다"
+                  f"(재시작 시 로그아웃). 파일 소유자 · 권한을 확인하세요.", flush=True)
+            return secrets.token_bytes(32)
         secret = secrets.token_bytes(32)
         try:
             write_text(path, secret.hex() + "\n")

@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { fileMissing } from '../util/fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만 — existsSync 는 stat 실패도 false)
 import { listManagedUsers } from '../auth/auth.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { makeJsonFileReader, readJsonFile } from '../util/jsonFileRead.js'; // 88회차 F1: 읽기 오류 ≠ 손상(결정 78 ① 과 같은 판정 — parse 기본값 parseJsonObject)
@@ -266,7 +267,7 @@ export function fileUserLoginPolicies() {
     if (s) parseLine('env', s);
   }
   try {
-    if (fs.existsSync(USER_POLICY_FILE)) {
+    if (!fileMissing(USER_POLICY_FILE)) {   // 134회차: stat 실패(existsSync 는 false)도 아래 읽기 실패 경고로 간다 — 무음으로 전역 정책이 되지 않게
       for (const line of fs.readFileSync(USER_POLICY_FILE, 'utf8').split(/\r?\n/)) {
         const s = line.split('#')[0].trim();
         if (s) parseLine('file', s);
@@ -336,7 +337,7 @@ export function setFileLoginPolicy(username, policy) {
   }
   let lines = [];
   try {
-    if (fs.existsSync(USER_POLICY_FILE)) lines = fs.readFileSync(USER_POLICY_FILE, 'utf8').split(/\r?\n/);
+    if (!fileMissing(USER_POLICY_FILE)) lines = fs.readFileSync(USER_POLICY_FILE, 'utf8').split(/\r?\n/);   // 134회차: stat 실패는 없음이 아니다 — 그 한 줄만 든 파일로 덮지 않는다
   } catch (e) {
     return { ok: false, reason: `재정의 파일을 읽지 못했습니다(${e.code || e.message}) — 덮어쓰지 않습니다.`, file: USER_POLICY_FILE, policy: null };
   }

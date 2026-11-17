@@ -45,8 +45,9 @@ function load() {
   readRetryAt = 0;
   cache = {};
   try {
-    if (fs.existsSync(FILE)) { cache = parseJsonObject(fs.readFileSync(FILE, 'utf8')); _loadErr.ok(); }
-    else _loadErr.missing();
+    // 134회차: `fs.existsSync` 가드는 stat 실패(폴더 수준 EACCES · EIO · ESTALE)를 '없음' 으로 읽어 빈 맵을 표지 없이 재시작까지 캐시했다(다음 저장이 그 대역 하나로 원본을 덮는다).
+    //   곧바로 읽는다 — 없음(ENOENT) · 읽기 오류 · 손상은 아래 catch 가 오류 코드로 가른다.
+    cache = parseJsonObject(fs.readFileSync(FILE, 'utf8')); _loadErr.ok();
   } catch (e) {
     // 62회차(재현 — EISDIR): 읽기 오류(EACCES · EISDIR)는 원본을 옮기지 않는다 · 확정 불가(20회차 반증 F4 규약)
     if (e?.code === 'ENOENT') _loadErr.missing();

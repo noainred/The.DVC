@@ -40,6 +40,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { fileMissing } from '../util/fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만 — existsSync 는 stat 실패도 false)
 
 // ⚠ 경로는 지연 평가(함수) — config.js 가 이 모듈을 import 하므로(loadVcenterConfig 복호 배선)
 // 모듈 평가 시점에 config.configDir 를 읽으면 순환 import TDZ 로 기동이 죽는다. 함수 호출
@@ -153,10 +154,10 @@ function validatePolicy(p) {
 /** 정책 파일 한 개 읽기 → { state: ok|missing|unreadable|corrupt|invalid, policy?, error? } */
 function readPolicyFile(fp) {
   let raw;
-  try {
-    if (!fs.existsSync(fp)) return { state: 'missing' };
-    raw = fs.readFileSync(fp, 'utf8');
-  } catch (e) { return { state: 'unreadable', error: e.message }; }   // 권한·입출력 — 손상이 아니므로 옆으로 치우지 않는다
+  // 134회차: `fs.existsSync` 가드는 stat 실패(폴더 수준 EACCES · EIO · ESTALE)를 'missing' 으로 읽었다 — 정책 · 신뢰 사본 · 흔적이 전부 '없음' 이 되어
+  //   첫 로드가 신규 설치(plain)로 떨어졌다(암호화 설치에서 새 비밀이 평문으로 저장되는 창). 곧바로 읽어 ENOENT 만 없음이고 그 밖은 unreadable(잠금 쪽)이다.
+  try { raw = fs.readFileSync(fp, 'utf8'); }
+  catch (e) { return e?.code === 'ENOENT' ? { state: 'missing' } : { state: 'unreadable', error: e.message }; }   // 권한·입출력 — 손상이 아니므로 옆으로 치우지 않는다
   let parsed;
   try { parsed = JSON.parse(raw); } catch (e) { return { state: 'corrupt', error: e.message }; }
   const pol = validatePolicy(parsed);
@@ -171,7 +172,7 @@ function encryptionEvidence() {
   const now = Date.now();
   if (_evidence && now - _evidenceAt < EVIDENCE_TTL_MS) return _evidence;
   const ev = [];
-  try { if (fs.existsSync(keyFile())) ev.push('key-file'); } catch { /* 존재 확인 실패는 흔적 없음으로 */ }
+  if (!fileMissing(keyFile())) ev.push('key-file');   // 134회차: 확인하지 못한 것(stat 실패)은 없음이 아니다 — 흔적으로 센다(잠금 쪽)
   try { if (fs.readdirSync(config.configDir).some((n) => n.startsWith('secrets-policy.json.corrupt.'))) ev.push('corrupt-policy-copy'); } catch { /* */ }
   for (const name of SECRET_FILES) {
     try {
@@ -295,13 +296,14 @@ function masterKey() {
   if (_keyMissing) throw _keyMissing;
   const env = process.env.SECRETS_KEY;
   if (env && env.length >= 16) { _key = Buffer.from(env, 'utf8'); return _key; }
+  // 134회차(재현): 키 파일 유무를 `fs.existsSync` 로 갈랐다 — stat 이 실패하는 폴더 수준 읽기 오류(EACCES · EIO · ESTALE)가 '키 없음' 으로 읽히고, 같은 오류로
+  //   비밀 파일의 봉인 흔적도 보이지 않아 **새 키를 만들었다**: 쓰기가 되면(일시 오류) 기존 키 파일을 덮어 모든 암호문이 복호 불가가 되고, 안 되면 임시 메모리 키로 돌았다.
+  //   곧바로 읽어 ENOENT 만 '키 없음' 이다 — 그 밖은 아래 '읽지 못함'(새 키를 만들지 않는다 · 21회차 M-1 과 같은 거절).
   let exists = false;
-  try { exists = fs.existsSync(keyFile()); } catch { exists = false; }
-  if (exists) {
-    let cur;
-    try { cur = fs.readFileSync(keyFile(), 'utf8').trim(); } catch (e) { throw keyUnavailable(`키 파일을 읽지 못함 ${String(e?.code || '')}`.trim()); }
-    if (cur.length >= 32) { _key = Buffer.from(cur, 'utf8'); return _key; }
-  }
+  let cur = '';
+  try { cur = fs.readFileSync(keyFile(), 'utf8').trim(); exists = true; }
+  catch (e) { if (e?.code !== 'ENOENT') throw keyUnavailable(`키 파일을 읽지 못함 ${String(e?.code || '')}`.trim()); }
+  if (exists && cur.length >= 32) { _key = Buffer.from(cur, 'utf8'); return _key; }
   _evidence = null;   // 흔적을 지금 다시 본다(30초 기억을 쓰지 않는다)
   if (encryptionEvidence().includes('sealed-values')) {
     // 22회차 반증 D-2: 키를 정말 잃은 설치의 탈출 — 운영자가 명시적으로 SECRETS_KEY_LOST=true 로 재시작하면 새 키를 만든다(옛 암호문은 복호 실패 · 저장 때 지워진다).
@@ -631,7 +633,7 @@ export function migrateSecretFiles(newPolicy) {
   for (const name of SECRET_FILES) {
     const fp = path.join(config.configDir, name);
     try {
-      if (!fs.existsSync(fp)) { out.files.push({ file: name, changed: false, secrets: 0 }); continue; }
+      if (fileMissing(fp)) { out.files.push({ file: name, changed: false, secrets: 0 }); continue; }   // 134회차: stat 실패는 없음이 아니다 — 아래 읽기가 오류로 남긴다(조용히 건너뛰지 않는다)
       const raw = fs.readFileSync(fp, 'utf8');
       const data = JSON.parse(raw);
       const failBefore = _decryptFailures;

@@ -359,7 +359,9 @@ function RelayTest({ vcenterId }) {
   const [r, setR] = useState(null);
   const run = async () => {
     setBusy(true); setR(null);
-    try { setR(await fetchJson(`/admin/vcenter/relay-test?vcenterId=${encodeURIComponent(vcenterId)}`)); }
+    // 132회차: 이 GET 은 서버가 실제로 TCP → TLS → HTTP 를 두드린다(단계마다 6초 + 이름 풀이) — 기본 20초 시한 · 재시도 2회를 타면 응답이 늦을 때
+    //   같은 진단이 세 번 시작되고 60초 뒤에야 '시간 초과' 만 보였다. 넉넉히 한 번만 기다린다.
+    try { setR(await fetchJson(`/admin/vcenter/relay-test?vcenterId=${encodeURIComponent(vcenterId)}`, {}, undefined, { timeoutMs: 45_000, retries: 0 })); }
     catch (e) { setR({ ok: false, reason: e.message }); }
     setBusy(false);
   };

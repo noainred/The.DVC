@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { fileMissing } from '../util/fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만 — existsSync 는 stat 실패도 false)
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';
 import { clampSetting } from '../util/clampSetting.js'; // v2.613 DEPS2613-12 · RUNTIME2613-08: 숫자 설정 정규화는 하나(빈 칸 = 미지정)
 import crypto from 'node:crypto';
@@ -271,7 +272,7 @@ function readText(file, err) {
   try { return fs.readFileSync(file, 'utf8'); } catch (e) { err.readError(e); return null; }
 }
 function readFile() {
-  if (!fs.existsSync(FILE())) { _localErr.missing(); return {}; }
+  if (fileMissing(FILE())) { _localErr.missing(); return {}; }   // 134회차: 없음은 ENOENT 뿐 — stat 실패(폴더 수준 EACCES · EIO · ESTALE)는 아래 읽기가 읽기 오류로 가른다
   const text = readText(FILE(), _localErr);
   if (text == null) return {};
   try {
@@ -418,7 +419,7 @@ export function bmUsageCentralState() {
 
 /** 중앙: 배포 설정(켬/끔 + 제외 엣지). 손상이면 보존 후 **꺼짐**(켜진 척하지 않는다). */
 export function loadDistribution() {
-  if (!fs.existsSync(DIST_FILE())) { _distErr.missing(); return normalizeDistribution({}); }
+  if (fileMissing(DIST_FILE())) { _distErr.missing(); return normalizeDistribution({}); }   // 134회차: 없음은 ENOENT 뿐 — stat 실패(폴더 수준 EACCES · EIO · ESTALE)는 아래 읽기가 읽기 오류로 가른다(배포 '꺼짐' 을 200 으로 내려보내지 않게)
   const text = readText(DIST_FILE(), _distErr);   // 34회차 F4
   if (text == null) return normalizeDistribution({});
   try {

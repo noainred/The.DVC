@@ -22,6 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
+import { fileMissing } from '../util/fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만 — existsSync 는 stat 실패도 false)
 import { capStr } from '../util/capStr.js';
 import { makeLoadError, summarizeRegistryError } from '../util/registryCore.js'; // v2.771(점검 R6-F4-2): '읽지 못함' 표지
 import { makeJsonFileReader, READ_RETRY_MS } from '../util/jsonFileLoad.js'; // 87회차 ⓐ: 읽기 오류 ≠ 손상(공용 읽기 판정)
@@ -56,8 +57,9 @@ function readTokens() {
 
 function load() {
   if (cache && !loadErr.get() && !readPending) return cache;
-  let exists = false;
-  try { exists = fs.existsSync(FILE); } catch { exists = false; }
+  // 134회차(재현): `fs.existsSync` 는 stat 실패(폴더 수준 EACCES · EIO · ESTALE)도 false 다 — 못 읽은 토큰 파일이 '없음' 이 되어 빈 목록을 **표지 없이 재시작까지** 캐시했다
+  //   (개별 토큰 엣지 전부 401 · 그동안의 발급 한 번이 그 토큰 하나만 든 파일로 원본을 덮는다). 정말 없을 때(ENOENT)만 이 지름길을 탄다 — 그 밖은 아래 공용 읽기가 가른다.
+  const exists = !fileMissing(FILE);
   if (!exists && !readPending) {
     // 표지가 선 채 파일이 없으면(보존본으로 옮겨진 뒤) 빈 목록 그대로 — 매 요청 existsSync 1회뿐이다.
     if (!cache) { loadErr.checkCorruptOnly(FILE); cache = []; }

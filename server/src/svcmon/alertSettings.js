@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { fileMissing } from '../util/fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만 — existsSync 는 stat 실패도 false)
 import { numOrNull } from '../util/numOrNull.js';
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';   // 26회차 F1 형제
 
@@ -47,7 +48,7 @@ export function alertSettingsLoadError() { getAlertSettings(); return _loadErr.g
 export function getAlertSettings() {
   if (_settings) return { ..._settings };
   try {
-    if (fs.existsSync(FILE())) {
+    if (!fileMissing(FILE())) {   // 134회차: 없음은 ENOENT 뿐 — stat 실패(폴더 수준 EACCES · EIO · ESTALE)는 아래 읽기가 읽기 오류로 가른다
       const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류');
       _settings = cleanAlertSettings(raw, ALERT_DEFAULTS);
@@ -56,7 +57,8 @@ export function getAlertSettings() {
     }
     _loadErr.missing();
   } catch (e) {
-    if (e?.code) _loadErr.readError(e);   // EACCES · EISDIR — 원본을 옮기지 않는다(20회차 반증 F4 규약)
+    if (e?.code === 'ENOENT') _loadErr.missing();   // 134회차: stat 뒤에 없어졌다 — 없음
+    else if (e?.code) _loadErr.readError(e);   // EACCES · EISDIR — 원본을 옮기지 않는다(20회차 반증 F4 규약)
     else { _loadErr.corrupt(e); preserveCorrupt(FILE(), e?.message); }
   }
   _settings = { ...ALERT_DEFAULTS };

@@ -213,6 +213,9 @@ export function HealthRollupBadges({ inv }) {
   );
 }
 
+/** iDRAC 에 실제로 접속하는 GET(GPU 프로브 · 인벤토리 새로 수집) — 길게 한 번만 기다린다(자동 재시도 금지: 앞 요청이 서버에서 계속 돈다). */
+const LIVE_IDRAC_GET = { timeoutMs: 120_000, retries: 0 };
+
 /** iDRAC 서버 상세 — 버전(iDRAC/BIOS/드라이버) + 온도센서·CPU 사용량 1분 시계열 차트. */
 export function IdracDetailModal({ server, onClose }) {
   const [inv, setInv] = useState(null);
@@ -223,8 +226,10 @@ export function IdracDetailModal({ server, onClose }) {
   const [tab, setTab] = useState('charts'); // charts | versions | gpu | disk(v3.8.0)
   const [gpuProbe, setGpuProbe] = useState(null); // null | 'loading' | result
   const [vh, setVh] = useState(null); // 서비스태그로 매칭된 vCenter 가상화 호스트
-  const runGpuProbe = () => { setGpuProbe('loading'); fetchJson(`/admin/idrac/${encodeURIComponent(server.id)}/gpu-probe`).then(setGpuProbe).catch((e) => setGpuProbe({ ok: false, reason: e.message })); };
-  const loadInv = (refresh) => fetchJson(`/admin/idrac/${encodeURIComponent(server.id)}/inventory${refresh ? '?refresh=1' : ''}`)
+  // 132회차: GPU 프로브 · 인벤토리 새로 수집은 서버가 iDRAC 에 Redfish 요청 수십 개를 차례로 보낸다(요청마다 시한 15초 · 전체 시한 없음).
+  //   기본 20초 시한 · 재시도 2회를 타면 20초를 넘는 순간 같은 수집이 그 iDRAC 에 세 번 겹쳐 시작됐다 — 넉넉히 한 번만 기다린다(캐시 조회는 기본 그대로).
+  const runGpuProbe = () => { setGpuProbe('loading'); fetchJson(`/admin/idrac/${encodeURIComponent(server.id)}/gpu-probe`, {}, undefined, LIVE_IDRAC_GET).then(setGpuProbe).catch((e) => setGpuProbe({ ok: false, reason: e.message })); };
+  const loadInv = (refresh) => fetchJson(`/admin/idrac/${encodeURIComponent(server.id)}/inventory${refresh ? '?refresh=1' : ''}`, {}, undefined, refresh ? LIVE_IDRAC_GET : {})
     .then((r) => { setInv(r.inventory); setInvResp(r); setInvErr(null); }).catch((e) => setInvErr(e.message));
   // v2.493: 오류를 삼키지 않는다 — 404/400/403 이 와도 예전에는 '아직 수집된 센서 샘플이 없습니다'
   // 와 똑같이 보여 '수집 0' 과 '조회 실패' 를 구분할 수 없었다.

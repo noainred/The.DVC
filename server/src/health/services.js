@@ -84,6 +84,7 @@ import { listSettingsLoadErrors, recheckSettingsFiles } from '../util/settingsLo
 import { bulletinHealth } from '../bulletin/store.js'; // 2026-10-09 검토 I-05
 import { runtimeServiceRow } from '../util/runtimeCheck.js'; // 2026-10-09 검토 I-06
 import { authGuardHealthRow } from '../util/authGuard.js'; // 127회차: 인증 정지 기록 파일을 못 읽는 도구(전 가드 한 행)
+import { secretsKeyMissing } from '../security/secretVault.js'; // 135회차 결정 D-d: 자격증명 암호화 키를 쓸 수 없는 상태(읽는 곳이 0곳이었다 — 콘솔 한 줄뿐)
 
 /** spec `mod` 경로 → 모듈. 표에 새 모듈이 생기면 여기에 한 줄 더한다(테스트가 빠진 것을 잡는다). */
 const MODS = Object.freeze({
@@ -160,6 +161,21 @@ const atOf = (x) => (typeof x === 'number' && Number.isFinite(x) ? x : (x && typ
 const wrap = (key, label, fn) => { try { return { key, label, ...fn() }; } catch (e) { return { key, label, status: 'warn', detail: `점검 오류: ${e.message}`, at: Date.now() }; } };
 
 const finite = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null);
+/**
+ * 서비스 점검의 '자격증명 암호화 키' 한 행(135회차 결정 D-d). 사유 문장은 secretVault 가 만든 것 그대로다(경로 · 키 값 없음 — 'CONFIG_DIR/secrets-key' 라는 이름과 오류 코드뿐).
+ * @param {string|null} [why] secretsKeyMissing() — 테스트 주입
+ * @returns {{status:'ok'|'warn', detail:string, at:number}}
+ */
+export function secretsKeyRow(why = secretsKeyMissing(), now = Date.now()) {
+  if (!why) return { status: 'ok', detail: '키 사용 가능(암호화를 쓰지 않는 설치도 정상입니다)', at: now };
+  return {
+    status: 'warn',
+    detail: `${String(why).slice(0, 400)} 그동안 비밀(비밀번호 · 토큰) 저장은 거절되고 저장된 자격증명은 열리지 않아 그 자격증명을 쓰는 수집 · 접속이 실패할 수 있습니다. `
+      + '키 파일을 읽지 못한 것이 일시적이었어도 재시작해야 풀립니다.',
+    at: now,
+  };
+}
+
 /** 폴러 상태 객체에서 '마지막 실행 시각' — 모듈마다 이름이 다르다(at · last.at · lastRun(.at) · lastRunTs · lastRunAt · lastTickAt · lastPollAt · lastTick). */
 export function pollerLastAt(st) {
   if (!st || typeof st !== 'object') return null;
@@ -366,6 +382,11 @@ export function getServiceCheck(opts = {}) {
   // 127회차(124회차 결정 D-A · 남긴 것): 인증 정지 기록 파일(<도구>-auth-stops.json)을 못 읽는 도구 — 예전에는 콘솔 한 줄뿐이었다(unreadable() 소비처 0곳).
   //   그동안은 자격 지문마다 한 대상으로 먼저 확인하며 수집한다(util/authGuard.js 머리말). 가드마다 한 줄이 아니라 한 행 — 파일 이름은 기본 이름만.
   checks.push(wrap('auth-stops', '인증 정지 기록 파일', () => authGuardHealthRow()));
+
+  // 135회차 결정 D-d(권장안 — 메인 구현): 자격증명 암호화 키를 쓸 수 없는 상태(키 파일을 읽지 못함 · 봉인된 비밀은 있는데 키가 없음). 그동안 비밀 저장은 거절되고
+  //   저장된 자격증명은 복호되지 않아(빈 값) 그 자격증명을 쓰는 수집 · 접속이 실패한다. 134회차부터는 기동 순간의 읽기 오류 한 번으로도 재시작까지 이 상태다 —
+  //   그런데 이 상태를 읽는 곳이 없었다(`secretsKeyMissing()` 호출부 0곳 · 콘솔 경고가 유일한 단서 — CLAUDE.md '무음 실패 금지').
+  checks.push(wrap('secrets-key', '자격증명 암호화 키', () => secretsKeyRow()));
 
   // 2026-10-09 검토 I-05: 게시판·공지 — 메모리에 받은 변경이 디스크에 저장되지 않고 있으면 warn(재시작하면 사라질 수 있다).
   //   pending 60초 경계는 화면(10초)보다 넉넉하게 — 묶음 저장 창마다 이 행이 깜빡이지 않게.

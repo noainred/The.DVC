@@ -161,7 +161,7 @@ export function StatusView({ targets, data, ov, now, runNow, busy, openTarget, o
         <div className="isd-cardhead"><h3>대상별 수집 상태</h3><div className="isd-note">각 노드가 자기 법인 아이실론에 SSH 로 접속해 du 를 돌리고, 엣지 결과는 메인으로 올라옵니다(엣지 push 10분마다). 다음 예정은 주기 규칙으로 계산한 추정입니다.</div></div>
         {/* 메일 기록 파일을 못 읽어 자동 발송이 멈춘 동안 — 사유는 파일 단위라 표 위에 한 번만 말하고, 표 칸에는 짧게 적는다(Chromium 검증: 좁은 칸에 긴 사유가 12줄로 쌓였다). */}
         {mailStateUnreadNote(targets) ? <div className="banner warn" data-isidu-mail-unread style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', margin: '0 0 10px', fontSize: 12.5 }}>{mailStateUnreadNote(targets)}</div> : null}
-        <STable className="v3-table" minWidth={1080}>
+        <STable className="v3-table isd-statustable" minWidth={1080}>
           <thead><tr><th>법인 · 대상</th><th>실행 노드</th><th>상태</th><th>진행 · 마지막 시도</th><th>마지막 성공 · 소요</th><th>주기 · 시한</th><th>다음 예정</th><th style={{ textAlign: 'right' }}>연속 실패</th><th>결과 메일</th><th data-nosort>지금</th></tr></thead>
           <tbody>
             {rows.map(({ t, st }) => {

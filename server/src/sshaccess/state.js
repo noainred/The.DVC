@@ -69,12 +69,14 @@ function load() {
   if (cache) return cache;
   if (readFailAt && inRetryWindow(Date.now(), readFailAt + READ_RETRY_MS, READ_RETRY_MS)) return null;   // 읽기 실패 뒤 잠시 — 매 호출마다 디스크를 두드리지 않는다
   let text = null;
+  // 134회차(재현): `fs.existsSync` 가드는 stat 실패(폴더 수준 EACCES · EIO · ESTALE)를 '파일 없음' 으로 읽어 빈 상태를 캐시했다 — 중지 기록(stops)이 사라져
+  //   멈춰 둔 법인 · 서버의 키 접속이 다시 열리고, 다음 기록이 원본을 덮었다. 곧바로 읽어 ENOENT 만 없음이고 그 밖은 아래 읽기 실패(잠금 · 30초 재읽기)다.
   try {
-    if (fs.existsSync(FILE())) text = fs.readFileSync(FILE(), 'utf8');
-  } catch (e) {
+    text = fs.readFileSync(FILE(), 'utf8');
+  } catch (e) { if (e?.code === 'ENOENT') text = null; else {
     // 읽기 자체가 실패(EMFILE · 권한 등 — 내용 손상이 아니다): 원본을 옮기지 않고 잠근 채 다시 읽는다.
     loadErr.set(`읽기 실패(${String(e?.code || e?.message || e).slice(0, 40)})`); readFailAt = Date.now(); readFailed = true; return null;
-  }
+  } }
   readFailAt = 0;
   // 100회차(97회차 추정 — 재현): 읽기 실패 뒤 파일이 **없어지면**(사람이 치움) 아래 checkCorruptOnly 가 '이미 오류가 있다' 로 그냥 돌아가 읽기 실패 표지가
   //   남았다 — 파일이 없는데도 키 접속 정지 · 쓰기 거절이 '상태 파일 다시 읽기'(OTP) · 재시작 전까지 풀리지 않았다. 읽기 자체가 된 지금은 그 오류를 거두고

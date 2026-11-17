@@ -91,7 +91,8 @@ function ManageCsv({ scope, canManage, onApplied }) {
     try {
       for (let i = 0; i < chunks.length; i++) {
         setProgress({ phase: '검증', done: i, total: chunks.length });
-        results.push(await postJson('/tools/ipam/manage/import', { csv: chunks[i].csv, dryRun: true, lineOffset: chunks[i].lineOffset }));
+        // 133회차: 검증(dryRun)도 관리상태 · 메모 파일을 못 읽은 동안은 409 다(postJson 은 던지지 않고 본문을 준다) — 그 본문을 결과로 읽으면 사유 없이 ‘새로 지정 0 · … 오류 0’ 이 됐다.
+        results.push(requireChanged(await postJson('/tools/ipam/manage/import', { csv: chunks[i].csv, dryRun: true, lineOffset: chunks[i].lineOffset })));
       }
       const m = mergeManageReports(results);
       setCheck({ sig: textSig(text), ...m, total: parsed.records.length, chunks: chunks.length, columns: results[0]?.columns || [] });
@@ -221,7 +222,8 @@ export function RangesCsv({ onApplied }) { // v2.638: IP 스캔 설정 페이지
     }
     setBusy(true);
     try {
-      const r = await postJson('/admin/ipam/scan/ranges/import', { csv: text, dryRun, mode });
+      // 133회차: IP 스캔 배정 파일을 못 읽은 동안의 거절(409)은 본문으로 온다 — 검증은 사유 없는 빈 결과로, 적용은 ‘적용 — 에이전트 0곳’(성공)으로 그렸다.
+      const r = requireChanged(await postJson('/admin/ipam/scan/ranges/import', { csv: text, dryRun, mode }));
       if (dryRun) setCheck({ sig: textSig(text), mode, ...r });
       else {
         setCheck({ sig: textSig(text), mode, ...r, plans: check?.plans || [], afterApply: true });

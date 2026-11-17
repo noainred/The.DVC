@@ -21,7 +21,7 @@ import TaskWho from './TaskWho.jsx';
 import ServiceDown from './ServiceDown.jsx';
 import { serviceDownKind } from './serviceDownText.js';
 import { numOrNull } from '../numOrNull.js';
-import { errorBoxInput } from './accessDeniedText.js';
+import { errorBoxInput, holdHttpInfo } from './accessDeniedText.js';
 import { compareCellValues } from './sortableText.js';
 
 /** VM GPU 배지 — vGPU/패스쓰루/혼합. Vms.jsx 에 있던 것을 공용으로 옮겼다(상세 화면 단일화). */
@@ -343,12 +343,16 @@ export function ErrorBox({ message: msgProp, error, info = null }) {
   // 사이드 채널(문자열 키)을 빗나가 `오류: {객체}` 로 그려져 React #31 로 탭 전체가 죽었다.
   // 객체에 상태코드가 있으면 그 객체가 곧 HTTP 정보다(403 만 AccessDenied — 계약 유지).
   const norm = errorBoxInput(message);
-  const perm = info || norm.perm || permissionInfoFor(norm.text);
+  // 132회차(129 E4): 사이드 채널 메모는 5분 뒤 지워진다 — 이 상자가 같은 문구로 한 번 찾은 정보는 문구가 바뀔 때까지 붙든다(holdHttpInfo).
+  //   예전에는 403 화면을 5분 넘게 열어 둔 뒤 다시 그리면 '접근 제어 안내' 가 빨간 '오류: …' 로 바뀌었다.
+  const heldRef = useRef(null);
+  const held = holdHttpInfo(heldRef, norm.text, { perm: info || norm.perm || permissionInfoFor(norm.text), http: norm.http || httpInfoFor(norm.text) });
+  const perm = held.perm;
   if (perm) return <AccessDenied info={perm} message={norm.text} />;
   // v2.459: 5xx·네트워크 실패는 '오류'가 아니라 **일시적 미가용**(업그레이드 중 재시작 포함)이다.
   // 빨간 "오류: Failed to fetch" 로 두면 사용자가 데이터 손실·자기 잘못으로 오해해 새로고침을
   // 반복한다. 403 → AccessDenied 와 같은 단일 지점 처리.
-  const http = norm.http || httpInfoFor(norm.text);
+  const http = held.http;
   const kind = serviceDownKind(norm.text, http);
   if (kind) return <ServiceDown kind={kind} message={norm.text} http={http} />;
   return <div className="error-box">오류: {norm.text}</div>;

@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import { morefOf } from '../vcenter/registry.js';   // v2.447: vcenterId 에 콜론이 있어도 안전한 moref 추출(감사 B1)
 import path from 'node:path';
 import { config, loadVcenterConfig } from '../config.js';
+import { fileMissing } from '../util/fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만 — existsSync 는 stat 실패도 false)
 import { store } from '../store.js';
 import { VimSoapClient } from '../gpu/guestops.js';
 import { loadGpuGuestSettings, resolveVmCreds } from '../gpu/settings.js';
@@ -276,7 +277,7 @@ async function runOsScanNowInner(scopeVcId, manual) {
 function registryVcIds() {
   try {
     const r = loadVcenterConfig();
-    if (!r.file && fs.existsSync(path.join(config.configDir, 'vcenters.json'))) return null;
+    if (!r.file && !fileMissing(path.join(config.configDir, 'vcenters.json'))) return null;   // 134회차: 확인하지 못한 것(stat 실패 — existsSync 는 false)도 '있는데 못 읽음' 이다(전 vCenter 의 OS 기록을 지우지 않게)
     return (r.vcenters || []).map((v) => v?.id).filter(Boolean);
   } catch { return null; }
 }

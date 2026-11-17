@@ -104,6 +104,7 @@
     뒤 세 가지는 `security-session.json`에 기록하지 않아 **UI 저장이 지울 수 없다** — 전원이 설정에서
     잠기는 사고의 복구 경로이므로 `fileSettingsOwners()` 합산을 제거하지 말 것.
 - **RDP 자격증명은 티켓으로**: RDP WS 게이트웨이는 username/password/domain을 URL 쿼리스트링에 싣지 않는다 — `proxy/rdpTicket.js`의 1회용 단기 티켓(`POST /api/remote/rdp-ticket`)으로 발급받아 쿼리엔 티켓 ID만 싣고 게이트웨이가 인메모리에서 조회한다(쿼리스트링은 상위 프록시 액세스 로그·브라우저 히스토리에 남음).
+- **WS 주소에 세션 토큰을 싣지 않는다**(132회차): 원격 콘솔 WS 는 1회용 단명 티켓 `wst=`(`proxy/wsTicket.js` · `POST /api/remote/ws-ticket` · rdp-ticket 응답)만 싣고, 게이트웨이가 꺼낸 토큰으로 예전과 같은 판정을 한다(`remoteUpgradeAuth`). 옛 `?token=` 수신은 다음 판에서 제거. 회귀 `wsTicket132`.
 - **서명 확인 화면 끄기(v2.809)는 env warn 과 같은 판정·시한부·소유자+OTP·root 확인 제외**(`upgrade/signatureOverride.js` · `signaturePolicy`) —
   `!runningAsRoot()`·`!t.fatal`·env 우선·`where:'offline'` 제외·상태 파일 등록·인증 꺼짐 409·복원 제외(RESTORE_EXCLUDE)·'지금' 기준 상한 중
   하나라도 빼면 회귀(`test/upgradeSigOverride2809.test.js` 변이 16건 · 반증 1인 M-1·M-2·L-1·L-3 반영).
@@ -250,6 +251,7 @@
   읽기 오류 중에는 AD 로그인 · 계정 생성 · 중앙 배포 적용도 막는다 · 확정 게이트 ≥ 쓰기 게이트(`ownerOnly` · `superOnly`).
 - **전체 점검 21 · 22회차(비밀 보관)**: 봉인된 값이 있으면 **키를 새로 만들지 않고 비밀 파일 저장을 거절**(env 누락 재시작 → 저장 한 번이 전 비밀 소거 · 탈출은 `SECRETS_KEY_LOST=true`) ·
   `openSecretsDeep` 는 비밀 칸만 연다(복호 오라클) · 저장은 쓰기 성공 뒤에 메모리 반영 · SSH 키 KDF rounds 상한(`util/sshKeyKdf.js`).
+- **134회차**: 설정 · 비밀 · 등록부 파일 유무를 `fs.existsSync` 로 가르지 말 것(stat 실패도 false — 권한 · 계정 · 폐기 목록 · 키가 '없음' 으로 열렸다). 곧바로 읽어 ENOENT 만 없음 · `util/fileMissing.js` · 분류표 `existsSyncSweep134`.
 
 ## 옮긴 절 (2026-10-20 — 이 파일을 짧게 유지하려고)
 

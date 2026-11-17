@@ -17,6 +17,7 @@ import { setLogQueryResult, takeLogQueries, vcenterOfReq } from '../../central/l
 import { setPingResults, takePingJobs } from '../../central/pingJobs.js';
 import { listCollectors as listCollectorsForLinks, registryLoadError as collectorsRegistryLoadError } from '../../collector/registry.js';
 import { config, currentVersion, loadVcenterConfig } from '../../config.js';
+import { fileMissing } from '../../util/fileMissing.js';   // 134회차: '정말 없는가'(ENOENT 만 — existsSync 는 stat 실패도 false)
 import { instanceId } from '../../instanceId.js';
 import { ipToNum } from '../../ipam/ledger.js';
 import { specToRange } from '../../ipam/rangePolicies.js';
@@ -82,7 +83,7 @@ function vmCloneAgentOnly(req, res) {
 /** vCenter 등록부·위임 인벤토리 → 실행 위치. 등록부 파일이 있는데 읽지 못했으면 null(빈 목록으로 답하지 않는다). */
 async function vmCloneTargets() {
   const cfg = loadVcenterConfig();
-  if (!cfg.file && fs.existsSync(path.join(config.configDir, 'vcenters.json'))) return null;
+  if (!cfg.file && !fileMissing(path.join(config.configDir, 'vcenters.json'))) return null;   // 134회차: 확인하지 못한 것(stat 실패 — existsSync 는 false)도 '있는데 못 읽음' 이다
   const { execTargets } = await import('../../vmclone/dispatch.js');
   return execTargets(cfg.vcenters || [], listInventory(), { mock: isMockModeForVmClone() });
 }

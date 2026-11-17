@@ -4,7 +4,7 @@ import { fetchJson, postJson, putJson, delJson, canCsv } from '../api.js';
 import { requireChanged } from './changeResult.js';   // 112회차: delJson 은 409 · 400 을 던지지 않고 본문을 준다 — 거절(등록부 읽기 오류 · 사용 중)을 삭제 성공으로 읽지 않는다
 import { droppedSecretNote } from './droppedSecretText.js';
 import { readFailText, installerState, deployTargetsUnreadableText } from './readFailText.js'; // v2.733(C5-02): 조회 실패를 '0개·패키지 없음' 으로 그리지 않는다
-import { pkgFormFromResponse, pkgSavePayload, pkgPlaceholder } from './pkgSettingsText.js';
+import { pkgFormFromResponse, pkgSavePayload, pkgPlaceholder, pkgFormUnread } from './pkgSettingsText.js';
 import { unreadMarkOf, saveLockedByUnread } from './settingsUnread.js';   // 128회차: 못 읽은 동안의 빈 폼(지정 없음)으로 저장하지 않는다(112회차 규약)
 import { SettingsUnreadBanner } from './SettingsUnreadBanner.jsx';
 import { Loading } from '../components/ui.jsx';
@@ -36,6 +36,7 @@ export default function AgentDeploy() {
   const [pkg, setPkg] = useState(null);
   const [dl, setDl] = useState({ kinds: ['installer_cent9'], version: '', busy: false });
   const [pkgCfg, setPkgCfg] = useState(null); // { baseUrl, dir } editable
+  const [pkgSeedLe, setPkgSeedLe] = useState(null);   // 133회차: 폼(pkgCfg)을 채운 조회의 읽기 오류 표지(없으면 null)
   // status(에이전트 현황·기본) | add(에이전트 추가) | bulk(대량 배포) | packages(설치 패키지 자동 다운로드)
   // 3단 해시(#/settings/agent-deploy/<키>)로 새로고침에도 유지한다(v2.438) — 배포 작업 중
   // 새로고침이 잦은 화면이라 매번 현황 탭으로 되돌아가는 것이 특히 번거로웠다.
@@ -51,15 +52,17 @@ export default function AgentDeploy() {
   // v2.621(감사 WEB-07): 폼은 웹 지정값만 채운다(기본값은 placeholder) — 유효값으로 채워 두 칸을 다 보내면 저장 경로만
   //   바꿔도 환경변수 기본 URL 이 웹 지정값으로 굳었다. 판정은 pkgSettingsText.js 하나.
   // v2.736.3: 서버가 저장소 versions.json 을 최대 60초(UPGRADE_CHECK_TIMEOUT_MS) 기다린다 — 기본 GET 시한 20초 × 재시도면 그 사이 같은 조회가 3번 겹친다.
-  const loadPkg = () => fetchJson('/admin/packages', {}, undefined, { timeoutMs: 130_000, retries: 0 }).then((p) => { setPkg(p); setPkgCfg(pkgFormFromResponse(p)); }).catch(() => setPkg(null));
+  const loadPkg = () => fetchJson('/admin/packages', {}, undefined, { timeoutMs: 130_000, retries: 0 }).then((p) => { setPkg(p); setPkgCfg(pkgFormFromResponse(p)); setPkgSeedLe(unreadMarkOf(p)); }).catch(() => setPkg(null));
   // 128회차: 패키지 저장소 설정 파일을 못 읽은 동안 조회는 ‘웹 지정 없음’(빈 칸 둘)을 준다 — 이 폼은 두 칸을 함께 보내므로(빈 칸 = 지정 해제), 다시 읽힌 뒤
   //   저장 경로만 적어 저장해도 저장돼 있던 사내 미러 주소가 지워졌다. 폼을 채운 조회가 읽기 오류였으면 저장을 잠근다(‘다시 확인’ 이 폼을 다시 채운다).
-  const pkgUnread = unreadMarkOf(pkg);
+  //   133회차: 잠금은 **폼을 채운 조회**의 표지를 본다 — ‘다시 확인’ 이 실패하면 pkg 는 비지만(null) 폼은 못 읽은 동안의 빈 칸 그대로라, 표지가 사라졌다고 저장을 열면 안 된다.
+  const pkgUnread = pkgFormUnread(pkg, pkgSeedLe);
   const pkgSaveLocked = saveLockedByUnread(pkgUnread);
   const savePkgCfg = async () => {
     if (pkgSaveLocked) return;
     const r = await putJson('/admin/packages/settings', pkgSavePayload(pkgCfg)).catch((e) => ({ ok: false, reason: e.message }));
-    setResult({ kind: 'pkgcfg', ok: !!r.ok, reason: r.reason });
+    const tokenNote = r.ok ? droppedSecretNote(r) : '';   // 133회차: 저장소 주소가 바뀌어 저장된 토큰을 폐기했으면 말한다(v2.607 규약)
+    setResult({ kind: 'pkgcfg', ok: !!r.ok, reason: r.reason, ...(tokenNote ? { warn: tokenNote } : {}) });
     await loadPkg();
   };
   // v2.733(C5-02): 실패면 직전 목록을 지우지 않고(있으면) 사유를 말한다 — 빈 목록 '(0)' 으로 그리지 않는다.
