@@ -106,6 +106,10 @@ describe('30회차 A — 파일을 못 읽음(…Unreadable) 503 은 일시 미�
   it('reason · code 가 …Unreadable 이면 null', () => {
     expect(serviceDownKind('등록부를 읽지 못했습니다', { status: 503, body: { ok: false, reason: 'registryUnreadable', detail: '등록부를 읽지 못했습니다' } })).toBeNull();
     expect(serviceDownKind('x', { status: 503, body: { code: 'settingsUnreadable' } })).toBeNull();
+    // 132~135회차 묶음 Chromium 검증: 표지를 error 칸에 싣는 응답(사용 기록 집계 — error:'settingsUnreadable')도 같다. 다른 error 값 · 다른 상태는 그대로.
+    expect(serviceDownKind('x', { status: 503, body: { ok: false, error: 'settingsUnreadable', reason: '사용 기록 설정을 읽지 못해 …' } })).toBeNull();
+    expect(serviceDownKind('x', { status: 503, body: { error: 'db-unavailable' } })).toBe('gateway');
+    expect(serviceDownKind('x', { status: 502, body: { error: 'settingsUnreadable' } })).toBe('gateway');
     expect(serviceDownKind('x', { status: 503, body: { reason: 'busy' } })).toBe('gateway');
     expect(serviceDownKind('x', { status: 503 })).toBe('gateway');
   });

@@ -666,12 +666,12 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/tool-categories` | — | [server/src/routes/admin/toolCategories.js:20](../server/src/routes/admin/toolCategories.js#L20) |
 | PUT | `/tool-categories` | 역할 `admin` · `fleetOnly` | [server/src/routes/admin/toolCategories.js:30](../server/src/routes/admin/toolCategories.js#L30) |
 | GET | `/tool-categories/preset` | 역할 `admin` | [server/src/routes/admin/toolCategories.js:50](../server/src/routes/admin/toolCategories.js#L50) |
-| GET | `/usage/export.csv` | 역할 `admin` · 권한 `data.csv` · `requireSettingsOwner` | [server/src/routes/admin/usage.js:49](../server/src/routes/admin/usage.js#L49) |
-| POST | `/usage/purge` | 역할 `admin` · `requireSettingsOwner` · `reauth` | [server/src/routes/admin/usage.js:82](../server/src/routes/admin/usage.js#L82) |
-| GET | `/usage/report` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/usage.js:37](../server/src/routes/admin/usage.js#L37) |
-| GET | `/usage/settings` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/usage.js:62](../server/src/routes/admin/usage.js#L62) |
-| PUT | `/usage/settings` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/usage.js:74](../server/src/routes/admin/usage.js#L74) |
-| GET | `/usage/user/:user` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/usage.js:42](../server/src/routes/admin/usage.js#L42) |
+| GET | `/usage/export.csv` | 역할 `admin` · 권한 `data.csv` · `requireSettingsOwner` | [server/src/routes/admin/usage.js:59](../server/src/routes/admin/usage.js#L59) |
+| POST | `/usage/purge` | 역할 `admin` · `requireSettingsOwner` · `reauth` | [server/src/routes/admin/usage.js:92](../server/src/routes/admin/usage.js#L92) |
+| GET | `/usage/report` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/usage.js:47](../server/src/routes/admin/usage.js#L47) |
+| GET | `/usage/settings` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/usage.js:72](../server/src/routes/admin/usage.js#L72) |
+| PUT | `/usage/settings` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/usage.js:84](../server/src/routes/admin/usage.js#L84) |
+| GET | `/usage/user/:user` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/admin/usage.js:52](../server/src/routes/admin/usage.js#L52) |
 | PUT | `/user-tools/:username` | 역할 `admin` | [server/src/routes/admin/users.js:184](../server/src/routes/admin/users.js#L184) |
 | GET | `/users` | 역할 `admin` | [server/src/routes/admin/users.js:103](../server/src/routes/admin/users.js#L103) |
 | POST | `/users` | 역할 `admin` | [server/src/routes/admin/users.js:113](../server/src/routes/admin/users.js#L113) |

@@ -46,3 +46,9 @@ test('서비스 점검에 secrets-key 행이 있고(평소 정상) 판정은 sec
   assert.match(src, /wrap\('secrets-key', '자격증명 암호화 키', \(\) => secretsKeyRow\(\)\)/);
   assert.match(src, /export function secretsKeyRow\(why = secretsKeyMissing\(\)/);
 });
+
+test('사용 기록 집계 503 본문 계약(소스) — code 와 error 를 함께 싣고 읽기 오류 문구를 가른다', () => {
+  const src = fs.readFileSync(path.join(here, '../src/routes/admin/usage.js'), 'utf8');
+  assert.match(src, /error: 'settingsUnreadable', code: 'settingsUnreadable', reason/);
+  assert.match(src, /le\?\.readError\s*\?\s*`사용 기록 설정\(usage-settings\.json\)을 읽지 못해 집계를 내지 않았습니다/);
+});

@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "fileCount": 4379,
+  "fileCount": 4382,
   "dynamicUnknown": {"count":8,"files":["server/src/edgelog/collect.js","server/src/linkcheck/settingsLinks.js","server/src/portalcheck/archScan.js","server/src/routes/api/bmFolders.js","server/src/routes/api/partFaults.js","server/src/routes/central/storageRoutes.js","server/src/routes/central.js","scripts/tools-catalog.mjs"]},
   "limits": {"sharedMinAreas":5,"sharedMinWebUsers":20,"testFilesMax":30},
   "scopes": [{"id":"server-util","title":"서버 공용 유틸","dir":"server/src/util","count":94},{"id":"web-components","title":"웹 공용 컴포넌트","dir":"web/src/components","count":49},{"id":"web-hooks","title":"웹 공용 훅","dir":"web/src/hooks","count":8},{"id":"web-util","title":"웹 공용 유틸","dir":"web/src/util","count":4},{"id":"web-top","title":"웹 최상위 공용 모듈","dir":"web/src","count":14},{"id":"outside","title":"공용 위치 밖","dir":"","count":82}],

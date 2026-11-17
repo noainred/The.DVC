@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect, lazy, Suspense } from 'react';
 import { useRemoteWindow, closeRemoteSession, activateSession, setWin, closeAllSessions, newSessionLike, duplicateSession, setSessionCreds, setSessionLabel } from './sessions.js';
+import { remoteWindowGeo, windowModeAvailable } from './windowGeo.js'; // 화면보다 큰 창은 화면에 맞춘다(400px 에서 창이 화면 밖으로 나갔다 — Chromium 검증)
 // xterm/guacamole 등 무거운 콘솔 의존성은 실제 원격 세션을 열 때만 로드(코드 스플릿).
 const SshConsole = lazy(() => import('./RemoteConsole.jsx').then((m) => ({ default: m.SshConsole })));
 const RdpConsole = lazy(() => import('./RemoteConsole.jsx').then((m) => ({ default: m.RdpConsole })));
@@ -20,6 +21,15 @@ export function RemoteConsoleWindow() {
     window.addEventListener('blur', close);
     return () => { window.removeEventListener('click', close); window.removeEventListener('blur', close); };
   }, [menu]);
+
+  // 뷰포트 크기 — 창이 화면 밖으로 나가지 않게(windowGeo.js). 크기가 바뀌면 다시 그린다. ⚠ 훅은 아래 조기 return 위에 둔다.
+  const [vp, setVp] = useState(() => ({ w: typeof window !== 'undefined' ? window.innerWidth : 1440, h: typeof window !== 'undefined' ? window.innerHeight : 900 }));
+  useEffect(() => {
+    const onResize = () => setVp({ w: window.innerWidth, h: window.innerHeight });
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  const canWindow = windowModeAvailable(vp.w);   // 좁은 화면은 늘 화면 전체 — 끌기 · 크기 조절 · 최대화 버튼이 뜻이 없다
 
   const openMenu = (x, y, id) => setMenu({
     x: Math.min(x, (typeof window !== 'undefined' ? window.innerWidth : 1200) - 230),
@@ -42,7 +52,7 @@ export function RemoteConsoleWindow() {
   }
 
   const startDrag = (e) => {
-    if (win.maximized || e.target.closest('button')) return;
+    if (win.maximized || !canWindow || e.target.closest('button')) return;
     const d = { sx: e.clientX, sy: e.clientY, x: win.x, y: win.y };
     const move = (ev) => setWin({ x: Math.max(0, d.x + ev.clientX - d.sx), y: Math.max(0, d.y + ev.clientY - d.sy) });
     const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
@@ -56,20 +66,18 @@ export function RemoteConsoleWindow() {
     window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
   };
 
-  const geo = win.maximized
-    ? { left: 8, top: 8, width: 'calc(100vw - 16px)', height: 'calc(100vh - 16px)' }
-    : { left: win.x, top: win.y, width: win.w, height: win.h };
+  const geo = remoteWindowGeo(win, vp.w, vp.h);
 
   return (
     <div className="card" style={{ position: 'fixed', zIndex: 250, display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden', boxShadow: '0 10px 40px rgba(0,0,0,.5)', ...geo }} ref={dragRef}>
       {/* title bar (drag) */}
-      <div onMouseDown={startDrag} onDoubleClick={() => setWin({ maximized: !win.maximized })}
-        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', cursor: win.maximized ? 'default' : 'move', background: 'rgba(255,255,255,.04)', borderBottom: '1px solid rgba(255,255,255,.08)' }}>
+      <div onMouseDown={startDrag} onDoubleClick={() => { if (canWindow) setWin({ maximized: !win.maximized }); }}
+        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', cursor: win.maximized || !canWindow ? 'default' : 'move', background: 'rgba(255,255,255,.04)', borderBottom: '1px solid rgba(255,255,255,.08)' }}>
         <b style={{ fontSize: 14 }}>🖥️ 원격 콘솔</b>
         <span className="muted" style={{ fontSize: 12 }}>{sessions.length} 세션</span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
           <button className="logout-btn" style={{ padding: '4px 10px' }} title="최소화" onClick={() => setWin({ minimized: true })}>—</button>
-          <button className="logout-btn" style={{ padding: '4px 10px' }} title={win.maximized ? '창 모드' : '최대화'} onClick={() => setWin({ maximized: !win.maximized })}>{win.maximized ? '⤡' : '⤢'}</button>
+          {canWindow && <button className="logout-btn" style={{ padding: '4px 10px' }} title={win.maximized ? '창 모드' : '최대화'} onClick={() => setWin({ maximized: !win.maximized })}>{win.maximized ? '⤡' : '⤢'}</button>}
           <button className="logout-btn" style={{ padding: '4px 10px' }} title="전체 닫기" onClick={closeAllSessions}>✕</button>
         </div>
       </div>
@@ -119,7 +127,7 @@ export function RemoteConsoleWindow() {
       )}
 
       {/* resize handle */}
-      {!win.maximized && (
+      {!win.maximized && canWindow && (
         <div onMouseDown={startResize} style={{ position: 'absolute', right: 0, bottom: 0, width: 16, height: 16, cursor: 'nwse-resize',
           background: 'linear-gradient(135deg, transparent 50%, rgba(255,255,255,.35) 50%)' }} />
       )}

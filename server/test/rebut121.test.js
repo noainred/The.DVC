@@ -360,7 +360,7 @@ test('R5 vCenter 관리 화면: 등록부 읽기 오류의 쓰기 거절(503)은
   assert.match(ui, /\{actErr && <div className="banner warn" data-vc-act-err/);
   // 전제: 화면 공용 판정은 503 본문의 reason · code 가 'Unreadable' 로 끝날 때만 서버 사유를 그대로 보인다 — 118회차 본문(code 'registry-unreadable')은 걸리지 않는다
   const sd = stripComments(fs.readFileSync(path.join(WEB, 'components', 'serviceDownText.js'), 'utf8'));
-  assert.match(sd, /\[b\.reason, b\.code\]\.some\(\(v\) => typeof v === 'string' && \/Unreadable\$\/\.test\(v\)\)/);
+  assert.match(sd, /\[b\.reason, b\.code, b\.error\]\.some\(\(v\) => typeof v === 'string' && \/Unreadable\$\/\.test\(v\)\)/);   // 132~135회차 묶음: error 칸 추가(판정식 · 접미 규칙은 그대로)
   assert.equal(/Unreadable$/.test('registry-unreadable'), false);
   const rt = stripComments(fs.readFileSync(path.join(SRC, 'routes', 'admin', 'vcenters.js'), 'utf8'));
   assert.match(rt, /res\.status\(503\)\.json\(\{ ok: false, code: 'registry-unreadable', registryUnreadable: true, readError: true,/, '화면이 보는 표지(registryUnreadable)');
