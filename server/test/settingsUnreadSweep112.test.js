@@ -271,6 +271,9 @@ const TABLE = {
     'perf/settings.js', 'sanswitch/registry.js', 'storage/registry.js', 'svcmon/store.js', 'upgrade/packageSettings.js', 'upgrade/settings.js', 'veeam/em/registry.js', 'veeam/registry.js',
     'util/registryCore.js',
   ].map((f) => [f, { cls: 'out', why: '97 · 103회차의 등록부 · 설정(자체 loadError · registryLoadError 흐름) — 112회차는 화면까지 대조하지 않았다' }])),
+  // 118회차가 읽기 단계를 가른 vCenter 등록부 · 표시 순서(조회 표지 + VCenterAdmin 배너 · 쓰기 버튼 잠금 — 메인이 등재).
+  'vcenter/registry.js': { cls: 'form', route: ['routes/admin/vcenters.js', /vcenters: all\.map\(withStop\), \.\.\.registryMark\(\) \}/], screen: ['views/VCenterAdmin.jsx', /const locked = saveLockedByUnread\(unread\);/], lose: '전 vCenter 접속 계정(읽기 오류 한 번에 원본이 옮겨지고 다음 등록이 한 건짜리 파일을 썼다 — 118회차 F1)' },
+  'vcenter/order.js': { cls: 'form', route: ['routes/admin/vcenters.js', /unreadMark\(orderWriteRefusal\(\) \|\| registryWriteRefusal\(\)\)/], screen: ['views/VCenterAdmin.jsx', /setLoadErr\(r\?\.loadError\?\.readError === true \?/], lose: 'vCenter 표시 순서(118회차 F4)' },
   // 116회차가 읽기 단계를 가른 NSX 등록부(112회차 뒤에 들어왔다 — 메인이 등재). 조회 표지 · NsxAdmin 화면의 저장 잠금은 아직 대조하지 않았다.
   'nsx/registry.js': { cls: 'out', why: '116회차의 NSX 등록부(registryLoadError · registryWriteRefusal — 못 읽는 동안 마지막으로 읽은 목록을 준다) — 조회 표지와 NSX 관리 화면의 잠금은 대조하지 않았다(다음 반증 회차 후보)' },
 };
