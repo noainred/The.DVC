@@ -466,6 +466,7 @@
             </div>
             <div class="card-footer">
               <span class="muted" id="initial-password-note"></span>
+              <span class="form-msg err" id="session-revoked-note" hidden></span>
             </div>
           </div>
         </div>
@@ -622,6 +623,21 @@
         <p class="field-hint">systemd 설치본(계정 dchub · 데이터 <code>/etc/dc-service-hub</code>)은
           <code>sudo -u dchub HUB_DATA_DIR=/etc/dc-service-hub python3 /opt/dc-service-hub/app.py --reset-password admin</code>.
           자세한 절차는 문서 <code>docs/HUB-PASSWORD-RECOVERY.md</code> 참고.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 비밀번호 변경 — 본인 변경은 현재 비밀번호를 확인한다(결정 · 31회차 E3) -->
+  <div class="modal" id="pw-modal" hidden>
+    <div class="modal-box">
+      <h3>비밀번호 변경</h3>
+      <p class="muted pw-target" id="pw-target"></p>
+      <input type="password" id="pw-current" placeholder="현재 비밀번호" autocomplete="current-password" maxlength="200" hidden />
+      <input type="password" id="pw-new" placeholder="새 비밀번호 (8자 이상)" autocomplete="new-password" minlength="8" maxlength="200" />
+      <div class="form-actions">
+        <button class="btn btn-primary" id="pw-submit" type="button">변경</button>
+        <button class="btn btn-ghost" id="pw-cancel" type="button">취소</button>
+        <span class="form-msg" id="pw-msg"></span>
       </div>
     </div>
   </div>

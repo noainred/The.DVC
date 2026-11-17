@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 
 from .config import config
-from .jsonfile import now_iso, read_json, write_json, write_text
+from .jsonfile import now_iso, preserve_corrupt, read_json, read_json_state, write_json, write_text
 
 PBKDF2_ROUNDS = 210_000
 ROLES = ("admin", "viewer")
@@ -292,6 +292,20 @@ class UserStore:
                     return str(user["role"]) if user["enabled"] else None
         return None
 
+    def bump_all_token_versions(self) -> int:
+        """모든 계정의 토큰을 한 번에 무효화한다(저장 1회) — 결정(56~75 남긴 것): 로그아웃 폐기 목록을 못 읽어 fail-closed 할 때.
+        반환: 올린 계정 수. 못 읽음 상태면 AuthError, 저장 실패면 OSError(호출부가 메모리 컷오프로 대신한다)."""
+        with self._lock:
+            users = self._load()
+            self._refuse_if_unreadable()
+            if not users:
+                return 0
+            for user in users:
+                user["tokenVersion"] = int(user["tokenVersion"]) + 1
+                user["updatedAt"] = now_iso()
+            self._save()
+            return len(users)
+
     def bump_token_version(self, username: str) -> None:
         """그 계정으로 발급된 모든 토큰을 즉시 무효화한다."""
         with self._lock:
@@ -447,10 +461,15 @@ class SessionStore:
       재기동하면 로그아웃한 토큰이 TTL 안에서 다시 통과했다(옛 주석의 'tokenVersion 으로 통제' 는 사실이 아니었다 — 로그아웃은
       tokenVersion 을 올리지 않는다). 이제 `session-revoked.json`(토큰 SHA-256 → 만료시각, 0600, 원자적 쓰기)에도 남긴다.
 
-    서명 키는 데이터 폴더에 0600 으로 보관한다 — 키가 새면 임의 계정 토큰을 위조할 수 있다.
+    결정(56~75 남긴 것 — fail-closed): 폐기 목록이 손상(파싱 · 형식 · 해석 못 하는 항목)이거나 읽기 오류면 어떤 토큰이 로그아웃했는지
+    모른다. 예전에는 손상 파일을 옮기고 빈 목록으로 돌아 로그아웃한 토큰이 만료까지 되살아났다. 이제 ① 원본을 보존(손상은 `.corrupt.*`,
+    읽기 오류는 그대로 — 옮기지도 덮어쓰지도 않는다) ② **그 시점 이전에 발급된 토큰을 모두 거부**(메모리 컷오프 + 전 계정 tokenVersion 인상 +
+    새 파일의 `_cutoff` 표지 — 재기동 뒤에도) ③ 빈 목록으로 시작 ④ 콘솔 · 감사 로그 · 설정 화면(revoked_load_error)에 사유를 남긴다.
+    폐기 목록에 쓸 수 없는 동안의 로그아웃(읽기 오류 · 저장 실패)은 그 계정 단위 폐기(tokenVersion 인상)로 접는다 — 메모리에만 남기면 재기동 뒤 되살아난다.
     """
 
     GLOBAL_FACTOR = 10          # 전역 임계값 = max_fails × 이 배수
+    CUTOFF_KEY = "_cutoff"      # 폐기 목록 파일의 fail-closed 표지(이 시각 이전 발급 토큰 거부) — 64자 토큰 해시 키와 겹치지 않는다
 
     def __init__(self, ttl_seconds: int, max_fails: int, lockout_seconds: int,
                  secret_path=None, users=None, revoked_path=None):
@@ -461,12 +480,17 @@ class SessionStore:
         self._secret = self._load_secret(secret_path)
         self._revoked_path = Path(revoked_path) if revoked_path else None
         self._revoked_user = {}   # sha256(token) -> 계정(37회차 R5 — 상한을 넘치면 계정 단위 폐기로 접는다)
-        self._revoked = self._load_revoked()   # sha256(token) -> 만료시각(개별 로그아웃 — 31회차 F5: 파일에도)
+        self._revoked = {}        # sha256(token) -> 만료시각(개별 로그아웃 — 31회차 F5: 파일에도)
+        self._global_cutoff = 0.0     # 이 시각 이전 발급(i <= cutoff) 토큰은 전부 거부 — fail-closed(결정 · 56~75 남긴 것)
+        self._revoked_error = None    # fail-closed 사유 {file, state, at, accountsReset} — 화면 · 감사용
+        self._revoked_writable = True  # 읽기 오류 · 보존 실패면 False — 원본을 덮어쓰지 않는다
+        self._load_revoked()
         self._user_revoked = {}  # username -> 이 시각 이전 발급 토큰 거부(계정 단위 폐기)
         # 마지막 발급시각 — time.time() 이 같은 마이크로초에 같은 값을 돌려주면 '폐기 직후
         # 재로그인' 토큰의 i 가 컷오프와 같아져(i <= cutoff) 튕긴다. 발급시각을 단조 증가로
         # 보정해 폐기(cutoff=마지막 발급시각 이상) / 재발급(i > cutoff)을 결정적으로 만든다.
-        self._last_issued = 0.0
+        # fail-closed 컷오프보다도 크게 시작한다(시계가 뒤로 가도 새 로그인은 컷오프에 걸리지 않게).
+        self._last_issued = self._global_cutoff
         self._fails = {}         # client -> [실패수, 잠금해제시각, 창 시작(첫 실패) 시각]
         self._global_fails = deque()   # 창 안 실패 시각들(31회차 F6 — 예전에는 성공 전까지 기간 없이 쌓였다)
         self._global_until = 0.0
@@ -512,35 +536,88 @@ class SessionStore:
         except (ValueError, TypeError, AttributeError):
             return None
 
-    def _load_revoked(self) -> dict:
-        if not self._revoked_path:
-            return {}
-        raw = read_json(self._revoked_path, {}, expect=dict)
-        now = time.time()
-        out = {}
-        for key, val in raw.items():
-            # 값은 [만료, 계정](37회차 R5) — 옛 꼴(만료 숫자만)도 읽는다(계정 모름).
-            user = None
-            if isinstance(val, list) and val:
-                user = val[1] if len(val) > 1 and isinstance(val[1], str) else None
-                val = val[0]
-            try:
-                exp = float(val)
-            except (TypeError, ValueError):
-                continue
-            if isinstance(key, str) and len(key) == 64 and exp >= now:
-                out[key] = exp
-                if user:
-                    self._revoked_user[key] = user
-        return out
-
-    def _save_revoked(self) -> None:
+    def _load_revoked(self) -> None:
         if not self._revoked_path:
             return
+        # 결정(56~75 남긴 것): strict 읽기 — 읽기 오류(권한 · 입출력)는 손상과 구분하고, 손상 보존본만 남아 있어도(파일 없음) 손상이다.
+        raw, state = read_json_state(self._revoked_path, expect=dict)
+        now = time.time()
+        out, users, bad = {}, {}, 0
+        if state is None:
+            for key, val in raw.items():
+                if key == self.CUTOFF_KEY:
+                    try:
+                        self._global_cutoff = max(self._global_cutoff, float(val))
+                    except (TypeError, ValueError):
+                        bad += 1
+                    continue
+                # 값은 [만료, 계정](37회차 R5) — 옛 꼴(만료 숫자만)도 읽는다(계정 모름).
+                user = None
+                if isinstance(val, list) and val:
+                    user = val[1] if len(val) > 1 and isinstance(val[1], str) else None
+                    val = val[0]
+                try:
+                    exp = float(val)
+                except (TypeError, ValueError):
+                    bad += 1
+                    continue
+                if not (isinstance(key, str) and len(key) == 64):
+                    bad += 1
+                    continue
+                if exp >= now:
+                    out[key] = exp
+                    if user:
+                        users[key] = user
+            if bad:
+                # 해석 못 한 항목이 어떤 토큰을 폐기했는지 모른다 — 손상과 같이 원본을 보존하고 fail-closed.
+                print(f"[auth] {self._revoked_path.name} 에 해석할 수 없는 항목 {bad}개 — 손상으로 봅니다.", flush=True)
+                preserve_corrupt(self._revoked_path)
+                state = "corrupt"
+        if state in ("corrupt", "unreadable"):
+            self._fail_closed(state)
+            return
+        self._revoked, self._revoked_user = out, users
+
+    def _fail_closed(self, state: str) -> None:
+        """폐기 목록을 믿을 수 없다 — 지금 이전에 발급된 토큰을 모두 거부하고 빈 목록으로 시작한다(원본은 보존)."""
+        cutoff = time.time()
+        self._global_cutoff = max(self._global_cutoff, cutoff)
+        self._revoked, self._revoked_user = {}, {}
+        name = self._revoked_path.name
+        # 읽기 오류면 원본을 그대로 둔다 — 덮어쓰지 않는다. 손상인데 보존(이동)에 실패해 원본이 그 자리에 있어도 덮어쓰지 않는다.
+        self._revoked_writable = state != "unreadable" and not self._revoked_path.exists()
+        print(f"[auth] {name} 을(를) " + ("읽지 못했습니다(권한 · 입출력 — 원본은 그대로 둡니다)" if state == "unreadable"
+                                         else "손상으로 보고 보존본(.corrupt.*)으로 옮겼습니다")
+              + " — 어떤 세션이 로그아웃했는지 알 수 없어 지금 이전에 발급된 세션을 모두 끊습니다(전원 다시 로그인).", flush=True)
+        reset = None
+        if self._users is not None:
+            try:
+                reset = self._users.bump_all_token_versions()   # 재기동 뒤에도 — 폐기 목록 파일과 무관하게 남는다
+            except (AuthError, OSError) as exc:
+                print(f"[auth] 계정 tokenVersion 인상 실패({exc}) — 이 프로세스의 메모리 컷오프로만 막습니다.", flush=True)
+        self._revoked_error = {"file": name, "state": state, "at": cutoff, "accountsReset": reset}
+        if self._revoked_writable:
+            self._save_revoked()   # 새 파일에 _cutoff 표지 — 재기동 뒤 '손상' 으로 다시 끊지 않고, 그 이전 토큰은 계속 거부
+
+    def revoked_load_error(self):
+        """fail-closed 사유(없으면 None) — 설정 화면 상태 · 감사 로그용(경로 없음 · 파일 이름만)."""
+        return dict(self._revoked_error) if self._revoked_error else None
+
+    def _save_revoked(self) -> bool:
+        """저장했으면 True. 쓸 수 없는 상태(읽기 오류) · 저장 실패면 False — 호출부가 계정 단위 폐기로 접는다."""
+        if not self._revoked_path:
+            return True
+        if not self._revoked_writable:
+            return False
+        data = {k: [exp, self._revoked_user.get(k, "")] for k, exp in self._revoked.items()}
+        if self._global_cutoff:
+            data[self.CUTOFF_KEY] = self._global_cutoff
         try:
-            write_json(self._revoked_path, {k: [exp, self._revoked_user.get(k, "")] for k, exp in self._revoked.items()})
-        except OSError as exc:   # 저장 실패가 로그아웃을 막지는 않는다(이 프로세스에서는 메모리로 막힌다)
-            print(f"[auth] 로그아웃 폐기 목록 저장 실패({exc}) — 재기동하면 그 토큰이 만료까지 다시 통할 수 있습니다.", flush=True)
+            write_json(self._revoked_path, data)
+            return True
+        except OSError as exc:
+            print(f"[auth] 로그아웃 폐기 목록 저장 실패({exc}) — 그 계정 단위 폐기로 대신합니다.", flush=True)
+            return False
 
     # ---------- 잠금 ----------
 
@@ -643,6 +720,8 @@ class SessionStore:
             self._purge_revoked()
             if self._token_id(token) in self._revoked:
                 return None
+            if self._global_cutoff and float(body.get("i", 0)) <= self._global_cutoff:
+                return None   # 결정(56~75 남긴 것): 폐기 목록을 못 믿게 된 시점 이전 발급 — fail-closed
             cutoff = self._user_revoked.get(username)
             if cutoff is not None and float(body.get("i", 0)) <= cutoff:
                 return None
@@ -702,7 +781,7 @@ class SessionStore:
                 self.destroy_user(name)   # tokenVersion 인상(재기동 뒤에도) + 메모리 컷오프 — 그 계정의 남은 세션도 끊긴다(남용일 때만)
                 folded.add(name)
                 print(f"[auth] 로그아웃 폐기 목록 상한을 넘어 계정 '{name}' 의 세션을 모두 끊었습니다(계정 단위 폐기).", flush=True)
-            except AuthError:
+            except (AuthError, OSError):   # 결정(56~75 남긴 것): 계정 파일 저장 실패(OSError)도 같은 처리 — 예외로 끝나면 그 토큰이 저장되지 않는다
                 # 39회차 R4(반증 — 재현): users.json 을 못 읽는 동안은 계정 단위 폐기를 못 한다 — 그 계정의 항목은 지우지 않고 그대로 저장한다
                 #   (예전엔 예외로 로그아웃이 400 이 되고 그 토큰이 저장되지 않아 재기동 뒤 되살아났다).
                 pass
@@ -714,7 +793,15 @@ class SessionStore:
                 for k, _exp in sorted(self._revoked.items(), key=lambda kv: kv[1])[: len(self._revoked) - self.REVOKED_MAX]:
                     self._revoked.pop(k, None)
                     self._revoked_user.pop(k, None)
-            self._save_revoked()
+            saved = self._save_revoked()
+        if not saved and uname and uname not in folded:
+            # 결정(56~75 남긴 것): 폐기 목록에 남기지 못한 로그아웃(읽기 오류 상태 · 저장 실패)은 메모리에만 두면 재기동 뒤 그 토큰이 되살아난다 —
+            #   그 계정 단위 폐기(tokenVersion 인상 — users.json 에 남는다)로 접는다. 그 계정의 다른 세션도 끊긴다(fail-closed).
+            try:
+                self.destroy_user(uname)
+                print(f"[auth] 로그아웃 폐기 목록에 쓸 수 없어 계정 '{uname}' 의 세션을 모두 끊었습니다(계정 단위 폐기).", flush=True)
+            except (AuthError, OSError) as exc:
+                print(f"[auth] 계정 단위 폐기도 실패했습니다({exc}) — 이 프로세스에서만 막힙니다.", flush=True)
 
     def destroy_user(self, username) -> None:
         """그 계정의 모든 토큰을 무효화한다.

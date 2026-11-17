@@ -91,6 +91,11 @@ python3 app.py                  # http://<서버>:8095
 - 세션은 **서명 토큰**이라 서비스를 재시작해도 유지됩니다(v2.215). 서명 키는
   `$HUB_DATA_DIR/session-secret`(0600)에 보관되며, 비밀번호 변경·계정 중지/삭제 시
   그 계정의 기존 토큰은 즉시 무효가 됩니다.
+- 로그아웃한 토큰은 `$HUB_DATA_DIR/session-revoked.json`(토큰 해시)에 남습니다. 이 파일이 손상됐거나 읽을 수 없으면
+  원본을 보존하고(손상은 `.corrupt.*` 로 옮김, 읽기 오류는 그대로) **그 시점 이전에 발급된 세션을 모두 끊습니다**(전원 다시 로그인 —
+  사유는 설정 › 사용자 구성과 감사 로그에 남음).
+- **본인 비밀번호를 바꿀 때는 현재 비밀번호를 함께 입력**합니다(틀리면 로그인 실패와 같은 출발지별 카운터 · 잠금).
+  admin 이 다른 계정의 비밀번호를 재설정할 때는 묻지 않습니다.
 
 | 하위 메뉴 | 할 수 있는 일 |
 |---|---|
@@ -275,6 +280,7 @@ sudo cat /etc/dc-service-hub/initial-settings-password.txt
 | GET | `/api/export/csv` | 세션 | 바로가기 CSV 내보내기 |
 | POST | `/api/import/csv` | 세션 | CSV 가져오기(`{"csv": "...", "mode": "append"\|"replace"}`) |
 | GET/POST/PUT/DELETE | `/api/settings/users…` | 세션(변경은 admin) | 계정 관리 |
+| POST | `/api/settings/users/<name>/password` | 세션(남의 계정은 admin) | 비밀번호 변경 — 본인은 `{"password", "currentPassword"}`(없으면 400 · 틀리면 403 · 잠금 429) |
 | POST/PUT/DELETE | `/api/settings/datacenters…` | admin | 데이터센터 구성 |
 | GET/POST/DELETE | `/api/settings/backups…` | admin | 백업 목록·생성·받기·삭제 |
 | POST | `/api/settings/backups/<name>/restore` | admin | 복원 |

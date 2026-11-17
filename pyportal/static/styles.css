@@ -521,6 +521,8 @@ p code { overflow-wrap: anywhere; }
 .link-btn:hover { color: var(--accent); }
 .recover-panel { display: flex; flex-direction: column; gap: 6px; margin-top: 2px;
   padding: 12px; border-radius: 12px; background: var(--accent-soft); border: 1px solid var(--line); }
+/* 결정(31회차 E3): 비밀번호 변경 창의 대상 계정 이름(최대 64자 · 공백 없을 수 있음)이 좁은 화면에서 창 밖으로 밀리지 않게 */
+.pw-target { overflow-wrap: anywhere; }
 .recover-title { margin: 0; font-weight: 600; font-size: 12px; color: var(--text); }
 .recover-cmd { margin: 2px 0; padding: 8px 10px; border-radius: 9px; background: rgba(9, 13, 23, 0.7);
   border: 1px solid var(--line); color: var(--accent-2); font-family: ui-monospace, Menlo, Consolas, monospace;
