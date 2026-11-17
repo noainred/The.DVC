@@ -3,7 +3,7 @@
  *
  * 왜 필요한가: 이 포탈은 `app.listen()` 하나(평문 HTTP)만 열었다. 중앙 ↔ 엣지 통신에는 수집 토큰
  * (`X-Collector-Token`)·중앙 토큰(`X-Central-Token`)·배포 자격증명·관리 설정이 실리고, 브라우저 원격 콘솔(WS)은
- * 세션 토큰을 쿼리(`?token=`)로 싣는다. 앞에 TLS 종단(HAProxy·nginx)이 없는 현장은 그 전부가 평문이었다
+ * 1회용 티켓(`?wst=` — 132회차 전에는 세션 토큰 `?token=`)을 주소에 싣는다. 앞에 TLS 종단(HAProxy·nginx)이 없는 현장은 그 전부가 평문이었다
  * (패키지에 TLS 종단 구성은 없다 — `packaging/offline/portal.env.example` 의 `TRUST_PROXY` 는 '프록시가 있다면' 의 안내뿐).
  *
  * 켜는 법(env — 전부 선택. 두 파일을 함께 주면 켜진다):
