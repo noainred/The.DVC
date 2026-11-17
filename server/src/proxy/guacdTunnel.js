@@ -13,6 +13,7 @@
 
 import net from 'node:net';
 import tls from 'node:tls';
+import { StringDecoder } from 'node:string_decoder';
 import { WebSocketServer } from 'ws';
 import { openGuacdSocket, rdpIgnoreCertArg } from './guacdTransport.js';
 /*
@@ -22,7 +23,7 @@ import { openGuacdSocket, rdpIgnoreCertArg } from './guacdTransport.js';
  */
 export const GUAC_WS_MAX_PAYLOAD = 4 * 1024 * 1024;
 import { resolveTokenUser } from '../auth/auth.js';
-import { getMapping, getProxyById, touchMapping } from './registry.js';
+import { getMapping, touchMapping, mappingProxyOf } from './registry.js';
 import { consumeRdpTicket } from './rdpTicket.js';
 import { config } from '../config.js';
 // WS 매핑 소유·scope 재검사 공용(v2.322) + 사용자 판정·열린 세션 재검증 공용(2026-10-09 S-04 — SSH 게이트웨이와 **같은 함수**).
@@ -71,6 +72,82 @@ function parseInstruction(str, start) {
   return null;
 }
 
+/*
+ * 76회차 F1(재현 — 중간): guacd → 브라우저 중계는 **완전한 명령 단위**로 보낸다. 예전에는 guacd TCP 조각('data')을 받은 그대로 WS 메시지 하나로
+ *   보냈는데, 브라우저의 guacamole-common-js 1.5.0 WebSocketTunnel 은 **메시지마다 따로** 파싱한다 — 명령 중간에서 잘린 메시지의 그 명령은
+ *   버려지고, 다음 메시지 앞머리(잘린 나머지)는 길이를 못 읽어 그 메시지 전체가 버려졌다(실제 라이브러리로 재현: img 명령이 사라진다).
+ *   TCP 조각 경계는 명령 경계와 무관하다(guacd 는 출력 버퍼가 차면 명령 중간에서도 내보낸다). Java 터널(GuacamoleWebSocketTunnelEndpoint)도
+ *   완전한 명령만 보낸다. 바이트 → 글자는 StringDecoder 로 잇는다(조각 경계에서 잘린 UTF-8 글자가 깨지지 않게 — SSH 게이트웨이와 같은 방식).
+ */
+/** 한 명령이 이보다 길게 끝나지 않으면 스트림 이상으로 보고 닫는다(guacd 명령은 blob 조각 수 KB — 브라우저 → guacd 프레임 상한과 같은 값). */
+export const GUAC_RELAY_MAX_PENDING = GUAC_WS_MAX_PAYLOAD;
+const HIGH_SURROGATE_RE = /[\uD800-\uDBFF]/;
+
+/**
+ * str 앞에서부터 **완전한** Guacamole 명령들이 끝나는 위치 — 0 이면 아직 완전한 명령이 없다, -1 이면 형식이 깨졌다.
+ * 길이 칸은 숫자 1~10자리(49회차 F49-1 과 같은 규칙), 값의 길이는 **유니코드 글자 수**다(guacd 는 UTF-8 글자로 센다 — 이 서버의 enc 와 같다).
+ * 선형: 원소마다 길이만큼 건너뛴다(4바이트 글자가 있을 때만 글자를 센다). astral 을 넘기면 그 판정을 다시 하지 않는다.
+ */
+export function guacCompleteEnd(str, astral = HIGH_SURROGATE_RE.test(str)) {
+  const n = str.length;
+  let i = 0;
+  let last = 0;
+  while (i < n) {
+    let j = i;
+    let len = 0;
+    while (j < n) {
+      const c = str.charCodeAt(j);
+      if (c < 48 || c > 57) break;
+      len = len * 10 + (c - 48);
+      j++;
+      if (j - i > 10) return -1;
+    }
+    if (j >= n) return last;                       // 길이 칸이 아직 다 오지 않았다
+    if (j === i || str.charCodeAt(j) !== 46) return -1;   // 숫자 없음 · '.' 아님
+    let k = j + 1;
+    if (!astral) k += len;
+    else {
+      for (let c = 0; c < len && k < n; c++) {
+        const u = str.charCodeAt(k);
+        k += (u >= 0xD800 && u <= 0xDBFF) ? 2 : 1;
+      }
+    }
+    if (k >= n) return last;                       // 값 또는 구분자가 아직 다 오지 않았다
+    const sep = str.charCodeAt(k);
+    if (sep === 59) { last = k + 1; i = k + 1; continue; }   // ';' 명령 끝
+    if (sep === 44) { i = k + 1; continue; }                 // ',' 다음 원소
+    return -1;
+  }
+  return last;
+}
+
+/**
+ * guacd 출력 → 브라우저 WS 중계기(76회차 F1). push(Buffer) 는 완전한 명령까지만 send 로 넘기고 나머지는 다음 조각과 잇는다.
+ * 형식이 깨졌거나 한 명령이 상한을 넘으면 fail(사유) 를 한 번 부르고 더 보내지 않는다.
+ */
+export function makeGuacRelay(send, fail, { maxPending = GUAC_RELAY_MAX_PENDING } = {}) {
+  const dec = new StringDecoder('utf8');
+  let pending = '';
+  let astral = false;
+  let dead = false;
+  const feed = (text) => {
+    if (dead || !text) return;
+    pending += text;
+    astral = astral || HIGH_SURROGATE_RE.test(text);
+    const end = guacCompleteEnd(pending, astral);
+    if (end < 0) { dead = true; pending = ''; fail('guacd 출력 형식 오류'); return; }
+    if (end > 0) {
+      const out = end === pending.length ? pending : pending.slice(0, end);
+      pending = end === pending.length ? '' : pending.slice(end);
+      if (!pending) astral = false;
+      send(out);
+    }
+    if (pending.length > maxPending) { dead = true; pending = ''; fail('guacd 명령이 너무 깁니다'); }
+  };
+  // decode 는 핸드셰이크 단계도 **같은 디코더**로 글자를 만들게 내준다(ready 직전 조각 끝의 잘린 글자를 잃지 않게).
+  return { push: (buf) => feed(dec.write(buf)), decode: (buf) => dec.write(buf), text: feed, pendingLength: () => pending.length };
+}
+
 export function attachRdpGateway(server) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: GUAC_WS_MAX_PAYLOAD });
   server.on('upgrade', (req, socket, head) => {
@@ -106,8 +183,10 @@ function handle(ws, params, user, token = null) {
   const issue = mappingAccessIssue(user, m);
   // v2.731(A5-02·A1-03): SSH 게이트웨이와 같은 사유 코드 — 브라우저 Guacamole 터널은 닫힘 사유를 상태 메시지로 넘기고 화면이 그것으로 문구를 고른다.
   if (issue) { safeWsClose(ws, 1011, 'mapping-denied'); return; }
+  // 76회차 F3: 매핑의 중계가 지워졌으면 열지 않는다 — 기본 프록시 + 같은 공개 포트는 다른 매핑의 대상이다(티켓 자격증명을 보내기 전 · 소비하기 전에 닫는다).
+  const proxy = mappingProxyOf(m);
+  if (!proxy) { safeWsClose(ws, 1011, 'mapping-proxy-gone'); return; }
   touchMapping(m.id); // reset the 1-day ephemeral expiry clock on use
-  const proxy = getProxyById(m.proxyId);
   if (!proxy.guacd?.host) { safeWsClose(ws, 1011, 'guacd not configured'); return; }
 
   const host = proxy.proxyHost || m.targetHost;
@@ -145,12 +224,17 @@ function handle(ws, params, user, token = null) {
   let ready = false;
   let buf = '';
   const MAX_HANDSHAKE_BUF = 256 * 1024; // 핸드셰이크 중 파싱 불가 데이터가 무한 누적되는 것 차단
+  // 76회차 F1: ready 뒤 guacd 출력은 완전한 명령 단위로만 브라우저에 보낸다(위 makeGuacRelay).
+  const relay = makeGuacRelay(
+    (text) => { if (ws.readyState === ws.OPEN) ws.send(text); },
+    (why) => { closed = true; try { guacd.destroy(); } catch { /* */ } safeWsClose(ws, 1011, why); },
+  );
 
   guacd.on(readyEvent, () => guacd.write(enc('select', 'rdp')));   // TLS 면 'secureConnect'(검증 통과 뒤) — 검증 실패는 'error' 로 닫힌다
 
   guacd.on('data', (data) => {
-    if (ready) { if (ws.readyState === ws.OPEN) ws.send(data.toString('utf8')); return; }
-    buf += data.toString('utf8');
+    if (ready) { relay.push(data); return; }
+    buf += relay.decode(data);
     let inst;
     while ((inst = parseInstruction(buf, 0))) {
       if (inst.opcode === 'args') {
@@ -165,9 +249,10 @@ function handle(ws, params, user, token = null) {
       } else if (inst.opcode === 'ready') {
         ready = true;
         guacd.setTimeout(0); // 핸드셰이크 완료 — 연결 타임아웃 해제(정상 세션은 오래 유휴 가능)
-        // forward 'ready' + anything buffered after it to the browser client
-        if (ws.readyState === ws.OPEN) ws.send(buf);
+        // forward 'ready' + anything buffered after it to the browser client — 76회차 F1: 뒤에 붙은 잘린 명령은 다음 조각과 이어 보낸다
+        const rest = buf;
         buf = '';
+        relay.text(rest);
         break;
       } else if (inst.opcode === 'error') {
         // guacd가 핸드셰이크 중 error를 보내면(연결 실패 등) 조용히 무시하면 ws가 영영 hang한다.

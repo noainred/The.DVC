@@ -13,7 +13,8 @@ import crypto from 'node:crypto';
 import net from 'node:net';
 import { config } from '../config.js';
 import { ipBlockReason, ssrfBlockReason } from '../collector/registry.js'; // v2.537: proxyHost 차단 대역 검사 · v2.631 AX3-02: 배포 주소도
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileLoad.js';   // 76회차 F5: 읽기 오류 ≠ 손상(손상이면 reader 가 preserveCorrupt)
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js';
 import { numOrNull } from '../util/numOrNull.js';
@@ -67,21 +68,42 @@ const DEFAULTS = {
 
 let cache = null;
 
+/*
+ * 76회차 F5(재현 — 중간 · 데이터 손실): **읽기 오류는 손상이 아니다**(결정 G2 · util/jsonFileLoad.js 와 같은 판정). 예전 catch 하나는 EIO · EACCES · EMFILE 같은
+ *   읽기 실패도 손상으로 보고 온전한 원본을 `.corrupt.<시각>` 으로 옮긴 뒤 빈 설정으로 돌았다 — 그다음 매핑 하나(quick-connect · touchMapping)가 저장되면
+ *   중계 서버 목록 · 기본 중계 주소 · Data Plane/SSH 배포 자격증명 · 다른 사람의 매핑이 빠진 파일이 남았다(원본은 보존본에만 — 재현 스크립트로 확인).
+ *   이제 읽기 오류면 원본을 그대로 두고 **캐시하지 않으며**(30초 간격으로 다시 읽는다 — reader) 그동안 저장(persist)은 거절한다. 손상(parse 실패 ·
+ *   복호 실패)은 예전처럼 보존본으로 옮기고 빈 값이다(server/CLAUDE.md '로드 손상 preserveCorrupt').
+ */
+const _reader = makeJsonFileReader(() => FILE, { parse: (t) => openSecretsDeep(parseJsonObject(t)), tag: 'remote' }); // v2.296 자격증명 복호 · v3.17.2 객체만
+let _readError = null;
+export const REGISTRY_READ_ERROR_TEXT = '원격 접속 설정 파일(remote-access.json)을 읽지 못했습니다(읽기 오류 — 손상이 아니라 원본은 그대로 둡니다). 권한 · 디스크를 확인하세요 — 그동안 원격 접속 설정 · 매핑 저장을 거절합니다.';
+
 function load() {
   if (cache) return cache;
-  let saved = {};
-  try { if (fs.existsSync(FILE)) saved = openSecretsDeep(parseJsonObject(fs.readFileSync(FILE, 'utf8'))); } catch { preserveCorrupt(FILE); saved = {}; } // v2.296 dataplane/SSH 자격증명 복호 · v2.322 손상본 보존
-  cache = {
+  const r = _reader.read();
+  if (r.kind === 'read-error') {
+    _readError = r.error;
+    return buildCache({});   // 캐시하지 않는다 — 원본이 다시 읽히면 그 값으로(그동안 persist 는 거절)
+  }
+  _readError = null;
+  cache = buildCache(r.kind === 'ok' ? r.value : {});   // missing · corrupt(보존본으로 옮겼다)는 빈 값 — 예전과 같다
+  return cache;
+}
+
+function buildCache(saved) {
+  return {
     ...DEFAULTS, ...saved,
     dataplane: { ...DEFAULTS.dataplane, ...(saved.dataplane || {}) },
     guacd: { ...DEFAULTS.guacd, ...(saved.guacd || {}) },
     proxies: Array.isArray(saved.proxies) ? saved.proxies : [],
     mappings: Array.isArray(saved.mappings) ? saved.mappings : [],
   };
-  return cache;
 }
 
 function persist() {
+  // 76회차 F5: 읽기 오류 중(cache 없음)에는 쓰지 않는다 — 빈 설정이 온전한 원본을 덮는다.
+  if (_readError || !cache) { const e = new Error(REGISTRY_READ_ERROR_TEXT); e.status = 409; e.code = 'settings-unreadable'; throw e; }
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(cache), null, 2), { mode: 0o600 }); // 암호화 모드면 password/privateKey 봉인(복제 — cache 평문 유지)
   try { fs.chmodSync(FILE, 0o600); } catch { /* mode는 신규생성 시에만 적용 — 덮어쓰기에도 0600 보장 */ }
@@ -252,6 +274,22 @@ export function getProxyById(id) {
   return p ? normalizeProxy(p) : defaultProxy();
 }
 
+/**
+ * 76회차 F3(재현 — 중간): 매핑이 **실제로 만들어진** 중계. 매핑의 proxyId 가 지워진 프록시를 가리키면 null 이다 — getProxyById 처럼
+ *   기본 프록시로 바꿔 끼우지 않는다. 예전 게이트웨이(SSH · RDP)는 getProxyById 의 기본 프록시 폴백으로 **기본 프록시 주소 + 그 매핑의 공개 포트**에
+ *   접속했는데, 공개 포트는 프록시마다 따로 매기므로(nextPublicPort) 기본 프록시에서 같은 포트는 **다른 매핑의 대상**이다 —
+ *   화면은 '연결 중 <원래 대상>' 인데 다른 장비로 붙고 입력한 비밀번호(SSH · RDP 티켓)가 그쪽으로 갔다(호스트키가 관찰 모드면 막지 못한다).
+ *   범위 계정은 mappingTargetScopeIssue 의 중계 대조가 이미 막았고, 전체 범위 계정(소유자 · admin)이 그대로 지났다.
+ */
+/** 76회차 F3: 매핑의 중계가 지워졌을 때의 문구(SSH 상태 줄 · /rdp/:id) — 게이트웨이 닫힘 사유는 'mapping-proxy-gone'(웹 remote/sshSend.js 표와 1:1). */
+export const MAPPING_PROXY_GONE_TEXT = '이 접속 매핑의 중계 서버(프록시)가 삭제되어 접속하지 않았습니다 — 매핑을 지우고 다시 접속하면 지금 배정된 중계로 만들어집니다.';
+export function mappingProxyOf(m) {
+  const id = m?.proxyId;
+  if (!id || id === 'default') return defaultProxy();
+  const p = load().proxies.find((x) => x.id === id);
+  return p ? normalizeProxy(p) : null;
+}
+
 /** Pick the proxy assigned to a vCenter (else the default proxy). */
 export function resolveProxy(vcenterId) {
   const extra = load().proxies.find((p) => (p.vcenterIds || []).includes(vcenterId));
@@ -370,6 +408,18 @@ export function mappingConfigIssue(m) {
   return null;
 }
 
+/*
+ * 76회차 F2(중간 — 포탈 쪽 재현 · HAProxy 거부는 2.8.0 원문 근거): 매핑 이름은 SSH 자동 배포 블록의 주석 줄(`listen ra_<id>   # <이름>`)에 들어간다.
+ *   예전에는 \r\n\t 만 지워, quick-connect(remote.access 계정)의 name 에 NUL 을 넣으면 설정 파일에 그대로 들어갔다 — HAProxy 는 줄 안의 NUL 을
+ *   'Stray NUL character' 치명 오류로 거부하고(cfgparse.c readcfgfile), 배포는 그 프록시의 **전 매핑을 한 블록으로 검증**하므로 그 매핑이 남아 있는 동안
+ *   그 프록시의 모든 배포(다른 사용자의 접속 포함)가 실패했다(R5-E5-4 와 같은 모양). 제어 문자는 공백으로 — 저장과 블록 생성(예전 저장본) 둘 다 이 함수를 쓴다.
+ */
+// eslint-disable-next-line no-control-regex
+const NAME_CTRL_RE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g;
+export function mappingNameText(v, max = 120) {
+  return String(v ?? '').replace(NAME_CTRL_RE, ' ').slice(0, max);
+}
+
 export function addMapping({ name, vcenterId, protocol, targetHost, targetPort, publicPort, proxyId, owner, ephemeral } = {}) {
   const c = load();
   protocol = PROTO_PORT[protocol] ? protocol : 'ssh';
@@ -383,7 +433,8 @@ export function addMapping({ name, vcenterId, protocol, targetHost, targetPort, 
   const pubIn = mappingPortOf(publicPort);
   if (Number.isNaN(pubIn)) return { ok: false, reason: '공개 포트는 1~65535 사이의 정수여야 합니다.' };
   // 표시 이름은 HAProxy 설정 주석(`# <name>`)에 들어가므로 개행/제어문자를 제거(설정 구조 보호).
-  name = name != null ? String(name).replace(/[\r\n\t]/g, ' ').slice(0, 120) : name;
+  // 76회차 F2: \r\n\t 만이 아니라 제어 문자 전부(mappingNameText — relaytopo INJ-02 와 같은 범위).
+  name = name != null ? mappingNameText(name) : name;
   const proxy = proxyId ? getProxyById(proxyId) : resolveProxy(vcenterId);
   const pid = proxy.id;
   publicPort = pubIn ?? nextPublicPort(pid, proxy.publicPortBase);
@@ -407,7 +458,10 @@ export function addMapping({ name, vcenterId, protocol, targetHost, targetPort, 
 /** Bump a mapping's last-used time (resets the ephemeral expiry clock). */
 export function touchMapping(id) {
   const m = getMapping(id);
-  if (m) { m.lastUsedAt = new Date().toISOString(); persist(); }
+  if (!m) return;
+  m.lastUsedAt = new Date().toISOString();
+  // 76회차 F5: 사용 시각 기록 실패(읽기 오류 · 디스크)는 접속을 막지 않는다 — WS 처리기 안에서 던지면 처리기 밖 '[fatal]' 이 된다.
+  try { persist(); } catch (e) { console.warn(`[remote] 매핑 사용 시각 저장 실패: ${String(e?.message || e).slice(0, 160)}`); }
 }
 
 /** Mappings visible to a user: admins see all; others only their own. */

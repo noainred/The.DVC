@@ -13,7 +13,11 @@ export { normalizeGuacdFlags, isLoopbackGuacdHost, guacdPlaintextRemote, rdpIgno
 export function openGuacdSocket(g, deps = {}) {
   const o = normalizeGuacdFlags(g);
   const port = Number(o.port) || 4822;
-  const host = String(o.host ?? '').trim();
+  // 76회차 F4: '[fd00::5]' 처럼 대괄호로 적은 IPv6 는 벗긴다 — net/tls.connect 는 대괄호째 이름으로 찾아 ENOTFOUND 였다
+  //   (설정 화면 경고 판정 isLoopbackGuacdHost 는 대괄호를 벗겨 '[::1]' 을 같은 호스트로 보는데 접속은 실패했다).
+  const raw = String(o.host ?? '').trim();
+  const inner = /^\[(.+)\]$/.exec(raw)?.[1];
+  const host = inner && net.isIP(inner) === 6 ? inner : raw;
   if (!o.tls) return { socket: (deps.netConnect || net.connect)(port, host), readyEvent: 'connect' };
   const opts = { ...wanTlsConnectOptions({ verify: true }), host, port };
   if (!net.isIP(host)) opts.servername = host;   // SNI · 이름 검증(IP 면 IP SAN 으로 검증된다)

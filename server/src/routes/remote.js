@@ -12,7 +12,7 @@ import { mergeScopedList, denyFleetWrite } from '../auth/scopeMerge.js';   // v2
 import {
   getConfig, getConfigSafe, saveConfig,
   listMappings, listMappingsForUser, getMapping, addMapping, removeMapping, setMappingStatus, touchMapping, mappingPortOf,
-  listProxies, listProxiesSafe, getProxyById, resolveProxy, saveProxy, removeProxy,
+  listProxies, listProxiesSafe, getProxyById, resolveProxy, saveProxy, removeProxy, mappingProxyOf, MAPPING_PROXY_GONE_TEXT,
 } from '../proxy/registry.js';
 import { testDataplane, applyMapping } from '../proxy/dataplane.js';
 import { previewConfig, testDeploy, deployToProxy } from '../proxy/deploy.js';
@@ -56,7 +56,9 @@ remoteRouter.get('/mappings', requirePerm('remote.access'), (req, res) => {
   res.json({
     ...(mine.length !== all.length ? { omittedOutOfScope: all.length - mine.length, scoped: true } : {}),
     mappings: mine.map(({ error, ...m }) => {
-      const p = mappingProxy(m);
+      // 76회차 F3: 중계가 지워진 매핑에 기본 프록시 주소를 보이지 않는다 — 기본 프록시:같은 공개 포트는 다른 매핑의 대상이다(수동 접속이 그리로 간다).
+      const p = mappingProxyOf(m);
+      if (!p) return { ...m, proxyName: '', proxyHost: '', proxyGone: true, guacdConfigured: false };
       return { ...m, proxyName: p.name, proxyHost: p.proxyHost, guacdConfigured: !!p.guacd?.host };
     }),
   });
@@ -512,7 +514,10 @@ remoteRouter.get('/rdp/:id', requirePerm('remote.access'), (req, res) => {
     // v2.770(점검 R5-E5-1): (vcenterId, targetHost) 쌍 + 매핑의 중계 — WS mappingAccessIssue 와 같은 판정.
     if (mappingTargetScopeIssue(store.get(), scopedVcenterIds(req.user, store.get()), m, { proxyIdOf })) return res.status(404).end();
   }
-  const proxyHost = mappingProxy(m).proxyHost;
+  // 76회차 F3: 매핑의 중계가 지워졌으면 .rdp 를 만들지 않는다 — 기본 프록시 + 같은 공개 포트는 다른 매핑의 대상이다(게이트웨이와 같은 판정).
+  const via = mappingProxyOf(m);
+  if (!via) return res.status(409).json({ ok: false, reason: MAPPING_PROXY_GONE_TEXT });
+  const proxyHost = via.proxyHost;
   const host = proxyHost || m.targetHost;
   const port = proxyHost ? m.publicPort : m.targetPort;
   const rdp = [

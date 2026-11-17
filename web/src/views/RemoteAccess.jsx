@@ -201,8 +201,8 @@ export default function RemoteAccess() {
                 </td>
                 <td><span className="badge blue">{m.protocol.toUpperCase()}</span></td>
                 <td>{m.targetHost}:{m.targetPort}</td>
-                <td className="muted" style={{ fontSize: 12 }}>{m.proxyName || '기본'}</td>
-                <td>{m.proxyHost ? `${m.proxyHost}:${m.publicPort}` : m.publicPort}</td>
+                <td className="muted" style={{ fontSize: 12 }}>{m.proxyGone ? '중계 서버 삭제됨' : (m.proxyName || '기본')}</td>
+                <td>{m.proxyGone ? '—' : (m.proxyHost ? `${m.proxyHost}:${m.publicPort}` : m.publicPort)}</td>
                 <td><span className={`badge ${STATUS_BADGE[m.status] || 'gray'}`}>{m.status}</span></td>
                 <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                   {m.protocol === 'ssh'
