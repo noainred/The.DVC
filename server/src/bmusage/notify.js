@@ -107,7 +107,7 @@ async function runCycle(rows, settings) {
    * 8a단계 ① 정비 창(설계 §20 ⑲ — 판정 코어 maint/judge.js 하나): 창 안 발화는 보내지 않고 상태에 표지를 단다 → 창 뒤에도 초과면 그때 1회(‘창 안부터 초과’).
    *   판정기를 못 만들면(파일 손상 등) 억제하지 않는다(알림이 나가는 쪽). 규약 · 상태 모양은 maint/alertHold.js 머리말.
    */
-  let fires = fires0; let maintOut = null;
+  let fires = fires0; let maintOut = null; let countAfter = null;
   try {
     const R = await import('./maint/runtime.js');
     const J = settings.maintJudge || await R.maintJudge({ now });
@@ -117,12 +117,15 @@ async function runCycle(rows, settings) {
     fires = H.send;
     for (const a of H.applied) R.noteApplied('alerts', a.key, a.until, a.ids, now, { occ: a.occ || null });   // 창마다(3회차 D3)
     for (const ids of H.counted) R.countSuppression('alerts', ids, { now });
-    for (const f of H.send) if (f.afterMaint) R.countSuppression('after', f.maintIds || [], { now });
+    // 83회차(82회차 '남긴 것' ② 반증 — 재현): '정비 창 뒤 첫 발화' 계수는 **실제로 보내는 것만** — 주기 상한(MAX_SEND)에 잘린 발화는 다음 주기에 다시 판정돼
+    //   거기서 센다(예전에는 이번에도 세어 같은 발화가 두 번 셌다). 아래 take 를 정한 뒤 센다.
+    countAfter = (f) => R.countSuppression('after', f.maintIds || [], { now });
     maintOut = { held: H.held, heldNew: H.heldNew, after: H.after };
   } catch (e) { maintOut = { error: String(e?.message || e).slice(0, 120) }; }
   // ⚠ 위험한 것(초과)을 먼저 — 상한에 걸려 잘릴 때 해제 알림이 초과를 밀어내면 안 된다.
   const ordered = [...fires].sort((a, b) => (a.kind === b.kind ? 0 : a.kind === 'over' ? -1 : 1));
   const take = ordered.slice(0, MAX_SEND);
+  if (countAfter) for (const f of take) if (f.afterMaint) { try { countAfter(f); } catch { /* 통계 — 발송을 막지 않는다 */ } }
   /*
    * 82회차 F1(재현): 상한을 넘겨 이번에 보내지 않은 발화는 **상태를 되돌려 다음 주기에 다시 판정**한다(형제 perfAlerts.dispatch 의 deferred 와 같은 규칙 —
    *   idrac-server.md 8b 반증 F6). 예전에는 evaluateRows 가 찍은 notifiedAt 을 그대로 저장해, 잘린 초과는 한 번도 보내지 않았는데 ‘알림’ 으로 기록돼

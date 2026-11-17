@@ -1023,7 +1023,8 @@ export function lastPruneNote(lp, now = Date.now()) {
   // 82회차 F2: 보존 기간을 정하는 설정 파일을 못 읽은 동안 서버는 그 정리를 멈춘다(held) — ‘정리했다’ 로 읽히지 않게 무엇을 멈췄는지 말한다.
   const HELD = { settings: '사용률 설정(원시 · 시간 · 일 · 장치 · 프로세스 상위)', 'perf-rules': '알림 규칙(집중 · 변경 이벤트 · 로그 · 프로세스 상위)' };
   const held = Array.isArray(lp.held) ? lp.held.filter((x) => HELD[x]) : [];
-  const heldText = held.length ? ` — **보존 정리 멈춤**: ${held.map((x) => HELD[x]).join(' · ')} 파일을 읽지 못해 그 보존 기간으로는 지우지 않았습니다(서비스 점검에서 확정하거나 파일을 되돌리면 다시 정리합니다)` : '';
+  // 83회차: 멈춤에 끝이 없으면 무상한 증가라 서버는 그동안 설정이 허용하는 가장 긴 보존으로만 지운다(heldMax) — 그 사실도 말한다.
+  const heldText = held.length ? ` — **보존 정리 멈춤**: ${held.map((x) => HELD[x]).join(' · ')} 파일을 읽지 못해 그 보존 기간으로는 지우지 않았습니다${lp.heldMax ? '(그동안은 설정이 허용하는 가장 긴 보존보다 오래된 것만 지웁니다)' : ''} — 서비스 점검에서 확정하거나 파일을 되돌리면 설정값으로 다시 정리합니다` : '';
   return `마지막 정리 ${when}${del}${lp.done === false ? ' (다음 정리에서 이어서 지웁니다)' : ''}${heldText}`;
 }
 

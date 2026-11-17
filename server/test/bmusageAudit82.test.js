@@ -190,12 +190,12 @@ test('F2 보존 정리 — 규칙 파일을 못 읽은 동안 변경 이벤트�
   assert.ok(!r2.held, '보류 없음');
   const ev2 = await O.changeEventsRange({ key: 'srv1', agent: '', from: now - 200 * DAY, to: now });
   assert.equal((ev2?.rows || ev2 || []).length, 0, '기본 보관(30일) 밖이라 지웠다');
-  // 사용률 설정 파일 손상 — 원시 · 일 · 시간 보존 정리(pruneUsage)를 부르지 않는다
+  // 사용률 설정 파일 손상 — 설정값(기본값)으로는 지우지 않는다. 83회차(반증): 멈춤에 끝이 없으면 무상한 증가라 설정이 허용하는 가장 긴 보존으로만 정리한다(heldMax).
   fs.writeFileSync(F('bmusage-settings.json'), '{ corrupt');
   S._resetForTest();
   assert.ok(S.bmUsageLocalLoadError(), '로컬 설정 로드 오류');
   const r3 = await P.pruneTick({ every: 1 });
   assert.ok(r3.held.includes('settings'));
-  assert.equal('rawDeleted' in r3, false, '사용률 보존 정리를 돌리지 않았다');
+  assert.equal(r3.heldMax, true, '83회차: 상한 보존으로만 정리(기본값 정리는 하지 않는다 — rebut83 이 지운 범위를 고정)');
   assert.deepEqual(P.bmUsageStatus().lastPrune.held, ['settings']);
 });

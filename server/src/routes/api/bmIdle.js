@@ -81,7 +81,7 @@ export async function bmIdleFleet(req, snap, deps = {}) {
     const sn = rec?.snap; if (!sn) continue;
     const byKey = new Map((sn.targets || []).map((x) => [t(x.key), x]));
     const id = sn.idle || null;
-    sources.push({ node: rec.agent, via: 'edge', at: id?.at ?? null, day: id?.day ?? null, firstDay: id?.firstDay ?? null, ...(sn.idleVer == null ? { old: true } : {}), ...(id ? {} : { none: true }), ...(id?.unreadable ? { unreadable: true } : {}), ...(id?.truncated ? { truncated: id.truncated } : {}) });
+    sources.push({ node: rec.agent, via: 'edge', at: id?.at ?? null, day: id?.day ?? null, firstDay: id?.firstDay ?? null, ...(sn.idleVer == null ? { old: true } : {}), ...(id ? {} : { none: true }), ...(id?.unreadable ? { unreadable: true } : {}), ...(id?.readError ? { readError: true } : {}), ...(id?.truncated ? { truncated: id.truncated } : {}) });
     for (const r of id?.rows || []) { const tgt = byKey.get(r.key); rows.push({ ...r, via: 'edge', node: rec.agent, name: String(tgt?.name || r.key), vcenterId: t(tgt?.vcenterId) }); }
   }
   const visible0 = rows.filter((r) => !allowed || (r.vcenterId && allowed.has(r.vcenterId)));

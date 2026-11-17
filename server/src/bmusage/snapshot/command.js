@@ -53,8 +53,24 @@ const IO_AWK = "awk -F'[/:]' '"
   + 'else { a[k] = v; q[$3] = 1 } } '
   + 'END { n = 0; for (x in q) n++; print "readable=" n; if (ti >= 2) print "span=" (t[2] - t[1]); '
   + `for (i = 1; i <= ${SNAPSHOT_IO_MAX}; i++) { best = ""; bv = 0; for (x in s) if (!(x in done) && r[x] + w[x] > bv) { bv = r[x] + w[x]; best = x } `
-  + 'if (best == "") break; done[best] = 1; nm = "?"; f = "/proc/" best "/comm"; if ((getline nm < f) <= 0) nm = "?"; close(f); '
-  + 'print "io " best " " r[best] " " w[best] " " substr(nm, 1, 32) } }\'';
+  // 83회차(80회차 E1 — 8b 규칙 'awk getline 으로 /proc 을 읽지 않는다'): 이름은 여기서 읽지 않고 자리표 '?' 만 둔다 — mawk 는 열린 뒤 끝난 프로세스의
+  //   /proc/<pid>/comm 읽기 오류(ESRCH)를 프로그램 전체 중단으로 다뤄 IO 구획이 중간에서 끊길 수 있었다. 이름은 셸이 고른 pid 만 grep 으로 읽어 NAME_AWK 가 붙인다.
+  + 'if (best == "") break; done[best] = 1; '
+  + 'print "io " best " " r[best] " " w[best] " ?" } }\'';
+/*
+ * 83회차(80회차 E1): IO 상위 pid 의 이름 — 셸이 /proc/<pid>/comm 을 grep -H 한 번(시한 SNAPSHOT_COMM_TIMEOUT_S · 줄 단위)으로 읽어 `N /proc/<pid>/comm:<이름>` 을 넘기고
+ *   awk 는 입력 줄만 받아 io 줄의 자리표를 바꾼다(Top-N 8b 의 후보 stat 읽기와 같은 방식). 개행 든 comm 은 pid 마다 첫 줄만 · 출력 가능한 ASCII 밖은 '?' ·
+ *   읽지 못한 pid 는 '?' 그대로(0 줄이 아니다). 파일 이름에는 ':' 가 없어 첫 ':' 앞이 파일 이름이다.
+ */
+export const SNAPSHOT_COMM_TIMEOUT_S = 1;
+const NAME_AWK = "awk '$1 == \"N\" { l = substr($0, 3); i = index(l, \":\"); if (i < 1) next; p = substr(l, 1, i - 1); c = substr(l, i + 1); "
+  + 'sub(/^\\/proc\\//, "", p); sub(/\\/comm$/, "", p); if (p !~ /^[0-9]+$/) next; if (p in nm) next; gsub(/[^ -~]/, "?", c); nm[p] = c; next } '
+  + '{ o[++n] = $0 } END { for (k = 1; k <= n; k++) { l = o[k]; if (l ~ /^io [0-9]+ [0-9]+ [0-9]+ /) { split(l, a, " "); if ((a[2] in nm) && nm[a[2]] != "") { sub(/ [^ ]*$/, "", l); l = l " " substr(nm[a[2]], 1, 32) } } print l } }\'';
+const IO_PIDS = "awk '$1 == \"io\" && $2 ~ /^[0-9]+$/ { print $2 }'";
+/** IO 구획 본문(진단 · 집중 공용 — 상위 수만 다르다). 두 표본 → 차이(awk) → 상위 pid 의 이름(셸 grep · 시한) → 붙이기(awk). */
+const ioSection = (top) => `_si=$({ ${UPTIME}; ${IO_SAMPLE}; echo '@@'; sleep ${SNAPSHOT_IO_GAP_S}; ${UPTIME}; ${IO_SAMPLE}; } 2>/dev/null | ${IO_AWK} | head -n ${top + 2}); `
+  + `_sp=$(printf '%s\\n' "$_si" | ${IO_PIDS}); `
+  + `{ printf '%s\\n' "$_si"; if [ -n "$_sp" ]; then timeout ${SNAPSHOT_COMM_TIMEOUT_S} grep -s -H --line-buffered '' $(for _p in $_sp; do printf '/proc/%s/comm ' "$_p"; done) 2>/dev/null | head -n ${top * 4} | sed 's/^/N /'; fi; } | ${NAME_AWK} | cut -c1-120;`;
 /*
  * 80회차 F2(재현 — 8b 반증 S1 의 형제): /proc/<pid>/io 읽기는 대상 프로세스의 exec 잠금을 기다릴 수 있다 — 예전에는 시한이 없어 한 프로세스가 붙잡으면
  *   진단 스냅샷 명령 전체가 exec 시한(30초)에 걸려 **전 구획**(ps 상위 · ss · 커널 로그)을 잃었다(집중 모니터링 경량 스냅샷은 그 분 12초를 잃었다).
@@ -64,6 +80,8 @@ const IO_AWK = "awk -F'[/:]' '"
 export const SNAPSHOT_IO_TIMEOUT_S = 2;
 const IO_SAMPLE = `timeout ${SNAPSHOT_IO_TIMEOUT_S} grep -s -H --line-buffered -E '^(read_bytes|write_bytes):' /proc/[0-9]*/io`;
 const UPTIME = "awk '{print \"t=\" $1}' /proc/uptime";
+/** 83회차(80회차 F2 형제 — 8b 반증 S1 'ps 는 전부 timeout'): ps 는 대상 프로세스의 /proc 읽기에서 멈출 수 있다 — 시한 없이 멈추면 명령 전체가 exec 시한에 걸려 전 구획을 잃었다. */
+export const SNAPSHOT_PS_TIMEOUT_S = 2;
 
 /**
  * 스냅샷 명령(상수) — 함수가 아니라 값이다(인자를 받을 자리가 없다).
@@ -71,10 +89,10 @@ const UPTIME = "awk '{print \"t=\" $1}' /proc/uptime";
  */
 export const SNAPSHOT_COMMAND = Object.freeze([
   'export LC_ALL=C; {',
-  `echo '##PSCPU'; ps -e -o pid=,user=,pcpu=,rss=,comm= --sort=-pcpu 2>/dev/null | head -n ${SNAPSHOT_PS_MAX} | cut -c1-${W.PS};`,
-  `echo '##PSMEM'; ps -e -o pid=,user=,pcpu=,rss=,comm= --sort=-rss 2>/dev/null | head -n ${SNAPSHOT_PS_MAX} | cut -c1-${W.PS};`,
+  `echo '##PSCPU'; timeout ${SNAPSHOT_PS_TIMEOUT_S} ps -e -o pid=,user=,pcpu=,rss=,comm= --sort=-pcpu 2>/dev/null | head -n ${SNAPSHOT_PS_MAX} | cut -c1-${W.PS};`,
+  `echo '##PSMEM'; timeout ${SNAPSHOT_PS_TIMEOUT_S} ps -e -o pid=,user=,pcpu=,rss=,comm= --sort=-rss 2>/dev/null | head -n ${SNAPSHOT_PS_MAX} | cut -c1-${W.PS};`,
   "echo '##PIDS'; ls -d /proc/[0-9]* 2>/dev/null | wc -l;",
-  `echo '##IO'; { ${UPTIME}; ${IO_SAMPLE}; echo '@@'; sleep ${SNAPSHOT_IO_GAP_S}; ${UPTIME}; ${IO_SAMPLE}; } 2>/dev/null | ${IO_AWK} | head -n ${SNAPSHOT_IO_MAX + 2} | cut -c1-120;`,
+  `echo '##IO'; ${ioSection(SNAPSHOT_IO_MAX)}`,
   `echo '##SS'; ss -s 2>/dev/null | head -n ${SNAPSHOT_SS_MAX} | cut -c1-${W.SS};`,
   // 반증 R6: 커널 로그 줄마다 `d:` 접두 — 이어진 줄(들여쓰기)이나 메시지 안 문자열이 ‘##IO’ 같은 표지가 되지 못하게(파서가 벗긴다).
   `echo '##DMESG'; dmesg --level=err,warn -T 2>&1 | tail -n ${SNAPSHOT_DMESG_MAX} | cut -c1-${W.DMESG} | sed 's/^/d:/';`,
@@ -92,9 +110,9 @@ export const FOCUS_SNAPSHOT_TOP = 5;
 export const FOCUS_SNAPSHOT_OUTPUT_MAX = 16 * 1024;
 export const FOCUS_SNAPSHOT_COMMAND = Object.freeze([
   'export LC_ALL=C; {',
-  `echo '##PSCPU'; ps -e -o pid=,user=,pcpu=,rss=,comm= --sort=-pcpu 2>/dev/null | head -n ${FOCUS_SNAPSHOT_TOP} | cut -c1-${W.PS};`,
+  `echo '##PSCPU'; timeout ${SNAPSHOT_PS_TIMEOUT_S} ps -e -o pid=,user=,pcpu=,rss=,comm= --sort=-pcpu 2>/dev/null | head -n ${FOCUS_SNAPSHOT_TOP} | cut -c1-${W.PS};`,
   "echo '##PIDS'; ls -d /proc/[0-9]* 2>/dev/null | wc -l;",
-  `echo '##IO'; { ${UPTIME}; ${IO_SAMPLE}; echo '@@'; sleep ${SNAPSHOT_IO_GAP_S}; ${UPTIME}; ${IO_SAMPLE}; } 2>/dev/null | ${IO_AWK} | head -n ${FOCUS_SNAPSHOT_TOP + 2} | cut -c1-120;`,
+  `echo '##IO'; ${ioSection(FOCUS_SNAPSHOT_TOP)}`,
   `echo '##SS'; ss -s 2>/dev/null | head -n 8 | cut -c1-${W.SS};`,
   "echo '##END';",
   `} | head -c ${FOCUS_SNAPSHOT_OUTPUT_MAX}`,

@@ -196,13 +196,14 @@ export function envelopePowerCaps(targets = [], keys = new Set(), { inventoryOf 
 /** 8b단계 봉투 필드 — 표지(topVer · idleVer)는 계산 전에도 싣는다(중앙이 ‘값 없음’ 과 ‘구버전’ 을 가른다). 실패해도 봉투는 나간다. */
 export const TOP_VER = 1;
 export const IDLE_VER = 1;
-const IDLE_FIELDS = ['key', 'status', 'reason', 'score', 'days', 'excludedDays', 'grades', 'dropped', 'metrics', 'periodic', 'candSince', 'candLeft'];
+const IDLE_FIELDS = ['key', 'status', 'reason', 'score', 'days', 'excludedDays', 'grades', 'dropped', 'metrics', 'periodic', 'candSince', 'candLeft', 'unreadPeriods'];   // 83회차: 기간 일부 못 읽음(수)
 async function envelopeIdle(keys) {
   const out = { topVer: TOP_VER, idleVer: IDLE_VER };
   try {
     const I = (await import('./idle.js')).loadIdle();
     if (I) {
-      out.idle = I.unreadable ? { unreadable: true, rows: [] }
+      // 83회차(81회차 결정): 읽기 오류(readError — 원본 그대로)를 손상(보존본으로 옮김)과 갈라 싣는다 — 중앙 화면이 '손상본 보존' 이라 말하지 않게.
+      out.idle = I.unreadable ? { unreadable: true, ...(I.readError ? { readError: true } : {}), rows: [] }
         : { at: I.at, day: I.day, firstDay: I.firstDay || null, cfg: I.cfg, history: I.history || [], ...(I.truncated ? { truncated: 'rows-cap' } : {}),
           rows: (I.rows || []).filter((r) => keys.has(t(r.key))).map((r) => Object.fromEntries(IDLE_FIELDS.filter((k) => r[k] !== undefined && r[k] !== null).map((k) => [k, r[k]]))) };
     }
@@ -226,7 +227,7 @@ async function envelopeMaintCapacity(keys) {
   try {
     const C = (await import('./capacity.js')).loadCapacity();
     if (C) {
-      out.capacity = C.unreadable ? { unreadable: true, rows: [] }
+      out.capacity = C.unreadable ? { unreadable: true, ...(C.readError ? { readError: true } : {}), rows: [] }   // 83회차: 읽기 오류 ≠ 손상
         : { at: C.at, day: C.day, cfg: C.cfg, ...(C.truncated ? { truncated: 'rows-cap' } : {}), ...(C.cap ? { cap: C.cap } : {}),
           rows: (C.rows || []).filter((r) => keys.has(t(r.key))).map((r) => Object.fromEntries(CAP_FIELDS.filter((k) => r[k] !== undefined && r[k] !== null).map((k) => [k, r[k]]))) };
     }

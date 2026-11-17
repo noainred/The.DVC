@@ -60,7 +60,7 @@ export async function bmCapacityFleet(req, snap, deps = {}) {
     const byKey = new Map((sn.targets || []).map((x) => [t(x.key), x]));
     const cap = sn.capacity || null;
     // 구버전(표지 없음) · 아직 계산 전 · 손상을 각각 밝힌다 — 행이 없는 것을 ‘소진 없음’ 으로 보이지 않게.
-    sources.push({ node: rec.agent, via: 'edge', at: cap?.at ?? null, day: cap?.day ?? null, ...(sn.capacityVer == null ? { old: true } : {}), ...(cap ? {} : { none: true }), ...(cap?.unreadable ? { unreadable: true } : {}), ...(cap?.truncated ? { truncated: cap.truncated } : {}), ...(cap?.cap ? { cap: cap.cap } : {}) });
+    sources.push({ node: rec.agent, via: 'edge', at: cap?.at ?? null, day: cap?.day ?? null, ...(sn.capacityVer == null ? { old: true } : {}), ...(cap ? {} : { none: true }), ...(cap?.unreadable ? { unreadable: true } : {}), ...(cap?.readError ? { readError: true } : {}), ...(cap?.truncated ? { truncated: cap.truncated } : {}), ...(cap?.cap ? { cap: cap.cap } : {}) });
     for (const r of cap?.rows || []) { const tgt = byKey.get(r.key); rows.push({ ...r, via: 'edge', node: rec.agent, name: String(tgt?.name || r.key), vcenterId: t(tgt?.vcenterId) }); }
   }
   const visible = rows.filter((r) => !allowed || (r.vcenterId && allowed.has(r.vcenterId)));

@@ -380,7 +380,8 @@ async function tick(sess, idx) {
   const [os, idrac] = await Promise.all([
     sess.hasOs ? withSlot(() => withDeadline(FOCUS_DEADLINE_MS, (signal) => _D.collectOs(osHostNow, {
       signal, budgetMs: FOCUS_BUDGET_MS, partitionIo: !!st.partitionIo, blkqMax: st.blkqMax, peakWindowS: Math.min(FOCUS_PEAK_WINDOW_S, Number(st.peakWindowS ?? FOCUS_PEAK_WINDOW_S) || 0),
-      extraCommands: [{ name: 'snap', cmd: FOCUS_SNAPSHOT_COMMAND, timeoutMs: 12_000, maxBytes: 16 * 1024 }],
+      // 83회차: 경량 스냅샷 안 시한 합(ps 2 · io 2+2 · 간격 2 · 이름 1 = 9초) + 여유 5초 ≤ 이 시한(산수 시험 bmTop8bBudget · rebut83) — ps 에도 시한을 붙여 12 → 15초.
+      extraCommands: [{ name: 'snap', cmd: FOCUS_SNAPSHOT_COMMAND, timeoutMs: 15_000, maxBytes: 16 * 1024 }],
       // 8b 반증 F10: 집중 모니터링은 프로세스 Top-N exec 을 돌리지 않는다(자체 스냅샷 ps 상위가 있다 · top 값은 저장하지 않는다 — 매 분 top 대기 · /proc 읽기를 더하지 않게).
       top: false,
     }), '집중 수집 시한 초과').catch((e) => ({ ok: false, error: String(e?.message || e).slice(0, 300) })), { priority: true, waitMs, onBusy: busy }) : null,

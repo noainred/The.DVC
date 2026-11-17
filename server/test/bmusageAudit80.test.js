@@ -83,7 +83,7 @@ function waitsSum(cmd) {
 test('F2 — 스냅샷 /proc/<pid>/io 읽기는 표본마다 timeout 안 · 줄 단위 출력 — 안 대기 합 + 여유 ≤ exec 시한(진단 · 집중 둘 다)', () => {
   for (const [name, cmd] of [['진단', SNAP.SNAPSHOT_COMMAND], ['집중', SNAP.FOCUS_SNAPSHOT_COMMAND]]) {
     const reads = [...cmd.matchAll(/(\S+ \S+ )?grep -s -H /g)];
-    assert.equal(reads.length, 2, `${name}: io 표본 두 번`);
+    assert.equal(reads.length, 3, `${name}: io 표본 두 번 + 이름(comm) 한 번(83회차 E1)`);
     for (const m of reads) assert.match(m[1] || '', /^timeout \d+ $/, `${name}: 시한 없는 io 읽기`);
     assert.equal([...cmd.matchAll(/grep -s -H --line-buffered -E '\^\(read_bytes\|write_bytes\):' \/proc\/\[0-9\]\*\/io/g)].length, 2, `${name}: --line-buffered`);
   }

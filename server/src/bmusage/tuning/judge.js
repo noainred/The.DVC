@@ -106,6 +106,11 @@ export const CUSTOM_RULES = Object.freeze({
  */
 export function noSchedChoice(d) {
   const l = Array.isArray(d?.schedulers) ? d.schedulers : [];
+  // 83회차(80회차 F1 반증 — 재현): 늘 blk-mq 인 물리 디스크(sd* SCSI · vd* virtio · xvd* Xen · hd*)는 빼낸다 — 그 장치의 '[none]' 하나는 '고를 수 없는 장치' 가
+  //   아니라 스케줄러 모듈이 올라오지 않은 것(mq-deadline 이 모듈인 커널)이라 권고(mq-deadline — modprobe · udev)가 맞고, 화면 문구('LVM · 소프트웨어 RAID 같은
+  //   논리 장치 — 아래 물리 디스크의 스케줄러를 봅니다')도 물리 디스크에는 사실이 아니다. nvme* 는 남긴다 — 다중 경로 머리(nvme0n1)는 bio 기반이라 정말 고를 수 없다.
+  //   (파서가 대괄호를 버려 '[none]' 과 'none' 을 가를 수 없다 — 이름으로 가른다 · 정직 기록)
+  if (/^(sd|vd|xvd|hd)[a-z]/.test(String(d?.name || ''))) return false;
   return l.length === 1 && l[0] === 'none';
 }
 

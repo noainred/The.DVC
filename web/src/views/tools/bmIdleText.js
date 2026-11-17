@@ -29,6 +29,12 @@ export function actText(m) {
 }
 /** 상태 칸 문장 — 제외 사유 · 주기 사용 · 데이터 부족 일수. */
 export function statusText(r) {
+  const base = statusBase(r);
+  // 83회차(81회차 결정 — 부분 합): 창의 일부 기간 파일을 못 읽어 남은 기간만으로 낸 결과면 그 사실을 붙인다(데이터 부족 · 저활용으로 단정해 보이지 않게).
+  const u = num(r?.unreadPeriods);
+  return u != null && u > 0 ? `${base} · 기간 일부 못 읽음(${u})` : base;
+}
+function statusBase(r) {
   const s = STATUS_TEXT[r?.status]?.label || r?.status || '—';
   if (r?.status === 'excluded') return `${s} · ${EXCLUDE_TEXT[r.reason] || r.reason || ''}${r.reason === 'insufficient' && num(r.days) != null ? `(${r.days}일)` : ''}`;
   if (r?.status === 'periodic') return `${s}(높은 날 ${r.periodic?.highDays ?? '—'}일${r.periodic?.sameWeekday ? ' · 같은 요일' : ''})`;

@@ -238,7 +238,10 @@ export async function computeIdleServer({ agent = '', target, now = Date.now(), 
   const c = { ...IDLE_DEFAULTS, ...cfg };
   const M = deps.monthStore || await import('./monthStore.js');
   const from = now - c.windowDays * DAY_MS;
-  const dr = await M.readDailyRange({ agent, key: target.key, from, to: now }).catch(() => ({ live: [], mig: [] }));
+  // 83회차(81회차 결정 — 부분 합 규칙): 못 연 1일 연 파일(missingPeriods — 'none' 은 파일이 없을 뿐 정상) · 조회 자체 실패는 버리지 않고 센다 —
+  //   남은 기간만으로 낸 점수에 '기간 일부 못 읽음(n)' 표지(unreadPeriods)를 싣고 화면이 밝힌다(데이터 부족 · 저활용으로 단정해 보이지 않게).
+  const dr = await M.readDailyRange({ agent, key: target.key, from, to: now }).catch((e) => ({ live: [], mig: [], missingPeriods: [{ period: '*', reason: `조회 실패: ${String(e?.message || e).slice(0, 80)}` }] }));
+  const unreadPeriods = (Array.isArray(dr.missingPeriods) ? dr.missingPeriods : []).filter((x) => x && x.reason !== 'none').length;
   const daily = new Map();
   for (const r of dr.live || []) daily.set(r.day, r);
   for (const r of dr.mig || []) daily.set(r.day, M.mergeDailyRows ? M.mergeDailyRows(daily.get(r.day), r) : (daily.get(r.day) || r));
@@ -252,7 +255,7 @@ export async function computeIdleServer({ agent = '', target, now = Date.now(), 
   const sc = scoreIdle({ metrics, power, activity, cfg: c, maintActive: !!ms?.active });
   return {
     key: target.key, name: String(target.name || target.key).slice(0, 256), vcenterId: String(target.vcenterId || ''), ...sc,
-    days: metrics.days, excludedDays: excludedDays.size,
+    days: metrics.days, excludedDays: excludedDays.size, ...(unreadPeriods ? { unreadPeriods } : {}),
     metrics: { cpuAvg: metrics.cpuAvg, cpuMax: metrics.cpuMax, memAvg: metrics.memAvg, diskMax: metrics.diskMax, netMax: metrics.netMax,
       powerAvgW: power?.avgW ?? null, powerMinW: power?.minW ?? null, powerHours: power?.hours ?? null,
       ssh: activity?.ssh ?? null, focus: activity?.focus ?? null, snap: activity?.snap ?? null },
