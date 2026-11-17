@@ -6,7 +6,7 @@ import { requireRole, requirePerm } from '../../auth/auth.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { STORAGE_TYPES, collectMethodsFor, normalizeCollectMethod } from '../../storage/types.js';
-import { listDevices, listDevicesWithSecrets, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithSecret, registryLoadError, storageAccessMoved } from '../../storage/registry.js';
+import { listDevices, listDevicesWithSecrets, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithSecret, registryLoadError, storageAccessMoved, registryWriteRefusal } from '../../storage/registry.js';
 import { requireSettingsOwner } from '../admin/shared.js';
 import { localSnapshots, dropSnapshot } from '../../storage/store.js';
 import { collectDeviceNow, storagePollerStatus, pollStorageOnce, testDeviceConnection } from '../../storage/poller.js';
@@ -26,7 +26,7 @@ import { listDatacenters } from '../../datacenter/store.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
 import { devicesToCsv, sampleCsv, parseDevicesCsv, analyzeImport, methodChangeHints,
   devicesToText, sampleText, parseDevicesText, TEXT_FIELDS } from '../../storage/csv.js';
-import { enrichAdvice, selectRows } from '../../util/bulkImport.js';
+import { enrichAdvice, selectRows, fillBlankFromSaved } from '../../util/bulkImport.js';
 import { startBulkTest, publicRun, passedLines } from '../../util/bulkRun.js';
 import { requestCollect, hasPendingRequest, recentCollectDrops } from '../../storage/collectRequests.js';
 import { INTERVAL_SPEC, loadIntervalConfig, saveIntervalConfig, intervalsForAgent,
@@ -214,10 +214,12 @@ api.post('/tools/storage/devices', adminOnly, fullScopeOnly, (req, res) => {
     res.status(201).json({ ok: true, device: d });
     // v2.522: 중복 거부는 **충돌 장비를 함께** 내려준다 — 화면이 '그 장비 보기'로 필터를 풀고
     // 데려간다(사유만 주면 13개 법인·42대에서 사용자가 찾을 수 없다는 실제 신고).
-  } catch (e) { res.status(400).json({ ok: false, reason: e.message, conflict: e.conflict || null }); }
+  } catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ ok: false, reason: e.message, conflict: e.conflict || null, ...(e?.readError ? { code: e.code, readError: true } : {}) }); }   // 결정(78 남긴 것 ①): 등록부 읽기 오류는 409
 });
 
 api.delete('/tools/storage/devices/:id', adminOnly, fullScopeOnly, (req, res) => {
+  const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①): 읽기 오류 중에는 409(읽지 못한 빈 목록으로 '없음' 을 답하지 않는다)
+  if (refused) return res.status(409).json(refused);
   if (!deleteDevice(req.params.id)) return res.status(404).json({ ok: false, reason: '장비를 찾을 수 없습니다.' });
   dropSnapshot(req.params.id); // 지운 장비의 낡은 스냅샷이 화면에 유령으로 남지 않게
   logAudit({ user: req.user?.username, action: '스토리지 장비 삭제', target: req.params.id });
@@ -342,15 +344,24 @@ const dcNameMap = () => { try { const m = new Map(listDatacenters().map((x) => [
  * 가져오기 본문 → 파싱 결과(v2.513). `text` 가 오면 자유텍스트, 아니면 기존 CSV.
  * 두 경로가 **같은 행 형태**를 만들어 뒤 파이프라인(analyzeImport → saveDevice)을 공유한다.
  */
+/** 결정(78 남긴 것 ③): 행 필드 ← 저장 장비(비밀 없음). 수정 행의 빈 칸만 이것으로 채운다(storage/csv.js KEEP_ON_BLANK). */
+const ST_FROM_SAVED = {
+  name: (d) => d.name || '', username: (d) => d.username || '', collectMethod: (d) => String(d.collectMethod || '').toLowerCase(),
+  sshPort: (d) => (d.sshPort == null ? '' : String(d.sshPort)), datacenter: (d) => d.datacenterId || '', agent: (d) => d.agent || '',
+  enabled: (d) => d.enabled !== false, note: (d) => d.note || '',
+};
 function stParseBody(body = {}) {
   const raw = String(body.text ?? body.csv ?? '');
   const format = body.format === 'text' || (body.text != null && body.csv == null) ? 'text' : 'csv';
-  if (format === 'text') {
-    const r = parseDevicesText(raw, { defaults: body.defaults || {} });
-    return { ...r, format, raw };
+  const r = format === 'text'
+    ? { ...parseDevicesText(raw, { defaults: body.defaults || {} }), format, raw }
+    : { ...parseDevicesCsv(raw), warnings: [], headerUsed: null, order: TEXT_FIELDS, format, raw };
+  // 결정(78 남긴 것 ③): 수정 행(같은 host+type)의 빈 칸은 저장값 유지 — 드라이런 · 연결 테스트 · 저장이 모두 이 채운 행을 본다(드라이런 통과 = 저장 성공).
+  if (Array.isArray(r.rows) && r.rows.length) {
+    const byKey = new Map(listDevices().map((d) => [`${d.host}|${d.type}`, d]));
+    r.rows = fillBlankFromSaved(r.rows, (row) => byKey.get(`${row.host}|${row.type}`), ST_FROM_SAVED);
   }
-  const r = parseDevicesCsv(raw);
-  return { ...r, warnings: [], headerUsed: null, order: TEXT_FIELDS, format, raw };
+  return r;
 }
 
 /**
@@ -407,6 +418,8 @@ api.get('/tools/storage/devices/sample.txt', csvPerm, adminOnly, fullScopeOnly, 
  * 파일 내 중복(host+type) 검출. UI 는 검증 통과 후에만 실행 버튼을 활성화한다.
  */
 api.post('/tools/storage/devices/import', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
+  const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①): 읽기 오류 중에는 409 — 빈 목록과 대조하면 전부 '추가' 로 보인다(드라이런 포함)
+  if (refused) return res.status(409).json(refused);
   const { rows, error, warnings, headerUsed, order, format, raw } = stParseBody(req.body || {});
   if (error) return res.status(400).json({ ok: false, reason: error });
   if (!rows.length) return res.status(400).json({ ok: false, reason: '가져올 데이터 행이 없습니다.' });
@@ -465,7 +478,9 @@ api.post('/tools/storage/devices/import', csvPerm, adminOnly, fullScopeOnly, (re
   let added = 0, updated = 0; const failed = [];
 
   for (const row of sel.picked) {
-    const id = existing.get(key(row.host, row.type));
+    // 결정 작업 중 발견(재현 — decideRegistry3189 ③): v2.545 가 map 값을 장비 객체로 바꾼 뒤 여기만 `.id` 를 빠뜨려 **객체를 id 로** 넘겼다 —
+    //   saveDevice 가 그 id 로 장비를 못 찾아 신규로 보고 '같은 host 의 같은 타입 장비가 이미 등록돼 있습니다' 로 떨어졌다(드라이런은 '수정' 이라 했는데 수정 행이 전부 실패).
+    const id = existing.get(key(row.host, row.type))?.id;
     const input = {
       id, type: row.type, name: row.name, host: row.host, username: row.username,
       collectMethod: row.collectMethod, sshPort: row.sshPort, datacenterId: resolveDc(row.datacenter),
@@ -491,6 +506,8 @@ api.post('/tools/storage/devices/import', csvPerm, adminOnly, fullScopeOnly, (re
  * ⚠ 자동 재시도 없음 — 잘못된 비밀번호를 반복하면 어레이 계정이 잠긴다(bulkRun 이 강제).
  */
 api.post('/tools/storage/devices/import/test', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
+  const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①): 읽지 못한 빈 목록과 대조하지 않는다(저장 비밀번호 판정도 못 한다)
+  if (refused) return res.status(409).json(refused);
   const p = stParseBody(req.body || {});
   if (p.error) return res.status(400).json({ ok: false, reason: p.error });
 

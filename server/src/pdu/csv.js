@@ -12,12 +12,14 @@
  *
  * 멱등성: **host** 를 동일 장비 식별 키로 본다 — 같은 host 가 이미 있으면 그 id 로 수정,
  *   없으면 신규. 그래서 export → 편집 → import 왕복이 안전하다.
+ * 빈 칸(결정 78 남긴 것 ③): 수정 행의 빈 칸 · 없는 열 = 저장값 유지, 값을 지우려면 `-` 하나(새 장비는 빈 칸 · `-` 모두 기본값).
  *
  * ⚠ 센서/PDU 수량 열이 없는 것은 의도다 — 수집기가 장비에 물어 자동 탐지하므로 사람이 적을
  *   필요가 없고, 적어 두면 현장에서 센서를 늘렸을 때 CSV 가 낡은 진실이 된다.
  */
 
 import { parseCsvRows, csvLine, unguardCell, delimiterHint, CSV_BOM } from '../util/csv.js';
+import { EMPTY_MARK } from '../util/bulkText.js';
 
 export const CSV_COLUMNS = ['name', 'host', 'username', 'sshPort', 'datacenter', 'agent', 'enabled', 'note', 'password'];
 
@@ -82,6 +84,16 @@ export function csvToDevices(text, dcIdOf = (x) => x) {
     const i = cols.indexOf(key);
     return i >= 0 ? unguardCell(row[i] ?? '').trim() : '';
   };
+  // 결정(78 남긴 것 ③ — CSV 빈 칸 계약): 수정 행의 **빈 칸(또는 파일에 없는 열)** = 저장값 유지, **`-` 하나** = 비움(명시 — 새 장비면 기본값).
+  //   예전에는 빈 agent · enabled · note · datacenter 가 저장값을 덮었다 — 빈 agent 한 칸이 엣지 위임 PDU 를 중앙 직접 수집으로 바꿨다.
+  //   `_blank` = 빈 칸이었던 필드(라우트가 수정 행이면 그 키를 저장 입력에서 빼 saveDevice(normalize)가 저장값을 쓰게 한다).
+  //   비밀번호 칸은 이 표지 밖이다(빈 칸 = 유지 · `-` 도 글자 그대로 — 예전 규약).
+  const opt = (row, key, blank, field = key) => {
+    const v = at(row, key);
+    if (v === EMPTY_MARK) return '';
+    if (!v) blank.push(field);
+    return v;
+  };
 
   const rows = [];
   const errors = [];
@@ -89,25 +101,28 @@ export function csvToDevices(text, dcIdOf = (x) => x) {
     const r = raw[i];
     if (!r || r.every((c) => !String(c ?? '').trim())) continue; // 빈 줄
     const host = at(r, 'host');
-    const name = at(r, 'name');
-    if (!host && !name) continue;
+    if (!host && !at(r, 'name')) continue;
     if (!host) { errors.push(`${i + 1}행: host 가 비어 있습니다.`); continue; }
-    const portRaw = at(r, 'sshport');
-    const userRaw = at(r, 'username');
+    const blank = [];
+    const name = opt(r, 'name', blank);
+    const portRaw = opt(r, 'sshport', blank, 'sshPort');
+    const userRaw = opt(r, 'username', blank);
+    const dcRaw = opt(r, 'datacenter', blank, 'datacenterId');
+    const agent = opt(r, 'agent', blank);
+    const enabledRaw = opt(r, 'enabled', blank);
+    const note = opt(r, 'note', blank);
     rows.push({
       name: name || host,
       host,
       username: userRaw || 'apc',
       sshPort: portRaw ? Number(portRaw) : 22,
-      // 78회차 F5: 빈 칸(또는 열 없음)이었다는 표지 — 기본값('apc' · 22)은 **새 장비**에만 쓴다. 이미 있는 host 의 수정 행에서 기본값으로 덮으면
-      //   계정 · 포트가 바뀐 것으로 판정돼(saveDevice pduAccessMoved) 저장 비밀번호가 조용히 버려졌다('비워 두면 기존 값 유지' 안내와 반대).
-      //   라우트(routes/api/pdu.js csv/import)가 수정 행이면 저장값으로 채운다. 저장 경로(normalize)는 아는 필드만 읽으므로 이 표지는 저장되지 않는다.
-      ...(userRaw ? {} : { _usernameBlank: true }),
-      ...(portRaw ? {} : { _portBlank: true }),
-      datacenterId: dcIdOf(at(r, 'datacenter')) || '',
-      agent: at(r, 'agent'),
-      enabled: bool(at(r, 'enabled')),
-      note: at(r, 'note'),
+      // 78회차 F5 → 결정(78 남긴 것 ③): 기본값('apc' · 22 · 켬 · 빈 값)은 **새 장비**에만 쓴다. 수정 행에서 기본값으로 덮으면 계정 · 포트가 바뀐 것으로
+      //   판정돼(saveDevice pduAccessMoved) 저장 비밀번호가 조용히 버려졌고, 빈 agent 가 위임 장비를 중앙 직접으로 바꿨다. 저장 경로(normalize)는 아는 필드만 읽으므로 이 표지는 저장되지 않는다.
+      ...(blank.length ? { _blank: blank } : {}),
+      datacenterId: dcIdOf(dcRaw) || '',
+      agent,
+      enabled: bool(enabledRaw),
+      note,
       password: at(r, 'password'),   // 비우면 saveDevice 가 기존 값을 유지
       _line: i + 1,
     });

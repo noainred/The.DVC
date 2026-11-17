@@ -440,7 +440,7 @@ export default function SanSwitchTool() {
         </Modal>
       )}
       {canCsv() && bulkOpen && (
-        <BulkDeviceIo base="/tools/sanswitch" title="SAN 스위치 대량 등록 — CSV · 자유텍스트" keyLabel="host"
+        <BulkDeviceIo base="/tools/sanswitch" title="SAN 스위치 대량 등록 — CSV · 자유텍스트" keyLabel="host" blankKeeps
           onClose={() => setBulkOpen(false)} onDone={() => { setBulkOpen(false); load(); }} />
       )}
     </>

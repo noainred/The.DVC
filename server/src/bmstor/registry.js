@@ -16,7 +16,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { ssrfBlockReason } from '../collector/registry.js'; // v2.537: 등록 시 SSRF 정적 가드
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { makeLoadError, filterObjectElements } from '../util/registryCore.js'; // v2.613 PERSIST2613-04
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { sanitizeMounts } from './collect.js';
@@ -34,22 +34,28 @@ let cache = null;
 const loadErr = makeLoadError();
 export function registryLoadError() { load(); return loadErr.get(); }
 
+// 결정(78 남긴 것 ①): parse 실패(형식 · 복호 · 마이그레이션 포함 — 예전 try 블록과 같은 범위)만 손상이다.
+const parseDb = (text) => {
+  const j = JSON.parse(text);
+  const servers = filterObjectElements(openSecretsDeep(Array.isArray(j?.servers) ? j.servers : [])).list; // 객체 원소만 — 변형 루프가 null 에서 던지지 않게
+  // v2.340 저장분(단일 group 문자열) → groups 배열 마이그레이션(로드 시 정규화 — 다음 저장에 영속).
+  for (const s of servers) { if (!Array.isArray(s.groups)) s.groups = groupsOf(s); delete s.group; }
+  return { servers, settings: j?.settings || {} };
+};
+const WHAT = 'OS 계정 등록부(bm-storage.json)';
 function load() {
-  if (cache) return cache;
-  try {
-    if (fs.existsSync(FILE)) {
-      const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-      const servers = filterObjectElements(openSecretsDeep(Array.isArray(j?.servers) ? j.servers : [])).list; // 객체 원소만 — 변형 루프가 null 에서 던지지 않게
-      // v2.340 저장분(단일 group 문자열) → groups 배열 마이그레이션(로드 시 정규화 — 다음 저장에 영속).
-      for (const s of servers) { if (!Array.isArray(s.groups)) s.groups = groupsOf(s); delete s.group; }
-      cache = { servers, settings: j?.settings || {} };
-    }
-  } catch (e) { preserveCorrupt(FILE, e?.message); loadErr.set(e); cache = null; }
+  if (cache && !loadErr.readPending()) return cache;
+  // 손상은 보존본으로 옮기고(사유 포함) 오류를 세운다(loadErr.read). 결정(78 남긴 것 ①): 읽기 오류는 원본을 그대로 두고 · 캐시하지 않고 · 쓰기를 거절한다.
+  const r = loadErr.read(FILE, parseDb);
+  cache = r.kind === 'ok' ? r.value : null;
   if (!cache) { loadErr.checkCorruptOnly(FILE); cache = { servers: [], settings: {} }; }
   return cache;
 }
+/** 결정(78 남긴 것 ①): 읽기 오류 중의 쓰기 거절(409) 또는 null — 로드를 먼저 한다(첫 호출이 쓰기여도 상태가 서게). */
+export function registryWriteRefusal() { load(); return loadErr.writeRefusal(WHAT); }
 
 function persist() {
+  loadErr.assertWritable(WHAT); // 결정(78 남긴 것 ①): 마지막 방어선 — 어느 경로도 읽기 오류 중에 원본을 덮지 않는다(던진다)
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ servers: cache.servers, settings: cache.settings }), null, 2), { mode: 0o600 });
   loadErr.clear(); // v2.612 LEFT2612-01 과 같은 규칙
@@ -68,6 +74,7 @@ export function getBmSettings() {
 }
 
 export function saveBmSettings(body = {}) {
+  const refused = registryWriteRefusal(); if (refused) return refused;   // 결정(78 남긴 것 ①)
   const iv = Number(body.intervalMinutes);
   if (!Number.isFinite(iv) || iv < 1 || iv > 1440) return { ok: false, reason: '수집 주기는 1~1440분 사이여야 합니다.' };
   const data = load();
@@ -113,6 +120,7 @@ export const COLLECT_VIA = Object.freeze(['edge', 'central', 'auto']);
 
 /** 추가/수정 — id 있으면 수정(빈 비밀번호는 기존 유지), 없으면 신규. 검증은 저장과 단일 소스. */
 export function saveBmServer(body = {}) {
+  const refused = registryWriteRefusal(); if (refused) return refused;   // 결정(78 남긴 것 ①): 읽지 못한 빈 목록에 넣지 않는다
   const data = load();
   const r = applyServerInput(data, body, { now: Date.now() });
   if (!r.ok) return r;
@@ -300,6 +308,7 @@ export function restoreBmServerKeyRef(id, previous = {}) {
 }
 
 export function removeBmServer(id) {
+  const refused = registryWriteRefusal(); if (refused) return refused;   // 결정(78 남긴 것 ①): '서버를 찾을 수 없습니다' 보다 먼저
   const data = load();
   const next = data.servers.filter((s) => s.id !== id);
   if (next.length === data.servers.length) return { ok: false, reason: '서버를 찾을 수 없습니다.' };

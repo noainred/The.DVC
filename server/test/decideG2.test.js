@@ -384,6 +384,7 @@ test('스윕: G2 모듈은 공용 로더로 읽는다 — 읽기와 파싱을 �
     assert.doesNotMatch(s.replace(/JSON\.parse\(fs\.readFileSync\(STATE_FILE\(\)/g, ''), /JSON\.parse\(fs\.readFileSync\(/, `${rel}: 읽기와 파싱을 한 식에 묶었다`);
   }
   // 로더 자신: 읽기 단계 실패는 preserveCorrupt 로 가지 않는다
-  const u = stripComments(fs.readFileSync(path.join(SRC, 'util/jsonFileLoad.js'), 'utf8'));
+  // 결정(78 남긴 것 ①): 읽기 판정은 순환을 피해 util/jsonFileRead.js 로 떼어 냈다(jsonFileLoad 는 그것을 다시 내보낸다) — 같은 판정을 그 파일에서 본다.
+  const u = stripComments(fs.readFileSync(path.join(SRC, 'util/jsonFileRead.js'), 'utf8'));
   assert.match(u, /try \{ text = fs\.readFileSync\(file, 'utf8'\); \} catch \(e\) \{\s*if \(e\?\.code === 'ENOENT'\) return \{ kind: 'missing' \};\s*return \{ kind: 'read-error', error: e \};/);
 });

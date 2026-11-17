@@ -473,6 +473,7 @@ function CsvModal({ onClose }) {
         <div className="muted" style={{ fontSize: 12.5, marginBottom: 10, lineHeight: 1.6 }}>
           열: <code>name, host, username, sshPort, datacenter, agent, enabled, note, password</code><br />
           같은 <b>host</b> 가 이미 있으면 <b>수정</b>, 없으면 추가됩니다(내보내기 → 편집 → 가져오기 왕복 안전).{' '}
+          수정 행의 <b>빈 칸은 기존 값을 유지</b>합니다(agent 를 비워도 중앙 직접으로 바뀌지 않습니다) — 값을 지우려면 그 칸에 ‘-’ 하나를 적으세요. 새 장비의 빈 칸은 기본값입니다.{' '}
           <b>비밀번호는 내보내지 않습니다</b>(가져오기에서 비워 두면 기존 값 유지).
           센서/PDU 수량 열이 없는 것은 의도입니다 — 자동 탐지합니다.
         </div>

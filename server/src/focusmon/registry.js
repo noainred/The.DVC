@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { makeLoadError, filterObjectElements } from '../util/registryCore.js';
 import { strictIpv4Num } from '../util/ipv4.js';
 import { ipBlockReason } from '../util/ssrfBlock.js';
@@ -75,15 +75,18 @@ function normSettings(x = {}) {
   return out;
 }
 
+// 결정(78 남긴 것 ①): parse 실패(형식 · 정규화 포함 — 예전 try 블록과 같은 범위)만 손상이다.
+const parseDb = (text) => {
+  const j = JSON.parse(text);
+  const list = filterObjectElements(Array.isArray(j?.targets) ? j.targets : []).list.map(normTarget).filter(Boolean);
+  return { targets: list, settings: normSettings(j?.settings), groups: withUsedGroups(Array.isArray(j?.groups) ? j.groups : [], list) };
+};
 function load() {
-  if (cache) return cache;
-  try {
-    if (fs.existsSync(FILE())) {
-      const j = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
-      const list = filterObjectElements(Array.isArray(j?.targets) ? j.targets : []).list.map(normTarget).filter(Boolean);
-      cache = { targets: list, settings: normSettings(j?.settings), groups: withUsedGroups(Array.isArray(j?.groups) ? j.groups : [], list) };
-    }
-  } catch (e) { preserveCorrupt(FILE(), e?.message); loadErr.set(e); cache = null; }
+  if (cache && !loadErr.readPending()) return cache;
+  // 손상은 보존본으로 옮기고(사유 포함) 오류를 세운다(loadErr.read). 결정(78 남긴 것 ①): 읽기 오류(EACCES · EIO · EISDIR)는 원본을 그대로 두고 ·
+  //   이 빈 값을 캐시로 믿지 않고(30초마다 다시 읽음 — 읽히면 저절로 풀린다) · 쓰기는 아래 writeRefusal 이 예전처럼 거절한다.
+  const r = loadErr.read(FILE(), parseDb);
+  cache = r.kind === 'ok' ? r.value : null;
   if (!cache) { loadErr.checkCorruptOnly(FILE()); cache = { targets: [], settings: normSettings(), groups: [] }; }
   return cache;
 }
@@ -97,6 +100,7 @@ function withUsedGroups(list, targets) {
   return out;
 }
 function persist(next) {
+  loadErr.assertWritable('집중 모니터링 등록부(focusmon-targets.json)'); // 결정(78 남긴 것 ①): 마지막 방어선 — 읽기 오류 중에 원본을 덮지 않는다(던진다)
   next = { ...next, groups: withUsedGroups(next.groups || [], next.targets || []) };
   fs.mkdirSync(path.dirname(FILE()), { recursive: true });
   atomicWriteFileSync(FILE(), JSON.stringify(next, null, 2), { mode: 0o600 });
@@ -108,7 +112,10 @@ function persist(next) {
 function writeRefusal() {
   load();
   const e = loadErr.get();
-  return e ? { ok: false, code: 'registry-unreadable', reason: '집중 모니터링 등록부(focusmon-targets.json)를 읽지 못해 저장하지 않았습니다 — 손상 보존본을 확인하세요.' } : null;
+  if (!e) return null;
+  // 결정(78 남긴 것 ①): 읽기 오류는 조치가 다르다(손상 보존본이 없다 — 원본이 그 자리에 있다).
+  if (e.readError) { const { status: _s, ...ref } = loadErr.writeRefusal('집중 모니터링 등록부(focusmon-targets.json)'); void _s; return ref; }   // 상태 코드는 이 모듈의 라우트 규약(503)
+  return { ok: false, code: 'registry-unreadable', reason: '집중 모니터링 등록부(focusmon-targets.json)를 읽지 못해 저장하지 않았습니다 — 손상 보존본을 확인하세요.' };
 }
 
 export function listTargets() { return load().targets.map((t) => ({ ...t })); }

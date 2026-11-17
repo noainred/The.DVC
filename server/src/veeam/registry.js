@@ -11,11 +11,10 @@
  *  - 접속처(host·port·username)가 바뀌면 저장 비밀번호를 승계하지 않는다(util/secretCarry.js). agent 변경은 승계한다(같은 서버).
  *  - 비밀번호 제어문자 거부(헤더·폼 본문 오류 문구로 값이 새지 않게 — storage v2.311 과 같은 이유).
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { makeLoadError, filterObjectElements, devicesForThisNode as coreForThisNode, devicesForAgent as coreForAgent } from '../util/registryCore.js';
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { ssrfBlockReason } from '../collector/registry.js';
@@ -34,23 +33,30 @@ let _db = null;
 const loadErr = makeLoadError();
 export function registryLoadError() { load(); return loadErr.get(); }
 
+// 결정(78 남긴 것 ①): parse 실패(형식 · 복호 포함 — 예전 try 블록과 같은 범위)만 손상이다.
+const parseDb = (text) => {
+  const raw = JSON.parse(text);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류');
+  const p = openSecretsDeep(raw);
+  return { servers: filterObjectElements(p.servers).list };
+};
+const WHAT = 'Veeam 서버 등록부(veeam-servers.json)';
 function load() {
-  if (_db) return _db;
-  try {
-    if (fs.existsSync(FILE())) {
-      const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
-      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류');
-      const p = openSecretsDeep(raw);
-      _db = { servers: filterObjectElements(p.servers).list };
-      return _db;
-    }
-  } catch (e) { preserveCorrupt(FILE(), e?.message); loadErr.set(e); }
+  if (_db && !loadErr.readPending()) return _db;
+  // 손상은 보존본으로 옮기고(사유 포함) 오류를 세운다(loadErr.read). 결정(78 남긴 것 ①): 읽기 오류는 원본을 그대로 두고 · 캐시하지 않고 · 쓰기를 거절한다.
+  const r = loadErr.read(FILE(), parseDb);
+  if (r.kind === 'ok') { _db = r.value; return _db; }
   loadErr.checkCorruptOnly(FILE());
   _db = { servers: [] };
   return _db;
 }
+/** 결정(78 남긴 것 ①): 읽기 오류 중의 쓰기 거절(409) 또는 null — 로드를 먼저 한다. */
+export function registryWriteRefusal() { load(); return loadErr.writeRefusal(WHAT); }
+/** 결정(78 남긴 것 ①): 거절이면 던진다(status 409) — 제자리 변경(saveServer · applyPulledServers)보다 먼저 부른다. */
+function assertWritable() { load(); loadErr.assertWritable(WHAT); }
 
 function persist() {
+  loadErr.assertWritable(WHAT); // 결정(78 남긴 것 ①): 마지막 방어선 — 어느 경로도 읽기 오류 중에 원본을 덮지 않는다(던진다)
   atomicWriteFileSync(FILE(), JSON.stringify(sealSecretsDeep({ version: 1, servers: load().servers }), null, 2), { mode: 0o600 });
   loadErr.clear();
 }
@@ -101,6 +107,7 @@ function normVcenterIds(v) {
 }
 
 export function saveServer(input = {}) {
+  assertWritable();   // 결정(78 남긴 것 ①): 제자리 변경 · '서버를 찾을 수 없습니다' 보다 먼저
   const db = load();
   const issue = serverInputIssue(input);
   if (issue) throw new Error(issue);
@@ -141,6 +148,7 @@ export function saveServer(input = {}) {
 }
 
 export function deleteServer(id) {
+  assertWritable();   // 결정(78 남긴 것 ①)
   const db = load();
   const i = db.servers.findIndex((d) => d.id === id);
   if (i < 0) return false;
@@ -178,6 +186,7 @@ export function serversForVcenter(vcenterId) {
  *   (봉인된 비밀번호 포함)가 영구히 남았다. 남기는 것은 이 노드에서 직접 등록한(pulled 아님) 남의 몫뿐이다.
  */
 export function applyPulledServers(list) {
+  assertWritable();   // 결정(78 남긴 것 ①): 읽기 오류 중에는 pull 을 적용하지 않는다(던진다 — 다음 pull 이 다시 시도)
   const db = load();
   const mine = String(config.agent.name || '').toLowerCase();
   const replaced = (d) => d.pulled === true || String(d.agent || '').toLowerCase() === mine;

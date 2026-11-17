@@ -3,7 +3,7 @@
 // 연결 시험은 **저장된 서버만**(id 로) — 요청 본문의 host 로 저장 비밀번호를 보내지 않는다(server/CLAUDE.md v2.480 규칙).
 import { adminOnly, fullScopeOnlyWith } from './shared.js';
 import { logAudit } from '../../audit.js';
-import { listServers, saveServer, deleteServer, getServerWithSecret, registryLoadError, serversForThisNode, centralManagedReason, DEFAULT_PORT, DEFAULT_API_VERSION } from '../../veeam/registry.js';
+import { listServers, saveServer, deleteServer, getServerWithSecret, registryLoadError, serversForThisNode, centralManagedReason, DEFAULT_PORT, DEFAULT_API_VERSION, registryWriteRefusal } from '../../veeam/registry.js';
 import { resultMaxAgeMs } from '../api/veeam.js';
 import { getRecord, dropResult } from '../../veeam/store.js';
 import { pollVeeamOnce, veeamPollerStatus, authGuard } from '../../veeam/poller.js';
@@ -122,6 +122,8 @@ export function registerVeeam(adminRouter) {
   });
 
   adminRouter.post('/veeam/servers', adminOnly, fleetWideOnly, (req, res) => {
+    const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①): 등록부 읽기 오류 중에는 409(원본은 그대로 — 읽히면 다시 열린다)
+    if (refused) return res.status(409).json(refused);
     try {
       // 읽는 곳(엣지)은 중앙이 아는 엣지 목록에서만(대소문자·공백 차이는 목록 표기로) — 이미 저장된 값은 목록에 없어도 통과(docs/rules/edge.md).
       const body = { ...(req.body || {}) };
@@ -140,6 +142,8 @@ export function registerVeeam(adminRouter) {
   });
 
   adminRouter.delete('/veeam/servers/:id', adminOnly, fleetWideOnly, (req, res) => {
+    const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①): '서버를 찾을 수 없습니다' 404 보다 먼저
+    if (refused) return res.status(409).json(refused);
     const d = getServerWithSecret(req.params.id);
     const locked = centralManagedReason(d);   // v2.763(V2-1): 지워도 pull 이 되살리지 않아 아무도 읽지 않게 된다 — 중앙에서 지운다
     if (locked) return res.status(409).json({ ok: false, reason: locked, centralManaged: true });
@@ -229,6 +233,8 @@ export function registerVeeam(adminRouter) {
   // ② 실제 연결 시험 — 저장 전에 중앙 직접 행만 로그인해 본다. 자동 재시도 없음(계정 잠금). 엣지 담당 행은 '테스트 불가'(실패 아님).
   //   비밀번호를 비운 기존 행은 **저장된 서버(같은 host:port·같은 계정)의 비밀번호**로만 시험한다 — 행의 다른 값으로 저장 비밀번호를 보내지 않는다.
   adminRouter.post('/veeam/servers/import/test', csvPerm, adminOnly, fleetWideOnly, (req, res) => {
+    const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①)
+    if (refused) return res.status(409).json(refused);
     const p = vbParse(req.body || {});
     if (p.error) return res.status(400).json({ ok: false, reason: p.error });
     const ctx = vbCtx();
@@ -268,6 +274,8 @@ export function registerVeeam(adminRouter) {
 
   // ①/③ 가져오기 — dryRun 이면 검증만, 아니면 고른 행을 저장. 걸러낸 행은 사유와 함께 skipped 로 돌려준다.
   adminRouter.post('/veeam/servers/import', csvPerm, adminOnly, fleetWideOnly, (req, res) => {
+    const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①): 빈 목록과 대조하면 전부 '추가' 로 보인다(드라이런 포함)
+    if (refused) return res.status(409).json(refused);
     const p = vbParse(req.body || {});
     if (p.error) return res.status(400).json({ ok: false, reason: p.error });
     const ctx = vbCtx();

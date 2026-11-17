@@ -42,6 +42,21 @@ function objList(v, max, map, cnt) {
   return out;
 }
 const flag = (o, k) => (o[k] === true ? { [k]: true } : {});
+
+/**
+ * 결정(78 남긴 것 ④ — 사용자 '권장안대로'): 엣지 PDU 스냅샷의 **아는 최상위 키**(루트 규칙 '엣지가 보낸 것은 정제한다 — 아는 필드만').
+ *   예전에는 `{ ...snap }` 을 펼쳐 모르는 최상위 키가 그대로 중앙 보관 파일 · 화면 응답에 실렸다(장비 1MB · 엣지 16MB 상한 안에서 임의 필드로 부풀릴 수 있었다).
+ *   목록의 출처 — 엣지 워커가 실제로 만드는 키: `pdu/types.js emptySnapshot`(id · name · host · datacenterId · agent · collectedAt · ok · error ·
+ *   model · serial · nmcModel · aosVersion · appVersion · units · sensors · totals · notes) · `pdu/collectors/apcSsh.js`(unitsIncomplete · sensorsIncomplete ·
+ *   cliSkipped · cliBudgetMs) · `pdu/poller.js`(authStopped) · `mock/demo/pdu.js`(demo) + 중앙이 수신 때 붙이는 키(routes/central/storageRoutes.js
+ *   stampEdgeCollectedAt — edgeCollectedAt · edgeClockAheadMs). 엣지 스냅샷에 새 최상위 키를 더하면 **여기에도** 넣는다(테스트가 수집기 출력과 대조한다).
+ */
+export const PDU_SNAPSHOT_KEYS = Object.freeze([
+  'id', 'name', 'host', 'datacenterId', 'agent', 'collectedAt', 'edgeCollectedAt', 'edgeClockAheadMs',
+  'ok', 'error', 'model', 'serial', 'nmcModel', 'aosVersion', 'appVersion',
+  'units', 'sensors', 'totals', 'notes', 'unitsIncomplete', 'sensorsIncomplete', 'cliSkipped', 'cliBudgetMs', 'authStopped', 'demo',
+]);
+const PDU_KEY_SET = new Set(PDU_SNAPSHOT_KEYS);
 export function sanitizePduSnapshot(snap) {
   const cnt = { n: 0 };
   const o = { ...snap };
@@ -69,8 +84,12 @@ export function sanitizePduSnapshot(snap) {
     o.authStopped = isPlainObj(a) ? { since: numOrNull(a.since), at: numOrNull(a.at), attempts: numOrNull(a.attempts), reason: capStr(a.reason, 300) } : null;
   }
   for (const k of ['nmcModel', 'aosVersion', 'appVersion']) if (Object.hasOwn(o, k)) o[k] = typeof o[k] === 'string' ? capStr(o[k], 128) : '';
-  for (const k of ['cliSkipped', 'cliBudgetMs']) if (Object.hasOwn(o, k)) o[k] = numOrNull(o[k]);
-  return { snap: o, narrowed: cnt.n };
+  for (const k of ['cliSkipped', 'cliBudgetMs', 'edgeClockAheadMs']) if (Object.hasOwn(o, k)) o[k] = numOrNull(o[k]);
+  if (Object.hasOwn(o, 'demo')) o.demo = o.demo === true;
+  // 결정(78 남긴 것 ④): 모르는 최상위 키는 버리고 개수를 센다(표지 — saveEdgePdu 응답 · 엣지별 보고 상태의 unknownKeys).
+  let unknownKeys = 0;
+  for (const k of Object.keys(o)) if (!PDU_KEY_SET.has(k)) { delete o[k]; unknownKeys += 1; }
+  return { snap: o, narrowed: cnt.n, unknownKeys };
 }
 
 const FILE = path.join(config.configDir, 'central-pdu.json');
@@ -129,17 +148,18 @@ export function saveEdgePdu(agent, snapshots) {
     return { ok: false, refused: true, reason: '중앙이 보관하는 엣지 수 상한에 닿았습니다(최근 보고한 엣지는 밀어내지 않습니다).', dropped };
   }
   if (adm.evicted) console.warn(`[central-pdu] 엣지 수 상한 — 오래 조용한 '${adm.evicted}' 보관분을 내렸다`);
-  let narrowed = 0;
+  let narrowed = 0; let unknownKeys = 0;
   const list = clean.map((s0) => {
-    const { snap: s, narrowed: n } = sanitizePduSnapshot(s0);   // v2.606 CEN2606-02
-    narrowed += n;
+    const { snap: s, narrowed: n, unknownKeys: u } = sanitizePduSnapshot(s0);   // v2.606 CEN2606-02 · 결정(78 남긴 것 ④): 모르는 최상위 키 버림
+    narrowed += n; unknownKeys += u;
     return { ...s, agent: String(agent) };   // 표시용으로 실제 인증된 이름을 박아 둔다
   });
+  if (unknownKeys) console.warn(`[central-pdu] ${String(agent).slice(0, 64)}: 엣지 PDU 스냅샷의 모르는 최상위 키 ${unknownKeys}개를 버렸습니다(아는 필드만 보관 — 엣지 버전이 중앙보다 새로우면 중앙을 올리세요)`);
   const prevRec = load().get(key);
-  load().set(key, { agent: String(agent), at: Date.now(), snapshots: list, ...(prevRec?.status ? { status: prevRec.status } : {}) }); // v2.613 EDGE2613-04: 마지막 상태 보고는 보존
+  load().set(key, { agent: String(agent), at: Date.now(), snapshots: list, ...(prevRec?.status ? { status: prevRec.status } : {}), ...(unknownKeys ? { unknownKeys } : {}) }); // v2.613 EDGE2613-04: 마지막 상태 보고는 보존
   persist();
   for (const sn of list) if (sn?.id) ackCollect(sn.id, Number(sn.edgeCollectedAt ?? sn.collectedAt) || null); // v2.630 A4-02: 엣지 시계 원본 // v2.590 P16: '지금 수집' 완료 확인
-  return { ok: true, count: list.length, dropped, coerced, ...(narrowed ? { narrowed } : {}), ...(adm.evicted ? { evicted: adm.evicted } : {}) };
+  return { ok: true, count: list.length, dropped, coerced, ...(narrowed ? { narrowed } : {}), ...(unknownKeys ? { unknownKeys } : {}), ...(adm.evicted ? { evicted: adm.evicted } : {}) };
 }
 
 /** 만료되지 않은 엣지 스냅샷 전체(중앙 화면이 자기 수집분과 합쳐 보여준다). */
@@ -177,6 +197,7 @@ export function edgePduStatus() {
   const cut = Date.now() - TTL_MS;
   return [...load().values()].map((e) => ({
     agent: e.agent, at: e.at, devices: (e.snapshots || []).length, stale: (e.at || 0) < cut, status: e.status || null,
+    ...(Number(e.unknownKeys) > 0 ? { unknownKeys: Number(e.unknownKeys) } : {}),   // 결정(78 남긴 것 ④): 마지막 push 에서 버린 모르는 최상위 키 수
   }));
 }
 

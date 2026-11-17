@@ -14,7 +14,7 @@ import { isAdminReq, maskPollerStatus, scrubHosts } from '../../auth/addressMask
 import { logAudit } from '../../audit.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
-import { listServers, getServer, getServerWithSecret, saveServer, deleteServer, agentKeyEq } from '../../cvp/registry.js';
+import { listServers, getServer, getServerWithSecret, saveServer, deleteServer, agentKeyEq, registryWriteRefusal } from '../../cvp/registry.js';
 import { loadSettings, saveSettings, cvpSettingsLoadError, LIMITS } from '../../cvp/settings.js';
 import { cvpPollerStatus, pollCvpOnce, isPollerBusy, testServerConnection } from '../../cvp/poller.js';
 import { getStatus, dropStatus } from '../../cvp/store.js';
@@ -802,6 +802,9 @@ function dcList() {
 }
 
 const saveRoute = (req, res) => {
+  // 결정(78 남긴 것 ①): 등록부 읽기 오류 중에는 409(원본은 그대로 — 읽히면 다시 열린다). 읽지 못한 빈 목록으로 agent · 법인을 고르지 않게 맨 앞에서.
+  const refused = registryWriteRefusal();
+  if (refused) return res.status(409).json(refused);
   try {
     const input = { ...(req.body && typeof req.body === 'object' ? req.body : {}), ...(req.params.id ? { id: req.params.id } : {}) };
     // 담당 엣지·DataCenter 는 기존 목록의 표기로 맞추고, 목록에 없는 새 값은 거부한다(오타 방지 — v2.609).
@@ -822,6 +825,8 @@ api.post('/tools/cvp/servers', adminOnly, toolsPerm, fullScopeOnly, (req, res) =
 api.put('/tools/cvp/servers/:id', adminOnly, toolsPerm, fullScopeOnly, (req, res) => saveRoute(req, res));
 
 api.delete('/tools/cvp/servers/:id', adminOnly, toolsPerm, fullScopeOnly, async (req, res) => {
+  const refused = registryWriteRefusal();   // 결정(78 남긴 것 ①): '없는 CVP 서버' 404 보다 먼저
+  if (refused) return res.status(409).json(refused);
   const srv = getServer(req.params.id);
   if (!deleteServer(req.params.id)) return res.status(404).json({ ok: false, reason: '없는 CVP 서버입니다.' });
   dropStatus(req.params.id);

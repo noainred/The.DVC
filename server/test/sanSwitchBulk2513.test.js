@@ -88,8 +88,13 @@ test('CSV — 별칭 헤더(한글 포함)를 받고, name·host 가 없으면 �
 test('CSV 와 자유텍스트가 같은 행 형태를 만든다(뒤 파이프라인 공유)', () => {
   const c = parseDevicesCsv([COLUMNS.join(','), 'brocade,A,10.0.0.1,admin,ssh,22,,,WA,,true,메모,pw'].join('\n'));
   const t = parseDevicesText('brocade\tA\t10.0.0.1\tadmin\tssh\t22\t-\t-\tWA\t-\ttrue\t메모\tpw');
-  const strip = (r) => { const { _line, ...rest } = r; return rest; };
+  // 결정(78 남긴 것 ③): 빈 칸(수정 행 = 저장값 유지)과 `-`(명시적 비움)는 이제 뜻이 다르다 — 그 차이는 `_blank` 표지에만 있고 필드 값은 같다.
+  const strip = (r) => { const { _line, _blank, ...rest } = r; return rest; };
   assert.deepEqual(strip(t.rows[0]), strip(c.rows[0]), 'CSV·텍스트 결과가 필드 단위로 같아야 한다');
+  // 같은 뜻(빈 칸)으로 적으면 표지까지 같다 — 탭 구분의 빈 칸
+  const t2 = parseDevicesText('brocade\tA\t10.0.0.1\tadmin\tssh\t22\t\t\tWA\t\ttrue\t메모\tpw');
+  assert.deepEqual((({ _line, ...rest }) => rest)(t2.rows[0]), (({ _line, ...rest }) => rest)(c.rows[0]), '빈 칸으로 적으면 _blank 까지 같다');
+  assert.equal(t.rows[0]._blank, undefined, '`-` 는 빈 칸이 아니다');
 });
 
 test('vfId·포트는 문자열로 넘기고 정규화는 registry 가 한다(셸 조립 불변조건)', () => {

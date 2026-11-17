@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { ssrfBlockReason } from '../collector/registry.js'; // v2.537: 등록 시 SSRF 정적 가드
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { makeLoadError, autoWriteRefusal, manualRemoteWriteRefusal } from '../util/registryCore.js'; // v2.743(감사 EDGE-01): 형제 등록부와 같은 로드 오류 판정(corruptOnlyReason 포함) · v2.744(EDGE-03) 자동 저장 거절
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { describeError } from '../util/errors.js';
@@ -99,27 +99,34 @@ export function registryLoadError() {
   return loadErr.get();
 }
 
+// 결정(78 남긴 것 ①): parse 실패(형식 · 복호 포함 — 예전 try 블록과 같은 범위)만 손상이다.
+const parseServers = (text) => { const parsed = JSON.parse(text); return openSecretsDeep(Array.isArray(parsed?.servers) ? parsed.servers : []); }; // 캐시는 평문 보관(v2.296) — 소비 코드 무변경
+const WHAT = 'iDRAC 등록부(idrac.json)';
 export function loadRegistry() {
   // ⚠ 파일이 없을 때의 corruptOnlyReason 판정(설정 폴더 목록)은 여기서 하지 않는다 — loadRegistry 는 요청·폴러마다 불리고,
   //   iDRAC 등록이 없는 엣지는 파일이 없는 것이 정상이다. 판정은 registryLoadError() 가 한다(export 라우트가 부른다).
-  if (!fs.existsSync(FILE)) { _regCache = null; return []; }
-  try {
-    const st = fs.statSync(FILE);
-    if (!_regCache || _regCache.mtimeMs !== st.mtimeMs || _regCache.size !== st.size) {
-      const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-      _regCache = { mtimeMs: st.mtimeMs, size: st.size, servers: openSecretsDeep(Array.isArray(parsed?.servers) ? parsed.servers : []) }; // 캐시는 평문 보관(v2.296) — 소비 코드 무변경
-      loadErr.clear(); // v2.743(EDGE-01): 파일을 정상으로 읽었다(보존본을 되돌린 경우 포함)
-    }
-    return structuredClone(_regCache.servers);
-  } catch (e) {
-    preserveCorrupt(FILE, e?.message); // v2.322: 파싱 실패 시 손상본 보존(빈 목록 반환이 다음 저장으로 전 자격증명 소거 방지)
-    loadErr.set(e); // v2.743(EDGE-01): 조용한 빈 목록 금지 — export 가 이 사유로 503 을 낸다
-    _regCache = null;
-    return [];
+  let st = null;
+  try { st = fs.statSync(FILE); } catch (e) {
+    if (e?.code === 'ENOENT') { _regCache = null; return []; }
+    // 그 밖의 stat 실패(상위 폴더 권한 등)는 아래 읽기가 읽기 오류로 판정한다
   }
+  if (st && _regCache && !loadErr.readPending() && _regCache.mtimeMs === st.mtimeMs && _regCache.size === st.size) return structuredClone(_regCache.servers);
+  // v2.322: 파싱 실패 시 손상본 보존(빈 목록 반환이 다음 저장으로 전 자격증명 소거 방지 — loadErr.read 가 preserveCorrupt) · v2.743(EDGE-01): 조용한 빈 목록 금지(export 503).
+  // 결정(78 남긴 것 ①): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 원본을 그대로 두고 · 캐시하지 않고(30초마다 다시 읽음) · 저장을 거절한다(saveRegistry).
+  const r = loadErr.read(FILE, parseServers);
+  if (r.kind === 'ok') {
+    _regCache = st ? { mtimeMs: st.mtimeMs, size: st.size, servers: r.value } : null;
+    loadErr.clear(); // v2.743(EDGE-01): 파일을 정상으로 읽었다(보존본을 되돌린 경우 포함)
+    return structuredClone(r.value);
+  }
+  _regCache = null;
+  return [];
 }
+/** 결정(78 남긴 것 ①): 읽기 오류 중의 쓰기 거절(409) 또는 null — 로드를 먼저 한다. 손상(보존본)은 예전처럼 관리자 저장을 막지 않는다. */
+export function registryWriteRefusal() { loadRegistry(); return loadErr.writeRefusal(WHAT); }
 
 function saveRegistry(list) {
+  loadErr.assertWritable(WHAT); // 결정(78 남긴 것 ①): 마지막 방어선 — 어느 경로도 읽기 오류 중에 원본을 보존본도 없이 덮지 않는다(던진다)
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ servers: list }), null, 2), { mode: 0o600 }); // 암호화 모드면 password 봉인
   loadErr.clear(); // v2.743(EDGE-01): 저장이 성공하면 그때부터는 관리자가 다시 만든 목록이 진실이다(형제 등록부와 같다)
   // 방금 쓴 내용으로 캐시 즉시 동기화(다음 읽기의 재파싱 회피). 실패 시 캐시 무효화가 안전.
@@ -233,6 +240,7 @@ export function idracInputIssue(body = {}, existing = null) {
 }
 
 export function addServer(body) {
+  const refused = registryWriteRefusal(); if (refused) return refused;   // 결정(78 남긴 것 ①)
   const list = loadRegistry();
   const [entry, err] = normalize(body);
   if (err) return { ok: false, reason: err };
@@ -243,6 +251,7 @@ export function addServer(body) {
 }
 
 export function updateServer(id, body) {
+  const refused = registryWriteRefusal(); if (refused) return refused;   // 결정(78 남긴 것 ①): '없는 서버' 보다 먼저
   const list = loadRegistry();
   const idx = list.findIndex((s) => s.id === id);
   if (idx === -1) return { ok: false, reason: `없는 서버: ${id}` };
@@ -266,6 +275,7 @@ export function removeServersBatch(ids = []) {
 }
 
 export function removeServer(id) {
+  const refused = registryWriteRefusal(); if (refused) return refused;   // 결정(78 남긴 것 ①): '없는 서버' 보다 먼저
   const list = loadRegistry();
   const next = list.filter((s) => s.id !== id);
   if (next.length === list.length) return { ok: false, reason: `없는 서버: ${id}` };

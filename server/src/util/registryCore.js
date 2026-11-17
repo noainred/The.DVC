@@ -7,16 +7,19 @@
  *   목록을 비웠다**(정상 서버까지 소실 — 스크래치 CONFIG_DIR 재현). `corruptOnlyReason` 은 4벌이 글자 그대로 같았다.
  *   CLAUDE.md '코어는 하나다'(v2.513)의 등록부 판이다.
  *
- * 범위: 손상 보존본 판정 · 로드 오류 상태 · 원소 형태 필터 · 법인 축(agent) 판정 **만**. 로드·저장 파이프라인 전체
+ * 범위: 손상 보존본 판정 · 로드 오류 상태 · 등록부 파일 읽기(read — 읽기 오류와 손상을 가른다 · 결정 78 남긴 것 ①) · 원소 형태 필터 · 법인 축(agent) 판정 **만**. 로드·저장 파이프라인 전체
  *   (`load/persist/secretCarry`)는 옮기지 않는다 — 비밀 승계(`accessMoved`)는 도구마다 접속 필드가 달라 한 벌로 묶으면
  *   회귀 위험이 이득보다 크다(verify-deps DEPS2613-04 판정). 각 등록부는 여기서 판정만 가져다 쓴다.
  *
- * ⚠ util/ 규약(arch2579): 도메인 모듈을 import 하지 않는다(fs·path + 같은 util/ 의 atomicWrite 만 — v2.744 리드 후속 RY).
+ * ⚠ util/ 규약(arch2579): 도메인 모듈을 import 하지 않는다(fs·path + 같은 util/ 의 atomicWrite · jsonFileRead 만 — v2.744 리드 후속 RY · 결정 78 남긴 것 ①).
  */
 import fs from 'node:fs';
 import path from 'node:path';
 // v2.744(리드 후속 RY): 로드 오류 사유 분류는 atomicWrite 하나(preserveCorrupt 콘솔 줄과 같은 판정 — 두 벌 금지). atomicWrite 는 fs·path 만 import 한다(순환 없음).
 import { classifyLoadReason, loadReasonWhere } from './atomicWrite.js';
+// 결정(78 남긴 것 ①): 읽기 단계 실패(read-error)와 parse 실패(corrupt)를 가르는 판정은 공용 읽기 하나다(판정 사본 금지).
+//   jsonFileLoad 가 아니라 순수 단계(jsonFileRead)에서 가져온다 — jsonFileLoad → settingsLoadError → registryCore 라 바로 가져오면 import 순환이다.
+import { makeJsonFileReader, READ_RETRY_MS } from './jsonFileRead.js';
 
 /**
  * v2.612 LEFT2612-01: 파일이 없는데 손상 보존본(<파일>.corrupt.<시각>)만 있으면 재시작 뒤에도 '못 읽음' 이다 — 빈 목록으로
@@ -38,6 +41,10 @@ export function corruptOnlyReason(file) {
  */
 export function makeLoadError() {
   let err = null;
+  // 결정(78 남긴 것 ①): 등록부 파일 읽기(read) 상태 — reader 는 처음 read() 때 그 파일로 만든다(테스트가 CONFIG_DIR 를 바꾸면 다시 만든다).
+  let reader = null; let readerFile = ''; let curParse = JSON.parse;
+  let pending = false;   // 마지막 read() 가 읽기 오류였다 — 호출부는 캐시(빈 목록)를 믿지 말고 다시 read() 한다(간격 안이면 디스크를 보지 않는다)
+  const codeOf = (e) => String((e && typeof e === 'object' ? e.code : '') || 'read-error').slice(0, 32);
   const api = {
     get: () => err,
     set(reason) {
@@ -45,7 +52,63 @@ export function makeLoadError() {
       err = { at: Date.now(), reason: String(msg ?? '').slice(0, 200) };
       return err;
     },
-    clear() { err = null; },
+    clear() { err = null; pending = false; reader?.reset(); },
+    /**
+     * 결정(78 남긴 것 ① — 사용자 '권장안대로'): 등록부 파일을 읽는다. 예전에는 등록부마다 `try { JSON.parse(readFileSync) } catch { preserveCorrupt; set }`
+     *   하나로 받아 **읽기 오류**(EACCES · EIO · EISDIR)도 손상으로 보고 온전한 원본(자격증명 파일)을 `.corrupt.*` 로 옮긴 뒤 빈 목록으로 돌았다 —
+     *   권한을 바로잡아도 원본은 보존본에만 남았고(재시작 뒤에도 '못 읽음'), 다음 저장이 빈 목록 위에 한 건만 든 파일을 썼다.
+     *   이제 판정은 공용 로더(util/jsonFileLoad.js — 읽기 단계 실패 = read-error · parse 실패 = corrupt):
+     *    - read-error: 원본을 **옮기지 않는다** · 오류(`readError:true`)를 세운다 · `readPending()` 이 참 — 호출부는 결과를 캐시로 믿지 않는다 ·
+     *      다시 읽기는 READ_RETRY_MS(30초) 간격(간격 안의 read() 는 디스크를 보지 않는다 — 요청마다 부르는 경로) · 쓰기는 `writeRefusal`/`assertWritable` 이 거절한다.
+     *      읽히면 그 오류만 지우고 정상으로 돌아온다(재시작 · 사람 조치 없이).
+     *    - corrupt: 예전과 같다 — 원본을 보존본으로 옮기고(preserveCorrupt — 사유 포함) 오류를 세운다. 저장으로 풀리는 규약(v2.612)도 그대로다.
+     *    - missing · ok: 오류를 세우지 않는다(missing 의 보존본 판정은 호출부의 checkCorruptOnly).
+     * @param {string} file
+     * @param {(text:string) => any} [parse]  JSON.parse + 형식 검사 · 복호 · 정규화(던지면 손상 — 예전 try 블록과 같은 범위)
+     * @returns {{kind:'ok', value:any} | {kind:'missing'} | {kind:'corrupt'} | {kind:'read-error', code:string}}
+     */
+    read(file, parse = JSON.parse) {
+      curParse = typeof parse === 'function' ? parse : JSON.parse;
+      const f = String(file || '');
+      if (!reader || readerFile !== f) { readerFile = f; reader = makeJsonFileReader(() => readerFile, { parse: (t) => curParse(t), tag: 'registry' }); }
+      const r = reader.read();
+      if (r.kind === 'read-error') {
+        const code = codeOf(r.error);
+        // 이어지는 읽기 오류는 처음 시각(at)을 유지한다. 사유는 고정 문구 + 시스템 오류 코드만(파일 조각 없음 — summarizeRegistryError 가 sysCode 를 뽑는다).
+        if (!err?.readError) err = { at: Date.now(), reason: `읽기 오류(${code}) — 손상이 아니라 원본은 그대로 둡니다`, readError: true, code };
+        pending = true;
+        return { kind: 'read-error', code: err.code || code };
+      }
+      if (pending) { pending = false; if (err?.readError) err = null; }
+      if (r.kind === 'corrupt') { api.set(r.error); return { kind: 'corrupt' }; }
+      if (r.kind === 'missing') return { kind: 'missing' };
+      return { kind: 'ok', value: r.value };
+    },
+    /** 결정(78 남긴 것 ①): 마지막 read() 가 읽기 오류였는가 — 참이면 캐시를 믿지 말고 다시 read() 한다. */
+    readPending: () => pending,
+    /**
+     * 결정(78 남긴 것 ①): 읽기 오류 중의 쓰기 거절(라우트 409 — 설정 파일의 settings-unreadable 과 같은 뜻). 손상(보존본으로 옮김)은 거절하지 않는다 —
+     *   관리자 저장이 새 등록부를 만드는 v2.612 규약 그대로다(자동 경로는 autoWriteRefusal 이 따로 막는다). 읽기 오류는 원본이 그 자리에 있어
+     *   원자적 쓰기(rename)가 그 원본을 **보존본도 없이** 덮는다 — 그래서 사람의 저장도 막는다.
+     * @param {string} what  사람이 읽는 이름(예 'PDU 등록부(pdu-devices.json)')
+     * @returns {null|{ok:false, code:'registry-unreadable', status:409, readError:true, reason:string}}
+     */
+    writeRefusal(what = '등록부') {
+      if (!err?.readError) return null;
+      const secs = Math.round(READ_RETRY_MS / 1000);
+      return {
+        ok: false, code: 'registry-unreadable', status: 409, readError: true,
+        reason: `${what}를 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류(${err.code || 'read-error'})이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(${secs}초마다 다시 읽고, 읽히면 저장이 다시 열립니다).`,
+      };
+    },
+    /** writeRefusal 을 던지는 꼴(등록부의 persist() 가 마지막 방어선으로 부른다 — 어느 경로도 읽기 오류 중에 원본을 덮지 않게). */
+    assertWritable(what = '등록부') {
+      const ref = api.writeRefusal(what);
+      if (!ref) return;
+      const e = new Error(ref.reason);
+      Object.assign(e, { code: ref.code, status: ref.status, readError: true, refusal: ref });
+      throw e;
+    },
     /** 오류가 없고 파일도 없을 때 손상 보존본만 남아 있으면 그 사유를 오류로 세운다(load() 끝에서 부른다). */
     checkCorruptOnly(file) {
       if (err) return;

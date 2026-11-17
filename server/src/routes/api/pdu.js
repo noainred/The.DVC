@@ -17,7 +17,7 @@ import { scopeDbStatus } from '../../auth/scopeStatus.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import {
-  listDevices, listDevicesWithSecrets, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithSecret, pduAccessMoved, registryLoadError,
+  listDevices, listDevicesWithSecrets, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithSecret, pduAccessMoved, registryLoadError, registryWriteRefusal,
 } from '../../pdu/registry.js';
 import { summarizeRegistryError } from '../../util/registryCore.js';
 import { collectDeviceNow, testDeviceConnection, pollOnce, pduPollerStatus, localSnapshots, getLocalSnapshot } from '../../pdu/poller.js';
@@ -27,6 +27,7 @@ import { INTERVAL_SPEC, saveIntervals, runtimeIntervals, intervalsForEdge, pduIn
 import { THRESHOLD_SPEC, loadThresholds, saveThresholds, evaluateSnapshot, activeViolations, pduThresholdsLoadError } from '../../pdu/thresholds.js';
 import { powerSeries, envSeries, dbStats } from '../../pdu/db.js';
 import { devicesToCsv, csvToDevices, sampleCsv } from '../../pdu/csv.js';
+import { fillBlankFromSaved } from '../../util/bulkImport.js';
 import { summarize } from '../../pdu/types.js';
 import { listDatacenters } from '../../datacenter/store.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
@@ -229,6 +230,11 @@ export function registerPdu(api) {
     res.send(sampleCsv());
   });
 
+  /** 결정(78 남긴 것 ③): CSV 행 필드 ← 저장 장비(비밀 없음). 수정 행의 빈 칸만 이것으로 채운다. */
+  const PDU_CSV_FROM_SAVED = {
+    name: (d) => d.name || d.host, username: (d) => d.username || '', sshPort: (d) => Number(d.sshPort) || 22,
+    datacenterId: (d) => d.datacenterId || '', agent: (d) => d.agent || '', enabled: (d) => d.enabled !== false, note: (d) => d.note || '',
+  };
   api.post('/tools/pdu/csv/import', csvPerm, adminOnly, fullScopeOnly, (req, res) => {
     const text = String(req.body?.csv || '');
     if (!text.trim()) return res.status(400).json({ ok: false, reason: 'CSV 내용이 비어 있습니다.' });
@@ -238,16 +244,23 @@ export function registerPdu(api) {
       if (!s) return '';
       return (dcs.find((d) => d.id === s) || dcs.find((d) => (d.name || '').toLowerCase() === s.toLowerCase()))?.id || s;
     };
-    const { rows, errors } = csvToDevices(text, dcIdOf);
+    // 결정(78 남긴 것 ①): 등록부를 읽기 오류로 못 읽었으면 행마다 같은 실패를 늘어놓지 않고 409 하나로 답한다(빈 목록과 대조하면 전부 '추가' 로 보인다).
+    const refused = registryWriteRefusal();
+    if (refused) return res.status(refused.status || 409).json(refused);
+    const parsed = csvToDevices(text, dcIdOf);
     const existing = listDevices();
+    const findPrev = (r) => existing.find((d) => d.host.toLowerCase() === r.host.toLowerCase());
+    // 78회차 F5 → 결정(78 남긴 것 ③): 수정 행의 빈 칸(이름 · 계정 · 포트 · 법인 · agent · enabled · note)은 저장값 유지 — 검증 · 저장 전에 행을 저장값으로 채운다.
+    //   기본값('apc' · 22 · 켬 · 빈 값)은 새 장비에만(pdu/csv.js `_blank`). 값을 지우려면 `-`.
+    const rows = fillBlankFromSaved(parsed.rows, findPrev, PDU_CSV_FROM_SAVED);
+    const { errors } = parsed;
     let added = 0, updated = 0;
     const failed = [...errors];
     const droppedSecrets = [];   // 78회차 F5: 접속처가 바뀌어 저장 비밀번호를 버린 행(조용히 버리지 않는다 — horizonAssign · veeam CSV 와 같은 규약)
     for (const r of rows) {
       // 멱등 키 = host. 있으면 그 id 로 수정, 없으면 신규.
-      const prev = existing.find((d) => d.host.toLowerCase() === r.host.toLowerCase());
-      // 78회차 F5: 수정 행의 빈 계정 · 포트 칸은 저장값 유지(기본값 'apc' · 22 는 새 장비에만 — pdu/csv.js 표지).
-      const input = prev ? { ...r, id: prev.id, ...(r._usernameBlank ? { username: prev.username } : {}), ...(r._portBlank ? { sshPort: prev.sshPort } : {}) } : r;
+      const prev = findPrev(r);
+      const input = prev ? { ...r, id: prev.id } : r;
       const out = saveDevice(input);
       if (!out.ok) { failed.push(`${r._line}행(${r.host}): ${out.reason}`); continue; }
       if (prev) updated++; else added++;
@@ -266,17 +279,23 @@ export function registerPdu(api) {
     //   스토리지(23회차 S-1) · SAN(v2.770 R5-E3-4) 의 형제 누락. 계정 · 포트만 바꿔 테스트하면 저장 비밀번호가 바뀐 계정 · 포트로 나갔다.
     let password = String(b.password ?? '');
     let moved = false;
-    if (!password && b.id) {
+    // 79회차 반증(재현): 판정은 같은 함수인데 **접속에 쓰는 값**이 달랐다 — 요청에 없는 칸(계정 · SSH 포트)을 판정은 '저장값 유지' 로 보고(accessMoved 규약)
+    //   접속은 요청값(계정 없음 · 포트 22)으로 했다. 저장 포트 2222 인 장비를 포트 없이 테스트하면 저장 비밀번호가 22 번으로 나갔다.
+    //   이제 수정 장비(b.id)는 저장 경로(normalize)와 같은 규칙으로 실제 접속값을 먼저 정하고 그 값으로 판정 · 접속한다.
+    let target = { host: b.host, username: b.username, sshPort: Number(b.sshPort) || 22 };
+    if (b.id) {
       const saved = getDeviceWithSecret(b.id);
-      moved = !!saved && pduAccessMoved(saved, b);
-      if (saved && !moved) password = saved.password || '';
+      if (saved) {
+        target = { host: String(b.host ?? saved.host ?? '').trim(), username: String(b.username ?? saved.username ?? '').trim(), sshPort: Number(b.sshPort ?? saved.sshPort ?? 22) || 22 };
+        if (!password) { moved = pduAccessMoved(saved, target); if (!moved) password = saved.password || ''; }
+      }
     }
     if (!password) {
       return res.status(400).json({ ok: false, reason: moved
         ? '접속처(host · 계정 · SSH 포트)를 바꿨으므로 비밀번호를 다시 입력해야 테스트할 수 있습니다(저장된 비밀번호는 바뀐 접속처로 보내지 않습니다).'
         : '비밀번호가 필요합니다.' });
     }
-    const device = { ...b, password, sshPort: Number(b.sshPort) || 22, id: b.id || `test-${Date.now()}` };
+    const device = { ...b, ...target, password, id: b.id || `test-${Date.now()}` };
     logAudit({ user: req.user?.username, action: 'PDU 연결 테스트', target: `${b.name || ''}(${b.host})` });
     const r = await testDeviceConnection(device, { timeoutMs: 60_000 });
     res.json(r);
@@ -295,13 +314,13 @@ export function registerPdu(api) {
   api.post('/tools/pdu/devices', adminOnly, fullScopeOnly, (req, res) => {
     const r = saveDevice(req.body || {});
     if (r.ok) logAudit({ user: req.user?.username, action: 'PDU 등록/수정', target: `${r.device.name}(${r.device.host})`, detail: r.device.agent ? `엣지 ${r.device.agent}` : '중앙 직접' });
-    res.status(r.ok ? 200 : 400).json(r);
+    res.status(r.ok ? 200 : (r.status || 400)).json(r);   // 결정(78 남긴 것 ①): 등록부 읽기 오류는 409
   });
 
   api.delete('/tools/pdu/devices/:id', adminOnly, fullScopeOnly, (req, res) => {
     const r = deleteDevice(req.params.id);
     if (r.ok) logAudit({ user: req.user?.username, action: 'PDU 삭제', target: req.params.id });
-    res.status(r.ok ? 200 : 404).json(r);
+    res.status(r.ok ? 200 : (r.status || 404)).json(r);   // 결정(78 남긴 것 ①): 등록부 읽기 오류는 409
   });
 
   /**
