@@ -264,10 +264,17 @@ class UserStore:
             # v2.500(감사 M1): 중지·비번없는 계정도 **같은 비용**을 태운다. 위 주석 참조.
             _burn_password_work(password)
             return None
-        if verify_password(match["password"], password):
-            return {"username": match["username"], "role": match["role"],
-                    "tokenVersion": match["tokenVersion"]}
-        return None
+        if not verify_password(match["password"], password):
+            return None
+        # 59회차(56회차 F2 반증 — 재현): 해시를 잠금 밖으로 옮기면서 '사본을 고른 뒤 검증이 끝나기까지' 사이에 비밀번호 변경 · 중지 · 삭제가
+        #   끼어들 수 있게 됐다 — 옛 비밀번호가 '로그인 성공'(감사 login 성공 · 실패 카운터 초기화)을 받고, 역할 변경이 끼면 정상 로그인이
+        #   곧바로 죽은 세션(옛 tokenVersion)이 됐다. 잠금 안에서 지금 기록을 다시 보고 같은 비밀번호 기록 · 사용 중일 때만 **지금 값**으로 돌려준다.
+        with self._lock:
+            live = next((u for u in self._load() if u["username"] == match["username"]), None)
+            if not live or not live["enabled"] or live["password"] != match["password"]:
+                return None
+            return {"username": live["username"], "role": live["role"],
+                    "tokenVersion": live["tokenVersion"]}
 
     def token_version(self, username: str):
         """서명 토큰 검증용 현재 카운터. 계정이 없거나 중지면 None(=무효)."""
