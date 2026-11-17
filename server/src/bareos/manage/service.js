@@ -129,6 +129,13 @@ export async function readConfig(d, { refresh = false } = {}) {
 const okVal = (cfg, k) => (cfg?.results?.[k]?.ok ? cfg.results[k].value : []);
 
 const groupsSafe = () => { try { return listGroups(); } catch { return []; } };
+/** 105회차: 같은 Director 를 가리키는 다른 등록(directorEndpointPeers — 판정 하나)의 포탈 전용 콘솔 이름(이 등록 것 제외). */
+function peerConsoleNames(d, settings) {
+  const dirs = settings?.directors || [];
+  const own = lc(d?.consoleName);
+  const ids = new Set(directorEndpointPeers(dirs).get(d?.id) || []);
+  return [...new Set(dirs.filter((o) => ids.has(o.id)).map((o) => String(o.consoleName || '')).filter((n) => n && lc(n) !== own))];
+}
 /** planManage 에 줄 '그 Director 의 지금 설정'(비밀 없음). 매핑 스토리지 = 사이트 매핑 + 이 법인 vCenter 의 백업 그룹이 지정한 스토리지(v2.846 D-5 ①). */
 export function knownFor(d, cfg, settings = effectiveSettings(), groups = groupsSafe()) {
   const storages = okVal(cfg, 'storages');
@@ -136,6 +143,9 @@ export function knownFor(d, cfg, settings = effectiveSettings(), groups = groups
   return {
     config: { storages, consoles: okVal(cfg, 'consoles'), profiles: okVal(cfg, 'profiles') },
     portalConsole: d.consoleName || '',
+    // 105회차(104 I1 형제 — 재현): 같은 Director(주소 · 포트 · 담당)를 가리키는 다른 등록(옛 짝)이 붙는 전용 콘솔도 포탈 콘솔이다 —
+    //   이 등록의 portalConsole 만 막아, 이 법인 화면의 계정 삭제 · 비밀번호 변경이 다른 등록의 콘솔(MARKER 파일)을 지우거나 바꿔 그 등록의 조회를 인증 실패(정지)로 만들었다
+    peerConsoles: peerConsoleNames(d, settings),
     address: prefer?.address || '',
     mappedStorages: (() => {
       // 104회차: 같은 Director(주소 · 포트 · 담당)를 가리키는 다른 등록(옛 짝 — D1 이 새로는 막는다)의 매핑 · 그룹 스토리지도 같은 Director 의 리소스다 —
@@ -207,13 +217,15 @@ export async function accountsMatrix({ refresh = false, showAddr = true } = {}) 
   const dirs = s.directors || [];
   const settled = await poolSettled(dirs, MATRIX_CONCURRENCY, async (d) => {
     const base = { id: d.id, name: d.name, agent: d.agent || '', ...(showAddr ? { host: d.host } : {}), portalConsole: d.consoleName || '', ssh: publicSsh(sshSource(d)) };
+    const peers = peerConsoleNames(d, s);
     try {
       const cfg = await readConfig(d, { refresh });
       const c = cfg.results.consoles;
       if (!c?.ok) return { ...base, ok: false, error: c ? `${c.code}: ${c.message}`.slice(0, 300) : '계정 목록을 읽지 못했습니다.' };
       return {
         ...base, ok: true, at: cfg.at, version: cfg.version,
-        consoles: c.value.map((x) => ({ name: x.name, profile: x.profile, tlsEnable: x.tlsEnable, reserved: RESERVED_CONSOLES.includes(lc(x.name)), portalConsole: lc(x.name) === lc(d.consoleName) })),
+        // 105회차: 같은 Director 의 다른 등록이 붙는 콘솔도 포탈 콘솔(통합 계정 목록 · 일괄 변경에서 뺀다 — planManage 와 같은 판정)
+        consoles: c.value.map((x) => ({ name: x.name, profile: x.profile, tlsEnable: x.tlsEnable, reserved: RESERVED_CONSOLES.includes(lc(x.name)), portalConsole: lc(x.name) === lc(d.consoleName) || peers.some((n) => lc(n) === lc(x.name)) })),
         profiles: okVal(cfg, 'profiles').map((p) => p.name),
       };
     } catch (e) { return { ...base, ok: false, error: `${e?.code || 'error'}: ${String(e?.message || e)}`.slice(0, 300) }; }

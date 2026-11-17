@@ -575,7 +575,9 @@ async function centralStep(j, creds, n) {
       // 포탈 등록: 주소 = 러너가 읽은 서버 주소(엣지가 붙는 곳) · 담당 = 그 엣지(중앙은 9101 에 붙지 않는다)
       save: ({ consoleName, password }) => {
         const v = { name: j.plan.directorName, host: j.hostAddr, port: 9101, consoleName, password, agent: j.agent };
-        if (existing) return updateDirector(existing.id, v);
+        // 105회차: 재설치의 재등록은 러너가 읽은 서버 주소로 고쳐 적는 것이다 — 같은 서버의 다른 등록은 사전 점검(sharedOfDirector · N4 확인)이 이미 셌다.
+        //   접속값 바꾸기의 같은 Director 새 묶음 판정(directorMoveBindIssue)을 여기서 걸면 0단계(초기화) 뒤 4단계에서 멈춘다.
+        if (existing) return updateDirector(existing.id, v, { bindCheck: false });
         const a = addDirector(v);
         touch(j, { directorId: a.director.id, createdDirector: true });
         addSetupGroupDirector(`install:${j.id}`, a.director.id);   // v2.846 C-3: 새로 등록한 Director 도 작업이 끝날 때까지 쥔다(방금 만든 id — 남이 쥘 수 없다)

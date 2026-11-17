@@ -442,7 +442,10 @@ adminRouter.post('/gpu-physical/test', adminOnly, fleetOnly, async (req, res) =>
         return res.json({ ok: false, method: 'carry-refused', code: 'carry-refused', host: s.host, port: s.port || 22, login: false, read: false, error: '입력한 주소 · 포트 · 계정이 저장값과 달라 저장된 비밀번호를 쓰지 않습니다 — 비밀번호를 함께 입력하거나, 먼저 저장한 뒤 시험하세요.', trace: [] });
       }
     }
-    if (s) { host = s.host; username = s.username; password = b.password || s.password; port = s.port || 22; }
+    // 105회차(100회차 반증): 비밀번호를 새로 준 시험은 저장 비밀을 쓰지 않는다 — 본문 주소 · 포트 · 계정을 쓰고 빈 칸만 저장값(/collectors/test 의 'url || saved.url' 과 같다).
+    //   예전에는 이때도 저장 주소로 바꿔, 주소와 비밀번호를 함께 고친 시험이 옛 서버에 새 비밀번호로 붙은 결과를 '입력한 서버' 결과처럼 보였다.
+    if (s && b.password) { host = host || s.host; username = username || s.username; port = (b.port != null && String(b.port).trim() !== '') ? port : (s.port || 22); }
+    else if (s) { host = s.host; username = s.username; password = s.password; port = s.port || 22; }
   }
   if (!host || !username) return res.status(400).json({ ok: false, reason: 'host, username이 필요합니다.' });
   { const why = physicalHostIssue(host); if (why) return res.json({ ok: false, host, port, login: false, read: false, error: why, trace: [] }); }   // 36회차 F3: 'VMware Tools' 사유 대신

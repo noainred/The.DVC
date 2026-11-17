@@ -328,6 +328,28 @@ export function directorEndpointPeers(directors = []) {
 }
 
 /**
+ * 105회차(104회차 D1 반증 — 재현): Director 접속값 바꾸기(주소 · 포트 · 담당)로 **같은 Director 를 새로 가리키게 되는** 경우.
+ *   104 D1 은 매핑 저장(saveSettings)에서만 묶음을 봐, vCenter 가 묶인 등록 B 의 주소를 vCenter 가 묶인 등록 A 의 주소:포트로 바꾸면(PUT Director · 자동 설정)
+ *   그대로 통과했고 · 그 뒤의 매핑 저장은 두 짝을 '이미 묶여 있던 짝'(grandfather — 묶음을 **바뀐** 등록으로 센다)으로 보아 'Director 하나에 vCenter 하나' 를 우회했다.
+ *   바꾸기 전에는 같은 Director 가 아니던 등록(added) 중에, 이 등록에 묶인 vCenter 와 **다른** vCenter 가 묶인 것이 있으면 거부한다.
+ *   이 등록에 묶인 vCenter 가 없으면 새 묶음이 아니다(같은 Director 에 콘솔 등록 하나 더 — 104 와 같다). 이미 같은 Director 이던 짝은 그대로(grandfather).
+ * @returns {string} 사유 · 없으면 ''
+ */
+export function directorMoveBindIssue(id, curDirectors = [], nextDirectors = [], sites = []) {
+  const before = new Set(directorEndpointPeers(curDirectors).get(id) || []);
+  const added = new Set((directorEndpointPeers(nextDirectors).get(id) || []).filter((o) => !before.has(o)));
+  if (!added.size) return '';
+  const list = Array.isArray(sites) ? sites : [];
+  const mine = new Set(list.filter((s) => s?.directorId === id).map((s) => String(s.vcenterId)));
+  if (!mine.size) return '';
+  const theirs = list.filter((s) => added.has(s?.directorId) && !mine.has(String(s.vcenterId)));
+  if (!theirs.length) return '';
+  const nameOf = (x) => (nextDirectors || []).find((d) => d.id === x)?.name || x;
+  const peerNames = [...new Set(theirs.map((s) => nameOf(s.directorId)))].slice(0, 3).map((n) => `‘${n}’`).join(', ');
+  return `Director ‘${nameOf(id)}’ 의 주소 · 포트 · 담당을 이렇게 바꾸면 ${peerNames} 와 같은 Director(같은 주소 · 포트 · 담당)를 가리키게 되는데, 두 등록에 서로 다른 vCenter(‘${[...mine].slice(0, 3).join(', ')}’ · ‘${theirs.slice(0, 3).map((s) => s.vcenterId).join(', ')}’)가 묶여 있습니다 — 서비스 하나 = vCenter 하나 + Bareos 하나입니다. 한쪽 vCenter 의 매핑을 먼저 자기 서비스의 Director 로 옮기세요.`;
+}
+
+/**
  * 52회차 D1(사용자 결정 — 2026-11-17 '권장 사항으로 진행'): 서비스 1 = vCenter 1 + Bareos 1 — Director 하나에 vCenter 하나.
  * **새로** 같은 Director 에 둘째 vCenter 를 묶는 저장은 거부한다. 이미 함께 묶여 있던 짝(이전 설정 · 옛 1:1:1 정리 전)은 그대로 둔다
  * (막으면 운영 중인 법인이 깨진다 — 화면이 경고만 한다 · `sharedDirectorsOf`). 판정은 이 함수 하나(설정 저장 · 완전 설치 시작 · 7단계 매핑).
@@ -427,13 +449,17 @@ export function addDirector(body = {}) {
  * @returns {{ director: object(public), droppedSecrets: string[] }}
  * @throws Error(code invalid|not-found)
  */
-export function updateDirector(id, body = {}) {
-  const { next, d, droppedSecrets } = prepareDirectorUpdate(id, body);
+export function updateDirector(id, body = {}, { bindCheck = true } = {}) {
+  const { next, d, droppedSecrets } = prepareDirectorUpdate(id, body, { bindCheck });
   persist(next);
   return { director: publicDirector(d), droppedSecrets };
 }
 
-function prepareDirectorUpdate(id, body) {
+/**
+ * @param {{ bindCheck?: boolean }} [o] 105회차: false = 같은 Director 새 묶음(directorMoveBindIssue)을 보지 않는다 — 완전 설치 4단계 재등록만
+ *   (러너가 읽은 서버 주소로 고쳐 적는다 · 같은 서버의 다른 등록은 사전 점검이 '함께 쓰는 vCenter' 로 이미 확인받았다 — 0단계 초기화 뒤 4단계에서 멈추지 않게).
+ */
+function prepareDirectorUpdate(id, body, { bindCheck = true } = {}) {
   const cur = loadSettings();
   const next = cloneSettings(cur);
   const d = next.directors.find((x) => x.id === id);
@@ -445,7 +471,7 @@ function prepareDirectorUpdate(id, body) {
   if (secretProvided(body.password)) d.password = String(body.password).slice(0, 512);
   let droppedSecrets = [];
   if (moved) droppedSecrets = dropCarriedSecrets(d, body, ['password']);
-  const issue = directorIssue(d) || clashIssue(next.directors, d);
+  const issue = directorIssue(d) || clashIssue(next.directors, d) || (bindCheck ? directorMoveBindIssue(id, cur.directors, next.directors, cur.sites) : '');   // 105회차: 접속값 바꾸기로 D1 우회
   if (issue) throw fail('invalid', issue);
   return { next, d, droppedSecrets };
 }
