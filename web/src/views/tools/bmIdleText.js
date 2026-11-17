@@ -61,6 +61,8 @@ export function monthText(sum = {}) {
 export function sourceText(s, minEdge) {
   const when = s.at ? new Date(s.at).toLocaleString() : '';
   if (s.old) return `${s.node} — 엣지가 구버전입니다(저활용 계산 없음 · 엣지 v${minEdge || '?'} 이상 필요)`;
+  // 81회차 F2: 읽기 오류는 손상이 아니다 — 원본을 옮기지 않고 읽힐 때까지 다시 계산하지 않는다(서버 idle.js · 같은 표지 readError).
+  if (s.unreadable && s.readError) return `${s.node || '이 노드'} — 결과 파일을 읽지 못했습니다(읽기 오류 — 손상이 아니라 원본은 그대로 · 읽힐 때까지 다시 계산하지 않습니다)`;
   if (s.unreadable) return `${s.node || '이 노드'} — 결과 파일을 읽지 못했습니다(손상본 보존 · 다음 계산이 새로 만듭니다)`;
   if (s.none) return `${s.node || '이 노드'} — 아직 계산 전입니다(하루 1회 · 01:20 뒤 첫 수집 틱)`;
   return `${s.node || '이 노드'}(${s.via === 'edge' ? '엣지' : '이 노드'}) — ${s.day || ''} 계산 · ${when}${s.truncated ? ' · 봉투 상한으로 ‘사용 중’ 행은 수만' : ''}`;

@@ -100,6 +100,8 @@ export function sourceText(s = {}, minEdgeVersion = null, cfg = {}) {
   const when = at != null ? `${String(Math.floor(at / 60)).padStart(2, '0')}:${String(at % 60).padStart(2, '0')}` : '—';
   const name = s.via === 'local' ? `이 노드${s.node ? `(${s.node})` : ''}` : `엣지 ${s.node}`;
   if (s.old) return `${name} — 구버전 엣지(용량 예측을 싣지 않음${minEdgeVersion ? ` · v${minEdgeVersion} 이상 필요` : ''})`;
+  // 81회차 F3: 읽기 오류는 손상이 아니다 — 원본을 옮기지 않고 읽힐 때까지 다시 계산하지 않는다(서버 capacity.js · 같은 표지 readError).
+  if (s.unreadable && s.readError) return `${name} — 계산 결과 파일을 읽지 못함(읽기 오류 — 손상이 아니라 원본은 그대로 · 읽힐 때까지 다시 계산하지 않는다)`;
   if (s.unreadable) return `${name} — 계산 결과 파일을 읽지 못함(다음 계산에서 다시 만든다)`;
   if (s.none) return `${name} — 아직 계산 전(하루 1회 · ${when} 뒤 첫 주기)`;
   const c = s.cap || null;

@@ -53,7 +53,7 @@ export async function bmCapacityFleet(req, snap, deps = {}) {
   const local = C.loadCapacity();
   const tg = await D.currentTargets().catch(() => ({ targets: [] }));
   const localNames = new Map((tg.targets || []).map((x) => [x.key, x]));
-  sources.push({ node: config.agent?.name || '', via: 'local', at: local?.at ?? null, day: local?.day ?? null, ...(local?.unreadable ? { unreadable: true } : {}), ...(local ? {} : { none: true }), ...(local?.truncated ? { truncated: true } : {}), ...(local?.cap ? { cap: local.cap } : {}) });
+  sources.push({ node: config.agent?.name || '', via: 'local', at: local?.at ?? null, day: local?.day ?? null, ...(local?.unreadable ? { unreadable: true } : {}), ...(local?.readError ? { readError: true } : {}), ...(local ? {} : { none: true }), ...(local?.truncated ? { truncated: true } : {}), ...(local?.cap ? { cap: local.cap } : {}) });
   for (const r of local?.rows || []) rows.push({ ...r, via: 'local', node: config.agent?.name || '', vcenterId: r.vcenterId || localNames.get(r.key)?.vcenterId || '' });
   for (const rec of await D.listEdgeBmUsage().catch(() => [])) {
     const sn = rec?.snap; if (!sn) continue;

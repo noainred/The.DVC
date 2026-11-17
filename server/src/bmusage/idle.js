@@ -21,7 +21,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileLoad.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { dayKey, DAY_MS, DAY_OFFSET_MIN } from '../util/dayKey.js';
 import { createYielder } from '../util/timeSlice.js';
@@ -259,18 +260,29 @@ export async function computeIdleServer({ agent = '', target, now = Date.now(), 
 }
 
 /** 저장(원자 쓰기) · 읽기(손상 보존). */
-export function saveIdle(obj) { atomicWriteFileSync(FILE(), JSON.stringify(obj), { mode: 0o600 }); _cache = null; }
+export function saveIdle(obj) { atomicWriteFileSync(FILE(), JSON.stringify(obj), { mode: 0o600 }); _cache = null; _reader.reset(); }
 let _cache = null;
+const parseIdle = (text) => {
+  const o = JSON.parse(text);
+  if (!o || typeof o !== 'object' || Array.isArray(o) || !Array.isArray(o.rows)) throw new Error('형식이 다릅니다');
+  return o;
+};
+/*
+ * 81회차 F2(재현 — 34회차 F4 '남긴 것' 의 형제): 읽기와 JSON.parse 를 catch 하나로 받아 **읽기 오류**(EACCES · EIO · EISDIR)도 손상으로 보고
+ *   온전한 원본을 `.corrupt.<시각>` 으로 옮겼고, 다음 계산이 빈 직전 값으로 이력(62일) · 후보 시작일 · 첫 계산일을 새로 썼다.
+ *   판정은 공용 로더(util/jsonFileLoad — 읽기 오류는 옮기지 않고 캐시하지 않으며 다시 읽기 간격을 둔다) · 그동안 다시 계산은 덮지 않는다(recomputeIdle).
+ */
+const _reader = makeJsonFileReader(FILE, { parse: parseIdle, tag: 'bmusage-idle' });
 export function loadIdle() {
   let st = null;
   try { st = fs.statSync(FILE()); } catch { return null; }
   if (_cache && _cache.m === st.mtimeMs && _cache.s === st.size) return _cache.data;
-  try {
-    const o = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
-    if (!o || typeof o !== 'object' || !Array.isArray(o.rows)) throw new Error('형식이 다릅니다');
-    _cache = { m: st.mtimeMs, s: st.size, data: o };
-    return o;
-  } catch (e) { preserveCorrupt(FILE(), String(e?.message || e)); _cache = null; return { unreadable: true, rows: [], at: 0 }; }
+  const r = _reader.read();
+  if (r.kind === 'ok') { _cache = { m: st.mtimeMs, s: st.size, data: r.value }; return r.value; }
+  _cache = null;
+  if (r.kind === 'missing') return null;
+  if (r.kind === 'read-error') return { unreadable: true, readError: true, rows: [], at: 0 };
+  return { unreadable: true, rows: [], at: 0 };   // 손상 — 보존본으로 옮겼다(다음 계산이 새로 만든다)
 }
 /** 다시 계산할 때인가(순수 — 용량 예측과 같은 규칙 · 01:20). */
 export function dueForIdle(cur, now = Date.now()) {
@@ -321,6 +333,8 @@ export async function recomputeIdle({ targets = null, now = Date.now(), force = 
     const t0 = Date.now();
     try {
       const cur = loadIdle();
+      // 81회차 F2: 읽기 오류 동안에는 다시 계산(수동 포함)이 원본을 덮지 않는다 — 덮으면 그 파일이 가진 이력 · 후보 시작일이 사라진다(보존본도 없다).
+      if (cur?.readError) return { ok: false, skipped: 'read-error', error: '저활용 결과 파일을 읽지 못했습니다(읽기 오류 — 손상이 아니라 원본은 그대로 둡니다 · 읽힐 때까지 다시 계산하지 않습니다).' };
       if (!force && !dueForIdle(cur, now)) return { ok: true, skipped: 'not-due' };
       const rules = deps.rules || loadPerfRules();
       const cfg = { ...IDLE_DEFAULTS, ...(rules.idle || {}) };
@@ -358,4 +372,4 @@ export async function recomputeIdle({ targets = null, now = Date.now(), force = 
   return _running;
 }
 export function idleRunning() { return !!_running; }
-export function _resetIdleForTest() { _cache = null; _running = null; try { fs.unlinkSync(FILE()); } catch { /* */ } }
+export function _resetIdleForTest() { _cache = null; _running = null; _reader.reset(); try { fs.unlinkSync(FILE()); } catch { /* */ } }

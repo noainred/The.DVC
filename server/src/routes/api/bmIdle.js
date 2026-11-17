@@ -75,7 +75,7 @@ export async function bmIdleFleet(req, snap, deps = {}) {
   const local = I.loadIdle();
   const tg = await D.currentTargets().catch(() => ({ targets: [] }));
   const localBy = new Map((tg.targets || []).map((x) => [x.key, x]));
-  sources.push({ node: config.agent?.name || '', via: 'local', at: local?.at ?? null, day: local?.day ?? null, firstDay: local?.firstDay ?? null, ...(local?.unreadable ? { unreadable: true } : {}), ...(local ? {} : { none: true }) });
+  sources.push({ node: config.agent?.name || '', via: 'local', at: local?.at ?? null, day: local?.day ?? null, firstDay: local?.firstDay ?? null, ...(local?.unreadable ? { unreadable: true } : {}), ...(local?.readError ? { readError: true } : {}), ...(local ? {} : { none: true }) });   // 81회차 F2: 읽기 오류 ≠ 손상
   for (const r of local?.rows || []) rows.push({ ...r, via: 'local', node: config.agent?.name || '', name: r.name || localBy.get(r.key)?.name || r.key, vcenterId: r.vcenterId || localBy.get(r.key)?.vcenterId || '' });
   for (const rec of await D.listEdgeBmUsage().catch(() => [])) {
     const sn = rec?.snap; if (!sn) continue;
