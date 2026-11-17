@@ -17,6 +17,7 @@ import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';
+import { makeJsonFileReader, READ_RETRY_MS } from '../util/jsonFileLoad.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { dayKey, DAY_OFFSET_MIN } from '../util/dayKey.js';
 import { RES_MS } from './trendWindow.js';
@@ -93,27 +94,44 @@ export function normalizeSlo(raw, { strict = true } = {}) {
 }
 let _cache = null; let _mtime = '';
 const mtimeOf = () => { try { const st = fs.statSync(FILE()); return `${st.mtimeMs}:${st.size}`; } catch { return ''; } };
+/*
+ * 82회차 F3(재현): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 공용 util/jsonFileLoad.js 로 가른다(perfRules.js 와 같은 규약).
+ *   예전에는 읽기 오류에도 원본(서버별 · 용도별 목표)을 `.corrupt.<시각>` 으로 옮겨 권한을 고쳐도 기본 목표로 굳었다. 이제 원본을 그대로 두고 캐시하지 않으며
+ *   (30초 간격 재읽기) 그동안 저장은 409 다. 손상(parse 실패)은 예전처럼 보존본으로 옮기고 저장이 푼다.
+ */
+const parseStrictObject = (text) => { const v = JSON.parse(text); if (!v || typeof v !== 'object' || Array.isArray(v)) throw new SyntaxError('객체가 아닙니다'); return v; };
+const _reader = makeJsonFileReader(FILE, { tag: 'bmusage', parse: parseStrictObject });
+const READ_ERROR_SAVE = '베어메탈 성능 목표선 파일(bm-perf-slo.json)을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).';
 function load() {
   const mt = mtimeOf();
   if (_cache && mt === _mtime) return _cache;
   _mtime = mt;
   if (!mt) { _err.missing(); _cache = normalizeSlo({}, { strict: false }).value; return _cache; }
+  const r = _reader.read();
+  if (r.kind === 'read-error') {
+    if (!r.deferred) _err.readError(r.error, { retryMs: READ_RETRY_MS });
+    _cache = null; _mtime = '';
+    return normalizeSlo({}, { strict: false }).value;
+  }
+  if (r.kind === 'missing') { _err.missing(); _cache = normalizeSlo({}, { strict: false }).value; _mtime = ''; return _cache; }
   try {
-    const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('객체가 아닙니다');
-    _cache = normalizeSlo(raw, { strict: false }).value; _err.ok();
+    if (r.kind === 'corrupt') throw r.error;   // 보존본으로 옮기기는 reader 가 했다
+    _cache = normalizeSlo(r.value, { strict: false }).value; _err.ok();
   } catch (e) {
-    preserveCorrupt(FILE(), String(e?.message || e)); _err.corrupt(e);
+    if (r.kind === 'ok') preserveCorrupt(FILE(), String(e?.message || e));
+    _err.corrupt(e);
     console.warn('[bmusage] bm-perf-slo.json 을 읽지 못해 기본 목표로 동작합니다 — 손상본은 보존했습니다');
     _cache = normalizeSlo({}, { strict: false }).value; _mtime = mtimeOf();
   }
   return _cache;
 }
-function writeFile(obj) { fs.mkdirSync(path.dirname(FILE()), { recursive: true }); atomicWriteFileSync(FILE(), JSON.stringify(obj, null, 2), { mode: 0o600 }); _cache = null; _mtime = ''; _err.ok(); }
+function writeFile(obj) { fs.mkdirSync(path.dirname(FILE()), { recursive: true }); atomicWriteFileSync(FILE(), JSON.stringify(obj, null, 2), { mode: 0o600 }); _cache = null; _mtime = ''; _err.ok(); _reader.reset(); }
 export function loadSlo() { return JSON.parse(JSON.stringify(load())); }
 export function sloLoadError() { load(); return _err.get(); }
 export function saveSlo(body, { by = '' } = {}) {
   const prev = load();
+  // 82회차 F3: 읽기 오류 중에는 쓰지 않는다(지금 쓰면 읽지 못한 원본을 덮는다).
+  if (_err.get()?.readError) { const e = new Error(READ_ERROR_SAVE); e.status = 409; e.code = 'settings-unreadable'; throw e; }
   const { value } = normalizeSlo(body && typeof body === 'object' ? body : {}, { strict: true });
   writeFile({ ...value, by: String(by).slice(0, 64), at: Date.now() });
   return { value: loadSlo(), prev };
@@ -200,4 +218,4 @@ export function monthWindow(now = Date.now()) {
   if (!d) return { from: now - 30 * 86_400_000, to: now };
   return { from: Date.UTC(Number(d.slice(0, 4)), Number(d.slice(5, 7)) - 1, 1) - DAY_OFFSET_MIN * 60_000, to: now };
 }
-export function _resetSloForTest() { _cache = null; _mtime = ''; _err.ok(); }
+export function _resetSloForTest() { _cache = null; _mtime = ''; _err.ok(); _reader.reset(); }

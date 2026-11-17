@@ -174,7 +174,8 @@ export async function bmSloSettingsRead(req, snap, deps = {}) {
     else { servers = {}; serversHidden = Object.keys(keep).length; }
   }
   return { ok: true, slo: { ...cfg, servers }, ...(serversHidden ? { serversHidden } : {}), metrics: L.SLO_METRICS, bases: L.SLO_BASES, peakMetrics: L.SLO_PEAK_METRICS, ops: L.SLO_OPS, profiles: L.SLO_PROFILES, limits: L.SLO_LIMITS, defaults: L.SLO_DEFAULTS,
-    canEdit: isAdminReq(req) && !allowed, ...(L.sloLoadError() ? { loadError: { reason: '목표 설정 파일을 읽지 못해 기본 목표로 동작 중입니다(저장하면 새 파일 · 손상본은 보존)' } } : {}) };
+    // 82회차 F3: 읽기 오류면 ‘저장하면 새 파일’ 이 아니다(저장은 409 — 원본이 그대로 있다).
+    canEdit: isAdminReq(req) && !allowed, ...(L.sloLoadError() ? { loadError: L.sloLoadError().readError ? { reason: '목표 설정 파일을 읽지 못해(권한 · 디스크 — 원본은 그대로) 기본 목표로 동작 중입니다 — 읽히기 전까지 저장하지 않습니다', readError: true } : { reason: '목표 설정 파일을 읽지 못해 기본 목표로 동작 중입니다(저장하면 새 파일 · 손상본은 보존)' } } : {}) };
 }
 async function sloWrite(req, res) {
   try {
@@ -185,6 +186,8 @@ async function sloWrite(req, res) {
     res.json({ ok: true, slo: out.value });
   } catch (e) {
     if (e?.status === 400) return res.status(400).json({ ok: false, field: e.field || null, reason: String(e.message || e).slice(0, 300) });
+    // 82회차 F3: 목표 파일 읽기 오류 중 저장 거절(원본을 덮지 않게).
+    if (e?.status === 409) return res.status(409).json({ ok: false, code: e.code || 'settings-unreadable', reason: String(e.message || e).slice(0, 300) });
     res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) });
   }
 }

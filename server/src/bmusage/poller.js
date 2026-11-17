@@ -26,7 +26,7 @@ import { store } from '../store.js';
 import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { withDeadline } from '../proxy/sshExec.js';
 import { createAuthGuard, isAuthFailureText } from '../util/authGuard.js';
-import { loadBmUsageSettings, bmUsageEnabled, enterpriseActive, onBmUsageSettingsChange, STORE_DEFAULTS, effectiveRawDays, SNAPSHOT_KEEP_DAYS } from './settings.js';
+import { loadBmUsageSettings, bmUsageEnabled, enterpriseActive, onBmUsageSettingsChange, STORE_DEFAULTS, effectiveRawDays, SNAPSHOT_KEEP_DAYS, bmUsageLocalLoadError } from './settings.js';
 import { withResolvedAuth, authCredOf } from './onboard/refs.js'; // 7b: OS 등록 항목의 키 · 공통 계정 참조 → 접속 자격
 import { noteKeyUse } from '../sshaccess/usage.js';   // v3.9.0: 키 사용 기록(화면용 — 판정에 쓰지 않는다)
 import { resolveTargets } from './targets.js';
@@ -847,14 +847,25 @@ export async function pruneTick({ every = PRUNE_EVERY } = {}) {
   let exists = false;
   try { exists = fs.existsSync(BMUSAGE_DB_FILE()); } catch { /* */ }
   if (!exists && !bmUsageEnabled()) return { ok: true, skipped: true, reason: 'no-db' };
+  /*
+   * 82회차 F2(재현): 보존 기간을 정하는 설정 파일을 못 읽은 동안(손상 · 손상 보존본만 남음 · 읽기 오류)은 그 파일이 정하는 보존 정리를 **멈춘다**.
+   *   예전에는 못 읽은 값 = 기본값(원시 90일 · 일 5년 · 시간 365일 · 변경 이벤트 30일 · Top-N 시간 90일 · 로그 30일)으로 정리해, 관리자가 더 길게 둔 보존
+   *   (예: 일 롤업 10년 · 변경 이벤트 400일)을 한 번의 손상 · 권한 오류로 되돌릴 수 없게 지웠다(허브 46회차 H1 과 같은 꼴 — 그동안 정리 중지).
+   *   설정 파일 오류는 서비스 점검이 밝히고, 기본값으로 확정하거나 파일을 되돌리면 다음 정리 틱부터 다시 돈다. 고정 보관(스냅샷 7일 · 수집 주기 기록 30일)은 그대로 정리한다.
+   */
+  let settingsErr = null; try { settingsErr = bmUsageLocalLoadError(); } catch { settingsErr = { reason: 'settings-read' }; }
+  let rulesErr = null; try { rulesErr = (await import('./perfRules.js')).perfRulesLoadError(); } catch { rulesErr = { reason: 'rules-module' }; }
+  const held = [...(settingsErr ? ['settings'] : []), ...(rulesErr ? ['perf-rules'] : [])];
+  if (held.length && _srcErrLog('prune-held', held.join(','))) console.warn(`[bmusage] 보존 기간 설정 파일을 읽지 못해(${held.join(' · ')}) 그 설정이 정하는 보존 정리를 멈췄습니다 — 기본값으로 지우지 않습니다(서비스 점검에서 확정하거나 파일을 되돌리면 다시 돕니다)`);
   const s = loadBmUsageSettings();
   // v2.922: 시간 단위 파일 보존(파일 삭제 + 경계 기간 청크) — 단계마다 보존일. 예전 표(마이그레이션 전 잔여)는 예전 규칙 그대로.
   const st = s.store || STORE_DEFAULTS;
-  // 8b단계: Top-N 보존(이 노드 설정 bm-perf-rules.json top — 기본 7일 · 90일). 설정을 못 읽으면 기본값.
-  let topKeep = { keepDays: 7, hourlyDays: 90 };
-  try { const tr = (await import('./perfRules.js')).loadPerfRules().top; if (tr) topKeep = tr; } catch { /* 기본값 */ }
+  // 8b단계: Top-N 보존(이 노드 설정 bm-perf-rules.json top — 기본 7일 · 90일). 규칙 파일을 못 읽으면(82회차 F2) Top-N 정리는 건너뛴다(null = 그 묶음 정리 안 함).
+  let topKeep = { keepDays: null, hourlyDays: null };
+  if (!rulesErr) { try { const tr = (await import('./perfRules.js')).loadPerfRules().top; if (tr) topKeep = tr; } catch { /* 건너뜀 */ } }
   const keep = { raw: effectiveRawDays(s), h1: st.hourlyDays, d1: s.dailyRetentionDays, dev: st.devRawDays, dev1h: st.devHourlyDays, top: topKeep.keepDays, toph: topKeep.hourlyDays };
-  const r = await pruneUsage({ rawDays: s.rawRetentionDays, dailyDays: s.dailyRetentionDays, force: true, keep }).catch((e) => ({ ok: false, error: errText(e) }));
+  const r = settingsErr ? { ok: true, held } : await pruneUsage({ rawDays: s.rawRetentionDays, dailyDays: s.dailyRetentionDays, force: true, keep }).catch((e) => ({ ok: false, error: errText(e) }));
+  if (held.length && r && typeof r === 'object') r.held = held;
   // v2.923(반증 R3): 진단 스냅샷 7일 보관 — 예전에는 ‘실행할 때만’ 지워져 아무도 누르지 않으면 프로세스 이름 · 커널 로그가 영구 보관됐다. 같은 스로틀 틱에 정리한다.
   if (exists) {
     try { const n = await snapshotPrune({ before: Date.now() - SNAPSHOT_KEEP_DAYS * 86_400_000 }); if (r && typeof r === 'object') r.snapshotsPruned = n; }
@@ -863,15 +874,16 @@ export async function pruneTick({ every = PRUNE_EVERY } = {}) {
     try {
       const rules = (await import('./perfRules.js')).loadPerfRules();
       const O = await import('./opsDb.js');
-      const fp = await focusHousekeeping({ keepDays: rules.focus?.keepDays ?? 30 });
-      const cp = await O.changePrune({ before: Date.now() - (rules.changes?.keepDays ?? 30) * 86_400_000 });
+      // 82회차 F2: 규칙 파일을 못 읽은 동안은 그 파일이 정하는 보관(집중 · 변경 이벤트 · 로그)을 기본값으로 지우지 않는다.
+      const fp = rulesErr ? null : await focusHousekeeping({ keepDays: rules.focus?.keepDays ?? 30 });
+      const cp = rulesErr ? 0 : await O.changePrune({ before: Date.now() - (rules.changes?.keepDays ?? 30) * 86_400_000 });
       const cyc = await O.cyclePrune({ before: Date.now() - 30 * 86_400_000 }).catch(() => 0);   // 6단계 수집 건강 주기 기록 30일
       // 대상 목록은 마지막 성공 주기의 것(이 틱에서 대상 해석을 다시 하지 않는다 — 등록부 · 분류를 정리 틱마다 읽지 않게). 모르면 지우지 않는다.
       let gone = 0;
       if (_lastLiveKeys) { try { gone = await O.changeLatestKeep({ agent: config.agent?.name || '', keys: [..._lastLiveKeys] }); } catch { /* 다음 틱 */ } }
       if (r && typeof r === 'object') r.opsPruned = { focusSessions: fp?.sessions ?? 0, focusSamples: fp?.samples ?? 0, changeEvents: cp || 0, changeLatestGone: gone, collectCycles: cyc || 0 };
       // 7a단계 로그 분석 보관(설정 keepDays) + 대상에서 사라진 서버의 읽기 위치 — 같은 스로틀 틱 · 청크 DELETE.
-      try { const lp = await (await import('./logs/run.js')).logPruneTick({ agent: config.agent?.name || '', keys: _lastLiveKeys ? [..._lastLiveKeys] : null }); if (r && typeof r === 'object') r.logsPruned = lp; }
+      try { if (!rulesErr) { const lp = await (await import('./logs/run.js')).logPruneTick({ agent: config.agent?.name || '', keys: _lastLiveKeys ? [..._lastLiveKeys] : null }); if (r && typeof r === 'object') r.logsPruned = lp; } }
       catch (e) { if (_srcErrLog('log-prune', errText(e))) console.warn(`[bmusage] 로그 분석 보관 정리 실패: ${errText(e)}`); }
     } catch (e) { if (_srcErrLog('ops-prune', errText(e))) console.warn(`[bmusage] 집중 · 변경 이벤트 보관 정리 실패: ${errText(e)}`); }
   }

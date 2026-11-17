@@ -15,6 +15,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';
+import { makeJsonFileReader, READ_RETRY_MS } from '../util/jsonFileLoad.js';
 import { HEALTH_DEFAULTS } from './health.js';
 import { LINE_CAP_RANGE, LINE_CAP_DEFAULT } from './logs/command.js';
 
@@ -128,6 +129,15 @@ export const DEFAULTS = Object.freeze({
 const _err = makeSettingsLoadError(FILE, { label: '베어메탈 성능 알림 규칙 · 집중 모니터링', confirm: () => writeFile(normalizeRules({}, { strict: false }).value), ownerOnly: true });   // 20회차 F8: 쓰기 라우트가 소유자 등급
 let _cache = null; let _mtime = '';
 const mtimeOf = () => { try { const st = fs.statSync(FILE()); return `${st.mtimeMs}:${st.size}`; } catch { return ''; } };
+/*
+ * 82회차 F3(재현): 읽기 단계 실패(EACCES · EIO · EISDIR)와 손상(parse 실패)을 가른다 — 공용 util/jsonFileLoad.js(77회차와 같은 규약).
+ *   예전에는 catch 하나로 받아 **읽기 오류도 손상으로 보고 원본을 `.corrupt.<시각>` 으로 옮겼다** — 권한을 고쳐도 파일이 없어 기본값(규칙 전부 꺼짐 · 랙 배치 없음)으로 굳었다.
+ *   이제 읽기 오류는 원본을 그대로 두고 캐시하지 않으며(30초 간격 재읽기 — 읽히면 재시작 없이 풀린다) 그동안 저장은 409 다(지금 쓰면 읽지 못한 원본을 덮는다).
+ */
+// 객체가 아닌 JSON(null 포함)은 예전처럼 손상이다(parseStrictObject — relaycheck · pdu 와 같은 판정).
+const parseStrictObject = (text) => { const v = JSON.parse(text); if (!v || typeof v !== 'object' || Array.isArray(v)) throw new SyntaxError('객체가 아닙니다'); return v; };
+const _reader = makeJsonFileReader(FILE, { tag: 'bmusage', parse: parseStrictObject });
+const READ_ERROR_SAVE = '베어메탈 성능 알림 규칙 파일(bm-perf-rules.json)을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).';
 function fieldError(field, msg) { const e = new Error(`${field}: ${msg}`); e.status = 400; e.field = field; return e; }
 const VC_RE = /^[A-Za-z0-9._:@-]{1,128}$/;
 const BAD_KEYS = new Set(['__proto__', 'constructor', 'prototype', 'toString', 'valueOf', 'hasOwnProperty']);
@@ -278,15 +288,23 @@ function load() {
   if (_cache && mt === _mtime) return _cache;
   _mtime = mt;
   if (!mt) { _err.missing(); _cache = normalizeRules({}, { strict: false }).value; return _cache; }
+  const r = _reader.read();
+  if (r.kind === 'read-error') {
+    // 82회차 F3: 원본을 옮기지 않고 캐시하지 않는다(다음 호출이 간격 뒤 다시 읽는다) — 값은 기본값(규칙 꺼짐)이고 로드 오류로 밝힌다.
+    if (!r.deferred) _err.readError(r.error, { retryMs: READ_RETRY_MS });
+    _cache = null; _mtime = '';
+    return normalizeRules({}, { strict: false }).value;
+  }
+  if (r.kind === 'missing') { _err.missing(); _cache = normalizeRules({}, { strict: false }).value; _mtime = ''; return _cache; }
   try {
-    const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('객체가 아닙니다');
+    if (r.kind === 'corrupt') throw r.error;   // 보존본으로 옮기기는 reader 가 했다(예전과 같다)
+    const raw = r.value;
     const { value, dropped } = normalizeRules(raw, { strict: false });
     if (dropped) console.warn(`[bmusage] bm-perf-rules.json 의 형식 밖 항목 ${dropped}개를 읽지 않았습니다(기본값으로)`);
     _cache = value;
     _err.ok();
   } catch (e) {
-    preserveCorrupt(FILE(), String(e?.message || e));
+    if (r.kind === 'ok') preserveCorrupt(FILE(), String(e?.message || e));   // 읽었는데 정규화가 던졌다 — 예전처럼 보존(저장이 원본을 덮지 않게)
     _err.corrupt(e);
     console.warn('[bmusage] bm-perf-rules.json 을 읽지 못해 기본값(알림 규칙 전부 꺼짐 · 자동 집중 꺼짐)으로 동작합니다 — 손상본은 보존했습니다');
     _cache = normalizeRules({}, { strict: false }).value;
@@ -298,7 +316,7 @@ function writeFile(obj) {
   fs.mkdirSync(path.dirname(FILE()), { recursive: true });
   atomicWriteFileSync(FILE(), JSON.stringify(obj, null, 2), { mode: 0o600 });
   _cache = null; _mtime = '';
-  _err.ok();
+  _err.ok(); _reader.reset();
   for (const fn of _listeners) { try { fn(); } catch { /* 구독자 오류는 저장을 막지 않는다 */ } }
 }
 const _listeners = new Set();
@@ -312,6 +330,8 @@ export function perfRulesLoadError() { load(); return _err.get(); }
  */
 export function savePerfRules(body, { by = '' } = {}) {
   const prev = load();
+  // 82회차 F3: 읽기 오류 중에는 쓰지 않는다(손상은 예전처럼 저장이 푼다 — 원본은 보존본에 있다).
+  if (_err.get()?.readError) { const e = new Error(READ_ERROR_SAVE); e.status = 409; e.code = 'settings-unreadable'; throw e; }
   const { value } = normalizeRules({ ...(body && typeof body === 'object' ? body : {}) }, { strict: true });
   const next = { ...value, by: String(by).slice(0, 64), at: Date.now() };
   writeFile(next);
@@ -323,4 +343,4 @@ export function rulesAuditSummary(prev, next) {
   const changed = ['daily', 'focus', 'baseline', 'health', 'changes', 'compare', 'collect', 'maintenance', 'logs', 'capacity', 'top', 'idle', 'power'].filter((k) => JSON.stringify(prev?.[k]) !== JSON.stringify(next?.[k]));
   return JSON.stringify({ before: on(prev), after: on(next), changed }).slice(0, 300);
 }
-export function _resetPerfRulesForTest() { _cache = null; _mtime = ''; _err.ok(); _listeners.clear(); }
+export function _resetPerfRulesForTest() { _cache = null; _mtime = ''; _err.ok(); _reader.reset(); _listeners.clear(); }

@@ -277,6 +277,13 @@ export function bmUsageSettingsLoadError() {
   return null;
 }
 
+/**
+ * 82회차 F2: 이 노드 **로컬** 설정 파일(bmusage-settings.json)의 로드 오류(손상 · 손상 보존본만 남음 · 읽기 오류) — 없으면 null.
+ *   보존 정리(poller.pruneTick)가 본다: 못 읽은 동안의 값은 기본값(원시 90일 · 일 5년 · 시간 365일 …)이라, 관리자가 더 길게 둔 보존을 그 기본값으로 지우면 되돌릴 수 없다.
+ *   배포 파일(bmusage-distribute.json — 중앙)의 오류는 보존 기간과 무관해 여기 넣지 않는다(bmUsageSettingsLoadError 와 다른 점).
+ */
+export function bmUsageLocalLoadError() { readFile(); return _localErr.get(); }
+
 /** 정규화(순수) — 테스트가 하한·상한을 고정한다. */
 export function normalizeSettings(raw = {}) {
   const corps = {};

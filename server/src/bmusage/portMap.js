@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileLoad.js';
 
 const FILE = () => path.join(config.configDir, 'bmusage-portmap.json');
 export const PORTMAP_MAX = 20_000;
@@ -20,17 +21,34 @@ let _cache = null;
 let _loadError = null;
 export function portMapLoadError() { return _loadError; }
 
+/*
+ * 82회차 F3(재현): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 공용 util/jsonFileLoad.js 로 가른다. 예전에는 읽기 오류에도 원본(사람이 확정한 매핑)을
+ *   `.corrupt.<시각>` 으로 옮겨, 재시작하면 파일이 없어 ‘매핑 없음 · 오류 없음’ 으로 굳었다. 이제 원본을 그대로 두고 캐시하지 않으며(30초 간격 재읽기 — 읽히면 풀린다)
+ *   그동안 저장은 예전 손상 때처럼 거절한다. 손상(parse 실패 · entries 없음)은 예전처럼 보존본으로 옮긴다.
+ */
+const parseMap = (text) => {
+  const raw = JSON.parse(text);
+  if (!raw || typeof raw !== 'object' || !Array.isArray(raw.entries)) throw new Error('entries 배열이 없습니다');
+  return raw;
+};
+const _reader = makeJsonFileReader(FILE, { tag: 'bmusage', parse: parseMap });
 function load() {
   if (_cache) return _cache;
   if (!fs.existsSync(FILE())) { _cache = { v: 1, entries: [] }; _loadError = null; return _cache; }
+  const r = _reader.read();
+  if (r.kind === 'read-error') {
+    _loadError = { at: _loadError?.readError ? _loadError.at : Date.now(), reason: `매핑 파일을 읽지 못했습니다(${String(r.error?.code || 'read-error').slice(0, 32)} — 원본은 그대로 · 권한 · 디스크를 확인하세요. 30초마다 다시 읽습니다)`, readError: true };
+    return { v: 1, entries: [] };   // 캐시하지 않는다 — 다음 호출이 간격 뒤 다시 읽는다
+  }
+  if (r.kind === 'missing') { _cache = { v: 1, entries: [] }; _loadError = null; return _cache; }
   try {
-    const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
-    if (!raw || typeof raw !== 'object' || !Array.isArray(raw.entries)) throw new Error('entries 배열이 없습니다');
+    if (r.kind === 'corrupt') throw r.error;   // 보존본으로 옮기기는 reader 가 했다
+    const raw = r.value;
     _cache = { v: 1, entries: raw.entries.filter((e) => e && typeof e === 'object').slice(0, PORTMAP_MAX) };
     _loadError = null;
   } catch (e) {
     // ⚠ 손상이면 원본을 보존하고 빈 목록으로 — 다음 저장이 온전했던 매핑을 덮지 않게 저장은 막는다(_loadError).
-    preserveCorrupt(FILE(), String(e?.message || e));
+    if (r.kind === 'ok') preserveCorrupt(FILE(), String(e?.message || e));
     _loadError = { at: Date.now(), reason: `매핑 파일을 읽지 못했습니다(원본은 보존): ${String(e?.message || e).slice(0, 160)}` };
     _cache = { v: 1, entries: [] };
   }
@@ -51,7 +69,7 @@ export function listPortMap({ agent = null, key = null } = {}) {
 
 /** 확정(덮어쓰기). 반환 { ok, entry, replaced }. 손상 파일을 읽은 상태면 저장을 거부한다(보존한 원본을 빈 목록으로 덮지 않게). */
 export function setPortMapping(m, { by = '' } = {}) {
-  if (_loadError || (load() && _loadError)) return { ok: false, reason: _loadError.reason };
+  if ((load() && _loadError) || _loadError) return { ok: false, reason: _loadError.reason };
   const v = validateMapping(m);
   if (v.error) return { ok: false, reason: v.error };
   const cur = load();
@@ -65,7 +83,7 @@ export function setPortMapping(m, { by = '' } = {}) {
   return { ok: true, entry, replaced };
 }
 export function removePortMapping({ agent = '', key, nic } = {}) {
-  if (_loadError || (load() && _loadError)) return { ok: false, reason: _loadError.reason };
+  if ((load() && _loadError) || _loadError) return { ok: false, reason: _loadError.reason };
   const cur = load();
   const next = cur.entries.filter((e) => !(e.agent === String(agent) && e.key === String(key) && e.nic === String(nic)));
   if (next.length === cur.entries.length) return { ok: false, reason: '그 매핑이 없습니다.', notFound: true };
@@ -77,4 +95,4 @@ function write(obj) {
   atomicWriteFileSync(FILE(), JSON.stringify(obj, null, 2), { mode: 0o600 });
   _cache = obj;
 }
-export function _resetPortMapForTest() { _cache = null; _loadError = null; }
+export function _resetPortMapForTest() { _cache = null; _loadError = null; _reader.reset(); }
