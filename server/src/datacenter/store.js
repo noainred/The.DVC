@@ -13,7 +13,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { makeJsonFileLoader } from '../util/jsonFileLoad.js';   // 결정(56~75 남긴 것) 73 ①
 import { resolvePickedDc } from '../collector/datacenterMatch.js'; // v2.986(반증 D3): 법인 id 고르기 규칙 하나(순수 · 의존 없음)
 
 const FILE = path.join(config.configDir, 'datacenters.json');
@@ -27,11 +28,25 @@ function fileTok() {
   try { const st = fs.statSync(FILE); return `${st.mtimeMs}:${st.size}`; } catch { return ''; }
 }
 
+/*
+ * 결정(56~75 남긴 것) 73 ①(73회차 남긴 것): 로드 catch 가 읽기 오류(EACCES · EIO · EMFILE)도 손상으로 보고 원본을 .corrupt 로 옮긴 뒤 빈 등록부로 돌았다 —
+ *   다음 법인 추가 · 할당 · 수집 서버 백필(ensureDatacenter) 한 번이 한두 건만 든 파일을 썼다. 이제 공용 로더: 읽기 오류는 원본을 두고 캐시하지 않으며
+ *   (30초 간격 재읽기) · 손상은 보존 + 서비스 점검 등재 · 오류 중 쓰기는 전부 거절(settings-unreadable — 라우트 409 · 백필은 조용히 건너뜀).
+ */
+const EMPTY = () => ({ datacenters: [], assign: {}, deleted: [], order: [] });
+const _file = makeJsonFileLoader(() => FILE, { label: 'DataCenter(법인) 목록 · vCenter 할당(datacenters.json) — 확정하면 법인 목록 · 할당이 모두 비워집니다(수집 서버 법인은 다음 조회에서 다시 생김)', confirm: () => { atomicWriteFileSync(FILE, JSON.stringify(EMPTY(), null, 2)); cache = EMPTY(); cacheTok = fileTok(); _file.saved(); }, tag: 'datacenter' });
+/** 등록부를 못 읽었으면 { reason, at, readError }, 아니면 null(GET /admin/datacenters 표지). */
+export function datacentersLoadError() { loadRaw(); return _file.marker(); }
+const refused = () => _file.refusal('DataCenter(법인) 목록 · 할당');
+
 function loadRaw() {
   const t = fileTok();
   if (cache && t === cacheTok) return cache;
-  try {
-    const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+  const r = _file.load();
+  if (r.kind === 'read-error') { cache = null; return EMPTY(); }   // 73 ①: 캐시하지 않는다
+  if (r.kind !== 'ok') { cache = EMPTY(); cacheTok = t; return cache; }
+  {
+    const p = r.value;
     cache = {
       datacenters: Array.isArray(p.datacenters) ? p.datacenters : [],
       assign: (p.assign && typeof p.assign === 'object') ? p.assign : {},
@@ -41,7 +56,7 @@ function loadRaw() {
       // 사용자가 지정한 표시 순서(id 배열). 모든 'DataCenter 선택' 콤보박스/목록에 적용.
       order: Array.isArray(p.order) ? p.order.map(String) : [],
     };
-  } catch (e) { preserveCorrupt(FILE, e.message); cache = { datacenters: [], assign: {}, deleted: [], order: [] }; }
+  }
   cacheTok = t;
   return cache;
 }
@@ -78,6 +93,7 @@ export function getDatacenterOrder() { return [...loadRaw().order]; }
 /** 표시 순서 저장. 등록된 id만 유지(정리), 중복 제거. */
 export function saveDatacenterOrder(ids) {
   const cur = loadRaw();
+  { const no = refused(); if (no) return no; }   // 73 ①
   const valid = new Set(cur.datacenters.map((d) => d.id));
   const order = Array.isArray(ids)
     ? [...new Set(ids.map((x) => String(x).trim()).filter((id) => valid.has(id)))]
@@ -103,6 +119,7 @@ export function addDatacenter(body = {}) {
   if (!/^[a-z0-9._-]{1,64}$/.test(id)) return { ok: false, reason: 'id는 영문/숫자/.-_ 1~64자만 가능합니다.' };
   if (!name) return { ok: false, reason: 'name(표시 이름)이 필요합니다.' };
   const cur = loadRaw();
+  { const no = refused(); if (no) return no; }   // 73 ①
   if (cur.datacenters.some((d) => d.id === id)) return { ok: false, reason: `이미 존재하는 DataCenter: ${id}` };
   const entry = { id, name: name.slice(0, 128), region: norm(body.region).slice(0, 64), note: norm(body.note).slice(0, 256) };
   // 명시적 추가는 tombstone 해제(관리자가 다시 원함).
@@ -117,6 +134,7 @@ export function ensureDatacenter(body = {}) {
   const id = idOf(body.id);
   if (!id || !/^[a-z0-9._-]{1,64}$/.test(id)) return { ok: false, reason: 'invalid id' };
   const cur = loadRaw();
+  { const no = refused(); if (no) return no; }   // 73 ①: 수집 서버 백필도 읽지 못한 등록부 위에 쓰지 않는다
   if (cur.datacenters.some((d) => d.id === id)) return { ok: true, existed: true, datacenter: { id } };
   // 관리자가 삭제한 법인은 자동 재생성하지 않는다(백필로 부활 방지). 다시 원하면 명시적 등록.
   if ((cur.deleted || []).includes(id)) return { ok: true, skipped: 'deleted', datacenter: { id } };
@@ -125,6 +143,7 @@ export function ensureDatacenter(body = {}) {
 
 export function updateDatacenter(id, body = {}) {
   const cur = loadRaw();
+  { const no = refused(); if (no) return no; }   // 73 ①
   const idx = cur.datacenters.findIndex((d) => d.id === id);
   if (idx === -1) return { ok: false, reason: `없는 DataCenter: ${id}` };
   const e = { ...cur.datacenters[idx] };
@@ -139,6 +158,7 @@ export function updateDatacenter(id, body = {}) {
 
 export function removeDatacenter(id) {
   const cur = loadRaw();
+  { const no = refused(); if (no) return no; }   // 73 ①
   if (!cur.datacenters.some((d) => d.id === id)) return { ok: false, reason: `없는 DataCenter: ${id}` };
   // 이 DataCenter에 할당돼 있던 vCenter 매핑도 함께 정리(유령 매핑 방지).
   const assign = {};
@@ -158,6 +178,7 @@ export function setVcenterDatacenter(vcenterId, datacenterId) {
   if (!vc) return { ok: false, reason: 'vcenterId가 필요합니다.' };
   const dc = idOf(datacenterId);
   const cur = loadRaw();
+  { const no = refused(); if (no) return no; }   // 73 ①
   if (dc && !cur.datacenters.some((d) => d.id === dc)) return { ok: false, reason: `없는 DataCenter: ${dc}` };
   const assign = { ...cur.assign };
   if (!dc) delete assign[vc]; else assign[vc] = dc;
@@ -169,6 +190,7 @@ export function setVcenterDatacenter(vcenterId, datacenterId) {
 /** 여러 vCenter 할당을 한 번에(설정 페이지 일괄 저장용). entries: [[vcenterId, datacenterId], ...]. */
 export function setVcenterDatacenterMany(entries = []) {
   const cur = loadRaw();
+  { const no = refused(); if (no) return no; }   // 73 ①
   const valid = new Set(cur.datacenters.map((d) => d.id));
   const assign = { ...cur.assign };
   let changed = 0;
@@ -200,6 +222,6 @@ export function setVcenterDatacenterMany(entries = []) {
 
 /** 테스트/관리용 초기화. */
 export function resetDatacenters() {
-  cache = null; cacheTok = '';
+  cache = null; cacheTok = ''; _file.resetRetry();
   try { if (fs.existsSync(FILE)) fs.unlinkSync(FILE); } catch { /* */ }
 }

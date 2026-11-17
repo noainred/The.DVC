@@ -13,10 +13,11 @@
  *   이벤트가 아니라 **상태**이므로 `perfDiag`('rest-method')가 화면에서 말한다.
  */
 import { createActivityLog } from '../util/activityLog.js';
+import { envPositive, ENV_INT_MAX } from '../util/envNumber.js'; // 결정(56~75 남긴 것) 57 · 58: 시한 · 개수 env 의 Infinity · 2^31 초과 · 음수는 기본값(예전 `Math.max(하한, Number(env) || 기본)` 은 Infinity · 3e9 를 통과시켜 setTimeout 이 1ms 로 바꿨다 · 개수는 무제한)
 
 const log = createActivityLog({
   fileName: 'sanswitch-perf-activity.json',
-  max: Number(process.env.SANSW_PERF_ACTIVITY_MAX) || 500,
+  max: envPositive(process.env.SANSW_PERF_ACTIVITY_MAX, 500, { max: ENV_INT_MAX }),
   // 수집 못 한 것과 '진짜 0' 을 구분해야 하므로 유한수가 아니면 null 로 굳힌다(팩토리가 처리).
   numFields: ['ports', 'totalBps'],
 });

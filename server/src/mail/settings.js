@@ -11,10 +11,10 @@
  *  - 검증은 순수 함수(`smtpIssue`·`validate`)로 분리 — 웹 테스트가 node 환경이라 화면 렌더
  *    테스트가 불가하므로 판정을 여기에 고정한다.
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileLoader } from '../util/jsonFileLoad.js';   // 결정(56~75 남긴 것) 73 ①
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { normalizeAddresses } from '../util/smtp.js';
 import { KINDS, isKind } from './kinds.js';
@@ -59,25 +59,36 @@ function normKinds(raw) {
   return out;
 }
 
+/*
+ * 결정(56~75 남긴 것) 73 ①(73회차 남긴 것): 로드 catch 가 읽기 오류(EACCES · EIO · EMFILE)도 손상으로 보고 원본(SMTP 계정 · 수신자)을 .corrupt 로 옮겼다.
+ *   이제 공용 로더 — 읽기 오류는 원본을 두고 기본값(발송 꺼짐)을 캐시하지 않으며(30초 간격 재읽기) · 손상은 예전처럼 보존 ·
+ *   둘 다 로드 오류(서비스 점검 등재 — 확정은 설정 소유자: 쓰기 라우트가 requireSettingsOwner) · 오류 중 저장은 409(saveRefusal).
+ *   parse 안의 openSecretsDeep 실패(봉인 손상)도 예전처럼 손상으로 본다.
+ */
+const _file = makeJsonFileLoader(() => FILE, { label: '메일 발송 설정(SMTP · 수신자 — mail.json) — 확정하면 기본값(발송 꺼짐 · SMTP · 수신자 없음)으로 저장됩니다', confirm: () => { atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(defaultsOut()), null, 2), { mode: 0o600 }); cache = null; _file.saved(); }, ownerOnly: true, parse: (text) => openSecretsDeep(parseJsonObject(text)), tag: 'mail' });
+function defaultsOut() { const out = structuredClone(DEFAULTS); out.kinds = normKinds({}); return out; }
+/** 메일 설정 파일을 못 읽었으면 { reason, at, readError }, 아니면 null(GET /admin/mail 표지). */
+export function mailSettingsLoadError() { load(); return _file.marker(); }
+/** 저장 거절 응답(409) 또는 null — PUT /admin/mail 이 검증보다 먼저 본다. */
+export function mailSaveRefusal() { load(); return _file.refusal('메일 발송 설정'); }
+
 export function load() {
   if (cache) return cache;
-  const out = structuredClone(DEFAULTS);
-  out.kinds = normKinds({});
-  try {
-    if (fs.existsSync(FILE)) {
-      const p = openSecretsDeep(parseJsonObject(fs.readFileSync(FILE, 'utf8')));
-      if (typeof p.enabled === 'boolean') out.enabled = p.enabled;
-      if (p.smtp && typeof p.smtp === 'object') out.smtp = { ...out.smtp, ...p.smtp };
-      out.defaultTo = normalizeAddresses(p.defaultTo).ok;
-      out.kinds = normKinds(p.kinds);
-      out.rateLimitPerHour = clamp(p.rateLimitPerHour, 0, 10000, DEFAULTS.rateLimitPerHour);
-      out.historyMax = clamp(p.historyMax, 20, 2000, DEFAULTS.historyMax);
-    }
-  } catch (e) {
-    // 손상 파일을 조용히 빈 설정으로 넘기면 다음 저장이 원본(수신자·SMTP 계정)을 지운다.
-    preserveCorrupt(FILE);
+  const out = defaultsOut();
+  const r = _file.load();
+  if (r.kind === 'read-error') return out;   // 73 ①: 기본값(발송 꺼짐)을 캐시하지 않는다 — 간격 뒤 다시 읽는다
+  if (r.kind === 'ok') {
+    const p = r.value;
+    if (typeof p.enabled === 'boolean') out.enabled = p.enabled;
+    if (p.smtp && typeof p.smtp === 'object') out.smtp = { ...out.smtp, ...p.smtp };
+    out.defaultTo = normalizeAddresses(p.defaultTo).ok;
+    out.kinds = normKinds(p.kinds);
+    out.rateLimitPerHour = clamp(p.rateLimitPerHour, 0, 10000, DEFAULTS.rateLimitPerHour);
+    out.historyMax = clamp(p.historyMax, 20, 2000, DEFAULTS.historyMax);
+  } else if (r.kind === 'corrupt') {
+    // 손상 파일을 조용히 빈 설정으로 넘기면 다음 저장이 원본(수신자·SMTP 계정)을 지운다 — 로더가 보존했다.
     // v2.744(최종 검토 RG2744-02): 사유는 요약이다(원문은 SMTP 비밀번호 앞부분 같은 파일 조각을 싣는다 — 원문은 mail.json.corrupt.* 에 있다).
-    console.warn(`[mail] 설정 로드 실패 — 원본을 .corrupt 로 보존하고 기본값으로 시작합니다: ${safeLoadText(e) || '사유 미상'}`);
+    console.warn(`[mail] 설정 로드 실패 — 원본을 .corrupt 로 보존하고 기본값으로 시작합니다: ${safeLoadText(r.error) || '사유 미상'}`);
   }
   cache = out;
   return cache;
@@ -121,6 +132,8 @@ export function nextSmtpPassword(s = {}, curSmtp = {}) {
 
 export function save(body = {}) {
   const cur = load();
+  // 73 ①: 읽지 못한 값(기본값) 위에 덮어쓰지 않는다 — 라우트가 먼저 409 로 막고, 다른 호출부를 위해 여기서도 던진다.
+  { const no = _file.refusal('메일 발송 설정'); if (no) throw Object.assign(new Error(no.reason), { status: 409, code: no.code }); }
   const next = structuredClone(cur);
   if (typeof body.enabled === 'boolean') next.enabled = body.enabled;
   if (body.smtp && typeof body.smtp === 'object') {
@@ -152,10 +165,11 @@ export function save(body = {}) {
 
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(next), null, 2), { mode: 0o600 });
   cache = next;
+  _file.saved();
   return next;
 }
 
-export function invalidate() { cache = null; }
+export function invalidate() { cache = null; _file.resetRetry(); }
 
 /** API 응답용 — 비밀 값을 제거하고 존재 여부만 남긴다. */
 export function redact(cfg = load()) {

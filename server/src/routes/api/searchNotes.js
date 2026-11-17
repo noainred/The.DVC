@@ -26,7 +26,11 @@ api.post('/search/nl', async (req, res) => {
       return res.status(403).json({ error: 'forbidden', requiredPerm: need, reason: `이 검색 결과(${out.label || out.entity})를 볼 권한(${need})이 없습니다.` });
     }
     res.json(out);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) {
+    // 결정(56~75 남긴 것) 67: LLM 동시 실행 상한에 걸리면 429 + 사유(llm/limit.js) — 500 이 아니다.
+    if (err?.status === 429) { res.set('Retry-After', '5'); return res.status(429).json({ error: err.code || 'llm-busy', reason: err.message }); }
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Release notes (built-in changelog + admin-recorded), newest first.

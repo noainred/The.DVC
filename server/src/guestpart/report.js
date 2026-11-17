@@ -120,7 +120,7 @@ export async function overview({ allowed = null, thr = null, mode = null, vcente
   const inv = inventory(snap, allowed);
   // vCenter 별 집계
   const per = new Map();
-  const vcOf = (id) => { let x = per.get(id); if (!x) { x = { reportedVms: new Set(), overVms: new Set(), overParts: 0, crit: 0, maxPct: null, unknownParts: 0, ignoredParts: 0, lastTs: 0, thr: null }; per.set(id, x); } return x; };
+  const vcOf = (id) => { let x = per.get(id); if (!x) { x = { reportedVms: new Set(), overVms: new Set(), overParts: 0, crit: 0, maxPct: null, unknownParts: 0, unknownVms: 0, ignoredParts: 0, lastTs: 0, thr: null }; per.set(id, x); } return x; };
   for (const p of ev.parts) {
     const x = vcOf(p.vcenterId);
     x.reportedVms.add(p.vmId); x.lastTs = Math.max(x.lastTs, p.ts || 0); x.thr = p.thr;
@@ -130,6 +130,8 @@ export async function overview({ allowed = null, thr = null, mode = null, vcente
     if (p.over) { x.overParts++; if (p.crit) x.crit++; }
   }
   for (const v of ev.vms.values()) if (v.over) { vcOf(v.vcenterId).overVms.add(v.vmId); if (ev.mode === 'vm' && v.crit) vcOf(v.vcenterId).crit++; }
+  // 결정(56~75 남긴 것) 68 D1: 판정 단위 'vm' 에서 값 모름 파티션이 있는 VM 은 판정하지 않는다 — 초과 · 정상 어디에도 넣지 않고 따로 센다.
+  if (ev.mode === 'vm') for (const v of ev.vms.values()) if (v.unknown > 0) vcOf(v.vcenterId).unknownVms++;
   const holdMs = latestHoldMs();
   const vcIds = new Set([...meta.keys()].filter((id) => !allowed || allowed.has(id)));
   for (const id of per.keys()) vcIds.add(id);
@@ -143,7 +145,7 @@ export async function overview({ allowed = null, thr = null, mode = null, vcente
     return { id, name: m.name, region: m.region, corp: m.corp, site: m.site,
       guests: iv.guests, reported, notReported: Math.max(0, iv.guests - reported), offNotReported,
       overVms: x ? x.overVms.size : 0, overParts: x ? x.overParts : 0, crit: x ? x.crit : 0, maxPct: x ? x.maxPct : null,
-      unknownParts: x ? x.unknownParts : 0, ignoredParts: x ? x.ignoredParts : 0,
+      unknownParts: x ? x.unknownParts : 0, ignoredParts: x ? x.ignoredParts : 0, unknownVms: ev.mode === 'vm' ? (x ? x.unknownVms : 0) : null,
       lastTs: x && x.lastTs ? x.lastTs : null, stale: !!(x && x.lastTs && now - x.lastTs > holdMs),
       thr: settings.vcThresholds[id] ?? null };
   }).sort((a, b) => b.overVms - a.overVms || (b.maxPct ?? -1) - (a.maxPct ?? -1) || a.name.localeCompare(b.name));
@@ -176,6 +178,8 @@ export async function overview({ allowed = null, thr = null, mode = null, vcente
       overVms: overVmSet.size, overParts: ev.mode === 'part' ? total : ev.parts.filter((p) => overVmSet.has(p.vmId) && !p.ignored && p.pct != null && p.pct >= p.thr).length,
       crit: rows.filter((r) => r.crit).length, soon: shown.filter((r) => r.etaDays != null && r.etaDays < 30).length,
       unknownParts: vcenters.reduce((a, v) => a + v.unknownParts, 0),
+      // 68 D1: 'vm' 단위에서 값 모름 파티션 때문에 판정하지 않은 VM 수(파티션 단위면 VM 합계로 판정하지 않으므로 null — 0 이 아니다).
+      unknownVms: ev.mode === 'vm' ? vcenters.reduce((a, v) => a + (v.unknownVms || 0), 0) : null,
     },
     vcenters, rows: shown, total, limited: !all && total > shown.length,
     ignored: ignoredSummary(ev.parts),
@@ -204,8 +208,9 @@ export async function vcenterDetail(vcenterId, { allowed = null, thr = null, mod
     if (!v) {
       const iv = inv.vms.get(p.vmId) || {};
       const sv = ev.vms.get(p.vmId);
+      // 68 D1: unknownParts = 무시하지 않은 값 모름 파티션 수 — 'vm' 단위면 이 수가 0 보다 클 때 합계로 판정하지 않았다(pct null).
       v = { vmId: p.vmId, vmName: p.vmName, host: iv.host || '', cluster: iv.cluster || '', guestOS: iv.os || '', over: !!sv?.over, crit: !!sv?.crit,
-        pct: sv?.pct ?? null, maxPct: sv?.maxPct ?? null, ts: p.ts, parts: [] };
+        pct: sv?.pct ?? null, maxPct: sv?.maxPct ?? null, unknownParts: sv?.unknown ?? 0, ts: p.ts, parts: [] };
       byVm.set(p.vmId, v);
     }
     v.parts.push({ path: p.path, os: p.os, capGB: r1(p.capGB), usedGB: r1(p.usedGB), freeGB: p.capGB == null || p.usedGB == null ? null : r1(p.capGB - p.usedGB),
@@ -243,7 +248,8 @@ export async function vcenterDetail(vcenterId, { allowed = null, thr = null, mod
       overVms: overVms.length, overParts: ev.parts.filter((p) => p.over).length,
       crit: ev.parts.filter((p) => !p.ignored && p.pct != null && p.pct >= CRIT_PCT).length,
       critFreeGB: r1(ev.parts.filter((p) => !p.ignored && p.pct != null && p.pct >= CRIT_PCT).reduce((a, p) => a + (p.capGB - p.usedGB), 0)),
-      unknownParts: ev.parts.filter((p) => !p.ignored && p.pct == null).length },
+      unknownParts: ev.parts.filter((p) => !p.ignored && p.pct == null).length,
+      unknownVms: ev.mode === 'vm' ? [...ev.vms.values()].filter((v) => v.unknown > 0).length : null },
     histogram: histogram(ev.parts),
     clusters: [...cl.values()].sort((a, b) => b.over - a.over || b.total - a.total),
     vms: list, total: (onlyOver ? overVms : allVms).length, onlyOver: !!onlyOver,
@@ -294,6 +300,15 @@ export async function vmPartitions(vm, { now = Date.now() } = {}) {
   };
 }
 
+/**
+ * 68 D1: 'vm' 단위에서 값 모름 파티션 때문에 판정하지 않은 VM 안내(메일 · CSV 공용) — 없거나 파티션 단위면 ''.
+ * @param {{mode:string, kpi?:{unknownVms?:number|null}}} r overview 결과
+ */
+export function unknownVmsNote(r) {
+  const n = r?.mode === 'vm' ? Number(r?.kpi?.unknownVms) : 0;
+  return n > 0 ? `값 모름 파티션이 있어 VM 합계로 판정하지 않은 게스트 ${n}대 — 초과에도 정상에도 넣지 않았습니다(이 목록에 없음 · 포탈의 vCenter 상세에서 확인).` : '';
+}
+
 /** CSV(초과 목록 전체). 빈 칸은 0 이 아니라 빈 값. 수식 가드 + BOM. */
 export function overCsv(r) {
   const head = ['vCenter', 'VM', 'OS', '파티션', '할당(GB)', '사용(GB)', '남은 용량(GB)', '사용률(%)', '임계(%)', `${r.growthDays}일 증가(GB)`, '가득 참 예상(일)', '수집 시각'];
@@ -304,5 +319,8 @@ export function overCsv(r) {
     lines.push(csvLine([x.vcenterName, x.vmName, osText[x.os] || '', x.path ?? `파티션 ${x.partCount ?? ''}개 합계`, x.capGB ?? '', x.usedGB ?? '', x.freeGB ?? '', x.pct ?? '', x.thr ?? '',
       x.growth7dGB ?? '', x.etaDays ?? '', at(x.ts)]));
   }
+  // 68 D1: 'vm' 단위에서 판정하지 않은 VM(값 모름 파티션)은 이 목록에 없다 — 파일만 받은 사람이 '그 밖은 정상' 으로 읽지 않게 마지막 줄에 밝힌다.
+  const unk = unknownVmsNote(r);
+  if (unk) lines.push(csvLine([unk]));
   return CSV_BOM + lines.join('\r\n') + '\r\n';
 }

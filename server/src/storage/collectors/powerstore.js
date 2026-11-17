@@ -12,6 +12,7 @@ import { healthWord } from '../healthWord.js'; // v2.599(감사 C2599-06) — �
 //   쓰는데, 여기서 import 하면 powerstore.js → (동적) powerstoreSsh.js → powerstore.js 순환이 생긴다(arch2579 SCC 상한).
 import { pickLatestSpacePoint, isActiveAlert } from './powerstoreCore.js';
 import { applyScannedPower, powerProbe } from '../power.js';
+import { envPort } from '../../util/envNumber.js'; // 결정(56~75 남긴 것) 57: 포트 env 는 1~65535 정수만(예전 `Number(env) || 443` 은 −1 · 70000 · 1.5 를 그대로 썼다)
 export { pickLatestSpacePoint, isActiveAlert };
 
 /** 미해결 알람 조회 상한(v2.599 C2599-08) — 닿으면 '이상' 으로 밝힌다(조용한 상한 금지). */
@@ -203,7 +204,7 @@ export function applyPowerstorePower(extra, raw) {
   applyScannedPower(extra, raw.psus.map((x) => x?.extra_details ?? x), { source, scope: 'psu' });
 }
 
-const PORT = () => Number(process.env.STORAGE_POWERSTORE_PORT) || 443;
+const PORT = () => envPort(process.env.STORAGE_POWERSTORE_PORT, 443);
 /** metrics/generate 의 집계 구간 — 짧을수록 최신이지만 아직 집계 전이라 빌 수 있어 하루가 무난. */
 const METRICS_INTERVAL = process.env.STORAGE_POWERSTORE_METRICS_INTERVAL || 'One_Day';
 

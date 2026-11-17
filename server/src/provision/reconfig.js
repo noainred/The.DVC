@@ -232,9 +232,15 @@ export function buildReconfigSpec(hw, plan = {}) {
   return { ok: true, errors: [], changes, specXml: parts.join('') + dev.join('') };
 }
 
-/** Task 완료 대기(폴링). 반환 { ok, error? }. */
-async function waitTask(c, taskRef, timeoutMs = 180_000, t0 = Date.now()) {
-  while (Date.now() - t0 < timeoutMs) {
+/**
+ * Task 완료 대기(폴링). 반환 { ok:true } | { ok:false, error } | { ok:false, timeout:true, error }.
+ * 결정(56~75 남긴 것) 74 ②: 프로비저닝(provision/jobs.js — 복제 작업 결과 추적)도 이 함수를 쓴다(대기 · 시한 판정 한 벌).
+ *   · 시간 초과는 실패와 구분해 timeout:true 를 싣는다 — 작업을 취소하지 않으므로 vCenter 에서 계속될 수 있다(부르는 쪽이 그렇게 말한다).
+ *   · 시한을 넘긴 뒤에도 **한 번은 상태를 본다**(예전에는 루프 조건이 먼저라 늦게 시작한 대기가 보지도 않고 시간 초과였다).
+ * @param {{timeoutMs?:number, pollMs?:number, t0?:number}} [o]
+ */
+export async function waitTask(c, taskRef, { timeoutMs = 180_000, pollMs = 1_500, t0 = Date.now() } = {}) {
+  for (;;) {
     const objs = await c.retrieveObjectProps('Task', taskRef, ['info.state', 'info.error']);
     const st = objs[0]?.props?.['info.state'] || '';
     if (/success/i.test(st)) return { ok: true };
@@ -242,10 +248,30 @@ async function waitTask(c, taskRef, timeoutMs = 180_000, t0 = Date.now()) {
       const errXml = objs[0]?.props?.['info.error'] || '';
       return { ok: false, error: /<localizedMessage>([^<]+)<\/localizedMessage>/.exec(errXml)?.[1] || 'vCenter 작업 실패' };
     }
-    await sleep(1500);
+    if (Date.now() - t0 >= timeoutMs) return { ok: false, timeout: true, error: '작업 시간 초과' };
+    await sleep(pollMs);
   }
-  return { ok: false, error: '작업 시간 초과' };
 }
+
+/*
+ * 결정(56~75 남긴 것) 74 ④: VM 사양 변경의 **서버 쪽 VM 단위 진행 중 잠금** — 예전에는 화면 버튼만 잠가 두 탭 · 두 사람이 같은 VM 에
+ *   디스크 추가 · NIC 추가를 겹쳐 보낼 수 있었다(ReconfigVM_Task 두 건 — 디스크가 두 번 붙는다). 같은 VM 의 두 번째 요청은 409(라우트).
+ *   끝나면(성공 · 실패 · 예외) 해제하고, 해제가 오지 않은 잠금(멈춘 요청)은 시한(RECONFIG_LOCK_TTL_MS)이 지나면 새 요청이 가져간다.
+ *   해제 함수는 자기 잠금만 푼다(시한 뒤 다른 요청이 가져간 잠금을 늦게 끝난 옛 요청이 풀지 않게).
+ */
+export const RECONFIG_LOCK_TTL_MS = 15 * 60_000;
+const _reconfigLocks = new Map();   // vmId -> { token, at }
+let _lockSeq = 0;
+/** 잡으면 해제 함수, 진행 중이면 null. */
+export function tryLockVmReconfig(vmId, { now = Date.now(), ttlMs = RECONFIG_LOCK_TTL_MS } = {}) {
+  const k = String(vmId ?? '');
+  const cur = _reconfigLocks.get(k);
+  if (cur && now - cur.at < ttlMs) return null;
+  const token = ++_lockSeq;
+  _reconfigLocks.set(k, { token, at: now });
+  return () => { if (_reconfigLocks.get(k)?.token === token) _reconfigLocks.delete(k); };
+}
+export function reconfigLocksForTest() { return _reconfigLocks; }
 
 /** VM 현재 하드웨어 조회(라우트용). */
 export async function getVmHardware(vc, moref) {
@@ -333,7 +359,10 @@ export async function reconfigVm(vc, moref, plan = {}) {
     const res = await c.callRaw(`<ReconfigVM_Task xmlns="urn:vim25"><_this type="VirtualMachine">${moref}</_this><spec>${spec.specXml}</spec></ReconfigVM_Task>`);
     const task = /<returnval type="Task">([^<]+)<\/returnval>/.exec(res)?.[1];
     if (!task) return { ok: false, error: 'ReconfigVM_Task 제출 실패(Task 미반환).' };
-    const done = await waitTask(c, task);
-    return done.ok ? { ok: true, changes: spec.changes } : { ok: false, error: done.error, changes: spec.changes };
+    const done = await waitTask(c, task);   // 기본 180초 · 1.5초 간격(예전과 같다)
+    if (done.ok) return { ok: true, changes: spec.changes };
+    // 74 ②(형제): 시간 초과는 실패가 아니라 '결과 모름' 이다 — 작업을 취소하지 않으므로 vCenter 에서 계속될 수 있다.
+    if (done.timeout) return { ok: false, timeout: true, error: '작업 시간 초과(3분) — vCenter 에서 계속될 수 있습니다(vCenter 최근 작업에서 결과를 확인하세요).', changes: spec.changes };
+    return { ok: false, error: done.error, changes: spec.changes };
   } finally { await c.logout().catch(() => {}); }
 }

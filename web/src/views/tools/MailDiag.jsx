@@ -3,6 +3,7 @@ import { fetchJson, postJson, sendJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { requireChanged } from '../changeResult.js'; // v2.742(WEB-02): 400 본문을 '저장되었습니다' 로 읽지 않는다
 import { blankOr } from '../blankOr.js'; // v2.606 WEB2606-01: 빈 숫자 칸은 보내지 않는다(이전 값 유지 — MailSettings 와 같은 규약)
+import { mailMaskedText, mailLoadErrorText } from '../mailSettingsText.js'; // 결정(56~75 남긴 것) 73 ① · ③: 같은 문구
 
 /**
  * 특수 기능 › 메일 진단(v2.455, admin 전용) — 사용자 요구사항:
@@ -87,6 +88,8 @@ export function MailDiag() {
         <br />
         <b>로그에 비밀번호는 나오지 않습니다</b> — 서버가 인증 단계를 가려서 보냅니다.
       </p>
+      {mailLoadErrorText(d.loadError) && <div className="login-error" style={{ marginBottom: 8 }}>{mailLoadErrorText(d.loadError)}</div>}
+      {mailMaskedText(d.settings) && <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>{mailMaskedText(d.settings)}</div>}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 10, marginTop: 12 }}>
         <F label="서버 주소"><input className="input" value={smtp.host} placeholder="relay.corp.local" onChange={(e) => setSmtp({ ...smtp, host: e.target.value })} /></F>
@@ -108,7 +111,7 @@ export function MailDiag() {
       </div>
 
       <div className="flex gap" style={{ alignItems: 'center', marginTop: 14, flexWrap: 'wrap' }}>
-        <button className="logout-btn" style={{ padding: '7px 16px' }} disabled={busy} onClick={save}>{busy ? '처리 중…' : '설정 저장'}</button>
+        <button className="logout-btn" style={{ padding: '7px 16px' }} disabled={busy || !!d.settings?.scopedMasked} onClick={save}>{busy ? '처리 중…' : '설정 저장'}</button>
         <input className="input" style={{ width: 280 }} value={to} placeholder="받는 사람 (쉼표로 구분)" onChange={(e) => setTo(e.target.value)} />
         <button className="login-btn" style={{ flex: 'none', padding: '7px 16px' }} disabled={busy} onClick={test}>테스트 발송 + 로그 보기</button>
         {msg && <span className="muted" style={{ fontSize: 12.5, color: msg.startsWith('오류') || msg.startsWith('실패') ? '#f0a' : '#32d583' }}>{msg}</span>}

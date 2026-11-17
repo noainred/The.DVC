@@ -7,6 +7,7 @@ import { Card, fmtWatts } from './shared.jsx';
 import { csvCell } from '../../util/csv.js'; // 수식 인젝션 가드 포함 공통 셀 이스케이프
 import { STable } from '../../components/STable.jsx';
 import { dayStamp } from '../../dayStamp.js';
+import { loadErrorText } from '../loadErrorText.js'; // 결정(56~75 남긴 것) 70 ①: 수동 분류 · 소속 파일을 못 읽은 동안의 표지
 import { fleetPartialsNote, fleetHeldNote, fleetHeldBadge } from '../fleetPartialText.js'; // v2.607 LEFT2607-02 · v2.744(감사 후속 FC): 등록부 손상으로 직전 목록 유지
 import { requireChanged } from '../changeResult.js'; // v2.732 B5-03: 실패 본문(400 · 200+ok:false)을 성공으로 읽지 않는다
 import { prunePlan, pruneDoneText } from './fleetPruneText.js'; // v2.783(점검 Q2 P-B3): 확인창은 미리보기 결과로
@@ -238,6 +239,8 @@ export function FleetInventory({ isAdmin }) {
       {d && fleetPartialsNote(d.fleetPartials) && <div className="card" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--amber)', fontSize: 13 }}>⚠ {fleetPartialsNote(d.fleetPartials)}</div>}
       {/* v2.744(감사 후속 FC — EDGE-01): 엣지가 iDRAC 등록부를 읽지 못해 중앙이 그 엣지의 직전 목록을 유지 중 — 행에는 짧은 표지, 설명은 여기 한 번. */}
       {d && fleetHeldNote(d.fleetPartials) && <div className="card" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--amber)', fontSize: 13 }}>⚠ {fleetHeldNote(d.fleetPartials)}</div>}
+      {d?.fleetStoreErrors?.tags && <div className="card" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--red)', fontSize: 13 }}>⚠ {loadErrorText('수동 분류 · 용도 태그(fleet-tags)', d.fleetStoreErrors.tags, '그동안 수동 분류 · 제외 · 용도 태그 없이 자동 분류로 보입니다.')}</div>}
+      {d?.fleetStoreErrors?.assign && <div className="card" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--red)', fontSize: 13 }}>⚠ {loadErrorText('베어메탈 소속 법인 수동 등록(fleet-assign)', d.fleetStoreErrors.assign, '그동안 수동 소속 없이 자동 귀속으로 보입니다.')}</div>}
       {notice && <div className="card flex between gap" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--green)', fontSize: 13, alignItems: 'center' }}><span>✓ {notice}</span><button className="logout-btn" style={{ padding: '2px 8px' }} onClick={() => setNotice('')}>✕</button></div>}
       {isAdmin && s.ghostKeys > 0 && (
         <div className="card flex between wrap gap" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--amber)', alignItems: 'center' }}>

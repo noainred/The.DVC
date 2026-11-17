@@ -17,15 +17,13 @@
  *   updatedAt/updatedBy
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
-import { makeSettingsLoadError } from '../util/settingsLoadError.js';   // 25회차 F-4
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { makeJsonFileLoader } from '../util/jsonFileLoad.js';   // 25회차 F-4 · 결정(56~75 남긴 것) 62
 import { isIpv4 } from './scan.js';
 import { canonIp } from '../util/ipv4.js';
 import { DAY_MS, DAY_OFFSET_MIN, dayStartMs, dayKey } from '../util/dayKey.js';
-import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
 
 
 const FILE = path.join(config.configDir, 'ipam-overrides.json');
@@ -42,16 +40,19 @@ export function overridesRev() { return rev; }
  * 전체 점검 25회차 F-4(재현): 손상되면 표지 없이 빈 값으로 넘어가 ① 예약 · 담당 기록이 화면과 ipam.db 에서 사라지고 ② 다음 저장 한 번이 그 한 건만 든
  *   파일을 만들었다(서비스 점검에도 없었다). 이제 로드 오류를 세우고(서비스 점검 목록) 오류 중 쓰기는 거절한다 — 해제는 확정 · 보존본 복구.
  */
-const _loadErr = makeSettingsLoadError(() => FILE, { label: 'IP 관리 예약 · 담당(override)', confirm: () => persist({ ...load() }) });
-/** override 파일을 못 읽었으면 { at, reason }, 아니면 null. */
-export function overridesLoadError() { load(); return _loadErr.get(); }
+// 결정(56~75 남긴 것) 62(62회차 남긴 것): 읽기 오류(EACCES · EISDIR · EIO)는 손상이 아니다 — 공용 로더가 원본을 두고 캐시하지 않으며(30초 간격 재읽기) 확정을 열지 않는다.
+const _file = makeJsonFileLoader(() => FILE, { label: 'IP 관리 예약 · 담당(override)', confirm: () => persist({ ...load() }), tag: 'ipam' });
+/** override 파일을 못 읽었으면 { at, reason, readError? }, 아니면 null. */
+export function overridesLoadError() { load(); return _file.loadError(); }
+/** 응답 표지 — { reason, at, readError } 또는 null(62: 예약 · 담당 GET 표지). */
+export function overridesLoadMarker() { load(); return _file.marker(); }
+let _unread = false;   // 62: 읽기 오류 구간에 들어가고 나올 때 rev 를 올린다(annotations.js 와 같다 — 원장 캐시가 빈 예약으로 만든 결과를 붙잡지 않게)
 function load() {
   if (cache) return cache;
-  cache = {};
-  try {
-    if (fs.existsSync(FILE)) { cache = parseJsonObject(fs.readFileSync(FILE, 'utf8')); _loadErr.ok(); }
-    else _loadErr.missing();
-  } catch (e) { _loadErr.corrupt(e); preserveCorrupt(FILE, e.message); cache = {}; }
+  const r = _file.load();
+  if (r.kind === 'read-error') { if (!_unread) { _unread = true; rev++; } return {}; }   // 62: 원본을 두고 빈 값을 캐시하지 않는다(쓰기는 refusal 로 막힌다)
+  if (_unread) { _unread = false; rev++; }
+  cache = r.kind === 'ok' ? r.value : {};
   return cache;
 }
 
@@ -133,9 +134,9 @@ function isEmpty(rec) {
 function persist(data) {
   atomicWriteFileSync(FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
   cache = data; rev++;
-  _loadErr.ok();
+  _file.saved();
 }
-const OVERRIDE_REFUSAL = { ok: false, code: 'settings-unreadable', reason: 'IP 관리 예약 · 담당 파일(ipam-overrides.json)을 읽지 못한 상태라 저장하지 않았습니다 — 지금 저장하면 그 한 건만 든 파일이 됩니다. 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리고 재시작하세요.' };
+const refusal = () => _file.refusal('IP 관리 예약 · 담당');   // 62: 사유가 읽기 오류 · 손상을 가른다(조치가 다르다)
 
 /**
  * 한 IP의 override를 생성/수정/삭제. 부분 업데이트(주어진 필드만 갱신).
@@ -145,7 +146,7 @@ export function setOverride(ip, partial = {}, user) {
   const raw = String(ip || '').trim();
   const key = canonIp(raw);
   if (!key) return { ok: false, reason: '유효한 IPv4 주소가 아닙니다.' };
-  if (overridesLoadError()) return { ...OVERRIDE_REFUSAL };   // 25회차 F-4
+  if (overridesLoadError()) return refusal();   // 25회차 F-4
   const data = { ...load() };   // 25회차 F-5: 사본에 고치고 persist 성공 뒤에만 캐시 교체(쓰기 실패 시 메모리≠디스크 방지)
   const prev = data[key] || (raw !== key ? data[raw] : null) || {};
   if (raw !== key && data[raw]) delete data[raw];   // 예전에 원문 키로 저장된 유령 항목을 정규 키로 옮긴다
@@ -166,7 +167,7 @@ export function setOverride(ip, partial = {}, user) {
 export function clearOverride(ip) {
   const raw = String(ip || '').trim();
   const key = canonIp(raw) || raw;
-  if (overridesLoadError()) return { ...OVERRIDE_REFUSAL };   // 25회차 F-4
+  if (overridesLoadError()) return refusal();   // 25회차 F-4
   const data = { ...load() };   // 25회차 F-5: 사본에 고치고 persist 성공 뒤에만 캐시 교체(쓰기 실패 시 메모리≠디스크 방지)
   let hit = false;
   for (const k of new Set([raw, key])) if (data[k]) { delete data[k]; hit = true; }
@@ -217,7 +218,7 @@ export function invalidBatchResult(invalid) {
  * v2.744(감사 WEB-02): opts.rejectInvalid 면 무효 토큰이 하나라도 있을 때 아무것도 쓰지 않고 거부한다(라우트는 이 판정을 먼저 한다).
  */
 export function setOverrideBatch(ips, partial = {}, user, opts = {}) {
-  if (overridesLoadError()) return { ...OVERRIDE_REFUSAL };   // 25회차 F-4
+  if (overridesLoadError()) return refusal();   // 25회차 F-4
   const { ips: list, invalid } = splitBatchIps(ips); // 유효 IPv4만(정규형 — v2.594), 중복 제거
   if (opts?.rejectInvalid) { const bad = invalidBatchResult(invalid); if (bad) return bad; }
   if (!list.length) return { ok: false, reason: '유효한 대상 IP가 없습니다.', ...(invalid.length ? { invalid: invalid.slice(0, INVALID_SHOW_MAX), invalidCount: invalid.length } : {}) };
@@ -247,7 +248,7 @@ export function setOverrideBatch(ips, partial = {}, user, opts = {}) {
  * @returns {{ok:true, changed:number, removed:number}}
  */
 export function setOverridesMany(entries, user) {
-  if (overridesLoadError()) return { ...OVERRIDE_REFUSAL };   // 25회차 F-4
+  if (overridesLoadError()) return refusal();   // 25회차 F-4
   const data = { ...load() };   // 25회차 F-5: 사본에 고치고 persist 성공 뒤에만 캐시 교체(쓰기 실패 시 메모리≠디스크 방지)
   const now = new Date().toISOString();
   const by = user?.username || 'unknown';

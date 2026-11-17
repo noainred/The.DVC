@@ -11,10 +11,11 @@
  *   유한수가 아닌 값을 null 로 굳힌다. 0 으로 채우면 '포트 0개' 라는 사실과 다른 화면이 된다.
  */
 import { createActivityLog } from '../util/activityLog.js';
+import { envPositive, ENV_INT_MAX } from '../util/envNumber.js'; // 결정(56~75 남긴 것) 57 · 58: 시한 · 개수 env 의 Infinity · 2^31 초과 · 음수는 기본값(예전 `Math.max(하한, Number(env) || 기본)` 은 Infinity · 3e9 를 통과시켜 setTimeout 이 1ms 로 바꿨다 · 개수는 무제한)
 
 const log = createActivityLog({
   fileName: 'sanswitch-activity.json',
-  max: Number(process.env.SANSWITCH_ACTIVITY_MAX) || 500,
+  max: envPositive(process.env.SANSWITCH_ACTIVITY_MAX, 500, { max: ENV_INT_MAX }),
   // 스위치 전용 수치 — 화면의 '포트'·'사용률' 열이 쓴다(용량이 아니라 포트가 이 장비의 용량이다).
   numFields: ['portsOnline', 'portsLicensed', 'portsFree', 'usedPct'],
 });

@@ -5,13 +5,12 @@
  * keyed by IP address.
  */
 
-import { makeSettingsLoadError } from '../util/settingsLoadError.js';   // 25회차 F-4
+import { makeJsonFileLoader } from '../util/jsonFileLoad.js';   // 25회차 F-4 · 결정(56~75 남긴 것) 62
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
 import { canonIp } from '../util/ipv4.js';
-import { parseJsonObject } from '../util/jsonObject.js'; // v3.17.2: 객체가 아닌 JSON(수 · 글자 · 배열)은 깨진 JSON 과 같이 — 손상 보존 경로로
 
 const FILE = path.join(config.configDir, 'ipam-annotations.json');
 
@@ -20,16 +19,20 @@ let rev = 0; // 메모/태그 변경 리비전(대장 캐시 무효화 키)
 export function annotationsRev() { return rev; }
 
 // 전체 점검 25회차 F-4: 손상 표지 · 서비스 점검 등재 · 오류 중 쓰기 거절(overrides.js 와 같은 판단)
-const _loadErr = makeSettingsLoadError(() => FILE, { label: 'IP 관리 메모 · 태그', confirm: () => { fs.mkdirSync(path.dirname(FILE), { recursive: true }); atomicWriteFileSync(FILE, JSON.stringify({ ...load() }, null, 2)); _loadErr.ok(); } });
-export function annotationsLoadError() { load(); return _loadErr.get(); }
-const ANNOTATION_REFUSAL = { ok: false, code: 'settings-unreadable', reason: 'IP 관리 메모 파일(ipam-annotations.json)을 읽지 못한 상태라 저장하지 않았습니다 — 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리고 재시작하세요.' };
+// 결정(56~75 남긴 것) 62(62회차 남긴 것 — 재현): 읽기 오류(EACCES · EISDIR · EIO)도 손상과 같은 catch 로 받아 원본을 보존본으로 치우고 '확정(빈 맵)' 을 열었다 →
+//   공용 로더(util/jsonFileLoad.js): 읽기 오류는 원본을 두고 캐시하지 않는다(30초 간격 재읽기 — 권한을 고치면 재시작 없이 풀린다) · 확정 불가(readError).
+const _file = makeJsonFileLoader(() => FILE, { label: 'IP 관리 메모 · 태그', confirm: () => { fs.mkdirSync(path.dirname(FILE), { recursive: true }); atomicWriteFileSync(FILE, JSON.stringify({ ...load() }, null, 2)); _file.saved(); }, tag: 'ipam' });
+export function annotationsLoadError() { load(); return _file.loadError(); }
+/** 응답 표지 — { reason, at, readError } 또는 null(62: 손상 · 읽기 오류 중 메모 GET 이 빈 값을 '없음' 으로 보이지 않게). */
+export function annotationsLoadMarker() { load(); return _file.marker(); }
+const refusal = () => _file.refusal('IP 관리 메모');
+let _unread = false;   // 62: 읽기 오류 구간에 들어가고 나올 때 rev 를 올린다 — 원장 캐시(ipamRevKey)가 빈 메모로 만든 결과를 회복 뒤에도 붙잡지 않게
 function load() {
   if (cache) return cache;
-  cache = {};
-  try {
-    if (fs.existsSync(FILE)) { cache = parseJsonObject(fs.readFileSync(FILE, 'utf8')); _loadErr.ok(); }
-    else _loadErr.missing();
-  } catch (e) { _loadErr.corrupt(e); preserveCorrupt(FILE, e.message); cache = {}; }
+  const r = _file.load();
+  if (r.kind === 'read-error') { if (!_unread) { _unread = true; rev++; } return {}; }   // 62: 원본을 두고 빈 값을 캐시하지 않는다(쓰기는 refusal 로 막힌다)
+  if (_unread) { _unread = false; rev++; }
+  cache = r.kind === 'ok' ? r.value : {};
   return cache;
 }
 
@@ -48,7 +51,7 @@ export function setAnnotation(ip, { memo = '', tags = [] } = {}, user) {
   if (!raw) return { ok: false, reason: 'IP가 필요합니다.' };
   // v2.594(감사 LO-2): IPv4 로 읽히면 정규형 키로 저장한다(선행 0 표기가 원장 행과 어긋나 유령이 되던 것).
   const key = canonIp(raw) || raw;
-  if (annotationsLoadError()) return { ...ANNOTATION_REFUSAL };   // 25회차 F-4
+  if (annotationsLoadError()) return refusal();   // 25회차 F-4 · 62: 사유가 읽기 오류 · 손상을 가른다
   const data = { ...load() };   // 25회차 F-5: 사본 — persist 성공 뒤에만 캐시 교체
   if (raw !== key && data[raw]) delete data[raw];
   const m = String(memo || '').trim().slice(0, 2000);
@@ -60,7 +63,7 @@ export function setAnnotation(ip, { memo = '', tags = [] } = {}, user) {
   }
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   atomicWriteFileSync(FILE, JSON.stringify(data, null, 2)); // 부분기록 시 메모/태그 전량 유실 방지
-  cache = data; rev++; _loadErr.ok();
+  cache = data; rev++; _file.saved();
   return { ok: true, annotation: data[key] || null };
 }
 
@@ -70,7 +73,7 @@ export function setAnnotation(ip, { memo = '', tags = [] } = {}, user) {
  * @param {{ip:string, memo:string, tags:string[]}[]} entries
  */
 export function setAnnotationsMany(entries, user) {
-  if (annotationsLoadError()) return { ...ANNOTATION_REFUSAL };   // 25회차 F-4
+  if (annotationsLoadError()) return refusal();   // 25회차 F-4 · 62
   const data = { ...load() };   // 25회차 F-5: 사본 — persist 성공 뒤에만 캐시 교체
   const now = new Date().toISOString();
   const by = user?.username || 'unknown';
@@ -89,7 +92,7 @@ export function setAnnotationsMany(entries, user) {
   if (changed || removed) {
     fs.mkdirSync(path.dirname(FILE), { recursive: true });
     atomicWriteFileSync(FILE, JSON.stringify(data, null, 2));
-    cache = data; rev++; _loadErr.ok();
+    cache = data; rev++; _file.saved();
   }
   return { ok: true, changed, removed };
 }

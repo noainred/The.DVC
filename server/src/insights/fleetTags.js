@@ -15,7 +15,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { makeJsonFileLoader } from '../util/jsonFileLoad.js';   // 결정(56~75 남긴 것) 70 ①
 import { bumpFleetRev } from './fleetRev.js';
 
 const FILE = path.join(config.configDir, 'fleet-tags.json');
@@ -34,18 +35,28 @@ function fileMtimeMs() {
   try { const st = fs.statSync(FILE); return `${st.mtimeMs}:${st.size}`; } catch { return ''; }
 }
 
+/*
+ * 결정(56~75 남긴 것) 70 ①(재현 — 70회차 남긴 것): 읽기 오류(EACCES · EMFILE · EIO)도 파싱 실패와 같은 catch 로 받아 온전한 원본을 .corrupt 로 옮긴 뒤
+ *   빈 값으로 돌았다 — 수동 분류 · 'exclude' · 용도 태그가 복구 전까지 전부 사라지고 화면 표지가 없었다. 이제 공용 로더(util/jsonFileLoad.js):
+ *   읽기 오류는 원본을 두고 값을 캐시하지 않으며(30초 간격으로 다시 읽는다) · 손상은 예전처럼 보존 + 로드 오류 · 서비스 점검 등재 ·
+ *   오류가 서 있는 동안 쓰기는 거절(settings-unreadable — 라우트 409) · GET /insights/fleet 이 표지(fleetStoreErrors)를 싣는다.
+ */
+const _file = makeJsonFileLoader(() => FILE, { label: '통합 서버 인벤토리 — 수동 분류 · 용도 태그(fleet-tags) — 확정하면 수동 분류 · 제외 · 용도 태그가 모두 비워집니다(자동 분류로 돌아감)', confirm: () => { atomicWriteFileSync(FILE, JSON.stringify({ tags: {} }, null, 2)); cache = {}; purposesCache = {}; cacheMtimeMs = fileMtimeMs(); _file.saved(); bumpFleetRev(); }, tag: 'fleet-tags' });
+/** 수동 분류 파일을 못 읽었으면 { reason, at, readError }, 아니면 null(응답 표지 — 70 ①). */
+export function fleetTagsLoadError() { loadFleetTags(); return _file.marker(); }
+const refused = () => _file.refusal('통합 서버 인벤토리 수동 분류 · 용도 태그');
+let _unread = false;
+
 export function loadFleetTags() {
   const mtime = fileMtimeMs();
   if (cache && mtime === cacheMtimeMs) return cache;
-  try {
-    const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    cache = p && typeof p.tags === 'object' && p.tags ? p.tags : {};
-    purposesCache = p && p.purposes && typeof p.purposes === 'object' && !Array.isArray(p.purposes) ? p.purposes : {};
-  } catch (e) {
-    preserveCorrupt(FILE, e.message);
-    cache = {};
-    purposesCache = {};
-  }
+  const r = _file.load();
+  // 읽기 오류: 원본을 두고 빈 값을 **캐시하지 않는다**(다음 호출이 간격 뒤 다시 읽는다). purposesCache 도 비운다(쓰기는 refused 로 막힌다).
+  if (r.kind === 'read-error') { cache = null; purposesCache = {}; if (!_unread) { _unread = true; bumpFleetRev(); } return {}; }
+  if (_unread) { _unread = false; bumpFleetRev(); }   // 70 ①: 읽기 오류 구간에 들어가고 나올 때 플릿 캐시(fleetRev)를 버린다 — 빈 분류로 만든 결과를 회복 뒤에 붙잡지 않게
+  const p = r.kind === 'ok' ? r.value : null;
+  cache = p && typeof p.tags === 'object' && p.tags && !Array.isArray(p.tags) ? p.tags : {};
+  purposesCache = p && p.purposes && typeof p.purposes === 'object' && !Array.isArray(p.purposes) ? p.purposes : {};
   cacheMtimeMs = mtime;
   return cache;
 }
@@ -56,6 +67,7 @@ export function setFleetTag(key, tag) {
   if (!k) return { ok: false, reason: 'key(서비스태그 또는 서버 ID)가 필요합니다.' };
   if (k.length > 128) return { ok: false, reason: 'key가 너무 깁니다.' };
   const next = { ...loadFleetTags() };
+  { const no = refused(); if (no) return no; }   // 70 ①: 읽지 못한 값 위에 덮어쓰지 않는다
   if (tag == null || tag === '' || tag === 'auto') {
     delete next[k];
   } else if (VALID.has(tag)) {
@@ -75,6 +87,7 @@ export function setFleetTag(key, tag) {
 export function pruneFleetTags(liveKeys) {
   const live = liveKeys instanceof Set ? liveKeys : new Set(liveKeys || []);
   const cur = loadFleetTags();
+  if (refused()) return 0;   // 70 ①: 읽지 못한 동안은 정리하지 않는다(지울 키를 판정할 수 없다)
   const next = {};
   let removed = 0;
   for (const [k, v] of Object.entries(cur)) { if (live.has(k)) next[k] = v; else removed += 1; }
@@ -125,6 +138,7 @@ export function setFleetPurpose(key, value, { by = '', knownApps = [], knownRole
   if (!k) return { ok: false, reason: 'key(서비스태그 또는 서버 ID)가 필요합니다.' };
   if (k.length > 128 || k === '__proto__' || k === 'constructor' || k === 'prototype') return { ok: false, reason: 'key 형식이 아닙니다.' };
   const tags = loadFleetTags();
+  { const no = refused(); if (no) return no; }   // 70 ①
   const next = { ...purposesCache };
   let purpose = null;
   if (value == null) delete next[k];
@@ -152,6 +166,7 @@ export function setFleetPurpose(key, value, { by = '', knownApps = [], knownRole
  */
 export function setFleetTagsBatch(items = [], { by = '', knownApps = [], knownRoles = [] } = {}) {
   const tags = { ...loadFleetTags() };
+  { const no = refused(); if (no) return no; }   // 70 ①
   const purposes = { ...purposesCache };
   let nt = 0; let np = 0;
   for (let i = 0; i < items.length; i += 1) {
@@ -186,5 +201,6 @@ export function resetFleetTags() {
   cache = {};
   purposesCache = {};
   cacheMtimeMs = '';
+  _file.resetRetry();
   try { if (fs.existsSync(FILE)) fs.unlinkSync(FILE); } catch { /* */ }
 }

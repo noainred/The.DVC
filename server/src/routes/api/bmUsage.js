@@ -948,7 +948,7 @@ async function purposeWrite(req, res) {
         : '예전 태그는 이 노드의 저장소에 있고, 이 노드에 엣지가 맡은 서버(또는 엣지 보관분)가 있어 그 태그를 쓰는 서버를 다 알지 못하므로 지우지 않았습니다(보이지 않는 다른 법인 서버의 태그일 수 있습니다). 엣지에서는 정리할 수 없고, 엣지에 맡긴 서버가 있는 동안은 이 화면에서도 지울 수 없습니다.';
       return res.json({ ...r, keyScope: wk.source, legacyRemains: true, legacyWhy, legacyNote: head + tail });
     }
-    res.status(r.ok ? 200 : 400).json(r.ok ? { ...r, keyScope: wk.source } : r);
+    res.status(r.ok ? 200 : r.code === 'settings-unreadable' ? 409 : 400).json(r.ok ? { ...r, keyScope: wk.source } : r);   // 결정(56~75 남긴 것) 70 ①: fleet-tags 를 못 읽은 동안은 409
   } catch (e) { res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
 }
 /** PUT /tools/bm-usage/tuning/overrides — 역할 권장값 덮어쓰기(설정 소유자 = 전체 범위 · 감사). 판정 기준일 뿐 서버에 적용하지 않는다. */

@@ -28,9 +28,9 @@ import { mailRecipients, failAlertDue, normalizeMailList, isEmail } from '../isi
 import { onGuestDiskCommitted, latestHoldMs, coverageByVcenter, listPartLatest } from '../guestdisk/db.js';
 import { onGuestDiskRunDone } from '../guestdisk/poller.js';
 import { load as loadSettings, settingsLoadError, digestOf } from './settings.js';
-import { overview, overCsv } from './report.js';
+import { overview, overCsv, unknownVmsNote } from './report.js';
 import { renderOverMail, renderFailMail } from './mailHtml.js';
-import { CRIT_PCT } from './rules.js';
+import { CRIT_PCT, rulesOf, ignoreReason } from './rules.js';
 import { todayStamp } from '../util/dayKey.js';
 
 export const MAIL_KIND = 'guestpart';
@@ -96,10 +96,17 @@ const keyOf = (r) => (r.path == null ? r.vmId : `${r.vmId}\u0000${r.path}`);
 async function prunedKeys(prev, keysNow, vcenterIds) {
   if (!prev.length) return prev;
   const rows = await listPartLatest(vcenterIds);
-  const knownPart = new Set(); const knownVm = new Set();
-  for (const p of rows) { if (p.unknown) continue; knownPart.add(`${p.vmId}\u0000${p.path}`); knownVm.add(p.vmId); }
-  return prev.filter((k) => keysNow.has(k) || !(k.includes('\u0000') ? knownPart.has(k) : knownVm.has(k)));
+  const knownPart = new Set(); const knownVm = new Set(); const unknownVm = new Set();
+  // 결정(56~75 남긴 것) 68 D1: VM 키는 그 VM 에 (무시하지 않은) 값 모름 파티션이 있으면 '값을 읽음' 이 아니다 — 판정 단위 'vm' 이
+  //   그 VM 을 판정하지 않으므로(부분 합 금지) 초과가 아니어도 회복이 아니다. 무시 규칙에 걸린 값 모름 파티션은 판정에 쓰지 않으므로 세지 않는다.
+  const rules = rulesOf(loadSettings().rules);
+  for (const p of rows) {
+    if (p.unknown) { if (!ignoreReason(p, rules)) unknownVm.add(p.vmId); continue; }
+    knownPart.add(`${p.vmId}\u0000${p.path}`); knownVm.add(p.vmId);
+  }
+  return prev.filter((k) => keysNow.has(k) || !(k.includes('\u0000') ? knownPart.has(k) : (knownVm.has(k) && !unknownVm.has(k))));
 }
+export { prunedKeys as _prunedKeysForTest };   // 결정 68 D1 회귀(test/decideG3.test.js)
 async function forgetRecovered(st, b, vcenterIds) {
   const next = await prunedKeys(st.lastKeys || [], new Set(b.keys), vcenterIds);
   if (next.length !== (st.lastKeys || []).length) { st.lastKeys = next; save(); }
@@ -136,7 +143,8 @@ async function buildMail(target, { s, d = null, now = Date.now(), streamState = 
     kind: test ? 'test' : (isDigest ? 'digest' : 'vcenter'), scopeLabel: isDigest ? '전체 법인' : (vc?.name || target),
     thr: isDigest ? (dg.thr ?? s.threshold) : (s.vcThresholds[target] ?? s.threshold), mode: r.mode, collectedAt: dataTsOf(r),
     rows, total: rows.length, topN: isDigest ? dg.topN : 30, newKeys, newOnly,
-    kpi: { overVms: r.kpi.overVms, crit: r.kpi.crit, notReported: r.kpi.notReported, newCount: newKeys.size },
+    kpi: { overVms: r.kpi.overVms, crit: r.kpi.crit, notReported: r.kpi.notReported, newCount: newKeys.size, unknownVms: r.kpi.unknownVms ?? null },
+    unknownNote: unknownVmsNote(r),   // 68 D1: 'vm' 단위에서 값 모름으로 판정하지 않은 VM
     vcSummary: isDigest ? r.vcenters : null, staleNote: staleNoteOf(r, now), csvName, demo: isMock(),
   });
   const attachments = csvName && rows.length ? [{ filename: csvName, contentType: 'text/csv', content: overCsv({ ...r, rows }) }] : [];

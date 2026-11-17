@@ -10,12 +10,23 @@
  *   `int`(기본 참)면 내림하고, 내림해 0 이 되면 기본값. 상한은 각 모듈이 의미에 맞게 따로 둔다(이 함수는 '못 쓰는 값' 만 거른다).
  */
 
-/** 양수 설정값 — 못 쓰는 값이면 def. */
-export function envPositive(raw, def, { int = true } = {}) {
+/** 2^31 − 1 — setTimeout 이 받는 최대 지연이자 개수 상한으로 쓸 수 있는 가장 큰 값. 넘는 env 는 오타로 보고 기본값을 쓴다(결정 57 · 58). */
+export const ENV_INT_MAX = 2 ** 31 - 1;
+/** TCP 포트 범위(1~65535) — 넘으면 기본값(결정 57: 스토리지 REST 포트 env 가 `Number(env) || 443` 이라 −1 · 70000 을 그대로 썼다). */
+export const TCP_PORT_MAX = 65_535;
+
+/**
+ * 양수 설정값 — 못 쓰는 값이면 def.
+ * max(선택): 이보다 크면 **기본값**(잘라 쓰지 않는다 — 포트 70000 · 시한 3e9ms 는 단위 착오일 가능성이 커서 가장 가까운 값이 맞지 않다).
+ */
+export function envPositive(raw, def, { int = true, max = Infinity } = {}) {
   const v = typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : typeof raw === 'number' ? raw : NaN;
   if (!Number.isFinite(v) || v <= 0) return def;
   const n = int ? Math.floor(v) : v;   // 지역 사본들(agentIdentity · gpu/store)과 같은 내림
-  return n > 0 ? n : def;
+  return n > 0 && n <= max ? n : def;
 }
+
+/** 포트 env — 1~65535 정수만, 아니면 def(결정 57). */
+export const envPort = (raw, def) => envPositive(raw, def, { max: TCP_PORT_MAX });
 
 export default envPositive;

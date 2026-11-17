@@ -6,6 +6,7 @@ import BoldText from '../components/boldText.jsx';
 import { blankOr } from './blankOr.js'; // v2.598 L2598-03: 빈 숫자 칸은 보내지 않는다
 import { mailAuthStopText } from './authSkipText.js'; // v2.591(감사 F4): SMTP 인증 실패로 자동 발송을 멈춘 사실
 import { requireChanged } from './changeResult.js'; // v2.742(WEB-02): 400 본문을 '저장되었습니다' 로 읽지 않는다
+import { mailMaskedText, mailLoadErrorText } from './mailSettingsText.js'; // 결정(56~75 남긴 것) 73 ① · ③
 
 /**
  * 설정 › 메일 발송(v2.454, admin 조회 / 저장·테스트는 설정 소유자).
@@ -113,6 +114,8 @@ export default function MailSettings() {
         메일은 외부 라이브러리 없이 포탈이 <b>직접 SMTP 로</b> 보냅니다 — OAuth2·DKIM 서명·첨부는 지원하지 않습니다.
       </p>
       {err && <div className="muted" style={{ color: '#f0a', fontSize: 12, marginBottom: 8 }}>폴링 오류: {err}</div>}
+      {mailLoadErrorText(d.loadError) && <div className="login-error" style={{ marginBottom: 8 }}>{mailLoadErrorText(d.loadError)}</div>}
+      {mailMaskedText(d.settings) && <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>{mailMaskedText(d.settings)}</div>}
 
       <label className="flex gap" style={{ alignItems: 'center', fontSize: 13, margin: '12px 0' }}>
         <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
@@ -195,7 +198,7 @@ export default function MailSettings() {
       </Field>
 
       <div className="flex gap" style={{ alignItems: 'center', marginTop: 18, flexWrap: 'wrap' }}>
-        <button className="logout-btn" style={{ padding: '7px 16px' }} disabled={busy} onClick={save}>{busy ? '저장 중…' : '저장'}</button>
+        <button className="logout-btn" style={{ padding: '7px 16px' }} disabled={busy || !!d.settings?.scopedMasked} onClick={save}>{busy ? '저장 중…' : '저장'}</button>
         <input className="input" style={{ width: 240 }} value={testTo} placeholder="테스트 수신 주소(비우면 기본 수신자)"
           onChange={(e) => setTestTo(e.target.value)} />
         <button className="logout-btn" style={{ padding: '7px 16px' }} disabled={busy} onClick={test}>메일 테스트</button>

@@ -8,7 +8,7 @@ import { forceCollectorToken } from '../../agent/deploy.js';
 import { listTargets, getTargetRaw, pickSshTarget } from '../../agent/deployRegistry.js';
 import { logAudit } from '../../audit.js';
 import { loadVcenterConfig } from '../../config.js';
-import { getVmHardware, reconfigVm } from '../../provision/reconfig.js';
+import { getVmHardware, reconfigVm, tryLockVmReconfig } from '../../provision/reconfig.js';
 import { onDemandErrorFields } from '../../vcenter/dsBrowse.js';   // v2.743(VC-03): 주문형 로그인 문이 막은 409 의 사유 필드
 import { setCollectorDatacenterId } from '../../collector/registry.js'; // v2.972: 수집 서버 ↔ 법인 매칭(사용자 지정)
 import { matchDatacenterId, resolvePickedDc } from '../../collector/datacenterMatch.js';
@@ -20,7 +20,7 @@ import { wanTlsStatus } from '../../util/resilientFetch.js';
 import { precheckTarget } from '../../sanswitch/precheck.js';
 import { collectorsToCsv, sampleCsv as collectorsSampleCsv, parseCollectorsCsv, analyzeCollectorsImport } from '../../collector/csv.js';
 import { clearCollectorServers } from '../../collector/remoteInventory.js';
-import { listDatacenters, getDatacenterAssign, addDatacenter, updateDatacenter, removeDatacenter, setVcenterDatacenterMany, getDatacenterOrder, saveDatacenterOrder } from '../../datacenter/store.js';
+import { listDatacenters, getDatacenterAssign, addDatacenter, updateDatacenter, removeDatacenter, setVcenterDatacenterMany, getDatacenterOrder, saveDatacenterOrder, datacentersLoadError } from '../../datacenter/store.js';
 import { allCollectorStatus, clearCollectorHosts, clearCollectorStatus } from '../../collector/state.js';
 import { agentIdentitySummary } from '../../central/agentIdentity.js';
 import { pullNow, EDGE_REASON_TEXT } from '../../collector/puller.js';
@@ -442,12 +442,14 @@ adminRouter.get('/datacenters', adminOnly, (req, res) => {
   // 백필: 등록된 수집 서버의 데이터센터를 DataCenter 목록에 없으면 자동 생성(이미 등록된 OC1 같은
   // 수집기도 재등록 없이 '스캔 대역 추가' 등에서 바로 보이게 한다). idempotent.
   try { for (const c of loadCollectors()) ensureCollectorDatacenter(c); } catch { /* best effort */ }
-  res.json({ datacenters: listDatacenters(), assign: getDatacenterAssign() });
+  // 결정(56~75 남긴 것) 73 ①: 등록부를 못 읽었으면 표지(사유 요약) — 그동안 법인 추가 · 할당 · 순서 저장은 409(백필도 건너뜀).
+  const le = datacentersLoadError();
+  res.json({ datacenters: listDatacenters(), assign: getDatacenterAssign(), ...(le ? { loadError: le } : {}) });
 });
 adminRouter.post('/datacenters', adminOnly, fleetOnly, (req, res) => {
   const r = addDatacenter(req.body || {});
   if (r.ok) logAudit({ user: req.user?.username, action: 'DataCenter 등록', target: r.datacenter?.id || '', detail: r.datacenter?.name || '', ip: req.ip || '' });
-  res.status(r.ok ? 201 : 400).json(r);
+  res.status(r.ok ? 201 : r.code === 'settings-unreadable' ? 409 : 400).json(r);   // 73 ①: 파일을 못 읽은 동안은 409
 });
 // '/datacenters/assign'을 '/:id'보다 먼저 둬야 라우트 충돌이 없다.
 // v2.986(반증 D4): vCenter → 법인 할당은 전 법인 판정을 바꾸는 쓰기 — 조회 ∧ 쓰기 모두 전체 범위(수집 서버 매칭 PUT 과 같은 게이트 · v2.904 규칙).
@@ -459,17 +461,17 @@ adminRouter.put('/datacenters/assign', adminOnly, fullReadWriteScopeOnlyWith('vC
   // v2.632 AX3-08: 모양이 전부 틀렸으면 400 — 원소는 [vcenterId, datacenterId] 또는 {vcenterId, datacenterId}.
   if (r.ok && r.malformed === entries.length) return res.status(400).json({ ok: false, reason: 'entries 원소는 [vcenterId, datacenterId] 또는 {vcenterId, datacenterId} 형식이어야 합니다.', malformed: r.malformed });
   if (r.ok) logAudit({ user: req.user?.username, action: 'vCenter→DataCenter 할당', target: `${r.changed}건`, ip: req.ip || '' });
-  res.status(r.ok ? 200 : 400).json(r);
+  res.status(r.ok ? 200 : r.code === 'settings-unreadable' ? 409 : 400).json(r);   // 73 ①
 });
 adminRouter.put('/datacenters/:id', adminOnly, fleetOnly, (req, res) => {
   const r = updateDatacenter(req.params.id, req.body || {});
   if (r.ok) logAudit({ user: req.user?.username, action: 'DataCenter 수정', target: req.params.id, ip: req.ip || '' });
-  res.status(r.ok ? 200 : 400).json(r);
+  res.status(r.ok ? 200 : r.code === 'settings-unreadable' ? 409 : 400).json(r);   // 73 ①
 });
 adminRouter.delete('/datacenters/:id', adminOnly, fleetOnly, (req, res) => {
   const r = removeDatacenter(req.params.id);
   if (r.ok) logAudit({ user: req.user?.username, action: 'DataCenter 삭제', target: req.params.id, ip: req.ip || '' });
-  res.status(r.ok ? 200 : 404).json(r);
+  res.status(r.ok ? 200 : r.code === 'settings-unreadable' ? 409 : 404).json(r);   // 73 ①
 });
 // DataCenter 표시 순서(vCenter 순서와 동일한 개념) — 모든 'DataCenter 선택' 목록에 적용.
 adminRouter.get('/datacenter-order', adminOnly, (req, res) => {
@@ -490,7 +492,7 @@ adminRouter.put('/datacenter-order', adminOnly, fleetOnly, (req, res) => {
   if (!ids.length && body.clear !== true) return res.status(400).json({ ok: false, reason: '빈 순서는 저장하지 않습니다 — 순서를 초기화하려면 clear:true 를 보내세요.' });
   const r = saveDatacenterOrder(ids);
   if (r.ok) logAudit({ user: req.user?.username, action: 'DataCenter 순서 변경', detail: `${(r.order || []).length}개`, ip: req.ip || '' });
-  res.status(r.ok ? 200 : 400).json(r);
+  res.status(r.ok ? 200 : r.code === 'settings-unreadable' ? 409 : 400).json(r);   // 73 ①
 });
 
 // 현재 하드웨어 + NIC 추가용 네트워크 목록.
@@ -546,6 +548,10 @@ adminRouter.post('/vm/:id/reconfig', requirePerm('vm.reconfig'), async (req, res
   for (const a of plan.diskAdds) {
     if (a.datastore && !validDs.has(a.datastore)) return res.status(400).json({ ok: false, reason: `데이터스토어 '${a.datastore}'를 찾을 수 없습니다(이 vCenter의 데이터스토어를 선택하세요).` });
   }
+  // 결정(56~75 남긴 것) 74 ④: 같은 VM 의 사양 변경이 진행 중이면 두 번째 요청은 409 — 화면 잠금만으로는 두 탭 · 두 사람이 디스크 · NIC 추가를 겹쳐 보냈다.
+  //   잠금은 끝나면(성공 · 실패 · 예외) 풀리고, 멈춘 요청의 잠금은 시한(reconfig.js RECONFIG_LOCK_TTL_MS) 뒤 새 요청이 가져간다.
+  const unlock = tryLockVmReconfig(t.vm.id);
+  if (!unlock) return res.status(409).json({ ok: false, busy: true, reason: '이 VM 의 사양 변경이 이미 진행 중입니다 — 끝난 뒤 다시 시도하세요(vCenter 최근 작업에서 진행을 볼 수 있습니다).' });
   try {
     const r = await reconfigVm(t.vc, t.moref, plan);
     logAudit({
@@ -560,7 +566,7 @@ adminRouter.post('/vm/:id/reconfig', requirePerm('vm.reconfig'), async (req, res
     logAudit({ user: req.user?.username, action: 'VM 사양 변경', target: t.vm.name, detail: `오류: ${e.message}`, ip: req.ip || '' });
     if (e?.status === 409) return res.status(409).json({ ok: false, reason: e.message, ...onDemandErrorFields(e) });   // v2.743(VC-03)
     res.status(502).json({ ok: false, reason: e.message });
-  }
+  } finally { unlock(); }
 });
 
 // Trigger an immediate pull of all collectors.

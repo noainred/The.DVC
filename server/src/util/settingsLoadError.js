@@ -52,9 +52,13 @@ export function makeSettingsLoadError(fileOf, opts = {}) {
      * 20회차 반증 F4: **읽기 오류**(EACCES · EISDIR — 원본을 옮기지 않았다). 사유가 '보존본으로 옮겼습니다' 가 아니고, '기본값으로 확정' 할 수 없다
      *   (파일이 그대로 있어 확정은 file-present 로 막히고, 재시작해도 같은 오류다 — 사람이 권한 · 소유자를 고쳐야 한다).
      */
-    readError(e) {
+    readError(e, { retryMs = 0 } = {}) {
       const code = String((e && typeof e === 'object' ? e.code : '') || 'read-error').slice(0, 32);
-      err = { at: Date.now(), reason: `설정 파일을 읽지 못했습니다(${code}) — 원본은 그대로 두었습니다. 파일 권한 · 소유자(포탈 서비스 계정)를 고치고 재시작하세요`, readError: true };
+      // 결정(56~75 남긴 것) G2: 다시 읽는 로더(util/jsonFileLoad.js — retryMs)는 재시작 없이 풀린다 — 그 사실을 말한다 · 이어지는 읽기 오류는 처음 시각(at)을 유지한다.
+      const tail = retryMs > 0
+        ? `파일 권한 · 소유자(포탈 서비스 계정) · 디스크를 확인하세요 — ${Math.round(retryMs / 1000)}초마다 다시 읽고, 읽히면 재시작 없이 풀립니다`
+        : '파일 권한 · 소유자(포탈 서비스 계정)를 고치고 재시작하세요';
+      err = { at: err?.readError && Number.isFinite(err.at) ? err.at : Date.now(), reason: `설정 파일을 읽지 못했습니다(${code}) — 원본은 그대로 두었습니다. ${tail}`, readError: true };
     },
     missing() {
       let why = null;

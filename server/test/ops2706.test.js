@@ -72,7 +72,8 @@ test('③ 생성·삭제 분석 — 순증·사용자·단명 VM·지금 있는�
   assert.equal(r.byKind.rename, 1);
   assert.equal(r.noDetail, 1);
   assert.equal(r.shortLivedCount, 1); assert.equal(r.shortLived[0].vm, 'tmp1'); assert.equal(r.shortLived[0].lifeMs, 3 * H);
-  assert.equal(r.series.length, 7);
+  // 결정(56~75 남긴 것) 69 ① — 기대값 갱신: 막대는 since(now − 7일)가 걸친 날부터라 7일 기간이 8칸이다.
+  assert.equal(r.series.length, 8);
   assert.equal(r.series.reduce((a, s) => a + s.added, 0), 2); assert.equal(r.series.reduce((a, s) => a + s.removed, 0), 2);
   assert.equal(r.events.find((e) => e.vm === 'web01' && e.kind === 'create').existsNow, true);
   assert.equal(r.events.find((e) => e.vm === 'old').existsNow, false);

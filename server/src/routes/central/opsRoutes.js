@@ -493,6 +493,7 @@ export function registerOpsRoutes(centralRouter, deps) {
       const out = await putEdgeLinkReport(req.centralAuth.agent, req.body || {});
       // v2.681(R2F-03): DB 를 못 쓰면 200 이 아니라 503(엣지가 '저장됨' 이라 적지 않게 — v2.611 규약).
       if (out?.dbUnavailable) return res.status(503).set(PERSISTENT_503_HEADERS).json(out); // v2.742(EDGE-03): 지속형 503 머리 — persistent503 과 같다(audit2681b 가 이 모양을 고정한다)
+      if (out?.registryUnreadable) return res.status(503).set(PERSISTENT_503_HEADERS).json(out); // 결정(56~75 남긴 것) 65 ①: 등록부를 못 읽어 배정을 판정할 수 없다 — 보류
       res.json(out);
     } catch (e) {
       res.status(400).json({ ok: false, reason: String(e?.message || e).slice(0, 300) });

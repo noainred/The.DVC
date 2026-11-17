@@ -15,6 +15,23 @@ export const SUBNET_HOSTS = 254;
 export const SUBNET_FULL_DEFAULT = 90;
 export const SCAN_STALE_DEFAULT = 3;
 export const DUP_ALERT_MAX = 200;   // 한 번에 낼 수 있는 중복 알림 수(대역 하나를 통째로 겹친 실수가 수백 통을 만들지 않게 — 넘으면 요약 한 건)
+export const DUP_MANY_KEY = 'ipdup:__many__';   // 넘었을 때의 묶음 알림 키
+
+/**
+ * 결정(56~75 남긴 것) 62: 묶음 알림의 끝 · 묶음 회차에 보류한 IP 별 알림의 정리 문구(알림 엔진 alerts.js refreshState 가 쓴다).
+ *   묶음 키가 목록에서 빠지는 것은 '중복이 없어졌다' 가 아니라 '상한 아래로 내려왔다' 일 수 있다 — 남은 중복 수를 사실대로 말한다.
+ */
+export function dupBundleEndTitle(left) {
+  const n = Number(left) || 0;
+  return n > 0
+    ? `중복 IP 묶음 해제 — 상한(${DUP_ALERT_MAX}개) 아래로 내려감 · 중복 ${n}개 남음(개별 알림으로 계속)`
+    : null;   // 남은 중복이 없으면 보통의 '해소' 다
+}
+/** 묶음 회차에 보류한 IP 별 알림이 보류 시한을 넘겼다 — 해소가 아니라 '묶음으로 대체 · 개별 상태 모름' 이다. */
+export function dupBundledExpiredTitle(title) {
+  return `묶음으로 대체: ${String(title || '중복 IP').slice(0, 200)} — 개별 상태 모름`;
+}
+export const DUP_BUNDLED_EXPIRED_DETAIL = `중복 IP 가 상한(${DUP_ALERT_MAX}개)을 넘어 한 건으로 묶인 동안 판정 보류 시한이 지나 이 IP 의 개별 알림을 정리했습니다. 해소가 아닙니다 — 묶음 알림이 계속 알리고, 상한 아래로 내려오면 개별 알림으로 다시 판정합니다.`;
 
 /** 중복 IP — 대장 행(duplicate:true) 을 IP 로 묶는다. */
 export function duplicateAlerts(rows, { unreadVc = new Set() } = {}) {
@@ -35,10 +52,11 @@ export function duplicateAlerts(rows, { unreadVc = new Set() } = {}) {
   if (out.length > DUP_ALERT_MAX) {
     // 60회차 F3(재현): 묶음으로 바뀌는 회차에 IP 별 키를 **보류**로 넘긴다 — 예전에는 키 목록에서 빠져 이미 발생 중이던 IP 별 중복 알림(최대 200건)이
     //   전부 '해소' 로 기록됐다(중복은 그대로인데 — 해소 구독자에게도 나갔다). 보류는 발생 중인 키에만 뜻이 있다(새 키를 만들지 않는다).
-    return { alerts: [{ key: 'ipdup:__many__', severity: 'warning', title: `중복 IP ${out.length}개`, detail: `중복 IP 가 ${out.length}개입니다(앞 ${DUP_ALERT_MAX}개를 넘어 한 건으로 묶음) — IP 관리 › IP 주소의 ‘중복’ 필터로 확인하세요.` }],
-      held: [...held, ...out.map((a) => a.key)] };
+    // 결정(56~75 남긴 것) 62: 묶음으로 보류한 키는 bundled 로도 넘긴다 — 보류 시한을 넘기면 엔진이 '해소' 가 아니라 '묶음으로 대체 — 개별 상태 모름' 으로 정리 기록한다.
+    return { alerts: [{ key: DUP_MANY_KEY, severity: 'warning', title: `중복 IP ${out.length}개`, detail: `중복 IP 가 ${out.length}개입니다(앞 ${DUP_ALERT_MAX}개를 넘어 한 건으로 묶음) — IP 관리 › IP 주소의 ‘중복’ 필터로 확인하세요.` }],
+      held: [...held, ...out.map((a) => a.key)], bundled: out.map((a) => a.key) };
   }
-  return { alerts: out, held };
+  return { alerts: out, held, bundled: [] };
 }
 
 /** 가득 찬 대역 — subnets 는 listSubnets 결과({subnet, base, used, rsv, dhcp, purpose?}). */

@@ -16,7 +16,7 @@ import { demoLinkInputs } from '../mock/demo/edge.js'; // v2.708 데모(mock) �
 import { insertResults } from '../linkcheck/db.js';
 import { PHASES } from '../linkcheck/phases.js';
 import { KIND_KEYS, EDGE_KINDS, linkIdOf, buildLinks } from '../linkcheck/links.js';
-import { loadCollectors } from '../collector/registry.js';
+import { loadCollectors, registryLoadError } from '../collector/registry.js';
 import { listRegistry as listVcenters } from '../vcenter/registry.js';
 import { loadLinkCheckSettings } from '../linkcheck/settings.js';
 import { capTrim, capStr } from '../util/capStr.js';
@@ -99,14 +99,17 @@ function sanitizeSteps(raw) {
 /**
  * v2.607(감사 LEFT2607-01 — 재현): 중앙이 **그 agent 에게 내려준 링크 id 집합**(link-check-config 와 같은 계산 —
  *   buildLinks 중 EDGE_KINDS · from === agent). id 재계산 대조(CEN2606-01)는 엣지가 준 `to` 로 다시 계산하므로 `to` 를
- *   바꾸면 임의 id 가 그대로 통과해 link_latest 에 행이 쌓였다. 등록부를 읽지 못하면 null(판정하지 않는다 — 설정 파일
- *   문제가 모든 엣지 보고를 끊지 않게, v2.600 edgeVcWriteDenied 와 같은 판단). enabled 는 보지 않는다(끈 직후 도착한 보고).
+ *   바꾸면 임의 id 가 그대로 통과해 link_latest 에 행이 쌓였다. 등록부를 읽지 못하면 null(판정할 수 없음 — 결정(56~75) 65 ①:
+ *   예전에는 null 이면 검사 없이 받았다. 이제 등록부 로드 오류의 null 은 putEdgeLinkReport 가 503 으로 보류한다). enabled 는 보지 않는다(끈 직후 도착한 보고).
  */
 export function assignedEdgeLinkIds(agent) {
   const ag = String(agent || '').toLowerCase();
   try {
     const st = loadLinkCheckSettings();
     const cols = loadCollectors();
+    // 결정(56~75 남긴 것) 65 ①(65회차 남긴 것): 등록부가 손상 · 못 읽음이면 loadCollectors 는 빈 목록이다 — 그것으로 계산하면 '배정 0'(전부 notAssigned 거절)이 된다.
+    //   주석대로 null(판정할 수 없음)을 돌려주고, 호출부가 503 으로 보류시킨다(엣지는 다음 주기에 다시 보낸다).
+    if (registryLoadError()) return null;
     const inp = demoLinkInputs({ vcenters: listVcenters(), pairs: st.pairs, collectors: cols }); // v2.708: mock 아니면 입력 그대로
     const { links } = buildLinks({ collectors: cols, vcenters: inp.vcenters, pairs: inp.pairs, settings: st });
     return new Set(links.filter((l) => EDGE_KINDS.includes(l.kind) && String(l.from || '').toLowerCase() === ag).map((l) => String(l.id).toLowerCase()));
@@ -117,6 +120,10 @@ export async function putEdgeLinkReport(agent, body = {}) {
   const ag = t(agent);
   if (!ag) return { ok: false, reason: 'agent 를 확인할 수 없습니다.' };
   const assigned = assignedEdgeLinkIds(ag);
+  // 65 ①: 등록부를 못 읽어 배정을 판정할 수 없으면 받지 않는다(503 — 빈 배정으로 전부 거절하거나 검사 없이 받지 않는다). 엣지는 다음 주기에 다시 보낸다.
+  if (assigned == null && registryLoadError()) {
+    return { ok: false, registryUnreadable: true, stored: 0, reason: 'registryUnreadable', detail: '중앙 수집 서버 등록부를 읽지 못해 이 엣지에 배정된 링크를 확인할 수 없습니다 — 보고를 받지 않았습니다(등록부를 고치면 다음 주기에 다시 받습니다).' };
+  }
   let notAssigned = 0;
   const at = Date.now();
   const raw = Array.isArray(body?.results) ? body.results : [];

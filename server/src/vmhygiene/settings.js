@@ -7,11 +7,11 @@
  *  · exceptions: VM 이름·메모에 이 글자가 들어 있으면 스냅샷 정책 판정에서 뺀다(뺀 개수는 화면이 밝힌다). 대소문자 무시.
  *  · notify: 하루 한 번(한국 시각 hour 시 이후 첫 확인) 스냅샷 정책 위반 요약을 알림 채널로 보낸다. 기본 꺼짐.
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileLoad.js';   // 결정(56~75 남긴 것) 71
 import { numOrNull } from '../util/numOrNull.js';
 
 export const SETTINGS_FILE_NAME = 'vm-hygiene.json';
@@ -60,33 +60,25 @@ export function applyPatch(cur, body = {}) {
   return next;
 }
 
-let _readWarned = false;   // 69회차 F4: 읽기 오류 경고는 상태가 바뀔 때 한 번
+// 결정(56~75 남긴 것) 71: 읽기 오류 뒤 다시 읽기는 공용 리더의 재읽기 간격(30초) — 요청마다 동기로 다시 읽지 않는다(cost/settings.js 와 같은 판단).
+const _reader = makeJsonFileReader(FILE, { parse: (t) => { const p = JSON.parse(t); if (!isObj(p)) throw new Error('객체가 아닙니다'); return p; }, tag: 'vm-hygiene' });
 export function loadVmHygieneSettings() {
   if (cache) return cache;
   let base = { ...DEFAULTS, notify: { ...DEFAULTS.notify } };
-  const file = FILE();
-  // 69회차 F4(재현 — cost/settings.js 와 같은 꼴): 읽기 오류는 손상이 아니다 — 원본을 옮기지 않고 기본값을 캐시하지 않으며(다음 호출에서 다시 읽는다)
+  // 69회차 F4(재현 — cost/settings.js 와 같은 꼴): 읽기 오류는 손상이 아니다 — 원본을 옮기지 않고 기본값을 캐시하지 않으며(71: 간격이 지난 다음 호출에서 다시 읽는다)
   //   unreadable 로 밝힌다. 저장은 거절하고 알림은 보내지 않는다(예전에는 원본을 .corrupt 로 옮겨 알림 · 예외 · 기준이 영구히 기본값으로 돌아갔다).
-  let raw = null;
-  if (fs.existsSync(file)) {
-    try { raw = fs.readFileSync(file, 'utf8'); } catch (e) {
-      if (!_readWarned) { _readWarned = true; console.warn(`[vm-hygiene] 설정 파일을 읽지 못했습니다(파일은 그대로 둡니다 — 다시 읽을 때까지 기본값 · 저장 거절 · 알림 보류): ${safeLoadText(e) || '사유 미상'}`); }
-      const { updatedAt: _a, updatedBy: _b, ...core0 } = base;
-      return { ...core0, updatedAt: null, updatedBy: null, unreadable: true, rev: 'unreadable' };
-    }
+  const r = _reader.read();
+  if (r.kind === 'read-error') {
+    const { updatedAt: _a, updatedBy: _b, ...core0 } = base;
+    return { ...core0, updatedAt: null, updatedBy: null, unreadable: true, rev: 'unreadable' };
   }
-  _readWarned = false;
-  try {
-    if (raw != null) {
-      const p = JSON.parse(raw);
-      if (!isObj(p)) throw new Error('객체가 아닙니다');
-      base = applyPatch(base, p);
-      if (typeof p.updatedAt === 'number') base.updatedAt = p.updatedAt;
-      if (typeof p.updatedBy === 'string') base.updatedBy = p.updatedBy.slice(0, 128);
-    }
-  } catch (e) {
-    preserveCorrupt(file, e?.message);
-    console.warn(`[vm-hygiene] 설정 파일을 읽지 못했습니다 — 원본을 .corrupt 로 보존하고 기본값으로 시작합니다: ${safeLoadText(e) || '사유 미상'}`);
+  if (r.kind === 'ok') {
+    const p = r.value;
+    base = applyPatch(base, p);
+    if (typeof p.updatedAt === 'number') base.updatedAt = p.updatedAt;
+    if (typeof p.updatedBy === 'string') base.updatedBy = p.updatedBy.slice(0, 128);
+  } else if (r.kind === 'corrupt') {
+    console.warn(`[vm-hygiene] 설정 파일을 읽지 못했습니다 — 원본을 .corrupt 로 보존하고 기본값으로 시작합니다: ${safeLoadText(r.error) || '사유 미상'}`);
   }
   const { updatedAt = null, updatedBy = null, ...core } = base;
   cache = { ...core, updatedAt, updatedBy, rev: revOf(core) };
@@ -100,7 +92,7 @@ export function saveVmHygieneSettings(body, user) {
   const next = applyPatch(core, body);
   const out = { ...next, updatedAt: Date.now(), updatedBy: user ? String(user).slice(0, 128) : null };
   atomicWriteFileSync(FILE(), JSON.stringify(out, null, 2));
-  cache = null;
+  cache = null; _reader.reset();
   return loadVmHygieneSettings();
 }
 

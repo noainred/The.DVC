@@ -33,7 +33,26 @@ export const EVENT_ROWS_MAX = 1000;
  * v2.932: 이동 집계를 조각마다 더하는 누적기 — 보고서가 행을 모으지 않고 흘려보내며 센다(logs/db.js trackedEventsEach).
  *   add(rows) 를 몇 번에 나눠 불러도 한 번에 부른 analyzeMoves 와 결과가 같다(테스트 대조 · 순서 무관 — 최신 판정은 ts 최대).
  */
-export function createMovesAcc({ days = 7, now = Date.now(), vcName = new Map(), q = '' } = {}) {
+/**
+ * 결정(56~75 남긴 것) 69 ①: 하루 막대 칸 — **조회 시작 시각(since)이 걸친 날부터** 오늘까지. 예전에는 '오늘 − days + 1' 부터라
+ *   since(now − days일)가 걸친 첫날의 이벤트가 KPI 합계(생성 · 이동 수)에는 들고 막대에는 없었다(KPI 합 ≠ 막대 합).
+ *   첫날은 since 시각부터의 일부만 담으므로 그 칸에 partialFrom(since)을 싣는다(화면이 '그 시각부터' 로 밝힌다). vm-lifecycle 과 한 벌.
+ * @param {{days:number, now:number, since:number|null}} o  since 가 없으면 now − days일
+ * @param {(d:number) => object} cellOf 날짜 번호 → 칸 값
+ */
+export function daySeries({ days = 7, now = Date.now(), since = null } = {}, cellOf) {
+  const today = dayIndex(now);
+  const from = Number.isFinite(since) ? since : now - Math.max(1, days) * 86_400_000;
+  const first = Math.min(today, dayIndex(from));
+  const out = [];
+  for (let d = first; d <= today; d++) {
+    const day = dayStartMs(d);
+    out.push({ day, ...cellOf(d), ...(d === first && from > day ? { partialFrom: from } : {}) });
+  }
+  return out;
+}
+
+export function createMovesAcc({ days = 7, now = Date.now(), since = null, vcName = new Map(), q = '' } = {}) {
   const byKind = { drs: 0, vmotion: 0, svmotion: 0, both: 0, relocate: 0 };
   const byVm = new Map();
   const byDay = new Map();
@@ -60,7 +79,7 @@ export function createMovesAcc({ days = 7, now = Date.now(), vcName = new Map(),
         if (v.last == null || r.ts > v.last) { v.last = r.ts; v.lastFrom = d?.from ?? null; v.lastTo = d?.to ?? null; }
       }
     },
-    result() {
+    result({ since: sinceAt = since } = {}) {   // 69 ①: 라우트가 행을 읽은 뒤 그 조회의 since 를 넘긴다(같은 시각으로 첫날을 정한다)
       const qq = String(q || '').toLowerCase();
       const thr = churnThreshold(days);
       let vms = [...byVm.values()].map((v) => ({ ...v, hosts: v.hosts.size, churn: v.moves >= thr }));
@@ -69,9 +88,7 @@ export function createMovesAcc({ days = 7, now = Date.now(), vcName = new Map(),
       vms.sort((a, b) => b.moves - a.moves || (b.last ?? 0) - (a.last ?? 0) || String(a.vm).localeCompare(String(b.vm)));
       const matched = vms.length;
       // 하루 칸 — 기간 전체(빈 날은 0 이 아니라 '이벤트 없음' 이지만, 수집이 켜져 있었다면 0 이 맞다 — 화면이 수집 범위를 함께 말한다).
-      const today = dayIndex(now);
-      const series = [];
-      for (let d = today - Math.max(1, days) + 1; d <= today; d++) series.push({ day: dayStartMs(d), moves: byDay.get(d) || 0 });
+      const series = daySeries({ days, now, since: sinceAt }, (d) => ({ moves: byDay.get(d) || 0 }));
       return { total, byKind, noDetail, churnThreshold: thr, churnVms, vmCount: byVm.size, series, matched, vms: vms.slice(0, VM_ROWS_MAX), omitted: Math.max(0, matched - VM_ROWS_MAX) };
     },
   };

@@ -3,6 +3,7 @@ import { fetchJson, postJson, putJson, delJson } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import { STable } from '../components/STable.jsx';
 import Select from '../components/Select.jsx';
+import { loadErrorText } from './loadErrorText.js'; // 결정(56~75 남긴 것) 73 ①: 등록부 파일을 못 읽은 동안의 표지
 
 /**
  * DataCenter(법인) 관리 — vCenter의 상위 개념.
@@ -16,13 +17,14 @@ export default function DatacenterAdmin() {
   const [vcs, setVcs] = useState([]);        // [{id,name}]
   const [vcErr, setVcErr] = useState(null);  // v2.630 WEB2630-06: vCenter 목록 조회 실패(개수를 0 으로 보이지 않는다)
   const [err, setErr] = useState(null);
+  const [loadError, setLoadError] = useState(null);   // 73 ①: 서버가 datacenters.json 을 못 읽었으면 { reason, readError }
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState(null);    // { id, name, region, note, isNew } | null
   const [dirty, setDirty] = useState({});    // 변경된 vcenterId -> datacenterId (저장 전)
   const [sort, setSort] = useState({ key: 'name', dir: 'asc' }); // 기본: 이름 오름차순(자동정렬)
 
-  const loadDcs = () => fetchJson('/admin/datacenters').then((d) => { setDcs(d.datacenters || []); setAssign(d.assign || {}); setErr(null); }).catch((e) => setErr(e.message));
+  const loadDcs = () => fetchJson('/admin/datacenters').then((d) => { setDcs(d.datacenters || []); setAssign(d.assign || {}); setLoadError(d.loadError || null); setErr(null); }).catch((e) => setErr(e.message));
   useEffect(() => {
     loadDcs();
     fetchJson('/admin/vcenters').then((d) => { setVcs(d.vcenters || d || []); setVcErr(null); })
@@ -96,6 +98,7 @@ export default function DatacenterAdmin() {
         법인 안의 물리 서버 정보는 <b>iDRAC 서버 등록 › 법인별 iDRAC 장비 스캔</b>에서 수집합니다.
       </div>
       {msg && <div className="card" style={{ padding: '8px 12px', marginBottom: 12, borderLeft: `3px solid var(--${msg.ok ? 'green' : 'red'})`, fontSize: 13 }}>{msg.ok ? '✓' : '⚠'} {msg.text}</div>}
+      {loadError && <div className="banner" style={{ marginBottom: 12 }}>⚠ {loadErrorText('DataCenter(법인) 목록 · 할당(datacenters.json)', loadError, '그동안 법인 목록과 할당이 비어 보입니다.')}</div>}
       {vcErr && <div className="banner" style={{ marginBottom: 12 }}>⚠ vCenter 목록을 읽지 못했습니다({vcErr}) — 법인별 vCenter 수는 ‘—’ 로 두었고 할당 표는 비어 있습니다. 새로고침으로 다시 시도하세요.</div>}
 
       {/* 1) DataCenter 종류 정의 */}

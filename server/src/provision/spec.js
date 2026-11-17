@@ -51,6 +51,35 @@ function inputLimitErrors(spec, guest) {
   return errs;
 }
 
+/**
+ * 결정(56~75 남긴 것) 74 ③: 연속 IP 범위(첫 IP ~ 마지막 IP)가 서브넷 마스크 · 게이트웨이로 정해지는 서브넷 밖으로 나가는가.
+ *   서브넷 = (게이트웨이가 있으면 게이트웨이, 없으면 시작 IP) & 마스크. 범위가 연속이라 양 끝만 보면 된다.
+ *   네트워크 · 브로드캐스트 주소도 사유로 본다(게스트에 넣으면 통신하지 않는다).
+ *   마스크가 비었거나 연속 비트가 아니거나 /31 · /32 면 판정하지 않는다(null — 이 검사의 범위 밖).
+ * @returns {string|null} 사유(없으면 null)
+ */
+export function subnetRangeError(label, base, count, { subnetMask = '', gateway = '' } = {}) {
+  if (base == null || !(count > 0)) return null;
+  const m = ipToNum(String(subnetMask || '').trim());
+  if (m == null || m === 0) return null;
+  const inv = (~m) >>> 0;
+  if (((inv + 1) & inv) !== 0) return null;   // 연속 비트가 아닌 마스크(예: 255.0.255.0)
+  if (inv < 3) return null;   // /31 · /32 는 점대점 · 호스트 경로라 게이트웨이가 서브넷 밖일 수 있다 — 판정하지 않는다
+  const gw = gateway ? ipToNum(String(gateway).trim()) : null;
+  const ref = gw ?? base;
+  const net = (ref & m) >>> 0;
+  const bcast = (net | inv) >>> 0;
+  const last = base + count - 1;
+  const where = `${numToIp(net)}/${32 - Math.log2(inv + 1)}${gw != null ? `(게이트웨이 ${numToIp(gw)})` : ''}`;
+  if (((base & m) >>> 0) !== net || ((last & m) >>> 0) !== net) {
+    return `${label} ${numToIp(base)} ~ ${numToIp(last)} 이(가) 서브넷 ${where} 밖으로 나갑니다 — 시작 IP · 개수 · 마스크 · 게이트웨이를 확인하세요.`;
+  }
+  if (base === net || last === bcast) {
+    return `${label} ${numToIp(base)} ~ ${numToIp(last)} 이(가) 서브넷 ${where} 의 ${base === net ? '네트워크' : '브로드캐스트'} 주소를 포함합니다.`;
+  }
+  return null;
+}
+
 export function expandSpec(spec = {}) {
   const errors = [];
   const guest = spec.guest || {};
@@ -119,6 +148,7 @@ export function expandSpec(spec = {}) {
     ipBase = ipToNum(guest.ipStart);
     if (ipBase == null) errors.push(`잘못된 시작 IP: ${guest.ipStart}`);
     else if (overflow(ipBase)) errors.push(`시작 IP ${guest.ipStart} 에서 ${count}대를 연속 배정하면 255.255.255.255 를 넘습니다.`);
+    else { const e = subnetRangeError('연속 IP', ipBase, count, guest); if (e) errors.push(e); }   // 74 ③
   }
 
   // Additional NICs (NIC2, NIC3 …) applied IN ORDER (vSphere maps nicSettingMap
@@ -130,6 +160,7 @@ export function expandSpec(spec = {}) {
       base = ipToNum(e.ipStart);
       if (base == null) errors.push(`NIC${idx + 2} 잘못된 시작 IP: ${e.ipStart}`);
       else if (overflow(base)) errors.push(`NIC${idx + 2} 시작 IP ${e.ipStart} 에서 ${count}대를 연속 배정하면 255.255.255.255 를 넘습니다.`);
+      else { const se = subnetRangeError(`NIC${idx + 2} 연속 IP`, base, count, e); if (se) errors.push(se); }   // 74 ③
     }
     return { edhcp, base, subnetMask: e.subnetMask || '', gateway: e.gateway || '', mac: String(e.mac || '').trim() };
   });

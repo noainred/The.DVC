@@ -5,15 +5,16 @@
  * datastore/host (empty RelocateSpec), applying a guest CustomizationSpec so the
  * new guest comes up with the requested hostname + static IP (or DHCP).
  *
- * One login is reused for the whole batch. Each clone is fire-and-return: we
- * issue the task and report it as submitted (vCenter runs it asynchronously);
- * a faulted submission is reported per-VM so one failure never aborts the rest.
+ * One login is reused for the whole batch. A faulted submission is reported per-VM so one failure never aborts the rest.
+ * 결정(56~75 남긴 것) 74 ②: 예전에는 제출만 하고(fire-and-return) 'done' 이라 했다 — 제출은 지금도 결과를 기다리지 않고(빠르게 다음 VM),
+ *   결과는 제출 풀과 분리된 추적 고리(taskTracker.js)가 fetchTaskStates 로 작업 id 를 묶어 조회한다(작업은 취소하지 않는다).
  */
 
 import { VimSoapClient } from '../vcenter/soapClient.js';
 import { onDemandLogin } from '../vcenter/dsBrowse.js';   // v2.743(감사 VC-03): 주문형 vCenter 로그인 문(판정은 collectTarget·authStopGate 하나)
 import { store } from '../store.js';
 import { morefOf } from '../vcenter/registry.js';   // v2.447: 콜론 포함 vcenterId 안전(감사 B1)
+import { isSafeMoref } from './reconfig.js';   // 결정 74 ②: 추적 조회에 싣는 작업 id 는 MoRef 꼴만(XML 에 그대로 들어간다)
 
 // Resolve a host/datastore display name to its MoRef using the live snapshot
 // (snapshot ids are `${vcId}:${moref}`), scoped to one vCenter.
@@ -153,7 +154,22 @@ export function createProvisioner(vc) {
         `<folder type="Folder">${folder}</folder><name>${esc(vm.name)}</name>${spec}</CloneVM_Task>`;
       const res = await client.callRaw(body);
       const task = /<returnval type="Task">([^<]+)<\/returnval>/.exec(res)?.[1];
-      return { task: task || null, submitted: true };
+      return { task: task && isSafeMoref(task) ? task : null, submitted: true };
+    },
+    /**
+     * 74 ②: 작업 id 여럿의 상태를 한 번에(RetrieveProperties objectSet 여럿) — Map(ref → { state, error }). 묶음 · 간격 · 시한은 taskTracker.js 가 정한다.
+     *   없는 작업이 섞이면 vCenter 가 묶음 전체를 fault(ManagedObjectNotFound)로 돌려준다 — 추적기가 그 묶음만 하나씩 다시 묻는다.
+     */
+    async fetchTaskStates(refs) {
+      await ensureLogin();
+      const safe = (Array.isArray(refs) ? refs : []).filter(isSafeMoref);
+      const out = new Map();
+      if (!safe.length) return out;
+      for (const o of await client.retrieveManyObjectProps('Task', safe, ['info.state', 'info.error'], safe.length)) {
+        const errXml = o.props?.['info.error'] || '';
+        out.set(o.ref, { state: o.props?.['info.state'] || '', error: /<localizedMessage>([^<]+)<\/localizedMessage>/.exec(errXml)?.[1] || (errXml ? 'vCenter 작업 실패' : '') });
+      }
+      return out;
     },
     async close() { if (loggedIn) await client.logout(); },
   };

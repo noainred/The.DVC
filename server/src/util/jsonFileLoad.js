@@ -1,0 +1,128 @@
+/**
+ * util/jsonFileLoad.js — 설정 · 저장소 JSON 파일 읽기의 공용 판정(결정(56~75 남긴 것) G2 — 57 · 58 · 60 · 62 · 65 · 69 · 70 · 73 · 74 회차가 모듈마다 따로 고친 꼴).
+ *
+ * 왜: '읽기 → JSON.parse → 실패면 preserveCorrupt' 를 catch 하나로 받은 모듈이 **읽기 오류**(EACCES · EIO · EISDIR · EMFILE)도 손상으로 보고
+ *   온전한 원본을 `<file>.corrupt.<시각>` 으로 옮긴 뒤 빈 값으로 돌았다 — 다음 저장이 그 빈 값 위에 한 건만 든 파일을 썼다(원본은 보존본에만).
+ *
+ * 판정(넷) — **어느 단계에서 실패했는가** 로 가른다(e.code 유무가 아니다 — parse 가 code 붙은 오류를 던져도 손상이다):
+ *  - `missing`    파일 없음(ENOENT). 손상 보존본만 남았으면 여전히 못 읽은 것이다(settingsLoadError.missing — 재시작 뒤에도).
+ *  - `read-error` 읽기 단계의 그 밖의 실패. 원본을 **옮기지 않는다** · 호출부는 값을 **캐시하지 않는다** · 쓰기는 거절한다.
+ *                 다시 읽기는 `READ_RETRY_MS`(30초) 간격 — 죽어 가는 디스크의 EIO 는 읽기마다 수 초 걸릴 수 있어, 요청마다 다시 읽으면
+ *                 이벤트 루프를 거듭 막는다(71회차 추정). 간격 안의 호출은 디스크를 건드리지 않고 같은 결과(`deferred:true`)를 돌려준다.
+ *  - `corrupt`    읽었는데 parse(형식 검사 포함)가 던졌다 → preserveCorrupt 로 원본을 보존본으로 옮긴다(예전과 같다).
+ *  - `ok`         `{ value, text }`.
+ *
+ * 둘로 나눴다:
+ *  - `makeJsonFileReader(fileOf, opts)` — 위 판정 + 재읽기 간격만(서비스 점검에 등재하지 않는 설정 — cost · vmhygiene · tags 처럼 손상이면 기본값으로 도는 것).
+ *  - `makeJsonFileLoader(fileOf, { label, confirm, … })` — 위에 `makeSettingsLoadError` 상태를 묶은 것(서비스 점검 등재 · '기본값으로 확정' ·
+ *    `refusal(what)` 쓰기 거절 응답). 로드 오류가 서 있는 동안 저장은 409 `settings-unreadable` 이 규약이다(rangeStore · annotations 와 같다).
+ *
+ * ⚠ util/ 규약(arch2579): 도메인 모듈을 import 하지 않는다.
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+import { preserveCorrupt } from './atomicWrite.js';
+import { makeSettingsLoadError } from './settingsLoadError.js';
+import { parseJsonObject } from './jsonObject.js';
+
+/** 읽기 오류 뒤 다시 읽기까지의 간격(ms). */
+export const READ_RETRY_MS = 30_000;
+
+let _now = () => Date.now();
+/** 테스트 전용 — 재읽기 간격 판정의 시계를 바꾼다(인자 없으면 원래대로). */
+export function _setJsonFileLoadClockForTest(fn = null) { _now = typeof fn === 'function' ? fn : () => Date.now(); }
+
+const codeOf = (e) => String((e && typeof e === 'object' ? e.code : '') || 'read-error').slice(0, 32);
+
+/**
+ * 한 번 읽기(상태 없음). 부수효과는 `corrupt` 일 때의 preserveCorrupt 하나다(`preserve:false` 면 그것도 없다).
+ * @param {string} file
+ * @param {{ parse?: (text:string) => any, preserve?: boolean }} [opts]  parse 기본값은 parseJsonObject(객체가 아닌 JSON 은 손상)
+ * @returns {{kind:'missing'} | {kind:'read-error', error:any} | {kind:'corrupt', error:any, backup:(string|null)} | {kind:'ok', value:any, text:string}}
+ */
+export function readJsonFile(file, { parse = parseJsonObject, preserve = true } = {}) {
+  let text;
+  try { text = fs.readFileSync(file, 'utf8'); } catch (e) {
+    if (e?.code === 'ENOENT') return { kind: 'missing' };
+    return { kind: 'read-error', error: e };
+  }
+  try { return { kind: 'ok', value: parse(text), text }; } catch (e) {
+    const backup = preserve ? preserveCorrupt(file, e?.message || String(e)) : null;
+    return { kind: 'corrupt', error: e, backup };
+  }
+}
+
+/**
+ * 재읽기 간격이 있는 읽기. 읽기 오류의 첫 회 · 회복을 콘솔에 한 번씩 남긴다(요청마다 부르는 경로라 콘솔을 채우지 않게).
+ * @param {() => string} fileOf
+ * @param {{ parse?: Function, preserve?: boolean, retryMs?: number, tag?: string }} [opts]  tag = 콘솔 머리(예 'cost')
+ */
+export function makeJsonFileReader(fileOf, { parse = parseJsonObject, preserve = true, retryMs = READ_RETRY_MS, tag = '' } = {}) {
+  let retryAt = 0; let lastError = null;
+  const head = () => `[${tag || 'jsonFileLoad'}] ${path.basename(String(fileOf() || ''))}`;
+  return {
+    /** @returns 위 readJsonFile 결과 + read-error 이면 `deferred`(간격 안 — 디스크를 보지 않았다) · `retryAt` */
+    read() {
+      if (lastError && _now() < retryAt) return { kind: 'read-error', error: lastError, deferred: true, retryAt };
+      const r = readJsonFile(fileOf(), { parse, preserve });
+      if (r.kind === 'read-error') {
+        if (!lastError) console.warn(`${head()} 읽기 오류(${codeOf(r.error)}) — 손상이 아니라 원본은 그대로 둡니다 · 그동안 저장은 거절하고 ${Math.round(retryMs / 1000)}초마다 다시 읽습니다`);
+        lastError = r.error; retryAt = _now() + retryMs;
+        return { ...r, retryAt };
+      }
+      if (lastError) console.warn(`${head()} 다시 읽었습니다(읽기 오류 풀림)`);
+      lastError = null; retryAt = 0;
+      return r;
+    },
+    /** 저장 성공 · 테스트 초기화 — 다음 read() 는 곧바로 디스크를 본다. */
+    reset() { lastError = null; retryAt = 0; },
+    /** 읽기 오류로 다시 읽기를 기다리는 중인가. */
+    pending: () => !!lastError,
+  };
+}
+
+/**
+ * 서비스 점검에 등재되는 로더 — reader + makeSettingsLoadError.
+ * @param {() => string} fileOf
+ * @param {{ label:string, confirm:Function, ownerOnly?:boolean, superOnly?:boolean, parse?:Function, preserve?:boolean, retryMs?:number, tag?:string }} opts
+ */
+export function makeJsonFileLoader(fileOf, opts = {}) {
+  const { label = '', confirm = null, ownerOnly = false, superOnly = false, retryMs = READ_RETRY_MS } = opts;
+  const err = makeSettingsLoadError(fileOf, { label, confirm, ownerOnly, superOnly });
+  const reader = makeJsonFileReader(fileOf, opts);
+  return {
+    /** 읽기 + 로드 오류 상태 갱신. 결과 모양은 makeJsonFileReader.read() 와 같다. */
+    load() {
+      const r = reader.read();
+      if (r.kind === 'ok') err.ok();
+      else if (r.kind === 'missing') err.missing();
+      else if (r.kind === 'corrupt') err.corrupt(r.error);
+      else if (!r.deferred) err.readError(r.error, { retryMs });
+      return r;
+    },
+    /** 지금 로드 오류({ at, reason, readError? }) 또는 null. 읽지 않는다 — 호출부가 먼저 load() 한다. */
+    loadError: () => err.get(),
+    /** 저장 성공 — 오류 해제 · 재읽기 간격 초기화. */
+    saved() { err.ok(); reader.reset(); },
+    /** 테스트 전용 — 재읽기 간격만 초기화(오류 상태는 다음 load() 가 다시 판정한다). */
+    resetRetry() { reader.reset(); },
+    /**
+     * 로드 오류가 서 있으면 쓰기 거절 응답(라우트 409), 아니면 null. 사유는 읽기 오류 · 손상을 가른다(조치가 다르다).
+     * @param {string} what  사람이 읽는 이름(예 'IP 관리 메모')
+     */
+    refusal(what) {
+      const e = err.get();
+      if (!e) return null;
+      const base = path.basename(String(fileOf() || ''));
+      const reason = e.readError
+        ? `${what} 파일(${base})을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(${Math.round(retryMs / 1000)}초마다 다시 읽고, 읽히면 저장이 다시 열립니다).`
+        : `${what} 파일(${base})을 읽지 못한 상태라 저장하지 않았습니다 — 손상돼 보존본으로 옮겼습니다. 지금 저장하면 그 한 건만 든 파일이 됩니다. 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리세요.`;
+      return { ok: false, code: 'settings-unreadable', reason, ...(e.readError ? { readError: true } : {}) };
+    },
+    /** 응답 표지 — `{ reason, at, readError }` 또는 null(사유는 settingsLoadError 의 요약 — 파일 조각 없음). */
+    marker() {
+      const e = err.get();
+      return e ? { reason: String(e.reason || '').slice(0, 300), at: Number.isFinite(e.at) ? e.at : null, readError: !!e.readError } : null;
+    },
+  };
+}

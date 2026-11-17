@@ -9,6 +9,7 @@ import { fetchJson, postJson } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import { agentName, migrationRow, migrationVisible } from './scanRangeImportText.js';
 import Select from '../../components/Select.jsx';
+import { loadErrorText } from '../loadErrorText.js';
 
 const TONE = { ok: 'var(--green)', warn: 'var(--amber)', dim: 'var(--text-dim)' };
 
@@ -36,6 +37,8 @@ export function ScanRangeMigration({ onChanged }) {
     <section className="card" style={{ padding: 14, marginBottom: 12, borderColor: remaining.length ? 'var(--amber)' : 'var(--border)' }} aria-label="기존 대역 이전 안내">
       {/* 28회차 P-4: 서버가 이전을 보류했으면(배정 파일 손상 등) 그 사유를 그대로 말한다 */}
       {m.held ? <div role="status" style={{ fontSize: 12, color: 'var(--amber)', marginBottom: 6 }}>아직 옮기지 않았습니다 — {m.held}</div> : null}
+      {/* 결정(56~75 남긴 것) 62: 남은 대역 파일(ipam-vcenter-ranges.json)을 못 읽으면 아래 '남은 대역' 이 비어 보여도 다 옮긴 것이 아니다 */}
+      {m.remainingLoadError ? <div role="status" style={{ fontSize: 12, color: 'var(--red)', marginBottom: 6 }}>{loadErrorText('남은 vCenter 별 대역(ipam-vcenter-ranges.json)', m.remainingLoadError, '그동안 남은 대역이 비어 보여도 다 옮긴 것이 아닙니다.')}</div> : null}
       <div className="flex between wrap" style={{ alignItems: 'center', gap: 8 }}>
         <b style={{ fontSize: 14 }}>vCenter 별 스캔 대역을 에이전트로 옮겼습니다{moved ? ` (${moved}건)` : ''}</b>
         <span className="flex gap wrap">

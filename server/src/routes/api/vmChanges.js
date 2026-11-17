@@ -75,7 +75,7 @@ export function registerVmChanges(api) {
     return {
       days: L.days, since: L.since, truncated: L.truncated, readMax: SCAN_MAX, scanned: L.scanned, coveredSince: L.truncated ? L.coveredSince : null,
       vcenters: L.coverage, notCollected: L.notCollected, logs: L.settings,
-      moves: mv.result(),
+      moves: mv.result({ since: L.since }),   // 결정(56~75 남긴 것) 69 ①: 하루 막대는 since 가 걸친 날부터(KPI 합 = 막대 합)
       changes: ch.result(),
       initial: snap.initial === true,
     };

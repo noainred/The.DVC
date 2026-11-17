@@ -9,11 +9,11 @@
  *  · 손상 파일은 `preserveCorrupt` 로 보존하고 기본값으로 시작한다(다음 저장이 온전했던 원본을 덮지 않게 — 조용한 빈값 금지).
  *  · `rev` 는 파일 내용의 짧은 해시다 — 재시작해도 같은 내용이면 같고(화면의 '다른 사람이 바꿨다' 판정·응답 캐시 키), 바뀌면 다르다.
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileLoader } from '../util/jsonFileLoad.js';   // 결정(56~75 남긴 것) 60
 import { strictIpv4Num, numToIp } from '../util/ipv4.js';
 
 export const POLICY_FILE_NAME = 'vm-dns-policy.json';
@@ -93,27 +93,35 @@ export function normalizeCorps(input) {
   return { corps, invalid };
 }
 
-/** 정책 읽기 — `{ corps, publicUnapproved, rev, invalid, updatedAt, updatedBy }`. 손상이면 보존하고 기본값. */
+/*
+ * 결정(56~75 남긴 것) 60(60회차 남긴 것): 손상이면 표지 없이 기본값이라 화면이 '설정 없음' 으로 보였고, 읽기 오류(EACCES · EIO)도 손상과 같이 원본을 옮겼다.
+ *   publicUnapproved 만 바꾸는 저장은 corps 를 지금 값(빈 기본값)으로 써 원본 법인 목록을 덮었다. 이제 공용 로더 — 읽기 오류는 원본을 두고 캐시하지 않으며
+ *   (30초 간격 재읽기) · 손상은 보존 + 서비스 점검 등재 · 둘 다 응답 표지(loadError) · 오류 중 저장은 409(settings-unreadable).
+ */
+const DOC_DEFAULTS = Object.freeze({ corps: {}, publicUnapproved: true });
+function writeDoc(doc) { atomicWriteFileSync(FILE(), JSON.stringify(doc, null, 2), { mode: 0o600 }); }
+const _file = makeJsonFileLoader(FILE, { label: 'VM DNS 승인 정책(vm-dns-policy.json) — 확정하면 기본값(공인 DNS 비승인 · 법인 목록 없음)으로 저장됩니다', confirm: () => { writeDoc({ ...DOC_DEFAULTS, updatedAt: Date.now(), updatedBy: 'confirm-default' }); cache = null; _file.saved(); }, parse: (t) => { const p = JSON.parse(t); if (!isObj(p)) throw new Error('객체가 아닙니다'); return p; }, tag: 'vm-dns' });
+
+/** 정책 읽기 — `{ corps, publicUnapproved, rev, invalid, updatedAt, updatedBy, loadError? }`. 손상이면 보존하고 기본값(+ 표지). */
 export function loadVmDnsPolicy() {
   if (cache) return cache;
-  const base = { corps: {}, publicUnapproved: true, updatedAt: null, updatedBy: null };
+  const base = { corps: {}, publicUnapproved: DOC_DEFAULTS.publicUnapproved, updatedAt: null, updatedBy: null };
   let invalid = [];
-  const file = FILE();
-  try {
-    if (fs.existsSync(file)) {
-      const p = JSON.parse(fs.readFileSync(file, 'utf8'));
-      if (!isObj(p)) throw new Error('객체가 아닙니다');
-      const n = normalizeCorps(p.corps ?? {});
-      base.corps = n.corps; invalid = n.invalid;
-      if (typeof p.publicUnapproved === 'boolean') base.publicUnapproved = p.publicUnapproved;
-      if (typeof p.updatedAt === 'number' && Number.isFinite(p.updatedAt)) base.updatedAt = p.updatedAt;
-      if (typeof p.updatedBy === 'string') base.updatedBy = p.updatedBy.slice(0, 128);
-    }
-  } catch (e) {
-    preserveCorrupt(file, e?.message);
-    console.warn(`[vm-dns] 정책 파일을 읽지 못했습니다 — 원본을 .corrupt 로 보존하고 기본값(공인 DNS 비승인 · 법인 목록 없음)으로 시작합니다: ${safeLoadText(e) || '사유 미상'}`);
+  const r = _file.load();
+  // 60: 읽기 오류 — 기본값을 **캐시하지 않는다**(rev 도 따로 — 응답 캐시가 정상 기본값과 섞이지 않게).
+  if (r.kind === 'read-error') return { ...base, invalid, rev: 'unreadable', loadError: _file.marker() };
+  if (r.kind === 'ok') {
+    const p = r.value;
+    const n = normalizeCorps(p.corps ?? {});
+    base.corps = n.corps; invalid = n.invalid;
+    if (typeof p.publicUnapproved === 'boolean') base.publicUnapproved = p.publicUnapproved;
+    if (typeof p.updatedAt === 'number' && Number.isFinite(p.updatedAt)) base.updatedAt = p.updatedAt;
+    if (typeof p.updatedBy === 'string') base.updatedBy = p.updatedBy.slice(0, 128);
+  } else if (r.kind === 'corrupt') {
+    console.warn(`[vm-dns] 정책 파일을 읽지 못했습니다 — 원본을 .corrupt 로 보존하고 기본값(공인 DNS 비승인 · 법인 목록 없음)으로 시작합니다(확정 전까지 저장 거절): ${safeLoadText(r.error) || '사유 미상'}`);
   }
-  cache = { ...base, invalid, rev: revOf({ corps: base.corps, publicUnapproved: base.publicUnapproved }) };
+  const le = _file.marker();
+  cache = { ...base, invalid, rev: le ? `err-${revOf({ corps: base.corps, publicUnapproved: base.publicUnapproved })}` : revOf({ corps: base.corps, publicUnapproved: base.publicUnapproved }), ...(le ? { loadError: le } : {}) };
   return cache;
 }
 
@@ -125,6 +133,7 @@ export function loadVmDnsPolicy() {
  */
 export function saveVmDnsPolicy(body = {}, user = '') {
   const cur = loadVmDnsPolicy();
+  { const no = _file.refusal('VM DNS 승인 정책'); if (no) return no; }   // 60: 읽지 못한 값(기본값) 위에 덮어쓰지 않는다 — 라우트 409
   if (!isObj(body)) return { ok: false, code: 'bad-request', reason: '본문이 객체가 아닙니다' };
   if (body.rev != null && String(body.rev) !== cur.rev) return { ok: false, code: 'stale', reason: '그 사이에 다른 관리자가 정책을 바꿨습니다 — 새로 불러온 뒤 다시 저장하세요', rev: cur.rev };
   const next = { corps: cur.corps, publicUnapproved: cur.publicUnapproved };
@@ -138,10 +147,11 @@ export function saveVmDnsPolicy(body = {}, user = '') {
     next.publicUnapproved = body.publicUnapproved;
   }
   const doc = { corps: next.corps, publicUnapproved: next.publicUnapproved, updatedAt: Date.now(), updatedBy: String(user || '').slice(0, 128) };
-  atomicWriteFileSync(FILE(), JSON.stringify(doc, null, 2), { mode: 0o600 });
+  writeDoc(doc);
+  _file.saved();
   cache = { ...doc, invalid: [], rev: revOf({ corps: doc.corps, publicUnapproved: doc.publicUnapproved }) };
   return { ok: true, policy: cache, changed: cache.rev !== cur.rev };
 }
 
 /** 파일을 다시 읽게 한다(테스트·외부 편집 뒤). */
-export function invalidateVmDnsPolicy() { cache = null; }
+export function invalidateVmDnsPolicy() { cache = null; _file.resetRetry(); }

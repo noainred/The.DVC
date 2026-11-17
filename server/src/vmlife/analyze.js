@@ -10,7 +10,8 @@
  *  · 상한으로 자르면 omitted 로 밝힌다(조용한 상한 금지).
  */
 import { LIFE_TYPES, LIFE_KIND, parseDetail } from '../vmchanges/eventDetail.js';
-import { dayIndex, dayStartMs } from '../util/dayKey.js';   // v2.727(감사 C-03): 날짜 경계는 포탈 오프셋(util/dayKey.js) 하나 — KST 상수 금지
+import { daySeries } from '../vmchanges/analyze.js';   // 결정(56~75 남긴 것) 69 ①: 하루 막대 칸은 vm-changes 와 한 벌
+import { dayIndex } from '../util/dayKey.js';   // v2.727(감사 C-03): 날짜 경계는 포탈 오프셋(util/dayKey.js) 하나 — KST 상수 금지
 
 export const LIFE_ROWS_MAX = 1000;
 const ADD_KINDS = new Set(['create', 'clone', 'deploy', 'register']);
@@ -19,9 +20,9 @@ export const kindOfLife = (type, d) => (d?.kind && Object.values(LIFE_KIND).incl
 
 /**
  * @param rows   opsEvents 행(최신 먼저 — 순서는 상관없다)
- * @param opts   { days, now, vcName:Map, q, kind, liveNames:Map<vcenterId, Set<name>> }
+ * @param opts   { days, now, since, vcName:Map, q, kind, liveNames:Map<vcenterId, Set<name>> } — since = 조회 시작 시각(라우트의 since · 없으면 now − days일)
  */
-export function analyzeLifecycle(rows, { days = 7, now = Date.now(), vcName = new Map(), q = '', kind = '', liveNames = null } = {}) {
+export function analyzeLifecycle(rows, { days = 7, now = Date.now(), since = null, vcName = new Map(), q = '', kind = '', liveNames = null } = {}) {
   const list = (rows || []).filter((r) => LIFE_TYPES.includes(r.type));
   const byKind = { create: 0, clone: 0, deploy: 0, register: 0, remove: 0, rename: 0 };
   const byDay = new Map();
@@ -75,12 +76,7 @@ export function analyzeLifecycle(rows, { days = 7, now = Date.now(), vcName = ne
   else if (kind && kind !== 'all') shown = shown.filter((e) => e.kind === kind);
   if (qq) shown = shown.filter((e) => [e.vm, e.user, e.vcenterName, e.host, e.source, e.oldName, e.newName].some((x) => String(x || '').toLowerCase().includes(qq)));
   shown.sort((a, b) => b.ts - a.ts || String(a.vm).localeCompare(String(b.vm)));
-  const today = dayIndex(now);
-  const series = [];
-  for (let d = today - Math.max(1, days) + 1; d <= today; d++) {
-    const c = byDay.get(d) || { added: 0, removed: 0 };
-    series.push({ day: dayStartMs(d), added: c.added, removed: c.removed });
-  }
+  const series = daySeries({ days, now, since }, (d) => { const c = byDay.get(d) || { added: 0, removed: 0 }; return { added: c.added, removed: c.removed }; });
   const added = byKind.create + byKind.clone + byKind.deploy + byKind.register;
   const users = [...byUser.values()].sort((a, b) => (b.added + b.removed + b.other) - (a.added + a.removed + a.other) || a.user.localeCompare(b.user)).slice(0, 50);
   return {

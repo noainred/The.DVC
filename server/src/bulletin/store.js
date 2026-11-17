@@ -53,7 +53,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileLoader } from '../util/jsonFileLoad.js';   // 결정(56~75 남긴 것) 73 ①
 import { capStr } from '../util/capStr.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { registerExitFlush } from '../util/exitFlush.js';
@@ -162,28 +163,70 @@ function writerOf(file, key) {
   return w;
 }
 
+/*
+ * 결정(56~75 남긴 것) 73 ①(73회차 남긴 것): 로드 catch 가 **읽기 오류(EACCES · EIO · EMFILE)도 손상으로** 보고 원본을 .corrupt 로 옮긴 뒤 빈 목록으로 시작했다 —
+ *   게시판이 비어 보이고 새 글이 새 파일에 쌓여 수작업 병합이 됐다. 이제 공용 로더(util/jsonFileLoad.js):
+ *   · 읽기 오류 — 원본을 두고 캐시하지 않는다(30초 간격으로 다시 읽는다) · 손상 — 예전처럼 보존본으로 옮긴다(둘 다 로드 오류 · 서비스 점검 등재)
+ *   · 로드 오류가 서 있는 동안 모든 쓰기(글 · 댓글 · 공감 · 공지)는 409 `settings-unreadable` — 한두 건만 든 새 파일이 생기지 않게
+ *   · 오류 중에는 캐시를 믿지 않고 매번 다시 판정한다(보존본을 되돌리면 재시작 없이 풀린다) · 목록 응답이 `loadError` 표지를 싣는다.
+ */
+const parseListOf = (key) => (text) => {
+  const j = JSON.parse(text);
+  if (!j || typeof j !== 'object' || Array.isArray(j) || !Array.isArray(j[key])) throw new Error(`${key} 배열이 없습니다`);
+  return j;
+};
+const LOADERS = Object.freeze({
+  board: makeJsonFileLoader(boardFile, { label: '게시판 글 · 댓글(board.json) — 확정하면 게시판이 빈 목록으로 시작합니다', confirm: () => confirmEmpty('board'), parse: parseListOf('posts'), tag: 'bulletin' }),
+  notices: makeJsonFileLoader(noticesFile, { label: '접속 공지(notices.json) — 확정하면 공지가 빈 목록으로 시작합니다', confirm: () => confirmEmpty('notices'), parse: parseListOf('notices'), tag: 'bulletin' }),
+});
+const kindOfKey = (key) => (key === 'posts' ? 'board' : 'notices');
+const WHAT = Object.freeze({ board: '게시판', notices: '접속 공지' });
+
+/** 서비스 점검 '기본값으로 확정' — 빈 목록 파일을 쓰고 캐시 · 크기를 맞춘다(손상 보존본은 그대로). */
+function confirmEmpty(kind) {
+  const { fileOf, key } = KINDS[kind];
+  const file = fileOf();
+  const body = JSON.stringify({ [key]: [] });
+  io.writeFileAtomicSync(file, body);
+  caches.set(file, { list: [] });
+  writerOf(file, key).bytes = Buffer.byteLength(body, 'utf8');
+  LOADERS[kind].saved();
+}
+
 function load(file, key) {
+  const kind = kindOfKey(key);
+  const L = LOADERS[kind];
   const hit = caches.get(file);
-  if (hit) return hit.list;
+  if (hit && !L.loadError()) return hit.list;   // 73 ①: 오류 중에는 캐시를 믿지 않는다(보존본 복구 · 권한 수정이 재시작 없이 보이게)
   const w = writerOf(file, key);
+  const r = L.load();
+  if (r.kind === 'read-error') return hit ? hit.list : [];   // 73 ①: 원본을 두고 빈 목록을 캐시하지 않는다(쓰기는 loadForWrite 가 409)
   let list = [];
   let bytes = 0;
-  try {
-    if (fs.existsSync(file)) {
-      const raw = fs.readFileSync(file, 'utf8');
-      const j = JSON.parse(raw);
-      if (!j || typeof j !== 'object' || !Array.isArray(j[key])) throw new Error(`${key} 배열이 없습니다`);
-      list = j[key].filter((x) => x && typeof x === 'object' && typeof x.id === 'string');
-      bytes = Buffer.byteLength(raw, 'utf8');
-    }
-  } catch (e) {
-    preserveCorrupt(file, e.message);
-    console.warn(`[bulletin] ${path.basename(file)} 를 읽지 못해 빈 목록으로 시작합니다: ${safeLoadText(e) || '사유 미상'}`);
-    list = []; bytes = 0;
+  if (r.kind === 'ok') {
+    list = r.value[key].filter((x) => x && typeof x === 'object' && typeof x.id === 'string');
+    bytes = Buffer.byteLength(r.text, 'utf8');
+  } else if (r.kind === 'corrupt') {
+    console.warn(`[bulletin] ${path.basename(file)} 를 읽지 못해 빈 목록으로 시작합니다(손상 보존본으로 옮김 · 확정 전까지 쓰기 거절): ${safeLoadText(r.error) || '사유 미상'}`);
   }
   caches.set(file, { list });
-  if (w.bytes == null) w.bytes = bytes;
+  if (w.bytes == null || r.kind === 'ok') w.bytes = bytes;
   return list;
+}
+
+/** 쓰기 경로의 읽기 — 로드 오류가 서 있으면 409 settings-unreadable 을 던진다(73 ①). */
+function loadForWrite(file, key) {
+  const list = load(file, key);
+  const no = LOADERS[kindOfKey(key)].refusal(WHAT[kindOfKey(key)]);
+  if (no) { const e = new Error(no.reason); e.status = 409; e.extra = { code: no.code, ...(no.readError ? { readError: true } : {}) }; throw e; }
+  return list;
+}
+
+/** 목록 응답 표지 — 그 저장소 파일을 못 읽었으면 { reason, at, readError }, 아니면 null. */
+export function bulletinLoadError(kind) {
+  const k = kind === 'notices' ? 'notices' : 'board';
+  load(KINDS[k].fileOf(), KINDS[k].key);
+  return LOADERS[k].marker();
 }
 
 /** 캐시를 바꾸고 쓰기를 예약한다(v2.727). deltaBytes 는 이 변경이 파일 크기에 주는 추정 변화(바이트). */
@@ -491,6 +534,7 @@ export function _resetBulletinCache() {
     w.waiters = [];
   }
   caches.clear(); writers.clear();
+  for (const L of Object.values(LOADERS)) L.resetRetry();   // 73 ①: 읽기 오류 재읽기 간격도 초기화(CONFIG_DIR 를 바꾼 테스트가 곧바로 읽게)
 }
 
 /** JSON 으로 쓰였을 때의 바이트(추정 변화량 계산용). */
@@ -579,7 +623,7 @@ export function activeNotices(now = Date.now(), { by = true } = {}) {
 }
 
 export function createNotice(body, user) {
-  const list = load(noticesFile(), 'notices');
+  const list = loadForWrite(noticesFile(), 'notices');
   if (list.length >= LIMITS.noticeMax) throw limitError(`공지는 ${LIMITS.noticeMax}개까지입니다 — 지난 공지를 지운 뒤 다시 하세요`);
   const now = Date.now();
   const n = { id: newId(), ...cleanNotice(body || {}), createdAt: now, createdBy: user, updatedAt: now, updatedBy: user };
@@ -588,7 +632,7 @@ export function createNotice(body, user) {
 }
 
 export function updateNotice(id, body, user) {
-  const list = load(noticesFile(), 'notices');
+  const list = loadForWrite(noticesFile(), 'notices');
   const i = list.findIndex((n) => n.id === id);
   if (i < 0) throw notFound();
   const n = { ...list[i], ...cleanNotice(body || {}, list[i]), updatedAt: Math.max(Date.now(), (list[i].updatedAt || 0) + 1), updatedBy: user };
@@ -598,7 +642,7 @@ export function updateNotice(id, body, user) {
 }
 
 export function deleteNotice(id) {
-  const list = load(noticesFile(), 'notices');
+  const list = loadForWrite(noticesFile(), 'notices');
   const n = list.find((x) => x.id === id);
   if (!n) throw notFound();
   save(noticesFile(), 'notices', list.filter((x) => x.id !== id));
@@ -664,7 +708,7 @@ function viewPost(p, me) {
 const canModify = (item, user, isAdmin) => isAdmin || (!!user && item.author === user);
 
 export function createPost(body, user, { isAdmin = false } = {}) {
-  const list = load(boardFile(), 'posts');
+  const list = loadForWrite(boardFile(), 'posts');
   if (list.length >= LIMITS.postMax) throw limitError(`게시글은 ${LIMITS.postMax}개까지입니다 — 관리자에게 정리를 요청하세요`);
   const now = Date.now();
   const p = {
@@ -681,7 +725,7 @@ export function createPost(body, user, { isAdmin = false } = {}) {
 }
 
 export function updatePost(id, body, user, { isAdmin = false } = {}) {
-  const list = load(boardFile(), 'posts');
+  const list = loadForWrite(boardFile(), 'posts');
   const i = list.findIndex((p) => p.id === id);
   if (i < 0) throw notFound();
   const cur = list[i];
@@ -705,7 +749,7 @@ export function updatePost(id, body, user, { isAdmin = false } = {}) {
 }
 
 export function deletePost(id, user, { isAdmin = false } = {}) {
-  const list = load(boardFile(), 'posts');
+  const list = loadForWrite(boardFile(), 'posts');
   const p = list.find((x) => x.id === id);
   if (!p) throw notFound();
   if (!canModify(p, user, isAdmin)) throw forbidden('작성자 본인이나 관리자만 지울 수 있습니다');
@@ -718,7 +762,7 @@ export function deletePost(id, user, { isAdmin = false } = {}) {
  * 답할 댓글이 없거나(지워짐) 삭제 자리면 거부한다(사라진 대화에 답글이 붙지 않게).
  */
 export function addComment(postId, body, user) {
-  const list = load(boardFile(), 'posts');
+  const list = loadForWrite(boardFile(), 'posts');
   const i = list.findIndex((p) => p.id === postId);
   if (i < 0) throw notFound();
   const cur = list[i];
@@ -747,7 +791,7 @@ export function addComment(postId, body, user) {
  * @returns {{ comment, kept: boolean }} kept = 자리를 남겼는가
  */
 export function deleteComment(postId, commentId, user, { isAdmin = false } = {}) {
-  const list = load(boardFile(), 'posts');
+  const list = loadForWrite(boardFile(), 'posts');
   const i = list.findIndex((p) => p.id === postId);
   if (i < 0) throw notFound();
   const comments = commentsOf(list[i]);
@@ -780,7 +824,7 @@ export function deleteComment(postId, commentId, user, { isAdmin = false } = {})
 export function setLike(postId, commentId, user, on) {
   if (!user) throw forbidden('로그인한 사용자만 공감할 수 있습니다');
   if (typeof on !== 'boolean') throw fieldError('on', 'true 또는 false 여야 합니다');
-  const list = load(boardFile(), 'posts');
+  const list = loadForWrite(boardFile(), 'posts');
   const i = list.findIndex((p) => p.id === postId);
   if (i < 0) throw notFound();
   const post = list[i];

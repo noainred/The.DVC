@@ -23,6 +23,7 @@ import { numOrNull } from '../../util/numOrNull.js';
 import { makeGetter, makeRawGetter, makePoster, isCredReject } from './restCommon.js';
 import { apiVersionsFrom, pathsFor } from './powermax.js';
 import { NODE_LOAD_LIMIT, unitIdOf } from '../nodeLoad.js';
+import { envPort } from '../../util/envNumber.js'; // 결정(56~75 남긴 것) 57: 포트 env 는 1~65535 정수만(예전 `Number(env) || 443` 은 −1 · 70000 · 1.5 를 그대로 썼다)
 
 /** 어레이 측 표본을 읽는 장비 타입(REST 수집 방식만 — SSH(uemcli · pstcli) 변형은 성능 경로가 없다). registry · 폴러 · 화면이 같이 쓴다. */
 export const FE_PERF_TYPES = Object.freeze(['powermax', 'vmax', 'powerstore', 'unity480']);
@@ -134,7 +135,7 @@ async function tryPost(post, paths, body) {
 /** 지원하지 않는 지표를 보내면 Unisphere 가 400 을 돌려준다(문구에 metric 이 든다) — 그때만 핵심 묶음으로 한 번 더. */
 const looksUnsupportedMetric = (e) => /metric|400|bad request/i.test(String(e?.message || ''));
 
-export async function samplePowermax(full, { signal = null, now = Date.now(), port = Number(process.env.STORAGE_UNISPHERE_PORT) || 8443 } = {}) {
+export async function samplePowermax(full, { signal = null, now = Date.now(), port = envPort(process.env.STORAGE_UNISPHERE_PORT, 8443) } = {}) {
   const get = makeGetter(full, { port, signal });
   const post = makePoster(full, { port, signal });
   const probe = { arrays: 0, directors: 0, read: 0, failed: 0, errors: [], metricSet: 'full' };
@@ -286,7 +287,7 @@ async function pstoreGenerate({ post, rawGet, csrf }, entity, entityId) {
   }
   return null;
 }
-export async function samplePowerstore(full, { signal = null, now = Date.now(), port = Number(process.env.STORAGE_POWERSTORE_PORT) || 443, withPorts = true } = {}) {
+export async function samplePowerstore(full, { signal = null, now = Date.now(), port = envPort(process.env.STORAGE_POWERSTORE_PORT, 443), withPorts = true } = {}) {
   const get = makeGetter(full, { port, signal });
   const rawGet = makeRawGetter(full, { port, signal });
   const post = makePoster(full, { port, signal });
@@ -404,7 +405,7 @@ export function unityUnits({ cpu = {}, rb, wb, rd, wr }, { withPorts = true } = 
   }
   return { units, partial };
 }
-export async function sampleUnity(full, { signal = null, now = Date.now(), port = Number(process.env.STORAGE_UNITY_PORT) || 443, withPorts = true } = {}) {
+export async function sampleUnity(full, { signal = null, now = Date.now(), port = envPort(process.env.STORAGE_UNITY_PORT, 443), withPorts = true } = {}) {
   const get = makeGetter(full, { port, headers: { 'X-EMC-REST-CLIENT': 'true' }, signal });
   const q = (path, n) => `/api/types/metricValue/instances?filter=path EQ "${path}"&per_page=${n}&compact=true`;
   const probe = { errors: [], paths: {} };

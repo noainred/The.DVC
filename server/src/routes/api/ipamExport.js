@@ -15,13 +15,13 @@ import { currentScanDatacenters } from '../../ipam/scanDatacenterSource.js';
 import { memoJson, scopeKey } from './shared.js';
 import { buildIpamInsights } from '../../ipam/insights.js';
 import { buildNetmap } from '../../ipam/netmap.js';
-import { listVcRanges } from '../../ipam/rangeStore.js';
+import { listVcRanges, vcRangesLoadError } from '../../ipam/rangeStore.js';
 import { vcRangesToCsv } from '../../ipam/vcRangesCsv.js';
 import { rangeSize } from '../../ipam/scan.js';
 import { checkRangeSpec } from '../../ipam/rangeSyntax.js'; // v2.639: 저장된 옛 값 중 이제 무효인 줄을 밝힌다
 import { makeVcResolver } from '../../ipam/vcResolve.js';
-import { getAnnotation, setAnnotation, getAnnotations, setAnnotationsMany, annotationsLoadError } from '../../ipam/annotations.js';
-import { getOverride, setOverride, clearOverride, setOverrideBatch, splitBatchIps, invalidBatchResult, overridesSummary, STATUSES, DEVICE_TYPES, reservedUntilDay, getOverrides, setOverridesMany, overridesLoadError } from '../../ipam/overrides.js';
+import { getAnnotation, setAnnotation, getAnnotations, setAnnotationsMany, annotationsLoadError, annotationsLoadMarker } from '../../ipam/annotations.js';
+import { getOverride, setOverride, clearOverride, setOverrideBatch, splitBatchIps, invalidBatchResult, overridesSummary, STATUSES, DEVICE_TYPES, reservedUntilDay, getOverrides, setOverridesMany, overridesLoadError, overridesLoadMarker } from '../../ipam/overrides.js';
 import { manageToCsv, manageSampleCsv, parseManageCsv, analyzeManageImport, MANAGE_CHUNK_MAX } from '../../ipam/manageCsv.js';
 import { getPolicies, getPolicy, setPolicy, deletePolicy, policiesSummary, findPolicy, specToRange, POLICY_STATUSES } from '../../ipam/rangePolicies.js';
 import { ipToNum } from '../../ipam/ledger.js';
@@ -34,6 +34,22 @@ import { entryMac, macInfo } from '../../ipam/macVendor.js'; // v2.999: 스캔 �
 import { renderIpamWorkbook } from '../../ipam/excel.js'; // v2.741 LEFT-01: 조립·직렬화는 워커 스레드에서
 import { acquireExport } from '../../util/exportBusy.js'; // v2.575 — 내보내기 동시 1건 가드
 import { todayStamp, DAY_OFFSET_MIN } from "../../util/dayKey.js";
+
+/*
+ * 결정(56~75 남긴 것) 60/62: 손상 · 읽기 오류 중 IPAM 조회가 빈 목록을 '없음' 으로 보이지 않게 표지(loadError — 사유 요약 · 읽기 오류 여부)를 싣고,
+ *   다시 가져올 수 있는 CSV 내보내기는 409 로 거절한다(빈 파일을 온전한 내보내기로 받지 않게). 쓰기 거절은 전부 409(settings-unreadable) 하나 —
+ *   예전에는 단건 PUT · bulk · annotation 이 400, 삭제 · CSV 가 409 였다(화면은 둘 다 사유를 그대로 보인다 — api.js sendJson · postJson 이 409 본문을 돌려준다).
+ */
+const loadMarkerOf = (e) => (e ? { reason: String(e.reason || '').slice(0, 300), at: Number.isFinite(e.at) ? e.at : null, readError: !!e.readError } : null);
+const writeStatus = (r, other = 400) => (r.ok ? 200 : r.code === 'settings-unreadable' ? 409 : other);
+/** 예약 · 메모 파일 표지 묶음(둘 다 정상이면 null). */
+function manageLoadMarker() {
+  const o = overridesLoadMarker(); const a = annotationsLoadMarker();
+  return o || a ? { ...(o ? { overrides: o } : {}), ...(a ? { annotations: a } : {}) } : null;
+}
+/** 응답에 펼칠 표지 칸 — 정상이면 빈 객체. */
+const manageLoadField = () => { const le = manageLoadMarker(); return le ? { loadError: le } : {}; };
+const MANAGE_UNREADABLE = 'IP 관리 예약 · 메모 파일을 읽지 못한 상태라 처리하지 않았습니다 — 읽기 오류면 파일 권한 · 디스크를 확인하고(30초마다 다시 읽음), 손상이면 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리세요.';
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
 
@@ -154,8 +170,9 @@ api.get('/tools/ipam', requirePerm('tools'), (req, res) => memoJson(req, res, 't
     if (hit.length > lim) { truncated = true; rows = hit.slice(0, lim); } else rows = hit;
   }
   // v2.631(감사 R2631-02): 예약 만료일을 화면이 '포탈 오프셋 기준 그 날' 로 되읽을 수 있게 오프셋을 싣는다(브라우저 시간대가 아니다).
-  return { ...data, rows, tzOffsetMin: DAY_OFFSET_MIN, ...(q ? { q, matched, truncated } : {}) };
-}, { extraKey: `${scopeKey(req.user, store.get())}|${ipamRevKey()}|d${currentScanDatacenters(store.get().vcenters).sig}` })); // v2.638: 스캔 행 데이터센터 귀속이 바뀌면 캐시를 버린다
+  const manageLoadError = manageLoadMarker();   // 62: 예약 · 메모를 못 읽은 동안 원장에 그 칸이 비어 보이는 이유
+  return { ...data, rows, tzOffsetMin: DAY_OFFSET_MIN, ...(q ? { q, matched, truncated } : {}), ...(manageLoadError ? { manageLoadError } : {}) };
+}, { extraKey: `${scopeKey(req.user, store.get())}|${ipamRevKey()}|d${currentScanDatacenters(store.get().vcenters).sig}` })); // v2.638: 스캔 행 데이터센터 귀속이 바뀌면 캐시를 버린다 · 62: 예약 · 메모 읽기 오류 구간의 경계는 원장 리비전(a · o)이 바뀐다 // v2.638: 스캔 행 데이터센터 귀속이 바뀌면 캐시를 버린다
 // IPAM 추천 기능 30선 — 유명 IPAM 솔루션 대표 기능을 수집 데이터로 계산.
 api.get('/tools/ipam/insights', requirePerm('tools'), async (req, res) => {
   const snap = store.get();
@@ -223,7 +240,8 @@ api.get('/tools/ipam/vc-ranges', requirePerm('tools'), (req, res) => {
     };
   });
   // 등록 안 된 vCenter도 선택할 수 있게 (허용 범위 내) vCenter 목록을 함께 내려준다.
-  res.json({ ranges: list, vcenters: (snap.vcenters || []).filter((v) => !allowed || allowed.has(v.id)).map((v) => ({ id: v.id, name: v.name })) });
+  const le = loadMarkerOf(vcRangesLoadError());   // 62: 손상 · 읽기 오류 중 빈 목록이 '등록 없음' 으로 보이지 않게
+  res.json({ ranges: list, vcenters: (snap.vcenters || []).filter((v) => !allowed || allowed.has(v.id)).map((v) => ({ id: v.id, name: v.name })), ...(le ? { loadError: le } : {}) });
 });
 
 // 스캔 대역 목록 CSV 내보내기 — JSON 라우트(/tools/ipam/vc-ranges)와 같은 scope 교집합.
@@ -233,6 +251,7 @@ api.get('/tools/ipam/vc-ranges.csv', csvPerm, requirePerm('tools'), (req, res) =
   const allowed = scopedVcenterIds(req.user, snap);
   const vcName = {};
   for (const vc of snap.vcenters || []) vcName[vc.id] = vc.name;
+  { const le = vcRangesLoadError(); if (le) return res.status(409).json({ ok: false, code: 'settings-unreadable', reason: 'vCenter 별 스캔 대역 파일(ipam-vcenter-ranges.json)을 읽지 못한 상태라 내보내지 않았습니다(빈 파일을 온전한 내보내기로 받지 않게) — 서비스 점검에서 확인하세요.', loadError: loadMarkerOf(le) }); }   // 62
   const list = listVcRanges().filter((e) => !allowed || allowed.has(e.vcenterId));
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="ipam-vc-ranges-${todayStamp()}.csv"`);
@@ -292,7 +311,8 @@ api.get('/tools/ipam/annotation', requirePerm('tools'), (req, res) => {
   if (allowed && !ipInWriteScope(allowed, ipVcenterOwners(snap), ip, getOverride(ip)?.claimedVcenterId || '')) {
     return res.json({ ip, annotation: null });
   }
-  res.json({ ip, annotation: getAnnotation(ip) });
+  const le = annotationsLoadMarker();   // 62: 못 읽은 동안 '메모 없음' 으로 보이지 않게
+  res.json({ ip, annotation: getAnnotation(ip), ...(le ? { loadError: le } : {}) });
 });
 api.put('/tools/ipam/annotation', canWrite, requirePerm('tools'), (req, res) => {
   const { ip, memo, tags } = req.body || {};
@@ -305,7 +325,7 @@ api.put('/tools/ipam/annotation', canWrite, requirePerm('tools'), (req, res) => 
   }
   if (writeScopeDenied(req, snap, owners, ip, claimed)) return res.status(403).json({ ok: false, reason: WRITE_DENIED_MSG });
   const r = setAnnotation(ip, { memo, tags }, req.user);
-  res.status(r.ok ? 200 : 400).json(r);
+  res.status(writeStatus(r)).json(r);   // 60/62: 파일을 못 읽은 동안은 409
 });
 
 // ---- IP 수동 관리(override) — vCenter/스캔 자동발견과 별개의 운영자 관리상태 -------------
@@ -319,7 +339,7 @@ api.get('/tools/ipam/manage-meta', requirePerm('tools'), (req, res) => {
   const owners = allowed ? ipVcenterOwners(snap) : null;
   const ovInclude = allowed ? (ip, rec) => ipInWriteScope(allowed, owners, ip, rec?.claimedVcenterId || '') : null;
   res.json({ statuses: STATUSES, deviceTypes: DEVICE_TYPES, summary: overridesSummary(ovInclude),
-    policyStatuses: POLICY_STATUSES, policiesSummary: policiesSummary(polList), tzOffsetMin: DAY_OFFSET_MIN });
+    policyStatuses: POLICY_STATUSES, policiesSummary: policiesSummary(polList), tzOffsetMin: DAY_OFFSET_MIN, ...manageLoadField() });   // 62: 표지
 });
 // 한 IP의 override 조회.
 api.get('/tools/ipam/ip/:ip', requirePerm('tools'), (req, res) => {
@@ -332,7 +352,8 @@ api.get('/tools/ipam/ip/:ip', requirePerm('tools'), (req, res) => {
     return res.status(404).json({ ip: req.params.ip, override: null });
   }
   // v2.631(감사 R2631-02): 폼이 만료 '날짜' 를 되읽을 값을 서버가 준다(저장값은 다음 날 00:00 이라 slice(0,10) 은 오프셋에 따라 하루 밀린다).
-  res.json({ ip: req.params.ip, override: ov, reservedUntilDay: ov?.reservedUntil ? reservedUntilDay(ov.reservedUntil) : '', tzOffsetMin: DAY_OFFSET_MIN });
+  const le = overridesLoadMarker();   // 62: 못 읽은 동안 '예약 없음' 으로 보이지 않게
+  res.json({ ip: req.params.ip, override: ov, reservedUntilDay: ov?.reservedUntil ? reservedUntilDay(ov.reservedUntil) : '', tzOffsetMin: DAY_OFFSET_MIN, ...(le ? { loadError: le } : {}) });
 });
 // 한 IP의 override 생성/수정(부분). 변경은 운영자/관리자만.
 api.put('/tools/ipam/ip/:ip', canWrite, requirePerm('tools'), (req, res) => {
@@ -347,7 +368,7 @@ api.put('/tools/ipam/ip/:ip', canWrite, requirePerm('tools'), (req, res) => {
   if (v?.status === 403) return res.status(403).json({ ok: false, reason: WRITE_DENIED_MSG });
   const r = setOverride(req.params.ip, req.body || {}, req.user);
   if (r.ok) logAudit({ user: req.user?.username, action: 'IP 관리상태 저장', target: `IP ${req.params.ip}`, detail: JSON.stringify(r.override || {}).slice(0, 500) });
-  res.status(r.ok ? 200 : 400).json(r);
+  res.status(writeStatus(r)).json(r);   // 60/62: 파일을 못 읽은 동안은 409(삭제 · CSV 와 같은 코드)
 });
 // 한 IP의 override 삭제(자동발견 상태로 되돌림).
 api.delete('/tools/ipam/ip/:ip', canWrite, requirePerm('tools'), (req, res) => {
@@ -392,7 +413,7 @@ api.post('/tools/ipam/bulk', canWrite, requirePerm('tools'), (req, res) => {
   }
   const r = setOverrideBatch(list, fields, req.user, { rejectInvalid: true });
   if (r.ok) logAudit({ user: req.user?.username, action: 'IP 관리상태 일괄 적용', target: `${r.changed}개 IP`, detail: JSON.stringify(fields).slice(0, 500) });
-  res.status(r.ok ? 200 : 400).json(r);
+  res.status(writeStatus(r)).json(r);   // 60/62: 409
 });
 
 // ---- 대역(subnet/range) 단위 정책 — IP override와 평행. 대역 기본 관리상태를 한 항목으로. -------
@@ -599,6 +620,7 @@ api.get('/tools/ipam/manage.csv', csvPerm, requirePerm('tools'), (req, res) => {
   const snap = store.get();
   const vcId = String(req.query.vcenterId || '');
   if (vcId && !inUserScope(req.user, snap, vcId)) return res.status(404).json({ error: 'vCenter를 찾을 수 없습니다.' });
+  { const le = manageLoadMarker(); if (le) return res.status(409).json({ ok: false, code: 'settings-unreadable', reason: MANAGE_UNREADABLE, loadError: le }); }   // 62: 빈 파일을 온전한 내보내기로 받지 않게
   const { entries, hiddenOutOfScope } = manageEntries(snap, req.user, vcId);
   const names = new Map((snap.vcenters || []).map((v) => [v.id, v.name || v.id]));
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -627,6 +649,8 @@ api.post('/tools/ipam/manage/import', csvPerm, canWrite, requirePerm('tools'), (
   const parsed = parseManageCsv(text, { lineOffset: req.body?.lineOffset, maxRows: MANAGE_CHUNK_MAX });
   if (parsed.error) return res.status(400).json({ ok: false, reason: parsed.error });
   if (parsed.rows.length > MANAGE_CHUNK_MAX) return res.status(400).json({ ok: false, reason: `한 번에 ${MANAGE_CHUNK_MAX}행까지 받습니다 — 화면은 자동으로 나눠 보냅니다.` });
+  // 62(62회차 F5 의 형제): 미리보기(dryRun)도 못 읽은 파일을 빈 맵으로 보고 전부 '추가' 라 하지 않는다 — 판정 전에 409.
+  if (overridesLoadError() || annotationsLoadError()) return res.status(409).json({ ok: false, code: 'settings-unreadable', reason: MANAGE_UNREADABLE, loadError: manageLoadMarker() });
   const snap = store.get();
   const allowed = scopedVcenterIds(req.user, snap);
   const owners = ipVcenterOwners(snap);
@@ -641,8 +665,7 @@ api.post('/tools/ipam/manage/import', csvPerm, canWrite, requirePerm('tools'), (
     statuses: STATUSES, deviceTypes: DEVICE_TYPES, dayOf: (iso) => reservedUntilDay(iso),
   });
   if (dryRun) return res.json({ ok: true, dryRun: true, columns: parsed.columns, report: a.report, summary: a.summary, total: parsed.rows.length });
-  // 25회차 F-4: 파일을 못 읽은 동안은 가져오지 않는다(그 몇 건만 든 파일이 되어 나머지 예약 · 메모가 사라진다)
-  { const le = overridesLoadError() || annotationsLoadError(); if (le) return res.status(409).json({ ok: false, code: 'settings-unreadable', reason: 'IP 관리 예약 · 메모 파일을 읽지 못한 상태라 가져오지 않았습니다 — 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리고 재시작하세요.' }); }
+  // 25회차 F-4: 파일을 못 읽은 동안은 가져오지 않는다(그 몇 건만 든 파일이 되어 나머지 예약 · 메모가 사라진다) — 62: 위(판정 전)에서 이미 409.
   const ovEntries = a.plans.filter((p) => p.override).map((p) => ({ ip: p.ip, partial: p.override }));
   const anEntries = a.plans.filter((p) => p.annotation).map((p) => ({ ip: p.ip, memo: p.annotation.memo, tags: p.annotation.tags }));
   const ov = ovEntries.length ? setOverridesMany(ovEntries, req.user) : { changed: 0, removed: 0 };
