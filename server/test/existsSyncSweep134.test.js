@@ -534,7 +534,7 @@ const TABLE = {
   'metrics/vmperfDb.js': [['cleanup', 4, '옛 경로 → 새 경로 옮기기 · 빈 DB 지우기']],
   'net/captureHistory.js': [['cache', 1, '캡처 기록']],
   'partfault/db.js': [['db', 1, 'DB 파일 유무']],
-  'pdu/thresholds.js': [['left', 1, 'PDU 임계값 로더 — 다른 회차(133)가 진행 중인 파일이라 고치지 않았다(같은 꼴: 확인하지 못하면 빈 임계값)']],
+  'pdu/thresholds.js': [['left', 1, 'PDU 임계값 로더(thresholdsForEdge) — 확인하지 못하면 {}(주석의 null 과 다르다). 135회차 실행: 호출부(pduSanRoutes)가 loadError 를 먼저 봐서 폴더 수준 오류에는 thresholdsUnreadable 이 나가고 {} 는 내려가지 않는다 — 함수 단독 계약만 어긋난다']],
   'perf/hangLog.js': [['artifact', 4, '멈춤 로그 파일(지우기 · 자르기 · 읽기 앞)']],
   'ping/store.js': [['cleanup', 1, '옛 파일 지우기']],
   'portalcheck/archScan.js': [['artifact', 3, '소스 트리 스캔']],
@@ -548,7 +548,10 @@ const TABLE = {
   'security/credentialStore.js': [['cache', 1, '사용 횟수(손실 허용)']],
   'security/secretScan.js': [['artifact', 3, '점검 대상 파일 · 폴더']],
   'security/secretVault.js': [
-    ['loader-safe', 1, '봉인 흔적 찾기(못 읽은 파일은 건너뜀) — 키 · 정책 판정은 이제 읽기 오류를 따로 가른다(P5)'],
+    // 135회차(최종 반증 — 재현 r135work/a8.mjs · 수정 전후 같다): 'loader-safe' 가 아니다. 키가 **정말 없고**(ENOENT — env 로 주던 키가 빠진 재시작) 봉인된 비밀 파일을
+    //   **읽지 못하면**(stat 은 되고 read 가 EACCES — root 로 도구를 돌려 파일만 root 0600 이 된 경우) 흔적 없음으로 보고 masterKey 가 새 키를 만든다(21회차 M-1 이 막은 갈래).
+    //   폴더 수준 오류는 키 읽기가 먼저 걸려 닫힌다(P5). 닫으려면 평문 설치의 '못 읽는 비밀 파일 하나' 가 전 비밀 저장을 막게 되어 정책 결정이 필요하다 — 남긴다.
+    ['left', 1, '봉인 흔적 찾기 — 못 읽은 비밀 파일을 건너뛴다: 키가 정말 없을 때 흔적 없음으로 보고 새 키를 만든다(135회차 재현 · 결정 대기). 키 · 정책 판정 자체는 읽기 오류를 따로 가른다(P5)'],
     ['loader-safe', 2, '신뢰 사본 맞추기 — false 면 방금 읽은 정책을 다시 쓸 뿐(같은 내용)'],
     ['loader-safe', 1, 'keyPresent — false 면 키를 만들지 않는 쪽(닫는 쪽)'],
   ],
@@ -619,7 +622,7 @@ test('스윕: existsSync 가 남은 곳은 전부 분류표에 있다(새 exists
     }
     assert.equal(found[rel], sum, `${rel}: existsSync ${found[rel]}곳인데 분류표는 ${sum}곳 — 새로 들어왔으면 분류해 넣을 것`);
   }
-  assert.deepEqual(totals, { 'loader-safe': 12, cache: 22, guard: 5, probe: 12, db: 10, dir: 1, artifact: 40, cleanup: 11, left: 2 });   // 합 115(67파일)
+  assert.deepEqual(totals, { 'loader-safe': 11, cache: 22, guard: 5, probe: 12, db: 10, dir: 1, artifact: 40, cleanup: 11, left: 3 });   // 합 115(67파일) · 135회차: secretVault 봉인 흔적 찾기 loader-safe → left(재현)
   // 고친 로더(이 회차) — existsSync 로 되돌리면 실패
   for (const rel of ['auth/permissions.js', 'auth/sessionState.js', 'sshaccess/state.js', 'upgrade/signature.js', 'collector/registry.js', 'central/agentTokens.js', 'central/token.js',
     'ipam/subnetNotes.js', 'ipam/rangeStore.js', 'sanswitch/directorMap.js', 'sanswitch/storageCheckSettings.js', 'horizon/horizon.js', 'gpu/settings.js', 'svcmon/alertSettings.js',
