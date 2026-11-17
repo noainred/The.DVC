@@ -912,6 +912,8 @@ export const TARGET_MAIL_CODE_TEXT = Object.freeze({
   'missed-late': '정한 시각을 한참 지나 확인한 회차라 보내지 않았습니다(몰아서 보내지 않습니다)',
   'missed-clock': '서버 시계가 뒤로 가 보내는 때를 저장한 시각이 지금보다 뒤였던 동안의 회차라 보내지 않았습니다(소급해 보내지 않습니다)',
   'no-recipients': '보낼 때 받는 사람이 없었습니다',
+  // 124회차: 메일 기록 파일을 못 읽는 동안의 '지금 상태'(기록이 아니다). 서버 사유가 원인(읽기 오류 원문)을 말하므로 화면은 그것을 먼저 쓴다 — 이 문구는 사유가 없을 때만.
+  'state-unreadable': '메일 기록 파일을 읽지 못해 자동 발송을 멈췄습니다(읽기 오류 — 원본은 그대로 있고, 읽히면 이어 갑니다)',
 });
 const MISSED_CODES = new Set(['missed-down', 'missed-late', 'missed-clock']);
 
@@ -920,6 +922,8 @@ function lastReasonText(last) {
   const code = last?.code;
   // 같은 code 'no-report' 라도 실패(결과 DB 를 열지 못함)는 서버 사유가 원인을 말한다 — 화면 문구로 덮지 않는다.
   if (code === 'no-report' && last.state === 'failed') return last.reason || '결과 DB 를 열지 못해 보내지 않았습니다';
+  // 못 읽는 동안의 상태는 서버 사유가 원인을 말한다(읽기 오류 원문 · 다시 읽는 간격) — 화면 문구로 덮지 않는다.
+  if (code === 'state-unreadable') return last.reason || TARGET_MAIL_CODE_TEXT[code];
   if (code && Object.hasOwn(TARGET_MAIL_CODE_TEXT, code)) {
     const n = numOrNull(last.count);
     return `${TARGET_MAIL_CODE_TEXT[code]}${MISSED_CODES.has(code) && n != null && n > 1 ? ` — 놓친 회차 ${countText(n)}번` : ''}`;
@@ -933,6 +937,8 @@ export function mailStateText(last, now = Date.now(), offsetMin = MAIL_DEF_OFFSE
   const when = agoText(last.at, now) || '';
   const what = last.kind === 'failure' ? '실패 알림' : last.schedule ? `정기 결과 메일${numOrNull(last.slot) != null ? `(${mailSlotShort(last.slot, offsetMin)} 회차)` : ''}` : '결과 메일';
   if (last.state === 'sent') return { tone: 'ok', text: `${what} ${when} 보냄 · ${countText(last.accepted ?? last.to)}명${last.manual ? ' (수동)' : ''}` };
+  // 메일 기록을 못 읽는 동안: '방금 보내지 않음' 이 아니라 '자동 발송이 멈춰 있다' 는 지금 상태다 — 회차 · 시각을 붙이지 않고 주의 톤으로 사유만 말한다.
+  if (last.state === 'skipped' && last.code === 'state-unreadable') return { tone: 'warn', text: lastReasonText(last) };
   if (last.state === 'skipped' && MISSED_CODES.has(last.code)) return { tone: 'warn', text: `${what} ${when} 놓침 — ${lastReasonText(last)}` };
   if (last.state === 'skipped') return { tone: 'muted', text: `${what} ${when} 보내지 않음 — ${lastReasonText(last)}` };
   return { tone: 'bad', text: `${what} ${when} 보내지 못함 — ${lastReasonText(last)}` };

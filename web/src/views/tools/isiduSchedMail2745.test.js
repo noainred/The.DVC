@@ -135,6 +135,14 @@ describe('④ 마지막 메일 기록의 code — 서버 TARGET_MAIL_CODES 와 1
     expect(codes.size).toBeGreaterThan(3);
     for (const c of codes) expect(M.TARGET_MAIL_CODES, c).toContain(c);
   });
+  it('메일 기록을 못 읽는 동안의 상태(state-unreadable · 124회차) — 주의 톤 · 서버 사유 그대로 · 회차 · 시각을 붙이지 않는다', () => {
+    const last = { at: NOW, kind: 'result', state: 'skipped', code: 'state-unreadable', readError: true, reason: '메일 기록 파일(isidu-mail-state.json)을 읽지 못해 자동 발송을 멈췄습니다 — 읽기 오류(EIO)' };
+    const v = mailStateText(last, NOW, OFF);
+    expect(v.tone).toBe('warn');
+    expect(v.text).toBe(last.reason);                       // '방금 보내지 않음 —' 을 앞에 붙이지 않는다(지금 상태지 회차 기록이 아니다)
+    expect(mailStateText({ ...last, reason: '' }, NOW, OFF).text).toBe(TARGET_MAIL_CODE_TEXT['state-unreadable']);   // 사유가 없을 때만 화면 문구
+    expect(TARGET_MAIL_CODE_TEXT['state-unreadable']).not.toMatch(/`/);
+  });
   it('정기 회차 기록 한 줄 — 회차·사유를 말하고, 놓친 회차는 주의 · DB 실패는 실패', () => {
     const slot = Date.UTC(2026, 9, 19, 23, 0);   // 10/20(화) 08:00 KST
     const a = mailStateText({ kind: 'result', schedule: true, slot, state: 'skipped', code: 'no-new', at: NOW - 60_000, reason: '서버 문장' }, NOW);
