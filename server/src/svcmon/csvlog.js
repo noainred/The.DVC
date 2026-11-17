@@ -263,17 +263,22 @@ export function logStatus() {
   const cfg = getLogSettings();
   const dir = logDir();
   let files = [];
+  let filesUnreadable = false;
   try {
     files = fs.readdirSync(dir).filter((f) => /^results-.*\.csv$/.test(f)).sort().reverse()
-      .map((f) => { const st = fs.statSync(path.join(dir, f)); return { name: f, sizeBytes: st.size, modifiedAt: st.mtimeMs }; });
-  } catch { /* 접근 실패 → 빈 목록 */ }
+      // 61회차 F2(재현): 한 파일의 stat 실패(끊긴 링크 · 권한)가 목록 전체를 비워 화면이 '파일 0개 · 0 B' 라고 했다 — 정리(pruneOld) ·
+      //   보유 범위(listLogWindows)처럼 그 파일만 뺀다.
+      .map((f) => { try { const st = fs.statSync(path.join(dir, f)); return { name: f, sizeBytes: st.size, modifiedAt: st.mtimeMs }; } catch { return null; } })
+      .filter(Boolean);
+  } catch (e) { if (e?.code !== 'ENOENT') filesUnreadable = true; }   // 폴더가 아직 없으면(첫 기록 전) 빈 목록 · 그 밖(권한 · 입출력)은 '0개' 가 아니라 못 읽음
   return {
     ...cfg, dir,
     rotateUnits: ROTATE_UNITS,
     rotateLabels: ROTATE_LABEL,
     files: files.slice(0, 100),
-    fileCount: files.length,
-    totalBytes: files.reduce((a, f) => a + f.sizeBytes, 0),
+    fileCount: filesUnreadable ? null : files.length,
+    totalBytes: filesUnreadable ? null : files.reduce((a, f) => a + f.sizeBytes, 0),
+    ...(filesUnreadable ? { filesUnreadable: true } : {}),   // 61회차 F2: 화면이 '파일 0개' 대신 '목록을 읽지 못함'
     stats: logStats(),
     settingsUnreadable: !!logSettingsLoadError(),   // 26회차 F1: 화면이 저장 버튼을 잠그고 서비스 점검으로 안내한다
   };

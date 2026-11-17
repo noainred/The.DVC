@@ -73,6 +73,12 @@ function load() {
     S.jobs = (Array.isArray(j?.jobs) ? j.jobs : []).filter((x) => x && typeof x.runId === 'string' && typeof x.tid === 'string').slice(0, MAX_JOBS);
     const lost = j && typeof j.lost === 'object' && !Array.isArray(j.lost) ? j.lost : {};
     for (const [k, v] of Object.entries(lost).slice(0, LOST_MAX)) if (/^da-[0-9a-f]{12}$/.test(k) && v && typeof v.tid === 'string' && v.node) S.lost[k] = v;
+    // 61회차 F1(재현): '반영 중'(ingesting)은 이 프로세스 안에서만 참이다 — 결과 반영(DB await) 도중 포탈이 다시 시작되면 파일에 남은 'ingesting' 이
+    //   jobExpired(시한 없음) · 결과 받기(건너뜀) · 접수('busy')에서 영원히 그 서버의 점검을 막았다(48시간 뒤에도 busy). 앞 프로세스의 반영은 끝나지 않았으므로
+    //   '실행 중' 으로 되돌린다 — ack 를 못 받은 엣지가 다시 보내면 반영하고, 안 오면 보통 시한(seen · 실행 시한)으로 'lost' 가 된다.
+    //   다시 배달하지는 않는다(배달 횟수를 채운다) — 엣지는 이미 실행을 끝냈다(ack 를 받았으면 결과도 없다). 다시 배달하면 root 점검이 10분 간격 없이 한 번 더 돈다.
+    for (const x of S.jobs) if (x.state === 'ingesting') { x.state = 'running'; x.deliveries = Math.max(Number(x.deliveries) || 0, MAX_DELIVER); }
+    for (const v of Object.values(S.lost)) if (v.state === 'ingesting') delete v.state;
     // 이 프로세스에서 처음 읽은 때 남아 있는 중앙 작업은 앞 프로세스의 것 — 끝을 알 수 없으므로 'lost' 로 남긴다(엣지 작업은 그대로 기다린다).
     //   startAuditService 에서 하면 기동 직후(폴러 순차 기동 최대 1분) 사용자가 건 작업까지 지웠다.
     const stale = S.jobs.filter((x) => !x.node);
@@ -446,7 +452,7 @@ export function requestPrep(t, { by = '', pick = null, corpVcs = [], now = Date.
  * 엣지 작업은 엣지가 진행 목록에 싣는 동안(seenAt) 지우지 않는다 — 노드 동시 1 이라 앞 작업만큼 기다린다.
  */
 export function jobExpired(j, now) {
-  if (j.state === 'ingesting') return false;
+  if (j.state === 'ingesting') return now - j.requestedAt > JOB_MAX_MS; // 61회차 F1: 반영 중에도 전체 시한은 있다(DB 가 멈춰 끝나지 않는 반영이 그 서버를 영원히 막지 않게)
   if (now - j.requestedAt > JOB_MAX_MS) return true;
   if (!j.node) return now - j.requestedAt > LOST_AFTER_MS + 60 * 60_000; // 중앙 줄: 동시 1이라 앞 작업만큼 기다린다 — 넉넉히
   if (!j.deliveredAt) return now - j.requestedAt > DELIVER_TTL_MS;
