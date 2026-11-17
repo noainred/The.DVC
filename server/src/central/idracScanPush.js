@@ -29,6 +29,11 @@ import { cmpVersion } from '../util/cmpVersion.js';
 export const MIN_ILO_EDGE_VERSION = '2.610.0';
 
 /** 담당 엣지의 버전(수집 서버 상태 기준). 모르면 ''. 인메모리라 중앙 재시작 직후(첫 pull 전)에는 모른다. */
+/** 반증(결정 G1a 66 ①): 이 이름이 표시 이름 겹침으로 수집 서버를 정할 수 없으면 그 사유, 아니면 '' — 위임 보류 사유에 싣는다. */
+export function collectorAmbiguityReason(agent) {
+  try { const r = resolveCollectorByName(agent); return r.issue === 'ambiguous' ? r.reason : ''; } catch { return ''; }
+}
+
 export function edgeVersionOf(agent) {
   const col = findCollectorByName(agent);
   if (!col) return '';
@@ -44,12 +49,13 @@ export function edgeVersionOf(agent) {
  *    미상이면 note 를 달지 않는다 — 실제 적용 여부는 회신의 iloEnabled 유무로 가린다(idracScanJobs iloIgnoredByEdge).
  * ⚠ 이 문구는 lastRun·이벤트·로그로 흐른다 — `**`·백틱 금지.
  */
-export function iloEdgeGate({ hasDell = false, hasIlo = false, version = '' } = {}) {
+export function iloEdgeGate({ hasDell = false, hasIlo = false, version = '', unknownWhy = '' } = {}) {
   if (!hasIlo) return { delegate: true };
   const c = cmpVersion(version, MIN_ILO_EDGE_VERSION);
   if (c != null && c >= 0) return { delegate: true };
   const known = c != null;
-  const verText = known ? `엣지 버전 ${version}` : '엣지 버전 미상(수집 서버 상태에 버전이 없음 — 중앙 재시작 직후이거나 수집 서버(원격)로 등록되지 않은 엣지)';
+  // 반증(결정 G1a 66 ①): 표시 이름이 겹쳐 담당 엣지를 정할 수 없어 버전을 모르는 것이면 그 사유를 그대로(재시작 직후 · 미등록 추측으로 덮지 않는다).
+  const verText = known ? `엣지 버전 ${version}` : unknownWhy ? `엣지 버전 미상 — ${String(unknownWhy).slice(0, 240)}` : '엣지 버전 미상(수집 서버 상태에 버전이 없음 — 중앙 재시작 직후이거나 수집 서버(원격)로 등록되지 않은 엣지)';
   if (!hasDell) {
     return {
       delegate: false, held: true, edgeVersion: version || '',

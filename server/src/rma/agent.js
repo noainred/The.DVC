@@ -254,7 +254,11 @@ export function applySchedule(sch, { fresh = true, now = Date.now(), password = 
   // 64 F7: 파일 보관본에 서명이 필요한 항목이 있으면 assignKey 를 비워 첫 폴에서 중앙 사본을 한 번 다시 받는다(그때 시각 창까지 다시 본다 —
   //   비밀번호를 바꾼 뒤 재시작했거나 받을 때 거부된 항목도 새 서명으로 다시 판정된다).
   const refetch = !fresh && !!password && tests.some((t) => scheduleSignRequired(t.test));
-  schedule = { version: Number(sch.version) || 0, assignKey: refetch ? '' : String(sch.assignKey || ''), tests };
+  // 반증(결정 G1a): 서명 시각 창(±10분) 밖으로만 거부된 항목은 assignKey 가 중앙과 같아 다시 내려오지 않았다 — 시계를 맞춰도 재시작 전까지
+  //   그 점검이 영원히 멈췄다(보류에 시한 없음 — 재현). SKEW_MS 뒤 첫 폴에서 한 번 다시 받는다(scheduleAssignKeyForPoll). HMAC 은 맞는 항목만 —
+  //   서명 없음 · 불일치는 중앙 비밀번호를 고치면 assignKey(:k 지문)가 바뀌어 다시 내려간다.
+  const windowOnly = fresh && !!password && tests.some((t) => t.sigIssue && verifyScheduleItem(password, AGENT, t, { now, checkWindow: false }).ok);
+  schedule = { version: Number(sch.version) || 0, assignKey: refetch ? '' : String(sch.assignKey || ''), tests, refetchAt: windowOnly ? now + SKEW_MS : 0 };
   const ids = new Set(tests.map((t) => t.id));
   for (const id of [...nextRun.keys()]) if (!ids.has(id)) nextRun.delete(id);
   for (const t of tests) if (!nextRun.has(t.id)) nextRun.set(t.id, Date.now() + Math.floor(Math.random() * Math.min(30_000, (Number(t.intervalSec) || 300) * 1000)));
@@ -340,11 +344,16 @@ export function rmaContactState() { return { lastContact, offlineFired, lastRefu
 export const _scheduleForTest = () => schedule;
 export const _outboxForTest = () => outbox.slice();
 
+/** 폴 본문의 assignKey — 시각 창 밖 거부 뒤 재요청 시각이 지났으면 '' (중앙이 스케줄을 새 서명으로 다시 내려보낸다). */
+export function scheduleAssignKeyForPoll(now = Date.now()) {
+  return schedule.refetchAt && now >= schedule.refetchAt ? '' : schedule.assignKey;
+}
+
 export async function pollOnce() {
   const batch = outbox.slice(0, 500);
   const r = await resilientFetch(`${CENTRAL_URL}/api/central/rma-poll`, {
     method: 'POST', headers: headers(),
-    body: JSON.stringify({ agent: AGENT, instance: INSTANCE, info: info(), wait: runtime.longpollMs, results: batch, scheduleVersion: schedule.version, assignKey: schedule.assignKey }),
+    body: JSON.stringify({ agent: AGENT, instance: INSTANCE, info: info(), wait: runtime.longpollMs, results: batch, scheduleVersion: schedule.version, assignKey: scheduleAssignKeyForPoll() }),
     timeoutMs: runtime.longpollMs + 15_000, retries: 0,
   });
   if (r.status === 403 || r.status === 404) {

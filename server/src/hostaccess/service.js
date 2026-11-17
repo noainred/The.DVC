@@ -102,7 +102,8 @@ export async function applyHostAccess(input, { requesterIp = '', peerIp = '', by
   busy = true;
   try {
     const st = loadHostAccess();
-    if (st.pending) return { ok: false, errors: ['확정 대기 중인 적용이 있습니다 — 먼저 확정하거나 되돌리세요.'] };
+    // 반증(결정 G1a): 자동 되돌림을 포기한 상태(revertGaveUp)는 기한이 지나 확정할 수 없다 — '확정하거나' 는 사실이 아니다.
+    if (st.pending) return { ok: false, errors: [st.pending.revertGaveUp === true && Date.now() > Number(st.pending.deadline) ? GAVE_UP_TEXT : '확정 대기 중인 적용이 있습니다 — 먼저 확정하거나 되돌리세요.'] };
     const p = await planHostAccess(input, { requesterIp, peerIp });
     if (!p.ok) return { ok: false, errors: p.errors, warnings: p.warnings || [], commands: p.commands || [] };
     const executed = [];
@@ -137,6 +138,8 @@ const REVERT_RETRY_MAX_MS = 5 * 60_000;
  *   되돌림 성공 · 확정 때 실패 연속 수를 0 으로 돌린다(예전에는 확정으로 끝나도 남아 다음 첫 재시도 간격이 길었다 — 66회차 ③).
  */
 export const REVERT_RETRY_WINDOW_MS = 6 * 3_600_000;
+/** 자동 되돌림을 포기한 뒤(revertGaveUp) 적용 · 확정을 거절할 때의 문구 — 확정 기한은 이미 지났고 자동 재시도도 멈췄다. */
+const GAVE_UP_TEXT = '되돌림 실패 — 수동 조치 필요: 확정 기한이 지났고 자동 되돌림 재시도 시한도 지나 더 시도하지 않습니다. firewalld 를 살핀 뒤 되돌리기를 다시 시도하세요(되돌림이 성공해야 새로 적용할 수 있습니다).';
 let revertRetryMinMs = REVERT_RETRY_MIN_MS;
 let revertRetryWindowMs = REVERT_RETRY_WINDOW_MS;
 let revertFailStreak = 0;
@@ -179,7 +182,8 @@ export async function confirmHostAccess({ by = '' } = {}) {
   try {
     const st = loadHostAccess();
     if (!st.pending) return { ok: false, errors: ['확정 대기 중인 적용이 없습니다.'] };
-    if (Date.now() > st.pending.deadline) return { ok: false, errors: ['확정 기한이 지났습니다 — 자동으로 되돌렸거나 곧 되돌립니다. 다시 적용하세요.'] };
+    // 반증(결정 G1a): 자동 재시도를 포기했으면(revertGaveUp) '곧 되돌립니다' 는 거짓이다 — 수동 조치 안내로.
+    if (Date.now() > st.pending.deadline) return { ok: false, errors: [st.pending.revertGaveUp === true ? GAVE_UP_TEXT : '확정 기한이 지났습니다 — 자동으로 되돌렸거나 곧 되돌립니다. 다시 적용하세요.'] };
     const r = await deps.fw(['--runtime-to-permanent']);
     if (!r.ok) return { ok: false, errors: [`--runtime-to-permanent 실패: ${(r.stderr || r.stdout).trim()}`] };
     if (revertTimer) { clearTimeout(revertTimer); revertTimer = null; }

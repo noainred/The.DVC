@@ -97,7 +97,7 @@ export function verifyScheduleItem(secret, agent, item, { now = Date.now(), chec
   if (!secret || !scheduleSignRequired(item?.test)) return { ok: true, signed: false };
   const sig = String(item?.sig || '');
   if (!sig) return { ok: false, code: 'unsigned', reason: '서명 없음 — 이 엣지는 RMA_PASSWORD 가 있어 외부 스크립트 · SSH 점검은 중앙 서명이 있어야 실행합니다(중앙 설정 › 원격 명령에서 이 법인의 비밀번호를 등록하세요).' };
-  if (checkWindow && Math.abs(now - (Number(item?.sigAt) || 0)) > SKEW_MS) return { ok: false, code: 'window', reason: '서명 시각이 허용 오차(±10분)를 벗어났습니다 — 중앙/엣지 시계를 맞춘 뒤 RMA 를 재시작하면 스케줄을 다시 받습니다.' };
+  if (checkWindow && Math.abs(now - (Number(item?.sigAt) || 0)) > SKEW_MS) return { ok: false, code: 'window', reason: '서명 시각이 허용 오차(±10분)를 벗어났습니다 — 중앙/엣지 시계를 맞추면 10분 안에 스케줄을 다시 받아 다시 판정합니다(RMA 를 재시작해도 됩니다).' };
   const want = signScheduleItem(secret, agent, item);
   const a = Buffer.from(sig, 'utf8'), b = Buffer.from(want, 'utf8');
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return { ok: false, code: 'mismatch', reason: '서명 불일치 — 중앙에 등록된 RMA 비밀번호와 이 엣지의 RMA_PASSWORD 가 다릅니다.' };
