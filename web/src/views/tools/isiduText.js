@@ -952,10 +952,13 @@ export function mailStateText(last, now = Date.now(), offsetMin = MAIL_DEF_OFFSE
 export function targetMailLine(t, now = Date.now(), offsetMin = MAIL_DEF_OFFSET) {
   const m = t?.mail;
   const last = t?.lastMail ? mailStateText(t.lastMail, now, offsetMin) : null;
+  // 메일 기록 파일을 못 읽는 동안(state-unreadable)의 사유는 길다(읽기 오류 원문 · 다시 읽는 간격 · 수동 발송 안내). 표 칸(parts)에는 짧게 적고
+  //   전체 사유는 한 줄 문장(text — 대상 상세)과 표 위 안내(mailStateUnreadNote)가 말한다 — Chromium 검증에서 좁은 칸에 12줄로 쌓여 행이 화면 절반을 차지했다.
+  const lastPart = last ? (t.lastMail?.code === 'state-unreadable' ? MAIL_UNREAD_SHORT : `마지막 — ${last.text}`) : null;
   if (!m || !(m.recipients > 0)) {
     if (!last) return null;
-    const parts = ['받는 사람이 없습니다(지금은 보내지 않습니다)', `마지막 — ${last.text}`];
-    return { tone: last.tone, text: `결과 메일: ${parts.join(' · ')}`, parts };
+    const head = '받는 사람이 없습니다(지금은 보내지 않습니다)';
+    return { tone: last.tone, text: `결과 메일: ${[head, `마지막 — ${last.text}`].join(' · ')}`, parts: [head, lastPart] };
   }
   const opts = [`받는 사람 ${countText(m.recipients)}명`];
   const sched = m.when === 'schedule';
@@ -968,6 +971,22 @@ export function targetMailLine(t, now = Date.now(), offsetMin = MAIL_DEF_OFFSET)
   if (m.onlyOnChange) opts.push('변화 없으면 생략');
   if (m.onFailure) opts.push(sched ? '실패 알림(조사 직후)' : '실패 알림');
   // parts: 표 칸처럼 좁은 자리에서 한 조각씩 줄을 바꿔 그리게(v2.745 — 한 문장을 74px 칸에 넣으면 글자 단위로 쪼개져 행이 13줄이 됐다).
-  const parts = [...opts, last ? `마지막 — ${last.text}` : '아직 보낸 적 없음'];
-  return { tone: last ? last.tone : 'muted', text: `결과 메일: ${parts.join(' · ')}`, parts };
+  const parts = [...opts, last ? lastPart : '아직 보낸 적 없음'];
+  const full = [...opts, last ? `마지막 — ${last.text}` : '아직 보낸 적 없음'];
+  return { tone: last ? last.tone : 'muted', text: `결과 메일: ${full.join(' · ')}`, parts };
+}
+
+/** 표 칸에 적는 짧은 문구 — 메일 기록 파일을 못 읽는 동안(전체 사유는 표 위 안내 · 대상 상세가 말한다). */
+export const MAIL_UNREAD_SHORT = '자동 발송 멈춤 — 메일 기록 파일을 읽지 못했습니다';
+
+/**
+ * 대상 목록 위의 안내 한 줄 — 메일 기록 파일을 못 읽어 자동 발송이 멈춘 동안의 서버 사유(파일 단위라 대상마다 같다 — 한 번만 말한다). 없으면 ''.
+ * @param {Array<object>} targets 서버 목록의 대상(lastMail 을 본다)
+ */
+export function mailStateUnreadNote(targets) {
+  for (const t of Array.isArray(targets) ? targets : []) {
+    const l = t?.lastMail;
+    if (l && l.code === 'state-unreadable') return String(l.reason || TARGET_MAIL_CODE_TEXT['state-unreadable']);
+  }
+  return '';
 }

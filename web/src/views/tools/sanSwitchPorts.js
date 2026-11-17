@@ -115,8 +115,9 @@ export function usedPctText(pct) {
 /**
  * 스위치 KPI 의 한 줄(v2.598 WEBUI-2598-07). 0대에서 '전부 수집 정상' 이라 말하지 않는다.
  */
-export function switchesMeta(agg = {}) {
+export function switchesMeta(agg = {}, { unread = false } = {}) {
   const n = Number(agg.switches) || 0;
+  if (!n && unread) return '등록부를 읽지 못함';   // 못 읽은 동안의 0 은 '등록 없음' 이 아니다(Chromium 검증 — 128회차의 남은 자리)
   if (!n) return '등록된 스위치 없음';
   if (Number(agg.failed) > 0) return `수집 실패 ${agg.failed}대`;
   return '전부 수집 정상';

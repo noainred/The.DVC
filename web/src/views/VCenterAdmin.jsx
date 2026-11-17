@@ -4,7 +4,7 @@ import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
 import BoldText from '../components/boldText.jsx';
-import { authStopInfo, authStopSummary, authStopShort } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
+import { authStopInfo, authStopSummary, authStopSummaryUnreadOnly, authStopShort } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 import { droppedSecretNote } from './droppedSecretText.js'; // v2.607 WEB2607-03
 import { unreadMarkOf, saveLockedByUnread, unreadKind } from './settingsUnread.js'; // 118회차: 등록부를 못 읽은 동안의 조회 표지(112회차 규약)
 import { SettingsUnreadBanner } from './SettingsUnreadBanner.jsx';
@@ -177,7 +177,7 @@ export default function VCenterAdmin() {
       {actErr && <div className="banner warn" data-vc-act-err style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', marginBottom: 10, fontSize: 12.5 }}>⚠ {actErr} <button type="button" className="tab" style={{ flex: 'none', marginLeft: 8, padding: '2px 8px', fontSize: 12 }} onClick={() => setActErr(null)}>닫기</button></div>}
 
       {authStopSummary(list.filter((v) => v.authStopped), { unit: '곳', what: 'vCenter' }) && (
-        <div className="card" style={{ marginBottom: 12, padding: '10px 14px', borderColor: 'var(--red)', fontSize: 13 }}>
+        <div className="card" data-auth-stop-summary style={{ marginBottom: 12, padding: '10px 14px', borderColor: authStopSummaryUnreadOnly(list.filter((v) => v.authStopped)) ? 'var(--amber)' : 'var(--red)', fontSize: 13 }}>
           <BoldText text={authStopSummary(list.filter((v) => v.authStopped), { unit: '곳', what: 'vCenter' })} />
           <span className="muted"> 수정 창의 ‘연결 테스트’ 는 저장된 비밀번호로 1회 시도하며, 성공하면 정지를 풉니다.</span>
         </div>

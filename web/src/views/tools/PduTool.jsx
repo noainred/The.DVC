@@ -9,7 +9,7 @@ import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
 import PduCharts from './PduCharts.jsx';
 import BoldText from '../../components/boldText.jsx';
-import { authStopInfo, authStopSummary, authStopShort } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
+import { authStopInfo, authStopSummary, authStopSummaryUnreadOnly, authStopShort } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 import { collectDropNote } from './collectDropText.js'; // v2.591: 결과 없이 폐기된 위임 '지금 수집' 요청
 import { agoText } from './relTime.js';
 import { edgeClockAheadMark, edgeClockFootnote } from './edgeLateText.js'; // v2.631 A6-2631-04: 엣지 시계 빠름 표지
@@ -172,7 +172,7 @@ export default function PduTool() {
 
       {/* v2.590(감사 F2): 인증 실패로 **주기 수집을 멈춘** PDU — 조용히 멈추지 않는다(authGuard 규칙 1). */}
       {authStopSummary(devices.filter((d) => d.snapshot?.authStopped), { unit: '대', what: 'PDU' }) && (
-        <div className="card" style={{ padding: 10, marginBottom: 12, fontSize: 13, borderColor: 'var(--red)' }}>
+        <div className="card" data-auth-stop-summary style={{ padding: 10, marginBottom: 12, fontSize: 13, borderColor: authStopSummaryUnreadOnly(devices.filter((d) => d.snapshot?.authStopped)) ? 'var(--amber)' : 'var(--red)' }}>
           <BoldText text={authStopSummary(devices.filter((d) => d.snapshot?.authStopped), { unit: '대', what: 'PDU' })} />
           <span className="muted"> 행의 수집 버튼은 정지와 무관하게 1회 시도하고, 성공하면 정지가 풀립니다.</span>
         </div>

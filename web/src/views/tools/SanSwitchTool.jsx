@@ -25,7 +25,7 @@ import CollectActivity from './CollectActivity.jsx';
 import { perfDiagText, diagBorder, perfCollectSummary } from './sanPerfDiagText.js';
 import { portsScopeNote } from './sanPortsScopeText.js';
 import { DeviceHealthPanel, AllHealthCheck } from './SanHealthCheck.jsx';
-import { authStopInfo, authStopSummary, authStopShort, credFpText } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
+import { authStopInfo, authStopSummary, authStopSummaryUnreadOnly, authStopShort, credFpText } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 import { collectDropNote } from './collectDropText.js'; // v2.591: 결과 없이 폐기된 위임 '지금 수집' 요청
 import { hostText, addressHiddenNote } from './addressHiddenText.js'; // v2.599 AUTHZ-2599-03
 import { powerText } from './sanPowerText.js';
@@ -154,7 +154,7 @@ export default function SanSwitchTool() {
     : { ...EMPTY_FORM, agent: '', datacenterId: data.datacenters?.[0]?.id || '' });
 
   const save = async () => {
-    setBusy(true); setMsg(null);
+    setBusy(true); setMsg(null); setFormNote(null);
     try {
       // 128회차: postJson 은 409 를 던지지 않고 본문을 준다 — 등록부 읽기 오류 거절(409)에 창을 닫고 ‘저장되었습니다.’ 라고 했다.
       const r = requireChanged(await postJson('/tools/sanswitch/devices', form));
@@ -162,7 +162,9 @@ export default function SanSwitchTool() {
       if (dropNote) { setForm((f) => ({ ...f, password: '' })); await load(); setFormNote(dropNote); }
       else { setForm(null); setFormNote(null); await load(); setMsg('저장되었습니다.'); }
     }
-    catch (e) { setMsg(`저장 실패: ${e.message}`); }
+    // 릴리스 전 Chromium 검증(119~131회차 묶음): 거절 사유를 창 **밖**(목록 위 한 줄)에만 적어, 창이 열린 동안에는 저장을 눌러도 아무 일도 없는 것처럼 보였다
+    //   (128회차가 409 를 실패로 읽게 고쳤지만 사유가 보이는 자리는 그대로였다) — 창 안에 보인다. 창이 이미 닫힌 경우를 위해 목록 위에도 남긴다.
+    catch (e) { setFormNote(`저장 실패: ${e.message}`); setMsg(`저장 실패: ${e.message}`); }
     finally { setBusy(false); }
   };
   const remove = async (r) => {
@@ -236,7 +238,7 @@ export default function SanSwitchTool() {
         <div style={{ minWidth: 0 }}>
           <h1>SAN 스위치 모니터링</h1>
           {(() => {
-            const hs = headStatus(rows, dcChips.length);
+            const hs = headStatus(rows, dcChips.length, registryEmptyText(unreadMarkOf(data), 'SAN 스위치 등록부'));
             const dot = hs.tone === 'ok' ? 'var(--green)' : hs.tone === 'warn' ? 'var(--amber)' : hs.tone === 'bad' ? 'var(--red)' : 'var(--text-faint)';
             const last = lastCollectedAt(rows);
             return (
@@ -275,7 +277,7 @@ export default function SanSwitchTool() {
       <RegistryUnreadBanner le={unreadMarkOf(data)} what="SAN 스위치 등록부" />
 
       {/* 포트 용량 — '용량'은 포트 용량이다. 라이선스 없는 포트는 여유에서 빠진다. */}
-      <CapacityCard agg={agg} scopeLabel={dcSel.size ? `선택 ${dcSel.size}개 법인` : '전체'} />
+      <CapacityCard agg={agg} scopeLabel={dcSel.size ? `선택 ${dcSel.size}개 법인` : '전체'} registryUnread={!!registryEmptyText(unreadMarkOf(data), 'SAN 스위치 등록부')} />
 
       {/* 스토리지 트래픽(v2.669) — 법인 선택을 그대로 범위로 쓴다. */}
       <TrafficCard datacenterIds={[...dcSel].map(dcIdOfName).filter(Boolean)} selected={dcSel.size} isAdmin={hasRole('admin')} />
@@ -288,7 +290,7 @@ export default function SanSwitchTool() {
 
       {/* v2.590(감사 F2): 인증 실패로 **주기 수집을 멈춘** 스위치 — 조용히 멈추지 않는다(authGuard 규칙 1). */}
       {authStopSummary(rows.filter((r) => r.snap?.extra?.authStopped), { unit: '대', what: 'SAN 스위치' }) && (
-        <div className="card" style={{ marginBottom: 10, padding: '10px 14px', fontSize: 13, borderColor: TONE.bad }}>
+        <div className="card" data-auth-stop-summary style={{ marginBottom: 10, padding: '10px 14px', fontSize: 13, borderColor: authStopSummaryUnreadOnly(rows.filter((r) => r.snap?.extra?.authStopped)) ? TONE.warn : TONE.bad }}>
           <BoldText text={authStopSummary(rows.filter((r) => r.snap?.extra?.authStopped), { unit: '대', what: 'SAN 스위치' })} />
           <span className="muted"> 행의 ‘수집’ 은 정지와 무관하게 1회 시도하고, 성공하면 정지가 풀립니다. 포트 사용량 수집도 같은 계정이라 함께 멈춥니다.</span>
         </div>

@@ -195,6 +195,8 @@ export default function CvpTool() {
       {view !== 'overview' && kpiNote && <div style={NOTE}><BoldText text={kpiNote} /></div>}
       {view !== 'overview' && unconfirmedNote(kpiTotals) && <div style={NOTE}><BoldText text={unconfirmedNote(kpiTotals)} /></div>}
 
+      {/* 등록부를 못 읽은 동안 — 설정 탭 밖에서도 말한다(Chromium 검증: 개요 탭은 '장비 0' 만 보이고 안내가 없었다). 설정 탭은 등록부 카드 안에 같은 안내가 있다. */}
+      {view !== 'settings' && <RegistryUnreadBanner le={unreadMarkOf(data)} what="CVP 서버 등록부" />}
       <div style={ROW}>
         {[['overview', 'Overview'], ['devices', '장비'], ['models', '모델'], ['traffic', '트래픽'], ['intf', '인터페이스 세부 정보'], ['ports', '포트 사용량'], ['optics', '광신호'], ['power', '전력'], ['events', '이벤트'], ['settings', 'CVP 설정']].map(([k, l]) => (
           <button key={k} type="button" className={`tab${view === k ? ' active' : ''}`} onClick={() => setView(k)}>{l}</button>

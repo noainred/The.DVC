@@ -186,11 +186,37 @@ export function authStopInfo(stop, { what = '이 대상', manual = '', now = Dat
  * @param {Array<{name?:string, id?:string}>} list
  * @param {{unit?: string, what?: string}} [opts] unit — '대'·'곳'·'개'
  */
-export function authStopSummary(list = [], { unit = '대', what = '' } = {}) {
+/** 목록 한 줄에서 정지 기록을 꺼낸다 — 화면마다 싣는 자리가 다르다(행.authStopped · 행.snapshot.authStopped · 행.snap.extra.authStopped · 정지 목록의 항목 자신). */
+const stopOfRow = (x) => (x && typeof x === 'object' ? (x.authStopped ?? x.snapshot?.authStopped ?? x.snap?.extra?.authStopped ?? x) : null);
+
+export function authStopSummary(list = [], { unit = '대', what = '', stopOf = stopOfRow } = {}) {
   const arr = Array.isArray(list) ? list.filter(Boolean) : [];
   if (!arr.length) return '';
-  const names = arr.slice(0, 4).map((x) => String(x.name || x.id || '').trim()).filter(Boolean);
-  const more = arr.length > names.length ? ` 외 ${arr.length - names.length}${unit}` : '';
-  return `**${what ? `${what} ` : ''}${arr.length}${unit}${topicOf(unit)} 인증 실패로 주기 수집을 멈췄습니다**${names.length ? `(${names.join(' · ')}${more})` : ''}.`
-    + ' 반복 로그인은 결과가 같고 **계정만 잠급니다** — 비밀번호를 고치면 자동으로 다시 시작합니다.';
+  // 릴리스 전 Chromium 검증(119~131회차 묶음)에서 확인: 정지 기록 파일을 못 읽는 동안의 건너뜀(인증 실패가 확인된 것이 아니다 — isUnreadStop)까지
+  //   'N대는 인증 실패로 주기 수집을 멈췄습니다 · 계정만 잠급니다 · 비밀번호를 고치면 …' 이라고 말했다(127회차가 남긴 소비처 — SAN 스위치 85대가 빨간 배너로).
+  //   실제 인증 정지와 못 읽음 건너뜀을 나눠 말한다. 판정은 isUnreadStop 하나.
+  const real = arr.filter((x) => !isUnreadStop(stopOf(x)));
+  const unread = arr.filter((x) => isUnreadStop(stopOf(x)));
+  const head = what ? `${what} ` : '';
+  const namesOf = (a) => {
+    const names = a.slice(0, 4).map((x) => String(x.name || x.id || '').trim()).filter(Boolean);
+    const more = a.length > names.length ? ` 외 ${a.length - names.length}${unit}` : '';
+    return names.length ? `(${names.join(' · ')}${more})` : '';
+  };
+  const parts = [];
+  if (real.length) {
+    parts.push(`**${head}${real.length}${unit}${topicOf(unit)} 인증 실패로 주기 수집을 멈췄습니다**${namesOf(real)}.`
+      + ' 반복 로그인은 결과가 같고 **계정만 잠급니다** — 비밀번호를 고치면 자동으로 다시 시작합니다.');
+  }
+  if (unread.length) {
+    parts.push(`**${head}${unread.length}${unit}${topicOf(unit)} 정지 기록 파일을 읽지 못해 주기 수집을 잠시 건너뛰고 있습니다**${namesOf(unread)}.`
+      + ' **인증 실패가 확인된 것이 아닙니다** — 같은 자격증명을 쓰는 대상 하나로 먼저 로그인을 확인하고, 통하면 다시 시작합니다(설정 › 서비스 점검의 ‘인증 정지 기록 파일’ 행에서 파일 상태를 볼 수 있습니다).');
+  }
+  return parts.join(' ');
+}
+
+/** 요약에 실제 인증 정지가 없고 못 읽음 건너뜀만 있는가 — 배너 색을 빨강(장애)이 아니라 주의로 그린다. 정지가 하나도 없으면 false. */
+export function authStopSummaryUnreadOnly(list = [], { stopOf = stopOfRow } = {}) {
+  const arr = Array.isArray(list) ? list.filter(Boolean) : [];
+  return arr.length > 0 && arr.every((x) => isUnreadStop(stopOf(x)));
 }

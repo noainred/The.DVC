@@ -21,7 +21,7 @@ import { Loading, ErrorBox } from '../components/ui.jsx';
 import { IdracScanJobs } from './idrac/IdracScanJobs.jsx';
 import { IdracScanRanges, scanRangesLoadErrorText } from './idrac/IdracScanRanges.jsx';
 import BoldText from '../components/boldText.jsx';
-import { authStopInfo, authStopSummary } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
+import { authStopInfo, authStopSummary, authStopSummaryUnreadOnly } from './tools/storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 import { manualPollMessage } from './idrac/manualPollText.js'; // v2.591(감사 P1): 진행 중·긴급중단을 '성공' 으로 말하지 않는다
 import { scanHoldNote, scanFormCredsState } from './idrac/scanRunText.js'; // v2.611(감사 RECENT2611-02): 비밀번호 폐기 뒤 남은 계정으로 계속되는 스캔을 말한다
 import ScopeOmitBanner from './ScopeOmitBanner.jsx';
@@ -207,7 +207,7 @@ export default function IdracAdmin() {
       <ScopeOmitBanner data={data} unit="iDRAC 서버" />
 
       {authStops.length > 0 && (
-        <div className="card" style={{ marginBottom: 10, padding: '10px 14px', fontSize: 13, borderColor: 'var(--red)' }}>
+        <div className="card" data-auth-stop-summary style={{ marginBottom: 10, padding: '10px 14px', fontSize: 13, borderColor: authStopSummaryUnreadOnly(authStops) ? 'var(--amber)' : 'var(--red)' }}>
           <BoldText text={authStopSummary(authStops, { unit: '대', what: 'iDRAC 서버' })} />
           <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
             계정·비밀번호는 아래 스캔 대역에서 고치고 다시 스캔하면(등록 정보가 갱신되면) 그 서버부터 자동으로 재개합니다.

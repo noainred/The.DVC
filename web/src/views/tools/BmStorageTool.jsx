@@ -14,7 +14,7 @@ import { CsvExportModal, CsvImportModal } from '../../components/CsvBulkModals.j
 import { fmtAgo } from '../../util/fmt.js';
 import { STable } from '../../components/STable.jsx';
 import BoldText from '../../components/boldText.jsx';
-import { authStopSummary, authStopShort, isUnreadStop } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
+import { authStopSummary, authStopSummaryUnreadOnly, authStopShort, isUnreadStop } from './storageAuthText.js'; // v2.590: 인증 실패 정지 안내(도구 공통)
 import { droppedSecretNote } from '../droppedSecretText.js';
 import { missingChoice } from '../idrac/scanRangeFormText.js'; // v2.630 WEB2630-03: 목록에 없는 저장값을 그대로 보인다
 import BmStorHistoryPanel from './BmStorHistoryPanel.jsx'; // v2.635: 디스크 사용량 12시간 이력 차트(v2.688: 세 보기)
@@ -229,7 +229,7 @@ export default function BmStorageTool() {
 
       {/* v2.590(감사 F2): 인증 실패로 **주기 수집을 멈춘** 서버 — 조용히 멈추지 않는다(authGuard 규칙 1). */}
       {authNote && (
-        <div className="card" style={{ padding: 10, marginBottom: 12, fontSize: 13, borderColor: 'var(--red)' }}>
+        <div className="card" data-auth-stop-summary style={{ padding: 10, marginBottom: 12, fontSize: 13, borderColor: authStopSummaryUnreadOnly(servers.filter((s) => s.authStopped)) ? 'var(--amber)' : 'var(--red)' }}>
           <BoldText text={authNote} />
           <span className="muted"> 위의 지금 수집 버튼은 정지와 무관하게 1회 시도하고, 성공하면 정지가 풀립니다.</span>
         </div>
