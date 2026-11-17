@@ -14,7 +14,7 @@ import { getAllPhysicalGpu } from '../../gpu/physicalStore.js';
 import { physicalPollerStatus, pollPhysicalOnce, reschedulePhysicalPoller } from '../../gpu/physicalPoller.js';
 import { getGuestGpuVms } from '../../gpu/store.js';
 import { getAllGpuGuestDiag } from '../../central/gpuGuestDiag.js';
-import { getAssignedGpuGuest, setAssignedGpuGuest, listAssignedGpuGuestAgents, redactAssignedGpuGuest, gpuGuestFoldStatus } from '../../central/agentGpuGuestConfig.js';
+import { getAssignedGpuGuest, setAssignedGpuGuest, listAssignedGpuGuestAgents, redactAssignedGpuGuest, gpuGuestFoldStatus, gpuGuestConfigLoadError } from '../../central/agentGpuGuestConfig.js';
 import { upsertAgentUser, upsertAgentUsersBulk, removeAgentUser, listAgentUsers, listAgentUserAgents, GLOBAL_AGENT } from '../../central/agentUsers.js';
 import { loadVcenterConfig } from '../../config.js';
 import { expandIpList } from '../../idrac/iprange.js';
@@ -292,6 +292,9 @@ adminRouter.get('/gpu-guest/deploy/:agent', adminOnly, fleetReadOnly, (req, res)
 adminRouter.put('/gpu-guest/deploy/:agent', adminOnly, fleetOnly, (req, res) => {
   const agent = String(req.params.agent || '').trim();
   if (!agent) return res.status(400).json({ ok: false, reason: 'agent 필요' });
+  // 103회차 F14: 배포 파일을 읽지 못한 동안(읽기 오류 — 원본 그대로)은 저장하지 않는다 — 사유를 화면까지(전역 오류 처리기는 사유를 싣지 않는다).
+  const le = gpuGuestConfigLoadError();
+  if (le?.readError) return res.status(409).json({ ok: false, code: 'settings-unreadable', readError: true, reason: String(le.reason || '').slice(0, 300) });
   const droppedSecrets = [];   // v2.612 RECENT2612-05: 로컬 PUT 과 같이 폐기한 비밀을 밝힌다
   setAssignedGpuGuest(agent, req.body || {}, droppedSecrets);
   res.json({ ok: true, ...redactAssignedGpuGuest(agent), ...(droppedSecrets.length ? { droppedSecrets: [...new Set(droppedSecrets)] } : {}) });
@@ -425,7 +428,22 @@ adminRouter.post('/gpu-physical/bulk-auto-register', adminOnly, fleetOnly, async
 adminRouter.post('/gpu-physical/test', adminOnly, fleetOnly, async (req, res) => {
   const b = req.body || {};
   let host = String(b.host || '').trim(); let username = String(b.username || '').trim(); let password = String(b.password || ''); let port = Number(b.port) || 22;
-  if (b.id) { const s = getPhysicalRaw(b.id); if (s) { host = s.host; username = s.username; password = b.password || s.password; port = s.port || 22; } }
+  if (b.id) {
+    const s = getPhysicalRaw(b.id);
+    // 100회차(98회차 남긴 것 ③ — 결정 · 91ⓐ · 98 F2 와 같은 규칙): 저장 비밀번호를 쓸 때 본문의 주소 · 포트 · 계정이 저장값과 다르면 예전에는 조용히 저장값으로
+    //   바꿔 시험해 '입력한 서버' 의 결과처럼 보였다. 이제 거절한다(비밀은 보내지 않는다 — 저장 경로 physicalRegistry 의 accessMoved(host · port · username) 와 같은 키).
+    //   본문에 없거나 빈 칸은 '저장값 그대로' 다(행의 '테스트' 버튼은 { id } 만 보낸다).
+    if (s && !b.password && s.password) {
+      const probe = {};
+      if (String(b.host ?? '').trim()) probe.host = String(b.host).trim();
+      if (String(b.username ?? '').trim()) probe.username = String(b.username).trim();
+      if (b.port != null && String(b.port).trim() !== '') probe.port = Number(b.port) || 22;
+      if (accessMoved({ host: s.host, port: s.port || 22, username: s.username }, probe, ['host', 'port', 'username'])) {
+        return res.json({ ok: false, method: 'carry-refused', code: 'carry-refused', host: s.host, port: s.port || 22, login: false, read: false, error: '입력한 주소 · 포트 · 계정이 저장값과 달라 저장된 비밀번호를 쓰지 않습니다 — 비밀번호를 함께 입력하거나, 먼저 저장한 뒤 시험하세요.', trace: [] });
+      }
+    }
+    if (s) { host = s.host; username = s.username; password = b.password || s.password; port = s.port || 22; }
+  }
   if (!host || !username) return res.status(400).json({ ok: false, reason: 'host, username이 필요합니다.' });
   { const why = physicalHostIssue(host); if (why) return res.json({ ok: false, host, port, login: false, read: false, error: why, trace: [] }); }   // 36회차 F3: 'VMware Tools' 사유 대신
   const st = loadGpuGuestSettings();

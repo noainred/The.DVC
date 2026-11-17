@@ -6,11 +6,11 @@
  *        **모든 인스턴스가 실행하지 않도록** 중앙이 인스턴스별로 나눠 배정), enabled }
  * 비밀 없음. 원자적 쓰기 + preserveCorrupt.
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { makeSettingsLoadError } from '../util/settingsLoadError.js';
+import { makeJsonFileReader, READ_RETRY_MS } from '../util/jsonFileRead.js';   // 103회차 F16: 읽기 오류 ≠ 손상
 import { scheduleItemIssue, buildTest } from './tests.js';
 import { scheduleSignRequired } from './signing.js';
 
@@ -25,11 +25,19 @@ let seq = 0;
  *   답하게 한다(엣지는 비-2xx 면 outbox·스케줄을 그대로 두고 백오프한다). 관리자가 한 번 저장하면 풀린다.
  */
 const _loadErr = makeSettingsLoadError(() => FILE, { label: 'RMA 점검 스케줄', confirm: () => { load(); persist(); } });
+/*
+ * 103회차 F16(재현 — EISDIR): 예전 catch 하나는 **읽기 오류**도 손상으로 보고 원본(법인별 점검 스케줄)을 `.corrupt.*` 로 옮겨, 관리자가 항목 하나를 저장하면
+ *   (저장이 로드 오류를 푼다) 그 법인 한 건만 든 파일이 되고 다른 법인 스케줄은 rma-poll 로 빈 목록이 나갔다. 읽기 단계는 공용 읽기(30초 간격 재읽기):
+ *   읽기 오류는 원본을 두고 · 캐시하지 않고 · 표지(readError — rma-poll 503 은 그대로)를 세우고 · 저장을 409 로 거절한다. parse 실패는 예전과 같다.
+ */
+const _reader = makeJsonFileReader(() => FILE, { parse: (t) => t, preserve: false, tag: 'rma-schedules' });
 function load() {
   if (_db) return _db;
-  if (!fs.existsSync(FILE)) { _loadErr.missing(); _db = { agents: {} }; return _db; }
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') { _loadErr.readError(rr.error, { retryMs: READ_RETRY_MS }); return { agents: {} }; }   // 캐시하지 않는다 — persist 가 거절한다
+  if (rr.kind === 'missing') { _loadErr.missing(); _db = { agents: {} }; return _db; }
   try {
-    const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    const p = JSON.parse(rr.value);
     if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('객체가 아닌 JSON 값');
     _db = { agents: p.agents && typeof p.agents === 'object' ? p.agents : {} };
     _loadErr.ok();
@@ -38,7 +46,9 @@ function load() {
   _db = { agents: {} };
   return _db;
 }
-function persist() { atomicWriteFileSync(FILE, JSON.stringify({ version: 1, ...load() }, null, 2), { mode: 0o600 }); _loadErr.ok(); }
+function persist() {
+  if (_loadErr.get()?.readError) throw Object.assign(new Error('RMA 점검 스케줄 파일을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).'), { status: 409, code: 'settings-unreadable', readError: true });   // 103회차 F16
+  atomicWriteFileSync(FILE, JSON.stringify({ version: 1, ...load() }, null, 2), { mode: 0o600 }); _loadErr.ok(); }
 /** v2.631(EDGE2631-01): 스케줄 파일을 못 읽었으면 사유(rma-poll 이 503 으로 답한다), 읽었으면 null. */
 export function rmaSchedulesLoadError() { load(); return _loadErr.get(); }
 const lc = (a) => String(a || '').trim().toLowerCase();
@@ -125,4 +135,4 @@ export function scheduleSignNote({ tests = [], hasPassword = false, instances = 
   return '';
 }
 
-export function _resetSchedules() { _db = null; }
+export function _resetSchedules() { _db = null; _reader.reset(); }

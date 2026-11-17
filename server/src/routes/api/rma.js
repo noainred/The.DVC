@@ -79,7 +79,7 @@ api.put('/tools/rma/agents/:agent/schedule', adminOnly, fullScopeOnly, shellSche
     const row = upsertScheduleItem(agent, req.body || {});
     logAudit({ user: req.user?.username, action: 'RMA 점검 스케줄 저장', target: agent, detail: `${row.test}${row.name ? `(${row.name})` : ''} ${row.intervalSec}s${row.instance ? ` @${row.instance}` : ''}${row.enabled ? '' : ' (비활성)'}`, ip: req.ip });
     res.json({ ok: true, item: row, ...scheduleFor(agent) });
-  } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
+  } catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ ok: false, reason: e.message }); }   // 103회차 F16: 읽기 오류 중 저장은 409
 });
 api.delete('/tools/rma/agents/:agent/schedule/:id', adminOnly, fullScopeOnly, (req, res) => {
   const agent = String(req.params.agent || '').trim();

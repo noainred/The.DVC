@@ -6,7 +6,7 @@ import { ollamaTest } from '../../llm/ollama.js';
 import { installOllama } from '../../llm/ollamaDeploy.js';
 import { deployAgent, testTarget, installerInfo, checkAgentStatus, envPairs, envPairsIssue } from '../../agent/deploy.js';
 import { fetchRemoteVersions, listLocalPackages, downloadPackage } from '../../upgrade/fetchPackage.js';
-import { getPackageSettings, savePackageSettings } from '../../upgrade/packageSettings.js';
+import { getPackageSettings, savePackageSettings, packageSettingsWriteRefusal } from '../../upgrade/packageSettings.js';
 import { listTargets, getTargetRaw, saveTarget, removeTarget, recordResult, findTargetByHost, listTargetsRaw, deployTargetsLoadError } from '../../agent/deployRegistry.js';
 import { targetsToCsv, sampleCsv as deploySampleCsv, parseTargetsCsv, analyzeTargetsImport } from '../../agent/deployCsv.js';
 import { parseTargetsText, analyzeBulkDeploy, targetsToText, targetsToTextCsv, sampleText, sampleTextCsv, fillAutoTokens, COLUMN_PRESETS, DEFAULT_PRESET } from '../../agent/deployText.js';   // 대량 배포 텍스트/CSV(v2.432)
@@ -54,6 +54,8 @@ adminRouter.get('/packages', adminOnly, async (req, res) => {
 });
 // Web-editable package source (repository URL / download dir / token).
 adminRouter.put('/packages/settings', adminOnly, fleetOnly, (req, res) => {
+  const unreadable = packageSettingsWriteRefusal();   // 103회차 F6: 읽기 오류 중 저장 거절 — 사유를 화면까지
+  if (unreadable) return res.status(409).json(unreadable);
   res.json({ ok: true, settings: savePackageSettings(req.body || {}) });
 });
 adminRouter.post('/packages/download', adminOnly, fleetOnly, async (req, res) => {

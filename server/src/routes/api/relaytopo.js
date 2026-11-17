@@ -4,7 +4,7 @@
  */
 import { requireRole, requirePerm } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
-import { loadTopology, loadTopologyRaw, saveTopology, parseTopologyTable, topologyToCsv, mergeImport, normalizeTopology, redactTopology, DEFAULT_SERVICES, TARGETS } from '../../relaytopo/store.js';
+import { loadTopology, loadTopologyRaw, saveTopology, parseTopologyTable, topologyToCsv, mergeImport, normalizeTopology, redactTopology, DEFAULT_SERVICES, TARGETS, relayTopologyReadError } from '../../relaytopo/store.js';
 import { validateTopology, kindForService } from '../../relaytopo/validate.js';
 import { renderManagedBlock } from '../../relaytopo/haproxy.js';
 import { fetchSite, fetchAll, applySite, testNode, lastResults, resolveNodeAccess } from '../../relaytopo/ops.js';
@@ -65,6 +65,8 @@ api.get('/tools/relaytopo', toolsPerm, (req, res) => {
   //   점검 결과(issues)는 문구에 주소가 들어가므로 개수만 준다.
   res.json({
     ok: true, admin, topology: admin ? topo : maskTopology(topo), issues: admin ? issues : [],
+    // 103회차 F4: 읽기 오류(원본 그대로 · 저장 거절 중)면 빈 토폴로지를 '없음' 으로 단정하지 않게 표지를 싣는다.
+    ...(relayTopologyReadError() ? { loadError: { readError: true, code: relayTopologyReadError().code, since: relayTopologyReadError().at } } : {}),
     ...(admin ? {} : { addressHidden: true, issueCount: issues.length }),
     results: lastResults({ full: admin }),                       // 비-admin 에는 cfg/env 본문 제거
     access: admin ? access : {},                                 // 접속 경로·자격증명 출처는 admin 만
@@ -81,7 +83,7 @@ api.put('/tools/relaytopo', adminOnly, fullScopeOnly, (req, res) => {
     logAudit({ user: req.user?.username, action: '중계 토폴로지 저장', detail: `sites=${saved.sites.length} services=${saved.services.map((s) => `${s.key}:${s.listenPort}`).join(',')}`, ip: req.ip });
     // v2.606 WEB2606-10: 버린 서비스 행(포트 비움·잘못된 key·중복 포트)과 이월하지 않은 비밀을 응답에 싣는다(조용한 축소 금지).
     res.json({ ok: true, topology: saved, servicesDropped: saved.servicesDropped || [], servicesReset: !!saved.servicesReset, secretsDropped: saved.secretsDropped || [], issues: validateTopology(saved, loadCollectors()) });
-  } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
+  } catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ ok: false, reason: e.message, ...(e?.readError ? { code: e.code, readError: true } : {}) }); }
 });
 
 /** 가져오기: body { text?(표/CSV/TSV 붙여넣기 또는 파일 내용), json?(내보낸 JSON 객체), replace?, apply? }. apply=false 면 미리보기만. */
@@ -101,7 +103,7 @@ api.post('/tools/relaytopo/import', csvPerm, adminOnly, fullScopeOnly, (req, res
     const saved = saveTopology(merged);
     logAudit({ user: req.user?.username, action: '중계 토폴로지 가져오기', detail: `format=${format} sites=${parsed.sites.length} replace=${!!replace} skipped=${parsed.skipped.length}`, ip: req.ip });
     res.json({ ok: true, topology: saved, format, parsedSites: parsed.sites.length, skipped: parsed.skipped.slice(0, 50), servicesDropped: saved.servicesDropped || [], servicesReset: !!saved.servicesReset, secretsDropped: saved.secretsDropped || [], issues: validateTopology(saved, loadCollectors()) });
-  } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
+  } catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ ok: false, reason: e.message, ...(e?.readError ? { code: e.code, readError: true } : {}) }); }
 });
 
 /** 내보내기(비밀 없음): ?format=json|csv */

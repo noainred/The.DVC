@@ -5,10 +5,10 @@
  * these whenever they change.
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 103회차 F5: 읽기 오류 ≠ 손상(손상 보존은 공용 읽기가 한다)
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // v2.538: 이 파일은 v2.537 까지 봉인 대상 미등록이었다(감사 M4 계열)
 import { accessMoved, secretProvided } from '../util/secretCarry.js';
 import { trimTrailingSlashes } from '../util/trimSlashes.js';
@@ -22,10 +22,35 @@ const FILE = path.join(config.configDir, 'upgrade.json');
 // v2.859: edgeAutoUpgrade — 중앙이 업그레이드되면 등록된 엣지도 모두 자동 업그레이드(기본 켬 — config.js UPGRADE_EDGE_AUTO).
 const FIELDS = ['enabled', 'watchDir', 'installDir', 'packageName', 'remoteBase', 'token', 'pollIntervalMs', 'autoApply', 'edgeAutoUpgrade'];
 
+/*
+ * 103회차 F5(재현 — EISDIR): 예전 catch 하나는 **읽기 오류**도 손상으로 보고 원본(원격 소스 · 봉인된 토큰 · 엣지 목록)을 `.corrupt.*` 로 옮겼다 —
+ *   이 파일은 호출마다 읽어 다음 확인부터 env 기본값(다른 원격 · 토큰 없음 · 자동 적용 여부)으로 돌았고, 다음 저장이 그 기본값 위에 토큰 없는 파일을 썼다.
+ *   읽기 단계는 공용 읽기(util/jsonFileRead.js — 30초 간격 재읽기): 읽기 오류는 원본을 두고 · **마지막으로 읽은 값**으로 돌며(없으면 env 기본값) ·
+ *   저장을 409 로 거절한다. parse · 형식 · 복호 실패는 예전과 같이 손상(보존본으로 옮김).
+ */
+const _reader = makeJsonFileReader(() => FILE, { parse: (t) => openSecretsDeep(parseJsonObject(t)), tag: 'upgrade' });
+let _readErr = null;   // { at, code }
+let _lastGood = null;  // 마지막으로 읽은 저장값(읽기 오류 동안 이 값으로 돈다 — 기본값으로 뒤집히지 않게)
 function readFile() {
-  if (!fs.existsSync(FILE)) return {};
-  try { return openSecretsDeep(parseJsonObject(fs.readFileSync(FILE, 'utf8'))); } catch (e) { if (fs.existsSync(FILE)) preserveCorrupt(FILE, e.message); return {}; }
+  const r = _reader.read();
+  if (r.kind === 'read-error') {
+    if (!_readErr) _readErr = { at: Date.now(), code: String(r.error?.code || 'read-error').slice(0, 32) };
+    return _lastGood ? { ..._lastGood } : {};
+  }
+  _readErr = null;
+  if (r.kind !== 'ok') { _lastGood = null; return {}; }
+  _lastGood = r.value;
+  return { ...r.value };
 }
+/** 103회차 F5: upgrade.json 읽기 오류 중의 쓰기 거절(라우트 409) 또는 null. */
+export function upgradeSettingsWriteRefusal() {
+  readFile();
+  if (!_readErr) return null;
+  return { ok: false, status: 409, code: 'settings-unreadable', readError: true,
+    reason: `업그레이드 설정 파일(upgrade.json)을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류(${_readErr.code})이고 원본(토큰 포함)은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` };
+}
+/** 테스트 전용. */
+export function _resetUpgradeSettingsForTest() { _readErr = null; _lastGood = null; _reader.reset(); }
 
 /** Effective settings = env defaults overlaid with persisted overrides. */
 export function loadSettings() {
@@ -71,6 +96,9 @@ export function upgradeTokenDropped(prevEffective, partial) {
 
 /** Persist a partial update and return the new effective settings. */
 export function saveSettings(partial) {
+  // 103회차 F5: 읽기 오류 중에는 저장하지 않는다 — 원본(토큰)이 그 자리에 있어 rename 이 보존본도 없이 덮는다.
+  const ref = upgradeSettingsWriteRefusal();
+  if (ref) throw Object.assign(new Error(ref.reason), { status: 409, code: ref.code, readError: true });
   const prevEffective = loadSettings();
   const next = readFile();
   for (const f of FIELDS) {

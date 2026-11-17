@@ -657,7 +657,7 @@ api.post('/alarm-mutes', requireRole('admin', 'operator'), requirePerm('inv.alar
   if (issue) return res.status(403).json({ error: 'forbidden', reason: issue });
   const result = addMute(body);
   if (result.ok) store.refresh().catch(() => {}); // re-apply immediately
-  return res.status(result.ok ? 200 : 400).json(result);
+  return res.status(result.ok ? 200 : result.status === 409 ? 409 : 400).json(result);   // 103회차 F13: 읽기 오류 중 409
 });
 api.delete('/alarm-mutes/:id', requireRole('admin', 'operator'), requirePerm('inv.alarms'), auditMiddleware, (req, res) => {
   // req.params.id는 Express가 이미 1회 URL 디코드한 값 — 추가 decodeURIComponent는 이중
@@ -667,7 +667,7 @@ api.delete('/alarm-mutes/:id', requireRole('admin', 'operator'), requirePerm('in
   if (issue) return res.status(403).json({ error: 'forbidden', reason: issue });
   const result = removeMute(req.params.id);
   if (result.ok) store.refresh().catch(() => {});
-  return res.status(result.ok ? 200 : 404).json(result);
+  return res.status(result.ok ? 200 : result.status === 409 ? 409 : 404).json(result);
 });
 
 // 특수 기능 사용 빈도 — 자주 쓰는 메뉴 자동 추천. 모든 로그인 사용자 합산 집계.

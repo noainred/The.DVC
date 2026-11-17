@@ -13,6 +13,7 @@ import { config, clampIntervalMs } from '../config.js';
 import { clampSetting } from '../util/clampSetting.js';
 import { DEFAULT_PORTS, isIpv4 } from './scan.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileReader, READ_RETRY_MS } from '../util/jsonFileRead.js';   // 103회차 F19: 읽기 오류 ≠ 손상(스캔 설정)
 import { getOverrides, overridesLoadError } from './overrides.js';
 import { getPolicies, isCoveredByAnyPolicy, findPolicy, specToRange } from './rangePolicies.js';
 import { registerExitFlush } from '../util/exitFlush.js'; // v2.582 ARCH-4: 디바운스 저장은 종료 시 동기 flush 를 등록한다
@@ -302,10 +303,21 @@ const _cfgLoadErr = makeSettingsLoadError(() => CFG, { label: 'IP 스캔 배정'
 /** 스캔 설정 파일을 못 읽었으면 { at, reason }, 읽었으면 null. */
 export function scanSettingsLoadError() { loadAll(); return _cfgLoadErr.get(); }
 
+/*
+ * 103회차 F19(재현 — EISDIR): 예전 catch 하나는 스캔 설정의 **읽기 오류**도 손상으로 보고 원본(에이전트별 대역 · 포트 · 쉬는 시간)을 `.corrupt.*` 로 옮겨,
+ *   다음 저장(에이전트 하나)이 그 한 건만 든 파일을 썼다 — 다른 엣지의 배정이 사라져 다음 pull 에 assigned:false 로 스캔이 멈췄다.
+ *   읽기 단계는 공용 읽기(30초 간격 재읽기): 읽기 오류는 원본을 두고 · 캐시하지 않고 · 표지(readError — 배정 pull 503 은 그대로)를 세우고 · saveAll 이 409 로 거절한다.
+ *   ⚠ 결과 · 이력(readJson)은 남겼다 — 그 값은 기동 때 한 번 읽어 디바운스 저장이 쓰므로, 읽기 오류에 원본을 두면 다음 저장이 보존본도 없이 덮는다(보류 장치가 필요 — 남긴 것).
+ */
+const _cfgReader = makeJsonFileReader(() => CFG, { parse: (t) => t, preserve: false, tag: 'ipam-scan' });
+let _cfgReadErr = false;
 function readCfg() {
-  if (!fs.existsSync(CFG)) { _cfgLoadErr.missing(); return {}; }
+  const rr = _cfgReader.read();
+  if (rr.kind === 'read-error') { _cfgReadErr = true; _cfgLoadErr.readError(rr.error, { retryMs: READ_RETRY_MS }); return {}; }
+  _cfgReadErr = false;
+  if (rr.kind === 'missing') { _cfgLoadErr.missing(); return {}; }
   try {
-    const j = JSON.parse(fs.readFileSync(CFG, 'utf8'));
+    const j = JSON.parse(rr.value);
     if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('객체가 아닌 JSON 값');
     _cfgLoadErr.ok();
     return j;
@@ -337,11 +349,13 @@ function loadAll() {
   const all = (!p.agents && (p.ranges || p.enabled !== undefined))
     ? { agents: { [LOCAL]: normalizeCfg(p) } }
     : { agents: p.agents && typeof p.agents === 'object' ? p.agents : {} };
-  if (tok) { _cfgCache = all; _cfgTok = tok; } else { _cfgCache = null; _cfgTok = ''; }
+  if (tok && !_cfgReadErr) { _cfgCache = all; _cfgTok = tok; } else { _cfgCache = null; _cfgTok = ''; }   // 103회차 F19: 읽기 오류의 빈 설정은 캐시하지 않는다
   return all;
 }
 
 function saveAll(all) {
+  // 103회차 F19: 읽기 오류 중에는 쓰지 않는다 — all 은 캐시하지 않은 빈 설정에서 만든 것이다(라우트 409).
+  if (_cfgLoadErr.get()?.readError) throw Object.assign(new Error(`IP 스캔 설정 파일(${path.basename(CFG)})을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽습니다).`), { status: 409, code: 'settings-unreadable', readError: true });
   fs.mkdirSync(path.dirname(CFG), { recursive: true });
   atomicWriteFileSync(CFG, JSON.stringify(all, null, 2));
   _cfgLoadErr.ok();

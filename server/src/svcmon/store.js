@@ -16,11 +16,11 @@
  * 보안: 원자적 쓰기 + 로드 손상 보존, host/url SSRF 가드, 경로/호스트 화이트리스트.
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 103회차 F1: 읽기 오류 ≠ 손상
 import { ssrfBlockReason } from '../collector/registry.js';
 import { DEFAULT_PORTS } from './checker.js';
 import { TEST_TYPES, KINDS, TEST_FIELDS, TARGET_FIELDS } from './testSchema.js';
@@ -57,10 +57,33 @@ let byTestId = null;      // testId -> { target, test }
 let saveTimer = null;
 let dirty = false;
 
+/*
+ * 103회차 F1(재현 — EISDIR): 예전 catch 하나는 **읽기 오류**(EACCES · EIO · EISDIR)도 손상으로 보고 온전한 원본(전 감시 대상 · 폴더)을 `.corrupt.*` 로 옮긴 뒤
+ *   빈 목록을 캐시했다 — 다음 등록 한 번이 그 한 건만 든 svcmon.json 을 썼고, 엣지 배정(PUT /assign · 설정 연동 동기화)은 빈 목록을 스냅샷으로 굳혀
+ *   엣지가 중앙 배포 점검을 전부 지웠다. 읽기 단계는 공용 읽기(util/jsonFileRead.js — 30초 간격 재읽기): 읽기 오류는 원본을 두고 · 캐시하지 않고
+ *   (빈 목록을 돌려준다) · save()(모든 쓰기의 길목)가 409 로 거절한다. parse 실패는 아래 catch(예전과 같다 — 보존본 + 빈 목록).
+ */
+const _reader = makeJsonFileReader(FILE, { parse: (t) => t, preserve: false, tag: 'svcmon' });
+let _readErr = null;   // { at, code } — 마지막 읽기가 읽기 오류
+/** 103회차 F1: svcmon.json 읽기 오류(원본은 그대로)면 `{ at, code }`, 아니면 null. */
+export function svcmonStoreReadError() { load(); return _readErr ? { ..._readErr } : null; }
+/** 103회차 F1: 읽기 오류 중 쓰기 거절(라우트 409) — 사람이 읽는 사유 포함. 없으면 null. */
+export function svcmonStoreWriteRefusal() {
+  if (!svcmonStoreReadError()) return null;
+  return { ok: false, status: 409, code: 'settings-unreadable', readError: true,
+    reason: `서비스 감시 대상 파일(svcmon.json)을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류(${_readErr.code})이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` };
+}
 function load() {
   if (db) return db;
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') {
+    if (!_readErr) _readErr = { at: Date.now(), code: String(rr.error?.code || 'read-error').slice(0, 32) };
+    return { targets: [], folders: [], sort: { infra: 'manual', service: 'manual' } };   // 캐시하지 않는다 — 쓰기는 save() 가 거절한다
+  }
+  if (_readErr) { _readErr = null; byTestId = null; rev += 1; }   // 다시 읽혔다 — 빈 목록으로 만든 색인 · 응답 캐시를 버린다
   try {
-    const parsed = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    if (rr.kind === 'missing') { const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; }
+    const parsed = JSON.parse(rr.value);
     db = {
       targets: Array.isArray(parsed?.targets) ? parsed.targets.filter(Boolean) : [],
       folders: Array.isArray(parsed?.folders) ? parsed.folders.filter(Boolean) : [],
@@ -75,6 +98,9 @@ function load() {
 
 /** 디바운스 저장 — 대량 변경을 한 번의 원자적 쓰기로 묶는다. */
 function save({ immediate = false } = {}) {
+  // 103회차 F1: 읽기 오류 중에는 어떤 쓰기도 받지 않는다 — 빈 목록 위의 변경이 원본(전 감시 대상)을 덮지 않게(라우트 409).
+  const ref = svcmonStoreWriteRefusal();
+  if (ref) throw Object.assign(new Error(ref.reason), { status: 409, code: ref.code, readError: true });
   rev += 1;
   byTestId = null;
   dirty = true;
@@ -740,4 +766,4 @@ export function batchCounts() {
   return m;
 }
 
-export function _resetCache() { db = null; byTestId = null; rev += 1; dirty = false; }
+export function _resetCache() { db = null; byTestId = null; rev += 1; dirty = false; _readErr = null; _reader.reset(); }

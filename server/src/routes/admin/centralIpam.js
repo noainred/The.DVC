@@ -155,7 +155,13 @@ function scanCfgUnreadable(res) {
   res.status(409).json({ ok: false, code: 'settings-unreadable', reason: 'IP 스캔 배정 파일(ipam-scan.json)을 읽지 못한 상태라 저장하지 않았습니다 — 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리고 재시작하세요.', loadError: { reason: String(e.reason || '').slice(0, 200) } });
   return true;
 }
-adminRouter.put('/ipam/scan/settings', adminOnly, fleetOnly, (req, res) => {
+// 103회차 F19: 스캔 설정 파일을 읽지 못한 동안(읽기 오류 — 원본 그대로)의 쓰기 거절 — 사유를 화면까지(saveAll 이 던지는 409 는 전역 오류 처리기로 가면 사유가 빠진다).
+function scanCfgWritable(_req, res, next) {
+  const e = scanSettingsLoadError();
+  if (e?.readError) return res.status(409).json({ ok: false, code: 'settings-unreadable', readError: true, reason: String(e.reason || '').slice(0, 300) });
+  return next();
+}
+adminRouter.put('/ipam/scan/settings', adminOnly, fleetOnly, scanCfgWritable, (req, res) => {
   if (scanCfgUnreadable(res)) return;   // 25회차 F-3: 배정 파일 손상 중 쓰기 409
   const agent = (req.body && req.body.agent) || LOCAL;
   // v2.638: 데이터센터는 등록된 DataCenter 만(빈 값 = 자동). 목록에 없는 값을 저장하면 그 에이전트의 스캔 결과가 어디에도 귀속되지 않는다.
@@ -319,7 +325,7 @@ adminRouter.get('/ipam/scan/ranges', adminOnly, fleetOnly, (_req, res) => {
  * v2.692: 줄 단위 추가·수정·삭제. 그 에이전트의 다른 줄은 건드리지 않는다. `old` 가 지금 값과 다르면 409(다른 관리자가 바꿨다).
  * 대역 문법은 저장 PUT 과 같은 판정(checkRangeList — 뒤집힌 범위 오류·스캔 상한 경고).
  */
-adminRouter.post('/ipam/scan/ranges/line', adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/ipam/scan/ranges/line', adminOnly, fleetOnly, scanCfgWritable, (req, res) => {
   if (scanCfgUnreadable(res)) return;   // 25회차 F-3: 배정 파일 손상 중 쓰기 409
   const b = req.body || {};
   const agent = String(b.agent || LOCAL).slice(0, 128);
@@ -345,7 +351,7 @@ adminRouter.post('/ipam/scan/ranges/line', adminOnly, fleetOnly, (req, res) => {
  *   `expect`(화면이 본 대역 목록)가 지금 값과 다르면 409 — 다른 관리자가 그사이 바꿨으면 지우지 않는다(줄 단위 수정과 같은 규칙).
  *   이미 보고된 스캔 결과는 지우지 않는다(보존 기간·해제 판정이 정리한다) — 응답이 그 사실을 말한다.
  */
-adminRouter.post('/ipam/scan/agent/delete', adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/ipam/scan/agent/delete', adminOnly, fleetOnly, scanCfgWritable, (req, res) => {
   if (scanCfgUnreadable(res)) return;   // 25회차 F-3: 배정 파일 손상 중 쓰기 409
   const b = req.body || {};
   const agent = String(b.agent || '').trim().slice(0, 128);
@@ -397,7 +403,7 @@ function migrationView() {
   return { ok: true, state: st, remaining, agents, ...(held ? { held } : {}), ...(remainingLoadError ? { remainingLoadError } : {}) };
 }
 adminRouter.get('/ipam/scan/migration', adminOnly, fleetOnly, (_req, res) => { res.json(migrationView()); });
-adminRouter.post('/ipam/scan/migration/move', adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/ipam/scan/migration/move', adminOnly, fleetOnly, scanCfgWritable, (req, res) => {
   const vcenterId = String(req.body?.vcenterId || '').slice(0, 200);
   const agent = String(req.body?.agent || '').trim().slice(0, 128);
   if (!vcenterId || !agent) return res.status(400).json({ ok: false, reason: 'vcenterId 와 agent 가 필요합니다.' });
@@ -455,7 +461,7 @@ adminRouter.get('/ipam/report', adminOnly, fleetOnly, (_req, res) => {
 });
 adminRouter.put('/ipam/report', adminOnly, fleetOnly, (req, res) => {
   const r = saveReportSettings(req.body?.report ?? req.body);
-  if (r.error) return res.status(400).json({ ok: false, reason: r.error, field: r.field });
+  if (r.error) return res.status(r.readError ? 409 : 400).json({ ok: false, reason: r.error, field: r.field, ...(r.readError ? { readError: true } : {}) });   // 103회차 F11: 읽기 오류는 409
   logAudit({ user: req.user?.username, action: 'ipam.report.settings', target: 'ipam-report', detail: `${r.report.enabled ? '켜짐' : '꺼짐'} · ${r.report.freq} · ${r.report.time} · ${r.report.clock === 'corp' ? '법인 현지 시각' : '메인 서버 시각'} · 법인 ${Object.keys(r.report.corps).length}곳`, ip: req.ip || '' });
   res.json({ ok: true, report: r.report, status: reportStatus() });
 });
@@ -508,7 +514,7 @@ adminRouter.get('/ipam/scan/ranges/sample.csv', csvPerm, adminOnly, fleetOnly, (
   res.setHeader('Content-Disposition', 'attachment; filename="ip-scan-ranges-sample.csv"');
   res.send(scanRangesSampleCsv());
 });
-adminRouter.post('/ipam/scan/ranges/import', csvPerm, adminOnly, fleetOnly, (req, res) => {
+adminRouter.post('/ipam/scan/ranges/import', csvPerm, adminOnly, fleetOnly, scanCfgWritable, (req, res) => {
   if (scanCfgUnreadable(res)) return;   // 25회차 F-3: 배정 파일 손상 중 쓰기 409
   const { rows, error } = parseScanRangesCsv(String(req.body?.csv || ''));
   if (error) return res.status(400).json({ ok: false, reason: error });

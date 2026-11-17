@@ -242,7 +242,7 @@ api.post('/tools/vm-clone/jobs', adminOnly, (req, res) => {
     const job = saveJob(body);
     logAudit({ user: req.user?.username, action: 'VM 복제 잡 저장', target: `${job.vcenterId}/${job.vmName}`, detail: `${job.dest.type}${job.dest.datastoreName ? `→${job.dest.datastoreName}` : ''} · ${job.schedule.mode} · 보존 ${job.keep}${job.keepDays ? `개·${job.keepDays}일` : ''}${job.verifyAfter ? ' · 자동 검증' : ''}` });
     res.status(201).json({ ok: true, job });
-  } catch (e) { res.status(400).json({ ok: false, reason: e.message }); }
+  } catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ ok: false, reason: e.message, ...(e?.readError ? { code: e.code, readError: true } : {}) }); }   // 103회차 F9: 읽기 오류 중 저장은 409
 });
 
 // v2.767(점검 R2-B3-8): 단건 쓰기는 '조회 밖 404 → 쓰기 밖 403'(server/CLAUDE.md writeVcenters 규약). 예전엔 조회 범위 밖 잡에도 403 을 줘
@@ -264,7 +264,7 @@ api.delete('/tools/vm-clone/jobs/:id', adminOnly, (req, res) => {
   const target = listJobs().find((j) => j.id === req.params.id);
   if (cloneJobDenied(req, res, target)) return;
   let removed;
-  try { removed = deleteJob(req.params.id); } catch (e) { return res.status(400).json({ ok: false, reason: e.message }); }   // v2.793: 엣지의 위임 잡
+  try { removed = deleteJob(req.params.id); } catch (e) { return res.status(e?.status === 409 ? 409 : 400).json({ ok: false, reason: e.message }); }   // v2.793: 엣지의 위임 잡
   if (!removed) return res.status(404).json({ ok: false, reason: '잡을 찾을 수 없습니다.' });
   logAudit({ user: req.user?.username, action: 'VM 복제 잡 삭제', target: req.params.id, detail: '잡 정의만 삭제(만든 클론/사본은 유지)' });
   res.json({ ok: true });
@@ -369,7 +369,7 @@ api.put('/tools/vm-clone/corps/mounts', adminOnly, (req, res) => {
   const ids = req.body?.mountIds;
   if (ids != null && !Array.isArray(ids)) return res.status(400).json({ ok: false, reason: 'mountIds 는 배열 또는 null 이어야 합니다.' });
   let view;
-  try { view = setMountUse(corp.key, ids, req.user?.username); } catch (e) { return res.status(400).json({ ok: false, reason: e.message }); }
+  try { view = setMountUse(corp.key, ids, req.user?.username); } catch (e) { return res.status(e?.status === 409 ? 409 : 400).json({ ok: false, reason: e.message }); }
   logAudit({ user: req.user?.username, action: 'VM 백업 법인 마운트 지정', target: corp.label || corp.key, detail: view ? `사용 ${view.mountIds.length}개(${view.mountIds.join(', ').slice(0, 150)})` : '지정 해제(전부 사용)' });
   res.json({ ok: true, mountUse: view });
 });

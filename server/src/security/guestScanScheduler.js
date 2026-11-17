@@ -18,6 +18,7 @@ import { recordLoginFails } from './loginStore.js';
 import { recordNetScan } from './netIssueStore.js';
 import { enqueueNotify as notify } from '../alerts.js'; // v2.742(감사 TIMING-01): 결과를 기다리지 않는 발송은 alerts.js 대기열로 — 동시 발송이 메일 인증 정지 가드를 우회하지 않게 한 번에 하나씩 보낸다.
 import { atomicWriteFileSync, safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 103회차 F7: 읽기 오류 ≠ 손상
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // v2.538: 이 파일은 v2.537 까지 봉인 대상 미등록이었다(감사 M4 계열)
 import { createAuthGuard, authStopView, createAuthBreaker, runWithBreakerWarmup } from '../util/authGuard.js';
 import { vcAuthGuard, isVcAuthError } from '../vcenter/restClient.js';
@@ -41,12 +42,32 @@ function backupCorrupt(err) {
 }
 
 let cache = null;
+/*
+ * 103회차 F7(재현 — EISDIR): 예전 catch 하나는 **읽기 오류**도 손상으로 보고 원본(게스트 자격증명 봉인본 포함 작업 정의)을 `.corrupt.*` 로 옮긴 뒤
+ *   빈 목록을 캐시했다 — 다음 저장 한 번이 그 한 건만 든 guest-scans.json 을 써서 나머지 작업 · 비밀이 보존본에만 남았다.
+ *   읽기 단계는 공용 읽기(util/jsonFileRead.js — 30초 간격 재읽기): 읽기 오류는 원본을 두고 · 캐시하지 않고 · 저장 · 삭제를 409 로 거절한다
+ *   (실행 기록 persist 는 쓰지 않는다). parse · 형식 · 복호 실패는 예전과 같이 backupCorrupt.
+ */
+const _reader = makeJsonFileReader(() => FILE, { parse: (t) => t, preserve: false, tag: 'gscan' });
+let _readErr = null;   // { at, code }
+/** 103회차 F7: guest-scans.json 읽기 오류(원본은 그대로)면 `{ at, code }`, 아니면 null. */
+export function guestScansReadError() { load(); return _readErr ? { ..._readErr } : null; }
+function assertWritable() {
+  if (!_readErr) return;
+  throw Object.assign(new Error(`게스트 조사 작업 파일(guest-scans.json)을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류(${_readErr.code})이고 원본(자격증명 포함)은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽습니다).`), { status: 409, code: 'settings-unreadable', readError: true });
+}
 function load() {
   if (cache) return cache;
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') {
+    if (!_readErr) _readErr = { at: Date.now(), code: String(rr.error?.code || 'read-error').slice(0, 32) };
+    return [];   // 캐시하지 않는다 — 저장 · 삭제는 assertWritable 이 거절한다
+  }
+  _readErr = null;
   cache = [];
   try {
-    if (fs.existsSync(FILE)) {
-      const p = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    if (rr.kind === 'ok') {
+      const p = JSON.parse(rr.value);
       if (!Array.isArray(p)) throw new Error('배열이 아님'); // 형식 불일치도 손상으로 취급
       cache = openSecretsDeep(p);
     }
@@ -55,7 +76,7 @@ function load() {
 }
 // 원자적 쓰기(0600) — runJob이 매 실행마다 lastRun/lastErr을 저장하므로 쓰기 빈도가 높고,
 // 그중 한 번이라도 부분기록으로 끊기면 load가 []가 되어 자격증명 포함 작업 정의가 사라진다.
-function persist() { try { writeList(cache); } catch { /* 실행 기록(lastRun 등)만 — 다음 저장에 함께 */ } }
+function persist() { if (!cache) return; try { writeList(cache); } catch { /* 실행 기록(lastRun 등)만 — 다음 저장에 함께 */ } }   // 103회차 F7: 캐시가 없으면(읽기 오류) 쓰지 않는다
 // 21회차 L-3(재현): 사람이 하는 저장 · 삭제는 쓰기 실패를 삼키지 않는다 — 예전에는 응답이 정상인데 메모리만 바뀌어(파일은 그대로)
 //   메모리 작업이 게스트 로그인을 하고 재시작 뒤 사라졌다(삭제 실패면 되살아났다). 쓰기가 성공한 뒤에만 메모리를 바꾼다.
 function writeList(list) { atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep(list), null, 2), { mode: 0o600 }); }
@@ -73,6 +94,7 @@ function posOr(v, max, def) {
 
 export function saveGuestScan(body = {}) {
   load();
+  assertWritable();   // 103회차 F7
   // v2.783: 새 id 는 시각만으로 만들지 않는다 — 같은 밀리초에 두 개를 만들면 id 가 겹쳐 새 항목이 기존 항목의 '수정' 이 되고 이전 값을 물려받았다
   //   (CI 빠른 러너에서 audit2600e LO2600-0x 가 [1440,…] 을 받은 원인). 시각 + 임의 6자리.
   const id = body.id || `gscan_${Date.now().toString(36)}${randomBytes(3).toString('hex')}`;
@@ -108,6 +130,7 @@ export function saveGuestScan(body = {}) {
 }
 export function removeGuestScan(id) {
   load();
+  assertWritable();   // 103회차 F7
   const next = cache.filter((x) => x.id !== id);
   if (next.length === cache.length) return false;
   writeList(next);   // 21회차 L-3
@@ -268,3 +291,6 @@ export async function runGuestScanNow(id, { trigger = 'manual' } = {}) {
   try { await runJob(j, { manual: trigger === 'manual' }); return { ok: true, ...redact(j) }; }
   finally { runningJobs.delete(id); }
 }
+
+/** 테스트 전용(103회차). */
+export function _resetGuestScansForTest() { cache = null; _readErr = null; _reader.reset(); }

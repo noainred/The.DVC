@@ -3,11 +3,11 @@
  * 규칙은 reportRules.js(순수), 내용 · 본문은 reportModel.js(순수). 메일은 공용 경로(sendPortalMail kind 'ipam-report' — SMTP · 속도 제한 · 이력 · 감사 공용).
  * 중앙 전용(엣지는 보내지 않는다). 데모(mock) 법인은 실제 메일에 넣지 않는다(미리 보기에는 넣고 밝힌다).
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { registerStateFile } from '../util/stateFiles.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 103회차 F11: 읽기 오류 ≠ 손상
 import { sendPortalMail } from '../mail/service.js';
 import { load as loadMailCfg } from '../mail/settings.js';
 import { store } from '../store.js';
@@ -33,9 +33,24 @@ const FREQ_LABEL = { weekly: '주간', daily: '일간' };
 const MISSED_TEXT = { down: '포탈이 꺼져 있던 동안의 회차라 보내지 않았습니다(몰아서 보내지 않습니다).', late: '정한 시각보다 30분 넘게 늦게 확인해 보내지 않았습니다(몰아서 보내지 않습니다).' };
 
 let _settingsErr = null;
+/*
+ * 103회차 F11(재현 — EISDIR): 예전 catch 하나는 **읽기 오류**도 손상으로 보고 원본(받는 사람 · 주기 · 법인별 설정)을 `.corrupt.*` 로 옮겼다 — 이 설정은 호출마다
+ *   읽으므로 다음 호출은 ENOENT → 기본값(보고 꺼짐)으로 돌았고 '못 읽음' 표지도 사라져 화면은 '꺼져 있음' 으로 보였다. 다음 저장이 기본값 위에 썼다.
+ *   읽기 단계는 공용 읽기(util/jsonFileRead.js — 30초 간격 재읽기): 읽기 오류는 원본을 두고 · null(보내지 않음 · 저장 거절)을 돌려주고 · 표지에 readError.
+ *   상태 파일(기록 · 직전 점유)도 같다 — 읽기 오류면 캐시 · 저장하지 않는다. parse 실패는 예전과 같다.
+ */
+const _settingsReader = makeJsonFileReader(SETTINGS_FILE, { parse: (t) => t, preserve: false, tag: 'ipam-report' });
+const _stateReader = makeJsonFileReader(STATE_FILE, { parse: (t) => t, preserve: false, tag: 'ipam-report' });
+let _stateReadErr = false;
 /** 설정(못 읽었으면 null — 기본값으로 보내지 않는다). */
 export function loadReportSettings() {
-  try { _settingsErr = null; return reportOf(JSON.parse(fs.readFileSync(SETTINGS_FILE(), 'utf8'))); }
+  const rr = _settingsReader.read();
+  if (rr.kind === 'read-error') {
+    const code = String(rr.error?.code || 'read-error').slice(0, 32);
+    if (!_settingsErr?.readError) _settingsErr = { at: Date.now(), reason: `읽기 오류(${code}) — 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽습니다)`, readError: true };
+    return null;
+  }
+  try { _settingsErr = null; if (rr.kind === 'missing') { const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; } return reportOf(JSON.parse(rr.value)); }
   catch (e) {
     if (e?.code === 'ENOENT') return reportOf(null);
     if (!_settingsErr) { preserveCorrupt(SETTINGS_FILE(), e?.message); console.warn(`[ipam-report] 설정 파일을 읽지 못했습니다: ${safeLoadText(e) || '사유 미상'}`); }
@@ -47,6 +62,7 @@ export function reportSettingsError() { loadReportSettings(); return _settingsEr
 /** 저장 — 정규화 실패는 { error, field }. */
 export function saveReportSettings(input, now = Date.now()) {
   const prev = loadReportSettings();
+  if (prev == null && _settingsErr?.readError) return { error: '설정 파일을 읽지 못해 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽습니다).', field: 'report', readError: true };   // 103회차 F11
   if (prev == null) return { error: '설정 파일을 읽지 못해 저장하지 않았습니다(손상본은 옆에 보존했습니다).', field: 'report' };
   const r = normalizeReport(input, prev, now);
   if (r.error) return r;
@@ -58,8 +74,12 @@ export function saveReportSettings(input, now = Date.now()) {
 let _state = null;
 function state() {
   if (_state) return _state;
+  const rr = _stateReader.read();
+  if (rr.kind === 'read-error') { _stateReadErr = true; return { overall: {}, corps: {}, prevOcc: {}, history: [] }; }   // 103회차 F11: 캐시하지 않는다 — save() 가 쓰지 않는다
+  _stateReadErr = false;
   try {
-    const raw = JSON.parse(fs.readFileSync(STATE_FILE(), 'utf8'));
+    if (rr.kind === 'missing') { const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; }
+    const raw = JSON.parse(rr.value);
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류');
     _state = { overall: raw.overall && typeof raw.overall === 'object' ? raw.overall : {}, corps: raw.corps && typeof raw.corps === 'object' ? raw.corps : {},
       prevOcc: raw.prevOcc && typeof raw.prevOcc === 'object' ? raw.prevOcc : {}, history: (Array.isArray(raw.history) ? raw.history : []).slice(0, HISTORY_MAX) };
@@ -69,7 +89,7 @@ function state() {
   }
   return _state;
 }
-function save() { try { atomicWriteFileSync(STATE_FILE(), JSON.stringify(state()), { mode: 0o600 }); } catch (e) { console.warn(`[ipam-report] 상태 저장 실패: ${e?.message || e}`); } }
+function save() { const st = state(); if (_stateReadErr) return; try { atomicWriteFileSync(STATE_FILE(), JSON.stringify(st), { mode: 0o600 }); } catch (e) { console.warn(`[ipam-report] 상태 저장 실패: ${e?.message || e}`); } }
 function record(entry) {
   const st = state();
   const e = { at: Date.now(), ...entry };
@@ -207,4 +227,4 @@ export function startIpamReport() {
   _timer = setInterval(() => { reportTick().catch(() => {}); }, REPORT_TICK_MS);
   _timer.unref?.();
 }
-export function _resetIpamReportForTest() { _state = null; _chain = Promise.resolve(); _busy = false; _lastTick = null; _lastError = null; _settingsErr = null; if (_timer) { clearInterval(_timer); _timer = null; } }
+export function _resetIpamReportForTest() { _state = null; _stateReadErr = false; _settingsReader.reset(); _stateReader.reset(); _chain = Promise.resolve(); _busy = false; _lastTick = null; _lastError = null; _settingsErr = null; if (_timer) { clearInterval(_timer); _timer = null; } }

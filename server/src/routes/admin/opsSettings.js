@@ -7,7 +7,7 @@ import { saveOsScanSettings, runOsScanNow, osScanStatus } from '../../inventory/
 import { getOsResults, osSummary } from '../../inventory/osStore.js';
 import { listAudit, logAudit } from '../../audit.js';
 import { loginHistorySummary, parseLoginRange } from '../../security/loginHistory.js'; // v2.912: 설정 › 로그 › 최근 로그인 · 로그인 횟수
-import { alertStatus, saveAlertConfig, testAlert, getAnomalySettings, saveAnomalySettings } from '../../alerts.js';
+import { alertStatus, saveAlertConfig, alertConfigWriteRefusal, testAlert, getAnomalySettings, saveAnomalySettings } from '../../alerts.js';
 import { createJob as createProvisionJob } from '../../provision/jobs.js';
 import { updateSaved, removeSaved, getSaved } from '../../provision/saved.js';
 import { store } from '../../store.js';
@@ -128,6 +128,8 @@ adminRouter.put('/alerts', adminOnly, fleetOnly, async (req, res) => {
       if (ssrf) return res.status(400).json({ ok: false, reason: `${key} 웹훅 URL: ${ssrf}` });
     }
   }
+  const unreadable = alertConfigWriteRefusal();   // 103회차 F12: 읽기 오류 중 저장 거절 — 사유를 화면까지
+  if (unreadable) return res.status(409).json(unreadable);
   res.json({ ok: true, config: saveAlertConfig(req.body || {}) });
 });
 adminRouter.post('/alerts/test', adminOnly, fleetOnly, async (req, res) => res.json(await testAlert(req.user?.username)));

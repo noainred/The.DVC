@@ -4,7 +4,7 @@
  */
 
 import { logAudit } from '../../audit.js';
-import { listTargetsCopy, KINDS } from '../../svcmon/store.js';
+import { listTargetsCopy, KINDS, svcmonStoreWriteRefusal } from '../../svcmon/store.js';
 import { pollerRole } from '../../svcmon/poller.js';
 import { edgeSummary, edgeSummaryWithAssigned, edgeState, edgeTotals, forgetAgent, probeAgent, MAX_AGENTS, MAX_ROWS_PER_AGENT } from '../../central/svcmonEdge.js';
 import { listAgentTokens } from '../../central/agentTokens.js';
@@ -72,6 +72,9 @@ svcmonRouter.put('/assign/:agent', canEdit, fullScopeOnly, (req, res) => {
     const includeSub = req.body?.includeSub !== false;
     const byAgent = req.body?.byAgent === true;   // 대상별 엣지 태그로 배정(대량등록 흐름의 원클릭 동기화)
     const exceptTypes = Array.isArray(req.body?.exceptTypes) ? req.body.exceptTypes : DEFAULT_EXCEPT_TYPES;
+    // 103회차 F1: 감시 대상 파일을 읽지 못한 동안(빈 목록)에 배정을 굳히면 엣지가 중앙 배포 점검을 전부 지운다 — 미리보기도 0건이라 같이 막는다.
+    const unreadable = svcmonStoreWriteRefusal();
+    if (unreadable) return res.status(409).json({ error: unreadable.reason, code: unreadable.code, readError: true });
     // 대상별 agent 규칙: 대상에 엣지가 박혀 있으면 '그 엣지 전용'이다.
     //  - byAgent 모드: 이 엣지에 태그된 대상만 스냅샷(경로 무시).
     //  - 경로 스코프 모드: 경로로 고르되, **다른 엣지 소유** 대상은 제외한다(한 대상을 둘이 점검 = 이중).
@@ -103,7 +106,7 @@ svcmonRouter.put('/assign/:agent', canEdit, fullScopeOnly, (req, res) => {
     const a = setAssignment(req.params.agent, { kind, path: scopePath, includeSub, byAgent, exceptTypes, note: req.body?.note },
       picked, { user: req.user?.username });
     res.json({ assignment: { ...a, targets: undefined }, tag: batchTag(a.sig), assignments: listAssignments() });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(e?.status === 409 ? 409 : 400).json({ error: e.message }); }
 });
 
 svcmonRouter.delete('/assign/:agent', canEdit, fullScopeOnly, (req, res) => {

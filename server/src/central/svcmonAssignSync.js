@@ -8,7 +8,7 @@
  *   그 엣지가 맡던 경로 대상이 통째로 빠진다(파괴적) — 그런 엣지는 '건너뜀' 으로 보고하고 엣지 배정 탭에서 사람이 고른다.
  *   배정은 대상 정의의 **스냅샷**이다(사용 여부 포함) — 중앙에서 대상을 켜고 꺼도 다시 굳히기 전에는 엣지가 모른다.
  */
-import { listTargets } from '../svcmon/store.js';
+import { listTargets, svcmonStoreReadError } from '../svcmon/store.js';
 import { capStr } from '../util/capStr.js';
 import { listAssignments, setAssignment, svcmonAssignLoadError, DEFAULT_EXCEPT_TYPES } from './svcmonAssign.js';
 
@@ -27,6 +27,8 @@ export function syncByAgentAssignments(agents, user = '', { note = '설정 연�
   //   못 읽었으면 아무것도 쓰지 않는다 — 사람이 엣지 배정 탭에서 확인한다(v2.915 설정 연동 적용 경로도 같이 막힌다).
   const loadErr = svcmonAssignLoadError();
   if (loadErr) return [...new Set((agents || []).map(t).filter(Boolean))].map((agent) => ({ agent, ok: false, reason: '엣지 배정 파일을 읽지 못했습니다(손상본을 보존했습니다) — 엣지 배정 탭에서 확인하기 전에는 배정을 다시 굳히지 않습니다.' }));
+  // 103회차 F1: 감시 대상 파일을 읽지 못한 동안(읽기 오류 — 빈 목록)에 굳히면 그 엣지 배정이 0건이 되어 엣지가 중앙 배포 점검을 전부 지운다.
+  if (svcmonStoreReadError()) return [...new Set((agents || []).map(t).filter(Boolean))].map((agent) => ({ agent, ok: false, reason: '서비스 감시 대상 파일(svcmon.json)을 읽지 못했습니다(읽기 오류 — 원본은 그대로) — 다시 읽힐 때까지 배정을 굳히지 않습니다.' }));
   let cur = [];
   try { cur = listAssignments(); } catch (e) { return agents.map((agent) => ({ agent, ok: false, reason: `배정 파일을 읽지 못했습니다: ${capStr(t(e?.message), 120)}` })); }
   const byName = new Map(cur.map((a) => [a.agent, a]));

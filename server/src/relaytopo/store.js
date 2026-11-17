@@ -15,7 +15,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 103회차 F4: 읽기 오류 ≠ 손상(손상 보존은 공용 읽기가 한다)
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
 import { parseCsvRows, csvLine, unguardCell } from '../util/csv.js';
 
@@ -141,11 +142,25 @@ export function normalizeTopology(input = {}, prev = null) {
 }
 
 let _cache = null;
+/*
+ * 103회차 F4(재현 — EISDIR): 예전 catch 하나는 **읽기 오류**도 손상으로 보고 원본(사이트 · 노드 SSH 비밀 봉인본)을 `.corrupt.*` 로 옮긴 뒤 빈 토폴로지를
+ *   캐시했다 — 다음 저장(normalizeTopology(입력, 빈 이전값))이 저장 비밀을 승계하지 못해 전 노드의 SSH 비밀이 보존본에만 남았다.
+ *   읽기 단계는 공용 읽기(util/jsonFileRead.js — 30초 간격 재읽기): 읽기 오류는 원본을 두고 · 캐시하지 않고 · 저장을 409 로 거절한다.
+ *   parse · 복호 실패는 예전과 같이 손상(보존본으로 옮김).
+ */
+const _reader = makeJsonFileReader(FILE, { parse: (t) => openSecretsDeep(JSON.parse(t)), tag: 'relaytopo' });
+let _readErr = null;   // { at, code }
+/** 103회차 F4: relay-topology.json 읽기 오류(원본은 그대로)면 `{ at, code }`, 아니면 null. */
+export function relayTopologyReadError() { loadRaw(); return _readErr ? { ..._readErr } : null; }
 function loadRaw() {
   if (!_cache) {
-    let raw = {};
-    try { if (fs.existsSync(FILE())) raw = openSecretsDeep(JSON.parse(fs.readFileSync(FILE(), 'utf8'))); } catch { preserveCorrupt(FILE()); raw = {}; }
-    _cache = normalizeTopology(raw);
+    const rr = _reader.read();
+    if (rr.kind === 'read-error') {
+      if (!_readErr) _readErr = { at: Date.now(), code: String(rr.error?.code || 'read-error').slice(0, 32) };
+      return normalizeTopology({});   // 캐시하지 않는다 — 저장은 saveTopology 가 거절한다
+    }
+    _readErr = null;
+    _cache = normalizeTopology(rr.kind === 'ok' ? rr.value : {});
   }
   return _cache;
 }
@@ -156,7 +171,10 @@ export function loadTopology() { return redactTopology(loadRaw()); }
 export function saveTopology(input = {}) {
   // v2.733(점검 3회차 C4-04): 캐시는 **디스크 쓰기 성공 뒤에만** — 예전에는 먼저 바꿔, 저장 실패 뒤에도 SSH 비밀 포함 토폴로지가 메모리에
   //   남아 점검·렌더·적용이 그 값을 썼다. 정규화가 붙인 비열거 필드(secretsDropped 등)는 next 에 붙어 있어 _cache = next 로 그대로 넘어간다.
-  const next = normalizeTopology(input, loadRaw());
+  // 103회차 F4: 읽기 오류 중에는 이전값(저장 비밀)이 없다 — 저장하면 원본 자리를 비밀 없는 토폴로지로 덮는다(라우트 409).
+  const prev = loadRaw();
+  if (_readErr) throw Object.assign(new Error(`중계 토폴로지 파일(relay-topology.json)을 읽지 못한 상태라 저장하지 않았습니다 — 읽기 오류(${_readErr.code})이고 원본(저장 비밀 포함)은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).`), { status: 409, code: 'settings-unreadable', readError: true });
+  const next = normalizeTopology(input, prev);
   atomicWriteFileSync(FILE(), JSON.stringify(sealSecretsDeep({ version: 1, ...next }), null, 2), { mode: 0o600 });
   _cache = next;
   try { fs.chmodSync(FILE(), 0o600); } catch { /* 신규 생성 외 덮어쓰기에도 0600 */ }
@@ -165,7 +183,7 @@ export function saveTopology(input = {}) {
   for (const k of ['servicesDropped', 'servicesReset', 'secretsDropped']) if (_cache[k] !== undefined) Object.defineProperty(out, k, { value: _cache[k], enumerable: false });
   return out;
 }
-export function _resetForTest() { _cache = null; }
+export function _resetForTest() { _cache = null; _readErr = null; _reader.reset(); }
 
 const redactSsh = (s) => { const out = { port: s?.port || 22, username: s?.username || '' }; for (const k of SSH_SECRETS) out[`has${k[0].toUpperCase()}${k.slice(1)}`] = !!s?.[k]; return out; };
 const redactNode = (n) => ({ ...n, ssh: redactSsh(n?.ssh) });
