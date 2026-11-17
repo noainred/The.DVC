@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';   // 86회차 F4
 import { getPackageBaseUrl, getPackageDir } from './packageSettings.js';
 import { upgradeAgent } from './upgradeAgent.js';
 import { resilientFetch } from '../util/resilientFetch.js';
@@ -143,7 +144,8 @@ export async function downloadPackage({ kind = 'installer', version, baseUrl, di
   if (!sig.ok) return { ok: false, reason: sig.reason, signature: signatureSummary(sig) };
 
   const dest = path.join(dir, safeName);
-  fs.writeFileSync(dest, buf);
+  // 86회차 F4: 임시 파일 + rename — 반쯤 쓴 패키지(최대 1.5GB)를 디스크가 찬 채로 남기거나 /dl · 엣지 동기화가 쓰는 중인 파일을 읽지 않게(fleetBundle 과 같은 규칙).
+  atomicWriteFileSync(dest, buf, { mode: 0o644 });
   // manifest 도 같은 폴더에 둔다 — 중앙 /dl 이 엣지에 함께 내주고(routes/dlsource.js), 엣지가 설치 전에 검증한다.
   if (man.text) { try { fs.writeFileSync(path.join(dir, manName), man.text); } catch { /* 엣지가 '서명 없음' 으로 거부한다 — 사유가 보인다 */ } }
   return { ok: true, kind, version: v.version, file: safeName, path: dest, sizeBytes: buf.length, sha256: got, verified: Boolean(sha), signature: signatureSummary(sig) };

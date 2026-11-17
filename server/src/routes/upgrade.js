@@ -8,6 +8,7 @@ import { requireRole } from '../auth/auth.js';
 import { upgradeManager } from '../upgrade/manager.js';
 import { holdPushIfBusy, clearPushHold } from '../upgrade/pushHold.js';   // 51회차 #3
 import { bundleShaIssue } from '../upgrade/upgrade.js'; // v2.480(3차 감사): 엣지 수신 번들 sha256 검증
+import { checkpointConfigDbs } from '../upgrade/dbCheckpoint.js';   // 86회차 F3: 설치 전 WAL 체크포인트(수집기 라우트와 같은 순서)
 import { upgradeFromBundleBytes, restartProcess } from '../upgrade/upgrade.js';
 import { decodeManifestHeader, MANIFEST_HEADER } from '../upgrade/signature.js'; // v2.730(검토 S-10): push 의 서명 manifest
 import { loadSettings as loadUpgradeSettings, upgradeTokenDropped } from '../upgrade/settings.js'; // v2.731(A3-01 ①)
@@ -259,13 +260,16 @@ upgradeRouter.post('/edge-sync', adminOnly, async (req, res) => {
 // Edge endpoint: accept a tar.gz bundle pushed by the portal and self-install.
 // Raw gzip body; admin-gated like the rest.
 upgradeRouter.post('/bundle', adminOnly, express.raw({ type: ['application/gzip', 'application/octet-stream'], limit: '210mb' }),
-  (req, res) => {
+  async (req, res) => {
     const s = upgradeManager.settings;
     if (!upgradeManager.enabled) return res.status(409).json({ ok: false, reason: 'auto-upgrade disabled' });
     if (!s.installDir) return res.status(409).json({ ok: false, reason: 'installDir not set' });
     if (!req.body || !req.body.length) return res.status(400).json({ ok: false, reason: 'empty bundle' });
     const shaIssue = bundleShaIssue(req.get('x-bundle-sha256'), req.body);
     if (shaIssue) return res.status(400).json({ ok: false, reason: shaIssue });
+    // 86회차 F3(재현): 설정 디렉터리 재귀 복사(preserveUserConfig) 전에 라이브 WAL SQLite 체크포인트 — 형제 수집기 라우트(/api/collector/upgrade) ·
+    //   자동 적용(manager) · 보류 해제(pushHold) 는 하는데 옛 방식 엣지 push 만 빠져 .db 와 -wal 이 다른 순간으로 복사될 수 있었다(best-effort).
+    try { await checkpointConfigDbs(config.configDir); } catch { /* never block upgrade */ }
 
     // 51회차 #3(사용자 결정): 재시작 요청 push 는 자동 적용과 같은 진행 중 작업을 같은 상한까지 기다린다 — 설치 자체를 미룬다(upgrade/pushHold.js).
     if (String(req.query.restart) === 'true') {

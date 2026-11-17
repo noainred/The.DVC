@@ -24,6 +24,7 @@ import { readBytesCapped } from '../util/readBytesCapped.js'; // v2.607 SEC2607-
 import { recordOutbound } from '../util/outboundStats.js'; // v2.727(감사 D-06): 전역 fetch 경로라 직접 기록(collector/upgradePush.js 와 같은 형태)
 import { reqTimeoutMs } from '../agent/envTimeout.js'; // v2.607 TIM2607-02: push 시한 정규화
 import { readTextCapped } from '../util/readCapped.js';
+import { atomicWriteFileSync } from '../util/atomicWrite.js';   // 86회차 F4: 받은 번들은 임시 파일 + rename
 // v2.730(검토 S-10·I-08): 배포자 서명 판정 하나(signature.js) · 메타데이터 상한·형식(versionsDoc.js)
 import {
   decideSignature, signatureSummary, manifestPathForArchive, archiveVersionOf, readManifestFile, encodeManifestHeader, MANIFEST_HEADER,
@@ -271,13 +272,33 @@ export function upgradeFromArchive(archivePath, installDir, currentVersion, pkgN
   } catch (err) {
     return { ok: false, reason: `failed to read archive: ${err.message}`, signature: signatureSummary(sig) };
   }
+  const rel = archiveRelInInstall(archivePath, installDir);   // 86회차 F1: 스왑 전에(둘 다 있을 때) 잰다
   const res = applyIfNewer(members, installDir, currentVersion, { signedVersion: sig.verified ? sig.version : null });
   res.signature = signatureSummary(sig);
   // 적용된 아카이브 경로를 노출 — manager.pushToEdges가 이 경로로 엣지에 같은 번들을 푸시한다.
   // (이전엔 res.appliedArchive가 항상 undefined라, watchDir 없는 remoteBase-only 중앙은 엣지
   //  업그레이드 푸시가 조용히 no-op이 되어 버전이 갈라졌다.)
-  if (res.ok) res.appliedArchive = archivePath;
+  // 86회차 F1(재현): 기본 downloadDir(<앱>/server/.upgrade-cache)은 설치 디렉터리 **안**이라 스왑이 받은 번들을 백업(<설치>.bak.<ts>)으로
+  //   옮긴다 — 예전에는 옮기기 전 경로를 돌려줘 적용 직후 보관(keepBundle) · 엣지 push · 수집 서버 push 가 전부 ENOENT 로 실패했다
+  //   (수집 서버 화면 '번들을 다시 확인하지 못해 수집 서버에 보내지 않았습니다'). 옮겨진 경로를 돌려준다(옆의 manifest 도 같이 옮겨졌다).
+  if (res.ok) res.appliedArchive = movedArchivePath(archivePath, rel, res.backup);
   return res;
+}
+
+/** 번들이 설치 디렉터리 안에 있으면 그 상대 경로(실경로 기준 — 심볼릭 링크 설치 경로 포함), 아니면 null. */
+export function archiveRelInInstall(archivePath, installDir) {
+  const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+  for (const [a, d] of [[real(archivePath), real(installDir)], [path.resolve(archivePath), path.resolve(installDir)]]) {
+    const rel = path.relative(d, a);
+    if (rel && rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel)) return rel;
+  }
+  return null;
+}
+/** 스왑 뒤 번들 경로 — 원래 자리에 있으면 그대로, 설치 디렉터리와 함께 백업으로 옮겨졌으면 그 경로. */
+export function movedArchivePath(archivePath, rel, backup) {
+  if (fs.existsSync(archivePath) || !rel || !backup) return archivePath;
+  const moved = path.join(backup, rel);
+  return fs.existsSync(moved) ? moved : archivePath;
 }
 
 /**
@@ -621,7 +642,9 @@ export async function downloadArchive(url, destDir, { token, timeout = 120_000, 
     if (!sig.ok) return { ok: false, reason: sig.reason, signature: signatureSummary(sig) };
     fs.mkdirSync(destDir, { recursive: true });
     const dest = path.join(destDir, name);
-    fs.writeFileSync(dest, buf);
+    // 86회차 F4(재현 — ENOSPC): 임시 파일 + rename(실패하면 임시 파일을 지운다). 예전 writeFileSync 는 디스크가 차면 반쯤 쓴 번들을
+    //   정식 이름으로 남겨(다음 확인 주기까지) 찬 디스크를 그대로 두었다(applyPackage 스테이징 정리 v2.591 P7 과 같은 이유).
+    atomicWriteFileSync(dest, buf, { mode: 0o644 });
     const manPath = manifestPathForArchive(dest);
     if (manText && manPath) { try { fs.writeFileSync(manPath, String(manText)); } catch { /* push 가 manifest 를 못 싣게 될 뿐 — 수신측이 '없음' 으로 거부한다 */ } }
     return { ok: true, path: dest, size: buf.length, signature: signatureSummary(sig), manifestText: manText ?? null };
