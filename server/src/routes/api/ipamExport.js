@@ -181,7 +181,7 @@ api.put('/tools/ipam/subnet-note', canWrite, requirePerm('tools'), (req, res) =>
   let r;
   try { r = setSubnetNote(b.base, { purpose: b.purpose, desc: b.desc }, req.user?.username); }
   catch (e) { return res.status(500).json({ error: `저장하지 못했습니다: ${e?.code || 'write-failed'}` }); }
-  if (!r.ok) return res.status(400).json({ error: r.reason });
+  if (!r.ok) return res.status(r.code === 'settings-unreadable' ? 409 : 400).json({ error: r.reason, ...(r.code ? { code: r.code } : {}) });   // 60회차 F2: 파일을 못 읽은 동안은 409
   logAudit({ user: req.user?.username, action: '대역 용도 저장', target: `대역 ${b.base}`, detail: JSON.stringify(r.note || {}).slice(0, 600) });
   res.json({ ok: true, note: r.note });
 });

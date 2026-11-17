@@ -66,11 +66,15 @@ export async function get(device, apiPath, { signal } = {}) { // v2.308: 영역 
   return res.json();
 }
 
-/** 주 경로 실패 시 대체 경로 순차 시도(버전별 경로 차이 흡수). 전부 실패면 마지막 오류 throw. */
+/**
+ * 주 경로 실패 시 대체 경로 순차 시도(버전별 경로 차이 흡수). 전부 실패면 마지막 오류 throw.
+ * 57회차 I1: 자격증명 거부(401)는 즉시 던진다 — 형제 restCommon.tryAny 와 같은 규칙(계정 잠금 예방). 예전에는 다음 후보 경로로 같은
+ *   잘못된 자격증명을 한 번 더 보냈다(수집 · 노드 부하 표본 · PowerScale 점검이 함께 쓴다).
+ */
 export async function getAny(device, paths) {
   let err;
   for (const p of paths) {
-    try { return await get(device, p); } catch (e) { err = e; }
+    try { return await get(device, p); } catch (e) { err = e; if (isCredReject(e)) throw e; }
   }
   throw err;
 }

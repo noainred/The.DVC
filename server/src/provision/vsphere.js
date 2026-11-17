@@ -19,12 +19,12 @@ import { morefOf } from '../vcenter/registry.js';   // v2.447: 콜론 포함 vce
 // (snapshot ids are `${vcId}:${moref}`), scoped to one vCenter.
 // v2.447(감사 B1): vcenterId 에 콜론이 있을 수 있어 split(':') 로 자르면 MoRef 가 깨진다 —
 // 공용 morefOf(id, vcenterId) 로 통일(vcenter/registry.js).
-function findHostRef(vcenterId, name) {
-  const h = store.get().hosts.find((x) => x.vcenterId === vcenterId && x.name === name);
+export function findHostRef(vcenterId, name) {
+  const h = (store.get().hosts || []).find((x) => x.vcenterId === vcenterId && x.name === name);
   return h ? morefOf(h.id, vcenterId) : null;
 }
-function findDatastoreRef(vcenterId, name) {
-  const d = store.get().datastores.find((x) => x.vcenterId === vcenterId && x.name === name);
+export function findDatastoreRef(vcenterId, name) {
+  const d = (store.get().datastores || []).find((x) => x.vcenterId === vcenterId && x.name === name);
   return d ? morefOf(d.id, vcenterId) : null;
 }
 
@@ -116,22 +116,30 @@ export function createProvisioner(vc) {
   return {
     async cloneOne(source, vm, { powerOn = false, placement = {} } = {}) {
       await ensureLogin();
-      const srcRef = morefOf(source.id, source.vcenterId || vcenterId) || source.id;
+      // 74회차 F7: 예전 대체값은 이 범위에 없는 이름(vcenterId)이라 원본에 vcenterId 가 비면 ReferenceError 였다 — 이 vCenter 의 id 로.
+      const srcRef = morefOf(source.id, source.vcenterId || vc.id) || source.id;
       // Target folder: the operator's choice would need a name→MoRef lookup; for
       // now we place into the source's parent folder (same as source).
       const folder = await parentFolder(srcRef);
       if (!folder) throw new Error('원본 VM의 폴더를 찾을 수 없습니다 (parent Folder 조회 실패).');
 
       // RelocateSpec: pin host / datastore when chosen (resolved from snapshot).
+      // 74회차 F5: 고른 호스트 · 데이터스토어를 스냅샷에서 못 찾으면(그 사이 빠졌다) 예전에는 조용히 빼고 원본 위치에 만들었다 —
+      //   사용자가 고른 곳이 아닌 데 만들지 않고 그 VM 을 실패로 남긴다(작업 시작 전 검사는 jobs.js createJob — 이것은 그 뒤 스냅샷이 바뀐 경우).
       const hostRef = placement.host ? findHostRef(source.vcenterId, placement.host) : null;
       const dsRef = placement.datastore ? findDatastoreRef(source.vcenterId, placement.datastore) : null;
+      if (placement.host && !hostRef) throw new Error(`선택한 호스트 '${placement.host}' 를 현재 인벤토리에서 찾을 수 없습니다 — 원본 위치에 만들지 않았습니다.`);
+      if (placement.datastore && !dsRef) throw new Error(`선택한 데이터스토어 '${placement.datastore}' 를 현재 인벤토리에서 찾을 수 없습니다 — 원본 위치에 만들지 않았습니다.`);
       // vim25 VirtualMachineRelocateSpec 시퀀스: (…) datastore → (…) host → profile.
       // datastore를 host보다 먼저 emit해야 한다 — 순서가 뒤바뀌면 host+datastore를 함께 지정한
       // 클론 요청이 unexpected-element로 매 VM 실패한다.
+      // 74회차 F6(추정 — pyVmomi 9.1.1.0 _typeinfo_vim 대조, 실 vCenter 미확인): 스토리지 프로파일은 보내지 않는다. 예전 본문
+      //   (profile 안에 profile 을 다시 넣고 그 안에 프로파일 이름 칸을 둔 모양)은 스키마에 없는 모양이다 — RelocateSpec.profile 은
+      //   ProfileSpec[](원소마다 xsi:type 을 단 profile 요소)이고 VirtualMachineDefinedProfileSpec 의 필수 필드는 profileId(SPBM 프로파일 UUID)이며
+      //   이름 필드는 없다. 이름 → UUID 해석(SPBM API)이 없으므로 화면이 '적용 안 됨' 으로 밝힌다(placement.js placementNotApplied).
       const reloc =
         (dsRef ? `<datastore type="Datastore">${dsRef}</datastore>` : '') +
-        (hostRef ? `<host type="HostSystem">${hostRef}</host>` : '') +
-        (placement.storageProfile ? `<profile><profile xsi:type="VirtualMachineDefinedProfileSpec"><profileName>${esc(placement.storageProfile)}</profileName></profile></profile>` : '');
+        (hostRef ? `<host type="HostSystem">${hostRef}</host>` : '');
       const windows = isWindows(source.guestOS);
       const spec =
         `<spec>` +

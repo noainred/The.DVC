@@ -32,7 +32,8 @@ const qStr = (v, n) => (typeof v === 'string' ? capStr(v.trim(), n) : '');
 function run(snap, req) {
   const scoped = scopeSlice(snap, req.user, qStr(req.query.vcenterId, 128) || undefined);
   const vcName = new Map((scoped.vcenters || []).map((v) => [v.id, v.name || v.id]));
-  const r = analyzeVmHygiene(scoped.vms, loadVmHygieneSettings(), {
+  const hs = loadVmHygieneSettings();
+  const r = analyzeVmHygiene(scoped.vms, hs, {
     vcName,
     code: qStr(req.query.code, 32) || undefined,
     sev: qStr(req.query.sev, 8) || undefined,
@@ -44,6 +45,9 @@ function run(snap, req) {
   const notReadVcenters = notReadVcentersOf(scoped);
   r.notReadVcenters = notReadVcenters;
   r.partial = notReadPartialOf(notReadVcenters);
+  // 71회차(69회차 F4 반증): 설정 파일을 읽지 못했으면(unreadable) 판정은 기본값(예외 없음 · 기본 기준)으로 한 것이다 — 응답에 밝혀 화면이
+  //   기본 기준의 '정상' 을 설정한 기준의 정상으로 말하지 않게 한다(r.settings 는 기준 다섯 칸만 싣는다).
+  r.settingsUnreadable = hs.unreadable === true;
   return r;
 }
 
@@ -103,6 +107,8 @@ export function registerVmHygiene(api) {
     // v2.744(회귀 검토 GF-R2 형제): 읽지 못한 것과 비활성을 나눠 한글 사유로 적는다 — 판정·문구는 corelicense/analyze.js notReadCsvLines 한 벌.
     // v2.744(최종 검토 RV-3·RX-CSV-01): 이 파일은 판정 목록이라 합계가 없다 — mode 'judge'(화면 notReadJudgeNote 와 같은 뜻 · 같은 명사).
     for (const t of notReadCsvLines(r.notReadVcenters, { mode: 'judge', noun: 'VM' })) lines.push(csvLine([t]));
+    // 69회차 I1: 상한으로 잘렸으면 파일에도 밝힌다(헤더 X-Omitted-Rows 만으로는 파일만 받은 사람이 모른다 — 32회차 F4 형제와 같은 모양).
+    if (r.omitted) lines.push(csvLine([`(상한으로 ${r.omitted}행 생략 — 전체 ${r.matched}대)`]));
     logAudit({ user: req.user?.username, action: 'vm-hygiene.csv', target: 'vm-hygiene', detail: `${r.rows.length} rows${r.omitted ? ` (+${r.omitted} omitted)` : ''}`, ip: req.ip });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="vm-hygiene-${fileStamp()}.csv"`);

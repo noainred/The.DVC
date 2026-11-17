@@ -158,7 +158,7 @@ export default function StorageUsageTool({ isAdmin = false }) {
         <Kpi label="사용" value={bytesText(cur?.usedBytes, unit)} meta={`사용률 ${pctText(cur?.pct)}`} tone={pctTone(cur?.pct) === 'crit' ? 'bad' : pctTone(cur?.pct) === 'warn' ? 'warn' : ''} />
         <Kpi label={prevLabel ? `${prevLabel} 대비` : '직전 기간 대비'} value={deltaText(total.delta, unit)} meta={total.deltaWhy || '사용량 변화'} />
         <Kpi label={`${periods[0]?.label || ''} → ${periods[periods.length - 1]?.label || ''}`} value={deltaText(total.range, unit)}
-          meta={total.avg != null ? `${granLabel === '일간' ? '하루' : granLabel === '주간' ? '한 주' : '한 달'} 평균 ${deltaText(total.avg, unit)}` : '범위 양 끝이 완전한 합계일 때만 냅니다'} />
+          meta={total.avg != null ? `${granLabel === '일간' ? '하루' : granLabel === '주간' ? '한 주' : '한 달'} 평균 ${deltaText(total.avg, unit)}` : '범위 양 끝이 같은 장비로 된 완전한 합계일 때만 냅니다'} />
       </div>
 
       {/* ── 조건(메일 탭에서는 숨긴다 — 메일은 화면 필터와 무관하게 전체 장비다) ── */}

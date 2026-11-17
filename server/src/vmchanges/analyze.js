@@ -10,6 +10,18 @@
  */
 import { MOVE_TYPES, RECONFIG_TYPES, PERM_TYPES, parseDetail, moveKind } from './eventDetail.js';
 import { dayIndex, dayStartMs } from '../util/dayKey.js';   // v2.727(감사 C-03): 날짜 경계는 포탈 오프셋(util/dayKey.js) 하나 — KST 상수 금지
+import { FUTURE_CLOCK_TOLERANCE_MS } from '../logs/clockTolerance.js';   // 69회차 F2: 미래 행 경계 — 폴러 · coverage · 가용성과 같은 값
+
+/**
+ * 69회차 F2(재현 — v2.783 L-B1 의 형제 경로): 이력 화면(이동 · 변경 · 생성/삭제)의 vCenter 별 '마지막으로 받은 이벤트 시각'.
+ *   DB 에 남은 미래 행 1건(2099 등 — prune 은 ts < ? 라 남는다)이 원본 MAX 를 미래로 밀어, 화면의 '마지막 이벤트가 이틀 넘게 지난 vCenter'
+ *   경고와 VM 상세의 지연 대체 판단이 영영 뜨지 않았다. 지금 + 여유(FUTURE_CLOCK_TOLERANCE_MS) 이하의 MAX 를 쓴다(가용성 · 수집 진단과 같은 경계).
+ */
+export const eventLastTsOf = (db, id, now = Date.now()) => db.lastTs(id, { maxTs: now + FUTURE_CLOCK_TOLERANCE_MS }) || null;
+/** 이력 화면의 수집 범위 행(상한 200) — vm-changes · vm-lifecycle 이 같은 모양을 쓴다. nc = 지금 이벤트를 수집하지 않는 vCenter 사유 맵. */
+export function eventCoverageRows(db, ids, { vcName = new Map(), nc = new Map(), now = Date.now() } = {}) {
+  return (ids || []).slice(0, 200).map((id) => ({ vcenterId: id, name: vcName.get(id) || id, lastTs: eventLastTsOf(db, id, now), ...(nc.has(id) ? { notCollected: nc.get(id) } : {}) }));
+}
 
 /** 7일에 10번 — 기간에 비례해 늘린다(14일이면 20). VM 하나가 이 이상 옮겨 다니면 '과다 이동' 후보다. */
 export const CHURN_PER_WEEK = 10;

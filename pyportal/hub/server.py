@@ -368,11 +368,13 @@ class HubHandler(BaseHTTPRequestHandler):
             "loadError": self.ctx.datacenters.load_error(),
         })
 
-    def api_health_latest(self):
+    def _latest_alive(self):
         # 삭제된 바로가기의 이력은 차트에는 남기되 '최근 상태' 표에는 띄우지 않는다.
         alive = {item["id"] for item in self.ctx.shortcuts.all()}
-        results = [row for row in self.ctx.history.latest().values() if row["id"] in alive]
-        return self._json({"success": True, "results": results})
+        return [row for row in self.ctx.history.latest().values() if row["id"] in alive]
+
+    def api_health_latest(self):
+        return self._json({"success": True, "results": self._latest_alive()})
 
     def api_health_history(self):
         query = self._query()
@@ -406,8 +408,9 @@ class HubHandler(BaseHTTPRequestHandler):
         results = self.ctx.run_health_check(targets)
         if results is None:
             # 이전 점검이 아직 진행 중 — 새로 돌리지 않고 최신 결과를 돌려준다.
-            return self._json({"success": True, "results": list(self.ctx.history.latest().values()),
-                               "skipped": True})
+            # 56회차 F6(재현): /api/health/latest 와 같은 규칙으로 삭제된 바로가기의 옛 이력은 뺀다 — 예전에는 이 응답만 그 행을 실어
+            #   '최근 상태' 표에 '(삭제됨)' 줄이 떠올랐다(다음 30초 갱신까지).
+            return self._json({"success": True, "results": self._latest_alive(), "skipped": True})
         return self._json({"success": True, "results": results, "skipped": False,
                            "checkedAt": self.date_time_string()})
 
@@ -625,28 +628,35 @@ class HubHandler(BaseHTTPRequestHandler):
                            .get("datacenterLimit", 0)})
 
     def api_dc_create(self):
-        if not self._require_admin():
+        actor = self._require_admin()
+        if not actor:
             return None
         created = self.ctx.datacenters.add(self._body_dict())
+        # 56회차 F5: README 가 약속한 '설정 변경' 감사 — 데이터센터 생성 · 수정 · 삭제 · 이동이 빠져 있었다(초기화만 남았다)
+        self._audit("datacenter.create", actor=actor["username"], detail={"id": created["id"]})
         return self._json({"success": True, "datacenter": created,
                            "datacenters": self.ctx.datacenters.all()}, status=HTTPStatus.CREATED)
 
     def api_dc_update(self, dc_id):
-        if not self._require_admin():
+        actor = self._require_admin()
+        if not actor:
             return None
         updated = self.ctx.datacenters.update(dc_id, self._body_dict())
         if not updated:
             return self._error(HTTPStatus.NOT_FOUND, "데이터센터를 찾을 수 없습니다.")
+        self._audit("datacenter.update", actor=actor["username"], detail={"id": dc_id})
         return self._json({"success": True, "datacenter": updated,
                            "datacenters": self.ctx.datacenters.all()})
 
     def api_dc_delete(self, dc_id):
-        if not self._require_admin():
+        actor = self._require_admin()
+        if not actor:
             return None
         if not self.ctx.datacenters.delete(dc_id):
             return self._error(HTTPStatus.NOT_FOUND, "데이터센터를 찾을 수 없습니다.")
         # v2.760(점검 B-07): 그 데이터센터에 묶인 바로가기는 '전체'로 옮긴다(카테고리 삭제와 같은 규칙).
         moved = self.ctx.shortcuts.reassign_missing_datacenters(self.ctx.datacenters.ids())
+        self._audit("datacenter.delete", actor=actor["username"], detail={"id": dc_id, "movedShortcuts": moved})
         return self._json({"success": True, "datacenters": self.ctx.datacenters.all(),
                            "shortcuts": self.ctx.shortcuts.all(), "movedShortcuts": moved})
 
@@ -661,13 +671,16 @@ class HubHandler(BaseHTTPRequestHandler):
                            "shortcuts": self.ctx.shortcuts.all(), "movedShortcuts": moved})
 
     def api_dc_move(self, dc_id):
-        if not self._require_admin():
+        actor = self._require_admin()
+        if not actor:
             return None
         items = self.ctx.datacenters.move(dc_id, self._move_delta())
         if items is None:
             # 이미 맨 위/맨 아래 — 오류가 아니라 '변경 없음' 이다.
             return self._json({"success": True, "moved": False,
                                "datacenters": self.ctx.datacenters.all()})
+        # '표시 개수 N' 이 앞에서 N곳을 자르므로 순서 변경은 공개 화면에 보이는 센터를 바꾼다 — 설정 변경으로 남긴다.
+        self._audit("datacenter.move", actor=actor["username"], detail={"id": dc_id})
         return self._json({"success": True, "moved": True, "datacenters": items})
 
     def _move_delta(self) -> int:
@@ -695,11 +708,13 @@ class HubHandler(BaseHTTPRequestHandler):
                            "categories": self.ctx.categories.all()}, status=HTTPStatus.CREATED)
 
     def api_cat_update(self, cat_id):
-        if not self._require_admin():
+        actor = self._require_admin()
+        if not actor:
             return None
         updated = self.ctx.categories.update(cat_id, self._body_dict())
         if not updated:
             return self._error(HTTPStatus.NOT_FOUND, "카테고리를 찾을 수 없습니다.")
+        self._audit("category.update", actor=actor["username"], detail={"id": cat_id})   # 56회차 F5
         return self._json({"success": True, "category": updated,
                            "categories": self.ctx.categories.all()})
 
@@ -717,12 +732,14 @@ class HubHandler(BaseHTTPRequestHandler):
                            "shortcuts": self.ctx.shortcuts.all(), "movedShortcuts": moved})
 
     def api_cat_move(self, cat_id):
-        if not self._require_admin():
+        actor = self._require_admin()
+        if not actor:
             return None
         items = self.ctx.categories.move(cat_id, self._move_delta())
         if items is None:
             return self._json({"success": True, "moved": False,
                                "categories": self.ctx.categories.all()})
+        self._audit("category.move", actor=actor["username"], detail={"id": cat_id})   # 56회차 F5
         return self._json({"success": True, "moved": True, "categories": items})
 
     def api_cat_reset(self):
@@ -826,16 +843,25 @@ class HubHandler(BaseHTTPRequestHandler):
         return self._json({"success": True, "moved": True, "shortcuts": items})
 
     def api_shortcut_delete(self, shortcut_id):
-        if not self._require_session():
+        user = self._require_session()
+        if not user:
             return None
+        before = self.ctx.shortcuts.get(shortcut_id)
         if not self.ctx.shortcuts.delete(shortcut_id):
             return self._error(HTTPStatus.NOT_FOUND, "바로가기를 찾을 수 없습니다.")
+        # 56회차 F5: 지우는 동작은 남긴다(viewer 도 할 수 있다) — 같은 꼴의 '교체' 가져오기(shortcuts.import)는 이미 남기는데 삭제 · 초기화만 빠져 있었다
+        self._audit("shortcut.delete", actor=user["username"],
+                    detail={"id": shortcut_id, "name": (before or {}).get("name", "")})
         return self._json({"success": True, "shortcuts": self.ctx.shortcuts.all()})
 
     def api_shortcut_reset(self):
-        if not self._require_session():
+        user = self._require_session()
+        if not user:
             return None
-        return self._json({"success": True, "shortcuts": self.ctx.shortcuts.reset()})
+        before = len(self.ctx.shortcuts.all())
+        shortcuts = self.ctx.shortcuts.reset()
+        self._audit("shortcuts.reset", actor=user["username"], detail={"removed": before, "added": len(shortcuts)})   # 56회차 F5
+        return self._json({"success": True, "shortcuts": shortcuts})
 
     def _resolve_import_category(self, user, value):
         """가져오기 일괄 카테고리(v2.219) — id/라벨로 찾고, 없으면 admin 에 한해 즉석 생성.
@@ -1010,7 +1036,12 @@ class HubHandler(BaseHTTPRequestHandler):
             return self._error(HTTPStatus.NOT_FOUND, f"파일이 없습니다: {name}")
         if path.stat().st_size > self.IMPORT_MAX_BYTES:
             return self._error(HTTPStatus.BAD_REQUEST, "파일이 너무 큽니다(최대 2MB).")
-        text = path.read_text(encoding="utf-8-sig")  # 엑셀 BOM 허용
+        try:
+            text = path.read_text(encoding="utf-8-sig")  # 엑셀 BOM 허용
+        except OSError as exc:
+            # 56회차 개선: 권한 오류(root 가 올린 0600 파일 등)는 예전에 _dispatch 의 '서버 내부 오류'(500)로 떨어져 원인을 알 수 없었다
+            return self._error(HTTPStatus.BAD_REQUEST,
+                               f"파일을 읽지 못했습니다: {name} ({exc.strerror or type(exc).__name__}) — 파일 소유자 · 권한을 확인하세요.")
         if name.lower().endswith(".csv"):
             entries = csvio.parse_csv(text)
         else:
@@ -1039,12 +1070,15 @@ class HubHandler(BaseHTTPRequestHandler):
 
         # '..' 이나 절대경로로 STATIC_DIR 밖을 읽지 못하게 정규화 후 재확인한다.
         relative = posixpath.normpath(path).lstrip("/")
-        candidate = (STATIC_DIR / relative).resolve()
         try:
+            candidate = (STATIC_DIR / relative).resolve()
             candidate.relative_to(STATIC_DIR.resolve())
-        except ValueError:
+            servable = candidate.suffix.lower() in STATIC_SUFFIXES and candidate.is_file()
+        except (ValueError, OSError):
+            # 56회차 F8(재현): NUL 이 든 경로(ValueError)·너무 긴 파일 이름(ENAMETOOLONG)은 이 함수가 _dispatch 의 try 밖이라
+            #   응답 없이 연결이 끊기고 요청 줄 전체가 든 traceback 이 로그에 쌓였다(미인증 요청 한 줄 — v2.768 R3-C3-3 과 같은 꼴).
             return self._error(HTTPStatus.NOT_FOUND, "없는 경로입니다.")
-        if candidate.suffix.lower() not in STATIC_SUFFIXES or not candidate.is_file():
+        if not servable:
             # SPA 해시 라우팅(#/settings 등)은 서버에 오지 않지만, 오탈자 경로는
             # 404 대신 첫 화면으로 보내 사용자가 막히지 않게 한다.
             return self._send_file(STATIC_DIR / "index.html")

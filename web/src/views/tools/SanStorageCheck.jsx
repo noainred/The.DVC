@@ -137,6 +137,7 @@ function SettingsModal({ initial, onClose, onSaved }) {
     <Modal title="성능 점검 기준(임계값)" onClose={onClose} width={860}>
       <div className="sst" style={{ gap: 10 }}>
         <div className="sst-note">값을 지우고 '비움' 을 켜면 그 항목은 판정하지 않습니다(값만 표시 · '?'). 빈 칸으로 저장하면 기본값으로 돌아갑니다. 기본값은 벤더 문서 값(출처)이고 못 찾은 항목은 처음부터 비어 있습니다.</div>
+        {initial?.loadError && <div className="sst-info">임계값 설정 파일을 읽지 못해 지금 판정은 기본값으로 돌고 저장도 받지 않습니다 — {String(initial.loadError.reason || '사유 미상')}. 손상 보존본을 되돌리고 재시작하거나, 서비스 점검에서 기본값으로 확정하세요.</div>}
         <div className="sst-table-wrap">
           <STable>
             <thead><tr><th>항목</th><th>값</th><th>비움</th><th>기본값</th><th>출처</th></tr></thead>
@@ -191,6 +192,8 @@ function NotifyModal({ isAdmin, items, onClose }) {
       <div className="sst" style={{ gap: 10 }}>
         <div className="sst-note">판정(현황 · 점검과 같은 함수)을 포트 사용량 수집 주기(하한 5분)마다 돌려 <b>상태가 바뀐 순간만</b> 법인 단위로 알립니다(정상 → 주의 · 주의 → 이상 · 회복 · 수집 상태의 보고 끊김). 확인 불가(값 없음)는 올리지도 내리지도 않습니다. 채널 · 수신자는 설정 › 알림의 알림 규칙과 같습니다. 엣지는 보내지 않습니다.</div>
         {err && <div className="sst-info">{err}</div>}
+        {/* 58회차 F5: 설정 파일을 못 읽은 동안 '알림 켬' 칸은 저장값이 아니라 기본값(꺼짐)이다 — 꺼 둔 것으로 보이지 않게 밝힌다. */}
+        {got?.loadError && <div className="sst-info">알림 설정 파일을 읽지 못해 알림을 보내지 않고 저장도 받지 않습니다 — {String(got.loadError.reason || '사유 미상')}. 아래 값은 저장된 설정이 아니라 기본값입니다. 손상 보존본을 되돌리고 재시작하거나, 서비스 점검에서 기본값으로 확정하세요.</div>}
         {!got ? <Loading label="알림 설정" /> : (
           <>
             <div className="sst-acts" style={{ flexWrap: 'wrap', gap: 14 }}>
@@ -261,6 +264,7 @@ function ReportModal({ isAdmin, onClose }) {
       <div className="sst" style={{ gap: 10 }}>
         <div className="sst-note">매달 정한 날 · 시각(포탈 시각)에 판정표 · 주의/이상 항목 · 상위 어레이 처리량 · 기준 표를 <b>자급형 HTML</b> 로 만들어 메일(설정 › 알림·메일 · 종류 'SAN 스토리지 성능 월간 보고서')에 첨부합니다. 메일 첨부는 HTML 이고, <b>PDF 로 저장</b> 은 이 화면에서 임베드 한글 글꼴로 벡터 PDF 를 만듭니다(서버에는 PDF 생성기가 없어 메일에는 붙이지 않습니다). 놓친 회차는 몰아서 보내지 않습니다.</div>
         {err && <div className="sst-info">{err}</div>}
+        {got?.loadError && <div className="sst-info">보고서 메일 설정 파일을 읽지 못해 정기 발송을 하지 않고 저장도 받지 않습니다 — {String(got.loadError.reason || '사유 미상')}. 아래 값은 저장된 설정이 아니라 기본값입니다. 손상 보존본을 되돌리고 재시작하거나, 서비스 점검에서 기본값으로 확정하세요.</div>}
         {!got || !form ? <Loading label="보고서 설정" /> : (
           <>
             <div className="sst-acts" style={{ flexWrap: 'wrap', gap: 14 }}>

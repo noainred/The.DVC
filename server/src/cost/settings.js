@@ -24,6 +24,7 @@ export const STORAGE_BASES = Object.freeze(['used', 'provisioned']);
 export const OFF_POLICIES = Object.freeze(['full', 'storage', 'none']);
 
 let cache = null;
+let _readWarned = false;   // 69회차 F4: 읽기 오류 경고는 상태가 바뀔 때 한 번(요청마다 부르는 경로라 콘솔을 채우지 않게)
 const isObj = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
 const revOf = (o) => crypto.createHash('sha1').update(JSON.stringify(o)).digest('hex').slice(0, 10);
 
@@ -54,9 +55,20 @@ export function loadCostSettings() {
   let base = { ...DEFAULTS };
   const file = FILE();
   let updatedAt = null; let updatedBy = null;
+  // 69회차 F4(재현): 읽기 오류(EIO · EACCES · EISDIR …)는 손상이 아니다 — 예전에는 파싱 실패와 같은 catch 에서 preserveCorrupt 로 온전한
+  //   원본을 .corrupt 로 옮겨, 오류가 지나간 뒤에도 단가가 영구히 비었다(수동 복구 전까지). 이제 원본을 두고 기본값을 **캐시하지 않고**
+  //   (다음 호출에서 다시 읽는다) unreadable 로 밝히며, 저장은 거절한다(saveCostSettings — 읽지 못한 값 위에 덮어쓰지 않게).
+  let raw = null;
+  if (fs.existsSync(file)) {
+    try { raw = fs.readFileSync(file, 'utf8'); } catch (e) {
+      if (!_readWarned) { _readWarned = true; console.warn(`[cost] 단가 설정 파일을 읽지 못했습니다(파일은 그대로 둡니다 — 다시 읽을 때까지 단가 없음 · 저장 거절): ${safeLoadText(e) || '사유 미상'}`); }
+      return { ...base, updatedAt: null, updatedBy: null, unreadable: true, rev: 'unreadable' };
+    }
+  }
+  _readWarned = false;
   try {
-    if (fs.existsSync(file)) {
-      const p = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (raw != null) {
+      const p = JSON.parse(raw);
       if (!isObj(p)) throw new Error('객체가 아닙니다');
       base = applyPatch(base, p);
       if (typeof p.updatedAt === 'number') updatedAt = p.updatedAt;
@@ -71,7 +83,9 @@ export function loadCostSettings() {
 }
 
 export function saveCostSettings(body, user) {
-  const { rev, updatedAt, updatedBy, ...core } = loadCostSettings();
+  const cur = loadCostSettings();
+  if (cur.unreadable) throw new Error('단가 설정 파일을 읽지 못해 저장하지 않습니다 — 파일을 확인한 뒤 다시 저장하세요(읽지 못한 값 위에 덮어쓰지 않습니다)');
+  const { rev, updatedAt, updatedBy, unreadable, ...core } = cur;
   const next = applyPatch(core, body);
   atomicWriteFileSync(FILE(), JSON.stringify({ ...next, updatedAt: Date.now(), updatedBy: user ? String(user).slice(0, 128) : null }, null, 2));
   cache = null;

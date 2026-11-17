@@ -19,6 +19,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { openSqlite, isSqliteLockError, createLockRetry } from '../util/sqliteOpen.js'; // v2.613 PERSIST2613-03: open 코어는 하나
 import { numOrNull } from '../util/numOrNull.js';
+import { envPositive } from '../util/envNumber.js';   // 57회차 I3: 보존 일수 env 폴백 — 음수 · Infinity 를 통과시키지 않는다(파괴적 sink)
 import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 import { createYielder } from '../util/timeSlice.js';   // v2.743 DB-01: 합계 추이 조각 사이 양보(시간 기준)
 import { pushAll } from '../util/pushAll.js';
@@ -113,17 +114,19 @@ let _pruneHoldWarned = null;
 /** 보존 정리 보류(사유) — null 이면 해제. */
 export function setPruneHold(reason) { _pruneHold = reason ? String(reason).slice(0, 200) : null; if (!_pruneHold) _pruneHoldWarned = null; }
 export function pruneHold() { return _pruneHold; }
+// 57회차 I3: env 폴백은 envPositive — `Number(env) || 기본값` 은 -5 를 그대로 통과시켜 보존 −5일(= 정리가 미래 시각 이전 행을 전부 지움)이 됐다.
+//   applyGrowthSettings 가 기동 때 설정값을 넣으므로 보통은 닿지 않는 경로다(그 적용이 실패했을 때의 폴백).
 function keepDays() {
   return {
-    raw: _keepDays.raw ?? (Number(process.env.STORAGE_HISTORY_KEEP_DAYS) || RAW_KEEP_DAYS_DEF),
-    daily: _keepDays.daily ?? (Number(process.env.STORAGE_DAILY_KEEP_DAYS) || DAILY_KEEP_DAYS_DEF),
+    raw: _keepDays.raw ?? envPositive(process.env.STORAGE_HISTORY_KEEP_DAYS, RAW_KEEP_DAYS_DEF),
+    daily: _keepDays.daily ?? envPositive(process.env.STORAGE_DAILY_KEEP_DAYS, DAILY_KEEP_DAYS_DEF),
     // v2.926 노드 부하 원시 — 노드 × 주기라 용량 원시보다 크다(64 노드 · 1시간 = 하루 1,536행) → 기본을 짧게(30일).
-    nodeRaw: _keepDays.nodeRaw ?? (Number(process.env.STORAGE_NODELOAD_KEEP_DAYS) || NODE_LOAD_RAW_KEEP_DAYS_DEF),
+    nodeRaw: _keepDays.nodeRaw ?? envPositive(process.env.STORAGE_NODELOAD_KEEP_DAYS, NODE_LOAD_RAW_KEEP_DAYS_DEF),
     // v2.932 — 노드 시간 요약 · 클라이언트/프로토콜 원시·시간·일(설정 → env → 기본).
-    nodeHourly: _keepDays.nodeHourly ?? (Number(process.env.STORAGE_NODELOAD_HOURLY_KEEP_DAYS) || NODE_LOAD_HOURLY_KEEP_DAYS_DEF),
-    clientRaw: _keepDays.clientRaw ?? (Number(process.env.STORAGE_NODECLIENT_KEEP_DAYS) || NODE_CLIENT_RAW_KEEP_DAYS_DEF),
-    clientHourly: _keepDays.clientHourly ?? (Number(process.env.STORAGE_NODECLIENT_HOURLY_KEEP_DAYS) || NODE_CLIENT_HOURLY_KEEP_DAYS_DEF),
-    clientDaily: _keepDays.clientDaily ?? (Number(process.env.STORAGE_NODECLIENT_DAILY_KEEP_DAYS) || NODE_CLIENT_DAILY_KEEP_DAYS_DEF),
+    nodeHourly: _keepDays.nodeHourly ?? envPositive(process.env.STORAGE_NODELOAD_HOURLY_KEEP_DAYS, NODE_LOAD_HOURLY_KEEP_DAYS_DEF),
+    clientRaw: _keepDays.clientRaw ?? envPositive(process.env.STORAGE_NODECLIENT_KEEP_DAYS, NODE_CLIENT_RAW_KEEP_DAYS_DEF),
+    clientHourly: _keepDays.clientHourly ?? envPositive(process.env.STORAGE_NODECLIENT_HOURLY_KEEP_DAYS, NODE_CLIENT_HOURLY_KEEP_DAYS_DEF),
+    clientDaily: _keepDays.clientDaily ?? envPositive(process.env.STORAGE_NODECLIENT_DAILY_KEEP_DAYS, NODE_CLIENT_DAILY_KEEP_DAYS_DEF),
   };
 }
 
@@ -1058,6 +1061,21 @@ export async function purgeZeroCapacityRows({ once = null, reason = '0 바이트
     throw e;
   }
   return { ran: true, devices, rows };
+}
+
+/**
+ * 1회 정리 마커(`migration:<id>`)의 값 — 없거나 못 읽으면 null. `resetCapacityHistory` · `purgeZeroCapacityRows` 의 `once` 마커는
+ *   **처음 한 번만** 쓰인다(이미 있으면 그대로 돌아간다) — 그래서 `at` 은 그 정리가 처음 돈 기동 시각이다.
+ */
+export async function migrationMarker(id) {
+  const db = await open();
+  if (!db) return null;
+  try {
+    const row = db.metaGet.get(`migration:${String(id || '')}`);
+    if (!row || row.v == null) return null;
+    const v = JSON.parse(row.v);
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : null;
+  } catch { return null; }
 }
 
 export async function capacityResets() {

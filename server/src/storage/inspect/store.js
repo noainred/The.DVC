@@ -70,7 +70,12 @@ function flushSync() {
   try {
     atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, at: Date.now(), devices: Object.fromEntries(load()) }), { mode: 0o600 });
     _persist.saved += 1; _persist.error = null;
-  } catch (e) { _persist.error = capErr(e); console.warn(`[storage-inspect] 점검 이력 저장 실패: ${capErr(e)}`); }
+  } catch (e) {
+    // 57회차 I2: 쓰기가 실패하면 '저장할 것 있음' 을 되살린다 — 예전에는 표지를 먼저 내려 다음 기록이 없으면 종료 flush 도 건너뛰어
+    //   메모리에만 있던 점검 이력이 재시작 때 사라졌다(스냅샷 저장소 store.js 의 '대기분 유지' 와 같은 규칙). 재시도는 다음 기록 · 종료 flush 가 한다.
+    _dirty = true;
+    _persist.error = capErr(e); console.warn(`[storage-inspect] 점검 이력 저장 실패: ${capErr(e)}`);
+  }
 }
 function save() {
   _dirty = true;

@@ -11,6 +11,7 @@
  *  · ⚠ **키를 지우지 않고 표식을 남긴다** — 지우면 화면이 '그 필드가 없다' 고 오해한다(v2.538 규약).
  *  · 값이 없거나 빈 문자열이면 그대로 둔다 — `''` 자체가 진단이다(배포가 비밀을 안 실어 왔다).
  *  · 깊이·노드 수 상한이 있다(순환 참조·거대 객체가 이 함수에서 멈추지 않게).
+ *  · 72회차 F3: 글자 값은 로그 줄 규칙(`redactLogLine` — URL 사용자정보 비밀번호 · `KEY=값` · Bearer 등)으로도 훑는다.
  *
  * ⚠ **이것은 최후 방어선이지 면죄부가 아니다.** 새 `*Status()` 를 만들 때 비밀을 넣지 않는 것이 먼저다.
  */
@@ -20,6 +21,28 @@ import { isSecretEnvKey } from '../util/envRedact.js';
 export const MASK = '[가림]';
 const MAX_DEPTH = 8;
 const MAX_NODES = 5_000;
+/** 72회차 F3: 글자 값 하나를 가림 정규식에 넣는 상한(collect.js SCAN_MAX 와 같은 값 — 정규식은 길이 한정 선형). */
+const STR_SCAN_MAX = 16_384;
+/*
+ * 75회차(72회차 F3 반증 — 재현): 상한을 넘는 글자를 **먼저 자르고 가렸다** — 자른 자리에 걸친 비밀은 끝 표지('@' · 닫는 따옴표)가 잘려
+ *   앞부분이 원문으로 남았다(`https://svc:SuperSecretPassw0…` · `password: "[가림]" def …`). 18회차 A-1 · collect.js 줄과 같은 순서로
+ *   **가린 뒤 자른다** — 상한 + 꼬리(따옴표 값 4,096 · URL 비밀번호 512 + 키 앞부분)까지 훑고, 자른 결과가 다시 가려도 그대로인 자리
+ *   (고정점)에서 자른다 — 중앙이 한 번 더 가려도 글자 · 개수가 바뀌지 않게(멱등). 자른 표지 앞의 공백은 그 때문이다.
+ */
+const SCAN_TAIL = 4_700;
+const CUT_MARK = ' …[길이 상한]';
+const lastWs = (s, from) => Math.max(s.lastIndexOf(' ', from), s.lastIndexOf('\n', from), s.lastIndexOf('\t', from));
+function cutRedacted(red) {
+  let end = STR_SCAN_MAX;
+  for (let i = 0; i < 4; i += 1) {
+    const out = `${red.slice(0, end)}${CUT_MARK}`;
+    if (redactLogLine(out) === out) return out;
+    const ws = lastWs(red, end - 1);   // 자른 자리의 토큰(반쯤 잘린 가림 표식 · 닫는 따옴표가 잘린 값)을 통째로 버린다
+    if (ws <= 0) break;
+    end = ws;
+  }
+  return redactLogLine(`${red.slice(0, end)}${CUT_MARK}`);
+}
 
 /** 이 키의 값을 가려야 하는가. 정확 일치(SECRET_FIELDS) + env 스타일 접미(SECRET_KEY_RE). */
 export function isSecretKey(k) {
@@ -46,6 +69,27 @@ export function redactDeep(input) {
 
   const walk = (v, depth) => {
     if (++nodes > MAX_NODES) { truncated = true; return '[상한]'; }
+    /*
+     * 72회차 F3: 글자 값도 줄 규칙(redactLogLine)으로 훑는다 — 키 이름 규칙만으로는 **값 속 비밀**을 못 잡았다. 실제 경로:
+     *   inventoryPushStatus · fleetPushStatus 등 열 곳 넘는 *Status() 가 `centralUrl: config.agent.centralUrl` 을 그대로 싣는다.
+     *   v2.599 가 로그 줄에서 가린 `https://user:pw@central` 비밀번호가 진행상태 값으로는 그대로 중앙 화면에 갔다(형제 누락).
+     *   바뀐 값만 센다(이미 가린 값은 그대로 — 두 번 지나도 개수가 늘지 않는다). 아주 긴 글자는 앞부분만 훑고 자른다(정규식 입력 상한).
+     */
+    if (typeof v === 'string') {
+      // 앞 단계(엣지)가 이미 자른 값(표지로 끝나고 상한 + 표지 길이 안)은 다시 자르지 않는다 — 통째로 훑는다(75회차).
+      const preCut = v.length > STR_SCAN_MAX && v.length <= STR_SCAN_MAX + CUT_MARK.length && v.endsWith(CUT_MARK);
+      if (v.length > STR_SCAN_MAX && !preCut) {
+        truncated = true;
+        const win = v.slice(0, STR_SCAN_MAX + SCAN_TAIL);
+        const red = redactLogLine(win);
+        if (red !== win) masked += 1;
+        return cutRedacted(red);
+      }
+      if (preCut) truncated = true;
+      const r = redactLogLine(v);
+      if (r !== v) masked += 1;
+      return r;
+    }
     if (v === null || typeof v !== 'object') return v;
     if (depth >= MAX_DEPTH) { truncated = true; return '[깊이 상한]'; }
     if (seen.has(v)) return '[순환]';
@@ -54,7 +98,7 @@ export function redactDeep(input) {
     const out = {};
     for (const [k, val] of Object.entries(v)) {
       // 빈 값은 그대로 — `''`·null 자체가 진단이다(비밀이 실려 오지 않았다는 사실).
-      if (isSecretKey(k) && val !== '' && val != null) { out[k] = MASK; masked += 1; continue; }
+      if (isSecretKey(k) && val !== '' && val != null) { out[k] = MASK; if (val !== MASK) masked += 1; continue; }
       out[k] = walk(val, depth + 1);
     }
     return out;

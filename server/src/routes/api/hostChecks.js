@@ -13,6 +13,7 @@ import { memoJson, applyFilters, scopeKey } from './shared.js';
 import { accessOf, makeIdracFor, BOOT_DAYS } from './hostExport.js';
 import { analyzeReboots } from '../../hostcfg/reboots.js';
 import { HOSTOPS_TYPES } from '../../vmchanges/eventDetail.js';
+import { eventLastTsOf } from '../../vmchanges/analyze.js';   // 71회차: 마지막 이벤트 시각(지금 + 여유 이하 MAX — 69회차 F2 한 벌)
 import { getLogsDb } from '../../logs/db.js';
 import { eventNotCollectedMap } from '../../logs/coverage.js';
 import { listRegistry } from '../../idrac/registry.js';
@@ -33,7 +34,7 @@ async function rebootsOf(snap, hosts, vcIds, now) {
   const readFrom = truncated && events.length ? events[events.length - 1].ts : null;
   const ncMap = eventNotCollectedMap();
   const vcName = new Map((snap.vcenters || []).map((v) => [v.id, v.name || v.id]));
-  const cov = new Map(vcIds.map((id) => [id, { firstTs: db.firstTs(id) || null, lastTs: db.lastTs(id) || null, why: ncMap.get(id) || null }]));
+  const cov = new Map(vcIds.map((id) => [id, { firstTs: db.firstTs(id) || null, lastTs: eventLastTsOf(db, id), why: ncMap.get(id) || null }]));   // 71회차(69회차 남긴 것 ②): 미래 행 경계 — 이력 화면과 같은 함수
   const r = analyzeReboots(hosts, events, { now, days: BOOT_DAYS, vcName, coverageOf: (id) => cov.get(id) || null, readFrom });
   return new Map(r.rows.map((x) => [x.id, x]));
 }

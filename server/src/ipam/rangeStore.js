@@ -11,21 +11,45 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeSettingsLoadError } from '../util/settingsLoadError.js';   // 60회차 F1
 
 const FILE = path.join(config.configDir, 'ipam-vcenter-ranges.json');
 
 let cache = null;
 let cacheMtime = -1;
 
+/*
+ * 전체 점검 60회차 F1(재현 — 25회차 F-4 의 형제): 손상되면 표지 없이 빈 맵이 되어 ① 옮기지 못한 vCenter 대역의 중앙 주기 스캔이 조용히 멈추고
+ *   ② 다음 저장 한 번이 그 한 vCenter 만 든 파일을 만들었다(나머지는 손상 보존본에만 — 서비스 점검에도 없었다). 이제 로드 오류를 세우고(서비스 점검 목록)
+ *   오류 중 저장 · 삭제는 거절한다(code 'settings-unreadable' — 라우트 409). 해제는 보존본을 되돌리거나(mtime 이 바뀌면 다시 읽는다) 서비스 점검 확정.
+ *   객체가 아닌 JSON · vcenters 가 객체가 아닌 값도 손상이다(예전에는 `{"vcenters":null}` 이 그대로 캐시가 되어 저장이 TypeError 로 죽었다).
+ */
+const _loadErr = makeSettingsLoadError(() => FILE, { label: 'IP 스캔 — vCenter 별 대역(에이전트로 옮기지 못한 것) — 확정하면 남은 vCenter 별 대역이 모두 비워집니다(그 대역은 스캔하지 않음)', confirm: () => write({ vcenters: {} }) });
+/** vCenter 별 대역 파일을 못 읽었으면 { at, reason }, 아니면 null. */
+export function vcRangesLoadError() { read(); return _loadErr.get(); }
+const VC_RANGES_REFUSAL = { ok: false, code: 'settings-unreadable', reason: 'vCenter 별 스캔 대역 파일(ipam-vcenter-ranges.json)을 읽지 못한 상태라 저장하지 않았습니다 — 지금 저장하면 그 vCenter 만 든 파일이 됩니다. 서비스 점검에서 기본값으로 확정하거나 손상 보존본을 되돌리세요.' };
+const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+
 function read() {
   // 파일 mtime이 캐시 적재 이후 변했으면(외부 편집·백업 복원·다른 프로세스) 재파싱한다.
   let mtime = -1;
   try { mtime = fs.statSync(FILE).mtimeMs; } catch { mtime = 0; /* 파일 없음 */ }
   if (cache && mtime === cacheMtime) return cache;
-  try {
-    const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    cache = j && typeof j.vcenters === 'object' ? j : { vcenters: {} };
-  } catch (e) { preserveCorrupt(FILE, e.message); cache = { vcenters: {} }; }
+  if (!fs.existsSync(FILE)) { cache = { vcenters: {} }; _loadErr.missing(); }   // 60회차 F1: 보존본만 남았으면(재시작 뒤 포함) 여전히 못 읽은 것
+  else {
+    try {
+      const j = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+      if (!isObj(j) || !isObj(j.vcenters)) throw new Error('형식 오류 — vcenters 객체가 없습니다');
+      cache = j; _loadErr.ok();
+    } catch (e) {
+      // 62회차(재현 — EISDIR): 읽기 오류(EACCES · EISDIR)는 손상이 아니다 — 원본을 옮기지 않고 확정할 수 없게(20회차 반증 F4 규약 · svcmon logsettings 와 같다).
+      //   예전에는 권한만 틀린 원본을 보존본으로 치우고 '확정(빈 맵)' 을 열었다.
+      if (e?.code === 'ENOENT') _loadErr.missing();
+      else if (e?.code) _loadErr.readError(e);
+      else { _loadErr.corrupt(e); preserveCorrupt(FILE, e.message); }
+      cache = { vcenters: {} };
+    }
+  }
   cacheMtime = mtime;
   return cache;
 }
@@ -43,6 +67,7 @@ function write(data) {
   try { fs.chmodSync(FILE, 0o600); } catch { /* */ }
   cache = data;
   try { cacheMtime = fs.statSync(FILE).mtimeMs; } catch { cacheMtime = -1; }
+  _loadErr.ok();
 }
 
 const normRanges = (r) => (Array.isArray(r) ? r : String(r || '').split(/[\n,]/))
@@ -73,6 +98,7 @@ export function saveVcRanges(vcenterId, partial = {}) {
   const id = String(vcenterId || '').trim();
   if (!id) return { ok: false, reason: 'vcenterId가 필요합니다.' };
   const data = read();
+  if (_loadErr.get()) return { ...VC_RANGES_REFUSAL };   // 60회차 F1
   const cur = data.vcenters[id] || { ranges: [], enabled: true };
   const next = {
     ranges: partial.ranges !== undefined ? normRanges(partial.ranges) : (cur.ranges || []),
@@ -86,6 +112,7 @@ export function saveVcRanges(vcenterId, partial = {}) {
 /** vCenter 대역 삭제. 쓰기 실패는 던진다(v2.639 S1). */
 export function removeVcRanges(vcenterId) {
   const data = read();
+  if (_loadErr.get()) return { ...VC_RANGES_REFUSAL };   // 60회차 F1
   if (!data.vcenters[vcenterId]) return { ok: false, reason: '없는 항목' };
   const { [vcenterId]: _removed, ...rest } = data.vcenters;
   write({ ...data, vcenters: rest });

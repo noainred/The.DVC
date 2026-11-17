@@ -30,7 +30,7 @@ import { hostVmks } from '../../ipam/serverView.js'; // v3.6.0: 스캔 대역 �
 import { getSubnetNotes, subnetKey } from '../../ipam/subnetNotes.js'; // v3.6.0: 후보 줄에 대역 용도 // v2.690: vCenter 스캔 대역 '/24 가져오기'
 import { todayStamp } from '../../util/dayKey.js';
 import { readMigrationState, runVcRangeMigration, moveVcRangeManually, removeVcRangeManually, dismissMigration } from '../../ipam/vcRangeMigrate.js'; // v2.691: vCenter 별 대역 → 에이전트
-import { saveVcRanges, removeVcRanges, listVcRanges } from '../../ipam/rangeStore.js';
+import { saveVcRanges, removeVcRanges, listVcRanges, vcRangesLoadError } from '../../ipam/rangeStore.js';
 import { sampleCsv as vcRangesSampleCsv, parseVcRangesCsv, analyzeVcRangesImport } from '../../ipam/vcRangesCsv.js';
 import { listAssignments as listIdracAssignments, getResults as getAgentResults } from '../../central/assignments.js';
 import { listCollectors } from '../../collector/registry.js';
@@ -546,7 +546,7 @@ adminRouter.put('/ipam/vc-ranges', adminOnly, (req, res) => {
     try { rescheduleScanPoller(); } catch { /* */ }
     recordScanLog({ event: 'settings', user: req.user?.username, ranges: (r.ranges || []).length, rangesSample: (r.ranges || []).slice(0, 5), message: `vCenter 스캔 대역 저장 — ${String(b.vcenterId || '').slice(0, 120)}` });
   }
-  res.status(r.ok ? 200 : 400).json(r);
+  res.status(r.ok ? 200 : r.code === 'settings-unreadable' ? 409 : 400).json(r);   // 60회차 F1: 파일을 못 읽은 동안은 409
 });
 /**
  * v2.690: vCenter별 스캔 대역 편집기의 '/24 가져오기' — kind=idrac(그 vCenter 의 DataCenter 또는 고른 DataCenter 의 iDRAC 스캔 대역)
@@ -590,7 +590,7 @@ adminRouter.delete('/ipam/vc-ranges/:vcenterId', adminOnly, (req, res) => {
   if (!vcRangeWritable(req.user, req.params.vcenterId)) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' }); // v2.607 AUTHZ2607-04
   const r = removeVcRanges(req.params.vcenterId);
   if (r.ok) recordScanLog({ event: 'settings', user: req.user?.username, message: `vCenter 스캔 대역 삭제 — ${String(req.params.vcenterId || '').slice(0, 120)}` });
-  res.status(r.ok ? 200 : 404).json(r);
+  res.status(r.ok ? 200 : r.code === 'settings-unreadable' ? 409 : 404).json(r);   // 60회차 F1
 });
 adminRouter.post('/ipam/vc-ranges/scan', adminOnly, fleetOnly, (_req, res) => {
   const r = startScan({ manual: true });
@@ -621,6 +621,9 @@ adminRouter.post('/ipam/vc-ranges/import', csvPerm, adminOnly, (req, res) => {
   //   manage CSV 의 해석기는 이미 모호하면 null 이었다 — 두 규칙을 하나로).
   const rv = makeVcResolver(vcs);
   const resolveVc = (v) => { const r = rv(v); return r.id && vcRangeWritable(req.user, r.id) ? r.id : null; };
+  // 60회차 F1: 파일을 못 읽은 동안은 적용하지 않는다(행마다 같은 거절이 '실패' 로 쌓이지 않게 — 한 번에 409)
+  // 62회차: 미리보기(dryRun)도 — 빈 맵을 기준으로 있는 항목을 전부 '추가' 로 보고했다(덮어쓰기 판정이 사라진 미리보기)
+  { const le = vcRangesLoadError(); if (le) return res.status(409).json({ ok: false, code: 'settings-unreadable', reason: 'vCenter 별 스캔 대역 파일(ipam-vcenter-ranges.json)을 읽지 못한 상태라 가져오지 않았습니다 — 서비스 점검에서 확정하거나 손상 보존본을 되돌리세요.' }); }
   const existing = new Set(listVcRanges().map((e) => e.vcenterId));
   const { report, summary } = analyzeVcRangesImport(rows, { resolveVc, hasExisting: (id) => existing.has(id) });
   if (req.body?.dryRun) {

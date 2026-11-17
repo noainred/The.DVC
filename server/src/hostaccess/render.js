@@ -53,6 +53,7 @@ export function parseCidr(s) {
   if (!Number.isInteger(bits) || bits < 0 || bits > maxBits) return null;
   return { family: fam === 4 ? 'ipv4' : 'ipv6', ip, bits, text: bits === maxBits ? ip : `${ip}/${bits}` };
 }
+const isLoopback = (ip) => /^127\./.test(ip) || ip === '::1';
 function ip4ToInt(ip) { return ip.split('.').reduce((a, o) => (a << 8) + Number(o), 0) >>> 0; }
 function ip6ToBig(ip) {
   // net.isIP 통과한 IPv6 만 받는다. '::' 확장 + IPv4-embedded 처리.
@@ -214,8 +215,9 @@ export function isManagedRich(rule, s, prevRich = []) {
  * 적용 계획 — 현재 존 상태(parseListAll 결과)와 설정을 비교해 firewall-cmd 인자 목록을 만든다(런타임, --permanent 없음).
  * @returns {{ commands: string[][], warnings: string[], errors: string[], desiredRich: string[] }}
  */
-export function planCommands(s, cur, { prevRich = [], requesterIp = '' } = {}) {
+export function planCommands(s, cur, { prevRich = [], requesterIp = '', peerIp = '' } = {}) {
   requesterIp = normalizeRequesterIp(requesterIp);   // v2.771(R6-F5-2): 호출부가 원문을 넘겨도 같은 판정
+  peerIp = normalizeRequesterIp(peerIp);
   const commands = []; const warnings = []; const errors = [];
   const z = cur.zone ? [`--zone=${cur.zone}`] : [];
   const cmd = (...a) => commands.push([...z, ...a]);
@@ -245,6 +247,13 @@ export function planCommands(s, cur, { prevRich = [], requesterIp = '' } = {}) {
   } else {
     if (!requesterIp) errors.push('요청자 IP 를 판별할 수 없어 웹 허용목록을 적용하지 않습니다(자기 잠금 방지).');
     else if (!s.web.allow.some((c) => ipInCidr(requesterIp, c))) errors.push(`요청자 IP ${requesterIp} 가 웹 허용목록에 없습니다 — 적용 직후 이 세션이 끊깁니다. 허용목록에 추가한 뒤 적용하세요.`);
+    // 64회차 F5(재현): TRUST_PROXY 뒤에서는 요청자 IP(clientIp)가 X-Forwarded-For 의 사람 주소다 — 방화벽이 보는 것은 TCP 상대(프록시)다.
+    //   사람 주소만 대조하면 프록시가 허용목록 밖인 채 통과해 적용 즉시 프록시를 거친 접속이 전부 끊겼다(확정 기한까지). 상대 주소도 본다
+    //   (루프백은 방화벽이 거르지 않는다 — 같은 호스트의 프록시).
+    if (peerIp && net.isIP(peerIp) && peerIp !== requesterIp && !isLoopback(peerIp)) {
+      if (!s.web.allow.some((c) => ipInCidr(peerIp, c))) errors.push(`포탈 앞 프록시(방화벽이 보는 접속 주소 ${peerIp})가 웹 허용목록에 없습니다 — 적용하면 프록시를 거친 접속이 전부 끊깁니다. 프록시 주소를 허용목록에 넣으세요.`);
+      else warnings.push(`포탈 앞에 프록시(${peerIp})가 있습니다 — 방화벽은 프록시 주소만 보므로 웹 허용목록은 프록시를 거친 접속을 사람 주소로 거르지 못합니다(프록시에서 거르세요).`);
+    }
     for (const p of s.web.ports) {
       if (hasPort(p)) cmd(`--remove-port=${p}/tcp`);
       if (p === '80' && hasService('http')) cmd('--remove-service=http');

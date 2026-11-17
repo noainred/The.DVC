@@ -40,7 +40,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resilientFetch } from '../util/resilientFetch.js';
 import { buildCommand, parseList } from './commands.js';
-import { verifyJob } from './signing.js';
+import { verifyJob, SKEW_MS } from './signing.js';
 import { runCommand, DEFAULT_MAX_OUTPUT } from './exec.js';
 import { pathAllowed } from './testRunner.js';  // 파일 경로 realpath 검사(점검과 같은 판정)
 import { buildTest } from './tests.js';
@@ -115,8 +115,10 @@ async function postResult(reqId, result) {
       method: 'POST', headers: headers(), body: JSON.stringify({ agent: AGENT, instance: INSTANCE, reqId, result }), timeoutMs: 20_000, retries: 3,
     });
     if (r && r.ok === false) {
+      // 64회차 F3: 403 은 토큰 거부만이 아니다(접속 허용 IP 밖 · 남의 reqId) — 중앙이 준 사유를 함께 남긴다.
+      let why = ''; try { why = String((await r.json())?.reason || '').slice(0, 200); } catch { /* 본문 없음 */ }
       const hint = r.status === 413 ? ' — 결과 본문이 중앙 한도를 넘었습니다(출력 상한 RMA_MAX_OUTPUT·중앙 JSON_BODY_LIMIT 확인)'
-        : r.status === 403 ? ' — 중앙이 이 엣지의 토큰을 거부했습니다(개별 토큰 전용)' : '';
+        : r.status === 403 ? (why ? ` — ${why}` : ' — 중앙이 이 엣지의 토큰을 거부했습니다(개별 토큰 전용)') : '';
       log(`결과 회신 실패 reqId=${reqId}: HTTP ${r.status}${hint}`);
     } else if (r && typeof r.json === 'function') {
       // v2.622(감사 EDGE-01): 200 이어도 stale:true 면 중앙이 결과를 **반영하지 않았다**(기한 초과로 이미 '미회신' 종결·잡 정리됨).
@@ -132,10 +134,29 @@ async function postResult(reqId, result) {
 /** 테스트용 — 결과 회신 경로(stale 로그 확인). */
 export const _postResultForTest = (reqId, result) => postResult(reqId, result);
 
+/**
+ * 64회차 개선: 서명 잡의 **재전송** 거부 — 서명은 ±10분 창(signing.js SKEW_MS) 안에서는 같은 잡을 다시 보내도 통과했다. 중앙은 같은 reqId 를
+ *   두 번 내보내지 않으므로(MAX_CLAIMS = 1) 같은 reqId 가 다시 오면 선로 · 가짜 중앙의 재전송이다(서비스 재시작 등 비멱등 명령이 두 번 돈다).
+ *   창(2×SKEW)이 지난 항목만 지운다 — 그보다 오래된 재전송은 서명 시각 검사가 막는다. 프로세스 메모리라 재시작 · 다른 인스턴스는 막지 않는다.
+ */
+const SEEN_SIGNED = new Map(); // reqId → 받은 시각
+const SEEN_SIGNED_MAX = 5000;
+function signedReplay(reqId, now) {
+  const id = String(reqId || '');
+  for (const [k, at] of SEEN_SIGNED) { if (now - at > 2 * SKEW_MS || SEEN_SIGNED.size > SEEN_SIGNED_MAX) SEEN_SIGNED.delete(k); else break; }
+  if (!id || SEEN_SIGNED.has(id)) return true;
+  SEEN_SIGNED.set(id, now);
+  return false;
+}
+
 /** 잡 1건 처리 — 검증 실패도 결과로 회신한다(중앙 UI 가 즉시 사유를 본다). */
 export async function handleJob(job, { password = PASSWORD, allowCustom = ALLOW_CUSTOM, policy = POLICY, exec = runCommand, now } = {}) {
   const v = verifyJob(password, { ...job, agent: AGENT }, now);
   if (!v.ok) { stats.rejected++; auditFail({ kind: 'job', reqId: job.reqId, cmd: job.cmd, reason: v.reason }); return { ok: false, reason: v.reason, rejected: true }; }
+  if (v.signed && signedReplay(job.reqId, Number.isFinite(now) ? now : Date.now())) {
+    const reason = '이미 받은 잡(같은 reqId)이 다시 왔습니다 — 재전송으로 보고 실행하지 않습니다.';
+    stats.rejected++; auditFail({ kind: 'job', reqId: job.reqId, cmd: job.cmd, reason: 'replay' }); return { ok: false, reason, rejected: true };
+  }
   const b = buildCommand(job.cmd, job.args || {}, { allowCustom, timeoutMs: job.timeoutMs, policy });
   if (!b.ok) { stats.rejected++; auditFail({ kind: 'job', reqId: job.reqId, cmd: job.cmd, reason: b.issue }); return { ok: false, reason: b.issue, rejected: true }; }
   // SSH 원격 실행: 계정은 잡에 없다 — 브로커(credentialId) 또는 1회 입력(job.secret, 중앙은 인출 즉시 삭제)에서

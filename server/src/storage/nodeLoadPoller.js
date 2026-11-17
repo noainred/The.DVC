@@ -181,7 +181,7 @@ function flushRingSync() {
   if (!_ringDirty) return;
   _ringDirty = false;
   try { atomicWriteFileSync(RING_FILE(), ringJson(), { mode: 0o600 }); _ringPersist.saved += 1; _ringPersist.error = null; _ringPersist.hasFile = true; }
-  catch (e) { _ringPersist.error = capErr(e); console.warn(`[storage-nodeload] 미전송 표본 파일 저장 실패: ${capErr(e)}`); }
+  catch (e) { _ringDirty = true; _ringPersist.error = capErr(e); console.warn(`[storage-nodeload] 미전송 표본 파일 저장 실패: ${capErr(e)}`); }   // 57회차 I2: 대기분 유지(종료 flush 가 다시 쓴다)
 }
 function saveRing() {
   if (!isEdge() && !_ringForce) return;

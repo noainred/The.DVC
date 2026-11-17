@@ -194,6 +194,15 @@ async function dispatchDue(cfg, now) {
   }
 }
 
+/*
+ * 71회차(68회차 P3 개선): 이력 정리 스로틀은 저장소 규약 `(++tick % N) === 0`(docs/rules/perf-db.md — 기동 첫 틱 금지)이다.
+ *   예전 `now % 6h < TICK_MS` 는 벽시계 모듈로라 ① 그 1분 창의 틱이 재진입 가드(du 수거 · 메일이 길 때)로 건너뛰어지면 그 6시간 정리가 통째로 빠졌고
+ *   ② 기동 시각이 창 안이면 첫 틱에 DELETE 스캔이 돌았다. 이제 **실제로 돈 틱** 수를 세어 6시간 분량마다 한 번 — 건너뛴 틱은 세지 않으므로 늦어질 뿐 빠지지 않는다.
+ */
+export const PRUNE_EVERY_TICKS = Math.max(1, Math.round((6 * 3600_000) / TICK_MS));
+let pruneTick = 0;
+export function pruneDue() { return (++pruneTick % PRUNE_EVERY_TICKS) === 0; }
+
 /** 한 틱. 재진입 가드는 호출부(tick/runNow)가 공유한다. */
 async function tickOnce() {
   const cfg = loadSettings();                  // ★ 매 틱 조회 — 설정 변경 즉시 반영
@@ -202,7 +211,7 @@ async function tickOnce() {
   await collectPending(cfg, now);              // 결과 수거를 먼저 — 같은 틱에 다음 잡을 걸 수 있다
   if (cfg.enabled) await dispatchDue(cfg, now);
   // 이력 prune(설정 보존일). 청크 삭제라 이벤트 루프를 막지 않는다.
-  if (now % (6 * 3600_000) < TICK_MS) {
+  if (pruneDue()) {
     const db = await getDb();
     if (db) await db.prune(now - Math.max(1, cfg.retentionDays || 365) * 86_400_000).catch(() => {});
   }
@@ -268,4 +277,4 @@ export function startDirUsageScheduler() {
   console.log(`[dirusage] 폴더 사용량 스케줄러 시작 (틱 ${Math.round(TICK_MS / 1000)}초)`);
 }
 
-export function _resetDirUsage() { pending.clear(); lastRunAt.clear(); recent.length = 0; running = false; }
+export function _resetDirUsage() { pending.clear(); lastRunAt.clear(); recent.length = 0; running = false; pruneTick = 0; }

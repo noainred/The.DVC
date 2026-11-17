@@ -142,8 +142,18 @@ function runQuery(q, allowed = null) {
     const dir = q.sort.dir === 'desc' ? -1 : 1;
     items = [...items].sort(nlSortCompare(q.sort.field, dir));
   }
-  const limit = Math.min(Number(q.limit) || 100, 500);
+  const limit = nlResultLimit(q.limit);
   return { entity, label: SCHEMA[entity].label, total: items.length, results: items.slice(0, limit) };
+}
+
+/**
+ * 67회차 개선: 결과 개수 상한 — LLM 이 만든 limit 를 1~500 정수로. 예전 `Math.min(Number(q.limit) || 100, 500)` 은 음수(-5)를 그대로 써
+ * `slice(0, -5)` 가 **뒤에서 5개를 빼고** 나머지를 줬고 요약은 '상위 N개 표시' 라고 했다(/vms limit 의 Math.max(1, …) 와 같은 함정). 0 · 음수 · 숫자 아님은 기본 100.
+ */
+export function nlResultLimit(v) {
+  const n = Math.trunc(Number(v));
+  if (!Number.isFinite(n) || n <= 0) return 100;
+  return Math.min(n, 500);
 }
 
 /**

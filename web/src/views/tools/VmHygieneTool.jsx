@@ -11,7 +11,7 @@ import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { VmLink } from '../../components/EntityDetail.jsx';
 import {
-  ALL_TEXT, SEV_LABEL, SEV_BADGE, codeChips, findingDetail, coverageText, coverageNote, notifyText, notifyNowMsg, settingsPatch, RANGES,
+  ALL_TEXT, SEV_LABEL, SEV_BADGE, codeChips, findingDetail, coverageText, coverageNote, notifyText, notifyNowMsg, settingsPatch, RANGES, SETTINGS_UNREADABLE_NOTE,
 } from '../vmcfg/vmHygieneText.js';
 import Select from '../../components/Select.jsx';
 import { mergeVcChoices } from './vcChoices.js';
@@ -180,6 +180,7 @@ export default function VmHygieneTool({ scope }) {
       <div style={{ fontSize: 13, marginBottom: 6 }}>{coverageText(cov, data.notReadVcenters)}</div>
       {note && <div className="banner" style={{ marginBottom: 8 }}>{note}</div>}
       {notReadBanner && <div className="banner" style={{ marginBottom: 8 }}>{notReadBanner}</div>}
+      {data.settingsUnreadable === true && <div className="banner" style={{ marginBottom: 8 }}>{SETTINGS_UNREADABLE_NOTE}</div>}
       {error && <div className="banner" style={{ marginBottom: 8 }}>다시 불러오지 못했습니다 — 이전 결과를 보여 줍니다.</div>}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8, alignItems: 'center' }}>

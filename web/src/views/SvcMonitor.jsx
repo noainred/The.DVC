@@ -943,7 +943,7 @@ export default function SvcMonitor() {
                 CSV 는 UTF-8 BOM 이라 엑셀에서 바로 열립니다.</div>
               <div className="pc-logfiles">
                 <div>저장 위치: <b>{logCfg.dir}</b></div>
-                <div>파일 {logCfg.fileCount}개 · 합계 {(logCfg.totalBytes / 1048576).toFixed(1)} MB
+                <div>{logCfg.filesUnreadable ? '파일 목록을 읽지 못했습니다(권한 · 입출력 오류)' : `파일 ${logCfg.fileCount}개 · 합계 ${(logCfg.totalBytes / 1048576).toFixed(1)} MB`}
                   {logCfg.stats && <> · 기록 {logCfg.stats.written?.toLocaleString?.() || 0}행
                     {logCfg.stats.dropped ? ` · 폐기 ${logCfg.stats.dropped}행` : ''}
                     {logCfg.stats.buffered ? ` · 대기 ${logCfg.stats.buffered}행` : ''}</>}</div>

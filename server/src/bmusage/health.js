@@ -132,10 +132,13 @@ export function compactHealth(h) {
 
 /**
  * svcmon cert 점검 결과에서 이 서버의 인증서 남은 일수(가장 짧은 것). 서버 주소 · 이름과 svcmon 대상 host 가 같을 때만(정확 일치 — 소문자).
- * @param {{targets:Array, results:Map, certDaysOf:Function}} src
+ * 62회차(61회차 F3 의 형제 — 재현): 결과의 'D-n' 은 **잰 때** 남은 일수다 — 꺼진 점검 · 낡은(stale) 결과의 옛 값을 지금 값처럼 쓰면
+ *   40일 전 'D-35'(지금은 만료)가 '정상' 으로 보였다. `testState`(svcmon 판정 코어 — src 로 받는다)가 있으면 꺼진 점검은 세지 않고,
+ *   지금 결과(ok · warn · bad)가 아닌 것(낡음 · 대기)은 세되 남은 일수로 쓰지 않는다(전부 그렇다면 days null → '못 읽음').
+ * @param {{targets:Array, results:Map, certDaysOf:Function, testState?:Function}} src
  * @returns {{days:number|null, count:number}|null}  null = 등록된 TLS 점검 없음
  */
-export function certForServer(target, { targets = [], results = new Map(), certDaysOf = () => null } = {}) {
+export function certForServer(target, { targets = [], results = new Map(), certDaysOf = () => null, testState = null } = {}, now = Date.now()) {
   const names = new Set([target?.osHost?.host, target?.osHostName, target?.name, target?.idrac?.host].filter((x) => typeof x === 'string' && x).map((x) => x.toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '')));
   if (!names.size) return null;
   let best = null; let count = 0;
@@ -144,7 +147,10 @@ export function certForServer(target, { targets = [], results = new Map(), certD
     if (!h || !names.has(h)) continue;
     for (const x of tg.tests || []) {
       if (x?.type !== 'cert') continue;
+      const st = typeof testState === 'function' ? testState(tg, x, results, now) : null;   // 62회차
+      if (st === 'disabled') continue;
       count += 1;
+      if (st != null && st !== 'ok' && st !== 'warn' && st !== 'bad') continue;
       const d = certDaysOf(results.get(x.id)?.reply);
       if (d != null && (best == null || d < best)) best = d;
     }

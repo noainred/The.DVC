@@ -18,6 +18,8 @@ export function numText(v, unit = '') {
 /** 단가 안내 — 비면 할당량만, 일부만 있으면 그 사실. */
 export function ratesNote(data) {
   if (!data) return null;
+  // 71회차(69회차 F4 반증): 단가 파일을 읽지 못한 것(서버 settingsUnreadable)은 '설정 안 됨' 이 아니다 — 다시 입력하라고 하지 않는다(저장도 거절된다).
+  if (data.settingsUnreadable === true) return '단가 설정 파일을 읽지 못해 비용은 계산하지 않고 할당량만 보여 줍니다 — 서버의 설정 파일(cost-rates.json)을 확인하세요(파일은 그대로 두었습니다).';
   if (!data.ratesSet) return '단가가 설정되지 않아 비용은 계산하지 않고 할당량만 보여 줍니다 — 단가는 이 화면의 단가 설정에서 입력합니다(관리자).';
   if (data.partialRates) {
     const miss = [['vcpu', 'vCPU'], ['ramGB', '메모리'], ['storageGB', '스토리지']].filter(([k]) => data.rates?.[k] == null).map(([, l]) => l);

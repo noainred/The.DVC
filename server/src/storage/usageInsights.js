@@ -15,7 +15,7 @@
  *  · 값을 못 읽은 장비는 0 으로 세지 않고 따로 적는다(마지막 관측일 · 최근 수집 실패 여부).
  */
 import { numOrNull } from '../util/numOrNull.js';
-import { aggregateCells, deltaOf, expectedIn, isoWeekLabel, labelOfDay, POOL_TYPES } from './usageReport.js';
+import { aggregateCells, deltaOf, expectedIn, isoWeekLabel, labelOfDay, POOL_TYPES, setChangeOf } from './usageReport.js';
 import { RESOURCE_KINDS } from './resources.js';
 
 /** 조치 기준(시안 승인값 — 2026-10-26). 화면·메일·엑셀 문구는 이 값으로 만든다(숫자를 문구에 박지 않는다). */
@@ -39,19 +39,27 @@ export function trendOf(cells, { avgWeeks = ACTION_RULE.avgWeeks, minSteps = ACT
   return { cur, prev, delta: deltaOf(prev, cur), avg: steps >= minSteps ? sum / steps : null, steps };
 }
 
-/** 합계 계열(aggregateCells) — 변화는 두 점이 다 완전한 합계일 때만. 평균도 완전한 걸음만. */
-export function aggTrendOf(cells, { avgWeeks = ACTION_RULE.avgWeeks, minSteps = ACTION_RULE.minSteps } = {}) {
+/**
+ * 합계 계열(aggregateCells) — 변화는 두 점이 다 완전한 합계일 때만. 평균도 완전한 걸음만.
+ * 57회차 F2: `devs`(그 합계를 만든 장비 목록)를 주면 두 점의 장비 구성이 같을 때만 뺀다(`setChangeOf` — 새로 등록한 장비의 사용량 전체를
+ *   '증가' 로 세지 않는다). 구성이 바뀌었으면 delta 는 null · deltaWhy 'changed' · changed = 한쪽에만 있는 장비 수.
+ */
+export function aggTrendOf(cells, { avgWeeks = ACTION_RULE.avgWeeks, minSteps = ACTION_RULE.minSteps, devs = null } = {}) {
   const ok = (x) => !!(x && x.counted > 0 && !x.partial);
+  const moved = (i, j) => (Array.isArray(devs) ? setChangeOf(devs, i, j) : 0);
   const c = Array.isArray(cells) ? cells : [];
   const n = c.length;
   const cur = n ? c[n - 1] : null; const prev = n > 1 ? c[n - 2] : null;
   let sum = 0; let steps = 0;
   for (let i = Math.max(1, n - avgWeeks); i < n; i++) {
-    if (ok(c[i - 1]) && ok(c[i])) { sum += c[i].usedBytes - c[i - 1].usedBytes; steps += 1; }
+    if (ok(c[i - 1]) && ok(c[i]) && !moved(i - 1, i)) { sum += c[i].usedBytes - c[i - 1].usedBytes; steps += 1; }
   }
+  const both = ok(prev) && ok(cur);
+  const changed = both ? moved(n - 2, n - 1) : 0;
   return {
-    cur, prev, delta: ok(prev) && ok(cur) ? cur.usedBytes - prev.usedBytes : null,
-    deltaWhy: prev && cur && (prev.partial || cur.partial) ? 'partial' : '',
+    cur, prev, delta: both && !changed ? cur.usedBytes - prev.usedBytes : null,
+    deltaWhy: prev && cur && (prev.partial || cur.partial) ? 'partial' : (changed ? 'changed' : ''),
+    ...(changed ? { changed } : {}),
     avg: steps >= minSteps ? sum / steps : null, steps,
   };
 }
@@ -179,7 +187,7 @@ export function buildInsights(rep, { includeResources = true, rule = ACTION_RULE
     for (const d of withData) { const k = keyOf(d); if (!m.has(k)) m.set(k, []); m.get(k).push(d); }
     return [...m.entries()].map(([key, list]) => {
       const cells = aggregateCells(list, periods);
-      return { key, devices: list.length, cells, ...aggTrendOf(cells, rule) };
+      return { key, devices: list.length, cells, ...aggTrendOf(cells, { ...rule, devs: list }) };   // 57회차 F2: 장비 구성이 같을 때만 뺀다
     }).sort((a, b) => (numOrNull(b.cur?.usedBytes) ?? -1) - (numOrNull(a.cur?.usedBytes) ?? -1) || String(a.key).localeCompare(String(b.key)));
   };
   const byCorp = groupBy(corpOf);
@@ -187,7 +195,7 @@ export function buildInsights(rep, { includeResources = true, rule = ACTION_RULE
 
   // ⑥ 핵심 지표
   const totalCells = aggregateCells(withData, periods);
-  const total = { cells: totalCells, ...aggTrendOf(totalCells, rule) };
+  const total = { cells: totalCells, ...aggTrendOf(totalCells, { ...rule, devs: withData }) };   // 57회차 F2
   const over = (list, p) => list.filter((e) => (pctOf(e) ?? -1) >= p).length;
   const kpi = {
     devices: withData.length, registered: (rep.devices || []).length, corps: byCorp.length,

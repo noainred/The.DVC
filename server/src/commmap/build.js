@@ -81,12 +81,16 @@ export const RES_STATES = Object.freeze(['ok', 'stale', 'pending', 'fail', 'main
 /** 등록부 이름 접기 — 표시 이름·id 어느 쪽으로 와도 **id** 로 접는다(v2.583 '키 하나' 규약). */
 export function aliasMap(collectors = []) {
   const m = new Map();
+  const named = [];
   for (const c of collectors) {
     const id = t(c?.id || c?.name);
     if (!id) continue;
     m.set(norm(id), id);
-    if (t(c?.name)) m.set(norm(c.name), id);
+    named.push([norm(c?.name), id]);
   }
+  // 63회차 F5: **id 가 표시 이름보다 먼저**다 — 예전에는 한 루프에서 이름을 덮어써, 다른 엣지의 표시 이름이 이 엣지의 id 와 같으면
+  //   이 엣지의 push·pull 기록·위임 자원이 그 엣지로 접혔다(재현: 'seoul' 이 보낸 push 로 'seoul-2' 가 정상 · 'seoul' 은 기록 없음).
+  for (const [n, id] of named) if (n && !m.has(n)) m.set(n, id);
   return m;
 }
 
@@ -176,6 +180,14 @@ export function buildCommMap(p = {}) {
   const rejectById = latestBy(rejectRows);
   const linkById = new Map(latestLinks.map((r) => [r.link_id, r]));
   const reportsOf = (list, id) => (Array.isArray(list) ? list : []).find((r) => toId(r.agent) === id) || null;
+  // 66회차(65회차 F1 의 형제 — 재현): 통신 점검 엣지 보고는 **인증된 토큰의 agent 표기**로 저장된다 — 등록부 이름 · id 와 대소문자만 다를 수 있다.
+  //   예전 `edgeReports[linkFrom] || edgeReports[id]`(표기 그대로)는 보고가 와도 reportAt 이 null 이었다. 다른 통계처럼 id 로 접는다(늦은 보고가 이긴다).
+  const linkReportById = new Map();
+  for (const [ag, r] of Object.entries(edgeReports)) {
+    const id = toId(ag); if (!id || !r || typeof r !== 'object') continue;
+    const cur = linkReportById.get(id);
+    if (!cur || (Number(r.at) || 0) > (Number(cur.at) || 0)) linkReportById.set(id, r);
+  }
   const snapById = new Map(snapVcenters.map((v) => [t(v.id), v]));
 
   // ── 자원 → 담당 엣지 배정 ──
@@ -267,7 +279,7 @@ export function buildCommMap(p = {}) {
     // 통신 점검(v2.552) 최신값 — 있으면 싣고, 없으면 null(정상으로 칠하지 않는다)
     const lkRow = (r) => (r ? { ok: !!r.ok, ts: r.ts, phase: t(r.phase), failKind: t(r.fail_kind), streak: num(r.streak) ?? 1, sinceTs: num(r.since_ts), totalMs: num(r.total_ms) } : null);
     const lk = (kind, from, to) => lkRow(linkById.get(linkIdOf(kind, from, to)));
-    const rep = edgeReports[linkFrom] || edgeReports[id] || null;
+    const rep = linkReportById.get(id) || null;
     const linkCheck = {
       enabled: linkCheckEnabled,
       'central->edge': lkRow(linkById.get(centralEdgeLinkId(c, nameCount))),

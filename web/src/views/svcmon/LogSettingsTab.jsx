@@ -118,7 +118,8 @@ export default function LogSettingsTab({ isAdmin }) {
           </label>
         </div>
         <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
-          현재 사용 중: <code>{cfg.dir}</code> · 파일 {cfg.fileCount}개 · 합계 {(cfg.totalBytes / 1048576).toFixed(1)} MB
+          {/* 61회차 F2: 로그 폴더를 읽지 못하면 '0개 · 0.0 MB' 가 아니라 못 읽음(서버 filesUnreadable) */}
+          현재 사용 중: <code>{cfg.dir}</code> · {cfg.filesUnreadable ? '파일 목록을 읽지 못했습니다(권한 · 입출력 오류)' : `파일 ${cfg.fileCount}개 · 합계 ${(cfg.totalBytes / 1048576).toFixed(1)} MB`}
         </div>
         <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
           저장 시 그 경로에 실제 쓰기 시험을 합니다 — 통과하지 못하면 저장되지 않습니다(오타

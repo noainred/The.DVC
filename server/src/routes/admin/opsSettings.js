@@ -362,11 +362,11 @@ function savedScopeDenied(req, res, item) {
 adminRouter.put('/provision/saved/:id', adminOnly, (req, res) => {
   if (savedScopeDenied(req, res, getSaved(req.params.id))) return;
   const r = updateSaved(req.params.id, req.body || {});
-  res.status(r.ok ? 200 : 404).json(r);
+  res.status(r.ok ? 200 : r.readError ? 503 : 404).json(r);   // 74회차 F9: 파일 읽기 오류는 '없음'(404)이 아니다
 });
 adminRouter.delete('/provision/saved/:id', adminOnly, (req, res) => {
   if (savedScopeDenied(req, res, getSaved(req.params.id))) return;
   const r = removeSaved(req.params.id);
-  res.status(r.ok ? 200 : 404).json(r);
+  res.status(r.ok ? 200 : r.readError ? 503 : 404).json(r);   // 74회차 F9
 });
 }

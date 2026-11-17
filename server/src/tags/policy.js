@@ -50,17 +50,28 @@ export function normalizePolicy(p) {
   return { policy: { requiredCategories: req, corpCategory: corp }, invalid };
 }
 
+let _readWarned = false;   // 69회차 F4: 읽기 오류 경고는 상태가 바뀔 때 한 번
 export function loadTagPolicy() {
   if (cache) return cache;
   const base = { requiredCategories: [], corpCategory: '', updatedAt: null, updatedBy: null };
   const file = FILE();
+  // 69회차 F4(재현 — cost/settings.js 와 같은 꼴): 읽기 오류는 손상이 아니다 — 원본을 옮기지 않고 정책 없음을 캐시하지 않으며(다음 호출에서 다시 읽는다)
+  //   unreadable 로 밝힌다. 저장은 거절한다(예전에는 원본을 .corrupt 로 옮겨 필수 카테고리가 영구히 비었다).
+  let raw = null;
+  if (fs.existsSync(file)) {
+    try { raw = fs.readFileSync(file, 'utf8'); } catch (e) {
+      if (!_readWarned) { _readWarned = true; console.warn(`[tags] 태그 정책 파일을 읽지 못했습니다(파일은 그대로 둡니다 — 다시 읽을 때까지 정책 없음 · 저장 거절): ${safeLoadText(e) || '사유 미상'}`); }
+      return { ...base, unreadable: true, rev: 'unreadable' };
+    }
+  }
+  _readWarned = false;
   try {
     // v2.710 데모(mock): 정책 파일이 없으면 목 데이터의 카테고리로 만든 데모 정책을 쓴다 — 정책이 비어 있으면 '누락' 판정이
     //   하나도 보이지 않는다. 파일은 만들지 않고(demo:true 로 밝힌다) 관리자가 저장하면 그 값이 이긴다.
     if (!fs.existsSync(file) && isMockMode()) {
       Object.assign(base, { requiredCategories: ['Environment', 'Owner-Team', 'Corp'], corpCategory: 'Corp', demo: true });
-    } else if (fs.existsSync(file)) {
-      const p = JSON.parse(fs.readFileSync(file, 'utf8'));
+    } else if (raw != null) {
+      const p = JSON.parse(raw);
       if (!isObj(p)) throw new Error('객체가 아닙니다');
       const n = normalizePolicy(p);
       Object.assign(base, n.policy);
@@ -77,6 +88,7 @@ export function loadTagPolicy() {
 
 export function saveTagPolicy(body = {}, user = '') {
   const cur = loadTagPolicy();
+  if (cur.unreadable) return { ok: false, code: 'unreadable', reason: '태그 정책 파일을 읽지 못해 저장하지 않습니다 — 파일을 확인한 뒤 다시 저장하세요(읽지 못한 값 위에 덮어쓰지 않습니다)' };
   if (!isObj(body)) return { ok: false, code: 'bad-request', reason: '본문이 객체가 아닙니다' };
   if (body.rev != null && String(body.rev) !== cur.rev) return { ok: false, code: 'stale', reason: '그 사이에 다른 관리자가 정책을 바꿨습니다 — 새로 불러온 뒤 다시 저장하세요', rev: cur.rev };
   const merged = {

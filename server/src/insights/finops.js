@@ -114,13 +114,16 @@ export function computeFinOps(snap, measuredList, cfg = loadFinopsConfig()) {
     };
   };
 
+  // 70회차 F2: 측정한 서버가 0대면 합계는 '모름' 이다 — 0 W · ₩0 · 0 kg 이 아니다(fleetInventory v2.977 bareMetalWatts 와 같은 규약).
+  //   키는 그대로 두고 값만 null(화면 포맷터가 '—').
+  const unknownPack = () => Object.fromEntries(Object.keys(pack(0)).map((k) => [k, null]));
   return {
     config: cfg,
     measuredHosts: measured,         // 측정된 등록 서버 수(매핑 여부 무관)
     totalHosts: (snap.hosts || []).length,
     unmappedServers: unmapped,       // 인벤토리 ESXi 호스트와 매핑 안 된 측정 서버 수
     unmappedWatts: Math.round(unmappedW),
-    totals: pack(totalW),
+    totals: measured ? pack(totalW) : unknownPack(),
     byVcenter: [...byVc.values()].map((c) => ({ vcId: c.vcId, region: c.region, hosts: c.hosts, ...pack(c.watts) })).sort((a, b) => b.watts - a.watts),
     byRegion: [...byRegion.values()].map((c) => ({ region: c.region, hosts: c.hosts, vcenters: c.vcenters.size, ...pack(c.watts) })).sort((a, b) => b.watts - a.watts),
     topHosts: perHost.sort((a, b) => b.watts - a.watts).slice(0, 20),

@@ -34,12 +34,23 @@ export function normTimeoutMs(v) {
   return Math.min(600_000, Math.max(1000, Math.round(n)));
 }
 
+/**
+ * 71회차(67회차 반증 — 재현): 이미 저장된 사용 여부도 로드에서 불리언으로. 67회차는 **저장** 만 불리언으로 좁혀 옛 파일(손으로 고친
+ * `"enabled": "false"` 등)은 그대로 남았다 — 자연어 검색 · ChatOps · 상태 점검(참/거짓)은 켜짐, 설정 현황 · 링크 점검(=== true)은 꺼짐으로
+ * 여전히 갈렸고, 화면은 불러온 값을 그대로 다시 보내 **어떤 저장도 400** 이 됐다. 글자 'true'(대소문자 · 앞뒤 공백 무시)만 켜짐, 그 밖은 꺼짐.
+ */
+export function normLlmEnabled(v) {
+  if (typeof v === 'boolean') return v;
+  return typeof v === 'string' && v.trim().toLowerCase() === 'true';
+}
+
 export function loadLlmConfig() {
   let saved = {};
   try { if (fs.existsSync(FILE)) saved = parseJsonObject(fs.readFileSync(FILE, 'utf8')); } catch (e) { preserveCorrupt(FILE, e.message); saved = {}; } // v2.479(감사 S-9)
   const merged = { ...DEFAULTS, ...saved };
   // 이미 저장된 문자열·범위 밖 값도 로드에서 복구한다(저장 경로만 고치면 옛 파일이 계속 검색을 막는다).
   merged.timeoutMs = normTimeoutMs(merged.timeoutMs) ?? DEFAULTS.timeoutMs;
+  merged.enabled = normLlmEnabled(merged.enabled);
   return merged;
 }
 
@@ -66,8 +77,16 @@ export function saveLlmConfig(partial = {}) {
     const why = llmUrlIssue(partial.url);
     if (why) { const e = new Error(why); e.status = 400; throw e; }
   }
+  // 67회차 개선: 형식을 본다 — 예전에는 아무 값이나 그대로 저장했다. 'enabled' 가 문자열 "false" 면 자연어 검색 · ChatOps · 상태 점검(참/거짓으로 읽는다)은
+  //   켜짐으로, 설정 현황(settingsStatus — === true)은 꺼짐으로 읽어 두 판정이 갈렸다.
+  const bad = (msg) => { const e = new Error(msg); e.status = 400; return e; };
+  if (partial.enabled !== undefined && typeof partial.enabled !== 'boolean') throw bad('사용 여부(enabled)는 true 또는 false 여야 합니다.');
+  if (partial.provider !== undefined && typeof partial.provider !== 'string') throw bad('LLM 제공자는 글자여야 합니다.');
+  // eslint-disable-next-line no-control-regex
+  if (partial.model !== undefined && (typeof partial.model !== 'string' || !/^[^\s\u0000-\u001f\u007f]{1,200}$/.test(partial.model.trim()))) throw bad('모델 이름은 공백 없는 200자 이하 글자여야 합니다(예: llama3.1:8b).');
+  if (partial.url !== undefined && typeof partial.url !== 'string') throw bad('LLM 주소는 글자여야 합니다.');
   const next = { ...cur };
-  for (const k of ['enabled', 'provider', 'url', 'model']) if (partial[k] !== undefined) next[k] = partial[k];
+  for (const k of ['enabled', 'provider', 'url', 'model']) if (partial[k] !== undefined) next[k] = typeof partial[k] === 'string' ? partial[k].trim() : partial[k];
   // v2.606 TIM2606-01: 빈 칸·잘못된 값은 미지정 → 이전 값 유지(명시적인 양수만 값이다).
   if (partial.timeoutMs !== undefined) next.timeoutMs = normTimeoutMs(partial.timeoutMs) ?? cur.timeoutMs;
   fs.mkdirSync(path.dirname(FILE), { recursive: true });

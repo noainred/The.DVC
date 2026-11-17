@@ -55,6 +55,16 @@ export function flowDefIssue(f) {
   return null;
 }
 
+/**
+ * 58회차 F2(재현): Virtual Fabrics 논리 스위치 컨텍스트 접두 — 수집기(fosSsh specs · perfPoller)와 같은 규칙(exec 마다 독립 채널이라 `setcontext` 가
+ *   이어지지 않는다 — 명령마다 앞에 붙인다). 예전에는 플로우 명령에만 빠져, vfId 를 둔 스위치에서 포탈이 그 논리 스위치의 switchshow 로 고른 포트로
+ *   **기본 컨텍스트**에서 만들기 · 보기 · 지우기를 했다. vfId 는 등록부가 1~128 정수로만 받는다 — 그 밖은 접두 없음.
+ */
+export function vfPrefixOf(device) {
+  const n = Number(device?.vfId);
+  return device?.vfId != null && device.vfId !== '' && Number.isInteger(n) && n >= 1 && n <= 128 ? `setcontext ${n}; ` : '';
+}
+
 /** 동작 이름 — 엣지 버전 게이트 · 화면 문구가 같은 목록을 본다. 비활성화 · 다시 켜기는 v2.940 에 더했다(그 전 엣지는 모른다). */
 export const FLOW_ACTIONS = Object.freeze(['check', 'create', 'show', 'delete', 'deactivate', 'activate']);
 

@@ -226,8 +226,10 @@ test('⑤ directorMap — 형식 검사 · 바뀐 항목만 변경자 갱신 · 
 });
 
 test('⑥ 실제 라우트 — 현황 합계 == 트래픽 카드 · 디렉터 · 점검 · 매핑 · 임계값 · CSV · 상세', async () => {
-  M._resetForTest(); S._resetForTest();
   fs.rmSync(path.join(tmp, 'san-storage-map.json'), { force: true }); fs.rmSync(path.join(tmp, 'storage-perf-check.json'), { force: true });
+  // 58회차 F5: 손상 보존본만 남으면 재시작 뒤에도 '못 읽음'(저장 거절)이다 — 앞 시험이 만든 보존본도 치워 깨끗한 설치로 시작한다(운영자 정리와 같다).
+  for (const f of fs.readdirSync(tmp)) if (/^(san-storage-map|storage-perf-check)\.json\.corrupt\./.test(f)) fs.rmSync(path.join(tmp, f), { force: true });
+  M._resetForTest(); S._resetForTest();
   const express = (await import('express')).default;
   const { api } = await import('../src/routes/api.js');
   const reg = await import('../src/sanswitch/registry.js');

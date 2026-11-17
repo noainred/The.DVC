@@ -254,9 +254,17 @@ function load() {
 }
 
 // v2.591: '지금 수집' 요청 큐의 기준선 — 중앙 재시작 직후에도 보관 중인 엣지 스냅샷의 수집 시각(엣지 시계 값)을 쓴다.
+// 59회차(58회차 F1 반증 — SAN 과 같은 꼴 · 재현): 여러 엣지가 같은 장비 사본을 들고 있으면(위임을 옮김) **수집 시각이 가장 늦은 사본**의 값 —
+//   첫 일치는 옛 엣지의 낡은 시각을 기준선으로 잡아, 새 엣지가 이미 보관 중인 스냅샷을 다시 보내기만 해도 '지금 수집' 이 완료로 지워졌다.
 setCollectBaseResolver((id) => {
-  for (const rec of load().values()) for (const d of rec?.devices || []) if (String(d?.deviceId || d?.id) === String(id)) return Number(d.edgeCollectedAt ?? d.collectedAt) || null; // v2.630 A4-02: 엣지 시계 원본
-  return null;
+  let hit = null;
+  for (const rec of load().values()) {
+    for (const d of rec?.devices || []) {
+      if (String(d?.deviceId || d?.id) !== String(id)) continue;
+      if (!hit || (Number(d.collectedAt) || 0) > (Number(hit.collectedAt) || 0)) hit = d;
+    }
+  }
+  return hit ? (Number(hit.edgeCollectedAt ?? hit.collectedAt) || null) : null; // v2.630 A4-02: 엣지 시계 원본
 });
 
 /**

@@ -151,7 +151,15 @@ class BackupService:
         path = self._resolve(name)
         if not path.exists():
             raise FileNotFoundError(name)
-        return read_json(path, None, expect=dict)
+        # 56회차 F3(재현): 읽기 오류(권한 — 예: root 가 옮겨 둔 0600 백업)는 손상이 아니다 — 예전에는 받기 · 복원을 누르는 순간 그 백업을
+        #   <이름>.corrupt.* 로 옮겨 목록에서 사라지게 하고 '찾을 수 없음' · '형식 오류' 로 답했다(31회차 F3 · 35회차 R2 와 같은 꼴).
+        try:
+            return read_json(path, None, expect=dict, strict_io=True)
+        except FileNotFoundError:
+            raise   # 그 사이 지워졌다 — 404
+        except OSError as exc:
+            raise ValueError(f"백업 파일을 읽지 못했습니다({exc.strerror or exc}) — 파일 소유자 · 권한을 확인하세요"
+                             "(서비스 계정이 읽을 수 있어야 합니다).") from None
 
     def delete(self, name: str) -> bool:
         with self._lock:

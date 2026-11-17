@@ -33,7 +33,10 @@ export function duplicateAlerts(rows, { unreadVc = new Set() } = {}) {
   }
   out.sort((a, b) => (a.key < b.key ? -1 : 1));
   if (out.length > DUP_ALERT_MAX) {
-    return { alerts: [{ key: 'ipdup:__many__', severity: 'warning', title: `중복 IP ${out.length}개`, detail: `중복 IP 가 ${out.length}개입니다(앞 ${DUP_ALERT_MAX}개를 넘어 한 건으로 묶음) — IP 관리 › IP 주소의 ‘중복’ 필터로 확인하세요.` }], held };
+    // 60회차 F3(재현): 묶음으로 바뀌는 회차에 IP 별 키를 **보류**로 넘긴다 — 예전에는 키 목록에서 빠져 이미 발생 중이던 IP 별 중복 알림(최대 200건)이
+    //   전부 '해소' 로 기록됐다(중복은 그대로인데 — 해소 구독자에게도 나갔다). 보류는 발생 중인 키에만 뜻이 있다(새 키를 만들지 않는다).
+    return { alerts: [{ key: 'ipdup:__many__', severity: 'warning', title: `중복 IP ${out.length}개`, detail: `중복 IP 가 ${out.length}개입니다(앞 ${DUP_ALERT_MAX}개를 넘어 한 건으로 묶음) — IP 관리 › IP 주소의 ‘중복’ 필터로 확인하세요.` }],
+      held: [...held, ...out.map((a) => a.key)] };
   }
   return { alerts: out, held };
 }

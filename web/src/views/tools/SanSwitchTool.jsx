@@ -13,7 +13,7 @@ import SanPortMap from './SanPortMap.jsx';       // v2.748 🔲 포트 배치(�
 import SanHostAttrib from './SanHostAttrib.jsx'; // v2.920 호스트 귀속(가상화 호스트 HBA ↔ 조닝 ↔ 스토리지 트래픽 — 시안 D-③)
 import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox } from '../../components/ui.jsx';
 import { stateLabel, stateTone, opticalHealth, errorLevel, capacityLevel, aggregate,
-  throughputText, throughputTitle, filterPorts, shortDeviceName, saturationPct, saturationLevel, bytesPerSecText,
+  throughputText, throughputTitle, filterPorts, otherErrorsTitle, shortDeviceName, saturationPct, saturationLevel, bytesPerSecText,
   toChartRows, topSeries, bps, sortPorts, nextSort, sortRows, seriesStats,
   RX_WARN_DBM, RX_BAD_DBM, alertsMeta, usedPctText, switchesMeta, perfPartialNote, perfPartialMark, rateNotReadyText, fruText } from './sanSwitchPorts.js';
 import { STable } from '../../components/STable.jsx';
@@ -1509,8 +1509,8 @@ function PortDetail({ detail, setDetail, closeDetail, portFilter, setPortFilter,
                           : null}
                         <div className="muted" style={{ ...ELLIPSIS, fontSize: 10.5 }}>{(p.attached || []).join(', ') || '—'}</div>
                       </td>
-                      <td style={{ color: TONE[el.level === 'ok' ? 'muted' : el.level] }}>
-                        {p.errCrc ?? '—'} / {p.errLinkFail ?? '—'} / {p.errLossSync ?? '—'}
+                      <td style={{ color: TONE[el.level === 'ok' ? 'muted' : el.level] }} title={otherErrorsTitle(p)}>
+                        {p.errCrc ?? '—'} / {p.errLinkFail ?? '—'} / {p.errLossSync ?? '—'}{otherErrorsTitle(p) ? ' ⓘ' : ''}
                       </td>
                       <td style={{ color: oh.level === 'none' ? TONE.muted : TONE[oh.level] }} title={oh.why}>
                         {p.rxPowerDbm ?? '—'} / {p.txPowerDbm ?? '—'}{oh.level === 'bad' || oh.level === 'warn' ? ' ⚠' : ''}

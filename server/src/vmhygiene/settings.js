@@ -60,13 +60,25 @@ export function applyPatch(cur, body = {}) {
   return next;
 }
 
+let _readWarned = false;   // 69회차 F4: 읽기 오류 경고는 상태가 바뀔 때 한 번
 export function loadVmHygieneSettings() {
   if (cache) return cache;
   let base = { ...DEFAULTS, notify: { ...DEFAULTS.notify } };
   const file = FILE();
+  // 69회차 F4(재현 — cost/settings.js 와 같은 꼴): 읽기 오류는 손상이 아니다 — 원본을 옮기지 않고 기본값을 캐시하지 않으며(다음 호출에서 다시 읽는다)
+  //   unreadable 로 밝힌다. 저장은 거절하고 알림은 보내지 않는다(예전에는 원본을 .corrupt 로 옮겨 알림 · 예외 · 기준이 영구히 기본값으로 돌아갔다).
+  let raw = null;
+  if (fs.existsSync(file)) {
+    try { raw = fs.readFileSync(file, 'utf8'); } catch (e) {
+      if (!_readWarned) { _readWarned = true; console.warn(`[vm-hygiene] 설정 파일을 읽지 못했습니다(파일은 그대로 둡니다 — 다시 읽을 때까지 기본값 · 저장 거절 · 알림 보류): ${safeLoadText(e) || '사유 미상'}`); }
+      const { updatedAt: _a, updatedBy: _b, ...core0 } = base;
+      return { ...core0, updatedAt: null, updatedBy: null, unreadable: true, rev: 'unreadable' };
+    }
+  }
+  _readWarned = false;
   try {
-    if (fs.existsSync(file)) {
-      const p = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (raw != null) {
+      const p = JSON.parse(raw);
       if (!isObj(p)) throw new Error('객체가 아닙니다');
       base = applyPatch(base, p);
       if (typeof p.updatedAt === 'number') base.updatedAt = p.updatedAt;
@@ -83,7 +95,8 @@ export function loadVmHygieneSettings() {
 
 export function saveVmHygieneSettings(body, user) {
   const cur = loadVmHygieneSettings();
-  const { rev, updatedAt, updatedBy, ...core } = cur;
+  if (cur.unreadable) throw new Error('VM 구성 점검 설정 파일을 읽지 못해 저장하지 않습니다 — 파일을 확인한 뒤 다시 저장하세요(읽지 못한 값 위에 덮어쓰지 않습니다)');
+  const { rev, updatedAt, updatedBy, unreadable, ...core } = cur;
   const next = applyPatch(core, body);
   const out = { ...next, updatedAt: Date.now(), updatedBy: user ? String(user).slice(0, 128) : null };
   atomicWriteFileSync(FILE(), JSON.stringify(out, null, 2));

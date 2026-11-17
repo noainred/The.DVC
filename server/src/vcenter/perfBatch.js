@@ -44,20 +44,22 @@ export function intervalForDays(days) {
   return normDays(days) <= 30 ? 'month' : 'year';
 }
 
+import { returnvalBodies, perfIdMarks } from './soapParse.js';
+
 /** 한 엔티티 블록에서 계열을 뽑는다 — 계열 경계는 `<id>` 블록(위 주석의 `<value>` 함정 회피). */
 function seriesOfBlock(block, ids) {
   const out = new Map(ids.map((id) => [id, []]));
   const times = [...block.matchAll(/<timestamp>([^<]+)<\/timestamp>/g)].map((m) => m[1]);
-  const marks = [...block.matchAll(/<id>([\s\S]*?)<\/id>/g)];
+  const marks = perfIdMarks(block);   // 75회차: 선형(soapParse.js — 게으른 정규식은 닫히지 않은 <id> 반복에 O(n²))
   const picked = new Map(); // cid -> 채택한 instance('' = 집계)
   for (let i = 0; i < marks.length; i++) {
-    const cid = /<counterId>(\d+)<\/counterId>/.exec(marks[i][1])?.[1];
+    const cid = /<counterId>(\d+)<\/counterId>/.exec(marks[i].inner)?.[1];
     if (!cid || !out.has(cid)) continue;
-    const instance = /<instance>([^<]*)<\/instance>/.exec(marks[i][1])?.[1] || '';
+    const instance = /<instance>([^<]*)<\/instance>/.exec(marks[i].inner)?.[1] || '';
     // 같은 counterId 가 인스턴스별로 여러 번 올 수 있다 — 집계(빈 instance)를 우선한다.
     if (picked.has(cid) && !(picked.get(cid) !== '' && instance === '')) continue;
-    const from = marks[i].index + marks[i][0].length;
-    const to = i + 1 < marks.length ? marks[i + 1].index : block.length;
+    const from = marks[i].end;
+    const to = i + 1 < marks.length ? marks[i + 1].start : block.length;
     const vals = [...block.slice(from, to).matchAll(/<value>(-?\d+)<\/value>/g)].map((m) => Number(m[1]));
     if (!vals.length) continue;
     const n = Math.min(times.length, vals.length);
@@ -77,11 +79,9 @@ export function parseEntityPerfBatchXml(xml, counterIds = [], entityType = 'Virt
   const ids = [...new Set((counterIds || []).filter(Boolean).map(String))];
   const out = new Map();
   if (!ids.length) return out;
-  const re = /<returnval[^>]*>([\s\S]*?)<\/returnval>/g;
-  let m;
-  while ((m = re.exec(xml || ''))) {
-    const blk = m[1];
-    const ent = new RegExp(`<entity type="${entityType}">([^<]+)</entity>`).exec(blk)?.[1];
+  const entRe = new RegExp(`<entity type="${entityType}">([^<]+)</entity>`);
+  for (const blk of returnvalBodies(xml || '')) {   // 75회차: 선형(닫히지 않은 <returnval> 반복에 O(n²) 이던 게으른 정규식)
+    const ent = entRe.exec(blk)?.[1];
     if (!ent) continue;
     out.set(ent, seriesOfBlock(blk, ids));
   }

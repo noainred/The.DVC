@@ -118,6 +118,8 @@ export default function HostAccessSettings() {
         <div className="card" style={{ marginBottom: 12, borderLeft: '4px solid var(--amber)' }}>
           <b>⏳ 확정 대기 중</b> — {when(pend.at)} 에 {pend.by || '?'} 가 런타임에 적용. <b>{Math.floor(remain / 60)}분 {remain % 60}초</b> 안에 확정하지 않으면 자동으로 되돌립니다.
           {' '}SSH 가 필요하면 다른 창에서 접속을 먼저 확인하세요.
+          {/* 64회차 F2: 되돌림(--reload)이 실패하면 서버가 pending 을 남기고 다시 시도한다 — '0분 0초 안에' 만 보이면 이미 되돌린 것처럼 읽힌다. */}
+          {pend.revertError && <div style={{ color: 'var(--red)', marginTop: 6 }}>되돌림(firewall-cmd --reload)이 실패해 런타임 규칙이 아직 남아 있습니다 — {String(pend.revertError).slice(0, 200)}. 자동으로 다시 시도합니다(되돌리기 버튼으로 바로 다시 시도할 수 있습니다).</div>}
           <div className="flex gap" style={{ marginTop: 8 }}>
             <button className="login-btn" disabled={busy !== ''} onClick={() => setOtpFor('confirm')}>✅ 확정(영구 반영, OTP)</button>
             <button className="tab" disabled={busy !== ''} onClick={() => run('revert')}>↩ 되돌리기</button>

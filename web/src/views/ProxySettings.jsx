@@ -6,14 +6,15 @@ import { blankOr } from './blankOr.js';
 import { guacdFlag, guacdPlaintextRemote, GUACD_TEXT } from './proxyGuacdText.js';
 
 /** 48회차 F2(사용자 결정): guacd TLS · RDP 대상 인증서 검증 옵션 + 평문 원격 경고 — 기본 프록시 · 추가 프록시 공용. */
+// v3.18.6 화면 검증: 이 칸은 .spec-grid 안이라 그 label 규칙(flex-direction: column)이 체크박스를 글자 위로 띄운다 — 행 방향을 직접 준다.
 function GuacdOptions({ g, onFlag }) {
   return (
     <div style={{ gridColumn: '1 / -1', minWidth: 0 }}>
       <div className="flex gap" style={{ flexWrap: 'wrap', alignItems: 'center', fontSize: 13 }}>
-        <label className="flex gap" style={{ alignItems: 'center' }} title={GUACD_TEXT.tlsHint}>
+        <label className="flex gap" style={{ flexDirection: 'row', alignItems: 'center' }} title={GUACD_TEXT.tlsHint}>
           <input type="checkbox" checked={guacdFlag(g?.tls)} onChange={(e) => onFlag('tls', e.target.checked)} /> {GUACD_TEXT.tls}
         </label>
-        <label className="flex gap" style={{ alignItems: 'center' }} title={GUACD_TEXT.verifyHint}>
+        <label className="flex gap" style={{ flexDirection: 'row', alignItems: 'center' }} title={GUACD_TEXT.verifyHint}>
           <input type="checkbox" checked={guacdFlag(g?.verifyRdpCert)} onChange={(e) => onFlag('verifyRdpCert', e.target.checked)} /> {GUACD_TEXT.verify}
         </label>
       </div>

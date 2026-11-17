@@ -342,7 +342,9 @@ export function evaluate(snap, cfg = loadAlertConfig()) {
           for (const k of d.held) held.add(k);
           for (const x of d.alerts.slice(0, 300)) out.push(x);
         }
-        if (R.ipamSubnetFull?.enabled) for (const x of subnetFullAlerts(withSubnetNotes(listSubnets(snap, '', null)), { threshold: R.ipamSubnetFull.threshold }).slice(0, 300)) out.push(x);
+        // 62회차(60회차 F3 의 형제 — 재현): 상한 300 을 넘은 꼬리는 '발생 중인데 이번 목록에 안 실린 것' 이다 — slice 로 버리면 순서가 밀린
+        //   발생 중 '대역 가득 참' 이 해소로 기록 · 발송됐다(305개 중 5개). 다른 상한 목록과 같이 holdTail(판정 보류).
+        if (R.ipamSubnetFull?.enabled) for (const x of holdTail(subnetFullAlerts(withSubnetNotes(listSubnets(snap, '', null)), { threshold: R.ipamSubnetFull.threshold }), 300, (a) => a.key)) out.push(x);
       }
     } catch (e) {
       // 평가 실패도 '해소' 가 아니다 — 보류한다.

@@ -14,12 +14,33 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 const FILE = path.join(config.configDir, 'provision-saved.json');
 
 let cache = null;
+/*
+ * 74회차 F9: **읽기 오류**(EACCES · EISDIR · EIO 등 — 파일은 있는데 읽지 못함)를 손상으로 보지 않는다. 예전에는 같은 catch 가
+ *   preserveCorrupt 로 원본을 `.corrupt.<시각>` 으로 옮기고 빈 목록으로 시작해, 다음 VM 생성이 새 파일(1건)을 써서 저장된 작업 전부가
+ *   목록에서 사라졌다(34회차 F4 · 19회차 users.json 과 같은 모양). 읽기 오류면 원본을 그대로 두고 캐시하지 않으며(다음 호출에 다시 읽는다)
+ *   그동안 쓰기(addSaved · updateSaved · removeSaved)를 막는다 — 빈 목록을 저장해 원본을 덮지 않게. 파싱 실패만 예전대로 보존 후 빈 값.
+ */
+let readErr = null;
 function load() {
   if (cache) return cache;
+  let raw;
+  try {
+    raw = fs.readFileSync(FILE, 'utf8');
+  } catch (e) {
+    if (e?.code === 'ENOENT') { readErr = null; cache = []; return cache; }
+    readErr = { code: String(e?.code || 'EREAD'), at: Date.now() };
+    console.error(`[provision] ${path.basename(FILE)} 읽기 실패(${readErr.code}) — 원본은 그대로 두었습니다. 파일 권한 · 소유자를 확인하세요(그동안 저장된 작업 쓰기를 막습니다).`);
+    return [];   // 캐시하지 않는다
+  }
+  readErr = null;
   cache = [];
-  try { if (fs.existsSync(FILE)) { const j = JSON.parse(fs.readFileSync(FILE, 'utf8')); cache = Array.isArray(j) ? j : (j.items || []); } } catch (e) { preserveCorrupt(FILE, e.message); cache = []; }
+  try { const j = JSON.parse(raw); cache = Array.isArray(j) ? j : (Array.isArray(j?.items) ? j.items : []); } catch (e) { preserveCorrupt(FILE, e.message); cache = []; }
   return cache;
 }
+/** 읽기 오류 중이면 사유(쓰기 거부) — 아니면 null. */
+const writeBlocked = () => (readErr ? `저장된 작업 파일을 읽지 못했습니다(${readErr.code}) — 원본을 덮지 않도록 저장을 막았습니다. 파일 권한 · 소유자를 확인하세요.` : null);
+/** 화면 · 진단용 — 읽기 오류 상태(없으면 null). */
+export function savedReadError() { load(); return readErr ? { ...readErr } : null; }
 function persist() {
   fs.mkdirSync(path.dirname(FILE), { recursive: true });
   atomicWriteFileSync(FILE, JSON.stringify(cache, null, 2), { mode: 0o600 });
@@ -29,6 +50,7 @@ const cleanTags = (v) => (Array.isArray(v) ? v : String(v || '').split(/[,\n]/))
 /** Persist one provisioning spec (called whenever a job is created). */
 export function addSaved({ spec, source, user, memo = '', tags = [] } = {}) {
   const list = load();
+  { const why = writeBlocked(); if (why) throw new Error(why); }   // 74회차 F9 — 호출부(createJob)는 best effort 로 삼킨다(작업은 진행)
   const entry = {
     id: randomUUID(),
     createdAt: new Date().toISOString(),
@@ -71,13 +93,16 @@ export function listSaved({ vcenterId = '', limit = 10, offset = 0, allowed = nu
   const total = items.length;
   const lim = Math.max(1, Math.min(200, Number(limit) || 10));
   const off = Math.max(0, Number(offset) || 0);
-  return { total, offset: off, limit: lim, items: items.slice(off, off + lim).map(copyOf), vcenters: savedVcenters(allowed) };
+  // 74회차 F9: 읽기 오류면 빈 목록이 '저장된 작업 없음' 이 아니라는 사실을 함께 싣는다(사유에 경로 · 원문 없음).
+  return { total, offset: off, limit: lim, items: items.slice(off, off + lim).map(copyOf), vcenters: savedVcenters(allowed), ...(readErr ? { readError: true, reason: writeBlocked() } : {}) };
 }
 
 export function getSaved(id) { return copyOf(load().find((e) => e.id === id)) || null; }
 
 export function updateSaved(id, { memo, tags } = {}) {
-  const e = load().find((x) => x.id === id);
+  const list = load();
+  { const why = writeBlocked(); if (why) return { ok: false, readError: true, reason: why }; }   // 74회차 F9
+  const e = list.find((x) => x.id === id);
   if (!e) return { ok: false, reason: '저장된 작업을 찾을 수 없습니다.' };
   if (memo !== undefined) e.memo = String(memo || '').slice(0, 2000);
   if (tags !== undefined) e.tags = cleanTags(tags);
@@ -87,6 +112,7 @@ export function updateSaved(id, { memo, tags } = {}) {
 
 export function removeSaved(id) {
   const list = load();
+  { const why = writeBlocked(); if (why) return { ok: false, readError: true, reason: why }; }   // 74회차 F9
   const i = list.findIndex((e) => e.id === id);
   if (i < 0) return { ok: false, reason: '없는 작업' };
   list.splice(i, 1);

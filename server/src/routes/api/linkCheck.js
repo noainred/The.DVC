@@ -58,6 +58,9 @@ api.get('/tools/link-check', adminOnly, fullScopeOnly, async (_req, res) => {
   // v2.770(점검 R5-E1-3): 엣지 보고 낡음 경계는 주기에 맞춘 값 하나 — 각 보고의 stale 과 응답의 reportStaleMs 가 같은 값이다.
   const reportStaleMs = reportStaleLimitMs(s.intervalMs);
   const reports = allEdgeLinkReports({ staleMs: reportStaleMs });
+  // 65회차 F1: 보고는 인증된 토큰의 agent 표기로 저장된다 — 링크의 from(등록부 이름)과 대소문자만 다를 수 있다
+  //   (수신 · 배정 · 버전 대조는 전부 대소문자 무시). 표기 그대로 찾으면 보고가 와도 행의 edgeReport 가 null 이었다.
+  const reportByLc = new Map(Object.entries(reports).map(([k, v]) => [t(k).toLowerCase(), v]));
   /*
    * 엣지 버전 — `allCollectorStatus()` 는 **수집 서버 id** 로 키가 잡히고 값에는 엣지가 스스로
    * 보고한 `agent` 가 들어 있다. 링크의 `from` 은 등록부의 **이름**이므로 **둘 다** 키로 넣는다.
@@ -76,7 +79,7 @@ api.get('/tools/link-check', adminOnly, fullScopeOnly, async (_req, res) => {
   const nowTs = Date.now();
   const rows = all.map((l) => {
     const r = byId.get(l.id) || null;
-    const rep = l.by === 'edge' ? (reports[l.from] || null) : null;
+    const rep = l.by === 'edge' ? (reportByLc.get(t(l.from).toLowerCase()) || null) : null;
     return {
       ...publicLink(l),
       latest: r ? {

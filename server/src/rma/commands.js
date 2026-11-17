@@ -126,8 +126,11 @@ export const PRESETS = [
   { id: 'log-event', group: '기타', label: '로그 이벤트 기록 (logger → journal)', params: [{ name: 'message', label: '메시지', type: 'message', required: true },
     { name: 'priority', label: '우선순위(info/warning/err)', type: 'text', def: 'info' }],
     argv: (a) => ['logger', '-t', 'vmware-portal-rma', '-p', `user.${/^(info|warning|err|notice|crit)$/.test(a.priority) ? a.priority : 'info'}`, a.message] },
+  // 64회차 F1(재현): curl `--data @경로` 는 그 파일을 읽어 본문으로 보낸다 — 본문 '@/etc/vmware-portal/portal.env' 하나로 엣지 토큰 · 비밀이
+  //   아무 URL 로 나갔다(자유 명령 opt-in 없이 · '파일 내용을 읽는 프리셋 금지' 우회). 선행 '@' 를 거부한다(noLeadingAt — 중앙 · 엣지 같은 함수라
+  //   옛 엣지도 중앙 검증에서 막힌다). `--data-raw` 로 바꾸지 않은 이유: 옛 curl(7.43 미만)에 없는 옵션이라 POST 가 통째로 깨진다.
   { id: 'http-request', group: '기타', label: 'HTTP 요청 (curl GET/POST)', params: [{ name: 'url', label: 'URL', type: 'url', required: true },
-    { name: 'method', label: '메서드(GET/POST)', type: 'text', def: 'GET' }, { name: 'body', label: '본문(POST, 선택)', type: 'message' }],
+    { name: 'method', label: '메서드(GET/POST)', type: 'text', def: 'GET' }, { name: 'body', label: '본문(POST, 선택)', type: 'message', noLeadingAt: true }],
     argv: (a) => ['curl', '-sS', '-m', '15', '--max-redirs', '2', '-X', /^POST$/i.test(a.method) ? 'POST' : 'GET', ...(a.body ? ['-H', 'Content-Type: application/json', '--data', a.body] : []), '-o', '/dev/null', '-w', '%{http_code} %{time_total}s', a.url], timeoutMs: 30_000 },
   { id: 'tcp-send', group: '기타', label: 'TCP 전송 (연결 후 문자열 전송, 응답 앞부분 회신)', params: [{ name: 'host', label: '대상', type: 'host', required: true },
     { name: 'port', label: '포트', type: 'int', min: 1, max: 65535, required: true }, { name: 'data', label: '전송 문자열', type: 'message' }], native: 'tcp-send', timeoutMs: 15_000 },
@@ -211,6 +214,7 @@ export function buildCommand(cmd, rawArgs = {}, opts = {}) {
     const t = PARAM_TYPES[p.type];
     if (!t) return { ok: false, issue: `내부 오류: 파라미터 타입 ${p.type}` };
     if (!t.re.test(v)) return { ok: false, issue: `'${p.label}' 형식 오류 — ${t.hint}` };
+    if (p.noLeadingAt && v.startsWith('@')) return { ok: false, issue: `'${p.label}' 은 @ 로 시작할 수 없습니다(curl 이 @ 뒤를 파일 경로로 읽어 그 내용을 보낸다).` };
     if (p.type === 'int') {
       const n = Number(v);
       if (p.min != null && n < p.min) return { ok: false, issue: `'${p.label}'은 ${p.min} 이상이어야 합니다.` };

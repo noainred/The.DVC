@@ -206,6 +206,38 @@ export function validate(cfg, dropped = null) {
   return out;
 }
 
+/**
+ * 73회차 F4(재현): 저장 본문의 받는 사람 주소 중 형식이 틀린 것 — 기본 수신자 · 종류별 받는 사람 · 참조.
+ *   save 는 `normalizeAddresses(...).ok` 만 남겨 **틀린 주소를 조용히 버렸다**('ops@corp' · 'a@b.com x@y.com' 같은 입력이 200 '저장되었습니다' 로
+ *   사라지고, 화면 입력칸은 그대로라 저장된 줄 알았다). 라우트가 저장 전에 이것으로 400 을 돌려준다.
+ * @returns {{ field: string, bad: string[] } | null}
+ */
+export function recipientIssue(body = {}) {
+  // 75회차(73회차 F4 반증 — 재현): 글자 · 수 · 그 배열만 주소로 읽는다 — `{toString:1}` 같은 객체는 normalizeAddresses 의 String() 이 던져
+  //   400 대신 500 이었다(72회차 F4 toolcats 와 같은 함정). 그런 값은 형식 오류(400)로 돌려준다.
+  const scalar = (x) => x == null || typeof x === 'string' || typeof x === 'number';
+  const check = (v, field) => {
+    if (v == null) return null;
+    if (!(Array.isArray(v) ? v.every(scalar) : scalar(v))) return { field, bad: ['(주소가 아닌 값)'] };
+    const { bad } = normalizeAddresses(v);
+    return bad.length ? { field, bad: bad.slice(0, 10) } : null;
+  };
+  const d = check(body?.defaultTo, 'defaultTo');
+  if (d) return d;
+  if (body?.kinds && typeof body.kinds === 'object') {
+    for (const k of KINDS) {
+      const v = body.kinds[k.id];
+      if (!v || typeof v !== 'object') continue;
+      const r = check(v.to, `kinds.${k.id}.to`) || check(v.cc, `kinds.${k.id}.cc`);
+      if (r) return r;
+    }
+  }
+  return null;
+}
+
+/** 저장될 종류별 설정(save 와 같은 정규화 — PUT 검증이 저장될 값으로 판정하게, 73회차 F4). */
+export function normalizeKinds(raw) { return normKinds(raw); }
+
 /** 알 수 없는 종류 id 를 저장하려는 시도를 걸러낸다(설정 파일 오염 방지). */
 export function unknownKinds(kinds) {
   return Object.keys(kinds || {}).filter((k) => !isKind(k));

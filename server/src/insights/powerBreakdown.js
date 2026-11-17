@@ -107,6 +107,8 @@ export function computePowerBreakdown(snap, measuredList, opts = {}) {
     };
   };
 
+  // 70회차 F2: 측정한 서버가 0대면 합계는 '모름'(null) — FinOps 와 같은 규약(키는 그대로 · 값만 null).
+  const unknownPack = () => Object.fromEntries(Object.keys(pack(0)).map((k) => [k, null]));
   return {
     config: cfg,
     scope: vcFilter || '',
@@ -114,7 +116,7 @@ export function computePowerBreakdown(snap, measuredList, opts = {}) {
     mappedServers: mapped,
     unmappedServers: unmapped,
     unmappedWatts: Math.round(unmappedW),
-    totals: pack(totalW),
+    totals: servers.length ? pack(totalW) : unknownPack(),
     byVcenter: [...byVc.values()].map((c) => ({ vcId: c.vcId, region: c.region, servers: c.servers, ...pack(c.watts) })).sort((a, b) => b.watts - a.watts),
     // 1차 DataCenter → 2차 vCenter/Baremetal. 미지정 법인(__nodc__)은 맨 뒤.
     byDatacenter: [...byDc.values()].map((d) => ({

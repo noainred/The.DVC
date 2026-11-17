@@ -83,6 +83,25 @@ export function checkOllamaArchive(p) {
   return { ok: true, real };
 }
 
+/**
+ * 67회차 F4(재현): 오프라인 설치 압축 해제 명령. 검증(checkOllamaArchive)은 gzip 과 zstd(.tar.zst) 를 받는데 예전 명령은 `tar -xzf` 라
+ * gzip 을 강제해 zstd 파일은 **언제나** 'gzip: stdin: not in gzip format' 으로 실패했다. GNU tar 는 읽을 때 앞머리 서명으로 압축 형식을
+ * 고르므로 `-xf` 로 둔다(gzip 은 그대로 · zstd 는 대상에 zstd 가 있어야 한다 — 없으면 tar 의 오류 문구가 사유로 나간다).
+ * 경로는 이 모듈이 만든 값(remoteTmpDir 결과)만 받는다 — 셸 메타 문자가 있으면 던진다.
+ */
+export function ollamaExtractCmd(archive, dest = '/usr') {
+  const safe = (v) => { const s = String(v ?? ''); if (!/^\/[A-Za-z0-9._/-]{1,255}$/.test(s)) throw new Error(`압축 해제 경로 형식이 아닙니다: ${s.slice(0, 80)}`); return s; };
+  return `tar -C ${safe(dest)} -xf ${safe(archive)}`;
+}
+/**
+ * 67회차 개선: 받을 모델 이름 — 문자열만 · 허용 글자만 · 앞의 '-' 는 뗀다(`ollama pull --insecure` 같은 선택 인자로 읽히지 않게).
+ * 받은 이름과 포탈 LLM 설정에 저장하는 이름이 같은 값이어야 한다(예전에는 거른 값으로 받고 원문을 저장해 '모델 없음' 이 됐다).
+ */
+export function ollamaModelName(v) {
+  if (typeof v !== 'string') return '';
+  return v.replace(/[^\w.:/-]/g, '').replace(/^-+/, '').slice(0, 200);
+}
+
 export async function installOllama(target, { mode = 'online', binaryPath, model, ollamaPort, applyToPortal = true } = {}) {
   if (!target?.host || !target?.username) return { ok: false, reason: 'host/username을 입력하세요.' };
   const port = normOllamaPort(ollamaPort);
@@ -109,7 +128,7 @@ export async function installOllama(target, { mode = 'online', binaryPath, model
         let x;
         try {
           await putFile(binaryPath, remote);
-          x = await exec(`tar -C /usr -xzf ${remote}`);
+          x = await exec(ollamaExtractCmd(remote));
         } finally { await exec(`rm -rf ${tmp}`).catch(() => {}); }
         if (x.code !== 0) return { ok: false, reason: `압축 해제 실패: ${x.stderr}` };
         await writeFile('/etc/systemd/system/ollama.service', serviceUnit(port), 0o644);
@@ -130,12 +149,13 @@ export async function installOllama(target, { mode = 'online', binaryPath, model
       if (tags.stdout.includes('FAIL')) return { ok: false, reason: `Ollama API(${port})가 응답하지 않습니다. 서비스 로그를 확인하세요.` };
 
       let pulled = null;
-      if (model) {
-        const p = await exec(`OLLAMA_HOST=127.0.0.1:${port} ollama pull ${model.replace(/[^\w.:/-]/g, '')}`);
-        pulled = { model, ok: p.code === 0, error: p.code === 0 ? undefined : (p.stderr || p.stdout).slice(-300) };
+      const modelName = ollamaModelName(model);
+      if (modelName) {
+        const p = await exec(`OLLAMA_HOST=127.0.0.1:${port} ollama pull ${modelName}`);
+        pulled = { model: modelName, ok: p.code === 0, error: p.code === 0 ? undefined : (p.stderr || p.stdout).slice(-300) };
       }
 
-      if (applyToPortal) saveLlmConfig({ enabled: true, url: `http://${target.host}:${port}`, ...(model ? { model } : {}) });
+      if (applyToPortal) saveLlmConfig({ enabled: true, url: `http://${target.host}:${port}`, ...(modelName ? { model: modelName } : {}) });
 
       const ver = await exec('/usr/bin/ollama --version 2>/dev/null || ollama --version 2>/dev/null');
       return { ok: true, version: ver.stdout.trim(), pulled, url: `http://${target.host}:${port}`, appliedToPortal: applyToPortal };

@@ -413,3 +413,49 @@ export function retrieveResultToObjectXml(xml) {
   const tm2 = tm || /<token>([^<]{1,512})<\/token>/.exec(tail);
   return { xml: parts.join(''), token: tm2 ? tm2[1] : null };
 }
+
+/*
+ * 75회차(74회차 F4 반증 — 형제 경로 측정): QueryPerf 응답의 `<returnval…>…</returnval>` · `<id>…</id>` 를 게으른 정규식 `[\s\S]*?` 로 찾으면
+ *   닫는 태그가 없는 여는 태그가 반복될 때 시작 위치마다 끝까지 다시 훑어 O(n²) 였다(실측: 닫히지 않은 `<id>` 100KB 0.30~0.36초 ·
+ *   `<returnval>` 220KB 0.49~0.53초 — perfBatch · nicPerf · soapClient parsePerfMultiXml, 정상 응답 350KB 3~6ms). 같은 뜻(여는 태그 다음의
+ *   '가장 가까운' 닫는 태그 · 짝 없는 여는 태그부터는 뒤에도 닫는 태그가 없으니 더 찾지 않는다)을 indexOf 로 한 번에 훑는다.
+ *   contention/parse.js(74회차 F4)의 판을 여기로 옮겨 한 벌로 쓴다 — 경계 판정을 복제하지 말 것.
+ */
+const isWordCh = (c) => (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95;   // 정규식 \w
+/**
+ * `<returnval…>본문</returnval>` 의 본문들(선형) — `/<returnval[^>]*>([\s\S]*?)<\/returnval>/g` 와 같은 결과.
+ * wordBoundary:true 면 `/<returnval\b[^>]*>…/` 와 같다(태그 이름 바로 뒤가 단어 글자면 다른 태그). max 개에서 멈춘다(첫 하나만 쓰는 호출).
+ */
+export function returnvalBodies(xml, { wordBoundary = false, max = Infinity } = {}) {
+  const s = typeof xml === 'string' ? xml : String(xml ?? '');
+  const out = [];
+  const OPEN = '<returnval'; const CLOSE = '</returnval>';
+  let i = 0;
+  while (out.length < max) {
+    const at = s.indexOf(OPEN, i);
+    if (at < 0) break;
+    if (wordBoundary && isWordCh(s.charCodeAt(at + OPEN.length))) { i = at + 1; continue; }
+    const gt = s.indexOf('>', at + OPEN.length);
+    if (gt < 0) break;
+    const e = s.indexOf(CLOSE, gt + 1);
+    if (e < 0) break;
+    out.push(s.slice(gt + 1, e));
+    i = e + CLOSE.length;
+  }
+  return out;
+}
+/** 본문 안의 `<id>…</id>` 표지들(선형) — `[...blk.matchAll(/<id>([\s\S]*?)<\/id>/g)]` 와 같은 결과. { inner, start(여는 태그 위치), end(닫는 태그 뒤) }. */
+export function perfIdMarks(blk) {
+  const s = typeof blk === 'string' ? blk : String(blk ?? '');
+  const out = [];
+  let i = 0;
+  for (;;) {
+    const at = s.indexOf('<id>', i);
+    if (at < 0) break;
+    const e = s.indexOf('</id>', at + 4);
+    if (e < 0) break;
+    out.push({ inner: s.slice(at + 4, e), start: at, end: e + 5 });
+    i = e + 5;
+  }
+  return out;
+}

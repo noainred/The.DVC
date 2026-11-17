@@ -329,13 +329,30 @@ export function seriesStats(values = []) {
   };
 }
 
+/**
+ * 58회차 F4(재현): 포트 에러 카운터 7종 — 서버 월간 점검(`sanswitch/healthCheck.js ERROR_KEYS`)· 엣지 축약(`push.js slimSnapshot`)과 **같은 목록**이다
+ *   (서버 테스트 sanFullAudit58 이 두 목록을 대조한다). 표의 에러 칸은 앞 세 값(CRC / LinkFail / LossSync)만 보이므로, 나머지 넷은 칸 툴팁이 밝힌다.
+ */
+export const PORT_ERROR_KEYS = Object.freeze(['errCrc', 'errEncIn', 'errEncOut', 'errLinkFail', 'errLossSync', 'errLossSig', 'discC3']);
+const OTHER_ERROR_LABEL = Object.freeze({ errEncIn: 'enc in', errEncOut: 'enc out', errLossSig: 'loss sig', discC3: 'disc c3' });
+/** 7종 중 하나라도 0 보다 큰가(못 읽음 null 은 0 이 아니다 — 세지 않는다). */
+export const hasPortErrors = (p) => PORT_ERROR_KEYS.some((k) => (numOrNull(p?.[k]) ?? 0) > 0);
+/** 표 에러 칸에 안 보이는 카운터(enc in · enc out · loss sig · disc c3) 중 0 보다 큰 것 — 칸 툴팁 문구. 없으면 undefined. */
+export function otherErrorsTitle(p) {
+  const parts = Object.entries(OTHER_ERROR_LABEL).map(([k, label]) => [label, numOrNull(p?.[k])]).filter(([, v]) => v != null && v > 0)
+    .map(([label, v]) => `${label} ${v.toLocaleString()}`);
+  return parts.length ? `이 칸에 없는 누적 카운터: ${parts.join(' · ')}` : undefined;
+}
+
 /** 포트 목록 필터(순수) — 화면의 '문제만 보기'가 무엇을 남기는지 한 곳에서 정의. */
 export function filterPorts(list = [], mode = 'all') {
   if (mode === 'online') return list.filter((p) => p.state === 'online');
   if (mode === 'free') return list.filter((p) => p.state === 'offline');
   if (mode === 'problem') {
+    // 58회차 F4: 에러는 카운터 7종 전부(서버 점검 · 엣지 축약과 같은 기준) — 예전 errorLevel(CRC · LinkFail · LossSync · enc out)만 보면
+    //   enc in · loss sig · disc c3 만 쌓인 포트(점검은 '주의')와 enc out 만 쌓인 포트(errorLevel 'info')가 '문제만' 에서 빠졌다.
     return list.filter((p) => p.state === 'faulty' || p.state === 'disabled'
-      || errorLevel(p).level === 'bad' || errorLevel(p).level === 'warn'
+      || errorLevel(p).level === 'bad' || errorLevel(p).level === 'warn' || hasPortErrors(p)
       || ['warn', 'bad'].includes(opticalHealth(p.rxPowerDbm, p.txPowerDbm).level));
   }
   return list;

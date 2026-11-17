@@ -35,7 +35,7 @@ const toolsPerm = requirePerm('tools');
 // v2.744(감사 AUTHZ-01): 관리자 판본(전 사이트 IP·SSH 계정·haproxy.cfg 원문·portal.env 발췌·배포 대상)은 isAdminDetailUser 하나로 정한다 —
 //   mock 데모 계정은 요청 문맥이 role 'admin' 이라 예전 `role === 'admin'` 판정을 그대로 통과해 operator 보다 넓게 봤다(v2.743 AUTHZ-01 의 형제).
 const isAdmin = (req) => isAdminDetailUser(req.user);
-const RE_DC = /^[^\s/\\]{1,40}$/;
+const RE_DC = /^[^\u0000-\u001f\u007f\u2028\u2029]{1,40}$/; // eslint-disable-line no-control-regex -- 63회차 F4: 저장(store.js str — 제어 문자만 거른다)이 받는 사이트 이름을 그대로 받는다(공백 · '/' 가 든 이름이 가져오기 · 적용 · SSH 테스트에서 400 이었다)
 
 export function registerRelayTopo(api) {
 api.get('/tools/relaytopo', toolsPerm, (req, res) => {
@@ -92,8 +92,10 @@ api.post('/tools/relaytopo/import', csvPerm, adminOnly, fullScopeOnly, (req, res
     else { if (String(text).length > 2_000_000) throw new Error('입력이 2MB 를 넘습니다.'); parsed = parseTopologyTable(text); }
     if (!parsed.sites.length && !(parsed.main?.privateIp || parsed.main?.publicIp)) return res.status(400).json({ ok: false, reason: '인식된 행이 없습니다. 열 순서(Datacenter, Server(Main/Edge/IRS), private IP, public IP …) 또는 내보낸 CSV/JSON 을 확인하세요.', skipped: parsed.skipped });
     const merged = mergeImport(loadTopologyRaw(), parsed, { replace: !!replace });
-    const preview = redactTopology(normalizeTopology(merged, loadTopologyRaw()));
-    if (!apply) return res.json({ ok: true, preview, format, parsedSites: parsed.sites.length, skipped: parsed.skipped.slice(0, 50), issues: validateTopology(preview, loadCollectors()) });
+    const pn = normalizeTopology(merged, loadTopologyRaw());
+    const preview = redactTopology(pn);
+    // 66회차 개선: 미리보기도 '적용하면 버려질 저장 비밀' 을 말한다 — 예전에는 적용 응답에서야 알았다(같은 정규화 결과의 비열거 필드).
+    if (!apply) return res.json({ ok: true, preview, format, parsedSites: parsed.sites.length, skipped: parsed.skipped.slice(0, 50), secretsDropped: pn.secretsDropped || [], issues: validateTopology(preview, loadCollectors()) });
     const saved = saveTopology(merged);
     logAudit({ user: req.user?.username, action: '중계 토폴로지 가져오기', detail: `format=${format} sites=${parsed.sites.length} replace=${!!replace} skipped=${parsed.skipped.length}`, ip: req.ip });
     res.json({ ok: true, topology: saved, format, parsedSites: parsed.sites.length, skipped: parsed.skipped.slice(0, 50), servicesDropped: saved.servicesDropped || [], servicesReset: !!saved.servicesReset, secretsDropped: saved.secretsDropped || [], issues: validateTopology(saved, loadCollectors()) });

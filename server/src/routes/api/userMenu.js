@@ -16,7 +16,7 @@
  */
 import { requireRole, listUsers } from '../../auth/auth.js';
 import { isSuperAdmin, requireSuperAdmin } from '../../auth/roles.js';
-import { isDemoGuest } from '../../auth/demoGuest.js'; // v2.727(감사 A-10·B-04)
+import { isAdminDetailUser } from '../../auth/demoGuest.js'; // v2.727(감사 A-10·B-04)
 import { logAudit } from '../../audit.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { clientIp } from '../../util/rateLimit.js';
@@ -30,7 +30,7 @@ const menuFleetOnly = fullScopeOnlyWith('메뉴 배포는 전 사용자 화면�
 
 const userOf = (req) => req.user?.username || 'anonymous';
 /** 배포자·보관자 계정명을 응답에 실어도 되는 요청인가(v2.727 A-10) — admin 역할 + 데모 계정 아님. */
-const seesNames = (req) => req.user?.role === 'admin' && !isDemoGuest(req.user);
+const seesNames = (req) => isAdminDetailUser(req.user);   // 75회차 제안: 같은 식 사본 → 판정 함수 하나(CLAUDE.md '관리자 판본 판정은 isAdminDetailUser 하나')
 const audit = (req, action, target, detail = '') => logAudit({ user: userOf(req), action, target, detail, ip: clientIp(req) });
 const localUsernames = () => listUsers().map((u) => u.username);
 
