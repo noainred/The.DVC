@@ -81,12 +81,16 @@ export const RES_STATES = Object.freeze(['ok', 'stale', 'pending', 'fail', 'main
 /** 등록부 이름 접기 — 표시 이름·id 어느 쪽으로 와도 **id** 로 접는다(v2.583 '키 하나' 규약). */
 export function aliasMap(collectors = []) {
   const m = new Map();
+  const named = [];
   for (const c of collectors) {
     const id = t(c?.id || c?.name);
     if (!id) continue;
     m.set(norm(id), id);
-    if (t(c?.name)) m.set(norm(c.name), id);
+    named.push([norm(c?.name), id]);
   }
+  // 63회차 F5: **id 가 표시 이름보다 먼저**다 — 예전에는 한 루프에서 이름을 덮어써, 다른 엣지의 표시 이름이 이 엣지의 id 와 같으면
+  //   이 엣지의 push·pull 기록·위임 자원이 그 엣지로 접혔다(재현: 'seoul' 이 보낸 push 로 'seoul-2' 가 정상 · 'seoul' 은 기록 없음).
+  for (const [n, id] of named) if (n && !m.has(n)) m.set(n, id);
   return m;
 }
 

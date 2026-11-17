@@ -83,6 +83,11 @@ export function isActiveOut(out) {
   const lines = String(out || '').trim().split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   return lines.length > 0 && lines[lines.length - 1] === 'active';
 }
+/**
+ * `…; echo "rc=$?"` 출력의 종료 코드(순수) — **끝에 붙은** rc= 만 읽는다. 없으면 NaN(성공 아님).
+ * 63회차 개선: 예전 `/rc=(\d+)/` 는 첫 일치라 `haproxy -c` 가 오류 문구에 'rc=0' 이 든 설정 줄을 되읊으면 검증 실패를 통과로 읽을 수 있었다.
+ */
+export function exitCodeOf(out) { const m = /rc=(\d+)\s*$/.exec(String(out || '')); return m ? Number(m[1]) : NaN; }
 const listenPorts = (out) => [...new Set(String(out || '').split(/\s+/).map((a) => Number(a.split(':').pop())).filter((n) => n > 0))];
 
 /** 노드 1개 검사(SSH 1세션, 노드당 타임아웃). role: 'edge'|'irs'|'main'. */
@@ -143,11 +148,21 @@ export async function fetchSite(dc, { withIrs = true, timeoutMs = TIMEOUT_MS } =
       if (irsSvc && !adv) irsIssues.push({ level: 'warn', text: `IRS 에 EDGE_ADVERTISE_URL 이 없습니다 — 자기등록 시 중앙이 피어 IP(중계 엣지)를 URL 로 잘못 유도합니다.`, fix: `portal.env EDGE_ADVERTISE_URL=http://${site.edge.publicIp || edgeHost}:${irsSvc.listenPort}` });
     }
     if (edge.ok && edge.portal.units.length && !edge.listeners.includes(topo.main.portalPort || 4000)) irsIssues.push({ level: 'warn', text: `Edge 가 :${topo.main.portalPort || 4000} 를 리슨하지 않습니다(Edge 포탈 미기동).`, fix: 'systemctl status vmware-portal' });
-    // summary.bad 는 대조 문제 + Edge 접속 실패(1) + IRS 오류 수준 항목 — Edge 에 못 들어가면 '문제 0건' 으로 보이면 안 된다.
-    const result = { ok: true, dc, at: Date.now(), edge, irs, rows, irsIssues, summary: { total: rows.length, bad: rows.filter((r) => r.status !== 'ok').length + (edge.ok ? 0 : 1) + irsIssues.filter((i) => i.level === 'error').length, edgeFailed: !edge.ok, irsFailed: !!(irs && !irs.ok) } };
+    const result = { ok: true, dc, at: Date.now(), edge, irs, rows, irsIssues, summary: siteSummary({ edge, irs, rows, irsIssues }) };
     _last.set(dc, result);
     return result;
   } finally { _busy.delete(dc); }
+}
+
+/**
+ * 사이트 가져오기 요약(순수). summary.bad 는 대조 문제 + Edge 접속 실패(1) + **IRS 접속 실패(1)** + IRS 오류 수준 항목 —
+ * 못 들어간 노드가 '문제 0건 · 모두 정상' 으로 보이면 안 된다.
+ * 63회차 F3: 예전에는 IRS 접속 실패를 bad 에 넣지 않아(irsIssues 는 IRS 에 들어갔을 때만 생긴다) IRS SSH 가 실패해도
+ *   사이트 배지가 '모두 정상'(화면 badSites 도 0)이었다 — Edge 실패만 세던 같은 판정의 형제.
+ */
+export function siteSummary({ edge, irs, rows = [], irsIssues = [] } = {}) {
+  const edgeFailed = !edge?.ok; const irsFailed = !!(irs && !irs.ok);
+  return { total: rows.length, bad: rows.filter((r) => r.status !== 'ok').length + (edgeFailed ? 1 : 0) + (irsFailed ? 1 : 0) + irsIssues.filter((i) => i.level === 'error').length, edgeFailed, irsFailed };
 }
 
 export async function fetchAll(opts = {}) {
@@ -225,7 +240,7 @@ export async function applySite(dc, { dryRun = false, timeoutMs = TIMEOUT_MS * 2
       if (!/written/.test(w.stdout)) { step('임시 파일 기록', false, w.stderr || w.stdout); return { applied: false }; }
       step('임시 파일 기록', true, tmp);
       const chk = await exec(`${S}haproxy -c -f ${tmp} 2>&1; echo "rc=$?"`, 30_000);
-      const rc = Number((/rc=(\d+)/.exec(chk.stdout) || [])[1]);
+      const rc = exitCodeOf(chk.stdout);
       if (rc !== 0) { step('haproxy -c 검증', false, chk.stdout.replace(/rc=\d+\s*$/, '')); await exec(`rm -f ${tmp}`, 5000).catch(() => {}); return { applied: false, merged }; }
       step('haproxy -c 검증', true, chk.stdout.replace(/rc=\d+\s*$/, '').trim() || 'Configuration file is valid');
       if (dryRun) { await exec(`rm -f ${tmp}`, 5000).catch(() => {}); step('모의 실행', true, '검증만 수행(파일 교체 없음)'); return { applied: false, dryRun: true, merged }; }
@@ -234,7 +249,7 @@ export async function applySite(dc, { dryRun = false, timeoutMs = TIMEOUT_MS * 2
       // 디스크 풀·ro 마운트·SELinux 로 백업이 안 된 채 원본을 덮어쓰면, reload 실패 시 롤백이 없는 백업을
       // 복사하려다 실패해 원본이 영구 유실된다. 백업 → 확인 → 교체를 `&&` 로 묶고 실패 코드를 구분한다.
       const b = await exec(`${S}sh -c 'set -e; if [ -f ${CFG} ]; then cp -a ${CFG} ${bak} || exit 91; [ -s ${bak} ] || exit 92; fi; install -m 644 ${tmp} ${CFG} || exit 93; rm -f ${tmp}; echo replaced'; echo "rc=$?"`, 15_000);
-      const brc = Number((/rc=(\d+)/.exec(b.stdout) || [])[1]);
+      const brc = exitCodeOf(b.stdout);
       if (!/replaced/.test(b.stdout)) {
         const why = brc === 91 ? `백업(cp -a ${CFG} → ${bak}) 실패 — 원본을 건드리지 않고 중단했습니다.`
           : brc === 92 ? `백업 파일이 비어 있습니다(${bak}) — 원본을 건드리지 않고 중단했습니다.`

@@ -315,7 +315,7 @@ export default function RelayTopoTool() {
                     <tbody>{[r.edge, r.irs].filter(Boolean).map((n) => (
                       <tr key={n.role}>
                         <td><b>{n.role === 'edge' ? 'Edge' : 'IRS'}</b></td>
-                        <td className="muted" style={{ fontSize: 11 }}>{n.host}:{n.port}{n.via ? <><br />{n.via}</> : ''}<br />{n.ok ? <span className="badge green">접속 {n.ms}ms</span> : <span className="badge red" title={n.error}>실패</span>}{!n.ok && <div style={{ color: 'var(--red)' }}>{n.error}</div>}</td>
+                        <td className="muted" style={{ fontSize: 11 }}>{n.host ? `${n.host}:${n.port}` : (r.maskedAddress ? '(주소 가림)' : '—')}{n.via ? <><br />{n.via}</> : ''}<br />{n.ok ? <span className="badge green">접속 {n.ms}ms</span> : <span className="badge red" title={n.error}>실패</span>}{!n.ok && <div style={{ color: 'var(--red)' }}>{n.error}</div>}</td>
                         <td>{n.node?.hostname || '—'}</td>
                         <td style={{ fontSize: 11 }}>{(n.node?.ips || []).join(' ') || '—'}</td>
                         <td>{n.ok ? (n.haproxy.installed ? <>{n.haproxy.version}<br /><span className={`badge ${n.haproxy.active ? 'green' : 'red'}`}>{n.haproxy.activeText}</span>{n.haproxy.enabled ? '' : <span className="badge amber" style={{ marginLeft: 3 }}>부팅 자동시작 아님</span>}</> : <span className="muted">미설치</span>) : '—'}</td>
@@ -337,7 +337,7 @@ export default function RelayTopoTool() {
                   )}
                   {r.irsIssues?.length > 0 && <ul style={{ fontSize: 12, marginTop: 8 }}>{r.irsIssues.map((i, k) => <li key={k}><span className={`badge ${LEVEL[i.level]?.[1]}`}>{LEVEL[i.level]?.[0]}</span> {i.text} <span className="muted">— {i.fix}</span></li>)}</ul>}
                   {r.maskedAddress && r.irsIssueCount > 0 && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>IRS 점검 {r.irsIssueCount}건 — 문구에 주소가 들어 있어 관리자만 확인할 수 있습니다.</div>}
-                  {r.edge.ok && r.edge.haproxy?.hasCfg && <details style={{ marginTop: 6 }}><summary className="muted" style={{ fontSize: 12, cursor: 'pointer' }}>현재 haproxy.cfg 전문</summary><pre style={{ fontSize: 11, maxHeight: 320, overflow: 'auto' }}>{r.edge.haproxy.cfg}</pre></details>}
+                  {r.edge.ok && r.edge.haproxy?.hasCfg && r.edge.haproxy.cfg && <details style={{ marginTop: 6 }}><summary className="muted" style={{ fontSize: 12, cursor: 'pointer' }}>현재 haproxy.cfg 전문</summary><pre style={{ fontSize: 11, maxHeight: 320, overflow: 'auto' }}>{r.edge.haproxy.cfg}</pre></details>}
                 </>
               )}
               {r?.ok && !r.edge.ok && <div style={{ color: 'var(--red)', fontSize: 12, marginTop: 6 }}>Edge 접속 실패: {r.edge.error}</div>}

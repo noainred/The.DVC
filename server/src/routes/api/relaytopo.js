@@ -35,7 +35,7 @@ const toolsPerm = requirePerm('tools');
 // v2.744(감사 AUTHZ-01): 관리자 판본(전 사이트 IP·SSH 계정·haproxy.cfg 원문·portal.env 발췌·배포 대상)은 isAdminDetailUser 하나로 정한다 —
 //   mock 데모 계정은 요청 문맥이 role 'admin' 이라 예전 `role === 'admin'` 판정을 그대로 통과해 operator 보다 넓게 봤다(v2.743 AUTHZ-01 의 형제).
 const isAdmin = (req) => isAdminDetailUser(req.user);
-const RE_DC = /^[^\s/\\]{1,40}$/;
+const RE_DC = /^[^\u0000-\u001f\u007f\u2028\u2029]{1,40}$/; // eslint-disable-line no-control-regex -- 63회차 F4: 저장(store.js str — 제어 문자만 거른다)이 받는 사이트 이름을 그대로 받는다(공백 · '/' 가 든 이름이 가져오기 · 적용 · SSH 테스트에서 400 이었다)
 
 export function registerRelayTopo(api) {
 api.get('/tools/relaytopo', toolsPerm, (req, res) => {
