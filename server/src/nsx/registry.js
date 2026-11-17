@@ -60,6 +60,9 @@ function saveRegistry(list) {
   // 원자적 쓰기 — 자격증명(NSX 매니저 계정/비번) 파일이 부분기록으로 손상되면 로드가 []를
   // 반환하고 다음 저장이 빈 목록으로 덮어써 전 매니저가 영구 유실된다.
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ managers: list }), null, 2), { mode: 0o600 }); // 암호화 모드면 password 봉인
+  // 121회차(116회차 F1 반증 — 재현): 마지막 목록은 **읽을 때만** 맞췄다 — 저장 바로 뒤의 읽기 오류(저장 라우트가 곧바로 nsxStore.refresh 를 부른다)에
+  //   저장 **전** 목록이 나와 지운 매니저 · 옛 비밀번호로 로그인했다(vCenter 등록부는 118회차가 저장 때 맞춘다 — 같은 규칙). 쓰기 성공 뒤에 맞춘다.
+  _lastGood = structuredClone(list);
   loadErr.clear();   // 손상 뒤의 관리자 저장이 새 등록부를 만들었다(v2.612 규약)
 }
 

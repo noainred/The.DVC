@@ -301,14 +301,28 @@ pingRouter.get('/vcport/overview', async (req, res) => {
 
 pingRouter.get('/vcport/ports', (_req, res) => res.json({ ports: getVcPorts() }));
 
+/*
+ * 121회차(118회차 반증 R3): vCenter 등록부를 **못 읽었고 마지막으로 읽은 목록도 없으면**(loadVcenterConfig 의 `readError && !file` — '등록 0개' 가 아니라 모름)
+ *   빈 목록으로 vCenter×포트 대상을 다시 만들지 않는다 — 대상 전부(사용자가 고친 기준값 · 켬/끔 포함)가 지워진다. 503 + 사유(화면은 사유를 그대로 보인다).
+ */
+function vcRegistryUnknown503(res) {
+  let c = null;
+  try { c = loadVcenterConfig(); } catch { c = null; }
+  if (!(c && c.readError && !c.file)) return false;
+  res.status(503).json({ ok: false, code: 'registry-unreadable', registryUnreadable: true, readError: true, reason: `vCenter 등록부(vcenters.json)를 읽지 못해(읽기 오류 ${c.readError}) vCenter 포트 대상을 바꾸지 않았습니다 — 지금 맞추면 대상이 전부 지워집니다. 파일 권한 · 소유자 · 디스크를 확인한 뒤 다시 시도하세요.` });
+  return true;
+}
+
 pingRouter.put('/vcport/ports', adminOnly, (req, res) => {
   if (denyScopedBulk(req, res, 'vCenter 포트 지정')) return;
+  if (vcRegistryUnknown503(res)) return;   // 121회차 R3
   const r = setVcPorts((req.body || {}).ports, vcenterList());
   res.status(r.ok ? 200 : 400).json(r);
 });
 
 pingRouter.post('/vcport/sync', adminOnly, (req, res) => {
   if (denyScopedBulk(req, res, 'vCenter 포트 대상 동기화')) return;
+  if (vcRegistryUnknown503(res)) return;   // 121회차 R3
   const r = syncVcPortTargets(vcenterList());
   res.status(r.ok ? 200 : 400).json(r);
 });

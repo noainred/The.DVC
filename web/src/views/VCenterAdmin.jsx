@@ -24,6 +24,9 @@ export default function VCenterAdmin() {
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
   const [importMsg, setImportMsg] = useState(null);
+  // 121회차(118회차 반증 R5): 등록부 읽기 오류의 쓰기 거절(503 · registryUnreadable)을 화면 전체 오류(ErrorBox)로 보내면 503 이라 '일시 미가용 — 잠시 후 다시' 안내로 바뀌어
+  //   서버가 준 사유(파일 권한 · 디스크)가 보이지 않았다(삭제 · 점검중 전환 — 목록을 연 뒤에 읽기 오류가 시작되면 버튼이 잠겨 있지 않다). 사유는 배너로 보이고 목록을 다시 조회한다(표지 · 잠금이 선다).
+  const [actErr, setActErr] = useState(null);
   const [replaceMode, setReplaceMode] = useState(false);
   const [serverPath, setServerPath] = useState('');
   const fileRef = useRef(null);
@@ -110,18 +113,23 @@ export default function VCenterAdmin() {
     finally { setBusy(false); }
   };
 
+  const failAct = async (e) => {
+    if (e?.status === 503 && e?.body?.registryUnreadable === true) { setActErr(e.message); await load(); } else setError(e.message);
+  };
   const remove = async (vc) => {
     if (!window.confirm(`'${vc.name}' (${vc.id}) 을(를) 삭제할까요?`)) return;
+    setActErr(null);
     try { await delJson(`/admin/vcenters/${encodeURIComponent(vc.id)}`); await load(); }
-    catch (e) { setError(e.message); }
+    catch (e) { await failAct(e); }
   };
 
   // 점검중 빠른 전환 — 수집 일시중단/재개(비밀번호는 비워서 보냄 → 기존 유지).
   const toggleMaintenance = async (vc) => {
+    setActErr(null);
     try {
       const r = await putJson(`/admin/vcenters/${encodeURIComponent(vc.id)}`, { maintenance: !vc.maintenance, password: '' });
       if (r.ok) await load(); else setError(r.reason);
-    } catch (e) { setError(e.message); }
+    } catch (e) { await failAct(e); }
   };
 
   // Auto-fill map coordinates from the city/country name (offline geocoder).
@@ -166,6 +174,7 @@ export default function VCenterAdmin() {
         </div>
       </div>
       <SettingsUnreadBanner le={unread} what="vCenter 등록부" save="등록 · 수정 · 삭제" lastGood onRecheck={load} />
+      {actErr && <div className="banner warn" data-vc-act-err style={{ whiteSpace: 'normal', overflowWrap: 'anywhere', marginBottom: 10, fontSize: 12.5 }}>⚠ {actErr} <button type="button" className="tab" style={{ flex: 'none', marginLeft: 8, padding: '2px 8px', fontSize: 12 }} onClick={() => setActErr(null)}>닫기</button></div>}
 
       {authStopSummary(list.filter((v) => v.authStopped), { unit: '곳', what: 'vCenter' }) && (
         <div className="card" style={{ marginBottom: 12, padding: '10px 14px', borderColor: 'var(--red)', fontSize: 13 }}>
