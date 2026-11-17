@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import {
   blankTarget, formFromTarget, targetBody, mailStateText, targetMailLine,
   MAIL_WHEN_CHOICES, mailDaysOf, isMailTime, mailDaysText, mailScheduleText, nextMailSlots, mailSlotShort,
-  mailScheduleIssue, firstMailScheduleIssue, mailWhenPreview, TARGET_MAIL_CODE_TEXT, MAIL_UNREAD_SHORT, mailStateUnreadNote,
+  mailScheduleIssue, firstMailScheduleIssue, mailWhenPreview, TARGET_MAIL_CODE_TEXT, MAIL_UNREAD_PARTS, mailStateUnreadNote,
 } from './isiduText.js';
 import { nextSlots as digestNextSlots, slotShort as digestSlotShort, daysLabel as digestDaysLabel, scheduleText as digestScheduleText } from './isiduDigestText.js';
 import { BULK_FIELD_KEYS, blankBulk, bulkPatchFrom, patchSummary } from './isiduBulkText.js';
@@ -149,13 +149,13 @@ describe('④ 마지막 메일 기록의 code — 서버 TARGET_MAIL_CODES 와 1
     const t = { mail: { recipients: 1, when: 'each' }, lastMail };
     const ml = targetMailLine(t, NOW, OFF);
     expect(ml.tone).toBe('warn');
-    expect(ml.parts[ml.parts.length - 1]).toBe(MAIL_UNREAD_SHORT);
+    expect(ml.parts.slice(-MAIL_UNREAD_PARTS.length)).toEqual([...MAIL_UNREAD_PARTS]);
     expect(ml.parts.join(' ')).not.toContain('EISDIR');            // 칸에는 긴 사유를 넣지 않는다
-    for (const p of ml.parts) expect(p.length).toBeLessThanOrEqual(40);
+    for (const p of MAIL_UNREAD_PARTS) expect(p.length).toBeLessThanOrEqual('아직 보낸 적 없음'.length + 2);   // 한 줄이 평소 문구보다 길지 않게(오른쪽 경계에서 잘린다)
     expect(ml.text).toContain(reason);                              // 대상 상세의 한 줄에는 전체 사유
     // 받는 사람이 없는 대상도 같다
     const none = targetMailLine({ mail: { recipients: 0 }, lastMail }, NOW, OFF);
-    expect(none.parts[none.parts.length - 1]).toBe(MAIL_UNREAD_SHORT);
+    expect(none.parts.slice(-MAIL_UNREAD_PARTS.length)).toEqual([...MAIL_UNREAD_PARTS]);
     expect(none.text).toContain(reason);
     // 표 위 안내 — 한 번만(첫 대상의 사유) · 없으면 ''
     expect(mailStateUnreadNote([{ lastMail: null }, t, t])).toBe(reason);

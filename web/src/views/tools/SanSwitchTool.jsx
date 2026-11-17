@@ -238,7 +238,7 @@ export default function SanSwitchTool() {
         <div style={{ minWidth: 0 }}>
           <h1>SAN 스위치 모니터링</h1>
           {(() => {
-            const hs = headStatus(rows, dcChips.length, registryEmptyText(unreadMarkOf(data), 'SAN 스위치 등록부'));
+            const hs = headStatus(rows, dcChips.length, registryEmptyText(unreadMarkOf(data), 'SAN 스위치 등록부') ? 'SAN 스위치 등록부를 읽지 못했습니다(아래 안내)' : '');   // 전체 문장은 아래 배너 · 표 안이 말한다(머리 줄은 짧게)
             const dot = hs.tone === 'ok' ? 'var(--green)' : hs.tone === 'warn' ? 'var(--amber)' : hs.tone === 'bad' ? 'var(--red)' : 'var(--text-faint)';
             const last = lastCollectedAt(rows);
             return (
@@ -458,48 +458,52 @@ export default function SanSwitchTool() {
 function DeviceForm({ form, setForm, data, save, busy, runTest, test, setTest, stopTestPoll, formNote, setFormNote }) {
   const set = (k) => (e) => setForm((p) => ({ ...p, [k]: e.target.value }));
   const type = data.types.find((t) => t.type === form.type) || data.types[0];
+  // Chromium 검증(1440 · 400): 전역 .input 의 min-width 220px 과 긴 선택지 글자 때문에 ‘수집 방식’ 선택 칸이 옆 칸(계정)을 덮었고, 한 줄 전체인 ‘메모’ 만 글자 옆에 칸이 붙었다.
+  //   라벨은 글자 위 · 칸 아래로 쌓고(grid), 칸은 열 폭을 넘지 않게 한다(그리드 자식 min-width:0 규칙).
+  const FL = { fontSize: 12, display: 'grid', gap: 3, minWidth: 0, alignContent: 'start' };
+  const FI = { width: '100%', minWidth: 0, boxSizing: 'border-box' };
   return (
     <Modal title={form.id ? 'SAN 스위치 수정' : 'SAN 스위치 등록'} onClose={() => { setForm(null); setTest(null); setFormNote?.(null); stopTestPoll(); }} width={760}>
       {formNote && <div style={{ margin: '0 0 10px', padding: '8px 12px', borderRadius: 8, fontSize: 12.5, background: 'rgba(245,158,11,.12)', color: 'var(--amber)' }}>{formNote}</div>}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10 }}>
-        <label style={{ fontSize: 12 }}>표시명<input className="input" value={form.name} onChange={set('name')} placeholder="예: SAN-A-01" /></label>
-        <label style={{ fontSize: 12 }}>host (IP/호스트명)<input className="input" value={form.host} onChange={set('host')} placeholder="10.10.10.11" /></label>
-        <label style={{ fontSize: 12 }}>타입
-          <Select className="input" value={form.type} onChange={(e) => setForm((p) => ({ ...p, type: e.target.value, collectMethod: (data.types.find((t) => t.type === e.target.value)?.methods || [])[0]?.value || 'ssh' }))}>
+        <label style={FL}>표시명<input className="input" style={FI} value={form.name} onChange={set('name')} placeholder="예: SAN-A-01" /></label>
+        <label style={FL}>host (IP/호스트명)<input className="input" style={FI} value={form.host} onChange={set('host')} placeholder="10.10.10.11" /></label>
+        <label style={FL}>타입
+          <Select className="input" style={FI} value={form.type} onChange={(e) => setForm((p) => ({ ...p, type: e.target.value, collectMethod: (data.types.find((t) => t.type === e.target.value)?.methods || [])[0]?.value || 'ssh' }))}>
             {data.types.map((t) => <option key={t.type} value={t.type} disabled={!t.implemented}>{t.label}{t.implemented ? '' : ' (예정)'}</option>)}
           </Select>
         </label>
-        <label style={{ fontSize: 12 }}>수집 방식
-          <Select sort={false} className="input" value={form.collectMethod} onChange={set('collectMethod')}
+        <label style={FL}>수집 방식
+          <Select sort={false} className="input" style={FI} value={form.collectMethod} onChange={set('collectMethod')}
             title={(type?.methods || []).find((m) => m.value === form.collectMethod)?.hint || ''}>
             {(type?.methods || []).map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
           </Select>
         </label>
-        <label style={{ fontSize: 12 }}>계정<input className="input" value={form.username} onChange={set('username')} autoComplete="off" /></label>
-        <label style={{ fontSize: 12 }}>비밀번호
-          <input className="input" type="password" value={form.password} onChange={set('password')} autoComplete="new-password"
+        <label style={FL}>계정<input className="input" style={FI} value={form.username} onChange={set('username')} autoComplete="off" /></label>
+        <label style={FL}>비밀번호
+          <input className="input" style={FI} type="password" value={form.password} onChange={set('password')} autoComplete="new-password"
             placeholder={form.hasPassword ? '(변경할 때만 입력)' : ''} />
         </label>
-        <label style={{ fontSize: 12 }}>SSH 포트<input className="input" type="number" value={form.sshPort} onChange={set('sshPort')} /></label>
-        <label style={{ fontSize: 12 }}>법인(DataCenter)
-          <Select className="input" value={form.datacenterId} onChange={set('datacenterId')}>
+        <label style={FL}>SSH 포트<input className="input" style={FI} type="number" value={form.sshPort} onChange={set('sshPort')} /></label>
+        <label style={FL}>법인(DataCenter)
+          <Select className="input" style={FI} value={form.datacenterId} onChange={set('datacenterId')}>
             <option value="">(미지정)</option>
             {(() => { const m = missingChoice((data.datacenters || []).map((d) => d.id), form.datacenterId); return m ? <option value={m.value}>{m.label}</option> : null; })()}
             {(data.datacenters || []).map((d) => <option key={d.id} value={d.id}>{d.name || d.id}</option>)}
           </Select>
         </label>
-        <label style={{ fontSize: 12 }}>수집 주체
-          <Select className="input" value={form.agent} onChange={set('agent')}
+        <label style={FL}>수집 주체
+          <Select className="input" style={FI} value={form.agent} onChange={set('agent')}
             title="중앙에서 스위치에 직접 닿지 않으면 그 법인의 엣지를 지정하세요. 엣지가 현지에서 수집해 중앙으로 올립니다.">
             <option value="">중앙이 직접 수집</option>
             {(() => { const m = missingChoice(data.agents || [], form.agent); return m ? <option value={m.value}>엣지 {m.label}</option> : null; })()}
             {(data.agents || []).map((a) => <option key={a} value={a}>엣지 {a}</option>)}
           </Select>
         </label>
-        <label style={{ fontSize: 12 }} title="Virtual Fabrics 를 쓰는 장비에서 특정 논리 스위치만 볼 때 지정합니다. 비워두면 기본 컨텍스트만 수집합니다.">
-          VF ID (선택)<input className="input" type="number" value={form.vfId} onChange={set('vfId')} placeholder="예: 128" />
+        <label style={FL} title="Virtual Fabrics 를 쓰는 장비에서 특정 논리 스위치만 볼 때 지정합니다. 비워두면 기본 컨텍스트만 수집합니다.">
+          VF ID (선택)<input className="input" style={FI} type="number" value={form.vfId} onChange={set('vfId')} placeholder="예: 128" />
         </label>
-        <label style={{ fontSize: 12, gridColumn: '1 / -1' }}>메모<input className="input" value={form.note} onChange={set('note')} /></label>
+        <label style={{ ...FL, gridColumn: '1 / -1' }}>메모<input className="input" style={FI} value={form.note} onChange={set('note')} /></label>
       </div>
       <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
         {(type?.methods || []).find((m) => m.value === form.collectMethod)?.hint}
