@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>랙 실장도 — 평면도와 함께 보기</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+button,select,input{font:inherit;color:inherit}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.dim{color:#8b9bb4}
+.tb{display:flex;align-items:center;gap:12px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #1f2a40}
+.logo{display:inline-flex;align-items:center;gap:8px;font-weight:700;white-space:nowrap}
+.logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-weight:800;color:#04101f}
+.bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.sel{height:32px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#0f1626}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{height:30px;padding:0 12px;border:0;background:transparent;color:#aebbd0;font-weight:600;font-size:12px;cursor:pointer}
+.seg button.on{background:rgba(59,130,246,.22);color:#e6edf6}
+.btn{height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#141b2d;font-weight:600;font-size:12px;cursor:pointer;white-space:nowrap}
+.btn.pri{background:#3b82f6;border-color:#3b82f6;color:#04101f}
+.lab{font-size:11px;color:#8b9bb4;font-weight:600}
+.panel{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.ph{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid #1f2a40}
+.plan{position:relative;width:610px;height:470px;margin:12px;border:2px solid #3a4866;border-radius:6px;background:#0a0e17;background-image:linear-gradient(#141b2d 1px,transparent 1px),linear-gradient(90deg,#141b2d 1px,transparent 1px);background-size:27px 27px}
+.plan .t{position:absolute;font-size:10.5px;color:#8b9bb4;white-space:nowrap}
+.plan .fx{position:absolute;box-sizing:border-box;border:1px solid #3a4866;background:#1a2236;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10.5px;color:#aebbd0}
+.plan .cold{position:absolute;left:36px;right:8px;box-sizing:border-box;background:rgba(59,130,246,.10);border:1px dashed #3b82f6;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:11px;color:#93c5fd}
+.pr{position:absolute;width:48px;height:70px;box-sizing:border-box;border-radius:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:0;cursor:pointer;line-height:1}
+.pr .id{font-family:"JetBrains Mono",monospace;font-size:10px;font-weight:500}
+.pr .vl{font-size:10px;font-weight:700;white-space:nowrap}
+.racks{display:flex;gap:14px;overflow-x:auto;padding:12px;align-items:flex-end}
+.rack{flex:0 0 232px;min-width:0}
+.rk-h{display:flex;align-items:baseline;gap:6px;padding:0 2px 6px;width:100%;background:none;border:0;cursor:pointer;text-align:left;box-sizing:border-box}
+.rk-h .nm{font-weight:800;font-size:14px}
+.rk-m{display:flex;flex-wrap:wrap;gap:2px 8px;font-size:10.5px;color:#8b9bb4;padding:0 2px 6px;white-space:nowrap}
+.rk-b{display:flex;gap:4px;border-radius:6px;background:#0a0e17;padding:4px}
+.us{flex:0 0 18px;display:flex;flex-direction:column}
+.us span{height:16px;line-height:16px;font-size:9px;color:#5d6b85;text-align:right;font-family:"JetBrains Mono",monospace}
+.slots{position:relative;flex:1;min-width:0;height:672px;background:repeating-linear-gradient(to bottom,#0f1626 0 15px,#1f2a40 15px 16px)}
+.dev{position:absolute;left:1px;right:1px;box-sizing:border-box;border-radius:3px;display:flex;align-items:center;gap:6px;padding:0 6px;font-size:10px;line-height:1;text-align:left;cursor:pointer;overflow:hidden;white-space:nowrap}
+.dev .nm{font-family:"JetBrains Mono",monospace;font-weight:500;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1}
+.dev .vl{font-weight:700;flex:0 0 auto}
+.pg{display:flex;gap:2px;flex:0 0 auto}
+.pdu{flex:0 0 8px;position:relative;border:1px solid #2b3852;border-radius:2px}
+.pdu i{position:absolute;left:0;right:0;bottom:0;opacity:.8}
+.lg{display:flex;flex-wrap:wrap;gap:12px;padding:8px 14px;border-top:1px solid #1f2a40;font-size:11.5px;color:#aebbd0}
+.lg .it{display:inline-flex;align-items:center;gap:6px}
+.lg .sw{width:18px;height:12px;border-radius:3px;box-sizing:border-box}
+</style>
+</helmet>
+<div style="min-height:1010px;background:#0a0e17;box-sizing:border-box">
+  <div class="tb">
+    <span class="logo"><span class="v">D</span>THE DAVINCI</span>
+    <span class="dim">특수 기능 › 하드웨어 ›</span><strong>랙 실장도</strong>
+    <span class="dim" style="margin-left:auto;font-size:12px">jhpark</span>
+  </div>
+
+  <div style="padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+    <div class="bar">
+      <label class="lab" for="corp">법인</label>
+      <select id="corp" class="sel"><option>KR-SEL (서울)</option></select>
+      <span class="lab">전산실</span>
+      <div class="seg"><button type="button" class="on">전산실 A · 2층</button><button type="button">전산실 B · 지하 1층</button></div>
+      <span class="lab">보기</span>
+      <div class="seg"><button type="button">평면도</button><button type="button" class="on">평면도 + 실장도</button><button type="button">실장도</button></div>
+      <span class="lab">겹쳐 보기</span>
+      <div class="seg">
+        <sc-for list="{{modes}}" as="m" hint-placeholder-count="4"><button type="button" class="{{m.cls}}" onClick="{{m.pick}}">{{m.label}}</button></sc-for>
+      </div>
+      <span style="flex:1 1 0"></span>
+      <button type="button" class="btn">평면도 편집</button>
+      <button type="button" class="btn pri">배치 편집</button>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start">
+      <div class="panel" style="flex:1 1 400px;max-width:640px">
+        <div class="ph"><strong>평면도</strong><span class="dim">랙 20 · 2줄 · 위에서 본 모습</span><span class="dim" style="margin-left:auto;font-size:11.5px">랙을 누르면 오른쪽에 그 랙과 양옆 랙의 실장도</span></div>
+        <div style="overflow-x:auto">
+          <div class="plan">
+            <div class="fx" style="left:70px;top:10px;width:130px;height:28px">항온항습기 1</div>
+            <div class="fx" style="left:400px;top:10px;width:130px;height:28px">항온항습기 2</div>
+            <div class="t" style="left:44px;top:66px">랙 뒷면 · 열기 통로</div>
+            <div class="t" style="left:8px;top:112px;font-weight:700;color:#c3cee0">A 줄</div>
+            <div class="cold" style="top:164px;height:74px">냉기 통로 — 두 줄의 전면(굵은 변)이 마주 봄</div>
+            <div class="t" style="left:8px;top:268px;font-weight:700;color:#c3cee0">B 줄</div>
+            <div class="t" style="left:44px;top:322px">랙 뒷면 · 열기 통로</div>
+            <div class="fx" style="left:500px;top:430px;width:90px;height:28px">출입문</div>
+            <div class="fx" style="left:20px;top:380px;width:120px;height:70px;border-style:dashed">분전반</div>
+            <sc-for list="{{plan}}" as="k" hint-placeholder-count="20">
+              <button type="button" class="pr" title="{{k.tip}}" onClick="{{k.pick}}" style="left:{{k.x}}px;top:{{k.y}}px;background:{{k.bg}};border:1px solid {{k.bd}};color:{{k.fg}};outline:{{k.ol}};{{k.fe}}"><span class="id">{{k.id}}</span><span class="vl">{{k.val}}</span></button>
+            </sc-for>
+          </div>
+        </div>
+        <div class="lg">
+          <sc-for list="{{legend}}" as="l" hint-placeholder-count="5"><span class="it"><span class="sw" style="background:{{l.bg}};border:1px solid {{l.bd}}"></span>{{l.label}}</span></sc-for>
+        </div>
+        <div class="lg" style="color:#8b9bb4">{{planNote}}</div>
+      </div>
+
+      <div class="panel" style="flex:999 1 420px">
+        <div class="ph"><strong>실장도</strong><span class="mono">{{selId}}</span><span class="dim">과 양옆 랙 · 전면</span><span class="dim" style="margin-left:auto;font-size:11.5px">랙 이름을 누르면 평면도 선택도 함께 바뀜</span></div>
+        <div class="racks">
+          <sc-for list="{{racks}}" as="r" hint-placeholder-count="3">
+            <div class="rack">
+              <button type="button" class="rk-h" onClick="{{r.pick}}"><span class="nm mono" style="color:{{r.nc}}">{{r.id}}</span><span class="dim" style="font-size:11px">{{r.used}} / 42U</span></button>
+              <div class="rk-m"><span>전력 {{r.kw}}</span><span>흡기 최고 {{r.tmax}}</span><span>세로 PDU {{r.pn}}개</span></div>
+              <div class="rk-b" style="border:2px solid {{r.bc}}">
+                <div class="pg"><sc-for list="{{r.pl}}" as="p" hint-placeholder-count="2"><div class="pdu" title="{{p.tip}}" style="background:{{p.bg}}"><i style="height:{{p.pct}}%;background:{{p.fill}}"></i></div></sc-for></div>
+                <div class="us"><sc-for list="{{us}}" as="u" hint-placeholder-count="42"><span>{{u}}</span></sc-for></div>
+                <div class="slots">
+                  <sc-for list="{{r.devs}}" as="d" hint-placeholder-count="8">
+                    <button type="button" class="dev" title="{{d.tip}}" style="bottom:{{d.b}}px;height:{{d.h}}px;background:{{d.bg}};border:1px solid {{d.bd}};color:{{d.fg}}"><span class="nm">{{d.name}}</span><span class="vl">{{d.val}}</span></button>
+                  </sc-for>
+                </div>
+                <div class="pg"><sc-for list="{{r.pr}}" as="p" hint-placeholder-count="2"><div class="pdu" title="{{p.tip}}" style="background:{{p.bg}}"><i style="height:{{p.pct}}%;background:{{p.fill}}"></i></div></sc-for></div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"overlay":{"editor":"enum","options":["status","temp","power","use"],"default":"status"},"$preview":{"width":1440,"height":1010}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const st = this.state || {};
+    const mode = st.mode || this.props.overlay || 'status';
+    const selId = st.sel || 'A-03';
+    const U = 16;
+    const HATCH = 'repeating-linear-gradient(45deg,#1a2236 0 5px,#2b3852 5px 10px)';
+    const PH = 'repeating-linear-gradient(45deg,#1a2236 0 3px,#3a4866 3px 6px)';
+    const KIND = { sv: ['rgba(59,130,246,.24)', '#3b82f6', '#dbeafe'], st: ['rgba(52,224,180,.18)', '#2dd4bf', '#ccfbf1'], net: ['rgba(34,211,238,.16)', '#22d3ee', '#cffafe'] };
+    const STAT = {
+      ok: ['rgba(34,197,94,.14)', '#22c55e', '#bbf7d0', '정상'],
+      warn: ['rgba(245,158,11,.32)', '#f59e0b', '#fde68a', '경고'],
+      crit: ['rgba(239,68,68,.5)', '#ef4444', '#ffffff', '장애'],
+      unk: [HATCH, '#8b9bb4', '#e6edf6', '못 읽음'],
+      none: ['#141b2d', '#2b3852', '#8b9bb4', '빈 랙'],
+    };
+    const TEMP = [[24, 'rgba(59,130,246,.22)', '#3b82f6', '24°C 미만'], [28, 'rgba(45,212,191,.2)', '#2dd4bf', '24–27°C'], [32, 'rgba(245,158,11,.32)', '#f59e0b', '28–31°C'], [999, 'rgba(239,68,68,.5)', '#ef4444', '32°C 이상']];
+    const PWR = [[200, 'rgba(59,130,246,.10)'], [500, 'rgba(59,130,246,.24)'], [1000, 'rgba(59,130,246,.42)'], [99999, 'rgba(59,130,246,.66)']];
+    const RKW = [[2, 'rgba(59,130,246,.10)', '2 kW 미만'], [5, 'rgba(59,130,246,.26)', '2–4.9 kW'], [8, 'rgba(59,130,246,.46)', '5–7.9 kW'], [999, 'rgba(59,130,246,.7)', '8 kW 이상']];
+    const USE = [[14, 'rgba(59,130,246,.10)', '14U 미만'], [28, 'rgba(59,130,246,.26)', '14–27U'], [38, 'rgba(59,130,246,.46)', '28–37U'], [99, 'rgba(59,130,246,.7)', '38U 이상']];
+    let seed = 11;
+    const rnd = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return Math.floor(seed / 65536) % n; };
+
+    const all = [];
+    ['A', 'B'].forEach((row, ri) => {
+      for (let i = 0; i < 10; i += 1) {
+        const id = row + '-' + String(i + 1).padStart(2, '0');
+        const kind = i === 0 ? 'net' : i === 3 ? 'st' : 'sv';
+        const top = id === 'B-10' ? 0 : i >= 8 ? 8 + rnd(8) : 18 + rnd(22);
+        const list = [];
+        let u = 3;
+        while (u < top) {
+          const size = kind === 'net' ? 1 : kind === 'st' ? (rnd(2) ? 4 : 2) : (rnd(5) === 0 ? 1 : 2);
+          const q = rnd(60);
+          const s = q === 0 ? 'crit' : q < 4 ? 'warn' : q === 5 ? 'unk' : 'ok';
+          list.push([u, size, kind, (kind === 'sv' ? 'srv-' : kind === 'st' ? 'stor-' : 'sw-') + row.toLowerCase() + String(i + 1).padStart(2, '0') + '-u' + String(u).padStart(2, '0'), s]);
+          u += size + (kind === 'net' ? 1 : 0);
+        }
+        let used = 0, wsum = 0, wn = 0, tmax = null, nC = 0, nW = 0, nU = 0;
+        const devs = list.map(([du, size, k, name, s]) => {
+          const read = s !== 'unk';
+          const watt = read ? (k === 'sv' ? 190 * size + rnd(170) : k === 'st' ? 220 * size + rnd(90) : 90 + rnd(120)) : null;
+          const temp = read && k !== 'st' ? 21 + rnd(8) + (s === 'crit' ? 9 : s === 'warn' ? 4 : 0) : null;
+          used += size;
+          if (watt != null) { wsum += watt; wn += 1; }
+          if (temp != null && (tmax == null || temp > tmax)) tmax = temp;
+          if (s === 'crit') nC += 1; else if (s === 'warn') nW += 1; else if (s === 'unk') nU += 1;
+          let c, val;
+          if (mode === 'use') { c = KIND[k]; val = size + 'U'; }
+          else if (mode === 'status') { c = STAT[s]; val = STAT[s][3]; }
+          else if (mode === 'temp') {
+            if (temp == null) { c = s === 'unk' ? STAT.unk : STAT.none; val = '—'; }
+            else { const t = TEMP.find((x) => temp < x[0]); c = [t[1], t[2], '#ffffff']; val = temp + '°C'; }
+          } else if (watt == null) { c = STAT.unk; val = '—'; }
+          else { const p = PWR.find((x) => watt < x[0]); c = [p[1], '#3b82f6', '#ffffff']; val = watt + ' W'; }
+          return { name, val, b: (du - 1) * U, h: size * U - 1, bg: c[0], bd: c[1], fg: c[2], tip: name + ' — ' + id + ' · U' + du + ' (' + size + 'U)' };
+        });
+        const pn = [2, 4, 6][rnd(3)];
+        const mk = (feed, j) => {
+          const w = Math.round((wsum / pn) * (0.75 + rnd(50) / 100));
+          const pct = Math.max(3, Math.min(100, Math.round((w / 7400) * 100)));
+          return { pct, fill: pct >= 80 ? '#ef4444' : '#f59e0b', bg: '#141b2d', tip: 'PDU ' + feed + (j + 1) + ' — ' + (w / 1000).toFixed(1) + ' kW · 부하 ' + pct + '%' };
+        };
+        const pl = Array.from({ length: pn / 2 }, (_, j) => mk('A', j));
+        const pr = Array.from({ length: pn / 2 }, (_, j) => mk('B', j));
+        const kw = wsum / 1000;
+        all.push({
+          id, row, i, ri, devs, used, pn, pl, pr, nC, nW, nU, tmaxN: tmax, kwN: wn ? kw : null,
+          kw: wn === 0 ? '—' : kw.toFixed(1) + ' kW' + (wn < devs.length ? ' (' + devs.length + '대 중 ' + wn + '대)' : ''),
+          tmax: tmax == null ? '—' : tmax + '°C',
+        });
+      }
+    });
+
+    const plan = all.map((r) => {
+      let c, val;
+      const empty = r.devs.length === 0;
+      if (empty) { c = STAT.none; val = '빈 랙'; }
+      else if (mode === 'status') {
+        const s = r.nC ? 'crit' : r.nW ? 'warn' : r.nU ? 'unk' : 'ok';
+        c = STAT[s]; val = r.nC ? '장애 ' + r.nC : r.nW ? '경고 ' + r.nW : r.nU ? '못읽음 ' + r.nU : '정상';
+      } else if (mode === 'temp') {
+        if (r.tmaxN == null) { c = STAT.none; val = '—'; }
+        else { const t = TEMP.find((x) => r.tmaxN < x[0]); c = [t[1], t[2], '#ffffff']; val = r.tmaxN + '°C'; }
+      } else if (mode === 'power') {
+        if (r.kwN == null) { c = STAT.none; val = '—'; }
+        else { const p = RKW.find((x) => r.kwN < x[0]); c = [p[1], '#3b82f6', '#ffffff']; val = r.kwN.toFixed(1) + 'kW'; }
+      } else { const p = USE.find((x) => r.used < x[0]); c = [p[1], '#3b82f6', '#ffffff']; val = r.used + 'U'; }
+      return {
+        id: r.id, val, bg: c[0], bd: c[1], fg: c[2],
+        x: 44 + r.i * 54, y: r.ri === 0 ? 88 : 244,
+        fe: r.ri === 0 ? 'border-bottom:4px solid #e6edf6' : 'border-top:4px solid #e6edf6',
+        ol: r.id === selId ? '3px solid #ffffff' : 'none',
+        tip: r.id + ' — ' + r.used + '/42U · 전력 ' + r.kw + ' · 흡기 최고 ' + r.tmax + ' · 장애 ' + r.nC + ' · 경고 ' + r.nW + ' · 못 읽음 ' + r.nU,
+        pick: () => this.setState({ sel: r.id }),
+      };
+    });
+
+    const cur = all.find((r) => r.id === selId) || all[2];
+    const start = Math.max(0, Math.min(7, cur.i - 1));
+    const racks = all.filter((r) => r.row === cur.row && r.i >= start && r.i < start + 3).map((r) => ({
+      ...r, bc: r.id === cur.id ? '#ffffff' : '#3a4866', nc: r.id === cur.id ? '#ffffff' : '#aebbd0',
+      pick: () => this.setState({ sel: r.id }),
+    }));
+
+    const legend = mode === 'status' ? ['ok', 'warn', 'crit', 'unk', 'none'].map((k) => ({ bg: STAT[k][0], bd: STAT[k][1], label: STAT[k][3] }))
+      : mode === 'temp' ? TEMP.map((t) => ({ bg: t[1], bd: t[2], label: t[3] }))
+      : (mode === 'power' ? RKW : USE).map((p) => ({ bg: p[1], bd: '#3b82f6', label: p[2] }));
+    const planNote = mode === 'status' ? '랙 색 = 그 랙에서 가장 나쁜 상태. 못 읽은 장비는 정상으로 세지 않습니다.'
+      : mode === 'temp' ? '랙 색 = 그 랙 장비의 흡기 온도 최고값. 온도를 읽은 장비가 없으면 ‘—’.'
+      : mode === 'power' ? '랙 색 = 읽은 장비 전력의 합. 일부만 읽었으면 실장도 쪽에 ‘n대 중 m대’ 로 밝힙니다.'
+      : '랙 색 = 사용 U. 빈 자리를 찾을 때 씁니다.';
+    const modes = [['status', '상태'], ['temp', '온도'], ['power', '전력'], ['use', '사용 U']].map(([k, label]) => ({
+      label, cls: k === mode ? 'on' : '', pick: () => this.setState({ mode: k }),
+    }));
+    return { plan, racks, legend, planNote, modes, selId: cur.id, us: Array.from({ length: 42 }, (_, i) => 42 - i) };
+  }
+}
+</script>
+</body>
+</html>

@@ -32,11 +32,12 @@ button,select,input{font:inherit;color:inherit}
 .tile .n{font-size:20px;font-weight:800;margin-top:2px}
 .tile .s{font-size:11px;color:#8b9bb4}
 .panel{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
-.racks{display:flex;gap:14px;overflow-x:auto;padding:12px}
-.rack{flex:0 0 228px;min-width:0}
+.racks{display:flex;gap:14px;overflow-x:auto;padding:12px;align-items:flex-end}
+.rack{flex:0 0 248px;min-width:0}
+.pg{display:flex;gap:2px;flex:0 0 auto}
 .rk-h{display:flex;align-items:baseline;gap:6px;padding:0 2px 6px}
 .rk-h .nm{font-weight:800;font-size:14px}
-.rk-m{display:flex;gap:8px;font-size:10.5px;color:#8b9bb4;padding:0 2px 6px;white-space:nowrap}
+.rk-m{display:flex;flex-wrap:wrap;gap:2px 8px;font-size:10.5px;color:#8b9bb4;padding:0 2px 6px;white-space:nowrap}
 .rk-b{display:flex;gap:4px;border:2px solid #3a4866;border-radius:6px;background:#0a0e17;padding:4px}
 .us{flex:0 0 18px;display:flex;flex-direction:column}
 .us span{height:16px;line-height:16px;font-size:9px;color:#5d6b85;text-align:right;font-family:"JetBrains Mono",monospace}
@@ -45,7 +46,7 @@ button,select,input{font:inherit;color:inherit}
 .dev .nm{font-family:"JetBrains Mono",monospace;font-weight:500;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1}
 .dev .vl{font-weight:700;flex:0 0 auto}
 .pdu{flex:0 0 8px;position:relative;background:#141b2d;border:1px solid #2b3852;border-radius:2px}
-.pdu i{position:absolute;left:0;right:0;bottom:0;background:#f59e0b;opacity:.7}
+.pdu i{position:absolute;left:0;right:0;bottom:0;opacity:.8}
 .lg{display:flex;flex-wrap:wrap;gap:12px;padding:8px 14px;border-top:1px solid #1f2a40;font-size:11.5px;color:#aebbd0}
 .lg .it{display:inline-flex;align-items:center;gap:6px}
 .lg .sw{width:18px;height:12px;border-radius:3px;box-sizing:border-box}
@@ -56,10 +57,12 @@ button,select,input{font:inherit;color:inherit}
 .un .b{min-width:0;flex:1}
 .un .t{font-family:"JetBrains Mono",monospace;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .un .r{font-size:11px;color:#8b9bb4}
+.idr{border-top:1px solid #1f2a40;padding-top:10px;display:flex;flex-direction:column;gap:8px}
+.pc{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap;box-sizing:border-box}
 .tag{display:inline-flex;align-items:center;height:18px;padding:0 6px;border-radius:5px;font-size:10px;font-weight:700;white-space:nowrap;border:1px solid #243049;color:#c3cee0;flex:0 0 auto}
 </style>
 </helmet>
-<div style="min-height:1010px;background:#0a0e17;box-sizing:border-box">
+<div style="min-height:1240px;background:#0a0e17;box-sizing:border-box">
   <div class="tb">
     <span class="logo"><span class="v">D</span>THE DAVINCI</span>
     <span class="dim">특수 기능 › 하드웨어 ›</span><strong>랙 실장도</strong>
@@ -72,6 +75,8 @@ button,select,input{font:inherit;color:inherit}
       <select id="corp" class="sel"><option>KR-SEL (서울)</option><option>PL-WAW (폴란드)</option><option>US-EST (미국 동부)</option></select>
       <span class="lab">전산실</span>
       <div class="seg"><button type="button" class="on">전산실 A · 2층</button><button type="button">전산실 B · 지하 1층</button></div>
+      <span class="lab">보기</span>
+      <div class="seg"><button type="button">평면도</button><button type="button">평면도 + 실장도</button><button type="button" class="on">실장도</button></div>
       <span class="lab">겹쳐 보기</span>
       <div class="seg">
         <sc-for list="{{modes}}" as="m" hint-placeholder-count="4"><button type="button" class="{{m.cls}}" onClick="{{m.pick}}">{{m.label}}</button></sc-for>
@@ -98,24 +103,24 @@ button,select,input{font:inherit;color:inherit}
         <div class="racks">
           <sc-for list="{{racks}}" as="r" hint-placeholder-count="6">
             <div class="rack">
-              <div class="rk-h"><span class="nm mono">{{r.id}}</span><span class="dim" style="font-size:11px">{{r.used}} / 42U</span><span class="dim" style="font-size:11px;margin-left:auto">{{r.role}}</span></div>
-              <div class="rk-m"><span>전력 {{r.kw}}</span><span>흡기 최고 {{r.tmax}}</span></div>
+              <div class="rk-h"><span class="nm mono">{{r.id}}</span><span class="dim" style="font-size:11px">{{r.used}} / 42U · {{r.pct}}%</span><span class="dim" style="font-size:11px;margin-left:auto">{{r.role}}</span></div>
+              <div class="rk-m"><span>전력 {{r.kw}}</span><span>흡기 최고 {{r.tmax}}</span><span>세로 PDU {{r.pn}}개 · {{r.pkw}}</span></div>
               <div class="rk-b">
+                <div class="pg"><sc-for list="{{r.pl}}" as="p" hint-placeholder-count="2"><div class="pdu" title="{{p.tip}}" style="background:{{p.bg}}"><i style="height:{{p.pct}}%;background:{{p.fill}}"></i></div></sc-for></div>
                 <div class="us"><sc-for list="{{us}}" as="u" hint-placeholder-count="42"><span>{{u}}</span></sc-for></div>
                 <div class="slots">
                   <sc-for list="{{r.devs}}" as="d" hint-placeholder-count="8">
                     <button type="button" class="dev" title="{{d.tip}}" onClick="{{d.pick}}" style="bottom:{{d.b}}px;height:{{d.h}}px;background:{{d.bg}};border:1px solid {{d.bd}};color:{{d.fg}};outline:{{d.ol}}"><span class="nm">{{d.name}}</span><span class="vl">{{d.val}}</span></button>
                   </sc-for>
                 </div>
-                <div class="pdu" title="PDU A"><i style="height:{{r.pa}}%"></i></div>
-                <div class="pdu" title="PDU B"><i style="height:{{r.pb}}%"></i></div>
+                <div class="pg"><sc-for list="{{r.pr}}" as="p" hint-placeholder-count="2"><div class="pdu" title="{{p.tip}}" style="background:{{p.bg}}"><i style="height:{{p.pct}}%;background:{{p.fill}}"></i></div></sc-for></div>
               </div>
             </div>
           </sc-for>
         </div>
         <div class="lg">
           <sc-for list="{{legend}}" as="l" hint-placeholder-count="5"><span class="it"><span class="sw" style="background:{{l.bg}};border:1px solid {{l.bd}}"></span>{{l.label}}</span></sc-for>
-          <span class="it" style="margin-left:auto"><span class="sw" style="background:#f59e0b;opacity:.7;width:8px"></span>랙 옆 띠 = PDU A · B 부하</span>
+          <span class="it" style="margin-left:auto"><span class="sw" style="background:#f59e0b;opacity:.8;width:8px"></span>랙 옆 세로 띠 = PDU(랙마다 2 · 4 · 6개 · 왼쪽 A 계통 · 오른쪽 B 계통) · 채움 높이 = 부하</span><span class="it"><span class="sw" style="background:#ef4444;width:8px"></span>80% 이상</span><span class="it"><span class="sw" style="background:repeating-linear-gradient(45deg,#1a2236 0 3px,#3a4866 3px 6px);border:1px solid #8b9bb4;width:8px"></span>PDU 못 읽음</span>
         </div>
       </div>
 
@@ -123,18 +128,42 @@ button,select,input{font:inherit;color:inherit}
         <div class="panel" style="padding:12px 14px;display:flex;flex-direction:column;gap:10px">
           <div style="display:flex;align-items:center;gap:8px"><span class="tag">{{sel.kindL}}</span><strong class="mono" style="font-size:14px;overflow-wrap:anywhere">{{sel.name}}</strong></div>
           <dl class="dl" style="margin:0">
+            <dt>표시 이름</dt><dd>{{sel.label}}</dd>
             <dt>위치</dt><dd class="mono">{{sel.pos}}</dd>
             <dt>모델</dt><dd>{{sel.model}}</dd>
             <dt>시리얼</dt><dd class="mono">{{sel.serial}}</dd>
             <dt>위치 출처</dt><dd>{{sel.srcL}}</dd>
             <dt>상태</dt><dd>{{sel.statL}}</dd>
             <dt>흡기 온도</dt><dd>{{sel.tempL}}</dd>
-            <dt>전력</dt><dd>{{sel.wattL}}</dd>
+            <dt>전력(측정)</dt><dd>{{sel.wattL}}</dd>
+            <dt>계획 전력</dt><dd>{{sel.planL}}</dd>
+            <dt>무게</dt><dd>{{sel.kgL}}</dd>
           </dl>
           <sc-if value="{{sel.mis}}" hint-placeholder-val="{{true}}">
             <div class="warn"><strong>위치 불일치</strong> — 원장은 {{sel.pos}}, iDRAC 에 적힌 값은 A-03 · U17 입니다. 어느 쪽이 맞는지 포탈은 판단하지 않습니다.
               <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px"><button type="button" class="btn">원장 유지</button><button type="button" class="btn">iDRAC 값으로 옮기기</button></div>
             </div>
+          </sc-if>
+          <sc-if value="{{sel.isSv}}" hint-placeholder-val="{{true}}">
+            <div class="idr">
+              <div style="display:flex;align-items:center;gap:8px"><strong>iDRAC 정보</strong><span class="dim" style="font-size:11px;margin-left:auto">{{sel.seen}}</span></div>
+              <sc-if value="{{sel.stale}}" hint-placeholder-val="{{false}}"><div class="warn">마지막 수집에 실패했습니다. 아래는 그 전에 읽은 값이고, 상태 · 온도 · 전력은 지금 값이 아닙니다.</div></sc-if>
+              <dl class="dl" style="margin:0">
+                <dt>호스트 이름</dt><dd class="mono">{{sel.name}}</dd>
+                <dt>서비스 태그</dt><dd class="mono">{{sel.serial}}</dd>
+                <dt>관리 주소</dt><dd class="mono">{{sel.mgmt}} <span class="dim" style="font-family:inherit">(관리자에게만 보임)</span></dd>
+                <dt>전원</dt><dd>{{sel.pwr}}</dd>
+                <dt>CPU · 메모리</dt><dd>{{sel.cpu}}</dd>
+                <dt>펌웨어</dt><dd>{{sel.fw}}</dd>
+              </dl>
+              <div style="display:flex;flex-wrap:wrap;gap:6px">
+                <sc-for list="{{sel.parts}}" as="p" hint-placeholder-count="5"><span class="pc" style="background:{{p.bg}};border:1px solid {{p.bd}};color:{{p.fg}}">{{p.t}}</span></sc-for>
+              </div>
+              <div style="display:flex;flex-wrap:wrap;gap:8px"><button type="button" class="btn">서버 상세 열기</button><button type="button" class="btn">iDRAC 웹 콘솔 열기</button></div>
+            </div>
+          </sc-if>
+          <sc-if value="{{sel.notSv}}" hint-placeholder-val="{{false}}">
+            <div class="idr"><span class="dim" style="font-size:12px">iDRAC 가 없는 장비입니다. 이 장비의 수집 정보는 아래 화면에 있습니다.</span></div>
           </sc-if>
           <a href="#">{{sel.linkL}}</a>
         </div>
@@ -154,7 +183,7 @@ button,select,input{font:inherit;color:inherit}
   </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"overlay":{"editor":"enum","options":["kind","status","temp","power"],"default":"kind"},"$preview":{"width":1440,"height":1010}}'>
+<script type="text/x-dc" data-dc-script data-props='{"overlay":{"editor":"enum","options":["kind","status","temp","power"],"default":"kind"},"$preview":{"width":1440,"height":1240}}'>
 class Component extends DCLogic {
   renderVals() {
     const st = this.state || {};
@@ -227,6 +256,7 @@ class Component extends DCLogic {
         [42, 1, 'etc', '패치패널 A06-1', '24포트 Cat6A'], [3, 2, 'sv', 'srv-esx-021', 'PowerEdge R750'],
       ]],
     ];
+    const PDUN = { 'A-01': 2, 'A-02': 4, 'A-03': 6, 'A-04': 4, 'A-05': 4, 'A-06': 2 };
     let seed = 7;
     const rnd = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
     let usedU = 0, placed = 0, noneN = 0, unkN = 0, sel = null;
@@ -265,6 +295,20 @@ class Component extends DCLogic {
           let h = 0; for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) % 1679616;
           sel = {
             name, model, pos, mis: !!o.mis, kindL: KIND[kind][3],
+            label: kind === 'sv' && name.indexOf('srv-esx-') === 0 ? '가상화서버 #' + Number(name.slice(8)) : kind === 'etc' ? name : '— (실장도 파일에 없음)',
+            planL: kind === 'etc' ? '—' : '정격 ' + (kind === 'sv' ? 375 * size : kind === 'st' ? 420 * size : 381) + ' W · 운전 ' + (kind === 'sv' ? 280 * size : kind === 'st' ? 300 * size : 263) + ' W (실장도 파일)',
+            kgL: kind === 'etc' ? '—' : (kind === 'sv' ? 16.5 * size : kind === 'st' ? 21 * size : 9.7).toFixed(1) + ' kg (실장도 파일)',
+            isSv: kind === 'sv', notSv: kind !== 'sv' && kind !== 'etc', stale: s === 'unk',
+            seen: s === 'unk' ? '마지막 성공 11-16 22:10' : '14:28 수집 · 엣지 KR-SEL',
+            mgmt: '192.0.2.' + (20 + (h % 200)),
+            pwr: s === 'unk' ? '— (못 읽음)' : '켜짐',
+            cpu: (name.indexOf('ai-') > 0 ? '2 × Xeon Platinum 8468 · 2,048 GB · GPU 8' : '2 × Xeon Gold 6338 · 512 GB'),
+            fw: 'iDRAC 7.00.00 · BIOS 1.12.2',
+            parts: [
+              ['전원공급장치 ' + (s === 'crit' ? '1/2 · 장애 1' : '2/2'), s === 'crit' ? 'crit' : 'ok'],
+              ['디스크 ' + (s === 'warn' ? '7/8 · 주의 1' : '8/8'), s === 'warn' ? 'warn' : 'ok'],
+              ['메모리 16/16', 'ok'], ['팬 6/6', 'ok'], ['NIC 포트 4/6 연결', 'ok'],
+            ].map(([t, k]) => { const c = s === 'unk' ? STAT.unk : STAT[k]; return { t: s === 'unk' ? t.split(' · ')[0] + ' · 이전 값' : t, bg: c[0], bd: c[1], fg: c[2] }; }),
             serial: kind === 'etc' ? '—' : (h.toString(36).toUpperCase() + 'X2K9').slice(0, 7),
             srcL: o.mis ? '원장(가져오기) · iDRAC 값과 다름' : kind === 'sv' ? 'iDRAC 자동 · 원장과 일치' : kind === 'etc' ? '수동 등록' : '원장(가져오기)',
             statL: s === 'none' ? '감시 안 함(포탈에 등록되지 않은 장비)' : s === 'unk' ? '못 읽음 — 마지막 수집 실패' : STAT[s][3],
@@ -277,7 +321,25 @@ class Component extends DCLogic {
       });
       usedU += used;
       const kwTxt = wn === 0 ? '—' : (wsum / 1000).toFixed(1) + ' kW' + (wn < wtot ? ' (' + wtot + '대 중 ' + wn + '대)' : '');
-      return { id, role, used, devs, kw: kwTxt, tmax: tmax == null ? '—' : tmax + '°C', pa: Math.min(95, Math.round(wsum / 2 / 55)), pb: Math.min(95, Math.round(wsum / 2 / 60)) };
+      // 세로(0U) PDU — 랙마다 2 · 4 · 6개. 절반은 왼쪽(A 계통), 절반은 오른쪽(B 계통). 용량 7.4 kW 는 그림용 가정.
+      const pn = PDUN[id] || 2, half = pn / 2, CAP = 7400;
+      let pRead = 0, pSum = 0;
+      const mk = (feed, i) => {
+        const nm = feed + (i + 1);
+        const unread = id === 'A-05' && nm === 'B2';
+        const w = unread ? null : Math.round((wsum / pn) * (0.75 + rnd(50) / 100));
+        if (w != null) { pRead += 1; pSum += w; }
+        const pct = w == null ? 0 : Math.max(3, Math.min(100, Math.round((w / CAP) * 100)));
+        return {
+          pct, fill: pct >= 80 ? '#ef4444' : '#f59e0b',
+          bg: unread ? 'repeating-linear-gradient(45deg,#1a2236 0 3px,#3a4866 3px 6px)' : '#141b2d',
+          tip: 'PDU ' + nm + ' — ' + (w == null ? '못 읽음' : (w / 1000).toFixed(1) + ' kW · 부하 ' + pct + '%'),
+        };
+      };
+      const pl = Array.from({ length: half }, (_, i) => mk('A', i));
+      const pr = Array.from({ length: half }, (_, i) => mk('B', i));
+      const pkw = pRead === 0 ? '—' : (pSum / 1000).toFixed(1) + ' kW' + (pRead < pn ? ' (' + pn + '개 중 ' + pRead + '개)' : '');
+      return { id, role, used, pct: Math.round((used / 42) * 100), devs, kw: kwTxt, tmax: tmax == null ? '—' : tmax + '°C', pn, pl, pr, pkw };
     });
     const legend = mode === 'kind' ? Object.values(KIND).map((c) => ({ bg: c[0], bd: c[1], label: c[3] }))
       : mode === 'status' ? Object.values(STAT).map((c) => ({ bg: c[0], bd: c[1], label: c[3] }))
