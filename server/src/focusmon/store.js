@@ -19,6 +19,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 107회차: 읽기 오류 ≠ 손상(공용 읽기 — 30초 간격 재읽기)
 import { registerStateFile } from '../util/stateFiles.js';
 import { flattenSample, newBlock, appendToBlock, encodeBlock, encodeProcBlock } from './codec.js';
 import { normInterval } from './script.js';
@@ -266,15 +267,29 @@ const lastView = new Map(); // targetId → ts
 let sessLoaded = false;
 const ended = []; // 끝난 수집(최근 20 — 화면 안내 · DB fm_run 이 진실)
 
+/*
+ * 107회차(재현 — EISDIR): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전 catch 하나는 온전한 원본을 .corrupt 로 옮기고 빈 값을 캐시해 다음 쓰기가 원본 자리를 덮었다.
+ *   읽기 단계는 공용 읽기(30초 간격 재읽기): 원본을 두고 · 캐시하지 않고 · 그동안 쓰지 않는다. parse 실패(손상)는 예전과 같다.
+ *   계속 수집 정의: 못 읽은 동안 메모리에서 시작한 수집은 그대로 돌고, 다시 읽히면 파일의 계속 수집을 더한다(이미 수집 중인 서버는 뺀다 — 서버는 수집 하나에만).
+ */
+const _sessReader = makeJsonFileReader(() => sessFile(), { parse: (t) => t, preserve: false, tag: 'focusmon-sessions' });
+let _sessReadErr = '';
+/** 107회차: 계속 수집 정의를 못 읽은 상태(읽기 오류 코드) 또는 ''. */
+export function sessionsReadError() { loadSessions(); return _sessReadErr; }
 function loadSessions() {
   if (sessLoaded) return;
+  const rr = _sessReader.read();
+  if (rr.kind === 'read-error') { _sessReadErr = String(rr.error?.code || 'read-error').slice(0, 32); return; }   // 읽었다고 치지 않는다 — 그동안 정의 파일은 쓰지 않는다(persistSessions)
+  const late = !!_sessReadErr;
+  _sessReadErr = '';
   sessLoaded = true;
+  const busy = new Set(); for (const s of S.values()) for (const t of s.targets) busy.add(t);   // late: 못 읽은 동안 시작한 수집의 서버
   try {
-    const j = JSON.parse(fs.readFileSync(sessFile(), 'utf8'));
+    const j = rr.kind === 'ok' ? JSON.parse(rr.value) : null;
     for (const x of Array.isArray(j?.sessions) ? j.sessions : []) {
       if (!x || typeof x !== 'object' || x.mode !== 'record' || !/^fs-[a-f0-9]{8,16}$/.test(String(x.id))) continue;
-      const targets = (Array.isArray(x.targets) ? x.targets : []).map(String).filter((t) => /^fm-[a-z0-9]{6,20}$/.test(t)).slice(0, MAX_PER_SESSION);
-      if (!targets.length) continue;
+      const targets = (Array.isArray(x.targets) ? x.targets : []).map(String).filter((t) => /^fm-[a-z0-9]{6,20}$/.test(t) && !busy.has(t)).slice(0, MAX_PER_SESSION);
+      if (!targets.length || S.has(x.id)) continue;
       S.set(x.id, { id: x.id, mode: 'record', by: String(x.by || '').slice(0, 64), targets, interval: normInterval(x.interval), startedAt: Number(x.startedAt) || Date.now(), until: null, lastViewAt: 0, resumed: true });
     }
   } catch (e) {
@@ -282,6 +297,7 @@ function loadSessions() {
     if (e?.code !== 'ENOENT') preserveCorrupt(sessFile(), String(e?.message || e));
   }
   dedupeLoadedSessions(Date.now());
+  if (late) persistSessions();   // 107회차: 못 읽은 동안 시작한 수집 + 파일의 계속 수집을 함께 쓴다
 }
 
 /**
@@ -311,6 +327,7 @@ function dedupeLoadedSessions(now) {
 /** 읽을 때 겹침을 정리한 수집(한 번만 돌려준다) — service.tick1 이 fm_run 을 고쳐 쓴다. */
 export function drainLoadFixes() { loadSessions(); return loadFixes.splice(0); }
 function persistSessions() {
+  if (!sessLoaded) { loadSessions(); if (!sessLoaded) { console.warn('[focusmon] 계속 수집 정의 파일을 읽지 못한 상태라 쓰지 않았습니다(원본 유지 — 읽히면 함께 씁니다).'); return; } }   // 107회차
   try {
     const list = [...S.values()].filter((x) => x.mode === 'record').map(({ id, mode, by, targets, interval, startedAt }) => ({ id, mode, by, targets, interval, startedAt }));
     fs.mkdirSync(config.configDir, { recursive: true });
@@ -578,15 +595,19 @@ export function setStatus(id, st, now = Date.now()) {
 }
 export function statusOf(id) { return ST.get(String(id)) || null; }
 
+const _keysReader = makeJsonFileReader(() => path.join(config.configDir, KEYS_FILE), { parse: (t) => t, preserve: false, tag: 'focusmon-keys' });   // 107회차
 function loadKeys() {
   if (keysLoaded) return;
+  const rr = _keysReader.read();
+  if (rr.kind === 'read-error') return;   // 107회차: 읽었다고 치지 않는다 — 그동안 받은 키는 메모리에만 두고 쓰지 않는다(persistKeys)
   keysLoaded = true;
   try {
-    const j = JSON.parse(fs.readFileSync(path.join(config.configDir, KEYS_FILE), 'utf8'));
-    for (const [k, v] of Object.entries(j?.edges || {})) if (v && typeof v === 'object') EDGE.set(k, { agent: String(v.agent || k).slice(0, 128), at: Number(v.at) || 0, version: String(v.version || '').slice(0, 32), key: v.key || null, keySeenAt: Number(v.keySeenAt) || 0 });
+    const j = rr.kind === 'ok' ? JSON.parse(rr.value) : null;
+    for (const [k, v] of Object.entries(j?.edges || {})) if (v && typeof v === 'object' && !EDGE.has(k)) EDGE.set(k, { agent: String(v.agent || k).slice(0, 128), at: Number(v.at) || 0, version: String(v.version || '').slice(0, 32), key: v.key || null, keySeenAt: Number(v.keySeenAt) || 0 });
   } catch (e) { if (e?.code !== 'ENOENT') preserveCorrupt(path.join(config.configDir, KEYS_FILE), String(e?.message || e)); }
 }
 function persistKeys() {
+  if (!keysLoaded) { loadKeys(); if (!keysLoaded) return; }   // 107회차: 못 읽은 키 파일 위에 쓰지 않는다
   try {
     const edges = {};
     for (const [k, v] of EDGE) edges[k] = { agent: v.agent, at: v.at, version: v.version, key: v.key, keySeenAt: v.keySeenAt || 0 };
@@ -678,5 +699,5 @@ export function forgetTargetState(id) {
 
 export function _resetForTest() {
   T.clear(); writeQ.length = 0; qEv = 0; KM.clear(); KMT.clear(); KMR.clear(); S.clear(); lastView.clear(); ST.clear(); EDGE.clear(); WAKES.clear(); TESTS.clear(); RETRIES.clear(); ended.length = 0;
-  sessLoaded = false; keysLoaded = false; counters.lateDropped = 0; counters.rewrites = 0; counters.closed = 0; loadFixes.length = 0;
+  sessLoaded = false; keysLoaded = false; _sessReader.reset(); _sessReadErr = ''; _keysReader.reset(); counters.lateDropped = 0; counters.rewrites = 0; counters.closed = 0; loadFixes.length = 0;
 }

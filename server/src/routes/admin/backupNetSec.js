@@ -25,7 +25,7 @@ import { denyScopedRun, denyFleetWrite } from '../../auth/scopeMerge.js';   // v
 import { snapshotFilter, slimVm, guestProbe } from '../../search/deepSearch.js';
 import { analyzeLoginFails, clampLoginFailParams } from '../../security/loginFails.js';
 import { snapMemo, snapCacheClear } from '../../util/snapCache.js';
-import { loadLoginMonitor, saveLoginMonitor, loginMonitorStatus, runLoginAnalysisNow } from '../../security/loginMonitor.js';
+import { loadLoginMonitor, saveLoginMonitor, loginMonitorStatus, runLoginAnalysisNow, loginMonitorWriteRefusal } from '../../security/loginMonitor.js';
 import { listGuestScans, saveGuestScan, removeGuestScan, runGuestScanNow } from '../../security/guestScanScheduler.js';
 import { analyzeNetIssues } from '../../security/netIssueStore.js';
 import path from 'node:path';
@@ -416,7 +416,7 @@ adminRouter.get('/security/login-fails', adminOnly, async (req, res) => {
   catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 adminRouter.get('/security/login-fails/status', adminOnly, fleetOnly, (_req, res) => res.json(loginMonitorStatus()));
-adminRouter.put('/security/login-fails/settings', adminOnly, (req, res) => { if (denyFleetWrite(req, res, '로그인 실패 감시 설정은 전 법인 공용이라 전체 범위 계정만 바꿀 수 있습니다.')) return; res.json(saveLoginMonitor(req.body || {})); });   // 전체 점검 2회차 V-1
+adminRouter.put('/security/login-fails/settings', adminOnly, (req, res) => { if (denyFleetWrite(req, res, '로그인 실패 감시 설정은 전 법인 공용이라 전체 범위 계정만 바꿀 수 있습니다.')) return; { const no = loginMonitorWriteRefusal(); if (no) return res.status(503).json(no); } res.json(saveLoginMonitor(req.body || {})); });   // 전체 점검 2회차 V-1
 adminRouter.post('/security/login-fails/run', adminOnly, async (req, res) => { if (denyScopedRun(req, res, '로그인 실패 수동 분석')) return; try { await runLoginAnalysisNow(); snapCacheClear('loginFails'); res.json({ ok: true, ...loginMonitorStatus() }); } catch (e) { res.status(500).json({ ok: false, reason: e.message }); } });
 
 // 게스트 네트워크 이슈(패킷드랍/에러) 분석.

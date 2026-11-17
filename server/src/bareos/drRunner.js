@@ -16,12 +16,12 @@
  *  · 대상 잠금(jobLocks)은 보내는 동안만 · 잡지 못한 대상은 다음 틱에. 중앙 전용(엣지는 기동하지 않고 라우트가 시작 · 계속을 409 — 반증 F10) · 회차마다 재진입 가드.
  *  · 시작 때 정한 범위 · 권한으로 돈다(백업 그룹 실행과 같은 모델) — 멈춤 · 계속 · 시작은 라우트가 그때의 쓰기 범위를 본다.
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { store } from '../store.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 107회차: 읽기 오류 ≠ 손상(공용 읽기 — 30초 간격 재읽기)
 import { registerStateFile } from '../util/stateFiles.js';
 import { listJobsOf, getJob, addRestore, inBatch, restoreOpen, restoreHeld, restoreUnknownHeld, restoreFinishing, registryLoadError } from './registry.js';
 import { jobDirectorId, directorById, directorConn, directorCred } from './settings.js';
@@ -64,10 +64,24 @@ function shapeIssue(db) {
   }
   return '';
 }
+/*
+ * 107회차(재현 — EISDIR): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전 catch 하나는 온전한 원본을 .corrupt 로 옮기고 빈 값을 캐시해 다음 쓰기가 원본 자리를 덮었다.
+ *   읽기 단계는 공용 읽기(30초 간격 재읽기): 원본을 두고 · 캐시하지 않고 · 그동안 쓰지 않는다. parse 실패(손상)는 예전과 같다.
+ *   그동안 실행기는 멈추고(_bad) 새 회차 · 멈춤 · 계속을 거절한다 — 다시 읽히면 저장된 자리에서 이어 간다.
+ */
+const _reader = makeJsonFileReader(() => FILE(), { parse: (t) => t, preserve: false, tag: 'bareos-dr-runs' });
+let _readErr = '';
 function load() {
   if (_db) return _db;
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') {
+    _readErr = String(rr.error?.code || 'read-error').slice(0, 32);
+    _bad = `재해 복구 실행 상태 파일을 읽지 못했습니다(읽기 오류 ${_readErr}) — 원본은 그대로 두었고 30초마다 다시 읽습니다. 그동안 복구 순서를 멈췄습니다`;
+    return { runs: [] };
+  }
+  if (_readErr) { _readErr = ''; _bad = ''; }
   try {
-    _db = fs.existsSync(FILE()) ? JSON.parse(fs.readFileSync(FILE(), 'utf8')) : { runs: [] };
+    _db = rr.kind === 'ok' ? JSON.parse(rr.value) : { runs: [] };
     const bad = shapeIssue(_db);
     if (bad) throw Object.assign(new Error(bad), { shape: true });
   } catch (e) {
@@ -80,7 +94,10 @@ function load() {
   return _db;
 }
 /** 저장 — 실패하면 던진다(보내기 전 'sending' 기록이 남지 않으면 보내지 않는다). */
-function save() { atomicWriteFileSync(FILE(), JSON.stringify(_db), { mode: 0o600 }); }
+function save() {
+  if (!_db) throw fail('unavailable', _bad || '실행 상태 파일을 읽지 못했습니다');   // 107회차: 읽기 오류 중에는 쓰지 않는다('null' 로 원본을 덮지 않게)
+  atomicWriteFileSync(FILE(), JSON.stringify(_db), { mode: 0o600 });
+}
 /**
  * 사람의 동작(시작 · 멈춤 · 계속) 저장 — 실패하면 **메모리를 되돌리고** 던진다(버그 점검 B1-01 · B3-03 — 재현: 400 을 받았는데 메모리는 바뀌어
  *   시작 실패한 회차가 보내고, 멈춤 실패한 회차가 재시작 뒤 다시 돌았다). 응답 문구에 파일 경로를 싣지 않는다(서버 로그에만).
@@ -93,7 +110,7 @@ function saveOrRollback(rollback) {
   }
 }
 export const drRunsLoadError = () => { load(); return _bad; };
-export function _resetDrRunsForTest() { _db = null; _bad = ''; _dirty = false; _stepping.clear(); }
+export function _resetDrRunsForTest() { _db = null; _bad = ''; _dirty = false; _stepping.clear(); _reader.reset(); _readErr = ''; }
 /** 폴러의 Director 조회 상태 공급자(drGateBlock 의 Director 판정 — poller 를 import 하면 순환이라 기동 때 넣는다). */
 export function setDrPollDirs(fn) { _pollDirs = typeof fn === 'function' ? fn : () => ({}); }
 

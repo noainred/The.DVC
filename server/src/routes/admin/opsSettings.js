@@ -3,7 +3,7 @@ import { config } from '../../config.js';
 import { verifyUserOtp, getUser, listUsers } from '../../auth/auth.js';
 import { saveSessionSecurity, loadConfiguredSecurity, managedAdminOwners, sessionSecurityRecovery } from '../../security/securitySettings.js';
 import { loadSecretsPolicy, saveSecretsPolicy, migrateSecretFiles, SECRET_FILES } from '../../security/secretVault.js';
-import { saveOsScanSettings, runOsScanNow, osScanStatus } from '../../inventory/osScanner.js';
+import { saveOsScanSettings, runOsScanNow, osScanStatus, osScanWriteRefusal } from '../../inventory/osScanner.js';
 import { getOsResults, osSummary } from '../../inventory/osStore.js';
 import { listAudit, logAudit } from '../../audit.js';
 import { loginHistorySummary, parseLoginRange } from '../../security/loginHistory.js'; // v2.912: 설정 › 로그 › 최근 로그인 · 로그인 횟수
@@ -13,7 +13,7 @@ import { updateSaved, removeSaved, getSaved } from '../../provision/saved.js';
 import { store } from '../../store.js';
 import { inUserWriteScope, inUserScope, scopedVcenterIds } from '../../auth/scope.js';
 import { ssrfBlockReasonResolved } from '../../collector/registry.js';
-import { dailyReportStatus, saveDailyReportSettings, runDailyReportNow } from '../../reports/dailyReport.js';
+import { dailyReportStatus, saveDailyReportSettings, runDailyReportNow, dailyReportWriteRefusal } from '../../reports/dailyReport.js';
 import { refreshCerts } from '../../security/certMonitor.js';
 import { adminOnly, requireSettingsOwner, fullScopeOnlyWith, SETTINGS_OWNER_FULL_SCOPE_REASON } from './shared.js';
 import { mergeScopedMap, filterScopedMap, denyScopedRun, denyFleetWrite, writeMergeScope } from '../../auth/scopeMerge.js'; // v2.606 AUTHZ2606-07
@@ -137,6 +137,7 @@ adminRouter.post('/alerts/test', adminOnly, fleetOnly, async (req, res) => res.j
 // 일일 헬스체크 리포트 — 스케줄 설정 + 즉시 발송(테스트).
 adminRouter.get('/report/daily', adminOnly, (_req, res) => res.json(dailyReportStatus()));
 adminRouter.put('/report/daily', adminOnly, fleetOnly, (req, res) => {
+  { const no = dailyReportWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
   const s = saveDailyReportSettings(req.body || {});
   logAudit({ user: req.user?.username || 'unknown', action: '일일 리포트 설정 변경', detail: `enabled=${s.enabled} ${String(s.hour).padStart(2, '0')}:${String(s.minute).padStart(2, '0')}` });
   res.json({ ok: true, settings: s });
@@ -283,6 +284,7 @@ adminRouter.get('/os-scan', adminOnly, (req, res) => res.json(scopedOsScanStatus
 //   실행에서 막은 것을 설정으로 우회). 범위 계정의 변경은 403(Horizon settings PUT v2.605 와 같은 판단).
 adminRouter.put('/os-scan/settings', adminOnly, (req, res) => {
   if (denyFleetWrite(req, res, '실제 OS 스캔 설정은 전 법인 공용이고 전 vCenter 게스트에 로그인합니다 — 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.')) return;   // 전체 점검 2회차 V-1(조회 ∧ 쓰기 전체)
+  { const no = osScanWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
   const status = scopedOsScanStatus(req);   // 예전과 같은 순서(저장 전 상태 + 저장 결과) — 전체 범위 admin 응답은 그대로
   res.json({ ok: true, ...status, settings: saveOsScanSettings(req.body || {}) });
 });

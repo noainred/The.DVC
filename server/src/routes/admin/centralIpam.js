@@ -2,7 +2,7 @@
 //   routes/admin/centralTokens.js 로 분리했다(이 파일은 IPAM 전용). 등록 순서는 admin.js 호출 순서가 보존한다.
 import { config, loadVcenterConfig } from '../../config.js';
 import { ledgerInfo } from '../../ipam/db.js';
-import { loadSettings as loadIpamSettings, saveSettings as saveIpamSettings, savedInvalidEntries, invalidEntries, ignoreRanges, getClassifier } from '../../ipam/settings.js';
+import { loadSettings as loadIpamSettings, saveSettings as saveIpamSettings, savedInvalidEntries, invalidEntries, ignoreRanges, getClassifier, ipamSettingsWriteRefusal } from '../../ipam/settings.js';
 import { makeVcResolver } from '../../ipam/vcResolve.js'; // v2.639: vCenter 이름 해석기 한 벌(모호하면 null — 예전엔 첫 항목을 택했다)
 import { checkRangeList } from '../../ipam/rangeSyntax.js';
 import { listTargets } from '../../agent/deployRegistry.js';
@@ -107,6 +107,7 @@ adminRouter.put('/ipam/settings', adminOnly, (req, res) => {
   const snap = store.get();
   const readAllowed = scopedVcenterIds(req.user, snap);
   const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+  { const no = ipamSettingsWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
   // 전체 점검 25회차 F-1(재현): 바깥 분기가 조회 범위만 봐서 '조회 무제한 + 쓰기 vcA' 관리자가 전역 3목록과 **모든 vCenter 의 무시 대역**을
   //   본문 그대로 저장했다(vc-b 무시 대역 삭제 · 전역 공인 대역 변경 — 7회차 R-3 '설정 저장 병합' 에서 빠진 라우트). 전체 저장은 조회 ∧ 쓰기 전체만.
   if (isFullReadWriteScope(req.user, snap)) {

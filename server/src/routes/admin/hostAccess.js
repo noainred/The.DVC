@@ -17,6 +17,7 @@ const fleetReadOnly = fullScopeOnlyWith('호스트 접근 제어(포탈 서버 O
 const fleetOnly = fullScopeOnlyWith('호스트 접근 제어(포탈 서버 OS 방화벽)는 전 법인 공용 서버 설정이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.');
 import { hostAccessStatus, saveDraft, planHostAccess, applyHostAccess, confirmHostAccess, revertHostAccess, SUDOERS_HINT } from '../../hostaccess/service.js';
 import { normalizeRequesterIp } from '../../hostaccess/render.js';
+import { hostAccessWriteRefusal } from '../../hostaccess/settings.js';   // 107회차
 
 // v2.771(점검 R6-F5-2): 요청자 IP 는 이 기능 경로에서만 '::ffff:a.b.c.d' → IPv4 로 정규화한다(듀얼스택 '::' listen 의 IPv4 peer).
 //   상태 응답(화면 '내 IP'·'내 IP 추가' 가 이 값을 그대로 쓴다)·계획·적용이 같은 값을 본다. 전역 clientIp 는 바꾸지 않는다
@@ -33,6 +34,7 @@ export function registerHostAccess(adminRouter) {
     res.json({ ...(await hostAccessStatus({ requesterIp: requesterIpOf(req) })), sudoersHint: SUDOERS_HINT() });
   });
   adminRouter.put('/host-access/draft', adminOnly, fleetOnly, requireSettingsOwner, (req, res) => {
+    { const no = hostAccessWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
     const r = saveDraft(req.body?.settings || req.body || {});
     if (!r.ok) return res.status(400).json(r);
     logAudit({ user: req.user?.username, action: '호스트 접근 제어 초안 저장', detail: `ssh=${r.settings.ssh.mode} web=${r.settings.web.mode} extra=${r.settings.firewall.extra.length}`, ip: req.ip || '' });
@@ -42,17 +44,23 @@ export function registerHostAccess(adminRouter) {
     res.json(await planHostAccess(req.body?.settings || {}, { requesterIp: requesterIpOf(req), peerIp: peerIpOf(req) }));
   });
   adminRouter.post('/host-access/apply', adminOnly, fleetOnly, requireSettingsOwner, requireOwnOtp, async (req, res) => {
+    { const no = hostAccessWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
     const r = await applyHostAccess(req.body?.settings || {}, { requesterIp: requesterIpOf(req), peerIp: peerIpOf(req), by: req.user?.username || '' });
     logAudit({ user: req.user?.username, action: r.ok ? '호스트 접근 제어 적용(런타임, 확정 대기)' : '호스트 접근 제어 적용 실패', target: 'host-access', detail: r.ok ? `명령 ${r.commands.length}개 · 확정 기한 ${new Date(r.pending.deadline).toISOString()}` : (r.errors || []).join(' / ').slice(0, 300), ip: req.ip || '' });
     res.status(r.ok ? 200 : 400).json(r);
   });
   adminRouter.post('/host-access/confirm', adminOnly, fleetOnly, requireSettingsOwner, requireOwnOtp, async (req, res) => {
+    { const no = hostAccessWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
     const r = await confirmHostAccess({ by: req.user?.username || '' });
     logAudit({ user: req.user?.username, action: r.ok ? '호스트 접근 제어 확정(영구)' : '호스트 접근 제어 확정 실패', target: 'host-access', detail: r.ok ? (r.notes || []).join(' ') : (r.errors || []).join(' / '), ip: req.ip || '' });
     res.status(r.ok ? 200 : 400).json(r);
   });
   adminRouter.post('/host-access/revert', adminOnly, fleetOnly, requireSettingsOwner, async (req, res) => {
-    const r = await revertHostAccess({ by: req.user?.username || '' });
+    let r;
+    try { r = await revertHostAccess({ by: req.user?.username || '' }); } catch (e) {
+      if (e?.code !== 'settingsUnreadable') throw e;   // 107회차: 방화벽은 되돌렸지만(--reload) 설정 파일을 못 읽어 상태를 기록하지 못했다
+      r = { ok: false, code: e.code, readError: true, errors: [`방화벽은 영구 설정으로 되돌렸지만 상태를 기록하지 못했습니다 — ${e.message}`] };
+    }
     logAudit({ user: req.user?.username, action: '호스트 접근 제어 되돌림(런타임→영구 설정)', target: 'host-access', ip: req.ip || '' });
     res.status(r.ok ? 200 : 400).json(r);
   });

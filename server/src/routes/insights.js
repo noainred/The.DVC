@@ -19,7 +19,7 @@ import { unreadVcenterReasons } from '../metrics/unreadVcenters.js'; // v2.733(C
 import { filterMeasuredByMapping, loadPowerSettings } from '../idrac/powerSettings.js';
 import { keepMappedMeasured } from '../idrac/attribution.js';
 import { snapMemo, sendCached } from '../util/snapCache.js';
-import { computeFinOps, loadFinopsConfig, saveFinopsConfig } from '../insights/finops.js';
+import { computeFinOps, loadFinopsConfig, saveFinopsConfig, finopsWriteRefusal } from '../insights/finops.js';
 import { computePowerBreakdown } from '../insights/powerBreakdown.js';
 import { getDatacenterAssign, listDatacenters, datacenterOfVcenter } from '../datacenter/store.js';
 import { getFleetInventory, fleetGhostReport } from '../insights/fleetInventory.js'; // v2.783(점검 Q2 P-B3): prune 은 화면과 같은 유령 판정
@@ -190,6 +190,7 @@ insightsRouter.get('/power-breakdown', async (req, res) => {
 //   범위 관리자가 바꿀 수 있었고 감사 기록도 없었다.
 const fleetOnly = fullScopeOnlyWith('FinOps 요금·PUE·탄소 계수는 전 법인 비용 계산에 함께 쓰이는 공용 설정이라 전체 범위(vCenter 제한 없는) 계정만 바꿀 수 있습니다.');
 insightsRouter.put('/finops/config', adminOnly, fleetOnly, (req, res) => {
+  { const no = finopsWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
   const saved = saveFinopsConfig(req.body || {});
   const keys = Object.keys(req.body && typeof req.body === 'object' ? req.body : {}).slice(0, 20).join(',');
   logAudit({ user: req.user?.username, action: 'insights.finops.config', detail: keys || '(빈 변경)', ip: req.ip || '' });

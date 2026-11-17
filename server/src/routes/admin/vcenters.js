@@ -41,7 +41,7 @@ adminRouter.get('/data-source', adminOnly, (_req, res) => {
 // Switch the data source at runtime (mock | live | auto) and re-poll.
 adminRouter.put('/data-source', adminOnly, fleetWideOnly, async (req, res) => {
   const result = setDataSource((req.body || {}).dataSource);
-  if (!result.ok) return res.status(400).json(result);
+  if (!result.ok) return res.status(result.status === 503 ? 503 : 400).json(result);   // 107회차: 설정 파일 읽기 오류는 503 settingsUnreadable
   await store.refresh().catch(() => {});
   res.json({ ...result, overridden: isDataSourceOverridden() });
 });

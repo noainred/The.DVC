@@ -12,13 +12,13 @@
  *  · 상태 파일 `focusmon-audit.json`(준비 상태 · 진행 중 작업 — 비밀 없음 · 원자 쓰기 · 손상 보존). 결과는 DB `fm_audit`(최근 10회 · 90일 · 원문 gzip).
  *  · 숫자는 보고서의 **줄 수**다(장애 횟수 아님) · 끝까지 돌지 않은 실행(시한 · 중단 · 오류)은 숫자를 합계처럼 쓰지 않는다(outcome ≠ 'done').
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import crypto from 'node:crypto';
 import { promisify } from 'node:util';
 import { config } from '../../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js';
+import { makeJsonFileReader } from '../../util/jsonFileRead.js';   // 107회차: 읽기 오류 ≠ 손상(공용 읽기 — 30초 간격 재읽기)
 import { registerStateFile } from '../../util/stateFiles.js';
 import * as db from '../db.js';
 import { createAuditRunner } from './runner.js';
@@ -63,10 +63,27 @@ const FILE_NAME = registerStateFile('focusmon-audit.json');
 const file = () => path.join(config.configDir, FILE_NAME);
 let S = null; // { ready: {tid: rec}, jobs: [job], lost: {runId: job} }
 let loadErr = '';
+/*
+ * 107회차(재현 — EISDIR): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전 catch 하나는 온전한 원본(서버별 준비 상태 · 진행 중 작업)을 .corrupt 로 옮기고 빈 상태를 캐시해
+ *   다음 쓰기가 원본 자리를 덮었다. 이제 원본을 두고 · 그동안 상태는 메모리에만 두고 쓰지 않는다(writeState). 30초 간격으로 다시 읽어, 그동안 메모리 상태가 바뀌지 않았으면
+ *   파일 상태로 바꿔 끼운다. 바뀌었으면(작업 접수 등) 바꿔 끼우지 않는다 — 진행 중 작업을 잃지 않게 이 프로세스는 메모리로 계속 돌고 재시작 때 파일을 읽는다. parse 실패는 예전과 같다.
+ */
+const _reader = makeJsonFileReader(() => file(), { parse: (t) => t, preserve: false, tag: 'focusmon-audit' });
+let _readErr = '';
+let _memChanged = false;
 function load() {
-  if (S) return S;
+  if (S && (!_readErr || _memChanged)) return S;
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') {
+    _readErr = String(rr.error?.code || 'read-error').slice(0, 32);
+    loadErr = `읽기 오류(${_readErr}) — 원본은 그대로 두었습니다 · 점검 상태를 저장하지 않습니다(30초마다 다시 읽습니다)`;
+    if (!S) S = { ready: Object.create(null), jobs: [], lost: Object.create(null) };
+    return S;
+  }
+  if (_readErr) { _readErr = ''; loadErr = ''; }
   try {
-    const j = JSON.parse(fs.readFileSync(file(), 'utf8'));
+    if (rr.kind === 'missing') throw Object.assign(new Error('없음'), { code: 'ENOENT' });
+    const j = JSON.parse(rr.value);
     const ready = j && typeof j.ready === 'object' && !Array.isArray(j.ready) ? j.ready : {};
     S = { ready: Object.create(null), jobs: [], lost: Object.create(null) };
     for (const [k, v] of Object.entries(ready).slice(0, 2000)) if (/^fm-[a-z0-9-]{4,40}$/.test(k) && v && typeof v === 'object') S.ready[k] = v;
@@ -90,7 +107,10 @@ function load() {
   }
   return S;
 }
-function writeState() { try { atomicWriteFileSync(file(), JSON.stringify({ v: 1, ready: load().ready, jobs: load().jobs, lost: load().lost })); } catch (e) { console.warn('[focusmon-audit] 상태 파일을 쓰지 못했습니다:', String(e?.message || e).slice(0, 160)); } }
+function writeState() {
+  load();
+  if (_readErr) { _memChanged = true; return; }   // 107회차: 못 읽은 상태 파일 위에 쓰지 않는다(메모리로 계속 — 재시작 때 파일을 읽는다)
+  try { atomicWriteFileSync(file(), JSON.stringify({ v: 1, ready: load().ready, jobs: load().jobs, lost: load().lost })); } catch (e) { console.warn('[focusmon-audit] 상태 파일을 쓰지 못했습니다:', String(e?.message || e).slice(0, 160)); } }
 /*
  * 51회차 #2: 엣지 동기화 한 번(handleEdgeAudit)이 받은 설치 · 준비 · 확인 결과(최대 RESULTS_PER_SYNC 8건)를 ingestResult 마다 원자 쓰기(fsync 둘)해
  *   한 요청에 상태 파일을 9번 썼다(실측 — 대상 2,000 개 상태 파일 291KB 에서 28~42ms 동기 · 이 컨테이너). 묶음 안에서는 persist 가 '더러움' 만 적고
@@ -669,4 +689,4 @@ export function cleanEdgeCred(v) {
   const choices = state === 'ambig' && Array.isArray(v.choices) ? v.choices.slice(0, 10).filter((c) => c && typeof c === 'object' && typeof c.id === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(c.id)).map((c) => ({ id: c.id, name: nm(c.name), acct: nm(c.acct), key: nm(c.key) })) : null;
   return { state, src: ['server', 'corp'].includes(v.src) ? v.src : null, acct: nm(v.acct), key: nm(v.key), ...(choices ? { choices } : {}) };
 }
-export function _resetForTest() { S = null; loadErr = ''; persistBatch = null; latest.clear(); localRunner = null; localInstaller = null; localPrepper = null; keysRef = null; spaceLow = () => false; edgeCred.clear(); knownSentAt.clear(); }
+export function _resetForTest() { S = null; loadErr = ''; _readErr = ''; _memChanged = false; _reader.reset(); persistBatch = null; latest.clear(); localRunner = null; localInstaller = null; localPrepper = null; keysRef = null; spaceLow = () => false; edgeCred.clear(); knownSentAt.clear(); }

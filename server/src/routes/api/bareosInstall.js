@@ -18,7 +18,7 @@ import { claimSetup, releaseSetupLock, setupBusyReason } from '../../bareos/setu
 import { setupAuditReason } from './bareosBackup.js';
 import { STEPS } from '../../bareos/install/plan.js';
 import { bundleSourceInfo, listAllBundles, fetchLatestBundle, bundleFetchStatus, deleteBundle, bundleDir, importDirState } from '../../bareos/install/bundle.js';
-import { getBundleSource, saveBundleSource } from '../../bareos/install/bundleSource.js';
+import { getBundleSource, saveBundleSource, bundleSourceWriteRefusal } from '../../bareos/install/bundleSource.js';
 import { listInstallTargets } from '../../bareos/install/targets.js';
 import { listLinkCandidates, linkInstallTarget } from '../../bareos/install/linkTarget.js';
 import {
@@ -128,6 +128,7 @@ api.put(`${P}/bundle/source`, adminOnly, fullScopeOnly, fullWriteOnly, (req, res
   if (b.baseUrl !== undefined) { if (typeof b.baseUrl !== 'string') return res.status(400).json({ ok: false, code: 'invalid', reason: '번들 주소는 글자로 보내세요.' }); body.baseUrl = b.baseUrl; }
   if (b.importDir !== undefined) { if (typeof b.importDir !== 'string') return res.status(400).json({ ok: false, code: 'invalid', reason: '디렉터리는 글자로 보내세요.' }); body.importDir = b.importDir; }
   if (!Object.keys(body).length) return res.status(400).json({ ok: false, code: 'invalid', reason: '바꿀 값(baseUrl · importDir)이 없습니다.' });
+  { const no = bundleSourceWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
   try {
     const saved = saveBundleSource(body);
     audit(req, 'Bareos 완전 설치 번들 받는 곳', '', `주소 ${saved.baseUrl || '(기본)'} · 서버 디렉터리 ${saved.importDir || '(없음)'}`);

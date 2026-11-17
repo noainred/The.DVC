@@ -8,10 +8,10 @@
  *   쓰기는 디바운스(2초)로 묶은 원자 쓰기 + 종료 시 flush. 손상 파일은 보존하고 빈 기록으로 시작한다(조용한 덮어쓰기 금지).
  * 범위: 스캔 결과처럼 vCenter 귀속이 없다 — 라우트가 관리자 · 전 법인 계정에만 연다.
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 107회차: 읽기 오류 ≠ 손상(공용 읽기 — 30초 간격 재읽기)
 import { registerStateFile } from '../util/stateFiles.js';
 import { registerExitFlush } from '../util/exitFlush.js';
 import { numOrNull } from '../util/numOrNull.js';
@@ -30,13 +30,25 @@ let seq = 0;
 let timer = null;
 let dirty = false;
 
+/*
+ * 107회차(재현 — EISDIR): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전 catch 하나는 온전한 원본을 .corrupt 로 옮기고 빈 값을 캐시해 다음 쓰기가 원본 자리를 덮었다.
+ *   읽기 단계는 공용 읽기(30초 간격 재읽기): 원본을 두고 · 캐시하지 않고 · 그동안 쓰지 않는다. parse 실패(손상)는 예전과 같다.
+ *   그동안의 변화는 기록되지 않는다(쓰기는 buf 가 없어 건너뛴다).
+ */
+const _reader = makeJsonFileReader(() => FILE(), { parse: (t) => t, preserve: false, tag: 'ipam-changes' });
+let _readErr = '';
+/** 107회차: 변화 기록을 못 읽은 상태(읽기 오류 코드) 또는 ''. */
+export function changeLogReadError() { load(); return _readErr; }
 function load() {
   if (buf) return buf;
   const file = FILE();
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') { _readErr = String(rr.error?.code || 'read-error').slice(0, 32); return []; }
+  _readErr = '';
   buf = [];
-  if (!fs.existsSync(file)) return buf;
+  if (rr.kind !== 'ok') return buf;
   try {
-    const a = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const a = JSON.parse(rr.value);
     if (!Array.isArray(a)) throw new Error('배열이 아닌 JSON 값');
     buf = a.filter((e) => e && typeof e === 'object' && CHANGE_TYPES.includes(e.type)).slice(-CHANGE_LOG_MAX);
   } catch (e) {
@@ -124,5 +136,5 @@ export function listChanges({ type = '', ip = '', agent = '', limit = 500 } = {}
   return { entries: rows.slice(0, n).map((e) => ({ ...e })), matched: rows.length, total: all.length, counts, max: CHANGE_LOG_MAX, maxAgeDays: CHANGE_LOG_MAX_AGE_MS / 86_400_000, truncated: rows.length > n };
 }
 
-export function _resetChangeLogForTest() { writeNow(); buf = null; seq = 0; dirty = false; }
+export function _resetChangeLogForTest() { writeNow(); buf = null; seq = 0; dirty = false; _reader.reset(); _readErr = ''; }
 export function _flushChangeLogForTest() { writeNow(); }

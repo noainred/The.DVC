@@ -19,6 +19,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 107회차: 읽기 오류 ≠ 손상(공용 읽기 — 30초 간격 재읽기)
 import { capStr } from '../util/capStr.js';
 
 export const ATTACH_LIMITS = Object.freeze({ fileBytes: 8 * 1024 * 1024, perOwner: 20, name: 120, maxTotalMBDefault: 2048, maxTotalMBMax: 102_400 });
@@ -44,14 +45,32 @@ function err(status, msg, extra) { const e = new Error(msg); e.status = status; 
 /* ───── 설정 ───── */
 let settingsCache = null;
 let settingsError = null;
+/*
+ * 107회차(재현 — EISDIR): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전 catch 하나는 온전한 원본을 .corrupt 로 옮기고 빈 값 · 기본값을 캐시해
+ *   다음 저장이 원본 자리를 덮었다. 읽기 단계는 공용 읽기: 원본을 두고 · 캐시하지 않고(30초 간격 재읽기) · 저장을 거절한다(503 settingsUnreadable). parse 실패는 예전과 같다.
+ */
+const _setReader = makeJsonFileReader(() => attachSettingsFile(), { parse: (t) => t, preserve: false, tag: 'attach-settings' });
+let _setReadErr = '';
+/** 107회차: 읽기 오류 중의 저장 거절 본문(503) 또는 null. */
+export function attachSettingsWriteRefusal() {
+  loadAttachSettings();
+  return _setReadErr ? { ok: false, status: 503, code: 'settingsUnreadable', readError: true, reason: `첨부 설정 파일(${path.basename(attachSettingsFile())})을 읽지 못해 저장하지 않았습니다 — 읽기 오류(${_setReadErr})이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` } : null;
+}
 export function loadAttachSettings() {
   if (settingsCache) return settingsCache;
   const f = attachSettingsFile();
+  const rr = _setReader.read();
+  if (rr.kind === 'read-error') {   // 107회차: 캐시하지 않는다 — 저장은 거절한다
+    _setReadErr = String(rr.error?.code || 'read-error').slice(0, 32);
+    settingsError = `읽기 오류(${_setReadErr}) — 원본은 그대로 두었습니다(30초마다 다시 읽습니다)`;
+    return { maxTotalMB: ATTACH_LIMITS.maxTotalMBDefault };
+  }
+  _setReadErr = '';
   settingsError = null;
   let maxTotalMB = ATTACH_LIMITS.maxTotalMBDefault;
   try {
-    if (fs.existsSync(f)) {
-      const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+    if (rr.kind === 'ok') {
+      const j = JSON.parse(rr.value);
       const n = Number(j?.maxTotalMB);
       if (Number.isInteger(n) && n >= 1 && n <= ATTACH_LIMITS.maxTotalMBMax) maxTotalMB = n;
       else throw new Error('maxTotalMB 가 1~102400 정수가 아닙니다');
@@ -68,6 +87,7 @@ export const attachSettingsError = () => { loadAttachSettings(); return settings
 export function saveAttachSettings(body) {
   const n = Number(body?.maxTotalMB);
   if (!Number.isInteger(n) || n < 1 || n > ATTACH_LIMITS.maxTotalMBMax) throw err(400, `maxTotalMB: 1~${ATTACH_LIMITS.maxTotalMBMax} (MB) 정수여야 합니다`);
+  { const no = attachSettingsWriteRefusal(); if (no) throw err(503, no.reason, { code: no.code, readError: true }); }   // 107회차
   atomicWriteFileSync(attachSettingsFile(), JSON.stringify({ maxTotalMB: n }), { mode: 0o600 });
   settingsCache = { maxTotalMB: n }; settingsError = null;
   return settingsCache;
@@ -75,13 +95,23 @@ export function saveAttachSettings(body) {
 
 /* ───── 목록 ───── */
 let cache = null; // { items }
+const _reader = makeJsonFileReader(() => attachIndexFile(), { parse: (t) => t, preserve: false, tag: 'attachments' });
+let _readErr = '';
+/** 107회차: 읽기 오류 중의 저장 거절 본문(503) 또는 null. */
+export function attachIndexWriteRefusal() {
+  load();
+  return _readErr ? { ok: false, status: 503, code: 'settingsUnreadable', readError: true, reason: `첨부 목록 파일(${path.basename(attachIndexFile())})을 읽지 못해 저장하지 않았습니다 — 읽기 오류(${_readErr})이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).` } : null;
+}
 function load() {
   if (cache) return cache;
   const f = attachIndexFile();
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') { _readErr = String(rr.error?.code || 'read-error').slice(0, 32); return { items: [] }; }   // 107회차: 캐시하지 않는다 — 쓰기는 거절한다
+  _readErr = '';
   let items = [];
   try {
-    if (fs.existsSync(f)) {
-      const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+    if (rr.kind === 'ok') {
+      const j = JSON.parse(rr.value);
       if (!j || !Array.isArray(j.items)) throw new Error('items 배열이 없습니다');
       items = j.items.filter((x) => x && typeof x === 'object' && ID_RE.test(x.id) && KINDS.includes(x.kind) && OWNER_RE[x.kind].test(x.owner)
         && typeof x.name === 'string' && Object.hasOwn(EXT, x.ext) && Number.isInteger(x.size) && x.size >= 0);
@@ -94,8 +124,10 @@ function load() {
   cache = { items };
   return cache;
 }
-function save() { atomicWriteFileSync(attachIndexFile(), JSON.stringify({ v: 1, items: cache.items }), { mode: 0o600 }); }
-export function _resetAttachCache() { cache = null; settingsCache = null; settingsError = null; }
+function save() {
+  { const no = attachIndexWriteRefusal(); if (no) throw err(503, no.reason, { code: no.code, readError: true }); }   // 107회차: 읽기 오류 중에는 빈 목록 위에 쓰지 않는다
+  atomicWriteFileSync(attachIndexFile(), JSON.stringify({ v: 1, items: cache.items }), { mode: 0o600 }); }
+export function _resetAttachCache() { cache = null; settingsCache = null; settingsError = null; _reader.reset(); _readErr = ''; _setReader.reset(); _setReadErr = ''; }
 
 /** 사용자가 준 파일 이름 → 표시 이름(제어 문자 · 경로 구분자 제거 · 120자) + 확장자(소문자). 받지 않는 확장자면 400. */
 export function cleanName(raw) {
@@ -141,6 +173,7 @@ export function addAttachment(kind, owner, rawName, buf, user, { now = Date.now(
   if (!Buffer.isBuffer(buf) || !buf.length) throw err(400, '빈 파일입니다');
   if (buf.length > ATTACH_LIMITS.fileBytes) throw err(413, `파일은 ${ATTACH_LIMITS.fileBytes / 1024 / 1024}MB 까지입니다`, { code: 'too-big' });
   const c = load();
+  { const no = attachIndexWriteRefusal(); if (no) throw err(503, no.reason, { code: no.code, readError: true }); }   // 107회차: 본체를 쓰기 전에 거절
   if (c.items.filter((x) => x.kind === kind && x.owner === owner).length >= ATTACH_LIMITS.perOwner) throw err(409, `첨부는 ${kind === 'wiki' ? '문서' : '이슈'}마다 ${ATTACH_LIMITS.perOwner}개까지입니다 — 필요 없는 첨부를 지우고 다시 하세요`, { code: 'too-many' });
   const maxBytes = loadAttachSettings().maxTotalMB * 1024 * 1024;
   const used = totalBytes();
@@ -166,6 +199,7 @@ export function addAttachment(kind, owner, rawName, buf, user, { now = Date.now(
 /** 지우기 — 항목과 본체. 권한은 호출부(올린 사람 또는 전체 범위 관리자 + 그 주인의 쓰기 범위). */
 export function removeAttachment(id) {
   const c = load();
+  { const no = attachIndexWriteRefusal(); if (no) throw err(503, no.reason, { code: no.code, readError: true }); }   // 107회차: '없는 첨부' 404 로 답하지 않는다
   const i = c.items.findIndex((x) => x.id === id);
   if (i < 0) throw err(404, '없는 첨부입니다');
   const [x] = c.items.splice(i, 1);

@@ -19,7 +19,7 @@ import { renderRightsizeHtml } from '../../tools/rightsizeHtml.js';
 import { zipManyAsync } from '../../util/zip.js'; // v2.742(LEFT-05·DB-05): 내보내기 zip 은 비동기판(결과 바이트는 zipMany 와 같다)
 import { withJob, withJobSync } from '../../perf/monitor.js'; // v2.498: 루프 정체가 관측되면 '그때 이 작업이 돌았다' 를 남긴다
 import { poweredOffSinceFor } from '../../tools/powerOff.js'; // v2.483: 전원 꺼진 VM 의 꺼진 시각
-import { loadPowerOffSettings, savePowerOffSettings, LIMITS as POWEROFF_LIMITS } from '../../tools/powerOffSettings.js'; // v2.484
+import { loadPowerOffSettings, savePowerOffSettings, powerOffWriteRefusal, LIMITS as POWEROFF_LIMITS } from '../../tools/powerOffSettings.js'; // v2.484
 import { powerOffPollerStatus, runPowerOffCheckNow } from '../../tools/powerOffPoller.js';
 import { diskBreakdown, analyzeDiskTrend, diskTrendPolicyFromEnv } from '../../tools/diskTrend.js';
 import { getMetricsDb } from '../../metrics/db.js';
@@ -670,6 +670,7 @@ api.get('/tools/waste/off-check', requirePerm('tools'), (req, res) => {
 api.put('/tools/waste/off-check/settings', requireRole('admin'), (req, res) => {
   // v2.607 AUTHZ2607-05: 이 설정은 전부 전 법인 공용(사용 여부·주기) — 범위 계정의 값은 적용하지 않고 밝힌다.
   const allowed = writeMergeScope(req);   // 전체 점검 7회차: 쓰기 범위가 제한된 계정도 '범위 계정'
+  { const no = powerOffWriteRefusal(); if (no) return res.status(503).json(no); }   // 107회차: 설정 파일 읽기 오류 중에는 저장하지 않는다(사유를 화면까지)
   const kg = keepScopedFields(req.body || {}, loadPowerOffSettings(), allowed, []);
   const next = allowed ? loadPowerOffSettings() : savePowerOffSettings(kg.patch);
   if (!allowed) logAudit({ user: req.user?.username, action: '전원 꺼짐 점검 설정 변경', detail: `enabled=${next.enabled} interval=${next.intervalHours}h`, ip: req.ip || '' });

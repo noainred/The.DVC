@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 107회차: 읽기 오류 ≠ 손상(공용 읽기 — 30초 간격 재읽기)
 import { numOrNull } from '../util/numOrNull.js';
 
 const FILE = () => path.join(config.configDir, 'ping-settings.json');
@@ -46,6 +47,7 @@ export function envDefaults() {
 
 let _cache = null; let _tok = '';
 let _loadError = null;
+const _reader = makeJsonFileReader(() => FILE(), { parse: (t) => t, preserve: false, tag: 'ping-settings' });   // 107회차
 const _listeners = new Set();
 const fileTok = () => { try { const st = fs.statSync(FILE()); return `${st.mtimeMs}:${st.size}`; } catch { return ''; } };
 
@@ -55,8 +57,17 @@ function loadSaved() {
   if (_cache && tok === _tok) return _cache;
   _tok = tok;
   if (!tok) { _cache = {}; _loadError = null; return _cache; }
+  // 107회차(재현 — EISDIR): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전에는 원본을 .corrupt 로 옮겨 재시작 뒤 '파일 없음'(env 기본값 · 표지 없음)이 됐다.
+  //   이제 원본을 두고 · 마지막으로 읽은 값으로 돌고(없으면 env 기본값) · 표지(loadError.readError — 저장 거절은 예전과 같다) · 30초 간격으로 다시 읽는다.
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') {
+    _loadError = { at: _loadError?.readError ? _loadError.at : Date.now(), reason: `읽기 오류(${String(rr.error?.code || 'read-error').slice(0, 32)}) — 원본은 그대로 두었습니다(30초마다 다시 읽습니다)`, readError: true };
+    _tok = '';   // 다음 호출이 다시 판정한다(디스크 읽기는 30초 간격 — reader)
+    return _cache || {};
+  }
+  if (rr.kind === 'missing') { _cache = {}; _loadError = null; return _cache; }
   try {
-    const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    const raw = JSON.parse(rr.value);
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('객체가 아닙니다');
     const out = {};
     for (const k of KEYS) {
@@ -107,6 +118,7 @@ function notify(s) { for (const fn of _listeners) { try { fn(s); } catch (e) { c
  * 항목이 숫자(정수 ms)가 아니거나 범위 밖이면 저장하지 않고 { ok:false, field, reason }.
  */
 export function savePingSettings(patch = {}, { actor = '' } = {}) {
+  loadSaved();   // 107회차: 읽기 오류가 풀렸는지 먼저 다시 본다
   if (_loadError) return { ok: false, field: null, reason: `설정 파일을 읽지 못한 상태라 저장하지 않습니다(원본은 보존했습니다) — ${_loadError.reason}` };
   const cur = loadSaved();
   const next = patch?.reset === true ? {} : { ...Object.fromEntries(KEYS.filter((k) => cur[k] != null).map((k) => [k, cur[k]])) };
@@ -151,4 +163,4 @@ export function pingLoadOf(s, targetCount) {
 }
 
 /** 테스트용 — 캐시·리스너를 비운다. */
-export function _resetPingSettingsForTest() { _cache = null; _tok = ''; _loadError = null; _listeners.clear(); }
+export function _resetPingSettingsForTest() { _cache = null; _tok = ''; _loadError = null; _reader.reset(); _listeners.clear(); }

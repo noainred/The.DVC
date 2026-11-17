@@ -12,10 +12,10 @@
  *  · 설정 파일(`storage-usage-mail.json`)을 못 읽으면 저장을 거절하고(409) 정기 발송도 하지 않는다 — 손상본 위에 기본값을 덮어
  *    받는 사람 목록이 조용히 사라지지 않게(손상본은 `.corrupt.<시각>` 로 보존).
  */
-import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { makeJsonFileReader } from '../util/jsonFileRead.js';   // 107회차: 읽기 오류 ≠ 손상(공용 읽기 — 30초 간격 재읽기)
 import { registerStateFile } from '../util/stateFiles.js';
 import { sendPortalMail } from '../mail/service.js';
 import { load as loadMailCfg } from '../mail/settings.js';
@@ -43,10 +43,24 @@ const MISSED_TEXT = {
 /* ── 설정 ───────────────────────────────────────────────────────────── */
 let _cfg = null;
 let _loadErr = null;
+/*
+ * 107회차(재현 — EISDIR): 읽기 오류(EACCES · EIO · EISDIR)는 손상이 아니다 — 예전 catch 하나는 온전한 원본을 .corrupt 로 옮기고 빈 값을 캐시해 다음 쓰기가 원본 자리를 덮었다.
+ *   읽기 단계는 공용 읽기(30초 간격 재읽기): 원본을 두고 · 캐시하지 않고 · 그동안 쓰지 않는다. parse 실패(손상)는 예전과 같다.
+ *   설정 · 처리 기록 둘 다 — 처리 기록을 못 읽은 동안에는 정기 발송도 멈춘다(마지막 회차를 몰라 같은 메일을 틱마다 다시 보내게 된다).
+ */
+const _reader = makeJsonFileReader(() => FILE(), { parse: (t) => t, preserve: false, tag: 'storage-usage-mail' });
+const _stReader = makeJsonFileReader(() => STATE_FILE(), { parse: (t) => t, preserve: false, tag: 'storage-usage-mail' });
+let _stReadErr = '';
 export function loadUsageMailSettings() {
   if (_cfg) return _cfg;
+  const rr = _reader.read();
+  if (rr.kind === 'read-error') {   // 캐시하지 않는다 — 저장 · 정기 발송은 예전처럼 멈춘다(_loadErr)
+    if (!_loadErr?.readError) _loadErr = { at: Date.now(), reason: `읽기 오류(${String(rr.error?.code || 'read-error').slice(0, 32)}) — 원본은 그대로 두었습니다(30초마다 다시 읽습니다)`, readError: true };
+    return mailOf(null);
+  }
+  if (rr.kind === 'missing') { _loadErr = null; _cfg = mailOf(null); return _cfg; }
   try {
-    const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
+    const raw = JSON.parse(rr.value);
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류');
     _cfg = mailOf(raw); _loadErr = null;
   } catch (e) {
@@ -59,12 +73,15 @@ export function loadUsageMailSettings() {
   }
   return _cfg;
 }
-export const usageMailLoadError = () => { loadUsageMailSettings(); return _loadErr; };
+export const usageMailLoadError = () => {
+  loadUsageMailSettings(); state();
+  return _loadErr || (_stReadErr ? { at: Date.now(), reason: `처리 기록 파일 읽기 오류(${_stReadErr}) — 원본은 그대로 두었습니다(30초마다 다시 읽습니다)`, readError: true } : null);
+};
 
 /** 저장(관리자). @returns {{ok:true, mail:object}|{ok:false, status:number, error:string, field?:string}} */
 export function saveUsageMailSettings(input, now = Date.now()) {
   loadUsageMailSettings();
-  if (_loadErr) return { ok: false, status: 409, error: '설정 파일을 읽지 못해 저장하지 않았습니다 — 손상본(storage-usage-mail.json.corrupt.*)을 확인하세요.' };
+  if (_loadErr) return { ok: false, status: 409, error: _loadErr.readError ? '설정 파일을 읽지 못해 저장하지 않았습니다 — 읽기 오류이고 원본은 그대로 있습니다. 파일 권한 · 소유자 · 디스크를 확인하세요(30초마다 다시 읽고, 읽히면 저장이 다시 열립니다).' : '설정 파일을 읽지 못해 저장하지 않았습니다 — 손상본(storage-usage-mail.json.corrupt.*)을 확인하세요.' };
   const r = normalizeMail(input, _cfg, now);
   if (r.error) return { ok: false, status: 400, error: r.error, field: r.field };
   atomicWriteFileSync(FILE(), JSON.stringify(r.mail, null, 2), { mode: 0o600 });
@@ -76,8 +93,12 @@ export function saveUsageMailSettings(input, now = Date.now()) {
 let _state = null;
 function state() {
   if (_state) return _state;
+  const rr = _stReader.read();
+  if (rr.kind === 'read-error') { _stReadErr = String(rr.error?.code || 'read-error').slice(0, 32); return { lastSlot: null, lastSentAt: null, history: [] }; }   // 107회차: 캐시하지 않는다 — saveState 가 쓰지 않고 정기 발송이 멈춘다
+  _stReadErr = '';
   try {
-    const raw = JSON.parse(fs.readFileSync(STATE_FILE(), 'utf8'));
+    if (rr.kind === 'missing') throw Object.assign(new Error('없음'), { code: 'ENOENT' });
+    const raw = JSON.parse(rr.value);
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류');
     const num = (v) => (Number.isFinite(Number(v)) && v !== null && v !== '' ? Number(v) : null);
     _state = { lastSlot: num(raw.lastSlot), lastSentAt: num(raw.lastSentAt),
@@ -89,7 +110,9 @@ function state() {
   return _state;
 }
 function saveState() {
-  try { atomicWriteFileSync(STATE_FILE(), JSON.stringify(state()), { mode: 0o600 }); }
+  const st = state();
+  if (_stReadErr) return;   // 107회차: 못 읽은 처리 기록 위에 쓰지 않는다
+  try { atomicWriteFileSync(STATE_FILE(), JSON.stringify(st), { mode: 0o600 }); }
   catch (e) { console.warn(`[storage-usage-mail] 상태 파일을 저장하지 못했습니다(메모리로 계속 — 재시작하면 같은 회차를 한 번 더 볼 수 있습니다): ${e.message}`); }
 }
 function record(entry) {
@@ -260,5 +283,5 @@ export function startStorageUsageMail() {
   _timer.unref?.();
 }
 
-export function _resetForTest() { _cfg = null; _loadErr = null; _state = null; _chain = Promise.resolve(); _busy = false; _lastTick = null; _lastError = null; if (_timer) { clearInterval(_timer); _timer = null; } }
+export function _resetForTest() { _cfg = null; _loadErr = null; _state = null; _reader.reset(); _stReader.reset(); _stReadErr = ''; _chain = Promise.resolve(); _busy = false; _lastTick = null; _lastError = null; if (_timer) { clearInterval(_timer); _timer = null; } }
 export const _bootAtForTest = () => BOOT_AT;
