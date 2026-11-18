@@ -14,7 +14,7 @@ body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR
 button{font:inherit}
 sc-for,sc-if{display:contents}
 .mono{font-family:"JetBrains Mono",monospace}
-.page{min-height:2000px;padding:22px 24px 28px;display:flex;flex-direction:column;gap:14px;box-sizing:border-box}
+.page{min-height:2400px;padding:22px 24px 28px;display:flex;flex-direction:column;gap:14px;box-sizing:border-box}
 .head{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px}
 .head h1{margin:0;font-size:20px;font-weight:800}
 .head .snap{margin-left:auto;font-size:12px;color:#8b9bb4;font-family:"JetBrains Mono",monospace;white-space:nowrap}
@@ -125,6 +125,55 @@ sc-for,sc-if{display:contents}
 .tv .bar .track{flex:1 1 auto}
 .tv .bar b{font-family:"JetBrains Mono",monospace;font-size:12px;width:38px;text-align:right}
 .tv .crit i{background:#ef4444}
+.gp{display:grid;grid-template-columns:minmax(0, 310px) minmax(0, 1fr) minmax(0, 1fr);gap:20px}
+.gp .sum{display:flex;flex-direction:column;gap:10px;min-width:0}
+.gp .hero{display:flex;align-items:flex-end;gap:10px}
+.gp .hero b{font-family:"JetBrains Mono",monospace;font-size:46px;font-weight:800;line-height:.95;color:#fcd34d}
+.gp .hero span{font-size:12.5px;color:#c3cfe2;line-height:1.45}
+.gp .st{display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:8px}
+.gp .st div{background:#0f1626;border:1px solid #243049;border-radius:10px;padding:8px 10px;display:flex;flex-direction:column;gap:3px;min-width:0}
+.gp .st b{font-family:"JetBrains Mono",monospace;font-size:18px;font-weight:800;line-height:1.1}
+.gp .st span{font-size:11.5px;color:#8b9bb4;line-height:1.35}
+.gp .st .c b{color:#fca5a5}
+.gp .st .s b{color:#fdba74}
+.bands span{min-width:26px}
+.lnk{display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:0 14px;border-radius:8px;background:#3b82f6;color:#fff;font-size:13px;font-weight:700;align-self:flex-start}
+.lnk2{font-size:12px;color:#93c5fd}
+.ovh{display:flex;align-items:flex-end;gap:10px}
+.ovh b{font-family:"JetBrains Mono",monospace;font-size:34px;font-weight:800;line-height:1;color:#fcd34d;white-space:nowrap}
+.ovh span{font-size:12.5px;color:#c3cfe2;line-height:1.45}
+.kpis.k4{grid-template-columns:repeat(4, minmax(0, 1fr))}
+.row.o{grid-template-columns:minmax(0, 1fr) minmax(0, 1.2fr)}
+.oc{display:grid;grid-template-columns:minmax(0, 124px) minmax(0, 1fr) 214px;gap:10px;align-items:center;min-height:32px;font-size:12.5px;border-bottom:1px solid #1f2a40}
+.oc .nm{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.oc .tx{font-size:11.5px;text-align:right;white-space:nowrap;color:#c3cfe2}
+.oc .tx b{font-family:"JetBrains Mono",monospace;color:#fcd34d;font-size:12.5px}
+.dw{display:block;min-width:0}
+.duo{display:flex;gap:2px;height:12px;min-width:8px}
+.duo i{display:block;height:100%;border-radius:3px;min-width:2px}
+.duo .u{background:#4b5873}
+.duo .d{background:#f59e0b}
+.pv{display:grid;grid-template-columns:minmax(0, 1fr) minmax(0, 250px) 112px;gap:0 12px;align-items:center;padding:8px 0;border-bottom:1px solid #1f2a40}
+.pv > span{display:flex;flex-direction:column;gap:4px;min-width:0}
+.pv .nm{font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pv .sb,.pv .fr{font-size:11.5px;color:#8b9bb4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pv .fr{color:#c3cfe2}
+.pv .bigc{align-items:flex-end}
+.pv .bigc b{font-family:"JetBrains Mono",monospace;font-size:15px;font-weight:800;color:#fcd34d;white-space:nowrap}
+.pv .bigc small{font-size:11px;color:#8b9bb4;white-space:nowrap}
+.gp .lst{display:flex;flex-direction:column;min-width:0}
+.gp .lh{display:flex;align-items:baseline;gap:8px;padding-bottom:6px;border-bottom:1px solid #243049}
+.gp .lh b{font-size:13px;font-weight:800}
+.gp .lh span{font-size:12px;color:#8b9bb4}
+.pr{display:grid;grid-template-columns:minmax(0, 1fr) 176px 66px;gap:0 12px;align-items:center;padding:8px 0;border-bottom:1px solid #1f2a40}
+.pr > span{display:flex;flex-direction:column;gap:4px;min-width:0}
+.pr .nm{font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pr .sb{font-size:11.5px;color:#8b9bb4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pr .fr{font-size:11.5px;color:#c3cfe2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pr .big{font-family:"JetBrains Mono",monospace;font-size:17px;font-weight:800;text-align:right;white-space:nowrap}
+.gt{position:relative;display:block;height:10px;border-radius:5px;background:rgba(148,163,184,.14)}
+.gt i{display:block;height:100%;border-radius:5px}
+.gt::after{content:"";position:absolute;left:80%;top:-3px;bottom:-3px;width:2px;background:#e6edf6;opacity:.55}
 .note{font-size:12px;line-height:1.6;color:#aebbd0}
 .empty{font-size:13px;color:#aebbd0;padding:18px 16px;border:1px solid #243049;border-radius:12px;background:#141b2d;line-height:1.6}
 </style>
@@ -215,6 +264,46 @@ sc-for,sc-if{display:contents}
       </section>
     </div>
 
+    <section class="panel" aria-label="디스크가 차 가는 VM">
+      <div class="ph"><h2>디스크가 차 가는 VM</h2><span class="hint">VM 안의 드라이브 · 마운트 사용률 — 특수 기능 ‘게스트 파티션 사용률’ 의 요약입니다</span><span class="rt">{{ gpRule }}</span></div>
+      <div class="gp">
+        <div class="sum">
+          <div class="hero"><b>{{ gpHero }}</b><span>{{ gpHeroText }}</span></div>
+          <div class="st">
+            <sc-for list="{{ gpStats }}" as="x" hint-placeholder-count="3"><div class="{{ x.cls }}" title="{{ x.tip }}"><b>{{ x.big }}</b><span>{{ x.text }}</span></div></sc-for>
+          </div>
+          <div class="stack tall bands"><sc-for list="{{ gpBands }}" as="b" hint-placeholder-count="4"><span style="flex: {{ b.n }} 1 0; background: {{ b.bg }}; color: {{ b.ink }}" title="{{ b.tip }}">{{ b.count }}</span></sc-for></div>
+          <div class="lgd"><sc-for list="{{ gpBands }}" as="b" hint-placeholder-count="4"><span><i style="background: {{ b.bg }}"></i>{{ b.label }} <b>{{ b.count }}</b></span></sc-for></div>
+          <div class="note">{{ gpOs }}</div>
+          <span class="lnk">게스트 파티션 사용률에서 모두 보기 →</span>
+          <span class="lnk2">줄일 수 있는 여유는 ‘게스트 디스크 회수’ 에서 →</span>
+        </div>
+        <div class="lst">
+          <div class="lh"><b>가장 찬 파티션</b><span>사용률이 높은 순 5개 · 흰 세로줄 = 기준 80%</span></div>
+          <sc-for list="{{ gpTop }}" as="p" hint-placeholder-count="5">
+            <div class="pr" title="{{ p.tip }}">
+              <span><span class="nm">{{ p.name }}</span><span class="sb">{{ p.sub }}</span></span>
+              <span><span class="gt"><i style="width: {{ p.w }}; background: {{ p.bg }}"></i></span><span class="fr">{{ p.free }}</span></span>
+              <span class="big">{{ p.pct }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div class="lst">
+          <div class="lh"><b>곧 가득 찰 파티션</b><span>지난 7일의 증가 속도로 본 예상 · 빠른 순 5개</span></div>
+          <sc-for list="{{ gpSoon }}" as="p" hint-placeholder-count="5">
+            <div class="pr" title="{{ p.tip }}">
+              <span><span class="nm">{{ p.name }}</span><span class="sb">{{ p.sub }}</span></span>
+              <span><span class="gt"><i style="width: {{ p.w }}; background: {{ p.bg }}"></i></span><span class="fr">{{ p.grow }}</span></span>
+              <span class="big">{{ p.eta }}</span>
+            </div>
+          </sc-for>
+          <sc-if value="{{ gpSoonEmpty }}" hint-placeholder-val="{{ false }}">
+            <div class="note">이 범위에는 30일 안에 가득 찰 것으로 보이는 파티션이 없습니다.</div>
+          </sc-if>
+        </div>
+      </div>
+    </section>
+
     <div class="row c">
       <section class="panel" aria-label="OS 종류">
         <div class="ph"><h2>OS 종류</h2><span class="rt">{{ osTotal }}</span></div>
@@ -301,14 +390,57 @@ sc-for,sc-if{display:contents}
     </section>
   </sc-if>
 
+  <sc-if value="{{ showOver }}" hint-placeholder-val="{{ false }}">
+    <div class="row c">
+      <sc-for list="{{ ovHeros }}" as="h" hint-placeholder-count="3">
+        <section class="panel" title="{{ h.tip }}">
+          <div class="ph"><h2>{{ h.title }}</h2><span class="rt">{{ h.right }}</span></div>
+          <div class="ovh"><b>{{ h.big }}</b><span>{{ h.bigText }}</span></div>
+          <div class="stack tall"><span style="flex: {{ h.aFlex }} 1 0; background: {{ h.aBg }}; color: {{ h.aInk }}">{{ h.aText }}</span><span style="flex: {{ h.bFlex }} 1 0; background: {{ h.bBg }}; color: {{ h.bInk }}">{{ h.bText }}</span></div>
+          <div class="lgd"><span><i style="background: {{ h.aBg }}"></i>{{ h.aLegend }}</span><span><i style="background: {{ h.bBg }}"></i>{{ h.bLegend }}</span></div>
+          <div class="note">{{ h.note }}</div>
+        </section>
+      </sc-for>
+    </div>
+
+    <div class="kpis k4">
+      <sc-for list="{{ ovStats }}" as="k" hint-placeholder-count="4">
+        <div class="kpi" title="{{ k.tip }}"><span class="l">{{ k.label }}</span><span class="v">{{ k.value }}</span><span class="s">{{ k.sub }}</span></div>
+      </sc-for>
+    </div>
+
+    <div class="row o">
+      <section class="panel" aria-label="법인별 과할당">
+        <div class="ph"><h2>법인별 — 준 것과 쓰는 것</h2><span class="hint">막대 길이 = 할당 · 회색 = 사용 · 주황 = 미사용 · 미사용이 큰 순</span></div>
+        <div class="ctl"><span>보는 자원</span><span class="seg" role="group" aria-label="보는 자원"><sc-for list="{{ ovKinds }}" as="z" hint-placeholder-count="2"><button type="button" class="{{ z.cls }}" aria-pressed="{{ z.on }}" onClick="{{ z.pick }}">{{ z.label }}</button></sc-for></span></div>
+        <sc-for list="{{ ovCorp }}" as="c" hint-placeholder-count="11">
+          <div class="oc" title="{{ c.tip }}"><span class="nm">{{ c.id }}</span><span class="dw"><span class="duo" style="width: {{ c.w }}"><i class="u" style="flex: {{ c.used }} 1 0"></i><i class="d" style="flex: {{ c.idle }} 1 0"></i></span></span><span class="tx"><b>{{ c.idleText }}</b> · {{ c.rest }}</span></div>
+        </sc-for>
+      </section>
+
+      <section class="panel" aria-label="줄일 수 있는 VM">
+        <div class="ph"><h2>{{ ovTopTitle }}</h2><span class="hint">미사용이 큰 순 5대 · 막대 길이 = 할당</span><span class="rt">{{ ovRule }}</span></div>
+        <sc-for list="{{ ovTop }}" as="v" hint-placeholder-count="5">
+          <div class="pv" title="{{ v.tip }}">
+            <span><span class="nm">{{ v.name }}</span><span class="sb">{{ v.sub }}</span></span>
+            <span><span class="dw"><span class="duo" style="width: {{ v.w }}"><i class="u" style="flex: {{ v.used }} 1 0"></i><i class="d" style="flex: {{ v.idle }} 1 0"></i></span></span><span class="fr">{{ v.text }}</span></span>
+            <span class="bigc"><b>{{ v.big }}</b><small>{{ v.save }}</small></span>
+          </div>
+        </sc-for>
+        <span class="lnk">Optimization 에서 모두 보기 →</span>
+        <div class="note">후보 전체 목록 · 전원 꺼짐 / 스냅샷 / Tools 미실행 목록 · 7일 사용률 추이 · 근거 리포트 · 엑셀(ZIP) 내보내기는 특수 기능 ‘Optimization’ 에 그대로 있습니다. 이 화면은 그 요약입니다.</div>
+      </section>
+    </div>
+  </sc-if>
+
   <sc-if value="{{ showOther }}" hint-placeholder-val="{{ false }}">
     <div class="empty"><b>{{ otherTitle }}</b> — {{ otherText }}</div>
   </sc-if>
 </main>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2000}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2400}}'>
 class Component extends DCLogic {
-  state = { sel: {}, q: '', fill: 'att', size: 'n', sub: 'insight' };
+  state = { sel: {}, q: '', fill: 'att', size: 'n', sub: 'insight', ovKind: 'mem' };
 
   // 목(mock, 가상) 서버 /api/vms 를 한 번 받아(2026-11-18 11:09:08 KST · VM 2,242) 법인별로 집계한 값 — 지어낸 수가 아니다.
   // os = [Win2022, Ubuntu22.04, RHEL9, CentOS Stream9, SLES15, Win2019, Debian12] · tv = [최신, 업그레이드 필요, 관리 안 함, 미설치] · hw = [19,17,15,13,10]
@@ -335,10 +467,72 @@ class Component extends DCLogic {
     return { 'vc-us-east': [24, 4], 'vc-us-west': [18, 4], 'vc-br-sao': [8, 2], 'vc-eu-central': [30, 5], 'vc-eu-west': [16, 3], 'vc-me-uae': [6, 2], 'vc-ap-northeast': [22, 4], 'vc-ap-southeast': [14, 2], 'vc-ap-south': [12, 2], 'vc-cn-east': [20, 4], 'vc-cn-north': [16, 3] };
   }
 
+  // 특수 기능 ‘게스트 파티션 사용률’(/api/tools/guest-partition) 응답을 같은 목 서버에서 한 번 받아(2026-11-18 11:23:00 KST) 법인별로 줄인 값.
+  // g = 게스트(템플릿 제외) · rep = Tools 가 파티션을 알려 준 VM · ov/op = 기준(80%) 이상인 VM/파티션 · cr = 95% 이상 파티션 · mx = 최고 사용률
+  // b = 초과 파티션의 구간 [80–85, 85–90, 90–95, 95↑] · os = [Windows, Linux] · soon = 30일 안에 가득 참 예상 파티션
+  // top = [VM, os(0 Win · 1 Linux), 경로, 할당 GB, 사용 GB, 남은 GB, 사용률 %, 7일 증가 GB, 가득 참 예상 일]
+  gp() {
+    return {
+      rows: [
+        {id:'vc-us-east',g:225,rep:171,ov:39,op:49,cr:0,mx:94.2,b:[17,15,17,0],os:[3,46],soon:2,top:[['lb-us-0170',1,'/var',12,11.3,0.7,94.2,0,null],['cache-us-0233',1,'/data',130,122.3,7.7,94.1,0,null],['mq-us-0189',1,'/data',10,9.4,0.6,94,0,null],['lb-us-0170',1,'/data',38,35.6,2.4,93.7,0,null],['lb-us-0145',1,'/var',75,70.1,4.9,93.5,0,null]]},
+        {id:'vc-us-west',g:135,rep:95,ov:8,op:9,cr:0,mx:92.1,b:[4,1,4,0],os:[1,8],soon:1,top:[['cache-us-0046',1,'/var',154,141.9,12.1,92.1,0,null],['app-us-0005',1,'/var',10,9.2,0.8,92,0,null],['web-us-0015',1,'/data',325,298.8,26.2,91.9,0,null],['backup-us-0132',1,'/data',10,9.1,0.9,91,0.8,7.9],['db-us-0107',1,'/var',154,132.8,21.2,86.2,0,null]]},
+        {id:'vc-br-sao',g:105,rep:75,ov:7,op:7,cr:0,mx:93.2,b:[2,3,2,0],os:[2,5],soon:0,top:[['lb-br-0082',1,'/data',38,35.4,2.6,93.2,0,null],['dns-br-0045',1,'/var',12,10.9,1.1,90.8,0,null],['db-br-0037',1,'/data',325,281.5,43.5,86.6,0,null],['monitor-br-0073',0,'D:\\',666,573.6,92.4,86.1,0,null],['mq-br-0091',1,'/data',130,110.6,19.4,85.1,0,null]]},
+        {id:'vc-eu-central',g:451,rep:342,ov:43,op:49,cr:0,mx:94.7,b:[21,12,16,0],os:[11,38],soon:4,top:[['db-eu-0381',1,'/var',30,28.4,1.6,94.7,0,null],['mq-eu-0244',1,'/var',30,28.4,1.6,94.7,0,null],['dns-eu-0342',1,'/data',665,629.1,35.9,94.6,9.9,25.4],['dns-eu-0034',1,'/data',665,628.2,36.8,94.5,0,null],['web-eu-0143',1,'/var',15,14,1,93.3,0,null]]},
+        {id:'vc-eu-west',g:240,rep:176,ov:22,op:28,cr:0,mx:92.9,b:[11,6,11,0],os:[4,24],soon:1,top:[['k8s-node-eu-0153',1,'/data',325,301.9,23.1,92.9,0,null],['k8s-node-eu-0045',1,'/data',325,301.3,23.7,92.7,4.7,35.3],['k8s-node-eu-0045',1,'/var',75,69.2,5.8,92.3,0,null],['cache-eu-0037',1,'/var',154,142.1,11.9,92.3,0,null],['backup-eu-0121',1,'/data',665,609.7,55.3,91.7,0,null]]},
+        {id:'vc-me-uae',g:56,rep:40,ov:7,op:7,cr:0,mx:90.2,b:[2,4,1,0],os:[1,6],soon:1,top:[['mq-me-0059',1,'/data',55,49.6,5.4,90.2,0,null],['mq-me-0037',1,'/data',55,49,6,89.1,0,null],['mq-me-0019',0,'D:\\',20,17.8,2.2,89,0,null],['k8s-node-me-0005',1,'/data',10,8.8,1.2,88,0,null],['web-me-0046',1,'/data',10,8.7,1.3,87,0.8,11.4]]},
+        {id:'vc-ap-northeast',g:207,rep:150,ov:20,op:23,cr:0,mx:94.8,b:[2,8,13,0],os:[4,19],soon:0,top:[['backup-ap-0081',1,'/var',75,71.1,3.9,94.8,0,null],['db-ap-0056',1,'/var',15,14.2,0.8,94.7,0,null],['lb-ap-0193',1,'/var',30,28.4,1.6,94.7,0,null],['monitor-ap-0126',0,'D:\\',20,18.7,1.3,93.5,0,null],['db-ap-0122',0,'D:\\',130,121.6,8.4,93.5,0,null]]},
+        {id:'vc-ap-southeast',g:118,rep:91,ov:16,op:20,cr:0,mx:94.7,b:[2,11,7,0],os:[4,16],soon:2,top:[['backup-ap-0021',1,'/var',15,14.2,0.8,94.7,0,null],['cache-ap-0098',1,'/data',325,306.3,18.7,94.2,4.8,27.3],['cache-ap-0029',0,'D:\\',20,18.8,1.2,94,0,null],['mq-ap-0014',1,'/var',10,9.1,0.9,91,0,null],['mq-ap-0076',1,'/var',75,68.1,6.9,90.8,0,null]]},
+        {id:'vc-ap-south',g:124,rep:97,ov:13,op:16,cr:2,mx:95,b:[6,7,1,2],os:[2,14],soon:1,top:[['mq-ap-0019',0,'D:\\',20,19,1,95,0,null],['k8s-node-ap-0104',1,'/data',38,36.1,1.9,95,1.2,11.1],['backup-ap-0114',1,'/data',665,606.2,58.8,91.2,9.2,44.7],['web-ap-0116',1,'/data',38,33.7,4.3,88.7,0,null],['k8s-node-ap-0104',1,'/var',12,10.6,1.4,88.3,0,null]]},
+        {id:'vc-cn-east',g:263,rep:191,ov:31,op:39,cr:0,mx:94.9,b:[16,14,9,0],os:[6,33],soon:1,top:[['app-cn-0164',0,'D:\\',130,123.4,6.6,94.9,0,null],['monitor-cn-0062',1,'/var',12,11.3,0.7,94.2,0,null],['k8s-node-cn-0229',1,'/var',154,145,9,94.2,0,null],['monitor-cn-0044',1,'/data',10,9.4,0.6,94,0,null],['web-cn-0149',1,'/data',55,51.6,3.4,93.8,1.6,14.9]]},
+        {id:'vc-cn-north',g:180,rep:145,ov:20,op:25,cr:0,mx:94.4,b:[6,6,13,0],os:[3,22],soon:1,top:[['mq-cn-0167',1,'/var',154,145.4,8.6,94.4,0,null],['lb-cn-0112',1,'/var',30,28.3,1.7,94.3,0,null],['mq-cn-0088',1,'/data',325,301.8,23.2,92.9,0,null],['backup-cn-0152',1,'/data',55,50.8,4.2,92.4,0,null],['db-cn-0192',1,'/data',665,614.1,50.9,92.3,9.5,37.5]]},
+      ],
+      // 30일 안에 가득 찰 것으로 예상되는 파티션 전부(14개 · 빠른 순) — [법인, VM, os, 경로, 할당, 사용, 남은, 사용률, 7일 증가, 예상 일]
+      soon: [
+        ['vc-us-west','backup-us-0132',1,'/data',10,9.1,0.9,91,0.8,7.9],
+        ['vc-ap-south','k8s-node-ap-0104',1,'/data',38,36.1,1.9,95,1.2,11.1],
+        ['vc-eu-central','cache-eu-0198',1,'/data',10,8.7,1.3,87,0.8,11.4],
+        ['vc-me-uae','web-me-0046',1,'/data',10,8.7,1.3,87,0.8,11.4],
+        ['vc-ap-southeast','mq-ap-0014',1,'/data',10,8.7,1.3,87,0.7,13],
+        ['vc-cn-east','web-cn-0149',1,'/data',55,51.6,3.4,93.8,1.6,14.9],
+        ['vc-us-east','lb-us-0138',1,'/data',10,8.5,1.5,85,0.6,17.5],
+        ['vc-us-east','mq-us-0167',1,'/data',38,35.2,2.8,92.6,1,19.6],
+        ['vc-eu-central','monitor-eu-0172',1,'/data',55,50.8,4.2,92.4,1.5,19.6],
+        ['vc-cn-north','mq-cn-0093',1,'/data',38,34.6,3.4,91.1,1.1,21.6],
+        ['vc-eu-west','k8s-node-eu-0104',1,'/data',55,50.2,4.8,91.3,1.5,22.4],
+        ['vc-eu-central','dns-eu-0342',1,'/data',665,629.1,35.9,94.6,9.9,25.4],
+        ['vc-ap-southeast','cache-ap-0098',1,'/data',325,306.3,18.7,94.2,4.8,27.3],
+        ['vc-eu-central','cache-eu-0288',1,'/data',10,8.3,1.7,83,0.4,29.7],
+      ],
+    };
+  }
+
+  // 특수 기능 ‘Optimization’(/api/tools/waste?vcenterId=…) 응답을 같은 목 서버에서 법인마다 한 번씩 받은 값(2026-11-18 11:26 KST).
+  // on = 구동 VM · c = CPU [할당, 사용, 미사용] GHz · cc = CPU 후보(사용률 20% 이하) · m = 메모리 [할당, 사용, 미사용] GB · mc = 메모리 후보(40% 이하)
+  // off = 전원 꺼짐 [대수, 디스크 GB] · sn = 스냅샷 [대수, GB] · th = Thin 여유 [대수, GB] · nt = Tools 미실행
+  // ct = CPU 상위 [VM, vCPU, 할당 GHz, 사용 GHz, 사용률 %, 절감 가능 %, os 번호] · mt = 메모리 상위 [VM, 할당 GB, 사용 GB, 미사용 GB, 사용률 %, 절감 가능 %, os 번호]
+  ov() {
+    return [
+      {id:'vc-us-east',on:189,c:[2534.2,1284.5,1249.7],cc:17,m:[4022,2400.5,1621.5],mc:41,off:[36,8616],sn:[37,1936.4],th:[120,23034],nt:10,ct:[['dns-us-0228',16,46.4,1.9,4,96,3],['mq-us-0189',16,38.4,3.5,9,91,2],['monitor-us-0139',16,35.2,6.7,19,81,3],['db-us-0080',8,23.2,0.9,4,96,5],['dns-us-0191',8,17.6,0.7,4,96,1]],mt:[['dns-us-0228',64,6.4,57.6,10,90,3],['cache-us-0006',64,9,55,14,86,0],['db-us-0061',64,16.6,47.4,26,74,5],['k8s-node-us-0226',64,19.8,44.2,31,69,4],['app-us-0100',64,21.8,42.2,34,66,0]]},
+      {id:'vc-us-west',on:111,c:[1400.3,729.9,670.4],cc:9,m:[2100,1289.2,810.8],mc:23,off:[24,7496],sn:[22,1911.3],th:[72,12875],nt:7,ct:[['app-us-0005',8,23.2,3.2,14,86,3],['k8s-node-us-0080',4,12.8,0.5,4,96,0],['cache-us-0006',4,10.4,0.3,3,97,0],['cache-us-0117',4,10.4,0.4,4,96,5],['k8s-node-us-0138',4,10.4,1.7,16,84,2]],mt:[['backup-us-0102',64,16,48,25,75,3],['db-us-0100',64,21.8,42.2,34,66,2],['db-us-0061',32,8.3,23.7,26,74,4],['mq-us-0020',32,8.6,23.4,27,73,2],['backup-us-0021',32,8.6,23.4,27,73,5]]},
+      {id:'vc-br-sao',on:92,c:[1388,685.2,702.8],cc:8,m:[1690,1012.6,677.4],mc:21,off:[13,4612],sn:[17,1100.4],th:[56,8835],nt:6,ct:[['mq-br-0097',16,38.4,4.6,12,88,4],['lb-br-0104',16,35.2,6,17,83,0],['app-br-0034',16,35.2,6.3,18,82,4],['lb-br-0028',4,11.6,1.9,16,84,1],['db-br-0074',4,8.8,0.9,10,90,6]],mt:[['db-br-0043',64,11.5,52.5,18,82,1],['k8s-node-br-0101',64,19.2,44.8,30,70,5],['cache-br-0063',64,20.5,43.5,32,68,0],['mq-br-0020',32,8.6,23.4,27,73,1],['lb-br-0100',32,10.9,21.1,34,66,4]]},
+      {id:'vc-eu-central',on:382,c:[5671.6,2913.2,2758.4],cc:43,m:[7478,4452.2,3025.8],mc:78,off:[69,23828],sn:[75,3732.7],th:[241,41870],nt:19,ct:[['db-eu-0074',16,51.2,5.1,10,90,4],['monitor-eu-0006',16,41.6,1.2,3,97,4],['monitor-eu-0281',16,38.4,3.8,10,90,1],['monitor-eu-0304',16,38.4,4.2,11,89,4],['db-eu-0276',16,41.6,7.5,18,82,3]],mt:[['app-eu-0117',64,7.7,56.3,12,88,2],['web-eu-0080',64,8.3,55.7,13,87,1],['lb-eu-0184',64,16.6,47.4,26,74,0],['cache-eu-0470',64,16.6,47.4,26,74,5],['app-eu-0021',64,17.3,46.7,27,73,0]]},
+      {id:'vc-eu-west',on:209,c:[3047.7,1569.4,1478.3],cc:23,m:[4062,2360,1702],mc:43,off:[31,13996],sn:[40,2568.3],th:[128,23927],nt:10,ct:[['backup-eu-0028',16,46.4,7.4,16,84,6],['k8s-node-eu-0235',16,46.4,7.4,16,84,6],['web-eu-0139',16,46.4,8.8,19,81,6],['db-eu-0189',16,38.4,3.5,9,91,4],['monitor-eu-0043',4,11.6,0.1,1,99,1]],mt:[['backup-eu-0191',64,9.6,54.4,15,85,4],['monitor-eu-0043',64,11.5,52.5,18,82,1],['lb-eu-0184',64,16.6,47.4,26,74,5],['monitor-eu-0225',64,17.3,46.7,27,73,1],['cache-eu-0183',64,17.9,46.1,28,72,3]]},
+      {id:'vc-me-uae',on:48,c:[707.4,371.7,335.7],cc:5,m:[1168,715,453],mc:8,off:[8,3528],sn:[9,549.4],th:[30,4111],nt:3,ct:[['k8s-node-me-0005',8,20.8,2.9,14,86,2],['mq-me-0051',2,6.4,0.9,14,86,5],['db-me-0028',2,5.8,0.9,16,84,0],['dns-me-0034',2,5.8,1,18,82,3],['lb-me-0043',2,4.8,0,1,99,4]],mt:[['mq-me-0059',64,22.4,41.6,35,65,4],['k8s-node-me-0023',64,23,41,36,64,2],['monitor-me-0017',64,25,39,39,61,4],['db-me-0024',64,25.6,38.4,40,60,3],['lb-me-0043',32,5.8,26.2,18,82,4]]},
+      {id:'vc-ap-northeast',on:173,c:[2499.7,1284.4,1215.3],cc:18,m:[3282,2029.1,1252.9],mc:31,off:[34,8952],sn:[34,1804.1],th:[111,19697],nt:10,ct:[['web-ap-0173',16,41.6,6.7,16,84,5],['monitor-ap-0080',16,35.2,1.4,4,96,0],['db-ap-0043',8,23.2,0.2,1,99,3],['cache-ap-0166',8,25.6,3.3,13,87,2],['web-ap-0034',8,25.6,4.6,18,82,6]],mt:[['app-ap-0117',64,7.7,56.3,12,88,6],['k8s-node-ap-0183',64,17.9,46.1,28,72,6],['backup-ap-0019',64,19.8,44.2,31,69,0],['mq-ap-0063',64,20.5,43.5,32,68,1],['cache-ap-0187',64,24.3,39.7,38,62,6]]},
+      {id:'vc-ap-southeast',on:104,c:[1328.7,679.5,649.2],cc:11,m:[1792,1077.8,714.2],mc:19,off:[14,7004],sn:[19,781.9],th:[63,11889],nt:5,ct:[['dns-ap-0074',16,51.2,5.1,10,90,4],['cache-ap-0034',16,35.2,6.3,18,82,5],['monitor-ap-0043',4,12.8,0.1,1,99,5],['db-ap-0117',4,9.6,0.4,4,96,6],['web-ap-0051',4,10.4,1.5,14,86,0]],mt:[['dns-ap-0020',64,17.3,46.7,27,73,0],['monitor-ap-0102',32,8,24,25,75,4],['dns-ap-0101',32,9.6,22.4,30,70,4],['mq-ap-0104',32,10.6,21.4,33,67,3],['db-ap-0059',32,11.2,20.8,35,65,2]]},
+      {id:'vc-ap-south',on:111,c:[1607,835.8,771.2],cc:8,m:[2016,1130.8,885.2],mc:22,off:[13,3360],sn:[20,1014.6],th:[66,8030],nt:5,ct:[['backup-ap-0006',16,38.4,1.2,3,97,3],['k8s-node-ap-0080',8,20.8,0.8,4,96,4],['lb-ap-0097',4,11.6,1.4,12,88,6],['k8s-node-ap-0005',4,11.6,1.6,14,86,6],['app-ap-0051',4,10.4,1.5,14,86,1]],mt:[['backup-ap-0006',64,9,55,14,86,3],['mq-ap-0061',64,16.6,47.4,26,74,5],['cache-ap-0100',64,21.8,42.2,34,66,5],['db-ap-0105',64,23.7,40.3,37,63,3],['web-ap-0058',64,25,39,39,61,2]]},
+      {id:'vc-cn-east',on:219,c:[3246.5,1650.4,1596.1],cc:20,m:[4090,2430.2,1659.8],mc:46,off:[44,18292],sn:[44,2809.5],th:[140,25507],nt:13,ct:[['web-cn-0212',16,46.4,6.5,14,86,4],['dns-cn-0043',8,25.6,0.3,1,99,3],['lb-cn-0166',8,25.6,3.3,13,87,1],['db-cn-0207',8,17.6,3,17,83,1],['app-cn-0228',4,12.8,0.5,4,96,3]],mt:[['dns-cn-0006',64,9,55,14,86,4],['monitor-cn-0183',64,17.9,46.1,28,72,0],['monitor-cn-0019',64,19.8,44.2,31,69,0],['mq-cn-0145',64,21.8,42.2,34,66,5],['lb-cn-0146',64,24.3,39.7,38,62,6]]},
+      {id:'vc-cn-north',on:162,c:[2044.8,1076.3,968.5],cc:14,m:[2718,1603.2,1114.8],mc:35,off:[18,7476],sn:[30,1934.4],th:[96,14935],nt:7,ct:[['cache-cn-0028',16,51.2,8.2,16,84,5],['lb-cn-0143',16,35.2,5.6,16,84,0],['web-cn-0117',8,23.2,0.9,4,96,0],['k8s-node-cn-0189',8,20.8,1.9,9,91,2],['k8s-node-cn-0097',8,17.6,2.1,12,88,5]],mt:[['db-cn-0022',64,20.5,43.5,32,68,2],['web-cn-0105',64,23.7,40.3,37,63,4],['cache-cn-0183',32,9,23,28,72,5],['app-cn-0144',32,9.3,22.7,29,71,4],['k8s-node-cn-0060',32,9.6,22.4,30,70,1]]},
+    ];
+  }
+
   renderVals() {
     const st = this.state;
     const rows = this.rows();
     const H = this.hosts();
+    const G = this.gp();
+    const oOf = {}; this.ov().forEach((o) => { oOf[o.id] = o; });
+    const gOf = {}; G.rows.forEach((g) => { gOf[g.id] = g; });
     const fmt = (v) => Number(v).toLocaleString('en-US');
     const pctN = (a, b) => (b > 0 ? (a / b) * 100 : 0);
     const pct = (a, b) => (b > 0 ? pctN(a, b).toFixed(1) + '%' : '—');
@@ -373,8 +567,8 @@ class Component extends DCLogic {
     const match = (r) => { const hay = (r.id + ' ' + r.city + ' ' + r.reg).toLowerCase(); return kws.every((k) => hay.includes(k)); };
     const chips = rows.filter((r) => match(r) || st.sel[r.id]).map((r) => ({ id: r.id, n: r.att, on: !!st.sel[r.id], cls: 'chip' + (st.sel[r.id] ? ' on' : ''), toggle: toggle(r.id) }));
 
-    const subs = [['insight', '분석'], ['list', '목록'], ['corp', '법인별'], ['attention', '조치 필요']].map(([k, label]) => ({
-      label, on: st.sub === k, cls: st.sub === k ? 'on' : '', isNew: k === 'insight', go: () => this.setState({ sub: k }),
+    const subs = [['insight', '분석'], ['list', '목록'], ['corp', '법인별'], ['attention', '조치 필요'], ['over', '과할당']].map(([k, label]) => ({
+      label, on: st.sub === k, cls: st.sub === k ? 'on' : '', isNew: k === 'insight' || k === 'over', go: () => this.setState({ sub: k }),
     }));
     const OTHER = {
       list: ['목록', '지금의 ‘현황’ 보기(분포 4패널 + VM 표)가 이 자리로 옵니다 — 본문은 바뀌지 않고, 고른 법인 범위만 따라옵니다.'],
@@ -397,6 +591,7 @@ class Component extends DCLogic {
       att: { label: '조치 필요 비율', val: (r) => pctN(r.att, r.n), steps: [10, 20, 30, 40], legend: ['10% 미만', '10–20%', '20–30%', '30–40%', '40% 이상'], short: '조치' },
       cpu: { label: '평균 CPU', val: (r) => r.cs / r.on, steps: [20, 40, 60, 80], legend: ['20% 미만', '20–40%', '40–60%', '60–80%', '80% 이상'], short: 'CPU' },
       mem: { label: '평균 메모리', val: (r) => r.ms / r.on, steps: [20, 40, 60, 80], legend: ['20% 미만', '20–40%', '40–60%', '60–80%', '80% 이상'], short: '메모리' },
+      disk: { label: '디스크 초과 VM 비율', val: (r) => pctN(gOf[r.id].ov, gOf[r.id].rep), steps: [5, 10, 15, 20], legend: ['5% 미만', '5–10%', '10–15%', '15–20%', '20% 이상'], short: '디스크' },
     };
     const SIZE = {
       n: { label: 'VM 수', val: (r) => r.n, text: (v) => fmt(v) + ' VM' },
@@ -505,18 +700,105 @@ class Component extends DCLogic {
       .sort((a, b) => (b.t[1] - a.t[1]) || (b.t[2] - a.t[2]) || (a.t[0] < b.t[0] ? -1 : 1)).slice(0, 5)
       .map(({ vc, t }) => ({ name: t[0], vc, os: OS[t[5]], spec: t[3] + ' vCPU · ' + t[4] + ' GB', cpu: t[1] + '%', cpuW: t[1] + '%', cpuCls: t[1] >= 90 ? 'crit' : '', mem: t[2] + '%', memW: t[2] + '%', memCls: t[2] >= 90 ? 'crit' : '' }));
 
+    // 디스크가 차 가는 VM — ‘게스트 파티션 사용률’ 도구의 요약(범위 = 켠 법인). 판정(기준 80% · 위험 95% · 30일 예상)은 그 도구 그대로.
+    const GS = (f) => scope.reduce((a, r) => a + f(gOf[r.id]), 0);
+    const gOv = GS((g) => g.ov); const gOp = GS((g) => g.op); const gCr = GS((g) => g.cr); const gSoonN = GS((g) => g.soon);
+    const gRep = GS((g) => g.rep); const gGuests = GS((g) => g.g);
+    const gb = scope.reduce((a, r) => a.map((x, i) => x + gOf[r.id].b[i]), [0, 0, 0, 0]);
+    const gWin = GS((g) => g.os[0]); const gLnx = GS((g) => g.os[1]);
+    const BAND = [
+      { label: '80–85%', bg: '#a16207', ink: '#ffffff' }, { label: '85–90%', bg: '#f59e0b', ink: '#0b0b0b' },
+      { label: '90–95%', bg: '#ec835a', ink: '#0b0b0b' }, { label: '95% 이상', bg: '#ef4444', ink: '#ffffff' },
+    ];
+    const bandOf = (p) => (p >= 95 ? 3 : p >= 90 ? 2 : p >= 85 ? 1 : 0);
+    const OSN = ['Windows', 'Linux'];
+    const gpBands = BAND.map((b, i) => Object.assign({}, b, { n: gb[i], count: fmt(gb[i]), tip: '사용률 ' + b.label + ' · 파티션 ' + fmt(gb[i]) + '개' })).filter((b) => b.n > 0);
+    const gpStats = [
+      { cls: 'c', big: fmt(gCr) + '개', text: '위험 — 사용률 95% 이상', tip: '사용률이 95% 이상인 파티션' },
+      { cls: 's', big: fmt(gSoonN) + '개', text: '30일 안에 가득 참 예상', tip: '지난 7일의 증가 속도가 이어지면 30일 안에 가득 차는 파티션' },
+      { cls: '', big: fmt(gGuests - gRep) + '대', text: '판정 밖 — 파티션 값을 받지 못한 VM', tip: 'VMware Tools 가 파티션을 알려 주지 않은 VM(꺼진 VM 포함) — 0% 가 아니라 모르는 것입니다' },
+    ];
+    const gpTop = scope.reduce((a, r) => a.concat(gOf[r.id].top.map((t) => ({ vc: r.id, t }))), [])
+      .sort((a, b) => (b.t[6] - a.t[6]) || (a.t[5] - b.t[5]) || (a.t[0] < b.t[0] ? -1 : 1)).slice(0, 5)
+      .map(({ vc, t }) => ({
+        name: t[0], sub: vc + ' · ' + OSN[t[1]] + ' · ' + t[2], w: t[6] + '%', bg: BAND[bandOf(t[6])].bg, pct: t[6] + '%',
+        free: '남은 ' + t[5] + ' GB / ' + t[3] + ' GB', tip: t[0] + ' ' + t[2] + ' — 할당 ' + t[3] + ' GB · 사용 ' + t[4] + ' GB · 남은 ' + t[5] + ' GB · 7일 증가 ' + t[7] + ' GB',
+      }));
+    const inScope = {}; scope.forEach((r) => { inScope[r.id] = true; });
+    const gpSoon = G.soon.filter((s) => inScope[s[0]]).slice(0, 5).map((s) => ({
+      name: s[1], sub: s[0] + ' · ' + OSN[s[2]] + ' · ' + s[3], w: s[7] + '%', bg: BAND[bandOf(s[7])].bg, eta: Math.round(s[9]) + '일',
+      grow: '7일 +' + s[8] + ' GB · 남은 ' + s[6] + ' GB', tip: s[1] + ' ' + s[3] + ' — 사용률 ' + s[7] + '% · 할당 ' + s[4] + ' GB · 남은 ' + s[6] + ' GB · 7일 증가 ' + s[8] + ' GB · 약 ' + s[9] + '일 뒤 가득 참 예상',
+    }));
+
+    // 과할당 — ‘Optimization’ 도구의 요약(범위 = 켠 법인). 판정(CPU 20% 이하 · 메모리 40% 이하)과 계산은 그 도구 그대로.
+    const f1 = (v) => Number(v).toLocaleString('en-US', { maximumFractionDigits: 1 });
+    const gbT = (gb) => (gb >= 1024 ? f1(gb / 1024) + ' TB' : f1(gb) + ' GB');
+    const OS2 = (f) => scope.reduce((a, r) => a + f(oOf[r.id]), 0);
+    const oOn = OS2((o) => o.on);
+    const cA = OS2((o) => o.c[0]); const cU = OS2((o) => o.c[1]); const cI = OS2((o) => o.c[2]); const cCand = OS2((o) => o.cc);
+    const mA = OS2((o) => o.m[0]); const mU = OS2((o) => o.m[1]); const mI = OS2((o) => o.m[2]); const mCand = OS2((o) => o.mc);
+    const offN = OS2((o) => o.off[0]); const offGB = OS2((o) => o.off[1]); const snN = OS2((o) => o.sn[0]); const snGB = OS2((o) => o.sn[1]);
+    const thN = OS2((o) => o.th[0]); const thGB = OS2((o) => o.th[1]); const ntN = OS2((o) => o.nt);
+    const USED = '#4b5873'; const IDLE = '#f59e0b'; const THIN = '#9085e9';
+    const ovHeros = [
+      { title: 'CPU — 준 것과 쓰는 것', right: '할당 ' + f1(cA) + ' GHz', big: f1(cI) + ' GHz', bigText: '미사용 — 할당의 ' + pct(cI, cA),
+        aFlex: cU, aBg: USED, aInk: '#ffffff', aText: '사용 ' + pct(cU, cA), bFlex: cI, bBg: IDLE, bInk: '#0b0b0b', bText: '미사용 ' + pct(cI, cA),
+        aLegend: '사용 ' + f1(cU) + ' GHz', bLegend: '미사용 ' + f1(cI) + ' GHz',
+        note: '줄일 후보 ' + fmt(cCand) + '대 — 구동 VM ' + fmt(oOn) + '대 중 CPU 사용률이 20% 이하인 VM.', tip: '구동 VM 의 CPU 할당 · 사용 합' },
+      { title: '메모리 — 준 것과 쓰는 것', right: '할당 ' + gbT(mA), big: gbT(mI), bigText: '미사용 — 할당의 ' + pct(mI, mA),
+        aFlex: mU, aBg: USED, aInk: '#ffffff', aText: '사용 ' + pct(mU, mA), bFlex: mI, bBg: IDLE, bInk: '#0b0b0b', bText: '미사용 ' + pct(mI, mA),
+        aLegend: '사용 ' + gbT(mU), bLegend: '미사용 ' + gbT(mI),
+        note: '줄일 후보 ' + fmt(mCand) + '대 — 게스트가 실제로 쓰는 메모리가 할당의 40% 이하인 VM.', tip: '구동 VM 의 메모리 할당 · 게스트 사용 합' },
+      { title: '회수 가능 스토리지(추정)', right: '두 가지의 합', big: gbT(offGB + thGB), bigText: '꺼진 VM 점유 + Thin 여유',
+        aFlex: offGB, aBg: IDLE, aInk: '#0b0b0b', aText: '꺼진 VM ' + pct(offGB, offGB + thGB), bFlex: thGB, bBg: THIN, bInk: '#0b0b0b', bText: 'Thin 여유 ' + pct(thGB, offGB + thGB),
+        aLegend: '꺼진 VM ' + fmt(offN) + '대 점유 ' + gbT(offGB), bLegend: 'Thin 여유 ' + gbT(thGB) + ' · ' + fmt(thN) + '대',
+        note: '추정값입니다 — VM 을 지우거나 디스크를 줄이기 전에는 돌아오지 않습니다.', tip: '전원이 꺼진 VM 이 잡은 디스크와 Thin 여유의 합' },
+    ];
+    const ovStats = [
+      { label: '전원 꺼짐 VM', value: fmt(offN) + '대', sub: '디스크 ' + gbT(offGB) + ' 점유', tip: '전원이 꺼진 VM' },
+      { label: '스냅샷 보유 VM', value: fmt(snN) + '대', sub: '스냅샷 크기 ' + gbT(snGB), tip: '스냅샷이 있는 VM' },
+      { label: 'Tools 미실행(구동 중)', value: fmt(ntN) + '대', sub: 'VMware Tools 가 실행 중이 아닌 구동 VM', tip: '전원이 켜져 있는데 VMware Tools 상태가 실행 중이 아닌 VM' },
+      { label: 'Thin 여유', value: gbT(thGB), sub: 'Thin 디스크 VM ' + fmt(thN) + '대의 아직 쓰지 않은 공간', tip: 'Thin(씬) 디스크 VM 의 아직 쓰지 않은 공간(uncommitted) 합' },
+    ];
+    const isMem = st.ovKind !== 'cpu';
+    const ovKinds = [['mem', '메모리'], ['cpu', 'CPU']].map(([k, label]) => ({ label, on: (k === 'mem') === isMem, cls: (k === 'mem') === isMem ? 'on' : '', pick: () => this.setState({ ovKind: k }) }));
+    const unitT = (v) => (isMem ? gbT(v) : f1(v) + ' GHz');
+    const tri = (o) => (isMem ? o.m : o.c);
+    const maxAlloc = Math.max.apply(null, scope.map((r) => tri(oOf[r.id])[0]));
+    const ovCorp = scope.map((r) => oOf[r.id]).sort((a, b) => tri(b)[2] - tri(a)[2]).map((o) => {
+      const t = tri(o); const cand = isMem ? o.mc : o.cc;
+      return { id: o.id, w: pctN(t[0], maxAlloc).toFixed(1) + '%', used: t[1], idle: t[2], idleText: '미사용 ' + unitT(t[2]), rest: pct(t[2], t[0]) + ' · 후보 ' + fmt(cand) + '대',
+        tip: o.id + ' — 할당 ' + unitT(t[0]) + ' · 사용 ' + unitT(t[1]) + ' · 미사용 ' + unitT(t[2]) + ' · 후보 ' + fmt(cand) + '대(구동 ' + fmt(o.on) + '대 중)' };
+    });
+    // 상위 VM — 법인마다 상위 5를 받아 합쳐 다시 고른다(어떤 범위에서도 상위 5는 정확하다). [이름, 할당, 사용, 미사용, 사용률, 절감 가능, os, vCPU]
+    const ovAll = scope.reduce((a, r) => a.concat((isMem ? oOf[r.id].mt.map((t) => [t[0], t[1], t[2], t[3], t[4], t[5], t[6], null]) : oOf[r.id].ct.map((t) => [t[0], t[2], t[3], Math.round((t[2] - t[3]) * 10) / 10, t[4], t[5], t[6], t[1]])).map((t) => ({ vc: r.id, t }))), [])
+      .sort((a, b) => (b.t[3] - a.t[3]) || (a.t[4] - b.t[4]) || (a.t[0] < b.t[0] ? -1 : 1)).slice(0, 5);
+    const maxVm = Math.max.apply(null, ovAll.map((x) => x.t[1]).concat([1]));
+    const ovTop = ovAll.map(({ vc, t }) => ({
+      name: t[0], sub: vc + ' · ' + OS[t[6]] + (t[7] ? ' · ' + t[7] + ' vCPU' : ''), w: pctN(t[1], maxVm).toFixed(1) + '%', used: t[2] || 0.01, idle: t[3],
+      text: '할당 ' + unitT(t[1]) + ' · 사용 ' + unitT(t[2]) + ' · 사용률 ' + t[4] + '%', big: unitT(t[3]), save: '절감 가능 ' + t[5] + '%',
+      tip: t[0] + ' — 할당 ' + unitT(t[1]) + ' · 사용 ' + unitT(t[2]) + ' · 미사용 ' + unitT(t[3]),
+    }));
+
     const isInsight = st.sub === 'insight';
+    const isOver = st.sub === 'over';
     const other = OTHER[st.sub] || ['', ''];
     return {
       tabs, q: st.q, onFind: (e) => this.setState({ q: e.target.value }), chips,
       hasSel, selText: picked.length + '곳 선택', clearSel: () => this.setState({ sel: {} }),
-      subs, showInsight: isInsight, showOther: !isInsight, otherTitle: other[0], otherText: other[1],
+      subs, showInsight: isInsight, showOver: isOver, showOther: !isInsight && !isOver, otherTitle: other[0], otherText: other[1],
+      ovHeros, ovStats, ovKinds, ovCorp, ovTop, ovTopTitle: isMem ? '메모리를 줄일 수 있는 VM' : 'CPU 를 줄일 수 있는 VM',
+      ovRule: isMem ? '후보 = 사용률 40% 이하 · 받은 시각 오전 11:26' : '후보 = 사용률 20% 이하 · 받은 시각 오전 11:26',
       kpis, fills, sizes, mapCols, tiles, scale, scaleTitle: '색 = ' + F.label,
       regions, osTotal: 'OS 7종 · ' + fmt(n) + '대', fam, osRows, power, conn, misc, tools, hw,
       cpuHist: histOf(chv, 'CPU'), memHist: histOf(mhv, '메모리'),
       cpuAvg: '평균 ' + cpuAvgN.toFixed(0) + '% · 90%↑ ' + fmt(chv[9]) + '대', memAvg: '평균 ' + memAvgN.toFixed(0) + '% · 90%↑ ' + fmt(mhv[9]) + '대',
       usageNote: '과부하(조치 필요) ' + fmt(ov) + '대 = CPU 또는 메모리가 90% 이상인 구동 VM. 칸을 누르면 ‘목록’ 이 그 구간으로 열리게 합니다(지금 분포 패널과 같은 동작).',
       vcpuRows, memRows, reclaim, top, topNote: hasSel ? '법인 ' + picked.length + '곳 범위' : '전체 법인',
+      gpRule: '기준 80% · 위험 95% · 받은 시각 오전 11:23',
+      gpHero: fmt(gOv), gpHeroText: '대 — 파티션 ' + fmt(gOp) + '개가 기준 80% 이상 · 값을 받은 VM ' + fmt(gRep) + '대 중 ' + pct(gOv, gRep),
+      gpStats, gpBands, gpOs: '초과 파티션의 OS — Linux ' + fmt(gLnx) + '개 · Windows ' + fmt(gWin) + '개. 구간 막대는 초과 파티션 ' + fmt(gOp) + '개를 사용률 구간으로 나눈 것입니다.',
+      gpTop, gpSoon, gpSoonEmpty: gpSoon.length === 0,
     };
   }
 }
