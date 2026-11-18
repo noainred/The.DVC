@@ -1,7 +1,7 @@
 // v2.811 — ESXi 호스트 '법인별' 보기 글자·색 판정(hostCorpText.js).
 import { describe, it, expect } from 'vitest';
 import { parseHostsView } from './hostChecksText.js';
-import { stepTone, RATIO_STEPS, ratioText, pctText, gbText, fmtN, rttCell, corpMark, corpSortKey, chipList, corpView, clusterTags, bucketSegs, corpKpis, CORP_CHIPS } from './hostCorpText.js';
+import { stepTone, RATIO_STEPS, ratioText, pctText, gbText, fmtN, rttCell, corpMark, corpSortKey, chipList, corpView, clusterTags, bucketSegs, corpKpis, CORP_CHIPS, vcoreCell, ramCell } from './hostCorpText.js';
 
 describe('hostCorpText', () => {
   it('보기 기억 — 모르는 값은 호스트별', () => {
@@ -84,5 +84,57 @@ describe('hostCorpText', () => {
     expect(k.hosts.sub).toContain('미수집 1곳 제외');
     expect(k.kw.value).toBe('3.5 kW');
     expect(k.hot.tone).toBe('crit');
+  });
+  // v3.19.1 — 서버가 'VM 을 전부 못 읽음' 을 null 로 준다(vcenter/vmSums.js vmAllocOf). 0.0 : 1 · 0% 가 아니라 '—' 이고 단위를 붙이지 않는다.
+  it("vCore 칸 — 전부 못 읽으면 '—'(0.0 : 1 아님) · 일부만 못 읽으면 ≥ 와 못 읽은 VM 수 · 용량을 못 읽으면 그 사유", () => {
+    const all = vcoreCell({ vms: 12, vcpu: null, vcpuUnknown: 12, vcpuPerCore: null, cores: 64, capUnknown: 0 });
+    expect(all.text).toBe('—');
+    expect(all.text).not.toMatch(/:|0/);
+    expect(all.title).toContain('VM 12대의 vCPU 를 하나도 읽지 못했습니다');
+    const part = vcoreCell({ vms: 12, vcpu: 40, vcpuUnknown: 3, vcpuPerCore: 0.6, cores: 64, capUnknown: 0 });
+    expect(part.text).toBe('≥0.6 : 1');
+    expect(part.partial).toBe(true);
+    expect(part.title).toContain('vCPU 를 못 읽은 VM 3대 제외(최소값)');
+    const ok = vcoreCell({ vms: 12, vcpu: 160, vcpuUnknown: 0, vcpuPerCore: 2.5, cores: 64, capUnknown: 0 });
+    expect(ok).toEqual({ text: '2.5 : 1', partial: false, title: '할당 vCore 160 / 물리 코어 64 · 템플릿 제외 · 눈금 2.5 · 4' });
+    expect(vcoreCell({ vcpu: 10, vcpuUnknown: 0, vcpuPerCore: null, cores: 8, capUnknown: 2 }).title).toBe('용량을 못 읽은 호스트 2대 — 비율을 내지 않습니다');
+    // VM 이 없는 법인은 0.0 : 1 이 맞다(모름이 아니다)
+    expect(vcoreCell({ vms: 0, vcpu: 0, vcpuUnknown: 0, vcpuPerCore: 0, cores: 8, capUnknown: 0 }).text).toBe('0.0 : 1');
+    // 호스트를 모르는 법인(전부 null) — 사유를 지어내지 않고 '—'
+    expect(vcoreCell({ hosts: null, vcpu: null, vcpuUnknown: null, vcpuPerCore: null, cores: null }).text).toBe('—');
+    expect(vcoreCell(null).text).toBe('—');
+  });
+
+  it("RAM 할당 칸 — 전부 못 읽으면 '—'(0% 아님 · GB 를 붙이지 않는다) · 일부만 못 읽으면 ≥", () => {
+    const all = ramCell({ vms: 5, vmMemGB: null, vmMemUnknown: 5, ramPct: null, memTotalGB: 512 });
+    expect(all.text).toBe('—');
+    expect(all.title).toContain('VM 5대의 메모리를 하나도 읽지 못했습니다');
+    expect(all.title).not.toMatch(/— GB|null|NaN/);
+    const part = ramCell({ vms: 5, vmMemGB: 100, vmMemUnknown: 2, ramPct: 20, memTotalGB: 512 });
+    expect(part.text).toBe('≥20%');
+    expect(part.title).toContain('메모리를 못 읽은 VM 2대 제외(최소값)');
+    expect(ramCell({ vms: 5, vmMemGB: 256, vmMemUnknown: 0, ramPct: 50, memTotalGB: 512 })).toEqual({ text: '50%', partial: false, title: 'VM 메모리 할당 256 GB / 물리 512 GB · 눈금 100% · 150%' });
+    expect(ramCell({ hosts: null, vmMemGB: null, vmMemUnknown: null, ramPct: null, memTotalGB: null })).toEqual({ text: '—', partial: false, title: 'VM 메모리 할당 — / 물리 — · 눈금 100% · 150%' });
+  });
+
+  it('요약 vCore : 물리 — vCPU 를 전부 못 읽은 법인은 분자 · 분모에서 빼고 밝힌다 · 일부만 못 읽은 법인이 있으면 ≥', () => {
+    const data = {
+      access: { cluster: true }, totals: { corps: 3, corpsUnknown: 0 },
+      corps: [
+        { hosts: 6, capUnknown: 0, cores: 100, vcpu: 300, vcpuUnknown: 0, powerKw: 1, vms: 40 },
+        { hosts: 4, capUnknown: 0, cores: 900, vcpu: null, vcpuUnknown: 7, powerKw: 1, vms: 7 },   // 전부 못 읽음 — 코어 900 을 분모에 넣으면 0.3 : 1 로 낮아진다
+      ],
+    };
+    const k = Object.fromEntries(corpKpis(data).map((x) => [x.key, x]));
+    expect(k.ratio.value).toBe('3.0 : 1');
+    expect(k.ratio.sub).toBe('물리 코어 100 · 할당 vCore 300 · vCPU 못 읽은 법인 1곳 제외');
+    data.corps[0].vcpuUnknown = 2;
+    const k2 = Object.fromEntries(corpKpis(data).map((x) => [x.key, x]));
+    expect(k2.ratio.value).toBe('≥3.0 : 1');
+    expect(k2.ratio.sub).toContain('vCPU 못 읽은 VM 2대 제외(최소값)');
+    // 비율을 낼 법인이 하나도 없으면 '—' 이고 0 을 적지 않는다
+    const k3 = Object.fromEntries(corpKpis({ totals: {}, corps: [data.corps[1]] }).map((x) => [x.key, x]));
+    expect(k3.ratio.value).toBe('—');
+    expect(k3.ratio.sub).not.toMatch(/물리 코어 0|할당 vCore 0/);
   });
 });

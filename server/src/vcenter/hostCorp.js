@@ -8,7 +8,8 @@
  *   · 클러스터 묶음: clustercfg/analyze.js clusterIndex(ref 우선 · 같은 이름 다른 데이터센터를 섞지 않는다)
  *   · HA·DRS·EVC·판정 코드: clustercfg/analyze.js analyzeClusters(클러스터 HA·DRS 점검 화면과 같은 결과)
  *   · N+1: clustercfg/n1.js n1Groups('인사이트' 화면과 같은 판정 — 가장 큰 호스트 1대 장애 · CPU·메모리 ≤ 90% · 점검 호스트는 받는 쪽에서 뺀다)
- *   · VM 할당 합: vcenter/hostChecks.js vmSumsOf(템플릿 제외 · 못 읽은 VM 은 unknown 으로 따로)
+ *   · VM 할당 합: vcenter/vmSums.js vmSumsOf · vmAllocOf(템플릿 제외 · 못 읽은 VM 은 unknown 으로 따로 · 전부 못 읽었으면 null —
+ *     /hosts 요약 · 호스트 엑셀과 같은 함수. v3.19.0 까지는 전부 못 읽어도 vCPU 0 · 비율 0 으로 냈다)
  * 시안에서 정한 판정(사용자 결정 2026-10-28 '시안 정의 그대로'):
  *   · 여유 메모리 = Σ(정격 메모리 × 90% − 사용 중) — 사용률을 읽은 호스트만, 뺀 호스트 수를 headroomExcluded 로 밝힌다.
  *   · 법인 위험(crit) = 연결 실패 · 끊김/무응답 1대 이상 · CPU 90% 초과 5대 이상 · HA 꺼진 클러스터
@@ -20,7 +21,8 @@
 import { numOrNull } from '../util/numOrNull.js';
 import { analyzeClusters, clusterIndex, clusterLabelOf, keyOf, refKeyOf } from '../clustercfg/analyze.js';
 import { n1Groups } from '../clustercfg/n1.js';
-import { vmSumsOf, vmsByHostOf } from './hostChecks.js';
+import { vmsByHostOf } from './hostChecks.js';
+import { vmSumsOf, vmAllocOf } from './vmSums.js';
 import { REGIONS } from '../util/regions.js';
 
 export const CPU_ATTENTION_PCT = 90;   // 서버 high-cpu 경보 · 웹 hostTriage.CPU_ATTENTION_PCT 와 같다
@@ -90,11 +92,25 @@ function hostStats(list, readable, capKnown) {
 /** 할당 비율 — 분모(용량)를 일부라도 못 읽었으면 null(분자만 남은 틀린 비율 금지 — toolsCapacity 와 같은 규칙). */
 /** 46회차 V3: 호스트를 모르는 법인의 비율 칸(모름). */
 const UNKNOWN_RATIOS = Object.freeze({ vcpuPerCore: null, ramPct: null });
-function ratios(st, vm) {
+function ratios(st, alloc) {
   const ok = st.capUnknown === 0 && st.cores != null;
   return {
-    vcpuPerCore: ok && st.cores > 0 ? Math.round((vm.vcpu / st.cores) * 10) / 10 : null,
-    ramPct: ok && st.memTotalGB > 0 ? Math.round((vm.memMB / 1024 / st.memTotalGB) * 100) : null,
+    // 분자(VM 할당 합)를 하나도 못 읽었으면 비율도 null — 0 : 1 · 0% 라는 거짓 금지(v3.19.1).
+    vcpuPerCore: ok && alloc.vcpu != null && st.cores > 0 ? Math.round((alloc.vcpu / st.cores) * 10) / 10 : null,
+    ramPct: ok && alloc.memMB != null && st.memTotalGB > 0 ? Math.round((alloc.memMB / 1024 / st.memTotalGB) * 100) : null,
+  };
+}
+
+/**
+ * 법인 · 클러스터 한 줄의 VM 할당 칸 — 판정은 vcenter/vmSums.js 하나.
+ * vcpu · vmMemGB 는 전부 못 읽었으면 null, 일부만 못 읽었으면 읽은 값의 합(최소값)이고 못 읽은 VM 수를 vcpuUnknown · vmMemUnknown 으로 싣는다.
+ */
+function vmCols(st, vm) {
+  const alloc = vmAllocOf(vm);
+  return {
+    vms: vm.n, vmsOn: vm.on, vcpu: alloc.vcpu, vcpuUnknown: vm.vcpuUnknown,
+    vmMemGB: alloc.memMB == null ? null : Math.round(alloc.memMB / 1024), vmMemUnknown: vm.memUnknown,
+    ...ratios(st, alloc),
   };
 }
 
@@ -164,7 +180,7 @@ export function hostCorpOf({ vcenters = [], hosts = [], vms = [], readable, capK
       key: k, vcenterId: first.vcenterId, name: first.cluster,
       label: clusterLabelOf({ name: first.cluster, sameName: meta.sameName, vcDatacenter: meta.vcDatacenter, clusterRef: meta.clusterRef }),
       ...st, hostIds: list.map((h) => h.id),
-      vms: vm.n, vmsOn: vm.on, vcpu: vm.vcpu, vcpuUnknown: vm.vcpuUnknown, vmMemGB: Math.round(vm.memMB / 1024), ...ratios(st, vm),
+      ...vmCols(st, vm),
     };
     if (cfgOk) {
       const c = cfgByKey.get(k) || null;
@@ -197,12 +213,12 @@ export function hostCorpOf({ vcenters = [], hosts = [], vms = [], readable, capK
       ...st,
       // 호스트를 모르는 법인(첫 수집 중·비활성·연결 실패이며 이월 값 없음)은 개수를 null 로 — '0대' 라는 거짓 금지.
       ...(unknownHosts ? { hosts: null, connected: null, maint: null, down: null, hot: null } : {}),
-      vms: vm.n, vmsOn: vm.on, vcpu: vm.vcpu, vcpuUnknown: vm.vcpuUnknown, vmMemGB: Math.round(vm.memMB / 1024), ...ratios(st, vm),
+      ...vmCols(st, vm),
       powerKw: Math.round(sum(list, (h) => (numOrNull(h.powerWatts) > 0 ? h.powerWatts : 0)) / 100) / 10,
       clusterCount: cls.length, standalone, rtt: rttOf(vc.id) || null,
       // 46회차 V3(재현): 호스트를 모르는 법인은 VM · vCPU · 코어 · 메모리 · 전력 · 여유도 0 이 아니라 모름(화면 '—') — 개수만 null 이고
       //   나머지가 0 으로 남아 'VM 0 · 물리 코어 0' 으로 보였다. 웹 요약(corpKpis)은 이미 그런 법인을 더하지 않는다.
-      ...(unknownHosts ? { vms: null, vmsOn: null, vcpu: null, vcpuUnknown: null, vmMemGB: null, cores: null, memTotalGB: null, powerKw: null, headroomGB: null, ...UNKNOWN_RATIOS } : {}),
+      ...(unknownHosts ? { vms: null, vmsOn: null, vcpu: null, vcpuUnknown: null, vmMemGB: null, vmMemUnknown: null, cores: null, memTotalGB: null, powerKw: null, headroomGB: null, ...UNKNOWN_RATIOS } : {}),
       clusters: cls.sort((a, b) => SEV_RANK[b.sev] - SEV_RANK[a.sev] || (b.cpuMax ?? -1) - (a.cpuMax ?? -1) || String(a.name).localeCompare(String(b.name))),
     };
     if (cfgOk) {

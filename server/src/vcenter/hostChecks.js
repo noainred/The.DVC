@@ -13,6 +13,7 @@
  */
 import { hwSummary } from './hostExport.js';
 import { recentBackupYn } from '../veeam/backupStatus.js';
+import { vmSumsOf, vmAllocOf } from './vmSums.js';
 
 export const HW_STATES = Object.freeze(['ok', 'warn', 'fault', 'unknown', 'none', 'pending', 'error']);
 export const VEEAM_YN_DAYS = 1;   // 사용자 결정(2026-10-27, veeam/backupStatus.js YN_DEFAULT_DAYS 와 같은 뜻 — '어제부터 지금까지')
@@ -42,19 +43,9 @@ export function veeamCountsOf(views, vms, now) {
   return out;
 }
 
-/** 이 호스트 VM 의 vCPU·메모리(MB) 합 — 못 읽은 VM 은 unknown 으로 따로. 템플릿은 세지 않는다(hostExport.js vmSums 와 같은 규칙). */
-export function vmSumsOf(vms) {
-  const out = { n: 0, on: 0, templates: 0, vcpu: 0, memMB: 0, vcpuUnknown: 0, memUnknown: 0 };
-  for (const v of vms || []) {
-    if (!v) continue;
-    if (v.template === true) { out.templates += 1; continue; }
-    out.n += 1;
-    if (v.powerState === 'POWERED_ON') out.on += 1;
-    const c = Number(v.cpuCount); if (Number.isFinite(c) && v.cpuCount != null && v.cpuCount !== '') out.vcpu += c; else out.vcpuUnknown += 1;
-    const m = Number(v.memMB); if (Number.isFinite(m) && v.memMB != null && v.memMB !== '') out.memMB += m; else out.memUnknown += 1;
-  }
-  return out;
-}
+// 이 호스트 VM 의 vCPU · 메모리(MB) 합 — 판정 코어는 vcenter/vmSums.js 하나(v3.19.1 — /hosts 요약 · 법인별 · 호스트 엑셀과 같이 쓴다).
+//   여기서는 다시 내보내기만 한다(예전 import 경로 유지). 호스트 표의 'VM' 묶음(c.vm)은 원래 합 + unknown 수를 그대로 싣는다.
+export { vmSumsOf, vmAllocOf };
 
 /**
  * 호스트별 점검 한 줄.
