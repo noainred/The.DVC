@@ -3,7 +3,8 @@
  *
  *  · 브라우저마다 · 화면마다 따로(키는 화면이 준다 — 예 'vmInsight.map'). 읽기 · 쓰기는 try/catch — 못 읽으면 기본값(사생활 창 · 막힌 저장소).
  *  · 저장된 값은 믿지 않는다: 높이는 300 ~ 1,200px · 20px 단위로 다시 자르고 모르는 크기 이름은 기본값으로.
- *  · 미리 정한 크기: 보통 360 · 크게 520(처음) · 아주 크게 760 · 자동 = 가장 긴 묶음의 칸 수 × 64px(360 ~ 1,200).
+ *  · 미리 정한 크기: 보통 360 · 크게 520(처음) · 아주 크게 760 · 자동 = 칸 수(maxTiles) × 64px(360 ~ 1,200).
+ *    칸 수는 호출부가 준다 — 넓은 화면은 여러 열로 놓은 뒤 가장 긴 작은 열의 칸 수(tilePack.maxTilesPacked · v3.23.0 · dbg3231), 폭을 모르면 가장 긴 묶음(지역)의 칸 수.
  */
 import { numOrNull } from '../../numOrNull.js';
 
@@ -22,7 +23,7 @@ export function clampMapH(v) {
   if (n == null) return null;
   return Math.max(MAP_H_MIN, Math.min(MAP_H_MAX, Math.round(n / MAP_H_STEP) * MAP_H_STEP));
 }
-/** 자동 높이 — 가장 긴 묶음의 칸 수 × 64 를 360 ~ 1,200 로. 칸이 없으면 360. */
+/** 자동 높이 — 칸 수(가장 긴 열 · 호출부가 정함) × 64 를 360 ~ 1,200 로. 칸이 없으면 360. */
 export function autoMapHeight(maxTiles) {
   const n = Math.max(0, numOrNull(maxTiles) ?? 0);
   return Math.max(MAP_AUTO_MIN, Math.min(MAP_H_MAX, n * MAP_AUTO_PER_TILE));

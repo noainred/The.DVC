@@ -154,7 +154,8 @@ describe('⑤ 그리기 소스 계약(Treemap.jsx · 두 화면)', () => {
     for (const f of ['../vms/VmInsight.jsx', '../hosts/HostInsight.jsx']) {
       const s = read(f);
       expect(s).toMatch(/groupView=\{groupView\} onWidth=\{setMapW\}/);
-      expect(s).toMatch(/mapW \? maxTilesPacked\(layout, mapW\) : maxTilesInCol\(layout\)/);
+      expect(s).toMatch(/packedAuto \? maxTilesPacked\(layout, mapW[,)]/);   // dbg3231: 좁은 화면이면 옛 폭을 쓰지 않는다(packedAuto = mapW ∧ 넓은 화면)
+      expect(s).toMatch(/: maxTilesInCol\(layout\)/);
       expect(s).toMatch(/worstMember\(members/);
     }
     expect(read('../hosts/HostInsight.jsx')).toMatch(/whereOf=\{\(t\) => corpName\(t\.row\)\}/);   // 클러스터 이름은 법인마다 겹칠 수 있다 — 목록에 법인 칸
