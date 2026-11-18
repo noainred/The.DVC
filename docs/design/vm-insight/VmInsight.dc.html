@@ -14,7 +14,7 @@ body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR
 button{font:inherit}
 sc-for,sc-if{display:contents}
 .mono{font-family:"JetBrains Mono",monospace}
-.page{min-height:2800px;padding:22px 24px 28px;display:flex;flex-direction:column;gap:14px;box-sizing:border-box}
+.page{min-height:3000px;padding:22px 24px 28px;display:flex;flex-direction:column;gap:14px;box-sizing:border-box}
 .head{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px}
 .head h1{margin:0;font-size:20px;font-weight:800}
 .head .snap{margin-left:auto;font-size:12px;color:#8b9bb4;font-family:"JetBrains Mono",monospace;white-space:nowrap}
@@ -182,6 +182,25 @@ sc-for,sc-if{display:contents}
 .gt::after{content:"";position:absolute;left:80%;top:-3px;bottom:-3px;width:2px;background:#e6edf6;opacity:.55}
 .gt.nt::after{display:none}
 .pr .big{min-width:0}
+.mk{display:inline-block;font-size:10.5px;font-weight:800;color:#0a0e17;background:#fbbf24;border-radius:999px;padding:1px 8px;white-space:nowrap;vertical-align:1px;margin-left:6px}
+.chg{outline:2px dashed #fbbf24;outline-offset:3px}
+.mklegend{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;font-size:12px;color:#c3cfe2;border:1px dashed #fbbf24;border-radius:10px;padding:8px 12px;background:rgba(251,191,36,.06)}
+.mklegend .mk{margin-left:0}
+.todo{display:grid;grid-template-columns:auto repeat(6, minmax(0, 1fr));gap:10px;align-items:stretch;background:#111a2e;border:1px solid #243049;border-radius:12px;padding:10px 12px}
+.todo .tl{display:flex;flex-direction:column;justify-content:center;align-items:flex-start;gap:6px;font-size:13px;font-weight:800;padding-right:4px;white-space:nowrap}
+.todo .tl .mk{margin-left:0}
+.td{display:flex;flex-direction:column;gap:2px;min-width:0;padding:6px 10px;border-radius:8px;background:#141b2d;border:1px solid #243049;border-left:3px solid #4b5873}
+.td.c{border-left-color:#ef4444}
+.td.w{border-left-color:#f59e0b}
+.td b{font-family:"JetBrains Mono",monospace;font-size:20px;font-weight:800;line-height:1.1}
+.td.c b{color:#fca5a5}
+.td.w b{color:#fcd34d}
+.td .tt{font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.td .ts{font-size:11px;color:#8b9bb4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.foldbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:8px 12px;border:1px solid #243049;border-radius:12px;background:#111a2e}
+.foldbar b{font-size:13.5px;font-weight:800}
+.foldbar .hint{font-size:12px;color:#8b9bb4;flex:1 1 300px;min-width:0}
+.foldbar .fb{min-height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font-size:12.5px;font-weight:600;cursor:pointer}
 .note{font-size:12px;line-height:1.6;color:#aebbd0}
 .empty{font-size:13px;color:#aebbd0;padding:18px 16px;border:1px solid #243049;border-radius:12px;background:#141b2d;line-height:1.6}
 </style>
@@ -192,6 +211,8 @@ sc-for,sc-if{display:contents}
     <h1>Virtual Machine</h1>
     <span class="snap">값 = 목(mock, 가상) 서버 · 스냅샷 오전 11:09:08</span>
   </header>
+
+  <div class="mklegend"><span class="mk">반영 표시</span><span>노란 표와 노란 점선 = 이번에 반영한 곳입니다(실제 화면에는 없는 표시) — <b>S1</b> 확인할 것을 맨 위로 · 분포 접기 / <b>S2</b> 호스트 몇 대분 환산(‘과할당’ 보기와 회수 후보) / <b>S6</b> 경계를 넘은 칸만 경고색(법인 지도)</span></div>
 
   <div class="tabs" aria-label="Virtual Machine 보기">
     <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="3">
@@ -217,7 +238,7 @@ sc-for,sc-if{display:contents}
 
   <div class="subs" role="tablist" aria-label="VM 탭 안의 보기">
     <sc-for list="{{ subs }}" as="s" hint-placeholder-count="4">
-      <button type="button" role="tab" class="{{ s.cls }}" aria-selected="{{ s.on }}" onClick="{{ s.go }}">{{ s.label }}<sc-if value="{{ s.isNew }}" hint-placeholder-val="{{ false }}"><span class="new">새 화면</span></sc-if></button>
+      <button type="button" role="tab" class="{{ s.cls }}" aria-selected="{{ s.on }}" onClick="{{ s.go }}">{{ s.label }}<sc-if value="{{ s.isNew }}" hint-placeholder-val="{{ false }}"><span class="new">새 화면</span></sc-if><sc-if value="{{ s.hasMark }}" hint-placeholder-val="{{ false }}"><span class="mk">{{ s.mark }}</span></sc-if></button>
     </sc-for>
     <span class="sp"></span>
     <span class="tool">VM 도구 6 ▾</span>
@@ -235,9 +256,16 @@ sc-for,sc-if{display:contents}
       </sc-for>
     </div>
 
+    <div class="todo chg" aria-label="확인할 것">
+      <span class="tl">확인할 것<span class="mk">S1 반영</span></span>
+      <sc-for list="{{ todo }}" as="x" hint-placeholder-count="6">
+        <div class="{{ x.cls }}" title="{{ x.tip }}"><b>{{ x.big }}</b><span class="tt">{{ x.label }}</span><span class="ts">{{ x.sub }}</span></div>
+      </sc-for>
+    </div>
+
     <div class="row b">
       <section class="panel" aria-label="법인 지도">
-        <div class="ph"><h2>법인 지도</h2><span class="hint">칸 하나 = 법인(vCenter) · 지역별로 묶음 · 넓이 = 크기 기준 · 색 = 색 기준 · 누르면 그 법인을 고릅니다</span></div>
+        <div class="ph"><h2>법인 지도</h2><span class="mk">S6 반영</span><span class="hint">칸 하나 = 법인(vCenter) · 지역별로 묶음 · 넓이 = 크기 기준 · 색 = 색 기준 · 누르면 그 법인을 고릅니다</span></div>
         <div class="ctl">
           <span>색</span>
           <span class="seg" role="group" aria-label="색 기준"><sc-for list="{{ fills }}" as="f" hint-placeholder-count="3"><button type="button" class="{{ f.cls }}" aria-pressed="{{ f.on }}" onClick="{{ f.pick }}">{{ f.label }}</button></sc-for></span>
@@ -256,6 +284,7 @@ sc-for,sc-if{display:contents}
           <span>{{ scaleTitle }}</span>
           <sc-for list="{{ scale }}" as="s" hint-placeholder-count="5"><span><i style="background: {{ s.bg }}"></i>{{ s.text }}</span></sc-for>
         </div>
+        <div class="note chg">{{ scaleNote }}</div>
       </section>
 
       <section class="panel" aria-label="지역별 분포">
@@ -348,6 +377,9 @@ sc-for,sc-if{display:contents}
       </div>
     </section>
 
+    <div class="foldbar chg"><b>분포 · 구성 · 회수 후보</b><span class="mk">S1 반영</span><span class="hint">{{ distSummary }}</span><button type="button" class="fb" aria-expanded="{{ distOpen }}" onClick="{{ toggleDist }}">{{ distBtn }}</button></div>
+
+    <sc-if value="{{ distOpen }}" hint-placeholder-val="{{ true }}">
     <div class="row c">
       <section class="panel" aria-label="OS 종류">
         <div class="ph"><h2>OS 종류</h2><span class="rt">{{ osTotal }}</span></div>
@@ -418,12 +450,14 @@ sc-for,sc-if{display:contents}
         <div class="ph"><h2>회수 · 정리 후보</h2><span class="hint">돌려받을 수 있는 자원</span></div>
         <sc-for list="{{ reclaim }}" as="x" hint-placeholder-count="4">
           <div class="rc">
-            <span class="t">{{ x.title }}<sc-if value="{{ x.isNew }}" hint-placeholder-val="{{ false }}"><span class="tag">새 판정 · 기준은 제안값</span></sc-if><b>{{ x.big }}</b></span>
+            <span class="t">{{ x.title }}<sc-if value="{{ x.isNew }}" hint-placeholder-val="{{ false }}"><span class="tag">새 판정 · 기준은 제안값</span></sc-if><sc-if value="{{ x.hasMark }}" hint-placeholder-val="{{ false }}"><span class="mk">{{ x.mark }}</span></sc-if><b>{{ x.big }}</b></span>
             <span class="d">{{ x.desc }}</span>
           </div>
         </sc-for>
       </section>
     </div>
+
+    </sc-if>
 
     <section class="panel" aria-label="지금 볼 VM">
       <div class="ph"><h2>지금 볼 VM</h2><span class="hint">지금 범위에서 CPU 사용률이 높은 순 5대 · 이름을 누르면 지금처럼 VM 빠른 확인(드로어)이 열립니다</span><span class="rt">{{ topNote }}</span></div>
@@ -438,7 +472,7 @@ sc-for,sc-if{display:contents}
     <div class="row c">
       <sc-for list="{{ ovHeros }}" as="h" hint-placeholder-count="3">
         <section class="panel" title="{{ h.tip }}">
-          <div class="ph"><h2>{{ h.title }}</h2><span class="rt">{{ h.right }}</span></div>
+          <div class="ph"><h2>{{ h.title }}</h2><sc-if value="{{ h.hasMark }}" hint-placeholder-val="{{ false }}"><span class="mk">{{ h.mark }}</span></sc-if><span class="rt">{{ h.right }}</span></div>
           <div class="ovh"><b>{{ h.big }}</b><span>{{ h.bigText }}</span></div>
           <div class="stack tall"><span style="flex: {{ h.aFlex }} 1 0; background: {{ h.aBg }}; color: {{ h.aInk }}">{{ h.aText }}</span><span style="flex: {{ h.bFlex }} 1 0; background: {{ h.bBg }}; color: {{ h.bInk }}">{{ h.bText }}</span></div>
           <div class="lgd"><span><i style="background: {{ h.aBg }}"></i>{{ h.aLegend }}</span><span><i style="background: {{ h.bBg }}"></i>{{ h.bLegend }}</span></div>
@@ -486,9 +520,9 @@ sc-for,sc-if{display:contents}
   </sc-if>
 </main>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2800}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":3000}}'>
 class Component extends DCLogic {
-  state = { sel: {}, q: '', fill: 'att', size: 'n', sub: 'insight', ovKind: 'mem' };
+  state = { sel: {}, q: '', fill: 'att', size: 'n', sub: 'insight', ovKind: 'mem', fold: false };
 
   // 목(mock, 가상) 서버 /api/vms 를 한 번 받아(2026-11-18 11:09:08 KST · VM 2,242) 법인별로 집계한 값 — 지어낸 수가 아니다.
   // os = [Win2022, Ubuntu22.04, RHEL9, CentOS Stream9, SLES15, Win2019, Debian12] · tv = [최신, 업그레이드 필요, 관리 안 함, 미설치] · hw = [19,17,15,13,10]
@@ -512,7 +546,8 @@ class Component extends DCLogic {
 
   // 호스트 수는 같은 목 서버의 10:52 값(눌러 보는 시안 ⑦ 과 같은 값) — [호스트, 확인 대상]
   hosts() {
-    return { 'vc-us-east': [24, 4], 'vc-us-west': [18, 4], 'vc-br-sao': [8, 2], 'vc-eu-central': [30, 5], 'vc-eu-west': [16, 3], 'vc-me-uae': [6, 2], 'vc-ap-northeast': [22, 4], 'vc-ap-southeast': [14, 2], 'vc-ap-south': [12, 2], 'vc-cn-east': [20, 4], 'vc-cn-north': [16, 3] };
+    // 셋째 값 = 그 법인 호스트의 메모리 합 GB(12:34 값 — ⑨ 와 같은 값). ‘호스트 몇 대분’ 환산(S2)에 쓴다.
+    return { 'vc-us-east': [24, 4, 13952], 'vc-us-west': [18, 4, 11520], 'vc-br-sao': [8, 2, 5888], 'vc-eu-central': [30, 5, 17024], 'vc-eu-west': [16, 3, 10112], 'vc-me-uae': [6, 2, 4736], 'vc-ap-northeast': [22, 4, 11648], 'vc-ap-southeast': [14, 2, 6784], 'vc-ap-south': [12, 2, 8832], 'vc-cn-east': [20, 4, 9472], 'vc-cn-north': [16, 3, 9600] };
   }
 
   // 특수 기능 ‘게스트 파티션 사용률’(/api/tools/guest-partition) 응답을 같은 목 서버에서 한 번 받아(2026-11-18 11:23:00 KST) 법인별로 줄인 값.
@@ -642,6 +677,8 @@ class Component extends DCLogic {
 
     // 위 숫자 3장(지금 화면과 같은 자리) — VM 탭이 켜진 상태
     const hostsN = S((r) => H[r.id][0]); const hAtt = S((r) => H[r.id][1]);
+    const hostMemAvg = S((r) => H[r.id][2]) / hostsN;   // 호스트 한 대의 평균 메모리 GB(범위 안) — S2 환산 기준
+    const hostsEq = (gb) => (gb / hostMemAvg).toFixed(1);
     const tabs = [
       { label: 'vCenter', sub: '· 법인', value: fmt(scope.length), parts: '연결 ' + fmt(scope.length) + ' · 불가 0 · REST 폴백 0 · 엣지 위임 0', badge: '', badgeCls: '', on: false },
       { label: 'Hypervisor', sub: '· ESXi 호스트', value: fmt(hostsN), parts: '호스트 탭에서 봅니다', badge: '확인 대상 ' + fmt(hAtt), badgeCls: 'bd warn', on: false },
@@ -654,7 +691,7 @@ class Component extends DCLogic {
     const chips = rows.filter((r) => match(r) || st.sel[r.id]).map((r) => ({ id: r.id, n: r.att, on: !!st.sel[r.id], cls: 'chip' + (st.sel[r.id] ? ' on' : ''), toggle: toggle(r.id) }));
 
     const subs = [['insight', '분석'], ['list', '목록'], ['corp', '법인별'], ['attention', '조치 필요'], ['over', '과할당']].map(([k, label]) => ({
-      label, on: st.sub === k, cls: st.sub === k ? 'on' : '', isNew: k === 'insight' || k === 'over', go: () => this.setState({ sub: k }),
+      label, on: st.sub === k, cls: st.sub === k ? 'on' : '', isNew: k === 'insight' || k === 'over', mark: k === 'over' ? 'S2 반영' : '', hasMark: k === 'over', go: () => this.setState({ sub: k }),
     }));
     const OTHER = {
       list: ['목록', '지금의 ‘현황’ 보기(분포 4패널 + VM 표)가 이 자리로 옵니다 — 본문은 바뀌지 않고, 고른 법인 범위만 따라옵니다.'],
@@ -675,8 +712,8 @@ class Component extends DCLogic {
     // 법인 지도 — 색 · 크기 기준을 바꿀 수 있다. 색 눈금은 절대값(법인 간 작은 차이를 부풀리지 않는다).
     const FILL = {
       att: { label: '조치 필요 비율', val: (r) => pctN(r.att, r.n), steps: [10, 20, 30, 40], legend: ['10% 미만', '10–20%', '20–30%', '30–40%', '40% 이상'], short: '조치' },
-      cpu: { label: '평균 CPU', val: (r) => r.cs / r.on, steps: [20, 40, 60, 80], legend: ['20% 미만', '20–40%', '40–60%', '60–80%', '80% 이상'], short: 'CPU' },
-      mem: { label: '평균 메모리', val: (r) => r.ms / r.on, steps: [20, 40, 60, 80], legend: ['20% 미만', '20–40%', '40–60%', '60–80%', '80% 이상'], short: '메모리' },
+      cpu: { label: '평균 CPU', val: (r) => r.cs / r.on, steps: [20, 40, 60, 80], legend: ['20% 미만', '20–40%', '40–60%', '60–80%', '80–90%'], short: 'CPU', crit: 90 },
+      mem: { label: '평균 메모리', val: (r) => r.ms / r.on, steps: [20, 40, 60, 80], legend: ['20% 미만', '20–40%', '40–60%', '60–80%', '80–90%'], short: '메모리', crit: 90 },
       disk: { label: '디스크 초과 VM 비율', val: (r) => pctN(gOf[r.id].ov, gOf[r.id].rep), steps: [5, 10, 15, 20], legend: ['5% 미만', '5–10%', '10–15%', '15–20%', '20% 이상'], short: '디스크' },
     };
     const SIZE = {
@@ -698,18 +735,23 @@ class Component extends DCLogic {
       mapCols.push({ left: x.toFixed(2) + '%', width: w.toFixed(2) + '%', text: name + ' · ' + Z.text(regZ) });
       rs.forEach((r) => {
         const h = (Z.val(r) / regZ) * 100; const fv = F.val(r); const step = F.steps.filter((s) => fv >= s).length;
+        const over = F.crit != null && fv >= F.crit;   // S6: 경계(90%)를 넘은 칸에만 경고색 — 그 밖은 파랑 단계
         tiles.push({
-          id: r.id, on: !!st.sel[r.id], toggle: toggle(r.id), bg: RAMP[step],
+          id: r.id, on: !!st.sel[r.id], toggle: toggle(r.id), bg: over ? '#ef4444' : RAMP[step],
           left: x.toFixed(2) + '%', top: y.toFixed(2) + '%', width: w.toFixed(2) + '%', height: h.toFixed(2) + '%',
           line: Z.text(Z.val(r)) + ' · ' + F.short + ' ' + fv.toFixed(0) + '%',
-          cls: 'tile' + (step >= 4 ? ' ink' : '') + (h < 14 ? ' small' : '') + (st.sel[r.id] ? ' on' : (hasSel ? ' dim' : '')),
+          cls: 'tile' + (!over && step >= 4 ? ' ink' : '') + (h < 14 ? ' small' : '') + (st.sel[r.id] ? ' on' : (hasSel ? ' dim' : '')),
           tip: r.id + ' · ' + r.city + ' — VM ' + fmt(r.n) + '(구동 ' + fmt(r.on) + ') · 조치 필요 ' + fmt(r.att) + '(과부하 ' + r.ov + ' · Tools ' + r.tl + ' · 스냅샷 ' + r.sn + ') · 평균 CPU ' + (r.cs / r.on).toFixed(0) + '% · 메모리 ' + (r.ms / r.on).toFixed(0) + '% — 누르면 이 법인을 고릅니다',
         });
         y += h;
       });
       x += w;
     });
-    const scale = RAMP.map((bg, i) => ({ bg, text: F.legend[i] }));
+    const scale = RAMP.map((bg, i) => ({ bg, text: F.legend[i] })).concat(F.crit != null ? [{ bg: '#ef4444', text: F.crit + '% 이상(경고)' }] : []);
+    const overN = F.crit != null ? rows.filter((r) => F.val(r) >= F.crit).length : 0;
+    const scaleNote = F.crit != null
+      ? '파랑 = 값의 크기 · 빨강 = ' + F.crit + '% 이상인 법인만. 지금 값에서 ' + F.crit + '% 를 넘는 법인은 ' + overN + '곳입니다.'
+      : '이 색 기준에는 정해진 경계가 없어 경고색을 쓰지 않습니다(파랑 단계만). ‘평균 CPU’ · ‘평균 메모리’ 로 바꾸면 90% 이상인 법인만 빨강이 됩니다.';
 
     // 지역별 — 지금 범위 안에서
     const regions = REG.map((name) => {
@@ -777,9 +819,9 @@ class Component extends DCLogic {
     const reclaim = [
       { title: '정지 VM', big: fmt(off) + '대', desc: '디스크 ' + tb(S((r) => r.od)) + ' 를 잡고 있습니다 — 오래 꺼 둔 VM 은 보관(백업 뒤 삭제) 후보입니다.' },
       { title: '스냅샷', big: fmt(sv) + '대', desc: '스냅샷 합 ' + tb(sg) + ' · 기준(7일)을 넘긴 VM ' + fmt(sn) + '대 · 30일을 넘긴 VM ' + fmt(s30) + '대.' },
-      { title: '유휴 후보', big: fmt(idle[0]) + '대', isNew: true, desc: '구동 중인데 CPU 10% 미만 · 메모리 30% 미만 — vCPU ' + fmt(idle[1]) + ' · 메모리 ' + fmt(idle[2]) + ' GB 를 쓰고 있습니다. 순간값이라 구현 때는 기간 평균으로 봐야 합니다.' },
+      { title: '유휴 후보', big: fmt(idle[0]) + '대', isNew: true, desc: '구동 중인데 CPU 10% 미만 · 메모리 30% 미만 — vCPU ' + fmt(idle[1]) + ' · 메모리 ' + fmt(idle[2]) + ' GB(호스트 약 ' + hostsEq(idle[2]) + '대분의 메모리)를 쓰고 있습니다. 순간값이라 구현 때는 기간 평균으로 봐야 합니다.', mark: 'S2 반영', hasMark: true },
       { title: '고아 · 접근 불가', big: fmt(cx[1] + cx[2]) + '대', desc: '고아 ' + fmt(cx[1]) + ' · 접근 불가 ' + fmt(cx[2]) + ' — 목록에서 지우거나 다시 등록할 대상입니다.' },
-    ].map((r) => Object.assign({ isNew: false }, r));
+    ].map((r) => Object.assign({ isNew: false, mark: '', hasMark: false }, r));
 
     // 지금 볼 VM — 범위 안 CPU 상위 5(법인마다 상위 5를 받아 합쳐 다시 고른다 — 어떤 범위에서도 상위 5는 정확하다)
     const top = scope.reduce((a, r) => a.concat(r.top.map((t) => ({ vc: r.id, t }))), [])
@@ -831,15 +873,15 @@ class Component extends DCLogic {
         aFlex: cU, aBg: USED, aInk: '#ffffff', aText: '사용 ' + pct(cU, cA), bFlex: cI, bBg: IDLE, bInk: '#0b0b0b', bText: '미사용 ' + pct(cI, cA),
         aLegend: '사용 ' + f1(cU) + ' GHz', bLegend: '미사용 ' + f1(cI) + ' GHz',
         note: '줄일 후보 ' + fmt(cCand) + '대 — 구동 VM ' + fmt(oOn) + '대 중 CPU 사용률이 20% 이하인 VM.', tip: '구동 VM 의 CPU 할당 · 사용 합' },
-      { title: '메모리 — 준 것과 쓰는 것', right: '할당 ' + gbT(mA), big: gbT(mI), bigText: '미사용 — 할당의 ' + pct(mI, mA),
+      { title: '메모리 — 준 것과 쓰는 것', right: '할당 ' + gbT(mA), big: gbT(mI), bigText: '미사용 — 할당의 ' + pct(mI, mA) + ' · 호스트 약 ' + hostsEq(mI) + '대분', mark: 'S2 반영', hasMark: true,
         aFlex: mU, aBg: USED, aInk: '#ffffff', aText: '사용 ' + pct(mU, mA), bFlex: mI, bBg: IDLE, bInk: '#0b0b0b', bText: '미사용 ' + pct(mI, mA),
         aLegend: '사용 ' + gbT(mU), bLegend: '미사용 ' + gbT(mI),
-        note: '줄일 후보 ' + fmt(mCand) + '대 — 게스트가 실제로 쓰는 메모리가 할당의 40% 이하인 VM.', tip: '구동 VM 의 메모리 할당 · 게스트 사용 합' },
+        note: '줄일 후보 ' + fmt(mCand) + '대 — 게스트가 실제로 쓰는 메모리가 할당의 40% 이하인 VM. 호스트 환산은 이 범위 호스트 한 대의 평균 메모리 ' + fmt(Math.round(hostMemAvg)) + ' GB 기준입니다.', tip: '구동 VM 의 메모리 할당 · 게스트 사용 합' },
       { title: '회수 가능 스토리지(추정)', right: '두 가지의 합', big: gbT(offGB + thGB), bigText: '꺼진 VM 점유 + Thin 여유',
         aFlex: offGB, aBg: IDLE, aInk: '#0b0b0b', aText: '꺼진 VM ' + pct(offGB, offGB + thGB), bFlex: thGB, bBg: THIN, bInk: '#0b0b0b', bText: 'Thin 여유 ' + pct(thGB, offGB + thGB),
         aLegend: '꺼진 VM ' + fmt(offN) + '대 점유 ' + gbT(offGB), bLegend: 'Thin 여유 ' + gbT(thGB) + ' · ' + fmt(thN) + '대',
         note: '추정값입니다 — VM 을 지우거나 디스크를 줄이기 전에는 돌아오지 않습니다.', tip: '전원이 꺼진 VM 이 잡은 디스크와 Thin 여유의 합' },
-    ];
+    ].map((x) => Object.assign({ mark: '', hasMark: false }, x));
     const ovStats = [
       { label: '전원 꺼짐 VM', value: fmt(offN) + '대', sub: '디스크 ' + gbT(offGB) + ' 점유', tip: '전원이 꺼진 VM' },
       { label: '스냅샷 보유 VM', value: fmt(snN) + '대', sub: '스냅샷 크기 ' + gbT(snGB), tip: '스냅샷이 있는 VM' },
@@ -921,6 +963,17 @@ class Component extends DCLogic {
     const snOld = snMerge('o5', (a, b) => (b.t[1] - a.t[1]) || (b.t[3] - a.t[3]) || (a.t[0] < b.t[0] ? -1 : 1)).map(snRow((t) => t[1], (t) => t[1] + '일', (t) => '스냅샷 크기 ' + gbT(t[3])));
     const snBig = snMerge('b5', (a, b) => (b.t[3] - a.t[3]) || (b.t[1] - a.t[1]) || (a.t[0] < b.t[0] ? -1 : 1)).map(snRow((t) => t[3], (t) => gbT(t[3]), (t) => t[1] + '일 지남'));
 
+    // S1: 확인할 것 — 요약 6장 바로 아래 한 줄. 아래 패널들의 머리 숫자를 모은 것(새 판정 없음).
+    const todo = [
+      { c: 'c', big: fmt(ov), label: '과부하 VM', sub: 'CPU 또는 메모리 90% 이상', tip: '조치 필요 › 과부하' },
+      { c: gCr ? 'c' : 'w', big: fmt(gOv), label: '디스크가 차 가는 VM', sub: '위험 ' + fmt(gCr) + ' · 30일 안 가득 ' + fmt(gSoonN), tip: '아래 ‘디스크가 차 가는 VM’ 패널' },
+      { c: 'w', big: fmt(oldN), label: '오래된 스냅샷', sub: '90일 넘김 ' + fmt(sab[2]) + '대', tip: '아래 ‘오래된 스냅샷’ 패널' },
+      { c: 'w', big: fmt(tl), label: 'Tools 업그레이드 필요', sub: 'VMware Tools 버전', tip: '조치 필요 › VMware Tools' },
+      { c: (cx[1] + cx[2]) ? 'w' : '', big: fmt(cx[1] + cx[2]), label: '고아 · 접근 불가', sub: '고아 ' + fmt(cx[1]) + ' · 접근 불가 ' + fmt(cx[2]), tip: '연결 상태가 정상이 아닌 VM' },
+      { c: '', big: fmt(off), label: '정지 VM', sub: '디스크 ' + tb(S((r) => r.od)) + ' 점유', tip: '전원이 꺼진 VM' },
+    ].map((x) => Object.assign(x, { cls: 'td' + (x.c ? ' ' + x.c : '') }));
+    const distSummary = 'OS 7종 · 구동 ' + pct(on, n) + ' · Tools 최신 ' + pct(tv[0], n) + ' · 평균 CPU ' + cpuAvgN.toFixed(0) + '% · 메모리 ' + memAvgN.toFixed(0) + '% · 회수 후보 4종';
+
     const isInsight = st.sub === 'insight';
     const isOver = st.sub === 'over';
     const other = OTHER[st.sub] || ['', ''];
@@ -939,6 +992,7 @@ class Component extends DCLogic {
       gpHero: fmt(gOv), gpHeroText: '대 — 파티션 ' + fmt(gOp) + '개가 기준 80% 이상 · 값을 받은 VM ' + fmt(gRep) + '대 중 ' + pct(gOv, gRep),
       gpStats, gpBands, gpOs: '초과 파티션의 OS — Linux ' + fmt(gLnx) + '개 · Windows ' + fmt(gWin) + '개. 구간 막대는 초과 파티션 ' + fmt(gOp) + '개를 사용률 구간으로 나눈 것입니다.',
       gpTop, gpSoon, gpSoonEmpty: gpSoon.length === 0,
+      todo, scaleNote, distSummary, distOpen: !st.fold, distBtn: st.fold ? '펼치기 ▾' : '접기 ▴', toggleDist: () => this.setState({ fold: !st.fold }),
       snRule: '기준 7일 · 받은 시각 오후 12:52', snHero: fmt(oldN), snHeroText: '대 — 가장 오래된 스냅샷이 7일을 넘겼습니다 · 전체 VM ' + fmt(n) + '대 중 ' + pct(oldN, n),
       snStats, snBands, snOld, snBig,
     };
