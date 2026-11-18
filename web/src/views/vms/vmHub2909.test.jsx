@@ -40,7 +40,10 @@ describe('vmHubText — 서버와 같은 신호 키 · 메뉴 · 도구', () => 
       expect(locate('tools', `#/tools/${k}`)).toEqual({ group: 'server', child: 'virt' });
     }
     expect(locate('vms', '#/vms/corp')).toEqual({ group: 'server', child: 'virt' });
-    expect([...HUB_VIEW_KEYS]).toEqual(['list', 'corp', 'attention']);
+    // v3.21.0: 첫 보기 '분석'(insight) · 끝 '과할당'(over) 이 더해졌다 — 옛 키 list · corp · attention 은 그대로(저장된 주소가 산다 · vmInsight3210.test.js ⑥)
+    expect([...HUB_VIEW_KEYS]).toEqual(['insight', 'list', 'corp', 'attention', 'over']);
+    expect(locate('vms', '#/vms/insight')).toEqual({ group: 'server', child: 'virt' });
+    expect(locate('vms', '#/vms/over')).toEqual({ group: 'server', child: 'virt' });
   });
 });
 

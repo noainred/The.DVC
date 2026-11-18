@@ -9,6 +9,7 @@ import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { memoJson, scopeKey } from './shared.js';
+import { isSummaryQuery, groupByVc } from './toolSummary.js';   // v3.21.0 VM 분석 화면 요약 — 같은 라우트 · 같은 게이트 안에서
 import { capStr } from '../../util/capStr.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp } from '../../util/dayKey.js';
@@ -77,6 +78,19 @@ export function liveNamesOf(snap, ids) {
 export function registerVmLifecycle(api) {
   api.get('/tools/vm-lifecycle', toolsPerm, (req, res) => memoJson(req, res, 'vm-lifecycle', async (snap) => {
     const L = await load(req, snap);
+    // v3.21.0: ?summary=1 — 법인별 줄(VM 분석 화면 'VM 수 추이 · 생성/삭제'). 게이트(tools · toolGate 'vm-lifecycle')와 범위(load)는 그대로 ·
+    //   같은 읽기(L.rows — 읽기 상한 LIFE_READ_MAX 는 원본과 같다 · 잘렸으면 truncated)를 법인마다 analyzeLifecycle 에 넘긴다(판정 그대로).
+    //   종류 · 검색 거르기는 보지 않는다 · 이벤트 목록은 싣지 않는다. 쌓인 이벤트가 없는 법인도 줄을 준다(0 은 '받은 이벤트 없음' — 수집 범위는 vcenters · notCollected).
+    if (isSummaryQuery(req.query)) {
+      const by = groupByVc(L.rows);
+      const rows = L.ids.map((id) => {
+        const a = analyzeLifecycle(by.get(String(id)) || [], { days: L.days, since: L.since, vcName: L.vcName });
+        return { vcenterId: id, name: L.vcName.get(id) || id, total: a.total, added: a.added, removed: a.removed, net: a.net, byKind: a.byKind, noDetail: a.noDetail,
+          shortLivedCount: a.shortLivedCount, series: a.series };
+      });
+      return { summary: true, tool: 'vm-lifecycle', days: L.days, since: L.since, truncated: L.truncated, readMax: LIFE_READ_MAX,
+        vcenters: L.coverage, notCollected: L.notCollected, logs: L.settings, rows, initial: snap.initial === true };
+    }
     return {
       days: L.days, since: L.since, truncated: L.truncated, readMax: LIFE_READ_MAX,
       vcenters: L.coverage, notCollected: L.notCollected, logs: L.settings,

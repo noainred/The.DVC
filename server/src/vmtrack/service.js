@@ -274,6 +274,39 @@ async function computeSeries({ sinceTs, vcenterId = '', scopeIds = null }) {
   };
 }
 
+/**
+ * v3.21.0 VM 분석 화면 요약(`/tools/vm-track?summary=1` — docs/design/vm-insight §10) — 법인(vCenter)별 수집 점 시계열.
+ *   vmtrackSeries 의 결과(세대 기억 공유 — 같은 조회를 두 번 하지 않는다)의 슬롯별 vCenter 분해(bySlotVc)를 vCenter 별로 다시 묶는다(새 계산 없음).
+ *   current = 마지막 점 · base = 창 안 첫 점(도구 화면의 '기간 순증감' 이 처음 점과 마지막 점을 비교하는 것과 같다).
+ *   points 는 최근 maxPoints 개(길이 상한) — 잘랐으면 pointsOmitted. 쌓인 이력이 없는 법인은 빈 배열(지어내지 않는다).
+ *   slots = 창 안 전체 합계 행의 슬롯(최근 maxPoints 개) — 화면이 고른 법인을 슬롯마다 더할 때, 어떤 법인의 점이 없는 슬롯은 부분 합으로 표시하라고 준다.
+ */
+export const VMTRACK_SUMMARY_POINTS_MAX = 62;
+export async function vmtrackSeriesByVc({ days = 30, scopeIds = null, maxPoints = VMTRACK_SUMMARY_POINTS_MAX } = {}) {
+  const s = await vmtrackSeries({ days, scopeIds });
+  const per = new Map();
+  for (const [slot, list] of Object.entries(s.bySlotVc || {})) {
+    for (const r of list) {
+      let a = per.get(r.vcenterId);
+      if (!a) { a = []; per.set(r.vcenterId, a); }
+      a.push({ slot, ts: slotStartMs(slot), total: r.total, onCount: r.onCount, added: r.added, removed: r.removed, baseline: r.baseline });
+    }
+  }
+  const cap = Math.max(1, Math.min(VMTRACK_SUMMARY_POINTS_MAX, Number(maxPoints) || VMTRACK_SUMMARY_POINTS_MAX));
+  const rows = [...per.entries()].map(([vcenterId, pts]) => {
+    pts.sort((a, b) => (a.slot < b.slot ? -1 : a.slot > b.slot ? 1 : 0));
+    const first = pts[0] || null; const last = pts[pts.length - 1] || null;
+    return {
+      vcenterId,
+      current: last ? { slot: last.slot, total: last.total, onCount: last.onCount } : null,
+      base: first ? { slot: first.slot, total: first.total } : null,
+      points: pts.slice(-cap), pointsOmitted: Math.max(0, pts.length - cap),
+    };
+  }).sort((a, b) => String(a.vcenterId).localeCompare(String(b.vcenterId)));
+  const slots = (s.points || []).map((p) => p.slot).filter((x) => typeof x === 'string').slice(-cap);
+  return { days, slots, maxPoints: cap, rows };
+}
+
 /** 슬롯별 vCenter 분해(표의 'vCenter별' 열·증감 클릭 대상 id 확보용). */
 function groupBySlot(rows) {
   const m = {};

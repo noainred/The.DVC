@@ -135,6 +135,32 @@ export function analyzeVmHygiene(vms, s, opt = {}) {
 }
 
 /**
+ * v3.21.0 VM 분석 화면 요약(`/tools/vm-hygiene?summary=1` — docs/design/vm-insight §10) — 법인(vCenter)별 줄 + 법인별 상위 N.
+ *   result = 거르기 없이 돌린 analyzeVmHygiene 결과. 법인 줄의 vms · withFindings · crit · warn · notCollected 는 도구의 vcenters 그대로이고,
+ *   byCode(문제 종류별 VM 수)는 도구의 byCode 와 같은 셈(판정마다 +1)을 화면 상한 전 전체(allRows)로 법인별로 낸다(잘린 rows 로 세지 않는다).
+ *   상위 N: question = 응답을 기다리며 멈춘 VM(question 판정) · worst = 도구 정렬(심각도 → 판정 수 → 이름)의 앞 N.
+ */
+export function hygieneSummaryByVc(result, topN = 5) {
+  const src = Array.isArray(result.allRows) ? result.allRows : result.rows;
+  const per = new Map();
+  for (const v of result.vcenters || []) {
+    const byCode = {};
+    for (const c of Object.keys(ALL_CODES)) byCode[c] = 0;
+    per.set(v.vcenterId, { vcenterId: v.vcenterId, name: v.name, vms: v.vms, withFindings: v.withFindings, crit: v.crit, warn: v.warn, notCollected: v.notCollected, byCode, top: { question: [], worst: [] } });
+  }
+  const pick = (r) => ({ id: r.id, name: r.name, host: r.host, cluster: r.cluster, powerState: r.powerState, worst: r.worst,
+    codes: r.findings.map((f) => f.code), ...(r.findings.find((f) => f.code === 'question') ? { question: r.findings.find((f) => f.code === 'question').facts || {} } : {}) });
+  for (const r of src) {   // src 는 도구 정렬(심각도 → 판정 수 → 이름) 그대로
+    const e = per.get(r.vcenterId);
+    if (!e) continue;
+    for (const f of r.findings) if (e.byCode[f.code] != null) e.byCode[f.code] += 1;
+    if (e.top.worst.length < topN) e.top.worst.push(pick(r));
+    if (e.top.question.length < topN && r.findings.some((f) => f.code === 'question')) e.top.question.push(pick(r));
+  }
+  return [...per.values()].sort((a, b) => String(a.vcenterId).localeCompare(String(b.vcenterId)));
+}
+
+/**
  * 알림 요약(스냅샷 정책·유령 스냅샷만 — 하루 한 번). 반환 null 이면 보낼 것이 없다.
  * v2.742(RECENT-03): 유령 스냅샷 후보는 **주의(통합 필요가 함께 표시된 것)만** 알린다 — 이름 규칙만 맞는 참고 후보는 화면에만 보인다
  *   (링크드 클론 등 오탐 가능성이 있는 후보로 매일 알림을 보내지 않는다).
