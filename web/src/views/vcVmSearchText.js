@@ -7,6 +7,8 @@
  *   · 범위(scope)는 서버가 먼저 강제한다(applyFilters) — 화면은 받은 것만 그린다.
  *   · 상한으로 자른 것은 개수를 밝힌다(조용한 상한 금지).
  */
+import { hubScopeQuery } from './platform/platformText.js';
+
 export const VM_SEARCH_MIN = 2;
 export const VM_SEARCH_LIMIT = 50;
 
@@ -48,11 +50,11 @@ export function memText(mb) {
  * v3.13.1(2차 루프 2회차): 허브 범위(리전 · vCenter)를 VM 이름 조회에도 싣는다 — 범위 바 안내('범위 · 검색은 vCenter · 호스트 · VM 탭에 함께 적용')와 맞춘다.
  *   예전에는 리전을 골라도 이 조회만 전 vCenter 를 찾고 '(전체 vCenter)' 라고 말했다. 범위를 고르지 않으면 지금처럼 전체(v2.671 요청 그대로).
  *   vCenter 가 있으면 vCenter 만(리전보다 좁다) · 서버 applyFilters 가 사용자 범위를 먼저 강제한다.
+ *   v3.20.0: 바로가기 복수 선택 — 고른 법인이 2곳 이상이면 vcenterIds(쉼표 목록)로 싣는다.
  */
 export function vmSearchScopeParams(scope) {
-  const vc = String(scope?.vcenterId || '').trim(); const region = String(scope?.region || '').trim();
-  if (vc) return { vcenterId: vc };
-  return region ? { region } : {};
+  // v3.20.0: 판정은 허브 범위 쿼리 한 벌(platformText.hubScopeQuery) — 고른 법인 1곳 vcenterId · 2곳 이상 vcenterIds · 없으면 리전.
+  return hubScopeQuery({ ...(scope && typeof scope === 'object' ? scope : {}), region: String(scope?.region || '').trim() });
 }
 /** 제목 · 요약에 쓰는 범위 글자 — scopeLabel('전체' · vCenter 이름 · '리전 X · N법인')을 받아 '전체' 만 '전체 vCenter' 로. */
 export const vmSearchScopeText = (label) => (!label || label === '전체' ? '전체 vCenter' : String(label));

@@ -443,7 +443,7 @@
     전부 못 읽음 '—'(단위 없음) · 일부만 못 읽음 `≥` + 못 읽은 VM 수(요약 타일과 같은 표기). 요약 칸 'vCore : 물리' 는 vCPU 를 전부 못 읽은 법인을 분자 · 분모 **둘 다**에서 뺀다(0 으로 더하면 코어만 늘어 낮게 나온다) —
     보조 문구는 **뺀 것을 앞에**(칸이 좁아 뒤는 말줄임된다 — Chromium 판독 1440 · 400).
     코어는 `hostChecks.js` · `hostExport.js` 어느 쪽에도 두지 않는다(`hostChecks.js` 가 `hostExport.js` 를 import — 순환). 회귀 `server/test/vmSumsCore3191.test.js`(같은 입력으로 세 출력 대조 · 소스 스윕) · `hostCorpText.test.js`.
-    남긴 것(같은 꼴 · 범위 밖): ① ~~호스트 표 'VM' 묶음(`/hosts/checks` 의 `c.vm`)은 원래 합을 그대로 실어 전부 못 읽은 호스트가 `0+?` 로 보인다(`Hosts.jsx`)~~ → **v3.19.2 에 고쳤다**(아래 줄) ② ~~`/summary` 의 OS 별 · vCenter 별 합은 아직 `v.cpuCount || 0`~~ → **v3.19.3 에 고쳤다**(그 아래 항목 — '공개 API 대조 계약' 이라는 이유도 정정)
+    남긴 것(같은 꼴 · 범위 밖): ① ~~호스트 표 'VM' 묶음(`/hosts/checks` 의 `c.vm`)은 원래 합을 그대로 실어 전부 못 읽은 호스트가 `0+?` 로 보인다(`Hosts.jsx`)~~ → **v3.19.2 에 고쳤다**(아래 줄) ② ~~`/summary` 의 OS 별 · vCenter 별 합은 아직 `v.cpuCount || 0`~~ → **v3.20.1 에 고쳤다**(그 아래 항목 — '공개 API 대조 계약' 이라는 이유도 정정)
     ③ 일부만 못 읽었을 때 엑셀 호스트 행은 비율 칸을 비우고(`cpuRatio` null) 화면 · 요약은 `≥` 최소값을 적는다(표기 방식만 다르고 합 · unknown 수는 같다).
   · **v3.19.2 — 호스트 한 대의 'VM' 묶음(`/hosts/checks` 의 `byId[id].vm`)도 `vmAllocOf` 를 거친다**(`hostChecks.js hostVmOf` = `vmSumsOf` + `vmAllocOf` — 키는 그대로, `vcpu` · `memMB` 가 null 일 수 있다).
     v3.19.1 까지 VM 을 **전부** 못 읽은 호스트가 표 `0+?` · 상세 `0` · `0.0 : 1` · 드로어 'vCPU 0 할당 이상' 이었고, 표의 'vCPU:코어' 정렬 값은 `null / 코어 = 0` 이라 '—' 행이 오름차순 맨 앞에 섰다.
@@ -452,8 +452,8 @@
     상세 '—' + 'VM N대 모두 못 읽음' · 드로어 'vCPU 할당 —' · '코어 대비 —' · 'VM N대 모두 못 읽음'. 일부 못 읽음: 예전 표기 그대로(표 `+?` · 드로어 '이상' · 상세 '못 읽은 VM N') — 이번에 표의 'vCPU:코어' 칸과
     상세 '할당 메모리' 칸에도 같은 표지를 붙였다(예전에는 부분 합의 비율 · 메모리가 표지 없이 나왔다). VM 없음: `0` · `0.0 : 1` · `0 GB`(예전 메모리 칸은 `gbText(0)` 이라 '—' 였다 — '—' 는 못 읽음에만 쓴다).
     회귀 `server/test/hostVmAlloc3192.test.js`(순수 + 실제 라우트에서 `/hosts` 요약 · 법인별과 null 여부 대조 + 소스 스윕 — 수정 전 소스에서 4건 모두 실패) · `hostChecksText.test.js` · `hosts/hostDrawerText.test.js`.
-    Chromium 은 목 데이터에 못 읽은 VM 이 없어 `/api/hosts/checks` 응답을 가로채 바꿔 봤다(실제 서버 null 은 단위 테스트가 라우트로 확인). 남긴 것: 위 ③ 그대로(② 는 v3.19.3 에 고쳤다 — 아래 항목).
-  · **v3.19.3(코드 · 테스트 표지는 v3.19.2 — main 이 호스트 표 수정으로 v3.19.2 를 먼저 내 번호만 올렸다) — `/summary`(전체 통합 합계 화면)의 VM 할당 합도 같은 코어**(v3.19.1 '남긴 것 ②' 해소 · 회귀 `server/test/summaryVmSums3192.test.js` · `web/src/views/summaryAllocText.test.js`).
+    Chromium 은 목 데이터에 못 읽은 VM 이 없어 `/api/hosts/checks` 응답을 가로채 바꿔 봤다(실제 서버 null 은 단위 테스트가 라우트로 확인). 남긴 것: 위 ③ 그대로(② 는 v3.20.1 에 고쳤다 — 아래 항목).
+  · **v3.20.1(코드 · 테스트 표지는 v3.19.2 — main 이 v3.19.2(호스트 표) · v3.20.0(바로가기 복수 선택)을 먼저 내 번호만 올렸다) — `/summary`(전체 통합 합계 화면)의 VM 할당 합도 같은 코어**(v3.19.1 '남긴 것 ②' 해소 · 회귀 `server/test/summaryVmSums3192.test.js` · `web/src/views/summaryAllocText.test.js`).
     ⓐ 조사로 드러난 것 — 같은 꼴은 두 곳이 아니라 **세 곳 + 공개 API** 였다: OS 별(`osAllocation[].vcpu · ramGB`) · vCenter 별(`byVcenter[].vcpuAllocated · ramAllocatedGB`) ·
     **전체 합**(`allocation.vcpuAllocated · ramAllocatedGB` — `sum(vms, (v) => v.cpuCount)` 도 null · '' 를 0 으로 더한다) · 공개 API `/inventory/summary` 의 `vmVcpu · vmRamMB`.
     **정정**: v3.19.1 이 적은 '공개 API 대조 계약' 은 OS 별 · vCenter 별 합에는 걸리지 않는다 — 공개 API 는 그 분해를 싣지 않는다(`publicapi/allowlist.js`). 계약이 걸리는 것은 전체 합(`vmVcpu` ↔ `allocation.vcpuAllocated`)뿐이다.
@@ -903,6 +903,11 @@
      ⓑ 허브 머리의 설명 문구(‘서비스 = vCenter 1 + Bareos 1 …’)는 지웠다(세 탭 공통). ⓒ **vCenter 탭은 바로가기 아래에 vCenter 카드만**(⑨의 카드 | 표 보기 · 도구 6 · 요약 3장 · `VcTable.jsx` · `platform.vcView` 기억은 없앴다 — 옛 저장 값은 읽지 않는다. VM 이름 검색 안내 · 결과 없음 · 용량 각주만 남는다). `HubTabs.jsx` 는 Hosts · Vms 탭이 쓰므로 남는다. 요약 3장이 넘기던 도구 인계(`KPI_HANDOFF` · `takeKpiVcenter`)의 받는 쪽도 뒤이은 정리에서 지웠다(v2.959 항목 끝).
      ⓓ **바로가기 글자로 찾기**: `platformText.filterChipSites(sites, text, selectedIds)` — 판정은 카드와 같은 `vcMatches`·`keywordsOf`(부분 일치 · 대소문자 무시 · 공백 낱말 AND). 범위 바의 공용 검색 `q` 와 **별개**인 App 메모리 상태 `chipQuery`(저장하지 않는다)를 허브(칩)와 vCenter 탭(카드)이 쓴다 — 숫자 3장 · 서버 호출은 그대로. **고른 법인의 칩은 일치하지 않아도 남긴다**(다시 눌러 풀 수 있게) · 맞는 법인이 없으면 칩 자리 · 카드 자리에 안내 + 지우기 · 접으면 글자도 비운다.
      ⓔ 400px 결함(D3): `.ph-tab.on .parts { grid-column }` 때문에 열린 탭의 분해가 탭 안과 `.ph-parts-narrow` 에 **두 번** 나왔다 — 탭 안 규칙을 지웠다(`.ph-tab .parts` 는 400px 에서 숨김, 열린 탭의 분해는 아래 한 줄만). 회귀 `platform/platformText.test.js` 맨 아래 v3.19.0 두 describe.
+  ⑬ **v3.20.0 바로가기 복수 선택(사용자 요청 2026-11-18 · 설계 `docs/design/vm-menu` §5 ③ 기본값 ‘복수 선택 · 세 탭 공용’ · 시안 ②)** — ⓐ 허브 칸(`PLATFORM_SCOPE_KEY`)의 법인은 **목록 `vcenterIds`(배열 · 메모리만 · 저장하지 않는다)** 이고 허브 칸에는 `vcenterId` 를 저장하지 않는다 — App `patchFilter` 가 허브 칸 patch 를 `platformText.hubScopePatch` 로 바꾼다(옛 단일 patch `{ vcenterId }` = 한 곳 목록 — 카드의 호스트 · VM 수 · VM 표의 법인 · 범위 바 선택 칸 · ⌘K 인계 · 필터 초기화가 그대로 산다). 허브 밖 탭은 지금처럼 탭마다 `vcenterId` 하나.
+     ⓑ **API 범위 조립은 `platformText.hubScopeQuery` 하나**(App `filters` · `scope` 두 곳 — `/platform/summary` · `/hosts` · `/hosts/checks` · `/hosts/corp` · `/vms` · `/vms/by-vcenter` 와 VM 이름 검색 `vmSearchScopeParams` 가 이 값을 싣는다): 0곳 = 리전 · 1곳 = `vcenterId=<id>` · 2곳 이상 = `vcenterIds=<id>,<id>`(날 글자를 잇고 인코딩은 URLSearchParams) — 둘을 함께 보내지 않는다. 메모 의존성은 목록 JSON(쉼표로 잇고 다시 나누지 않는다).
+     ⓒ 칩은 켜고 끄는 단추(`aria-pressed` · `toggleScopeId`) · 1곳 이상이면 ‘✕ 전체 법인’(접어도 남는다) · 켠 칩은 찾기 글자와 무관하게 보인다 · **켜지 않은 칩도 숫자를 유지**(서버가 고른 법인과 무관하게 `byVc` 를 준다 — 화면은 그대로 읽는다). 범례에 ‘여러 곳을 함께 고를 수 있습니다’(줄바꿈 허용 — 400px 가로 넘침 방지).
+     ⓓ 범위 바 vCenter 칸: 2곳 이상이면 ‘법인 N곳 선택’(고를 수 없는 option · 값 `MULTI_PICK_VALUE` — `__` 로 시작해 정렬 맨 위) · 칸에서 한 곳을 고르면 목록이 그 한 곳 · ‘전체’ 는 전부 해제. 허브 탭에서 리전을 바꾸면 **그 리전 밖 선택만** 푼다(`idsInRegion` — 목록에 없는 id 는 판정할 수 없어 남긴다).
+     ⓔ 카드는 `sitesInHubScope`(고른 법인들 · 0곳이면 리전 — 서버에 싣는 범위와 같은 뜻) · 상세 ‹ 이전 · 다음 › 은 2곳 이상이면 그 법인들 안에서(`siblingSites` · 글자 ‘법인 N곳’) · 0 · 1곳이면 지금 규칙. 회귀 `platform/hubMultiPick3200.test.jsx`.
 
 - **v2.998.0(코드 · 테스트 표지는 v2.994 — main 이 v2.997 까지 먼저 나가 번호만 올렸다) — 서버 메뉴 이름 변경: Virtual Machine(VM) · Hypervisor · Bare Metal Server · Physical Server(사용자 요청 2026-11-13 · 설계 `docs/design/server-menu-rename/README.md` · 컨펌 '추천대로 전부 진행')**.
   회귀 `web/src/views/topMenu.test.js`(구성 · locate · 진입 탭 `menuTabOf` · aka 검색) · `sidebar/{sideMenu,singleMenu2891,menuEdit}.test.js`(옛 저장 메뉴 두 모양) · `platform/platformText.test.js`(허브 제목 = 메뉴 라벨) · `featureUsageText.test.js` · `server/test/platformHub2915.test.js` ④.

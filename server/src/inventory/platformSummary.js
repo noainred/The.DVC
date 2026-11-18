@@ -84,8 +84,10 @@ function addInto(sum, part, keys) {
  * @param {object} p.ctx          vmSignals.signalContext
  * @param {(h)=>boolean} p.readable  store.usageReadable
  * @param {(vc)=>boolean} [p.staleOf] store.siteInventoryStale
+ * @param {Set<string>|null} [p.pick] v3.20.0(허브 복수 법인): 고른 법인 — 있으면 totals 는 이 법인들의 합이고 byVc 는 그대로 전체 줄이다
+ *   (칩이 켜지지 않은 법인의 숫자도 유지 — 설계 docs/design/vm-menu §6). 빈 Set 은 0건(합계 0). null 이면 전체 합(예전 그대로).
  */
-export function platformSummaryOf({ vcenters = [], hosts = null, vms = null, ctx, readable = () => true, staleOf = () => false } = {}) {
+export function platformSummaryOf({ vcenters = [], hosts = null, vms = null, ctx, readable = () => true, staleOf = () => false, pick = null } = {}) {
   const hostsBy = new Map(); const vmsBy = new Map();
   if (Array.isArray(hosts)) for (const h of hosts) { if (!h || typeof h !== 'object') continue; const l = hostsBy.get(h.vcenterId) || []; l.push(h); hostsBy.set(h.vcenterId, l); }
   if (Array.isArray(vms)) for (const v of vms) { if (!v || typeof v !== 'object') continue; const l = vmsBy.get(v.vcenterId) || []; l.push(v); vmsBy.set(v.vcenterId, l); }
@@ -113,6 +115,7 @@ export function platformSummaryOf({ vcenters = [], hosts = null, vms = null, ctx
       vms: !Array.isArray(vms) ? null : (vmsUnknown ? { ...NULL_VMS } : vmsSection(vl, ctx)),
     };
     byVc.push(row);
+    if (pick && !pick.has(vc.id)) continue;   // 고르지 않은 법인 — 줄은 싣고 합에는 넣지 않는다
     tv.total += 1;
     if (status === 'connected') tv.connected += 1;
     if (stale) tv.stale += 1;

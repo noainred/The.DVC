@@ -40,7 +40,7 @@ const SvcMonitor = lazy(() => import('./views/SvcMonitor.jsx'));
 import { movedTabHash, legacyShellHash, LEGACY_SHELL_KEY, hashSegments } from './hooks/hashTab.js';
 // v2.915 '서버 › 가상화 플랫폼' 허브(설계 docs/design/virt-platform-menu 시안 A · 컨펌 2026-11-07): vcenters · hosts · vms 세 탭 위에 한 셸 — 탭 id · 해시는 그대로.
 import PlatformHub from './views/platform/PlatformHub.jsx';
-import { isPlatformTab, PLATFORM_TAB_KEYS, SCOPE_SEARCH_PLACEHOLDER, SCOPE_NOTE, scopeVcOptions, scopeVcPatch, scopeRegionOptions, regionText } from './views/platform/platformText.js';
+import { isPlatformTab, PLATFORM_TAB_KEYS, SCOPE_SEARCH_PLACEHOLDER, SCOPE_NOTE, scopeVcOptions, scopeVcPatch, scopeRegionOptions, regionText, normScopeIds, singleScopeId, toggleScopeId, idsInRegion, hubScopeQuery, hubScopePatch, multiPickText, MULTI_PICK_VALUE } from './views/platform/platformText.js';
 // v2.725 상단 메뉴 재구성(시안 A '2단 탭') — 대메뉴·하위 메뉴·현재 위치 판정은 views/topMenu.js 하나가 소유한다.
 import { visibleMenu, locate, entryOf, hashOf, menuTabOf } from './views/topMenu.js';
 import { lockReasonOf } from './views/toolVisibility.js';
@@ -113,8 +113,10 @@ import { runtimeBanner } from './views/runtimeBannerText.js'; // 2026-10-09 검�
 import { takeSearch, onSearchHandoff } from './hooks/searchHandoff.js'; // v2.909 ⌘K 통합 장비 검색 — 검색어 인계(메모리)
 const INV_FILTER_TABS = ['vms', 'hosts', 'datastores', 'vcenters'];   // v2.915: vCenter 탭도 공용 범위 바의 검색 칸을 쓴다(허브 세 탭 공용)
 // v2.915 가상화 플랫폼 허브 — 세 탭이 범위(리전 · vCenter · 검색어)를 한 칸으로 공유한다. 탭 고유 조건은 그 탭 칸에 남는다.
+//   v3.20.0(바로가기 복수 선택): 허브 칸의 법인은 **목록 vcenterIds**(배열 · 메모리만)로 든다 — 허브 칸에는 vcenterId 를 저장하지 않는다(patchFilter 가 hubScopePatch 로 바꾼다).
+//   허브 밖 탭은 지금처럼 탭마다 vcenterId 하나 — 이 목록은 PLATFORM_SCOPE_KEY 칸에만 산다(허브 범위가 다른 탭 · 도구로 새지 않는다).
 const PLATFORM_SCOPE_KEY = 'platform';
-const SHARED_FILTER_KEYS = ['region', 'vcenterId', 'q'];
+const SHARED_FILTER_KEYS = ['region', 'vcenterId', 'vcenterIds', 'q'];
 const pickKeys = (o, keys) => Object.fromEntries(keys.filter((k) => k in o).map((k) => [k, o[k]]));
 const readOvMode = () => { try { return normMode(window.localStorage.getItem(MODE_KEY)); } catch { return null; } };
 const writeOvMode = (m) => { try { window.localStorage.setItem(MODE_KEY, m); } catch { /* 저장 실패는 기능을 막지 않는다 */ } };
@@ -353,21 +355,25 @@ function Portal({ user, onLogout }) {
   const scopeKeyOf = (t) => (isPlatformTab(t) ? PLATFORM_SCOPE_KEY : t);
   const cur = { ...(tabFilters[tab] || {}), ...pickKeys(tabFilters[scopeKeyOf(tab)] || {}, SHARED_FILTER_KEYS) };
   const region = cur.region || '';
-  const vcenterId = cur.vcenterId || '';
+  // v3.20.0: 고른 법인 목록 — 허브 탭은 칸의 vcenterIds, 그 밖 탭은 자기 vcenterId 하나(0 · 1곳 목록). vcenterId 는 정확히 1곳일 때만 그 id(범위 바 선택 칸 · 옛 값을 읽는 곳).
+  const vcenterIds = isPlatformTab(tab) ? normScopeIds(cur.vcenterIds) : normScopeIds(cur.vcenterId ? [cur.vcenterId] : []);
+  const vcenterId = isPlatformTab(tab) ? singleScopeId(vcenterIds) : (cur.vcenterId || '');
+  const vcenterIdsKey = JSON.stringify(vcenterIds);   // 메모 의존성 — 배열 그대로 싣는다(쉼표로 잇고 다시 나누면 쉼표가 든 id 가 둘로 갈린다)
   const q = cur.q || '';
   const qNotes = !!cur.qNotes; // 메모 포함 검색 (기본 꺼짐)
   const qIpms = !!cur.qIpms;   // IPMS(IP 스캔) 자료 포함 — IP 검색 시 해당 대역 스캔 IP도 표시
   const patchFilter = (patch, t = tab) => setTabFilters((m) => {
     const sk = scopeKeyOf(t);
-    const shared = pickKeys(patch, SHARED_FILTER_KEYS);
+    // v3.20.0: 허브 칸에는 목록만 — 옛 단일 patch({ vcenterId })는 한 곳 목록으로(카드 · VM 표 · 선택 칸 · ⌘K 인계 · 필터 초기화가 그대로 산다).
+    const shared = sk === PLATFORM_SCOPE_KEY ? hubScopePatch(pickKeys(patch, SHARED_FILTER_KEYS)) : pickKeys(patch, SHARED_FILTER_KEYS);
     const own = Object.fromEntries(Object.entries(patch).filter(([k]) => !SHARED_FILTER_KEYS.includes(k)));
     const n = { ...m };
     if (Object.keys(shared).length) n[sk] = { ...(n[sk] || {}), ...shared };
     if (Object.keys(own).length) n[t] = { ...(n[t] || {}), ...own };
     return n;
   });
-  const setRegion = (v) => patchFilter({ region: v, vcenterId: '' });
-  const setVcenterId = (v) => patchFilter({ vcenterId: v });
+  // v3.20.0: 허브 탭은 리전을 바꾸면 그 리전 밖 선택만 푼다(scopeVcPatch 와 같은 규칙 — idsInRegion). 그 밖 탭은 지금처럼 vCenter 를 비운다.
+  const setRegion = (v) => patchFilter(isPlatformTab(tab) ? { region: v, vcenterIds: idsInRegion(vcenterIds, vcenters, v) } : { region: v, vcenterId: '' });
   const setQ = (v) => patchFilter({ q: v });
   const setQNotes = (v) => patchFilter({ qNotes: v });
   const setQIpms = (v) => patchFilter({ qIpms: v });
@@ -569,24 +575,19 @@ function Portal({ user, onLogout }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, user]);
 
+  // v3.20.0: 범위 쿼리 조각은 platformText.hubScopeQuery 하나(1곳 vcenterId · 2곳 이상 vcenterIds · 0곳이면 region) — Hosts · HostsCorp · Vms(목록 · 법인별 · 조치 필요) · /platform/summary 가 이 값을 그대로 싣는다.
+  //   의존성에 목록 키(vcenterIdsKey — JSON)를 둬 목록이 바뀌면 새 객체 → usePolling · fetchJson 쪽 키(JSON)가 바뀌어 새로 부르고 옛 응답은 버린다.
   const filters = useMemo(() => {
-    const f = {};
-    if (vcenterId) f.vcenterId = vcenterId;
-    else if (region) f.region = region;
+    const f = { ...hubScopeQuery({ vcenterIds: JSON.parse(vcenterIdsKey), region }) };
     if (q) { f.q = q; if (qNotes) f.notes = '1'; if (qIpms) f.qIpms = '1'; }
     const mf = MENU_FILTERS[tab];
     if (mf && menuFilter[tab]) f[mf.key] = menuFilter[tab];
     if (tab === 'vms' && vmHost) f.host = vmHost;   // v2.915 호스트 표에서 넘어온 '그 호스트의 VM'
     return f;
-  }, [vcenterId, region, q, qNotes, qIpms, tab, menuFilter, vmHost]);
+  }, [vcenterIdsKey, region, q, qNotes, qIpms, tab, menuFilter, vmHost]);
 
   // Scope (region/vCenter) without the free-text query, used by Summary.
-  const scope = useMemo(() => {
-    const s = {};
-    if (vcenterId) s.vcenterId = vcenterId;
-    else if (region) s.region = region;
-    return s;
-  }, [vcenterId, region]);
+  const scope = useMemo(() => hubScopeQuery({ vcenterIds: JSON.parse(vcenterIdsKey), region }), [vcenterIdsKey, region]);
 
 
   // 상단 필터바(리전·vCenter·이름 검색)를 쓰지 않는 탭 — 화면이 자체 필터를 갖거나 필터 대상이
@@ -626,15 +627,17 @@ function Portal({ user, onLogout }) {
   );
   const filterBar = (showFilters && (
           <div className="filters">
-            <Select className="select" value={region} onChange={(e) => { setRegion(e.target.value); setVcenterId(''); }}>
+            <Select className="select" value={region} onChange={(e) => setRegion(e.target.value)}>
               <option value="">전체 리전</option>
               {/* scope.regions 가 지정된 사용자는 허용 리전만 선택 가능(데이터도 서버에서 동일 제한). */}
               {/* v3.13.6: 정해진 4리전 + 등록 데이터에만 있는 리전('Unknown' 등) — 그런 vCenter 도 리전으로 거른다(도구의 리전 선택과 같은 범위) */}
               {scopeRegionOptions(REGIONS, vcenters, user.scope?.regions).map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
             </Select>
             {/* v3.13.0: 리전을 골랐으면 그 리전 vCenter 만 · 리전 밖 vCenter 를 고르면(다른 경로의 값) 리전을 비운다 — 허브 카드와 본문이 엇갈리지 않게 */}
-            <Select className="select" value={vcenterId} onChange={(e) => patchFilter(scopeVcPatch(vcenters, region, e.target.value))}>
+            {/* v3.20.0: 허브에서 법인을 2곳 이상 골랐으면 ‘법인 N곳 선택’(고를 수 없는 option) — 칸에서 한 곳을 고르면 목록이 그 한 곳으로, ‘전체’ 는 전부 해제 */}
+            <Select className="select" value={multiPickText(vcenterIds) ? MULTI_PICK_VALUE : vcenterId} onChange={(e) => { if (e.target.value !== MULTI_PICK_VALUE) patchFilter(scopeVcPatch(vcenters, region, e.target.value)); }}>
               <option value="">{region ? `${regionText(region)} 전체` : '전체 vCenter'}</option>
+              {multiPickText(vcenterIds) && <option value={MULTI_PICK_VALUE} disabled>{multiPickText(vcenterIds)}</option>}
               {scopeVcOptions(vcenters, region, vcenterId).map((v) => <option key={v.id} value={v.id}>{v.outside ? `${v.name} (리전 밖)` : v.name}</option>)}
             </Select>
             {/* v2.915: 허브 세 탭은 공용 바가 똑같다(범위 · 검색 · 안내) — 탭 고유 조건(상태 · 전원 · 메모 · IPMS)은 그 탭의 탭 줄 오른쪽으로 내렸다 */}
@@ -658,7 +661,7 @@ function Portal({ user, onLogout }) {
               </label>
             )}
             {platformOn && <span className="muted ph-scope-note" style={{ fontSize: 11.5 }}>{SCOPE_NOTE}</span>}
-            {(region || vcenterId || q || menuFilter[tab] || (tab === 'vms' && vmHost) || (tab === 'hosts' && hostFocusName)) && (
+            {(region || vcenterIds.length > 0 || q || menuFilter[tab] || (tab === 'vms' && vmHost) || (tab === 'hosts' && hostFocusName)) && (
               <button className="tab" onClick={() => { patchFilter({ region: '', vcenterId: '', q: '', qNotes: false, qIpms: false }); setMenuFilter((m) => ({ ...m, [tab]: '' })); setVmHost(''); setHostFocusName(''); }}>필터 초기화</button>
             )}
           </div>
@@ -683,7 +686,7 @@ function Portal({ user, onLogout }) {
             : <Overview onSelectSite={selectSite} onGotoTab={setTab} modeToggle={ovToggle} />)}
           {tab === 'summary' && <Summary scope={scope} onGotoTab={setTab} />}
           {/* v2.915: vCenter 탭은 허브 범위(리전 · vCenter · 검색)로 카드를 거르고, 카드의 호스트 · VM 수는 그 법인 범위로 탭을 바꾼다(죽은 prop 이던 onSelectSite 를 실제로 쓴다) */}
-          {tab === 'vcenters' && <VCenters onSelectSite={selectSite} onGoVms={(id) => goVms(id)} resetSignal={platformResetSeq} scope={{ region, vcenterId, q }} chipQuery={chipQuery} onChipQuery={setChipQuery} />}
+          {tab === 'vcenters' && <VCenters onSelectSite={selectSite} onGoVms={(id) => goVms(id)} resetSignal={platformResetSeq} scope={{ region, vcenterIds, q }} chipQuery={chipQuery} onChipQuery={setChipQuery} />}
           {tab === 'svcmon' && <SvcMonitor />}
           {tab === 'ipam' && <Ipam />}
           {tab === 'hosts' && <Hosts filters={filters} cond={platformCond} nameFocus={hostFocusName} onNameFocus={setHostFocusName} onGoVms={(host) => goVms('', host)} />}
@@ -884,7 +887,7 @@ function Portal({ user, onLogout }) {
           {platformOn && (
             <PlatformHub tab={tab} tabs={PLATFORM_TAB_KEYS.filter((t) => isAllowed(t))} summary={platformSummary}
               onTab={(t) => { if (t === 'vcenters') setPlatformResetSeq((n) => n + 1); setTab(t); }}
-              vcenters={vcenters} vcenterId={vcenterId} region={region} onPickVcenter={(id) => patchFilter({ vcenterId: id })} chipQuery={chipQuery} onChipQuery={setChipQuery} />
+              vcenters={vcenters} vcenterIds={vcenterIds} region={region} onToggleVcenter={(id) => patchFilter({ vcenterIds: toggleScopeId(vcenterIds, id) })} onClearVcenters={() => patchFilter({ vcenterIds: [] })} chipQuery={chipQuery} onChipQuery={setChipQuery} />
           )}
 
           {tabBody}

@@ -39,6 +39,13 @@ describe('v3.13.1 — VM 이름 조회가 허브 범위(리전 · vCenter)를 �
     expect(vmSearchScopeParams({ region: ' 유럽 ' })).toEqual({ region: '유럽' });
     expect(vmSearchScopeParams({})).toEqual({}); expect(vmSearchScopeParams(null)).toEqual({});
   });
+  it('v3.20.0 — 고른 법인 목록: 1곳 vcenterId · 2곳 이상 vcenterIds(쉼표) · 판정은 hubScopeQuery 한 벌', () => {
+    expect(vmSearchScopeParams({ region: '유럽', vcenterIds: ['vc1'] })).toEqual({ vcenterId: 'vc1' });
+    expect(vmSearchScopeParams({ region: '유럽', vcenterIds: ['vc1', 'vc2'] })).toEqual({ vcenterIds: 'vc1,vc2' });
+    expect(vmSearchScopeParams({ region: ' 유럽 ', vcenterIds: [] })).toEqual({ region: '유럽' });
+    const src = fs.readFileSync(path.join(HERE, 'vcVmSearchText.js'), 'utf8');
+    expect(src).toMatch(/return hubScopeQuery\(/);
+  });
   it('범위 글자 — scopeLabel 의 ‘전체’ 만 ‘전체 vCenter’ · 0건 문구에 범위를 적는다', () => {
     expect(vmSearchScopeText('전체')).toBe('전체 vCenter'); expect(vmSearchScopeText('')).toBe('전체 vCenter');
     expect(vmSearchScopeText('리전 유럽 · 3법인')).toBe('리전 유럽 · 3법인');
@@ -48,8 +55,8 @@ describe('v3.13.1 — VM 이름 조회가 허브 범위(리전 · vCenter)를 �
   it('소스 계약 — 화면이 범위를 요청과 제목에 싣고, 범위가 바뀌면 다시 찾는다', () => {
     const src = fs.readFileSync(path.join(HERE, 'VCenters.jsx'), 'utf8');
     expect(src).toMatch(/limit: VM_SEARCH_LIMIT, \.\.\.vmSearchScopeParams\(scope\) \}/);
-    expect(src).toMatch(/\[term, allowed, scope\?\.region, scope\?\.vcenterId\]/);
+    expect(src).toMatch(/\[term, allowed, scope\?\.region, scopeIdsOf\(scope\)\.join\('\\n'\)\]/);   // v3.20.0: 고른 법인 목록이 바뀌어도 다시 찾는다
     expect(src).toMatch(/<b>VM 이름 검색 — \{scopeText\}<\/b>/);
-    expect(src).toMatch(/<VmNameSearch term=\{vmSearchTerm\(query\)\} sites=\{sites\} scope=\{\{ region: regSel, vcenterId: vcSel \}\} scopeText=\{vmSearchScopeText\(kpiScope\)\} \/>/);
+    expect(src).toMatch(/<VmNameSearch term=\{vmSearchTerm\(query\)\} sites=\{sites\} scope=\{\{ region: regSel, vcenterIds: vcSel \}\} scopeText=\{vmSearchScopeText\(kpiScope\)\} \/>/);
   });
 });
