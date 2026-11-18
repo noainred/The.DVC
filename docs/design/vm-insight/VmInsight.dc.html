@@ -148,6 +148,12 @@ sc-for,sc-if{display:contents}
 .oc .nm{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .oc .tx{font-size:11.5px;text-align:right;white-space:nowrap;color:#c3cfe2}
 .oc .tx b{font-family:"JetBrains Mono",monospace;color:#fcd34d;font-size:12.5px}
+.hide{display:none}
+.ovtabs{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:12px;color:#8b9bb4}
+.ovtabs button{display:inline-flex;align-items:center;gap:8px;min-height:36px;padding:0 14px;border-radius:999px;border:1px solid #243049;background:#141b2d;color:#c3cfe2;font-size:13px;font-weight:600;cursor:pointer}
+.ovtabs button:hover{border-color:#3b82f6}
+.ovtabs button.on{background:rgba(59,130,246,.28);border-color:#3b82f6;color:#fff}
+.ovtabs button b{font-family:"JetBrains Mono",monospace;font-size:12px;font-weight:800;color:#fcd34d}
 .dw{display:block;min-width:0}
 .duo{display:flex;gap:2px;height:12px;min-width:8px}
 .duo i{display:block;height:100%;border-radius:3px;min-width:2px}
@@ -409,21 +415,25 @@ sc-for,sc-if{display:contents}
       </sc-for>
     </div>
 
+    <div class="ovtabs" role="tablist" aria-label="무엇을 볼지">
+      <span>무엇을 볼지</span>
+      <sc-for list="{{ ovKinds }}" as="z" hint-placeholder-count="5"><button type="button" role="tab" class="{{ z.cls }}" aria-selected="{{ z.on }}" onClick="{{ z.pick }}">{{ z.label }} <b>{{ z.count }}</b></button></sc-for>
+    </div>
+
     <div class="row o">
-      <section class="panel" aria-label="법인별 과할당">
-        <div class="ph"><h2>법인별 — 준 것과 쓰는 것</h2><span class="hint">막대 길이 = 할당 · 회색 = 사용 · 주황 = 미사용 · 미사용이 큰 순</span></div>
-        <div class="ctl"><span>보는 자원</span><span class="seg" role="group" aria-label="보는 자원"><sc-for list="{{ ovKinds }}" as="z" hint-placeholder-count="2"><button type="button" class="{{ z.cls }}" aria-pressed="{{ z.on }}" onClick="{{ z.pick }}">{{ z.label }}</button></sc-for></span></div>
+      <section class="panel" aria-label="법인별">
+        <div class="ph"><h2>{{ ovCorpTitle }}</h2><span class="hint">{{ ovCorpHint }}</span></div>
         <sc-for list="{{ ovCorp }}" as="c" hint-placeholder-count="11">
-          <div class="oc" title="{{ c.tip }}"><span class="nm">{{ c.id }}</span><span class="dw"><span class="duo" style="width: {{ c.w }}"><i class="u" style="flex: {{ c.used }} 1 0"></i><i class="d" style="flex: {{ c.idle }} 1 0"></i></span></span><span class="tx"><b>{{ c.idleText }}</b> · {{ c.rest }}</span></div>
+          <div class="oc" title="{{ c.tip }}"><span class="nm">{{ c.id }}</span><span class="dw"><span class="duo" style="width: {{ c.w }}"><i class="u {{ c.uCls }}" style="flex: {{ c.used }} 1 0"></i><i class="d" style="flex: {{ c.idle }} 1 0"></i></span></span><span class="tx"><b>{{ c.idleText }}</b> · {{ c.rest }}</span></div>
         </sc-for>
       </section>
 
       <section class="panel" aria-label="줄일 수 있는 VM">
-        <div class="ph"><h2>{{ ovTopTitle }}</h2><span class="hint">미사용이 큰 순 5대 · 막대 길이 = 할당</span><span class="rt">{{ ovRule }}</span></div>
+        <div class="ph"><h2>{{ ovTopTitle }}</h2><span class="hint">{{ ovTopHint }}</span><span class="rt">{{ ovRule }}</span></div>
         <sc-for list="{{ ovTop }}" as="v" hint-placeholder-count="5">
           <div class="pv" title="{{ v.tip }}">
             <span><span class="nm">{{ v.name }}</span><span class="sb">{{ v.sub }}</span></span>
-            <span><span class="dw"><span class="duo" style="width: {{ v.w }}"><i class="u" style="flex: {{ v.used }} 1 0"></i><i class="d" style="flex: {{ v.idle }} 1 0"></i></span></span><span class="fr">{{ v.text }}</span></span>
+            <span><span class="dw {{ v.dwCls }}"><span class="duo" style="width: {{ v.w }}"><i class="u {{ v.uCls }}" style="flex: {{ v.used }} 1 0"></i><i class="d" style="flex: {{ v.idle }} 1 0"></i></span></span><span class="fr">{{ v.text }}</span></span>
             <span class="bigc"><b>{{ v.big }}</b><small>{{ v.save }}</small></span>
           </div>
         </sc-for>
@@ -526,11 +536,30 @@ class Component extends DCLogic {
     ];
   }
 
+  // 같은 도구 응답의 목록 3종(2026-11-18 11:32 KST · 수는 위 ov() 와 같다) — 법인마다 상위 5줄.
+  // of = 전원 꺼짐 [VM, 디스크 GB, os 번호](디스크 큰 순) · sv = 스냅샷 [VM, 스냅샷 수, 크기 GB](크기 큰 순) · nv = Tools 미실행 [VM, Tools 상태](도구가 준 순서)
+  ovLists() {
+    return {
+      'vc-us-east': {of:[['backup-us-0031',1024,2],['backup-us-0032',1024,0],['dns-us-0185',1024,4],['k8s-node-us-0156',1024,4],['app-us-0160',500,0]],sv:[['backup-us-0109',1,235.5],['db-us-0223',3,174.1],['lb-us-0145',1,145],['mq-us-0055',3,145],['cache-us-0079',3,115]],nv:[['lb-us-0004','OUTDATED'],['backup-us-0023','OUTDATED'],['web-us-0042','OUTDATED'],['db-us-0061','OUTDATED'],['db-us-0080','OUTDATED']]},
+      'vc-us-west': {of:[['db-us-0107',1024,1],['db-us-0119',1024,1],['monitor-us-0055',1024,0],['monitor-us-0126',1024,6],['backup-us-0096',500,5]],sv:[['app-us-0025',1,297],['cache-us-0115',3,297],['monitor-us-0055',3,297],['backup-us-0049',1,235.5],['dns-us-0019',3,235.5]],nv:[['lb-us-0004','OUTDATED'],['db-us-0023','OUTDATED'],['lb-us-0042','OUTDATED'],['db-us-0061','OUTDATED'],['k8s-node-us-0080','OUTDATED']]},
+      'vc-br-sao': {of:[['app-br-0017',1024,1],['backup-br-0033',1024,1],['backup-br-0106',1024,0],['lb-br-0057',500,1],['backup-br-0077',200,1]],sv:[['web-br-0055',3,297],['monitor-br-0109',1,235.5],['monitor-br-0073',1,174.1],['mq-br-0085',1,58],['db-br-0037',1,55]],nv:[['k8s-node-br-0004','OUTDATED'],['lb-br-0023','OUTDATED'],['app-br-0042','OUTDATED'],['k8s-node-br-0061','OUTDATED'],['web-br-0080','OUTDATED']]},
+      'vc-eu-central': {of:[['app-eu-0412',1024,0],['backup-eu-0022',1024,1],['cache-eu-0060',1024,3],['cache-eu-0077',1024,0],['cache-eu-0407',1024,0]],sv:[['app-eu-0475',3,297],['app-eu-0169',1,235.5],['dns-eu-0319',3,235.5],['k8s-node-eu-0073',1,174.1],['lb-eu-0193',1,174.1]],nv:[['monitor-eu-0004','OUTDATED'],['web-eu-0042','OUTDATED'],['app-eu-0061','OUTDATED'],['web-eu-0080','OUTDATED'],['app-eu-0099','OUTDATED']]},
+      'vc-eu-west': {of:[['app-eu-0250',1024,6],['backup-eu-0102',1024,1],['backup-eu-0159',1024,5],['cache-eu-0131',1024,1],['db-eu-0204',1024,1]],sv:[['dns-eu-0025',1,297],['lb-eu-0169',1,235.5],['web-eu-0139',3,235.5],['monitor-eu-0223',3,174.1],['mq-eu-0115',3,145]],nv:[['db-eu-0004','OUTDATED'],['cache-eu-0023','OUTDATED'],['app-eu-0042','OUTDATED'],['mq-eu-0061','OUTDATED'],['app-eu-0080','OUTDATED']]},
+      'vc-me-uae': {of:[['db-me-0056',1024,1],['web-me-0055',1024,4],['k8s-node-me-0021',500,4],['web-me-0040',500,1],['app-me-0058',200,0]],sv:[['web-me-0055',3,297],['web-me-0049',1,115],['dns-me-0013',1,85],['backup-me-0025',1,11.6],['mq-me-0037',1,11]],nv:[['cache-me-0004','OUTDATED'],['k8s-node-me-0023','OUTDATED'],['dns-me-0042','OUTDATED']]},
+      'vc-ap-northeast': {of:[['dns-ap-0211',1024,4],['mq-ap-0215',1024,0],['web-ap-0010',1024,5],['app-ap-0083',500,6],['backup-ap-0059',500,2]],sv:[['cache-ap-0175',3,297],['k8s-node-ap-0163',3,174.1],['app-ap-0049',1,115],['k8s-node-ap-0169',1,115],['app-ap-0037',1,112.6]],nv:[['lb-ap-0004','OUTDATED'],['dns-ap-0023','OUTDATED'],['lb-ap-0042','OUTDATED'],['monitor-ap-0080','OUTDATED'],['cache-ap-0099','OUTDATED']]},
+      'vc-ap-southeast': {of:[['db-ap-0015',1024,0],['dns-ap-0006',1024,2],['dns-ap-0063',1024,6],['lb-ap-0113',1024,0],['mq-ap-0111',1024,1]],sv:[['mq-ap-0109',1,235.5],['app-ap-0025',1,145],['mq-ap-0085',1,58],['web-ap-0097',1,55],['db-ap-0121',1,51.2]],nv:[['db-ap-0004','OUTDATED'],['dns-ap-0023','OUTDATED'],['lb-ap-0042','OUTDATED'],['app-ap-0080','OUTDATED'],['lb-ap-0099','OUTDATED']]},
+      'vc-ap-south': {of:[['app-ap-0016',500,2],['db-ap-0011',500,0],['k8s-node-ap-0008',500,1],['web-ap-0023',500,4],['web-ap-0118',500,5]],sv:[['k8s-node-ap-0055',3,297],['web-ap-0025',1,297],['mq-ap-0049',1,115],['dns-ap-0109',1,46],['web-ap-0013',1,34]],nv:[['web-ap-0004','OUTDATED'],['dns-ap-0042','OUTDATED'],['mq-ap-0061','OUTDATED'],['k8s-node-ap-0080','OUTDATED'],['lb-ap-0099','OUTDATED']]},
+      'vc-cn-east': {of:[['app-cn-0089',1024,5],['app-cn-0198',1024,3],['backup-cn-0277',1024,1],['cache-cn-0117',1024,5],['cache-cn-0165',1024,3]],sv:[['db-cn-0025',1,297],['dns-cn-0235',3,297],['monitor-cn-0115',3,297],['k8s-node-cn-0229',1,235.5],['monitor-cn-0019',3,235.5]],nv:[['monitor-cn-0004','OUTDATED'],['dns-cn-0023','OUTDATED'],['cache-cn-0042','OUTDATED'],['mq-cn-0061','OUTDATED'],['k8s-node-cn-0099','OUTDATED']]},
+      'vc-cn-north': {of:[['backup-cn-0007',1024,2],['db-cn-0073',1024,1],['dns-cn-0026',1024,5],['dns-cn-0063',1024,1],['db-cn-0014',500,2]],sv:[['cache-cn-0145',1,297],['db-cn-0055',3,297],['dns-cn-0169',1,235.5],['k8s-node-cn-0079',3,235.5],['db-cn-0073',1,174.1]],nv:[['mq-cn-0004','OUTDATED'],['web-cn-0042','OUTDATED'],['mq-cn-0080','OUTDATED'],['k8s-node-cn-0099','OUTDATED'],['app-cn-0118','OUTDATED']]},
+    };
+  }
+
   renderVals() {
     const st = this.state;
     const rows = this.rows();
     const H = this.hosts();
     const G = this.gp();
+    const L = this.ovLists();
     const oOf = {}; this.ov().forEach((o) => { oOf[o.id] = o; });
     const gOf = {}; G.rows.forEach((g) => { gOf[g.id] = g; });
     const fmt = (v) => Number(v).toLocaleString('en-US');
@@ -757,11 +786,13 @@ class Component extends DCLogic {
     const ovStats = [
       { label: '전원 꺼짐 VM', value: fmt(offN) + '대', sub: '디스크 ' + gbT(offGB) + ' 점유', tip: '전원이 꺼진 VM' },
       { label: '스냅샷 보유 VM', value: fmt(snN) + '대', sub: '스냅샷 크기 ' + gbT(snGB), tip: '스냅샷이 있는 VM' },
-      { label: 'Tools 미실행(구동 중)', value: fmt(ntN) + '대', sub: 'VMware Tools 가 실행 중이 아닌 구동 VM', tip: '전원이 켜져 있는데 VMware Tools 상태가 실행 중이 아닌 VM' },
+      { label: 'Tools 미실행(구동 중)', value: fmt(ntN) + '대', sub: 'Tools 상태가 ‘실행 중’ 이 아닌 구동 VM', tip: '전원이 켜져 있는데 VMware Tools 상태가 실행 중이 아닌 VM' },
       { label: 'Thin 여유', value: gbT(thGB), sub: 'Thin 디스크 VM ' + fmt(thN) + '대의 아직 쓰지 않은 공간', tip: 'Thin(씬) 디스크 VM 의 아직 쓰지 않은 공간(uncommitted) 합' },
     ];
     const isMem = st.ovKind !== 'cpu';
-    const ovKinds = [['mem', '메모리'], ['cpu', 'CPU']].map(([k, label]) => ({ label, on: (k === 'mem') === isMem, cls: (k === 'mem') === isMem ? 'on' : '', pick: () => this.setState({ ovKind: k }) }));
+    const kind = ['mem', 'cpu', 'off', 'snap', 'tools'].indexOf(st.ovKind) >= 0 ? st.ovKind : 'mem';
+    const ovKinds = [['mem', '메모리 과할당', mCand], ['cpu', 'CPU 과할당', cCand], ['off', '전원 꺼짐', offN], ['snap', '스냅샷', snN], ['tools', 'Tools 미실행', ntN]]
+      .map(([k, label, cnt]) => ({ label, count: fmt(cnt), on: k === kind, cls: k === kind ? 'on' : '', pick: () => this.setState({ ovKind: k }) }));
     const unitT = (v) => (isMem ? gbT(v) : f1(v) + ' GHz');
     const tri = (o) => (isMem ? o.m : o.c);
     const maxAlloc = Math.max.apply(null, scope.map((r) => tri(oOf[r.id])[0]));
@@ -780,6 +811,35 @@ class Component extends DCLogic {
       tip: t[0] + ' — 할당 ' + unitT(t[1]) + ' · 사용 ' + unitT(t[2]) + ' · 미사용 ' + unitT(t[3]),
     }));
 
+    // 전원 꺼짐 · 스냅샷 · Tools 미실행 — 재는 값이 하나라 막대도 한 색(주황)이다.
+    const single = (get, big, rest, tipOf) => {
+      const xs = scope.map((r) => ({ o: oOf[r.id], v: get(oOf[r.id]) })).sort((a, b) => b.v - a.v); const mx = Math.max.apply(null, xs.map((x) => x.v).concat([1]));
+      return xs.map(({ o, v }) => ({ id: o.id, w: pctN(v, mx).toFixed(1) + '%', used: 0, uCls: 'hide', idle: 1, idleText: big(o), rest: rest(o), tip: o.id + ' — ' + tipOf(o) }));
+    };
+    const listOf = (key, sortIdx) => scope.reduce((a, r) => a.concat(L[r.id][key].map((t) => ({ vc: r.id, t }))), [])
+      .sort((a, b) => (sortIdx == null ? 0 : (b.t[sortIdx] - a.t[sortIdx])) || 0).slice(0, 5);
+    let ovCorpX = ovCorp; let ovTopX = ovTop;
+    let ovCorpTitle = '법인별 — 준 것과 쓰는 것'; let ovCorpHint = '막대 길이 = 할당 · 회색 = 사용 · 주황 = 미사용 · 미사용이 큰 순';
+    let ovTopTitle = isMem ? '메모리를 줄일 수 있는 VM' : 'CPU 를 줄일 수 있는 VM'; let ovTopHint = '미사용이 큰 순 5대 · 막대 길이 = 할당';
+    let ovRule = isMem ? '후보 = 사용률 40% 이하' : '후보 = 사용률 20% 이하';
+    if (kind === 'off') {
+      ovCorpX = single((o) => o.off[1], (o) => '점유 ' + gbT(o.off[1]), (o) => fmt(o.off[0]) + '대', (o) => '전원 꺼짐 ' + fmt(o.off[0]) + '대 · 디스크 ' + gbT(o.off[1]));
+      const xs = listOf('of', 1); const mx = Math.max.apply(null, xs.map((x) => x.t[1]).concat([1]));
+      ovTopX = xs.map(({ vc, t }) => ({ name: t[0], sub: vc + ' · ' + OS[t[2]], w: pctN(t[1], mx).toFixed(1) + '%', used: 0, uCls: 'hide', idle: 1, text: '전원이 꺼진 채 디스크를 잡고 있습니다', big: gbT(t[1]), save: '점유 디스크', tip: t[0] + ' — 디스크 ' + gbT(t[1]) }));
+      ovCorpTitle = '법인별 — 꺼진 VM 이 잡은 디스크'; ovCorpHint = '막대 = 점유 디스크 · 큰 순'; ovTopTitle = '전원이 꺼진 VM'; ovTopHint = '디스크를 많이 잡은 순 5대'; ovRule = '꺼진 지 오래된 VM 은 도구의 ‘전원 꺼짐’ 에서';
+    } else if (kind === 'snap') {
+      ovCorpX = single((o) => o.sn[1], (o) => '스냅샷 ' + gbT(o.sn[1]), (o) => fmt(o.sn[0]) + '대', (o) => '스냅샷 보유 ' + fmt(o.sn[0]) + '대 · 크기 ' + gbT(o.sn[1]));
+      const xs = listOf('sv', 2); const mx = Math.max.apply(null, xs.map((x) => x.t[2]).concat([1]));
+      ovTopX = xs.map(({ vc, t }) => ({ name: t[0], sub: vc, w: pctN(t[2], mx).toFixed(1) + '%', used: 0, uCls: 'hide', idle: 1, text: '스냅샷 ' + t[1] + '개', big: gbT(t[2]), save: '스냅샷 크기', tip: t[0] + ' — 스냅샷 ' + t[1] + '개 · ' + gbT(t[2]) }));
+      ovCorpTitle = '법인별 — 스냅샷 크기'; ovCorpHint = '막대 = 스냅샷 크기 · 큰 순'; ovTopTitle = '스냅샷이 큰 VM'; ovTopHint = '스냅샷 크기가 큰 순 5대'; ovRule = '스냅샷 보유 VM 전체는 도구에서';
+    } else if (kind === 'tools') {
+      ovCorpX = single((o) => o.nt, (o) => fmt(o.nt) + '대', (o) => '구동 ' + fmt(o.on) + '대 중 ' + pct(o.nt, o.on), (o) => 'Tools 미실행 ' + fmt(o.nt) + '대(구동 ' + fmt(o.on) + '대 중)');
+      ovTopX = listOf('nv', null).map(({ vc, t }) => ({ name: t[0], sub: vc, w: '0%', dwCls: 'hide', used: 0, uCls: 'hide', idle: 1, text: '구동 중 · Tools 상태가 ‘실행 중’ 이 아닙니다', big: t[1], save: 'Tools 상태', tip: t[0] + ' — Tools 상태 ' + t[1] }));
+      ovCorpTitle = '법인별 — Tools 미실행 VM'; ovCorpHint = '막대 = 대수 · 많은 순'; ovTopTitle = 'Tools 상태가 ‘실행 중’ 이 아닌 구동 VM'; ovTopHint = '5대(도구가 준 순서 — 순위가 아닙니다)'; ovRule = '전체 목록은 도구에서';
+    }
+    ovCorpX = ovCorpX.map((c) => Object.assign({ uCls: '' }, c));
+    ovTopX = ovTopX.map((v) => Object.assign({ uCls: '', dwCls: '' }, v));
+
     const isInsight = st.sub === 'insight';
     const isOver = st.sub === 'over';
     const other = OTHER[st.sub] || ['', ''];
@@ -787,8 +847,7 @@ class Component extends DCLogic {
       tabs, q: st.q, onFind: (e) => this.setState({ q: e.target.value }), chips,
       hasSel, selText: picked.length + '곳 선택', clearSel: () => this.setState({ sel: {} }),
       subs, showInsight: isInsight, showOver: isOver, showOther: !isInsight && !isOver, otherTitle: other[0], otherText: other[1],
-      ovHeros, ovStats, ovKinds, ovCorp, ovTop, ovTopTitle: isMem ? '메모리를 줄일 수 있는 VM' : 'CPU 를 줄일 수 있는 VM',
-      ovRule: isMem ? '후보 = 사용률 40% 이하 · 받은 시각 오전 11:26' : '후보 = 사용률 20% 이하 · 받은 시각 오전 11:26',
+      ovHeros, ovStats, ovKinds, ovCorp: ovCorpX, ovTop: ovTopX, ovCorpTitle, ovCorpHint, ovTopTitle, ovTopHint, ovRule,
       kpis, fills, sizes, mapCols, tiles, scale, scaleTitle: '색 = ' + F.label,
       regions, osTotal: 'OS 7종 · ' + fmt(n) + '대', fam, osRows, power, conn, misc, tools, hw,
       cpuHist: histOf(chv, 'CPU'), memHist: histOf(mhv, '메모리'),
