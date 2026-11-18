@@ -1,5 +1,6 @@
 // views/insight/MapSize.jsx — 지도 크기 조절 줄과 설정 상자(v3.21.0 · 설계 docs/design/host-insight §10 · 고침 ‘설정은 누를 때만’). VM · Hypervisor 분석이 같이 쓴다.
-//   조절 줄: ‘지도 크기’ 자동 · 보통 · 크게 · 아주 크게 + ‘설정 · 520px ▾’ 단추(aria-expanded). 상자는 단추를 누를 때만 열린다(처음 닫힘).
+//   조절 줄: ‘설정 · 520px ▾’ 단추 하나(aria-expanded). 크기를 고르는 것(미리 정한 크기 · 높이 · 폭)은 전부 상자 안 — 상자는 단추를 누를 때만 열리고 ‘닫기’ 로 닫는다(처음 닫힘).
+//   v3.22.1(사용자 지시 2026-11-18 21:04 — ‘크기 조정하는 메뉴가 항상 보여 · 설정 버튼을 누를 때만 보이고 평소에는 안 보여야 돼’): 조절 줄에 늘 보이던 ‘지도 크기’ 자동 · 보통 · 크게 · 아주 크게 칸을 뺐다(상자 안에 같은 칸이 있다).
 //   상자: 높이(− · 슬라이더 · ＋ — 300 ~ 1,200px · 20px · 슬라이더는 키보드 ← → 로도 20px) · 미리 정한 크기 · 폭(기본 · 전체 폭 — 좁은 화면에서는 숨김) · 기본값으로 · 닫기.
 //   값 계산 · 기억은 insightPrefs.js(순수 · try/catch) — useMapPrefs 가 화면별 키로 읽고 쓴다.
 import React, { useState } from 'react';
@@ -13,20 +14,13 @@ export function useMapPrefs(storageKey) {
   return [prefs, update];
 }
 
-/** 조절 줄의 ‘지도 크기’ 칸 + 설정 단추. open/onOpen 은 호출부가 든다(상자는 조절 줄 아래 자리에 MapSizeBox 로). */
+/** 조절 줄의 설정 단추 하나(v3.22.1 — 크기 칸은 상자 안에만). open/onOpen 은 호출부가 든다(상자는 조절 줄 아래 자리에 MapSizeBox 로). onPrefs 는 예전 호출 모양을 위해 받기만 한다. */
 export function MapSizeSeg({ prefs, onPrefs, maxTiles, open, onOpen }) {
   const p = normMapPrefs(prefs);
   const h = mapHeightOf(p, maxTiles);
   return (
-    <>
-      <span>지도 크기</span>
-      <span className="ins-seg" role="group" aria-label="지도 크기">
-        {MAP_SIZE_KEYS.map(([k, label]) => (
-          <button key={k} type="button" className={p.size === k ? 'on' : ''} aria-pressed={p.size === k} onClick={() => onPrefs(pickMapSize(p, k, maxTiles))}>{label}</button>
-        ))}
-      </span>
-      <button type="button" className={`ins-btn${open ? ' on' : ''}`} aria-expanded={!!open} onClick={() => onOpen(!open)}>설정 · {h}px {open ? '▴' : '▾'}</button>
-    </>
+    <button type="button" className={`ins-btn${open ? ' on' : ''}`} aria-expanded={!!open} title="지도 크기 설정 — 누르면 열리고 ‘닫기’ 로 닫습니다"
+      onClick={() => onOpen(!open)}>설정 · {h}px {open ? '▴' : '▾'}</button>
   );
 }
 

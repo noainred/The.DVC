@@ -60,6 +60,7 @@ describe('분석 보기 렌더', () => {
     expect(t).toMatch(/전체 호스트 7 /);               // 8대 중 오래된 법인의 1대 제외
     expect(t).toMatch(/설정 · 520px ▾/);               // 처음 크기 = 크게 520 · 설정 상자는 닫힘
     expect(t).not.toMatch(/지도 크기 설정/);
+    expect(t).not.toMatch(/아주 크게/);                // v3.22.1: 크기 칸(자동 · 보통 · 크게 · 아주 크게)도 상자 안에만 — 닫힌 동안은 안 보인다
     expect(t).toMatch(/하드웨어 장애 · 경고/);
     expect(t).toMatch(/예기치 않은 재부팅\(30일\)/);
     expect(t).toMatch(/HA 꺼진 클러스터/);
