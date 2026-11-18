@@ -71,7 +71,7 @@ test('D1 — 이미 등록된 옛 정의 대상은 \'변경\' · 적용하면 �
   const row = cls.rows.find((r) => r.key === x.id);
   assert.equal(row.state, 'changed');
   assert.equal(row.defChanged, true);
-  assert.match(row.reason, /점검 정의가 바뀌었습니다/);
+  assert.match(row.reason, /점검 정의 갱신/);
   const plan = SYNC.planApply(cls.rows, [x.id], { builtByKey: new Map([[x.id, x]]) });
   assert.equal(plan.change.length, 1);
   SYNC.executePlan(plan, { user: 'adm' });

@@ -304,7 +304,7 @@ export function classifyCatalog(built = {}, svcTargets = [], { ctx = {}, candida
       const repath = !changed && !ctx?.corpUnreadable && row.corpKey && t(st.path) === placedAt && row.path && row.path !== t(st.path) ? row.path : '';
       rows.push({
         ...row, state: changed ? 'changed' : 'linked', ...(repath ? { repath } : {}), ...(reappeared ? { reappeared: true, reason: '설정에 다시 나타났습니다 — 적용하면 사라짐 표지를 지웁니다(설정 연동이 중지했다면 다시 켭니다).' } : {}),
-        ...(defStale && !hostChanged && !portChanged ? { defChanged: true, reason: `점검 정의가 바뀌었습니다 — 예전 HTTP 점검 경로(${LEGACY_COLLECTOR_PATH})는 로그인이 필요해 인증을 켠 포탈에서 늘 401 실패였습니다. 적용하면 무인증 경로(${COLLECTOR_PROBE_PATH})로 고칩니다(점검 id 승계).` } : {}),
+        ...(defStale && !hostChanged && !portChanged ? { defChanged: true, reason: `점검 정의 갱신 — 옛 HTTP 경로(${LEGACY_COLLECTOR_PATH})는 인증 포탈에서 늘 401 이었습니다. 적용하면 공개 경로로 고칩니다(점검 id 승계).` } : {}),
         targetId: st.id, targetPath: st.path, targetName: st.name, targetEnabled: st.enabled !== false, targetAgent: t(st.agent),
         tests: Array.isArray(st.tests) ? st.tests.length : 0, syncedAt: o.syncedAt || null, ...(o.gone ? { wasGone: o.gone } : {}),
         ...(changed ? { prevHost: t(st.host), prevPort: o.port || null } : {}),
@@ -651,7 +651,7 @@ export function planApply(rows, keys, { enabled = false, goneAction = 'disable',
       });
     } else if (r.state === 'changed') {
       if (!x) { skip.push({ key: k, name: r.name, reason: '카탈로그 항목을 다시 읽지 못했습니다.' }); continue; }
-      change.push({ key: k, name: r.name, kindLabel: r.kindLabel, targetId: r.targetId, prevHost: r.prevHost, prevPort: r.prevPort, host: r.host, port: r.port, x, corp: r.corp });
+      change.push({ key: k, name: r.name, kindLabel: r.kindLabel, targetId: r.targetId, prevHost: r.prevHost, prevPort: r.prevPort, host: r.host, port: r.port, x, corp: r.corp, ...(r.defChanged ? { defChanged: true } : {}) });
     } else if (r.state === 'gone') {
       gone.push({ key: k, name: r.name, kindLabel: r.kindLabel, targetId: r.targetId, action: GONE_ACTIONS.includes(goneAction) ? goneAction : 'disable' });
     }
@@ -663,7 +663,7 @@ export function planApply(rows, keys, { enabled = false, goneAction = 'disable',
 export function previewOf(plan, bulkPlan = null) {
   return {
     add: plan.add.map((a) => ({ key: a.key, name: a.name, kindLabel: a.kindLabel, path: a.path, host: a.host, port: a.port, agent: a.agent, ...(a.agentFrom ? { agentFrom: a.agentFrom } : {}), checks: checkBrief(a.row.tests) })),
-    change: plan.change.map((c) => ({ key: c.key, name: c.name, kindLabel: c.kindLabel, targetId: c.targetId, prevHost: c.prevHost, prevPort: c.prevPort, host: c.host, port: c.port })),
+    change: plan.change.map((c) => ({ key: c.key, name: c.name, kindLabel: c.kindLabel, targetId: c.targetId, prevHost: c.prevHost, prevPort: c.prevPort, host: c.host, port: c.port, ...(c.defChanged ? { defChanged: true } : {}) })),
     gone: plan.gone.map((g) => ({ key: g.key, name: g.name, kindLabel: g.kindLabel, targetId: g.targetId, action: g.action })),
     skip: plan.skip.slice(0, 500),
     ...(bulkPlan ? {
