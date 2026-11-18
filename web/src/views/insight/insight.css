@@ -4,6 +4,9 @@
  * 그리드 · 플렉스 자식은 min-width:0 · 트랙은 minmax(0, …) · 버튼 여러 개 줄은 flex-wrap · uppercase 금지.
  */
 .ins { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+/* v3.22.0 Chromium: Hypervisor 탭은 .vmh 밖이라 표 안 링크가 기본 짙은 파랑(어두운 바탕에서 안 읽힘) — VM 허브와 같은 색 */
+.ins a:not([class]) { color: #93c5fd; }
+.ins a:not([class]):hover { color: #bfdbfe; }
 .ins-note { font-size: 12px; line-height: 1.6; color: var(--text-dim); white-space: normal; min-width: 0; }
 .ins-note.warn { color: #fcd34d; }
 
@@ -95,6 +98,11 @@ a.ins-td:hover { border-color: var(--accent); }
 .ins-mk { align-self: flex-start; font-style: normal; font-size: 10.5px; font-weight: 800; line-height: 1.3; padding: 0 6px; border-radius: 999px; background: #0b0b0b; color: #fca5a5; border: 1px solid #ef4444; white-space: nowrap; flex: none; }
 .ins-tl.one .ins-mk { align-self: center; }
 .ins-scale .ins-mk { margin-right: 5px; }
+/* v3.22.0 Chromium 400px: 지역 띠 안 칸이 좁으면(클러스터 7개 ≈ 45px) 글이 ‘빠…’ 로만 남아 뜻이 없다 — 칸 폭으로 줄인다(자세한 값은 툴팁 · 누르면 그 법인 선택).
+   칸 자체를 크기 컨테이너로 두고 80px 미만이면 둘째 줄을 감추고 · 56px 미만이면 이름도 감추고 표(못 버팀)만 ‘!’ 크기로 남긴다. */
+.ins-bandt .ins-tl { container-type: inline-size; padding: 4px 5px; }
+@container (max-width: 80px) { .ins-tl span { display: none; } .ins-tl .ins-mk { font-size: 9.5px; padding: 0 2px; letter-spacing: -0.3px; } }
+@container (max-width: 56px) { .ins-tl b { display: none; } }
 .ins-scale { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 11.5px; color: var(--text-dim); }
 .ins-scale i { display: inline-block; width: 14px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 

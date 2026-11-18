@@ -4,6 +4,7 @@
 //     오래됨 · 모름 법인은 합에 섞지 않고 따로 밝힌다. 특수 기능 요약 패널은 insight-tools(마운트 1회 + ‘다시 받기’)가 그린다.
 //   공용 부품(views/insight/ — 묶음 지도 · 타일 · 막대 줄 · 히스토그램 · 묶음 접기 · 지도 크기 설정)을 그대로 쓴다 — 호스트 전용 사본을 만들지 않는다.
 //   새 판정 없음 — 과부하 · 확인 대상 · 하드웨어 · 재부팅 · N+1 · HA · 수용 제어 · DRS 는 서버 값 · 기준값은 응답의 thresholds · 권한이 없는 칸은 숨긴다.
+import { unitText } from '../unitText.js'; // v3.22.0: 값이 없으면 단위 없는 ‘—’(BUG-20)
 import React, { useMemo, useState } from 'react';
 import { usePolling, toolAllowed } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
@@ -92,7 +93,7 @@ export default function HostInsight({ filters = {}, scopeIds = null, scopeRegion
       ? ` · 한 대 빠지면 CPU ${n1PctText(c.n1Cpu)} · 메모리 ${n1PctText(c.n1Mem)}${fail ? ' — 버티지 못함' : c.n1Ok == null ? '(판정 밖)' : ''}`
       : '';
     return {
-      title: t.label, line: `${corpName(r)} · ${size.text(t.size)} · ${fill.short} ${fill.key === 'n1mem' ? n1PctText(fv) : pct0(fv)}`, bg: col.bg, ink: col.ink, stale: r.stale === true,
+      title: t.label, line: `${fill.short} ${fill.key === 'n1mem' ? n1PctText(fv) : pct0(fv)} · ${size.text(t.size)}`, bg: col.bg, ink: col.ink, stale: r.stale === true,
       mark: fail ? '못 버팀' : null,
       tip: `${t.label} · ${corpName(r)}${r.city ? ` · ${r.city}` : ''}${r.stale ? ' · 값이 오래됨(합에 넣지 않음)' : ''} — 호스트 ${fmtN(c.hosts)}대(연결 ${fmtN(c.connected)} · 점검 ${fmtN(c.maint)} · 끊김 ${fmtN(c.down)}) · 코어 ${fmtN(c.cores)} · 메모리 ${gbText(c.memTotalGB)} · 평균 CPU ${pct0(c.cpuAvg)} · 가장 바쁜 호스트 ${pct0(c.busiestCpu)} · 평균 메모리 ${pct0(c.memAvg)}${n1}${(numOrNull(c.usageUnknown) ?? 0) > 0 ? ` · 사용률 모름 ${fmtN(c.usageUnknown)}대` : ''}${onScopeIds ? ' — 누르면 이 법인을 바로가기 선택에 켜고 끕니다' : ''}`,
     };
@@ -101,7 +102,7 @@ export default function HostInsight({ filters = {}, scopeIds = null, scopeRegion
   const clusterCells = layout.cols.flatMap((c) => c.tiles);
   const overN = fill.crit != null ? clusterCells.filter((t) => fillStep(fill.val(t.cell), fill).over).length : 0;
   const unknownN = clusterCells.filter((t) => fill.val(t.cell) == null).length;
-  const scaleNote = `파랑 = 값의 크기 · 빨강 = ${fill.crit ?? '—'}% 이상인 칸만 — 지금 ‘${fill.label}’ 기준으로 ${fmtN(overN)}칸입니다(${fmtN(clusterCells.length)}칸 중).`
+  const scaleNote = `파랑 = 값의 크기 · 빨강 = ${unitText(fill.crit, '%')} 이상인 칸만 — 지금 ‘${fill.label}’ 기준으로 ${fmtN(overN)}칸입니다(${fmtN(clusterCells.length)}칸 중).`
     + (access.cluster ? ' ‘못 버팀’ 표는 색 기준과 상관없이 붙습니다.' : '')
     + (unknownN ? ` 값 모름(회색) ${fmtN(unknownN)}칸${fill.key === 'n1mem' ? ' — 독립 호스트 · 용량을 모르는 호스트가 있는 클러스터는 빠진 뒤 값이 없습니다' : ''}.` : '');
   const hiddenNote = layout.hidden.length ? ` 칸 없음 ${fmtN(layout.hidden.length)}개(크기 값 모름 또는 0): ${layout.hidden.slice(0, 6).map((t) => t.label).join(' · ')}${layout.hidden.length > 6 ? ' 외' : ''}` : '';
@@ -297,7 +298,7 @@ function DistPanels({ s, used, th, access, tops, esxi, nameOf, onOpenCorp }) {
             { key: 'r', value: ratio == null ? '—' : `${ratio} : 1`, text: 'vCPU : 물리 코어', tip: `VM 에 준 vCPU ${fmtN(s.vcpu)} ÷ 물리 코어 ${fmtN(s.cores)}${(numOrNull(s.capUnknown) ?? 0) > 0 ? ' — 용량 모름 호스트가 있어 비율을 내지 않습니다' : ''}` },
             { key: 'm', value: numOrNull(s.ramPct) == null ? '—' : `${s.ramPct}%`, text: '메모리 — VM 에 준 것 ÷ 호스트 총량', tip: `VM 에 준 메모리 ${gbText(mbToGb(s.memVmMB))} ÷ 호스트 메모리 ${gbText(mbToGb(s.memTotalMB))}` },
             { key: 'h', value: gbText(headGB), text: `메모리 여유${eq != null ? ` — 호스트 약 ${eq}대분` : ''}`,
-              tip: `‘법인별’ 보기의 여유(headroom — 정격 × ${th.headroomPct ?? '—'}% − 사용 중) 합${avgGB != null ? ` ÷ 이 범위 호스트 한 대의 평균 메모리 ${gbText(avgGB)}` : ''}${(numOrNull(s.headroom?.excluded) ?? 0) > 0 ? ` · 여유 계산에서 뺀 호스트 ${fmtN(s.headroom.excluded)}대` : ''}` },
+              tip: `‘법인별’ 보기의 여유(headroom — 정격 × ${unitText(th.headroomPct, '%')} − 사용 중) 합${avgGB != null ? ` ÷ 이 범위 호스트 한 대의 평균 메모리 ${gbText(avgGB)}` : ''}${(numOrNull(s.headroom?.excluded) ?? 0) > 0 ? ` · 여유 계산에서 뺀 호스트 ${fmtN(s.headroom.excluded)}대` : ''}` },
           ]} />
           {(numOrNull(s.headroom?.excluded) ?? 0) > 0 && <div className="ins-note">여유 계산에서 뺀 호스트(용량 · 사용률 모름) {fmtN(s.headroom.excluded)}대 — 여유 합에 넣지 않았습니다.</div>}
           <div className="ins-h3">호스트 한 대의 VM 수</div>

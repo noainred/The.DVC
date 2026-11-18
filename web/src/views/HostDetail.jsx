@@ -84,7 +84,7 @@ export default function HostDetail({ id }) {
     return { rows: [...m.entries()].map(([name, n]) => ({ name, vms: n })).sort((a, b) => b.vms - a.vms || a.name.localeCompare(b.name)), noDev };
   }, [vmList]);
 
-  if (st.error) return <div><a href="#/hosts" className="hd-back">‹ 호스트 목록</a><ErrorBox error={st.error} /></div>;
+  if (st.error) return <div><a href="#/hosts/list" className="hd-back">‹ 호스트 목록</a><ErrorBox error={st.error} /></div>;
   if (!h) return <Loading />;
 
   const vc = st.data.vcenter;
@@ -135,7 +135,7 @@ export default function HostDetail({ id }) {
     <div className="hd">
       <div className="hd-top">
         <div className="hd-title">
-          <a href="#/hosts" className="hd-back">‹ 호스트 목록</a>
+          <a href="#/hosts/list" className="hd-back">‹ 호스트 목록</a>
           <div className="hd-name">
             <b>{h.name}</b>
             <StateBadge state={h.connectionState} />

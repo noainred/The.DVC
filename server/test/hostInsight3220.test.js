@@ -30,6 +30,8 @@ const DAY = 86_400_000;
 const HOUR = 3_600_000;
 // 기준 시각 — 실제 시각을 정시 경계로 떨어뜨려 고정(Date.now() 직접 · 고정 epoch 둘 다 깨진다)
 const NOW = Math.floor(Date.now() / HOUR) * HOUR;
+// 경합 표본 시각은 판정이 실제 시각(Date.now)과 비교한다(staleAfterMs 45분) — 정시 경계로 떨어뜨린 NOW 에서 1분 전이면 매시 45분 뒤에 낡은 표본이 돼 ⑤ 가 실패했다(v3.22.0 메인 재현). 표본은 실제 시각 1분 전.
+const RECENT = Date.now() - 60_000;
 let seq = 0;
 const GB = 1024;
 
@@ -39,7 +41,7 @@ const host = (vc, id, cluster, o = {}) => {
     connectionState: 'CONNECTED', powerState: 'POWERED_ON', version: '8.0.2', vendor: 'Dell Inc.', model: 'PowerEdge R760',
     cpuCores: 32, cpuSockets: 2, cpuThreads: 64, cpuTotalMhz: 64000, cpuUsagePct: 40, memTotalMB: 512 * GB, memUsagePct: 50, powerWatts: 400,
     hcfg: { at: NOW - HOUR, certNotAfter: NOW + 400 * DAY, services: { ssh: { running: false } }, mp: { luns: 4, shared: 4, paths: 8, dead: 0, deadLuns: [], singlePath: 0, singleLuns: [], policies: { VMW_PSP_RR: 4 } } },
-    perfc: { at: NOW - 60_000, diskMaxMs: { avg: 5 }, ds: [] },
+    perfc: { at: RECENT, diskMaxMs: { avg: 5 }, ds: [] },
     ...o,
   };
   h.cpuUsageMhz = h.cpuUsagePct == null || h.cpuTotalMhz == null ? 0 : Math.round(h.cpuTotalMhz * h.cpuUsagePct / 100);
@@ -50,7 +52,7 @@ const hc = (o) => ({ at: NOW - HOUR, certNotAfter: NOW + 400 * DAY, services: { 
 const vm = (vc, hostName, i, o = {}) => ({
   id: `${vc}:vm-${hostName}-${i}`, vcenterId: vc, name: `${hostName}-vm${i}`, host: hostName, powerState: 'POWERED_ON', template: false,
   cpuCount: 4, memMB: 8 * GB, cpuUsagePct: 10, memUsagePct: 20,
-  perfc: { at: NOW - 60_000, samples: 15, readyPct: { avg: 2, max: 3 }, costopPct: { avg: 0, max: 0 }, latencyPct: { avg: 0, max: 0 }, readMs: { avg: 3, max: 5 }, writeMs: { avg: 2, max: 4 }, disk: 'scsi0:0' },
+  perfc: { at: RECENT, samples: 15, readyPct: { avg: 2, max: 3 }, costopPct: { avg: 0, max: 0 }, latencyPct: { avg: 0, max: 0 }, readMs: { avg: 3, max: 5 }, writeMs: { avg: 2, max: 4 }, disk: 'scsi0:0' },
   ...o,
 });
 
@@ -62,7 +64,7 @@ function buildSnap() {
     host('vc-a', 'h3', 'CL1', { cpuUsagePct: 20, model: 'PowerEdge R750', powerWatts: undefined }),
     host('vc-a', 'h4', 'CL2', { connectionState: 'DISCONNECTED', cpuUsagePct: 0, memUsagePct: 0 }),
     host('vc-a', 'h5', 'CL2', { cpuUsagePct: null, memUsagePct: null, hcfg: null }),
-    host('vc-a', 'h6', 'CL2', { cpuUsagePct: 55, memUsagePct: 85, perfc: { at: NOW - 60_000, diskMaxMs: { avg: 60 }, ds: [{ uuid: 'vc-a-u1', readMs: { avg: 70 }, writeMs: { avg: 1 } }] } }),
+    host('vc-a', 'h6', 'CL2', { cpuUsagePct: 55, memUsagePct: 85, perfc: { at: RECENT, diskMaxMs: { avg: 60 }, ds: [{ uuid: 'vc-a-u1', readMs: { avg: 70 }, writeMs: { avg: 1 } }] } }),
     host('vc-a', 'h7', 'standalone', { cpuUsagePct: 30, vendor: 'HPE', model: 'ProLiant DL380' }),
     // vc-b(아시아) — 클러스터 설정 미수집 · 용량 모름 1 · 점검 1
     host('vc-b', 'h1', 'BCL', { cpuCores: null, cpuTotalMhz: null, memTotalMB: null, cpuUsagePct: 30 }),

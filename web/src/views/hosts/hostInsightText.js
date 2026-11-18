@@ -157,7 +157,7 @@ export function checkItems(s, access = {}, th = {}) {
       tip: '계획하지 않은 재부팅이 있었던 호스트 — 원인(전원 · 패닉 · 펌웨어)을 확인할 대상입니다' });
   }
   if (access?.cluster) {
-    out.push({ key: 'n1', label: '한 대 빠지면 못 버티는 클러스터', value: cl.n1Fail ?? null, tone: 'crit', sub: `증설 · VM 이전 대상${unkText(cl.n1Unknown, '모름', '개')}`,
+    out.push({ key: 'n1', label: '못 버티는 클러스터', value: cl.n1Fail ?? null, tone: 'crit', sub: `한 대 빠지면 · 증설 · VM 이전 대상${unkText(cl.n1Unknown, '모름', '개')}`,
       tip: '호스트 한 대가 죽으면 남은 호스트가 VM 을 다 받지 못합니다 — ‘법인별’ 보기의 판정 그대로' });
     out.push({ key: 'ha', label: 'HA 꺼진 클러스터', value: cl.haOff ?? null, tone: 'crit', sub: `VM 이 다시 켜지지 않음${unkText(cl.cfgUnknown, '설정 미수집', '개')}`,
       tip: '호스트가 죽어도 VM 이 다른 호스트에서 다시 켜지지 않습니다' });
