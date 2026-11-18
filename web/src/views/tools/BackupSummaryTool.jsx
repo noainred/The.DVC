@@ -22,7 +22,7 @@ import BackupSummaryCapSched from './BackupSummaryCapSched.jsx';
 import BackupSummaryErrors from './BackupSummaryErrors.jsx';
 import { poolKpiText } from './bareosPolicyText.js';   // 52회차 F3
 
-export { DETAIL_VC_KEY };   // 서머리에서 고른 vCenter 를 세부내용이 이어받는다(이 브라우저에만) — v2.959: 값은 backupViewText.js(가상화 플랫폼 KPI 카드도 같은 키로 연다)
+export { DETAIL_VC_KEY };   // 서머리에서 고른 vCenter 를 세부내용이 이어받는다(이 브라우저에만) — v2.959: 값은 backupViewText.js(v3.19.0: 같은 키로 열던 가상화 플랫폼 KPI 카드는 걷어냈다)
 
 const TONE = { ok: '#86efac', bad: '#fca5a5', warn: '#fcd34d', info: '#93c5fd', muted: 'var(--text-dim)' };
 const CHIP = { bad: { color: '#fca5a5', background: 'rgba(239,68,68,.14)' }, warn: { color: '#fcd34d', background: 'rgba(245,158,11,.14)' }, info: { color: '#93c5fd', background: 'rgba(59,130,246,.14)' }, muted: { color: 'var(--text-dim)', background: 'var(--panel-deep)' } };
