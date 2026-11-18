@@ -38,24 +38,27 @@ const numText = (v) => (Number.isFinite(v) ? v.toLocaleString('en-US') : '—');
 const numTone = (v) => (Number.isFinite(v) && v > 0 ? 'var(--red)' : undefined);
 
 export default function Hosts({ filters, cond = null, nameFocus = '', onNameFocus = null, onGoVms = null, scopeIds = null, scopeRegion = null, onScopeIds = null }) {
-  const { data, error, loading } = usePolling('/hosts', filters, 15_000);
+  const [hostId, setHostId] = useState(() => hostIdOf(currentHash()));
+  const [hashView, setHashView] = useState(() => hostViewInHash(currentHash()));
+  // 지금 보기 — 주소에 없으면 기본 ‘분석’(검색어 · ‘그 호스트만’ 이 있으면 ‘목록’ — 넘겨받은 조건의 결과가 보이게).
+  const view = hostViewOf(hashView, { q: filters?.q, nameFocus });
+  // 분석 보기는 /hosts/insight(30초)만 쓴다 — 호스트 전량 목록(/hosts)을 15초마다 받지 않고, 바로가기 선택(filters)을 바꿀 때도 다시 받지 않는다(dbg3221).
+  //   빠른 확인은 누를 때 그 호스트 하나(/hosts/:id)만 받는다(openHostById).
+  const { data, error, loading } = usePolling(view === 'insight' ? null : '/hosts', filters, 15_000);
   const [tab, setTab] = useState(null); // null = 확인 대상이 있으면 그 탭, 없으면 전체
   const [focus, setFocus] = useState(null);
   const [allTiles, setAllTiles] = useState(false);
   const [off, setOff] = useState(() => readColPrefs());
-  const [hostId, setHostId] = useState(() => hostIdOf(currentHash()));
-  const [hashView, setHashView] = useState(() => hostViewInHash(currentHash()));
   const [checks, setChecks] = useState(null);
   const [checksErr, setChecksErr] = useState(null);
   const [checksBusy, setChecksBusy] = useState(false);
   const checksSeq = useRef(0);
   const [drawer, setDrawer] = useState(null);   // v2.975 '빠른 확인' 으로 연 호스트(드로어) — ‹ › 는 지금 표에 그린 순서(shownRef)
   const shownRef = useRef([]);
+  const hostSeq = useRef(0);                    // 분석 보기 빠른 확인 — 늦게 온 이전 호스트 응답은 버린다(닫기도 세대를 올린다)
   const [exportVc, setExportVc] = useState('');
   const [exportOpen, setExportOpen] = useState(false);
   const [exportPick, setExportPick] = useState(false);
-  // 지금 보기 — 주소에 없으면 기본 ‘분석’(검색어 · ‘그 호스트만’ 이 있으면 ‘목록’ — 넘겨받은 조건의 결과가 보이게).
-  const view = hostViewOf(hashView, { q: filters?.q, nameFocus });
   const setView = (v) => { setHashView(v); goHash(hostViewHash(v)); };
   const filtersKey = JSON.stringify(filters || {});
 
@@ -111,20 +114,28 @@ export default function Hosts({ filters, cond = null, nameFocus = '', onNameFocu
   );
   // 빠른 확인(드로어) — ‹ › 는 지금 표(목록)나 분석의 ‘지금 볼 호스트’ 순서.
   const byId = checks?.byId || null;
+  // 분석 보기 — 호스트 하나만 받아 드로어를 연다. 못 받으면 전체 페이지 상세(#/hosts/<id>)로 간다(그 화면이 오류를 밝힌다).
+  const openHostById = (id) => {
+    const my = ++hostSeq.current;
+    const toPage = () => { if (my === hostSeq.current) goHash(`#/hosts/${encodeURIComponent(id)}`); };
+    fetchJson(`/hosts/${encodeURIComponent(id)}`)
+      .then((r) => { if (my !== hostSeq.current) return; if (r?.item) setDrawer(r.item); else toPage(); })
+      .catch(toPage);
+  };
+  const insightView = view === 'insight';
   const drawerEl = drawer && (
     <React.Suspense fallback={null}>
-      <HostDrawer host={rows.find((h) => h.id === drawer.id) || drawer} rows={shownRef.current} checks={byId}
-        onClose={() => setDrawer(null)} onMove={(h) => setDrawer(h)} />
+      <HostDrawer host={insightView ? drawer : (rows.find((h) => h.id === drawer.id) || drawer)} rows={shownRef.current} checks={byId}
+        onClose={() => { hostSeq.current += 1; setDrawer(null); }} onMove={(h) => (insightView ? openHostById(h.id) : setDrawer(h))} />
     </React.Suspense>
   );
   // v3.22.0 분석 보기 — /hosts/insight(30초 · 법인별 줄)만 쓴다. 지도 칸 · 지역 줄 → 바로가기 선택(onScopeIds — App 이 넘길 때만) ·
-  //   못 버티는 클러스터 → ‘법인별’ 보기의 그 법인(바로가기를 그 법인 하나로) · 지금 볼 호스트 → 빠른 확인(/hosts 행이 있을 때 — 없으면 개체 보기 주소).
+  //   못 버티는 클러스터 → ‘법인별’ 보기의 그 법인(바로가기를 그 법인 하나로) · 지금 볼 호스트 → 빠른 확인(누를 때 /hosts/:id 하나).
   if (view === 'insight') {
     const quickHost = (id, ids) => {
-      const h = rows.find((x) => x.id === id);
-      if (!h) return false;
-      shownRef.current = (ids || []).map((i) => rows.find((x) => x.id === i)).filter(Boolean);
-      setDrawer(h);
+      if (!id) return false;
+      shownRef.current = (ids || []).filter(Boolean).map((i) => ({ id: i }));   // ‹ › 는 id 만 쓴다 — 옮길 때 그 호스트를 받는다
+      openHostById(id);
       return true;
     };
     const openCorp = (vcId) => { if (onScopeIds && vcId) onScopeIds([String(vcId)]); setView('corp'); window.scrollTo({ top: 0 }); };
@@ -138,8 +149,10 @@ export default function Hosts({ filters, cond = null, nameFocus = '', onNameFocu
       </>
     );
   }
-  if (loading && !data) return <Loading />;
+  // 분석 → 목록 · 법인별로 바뀐 첫 렌더는 loading=false · data=null 이다(분석 보기는 usePolling(null) — 효과가 아직 돌지 않았다).
+  //   그래서 loading 이 아니라 data 가 없으면 불러오는 중으로 본다(dbg3221 2회차 — 예전: data.summary 에서 TypeError · ErrorBoundary).
   if (error && !data) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류는 화면 유지
+  if (!data) return <Loading />;
 
   const now = Date.now();
   const counts = triageCounts(rows);

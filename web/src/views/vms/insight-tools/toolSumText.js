@@ -15,7 +15,7 @@ import { TOOLS } from '../../specialToolsList.js';
 export const TOP_N_DEFAULT = 5;
 
 /** 천 단위 쉼표 정수 — 분석 화면 공용(insightCore) 그대로. 값이 없으면 '—'. */
-export { fmtN } from '../../insight/insightCore.js';
+export { fmtN, fmtU } from '../../insight/insightCore.js';
 
 /** 소수 첫째 자리까지 · 천 단위 쉼표. 값이 없으면 '—'. */
 export function fmt1(v) {
@@ -70,6 +70,34 @@ export function pickRows(rows, vcIds, keyOf = (r) => r?.vcenterId) {
   const picked = all.filter((r) => want.has(String(keyOf(r) ?? '')));
   const have = new Set(picked.map((r) => String(keyOf(r) ?? '')));
   return { rows: picked, missing: ids.filter((id) => !have.has(id)) };
+}
+
+/**
+ * dbg3221 5회차: 응답의 '못 읽은 · 수집하지 않는 법인' 목록(notReadVcenters · notCollected — 항목마다 vcenterId)을 **고른 법인으로** 거른다.
+ *   서버는 이 목록을 사용자 범위 전체(scopeSlice)로 만든다 — 거르지 않으면 고르지 않은 법인 하나가 불통이어도 '일부만 센 수' 가 떴다.
+ *   vcIds 가 비었으면 전부(행 합계 pickRows 와 같은 규칙).
+ */
+export function pickByVc(list, vcIds) {
+  const all = Array.isArray(list) ? list.filter((x) => x && typeof x === 'object') : [];
+  const ids = Array.isArray(vcIds) ? vcIds.map((x) => String(x)).filter(Boolean) : [];
+  if (!ids.length) return all;
+  const want = new Set(ids);
+  return all.filter((x) => want.has(String(x.vcenterId ?? '')));
+}
+/** 못 읽은 법인 중 합계를 하한으로 만드는 것이 있는가 — 서버 corelicense/analyze.js notReadPartialOf 와 같은 뜻(비활성 'disabled' 만이면 false · 시험이 대조). */
+export const notReadPartialIn = (list) => (Array.isArray(list) ? list : []).some((x) => x?.why !== 'disabled');
+/**
+ * 고른 법인 범위의 못 읽음 — { list, partial, nMissing(비활성 제외) · nDisabled(비활성), missing }. 못 읽은 법인은 행이 없어 pickRows 의 missing 에도 잡히므로
+ * missing 에서는 뺀다(같은 법인을 '못 읽음' 과 '이 도구에 값 없음' 으로 두 번 세지 않는다). vcIds 가 비었으면 partial 은 응답 값 그대로.
+ */
+export function notReadPicked(resp, vcIds, missing = []) {
+  const list = pickByVc(resp?.notReadVcenters, vcIds);
+  const picked = Array.isArray(vcIds) && vcIds.some((x) => String(x));
+  const partial = picked ? notReadPartialIn(list) : resp?.partial === true;
+  const nr = new Set(list.map((x) => String(x.vcenterId)));
+  // dbg3221 7회차: 개수도 판정 코어(notReadPartialIn · 서버 isNotReadMissing)와 같은 구분 — 읽지 못함(비활성 제외) · 비활성(수집하지 않음)을 따로 센다.
+  const nDisabled = list.filter((x) => x?.why === 'disabled').length;
+  return { list, partial, nMissing: list.length - nDisabled, nDisabled, missing: (Array.isArray(missing) ? missing : []).filter((id) => !nr.has(String(id))) };
 }
 
 /**
@@ -221,6 +249,15 @@ export function receivedText(at) {
   const t = numOrNull(at);
   if (t == null) return '';
   try { return `받은 시각 ${new Date(t).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' })}`; } catch { return ''; }
+}
+
+/**
+ * 도구 응답에 더할 법인 줄이 하나도 없을 때(view.empty) 패널 본문 대신 쓰는 글 — 수 칸을 ‘—대’ 로 그리지 않는다(dbg3221 2회차).
+ *   고른 법인이 응답에 없으면(missing) 그 사실만, 아니면 범위에 값이 없다는 사실만 말한다(이유를 단정하지 않는다). view 가 비지 않았으면 ''.
+ */
+export function emptyViewText(view) {
+  if (!view || view.empty !== true) return '';
+  return Array.isArray(view.missing) && view.missing.length ? '고른 법인은 이 도구에 값이 없습니다.' : '이 범위에는 이 도구의 값이 없습니다.';
 }
 
 /** 고른 법인 중 응답에 없는 곳 안내 — 없으면 ''. */

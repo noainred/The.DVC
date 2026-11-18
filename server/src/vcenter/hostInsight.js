@@ -118,7 +118,15 @@ async function scanHosts(list, { readable, capKnown, byHostVm, yielder, topN, ch
     vmsPerHost[sizeKey(vmN, VMS_PER_HOST_EDGES)] += 1;
     const ck = checks?.byId?.[h.id];
     if (hw) { const st = ck?.hw?.state; if (st && hw[st] != null) hw[st] += 1; else hw.error += 1; }
-    if (reboots != null) { if (ck?.boot?.kind === 'unexpected') reboots += 1; else if (!ck?.boot) rebootsUnread += 1; }
+    // 재부팅 '모름' = 판정하지 못한 호스트만(v3.22.x 수정 — 예전에는 boot 가 없는 호스트를 전부 셌다):
+    //   analyzeReboots 는 기간(bootDays) 안에 부팅한 호스트만 행을 만든다 — boot 가 null 이면 대부분 '기간 안 재부팅 없음'(정상, 0).
+    //   모름 = 이벤트를 받지 못함(kind 'no-events' · readCut 포함) + bootTime 을 못 읽음 + 끊김(analyzeReboots 가 건너뛴다) + 점검 줄 자체 없음.
+    if (reboots != null) {
+      const boot = ck?.boot;
+      if (boot?.kind === 'unexpected') reboots += 1;
+      else if (boot?.kind === 'no-events') rebootsUnread += 1;
+      else if (!boot && (!ck || h.connectionState === 'DISCONNECTED' || !Number.isFinite(h.bootTime))) rebootsUnread += 1;
+    }
     if (c != null && c >= 0) {
       pushTop(cpuTop, {
         id: h.id, name: h.name, vcenterId: h.vcenterId, cluster: textOrNull(h.cluster), model: textOrNull(h.model), vendor: textOrNull(h.vendor),
@@ -145,10 +153,12 @@ async function scanHosts(list, { readable, capKnown, byHostVm, yielder, topN, ch
 }
 
 /** 클러스터 지도 한 칸 — hostCorp 클러스터 줄(또는 독립 호스트 hostStats)에서. */
-function clusterCell(c, { vcenterId, standalone, memTotalMB, cfgOk }) {
+//   down = 끊김 · 무응답만(platformSummary.hostsSection — 법인 줄 · 요약 카드와 같은 판정). hostStats 의 down(= 구간 'na')은 사용률 못 읽음까지 세므로
+//   쓰지 않는다 — 사용률 못 읽음은 usageUnknown 으로만 센다(v3.22.x 수정 — 툴팁이 같은 호스트를 '끊김' · '사용률 모름' 으로 두 번 셌다).
+function clusterCell(c, { vcenterId, standalone, memTotalMB, cfgOk, down }) {
   const cell = {
     key: c.key, vcenterId, name: c.name, label: c.label ?? c.name, standalone,
-    hosts: c.hosts, connected: c.connected, maint: c.maint, down: c.down,
+    hosts: c.hosts, connected: c.connected, maint: c.maint, down,
     cores: c.cores, memTotalMB, memTotalGB: c.memTotalGB, capUnknown: c.capUnknown,
     busiestCpu: c.cpuMax, cpuAvg: c.cpuAvg, memAvg: c.memAvg,
     usageUnknown: c.buckets?.na ?? null, hot: c.hot,
@@ -248,7 +258,7 @@ export async function hostInsightOf({ vcenters = [], hosts = [], vms = [], reada
     });
     for (const c of corp.clusters) {
       const memList = (c.hostIds || []).map((id) => hostById.get(id)).filter(Boolean);
-      clusters.push(clusterCell(c, { vcenterId: corp.id, standalone: false, memTotalMB: c.memTotalGB == null ? null : capMB(memList), cfgOk }));
+      clusters.push(clusterCell(c, { vcenterId: corp.id, standalone: false, memTotalMB: c.memTotalGB == null ? null : capMB(memList), cfgOk, down: hostsSection(memList, readable).down }));
     }
     // 독립 호스트 = 어느 클러스터 줄에도 들지 않은 호스트(hostCorp 의 standalone 수와 같은 집합 — clusterIndex 키가 없는 호스트)
     const inCluster = new Set(corp.clusters.flatMap((c) => c.hostIds || []));
@@ -258,7 +268,7 @@ export async function hostInsightOf({ vcenters = [], hosts = [], vms = [], reada
       const vm = vmSumsOf(alone.flatMap((h) => byHostVm.get(`${h.vcenterId}\t${h.name}`) || []));
       const va = vmAllocOf(vm);
       clusters.push(clusterCell({ ...st, key: `${corp.id}\u0000standalone`, name: STANDALONE_NAME, label: STANDALONE_NAME, vms: vm.n, vcpu: va.vcpu, vcpuUnknown: vm.vcpuUnknown, sev: null },
-        { vcenterId: corp.id, standalone: true, memTotalMB: st.memTotalGB == null ? null : capMB(alone), cfgOk }));
+        { vcenterId: corp.id, standalone: true, memTotalMB: st.memTotalGB == null ? null : capMB(alone), cfgOk, down: hostsSection(alone, readable).down }));
     }
     top.push({
       id: corp.id, cpuTop,

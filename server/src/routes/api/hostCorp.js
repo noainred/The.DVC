@@ -14,7 +14,6 @@ import { accessOf } from './hostExport.js';
 import { hostCorpOf } from '../../vcenter/hostCorp.js';
 import { getPingDb } from '../../ping/db.js';
 import { listTargets } from '../../ping/store.js';
-import { REGIONS } from '../../util/regions.js';
 
 const invHosts = requirePerm('inv.hosts');
 const RTT_FRESH_MS = 30 * 60_000;   // 30분보다 오래된 핑 값은 '지금 RTT' 로 보이지 않게 at 과 함께 싣는다(화면이 흐리게)
@@ -42,7 +41,9 @@ export function registerHostCorp(api) {
       const allowed = scopedVcenterIds(req.user, snap);
       let hosts = applyFilters(snap.hosts || [], req.query, snap, ['name', 'cluster'], req.user);
       if (req.query.state) hosts = hosts.filter((h) => h.connectionState === req.query.state);
-      const region = typeof req.query.region === 'string' && REGIONS.includes(req.query.region) ? req.query.region : null;
+      // v3.22.1: 정해진 4리전으로 거르지 않는다 — 범위 바는 등록 데이터에만 있는 리전('Unknown' 등)도 고르게 하므로(platformText.scopeRegionOptions)
+      //   그 글자를 버리면 전 법인 합이 나왔다. /hosts · /vms/insight 처럼 location.region 과 그대로 비교한다.
+      const region = typeof req.query.region === 'string' && req.query.region ? req.query.region : null;
       // v3.20.0: 고른 법인(vcenterId 하나 또는 vcenterIds 목록 — shared.js vcenterPickOf · 호스트는 applyFilters 가 같은 함수로 거른다).
       const pick = vcenterPickOf(req.query, snap);
       // 법인 목록은 scope 가 먼저(요청 필터보다) — 범위 밖 vCenter 는 이름도 싣지 않는다.

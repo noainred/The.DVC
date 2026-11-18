@@ -134,7 +134,12 @@ a.ins-td:hover { border-color: var(--accent); }
 .ins-rb .n { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .ins-rb .v { font-family: var(--mono); font-size: 12px; text-align: right; white-space: nowrap; }
 .ins-rb .v small { color: var(--text-dim); margin-left: 6px; font-size: 11px; }
-@media (max-width: 720px) { .ins-rb, .ins-rb.sm { grid-template-columns: minmax(0, 96px) minmax(0, 1fr) 84px; } }
+/* 좁은 화면 — 이름 열이 96px 로 줄면 말줄임 대신 줄바꿈한다(‘Windows Server 2022’ · ‘PowerEdge R740’ 처럼 뒷부분만 다른 이름이
+   같은 글자로 보이지 않게 · 전체 이름은 title 에만 두면 터치 화면에서 볼 수 없다). */
+@media (max-width: 720px) {
+  .ins-rb, .ins-rb.sm { grid-template-columns: minmax(0, 96px) minmax(0, 1fr) 84px; }
+  .ins-rb .n { white-space: normal; overflow-wrap: anywhere; line-height: 1.3; }
+}
 
 /* 키 · 값 줄 */
 .ins-kv { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; min-height: 24px; font-size: 12.5px; color: var(--text); border-bottom: 1px solid var(--border-soft); min-width: 0; }
@@ -169,10 +174,16 @@ a.ins-td:hover { border-color: var(--accent); }
 .ins-pr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 150px) 70px; gap: 0 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border-soft); min-width: 0; }
 .ins-pr > span { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .ins-pr .nm { font-size: 13px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ins-pr .sb, .ins-pr .fr { font-size: 11.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ins-pr .ins-sb, .ins-pr .fr { font-size: 11.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ins-pr .big { font-family: var(--mono); font-size: 16px; font-weight: 800; text-align: right; white-space: nowrap; color: var(--text); }
 .ins-pr a.nm { text-decoration: none; }
 .ins-pr a.nm:hover { color: #93c5fd; }
+/* 좁은 화면 — 이름 · 법인 줄을 한 줄 위로 올리고(막대 · 값은 다음 줄) 말줄임 대신 줄바꿈한다(VM 이름이 8자 안팎에서 잘리지 않게). */
+@media (max-width: 720px) {
+  .ins-pr { grid-template-columns: minmax(0, 1fr) 70px; gap: 6px 12px; }
+  .ins-pr > span:first-child { grid-column: 1 / -1; }
+  .ins-pr .nm, .ins-pr .ins-sb { white-space: normal; overflow-wrap: anywhere; }
+}
 
 /* 회수 후보 */
 .ins-rc { display: flex; flex-direction: column; gap: 3px; padding: 8px 0; border-bottom: 1px solid var(--border-soft); min-width: 0; }

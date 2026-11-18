@@ -832,8 +832,8 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/hosts/:id/nic-stats` | 권한 `inv.hosts` | [server/src/routes/api/vmMetrics.js:231](../server/src/routes/api/vmMetrics.js#L231) |
 | GET | `/hosts/:id/san-attribution` | 권한 `inv.hosts` | [server/src/routes/api/hostSan.js:205](../server/src/routes/api/hostSan.js#L205) |
 | GET | `/hosts/checks` | 권한 `inv.hosts` | [server/src/routes/api/hostChecks.js:43](../server/src/routes/api/hostChecks.js#L43) |
-| GET | `/hosts/corp` | 권한 `inv.hosts` | [server/src/routes/api/hostCorp.js:39](../server/src/routes/api/hostCorp.js#L39) |
-| GET | `/hosts/insight` | 권한 `inv.hosts` | [server/src/routes/api/hostInsight.js:27](../server/src/routes/api/hostInsight.js#L27) |
+| GET | `/hosts/corp` | 권한 `inv.hosts` | [server/src/routes/api/hostCorp.js:38](../server/src/routes/api/hostCorp.js#L38) |
+| GET | `/hosts/insight` | 권한 `inv.hosts` | [server/src/routes/api/hostInsight.js:26](../server/src/routes/api/hostInsight.js#L26) |
 | GET | `/idrac/host-power` | 권한 `inv.hosts` | [server/src/routes/api/vmMetrics.js:318](../server/src/routes/api/vmMetrics.js#L318) |
 | GET | `/issues` | — | [server/src/routes/api/issues.js:338](../server/src/routes/api/issues.js#L338) |
 | POST | `/issues` | `creators` | [server/src/routes/api/issues.js:443](../server/src/routes/api/issues.js#L443) |

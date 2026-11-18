@@ -3,7 +3,7 @@
 //   못 읽은 값은 '—'(단위 없음) — 글자는 호출부가 fmtN · gbText 로 만든다. 문구에 백틱 금지.
 import React from 'react';
 import { numOrNull } from '../../numOrNull.js';
-import { fmtN, shareText } from './insightCore.js';
+import { fmtN, fmtU, shareText } from './insightCore.js';
 import './insight.css';
 
 /** 숫자 타일 — meter(0~100)가 있으면 아래 막대. tone: crit | warn | ''. */
@@ -123,7 +123,7 @@ export function Histogram({ bins = [], binPct = 10, critFrom = null, what = '' }
         {vals.map((v, i) => {
           const isCrit = crit != null && i * binPct >= crit;
           return (
-            <span key={i} className={`ins-col${isCrit ? ' crit' : ''}`} title={`${what} ${i * binPct}–${(i + 1) * binPct}%${i === vals.length - 1 ? '(그 이상 포함)' : ''} · ${fmtN(v)}대`}>
+            <span key={i} className={`ins-col${isCrit ? ' crit' : ''}`} title={`${what} ${i * binPct}–${(i + 1) * binPct}%${i === vals.length - 1 ? '(그 이상 포함)' : ''} · ${fmtU(v, '대')}`}>
               <b>{max > 0 && (i === topI || (isCrit && v > 0)) ? fmtN(v) : ''}</b>
               <i style={{ height: `${max ? Math.max(2, (v / max) * 82) : 2}%` }} />
             </span>

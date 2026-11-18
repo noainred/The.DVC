@@ -1,7 +1,7 @@
 // views/platform/HubTabs.jsx — 허브 탭 줄 하나(v2.915 · 설계 docs/design/virt-platform-menu §4.0-11): 이 화면 안의 보기 ‖ 그 탭 성격의 특수 기능 도구 ‖ 오른쪽 = 탭 고유 조건.
 //   가상화 서버 허브의 탭 줄(v2.909 VmHubTabs)을 일반화한 것 — 모양(.vmh-tabs · .vmh-tab)은 그대로라 세 탭(vCenter · 호스트 · VM)이 같은 줄을 쓴다.
 //   도구 키는 그대로(권한 파일의 값)이고 권한이 없는 도구는 숨긴다(카탈로그 adminOnly 는 관리자만 — 서버 게이트와 같은 판정).
-//   400px 에서는 탭 줄만 가로로 넘긴다(페이지는 밀리지 않는다) — 열린 탭이 보이게 줄만 옮긴다.
+//   400px 에서는 탭 줄만 가로로 넘긴다(페이지는 밀리지 않는다) — 열린 탭이 보이게 줄만 옮긴다. 오른쪽 조건은 탭 줄 밖(넘치면 아래 줄 — .vmh-tabbar).
 import React, { useRef } from 'react';
 import useActiveTabInView from '../../hooks/useActiveTabInView.js'; // v3.10.16: 열린 탭이 보이게 줄만 옮기는 규칙을 훅으로(상세 · 개체 보기 탭 줄과 공유)
 import { hasRole, toolAllowed } from '../../api.js';
@@ -28,7 +28,7 @@ export function toolsFor(list) {
 export default function HubTabs({ label, views, tools = [], active, right = null }) {
   const listRef = useRef(null);
   useActiveTabInView(listRef, active);
-  return (
+  const strip = (
     <div ref={listRef} role="tablist" aria-label={label} className="vmh-tabs tabstrip-noscroll">
       {views.map((v) => {
         const on = v.k === active;
@@ -42,7 +42,15 @@ export default function HubTabs({ label, views, tools = [], active, right = null
         const on = k === active;
         return <a key={k} role="tab" aria-selected={on} href={`#/tools/${k}`} className={`vmh-tab tool${on ? ' on' : ''}`} title="특수 기능 도구를 엽니다">{t}</a>;
       })}
-      {right && <span className="ph-right">{right}</span>}
+    </div>
+  );
+  if (!right) return strip;
+  // 오른쪽 조건은 탭 줄(가로 스크롤 · 스크롤바 숨김) **밖** 형제로 둔다(dbg3221 2회차 — 1440 VM ‘분석’ 에서 탭 줄 안의 IPMS 칸이 잘려 보이지 않았다).
+  //   한 줄에 다 들어가면 탭 옆, 넘치면 탭 아래 줄(.vmh-tabbar flex-wrap) — 어느 폭에서도 조건 칸이 스크롤 뒤로 숨지 않는다.
+  return (
+    <div className="vmh-tabbar">
+      {strip}
+      <span className="ph-right">{right}</span>
     </div>
   );
 }

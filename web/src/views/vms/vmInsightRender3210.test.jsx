@@ -47,6 +47,7 @@ describe('분석 보기 렌더', () => {
     expect(t).toMatch(/전체 VM 6 /);                  // 7대 중 오래된 법인의 1대 제외
     expect(t).toMatch(/설정 · 520px ▾/);              // 처음 크기 = 크게 520 · 설정 상자는 닫힘
     expect(t).not.toMatch(/지도 크기 설정/);
+    expect(t).not.toMatch(/아주 크게/);                // v3.22.1: 크기 칸(자동 · 보통 · 크게 · 아주 크게)도 상자 안에만 — 닫힌 동안은 안 보인다
   });
   it('고른 법인만 합 — vb 하나', () => {
     const t = text(render({ scopeIds: ['vb'] }));
@@ -94,7 +95,8 @@ describe('소스 규약', () => {
   });
   it('리뷰 정정 — 리전만 고른 범위에서는 도구 패널 · 확인할 것 도구 칸도 그 리전의 법인(이 응답의 줄)만 더한다', () => {
     const src = stripComments(fs.readFileSync(new URL('./VmInsight.jsx', import.meta.url), 'utf8'));
-    expect(src).toMatch(/const toolIds = ids\.length \|\| !region \|\| !rows\.length \? ids : rows\.map\(\(r\) => String\(r\.id\)\)/);
+    // dbg3221 2회차: 규칙은 insightCore.toolIdsOf 하나(오래됨 · 모름 법인도 뺀다 — 순수 시험은 views/hosts/insightFixes2.dbg3221.test.jsx)
+    expect(src).toMatch(/const toolIdsRaw = toolIdsOf\(\{ ids, region, rows, picked, loaded: !!data \}\)/);
     expect(src).not.toMatch(/vcIds=\{ids\}/);                       // 도구 패널 · 과할당에 ids 를 그대로 넘기지 않는다
     expect(src).toMatch(/checkItems\(\{ vcIds: toolIds/);
   });

@@ -9,8 +9,9 @@
  */
 import { useToolSummary } from './useToolSummary.js';
 import { guestPartView, offView } from './vmToolPanelsText.js';
-import { fmtN, gbText, toolHref, toolLabel, gateOf } from './toolSumText.js';
+import { fmtN, fmtU, gbText, toolHref, toolLabel, gateOf } from './toolSumText.js';
 import { toolAllowed } from '../../../api.js';
+import { numOrNull } from '../../../numOrNull.js';
 
 /** 칸 만들기(순수) — gp · waste 는 { data, error, loading } 상태. */
 export function buildToolChecks({ vcIds = [], canTool, gp = null, waste = null } = {}) {
@@ -21,8 +22,8 @@ export function buildToolChecks({ vcIds = [], canTool, gp = null, waste = null }
     const v = guestPartView(gp?.data, vcIds);
     out.push({
       key: 'disk-filling', label: '디스크가 차 가는 VM',
-      value: v ? fmtN(v.overVms) : '—',
-      sub: v ? `위험 ${fmtN(v.crit)} · ${v.soonDays ?? '—'}일 안 가득 ${fmtN(v.soon)}` : pending(gp),
+      value: v && !v.noValues ? fmtN(v.overVms) : '—',
+      sub: v?.noValues ? '아직 수집된 파티션 값이 없습니다' : v ? `위험 ${fmtN(v.crit)} · ${v.soonDays ?? '—'}일 안 가득 ${fmtN(v.soon)}` : pending(gp),
       tone: v && (v.crit || 0) > 0 ? 'crit' : v && (v.overVms || 0) > 0 ? 'warn' : '',
       href: toolHref('guest-partition'),
       title: `아래 ‘디스크가 차 가는 VM’ 패널 — 특수 기능 ‘${toolLabel('guest-partition')}’ 의 판정`,
@@ -30,10 +31,12 @@ export function buildToolChecks({ vcIds = [], canTool, gp = null, waste = null }
   }
   if (can('waste')) {
     const v = offView(waste?.data, null, vcIds);
+    // 6회차: 디스크 합은 용량을 읽은 정지 VM 만의 부분 합 — 못 읽은 VM 이 있으면 ‘이상’ 과 모름 수(아래 패널의 ‘합에서 뺐습니다’ 와 같은 사실).
+    const du = numOrNull(v?.diskUnknown) ?? 0;
     out.push({
       key: 'powered-off', label: '꺼진 VM',
       value: v ? fmtN(v.count) : '—',
-      sub: v ? `디스크 ${gbText(v.diskGB)} 점유` : pending(waste),
+      sub: v ? `디스크 ${gbText(v.diskGB)}${du > 0 && numOrNull(v.diskGB) != null ? ' 이상' : ''} 점유${du > 0 ? ` · 모름 ${fmtU(du, '대')}` : ''}` : pending(waste),
       tone: '',
       href: toolHref('waste', 'off'),
       title: `아래 ‘꺼진 VM’ 패널(템플릿 제외) — 특수 기능 ‘${toolLabel('waste')}’ 의 ‘전원 꺼짐’`,

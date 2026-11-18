@@ -9,7 +9,7 @@ import { numOrNull } from '../../../numOrNull.js';
 import { ALL_TEXT } from '../../vmcfg/vmHygieneText.js';
 import { LIFE_KIND_LABEL, ADD_KINDS } from '../../vmlife/vmLifeText.js';
 import {
-  pickRows, total, sumArrays, sumObjects, mergeTop, descNull, ascNull, byName, TOP_N_DEFAULT,
+  pickRows, pickByVc, notReadPicked, total, sumArrays, sumObjects, mergeTop, descNull, ascNull, byName, TOP_N_DEFAULT,
 } from './toolSumText.js';
 
 /** 따뜻한 색 4단(낮음 → 높음) — 시안 보드와 같은 값. 글자색은 바탕 밝기에 맞춘다. */
@@ -45,15 +45,21 @@ export function warmAt(i, nb) {
   return WARM[Math.min(WARM.length - 1, Math.max(0, k))];
 }
 
-/** 구간 이름 — ['80–85%', '85–90%', '90–95%', '95% 이상']. 첫 칸의 아래 끝은 기준(법인마다 다르면 ‘기준’). */
+/**
+ * 구간 이름 — ['80–85%', '85–90%', '90–95%', '95% 이상']. 첫 칸의 아래 끝은 기준(법인마다 다르면 ‘기준’).
+ * 기준이 경계 이상이면(thr 90 · 경계 [85, 90, 95]) 각 칸의 아래 끝은 max(기준, 경계)이고, 위 끝이 기준 이하인 칸은 null —
+ * 그 칸은 서버 overBins 에서 비어 있을 수밖에 없다(‘90–85%’ 같은 거꾸로 된 이름을 만들지 않는다 · guestPartView 가 빈 칸을 뺀다).
+ */
 export function gpBandLabels(thr, edges) {
   const e = Array.isArray(edges) ? edges.map(numOrNull).filter((x) => x != null) : [];
   const t = numOrNull(thr);
+  const lo = (x) => (t == null ? x : Math.max(t, x));
   const out = [];
   for (let i = 0; i <= e.length; i++) {
-    if (i === e.length) out.push(`${e[i - 1]}% 이상`);
+    if (i < e.length && t != null && e[i] <= t) out.push(null);
+    else if (i === e.length) out.push(e.length ? `${lo(e[i - 1])}% 이상` : (t == null ? '기준 이상' : `${t}% 이상`));
     else if (i === 0) out.push(t == null ? `기준–${e[0]}%` : `${t}–${e[0]}%`);
-    else out.push(`${e[i - 1]}–${e[i]}%`);
+    else out.push(`${lo(e[i - 1])}–${e[i]}%`);
   }
   return out;
 }
@@ -83,17 +89,26 @@ export function guestPartView(resp, vcIds) {
   const labels = gpBandLabels(thr, edges);
   const N = topNOf(resp);
   const nb = edges.length + 1;
+  // 파티션 값을 받은 VM 이 고른 범위에 한 대도 없으면(수집 전 · 수집 꺼짐 · 전부 미보고) 초과 0 은 ‘정상 0’ 이 아니라 모르는 것이다 —
+  // 수를 null 로 두어 칸 · 머리 숫자 · 구간이 ‘—’ 로 나오게 한다(못 읽은 값은 0 이 아니다).
+  const reported = total(rows, (r) => r.reported);
+  //   reported 를 싣지 않은 응답(모름)은 collect.empty 로만 판단한다 — 없는 필드를 0 으로 읽지 않는다.
+  const noValues = rows.length > 0 && (reported === 0 || (reported == null && resp.collect?.empty === true));
+  const known = (x) => (noValues ? null : x);
   return {
     empty: rows.length === 0,
+    noValues,
     missing,
     thr, thrMixed, critPct: numOrNull(th.critPct), soonDays: numOrNull(th.soonDays), growthDays: numOrNull(th.growthDays),
-    overVms: total(rows, (r) => r.overVms), overParts: total(rows, (r) => r.overParts),
-    crit: total(rows, (r) => r.crit), soon: total(rows, (r) => r.soon),
-    guests: total(rows, (r) => r.guests), reported: total(rows, (r) => r.reported), notReported: total(rows, (r) => r.notReported),
+    overVms: known(total(rows, (r) => r.overVms)), overParts: known(total(rows, (r) => r.overParts)),
+    crit: known(total(rows, (r) => r.crit)), soon: known(total(rows, (r) => r.soon)),
+    guests: total(rows, (r) => r.guests), reported, notReported: total(rows, (r) => r.notReported),
     offNotReported: total(rows, (r) => r.offNotReported), unknownParts: total(rows, (r) => r.unknownParts),
     staleCorps: rows.filter((r) => r.stale === true).length,
     os: sumObjects(rows, (r) => r.osOver),
-    bands: bins.map((n, i) => ({ key: `b${i}`, n, label: labels[i] || '', ...warmAt(i, nb) })),
+    // 위 끝이 기준 이하인 칸(이름 null)은 비어 있으면 그리지 않는다 — 값이 있으면(뜻밖) 숨기지 않고 ‘경계 미만’ 으로 밝힌다.
+    bands: bins.map((n, i) => ({ key: `b${i}`, n: known(n), label: labels[i] ?? `${edges[i]}% 미만`, ...warmAt(i, nb) }))
+      .filter((b, i) => labels[i] != null || (numOrNull(b.n) ?? 0) > 0),
     fullest: mergeTop(rows, (r) => r.top?.fullest, (a, b) => descNull(a.pct, b.pct) || ascNull(a.freeGB, b.freeGB) || byName(a, b), N),
     // 예상을 모르는 행은 서버가 넣지 않는다(곧 가득 찰 순 — 빠른 순).
     soonest: mergeTop(rows, (r) => r.top?.soonest, (a, b) => ascNull(a.etaDays, b.etaDays) || descNull(a.pct, b.pct) || byName(a, b), N),
@@ -178,13 +193,18 @@ export function trackView(resp, vcIds) {
     points.push({ slot, ts, total: sum, partial: have < rows.length, missingCorps: rows.length - have });
   }
   // 지금 · 기준(창 안의 첫 점) — 한 곳이라도 모르면 증감을 말하지 않는다(부분 합끼리의 차는 거짓이다).
+  // 법인마다 첫 점 · 마지막 점의 슬롯이 다를 수 있다(창 중간에 수집을 시작한 vCenter 등). 서로 다른 시각의 점을 더해 한 슬롯 이름으로
+  // 말하지 않는다 — 기준은 모든 법인의 첫 슬롯이 같을 때만, 증감은 첫 슬롯 · 마지막 슬롯이 각각 모두 같을 때만 낸다(slotsMixed 로 밝힌다).
   const cur = rows.map((r) => numOrNull(r.current?.total));
   const base = rows.map((r) => numOrNull(r.base?.total));
   const curOk = rows.length > 0 && cur.every((v) => v != null);
   const baseOk = rows.length > 0 && base.every((v) => v != null);
+  const oneSlot = (get) => { const set = new Set(rows.map((r) => String(get(r) ?? ''))); return set.size === 1 && !set.has('') ? [...set][0] : null; };
+  const baseSlot = baseOk ? oneSlot((r) => r.base?.slot) : null;
+  const curSlot = curOk ? oneSlot((r) => r.current?.slot) : null;
   const current = curOk ? cur.reduce((a, b) => a + b, 0) : null;
-  const baseTotal = baseOk ? base.reduce((a, b) => a + b, 0) : null;
-  const baseSlot = rows.map((r) => r.base?.slot).find(Boolean) || null;
+  const baseTotal = baseOk && baseSlot != null ? base.reduce((a, b) => a + b, 0) : null;
+  const slotsMixed = (baseOk && baseSlot == null) || (curOk && curSlot == null);
   return {
     empty: points.length === 0,
     missing,
@@ -192,8 +212,8 @@ export function trackView(resp, vcIds) {
     available: resp.available !== false,
     points,
     partialPoints: points.filter((p) => p.partial).length,
-    current, base: baseTotal, baseSlot,
-    diff: current != null && baseTotal != null ? current - baseTotal : null,
+    current, base: baseTotal, baseSlot, curSlot, slotsMixed,
+    diff: current != null && baseTotal != null && curSlot != null ? current - baseTotal : null,
     min: points.length ? Math.min(...points.map((p) => p.total)) : null,
     max: points.length ? Math.max(...points.map((p) => p.total)) : null,
   };
@@ -213,10 +233,18 @@ export function dayText(ts) {
   return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-/** 생성 · 삭제 이력(vm-lifecycle 요약) — 합 · 종류별 · 날마다(같은 날끼리 더한다). */
+/**
+ * 생성 · 삭제 이력(vm-lifecycle 요약) — 합 · 종류별 · 날마다(같은 날끼리 더한다).
+ * dbg3221 8회차: 서버는 이벤트를 수집하지 않는 법인(notCollected — 엣지 위임 · 비활성 · 점검 중)에도 줄을 싣는다(쌓인 이벤트가 없으면 0 줄 · vmLifecycle.js summary).
+ *   그 줄은 합 · 종류별 · 날마다에서 **뺀다**(못 읽은 값은 0 이 아니다 — ‘세지 않았습니다’ 안내와 계산이 맞게). 고른 법인이 모두 수집 밖이면
+ *   수는 null(‘—’)이고 allNotCollected 로 밝힌다(화면은 ‘기록이 없다’ 고 단정하지 않는다).
+ */
 export function lifeView(resp, vcIds) {
   if (!resp || !Array.isArray(resp.rows)) return null;
-  const { rows, missing } = pickRows(resp.rows, vcIds);
+  const { rows: picked, missing } = pickRows(resp.rows, vcIds);
+  const nc = pickByVc(resp.notCollected, vcIds);   // dbg3221: 고른 법인 안의 수만(서버 목록은 사용자 범위 전체)
+  const ncIds = new Set(nc.map((x) => String(x.vcenterId ?? '')));
+  const rows = picked.filter((r) => !ncIds.has(String(r.vcenterId ?? '')));
   const byKind = sumObjects(rows, (r) => r.byKind);
   const days = new Map();
   for (const r of rows) {
@@ -231,9 +259,10 @@ export function lifeView(resp, vcIds) {
     }
   }
   const series = [...days.values()].sort((a, b) => a.day - b.day);
-  const notCollected = Array.isArray(resp.notCollected) ? resp.notCollected.length : 0;
+  const notCollected = nc.length;
   return {
-    empty: rows.length === 0,
+    empty: picked.length === 0,
+    allNotCollected: picked.length > 0 && rows.length === 0,
     missing,
     days: numOrNull(resp.days),
     added: total(rows, (r) => r.added), removed: total(rows, (r) => r.removed), net: total(rows, (r) => r.net),
@@ -255,23 +284,41 @@ export function diskLatOf(v) {
   return Math.max(r ?? -Infinity, w ?? -Infinity);
 }
 
+/** 경합 요약 패널의 머리 규칙 줄 — 측정이 꺼져 있으면 'N분마다 측정' 을 싣지 않는다(dbg3221 9회차). VM · Hypervisor 분석 패널이 함께 쓴다. */
+export function contentionRule(v) {
+  const th = v?.th || {};
+  const every = !v?.off && v?.scan?.refreshMs > 0 ? `${Math.round(v.scan.refreshMs / 60000)}분마다 측정` : '';
+  return [th.readyCrit != null ? `심각 = 대기 ${th.readyCrit}% 이상` : '', every].filter(Boolean).join(' · ');
+}
+/** 경합 요약 패널 목록의 빈 줄 문구 — 꺼짐 · 측정 0 이면 '없습니다' 가 아니라 판정하지 않았다고 쓴다. */
+export function contentionEmpty(v, normal) {
+  if (v?.off) return '측정이 꺼져 있어 판정하지 않습니다.';
+  if (v?.noValues) return '측정한 값이 없어 판정하지 않았습니다.';
+  return normal;
+}
+
 export function contentionView(resp, vcIds) {
   if (!resp || !Array.isArray(resp.rows)) return null;
   const { rows, missing } = pickRows(resp.rows, vcIds);
   const N = topNOf(resp);
-  const k = (key) => total(rows, (r) => r.kpi?.[key]);
   const c = (key) => total(rows, (r) => r.coverage?.[key]);
+  //   측정이 꺼졌거나(scan.enabled === false) 측정한 VM 이 0대면 판정 수는 '0' 이 아니라 모름(null → '—') — guestPartView noValues 와 같은 규칙(dbg3221 9회차).
+  const off = resp.scan?.enabled === false;
+  const measured = c('measured');
+  const noValues = rows.length > 0 && (off || measured === 0);
+  const k = (key) => (noValues ? null : total(rows, (r) => r.kpi?.[key]));
   return {
     empty: rows.length === 0,
     missing,
+    off, noValues,
     th: resp.thresholds && typeof resp.thresholds === 'object' ? resp.thresholds : {},
     initial: resp.initial === true,
     scan: resp.scan && typeof resp.scan === 'object' ? resp.scan : null,
     readyCrit: k('readyCrit'), readyWarn: k('readyWarn'), costop: k('costop'), diskCrit: k('diskCrit'), diskWarn: k('diskWarn'),
     hostsDisk: k('hostsDisk'), dsSlow: k('dsSlow'),
-    poweredOn: c('poweredOn'), measured: c('measured'), notMeasured: c('notMeasured'), stale: c('stale'),
-    ready: mergeTop(rows, (r) => r.top?.ready, (a, b) => descNull(a.readyAvg, b.readyAvg) || descNull(a.readyMax, b.readyMax) || byName(a, b), N),
-    disk: mergeTop(rows, (r) => r.top?.disk, (a, b) => descNull(diskLatOf(a), diskLatOf(b)) || descNull(a.diskMax, b.diskMax) || byName(a, b), N),
+    poweredOn: c('poweredOn'), measured, notMeasured: c('notMeasured'), stale: c('stale'),
+    ready: off ? [] : mergeTop(rows, (r) => r.top?.ready, (a, b) => descNull(a.readyAvg, b.readyAvg) || descNull(a.readyMax, b.readyMax) || byName(a, b), N),
+    disk: off ? [] : mergeTop(rows, (r) => r.top?.disk, (a, b) => descNull(diskLatOf(a), diskLatOf(b)) || descNull(a.diskMax, b.diskMax) || byName(a, b), N),
   };
 }
 
@@ -292,7 +339,10 @@ export function hygieneCodes(resp, rows) {
 
 export function hygieneView(resp, vcIds) {
   if (!resp || !Array.isArray(resp.rows)) return null;
-  const { rows, missing } = pickRows(resp.rows, vcIds);
+  const picked = pickRows(resp.rows, vcIds);
+  const { rows } = picked;
+  const nr = notReadPicked(resp, vcIds, picked.missing);   // dbg3221: 못 읽은 법인도 고른 법인으로 거른다 · missing 에서 뺀다
+  const missing = nr.missing;
   const N = topNOf(resp);
   const by = sumObjects(rows, (r) => r.byCode);
   return {
@@ -304,9 +354,10 @@ export function hygieneView(resp, vcIds) {
     codes: hygieneCodes(resp, rows),
     // 응답 대기 질문 — 도구의 판정(심각). 순서는 이름(심각도가 모두 같다).
     questions: mergeTop(rows, (r) => r.top?.question, (a, b) => byName(a, b), N),
-    partial: resp.partial === true,
+    partial: nr.partial,
     settingsUnreadable: resp.settingsUnreadable === true,
-    notReadVcenters: Array.isArray(resp.notReadVcenters) ? resp.notReadVcenters.length : 0,
+    notReadVcenters: nr.nMissing,   // dbg3221 7회차: 비활성(why 'disabled')은 ‘못 읽음’ 이 아니다 — 따로 notReadDisabled
+    notReadDisabled: nr.nDisabled,
     initial: resp.initial === true,
   };
 }

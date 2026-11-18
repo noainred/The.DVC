@@ -116,7 +116,7 @@ describe('법인 줄 합 — 고른 법인 · 오래됨 · 모름', () => {
   });
   it('비율 — 한 법인은 서버 값 그대로 · 여럿은 같은 규칙(용량 모름이 있으면 null)', () => {
     const a = rowOf('vc-a');
-    expect(ratiosOf([a], sumHostRows([a]))).toEqual({ vcpuPerCore: a.vcpuPerCore, ramPct: a.ramPct });
+    expect(ratiosOf([a], sumHostRows([a]))).toMatchObject({ vcpuPerCore: a.vcpuPerCore, ramPct: a.ramPct });   // dbg3221 8회차 — 비율 표지(…RatioExcl · …RatioUnknown)도 함께 낸다
     const ac = sumHostRows([a, rowOf('vc-c')]);
     expect(ac.vcpuPerCore).toBe(Math.round((ac.vcpu / ac.cores) * 10) / 10);
     expect(sumHostRows([a, rowOf('vc-b')]).vcpuPerCore).toBeNull();   // vc-b 에 용량 모름 호스트 — 모자란 분모로 지어내지 않는다

@@ -84,11 +84,19 @@ describe('v3.20.0 API 계약 — hubScopeQuery(1곳 vcenterId · 2곳 이상 vce
     expect(hubScopeQuery({ vcenterIds: ['kr1'], region: '아시아' })).toEqual({ vcenterId: 'kr1' });
     expect(hubScopeQuery({ vcenterId: 'kr1' })).toEqual({ vcenterId: 'kr1' });   // 허브 밖 탭(옛 단일 값)도 같은 함수
   });
-  it('2곳 이상 = vcenterIds 쉼표 목록(날 글자 — 인코딩은 URLSearchParams 가 한다) · vcenterId 는 없다', () => {
+  it('2곳 이상 = vcenterIds 쉼표 목록(id 마다 encodeURIComponent — dbg3221) · vcenterId 는 없다', () => {
     const q = hubScopeQuery({ vcenterIds: ['kr1', 'pl 1'], region: '아시아' });
-    expect(q).toEqual({ vcenterIds: 'kr1,pl 1' });
+    expect(q).toEqual({ vcenterIds: 'kr1,pl%201' });
     expect('vcenterId' in q).toBe(false);
-    expect(new URLSearchParams(q).toString()).toBe('vcenterIds=kr1%2Cpl+1');   // 서버(express) 가 'kr1,pl 1' 로 푼다
+    expect(new URLSearchParams(q).toString()).toBe('vcenterIds=kr1%2Cpl%25201');   // express 가 'kr1,pl%201' 로 풀고 서버가 조각마다 디코드
+  });
+  it('dbg3221 — 쉼표가 든 id 는 %2C 로 실려 둘로 갈리지 않는다 · 화면 안 재해석(scopeIdsOf(filters))도 같은 목록', () => {
+    const q = hubScopeQuery({ vcenterIds: ['KR,Seoul', 'US1', '50%off'] });
+    expect(q).toEqual({ vcenterIds: 'KR%2CSeoul,US1,50%25off' });
+    const back = new URLSearchParams(new URLSearchParams(q).toString()).get('vcenterIds');   // express 와 같은 바깥 디코드
+    expect(normScopeIds(back)).toEqual(['KR,Seoul', 'US1', '50%off']);
+    expect(scopeIdsOf(q)).toEqual(['KR,Seoul', 'US1', '50%off']);
+    expect(normScopeIds('a,b%ZZ, c ')).toEqual(['a', 'b%ZZ', 'c']);   // 잘못된 % 줄은 날 글자 그대로
   });
 });
 

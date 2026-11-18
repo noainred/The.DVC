@@ -8,7 +8,7 @@
  */
 import { numOrNull } from '../../../numOrNull.js';
 import { reclaimStorage } from '../../tools/wasteViewText.js';
-import { pickRows, total, mergeTop, descNull, ascNull, byName, barPct, TOP_N_DEFAULT } from './toolSumText.js';
+import { pickRows, total, mergeTop, descNull, ascNull, byName, barPct, fmtU, TOP_N_DEFAULT } from './toolSumText.js';
 
 /** 갈래 5개 — 키는 Optimization 화면의 하위 탭 키(#/tools/waste/<키>)와 같다. */
 export const OVER_KINDS = Object.freeze([
@@ -50,6 +50,16 @@ export function overTotals(resp, vcIds) {
   };
 }
 
+/**
+ * 호스트 코어 clock(mhzPerCore)을 몰라 CPU 할당 · 사용 합에서 뺀 구동 VM 수의 안내(서버 overAllocatedReport excludedNoHostMhz).
+ *   이 VM 들은 사용률을 읽었어도 합에서 빠져 usageUnknown 에 잡히지 않는다 — 따로 밝히지 않으면 부분 합이 전체 합처럼 보인다.
+ *   도구 화면(CapacityTools) · 내보내기(wasteExport)와 같은 사실 · 같은 수. 0 · 결측이면 빈 글자.
+ */
+export function cpuNoClockText(n) {
+  const v = numOrNull(n);
+  return v != null && v > 0 ? `호스트 코어 clock 을 몰라 ${fmtU(v, '대')}는 CPU 합에서 뺐습니다(합은 하한).` : '';
+}
+
 /** 갈래 줄의 수 — 메모리 · CPU 는 줄일 후보 수, 나머지는 해당 VM 수. */
 export function kindCounts(t) {
   if (!t) return {};
@@ -73,7 +83,8 @@ export function corpBars(t, kind) {
     const max = xs.reduce((a, x) => Math.max(a, x.alloc), 0);
     return xs.sort((a, b) => descNull(a.idle, b.idle) || String(a.r.vcenterId).localeCompare(String(b.r.vcenterId)))
       .map((x) => ({ vcenterId: x.r.vcenterId, name: x.r.name, w: barPct(x.alloc, max), used: Math.max(0, x.used || 0), idle: Math.max(0, x.idle || 0),
-        alloc: x.alloc, value: x.idle, n: x.cand, poweredOn: numOrNull(x.r.poweredOnVms) }));
+        alloc: x.alloc, value: x.idle, n: x.cand, poweredOn: numOrNull(x.r.poweredOnVms),
+        noClock: k === 'cpu' ? (numOrNull(x.r.excludedNoHostMhz) || 0) : 0 }));
   }
   const get = { off: (r) => ({ v: numOrNull(r.poweredOffGB), n: numOrNull(r.poweredOff) }),
     snap: (r) => ({ v: numOrNull(r.snapshotGB), n: numOrNull(r.snapshots) }),
