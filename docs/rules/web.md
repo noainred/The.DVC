@@ -925,6 +925,12 @@
      ⓐ 보기는 **주소로**: `#/hosts`(= 분석) · `#/hosts/insight` · `#/hosts/list`(옛 ‘호스트별’ 표 — 이름만 ‘목록’) · `#/hosts/corp`. 상세 `#/hosts/<id>` 는 그대로(`hosts/hostInsightText.hostIdOfHash` — 보기 키가 아닌 둘째 칸). 검색어 · ‘그 호스트만’(nameFocus)이 있으면 기본 보기는 목록(`hostViewOf`). 옛 보기 기억 `dvc.hosts.view` 는 읽지 않는다(탭을 열면 분석).
      ⓑ 값: `GET /hosts/insight`(법인 줄 · 클러스터 줄 · 법인별 상위 N · 30초 · 리전만) → 고른 법인 줄을 더한다(`sumHostRows` — 비율은 한 법인이면 서버 값, 여럿이면 서버 `ratios` 와 같은 규칙). 지도 칸 = 클러스터(독립 호스트는 법인마다 한 칸) · 고르는 id = 법인(`Treemap pickOf`) · 처음 색 = 한 대 빠진 뒤 메모리(클러스터 구성 권한이 있을 때만) · 파랑 3단 + 경계 이상만 빨강 · ‘못 버팀’ 은 칸 안의 표(`tileView().mark`). 권한 없는 칸(hw · hygiene · cluster)은 0 이 아니라 숨긴다.
      ⓒ 특수 기능 패널 3개(`hosts/insight-tools/` — 경합(호스트) · ESXi 호스트 구성 점검 · 데이터스토어 곧 가득 · 경로)는 VM 쪽 `ToolParts` · `useToolSummary` · `toolSumText` 를 그대로 쓴다. 용량 고갈 예측 라우트의 집행 키는 `forecast`. 기억 키는 `hostInsight.map` · `hostInsight.fold`. 회귀 `hosts/hostInsight3220.test.js` · `hosts/hostInsightRender3220.test.jsx`.
+  ⑯ **v3.23.0 지도 칸 글자 — 작은 칸도 읽히게(사용자 요청 2026-11-18 · 설계 `docs/design/insight-tiles` · 컨펌 ‘진행해’ = 추천 B + C + D)** — 공용 `insight/tilePack.js`(순수) + `Treemap.jsx` 한 곳.
+     ⓐ 넓은 화면은 지도 폭을 재서(ResizeObserver · 글자 폭은 canvas measureText) `packLayout` 으로 다시 놓는다 — 칸이 많은 지역은 1 ~ 4개 작은 열(폭 120px 아래로 안 나눔 · **이름이 보이는 칸이 가장 많은 수**). 넓이는 크기 값에 비례(시험 고정).
+     ⓑ 칸마다 글자 단계 `t-xl · t-l · t-m · t-one · t-none` — **12px 아래로 내리지 않는다**(잘린 글자를 그리지 말고 글 없음 · 표만). ‘못 버팀’ 표가 붙으면 그 폭 · 셋째 줄 높이까지 판정에 넣는다(넣지 않으면 이름이 위로 잘렸다).
+     ⓒ 그래도 글이 안 들어가는 칸이 한 지역에 2개 이상이면 ‘그 밖 N개’ 한 칸(빗금 · `aria-expanded`) — 색은 **구성원 중 가장 높은 값**(`worstMember`) · 누르면 지도 아래 목록(STable · Hypervisor 는 법인 칸 — 클러스터 이름이 법인마다 겹친다).
+     ⓓ 자동 높이는 잰 폭 기준 `maxTilesPacked`(호출부가 `onWidth` 로 받는다). 좁은 화면(≤720px)은 v3.21.0 세로 띠 그대로(묶음 없음).
+     ⓔ 정정(설계 §5): 처음 안이던 ‘네모 배치(squarified)’ 는 세어 보니 이름이 더 잘려 버렸다 — 지금 배치의 문제는 폭이 아니라 높이였다.
 
 - **v2.998.0(코드 · 테스트 표지는 v2.994 — main 이 v2.997 까지 먼저 나가 번호만 올렸다) — 서버 메뉴 이름 변경: Virtual Machine(VM) · Hypervisor · Bare Metal Server · Physical Server(사용자 요청 2026-11-13 · 설계 `docs/design/server-menu-rename/README.md` · 컨펌 '추천대로 전부 진행')**.
   회귀 `web/src/views/topMenu.test.js`(구성 · locate · 진입 탭 `menuTabOf` · aka 검색) · `sidebar/{sideMenu,singleMenu2891,menuEdit}.test.js`(옛 저장 메뉴 두 모양) · `platform/platformText.test.js`(허브 제목 = 메뉴 라벨) · `featureUsageText.test.js` · `server/test/platformHub2915.test.js` ④.

@@ -17,6 +17,7 @@ import { vcHash } from '../vcd/vcdRoute.js';
 import { pickRows, toolIdsOf, fmtN, fmtU, gbText, shareText, barPct } from '../insight/insightCore.js';
 import { treemapLayout, maxTilesInCol, fillStep } from '../insight/treemap.js';
 import { mapHeightOf, autoMapHeight } from '../insight/insightPrefs.js';
+import { maxTilesPacked, worstMember } from '../insight/tilePack.js'; // v3.23.0 지도 칸 글자(설계 docs/design/insight-tiles)
 import { useFolded } from '../insight/useInsight.js';
 import Treemap from '../insight/Treemap.jsx';
 import { useMapPrefs, MapSizeSeg, MapSizeBox } from '../insight/MapSize.jsx';
@@ -49,6 +50,7 @@ export default function HostInsight({ filters = {}, scopeIds = null, scopeRegion
   const [folded, toggleFold] = useFolded(HOST_FOLD_PREF_KEY, HOST_FOLD_KEYS);
   const [mapPrefs, setMapPrefs] = useMapPrefs(HOST_MAP_PREF_KEY);
   const [cfgOpen, setCfgOpen] = useState(false);
+  const [mapW, setMapW] = useState(null);   // v3.23.0: 지도가 잰 폭(px) — 자동 높이를 여러 열 기준으로
   const [fillKey, setFillKey] = useState(null);   // null = 처음 색(한 대 빠진 뒤 메모리 — 권한이 없으면 첫 기준)
   const [sizeKey, setSizeKey] = useState('hosts');
   const rows = useMemo(() => (Array.isArray(data?.rows) ? data.rows : []), [data]);
@@ -84,7 +86,7 @@ export default function HostInsight({ filters = {}, scopeIds = null, scopeRegion
   const fill = fills.find((f) => f.key === fillKey) || fills[0];
   const size = SIZE_DEFS.find((z) => z.key === sizeKey) || SIZE_DEFS[0];
   const layout = treemapLayout(mapGroups(data.clusters, picked.all, size));
-  const maxTiles = maxTilesInCol(layout);
+  const maxTiles = mapW ? maxTilesPacked(layout, mapW) : maxTilesInCol(layout);
   const mapH = mapHeightOf(mapPrefs, maxTiles);
   const selSet = ids.length ? new Set(ids) : null;
   const tileView = (t) => {
@@ -99,6 +101,17 @@ export default function HostInsight({ filters = {}, scopeIds = null, scopeRegion
       title: t.label, line: `${fill.short} ${fill.key === 'n1mem' ? n1PctText(fv) : pct0(fv)} · ${size.text(t.size)}`, bg: col.bg, ink: col.ink, stale: r.stale === true,
       mark: fail ? '못 버팀' : null,
       tip: `${t.label} · ${corpName(r)}${r.city ? ` · ${r.city}` : ''}${r.stale ? ' · 값이 오래됨(합에 넣지 않음)' : ''} — 호스트 ${fmtU(c.hosts, '대')}(연결 ${fmtN(c.connected)} · 점검 ${fmtN(c.maint)} · 끊김 ${fmtN(c.down)}) · 코어 ${fmtN(c.cores)} · 메모리 ${gbText(c.memTotalGB)} · 평균 CPU ${pct0(c.cpuAvg)} · 가장 바쁜 호스트 ${pct0(c.busiestCpu)} · 평균 메모리 ${pct0(c.memAvg)}${n1}${(numOrNull(c.usageUnknown) ?? 0) > 0 ? ` · 사용률 모름 ${fmtU(c.usageUnknown, '대')}` : ''}${onScopeIds ? ' — 누르면 이 법인을 바로가기 선택에 켜고 끕니다' : ''}`,
+    };
+  };
+  // v3.23.0: ‘그 밖 N개’ 칸 — 색은 구성원 중 가장 높은 값 · ‘못 버팀’ 이 있으면 수를 적는다 · 누르면 아래에 목록
+  const groupView = (members, g) => {
+    const { member, value } = worstMember(members, (m) => fill.val(m.cell));
+    const col = hostTileColors(fillStep(value, fill));
+    const failN = members.filter((m) => n1FailOf(m.cell)).length;
+    return {
+      title: g.label, line: `가장 높은 ${fill.short} ${fill.key === 'n1mem' ? n1PctText(value) : pct0(value)} · 합 ${size.text(g.size)}`, bg: col.bg, ink: col.ink,
+      mark: failN ? `못 버팀 ${failN}` : null,
+      tip: `${g.label} — 칸이 너무 작아 한 칸으로 묶은 클러스터(${members.map((m) => m.label).join(' · ')}) · 색은 가장 높은 값(${member ? member.label : '—'})${failN ? ` · 못 버티는 클러스터 ${failN}개` : ''} · 누르면 아래에 목록이 열립니다`,
     };
   };
   const scale = hostScale(fill);
@@ -159,7 +172,7 @@ export default function HostInsight({ filters = {}, scopeIds = null, scopeRegion
       {cfgOpen && <MapSizeBox prefs={mapPrefs} onPrefs={setMapPrefs} maxTiles={maxTiles} onClose={() => setCfgOpen(false)} narrow={narrow}
         autoNote={`자동 = 가장 긴 지역의 칸 수로 정합니다(지금 ${autoMapHeight(maxTiles)}px)`} />}
       {layout.cols.length
-        ? <Treemap layout={layout} heightPx={mapH} tileView={tileView} selected={selSet} onToggle={onScopeIds ? toggleId : null} pickOf={(t) => t.pick}
+        ? <Treemap layout={layout} heightPx={mapH} tileView={tileView} groupView={groupView} onWidth={setMapW} whereOf={(t) => corpName(t.row)} selected={selSet} onToggle={onScopeIds ? toggleId : null} pickOf={(t) => t.pick}
           label="가상화 호스트 현황 — 클러스터 칸" colText={(c) => `${c.label} · ${size.text(c.total)}`} />
         : <div className="ins-note">그릴 클러스터 칸이 없습니다 — 범위 안 클러스터의 크기 값이 없거나 0 입니다.</div>}
       <div className="ins-scale">
