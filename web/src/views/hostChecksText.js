@@ -105,6 +105,34 @@ export const gbText = (mb) => (Number.isFinite(mb) && mb > 0 ? `${Math.round(mb 
 export const kwText = (w) => (Number.isFinite(w) && w > 0 ? `${w.toLocaleString('en-US')} W` : '—');
 export const ratioText = (a, b) => (Number.isFinite(a) && Number.isFinite(b) && b > 0 ? `${(Math.round((a / b) * 10) / 10).toFixed(1)} : 1` : '—');
 
+/**
+ * 호스트 한 대의 VM 할당 칸(vCPU · vCPU:코어 · VM 메모리) — 서버 /hosts/checks 의 vm 한 줄을 글자로만 바꾼다(v3.19.2).
+ *   호스트 표(Hosts.jsx) · 전체 페이지 상세(HostDetail.jsx) · 드로어(hosts/hostDrawerText.js)가 이 함수 하나를 쓴다.
+ *   · '전부 못 읽음' 판정은 서버 vcenter/vmSums.js vmAllocOf 하나다 — 서버가 null 을 주고, 여기서는 그 null 을 '—'(단위 없음)로 그릴 뿐 **다시 판정하지 않는다**
+ *     (unknown 수와 n 을 비교하는 식을 여기 두지 말 것 — 회귀 hostChecksText.test.js 가 소스를 본다).
+ *   · 일부만 못 읽음(unknown > 0)은 읽은 값의 합(최소값) — partial 이 true 이고 화면이 '+?'(표) · '이상'(드로어) · '못 읽은 VM N'(상세)을 붙인다.
+ *   · VM 이 없으면 0 · '0 GB'(모름이 아니다). 점검 묶음을 아직 못 받았으면(vm 없음) 세 칸 다 '—'.
+ * 칸: { text, sort(null 은 정렬에서 항상 뒤), partial, all(전부 못 읽음), title(표 툴팁), note(보조 문구) }
+ */
+const vmNum = (v) => (Number.isFinite(v) ? v.toLocaleString('en-US') : '—');
+const VM_CELL_NONE = Object.freeze({ text: '—', sort: null, partial: false, all: false, title: '', note: '' });
+export function vmAllocCells(vm, host) {
+  if (!vm || typeof vm !== 'object') return { vcpu: VM_CELL_NONE, ratio: VM_CELL_NONE, mem: VM_CELL_NONE };
+  const n = numOrNull(vm.n) ?? 0;
+  const cell = (value, unknown, what, text) => {
+    const u = numOrNull(unknown) ?? 0;
+    if (value == null) return { text: '—', sort: null, partial: false, all: true, title: `VM ${vmNum(n)}대의 ${what} 모두 못 읽었습니다`, note: `VM ${vmNum(n)}대 모두 못 읽음` };
+    return { text: text(value), sort: value, partial: u > 0, all: false, title: u > 0 ? `${what} 못 읽은 VM ${vmNum(u)} — 읽은 VM 만의 합(최소값)` : '', note: u > 0 ? `못 읽은 VM ${vmNum(u)}` : '' };
+  };
+  const vcpu = cell(numOrNull(vm.vcpu), vm.vcpuUnknown, 'vCPU 를', (v) => vmNum(v));
+  const mem = cell(numOrNull(vm.memMB), vm.memUnknown, '메모리를', (v) => `${vmNum(Math.round(v / 1024))} GB`);
+  const cores = numOrNull(host?.cpuCores);
+  const ratioOk = !vcpu.all && cores != null && cores > 0;
+  const ratio = ratioOk ? { ...vcpu, text: ratioText(vcpu.sort, cores), sort: vcpu.sort / cores }
+    : { ...VM_CELL_NONE, all: vcpu.all, title: vcpu.all ? vcpu.title : '', note: vcpu.all ? vcpu.note : '' };
+  return { vcpu, ratio, mem };
+}
+
 /** iDRAC 열 글자·톤 — 서버 hw 한 줄. 묶음이 없으면(권한) 열 자체가 없다. */
 export const HW_TEXT = Object.freeze({
   ok: ['정상', 'green'], warn: ['경고', 'amber'], fault: ['장애', 'red'], unknown: ['상태 모름', 'gray'],

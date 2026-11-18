@@ -19,6 +19,7 @@ import {
   COL_GROUPS, FIXED_GROUP, readColPrefs, writeColPrefs, visibleColumns, secCountsOf, secText, secTone, uplinkDownOf, nicLinkDownOf, deadPathsOf, lunsOf,
   uptimeDays, coresText, gbText, kwText, ratioText, hwCell, bootCell, veeamCell, hostKpis, chipCounts, filterHostsExt, focusLabelExt,
   readHostsView, writeHostsView,   // v2.811 보기(호스트별 · 법인별) 기억
+  vmAllocCells,                    // v3.19.2 VM 할당 칸(전부 못 읽음 '—' · 일부 못 읽음 '+?')
 } from './hostChecksText.js';
 
 const HostDetail = React.lazy(() => import('./HostDetail.jsx'));          // v2.805 전체 페이지 상세(#/hosts/<id>)
@@ -134,7 +135,8 @@ export default function Hosts({ filters, cond = null, nameFocus = '', onNameFocu
   const dot = (g) => <i className="ht-gdot" style={{ background: g.color }} aria-hidden="true" />;
   const groupOf = (c) => COL_GROUPS.find((g) => g.key === c.group);
   const tone = (t) => ({ green: 'green', amber: 'amber', red: 'red', gray: 'gray' }[t] || 'gray');
-  const vmOf = (h) => byId?.[h.id]?.vm || null;
+  const vmCells = (h) => vmAllocCells(byId?.[h.id]?.vm || null, h);
+  const vmCellNode = (c) => (c.title || c.partial ? <span title={c.title || undefined}>{c.text}{c.partial ? <span className="muted">+?</span> : null}</span> : c.text);
   const R = {
     // v2.915(상세 한 규칙): 이름 = 개체 보기(#/vcenters/<vc>/host/<id> — 브레드크럼). 전체 페이지 상세(#/hosts/<id>)는 그 안의 '전체 페이지 상세 →' 버튼(주소는 그대로 산다).
     // v2.975: VM 표와 같은 규칙 — 드로어는 이름 옆 '빠른 확인'(‹ › 로 표 순서대로 넘긴다). 이름 링크는 그대로 개체 보기.
@@ -164,9 +166,11 @@ export default function Hosts({ filters, cond = null, nameFocus = '', onNameFocu
       ? <button type="button" className="cell-link tabular" onClick={() => onGoVms(h.name)} title="VM 탭을 이 호스트의 VM 으로">{numText(h.vmCount)} →</button>
       : numText(h.vmCount)) },
     // VM 묶음 — 호스트 객체에는 VM 할당 합이 없다. /hosts/checks 의 vm(템플릿 제외 · 못 읽은 VM 은 unknown)을 쓰고, 아직 안 읽었으면 '—'.
-    vcpu: { sortValue: (h) => vmOf(h)?.vcpu ?? null, render: (h) => { const v = vmOf(h); return v ? <span title={v.vcpuUnknown ? `vCPU 를 못 읽은 VM ${v.vcpuUnknown}` : undefined}>{numText(v.vcpu)}{v.vcpuUnknown ? <span className="muted">+?</span> : null}</span> : '—'; } },
-    vcpuRatio: { sortValue: (h) => { const v = vmOf(h); return v && h.cpuCores > 0 ? v.vcpu / h.cpuCores : null; }, render: (h) => { const v = vmOf(h); return v ? ratioText(v.vcpu, h.cpuCores) : '—'; } },
-    vmMemGB: { sortValue: (h) => vmOf(h)?.memMB ?? null, render: (h) => { const v = vmOf(h); return v ? <span title={v.memUnknown ? `메모리를 못 읽은 VM ${v.memUnknown}` : undefined}>{gbText(v.memMB)}{v.memUnknown ? <span className="muted">+?</span> : null}</span> : '—'; } },
+    //   v3.19.2: 글자 · 정렬 값은 hostChecksText.vmAllocCells 하나(상세 · 드로어와 같이 쓴다) — VM 을 전부 못 읽은 호스트는 서버가 null 을 줘 '—'(단위 없음 · 정렬은 항상 뒤),
+    //   일부만 못 읽으면 읽은 값의 합 + '+?'. 예전에는 원래 합을 그대로 그려 전부 못 읽은 호스트가 '0+?' 였다.
+    vcpu: { sortValue: (h) => vmCells(h).vcpu.sort, render: (h) => vmCellNode(vmCells(h).vcpu) },
+    vcpuRatio: { sortValue: (h) => vmCells(h).ratio.sort, render: (h) => vmCellNode(vmCells(h).ratio) },
+    vmMemGB: { sortValue: (h) => vmCells(h).mem.sort, render: (h) => vmCellNode(vmCells(h).mem) },
     nics: { sortValue: (h) => (Array.isArray(h.nics) ? h.nics.length : null), render: (h) => (Array.isArray(h.nics) && h.nics.length ? h.nics.length : '—') },
     nicDown: { sortValue: (h) => nicLinkDownOf(h), render: (h) => { const v = nicLinkDownOf(h); return <span style={{ color: numTone(v) }}>{numText(v)}</span>; } },
     uplinkDown: { sortValue: (h) => uplinkDownOf(h, secOf(h)), render: (h) => { const v = uplinkDownOf(h, secOf(h)); return <span style={{ color: numTone(v) }}>{numText(v)}</span>; } },

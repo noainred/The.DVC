@@ -443,8 +443,16 @@
     전부 못 읽음 '—'(단위 없음) · 일부만 못 읽음 `≥` + 못 읽은 VM 수(요약 타일과 같은 표기). 요약 칸 'vCore : 물리' 는 vCPU 를 전부 못 읽은 법인을 분자 · 분모 **둘 다**에서 뺀다(0 으로 더하면 코어만 늘어 낮게 나온다) —
     보조 문구는 **뺀 것을 앞에**(칸이 좁아 뒤는 말줄임된다 — Chromium 판독 1440 · 400).
     코어는 `hostChecks.js` · `hostExport.js` 어느 쪽에도 두지 않는다(`hostChecks.js` 가 `hostExport.js` 를 import — 순환). 회귀 `server/test/vmSumsCore3191.test.js`(같은 입력으로 세 출력 대조 · 소스 스윕) · `hostCorpText.test.js`.
-    남긴 것(같은 꼴 · 범위 밖): ① 호스트 표 'VM' 묶음(`/hosts/checks` 의 `c.vm`)은 원래 합을 그대로 실어 전부 못 읽은 호스트가 `0+?` 로 보인다(`Hosts.jsx`) ② `/summary` 의 OS 별 · vCenter 별 합은
+    남긴 것(같은 꼴 · 범위 밖): ① ~~호스트 표 'VM' 묶음(`/hosts/checks` 의 `c.vm`)은 원래 합을 그대로 실어 전부 못 읽은 호스트가 `0+?` 로 보인다(`Hosts.jsx`)~~ → **v3.19.2 에 고쳤다**(아래 줄) ② `/summary` 의 OS 별 · vCenter 별 합은
     아직 `v.cpuCount || 0`(템플릿 포함 · 공개 API 대조 계약) ③ 일부만 못 읽었을 때 엑셀 호스트 행은 비율 칸을 비우고(`cpuRatio` null) 화면 · 요약은 `≥` 최소값을 적는다(표기 방식만 다르고 합 · unknown 수는 같다).
+  · **v3.19.2 — 호스트 한 대의 'VM' 묶음(`/hosts/checks` 의 `byId[id].vm`)도 `vmAllocOf` 를 거친다**(`hostChecks.js hostVmOf` = `vmSumsOf` + `vmAllocOf` — 키는 그대로, `vcpu` · `memMB` 가 null 일 수 있다).
+    v3.19.1 까지 VM 을 **전부** 못 읽은 호스트가 표 `0+?` · 상세 `0` · `0.0 : 1` · 드로어 'vCPU 0 할당 이상' 이었고, 표의 'vCPU:코어' 정렬 값은 `null / 코어 = 0` 이라 '—' 행이 오름차순 맨 앞에 섰다.
+    소비처 세 곳(`Hosts.jsx` 열 `vcpu` · `vcpuRatio` · `vmMemGB` / `HostDetail.jsx` '할당 vCPU' · '할당 메모리' 칸 + VM 카드 보조 문구 / `hosts/hostDrawerText.js hostTiles`)은 글자 함수 **`hostChecksText.vmAllocCells(vm, host)` 하나**를 쓴다 —
+    웹은 서버가 준 null 을 '—'(단위 없음 · 정렬 null = 항상 뒤)로 그릴 뿐 **'unknown 수 === n' 판정을 다시 하지 않는다**(소스 스윕이 막는다). 전부 못 읽음: 표 '—'(툴팁 'VM N대의 vCPU 를 모두 못 읽었습니다') ·
+    상세 '—' + 'VM N대 모두 못 읽음' · 드로어 'vCPU 할당 —' · '코어 대비 —' · 'VM N대 모두 못 읽음'. 일부 못 읽음: 예전 표기 그대로(표 `+?` · 드로어 '이상' · 상세 '못 읽은 VM N') — 이번에 표의 'vCPU:코어' 칸과
+    상세 '할당 메모리' 칸에도 같은 표지를 붙였다(예전에는 부분 합의 비율 · 메모리가 표지 없이 나왔다). VM 없음: `0` · `0.0 : 1` · `0 GB`(예전 메모리 칸은 `gbText(0)` 이라 '—' 였다 — '—' 는 못 읽음에만 쓴다).
+    회귀 `server/test/hostVmAlloc3192.test.js`(순수 + 실제 라우트에서 `/hosts` 요약 · 법인별과 null 여부 대조 + 소스 스윕 — 수정 전 소스에서 4건 모두 실패) · `hostChecksText.test.js` · `hosts/hostDrawerText.test.js`.
+    Chromium 은 목 데이터에 못 읽은 VM 이 없어 `/api/hosts/checks` 응답을 가로채 바꿔 봤다(실제 서버 null 은 단위 테스트가 라우트로 확인). 남긴 것: 위 ② ③ 그대로.
   · 표는 `STable`(법인 열 sticky · `data-sort` 로 null 뒤로). 패널은 콘텐츠가 넓을 때(창 1600px 이상)만 표 옆, 그보다 좁으면 표 아래로 내려가고 행을 고르면 그 패널로 스크롤한다.
     펼친 클러스터의 호스트 표는 `limit` 8 + '호스트 N대 모두 보기 — 호스트별 보기로'(그 클러스터 focus 로 내려간다).
 - ⚠⚠ **v2.708 — 드롭다운은 공용 `Select`·`DataList` 하나다(자동 정렬)**(`web/src/components/`{Select.jsx,DataList.jsx,selectSort.js}, 사용자 요청 "모든 드랍박스 메뉴를 소팅되서 보이게 하고 앞으로 만들면 소팅"):

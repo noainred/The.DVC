@@ -12,7 +12,7 @@ import { HostBasicRows, HostCfgSection, PerfcSection, ClusterCfgSection, HostHba
 import { STable } from '../components/STable.jsx';
 import { hostUsagePct } from './vcdOverview.js';
 import { REBOOT_KIND } from './hostcfg/hostCfgText.js';
-import { secCountsOf, secText, secTone, reasonBadges, bootCell, veeamCell, hwCell, uptimeDays, gbText, kwText, ratioText, nicLinkDownOf, uplinkDownOf } from './hostChecksText.js';
+import { secCountsOf, secText, secTone, reasonBadges, bootCell, veeamCell, hwCell, uptimeDays, gbText, kwText, ratioText, nicLinkDownOf, uplinkDownOf, vmAllocCells } from './hostChecksText.js';
 import HostNetCvp from './HostNetCvp.jsx';   // v2.920 CVP 업링크 블록(시안 D-② HostNet)
 import HostNicCounters from './HostNicCounters.jsx';   // v2.925(B-③) ESXi vmnic 드롭·에러 — 버튼으로 읽는다
 import { uplinksByNic, nicUplinkText, txRxText, basisOf, uplinkSummary } from './hostNetText.js';
@@ -96,6 +96,8 @@ export default function HostDetail({ id }) {
   const up = uptimeDays(h, now);
   const vmOn = vmList.filter((v) => v.powerState === 'POWERED_ON').length;
   const vmSum = c?.vm || null;
+  const va = vmAllocCells(vmSum, h);
+  const vaLabel = (x) => `${x.text}${x.partial ? '+?' : ''}`;   // 한 줄 문구용(표의 '+?' 와 같은 표기)
   const vnet = h.hcfg?.net || null;   // 가상 스위치 구성(hcfg.net) — CVP 업링크 응답(net)과 이름이 겹쳐 v2.920 에 vnet 으로
   const mp = h.hcfg?.mp || null;
   const cvpCols = toolAllowed('cvp');   // v2.920: NIC 표의 CVP 열 3개(도구 키가 허용될 때만)
@@ -107,8 +109,10 @@ export default function HostDetail({ id }) {
     { l: 'CPU 사용률', v: <UsageCell pct={hostUsagePct(h, 'cpuUsagePct')} />, s: Number.isFinite(h.cpuUsageMhz) && Number.isFinite(h.cpuTotalMhz) ? `${numText(h.cpuUsageMhz)} / ${numText(h.cpuTotalMhz)} MHz` : '' },
     { l: '메모리 사용률', v: <UsageCell pct={hostUsagePct(h, 'memUsagePct')} />, s: `${gbText(h.memUsageMB)} / ${gbText(h.memTotalMB)}` },
     { l: 'VM', v: numText(h.vmCount), s: vms ? `켜짐 ${numText(vmOn)} · 꺼짐 ${numText(vmList.length - vmOn)}` : '목록 읽는 중…' },
-    { l: '할당 vCPU', v: vmSum ? numText(vmSum.vcpu) : '—', s: vmSum ? `vCPU:코어 ${ratioText(vmSum.vcpu, h.cpuCores)}${vmSum.vcpuUnknown ? ` · 못 읽은 VM ${vmSum.vcpuUnknown}` : ''}` : '' },
-    { l: '할당 메모리', v: vmSum ? gbText(vmSum.memMB) : '—', s: vmSum && h.memTotalMB > 0 ? `물리 대비 ${ratioText(vmSum.memMB, h.memTotalMB)}` : '' },
+    // v3.19.2: 글자는 hostChecksText.vmAllocCells(표 · 드로어와 같이 쓴다) — VM 을 전부 못 읽었으면 서버가 null 을 줘 '—' + 'VM N대 모두 못 읽음'(예전 '0' · '0.0 : 1'),
+    //   일부만 못 읽었으면 읽은 값의 합 + '못 읽은 VM N'(메모리 칸에도 — 예전에는 vCPU 칸에만 있었다).
+    { l: '할당 vCPU', v: va.vcpu.text, s: !vmSum ? '' : va.vcpu.all ? va.vcpu.note : `vCPU:코어 ${va.ratio.text}${va.vcpu.note ? ` · ${va.vcpu.note}` : ''}` },
+    { l: '할당 메모리', v: va.mem.text, s: !vmSum ? '' : va.mem.all ? va.mem.note : [h.memTotalMB > 0 ? `물리 대비 ${ratioText(va.mem.sort, h.memTotalMB)}` : '', va.mem.note].filter(Boolean).join(' · ') },
     { l: '소비전력', v: kwText(h.powerWatts), s: h.powerSource === 'idrac' ? 'iDRAC 실측' : h.idracBacked ? 'vCenter 추정' : h.powerWatts > 0 ? 'vCenter' : '' },
     { l: '온도', v: Number.isFinite(h.tempC) ? `${h.tempC}℃` : '—', s: Number.isFinite(h.tempMaxC) ? `최고 ${h.tempMaxC}℃${Array.isArray(h.temps) ? ` · 센서 ${h.temps.length}개` : ''}` : '' },
     { l: '업타임', v: up == null ? '—' : `${up}일`, s: Number.isFinite(h.bootTime) ? `부팅 ${timeText(h.bootTime)}` : '부팅 시각 못 읽음' },
@@ -257,7 +261,7 @@ export default function HostDetail({ id }) {
         </Card>
       )}
 
-      <Card id="vm" title={`이 호스트의 VM ${numText(h.vmCount)}대`} color="#22c55e" sub={vms && !vms.error ? `목록 ${numText(vmList.length)} · 켜짐 ${numText(vmOn)}${vmSum ? ` · 템플릿 ${numText(vmSum.templates)} · vCPU ${numText(vmSum.vcpu)} · 메모리 ${gbText(vmSum.memMB)}(할당)` : ''}${vcell ? ` · Veeam 최근 백업 ${vcell.text}` : ''}` : ''}>
+      <Card id="vm" title={`이 호스트의 VM ${numText(h.vmCount)}대`} color="#22c55e" sub={vms && !vms.error ? `목록 ${numText(vmList.length)} · 켜짐 ${numText(vmOn)}${vmSum ? ` · 템플릿 ${numText(vmSum.templates)} · 할당 vCPU ${vaLabel(va.vcpu)} · 할당 메모리 ${vaLabel(va.mem)}` : ''}${vcell ? ` · Veeam 최근 백업 ${vcell.text}` : ''}` : ''}>
         {!vms ? <div className="muted">VM 목록 읽는 중…</div> : vms.error ? <div className="muted">VM 목록을 읽지 못했습니다({vms.error}).</div> : (
           <DataTable className="ht-table" columns={vmCols} rows={vmList} initialSort={{ key: 'name', dir: 'asc' }} emptyText="이 호스트에 VM 이 없습니다." maxHeight="56vh" />
         )}
