@@ -147,6 +147,12 @@
   · ⚠ **이득의 성격을 과장하지 말 것**: TTL 12초 · 폴링 15초라 **단독 사용자에게는 이득이 없다**.
     이득은 **동시 사용자·탭**과 **버스트**(single-flight 합류)다. 형제 5종과 같은 성질이다.
   · ⚠ `memoJson` 은 값을 **return** 해야 한다 — `res.json()` 을 직접 부르면 캐시가 채워지지 않는다.
+  · ⚠ **v3.20.0 `?vcenterIds=a,b,…`(허브 바로가기 복수 선택)** — 해석은 `routes/api/shared.js parseVcenterIds`(고른 법인 Set 은 `vcenterPickOf`) 하나:
+    **범위(scope) 교집합이 먼저**(`applyFilters` 순서 — 범위 밖 id 는 섞이지 않는다) · 공백 · 빈 값 · 중복 제거 · id 200자 · 개수 min(등록 수, 200)(앞에서 자른다) ·
+    **목록을 보냈는데 남은 것이 없거나 글자가 아니면 0건**(필터 없음이 아니다 — 범위 밖 id 만 보내 전체를 받으면 안 된다) · `vcenterId` 와 함께 오면 `vcenterId` 우선.
+    캐시 키는 URL 외에 `extraKey` 에 **정규화한 목록**(`vcenterPickKey` — 정렬 · 중복 제거, 고르지 않음 '-' 와 빈 목록 'v' 를 가른다)과 `scopeKey` 를 함께 넣는다 —
+    세대(`generatedAt`)가 바뀌면 전부 새로 계산된다. `/platform/summary` 는 `byVc` = (범위 ∩ 리전) 전체 줄(칩 숫자) · `totals` = 고른 법인의 합(단일 `vcenterId` 도 같은 규칙).
+    VM 페이지 커서 지문(`vmPaging VM_FILTER_KEYS`)에도 `vcenterIds` 가 있다. 회귀 `test/hubMultiScope3200.test.js`.
 
 - ⚠ **운영 규모를 재려면 `MOCK_SCALE`**(`mock/generator.js`, v2.577): 이 저장소의 성능 규약은 전부
   **28 vCenter · ~658 호스트 · ~5,850 VM** 을 전제로 쓰였는데 목 데이터는 **11 / 186 / 2,242** 라

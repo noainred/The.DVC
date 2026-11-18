@@ -9,7 +9,7 @@
 import { requirePerm } from '../../auth/auth.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store, usageReadable, hostCapacityKnown } from '../../store.js';
-import { memoJson, applyFilters, scopeKey } from './shared.js';
+import { memoJson, applyFilters, scopeKey, vcenterPickOf, vcenterPickKey } from './shared.js';
 import { accessOf } from './hostExport.js';
 import { hostCorpOf } from '../../vcenter/hostCorp.js';
 import { getPingDb } from '../../ping/db.js';
@@ -43,17 +43,18 @@ export function registerHostCorp(api) {
       let hosts = applyFilters(snap.hosts || [], req.query, snap, ['name', 'cluster'], req.user);
       if (req.query.state) hosts = hosts.filter((h) => h.connectionState === req.query.state);
       const region = typeof req.query.region === 'string' && REGIONS.includes(req.query.region) ? req.query.region : null;
-      const vcId = typeof req.query.vcenterId === 'string' ? req.query.vcenterId : null;
+      // v3.20.0: 고른 법인(vcenterId 하나 또는 vcenterIds 목록 — shared.js vcenterPickOf · 호스트는 applyFilters 가 같은 함수로 거른다).
+      const pick = vcenterPickOf(req.query, snap);
       // 법인 목록은 scope 가 먼저(요청 필터보다) — 범위 밖 vCenter 는 이름도 싣지 않는다.
       const vcenters = (snap.vcenters || [])
         .filter((v) => !allowed || allowed.has(v.id))
-        .filter((v) => !vcId || v.id === vcId)
+        .filter((v) => !pick || pick.has(v.id))
         .filter((v) => !region || v.location?.region === region);
       const vms = (snap.vms || []).filter((v) => !allowed || allowed.has(v.vcenterId));
       const narrowed = !!(req.query.q || req.query.state || req.query.notes);
       const rttOf = await rttReader();
       const r = hostCorpOf({ vcenters, hosts, vms, readable: usageReadable, capKnown: hostCapacityKnown, rttOf, access: { cluster: access.cluster }, dropEmpty: narrowed });
       return { ok: true, ...r, initial: snap.initial === true, generatedAt: snap.generatedAt || null };
-    }, { ttlMs: 30_000, extraKey: `${scopeKey(req.user, store.get())}|${access.cluster ? 'c' : '-'}` });
+    }, { ttlMs: 30_000, extraKey: `${scopeKey(req.user, store.get())}|${vcenterPickKey(req.query, store.get())}|${access.cluster ? 'c' : '-'}` });
   });
 }

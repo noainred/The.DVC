@@ -3,7 +3,7 @@ import { usePolling, fetchJson, toolAllowed, can } from '../api.js';
 // v2.915 가상화 플랫폼 허브(설계 docs/design/virt-platform-menu 시안 A ② · ⑨): 이 화면은 허브의 'vCenter 탭' 본문이다 — 제목 · 전체 vCenter/호스트/VM 카드 · 바로가기는
 //   허브(views/platform/PlatformHub.jsx)가 그리고, 여기는 vCenter 카드만 남는다(v3.19.0 설계 docs/design/vm-menu 시안 A — 보기 전환 · 도구 줄 · 요약 3장 · 표 보기는 걷어냈다).
 //   범위(리전 · vCenter · 검색)는 App 의 공용 바.
-import { scopeLabel, keywordsOf, vcMatches, filterChipSites, siblingSites, siblingScopeText } from './platform/platformText.js';
+import { scopeLabel, keywordsOf, vcMatches, filterChipSites, siblingSites, siblingScopeText, scopeIdsOf, sitesInHubScope } from './platform/platformText.js';
 import { HUB_ENTRY_TAB } from './vcd/vcdTabs.js'; // v2.958: 허브에서 법인을 누르면 상세는 '요약' 부터
 import { pressable } from '../components/pressable.js';   // v3.10.19: 누르는 카드(KPI 3장 · vCenter 카드)에 키보드 접근 // v2.959: 백업 KPI 카드 → 고른 법인의 Backup 세부내용(순수 모듈 — 도구 화면을 끌어오지 않는다)
 import { Loading, ErrorBox, StateBadge, usageColor } from '../components/ui.jsx';
@@ -85,7 +85,7 @@ export function vcCountMeta(sites, now = Date.now()) {
  * 입력이 멈추고 300ms 뒤 서버 /vms?nameOnly=1 을 한 번 부른다(폴링 안 함). 늦게 온 이전 응답은 버린다.
  * 범위(scope)는 서버가 강제하고, inv.vms 권한이 없으면 부르지 않고 그 사실을 말한다.
  */
-function VmNameSearch({ term, sites, scope = null, scopeText = '전체 vCenter' }) {   // v3.13.1 scope: 허브 범위(리전 · vCenter) — 없으면 전체(v2.671)
+function VmNameSearch({ term, sites, scope = null, scopeText = '전체 vCenter' }) {   // v3.13.1 scope: 허브 범위(리전 · vCenter) — 없으면 전체(v2.671) · v3.20.0 고른 법인 목록(vcenterIds)
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
   const [sel, setSel] = useState(null);
@@ -100,7 +100,7 @@ function VmNameSearch({ term, sites, scope = null, scopeText = '전체 vCenter' 
         .catch((e) => { if (active) setErr(e?.status === 403 ? 'VM 목록 조회 권한이 없습니다(설정 › 사용자 관리 › 권한).' : `VM 조회 실패: ${e?.message || e}`); });
     }, 300);
     return () => { active = false; clearTimeout(t); };
-  }, [term, allowed, scope?.region, scope?.vcenterId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [term, allowed, scope?.region, scopeIdsOf(scope).join('\n')]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!term) return null;
   const items = Array.isArray(data?.items) ? data.items : [];
   return (
@@ -196,14 +196,15 @@ export default function VCenters({ onSelectSite, onGoVms, resetSignal, scope = {
   //   (Chromium A/B 재현). vCenter 가 바뀌면 새로 마운트해 주소에서 다시 읽는다(검색 · 펼침 · 탭 상태도 그 vCenter 의 것으로).
   if (openSite) return <Suspense fallback={<Loading />}><VCenterDetail key={openSite.id} site={openSite} onBack={() => setOpenId(null)} siblings={{ ...siblingsOf(siblingSites(sites, scope), openId), scopeText: siblingScopeText(scope) }} onOpen={(id) => setOpenId(id)} initialTab={openTab} /></Suspense>;
   // v2.915 허브 범위(리전 · vCenter)로 먼저 거른다 — 세 탭이 같은 범위를 쓴다. 검색은 그 다음.
-  const regSel = String(scope?.region || ''); const vcSel = String(scope?.vcenterId || '');
-  const inScope = sites.filter((s) => (!vcSel || s.id === vcSel) && (!regSel || s.location?.region === regSel));
+  //   v3.20.0(바로가기 복수 선택): 고른 법인 목록이 있으면 그 법인들의 카드만(0곳이면 리전) — 서버에 싣는 범위(hubScopeQuery)와 같은 뜻(sitesInHubScope).
+  const regSel = String(scope?.region || ''); const vcSel = scopeIdsOf(scope);
+  const inScope = sitesInHubScope(sites, scope);
   // 공백 구분 다중 키워드 AND — 이름·id·도시·국가·리전·버전에서 검색(허브 검색과 같은 규칙 · v3.10.13 부터 platformText.vcMatches 한 벌 — 상세의 이전 · 다음 이웃 목록도 같은 규칙).
   const keywords = keywordsOf(query);
-  // v3.19.0: 바로가기 찾기 글자(chipQuery — 범위 바의 공용 검색 q 와 별개)도 같은 판정(vcMatches)으로 카드를 좁힌다. 고른 법인(vcSel)의 카드는 그대로 남는다.
+  // v3.19.0: 바로가기 찾기 글자(chipQuery — 범위 바의 공용 검색 q 와 별개)도 같은 판정(vcMatches)으로 카드를 좁힌다. 고른 법인(vcSel — v3.20.0 목록)의 카드는 그대로 남는다.
   const chipKeywords = keywordsOf(chipQuery);
   const byQuery = keywords.length === 0 ? inScope : inScope.filter((s) => vcMatches(s, keywords));
-  const shown = filterChipSites(byQuery, chipQuery, vcSel ? [vcSel] : []);
+  const shown = filterChipSites(byQuery, chipQuery, vcSel);
   // v2.732(그룹 i3) vcCountMeta(연결됨 수 + 낡은 값)는 v2.915 부터 허브의 엔티티 탭이 서버 요약으로 말한다(이 파일의 export 는 테스트 · 다른 화면이 쓴다).
   // v3.19.0: 요약 3장(VM 백업 · VM 증가 · 스토리지 증가)과 그 합계 계산(다빈치/IRS 분류 · countableTotals · backupTotals · Bareos 합)은 걷어냈다 — 값은 Backup 현황 · VM 수량 추이 · 스토리지 증가 도구에 있다.
   const kpiScope = scopeLabel(scope, inScope);   // VM 이름 검색 제목의 범위 글자
@@ -213,7 +214,7 @@ export default function VCenters({ onSelectSite, onGoVms, resetSignal, scope = {
     <>
       {error && <div className="card" style={{ marginBottom: 8, padding: '8px 12px', color: 'var(--red)', fontSize: 12 }}>일시적 갱신 오류: {String(error.message || error)} — 직전 데이터를 표시 중입니다.</div>}
 
-      <VmNameSearch term={vmSearchTerm(query)} sites={sites} scope={{ region: regSel, vcenterId: vcSel }} scopeText={vmSearchScopeText(kpiScope)} />
+      <VmNameSearch term={vmSearchTerm(query)} sites={sites} scope={{ region: regSel, vcenterIds: vcSel }} scopeText={vmSearchScopeText(kpiScope)} />
 
       {/* v3.19.0: 빈 결과의 원인을 가른다 — 공용 검색(q)이 이미 0곳이면 이 안내, q 로는 남았는데 바로가기 찾기 글자가 지웠으면 아래 안내(엉뚱한 칸을 탓하지 않는다). */}
       {keywords.length > 0 && byQuery.length === 0 && (

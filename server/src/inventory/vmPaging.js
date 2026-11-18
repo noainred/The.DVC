@@ -64,6 +64,8 @@ export const VM_FILTER_KEYS = [
   'cpuBin', 'memBin', 'power', 'osName',
   // v2.909(가상화 서버 허브) 신호 선택 — 목록을 바꾸므로 지문에 넣는다(없으면 예전 지문 그대로). `signals`(개수 싣기)는 넣지 않는다.
   'signal',
+  // v3.20.0(허브 복수 법인) 고른 법인 목록 — 목록을 바꾸므로 지문에 넣는다(없으면 예전 지문 그대로).
+  'vcenterIds',
 ];
 export function vmFilterString(q) {
   const parts = [];

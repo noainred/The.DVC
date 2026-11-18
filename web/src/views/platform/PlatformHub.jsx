@@ -1,11 +1,12 @@
 // views/platform/PlatformHub.jsx — 가상화 허브 셸(v2.994 메뉴 '서버 › Virtual Machine' · '서버 › Hypervisor' — 옛 이름 '가상화 플랫폼')(v2.915 · 설계 docs/design/virt-platform-menu 시안 A ②③④⑥ · 컨펌 2026-11-07 '시안 A · 표준 검증').
 //   App 이 vcenters · hosts · vms 탭 위에 그린다: 제목 · 엔티티 탭 3장(수 + '지금 볼 것' 배지 + 그 탭의 분해) · 바로가기 칩(vCenter 별 이 탭의 숫자 · 고른 법인은 파랗게 · 접기 기억).
 //   숫자는 서버 /platform/summary 하나(30초 · 탭 배지를 위해 무거운 집계를 다시 부르지 않는다) — 응답 전 · 첫 수집 중은 '—'(0 금지). 화면은 글자만 만든다(platformText.js).
-//   탭 id · 해시는 그대로(#/vcenters · #/hosts · #/vms) — 탭을 누르면 App 의 setTab, 칩을 누르면 허브 범위(위 필터 바의 vCenter)가 그 법인으로 바뀐다.
+//   탭 id · 해시는 그대로(#/vcenters · #/hosts · #/vms) — 탭을 누르면 App 의 setTab, 칩을 누르면 허브 범위(고른 법인 목록)에 그 법인을 켜고 끈다.
+//   v3.20.0(사용자 요청 2026-11-18 · 설계 docs/design/vm-menu §5 ③ 시안 ②): 칩은 **복수 선택**(aria-pressed) — 켠 법인들이 세 탭 공용 범위다 · ‘✕ 전체 법인’ 으로 한 번에 해제.
 import React, { useState } from 'react';
 import { vcQuickDot } from '../vcCardText.js';
 import { SearchBox } from '../../components/ui.jsx';
-import { entityTabs, chipCount, chipLegend, loadChipsCollapsed, saveChipsCollapsed, platformMenuLabel, chipSites, chipRegionNote, filterChipSites, keywordsOf } from './platformText.js';
+import { entityTabs, chipCount, chipLegend, loadChipsCollapsed, saveChipsCollapsed, platformMenuLabel, chipSites, chipRegionNote, filterChipSites, keywordsOf, normScopeIds } from './platformText.js';
 import './platform.css';
 
 const lsSafe = () => { try { return typeof window !== 'undefined' ? window.localStorage : null; } catch { return null; } };
@@ -23,14 +24,16 @@ const ICON = {
  * @param {(t:string)=>void} p.onTab
  * @param {object|null} p.summary          /platform/summary 응답 — App 이 허브 범위(위 필터 바의 리전 · vCenter)로 한 번 부른 것(응답 전 null → '—')
  * @param {object[]} p.vcenters             /vcenters 목록(App 폴링) — 칩 순서 · 상태 점
- * @param {string} p.vcenterId              고른 법인(없으면 '')
- * @param {(id:string)=>void} p.onPickVcenter  칩 클릭 — 같은 칩을 다시 누르면 전체
+ * @param {string[]} p.vcenterIds           고른 법인 목록(v3.20.0 — 없으면 [] · 메모리만)
+ * @param {(id:string)=>void} p.onToggleVcenter  칩 클릭 — 그 법인을 켜고 끈다(여러 곳을 함께)
+ * @param {()=>void} p.onClearVcenters          ‘✕ 전체 법인’ — 고른 법인을 한 번에 해제
  * @param {string} p.chipQuery                 바로가기 찾기 글자(v3.19.0 — App 이 메모리로만 든다 · 범위 바의 공용 검색 q 와 별개)
  * @param {(v:string)=>void} p.onChipQuery
  */
-export default function PlatformHub({ tab, tabs, onTab, summary = null, vcenters, vcenterId, region = '', onPickVcenter, chipQuery = '', onChipQuery = () => {} }) {
+export default function PlatformHub({ tab, tabs, onTab, summary = null, vcenters, vcenterIds = [], region = '', onToggleVcenter = () => {}, onClearVcenters = () => {}, chipQuery = '', onChipQuery = () => {} }) {
   // v2.954(점검 E-2): 요약은 App 이 범위(리전 · vCenter)를 실어 부른 summary prop 하나를 쓴다. 예전에는 여기서 scope 없이(App 이 넘기지 않음) 다시 폴링해
-  //   엔티티 탭 · 칩이 범위를 따르지 않고(전 법인 수) 같은 요약을 30초마다 두 번 불렀다. 범위 밖 법인의 칩은 숫자 없이 점만 남는다(요약에 그 법인 줄이 없다).
+  //   엔티티 탭 · 칩이 범위를 따르지 않고(전 법인 수) 같은 요약을 30초마다 두 번 불렀다.
+  //   v3.20.0: 서버는 고른 법인과 무관하게 byVc(칩 숫자용 · 사용자 조회 범위 안 전 법인)를 주고 totals 만 고른 법인의 합이다 — **켜지 않은 칩도 자기 숫자를 유지**한다. 화면은 byVc 를 그대로 읽는다.
   const [folded, setFolded] = useState(() => loadChipsCollapsed(lsSafe()));
   // 접으면 찾기 칸도 접힌다 — 보이지 않는 글자가 카드를 계속 거르지 않게 접을 때 글자를 비운다(v3.19.0).
   const toggleFold = () => { const n = !folded; setFolded(n); saveChipsCollapsed(lsSafe(), n); if (n && chipQuery) onChipQuery(''); };
@@ -39,7 +42,9 @@ export default function PlatformHub({ tab, tabs, onTab, summary = null, vcenters
   // v3.10.14(점검 2회차): 칩은 고른 리전 안의 법인만 — 칩을 눌러도 리전은 남는다(App 의 onPickVcenter 가 region 을 지우지 않는다).
   const regionSites = chipSites(vcenters, region);
   // v3.19.0(사용자 요청 2026-11-18): 바로가기 찾기 — 카드와 같은 판정(vcMatches). 고른 법인의 칩은 일치하지 않아도 남긴다(다시 눌러 풀 수 있게). 숫자 3장 · 서버 호출은 바뀌지 않는다.
-  const sites = filterChipSites(regionSites, chipQuery, [vcenterId]);
+  //   v3.20.0: 켠 칩(목록 전부)은 찾기 글자와 무관하게 항상 보인다.
+  const picked = normScopeIds(vcenterIds);
+  const sites = filterChipSites(regionSites, chipQuery, picked);
   const finding = keywordsOf(chipQuery).length > 0;
   const regionNote = chipRegionNote(region, regionSites.length);
   const snap = summary?.generatedAt ? new Date(summary.generatedAt).toLocaleTimeString('ko-KR') : '';
@@ -84,16 +89,20 @@ export default function PlatformHub({ tab, tabs, onTab, summary = null, vcenters
           {sites.map((s) => {
             const { dot, down } = vcQuickDot(s);
             const c = chipCount(byVc.get(s.id), tab);
-            const on = vcenterId === s.id;
+            const on = picked.includes(String(s.id));
             return (
               <button key={s.id} type="button" className={`qn-btn${down ? ' down' : ''}${on ? ' on' : ''}`} aria-pressed={on}
-                title={`${s.name} — 허브 범위를 이 법인으로${c.title ? ` · ${c.title}` : ''}${on ? (region ? ' (다시 누르면 리전 전체)' : ' (다시 누르면 전체)') : ''}`}
-                onClick={() => onPickVcenter(on ? '' : s.id)}>
+                title={`${s.name} — ${on ? '누르면 허브 범위에서 뺍니다' : '누르면 허브 범위에 더합니다(여러 곳을 함께)'}${c.title ? ` · ${c.title}` : ''}`}
+                onClick={() => onToggleVcenter(s.id)}>
                 <span className="qn-dot" style={{ background: dot }} />{s.id}
                 {c.n != null && c.n > 0 && <b className={`qn-n ${c.tone}`}>{c.n.toLocaleString('en-US')}</b>}
               </button>
             );
           })}
+          {picked.length > 0 && (
+            <button type="button" className="qn-btn ph-clear" onClick={onClearVcenters}
+              title={`고른 법인 ${picked.length}곳을 한 번에 풉니다${region ? ' — 리전은 남습니다' : ''}`}>✕ 전체 법인</button>
+          )}
           <span className="ph-legend">{chipLegend(tab)}</span>
           <button type="button" className="tab ph-fold" style={{ flex: 'none', padding: '4px 10px', fontSize: 12 }} onClick={toggleFold} aria-expanded={!folded}>{folded ? '바로가기 펴기 ▾' : '접기 ▴'}</button>
         </div>

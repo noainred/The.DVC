@@ -12,7 +12,7 @@ import { browseDatastore, onDemandErrorFields } from '../../vcenter/dsBrowse.js'
 import { listMutes, addMute, removeMute, muteCreateIssue, muteDeleteIssue, visibleMutes } from '../../alarm-mutes.js';
 import { auditMiddleware } from '../../audit.js'; // v2.478(감사 S15): 알람 음소거는 무기록이었다
 import { recordToolUse, getTopTools } from '../../tool-usage.js';
-import { memoJson, applyFilters, sortBy, scopeKey, osFamily } from './shared.js';
+import { memoJson, applyFilters, sortBy, scopeKey, osFamily, vcenterPickOf, vcenterPickKey } from './shared.js';
 import { isPagedRequest, prepareVmPage, buildVmPage } from '../../inventory/vmPaging.js'; // v2.730(I-02)
 import { parseVmFacets, passGpu, filterVmsByFacets, vmDistribution, VM_FACET_KEYS } from '../../inventory/vmDist.js'; // v2.746(VM 상세 C안)
 import { parseSignalQuery, filterVmsBySignal, signalCounts, signalContext, vmSignalsOf } from '../../inventory/vmSignals.js'; // v2.909 가상화 서버 허브
@@ -399,7 +399,8 @@ api.get('/hosts', invHosts, (req, res) => memoJson(req, res, 'inv:hosts', (snap)
     esxiVersions: Object.entries(verMap).map(([version, count]) => ({ version, count })).sort((a, b) => b.count - a.count),
   };
   return { total: hosts.length, items: hosts, summary };
-}, { extraKey: scopeKey(req.user, store.get()) }));
+  // v3.20.0: 고른 법인 목록(정규화)도 키에 — URL 이 이미 다르지만 '범위 · 고른 법인' 을 키에서 바로 읽게 한다.
+}, { extraKey: `${scopeKey(req.user, store.get())}|${vcenterPickKey(req.query, store.get())}` }));
 
 /** 요청의 원문 쿼리 문자열('?' 뒤) — 없으면 ''. 정규화기를 거치기 전 모양을 보기 위한 것이다. */
 function rawQueryOf(req) {
@@ -463,7 +464,7 @@ api.get('/vms', invVms, (req, res) => {
   const items = list.slice(0, limit);
   // 예전 응답에는 이어 받는 방법이 없다(nextCursor:null) — 나머지는 paged=1 로 다시 요청한다.
   return { total: list.length, items: withSig(items), totals, returned: items.length, hasMore: list.length > items.length, nextCursor: null, snapshotAt, ...extra };
-}, { extraKey: `${scopeKey(req.user, store.get())}${useSig ? `|h${sig.rev}` : ''}` });
+}, { extraKey: `${scopeKey(req.user, store.get())}|${vcenterPickKey(req.query, store.get())}${useSig ? `|h${sig.rev}` : ''}` });
 });
 
 // v2.909(가상화 서버 허브 · 시안 ③): 법인(vCenter)별 VM 집계. /vms 와 같은 범위·필터(matchVms — 패널·GPU·신호 선택은 빼고).
@@ -476,16 +477,17 @@ api.get('/vms/by-vcenter', invVms, (req, res) => {
     const q0 = { ...req.query };
     for (const k of [...FACET_STRIP_KEYS, 'signal', 'signals']) delete q0[k];
     const { vms } = matchVms(snap, q0, req.user);
-    const vcId = typeof req.query.vcenterId === 'string' && req.query.vcenterId ? req.query.vcenterId : null;
+    // v3.20.0: 고른 법인(vcenterId 하나 또는 vcenterIds 목록 — shared.js vcenterPickOf). 범위가 먼저 · 범위 밖만 고르면 0곳.
+    const pick = vcenterPickOf(req.query, snap);
     const region = typeof req.query.region === 'string' && req.query.region ? req.query.region : null;
     const vcenters = (snap.vcenters || [])
       .filter((v) => !allowed || allowed.has(v.id))
-      .filter((v) => !vcId || v.id === vcId)
+      .filter((v) => !pick || pick.has(v.id))
       .filter((v) => !region || v.location?.region === region);
     const narrowed = !!(req.query.q || req.query.powerState || req.query.os || req.query.host || req.query.toolsStatus);
     const r = vmByVcenter({ vcenters, vms, ctx: sig.ctx, dropEmpty: narrowed });
     return { ok: true, ...r, snapAgeDays: sig.ctx?.hygiene?.snapAgeDays ?? null, snapshotAt: snap.generatedAt ?? null, initial: snap.initial === true };
-  }, { ttlMs: 30_000, extraKey: `${scopeKey(req.user, store.get())}|h${sig.rev}` });
+  }, { ttlMs: 30_000, extraKey: `${scopeKey(req.user, store.get())}|${vcenterPickKey(req.query, store.get())}|h${sig.rev}` });
 });
 
 // VM 단건 조회 — 이름/IP/호스트명으로 스냅샷에서 찾아 상세 팝업에 쓴다(모든 화면 공용).
@@ -534,19 +536,21 @@ api.get('/platform/summary', (req, res) => {
   const canVms = userHasPermission(req.user, 'inv.vms');
   return memoJson(req, res, 'platform:summary', (snap) => {
     const allowed = scopedVcenterIds(req.user, snap);
-    const vcId = typeof req.query.vcenterId === 'string' && req.query.vcenterId ? req.query.vcenterId : null;
+    // v3.20.0(허브 복수 법인): 칩 숫자를 위해 byVc 는 고른 법인과 무관하게 (범위 ∩ 리전) 의 전체 줄이고, totals 는 고른 법인
+    //   (vcenterId 하나 또는 vcenterIds 목록 — shared.js vcenterPickOf)의 합이다. 예전에는 하나를 고르면 byVc 도 그 줄만 남아 다른 칩 숫자가 사라졌다.
+    //   범위가 먼저다 — byVc 에 범위 밖 법인은 이름도 없고, 범위 밖 id 만 고르면 totals 는 0건(전체가 아니다).
+    const pick = vcenterPickOf(req.query, snap);
     const region = typeof req.query.region === 'string' && req.query.region ? req.query.region : null;
     // 법인 줄은 /vcenters 와 같은 롤업 사이트(metrics — 알람 수 · 상태 · 낡은 값)에서 — 없으면(첫 병합 전) 등록 목록
     const vcenters = (Array.isArray(snap.rollups?.sites) && snap.rollups.sites.length ? snap.rollups.sites : (snap.vcenters || []))
       .filter((v) => !allowed || allowed.has(v.id))
-      .filter((v) => !vcId || v.id === vcId)
       .filter((v) => !region || v.location?.region === region);
     const ids = new Set(vcenters.map((v) => v.id));
     const hosts = canHosts ? (snap.hosts || []).filter((h) => ids.has(h.vcenterId)) : null;
     const vms = canVms ? (snap.vms || []).filter((v) => ids.has(v.vcenterId)) : null;
-    const r = platformSummaryOf({ vcenters, hosts, vms, ctx: sig.ctx, readable: usageReadable, staleOf: siteInventoryStale });
+    const r = platformSummaryOf({ vcenters, hosts, vms, ctx: sig.ctx, readable: usageReadable, staleOf: siteInventoryStale, pick });
     return { ok: true, ...r, generatedAt: snap.generatedAt ?? null, initial: snap.initial === true, snapAgeDays: sig.ctx?.hygiene?.snapAgeDays ?? null };
-  }, { ttlMs: 30_000, extraKey: `${scopeKey(req.user, store.get())}|h${sig.rev}|p${canHosts ? 1 : 0}${canVms ? 1 : 0}` });
+  }, { ttlMs: 30_000, extraKey: `${scopeKey(req.user, store.get())}|${vcenterPickKey(req.query, store.get())}|h${sig.rev}|p${canHosts ? 1 : 0}${canVms ? 1 : 0}` });
 });
 
 api.get('/datastores', invDs, (req, res) => memoJson(req, res, 'inv:datastores', (snap) => {
