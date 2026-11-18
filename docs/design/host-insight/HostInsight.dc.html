@@ -14,7 +14,7 @@ body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR
 button{font:inherit}
 sc-for,sc-if{display:contents}
 .mono{font-family:"JetBrains Mono",monospace}
-.page{min-height:2100px;padding:22px 24px 28px;display:flex;flex-direction:column;gap:14px;box-sizing:border-box}
+.page{min-height:2450px;padding:22px 24px 28px;display:flex;flex-direction:column;gap:14px;box-sizing:border-box}
 .head{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px}
 .head h1{margin:0;font-size:20px;font-weight:800}
 .head .snap{margin-left:auto;font-size:12px;color:#8b9bb4;font-family:"JetBrains Mono",monospace;white-space:nowrap}
@@ -155,6 +155,21 @@ sc-for,sc-if{display:contents}
 .row.d{grid-template-columns:minmax(0, 2fr) minmax(0, 1fr)}
 .rk{display:inline-block;font-style:normal;font-size:10.5px;font-weight:800;background:#ffffff;color:#b91c1c;border-radius:999px;padding:1px 7px;white-space:nowrap;flex:none}
 .big3 span .mk{margin-left:4px}
+.row.b.wide{grid-template-columns:minmax(0, 1fr)}
+.gear{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font-size:12px;font-weight:600;cursor:pointer}
+.gear.on{border-color:#3b82f6;background:rgba(59,130,246,.2)}
+.cfg{display:flex;flex-direction:column;gap:10px;border:1px solid #33425f;border-radius:12px;background:#0f1626;padding:12px 14px}
+.cfgh{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px}
+.cfgh b{font-size:13.5px;font-weight:800}
+.cfgh .hint{font-size:12px;color:#8b9bb4;flex:1 1 260px;min-width:0}
+.cfgh .x{min-height:28px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:transparent;color:#aebbd0;font-size:12px;cursor:pointer}
+.cfgr{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;font-size:12.5px}
+.cfgr .cl{flex:0 0 104px;color:#c3cfe2;font-weight:700}
+.cfgr .hint{font-size:12px;color:#8b9bb4}
+.cfgr .stp{min-width:32px;min-height:32px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font-size:15px;font-weight:700;cursor:pointer}
+.cfgr .rng{flex:1 1 220px;max-width:420px;accent-color:#3b82f6}
+.cfgr .val{font-family:"JetBrains Mono",monospace;font-size:14px;font-weight:800;min-width:72px}
+.cfgr .rst{min-height:30px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font-size:12.5px;font-weight:600;cursor:pointer}
 .note{font-size:12px;line-height:1.6;color:#aebbd0}
 .empty{font-size:13px;color:#aebbd0;padding:18px 16px;border:1px solid #243049;border-radius:12px;background:#141b2d;line-height:1.6}
 </style>
@@ -166,7 +181,7 @@ sc-for,sc-if{display:contents}
     <span class="snap">값 = 목(mock, 가상) 서버 · 스냅샷 오후 12:34:03</span>
   </header>
 
-  <div class="mklegend"><span class="mk">반영 표시</span><span>노란 표와 노란 점선 = 이번에 반영한 곳입니다(실제 화면에는 없는 표시) — <b>S1</b> 확인할 것을 맨 위로 · 분포 접기 / <b>S2</b> 호스트 몇 대분 환산(통합 비율의 메모리 여유) / <b>S6</b> 경계를 넘은 칸만 경고색(클러스터 지도)</span></div>
+  <div class="mklegend"><span class="mk">반영 표시</span><span>노란 표와 노란 점선 = 이번에 반영한 곳입니다(실제 화면에는 없는 표시) — <b>S1</b> 확인할 것을 맨 위로 · 분포 접기 / <b>S2</b> 호스트 몇 대분 환산(통합 비율의 메모리 여유) / <b>S6</b> 경계를 넘은 칸만 경고색(가상화 호스트 현황)</span><span><span class="mk">이름 변경</span> ‘클러스터 지도’ → ‘가상화 호스트 현황’ · <span class="mk">새 기능</span> 지도 크기 지정(조절 줄의 맨 끝 · 그 아래 설정 상자) · 지도를 크게(처음 520px)</span></div>
 
   <div class="tabs" aria-label="보기">
     <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="3">
@@ -217,19 +232,31 @@ sc-for,sc-if{display:contents}
       </sc-for>
     </div>
 
-    <div class="row b">
-      <section class="panel" aria-label="클러스터 지도">
-        <div class="ph"><h2>클러스터 지도</h2><span class="mk">S6 반영</span><span class="hint">칸 하나 = 클러스터 · 지역별로 묶음 · 넓이 = 크기 기준 · 색 = 색 기준(빨강 = 90% 이상만) · ‘못 버팀’ 표 = 한 대가 빠지면 버티지 못함 · 누르면 그 법인을 고릅니다</span></div>
+    <div class="{{ rowB }}">
+      <section class="panel" aria-label="가상화 호스트 현황">
+        <div class="ph"><h2>가상화 호스트 현황</h2><span class="mk">이름 변경</span><span class="mk">S6 반영</span><span class="hint">칸 하나 = 클러스터 · 지역별로 묶음 · 넓이 = 크기 기준 · 색 = 색 기준(빨강 = 90% 이상만) · ‘못 버팀’ 표 = 한 대가 빠지면 버티지 못함 · 누르면 그 법인을 고릅니다</span></div>
         <div class="ctl">
           <span>색</span>
           <span class="seg" role="group" aria-label="색 기준"><sc-for list="{{ fills }}" as="f" hint-placeholder-count="4"><button type="button" class="{{ f.cls }}" aria-pressed="{{ f.on }}" onClick="{{ f.pick }}">{{ f.label }}</button></sc-for></span>
           <span>크기</span>
           <span class="seg" role="group" aria-label="크기 기준"><sc-for list="{{ sizes }}" as="z" hint-placeholder-count="3"><button type="button" class="{{ z.cls }}" aria-pressed="{{ z.on }}" onClick="{{ z.pick }}">{{ z.label }}</button></sc-for></span>
+          <span>지도 크기</span>
+          <span class="seg chg" role="group" aria-label="지도 크기"><sc-for list="{{ mapSizes }}" as="m" hint-placeholder-count="4"><button type="button" class="{{ m.cls }}" aria-pressed="{{ m.on }}" onClick="{{ m.pick }}">{{ m.label }}</button></sc-for></span>
+          <button type="button" class="{{ cfgCls }}" aria-expanded="{{ cfgOpen }}" onClick="{{ toggleCfg }}">직접 지정 · {{ mapHText }} ▾</button><span class="mk">새 기능</span>
         </div>
+        <sc-if value="{{ cfgOpen }}" hint-placeholder-val="{{ true }}">
+          <div class="cfg chg" role="group" aria-label="지도 크기 설정">
+            <div class="cfgh"><b>지도 크기 설정</b><span class="mk">설정 시안</span><span class="hint">클러스터가 많아 칸이 작아질 때 지도를 키웁니다 — 정한 크기는 이 브라우저에 기억합니다</span><button type="button" class="x" onClick="{{ toggleCfg }}">닫기 ✕</button></div>
+            <div class="cfgr"><span class="cl">높이</span><button type="button" class="stp" aria-label="20px 줄이기" onClick="{{ hMinus }}">−</button><input class="rng" type="range" min="300" max="1200" step="20" value="{{ mapH }}" onChange="{{ onRange }}" aria-label="지도 높이"><button type="button" class="stp" aria-label="20px 늘리기" onClick="{{ hPlus }}">＋</button><b class="val">{{ mapHText }}</b><span class="hint">300 ~ 1,200px · 20px 단위</span></div>
+            <div class="cfgr"><span class="cl">미리 정한 크기</span><span class="seg" role="group" aria-label="미리 정한 크기"><sc-for list="{{ mapSizes }}" as="m" hint-placeholder-count="4"><button type="button" class="{{ m.cls }}" aria-pressed="{{ m.on }}" onClick="{{ m.pick }}">{{ m.label }}</button></sc-for></span><span class="hint">{{ presetHint }}</span></div>
+            <div class="cfgr"><span class="cl">폭</span><span class="seg" role="group" aria-label="지도 폭"><sc-for list="{{ widths }}" as="w" hint-placeholder-count="2"><button type="button" class="{{ w.cls }}" aria-pressed="{{ w.on }}" onClick="{{ w.pick }}">{{ w.label }}</button></sc-for></span><span class="hint">전체 폭 = ‘지역별 분포’ 를 아래로 내리고 지도를 화면 폭 전체로 씁니다</span></div>
+            <div class="cfgr"><span class="cl">기억</span><span class="hint">사용자의 브라우저마다 · 화면(VM · Hypervisor)마다 따로 기억합니다</span><button type="button" class="rst" onClick="{{ resetMap }}">기본값으로</button></div>
+          </div>
+        </sc-if>
         <div class="mapcols">
           <sc-for list="{{ mapCols }}" as="g" hint-placeholder-count="4"><span style="left: {{ g.left }}; width: {{ g.width }}">{{ g.text }}</span></sc-for>
         </div>
-        <div class="map">
+        <div class="map" style="height: {{ mapHpx }}">
           <sc-for list="{{ tiles }}" as="t" hint-placeholder-count="25">
             <button type="button" class="{{ t.cls }}" aria-pressed="{{ t.on }}" title="{{ t.tip }}" onClick="{{ t.toggle }}" style="left: {{ t.left }}; top: {{ t.top }}; width: {{ t.width }}; height: {{ t.height }}; background: {{ t.bg }}"><b>{{ t.name }}</b><span>{{ t.line }}</span><sc-if value="{{ t.risk }}" hint-placeholder-val="{{ false }}"><em class="rk">못 버팀</em></sc-if></button>
           </sc-for>
@@ -340,9 +367,9 @@ sc-for,sc-if{display:contents}
   </sc-if>
 </main>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2100}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2450}}'>
 class Component extends DCLogic {
-  state = { sel: {}, q: '', fill: 'n1', size: 'h', sub: 'insight', fold: false };
+  state = { sel: {}, q: '', fill: 'n1', size: 'h', sub: 'insight', fold: false, mapSize: 'l', mapH: 520, mapWide: false, cfgOpen: true };
 
   // 목(mock, 가상) 서버 /api/hosts · /api/hosts/corp · /api/hosts/checks · /api/platform/summary 를 한 번 받아(2026-11-18 12:34:03 KST · 호스트 186) 법인별로 집계한 값.
   // h 호스트 · cn 연결 · mt 점검 · dn 끊김 · co 물리 코어 · mem 메모리 GB · ct/cu CPU 총/사용 GHz · ml/mu 메모리 총/사용 GB(연결된 호스트)
@@ -468,6 +495,15 @@ class Component extends DCLogic {
     const fills = Object.keys(FILL).map((k) => ({ label: FILL[k].label, on: st.fill === k, cls: st.fill === k ? 'on' : '', pick: () => this.setState({ fill: k }) }));
     const sizes = Object.keys(SIZE).map((k) => ({ label: SIZE[k].label, on: st.size === k, cls: st.size === k ? 'on' : '', pick: () => this.setState({ size: k }) }));
     const REG = ['북미', '유럽', '아시아', '중국'];
+    // 지도 크기 — 사용자가 정한다(미리 정한 크기 4종 + 직접 지정 · 폭). 구현 때는 브라우저에 기억한다.
+    const colMax = Math.max.apply(null, REG.map((name) => CL.filter((c) => rowOf[c[0]].reg === name).length));
+    const AUTO_H = Math.max(360, Math.min(1200, colMax * 64));   // 자동 = 가장 긴 줄의 칸 수 × 64px(360 ~ 1,200 사이)
+    const PRESET = { auto: AUTO_H, m: 360, l: 520, xl: 760 };
+    const mapSize = PRESET[st.mapSize] != null || st.mapSize === 'custom' ? st.mapSize : 'l';
+    const clampH = (v) => Math.max(300, Math.min(1200, Math.round(v / 20) * 20));
+    const mapH = mapSize === 'custom' ? clampH(st.mapH) : PRESET[mapSize];
+    const mapSizes = [['auto', '자동'], ['m', '보통'], ['l', '크게'], ['xl', '아주 크게']].map(([k, label]) => ({ label, on: mapSize === k, cls: mapSize === k ? 'on' : '', pick: () => this.setState({ mapSize: k, mapH: PRESET[k] }) }));
+    const widths = [[false, '기본 폭'], [true, '전체 폭']].map(([w, label]) => ({ label, on: !!st.mapWide === w, cls: !!st.mapWide === w ? 'on' : '', pick: () => this.setState({ mapWide: w }) }));
     const allZ = CL.reduce((a, c) => a + Z.val(c), 0);
     const tiles = []; const mapCols = []; let x = 0;
     REG.forEach((name) => {
@@ -480,7 +516,7 @@ class Component extends DCLogic {
           name: c[1], on, toggle: toggle(c[0]), bg: RAMP[step], risk: c[9] === 0,
           left: x.toFixed(2) + '%', top: y.toFixed(2) + '%', width: w.toFixed(2) + '%', height: hh.toFixed(2) + '%',
           line: Z.text(Z.val(c)) + ' · ' + F.short + ' ' + fv + '%',
-          cls: 'tile' + (hh >= 16 ? ' tall' : '') + (on ? ' on' : (hasSel ? ' dim' : '')),
+          cls: 'tile' + ((hh / 100) * mapH >= 58 ? ' tall' : '') + (on ? ' on' : (hasSel ? ' dim' : '')),
           tip: c[1] + '(' + c[0] + ') — 호스트 ' + c[2] + '대 · 코어 ' + fmt(c[3]) + ' · 메모리 ' + tb(c[4]) + ' · 평균 CPU ' + c[5] + '% · 최고 ' + c[6] + '% · 평균 메모리 ' + c[7] + '% · 한 대 빠지면 CPU ' + c[14] + '% · 메모리 ' + c[13] + '%' + (c[9] === 0 ? ' — 버티지 못함' : '') + ' — 누르면 이 법인을 고릅니다',
         });
         y += hh;
@@ -576,6 +612,11 @@ class Component extends DCLogic {
       hasSel, selText: picked.length + '곳 선택', clearSel: () => this.setState({ sel: {} }),
       subs, showInsight: isInsight, showOther: !isInsight, otherTitle: other[0], otherText: other[1],
       kpis, fills, sizes, mapCols, tiles, scale, scaleTitle: '색 = ' + F.label,
+      mapSizes, widths, mapH, mapHpx: mapH + 'px', mapHText: fmt(mapH) + 'px' + (mapSize === 'custom' ? '(직접)' : ''),
+      rowB: 'row b' + (st.mapWide ? ' wide' : ''), cfgOpen: !!st.cfgOpen, cfgCls: 'gear' + (st.cfgOpen ? ' on' : ''), toggleCfg: () => this.setState({ cfgOpen: !st.cfgOpen }),
+      hMinus: () => this.setState({ mapSize: 'custom', mapH: clampH(mapH - 20) }), hPlus: () => this.setState({ mapSize: 'custom', mapH: clampH(mapH + 20) }),
+      onRange: (e) => this.setState({ mapSize: 'custom', mapH: clampH(Number(e.target.value)) }), resetMap: () => this.setState({ mapSize: 'l', mapH: 520, mapWide: false }),
+      presetHint: '자동 = 가장 긴 줄의 칸 수에 맞춤(지금 ' + fmt(AUTO_H) + 'px) · 보통 360 · 크게 520 · 아주 크게 760',
       regions, verTotal: '6종 · ' + fmt(h) + '대', verFam, verRows, mdTotal: fmt(mdRows.length) + '종', mdRows, vendorText,
       clTotal: '클러스터 ' + fmt(scl.length) + '개', n1, safety, n1Fail, n1FailEmpty: n1Fail.length === 0,
       cpuHist: histOf(chv, 'CPU'), memHist: histOf(mhv, '메모리'),
