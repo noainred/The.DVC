@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<title>Virtual Machine 메뉴 — 법인 하나를 고른 상태</title>
+<title>Virtual Machine 메뉴 — 바로가기에서 법인을 여러 개 고른 상태</title>
 <script src="./support.js"></script>
 </head>
 <body>
@@ -45,6 +45,7 @@ a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
 .tab .bd{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:11px;font-weight:800;border-radius:999px;padding:1px 7px;white-space:nowrap}
 .bd.warn{background:rgba(245,158,11,.16);color:#fcd34d}.bd.crit{background:rgba(239,68,68,.16);color:#fca5a5}
 .tab .val{font-family:"JetBrains Mono",monospace;font-size:30px;font-weight:800;line-height:1}
+.tab .val small{font-family:"Inter","Noto Sans KR",sans-serif;font-size:12px;font-weight:600;color:#8b9bb4;margin-left:8px}
 .tab .parts{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:12px;color:#8b9bb4}
 .tab .parts b{color:#e6edf6;font-weight:600}
 .tab .parts b.g{color:#86efac}.tab .parts b.r{color:#fca5a5}
@@ -54,6 +55,9 @@ a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
 .chip i{width:8px;height:8px;border-radius:50%;background:#f59e0b;flex:none}
 .chip b{font-family:"JetBrains Mono",monospace;font-size:11px;color:#fcd34d}
 .chip.on{background:rgba(59,130,246,.28);border-color:#3b82f6}
+.chip .ck{width:12px;height:12px;flex:none}
+.picked{display:inline-flex;align-items:center;gap:8px;min-height:28px;padding:0 6px 0 11px;border-radius:999px;background:rgba(59,130,246,.18);border:1px solid #3b82f6;color:#dbeafe;font-size:12px;font-weight:700;white-space:nowrap}
+.picked button{min-height:24px;padding:0 9px;border-radius:999px;border:0;background:rgba(15,22,38,.7);color:#e6edf6;font:inherit;font-size:11.5px;font-weight:700;cursor:pointer}
 .chips .lg{font-size:12px;color:#8b9bb4}
 .chips .fold{margin-left:auto;min-height:28px;border:0;background:transparent;color:#aebbd0;font:inherit;font-size:12px;cursor:pointer}
 .grid{display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:16px}
@@ -66,7 +70,8 @@ a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
 .cnt div{display:flex;flex-direction:column;gap:1px}
 .cnt b{font-size:18px;font-weight:800;line-height:1.1}
 .cnt span{font-size:11.5px;color:#8b9bb4}
-.cnt .al b{color:#f87171}
+.cnt .al b{color:#fbbf24}
+.cnt .al.c b{color:#f87171}
 .cnt .bk{border:1px solid rgba(34,197,94,.5);border-radius:6px;padding:4px 9px;background:rgba(34,197,94,.06)}
 .cnt .bk b{color:#4ade80}
 .bar{display:flex;flex-direction:column;gap:7px}
@@ -76,8 +81,6 @@ a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
 .bar .tr i{display:block;height:100%;border-radius:3px;background:#22c55e}
 .bar .tr i.a{background:#f59e0b}
 .ft{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#8b9bb4;border-top:1px solid #1f2a40;padding-top:10px}
-.hint{grid-column:span 2;align-self:start;border:1px dashed #33425f;border-radius:12px;padding:14px 16px;font-size:12.5px;line-height:1.6;color:#aebbd0}
-.hint b{color:#e6edf6}
 </style>
 </helmet>
 
@@ -100,7 +103,7 @@ a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
   <main class="page">
     <div class="scope">
       <select aria-label="리전"><option>전체 리전</option></select>
-      <select class="sel" aria-label="vCenter"><option>vcenter-us-east-01</option></select>
+      <select class="sel" aria-label="vCenter"><option>법인 3곳 선택</option></select>
       <input type="search" aria-label="검색" placeholder="vCenter · 호스트 · VM 이름 · IP">
       <span>범위 · 검색은 vCenter · 호스트 · VM 탭에 함께 적용됩니다</span>
       <button type="button">필터 초기화</button>
@@ -109,58 +112,70 @@ a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
     <header class="head">
       <h1>Virtual Machine</h1>
       <span class="s">서비스 = vCenter 1 + Bareos 1 · 한 법인에 서비스가 여럿일 수 있습니다 · vCenter 에서 호스트 · VM 으로 내려가고, 숫자를 누르면 그 범위로 탭이 바뀝니다</span>
-      <span class="snap">스냅샷 오전 10:12:43</span>
+      <span class="snap">스냅샷 오전 10:35:02</span>
     </header>
 
     <nav class="tabs" aria-label="Virtual Machine 보기">
       <a class="tab on" href="#" aria-current="true">
         <span class="lb">vCenter<span class="sb">· 법인</span></span>
-        <span class="val">1</span>
-        <span class="parts"><span><b class="g">연결 1</b></span><span><b>불가 0</b></span><span><b>REST 폴백 0</b></span><span><b>엣지 위임 0</b></span><span><b class="r">알람 5</b></span></span>
+        <span class="val">3<small>고른 법인의 합</small></span>
+        <span class="parts"><span><b class="g">연결 3</b></span><span><b>불가 0</b></span><span><b>REST 폴백 0</b></span><span><b>엣지 위임 0</b></span><span><b class="r">알람 11</b></span></span>
       </a>
       <a class="tab" href="#">
-        <span class="lb">Hypervisor<span class="sb">· ESXi 호스트</span><span class="bd warn">확인 대상 2</span></span>
-        <span class="val">24</span>
-        <span class="parts"><span><b>연결 24</b></span><span><b>점검 0</b></span><span><b>끊김 0</b></span><span><b>미수집 0</b></span><span><b>클러스터 3</b></span></span>
+        <span class="lb">Hypervisor<span class="sb">· ESXi 호스트</span><span class="bd warn">확인 대상 5</span></span>
+        <span class="val">50</span>
+        <span class="parts"><span><b>연결 50</b></span><span><b>점검 0</b></span><span><b>끊김 0</b></span><span><b>미수집 0</b></span><span><b>클러스터 6</b></span></span>
       </a>
       <a class="tab" href="#">
-        <span class="lb">Virtual Machine<span class="sb">· VM</span><span class="bd crit">조치 필요 50</span></span>
-        <span class="val">240</span>
-        <span class="parts"><span><b class="g">구동 209</b></span><span><b>정지 31</b></span><span><b>사용률 미수집 0</b></span><span><b>템플릿 15</b></span></span>
+        <span class="lb">Virtual Machine<span class="sb">· VM</span><span class="bd crit">조치 필요 105</span></span>
+        <span class="val">496</span>
+        <span class="parts"><span><b class="g">구동 433</b></span><span><b>정지 63</b></span><span><b>사용률 미수집 0</b></span><span><b>템플릿 31</b></span></span>
       </a>
     </nav>
 
-    <div class="chips" aria-label="바로가기 — 법인 고르기">
+    <div class="chips" aria-label="바로가기 — 법인 고르기(여러 개)">
       <span class="ql">바로가기</span>
-      <button class="chip on" type="button" aria-pressed="true"><i></i>vc-us-east <b>5</b></button>
-      <button class="chip" type="button" aria-pressed="false"><i></i>vc-us-west</button>
-      <button class="chip" type="button" aria-pressed="false"><i></i>vc-br-sao</button>
-      <button class="chip" type="button" aria-pressed="false"><i></i>vc-eu-central</button>
-      <button class="chip" type="button" aria-pressed="false"><i></i>vc-eu-west</button>
-      <button class="chip" type="button" aria-pressed="false"><i></i>vc-me-uae</button>
-      <button class="chip" type="button" aria-pressed="false"><i></i>vc-ap-northeast</button>
-      <button class="chip" type="button" aria-pressed="false"><i></i>vc-ap-southeast</button>
-      <button class="chip" type="button" aria-pressed="false"><i></i>vc-ap-south</button>
-      <button class="chip" type="button" aria-pressed="false"><i></i>vc-cn-east</button>
-      <button class="chip" type="button" aria-pressed="false"><i></i>vc-cn-north</button>
-      <span class="lg">숫자 = 그 vCenter 의 알람 · 고른 법인은 파랗게</span>
+      <span class="picked">3곳 선택<button type="button">✕ 전체 법인</button></span>
+      <button class="chip on" type="button" aria-pressed="true"><svg class="ck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg>vc-us-east <b>5</b></button>
+      <button class="chip on" type="button" aria-pressed="true"><svg class="ck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg>vc-us-west <b>4</b></button>
+      <button class="chip on" type="button" aria-pressed="true"><svg class="ck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg>vc-br-sao <b>2</b></button>
+      <button class="chip" type="button" aria-pressed="false"><i></i>vc-eu-central <b>6</b></button>
+      <button class="chip" type="button" aria-pressed="false"><i></i>vc-eu-west <b>4</b></button>
+      <button class="chip" type="button" aria-pressed="false"><i></i>vc-me-uae <b>2</b></button>
+      <button class="chip" type="button" aria-pressed="false"><i></i>vc-ap-northeast <b>5</b></button>
+      <button class="chip" type="button" aria-pressed="false"><i></i>vc-ap-southeast <b>3</b></button>
+      <button class="chip" type="button" aria-pressed="false"><i></i>vc-ap-south <b>2</b></button>
+      <button class="chip" type="button" aria-pressed="false"><i></i>vc-cn-east <b>5</b></button>
+      <button class="chip" type="button" aria-pressed="false"><i></i>vc-cn-north <b>4</b></button>
+      <span class="lg">누를 때마다 켜지고 꺼집니다 · 여러 개를 고를 수 있습니다 · 숫자 = 그 vCenter 의 알람</span>
       <button class="fold" type="button" aria-expanded="true">접기 ▴</button>
     </div>
 
     <div class="grid">
       <a class="card" href="#">
         <div class="ch"><div><div class="nm">vcenter-us-east-01</div><div class="loc">Ashburn, USA · 북미</div></div><span class="st">Connected</span></div>
-        <div class="cnt"><div><b>24</b><span>호스트 →</span></div><div><b>240</b><span>VM (209 on) →</span></div><div class="al"><b>5</b><span>알람</span></div><div class="bk"><b>156/1</b><span>veeam/bareos</span></div></div>
-        <div class="bar"><div class="bl"><span>CPU</span><b>57% · 1229.7/2167.2 GHz</b></div><div class="tr"><i style="width:57%"></i></div></div>
+        <div class="cnt"><div><b>24</b><span>호스트 →</span></div><div><b>240</b><span>VM (209 on) →</span></div><div class="al c"><b>5</b><span>알람</span></div><div class="bk"><b>156/0</b><span>veeam/bareos</span></div></div>
+        <div class="bar"><div class="bl"><span>CPU</span><b>59% · 1279.2/2167.2 GHz</b></div><div class="tr"><i style="width:59%"></i></div></div>
         <div class="bar"><div class="bl"><span>메모리</span><b>62% · 8.4/13.6 TB</b></div><div class="tr"><i style="width:62%"></i></div></div>
-        <div class="bar"><div class="bl"><span>스토리지</span><b>78% · 115.7/148 TB</b></div><div class="tr"><i class="a" style="width:78%"></i></div></div>
+        <div class="bar"><div class="bl"><span>스토리지</span><b>84% · 123.7/148 TB</b></div><div class="tr"><i class="a" style="width:84%"></i></div></div>
         <div class="ft"><span>v8.0.2 · build 22617221</span><span>vc-us-east →</span></div>
       </a>
-      <div class="hint">
-        <b>칩을 누르면 지금과 같이 범위가 그 법인으로 좁혀집니다.</b><br>
-        위 숫자 3장이 그 법인 값으로 바뀌고 카드는 그 법인 1장만 남습니다. 같은 칩을 다시 누르거나 ‘필터 초기화’ 를 누르면 전체로 돌아갑니다.<br>
-        카드를 누르면 그 vCenter 의 상세(요약 탭)로 들어갑니다 — 지금과 같습니다.
-      </div>
+      <a class="card" href="#">
+        <div class="ch"><div><div class="nm">vcenter-us-west-01</div><div class="loc">San Jose, USA · 북미</div></div><span class="st">Connected</span></div>
+        <div class="cnt"><div><b>18</b><span>호스트 →</span></div><div><b>144</b><span>VM (125 on) →</span></div><div class="al c"><b>4</b><span>알람</span></div><div class="bk"><b>91/0</b><span>veeam/bareos</span></div></div>
+        <div class="bar"><div class="bl"><span>CPU</span><b>62% · 1015.8/1632 GHz</b></div><div class="tr"><i style="width:62%"></i></div></div>
+        <div class="bar"><div class="bl"><span>메모리</span><b>59% · 6.6/11.3 TB</b></div><div class="tr"><i style="width:59%"></i></div></div>
+        <div class="bar"><div class="bl"><span>스토리지</span><b>85% · 98.4/116 TB</b></div><div class="tr"><i class="a" style="width:85%"></i></div></div>
+        <div class="ft"><span>v8.0.2 · build 22617221</span><span>vc-us-west →</span></div>
+      </a>
+      <a class="card" href="#">
+        <div class="ch"><div><div class="nm">vcenter-br-sao-01</div><div class="loc">São Paulo, Brazil · 북미</div></div><span class="st">Connected</span></div>
+        <div class="cnt"><div><b>8</b><span>호스트 →</span></div><div><b>112</b><span>VM (99 on) →</span></div><div class="al"><b>2</b><span>알람</span></div><div class="bk"><b>70/0</b><span>veeam/bareos</span></div></div>
+        <div class="bar"><div class="bl"><span>CPU</span><b>73% · 657.1/900.8 GHz</b></div><div class="tr"><i style="width:73%"></i></div></div>
+        <div class="bar"><div class="bl"><span>메모리</span><b>59% · 3.4/5.8 TB</b></div><div class="tr"><i style="width:59%"></i></div></div>
+        <div class="bar"><div class="bl"><span>스토리지</span><b>80% · 25.7/32 TB</b></div><div class="tr"><i class="a" style="width:80%"></i></div></div>
+        <div class="ft"><span>v8.0.3 · build 22617221</span><span>vc-br-sao →</span></div>
+      </a>
     </div>
   </main>
 </div>
