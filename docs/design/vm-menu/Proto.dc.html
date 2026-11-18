@@ -88,6 +88,30 @@ button{font:inherit}
 .panel .r span{color:#c3cfe2}
 .back{align-self:flex-start;min-height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font-size:12.5px;font-weight:600;cursor:pointer}
 .empty{font-size:13px;color:#aebbd0;padding:18px 16px;border:1px solid #243049;border-radius:12px;background:#141b2d}
+sc-for,sc-if{display:contents}
+.alt{margin-top:10px;padding:10px 12px;border:1px dashed #3b82f6;border-radius:10px;background:rgba(59,130,246,.06);display:flex;flex-direction:column;gap:8px;font-size:12px;line-height:1.5;color:#aebbd0}
+.alt b{color:#e6edf6}
+.alt .ab{display:flex;gap:6px;flex-wrap:wrap}
+.alt button{min-height:30px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font-size:12px;font-weight:600;cursor:pointer}
+.alt button.on{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.keep{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding:8px 12px;border:1px dashed #3b82f6;border-radius:12px;background:rgba(59,130,246,.06)}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden}
+.seg button{min-height:30px;padding:0 12px;border:0;background:transparent;color:#aebbd0;font-size:12.5px;font-weight:600;cursor:pointer}
+.seg button.on{background:#3b82f6;color:#fff}
+.tool{display:inline-flex;align-items:center;min-height:30px;padding:0 12px;border:1px solid #243049;border-radius:8px;background:#1a2236;color:#e6edf6;font-size:12.5px;font-weight:600}
+.kp{display:inline-flex;align-items:baseline;gap:6px;font-size:12.5px;color:#8b9bb4;white-space:nowrap}
+.kp b{font-family:"JetBrains Mono",monospace;font-size:14px;color:#e6edf6}
+.kp b.g{color:#4ade80}
+.keep .sp{flex:1 1 auto}
+.tbl{background:#141b2d;border:1px solid #243049;border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
+.tbl .tr{display:grid;grid-template-columns:minmax(0,2.6fr) 92px repeat(8, minmax(0,1fr)) 60px;gap:0 10px;align-items:center;min-height:38px;padding:0 14px;border:0;border-bottom:1px solid #1f2a40;background:transparent;color:#e6edf6;font-size:12.5px;text-align:left;width:100%;box-sizing:border-box}
+.tbl button.tr{cursor:pointer}
+.tbl button.tr:hover{background:rgba(59,130,246,.08)}
+.tbl .th{color:#8b9bb4;font-weight:700;font-size:12px;background:#111a2e}
+.tbl .tr span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tbl .n{text-align:right;font-family:"JetBrains Mono",monospace}
+.tbl .ok{color:#86efac;font-weight:700;font-size:11.5px}
+.tbl .cap{padding:9px 14px;font-size:12px;color:#8b9bb4}
 </style>
 </helmet>
 
@@ -98,6 +122,14 @@ button{font:inherit}
       <button type="button" class="{{ m.cls }}" onClick="{{ m.go }}"><i></i><span>{{ m.label }}</span></button>
     </sc-for>
     <div class="tip"><b>눌러 보세요</b> — 왼쪽 메뉴 · 위 숫자 3장 · 바로가기 칩 · 찾기 칸 · 카드가 반응합니다. 값은 목(mock, 가상) 서버의 것입니다.</div>
+    <div class="alt" role="group" aria-label="시안 고르기 — 바로가기와 카드 사이">
+      <span><b>시안 고르기</b> — 바로가기와 카드 사이(컨펌 질문 ①). 이 상자는 시안용이며 실제 화면에는 없습니다.</span>
+      <span class="ab">
+        <sc-for list="{{ alts }}" as="a" hint-placeholder-count="2">
+          <button type="button" class="{{ a.cls }}" aria-pressed="{{ a.on }}" onClick="{{ a.pick }}">{{ a.label }}</button>
+        </sc-for>
+      </span>
+    </div>
   </nav>
 
   <main class="page">
@@ -129,6 +161,21 @@ button{font:inherit}
         <span class="lg">{{ legend }}</span>
       </div>
 
+      <sc-if value="{{ showKeep }}" hint-placeholder-val="{{ false }}">
+        <div class="keep" aria-label="대안 B 에서 남기는 한 줄 — 보기 전환 · 도구 · 요약">
+          <span class="seg" role="group" aria-label="보기">
+            <sc-for list="{{ views }}" as="w" hint-placeholder-count="2">
+              <button type="button" class="{{ w.cls }}" aria-pressed="{{ w.on }}" onClick="{{ w.pick }}">{{ w.label }}</button>
+            </sc-for>
+          </span>
+          <span class="tool">vCenter 도구 6 ▾</span>
+          <span class="sp"></span>
+          <span class="kp">VM 백업(Veeam / Bareos) <b class="g">{{ bkText }}</b></span>
+          <span class="kp">VM 증가(30일) <b>—</b></span>
+          <span class="kp">스토리지 증가(30일) <b>—</b></span>
+        </div>
+      </sc-if>
+
       <sc-if value="{{ showCards }}" hint-placeholder-val="{{ true }}">
         <div class="grid">
           <sc-for list="{{ cards }}" as="k" hint-placeholder-count="6">
@@ -142,9 +189,20 @@ button{font:inherit}
             </button>
           </sc-for>
         </div>
-        <sc-if value="{{ noCards }}" hint-placeholder-val="{{ false }}">
-          <div class="empty">{{ noCardsText }}</div>
-        </sc-if>
+      </sc-if>
+
+      <sc-if value="{{ showTable }}" hint-placeholder-val="{{ false }}">
+        <div class="tbl" role="table" aria-label="표 · 법인별 비교">
+          <div class="tr th" role="row"><span>법인 · vCenter</span><span>상태</span><span class="n">호스트</span><span class="n">확인 대상</span><span class="n">VM</span><span class="n">CPU</span><span class="n">메모리</span><span class="n">스토리지</span><span class="n">알람</span><span class="n">Veeam / Bareos</span><span>버전</span></div>
+          <sc-for list="{{ cards }}" as="k" hint-placeholder-count="6">
+            <button type="button" class="tr" role="row" onClick="{{ k.open }}"><span>{{ k.name }}</span><span class="ok">Connected</span><span class="n">{{ k.hosts }}</span><span class="n">{{ k.hAtt }}</span><span class="n">{{ k.vms }}</span><span class="n">{{ k.cpuW }}</span><span class="n">{{ k.memW }}</span><span class="n">{{ k.stoW }}</span><span class="n">{{ k.alarms }}</span><span class="n">{{ k.bk }}</span><span>{{ k.verShort }}</span></button>
+          </sc-for>
+          <div class="cap">대안 B 에만 남는 ‘표 · 법인별 비교’ 보기입니다 — 열 이름은 지금 표와 같고, ‘수집’ 열은 이 시안에 값이 없어 뺐습니다.</div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ showEmpty }}" hint-placeholder-val="{{ false }}">
+        <div class="empty">{{ noCardsText }}</div>
       </sc-if>
 
       <sc-if value="{{ showDetail }}" hint-placeholder-val="{{ false }}">
@@ -193,7 +251,7 @@ button{font:inherit}
 </x-dc>
 <script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1800}}'>
 class Component extends DCLogic {
-  state = { menu: 'vm', tab: 'vcenters', sel: {}, q: '', open: '' };
+  state = { menu: 'vm', tab: 'vcenters', sel: {}, q: '', open: '', alt: 'A', view: 'card' };
 
   rows() {
     return [
@@ -290,9 +348,21 @@ class Component extends DCLogic {
       cpuText: r.cpu + '% · ' + r.cpuT, cpuW: r.cpu + '%', cpuCls: tone(r.cpu),
       memText: r.mem + '% · ' + r.memT, memW: r.mem + '%', memCls: tone(r.mem),
       stoText: r.sto + '% · ' + r.stoT, stoW: r.sto + '%', stoCls: tone(r.sto),
-      ver: r.ver, idArrow: r.id + ' →',
+      ver: r.ver, idArrow: r.id + ' →', hAtt: fmt(r.hAtt), verShort: r.ver.split(' · ')[0],
       open: () => this.setState({ open: r.id }),
     }));
+
+    // 시안 고르기 — A: 바로가기 바로 아래 카드 · B: 그 사이에 한 줄(보기 전환 · 도구 · 요약)을 남긴다. 그 밖은 같다.
+    const isB = st.alt === 'B';
+    const alts = [{ k: 'A', label: 'A — 바로 카드' }, { k: 'B', label: 'B — 한 줄 남김' }].map((a) => ({
+      label: a.label, on: st.alt === a.k, cls: st.alt === a.k ? 'on' : '', pick: () => this.setState({ alt: a.k, view: 'card' }),
+    }));
+    const views = [{ k: 'card', label: '카드' }, { k: 'table', label: '표 · 법인별 비교' }].map((w) => ({
+      label: w.label, on: st.view === w.k, cls: st.view === w.k ? 'on' : '', pick: () => this.setState({ view: w.k }),
+    }));
+    const tableOn = isB && st.view === 'table';
+    // VM 백업 요약은 지금 코드처럼 범위(켠 법인 · 없으면 전체) 안 카드 값의 합
+    const bkSum = scope.reduce((a, r) => { const p = r.bk.split('/'); return [a[0] + Number(p[0]), a[1] + Number(p[1])]; }, [0, 0]);
     const opened = rows.find((r) => r.id === st.open);
     const onCards = isVm && st.tab === 'vcenters';
     const scopeText = hasSel ? '고른 법인 ' + picked.length + '곳만 보입니다.' : '전체 법인이 보입니다.';
@@ -304,7 +374,10 @@ class Component extends DCLogic {
       tabs, q: st.q, onFind: (e) => this.setState({ q: e.target.value }),
       hasSel, selText: picked.length + '곳 선택', clearSel: () => this.setState({ sel: {} }),
       chips, legend,
-      showCards: onCards && !opened, cards, noCards: cards.length === 0,
+      alts, views, bkText: fmt(bkSum[0]) + '/' + fmt(bkSum[1]),
+      showKeep: onCards && !opened && isB,
+      showCards: onCards && !opened && !tableOn, showTable: onCards && !opened && tableOn, cards,
+      showEmpty: onCards && !opened && cards.length === 0,
       noCardsText: '‘' + st.q + '’ 와 일치하는 법인이 없습니다 — 찾기 칸을 지우면 전체가 다시 보입니다.',
       showDetail: onCards && !!opened, detailName: opened ? opened.name : '', back: () => this.setState({ open: '' }),
       showHosts: isVm && st.tab === 'hosts', showVms: isVm && st.tab === 'vms', scopeText,
