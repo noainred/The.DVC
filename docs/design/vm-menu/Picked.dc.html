@@ -51,6 +51,7 @@ a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
 .tab .parts b.g{color:#86efac}.tab .parts b.r{color:#fca5a5}
 .chips{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#111a2e;border:1px solid #243049;border-radius:12px;padding:10px 12px}
 .chips .ql{color:#8b9bb4;font-size:12px;white-space:nowrap}
+.chips .find{height:32px;width:170px;box-sizing:border-box;border-radius:999px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px;padding:0 12px}
 .chip{display:inline-flex;align-items:center;gap:6px;min-height:32px;background:rgba(148,163,184,.08);border:1px solid #243049;color:#e6edf6;border-radius:999px;padding:0 13px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
 .chip i{width:8px;height:8px;border-radius:50%;background:#f59e0b;flex:none}
 .chip b{font-family:"JetBrains Mono",monospace;font-size:11px;color:#fcd34d}
@@ -134,6 +135,7 @@ a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
 
     <div class="chips" aria-label="바로가기 — 법인 고르기(여러 개)">
       <span class="ql">바로가기</span>
+      <input class="find" type="search" aria-label="법인 찾기" placeholder="법인 찾기">
       <span class="picked">3곳 선택<button type="button">✕ 전체 법인</button></span>
       <button class="chip on" type="button" aria-pressed="true"><svg class="ck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg>vc-us-east <b>5</b></button>
       <button class="chip on" type="button" aria-pressed="true"><svg class="ck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg>vc-us-west <b>4</b></button>

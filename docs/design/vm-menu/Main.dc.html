@@ -54,6 +54,7 @@ a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
 .chips{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#111a2e;border:1px solid #243049;border-radius:12px;padding:10px 12px}
 .chips .ql{display:inline-flex;align-items:center;gap:6px;color:#8b9bb4;font-size:12px;white-space:nowrap}
 .chips .ql svg{width:13px;height:13px}
+.chips .find{height:32px;width:170px;box-sizing:border-box;border-radius:999px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px;padding:0 12px}
 .chip{display:inline-flex;align-items:center;gap:6px;min-height:32px;background:rgba(148,163,184,.08);border:1px solid #243049;color:#e6edf6;border-radius:999px;padding:0 13px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
 .chip i{width:8px;height:8px;border-radius:50%;background:#f59e0b;flex:none}
 .chip b{font-family:"JetBrains Mono",monospace;font-size:11px;color:#fcd34d}
@@ -135,6 +136,7 @@ a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
 
     <div class="chips" aria-label="바로가기 — 법인 고르기">
       <span class="ql"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7z"></path></svg>바로가기</span>
+      <input class="find" type="search" aria-label="법인 찾기" placeholder="법인 찾기">
       <button class="chip" type="button"><i></i>vc-us-east <b>5</b></button>
       <button class="chip" type="button"><i></i>vc-us-west <b>4</b></button>
       <button class="chip" type="button"><i></i>vc-br-sao <b>2</b></button>
