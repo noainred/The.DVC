@@ -872,7 +872,7 @@
   ⑩ 기능 사용 현황(`featureUsageText.js menuIndex`)은 `tabs` 도 같은 자리로 센다(`tab:vms` 키 그대로 · 이름 '가상화 플랫폼 › 가상화 서버 · VM').
   ⑪ **v2.994 에서 이름 · 항목 분리가 바뀌었다** — 아래 'v2.994 서버 메뉴 이름 변경' 항목이 우선한다(①의 항목 모양 · ②의 별칭 방향 · ⑨의 '마지막 본 탭' 기억 · ⑥의 브레드크럼 뿌리 이름).
   ⑫ **v3.19.0(사용자 요청 2026-11-18 · 설계 `docs/design/vm-menu` 시안 A · §8)** — ⓐ 숫자 3장 순서는 **vCenter · Virtual Machine · Hypervisor**(사이드바 '서버' 묶음과 같다 — 계층 순서가 아니다). `platformText.PLATFORM_TABS` 와 `entityTabs()` 반환이 **리터럴로 따로** 순서를 적으니 둘을 함께 바꾼다(탭 id · 해시 · 권한 id 는 그대로).
-     ⓑ 허브 머리의 설명 문구(‘서비스 = vCenter 1 + Bareos 1 …’)는 지웠다(세 탭 공통). ⓒ **vCenter 탭은 바로가기 아래에 vCenter 카드만**(⑨의 카드 | 표 보기 · 도구 6 · 요약 3장 · `VcTable.jsx` · `platform.vcView` 기억은 없앴다 — 옛 저장 값은 읽지 않는다. VM 이름 검색 안내 · 결과 없음 · 용량 각주만 남는다). `HubTabs.jsx` 는 Hosts · Vms 탭이 쓰므로 남는다.
+     ⓑ 허브 머리의 설명 문구(‘서비스 = vCenter 1 + Bareos 1 …’)는 지웠다(세 탭 공통). ⓒ **vCenter 탭은 바로가기 아래에 vCenter 카드만**(⑨의 카드 | 표 보기 · 도구 6 · 요약 3장 · `VcTable.jsx` · `platform.vcView` 기억은 없앴다 — 옛 저장 값은 읽지 않는다. VM 이름 검색 안내 · 결과 없음 · 용량 각주만 남는다). `HubTabs.jsx` 는 Hosts · Vms 탭이 쓰므로 남는다. 요약 3장이 넘기던 도구 인계(`KPI_HANDOFF` · `takeKpiVcenter`)의 받는 쪽도 뒤이은 정리에서 지웠다(v2.959 항목 끝).
      ⓓ **바로가기 글자로 찾기**: `platformText.filterChipSites(sites, text, selectedIds)` — 판정은 카드와 같은 `vcMatches`·`keywordsOf`(부분 일치 · 대소문자 무시 · 공백 낱말 AND). 범위 바의 공용 검색 `q` 와 **별개**인 App 메모리 상태 `chipQuery`(저장하지 않는다)를 허브(칩)와 vCenter 탭(카드)이 쓴다 — 숫자 3장 · 서버 호출은 그대로. **고른 법인의 칩은 일치하지 않아도 남긴다**(다시 눌러 풀 수 있게) · 맞는 법인이 없으면 칩 자리 · 카드 자리에 안내 + 지우기 · 접으면 글자도 비운다.
      ⓔ 400px 결함(D3): `.ph-tab.on .parts { grid-column }` 때문에 열린 탭의 분해가 탭 안과 `.ph-parts-narrow` 에 **두 번** 나왔다 — 탭 안 규칙을 지웠다(`.ph-tab .parts` 는 400px 에서 숨김, 열린 탭의 분해는 아래 한 줄만). 회귀 `platform/platformText.test.js` 맨 아래 v3.19.0 두 describe.
 
@@ -951,13 +951,17 @@
   `platformText.KPI_HANDOFF`(`vm-track:vcenter` · `storage-track:vcenter`) 로 `hooks/searchHandoff` 메모리 인계(URL 에 싣지 않는다 · 30초 · 꺼내면 지운다) · 받는 도구는 `useState(() => takeKpiVcenter(…))` 로 마운트 때 1회.
   ‘VM 백업’ 카드는 법인을 골랐으면 Backup 현황 · Detail(`backupViewText.openBackupDetail` — 서머리의 openDetail 과 같은 키 `backup-detail-vc`), 아니면 Summary. 도구 권한이 없으면 누를 수 없다(커서 · 제목 없음). 리전만 골랐으면 전체로 연다(도구에 리전 선택이 없다).
   새 인계 target 을 ⌘K 의 `invSearchQuery SCREEN` 표에 넣지 않는다(검색 인계가 아니다) — `useSearchHandoff` 훅 대신 `takeSearch` 를 직접 쓴 이유.
+  **(정리 2026-11-18 — v3.19.0 에 요약 3장이 없어져 이 인계는 보내는 쪽 · 받는 쪽 모두 지웠다)**: `KPI_HANDOFF` · `handoffKpiScope` · `handoffKpiVcenter` · `takeKpiVcenter` 는 없다. 지우기 전에 같은 target
+  (`vm-track:vcenter|region` · `storage-track:vcenter|region` · `backup-summary:region`)을 남기는 다른 경로가 없음을 확인했다 — `handoffMany`/`handoffSearch`/`stashForNewTab` 호출처는 ⌘K 팔레트(`invSearchQuery` SCREEN · EXTRA 표의 target 만) ·
+  `IdracTrendLinkButton`(`TREND_HANDOFF`) · `SanStorageTool`(`san-flow:targets`) 셋뿐. VM 수량 · 스토리지 사용량 추이 · Backup Summary 는 전체로 열리고 화면의 리전 · vCenter 선택 칸으로 고른다(리전 선택 · `regionsOf · vcInRegion` 은 그대로).
+  회귀 `platform/platformText.test.js` ‘KPI 카드 → 도구 인계(v2.959)는 걷어냈다’(상수 · 함수 없음 · 세 도구 초기값 `''` · 옛 target 문자열이 web/src 에 0건).
 - **v3.10.13 — 가상화 플랫폼 점검 1회차: vCenter 상세의 ‹ 이전 · 다음 › 은 허브 범위 안에서**(자율 개선 루프 2026-11-15): 전에는 리전 · 검색어로 범위를 좁혀도 상세의 이전 · 다음이 전 법인을 돌았다(세 탭이 같은 범위를 쓴다는 v2.915 규약과 어긋남).
   이웃 목록은 `platformText.siblingSites(sites, scope)`(리전 · 검색어만 — 고른 법인 하나 `vcenterId` 는 범위로 치지 않는다: 그러면 이웃이 없다) · 카운터 옆에 `siblingScopeText`(‘리전 유럽 · ‘kr1’’) · 검색 규칙은 `keywordsOf · vcMatches` 한 벌(카드 목록 `shown` 과 같은 함수).
 - **v3.10.14 — 가상화 플랫폼 점검 2회차: 바로가기 칩은 고른 리전 안의 법인만 · 칩을 눌러도 리전은 남는다**(자율 개선 루프): 전에는 리전을 골라도 칩이 28곳 전부였고 리전 밖 칩을 누르면 App 이 리전을 지워 범위가 튀었다.
   `platformText.chipSites(vcenters, region)`(리전 안만 · 없으면 빈 목록 + '이 리전에 법인이 없습니다') · `chipRegionNote`(‘리전 유럽 · 5법인’) · App 의 `onPickVcenter` 는 `patchFilter({ vcenterId })` 만(리전 유지 — 고른 칩을 다시 누르면 ‘리전 전체’). VM 탭 ‘법인별’ 행의 onPickVcenter(리전 지움)는 그대로(법인별 표는 전 법인 표).
 - **v3.10.15 — 가상화 플랫폼 점검 3회차: VM 수량 · 스토리지 사용량 추이 도구에 ‘리전’ 선택 · KPI 카드가 리전도 넘긴다**(자율 개선 루프): KPI 줄은 리전 범위를 합했는데(v2.958) 카드를 누르면 도구가 전체로 열렸다(도구에 리전이 없었다).
   도구: 리전 Select(리전이 2개 이상이거나 골라져 있을 때만) + vCenter Select(리전 안만 · `platformText.regionsOf · vcInRegion`) · 요청은 `vcenterId` 가 없을 때만 `region` · 제목은 `scopeText`(vCenter 이름 / ‘리전 X 합계’ / ‘전체 vCenter 합계’ — 예전엔 id 를 그대로 보였다).
-  인계: `handoffKpiScope(targets, {vcenterId, region})` — vCenter 가 있으면 vCenter 만, 없으면 리전(`KPI_HANDOFF.vmTrackRegion · storageTrackRegion`). 서버 `vcenterList` 항목에 `region`.
+  인계(**삭제됨** — v2.959 항목 끝 ‘정리 2026-11-18’): `handoffKpiScope(targets, {vcenterId, region})` — vCenter 가 있으면 vCenter 만, 없으면 리전(`KPI_HANDOFF.vmTrackRegion · storageTrackRegion`). 서버 `vcenterList` 항목에 `region`.
 - **v3.10.16 — 가상화 플랫폼 점검 4회차: 탭 줄이 넘치면(400px) 열린 탭이 보이게 그 줄만 옮긴다 — 허브 · vCenter 상세 · 개체 보기 한 훅**(자율 개선 루프):
   허브 탭 줄(HubTabs v2.915)과 Backup 현황 머리(VeeamHeader v2.822)에 두 벌 있던 규칙을 `hooks/useActiveTabInView.js`(순수 `keepActiveTabInView` + 훅) 하나로 모으고 vCenter 상세 · VM · 호스트 개체 보기의 `.vcd-views` 도 쓴다 —
   400px 에서 ‹ 이전 · 다음 › 으로 넘어가거나 기억 탭으로 열면 ‘네트워크’ 같은 뒤쪽 탭 · 강조 탭(‘호스트 및 클러스터’ · ‘VM’)이 줄 밖에 숨어 있었다.
@@ -965,7 +969,7 @@
 - **v3.10.17 — 가상화 플랫폼 점검 5회차: 리전만 고른 채 백업 KPI 카드 → Backup 현황 · Summary 가 그 리전만 센다**(자율 개선 루프): VM · 스토리지 카드는 v3.10.15 에 리전을 넘겼는데 백업 카드만 전체 Summary 로 열렸다.
   서버 `veeam/summaryRegion.js`(`regionQuery · inRegion · regionsOf`) 하나로 `/tools/backup-summary`(+`.csv`) · `/schedule` · `/errors` · `/stale`(staleQueryOf.region) 이 **사용자 범위 교집합 뒤**에 리전을 거른다 — 응답에 `region · regions`.
   화면: Summary 에 리전 Select(`data-backup-region` — 리전이 2개 이상이거나 골라져 있을 때만 · 모르는 리전은 ‘(법인 없음)’) · 머리 ‘N개 법인 · 리전 X’ · 숫자 줄 · 두 카드 · 트리 · CSV · 찾기 · 일정 · 에러가 같은 `?region=`(‘제목뿐이지 않게’ — v3.10.15 교훈) · 리전을 바꾸면 선택(한 법인 안)을 푼다 · 기억하지 않는다.
-  인계: `KPI_HANDOFF.backupSummaryRegion`(메모리 · 30초) — 허브 `backupGo` 는 법인이 있으면 Detail(v2.959), 리전만이면 Summary+리전. 테스트 `platformText.test.js` v3.10.17 · `server/test/backupSummaryRegion31017.test.js`.
+  인계(**삭제됨** — v2.959 항목 끝 ‘정리 2026-11-18’): `KPI_HANDOFF.backupSummaryRegion`(메모리 · 30초) — 허브 `backupGo` 는 법인이 있으면 Detail(v2.959), 리전만이면 Summary+리전. 테스트 `platformText.test.js` v3.10.17 · `server/test/backupSummaryRegion31017.test.js`.
 - **v3.10.18 — 가상화 플랫폼 점검 6회차: 허브 부제의 옛 가정 문구 정정**(자율 개선 루프): `PlatformHub` 부제가 ‘법인 = vCenter = Bareos 한 단위’ 라고 말했다 — 2026-11-13 사용자 정정(법인 1 : 서비스 N · 서비스 1 = vCenter 1 + Bareos 1)과 어긋나는 **화면 문구**라 고쳤다
   (‘서비스 = vCenter 1 + Bareos 1 · 한 법인에 서비스가 여럿일 수 있습니다’). 같은 옛 가정이 남은 다른 문구(`BareosCorp` 라벨 ‘1:1:1’ · `bareosText` 혼합 엣지 안내 · 카드 ‘vCenter · 법인’ 류의 느슨한 ‘법인’)는
   루트 CLAUDE.md 대로 **정리 범위를 사용자가 정한 뒤**에 손댄다(이 회차는 부제 한 줄만). 테스트 `platformText.test.js` v3.10.18.

@@ -15,7 +15,7 @@ import { vmNetSummary, vmNetUnaccountedTitle, signed } from './vmTrackText.js'; 
 import { unitText } from '../unitText.js';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
-import { KPI_HANDOFF, takeKpiVcenter, regionsOf, vcInRegion } from '../platform/platformText.js'; // v2.959: 가상화 플랫폼 KPI 카드가 넘긴 법인 · v3.10.15: 리전
+import { regionsOf, vcInRegion } from '../platform/platformText.js'; // v3.10.15: 리전 선택 보조(v3.19.0: 허브 KPI 카드 인계는 걷어냈다 — 전체로 연다)
 import { backdropClose } from '../../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만
 
 const DAY_OPTS = [7, 30, 90, 365];
@@ -82,10 +82,10 @@ export function createRetryGate() {
 
 export default function VmTrackTool() {
   const [days, setDays] = useState(30);
-  // v2.959: 가상화 플랫폼 KPI 카드에서 왔으면 고른 법인(vCenter)을 초기 선택으로(메모리 인계 · 마운트 때 1회 · 없으면 전체).
-  const [vcenterId, setVcenterId] = useState(() => takeKpiVcenter(KPI_HANDOFF.vmTrack));
-  // v3.10.15(점검 3회차): 리전 선택 — 서버 ?region= 은 사용자 범위와의 교집합(vcenterId 가 있으면 region 은 보내지 않는다). KPI 카드가 리전만 골랐을 때 인계받는다.
-  const [region, setRegion] = useState(() => takeKpiVcenter(KPI_HANDOFF.vmTrackRegion));
+  // 전체로 연다(v3.19.0: 허브 KPI 카드가 없어져 넘겨받을 법인 · 리전이 없다 — 화면의 선택 칸으로 고른다).
+  const [vcenterId, setVcenterId] = useState('');
+  // v3.10.15(점검 3회차): 리전 선택 — 서버 ?region= 은 사용자 범위와의 교집합(vcenterId 가 있으면 region 은 보내지 않는다).
+  const [region, setRegion] = useState('');
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);

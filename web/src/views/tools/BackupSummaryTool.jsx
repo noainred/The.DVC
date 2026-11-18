@@ -15,7 +15,6 @@ import { summaryPolicyKpis, bundlesOf, okPct, hhmm, rpoLabel } from './backupSum
 import VeeamHeader, { visibleTabs } from './VeeamHeader.jsx';
 import BackupOptions from './BackupOptions.jsx';
 import Select from '../../components/Select.jsx';
-import { KPI_HANDOFF, takeKpiVcenter } from '../platform/platformText.js';   // v3.10.17 가상화 플랫폼 백업 KPI 카드가 넘긴 리전(메모리 인계 — 주소에 싣지 않는다)
 import BackupSummaryBar from './BackupSummaryBar.jsx';
 import BackupSummaryStale from './BackupSummaryStale.jsx';
 import BackupSummaryTree from './BackupSummaryTree.jsx';
@@ -58,8 +57,8 @@ export default function BackupSummaryTool() {
   const [csvErr, setCsvErr] = useState(null);
   // v2.837 선택 — 트리 표 · 찾기 결과가 함께 쓴다(시안 '선택은 한 법인 안에서만' — 다른 법인 칸은 화면이 막는다)
   const [sel, setSel] = useState(() => ({ vc: null, ids: new Set() }));
-  // v3.10.17 리전(허브 KPI 카드 인계 · 화면 Select) — 숫자 줄 · 두 카드 · 트리 · CSV · 찾기 · 일정 · 에러가 모두 같은 ?region= 으로 센다. 기억하지 않는다(다음에 열면 전체).
-  const [region, setRegion] = useState(() => takeKpiVcenter(KPI_HANDOFF.backupSummaryRegion) || '');
+  // v3.10.17 리전(화면 Select — v3.19.0: 허브 KPI 카드 인계는 걷어냈다) — 숫자 줄 · 두 카드 · 트리 · CSV · 찾기 · 일정 · 에러가 모두 같은 ?region= 으로 센다. 기억하지 않는다(다음에 열면 전체).
+  const [region, setRegion] = useState('');
   const gen = useRef(0);
   // 전원·제외는 서버가 센다(같은 backupRow — 세부내용과 같은 수) · 바꾸면 그 조건으로 다시 읽는다. RPO 기준은 같은 응답에서 고른다.
   const load = useCallback(() => {
