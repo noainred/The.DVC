@@ -9,8 +9,8 @@
  * 문구에 백틱 금지 · 값 인용은 ‘ ’(BoldText 규약).
  */
 import { MENU_GROUPS } from './topMenu.js';
-import { PLATFORM_TABS } from './platform/platformText.js'; // v2.915 여러 탭을 맡는 항목의 탭 이름(v2.994: Virtual Machine(VM) 항목의 vcenters)
-const PLATFORM_TAB_LABEL = new Map(PLATFORM_TABS.map((t) => [t.k, t.label]));
+import { PLATFORM_TABS } from './platform/platformText.js'; // v2.915 여러 탭을 맡는 항목의 탭 이름(v2.994: Virtual Machine(VM) 항목의 vcenters · v3.19.0: Virtual Machine 항목의 vms)
+const PLATFORM_TAB = new Map(PLATFORM_TABS.map((t) => [t.k, t]));
 import { TOOLS } from './specialToolsList.js';
 
 export const PERIODS = Object.freeze([7, 30, 90, 365]);
@@ -47,9 +47,12 @@ function menuIndex(groups = MENU_GROUPS) {
       const where = Array.isArray(g.children) ? `${g.label} › ${c.label}` : g.label;
       const item = { group: g.id, groupLabel: g.label, label: c.label, where };
       if (c.tab) { if (!tab.has(c.tab)) tab.set(c.tab, item); items.push({ ...item, k: c.tab === 'tools' ? 'tab:tools' : `tab:${c.tab}` }); }
-      // v2.915: 한 항목이 맡는 나머지 탭 — 같은 자리이고 이름은 '항목 › 탭'. v2.994: 'Virtual Machine(VM)' 의 vcenters → '서버 › Virtual Machine(VM) › vCenter' · hosts 는 자기 항목 'Hypervisor'. 추적 키(tab:…)는 그대로다.
+      // v2.915: 한 항목이 맡는 나머지 탭 — 같은 자리이고 이름은 '항목 › 탭'. v2.994: 'Virtual Machine(VM)' 의 vcenters → '서버 › Virtual Machine(VM) › vCenter' · hosts 는 자기 항목 'Hypervisor'.
+      //   v3.19.0: 'Virtual Machine' 의 처음 탭이 vcenters 라 나머지 탭은 vms → '서버 › Virtual Machine › (PLATFORM_TABS 의 vms 이름)'. 추적 키(tab:…)는 그대로다.
       for (const t of Array.isArray(c.tabs) ? c.tabs : []) {
-        const tl = PLATFORM_TAB_LABEL.get(t) || t;
+        // v3.19.0: 탭 이름이 항목 이름과 같으면('Virtual Machine › Virtual Machine') 탭의 작은 이름(sub — 'VM')을 쓴다 — 같은 말을 두 번 적지 않는다
+        const pt = PLATFORM_TAB.get(t);
+        const tl = pt ? (pt.label === c.label && pt.sub ? pt.sub : pt.label) : t;
         const sub = { ...item, label: `${c.label} › ${tl}`, where: `${where} › ${tl}` };
         if (!tab.has(t)) tab.set(t, sub);
         items.push({ ...sub, k: `tab:${t}` });

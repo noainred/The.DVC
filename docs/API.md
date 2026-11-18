@@ -798,10 +798,10 @@ Prometheus/OTel 익스포터(선택 토큰).
 
 | 메서드 | 경로 | 게이트(공통 제외) | 소스 |
 |---|---|---|---|
-| GET | `/alarm-mutes` | 권한 `inv.alarms` | [server/src/routes/api/inventory.js:651](../server/src/routes/api/inventory.js#L651) |
-| POST | `/alarm-mutes` | 역할 `admin/operator` · 권한 `inv.alarms` · `auditMiddleware` | [server/src/routes/api/inventory.js:654](../server/src/routes/api/inventory.js#L654) |
-| DELETE | `/alarm-mutes/:id` | 역할 `admin/operator` · 권한 `inv.alarms` · `auditMiddleware` | [server/src/routes/api/inventory.js:662](../server/src/routes/api/inventory.js#L662) |
-| GET | `/alarms` | 권한 `inv.alarms` | [server/src/routes/api/inventory.js:634](../server/src/routes/api/inventory.js#L634) |
+| GET | `/alarm-mutes` | 권한 `inv.alarms` | [server/src/routes/api/inventory.js:658](../server/src/routes/api/inventory.js#L658) |
+| POST | `/alarm-mutes` | 역할 `admin/operator` · 권한 `inv.alarms` · `auditMiddleware` | [server/src/routes/api/inventory.js:661](../server/src/routes/api/inventory.js#L661) |
+| DELETE | `/alarm-mutes/:id` | 역할 `admin/operator` · 권한 `inv.alarms` · `auditMiddleware` | [server/src/routes/api/inventory.js:669](../server/src/routes/api/inventory.js#L669) |
+| GET | `/alarms` | 권한 `inv.alarms` | [server/src/routes/api/inventory.js:641](../server/src/routes/api/inventory.js#L641) |
 | GET | `/attach/:kind/:owner` | — | [server/src/routes/api/attach.js:136](../server/src/routes/api/attach.js#L136) |
 | POST | `/attach/:kind/:owner` | 역할 `admin/operator` · `uploadPrecheck` · `express.raw` | [server/src/routes/api/attach.js:152](../server/src/routes/api/attach.js#L152) |
 | GET | `/attach/admin/archive` | 역할 `admin` · `fleetOnly` | [server/src/routes/api/attach.js:86](../server/src/routes/api/attach.js#L86) |
@@ -821,10 +821,10 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/board/posts/:id/comments/:cid/like` | 역할 `admin/operator` | [server/src/routes/api/bulletin.js:190](../server/src/routes/api/bulletin.js#L190) |
 | POST | `/board/posts/:id/like` | 역할 `admin/operator` | [server/src/routes/api/bulletin.js:186](../server/src/routes/api/bulletin.js#L186) |
 | GET | `/compare/matrix` | — | [server/src/routes/api/compareMatrix.js:28](../server/src/routes/api/compareMatrix.js#L28) |
-| GET | `/datastores` | 권한 `inv.datastores` | [server/src/routes/api/inventory.js:545](../server/src/routes/api/inventory.js#L545) |
-| GET | `/datastores/:id/browse` | 권한 `inv.datastores` | [server/src/routes/api/inventory.js:553](../server/src/routes/api/inventory.js#L553) |
+| GET | `/datastores` | 권한 `inv.datastores` | [server/src/routes/api/inventory.js:552](../server/src/routes/api/inventory.js#L552) |
+| GET | `/datastores/:id/browse` | 권한 `inv.datastores` | [server/src/routes/api/inventory.js:560](../server/src/routes/api/inventory.js#L560) |
 | GET | `/health` | — | [server/src/routes/api/overviewNsx.js:153](../server/src/routes/api/overviewNsx.js#L153) |
-| GET | `/hosts` | 권한 `inv.hosts` | [server/src/routes/api/inventory.js:353](../server/src/routes/api/inventory.js#L353) |
+| GET | `/hosts` | 권한 `inv.hosts` | [server/src/routes/api/inventory.js:354](../server/src/routes/api/inventory.js#L354) |
 | GET | `/hosts/:id` | 권한 `inv.hosts` | [server/src/routes/api/hostChecks.js:67](../server/src/routes/api/hostChecks.js#L67) |
 | POST | `/hosts/:id/endpoint-locate` | 권한 `inv.hosts` | [server/src/routes/api/hostSan.js:382](../server/src/routes/api/hostSan.js#L382) |
 | GET | `/hosts/:id/metrics` | 권한 `inv.hosts` | [server/src/routes/api/vmMetrics.js:201](../server/src/routes/api/vmMetrics.js#L201) |
@@ -885,7 +885,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | DELETE | `/issues/templates/:id` | 역할 `admin` · `issueSettingsFleetOnly` · `fullWriteOnly` | [server/src/routes/api/issues.js:211](../server/src/routes/api/issues.js#L211) |
 | PUT | `/issues/templates/:id` | 역할 `admin` · `issueSettingsFleetOnly` · `fullWriteOnly` | [server/src/routes/api/issues.js:207](../server/src/routes/api/issues.js#L207) |
 | GET | `/issues/versions` | — | [server/src/routes/api/issues.js:346](../server/src/routes/api/issues.js#L346) |
-| GET | `/networks` | 권한 `inv.networks` | [server/src/routes/api/inventory.js:568](../server/src/routes/api/inventory.js#L568) |
+| GET | `/networks` | 권한 `inv.networks` | [server/src/routes/api/inventory.js:575](../server/src/routes/api/inventory.js#L575) |
 | GET | `/notices` | — | [server/src/routes/api/bulletin.js:109](../server/src/routes/api/bulletin.js#L109) |
 | POST | `/notices` | 역할 `admin` · `noticeFleetOnly` | [server/src/routes/api/bulletin.js:115](../server/src/routes/api/bulletin.js#L115) |
 | DELETE | `/notices/:id` | 역할 `admin` · `noticeFleetOnly` | [server/src/routes/api/bulletin.js:130](../server/src/routes/api/bulletin.js#L130) |
@@ -899,7 +899,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/perf/client-config` | — | [server/src/routes/api/perfClient.js:117](../server/src/routes/api/perfClient.js#L117) |
 | POST | `/perf/client-stall` | — | [server/src/routes/api/perfClient.js:75](../server/src/routes/api/perfClient.js#L75) |
 | GET | `/perf/req-status` | — | [server/src/routes/api/perfClient.js:105](../server/src/routes/api/perfClient.js#L105) |
-| GET | `/platform/summary` | — | [server/src/routes/api/inventory.js:524](../server/src/routes/api/inventory.js#L524) |
+| GET | `/platform/summary` | — | [server/src/routes/api/inventory.js:531](../server/src/routes/api/inventory.js#L531) |
 | GET | `/provision/jobs` | — | [server/src/routes/api/provision.js:64](../server/src/routes/api/provision.js#L64) |
 | GET | `/provision/jobs/:id` | — | [server/src/routes/api/provision.js:70](../server/src/routes/api/provision.js#L70) |
 | GET | `/provision/placement` | 권한 `vm.provision` | [server/src/routes/api/provision.js:28](../server/src/routes/api/provision.js#L28) |
@@ -927,9 +927,9 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/settings/ssh-access/servers/:id/key` | 역할 `admin` · `requireSettingsOwner` · `reauth` | [server/src/routes/api/sshAccess.js:83](../server/src/routes/api/sshAccess.js#L83) |
 | POST | `/settings/ssh-access/servers/:id/test` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:102](../server/src/routes/api/sshAccess.js#L102) |
 | GET | `/settings/ssh-access/usage` | 역할 `admin` · `requireSettingsOwner` | [server/src/routes/api/sshAccess.js:137](../server/src/routes/api/sshAccess.js#L137) |
-| GET | `/summary` | — | [server/src/routes/api/inventory.js:164](../server/src/routes/api/inventory.js#L164) |
-| POST | `/tool-usage` | — | [server/src/routes/api/inventory.js:681](../server/src/routes/api/inventory.js#L681) |
-| GET | `/tool-usage/top` | — | [server/src/routes/api/inventory.js:677](../server/src/routes/api/inventory.js#L677) |
+| GET | `/summary` | — | [server/src/routes/api/inventory.js:165](../server/src/routes/api/inventory.js#L165) |
+| POST | `/tool-usage` | — | [server/src/routes/api/inventory.js:688](../server/src/routes/api/inventory.js#L688) |
+| GET | `/tool-usage/top` | — | [server/src/routes/api/inventory.js:684](../server/src/routes/api/inventory.js#L684) |
 | GET | `/tools/backup-detail` | 권한 `tools` | [server/src/routes/api/veeam.js:1448](../server/src/routes/api/veeam.js#L1448) |
 | GET | `/tools/backup-detail.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/veeam.js:1520](../server/src/routes/api/veeam.js#L1520) |
 | PUT | `/tools/backup-detail/marks` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/veeam.js:1463](../server/src/routes/api/veeam.js#L1463) |
@@ -1655,7 +1655,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/xfer-speed/ping` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:319](../server/src/routes/api/xferSpeed.js#L319) |
 | POST | `/tools/xfer-speed/run` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:393](../server/src/routes/api/xferSpeed.js#L393) |
 | PUT | `/tools/xfer-speed/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/xferSpeed.js:418](../server/src/routes/api/xferSpeed.js#L418) |
-| GET | `/top` | — | [server/src/routes/api/inventory.js:589](../server/src/routes/api/inventory.js#L589) |
+| GET | `/top` | — | [server/src/routes/api/inventory.js:596](../server/src/routes/api/inventory.js#L596) |
 | GET | `/ui-settings` | — | [server/src/routes/api/toolsInfo.js:352](../server/src/routes/api/toolsInfo.js#L352) |
 | PUT | `/ui-settings` | 역할 `admin/operator` | [server/src/routes/api/toolsInfo.js:354](../server/src/routes/api/toolsInfo.js#L354) |
 | POST | `/usage/track` | — | [server/src/routes/api/usage.js:15](../server/src/routes/api/usage.js#L15) |
@@ -1680,14 +1680,14 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/veeam/vm-list/prefs` | 권한 `data.csv` | [server/src/routes/api/veeam.js:385](../server/src/routes/api/veeam.js#L385) |
 | PUT | `/veeam/vm-list/prefs` | 역할 `admin/operator` · 권한 `data.csv` · `prefsWrite` | [server/src/routes/api/veeam.js:393](../server/src/routes/api/veeam.js#L393) |
 | POST | `/veeam/vm-list/preview` | 권한 `data.csv` | [server/src/routes/api/veeam.js:364](../server/src/routes/api/veeam.js#L364) |
-| GET | `/vms` | 권한 `inv.vms` | [server/src/routes/api/inventory.js:411](../server/src/routes/api/inventory.js#L411) |
+| GET | `/vms` | 권한 `inv.vms` | [server/src/routes/api/inventory.js:418](../server/src/routes/api/inventory.js#L418) |
 | GET | `/vms/:id/console` | 권한 `vm.console` | [server/src/routes/api/vmMetrics.js:257](../server/src/routes/api/vmMetrics.js#L257) |
 | POST | `/vms/:id/endpoint-locate` | 권한 `inv.vms` | [server/src/routes/api/hostSan.js:398](../server/src/routes/api/hostSan.js#L398) |
 | GET | `/vms/:id/endpoint-locations` | 권한 `inv.vms` | [server/src/routes/api/hostSan.js:416](../server/src/routes/api/hostSan.js#L416) |
 | GET | `/vms/:id/metrics` | 권한 `inv.vms` | [server/src/routes/api/vmMetrics.js:168](../server/src/routes/api/vmMetrics.js#L168) |
 | GET | `/vms/:id/partitions` | 권한 `inv.vms` | [server/src/routes/api/toolsGuestPart.js:44](../server/src/routes/api/toolsGuestPart.js#L44) |
-| GET | `/vms/by-vcenter` | 권한 `inv.vms` | [server/src/routes/api/inventory.js:465](../server/src/routes/api/inventory.js#L465) |
-| GET | `/vms/lookup` | 권한 `inv.vms` | [server/src/routes/api/inventory.js:485](../server/src/routes/api/inventory.js#L485) |
+| GET | `/vms/by-vcenter` | 권한 `inv.vms` | [server/src/routes/api/inventory.js:472](../server/src/routes/api/inventory.js#L472) |
+| GET | `/vms/lookup` | 권한 `inv.vms` | [server/src/routes/api/inventory.js:492](../server/src/routes/api/inventory.js#L492) |
 | POST | `/vms/upgrade-tools` | 역할 `admin/operator` · 권한 `tools` · `auditMiddleware` | [server/src/routes/api/toolsInfo.js:300](../server/src/routes/api/toolsInfo.js#L300) |
 | POST | `/vms/usage` | 권한 `inv.vms` | [server/src/routes/api/toolsCapacity.js:359](../server/src/routes/api/toolsCapacity.js#L359) |
 | GET | `/wiki/backrefs` | — | [server/src/routes/api/wiki.js:206](../server/src/routes/api/wiki.js#L206) |

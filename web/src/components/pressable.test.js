@@ -21,14 +21,12 @@ describe('pressable', () => {
     expect(pressable(null)).toEqual({}); expect(pressable(undefined)).toEqual({}); expect(pressable('x')).toEqual({});
     expect(pressable(() => {}, { disabled: true })).toEqual({});
   });
-  it('소스 계약 — 허브 vCenter 카드 · KPI 카드 3장 · primitives Kpi 가 pressable 을 쓰고, 법인별 비교 표의 이름은 button · 포커스 CSS 가 있다', () => {
+  it('소스 계약 — 허브 vCenter 카드 · primitives Kpi 가 pressable 을 쓰고 포커스 CSS 가 있다(v3.19.0: KPI 카드 3장 · 법인별 비교 표는 걷어냈다)', () => {
     const vc = fs.readFileSync(new URL('../views/VCenters.jsx', import.meta.url), 'utf8');
-    expect((vc.match(/\{\.\.\.pressable\(/g) || []).length).toBe(4);
+    expect((vc.match(/\{\.\.\.pressable\(/g) || []).length).toBe(1);   // vCenter 카드 하나
     expect(vc).not.toMatch(/className="card (kpi|vc-card)"[^\n]*\sonClick=/);   // 카드는 onClick 직접 금지 — pressable 로
     const pr = fs.readFileSync(new URL('./primitives.jsx', import.meta.url), 'utf8');
     expect(pr).toMatch(/\{\.\.\.pressable\(onClick\)\}/); expect(pr).not.toMatch(/onKeyDown=\{onClick \?/);
-    const vt = fs.readFileSync(new URL('../views/platform/VcTable.jsx', import.meta.url), 'utf8');
-    expect(vt).toMatch(/<button type="button" className="cell-link" style=\{\{ fontWeight: 700 \}\} onClick=\{\(e\) => \{ stop\(e\); onOpen\(s\.id\); \}\}/);
     const css = fs.readFileSync(new URL('../views/platform/platform.css', import.meta.url), 'utf8');
     expect(css).toMatch(/\.card\.kpi\[role="button"\]:focus-visible, \.card\.vc-card\[role="button"\]:focus-visible \{ outline: 2px solid var\(--accent\)/);
   });

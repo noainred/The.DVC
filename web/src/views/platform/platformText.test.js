@@ -4,9 +4,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  PLATFORM_TABS, PLATFORM_TAB_KEYS, scopeVcOptions, scopeVcPatch, scopeRegionOptions, regionText, isPlatformTab, scopeLabel, bareosSumOf, KPI_HANDOFF, handoffKpiVcenter, takeKpiVcenter, keywordsOf, vcMatches, siblingSites, siblingScopeText, chipSites, chipRegionNote, handoffKpiScope, regionsOf, vcInRegion, VC_TOOLS, HOST_TOOLS, PLATFORM_TOOL_KEYS, entityTabs, chipCount, chipLegend, signalSegments,
+  PLATFORM_TABS, PLATFORM_TAB_KEYS, scopeVcOptions, scopeVcPatch, scopeRegionOptions, regionText, isPlatformTab, scopeLabel, KPI_HANDOFF, handoffKpiVcenter, takeKpiVcenter, keywordsOf, vcMatches, filterChipSites, siblingSites, siblingScopeText, chipSites, chipRegionNote, regionsOf, vcInRegion, VC_TOOLS, HOST_TOOLS, PLATFORM_TOOL_KEYS, entityTabs, chipCount, chipLegend, signalSegments,
   VM_ITEM_TOOL_KEYS, HV_ITEM_TOOL_KEYS, platformMenuLabel,
-  loadChipsCollapsed, saveChipsCollapsed, loadVcView, saveVcView, SCOPE_SEARCH_PLACEHOLDER, SCOPE_NOTE,
+  loadChipsCollapsed, saveChipsCollapsed, SCOPE_SEARCH_PLACEHOLDER, SCOPE_NOTE,
 } from './platformText.js';
 import * as PT from './platformText.js';
 import { REGIONS } from '../../regions.js';   // v3.13.6 테스트 — 지역 목록 단일 소스
@@ -21,14 +21,15 @@ const mem = () => { const m = new Map(); return { getItem: (k) => (m.has(k) ? m.
 const broken = { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); } };
 
 describe('탭 · 도구 · 메뉴 대조', () => {
-  it('허브 탭은 계층 순서(vCenter → 호스트 → VM)이고 App 의 탭 id 그대로 · v2.994 메뉴 항목 둘이 나눠 맡는다', () => {
-    expect(PLATFORM_TAB_KEYS).toEqual(['vcenters', 'hosts', 'vms']);
-    expect(PLATFORM_TABS.map((t) => t.perm)).toEqual(['dashboard', 'inv.hosts', 'inv.vms']);
+  it('허브 탭 순서는 vCenter · Virtual Machine · Hypervisor(v3.19.0 — 사이드바와 같은 순서)이고 App 의 탭 id 그대로 · v2.994 메뉴 항목 둘이 나눠 맡는다', () => {
+    expect(PLATFORM_TAB_KEYS).toEqual(['vcenters', 'vms', 'hosts']);
+    expect(PLATFORM_TABS.map((t) => t.perm)).toEqual(['dashboard', 'inv.vms', 'inv.hosts']);
     expect(isPlatformTab('hosts')).toBe(true); expect(isPlatformTab('datastores')).toBe(false);
     const srv = MENU_GROUPS.find((g) => g.id === 'server').children;
     const virt = srv.find((c) => c.id === 'virt'); const hv = srv.find((c) => c.id === 'hv');
     // v2.994: Virtual Machine(VM) = vms(처음) + vcenters · Hypervisor = hosts — 두 항목의 탭을 합치면 허브 탭 셋 그대로(빠짐 · 겹침 없음)
-    expect([virt.tab, ...virt.tabs]).toEqual(['vms', 'vcenters']);
+    // v3.19.0: 이름 'Virtual Machine' · 처음 탭 vcenters(vCenter 카드 화면) + vms
+    expect([virt.tab, ...virt.tabs]).toEqual(['vcenters', 'vms']);
     expect([hv.tab, ...(hv.tabs || [])]).toEqual(['hosts']);
     expect([virt.tab, ...virt.tabs, hv.tab].sort()).toEqual([...PLATFORM_TAB_KEYS].sort());
     // 도구도 두 항목으로 갈린다 — VM 6 + vCenter 6 → virt · 호스트 4 → hv · 합치면 16 그대로
@@ -45,7 +46,7 @@ describe('탭 · 도구 · 메뉴 대조', () => {
     expect(platformMenuLabel('hosts')).toBe(label('hv'));
     expect(platformMenuLabel('vms')).toBe(label('virt'));
     expect(platformMenuLabel('vcenters')).toBe(label('virt'));
-    expect([platformMenuLabel('hosts'), platformMenuLabel('vms')]).toEqual(['Hypervisor', 'Virtual Machine(VM)']);
+    expect([platformMenuLabel('hosts'), platformMenuLabel('vms')]).toEqual(['Hypervisor', 'Virtual Machine']);   // v3.19.0 메뉴 이름
     for (const t of PLATFORM_TAB_KEYS) {
       const at = locate(t, `#/${t}`);
       expect(platformMenuLabel(t), t).toBe(srv.find((c) => c.id === at.child).label);
@@ -68,7 +69,7 @@ describe('탭 · 도구 · 메뉴 대조', () => {
     }
   });
   it('v2.994 탭 줄 이름 — Hypervisor · ESXi 호스트 / Virtual Machine · VM(옛 이름은 작은 글자) · 엔티티 탭도 같은 이름', () => {
-    expect(PLATFORM_TABS.map((t) => [t.k, t.label, t.sub])).toEqual([['vcenters', 'vCenter', '법인'], ['hosts', 'Hypervisor', 'ESXi 호스트'], ['vms', 'Virtual Machine', 'VM']]);
+    expect(PLATFORM_TABS.map((t) => [t.k, t.label, t.sub])).toEqual([['vcenters', 'vCenter', '법인'], ['vms', 'Virtual Machine', 'VM'], ['hosts', 'Hypervisor', 'ESXi 호스트']]);
     expect(entityTabs(null).map((t) => [t.k, t.label, t.sub])).toEqual(PLATFORM_TABS.map((t) => [t.k, t.label, t.sub]));
   });
   it('도구 키는 카탈로그에 실재하고 패널이 있는 도구 · VM 6 은 v2.909 그대로 · 겹치지 않는다', () => {
@@ -100,7 +101,7 @@ describe('엔티티 탭 글자 — 못 읽은 값은 — · 분해는 그 탭 �
     vms: { total: 5850, on: 5120, off: 730, usageUnknown: 37, templates: 42, attention: 641, unknownVcs: 1 },
   } };
   it('값 · 배지 · 분해', () => {
-    const [vc, h, v] = entityTabs(summary);
+    const [vc, v, h] = entityTabs(summary);   // v3.19.0 순서 — vCenter · VM · 호스트
     expect([vc.k, vc.value, vc.badge]).toEqual(['vcenters', '28', { text: '낡은 값 1', tone: 'amber' }]);
     expect(vc.parts.map((p) => p.text)).toEqual(['연결 27', '불가 0', 'REST 폴백 2', '엣지 위임 6', '알람 58']);
     expect(vc.parts[4].note).toBe('(미조회 2곳 제외)');
@@ -136,16 +137,16 @@ describe('엔티티 탭 글자 — 못 읽은 값은 — · 분해는 그 탭 �
 });
 
 describe('브라우저 기억 — try/catch · 모르는 값은 기본', () => {
-  it('바로가기 접힘 · vCenter 보기(v2.994: 마지막 본 탭 기억은 없앴다)', () => {
+  it('바로가기 접힘(v2.994: 마지막 본 탭 기억은 없앴다 · v3.19.0: vCenter 보기 카드 | 표 기억도 없앴다)', () => {
     const st = mem();
     expect(loadChipsCollapsed(st)).toBe(false); saveChipsCollapsed(st, true); expect(loadChipsCollapsed(st)).toBe(true);
-    expect(loadVcView(st)).toBe('cards'); saveVcView(st, 'table'); expect(loadVcView(st)).toBe('table'); saveVcView(st, 'tree'); expect(loadVcView(st)).toBe('table');
-    expect(loadChipsCollapsed(broken)).toBe(false); expect(loadVcView(broken)).toBe('cards');
+    expect(loadChipsCollapsed(broken)).toBe(false);
+    expect(PT.loadVcView).toBe(undefined); expect(PT.saveVcView).toBe(undefined); expect(PT.VC_VIEWS).toBe(undefined); expect(PT.LS_VC_VIEW).toBe(undefined);
   });
 });
 
 // v2.958(사용자 요청 2026-11-10) — vCenter 탭 KPI 줄은 허브 범위(리전 · vCenter) 안의 법인만 합한다.
-describe('KPI 범위 문구 · Bareos 범위 합(v2.958)', () => {
+describe('KPI 범위 문구(v2.958 — v3.19.0 부터 VM 이름 검색 제목이 쓴다)', () => {
   const sites = [{ id: 'vc-a', name: 'OC2Sandbox', location: { region: '아시아' } }, { id: 'vc-b', name: 'AZ', location: { region: '아시아' } }];
   it('scopeLabel — 전체 / vCenter 이름(없으면 id) / 리전 · N법인', () => {
     expect(scopeLabel({}, sites)).toBe('전체');
@@ -154,14 +155,7 @@ describe('KPI 범위 문구 · Bareos 범위 합(v2.958)', () => {
     expect(scopeLabel({ region: '아시아' }, sites)).toBe('리전 아시아 · 2법인');
     expect(scopeLabel(null, null)).toBe('전체');
   });
-  it('bareosSumOf — 범위 안 법인의 counts.jobs 합 · 못 읽은 법인은 0 이 아니라 unknown · 전부 못 읽으면 null', () => {
-    const rows = [{ id: 'vc-a', counts: { jobs: 11 } }, { id: 'vc-b', counts: { jobs: '7' } }, { id: 'vc-c', counts: {} }, null];
-    expect(bareosSumOf(rows, ['vc-a', 'vc-b'])).toEqual({ jobs: 18, known: 2, unknown: 0, partial: false });
-    expect(bareosSumOf(rows, ['vc-a', 'vc-c'])).toEqual({ jobs: 11, known: 1, unknown: 1, partial: true });
-    expect(bareosSumOf(rows, ['vc-c', 'vc-zzz'])).toEqual({ jobs: null, known: 0, unknown: 2, partial: false });
-    expect(bareosSumOf(null, ['vc-a'])).toEqual({ jobs: null, known: 0, unknown: 1, partial: false });
-    expect(bareosSumOf(rows, [])).toEqual({ jobs: null, known: 0, unknown: 0, partial: false });
-  });
+  it('bareosSumOf · handoffKpiScope 는 KPI 줄과 함께 지웠다(v3.19.0)', () => { expect(PT.bareosSumOf).toBe(undefined); expect(PT.handoffKpiScope).toBe(undefined); });
 });
 
 // v2.959(사용자 요청 2026-11-10) — KPI 카드 → 도구 화면에 고른 vCenter 인계(메모리 · 꺼내면 지운다).
@@ -238,24 +232,13 @@ describe('바로가기 칩 범위(v3.10.14)', () => {
     const app = fs.readFileSync(new URL('../../App.jsx', import.meta.url), 'utf8');
     expect(app).toMatch(/<PlatformHub[\s\S]*?region=\{region\}[\s\S]*?onPickVcenter=\{\(id\) => patchFilter\(\{ vcenterId: id \}\)\}/);
     const hub = fs.readFileSync(new URL('./PlatformHub.jsx', import.meta.url), 'utf8');
-    expect(hub).toMatch(/const sites = chipSites\(vcenters, region\)/);
+    expect(hub).toMatch(/const regionSites = chipSites\(vcenters, region\)/);
   });
 });
 
 // v3.10.15(점검 3회차) — KPI 카드가 리전도 넘긴다 · 도구의 리전 보조.
-describe('KPI 카드 → 도구 리전 인계(v3.10.15)', () => {
-  const T = { vc: KPI_HANDOFF.vmTrack, region: KPI_HANDOFF.vmTrackRegion };
-  it('handoffKpiScope — vCenter 가 있으면 vCenter 만, 없고 리전만 있으면 리전, 둘 다 없으면 false(남기지 않음)', () => {
-    expect(handoffKpiScope(T, { vcenterId: 'vc-a', region: '유럽' })).toBe(true);
-    expect(takeKpiVcenter(T.region)).toBe('');
-    expect(takeKpiVcenter(T.vc)).toBe('vc-a');
-    expect(handoffKpiScope(T, { region: '유럽' })).toBe(true);
-    expect(takeKpiVcenter(T.vc)).toBe('');
-    expect(takeKpiVcenter(T.region)).toBe('유럽');
-    expect(handoffKpiScope(T, {})).toBe(false);
-    expect(takeKpiVcenter(T.region)).toBe('');
-  });
-  it('regionsOf · vcInRegion — 빈 리전 제외 · 이름순 · 리전 없으면 전부', () => {
+describe('도구의 리전 보조 · 받는 쪽(v3.10.15 — v3.19.0: 보내는 KPI 카드는 걷어냈다)', () => {
+    it('regionsOf · vcInRegion — 빈 리전 제외 · 이름순 · 리전 없으면 전부', () => {
     const list = [{ id: 'a', region: '유럽' }, { id: 'b', region: '아시아' }, { id: 'c', region: '' }, { id: 'd', region: '유럽' }, null];
     expect(regionsOf(list)).toEqual(['아시아', '유럽']);
     expect(vcInRegion(list, '유럽').map((v) => v.id)).toEqual(['a', 'd']);
@@ -282,19 +265,10 @@ describe('KPI 카드 → 도구 리전 인계(v3.10.15)', () => {
 });
 
 describe('v3.10.17 — 점검 5회차: 리전만 고른 채 백업 KPI 카드 → Backup 현황 · Summary 가 그 리전만 센다', () => {
-  it('KPI_HANDOFF 에 backupSummaryRegion · handoffKpiScope 는 리전 대상만 있어도 리전을 남긴다(vCenter 대상이 없으면 vCenter 는 남기지 않는다)', () => {
+  it('KPI_HANDOFF 에 backupSummaryRegion 이 있다(받는 쪽 BackupSummaryTool 이 쓴다)', () => {
     expect(KPI_HANDOFF.backupSummaryRegion).toBe('backup-summary:region');
-    expect(handoffKpiScope({ region: KPI_HANDOFF.backupSummaryRegion }, { region: '유럽' })).toBe(true);
-    expect(takeKpiVcenter(KPI_HANDOFF.backupSummaryRegion)).toBe('유럽');
-    expect(takeKpiVcenter(KPI_HANDOFF.backupSummaryRegion)).toBe('');   // 한 번 읽으면 비운다
-    // vCenter 대상이 없는 호출(백업 카드는 법인을 골랐으면 Detail 로 가므로 Summary 쪽은 리전 대상만 준다) — vCenter 가 있어도 리전을 남긴다(대상이 리전뿐이라)
-    expect(handoffKpiScope({ region: KPI_HANDOFF.backupSummaryRegion }, { vcenterId: 'vc-1', region: '유럽' })).toBe(true);
-    expect(takeKpiVcenter(KPI_HANDOFF.backupSummaryRegion)).toBe('유럽');
-    expect(handoffKpiScope({ region: KPI_HANDOFF.backupSummaryRegion }, {})).toBe(false);
   });
-  it('소스 계약 — 허브 백업 카드가 리전을 넘기고 · Summary 가 받아 다섯 요청에 싣는다 · 하위 구획 셋이 region 을 받는다', () => {
-    const vc = fs.readFileSync(new URL('../VCenters.jsx', import.meta.url), 'utf8');
-    expect(vc).toMatch(/handoffKpiScope\(\{ region: KPI_HANDOFF\.backupSummaryRegion \}, \{ region: regSel \}\); window\.location\.hash = '#\/tools\/backup-summary'/);
+  it('소스 계약 — Summary 가 받아 다섯 요청에 싣는다 · 하위 구획 셋이 region 을 받는다', () => {
     const t = fs.readFileSync(new URL('../tools/BackupSummaryTool.jsx', import.meta.url), 'utf8');
     expect(t).toMatch(/takeKpiVcenter\(KPI_HANDOFF\.backupSummaryRegion\)/);
     expect((t.match(/\.\.\.\(region \? \{ region \} : \{\}\)/g) || []).length).toBe(2);   // 조회 · CSV
@@ -308,11 +282,14 @@ describe('v3.10.17 — 점검 5회차: 리전만 고른 채 백업 KPI 카드 �
   });
 });
 
-describe('v3.10.18 — 점검 6회차: 허브 부제가 옛 가정(법인 = vCenter = Bareos 1:1:1)을 말하지 않는다', () => {
-  it('2026-11-13 사용자 정정 — 법인 1 : 서비스 N · 서비스 1 = vCenter 1 + Bareos 1(소스 계약)', () => {
+describe('v3.19.0 — 허브 머리의 설명 문구(‘서비스 = vCenter 1 + Bareos 1 …’)를 지웠다(사용자 지시 2026-11-18)', () => {
+  it('세 탭이 같이 쓰는 머리에서 사라지고 .ph-sub 스타일도 없다 · 옛 가정 문구(법인 = vCenter = Bareos)도 없다(소스 계약)', () => {
     const s = fs.readFileSync(new URL('./PlatformHub.jsx', import.meta.url), 'utf8');
     expect(s).not.toMatch(/법인 = vCenter = Bareos/);
-    expect(s).toMatch(/서비스 = vCenter 1 \+ Bareos 1 · 한 법인에 서비스가 여럿일 수 있습니다/);
+    expect(s).not.toMatch(/서비스 = vCenter 1 \+ Bareos 1/);
+    expect(s).not.toMatch(/ph-sub/);
+    expect(fs.readFileSync(new URL('./platform.css', import.meta.url), 'utf8')).not.toMatch(/\.ph-sub/);
+    expect(s).not.toMatch(/Virtual Machine\(VM\)/);   // 기본 제목도 ‘Virtual Machine’
   });
 });
 
@@ -379,5 +356,68 @@ describe('v3.13.6 — 2차 루프 7회차: 범위 바 리전 선택지 = 정해�
     expect(scopeLabel({ region: 'Unknown' }, [{}, {}])).toBe('리전 미지정 · 2법인');
     expect(PT.chipRegionNote('Unknown', 1)).toBe('리전 미지정 · 1법인');
     expect(PT.siblingScopeText({ region: 'Unknown' })).toBe('리전 미지정');
+  });
+});
+
+// v3.19.0(사용자 요청 2026-11-18) — 바로가기 글자로 찾기 · vCenter 탭 카드 위 걷어냄(A) · 400px 분해 한 번.
+describe('v3.19.0 — 바로가기 찾기(filterChipSites)', () => {
+  const V = [
+    { id: 'AAA', name: 'AAA', version: '8.0.2', location: { city: 'Seoul', country: 'Korea', region: '아시아' } },
+    { id: 'AAB', name: 'AAB', version: '7.0.3', location: { city: 'Busan', country: 'Korea', region: '아시아' } },
+    { id: 'BBC', name: 'BBC-IRS', version: '8.0.3', location: { city: 'Frankfurt', country: 'Germany', region: '유럽' } },
+    null,
+  ];
+  const ids = (l) => l.map((s) => s.id);
+  it('부분 일치 — ‘AA’ 는 AAA · AAB 를 모두 찾는다', () => { expect(ids(filterChipSites(V, 'AA'))).toEqual(['AAA', 'AAB']); });
+  it('대소문자 무시 · 공백 낱말은 AND(이름 · 도시 · 버전 어느 칸이든)', () => {
+    expect(ids(filterChipSites(V, 'aa'))).toEqual(['AAA', 'AAB']);
+    expect(ids(filterChipSites(V, 'aa busan'))).toEqual(['AAB']);
+    expect(ids(filterChipSites(V, '  irs  8.0.3 '))).toEqual(['BBC']);
+    expect(filterChipSites(V, 'aa germany')).toEqual([]);
+  });
+  it('빈 글자 · 공백만 = 전부(원본 그대로) · 목록이 아니면 빈 목록', () => {
+    expect(filterChipSites(V, '')).toBe(V); expect(filterChipSites(V, '   ')).toBe(V); expect(filterChipSites(V, undefined)).toBe(V);
+    expect(filterChipSites(null, 'aa')).toEqual([]);
+  });
+  it('고른 법인의 칩은 일치하지 않아도 남는다(배열 · 문자열 모두) — 맞는 법인이 없어도 고른 칩만은 보인다', () => {
+    expect(ids(filterChipSites(V, 'aa', ['BBC']))).toEqual(['AAA', 'AAB', 'BBC']);
+    expect(ids(filterChipSites(V, 'zzz', ['BBC']))).toEqual(['BBC']);
+    expect(ids(filterChipSites(V, 'zzz', 'BBC'))).toEqual(['BBC']);
+    expect(ids(filterChipSites(V, 'zzz', ['']))).toEqual([]);
+  });
+  it('카드와 같은 판정(vcMatches)을 쓰고 새 판정을 만들지 않는다 · 소스 계약 — 허브 칩 · 카드 · App 상태', () => {
+    expect(stripComments(read('./platformText.js'))).toMatch(/vcMatches\(s, kws\)/);
+    const hub = stripComments(read('./PlatformHub.jsx'));
+    expect(hub).toMatch(/filterChipSites\(regionSites, chipQuery, \[vcenterId\]\)/);
+    expect(hub).toMatch(/찾는 글자에 맞는 법인이 없습니다/);
+    expect(hub).toMatch(/<SearchBox /);
+    const vc = stripComments(read('../VCenters.jsx'));
+    expect(vc).toMatch(/filterChipSites\(/);
+    expect(vc).toMatch(/찾는 글자 ‘/);
+    // 빈 결과의 원인을 가른다 — 공용 검색 안내는 q 로 거른 결과(byQuery)가 0일 때만, 찾기 글자 안내는 q 로는 남았는데 찾기 글자가 지웠을 때만
+    expect(vc).toMatch(/keywords\.length > 0 && byQuery\.length === 0 &&/);
+    expect(vc).toMatch(/chipKeywords\.length > 0 && shown\.length === 0 && byQuery\.length > 0 &&/);
+    const app = stripComments(read('../../App.jsx'));
+    expect(app).toMatch(/const \[chipQuery, setChipQuery\] = useState\(''\)/);   // 메모리만 — 저장하지 않는다
+    expect(app).toMatch(/chipQuery=\{chipQuery\} onChipQuery=\{setChipQuery\}/);
+    expect(app).not.toMatch(/localStorage[^\n]*chipQuery|chipQuery[^\n]*localStorage/);
+  });
+});
+
+describe('v3.19.0 — vCenter 탭은 바로가기 아래에 카드만(설계 docs/design/vm-menu 시안 A)', () => {
+  it('HubTabs 줄 · 요약 3장 · 표 보기 · 카드 기억 · 죽은 ref 가 없다(소스 계약)', () => {
+    const vc = stripComments(read('../VCenters.jsx'));
+    for (const bad of [/HubTabs/, /TrendKpis/, /VcTable/, /loadVcView|saveVcView|VC_VIEWS|platform\.vcView/, /cardRefs/, /data-kpi-backup/, /kpis-1row/, /localStorage/]) expect(vc).not.toMatch(bad);
+    expect(vc).toMatch(/<VmNameSearch /);            // VM 이름 검색 안내는 남는다
+    expect(vc).toMatch(/className="vc-grid"/);
+    expect(fs.existsSync(path.resolve(HERE, './VcTable.jsx'))).toBe(false);
+    expect(fs.existsSync(path.resolve(HERE, './HubTabs.jsx'))).toBe(true);   // Hosts · Vms 탭이 쓴다
+    const css = fs.readFileSync(path.resolve(HERE, '../../styles.css'), 'utf8');
+    expect(css).not.toMatch(/vcFlash|\.vc-card\.flash/);
+  });
+  it('400px 열린 탭의 분해는 탭 아래 한 줄(.ph-parts-narrow)뿐 — 탭 안에 다시 켜지 않는다(D3)', () => {
+    const css = fs.readFileSync(path.resolve(HERE, './platform.css'), 'utf8');
+    expect(css).not.toMatch(/\.ph-tab\.on \.parts/);
+    expect(css).toMatch(/\.ph-tab \.parts \{ display: none; \}/);
   });
 });

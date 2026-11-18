@@ -57,6 +57,9 @@ export const LEGACY_GROUP_LABELS = Object.freeze({ backup: 'Veeam 백업' });
  * v2.994(설계 docs/design/server-menu-rename): 별칭 방향이 바뀌었다 — 'Virtual Machine(VM)'(virt)의 정체 키가 tab:vms 가 되고 tab:vcenters 가 별칭이다.
  *   v2.942~v2.993 에 저장된 메뉴(tab:vcenters 하나)도, 그 이전 메뉴(tab:vms · tab:hosts · tab:vcenters 셋)도 그대로 풀린다 — 옛 tab:hosts 는 이제
  *   별칭이 아니라 실제 항목 'Hypervisor'(hv)다. 별칭은 topMenu 의 `tabs` 에서만 만든다(여기에 키를 따로 적지 않는다).
+ * v3.19.0(사용자 요청 2026-11-18): 이름 'Virtual Machine' · 처음 여는 탭 vcenters 로 topMenu 의 tab · tabs 를 맞바꿔 방향이 다시 바뀌었다 —
+ *   정체 키 tab:vcenters · 별칭 tab:vms. v2.994~v3.18 에 저장된 tab:vms 도, 새 tab:vcenters 도, 그 이전 모양도 모두 이 항목 하나로 풀린다
+ *   (편집 화면에서 다시 저장하면 tab:vcenters 로 저장된다 — 서버 usermenu/store.js 는 주소만 저장하고 탭 실재 · 별칭을 모른다).
  */
 export function itemAliases() {
   const out = new Map();
@@ -104,7 +107,7 @@ export function resolveMenu({ mine = null, distributed = null, catalog = null, o
   if (!base) return { groups: MENU_GROUPS, source: failed ? 'unknown' : 'default', unknown: 0 };
   const source = failed ? 'unknown' : (base === mine ? 'mine' : 'distributed');
   const { groupLabel, items } = defaultIndex();
-  const aliases = itemAliases();   // v2.994 tab:vcenters → Virtual Machine(VM) 항목(tab:vms)
+  const aliases = itemAliases();   // v3.19.0 tab:vms → Virtual Machine 항목(tab:vcenters) — v2.994~v3.18 은 반대 방향
   const toolMap = new Map((catalog || []).filter(toolEligible).map((t) => [t.k, t]));
   const seen = new Set();
   let unknown = 0;
@@ -163,7 +166,7 @@ export function resolveMenu({ mine = null, distributed = null, catalog = null, o
 
 /** 기본 메뉴 항목 중 지금 메뉴에 없는 것(지운 것 · 업그레이드로 새로 생긴 것) — 편집 화면의 '다시 넣기' 목록. */
 export function missingDefaults(groups) {
-  const aliases = itemAliases();   // v2.915: 별칭 키(v2.994 부터 tab:vcenters)는 '다시 넣기' 후보가 아니다 — 그 항목(Virtual Machine(VM))이 있으면 들어 있는 것
+  const aliases = itemAliases();   // v2.915: 별칭 키(v3.19.0 부터 tab:vms)는 '다시 넣기' 후보가 아니다 — 그 항목(Virtual Machine)이 있으면 들어 있는 것
   const present = new Set();
   for (const g of groups || []) {
     if (isSingle(g)) { present.add(canonKey(itemKey(g), aliases)); continue; }   // v2.891: 단독 도구도

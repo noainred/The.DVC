@@ -1,10 +1,11 @@
-// views/platform/PlatformHub.jsx — 가상화 허브 셸(v2.994 메뉴 '서버 › Virtual Machine(VM)' · '서버 › Hypervisor' — 옛 이름 '가상화 플랫폼')(v2.915 · 설계 docs/design/virt-platform-menu 시안 A ②③④⑥ · 컨펌 2026-11-07 '시안 A · 표준 검증').
+// views/platform/PlatformHub.jsx — 가상화 허브 셸(v2.994 메뉴 '서버 › Virtual Machine' · '서버 › Hypervisor' — 옛 이름 '가상화 플랫폼')(v2.915 · 설계 docs/design/virt-platform-menu 시안 A ②③④⑥ · 컨펌 2026-11-07 '시안 A · 표준 검증').
 //   App 이 vcenters · hosts · vms 탭 위에 그린다: 제목 · 엔티티 탭 3장(수 + '지금 볼 것' 배지 + 그 탭의 분해) · 바로가기 칩(vCenter 별 이 탭의 숫자 · 고른 법인은 파랗게 · 접기 기억).
 //   숫자는 서버 /platform/summary 하나(30초 · 탭 배지를 위해 무거운 집계를 다시 부르지 않는다) — 응답 전 · 첫 수집 중은 '—'(0 금지). 화면은 글자만 만든다(platformText.js).
 //   탭 id · 해시는 그대로(#/vcenters · #/hosts · #/vms) — 탭을 누르면 App 의 setTab, 칩을 누르면 허브 범위(위 필터 바의 vCenter)가 그 법인으로 바뀐다.
 import React, { useState } from 'react';
 import { vcQuickDot } from '../vcCardText.js';
-import { entityTabs, chipCount, chipLegend, loadChipsCollapsed, saveChipsCollapsed, platformMenuLabel, chipSites, chipRegionNote } from './platformText.js';
+import { SearchBox } from '../../components/ui.jsx';
+import { entityTabs, chipCount, chipLegend, loadChipsCollapsed, saveChipsCollapsed, platformMenuLabel, chipSites, chipRegionNote, filterChipSites, keywordsOf } from './platformText.js';
 import './platform.css';
 
 const lsSafe = () => { try { return typeof window !== 'undefined' ? window.localStorage : null; } catch { return null; } };
@@ -24,27 +25,32 @@ const ICON = {
  * @param {object[]} p.vcenters             /vcenters 목록(App 폴링) — 칩 순서 · 상태 점
  * @param {string} p.vcenterId              고른 법인(없으면 '')
  * @param {(id:string)=>void} p.onPickVcenter  칩 클릭 — 같은 칩을 다시 누르면 전체
+ * @param {string} p.chipQuery                 바로가기 찾기 글자(v3.19.0 — App 이 메모리로만 든다 · 범위 바의 공용 검색 q 와 별개)
+ * @param {(v:string)=>void} p.onChipQuery
  */
-export default function PlatformHub({ tab, tabs, onTab, summary = null, vcenters, vcenterId, region = '', onPickVcenter }) {
+export default function PlatformHub({ tab, tabs, onTab, summary = null, vcenters, vcenterId, region = '', onPickVcenter, chipQuery = '', onChipQuery = () => {} }) {
   // v2.954(점검 E-2): 요약은 App 이 범위(리전 · vCenter)를 실어 부른 summary prop 하나를 쓴다. 예전에는 여기서 scope 없이(App 이 넘기지 않음) 다시 폴링해
   //   엔티티 탭 · 칩이 범위를 따르지 않고(전 법인 수) 같은 요약을 30초마다 두 번 불렀다. 범위 밖 법인의 칩은 숫자 없이 점만 남는다(요약에 그 법인 줄이 없다).
   const [folded, setFolded] = useState(() => loadChipsCollapsed(lsSafe()));
-  const toggleFold = () => { const n = !folded; setFolded(n); saveChipsCollapsed(lsSafe(), n); };
+  // 접으면 찾기 칸도 접힌다 — 보이지 않는 글자가 카드를 계속 거르지 않게 접을 때 글자를 비운다(v3.19.0).
+  const toggleFold = () => { const n = !folded; setFolded(n); saveChipsCollapsed(lsSafe(), n); if (n && chipQuery) onChipQuery(''); };
   const items = entityTabs(summary).filter((t) => tabs.includes(t.k));
   const byVc = new Map((summary?.byVc || []).map((r) => [r.id, r]));
   // v3.10.14(점검 2회차): 칩은 고른 리전 안의 법인만 — 칩을 눌러도 리전은 남는다(App 의 onPickVcenter 가 region 을 지우지 않는다).
-  const sites = chipSites(vcenters, region);
-  const regionNote = chipRegionNote(region, sites.length);
+  const regionSites = chipSites(vcenters, region);
+  // v3.19.0(사용자 요청 2026-11-18): 바로가기 찾기 — 카드와 같은 판정(vcMatches). 고른 법인의 칩은 일치하지 않아도 남긴다(다시 눌러 풀 수 있게). 숫자 3장 · 서버 호출은 바뀌지 않는다.
+  const sites = filterChipSites(regionSites, chipQuery, [vcenterId]);
+  const finding = keywordsOf(chipQuery).length > 0;
+  const regionNote = chipRegionNote(region, regionSites.length);
   const snap = summary?.generatedAt ? new Date(summary.generatedAt).toLocaleTimeString('ko-KR') : '';
   const cur = items.find((t) => t.k === tab) || null;
-  // v2.994(사용자 요청 2026-11-13 · 설계 docs/design/server-menu-rename): 제목 = 이 탭에서 사이드바에 켜지는 항목 이름(호스트 탭 'Hypervisor' · vCenter · VM 탭 'Virtual Machine(VM)').
+  // v2.994(사용자 요청 2026-11-13 · 설계 docs/design/server-menu-rename): 제목 = 이 탭에서 사이드바에 켜지는 항목 이름(호스트 탭 'Hypervisor' · vCenter · VM 탭 'Virtual Machine').
   //   '마지막으로 본 탭을 기억합니다' 문구는 기억을 없애 지웠다(메뉴 항목마다 자기 탭으로 간다).
-  const title = platformMenuLabel(tab) || 'Virtual Machine(VM)';
+  const title = platformMenuLabel(tab) || 'Virtual Machine';
   return (
     <section className="ph" aria-label={title}>
       <header className="ph-head">
         <h1>{title}</h1>
-        <span className="ph-sub">서비스 = vCenter 1 + Bareos 1 · 한 법인에 서비스가 여럿일 수 있습니다 · vCenter 에서 호스트 · VM 으로 내려가고, 숫자를 누르면 그 범위로 탭이 바뀝니다</span>
         {snap && <span className="ph-snap" title="이 숫자들의 기준(인벤토리 스냅샷 시각)">스냅샷 {snap}</span>}
       </header>
 
@@ -63,10 +69,18 @@ export default function PlatformHub({ tab, tabs, onTab, summary = null, vcenters
       {/* 400px: 열린 탭의 분해를 탭 아래 한 줄로(탭 3장은 수 + 이름 + 배지만 — platform.css) */}
       {cur && cur.parts.length > 0 && <div className="ph-parts-narrow">{cur.parts.map((p) => <span key={p.text}><b className={p.tone || ''}>{p.text}</b>{p.note ? <small> {p.note}</small> : null}</span>)}</div>}
 
-      {(sites.length > 0 || regionNote) && (
+      {(regionSites.length > 0 || regionNote) && (
         <div className={`vc-quicknav ph-chips${folded ? ' folded' : ''}`} aria-label="바로가기">
           <span className="qn-label">⚡ 바로가기</span>
-          {regionNote && <span className="ph-legend" style={{ marginLeft: 0 }} title="범위 바의 리전 — 이 리전의 법인만 보입니다 · 칩을 눌러도 리전은 남습니다">{regionNote}{sites.length === 0 ? ' · 이 리전에 법인이 없습니다' : ''}</span>}
+          {regionNote && <span className="ph-legend" style={{ marginLeft: 0 }} title="범위 바의 리전 — 이 리전의 법인만 보입니다 · 칩을 눌러도 리전은 남습니다">{regionNote}{regionSites.length === 0 ? ' · 이 리전에 법인이 없습니다' : ''}</span>}
+          {regionSites.length > 0 && (
+            <span className="ph-find">
+              <SearchBox className="input" placeholder="법인 찾기 · 이름 · id · 도시 · 버전" value={chipQuery} onChange={onChipQuery} />
+              {finding && <button type="button" className="tab ph-find-clear" style={{ flex: 'none', padding: '4px 10px', fontSize: 12 }} onClick={() => onChipQuery('')}>지우기</button>}
+              {finding && <span className="ph-legend" title="글자로 찾은 법인 수 — 범위 바의 검색과는 별개입니다">{sites.length}곳 · {regionSites.length}곳 중</span>}
+            </span>
+          )}
+          {finding && sites.length === 0 && <span className="ph-nomatch" role="status">찾는 글자에 맞는 법인이 없습니다 — ‘{chipQuery.trim()}’ 는 이름 · id · 도시 · 국가 · 리전 · 버전에서 찾습니다</span>}
           {sites.map((s) => {
             const { dot, down } = vcQuickDot(s);
             const c = chipCount(byVc.get(s.id), tab);

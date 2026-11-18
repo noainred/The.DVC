@@ -27,9 +27,7 @@ describe('vmNetSummary', () => {
     expect(vmNetMetaText(vmNetSummary([]))).toBe('');
     expect(signed(-3)).toBe('-3'); expect(signed(0)).toBe('0'); expect(signed(1234)).toBe('+1,234');
   });
-  it('소스 계약 — 허브 카드(VCenters TrendKpis)와 VM 수량 추이 도구가 vmNetSummary 를 쓰고 따로 reduce 하지 않는다', () => {
-    const vc = fs.readFileSync(new URL('../VCenters.jsx', import.meta.url), 'utf8');
-    expect(vc).toMatch(/vmNetSummary\(pts\)/); expect(vc).toMatch(/vmNetMetaText\(/); expect(vc).not.toMatch(/pts\.reduce\(\(a, p\) => a \+ \(p\.added/);
+  it('소스 계약 — VM 수량 추이 도구가 vmNetSummary 를 쓰고 따로 reduce 하지 않는다(v3.19.0: 허브 KPI 카드 TrendKpis 는 걷어냈다)', () => {
     const t = fs.readFileSync(new URL('./VmTrackTool.jsx', import.meta.url), 'utf8');
     expect(t).toMatch(/vmNetSummary\(points\)/); expect(t).not.toMatch(/points\.reduce\(\(a, p\) => a \+ \(p\.added/);
     expect(t).toMatch(/vmNetUnaccountedTitle\(/);
