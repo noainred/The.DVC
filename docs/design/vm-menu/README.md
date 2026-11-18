@@ -149,10 +149,10 @@
 
 ### 8-1. 위 숫자 3장의 순서 — vCenter · **Virtual Machine** · **Hypervisor**
 
-- 지금: vCenter · Hypervisor · Virtual Machine(`web/src/views/platform/platformText.js:16` `PLATFORM_TABS` 의 순서 — `entityTabs()` 가 그 순서로 3장을 만든다).
+- 지금: vCenter · Hypervisor · Virtual Machine(`web/src/views/platform/platformText.js:16` `PLATFORM_TABS` · `entityTabs()`(`:172` — 3장을 만드는 함수가 제 순서를 따로 적어 둔다: `:178` vcenters · `:188` hosts · `:197` vms)).
 - 시안: Hypervisor 와 Virtual Machine 의 자리를 바꿨다 — 캔버스 ① ② ③ ④ ⑥ ⑦ ⑧ ⑨ 전부(⓪ 은 지금 화면 캡처라 그대로).
 - 사이드바의 순서는 이미 Virtual Machine · Hypervisor 다(`topMenu.js` ‘서버’ 묶음) — 위 숫자 3장이 그 순서와 같아진다.
-- 구현 메모: `PLATFORM_TABS` 의 순서만 바꾼다(키 `vcenters` · `hosts` · `vms` 와 주소는 그대로). 순서를 고정한 테스트(`platform/platformText.test.js` · `audit2741j.test.js`)를 고친다. 400px 의 3칸 줄 · 분해 줄(`ph-parts-narrow`)도 같은 배열을 쓰므로 함께 바뀐다 — Chromium 400 으로 확인한다.
+- 구현 메모(정정 — 처음에 ‘`PLATFORM_TABS` 의 순서만 바꾼다’ 고 적었으나 틀렸다): **두 곳을 함께** 바꾼다 — `PLATFORM_TABS`(`:16`)와 `entityTabs()` 의 반환 순서(`:178` ~ `:197`). 한쪽만 바꾸면 위 숫자 3장은 그대로다(키 `vcenters` · `hosts` · `vms` 와 주소는 그대로). 순서를 고정한 테스트(`platform/platformText.test.js` · `audit2741j.test.js`)를 고친다. 400px 의 3칸 줄 · 분해 줄(`ph-parts-narrow`)도 같은 배열을 쓰므로 함께 바뀐다 — Chromium 400 으로 확인한다.
   바뀌는 것은 **보이는 순서뿐**이다 — vCenter 카드의 ‘호스트 →’ · ‘VM →’ 이동, 드릴다운(vCenter → 호스트 → VM)은 그대로다.
 
 ### 8-2. 메뉴 이름 — ‘Physical Server · Baremetal’ → **‘Physical Server’**
