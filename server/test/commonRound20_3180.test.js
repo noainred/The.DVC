@@ -28,7 +28,8 @@ test('화면 — Summary 비율 창은 용량 미상 호스트가 있는 vCenter
 test('화면(10회차 보완) — 물리 칸은 부분 합 표시(*) · 배지 툴팁은 미상 호스트 수를 말한다', () => {
   const s = read('web/src/views/Summary.jsx');
   assert.match(s, /\(key === 'cpuCores' \|\| key === 'memTotalGB'\) \? capUnknownTitle\(vc\) : null/);
-  assert.match(s, /capUnknownTitle\(vc\) \|\| '물리 자원/);
+  // v3.19.2: 배지 툴팁은 summaryAllocText.ratioBadgeTitle 이 고른다 — 용량 미상 호스트 문구(capUnknownTitle)가 먼저다(그 함수의 vitest 가 순서를 고정).
+  assert.match(s, /ratioBadgeTitle\(vc, allocKind, capUnknownTitle\(vc\), '물리 자원/);
 });
 
 test('virtRatioText — capUnknownOf · capUnknownTitle(못 읽은 값은 0 이 아니다 · 0 이하 · 글자는 미상 없음)', async () => {

@@ -183,6 +183,7 @@ ISO 문자열이 섞여 나오지 않습니다.
 | `storageCapacityAllGB` | 사용량 미상 데이터스토어를 포함한 설치 용량(v2.632) |
 | `datastoresUsageUnknown` | 사용량을 읽지 못해 위 두 합계에서 뺀 데이터스토어 수(v2.632) |
 | `vmVcpu` `vmRamMB` `vmProvisionedGB` | VM 에 **할당된** 양(실제 사용량이 아닙니다). `vmProvisionedGB` 는 스토리지 용량을 읽은 VM 만의 합입니다(v2.727) |
+| `vmVcpuUnknown` `vmRamUnknown` | vCPU 수 · 메모리 크기를 읽지 못해 `vmVcpu` · `vmRamMB` 에서 뺀 VM 수(v3.20.1 — 0 으로 채우지 않습니다). 0 보다 크면 그 합은 **읽은 VM 만의 부분 합(최소값)** 이고, `vms` 와 같으면 하나도 읽지 못한 것이라 합 `0` 은 '할당 없음' 이 아니라 **모름**입니다 |
 | `vmStorageUnknown` | 스토리지 용량(`summary.storage.committed`)을 읽지 못해 `vmProvisionedGB` 에서 뺀 VM 수(v2.727 — 0 으로 채우지 않습니다) |
 
 ```json
@@ -195,7 +196,8 @@ ISO 문자열이 섞여 나오지 않습니다.
     "cpuCores": 6936, "cpuTotalMhz": 18288800, "cpuUsedMhz": 10231709,
     "memTotalMB": 112197632, "memUsedMB": 69231477,
     "storageCapacityGB": 1157120, "storageUsedGB": 800543, "storageCapacityAllGB": 1157120, "datastoresUsageUnknown": 0,
-    "vmVcpu": 11957, "vmRamMB": 44269568, "vmProvisionedGB": 736552, "vmStorageUnknown": 0
+    "vmVcpu": 11957, "vmRamMB": 44269568, "vmVcpuUnknown": 0, "vmRamUnknown": 0,
+    "vmProvisionedGB": 736552, "vmStorageUnknown": 0
   },
   "meta": { "scopedToVcenters": null, "collectedAt": 1789727271549, "notCurrentVcenters": 0, "notCurrentVcenterIds": [] }
 }

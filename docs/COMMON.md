@@ -5,7 +5,7 @@
 
 - 생성: `node scripts/common-doc.mjs` · 최신 여부: `node scripts/common-doc.mjs --check`
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다. 설명을 고치려면 그 모듈의 **머리 주석 첫 단락**을 고친다.
-- 훑은 소스 4416개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
+- 훑은 소스 4419개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
 
 ## 읽는 법 · 한계
 
@@ -149,6 +149,7 @@
 | `VmRemote.jsx` | (머리 주석 없음) | `VmRemoteButton` | 5 | 4 | 2 |
 | `pressable.js` | 누르는 카드 · 행(div · td)에 **키보드 접근**을 주는 props(v3.10.19 · 가상화 플랫폼 점검 7회차). - 마우스로만 열리던 div(onClick) 는 Tab 으로 닿지 않고 Enter · Space 로 열리지 않았다(허브 vCenter 카드 ·… | `onPressKey` `pressable` `PRESS_KEYS` | 5 | 3 | 1 |
 | `IpmsMatches.jsx` | (머리 주석 없음) | `IPMS_DENIED_TEXT` `default` | 4 | 1 | 4 |
+| `useNarrowScreen.js` | 좁은 화면 여부 훅(v2.987 — VmDistPanels.jsx 에서 옮김 · 물리서버 폴더와 함께 쓴다). matchMedia 가 없거나 던지면 넓은 화면으로 본다(SSR · 구형 브라우저). | `useNarrowScreen` | 4 | 4 | 0 |
 | `CsvBulkModals.jsx` | CSV 일괄 관리 공용 모달(v2.339) — 내보내기(비밀 포함 선택)·가져오기(검증 드라이런 → 덮어쓰기 확인 → 실행). 수집 서버 CSV(v2.338, Collectors.jsx)에서 자리잡은 UX 를 화면마다 복제하지 않게 엔드포인트/컬럼만 주입받는 형태로 일… | `CsvExportModal` `CsvImportModal` | 3 | 3 | 2 |
 | `ErrorBoundary.jsx` | Catches render/runtime errors in its subtree so a single broken component never blanks the whole portal. Shows a small fallback (or a custom one). | `default` | 3 | 2 | 2 |
 | `VmConsole.jsx` | VM remote-console launcher (원격 콘솔), mirroring the vSphere Client: - LAUNCH REMOTE CONSOLE → VMRC desktop app (vmrc:// URL) - LAUNCH WEB CONSOLE → HTML… | `VmConsoleButton` | 3 | 3 | 1 |
@@ -156,7 +157,6 @@
 | `cpuModelText.js` | CPU 모델명 표시 문구(순수, v2.556). | `cpuModelText` `cpuModelCell` `CPU_MODEL_MAX` | 3 | 3 | 1 |
 | `mentionText.js` | 댓글 @멘션 자동완성의 순수 판정(v2.907 · 시안 docs/design/wiki-mention ①②). | `mentionQueryAt` `mentionText` `applyMention` `mentionsInText` `MENTION_TOKEN_MAX` | 3 | 3 | 1 |
 | `taskLabel.js` | 요청 경로 → **사람이 읽는 작업 이름**(v2.501) — 순수 함수. | `taskLabel` `secText` `taskRows` `visibleProgress` | 3 | 2 | 3 |
-| `useNarrowScreen.js` | 좁은 화면 여부 훅(v2.987 — VmDistPanels.jsx 에서 옮김 · 물리서버 폴더와 함께 쓴다). matchMedia 가 없거나 던지면 넓은 화면으로 본다(SSR · 구형 브라우저). | `useNarrowScreen` | 3 | 3 | 0 |
 | `ExportPreviewModal.jsx` | 내보내기 미리보기 '크게 보기'(전체 화면 팝업, v2.801 — 승인 시안 ⑤ https://claude.ai/artifact/5PT9nUWUwMPTxwURq3xm1h). 사용자 요청(2026-10-27): "지금 미리보기 화면이 작은데, 미리보기를 전체화면으로 팝업… | `default` | 2 | 2 | 1 |
 | `HostGpuPanel.jsx` | v2.650: 호스트 상세의 GPU 칸 — 사용률·온도·GPU 메모리 할당/사용·VM 별 동작(사용자 요청 "GPU 있는 서버는 GPU 사용율, GPU 온도, GPU 메모리 할당/사용율 붙여줘"). 서버 GET /tools/gpu/host(스냅샷·오버레이만 — 왕복 0… | `default` | 2 | 2 | 1 |
 | `HostPowerPanel.jsx` | (머리 주석 없음) | `default` | 2 | 2 | 0 |
@@ -216,7 +216,7 @@
 | 모듈 | 하는 일 | 내보내는 이름 | 사용처 | 영역 | 테스트 |
 |---|---|---|---|---|---|
 | `api.js` | v2.498: 진행 중 요청 레지스트리 + 장기 로딩(hang) 보고. perfClient 는 api.js 를 import 하지 않으므로 순환이 없다(설정 조회는 fetchJson 을 인자로 받는다). | `noteHttpError` `permissionInfoFor` `httpInfoFor` `fetchJson` `postJson` `sendJson` 외 35 | 407 | 20 | 54 |
-| `numOrNull.js` | `numOrNull`(웹) — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정. | `numOrNull` `default` | 152 | 12 | 2 |
+| `numOrNull.js` | `numOrNull`(웹) — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정. | `numOrNull` `default` | 153 | 12 | 2 |
 | `dayStamp.js` | 브라우저 쪽 날짜 표기(v2.582 BUG-3) — 내려받기 파일명·만료일은 **사용자의 로컬 날짜**다. `new Date().toISOString().slice(0, 10)` 은 UTC 날짜라 한국 시각 00:00~09:00 에는 **어제**가 된다 (보고서 파일명… | `dayStamp` | 24 | 5 | 1 |
 | `regions.js` | 지역(region) 목록 — 웹 단일 소스(v2.575 IMP-10). ⚠ 값은 서버 `server/src/util/regions.js` 와 **글자 그대로 같아야 한다**(웹은 서버 소스를 import 할 수 없어 복사가 불가피하다). `web/src/regions.`… | `REGIONS` `default` | 5 | 2 | 2 |
 | `perfClientLogic.js` | 브라우저 성능 보고의 **순수 로직**(v2.498): 경로 정규화·장기 로딩 문구· 쿨다운/상한 판정. 웹 테스트는 node 환경(DOM 없음)이라 판정·문구는 여기서 회귀로 고정한다. | `normPath` `loadingText` `allowReport` `stallPayload` `statusPollTargets` `requesterText` 외 3 | 4 | 2 | 3 |
@@ -241,7 +241,7 @@
 | 모듈 | 하는 일 | 사용처 | 다른 영역 | 테스트 |
 |---|---|---|---|---|
 | `server/src/config.js` | (머리 주석 없음) | 512 | 86 | 186 |
-| `server/src/store.js` | (머리 주석 없음) | 208 | 43 | 341 |
+| `server/src/store.js` | (머리 주석 없음) | 208 | 43 | 342 |
 | `server/src/collector/registry.js` | Collector registry — the list of remote collector agents (one per datacenter) the central portal pulls power from. Stored in CONFIG_DIR/collectors.jso… | 83 | 32 | 55 |
 | `server/src/security/secretVault.js` | 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). | 41 | 29 | 31 |
 | `server/src/mock/demo/flags.js` | 데모(DATA_SOURCE=mock) 모드 공용 판정(v2.708). | 85 | 26 | 3 |
@@ -320,7 +320,7 @@
 | 모듈 | 하는 일 | 사용처 | 다른 영역 | 테스트 |
 |---|---|---|---|---|
 | `web/src/views/changeResult.js` | v2.731(점검 1회차 A5-01): 변경 요청 응답 판정 — 순수 모듈(화면·테스트가 같이 쓴다). | 58 | 4 | 7 |
-| `web/src/views/unitText.js` | 값 + 단위 표기 — **값이 없으면 단위를 붙이지 않는다**(v2.575 BUG-20). | 54 | 7 | 3 |
+| `web/src/views/unitText.js` | 값 + 단위 표기 — **값이 없으면 단위를 붙이지 않는다**(v2.575 BUG-20). | 56 | 8 | 3 |
 | `web/src/views/tools/relTime.js` | 상대시각 문구 — **공용 코어** (v2.574 IMP-03). | 49 | 4 | 2 |
 | `web/src/views/settingsUnread.js` | 112회차(설정 화면 스윕 — 106회차 R3 · R4 와 같은 꼴): '서버가 설정 파일을 읽지 못한 동안의 조회' 를 화면이 다루는 공용 판정(순수 — 화면 · vitest 가 같이 쓴다). | 34 | 3 | 5 |
 | `web/src/views/tools/toneVar.js` | toneVar — 판정 톤(`ok`/`warn`/`bad`, 또는 진단 어휘 `green`/`amber`/`red`) → CSS 색 변수. **공용 코어** (v2.613 DEPS2613-11). 예전에는 `bmUsageText`·`edgeLogText`·`partFa`… | 29 | 1 | 1 |
