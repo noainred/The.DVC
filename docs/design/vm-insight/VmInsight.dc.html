@@ -14,7 +14,7 @@ body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR
 button{font:inherit}
 sc-for,sc-if{display:contents}
 .mono{font-family:"JetBrains Mono",monospace}
-.page{min-height:2400px;padding:22px 24px 28px;display:flex;flex-direction:column;gap:14px;box-sizing:border-box}
+.page{min-height:2800px;padding:22px 24px 28px;display:flex;flex-direction:column;gap:14px;box-sizing:border-box}
 .head{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px}
 .head h1{margin:0;font-size:20px;font-weight:800}
 .head .snap{margin-left:auto;font-size:12px;color:#8b9bb4;font-family:"JetBrains Mono",monospace;white-space:nowrap}
@@ -180,6 +180,8 @@ sc-for,sc-if{display:contents}
 .gt{position:relative;display:block;height:10px;border-radius:5px;background:rgba(148,163,184,.14)}
 .gt i{display:block;height:100%;border-radius:5px}
 .gt::after{content:"";position:absolute;left:80%;top:-3px;bottom:-3px;width:2px;background:#e6edf6;opacity:.55}
+.gt.nt::after{display:none}
+.pr .big{min-width:0}
 .note{font-size:12px;line-height:1.6;color:#aebbd0}
 .empty{font-size:13px;color:#aebbd0;padding:18px 16px;border:1px solid #243049;border-radius:12px;background:#141b2d;line-height:1.6}
 </style>
@@ -306,6 +308,42 @@ sc-for,sc-if{display:contents}
           <sc-if value="{{ gpSoonEmpty }}" hint-placeholder-val="{{ false }}">
             <div class="note">이 범위에는 30일 안에 가득 찰 것으로 보이는 파티션이 없습니다.</div>
           </sc-if>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" aria-label="오래된 스냅샷">
+      <div class="ph"><h2>오래된 스냅샷</h2><span class="hint">가장 오래된 스냅샷이 기준 일수를 넘긴 VM — ‘조치 필요’ 의 판정 그대로입니다</span><span class="rt">{{ snRule }}</span></div>
+      <div class="gp">
+        <div class="sum">
+          <div class="hero"><b>{{ snHero }}</b><span>{{ snHeroText }}</span></div>
+          <div class="st">
+            <sc-for list="{{ snStats }}" as="x" hint-placeholder-count="3"><div class="{{ x.cls }}" title="{{ x.tip }}"><b>{{ x.big }}</b><span>{{ x.text }}</span></div></sc-for>
+          </div>
+          <div class="stack tall bands"><sc-for list="{{ snBands }}" as="b" hint-placeholder-count="3"><span style="flex: {{ b.n }} 1 0; background: {{ b.bg }}; color: {{ b.ink }}" title="{{ b.tip }}">{{ b.count }}</span></sc-for></div>
+          <div class="lgd"><sc-for list="{{ snBands }}" as="b" hint-placeholder-count="3"><span><i style="background: {{ b.bg }}"></i>{{ b.label }} <b>{{ b.count }}</b> · {{ b.size }}</span></sc-for></div>
+          <span class="lnk">‘조치 필요 › 오래된 스냅샷’ 에서 모두 보기 →</span>
+          <span class="lnk2">기준 일수와 예외 목록은 ‘VM 구성 점검’ 설정에서 →</span>
+        </div>
+        <div class="lst">
+          <div class="lh"><b>가장 오래된 VM</b><span>지난 일수가 많은 순 5대</span></div>
+          <sc-for list="{{ snOld }}" as="p" hint-placeholder-count="5">
+            <div class="pr" title="{{ p.tip }}">
+              <span><span class="nm">{{ p.name }}</span><span class="sb">{{ p.sub }}</span></span>
+              <span><span class="gt nt"><i style="width: {{ p.w }}; background: {{ p.bg }}"></i></span><span class="fr">{{ p.note }}</span></span>
+              <span class="big">{{ p.big }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div class="lst">
+          <div class="lh"><b>스냅샷이 큰 VM</b><span>기준을 넘긴 VM 중 크기가 큰 순 5대</span></div>
+          <sc-for list="{{ snBig }}" as="p" hint-placeholder-count="5">
+            <div class="pr" title="{{ p.tip }}">
+              <span><span class="nm">{{ p.name }}</span><span class="sb">{{ p.sub }}</span></span>
+              <span><span class="gt nt"><i style="width: {{ p.w }}; background: {{ p.bg }}"></i></span><span class="fr">{{ p.note }}</span></span>
+              <span class="big">{{ p.big }}</span>
+            </div>
+          </sc-for>
         </div>
       </div>
     </section>
@@ -448,7 +486,7 @@ sc-for,sc-if{display:contents}
   </sc-if>
 </main>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2400}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2800}}'>
 class Component extends DCLogic {
   state = { sel: {}, q: '', fill: 'att', size: 'n', sub: 'insight', ovKind: 'mem' };
 
@@ -533,6 +571,25 @@ class Component extends DCLogic {
       {id:'vc-ap-south',on:111,c:[1607,835.8,771.2],cc:8,m:[2016,1130.8,885.2],mc:22,off:[13,3360],sn:[20,1014.6],th:[66,8030],nt:5,ct:[['backup-ap-0006',16,38.4,1.2,3,97,3],['k8s-node-ap-0080',8,20.8,0.8,4,96,4],['lb-ap-0097',4,11.6,1.4,12,88,6],['k8s-node-ap-0005',4,11.6,1.6,14,86,6],['app-ap-0051',4,10.4,1.5,14,86,1]],mt:[['backup-ap-0006',64,9,55,14,86,3],['mq-ap-0061',64,16.6,47.4,26,74,5],['cache-ap-0100',64,21.8,42.2,34,66,5],['db-ap-0105',64,23.7,40.3,37,63,3],['web-ap-0058',64,25,39,39,61,2]]},
       {id:'vc-cn-east',on:219,c:[3246.5,1650.4,1596.1],cc:20,m:[4090,2430.2,1659.8],mc:46,off:[44,18292],sn:[44,2809.5],th:[140,25507],nt:13,ct:[['web-cn-0212',16,46.4,6.5,14,86,4],['dns-cn-0043',8,25.6,0.3,1,99,3],['lb-cn-0166',8,25.6,3.3,13,87,1],['db-cn-0207',8,17.6,3,17,83,1],['app-cn-0228',4,12.8,0.5,4,96,3]],mt:[['dns-cn-0006',64,9,55,14,86,4],['monitor-cn-0183',64,17.9,46.1,28,72,0],['monitor-cn-0019',64,19.8,44.2,31,69,0],['mq-cn-0145',64,21.8,42.2,34,66,5],['lb-cn-0146',64,24.3,39.7,38,62,6]]},
       {id:'vc-cn-north',on:162,c:[2044.8,1076.3,968.5],cc:14,m:[2718,1603.2,1114.8],mc:35,off:[18,7476],sn:[30,1934.4],th:[96,14935],nt:7,ct:[['cache-cn-0028',16,51.2,8.2,16,84,5],['lb-cn-0143',16,35.2,5.6,16,84,0],['web-cn-0117',8,23.2,0.9,4,96,0],['k8s-node-cn-0189',8,20.8,1.9,9,91,2],['k8s-node-cn-0097',8,17.6,2.1,12,88,5]],mt:[['db-cn-0022',64,20.5,43.5,32,68,2],['web-cn-0105',64,23.7,40.3,37,63,4],['cache-cn-0183',32,9,23,28,72,5],['app-cn-0144',32,9.3,22.7,29,71,4],['k8s-node-cn-0060',32,9.6,22.4,30,70,1]]},
+    ];
+  }
+
+  // 오래된 스냅샷 — 같은 목 서버 /api/vms(신호 snapOld · 기준 7일)를 2026-11-18 12:52:27 KST 에 한 번 받아 법인별로 줄인 값(VM 340).
+  // n = 기준을 넘긴 VM · ab = 지난 일수 구간 [7–30, 30–90, 90 이상] 의 VM 수 · as = 그 구간의 스냅샷 크기 GB · cnt = 스냅샷 수
+  // o5 = 가장 오래된 5대 · b5 = 스냅샷이 큰 5대 — [VM, 지난 일수, 스냅샷 수, 크기 GB, 가장 오래된 스냅샷 이름, 전원(1 켜짐)]
+  snap() {
+    return [
+      {id:'vc-us-east',n:36,ab:[7,15,14],as:[238.8,861.5,784.9],cnt:74,o5:[['mq-us-0175',175,3,58,'pre-patch',1],['dns-us-0169',169,1,23,'pre-patch',0],['backup-us-0163',163,3,6.8,'pre-patch',1],['k8s-node-us-0157',157,1,112.6,'pre-patch',1],['backup-us-0151',151,3,25,'pre-patch',1]],b5:[['backup-us-0109',109,1,235.5,'pre-patch',1],['db-us-0223',43,3,174.1,'pre-patch',1],['lb-us-0145',145,1,145,'pre-patch',1],['mq-us-0055',55,3,145,'pre-patch',1],['cache-us-0079',79,3,115,'pre-patch',1]]},
+      {id:'vc-us-west',n:22,ab:[4,10,8],as:[560.5,863.2,487.6],cnt:44,o5:[['lb-us-0139',139,3,9.2,'pre-patch',1],['db-us-0133',133,1,34,'pre-patch',1],['db-us-0127',127,3,22,'pre-patch',1],['app-us-0121',121,1,2,'pre-patch',1],['cache-us-0115',115,3,297,'pre-patch',1]],b5:[['cache-us-0115',115,3,297,'pre-patch',1],['monitor-us-0055',55,3,297,'pre-patch',0],['app-us-0025',25,1,297,'pre-patch',1],['monitor-us-0079',79,3,235.5,'pre-patch',1],['backup-us-0049',49,1,235.5,'pre-patch',1]]},
+      {id:'vc-br-sao',n:17,ab:[4,10,3],as:[103.4,747.1,249.9],cnt:33,o5:[['monitor-br-0109',109,1,235.5,'pre-patch',1],['mq-br-0097',97,1,4.4,'pre-patch',1],['mq-br-0091',91,3,10,'pre-patch',1],['mq-br-0085',85,1,58,'pre-patch',1],['lb-br-0079',79,3,46,'pre-patch',1]],b5:[['web-br-0055',55,3,297,'pre-patch',1],['monitor-br-0109',109,1,235.5,'pre-patch',1],['monitor-br-0073',73,1,174.1,'pre-patch',1],['mq-br-0085',85,1,58,'pre-patch',1],['mq-br-0067',67,3,55,'pre-patch',1]]},
+      {id:'vc-eu-central',n:73,ab:[11,29,33],as:[765.6,1307.9,1583],cnt:149,o5:[['app-eu-0355',175,3,58,'pre-patch',0],['db-eu-0175',175,3,11.6,'pre-patch',1],['app-eu-0169',169,1,235.5,'pre-patch',1],['lb-eu-0349',169,1,115,'pre-patch',1],['db-eu-0163',163,3,13.6,'pre-patch',1]],b5:[['app-eu-0475',115,3,297,'pre-patch',1],['app-eu-0169',169,1,235.5,'pre-patch',1],['dns-eu-0319',139,3,235.5,'pre-patch',1],['k8s-node-eu-0073',73,1,174.1,'pre-patch',1],['lb-eu-0193',13,1,174.1,'pre-patch',1]]},
+      {id:'vc-eu-west',n:39,ab:[7,18,14],as:[402.6,855.5,1259],cnt:79,o5:[['k8s-node-eu-0175',175,3,58,'pre-patch',0],['lb-eu-0169',169,1,235.5,'pre-patch',1],['mq-eu-0163',163,3,85,'pre-patch',1],['web-eu-0157',157,1,112.6,'pre-patch',0],['mq-eu-0151',151,3,10,'pre-patch',0]],b5:[['dns-eu-0025',25,1,297,'pre-patch',1],['lb-eu-0169',169,1,235.5,'pre-patch',1],['web-eu-0139',139,3,235.5,'pre-patch',1],['monitor-eu-0223',43,3,174.1,'pre-patch',1],['mq-eu-0115',115,3,145,'pre-patch',1]]},
+      {id:'vc-me-uae',n:9,ab:[4,5,0],as:[114.6,434.8,0],cnt:19,o5:[['web-me-0055',55,3,297,'pre-patch',0],['web-me-0049',49,1,115,'pre-patch',1],['lb-me-0043',43,3,6.8,'pre-patch',1],['mq-me-0037',37,1,11,'pre-patch',1],['web-me-0031',31,3,5,'pre-patch',0]],b5:[['web-me-0055',55,3,297,'pre-patch',0],['web-me-0049',49,1,115,'pre-patch',1],['dns-me-0013',13,1,85,'pre-patch',1],['backup-me-0025',25,1,11.6,'pre-patch',1],['mq-me-0037',37,1,11,'pre-patch',1]]},
+      {id:'vc-ap-northeast',n:33,ab:[7,12,14],as:[229.2,657.4,907.5],cnt:67,o5:[['cache-ap-0175',175,3,297,'pre-patch',1],['k8s-node-ap-0169',169,1,115,'pre-patch',1],['k8s-node-ap-0163',163,3,174.1,'pre-patch',1],['dns-ap-0157',157,1,112.6,'pre-patch',1],['web-ap-0151',151,3,51.2,'pre-patch',1]],b5:[['cache-ap-0175',175,3,297,'pre-patch',1],['k8s-node-ap-0163',163,3,174.1,'pre-patch',1],['k8s-node-ap-0169',169,1,115,'pre-patch',1],['app-ap-0049',49,1,115,'pre-patch',1],['dns-ap-0157',157,1,112.6,'pre-patch',1]]},
+      {id:'vc-ap-southeast',n:19,ab:[4,10,5],as:[175.6,237.4,368.9],cnt:37,o5:[['db-ap-0121',121,1,51.2,'pre-patch',1],['dns-ap-0115',115,3,23.2,'pre-patch',1],['mq-ap-0109',109,1,235.5,'pre-patch',1],['web-ap-0097',97,1,55,'pre-patch',1],['web-ap-0091',91,3,4,'pre-patch',1]],b5:[['mq-ap-0109',109,1,235.5,'pre-patch',1],['app-ap-0025',25,1,145,'pre-patch',1],['mq-ap-0085',85,1,58,'pre-patch',0],['web-ap-0097',97,1,55,'pre-patch',1],['db-ap-0121',121,1,51.2,'pre-patch',1]]},
+      {id:'vc-ap-south',n:20,ab:[4,10,6],as:[353.8,526.2,134.6],cnt:40,o5:[['dns-ap-0127',127,3,4.4,'pre-patch',1],['k8s-node-ap-0121',121,1,25,'pre-patch',1],['mq-ap-0115',115,3,23.2,'pre-patch',1],['dns-ap-0109',109,1,46,'pre-patch',1],['lb-ap-0097',97,1,11,'pre-patch',1]],b5:[['k8s-node-ap-0055',55,3,297,'pre-patch',1],['web-ap-0025',25,1,297,'pre-patch',1],['mq-ap-0049',49,1,115,'pre-patch',1],['dns-ap-0109',109,1,46,'pre-patch',1],['web-ap-0013',13,1,34,'pre-patch',0]]},
+      {id:'vc-cn-east',n:43,ab:[7,20,16],as:[996,979.7,828.8],cnt:87,o5:[['app-cn-0175',175,3,11.6,'pre-patch',1],['db-cn-0169',169,1,9.2,'pre-patch',0],['dns-cn-0163',163,3,85,'pre-patch',1],['web-cn-0157',157,1,8.8,'pre-patch',0],['lb-cn-0151',151,3,2,'pre-patch',1]],b5:[['monitor-cn-0115',115,3,297,'pre-patch',1],['dns-cn-0235',55,3,297,'pre-patch',0],['db-cn-0025',25,1,297,'pre-patch',1],['k8s-node-cn-0229',49,1,235.5,'pre-patch',1],['monitor-cn-0019',19,3,235.5,'pre-patch',1]]},
+      {id:'vc-cn-north',n:29,ab:[5,10,14],as:[151.2,964.1,767.9],cnt:59,o5:[['app-cn-0175',175,3,58,'pre-patch',1],['dns-cn-0169',169,1,235.5,'pre-patch',1],['web-cn-0163',163,3,17,'pre-patch',1],['k8s-node-cn-0157',157,1,4.4,'pre-patch',1],['k8s-node-cn-0151',151,3,2,'pre-patch',1]],b5:[['cache-cn-0145',145,1,297,'pre-patch',1],['db-cn-0055',55,3,297,'pre-patch',1],['dns-cn-0169',169,1,235.5,'pre-patch',1],['k8s-node-cn-0079',79,3,235.5,'pre-patch',1],['db-cn-0073',73,1,174.1,'pre-patch',0]]},
     ];
   }
 
@@ -840,6 +897,30 @@ class Component extends DCLogic {
     ovCorpX = ovCorpX.map((c) => Object.assign({ uCls: '' }, c));
     ovTopX = ovTopX.map((v) => Object.assign({ uCls: '', dwCls: '' }, v));
 
+    // 오래된 스냅샷 — 판정(가장 오래된 스냅샷이 기준 일수를 넘김)은 지금 신호 snapOld 그대로. 범위 = 켠 법인.
+    const SN = {}; this.snap().forEach((s) => { SN[s.id] = s; });
+    const SS = (f) => scope.reduce((a, r) => a + f(SN[r.id]), 0);
+    const oldN = SS((s) => s.n); const snCnt = SS((s) => s.cnt);
+    const sab = scope.reduce((a, r) => a.map((x, i) => x + SN[r.id].ab[i]), [0, 0, 0]);
+    const sas = scope.reduce((a, r) => a.map((x, i) => x + SN[r.id].as[i]), [0, 0, 0]);
+    const snGBsum = sas[0] + sas[1] + sas[2];
+    const SB = [{ label: '7–30일', bg: '#f59e0b', ink: '#0b0b0b' }, { label: '30–90일', bg: '#ec835a', ink: '#0b0b0b' }, { label: '90일 이상', bg: '#ef4444', ink: '#ffffff' }];
+    const sBand = (d) => (d >= 90 ? 2 : d >= 30 ? 1 : 0);
+    const snBands = SB.map((b, i) => Object.assign({}, b, { n: sab[i], count: fmt(sab[i]), size: gbT(sas[i]), tip: '가장 오래된 스냅샷이 ' + b.label + ' 지난 VM ' + fmt(sab[i]) + '대 · 스냅샷 ' + gbT(sas[i]) })).filter((b) => b.n > 0);
+    const snStats = [
+      { cls: 'c', big: fmt(sab[2]) + '대', text: '90일 넘게 둔 VM', tip: '가장 오래된 스냅샷이 90일을 넘긴 VM' },
+      { cls: 's', big: gbT(snGBsum), text: '이 VM 들의 스냅샷 크기', tip: '기준을 넘긴 VM 의 스냅샷 크기 합' },
+      { cls: '', big: fmt(snCnt) + '개', text: '스냅샷 수 — VM 한 대에 ' + (oldN ? (snCnt / oldN).toFixed(1) : '0') + '개', tip: '기준을 넘긴 VM 이 가진 스냅샷 수' },
+    ];
+    const snRow = (maxOf, bigOf, noteOf) => ({ vc, t }, i, arr) => {
+      const mx = Math.max.apply(null, arr.map((x) => maxOf(x.t)).concat([1]));
+      return { name: t[0], sub: vc + ' · 스냅샷 ' + t[2] + '개 · ‘' + t[4] + '’' + (t[5] ? '' : ' · 전원 꺼짐'), w: pctN(maxOf(t), mx).toFixed(1) + '%', bg: SB[sBand(t[1])].bg, big: bigOf(t), note: noteOf(t),
+        tip: t[0] + ' — 가장 오래된 스냅샷 ‘' + t[4] + '’ · ' + t[1] + '일 지남 · 스냅샷 ' + t[2] + '개 · ' + gbT(t[3]) };
+    };
+    const snMerge = (key, cmp) => scope.reduce((a, r) => a.concat(SN[r.id][key].map((t) => ({ vc: r.id, t }))), []).sort(cmp).slice(0, 5);
+    const snOld = snMerge('o5', (a, b) => (b.t[1] - a.t[1]) || (b.t[3] - a.t[3]) || (a.t[0] < b.t[0] ? -1 : 1)).map(snRow((t) => t[1], (t) => t[1] + '일', (t) => '스냅샷 크기 ' + gbT(t[3])));
+    const snBig = snMerge('b5', (a, b) => (b.t[3] - a.t[3]) || (b.t[1] - a.t[1]) || (a.t[0] < b.t[0] ? -1 : 1)).map(snRow((t) => t[3], (t) => gbT(t[3]), (t) => t[1] + '일 지남'));
+
     const isInsight = st.sub === 'insight';
     const isOver = st.sub === 'over';
     const other = OTHER[st.sub] || ['', ''];
@@ -858,6 +939,8 @@ class Component extends DCLogic {
       gpHero: fmt(gOv), gpHeroText: '대 — 파티션 ' + fmt(gOp) + '개가 기준 80% 이상 · 값을 받은 VM ' + fmt(gRep) + '대 중 ' + pct(gOv, gRep),
       gpStats, gpBands, gpOs: '초과 파티션의 OS — Linux ' + fmt(gLnx) + '개 · Windows ' + fmt(gWin) + '개. 구간 막대는 초과 파티션 ' + fmt(gOp) + '개를 사용률 구간으로 나눈 것입니다.',
       gpTop, gpSoon, gpSoonEmpty: gpSoon.length === 0,
+      snRule: '기준 7일 · 받은 시각 오후 12:52', snHero: fmt(oldN), snHeroText: '대 — 가장 오래된 스냅샷이 7일을 넘겼습니다 · 전체 VM ' + fmt(n) + '대 중 ' + pct(oldN, n),
+      snStats, snBands, snOld, snBig,
     };
   }
 }
