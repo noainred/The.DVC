@@ -18,7 +18,8 @@ import { unitText } from '../../unitText.js';
 import { useToolSummary } from '../../vms/insight-tools/useToolSummary.js';
 import { fmtN, fmtU, fmt1, gbText, corpNameOf, missingText, synthNote, barPct, toolLabel, gateOf } from '../../vms/insight-tools/toolSumText.js';
 import { PanelHead, PanelState, ToolLink, Gauge, TopTable, NameCell } from '../../vms/insight-tools/ToolParts.jsx';
-import { HYGIENE_CODE_ROWS, WARM, NEUTRAL } from '../../vms/insight-tools/vmToolPanelsText.js';
+import { HYGIENE_CODE_ROWS, WARM, NEUTRAL, contentionRule, contentionEmpty } from '../../vms/insight-tools/vmToolPanelsText.js';
+import { SCAN_OFF_NOTE } from '../../contention/contentionText.js';
 import { Hero, MiniStats, RankBars } from '../../insight/InsightParts.jsx';
 import { contentionHostView, hostHygieneView, forecastView, pathsView, dsLatOf, hostPanelsFor } from './hostToolPanelsText.js';
 
@@ -41,8 +42,7 @@ function ContentionPanel({ vcIds, rows }) {
   const v = contentionHostView(q.data, vcIds);
   const nameOf = corpNameOf(rows, q.data?.rows);
   const th = v?.th || {};
-  const every = v?.scan?.refreshMs > 0 ? `${Math.round(v.scan.refreshMs / 60000)}분마다 측정` : '';
-  const rule = [th.readyCrit != null ? `심각 = 대기 ${th.readyCrit}% 이상` : '', every].filter(Boolean).join(' · ');
+  const rule = contentionRule(v);
   const hMax = v ? v.hosts.reduce((a, x) => Math.max(a, Number(x.contended) || 0), 0) : 0;
   const dMax = v ? v.datastores.reduce((a, x) => Math.max(a, dsLatOf(x) || 0), 0) : 0;
   return (
@@ -52,12 +52,13 @@ function ContentionPanel({ vcIds, rows }) {
         {v && (
           <div className="vit-gp">
             <div className="vit-sum">
-              <Hero value={fmtN(v.hostsReadyCrit)} text={`대 — CPU 대기(Ready)가 ${unitText(th.readyCrit, '%')} 이상인 VM 이 있는 호스트입니다(연결된 호스트 ${fmtU(v.hostsConnected, '대')} 중)`} />
+              <Hero value={fmtN(v.hostsReadyCrit)} text={v.hostsReadyCrit == null ? (v.off ? '측정이 꺼져 있어 CPU 대기 판정이 없습니다(0 이 아닙니다)' : '측정한 VM 이 0대라 CPU 대기가 큰 호스트를 모릅니다(0 이 아닙니다)') : `대 — CPU 대기(Ready)가 ${unitText(th.readyCrit, '%')} 이상인 VM 이 있는 호스트입니다(연결된 호스트 ${fmtU(v.hostsConnected, '대')} 중)`} />
               <Stats items={[
                 { key: 'hc', tone: 's', big: `${fmtU(v.hostsContended, '대')}`, text: '경합 VM 이 있는 호스트(대기 · Co-stop 경고 포함)', title: '도구의 호스트 표에서 경합 VM 이 하나 이상인 호스트' },
                 { key: 'hd', tone: 'c', big: `${fmtU(v.hostsDisk, '대')}`, text: `디스크 지연이 큰 호스트(${unitText(th.diskWarn, 'ms')} 이상)`, title: '호스트가 보고한 디스크 지연이 경고 기준 이상' },
                 { key: 'ds', tone: 's', big: `${fmtU(v.dsSlow, '개')}`, text: '느린 데이터스토어', title: '읽기 · 쓰기 응답이 경고 기준 이상인 데이터스토어' },
               ]} />
+              {v.off && <div className="vit-note warn">{SCAN_OFF_NOTE}</div>}
               <div className="vit-note">연결된 호스트 {fmtU(v.hostsConnected, '대')} 중 {fmtU(v.hostsMeasured, '대')}를 측정했습니다 — 측정하지 못한 {fmtU(v.hostsNotMeasured, '대')}는 판정 밖입니다.{(v.unmatchedDs || 0) > 0 ? ` 이름을 모르는 데이터스토어 보고 ${fmtU(v.unmatchedDs, '건')}은 세지 않았습니다.` : ''}</div>
               {v.initial && <div className="vit-note warn">첫 측정 중입니다 — 수가 아직 다 차지 않았습니다.</div>}
               <ToolLink toolKey="contention" vcIds={vcIds}>‘{toolLabel('contention')}’ 에서 모두 보기 →</ToolLink>
@@ -66,7 +67,7 @@ function ContentionPanel({ vcIds, rows }) {
             <div className="vit-lst">
               <div className="vit-lh"><b>경합 · 지연이 큰 호스트</b><span>도구의 순서(경합 VM 수 → 가장 큰 대기 → 디스크 지연)</span></div>
               <TopTable label="경합 · 지연이 큰 호스트" cols={[{ label: '호스트', width: '46%' }, { label: '대기 · 이웃' }, { label: '경합 VM', cls: 'r', width: '72px' }]}
-                empty="이 범위에는 경합 · 지연 판정이 붙은 호스트가 없습니다."
+                empty={contentionEmpty(v, '이 범위에는 경합 · 지연 판정이 붙은 호스트가 없습니다.')}
                 rows={v.hosts.map((x, i) => ({ key: `${x.id}-${i}`, cells: [
                   { node: <NameCell name={x.name} sub={`${nameOf(x.vcenterId)}${x.cluster ? ` · ${x.cluster}` : ''} · VM ${fmtU(x.vmCount, '대')}`} />, sort: x.name },
                   { node: <Gauge w={barPct(x.contended, hMax)} bg={sevColor(x.diskSev || ((x.contended || 0) > 0 ? 'warn' : null))}
@@ -77,7 +78,7 @@ function ContentionPanel({ vcIds, rows }) {
             <div className="vit-lst">
               <div className="vit-lh"><b>느린 데이터스토어</b><span>읽기 · 쓰기 평균 중 큰 값 순</span></div>
               <TopTable label="느린 데이터스토어" cols={[{ label: '데이터스토어', width: '46%' }, { label: '읽기 · 쓰기' }, { label: '지연', cls: 'r', width: '72px' }]}
-                empty="이 범위에는 느림 판정이 붙은 데이터스토어가 없습니다."
+                empty={contentionEmpty(v, '이 범위에는 느림 판정이 붙은 데이터스토어가 없습니다.')}
                 rows={v.datastores.map((x, i) => ({ key: `${x.id}-${i}`, cells: [
                   { node: <NameCell name={x.name} sub={`${nameOf(x.vcenterId)}${x.worstHost ? ` · 가장 느린 호스트 ${x.worstHost}` : ''}`} />, sort: x.name },
                   { node: <Gauge w={barPct(dsLatOf(x), dMax)} bg={sevColor(x.sev)} note={`읽기 ${x.readAvg == null ? '—' : `${fmt1(x.readAvg)} ms`} · 쓰기 ${x.writeAvg == null ? '—' : `${fmt1(x.writeAvg)} ms`}`} />, sort: dsLatOf(x) },
@@ -111,7 +112,8 @@ function HygienePanel({ vcIds, rows }) {
               ]} />
               <div className="vit-note">정보 수준 판정은 여기서 뺐습니다 — 도구에서 봅니다.</div>
               {v.scan && v.scan.enabled === false && <div className="vit-note warn">호스트 구성 수집이 꺼져 있습니다 — 아래 수는 마지막으로 받은 값입니다.</div>}
-              {(v.partial || v.notReadVcenters > 0) && <div className="vit-note warn">값을 읽지 못한 법인이 있어 일부만 센 수입니다{v.notReadVcenters > 0 ? `(${fmtU(v.notReadVcenters, '곳')})` : ''}.</div>}
+              {v.partial && <div className="vit-note warn">값을 읽지 못한 법인이 있어 일부만 센 수입니다{v.notReadVcenters > 0 ? `(${fmtU(v.notReadVcenters, '곳')})` : ''}.</div>}
+              {v.notReadDisabled > 0 && <div className="vit-note">수집하지 않는(비활성) 법인 {fmtU(v.notReadDisabled, '곳')}은 이 수에 없습니다.</div>}
               {v.initial && <div className="vit-note warn">첫 수집 중입니다 — 수가 아직 다 차지 않았습니다.</div>}
               <ToolLink toolKey="host-hygiene" vcIds={vcIds}>‘{toolLabel('host-hygiene')}’ 에서 모두 보기 →</ToolLink>
               <Foot resp={q.data} missing={v.missing} nameOf={nameOf} />

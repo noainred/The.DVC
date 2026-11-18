@@ -87,7 +87,7 @@ export function pickByVc(list, vcIds) {
 /** 못 읽은 법인 중 합계를 하한으로 만드는 것이 있는가 — 서버 corelicense/analyze.js notReadPartialOf 와 같은 뜻(비활성 'disabled' 만이면 false · 시험이 대조). */
 export const notReadPartialIn = (list) => (Array.isArray(list) ? list : []).some((x) => x?.why !== 'disabled');
 /**
- * 고른 법인 범위의 못 읽음 — { list, partial, missing }. 못 읽은 법인은 행이 없어 pickRows 의 missing 에도 잡히므로
+ * 고른 법인 범위의 못 읽음 — { list, partial, nMissing(비활성 제외) · nDisabled(비활성), missing }. 못 읽은 법인은 행이 없어 pickRows 의 missing 에도 잡히므로
  * missing 에서는 뺀다(같은 법인을 '못 읽음' 과 '이 도구에 값 없음' 으로 두 번 세지 않는다). vcIds 가 비었으면 partial 은 응답 값 그대로.
  */
 export function notReadPicked(resp, vcIds, missing = []) {
@@ -95,7 +95,9 @@ export function notReadPicked(resp, vcIds, missing = []) {
   const picked = Array.isArray(vcIds) && vcIds.some((x) => String(x));
   const partial = picked ? notReadPartialIn(list) : resp?.partial === true;
   const nr = new Set(list.map((x) => String(x.vcenterId)));
-  return { list, partial, missing: (Array.isArray(missing) ? missing : []).filter((id) => !nr.has(String(id))) };
+  // dbg3221 7회차: 개수도 판정 코어(notReadPartialIn · 서버 isNotReadMissing)와 같은 구분 — 읽지 못함(비활성 제외) · 비활성(수집하지 않음)을 따로 센다.
+  const nDisabled = list.filter((x) => x?.why === 'disabled').length;
+  return { list, partial, nMissing: list.length - nDisabled, nDisabled, missing: (Array.isArray(missing) ? missing : []).filter((id) => !nr.has(String(id))) };
 }
 
 /**

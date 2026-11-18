@@ -32,21 +32,28 @@ export function contentionHostView(resp, vcIds) {
   const N = topNOf(resp);
   const cov = (key) => total(rows, (r) => r.coverage?.[key]);
   const connected = cov('hostsConnected'); const measured = cov('hostsMeasured');
+  //   측정이 꺼졌으면(scan.enabled === false) 판정 수는 전부 모름(null → '—'). 켜져 있어도 VM 을 하나도 측정하지 못했으면 VM 판정에서 나온
+  //   호스트 수(대기 심각 · 경합)를, 호스트를 하나도 측정하지 못했으면 호스트 보고값에서 나온 수(디스크 지연 · 느린 DS)를 모름으로 둔다 — '0' 이 아니다(dbg3221 9회차).
+  const off = resp.scan?.enabled === false;
+  const vmMeasured = cov('measured');
+  const vmNone = rows.length > 0 && (off || vmMeasured === 0);
+  const hostNone = rows.length > 0 && (off || measured === 0);
   return {
     empty: rows.length === 0,
     missing,
+    off, noValues: vmNone && hostNone,
     th: resp.thresholds && typeof resp.thresholds === 'object' ? resp.thresholds : {},
     initial: resp.initial === true,
     scan: resp.scan && typeof resp.scan === 'object' ? resp.scan : null,
-    hostsReadyCrit: total(rows, (r) => r.hostsReadyCrit),
-    hostsContended: total(rows, (r) => r.hostsContended),
-    hostsDisk: total(rows, (r) => r.kpi?.hostsDisk),
-    dsSlow: total(rows, (r) => r.kpi?.dsSlow),
+    hostsReadyCrit: vmNone ? null : total(rows, (r) => r.hostsReadyCrit),
+    hostsContended: vmNone ? null : total(rows, (r) => r.hostsContended),
+    hostsDisk: hostNone ? null : total(rows, (r) => r.kpi?.hostsDisk),
+    dsSlow: hostNone ? null : total(rows, (r) => r.kpi?.dsSlow),
     hostsConnected: connected, hostsMeasured: measured,
     hostsNotMeasured: connected != null && measured != null ? Math.max(0, connected - measured) : null,
     unmatchedDs: total(rows, (r) => r.unmatchedDs),
-    hosts: mergeTop(rows, (r) => r.top?.hosts, (a, b) => CMP_HOST(a, b) || byName(a, b), N),
-    datastores: mergeTop(rows, (r) => r.top?.datastores, (a, b) => descNull(dsLatOf(a), dsLatOf(b)) || byName(a, b), N),
+    hosts: off ? [] : mergeTop(rows, (r) => r.top?.hosts, (a, b) => CMP_HOST(a, b) || byName(a, b), N),
+    datastores: off ? [] : mergeTop(rows, (r) => r.top?.datastores, (a, b) => descNull(dsLatOf(a), dsLatOf(b)) || byName(a, b), N),
   };
 }
 
@@ -82,7 +89,8 @@ export function hostHygieneView(resp, vcIds) {
     // 인증서가 만료된 호스트 — 도구 요약과 같은 순서(지난 일수 큰 순 · 이름)
     certList: mergeTop(rows, (r) => r.top?.certExpired, (a, b) => descNull(a.days, b.days) || byName(a, b), N),
     partial: nr.partial,
-    notReadVcenters: nr.list.length,
+    notReadVcenters: nr.nMissing,   // dbg3221 7회차: 비활성(why 'disabled')은 ‘못 읽음’ 이 아니다 — 따로 notReadDisabled
+    notReadDisabled: nr.nDisabled,
     initial: resp.initial === true,
     scan: resp.scan && typeof resp.scan === 'object' ? resp.scan : null,
   };

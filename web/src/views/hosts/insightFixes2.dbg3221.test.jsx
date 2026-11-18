@@ -65,7 +65,7 @@ describe('① 도구 칸 · 패널 = 본체 합과 같은 법인(오래됨 · �
   it('소스: VmInsight · HostInsight 는 toolIdsOf 로 정하고, 패널 · 도구 칸에 toolCan 을 넘긴다', () => {
     for (const f of ['views/vms/VmInsight.jsx', 'views/hosts/HostInsight.jsx']) {
       const src = read(f);
-      expect(src).toMatch(/const toolIdsRaw = toolIdsOf\(\{ ids, region, rows, picked \}\)/);
+      expect(src).toMatch(/const toolIdsRaw = toolIdsOf\(\{ ids, region, rows, picked, loaded: !!data \}\)/);
       expect(src).not.toMatch(/const toolIds = ids\.length \|\|/);
       expect(src).not.toMatch(/ToolPanels vcIds=\{toolIds\}[^>]*canTool=\{canTool\}/);
       expect(src).toMatch(/ToolPanels vcIds=\{toolIds\}[^>]*canTool=\{toolCan\}/);

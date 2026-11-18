@@ -96,7 +96,7 @@ describe('소스 규약', () => {
   it('리뷰 정정 — 리전만 고른 범위에서는 도구 패널 · 확인할 것 도구 칸도 그 리전의 법인(이 응답의 줄)만 더한다', () => {
     const src = stripComments(fs.readFileSync(new URL('./VmInsight.jsx', import.meta.url), 'utf8'));
     // dbg3221 2회차: 규칙은 insightCore.toolIdsOf 하나(오래됨 · 모름 법인도 뺀다 — 순수 시험은 views/hosts/insightFixes2.dbg3221.test.jsx)
-    expect(src).toMatch(/const toolIdsRaw = toolIdsOf\(\{ ids, region, rows, picked \}\)/);
+    expect(src).toMatch(/const toolIdsRaw = toolIdsOf\(\{ ids, region, rows, picked, loaded: !!data \}\)/);
     expect(src).not.toMatch(/vcIds=\{ids\}/);                       // 도구 패널 · 과할당에 ids 를 그대로 넘기지 않는다
     expect(src).toMatch(/checkItems\(\{ vcIds: toolIds/);
   });

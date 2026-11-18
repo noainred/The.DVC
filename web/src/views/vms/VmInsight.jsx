@@ -59,9 +59,9 @@ export default function VmInsight({ mode = 'insight', filters = {}, scopeIds = n
   const canTool = (k) => canHubTool(k) && toolAllowed(k);
   // 리뷰 정정: 도구 요약(?summary=1)은 리전을 모른다(범위 안 법인 줄 전부) — 리전만 고르고 법인을 고르지 않았으면 이 응답의 법인(그 리전)으로 좁혀
   //   도구 패널 · ‘확인할 것’ 의 도구 칸이 위 수와 같은 범위를 더하게 한다(예전에는 리전과 무관하게 전 법인 합이었다).
-  //   dbg3221 2회차: 도구 칸 · 패널도 본체 합과 같은 법인 집합(오래됨 · 모름 법인 제외 — toolIdsOf). null = 고른 법인이 모두 오래됨 · 모름 → 도구 칸 · 패널을 그리지 않는다.
+  //   dbg3221 2회차: 도구 칸 · 패널도 본체 합과 같은 법인 집합(오래됨 · 모름 법인 제외 — toolIdsOf). null = 고른 법인이 모두 오래됨 · 모름이거나 응답에 고른 법인 줄이 0개(7회차) → 도구 칸 · 패널을 그리지 않는다.
   const picked = useMemo(() => pickRows(rows, ids), [rows, ids]);
-  const toolIdsRaw = toolIdsOf({ ids, region, rows, picked });
+  const toolIdsRaw = toolIdsOf({ ids, region, rows, picked, loaded: !!data });
   const toolIds = toolIdsRaw ?? [];
   const toolCan = toolIdsRaw == null ? () => false : canTool;
   // ‘과할당’ 보기에서는 확인할 것 · 지도를 그리지 않는다 — 캐시 없는 게스트 파티션 조회를 보내지 않는다.
@@ -93,7 +93,7 @@ export default function VmInsight({ mode = 'insight', filters = {}, scopeIds = n
 
   if (mode === 'over') {
     if (!canTool('waste')) return <div className="ins-note">이 계정에는 ‘Optimization’ 도구 권한이 없어 과할당 요약을 볼 수 없습니다 — 관리자에게 요청하세요(설정 › 사용자 관리 › 특수 기능 도구별 접근).</div>;
-    if (toolIdsRaw == null) return <div className="ins-note">고른 법인이 모두 값이 오래됐거나 아직 수집하지 못해 과할당 요약에 더할 법인이 없습니다.</div>;
+    if (toolIdsRaw == null) return <div className="ins-note">고른 범위에 법인이 없거나, 고른 법인이 모두 값이 오래됐거나 아직 수집하지 못해 과할당 요약에 더할 법인이 없습니다.</div>;
     return <div className="ins"><VmOverView vcIds={toolIds} rows={rows} canTool={canTool} /></div>;
   }
 

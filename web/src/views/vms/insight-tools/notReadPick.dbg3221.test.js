@@ -31,10 +31,11 @@ describe('dbg3221 — 못 읽은 법인 수는 고른 법인 안에서만 센다
     const ab = hostHygieneView(resp, ['a', 'b']);
     expect(ab.partial).toBe(true); expect(ab.notReadVcenters).toBe(1); expect(ab.missing).toEqual([]);
   });
-  it('비활성만 고르면 partial 은 false(서버 notReadPartialOf 와 같은 뜻) · 수는 센다', () => {
+  it('비활성만 고르면 partial 은 false(서버 notReadPartialOf 와 같은 뜻) · 수는 비활성으로 따로 센다(7회차)', () => {
     const resp = { rows: [VM_ROW('a')], notReadVcenters: [{ vcenterId: 'd', why: 'disabled' }, ...down], partial: true };
     const ad = hygieneView(resp, ['a', 'd']);
-    expect(ad.partial).toBe(false); expect(ad.notReadVcenters).toBe(1);
+    // 7회차: 예전에는 notReadVcenters 1 이라 패널이 ‘값을 읽지 못한 법인이 있어 일부만 센 수(1곳)’ 를 띄웠다 — 비활성은 못 읽음이 아니다
+    expect(ad.partial).toBe(false); expect(ad.notReadVcenters).toBe(0); expect(ad.notReadDisabled).toBe(1);
   });
   it('생성 · 삭제 이력 — notCollected 도 고른 법인 안에서만', () => {
     const resp = { rows: [LIFE_ROW('a'), LIFE_ROW('b')], notCollected: [{ vcenterId: 'b', why: 'edge' }] };
@@ -47,6 +48,6 @@ describe('dbg3221 — 못 읽은 법인 수는 고른 법인 안에서만 센다
     expect(pickByVc(undefined, ['a'])).toEqual([]);
     expect(notReadPartialIn([{ why: 'disabled' }])).toBe(false);
     expect(notReadPartialIn([{ why: 'stale' }])).toBe(true);
-    expect(notReadPicked({ partial: true }, [], ['x'])).toEqual({ list: [], partial: true, missing: ['x'] });
+    expect(notReadPicked({ partial: true }, [], ['x'])).toEqual({ list: [], partial: true, nMissing: 0, nDisabled: 0, missing: ['x'] });
   });
 });

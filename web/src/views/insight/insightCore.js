@@ -31,13 +31,16 @@ export function pickRows(rows, ids) {
 /**
  * 도구 칸 · 도구 패널이 더할 법인 id — 본체 합(pickRows used)과 **같은 법인 집합**(dbg3221 2회차: 오래됨 법인이 ‘확인할 것’ 의 도구 칸 · 패널 합에만 섞였다).
  *  · 응답이 아직 없으면 ids 그대로(이전 규칙).
+ *  · 응답은 왔는데(loaded) 고른 법인 줄이 0개면 null(dbg3221 7회차: 법인 0곳 리전에서 ids=[] 가 도구 쪽 ‘전부’ 로 읽혀
+ *    본체 합은 ‘—’ 인데 도구 칸 · 패널 · 과할당 보기만 사용자 범위 전 법인 합을 보였다).
  *  · 고른 법인(ids 가 비면 응답의 줄 전부) 중 오래됨 · 모름이 없으면 이전 규칙 그대로 — ids, 리전만 골랐으면 응답의 법인(그 리전) · 둘 다 없으면 [](= 도구 응답 전부).
  *  · 오래됨 · 모름이 있으면 used 의 id 만. used 가 비면 null(= 더할 법인이 없다 — 도구 쪽에서 [] 는 ‘전부’ 라는 뜻이라 쓰면 안 된다).
  * @returns {string[]|null}
  */
-export function toolIdsOf({ ids = [], region = '', rows = [], picked = null } = {}) {
+export function toolIdsOf({ ids = [], region = '', rows = [], picked = null, loaded = false } = {}) {
   const list = Array.isArray(rows) ? rows : [];
   const want = Array.isArray(ids) ? ids : [];
+  if (loaded && (!list.length || (picked && !picked.picked.length))) return null;
   if (!list.length || !picked) return want;
   if (!picked.stale.length && !picked.unknown.length) return want.length || !region ? want : list.map((r) => String(r.id));
   return picked.used.length ? picked.used.map((r) => String(r.id)) : null;

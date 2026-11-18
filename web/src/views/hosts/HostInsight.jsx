@@ -67,8 +67,8 @@ export default function HostInsight({ filters = {}, scopeIds = null, scopeRegion
   // 도구 권한 — 허브 도구 칸과 같은 판정(toolsFor — 카탈로그 adminOnly 는 관리자만) + 서버 집행 축(toolAllowed). 없으면 묶음 · 패널을 숨기고 요청도 보내지 않는다.
   const canTool = (k) => toolsFor([[k, k]]).length > 0 && toolAllowed(k);
   // 도구 요약(?summary=1)은 리전을 모른다 — 리전만 고르고 법인을 고르지 않았으면 이 응답의 법인(그 리전)으로 좁힌다(VM 분석과 같은 규칙).
-  //   dbg3221 2회차: 도구 패널도 본체 합과 같은 법인 집합(오래됨 · 모름 법인 제외 — toolIdsOf). null = 고른 법인이 모두 오래됨 · 모름 → 도구 패널을 그리지 않는다.
-  const toolIdsRaw = toolIdsOf({ ids, region, rows, picked });
+  //   dbg3221 2회차: 도구 패널도 본체 합과 같은 법인 집합(오래됨 · 모름 법인 제외 — toolIdsOf). null = 고른 법인이 모두 오래됨 · 모름이거나 응답에 고른 법인 줄이 0개(7회차) → 도구 패널을 그리지 않는다.
+  const toolIdsRaw = toolIdsOf({ ids, region, rows, picked, loaded: !!data });
   const toolIds = toolIdsRaw ?? [];
   const toolCan = toolIdsRaw == null ? () => false : canTool;
   const setIds = (next) => { if (onScopeIds) onScopeIds(normScopeIds(next)); };
@@ -298,8 +298,8 @@ function DistPanels({ s, used, th, access, tops, esxi, nameOf, onOpenCorp }) {
         <section className="ins-panel" aria-label="통합 비율과 VM 밀도">
           <PanelHead title="통합 비율 · VM 밀도" hint="호스트에 VM 을 얼마나 실었나(템플릿 제외)" />
           <MiniStats stats={[
-            { key: 'r', value: am.ratioOne, text: `vCPU : 물리 코어${am.vcpuNote ? ` — ${am.vcpuNote}` : ''}`, tip: `VM 에 준 vCPU ${am.vcpuText} ÷ 물리 코어 ${fmtN(s.cores)}${(numOrNull(s.capUnknown) ?? 0) > 0 ? ' — 용량 모름 호스트가 있어 비율을 내지 않습니다' : ''}${am.vcpuNote ? ` — ${am.vcpuNote}(읽은 VM 만의 합 · 최소값)` : ''}` },
-            { key: 'm', value: am.ram, text: `메모리 — VM 에 준 것 ÷ 호스트 총량${am.memNote ? ` — ${am.memNote}` : ''}`, tip: `VM 에 준 메모리 ${am.vmMemText} ÷ 호스트 메모리 ${gbText(mbToGb(s.memTotalMB))}${am.memNote ? ` — ${am.memNote}(읽은 VM 만의 합 · 최소값)` : ''}` },
+            { key: 'r', value: am.ratioOne, text: `vCPU : 물리 코어${am.vcpuExclNote ? ` — ${am.vcpuExclNote}` : ''}${am.vcpuNote ? ` — ${am.vcpuNote}` : ''}`, tip: `VM 에 준 vCPU ${am.vcpuText} ÷ 물리 코어 ${fmtN(s.cores)}${am.vcpuExclNote ? ` — ${am.vcpuExclNote}(그 법인의 vCPU · 코어는 비율의 분자 · 분모 양쪽에서 뺍니다)` : ''}${(numOrNull(s.capUnknown) ?? 0) > 0 ? ' — 용량 모름 호스트가 있어 비율을 내지 않습니다' : ''}${am.vcpuNote ? ` — ${am.vcpuNote}(읽은 VM 만의 합 · 최소값)` : ''}` },
+            { key: 'm', value: am.ram, text: `메모리 — VM 에 준 것 ÷ 호스트 총량${am.memExclNote ? ` — ${am.memExclNote}` : ''}${am.memNote ? ` — ${am.memNote}` : ''}`, tip: `VM 에 준 메모리 ${am.vmMemText} ÷ 호스트 메모리 ${gbText(mbToGb(s.memTotalMB))}${am.memExclNote ? ` — ${am.memExclNote}(그 법인의 할당 · 메모리는 비율의 분자 · 분모 양쪽에서 뺍니다)` : ''}${am.memNote ? ` — ${am.memNote}(읽은 VM 만의 합 · 최소값)` : ''}` },
             { key: 'h', value: gbText(headGB), text: `메모리 여유${eq != null ? ` — 호스트 약 ${eq}대분` : ''}`,
               tip: `‘법인별’ 보기의 여유(headroom — 정격 × ${unitText(th.headroomPct, '%')} − 사용 중) 합${avgGB != null ? ` ÷ 이 범위 호스트 한 대의 평균 메모리 ${gbText(avgGB)}` : ''}${(numOrNull(s.headroom?.excluded) ?? 0) > 0 ? ` · 여유 계산에서 뺀 호스트 ${fmtU(s.headroom.excluded, '대')}` : ''}` },
           ]} />

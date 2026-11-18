@@ -53,16 +53,28 @@ export const HOST_STAT_KEYS = Object.freeze([
 /**
  * 비율 — 한 법인이면 서버 값 그대로(/hosts/corp 와 같은 값), 여럿이면 서버 hostCorp.ratios 와 같은 규칙으로 합에서 다시:
  * 용량 모름 호스트가 하나라도 있으면 null(분모가 모자란 비율을 지어내지 않는다) · 분자를 못 읽었으면 null.
+ * 할당을 **전부** 못 읽은 법인(서버 vcpu · memVmMB null — vmSums.vmAllocOf)은 그 비율의 분자 · 분모(cores · memTotalMB) 양쪽에서 뺀다
+ *   (dbg3221 8회차 — 예전: 분자에서만 빠지고 코어 · 메모리는 분모에 남아 그 법인의 할당을 0 으로 더한 것과 같았다 → ‘법인별’ 요약 hostCorpText.corpKpis 와 비율이 갈렸다.
+ *   corpKpis v3.19.1 과 같은 규칙). 뺀 법인 수(vcpuRatioExcl · memRatioExcl)와 비율에 든 법인의 못 읽은 VM 수(vcpuRatioUnknown · memRatioUnknown)를 함께 낸다.
  */
 export function ratiosOf(used, s) {
   const list = Array.isArray(used) ? used : [];
-  if (list.length === 1) return { vcpuPerCore: numOrNull(list[0].vcpuPerCore), ramPct: numOrNull(list[0].ramPct) };
+  const part = (valKey, unkKey) => {
+    const inc = list.filter((r) => numOrNull(r?.[valKey]) != null);
+    return { inc, excl: list.length - inc.length, unknown: inc.reduce((a, r) => a + (numOrNull(r?.[unkKey]) ?? 0), 0) };
+  };
+  const pv = part('vcpu', 'vcpuUnknown'); const pm = part('memVmMB', 'memUnknown');
+  const marks = { vcpuRatioExcl: pv.excl, vcpuRatioUnknown: pv.unknown, memRatioExcl: pm.excl, memRatioUnknown: pm.unknown };
+  if (list.length === 1) return { vcpuPerCore: numOrNull(list[0].vcpuPerCore), ramPct: numOrNull(list[0].ramPct), ...marks };
   const ok = numOrNull(s?.capUnknown) === 0 && numOrNull(s?.cores) != null;
-  const cores = numOrNull(s?.cores); const vcpu = numOrNull(s?.vcpu);
-  const mem = numOrNull(s?.memTotalMB); const vmMem = numOrNull(s?.memVmMB);
+  // 비율에 넣는 법인의 분모 합 — 그중 하나라도 분모를 못 읽었으면 null(모르는 값을 0 으로 더하지 않는다).
+  const sumOf = (rows, k) => (rows.some((r) => numOrNull(r?.[k]) == null) ? null : rows.reduce((a, r) => a + numOrNull(r[k]), 0));
+  const cores = sumOf(pv.inc, 'cores'); const vcpu = sumOf(pv.inc, 'vcpu');
+  const mem = sumOf(pm.inc, 'memTotalMB'); const vmMem = sumOf(pm.inc, 'memVmMB');
   return {
-    vcpuPerCore: ok && vcpu != null && cores > 0 ? Math.round((vcpu / cores) * 10) / 10 : null,
-    ramPct: ok && vmMem != null && mem != null && mem > 0 ? Math.round((vmMem / mem) * 100) : null,
+    vcpuPerCore: ok && pv.inc.length && vcpu != null && cores > 0 ? Math.round((vcpu / cores) * 10) / 10 : null,
+    ramPct: ok && pm.inc.length && vmMem != null && mem != null && mem > 0 ? Math.round((vmMem / mem) * 100) : null,
+    ...marks,
   };
 }
 
@@ -94,16 +106,22 @@ export function allocMarks(s) {
   const vcpuPartial = vu > 0 && numOrNull(s?.vcpu) != null;
   const memPartial = mu > 0 && numOrNull(s?.memVmMB) != null;
   const ratio = numOrNull(s?.vcpuPerCore); const ram = numOrNull(s?.ramPct);
+  // 비율의 ‘이상’ 은 비율에 든 법인의 못 읽은 VM 으로만 판정한다(할당을 전부 못 읽어 비율에서 뺀 법인은 ‘N곳 제외’ 로 따로 — ratiosOf). 표지가 없는 입력이면 합 기준.
+  const ratioVu = numOrNull(s?.vcpuRatioUnknown) ?? vu; const ratioMu = numOrNull(s?.memRatioUnknown) ?? mu;
+  const vEx = numOrNull(s?.vcpuRatioExcl) ?? 0; const mEx = numOrNull(s?.memRatioExcl) ?? 0;
   const up = (p) => (p ? ' 이상' : '');
   return {
     vcpuPartial, memPartial,
     vcpuText: `${fmtN(s?.vcpu)}${up(vcpuPartial)}`,
-    ratio: ratio == null ? '—' : `${ratio}${up(vcpuPartial)}`,
-    ratioOne: ratio == null ? '—' : `${ratio} : 1${up(vcpuPartial)}`,
+    ratio: ratio == null ? '—' : `${ratio}${up(ratioVu > 0)}`,
+    ratioOne: ratio == null ? '—' : `${ratio} : 1${up(ratioVu > 0)}`,
     vmMemText: `${gbText(mbToGb(s?.memVmMB))}${up(memPartial)}`,
-    ram: ram == null ? '—' : `${ram}%${up(memPartial)}`,
+    ram: ram == null ? '—' : `${ram}%${up(ratioMu > 0)}`,
     vcpuNote: vu > 0 ? `vCPU 못 읽은 VM ${fmtU(vu, '대')}` : '',
     memNote: mu > 0 ? `메모리 할당 못 읽은 VM ${fmtU(mu, '대')}` : '',
+    // 비율에서 뺀 법인(값이 있을 때만 — 비율이 ‘—’ 면 뺄 비율이 없다). ‘곳’ = 법인(‘법인별’ 요약 corpKpis 와 같은 말).
+    vcpuExclNote: ratio != null && vEx > 0 ? `vCPU 못 읽은 ${fmtU(vEx, '곳')} 제외` : '',
+    memExclNote: ram != null && mEx > 0 ? `메모리 할당 못 읽은 ${fmtU(mEx, '곳')} 제외` : '',
   };
 }
 
@@ -140,9 +158,9 @@ export function kpiView(s, corpN) {
       sub: `${shareText(h.connected, total)} · 점검 ${fmtN(h.maint)} · 끊김 ${fmtN(h.down)}${unkText(h.unread, '사용률 못 읽음')}`, tip: 'vCenter 에 연결된 호스트 — 사용률 못 읽음은 연결됐는데 CPU · 메모리 사용률을 읽지 못한 호스트' },
     { key: 'att', label: '확인 대상', value: fmtN(s?.attention), tone: (numOrNull(s?.attention) ?? 0) > 0 ? 'warn' : '',
       sub: `과부하 ${fmtN(s?.overloaded)} · 끊김 ${fmtN(h.down)} · 점검 ${fmtN(h.maint)}`, tip: '점검 중 · 끊김 · 과부하 호스트(‘목록’ 의 확인 대상과 같은 판정)' },
-    { key: 'cores', label: '물리 코어', value: fmtN(s?.cores), sub: `vCPU ${am.vcpuText} · 코어 하나에 ${am.ratio}${unkText(s?.vcpuUnknown, 'vCPU 모름')}${unkText(s?.capUnknown, '용량 모름')}`,
+    { key: 'cores', label: '물리 코어', value: fmtN(s?.cores), sub: `vCPU ${am.vcpuText} · 코어 하나에 ${am.ratio}${am.vcpuExclNote ? ` · ${am.vcpuExclNote}` : ''}${unkText(s?.vcpuUnknown, 'vCPU 모름')}${unkText(s?.capUnknown, '용량 모름')}`,
       tip: '호스트의 물리 코어 합(용량을 읽은 호스트만) · VM 에 준 vCPU(템플릿 제외)와의 비율 — vCPU 를 못 읽은 VM 이 있으면 읽은 VM 만의 합이라 ‘이상’' },
-    { key: 'mem', label: '메모리', value: gbText(memGB), sub: `VM 에 준 것 ${am.vmMemText} · ${am.ram}${unkText(s?.memUnknown, '할당 모름')}`,
+    { key: 'mem', label: '메모리', value: gbText(memGB), sub: `VM 에 준 것 ${am.vmMemText} · ${am.ram}${am.memExclNote ? ` · ${am.memExclNote}` : ''}${unkText(s?.memUnknown, '할당 모름')}`,
       tip: '호스트 메모리 합(용량을 읽은 호스트만) · VM 에 준 메모리(템플릿 제외)와의 비율 — 할당을 못 읽은 VM 이 있으면 읽은 VM 만의 합이라 ‘이상’' },
     { key: 'power', label: '전력', value: kwText(pw),
       sub: pwN > 0 ? `호스트 한 대 평균 ${fmtN(pw.sum / pwN)} W · 읽은 호스트 ${fmtU(pwN, '대')}` : '전력을 보고한 호스트가 없습니다', tip: '호스트가 보고한 지금 전력의 합(0 보다 큰 값만 — 센서가 없으면 빠집니다)' },

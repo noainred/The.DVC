@@ -233,10 +233,18 @@ export function dayText(ts) {
   return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-/** 생성 · 삭제 이력(vm-lifecycle 요약) — 합 · 종류별 · 날마다(같은 날끼리 더한다). */
+/**
+ * 생성 · 삭제 이력(vm-lifecycle 요약) — 합 · 종류별 · 날마다(같은 날끼리 더한다).
+ * dbg3221 8회차: 서버는 이벤트를 수집하지 않는 법인(notCollected — 엣지 위임 · 비활성 · 점검 중)에도 줄을 싣는다(쌓인 이벤트가 없으면 0 줄 · vmLifecycle.js summary).
+ *   그 줄은 합 · 종류별 · 날마다에서 **뺀다**(못 읽은 값은 0 이 아니다 — ‘세지 않았습니다’ 안내와 계산이 맞게). 고른 법인이 모두 수집 밖이면
+ *   수는 null(‘—’)이고 allNotCollected 로 밝힌다(화면은 ‘기록이 없다’ 고 단정하지 않는다).
+ */
 export function lifeView(resp, vcIds) {
   if (!resp || !Array.isArray(resp.rows)) return null;
-  const { rows, missing } = pickRows(resp.rows, vcIds);
+  const { rows: picked, missing } = pickRows(resp.rows, vcIds);
+  const nc = pickByVc(resp.notCollected, vcIds);   // dbg3221: 고른 법인 안의 수만(서버 목록은 사용자 범위 전체)
+  const ncIds = new Set(nc.map((x) => String(x.vcenterId ?? '')));
+  const rows = picked.filter((r) => !ncIds.has(String(r.vcenterId ?? '')));
   const byKind = sumObjects(rows, (r) => r.byKind);
   const days = new Map();
   for (const r of rows) {
@@ -251,9 +259,10 @@ export function lifeView(resp, vcIds) {
     }
   }
   const series = [...days.values()].sort((a, b) => a.day - b.day);
-  const notCollected = pickByVc(resp.notCollected, vcIds).length;   // dbg3221: 고른 법인 안의 수만(서버 목록은 사용자 범위 전체)
+  const notCollected = nc.length;
   return {
-    empty: rows.length === 0,
+    empty: picked.length === 0,
+    allNotCollected: picked.length > 0 && rows.length === 0,
     missing,
     days: numOrNull(resp.days),
     added: total(rows, (r) => r.added), removed: total(rows, (r) => r.removed), net: total(rows, (r) => r.net),
@@ -275,23 +284,41 @@ export function diskLatOf(v) {
   return Math.max(r ?? -Infinity, w ?? -Infinity);
 }
 
+/** 경합 요약 패널의 머리 규칙 줄 — 측정이 꺼져 있으면 'N분마다 측정' 을 싣지 않는다(dbg3221 9회차). VM · Hypervisor 분석 패널이 함께 쓴다. */
+export function contentionRule(v) {
+  const th = v?.th || {};
+  const every = !v?.off && v?.scan?.refreshMs > 0 ? `${Math.round(v.scan.refreshMs / 60000)}분마다 측정` : '';
+  return [th.readyCrit != null ? `심각 = 대기 ${th.readyCrit}% 이상` : '', every].filter(Boolean).join(' · ');
+}
+/** 경합 요약 패널 목록의 빈 줄 문구 — 꺼짐 · 측정 0 이면 '없습니다' 가 아니라 판정하지 않았다고 쓴다. */
+export function contentionEmpty(v, normal) {
+  if (v?.off) return '측정이 꺼져 있어 판정하지 않습니다.';
+  if (v?.noValues) return '측정한 값이 없어 판정하지 않았습니다.';
+  return normal;
+}
+
 export function contentionView(resp, vcIds) {
   if (!resp || !Array.isArray(resp.rows)) return null;
   const { rows, missing } = pickRows(resp.rows, vcIds);
   const N = topNOf(resp);
-  const k = (key) => total(rows, (r) => r.kpi?.[key]);
   const c = (key) => total(rows, (r) => r.coverage?.[key]);
+  //   측정이 꺼졌거나(scan.enabled === false) 측정한 VM 이 0대면 판정 수는 '0' 이 아니라 모름(null → '—') — guestPartView noValues 와 같은 규칙(dbg3221 9회차).
+  const off = resp.scan?.enabled === false;
+  const measured = c('measured');
+  const noValues = rows.length > 0 && (off || measured === 0);
+  const k = (key) => (noValues ? null : total(rows, (r) => r.kpi?.[key]));
   return {
     empty: rows.length === 0,
     missing,
+    off, noValues,
     th: resp.thresholds && typeof resp.thresholds === 'object' ? resp.thresholds : {},
     initial: resp.initial === true,
     scan: resp.scan && typeof resp.scan === 'object' ? resp.scan : null,
     readyCrit: k('readyCrit'), readyWarn: k('readyWarn'), costop: k('costop'), diskCrit: k('diskCrit'), diskWarn: k('diskWarn'),
     hostsDisk: k('hostsDisk'), dsSlow: k('dsSlow'),
-    poweredOn: c('poweredOn'), measured: c('measured'), notMeasured: c('notMeasured'), stale: c('stale'),
-    ready: mergeTop(rows, (r) => r.top?.ready, (a, b) => descNull(a.readyAvg, b.readyAvg) || descNull(a.readyMax, b.readyMax) || byName(a, b), N),
-    disk: mergeTop(rows, (r) => r.top?.disk, (a, b) => descNull(diskLatOf(a), diskLatOf(b)) || descNull(a.diskMax, b.diskMax) || byName(a, b), N),
+    poweredOn: c('poweredOn'), measured, notMeasured: c('notMeasured'), stale: c('stale'),
+    ready: off ? [] : mergeTop(rows, (r) => r.top?.ready, (a, b) => descNull(a.readyAvg, b.readyAvg) || descNull(a.readyMax, b.readyMax) || byName(a, b), N),
+    disk: off ? [] : mergeTop(rows, (r) => r.top?.disk, (a, b) => descNull(diskLatOf(a), diskLatOf(b)) || descNull(a.diskMax, b.diskMax) || byName(a, b), N),
   };
 }
 
@@ -329,7 +356,8 @@ export function hygieneView(resp, vcIds) {
     questions: mergeTop(rows, (r) => r.top?.question, (a, b) => byName(a, b), N),
     partial: nr.partial,
     settingsUnreadable: resp.settingsUnreadable === true,
-    notReadVcenters: nr.list.length,
+    notReadVcenters: nr.nMissing,   // dbg3221 7회차: 비활성(why 'disabled')은 ‘못 읽음’ 이 아니다 — 따로 notReadDisabled
+    notReadDisabled: nr.nDisabled,
     initial: resp.initial === true,
   };
 }
