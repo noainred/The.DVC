@@ -1,6 +1,18 @@
 {
   "notes": [
     {
+      "version": "3.20.1",
+      "date": "2026-11-18",
+      "title": "전 vCenter 요약 — vCPU · 메모리를 못 읽은 VM 을 0 으로 더하던 합계 수정(미상 VM 수 표시 · 공개 API 필드 추가)",
+      "notes": [
+        "‘전체 통합 합계’ 화면의 할당 vCPU · RAM 합(전체 · OS 별 · vCenter 별)이 vCPU 수나 메모리 크기를 읽지 못한 VM 을 0 으로 더하던 것을 고쳤습니다 — 합은 값을 읽은 VM 만 더하고, 뺀 VM 수를 값 옆에 ‘미상 N’ 으로 보여 줍니다.",
+        "VM 을 하나도 읽지 못한 vCenter · OS 는 할당이 0 이 아니라 ‘—’ 로 나오고, 가상화율도 ‘0 : 1 · 정상’ 대신 판정하지 않습니다(배지에 마우스를 올리면 이유를 보여 줍니다).",
+        "일부 VM 만 못 읽었을 때 ‘vCPU : 물리코어’ · ‘메모리 : 물리RAM’ 비율 앞에 ‘≥’ 를 붙입니다(읽은 값만으로 낸 최소값).",
+        "공개 API ‘/inventory/summary’ 에 vmVcpuUnknown · vmRamUnknown(읽지 못해 vmVcpu · vmRamMB 에서 뺀 VM 수)을 추가했습니다 — 기존 필드의 값과 형식은 그대로입니다.",
+        "모든 VM 을 정상으로 읽은 환경에서는 화면 · API 의 숫자가 이전과 같습니다."
+      ]
+    },
+    {
       "version": "3.20.0",
       "date": "2026-11-18",
       "title": "바로가기 복수 선택 — 여러 법인을 함께 골라 vCenter · Virtual Machine · Hypervisor 세 탭을 그 합으로",

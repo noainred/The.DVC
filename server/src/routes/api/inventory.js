@@ -5,7 +5,7 @@ import { scopedVcenterIds, inUserScope, writeScopedVcenterIds } from '../../auth
 import { store, usageReadable, dsUsageReadable, dsUsedOf, dsUsageUnknownOf, hostCapacityKnown, siteInventoryStale } from '../../store.js'; // v2.771(R6-F3-2) 용량 판정도 store 하나 · v2.915 낡은 값 판정
 import { platformSummaryOf } from '../../inventory/platformSummary.js'; // v2.915 가상화 플랫폼 허브
 import { numOrNull } from '../../util/numOrNull.js';
-import { vmSumsOf, vmAllocOf } from '../../vcenter/vmSums.js'; // v3.19.0 /hosts 요약 VM 할당 합 — 점검 표 · 법인별 · 호스트 엑셀과 같은 판정 코어(v3.19.1 '전부 못 읽음' 도 그 모듈이)
+import { vmSumsOf, vmAllocOf, newVmSum, vmSumAdd } from '../../vcenter/vmSums.js'; // v3.19.0 /hosts 요약 VM 할당 합 — 점검 표 · 법인별 · 호스트 엑셀과 같은 판정 코어(v3.19.1 '전부 못 읽음' 도 그 모듈이 · v3.19.2 /summary 합도)
 import { clusterCountOf } from '../../clustercfg/analyze.js'; // v2.743 LEFT-07 — 클러스터 개수(묶음 키)
 const pctOrNullR = (u, t) => (t > 0 ? Math.round((u / t) * 100) : null);
 import { browseDatastore, onDemandErrorFields } from '../../vcenter/dsBrowse.js';
@@ -195,8 +195,10 @@ api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
   const dsUsageUnknownCount = datastores.filter(dsUsageUnknownOf).length;
 
   // VM allocation totals (what is provisioned, regardless of host capacity)
-  const vmVcpu = sum(vms, (v) => v.cpuCount);
-  const vmRamMB = sum(vms, (v) => v.memMB);
+  // v3.19.2: 합은 판정 코어(vcenter/vmSums.js) — 못 읽은 cpuCount · memMB(null · '')는 0 으로 더하지 않고 따로 센다(vcpuUnknown · ramUnknown).
+  //   VM 이 있는데 하나도 못 읽었으면 합은 0 이 아니라 null(vmAllocOf). 이 합은 **템플릿 포함**이다(전 VM 인벤토리 — 공개 API vmVcpu · vmRamMB 와 같은 값).
+  const vmAllSum = vmSumsOf(vms, { includeTemplates: true });
+  const { vcpu: vmVcpu, memMB: vmRamMB } = vmAllocOf(vmAllSum);
   // v2.771(점검 R6-F3-2): 용량(코어·CPU·메모리 총량)을 못 읽은 호스트(REST 폴백 — store.hostCapacityKnown)가 있으면 분모는 읽은 호스트만,
   //   분자는 전 VM 이라 vCPU:코어·RAM 오버커밋이 부푼다(실측 2:1·50% → 4·100%). 형제 /tools/capacity·compareMatrix(C2-06)와 같은 규칙 —
   //   비율은 null('—')이고 뺀 호스트 수를 hostsCapacityUnknown 으로 싣는다. 합계(cpuCores·memTotalGB)는 공개 API 대조 계약이라 그대로 둔다.
@@ -220,10 +222,9 @@ api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
   for (const v of osVms) {
     const f = osFamily(v.guestOS);
     osDist[f] = (osDist[f] || 0) + 1;
-    const a = osAlloc[f] || (osAlloc[f] = { name: f, vms: 0, vcpu: 0, ramMB: 0, diskGB: 0, storageUnknown: 0 });
+    const a = osAlloc[f] || (osAlloc[f] = { name: f, vms: 0, sum: newVmSum(), diskGB: 0, storageUnknown: 0 });
     a.vms += 1;
-    a.vcpu += v.cpuCount || 0;
-    a.ramMB += v.memMB || 0;
+    vmSumAdd(a.sum, v);                                // v3.19.2: 못 읽은 cpuCount · memMB 는 합에서 빼고 센다(템플릿은 위 kind 필터가 정한다)
     const sg = numOrNull(v.storageGB);                 // v2.727(C-01): null 은 합에서 빼고 센다
     if (sg == null) a.storageUnknown += 1; else a.diskGB += sg;
   }
@@ -234,17 +235,18 @@ api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
   // vCenter마다 hosts/vms/datastores 전체를 재필터하면 O(vCenter×N)이라 28×5,800으로 커진다.
   // 호스트/VM/DS를 vcenterId 기준으로 '1회' 그룹핑(O(N))한 뒤 누적한다(롤업 규칙).
   const acc = new Map(); // vcId -> { hosts, vms, vmsOn, cpuCores, memMB, dsCapGB, dsUnknown, vcpu, ramMB, provGB, powerW }
-  const bucket = (id) => { let b = acc.get(id); if (!b) { b = { hosts: 0, vms: 0, vmsOn: 0, cpuCores: 0, memMB: 0, dsCapGB: 0, dsCapAllGB: 0, dsUnknown: 0, vcpu: 0, ramMB: 0, provGB: 0, storageUnknown: 0, powerW: 0, powerN: 0, capUnknown: 0 }; acc.set(id, b); } return b; };
+  const bucket = (id) => { let b = acc.get(id); if (!b) { b = { hosts: 0, vms: 0, vmsOn: 0, cpuCores: 0, memMB: 0, dsCapGB: 0, dsCapAllGB: 0, dsUnknown: 0, vm: newVmSum(), provGB: 0, storageUnknown: 0, powerW: 0, powerN: 0, capUnknown: 0 }; acc.set(id, b); } return b; };
   // 2차 공통 기능 점검 10회차: vCenter 별로도 전체 합계(v2.771 R6-F3-2 hostsCapacityUnknown)와 같은 판정으로 '용량을 못 읽은 호스트' 를 센다.
   //   예전엔 그 수를 싣지 않아 Summary 의 vCenter 별 가상화율(할당 ÷ 물리)이 분모만 빠진 부분 합으로 부풀었다. 합(cpuCores · memTotalGB)은 예전 그대로(공개 API 대조 계약).
   for (const h of hosts) { const b = bucket(h.vcenterId); b.hosts++; b.cpuCores += h.cpuCores || 0; b.memMB += h.memTotalMB || 0; if (!hostCapacityKnown(h)) b.capUnknown++; if (h.powerWatts > 0) { b.powerW += h.powerWatts; b.powerN++; } }
-  // v2.727(C-01): provGB 는 읽은 VM 만, 못 읽은 수는 storageUnknown.
-  for (const v of vms) { const b = bucket(v.vcenterId); b.vms++; if (v.powerState === 'POWERED_ON') b.vmsOn++; b.vcpu += v.cpuCount || 0; b.ramMB += v.memMB || 0; const sg = numOrNull(v.storageGB); if (sg == null) b.storageUnknown++; else b.provGB += sg; }
+  // v2.727(C-01): provGB 는 읽은 VM 만, 못 읽은 수는 storageUnknown. v3.19.2: vCPU · 메모리도 같은 규칙 — 코어 vmSumAdd(못 읽은 수는 b.vm.vcpuUnknown · memUnknown).
+  for (const v of vms) { const b = bucket(v.vcenterId); b.vms++; if (v.powerState === 'POWERED_ON') b.vmsOn++; vmSumAdd(b.vm, v); const sg = numOrNull(v.storageGB); if (sg == null) b.storageUnknown++; else b.provGB += sg; }
   // v2.631(AX2-01): vCenter 카드(롤업 storageTotalTB)와 같은 기준 — 사용량 미상 DS 는 용량에서 빼고 개수를 싣는다.
   //   v2.632(AX1-2632-04·WEB2632-01): 설치 용량 전체(미상 DS 포함)는 storageTotalTBAll 로 따로 싣는다 — 프로비저닝 비교는 그 값을 쓴다.
   for (const d of datastores) { const b = bucket(d.vcenterId); b.dsCapAllGB += d.capacityGB || 0; if (dsUsageReadable(d)) b.dsCapGB += d.capacityGB || 0; else if (dsUsageUnknownOf(d)) b.dsUnknown++; }
   const byVcenter = vcenters.map((vc) => {
     const b = acc.get(vc.id) || bucket(vc.id);
+    const vmAl = vmAllocOf(b.vm);                         // v3.19.2: VM 이 있는데 하나도 못 읽었으면 null(0 이 아니다)
     return {
       id: vc.id, name: vc.name, region: vc.location?.region, status: vc.status,
       hosts: b.hosts,
@@ -256,8 +258,10 @@ api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
       storageTotalTB: round(b.dsCapGB / 1024, 1),
       storageTotalTBAll: round(b.dsCapAllGB / 1024, 1),   // 미상 DS 포함 설치 용량(프로비저닝 비교용)
       datastoresUsageUnknown: b.dsUnknown,
-      vcpuAllocated: b.vcpu,
-      ramAllocatedGB: round(b.ramMB / 1024),
+      vcpuAllocated: vmAl.vcpu,                           // 읽은 VM 만의 합(vcpuUnknown > 0 이면 부분 합 — 최소값) · 전부 못 읽으면 null
+      ramAllocatedGB: vmAl.memMB == null ? null : round(vmAl.memMB / 1024),
+      vcpuUnknown: b.vm.vcpuUnknown,                      // v3.19.2: vCPU 를 못 읽어 vcpuAllocated 에서 뺀 VM 수(템플릿 포함)
+      ramUnknown: b.vm.memUnknown,                        // v3.19.2: 메모리를 못 읽어 ramAllocatedGB 에서 뺀 VM 수
       provisionedTB: round(b.provGB / 1024, 1),
       vmStorageUnknown: b.storageUnknown,                 // v2.727(C-01): 용량을 못 읽어 provisionedTB 에서 뺀 VM 수
       // v2.720(감사 B1-04): 전력을 보고한 호스트가 0대면 0 kW 가 아니라 null(측정 없음) — store.powerOf 와 같은 규칙.
@@ -320,26 +324,31 @@ api.get('/summary', (req, res) => memoJson(req, res, 'summary', (snap) => {
       annualMwh: round((powerWatts * 24 * 365) / 1e9, 1),
     },
     allocation: {
-      vcpuAllocated: vmVcpu,
-      ramAllocatedGB: round(vmRamMB / 1024),
+      vcpuAllocated: vmVcpu,                              // v3.19.2: 읽은 VM 만의 합 · VM 이 있는데 하나도 못 읽었으면 null
+      ramAllocatedGB: vmRamMB == null ? null : round(vmRamMB / 1024),
+      vcpuUnknown: vmAllSum.vcpuUnknown,                  // v3.19.2: vCPU 를 못 읽어 합에서 뺀 VM 수(공개 API vmVcpuUnknown 과 같은 수)
+      ramUnknown: vmAllSum.memUnknown,                    // v3.19.2: 메모리를 못 읽어 합에서 뺀 VM 수(공개 API vmRamUnknown)
       provisionedStorageTB: round(vmProvGB / 1024, 1),
       vmStorageUnknown,                                   // v2.727(C-01): 용량을 못 읽어 provisionedStorageTB 에서 뺀 VM 수
       // Overcommit: allocated vCPU / physical cores, allocated RAM / physical RAM
-      vcpuPerCore: hostsCapacityUnknown > 0 ? null : cpuCores > 0 ? round(vmVcpu / cpuCores, 2) : 0,
-      ramOvercommitPct: hostsCapacityUnknown > 0 ? null : memTotalMB > 0 ? Math.round((vmRamMB / memTotalMB) * 100) : 0,
+      //   v3.19.2: 분자(할당 합)를 하나도 못 읽었으면 비율도 null. 일부만 못 읽었으면 읽은 값으로 낸 최소값이다(화면이 vcpuUnknown · ramUnknown 으로 '≥' 를 붙인다).
+      vcpuPerCore: hostsCapacityUnknown > 0 || vmVcpu == null ? null : cpuCores > 0 ? round(vmVcpu / cpuCores, 2) : 0,
+      ramOvercommitPct: hostsCapacityUnknown > 0 || vmRamMB == null ? null : memTotalMB > 0 ? Math.round((vmRamMB / memTotalMB) * 100) : 0,
       hostsCapacityUnknown,                               // v2.771(R6-F3-2): 용량을 못 읽은 호스트 수(있으면 위 두 비율은 null)
       avgVmPerHost: hosts.length > 0 ? round(vms.length / hosts.length, 1) : 0,
     },
     osDistribution: Object.entries(osDist).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value),
-    osAllocation: Object.values(osAlloc).map((a) => ({
+    osAllocation: Object.values(osAlloc).map((a) => { const al = vmAllocOf(a.sum); return {
       name: a.name,
       vms: a.vms,
-      vcpu: a.vcpu,
-      ramGB: round(a.ramMB / 1024),
+      vcpu: al.vcpu,                                    // v3.19.2: 읽은 VM 만의 합 · 그 OS 의 VM 을 하나도 못 읽었으면 null
+      ramGB: al.memMB == null ? null : round(al.memMB / 1024),
+      vcpuUnknown: a.sum.vcpuUnknown,                   // v3.19.2: vCPU 를 못 읽어 vcpu 에서 뺀 VM 수
+      ramUnknown: a.sum.memUnknown,                     // v3.19.2: 메모리를 못 읽어 ramGB 에서 뺀 VM 수
       diskGB: a.diskGB,
       diskTB: round(a.diskGB / 1024, 1),
       storageUnknown: a.storageUnknown,                 // v2.727(C-01)
-    })).sort((a, b) => b.vcpu - a.vcpu),
+    }; }).sort((a, b) => (b.vcpu ?? -1) - (a.vcpu ?? -1)),   // 못 읽은 행(null)은 뒤로
     byVcenter,
   };
   // 본문은 applyFilters(req.user)로 스코프되지만 memoJson 캐시 키에 scope 서명이 없으면 무제한

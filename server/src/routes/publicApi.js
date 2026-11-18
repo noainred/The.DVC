@@ -28,6 +28,7 @@ import path from 'node:path';
 import { endpointAllowed, project, projectAll, ENDPOINTS, GROUPS } from '../publicapi/allowlist.js';
 import { buildOpenApi } from '../publicapi/openapi.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { vmSumsOf } from '../vcenter/vmSums.js'; // v3.19.2 — VM 할당 합(vmVcpu · vmRamMB)의 '못 읽음' 판정은 내부 /summary 와 같은 코어
 import { clusterCountOf } from '../clustercfg/analyze.js'; // v2.743 LEFT-07 — 내부 /summary 와 같은 클러스터 개수
 import { msOrNull, vcCollectedAtOf, isMaintenanceVc } from '../publicapi/time.js';
 import { unreadVcenterReasons } from '../metrics/unreadVcenters.js';   // 126회차: '지금 값이 아닌 vCenter' 공용 판정(지표 샘플러 · 알림 · /metrics 와 한 벌)
@@ -233,6 +234,19 @@ v1.get('/openapi.json', (req, res) => {
 
 /* ── inventory ────────────────────────────────────────────────────────────── */
 
+/**
+ * v3.19.2: /inventory/summary 의 VM 할당 합 — 내부 /summary 와 같은 판정 코어(vcenter/vmSums.js · 템플릿 포함).
+ * 못 읽은 cpuCount · memMB(null · '')는 0 으로 더하지 않고 센다: 합은 읽은 VM 만(값 · 타입은 예전 그대로 — 수),
+ * 못 읽어 뺀 VM 수는 vmVcpuUnknown · vmRamUnknown(vmStorageUnknown 과 같은 규약).
+ * ⚠ VM 을 하나도 못 읽었을 때 내부 /summary 는 null 을 주지만 여기는 계약(수)을 지켜 0 이다 — 소비자는
+ *   vmVcpuUnknown === vms 로 '모름' 을 가린다(docs/API-PUBLIC.md).
+ * ⚠ 핸들러 밖에 둔 이유: scripts/api-doc.mjs 스캐너는 guarded(...) 인자를 3000자까지만 읽는다 — 핸들러 본문에 긴 주석을 더하면 문서 생성이 실패한다.
+ */
+function vmAllocFields(vms) {
+  const s = vmSumsOf(vms, { includeTemplates: true });
+  return { vmVcpu: s.vcpu, vmRamMB: s.memMB, vmVcpuUnknown: s.vcpuUnknown, vmRamUnknown: s.memUnknown };
+}
+
 v1.get('/inventory/summary', guarded('/inventory/summary', ({ res, snap, inScope, fields, scopeMeta, apiPath }) => {
   const vcs = (snap.vcenters || []).filter((v) => inScope(v.id));
   const ids = new Set(vcs.map((v) => v.id));
@@ -270,8 +284,7 @@ v1.get('/inventory/summary', guarded('/inventory/summary', ({ res, snap, inScope
     storageUsedGB: sum(dssR, dsUsedOf),
     storageCapacityAllGB: sum(dss, (d) => d.capacityGB),
     datastoresUsageUnknown: dss.filter(dsUsageUnknownOf).length,
-    vmVcpu: sum(vms, (v) => v.cpuCount),
-    vmRamMB: sum(vms, (v) => v.memMB),
+    ...vmAllocFields(vms),   // v3.19.2: vmVcpu · vmRamMB(읽은 VM 만) + vmVcpuUnknown · vmRamUnknown
     // v2.727(감사 C-01): storageGB 는 v2.719 부터 못 읽으면 null — 합은 읽은 VM 만이고(sum 이 null 을 건너뛴다) 뺀 수를
     //   vmStorageUnknown 으로 밝힌다(내부 /summary allocation.vmStorageUnknown · datastoresUsageUnknown 과 같은 규약).
     vmProvisionedGB: sum(vms, (v) => v.storageGB),
