@@ -689,7 +689,8 @@ function Portal({ user, onLogout }) {
           {tab === 'vcenters' && <VCenters onSelectSite={selectSite} onGoVms={(id) => goVms(id)} resetSignal={platformResetSeq} scope={{ region, vcenterIds, q }} chipQuery={chipQuery} onChipQuery={setChipQuery} />}
           {tab === 'svcmon' && <SvcMonitor />}
           {tab === 'ipam' && <Ipam />}
-          {tab === 'hosts' && <Hosts filters={filters} cond={platformCond} nameFocus={hostFocusName} onNameFocus={setHostFocusName} onGoVms={(host) => goVms('', host)} />}
+          {tab === 'hosts' && <Hosts filters={filters} cond={platformCond} nameFocus={hostFocusName} onNameFocus={setHostFocusName} onGoVms={(host) => goVms('', host)}
+            scopeIds={vcenterIds} scopeRegion={region} onScopeIds={(ids) => patchFilter({ vcenterIds: ids })} />}{/* v3.22.0: Hypervisor 분석의 지도 칸 · 지역 줄도 바로가기 선택을 켜고 끈다(VM 쪽과 같은 연결) */}
           {/* v2.909: 법인별 탭에서 법인을 고르면 이 탭(vms)의 vCenter 필터를 바꾼다(현황 탭으로 돌아간다) · v2.915: 호스트 칩 · 호스트 이름 → 호스트 탭 */}
           {tab === 'vms' && <Vms filters={filters} onPickVcenter={(id) => patchFilter({ vcenterId: id, region: '' }, 'vms')} cond={platformCond} host={vmHost} onHost={setVmHost} onGoHost={goHostsByName}
             scopeIds={vcenterIds} scopeRegion={region} onScopeIds={(ids) => patchFilter({ vcenterIds: ids })} />}{/* v3.21.0: 분석 보기의 지도 칸 · 지역 줄이 바로가기 선택(허브 칸 vcenterIds)을 켜고 끈다 */}

@@ -38,6 +38,7 @@ import { vmperfHistory, vmperfMeta, vmperfDiskUsage, dropVmperfDb, dbFileName, V
 import { loadVmperfSettings, saveVmperfSettings, vmperfSettingsRefusal, VMPERF_LIMITS } from '../../metrics/vmperfSettings.js';
 import { memoJson, hash, eachLimited, scopeSlice, scopeKey } from './shared.js';
 import { isSummaryQuery, groupByVc, SUMMARY_TOP_N } from './toolSummary.js'; // v3.21.0 VM 분석 화면 요약 — 같은 라우트 · 같은 게이트 안에서
+import { capacityForecastSummaryByVc } from '../../dscfg/summary.js'; // v3.22.0 Hypervisor 분석 화면 — 용량 예측 요약
 import { dsGrowthFor } from '../../tools/dsGrowth.js'; // v2.672 운영 장애: 용량 예측 증가율 — 롤업 전용·스냅샷 무관 캐시·시간 기준 양보
 import { lowerTerm } from '../../search/deepSearch.js'; // v2.629 AUTHZ2629-01: 검색어 1회 소문자화 + 길이 상한(한 벌)
 import { numOrNull } from '../../util/numOrNull.js'; // v2.578: 요청 기간 등 '읽지 못한 수치' 를 0 으로 둔갑시키지 않는다
@@ -1917,8 +1918,17 @@ api.get('/tools/capacity-forecast', requirePerm('tools'), (req, res) => memoJson
     items.push({ id: d.id, name: d.name, vcenterId: d.vcenterId, type: d.type, capacityGB: d.capacityGB, usedGB: d.usedGB, freeGB, usagePct: d.usagePct, growthGBperDay: slope == null ? null : Number(slope.toFixed(2)), daysToFull, synthesized, growthPoints: g?.points ?? 0, growthSince: g?.firstTs ?? null });
   }
   items.sort((a, b) => (a.daysToFull ?? Infinity) - (b.daysToFull ?? Infinity));
+  const growthInfo = { source: 'rollup', windowDays: growth.windowDays, at: growth.at, stale: growth.stale, refreshing: growth.refreshing, error: growth.error };
+  // v3.22.0: ?summary=1 — 법인별 줄 + 법인별 상위 N(Hypervisor 분석 화면 · dscfg/summary.js). 게이트(tools · toolGate 'capacity-forecast')와 범위(allowed)는 위 그대로 ·
+  //   항목(소진 예상일 · 합성 여부)도 위에서 만든 것 그대로 센다. mock · synthesized 표시를 그대로 싣는다. memo 열쇠는 URL 이라 원본과 다른 칸이다.
+  if (isSummaryQuery(req.query)) {
+    const vcs = (snap.vcenters || []).filter((v) => (!allowed || allowed.has(v.id)) && (!vcId || v.id === vcId));
+    const vcName = new Map(vcs.map((v) => [v.id, v.name || v.id]));
+    const sm = capacityForecastSummaryByVc(items, { vcenters: vcs }, { vcName, topN: SUMMARY_TOP_N });
+    return { summary: true, tool: 'capacity-forecast', scope: vcId || 'all', mock, synthesized: items.some((x) => x.synthesized), ...sm, growth: growthInfo };
+  }
   // 추세의 근거(정직): 롤업만 · 기준 시각 · 오래됐는지 · 계산 오류. 롤업 도입 이전 구간은 쓰지 않는다(항목의 growthSince 가 첫 점).
-  return { scope: vcId || 'all', mock, items, growth: { source: 'rollup', windowDays: growth.windowDays, at: growth.at, stale: growth.stale, refreshing: growth.refreshing, error: growth.error } };
+  return { scope: vcId || 'all', mock, items, growth: growthInfo };
 }, { ttlMs: 30_000, extraKey: scopeKey(req.user, store.get()) }));
 
 /**

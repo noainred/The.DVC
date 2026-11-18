@@ -125,6 +125,7 @@ export function analyzeContention(snap, { now = Date.now(), refreshMs = 900_000,
  *   법인마다 analyzeContention 을 **상한 없이** 한 번 돌린다(판정 그대로 — 화면 목록 1,000줄에 잘린 행으로 세지 않는다).
  *   kpi · coverage · unmatchedDs 는 법인으로 나눠도 더하면 전체와 같다(VM · 호스트 · 데이터스토어가 모두 한 vCenter 에 속한다).
  *   hostsContended = 경합 VM 이 있는 호스트 수(도구의 hosts 행 중 contended > 0).
+ *   hostsReadyCrit = 대기(Ready) 심각 판정(cpu-ready-crit — 기준 THRESHOLDS.readyCrit)이 붙은 VM 이 있는 호스트 수(v3.22.0 Hypervisor 분석 — 같은 판정 결과를 호스트로 센다).
  *   상위 N: ready = CPU 판정(cpu-*)이 붙은 VM 을 대기(Ready 평균) 큰 순 · disk = 디스크 판정(disk-*)이 붙은 VM 을 읽기 · 쓰기 지연 중 큰 값 순 ·
  *   hosts = 도구의 호스트 정렬(경합 VM 수 → 가장 큰 대기 → 디스크 지연) · datastores = 느림 판정(sev)이 붙은 DS 를 도구 정렬(지연 큰 순)로.
  */
@@ -142,6 +143,7 @@ export function contentionSummaryByVc(snap, { now = Date.now(), refreshMs = 900_
     return {
       vcenterId: id, name: vcName.get(id) || id, coverage: out.coverage, kpi: out.kpi, unmatchedDs: out.unmatchedDs,
       hostsContended: out.hosts.filter((h) => h.contended > 0).length,
+      hostsReadyCrit: new Set(out.vms.filter((r) => r.host && r.findings.some((f) => f.code === 'cpu-ready-crit')).map((r) => `${r.vcenterId}\u0000${r.host}`)).size,
       top: {
         ready: [...cpuRows].sort((a, b) => (b.readyAvg ?? -1) - (a.readyAvg ?? -1) || String(a.name).localeCompare(String(b.name))).slice(0, topN).map(vmPick),
         disk: [...diskRows].sort((a, b) => dMax(b) - dMax(a) || String(a.name).localeCompare(String(b.name))).slice(0, topN).map(vmPick),

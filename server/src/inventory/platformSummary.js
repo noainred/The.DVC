@@ -42,7 +42,8 @@ const EMPTY_HOSTS = Object.freeze({ total: 0, connected: 0, maint: 0, down: 0, h
 const NULL_HOSTS = Object.freeze({ total: null, connected: null, maint: null, down: null, hot: null, unread: null, attention: null, clusters: null });
 const NULL_VMS = Object.freeze({ total: null, on: null, off: null, templates: null, usageUnknown: null, attention: null, signals: null });
 
-function hostsSection(list, readable) {
+/** 호스트 수 · 확인 대상 칸 — v3.22.0 Hypervisor 분석(vcenter/hostInsight.js)도 법인 줄마다 이 함수를 부른다(판정 한 벌). */
+export function hostsSection(list, readable) {
   let connected = 0; let maint = 0; let down = 0; let hot = 0; let unread = 0; let attention = 0;
   const clusters = new Set();
   for (const h of list) {

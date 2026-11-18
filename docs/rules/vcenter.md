@@ -163,6 +163,14 @@
     (바로가기 복수 선택에 서버 왕복 없음 — 그래서 `vcenterId` · `vcenterIds` 를 받지 않는다 · 범위가 먼저 · `region` 만). 줄의 값은 더할 수 있는 모양이다: 평균은 `{ sum, n }` ·
     분포는 칸별 수 · OS 종류는 법인마다 50종까지(상위 8 만 주면 여러 법인 합의 상위 8 이 틀린다 — 접기는 화면) · 상위 목록은 법인마다 N(합집합의 상위 N 은 법인별 상위 N 의 합집합 안).
     기준값(스냅샷 기준 일수 · 구간 경계 · 크기 칸 · N)은 `thresholds` 로 싣는다(화면에 박지 않는다). 법인별 합 = `/vms` totals · signalCounts(테스트가 대조). memoJson + `scopeKey` + 설정 rev · VM 사이 `createYielder`.
+  · **v3.22.0 `/hosts/insight`(Hypervisor 탭 '분석' 보기 · 설계 `docs/design/host-insight` · 라우트 `routes/api/hostInsight.js` · 집계 `vcenter/hostInsight.js` · 회귀 `server/test/hostInsight3220.test.js`)**:
+    `/vms/insight` 와 같은 꼴(법인마다 한 줄 · 화면이 고른 줄을 더한다 · `vcenterId` · `vcenterIds` 받지 않음 · 범위가 먼저 · `region` 만). **판정을 새로 하지 않는다** —
+    법인 · 클러스터 줄(상태 · 용량 · 여유 · HA · 수용 제어 · DRS · N+1) = `/hosts/corp` 의 `hostCorpOf` 를 같은 입력으로 · 확인 대상 · 과부하(CPU > 90) · 끊김 · 못 읽음 = `platformSummary.hostsSection` ·
+    하드웨어 · 예기치 않은 재부팅 = `/hosts/checks` 의 `hostChecksOf` + `rebootsOf`(권한 `accessOf` 그대로 — 없는 묶음은 **키가 없다**, 0 이 아니다) · 사용률 칸 = `usageBinOf` 10% 접기 ·
+    VM 할당 · 호스트당 VM 수 = `vmSumsOf`(템플릿 제외). 클러스터 칸(`clusters[]`)은 hostCorp 클러스터 줄 + 법인마다 '독립 호스트' 한 줄(`hostStats` — N+1 판정 없음 null).
+    모델 · 버전 · 제조사는 법인마다 상한까지(접기는 화면) · 평균 `{ value(hostCorp 값), sum, n }`. 못 읽음(usageUnknown) · 용량 모름(capUnknown) · 여유 제외(headroom.excluded) · 설정 미수집(cfgUnknown)은 따로 센다 ·
+    개수 모르는 법인은 `unknown:true` + 수 전부 null. 캐시 = memoJson + `scopeKey` + 권한 판본(`accessOf` 결과 c/h/a — 역할 글자 아님) · 60초(재부팅이 로그 DB 를 읽는다) · 호스트 사이 `createYielder`.
+    ⚠ 이 라우트는 `/hosts/:id` 보다 먼저 등록한다. 법인별 합 = `/hosts/corp` 법인 줄 · `/hosts` 합계 · `/hosts/checks` 수(테스트가 실제 라우터로 대조).
   · 웹: 탭 `#/vms/<list|corp|attention>`(첫 조각 vms — 탭 id 그대로) + 도구 6개 링크(`#/tools/<k>` — 도구 키 그대로 · 권한 없으면 숨김 · 그 도구 화면 위에도 같은 줄 · `topMenu vm.also` 로 메뉴 위치 유지).
     법인별·조치 필요는 **15초 폴링 금지**(열 때 1회 + 다시 읽기 · 늦은 응답 버림). KPI 8장 → 타일 5장(값은 그대로 `unitText` — v2.629 고정 테스트 · vCore 는 vCPU 와 같은 값이라 한 줄).
   · VM 클릭 = 오른쪽 드로어(`VmDrawer` — 720 미만 전체 시트). **예전 모달 기능을 빠짐없이**: 버튼 6 · KV 17 · 섹션 6(`EntityDetail.jsx` 에서 꺼내 재사용 — 복제 금지).

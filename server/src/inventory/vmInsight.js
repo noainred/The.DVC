@@ -89,8 +89,8 @@ function newAcc() {
   };
 }
 
-/** 정렬된 길이 n 배열에 넣는다(cmp 가 음수면 a 가 앞) — 법인마다 N 칸이라 삽입이 정렬보다 싸다. */
-function pushTop(arr, item, cmp, n) {
+/** 정렬된 길이 n 배열에 넣는다(cmp 가 음수면 a 가 앞) — 법인마다 N 칸이라 삽입이 정렬보다 싸다. v3.22.0 Hypervisor 분석(vcenter/hostInsight.js)도 이것을 쓴다(한 벌). */
+export function pushTop(arr, item, cmp, n) {
   if (arr.length >= n && cmp(item, arr[arr.length - 1]) >= 0) return;
   let i = arr.length;
   while (i > 0 && cmp(item, arr[i - 1]) < 0) i -= 1;

@@ -1,6 +1,6 @@
 # ‘Hypervisor · ESXi 호스트’ 탭 새 시안 — 분석 화면
 
-- 상태: **시안(컨펌 대기)** — 코드 변경 없음. 구현은 컨펌 뒤 Opus.
+- 상태: **구현 v3.22.0**(2026-11-18 컨펌 — 질문 전부 기본값 · §9 S1 · S2 · S6 · §10 · vm-insight §10 Hypervisor 특수 기능 패널 3개) — 화면 `web/src/views/hosts/HostInsight.jsx` · 계산 `hosts/hostInsightText.js` · 도구 패널 `hosts/insight-tools/` · 서버 `GET /api/hosts/insight`. 규약 `docs/rules/web.md` 허브 절 ⑮.
 - 캔버스(Claude Design · 비공개): https://claude.ai/artifact/E7RGUQQWYhDGuVGAd8prTa — 아래 줄 오른쪽 **⑨ `HostInsight.dc.html`**(눌러 보는 보드). 왼쪽 ⑧ 이 같은 방식의 VM 탭 시안(`docs/design/vm-insight/`)이다.
 
 ## 1. 요구(사용자 2026-11-18 12:32 KST)

@@ -13,6 +13,8 @@ import { fileStamp } from '../../util/dayKey.js';
 import { analyzeDatastores, analyzePaths, analyzeVsan, VSAN_CODES } from '../../dscfg/analyze.js';
 import { DS_CFG_CODES, DS_OVERCOMMIT_PCT, DS_MANY_VMS } from '../../dscfg/parse.js';
 import { config } from '../../config.js';
+import { isSummaryQuery, SUMMARY_TOP_N } from './toolSummary.js';   // v3.22.0 Hypervisor 분석 화면 요약 — 같은 라우트 · 같은 게이트 안에서
+import { storagePathsSummaryByVc } from '../../dscfg/summary.js';
 
 const toolsPerm = requirePerm('tools');
 const csvPerm = requirePerm('data.csv');
@@ -31,13 +33,24 @@ function run(snap, req) {
 }
 
 export function registerStoragePaths(api) {
-  api.get('/tools/storage-paths', toolsPerm, (req, res) => memoJson(req, res, 'storage-paths', (snap) => ({
-    ...run(snap, req),
-    codes: { ...DS_CFG_CODES, ...VSAN_CODES },
-    limits: { overcommitPct: DS_OVERCOMMIT_PCT, manyVms: DS_MANY_VMS },
-    scan: { ds: config.dsCfgScan, host: config.hostCfgScan, dsRefreshMs: config.dsCfgRefreshMs, hostRefreshMs: config.hostCfgRefreshMs },
-    initial: snap.initial === true, generatedAt: snap.generatedAt || null,
-  }), { extraKey: scopeKey(req.user, store.get()) }));
+  api.get('/tools/storage-paths', toolsPerm, (req, res) => memoJson(req, res, 'storage-paths', (snap) => {
+    // v3.22.0: ?summary=1 — 법인별 줄 + 법인별 상위 N(Hypervisor 분석 화면). 게이트(tools · toolGate 'storage-paths')와 범위(scopeSlice)는 그대로 ·
+    //   화면 조건(q · onlyIssues · code)은 보지 않는다. memo 열쇠는 URL 이라 원본과 다른 칸이다.
+    if (isSummaryQuery(req.query)) {
+      const scoped = scopeSlice(snap, req.user, qStr(req.query.vcenterId, 128) || undefined);
+      const vcName = new Map((scoped.vcenters || []).map((v) => [v.id, v.name || v.id]));
+      return { summary: true, tool: 'storage-paths', ...storagePathsSummaryByVc(scoped, { vcName, topN: SUMMARY_TOP_N }),
+        scan: { ds: config.dsCfgScan, host: config.hostCfgScan, dsRefreshMs: config.dsCfgRefreshMs, hostRefreshMs: config.hostCfgRefreshMs },
+        initial: snap.initial === true, generatedAt: snap.generatedAt || null };
+    }
+    return {
+      ...run(snap, req),
+      codes: { ...DS_CFG_CODES, ...VSAN_CODES },
+      limits: { overcommitPct: DS_OVERCOMMIT_PCT, manyVms: DS_MANY_VMS },
+      scan: { ds: config.dsCfgScan, host: config.hostCfgScan, dsRefreshMs: config.dsCfgRefreshMs, hostRefreshMs: config.hostCfgRefreshMs },
+      initial: snap.initial === true, generatedAt: snap.generatedAt || null,
+    };
+  }, { extraKey: scopeKey(req.user, store.get()) }));
 
   api.get('/tools/storage-paths.csv', csvPerm, toolsPerm, (req, res) => {
     const r = run(store.get(), req).datastores;

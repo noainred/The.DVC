@@ -59,7 +59,8 @@ export function drsModeOf(drs) {
 const sum = (arr, f) => arr.reduce((a, x) => a + (f(x) || 0), 0);
 const avg = (vals) => (vals.length ? Math.round(vals.reduce((a, v) => a + v, 0) / vals.length) : null);
 
-function hostStats(list, readable, capKnown) {
+/** 호스트 묶음의 상태 · 구간 · 용량 · 여유 — 법인 · 클러스터 줄과 v3.22.0 분석(hostInsight.js — 독립 호스트 줄)이 같이 쓴다. */
+export function hostStats(list, readable, capKnown) {
   const b = Object.fromEntries(BUCKET_KEYS.map((k) => [k, 0]));
   let maint = 0, connected = 0, capUnknown = 0, cores = 0, memMB = 0, headMB = 0, headExcluded = 0;
   const cpu = [], mem = [];

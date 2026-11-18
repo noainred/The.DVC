@@ -310,6 +310,7 @@ const TABLE = {
   'bareos/drPlan.js': ['own', '재해 복구 사전 점검 — unreachable · maintenance · pending 은 ✕(보내지 않음) · stale 은 경고'],
   'bareos/rehearsal.js': ['shared', '126 F3 — 정기 복원 검증은 멈춘 vCenter 를 건너뛴다'],
   'bareos/restore.js': ['left', '대화형 복원 판정(사람이 확인하고 OTP 로 보낸다) — 여유가 옛 값이라는 표지는 없다(126 남긴 것)'],
+  'dscfg/summary.js': ['own', 'v3.22.0 도구 요약 — 경로는 analyzePaths 그대로(수집 안 된 호스트는 notCollected 로 따로) · 용량 예측은 라우트가 만든 items(원본 도구와 같은 판정) 그대로 법인별로 센다'],
   'contention/analyze.js': ['own', '표본 시각 기준 stale(staleAfterMs) — 오래된 표본은 측정에서 뺀다'],
   'corelicense/analyze.js': ['shared', 'notReadVcentersOf — 인벤토리가 빈 못 읽은 vCenter 를 밝힌다(값이 남은 vCenter 는 합계에 든다 — 구성 리포트)'],
   'gpu/allocTree.js': ['own', '계층 계산만 — 호출자(alerts · healthReport · gpu/allocHistory)가 못 읽은 법인을 거른다'],
