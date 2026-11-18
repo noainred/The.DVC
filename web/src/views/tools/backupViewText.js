@@ -849,7 +849,8 @@ export function saveStaleOpts(o, storage, key = STALE_KEY) {
 }
 
 /**
- * v2.959: Backup 현황 · Detail 이 이어받는 vCenter(이 브라우저에만) — 서머리의 openDetail 과 가상화 플랫폼 KPI 카드가 같은 키 · 같은 함수를 쓴다(복제 금지).
+ * v2.959: Backup 현황 · Detail 이 이어받는 vCenter(이 브라우저에만) — 여는 곳은 이 키 · 이 함수 하나를 쓴다(복제 금지).
+ * 지금 호출처는 서머리의 openDetail 하나다(v3.19.0 에 가상화 플랫폼 KPI 카드를 걷어냈다 — 전에는 그 카드도 같이 썼다).
  * storage · go 는 테스트용 주입(기본은 브라우저). 저장 못 해도 세부내용은 첫 vCenter 로 열린다.
  */
 export const DETAIL_VC_KEY = 'backup-detail-vc';
