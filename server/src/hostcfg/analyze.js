@@ -47,5 +47,40 @@ export function analyzeHostCfg(hosts, opt = {}) {
   }
   rows.sort((a, b) => SEV_ORDER[a.sev] - SEV_ORDER[b.sev] || b.findings.length - a.findings.length || String(a.name).localeCompare(String(b.name)));
   const matched = rows.length;
-  return { coverage, byCode, vcenters: [...byVc.values()].sort((a, b) => String(a.name).localeCompare(String(b.name))), clusters: clusters.slice(0, 200), clustersOmitted: Math.max(0, clusters.length - 200), matched, rows: rows.slice(0, ROWS_MAX), omitted: Math.max(0, matched - ROWS_MAX) };
+  const rowsMax = opt.rowsMax ?? ROWS_MAX;
+  return { coverage, byCode, vcenters: [...byVc.values()].sort((a, b) => String(a.name).localeCompare(String(b.name))), clusters: clusters.slice(0, 200), clustersOmitted: Math.max(0, clusters.length - 200), matched, rows: rows.slice(0, rowsMax), omitted: Math.max(0, matched - rowsMax) };
+}
+
+/**
+ * v3.22.0 Hypervisor 분석 화면 요약(`/tools/host-hygiene?summary=1` — docs/design/vm-insight §10 · host-insight) — 법인(vCenter)별 줄 + 법인별 상위 N.
+ *   법인마다 analyzeHostCfg 를 **상한 없이** 한 번 돌린다(판정 그대로 — 화면 목록 2,000줄에 잘린 행으로 세지 않는다). 드리프트 비교 묶음은
+ *   (vCenter, 클러스터) 라 법인으로 나눠 돌려도 판정이 같고, coverage · byCode 는 더하면 전체와 같다.
+ *   crit · warn · info = 가장 높은 심각도로 센 호스트 수(도구 행의 sev) · problem = 판정이 하나라도 있는 호스트(withFindings) ·
+ *   ssh · certExpired · certExpiring = 도구 byCode 의 'ssh-running' · 'cert-expired' · 'cert-expiring' 호스트 수 ·
+ *   판정 밖 = coverage.notCollected(구성 값을 못 받음) + coverage.disconnected(끊김 — 값이 낡았다).
+ *   상위 N: certExpired = 인증서가 만료된 호스트를 만료 뒤 지난 일수 큰 순 · worst = 도구 정렬(심각도 → 판정 수 → 이름)의 앞 N.
+ */
+export function hostCfgSummaryByVc(snap, { now = Date.now(), vcName = new Map(), topN = 5 } = {}) {
+  const ids = new Set((snap.vcenters || []).map((v) => v.id));
+  const by = new Map();
+  for (const h of snap.hosts || []) { if (!h || typeof h !== 'object') continue; ids.add(h.vcenterId); let a = by.get(h.vcenterId); if (!a) { a = []; by.set(h.vcenterId, a); } a.push(h); }
+  const pick = (r) => ({ id: r.id, name: r.name, cluster: r.cluster, version: r.version, build: r.build, sev: r.sev, codes: [...new Set(r.findings.map((f) => f.code))] });
+  const rows = [...ids].map((id) => {
+    const out = analyzeHostCfg(by.get(id) || [], { now, vcName, rowsMax: Infinity });
+    const sevN = { crit: 0, warn: 0, info: 0 };
+    for (const r of out.rows) sevN[r.sev] += 1;
+    const byCode = Object.fromEntries(Object.entries(out.byCode).map(([c, v]) => [c, v.hosts]));
+    const expired = out.rows.filter((r) => r.findings.some((f) => f.code === 'cert-expired'))
+      .map((r) => ({ ...pick(r), days: r.findings.find((f) => f.code === 'cert-expired').facts?.days ?? null }))
+      .sort((a, b) => (b.days ?? -1) - (a.days ?? -1) || String(a.name).localeCompare(String(b.name)));
+    return {
+      vcenterId: id, name: vcName.get(id) || id, coverage: out.coverage, hosts: out.coverage.hosts,
+      problem: out.matched, crit: sevN.crit, warn: sevN.warn, info: sevN.info,
+      ssh: byCode['ssh-running'] ?? 0, certExpired: byCode['cert-expired'] ?? 0, certExpiring: byCode['cert-expiring'] ?? 0,
+      outOfJudgment: out.coverage.notCollected + out.coverage.disconnected,
+      byCode,
+      top: { certExpired: expired.slice(0, topN), worst: out.rows.slice(0, topN).map(pick) },
+    };
+  }).sort((a, b) => String(a.vcenterId).localeCompare(String(b.vcenterId)));
+  return { codes: HOST_CFG_CODES, topN, rows };
 }

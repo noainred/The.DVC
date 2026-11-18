@@ -4,12 +4,14 @@ import { DataTable, UsageCell, StateBadge, Loading, ErrorBox } from '../componen
 import IpmsMatches from '../components/IpmsMatches.jsx';
 import Select from '../components/Select.jsx';
 import { cpuModelCell } from '../components/cpuModelText.js';
-import { hashSegments } from '../hooks/hashTab.js';
 // v2.915 가상화 플랫폼 허브(설계 docs/design/virt-platform-menu 시안 A ③): 이 화면은 허브의 '호스트 탭' 본문이다 — 제목은 허브가, 여기는 탭 줄(호스트별 · 법인별 ‖ 호스트 도구 4 ‖ 상태 · 메모 · IPMS) 부터.
 //   호스트 이름 = 개체 보기(브레드크럼 · 전체 페이지 상세는 그 안의 버튼) · VM 수 = VM 탭을 그 호스트 범위로 · 점검 집계 · 엑셀 버튼은 표 머리로.
 import HubTabs, { toolsFor } from './platform/HubTabs.jsx';
 import { HOST_TOOLS } from './platform/platformText.js';
-import { vcHash } from './vcd/vcdRoute.js';
+import { vcHash, currentHash, goHash } from './vcd/vcdRoute.js';
+// v3.22.0(설계 docs/design/host-insight · 확정 기본값): 첫 보기 ‘분석’(#/hosts · #/hosts/insight) · 지금 호스트 표 = ‘목록’(#/hosts/list) · ‘법인별’(#/hosts/corp).
+//   보기는 주소로 연다(VM 탭과 같은 꼴) — 호스트 상세 #/hosts/<id> 는 그대로(hostIdOfHash — 보기 키가 아닌 둘째 칸). 옛 보기 기억(localStorage dvc.hosts.view)은 읽지 않는다(탭을 열면 분석).
+import { HOST_VIEWS, hostViewInHash, hostIdOfHash, hostViewOf, hostViewHash } from './hosts/hostInsightText.js';
 import { hostUsagePct } from './vcdOverview.js'; // v2.606 WEB2606-02: 끊긴·무응답 호스트의 0% 는 '못 읽음'(—)
 // v2.764: 시안 B '이상 우선' 배치 — 확인 대상·CPU 구간·클러스터 타일 판정은 hostTriage.js 하나(카드 숫자와 표 필터가 같은 판정).
 import { CPU_ATTENTION_PCT, CPU_BUCKETS, hostReasons, triageCounts, cpuDistribution, clusterTiles } from './hostTriage.js';
@@ -18,7 +20,6 @@ import { CPU_ATTENTION_PCT, CPU_BUCKETS, hostReasons, triageCounts, cpuDistribut
 import {
   COL_GROUPS, FIXED_GROUP, readColPrefs, writeColPrefs, visibleColumns, secCountsOf, secText, secTone, uplinkDownOf, nicLinkDownOf, deadPathsOf, lunsOf,
   uptimeDays, coresText, gbText, kwText, ratioText, hwCell, bootCell, veeamCell, hostKpis, chipCounts, filterHostsExt, focusLabelExt,
-  readHostsView, writeHostsView,   // v2.811 보기(호스트별 · 법인별) 기억
   vmAllocCells,                    // v3.19.2 VM 할당 칸(전부 못 읽음 '—' · 일부 못 읽음 '+?')
 } from './hostChecksText.js';
 
@@ -26,22 +27,24 @@ const HostDetail = React.lazy(() => import('./HostDetail.jsx'));          // v2.
 const HostExportDialog = React.lazy(() => import('./HostExportDialog.jsx')); // v2.802 호스트 · 클러스터 엑셀(vCenter 단위)
 const HostDrawer = React.lazy(() => import('./hosts/HostDrawer.jsx'));     // v2.975 이름 옆 '빠른 확인' 드로어(시안 docs/design/host-drawer ⑤)
 const HostsCorp = React.lazy(() => import('./HostsCorp.jsx'));               // v2.811 '법인별' 보기(승인 시안 B https://claude.ai/artifact/JGykMmoG7kAyNsa5y4uG1x)
+const HostInsight = React.lazy(() => import('./hosts/HostInsight.jsx'));     // v3.22.0 '분석' 보기(설계 docs/design/host-insight)
 
 const TILE_LIMIT = 12; // 처음엔 '먼저 볼' 클러스터만 — 나머지는 '모두 보기'
 const TILE_LIMIT_NARROW = 4; // 720px 이하는 4개(styles.css .ht-tiles) — 12개가 세로로 쌓이면 표까지 스크롤이 너무 길다(Chromium 400px 판독)
 const REASON_BADGE = { maint: 'amber', down: 'red', cpu: 'red' };
 const KPI_COLOR = { text: 'var(--text)', accent: 'var(--accent)', cyan: 'var(--accent-2)', green: 'var(--green)', amber: 'var(--amber)' };
-const hostIdOf = (hash) => { const s = hashSegments(hash); return s[0] === 'hosts' && s[1] ? decodeURIComponent(s[1]) : ''; };
+const hostIdOf = hostIdOfHash;
 const numText = (v) => (Number.isFinite(v) ? v.toLocaleString('en-US') : '—');
 const numTone = (v) => (Number.isFinite(v) && v > 0 ? 'var(--red)' : undefined);
 
-export default function Hosts({ filters, cond = null, nameFocus = '', onNameFocus = null, onGoVms = null }) {
+export default function Hosts({ filters, cond = null, nameFocus = '', onNameFocus = null, onGoVms = null, scopeIds = null, scopeRegion = null, onScopeIds = null }) {
   const { data, error, loading } = usePolling('/hosts', filters, 15_000);
   const [tab, setTab] = useState(null); // null = 확인 대상이 있으면 그 탭, 없으면 전체
   const [focus, setFocus] = useState(null);
   const [allTiles, setAllTiles] = useState(false);
   const [off, setOff] = useState(() => readColPrefs());
-  const [hostId, setHostId] = useState(() => hostIdOf(window.location.hash));
+  const [hostId, setHostId] = useState(() => hostIdOf(currentHash()));
+  const [hashView, setHashView] = useState(() => hostViewInHash(currentHash()));
   const [checks, setChecks] = useState(null);
   const [checksErr, setChecksErr] = useState(null);
   const [checksBusy, setChecksBusy] = useState(false);
@@ -51,12 +54,13 @@ export default function Hosts({ filters, cond = null, nameFocus = '', onNameFocu
   const [exportVc, setExportVc] = useState('');
   const [exportOpen, setExportOpen] = useState(false);
   const [exportPick, setExportPick] = useState(false);
-  const [view, setViewState] = useState(readHostsView);
-  const setView = (v) => { setViewState(v); writeHostsView(v); };
+  // 지금 보기 — 주소에 없으면 기본 ‘분석’(검색어 · ‘그 호스트만’ 이 있으면 ‘목록’ — 넘겨받은 조건의 결과가 보이게).
+  const view = hostViewOf(hashView, { q: filters?.q, nameFocus });
+  const setView = (v) => { setHashView(v); goHash(hostViewHash(v)); };
   const filtersKey = JSON.stringify(filters || {});
 
   useEffect(() => {
-    const on = () => setHostId(hostIdOf(window.location.hash));
+    const on = () => { const h = currentHash(); setHostId(hostIdOf(h)); setHashView(hostViewInHash(h)); };
     window.addEventListener('hashchange', on);
     return () => window.removeEventListener('hashchange', on);
   }, []);
@@ -70,7 +74,7 @@ export default function Hosts({ filters, cond = null, nameFocus = '', onNameFocu
       .finally(() => { if (seq === checksSeq.current) setChecksBusy(false); });
   }, [filtersKey]);
   // 점검 집계는 호스트별 보기에서만 읽는다(법인별 보기는 /hosts/corp 를 쓴다 — 무거운 집계를 쓸데없이 부르지 않게).
-  useEffect(() => { if (!hostId && view === 'host') loadChecks(); }, [loadChecks, hostId, view]);
+  useEffect(() => { if (!hostId && view === 'list') loadChecks(); }, [loadChecks, hostId, view]);
 
   const rows = useMemo(() => data?.items || [], [data]);
   // 구성·보안 판정은 호스트당 한 번(표·칩·거르기가 같은 결과를 쓴다). 폴링마다 다시 센다.
@@ -84,6 +88,56 @@ export default function Hosts({ filters, cond = null, nameFocus = '', onNameFocu
       </React.Suspense>
     );
   }
+  // 허브 탭 줄 — 분석 보기는 /hosts 응답을 기다리지 않고 그린다(조기 return 위에서 만든다).
+  const tabsBar = (
+    <>
+      {/* v2.915: 제목 줄 대신 허브 탭 줄 — 분석 · 목록 · 법인별(v3.22.0 — 이 화면 안의 보기 · #/hosts/<보기>) ‖ 호스트 성격의 특수 기능 4 ‖ 오른쪽 = 이 탭 고유 조건(공용 범위 바에서 내려온 상태 · 메모 · IPMS) */}
+      <div style={{ marginBottom: 12 }}>
+        <HubTabs label="호스트 보기 · 도구" active={view} tools={toolsFor(HOST_TOOLS)}
+          views={HOST_VIEWS.map(([k, label]) => ({ k, label, href: hostViewHash(k), onClick: () => setView(k) }))}
+          right={cond ? (
+            <>
+              {cond.menuFilter && (
+                <Select sort={false} className="select" value={cond.menuFilter.value} onChange={(e) => cond.menuFilter.onChange(e.target.value)} aria-label="상태">
+                  {cond.menuFilter.options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </Select>
+              )}
+              <label title="메모 포함 — 체크하면 검색에 메모(Notes) 내용도 포함합니다. (기본: 미포함)"><input type="checkbox" checked={cond.qNotes} onChange={(e) => cond.setQNotes(e.target.checked)} /> 메모</label>
+              <label title="IPMS 포함 — 체크하면 IP로 검색할 때 IPMS(IP 스캔) 자료의 해당 대역 IP도 함께 보여줍니다."><input type="checkbox" checked={cond.qIpms} onChange={(e) => cond.setQIpms(e.target.checked)} /> IPMS</label>
+            </>
+          ) : null} />
+      </div>
+    </>
+  );
+  // 빠른 확인(드로어) — ‹ › 는 지금 표(목록)나 분석의 ‘지금 볼 호스트’ 순서.
+  const byId = checks?.byId || null;
+  const drawerEl = drawer && (
+    <React.Suspense fallback={null}>
+      <HostDrawer host={rows.find((h) => h.id === drawer.id) || drawer} rows={shownRef.current} checks={byId}
+        onClose={() => setDrawer(null)} onMove={(h) => setDrawer(h)} />
+    </React.Suspense>
+  );
+  // v3.22.0 분석 보기 — /hosts/insight(30초 · 법인별 줄)만 쓴다. 지도 칸 · 지역 줄 → 바로가기 선택(onScopeIds — App 이 넘길 때만) ·
+  //   못 버티는 클러스터 → ‘법인별’ 보기의 그 법인(바로가기를 그 법인 하나로) · 지금 볼 호스트 → 빠른 확인(/hosts 행이 있을 때 — 없으면 개체 보기 주소).
+  if (view === 'insight') {
+    const quickHost = (id, ids) => {
+      const h = rows.find((x) => x.id === id);
+      if (!h) return false;
+      shownRef.current = (ids || []).map((i) => rows.find((x) => x.id === i)).filter(Boolean);
+      setDrawer(h);
+      return true;
+    };
+    const openCorp = (vcId) => { if (onScopeIds && vcId) onScopeIds([String(vcId)]); setView('corp'); window.scrollTo({ top: 0 }); };
+    return (
+      <>
+        {tabsBar}
+        <React.Suspense fallback={<Loading />}>
+          <HostInsight filters={filters} scopeIds={scopeIds} scopeRegion={scopeRegion} onScopeIds={onScopeIds} onOpenCorp={openCorp} onQuickHost={quickHost} />
+        </React.Suspense>
+        {drawerEl}
+      </>
+    );
+  }
   if (loading && !data) return <Loading />;
   if (error && !data) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류는 화면 유지
 
@@ -92,7 +146,6 @@ export default function Hosts({ filters, cond = null, nameFocus = '', onNameFocu
   const dist = cpuDistribution(rows);
   const tiles = clusterTiles(rows);
   const curTab = tab || (counts.attention > 0 ? 'attention' : 'all');
-  const byId = checks?.byId || null;
   const access = checks?.access || null;
   // v2.915: VM 표의 호스트 이름에서 넘어온 '그 호스트만'(nameFocus — 이름 정확 일치 · 칩으로 해제)은 탭 · 조건 위에 겹쳐 건다.
   const shown0 = filterHostsExt(rows, { tab: curTab, focus }, { secOf, checks: byId });
@@ -122,7 +175,7 @@ export default function Hosts({ filters, cond = null, nameFocus = '', onNameFocu
   };
 
   // 법인별 보기 → 호스트별 보기의 그 클러스터(hostTriage.clusterKey 와 같은 키)로 내려간다.
-  const openCluster = (vc, cluster) => { setView('host'); setTab('all'); setFocus({ kind: 'cluster', value: `${vc}\t${cluster || 'standalone'}` }); window.scrollTo({ top: 0 }); };
+  const openCluster = (vc, cluster) => { setView('list'); setTab('all'); setFocus({ kind: 'cluster', value: `${vc}\t${cluster || 'standalone'}` }); window.scrollTo({ top: 0 }); };
 
   const cards = [
     { kind: 'maint', n: counts.maint, title: '점검(Maintenance) 모드', sub: '유지보수 상태 호스트', tone: 'amber' },
@@ -204,25 +257,7 @@ export default function Hosts({ filters, cond = null, nameFocus = '', onNameFocu
       {/* 폴링 지속 실패 시 낡은 데이터를 무경고로 표시하지 않고 배너로 알린다(v2.287, #20). */}
       {error && <div className="badge red" style={{ display: 'block', marginBottom: 10, padding: '6px 10px' }}>⚠ 갱신 실패 — 직전 데이터를 표시 중입니다({error}).</div>}
 
-      {/* v2.915: 제목 줄 대신 허브 탭 줄 — 호스트별 · 법인별(이 화면 안의 보기) ‖ 호스트 성격의 특수 기능 4 ‖ 오른쪽 = 이 탭 고유 조건(공용 범위 바에서 내려온 상태 · 메모 · IPMS) */}
-      <div style={{ marginBottom: 12 }}>
-        <HubTabs label="호스트 보기 · 도구" active={view} tools={toolsFor(HOST_TOOLS)}
-          views={[
-            { k: 'host', label: '호스트별', onClick: () => setView('host') },
-            { k: 'corp', label: '법인별', onClick: () => setView('corp') },
-          ]}
-          right={cond ? (
-            <>
-              {cond.menuFilter && (
-                <Select sort={false} className="select" value={cond.menuFilter.value} onChange={(e) => cond.menuFilter.onChange(e.target.value)} aria-label="상태">
-                  {cond.menuFilter.options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                </Select>
-              )}
-              <label title="메모 포함 — 체크하면 검색에 메모(Notes) 내용도 포함합니다. (기본: 미포함)"><input type="checkbox" checked={cond.qNotes} onChange={(e) => cond.setQNotes(e.target.checked)} /> 메모</label>
-              <label title="IPMS 포함 — 체크하면 IP로 검색할 때 IPMS(IP 스캔) 자료의 해당 대역 IP도 함께 보여줍니다."><input type="checkbox" checked={cond.qIpms} onChange={(e) => cond.setQIpms(e.target.checked)} /> IPMS</label>
-            </>
-          ) : null} />
-      </div>
+      {tabsBar}
       <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>vCenter {fmt(vcIds.length)} · 호스트 {fmt(rows.length)}{data.generatedAt ? ` · 인벤토리 ${new Date(data.generatedAt).toLocaleTimeString('ko-KR')}` : ''}</div>
       {exportPick && !filters?.vcenterId && vcIds.length > 1 && (
         <div className="ht-pick">
@@ -234,14 +269,14 @@ export default function Hosts({ filters, cond = null, nameFocus = '', onNameFocu
           <button type="button" className="btn" disabled={!exportVc} onClick={() => { setExportOpen(true); setExportPick(false); }}>열기</button>
         </div>
       )}
-      {view === 'host' && checksErr && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>점검 집계를 읽지 못했습니다({checksErr}) — iDRAC · 재부팅 · Veeam 열은 ‘—’ 로 둡니다.</div>}
+      {view === 'list' && checksErr && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>점검 집계를 읽지 못했습니다({checksErr}) — iDRAC · 재부팅 · Veeam 열은 ‘—’ 로 둡니다.</div>}
       {view === 'corp' && (
         <React.Suspense fallback={<Loading />}>
           {csvOk && <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}><button type="button" className="btn primary" onClick={openExport}>⤓ 호스트·클러스터 엑셀…</button></div>}
           <HostsCorp filters={filters} rows={rows} onOpenCluster={openCluster} />
         </React.Suspense>
       )}
-      {view === 'host' && (
+      {view === 'list' && (
         <>
 
         {s && (
@@ -412,12 +447,7 @@ export default function Hosts({ filters, cond = null, nameFocus = '', onNameFocu
         <IpmsMatches filters={filters} />
         </>
       )}
-      {drawer && (
-        <React.Suspense fallback={null}>
-          <HostDrawer host={rows.find((h) => h.id === drawer.id) || drawer} rows={shownRef.current} checks={byId}
-            onClose={() => setDrawer(null)} onMove={(h) => setDrawer(h)} />
-        </React.Suspense>
-      )}
+      {drawerEl}
       {exportOpen && exportVc && (
         <React.Suspense fallback={null}><HostExportDialog vcenterId={exportVc} vcName={exportVc} onClose={() => setExportOpen(false)} /></React.Suspense>
       )}

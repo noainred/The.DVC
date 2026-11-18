@@ -24,8 +24,8 @@ import { hostChecksOf, vmsByHostOf } from '../../vcenter/hostChecks.js';
 const invHosts = requirePerm('inv.hosts');
 const READ_MAX = 20_000;   // 재부팅 근거 이벤트 읽기 상한(hostHygiene.js /reboots 와 같다)
 
-/** 범위 안 vCenter 의 재부팅 판정(hostHygiene.js /reboots 와 같은 입력). */
-async function rebootsOf(snap, hosts, vcIds, now) {
+/** 범위 안 vCenter 의 재부팅 판정(hostHygiene.js /reboots 와 같은 입력). v3.22.0 /hosts/insight 도 이 함수를 부른다(한 벌). */
+export async function rebootsOf(snap, hosts, vcIds, now) {
   const db = await getLogsDb();
   const since = now - BOOT_DAYS * 86_400_000 - 86_400_000;
   const got = vcIds.length ? await db.opsEventsAsync({ vcenterIds: vcIds, since, types: [...HOSTOPS_TYPES] }, READ_MAX + 1) : [];

@@ -25,20 +25,23 @@ export function bandHeightPx(colWidthPct, mapPx) {
  * @param {(id:string)=>void} [p.onToggle]
  * @param {(col:object)=>string} [p.colText]  열 머리 글자
  * @param {string} p.label              접근성 이름
+ * @param {(tile:object)=>string} [p.pickOf]  v3.22.0: 칸을 고르는 id(눌림 · onToggle) — 기본은 칸 id. Hypervisor 분석은 칸 = 클러스터 · 고르는 것 = 그 법인이라 다르다.
+ *   tileView 가 mark(글자)를 주면 칸 안에 작은 표로 그린다(Hypervisor ‘못 버팀’ — 색이 아니라 표로 · S6).
  */
-export default function Treemap({ layout, heightPx, tileView, selected = null, onToggle = null, colText = null, label }) {
+export default function Treemap({ layout, heightPx, tileView, selected = null, onToggle = null, colText = null, label, pickOf = null }) {
   const cols = layout?.cols || [];
   const hasSel = !!(selected && selected.size);
   const narrow = useNarrowScreen(MAP_NARROW_QUERY);
   const tileBtn = (t, pos, mode) => {
     const v = tileView(t);
-    const on = hasSel && selected.has(String(t.id));
+    const pid = String(pickOf ? pickOf(t) : t.id);
+    const on = hasSel && selected.has(pid);
     const cls = `ins-tl ${mode}${on ? ' on' : (hasSel ? ' dim' : '')}${v.stale ? ' stale' : ''}`;
     return (
       <button key={t.id} type="button" className={cls} aria-pressed={on} title={v.tip}
-        onClick={onToggle ? () => onToggle(String(t.id)) : undefined}
+        onClick={onToggle ? () => onToggle(pid) : undefined}
         style={{ ...pos, background: v.bg, color: v.ink }}>
-        <b>{v.title}</b><span>{v.line}</span>
+        <b>{v.title}</b><span>{v.line}</span>{v.mark ? <em className="ins-mk">{v.mark}</em> : null}
       </button>
     );
   };

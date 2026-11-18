@@ -88,7 +88,7 @@
     경로로는 전량** 나갔다. 그 플래그는 손으로 붙이는 것이라 전 카탈로그에서 2곳뿐이었다.
   - ⚠ **도구 요약 모드는 기존 라우트 안에서 같은 게이트로**(v3.21.0 — VM 분석 화면 · `routes/api/toolSummary.js`):
     분석 화면이 쓰는 도구 요약은 새 경로가 아니라 기존 도구 라우트의 `?summary=1` 이다(guest-partition · waste · waste/off-since ·
-    contention · vm-hygiene · vm-track · vm-lifecycle). 새 경로면 `requirePerm('tools')` · toolGate 도구별 거부 · 범위 교집합을 다시 걸어야 하고
+    contention · vm-hygiene · vm-track · vm-lifecycle · v3.22.0 Hypervisor 분석: host-hygiene · storage-paths · capacity-forecast(집행 키 'forecast') — 회귀 `test/hostInsight3220.test.js`). 새 경로면 `requirePerm('tools')` · toolGate 도구별 거부 · 범위 교집합을 다시 걸어야 하고
     빠뜨리기 쉽다 — 분기는 **범위를 계산한 뒤** 두고, 요약은 법인별 줄 + 법인별 상위 N · 판정은 도구 그대로 · 화면 목록 상한에 잘린 행으로 세지 않는다.
     memoJson 열쇠는 URL 이라 `summary=1` 이 원본과 다른 칸을 쓴다(범위 서명은 같은 extraKey). 회귀 `test/vmInsightTools3210.test.js`(실제 api 라우터 — 권한 · 도구 거부 · 범위 · 합 대조).
 

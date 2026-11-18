@@ -12,7 +12,8 @@ import { capStr } from '../../util/capStr.js';
 import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp } from '../../util/dayKey.js';
-import { analyzeHostCfg } from '../../hostcfg/analyze.js';
+import { analyzeHostCfg, hostCfgSummaryByVc } from '../../hostcfg/analyze.js';
+import { isSummaryQuery, SUMMARY_TOP_N } from './toolSummary.js';   // v3.22.0 Hypervisor 분석 화면 요약 — 같은 라우트 · 같은 게이트 안에서
 import { HOST_CFG_CODES } from '../../hostcfg/parse.js';
 import { hostCfgStatus } from '../../hostcfg/cache.js';
 import { config } from '../../config.js';
@@ -46,6 +47,16 @@ function run(snap, req) {
 
 export function registerHostHygiene(api) {
   api.get('/tools/host-hygiene', toolsPerm, (req, res) => memoJson(req, res, 'host-hygiene', (snap) => {
+    // v3.22.0: ?summary=1 — 법인별 줄 + 법인별 상위 N(Hypervisor 분석 화면). 게이트(tools · toolGate 'host-hygiene')와 범위(scopeSlice)는 그대로 ·
+    //   화면 조건(code · sev · q)은 보지 않는다 · 수집 상태(오류 원문)는 싣지 않는다. memo 열쇠는 URL 이라 원본과 다른 칸이다.
+    if (isSummaryQuery(req.query)) {
+      const scoped = scopeSlice(snap, req.user, qStr(req.query.vcenterId, 128) || undefined);
+      const vcName = new Map((scoped.vcenters || []).map((v) => [v.id, v.name || v.id]));
+      const notReadVcenters = notReadVcentersOf(scoped);
+      return { summary: true, tool: 'host-hygiene', ...hostCfgSummaryByVc(scoped, { vcName, topN: SUMMARY_TOP_N }),
+        notReadVcenters, partial: notReadPartialOf(notReadVcenters),
+        scan: { enabled: config.hostCfgScan, refreshMs: config.hostCfgRefreshMs }, initial: snap.initial === true, generatedAt: snap.generatedAt || null };
+    }
     const r = run(snap, req);
     // v2.744(감사 AUTHZ-01): 판정은 isAdminDetailUser — 데모 계정(요청 문맥 admin + demoGuest)은 operator 와 같은 판본이고, memo 키도 역할 문자열이 아니라
     //   판정 결과(a/u)로 만든다(역할 문자열이면 데모와 진짜 관리자가 같은 캐시 칸을 써 한쪽 판본이 다른 쪽에 나간다).

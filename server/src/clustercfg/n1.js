@@ -7,6 +7,9 @@
  */
 import { clusterRefMode, clusterGroupKeyOf } from './analyze.js';
 
+/** N+1 판정 상한(%) — 한 대가 빠진 뒤 CPU · 메모리가 이 값 이하여야 '버팀'. 응답 기준값(v3.22.0 /hosts/insight thresholds)도 이 값을 싣는다. */
+export const N1_LIMIT_PCT = 90;
+
 const r0 = (n, d = 0) => Number((n || 0).toFixed(d));
 
 export function n1Groups(hosts, usageReadable) {
@@ -50,7 +53,7 @@ export function n1Groups(hosts, usageReadable) {
       const remCpu = g.actCpu - g.maxCpu, remMem = g.actMem - g.maxMem;
       cpuOkPct = remCpu > 0 ? r0((g.cpuUsed / remCpu) * 100) : 999;
       memOkPct = remMem > 0 ? r0((g.memUsed / remMem) * 100) : 999;
-      n1Ok = g.active >= 2 && cpuOkPct <= 90 && memOkPct <= 90;
+      n1Ok = g.active >= 2 && cpuOkPct <= N1_LIMIT_PCT && memOkPct <= N1_LIMIT_PCT;
     }
     return { key, row: { vcenterId: g.vcenterId, cluster: g.cluster, clusterRef: g.clusterRef, vcDatacenter: g.vcDatacenter, sameName: sameNameN.get(`${g.vcenterId}\u0000${String(g.cluster).toLowerCase()}`) || 1, standalone: g.standalone, hosts: g.hosts, hostsUsageExcluded: g.excluded, maintenance: g.maintenance, clusterUnknown: g.clusterUnknown, ...(g.capUnknown ? { hostsCapacityUnknown: g.capUnknown } : {}),
       n1Ok, cpuAfterFailPct: cpuOkPct, memAfterFailPct: memOkPct,
