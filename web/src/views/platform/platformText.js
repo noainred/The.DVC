@@ -71,8 +71,10 @@ export function regionText(r) {
   return v === 'Unknown' ? '리전 미지정' : `리전 ${v}`;
 }
 export function scopeLabel(scope, sitesInScope) {
-  const vc = String(scope?.vcenterId || ''); const region = String(scope?.region || '');
+  const ids = scopeIdsOf(scope); const region = String(scope?.region || '');
   const list = Array.isArray(sitesInScope) ? sitesInScope : [];
+  if (ids.length > 1) return `법인 ${ids.length}곳`;   // v3.20.0 복수 선택
+  const vc = ids[0] || '';
   if (vc) { const s = list.find((x) => x && x.id === vc); return s ? String(s.name || s.id) : vc; }
   if (region) return `${regionText(region)} · ${list.length}법인`;
   return '전체';
@@ -91,6 +93,84 @@ export function vcInRegion(vcList, region) {
   const list = (Array.isArray(vcList) ? vcList : []).filter((v) => v && typeof v === 'object');
   return r ? list.filter((v) => String(v.region || '') === r) : list;
 }
+
+/**
+ * v3.20.0(사용자 요청 2026-11-18 "바로가기의 선택을 복수개 선택해서 볼 수 있게" · 설계 docs/design/vm-menu §5 ③ 기본값 ‘복수 선택 · 세 탭 공용’):
+ * 허브 범위의 **고른 법인 목록**(vcenterIds — 배열 · 메모리만 · 저장하지 않는다) 판정 코어. App · 허브 칩 · 카드 · 상세 이웃이 이 한 벌을 쓴다.
+ *  · API 계약: 0곳 = 둘 다 안 보냄(리전이 있으면 region) · 1곳 = 지금처럼 vcenterId=<id> · 2곳 이상 = vcenterIds=<id>,<id>(쉼표 목록) — 둘을 함께 보내지 않는다(hubScopeQuery).
+ *    값은 날 글자로 잇고 인코딩은 보내는 쪽(URLSearchParams)이 한다 — 여기서 encodeURIComponent 를 하면 두 번 인코딩된다.
+ *  · 허브 밖 탭 · 도구의 vcenterId(문자열 하나)는 그대로다 — 이 목록은 App 의 허브 칸(PLATFORM_SCOPE_KEY)에만 산다.
+ */
+export const SCOPE_IDS_MAX = 200;   // 서버 상한(등록 vCenter 수와 200 중 작은 값)과 같은 바깥 상한 — 화면에서 그 이상 고를 일은 없다
+/** 목록 정리 — 배열 · 문자열(쉼표 목록 포함) 모두 받는다 · 앞뒤 공백 제거 · 빈 값 · 중복 제거 · 상한. 순서는 고른 차례 그대로. */
+export function normScopeIds(v) {
+  const raw = Array.isArray(v) ? v : (v == null ? [] : String(v).split(','));
+  const out = [];
+  for (const x of raw) {
+    if (x == null || typeof x === 'object') continue;
+    const id = String(x).trim();
+    if (id && !out.includes(id)) out.push(id);
+    if (out.length >= SCOPE_IDS_MAX) break;
+  }
+  return out;
+}
+/** 범위 객체에서 고른 법인 목록 — vcenterIds(목록)가 있으면 그것, 없으면 옛 단일 vcenterId 를 한 곳 목록으로. */
+export function scopeIdsOf(scope) {
+  if (!scope || typeof scope !== 'object') return [];
+  const list = normScopeIds(scope.vcenterIds);
+  if (list.length) return list;
+  return normScopeIds(scope.vcenterId ? [scope.vcenterId] : []);
+}
+/** 목록 → 단일 vcenterId(옛 값을 읽는 곳 — 범위 바의 선택 칸 · 내보내기) — 정확히 1곳일 때만 그 id, 아니면 ''. */
+export const singleScopeId = (ids) => { const l = normScopeIds(ids); return l.length === 1 ? l[0] : ''; };
+/** 칩 하나를 켜고 끈다 — 있으면 빼고 없으면 뒤에 더한다(새 배열). */
+export function toggleScopeId(ids, id) {
+  const l = normScopeIds(ids); const v = String(id ?? '').trim();
+  if (!v) return l;
+  return l.includes(v) ? l.filter((x) => x !== v) : normScopeIds([...l, v]);
+}
+/**
+ * 리전을 바꾸면 그 리전 밖 선택은 풀린다(scopeVcPatch 와 같은 규칙 — 리전과 고른 법인이 엇갈리면 화면이 빈다).
+ * 리전이 없으면(전체 리전) 그대로. 목록에 없는 id(지워진 vCenter · 목록을 아직 못 받음)는 판정할 수 없어 남긴다 — 못 읽은 것을 리전 밖으로 단정하지 않는다.
+ */
+export function idsInRegion(ids, vcenters, region) {
+  const l = normScopeIds(ids); const r = String(region || '');
+  if (!r) return l;
+  const byId = new Map((Array.isArray(vcenters) ? vcenters : []).filter((v) => v && typeof v === 'object').map((v) => [String(v.id), v]));
+  return l.filter((id) => { const v = byId.get(id); return !v || String(v.location?.region ?? '') === r; });
+}
+/**
+ * API 범위 쿼리 조각 — 허브 세 탭(/platform/summary · /hosts · /hosts/checks · /hosts/corp · /vms · /vms/by-vcenter)과 그 밖 탭의 filters · scope 를 이 함수 하나가 만든다.
+ * 1곳 = { vcenterId } · 2곳 이상 = { vcenterIds: 'a,b' } · 0곳 = 리전이 있으면 { region } · 아무것도 없으면 {}. 고른 법인이 있으면 리전은 싣지 않는다(지금 규칙 — 법인이 리전보다 좁다).
+ */
+export function hubScopeQuery(scope) {
+  const ids = scopeIdsOf(scope);
+  if (ids.length === 1) return { vcenterId: ids[0] };
+  if (ids.length > 1) return { vcenterIds: ids.join(',') };
+  const region = String(scope?.region || '');
+  return region ? { region } : {};
+}
+/** 범위 안 법인(카드) — 고른 법인이 있으면 그 법인들만(목록 순서 그대로), 없으면 리전. hubScopeQuery 가 서버에 싣는 것과 같은 뜻. */
+export function sitesInHubScope(sites, scope) {
+  const list = (Array.isArray(sites) ? sites : []).filter((s) => s && typeof s === 'object');
+  const ids = scopeIdsOf(scope);
+  if (ids.length) { const set = new Set(ids); return list.filter((s) => set.has(String(s.id))); }
+  const region = String(scope?.region || '');
+  return region ? list.filter((s) => s.location?.region === region) : list;
+}
+/**
+ * App 허브 칸에 쓰는 patch 정규화 — 옛 단일 patch({ vcenterId })를 목록(vcenterIds)으로 바꾼다. 허브 칸에는 vcenterId 를 저장하지 않는다(값이 두 벌이 되지 않게).
+ * 카드의 호스트 · VM 수 · VM 표의 법인 · 범위 바 선택 칸 · ⌘K 인계 · ‘필터 초기화’ 가 보내는 { vcenterId: id | '' } 가 그대로 한 곳 목록 · 빈 목록이 된다.
+ */
+export function hubScopePatch(patch) {
+  const p = { ...(patch && typeof patch === 'object' ? patch : {}) };
+  if ('vcenterId' in p) { const v = String(p.vcenterId || '').trim(); p.vcenterIds = v ? [v] : []; delete p.vcenterId; }
+  if ('vcenterIds' in p) p.vcenterIds = normScopeIds(p.vcenterIds);
+  return p;
+}
+/** 범위 바 vCenter 선택 칸의 ‘여러 곳’ 글자 — 2곳 이상이면 ‘법인 N곳 선택’(비활성 option), 아니면 ''. */
+export const multiPickText = (ids) => { const n = normScopeIds(ids).length; return n > 1 ? `법인 ${n}곳 선택` : ''; };
+export const MULTI_PICK_VALUE = '__multi__';   // 그 option 의 값(고를 수 없다 — disabled)
 
 /**
  * v3.10.13(점검 1회차): vCenter 목록의 검색어 규칙 한 벌(공백 구분 다중 키워드 AND — 이름 · id · 도시 · 국가 · 리전 · 버전)과,
@@ -116,15 +196,24 @@ export function filterChipSites(sites, text, selectedIds = []) {
   const keep = new Set((Array.isArray(selectedIds) ? selectedIds : [selectedIds]).filter(Boolean).map(String));
   return list.filter((s) => s && typeof s === 'object' && (keep.has(String(s.id)) || vcMatches(s, kws)));
 }
+/**
+ * v3.20.0: 고른 법인이 **2곳 이상**이면 이웃은 그 법인들 안에서 돈다(목록 순서 · 검색어는 그대로 건다 — 카드와 같은 범위).
+ *   0 · 1곳이면 지금 규칙(리전 · 검색어 — 한 곳만 고른 것은 범위로 치지 않는다. 그러면 이웃이 없다).
+ */
 export function siblingSites(sites, scope) {
   const region = String(scope?.region || '');
   const kws = keywordsOf(scope?.q);
-  return (Array.isArray(sites) ? sites : []).filter((s) => s && typeof s === 'object' && (!region || s.location?.region === region) && vcMatches(s, kws));
+  const ids = scopeIdsOf(scope);
+  const picked = ids.length > 1 ? new Set(ids) : null;
+  return (Array.isArray(sites) ? sites : []).filter((s) => s && typeof s === 'object'
+    && (picked ? picked.has(String(s.id)) : (!region || s.location?.region === region)) && vcMatches(s, kws));
 }
-/** 이전 · 다음 옆에 붙는 범위 글자 — 리전 · 검색어가 있을 때만('리전 유럽 · ‘kr1’'), 없으면 ''. */
+/** 이전 · 다음 옆에 붙는 범위 글자 — 고른 법인(2곳 이상) · 리전 · 검색어가 있을 때만('리전 유럽 · ‘kr1’' · '법인 3곳'), 없으면 ''. */
 export function siblingScopeText(scope) {
   const region = String(scope?.region || '').trim(); const q = String(scope?.q || '').trim();
-  return [region ? regionText(region) : '', q ? `‘${q}’` : ''].filter(Boolean).join(' · ');
+  const ids = scopeIdsOf(scope);
+  const head = ids.length > 1 ? `법인 ${ids.length}곳` : region ? regionText(region) : '';
+  return [head, q ? `‘${q}’` : ''].filter(Boolean).join(' · ');
 }
 
 export const fmtN = (v) => { const n = numOrNull(v); return n == null ? '—' : n.toLocaleString('en-US'); };
@@ -234,10 +323,11 @@ export function chipRegionNote(region, n) {
   return r ? `${regionText(r)} · ${Number.isFinite(n) ? n : 0}법인` : '';
 }
 
+/** v3.20.0: 칩은 켜고 끄는 단추 — 여러 곳을 함께 고를 수 있다는 안내를 붙인다. */
 export function chipLegend(tab) {
-  return tab === 'hosts' ? '숫자 = 그 vCenter 의 확인 대상 호스트 · 고른 법인은 파랗게'
-    : tab === 'vms' ? '숫자 = 그 vCenter 의 조치 필요 VM · 고른 법인은 파랗게'
-      : '숫자 = 그 vCenter 의 알람 · 고른 법인은 파랗게';
+  return tab === 'hosts' ? '숫자 = 그 vCenter 의 확인 대상 호스트 · 고른 법인은 파랗게 · 여러 곳을 함께 고를 수 있습니다'
+    : tab === 'vms' ? '숫자 = 그 vCenter 의 조치 필요 VM · 고른 법인은 파랗게 · 여러 곳을 함께 고를 수 있습니다'
+      : '숫자 = 그 vCenter 의 알람 · 고른 법인은 파랗게 · 여러 곳을 함께 고를 수 있습니다';
 }
 
 /** '조치 필요' 타일(VM 탭 — 예전 '전체 VM' 타일 자리)의 신호 분해 — 서버 signalCounts 키 순서. */

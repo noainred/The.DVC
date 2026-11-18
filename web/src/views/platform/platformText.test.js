@@ -226,10 +226,10 @@ describe('바로가기 칩 범위(v3.10.14)', () => {
     expect(chipRegionNote('유럽', 5)).toBe('리전 유럽 · 5법인');
     expect(chipRegionNote('유럽', NaN)).toBe('리전 유럽 · 0법인');
   });
-  it('App 은 칩에 region 을 넘기고 칩을 눌러도 region 을 지우지 않는다(소스 계약)', async () => {
+  it('App 은 칩에 region 을 넘기고 칩을 눌러도 region 을 지우지 않는다(소스 계약 — v3.20.0: 칩은 목록을 켜고 끈다 · region 은 patch 에 없다)', async () => {
     const fs = await import('node:fs');
     const app = fs.readFileSync(new URL('../../App.jsx', import.meta.url), 'utf8');
-    expect(app).toMatch(/<PlatformHub[\s\S]*?region=\{region\}[\s\S]*?onPickVcenter=\{\(id\) => patchFilter\(\{ vcenterId: id \}\)\}/);
+    expect(app).toMatch(/<PlatformHub[\s\S]*?region=\{region\}[\s\S]*?onToggleVcenter=\{\(id\) => patchFilter\(\{ vcenterIds: toggleScopeId\(vcenterIds, id\) \}\)\}/);
     const hub = fs.readFileSync(new URL('./PlatformHub.jsx', import.meta.url), 'utf8');
     expect(hub).toMatch(/const regionSites = chipSites\(vcenters, region\)/);
   });
@@ -320,7 +320,8 @@ describe('v3.13.0 — 2차 루프 1회차: 공용 범위 바의 vCenter 선택�
   });
   it('소스 계약 — App 범위 바가 두 함수를 쓰고 · 리전이 있으면 첫 선택지가 ‘리전 X 전체’', () => {
     const app = fs.readFileSync(new URL('../../App.jsx', import.meta.url), 'utf8');
-    expect(app).toMatch(/onChange=\{\(e\) => patchFilter\(scopeVcPatch\(vcenters, region, e\.target\.value\)\)\}/);
+    // v3.20.0: ‘법인 N곳 선택’ option(MULTI_PICK_VALUE)을 고른 것은 무시하고, 그 밖은 지금처럼 scopeVcPatch 로
+    expect(app).toMatch(/onChange=\{\(e\) => \{ if \(e\.target\.value !== MULTI_PICK_VALUE\) patchFilter\(scopeVcPatch\(vcenters, region, e\.target\.value\)\); \}\}/);
     expect(app).toMatch(/scopeVcOptions\(vcenters, region, vcenterId\)\.map/);
     expect(app).toMatch(/\{region \? `\$\{regionText\(region\)\} 전체` : '전체 vCenter'\}/);   // v3.13.6 부터 리전 글자는 regionText(Unknown → 리전 미지정)
     expect(app).not.toMatch(/\(vcenters \|\| \[\]\)\.map\(\(v\) => <option key=\{v\.id\} value=\{v\.id\}>\{v\.name\}<\/option>\)/);
@@ -382,7 +383,7 @@ describe('v3.19.0 — 바로가기 찾기(filterChipSites)', () => {
   it('카드와 같은 판정(vcMatches)을 쓰고 새 판정을 만들지 않는다 · 소스 계약 — 허브 칩 · 카드 · App 상태', () => {
     expect(stripComments(read('./platformText.js'))).toMatch(/vcMatches\(s, kws\)/);
     const hub = stripComments(read('./PlatformHub.jsx'));
-    expect(hub).toMatch(/filterChipSites\(regionSites, chipQuery, \[vcenterId\]\)/);
+    expect(hub).toMatch(/filterChipSites\(regionSites, chipQuery, picked\)/);   // v3.20.0: 켠 칩 목록 전부
     expect(hub).toMatch(/찾는 글자에 맞는 법인이 없습니다/);
     expect(hub).toMatch(/<SearchBox /);
     const vc = stripComments(read('../VCenters.jsx'));

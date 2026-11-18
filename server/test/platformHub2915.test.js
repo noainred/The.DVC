@@ -147,7 +147,10 @@ test('③ 실제 라우트 /platform/summary — 범위 · 권한 칸 · region 
   assert.deepEqual(j.byVc.map((x) => x.id), [VA]);
   assert.equal(JSON.stringify(j).includes('vc-out'), false);
   ({ j } = await get('?vcenterId=' + OUT));
-  assert.deepEqual(j.byVc, [], '범위 밖 vcenterId 는 비어 있다');
+  // v3.20.0(허브 복수 법인): byVc 는 고른 법인과 무관하게 범위 안 전체 줄(칩 숫자 유지) · totals 는 고른 법인의 합 — 범위 밖만 고르면 0건
+  assert.deepEqual(j.byVc.map((x) => x.id), [VA], '범위 밖 vcenterId 로 넓힐 수 없다 — 줄은 범위 안 것만');
+  assert.equal(JSON.stringify(j).includes('vc-out'), false);
+  assert.equal(j.totals.vcenters.total, 0, '범위 밖 vcenterId 의 합은 0건(전체가 아니다)');
   // inv.vms 없는 역할 — VM 칸은 null(호스트 칸은 있다) · 캐시가 역할 사이에 섞이지 않는다(같은 URL)
   user = { username: 'op', role: 'operator' };
   ({ j } = await get());

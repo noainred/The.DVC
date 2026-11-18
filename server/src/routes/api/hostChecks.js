@@ -9,7 +9,7 @@ import { requirePerm } from '../../auth/auth.js';
 import { inUserScope } from '../../auth/scope.js';
 import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { store } from '../../store.js';
-import { memoJson, applyFilters, scopeKey } from './shared.js';
+import { memoJson, applyFilters, scopeKey, vcenterPickKey } from './shared.js';
 import { accessOf, makeIdracFor, BOOT_DAYS } from './hostExport.js';
 import { analyzeReboots } from '../../hostcfg/reboots.js';
 import { HOSTOPS_TYPES } from '../../vmchanges/eventDetail.js';
@@ -61,7 +61,7 @@ export function registerHostChecks(api) {
       }
       const r = hostChecksOf(hosts, { access, idracFor, reboots, veeamOf: (id) => veeamByVc.get(id) || null, vmsByHost: vmsByHostOf(snap.vms), now });
       return { ok: true, ...r, bootDays: BOOT_DAYS, at: now, initial: snap.initial === true, hosts: hosts.length };
-    }, { ttlMs: 60_000, extraKey: `${scopeKey(req.user, store.get())}|${accessKey}` });
+    }, { ttlMs: 60_000, extraKey: `${scopeKey(req.user, store.get())}|${vcenterPickKey(req.query, store.get())}|${accessKey}` });
   });
 
   api.get('/hosts/:id', invHosts, (req, res) => {
