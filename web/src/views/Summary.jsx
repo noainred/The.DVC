@@ -12,7 +12,7 @@ import { ratioOrNull, serverRatio, ratioLabel, ratioBadge, ratioKpi, numCell, RA
 // v2.632(감사 WEB2632-01·02): 기여도 표·설치 용량 판정은 corpContribution.js 하나가 한다(v2.747 에 version_6/v6Data.js 에서 옮겼다).
 import { corpContribution, contribNote, contribTotalLabel, dsUnknownMark, physStorageTB } from './corpContribution.js';
 // v3.19.2: VM 할당 합(vCPU · 메모리)의 못 읽은 VM 표기 — 서버가 0 으로 더하지 않고 vcpuUnknown · ramUnknown 으로 센다(합이 null 이면 '—').
-import { allocUnknownOf, allocCell, allocUnknownSub, minMark, ratioKpiSub, ratioBadgeTitle, osAllocTotals as osAllocTotalsOf } from './summaryAllocText.js';
+import { allocUnknownOf, allocCell, allocKpiSub, minMark, ratioKpiSub, ratioBadgeTitle, osAllocTotals as osAllocTotalsOf } from './summaryAllocText.js';
 import Select from '../components/Select.jsx';
 
 const OS_COLORS = {
@@ -216,12 +216,12 @@ export default function Summary({ scope, onGotoTab }) {
         {/* v2.771(점검 R6-F3-2): 용량을 못 읽은 호스트(REST 폴백)가 있으면 서버가 두 비율을 null 로 준다(분모만 빠진 비율은 틀린 값) —
             '—' 와 함께 그 이유(용량 미상 호스트 수)를 말한다. 물리 코어·RAM 합계는 읽은 호스트만의 합임을 밝힌다. */}
         {/* v3.19.2: 못 읽은 VM 은 합에서 뺐다(0 으로 채우지 않음) — 하나도 못 읽었으면 '—', 일부면 뺀 VM 수를 말하고 비율에는 '≥'(최소값). */}
-        <Big label="할당된 vCPU 합계" value={fmtOr(al.vcpuAllocated)} sub={[`물리 코어 ${fmt(comp.cpuCores)}개${capUnknown ? `(용량 읽은 호스트만 · 미상 ${fmt(capUnknown)}대 제외)` : ''}`, allocUnknownSub(vcpuUnk, 'vcpu')].filter(Boolean).join(' · ')} accent="var(--accent)" />
+        <Big label="할당된 vCPU 합계" value={fmtOr(al.vcpuAllocated)} sub={[`물리 코어 ${fmt(comp.cpuCores)}개${capUnknown ? `(용량 읽은 호스트만 · 미상 ${fmt(capUnknown)}대 제외)` : ''}`, allocKpiSub(al.vcpuAllocated, vcpuUnk, 'vcpu')].filter(Boolean).join(' · ')} accent="var(--accent)" />
         {(() => { const cr = serverRatio(al.vcpuPerCore, comp.cpuCores); const k = ratioKpi(cr, 'cpu'); return (
           <Big label="vCPU : 물리코어 비율" value={`${minMark(cr, vcpuUnk)}${ratioLabel(cr)}`} sub={ratioKpiSub(cr, k, { allocated: al.vcpuAllocated, unknown: vcpuUnk, kind: 'vcpu', capSub: capUnknown ? capUnknownSub : null })} accent={k.accent} onClick={() => setShowRatio(true)} />
         ); })()}
         <Big label="할당된 RAM 합계" value={fmtOr(al.ramAllocatedGB)} unit={al.ramAllocatedGB == null ? undefined : 'GB'}
-          sub={[al.ramOvercommitPct == null ? (capUnknown ? capUnknownSub : al.ramAllocatedGB == null ? '' : '물리 RAM 미수집') : comp.memTotalGB > 0 ? `물리 RAM의 ${minMark(al.ramOvercommitPct, ramUnk)}${al.ramOvercommitPct}%` : '물리 RAM 미수집', allocUnknownSub(ramUnk, 'ram')].filter(Boolean).join(' · ')} accent="var(--purple)" />
+          sub={[al.ramOvercommitPct == null ? (capUnknown ? capUnknownSub : al.ramAllocatedGB == null ? '' : '물리 RAM 미수집') : comp.memTotalGB > 0 ? `물리 RAM의 ${minMark(al.ramOvercommitPct, ramUnk)}${al.ramOvercommitPct}%` : '물리 RAM 미수집', allocKpiSub(al.ramAllocatedGB, ramUnk, 'ram')].filter(Boolean).join(' · ')} accent="var(--purple)" />
         {(() => { const mr = serverRatio(al.ramOvercommitPct, comp.memTotalGB, 100); const k = ratioKpi(mr, 'mem'); return (
           <Big label="메모리 : 물리RAM 비율" value={`${minMark(mr, ramUnk)}${ratioLabel(mr)}`}
             sub={ratioKpiSub(mr, k, { allocated: al.ramAllocatedGB, unknown: ramUnk, kind: 'ram', capSub: capUnknown ? capUnknownSub : null })}

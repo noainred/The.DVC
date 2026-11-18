@@ -6,7 +6,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { allocUnknownOf, allocCell, allocUnknownSub, minMark, ratioKpiSub, ratioBadgeTitle, osAllocTotals } from './summaryAllocText.js';
+import { allocUnknownOf, allocCell, allocUnknownSub, allocKpiSub, minMark, ratioKpiSub, ratioBadgeTitle, osAllocTotals } from './summaryAllocText.js';
 import { corpContribution, contribNote } from './corpContribution.js';
 import { ratioOrNull } from './virtRatioText.js';
 
@@ -47,6 +47,12 @@ describe('KPI 부제 · ≥ 표지', () => {
     expect(allocUnknownSub(4, 'vcpu')).toBe('vCPU 미상 VM 4대 제외');
     expect(allocUnknownSub(1200, 'ram')).toBe('메모리 미상 VM 1,200대 제외');
     expect(allocUnknownSub(0)).toBe(''); expect(allocUnknownSub(null)).toBe('');
+  });
+  it('allocKpiSub — 합이 null 이면 제외가 아니라 읽지 못했다고 말한다', () => {
+    expect(allocKpiSub(null, 2242, 'vcpu')).toBe('VM 2,242대의 vCPU 를 읽지 못했습니다');
+    expect(allocKpiSub(null, 5, 'ram')).toBe('VM 5대의 메모리를 읽지 못했습니다');
+    expect(allocKpiSub(100, 5, 'ram')).toBe('메모리 미상 VM 5대 제외');
+    expect(allocKpiSub(100, 0, 'vcpu')).toBe(''); expect(allocKpiSub(null, 0, 'vcpu')).toBe('');
   });
   it('minMark — 부분 합일 때만 ≥, 비율이 없으면 붙이지 않는다', () => {
     expect(minMark(2.1, 3)).toBe('≥ '); expect(minMark(2.1, 0)).toBe(''); expect(minMark(null, 3)).toBe('');

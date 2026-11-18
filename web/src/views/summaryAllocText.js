@@ -42,6 +42,16 @@ export function allocUnknownSub(unknown, kind = 'vcpu') {
   return u != null && u > 0 ? `${wordOf(kind).name} 미상 VM ${fmt(u)}대 제외` : '';
 }
 
+/**
+ * 할당 합 KPI(‘할당된 vCPU 합계’ · ‘할당된 RAM 합계’)의 부제 조각 — 합이 null(하나도 못 읽음)이면 '제외' 가 아니라 '읽지 못했습니다'
+ * (뺄 합이 없다 — Chromium 판독 v3.19.2). 일부만 못 읽었으면 allocUnknownSub. 못 읽은 VM 이 없으면 ''.
+ */
+export function allocKpiSub(value, unknown, kind = 'vcpu') {
+  const u = n(unknown);
+  if (!(u > 0)) return '';
+  return n(value) == null ? `VM ${fmt(u)}대의 ${wordOf(kind).obj} 읽지 못했습니다` : allocUnknownSub(u, kind);
+}
+
 /** 비율 · 퍼센트 앞 표지 — 분자(할당 합)가 부분 합이면 '≥ '(최소값). 비율이 없으면(null) 붙이지 않는다('—' 앞에 '≥' 금지). */
 export function minMark(ratio, unknown) {
   return ratio != null && n(unknown) > 0 ? '≥ ' : '';
