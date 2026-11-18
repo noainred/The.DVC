@@ -170,6 +170,22 @@ const DEFAULT_PORT_OF = { https: 443, http: 80 };
  * 인터벌: TCP 120초 · HTTP·SSH·SMTP 300초 · 인증서 1일.
  * @returns {object[]} store.cleanTest 입력 모양 + tpl/tplKey
  */
+/** 엣지 포탈(수집 서버) HTTP 점검 — 무인증으로 200 을 주는 공개 경로와 그 본문의 표지(v3.18.14 결함 D1). */
+export const COLLECTOR_PROBE_PATH = '/api/auth/config';
+export const COLLECTOR_PROBE_KEYWORD = 'authEnabled';
+/** v2.915 ~ v3.18.13 가 만든 엣지 포탈 HTTP 점검의 경로 — 로그인이 필요해 인증 포탈에서 늘 401 이었다. */
+const LEGACY_COLLECTOR_PATH = '/api/health';
+const urlPathOf = (u) => { try { return new URL(String(u || '')).pathname; } catch { return ''; } };
+
+/**
+ * 설정 연동이 만든 점검(tpl='settings') 중 **옛 정의라 고쳐야 하는 것**인가 — 지금은 엣지 포탈 HTTP 점검의 옛 경로 하나뿐(결함 D1).
+ *   주소 비교로 일반화하지 않는다: 버전마다 URL 표기가 조금씩 달라(대괄호 · 기본 포트) 정상 대상이 대량으로 '변경' 이 된다.
+ * @returns {boolean}
+ */
+export function isLegacyCheck(kind, test) {
+  return t(kind) === 'set:collector' && test?.tpl === SYNC_TPL && test?.tplKey === 'http' && urlPathOf(test.url) === LEGACY_COLLECTOR_PATH;
+}
+
 export function checksFor(x) {
   const spec = SETTING_KINDS[t(x?.kind)];
   if (!spec) return [];
@@ -180,8 +196,10 @@ export function checksFor(x) {
   const mode = spec.probe?.mode;
   if (mode === 'http') {
     const scheme = isHttps(x) ? 'https' : 'http';
-    // 엣지 포탈의 카탈로그 프로브(/api/collector/ping)는 포탈 토큰을 보낸다 — Monitoring 은 토큰을 싣지 않으므로 공개 상태 경로를 쓴다.
-    const probePath = t(x.kind) === 'set:collector' ? '/api/health' : t(spec.probe?.path);
+    // 엣지 포탈의 카탈로그 프로브(/api/collector/ping)는 포탈 토큰을 보낸다 — Monitoring 은 토큰을 싣지 않으므로 **무인증 경로**를 쓴다.
+    //   v3.18.14(결함 D1 — 재현): v2.915 부터 '/api/health' 였는데 그 경로는 `/api` 인증 라우터 아래라 인증을 켠 포탈(운영 기본)에서 늘 401 →
+    //   200 고정 점검이 'HTTP 401' 실패였다. 로그인 화면이 쓰는 공개 설정 경로(/api/auth/config — 200 · 'authEnabled' 가 실린다)로 바꾼다.
+    const probePath = t(x.kind) === 'set:collector' ? COLLECTOR_PROBE_PATH : t(spec.probe?.path);
     const hostPart = x.host && String(x.host).includes(':') && !String(x.host).startsWith('[') ? `[${x.host}]` : t(x.host);
     const portPart = port === DEFAULT_PORT_OF[scheme] ? '' : `:${port}`;
     const url = `${scheme}://${hostPart}${portPart}${t(x.basePath)}${probePath}` || `${scheme}://${hostPart}${portPart}/`;
@@ -191,7 +209,7 @@ export function checksFor(x) {
       // 인증서 **신뢰**는 이 점검의 질문이 아니다(자체서명 장비가 대부분) — 만료는 cert 점검이 본다.
       insecure: true,
       ...(identity ? { expectStatus: 200 } : {}),
-      ...(t(x.kind) === 'set:collector' ? { keyword: 'status' } : {}),
+      ...(t(x.kind) === 'set:collector' ? { keyword: COLLECTOR_PROBE_KEYWORD } : {}),
     });
     return scheme === 'https' ? [tcp, cert, http] : [tcp, http];
   }
@@ -275,7 +293,10 @@ export function classifyCatalog(built = {}, svcTargets = [], { ctx = {}, candida
       // v2.915(반증 M3 — 재현): 사라짐으로 표지(·중지)된 대상이 설정에 다시 나타나면 '연동' 으로 두면 영구히 중지·표지가 남았다 —
       //   '변경(다시 나타남)' 으로 올려 적용이 표지를 지우고, 설정 연동이 중지한 것이었으면 다시 켠다(goneOff).
       const reappeared = !!o.gone;
-      const changed = hostChanged || portChanged || reappeared;
+      // v3.18.14(결함 D1): 옛 정의(엣지 포탈 HTTP 점검 '/api/health' — 인증 포탈에서 늘 401)가 남은 연동 대상은 '변경' 으로 올린다.
+      //   감지는 읽기만 한다(적용은 사람이) — 적용하면 점검 id 를 승계한 채 경로 · 표지만 고친다(executePlan).
+      const defStale = !reappeared && (Array.isArray(st.tests) ? st.tests : []).some((x2) => isLegacyCheck(row.kind, x2));
+      const changed = hostChanged || portChanged || reappeared || defStale;
       // v2.988(쉬운 등록 후속 — '법인 폴더로 정리'): 대상이 **설정 연동이 놓은 자리**(등록 때 법인의 기본 경로)에 그대로 있는데 지금 법인 판정으로는
       //   다른 폴더여야 하면(법인 판정 보강 전에 '전역' 으로 등록된 것 · DataCenter 이름이 바뀐 것) 옮길 경로를 싣는다. 사람이 옮긴 대상은 건드리지 않는다.
       const placedAt = syncPathOf({ group: SETTING_KINDS[t(x.kind)]?.group }, { label: t(o.corp) || '전역' });
@@ -283,6 +304,7 @@ export function classifyCatalog(built = {}, svcTargets = [], { ctx = {}, candida
       const repath = !changed && !ctx?.corpUnreadable && row.corpKey && t(st.path) === placedAt && row.path && row.path !== t(st.path) ? row.path : '';
       rows.push({
         ...row, state: changed ? 'changed' : 'linked', ...(repath ? { repath } : {}), ...(reappeared ? { reappeared: true, reason: '설정에 다시 나타났습니다 — 적용하면 사라짐 표지를 지웁니다(설정 연동이 중지했다면 다시 켭니다).' } : {}),
+        ...(defStale && !hostChanged && !portChanged ? { defChanged: true, reason: `점검 정의 갱신 — 옛 HTTP 경로(${LEGACY_COLLECTOR_PATH})는 인증 포탈에서 늘 401 이었습니다. 적용하면 공개 경로로 고칩니다(점검 id 승계).` } : {}),
         targetId: st.id, targetPath: st.path, targetName: st.name, targetEnabled: st.enabled !== false, targetAgent: t(st.agent),
         tests: Array.isArray(st.tests) ? st.tests.length : 0, syncedAt: o.syncedAt || null, ...(o.gone ? { wasGone: o.gone } : {}),
         ...(changed ? { prevHost: t(st.host), prevPort: o.port || null } : {}),
@@ -629,7 +651,7 @@ export function planApply(rows, keys, { enabled = false, goneAction = 'disable',
       });
     } else if (r.state === 'changed') {
       if (!x) { skip.push({ key: k, name: r.name, reason: '카탈로그 항목을 다시 읽지 못했습니다.' }); continue; }
-      change.push({ key: k, name: r.name, kindLabel: r.kindLabel, targetId: r.targetId, prevHost: r.prevHost, prevPort: r.prevPort, host: r.host, port: r.port, x, corp: r.corp });
+      change.push({ key: k, name: r.name, kindLabel: r.kindLabel, targetId: r.targetId, prevHost: r.prevHost, prevPort: r.prevPort, host: r.host, port: r.port, x, corp: r.corp, ...(r.defChanged ? { defChanged: true } : {}) });
     } else if (r.state === 'gone') {
       gone.push({ key: k, name: r.name, kindLabel: r.kindLabel, targetId: r.targetId, action: GONE_ACTIONS.includes(goneAction) ? goneAction : 'disable' });
     }
@@ -641,7 +663,7 @@ export function planApply(rows, keys, { enabled = false, goneAction = 'disable',
 export function previewOf(plan, bulkPlan = null) {
   return {
     add: plan.add.map((a) => ({ key: a.key, name: a.name, kindLabel: a.kindLabel, path: a.path, host: a.host, port: a.port, agent: a.agent, ...(a.agentFrom ? { agentFrom: a.agentFrom } : {}), checks: checkBrief(a.row.tests) })),
-    change: plan.change.map((c) => ({ key: c.key, name: c.name, kindLabel: c.kindLabel, targetId: c.targetId, prevHost: c.prevHost, prevPort: c.prevPort, host: c.host, port: c.port })),
+    change: plan.change.map((c) => ({ key: c.key, name: c.name, kindLabel: c.kindLabel, targetId: c.targetId, prevHost: c.prevHost, prevPort: c.prevPort, host: c.host, port: c.port, ...(c.defChanged ? { defChanged: true } : {}) })),
     gone: plan.gone.map((g) => ({ key: g.key, name: g.name, kindLabel: g.kindLabel, targetId: g.targetId, action: g.action })),
     skip: plan.skip.slice(0, 500),
     ...(bulkPlan ? {
@@ -691,7 +713,9 @@ export function executePlan(plan, { user = '', now = Date.now(), batchPrefix = '
         const s = specs.get(test.tplKey);
         if (!s) continue;
         // 주소에 묶인 칸(포트·URL)만 고친다 — 사람이 바꾼 사용 여부·주기·이름·임계는 그대로(반증 낮음: 예전에는 전부 덮어썼다).
-        updateTest(c.targetId, test.id, Object.fromEntries(Object.entries({ port: s.port, url: s.url }).filter(([, v]) => v !== undefined)));
+        //   v3.18.14(결함 D1): 옛 정의 점검은 경로와 함께 그 경로에 묶인 표지 · 기대 코드도 새 정의로(옛 표지 'status' 는 새 경로 본문에 없다).
+        const legacy = isLegacyCheck(c.x?.kind, test);
+        updateTest(c.targetId, test.id, Object.fromEntries(Object.entries({ port: s.port, url: s.url, ...(legacy ? { keyword: s.keyword, expectStatus: s.expectStatus } : {}) }).filter(([, v]) => v !== undefined)));
         specs.delete(test.tplKey);
         fixed += 1;
       }
@@ -832,8 +856,7 @@ export async function detectOnce(deps = {}) {
   if (!deps.svcTargets && svcmonStoreReadError()) return null;
   _running = true;
   try {
-    const cat = await readCatalog(deps);
-    noteDetection(cat, { at: cat.at, ms: cat.ms, sourceErrors: cat.sourceErrors });
+    let cat = await readCatalog(deps);
     const auto = new Set(getOptions().autoKinds);
     if (auto.size) {
       const known = knownKeys();
@@ -845,6 +868,9 @@ export async function detectOnce(deps = {}) {
         const plan = planApply(cat.rows, keys, { enabled: false, builtByKey });
         if (plan.add.length) {
           const r = executePlan({ add: plan.add, change: [], gone: [], skip: [] }, { user: 'auto', batchPrefix: 'settings-auto' });
+          // v3.18.14(결함 D2 — 재현): 감지값을 자동 등록 **전** 카탈로그로 남겨 개요 '감시 범위' 가 다음 감지(5분)까지 '감시 0 · 미등록 N' 이었다 —
+          //   대상을 더했으면 저장소 기준으로 다시 분류한 값을 남긴다(이력 · 일별 요약은 한 감지에 한 번).
+          if (r.added) cat = await readCatalog({ ...deps, svcTargets: undefined });
           try {
             const { recordBatch } = await import('./batches.js');
             if (r.added) recordBatch({ id: r.batch, createdBy: 'auto', source: 'settings', kind: 'infra', path: SYNC_ROOT, targets: r.added, tests: r.newTests, note: '설정 연동 자동 등록(중지 상태)' });
@@ -852,6 +878,7 @@ export async function detectOnce(deps = {}) {
         }
       }
     }
+    noteDetection(cat, { at: cat.at, ms: cat.ms, sourceErrors: cat.sourceErrors });
     return cat;
   } catch (e) {
     console.warn('[svcmon] 설정 연동 감지 실패:', e?.message || e);
@@ -874,7 +901,8 @@ export function startSettingsSyncDetector() {
  */
 let _reqTimer = null;
 export function requestDetect(delayMs = 2000) {
-  if (!_timer || _reqTimer) return false;
+  if (!_timer) return false;
+  if (_reqTimer) return true;   // 이미 곧 돈다(v3.18.14 — 저장 응답의 detectQueued 가 '안 돈다' 로 거짓 보고하지 않게)
   _reqTimer = setTimeout(() => { _reqTimer = null; detectOnce().catch(() => {}); }, delayMs);
   _reqTimer.unref?.();
   return true;

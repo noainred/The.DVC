@@ -6,7 +6,7 @@ import { requireChanged } from '../changeResult.js';
 import { STable } from '../../components/STable.jsx';
 import './techView.css';
 import {
-  SYNC_STATE_META, SELECTABLE, FACETS, emptySelection, filterRows, facetCounts, chipValue, toggleFacet, sparkPoints, stackedBars, fmtMs, fmtAge, detectText,
+  SYNC_STATE_META, SELECTABLE, FACETS, emptySelection, filterRows, facetCounts, chipValue, toggleFacet, sparkPoints, stackedBars, fmtMs, fmtAge, detectText, autoSavedText,
 } from './syncLogic.js';
 
 /**
@@ -81,6 +81,7 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
   const [msg, setMsg] = useState('');
   const [result, setResult] = useState(null);
   const [autoKinds, setAutoKinds] = useState(null);
+  const [autoMsg, setAutoMsg] = useState('');   // v3.18.14: 저장 안내는 버튼 옆에(페이지 맨 아래 안내는 하단 고정 바에 가려졌다 — Chromium)
   const [rp, setRp] = useState(null);   // v2.988 '법인 폴더로 정리' — { preview, result, busy, msg } · null = 닫힘
   const seq = useRef(0);
   const rpSeq = useRef(0);   // v2.988(반증 R10): 닫은 뒤 늦게 온 미리보기 응답이 창을 다시 열지 않게
@@ -184,9 +185,14 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
     } catch (e) { if (my === rpSeq.current) setRp((p) => ({ ...p, busy: false, msg: e.message })); }
   };
   const saveAuto = async () => {
-    setBusy(true); setMsg('');
-    try { const r = requireChanged(await putJson('/svcmon/settings-sync/options', { autoKinds: [...(autoKinds || [])] }), '자동 등록 설정을 저장하지 못했습니다.'); setAutoKinds(new Set(r.options?.autoKinds || [])); setMsg('자동 등록 설정을 저장했습니다.'); }
-    catch (e) { setMsg(e.message); } finally { setBusy(false); }
+    setBusy(true); setAutoMsg('');
+    try {
+      const r = requireChanged(await putJson('/svcmon/settings-sync/options', { autoKinds: [...(autoKinds || [])] }), '자동 등록 설정을 저장하지 못했습니다.');
+      setAutoKinds(new Set(r.options?.autoKinds || []));
+      setAutoMsg(autoSavedText(r, detectEvery));
+      // v3.18.14(결함 D3): 서버가 저장 직후 감지를 한 번 돌린다(2초 묶음) — 끝날 즈음 목록을 다시 읽어 등록된 것이 보이게 한다.
+      if (r.detectQueued) setTimeout(() => { load(); }, 6000);
+    } catch (e) { setAutoMsg(e.message); } finally { setBusy(false); }
   };
 
   const chipLabel = (k) => chipValue(sel, k, labelOf[k] || ((v) => v));
@@ -338,7 +344,7 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
                         {r.depth && <span className="tv-tag d">{`depth:${r.depth}`}</span>}
                       </td>
                       <td className="mono">
-                        {r.state === 'changed'
+                        {r.state === 'changed' && !r.defChanged
                           ? <><s style={{ color: 'var(--text-faint)' }}>{`${r.prevHost}${r.prevPort ? `:${r.prevPort}` : ''}`}</s>{` → ${r.host}${r.port ? `:${r.port}` : ''}`}</>
                           : (r.host ? `${r.host}${r.port ? `:${r.port}` : ''}` : (r.address || '—'))}
                       </td>
@@ -379,13 +385,17 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
           <div style={{ padding: '10px 12px' }} className="tv-opts">
             <div className="muted" style={{ fontSize: 12 }}>
               켠 종류의 <b>한 번도 연동된 적 없는</b> 새 항목만 등록합니다(지운 대상을 되살리지 않습니다). 등록은 언제나 중지 상태이고 배정 동기화는 하지 않습니다.
+              저장하면 <b>곧바로 한 번 감지</b>하고, 그 뒤로는 {detectEvery ? `${detectEvery}마다` : '주기마다'} 감지할 때 등록합니다. 등록된 대상은 Monitoring 트리의 ‘{data.root}’ 폴더에서 스위치나 ‘시험 점검 후 사용’으로 켜야 점검을 시작합니다.
             </div>
             <div className="tv-kindgrid">
               {Object.entries(kinds).filter(([, v]) => !v.excluded).map(([k, v]) => (
                 <label key={k}><input type="checkbox" checked={!!autoKinds?.has(k)} onChange={() => setAutoKinds((s) => { const n = new Set(s || []); if (n.has(k)) n.delete(k); else n.add(k); return n; })} />{v.label}</label>
               ))}
             </div>
-            <div><button type="button" className="btn" disabled={busy} onClick={saveAuto}>자동 등록 저장</button></div>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button type="button" className="btn" disabled={busy} onClick={saveAuto}>자동 등록 저장</button>
+              {autoMsg && <span className="muted" role="status" style={{ fontSize: 12, minWidth: 0 }}>{autoMsg}</span>}
+            </div>
           </div>
         </div>
       )}
@@ -428,7 +438,7 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
                         <td>{a.checks.map((x, i) => <span key={i} className="tv-chk">{x.type}{x.port ? `:${x.port}` : ''}</span>)}</td><td>{a.agent || '중앙'}</td></tr>
                     ))}
                     {preview.change.map((x) => (
-                      <tr key={x.key}><td><span className="tv-pill chg">변경</span></td><td>{x.name}</td><td className="mono">—</td><td className="mono">{`${x.prevHost}${x.prevPort ? `:${x.prevPort}` : ''} → ${x.host}:${x.port}`}</td><td className="muted">점검 id 승계 · url·포트 갱신</td><td>—</td></tr>
+                      <tr key={x.key}><td><span className="tv-pill chg">변경</span></td><td>{x.name}</td><td className="mono">—</td><td className="mono">{x.defChanged ? `${x.host}:${x.port}` : `${x.prevHost}${x.prevPort ? `:${x.prevPort}` : ''} → ${x.host}:${x.port}`}</td><td className="muted">{x.defChanged ? '점검 id 승계 · 점검 정의 갱신(경로 · 표지)' : '점검 id 승계 · url·포트 갱신'}</td><td>—</td></tr>
                     ))}
                     {preview.gone.map((x) => (
                       <tr key={x.key}><td><span className="tv-pill gone">사라짐</span></td><td>{x.name}</td><td className="mono">—</td><td className="mono">—</td><td className="muted">{x.action === 'delete' ? '대상 삭제' : x.action === 'keep' ? '표지만' : '중지 + 표지'}</td><td>—</td></tr>

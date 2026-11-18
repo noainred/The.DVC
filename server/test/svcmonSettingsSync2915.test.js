@@ -56,8 +56,10 @@ test('checksFor — 종류별 무인증 점검: identity HTTP 는 200 고정 · 
   const nsx = SYNC.checksFor(cat('set:nsx', 'n1')).find((c) => c.type === 'http');
   assert.equal(nsx.expectStatus, undefined, '무인증이라 401/403 이 정상 — 기대 코드를 비워 500 미만을 정상으로');
   const edge = SYNC.checksFor(cat('set:collector', 'e1', { port: 8443 })).find((c) => c.type === 'http');
-  assert.equal(edge.url, 'https://e1.corp.example:8443/api/health', '엣지는 토큰 없는 공개 상태 경로');
-  assert.equal(edge.keyword, 'status');
+  // ⚠ v3.18.14 정정(결함 D1 — 재현): v2.915 의 '/api/health = 토큰 없는 공개 상태 경로' 전제가 틀렸다(`/api` 인증 라우터 아래 — 인증 포탈에서 401).
+  //   무인증 공개 경로로 바꿨다 — 실제로 인증 없이 200 인지는 svcmonSettingsSyncFix31814 가 라우터로 확인한다.
+  assert.equal(edge.url, 'https://e1.corp.example:8443/api/auth/config', '엣지는 토큰 없는 공개 경로');
+  assert.equal(edge.keyword, 'authEnabled');
   assert.deepEqual(SYNC.checksFor(cat('set:sanswitch-ssh', 's1', { port: 2222 })).map((c) => [c.type, c.port]), [['ssh', 2222]]);
   assert.deepEqual(SYNC.checksFor(cat('set:pdu', 'p1', { port: 22 })).map((c) => c.type), ['ssh'], 'PDU 는 SSH 수집 경로');
   assert.deepEqual(SYNC.checksFor(cat('set:smtp', 'm', { port: 25 })).map((c) => c.type), ['smtp']);

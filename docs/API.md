@@ -262,8 +262,8 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 
 | 메서드 | 경로 | 게이트(공통 제외) | 소스 |
 |---|---|---|---|
-| GET | `/alert-settings` | 역할 `admin/operator` | [server/src/routes/svcmon/settingsSync.js:234](../server/src/routes/svcmon/settingsSync.js#L234) |
-| PUT | `/alert-settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:240](../server/src/routes/svcmon/settingsSync.js#L240) |
+| GET | `/alert-settings` | 역할 `admin/operator` | [server/src/routes/svcmon/settingsSync.js:237](../server/src/routes/svcmon/settingsSync.js#L237) |
+| PUT | `/alert-settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:243](../server/src/routes/svcmon/settingsSync.js#L243) |
 | GET | `/assign` | 역할 `admin/operator` | [server/src/routes/svcmon/edge.js:32](../server/src/routes/svcmon/edge.js#L32) |
 | DELETE | `/assign/:agent` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/edge.js:112](../server/src/routes/svcmon/edge.js#L112) |
 | PUT | `/assign/:agent` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/edge.js:67](../server/src/routes/svcmon/edge.js#L67) |
@@ -287,15 +287,15 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | GET | `/log/files/:name` | 역할 `admin/operator` | [server/src/routes/svcmon/logs.js:71](../server/src/routes/svcmon/logs.js#L71) |
 | POST | `/log/prune` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/logs.js:124](../server/src/routes/svcmon/logs.js#L124) |
 | GET | `/log/windows` | — | [server/src/routes/svcmon/logs.js:84](../server/src/routes/svcmon/logs.js#L84) |
-| GET | `/overview` | — | [server/src/routes/svcmon/settingsSync.js:215](../server/src/routes/svcmon/settingsSync.js#L215) |
+| GET | `/overview` | — | [server/src/routes/svcmon/settingsSync.js:218](../server/src/routes/svcmon/settingsSync.js#L218) |
 | POST | `/push-now` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/edge.js:181](../server/src/routes/svcmon/edge.js#L181) |
 | POST | `/refresh` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/overview.js:127](../server/src/routes/svcmon/overview.js#L127) |
 | PUT | `/reorder/folders` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/tree.js:53](../server/src/routes/svcmon/tree.js#L53) |
 | PUT | `/reorder/targets` | 역할 `admin/operator` · `fullScopeOnly` | [server/src/routes/svcmon/tree.js:48](../server/src/routes/svcmon/tree.js#L48) |
-| POST | `/settings-sync/ack` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:199](../server/src/routes/svcmon/settingsSync.js#L199) |
+| POST | `/settings-sync/ack` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:202](../server/src/routes/svcmon/settingsSync.js#L202) |
 | POST | `/settings-sync/apply` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:145](../server/src/routes/svcmon/settingsSync.js#L145) |
 | GET | `/settings-sync/catalog` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:102](../server/src/routes/svcmon/settingsSync.js#L102) |
-| POST | `/settings-sync/detach/:id` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:206](../server/src/routes/svcmon/settingsSync.js#L206) |
+| POST | `/settings-sync/detach/:id` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:209](../server/src/routes/svcmon/settingsSync.js#L209) |
 | PUT | `/settings-sync/options` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:190](../server/src/routes/svcmon/settingsSync.js#L190) |
 | POST | `/settings-sync/preview` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:136](../server/src/routes/svcmon/settingsSync.js#L136) |
 | POST | `/settings-sync/repath` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/svcmon/settingsSync.js:169](../server/src/routes/svcmon/settingsSync.js#L169) |
