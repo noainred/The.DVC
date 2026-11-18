@@ -191,7 +191,11 @@ export function hostKpis(summary, rows, now = Date.now()) {
   const vcoreRatio = s.hostsCapacityUnknown ? `—(용량 못 읽은 호스트 ${fmt(s.hostsCapacityUnknown)})`
     : !vcpuUnknown ? ratioText(vcore, cores)
       : ratioText(vcore, cores) === '—' ? `—(vCPU 못 읽은 VM ${fmt(vcpuUnknown)}대)` : `≥${ratioText(vcore, cores)}(vCPU 못 읽은 VM ${fmt(vcpuUnknown)}대 제외 · 최소값)`;
-  const memAlloc = s.memOvercommit ? `${vmemUnknown ? '≥' : ''}${s.memOvercommit} : 1${vmemUnknown ? `(메모리 못 읽은 VM ${fmt(vmemUnknown)}대 제외)` : ''}` : '—';
+  // 6회차: 참 · 거짓이 아니라 numOrNull 로 — 진짜 0(VM 0대)은 '0 : 1', null(모름)은 vCore 칸과 같은 사유를 붙인다.
+  const memRatio = numOrNull(s.memOvercommit);
+  const memAlloc = memRatio != null ? `${vmemUnknown ? '≥' : ''}${memRatio} : 1${vmemUnknown ? `(메모리 못 읽은 VM ${fmt(vmemUnknown)}대 제외)` : ''}`
+    : s.hostsCapacityUnknown ? `—(용량 못 읽은 호스트 ${fmt(s.hostsCapacityUnknown)})`
+      : vmemUnknown ? `—(메모리 못 읽은 VM ${fmt(vmemUnknown)}대)` : '—';
   const ver = Array.isArray(s.esxiVersions) ? s.esxiVersions : [];
   return [
     { key: 'hosts', label: '호스트(ESXi)', value: fmt(s.total), sub: `연결 ${fmt(s.connected)} · 점검 ${fmt(s.maintenance)} · 끊김 ${fmt(s.disconnected)}`, bar: s.total > 0 ? s.connected / s.total : 0, tone: 'text' },

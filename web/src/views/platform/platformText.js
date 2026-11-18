@@ -98,13 +98,22 @@ export function vcInRegion(vcList, region) {
  * v3.20.0(사용자 요청 2026-11-18 "바로가기의 선택을 복수개 선택해서 볼 수 있게" · 설계 docs/design/vm-menu §5 ③ 기본값 ‘복수 선택 · 세 탭 공용’):
  * 허브 범위의 **고른 법인 목록**(vcenterIds — 배열 · 메모리만 · 저장하지 않는다) 판정 코어. App · 허브 칩 · 카드 · 상세 이웃이 이 한 벌을 쓴다.
  *  · API 계약: 0곳 = 둘 다 안 보냄(리전이 있으면 region) · 1곳 = 지금처럼 vcenterId=<id> · 2곳 이상 = vcenterIds=<id>,<id>(쉼표 목록) — 둘을 함께 보내지 않는다(hubScopeQuery).
- *    값은 날 글자로 잇고 인코딩은 보내는 쪽(URLSearchParams)이 한다 — 여기서 encodeURIComponent 를 하면 두 번 인코딩된다.
+ *    점검 dbg3221: 등록부는 id 에 쉼표를 허용한다(vcenter/registry.js normalize — 제어 문자만 거부) — 날 글자로 이으면 'KR,Seoul' 이 서버에서 둘로 갈려
+ *    그 법인이 합계에서 조용히 빠졌다. 그래서 id 하나하나를 encodeURIComponent 한 뒤 쉼표로 잇는다(목록 구분 쉼표 = 날 쉼표 · id 안 쉼표 = %2C).
+ *    URLSearchParams 가 바깥을 한 번 더 인코딩하고 express 가 그 바깥을 푼 뒤, 서버 parseVcenterIds 가 나눈 조각마다 decodeURIComponent 한다.
+ *    화면 안에서 이 글자를 다시 읽는 normScopeIds(문자열)도 조각마다 같은 디코드를 한다(scopeIdsOf(filters)).
  *  · 허브 밖 탭 · 도구의 vcenterId(문자열 하나)는 그대로다 — 이 목록은 App 의 허브 칸(PLATFORM_SCOPE_KEY)에만 산다.
  */
 export const SCOPE_IDS_MAX = 200;   // 서버 상한(등록 vCenter 수와 200 중 작은 값)과 같은 바깥 상한 — 화면에서 그 이상 고를 일은 없다
-/** 목록 정리 — 배열 · 문자열(쉼표 목록 포함) 모두 받는다 · 앞뒤 공백 제거 · 빈 값 · 중복 제거 · 상한. 순서는 고른 차례 그대로. */
+/** 쉼표 목록 조각 하나를 푼다(hubScopeQuery 가 encodeURIComponent 한 id) — 잘못된 % 줄은 날 글자 그대로(서버 parseVcenterIds 의 decodeVcenterIdPart 와 같은 뜻). */
+export function decodeScopeIdPart(part) {
+  const s = String(part ?? '');
+  if (!s.includes('%')) return s;
+  try { return decodeURIComponent(s); } catch { return s; }
+}
+/** 목록 정리 — 배열 · 문자열(쉼표 목록 — 조각마다 decodeScopeIdPart) 모두 받는다 · 앞뒤 공백 제거 · 빈 값 · 중복 제거 · 상한. 순서는 고른 차례 그대로. */
 export function normScopeIds(v) {
-  const raw = Array.isArray(v) ? v : (v == null ? [] : String(v).split(','));
+  const raw = Array.isArray(v) ? v : (v == null ? [] : String(v).split(',').map(decodeScopeIdPart));
   const out = [];
   for (const x of raw) {
     if (x == null || typeof x === 'object') continue;
@@ -141,12 +150,12 @@ export function idsInRegion(ids, vcenters, region) {
 }
 /**
  * API 범위 쿼리 조각 — 허브 세 탭(/platform/summary · /hosts · /hosts/checks · /hosts/corp · /vms · /vms/by-vcenter)과 그 밖 탭의 filters · scope 를 이 함수 하나가 만든다.
- * 1곳 = { vcenterId } · 2곳 이상 = { vcenterIds: 'a,b' } · 0곳 = 리전이 있으면 { region } · 아무것도 없으면 {}. 고른 법인이 있으면 리전은 싣지 않는다(지금 규칙 — 법인이 리전보다 좁다).
+ * 1곳 = { vcenterId } · 2곳 이상 = { vcenterIds: 'a,b' }(id 마다 encodeURIComponent — 'KR,Seoul' 은 'KR%2CSeoul') · 0곳 = 리전이 있으면 { region } · 아무것도 없으면 {}. 고른 법인이 있으면 리전은 싣지 않는다(지금 규칙 — 법인이 리전보다 좁다).
  */
 export function hubScopeQuery(scope) {
   const ids = scopeIdsOf(scope);
   if (ids.length === 1) return { vcenterId: ids[0] };
-  if (ids.length > 1) return { vcenterIds: ids.join(',') };
+  if (ids.length > 1) return { vcenterIds: ids.map((id) => encodeURIComponent(id)).join(',') };
   const region = String(scope?.region || '');
   return region ? { region } : {};
 }

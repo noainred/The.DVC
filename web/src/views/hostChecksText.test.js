@@ -132,7 +132,15 @@ describe('hostChecksText — 요약 8칸·칩·거르기', () => {
     const none = hostKpis({ ...summary, vcoreAllocated: null, memOvercommit: null, vcpuUnknown: 4, vmemUnknown: 4 }, rows, NOW);
     expect(none[3].value).toBe('—');
     expect(none[3].sub).toBe('vCore:물리 —(vCPU 못 읽은 VM 4대)');
-    expect(none[4].sub).toMatch(/할당 —$/);
+    expect(none[4].sub).toMatch(/할당 —\(메모리 못 읽은 VM 4대\)$/);
+    // 6회차: 진짜 0(VM 0대 — 서버가 0 을 준다)은 '0 : 1' · 모름(null)과 다르다
+    const zero = hostKpis({ ...summary, vcoreAllocated: 0, memOvercommit: 0, vmemAllocatedGB: 0, vcpuUnknown: 0, vmemUnknown: 0 }, rows, NOW);
+    expect(zero[4].sub).toMatch(/할당 0 : 1$/);
+    expect(zero[3].sub).toBe('vCore:물리 0.0 : 1');
+    // 용량 못 읽은 호스트가 있으면(서버 null) vCore 칸과 같은 사유
+    expect(hostKpis({ ...summary, memOvercommit: null, hostsCapacityUnknown: 1 }, rows, NOW)[4].sub).toMatch(/할당 —\(용량 못 읽은 호스트 1\)$/);
+    // 사유 없는 null(옛 서버 등)은 그냥 '—'
+    expect(hostKpis({ ...summary, memOvercommit: null, vmemUnknown: 0 }, rows, NOW)[4].sub).toMatch(/할당 —$/);
     // 호스트 용량을 못 읽었으면 그 사유가 먼저(예전 문구 그대로)
     expect(hostKpis({ ...summary, hostsCapacityUnknown: 1, vcpuUnknown: 3 }, rows, NOW)[3].sub).toBe('vCore:물리 —(용량 못 읽은 호스트 1)');
   });

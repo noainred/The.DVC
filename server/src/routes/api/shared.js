@@ -60,9 +60,18 @@ export const eachLimited = poolRun;
 //   · 쉼표로 나누고 앞뒤 공백 · 빈 값 · 중복을 버리고, id 하나가 200자를 넘으면 버린다. 개수는 min(등록 vCenter 수, 200) — 넘으면 앞에서 자른다.
 //   · 목록을 보냈는데 남은 것이 없으면 [] — **필터 없음이 아니라 0건**이다(이상한 목록이 전체 조회가 되면 안 된다). 글자가 아닌 값(배열 · 객체)도 [].
 //   · 사용자 조회 범위(scope) 교집합은 부르는 쪽이 **먼저** 건다(applyFilters 순서) — 범위 밖 id 는 결과에 섞이지 않고, 범위 밖 id 만 보내면 0건.
+//   · 점검 dbg3221: 웹(platformText.hubScopeQuery)은 id 마다 encodeURIComponent 한 뒤 쉼표로 잇는다 — 등록부가 id 에 쉼표를 허용하므로
+//     날 글자로 이으면 'KR,Seoul' 이 둘로 갈려 그 법인이 조용히 빠졌다. 나눈 조각마다 decodeVcenterIdPart(잘못된 % 줄은 날 글자 그대로 — 옛 웹 호환).
+//     길이 상한은 **푼 뒤** 의 id 에 건다. 원문 상한은 인코딩으로 늘어나는 길이(UTF-8 3바이트 × '%XX' 3글자)를 감안한다.
 export const VCENTER_IDS_MAX = 200;
 export const VCENTER_ID_LEN_MAX = 200;
-const VCENTER_IDS_RAW_MAX = VCENTER_IDS_MAX * (VCENTER_ID_LEN_MAX + 1);
+const VCENTER_IDS_RAW_MAX = VCENTER_IDS_MAX * (VCENTER_ID_LEN_MAX * 9 + 1);
+/** 쉼표 목록 조각 하나를 푼다 — 웹 platformText.decodeScopeIdPart 와 같은 뜻(시험이 같은 입력으로 대조). */
+export function decodeVcenterIdPart(part) {
+  const s = String(part ?? '');
+  if (!s.includes('%')) return s;
+  try { return decodeURIComponent(s); } catch { return s; }
+}
 export function parseVcenterIds(query, snap) {
   if (query?.vcenterId) return null;
   const raw = query?.vcenterIds;
@@ -73,7 +82,7 @@ export function parseVcenterIds(query, snap) {
   const out = [];
   for (const part of raw.slice(0, VCENTER_IDS_RAW_MAX).split(',')) {
     if (out.length >= cap) break;
-    const id = part.trim();
+    const id = decodeVcenterIdPart(part).trim();
     if (!id || id.length > VCENTER_ID_LEN_MAX || seen.has(id)) continue;
     seen.add(id);
     out.push(id);

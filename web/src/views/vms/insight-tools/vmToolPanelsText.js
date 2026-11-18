@@ -9,7 +9,7 @@ import { numOrNull } from '../../../numOrNull.js';
 import { ALL_TEXT } from '../../vmcfg/vmHygieneText.js';
 import { LIFE_KIND_LABEL, ADD_KINDS } from '../../vmlife/vmLifeText.js';
 import {
-  pickRows, total, sumArrays, sumObjects, mergeTop, descNull, ascNull, byName, TOP_N_DEFAULT,
+  pickRows, pickByVc, notReadPicked, total, sumArrays, sumObjects, mergeTop, descNull, ascNull, byName, TOP_N_DEFAULT,
 } from './toolSumText.js';
 
 /** 따뜻한 색 4단(낮음 → 높음) — 시안 보드와 같은 값. 글자색은 바탕 밝기에 맞춘다. */
@@ -251,7 +251,7 @@ export function lifeView(resp, vcIds) {
     }
   }
   const series = [...days.values()].sort((a, b) => a.day - b.day);
-  const notCollected = Array.isArray(resp.notCollected) ? resp.notCollected.length : 0;
+  const notCollected = pickByVc(resp.notCollected, vcIds).length;   // dbg3221: 고른 법인 안의 수만(서버 목록은 사용자 범위 전체)
   return {
     empty: rows.length === 0,
     missing,
@@ -312,7 +312,10 @@ export function hygieneCodes(resp, rows) {
 
 export function hygieneView(resp, vcIds) {
   if (!resp || !Array.isArray(resp.rows)) return null;
-  const { rows, missing } = pickRows(resp.rows, vcIds);
+  const picked = pickRows(resp.rows, vcIds);
+  const { rows } = picked;
+  const nr = notReadPicked(resp, vcIds, picked.missing);   // dbg3221: 못 읽은 법인도 고른 법인으로 거른다 · missing 에서 뺀다
+  const missing = nr.missing;
   const N = topNOf(resp);
   const by = sumObjects(rows, (r) => r.byCode);
   return {
@@ -324,9 +327,9 @@ export function hygieneView(resp, vcIds) {
     codes: hygieneCodes(resp, rows),
     // 응답 대기 질문 — 도구의 판정(심각). 순서는 이름(심각도가 모두 같다).
     questions: mergeTop(rows, (r) => r.top?.question, (a, b) => byName(a, b), N),
-    partial: resp.partial === true,
+    partial: nr.partial,
     settingsUnreadable: resp.settingsUnreadable === true,
-    notReadVcenters: Array.isArray(resp.notReadVcenters) ? resp.notReadVcenters.length : 0,
+    notReadVcenters: nr.list.length,
     initial: resp.initial === true,
   };
 }

@@ -73,6 +73,32 @@ export function pickRows(rows, vcIds, keyOf = (r) => r?.vcenterId) {
 }
 
 /**
+ * dbg3221 5회차: 응답의 '못 읽은 · 수집하지 않는 법인' 목록(notReadVcenters · notCollected — 항목마다 vcenterId)을 **고른 법인으로** 거른다.
+ *   서버는 이 목록을 사용자 범위 전체(scopeSlice)로 만든다 — 거르지 않으면 고르지 않은 법인 하나가 불통이어도 '일부만 센 수' 가 떴다.
+ *   vcIds 가 비었으면 전부(행 합계 pickRows 와 같은 규칙).
+ */
+export function pickByVc(list, vcIds) {
+  const all = Array.isArray(list) ? list.filter((x) => x && typeof x === 'object') : [];
+  const ids = Array.isArray(vcIds) ? vcIds.map((x) => String(x)).filter(Boolean) : [];
+  if (!ids.length) return all;
+  const want = new Set(ids);
+  return all.filter((x) => want.has(String(x.vcenterId ?? '')));
+}
+/** 못 읽은 법인 중 합계를 하한으로 만드는 것이 있는가 — 서버 corelicense/analyze.js notReadPartialOf 와 같은 뜻(비활성 'disabled' 만이면 false · 시험이 대조). */
+export const notReadPartialIn = (list) => (Array.isArray(list) ? list : []).some((x) => x?.why !== 'disabled');
+/**
+ * 고른 법인 범위의 못 읽음 — { list, partial, missing }. 못 읽은 법인은 행이 없어 pickRows 의 missing 에도 잡히므로
+ * missing 에서는 뺀다(같은 법인을 '못 읽음' 과 '이 도구에 값 없음' 으로 두 번 세지 않는다). vcIds 가 비었으면 partial 은 응답 값 그대로.
+ */
+export function notReadPicked(resp, vcIds, missing = []) {
+  const list = pickByVc(resp?.notReadVcenters, vcIds);
+  const picked = Array.isArray(vcIds) && vcIds.some((x) => String(x));
+  const partial = picked ? notReadPartialIn(list) : resp?.partial === true;
+  const nr = new Set(list.map((x) => String(x.vcenterId)));
+  return { list, partial, missing: (Array.isArray(missing) ? missing : []).filter((id) => !nr.has(String(id))) };
+}
+
+/**
  * 줄의 값을 더한다 — 읽은 값만 더하고 못 읽은 줄 수를 센다.
  * @returns {{ sum: number|null, n: number, unknown: number }} 읽은 줄이 하나도 없으면 sum = null(0 을 지어내지 않는다)
  */

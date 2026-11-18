@@ -16,7 +16,7 @@ import { fetchJson, toolAllowed } from '../../../api.js';
 import { useLatest } from '../../../hooks/useLatest.js';
 import { useToolSummary } from './useToolSummary.js';
 import { fmtN, fmtU, fmt1, gbText, mbText, ghzText, pctText, pctOf, corpNameOf, hostAvgMemGB, hostsEq, missingText, synthNote, barPct, toolLabel, gateOf } from './toolSumText.js';
-import { overTotals, kindCounts, corpBars, topVms, OVER_KINDS, normKind, OVER_COLORS, OVER_CORP_ROWS } from './vmOverText.js';
+import { overTotals, kindCounts, corpBars, topVms, OVER_KINDS, normKind, OVER_COLORS, OVER_CORP_ROWS, cpuNoClockText } from './vmOverText.js';
 import { PanelHead, PanelState, SegBar, Legend, ToolLink, TopTable, NameCell } from './ToolParts.jsx';
 
 function HeroCard({ title, right, big, bigText, segs, note, title2 }) {
@@ -71,7 +71,7 @@ export default function VmOverView({ vcIds = [], rows = [], canTool }) {
         <HeroCard title="CPU — 준 것과 쓰는 것" right={`할당 ${ghzText(t.cpu.allocMhz)}`} big={ghzText(t.cpu.idleMhz)}
           bigText={`미사용 — 할당의 ${pctText(t.cpu.idleMhz, t.cpu.allocMhz)}`} title2="구동 VM 의 CPU 할당 · 사용 합"
           segs={duoSegs(t.cpu.usedMhz, t.cpu.idleMhz, t.cpu.allocMhz, ghzText)}
-          note={`줄일 후보 ${fmtU(t.cpu.candidates, '대')} — 구동 VM ${fmtU(t.poweredOnVms, '대')} 중 CPU 사용률이 ${unitText(t.cpuIdlePct, '%')} 이하인 VM.${t.usageUnknown.cpu ? ` 사용률을 못 읽은 ${fmtU(t.usageUnknown.cpu, '대')}는 합 · 판정에서 뺐습니다.` : ''}`} />
+          note={`줄일 후보 ${fmtU(t.cpu.candidates, '대')} — 구동 VM ${fmtU(t.poweredOnVms, '대')} 중 CPU 사용률이 ${unitText(t.cpuIdlePct, '%')} 이하인 VM.${t.usageUnknown.cpu ? ` 사용률을 못 읽은 ${fmtU(t.usageUnknown.cpu, '대')}는 합 · 판정에서 뺐습니다.` : ''}${cpuNoClockText(t.excludedNoHostMhz) ? ` ${cpuNoClockText(t.excludedNoHostMhz)}` : ''}`} />
         <HeroCard title="메모리 — 준 것과 쓰는 것" right={`할당 ${mbText(t.mem.allocMB)}`} big={mbText(t.mem.idleMB)}
           bigText={`미사용 — 할당의 ${pctText(t.mem.idleMB, t.mem.allocMB)}${eq == null ? '' : ` · 호스트 약 ${fmt1(eq)}대분`}`} title2="구동 VM 의 메모리 할당 · 게스트 사용 합"
           segs={duoSegs(t.mem.usedMB, t.mem.idleMB, t.mem.allocMB, mbText)}
@@ -164,11 +164,11 @@ export default function VmOverView({ vcIds = [], rows = [], canTool }) {
                 {!shown.length && <div className="vit-empty">이 범위에는 해당하는 법인이 없습니다.</div>}
                 {shown.map((c) => {
                   const text = isUse
-                    ? <><b>{unit(c.value)}</b> · {pctText(c.idle, c.alloc)} · 후보 {fmtU(c.n, '대')}</>
+                    ? <><b>{unit(c.value)}</b> · {pctText(c.idle, c.alloc)} · 후보 {fmtU(c.n, '대')}{c.noClock > 0 ? ` · clock 미상 ${fmtU(c.noClock, '대')} 제외` : ''}</>
                     : k === 'tools' ? <><b>{fmtU(c.value, '대')}</b> · 구동 {fmtU(c.poweredOn, '대')} 중 {pctOf(c.value, c.poweredOn) == null ? '—' : `${pctOf(c.value, c.poweredOn)}%`}</>
                       : <><b>{gbText(c.value)}</b> · {fmtU(c.n, '대')}</>;
                   return (
-                    <div key={c.vcenterId} className="vit-oc" title={isUse ? `${nameOf(c.vcenterId)} — 할당 ${unit(c.alloc)} · 사용 ${unit(c.used)} · 미사용 ${unit(c.idle)} · 후보 ${fmtU(c.n, '대')}` : nameOf(c.vcenterId)}>
+                    <div key={c.vcenterId} className="vit-oc" title={isUse ? `${nameOf(c.vcenterId)} — 할당 ${unit(c.alloc)} · 사용 ${unit(c.used)} · 미사용 ${unit(c.idle)} · 후보 ${fmtU(c.n, '대')}${c.noClock > 0 ? ` · ${cpuNoClockText(c.noClock)}` : ''}` : nameOf(c.vcenterId)}>
                       <span className="nm">{nameOf(c.vcenterId)}</span>
                       <span><span className="vit-duo" style={{ width: `${c.w}%` }}>
                         {isUse && <i className="u" style={{ flex: `${c.used} 1 0` }} />}<i className="d" style={{ flex: `${c.idle} 1 0` }} />

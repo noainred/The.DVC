@@ -52,7 +52,7 @@ function ContentionPanel({ vcIds, rows }) {
         {v && (
           <div className="vit-gp">
             <div className="vit-sum">
-              <Hero value={fmtN(v.hostsReadyCrit)} text={`대 — CPU 대기(Ready)가 ${unitText(th.readyCrit, '%')} 이상인 VM 이 있는 호스트입니다(측정한 호스트 ${fmtU(v.hostsMeasured, '대')} 중)`} />
+              <Hero value={fmtN(v.hostsReadyCrit)} text={`대 — CPU 대기(Ready)가 ${unitText(th.readyCrit, '%')} 이상인 VM 이 있는 호스트입니다(연결된 호스트 ${fmtU(v.hostsConnected, '대')} 중)`} />
               <Stats items={[
                 { key: 'hc', tone: 's', big: `${fmtU(v.hostsContended, '대')}`, text: '경합 VM 이 있는 호스트(대기 · Co-stop 경고 포함)', title: '도구의 호스트 표에서 경합 VM 이 하나 이상인 호스트' },
                 { key: 'hd', tone: 'c', big: `${fmtU(v.hostsDisk, '대')}`, text: `디스크 지연이 큰 호스트(${unitText(th.diskWarn, 'ms')} 이상)`, title: '호스트가 보고한 디스크 지연이 경고 기준 이상' },

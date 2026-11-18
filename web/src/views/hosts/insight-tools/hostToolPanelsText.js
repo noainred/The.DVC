@@ -8,7 +8,7 @@
  */
 import { numOrNull } from '../../../numOrNull.js';
 import { HOST_CFG_TEXT } from '../../hostcfg/hostCfgText.js';
-import { pickRows, total, sumObjects, mergeTop, descNull, ascNull, byName, TOP_N_DEFAULT } from '../../vms/insight-tools/toolSumText.js';
+import { pickRows, notReadPicked, total, sumObjects, mergeTop, descNull, ascNull, byName, TOP_N_DEFAULT } from '../../vms/insight-tools/toolSumText.js';
 
 const topNOf = (resp) => (Number.isInteger(resp?.topN) && resp.topN > 0 ? resp.topN : TOP_N_DEFAULT);
 const SEV_RANK = { crit: 0, warn: 1, info: 2 };
@@ -65,7 +65,10 @@ export function hostCodeRows(resp, rows) {
 
 export function hostHygieneView(resp, vcIds) {
   if (!resp || !Array.isArray(resp.rows)) return null;
-  const { rows, missing } = pickRows(resp.rows, vcIds);
+  const picked = pickRows(resp.rows, vcIds);
+  const { rows } = picked;
+  const nr = notReadPicked(resp, vcIds, picked.missing);   // dbg3221: 못 읽은 법인도 고른 법인으로 거른다 · missing 에서 뺀다
+  const missing = nr.missing;
   const N = topNOf(resp);
   return {
     empty: rows.length === 0,
@@ -78,8 +81,8 @@ export function hostHygieneView(resp, vcIds) {
     codes: hostCodeRows(resp, rows),
     // 인증서가 만료된 호스트 — 도구 요약과 같은 순서(지난 일수 큰 순 · 이름)
     certList: mergeTop(rows, (r) => r.top?.certExpired, (a, b) => descNull(a.days, b.days) || byName(a, b), N),
-    partial: resp.partial === true,
-    notReadVcenters: Array.isArray(resp.notReadVcenters) ? resp.notReadVcenters.length : 0,
+    partial: nr.partial,
+    notReadVcenters: nr.list.length,
     initial: resp.initial === true,
     scan: resp.scan && typeof resp.scan === 'object' ? resp.scan : null,
   };

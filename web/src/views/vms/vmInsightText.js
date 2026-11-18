@@ -95,6 +95,9 @@ export function checkBase(s, { snapAgeDays = null, wasteHref = null } = {}) {
   const sig = s?.signals || {};
   const r = s?.reclaim || {};
   const d = numOrNull(snapAgeDays);
+  // 6회차: 정지 VM 디스크는 용량을 읽은 VM 만의 부분 합 — 서버 reclaim.offDiskUnknown 이 있으면 ‘이상’ 과 모름 수(VmInsight 정지 VM 카드와 같은 사실).
+  const offDu = numOrNull(r.offDiskUnknown) ?? 0;
+  const offPartial = offDu > 0 && numOrNull(r.offDiskGB) != null ? ' 이상' : '';
   return {
     head: [
       { key: 'overload', label: '과부하 VM', value: sig.overload ?? null, tone: 'crit', sub: 'CPU 또는 메모리 사용률 높음', href: '#/vms/attention', tip: '‘조치 필요’ 의 과부하 신호(구동 VM)' },
@@ -103,7 +106,7 @@ export function checkBase(s, { snapAgeDays = null, wasteHref = null } = {}) {
       { key: 'snapOld', label: '오래된 스냅샷', value: sig.snapOld ?? null, tone: 'warn', sub: d != null ? `${d}일 넘긴 VM` : '기준 일수를 넘긴 VM', href: '#/vms/attention', tip: '가장 오래된 스냅샷이 기준 일수를 넘긴 VM — 기준은 ‘VM 구성 점검’ 설정' },
       { key: 'toolsOld', label: 'Tools 업그레이드 필요', value: sig.toolsOld ?? null, tone: 'warn', sub: 'VMware Tools 버전', href: '#/vms/attention', tip: 'Tools 버전 상태가 업그레이드 필요 · 너무 오래됨 · 차단 판' },
       { key: 'orphan', label: '고아 · 접근 불가', value: r.orphan ?? null, tone: 'warn', sub: '연결 상태', tip: 'vCenter 가 고아(orphaned) · 접근 불가(inaccessible)로 보는 VM' },
-      { key: 'off', label: '정지 VM', value: r.offCount ?? null, tone: '', sub: `디스크 ${gbText(r.offDiskGB)}(템플릿 제외)`, ...(wasteHref ? { href: wasteHref } : {}), tip: '전원이 꺼진 VM(템플릿 제외)' },
+      { key: 'off', label: '정지 VM', value: r.offCount ?? null, tone: '', sub: `디스크 ${gbText(r.offDiskGB)}${offPartial}(템플릿 제외${offDu > 0 ? ` · 디스크 모름 ${fmtU(offDu, '대')}` : ''})`, ...(wasteHref ? { href: wasteHref } : {}), tip: '전원이 꺼진 VM(템플릿 제외)' },
     ],
   };
 }
