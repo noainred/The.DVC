@@ -14,7 +14,7 @@ body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR
 button{font:inherit}
 sc-for,sc-if{display:contents}
 .mono{font-family:"JetBrains Mono",monospace}
-.page{min-height:3400px;padding:22px 24px 28px;display:flex;flex-direction:column;gap:14px;box-sizing:border-box}
+.page{min-height:3800px;padding:22px 24px 28px;display:flex;flex-direction:column;gap:14px;box-sizing:border-box}
 .head{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px}
 .head h1{margin:0;font-size:20px;font-weight:800}
 .head .snap{margin-left:auto;font-size:12px;color:#8b9bb4;font-family:"JetBrains Mono",monospace;white-space:nowrap}
@@ -404,6 +404,39 @@ sc-for,sc-if{display:contents}
       </div>
     </section>
 
+    <section class="panel chg" aria-label="꺼진 VM">
+      <div class="ph"><h2>꺼진 VM</h2><span class="mk">새 패널</span><span class="hint">전원이 꺼진 VM(템플릿 제외) — 특수 기능 ‘Optimization’ 의 ‘전원 꺼짐’ 조사(꺼진 지 며칠) 요약입니다</span><span class="rt">{{ offRule }}</span></div>
+      <div class="gp">
+        <div class="sum">
+          <div class="hero"><b>{{ offHero }}</b><span>{{ offHeroText }}</span></div>
+          <div class="st">
+            <sc-for list="{{ offStats }}" as="x" hint-placeholder-count="3"><div class="{{ x.cls }}" title="{{ x.tip }}"><b>{{ x.big }}</b><span>{{ x.text }}</span></div></sc-for>
+          </div>
+          <div class="stack tall bands"><sc-for list="{{ offBands }}" as="b" hint-placeholder-count="3"><span style="flex: {{ b.n }} 1 0; background: {{ b.bg }}; color: {{ b.ink }}" title="{{ b.tip }}">{{ b.count }}</span></sc-for></div>
+          <div class="lgd"><sc-for list="{{ offBands }}" as="b" hint-placeholder-count="3"><span><i style="background: {{ b.bg }}"></i>{{ b.label }} <b>{{ b.count }}</b></span></sc-for></div>
+          <div class="note">{{ offNote }}</div>
+          <span class="lnk">‘Optimization › 전원 꺼짐’ 에서 모두 보기 →</span>
+          <span class="lnk2">오래 방치된 VM · 고아 VM 은 ‘좀비/방치 리소스’ 에서 →</span>
+        </div>
+        <div class="lst">
+          <div class="lh"><b>꺼진 VM</b><span class="seg" role="group" aria-label="정렬"><sc-for list="{{ offSorts }}" as="z" hint-placeholder-count="2"><button type="button" class="{{ z.cls }}" aria-pressed="{{ z.on }}" onClick="{{ z.pick }}">{{ z.label }}</button></sc-for></span><span>5대</span></div>
+          <sc-for list="{{ offTop }}" as="p" hint-placeholder-count="5">
+            <div class="pr" title="{{ p.tip }}">
+              <span><span class="nm">{{ p.name }}</span><span class="sb">{{ p.sub }}</span></span>
+              <span><span class="gt nt"><i style="width: {{ p.w }}; background: {{ p.bg }}"></i></span><span class="fr">{{ p.note }}</span></span>
+              <span class="big">{{ p.big }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div class="lst">
+          <div class="lh"><b>법인별</b><span>꺼진 VM 이 잡은 디스크가 큰 순</span></div>
+          <sc-for list="{{ offCorp }}" as="c" hint-placeholder-count="6">
+            <div class="oc" title="{{ c.tip }}"><span class="nm">{{ c.id }}</span><span class="dw"><span class="duo" style="width: {{ c.w }}"><i class="d" style="flex: 1 1 0"></i></span></span><span class="tx"><b>{{ c.big }}</b> · {{ c.rest }}</span></div>
+          </sc-for>
+        </div>
+      </div>
+    </section>
+
     <div class="foldbar chg"><b>분포 · 구성 · 회수 후보</b><span class="mk">S1 반영</span><span class="hint">{{ distSummary }}</span><button type="button" class="fb" aria-expanded="{{ distOpen }}" onClick="{{ toggleDist }}">{{ distBtn }}</button></div>
 
     <sc-if value="{{ distOpen }}" hint-placeholder-val="{{ true }}">
@@ -547,9 +580,9 @@ sc-for,sc-if{display:contents}
   </sc-if>
 </main>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":3400}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":3800}}'>
 class Component extends DCLogic {
-  state = { sel: {}, q: '', fill: 'att', size: 'n', sub: 'insight', ovKind: 'mem', fold: false, mapSize: 'l', mapH: 520, mapWide: false, cfgOpen: false };
+  state = { sel: {}, q: '', fill: 'att', size: 'n', sub: 'insight', ovKind: 'mem', fold: false, mapSize: 'l', mapH: 520, mapWide: false, cfgOpen: false, offSort: 'disk' };
 
   // 목(mock, 가상) 서버 /api/vms 를 한 번 받아(2026-11-18 11:09:08 KST · VM 2,242) 법인별로 집계한 값 — 지어낸 수가 아니다.
   // os = [Win2022, Ubuntu22.04, RHEL9, CentOS Stream9, SLES15, Win2019, Debian12] · tv = [최신, 업그레이드 필요, 관리 안 함, 미설치] · hw = [19,17,15,13,10]
@@ -633,6 +666,25 @@ class Component extends DCLogic {
       {id:'vc-ap-south',on:111,c:[1607,835.8,771.2],cc:8,m:[2016,1130.8,885.2],mc:22,off:[13,3360],sn:[20,1014.6],th:[66,8030],nt:5,ct:[['backup-ap-0006',16,38.4,1.2,3,97,3],['k8s-node-ap-0080',8,20.8,0.8,4,96,4],['lb-ap-0097',4,11.6,1.4,12,88,6],['k8s-node-ap-0005',4,11.6,1.6,14,86,6],['app-ap-0051',4,10.4,1.5,14,86,1]],mt:[['backup-ap-0006',64,9,55,14,86,3],['mq-ap-0061',64,16.6,47.4,26,74,5],['cache-ap-0100',64,21.8,42.2,34,66,5],['db-ap-0105',64,23.7,40.3,37,63,3],['web-ap-0058',64,25,39,39,61,2]]},
       {id:'vc-cn-east',on:219,c:[3246.5,1650.4,1596.1],cc:20,m:[4090,2430.2,1659.8],mc:46,off:[44,18292],sn:[44,2809.5],th:[140,25507],nt:13,ct:[['web-cn-0212',16,46.4,6.5,14,86,4],['dns-cn-0043',8,25.6,0.3,1,99,3],['lb-cn-0166',8,25.6,3.3,13,87,1],['db-cn-0207',8,17.6,3,17,83,1],['app-cn-0228',4,12.8,0.5,4,96,3]],mt:[['dns-cn-0006',64,9,55,14,86,4],['monitor-cn-0183',64,17.9,46.1,28,72,0],['monitor-cn-0019',64,19.8,44.2,31,69,0],['mq-cn-0145',64,21.8,42.2,34,66,5],['lb-cn-0146',64,24.3,39.7,38,62,6]]},
       {id:'vc-cn-north',on:162,c:[2044.8,1076.3,968.5],cc:14,m:[2718,1603.2,1114.8],mc:35,off:[18,7476],sn:[30,1934.4],th:[96,14935],nt:7,ct:[['cache-cn-0028',16,51.2,8.2,16,84,5],['lb-cn-0143',16,35.2,5.6,16,84,0],['web-cn-0117',8,23.2,0.9,4,96,0],['k8s-node-cn-0189',8,20.8,1.9,9,91,2],['k8s-node-cn-0097',8,17.6,2.1,12,88,5]],mt:[['db-cn-0022',64,20.5,43.5,32,68,2],['web-cn-0105',64,23.7,40.3,37,63,4],['cache-cn-0183',32,9,23,28,72,5],['app-cn-0144',32,9.3,22.7,29,71,4],['k8s-node-cn-0060',32,9.6,22.4,30,70,1]]},
+    ];
+  }
+
+  // 꺼진 VM — 같은 목 서버 /api/vms 와 /api/tools/waste/off-since(Optimization 의 ‘전원 꺼짐’ 조사)를 2026-11-18 13:29:25 KST 에 받아 법인별로 줄인 값(템플릿 제외 261).
+  // n = 꺼진 VM · d = 디스크 GB · c = vCPU · m = 메모리 GB · snap = 스냅샷도 있는 VM · un = 꺼진 지를 모르는 VM
+  // top = 디스크 큰 순 5대 [VM, 디스크 GB, os 번호, 꺼진 지 일수, vCPU, 메모리 GB]. 목 서버에서는 꺼진 지가 전부 6일(점검이 처음 본 때 — 하한 · 6시간 단위)이다.
+  off() {
+    return [
+      {id:'vc-us-east',n:29,d:6872,c:201,m:544,snap:7,un:0,top:[['backup-us-0031',1024,2,6,2,32],['backup-us-0032',1024,0,6,1,2],['k8s-node-us-0156',1024,4,6,8,2],['app-us-0160',500,0,6,4,8],['backup-us-0009',500,1,6,4,4]]},
+      {id:'vc-us-west',n:18,d:5632,c:66,m:318,snap:5,un:0,top:[['db-us-0119',1024,1,6,2,8],['monitor-us-0055',1024,0,6,4,8],['monitor-us-0126',1024,6,6,1,8],['backup-us-0096',500,5,6,4,16],['cache-us-0059',500,2,6,4,16]]},
+      {id:'vc-br-sao',n:13,d:4612,c:90,m:322,snap:0,un:0,top:[['app-br-0017',1024,1,6,4,64],['backup-br-0033',1024,1,6,2,8],['backup-br-0106',1024,0,6,2,32],['lb-br-0057',500,1,6,8,2],['backup-br-0077',200,1,6,4,4]]},
+      {id:'vc-eu-central',n:56,d:19096,c:331,m:1086,snap:11,un:0,top:[['app-eu-0412',1024,0,6,2,8],['backup-eu-0022',1024,1,6,2,8],['cache-eu-0060',1024,3,6,2,8],['db-eu-0140',1024,4,6,1,8],['dns-eu-0271',1024,3,6,1,32]]},
+      {id:'vc-eu-west',n:31,d:13996,c:153,m:660,snap:4,un:0,top:[['app-eu-0250',1024,6,6,2,32],['backup-eu-0102',1024,1,6,2,64],['backup-eu-0159',1024,5,6,1,8],['cache-eu-0131',1024,1,6,2,4],['db-eu-0204',1024,1,6,2,2]]},
+      {id:'vc-me-uae',n:8,d:3528,c:29,m:122,snap:2,un:0,top:[['db-me-0056',1024,1,6,4,8],['web-me-0055',1024,4,6,8,32],['k8s-node-me-0021',500,4,6,4,2],['web-me-0040',500,1,6,2,32],['app-me-0058',200,0,6,4,16]]},
+      {id:'vc-ap-northeast',n:26,d:6588,c:137,m:524,snap:4,un:0,top:[['dns-ap-0211',1024,4,6,4,8],['web-ap-0010',1024,5,6,2,2],['backup-ap-0059',500,2,6,8,32],['backup-ap-0178',500,2,6,16,8],['mq-ap-0098',500,3,6,4,64]]},
+      {id:'vc-ap-southeast',n:14,d:7004,c:42,m:408,snap:3,un:0,top:[['db-ap-0015',1024,0,6,1,8],['dns-ap-0006',1024,2,6,4,64],['dns-ap-0063',1024,6,6,2,32],['lb-ap-0113',1024,0,6,2,64],['mq-ap-0111',1024,1,6,1,8]]},
+      {id:'vc-ap-south',n:13,d:3360,c:87,m:298,snap:3,un:0,top:[['app-ap-0016',500,2,6,4,4],['db-ap-0011',500,0,6,8,64],['k8s-node-ap-0008',500,1,6,16,4],['web-ap-0023',500,4,6,16,8],['web-ap-0118',500,5,6,8,8]]},
+      {id:'vc-cn-east',n:35,d:14680,c:147,m:596,snap:11,un:0,top:[['app-cn-0089',1024,5,6,2,2],['app-cn-0198',1024,3,6,8,16],['backup-cn-0277',1024,1,6,4,64],['cache-cn-0165',1024,3,6,4,8],['dns-cn-0125',1024,4,6,1,4]]},
+      {id:'vc-cn-north',n:18,d:7476,c:69,m:298,snap:5,un:0,top:[['backup-cn-0007',1024,2,6,4,8],['db-cn-0073',1024,1,6,4,2],['dns-cn-0026',1024,5,6,1,32],['dns-cn-0063',1024,1,6,2,32],['db-cn-0014',500,2,6,2,16]]},
     ];
   }
 
@@ -1000,6 +1052,33 @@ class Component extends DCLogic {
     const snOld = snMerge('o5', (a, b) => (b.t[1] - a.t[1]) || (b.t[3] - a.t[3]) || (a.t[0] < b.t[0] ? -1 : 1)).map(snRow((t) => t[1], (t) => t[1] + '일', (t) => '스냅샷 크기 ' + gbT(t[3])));
     const snBig = snMerge('b5', (a, b) => (b.t[3] - a.t[3]) || (b.t[1] - a.t[1]) || (a.t[0] < b.t[0] ? -1 : 1)).map(snRow((t) => t[3], (t) => gbT(t[3]), (t) => t[1] + '일 지남'));
 
+    // 꺼진 VM — ‘Optimization › 전원 꺼짐’ 의 요약. 꺼진 지 구간은 그 도구의 구간(7일 미만 · 7–30일 · 30일 이상 · 모름) 그대로.
+    const OF = {}; this.off().forEach((o) => { OF[o.id] = o; });
+    const OFS = (f) => scope.reduce((a, r) => a + f(OF[r.id]), 0);
+    const offN2 = OFS((o) => o.n); const offD = OFS((o) => o.d); const offC = OFS((o) => o.c); const offM = OFS((o) => o.m); const offSnap = OFS((o) => o.snap); const offUn = OFS((o) => o.un);
+    const offAll = scope.reduce((a, r) => a.concat(OF[r.id].top.map((t) => ({ vc: r.id, t }))), []);
+    const ageOf = (d) => (d == null ? 3 : d >= 30 ? 2 : d >= 7 ? 1 : 0);
+    const OB = [{ label: '7일 미만', bg: '#4b5873', ink: '#ffffff' }, { label: '7–30일', bg: '#f59e0b', ink: '#0b0b0b' }, { label: '30일 이상', bg: '#ef4444', ink: '#ffffff' }, { label: '모름', bg: '#243049', ink: '#c3cfe2' }];
+    // 목 서버 값은 꺼진 지가 전부 6일이라 구간 수를 법인 합으로 바로 센다(7일 미만 = 전부 · 모름 = un).
+    const offBandN = [offN2 - offUn, 0, 0, offUn];
+    const offBands = OB.map((b, i) => Object.assign({}, b, { n: offBandN[i], count: fmt(offBandN[i]), tip: '꺼진 지 ' + b.label + ' · ' + fmt(offBandN[i]) + '대' })).filter((b) => b.n > 0);
+    const offStats = [
+      { cls: '', big: fmt(offC), text: '잡고 있는 vCPU(할당)', tip: '꺼진 VM 에 준 vCPU — 켜기 전에는 쓰지 않지만 다시 켜면 필요합니다' },
+      { cls: '', big: gbT(offM), text: '잡고 있는 메모리(할당)', tip: '꺼진 VM 에 준 메모리' },
+      { cls: 's', big: fmt(offSnap) + '대', text: '스냅샷도 남아 있는 VM', tip: '꺼져 있으면서 스냅샷이 있는 VM — 정리 후보' },
+    ];
+    const byDays = st.offSort === 'days';
+    const offSorts = [['disk', '디스크 큰 순'], ['days', '오래 꺼진 순']].map(([k, label]) => ({ label, on: (k === 'days') === byDays, cls: (k === 'days') === byDays ? 'on' : '', pick: () => this.setState({ offSort: k }) }));
+    const offSel = offAll.slice().sort((a, b) => (byDays ? ((b.t[3] || 0) - (a.t[3] || 0)) : 0) || (b.t[1] - a.t[1]) || (a.t[0] < b.t[0] ? -1 : 1)).slice(0, 5);
+    const offMax = Math.max.apply(null, offSel.map((x) => x.t[1]).concat([1]));
+    const offTop = offSel.map(({ vc, t }) => ({
+      name: t[0], sub: vc + ' · ' + OS[t[2]] + ' · ' + t[4] + ' vCPU · ' + t[5] + ' GB', w: pctN(t[1], offMax).toFixed(1) + '%', bg: OB[ageOf(t[3])].bg === '#4b5873' ? '#f59e0b' : OB[ageOf(t[3])].bg,
+      note: t[3] == null ? '꺼진 지 모름' : '꺼진 지 ' + t[3] + '일 이상(점검 기준)', big: gbT(t[1]),
+      tip: t[0] + ' — 디스크 ' + gbT(t[1]) + ' · ' + t[4] + ' vCPU · ' + t[5] + ' GB · ' + (t[3] == null ? '꺼진 지 모름' : '꺼진 지 ' + t[3] + '일 이상'),
+    }));
+    const offCorpAll = scope.map((r) => OF[r.id]).sort((a, b) => b.d - a.d); const offCorpMax = Math.max.apply(null, offCorpAll.map((o) => o.d).concat([1]));
+    const offCorp = offCorpAll.slice(0, 6).map((o) => ({ id: o.id, w: pctN(o.d, offCorpMax).toFixed(1) + '%', big: gbT(o.d), rest: fmt(o.n) + '대', tip: o.id + ' — 꺼진 VM ' + fmt(o.n) + '대 · 디스크 ' + gbT(o.d) + ' · vCPU ' + fmt(o.c) + ' · 메모리 ' + gbT(o.m) }));
+
     // S1: 확인할 것 — 요약 6장 바로 아래 한 줄. 아래 패널들의 머리 숫자를 모은 것(새 판정 없음).
     const todo = [
       { c: 'c', big: fmt(ov), label: '과부하 VM', sub: 'CPU 또는 메모리 90% 이상', tip: '조치 필요 › 과부하' },
@@ -1007,7 +1086,7 @@ class Component extends DCLogic {
       { c: 'w', big: fmt(oldN), label: '오래된 스냅샷', sub: '90일 넘김 ' + fmt(sab[2]) + '대', tip: '아래 ‘오래된 스냅샷’ 패널' },
       { c: 'w', big: fmt(tl), label: 'Tools 업그레이드 필요', sub: 'VMware Tools 버전', tip: '조치 필요 › VMware Tools' },
       { c: (cx[1] + cx[2]) ? 'w' : '', big: fmt(cx[1] + cx[2]), label: '고아 · 접근 불가', sub: '고아 ' + fmt(cx[1]) + ' · 접근 불가 ' + fmt(cx[2]), tip: '연결 상태가 정상이 아닌 VM' },
-      { c: '', big: fmt(off), label: '정지 VM', sub: '디스크 ' + tb(S((r) => r.od)) + ' 점유', tip: '전원이 꺼진 VM' },
+      { c: '', big: fmt(offN2), label: '꺼진 VM', sub: '디스크 ' + gbT(offD) + ' 점유', tip: '아래 ‘꺼진 VM’ 패널(템플릿 제외)' },
     ].map((x) => Object.assign(x, { cls: 'td' + (x.c ? ' ' + x.c : '') }));
     const distSummary = 'OS 7종 · 구동 ' + pct(on, n) + ' · Tools 최신 ' + pct(tv[0], n) + ' · 평균 CPU ' + cpuAvgN.toFixed(0) + '% · 메모리 ' + memAvgN.toFixed(0) + '% · 회수 후보 4종';
 
@@ -1034,6 +1113,9 @@ class Component extends DCLogic {
       gpHero: fmt(gOv), gpHeroText: '대 — 파티션 ' + fmt(gOp) + '개가 기준 80% 이상 · 값을 받은 VM ' + fmt(gRep) + '대 중 ' + pct(gOv, gRep),
       gpStats, gpBands, gpOs: '초과 파티션의 OS — Linux ' + fmt(gLnx) + '개 · Windows ' + fmt(gWin) + '개. 구간 막대는 초과 파티션 ' + fmt(gOp) + '개를 사용률 구간으로 나눈 것입니다.',
       gpTop, gpSoon, gpSoonEmpty: gpSoon.length === 0,
+      offRule: '점검 주기 6시간 · 받은 시각 오후 1:29', offHero: fmt(offN2), offHeroText: '대 — 디스크 ' + gbT(offD) + ' 를 잡고 있습니다 · 템플릿을 뺀 VM 중 ' + pct(offN2, n - tpl),
+      offStats, offBands, offTop, offSorts, offCorp,
+      offNote: '꺼진 지 = 점검이 꺼진 것을 처음 본 때부터(하한 · 6시간 단위). vCenter 이벤트에서 찾으면 정확한 시각이 됩니다. 이 값은 목 서버가 전부 6일이라 ‘오래 꺼진 순’ 으로 바꿔도 순서가 같습니다. 받은 시각 · 세는 범위(템플릿 제외)가 달라 위 요약의 ‘정지’ 수와 조금 다릅니다.',
       todo, scaleNote, distSummary, distOpen: !st.fold, distBtn: st.fold ? '펼치기 ▾' : '접기 ▴', toggleDist: () => this.setState({ fold: !st.fold }),
       snRule: '기준 7일 · 받은 시각 오후 12:52', snHero: fmt(oldN), snHeroText: '대 — 가장 오래된 스냅샷이 7일을 넘겼습니다 · 전체 VM ' + fmt(n) + '대 중 ' + pct(oldN, n),
       snStats, snBands, snOld, snBig,
