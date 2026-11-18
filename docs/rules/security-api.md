@@ -8,6 +8,7 @@
 
 - (원래 1289행) express 4 는 async 핸들러의 throw 를 잡지 않는다 — 라우터를 `wrapAsyncRouter` 로 감싼다
 - (원래 1313행) 범위(scope)는 '형제 라우트가 하고 있는가' 로 점검한다 — 한 파일에서 하나만 빠지면 실수다
+  - ⚠ v3.21.0: 도구 요약 모드(`?summary=1`)는 기존 라우트 안에서 같은 게이트(tools · toolGate · 범위)를 지난 뒤 — 새 경로를 만들지 않는다
 - (원래 1360행) STARTTLS 는 '광고하지 않으면 평문으로 내려간다' 가 기본값이었다
 - (원래 1366행) `new Agent(` 스윕은 'Agent 를 안 쓰는 경로' 를 못 본다
 - (원래 1371행) `resilientFetch` 는 리다이렉트를 직접 따라가며 출처가 바뀌면 비밀 헤더를 뗀다
@@ -85,6 +86,11 @@
   - ⚠ **공개 API 선언(`publicapi/allowlist.js`)과 내부 라우트의 `fullScopeOnly` 를 대조할 것**:
     `/faults/parts` 는 `requiresFullScope` 가 빠져 **같은 데이터가 세션 경로에서는 403 인데 키
     경로로는 전량** 나갔다. 그 플래그는 손으로 붙이는 것이라 전 카탈로그에서 2곳뿐이었다.
+  - ⚠ **도구 요약 모드는 기존 라우트 안에서 같은 게이트로**(v3.21.0 — VM 분석 화면 · `routes/api/toolSummary.js`):
+    분석 화면이 쓰는 도구 요약은 새 경로가 아니라 기존 도구 라우트의 `?summary=1` 이다(guest-partition · waste · waste/off-since ·
+    contention · vm-hygiene · vm-track · vm-lifecycle). 새 경로면 `requirePerm('tools')` · toolGate 도구별 거부 · 범위 교집합을 다시 걸어야 하고
+    빠뜨리기 쉽다 — 분기는 **범위를 계산한 뒤** 두고, 요약은 법인별 줄 + 법인별 상위 N · 판정은 도구 그대로 · 화면 목록 상한에 잘린 행으로 세지 않는다.
+    memoJson 열쇠는 URL 이라 `summary=1` 이 원본과 다른 칸을 쓴다(범위 서명은 같은 extraKey). 회귀 `test/vmInsightTools3210.test.js`(실제 api 라우터 — 권한 · 도구 거부 · 범위 · 합 대조).
 
 - ⚠ **STARTTLS 는 '광고하지 않으면 평문으로 내려간다' 가 기본값이었다**(`util/smtp.js`, v2.574 SEC-10):
   조건이 `… && ehloCaps(ehlo).has('STARTTLS')` 하나라, 서버가 그 한 줄을 광고하지 않으면

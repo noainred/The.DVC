@@ -12,6 +12,8 @@ vi.mock('../api.js', async (orig) => {
   return { ...real, usePolling: (path, params) => { state.calls.push({ path, params }); return { data: state.data, error: state.error, loading: state.loading }; } };
 });
 vi.mock('../components/IpmsMatches.jsx', () => ({ default: () => null }));
+// v3.21.0: #/vms 의 기본 보기가 ‘분석’ 이 됐다 — 이 시험은 ‘목록’(옛 현황) 화면을 보므로 주소를 #/vms/list 로 둔다.
+vi.mock('./vcd/vcdRoute.js', async (orig) => ({ ...(await orig()), currentHash: () => '#/vms/list' }));
 const { default: Vms } = await import('./Vms.jsx');
 
 const h = React.createElement;

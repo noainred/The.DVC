@@ -1,6 +1,6 @@
 # ‘Virtual Machine · VM’ 탭 새 시안 — 분석 화면
 
-- 상태: **시안(컨펌 대기)** — 코드 변경 없음. 구현은 컨펌 뒤 Opus.
+- 상태: **구현 v3.21.0**(2026-11-18 — 질문 ①~⑫ 기본값 확정 · 규약 `docs/rules/web.md` 허브 절 ⑭). 아래는 시안 때의 기록이다.
 - 캔버스(Claude Design · 비공개): https://claude.ai/artifact/E7RGUQQWYhDGuVGAd8prTa — 맨 왼쪽 아래 **⑧ `VmInsight.dc.html`**(눌러 보는 보드).
 - 같은 캔버스의 ① ~ ⑦ 은 `docs/design/vm-menu/`(메뉴 이름 · 처음 여는 화면 · 바로가기 복수 선택 · 찾기)다. 이 시안은 그 위에 얹힌다(바로가기 복수 선택 · 찾기를 그대로 쓴다).
 

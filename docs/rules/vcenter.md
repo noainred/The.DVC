@@ -157,6 +157,12 @@
   · `/vms/by-vcenter`: 법인 목록은 **범위가 먼저**(요청 vcenterId·region 으로 넓힐 수 없다 · 범위 밖 법인 이름도 싣지 않는다) · 평균은 구동 VM · 미수집 제외(`vmTotals.usageAvg` — /vms 와 한 벌) ·
     합계 줄 평균은 법인 평균의 평균이 아니다 · 모르는 법인(첫 수집 중·연결 실패·인증 정지이며 VM 0)은 null · 목록 밖 vCenter 의 VM 은 `unlisted` 줄 · memoJson + `scopeKey` + 설정 rev.
   · `/vms` totals 계산은 `inventory/vmTotals.js` 로 **글자 그대로** 옮겼다(vmDist2746 ④ 바이트 대조 통과) — 합의 순서를 바꾸지 말 것(부동소수).
+  · **v3.21.0 `/vms/insight`(VM 탭 '분석' 보기 · 설계 `docs/design/vm-insight` · 집계 `inventory/vmInsight.js` · 회귀 `server/test/vmInsight3210.test.js`)**: **판정을 새로 하지 않는다** —
+    조치 필요 · 신호 = `vmSignalsOf` · 사용률 칸 = `usageBinOf` 를 10% 로 접은 것(90%↑ = 과부하 칸) · 평균 = `usageAvg` 규칙 · 스냅샷 지난 일수 = `hygieneFindings` snap-age 사실 ·
+    OS 계열 = `osKind` · Tools = `toolsRead` + `TOOLS_NEED_UPGRADE` · 모르는 법인 = `corpUnknownOf`(수 전부 null). **법인(vCenter)마다 한 줄**을 주고 **화면이 고른 줄을 더한다**
+    (바로가기 복수 선택에 서버 왕복 없음 — 그래서 `vcenterId` · `vcenterIds` 를 받지 않는다 · 범위가 먼저 · `region` 만). 줄의 값은 더할 수 있는 모양이다: 평균은 `{ sum, n }` ·
+    분포는 칸별 수 · OS 종류는 법인마다 50종까지(상위 8 만 주면 여러 법인 합의 상위 8 이 틀린다 — 접기는 화면) · 상위 목록은 법인마다 N(합집합의 상위 N 은 법인별 상위 N 의 합집합 안).
+    기준값(스냅샷 기준 일수 · 구간 경계 · 크기 칸 · N)은 `thresholds` 로 싣는다(화면에 박지 않는다). 법인별 합 = `/vms` totals · signalCounts(테스트가 대조). memoJson + `scopeKey` + 설정 rev · VM 사이 `createYielder`.
   · 웹: 탭 `#/vms/<list|corp|attention>`(첫 조각 vms — 탭 id 그대로) + 도구 6개 링크(`#/tools/<k>` — 도구 키 그대로 · 권한 없으면 숨김 · 그 도구 화면 위에도 같은 줄 · `topMenu vm.also` 로 메뉴 위치 유지).
     법인별·조치 필요는 **15초 폴링 금지**(열 때 1회 + 다시 읽기 · 늦은 응답 버림). KPI 8장 → 타일 5장(값은 그대로 `unitText` — v2.629 고정 테스트 · vCore 는 vCPU 와 같은 값이라 한 줄).
   · VM 클릭 = 오른쪽 드로어(`VmDrawer` — 720 미만 전체 시트). **예전 모달 기능을 빠짐없이**: 버튼 6 · KV 17 · 섹션 6(`EntityDetail.jsx` 에서 꺼내 재사용 — 복제 금지).

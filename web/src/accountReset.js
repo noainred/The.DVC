@@ -12,6 +12,7 @@
  *  · 비우는 것은 여기 한 곳에 모은다 — 새 모듈 변수에 계정의 비밀 · 자료를 두면 여기에 넣는다.
  */
 import { closeAllSessions } from './remote/sessions.js';
+import { clearToolSummaryCells } from './views/vms/insight-tools/useToolSummary.js';   // v3.21.0 VM 분석 — 도구 요약 칸(이전 계정의 범위 · 권한으로 받은 값)
 
 /** 계정 열쇠 — 로그인 계정 이름(인증을 끈 포탈은 표시 이름 'Anonymous'). 로그아웃이면 null. */
 export function accountKeyOf(user) {
@@ -33,6 +34,7 @@ export function noteAccount(key) {
   _last = k;
   if (prev === undefined || prev === k) return false;
   closeAllSessions();
+  clearToolSummaryCells();
   return true;
 }
 

@@ -8,8 +8,25 @@
  */
 import { numOrNull } from '../../numOrNull.js';
 
-export const HUB_VIEWS = Object.freeze([['list', '현황'], ['corp', '법인별'], ['attention', '조치 필요']]);
+// v3.21.0(설계 docs/design/vm-insight §6 ① · ⑨): 첫 보기 '분석'(insight — #/vms 를 열면 이 화면) · 옛 '현황' 은 이름만 '목록'(키 list 그대로 — 저장된 #/vms/list 가 그대로 열린다)
+//   · '과할당'(over — Optimization 도구 요약 · 도구 권한이 없으면 칸을 숨긴다 VmHubTabs). 키는 바꾸지 않는다(주소 · 기억 값).
+export const HUB_VIEWS = Object.freeze([['insight', '분석'], ['list', '목록'], ['corp', '법인별'], ['attention', '조치 필요'], ['over', '과할당']]);
 export const HUB_VIEW_KEYS = Object.freeze(HUB_VIEWS.map(([k]) => k));
+/** '과할당' 보기가 요약하는 도구 — 이 도구 권한이 없으면 칸을 숨기고 주소로 와도 기본 보기로. */
+export const HUB_OVER_TOOL = 'waste';
+/**
+ * 주소에 보기가 없을 때(#/vms) 여는 보기 — 기본은 '분석'. 단 검색어(⌘K · 범위 바 검색)나 호스트 표에서 넘어온 '그 호스트의 VM' 이 있으면 '목록'
+ * (분석 보기는 검색어 · 호스트를 쓰지 않는다 — 넘겨받은 조건의 결과가 보이게. IP 관리 v3.4.0 의 '검색어가 있으면 IP 주소 탭' 과 같은 규칙).
+ */
+export function hubDefaultView({ q = '', host = '' } = {}) {
+  return String(q || '').trim() || String(host || '').trim() ? 'list' : 'insight';
+}
+/** 주소의 보기(없거나 모르면 null) → 지금 열 보기. over 는 도구 권한이 있을 때만. */
+export function hubViewOf(hashView, { q = '', host = '', canOver = true } = {}) {
+  const v = HUB_VIEW_KEYS.includes(hashView) ? hashView : null;
+  if (v === 'over' && !canOver) return hubDefaultView({ q, host });
+  return v || hubDefaultView({ q, host });
+}
 /** 허브 탭 줄 오른쪽의 기존 도구(특수 기능) — [도구 키, 짧은 이름]. 순서 = 탭 순서. */
 export const HUB_TOOLS = Object.freeze([
   ['vmfinder', 'VM 정밀 검색'], ['guestos', 'Guest OS'], ['vmtools', 'VMware Tools'],

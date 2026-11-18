@@ -896,6 +896,19 @@
      ⓒ 칩은 켜고 끄는 단추(`aria-pressed` · `toggleScopeId`) · 1곳 이상이면 ‘✕ 전체 법인’(접어도 남는다) · 켠 칩은 찾기 글자와 무관하게 보인다 · **켜지 않은 칩도 숫자를 유지**(서버가 고른 법인과 무관하게 `byVc` 를 준다 — 화면은 그대로 읽는다). 범례에 ‘여러 곳을 함께 고를 수 있습니다’(줄바꿈 허용 — 400px 가로 넘침 방지).
      ⓓ 범위 바 vCenter 칸: 2곳 이상이면 ‘법인 N곳 선택’(고를 수 없는 option · 값 `MULTI_PICK_VALUE` — `__` 로 시작해 정렬 맨 위) · 칸에서 한 곳을 고르면 목록이 그 한 곳 · ‘전체’ 는 전부 해제. 허브 탭에서 리전을 바꾸면 **그 리전 밖 선택만** 푼다(`idsInRegion` — 목록에 없는 id 는 판정할 수 없어 남긴다).
      ⓔ 카드는 `sitesInHubScope`(고른 법인들 · 0곳이면 리전 — 서버에 싣는 범위와 같은 뜻) · 상세 ‹ 이전 · 다음 › 은 2곳 이상이면 그 법인들 안에서(`siblingSites` · 글자 ‘법인 N곳’) · 0 · 1곳이면 지금 규칙. 회귀 `platform/hubMultiPick3200.test.jsx`.
+  ⑭ **v3.21.0 VM 탭 ‘분석’ 보기 · 공용 분석 부품(`views/insight/`)(사용자 요청 2026-11-18 · 설계 `docs/design/vm-insight` · 질문 전부 기본값 확정)** — **다음 Hypervisor 분석이 같은 부품을 쓴다**(VM 전용 이름을 넣지 말 것).
+     ⓐ 보기 줄 `vmHubText.HUB_VIEWS` = 분석(`insight` · 기본) · 목록(`list` — 옛 ‘현황’, 이름만) · 법인별 · 조치 필요 · 과할당(`over` — `waste` 권한이 있을 때만 · `VmHubTabs.canHubTool` = 허브 도구 칸과 같은 `toolsFor` 판정). 키는 바꾸지 않는다(저장된 `#/vms/list` 가 그대로 열린다).
+        보기가 없는 주소(`#/vms`)는 `hubViewOf` — 기본 분석, **검색어 · 호스트 조건이 있으면 목록**(⌘K · 호스트 표 인계의 결과가 보이게) · 권한 없는 `#/vms/over` 는 기본 보기로. 분석 보기에 검색어가 있으면 ‘목록에 적용’ 안내.
+     ⓑ 값: `GET /vms/insight`(법인마다 한 줄 + 법인마다 상위 N · 30초 폴링 · **리전만 싣고 고른 법인은 싣지 않는다**) → 화면이 고른 법인 줄을 더한다(`insight/insightCore.js pickRows · sumKeys · avgOf(Σsum÷Σn) · mergeTopN` — 선택을 바꿀 때 서버 왕복 없음).
+        **오래됨(stale) · 모름(unknown) 법인은 합에 섞지 않고 ‘오래됨 N곳’ · ‘값 모름 N곳’ 으로 따로** · 못 읽은 수는 패널마다 ‘모름 N’ · 상위 N 은 서버 CMP 와 같은 비교로 다시 고른다(`vmInsightText.CMP_*` — `vmInsight3210.test.js` ① 이 서버 `vmInsightOf` 로 대조).
+     ⓒ 지도 ‘VM 현황’(`insight/treemap.js` + `Treemap.jsx`): 열 = 지역(폭 = 몫) · 칸 = 법인(높이 = 몫 — 합 100% 를 마지막 칸이 받는다) · 크기 0 · 모름 칸은 그리지 않고 ‘칸 없음 N곳’ · 색 눈금 절대값 5단 · **S6: 경계(응답 `overloadPct`) 이상만 빨강**(평균 CPU · 메모리만) ·
+        칸 = 단추(`aria-pressed`) — 누르면 App 허브 칸 `vcenterIds` 를 켜고 끈다(Vms prop `scopeIds · scopeRegion · onScopeIds`) · 지역 줄을 누르면 그 지역 법인만 · 칸 글 한 줄/두 줄은 칸의 실제 px(`tileLineMode` 46px).
+     ⓓ 지도 크기(`insight/insightPrefs.js` + `MapSize.jsx`): 자동(가장 긴 열 칸 수 × 64 → 360~1,200) · 보통 360 · **크게 520(처음)** · 아주 크게 760 · ‘설정 · Npx ▾’ 단추를 **누를 때만** 상자(− · 슬라이더 · ＋ 300~1,200 · 20px · 폭 기본/전체 — 좁은 화면은 폭 숨김 · 기본값으로 · 닫기).
+        localStorage 는 `insightPrefs` 한 곳(화면별 키 `vmInsight.map` · `vmInsight.fold` — 읽기 · 쓰기 try/catch · 저장값은 다시 자른다).
+     ⓔ 긴 화면은 **묶음 접기**(`FoldGroup` — 지금 볼 것 · 용량과 정리 · 성능 · 구성 점검 · 분포 · 처음 펼침 · 접으면 본문을 그리지 않아 안의 도구 패널이 요청하지 않는다). 도구 권한이 없는 묶음(성능 = contention · 구성 점검 = vm-hygiene)은 머리줄째 숨긴다.
+     ⓕ 특수 기능 요약 패널 · ‘과할당’ 본문 · ‘확인할 것’ 의 도구 칸은 `vms/insight-tools/`(VmToolPanels · VmOverView · checkItems 훅) — 요약은 `useToolSummary` 칸을 **같이 본다**(지도 ‘디스크 초과 VM 비율’ · 회수 후보의 Optimization 후보 수가 같은 칸 — 따로 부르면 캐시 없는 게스트 파티션 조회가 두 번).
+        ‘확인할 것’ 배치는 `vmInsightText.arrangeChecks`(도구의 ‘꺼진 VM’ 이 VM 집계의 ‘정지 VM’ 자리를 대신 — 두 번 세지 않는다). S2 ‘호스트 약 N대분’ 은 메모리에만(`/hosts/corp` 의 고른 범위 호스트 한 대 평균 메모리 · 없으면 생략).
+        새 판정 없음(유휴 후보는 Optimization 판정 · §9 정정) · 하드웨어 버전 옆 ESXi 세대 표기는 확인하지 못해 넣지 않았다. 회귀 `insight/insight3210.test.js` · `vms/vmInsight3210.test.js` · `vms/vmInsightRender3210.test.jsx`.
 
 - **v2.998.0(코드 · 테스트 표지는 v2.994 — main 이 v2.997 까지 먼저 나가 번호만 올렸다) — 서버 메뉴 이름 변경: Virtual Machine(VM) · Hypervisor · Bare Metal Server · Physical Server(사용자 요청 2026-11-13 · 설계 `docs/design/server-menu-rename/README.md` · 컨펌 '추천대로 전부 진행')**.
   회귀 `web/src/views/topMenu.test.js`(구성 · locate · 진입 탭 `menuTabOf` · aka 검색) · `sidebar/{sideMenu,singleMenu2891,menuEdit}.test.js`(옛 저장 메뉴 두 모양) · `platform/platformText.test.js`(허브 제목 = 메뉴 라벨) · `featureUsageText.test.js` · `server/test/platformHub2915.test.js` ④.

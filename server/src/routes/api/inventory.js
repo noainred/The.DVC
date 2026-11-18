@@ -19,6 +19,8 @@ import { parseSignalQuery, filterVmsBySignal, signalCounts, signalContext, vmSig
 import { vmTotals } from '../../inventory/vmTotals.js';
 import { vmByVcenter } from '../../inventory/vmByVcenter.js';
 import { loadVmHygieneSettings } from '../../vmhygiene/settings.js';
+import { vmInsightOf } from '../../inventory/vmInsight.js'; // v3.21.0 VM 탭 '분석' 보기
+import { createYielder } from '../../util/timeSlice.js';
 
 /**
  * 인벤토리 조회 권한 게이트(v2.536 — 인증·인가 전수 감사).
@@ -487,6 +489,25 @@ api.get('/vms/by-vcenter', invVms, (req, res) => {
     const r = vmByVcenter({ vcenters, vms, ctx: sig.ctx, dropEmpty: narrowed });
     return { ok: true, ...r, snapAgeDays: sig.ctx?.hygiene?.snapAgeDays ?? null, snapshotAt: snap.generatedAt ?? null, initial: snap.initial === true };
   }, { ttlMs: 30_000, extraKey: `${scopeKey(req.user, store.get())}|${vcenterPickKey(req.query, store.get())}|h${sig.rev}` });
+});
+
+// v3.21.0 VM 탭 '분석' 보기(설계 docs/design/vm-insight · 집계 inventory/vmInsight.js) — 법인(vCenter)마다 한 줄 + 법인마다 상위 N.
+//   화면이 바로가기에서 고른 법인의 줄을 더한다(선택을 바꿀 때 서버 왕복이 없다) — 그래서 vcenterId · vcenterIds 는 **받지 않는다**(법인별 줄을 다 준다).
+//   범위(scope)가 먼저 · region 쿼리는 그 안에서 리전만 남긴다. 판정은 새로 하지 않는다(신호 · 스냅샷 기준은 VM 구성 점검 설정 — 캐시 키에 개정).
+//   상시 폴링 경로: memoJson + 범위 키(응답에 역할 · 권한에 따라 다른 칸이 없어 역할은 키에 넣지 않는다 — /vms/by-vcenter 와 같은 꼴) · VM 사이 시간 기준 양보.
+api.get('/vms/insight', invVms, (req, res) => {
+  const sig = vmSignalCtx();
+  return memoJson(req, res, 'inv:vms-insight', async (snap) => {
+    const allowed = scopedVcenterIds(req.user, snap);
+    const region = typeof req.query.region === 'string' && req.query.region ? req.query.region : null;
+    const vcenters = (snap.vcenters || [])
+      .filter((v) => v && (!allowed || allowed.has(v.id)))
+      .filter((v) => !region || v.location?.region === region);
+    const regionIds = region ? new Set(vcenters.map((v) => v.id)) : null;
+    const vms = (snap.vms || []).filter((v) => v && (!allowed || allowed.has(v.vcenterId)) && (!regionIds || regionIds.has(v.vcenterId)));
+    const r = await vmInsightOf({ vcenters, vms, ctx: sig.ctx, unlisted: !region, yielder: createYielder(15) });
+    return { ok: true, generatedAt: snap.generatedAt ?? null, initial: snap.initial === true, region, ...r };
+  }, { ttlMs: 30_000, extraKey: `${scopeKey(req.user, store.get())}|h${sig.rev}` });
 });
 
 // VM 단건 조회 — 이름/IP/호스트명으로 스냅샷에서 찾아 상세 팝업에 쓴다(모든 화면 공용).

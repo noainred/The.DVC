@@ -19,7 +19,7 @@ export const staleAfterMs = (refreshMs) => Math.max(45 * 60_000, (Number(refresh
  * @param snap  { vms, hosts, datastores, vcenters }(범위로 이미 거른 것)
  * @param opts  { now, refreshMs, q, sev, vcName:Map }
  */
-export function analyzeContention(snap, { now = Date.now(), refreshMs = 900_000, q = '', sev = '', vcName = new Map() } = {}) {
+export function analyzeContention(snap, { now = Date.now(), refreshMs = 900_000, q = '', sev = '', vcName = new Map(), rowsMax = ROWS_MAX, sideMax = 300 } = {}) {
   const staleMs = staleAfterMs(refreshMs);
   const vms = (snap.vms || []).filter((v) => v.powerState === 'POWERED_ON' && !v.template);
   const hosts = snap.hosts || [];
@@ -114,8 +114,41 @@ export function analyzeContention(snap, { now = Date.now(), refreshMs = 900_000,
   shown.sort((a, b) => (SEV_RANK[b.sev] || 0) - (SEV_RANK[a.sev] || 0) || (b.readyAvg ?? -1) - (a.readyAvg ?? -1) || (b.readAvg ?? -1) - (a.readAvg ?? -1) || String(a.name).localeCompare(String(b.name)));
   return {
     thresholds: THRESHOLDS, codes: CONTENTION_CODES, staleAfterMs: staleMs, coverage: cov, kpi,
-    matched: shown.length, vms: shown.slice(0, ROWS_MAX), omitted: Math.max(0, shown.length - ROWS_MAX),
-    hosts: hostRows.slice(0, 300), hostsOmitted: Math.max(0, hostRows.length - 300),
-    datastores: dsRows.slice(0, 300), dsOmitted: Math.max(0, dsRows.length - 300), unmatchedDs,
+    matched: shown.length, vms: shown.slice(0, rowsMax), omitted: Math.max(0, shown.length - rowsMax),
+    hosts: hostRows.slice(0, sideMax), hostsOmitted: Math.max(0, hostRows.length - sideMax),
+    datastores: dsRows.slice(0, sideMax), dsOmitted: Math.max(0, dsRows.length - sideMax), unmatchedDs,
   };
+}
+
+/**
+ * v3.21.0 VM 분석 화면 요약(`/tools/contention?summary=1` — docs/design/vm-insight §10 · host-insight) — 법인(vCenter)별 줄 + 법인별 상위 N.
+ *   법인마다 analyzeContention 을 **상한 없이** 한 번 돌린다(판정 그대로 — 화면 목록 1,000줄에 잘린 행으로 세지 않는다).
+ *   kpi · coverage · unmatchedDs 는 법인으로 나눠도 더하면 전체와 같다(VM · 호스트 · 데이터스토어가 모두 한 vCenter 에 속한다).
+ *   hostsContended = 경합 VM 이 있는 호스트 수(도구의 hosts 행 중 contended > 0).
+ *   상위 N: ready = CPU 판정(cpu-*)이 붙은 VM 을 대기(Ready 평균) 큰 순 · disk = 디스크 판정(disk-*)이 붙은 VM 을 읽기 · 쓰기 지연 중 큰 값 순 ·
+ *   hosts = 도구의 호스트 정렬(경합 VM 수 → 가장 큰 대기 → 디스크 지연) · datastores = 느림 판정(sev)이 붙은 DS 를 도구 정렬(지연 큰 순)로.
+ */
+export function contentionSummaryByVc(snap, { now = Date.now(), refreshMs = 900_000, vcName = new Map(), topN = 5 } = {}) {
+  const ids = new Set((snap.vcenters || []).map((v) => v.id));
+  const group = (arr) => { const m = new Map(); for (const x of arr || []) { ids.add(x.vcenterId); let a = m.get(x.vcenterId); if (!a) { a = []; m.set(x.vcenterId, a); } a.push(x); } return m; };
+  const vmsBy = group(snap.vms); const hostsBy = group(snap.hosts); const dsBy = group(snap.datastores);
+  const dMax = (r) => Math.max(r.readAvg ?? -1, r.writeAvg ?? -1);
+  const vmPick = (r) => ({ id: r.id, name: r.name, host: r.host, cluster: r.cluster, cpuCount: r.cpuCount, readyAvg: r.readyAvg, readyMax: r.readyMax, costopAvg: r.costopAvg,
+    latencyAvg: r.latencyAvg, readAvg: r.readAvg, writeAvg: r.writeAvg, diskMax: r.diskMax, disk: r.disk, sev: r.sev, codes: r.findings.map((f) => f.code), at: r.at });
+  const rows = [...ids].map((id) => {
+    const out = analyzeContention({ vms: vmsBy.get(id) || [], hosts: hostsBy.get(id) || [], datastores: dsBy.get(id) || [] }, { now, refreshMs, vcName, rowsMax: Infinity, sideMax: Infinity });
+    const cpuRows = out.vms.filter((r) => r.findings.some((f) => f.code.startsWith('cpu-')));
+    const diskRows = out.vms.filter((r) => r.findings.some((f) => f.code.startsWith('disk-')));
+    return {
+      vcenterId: id, name: vcName.get(id) || id, coverage: out.coverage, kpi: out.kpi, unmatchedDs: out.unmatchedDs,
+      hostsContended: out.hosts.filter((h) => h.contended > 0).length,
+      top: {
+        ready: [...cpuRows].sort((a, b) => (b.readyAvg ?? -1) - (a.readyAvg ?? -1) || String(a.name).localeCompare(String(b.name))).slice(0, topN).map(vmPick),
+        disk: [...diskRows].sort((a, b) => dMax(b) - dMax(a) || String(a.name).localeCompare(String(b.name))).slice(0, topN).map(vmPick),
+        hosts: out.hosts.slice(0, topN),
+        datastores: out.datastores.filter((d) => d.sev).slice(0, topN),
+      },
+    };
+  }).sort((a, b) => String(a.vcenterId).localeCompare(String(b.vcenterId)));
+  return { thresholds: THRESHOLDS, codes: CONTENTION_CODES, staleAfterMs: staleAfterMs(refreshMs), topN, rows };
 }

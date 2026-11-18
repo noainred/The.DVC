@@ -13,7 +13,8 @@ import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { logAudit } from '../../audit.js';
 import { store } from '../../store.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
-import { overview, vcenterDetail, overCsv, vmPartitions } from '../../guestpart/report.js';
+import { overview, overviewSummary, vcenterDetail, overCsv, vmPartitions } from '../../guestpart/report.js';
+import { isSummaryQuery } from './toolSummary.js';   // v3.21.0 VM 분석 화면 요약 — 같은 라우트 · 같은 게이트 안에서
 import { load as loadSettings, save as saveSettings, publicSettings, settingsLoadError, guestPartWriteRefusal } from '../../guestpart/settings.js';
 import { unreadMark } from '../settingsUnreadMark.js';   // 112회차: 조회 응답의 읽기 오류 표지
 import { thresholdOk, MODES, RANGES, IGNORE_TEXT, CRIT_PCT, WIN_ISO_MAX_GB } from '../../guestpart/rules.js';
@@ -52,6 +53,9 @@ export function registerToolsGuestPart(api) {
     const allowed = scopedVcenterIds(req.user, store.get());
     const v = viewQuery(req.query);
     if (v.issue) return res.status(400).json({ ok: false, reason: v.issue });
+    // v3.21.0: ?summary=1 — 법인별 줄 + 법인별 상위 N(VM 분석 화면). 게이트(tools · toolGate 'guest-partition')와 범위는 이 라우트 그대로다.
+    //   화면 조건(vcenterId · 검색 · OS · limit)은 보지 않는다 — 범위 안 법인 전부의 줄을 주고 화면이 고른 법인을 더한다.
+    if (isSummaryQuery(req.query)) return res.json({ ok: true, summary: true, tool: 'guest-partition', ...(await overviewSummary({ allowed, thr: v.thr, mode: v.mode })) });
     const vcenterId = req.query.vcenterId ? String(req.query.vcenterId) : null;
     if (vcenterId && allowed && !allowed.has(vcenterId)) return res.status(404).json({ ok: false, error: 'not found' });
     const os = ['win', 'lnx', 'other'].includes(req.query.os) ? req.query.os : 'all';

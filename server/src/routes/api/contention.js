@@ -14,7 +14,8 @@ import { capStr } from '../../util/capStr.js';
 import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp } from '../../util/dayKey.js';
-import { analyzeContention } from '../../contention/analyze.js';
+import { analyzeContention, contentionSummaryByVc } from '../../contention/analyze.js';
+import { isSummaryQuery, SUMMARY_TOP_N } from './toolSummary.js';   // v3.21.0 VM 분석 화면 요약 — 같은 라우트 · 같은 게이트 안에서
 import { contentionStatus } from '../../contention/cache.js';
 
 const toolsPerm = requirePerm('tools');
@@ -33,6 +34,12 @@ export function registerContention(api) {
   api.get('/tools/contention', toolsPerm, (req, res) => memoJson(req, res, 'contention', async (snap) => {
     const S = scoped(req, snap);
     const vcName = new Map(S.vcenters.map((v) => [v.id, v.name || v.id]));
+    // v3.21.0: ?summary=1 — 법인별 줄 + 법인별 상위 N(VM · Hypervisor 분석 화면). 게이트(tools · toolGate 'contention')와 범위(scoped)는 그대로 ·
+    //   화면 조건(검색 · 심각도)은 보지 않는다 · 수집 상태 오류 원문은 싣지 않는다. memo 열쇠는 URL 이라 원본과 다른 칸이다.
+    if (isSummaryQuery(req.query)) {
+      return { summary: true, tool: 'contention', ...contentionSummaryByVc(S, { refreshMs: config.contentionRefreshMs, vcName, topN: SUMMARY_TOP_N }),
+        scan: { enabled: config.contentionScan, refreshMs: config.contentionRefreshMs, samples: config.contentionSamples, windowSec: config.contentionSamples * 20 }, initial: snap.initial === true };
+    }
     const out = analyzeContention(S, { refreshMs: config.contentionRefreshMs, q: qStr(req.query.q, 128), sev: qStr(req.query.sev, 16), vcName });
     // v2.744(감사 AUTHZ-01): 판정은 isAdminDetailUser — 데모 계정(요청 문맥 admin + demoGuest)은 operator 와 같은 판본이고, memo 키도 역할 문자열이 아니라
     //   판정 결과(a/u)로 만든다(역할 문자열이면 데모와 진짜 관리자가 같은 캐시 칸을 써 한쪽 판본이 다른 쪽에 나간다).

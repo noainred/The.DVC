@@ -8,9 +8,9 @@ import { VM_PAGE_SIZE, vmPageQueryKey, resetNoticeText, pageNavState, vmPageSumm
 import { EMPTY_FACETS, facetParams, facetKey, hasFacet, clearFacet, chipList, facetErrorText, specText, specSort, selectionView } from './vmDistText.js';
 import { VmDistPanels, VmDistChips, VmUsageBar, VmNameCell, VmMobileList, useNarrowScreen } from './VmDistPanels.jsx';
 // v2.909 가상화 서버 허브(시안 docs/design/vm-screen 시안 1): 탭(현황 · 법인별 · 조치 필요 ‖ VM 도구 6) · 타일 5장 · 신호 열 · 드로어.
-import VmHubTabs from './vms/VmHubTabs.jsx';
+import VmHubTabs, { canHubTool } from './vms/VmHubTabs.jsx';
 import VmDrawer from './vms/VmDrawer.jsx';
-import { HUB_VIEW_KEYS, signalText, usageTone, TONE_COLOR, barW } from './vms/vmHubText.js';
+import { HUB_VIEW_KEYS, HUB_OVER_TOOL, hubViewOf, signalText, usageTone, TONE_COLOR, barW } from './vms/vmHubText.js';
 import { tabFromHash, isUnderBase } from '../hooks/hashTab.js';
 import { currentHash, goHash, vcHash } from './vcd/vcdRoute.js';
 // v2.915 가상화 플랫폼 허브(설계 docs/design/virt-platform-menu 시안 A ④): 이 화면은 허브의 'VM 탭' 본문 — 제목 · 스냅샷 시각은 허브가. 탭 줄 오른쪽에 이 탭 고유 조건(전원 · 메모 · IPMS · 호스트 칩),
@@ -21,6 +21,8 @@ import './vms/vmHub.css';
 
 const VmsByCorp = React.lazy(() => import('./vms/VmsByCorp.jsx'));
 const VmsAttention = React.lazy(() => import('./vms/VmsAttention.jsx'));
+// v3.21.0: '분석'(첫 보기) · '과할당' — 설계 docs/design/vm-insight. 값은 /vms/insight(법인마다 한 줄) — 고른 법인의 합은 화면이 낸다.
+const VmInsight = React.lazy(() => import('./vms/VmInsight.jsx'));
 const HUB_BASE = ['vms'];
 
 /** Render every IPv4 a VM has (multi-homed), one per line; IPv6 is excluded upstream. */
@@ -32,22 +34,24 @@ function ipList(vm) {
 
 
 /**
- * v2.909: 허브 보기 — #/vms/<list|corp|attention>. 브라우저가 아닌 곳(렌더 시험)에서도 던지지 않는다(currentHash).
+ * v2.909: 허브 보기 — #/vms/<insight|list|corp|attention|over>. 브라우저가 아닌 곳(렌더 시험)에서도 던지지 않는다(currentHash).
  * useHashTab 과 같은 규약(base 아래의 해시 변화만 받는다)이지만 window 가 없는 렌더 시험을 위해 이 화면 안에 둔다.
+ * v3.21.0: 주소의 보기만 돌려준다(없으면 null) — 보기가 없을 때(#/vms) 무엇을 열지는 hubViewOf(기본 '분석' · 검색어 · 호스트 조건이 있으면 '목록').
  */
 function useHubView() {
-  const [view, setView] = useState(() => tabFromHash(currentHash(), HUB_BASE, HUB_VIEW_KEYS) || 'list');
+  const [view, setView] = useState(() => tabFromHash(currentHash(), HUB_BASE, HUB_VIEW_KEYS) || null);
   useEffect(() => {
-    const onHash = () => { const h = currentHash(); if (isUnderBase(h, HUB_BASE)) setView(tabFromHash(h, HUB_BASE, HUB_VIEW_KEYS) || 'list'); };
+    const onHash = () => { const h = currentHash(); if (isUnderBase(h, HUB_BASE)) setView(tabFromHash(h, HUB_BASE, HUB_VIEW_KEYS) || null); };
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
   return view;
 }
 
-/** 가상화 서버 화면 셸 — 머리 · 탭 · 보기 전환 · VM 드로어(현황·조치 필요 공용). onPickVcenter = 위 필터 바의 vCenter 를 바꾼다(App). */
-export default function Vms({ filters, onPickVcenter, cond = null, host = '', onHost = null, onGoHost = null }) {
-  const view = useHubView();
+/** 가상화 서버 화면 셸 — 머리 · 탭 · 보기 전환 · VM 드로어(목록·조치 필요 공용). onPickVcenter = 위 필터 바의 vCenter 를 바꾼다(App).
+ *  v3.21.0: scopeIds · scopeRegion · onScopeIds = 허브 범위(바로가기 고른 법인 · 리전)와 그 갱신(App) — 분석 보기의 지도 칸 · 지역 줄이 켜고 끈다. */
+export default function Vms({ filters, onPickVcenter, cond = null, host = '', onHost = null, onGoHost = null, scopeIds = null, scopeRegion = null, onScopeIds = null }) {
+  const view = hubViewOf(useHubView(), { q: filters?.q, host, canOver: canHubTool(HUB_OVER_TOOL) });
   const [drawer, setDrawer] = useState(null);       // 열린 VM(드로어) — 목록이 바뀌어도 연 순간의 값을 보여 준다(넘기면 새 값)
   const rowsRef = useRef([]);                        // 지금 화면에 그린 행(정렬 반영 — DataTable onVisible) → 드로어 ‹ › 순서
   const [hub, setHub] = useState({ sc: null, snapAt: null });
@@ -74,6 +78,11 @@ export default function Vms({ filters, onPickVcenter, cond = null, host = '', on
   return (
     <div className="vmh">
       <VmHubTabs active={view} attention={sc ? sc.any : null} right={right} />
+      {(view === 'insight' || view === 'over') && (
+        <React.Suspense fallback={<Loading />}>
+          <VmInsight mode={view} filters={filters} scopeIds={scopeIds} scopeRegion={scopeRegion} onScopeIds={onScopeIds} onHub={setHub} />
+        </React.Suspense>
+      )}
       {view === 'list' && <VmsList filters={filters} onOpen={open} onVisible={onVisible} onHub={setHub} selectedId={drawer?.id} onGoHost={onGoHost} />}
       {view === 'corp' && (
         <React.Suspense fallback={<Loading />}>
