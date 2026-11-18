@@ -5,6 +5,7 @@ import { scopedVcenterIds, inUserScope, writeScopedVcenterIds } from '../../auth
 import { store, usageReadable, dsUsageReadable, dsUsedOf, dsUsageUnknownOf, hostCapacityKnown, siteInventoryStale } from '../../store.js'; // v2.771(R6-F3-2) 용량 판정도 store 하나 · v2.915 낡은 값 판정
 import { platformSummaryOf } from '../../inventory/platformSummary.js'; // v2.915 가상화 플랫폼 허브
 import { numOrNull } from '../../util/numOrNull.js';
+import { vmSumsOf } from '../../vcenter/hostChecks.js'; // v3.19.0 /hosts 요약 VM 할당 합 — 점검 표 · 법인별과 같은 판정 코어
 import { clusterCountOf } from '../../clustercfg/analyze.js'; // v2.743 LEFT-07 — 클러스터 개수(묶음 키)
 const pctOrNullR = (u, t) => (t > 0 ? Math.round((u / t) * 100) : null);
 import { browseDatastore, onDemandErrorFields } from '../../vcenter/dsBrowse.js';
@@ -363,8 +364,12 @@ api.get('/hosts', invHosts, (req, res) => memoJson(req, res, 'inv:hosts', (snap)
   // in-scope 호스트에 올라간 VM 만 한 번에 골라 vCPU·메모리 할당을 합산한다((vcenterId, host) 키 —
   // 동명 호스트가 여러 사이트에 있어도 섞이지 않게).
   const hostVms = snap.vms.filter((v) => hostKeys.has(`${v.vcenterId}\t${v.host}`));
-  const vcoreAllocated = hostVms.reduce((a, v) => a + (v.cpuCount || 0), 0);
-  const vmemAllocatedMB = hostVms.reduce((a, v) => a + (v.memMB || 0), 0);
+  // v3.19.0: 합은 점검 표 · 법인별 보기와 같은 판정 코어(vcenter/hostChecks.js vmSumsOf) — 템플릿은 세지 않고, 못 읽은
+  //   cpuCount · memMB 는 0 으로 더하지 않고 따로 센다(예전 `v.cpuCount || 0` 은 템플릿까지 더해 같은 범위의 vCore 비율이 화면마다 달랐다).
+  const vmSum = vmSumsOf(hostVms);
+  //   VM 이 있는데 하나도 못 읽었으면 0 이 아니라 모름(null — hostExport.js 호스트 행과 같은 규칙).
+  const vcoreAllocated = vmSum.n && vmSum.vcpuUnknown === vmSum.n ? null : vmSum.vcpu;
+  const vmemAllocatedMB = vmSum.n && vmSum.memUnknown === vmSum.n ? null : vmSum.memMB;
   const verMap = {};
   for (const h of hosts) { const v = h.version || 'unknown'; verMap[v] = (verMap[v] || 0) + 1; }
   const physicalCores = sm((h) => h.cpuCores);
@@ -381,13 +386,15 @@ api.get('/hosts', invHosts, (req, res) => memoJson(req, res, 'inv:hosts', (snap)
     poweredOff: hosts.filter((h) => h.powerState && h.powerState !== 'POWERED_ON').length,
     physicalCores,
     logicalCores: sm((h) => h.cpuThreads || h.cpuCores),
-    vcoreAllocated,
-    vcorePerCore: hostsCapacityUnknown ? null : physicalCores > 0 ? Math.round((vcoreAllocated / physicalCores) * 100) / 100 : 0,
+    vcoreAllocated,                                     // 읽은 VM 만의 합(vcpuUnknown > 0 이면 부분 합 — 최소값)
+    vcpuUnknown: vmSum.vcpuUnknown,                      // v3.19.0: vCPU 를 못 읽어 vcoreAllocated 에서 뺀 VM 수(템플릿 제외)
+    vcorePerCore: hostsCapacityUnknown ? null : vcoreAllocated == null ? null : physicalCores > 0 ? Math.round((vcoreAllocated / physicalCores) * 100) / 100 : 0,
     hostsCapacityUnknown,
     memTotalGB: Math.round(physicalMemMB / 1024),
     // 메모리 가상화율(오버커밋) = 할당된 VM 메모리 합 / 물리 호스트 메모리 합. 1.0 초과면 오버커밋.
-    vmemAllocatedGB: Math.round(vmemAllocatedMB / 1024),
-    memOvercommit: hostsCapacityUnknown ? null : physicalMemMB > 0 ? Math.round((vmemAllocatedMB / physicalMemMB) * 100) / 100 : 0,
+    vmemAllocatedGB: vmemAllocatedMB == null ? null : Math.round(vmemAllocatedMB / 1024),
+    vmemUnknown: vmSum.memUnknown,                       // v3.19.0: 메모리를 못 읽어 vmemAllocatedGB · memOvercommit 에서 뺀 VM 수(호스트 메모리가 아니다)
+    memOvercommit: hostsCapacityUnknown ? null : vmemAllocatedMB == null ? null : physicalMemMB > 0 ? Math.round((vmemAllocatedMB / physicalMemMB) * 100) / 100 : 0,
     powerKw: Math.round(sm((h) => h.powerWatts) / 100) / 10,
     esxiVersions: Object.entries(verMap).map(([version, count]) => ({ version, count })).sort((a, b) => b.count - a.count),
   };

@@ -158,13 +158,19 @@ export function hostKpis(summary, rows, now = Date.now()) {
   const memUsedGB = memUsedUnknown === list.length && list.length ? null : Math.round(memUsed / 1024);
   const memPct = memTotalGB > 0 && memUsedGB != null ? Math.round((memUsedGB / memTotalGB) * 100) : null;
   const vcore = numOrNull(s.vcoreAllocated); const cores = numOrNull(s.physicalCores);
+  // v3.19.0: 할당 합은 서버 vmSumsOf(템플릿 제외) — 못 읽은 VM 이 있으면 부분 합(최소값)이라 비율에 ≥ 를 붙이고 수를 따로 적는다.
+  const vcpuUnknown = numOrNull(s.vcpuUnknown) || 0; const vmemUnknown = numOrNull(s.vmemUnknown) || 0;
+  const vcoreRatio = s.hostsCapacityUnknown ? `—(용량 못 읽은 호스트 ${fmt(s.hostsCapacityUnknown)})`
+    : !vcpuUnknown ? ratioText(vcore, cores)
+      : ratioText(vcore, cores) === '—' ? `—(vCPU 못 읽은 VM ${fmt(vcpuUnknown)}대)` : `≥${ratioText(vcore, cores)}(vCPU 못 읽은 VM ${fmt(vcpuUnknown)}대 제외 · 최소값)`;
+  const memAlloc = s.memOvercommit ? `${vmemUnknown ? '≥' : ''}${s.memOvercommit} : 1${vmemUnknown ? `(메모리 못 읽은 VM ${fmt(vmemUnknown)}대 제외)` : ''}` : '—';
   const ver = Array.isArray(s.esxiVersions) ? s.esxiVersions : [];
   return [
     { key: 'hosts', label: '호스트(ESXi)', value: fmt(s.total), sub: `연결 ${fmt(s.connected)} · 점검 ${fmt(s.maintenance)} · 끊김 ${fmt(s.disconnected)}`, bar: s.total > 0 ? s.connected / s.total : 0, tone: 'text' },
     { key: 'clusters', label: '클러스터', value: fmt(clusters), sub: `독립 호스트 ${fmt(standalone)} · vCenter ${fmt(vcs)}`, bar: 1, tone: 'text' },
     { key: 'cores', label: '물리 코어', value: fmt(cores), sub: `${s.hostsCapacityUnknown ? `용량 못 읽은 호스트 ${fmt(s.hostsCapacityUnknown)}대 제외(최소값) · ` : ''}소켓 ${socketsUnknown === list.length && list.length ? '—' : fmt(sockets)}${socketsUnknown ? `(못 읽음 ${socketsUnknown})` : ''} · 논리 ${fmt(s.logicalCores)}`, bar: 1, tone: 'text' },
-    { key: 'vcore', label: '할당 vCore', value: fmt(vcore), sub: `vCore:물리 ${s.hostsCapacityUnknown ? `—(용량 못 읽은 호스트 ${fmt(s.hostsCapacityUnknown)})` : ratioText(vcore, cores)}`, bar: !s.hostsCapacityUnknown && cores > 0 && vcore != null ? Math.min(1, vcore / (cores * 4)) : 0, tone: 'accent' },   // 55회차 #5
-    { key: 'mem', label: '전체 메모리', value: memTotalGB != null ? `${(memTotalGB / 1024).toFixed(1)}` : '—', unit: memTotalGB != null ? 'TB' : '', sub: memUsedGB != null ? `사용 ${(memUsedGB / 1024).toFixed(1)} TB${memPct != null ? `(${memPct}%)` : ''}${memUsedUnknown ? ` · 못 읽음 ${memUsedUnknown}` : ''} · 할당 ${s.memOvercommit ? `${s.memOvercommit} : 1` : '—'}` : '사용량 못 읽음', bar: memPct != null ? memPct / 100 : 0, tone: 'cyan' },
+    { key: 'vcore', label: '할당 vCore', value: fmt(vcore), sub: `vCore:물리 ${vcoreRatio}`, bar: !s.hostsCapacityUnknown && cores > 0 && vcore != null ? Math.min(1, vcore / (cores * 4)) : 0, tone: 'accent' },   // 55회차 #5
+    { key: 'mem', label: '전체 메모리', value: memTotalGB != null ? `${(memTotalGB / 1024).toFixed(1)}` : '—', unit: memTotalGB != null ? 'TB' : '', sub: memUsedGB != null ? `사용 ${(memUsedGB / 1024).toFixed(1)} TB${memPct != null ? `(${memPct}%)` : ''}${memUsedUnknown ? ` · 못 읽음 ${memUsedUnknown}` : ''} · 할당 ${memAlloc}` : '사용량 못 읽음', bar: memPct != null ? memPct / 100 : 0, tone: 'cyan' },
     { key: 'vms', label: 'VM', value: fmt(list.reduce((a, h) => a + (numOrNull(h.vmCount) ?? 0), 0)), sub: `호스트당 평균 ${list.length ? (list.reduce((a, h) => a + (numOrNull(h.vmCount) ?? 0), 0) / list.length).toFixed(1) : '—'}`, bar: 1, tone: 'green' },
     { key: 'power', label: '전력', value: Number.isFinite(s.powerKw) && s.powerKw > 0 ? s.powerKw.toLocaleString('en-US') : '—', unit: Number.isFinite(s.powerKw) && s.powerKw > 0 ? 'kW' : '', sub: `읽은 호스트 ${fmt(powerHosts)} / ${fmt(list.length)}${temps.length ? ` · 온도 최고 ${Math.max(...temps)}℃` : ''}`, bar: list.length ? powerHosts / list.length : 0, tone: 'amber' },
     { key: 'ver', label: 'ESXi 버전', value: ver.length ? String(ver.length) : '—', unit: ver.length ? '종' : '', sub: ver.length ? ver.slice(0, 3).map((v) => `${v.version} · ${v.count}`).join(' / ') : '정보 없음', bar: ver.length && s.total ? ver[0].count / s.total : 0, tone: 'text', versions: ver },

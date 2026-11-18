@@ -331,6 +331,8 @@ function Portal({ user, onLogout }) {
   const [tabFilters, setTabFilters] = useState({}); // { [tabId]: { region, vcenterId, q } }
   const [menuFilter, setMenuFilter] = useState({}); // { [tabId]: value }
   // v2.915 허브 교차 링크 — 호스트 표의 VM 수 → VM 탭을 그 호스트로(서버 /vms?host) · VM 표의 호스트 → 호스트 탭을 그 이름으로(화면 거르기).
+  // v3.19.0: 허브 바로가기 찾기 글자 — 메모리만(저장하지 않는다) · 범위 바의 공용 검색 q 와 별개. 칩(PlatformHub)과 vCenter 카드(VCenters)를 좁힌다.
+  const [chipQuery, setChipQuery] = useState('');
   const [vmHost, setVmHost] = useState('');
   const [hostFocusName, setHostFocusName] = useState('');
   const [showNotes, setShowNotes] = useState(false);
@@ -554,7 +556,7 @@ function Portal({ user, onLogout }) {
       return;
     }
     // v2.994(설계 docs/design/server-menu-rename): 탭 여러 개를 맡는 항목도 '마지막으로 본 탭' 이 아니라 그 항목의 처음 허용 탭(visibleMenu 의 entryTab)으로 —
-    //   Virtual Machine(VM) → VM 탭(inv.vms 가 없으면 vCenter 탭) · Hypervisor → 호스트 탭. vCenter 탭으로 가면 드릴다운을 닫는 재클릭 신호는 그대로다.
+    //   Virtual Machine → vCenter 카드 탭(v3.19.0 — dashboard 권한이 없으면 VM 탭) · Hypervisor → 호스트 탭. vCenter 탭으로 가면 드릴다운을 닫는 재클릭 신호는 그대로다.
     const dest = menuTabOf(item);
     if (!dest) return;
     if (dest === 'vcenters') setPlatformResetSeq((n) => n + 1);
@@ -681,7 +683,7 @@ function Portal({ user, onLogout }) {
             : <Overview onSelectSite={selectSite} onGotoTab={setTab} modeToggle={ovToggle} />)}
           {tab === 'summary' && <Summary scope={scope} onGotoTab={setTab} />}
           {/* v2.915: vCenter 탭은 허브 범위(리전 · vCenter · 검색)로 카드를 거르고, 카드의 호스트 · VM 수는 그 법인 범위로 탭을 바꾼다(죽은 prop 이던 onSelectSite 를 실제로 쓴다) */}
-          {tab === 'vcenters' && <VCenters onSelectSite={selectSite} onGoVms={(id) => goVms(id)} resetSignal={platformResetSeq} scope={{ region, vcenterId, q }} summary={platformSummary} />}
+          {tab === 'vcenters' && <VCenters onSelectSite={selectSite} onGoVms={(id) => goVms(id)} resetSignal={platformResetSeq} scope={{ region, vcenterId, q }} chipQuery={chipQuery} onChipQuery={setChipQuery} />}
           {tab === 'svcmon' && <SvcMonitor />}
           {tab === 'ipam' && <Ipam />}
           {tab === 'hosts' && <Hosts filters={filters} cond={platformCond} nameFocus={hostFocusName} onNameFocus={setHostFocusName} onGoVms={(host) => goVms('', host)} />}
@@ -882,7 +884,7 @@ function Portal({ user, onLogout }) {
           {platformOn && (
             <PlatformHub tab={tab} tabs={PLATFORM_TAB_KEYS.filter((t) => isAllowed(t))} summary={platformSummary}
               onTab={(t) => { if (t === 'vcenters') setPlatformResetSeq((n) => n + 1); setTab(t); }}
-              vcenters={vcenters} vcenterId={vcenterId} region={region} onPickVcenter={(id) => patchFilter({ vcenterId: id })} />
+              vcenters={vcenters} vcenterId={vcenterId} region={region} onPickVcenter={(id) => patchFilter({ vcenterId: id })} chipQuery={chipQuery} onChipQuery={setChipQuery} />
           )}
 
           {tabBody}

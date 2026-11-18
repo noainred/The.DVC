@@ -1,6 +1,7 @@
 # 설계: ‘Virtual Machine’ 메뉴 — 누르면 법인 바로가기와 vCenter 카드만
 
 - 상태: **시안(컨펌 대기)** — 구현은 컨펌 뒤(Opus). 이 폴더는 문서뿐이라 릴리스가 없다.
+- **1번 덩어리 구현 v3.19.0** — 숫자 3장 순서 · 설명 문구 제거 · vCenter 탭 카드 위 걷어냄(A) · 바로가기 글자로 찾기 · 400px 분해 중복(B1) · 죽은 코드(B2/B3). 화면(Chromium) 확인은 다음 단계.
 - 캔버스(Claude Design): https://claude.ai/artifact/E7RGUQQWYhDGuVGAd8prTa (비공개 — 소유자만 열 수 있다)
 - 아트보드 원본: 이 폴더의 `*.dc.html` 6개(캔버스에 올린 것과 같은 파일). 캔버스가 실제로 어떻게 그려지는지는 열어 확인하지 않았다(Design 유형 규칙 — 요청 없이는 검증하지 않는다).
 - 앞선 설계: `docs/design/virt-platform-menu/`(v2.915 세 메뉴를 허브 하나로) · `docs/design/server-menu-rename/`(v2.994 ‘Virtual Machine(VM)’ · ‘Hypervisor’ 로 나눔).

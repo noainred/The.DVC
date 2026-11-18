@@ -58,7 +58,7 @@
 - (8b단계 추가) 리눅스 성능 8b단계 화면 — 이 시점 프로세스 · 띠 · 저활용 · 전력/온도 — 서버 값만(점수 · 합 · 단서 재계산 없음) · 권한 · 미측정 ≠ 0 · 폴링 없음
 - (v2.976) 집중 모니터링 화면 — 시간 띠 하나가 모든 차트를 옮김 · 숫자는 응답 limits · 비교 색은 고정한 서버에만(4색) · 대상 표는 1440px 에서 동작 열까지
 - (v2.977) 업그레이드 뒤 화면 조각 404 는 자동 새로고침(60초에 한 번) · 열이 많은 표는 오른쪽 동작 열을 고정한다(sm-pin-right)
-- (v2.998.0(코드 · 테스트 표지는 v2.994 — main 이 v2.997 까지 먼저 나가 번호만 올렸다)) 서버 메뉴 이름 변경 — Virtual Machine(VM)(vms · vcenters) · Hypervisor(hosts · 새 항목) · Physical Server · Bare Metal Server · 저장 메뉴 별칭은 tab:vcenters → tab:vms · 마지막 본 탭 기억 삭제 · 허브 제목 = 메뉴 라벨
+- (v2.998.0(코드 · 테스트 표지는 v2.994 — main 이 v2.997 까지 먼저 나가 번호만 올렸다)) 서버 메뉴 이름 변경 — Virtual Machine(VM)(vms · vcenters) · Hypervisor(hosts · 새 항목) · Physical Server · Bare Metal Server · 저장 메뉴 별칭은 tab:vcenters → tab:vms · 마지막 본 탭 기억 삭제 · 허브 제목 = 메뉴 라벨 · (v3.19.0 ⑦) 이름 Virtual Machine · Physical Server · Physical Server(전체) · 처음 탭 vcenters · 별칭 tab:vms → tab:vcenters
 - (v3.0.0(코드 · 테스트 표지는 v2.999 — main 이 v2.999 까지 먼저 나가 번호만 올렸다)) 업그레이드 뒤 ‘새로고침 하세요’ — 이 창의 판(빌드 값) ≠ 서버 판이면 오류 상자 대신 안내 + 바뀐 것 3줄 + More · 알림은 닫을 때까지 · ‘새로고침 필요’ 배지 · /release-notes/since 는 옛 판 창의 계약
 
 ## 본문
@@ -871,6 +871,10 @@
      마지막 본 탭은 `platform.tab`, 바로가기 접힘은 `platform.chips`(전부 try/catch). 400px: 엔티티 탭 3칸 한 줄(수 + 이름 + 배지 — `.ph-tab .parts` 숨김 · 열린 탭의 분해는 아래 한 줄) · KPI 한 줄(`kpis-1row`)은 720 미만에서 세로로(추이 스파크 130px 가 넘쳤다 — Chromium 실측 8px).
   ⑩ 기능 사용 현황(`featureUsageText.js menuIndex`)은 `tabs` 도 같은 자리로 센다(`tab:vms` 키 그대로 · 이름 '가상화 플랫폼 › 가상화 서버 · VM').
   ⑪ **v2.994 에서 이름 · 항목 분리가 바뀌었다** — 아래 'v2.994 서버 메뉴 이름 변경' 항목이 우선한다(①의 항목 모양 · ②의 별칭 방향 · ⑨의 '마지막 본 탭' 기억 · ⑥의 브레드크럼 뿌리 이름).
+  ⑫ **v3.19.0(사용자 요청 2026-11-18 · 설계 `docs/design/vm-menu` 시안 A · §8)** — ⓐ 숫자 3장 순서는 **vCenter · Virtual Machine · Hypervisor**(사이드바 '서버' 묶음과 같다 — 계층 순서가 아니다). `platformText.PLATFORM_TABS` 와 `entityTabs()` 반환이 **리터럴로 따로** 순서를 적으니 둘을 함께 바꾼다(탭 id · 해시 · 권한 id 는 그대로).
+     ⓑ 허브 머리의 설명 문구(‘서비스 = vCenter 1 + Bareos 1 …’)는 지웠다(세 탭 공통). ⓒ **vCenter 탭은 바로가기 아래에 vCenter 카드만**(⑨의 카드 | 표 보기 · 도구 6 · 요약 3장 · `VcTable.jsx` · `platform.vcView` 기억은 없앴다 — 옛 저장 값은 읽지 않는다. VM 이름 검색 안내 · 결과 없음 · 용량 각주만 남는다). `HubTabs.jsx` 는 Hosts · Vms 탭이 쓰므로 남는다.
+     ⓓ **바로가기 글자로 찾기**: `platformText.filterChipSites(sites, text, selectedIds)` — 판정은 카드와 같은 `vcMatches`·`keywordsOf`(부분 일치 · 대소문자 무시 · 공백 낱말 AND). 범위 바의 공용 검색 `q` 와 **별개**인 App 메모리 상태 `chipQuery`(저장하지 않는다)를 허브(칩)와 vCenter 탭(카드)이 쓴다 — 숫자 3장 · 서버 호출은 그대로. **고른 법인의 칩은 일치하지 않아도 남긴다**(다시 눌러 풀 수 있게) · 맞는 법인이 없으면 칩 자리 · 카드 자리에 안내 + 지우기 · 접으면 글자도 비운다.
+     ⓔ 400px 결함(D3): `.ph-tab.on .parts { grid-column }` 때문에 열린 탭의 분해가 탭 안과 `.ph-parts-narrow` 에 **두 번** 나왔다 — 탭 안 규칙을 지웠다(`.ph-tab .parts` 는 400px 에서 숨김, 열린 탭의 분해는 아래 한 줄만). 회귀 `platform/platformText.test.js` 맨 아래 v3.19.0 두 describe.
 
 - **v2.998.0(코드 · 테스트 표지는 v2.994 — main 이 v2.997 까지 먼저 나가 번호만 올렸다) — 서버 메뉴 이름 변경: Virtual Machine(VM) · Hypervisor · Bare Metal Server · Physical Server(사용자 요청 2026-11-13 · 설계 `docs/design/server-menu-rename/README.md` · 컨펌 '추천대로 전부 진행')**.
   회귀 `web/src/views/topMenu.test.js`(구성 · locate · 진입 탭 `menuTabOf` · aka 검색) · `sidebar/{sideMenu,singleMenu2891,menuEdit}.test.js`(옛 저장 메뉴 두 모양) · `platform/platformText.test.js`(허브 제목 = 메뉴 라벨) · `featureUsageText.test.js` · `server/test/platformHub2915.test.js` ④.
@@ -889,6 +893,11 @@
   ⑥ **위치 안내 문구**: '서버 분석 › …' → 'Physical Server › …'(통합 검색 화면 이름 `invSearchQuery.LIST_SCREEN` · `TO_LABEL` 은 웹 한 벌 · 서버 `dbGuideData` · `hwExport/xlsx` 안내) ·
      '특수 기능 › 물리서버 폴더' → '특수 기능 › Bare Metal Server' · BmFolders 화면 제목. **개념 이름은 그대로**: '물리서버 폴더 규칙'(서비스 인벤토리 `SRC_LABEL` — 서버 `svcInventory.js` 와 두 벌) ·
      저장소 손상 · 이름 변경/삭제 결과 문구 · 일반 용어 '물리 서버'(Overview 카드 · 법인별 서버 사용량 역할 이름). 도구 이름 안의 'ESXi'(ESXi 호스트 구성 점검 · ESXi 버전별)도 그대로.
+  ⑦ **v3.19.0(사용자 요청 2026-11-18) — 이름 3곳 · 처음 여는 탭 · 별칭 방향**(이 항목의 ② ③ ④ ⑤ 보다 우선): `virt` = 'Virtual Machine' · `tab:'vcenters'` · `tabs:['vms']`(메뉴를 누르면 vCenter 카드 `#/vcenters` —
+     dashboard 권한이 없으면 visibleMenu `entryTab` 이 vms) / `bm` = 'Physical Server' / 자원관리 `sa` = 'Physical Server(전체)'(같은 이름의 메뉴 항목 두 개 금지 — `topMenu.test.js` 'v3.19.0 메뉴 이름').
+     tab · tabs 를 맞바꿔 정체 키가 `tab:vcenters`, 별칭이 `tab:vms → tab:vcenters` 가 됐다 — **옛 저장 형식 `tab:vms`(v2.994~v3.18)와 새 형식 `tab:vcenters` 둘 다 같은 항목**으로 풀리고(그룹 · 단독 · 둘 다 든 메뉴)
+     편집 화면에서 다시 저장하면 `tab:vcenters` 로 저장된다(`sideMenu.test.js` · `menuEdit.test.js` · `server/test/platformHub2915.test.js` ④). 서버 `usermenu/store.js` 형식 · 탭 id · 도구 키는 그대로.
+     기능 사용 현황의 추적 키도 그대로 — `tab:vcenters` = '서버 › Virtual Machine', `tab:vms` = '서버 › Virtual Machine › (PLATFORM_TABS 의 vms 이름)'. 화면 안 안내는 묶음 이름을 앞에 붙인다('서버 › Physical Server' · '자원관리 › Physical Server(전체)' — `HardwareTools.jsx`).
 
 - **리눅스 성능 7b단계 설정 › 베어메탈 성능 › 서버 등록(`web/src/views/tools/BmOnboardPanel.jsx` · 문구 `bmOnboardText.js` · `bmOnboard.css` · vitest `bmOnboardText.test.jsx`)**:
   - 순서: SSH 키 저장소 → 법인 공통 계정 → CSV · Excel 등록(파일 → 분석 표 → 결과 CSV · 적용) → 엣지 배포 목록(중앙) → 누락 점검. 마운트 1회 + 버튼(폴링 없음) · 늦은 응답은 gen 으로 버린다.

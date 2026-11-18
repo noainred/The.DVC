@@ -35,7 +35,7 @@ describe('메뉴 구성', () => {
 
   it('메뉴가 가리키는 도구는 카탈로그에 실재하고 패널이 있는 도구다', () => {
     const keys = allItems().map(({ c }) => c?.tool).filter(Boolean);
-    expect(keys.length).toBe(19);               // 서버 분석(Physical Server)은 'Physical Server · Baremetal' 과 'Physical Server' 두 자리 · v2.787 Veeam 1(Detail 은 also) · v2.789 스토리지 사용량 보고서 1 · v2.827 엣지 토큰 맞추기 1 · v2.948 SAN 스토리지 성능 1 · v2.965 PowerScale 장비 점검 1
+    expect(keys.length).toBe(19);               // 서버 분석(serveranalysis)은 서버 › 'Physical Server'(baremetal) 와 자원관리 › 'Physical Server(전체)' 두 자리(v3.19.0 이름) · v2.787 Veeam 1(Detail 은 also) · v2.789 스토리지 사용량 보고서 1 · v2.827 엣지 토큰 맞추기 1 · v2.948 SAN 스토리지 성능 1 · v2.965 PowerScale 장비 점검 1
     expect(new Set(keys).size).toBe(18);
     for (const k of keys) {
       const t = TOOLS.find((x) => x.k === k);
@@ -49,11 +49,14 @@ describe('메뉴 구성', () => {
     // v2.915(사용자 요청 '세 메뉴를 하나로' · 이름 '가상화 플랫폼'): 가상화 서버 · ESXi 호스트 · vCenter → 항목 하나(탭은 vcenters + hosts · vms)
     // v2.994(사용자 요청 2026-11-13 · 설계 docs/design/server-menu-rename): 'Virtual Machine(VM)'(vms + vcenters) · 'Hypervisor'(hosts) 둘로 ·
     //   물리 서버 → 'Physical Server · Baremetal'. id · 탭 id · 도구 키는 그대로.
-    expect(labels('server')).toEqual(['Virtual Machine(VM)', 'Hypervisor', 'Physical Server · Baremetal', 'Backup', '알람']);
+    // v3.19.0(사용자 요청 2026-11-18): 'Virtual Machine(VM)' → 'Virtual Machine'(처음 여는 탭 vcenters — vCenter 카드 화면) ·
+    //   'Physical Server · Baremetal' → 'Physical Server'(자원관리 쪽은 'Physical Server(전체)'). id · 탭 id · 도구 키는 그대로.
+    expect(labels('server')).toEqual(['Virtual Machine', 'Hypervisor', 'Physical Server', 'Backup', '알람']);
     const srv = MENU_GROUPS.find((g) => g.id === 'server').children;
     expect(srv.map((c) => c.id)).toEqual(['virt', 'hv', 'bm', 'veeam', 'alarm']);
     const virt = srv.find((c) => c.id === 'virt');
-    expect(tabsOf(virt)).toEqual(['vms', 'vcenters']);
+    expect(tabsOf(virt)).toEqual(['vcenters', 'vms']);
+    expect(hashOf(virt)).toBe('#/vcenters');   // v3.19.0: 메뉴를 누르면 vCenter 카드 화면
     expect(tabsOf(srv.find((c) => c.id === 'hv'))).toEqual(['hosts']);
     expect(srv.find((c) => c.id === 'bm')).toMatchObject({ tool: 'serveranalysis', seg: BAREMETAL_SEG });
     expect(tabsOf({ tool: 'x' })).toEqual([]);
@@ -63,7 +66,7 @@ describe('메뉴 구성', () => {
     // v2.965: 사용자 요청 '법인별로 전체 power scale 장비의 장비 점검을 하는 기능'(독립 도구 ps-inspect)을 스토리지 현황 바로 아래에 더했다.
     expect(labels('storage')).toEqual(['스토리지 현황', 'PowerScale 장비 점검', '데이터스토어', '스토리지 증가량 보고서', '스토리지 사용량 보고서', '스토리지 사용량 추이', '베어메탈 스토리지', 'SAN 스위치 모니터링', 'SAN 스토리지 성능']);
     expect(labels('network')).toEqual(['전체 네트워크 장비', '가상화 네트워크', '통신 지도', '글로벌 네트워크 점검', 'IP관리', 'Monitoring']);
-    expect(labels('resource')).toEqual(['Physical Server', 'GPU 인벤토리', '전력 분석']);   // v2.994 '서버 분석' → 'Physical Server'(도구 키 serveranalysis 그대로)
+    expect(labels('resource')).toEqual(['Physical Server(전체)', 'GPU 인벤토리', '전력 분석']);   // v2.994 '서버 분석' → 'Physical Server' · v3.19.0 → 'Physical Server(전체)'(도구 키 serveranalysis 그대로)
     expect(labels('optimize')).toEqual(['Optimization', 'Infra Observability']);   // v2.878 이름 변경(id·도구 키 idrac-trend 그대로)
   });
 });
@@ -104,7 +107,7 @@ describe('locate — 지금 화면이 어느 메뉴인가', () => {
   });
   it('옛 탭 주소는 새 메뉴 자리로 간다(#/hosts → 서버 › Hypervisor, #/upgrade → 설정 › 업그레이드)', () => {
     // v2.915: 세 탭 모두 '서버 › 가상화 플랫폼' 한 항목(옛 주소 · 탭 id 는 그대로)
-    // v2.994: hosts 는 'Hypervisor'(hv) · vms · vcenters 는 'Virtual Machine(VM)'(virt). 호스트 개체 보기(#/vcenters/…/host/…)는 vcenters 탭이라 virt.
+    // v2.994: hosts 는 'Hypervisor'(hv) · vms · vcenters 는 'Virtual Machine(VM)'(virt · v3.19.0 이름 'Virtual Machine'). 호스트 개체 보기(#/vcenters/…/host/…)는 vcenters 탭이라 virt.
     expect(locate('hosts', '#/hosts')).toEqual({ group: 'server', child: 'hv' });
     expect(locate('vms', '#/vms')).toEqual({ group: 'server', child: 'virt' });
     expect(locate('vcenters', '#/vcenters')).toEqual({ group: 'server', child: 'virt' });
@@ -122,28 +125,32 @@ describe('visibleMenu · entryOf', () => {
     expect(m.map((g) => g.id)).toEqual(['overview', 'server', 'tools']);
     expect(m.find((g) => g.id === 'server').children.map((c) => c.id)).toEqual(['virt']);
     // v2.915: 하나라도 허용이면 보이고 처음 여는 탭은 허용된 것 중 첫째(entryTab) — hashOf 가 그리로
-    // v2.994: virt 의 처음 탭이 vms 가 됐다(entryTab 없음) · inv.vms 가 없으면 vcenters 로(entryTab) · hosts 는 hv 항목
+    // v2.994: virt 의 처음 탭이 vms 가 됐다 · hosts 는 hv 항목
+    // v3.19.0: virt 의 처음 탭이 vcenters(vCenter 카드)로 — dashboard 권한(vcenters 탭)이 없으면 entryTab 이 vms 로 떨어진다
     expect(hashOf(m.find((g) => g.id === 'server').children[0])).toBe('#/vms');
-    expect(m.find((g) => g.id === 'server').children[0].entryTab).toBe(undefined);
+    expect(m.find((g) => g.id === 'server').children[0].entryTab).toBe('vms');
     const m2 = visibleMenu({ tabOk: (t) => ['overview', 'hosts', 'vcenters'].includes(t), toolOk: () => false });
     expect(m2.find((g) => g.id === 'server').children.map((c) => c.id)).toEqual(['virt', 'hv']);
     const it2 = m2.find((g) => g.id === 'server').children[0];
     expect(hashOf(it2)).toBe('#/vcenters');
-    expect(it2.entryTab).toBe('vcenters');
+    expect(it2.entryTab).toBe(undefined);
     const m3 = visibleMenu({ tabOk: (t) => ['overview', 'alarms'].includes(t), toolOk: () => false });
     expect(m3.find((g) => g.id === 'server').children.map((c) => c.id)).toEqual(['alarm']);
   });
   it('v2.994 메뉴 클릭 진입 탭(menuTabOf) — 마지막으로 본 탭이 아니라 그 항목의 처음 허용 탭 · 권한별', () => {
     const srv = (tabs) => visibleMenu({ tabOk: (t) => tabs.includes(t), toolOk: () => true }).find((g) => g.id === 'server')?.children || [];
     const pick = (tabs, id) => srv(tabs).find((c) => c.id === id) || null;
-    // 전부 허용: Virtual Machine(VM) → VM 탭 · Hypervisor → 호스트 탭
-    expect(menuTabOf(pick(['vms', 'hosts', 'vcenters'], 'virt'))).toBe('vms');
+    // 전부 허용: Virtual Machine → vCenter 카드 탭(v3.19.0 — v2.994~v3.18 은 VM 탭) · Hypervisor → 호스트 탭
+    expect(menuTabOf(pick(['vms', 'hosts', 'vcenters'], 'virt'))).toBe('vcenters');
     expect(menuTabOf(pick(['vms', 'hosts', 'vcenters'], 'hv'))).toBe('hosts');
-    // inv.vms 없음 → vCenter 탭으로 진입
+    // inv.vms 없음 → 그대로 vCenter 탭
     expect(menuTabOf(pick(['hosts', 'vcenters'], 'virt'))).toBe('vcenters');
-    // inv.hosts 없음 → Hypervisor 항목이 보이지 않는다 · VM 은 그대로
+    // inv.hosts 없음 → Hypervisor 항목이 보이지 않는다 · Virtual Machine 은 그대로 vCenter 탭
     expect(pick(['vms', 'vcenters'], 'hv')).toBe(null);
-    expect(menuTabOf(pick(['vms', 'vcenters'], 'virt'))).toBe('vms');
+    expect(menuTabOf(pick(['vms', 'vcenters'], 'virt'))).toBe('vcenters');
+    // v3.19.0: dashboard 권한(vcenters 탭)이 없으면 VM 탭으로 떨어진다(항목은 보인다)
+    expect(menuTabOf(pick(['vms', 'hosts'], 'virt'))).toBe('vms');
+    expect(menuTabOf(pick(['vms'], 'virt'))).toBe('vms');
     // vCenter 만 → virt 는 vcenters · hosts 만 → virt 가 사라지고 hv 만
     expect(menuTabOf(pick(['vcenters'], 'virt'))).toBe('vcenters');
     expect(srv(['hosts']).filter((c) => !c.tool).map((c) => c.id)).toEqual(['hv']);   // 도구 항목(bm · veeam)은 toolOk 로 따로 보인다
@@ -250,6 +257,25 @@ describe('v2.785→v2.787 Veeam — 주소·도구 키는 그대로 · 옛 이�
   });
 });
 
+
+// v3.19.0(사용자 요청 2026-11-18): 서버 › 'Physical Server'(bm) 와 자원관리 › 'Physical Server(전체)'(sa) — 이름이 같은 메뉴 항목은 둘이 되지 않는다.
+describe('v3.19.0 메뉴 이름 — 같은 이름의 항목이 두 개 없다', () => {
+  it('기본 메뉴 전체에서 항목 이름(대메뉴 단독 · 하위 항목)은 겹치지 않는다', () => {
+    const names = allItems().map(({ g, c }) => (c || g).label);
+    const dup = names.filter((n, i) => names.indexOf(n) !== i);
+    expect(dup).toEqual([]);
+  });
+  it('Physical Server 두 자리 — 서버 쪽은 Baremetal 조각 · 자원관리 쪽은 (전체) · 같은 도구 키', () => {
+    const srv = MENU_GROUPS.find((g) => g.id === 'server').children;
+    const res = MENU_GROUPS.find((g) => g.id === 'resource').children;
+    expect(srv.find((c) => c.id === 'bm')).toMatchObject({ label: 'Physical Server', tool: 'serveranalysis', seg: BAREMETAL_SEG });
+    expect(res.find((c) => c.id === 'sa')).toMatchObject({ label: 'Physical Server(전체)', tool: 'serveranalysis' });
+    expect(res.find((c) => c.id === 'sa').seg).toBe(undefined);
+    // 옛 이름은 메뉴에 남지 않는다
+    const names = allItems().map(({ g, c }) => (c || g).label);
+    for (const old of ['Virtual Machine(VM)', 'Physical Server · Baremetal']) expect(names, old).not.toContain(old);
+  });
+});
 
 // v2.994(사용자 요청 2026-11-13 · 설계 docs/design/server-menu-rename): 도구 이름 변경 — 키는 그대로 · 옛 이름은 aka 로 찾힌다.
 describe('v2.994 Physical Server · Bare Metal Server — 도구 키 그대로 · 옛 이름으로도 찾힌다', async () => {

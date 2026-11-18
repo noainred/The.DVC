@@ -120,6 +120,21 @@ describe('hostChecksText — 요약 8칸·칩·거르기', () => {
     const empty = hostKpis({}, [], NOW);
     expect(empty[4].value).toBe('—'); expect(empty[4].unit).toBe(''); expect(empty[6].value).toBe('—');
   });
+  it('v3.19.0 할당 vCore · 메모리 할당 — 못 읽은 VM 이 있으면 부분 합(≥ · 수를 따로) · 없으면 예전 문구 그대로', () => {
+    expect(hostKpis({ ...summary, vcpuUnknown: 0, vmemUnknown: 0 }, rows, NOW)[3].sub).toBe('vCore:물리 2.0 : 1');
+    const k = hostKpis({ ...summary, vcpuUnknown: 3, vmemUnknown: 2 }, rows, NOW);
+    expect(k[3].value).toBe('192');
+    expect(k[3].sub).toBe('vCore:물리 ≥2.0 : 1(vCPU 못 읽은 VM 3대 제외 · 최소값)');
+    expect(k[4].sub).toMatch(/할당 ≥0\.5 : 1\(메모리 못 읽은 VM 2대 제외\)/);
+    expect(hostKpis(summary, rows, NOW)[4].sub).toMatch(/할당 0\.5 : 1$/);
+    // 전부 못 읽음 — 서버가 합 · 비율을 null 로 준다: 값 '—' · 0 으로 보이지 않는다
+    const none = hostKpis({ ...summary, vcoreAllocated: null, memOvercommit: null, vcpuUnknown: 4, vmemUnknown: 4 }, rows, NOW);
+    expect(none[3].value).toBe('—');
+    expect(none[3].sub).toBe('vCore:물리 —(vCPU 못 읽은 VM 4대)');
+    expect(none[4].sub).toMatch(/할당 —$/);
+    // 호스트 용량을 못 읽었으면 그 사유가 먼저(예전 문구 그대로)
+    expect(hostKpis({ ...summary, hostsCapacityUnknown: 1, vcpuUnknown: 3 }, rows, NOW)[3].sub).toBe('vCore:물리 —(용량 못 읽은 호스트 1)');
+  });
   it('칩 — 묶음을 못 읽었으면 null(0 이 아니다) · 구성 칩은 findings 코드로 · 서버 칩은 checks 로', () => {
     const secOf = (h) => secCountsOf(h, NOW);
     const none = chipCounts(rows, { secOf, checks: null, access: null });

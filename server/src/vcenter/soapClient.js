@@ -2373,8 +2373,9 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
         ...vmIps(p['guest.net'], p['guest.ipAddress']),
         gateways: vmGateways(p['guest.ipStack']),
         dns: vmDns(p['guest.net'], p['guest.ipStack']),   // v2.695: VM 이 쓰는 DNS 서버(IP 와 분리)
-        toolsStatus: p['guest.toolsRunningStatus'] === 'guestToolsRunning' ? 'RUNNING'
-          : powered ? 'NOT_RUNNING' : 'NOT_RUNNING',
+        // v3.19.0: 예전 식 `powered ? 'NOT_RUNNING' : 'NOT_RUNNING'` 은 양쪽이 같아 뜻이 없었다 — 값은 그대로 둘(RUNNING/NOT_RUNNING)이다
+        //   (inventory/vmToolsDist.js 머리말 · 소비처가 이 두 값을 전제한다). 미설치 · 오래됨은 toolsVersionStatus 가 가른다.
+        toolsStatus: p['guest.toolsRunningStatus'] === 'guestToolsRunning' ? 'RUNNING' : 'NOT_RUNNING',
         toolsVersion: p['guest.toolsVersion'] || '',
         toolsVersionStatus: p['guest.toolsVersionStatus2'] || '',
         hwVersion: p['config.version'] || '',

@@ -1,7 +1,7 @@
 /**
  * views/platform/platformText.js — '서버 › 가상화 플랫폼' 허브(v2.915 · 설계 docs/design/virt-platform-menu 시안 A · 컨펌 2026-11-07)의 순수 보조(vitest 고정).
  *
- *  · 탭 세 개(vCenter · 호스트 · VM) — v2.994 부터 메뉴 항목 둘('Virtual Machine(VM)' = vCenter · VM · 'Hypervisor' = 호스트). 탭 id(vcenters · hosts · vms) · 해시 · 권한 id 는 그대로다 — 여기서는 이름 · 순서 · 문구 · 기억만 정한다.
+ *  · 탭 세 개(vCenter · VM · 호스트) — v2.994 부터 메뉴 항목 둘('Virtual Machine(VM)' = vCenter · VM · 'Hypervisor' = 호스트). 탭 id(vcenters · hosts · vms) · 해시 · 권한 id 는 그대로다 — 여기서는 이름 · 순서 · 문구 · 기억만 정한다.
  *  · 숫자 판정은 서버 /platform/summary(inventory/platformSummary.js) 하나 — 여기서는 글자로 바꾸기만 한다. 못 읽은 값(null)은 '—' 이고 단위를 붙이지 않는다.
  *  · 도구 키는 바꾸지 않는다(권한 파일의 값). 탭 줄 오른쪽의 도구는 그 탭 성격의 특수 기능 — vCenter 6 · 호스트 4 · VM 6(vmHubText.HUB_TOOLS).
  *  · localStorage 는 try/catch(사생활 모드 · 차단에서 던진다) — 못 기억해도 화면은 동작한다.
@@ -11,18 +11,18 @@ import { HUB_TOOLS } from '../vms/vmHubText.js';
 import { handoffMany, takeSearch } from '../../hooks/searchHandoff.js'; // v2.959: KPI 카드 → 도구 화면에 고른 vCenter 인계(메모리)
 import { MENU_GROUPS, tabsOf } from '../topMenu.js'; // v2.994: 허브 제목 = 그 탭에서 켜지는 사이드바 항목 이름(이름 코어는 MENU_GROUPS 하나)
 
-/** 허브 탭 — 순서 = 계층(법인 → 호스트 → VM). k 는 App 의 탭 id 그대로.
+/** 허브 탭 — 순서 = vCenter · Virtual Machine · Hypervisor(v3.19.0 사용자 지시 2026-11-18 — 사이드바 '서버' 묶음의 Virtual Machine → Hypervisor 순서와 같다. 전에는 법인 → 호스트 → VM 이었다). k 는 App 의 탭 id 그대로.
  *  v2.994(사용자 요청 2026-11-13 · 설계 docs/design/server-menu-rename): 이름 'Hypervisor' · 'Virtual Machine' — 옛 이름은 작은 글자(sub)로 남긴다. */
 export const PLATFORM_TABS = Object.freeze([
   { k: 'vcenters', label: 'vCenter', sub: '법인', perm: 'dashboard' },
-  { k: 'hosts', label: 'Hypervisor', sub: 'ESXi 호스트', perm: 'inv.hosts' },
   { k: 'vms', label: 'Virtual Machine', sub: 'VM', perm: 'inv.vms' },
+  { k: 'hosts', label: 'Hypervisor', sub: 'ESXi 호스트', perm: 'inv.hosts' },
 ]);
 export const PLATFORM_TAB_KEYS = Object.freeze(PLATFORM_TABS.map((t) => t.k));
 export const isPlatformTab = (t) => PLATFORM_TAB_KEYS.includes(t);
 
 /**
- * v2.994: 허브 제목 — 그 탭에서 사이드바에 켜지는 기본 메뉴 항목의 이름(vcenters · vms → 'Virtual Machine(VM)', hosts → 'Hypervisor').
+ * v2.994: 허브 제목 — 그 탭에서 사이드바에 켜지는 기본 메뉴 항목의 이름(vcenters · vms → 'Virtual Machine', hosts → 'Hypervisor').
  * 이름을 여기 따로 적지 않는다 — topMenu.MENU_GROUPS 의 라벨을 읽는다(v2.915 의 상수 PLATFORM_MENU_LABEL 은 없앴다). 허브 탭이 아니면 ''.
  */
 export function platformMenuLabel(tab, groups = MENU_GROUPS) {
@@ -46,16 +46,15 @@ export const HOST_TOOLS = Object.freeze([
   ['host-hygiene', 'ESXi 호스트 구성 점검'], ['esxi', 'ESXi 버전별'], ['hba', 'HBA 카드 속도'], ['cluster-check', '클러스터 HA·DRS 점검'],
 ]);
 /**
- * 메뉴 항목 also 에 들어가는 도구 — v2.994 부터 두 항목으로 갈린다: 'Virtual Machine(VM)'(virt) = VM 6 + vCenter 6 · 'Hypervisor'(hv) = 호스트 4.
+ * 메뉴 항목 also 에 들어가는 도구 — v2.994 부터 두 항목으로 갈린다: 'Virtual Machine'(virt) = VM 6 + vCenter 6 · 'Hypervisor'(hv) = 호스트 4.
  * 그 도구를 열면 그 항목이 켜진다(topMenu.locate). 순서 = VM(기존) → vCenter → 호스트. 전체(16)는 PLATFORM_TOOL_KEYS.
  */
 export const VM_ITEM_TOOL_KEYS = Object.freeze([...HUB_TOOLS.map(([k]) => k), ...VC_TOOLS.map(([k]) => k)]);
 export const HV_ITEM_TOOL_KEYS = Object.freeze(HOST_TOOLS.map(([k]) => k));
 export const PLATFORM_TOOL_KEYS = Object.freeze([...VM_ITEM_TOOL_KEYS, ...HV_ITEM_TOOL_KEYS]);
 
-/** 브라우저 기억 키 — 바로가기 접힘 · vCenter 탭 보기(카드 | 표). v2.994: '마지막 본 탭'(platform.tab) 기억은 없앴다 — 메뉴 항목마다 자기 탭으로 간다. */
+/** 브라우저 기억 키 — 바로가기 접힘. v3.19.0: vCenter 탭 보기(카드 | 표) 기억(platform.vcView)은 없앴다 — 표 보기가 없다(옛 저장 값은 읽지 않는다). v2.994: '마지막 본 탭'(platform.tab) 기억은 없앴다 — 메뉴 항목마다 자기 탭으로 간다. */
 export const LS_CHIPS = 'platform.chips';
-export const LS_VC_VIEW = 'platform.vcView';
 
 export function loadChipsCollapsed(storage) {
   try { return storage?.getItem?.(LS_CHIPS) === '1'; } catch { return false; }
@@ -64,10 +63,8 @@ export function saveChipsCollapsed(storage, collapsed) {
   try { storage?.setItem?.(LS_CHIPS, collapsed ? '1' : '0'); } catch { /* */ }
 }
 /**
- * v2.958(사용자 요청 2026-11-10 "법인 선택하면 상태창의 백업/VM 수량 등을 법인에 맞게"): vCenter 탭 KPI 줄(VM 백업 · VM 증가 · 스토리지 증가)은
- * 허브 범위(리전 · vCenter) 안의 법인만 합한다. 검색어는 범위가 아니라 찾기라 KPI 에 걸지 않는다.
+ * v2.958(사용자 요청 2026-11-10): 허브 범위(리전 · vCenter) 글자. v3.19.0: vCenter 탭의 KPI 줄은 없앴지만 scopeLabel 은 VM 이름 검색 제목이 쓴다.
  *  - scopeLabel: KPI 문구의 머리 — 전체 / vCenter 이름 / '리전 X · N법인'.
- *  - bareosSumOf: Bareos 백업 현황 rows[] 중 범위 안 법인의 counts.jobs 합 — 못 읽은 법인(counts 없음)은 0 으로 더하지 않고 unknown 으로 센다 · 하나도 못 읽었으면 jobs null.
  */
 /** v3.13.6: 리전 글자 — 'Unknown'(위치를 비워 등록)은 '리전 미지정', 그 밖은 '리전 X'. 범위 글자 · 칩 안내 · 범위 바가 한 벌로 쓴다. */
 export function regionText(r) {
@@ -81,37 +78,13 @@ export function scopeLabel(scope, sitesInScope) {
   if (region) return `${regionText(region)} · ${list.length}법인`;
   return '전체';
 }
-export function bareosSumOf(rows, ids) {
-  const by = new Map((Array.isArray(rows) ? rows : []).filter((r) => r && typeof r === 'object').map((r) => [r.id, r]));
-  let jobs = 0; let known = 0; let unknown = 0;
-  for (const id of Array.isArray(ids) ? ids : []) {
-    const r = by.get(id);
-    const n = numOrNull(r?.counts?.jobs);
-    if (n == null) { unknown += 1; continue; }
-    jobs += n; known += 1;
-  }
-  return { jobs: known ? jobs : null, known, unknown, partial: known > 0 && unknown > 0 };
-}
-
 /**
  * v2.959(사용자 요청 2026-11-10 "법인을 선택한 상태에서 백업 · VM 수량 · 스토리지 증가 버튼 누르면 해당 법인에 대한 정보 보여주기"):
  * KPI 카드를 누르면 그 도구 화면으로 가면서 **고른 vCenter 를 메모리 인계**(hooks/searchHandoff — URL 에 싣지 않는다 · 30초 · 꺼내면 지운다)로 넘긴다.
  * 받는 도구는 마운트 때 한 번 꺼내 vCenter 선택 칸의 초기값으로 쓴다(VmTrackTool · StorageTrackTool). 범위가 리전뿐이면(vCenter 없음) 넘길 것이 없어 전체로 연다.
  */
 export const KPI_HANDOFF = Object.freeze({ vmTrack: 'vm-track:vcenter', storageTrack: 'storage-track:vcenter', vmTrackRegion: 'vm-track:region', storageTrackRegion: 'storage-track:region', backupSummaryRegion: 'backup-summary:region' });   // v3.10.17 백업 카드 → Summary 리전
-/**
- * v3.10.15(점검 3회차): KPI 카드 → 도구에 **리전도** 넘긴다(법인을 고르지 않고 리전만 골랐을 때 — 전에는 전체로 열렸다). 한 번의 인계에 vCenter · 리전을 함께 남긴다(handoffMany 는 새로 남길 때 이전 것을 지운다).
- * 도구 쪽 보조: regionsOf(목록의 리전 · 빈 값 제외 · 이름순) · vcInRegion(리전 안 vCenter — 리전이 없으면 전부).
- */
-export function handoffKpiScope(targets, scope) {
-  const vc = String(scope?.vcenterId || '').trim(); const region = String(scope?.region || '').trim();
-  const entries = [];
-  if (vc && targets?.vc) entries.push([targets.vc, vc]);
-  else if (region && targets?.region) entries.push([targets.region, region]);
-  if (!entries.length) return false;
-  handoffMany(entries);
-  return true;
-}
+/** 도구 쪽 보조: regionsOf(목록의 리전 · 빈 값 제외 · 이름순) · vcInRegion(리전 안 vCenter — 리전이 없으면 전부). (v3.19.0: KPI 카드가 없어져 인계를 남기는 handoffKpiScope 는 지웠다 — 받는 쪽 takeKpiVcenter 만 남는다.) */
 export function regionsOf(vcList) {
   const set = new Set((Array.isArray(vcList) ? vcList : []).map((v) => String(v?.region || '').trim()).filter(Boolean));
   return [...set].sort((a, b) => a.localeCompare(b, 'ko'));
@@ -141,6 +114,18 @@ export function vcMatches(s, keywords) {
   const hay = [s.name, s.id, s.location?.city, s.location?.country, s.location?.region, s.version].filter(Boolean).join(' ').toLowerCase();
   return keywords.every((kw) => hay.includes(kw));
 }
+/**
+ * v3.19.0(사용자 요청 2026-11-18 "바로가기 메뉴에 텍스트로 검색 — AAA AAB 가 있을 때 AA 를 입력하면 둘 다"): 바로가기 칩을 글자로 좁힌다.
+ * 판정은 카드와 같은 vcMatches · keywordsOf 한 벌(부분 일치 · 대소문자 무시 · 공백 낱말 AND) — 새 판정을 만들지 않는다. 범위 바의 공용 검색(q)과는 별개의 값이다.
+ * **고른 법인(selectedIds)의 칩은 일치하지 않아도 남긴다** — 다시 눌러 풀 수 있어야 한다. 빈 글자 = 전부(원본 순서 그대로).
+ */
+export function filterChipSites(sites, text, selectedIds = []) {
+  const list = Array.isArray(sites) ? sites : [];
+  const kws = keywordsOf(text);
+  if (kws.length === 0) return list;
+  const keep = new Set((Array.isArray(selectedIds) ? selectedIds : [selectedIds]).filter(Boolean).map(String));
+  return list.filter((s) => s && typeof s === 'object' && (keep.has(String(s.id)) || vcMatches(s, kws)));
+}
 export function siblingSites(sites, scope) {
   const region = String(scope?.region || '');
   const kws = keywordsOf(scope?.q);
@@ -152,20 +137,11 @@ export function siblingScopeText(scope) {
   return [region ? regionText(region) : '', q ? `‘${q}’` : ''].filter(Boolean).join(' · ');
 }
 
-export const VC_VIEWS = Object.freeze([['cards', '카드'], ['table', '표']]);
-export function loadVcView(storage) {
-  try { const v = storage?.getItem?.(LS_VC_VIEW); return VC_VIEWS.some(([k]) => k === v) ? v : 'cards'; } catch { return 'cards'; }
-}
-export function saveVcView(storage, v) {
-  if (!VC_VIEWS.some(([k]) => k === v)) return;
-  try { storage?.setItem?.(LS_VC_VIEW, v); } catch { /* */ }
-}
-
 export const fmtN = (v) => { const n = numOrNull(v); return n == null ? '—' : n.toLocaleString('en-US'); };
 
 /**
  * 엔티티 탭 3장의 글자 — 서버 요약(totals)에서. 분해는 **그 탭에만 있는 것**(시안 §4.0-2): vCenter 는 연결 · 불가 · REST 폴백 · 엣지 위임 · 알람,
- * 호스트는 연결 · 점검 · 끊김 · 미수집 · 클러스터, VM 은 구동 · 정지 · 미수집 · 템플릿. 배지는 '지금 볼 것'(낡은 값 · 확인 대상 · 조치 필요) — 0 이면 없다.
+ * VM 은 구동 · 정지 · 미수집 · 템플릿, 호스트는 연결 · 점검 · 끊김 · 미수집 · 클러스터(v3.19.0 순서 — vCenter · VM · 호스트). 배지는 '지금 볼 것'(낡은 값 · 확인 대상 · 조치 필요) — 0 이면 없다.
  * 요약이 아직 없으면(응답 전 · 첫 수집 중 · 권한 없음) 수는 '—' 이고 배지도 없다(0 을 지어내지 않는다).
  */
 const tabText = (k) => { const x = PLATFORM_TABS.find((p) => p.k === k); return { label: x.label, sub: x.sub }; };   // v2.994: 탭 이름은 PLATFORM_TABS 하나
@@ -185,20 +161,20 @@ export function entityTabs(summary) {
       ] : [],
     },
     {
+      k: 'vms', ...tabText('vms'), value: fmtN(m?.total),
+      badge: pos(m?.attention) ? { text: `조치 필요 ${fmtN(m.attention)}`, tone: 'red' } : null,
+      parts: m ? [
+        { text: `구동 ${fmtN(m.on)}`, tone: 'green' }, { text: `정지 ${fmtN(m.off)}` }, { text: `사용률 미수집 ${fmtN(m.usageUnknown)}` }, { text: `템플릿 ${fmtN(m.templates)}` },
+        ...(pos(m.unknownVcs) ? [{ text: `개수 모름 ${fmtN(m.unknownVcs)}곳`, title: '첫 수집 중 · 비활성 · 연결 실패인 법인 — 0대가 아니라 모르는 것입니다' }] : []),
+      ] : [],
+    },
+    {
       k: 'hosts', ...tabText('hosts'), value: fmtN(h?.total),
       badge: pos(h?.attention) ? { text: `확인 대상 ${fmtN(h.attention)}`, tone: 'amber' } : null,
       parts: h ? [
         { text: `연결 ${fmtN(h.connected)}` }, { text: `점검 ${fmtN(h.maint)}`, tone: pos(h.maint) ? 'amber' : '' }, { text: `끊김 ${fmtN(h.down)}`, tone: pos(h.down) ? 'red' : '' },
         { text: `미수집 ${fmtN(h.unread)}` }, { text: `클러스터 ${fmtN(h.clusters)}` },
         ...(pos(h.unknownVcs) ? [{ text: `개수 모름 ${fmtN(h.unknownVcs)}곳`, title: '첫 수집 중 · 비활성 · 연결 실패인 법인 — 0대가 아니라 모르는 것입니다' }] : []),
-      ] : [],
-    },
-    {
-      k: 'vms', ...tabText('vms'), value: fmtN(m?.total),
-      badge: pos(m?.attention) ? { text: `조치 필요 ${fmtN(m.attention)}`, tone: 'red' } : null,
-      parts: m ? [
-        { text: `구동 ${fmtN(m.on)}`, tone: 'green' }, { text: `정지 ${fmtN(m.off)}` }, { text: `사용률 미수집 ${fmtN(m.usageUnknown)}` }, { text: `템플릿 ${fmtN(m.templates)}` },
-        ...(pos(m.unknownVcs) ? [{ text: `개수 모름 ${fmtN(m.unknownVcs)}곳`, title: '첫 수집 중 · 비활성 · 연결 실패인 법인 — 0대가 아니라 모르는 것입니다' }] : []),
       ] : [],
     },
   ];

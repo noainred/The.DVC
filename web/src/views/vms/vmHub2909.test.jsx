@@ -29,7 +29,9 @@ describe('vmHubText — 서버와 같은 신호 키 · 메뉴 · 도구', () => 
   it('허브 도구는 카탈로그에 실재하고 메뉴 서버 › 가상화 서버 의 also 와 같다 → 그 도구를 열어도 이 메뉴가 켜진다', () => {
     // v2.915: '가상화 서버' 항목은 '가상화 플랫폼'(virt — vcenters · hosts · vms) 한 항목이 됐다 — VM 도구 6은 그 also 의 앞 여섯 그대로(뒤에 vCenter · 호스트 도구)
     const vm = MENU_GROUPS.find((g) => g.id === 'server').children.find((c) => c.id === 'virt');
-    expect(vm.tab).toBe('vms');   // v2.994: 'Virtual Machine(VM)' 의 처음 탭이 vms(같은 항목이 vcenters 도 맡는다 · 호스트는 Hypervisor 항목)
+    // v2.994: 'Virtual Machine(VM)' 의 처음 탭이 vms(같은 항목이 vcenters 도 맡는다 · 호스트는 Hypervisor 항목)
+    // v3.19.0: 이름 'Virtual Machine' · 처음 탭 vcenters(vCenter 카드) — vms 는 같은 항목의 나머지 탭
+    expect([vm.tab, ...vm.tabs]).toEqual(['vcenters', 'vms']);
     expect(vm.also.slice(0, HUB_TOOL_KEYS.length)).toEqual([...HUB_TOOL_KEYS]);
     for (const k of HUB_TOOL_KEYS) {
       const t = TOOLS.find((x) => x.k === k);

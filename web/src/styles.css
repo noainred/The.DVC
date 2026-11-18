@@ -848,18 +848,7 @@ tbody tr:last-child td { border-bottom: none; }
 .qn-btn.on:hover { background: rgba(59,130,246,.36); }
 .qn-btn.on.down { opacity: 1; }   /* 선택된 칩은 흐리게 하지 않는다(선택이 더 중요한 정보) */
 
-/* 카드 반짝 하이라이트 */
-@keyframes vcFlash {
-  0%   { box-shadow: 0 0 0 0 rgba(96,165,250,0); border-color: var(--border); }
-  15%  { box-shadow: 0 0 0 4px rgba(96,165,250,.55), 0 0 26px 6px rgba(96,165,250,.45); border-color: var(--accent); }
-  55%  { box-shadow: 0 0 0 3px rgba(96,165,250,.30), 0 0 18px 4px rgba(96,165,250,.25); border-color: var(--accent); }
-  100% { box-shadow: 0 0 0 0 rgba(96,165,250,0); border-color: var(--border); }
-}
-/* 바로가기 클릭 시 대상 카드 반짝임 — 눈에 확실히 들어오도록 지속시간 2배(1.5s→3s). */
-.vc-card.flash { animation: vcFlash 3s ease-out; border-color: var(--accent); }
-
-/* 테두리 없는 그룹 블록(스토리지 모니터링 '법인별' 등)용 바로가기 대상 — .vc-card.flash 는
-   자체 테두리·그림자가 있는 카드 전제라 밋밋한 컨테이너에서는 거의 보이지 않는다. 여기서는
+/* 테두리 없는 그룹 블록(스토리지 모니터링 '법인별' 등)용 바로가기 대상 — vCenter 카드용 반짝은 v3.19.0 에 지웠다. 여기서는
    outline + 배경 틴트로 표시한다. scroll-margin-top 은 sticky .topbar(약 63px) 아래로
    대상이 들어가지 않도록 하는 여유값. */
 .qn-anchor { border-radius: 12px; scroll-margin-top: 84px; }

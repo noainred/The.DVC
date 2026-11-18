@@ -18,13 +18,12 @@ describe('openBackupDetail(v2.959)', () => {
     expect(mem.get(DETAIL_VC_KEY)).toBe('vc-a');
     expect(openBackupDetail(' vc-c ', { storage: null, go: () => {} })).toBeUndefined();
   });
-  it('키는 한 곳 — BackupSummaryTool 은 재수출만 하고 BackupDetailTool · VCenters 는 같은 값을 읽는다', () => {
+  it('키는 한 곳 — BackupSummaryTool 은 재수출만 하고 BackupDetailTool 은 같은 값을 읽는다(v3.19.0: 허브 VCenters 의 백업 KPI 는 걷어냈다)', () => {
     expect(DETAIL_VC_KEY).toBe('backup-detail-vc');
     const sum = fs.readFileSync(new URL('./BackupSummaryTool.jsx', import.meta.url), 'utf8');
     expect(sum).toMatch(/export \{ DETAIL_VC_KEY \};/);
     expect(sum).not.toMatch(/localStorage\.setItem\(DETAIL_VC_KEY/);
     const vc = fs.readFileSync(new URL('../VCenters.jsx', import.meta.url), 'utf8');
-    expect(vc).toMatch(/openBackupDetail\(vcSel\)/);
     expect(vc).not.toMatch(/'backup-detail-vc'/);
   });
 });

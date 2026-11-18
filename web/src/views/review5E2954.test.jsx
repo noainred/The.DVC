@@ -1,5 +1,5 @@
 // v2.954 — 점검 축 E(웹 화면) 확정 결함 6건의 회귀 테스트.
-//   E-1 VcTable 셀 수 없는 vCenter '—' · 합계 countableTotals · E-2 PlatformHub 는 App 의 범위 요약 prop · E-3 SAN 상세 편중 = 서버 규칙(최소 처리량 포함) ·
+//   (E-1 VcTable 은 v3.19.0 에 표 보기와 함께 지웠다) E-2 PlatformHub 는 App 의 범위 요약 prop · E-3 SAN 상세 편중 = 서버 규칙(최소 처리량 포함) ·
 //   E-4 분류 · 매핑 두 칼럼이 1100px 이하에서 한 칼럼 · E-5 BmPowerFleet 랙 늦은 응답 · E-6 BmCompareView 빈 선택에서 로더 세대 증가.
 import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
@@ -19,34 +19,7 @@ const h = React.createElement;
 const H = 3_600_000;
 const NOW = Math.floor(Date.now() / H) * H - 30 * 60_000;
 
-describe('E-1 VcTable — 셀 수 없는 vCenter 는 0 이 아니라 —', () => {
-  it('첫 수집 중 · 비활성 행은 호스트 · VM · 알람 · 사용률이 — 이고 합계에 0 으로 더하지 않는다(빠진 곳 수 표기)', async () => {
-    const { default: VcTable } = await import('./platform/VcTable.jsx');
-    const sites = [
-      { id: 'KR', name: 'KR', status: 'connected', metrics: { hosts: 10, vms: 120, alarmsCritical: 1, alarmsWarning: 2, cpuUsagePct: 40, memUsagePct: 50 } },
-      { id: 'PL', name: 'PL', status: 'pending', metrics: { hosts: 0, vms: 0, alarmsCritical: 0, alarmsWarning: 0, cpuUsagePct: 0, memUsagePct: 0 } },
-      { id: 'US', name: 'US', status: 'disabled', metrics: { hosts: 0, vms: 0, alarmsCritical: 0, alarmsWarning: 0 } },
-    ];
-    const html = renderToStaticMarkup(h(VcTable, { sites, byVc: new Map(), backupText: () => null, onOpen() {}, onGoHosts() {}, onGoVms() {}, now: NOW }));
-    const rows = html.split('<tr').slice(1);
-    const pl = rows.find((r) => r.includes('>PL</button>'));   // v3.10.19: 이름은 button.cell-link(키보드로 상세)
-    expect(pl).toBeTruthy();
-    expect(pl).not.toMatch(/>0 →</);          // 호스트 · VM 버튼 '0 →' 없음
-    expect(pl).not.toMatch(/>0%</);           // 사용률 0% 없음
-    expect(pl).not.toMatch(/tabular">0</);    // 알람 0 없음
-    const total = rows.find((r) => r.includes('합계 ·'));
-    expect(total).toMatch(/>10</);
-    expect(total).toMatch(/>120</);
-    expect(total).toContain('미수집 2곳 제외');
-  });
-  it('합계는 countableTotals 를 쓴다(판정 복제 금지 — 행 판정은 corpSiteStatus)', () => {
-    const s = read('./platform/VcTable.jsx');
-    expect(s).toMatch(/countableTotals\(rows/);
-    expect(s).toMatch(/corpSiteStatus\(s, now\)/);
-    expect(s).not.toMatch(/Number\.isFinite\(s\.metrics\?\.hosts\)/);
-  });
-});
-
+// E-1(VcTable 셀 수 없는 vCenter '—')은 v3.19.0 에 표 보기(VcTable.jsx)를 지우며 그 테스트도 지웠다 — 이 화면에서만 쓰던 표라 판정 코어(corpSiteStatus · countableTotals)는 법인 표 · 상세가 그대로 쓴다.
 describe('E-2 PlatformHub — App 의 범위 요약 prop 하나만', () => {
   it('summary prop 의 수를 그리고 자체 /platform/summary 폴링을 하지 않는다', async () => {
     const { default: PlatformHub } = await import('./platform/PlatformHub.jsx');
