@@ -141,3 +141,25 @@
   카드 화면(`VCenters`)에도 넘겨 카드를 같이 좁힌다(선택이 없을 때). 선택(켠 법인)이 있으면 칩만 좁히고 카드는 선택 그대로 · 켠 칩은 일치하지 않아도 남긴다(무엇을 골랐는지 잃지 않게).
   숫자 3장 · 서버 호출은 바꾸지 않는다(찾기는 범위가 아니다 — v2.958 규칙 그대로). 일치 0곳이면 ‘‘zz’ 가 든 법인이 없습니다’ 한 줄 + 칸은 남긴다(v2.401 — 찾기 칸까지 사라져 지울 수 없던 결함을 되풀이하지 않는다).
   탭을 옮기면(Hypervisor · Virtual Machine) 찾기 글자는 그대로 두되 그 탭 본문에는 걸지 않는다(칩만 좁힌다). 400px 에서는 찾기 칸이 한 줄을 다 쓴다(44px).
+
+## 8. 고침(2026-11-18 13:23 · 13:25 사용자 지시) — 앞 절의 해당 내용을 대신한다
+
+> (13:23 · 위 숫자 3장 캡처) "순서를 하이퍼 바이저와 VM 을 바꿔줘"
+> (13:25) "메뉴 이름을 Pysical 서버를 Pysical Server 라고 변경해줘"
+
+### 8-1. 위 숫자 3장의 순서 — vCenter · **Virtual Machine** · **Hypervisor**
+
+- 지금: vCenter · Hypervisor · Virtual Machine(`web/src/views/platform/platformText.js:16` `PLATFORM_TABS` 의 순서 — `entityTabs()` 가 그 순서로 3장을 만든다).
+- 시안: Hypervisor 와 Virtual Machine 의 자리를 바꿨다 — 캔버스 ① ② ③ ④ ⑥ ⑦ ⑧ ⑨ 전부(⓪ 은 지금 화면 캡처라 그대로).
+- 사이드바의 순서는 이미 Virtual Machine · Hypervisor 다(`topMenu.js` ‘서버’ 묶음) — 위 숫자 3장이 그 순서와 같아진다.
+- 구현 메모: `PLATFORM_TABS` 의 순서만 바꾼다(키 `vcenters` · `hosts` · `vms` 와 주소는 그대로). 순서를 고정한 테스트(`platform/platformText.test.js` · `audit2741j.test.js`)를 고친다. 400px 의 3칸 줄 · 분해 줄(`ph-parts-narrow`)도 같은 배열을 쓰므로 함께 바뀐다 — Chromium 400 으로 확인한다.
+  바뀌는 것은 **보이는 순서뿐**이다 — vCenter 카드의 ‘호스트 →’ · ‘VM →’ 이동, 드릴다운(vCenter → 호스트 → VM)은 그대로다.
+
+### 8-2. 메뉴 이름 — ‘Physical Server · Baremetal’ → **‘Physical Server’**
+
+- §1 의 읽기(‘Pysocal 서버’ → ‘Physical 서버’)와 §5 ⑧ · §6 의 ‘Physical 서버’ 는 **이 지시로 바뀌었다**: 새 이름은 **‘Physical Server’**(‘Pysical Server’ 를 오타로 읽음 — 원래 이름에서 뒤의 ‘· Baremetal’ 을 뗀 것).
+- ⚠ **이름이 같은 메뉴가 두 곳이 된다**: 서버 › Physical Server(`topMenu.js:38` `bm` — 구분이 Baremetal 로 고정) · 자원관리 › Physical Server(`topMenu.js:68` `sa` — 구분 전체). 둘 다 같은 도구(`serveranalysis`)다. v2.994 에 ‘· Baremetal’ 을 붙인 것이 이 둘을 가르기 위해서였다(`topMenu.js:37` 주석).
+  코드에서 메뉴 이름이 서로 달라야 한다는 검사나 이름으로 항목을 찾는 곳은 찾지 못했다(`topMenu.test.js` · `sidebar/*.test.js` · `topMenu.js` · `sideMenu.js` 를 봄 — 항목은 `id` 로 가린다). 기능은 깨지지 않지만 **사람이 헷갈릴 수 있다** — 메뉴 편집 · 기능 사용 현황에서는 묶음 이름(서버 › · 자원관리 ›)이 함께 보여야 가려진다.
+- 구현 메모(§6 의 ‘Physical 서버’ 항목을 대신): `topMenu.js:38` 의 `label` 을 `'Physical Server'` 로 — `id` · `tool` · `seg` 는 그대로. 같이 고칠 곳은 §6 과 같다(`featureUsageText.test.js:26` · `topMenu.test.js:38,51,52` · `sidebar/sideMenu.test.js:110` · `tools/HardwareTools.jsx:651,665` · 주석 `topMenu.js:17,37` · `docs/rules/web.md:879`).
+  `HardwareTools.jsx:651` 의 안내 글은 ‘서버 › Physical Server 메뉴는 Baremetal 로 고정입니다 — 다른 구분은 자원관리 › Physical Server 에서’ 처럼 **묶음 이름을 앞에 붙여** 두 메뉴를 가린다.
+- 컨펌 질문 ⑧(다시): 이름이 같은 두 메뉴를 어떻게 가릴지 — **그대로 둔다(기본 · 사용자 지시대로)** / 자원관리 쪽 이름을 바꾼다 / 서버 쪽 항목을 없애고 자원관리 것 하나만 둔다.

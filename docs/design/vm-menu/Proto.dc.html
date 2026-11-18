@@ -277,7 +277,7 @@ class Component extends DCLogic {
       { k: 'grp', label: '서버', kind: 'mi grp' },
       { k: 'vm', label: 'Virtual Machine', kind: 'sub' },
       { k: 'bmfolders', label: 'Bare Metal Server', kind: 'sub', title: 'Bare Metal Server', lines: ['이 시안에서 바뀌지 않는 화면입니다 — 물리서버를 법인 › 폴더로 묶어 보는 화면 그대로입니다.'] },
-      { k: 'bm', label: 'Physical 서버', kind: 'sub', title: 'Physical 서버', lines: ['이름만 바뀝니다 — 지금 이름은 ‘Physical Server · Baremetal’ 입니다.', '여는 화면은 그대로입니다: Physical Server 도구에서 구분이 Baremetal(가상화하지 않은 물리 서버)인 것만 보는 화면.'] },
+      { k: 'bm', label: 'Physical Server', kind: 'sub', title: 'Physical Server', lines: ['이름만 바뀝니다 — 지금 이름은 ‘Physical Server · Baremetal’ 입니다(뒤의 ‘· Baremetal’ 을 뗍니다).', '주의: 자원관리에도 같은 이름 ‘Physical Server’ 메뉴가 있습니다(구분 전체) — 이름이 같은 메뉴가 두 곳이 됩니다.', '여는 화면은 그대로입니다: Physical Server 도구에서 구분이 Baremetal(가상화하지 않은 물리 서버)인 것만 보는 화면.'] },
       { k: 'bmusage', label: '베어메탈 사용률', kind: 'sub', title: '베어메탈 사용률', lines: ['이 시안에서 바뀌지 않는 화면입니다 — 지금과 같습니다.'] },
       { k: 'fleet', label: '통합 서버 인벤토리', kind: 'sub', title: '통합 서버 인벤토리', lines: ['이 시안에서 바뀌지 않는 화면입니다 — 지금과 같습니다.'] },
       { k: 'storage', label: '스토리지', kind: 'mi', title: '스토리지', lines: ['하위 메뉴가 있는 묶음입니다 — 이 시안의 범위 밖입니다.'] },
@@ -334,7 +334,8 @@ class Component extends DCLogic {
       { k: 'vms', label: 'Virtual Machine', sub: '· VM', value: fmt(sum(scope, 'vms')), badge: vAtt ? '조치 필요 ' + fmt(vAtt) : '', badgeCls: 'bd crit',
         parts: '구동 ' + fmt(sum(scope, 'on')) + ' · 정지 ' + fmt(sum(scope, 'off')) + ' · 사용률 미수집 0 · 템플릿 ' + fmt(sum(scope, 'tpl')) },
     ];
-    const tabs = tabDefs.map((t) => ({
+    // 순서: vCenter · Virtual Machine · Hypervisor(2026-11-18 사용자 지시 — Hypervisor 와 VM 의 자리를 바꿨다)
+    const tabs = [tabDefs[0], tabDefs[2], tabDefs[1]].map((t) => ({
       label: t.label, sub: t.sub, value: t.value, parts: t.parts, badge: t.badge, badgeCls: t.badgeCls, hasBadge: !!t.badge,
       on: t.k === st.tab, cls: 'tab' + (t.k === st.tab ? ' on' : ''),
       go: () => this.setState({ tab: t.k, open: '' }),

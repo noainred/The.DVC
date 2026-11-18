@@ -227,7 +227,7 @@ sc-for,sc-if{display:contents}
     <span class="snap">값 = 목(mock, 가상) 서버 · 스냅샷 오전 11:09:08</span>
   </header>
 
-  <div class="mklegend"><span class="mk">반영 표시</span><span>노란 표와 노란 점선 = 이번에 반영한 곳입니다(실제 화면에는 없는 표시) — <b>S1</b> 확인할 것을 맨 위로 · 분포 접기 / <b>S2</b> 호스트 몇 대분 환산(‘과할당’ 보기와 회수 후보) / <b>S6</b> 경계를 넘은 칸만 경고색(VM 현황)</span><span><span class="mk">이름 변경</span> ‘법인 지도’ → ‘VM 현황’ · <span class="mk">새 기능</span> 지도 크기 지정(조절 줄의 맨 끝 — ‘설정’ 단추를 누를 때만 설정 상자가 열립니다) · 지도를 크게(처음 520px)</span></div>
+  <div class="mklegend"><span class="mk">반영 표시</span><span>노란 표와 노란 점선 = 이번에 반영한 곳입니다(실제 화면에는 없는 표시) — <b>S1</b> 확인할 것을 맨 위로 · 분포 접기 / <b>S2</b> 호스트 몇 대분 환산(‘과할당’ 보기와 회수 후보) / <b>S6</b> 경계를 넘은 칸만 경고색(VM 현황)</span><span><span class="mk">이름 변경</span> ‘법인 지도’ → ‘VM 현황’ · <span class="mk">새 기능</span> 지도 크기 지정(조절 줄의 맨 끝 — ‘설정’ 단추를 누를 때만 설정 상자가 열립니다) · 지도를 크게(처음 520px) · <span class="mk">순서 변경</span> 위 숫자 3장: vCenter · Virtual Machine · Hypervisor</span></div>
 
   <div class="tabs" aria-label="Virtual Machine 보기">
     <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="3">
@@ -710,7 +710,8 @@ class Component extends DCLogic {
       { label: 'vCenter', sub: '· 법인', value: fmt(scope.length), parts: '연결 ' + fmt(scope.length) + ' · 불가 0 · REST 폴백 0 · 엣지 위임 0', badge: '', badgeCls: '', on: false },
       { label: 'Hypervisor', sub: '· ESXi 호스트', value: fmt(hostsN), parts: '호스트 탭에서 봅니다', badge: '확인 대상 ' + fmt(hAtt), badgeCls: 'bd warn', on: false },
       { label: 'Virtual Machine', sub: '· VM', value: fmt(n), parts: '구동 ' + fmt(on) + ' · 정지 ' + fmt(off) + ' · 사용률 미수집 0 · 템플릿 ' + fmt(tpl), badge: '조치 필요 ' + fmt(att), badgeCls: 'bd crit', on: true },
-    ].map((t) => Object.assign(t, { cls: 'tab' + (t.on ? ' on' : ''), hasBadge: !!t.badge }));
+    ].map((t) => Object.assign(t, { cls: 'tab' + (t.on ? ' on' : ''), hasBadge: !!t.badge }))
+      .map((t, i, a) => a[[0, 2, 1][i]]);   // 순서: vCenter · Virtual Machine · Hypervisor(2026-11-18 사용자 지시 — Hypervisor 와 VM 의 자리를 바꿨다)
 
     // 바로가기 — 찾기(부분 일치) + 복수 선택. 칩 숫자 = 조치 필요 VM(VM 탭의 칩 숫자)
     const kws = String(st.q || '').toLowerCase().split(/\s+/).filter(Boolean);
