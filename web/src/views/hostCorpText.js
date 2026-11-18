@@ -148,7 +148,7 @@ export function corpKpis(data) {
   const vcpuUnreadCorps = capOk.length - ratioOk.length;
   // 뺀 것을 앞에 적는다 — 요약 칸은 좁아(1440 에서 6칸) 뒤쪽 글자가 말줄임되므로, 뒤에 두면 '제외' 가 마우스를 올려야만 보인다(Chromium 판독).
   const ratioSub = [
-    vcpuUnreadCorps ? `vCPU 못 읽은 법인 ${fmtN(vcpuUnreadCorps)}곳 제외` : '',
+    vcpuUnreadCorps ? `vCPU 못 읽은 ${fmtN(vcpuUnreadCorps)}곳 제외` : '',   // '곳' = 법인(다른 칸의 '미수집 N곳 제외' 와 같은 말) — 400px 에서 '제외' 가 잘리지 않는 길이
     vcpuUnknown ? `vCPU 못 읽은 VM ${fmtN(vcpuUnknown)}대 제외(최소값)` : '',
     ratioOk.length ? `물리 코어 ${fmtN(cores)} · 할당 vCore ${fmtN(vcpu)}` : '비율을 낼 법인이 없습니다',
     capOk.length < known.length ? '용량 못 읽은 법인 제외' : '',

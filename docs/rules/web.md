@@ -440,7 +440,8 @@
   · **v3.19.1 — VM 할당 합(vCPU · 메모리)의 판정 코어는 `server/src/vcenter/vmSums.js` 하나**(`vmSumsOf` 합 + unknown 수 · `vmAllocOf` '전부 못 읽음 → null'). `/hosts` 요약(`routes/api/inventory.js`) ·
     법인별(`hostCorp.js vmCols`) · 호스트 엑셀(`hostExport.js` — 사본 `vmSums` 삭제) 세 곳이 그 둘만 부른다. v3.19.0 까지 법인별은 VM 을 **전부** 못 읽어도 vCPU 0 · `0.0 : 1` · RAM `0%` 로 냈다
     (요약은 '—'). 이제 `vcpu` · `vmMemGB` · `vcpuPerCore` · `ramPct` 가 null 이고, 법인 · 클러스터 행에 `vmMemUnknown`(메모리를 못 읽은 VM 수)을 싣는다. 화면 글자는 `hostCorpText.vcoreCell` · `ramCell` —
-    전부 못 읽음 '—'(단위 없음) · 일부만 못 읽음 `≥` + 못 읽은 VM 수(요약 타일과 같은 표기). 요약 칸 'vCore : 물리' 는 vCPU 를 전부 못 읽은 법인을 분자 · 분모 **둘 다**에서 뺀다(0 으로 더하면 코어만 늘어 낮게 나온다).
+    전부 못 읽음 '—'(단위 없음) · 일부만 못 읽음 `≥` + 못 읽은 VM 수(요약 타일과 같은 표기). 요약 칸 'vCore : 물리' 는 vCPU 를 전부 못 읽은 법인을 분자 · 분모 **둘 다**에서 뺀다(0 으로 더하면 코어만 늘어 낮게 나온다) —
+    보조 문구는 **뺀 것을 앞에**(칸이 좁아 뒤는 말줄임된다 — Chromium 판독 1440 · 400).
     코어는 `hostChecks.js` · `hostExport.js` 어느 쪽에도 두지 않는다(`hostChecks.js` 가 `hostExport.js` 를 import — 순환). 회귀 `server/test/vmSumsCore3191.test.js`(같은 입력으로 세 출력 대조 · 소스 스윕) · `hostCorpText.test.js`.
     남긴 것(같은 꼴 · 범위 밖): ① 호스트 표 'VM' 묶음(`/hosts/checks` 의 `c.vm`)은 원래 합을 그대로 실어 전부 못 읽은 호스트가 `0+?` 로 보인다(`Hosts.jsx`) ② `/summary` 의 OS 별 · vCenter 별 합은
     아직 `v.cpuCount || 0`(템플릿 포함 · 공개 API 대조 계약) ③ 일부만 못 읽었을 때 엑셀 호스트 행은 비율 칸을 비우고(`cpuRatio` null) 화면 · 요약은 `≥` 최소값을 적는다(표기 방식만 다르고 합 · unknown 수는 같다).

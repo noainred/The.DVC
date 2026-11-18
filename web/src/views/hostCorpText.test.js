@@ -127,7 +127,7 @@ describe('hostCorpText', () => {
     };
     const k = Object.fromEntries(corpKpis(data).map((x) => [x.key, x]));
     expect(k.ratio.value).toBe('3.0 : 1');
-    expect(k.ratio.sub).toBe('vCPU 못 읽은 법인 1곳 제외 · 물리 코어 100 · 할당 vCore 300');   // 뺀 것이 앞 — 좁은 칸에서 말줄임돼도 보이게
+    expect(k.ratio.sub).toBe('vCPU 못 읽은 1곳 제외 · 물리 코어 100 · 할당 vCore 300');   // 뺀 것이 앞 — 좁은 칸에서 말줄임돼도 보이게
     data.corps[0].vcpuUnknown = 2;
     const k2 = Object.fromEntries(corpKpis(data).map((x) => [x.key, x]));
     expect(k2.ratio.value).toBe('≥3.0 : 1');
