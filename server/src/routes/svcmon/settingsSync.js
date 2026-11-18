@@ -192,7 +192,10 @@ svcmonRouter.put('/settings-sync/options', adminOnly, fullScopeOnly, (req, res) 
   const before = getOptions();
   const next = setOptions(req.body || {});
   logAudit({ user: req.user?.username, action: 'svcmon.settings-sync.options', detail: `자동 등록 ${before.autoKinds.join(',') || '없음'} → ${next.autoKinds.join(',') || '없음'}` });
-  res.status(next.saved ? 200 : 500).json({ ok: next.saved, options: { autoKinds: next.autoKinds } });
+  // v3.18.14(결함 D3): 새 종류를 켜면 다음 감지(최대 감지 주기)까지 아무 일도 없어 '안 된다' 로 보였다 — 저장 직후 한 번 감지한다(2초 묶음 · 감지 타이머가 도는 중앙에서만).
+  const added = next.autoKinds.filter((k) => !before.autoKinds.includes(k));
+  const detectQueued = !!(next.saved && added.length && requestDetect());
+  res.status(next.saved ? 200 : 500).json({ ok: next.saved, options: { autoKinds: next.autoKinds }, detectQueued });
 });
 
 /** 배너 '확인' — 지금까지 설정에 새로 생긴 항목을 본 것으로 둔다(미등록 상태는 설정 연동 탭에 그대로 남는다). */

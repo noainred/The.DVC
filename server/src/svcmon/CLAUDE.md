@@ -12,6 +12,8 @@
   재동기화는 `tpl:'settings'` + `tplKey` 로 **test.id 를 승계**한다(연속 횟수·만기 리셋 금지). 사람이 더한 점검은 건드리지 않는다.
 - **배정 동기화는 byAgent 배정이거나 배정이 없는 엣지만** — 경로 기준 배정을 byAgent 로 바꾸면 그 엣지의 경로 대상이 통째로 빠진다(파괴적). 건너뜀으로 보고한다.
 - **자동 등록 기본 끔** · 켜도 한 번도 연동된 적 없는 키(`known`)만 · 언제나 중지 상태 · 배정 동기화 없음. 감지(5분)는 카탈로그 **읽기만** · 엣지 노드(CENTRAL_URL)는 돌지 않고 라우트는 409.
+  v3.18.14(회귀 `svcmonSettingsSyncFix31814`): 자동 등록 종류를 **늘리는** 저장은 곧바로 한 번 감지(`requestDetect` — 응답 `detectQueued`) · 자동 등록이 대상을 더한 감지는 **등록 뒤 카탈로그**로 감지값을 남긴다(개요 '감시 범위' 가 5분 동안 0 이던 것) ·
+  엣지 포탈 HTTP 점검은 **무인증 공개 경로**(`COLLECTOR_PROBE_PATH` — `/api/health` 는 `/api` 인증 라우터 아래라 인증 포탈에서 늘 401 이었다). 옛 정의(`isLegacyCheck` — 그 경로 하나만, URL 일반 비교 금지)가 남은 연동 대상은 '변경'(`defChanged`) → 적용이 경로 · 표지 · 기대 코드만 고친다(id 승계).
 - **배너의 '새 항목' 은 기준점(첫 감지 · 마지막 확인) 이후 생긴 것만**(`driftSummary` — Chromium 실측: 미등록 258건을 '설정이 바뀌었습니다' 로 띄웠다). 미등록 전체는 `unregistered`.
 - **상태 파일** `svcmon-settings-sync.json`(옵션 · known · seen · 일별 요약)은 감지가 쓰므로 `backup/service.js CHANGE_WATCH_EXCLUDE`(번들에는 들어간다). `svcmon-alert.json` 은 `alertSettings.js` 하나만 쓴다
   (`transitions.js` 는 파일을 쓰지 않는다 — ARCH-4·MIXED_STATE 스윕).
