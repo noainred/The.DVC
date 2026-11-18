@@ -1,4 +1,4 @@
-// v2.959 — Backup 현황 · Detail 이 이어받는 vCenter 키 · 여는 함수 한 벌(서머리 openDetail 과 가상화 플랫폼 KPI 카드가 같이 쓴다).
+// v2.959 — Backup 현황 · Detail 이 이어받는 vCenter 키 · 여는 함수 한 벌(서머리 openDetail 이 쓴다 — v3.19.0 에 같이 쓰던 가상화 플랫폼 KPI 카드는 걷어냈다).
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import { DETAIL_VC_KEY, openBackupDetail } from './backupViewText.js';

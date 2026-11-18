@@ -5,7 +5,7 @@ import { scopedVcenterIds, inUserScope, writeScopedVcenterIds } from '../../auth
 import { store, usageReadable, dsUsageReadable, dsUsedOf, dsUsageUnknownOf, hostCapacityKnown, siteInventoryStale } from '../../store.js'; // v2.771(R6-F3-2) 용량 판정도 store 하나 · v2.915 낡은 값 판정
 import { platformSummaryOf } from '../../inventory/platformSummary.js'; // v2.915 가상화 플랫폼 허브
 import { numOrNull } from '../../util/numOrNull.js';
-import { vmSumsOf } from '../../vcenter/hostChecks.js'; // v3.19.0 /hosts 요약 VM 할당 합 — 점검 표 · 법인별과 같은 판정 코어
+import { vmSumsOf, vmAllocOf } from '../../vcenter/vmSums.js'; // v3.19.0 /hosts 요약 VM 할당 합 — 점검 표 · 법인별 · 호스트 엑셀과 같은 판정 코어(v3.19.1 '전부 못 읽음' 도 그 모듈이)
 import { clusterCountOf } from '../../clustercfg/analyze.js'; // v2.743 LEFT-07 — 클러스터 개수(묶음 키)
 const pctOrNullR = (u, t) => (t > 0 ? Math.round((u / t) * 100) : null);
 import { browseDatastore, onDemandErrorFields } from '../../vcenter/dsBrowse.js';
@@ -367,9 +367,8 @@ api.get('/hosts', invHosts, (req, res) => memoJson(req, res, 'inv:hosts', (snap)
   // v3.19.0: 합은 점검 표 · 법인별 보기와 같은 판정 코어(vcenter/hostChecks.js vmSumsOf) — 템플릿은 세지 않고, 못 읽은
   //   cpuCount · memMB 는 0 으로 더하지 않고 따로 센다(예전 `v.cpuCount || 0` 은 템플릿까지 더해 같은 범위의 vCore 비율이 화면마다 달랐다).
   const vmSum = vmSumsOf(hostVms);
-  //   VM 이 있는데 하나도 못 읽었으면 0 이 아니라 모름(null — hostExport.js 호스트 행과 같은 규칙).
-  const vcoreAllocated = vmSum.n && vmSum.vcpuUnknown === vmSum.n ? null : vmSum.vcpu;
-  const vmemAllocatedMB = vmSum.n && vmSum.memUnknown === vmSum.n ? null : vmSum.memMB;
+  //   VM 이 있는데 하나도 못 읽었으면 0 이 아니라 모름(null) — 판정은 vmAllocOf 하나(v3.19.1 — 법인별 · 호스트 엑셀과 같은 함수).
+  const { vcpu: vcoreAllocated, memMB: vmemAllocatedMB } = vmAllocOf(vmSum);
   const verMap = {};
   for (const h of hosts) { const v = h.version || 'unknown'; verMap[v] = (verMap[v] || 0) + 1; }
   const physicalCores = sm((h) => h.cpuCores);

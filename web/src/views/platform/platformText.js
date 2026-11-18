@@ -8,7 +8,6 @@
  */
 import { numOrNull } from '../../numOrNull.js';
 import { HUB_TOOLS } from '../vms/vmHubText.js';
-import { handoffMany, takeSearch } from '../../hooks/searchHandoff.js'; // v2.959: KPI 카드 → 도구 화면에 고른 vCenter 인계(메모리)
 import { MENU_GROUPS, tabsOf } from '../topMenu.js'; // v2.994: 허브 제목 = 그 탭에서 켜지는 사이드바 항목 이름(이름 코어는 MENU_GROUPS 하나)
 
 /** 허브 탭 — 순서 = vCenter · Virtual Machine · Hypervisor(v3.19.0 사용자 지시 2026-11-18 — 사이드바 '서버' 묶음의 Virtual Machine → Hypervisor 순서와 같다. 전에는 법인 → 호스트 → VM 이었다). k 는 App 의 탭 id 그대로.
@@ -81,12 +80,10 @@ export function scopeLabel(scope, sitesInScope) {
   return '전체';
 }
 /**
- * v2.959(사용자 요청 2026-11-10 "법인을 선택한 상태에서 백업 · VM 수량 · 스토리지 증가 버튼 누르면 해당 법인에 대한 정보 보여주기"):
- * KPI 카드를 누르면 그 도구 화면으로 가면서 **고른 vCenter 를 메모리 인계**(hooks/searchHandoff — URL 에 싣지 않는다 · 30초 · 꺼내면 지운다)로 넘긴다.
- * 받는 도구는 마운트 때 한 번 꺼내 vCenter 선택 칸의 초기값으로 쓴다(VmTrackTool · StorageTrackTool). 범위가 리전뿐이면(vCenter 없음) 넘길 것이 없어 전체로 연다.
+ * 도구 쪽 보조: regionsOf(목록의 리전 · 빈 값 제외 · 이름순) · vcInRegion(리전 안 vCenter — 리전이 없으면 전부).
+ * v3.19.0 에 허브 KPI 카드(요약 3장)를 없애면서 카드 → 도구 메모리 인계(KPI_HANDOFF · handoffKpiScope · handoffKpiVcenter · takeKpiVcenter)도
+ * 함께 걷어냈다 — 넣는 쪽이 없는 키를 받는 쪽만 남겨 두지 않는다. 도구(VM 수량 · 스토리지 사용량 추이 · Backup Summary)는 전체로 열리고 화면의 선택 칸으로 고른다.
  */
-export const KPI_HANDOFF = Object.freeze({ vmTrack: 'vm-track:vcenter', storageTrack: 'storage-track:vcenter', vmTrackRegion: 'vm-track:region', storageTrackRegion: 'storage-track:region', backupSummaryRegion: 'backup-summary:region' });   // v3.10.17 백업 카드 → Summary 리전
-/** 도구 쪽 보조: regionsOf(목록의 리전 · 빈 값 제외 · 이름순) · vcInRegion(리전 안 vCenter — 리전이 없으면 전부). (v3.19.0: KPI 카드가 없어져 인계를 남기는 handoffKpiScope 는 지웠다 — 받는 쪽 takeKpiVcenter 만 남는다.) */
 export function regionsOf(vcList) {
   const set = new Set((Array.isArray(vcList) ? vcList : []).map((v) => String(v?.region || '').trim()).filter(Boolean));
   return [...set].sort((a, b) => a.localeCompare(b, 'ko'));
@@ -96,13 +93,6 @@ export function vcInRegion(vcList, region) {
   const list = (Array.isArray(vcList) ? vcList : []).filter((v) => v && typeof v === 'object');
   return r ? list.filter((v) => String(v.region || '') === r) : list;
 }
-export function handoffKpiVcenter(target, vcenterId) {
-  const id = String(vcenterId || '').trim();
-  if (!id) return false;
-  handoffMany([[target, id]]);
-  return true;
-}
-export function takeKpiVcenter(target) { return takeSearch(target) || ''; }
 
 /**
  * v3.20.0(사용자 요청 2026-11-18 "바로가기의 선택을 복수개 선택해서 볼 수 있게" · 설계 docs/design/vm-menu §5 ③ 기본값 ‘복수 선택 · 세 탭 공용’):

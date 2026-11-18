@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  PLATFORM_TABS, PLATFORM_TAB_KEYS, scopeVcOptions, scopeVcPatch, scopeRegionOptions, regionText, isPlatformTab, scopeLabel, KPI_HANDOFF, handoffKpiVcenter, takeKpiVcenter, keywordsOf, vcMatches, filterChipSites, siblingSites, siblingScopeText, chipSites, chipRegionNote, regionsOf, vcInRegion, VC_TOOLS, HOST_TOOLS, PLATFORM_TOOL_KEYS, entityTabs, chipCount, chipLegend, signalSegments,
+  PLATFORM_TABS, PLATFORM_TAB_KEYS, scopeVcOptions, scopeVcPatch, scopeRegionOptions, regionText, isPlatformTab, scopeLabel, keywordsOf, vcMatches, filterChipSites, siblingSites, siblingScopeText, chipSites, chipRegionNote, regionsOf, vcInRegion, VC_TOOLS, HOST_TOOLS, PLATFORM_TOOL_KEYS, entityTabs, chipCount, chipLegend, signalSegments,
   VM_ITEM_TOOL_KEYS, HV_ITEM_TOOL_KEYS, platformMenuLabel,
   loadChipsCollapsed, saveChipsCollapsed, SCOPE_SEARCH_PLACEHOLDER, SCOPE_NOTE,
 } from './platformText.js';
@@ -155,29 +155,28 @@ describe('KPI 범위 문구(v2.958 — v3.19.0 부터 VM 이름 검색 제목이
     expect(scopeLabel({ region: '아시아' }, sites)).toBe('리전 아시아 · 2법인');
     expect(scopeLabel(null, null)).toBe('전체');
   });
-  it('bareosSumOf · handoffKpiScope 는 KPI 줄과 함께 지웠다(v3.19.0)', () => { expect(PT.bareosSumOf).toBe(undefined); expect(PT.handoffKpiScope).toBe(undefined); });
+  it('bareosSumOf 는 KPI 줄과 함께 지웠다(v3.19.0)', () => { expect(PT.bareosSumOf).toBe(undefined); });
 });
 
-// v2.959(사용자 요청 2026-11-10) — KPI 카드 → 도구 화면에 고른 vCenter 인계(메모리 · 꺼내면 지운다).
-describe('KPI 카드 → 도구 인계(v2.959)', () => {
-  it('target 은 도구마다 하나 · 넘긴 id 를 그 target 에서만 한 번 꺼낸다 · 빈 id 는 넘기지 않는다', () => {
-    expect(KPI_HANDOFF).toEqual({ vmTrack: 'vm-track:vcenter', storageTrack: 'storage-track:vcenter', vmTrackRegion: 'vm-track:region', storageTrackRegion: 'storage-track:region', backupSummaryRegion: 'backup-summary:region' });   // v3.10.17 +backupSummaryRegion
-    expect(handoffKpiVcenter(KPI_HANDOFF.vmTrack, 'vc-a')).toBe(true);
-    expect(takeKpiVcenter(KPI_HANDOFF.storageTrack)).toBe('');
-    expect(takeKpiVcenter(KPI_HANDOFF.vmTrack)).toBe('vc-a');
-    expect(takeKpiVcenter(KPI_HANDOFF.vmTrack)).toBe('');
-    expect(handoffKpiVcenter(KPI_HANDOFF.storageTrack, '')).toBe(false);
-    expect(handoffKpiVcenter(KPI_HANDOFF.storageTrack, null)).toBe(false);
-    expect(takeKpiVcenter(KPI_HANDOFF.storageTrack)).toBe('');
+// v2.959 의 KPI 카드 → 도구 인계는 v3.19.0 에 보내는 카드(요약 3장)가 없어져 받는 쪽까지 걷어냈다 — 넣는 곳 없는 키를 받는 코드만 남기지 않는다.
+describe('KPI 카드 → 도구 인계(v2.959)는 걷어냈다 — 보내는 쪽도 받는 쪽도 없다', () => {
+  it('platformText 에 인계 상수 · 함수가 없다', () => {
+    for (const k of ['KPI_HANDOFF', 'handoffKpiScope', 'handoffKpiVcenter', 'takeKpiVcenter']) expect(PT[k]).toBe(undefined);
   });
-  it('받는 도구 두 곳이 마운트 초기값으로 꺼낸다(소스 계약) · ⌘K SCREEN 표의 target 과 겹치지 않는다', async () => {
-    const fs = await import('node:fs');
-    for (const f of ['../tools/VmTrackTool.jsx', '../tools/StorageTrackTool.jsx']) {
-      const s = fs.readFileSync(new URL(f, import.meta.url), 'utf8');
-      expect(s).toMatch(/useState\(\(\) => takeKpiVcenter\(KPI_HANDOFF\.(vmTrack|storageTrack)\)\)/);
+  it('도구 세 곳이 인계를 꺼내지 않고 전체로 연다 · 옛 target 을 남기는 곳이 web/src 어디에도 없다(소스 계약)', () => {
+    for (const f of ['../tools/VmTrackTool.jsx', '../tools/StorageTrackTool.jsx', '../tools/BackupSummaryTool.jsx']) {
+      const s = stripComments(fs.readFileSync(new URL(f, import.meta.url), 'utf8'));
+      expect(s).not.toMatch(/KPI_HANDOFF|takeKpiVcenter|searchHandoff/);
+      expect(s).toMatch(/const \[region, setRegion\] = useState\(''\)/);
     }
-    const q = fs.readFileSync(new URL('../../components/invSearchQuery.js', import.meta.url), 'utf8');
-    expect(q).not.toMatch(/vm-track:vcenter|storage-track:vcenter/);
+    for (const f of ['../tools/VmTrackTool.jsx', '../tools/StorageTrackTool.jsx']) {
+      expect(stripComments(fs.readFileSync(new URL(f, import.meta.url), 'utf8'))).toMatch(/const \[vcenterId, setVcenterId\] = useState\(''\)/);
+    }
+    const OLD = /(vm-track|storage-track):(vcenter|region)|backup-summary:region/;
+    const root = new URL('../../', import.meta.url);
+    const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(new URL(`${e.name}/`, dir)) : [new URL(e.name, dir)]));
+    const hits = walk(root).filter((u) => /\.(js|jsx)$/.test(u.pathname) && !/\.test\.js$/.test(u.pathname)).filter((u) => OLD.test(stripComments(fs.readFileSync(u, 'utf8'))));
+    expect(hits.map((u) => u.pathname.split('/web/src/')[1])).toEqual([]);
   });
 });
 
@@ -236,8 +235,8 @@ describe('바로가기 칩 범위(v3.10.14)', () => {
   });
 });
 
-// v3.10.15(점검 3회차) — KPI 카드가 리전도 넘긴다 · 도구의 리전 보조.
-describe('도구의 리전 보조 · 받는 쪽(v3.10.15 — v3.19.0: 보내는 KPI 카드는 걷어냈다)', () => {
+// v3.10.15(점검 3회차) — 도구의 리전 보조(KPI 카드 인계는 v3.19.0 에 보내는 쪽 · 받는 쪽 모두 걷어냈다).
+describe('도구의 리전 보조(v3.10.15)', () => {
     it('regionsOf · vcInRegion — 빈 리전 제외 · 이름순 · 리전 없으면 전부', () => {
     const list = [{ id: 'a', region: '유럽' }, { id: 'b', region: '아시아' }, { id: 'c', region: '' }, { id: 'd', region: '유럽' }, null];
     expect(regionsOf(list)).toEqual(['아시아', '유럽']);
@@ -250,7 +249,6 @@ describe('도구의 리전 보조 · 받는 쪽(v3.10.15 — v3.19.0: 보내는 
     for (const f of ['../tools/VmTrackTool.jsx', '../tools/StorageTrackTool.jsx']) {
       const s = fs.readFileSync(new URL(f, import.meta.url), 'utf8');
       expect(s).toMatch(/\.\.\.\(region && !vcenterId \? \{ region \} : \{\}\)/);
-      expect(s).toMatch(/useState\(\(\) => takeKpiVcenter\(KPI_HANDOFF\.(vmTrackRegion|storageTrackRegion)\)\)/);
     }
     const srv = fs.readFileSync(new URL('../../../../server/src/routes/api/vmtrack.js', import.meta.url), 'utf8');
     expect(srv).toMatch(/region: String\(vc\.location\?\.region \|\| ''\)/);
@@ -264,13 +262,9 @@ describe('도구의 리전 보조 · 받는 쪽(v3.10.15 — v3.19.0: 보내는 
   });
 });
 
-describe('v3.10.17 — 점검 5회차: 리전만 고른 채 백업 KPI 카드 → Backup 현황 · Summary 가 그 리전만 센다', () => {
-  it('KPI_HANDOFF 에 backupSummaryRegion 이 있다(받는 쪽 BackupSummaryTool 이 쓴다)', () => {
-    expect(KPI_HANDOFF.backupSummaryRegion).toBe('backup-summary:region');
-  });
-  it('소스 계약 — Summary 가 받아 다섯 요청에 싣는다 · 하위 구획 셋이 region 을 받는다', () => {
+describe('v3.10.17 — 점검 5회차: Backup 현황 · Summary 가 고른 리전만 센다(v3.19.0: 허브 KPI 카드 인계는 걷어냈다 — 화면 Select 로 고른다)', () => {
+  it('소스 계약 — Summary 가 리전을 다섯 요청에 싣는다 · 하위 구획 셋이 region 을 받는다', () => {
     const t = fs.readFileSync(new URL('../tools/BackupSummaryTool.jsx', import.meta.url), 'utf8');
-    expect(t).toMatch(/takeKpiVcenter\(KPI_HANDOFF\.backupSummaryRegion\)/);
     expect((t.match(/\.\.\.\(region \? \{ region \} : \{\}\)/g) || []).length).toBe(2);   // 조회 · CSV
     expect(t).toMatch(/const scope = \{ power: opts\.power, excl: opts\.excl, region \}/);   // 찾기(stale)
     expect(t).toMatch(/<BackupSummaryCapSched [^\n]*region=\{region\}/); expect(t).toMatch(/<BackupSummaryErrors [^\n]*region=\{region\}/);

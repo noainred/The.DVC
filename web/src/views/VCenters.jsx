@@ -5,7 +5,7 @@ import { usePolling, fetchJson, toolAllowed, can } from '../api.js';
 //   범위(리전 · vCenter · 검색)는 App 의 공용 바.
 import { scopeLabel, keywordsOf, vcMatches, filterChipSites, siblingSites, siblingScopeText, scopeIdsOf, sitesInHubScope } from './platform/platformText.js';
 import { HUB_ENTRY_TAB } from './vcd/vcdTabs.js'; // v2.958: 허브에서 법인을 누르면 상세는 '요약' 부터
-import { pressable } from '../components/pressable.js';   // v3.10.19: 누르는 카드(KPI 3장 · vCenter 카드)에 키보드 접근 // v2.959: 백업 KPI 카드 → 고른 법인의 Backup 세부내용(순수 모듈 — 도구 화면을 끌어오지 않는다)
+import { pressable } from '../components/pressable.js';   // v3.10.19: 누르는 vCenter 카드에 키보드 접근(v3.19.0: KPI 3장은 걷어냈다)
 import { Loading, ErrorBox, StateBadge, usageColor } from '../components/ui.jsx';
 // v2.596(감사 PERFWEB-04): 상세는 recharts 를 쓴다 — 목록 화면이 그 청크를 받지 않게 상세를 열 때만 받는다.
 const VCenterDetail = lazy(() => import('./VCenterDetail.jsx'));

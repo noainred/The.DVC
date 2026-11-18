@@ -437,6 +437,22 @@
   · RTT 는 핑 모니터가 저장한 vCenter 대상의 마지막 값이다(요청마다 실시간 측정 금지 — `/tools/network-check` 는 최대 5초 프로브). 30분보다 오래된 값은 흐리게.
   · 호스트를 모르는 법인(첫 수집 중·비활성·이월 값 없는 연결 실패)은 개수를 null('—')로 둔다 — 표지는 `corpSiteStatus` 그대로. 요약 합에서는 빼고 '미수집 N곳 제외' 를 밝힌다.
   · 과할당 비율은 용량(코어·메모리)을 하나라도 못 읽은 법인·클러스터에서 null — 분자만 남은 비율 금지(`toolsCapacity` 와 같은 규칙). vCPU 합은 템플릿 제외(`vmSumsOf`).
+  · **v3.19.1 — VM 할당 합(vCPU · 메모리)의 판정 코어는 `server/src/vcenter/vmSums.js` 하나**(`vmSumsOf` 합 + unknown 수 · `vmAllocOf` '전부 못 읽음 → null'). `/hosts` 요약(`routes/api/inventory.js`) ·
+    법인별(`hostCorp.js vmCols`) · 호스트 엑셀(`hostExport.js` — 사본 `vmSums` 삭제) 세 곳이 그 둘만 부른다. v3.19.0 까지 법인별은 VM 을 **전부** 못 읽어도 vCPU 0 · `0.0 : 1` · RAM `0%` 로 냈다
+    (요약은 '—'). 이제 `vcpu` · `vmMemGB` · `vcpuPerCore` · `ramPct` 가 null 이고, 법인 · 클러스터 행에 `vmMemUnknown`(메모리를 못 읽은 VM 수)을 싣는다. 화면 글자는 `hostCorpText.vcoreCell` · `ramCell` —
+    전부 못 읽음 '—'(단위 없음) · 일부만 못 읽음 `≥` + 못 읽은 VM 수(요약 타일과 같은 표기). 요약 칸 'vCore : 물리' 는 vCPU 를 전부 못 읽은 법인을 분자 · 분모 **둘 다**에서 뺀다(0 으로 더하면 코어만 늘어 낮게 나온다) —
+    보조 문구는 **뺀 것을 앞에**(칸이 좁아 뒤는 말줄임된다 — Chromium 판독 1440 · 400).
+    코어는 `hostChecks.js` · `hostExport.js` 어느 쪽에도 두지 않는다(`hostChecks.js` 가 `hostExport.js` 를 import — 순환). 회귀 `server/test/vmSumsCore3191.test.js`(같은 입력으로 세 출력 대조 · 소스 스윕) · `hostCorpText.test.js`.
+    남긴 것(같은 꼴 · 범위 밖): ① ~~호스트 표 'VM' 묶음(`/hosts/checks` 의 `c.vm`)은 원래 합을 그대로 실어 전부 못 읽은 호스트가 `0+?` 로 보인다(`Hosts.jsx`)~~ → **v3.19.2 에 고쳤다**(아래 줄) ② `/summary` 의 OS 별 · vCenter 별 합은
+    아직 `v.cpuCount || 0`(템플릿 포함 · 공개 API 대조 계약) ③ 일부만 못 읽었을 때 엑셀 호스트 행은 비율 칸을 비우고(`cpuRatio` null) 화면 · 요약은 `≥` 최소값을 적는다(표기 방식만 다르고 합 · unknown 수는 같다).
+  · **v3.19.2 — 호스트 한 대의 'VM' 묶음(`/hosts/checks` 의 `byId[id].vm`)도 `vmAllocOf` 를 거친다**(`hostChecks.js hostVmOf` = `vmSumsOf` + `vmAllocOf` — 키는 그대로, `vcpu` · `memMB` 가 null 일 수 있다).
+    v3.19.1 까지 VM 을 **전부** 못 읽은 호스트가 표 `0+?` · 상세 `0` · `0.0 : 1` · 드로어 'vCPU 0 할당 이상' 이었고, 표의 'vCPU:코어' 정렬 값은 `null / 코어 = 0` 이라 '—' 행이 오름차순 맨 앞에 섰다.
+    소비처 세 곳(`Hosts.jsx` 열 `vcpu` · `vcpuRatio` · `vmMemGB` / `HostDetail.jsx` '할당 vCPU' · '할당 메모리' 칸 + VM 카드 보조 문구 / `hosts/hostDrawerText.js hostTiles`)은 글자 함수 **`hostChecksText.vmAllocCells(vm, host)` 하나**를 쓴다 —
+    웹은 서버가 준 null 을 '—'(단위 없음 · 정렬 null = 항상 뒤)로 그릴 뿐 **'unknown 수 === n' 판정을 다시 하지 않는다**(소스 스윕이 막는다). 전부 못 읽음: 표 '—'(툴팁 'VM N대의 vCPU 를 모두 못 읽었습니다') ·
+    상세 '—' + 'VM N대 모두 못 읽음' · 드로어 'vCPU 할당 —' · '코어 대비 —' · 'VM N대 모두 못 읽음'. 일부 못 읽음: 예전 표기 그대로(표 `+?` · 드로어 '이상' · 상세 '못 읽은 VM N') — 이번에 표의 'vCPU:코어' 칸과
+    상세 '할당 메모리' 칸에도 같은 표지를 붙였다(예전에는 부분 합의 비율 · 메모리가 표지 없이 나왔다). VM 없음: `0` · `0.0 : 1` · `0 GB`(예전 메모리 칸은 `gbText(0)` 이라 '—' 였다 — '—' 는 못 읽음에만 쓴다).
+    회귀 `server/test/hostVmAlloc3192.test.js`(순수 + 실제 라우트에서 `/hosts` 요약 · 법인별과 null 여부 대조 + 소스 스윕 — 수정 전 소스에서 4건 모두 실패) · `hostChecksText.test.js` · `hosts/hostDrawerText.test.js`.
+    Chromium 은 목 데이터에 못 읽은 VM 이 없어 `/api/hosts/checks` 응답을 가로채 바꿔 봤다(실제 서버 null 은 단위 테스트가 라우트로 확인). 남긴 것: 위 ② ③ 그대로.
   · 표는 `STable`(법인 열 sticky · `data-sort` 로 null 뒤로). 패널은 콘텐츠가 넓을 때(창 1600px 이상)만 표 옆, 그보다 좁으면 표 아래로 내려가고 행을 고르면 그 패널로 스크롤한다.
     펼친 클러스터의 호스트 표는 `limit` 8 + '호스트 N대 모두 보기 — 호스트별 보기로'(그 클러스터 focus 로 내려간다).
 - ⚠⚠ **v2.708 — 드롭다운은 공용 `Select`·`DataList` 하나다(자동 정렬)**(`web/src/components/`{Select.jsx,DataList.jsx,selectSort.js}, 사용자 요청 "모든 드랍박스 메뉴를 소팅되서 보이게 하고 앞으로 만들면 소팅"):
@@ -872,7 +888,7 @@
   ⑩ 기능 사용 현황(`featureUsageText.js menuIndex`)은 `tabs` 도 같은 자리로 센다(`tab:vms` 키 그대로 · 이름 '가상화 플랫폼 › 가상화 서버 · VM').
   ⑪ **v2.994 에서 이름 · 항목 분리가 바뀌었다** — 아래 'v2.994 서버 메뉴 이름 변경' 항목이 우선한다(①의 항목 모양 · ②의 별칭 방향 · ⑨의 '마지막 본 탭' 기억 · ⑥의 브레드크럼 뿌리 이름).
   ⑫ **v3.19.0(사용자 요청 2026-11-18 · 설계 `docs/design/vm-menu` 시안 A · §8)** — ⓐ 숫자 3장 순서는 **vCenter · Virtual Machine · Hypervisor**(사이드바 '서버' 묶음과 같다 — 계층 순서가 아니다). `platformText.PLATFORM_TABS` 와 `entityTabs()` 반환이 **리터럴로 따로** 순서를 적으니 둘을 함께 바꾼다(탭 id · 해시 · 권한 id 는 그대로).
-     ⓑ 허브 머리의 설명 문구(‘서비스 = vCenter 1 + Bareos 1 …’)는 지웠다(세 탭 공통). ⓒ **vCenter 탭은 바로가기 아래에 vCenter 카드만**(⑨의 카드 | 표 보기 · 도구 6 · 요약 3장 · `VcTable.jsx` · `platform.vcView` 기억은 없앴다 — 옛 저장 값은 읽지 않는다. VM 이름 검색 안내 · 결과 없음 · 용량 각주만 남는다). `HubTabs.jsx` 는 Hosts · Vms 탭이 쓰므로 남는다.
+     ⓑ 허브 머리의 설명 문구(‘서비스 = vCenter 1 + Bareos 1 …’)는 지웠다(세 탭 공통). ⓒ **vCenter 탭은 바로가기 아래에 vCenter 카드만**(⑨의 카드 | 표 보기 · 도구 6 · 요약 3장 · `VcTable.jsx` · `platform.vcView` 기억은 없앴다 — 옛 저장 값은 읽지 않는다. VM 이름 검색 안내 · 결과 없음 · 용량 각주만 남는다). `HubTabs.jsx` 는 Hosts · Vms 탭이 쓰므로 남는다. 요약 3장이 넘기던 도구 인계(`KPI_HANDOFF` · `takeKpiVcenter`)의 받는 쪽도 뒤이은 정리에서 지웠다(v2.959 항목 끝).
      ⓓ **바로가기 글자로 찾기**: `platformText.filterChipSites(sites, text, selectedIds)` — 판정은 카드와 같은 `vcMatches`·`keywordsOf`(부분 일치 · 대소문자 무시 · 공백 낱말 AND). 범위 바의 공용 검색 `q` 와 **별개**인 App 메모리 상태 `chipQuery`(저장하지 않는다)를 허브(칩)와 vCenter 탭(카드)이 쓴다 — 숫자 3장 · 서버 호출은 그대로. **고른 법인의 칩은 일치하지 않아도 남긴다**(다시 눌러 풀 수 있게) · 맞는 법인이 없으면 칩 자리 · 카드 자리에 안내 + 지우기 · 접으면 글자도 비운다.
      ⓔ 400px 결함(D3): `.ph-tab.on .parts { grid-column }` 때문에 열린 탭의 분해가 탭 안과 `.ph-parts-narrow` 에 **두 번** 나왔다 — 탭 안 규칙을 지웠다(`.ph-tab .parts` 는 400px 에서 숨김, 열린 탭의 분해는 아래 한 줄만). 회귀 `platform/platformText.test.js` 맨 아래 v3.19.0 두 describe.
   ⑬ **v3.20.0 바로가기 복수 선택(사용자 요청 2026-11-18 · 설계 `docs/design/vm-menu` §5 ③ 기본값 ‘복수 선택 · 세 탭 공용’ · 시안 ②)** — ⓐ 허브 칸(`PLATFORM_SCOPE_KEY`)의 법인은 **목록 `vcenterIds`(배열 · 메모리만 · 저장하지 않는다)** 이고 허브 칸에는 `vcenterId` 를 저장하지 않는다 — App `patchFilter` 가 허브 칸 patch 를 `platformText.hubScopePatch` 로 바꾼다(옛 단일 patch `{ vcenterId }` = 한 곳 목록 — 카드의 호스트 · VM 수 · VM 표의 법인 · 범위 바 선택 칸 · ⌘K 인계 · 필터 초기화가 그대로 산다). 허브 밖 탭은 지금처럼 탭마다 `vcenterId` 하나.
@@ -956,13 +972,17 @@
   `platformText.KPI_HANDOFF`(`vm-track:vcenter` · `storage-track:vcenter`) 로 `hooks/searchHandoff` 메모리 인계(URL 에 싣지 않는다 · 30초 · 꺼내면 지운다) · 받는 도구는 `useState(() => takeKpiVcenter(…))` 로 마운트 때 1회.
   ‘VM 백업’ 카드는 법인을 골랐으면 Backup 현황 · Detail(`backupViewText.openBackupDetail` — 서머리의 openDetail 과 같은 키 `backup-detail-vc`), 아니면 Summary. 도구 권한이 없으면 누를 수 없다(커서 · 제목 없음). 리전만 골랐으면 전체로 연다(도구에 리전 선택이 없다).
   새 인계 target 을 ⌘K 의 `invSearchQuery SCREEN` 표에 넣지 않는다(검색 인계가 아니다) — `useSearchHandoff` 훅 대신 `takeSearch` 를 직접 쓴 이유.
+  **(정리 2026-11-18 — v3.19.0 에 요약 3장이 없어져 이 인계는 보내는 쪽 · 받는 쪽 모두 지웠다)**: `KPI_HANDOFF` · `handoffKpiScope` · `handoffKpiVcenter` · `takeKpiVcenter` 는 없다. 지우기 전에 같은 target
+  (`vm-track:vcenter|region` · `storage-track:vcenter|region` · `backup-summary:region`)을 남기는 다른 경로가 없음을 확인했다 — `handoffMany`/`handoffSearch`/`stashForNewTab` 호출처는 ⌘K 팔레트(`invSearchQuery` SCREEN · EXTRA 표의 target 만) ·
+  `IdracTrendLinkButton`(`TREND_HANDOFF`) · `SanStorageTool`(`san-flow:targets`) 셋뿐. VM 수량 · 스토리지 사용량 추이 · Backup Summary 는 전체로 열리고 화면의 리전 · vCenter 선택 칸으로 고른다(리전 선택 · `regionsOf · vcInRegion` 은 그대로).
+  회귀 `platform/platformText.test.js` ‘KPI 카드 → 도구 인계(v2.959)는 걷어냈다’(상수 · 함수 없음 · 세 도구 초기값 `''` · 옛 target 문자열이 web/src 에 0건).
 - **v3.10.13 — 가상화 플랫폼 점검 1회차: vCenter 상세의 ‹ 이전 · 다음 › 은 허브 범위 안에서**(자율 개선 루프 2026-11-15): 전에는 리전 · 검색어로 범위를 좁혀도 상세의 이전 · 다음이 전 법인을 돌았다(세 탭이 같은 범위를 쓴다는 v2.915 규약과 어긋남).
   이웃 목록은 `platformText.siblingSites(sites, scope)`(리전 · 검색어만 — 고른 법인 하나 `vcenterId` 는 범위로 치지 않는다: 그러면 이웃이 없다) · 카운터 옆에 `siblingScopeText`(‘리전 유럽 · ‘kr1’’) · 검색 규칙은 `keywordsOf · vcMatches` 한 벌(카드 목록 `shown` 과 같은 함수).
 - **v3.10.14 — 가상화 플랫폼 점검 2회차: 바로가기 칩은 고른 리전 안의 법인만 · 칩을 눌러도 리전은 남는다**(자율 개선 루프): 전에는 리전을 골라도 칩이 28곳 전부였고 리전 밖 칩을 누르면 App 이 리전을 지워 범위가 튀었다.
   `platformText.chipSites(vcenters, region)`(리전 안만 · 없으면 빈 목록 + '이 리전에 법인이 없습니다') · `chipRegionNote`(‘리전 유럽 · 5법인’) · App 의 `onPickVcenter` 는 `patchFilter({ vcenterId })` 만(리전 유지 — 고른 칩을 다시 누르면 ‘리전 전체’). VM 탭 ‘법인별’ 행의 onPickVcenter(리전 지움)는 그대로(법인별 표는 전 법인 표).
 - **v3.10.15 — 가상화 플랫폼 점검 3회차: VM 수량 · 스토리지 사용량 추이 도구에 ‘리전’ 선택 · KPI 카드가 리전도 넘긴다**(자율 개선 루프): KPI 줄은 리전 범위를 합했는데(v2.958) 카드를 누르면 도구가 전체로 열렸다(도구에 리전이 없었다).
   도구: 리전 Select(리전이 2개 이상이거나 골라져 있을 때만) + vCenter Select(리전 안만 · `platformText.regionsOf · vcInRegion`) · 요청은 `vcenterId` 가 없을 때만 `region` · 제목은 `scopeText`(vCenter 이름 / ‘리전 X 합계’ / ‘전체 vCenter 합계’ — 예전엔 id 를 그대로 보였다).
-  인계: `handoffKpiScope(targets, {vcenterId, region})` — vCenter 가 있으면 vCenter 만, 없으면 리전(`KPI_HANDOFF.vmTrackRegion · storageTrackRegion`). 서버 `vcenterList` 항목에 `region`.
+  인계(**삭제됨** — v2.959 항목 끝 ‘정리 2026-11-18’): `handoffKpiScope(targets, {vcenterId, region})` — vCenter 가 있으면 vCenter 만, 없으면 리전(`KPI_HANDOFF.vmTrackRegion · storageTrackRegion`). 서버 `vcenterList` 항목에 `region`.
 - **v3.10.16 — 가상화 플랫폼 점검 4회차: 탭 줄이 넘치면(400px) 열린 탭이 보이게 그 줄만 옮긴다 — 허브 · vCenter 상세 · 개체 보기 한 훅**(자율 개선 루프):
   허브 탭 줄(HubTabs v2.915)과 Backup 현황 머리(VeeamHeader v2.822)에 두 벌 있던 규칙을 `hooks/useActiveTabInView.js`(순수 `keepActiveTabInView` + 훅) 하나로 모으고 vCenter 상세 · VM · 호스트 개체 보기의 `.vcd-views` 도 쓴다 —
   400px 에서 ‹ 이전 · 다음 › 으로 넘어가거나 기억 탭으로 열면 ‘네트워크’ 같은 뒤쪽 탭 · 강조 탭(‘호스트 및 클러스터’ · ‘VM’)이 줄 밖에 숨어 있었다.
@@ -970,7 +990,7 @@
 - **v3.10.17 — 가상화 플랫폼 점검 5회차: 리전만 고른 채 백업 KPI 카드 → Backup 현황 · Summary 가 그 리전만 센다**(자율 개선 루프): VM · 스토리지 카드는 v3.10.15 에 리전을 넘겼는데 백업 카드만 전체 Summary 로 열렸다.
   서버 `veeam/summaryRegion.js`(`regionQuery · inRegion · regionsOf`) 하나로 `/tools/backup-summary`(+`.csv`) · `/schedule` · `/errors` · `/stale`(staleQueryOf.region) 이 **사용자 범위 교집합 뒤**에 리전을 거른다 — 응답에 `region · regions`.
   화면: Summary 에 리전 Select(`data-backup-region` — 리전이 2개 이상이거나 골라져 있을 때만 · 모르는 리전은 ‘(법인 없음)’) · 머리 ‘N개 법인 · 리전 X’ · 숫자 줄 · 두 카드 · 트리 · CSV · 찾기 · 일정 · 에러가 같은 `?region=`(‘제목뿐이지 않게’ — v3.10.15 교훈) · 리전을 바꾸면 선택(한 법인 안)을 푼다 · 기억하지 않는다.
-  인계: `KPI_HANDOFF.backupSummaryRegion`(메모리 · 30초) — 허브 `backupGo` 는 법인이 있으면 Detail(v2.959), 리전만이면 Summary+리전. 테스트 `platformText.test.js` v3.10.17 · `server/test/backupSummaryRegion31017.test.js`.
+  인계(**삭제됨** — v2.959 항목 끝 ‘정리 2026-11-18’): `KPI_HANDOFF.backupSummaryRegion`(메모리 · 30초) — 허브 `backupGo` 는 법인이 있으면 Detail(v2.959), 리전만이면 Summary+리전. 테스트 `platformText.test.js` v3.10.17 · `server/test/backupSummaryRegion31017.test.js`.
 - **v3.10.18 — 가상화 플랫폼 점검 6회차: 허브 부제의 옛 가정 문구 정정**(자율 개선 루프): `PlatformHub` 부제가 ‘법인 = vCenter = Bareos 한 단위’ 라고 말했다 — 2026-11-13 사용자 정정(법인 1 : 서비스 N · 서비스 1 = vCenter 1 + Bareos 1)과 어긋나는 **화면 문구**라 고쳤다
   (‘서비스 = vCenter 1 + Bareos 1 · 한 법인에 서비스가 여럿일 수 있습니다’). 같은 옛 가정이 남은 다른 문구(`BareosCorp` 라벨 ‘1:1:1’ · `bareosText` 혼합 엣지 안내 · 카드 ‘vCenter · 법인’ 류의 느슨한 ‘법인’)는
   루트 CLAUDE.md 대로 **정리 범위를 사용자가 정한 뒤**에 손댄다(이 회차는 부제 한 줄만). 테스트 `platformText.test.js` v3.10.18.
