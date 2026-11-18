@@ -67,3 +67,13 @@ describe('syncLogic', () => {
     for (const s of ['new', 'linked', 'changed', 'gone', 'held', 'problem', 'excluded']) expect(SYNC_STATE_META[s]?.label).toBeTruthy();
   });
 });
+
+describe('v3.18.14 autoSavedText — 자동 등록 저장 뒤 안내(결함 D3)', async () => {
+  const { autoSavedText } = await import('./syncLogic.js');
+  it('곧 감지 · 다음 감지 · 끔', () => {
+    expect(autoSavedText({ options: { autoKinds: ['set:vcenter'] }, detectQueued: true }, '5분')).toMatch(/곧 한 번 감지.*5분마다/);
+    expect(autoSavedText({ options: { autoKinds: ['set:vcenter'] }, detectQueued: false }, '5분')).toMatch(/다음 감지\(5분마다\)/);
+    expect(autoSavedText({ options: { autoKinds: ['set:vcenter'] } }, '')).toMatch(/주기마다/);
+    expect(autoSavedText({ options: { autoKinds: [] } }, '5분')).toBe('자동 등록을 껐습니다.');
+  });
+});
