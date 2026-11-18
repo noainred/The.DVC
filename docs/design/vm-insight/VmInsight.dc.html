@@ -14,7 +14,7 @@ body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR
 button{font:inherit}
 sc-for,sc-if{display:contents}
 .mono{font-family:"JetBrains Mono",monospace}
-.page{min-height:3800px;padding:22px 24px 28px;display:flex;flex-direction:column;gap:14px;box-sizing:border-box}
+.page{min-height:4900px;padding:22px 24px 28px;display:flex;flex-direction:column;gap:14px;box-sizing:border-box}
 .head{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px}
 .head h1{margin:0;font-size:20px;font-weight:800}
 .head .snap{margin-left:auto;font-size:12px;color:#8b9bb4;font-family:"JetBrains Mono",monospace;white-space:nowrap}
@@ -202,6 +202,13 @@ sc-for,sc-if{display:contents}
 .foldbar .hint{font-size:12px;color:#8b9bb4;flex:1 1 300px;min-width:0}
 .foldbar .fb{min-height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font-size:12.5px;font-weight:600;cursor:pointer}
 .row.b.wide{grid-template-columns:minmax(0, 1fr)}
+.duo .a{background:#3987e5}
+.dots{position:relative;height:150px;border-left:1px solid #33425f;border-bottom:1px solid #33425f;margin:10px 8px 0 48px}
+.dots i{position:absolute;width:7px;height:7px;border-radius:50%;background:#3987e5;transform:translate(-50%, 50%);box-shadow:0 0 0 2px #141b2d}
+.dots .yl{position:absolute;left:-48px;width:42px;text-align:right;font-family:"JetBrains Mono",monospace;font-size:10.5px;color:#8b9bb4}
+.dots .yt{top:-6px}
+.dots .yb{bottom:-6px}
+.axis.dx{margin:4px 8px 0 48px}
 .gear{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font-size:12px;font-weight:600;cursor:pointer}
 .gear.on{border-color:#3b82f6;background:rgba(59,130,246,.2)}
 .cfg{display:flex;flex-direction:column;gap:10px;border:1px solid #33425f;border-radius:12px;background:#0f1626;padding:12px 14px}
@@ -437,6 +444,79 @@ sc-for,sc-if{display:contents}
       </div>
     </section>
 
+    <section class="panel chg" aria-label="VM 수 추이와 생성 · 삭제">
+      <div class="ph"><h2>VM 수 추이 · 생성/삭제</h2><span class="mk">추가 · 특수 기능</span><span class="hint">특수 기능 ‘VM 수량 추이’ · ‘VM 생성 · 삭제 이력’ 의 요약입니다</span><span class="rt">{{ trRule }}</span></div>
+      <div class="gp">
+        <div class="sum">
+          <div class="hero"><b>{{ trHero }}</b><span>{{ trHeroText }}</span></div>
+          <div class="st"><sc-for list="{{ trStats }}" as="x" hint-placeholder-count="3"><div class="{{ x.cls }}" title="{{ x.tip }}"><b>{{ x.big }}</b><span>{{ x.text }}</span></div></sc-for></div>
+          <div class="note">{{ trNote }}</div>
+          <span class="lnk">‘VM 수량 추이’ 에서 보기 →</span>
+          <span class="lnk2">누가 무엇을 만들고 지웠는지는 ‘VM 생성 · 삭제 이력’ 에서 →</span>
+        </div>
+        <div class="lst">
+          <div class="lh"><b>VM 수</b><span>{{ trChartHint }}</span></div>
+          <div class="dots"><span class="yl yt">{{ trMax }}</span><span class="yl yb">{{ trMin }}</span><sc-for list="{{ trDots }}" as="d" hint-placeholder-count="24"><i style="left: {{ d.x }}; bottom: {{ d.y }}" title="{{ d.tip }}"></i></sc-for></div>
+          <div class="axis dx"><span>10-20</span><span>11-18</span></div>
+        </div>
+        <div class="lst">
+          <div class="lh"><b>날마다 생성 · 삭제</b><span>지난 7일 · 파랑 = 생성 · 회색 = 삭제</span></div>
+          <sc-for list="{{ trDays }}" as="c" hint-placeholder-count="8">
+            <div class="oc" title="{{ c.tip }}"><span class="nm">{{ c.day }}</span><span class="dw"><span class="duo" style="width: {{ c.w }}"><i class="a" style="flex: {{ c.add }} 1 0"></i><i class="u" style="flex: {{ c.rem }} 1 0"></i></span></span><span class="tx"><b>{{ c.big }}</b> · {{ c.rest }}</span></div>
+          </sc-for>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel chg" aria-label="CPU 경합과 디스크 지연">
+      <div class="ph"><h2>CPU 경합 · 디스크 지연</h2><span class="mk">추가 · 특수 기능</span><span class="hint">VM 이 CPU 를 기다리는 시간(Ready)과 디스크 응답 시간 — 특수 기능 ‘CPU 경합 · 디스크 지연’ 의 요약입니다</span><span class="rt">{{ ctRule }}</span></div>
+      <div class="gp">
+        <div class="sum">
+          <div class="hero"><b>{{ ctHero }}</b><span>{{ ctHeroText }}</span></div>
+          <div class="st"><sc-for list="{{ ctStats }}" as="x" hint-placeholder-count="3"><div class="{{ x.cls }}" title="{{ x.tip }}"><b>{{ x.big }}</b><span>{{ x.text }}</span></div></sc-for></div>
+          <div class="note">{{ ctNote }}</div>
+          <span class="lnk">‘CPU 경합 · 디스크 지연’ 에서 모두 보기 →</span>
+        </div>
+        <div class="lst">
+          <div class="lh"><b>CPU 대기가 큰 VM</b><span>법인마다 가장 심한 1대 중 5대</span></div>
+          <sc-for list="{{ ctReady }}" as="p" hint-placeholder-count="5">
+            <div class="pr" title="{{ p.tip }}"><span><span class="nm">{{ p.name }}</span><span class="sb">{{ p.sub }}</span></span><span><span class="gt nt"><i style="width: {{ p.w }}; background: {{ p.bg }}"></i></span><span class="fr">{{ p.note }}</span></span><span class="big">{{ p.big }}</span></div>
+          </sc-for>
+        </div>
+        <div class="lst">
+          <div class="lh"><b>디스크 지연이 큰 VM</b><span>법인마다 가장 심한 1대 중 5대</span></div>
+          <sc-for list="{{ ctDisk }}" as="p" hint-placeholder-count="5">
+            <div class="pr" title="{{ p.tip }}"><span><span class="nm">{{ p.name }}</span><span class="sb">{{ p.sub }}</span></span><span><span class="gt nt"><i style="width: {{ p.w }}; background: {{ p.bg }}"></i></span><span class="fr">{{ p.note }}</span></span><span class="big">{{ p.big }}</span></div>
+          </sc-for>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel chg" aria-label="VM 구성 점검">
+      <div class="ph"><h2>VM 구성 점검</h2><span class="mk">추가 · 특수 기능</span><span class="hint">백업 실패 · 멈춤으로 이어지는 구성 문제 — 특수 기능 ‘VM 구성 점검’ 의 요약입니다</span><span class="rt">{{ hyRule }}</span></div>
+      <div class="gp">
+        <div class="sum">
+          <div class="hero"><b>{{ hyHero }}</b><span>{{ hyHeroText }}</span></div>
+          <div class="st"><sc-for list="{{ hyStats }}" as="x" hint-placeholder-count="3"><div class="{{ x.cls }}" title="{{ x.tip }}"><b>{{ x.big }}</b><span>{{ x.text }}</span></div></sc-for></div>
+          <div class="note">{{ hyNote }}</div>
+          <span class="lnk">‘VM 구성 점검’ 에서 모두 보기 →</span>
+        </div>
+        <div class="lst">
+          <div class="lh"><b>문제 종류</b><span>심각 · 경고 7종 — 해당하는 VM 수</span></div>
+          <sc-for list="{{ hyCodes }}" as="o" hint-placeholder-count="7">
+            <div class="rb" title="{{ o.tip }}"><span class="n">{{ o.name }}</span><span class="track"><i style="width: {{ o.w }}; background: {{ o.bg }}"></i></span><span class="v">{{ o.count }}</span></div>
+          </sc-for>
+        </div>
+        <div class="lst">
+          <div class="lh"><b>응답을 기다리며 멈춘 VM</b><span>법인마다 1대 중 5대</span></div>
+          <sc-for list="{{ hyCrit }}" as="p" hint-placeholder-count="5">
+            <div class="pr" title="{{ p.tip }}"><span><span class="nm">{{ p.name }}</span><span class="sb">{{ p.sub }}</span></span><span><span class="gt nt"><i style="width: {{ p.w }}; background: {{ p.bg }}"></i></span><span class="fr">{{ p.note }}</span></span><span class="big">{{ p.big }}</span></div>
+          </sc-for>
+          <sc-if value="{{ hyCritEmpty }}" hint-placeholder-val="{{ false }}"><div class="note">이 범위에는 없습니다.</div></sc-if>
+        </div>
+      </div>
+    </section>
+
     <div class="foldbar chg"><b>분포 · 구성 · 회수 후보</b><span class="mk">S1 반영</span><span class="hint">{{ distSummary }}</span><button type="button" class="fb" aria-expanded="{{ distOpen }}" onClick="{{ toggleDist }}">{{ distBtn }}</button></div>
 
     <sc-if value="{{ distOpen }}" hint-placeholder-val="{{ true }}">
@@ -580,7 +660,7 @@ sc-for,sc-if{display:contents}
   </sc-if>
 </main>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":3800}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":4900}}'>
 class Component extends DCLogic {
   state = { sel: {}, q: '', fill: 'att', size: 'n', sub: 'insight', ovKind: 'mem', fold: false, mapSize: 'l', mapH: 520, mapWide: false, cfgOpen: false, offSort: 'disk' };
 
@@ -667,6 +747,54 @@ class Component extends DCLogic {
       {id:'vc-cn-east',on:219,c:[3246.5,1650.4,1596.1],cc:20,m:[4090,2430.2,1659.8],mc:46,off:[44,18292],sn:[44,2809.5],th:[140,25507],nt:13,ct:[['web-cn-0212',16,46.4,6.5,14,86,4],['dns-cn-0043',8,25.6,0.3,1,99,3],['lb-cn-0166',8,25.6,3.3,13,87,1],['db-cn-0207',8,17.6,3,17,83,1],['app-cn-0228',4,12.8,0.5,4,96,3]],mt:[['dns-cn-0006',64,9,55,14,86,4],['monitor-cn-0183',64,17.9,46.1,28,72,0],['monitor-cn-0019',64,19.8,44.2,31,69,0],['mq-cn-0145',64,21.8,42.2,34,66,5],['lb-cn-0146',64,24.3,39.7,38,62,6]]},
       {id:'vc-cn-north',on:162,c:[2044.8,1076.3,968.5],cc:14,m:[2718,1603.2,1114.8],mc:35,off:[18,7476],sn:[30,1934.4],th:[96,14935],nt:7,ct:[['cache-cn-0028',16,51.2,8.2,16,84,5],['lb-cn-0143',16,35.2,5.6,16,84,0],['web-cn-0117',8,23.2,0.9,4,96,0],['k8s-node-cn-0189',8,20.8,1.9,9,91,2],['k8s-node-cn-0097',8,17.6,2.1,12,88,5]],mt:[['db-cn-0022',64,20.5,43.5,32,68,2],['web-cn-0105',64,23.7,40.3,37,63,4],['cache-cn-0183',32,9,23,28,72,5],['app-cn-0144',32,9.3,22.7,29,71,4],['k8s-node-cn-0060',32,9.6,22.4,30,70,1]]},
     ];
+  }
+
+  // 특수 기능 요약 3종 — 같은 목 서버에서 2026-11-18 13:46 KST 에 받은 /api/tools/contention · /vm-hygiene · /vm-track · /vm-lifecycle 을 법인별로 줄인 값. 판정은 각 도구 그대로.
+  // cont = [Ready 심각(10%↑), Ready 경고(5%↑), Co-stop, 디스크 지연 심각(50ms↑), 디스크 지연 경고(20ms↑), 가장 심한 VM [이름, 호스트, Ready 평균%, 최고%], 디스크 지연이 가장 큰 VM [이름, 호스트, ms, 디스크]]
+  // hyg = [심각 VM, 경고 VM, 구성 값을 못 받은 VM, 종류별 7종(응답 대기 질문 · 디스크 통합 필요 · 비영구 디스크 · CPU 제한 · 메모리 제한 · CD-ROM 연결 · 설정 OS 불일치), 심각 VM 1대 [이름, 호스트]]
+  // trend = [VM 수(수집 시점 24점 · 10-20 ~ 11-18), 날마다 생성(8일 · 11-11 ~ 11-18), 날마다 삭제, 종류별 [새로 만듦, 복제, 템플릿 배포, 삭제]]
+  tools5() {
+    return {
+      cont: {
+        'vc-us-east': [4,14,7,9,16,['monitor-us-0062','esxi-useast-14',12.4,22.3],['app-us-0072','esxi-useast-24',140.8,'scsi0:2']],
+        'vc-us-west': [4,9,5,7,10,['dns-us-0062','esxi-uswest-08',12.4,22.3],['cache-us-0072','esxi-uswest-18',140.8,'scsi0:2']],
+        'vc-br-sao': [3,7,4,4,7,['cache-br-0062','esxi-brsao-06',12.4,22.3],['cache-br-0072','esxi-brsao-08',140.8,'scsi0:2']],
+        'vc-eu-central': [12,31,12,14,32,['db-eu-0381','esxi-eucentral-21',12.4,22.3],['mq-eu-0279','esxi-eucentral-09',140.8,'scsi0:2']],
+        'vc-eu-west': [6,17,8,11,18,['monitor-eu-0062','esxi-euwest-14',12.4,22.3],['k8s-node-eu-0072','esxi-euwest-08',140.8,'scsi0:2']],
+        'vc-me-uae': [2,3,2,3,3,['k8s-node-me-0033','esxi-meuae-03',12.4,22.3],['dns-me-0026','esxi-meuae-02',140.8,'scsi0:1']],
+        'vc-ap-northeast': [5,14,6,10,16,['cache-ap-0062','esxi-apnortheast-18',12.4,22.3],['lb-ap-0072','esxi-apnortheast-06',140.8,'scsi0:2']],
+        'vc-ap-southeast': [3,9,4,5,8,['web-ap-0091','esxi-apsoutheast-07',12.4,22.3],['lb-ap-0072','esxi-apsoutheast-02',140.8,'scsi0:2']],
+        'vc-ap-south': [4,10,4,5,10,['dns-ap-0062','esxi-apsouth-02',12.4,22.3],['mq-ap-0072','esxi-apsouth-12',140.8,'scsi0:2']],
+        'vc-cn-east': [7,15,7,11,18,['monitor-cn-0062','esxi-cneast-02',12.4,22.3],['app-cn-0279','esxi-cneast-19',140.8,'scsi0:2']],
+        'vc-cn-north': [5,13,6,7,13,['dns-cn-0062','esxi-cnnorth-14',12.4,22.3],['web-cn-0072','esxi-cnnorth-08',140.8,'scsi0:2']],
+      },
+      hyg: {
+        'vc-us-east': [2,76,5,[2,6,4,5,5,17,5],['k8s-node-us-0098','esxi-useast-02']],
+        'vc-us-west': [1,47,3,[1,3,2,3,3,11,4],['cache-us-0098','esxi-uswest-08']],
+        'vc-br-sao': [1,37,2,[1,3,2,2,2,8,3],['app-br-0098','esxi-brsao-02']],
+        'vc-eu-central': [4,146,11,[4,12,9,11,10,34,7],['backup-eu-0195','esxi-eucentral-15']],
+        'vc-eu-west': [1,83,6,[1,6,5,5,5,18,5],['dns-eu-0098','esxi-euwest-02']],
+        'vc-me-uae': [0,19,1,[0,1,1,1,1,4,1],null],
+        'vc-ap-northeast': [1,71,5,[1,5,4,5,4,16,6],['app-ap-0195','esxi-apnortheast-19']],
+        'vc-ap-southeast': [1,41,3,[1,3,2,2,2,9,3],['cache-ap-0098','esxi-apsoutheast-14']],
+        'vc-ap-south': [1,45,3,[1,3,2,3,2,10,4],['mq-ap-0098','esxi-apsouth-02']],
+        'vc-cn-east': [2,87,6,[2,7,5,6,5,20,4],['dns-cn-0098','esxi-cneast-18']],
+        'vc-cn-north': [1,65,4,[1,5,3,4,4,14,5],['monitor-cn-0098','esxi-cnnorth-02']],
+      },
+      trend: {
+        'vc-us-east': [[235,235,235,236,236,236,236,237,237,237,237,237,238,238,238,238,238,239,239,239,239,240,240,240],[1,3,0,0,0,2,1,12],[0,1,0,0,0,1,0,4],[6,7,6,6]],
+        'vc-us-west': [[141,141,141,141,142,142,142,142,142,142,142,142,143,143,143,143,143,143,143,143,144,144,144,144],[1,3,0,0,0,2,1,12],[0,1,0,0,0,1,0,4],[6,7,6,6]],
+        'vc-br-sao': [[110,110,110,110,110,110,110,110,110,111,111,111,111,111,111,111,111,111,111,112,112,112,112,112],[1,2,1,0,0,2,1,12],[0,1,0,0,0,0,1,4],[7,6,6,6]],
+        'vc-eu-central': [[470,471,471,471,472,472,473,473,474,474,474,475,475,476,476,477,477,477,478,478,479,479,480,480],[0,1,0,0,2,1,0,8],[0,0,0,0,0,1,0,2],[3,3,6,3]],
+        'vc-eu-west': [[251,251,251,251,252,252,252,252,253,253,253,253,253,254,254,254,254,255,255,255,255,256,256,256],[1,3,0,0,0,2,1,12],[0,1,0,0,0,1,0,4],[6,7,6,6]],
+        'vc-me-uae': [[59,59,59,59,59,59,59,59,59,59,59,59,59,59,60,60,60,60,60,60,60,60,60,60],[1,2,1,0,0,2,1,12],[0,1,0,0,0,0,1,4],[7,6,6,6]],
+        'vc-ap-northeast': [[215,216,216,216,216,216,217,217,217,217,217,218,218,218,218,218,219,219,219,219,219,220,220,220],[0,0,0,0,3,0,0,6],[0,0,0,0,1,0,0,2],[3,3,3,3]],
+        'vc-ap-southeast': [[123,124,124,124,124,124,124,124,124,124,125,125,125,125,125,125,125,125,125,126,126,126,126,126],[0,0,0,0,3,0,0,6],[0,0,0,0,1,0,0,2],[3,3,3,3]],
+        'vc-ap-south': [[129,129,130,130,130,130,130,130,130,130,130,131,131,131,131,131,131,131,131,132,132,132,132,132],[0,2,0,0,0,3,0,10],[1,1,0,0,0,1,0,4],[3,6,6,7]],
+        'vc-cn-east': [[274,274,275,275,275,275,276,276,276,276,277,277,277,277,278,278,278,278,279,279,279,280,280,280],[1,3,0,0,0,2,1,12],[0,1,0,0,0,1,0,4],[6,7,6,6]],
+        'vc-cn-north': [[188,188,188,189,189,189,189,189,189,190,190,190,190,190,190,191,191,191,191,191,191,192,192,192],[0,2,0,0,0,3,0,10],[1,1,0,0,0,1,0,4],[3,6,6,7]],
+      },
+    };
   }
 
   // 꺼진 VM — 같은 목 서버 /api/vms 와 /api/tools/waste/off-since(Optimization 의 ‘전원 꺼짐’ 조사)를 2026-11-18 13:29:25 KST 에 받아 법인별로 줄인 값(템플릿 제외 261).
@@ -1079,6 +1207,48 @@ class Component extends DCLogic {
     const offCorpAll = scope.map((r) => OF[r.id]).sort((a, b) => b.d - a.d); const offCorpMax = Math.max.apply(null, offCorpAll.map((o) => o.d).concat([1]));
     const offCorp = offCorpAll.slice(0, 6).map((o) => ({ id: o.id, w: pctN(o.d, offCorpMax).toFixed(1) + '%', big: gbT(o.d), rest: fmt(o.n) + '대', tip: o.id + ' — 꺼진 VM ' + fmt(o.n) + '대 · 디스크 ' + gbT(o.d) + ' · vCPU ' + fmt(o.c) + ' · 메모리 ' + gbT(o.m) }));
 
+    // 특수 기능 요약 3종 — 수는 켠 법인의 합 · 목록은 법인마다 가장 심한 1줄을 받아 그중 5줄(전체 상위 5와는 다를 수 있다).
+    const T5 = this.tools5();
+    const tsum = (grp, i) => scope.reduce((a, r) => a + T5[grp][r.id][i], 0);
+    const tpick = (grp, i, key) => scope.map((r) => ({ vc: r.id, t: T5[grp][r.id][i] })).filter((x) => x.t).sort((a, b) => (key == null ? 0 : b.t[key] - a.t[key]) || (a.vc < b.vc ? -1 : 1)).slice(0, 5);
+    // ① VM 수 추이 · 생성/삭제
+    const trTot = scope.reduce((a, r) => a.map((x, i) => x + T5.trend[r.id][0][i]), T5.trend[scope[0].id][0].map(() => 0));
+    const trAdd = scope.reduce((a, r) => a.map((x, i) => x + T5.trend[r.id][1][i]), [0, 0, 0, 0, 0, 0, 0, 0]);
+    const trRem = scope.reduce((a, r) => a.map((x, i) => x + T5.trend[r.id][2][i]), [0, 0, 0, 0, 0, 0, 0, 0]);
+    const trKd = scope.reduce((a, r) => a.map((x, i) => x + T5.trend[r.id][3][i]), [0, 0, 0, 0]);
+    const trLo = Math.min.apply(null, trTot); const trHi = Math.max.apply(null, trTot); const trDiff = trTot[trTot.length - 1] - trTot[0];
+    const trDots = trTot.map((v, i) => ({ x: ((i / (trTot.length - 1)) * 100).toFixed(1) + '%', y: (trHi > trLo ? ((v - trLo) / (trHi - trLo)) * 100 : 50).toFixed(1) + '%', tip: (i + 1) + '번째 수집 · VM ' + fmt(v) + '대' }));
+    const addN = trAdd.reduce((a, b) => a + b, 0); const remN = trRem.reduce((a, b) => a + b, 0);
+    const TRD = ['11-11', '11-12', '11-13', '11-14', '11-15', '11-16', '11-17', '11-18']; const trDayMax = Math.max.apply(null, trAdd.map((a, i) => a + trRem[i]).concat([1]));
+    const trDays = TRD.map((day, i) => ({ day, add: trAdd[i] || 0.001, rem: trRem[i] || 0.001, w: pctN(trAdd[i] + trRem[i], trDayMax).toFixed(1) + '%', big: '+' + fmt(trAdd[i]), rest: '삭제 ' + fmt(trRem[i]), tip: day + ' — 생성 ' + fmt(trAdd[i]) + ' · 삭제 ' + fmt(trRem[i]) }));
+    const trStats = [
+      { cls: '', big: '+' + fmt(addN), text: '지난 7일 생성', tip: '새로 만듦 · 복제 · 템플릿 배포' },
+      { cls: '', big: fmt(remN), text: '지난 7일 삭제', tip: '지운 VM' },
+      { cls: addN - remN > 0 ? 's' : '', big: (addN - remN >= 0 ? '+' : '') + fmt(addN - remN), text: '순증(생성 − 삭제)', tip: '생성에서 삭제를 뺀 수' },
+    ];
+    // ② CPU 경합 · 디스크 지연
+    const ctRc = tsum('cont', 0);
+    const ctStats = [
+      { cls: 's', big: fmt(tsum('cont', 1)) + '대', text: 'CPU 대기 경고(5% 이상)', tip: 'Ready 평균이 5% 이상 10% 미만' },
+      { cls: 's', big: fmt(tsum('cont', 2)) + '대', text: 'Co-stop(vCPU 끼리 기다림)', tip: 'vCPU 가 많은 VM 이 서로를 기다리는 시간' },
+      { cls: 'c', big: fmt(tsum('cont', 3)) + '대', text: '디스크 지연 심각(50ms 이상)', tip: '디스크 읽기 · 쓰기 응답이 50ms 이상 — 경고(20ms 이상)는 ' + fmt(tsum('cont', 4)) + '대' },
+    ];
+    const ctReady = tpick('cont', 5, 2).map(({ vc, t }) => ({ name: t[0], sub: vc + ' · ' + t[1], w: Math.min(100, (t[2] / 20) * 100).toFixed(1) + '%', bg: t[2] >= 10 ? '#ef4444' : '#f59e0b', note: '최고 ' + t[3] + '%', big: t[2] + '%', tip: t[0] + ' — CPU 대기(Ready) 평균 ' + t[2] + '% · 최고 ' + t[3] + '% · 호스트 ' + t[1] }));
+    const ctDiskPick = tpick('cont', 6, 2); const ctDiskMax = Math.max.apply(null, ctDiskPick.map((x) => x.t[2]).concat([1]));
+    const ctDisk = ctDiskPick.map(({ vc, t }) => ({ name: t[0], sub: vc + ' · ' + t[1] + ' · ' + t[3], w: pctN(t[2], ctDiskMax).toFixed(1) + '%', bg: t[2] >= 50 ? '#ef4444' : '#f59e0b', note: '가장 느린 디스크 ' + t[3], big: Math.round(t[2]) + ' ms', tip: t[0] + ' — 디스크 지연 최고 ' + t[2] + ' ms(' + t[3] + ') · 호스트 ' + t[1] }));
+    // ③ VM 구성 점검
+    const hyCr = tsum('hyg', 0); const hyWn = tsum('hyg', 1); const hyNc = tsum('hyg', 2);
+    const hyCd = scope.reduce((a, r) => a.map((x, i) => x + T5.hyg[r.id][3][i]), [0, 0, 0, 0, 0, 0, 0]);
+    const HYN = ['응답 대기 질문(멈춤)', '디스크 통합 필요', '비영구 디스크', 'CPU 제한', '메모리 제한', 'CD-ROM 연결됨', '설정 OS 와 실제 OS 불일치'];
+    const hyMax = Math.max.apply(null, hyCd.concat([1]));
+    const hyCodes = hyCd.map((v, i) => ({ name: HYN[i], count: fmt(v), w: pctN(v, hyMax).toFixed(1) + '%', bg: i === 0 ? '#ef4444' : '#f59e0b', tip: HYN[i] + ' · ' + fmt(v) + '대' }));
+    const hyStats = [
+      { cls: 's', big: fmt(hyWn) + '대', text: '경고가 있는 VM', tip: '경고 수준의 구성 문제가 하나 이상 있는 VM' },
+      { cls: 's', big: fmt(hyCd[1]) + '대', text: '디스크 통합 필요', tip: '스냅샷 정리가 끝나지 않아 통합이 필요한 VM — 백업 실패로 이어집니다' },
+      { cls: '', big: fmt(hyNc) + '대', text: '판정 밖 — 구성 값을 못 받은 VM', tip: '구성 값을 받지 못한 VM — 문제 없음이 아니라 모르는 것입니다' },
+    ];
+    const hyCrit = tpick('hyg', 4, null).map(({ vc, t }) => ({ name: t[0], sub: vc + ' · ' + t[1], w: '100%', bg: '#ef4444', note: '질문에 답할 때까지 멈춰 있습니다', big: '심각', tip: t[0] + ' — 응답 대기 질문 · 호스트 ' + t[1] }));
+
     // S1: 확인할 것 — 요약 6장 바로 아래 한 줄. 아래 패널들의 머리 숫자를 모은 것(새 판정 없음).
     const todo = [
       { c: 'c', big: fmt(ov), label: '과부하 VM', sub: 'CPU 또는 메모리 90% 이상', tip: '조치 필요 › 과부하' },
@@ -1113,6 +1283,12 @@ class Component extends DCLogic {
       gpHero: fmt(gOv), gpHeroText: '대 — 파티션 ' + fmt(gOp) + '개가 기준 80% 이상 · 값을 받은 VM ' + fmt(gRep) + '대 중 ' + pct(gOv, gRep),
       gpStats, gpBands, gpOs: '초과 파티션의 OS — Linux ' + fmt(gLnx) + '개 · Windows ' + fmt(gWin) + '개. 구간 막대는 초과 파티션 ' + fmt(gOp) + '개를 사용률 구간으로 나눈 것입니다.',
       gpTop, gpSoon, gpSoonEmpty: gpSoon.length === 0,
+      trRule: '수집 24회분 · 생성/삭제는 지난 7일 · 받은 시각 오후 1:46', trHero: fmt(trTot[trTot.length - 1]), trHeroText: '대 — 10월 20일보다 ' + (trDiff >= 0 ? '+' : '') + fmt(trDiff) + '(' + fmt(trTot[0]) + ' → ' + fmt(trTot[trTot.length - 1]) + ')',
+      trStats, trNote: '지난 7일 — 새로 만듦 ' + fmt(trKd[0]) + ' · 복제 ' + fmt(trKd[1]) + ' · 템플릿 배포 ' + fmt(trKd[2]) + ' · 삭제 ' + fmt(trKd[3]) + '.', trChartHint: '수집 시점 순 24점 · 세로 눈금은 ' + fmt(trLo) + ' ~ ' + fmt(trHi) + '(0 부터가 아닙니다)', trMax: fmt(trHi), trMin: fmt(trLo), trDots, trDays,
+      ctRule: '심각 = 대기 10% 이상 · 15분마다 측정 · 받은 시각 오후 1:46', ctHero: fmt(ctRc), ctHeroText: '대 — CPU 대기(Ready)가 10% 이상입니다. 사용률이 낮아도 호스트가 붐비면 VM 이 기다립니다',
+      ctStats, ctNote: '전체 기준으로 구동 VM 1,800대 중 1,754대를 측정했습니다 — 측정하지 못한 46대는 판정 밖입니다.', ctReady, ctDisk,
+      hyRule: '받은 시각 오후 1:46', hyHero: fmt(hyCr), hyHeroText: '대 — 지금 조치가 필요합니다(심각 · 응답 대기 질문으로 멈춘 VM)',
+      hyStats, hyNote: '정보 수준(CBT 꺼짐 · 예약 · 독립 디스크 등)은 여기서 뺐습니다 — 도구에서 봅니다.', hyCodes, hyCrit, hyCritEmpty: hyCrit.length === 0,
       offRule: '점검 주기 6시간 · 받은 시각 오후 1:29', offHero: fmt(offN2), offHeroText: '대 — 디스크 ' + gbT(offD) + ' 를 잡고 있습니다 · 템플릿을 뺀 VM 중 ' + pct(offN2, n - tpl),
       offStats, offBands, offTop, offSorts, offCorp,
       offNote: '꺼진 지 = 점검이 꺼진 것을 처음 본 때부터(하한 · 6시간 단위). vCenter 이벤트에서 찾으면 정확한 시각이 됩니다. 이 값은 목 서버가 전부 6일이라 ‘오래 꺼진 순’ 으로 바꿔도 순서가 같습니다. 받은 시각 · 세는 범위(템플릿 제외)가 달라 위 요약의 ‘정지’ 수와 조금 다릅니다.',
