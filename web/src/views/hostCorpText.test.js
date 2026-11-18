@@ -127,11 +127,12 @@ describe('hostCorpText', () => {
     };
     const k = Object.fromEntries(corpKpis(data).map((x) => [x.key, x]));
     expect(k.ratio.value).toBe('3.0 : 1');
-    expect(k.ratio.sub).toBe('물리 코어 100 · 할당 vCore 300 · vCPU 못 읽은 법인 1곳 제외');
+    expect(k.ratio.sub).toBe('vCPU 못 읽은 법인 1곳 제외 · 물리 코어 100 · 할당 vCore 300');   // 뺀 것이 앞 — 좁은 칸에서 말줄임돼도 보이게
     data.corps[0].vcpuUnknown = 2;
     const k2 = Object.fromEntries(corpKpis(data).map((x) => [x.key, x]));
     expect(k2.ratio.value).toBe('≥3.0 : 1');
     expect(k2.ratio.sub).toContain('vCPU 못 읽은 VM 2대 제외(최소값)');
+    expect(k2.ratio.sub.indexOf('제외')).toBeLessThan(k2.ratio.sub.indexOf('물리 코어'));
     // 비율을 낼 법인이 하나도 없으면 '—' 이고 0 을 적지 않는다
     const k3 = Object.fromEntries(corpKpis({ totals: {}, corps: [data.corps[1]] }).map((x) => [x.key, x]));
     expect(k3.ratio.value).toBe('—');
