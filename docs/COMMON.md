@@ -5,7 +5,7 @@
 
 - 생성: `node scripts/common-doc.mjs` · 최신 여부: `node scripts/common-doc.mjs --check`
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다. 설명을 고치려면 그 모듈의 **머리 주석 첫 단락**을 고친다.
-- 훑은 소스 4388개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
+- 훑은 소스 4389개 파일(`server/src` · `server/test` · `web/src` · `scripts`). `pyportal/`(Python)은 대상이 아니다.
 
 ## 읽는 법 · 한계
 
@@ -174,7 +174,7 @@
 | `ServiceDown.jsx` | ServiceDown — 서비스 일시 미가용(업그레이드 중·5xx·연결 실패) 안내 화면(v2.459). | `default` | 1 | 1 | 2 |
 | `SessionExpiryGuard.jsx` | 세션 만료 경고 + 연장(v2.428). | `tokenExpiresAt` `default` | 1 | 1 | 2 |
 | `WorldMap.jsx` | (머리 주석 없음) | `default` | 1 | 1 | 1 |
-| `invSearchQuery.js` | 헤더 ⌘K '통합 장비 검색' 의 화면 쪽 순수 모듈(v2.909). | `splitPrefix` `withKindPrefix` `focusPlan` `listPlan` `normPlan` `recentKeyFor` 외 26 | 1 | 1 | 4 |
+| `invSearchQuery.js` | 헤더 ⌘K '통합 장비 검색' 의 화면 쪽 순수 모듈(v2.909). | `splitPrefix` `withKindPrefix` `focusPlan` `listPlan` `normPlan` `recentKeyFor` 외 26 | 1 | 1 | 3 |
 | `loadState.js` | 화면이 '비어 있는 이유' 를 정직하게 말하게 하는 판정(v2.509, 순수 모듈). v2.747: V4 셸 삭제로 version_4/loadState.js 에서 옮겼다(관제 콘솔이 쓴다). | `isTimeoutError` `isNetworkError` `loadPhase` `collectProgress` `loadText` | 1 | 1 | 1 |
 | `palette.js` | 헤더 ⌘K 기능 찾기의 후보 목록과 매칭(v2.508, 순수). | `catsOfFrom` `tabEntries` `search` `flatten` `TAB_GROUP` | 1 | 1 | 2 |
 | `tableKeys.js` | 표 행 React key 를 **고유하게**(v3.13.4 · 2차 루프 5회차). - DataTable 은 행 key 로 `r.id \|\| r.key \|\| i` 를 썼다. 라이선스 표는 가림 처리된 키(XXXXX-…-AAAAA)가 여러 vCenter 에서 같아 key… | `uniqueKeys` `baseRowKey` | 1 | 1 | 1 |
@@ -192,7 +192,7 @@
 | `useHashTab.js` | 하위 탭을 URL 해시에 실어 **새로고침·북마크·뒤로가기에서 유지**한다(v2.438). | `useHashTab` | 42 | 4 | 2 |
 | `hashTab.js` | 해시 라우팅의 하위 탭 계산(순수, v2.438). | `hashSegments` `isUnderBase` `tabFromHash` `buildHash` `movedTabHash` `legacyShellHash` 외 3 | 14 | 6 | 3 |
 | `useLatest.js` | 늦게 도착한 이전 응답이 최신 화면을 덮어쓰지 못하게 하는 세대 가드(v2.447, 감사 B16). | `useLatest` `default` | 11 | 1 | 0 |
-| `searchHandoff.js` | 화면 사이의 검색어 인계(v2.616, V5 통합 검색). | `onSearchHandoff` `handoffSearch` `handoffMany` `takeSearch` `stashForNewTab` `consumeNewTabHandoff` 외 3 | 10 | 5 | 1 |
+| `searchHandoff.js` | 화면 사이의 검색어 인계(v2.616, V5 통합 검색). | `onSearchHandoff` `handoffSearch` `handoffMany` `takeSearch` `stashForNewTab` `consumeNewTabHandoff` 외 3 | 9 | 4 | 1 |
 | `useSearchHandoff.js` | 검색어 인계(hooks/searchHandoff.js, v2.616)를 받는 화면용 훅(v2.909 통합 장비 검색). | `useFocusHandoff` `default` | 8 | 2 | 0 |
 | `useActiveTabInView.js` | 가로로 넘치는 탭 줄에서 **열린 탭이 보이게 그 줄만** 옮긴다(v3.10.16 · 가상화 플랫폼 점검 4회차). - 허브 탭 줄(HubTabs · v2.915)에 있던 규칙을 vCenter 상세 · 개체 보기(VM · 호스트)의 `.vcd-views` 도 쓰게 뺀… | `keepActiveTabInView` `default` | 4 | 4 | 1 |
 | `useStickyOffset.js` | 화면 안에서 sticky 로 붙이는 바의 top 을 '숫자를 박지 않고' 정하기 위한 높이 측정 훅(v2.810). | `useStickyHeadH` `useBoxHeight` `STICKY_HEADS` | 2 | 2 | 1 |
@@ -241,7 +241,7 @@
 | 모듈 | 하는 일 | 사용처 | 다른 영역 | 테스트 |
 |---|---|---|---|---|
 | `server/src/config.js` | (머리 주석 없음) | 512 | 86 | 186 |
-| `server/src/store.js` | (머리 주석 없음) | 208 | 43 | 338 |
+| `server/src/store.js` | (머리 주석 없음) | 208 | 43 | 339 |
 | `server/src/collector/registry.js` | Collector registry — the list of remote collector agents (one per datacenter) the central portal pulls power from. Stored in CONFIG_DIR/collectors.jso… | 83 | 32 | 55 |
 | `server/src/security/secretVault.js` | 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). | 41 | 29 | 31 |
 | `server/src/mock/demo/flags.js` | 데모(DATA_SOURCE=mock) 모드 공용 판정(v2.708). | 85 | 26 | 3 |

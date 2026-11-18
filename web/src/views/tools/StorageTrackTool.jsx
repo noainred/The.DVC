@@ -26,7 +26,7 @@ const DAY_OPTS = [7, 30, 90, 365];
 const SEARCH_DEBOUNCE_MS = 300;
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
-import { KPI_HANDOFF, takeKpiVcenter, regionsOf, vcInRegion } from '../platform/platformText.js'; // v2.959: 가상화 플랫폼 KPI 카드가 넘긴 법인 · v3.10.15: 리전
+import { regionsOf, vcInRegion } from '../platform/platformText.js'; // v3.10.15: 리전 선택 보조(v3.19.0: 허브 KPI 카드 인계는 걷어냈다 — 전체로 연다)
 import { backdropClose } from '../../components/backdropClose.js'; // 96회차(95회차 남긴 것 ①): 창 안에서 끌다 배경에서 떼면 닫히던 것 — 누름 · 뗌 모두 배경일 때만
 const slotLabel = (slot) => {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(00|12)$/.exec(String(slot || ''));
@@ -36,10 +36,10 @@ const pctColor = (p) => (p >= 90 ? 'var(--red)' : p >= 75 ? 'var(--amber)' : 'va
 
 export default function StorageTrackTool() {
   const [days, setDays] = useState(30);
-  // v2.959: 가상화 플랫폼 KPI 카드에서 왔으면 고른 법인(vCenter)을 초기 선택으로(메모리 인계 · 마운트 때 1회 · 없으면 전체).
-  const [vcenterId, setVcenterId] = useState(() => takeKpiVcenter(KPI_HANDOFF.storageTrack));
+  // 전체로 연다(v3.19.0: 허브 KPI 카드가 없어져 넘겨받을 법인 · 리전이 없다 — 화면의 선택 칸으로 고른다).
+  const [vcenterId, setVcenterId] = useState('');
   // v3.10.15(점검 3회차): 리전 선택(VmTrackTool 과 같은 규칙) — vcenterId 가 있으면 region 은 보내지 않는다.
-  const [region, setRegion] = useState(() => takeKpiVcenter(KPI_HANDOFF.storageTrackRegion));
+  const [region, setRegion] = useState('');
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
