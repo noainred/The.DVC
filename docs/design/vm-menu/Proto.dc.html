@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>눌러 보는 시안 — 메뉴를 누르면 나오는 화면</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
+button{font:inherit}
+.app{display:flex;flex-wrap:wrap;min-height:1800px}
+.side{flex:0 0 236px;background:#0f1626;border-right:1px solid #1f2a40;padding:14px 10px;display:flex;flex-direction:column;gap:4px;box-sizing:border-box}
+.brand{display:flex;align-items:center;gap:10px;padding:4px 8px 14px;font-weight:800;font-size:15px}
+.brand .logo{width:26px;height:26px;border-radius:7px;background:#3b82f6;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:14px}
+.brand .ver{font-family:"JetBrains Mono",monospace;font-size:11px;font-weight:700;color:#67e8f9;border:1px solid rgba(34,211,238,.45);border-radius:999px;padding:1px 8px}
+.mi,.sub{display:flex;align-items:center;gap:10px;border:0;background:transparent;text-align:left;cursor:pointer;border-radius:8px;width:100%;box-sizing:border-box}
+.mi{min-height:36px;padding:0 10px;color:#aebbd0;font-weight:600;font-size:13.5px}
+.mi i{display:none}
+.mi.grp{background:rgba(34,211,238,.10);color:#e6edf6;box-shadow:inset 3px 0 0 #22d3ee;cursor:default}
+.sub{min-height:34px;padding:0 10px 0 30px;color:#aebbd0;font-size:13px}
+.sub i{width:5px;height:5px;border-radius:50%;background:#5d6b85;flex:none}
+.mi:hover,.sub:hover{background:rgba(148,163,184,.10);color:#fff}
+.mi.grp:hover{background:rgba(34,211,238,.10)}
+.mi.on,.sub.on{background:rgba(34,211,238,.14);color:#fff;font-weight:700}
+.sub.on i{background:#22d3ee}
+.tip{margin-top:14px;padding:10px 12px;border:1px dashed #33425f;border-radius:10px;font-size:12px;line-height:1.6;color:#aebbd0}
+.tip b{color:#e6edf6}
+.page{flex:999 1 560px;min-width:0;padding:22px 24px 28px;display:flex;flex-direction:column;gap:14px;box-sizing:border-box}
+.head{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px}
+.head h1{margin:0;font-size:20px;font-weight:800}
+.head .snap{margin-left:auto;font-size:12px;color:#8b9bb4;font-family:"JetBrains Mono",monospace;white-space:nowrap}
+.tabs{display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:12px}
+.tab{display:flex;flex-direction:column;gap:7px;padding:13px 16px 12px;border-radius:12px;background:#141b2d;border:1px solid #243049;color:#e6edf6;min-width:0;text-align:left;cursor:pointer}
+.tab:hover{border-color:#3b82f6}
+.tab.on{border-color:#3b82f6;background:#1a2236;box-shadow:inset 0 -3px 0 #3b82f6}
+.tab .lb{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;color:#8b9bb4}
+.tab.on .lb{color:#93c5fd}
+.tab .lb .sb{font-weight:500}
+.bd{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:11px;font-weight:800;border-radius:999px;padding:1px 7px;white-space:nowrap}
+.bd.warn{background:rgba(245,158,11,.16);color:#fcd34d}.bd.crit{background:rgba(239,68,68,.16);color:#fca5a5}
+.tab .val{font-family:"JetBrains Mono",monospace;font-size:30px;font-weight:800;line-height:1}
+.tab .parts{font-size:12px;color:#c3cfe2}
+.chips{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#111a2e;border:1px solid #243049;border-radius:12px;padding:10px 12px}
+.chips .ql{color:#8b9bb4;font-size:12px;white-space:nowrap}
+.chips .find{height:32px;width:170px;box-sizing:border-box;border-radius:999px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12.5px;padding:0 12px}
+.chips .find:focus{outline:2px solid #3b82f6;outline-offset:1px}
+.chip{display:inline-flex;align-items:center;gap:6px;min-height:32px;background:rgba(148,163,184,.08);border:1px solid #243049;color:#e6edf6;border-radius:999px;padding:0 13px;font-size:13px;font-weight:600;cursor:pointer}
+.chip:hover{border-color:#3b82f6}
+.chip i{width:8px;height:8px;border-radius:50%;background:#f59e0b;flex:none}
+.chip b{font-family:"JetBrains Mono",monospace;font-size:11px;color:#fcd34d}
+.chip.on{background:rgba(59,130,246,.30);border-color:#3b82f6}
+.chip.on i{background:#60a5fa}
+.picked{display:inline-flex;align-items:center;gap:8px;min-height:28px;padding:0 6px 0 11px;border-radius:999px;background:rgba(59,130,246,.18);border:1px solid #3b82f6;color:#dbeafe;font-size:12px;font-weight:700;white-space:nowrap}
+.picked button{min-height:24px;padding:0 9px;border-radius:999px;border:0;background:rgba(15,22,38,.7);color:#e6edf6;font-size:11.5px;font-weight:700;cursor:pointer}
+.chips .lg{font-size:12px;color:#8b9bb4}
+.grid{display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:16px}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:12px;min-width:0;color:#e6edf6;text-align:left;cursor:pointer}
+.card:hover{border-color:#3b82f6}
+.card span{display:block}
+.card .ch{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+.card .nm{font-weight:700;font-size:15px}
+.card .loc{font-size:12px;color:#8b9bb4;margin-top:3px}
+.card .st{display:inline-flex;align-items:center;height:20px;padding:0 9px;border-radius:999px;font-size:11px;font-weight:700;background:rgba(34,197,94,.14);color:#86efac;white-space:nowrap}
+.card .cnt{display:flex;flex-wrap:wrap;align-items:flex-end;gap:6px 22px}
+.card .cnt b{display:block;font-size:18px;font-weight:800;line-height:1.1}
+.card .cnt .lbl{font-size:11.5px;color:#8b9bb4}
+.card .cnt .al b{color:#fbbf24}
+.card .cnt .al.c b{color:#f87171}
+.card .cnt .bk{border:1px solid rgba(34,197,94,.5);border-radius:6px;padding:4px 9px;background:rgba(34,197,94,.06)}
+.card .cnt .bk b{color:#4ade80}
+.card .bl{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#8b9bb4;margin-bottom:7px}
+.card .bl b{color:#e6edf6;font-weight:700}
+.card .tr{height:6px;border-radius:3px;background:rgba(148,163,184,.15);overflow:hidden}
+.card .tr i{display:block;height:100%;border-radius:3px;background:#22c55e}
+.card .tr i.a{background:#f59e0b}.card .tr i.r{background:#ef4444}
+.card .ft{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#8b9bb4;border-top:1px solid #1f2a40;padding-top:10px}
+.panel{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:18px 20px;display:flex;flex-direction:column;gap:10px}
+.panel h2{margin:0;font-size:16px;font-weight:800}
+.panel p{margin:0;font-size:13px;line-height:1.6;color:#c3cfe2}
+.panel .rows{display:flex;flex-direction:column;border-top:1px solid #1f2a40}
+.panel .r{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid #1f2a40;font-size:12.5px}
+.panel .r b{font-weight:700}
+.panel .r span{color:#c3cfe2}
+.back{align-self:flex-start;min-height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font-size:12.5px;font-weight:600;cursor:pointer}
+.empty{font-size:13px;color:#aebbd0;padding:18px 16px;border:1px solid #243049;border-radius:12px;background:#141b2d}
+</style>
+</helmet>
+
+<div class="app">
+  <nav class="side" aria-label="메뉴">
+    <div class="brand"><span class="logo">V</span>The Davinci<span class="ver">v3.18.13</span></div>
+    <sc-for list="{{ menu }}" as="m" hint-placeholder-count="11">
+      <button type="button" class="{{ m.cls }}" onClick="{{ m.go }}"><i></i><span>{{ m.label }}</span></button>
+    </sc-for>
+    <div class="tip"><b>눌러 보세요</b> — 왼쪽 메뉴 · 위 숫자 3장 · 바로가기 칩 · 찾기 칸 · 카드가 반응합니다. 값은 목(mock, 가상) 서버의 것입니다.</div>
+  </nav>
+
+  <main class="page">
+    <sc-if value="{{ isVm }}" hint-placeholder-val="{{ true }}">
+      <header class="head">
+        <h1>Virtual Machine</h1>
+        <span class="snap">값 = 목(mock, 가상) 서버</span>
+      </header>
+
+      <div class="tabs" role="tablist" aria-label="Virtual Machine 보기">
+        <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="3">
+          <button type="button" role="tab" class="{{ t.cls }}" aria-selected="{{ t.on }}" onClick="{{ t.go }}">
+            <span class="lb">{{ t.label }}<span class="sb">{{ t.sub }}</span><sc-if value="{{ t.hasBadge }}" hint-placeholder-val="{{ false }}"><span class="{{ t.badgeCls }}">{{ t.badge }}</span></sc-if></span>
+            <span class="val">{{ t.value }}</span>
+            <span class="parts">{{ t.parts }}</span>
+          </button>
+        </sc-for>
+      </div>
+
+      <div class="chips" aria-label="바로가기 — 법인 찾기와 고르기">
+        <span class="ql">바로가기</span>
+        <input class="find" type="search" aria-label="법인 찾기" placeholder="법인 찾기" value="{{ q }}" onChange="{{ onFind }}">
+        <sc-if value="{{ hasSel }}" hint-placeholder-val="{{ false }}">
+          <span class="picked">{{ selText }}<button type="button" onClick="{{ clearSel }}">✕ 전체 법인</button></span>
+        </sc-if>
+        <sc-for list="{{ chips }}" as="c" hint-placeholder-count="11">
+          <button type="button" class="{{ c.cls }}" aria-pressed="{{ c.on }}" onClick="{{ c.toggle }}"><i></i>{{ c.id }} <b>{{ c.n }}</b></button>
+        </sc-for>
+        <span class="lg">{{ legend }}</span>
+      </div>
+
+      <sc-if value="{{ showCards }}" hint-placeholder-val="{{ true }}">
+        <div class="grid">
+          <sc-for list="{{ cards }}" as="k" hint-placeholder-count="6">
+            <button type="button" class="card" onClick="{{ k.open }}">
+              <span class="ch"><span><span class="nm">{{ k.name }}</span><span class="loc">{{ k.loc }}</span></span><span class="st">Connected</span></span>
+              <span class="cnt"><span><b>{{ k.hosts }}</b><span class="lbl">호스트</span></span><span><b>{{ k.vms }}</b><span class="lbl">{{ k.onText }}</span></span><span class="{{ k.alCls }}"><b>{{ k.alarms }}</b><span class="lbl">알람</span></span><span class="bk"><b>{{ k.bk }}</b><span class="lbl">veeam/bareos</span></span></span>
+              <span><span class="bl"><span>CPU</span><b>{{ k.cpuText }}</b></span><span class="tr"><i class="{{ k.cpuCls }}" style="width: {{ k.cpuW }}"></i></span></span>
+              <span><span class="bl"><span>메모리</span><b>{{ k.memText }}</b></span><span class="tr"><i class="{{ k.memCls }}" style="width: {{ k.memW }}"></i></span></span>
+              <span><span class="bl"><span>스토리지</span><b>{{ k.stoText }}</b></span><span class="tr"><i class="{{ k.stoCls }}" style="width: {{ k.stoW }}"></i></span></span>
+              <span class="ft"><span>{{ k.ver }}</span><span>{{ k.idArrow }}</span></span>
+            </button>
+          </sc-for>
+        </div>
+        <sc-if value="{{ noCards }}" hint-placeholder-val="{{ false }}">
+          <div class="empty">{{ noCardsText }}</div>
+        </sc-if>
+      </sc-if>
+
+      <sc-if value="{{ showDetail }}" hint-placeholder-val="{{ false }}">
+        <section class="panel">
+          <button type="button" class="back" onClick="{{ back }}">← 법인 카드로</button>
+          <h2>{{ detailName }} — vCenter 상세(요약 탭)</h2>
+          <p>카드를 누르면 지금과 같이 그 vCenter 의 상세로 들어갑니다. 상세 화면(요약 · 모니터 · 구성 · 호스트 및 클러스터 · VM …)은 이 시안에서 바뀌지 않습니다.</p>
+        </section>
+      </sc-if>
+
+      <sc-if value="{{ showHosts }}" hint-placeholder-val="{{ false }}">
+        <section class="panel">
+          <h2>Hypervisor 탭 — ESXi 호스트 목록</h2>
+          <p>{{ scopeText }} 이 탭의 본문(호스트 표 · 확인할 것 칩)은 이 시안에서 바뀌지 않습니다 — 바로가기에서 고른 법인만 보이는 점이 달라집니다.</p>
+          <div class="rows">
+            <sc-for list="{{ scopeRows }}" as="r" hint-placeholder-count="3">
+              <div class="r"><b>{{ r.id }}</b><span>{{ r.hostsText }}</span></div>
+            </sc-for>
+          </div>
+        </section>
+      </sc-if>
+
+      <sc-if value="{{ showVms }}" hint-placeholder-val="{{ false }}">
+        <section class="panel">
+          <h2>Virtual Machine 탭 — VM 요약과 목록</h2>
+          <p>{{ scopeText }} 지금은 메뉴를 누르면 이 탭이 먼저 열립니다. 시안에서는 위 ‘Virtual Machine · VM’ 숫자를 눌러 들어옵니다. 본문(가상머신 요약 · 분포 · VM 표)은 바뀌지 않습니다.</p>
+          <div class="rows">
+            <sc-for list="{{ scopeRows }}" as="r" hint-placeholder-count="3">
+              <div class="r"><b>{{ r.id }}</b><span>{{ r.vmsText }}</span></div>
+            </sc-for>
+          </div>
+        </section>
+      </sc-if>
+    </sc-if>
+
+    <sc-if value="{{ isOther }}" hint-placeholder-val="{{ false }}">
+      <section class="panel">
+        <h2>{{ otherTitle }}</h2>
+        <sc-for list="{{ otherLines }}" as="l" hint-placeholder-count="2">
+          <p>{{ l.t }}</p>
+        </sc-for>
+      </section>
+    </sc-if>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1800}}'>
+class Component extends DCLogic {
+  state = { menu: 'vm', tab: 'vcenters', sel: {}, q: '', open: '' };
+
+  rows() {
+    return [
+      { id: 'vc-us-east', name: 'vcenter-us-east-01', loc: 'Ashburn, USA · 북미', hosts: 24, hConn: 22, hMaint: 1, hDown: 1, hAtt: 4, cl: 3, vms: 240, on: 201, off: 39, tpl: 15, vAtt: 50, crit: 1, warn: 5, bk: '152/0', cpu: 53, cpuT: '1079.3/2167.2 GHz', mem: 63, memT: '8.3/13.6 TB', sto: 64, stoT: '95.4/148 TB', ver: 'v8.0.2 · build 22617221' },
+      { id: 'vc-us-west', name: 'vcenter-us-west-01', loc: 'San Jose, USA · 북미', hosts: 18, hConn: 16, hMaint: 1, hDown: 1, hAtt: 4, cl: 2, vms: 144, on: 118, off: 26, tpl: 9, vAtt: 31, crit: 1, warn: 4, bk: '89/0', cpu: 63, cpuT: '972.5/1632 GHz', mem: 59, memT: '6.2/11.2 TB', sto: 68, stoT: '78.5/116 TB', ver: 'v8.0.2 · build 22617221' },
+      { id: 'vc-br-sao', name: 'vcenter-br-sao-01', loc: 'São Paulo, Brazil · 북미', hosts: 8, hConn: 7, hMaint: 1, hDown: 0, hAtt: 2, cl: 1, vms: 112, on: 99, off: 13, tpl: 7, vAtt: 24, crit: 0, warn: 2, bk: '70/0', cpu: 58, cpuT: '521.1/900.8 GHz', mem: 71, memT: '4.1/5.8 TB', sto: 55, stoT: '17.6/32 TB', ver: 'v8.0.3 · build 22617221' },
+      { id: 'vc-eu-central', name: 'vcenter-eu-central-01', loc: 'Frankfurt, Germany · 유럽', hosts: 30, hConn: 28, hMaint: 1, hDown: 1, hAtt: 5, cl: 4, vms: 480, on: 407, off: 73, tpl: 29, vAtt: 101, crit: 1, warn: 6, bk: '320/0', cpu: 56, cpuT: '1650.8/3058.4 GHz', mem: 66, memT: '10.6/16.6 TB', sto: 72, stoT: '140.8/196 TB', ver: 'v8.0.2 · build 22617221' },
+      { id: 'vc-eu-west', name: 'vcenter-eu-west-01', loc: 'Dublin, Ireland · 유럽', hosts: 16, hConn: 15, hMaint: 1, hDown: 0, hAtt: 3, cl: 2, vms: 256, on: 223, off: 33, tpl: 16, vAtt: 53, crit: 0, warn: 4, bk: '168/0', cpu: 61, cpuT: '828/1356.8 GHz', mem: 61, memT: '6.0/9.9 TB', sto: 72, stoT: '97.7/136 TB', ver: 'v8.0.2 · build 22617221' },
+      { id: 'vc-me-uae', name: 'vcenter-me-uae-01', loc: 'Dubai, UAE · 유럽', hosts: 6, hConn: 5, hMaint: 1, hDown: 0, hAtt: 2, cl: 1, vms: 60, on: 51, off: 9, tpl: 4, vAtt: 13, crit: 0, warn: 2, bk: '40/0', cpu: 50, cpuT: '206.4/412.8 GHz', mem: 75, memT: '3.5/4.6 TB', sto: 56, stoT: '13.4/24 TB', ver: 'v8.0.3 · build 22617221' },
+      { id: 'vc-ap-northeast', name: 'vcenter-ap-northeast-01', loc: 'Seoul, South Korea · 아시아', hosts: 22, hConn: 20, hMaint: 1, hDown: 1, hAtt: 4, cl: 3, vms: 220, on: 185, off: 35, tpl: 13, vAtt: 45, crit: 1, warn: 5, bk: '144/0', cpu: 55, cpuT: '1341.5/2497.6 GHz', mem: 60, memT: '6.4/11.4 TB', sto: 68, stoT: '76.3/112 TB', ver: 'v8.0.3 · build 22617221' },
+      { id: 'vc-ap-southeast', name: 'vcenter-ap-southeast-01', loc: 'Singapore, Singapore · 아시아', hosts: 14, hConn: 13, hMaint: 1, hDown: 0, hAtt: 2, cl: 2, vms: 126, on: 112, off: 14, tpl: 8, vAtt: 27, crit: 0, warn: 3, bk: '88/0', cpu: 58, cpuT: '625.4/1074.4 GHz', mem: 65, memT: '4.3/6.6 TB', sto: 89, stoT: '65.7/74 TB', ver: 'v8.0.3 · build 22617221' },
+      { id: 'vc-ap-south', name: 'vcenter-ap-south-01', loc: 'Mumbai, India · 아시아', hosts: 12, hConn: 11, hMaint: 1, hDown: 0, hAtt: 2, cl: 2, vms: 132, on: 118, off: 14, tpl: 8, vAtt: 28, crit: 0, warn: 2, bk: '88/0', cpu: 58, cpuT: '684.5/1176 GHz', mem: 68, memT: '5.8/8.6 TB', sto: 57, stoT: '22.7/40 TB', ver: 'v7.0.3 · build 22617221' },
+      { id: 'vc-cn-east', name: 'vcenter-cn-east-01', loc: 'Shanghai, China · 중국', hosts: 20, hConn: 18, hMaint: 1, hDown: 1, hAtt: 4, cl: 3, vms: 280, on: 231, off: 49, tpl: 17, vAtt: 60, crit: 1, warn: 5, bk: '181/0', cpu: 58, cpuT: '1137.5/2065.6 GHz', mem: 60, memT: '5.3/9.2 TB', sto: 75, stoT: '104.9/140 TB', ver: 'v8.0.2 · build 22617221' },
+      { id: 'vc-cn-north', name: 'vcenter-cn-north-01', loc: 'Beijing, China · 중국', hosts: 16, hConn: 15, hMaint: 1, hDown: 0, hAtt: 3, cl: 2, vms: 192, on: 173, off: 19, tpl: 12, vAtt: 40, crit: 0, warn: 4, bk: '129/0', cpu: 61, cpuT: '1184.8/1947.2 GHz', mem: 59, memT: '5.5/9.4 TB', sto: 61, stoT: '68.7/112 TB', ver: 'v7.0.3 · build 22617221' },
+    ];
+  }
+
+  menuDefs() {
+    return [
+      { k: 'overview', label: 'Overview', kind: 'mi', title: 'Overview', lines: ['이 시안에서 바뀌지 않는 화면입니다 — 지금과 같습니다.'] },
+      { k: 'summary', label: 'Summary', kind: 'mi', title: 'Summary', lines: ['이 시안에서 바뀌지 않는 화면입니다 — 지금과 같습니다.'] },
+      { k: 'svcinv', label: '서비스 인벤토리', kind: 'mi', title: '서비스 인벤토리', lines: ['이 시안에서 바뀌지 않는 화면입니다 — 지금과 같습니다.'] },
+      { k: 'grp', label: '서버', kind: 'mi grp' },
+      { k: 'vm', label: 'Virtual Machine', kind: 'sub' },
+      { k: 'bmfolders', label: 'Bare Metal Server', kind: 'sub', title: 'Bare Metal Server', lines: ['이 시안에서 바뀌지 않는 화면입니다 — 물리서버를 법인 › 폴더로 묶어 보는 화면 그대로입니다.'] },
+      { k: 'bm', label: 'Physical 서버', kind: 'sub', title: 'Physical 서버', lines: ['이름만 바뀝니다 — 지금 이름은 ‘Physical Server · Baremetal’ 입니다.', '여는 화면은 그대로입니다: Physical Server 도구에서 구분이 Baremetal(가상화하지 않은 물리 서버)인 것만 보는 화면.'] },
+      { k: 'bmusage', label: '베어메탈 사용률', kind: 'sub', title: '베어메탈 사용률', lines: ['이 시안에서 바뀌지 않는 화면입니다 — 지금과 같습니다.'] },
+      { k: 'fleet', label: '통합 서버 인벤토리', kind: 'sub', title: '통합 서버 인벤토리', lines: ['이 시안에서 바뀌지 않는 화면입니다 — 지금과 같습니다.'] },
+      { k: 'storage', label: '스토리지', kind: 'mi', title: '스토리지', lines: ['하위 메뉴가 있는 묶음입니다 — 이 시안의 범위 밖입니다.'] },
+      { k: 'network', label: '네트워크', kind: 'mi', title: '네트워크', lines: ['하위 메뉴가 있는 묶음입니다 — 이 시안의 범위 밖입니다.'] },
+    ];
+  }
+
+  renderVals() {
+    const st = this.state;
+    const rows = this.rows();
+    const defs = this.menuDefs();
+    const fmt = (n) => Number(n).toLocaleString('en-US');
+    const sum = (list, key) => list.reduce((a, r) => a + r[key], 0);
+
+    // 왼쪽 메뉴 — 누르면 화면이 바뀐다. ‘Virtual Machine’ 은 언제나 법인 카드 화면부터.
+    const menu = defs.map((d) => ({
+      label: d.label,
+      cls: d.kind + (d.k === st.menu ? ' on' : ''),
+      go: () => {
+        if (d.k === 'grp') return;
+        if (d.k === 'vm') this.setState({ menu: 'vm', tab: 'vcenters', open: '' });
+        else this.setState({ menu: d.k });
+      },
+    }));
+    const cur = defs.find((d) => d.k === st.menu) || defs[4];
+    const isVm = st.menu === 'vm';
+
+    // 바로가기 — 찾기(부분 일치 · 대소문자 무시 · 띄어 쓴 낱말 모두 포함)와 복수 선택
+    const kws = String(st.q || '').toLowerCase().split(/\s+/).filter(Boolean);
+    const match = (r) => { const hay = (r.id + ' ' + r.name + ' ' + r.loc + ' ' + r.ver).toLowerCase(); return kws.every((k) => hay.includes(k)); };
+    const picked = rows.filter((r) => st.sel[r.id]);
+    const hasSel = picked.length > 0;
+    const chipRows = rows.filter((r) => match(r) || st.sel[r.id]);
+    // 칩 숫자는 지금 코드(chipCount)와 같이 탭마다 다르다 — vCenter: 알람 · Hypervisor: 확인 대상 · VM: 조치 필요
+    const chipN = (r) => (st.tab === 'hosts' ? r.hAtt : st.tab === 'vms' ? r.vAtt : r.crit + r.warn);
+    const chipMean = st.tab === 'hosts' ? '확인 대상 호스트' : st.tab === 'vms' ? '조치 필요 VM' : '그 vCenter 의 알람';
+    const chips = chipRows.map((r) => ({
+      id: r.id, n: chipN(r), on: !!st.sel[r.id], cls: 'chip' + (st.sel[r.id] ? ' on' : ''),
+      toggle: () => { const sel = Object.assign({}, st.sel); if (sel[r.id]) delete sel[r.id]; else sel[r.id] = true; this.setState({ sel, open: '' }); },
+    }));
+    const matched = rows.filter(match);
+    const legend = kws.length
+      ? (matched.length ? '‘' + st.q + '’ 가 든 법인 ' + matched.length + '곳 · ' + rows.length + '곳 중' : '‘' + st.q + '’ 가 든 법인이 없습니다')
+      : '누를 때마다 켜지고 꺼집니다 · 여러 개를 고를 수 있습니다 · 숫자 = ' + chipMean;
+
+    // 범위 = 켠 법인(없으면 전체). 찾기는 범위를 바꾸지 않는다 — 위 숫자 3장은 범위의 합.
+    const scope = hasSel ? picked : rows;
+    const crit = sum(scope, 'crit'); const hAtt = sum(scope, 'hAtt'); const vAtt = sum(scope, 'vAtt');
+    const tabDefs = [
+      { k: 'vcenters', label: 'vCenter', sub: '· 법인', value: fmt(scope.length), badge: '', badgeCls: '',
+        parts: '연결 ' + fmt(scope.length) + ' · 불가 0 · REST 폴백 0 · 엣지 위임 0 · 알람 ' + fmt(crit + sum(scope, 'warn')) },
+      { k: 'hosts', label: 'Hypervisor', sub: '· ESXi 호스트', value: fmt(sum(scope, 'hosts')), badge: hAtt ? '확인 대상 ' + fmt(hAtt) : '', badgeCls: 'bd warn',
+        parts: '연결 ' + fmt(sum(scope, 'hConn')) + ' · 점검 ' + fmt(sum(scope, 'hMaint')) + ' · 끊김 ' + fmt(sum(scope, 'hDown')) + ' · 미수집 0 · 클러스터 ' + fmt(sum(scope, 'cl')) },
+      { k: 'vms', label: 'Virtual Machine', sub: '· VM', value: fmt(sum(scope, 'vms')), badge: vAtt ? '조치 필요 ' + fmt(vAtt) : '', badgeCls: 'bd crit',
+        parts: '구동 ' + fmt(sum(scope, 'on')) + ' · 정지 ' + fmt(sum(scope, 'off')) + ' · 사용률 미수집 0 · 템플릿 ' + fmt(sum(scope, 'tpl')) },
+    ];
+    const tabs = tabDefs.map((t) => ({
+      label: t.label, sub: t.sub, value: t.value, parts: t.parts, badge: t.badge, badgeCls: t.badgeCls, hasBadge: !!t.badge,
+      on: t.k === st.tab, cls: 'tab' + (t.k === st.tab ? ' on' : ''),
+      go: () => this.setState({ tab: t.k, open: '' }),
+    }));
+
+    // 카드 — 켠 법인이 있으면 그 법인들, 없으면 찾기에 맞는 법인(찾기가 비면 전부)
+    const tone = (p) => (p >= 90 ? 'r' : p >= 75 ? 'a' : '');
+    const cardRows = hasSel ? picked : matched;
+    const cards = cardRows.map((r) => ({
+      name: r.name, loc: r.loc, hosts: fmt(r.hosts), vms: fmt(r.vms), onText: 'VM (' + fmt(r.on) + ' on)', alarms: fmt(r.crit + r.warn), alCls: 'al' + (r.crit ? ' c' : ''), bk: r.bk,
+      cpuText: r.cpu + '% · ' + r.cpuT, cpuW: r.cpu + '%', cpuCls: tone(r.cpu),
+      memText: r.mem + '% · ' + r.memT, memW: r.mem + '%', memCls: tone(r.mem),
+      stoText: r.sto + '% · ' + r.stoT, stoW: r.sto + '%', stoCls: tone(r.sto),
+      ver: r.ver, idArrow: r.id + ' →',
+      open: () => this.setState({ open: r.id }),
+    }));
+    const opened = rows.find((r) => r.id === st.open);
+    const onCards = isVm && st.tab === 'vcenters';
+    const scopeText = hasSel ? '고른 법인 ' + picked.length + '곳만 보입니다.' : '전체 법인이 보입니다.';
+
+    return {
+      menu, isVm, isOther: !isVm,
+      otherTitle: cur.title || cur.label,
+      otherLines: (cur.lines || []).map((t) => ({ t })),
+      tabs, q: st.q, onFind: (e) => this.setState({ q: e.target.value }),
+      hasSel, selText: picked.length + '곳 선택', clearSel: () => this.setState({ sel: {} }),
+      chips, legend,
+      showCards: onCards && !opened, cards, noCards: cards.length === 0,
+      noCardsText: '‘' + st.q + '’ 와 일치하는 법인이 없습니다 — 찾기 칸을 지우면 전체가 다시 보입니다.',
+      showDetail: onCards && !!opened, detailName: opened ? opened.name : '', back: () => this.setState({ open: '' }),
+      showHosts: isVm && st.tab === 'hosts', showVms: isVm && st.tab === 'vms', scopeText,
+      scopeRows: scope.map((r) => ({ id: r.id, hostsText: '호스트 ' + fmt(r.hosts) + ' · 확인 대상 ' + fmt(r.hAtt), vmsText: 'VM ' + fmt(r.vms) + ' · 조치 필요 ' + fmt(r.vAtt) })),
+    };
+  }
+}
+</script>
+</body>
+</html>

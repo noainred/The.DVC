@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<title>메뉴 이름 — Virtual Machine(VM) 에서 Virtual Machine 으로</title>
+<title>메뉴 이름 — 두 곳이 바뀝니다</title>
 <script src="./support.js"></script>
 </head>
 <body>
@@ -12,7 +12,7 @@
 <style>
 body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.5}
 a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
-.wrap{width:760px;min-height:640px;box-sizing:border-box;padding:20px 24px;display:flex;flex-direction:column;gap:16px}
+.wrap{width:760px;min-height:720px;box-sizing:border-box;padding:20px 24px;display:flex;flex-direction:column;gap:16px}
 .cols{display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));gap:16px}
 .col{display:flex;flex-direction:column;gap:8px;min-width:0}
 .col h2{margin:0;font-size:13px;font-weight:700;color:#8b9bb4}
@@ -50,7 +50,7 @@ a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
         <a class="mi grp" href="#">서버<span class="n">5</span></a>
         <a class="sub on new" href="#" aria-current="page"><i></i>Virtual Machine</a>
         <a class="sub" href="#"><i></i>Bare Metal Server</a>
-        <a class="sub" href="#"><i></i>Physical Server · Baremetal</a>
+        <a class="sub new" href="#"><i></i>Physical 서버</a>
         <a class="sub" href="#"><i></i>베어메탈 사용률</a>
         <a class="sub" href="#"><i></i>통합 서버 인벤토리</a>
       </nav>
@@ -64,6 +64,7 @@ a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
         <li>vCenter 상세 · 개체 보기의 경로 첫 칸</li>
         <li>메뉴 편집 화면의 항목 이름</li>
         <li>기능 사용 현황의 항목 이름</li>
+        <li><b>Physical 서버</b> — 그 화면 안의 안내 글 두 줄도 같은 이름으로</li>
       </ul>
     </div>
     <div>
@@ -73,12 +74,13 @@ a{color:#93c5fd;text-decoration:none}a:hover{color:#bfdbfe}
         <li>권한 · 도구 키</li>
         <li>저장해 둔 사용자 메뉴의 구성(이름만 새로 보입니다)</li>
         <li>위 숫자 3장의 ‘Virtual Machine · VM’ 이름</li>
+        <li><b>Physical 서버</b> 가 여는 화면(구분 Baremetal 고정) · 자원관리의 ‘Physical Server’ 메뉴</li>
       </ul>
     </div>
   </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":760,"height":640}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":760,"height":720}}'>
 class Component extends DCLogic {
   renderVals() { return {}; }
 }
