@@ -1,6 +1,20 @@
 {
   "notes": [
     {
+      "version": "3.19.0",
+      "date": "2026-11-18",
+      "title": "서버 메뉴 — ‘Virtual Machine’ 이 vCenter 카드로 열림 · 바로가기 찾기 칸 · 메뉴 이름 정리",
+      "notes": [
+        "메뉴 이름을 바꿨습니다 — 서버 › ‘Virtual Machine(VM)’ → ‘Virtual Machine’ · 서버 › ‘Physical Server · Baremetal’ → ‘Physical Server’ · 자원관리 › ‘Physical Server’ → ‘Physical Server(전체)’. 주소와 권한은 그대로입니다.",
+        "‘Virtual Machine’ 메뉴를 누르면 법인 바로가기와 vCenter 카드가 먼저 열립니다(이전에는 VM 목록). VM 목록은 위 숫자 카드의 ‘Virtual Machine’ 을 누르면 열립니다.",
+        "위 숫자 카드 3장의 순서가 vCenter · Virtual Machine · Hypervisor 로 바뀌었습니다.",
+        "바로가기에 글자로 찾는 칸이 생겼습니다 — 일부만 넣어도 맞는 법인의 칩과 카드만 남습니다(대소문자 구분 없음 · 띄어 쓴 낱말은 모두 포함).",
+        "vCenter 화면의 카드 위에 있던 보기 전환 · vCenter 도구 6개 · 요약 3장 · ‘표 · 법인별 비교’ 보기와 제목 옆 안내 문구를 없앴습니다 — 도구는 특수 기능에서 그대로 열 수 있습니다.",
+        "호스트 화면 요약의 ‘할당 vCore’ 가 템플릿을 포함하고 못 읽은 값을 0 으로 더하던 결함을 고쳤습니다 — 법인별 보기와 같은 판정을 씁니다.",
+        "좁은 화면(휴대폰)에서 숫자 카드의 세부 줄이 두 번 나오던 것을 고쳤습니다."
+      ]
+    },
+    {
       "version": "3.18.14",
       "date": "2026-11-18",
       "title": "Monitoring 설정 연동 — 엣지 노드 점검 401 결함 · 자동 등록 저장 직후 감지 · 감시 범위 카드 갱신",
