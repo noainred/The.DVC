@@ -167,15 +167,14 @@ test('⑤ 소스 — 세 곳이 vmSums.js 하나를 쓰고, 사본 · 인라인 
     assert.ok(!/function vmSums\s*\(/.test(src), `${rel}: 합 사본(function vmSums)이 없다`);
     // '전부 못 읽음' 판정(unknown 수 === VM 수)은 vmSums.js 에만 있다
     assert.ok(!/(?:vcpuUnknown|memUnknown)\s*===/.test(src), `${rel}: '전부 못 읽음' 판정을 따로 하지 않는다`);
-    // 못 읽은 값을 0 으로 더하는 식(cpuCount || 0)이 없다. inventory.js 는 /hosts 핸들러만 본다 — 같은 파일의 /summary(OS 별 · vCenter 별 합,
-    //   템플릿 포함 · 공개 API 대조 계약)는 이 판정의 대상이 아니다(v3.19.1 에서 손대지 않았다 — docs/rules/vcenter.md 에 남은 것으로 적었다).
-    let scope = src;
+    // 못 읽은 값을 0 으로 더하는 식(cpuCount || 0)이 없다. v3.19.2: inventory.js 는 파일 전체를 본다 — 같은 파일의 /summary(OS 별 · vCenter 별 · 전체 합,
+    //   템플릿 포함)도 같은 코어를 쓰게 됐다(v3.19.1 에서는 '남긴 것' 이라 /hosts 핸들러만 봤다 — 회귀 summaryVmSums3192.test.js).
+    const scope = src;
     if (rel === 'routes/api/inventory.js') {
       const i = src.indexOf("api.get('/hosts', invHosts");
       assert.ok(i >= 0, '/hosts 핸들러를 찾는다');
       const j = src.indexOf('api.get(', i + 10);
-      scope = src.slice(i, j < 0 ? undefined : j);
-      assert.ok(scope.includes('vmAllocOf('), '/hosts 핸들러가 vmAllocOf 를 부른다');
+      assert.ok(src.slice(i, j < 0 ? undefined : j).includes('vmAllocOf('), '/hosts 핸들러가 vmAllocOf 를 부른다');
     }
     assert.ok(!/cpuCount\s*\|\|\s*0|memMB\s*\|\|\s*0/.test(scope), `${rel}: 못 읽은 값을 0 으로 더하지 않는다`);
   }

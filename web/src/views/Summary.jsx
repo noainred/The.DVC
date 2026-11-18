@@ -11,6 +11,8 @@ import { unitText } from './unitText.js';
 import { ratioOrNull, serverRatio, ratioLabel, ratioBadge, ratioKpi, numCell, RATIO_HI, capUnknownOf, capUnknownTitle } from './virtRatioText.js';
 // v2.632(감사 WEB2632-01·02): 기여도 표·설치 용량 판정은 corpContribution.js 하나가 한다(v2.747 에 version_6/v6Data.js 에서 옮겼다).
 import { corpContribution, contribNote, contribTotalLabel, dsUnknownMark, physStorageTB } from './corpContribution.js';
+// v3.19.2: VM 할당 합(vCPU · 메모리)의 못 읽은 VM 표기 — 서버가 0 으로 더하지 않고 vcpuUnknown · ramUnknown 으로 센다(합이 null 이면 '—').
+import { allocUnknownOf, allocCell, allocUnknownSub, minMark, ratioKpiSub, ratioBadgeTitle, osAllocTotals as osAllocTotalsOf } from './summaryAllocText.js';
 import Select from '../components/Select.jsx';
 
 const OS_COLORS = {
@@ -23,6 +25,11 @@ const labelStyle = { color: '#8b9bb4' };
 const fmt = (n) => (n ?? 0).toLocaleString('en-US');
 /** 값이 없으면 0 이 아니라 '—'(기여도 표 — 첫 수집 중·비활성 행은 모른다). */
 const fmtOr = (n, d = 0) => (n == null || !Number.isFinite(Number(n)) ? '—' : Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }));
+
+/** 할당 합 칸의 흐린 표지('미상 N') — 못 읽은 VM 이 없으면 아무것도 그리지 않는다. */
+function AllocMark({ cell }) {
+  return cell.mark ? <span className="muted" style={{ fontSize: 11 }} title={cell.title}> · {cell.mark}</span> : null;
+}
 
 function Big({ label, value, unit, sub, accent, onClick }) {
   return (
@@ -46,6 +53,9 @@ function RatioModal({ rows, kind = 'cpu', onClose }) {
   const ratioOf = isMem
     ? (vc) => (capUnknownOf(vc) > 0 ? null : ratioOrNull(vc.ramAllocatedGB, vc.memTotalGB))
     : (vc) => (capUnknownOf(vc) > 0 ? null : ratioOrNull(vc.vcpuAllocated, vc.cpuCores));
+  // v3.19.2: 분자(할당 합)가 부분 합이면 비율은 최소값('≥') — 못 읽은 VM 수는 서버 vcpuUnknown · ramUnknown.
+  const allocKind = isMem ? 'ram' : 'vcpu';
+  const allocKey = isMem ? 'ramAllocatedGB' : 'vcpuAllocated';
   const base = (rows || []).map((vc) => ({ ...vc, ratio: ratioOf(vc) }));
   const list = [...base].sort((a, b) => {
     const va = a[sort.key], vb = b[sort.key];
@@ -83,12 +93,13 @@ function RatioModal({ rows, kind = 'cpu', onClose }) {
               <tr key={vc.id}>
                 {COLS.map(([key, , align]) => {
                   if (key === 'name') return <td key={key}><b>{vc.name}</b></td>;
-                  if (key === 'ratio') return <td key={key} style={{ textAlign: 'right', fontWeight: 700, color: ratioColor(vc.ratio) }} className="tabular">{ratioLabel(vc.ratio)}</td>;
+                  if (key === 'ratio') return <td key={key} style={{ textAlign: 'right', fontWeight: 700, color: ratioColor(vc.ratio) }} className="tabular">{minMark(vc.ratio, allocUnknownOf(vc, allocKind))}{ratioLabel(vc.ratio)}</td>;
+                  if (key === allocKey) { const cell = allocCell(vc[key], allocUnknownOf(vc, allocKind), allocKind); return <td key={key} style={{ textAlign: align }} className="tabular">{cell.text}<AllocMark cell={cell} /></td>; }
                   // 10회차 보완: 미상 호스트가 있으면 물리 칸은 부분 합이다 — 값 옆 '*' + 툴팁(판정은 위 ratioOf 가 보류).
                   const partial = (key === 'cpuCores' || key === 'memTotalGB') ? capUnknownTitle(vc) : null;
                   return <td key={key} style={{ textAlign: align }} className="tabular" title={partial || undefined}>{numCell(vc[key])}{partial && <span className="muted" style={{ marginLeft: 2 }}>*</span>}</td>;
                 })}
-                {(() => { const b = ratioBadge(vc.ratio, kind); return <td><span className={`badge ${b.cls}`} title={vc.ratio == null ? (capUnknownTitle(vc) || '물리 자원(코어·RAM)을 아직 읽지 못해 판정하지 않았습니다(첫 수집 중 또는 연결 실패).') : undefined}>{b.text}</span></td>; })()}
+                {(() => { const b = ratioBadge(vc.ratio, kind); return <td><span className={`badge ${b.cls}`} title={vc.ratio == null ? ratioBadgeTitle(vc, allocKind, capUnknownTitle(vc), '물리 자원(코어·RAM)을 아직 읽지 못해 판정하지 않았습니다(첫 수집 중 또는 연결 실패).') : undefined}>{b.text}</span></td>; })()}
               </tr>
             ))}
           </tbody>
@@ -158,9 +169,11 @@ export default function Summary({ scope, onGotoTab }) {
   const stPhys = physStorageTB(st); // v2.632(AX1-2632-04·WEB2632-01): 설치 용량 전체(미상 DS 포함)
 
   const osAlloc = s.osAllocation || [];
-  const osAllocTotals = osAlloc.reduce((a, r) => {
-    a.vms += r.vms; a.vcpu += r.vcpu; a.ramGB += r.ramGB; a.diskGB += r.diskGB; return a;
-  }, { vms: 0, vcpu: 0, ramGB: 0, diskGB: 0 });
+  // v3.19.2: 합계 행은 읽은 행만 더한다(vcpu · ramGB 가 null 인 OS 는 0 이 아니다) — summaryAllocText.osAllocTotals.
+  const osAllocTotals = osAllocTotalsOf(osAlloc);
+  // v3.19.2: 전체 합계에서 vCPU · 메모리를 못 읽어 뺀 VM 수(서버 allocation.vcpuUnknown · ramUnknown).
+  const vcpuUnk = allocUnknownOf(al, 'vcpu');
+  const ramUnk = allocUnknownOf(al, 'ram');
   const corpName = corp ? (vcList || []).find((v) => v.id === corp)?.name || corp : '전체 법인';
 
   return (
@@ -202,14 +215,16 @@ export default function Summary({ scope, onGotoTab }) {
       <div className="kpis">
         {/* v2.771(점검 R6-F3-2): 용량을 못 읽은 호스트(REST 폴백)가 있으면 서버가 두 비율을 null 로 준다(분모만 빠진 비율은 틀린 값) —
             '—' 와 함께 그 이유(용량 미상 호스트 수)를 말한다. 물리 코어·RAM 합계는 읽은 호스트만의 합임을 밝힌다. */}
-        <Big label="할당된 vCPU 합계" value={fmt(al.vcpuAllocated)} sub={`물리 코어 ${fmt(comp.cpuCores)}개${capUnknown ? `(용량 읽은 호스트만 · 미상 ${fmt(capUnknown)}대 제외)` : ''}`} accent="var(--accent)" />
+        {/* v3.19.2: 못 읽은 VM 은 합에서 뺐다(0 으로 채우지 않음) — 하나도 못 읽었으면 '—', 일부면 뺀 VM 수를 말하고 비율에는 '≥'(최소값). */}
+        <Big label="할당된 vCPU 합계" value={fmtOr(al.vcpuAllocated)} sub={[`물리 코어 ${fmt(comp.cpuCores)}개${capUnknown ? `(용량 읽은 호스트만 · 미상 ${fmt(capUnknown)}대 제외)` : ''}`, allocUnknownSub(vcpuUnk, 'vcpu')].filter(Boolean).join(' · ')} accent="var(--accent)" />
         {(() => { const cr = serverRatio(al.vcpuPerCore, comp.cpuCores); const k = ratioKpi(cr, 'cpu'); return (
-          <Big label="vCPU : 물리코어 비율" value={ratioLabel(cr)} sub={cr == null && capUnknown ? capUnknownSub : k.sub} accent={k.accent} onClick={() => setShowRatio(true)} />
+          <Big label="vCPU : 물리코어 비율" value={`${minMark(cr, vcpuUnk)}${ratioLabel(cr)}`} sub={ratioKpiSub(cr, k, { allocated: al.vcpuAllocated, unknown: vcpuUnk, kind: 'vcpu', capSub: capUnknown ? capUnknownSub : null })} accent={k.accent} onClick={() => setShowRatio(true)} />
         ); })()}
-        <Big label="할당된 RAM 합계" value={fmt(al.ramAllocatedGB)} unit="GB" sub={al.ramOvercommitPct == null ? (capUnknown ? capUnknownSub : '물리 RAM 미수집') : comp.memTotalGB > 0 ? `물리 RAM의 ${al.ramOvercommitPct}%` : '물리 RAM 미수집'} accent="var(--purple)" />
+        <Big label="할당된 RAM 합계" value={fmtOr(al.ramAllocatedGB)} unit={al.ramAllocatedGB == null ? undefined : 'GB'}
+          sub={[al.ramOvercommitPct == null ? (capUnknown ? capUnknownSub : al.ramAllocatedGB == null ? '' : '물리 RAM 미수집') : comp.memTotalGB > 0 ? `물리 RAM의 ${minMark(al.ramOvercommitPct, ramUnk)}${al.ramOvercommitPct}%` : '물리 RAM 미수집', allocUnknownSub(ramUnk, 'ram')].filter(Boolean).join(' · ')} accent="var(--purple)" />
         {(() => { const mr = serverRatio(al.ramOvercommitPct, comp.memTotalGB, 100); const k = ratioKpi(mr, 'mem'); return (
-          <Big label="메모리 : 물리RAM 비율" value={ratioLabel(mr)}
-            sub={mr == null && capUnknown ? capUnknownSub : k.sub}
+          <Big label="메모리 : 물리RAM 비율" value={`${minMark(mr, ramUnk)}${ratioLabel(mr)}`}
+            sub={ratioKpiSub(mr, k, { allocated: al.ramAllocatedGB, unknown: ramUnk, kind: 'ram', capSub: capUnknown ? capUnknownSub : null })}
             accent={k.accent} onClick={() => setShowMemRatio(true)} />
         ); })()}
         {/* v2.727(C-01): 용량을 못 읽은 VM 은 합계에서 뺐다(0 으로 채우지 않음) — 그 수를 한 줄로 말한다. */}
@@ -246,8 +261,8 @@ export default function Summary({ scope, onGotoTab }) {
                   <tr key={o.name}>
                     <td><span className="dot" style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 9, marginRight: 6, background: OS_COLORS[o.name] || '#64748b' }} />{o.name}</td>
                     <td className="right tabular">{fmt(o.vms)}</td>
-                    <td className="right tabular">{fmt(o.vcpu)}</td>
-                    <td className="right tabular">{fmt(o.ramGB)}</td>
+                    {(() => { const cell = allocCell(o.vcpu, allocUnknownOf(o, 'vcpu'), 'vcpu'); return <td className="right tabular" data-sort={cell.sort}>{cell.text}<AllocMark cell={cell} /></td>; })()}
+                    {(() => { const cell = allocCell(o.ramGB, allocUnknownOf(o, 'ram'), 'ram'); return <td className="right tabular" data-sort={cell.sort}>{cell.text}<AllocMark cell={cell} /></td>; })()}
                     <td className="right tabular">{fmt(o.diskGB)}{o.storageUnknown ? <span className="muted" style={{ fontSize: 11 }} title="디스크 용량을 못 읽은 VM 은 이 값에서 뺐습니다(0 으로 채우지 않음)"> · 미상 {o.storageUnknown}</span> : null}</td>
                   </tr>
                 ))}
@@ -255,8 +270,8 @@ export default function Summary({ scope, onGotoTab }) {
                 <tr style={{ borderTop: '2px solid var(--accent)', fontWeight: 700 }}>
                   <td><b>합계</b></td>
                   <td className="right tabular">{fmt(osAllocTotals.vms)}</td>
-                  <td className="right tabular">{fmt(osAllocTotals.vcpu)}</td>
-                  <td className="right tabular">{fmt(osAllocTotals.ramGB)}</td>
+                  {(() => { const cell = allocCell(osAllocTotals.vcpu, osAllocTotals.vcpuUnknown, 'vcpu'); return <td className="right tabular">{cell.text}<AllocMark cell={cell} /></td>; })()}
+                  {(() => { const cell = allocCell(osAllocTotals.ramGB, osAllocTotals.ramUnknown, 'ram'); return <td className="right tabular">{cell.text}<AllocMark cell={cell} /></td>; })()}
                   <td className="right tabular">{fmt(osAllocTotals.diskGB)}</td>
                 </tr>
               </tbody>
@@ -305,9 +320,9 @@ export default function Summary({ scope, onGotoTab }) {
           <b>물리 용량 vs 할당 (오버커밋 시각화)</b>
           <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 18 }}>
             <OverBar title="CPU" physical={comp.cpuCores} physicalLabel={`${fmt(comp.cpuCores)} cores`}
-              allocated={al.vcpuAllocated} allocatedLabel={`${fmt(al.vcpuAllocated)} vCPU`} />
+              allocated={al.vcpuAllocated} allocatedLabel={al.vcpuAllocated == null ? '—' : `${minMark(al.vcpuAllocated, vcpuUnk)}${fmt(al.vcpuAllocated)} vCPU`} min={vcpuUnk > 0} />
             <OverBar title="메모리" physical={comp.memTotalGB} physicalLabel={`${fmt(comp.memTotalGB)} GB`}
-              allocated={al.ramAllocatedGB} allocatedLabel={`${fmt(al.ramAllocatedGB)} GB`} />
+              allocated={al.ramAllocatedGB} allocatedLabel={al.ramAllocatedGB == null ? '—' : `${minMark(al.ramAllocatedGB, ramUnk)}${fmt(al.ramAllocatedGB)} GB`} min={ramUnk > 0} />
             <OverBar title="스토리지" physical={stPhys} physicalLabel={unitText(stPhys, ' TB')}
               allocated={al.provisionedStorageTB} allocatedLabel={`${al.provisionedStorageTB} TB`} />
           </div>
@@ -328,9 +343,9 @@ export default function Summary({ scope, onGotoTab }) {
                 <td className="right tabular" data-sort={r.hosts ?? ''}>{fmtOr(r.hosts)}</td>
                 <td className="right tabular" data-sort={r.vms ?? ''}>{fmtOr(r.vms)}</td>
                 <td className="right tabular" data-sort={r.cpuCores ?? ''}>{fmtOr(r.cpuCores)}</td>
-                <td className="right tabular" data-sort={r.vcpuAllocated ?? ''}>{fmtOr(r.vcpuAllocated)}</td>
+                {(() => { const cell = allocCell(r.vcpuAllocated, allocUnknownOf(r, 'vcpu'), 'vcpu'); return <td className="right tabular" data-sort={cell.sort}>{cell.text}<AllocMark cell={cell} /></td>; })()}
                 <td className="right tabular" data-sort={r.memTotalGB ?? ''}>{fmtOr(r.memTotalGB)}</td>
-                <td className="right tabular" data-sort={r.ramAllocatedGB ?? ''}>{fmtOr(r.ramAllocatedGB)}</td>
+                {(() => { const cell = allocCell(r.ramAllocatedGB, allocUnknownOf(r, 'ram'), 'ram'); return <td className="right tabular" data-sort={cell.sort}>{cell.text}<AllocMark cell={cell} /></td>; })()}
                 <td className="right tabular" data-sort={r.storageTotalTB ?? ''}>{fmtOr(r.storageTotalTB, 1)}{dsUnknownMark(r) && <span className="muted" style={{ fontSize: 11 }} title="사용량을 못 읽은 데이터스토어는 이 값에서 뺐습니다"> · {dsUnknownMark(r)}</span>}</td>
                 <td className="right tabular" data-sort={r.provisionedTB ?? ''}>{fmtOr(r.provisionedTB, 1)}{r.vmStorageUnknown > 0 && <span className="muted" style={{ fontSize: 11 }} title="디스크 용량을 못 읽은 VM 은 이 값에서 뺐습니다(0 으로 채우지 않음)"> · 미상 {r.vmStorageUnknown}</span>}</td>
               </tr>
@@ -340,9 +355,9 @@ export default function Summary({ scope, onGotoTab }) {
               <td className="right tabular">{fmtOr(totals.hosts)}</td>
               <td className="right tabular">{fmtOr(totals.vms)}</td>
               <td className="right tabular">{fmtOr(totals.cpuCores)}</td>
-              <td className="right tabular">{fmtOr(totals.vcpuAllocated)}</td>
+              {(() => { const cell = allocCell(totals.vcpuAllocated, contrib.vcpuUnknown, 'vcpu'); return <td className="right tabular">{cell.text}<AllocMark cell={cell} /></td>; })()}
               <td className="right tabular">{fmtOr(totals.memTotalGB)}</td>
-              <td className="right tabular">{fmtOr(totals.ramAllocatedGB)}</td>
+              {(() => { const cell = allocCell(totals.ramAllocatedGB, contrib.ramUnknown, 'ram'); return <td className="right tabular">{cell.text}<AllocMark cell={cell} /></td>; })()}
               <td className="right tabular">{fmtOr(totals.storageTotalTB, 1)}</td>
               <td className="right tabular">{fmtOr(totals.provisionedTB, 1)}</td>
             </tr>
@@ -367,17 +382,18 @@ export default function Summary({ scope, onGotoTab }) {
   );
 }
 
-function OverBar({ title, physical, physicalLabel, allocated, allocatedLabel }) {
+function OverBar({ title, physical, physicalLabel, allocated, allocatedLabel, min = false }) {
   // v2.632(AX1-2632-04): 물리 용량을 모르면(0·null) 비율은 0% 가 아니라 '—' 다.
+  // v3.19.2: 할당 합을 못 읽었으면(null) 역시 '—'(0% 가 아니다). min: 할당이 부분 합(못 읽은 VM 제외)이면 '≥'.
   const phys = Number(physical) > 0 ? Number(physical) : 0;
   const max = Math.max(phys, Number(allocated) || 0, 1);
-  const ratio = phys > 0 ? (Number(allocated) || 0) / phys : null;
+  const ratio = phys > 0 && allocated != null ? (Number(allocated) || 0) / phys : null;
   return (
     <div>
       <div className="flex between" style={{ fontSize: 12, marginBottom: 6 }}>
         <b>{title}</b>
         <span className="tabular" style={{ color: ratio > 1 ? 'var(--amber)' : 'var(--text-dim)' }}>
-          할당/물리 {ratio == null ? '—' : `${Math.round(ratio * 100)}%`}
+          할당/물리 {ratio == null ? '—' : `${min ? '≥ ' : ''}${Math.round(ratio * 100)}%`}
         </span>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>

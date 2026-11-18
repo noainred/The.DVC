@@ -443,8 +443,19 @@
     전부 못 읽음 '—'(단위 없음) · 일부만 못 읽음 `≥` + 못 읽은 VM 수(요약 타일과 같은 표기). 요약 칸 'vCore : 물리' 는 vCPU 를 전부 못 읽은 법인을 분자 · 분모 **둘 다**에서 뺀다(0 으로 더하면 코어만 늘어 낮게 나온다) —
     보조 문구는 **뺀 것을 앞에**(칸이 좁아 뒤는 말줄임된다 — Chromium 판독 1440 · 400).
     코어는 `hostChecks.js` · `hostExport.js` 어느 쪽에도 두지 않는다(`hostChecks.js` 가 `hostExport.js` 를 import — 순환). 회귀 `server/test/vmSumsCore3191.test.js`(같은 입력으로 세 출력 대조 · 소스 스윕) · `hostCorpText.test.js`.
-    남긴 것(같은 꼴 · 범위 밖): ① 호스트 표 'VM' 묶음(`/hosts/checks` 의 `c.vm`)은 원래 합을 그대로 실어 전부 못 읽은 호스트가 `0+?` 로 보인다(`Hosts.jsx`) ② `/summary` 의 OS 별 · vCenter 별 합은
-    아직 `v.cpuCount || 0`(템플릿 포함 · 공개 API 대조 계약) ③ 일부만 못 읽었을 때 엑셀 호스트 행은 비율 칸을 비우고(`cpuRatio` null) 화면 · 요약은 `≥` 최소값을 적는다(표기 방식만 다르고 합 · unknown 수는 같다).
+    남긴 것(같은 꼴 · 범위 밖): ① 호스트 표 'VM' 묶음(`/hosts/checks` 의 `c.vm`)은 원래 합을 그대로 실어 전부 못 읽은 호스트가 `0+?` 로 보인다(`Hosts.jsx`) ② ~~`/summary` 의 OS 별 · vCenter 별 합은 아직 `v.cpuCount || 0`~~ → **v3.19.2 에서 고쳤다**(바로 아래 항목 — '공개 API 대조 계약' 이라는 이유도 정정) ③ 일부만 못 읽었을 때 엑셀 호스트 행은 비율 칸을 비우고(`cpuRatio` null) 화면 · 요약은 `≥` 최소값을 적는다(표기 방식만 다르고 합 · unknown 수는 같다).
+  · **v3.19.2 — `/summary`(전체 통합 합계 화면)의 VM 할당 합도 같은 코어**(v3.19.1 '남긴 것 ②' 해소 · 회귀 `server/test/summaryVmSums3192.test.js` · `web/src/views/summaryAllocText.test.js`).
+    ⓐ 조사로 드러난 것 — 같은 꼴은 두 곳이 아니라 **세 곳 + 공개 API** 였다: OS 별(`osAllocation[].vcpu · ramGB`) · vCenter 별(`byVcenter[].vcpuAllocated · ramAllocatedGB`) ·
+    **전체 합**(`allocation.vcpuAllocated · ramAllocatedGB` — `sum(vms, (v) => v.cpuCount)` 도 null · '' 를 0 으로 더한다) · 공개 API `/inventory/summary` 의 `vmVcpu · vmRamMB`.
+    **정정**: v3.19.1 이 적은 '공개 API 대조 계약' 은 OS 별 · vCenter 별 합에는 걸리지 않는다 — 공개 API 는 그 분해를 싣지 않는다(`publicapi/allowlist.js`). 계약이 걸리는 것은 전체 합(`vmVcpu` ↔ `allocation.vcpuAllocated`)뿐이다.
+    ⓑ 규칙(사용자 선택 2026-11-18): 합은 읽은 VM 만 + 못 읽은 VM 수(`vcpuUnknown` · `ramUnknown` — allocation · OS 행 · vCenter 행 같은 이름) · VM 이 있는데 하나도 못 읽었으면 합 · 비율이 **null**(`vmAllocOf`).
+    이 합은 **템플릿 포함**이라 `vmSumsOf(vms, { includeTemplates: true })` · 묶음별 누적은 `newVmSum` + `vmSumAdd`(한 대 — 템플릿 여부는 부르는 쪽이). '읽기 판정' 을 라우트에 다시 쓰지 말 것.
+    ⓒ 공개 API 는 **필드 추가만**(`vmVcpuUnknown` · `vmRamUnknown`) — `vmVcpu` · `vmRamMB` 는 값 · 타입(수) 그대로다. 그래서 '전부 못 읽음' 일 때 내부는 null, 공개는 `0` + `unknown === vms` 로 표기가 갈린다(의도 — 외부 소비자의 타입 계약 · `docs/API-PUBLIC.md` 에 적었다).
+    ⓓ 화면 글자는 `web/src/views/summaryAllocText.js` 하나 — 칸은 `allocCell`(null → '—' · 일부 → 값 + '미상 N' — 같은 표의 디스크 · 스토리지 열과 같은 표기) · 비율은 `minMark`('≥ ' — 비율이 없으면 붙이지 않는다) + 기존 `ratioLabel` ·
+    비율이 없는 이유는 `ratioKpiSub` · `ratioBadgeTitle`(용량 미상 호스트 → 할당을 하나도 못 읽음 → 물리 미수집 순 — '물리 자원 미수집' 으로 단정하지 않는다) · OS 표 합계 행 `osAllocTotals` · 기여도 표 안내는 `corpContribution` 의 `vcpuUnknown` · `ramUnknown`.
+    `Summary.jsx` 의 `fmt()` 는 null 을 0 으로 찍는다(`(n ?? 0)`) — 못 읽을 수 있는 값에 쓰지 말 것(`fmtOr` · `allocCell`). 오버커밋 막대(`OverBar`)도 할당이 null 이면 '—'.
+    ⓔ 남긴 것(같은 꼴 · 범위 밖 — 영향은 확인하지 않았다): `alerts.js`(클러스터 vCPU · RAM 합 `v.cpuCount || 0`) · `routes/api/toolsCapacity.js`(`vcpuAll` · `vcpuOn` · `ramOnGB`) · `inventory/vmTotals.js` · `inventory/vmByVcenter.js`(`Number.isFinite(…) ? … : 0`) ·
+    `routes/api/toolsInfo.js`(`cpu` · `memGB`) · `routes/api/toolsAnalytics.js`(`vcpu`). 그리고 v3.19.1 의 ① ③ 은 그대로다.
   · 표는 `STable`(법인 열 sticky · `data-sort` 로 null 뒤로). 패널은 콘텐츠가 넓을 때(창 1600px 이상)만 표 옆, 그보다 좁으면 표 아래로 내려가고 행을 고르면 그 패널로 스크롤한다.
     펼친 클러스터의 호스트 표는 `limit` 8 + '호스트 N대 모두 보기 — 호스트별 보기로'(그 클러스터 focus 로 내려간다).
 - ⚠⚠ **v2.708 — 드롭다운은 공용 `Select`·`DataList` 하나다(자동 정렬)**(`web/src/components/`{Select.jsx,DataList.jsx,selectSort.js}, 사용자 요청 "모든 드랍박스 메뉴를 소팅되서 보이게 하고 앞으로 만들면 소팅"):
