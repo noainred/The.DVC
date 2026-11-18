@@ -437,6 +437,14 @@
   · RTT 는 핑 모니터가 저장한 vCenter 대상의 마지막 값이다(요청마다 실시간 측정 금지 — `/tools/network-check` 는 최대 5초 프로브). 30분보다 오래된 값은 흐리게.
   · 호스트를 모르는 법인(첫 수집 중·비활성·이월 값 없는 연결 실패)은 개수를 null('—')로 둔다 — 표지는 `corpSiteStatus` 그대로. 요약 합에서는 빼고 '미수집 N곳 제외' 를 밝힌다.
   · 과할당 비율은 용량(코어·메모리)을 하나라도 못 읽은 법인·클러스터에서 null — 분자만 남은 비율 금지(`toolsCapacity` 와 같은 규칙). vCPU 합은 템플릿 제외(`vmSumsOf`).
+  · **v3.19.1 — VM 할당 합(vCPU · 메모리)의 판정 코어는 `server/src/vcenter/vmSums.js` 하나**(`vmSumsOf` 합 + unknown 수 · `vmAllocOf` '전부 못 읽음 → null'). `/hosts` 요약(`routes/api/inventory.js`) ·
+    법인별(`hostCorp.js vmCols`) · 호스트 엑셀(`hostExport.js` — 사본 `vmSums` 삭제) 세 곳이 그 둘만 부른다. v3.19.0 까지 법인별은 VM 을 **전부** 못 읽어도 vCPU 0 · `0.0 : 1` · RAM `0%` 로 냈다
+    (요약은 '—'). 이제 `vcpu` · `vmMemGB` · `vcpuPerCore` · `ramPct` 가 null 이고, 법인 · 클러스터 행에 `vmMemUnknown`(메모리를 못 읽은 VM 수)을 싣는다. 화면 글자는 `hostCorpText.vcoreCell` · `ramCell` —
+    전부 못 읽음 '—'(단위 없음) · 일부만 못 읽음 `≥` + 못 읽은 VM 수(요약 타일과 같은 표기). 요약 칸 'vCore : 물리' 는 vCPU 를 전부 못 읽은 법인을 분자 · 분모 **둘 다**에서 뺀다(0 으로 더하면 코어만 늘어 낮게 나온다) —
+    보조 문구는 **뺀 것을 앞에**(칸이 좁아 뒤는 말줄임된다 — Chromium 판독 1440 · 400).
+    코어는 `hostChecks.js` · `hostExport.js` 어느 쪽에도 두지 않는다(`hostChecks.js` 가 `hostExport.js` 를 import — 순환). 회귀 `server/test/vmSumsCore3191.test.js`(같은 입력으로 세 출력 대조 · 소스 스윕) · `hostCorpText.test.js`.
+    남긴 것(같은 꼴 · 범위 밖): ① 호스트 표 'VM' 묶음(`/hosts/checks` 의 `c.vm`)은 원래 합을 그대로 실어 전부 못 읽은 호스트가 `0+?` 로 보인다(`Hosts.jsx`) ② `/summary` 의 OS 별 · vCenter 별 합은
+    아직 `v.cpuCount || 0`(템플릿 포함 · 공개 API 대조 계약) ③ 일부만 못 읽었을 때 엑셀 호스트 행은 비율 칸을 비우고(`cpuRatio` null) 화면 · 요약은 `≥` 최소값을 적는다(표기 방식만 다르고 합 · unknown 수는 같다).
   · 표는 `STable`(법인 열 sticky · `data-sort` 로 null 뒤로). 패널은 콘텐츠가 넓을 때(창 1600px 이상)만 표 옆, 그보다 좁으면 표 아래로 내려가고 행을 고르면 그 패널로 스크롤한다.
     펼친 클러스터의 호스트 표는 `limit` 8 + '호스트 N대 모두 보기 — 호스트별 보기로'(그 클러스터 focus 로 내려간다).
 - ⚠⚠ **v2.708 — 드롭다운은 공용 `Select`·`DataList` 하나다(자동 정렬)**(`web/src/components/`{Select.jsx,DataList.jsx,selectSort.js}, 사용자 요청 "모든 드랍박스 메뉴를 소팅되서 보이게 하고 앞으로 만들면 소팅"):
