@@ -15,6 +15,7 @@ import { vcHash } from '../vcd/vcdRoute.js';
 import { pickRows, toolIdsOf, fmtN, fmtU, gbText, shareText, barPct } from '../insight/insightCore.js';
 import { treemapLayout, maxTilesInCol, fillStep, tileColors, scaleLegend, RAMP, CRIT_BG, NONE_BG } from '../insight/treemap.js';
 import { mapHeightOf, autoMapHeight } from '../insight/insightPrefs.js';
+import { maxTilesPacked, worstMember } from '../insight/tilePack.js'; // v3.23.0 지도 칸 글자(설계 docs/design/insight-tiles)
 import { useFolded, useLazyJson } from '../insight/useInsight.js';
 import Treemap from '../insight/Treemap.jsx';
 import { useMapPrefs, MapSizeSeg, MapSizeBox } from '../insight/MapSize.jsx';
@@ -51,6 +52,7 @@ export default function VmInsight({ mode = 'insight', filters = {}, scopeIds = n
   const [folded, toggleFold] = useFolded(VM_FOLD_PREF_KEY, VM_FOLD_KEYS);
   const [mapPrefs, setMapPrefs] = useMapPrefs(VM_MAP_PREF_KEY);
   const [cfgOpen, setCfgOpen] = useState(false);
+  const [mapW, setMapW] = useState(null);   // v3.23.0: 지도가 잰 폭(px) — 자동 높이를 여러 열 기준으로
   const [fillKey, setFillKey] = useState('att');
   const [sizeKey, setSizeKey] = useState('n');
   const rows = useMemo(() => (Array.isArray(data?.rows) ? data.rows : []), [data]);
@@ -112,7 +114,7 @@ export default function VmInsight({ mode = 'insight', filters = {}, scopeIds = n
   const fill = fills.find((f) => f.key === fillKey) || fills[0];
   const size = SIZE_DEFS.find((z) => z.key === sizeKey) || SIZE_DEFS[0];
   const layout = treemapLayout(mapGroups(picked.all, size));
-  const maxTiles = maxTilesInCol(layout);
+  const maxTiles = mapW ? maxTilesPacked(layout, mapW) : maxTilesInCol(layout);
   const mapH = mapHeightOf(mapPrefs, maxTiles);
   const selSet = ids.length ? new Set(ids) : null;
   const pct0 = (v) => (v == null ? '—' : `${Math.round(v)}%`);
@@ -124,6 +126,15 @@ export default function VmInsight({ mode = 'insight', filters = {}, scopeIds = n
     return {
       title: corpName(r), line: `${size.text(t.size)} · ${fill.short} ${pct0(fv)}`, bg: col.bg, ink: col.ink, stale: r.stale === true,
       tip: `${corpName(r)}${r.city ? ` · ${r.city}` : ''}${r.stale ? ' · 값이 오래됨(합에 넣지 않음)' : ''} — VM ${fmtN(r.total)}(구동 ${fmtN(r.on)}) · 조치 필요 ${fmtN(r.attention)} · 평균 CPU ${pct0(numOrNull(r.cpuAvg?.value))} · 메모리 ${pct0(numOrNull(r.memAvg?.value))}${onScopeIds ? ' — 누르면 이 법인을 바로가기 선택에 켜고 끕니다' : ''}`,
+    };
+  };
+  // v3.23.0: ‘그 밖 N개’ 칸 — 색은 구성원 중 가장 높은 값(나쁜 것이 묶음에 가려지지 않게) · 누르면 아래에 목록
+  const groupView = (members, g) => {
+    const { member, value } = worstMember(members, (m) => fill.val(m.row));
+    const col = tileColors(fillStep(value, fill));
+    return {
+      title: g.label, line: `가장 높은 ${fill.short} ${pct0(value)} · 합 ${size.text(g.size)}`, bg: col.bg, ink: col.ink,
+      tip: `${g.label} — 칸이 너무 작아 한 칸으로 묶은 법인(${members.map((m) => corpName(m.row)).join(' · ')}) · 색은 가장 높은 값(${member ? corpName(member.row) : '—'}) · 누르면 아래에 목록이 열립니다`,
     };
   };
   const scale = [...scaleLegend(fill.steps, { crit: fill.crit }).map((text, i) => ({ text, bg: RAMP[i] })),
@@ -182,7 +193,7 @@ export default function VmInsight({ mode = 'insight', filters = {}, scopeIds = n
       {cfgOpen && <MapSizeBox prefs={mapPrefs} onPrefs={setMapPrefs} maxTiles={maxTiles} onClose={() => setCfgOpen(false)} narrow={narrow}
         autoNote={`자동 = 가장 긴 지역의 칸 수로 정합니다(지금 ${autoMapHeight(maxTiles)}px)`} />}
       {layout.cols.length
-        ? <Treemap layout={layout} heightPx={mapH} tileView={tileView} selected={selSet} onToggle={onScopeIds ? toggleId : null} label="VM 현황 — 법인 칸"
+        ? <Treemap layout={layout} heightPx={mapH} tileView={tileView} groupView={groupView} onWidth={setMapW} selected={selSet} onToggle={onScopeIds ? toggleId : null} label="VM 현황 — 법인 칸"
           colText={(c) => `${c.label} · ${size.text(c.total)}`} />
         : <div className="ins-note">그릴 법인 칸이 없습니다 — 범위 안 법인의 크기 값이 없거나 0 입니다.</div>}
       <div className="ins-scale">

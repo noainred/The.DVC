@@ -94,6 +94,26 @@ a.ins-td:hover { border-color: var(--accent); }
 .ins-tl.dim { opacity: 0.35; }
 .ins-tl.stale { background-image: repeating-linear-gradient(135deg, rgba(0, 0, 0, 0.18) 0 6px, transparent 6px 12px); }
 .ins-tl:focus-visible { outline: 2px solid #fbbf24; outline-offset: -3px; }
+/* v3.23.0 글자 단계(tilePack tier — 칸 px 크기로 고른다 · 12px 아래로 내려가지 않는다) · 그 밖 N개 묶음 칸 */
+.ins-tl.t-xl b { font-size: 16px; } .ins-tl.t-xl span { font-size: 13px; }
+.ins-tl.t-l b { font-size: 13.5px; } .ins-tl.t-l span { font-size: 12px; }
+.ins-tl.t-m span, .ins-tl.t-one span { font-size: 12px; }
+/* 한 줄 칸: 이름이 먼저다 — 값 글이 남은 폭만 쓰고(말줄임 · 모자라면 사라짐) 이름을 밀어내지 않는다(v3.23.0 Chromium 판독 — 이름이 ‘Frankf…’ 로 잘렸다) */
+.ins-tl.t-one b { flex: 0 0 auto; max-width: 100%; }
+.ins-tl.t-one span { flex: 1 1 0; min-width: 0; }
+.ins-tl.t-one .ins-mk { margin-left: auto; }
+.ins-tl.t-none { padding: 2px; align-items: center; justify-content: center; }
+.ins-tl.t-none b, .ins-tl.t-none span { display: none; }
+.ins-tl.t-none .ins-mk { align-self: center; font-size: 9.5px; padding: 0 3px; }
+.ins-tl.grp { border: 1px dashed rgba(255, 255, 255, 0.75); background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0 8px, transparent 8px 16px); }
+.ins-grp { display: flex; flex-direction: column; gap: 8px; background: var(--bg-soft); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; min-width: 0; }
+.ins-grph { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; min-width: 0; }
+.ins-grph b { font-size: 13.5px; font-weight: 800; color: var(--text); }
+.ins-grph .hint { font-size: 12px; color: var(--text-dim); min-width: 0; }
+.ins-grph .ins-btn { margin-left: auto; }
+.ins-grpn { display: inline-flex; align-items: center; gap: 7px; border: 0; background: transparent; color: var(--text); font: inherit; font-weight: 700; padding: 0; cursor: pointer; text-align: left; }
+.ins-grpn i { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+.ins-grpn.on { color: #fde68a; }
 /* v3.22.0 칸 안의 작은 표(Hypervisor ‘못 버팀’ — 색이 아니라 표로 · S6). 칸이 낮으면(한 줄) 옆에 붙는다. 범례의 같은 표는 .ins-mk 를 그대로 쓴다. */
 .ins-mk { align-self: flex-start; font-style: normal; font-size: 10.5px; font-weight: 800; line-height: 1.3; padding: 0 6px; border-radius: 999px; background: #0b0b0b; color: #fca5a5; border: 1px solid #ef4444; white-space: nowrap; flex: none; }
 .ins-tl.one .ins-mk { align-self: center; }
