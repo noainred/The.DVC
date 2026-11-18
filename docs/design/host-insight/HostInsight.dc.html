@@ -181,7 +181,7 @@ sc-for,sc-if{display:contents}
     <span class="snap">값 = 목(mock, 가상) 서버 · 스냅샷 오후 12:34:03</span>
   </header>
 
-  <div class="mklegend"><span class="mk">반영 표시</span><span>노란 표와 노란 점선 = 이번에 반영한 곳입니다(실제 화면에는 없는 표시) — <b>S1</b> 확인할 것을 맨 위로 · 분포 접기 / <b>S2</b> 호스트 몇 대분 환산(통합 비율의 메모리 여유) / <b>S6</b> 경계를 넘은 칸만 경고색(가상화 호스트 현황)</span><span><span class="mk">이름 변경</span> ‘클러스터 지도’ → ‘가상화 호스트 현황’ · <span class="mk">새 기능</span> 지도 크기 지정(조절 줄의 맨 끝 · 그 아래 설정 상자) · 지도를 크게(처음 520px)</span></div>
+  <div class="mklegend"><span class="mk">반영 표시</span><span>노란 표와 노란 점선 = 이번에 반영한 곳입니다(실제 화면에는 없는 표시) — <b>S1</b> 확인할 것을 맨 위로 · 분포 접기 / <b>S2</b> 호스트 몇 대분 환산(통합 비율의 메모리 여유) / <b>S6</b> 경계를 넘은 칸만 경고색(가상화 호스트 현황)</span><span><span class="mk">이름 변경</span> ‘클러스터 지도’ → ‘가상화 호스트 현황’ · <span class="mk">새 기능</span> 지도 크기 지정(조절 줄의 맨 끝 — ‘설정’ 단추를 누를 때만 설정 상자가 열립니다) · 지도를 크게(처음 520px)</span></div>
 
   <div class="tabs" aria-label="보기">
     <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="3">
@@ -242,9 +242,9 @@ sc-for,sc-if{display:contents}
           <span class="seg" role="group" aria-label="크기 기준"><sc-for list="{{ sizes }}" as="z" hint-placeholder-count="3"><button type="button" class="{{ z.cls }}" aria-pressed="{{ z.on }}" onClick="{{ z.pick }}">{{ z.label }}</button></sc-for></span>
           <span>지도 크기</span>
           <span class="seg chg" role="group" aria-label="지도 크기"><sc-for list="{{ mapSizes }}" as="m" hint-placeholder-count="4"><button type="button" class="{{ m.cls }}" aria-pressed="{{ m.on }}" onClick="{{ m.pick }}">{{ m.label }}</button></sc-for></span>
-          <button type="button" class="{{ cfgCls }}" aria-expanded="{{ cfgOpen }}" onClick="{{ toggleCfg }}">직접 지정 · {{ mapHText }} ▾</button><span class="mk">새 기능</span>
+          <button type="button" class="{{ cfgCls }}" aria-expanded="{{ cfgOpen }}" onClick="{{ toggleCfg }}">설정 · {{ mapHText }} {{ cfgArrow }}</button><span class="mk">새 기능</span>
         </div>
-        <sc-if value="{{ cfgOpen }}" hint-placeholder-val="{{ true }}">
+        <sc-if value="{{ cfgOpen }}" hint-placeholder-val="{{ false }}">
           <div class="cfg chg" role="group" aria-label="지도 크기 설정">
             <div class="cfgh"><b>지도 크기 설정</b><span class="mk">설정 시안</span><span class="hint">클러스터가 많아 칸이 작아질 때 지도를 키웁니다 — 정한 크기는 이 브라우저에 기억합니다</span><button type="button" class="x" onClick="{{ toggleCfg }}">닫기 ✕</button></div>
             <div class="cfgr"><span class="cl">높이</span><button type="button" class="stp" aria-label="20px 줄이기" onClick="{{ hMinus }}">−</button><input class="rng" type="range" min="300" max="1200" step="20" value="{{ mapH }}" onChange="{{ onRange }}" aria-label="지도 높이"><button type="button" class="stp" aria-label="20px 늘리기" onClick="{{ hPlus }}">＋</button><b class="val">{{ mapHText }}</b><span class="hint">300 ~ 1,200px · 20px 단위</span></div>
@@ -369,7 +369,7 @@ sc-for,sc-if{display:contents}
 </x-dc>
 <script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2450}}'>
 class Component extends DCLogic {
-  state = { sel: {}, q: '', fill: 'n1', size: 'h', sub: 'insight', fold: false, mapSize: 'l', mapH: 520, mapWide: false, cfgOpen: true };
+  state = { sel: {}, q: '', fill: 'n1', size: 'h', sub: 'insight', fold: false, mapSize: 'l', mapH: 520, mapWide: false, cfgOpen: false };
 
   // 목(mock, 가상) 서버 /api/hosts · /api/hosts/corp · /api/hosts/checks · /api/platform/summary 를 한 번 받아(2026-11-18 12:34:03 KST · 호스트 186) 법인별로 집계한 값.
   // h 호스트 · cn 연결 · mt 점검 · dn 끊김 · co 물리 코어 · mem 메모리 GB · ct/cu CPU 총/사용 GHz · ml/mu 메모리 총/사용 GB(연결된 호스트)
@@ -613,7 +613,7 @@ class Component extends DCLogic {
       subs, showInsight: isInsight, showOther: !isInsight, otherTitle: other[0], otherText: other[1],
       kpis, fills, sizes, mapCols, tiles, scale, scaleTitle: '색 = ' + F.label,
       mapSizes, widths, mapH, mapHpx: mapH + 'px', mapHText: fmt(mapH) + 'px' + (mapSize === 'custom' ? '(직접)' : ''),
-      rowB: 'row b' + (st.mapWide ? ' wide' : ''), cfgOpen: !!st.cfgOpen, cfgCls: 'gear' + (st.cfgOpen ? ' on' : ''), toggleCfg: () => this.setState({ cfgOpen: !st.cfgOpen }),
+      rowB: 'row b' + (st.mapWide ? ' wide' : ''), cfgOpen: !!st.cfgOpen, cfgCls: 'gear' + (st.cfgOpen ? ' on' : ''), cfgArrow: st.cfgOpen ? '▴' : '▾', toggleCfg: () => this.setState({ cfgOpen: !st.cfgOpen }),
       hMinus: () => this.setState({ mapSize: 'custom', mapH: clampH(mapH - 20) }), hPlus: () => this.setState({ mapSize: 'custom', mapH: clampH(mapH + 20) }),
       onRange: (e) => this.setState({ mapSize: 'custom', mapH: clampH(Number(e.target.value)) }), resetMap: () => this.setState({ mapSize: 'l', mapH: 520, mapWide: false }),
       presetHint: '자동 = 가장 긴 줄의 칸 수에 맞춤(지금 ' + fmt(AUTO_H) + 'px) · 보통 360 · 크게 520 · 아주 크게 760',
