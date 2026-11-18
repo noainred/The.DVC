@@ -10,7 +10,7 @@
  */
 import { numOrNull } from '../../numOrNull.js';
 import { hashSegments } from '../../hooks/hashTab.js';
-import { addVal, sumKeys, avgOf, mergeTopN, shareOf, shareText, fmtN, gbText, round1 } from '../insight/insightCore.js';
+import { addVal, sumKeys, avgOf, mergeTopN, shareOf, shareText, fmtN, fmtU, gbText, round1 } from '../insight/insightCore.js';
 import { tileColors, scaleLegend, RAMP, CRIT_BG, NONE_BG } from '../insight/treemap.js';
 import { hostAvgMemGB as toolHostAvgMemGB, hostsEq } from '../vms/insight-tools/toolSumText.js';   // S2 환산 판정 한 벌(VM 분석 · 과할당과 같은 함수)
 
@@ -83,6 +83,30 @@ export const corpName = (r) => String(r?.name || r?.id || '');
 export const mbToGb = (mb) => { const n = numOrNull(mb); return n == null ? null : Math.round((n / 1024) * 10) / 10; };
 const unkText = (n, what = '모름', unit = '대') => ((numOrNull(n) ?? 0) > 0 ? ` · ${what} ${fmtN(n)}${unit}` : '');
 
+/**
+ * 할당 합의 부분 합 표지(dbg3221 3회차 — 예전: vCPU 를 못 읽은 VM 이 있어도 ‘vCPU N · 코어 하나에 R’ 를 전체처럼 보였다).
+ * 서버(vmSums.vmAllocOf)는 VM 을 **전부** 못 읽었을 때만 vcpu · memVmMB 를 null 로 두고, 일부만 못 읽었으면 읽은 VM 만의 합(최소값)을 준다 —
+ * 그러면 합과 비율(vcpuPerCore · ramPct)에 ‘이상’ 을 붙이고 못 읽은 VM 수를 따로 밝힌다(hostChecksText.vmAllocCells · 드로어 v2.977 과 같은 규칙).
+ * 값이 null 이면 ‘—’ 만(단위 · ‘이상’ 없음).
+ */
+export function allocMarks(s) {
+  const vu = numOrNull(s?.vcpuUnknown) ?? 0; const mu = numOrNull(s?.memUnknown) ?? 0;
+  const vcpuPartial = vu > 0 && numOrNull(s?.vcpu) != null;
+  const memPartial = mu > 0 && numOrNull(s?.memVmMB) != null;
+  const ratio = numOrNull(s?.vcpuPerCore); const ram = numOrNull(s?.ramPct);
+  const up = (p) => (p ? ' 이상' : '');
+  return {
+    vcpuPartial, memPartial,
+    vcpuText: `${fmtN(s?.vcpu)}${up(vcpuPartial)}`,
+    ratio: ratio == null ? '—' : `${ratio}${up(vcpuPartial)}`,
+    ratioOne: ratio == null ? '—' : `${ratio} : 1${up(vcpuPartial)}`,
+    vmMemText: `${gbText(mbToGb(s?.memVmMB))}${up(memPartial)}`,
+    ram: ram == null ? '—' : `${ram}%${up(memPartial)}`,
+    vcpuNote: vu > 0 ? `vCPU 못 읽은 VM ${fmtU(vu, '대')}` : '',
+    memNote: mu > 0 ? `메모리 할당 못 읽은 VM ${fmtU(mu, '대')}` : '',
+  };
+}
+
 /** S2 — 고른 범위 호스트 한 대의 평균 메모리(GB) · 판정은 toolSumText.hostAvgMemGB 하나(용량을 읽은 호스트만 · 오래됨 제외). 모르면 null. */
 export function hostAvgMemGB(used) {
   const corps = (Array.isArray(used) ? used : []).map((r) => ({
@@ -109,20 +133,19 @@ export function kpiView(s, corpN) {
   const pw = s?.powerW || {};
   const pwN = numOrNull(pw.n);
   const memGB = mbToGb(s?.memTotalMB);
-  const vmMemGB = mbToGb(s?.memVmMB);
-  const ratio = numOrNull(s?.vcpuPerCore);
+  const am = allocMarks(s);
   return [
-    { key: 'total', label: '전체 호스트', value: fmtN(total), sub: `클러스터 ${fmtN(cl.total)} · 독립 ${fmtN(s?.standalone)} · 법인 ${fmtN(corpN)}곳`, tip: '지금 범위의 ESXi 호스트 수' },
+    { key: 'total', label: '전체 호스트', value: fmtN(total), sub: `클러스터 ${fmtN(cl.total)} · 독립 ${fmtN(s?.standalone)} · 법인 ${fmtU(corpN, '곳')}`, tip: '지금 범위의 ESXi 호스트 수' },
     { key: 'conn', label: '연결', value: fmtN(h.connected), meter: shareOf(h.connected, total),
       sub: `${shareText(h.connected, total)} · 점검 ${fmtN(h.maint)} · 끊김 ${fmtN(h.down)}${unkText(h.unread, '사용률 못 읽음')}`, tip: 'vCenter 에 연결된 호스트 — 사용률 못 읽음은 연결됐는데 CPU · 메모리 사용률을 읽지 못한 호스트' },
     { key: 'att', label: '확인 대상', value: fmtN(s?.attention), tone: (numOrNull(s?.attention) ?? 0) > 0 ? 'warn' : '',
       sub: `과부하 ${fmtN(s?.overloaded)} · 끊김 ${fmtN(h.down)} · 점검 ${fmtN(h.maint)}`, tip: '점검 중 · 끊김 · 과부하 호스트(‘목록’ 의 확인 대상과 같은 판정)' },
-    { key: 'cores', label: '물리 코어', value: fmtN(s?.cores), sub: `vCPU ${fmtN(s?.vcpu)} · 코어 하나에 ${ratio == null ? '—' : ratio}${unkText(s?.capUnknown, '용량 모름')}`,
-      tip: '호스트의 물리 코어 합(용량을 읽은 호스트만) · VM 에 준 vCPU(템플릿 제외)와의 비율' },
-    { key: 'mem', label: '메모리', value: gbText(memGB), sub: `VM 에 준 것 ${gbText(vmMemGB)} · ${numOrNull(s?.ramPct) == null ? '—' : `${s.ramPct}%`}${unkText(s?.memUnknown, '할당 모름')}`,
-      tip: '호스트 메모리 합(용량을 읽은 호스트만) · VM 에 준 메모리(템플릿 제외)와의 비율' },
+    { key: 'cores', label: '물리 코어', value: fmtN(s?.cores), sub: `vCPU ${am.vcpuText} · 코어 하나에 ${am.ratio}${unkText(s?.vcpuUnknown, 'vCPU 모름')}${unkText(s?.capUnknown, '용량 모름')}`,
+      tip: '호스트의 물리 코어 합(용량을 읽은 호스트만) · VM 에 준 vCPU(템플릿 제외)와의 비율 — vCPU 를 못 읽은 VM 이 있으면 읽은 VM 만의 합이라 ‘이상’' },
+    { key: 'mem', label: '메모리', value: gbText(memGB), sub: `VM 에 준 것 ${am.vmMemText} · ${am.ram}${unkText(s?.memUnknown, '할당 모름')}`,
+      tip: '호스트 메모리 합(용량을 읽은 호스트만) · VM 에 준 메모리(템플릿 제외)와의 비율 — 할당을 못 읽은 VM 이 있으면 읽은 VM 만의 합이라 ‘이상’' },
     { key: 'power', label: '전력', value: kwText(pw),
-      sub: pwN > 0 ? `호스트 한 대 평균 ${fmtN(pw.sum / pwN)} W · 읽은 호스트 ${fmtN(pwN)}대` : '전력을 보고한 호스트가 없습니다', tip: '호스트가 보고한 지금 전력의 합(0 보다 큰 값만 — 센서가 없으면 빠집니다)' },
+      sub: pwN > 0 ? `호스트 한 대 평균 ${fmtN(pw.sum / pwN)} W · 읽은 호스트 ${fmtU(pwN, '대')}` : '전력을 보고한 호스트가 없습니다', tip: '호스트가 보고한 지금 전력의 합(0 보다 큰 값만 — 센서가 없으면 빠집니다)' },
   ];
 }
 
@@ -148,8 +171,9 @@ export function checkItems(s, access = {}, th = {}) {
   ];
   if (access?.hw) {
     out.push({ key: 'hw', label: '하드웨어 장애 · 경고', value: hwN, tone: (fault ?? 0) > 0 ? 'crit' : 'warn',
-      sub: `장애 ${fmtN(fault)} · 경고 ${fmtN(warn)}${unkText((numOrNull(hw?.unknown) ?? 0) + (numOrNull(hw?.error) ?? 0), '모름')}`, href: '#/hosts/list',
-      tip: 'iDRAC 부품 상태 — 부품은 호스트 빠른 확인에서 봅니다' });
+      // 수집 대기(pending — iDRAC 는 등록됐지만 인벤토리가 아직 없음)도 따로 밝힌다(dbg3221 2회차 — 예전: 장애 0 · 경고 0 만 보여 모두 정상처럼 읽혔다).
+      sub: `장애 ${fmtN(fault)} · 경고 ${fmtN(warn)}${unkText((numOrNull(hw?.unknown) ?? 0) + (numOrNull(hw?.error) ?? 0), '모름')}${unkText(hw?.pending, '수집 대기')}`, href: '#/hosts/list',
+      tip: 'iDRAC 부품 상태 — 부품은 호스트 빠른 확인에서 봅니다 · 수집 대기는 iDRAC 를 등록했지만 부품 목록을 아직 받지 못한 호스트(장애 · 경고 수에 들지 않음)' });
   }
   if (access?.hygiene) {
     out.push({ key: 'reboot', label: boot != null ? `예기치 않은 재부팅(${boot}일)` : '예기치 않은 재부팅', value: s?.reboots30d ?? null, tone: 'warn',
@@ -188,7 +212,7 @@ export function fillDefs(th = {}, access = {}) {
 }
 /** 크기 기준(칸 넓이). */
 export const SIZE_DEFS = Object.freeze([
-  { key: 'hosts', label: '호스트 수', val: (c) => numOrNull(c?.hosts), text: (v) => `${fmtN(v)}대` },
+  { key: 'hosts', label: '호스트 수', val: (c) => numOrNull(c?.hosts), text: (v) => `${fmtU(v, '대')}` },
   { key: 'cores', label: '코어', val: (c) => numOrNull(c?.cores), text: (v) => `${fmtN(v)} 코어` },
   { key: 'mem', label: '메모리', val: (c) => numOrNull(c?.memTotalGB), text: (v) => gbText(v) },
 ]);
@@ -306,7 +330,8 @@ export function esxiView(esxi) {
   const rows = list.map((x) => { const g = esxiMajorOf(x.name); return { key: `v:${x.name}`, name: `ESXi ${x.name}`, n: x.n, bg: bgOf(g == null ? '?' : String(g)) }; });
   const rest = numOrNull(esxi?.rest) ?? 0;
   if (rest > 0) rows.push({ key: 'rest', name: '그 밖', n: rest, bg: '#4b5873' });
-  return { genSegs, rows, kinds: list.length, unread: numOrNull(esxi?.unread) };
+  // 입력(esxi)이 없으면(고른 법인이 모두 오래됨 · 모름) 종류 수는 모름(null) — 0 은 ‘읽었는데 없음’ 일 때만(dbg3221 2회차).
+  return { genSegs, rows, kinds: esxi && typeof esxi === 'object' ? list.length : null, unread: numOrNull(esxi?.unread) };
 }
 
 /** 서버 모델 — 많은 순 shown 종 + ‘그 밖’(접은 종류 + 서버가 접은 rest) · 못 읽음 따로 · 제조사 한 줄. */
@@ -317,12 +342,12 @@ export function modelView(model, vendor, shown) {
   const head = list.slice(0, n).map((x) => ({ key: `m:${x.name}`, name: x.name, n: x.n }));
   const restKinds = list.slice(n);
   const rest = restKinds.reduce((a, x) => a + x.n, 0) + (numOrNull(model?.rest) ?? 0);
-  if (rest > 0) head.push({ key: 'rest', name: `그 밖${restKinds.length ? ` ${fmtN(restKinds.length)}종` : ''}`, n: rest });
+  if (rest > 0) head.push({ key: 'rest', name: `그 밖${restKinds.length ? ` ${fmtU(restKinds.length, '종')}` : ''}`, n: rest });
   const vs = vendor?.vendors && typeof vendor.vendors === 'object' ? vendor.vendors : {};
   const vlist = Object.entries(vs).map(([name, c]) => ({ name, n: numOrNull(c) ?? 0 })).filter((x) => x.n > 0).sort((a, b) => (b.n - a.n) || a.name.localeCompare(b.name));
   const vrest = numOrNull(vendor?.rest) ?? 0;
   const vendorText = vlist.length ? `제조사 — ${vlist.map((x) => `${x.name} ${fmtN(x.n)}`).join(' · ')}${vrest > 0 ? ` · 그 밖 ${fmtN(vrest)}` : ''}${unkText(vendor?.unread, '모름')}` : '';
-  return { rows: head, kinds: list.length, unread: numOrNull(model?.unread), vendorText };
+  return { rows: head, kinds: model && typeof model === 'object' ? list.length : null, unread: numOrNull(model?.unread), vendorText };
 }
 
 /** 호스트 한 대의 VM 수 구간 이름 — 서버 키 k 는 ‘앞 키 초과 k 이하’. edges [9,12,15] → ['9대 이하','10–12대','13–15대','16대 이상']. */

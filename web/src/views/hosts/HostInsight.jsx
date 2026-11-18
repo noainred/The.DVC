@@ -14,7 +14,7 @@ import { numOrNull } from '../../numOrNull.js';
 import { scopeIdsOf, normScopeIds, toggleScopeId } from '../platform/platformText.js';
 import { toolsFor } from '../platform/HubTabs.jsx';
 import { vcHash } from '../vcd/vcdRoute.js';
-import { pickRows, fmtN, gbText, shareText, barPct } from '../insight/insightCore.js';
+import { pickRows, toolIdsOf, fmtN, fmtU, gbText, shareText, barPct } from '../insight/insightCore.js';
 import { treemapLayout, maxTilesInCol, fillStep } from '../insight/treemap.js';
 import { mapHeightOf, autoMapHeight } from '../insight/insightPrefs.js';
 import { useFolded } from '../insight/useInsight.js';
@@ -23,7 +23,7 @@ import { useMapPrefs, MapSizeSeg, MapSizeBox } from '../insight/MapSize.jsx';
 import { NumTile, CheckLine, PanelHead, StackBar, RankBars, KvRows, Histogram, MiniStats, FoldGroup } from '../insight/InsightParts.jsx';
 import {
   sumHostRows, kpiView, checkItems, fillDefs, SIZE_DEFS, mapGroups, regionRows, mergedTops, esxiView, modelView, densityRows, safetyView,
-  hostAvgMemGB, hostsEquivalent, hostTileColors, hostScale, n1FailOf, n1PctText, corpName, regionName, mbToGb, histCritFrom, groupShownOf,
+  hostAvgMemGB, hostsEquivalent, hostTileColors, hostScale, n1FailOf, n1PctText, corpName, regionName, mbToGb, histCritFrom, groupShownOf, allocMarks,
   HOST_FOLD_GROUPS, HOST_FOLD_KEYS, HOST_MAP_PREF_KEY, HOST_FOLD_PREF_KEY,
 } from './hostInsightText.js';
 import HostToolPanels from './insight-tools/HostToolPanels.jsx';
@@ -67,7 +67,10 @@ export default function HostInsight({ filters = {}, scopeIds = null, scopeRegion
   // 도구 권한 — 허브 도구 칸과 같은 판정(toolsFor — 카탈로그 adminOnly 는 관리자만) + 서버 집행 축(toolAllowed). 없으면 묶음 · 패널을 숨기고 요청도 보내지 않는다.
   const canTool = (k) => toolsFor([[k, k]]).length > 0 && toolAllowed(k);
   // 도구 요약(?summary=1)은 리전을 모른다 — 리전만 고르고 법인을 고르지 않았으면 이 응답의 법인(그 리전)으로 좁힌다(VM 분석과 같은 규칙).
-  const toolIds = ids.length || !region || !rows.length ? ids : rows.map((r) => String(r.id));
+  //   dbg3221 2회차: 도구 패널도 본체 합과 같은 법인 집합(오래됨 · 모름 법인 제외 — toolIdsOf). null = 고른 법인이 모두 오래됨 · 모름 → 도구 패널을 그리지 않는다.
+  const toolIdsRaw = toolIdsOf({ ids, region, rows, picked });
+  const toolIds = toolIdsRaw ?? [];
+  const toolCan = toolIdsRaw == null ? () => false : canTool;
   const setIds = (next) => { if (onScopeIds) onScopeIds(normScopeIds(next)); };
   const toggleId = (id) => setIds(toggleScopeId(ids, id));
   const totalHosts = numOrNull(s.hosts?.total);
@@ -95,17 +98,17 @@ export default function HostInsight({ filters = {}, scopeIds = null, scopeRegion
     return {
       title: t.label, line: `${fill.short} ${fill.key === 'n1mem' ? n1PctText(fv) : pct0(fv)} · ${size.text(t.size)}`, bg: col.bg, ink: col.ink, stale: r.stale === true,
       mark: fail ? '못 버팀' : null,
-      tip: `${t.label} · ${corpName(r)}${r.city ? ` · ${r.city}` : ''}${r.stale ? ' · 값이 오래됨(합에 넣지 않음)' : ''} — 호스트 ${fmtN(c.hosts)}대(연결 ${fmtN(c.connected)} · 점검 ${fmtN(c.maint)} · 끊김 ${fmtN(c.down)}) · 코어 ${fmtN(c.cores)} · 메모리 ${gbText(c.memTotalGB)} · 평균 CPU ${pct0(c.cpuAvg)} · 가장 바쁜 호스트 ${pct0(c.busiestCpu)} · 평균 메모리 ${pct0(c.memAvg)}${n1}${(numOrNull(c.usageUnknown) ?? 0) > 0 ? ` · 사용률 모름 ${fmtN(c.usageUnknown)}대` : ''}${onScopeIds ? ' — 누르면 이 법인을 바로가기 선택에 켜고 끕니다' : ''}`,
+      tip: `${t.label} · ${corpName(r)}${r.city ? ` · ${r.city}` : ''}${r.stale ? ' · 값이 오래됨(합에 넣지 않음)' : ''} — 호스트 ${fmtU(c.hosts, '대')}(연결 ${fmtN(c.connected)} · 점검 ${fmtN(c.maint)} · 끊김 ${fmtN(c.down)}) · 코어 ${fmtN(c.cores)} · 메모리 ${gbText(c.memTotalGB)} · 평균 CPU ${pct0(c.cpuAvg)} · 가장 바쁜 호스트 ${pct0(c.busiestCpu)} · 평균 메모리 ${pct0(c.memAvg)}${n1}${(numOrNull(c.usageUnknown) ?? 0) > 0 ? ` · 사용률 모름 ${fmtU(c.usageUnknown, '대')}` : ''}${onScopeIds ? ' — 누르면 이 법인을 바로가기 선택에 켜고 끕니다' : ''}`,
     };
   };
   const scale = hostScale(fill);
   const clusterCells = layout.cols.flatMap((c) => c.tiles);
   const overN = fill.crit != null ? clusterCells.filter((t) => fillStep(fill.val(t.cell), fill).over).length : 0;
   const unknownN = clusterCells.filter((t) => fill.val(t.cell) == null).length;
-  const scaleNote = `파랑 = 값의 크기 · 빨강 = ${unitText(fill.crit, '%')} 이상인 칸만 — 지금 ‘${fill.label}’ 기준으로 ${fmtN(overN)}칸입니다(${fmtN(clusterCells.length)}칸 중).`
+  const scaleNote = `파랑 = 값의 크기 · 빨강 = ${unitText(fill.crit, '%')} 이상인 칸만 — 지금 ‘${fill.label}’ 기준으로 ${fmtU(overN, '칸')}입니다(${fmtU(clusterCells.length, '칸')} 중).`
     + (access.cluster ? ' ‘못 버팀’ 표는 색 기준과 상관없이 붙습니다.' : '')
-    + (unknownN ? ` 값 모름(회색) ${fmtN(unknownN)}칸${fill.key === 'n1mem' ? ' — 독립 호스트 · 용량을 모르는 호스트가 있는 클러스터는 빠진 뒤 값이 없습니다' : ''}.` : '');
-  const hiddenNote = layout.hidden.length ? ` 칸 없음 ${fmtN(layout.hidden.length)}개(크기 값 모름 또는 0): ${layout.hidden.slice(0, 6).map((t) => t.label).join(' · ')}${layout.hidden.length > 6 ? ' 외' : ''}` : '';
+    + (unknownN ? ` 값 모름(회색) ${fmtU(unknownN, '칸')}${fill.key === 'n1mem' ? ' — 독립 호스트 · 용량을 모르는 호스트가 있는 클러스터는 빠진 뒤 값이 없습니다' : ''}.` : '');
+  const hiddenNote = layout.hidden.length ? ` 칸 없음 ${fmtU(layout.hidden.length, '개')}(크기 값 모름 또는 0): ${layout.hidden.slice(0, 6).map((t) => t.label).join(' · ')}${layout.hidden.length > 6 ? ' 외' : ''}` : '';
   const regions = regionRows(picked.used, totalHosts);
   const wide = !!mapPrefs.wide && !narrow;
 
@@ -117,13 +120,13 @@ export default function HostInsight({ filters = {}, scopeIds = null, scopeRegion
     data.initial ? '첫 수집이 끝나지 않았습니다 — 수가 아직 모자랄 수 있습니다.' : '',
   ].filter(Boolean).join(' ');
 
-  const groupShown = groupShownOf(canTool);
+  const groupShown = groupShownOf(toolCan);
   const esxi = esxiView(s.esxi);
   const foldSummary = {
     perf: 'CPU 경합 · 디스크 지연(특수 기능 요약)',
     config: 'ESXi 호스트 구성 점검(특수 기능 요약)',
     capacity: '데이터스토어 — 곧 가득 · 경로(특수 기능 요약)',
-    dist: `ESXi ${fmtN(esxi.kinds)}개 버전 · 평균 CPU ${pct0(s.cpuAvg?.value)} · 메모리 ${pct0(s.memAvg?.value)} · vCPU : 코어 ${s.vcpuPerCore == null ? '—' : s.vcpuPerCore}${access.cluster ? ` · 못 버티는 클러스터 ${fmtN(s.clusters?.n1Fail)}` : ''}`,
+    dist: `ESXi ${fmtU(esxi.kinds, '개')} 버전 · 평균 CPU ${pct0(s.cpuAvg?.value)} · 메모리 ${pct0(s.memAvg?.value)} · vCPU : 코어 ${allocMarks(s).ratio}${access.cluster ? ` · 못 버티는 클러스터 ${fmtN(s.clusters?.n1Fail)}` : ''}`,
   };
 
   // ── 지금 볼 호스트(STable — 법인별 상위 N 을 합쳐 다시 N) ──
@@ -196,15 +199,15 @@ export default function HostInsight({ filters = {}, scopeIds = null, scopeRegion
 
       {HOST_FOLD_GROUPS.filter(([k]) => groupShown[k]).map(([k, title]) => (
         <FoldGroup key={k} id={`host-${k}`} title={title} summary={folded[k] ? foldSummary[k] : null} folded={!!folded[k]} onToggle={() => toggleFold(k)}>
-          {k === 'perf' && <HostToolPanels vcIds={toolIds} rows={rows} group="perf" canTool={canTool} />}
-          {k === 'config' && <HostToolPanels vcIds={toolIds} rows={rows} group="config" canTool={canTool} />}
-          {k === 'capacity' && <HostToolPanels vcIds={toolIds} rows={rows} group="capacity" canTool={canTool} />}
+          {k === 'perf' && <HostToolPanels vcIds={toolIds} rows={rows} group="perf" canTool={toolCan} />}
+          {k === 'config' && <HostToolPanels vcIds={toolIds} rows={rows} group="config" canTool={toolCan} />}
+          {k === 'capacity' && <HostToolPanels vcIds={toolIds} rows={rows} group="capacity" canTool={toolCan} />}
           {k === 'dist' && <DistPanels s={s} used={picked.used} th={th} access={access} tops={tops} esxi={esxi} nameOf={nameOf} onOpenCorp={onOpenCorp} />}
         </FoldGroup>
       ))}
 
       <section className="ins-panel" aria-label="지금 볼 호스트">
-        <PanelHead title="지금 볼 호스트" hint={`지금 범위에서 CPU 사용률이 높은 순${onQuickHost ? ' · 이름을 누르면 호스트 빠른 확인(드로어)이 열립니다' : ' · 이름을 누르면 호스트 개체 보기'}`} right={`${fmtN(topRows.length)}대`} />
+        <PanelHead title="지금 볼 호스트" hint={`지금 범위에서 CPU 사용률이 높은 순${onQuickHost ? ' · 이름을 누르면 호스트 빠른 확인(드로어)이 열립니다' : ' · 이름을 누르면 호스트 개체 보기'}`} right={`${fmtU(topRows.length, '대')}`} />
         {topRows.length ? (
           <STable className="vmh-corp-table" minWidth={760}>
             <thead><tr><th>호스트</th><th>법인 · 클러스터</th><th>모델</th><th>VM</th><th>CPU</th><th>메모리</th></tr></thead>
@@ -238,30 +241,30 @@ function DistPanels({ s, used, th, access, tops, esxi, nameOf, onOpenCorp }) {
   const headGB = numOrNull(s.headroom?.gb);
   const avgGB = hostAvgMemGB(used);
   const eq = hostsEquivalent(headGB, avgGB);
-  const ratio = numOrNull(s.vcpuPerCore);
+  const am = allocMarks(s);   // 부분 합 표지(vCPU · 메모리 할당을 일부 VM 에서 못 읽었으면 ‘이상’ + 못 읽은 VM 수 — dbg3221 3회차)
   return (
     <>
       <div className="ins-row c">
         <section className="ins-panel" aria-label="ESXi 버전">
-          <PanelHead title="ESXi 버전" right={`${fmtN(esxi.kinds)}개 버전`} />
+          <PanelHead title="ESXi 버전" right={`${fmtU(esxi.kinds, '개')} 버전`} />
           <StackBar segs={esxi.genSegs} total={totalHosts} />
-          <RankBars small rows={esxi.rows.map((x) => ({ key: x.key, name: x.name, n: x.n, bg: x.bg, share: shareText(x.n, totalHosts), tip: `${x.name} · ${fmtN(x.n)}대` }))} />
-          <div className="ins-note">새 버전이 위 · 세대 = 버전의 첫 숫자(지원 종료 판정은 ‘버전/패치 준수’ 도구).{(esxi.unread ?? 0) > 0 ? ` 버전을 못 읽은 호스트 ${fmtN(esxi.unread)}대.` : ''}</div>
+          <RankBars small rows={esxi.rows.map((x) => ({ key: x.key, name: x.name, n: x.n, bg: x.bg, share: shareText(x.n, totalHosts), tip: `${x.name} · ${fmtU(x.n, '대')}` }))} />
+          <div className="ins-note">새 버전이 위 · 세대 = 버전의 첫 숫자(지원 종료 판정은 ‘버전/패치 준수’ 도구).{(esxi.unread ?? 0) > 0 ? ` 버전을 못 읽은 호스트 ${fmtU(esxi.unread, '대')}.` : ''}</div>
         </section>
         <section className="ins-panel" aria-label="서버 모델">
-          <PanelHead title="서버 모델" right={`${fmtN(md.kinds)}종`} />
-          <RankBars rows={md.rows.map((x) => ({ key: x.key, name: x.name, n: x.n, share: shareText(x.n, totalHosts), tip: `${x.name} · ${fmtN(x.n)}대` }))} />
+          <PanelHead title="서버 모델" right={`${fmtU(md.kinds, '종')}`} />
+          <RankBars rows={md.rows.map((x) => ({ key: x.key, name: x.name, n: x.n, share: shareText(x.n, totalHosts), tip: `${x.name} · ${fmtU(x.n, '대')}` }))} />
           {md.vendorText && <div className="ins-note">{md.vendorText}</div>}
-          {(md.unread ?? 0) > 0 && <div className="ins-note">모델을 못 읽은 호스트 {fmtN(md.unread)}대</div>}
+          {(md.unread ?? 0) > 0 && <div className="ins-note">모델을 못 읽은 호스트 {fmtU(md.unread, '대')}</div>}
         </section>
         {safety && (
           <section className="ins-panel" aria-label="클러스터 안전성">
-            <PanelHead title="클러스터 안전성" hint="호스트 한 대가 빠져도 버티는가" right={`클러스터 ${fmtN(safety.total)}개`} />
+            <PanelHead title="클러스터 안전성" hint="호스트 한 대가 빠져도 버티는가" right={`클러스터 ${fmtU(safety.total, '개')}`} />
             <StackBar tall segs={safety.segs} />
             <KvRows rows={safety.kv} />
             <div className="ins-h3">한 대가 빠지면 버티지 못하는 클러스터</div>
             {tops.n1Fail.length ? tops.n1Fail.map((x) => (
-              <div key={`${x.vcenterId}-${x.key}`} className="ins-kv" title={`${x.label || x.name} — 호스트 한 대가 빠진 뒤의 예상 사용률 · 호스트 ${fmtN(x.hosts)}대${x.ha === false ? ' · HA 꺼짐' : ''}`}>
+              <div key={`${x.vcenterId}-${x.key}`} className="ins-kv" title={`${x.label || x.name} — 호스트 한 대가 빠진 뒤의 예상 사용률 · 호스트 ${fmtU(x.hosts, '대')}${x.ha === false ? ' · HA 꺼짐' : ''}`}>
                 <span>
                   {onOpenCorp
                     ? <button type="button" className="ins-lnkbtn" onClick={() => onOpenCorp(x.vcenterId)} title="‘법인별’ 보기에서 이 법인을 엽니다">{`${x.label || x.name} · ${nameOf.get(String(x.vcenterId)) || x.vcenterId}`} →</button>
@@ -287,22 +290,22 @@ function DistPanels({ s, used, th, access, tops, esxi, nameOf, onOpenCorp }) {
             </div>
           </div>
           <div className="ins-note">
-            {crit != null ? `${crit}% 초과 — CPU ${fmtN(s.over90?.cpu)}대 · 메모리 ${fmtN(s.over90?.mem)}대. ` : ''}
-            사용률 모름 — CPU {fmtN(s.usageUnknown?.cpu)}대 · 메모리 {fmtN(s.usageUnknown?.mem)}대(끊김 · 못 읽음 — 평균 · 칸에 넣지 않음)
+            {crit != null ? `${crit}% 초과 — CPU ${fmtU(s.over90?.cpu, '대')} · 메모리 ${fmtU(s.over90?.mem, '대')}. ` : ''}
+            사용률 모름 — CPU {fmtU(s.usageUnknown?.cpu, '대')} · 메모리 {fmtU(s.usageUnknown?.mem, '대')}(끊김 · 못 읽음 — 평균 · 칸에 넣지 않음)
             {((numOrNull(s.histOut?.cpu) ?? 0) + (numOrNull(s.histOut?.mem) ?? 0)) > 0 ? ` · 칸 밖 값 CPU ${fmtN(s.histOut?.cpu)} · 메모리 ${fmtN(s.histOut?.mem)}` : ''}.
           </div>
         </section>
         <section className="ins-panel" aria-label="통합 비율과 VM 밀도">
           <PanelHead title="통합 비율 · VM 밀도" hint="호스트에 VM 을 얼마나 실었나(템플릿 제외)" />
           <MiniStats stats={[
-            { key: 'r', value: ratio == null ? '—' : `${ratio} : 1`, text: 'vCPU : 물리 코어', tip: `VM 에 준 vCPU ${fmtN(s.vcpu)} ÷ 물리 코어 ${fmtN(s.cores)}${(numOrNull(s.capUnknown) ?? 0) > 0 ? ' — 용량 모름 호스트가 있어 비율을 내지 않습니다' : ''}` },
-            { key: 'm', value: numOrNull(s.ramPct) == null ? '—' : `${s.ramPct}%`, text: '메모리 — VM 에 준 것 ÷ 호스트 총량', tip: `VM 에 준 메모리 ${gbText(mbToGb(s.memVmMB))} ÷ 호스트 메모리 ${gbText(mbToGb(s.memTotalMB))}` },
+            { key: 'r', value: am.ratioOne, text: `vCPU : 물리 코어${am.vcpuNote ? ` — ${am.vcpuNote}` : ''}`, tip: `VM 에 준 vCPU ${am.vcpuText} ÷ 물리 코어 ${fmtN(s.cores)}${(numOrNull(s.capUnknown) ?? 0) > 0 ? ' — 용량 모름 호스트가 있어 비율을 내지 않습니다' : ''}${am.vcpuNote ? ` — ${am.vcpuNote}(읽은 VM 만의 합 · 최소값)` : ''}` },
+            { key: 'm', value: am.ram, text: `메모리 — VM 에 준 것 ÷ 호스트 총량${am.memNote ? ` — ${am.memNote}` : ''}`, tip: `VM 에 준 메모리 ${am.vmMemText} ÷ 호스트 메모리 ${gbText(mbToGb(s.memTotalMB))}${am.memNote ? ` — ${am.memNote}(읽은 VM 만의 합 · 최소값)` : ''}` },
             { key: 'h', value: gbText(headGB), text: `메모리 여유${eq != null ? ` — 호스트 약 ${eq}대분` : ''}`,
-              tip: `‘법인별’ 보기의 여유(headroom — 정격 × ${unitText(th.headroomPct, '%')} − 사용 중) 합${avgGB != null ? ` ÷ 이 범위 호스트 한 대의 평균 메모리 ${gbText(avgGB)}` : ''}${(numOrNull(s.headroom?.excluded) ?? 0) > 0 ? ` · 여유 계산에서 뺀 호스트 ${fmtN(s.headroom.excluded)}대` : ''}` },
+              tip: `‘법인별’ 보기의 여유(headroom — 정격 × ${unitText(th.headroomPct, '%')} − 사용 중) 합${avgGB != null ? ` ÷ 이 범위 호스트 한 대의 평균 메모리 ${gbText(avgGB)}` : ''}${(numOrNull(s.headroom?.excluded) ?? 0) > 0 ? ` · 여유 계산에서 뺀 호스트 ${fmtU(s.headroom.excluded, '대')}` : ''}` },
           ]} />
-          {(numOrNull(s.headroom?.excluded) ?? 0) > 0 && <div className="ins-note">여유 계산에서 뺀 호스트(용량 · 사용률 모름) {fmtN(s.headroom.excluded)}대 — 여유 합에 넣지 않았습니다.</div>}
+          {(numOrNull(s.headroom?.excluded) ?? 0) > 0 && <div className="ins-note">여유 계산에서 뺀 호스트(용량 · 사용률 모름) {fmtU(s.headroom.excluded, '대')} — 여유 합에 넣지 않았습니다.</div>}
           <div className="ins-h3">호스트 한 대의 VM 수</div>
-          <RankBars small rows={dens.map((x) => ({ key: x.key, name: x.name, n: x.n, share: shareText(x.n, totalHosts), tip: `VM 을 ${x.name} 실은 호스트 ${fmtN(x.n)}대` }))} />
+          <RankBars small rows={dens.map((x) => ({ key: x.key, name: x.name, n: x.n, share: shareText(x.n, totalHosts), tip: `VM 을 ${x.name} 실은 호스트 ${fmtU(x.n, '대')}` }))} />
         </section>
       </div>
     </>

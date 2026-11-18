@@ -45,15 +45,21 @@ export function warmAt(i, nb) {
   return WARM[Math.min(WARM.length - 1, Math.max(0, k))];
 }
 
-/** 구간 이름 — ['80–85%', '85–90%', '90–95%', '95% 이상']. 첫 칸의 아래 끝은 기준(법인마다 다르면 ‘기준’). */
+/**
+ * 구간 이름 — ['80–85%', '85–90%', '90–95%', '95% 이상']. 첫 칸의 아래 끝은 기준(법인마다 다르면 ‘기준’).
+ * 기준이 경계 이상이면(thr 90 · 경계 [85, 90, 95]) 각 칸의 아래 끝은 max(기준, 경계)이고, 위 끝이 기준 이하인 칸은 null —
+ * 그 칸은 서버 overBins 에서 비어 있을 수밖에 없다(‘90–85%’ 같은 거꾸로 된 이름을 만들지 않는다 · guestPartView 가 빈 칸을 뺀다).
+ */
 export function gpBandLabels(thr, edges) {
   const e = Array.isArray(edges) ? edges.map(numOrNull).filter((x) => x != null) : [];
   const t = numOrNull(thr);
+  const lo = (x) => (t == null ? x : Math.max(t, x));
   const out = [];
   for (let i = 0; i <= e.length; i++) {
-    if (i === e.length) out.push(`${e[i - 1]}% 이상`);
+    if (i < e.length && t != null && e[i] <= t) out.push(null);
+    else if (i === e.length) out.push(e.length ? `${lo(e[i - 1])}% 이상` : (t == null ? '기준 이상' : `${t}% 이상`));
     else if (i === 0) out.push(t == null ? `기준–${e[0]}%` : `${t}–${e[0]}%`);
-    else out.push(`${e[i - 1]}–${e[i]}%`);
+    else out.push(`${lo(e[i - 1])}–${e[i]}%`);
   }
   return out;
 }
@@ -83,17 +89,26 @@ export function guestPartView(resp, vcIds) {
   const labels = gpBandLabels(thr, edges);
   const N = topNOf(resp);
   const nb = edges.length + 1;
+  // 파티션 값을 받은 VM 이 고른 범위에 한 대도 없으면(수집 전 · 수집 꺼짐 · 전부 미보고) 초과 0 은 ‘정상 0’ 이 아니라 모르는 것이다 —
+  // 수를 null 로 두어 칸 · 머리 숫자 · 구간이 ‘—’ 로 나오게 한다(못 읽은 값은 0 이 아니다).
+  const reported = total(rows, (r) => r.reported);
+  //   reported 를 싣지 않은 응답(모름)은 collect.empty 로만 판단한다 — 없는 필드를 0 으로 읽지 않는다.
+  const noValues = rows.length > 0 && (reported === 0 || (reported == null && resp.collect?.empty === true));
+  const known = (x) => (noValues ? null : x);
   return {
     empty: rows.length === 0,
+    noValues,
     missing,
     thr, thrMixed, critPct: numOrNull(th.critPct), soonDays: numOrNull(th.soonDays), growthDays: numOrNull(th.growthDays),
-    overVms: total(rows, (r) => r.overVms), overParts: total(rows, (r) => r.overParts),
-    crit: total(rows, (r) => r.crit), soon: total(rows, (r) => r.soon),
-    guests: total(rows, (r) => r.guests), reported: total(rows, (r) => r.reported), notReported: total(rows, (r) => r.notReported),
+    overVms: known(total(rows, (r) => r.overVms)), overParts: known(total(rows, (r) => r.overParts)),
+    crit: known(total(rows, (r) => r.crit)), soon: known(total(rows, (r) => r.soon)),
+    guests: total(rows, (r) => r.guests), reported, notReported: total(rows, (r) => r.notReported),
     offNotReported: total(rows, (r) => r.offNotReported), unknownParts: total(rows, (r) => r.unknownParts),
     staleCorps: rows.filter((r) => r.stale === true).length,
     os: sumObjects(rows, (r) => r.osOver),
-    bands: bins.map((n, i) => ({ key: `b${i}`, n, label: labels[i] || '', ...warmAt(i, nb) })),
+    // 위 끝이 기준 이하인 칸(이름 null)은 비어 있으면 그리지 않는다 — 값이 있으면(뜻밖) 숨기지 않고 ‘경계 미만’ 으로 밝힌다.
+    bands: bins.map((n, i) => ({ key: `b${i}`, n: known(n), label: labels[i] ?? `${edges[i]}% 미만`, ...warmAt(i, nb) }))
+      .filter((b, i) => labels[i] != null || (numOrNull(b.n) ?? 0) > 0),
     fullest: mergeTop(rows, (r) => r.top?.fullest, (a, b) => descNull(a.pct, b.pct) || ascNull(a.freeGB, b.freeGB) || byName(a, b), N),
     // 예상을 모르는 행은 서버가 넣지 않는다(곧 가득 찰 순 — 빠른 순).
     soonest: mergeTop(rows, (r) => r.top?.soonest, (a, b) => ascNull(a.etaDays, b.etaDays) || descNull(a.pct, b.pct) || byName(a, b), N),
@@ -178,13 +193,18 @@ export function trackView(resp, vcIds) {
     points.push({ slot, ts, total: sum, partial: have < rows.length, missingCorps: rows.length - have });
   }
   // 지금 · 기준(창 안의 첫 점) — 한 곳이라도 모르면 증감을 말하지 않는다(부분 합끼리의 차는 거짓이다).
+  // 법인마다 첫 점 · 마지막 점의 슬롯이 다를 수 있다(창 중간에 수집을 시작한 vCenter 등). 서로 다른 시각의 점을 더해 한 슬롯 이름으로
+  // 말하지 않는다 — 기준은 모든 법인의 첫 슬롯이 같을 때만, 증감은 첫 슬롯 · 마지막 슬롯이 각각 모두 같을 때만 낸다(slotsMixed 로 밝힌다).
   const cur = rows.map((r) => numOrNull(r.current?.total));
   const base = rows.map((r) => numOrNull(r.base?.total));
   const curOk = rows.length > 0 && cur.every((v) => v != null);
   const baseOk = rows.length > 0 && base.every((v) => v != null);
+  const oneSlot = (get) => { const set = new Set(rows.map((r) => String(get(r) ?? ''))); return set.size === 1 && !set.has('') ? [...set][0] : null; };
+  const baseSlot = baseOk ? oneSlot((r) => r.base?.slot) : null;
+  const curSlot = curOk ? oneSlot((r) => r.current?.slot) : null;
   const current = curOk ? cur.reduce((a, b) => a + b, 0) : null;
-  const baseTotal = baseOk ? base.reduce((a, b) => a + b, 0) : null;
-  const baseSlot = rows.map((r) => r.base?.slot).find(Boolean) || null;
+  const baseTotal = baseOk && baseSlot != null ? base.reduce((a, b) => a + b, 0) : null;
+  const slotsMixed = (baseOk && baseSlot == null) || (curOk && curSlot == null);
   return {
     empty: points.length === 0,
     missing,
@@ -192,8 +212,8 @@ export function trackView(resp, vcIds) {
     available: resp.available !== false,
     points,
     partialPoints: points.filter((p) => p.partial).length,
-    current, base: baseTotal, baseSlot,
-    diff: current != null && baseTotal != null ? current - baseTotal : null,
+    current, base: baseTotal, baseSlot, curSlot, slotsMixed,
+    diff: current != null && baseTotal != null && curSlot != null ? current - baseTotal : null,
     min: points.length ? Math.min(...points.map((p) => p.total)) : null,
     max: points.length ? Math.max(...points.map((p) => p.total)) : null,
   };

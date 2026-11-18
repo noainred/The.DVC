@@ -12,7 +12,7 @@ import { useNarrowScreen } from '../../components/useNarrowScreen.js';
 import { numOrNull } from '../../numOrNull.js';
 import { scopeIdsOf, normScopeIds, toggleScopeId } from '../platform/platformText.js';
 import { vcHash } from '../vcd/vcdRoute.js';
-import { pickRows, fmtN, gbText, shareText, barPct } from '../insight/insightCore.js';
+import { pickRows, toolIdsOf, fmtN, fmtU, gbText, shareText, barPct } from '../insight/insightCore.js';
 import { treemapLayout, maxTilesInCol, fillStep, tileColors, scaleLegend, RAMP, CRIT_BG, NONE_BG } from '../insight/treemap.js';
 import { mapHeightOf, autoMapHeight } from '../insight/insightPrefs.js';
 import { useFolded, useLazyJson } from '../insight/useInsight.js';
@@ -59,11 +59,15 @@ export default function VmInsight({ mode = 'insight', filters = {}, scopeIds = n
   const canTool = (k) => canHubTool(k) && toolAllowed(k);
   // 리뷰 정정: 도구 요약(?summary=1)은 리전을 모른다(범위 안 법인 줄 전부) — 리전만 고르고 법인을 고르지 않았으면 이 응답의 법인(그 리전)으로 좁혀
   //   도구 패널 · ‘확인할 것’ 의 도구 칸이 위 수와 같은 범위를 더하게 한다(예전에는 리전과 무관하게 전 법인 합이었다).
-  const toolIds = ids.length || !region || !rows.length ? ids : rows.map((r) => String(r.id));
+  //   dbg3221 2회차: 도구 칸 · 패널도 본체 합과 같은 법인 집합(오래됨 · 모름 법인 제외 — toolIdsOf). null = 고른 법인이 모두 오래됨 · 모름 → 도구 칸 · 패널을 그리지 않는다.
+  const picked = useMemo(() => pickRows(rows, ids), [rows, ids]);
+  const toolIdsRaw = toolIdsOf({ ids, region, rows, picked });
+  const toolIds = toolIdsRaw ?? [];
+  const toolCan = toolIdsRaw == null ? () => false : canTool;
   // ‘과할당’ 보기에서는 확인할 것 · 지도를 그리지 않는다 — 캐시 없는 게스트 파티션 조회를 보내지 않는다.
   const insightOn = mode !== 'over';
   // 도구 쪽 ‘확인할 것’ 칸(디스크가 차 가는 VM · 꺼진 VM) — insight-tools 의 훅(checkItems = useVmToolChecks). 조기 return 위에서 늘 부른다.
-  const toolChecks = checkItems({ vcIds: toolIds, canTool: insightOn ? canTool : () => false });
+  const toolChecks = checkItems({ vcIds: toolIds, canTool: insightOn ? toolCan : () => false });
   // 게스트 파티션 · Optimization 요약은 insight-tools 의 칸(useToolSummary — 경로 · 쿼리 · 옵션이 같으면 요청 한 번을 나눠 본다)을 같이 본다.
   //   지도 ‘디스크 초과 VM 비율’ · 회수 후보의 CPU · 메모리 후보 수가 이 값 — 따로 부르면 캐시 없는 게스트 파티션 조회가 두 번 나간다.
   const gpOk = insightOn && canTool('guest-partition');
@@ -73,7 +77,6 @@ export default function VmInsight({ mode = 'insight', filters = {}, scopeIds = n
   const distOpen = mode === 'insight' && !folded.dist;
   const hostCorp = useLazyJson('/hosts/corp', region ? { region } : {}, distOpen);
 
-  const picked = useMemo(() => pickRows(rows, ids), [rows, ids]);
   const s = useMemo(() => sumVmRows(picked.used), [picked]);
   const usedIds = useMemo(() => picked.used.map((r) => String(r.id)), [picked]);
   const tops = useMemo(() => mergedTops(data?.top, usedIds, numOrNull(th.topN) ?? 5), [data, usedIds, th.topN]);
@@ -90,6 +93,7 @@ export default function VmInsight({ mode = 'insight', filters = {}, scopeIds = n
 
   if (mode === 'over') {
     if (!canTool('waste')) return <div className="ins-note">이 계정에는 ‘Optimization’ 도구 권한이 없어 과할당 요약을 볼 수 없습니다 — 관리자에게 요청하세요(설정 › 사용자 관리 › 특수 기능 도구별 접근).</div>;
+    if (toolIdsRaw == null) return <div className="ins-note">고른 법인이 모두 값이 오래됐거나 아직 수집하지 못해 과할당 요약에 더할 법인이 없습니다.</div>;
     return <div className="ins"><VmOverView vcIds={toolIds} rows={rows} canTool={canTool} /></div>;
   }
 
@@ -145,13 +149,13 @@ export default function VmInsight({ mode = 'insight', filters = {}, scopeIds = n
   // ── 묶음 접힘 요약(접었을 때 한 줄) ──
   const sig = s.signals || {};
   const foldSummary = {
-    now: `법인 ${fmtN(picked.used.length)}곳 · 지역 ${fmtN(regions.length)}곳 · CPU 상위 VM ${fmtN(tops.cpuTop.length)}대`,
-    capacity: `오래된 스냅샷 ${fmtN(sig.snapOld)}대 · 정지 VM ${fmtN(s.reclaim?.offCount)}대 · 특수 기능 요약(디스크 · 꺼진 VM · 추이)`,
+    now: `법인 ${fmtU(picked.used.length, '곳')} · 지역 ${fmtU(regions.length, '곳')} · CPU 상위 VM ${fmtU(tops.cpuTop.length, '대')}`,
+    capacity: `오래된 스냅샷 ${fmtU(sig.snapOld, '대')} · 정지 VM ${fmtU(s.reclaim?.offCount, '대')} · 특수 기능 요약(디스크 · 꺼진 VM · 추이)`,
     perf: 'CPU 경합 · 디스크 지연(특수 기능 요약)',
     config: 'VM 구성 점검(특수 기능 요약)',
-    dist: `OS ${fmtN(s.os?.kinds?.length)}종 · 구동 ${shareText(s.on, total)} · Tools 업그레이드 필요 ${fmtN(s.tools?.version?.needUpgrade)} · 회수 후보`,
+    dist: `OS ${fmtU(s.os?.kinds?.length, '종')} · 구동 ${shareText(s.on, total)} · Tools 업그레이드 필요 ${fmtN(s.tools?.version?.needUpgrade)} · 회수 후보`,
   };
-  const groupShown = { now: true, capacity: true, perf: canTool('contention'), config: canTool('vm-hygiene'), dist: true };
+  const groupShown = { now: true, capacity: true, perf: toolCan('contention'), config: toolCan('vm-hygiene'), dist: true };
 
   // ── 지금 볼 VM(STable — 법인별 상위 N 을 합쳐 다시 N) ──
   const topRows = tops.cpuTop;
@@ -220,7 +224,7 @@ export default function VmInsight({ mode = 'insight', filters = {}, scopeIds = n
             <>
               <div className={`ins-row b${wide ? ' wide' : ''}`}>{mapPanel}{regionPanel}</div>
               <section className="ins-panel" aria-label="지금 볼 VM">
-                <PanelHead title="지금 볼 VM" hint="지금 범위에서 CPU 사용률이 높은 순 · 이름을 누르면 VM 개체 보기" right={`${fmtN(topRows.length)}대`} />
+                <PanelHead title="지금 볼 VM" hint="지금 범위에서 CPU 사용률이 높은 순 · 이름을 누르면 VM 개체 보기" right={`${fmtU(topRows.length, '대')}`} />
                 {topRows.length ? (
                   <STable className="vmh-corp-table" minWidth={760}>
                     <thead><tr><th>VM</th><th>법인</th><th>OS</th><th>할당</th><th>CPU</th><th>메모리</th></tr></thead>
@@ -244,14 +248,14 @@ export default function VmInsight({ mode = 'insight', filters = {}, scopeIds = n
           {k === 'capacity' && (
             <>
               {/* 시안 순서(§4-1 · §4-3 · §8 · §10): 디스크 → 오래된 스냅샷 → 꺼진 VM → 추이 */}
-              <VmToolPanels vcIds={toolIds} rows={rows} group="capacity" canTool={canTool} only={['disk']} />
+              <VmToolPanels vcIds={toolIds} rows={rows} group="capacity" canTool={toolCan} only={['disk']} />
               <SnapPanel s={s} th={th} tops={tops} nameOf={nameOf} />
-              <VmToolPanels vcIds={toolIds} rows={rows} group="capacity" canTool={canTool} only={['off', 'trend']} />
+              <VmToolPanels vcIds={toolIds} rows={rows} group="capacity" canTool={toolCan} only={['off', 'trend']} />
             </>
           )}
-          {k === 'perf' && <VmToolPanels vcIds={toolIds} rows={rows} group="perf" canTool={canTool} />}
-          {k === 'config' && <VmToolPanels vcIds={toolIds} rows={rows} group="config" canTool={canTool} />}
-          {k === 'dist' && <DistPanels s={s} th={th} ids={toolIds} canTool={canTool} waste={waste} hostCorp={hostCorp} />}
+          {k === 'perf' && <VmToolPanels vcIds={toolIds} rows={rows} group="perf" canTool={toolCan} />}
+          {k === 'config' && <VmToolPanels vcIds={toolIds} rows={rows} group="config" canTool={toolCan} />}
+          {k === 'dist' && <DistPanels s={s} th={th} ids={toolIds} canTool={toolCan} waste={waste} hostCorp={hostCorp} />}
         </FoldGroup>
       ))}
     </div>
@@ -269,9 +273,9 @@ function SnapPanel({ s, th, tops, nameOf }) {
     <div key={v.id} className="ins-pr" title={`${v.name} · ${nameOf.get(String(v.vcenterId)) || v.vcenterId}${v.oldestName ? ` · 가장 오래된 스냅샷 ‘${v.oldestName}’` : ''}`}>
       <span>
         <a className="nm" href={v.vcenterId && v.id ? vcHash(v.vcenterId, { type: 'vm', id: v.id }) : undefined}>{v.name}</a>
-        <span className="sb">{`${nameOf.get(String(v.vcenterId)) || v.vcenterId} · 스냅샷 ${fmtN(v.snapCount)}개${v.oldestName ? ` · ${v.oldestName}` : ''}${v.power === 'off' ? ' · 전원 꺼짐' : ''}`}</span>
+        <span className="ins-sb">{`${nameOf.get(String(v.vcenterId)) || v.vcenterId} · 스냅샷 ${fmtU(v.snapCount, '개')}${v.oldestName ? ` · ${v.oldestName}` : ''}${v.power === 'off' ? ' · 전원 꺼짐' : ''}`}</span>
       </span>
-      <span><span className="ins-track"><i style={{ width: `${w}%`, background: bg }} /></span><span className="fr">{`${fmtN(v.days)}일 · ${gbText(v.snapGB)}`}</span></span>
+      <span><span className="ins-track"><i style={{ width: `${w}%`, background: bg }} /></span><span className="fr">{`${fmtU(v.days, '일')} · ${gbText(v.snapGB)}`}</span></span>
       <span className="big">{big}</span>
     </div>
   );
@@ -285,7 +289,7 @@ function SnapPanel({ s, th, tops, nameOf }) {
           <Hero value={fmtN(r.snapOld)} text={`기준을 넘긴 VM · 전체 VM 의 ${shareText(r.snapOld, s.total)}`} />
           <MiniStats stats={[
             { key: 'd90', value: fmtN(r.snapAge?.d90p), text: `${(th.snapAgeEdgesDays || [])[1] ?? '—'}일 넘게 둔 VM`, color: '#fca5a5' },
-            { key: 'gb', value: gbText(r.snapOldGB), text: `이 VM 들의 스냅샷 크기${(numOrNull(r.snapOldGBUnknown) ?? 0) > 0 ? ` · 모름 ${fmtN(r.snapOldGBUnknown)}대` : ''}` },
+            { key: 'gb', value: gbText(r.snapOldGB), text: `이 VM 들의 스냅샷 크기${(numOrNull(r.snapOldGBUnknown) ?? 0) > 0 ? ` · 모름 ${fmtU(r.snapOldGBUnknown, '대')}` : ''}` },
             { key: 'n', value: fmtN(r.snapOldSnaps), text: '스냅샷 수' },
           ]} />
           <StackBar segs={bands} tall />
@@ -294,7 +298,7 @@ function SnapPanel({ s, th, tops, nameOf }) {
         </div>
         <div className="ins-lst">
           <div className="ins-lh"><b>가장 오래된 VM</b><span>지난 일수가 많은 순</span></div>
-          {tops.snapOldest.length ? tops.snapOldest.map((v) => line(v, `${fmtN(v.days)}일`, barPct(v.days, maxDays), dayBg(v.days))) : <div className="ins-note">이 범위에는 없습니다.</div>}
+          {tops.snapOldest.length ? tops.snapOldest.map((v) => line(v, `${fmtU(v.days, '일')}`, barPct(v.days, maxDays), dayBg(v.days))) : <div className="ins-note">이 범위에는 없습니다.</div>}
         </div>
         <div className="ins-lst">
           <div className="ins-lh"><b>스냅샷이 큰 VM</b><span>기준을 넘긴 VM 중 크기가 큰 순</span></div>
@@ -313,7 +317,7 @@ function DistPanels({ s, th, ids, canTool, waste, hostCorp }) {
     { key: 'linux', label: 'Linux', n: fam.linux, bg: FAMILY_BG.linux }, { key: 'windows', label: 'Windows', n: fam.windows, bg: FAMILY_BG.windows },
     { key: 'other', label: '기타', n: fam.other, bg: FAMILY_BG.other }, { key: 'unknown', label: '모름', n: fam.unknown, bg: C.none },
   ];
-  const os = osRows(s.os, th.osKindsShown).map((o) => ({ ...o, share: shareText(o.n, total), bg: o.unknown ? C.none : o.rest ? C.gray : (FAMILY_BG[o.family] || C.faint), tip: `${o.name} ${fmtN(o.n)}대` }));
+  const os = osRows(s.os, th.osKindsShown).map((o) => ({ ...o, share: shareText(o.n, total), bg: o.unknown ? C.none : o.rest ? C.gray : (FAMILY_BG[o.family] || C.faint), tip: `${o.name} ${fmtU(o.n, '대')}` }));
   const cx = s.connection || {};
   const tv = s.tools?.version || {};
   const ts = s.tools?.status || {};
@@ -332,16 +336,16 @@ function DistPanels({ s, th, ids, canTool, waste, hostCorp }) {
   const hostAvg = hostAvgMemGB(hostCorp.data?.corps, ids);
   const memIdleGB = mbToGb(w?.memIdleMB);
   const eq = hostsEquivalent(memIdleGB, hostAvg);
-  const unk = (n, what = '') => ((numOrNull(n) ?? 0) > 0 ? ` · ${what}모름 ${fmtN(n)}대` : '');
+  const unk = (n, what = '') => ((numOrNull(n) ?? 0) > 0 ? ` · ${what}모름 ${fmtU(n, '대')}` : '');
   const reclaim = [
-    { key: 'off', title: '정지 VM', big: `${fmtN(r.offCount)}대`, desc: `디스크 ${gbText(r.offDiskGB)} 를 잡고 있습니다(템플릿 제외${unk(r.offDiskUnknown, '디스크 ')}) — 오래 꺼 둔 VM 은 보관(백업 뒤 삭제) 후보입니다.` },
-    { key: 'snap', title: '스냅샷', big: `${fmtN(r.snapVms)}대`, desc: `스냅샷 ${fmtN(r.snapCount)}개 · 합 ${gbText(r.snapGB)}${unk(r.snapGBUnknown, '크기 ')} · 기준을 넘긴 VM ${fmtN(r.snapOld)}대.` },
-    { key: 'orphan', title: '고아 · 접근 불가', big: `${fmtN(r.orphan)}대`, desc: `고아 ${fmtN(cx.orphaned)} · 접근 불가 ${fmtN(cx.inaccessible)} — 목록에서 지우거나 다시 등록할 대상입니다.` },
+    { key: 'off', title: '정지 VM', big: `${fmtU(r.offCount, '대')}`, desc: `디스크 ${gbText(r.offDiskGB)} 를 잡고 있습니다(템플릿 제외${unk(r.offDiskUnknown, '디스크 ')}) — 오래 꺼 둔 VM 은 보관(백업 뒤 삭제) 후보입니다.` },
+    { key: 'snap', title: '스냅샷', big: `${fmtU(r.snapVms, '대')}`, desc: `스냅샷 ${fmtU(r.snapCount, '개')} · 합 ${gbText(r.snapGB)}${unk(r.snapGBUnknown, '크기 ')} · 기준을 넘긴 VM ${fmtU(r.snapOld, '대')}.` },
+    { key: 'orphan', title: '고아 · 접근 불가', big: `${fmtU(r.orphan, '대')}`, desc: `고아 ${fmtN(cx.orphaned)} · 접근 불가 ${fmtN(cx.inaccessible)} — 목록에서 지우거나 다시 등록할 대상입니다.` },
     ...(canTool('waste') ? [{
       key: 'waste', title: 'CPU · 메모리 과할당 후보',
-      big: w ? `${fmtN(w.cpuCand)} · ${fmtN(w.memCand)}대` : (waste.loading ? '받는 중' : '—'),
+      big: w ? `${fmtN(w.cpuCand)} · ${fmtU(w.memCand, '대')}` : (waste.loading ? '받는 중' : '—'),
       desc: w
-        ? `특수 기능 ‘Optimization’ 의 판정 그대로 — CPU 후보 ${fmtN(w.cpuCand)}대 · 메모리 후보 ${fmtN(w.memCand)}대 · 할당 대비 미사용 메모리 ${gbText(memIdleGB)}${eq != null ? `(호스트 약 ${eq}대분 — 고른 범위 호스트 한 대의 평균 메모리 ${gbText(hostAvg)} 기준)` : ''}.`
+        ? `특수 기능 ‘Optimization’ 의 판정 그대로 — CPU 후보 ${fmtU(w.cpuCand, '대')} · 메모리 후보 ${fmtU(w.memCand, '대')} · 할당 대비 미사용 메모리 ${gbText(memIdleGB)}${eq != null ? `(호스트 약 ${eq}대분 — 고른 범위 호스트 한 대의 평균 메모리 ${gbText(hostAvg)} 기준)` : ''}.`
         : (waste.error ? `Optimization 요약을 받지 못했습니다(${waste.error.message || waste.error}).` : waste.loading ? 'Optimization 요약을 받는 중입니다.' : '이 범위의 Optimization 줄이 없습니다.'),
       link: '#/tools/waste',
     }] : []),
@@ -379,8 +383,8 @@ function DistPanels({ s, th, ids, canTool, waste, hostCorp }) {
             ...((numOrNull(ts.unread) ?? 0) > 0 ? [{ key: 'u', label: '모름', value: fmtN(ts.unread) }] : []),
           ]} />
           <div className="ins-h3">하드웨어 버전</div>
-          <RankBars small rows={hw.rows.map((x) => ({ key: x.key, name: x.name, n: x.n, share: shareText(x.n, total), tip: `${x.name} ${fmtN(x.n)}대` }))} />
-          {(hw.unread ?? 0) > 0 && <div className="ins-note">하드웨어 버전을 못 읽은 VM {fmtN(hw.unread)}대</div>}
+          <RankBars small rows={hw.rows.map((x) => ({ key: x.key, name: x.name, n: x.n, share: shareText(x.n, total), tip: `${x.name} ${fmtU(x.n, '대')}` }))} />
+          {(hw.unread ?? 0) > 0 && <div className="ins-note">하드웨어 버전을 못 읽은 VM {fmtU(hw.unread, '대')}</div>}
         </section>
       </div>
       <div className="ins-row c">
@@ -397,8 +401,8 @@ function DistPanels({ s, th, ids, canTool, waste, hostCorp }) {
             </div>
           </div>
           <div className="ins-note">
-            {crit != null ? `${crit}% 이상 — CPU ${fmtN(s.over90?.cpu)}대 · 메모리 ${fmtN(s.over90?.mem)}대. ` : ''}
-            사용률 모름 — CPU {fmtN(s.usageUnknown?.cpu)}대 · 메모리 {fmtN(s.usageUnknown?.mem)}대(평균 · 칸에 넣지 않음)
+            {crit != null ? `${crit}% 이상 — CPU ${fmtU(s.over90?.cpu, '대')} · 메모리 ${fmtU(s.over90?.mem, '대')}. ` : ''}
+            사용률 모름 — CPU {fmtU(s.usageUnknown?.cpu, '대')} · 메모리 {fmtU(s.usageUnknown?.mem, '대')}(평균 · 칸에 넣지 않음)
             {((numOrNull(s.histOut?.cpu) ?? 0) + (numOrNull(s.histOut?.mem) ?? 0)) > 0 ? ` · 칸 밖 값(음수) CPU ${fmtN(s.histOut?.cpu)} · 메모리 ${fmtN(s.histOut?.mem)}` : ''}.
           </div>
         </section>
@@ -408,7 +412,7 @@ function DistPanels({ s, th, ids, canTool, waste, hostCorp }) {
           <RankBars small rows={vc.rows.map((x) => ({ key: x.key, name: x.name, n: x.n, share: shareText(x.n, total) }))} />
           <div className="ins-h3">메모리</div>
           <RankBars small rows={mg.rows.map((x) => ({ key: x.key, name: x.name, n: x.n, share: shareText(x.n, total) }))} />
-          {((vc.unknown ?? 0) > 0 || (mg.unknown ?? 0) > 0) && <div className="ins-note">못 읽음 — vCPU {fmtN(vc.unknown)}대 · 메모리 {fmtN(mg.unknown)}대</div>}
+          {((vc.unknown ?? 0) > 0 || (mg.unknown ?? 0) > 0) && <div className="ins-note">못 읽음 — vCPU {fmtU(vc.unknown, '대')} · 메모리 {fmtU(mg.unknown, '대')}</div>}
         </section>
         <section className="ins-panel" aria-label="회수 · 정리 후보">
           <PanelHead title="회수 · 정리 후보" hint="돌려받을 수 있는 자원" />

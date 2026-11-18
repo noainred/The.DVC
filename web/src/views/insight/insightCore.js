@@ -29,6 +29,21 @@ export function pickRows(rows, ids) {
 }
 
 /**
+ * 도구 칸 · 도구 패널이 더할 법인 id — 본체 합(pickRows used)과 **같은 법인 집합**(dbg3221 2회차: 오래됨 법인이 ‘확인할 것’ 의 도구 칸 · 패널 합에만 섞였다).
+ *  · 응답이 아직 없으면 ids 그대로(이전 규칙).
+ *  · 고른 법인(ids 가 비면 응답의 줄 전부) 중 오래됨 · 모름이 없으면 이전 규칙 그대로 — ids, 리전만 골랐으면 응답의 법인(그 리전) · 둘 다 없으면 [](= 도구 응답 전부).
+ *  · 오래됨 · 모름이 있으면 used 의 id 만. used 가 비면 null(= 더할 법인이 없다 — 도구 쪽에서 [] 는 ‘전부’ 라는 뜻이라 쓰면 안 된다).
+ * @returns {string[]|null}
+ */
+export function toolIdsOf({ ids = [], region = '', rows = [], picked = null } = {}) {
+  const list = Array.isArray(rows) ? rows : [];
+  const want = Array.isArray(ids) ? ids : [];
+  if (!list.length || !picked) return want;
+  if (!picked.stale.length && !picked.unknown.length) return want.length || !region ? want : list.map((r) => String(r.id));
+  return picked.used.length ? picked.used.map((r) => String(r.id)) : null;
+}
+
+/**
  * 값 하나를 더한다 — 수 · 수 배열(칸마다) · 객체(키마다) 를 재귀로. 못 읽은 값(null · 글자 아닌 것)은 더하지 않는다.
  * 둘 다 못 읽었으면 null(0 이 아니다). 객체 배열(목록)은 이 함수로 더하지 않는다 — 호출부가 키로 합친다.
  */
@@ -97,6 +112,8 @@ export function shareText(part, whole) {
 }
 /** 천 단위 쉼표 — 모르면 '—'. */
 export const fmtN = (v) => { const n = numOrNull(v); return n == null ? '—' : Math.round(n).toLocaleString('en-US'); };
+/** 수 + 단위 — 값이 없으면 단위 없이 '—'(BUG-20 · dbg3221 2회차: `${fmtN(x)}대` 는 null 이면 ‘—대’ 가 됐다). 분석 화면의 수 + 단위는 이것으로. */
+export const fmtU = (v, unit) => { const t = fmtN(v); return t === '—' ? t : `${t}${unit}`; };
 /** GB → 'x GB' · 1,024 GB 이상은 'x.x TB'. 모르면 '—'(단위 없음). */
 export function gbText(gb) {
   const n = numOrNull(gb);

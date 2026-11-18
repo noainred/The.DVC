@@ -169,7 +169,7 @@ a.ins-td:hover { border-color: var(--accent); }
 .ins-pr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 150px) 70px; gap: 0 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border-soft); min-width: 0; }
 .ins-pr > span { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .ins-pr .nm { font-size: 13px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ins-pr .sb, .ins-pr .fr { font-size: 11.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ins-pr .ins-sb, .ins-pr .fr { font-size: 11.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ins-pr .big { font-family: var(--mono); font-size: 16px; font-weight: 800; text-align: right; white-space: nowrap; color: var(--text); }
 .ins-pr a.nm { text-decoration: none; }
 .ins-pr a.nm:hover { color: #93c5fd; }

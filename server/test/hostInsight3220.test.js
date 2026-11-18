@@ -247,6 +247,27 @@ test('③ 범위 계정은 범위 밖 줄이 없다 · vcenterIds 는 받지 않
   assert.deepEqual(reg.j.rows.map((r) => r.id), ['vc-a'], 'region 은 그 안에서 리전만');
 });
 
+// dbg3221(v3.22.1): 범위 바는 등록 데이터에만 있는 리전('Unknown' — registry.js 가 위치 없는 vCenter 에 둔다 · 사용자가 적은 '중동')도 고른다.
+//   정해진 4리전만 받으면 그 글자를 버려 전 법인 합이 나왔다 — /vms/insight 처럼 location.region 과 그대로 비교한다. /hosts/corp(VM 분석 분포가 region 으로 부른다)도 같다.
+test('③ dbg3221 정해진 4리전 밖 리전(Unknown · 중동)도 그 리전 법인만 — 전 법인 합으로 넓히지 않는다', async () => {
+  const snap = buildSnap();
+  snap.vcenters = snap.vcenters.map((v) => (v.id === 'vc-down' ? { ...v, location: { region: 'Unknown' } } : v.id === 'vc-b' ? { ...v, location: { region: '중동' } } : v));
+  store.snapshot = { ...(store.get() || {}), ...snap };
+  try {
+    const unk = await get('/api/hosts/insight?region=Unknown');
+    assert.equal(unk.status, 200, unk.text.slice(0, 200));
+    assert.equal(unk.j.region, 'Unknown', '응답이 고른 리전을 그대로 밝힌다(null 로 버리지 않는다)');
+    assert.deepEqual(unk.j.rows.map((r) => r.id), ['vc-down'], 'Unknown 리전 법인만');
+    const me = await get(`/api/hosts/insight?region=${encodeURIComponent('중동')}`);
+    assert.deepEqual(me.j.rows.map((r) => r.id), ['vc-b'], '사용자가 적은 리전 글자도 그 리전만');
+    assert.ok(me.j.clusters.every((x) => x.vcenterId === 'vc-b'));
+    const vmi = await get(`/api/vms/insight?region=${encodeURIComponent('중동')}`);
+    assert.deepEqual(me.j.rows.map((r) => r.id), vmi.j.rows.map((r) => r.id), 'VM 분석과 같은 법인');
+    const corp = await get(`/api/hosts/corp?region=${encodeURIComponent('중동')}`);
+    assert.deepEqual(corp.j.corps.map((c) => c.id), ['vc-b'], '/hosts/corp 도 그 리전 법인만');
+  } finally { setSnap(); }
+});
+
 test('③ 권한 — inv.hosts 없으면 /hosts/corp 와 같은 거부 · 클러스터 구성 · 하드웨어 · 재부팅 권한이 없으면 그 키가 없다', async () => {
   const v1 = await get('/api/hosts/insight', { role: 'viewer' });
   const v0 = await get('/api/hosts/corp', { role: 'viewer' });

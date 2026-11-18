@@ -21,8 +21,8 @@ export function buildToolChecks({ vcIds = [], canTool, gp = null, waste = null }
     const v = guestPartView(gp?.data, vcIds);
     out.push({
       key: 'disk-filling', label: '디스크가 차 가는 VM',
-      value: v ? fmtN(v.overVms) : '—',
-      sub: v ? `위험 ${fmtN(v.crit)} · ${v.soonDays ?? '—'}일 안 가득 ${fmtN(v.soon)}` : pending(gp),
+      value: v && !v.noValues ? fmtN(v.overVms) : '—',
+      sub: v?.noValues ? '아직 수집된 파티션 값이 없습니다' : v ? `위험 ${fmtN(v.crit)} · ${v.soonDays ?? '—'}일 안 가득 ${fmtN(v.soon)}` : pending(gp),
       tone: v && (v.crit || 0) > 0 ? 'crit' : v && (v.overVms || 0) > 0 ? 'warn' : '',
       href: toolHref('guest-partition'),
       title: `아래 ‘디스크가 차 가는 VM’ 패널 — 특수 기능 ‘${toolLabel('guest-partition')}’ 의 판정`,

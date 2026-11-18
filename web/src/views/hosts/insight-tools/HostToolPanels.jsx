@@ -16,7 +16,7 @@ import '../../vms/insight-tools/vmTools.css';
 import { toolAllowed } from '../../../api.js';
 import { unitText } from '../../unitText.js';
 import { useToolSummary } from '../../vms/insight-tools/useToolSummary.js';
-import { fmtN, fmt1, gbText, corpNameOf, missingText, synthNote, barPct, toolLabel, gateOf } from '../../vms/insight-tools/toolSumText.js';
+import { fmtN, fmtU, fmt1, gbText, corpNameOf, missingText, synthNote, barPct, toolLabel, gateOf } from '../../vms/insight-tools/toolSumText.js';
 import { PanelHead, PanelState, ToolLink, Gauge, TopTable, NameCell } from '../../vms/insight-tools/ToolParts.jsx';
 import { HYGIENE_CODE_ROWS, WARM, NEUTRAL } from '../../vms/insight-tools/vmToolPanelsText.js';
 import { Hero, MiniStats, RankBars } from '../../insight/InsightParts.jsx';
@@ -48,17 +48,17 @@ function ContentionPanel({ vcIds, rows }) {
   return (
     <section className="vit-panel" aria-label="CPU 경합과 디스크 지연(호스트)">
       <PanelHead title="CPU 경합 · 디스크 지연" hint={`VM 이 CPU 를 기다리는 호스트와 느린 데이터스토어 — 특수 기능 ‘${toolLabel('contention')}’ 의 요약입니다`} rule={rule} q={q} onReload={q.reload} />
-      <PanelState q={q} waitText="경합 요약을 받는 중입니다…">
+      <PanelState q={q} view={v} waitText="경합 요약을 받는 중입니다…">
         {v && (
           <div className="vit-gp">
             <div className="vit-sum">
-              <Hero value={fmtN(v.hostsReadyCrit)} text={`대 — CPU 대기(Ready)가 ${unitText(th.readyCrit, '%')} 이상인 VM 이 있는 호스트입니다(측정한 호스트 ${fmtN(v.hostsMeasured)}대 중)`} />
+              <Hero value={fmtN(v.hostsReadyCrit)} text={`대 — CPU 대기(Ready)가 ${unitText(th.readyCrit, '%')} 이상인 VM 이 있는 호스트입니다(측정한 호스트 ${fmtU(v.hostsMeasured, '대')} 중)`} />
               <Stats items={[
-                { key: 'hc', tone: 's', big: `${fmtN(v.hostsContended)}대`, text: '경합 VM 이 있는 호스트(대기 · Co-stop 경고 포함)', title: '도구의 호스트 표에서 경합 VM 이 하나 이상인 호스트' },
-                { key: 'hd', tone: 'c', big: `${fmtN(v.hostsDisk)}대`, text: `디스크 지연이 큰 호스트(${unitText(th.diskWarn, 'ms')} 이상)`, title: '호스트가 보고한 디스크 지연이 경고 기준 이상' },
-                { key: 'ds', tone: 's', big: `${fmtN(v.dsSlow)}개`, text: '느린 데이터스토어', title: '읽기 · 쓰기 응답이 경고 기준 이상인 데이터스토어' },
+                { key: 'hc', tone: 's', big: `${fmtU(v.hostsContended, '대')}`, text: '경합 VM 이 있는 호스트(대기 · Co-stop 경고 포함)', title: '도구의 호스트 표에서 경합 VM 이 하나 이상인 호스트' },
+                { key: 'hd', tone: 'c', big: `${fmtU(v.hostsDisk, '대')}`, text: `디스크 지연이 큰 호스트(${unitText(th.diskWarn, 'ms')} 이상)`, title: '호스트가 보고한 디스크 지연이 경고 기준 이상' },
+                { key: 'ds', tone: 's', big: `${fmtU(v.dsSlow, '개')}`, text: '느린 데이터스토어', title: '읽기 · 쓰기 응답이 경고 기준 이상인 데이터스토어' },
               ]} />
-              <div className="vit-note">연결된 호스트 {fmtN(v.hostsConnected)}대 중 {fmtN(v.hostsMeasured)}대를 측정했습니다 — 측정하지 못한 {fmtN(v.hostsNotMeasured)}대는 판정 밖입니다.{(v.unmatchedDs || 0) > 0 ? ` 이름을 모르는 데이터스토어 보고 ${fmtN(v.unmatchedDs)}건은 세지 않았습니다.` : ''}</div>
+              <div className="vit-note">연결된 호스트 {fmtU(v.hostsConnected, '대')} 중 {fmtU(v.hostsMeasured, '대')}를 측정했습니다 — 측정하지 못한 {fmtU(v.hostsNotMeasured, '대')}는 판정 밖입니다.{(v.unmatchedDs || 0) > 0 ? ` 이름을 모르는 데이터스토어 보고 ${fmtU(v.unmatchedDs, '건')}은 세지 않았습니다.` : ''}</div>
               {v.initial && <div className="vit-note warn">첫 측정 중입니다 — 수가 아직 다 차지 않았습니다.</div>}
               <ToolLink toolKey="contention" vcIds={vcIds}>‘{toolLabel('contention')}’ 에서 모두 보기 →</ToolLink>
               <Foot resp={q.data} missing={v.missing} nameOf={nameOf} />
@@ -68,10 +68,10 @@ function ContentionPanel({ vcIds, rows }) {
               <TopTable label="경합 · 지연이 큰 호스트" cols={[{ label: '호스트', width: '46%' }, { label: '대기 · 이웃' }, { label: '경합 VM', cls: 'r', width: '72px' }]}
                 empty="이 범위에는 경합 · 지연 판정이 붙은 호스트가 없습니다."
                 rows={v.hosts.map((x, i) => ({ key: `${x.id}-${i}`, cells: [
-                  { node: <NameCell name={x.name} sub={`${nameOf(x.vcenterId)}${x.cluster ? ` · ${x.cluster}` : ''} · VM ${fmtN(x.vmCount)}대`} />, sort: x.name },
+                  { node: <NameCell name={x.name} sub={`${nameOf(x.vcenterId)}${x.cluster ? ` · ${x.cluster}` : ''} · VM ${fmtU(x.vmCount, '대')}`} />, sort: x.name },
                   { node: <Gauge w={barPct(x.contended, hMax)} bg={sevColor(x.diskSev || ((x.contended || 0) > 0 ? 'warn' : null))}
                     note={`대기 최고 ${x.worstReady == null ? '—' : `${fmt1(x.worstReady)}%`}${Array.isArray(x.neighbors) && x.neighbors.length ? ` · 부하가 큰 이웃 ${x.neighbors.map((n) => n.name).join(', ')}` : ''}${x.diskMaxMs != null ? ` · 디스크 ${fmt1(x.diskMaxMs)} ms` : ''}`} />, sort: x.worstReady },
-                  { node: <span className="vit-big hero">{`${fmtN(x.contended)}대`}</span>, sort: x.contended, cls: 'r' },
+                  { node: <span className="vit-big hero">{`${fmtU(x.contended, '대')}`}</span>, sort: x.contended, cls: 'r' },
                 ] }))} />
             </div>
             <div className="vit-lst">
@@ -99,19 +99,19 @@ function HygienePanel({ vcIds, rows }) {
   return (
     <section className="vit-panel" aria-label="ESXi 호스트 구성 점검">
       <PanelHead title="ESXi 호스트 구성 점검" hint={`인증서 · 재부팅 · SSH · 시각 동기화 등 보안과 구성 — 특수 기능 ‘${toolLabel('host-hygiene')}’ 의 요약입니다`} q={q} onReload={q.reload} />
-      <PanelState q={q} waitText="구성 점검 요약을 받는 중입니다…">
+      <PanelState q={q} view={v} waitText="구성 점검 요약을 받는 중입니다…">
         {v && (
           <div className="vit-gp">
             <div className="vit-sum">
               <Hero value={fmtN(v.crit)} text="대 — 지금 조치가 필요합니다(심각 판정이 붙은 호스트)" />
               <Stats items={[
-                { key: 'p', tone: 's', big: `${fmtN(v.problem)}대`, text: '문제가 하나 이상인 호스트', title: '점검 항목에 하나라도 걸린 호스트' },
-                { key: 's', tone: 's', big: `${fmtN(v.ssh)}대`, text: 'SSH 가 켜져 있는 호스트', title: '작업 뒤 끄지 않은 SSH — 보안 점검 대상' },
-                { key: 'o', big: `${fmtN(v.outOfJudgment)}대`, text: '판정 밖 — 구성 값을 못 받았거나 끊긴 호스트', title: `구성 값을 못 받은 호스트 ${fmtN(v.notCollected)}대 · 끊긴 호스트 ${fmtN(v.disconnected)}대 — 문제 없음이 아니라 모르는 것입니다` },
+                { key: 'p', tone: 's', big: `${fmtU(v.problem, '대')}`, text: '문제가 하나 이상인 호스트', title: '점검 항목에 하나라도 걸린 호스트' },
+                { key: 's', tone: 's', big: `${fmtU(v.ssh, '대')}`, text: 'SSH 가 켜져 있는 호스트', title: '작업 뒤 끄지 않은 SSH — 보안 점검 대상' },
+                { key: 'o', big: `${fmtU(v.outOfJudgment, '대')}`, text: '판정 밖 — 구성 값을 못 받았거나 끊긴 호스트', title: `구성 값을 못 받은 호스트 ${fmtU(v.notCollected, '대')} · 끊긴 호스트 ${fmtU(v.disconnected, '대')} — 문제 없음이 아니라 모르는 것입니다` },
               ]} />
               <div className="vit-note">정보 수준 판정은 여기서 뺐습니다 — 도구에서 봅니다.</div>
               {v.scan && v.scan.enabled === false && <div className="vit-note warn">호스트 구성 수집이 꺼져 있습니다 — 아래 수는 마지막으로 받은 값입니다.</div>}
-              {(v.partial || v.notReadVcenters > 0) && <div className="vit-note warn">값을 읽지 못한 법인이 있어 일부만 센 수입니다{v.notReadVcenters > 0 ? `(${fmtN(v.notReadVcenters)}곳)` : ''}.</div>}
+              {(v.partial || v.notReadVcenters > 0) && <div className="vit-note warn">값을 읽지 못한 법인이 있어 일부만 센 수입니다{v.notReadVcenters > 0 ? `(${fmtU(v.notReadVcenters, '곳')})` : ''}.</div>}
               {v.initial && <div className="vit-note warn">첫 수집 중입니다 — 수가 아직 다 차지 않았습니다.</div>}
               <ToolLink toolKey="host-hygiene" vcIds={vcIds}>‘{toolLabel('host-hygiene')}’ 에서 모두 보기 →</ToolLink>
               <Foot resp={q.data} missing={v.missing} nameOf={nameOf} />
@@ -119,17 +119,17 @@ function HygienePanel({ vcIds, rows }) {
             <div className="vit-lst">
               <div className="vit-lh"><b>문제 종류</b><span>심각 · 경고 판정 — 해당하는 호스트 수</span></div>
               {!v.codes.length && <div className="vit-empty">이 범위에는 심각 · 경고 판정이 없습니다.</div>}
-              <RankBars rows={v.codes.slice(0, HYGIENE_CODE_ROWS).map((c) => ({ key: c.code, name: c.title, n: c.n, bg: sevColor(c.sev), tip: `${c.title} · ${fmtN(c.n)}대` }))} />
-              {v.codes.length > HYGIENE_CODE_ROWS && <div className="vit-note">그 밖 {fmtN(v.codes.length - HYGIENE_CODE_ROWS)}종은 도구에서 봅니다.</div>}
+              <RankBars rows={v.codes.slice(0, HYGIENE_CODE_ROWS).map((c) => ({ key: c.code, name: c.title, n: c.n, bg: sevColor(c.sev), tip: `${c.title} · ${fmtU(c.n, '대')}` }))} />
+              {v.codes.length > HYGIENE_CODE_ROWS && <div className="vit-note">그 밖 {fmtU(v.codes.length - HYGIENE_CODE_ROWS, '종')}은 도구에서 봅니다.</div>}
             </div>
             <div className="vit-lst">
-              <div className="vit-lh"><b>인증서가 만료된 호스트</b><span>만료된 지 오래된 순 · 전체 {fmtN(v.certExpired)}대 · 곧 만료 {fmtN(v.certExpiring)}대</span></div>
+              <div className="vit-lh"><b>인증서가 만료된 호스트</b><span>만료된 지 오래된 순 · 전체 {fmtU(v.certExpired, '대')} · 곧 만료 {fmtU(v.certExpiring, '대')}</span></div>
               <TopTable label="인증서가 만료된 호스트" cols={[{ label: '호스트', width: '52%' }, { label: '버전' }, { label: '지난 일수', cls: 'r', width: '72px' }]}
                 empty="이 범위에는 인증서가 만료된 호스트가 없습니다."
                 rows={v.certList.map((x, i) => ({ key: `${x.id}-${i}`, cells: [
                   { node: <NameCell name={x.name} sub={`${nameOf(x.vcenterId)}${x.cluster ? ` · ${x.cluster}` : ''}`} />, sort: x.name },
                   { node: <span className="vit-sb">{[x.version, x.build].filter(Boolean).join(' · ') || '—'}</span>, sort: x.version || '' },
-                  { node: <span className="vit-big hero">{x.days == null ? '—' : `${fmtN(x.days)}일`}</span>, sort: x.days, cls: 'r' },
+                  { node: <span className="vit-big hero">{x.days == null ? '—' : `${fmtU(x.days, '일')}`}</span>, sort: x.days, cls: 'r' },
                 ] }))} />
             </div>
           </div>
@@ -163,20 +163,20 @@ function DsPanel({ vcIds, rows, canTool }) {
           <div className="vit-sum">
             {f && (
               <>
-                <Hero value={fmtN(f.soon)} text={`개 — 지금 늘어나는 속도면 ${f.soonDays ?? '—'}일 안에 가득 찹니다(데이터스토어 ${fmtN(f.datastores)}개 중)`} />
-                <div className="vit-note">예상일이 없는 데이터스토어 {fmtN(f.noForecast)}개(증가 근거 부족 · 여유 모름 · 늘지 않음 — 가득 안 참이 아닙니다){(f.usageUnknown || 0) > 0 ? ` · 사용률 모름 ${fmtN(f.usageUnknown)}개` : ''}.</div>
-                {(f.synthesized || 0) > 0 && <div className="vit-note warn">증가 속도를 목(mock) 서버가 만들어 낸 예상일 {fmtN(f.synthesized)}개가 섞여 있습니다 — 실제 환경 값이 아닙니다.</div>}
+                <Hero value={fmtN(f.soon)} text={`개 — 지금 늘어나는 속도면 ${f.soonDays ?? '—'}일 안에 가득 찹니다(데이터스토어 ${fmtU(f.datastores, '개')} 중)`} />
+                <div className="vit-note">예상일이 없는 데이터스토어 {fmtU(f.noForecast, '개')}(증가 근거 부족 · 여유 모름 · 늘지 않음 — 가득 안 참이 아닙니다){(f.usageUnknown || 0) > 0 ? ` · 사용률 모름 ${fmtU(f.usageUnknown, '개')}` : ''}.</div>
+                {(f.synthesized || 0) > 0 && <div className="vit-note warn">증가 속도를 목(mock) 서버가 만들어 낸 예상일 {fmtU(f.synthesized, '개')}가 섞여 있습니다 — 실제 환경 값이 아닙니다.</div>}
               </>
             )}
             {canFc && !f && qf.error && <div className="vit-note warn">용량 예측 요약을 받지 못했습니다.</div>}
             <Stats items={[
-              ...(f ? [{ key: 'h', tone: 'c', big: `${fmtN(f.high)}개`, text: `사용률 ${unitText(f.highPct, '%')} 이상`, title: '지금 사용률이 기준 이상인 데이터스토어' }] : []),
+              ...(f ? [{ key: 'h', tone: 'c', big: `${fmtU(f.high, '개')}`, text: `사용률 ${unitText(f.highPct, '%')} 이상`, title: '지금 사용률이 기준 이상인 데이터스토어' }] : []),
               ...(p ? [
-                { key: 'd', tone: 'c', big: `${fmtN(p.dead)}개`, text: `죽은 경로 — 호스트 ${fmtN(p.hostsDead)}대`, title: '스토리지로 가는 경로 중 죽은 것' },
-                { key: 's', tone: 's', big: `${fmtN(p.hostsSingle)}대`, text: '경로가 한 줄뿐인 호스트', title: `이중화가 없는 LUN ${fmtN(p.singlePath)}개 — 경로 하나가 죽으면 끊깁니다` },
+                { key: 'd', tone: 'c', big: `${fmtU(p.dead, '개')}`, text: `죽은 경로 — 호스트 ${fmtU(p.hostsDead, '대')}`, title: '스토리지로 가는 경로 중 죽은 것' },
+                { key: 's', tone: 's', big: `${fmtU(p.hostsSingle, '대')}`, text: '경로가 한 줄뿐인 호스트', title: `이중화가 없는 LUN ${fmtU(p.singlePath, '개')} — 경로 하나가 죽으면 끊깁니다` },
               ] : []),
             ]} />
-            {p && <div className="vit-note">경로 값을 읽은 호스트 {fmtN(p.read)}대 · 판정 밖(경로 값을 못 받은 호스트) {fmtN(p.notCollected)}대.</div>}
+            {p && <div className="vit-note">경로 값을 읽은 호스트 {fmtU(p.read, '대')} · 판정 밖(경로 값을 못 받은 호스트) {fmtU(p.notCollected, '대')}.</div>}
             {canSp && !p && qp.error && <div className="vit-note warn">경로 점검 요약을 받지 못했습니다.</div>}
             {canFc && <ToolLink toolKey="forecast" vcIds={vcIds}>‘{toolLabel('forecast')}’ 에서 모두 보기 →</ToolLink>}
             {canSp && <ToolLink secondary toolKey="storage-paths" vcIds={vcIds}>경로는 ‘{toolLabel('storage-paths')}’ 에서 →</ToolLink>}
@@ -192,7 +192,7 @@ function DsPanel({ vcIds, rows, canTool }) {
                     { node: <NameCell name={x.name} sub={`${nameOf(x.vcenterId)}${x.type ? ` · ${x.type}` : ''} · 남은 ${gbText(x.freeGB)}`} />, sort: x.name },
                     { node: <Gauge w={barPct(x.usagePct, Math.max(100, soonMax))} bg={(Number(x.usagePct) || 0) >= (f.highPct ?? Infinity) ? WARM[3].bg : '#3987e5'}
                       note={`사용률 ${x.usagePct == null ? '—' : `${fmt1(x.usagePct)}%`} · 하루 ${x.growthGBperDay == null ? '—' : `+${gbText(x.growthGBperDay)}`}${x.synthesized ? ' · 목 값' : ''}`} />, sort: x.usagePct },
-                    { node: <span className="vit-big hero">{x.daysToFull == null ? '—' : `${fmtN(x.daysToFull)}일`}</span>, sort: x.daysToFull, cls: 'r', title: '예상일 뿐입니다' },
+                    { node: <span className="vit-big hero">{x.daysToFull == null ? '—' : `${fmtU(x.daysToFull, '일')}`}</span>, sort: x.daysToFull, cls: 'r', title: '예상일 뿐입니다' },
                   ] }))} />
               )}
             </div>
@@ -205,8 +205,8 @@ function DsPanel({ vcIds, rows, canTool }) {
                   empty="이 범위에는 죽은 경로가 있는 호스트가 없습니다."
                   rows={p.deadHosts.map((x, i) => ({ key: `${x.id}-${i}`, cells: [
                     { node: <NameCell name={x.name} sub={`${nameOf(x.vcenterId)}${x.cluster ? ` · ${x.cluster}` : ''}${Array.isArray(x.deadLuns) && x.deadLuns.length ? ` · ${x.deadLuns.slice(0, 2).join(', ')}` : ''}`} />, sort: x.name },
-                    { node: <Gauge w={barPct(x.dead, x.paths ?? deadMax)} bg={WARM[3].bg} note={`경로 ${fmtN(x.paths)}개 중 ${fmtN(x.dead)}개 · 한 줄 경로 ${fmtN(x.singlePath)}`} />, sort: x.paths },
-                    { node: <span className="vit-big hero">{`${fmtN(x.dead)}개`}</span>, sort: x.dead, cls: 'r' },
+                    { node: <Gauge w={barPct(x.dead, x.paths ?? deadMax)} bg={WARM[3].bg} note={`경로 ${fmtU(x.paths, '개')} 중 ${fmtU(x.dead, '개')} · 한 줄 경로 ${fmtN(x.singlePath)}`} />, sort: x.paths },
+                    { node: <span className="vit-big hero">{`${fmtU(x.dead, '개')}`}</span>, sort: x.dead, cls: 'r' },
                   ] }))} />
               )}
             </div>

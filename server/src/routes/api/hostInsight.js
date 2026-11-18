@@ -19,7 +19,6 @@ import { hostInsightOf } from '../../vcenter/hostInsight.js';
 import { listRegistry } from '../../idrac/registry.js';
 import { allRemoteServers } from '../../collector/remoteInventory.js';
 import { createYielder } from '../../util/timeSlice.js';
-import { REGIONS } from '../../util/regions.js';
 
 const invHosts = requirePerm('inv.hosts');
 
@@ -30,7 +29,9 @@ export function registerHostInsight(api) {
     return memoJson(req, res, 'host-insight', async (snap) => {
       const now = Date.now();
       const allowed = scopedVcenterIds(req.user, snap);
-      const region = typeof req.query.region === 'string' && REGIONS.includes(req.query.region) ? req.query.region : null;
+      // v3.22.1: 정해진 4리전으로 거르지 않는다 — 범위 바는 등록 데이터에만 있는 리전('Unknown' 등)도 고르게 하므로(platformText.scopeRegionOptions)
+      //   그 글자를 버리면 전 법인 합이 나왔다. /hosts · /vms/insight 처럼 location.region 과 그대로 비교한다.
+      const region = typeof req.query.region === 'string' && req.query.region ? req.query.region : null;
       const vcenters = (snap.vcenters || [])
         .filter((v) => v && (!allowed || allowed.has(v.id)))
         .filter((v) => !region || v.location?.region === region);

@@ -18,7 +18,7 @@ import React, { useState } from 'react';
 import './vmTools.css';
 import { useToolSummary } from './useToolSummary.js';
 import {
-  fmtN, fmt1, gbText, pctText, corpNameOf, missingText, synthNote, barPct, toolLabel, gateOf,
+  fmtN, fmtU, fmt1, gbText, pctText, corpNameOf, missingText, synthNote, barPct, toolLabel, gateOf,
 } from './toolSumText.js';
 import {
   guestPartView, offView, trackView, lifeView, contentionView, hygieneView, slotText, dayText, osName, HYGIENE_CODE_ROWS, WARM, NEUTRAL,
@@ -76,26 +76,26 @@ function DiskPanel({ vcIds, rows }) {
   return (
     <section className="vit-panel" aria-label="디스크가 차 가는 VM">
       <PanelHead title="디스크가 차 가는 VM" hint={`VM 안의 드라이브 · 마운트 사용률 — 특수 기능 ‘${toolLabel('guest-partition')}’ 의 요약입니다`} rule={rule} q={q} onReload={q.reload} />
-      <PanelState q={q} waitText="게스트 파티션 요약을 받는 중입니다(파티션 수가 많으면 오래 걸릴 수 있습니다)…">
+      <PanelState q={q} view={v} waitText="게스트 파티션 요약을 받는 중입니다(파티션 수가 많으면 오래 걸릴 수 있습니다)…">
         {v && (
           <div className="vit-gp">
             <div className="vit-sum">
-              <Hero value={fmtN(v.overVms)} text={`대 — 파티션 ${fmtN(v.overParts)}개가 ${thrWord} 이상 · 값을 받은 VM ${fmtN(v.reported)}대 중 ${pctText(v.overVms, v.reported)}`} />
+              <Hero value={fmtN(v.overVms)} text={v.noValues ? '아직 수집된 파티션 값이 없습니다 — 값을 받은 VM 이 0대라 초과 수를 모릅니다(0 이 아닙니다)' : `대 — 파티션 ${fmtU(v.overParts, '개')}가 ${thrWord} 이상 · 값을 받은 VM ${fmtU(v.reported, '대')} 중 ${pctText(v.overVms, v.reported)}`} />
               <Stats items={[
-                { key: 'crit', tone: 'c', big: `${fmtN(v.crit)}개`, text: `위험 — 사용률 ${unitText(v.critPct, '%')} 이상`, title: '사용률이 위험 기준 이상인 파티션' },
-                { key: 'soon', tone: 's', big: `${fmtN(v.soon)}개`, text: `${v.soonDays ?? '—'}일 안에 가득 참 예상`, title: `지난 ${v.growthDays ?? '—'}일의 증가 속도가 이어지면 가득 차는 파티션 — 예상일 뿐입니다` },
-                { key: 'nr', big: `${fmtN(v.notReported)}대`, text: '판정 밖 — 파티션 값을 받지 못한 VM', title: `VMware Tools 가 파티션을 알려 주지 않은 VM(꺼진 VM ${fmtN(v.offNotReported)}대 포함) — 0% 가 아니라 모르는 것입니다` },
+                { key: 'crit', tone: 'c', big: v.crit == null ? '—' : `${fmtU(v.crit, '개')}`, text: `위험 — 사용률 ${unitText(v.critPct, '%')} 이상`, title: '사용률이 위험 기준 이상인 파티션' },
+                { key: 'soon', tone: 's', big: v.soon == null ? '—' : `${fmtU(v.soon, '개')}`, text: `${v.soonDays ?? '—'}일 안에 가득 참 예상`, title: `지난 ${v.growthDays ?? '—'}일의 증가 속도가 이어지면 가득 차는 파티션 — 예상일 뿐입니다` },
+                { key: 'nr', big: `${fmtU(v.notReported, '대')}`, text: '판정 밖 — 파티션 값을 받지 못한 VM', title: `VMware Tools 가 파티션을 알려 주지 않은 VM(꺼진 VM ${fmtU(v.offNotReported, '대')} 포함) — 0% 가 아니라 모르는 것입니다` },
               ]} />
               <StackBar tall segs={v.bands.map((b) => ({ key: b.key, label: b.label, n: b.n, bg: b.bg, ink: b.ink }))} label="초과 파티션의 사용률 구간" />
-              <div className="vit-note">초과 VM — Windows {fmtN(v.os.win || 0)} · Linux {fmtN(v.os.lnx || 0)}{v.os.other ? ` · 그 밖 ${fmtN(v.os.other)}` : ''}</div>
+              {!v.noValues && <div className="vit-note">초과 VM — Windows {fmtN(v.os.win || 0)} · Linux {fmtN(v.os.lnx || 0)}{v.os.other ? ` · 그 밖 ${fmtN(v.os.other)}` : ''}</div>}
               {v.collect && v.collect.enabled === false && <div className="vit-note warn">게스트 파티션 수집이 꺼져 있습니다(도구 설정) — 아래 수는 마지막으로 받은 값입니다.</div>}
               {v.collect && v.collect.empty === true && <div className="vit-note">아직 쌓인 파티션 값이 없습니다.</div>}
-              {v.staleCorps > 0 && <div className="vit-note warn">{fmtN(v.staleCorps)}곳은 파티션 값이 오래됐습니다(도구의 보관 시한을 넘김).</div>}
+              {v.staleCorps > 0 && <div className="vit-note warn">{fmtU(v.staleCorps, '곳')}은 파티션 값이 오래됐습니다(도구의 보관 시한을 넘김).</div>}
               <ToolLink toolKey="guest-partition" vcIds={vcIds}>{toolLabel('guest-partition')}에서 모두 보기 →</ToolLink>
               <Foot resp={q.data} missing={v.missing} nameOf={nameOf} />
             </div>
             <div className="vit-lst">
-              <div className="vit-lh"><b>가장 찬 파티션</b><span>사용률이 높은 순 {fmtN(v.fullest.length)}개 · 흰 세로줄 = 기준</span></div>
+              <div className="vit-lh"><b>가장 찬 파티션</b><span>사용률이 높은 순 {fmtU(v.fullest.length, '개')} · 흰 세로줄 = 기준</span></div>
               <TopTable label="가장 찬 파티션" cols={[{ label: '파티션', width: '46%' }, { label: '사용률 · 남은 용량' }, { label: '사용률', cls: 'r', width: '64px' }]}
                 empty="이 범위에는 기준을 넘긴 파티션이 없습니다."
                 rows={v.fullest.map((p, i) => ({ key: `${p.vmId}-${p.path}-${i}`, cells: [
@@ -140,22 +140,22 @@ function OffPanel({ vcIds, rows, canTool }) {
     <section className="vit-panel" aria-label="꺼진 VM">
       <PanelHead title="꺼진 VM" hint={`전원이 꺼진 VM(템플릿 제외) — 특수 기능 ‘${toolLabel('waste')}’ 의 ‘전원 꺼짐’ 조사(꺼진 지 며칠) 요약입니다`} rule={rule}
         q={{ ...q, loading: q.loading || qs.loading }} onReload={reload} />
-      <PanelState q={q} waitText="꺼진 VM 요약을 받는 중입니다…">
+      <PanelState q={q} view={v} waitText="꺼진 VM 요약을 받는 중입니다…">
         {v && (
           <div className="vit-gp">
             <div className="vit-sum">
-              <Hero value={fmtN(v.count)} text={`대 — 디스크 ${gbText(v.diskGB)} 를 잡고 있습니다 · 템플릿을 뺀 VM ${fmtN(v.vms)}대 중 ${pctText(v.count, v.vms)}`} />
+              <Hero value={fmtN(v.count)} text={`대 — 디스크 ${gbText(v.diskGB)} 를 잡고 있습니다 · 템플릿을 뺀 VM ${fmtU(v.vms, '대')} 중 ${pctText(v.count, v.vms)}`} />
               <Stats items={[
                 { key: 'cpu', big: fmtN(v.vcpu), text: '잡고 있는 vCPU(할당)', title: '꺼진 VM 에 준 vCPU — 켜기 전에는 쓰지 않지만 다시 켜면 필요합니다' },
                 { key: 'mem', big: gbText(v.memGB), text: '잡고 있는 메모리(할당)', title: '꺼진 VM 에 준 메모리' },
-                { key: 'snap', tone: 's', big: `${fmtN(v.withSnap)}대`, text: '스냅샷도 남아 있는 VM', title: '꺼져 있으면서 스냅샷이 있는 VM — 정리 후보' },
+                { key: 'snap', tone: 's', big: `${fmtU(v.withSnap, '대')}`, text: '스냅샷도 남아 있는 VM', title: '꺼져 있으면서 스냅샷이 있는 VM — 정리 후보' },
               ]} />
               {v.bands
                 ? <StackBar tall segs={v.bands.map((b) => ({ key: b.key, label: b.label, n: b.n, bg: b.bg, ink: b.ink }))} label="꺼진 지 구간" />
                 : <div className="vit-note">{qs.loading ? '꺼진 지(며칠)를 찾는 중입니다…' : qs.error ? '꺼진 지(며칠)를 받지 못했습니다 — ‘다시 받기’ 를 눌러 보세요.' : ''}</div>}
               <div className="vit-note">꺼진 지는 도구가 찾은 출처(이벤트 · VM 추적 · 주기 점검 · 처음 본 때)로 셉니다 — 찾지 못한 VM 은 ‘모름’ 이고 0일로 넣지 않습니다.</div>
               {(v.diskUnknown > 0 || v.allocUnknown > 0) && (
-                <div className="vit-note warn">{[v.diskUnknown > 0 ? `디스크 용량을 못 읽은 ${fmtN(v.diskUnknown)}대` : '', v.allocUnknown > 0 ? `vCPU · 메모리를 못 읽은 ${fmtN(v.allocUnknown)}대` : ''].filter(Boolean).join(' · ')}는 합에서 뺐습니다.</div>
+                <div className="vit-note warn">{[v.diskUnknown > 0 ? `디스크 용량을 못 읽은 ${fmtU(v.diskUnknown, '대')}` : '', v.allocUnknown > 0 ? `vCPU · 메모리를 못 읽은 ${fmtU(v.allocUnknown, '대')}` : ''].filter(Boolean).join(' · ')}는 합에서 뺐습니다.</div>
               )}
               <ToolLink toolKey="waste" sub="off" vcIds={vcIds}>‘{toolLabel('waste')} › 전원 꺼짐’ 에서 모두 보기 →</ToolLink>
               {typeof canTool === 'function' && canTool('zombie-vms') && <ToolLink secondary toolKey="zombie-vms" vcIds={vcIds}>오래 방치된 VM · 고아 VM 은 ‘{toolLabel('zombie-vms')}’ 에서 →</ToolLink>}
@@ -168,14 +168,14 @@ function OffPanel({ vcIds, rows, canTool }) {
                   <button type="button" aria-pressed={sort === 'disk'} onClick={() => setSort('disk')}>디스크 큰 순</button>
                   <button type="button" aria-pressed={sort === 'days'} disabled={!v.byDays} title={!v.byDays ? '꺼진 지(며칠)를 아직 받지 못했습니다' : undefined} onClick={() => setSort('days')}>오래 꺼진 순</button>
                 </span>
-                <span>{fmtN(list.length)}대</span>
+                <span>{fmtU(list.length, '대')}</span>
               </div>
               <TopTable label="꺼진 VM" cols={[{ label: 'VM', width: '46%' }, { label: byDays ? '꺼진 지' : '잡은 디스크' }, { label: byDays ? '일수' : '디스크', cls: 'r', width: '84px' }]}
                 empty="이 범위에는 꺼진 VM 이 없습니다."
                 rows={list.map((x, i) => ({ key: `${x.id || x.name}-${i}`, cells: byDays ? [
                   { node: <NameCell name={x.name} sub={`${nameOf(x.vcenterId)} · 디스크 ${gbText(x.storageGB)}`} />, sort: x.name },
                   { node: <Gauge w={barPct(x.offDays, list[0]?.offDays)} bg={WARM[1].bg} note={x.offDays == null ? '꺼진 지 모름' : `출처 ${OFF_SRC_SHORT[x.source] || x.source || '—'}${x.exact ? '' : ' · 하한'}`} />, sort: x.offDays },
-                  { node: <span className="vit-big hero">{x.offDays == null ? '—' : `${fmtN(x.offDays)}일${x.exact ? '' : ' 이상'}`}</span>, sort: x.offDays, cls: 'r' },
+                  { node: <span className="vit-big hero">{x.offDays == null ? '—' : `${fmtU(x.offDays, '일')}${x.exact ? '' : ' 이상'}`}</span>, sort: x.offDays, cls: 'r' },
                 ] : [
                   { node: <NameCell name={x.name} sub={`${nameOf(x.vcenterId)} · ${x.guestOS || '—'}`} />, sort: x.name },
                   { node: <Gauge w={barPct(x.storageGB, listMax)} bg={WARM[1].bg} />, sort: x.storageGB },
@@ -186,13 +186,13 @@ function OffPanel({ vcIds, rows, canTool }) {
               <div className="vit-lh"><b>법인별</b><span>꺼진 VM 이 잡은 디스크가 큰 순</span></div>
               {!corps.length && <div className="vit-empty">이 범위에는 꺼진 VM 이 없습니다.</div>}
               {corps.map((c) => (
-                <div key={c.vcenterId} className="vit-oc" title={`${nameOf(c.vcenterId)} — 꺼진 VM ${fmtN(c.n)}대 · 디스크 ${gbText(c.gb)}`}>
+                <div key={c.vcenterId} className="vit-oc" title={`${nameOf(c.vcenterId)} — 꺼진 VM ${fmtU(c.n, '대')} · 디스크 ${gbText(c.gb)}`}>
                   <span className="nm">{nameOf(c.vcenterId)}</span>
                   <span><span className="vit-duo" style={{ width: `${barPct(c.gb, corpMax)}%` }}><i className="d" style={{ flex: '1 1 0' }} /></span></span>
-                  <span className="tx"><b>{gbText(c.gb)}</b> · {fmtN(c.n)}대</span>
+                  <span className="tx"><b>{gbText(c.gb)}</b> · {fmtU(c.n, '대')}</span>
                 </div>
               ))}
-              {v.corps.length > corps.length && <div className="vit-note">그 밖 {fmtN(v.corps.length - corps.length)}곳은 도구에서 봅니다.</div>}
+              {v.corps.length > corps.length && <div className="vit-note">그 밖 {fmtU(v.corps.length - corps.length, '곳')}은 도구에서 봅니다.</div>}
             </div>
           </div>
         )}
@@ -225,7 +225,7 @@ function TrendPanel({ vcIds, rows, canTool }) {
         <div className="vit-gp">
           <div className="vit-sum">
             {canTrack && t && (t.current != null
-              ? <Hero value={fmtN(t.current)} text={t.diff == null ? '대 — 지금 VM 수' : `대 — ${t.baseSlot ? slotText(t.baseSlot) : '창의 첫 기록'}보다 ${t.diff > 0 ? '+' : ''}${fmtN(t.diff)}(${fmtN(t.base)} → ${fmtN(t.current)})`} />
+              ? <Hero value={fmtN(t.current)} text={t.diff == null ? (t.slotsMixed ? '대 — 지금 VM 수(법인마다 첫 기록 · 마지막 기록 시각이 달라 증감을 말하지 않습니다)' : '대 — 지금 VM 수') : `대 — ${t.baseSlot ? slotText(t.baseSlot) : '창의 첫 기록'}보다 ${t.diff > 0 ? '+' : ''}${fmtN(t.diff)}(${fmtN(t.base)} → ${fmtN(t.current)})`} />
               : <div className="vit-note">{t.empty ? '' : '고른 법인 중 지금 값이 없는 곳이 있어 합과 증감을 말하지 않습니다.'}</div>)}
             {canTrack && qt.error && !qt.data && <div className="vit-note warn">VM 수 추이를 받지 못했습니다.</div>}
             {canLife && l && (
@@ -237,7 +237,7 @@ function TrendPanel({ vcIds, rows, canTool }) {
                 ]} />
                 <div className="vit-note">{l.kinds.filter((k) => k.n > 0).map((k) => `${k.label} ${fmtN(k.n)}`).join(' · ') || '이 기간에 기록된 생성 · 삭제가 없습니다.'}</div>
                 {l.truncated && <div className="vit-note warn">이벤트가 많아 도구가 읽는 상한에서 잘렸습니다 — 수는 하한입니다.</div>}
-                {l.notCollected > 0 && <div className="vit-note warn">이벤트를 수집하지 않는 법인 {fmtN(l.notCollected)}곳은 세지 않았습니다.</div>}
+                {l.notCollected > 0 && <div className="vit-note warn">이벤트를 수집하지 않는 법인 {fmtU(l.notCollected, '곳')}은 세지 않았습니다.</div>}
               </>
             )}
             {canLife && ql.error && !ql.data && <div className="vit-note warn">생성 · 삭제 이력을 받지 못했습니다.</div>}
@@ -247,7 +247,7 @@ function TrendPanel({ vcIds, rows, canTool }) {
           </div>
           {canTrack && (
             <div className="vit-lst">
-              <div className="vit-lh"><b>VM 수</b>{t && !t.empty && <span>수집 시점 순 {fmtN(t.points.length)}점 · 세로 눈금은 {fmtN(t.min)} ~ {fmtN(t.max)}(0 부터가 아닙니다)</span>}</div>
+              <div className="vit-lh"><b>VM 수</b>{t && !t.empty && <span>수집 시점 순 {fmtU(t.points.length, '점')} · 세로 눈금은 {fmtN(t.min)} ~ {fmtN(t.max)}(0 부터가 아닙니다)</span>}</div>
               {!t || t.empty
                 ? <div className="vit-empty">{qt.loading ? '받는 중…' : '쌓인 추이가 아직 없습니다 — 기록이 쌓이면 그려집니다.'}</div>
                 : (
@@ -256,11 +256,11 @@ function TrendPanel({ vcIds, rows, canTool }) {
                       <span className="yl yt">{fmtN(t.max)}</span><span className="yl yb">{fmtN(t.min)}</span>
                       {t.points.map((p, i) => (
                         <i key={p.slot} className={p.partial ? 'p' : ''} style={{ left: `${t.points.length > 1 ? (i / (t.points.length - 1)) * 100 : 50}%`, bottom: `${yOf(p.total)}%` }}
-                          title={`${slotText(p.slot)} · VM ${fmtN(p.total)}대${p.partial ? ` — 부분 합(${fmtN(p.missingCorps)}곳 값 없음)` : ''}`} />
+                          title={`${slotText(p.slot)} · VM ${fmtU(p.total, '대')}${p.partial ? ` — 부분 합(${fmtU(p.missingCorps, '곳')} 값 없음)` : ''}`} />
                       ))}
                     </div>
                     <div className="vit-axis"><span>{slotText(t.points[0].slot)}</span><span>{slotText(t.points[t.points.length - 1].slot)}</span></div>
-                    {t.partialPoints > 0 && <div className="vit-note">속이 빈 점 = 부분 합(그때 값이 없는 법인이 있습니다) {fmtN(t.partialPoints)}점.</div>}
+                    {t.partialPoints > 0 && <div className="vit-note">속이 빈 점 = 부분 합(그때 값이 없는 법인이 있습니다) {fmtU(t.partialPoints, '점')}.</div>}
                   </>
                 )}
             </div>
@@ -301,17 +301,17 @@ function ContentionPanel({ vcIds, rows }) {
   return (
     <section className="vit-panel" aria-label="CPU 경합과 디스크 지연">
       <PanelHead title="CPU 경합 · 디스크 지연" hint={`VM 이 CPU 를 기다리는 시간(Ready)과 디스크 응답 시간 — 특수 기능 ‘${toolLabel('contention')}’ 의 요약입니다`} rule={rule} q={q} onReload={q.reload} />
-      <PanelState q={q} waitText="경합 요약을 받는 중입니다…">
+      <PanelState q={q} view={v} waitText="경합 요약을 받는 중입니다…">
         {v && (
           <div className="vit-gp">
             <div className="vit-sum">
               <Hero value={fmtN(v.readyCrit)} text={`대 — CPU 대기(Ready)가 ${unitText(th.readyCrit, '%')} 이상입니다. 사용률이 낮아도 호스트가 붐비면 VM 이 기다립니다`} />
               <Stats items={[
-                { key: 'rw', tone: 's', big: `${fmtN(v.readyWarn)}대`, text: `CPU 대기 경고(${unitText(th.readyWarn, '%')} 이상)`, title: `Ready 평균이 ${unitText(th.readyWarn, '%')} 이상 ${unitText(th.readyCrit, '%')} 미만` },
-                { key: 'co', tone: 's', big: `${fmtN(v.costop)}대`, text: 'Co-stop(vCPU 끼리 기다림)', title: 'vCPU 가 많은 VM 이 서로를 기다리는 시간' },
-                { key: 'dc', tone: 'c', big: `${fmtN(v.diskCrit)}대`, text: `디스크 지연 심각(${unitText(th.diskCrit, 'ms')} 이상)`, title: `디스크 읽기 · 쓰기 응답이 ${unitText(th.diskCrit, 'ms')} 이상 — 경고(${unitText(th.diskWarn, 'ms')} 이상)는 ${fmtN(v.diskWarn)}대` },
+                { key: 'rw', tone: 's', big: `${fmtU(v.readyWarn, '대')}`, text: `CPU 대기 경고(${unitText(th.readyWarn, '%')} 이상)`, title: `Ready 평균이 ${unitText(th.readyWarn, '%')} 이상 ${unitText(th.readyCrit, '%')} 미만` },
+                { key: 'co', tone: 's', big: `${fmtU(v.costop, '대')}`, text: 'Co-stop(vCPU 끼리 기다림)', title: 'vCPU 가 많은 VM 이 서로를 기다리는 시간' },
+                { key: 'dc', tone: 'c', big: `${fmtU(v.diskCrit, '대')}`, text: `디스크 지연 심각(${unitText(th.diskCrit, 'ms')} 이상)`, title: `디스크 읽기 · 쓰기 응답이 ${unitText(th.diskCrit, 'ms')} 이상 — 경고(${unitText(th.diskWarn, 'ms')} 이상)는 ${fmtU(v.diskWarn, '대')}` },
               ]} />
-              <div className="vit-note">구동 VM {fmtN(v.poweredOn)}대 중 {fmtN(v.measured)}대를 측정했습니다 — 측정하지 못한 {fmtN(v.notMeasured)}대는 판정 밖입니다.{(v.stale || 0) > 0 ? ` 측정값이 오래된 VM ${fmtN(v.stale)}대.` : ''}</div>
+              <div className="vit-note">구동 VM {fmtU(v.poweredOn, '대')} 중 {fmtU(v.measured, '대')}를 측정했습니다 — 측정하지 못한 {fmtU(v.notMeasured, '대')}는 판정 밖입니다.{(v.stale || 0) > 0 ? ` 측정값이 오래된 VM ${fmtU(v.stale, '대')}.` : ''}</div>
               {v.initial && <div className="vit-note warn">첫 측정 중입니다 — 수가 아직 다 차지 않았습니다.</div>}
               <ToolLink toolKey="contention" vcIds={vcIds}>‘{toolLabel('contention')}’ 에서 모두 보기 →</ToolLink>
               <Foot resp={q.data} missing={v.missing} nameOf={nameOf} />
@@ -351,19 +351,19 @@ function HygienePanel({ vcIds, rows }) {
   return (
     <section className="vit-panel" aria-label="VM 구성 점검">
       <PanelHead title="VM 구성 점검" hint={`백업 실패 · 멈춤으로 이어지는 구성 문제 — 특수 기능 ‘${toolLabel('vm-hygiene')}’ 의 요약입니다`} q={q} onReload={q.reload} />
-      <PanelState q={q} waitText="구성 점검 요약을 받는 중입니다…">
+      <PanelState q={q} view={v} waitText="구성 점검 요약을 받는 중입니다…">
         {v && (
           <div className="vit-gp">
             <div className="vit-sum">
               <Hero value={fmtN(v.crit)} text="대 — 지금 조치가 필요합니다(심각 판정이 붙은 VM)" />
               <Stats items={[
-                { key: 'w', tone: 's', big: `${fmtN(v.warn)}대`, text: '경고가 있는 VM', title: '경고 수준의 구성 문제가 하나 이상 있는 VM' },
-                { key: 'c', tone: 's', big: `${fmtN(v.consolidation)}대`, text: '디스크 통합 필요', title: '스냅샷 정리가 끝나지 않아 통합이 필요한 VM — 백업 실패로 이어집니다' },
-                { key: 'n', big: `${fmtN(v.notCollected)}대`, text: '판정 밖 — 구성 값을 못 받은 VM', title: '구성 값을 받지 못한 VM — 문제 없음이 아니라 모르는 것입니다' },
+                { key: 'w', tone: 's', big: `${fmtU(v.warn, '대')}`, text: '경고가 있는 VM', title: '경고 수준의 구성 문제가 하나 이상 있는 VM' },
+                { key: 'c', tone: 's', big: `${fmtU(v.consolidation, '대')}`, text: '디스크 통합 필요', title: '스냅샷 정리가 끝나지 않아 통합이 필요한 VM — 백업 실패로 이어집니다' },
+                { key: 'n', big: `${fmtU(v.notCollected, '대')}`, text: '판정 밖 — 구성 값을 못 받은 VM', title: '구성 값을 받지 못한 VM — 문제 없음이 아니라 모르는 것입니다' },
               ]} />
               <div className="vit-note">정보 수준(CBT 꺼짐 · 예약 · 독립 디스크 등)은 여기서 뺐습니다 — 도구에서 봅니다.</div>
               {v.settingsUnreadable && <div className="vit-note warn">도구 설정을 읽지 못해 기본 기준으로 판정한 값입니다.</div>}
-              {(v.partial || v.notReadVcenters > 0) && <div className="vit-note warn">값을 읽지 못한 법인이 있어 일부만 센 수입니다{v.notReadVcenters > 0 ? `(${fmtN(v.notReadVcenters)}곳)` : ''}.</div>}
+              {(v.partial || v.notReadVcenters > 0) && <div className="vit-note warn">값을 읽지 못한 법인이 있어 일부만 센 수입니다{v.notReadVcenters > 0 ? `(${fmtU(v.notReadVcenters, '곳')})` : ''}.</div>}
               {v.initial && <div className="vit-note warn">첫 수집 중입니다 — 수가 아직 다 차지 않았습니다.</div>}
               <ToolLink toolKey="vm-hygiene" vcIds={vcIds}>‘{toolLabel('vm-hygiene')}’ 에서 모두 보기 →</ToolLink>
               <Foot resp={q.data} missing={v.missing} nameOf={nameOf} />
@@ -371,11 +371,11 @@ function HygienePanel({ vcIds, rows }) {
             <div className="vit-lst">
               <div className="vit-lh"><b>문제 종류</b><span>심각 · 경고 판정 — 해당하는 VM 수</span></div>
               {!v.codes.length && <div className="vit-empty">이 범위에는 심각 · 경고 판정이 없습니다.</div>}
-              <RankBars rows={v.codes.slice(0, HYGIENE_CODE_ROWS).map((c) => ({ key: c.code, name: c.title, n: c.n, bg: sevColor(c.sev), tip: `${c.title} · ${fmtN(c.n)}대` }))} />
-              {v.codes.length > HYGIENE_CODE_ROWS && <div className="vit-note">그 밖 {fmtN(v.codes.length - HYGIENE_CODE_ROWS)}종은 도구에서 봅니다.</div>}
+              <RankBars rows={v.codes.slice(0, HYGIENE_CODE_ROWS).map((c) => ({ key: c.code, name: c.title, n: c.n, bg: sevColor(c.sev), tip: `${c.title} · ${fmtU(c.n, '대')}` }))} />
+              {v.codes.length > HYGIENE_CODE_ROWS && <div className="vit-note">그 밖 {fmtU(v.codes.length - HYGIENE_CODE_ROWS, '종')}은 도구에서 봅니다.</div>}
             </div>
             <div className="vit-lst">
-              <div className="vit-lh"><b>응답을 기다리며 멈춘 VM</b><span>vCenter 질문에 답할 때까지 멈춰 있습니다 · 전체 {fmtN(v.question)}대</span></div>
+              <div className="vit-lh"><b>응답을 기다리며 멈춘 VM</b><span>vCenter 질문에 답할 때까지 멈춰 있습니다 · 전체 {fmtU(v.question, '대')}</span></div>
               <TopTable label="응답을 기다리며 멈춘 VM" cols={[{ label: 'VM', width: '48%' }, { label: '질문' }]}
                 empty="이 범위에는 없습니다."
                 rows={v.questions.map((x, i) => ({ key: `${x.id}-${i}`, cells: [

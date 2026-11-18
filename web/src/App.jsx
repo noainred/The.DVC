@@ -264,7 +264,9 @@ export default function App() {
     // 세션이면 hang 기록에도 남는다(토큰이 없으면 보고하지 않는다).
     return <div className="login-screen"><Loading label="포탈 시작" /></div>;
   }
-  if (!user) return <Login onSuccess={(u) => { setLoginNotice(''); setUser(u); }} notice={loginNotice} setup={authCfg} />;
+  // 로그인은 setUser **전에** 계정을 알린다(다른 탭 전환 경로와 같다). 아래 [user] 효과에 맡기면 Portal 과 그 안의 화면(VM 분석 등)이 같은 커밋에
+  //   마운트돼 자식 효과가 먼저 구독 · 요청한 뒤에 비우기가 돌아, 새 계정의 첫 구독이 지워진 칸에 묶인 채 남았다(dbg3221). 효과는 같은 열쇠라 비우지 않는다.
+  if (!user) return <Login onSuccess={(u) => { noteAccount(accountKeyOf(u)); setLoginNotice(''); setUser(u); }} notice={loginNotice} setup={authCfg} />;
   // 고권한 계정이 OTP 미등록 상태로 로그인 → 등록을 마칠 때까지 이 화면에 고정(서버도 API 차단).
   if (user.mustEnrollOtp) {
     return <ForceOtpEnroll user={user} onExit={(completed) => {

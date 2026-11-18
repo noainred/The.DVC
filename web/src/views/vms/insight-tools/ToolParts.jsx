@@ -8,7 +8,7 @@ import React from 'react';
 import { ErrorBox } from '../../../components/ui.jsx';
 import { STable } from '../../../components/STable.jsx';
 import { errorBoxInput } from '../../../components/accessDeniedText.js';
-import { receivedText, segsOf, toolHref } from './toolSumText.js';
+import { receivedText, segsOf, toolHref, emptyViewText } from './toolSumText.js';
 
 /** 패널 머리 — 제목 · 설명 · 오른쪽(기준 글 · 받은 시각 · 다시 받기). */
 export function PanelHead({ title, hint, rule, q, onReload }) {
@@ -33,17 +33,19 @@ export function PanelHead({ title, hint, rule, q, onReload }) {
  * 받는 중 · 못 받음 · 다시 받기 실패 — 값이 없으면 이것만 그린다(children 을 그리지 않는다).
  *   403 은 ErrorBox 가 권한 안내로 바꾼다(오류로 보이지 않게). 값이 있는데 다시 받기가 실패하면 값 + 한 줄 안내.
  */
-export function PanelState({ q, waitText = '요약을 받는 중입니다…', children }) {
+export function PanelState({ q, waitText = '요약을 받는 중입니다…', view = null, children }) {
   if (!q?.data) {
     if (q?.error) return <ErrorBox message={q.error} />;
     return <div className="vit-wait">{waitText}</div>;
   }
+  // view.empty(고른 법인의 줄이 응답에 하나도 없음)면 수 칸 대신 그 사실만(dbg3221 2회차 — 예전: ‘—대 —개’ 칸이 그대로 그려졌다).
+  const none = emptyViewText(view);
   return (
     <>
       {q.error && !errorBoxInput(q.error).perm && (
         <div className="vit-note warn">다시 받기에 실패했습니다 — 아래는 {receivedText(q.at) || '이전에 받은'} 값입니다.</div>
       )}
-      {children}
+      {none ? <div className="vit-empty">{none}</div> : children}
     </>
   );
 }

@@ -128,8 +128,11 @@ describe('VM 수 추이 — 슬롯마다 합 · 빠진 법인이 있는 슬롯�
     expect(v.points.map((p) => [p.total, p.partial])).toEqual([[100, true], [157, false], [160, false]]);
     expect(v.partialPoints).toBe(1);
     expect(v.current).toBe(160);
-    expect(v.base).toBe(152);
-    expect(v.diff).toBe(8);
+    // dbg3221: b 의 첫 점은 17T12 — 법인마다 첫 슬롯이 달라 기준 합(100 + 52 = 152 · 서로 다른 시각)과 증감을 만들지 않는다
+    expect(v.base).toBeNull();
+    expect(v.baseSlot).toBeNull();
+    expect(v.diff).toBeNull();
+    expect(v.slotsMixed).toBe(true);
     expect(v.min).toBe(100);
   });
   it('한 법인이라도 지금 값을 모르면 합 · 증감을 말하지 않는다', () => {

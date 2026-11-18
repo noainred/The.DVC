@@ -15,7 +15,7 @@ import { TOOLS } from '../../specialToolsList.js';
 export const TOP_N_DEFAULT = 5;
 
 /** 천 단위 쉼표 정수 — 분석 화면 공용(insightCore) 그대로. 값이 없으면 '—'. */
-export { fmtN } from '../../insight/insightCore.js';
+export { fmtN, fmtU } from '../../insight/insightCore.js';
 
 /** 소수 첫째 자리까지 · 천 단위 쉼표. 값이 없으면 '—'. */
 export function fmt1(v) {
@@ -221,6 +221,15 @@ export function receivedText(at) {
   const t = numOrNull(at);
   if (t == null) return '';
   try { return `받은 시각 ${new Date(t).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' })}`; } catch { return ''; }
+}
+
+/**
+ * 도구 응답에 더할 법인 줄이 하나도 없을 때(view.empty) 패널 본문 대신 쓰는 글 — 수 칸을 ‘—대’ 로 그리지 않는다(dbg3221 2회차).
+ *   고른 법인이 응답에 없으면(missing) 그 사실만, 아니면 범위에 값이 없다는 사실만 말한다(이유를 단정하지 않는다). view 가 비지 않았으면 ''.
+ */
+export function emptyViewText(view) {
+  if (!view || view.empty !== true) return '';
+  return Array.isArray(view.missing) && view.missing.length ? '고른 법인은 이 도구에 값이 없습니다.' : '이 범위에는 이 도구의 값이 없습니다.';
 }
 
 /** 고른 법인 중 응답에 없는 곳 안내 — 없으면 ''. */

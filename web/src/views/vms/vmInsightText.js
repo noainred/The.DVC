@@ -6,7 +6,7 @@
  *  · 못 읽은 값은 0 이 아니다 — 모르는 수는 null('—'), 못 읽은 VM 수는 ‘모름 N’ 으로 따로. 오래됨 · 모름 법인은 합에 넣지 않는다.
  */
 import { numOrNull } from '../../numOrNull.js';
-import { addVal, sumKeys, avgOf, mergeTopN, byName, shareOf, shareText, fmtN, gbText, round1 } from '../insight/insightCore.js';
+import { addVal, sumKeys, avgOf, mergeTopN, byName, shareOf, shareText, fmtN, fmtU, gbText, round1 } from '../insight/insightCore.js';
 import { hostAvgMemGB as toolHostAvgMemGB, hostsEq } from './insight-tools/toolSumText.js';   // S2 환산 판정 한 벌
 
 /** 서버 vmInsight.js finishRow 의 수 · 합 키(신원 키 제외) — 이 키만 더한다. os 는 kinds 를 이름으로 합쳐야 해서 따로. */
@@ -77,9 +77,9 @@ export function kpiView(s, corpN) {
   const vcpuKnown = total == null ? null : total - (numOrNull(s?.vcpuUnknown) ?? 0);
   const memKnown = total == null ? null : total - (numOrNull(s?.memUnknown) ?? 0);
   const memGB = mbToGb(s?.memMB);
-  const unk = (n) => ((numOrNull(n) ?? 0) > 0 ? ` · 모름 ${fmtN(n)}대` : '');
+  const unk = (n) => ((numOrNull(n) ?? 0) > 0 ? ` · 모름 ${fmtU(n, '대')}` : '');
   return [
-    { key: 'total', label: '전체 VM', value: fmtN(total), sub: `템플릿 ${fmtN(s?.templates)} 포함 · 법인 ${fmtN(corpN)}곳`, tip: '지금 범위의 VM 수(템플릿 포함)' },
+    { key: 'total', label: '전체 VM', value: fmtN(total), sub: `템플릿 ${fmtN(s?.templates)} 포함 · 법인 ${fmtU(corpN, '곳')}`, tip: '지금 범위의 VM 수(템플릿 포함)' },
     { key: 'on', label: '구동', value: fmtN(on), meter: shareOf(on, total), sub: `${shareText(on, total)} · 정지 ${fmtN(off)}(템플릿 포함)`, tip: '전원이 켜진 VM' },
     { key: 'attention', label: '조치 필요', value: fmtN(s?.attention), tone: (numOrNull(s?.attention) ?? 0) > 0 ? 'crit' : '',
       sub: `${shareText(s?.attention, total)} · 과부하 ${fmtN(sig.overload)} · Tools ${fmtN(sig.toolsOld)} · 스냅샷 ${fmtN(sig.snapOld)} · 사용률 미수집 ${fmtN(sig.usageUnknown)}`,
@@ -184,7 +184,7 @@ export function osRows(os, shown) {
   const restKinds = known.slice(n);
   const rest = restKinds.reduce((a, k) => a + (numOrNull(k.count) ?? 0), 0) + (numOrNull(os?.kindsRest) ?? 0);
   const out = head.map((k) => ({ key: `k:${k.name}`, name: k.name, family: k.family, n: numOrNull(k.count) ?? 0 }));
-  if (rest > 0) out.push({ key: 'rest', name: `그 밖${restKinds.length ? ` ${fmtN(restKinds.length)}종` : ''}`, family: null, n: rest, rest: true });
+  if (rest > 0) out.push({ key: 'rest', name: `그 밖${restKinds.length ? ` ${fmtU(restKinds.length, '종')}` : ''}`, family: null, n: rest, rest: true });
   if (unknown > 0) out.push({ key: 'unknown', name: 'OS 모름', family: null, n: unknown, unknown: true });
   return out;
 }
@@ -216,17 +216,25 @@ export function hwRows(hw, limit = 6) {
   return { rows: head, unread: numOrNull(hw?.unread) };
 }
 
-/** 오래된 스냅샷 구간 — 경계는 [기준 일수, edges[0]) · [edges[0], edges[1]) · edges[1] 이상(서버 snapAge 키 d7_30 · d30_90 · d90p). */
+/**
+ * 오래된 스냅샷 구간 — 서버(inventory/vmInsight.js)는 고정 경계로 나눈다: days < edges[0] → d7_30 · < edges[1] → d30_90 · 나머지 d90p.
+ * 판정 대상은 기준 일수 이상이므로 각 구간의 실제 아래 끝은 max(기준, 경계)다(기준 45 · 경계 30 이면 둘째 칸은 45–90일).
+ * 위 끝이 기준 이하인 구간은 비어 있을 수밖에 없으므로 이름을 만들지 않는다(‘45–30일’ 같은 거꾸로 된 범위를 그리지 않는다).
+ */
 export function snapBands(reclaim, thresholds) {
   const a = reclaim?.snapAge || {};
   const d = numOrNull(thresholds?.snapAgeDays);
   const e = Array.isArray(thresholds?.snapAgeEdgesDays) ? thresholds.snapAgeEdgesDays : [];
   const e1 = numOrNull(e[0]); const e2 = numOrNull(e[1]);
+  const lo = (edge) => (d != null && edge != null ? Math.max(d, edge) : edge);
+  const dead = (hi, n) => d != null && hi != null && hi <= d && !((n ?? 0) > 0);
+  const n1 = numOrNull(a.d7_30); const n2 = numOrNull(a.d30_90); const n3 = numOrNull(a.d90p);
+  const lo2 = lo(e1); const lo3 = lo(e2);
   return [
-    { key: 'd7_30', label: `${d != null ? d : '기준'}–${e1 ?? '—'}일`, n: numOrNull(a.d7_30), bg: '#f59e0b', ink: '#0b0b0b' },
-    { key: 'd30_90', label: `${e1 ?? '—'}–${e2 ?? '—'}일`, n: numOrNull(a.d30_90), bg: '#ec835a', ink: '#0b0b0b' },
-    { key: 'd90p', label: `${e2 ?? '—'}일 이상`, n: numOrNull(a.d90p), bg: '#ef4444', ink: '#ffffff' },
-  ];
+    dead(e1, n1) ? null : { key: 'd7_30', label: `${d != null ? d : '기준'}–${e1 ?? '—'}일`, n: n1, bg: '#f59e0b', ink: '#0b0b0b' },
+    dead(e2, n2) ? null : { key: 'd30_90', label: `${lo2 ?? '—'}–${e2 ?? '—'}일`, n: n2, bg: '#ec835a', ink: '#0b0b0b' },
+    { key: 'd90p', label: `${lo3 ?? '—'}일 이상`, n: n3, bg: '#ef4444', ink: '#ffffff' },
+  ].filter(Boolean);
 }
 
 /**
