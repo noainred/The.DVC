@@ -84,7 +84,8 @@
 
 (11:31 사용자 확인 — "캡처한 Optimization 화면을 … 이것도 하위 메뉴로 넣어줘 라는 의미야": ‘과할당’ 하위 메뉴가 그것이다. 확인을 받고 요약만 있던 것에 갈래 줄을 더해, 캡처한 화면의 다섯 갈래를 하위 메뉴 안에서 바로 바꿔 볼 수 있게 했다.)
 
-함께 본 것(추정 — 확인 필요): 도구는 ‘Tools 미실행’ 을 `전원 켜짐 && toolsStatus !== 'RUNNING'` 으로 센다(`toolsCapacity.js:281`). 목 서버의 그 VM 들은 상태가 전부 `OUTDATED` 다 — **오래된 Tools(돌고는 있는 것)까지 ‘미실행’ 으로 세는지**는 실제 vCenter 값의 정규화를 확인해야 한다. 시안의 글은 판정 그대로 ‘Tools 상태가 실행 중이 아닌 구동 VM’ 으로 적었다.
+**정정(2026-11-18 12:50 — 코드로 확인)**: 앞서 ‘오래된 Tools(`OUTDATED`)까지 ‘Tools 미실행’ 으로 세는지 확인 필요(추정)’ 라고 적었다 — **실제 환경에서는 문제가 아니다.** 실 수집(`vcenter/soapClient.js:2376`)은 `toolsStatus` 를 `RUNNING` · `NOT_RUNNING` 둘만 만든다. `OUTDATED` 는 목 생성기만 만드는 값이다(`inventory/vmToolsDist.js:3` 주석 · `reports/compliance.js:3`). 도구의 판정 `전원 켜짐 && toolsStatus !== 'RUNNING'`(`toolsCapacity.js:281`)은 실 환경에서 ‘구동 중인데 Tools 가 돌지 않는 VM’ 과 같다. 목 서버 값만 보고 의심한 것이 틀렸다.
+덤(무해): `soapClient.js:2377` 의 `powered ? 'NOT_RUNNING' : 'NOT_RUNNING'` 은 두 갈래가 같은 죽은 조건이다 — 정리 후보.
 
 누를 수 있는 것: 바로가기 칩(복수) · 찾기 칸 · ‘✕ 전체 법인’ · 법인 지도의 칸 · 지역 줄 · 색 기준 · 크기 기준 · 보기 줄(분석 · 목록 · 법인별 · 조치 필요). 법인을 고르면 **요약 6장부터 상위 목록까지 전부** 그 법인들의 합으로 바뀐다.
 
